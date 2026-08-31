@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/imroc/req/v3"
+	"github.com/liulixin-lex/xy2api/internal/config"
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 )
 
 // CoerceDingTalkCorpPolicyForWrite 是 coerceDeprecatedDingTalkCorpPolicy 的导出版本，

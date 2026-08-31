@@ -10,9 +10,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
+	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 )
 
 const accountTestSuppressCompletionContextKey = "account_test_suppress_completion"

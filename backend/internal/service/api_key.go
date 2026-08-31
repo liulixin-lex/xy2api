@@ -3,7 +3,7 @@ package service
 import (
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ip"
 )
 
 // API Key status constants

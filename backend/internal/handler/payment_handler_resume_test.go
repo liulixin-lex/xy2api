@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
-	"github.com/Wei-Shaw/sub2api/ent/enttest"
-	"github.com/Wei-Shaw/sub2api/internal/payment"
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	dbent "github.com/liulixin-lex/xy2api/ent"
+	"github.com/liulixin-lex/xy2api/ent/enttest"
+	"github.com/liulixin-lex/xy2api/internal/payment"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 
 	"entgo.io/ent/dialect"

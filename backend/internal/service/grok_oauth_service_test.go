@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
+	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
 	"github.com/stretchr/testify/require"
 )
 
@@ -252,7 +252,7 @@ func TestGrokOAuthServiceRefreshAccountTokenIgnoresIDTokenTierWhenAccessTokenHas
 	svc := NewGrokOAuthService(nil, &grokOAuthClientStub{
 		refreshResponse: &xai.TokenResponse{
 			AccessToken: "opaque-access-token",
-			IDToken:      makeGrokOAuthJWT(map[string]any{"tier": 5}),
+			IDToken:     makeGrokOAuthJWT(map[string]any{"tier": 5}),
 			TokenType:   "Bearer",
 			ExpiresIn:   3600,
 		},

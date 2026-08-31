@@ -10,13 +10,13 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
-	"github.com/Wei-Shaw/sub2api/ent/account"
-	"github.com/Wei-Shaw/sub2api/ent/apikey"
-	"github.com/Wei-Shaw/sub2api/ent/group"
-	"github.com/Wei-Shaw/sub2api/ent/predicate"
-	"github.com/Wei-Shaw/sub2api/ent/usagelog"
-	"github.com/Wei-Shaw/sub2api/ent/user"
-	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/liulixin-lex/xy2api/ent/account"
+	"github.com/liulixin-lex/xy2api/ent/apikey"
+	"github.com/liulixin-lex/xy2api/ent/group"
+	"github.com/liulixin-lex/xy2api/ent/predicate"
+	"github.com/liulixin-lex/xy2api/ent/usagelog"
+	"github.com/liulixin-lex/xy2api/ent/user"
+	"github.com/liulixin-lex/xy2api/ent/usersubscription"
 )
 
 // UsageLogUpdate is the builder for updating UsageLog entities.

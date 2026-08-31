@@ -1,27 +1,27 @@
 [Unit]
-Description=Sub2API - AI API Gateway Platform
-Documentation=https://github.com/Wei-Shaw/sub2api
+Description=XY2API - AI API Gateway Platform
+Documentation=https://github.com/liulixin-lex/xy2api
 After=network.target postgresql.service redis.service
 Wants=postgresql.service redis.service
 
 [Service]
 Type=simple
-User=sub2api
-Group=sub2api
-WorkingDirectory=/opt/sub2api
-ExecStart=/opt/sub2api/sub2api
+User=xy2api
+Group=xy2api
+WorkingDirectory=/opt/xy2api
+ExecStart=/opt/xy2api/xy2api
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=sub2api
+SyslogIdentifier=xy2api
 
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/opt/sub2api
+ReadWritePaths=/opt/xy2api
 
 # Environment - Server configuration
 # Modify these values to change listen address and port

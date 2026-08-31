@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
-	"github.com/Wei-Shaw/sub2api/ent/announcement"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
-	"github.com/Wei-Shaw/sub2api/internal/service"
+	dbent "github.com/liulixin-lex/xy2api/ent"
+	"github.com/liulixin-lex/xy2api/ent/announcement"
+	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
+	"github.com/liulixin-lex/xy2api/internal/service"
 
 	entsql "entgo.io/ent/dialect/sql"
 )

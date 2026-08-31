@@ -6,9 +6,9 @@ import (
 	"errors"
 	"strings"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/lib/pq"
+	dbent "github.com/liulixin-lex/xy2api/ent"
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 )
 
 // clientFromContext 从 context 中获取事务 client，如果不存在则返回默认 client。

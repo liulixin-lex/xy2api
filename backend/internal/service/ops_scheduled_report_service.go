@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/google/uuid"
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 )

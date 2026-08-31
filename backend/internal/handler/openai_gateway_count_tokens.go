@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/domain"
-	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
-	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/liulixin-lex/xy2api/internal/domain"
+	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
+	"github.com/liulixin-lex/xy2api/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"

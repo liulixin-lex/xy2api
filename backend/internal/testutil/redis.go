@@ -3,9 +3,9 @@ package testutil
 import (
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/repository"
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/alicebob/miniredis/v2"
+	"github.com/liulixin-lex/xy2api/internal/repository"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/redis/go-redis/v9"
 )
 

@@ -3,21 +3,21 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${SUB2API_ENV_FILE:-${SCRIPT_DIR}/.env}"
+ENV_FILE="${XY2API_ENV_FILE:-${SCRIPT_DIR}/.env}"
 
-STACK_LABEL_KEY="org.sub2api.stack"
+STACK_LABEL_KEY="org.xy2api.stack"
 STACK_LABEL_VALUE="apple-container"
-NETWORK_NAME="sub2api-apple"
-APP_CONTAINER="sub2api-apple"
-POSTGRES_CONTAINER="sub2api-apple-postgres"
-REDIS_CONTAINER="sub2api-apple-redis"
-APP_VOLUME="sub2api-apple-data"
-POSTGRES_VOLUME="sub2api-apple-postgres-data"
-REDIS_VOLUME="sub2api-apple-redis-data"
+NETWORK_NAME="xy2api-apple"
+APP_CONTAINER="xy2api-apple"
+POSTGRES_CONTAINER="xy2api-apple-postgres"
+REDIS_CONTAINER="xy2api-apple-redis"
+APP_VOLUME="xy2api-apple-data"
+POSTGRES_VOLUME="xy2api-apple-postgres-data"
+REDIS_VOLUME="xy2api-apple-redis-data"
 PLATFORM="linux/arm64"
 
 TEMP_DIR=""
-LOCK_DIR="${TMPDIR:-/tmp}/sub2api-apple-container.lock"
+LOCK_DIR="${TMPDIR:-/tmp}/xy2api-apple-container.lock"
 LOCK_ACQUIRED=false
 
 APP_IMAGE=""
@@ -57,7 +57,7 @@ Usage: ./apple-container.sh <command> [options]
 
 Commands:
   init                  Create .env and generate required secrets
-  up [--recreate]       Create and start the complete Sub2API stack
+  up [--recreate]       Create and start the complete XY2API stack
   down                  Stop the stack and preserve all data
   restart               Restart the stack in dependency order
   status                Show container and workload health
@@ -70,7 +70,7 @@ Destroy options:
   --yes                 Skip the confirmation prompt
 
 Environment:
-  SUB2API_ENV_FILE      Path to the deployment env file (default: deploy/.env)
+  XY2API_ENV_FILE      Path to the deployment env file (default: deploy/.env)
 EOF
 }
 
@@ -98,7 +98,7 @@ acquire_lock() {
             rm -rf "${LOCK_DIR}"
             mkdir "${LOCK_DIR}" || die "Failed to reclaim stale operation lock."
         else
-            die "Another Sub2API Apple container operation is already running."
+            die "Another XY2API Apple container operation is already running."
         fi
     fi
     printf '%s\n' "$$" >"${LOCK_DIR}/pid"
@@ -358,7 +358,7 @@ cmd_init() {
     mv "${temp_file}" "${ENV_FILE}"
 
     info "Created ${ENV_FILE} with generated secrets."
-    info "Review the file, then run: SUB2API_ENV_FILE='${ENV_FILE}' ${SCRIPT_DIR}/apple-container.sh up"
+    info "Review the file, then run: XY2API_ENV_FILE='${ENV_FILE}' ${SCRIPT_DIR}/apple-container.sh up"
 }
 
 validate_port() {
@@ -400,14 +400,14 @@ validate_env_file_security() {
 prepare_environment() {
     validate_env_file_security
 
-    APP_IMAGE="$(read_env_value APPLE_CONTAINER_SUB2API_IMAGE weishaw/sub2api:latest)"
+    APP_IMAGE="$(read_env_value APPLE_CONTAINER_XY2API_IMAGE ghcr.io/liulixin-lex/xy2api:latest)"
     POSTGRES_IMAGE="$(read_env_value APPLE_CONTAINER_POSTGRES_IMAGE postgres:18-alpine)"
     REDIS_IMAGE="$(read_env_value APPLE_CONTAINER_REDIS_IMAGE redis:8-alpine)"
     BIND_HOST="$(read_env_value BIND_HOST 0.0.0.0)"
     HOST_PORT="$(read_env_value SERVER_PORT 8080)"
-    POSTGRES_USER="$(read_env_value POSTGRES_USER sub2api)"
+    POSTGRES_USER="$(read_env_value POSTGRES_USER xy2api)"
     POSTGRES_PASSWORD="$(read_env_value POSTGRES_PASSWORD)"
-    POSTGRES_DB="$(read_env_value POSTGRES_DB sub2api)"
+    POSTGRES_DB="$(read_env_value POSTGRES_DB xy2api)"
     REDIS_PASSWORD="$(read_env_value REDIS_PASSWORD)"
     TZ_VALUE="$(read_env_value TZ Asia/Shanghai)"
 
@@ -425,7 +425,7 @@ prepare_environment() {
         die "Set a secure POSTGRES_PASSWORD in ${ENV_FILE}."
     fi
 
-    TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sub2api-apple.XXXXXX")"
+    TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/xy2api-apple.XXXXXX")"
     APP_ENV_FILE="${TEMP_DIR}/app.env"
     POSTGRES_ENV_FILE="${TEMP_DIR}/postgres.env"
     POSTGRES_PROBE_ENV_FILE="${TEMP_DIR}/postgres-probe.env"
@@ -506,7 +506,7 @@ create_redis_container() {
 }
 
 create_app_container() {
-    info "Creating Sub2API container..."
+    info "Creating XY2API container..."
     container create \
         --name "${APP_CONTAINER}" \
         --label "${STACK_LABEL_KEY}=${STACK_LABEL_VALUE}" \
@@ -518,7 +518,7 @@ create_app_container() {
         --volume "${APP_VOLUME}:/app/storage" \
         --entrypoint /bin/sh \
         "${APP_IMAGE}" \
-        -c 'set -e; mkdir -p "$DATA_DIR"; chown -R sub2api:sub2api "$DATA_DIR"; exec su-exec sub2api /app/sub2api' \
+        -c 'set -e; mkdir -p "$DATA_DIR"; chown -R xy2api:xy2api "$DATA_DIR"; exec su-exec xy2api /app/xy2api' \
         >/dev/null
 }
 
@@ -635,11 +635,11 @@ start_dependencies() {
 
 start_app() {
     start_container_if_needed "${APP_CONTAINER}"
-    if ! wait_for_probe "Sub2API" 180 probe_app; then
+    if ! wait_for_probe "XY2API" 180 probe_app; then
         show_failure_logs "${APP_CONTAINER}"
-        die "Sub2API did not become ready."
+        die "XY2API did not become ready."
     fi
-    if ! wait_for_probe "Sub2API host port" 15 probe_host_app; then
+    if ! wait_for_probe "XY2API host port" 15 probe_host_app; then
         die "Host port forwarding failed. In System Settings > Privacy & Security > Local Network, allow container-runtime-linux; restart Apple container services; then run 'apple-container.sh up' again."
     fi
 }
@@ -683,7 +683,7 @@ cmd_up() {
     create_app_container
     start_app
 
-    info "Sub2API is available at http://${ACCESS_HOST}:${HOST_PORT}"
+    info "XY2API is available at http://${ACCESS_HOST}:${HOST_PORT}"
 }
 
 cmd_down() {
@@ -696,7 +696,7 @@ cmd_down() {
     stop_container_if_running "${APP_CONTAINER}"
     stop_container_if_running "${REDIS_CONTAINER}"
     stop_container_if_running "${POSTGRES_CONTAINER}"
-    info "Sub2API stack stopped; persistent volumes were preserved."
+    info "XY2API stack stopped; persistent volumes were preserved."
 }
 
 cmd_restart() {
@@ -778,7 +778,7 @@ cmd_logs() {
     fi
 
     case "${service}" in
-        app|sub2api) container_name="${APP_CONTAINER}" ;;
+        app|xy2api) container_name="${APP_CONTAINER}" ;;
         postgres) container_name="${POSTGRES_CONTAINER}" ;;
         redis) container_name="${REDIS_CONTAINER}" ;;
         *) die "Unknown service '${service}'. Use app, postgres, or redis." ;;
@@ -811,9 +811,9 @@ confirm_destroy() {
     local answer
 
     if [[ "${include_volumes}" == true ]]; then
-        printf 'Delete the Sub2API stack and all persistent data? [y/N] '
+        printf 'Delete the XY2API stack and all persistent data? [y/N] '
     else
-        printf 'Delete the Sub2API containers and network, preserving volumes? [y/N] '
+        printf 'Delete the XY2API containers and network, preserving volumes? [y/N] '
     fi
     read -r answer
     [[ "${answer}" == "y" || "${answer}" == "Y" ]]
@@ -864,9 +864,9 @@ cmd_destroy() {
         delete_volume_if_present "${APP_VOLUME}"
         delete_volume_if_present "${REDIS_VOLUME}"
         delete_volume_if_present "${POSTGRES_VOLUME}"
-        info "Sub2API stack and persistent data deleted."
+        info "XY2API stack and persistent data deleted."
     else
-        info "Sub2API stack deleted; persistent volumes were preserved."
+        info "XY2API stack deleted; persistent volumes were preserved."
     fi
 }
 

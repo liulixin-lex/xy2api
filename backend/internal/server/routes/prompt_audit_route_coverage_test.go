@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/handler"
-	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
-	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/handler"
+	"github.com/liulixin-lex/xy2api/internal/securityaudit"
+	servermiddleware "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/stretchr/testify/require"
 )
 

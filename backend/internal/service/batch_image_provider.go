@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/liulixin-lex/xy2api/internal/config"
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 )
 
 type BatchImageProvider interface {

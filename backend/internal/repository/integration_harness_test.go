@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
-	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	dbent "github.com/liulixin-lex/xy2api/ent"
+	_ "github.com/liulixin-lex/xy2api/ent/runtime"
+	"github.com/liulixin-lex/xy2api/internal/pkg/timezone"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -64,7 +64,7 @@ func TestMain(m *testing.M) {
 	pgContainer, err := tcpostgres.Run(
 		ctx,
 		postgresImage,
-		tcpostgres.WithDatabase("sub2api_test"),
+		tcpostgres.WithDatabase("xy2api_test"),
 		tcpostgres.WithUsername("postgres"),
 		tcpostgres.WithPassword("postgres"),
 		tcpostgres.BasicWaitStrategies(),

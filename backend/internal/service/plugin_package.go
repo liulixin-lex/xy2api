@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/config"
 )
 
 const (
@@ -107,7 +107,12 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 	if err != nil {
 		return nil, fmt.Errorf("插件包不是有效的 ZIP: %w", err)
 	}
-	defer func() { _ = archive.Close() }()
+	archiveClosed := false
+	defer func() {
+		if !archiveClosed {
+			_ = archive.Close()
+		}
+	}()
 	manifest, _, signatureStatus, err := i.inspectArchive(&archive.Reader)
 	if err != nil {
 		return nil, err
@@ -137,6 +142,13 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 	if err := i.extractArchive(ctx, &archive.Reader, manifest, extractPath); err != nil {
 		return nil, err
 	}
+	// Windows does not allow renaming the staged archive while zip.OpenReader
+	// still owns its file handle. Close it once inspection and extraction are
+	// complete; Linux behavior remains unchanged.
+	if err := archive.Close(); err != nil {
+		return nil, fmt.Errorf("关闭插件包归档: %w", err)
+	}
+	archiveClosed = true
 	if err := os.Rename(extractPath, installPath); err != nil {
 		return nil, fmt.Errorf("提交插件安装目录: %w", err)
 	}

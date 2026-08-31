@@ -13,7 +13,7 @@
 *.dylib
 backend/bin/
 backend/server
-backend/sub2api
+backend/xy2api
 backend/main
 
 # Go 测试二进制
@@ -124,6 +124,8 @@ CLAUDE.md
 scripts
 !backend/scripts/
 !backend/scripts/resolve-version.sh
+!skills/xy2api-admin/scripts/
+!skills/xy2api-admin/scripts/xy2api-admin.js
 .code-review-state
 #openspec/
 code-reviews/
@@ -140,6 +142,7 @@ docs/*
 !docs/BATCH_IMAGE_MVP.md
 !docs/COMPOSITE_GROUPS.md
 !docs/PLUGIN_DEVELOPMENT.md
+!docs/BRANDING_AND_MIGRATION_COMPATIBILITY.md
 !docs/channel-monitor-v2-safe-defaults.md
 !docs/legal/
 !docs/legal/*.md
@@ -155,5 +158,5 @@ output/
 
 # Vitest / Vite cache at repo root
 .vite/
-# 本地闭源插件开发目录及构建产物不进入 Sub2API 仓库
+# 本地闭源插件开发目录及构建产物不进入 XY2API 仓库
 /plugins/

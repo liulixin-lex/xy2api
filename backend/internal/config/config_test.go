@@ -30,6 +30,16 @@ func TestLoadDefaultModelsListReadMaxBytes(t *testing.T) {
 	require.Equal(t, DefaultModelsListReadMaxBytes, cfg.Gateway.ModelsListReadMaxBytes)
 }
 
+func TestLoadDefaultPricingRemoteSources(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, "https://raw.githubusercontent.com/Wei-Shaw/model-price-repo/main/model_prices_and_context_window.json", cfg.Pricing.RemoteURL)
+	require.Equal(t, "https://raw.githubusercontent.com/Wei-Shaw/model-price-repo/main/model_prices_and_context_window.sha256", cfg.Pricing.HashURL)
+	require.Equal(t, "./resources/model-pricing/model_prices_and_context_window.json", cfg.Pricing.FallbackFile)
+}
+
 func TestLoadTimezonePrecedence(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -327,6 +337,26 @@ func TestConfigFileTakesPrecedenceOverDataDir(t *testing.T) {
 	cfg, err := Load()
 	require.NoError(t, err)
 	require.Equal(t, "192.0.2.30", cfg.Server.Host)
+}
+
+func TestConfigureConfigSourceKeepsLegacyInstallPath(t *testing.T) {
+	t.Setenv("CONFIG_FILE", "")
+	t.Setenv("DATA_DIR", "")
+
+	var paths []string
+	configureConfigSource(func(string) {
+		t.Fatal("unexpected explicit config file")
+	}, func(path string) {
+		paths = append(paths, path)
+	})
+
+	require.Equal(t, []string{
+		"/app/data",
+		".",
+		"./config",
+		"/etc/xy2api",
+		"/etc/sub2api",
+	}, paths)
 }
 
 func TestLoadReturnsErrorForMissingConfigFile(t *testing.T) {
@@ -1035,8 +1065,8 @@ func TestLoadDefaultDashboardCacheConfig(t *testing.T) {
 	if !cfg.Dashboard.Enabled {
 		t.Fatalf("Dashboard.Enabled = false, want true")
 	}
-	if cfg.Dashboard.KeyPrefix != "sub2api:" {
-		t.Fatalf("Dashboard.KeyPrefix = %q, want %q", cfg.Dashboard.KeyPrefix, "sub2api:")
+	if cfg.Dashboard.KeyPrefix != "xy2api:" {
+		t.Fatalf("Dashboard.KeyPrefix = %q, want %q", cfg.Dashboard.KeyPrefix, "xy2api:")
 	}
 	if cfg.Dashboard.StatsFreshTTLSeconds != 15 {
 		t.Fatalf("Dashboard.StatsFreshTTLSeconds = %d, want 15", cfg.Dashboard.StatsFreshTTLSeconds)
@@ -1240,7 +1270,7 @@ func TestConfigAddressHelpers(t *testing.T) {
 		Port:     5432,
 		User:     "postgres",
 		Password: "",
-		DBName:   "sub2api",
+		DBName:   "xy2api",
 		SSLMode:  "disable",
 	}
 	if !strings.Contains(dbCfg.DSN(), "password=") {

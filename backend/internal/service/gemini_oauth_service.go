@@ -12,14 +12,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/geminicli"
+	"github.com/liulixin-lex/xy2api/internal/pkg/httpclient"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 )
 
 const (
-	// Canonical tier IDs used by sub2api (2026-aligned).
+	// Canonical tier IDs used by XY2API (2026-aligned).
 	GeminiTierGoogleOneFree    = "google_one_free"
 	GeminiTierGoogleAIPro      = "google_ai_pro"
 	GeminiTierGoogleAIUltra    = "google_ai_ultra"

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/pkg/timezone"
+	"github.com/liulixin-lex/xy2api/internal/pkg/usagestats"
+	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
 // GetUserStatsAggregated returns aggregated usage statistics for a user using database-level aggregation

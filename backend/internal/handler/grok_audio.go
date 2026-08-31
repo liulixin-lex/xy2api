@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ip"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"go.uber.org/zap"
 )
 

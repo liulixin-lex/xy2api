@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/config"
 )
 
 type snapshotHydrationCache struct {

@@ -1,0 +1,7 @@
+interface:
+  display_name: "XY2API Admin"
+  short_description: "Manage XY2API admin accounts and settings"
+  default_prompt: "Use $xy2api-admin to inspect and manage XY2API backend accounts safely."
+
+policy:
+  allow_implicit_invocation: true

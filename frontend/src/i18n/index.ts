@@ -4,6 +4,7 @@ type LocaleCode = 'en' | 'zh'
 
 type LocaleMessages = Record<string, any>
 
+// Browser storage keys are persistent compatibility identifiers, not display branding.
 const LOCALE_KEY = 'sub2api_locale'
 const DEFAULT_LOCALE: LocaleCode = 'en'
 

@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/gin-gonic/gin"
+	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/stretchr/testify/require"
 )
 

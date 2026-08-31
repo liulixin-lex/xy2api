@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
-	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/pkg/oauth"
+	"github.com/liulixin-lex/xy2api/internal/pkg/proxyurl"
+	"github.com/liulixin-lex/xy2api/internal/service"
+	"github.com/liulixin-lex/xy2api/internal/util/logredact"
 
 	"github.com/imroc/req/v3"
 )

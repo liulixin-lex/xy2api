@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/domain"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/liulixin-lex/xy2api/internal/domain"
+	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 )
 
 type AnnouncementService struct {

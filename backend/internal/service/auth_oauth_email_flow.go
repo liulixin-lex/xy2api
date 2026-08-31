@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
-	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	dbent "github.com/liulixin-lex/xy2api/ent"
+	"github.com/liulixin-lex/xy2api/ent/redeemcode"
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 )
 
 func normalizeOAuthSignupSource(signupSource string) string {
@@ -46,7 +46,7 @@ func (s *AuthService) SendPendingOAuthVerifyCode(ctx context.Context, email stri
 		return nil, err
 	}
 
-	siteName := "Sub2API"
+	siteName := "XY2API"
 	if s.settingService != nil {
 		siteName = s.settingService.GetSiteName(ctx)
 	}

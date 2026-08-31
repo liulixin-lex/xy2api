@@ -6,6 +6,7 @@ const AUTH_TOKEN_KEY = 'auth_token'
 const AUTH_USER_KEY = 'auth_user'
 const REFRESH_TOKEN_KEY = 'refresh_token'
 const TOKEN_EXPIRES_AT_KEY = 'token_expires_at'
+// Keep the established lock name so old and new tabs still coordinate during upgrades.
 const TOKEN_REFRESH_LOCK_NAME = 'sub2api-auth-token-refresh'
 const TOKEN_REFRESH_TIMEOUT_MS = 30_000
 const PEER_REFRESH_WAIT_MS = 1_000

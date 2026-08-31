@@ -3,10 +3,10 @@ package middleware
 import (
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ip"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"go.uber.org/zap"
 )
 

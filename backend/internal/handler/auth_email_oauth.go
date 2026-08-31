@@ -9,14 +9,14 @@ import (
 	"net/url"
 	"strings"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
-	"github.com/Wei-Shaw/sub2api/internal/config"
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/imroc/req/v3"
+	dbent "github.com/liulixin-lex/xy2api/ent"
+	"github.com/liulixin-lex/xy2api/internal/config"
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
+	"github.com/liulixin-lex/xy2api/internal/pkg/oauth"
+	"github.com/liulixin-lex/xy2api/internal/pkg/response"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/tidwall/gjson"
 )
 

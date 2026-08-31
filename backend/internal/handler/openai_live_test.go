@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -98,11 +98,11 @@ func TestLiveAttestationErrorIsExplicit(t *testing.T) {
 	context, _ := gin.CreateTestContext(recorder)
 
 	(&OpenAIGatewayHandler{}).writeLiveCreateError(context, &service.LiveAttestationUnavailableError{
-		Reason: "Live attestation is only supported when Sub2API runs on macOS",
+		Reason: "Live attestation is only supported when XY2API runs on macOS",
 	})
 
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "Sub2API runs on macOS")
+	require.Contains(t, recorder.Body.String(), "XY2API runs on macOS")
 }
 
 func jsonPathString(t *testing.T, raw json.RawMessage, keys ...string) string {
