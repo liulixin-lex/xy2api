@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
+	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
 // --- 模型定价 ---

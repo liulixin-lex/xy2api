@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
-	sharedhttp "github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
-	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 	"github.com/imroc/req/v3"
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
+	sharedhttp "github.com/liulixin-lex/xy2api/internal/pkg/httpclient"
+	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
+	"github.com/liulixin-lex/xy2api/internal/service"
+	"github.com/liulixin-lex/xy2api/internal/util/logredact"
 )
 
 type grokOAuthClient struct {

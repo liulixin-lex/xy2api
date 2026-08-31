@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -16,7 +16,8 @@ import (
 const (
 	grokConversationIDHeader         = "X-Grok-Conv-Id"
 	claudeCodeSessionHeader          = "X-Claude-Code-Session-Id"
-	grokClientToolCacheOptInHeader   = "X-Sub2API-Grok-Client-Tool-Cache"
+	grokClientToolCacheOptInHeader   = "X-XY2API-Grok-Client-Tool-Cache"
+	legacyGrokClientToolCacheHeader  = "X-Sub2API-Grok-Client-Tool-Cache"
 	grokFreeCacheNativeToolsJSON     = `[{"type":"web_search"},{"type":"x_search"}]`
 	grokFreeCacheDisabledToolChoice  = "none"
 	grokClientToolCacheOptInExtraKey = "grok_client_tool_cache_enabled"
@@ -96,7 +97,7 @@ func resolveGrokCacheIdentity(c *gin.Context, body []byte, explicitKey, upstream
 
 	// generateSessionUUID hashes the whole seed before formatting it as a UUID.
 	// Include a versioned namespace so this identity cannot collide with other
-	// upstream session identifiers derived by sub2api.
+	// upstream session identifiers derived by XY2API.
 	isolatedSeed := fmt.Sprintf("grok-prompt-cache:v1:%d:%s:%s", apiKeyID, model, seed)
 	return generateSessionUUID(isolatedSeed)
 }
@@ -212,7 +213,7 @@ func hasGrokResponsesToolIntent(body []byte) bool {
 
 // applyGrokFreeMessagesFunctionToolCacheRoute enables xAI's cache-capable
 // mixed-tools route only for known Free accounts. Pure client tools default to
-// the cache-capable route so an intermediate sub2api does not need to preserve
+// the cache-capable route so an intermediate XY2API does not need to preserve
 // client-specific opt-in headers. Operators can explicitly disable this per
 // account when native search tools would change the desired behavior (#4486).
 func applyGrokFreeMessagesFunctionToolCacheRoute(body, intentSourceBody []byte, account *Account, cacheIdentity string) ([]byte, error) {
@@ -221,13 +222,18 @@ func applyGrokFreeMessagesFunctionToolCacheRoute(body, intentSourceBody []byte, 
 }
 
 // applyGrokFreeRequestToolCacheRoute also accepts a request-scoped opt-in. The
-// sub2api header is consumed locally because buildGrokResponsesRequest only
+// The XY2API header (and its legacy Sub2API alias) is consumed locally because
+// buildGrokResponsesRequest only
 // forwards the explicitly supported OpenAI-Beta header from downstream.
 func applyGrokFreeRequestToolCacheRoute(c *gin.Context, body, intentSourceBody []byte, account *Account, cacheIdentity string) ([]byte, error) {
 	allowPureClientTools, accountPolicyExplicit := grokClientToolCacheAccountPolicy(account)
 	requestOptOut := false
 	if c != nil {
-		switch strings.ToLower(strings.TrimSpace(c.GetHeader(grokClientToolCacheOptInHeader))) {
+		headerValue := strings.TrimSpace(c.GetHeader(grokClientToolCacheOptInHeader))
+		if headerValue == "" {
+			headerValue = strings.TrimSpace(c.GetHeader(legacyGrokClientToolCacheHeader))
+		}
+		switch strings.ToLower(headerValue) {
 		case "1", "true", "yes", "on", "prefer-cache":
 			allowPureClientTools = true
 		case "0", "false", "no", "off":

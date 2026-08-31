@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -562,6 +562,26 @@ func TestGrokFreeClientToolCacheRequestOptInOverridesAccountOptOut(t *testing.T)
 	body, err = applyGrokFreeRequestToolCacheRoute(c, body, intentBody, account, "isolated-id")
 	require.NoError(t, err)
 
+	tools := gjson.GetBytes(body, "tools").Array()
+	require.Len(t, tools, 3)
+	require.Equal(t, "view_image", tools[0].Get("name").String())
+	require.Equal(t, "web_search", tools[1].Get("type").String())
+	require.Equal(t, "x_search", tools[2].Get("type").String())
+}
+
+func TestGrokFreeClientToolCacheLegacyRequestHeaderRemainsCompatible(t *testing.T) {
+	account := healthyGrokOAuthGatewayTestAccount(90145, "access-token")
+	account.Credentials["subscription_tier"] = "free"
+	account.Extra = map[string]any{grokClientToolCacheOptInExtraKey: false}
+	c := newGrokCacheTestContext(90145)
+	c.Request.Header.Set(legacyGrokClientToolCacheHeader, "prefer-cache")
+	intentBody := []byte(`{"model":"grok","tools":[{"type":"function","name":"view_image","parameters":{"type":"object"}}],"tool_choice":"auto"}`)
+
+	body, err := applyGrokResponsesCacheIdentity(intentBody, intentBody, "isolated-id", true)
+	require.NoError(t, err)
+	body, err = applyGrokFreeRequestToolCacheRoute(c, body, intentBody, account, "isolated-id")
+
+	require.NoError(t, err)
 	tools := gjson.GetBytes(body, "tools").Array()
 	require.Len(t, tools, 3)
 	require.Equal(t, "view_image", tools[0].Get("name").String())

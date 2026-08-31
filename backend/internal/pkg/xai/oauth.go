@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/redissession"
-	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
-	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
+	"github.com/liulixin-lex/xy2api/internal/pkg/redissession"
+	"github.com/liulixin-lex/xy2api/internal/util/logredact"
+	"github.com/liulixin-lex/xy2api/internal/util/urlvalidator"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -584,6 +584,8 @@ func BuildAuthorizationURL(state, codeChallenge, redirectURI, nonce string) (str
 	params.Set("code_challenge", codeChallenge)
 	params.Set("code_challenge_method", "S256")
 	params.Set("plan", "generic")
+	// xAI treats this as an integration identifier, not display branding.
+	// Preserve the established value so existing OAuth behavior stays stable.
 	params.Set("referrer", "sub2api")
 
 	return fmt.Sprintf("%s?%s", authorizeURL, params.Encode()), nil

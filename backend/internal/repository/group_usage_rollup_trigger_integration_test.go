@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/lib/pq"
+	"github.com/liulixin-lex/xy2api/migrations"
 	"github.com/stretchr/testify/require"
 )
 

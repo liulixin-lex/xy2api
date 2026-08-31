@@ -19,10 +19,10 @@ import (
 	"sync"
 	"time"
 
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/google/uuid"
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 )
@@ -236,7 +236,7 @@ func normalizeUpstreamBillingProbeSettings(settings *UpstreamBillingProbeSetting
 	}
 }
 
-// UpstreamBillingProbeService discovers a remote Sub2API billing snapshot.
+// UpstreamBillingProbeService discovers a remote XY2API billing snapshot.
 type UpstreamBillingProbeService struct {
 	accountRepo        AccountRepository
 	accountTestService *AccountTestService
@@ -1128,7 +1128,7 @@ func nextProbeDelay(intervalMinutes int, retryAfterDuration time.Duration) time.
 }
 
 // unsupportedProbeDelay 拉长 unsupported 账号的重探间隔，让无效候选自然退出
-// 热队列，不再和真正接入 sub2api 的中转账号抢每周期的探测名额。
+// 热队列，不再和真正支持 /v1/sub2api/billing 的中转账号抢每周期的探测名额。
 // 仍按 upstreamBillingProbeMaxDelay 封顶，保证上游后来接入 sub2api 时最迟一天
 // 内会被重新发现；base 本身已达上限（例如 Retry-After 明确要求更久）时原样返回，
 // 不缩短上游指令。

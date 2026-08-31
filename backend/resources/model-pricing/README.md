@@ -3,9 +3,12 @@
 This directory contains a local copy of the mirrored model pricing data as a fallback mechanism.
 
 ## Source
-The original file is maintained by the LiteLLM project and mirrored into the `price-mirror` branch of this repository via GitHub Actions:
-- Mirror branch (configurable via `PRICE_MIRROR_REPO`): https://raw.githubusercontent.com/<your-repo>/price-mirror/model_prices_and_context_window.json
-- Upstream source: https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
+The source data is maintained by LiteLLM. XY2API keeps the original runtime
+download path through the Wei-Shaw `model-price-repo` mirror and verifies it
+with the matching SHA-256 file:
+- Default mirror: https://raw.githubusercontent.com/Wei-Shaw/model-price-repo/main/model_prices_and_context_window.json
+- Mirror checksum: https://raw.githubusercontent.com/Wei-Shaw/model-price-repo/main/model_prices_and_context_window.sha256
+- LiteLLM upstream: https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
 
 ## Purpose
 This local copy serves as a fallback when the remote file cannot be downloaded due to:

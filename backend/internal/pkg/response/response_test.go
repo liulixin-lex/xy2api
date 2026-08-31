@@ -9,8 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	errors2 "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/gin-gonic/gin"
+	errors2 "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 

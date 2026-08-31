@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/response"
+	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
 // GetConcurrencyStats returns real-time concurrency usage aggregated by platform/group/account.

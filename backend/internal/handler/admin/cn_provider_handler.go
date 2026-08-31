@@ -3,9 +3,9 @@ package admin
 import (
 	"strconv"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/response"
+	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
 // CNProviderHandler 暴露国产供应商（kimi/zhipu/deepseek）的额度与余额查询端点。

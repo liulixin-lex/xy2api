@@ -11,8 +11,8 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/Wei-Shaw/sub2api/ent/group"
-	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/liulixin-lex/xy2api/ent/group"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 )
 
 // Group is the model entity for the Group schema.

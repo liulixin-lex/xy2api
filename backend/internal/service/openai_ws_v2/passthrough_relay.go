@@ -15,7 +15,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/tidwall/gjson"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
+	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
 )
 
 type FrameConn interface {

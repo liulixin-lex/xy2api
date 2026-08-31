@@ -16,10 +16,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"go.uber.org/zap"
@@ -1755,7 +1755,7 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 
 // nonStreamingTerminalFailureFailover applies the streaming path's terminal-event
 // verdict to a stream=false request whose upstream answered with SSE anyway
-// (other sub2api instances and several OpenAI-compatible upstreams do this).
+// (other XY2API-compatible relay instances and several OpenAI-compatible upstreams do this).
 //
 // Both handleSSEToJSON and handlePassthroughSSEToJSON collapsed every terminal
 // `response.failed` / `error` frame into writeOpenAINonStreamingProtocolError, a
@@ -2267,7 +2267,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	}
 
 	// Detect SSE responses from upstream and convert to JSON.
-	// Some upstreams (e.g. other sub2api instances) may return SSE even when
+	// Some upstreams (e.g. other XY2API-compatible relay instances) may return SSE even when
 	// stream=false was requested. Without this conversion the client would
 	// receive raw SSE text or a terminal event with empty output.
 	if isEventStreamResponse(resp.Header) {

@@ -9,16 +9,16 @@ import (
 	"sync"
 	"testing"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
-	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
-	"github.com/Wei-Shaw/sub2api/internal/service"
+	dbent "github.com/liulixin-lex/xy2api/ent"
+	_ "github.com/liulixin-lex/xy2api/ent/runtime"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
 )
 
-const parameterLimitTestDriverName = "sub2api_param_limit_test"
+const parameterLimitTestDriverName = "xy2api_param_limit_test"
 
 var registerParameterLimitTestDriverOnce sync.Once
 

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/lib/pq"
+	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
 type passkeyRepository struct {

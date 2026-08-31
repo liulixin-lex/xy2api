@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/lib/pq"
+	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
 

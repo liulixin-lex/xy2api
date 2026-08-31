@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/ent/pendingauthsession"
 	"github.com/stretchr/testify/require"
 )
 

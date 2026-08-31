@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
+	"github.com/liulixin-lex/xy2api/internal/pkg/servertiming"
 )
 
 type serverTimingConnector struct {

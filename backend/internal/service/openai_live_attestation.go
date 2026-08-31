@@ -12,7 +12,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/config"
 )
 
 const liveAttestationHeader = "x-oai-attestation"
@@ -73,7 +73,7 @@ func (c *liveAttestationAES) Decrypt(ciphertext string) (string, error) {
 func (s *OpenAIGatewayService) prepareLiveAttestation(ctx context.Context) (string, string, error) {
 	if s == nil || s.liveAttestation == nil {
 		return "", "", &LiveAttestationUnavailableError{
-			Reason: "Sub2API has no platform DeviceCheck provider",
+			Reason: "XY2API has no platform DeviceCheck provider",
 		}
 	}
 	if s.liveAttestationCipher == nil {

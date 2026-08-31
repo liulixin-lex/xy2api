@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"go.uber.org/zap"
 )
 
