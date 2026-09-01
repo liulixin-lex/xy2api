@@ -81,15 +81,76 @@ def matches_any(path: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
 
 
+def classify_owner(path: str, policy: dict) -> str | None:
+    categories = policy.get("categories", {})
+    priority = policy.get("ownership_priority", list(categories))
+    for category in priority:
+        if matches_any(path, categories.get(category, [])):
+            return category
+    return None
+
+
 def changed_files(base: str, head: str) -> list[str]:
     output = git_output("diff", "--name-only", f"{base}..{head}", "--")
     return sorted(line for line in output.splitlines() if line)
 
 
-def build_report(base: str, upstream: str, fork: str) -> dict:
+def commit_records(revision_range: str) -> list[dict[str, str]]:
+    output = git_output("log", "--reverse", "--format=%H%x09%s", revision_range, "--")
+    records: list[dict[str, str]] = []
+    for line in output.splitlines():
+        if not line:
+            continue
+        commit, _, subject = line.partition("\t")
+        records.append({"commit": commit, "subject": subject})
+    return records
+
+
+def classify_impacts(paths: list[str]) -> dict[str, list[str]]:
+    rules = {
+        "migrations": ["backend/migrations/*.sql"],
+        "api": [
+            "backend/internal/handler/**",
+            "backend/internal/server/routes/**",
+            "backend/pkg/pluginapi/**",
+            "frontend/src/api/**",
+        ],
+        "config": [
+            "backend/internal/config/**",
+            "deploy/.env.example",
+            "deploy/config.example.yaml",
+            "deploy/docker-compose*.yml",
+        ],
+        "dependencies": [
+            "backend/go.mod",
+            "backend/go.sum",
+            "frontend/package.json",
+            "frontend/*lock*",
+            "Dockerfile*",
+            "deploy/Dockerfile",
+        ],
+        "generated": [
+            "backend/ent/**",
+            "backend/cmd/server/wire_gen.go",
+            "backend/pkg/pluginapi/**/*.pb.go",
+        ],
+    }
+    return {
+        name: [path for path in paths if matches_any(path, patterns)]
+        for name, patterns in rules.items()
+    }
+
+
+def build_report(base: str, upstream: str, fork: str, policy: dict) -> dict:
     upstream_files = changed_files(base, upstream)
     fork_files = changed_files(base, fork)
     overlap = sorted(set(upstream_files) & set(fork_files))
+    ownership = {category: [] for category in policy["ownership_priority"]}
+    ownership["unclassified"] = []
+    for path in fork_files:
+        owner = classify_owner(path, policy)
+        ownership[owner or "unclassified"].append(path)
+    all_paths = sorted(set(upstream_files) | set(fork_files))
     return {
         "schema_version": 1,
         "base": base,
@@ -97,18 +158,33 @@ def build_report(base: str, upstream: str, fork: str) -> dict:
         "fork": fork,
         "upstream_commit_count": int(git_output("rev-list", "--count", f"{base}..{upstream}")),
         "fork_commit_count": int(git_output("rev-list", "--count", f"{base}..{fork}")),
+        "upstream_commits": commit_records(f"{base}..{upstream}"),
         "upstream_changed_files": upstream_files,
         "fork_changed_files": fork_files,
         "overlap_files": overlap,
+        "three_way_matrix": [
+            {
+                "path": path,
+                "upstream_changed": path in upstream_files,
+                "fork_changed": path in fork_files,
+                "overlap": path in overlap,
+                "fork_owner": classify_owner(path, policy) if path in fork_files else "upstream",
+            }
+            for path in all_paths
+        ],
+        "fork_ownership": ownership,
+        "upstream_impact": classify_impacts(upstream_files),
+        "fork_impact": classify_impacts(fork_files),
         "upstream_migrations": [path for path in upstream_files if path.startswith("backend/migrations/") and path.endswith(".sql")],
     }
 
 
 def command_report(args: argparse.Namespace) -> int:
+    policy = load_policy()
     fork = git_output("rev-parse", args.fork)
     upstream = git_output("rev-parse", args.upstream)
     base = git_output("merge-base", fork, upstream)
-    report = build_report(base, upstream, fork)
+    report = build_report(base, upstream, fork, policy)
     write_json(Path(args.output).resolve(), report)
     print(json.dumps(report, indent=2, ensure_ascii=False))
     return 0
@@ -180,6 +256,13 @@ def audit_policy(policy: dict, errors: list[str]) -> None:
             f"{sorted(expected_categories)}; got {sorted(actual_categories)}"
         )
 
+    ownership_priority = policy.get("ownership_priority", [])
+    if len(ownership_priority) != len(set(ownership_priority)) or set(ownership_priority) != expected_categories:
+        errors.append(
+            "ownership_priority must list every ownership category exactly once; "
+            f"got {ownership_priority}"
+        )
+
     patch_ids = set(policy.get("custom_patches", []))
     test_bindings = policy.get("custom_patch_tests", [])
     bound_ids = {binding.get("id", "") for binding in test_bindings}
@@ -220,8 +303,6 @@ def audit_policy(policy: dict, errors: list[str]) -> None:
 
 
 def classify_fork_differences(upstream: str, policy: dict) -> list[str]:
-    categories = policy.get("categories", {})
-    patterns = [pattern for values in categories.values() for pattern in values]
     rewrite = policy["module_rewrite"]
     source = rewrite["from"].encode("utf-8")
     target = rewrite["to"].encode("utf-8")
@@ -231,7 +312,7 @@ def classify_fork_differences(upstream: str, policy: dict) -> list[str]:
     for relative in changed_files(upstream, "HEAD"):
         if relative in {"UPSTREAM_BASE.json"} or relative.startswith("tools/upstream-sync/") or relative.startswith("docs/upstream-sync/"):
             continue
-        if matches_any(relative, patterns):
+        if classify_owner(relative, policy) is not None:
             continue
         current_path = ROOT / relative
         upstream_blob = run_git_bytes("show", f"{upstream}:{relative}", check=False)
@@ -360,14 +441,20 @@ def command_prepare(args: argparse.Namespace) -> int:
         raise SyncError(f"tag target changed: expected {args.expected_commit}, got {upstream}")
     if args.expected_base and base != args.expected_base:
         raise SyncError(f"merge base changed: expected {args.expected_base}, got {base}")
-    report = build_report(base, upstream, fork)
+    report = build_report(base, upstream, fork, policy)
     report_path, report_relative = path_inside_repo(args.report)
-    write_json(report_path, report)
 
     merge = run_git("merge", "--no-ff", "--no-commit", upstream, check=False)
     conflicts = [line for line in git_output("diff", "--name-only", "--diff-filter=U").splitlines() if line]
     allowed = policy["categories"]["manual_merge"]
     unexpected = [path for path in conflicts if not matches_any(path, allowed)]
+    report["merge_conflicts"] = conflicts
+    report["unexpected_conflicts"] = unexpected
+    report["upstream_tag"] = tag
+    report["upstream_tag_ref"] = tag_ref
+    report["upstream_tag_object"] = tag_object
+    report["upstream_tag_signature"] = signature_status
+    write_json(report_path, report)
     if unexpected:
         run_git("merge", "--abort", check=False)
         raise SyncError(f"unexpected conflicts blocked the sync: {unexpected}")

@@ -33,6 +33,29 @@ class UpstreamSyncTests(unittest.TestCase):
         self.assertTrue(SYNC.matches_any("backend/ent/user.go", ["backend/ent/**"]))
         self.assertFalse(SYNC.matches_any("backend/internal/service/user.go", ["backend/ent/**"]))
 
+    def test_ownership_priority_keeps_compat_and_manual_paths_specific(self):
+        policy = {
+            "ownership_priority": ["compat_invariant", "manual_merge", "xy_owned"],
+            "categories": {
+                "compat_invariant": ["backend/pkg/pluginapi/**"],
+                "manual_merge": ["backend/internal/config/config.go"],
+                "xy_owned": ["backend/**"],
+            },
+        }
+
+        self.assertEqual(
+            SYNC.classify_owner("backend/pkg/pluginapi/v1/runtime.go", policy),
+            "compat_invariant",
+        )
+        self.assertEqual(
+            SYNC.classify_owner("backend/internal/config/config.go", policy),
+            "manual_merge",
+        )
+        self.assertEqual(
+            SYNC.classify_owner("backend/internal/service/user.go", policy),
+            "xy_owned",
+        )
+
     def test_migration_checksum_uses_trim_space_rule(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "001.sql"

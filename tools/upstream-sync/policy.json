@@ -6,16 +6,39 @@
     "to": "github.com/liulixin-lex/xy2api",
     "extensions": [".go", ".proto"]
   },
+  "ownership_priority": [
+    "compat_invariant",
+    "manual_merge",
+    "generated",
+    "xy_owned",
+    "upstream"
+  ],
   "categories": {
     "upstream": [],
     "xy_owned": [
+      ".dockerignore",
+      ".gitignore",
+      ".github/workflows/**",
+      "CLA.md",
+      "DEV_GUIDE.md",
+      "README_JA.md",
+      "Dockerfile*",
+      "assets/**",
+      "backend/.golangci.yml",
+      "backend/go.mod",
+      "backend/go.sum",
+      "backend/cmd/**",
+      "backend/internal/**",
+      "backend/resources/**",
       "backend/cmd/server/VERSION",
       "backend/cmd/server/SUB2API_COMPAT_VERSION",
       ".goreleaser*.yaml",
       ".github/workflows/release.yml",
-      "deploy/install.sh",
-      "deploy/systemd/**",
-      "frontend/src/assets/**"
+      "deploy/**",
+      "docs/**",
+      "frontend/**",
+      "skills/**",
+      "tools/**"
     ],
     "manual_merge": [
       "README.md",
@@ -32,7 +55,7 @@
       "backend/pkg/pluginapi/**/*.pb.go"
     ],
     "compat_invariant": [
-      "backend/migrations/*.sql",
+      "backend/migrations/**",
       "backend/pkg/pluginapi/**",
       "backend/internal/server/routes/gateway.go",
       "backend/internal/handler/admin/ops_ws_handler.go",
@@ -41,12 +64,12 @@
   },
   "required_literals": [
     {"path": "backend/go.mod", "value": "module github.com/liulixin-lex/xy2api"},
-    {"path": "backend/internal/server/routes/gateway.go", "value": "/v1/sub2api/billing"},
+    {"path": "backend/internal/server/routes/gateway.go", "value": "/sub2api/billing"},
     {"path": "backend/pkg/pluginapi/v1/plugin.proto", "value": "package sub2api.plugin.v1;"},
-    {"path": "backend/pkg/pluginapi/v1/plugin.proto", "value": "SUB2API_PLUGIN_MAGIC_COOKIE"},
+    {"path": "backend/pkg/pluginapi/v1/runtime.go", "value": "SUB2API_PLUGIN_MAGIC_COOKIE"},
     {"path": "backend/internal/handler/admin/ops_ws_handler.go", "value": "sub2api-admin"},
     {"path": "frontend/src/api/admin/ops.ts", "value": "sub2api-admin"},
-    {"path": "backend/internal/pkg/xai/oauth.go", "value": "referrer=sub2api"},
+    {"path": "backend/internal/pkg/xai/oauth.go", "value": "params.Set(\"referrer\", \"sub2api\")"},
     {"path": "backend/internal/config/config.go", "value": "/etc/sub2api"},
     {"path": "backend/internal/service/update_service.go", "value": "liulixin-lex/xy2api"},
     {"path": "backend/internal/service/update_service.go", "value": "sub2api.exe"},
