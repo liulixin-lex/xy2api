@@ -51,6 +51,7 @@
     {"path": "backend/internal/service/update_service.go", "value": "liulixin-lex/xy2api"},
     {"path": "backend/internal/service/update_service.go", "value": "sub2api.exe"},
     {"path": "backend/internal/service/openai_gateway_grok_cache.go", "value": "X-Sub2API-Grok-Client-Tool-Cache"},
+    {"path": "backend/internal/service/openai_messages_todo_guard.go", "value": "<sub2api-claude-code-todo-guard>"},
     {"path": "deploy/docker-compose.yml", "value": "APP_DATA_VOLUME_NAME"}
   ],
   "forbidden_module_paths": [
@@ -59,7 +60,8 @@
   "required_absent_paths": [
     ".github/workflows/cla.yml",
     "CLA.md",
-    "frontend/src/components/common/ProxyAdBanner.vue"
+    "frontend/src/components/common/ProxyAdBanner.vue",
+    "assets/partners/logos/axisnow.jpg"
   ],
   "custom_patches": [
     "legacy-config-path",
