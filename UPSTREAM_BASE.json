@@ -12,7 +12,7 @@
   "merge_commit": "34448ede25e97dac5b048db661ecfb2211a1bf18",
   "module_normalization_commit": "c72f5e25b460f4c96ff413435af7dda9737355b1",
   "sync_branch": "sync/sub2api-v0.1.185",
-  "sync_pr": null,
+  "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/2",
   "xy2api_version": "0.0.2-rc.1",
   "sub2api_compat_version": "0.1.185",
   "status": "resolved",
