@@ -1,0 +1,4 @@
+interface:
+  display_name: "XY2API Upstream Sync"
+  short_description: "Sync Sub2API into XY2API through audited release gates"
+  default_prompt: "Use $xy2api-upstream-sync to synchronize a stable Sub2API release into XY2API and carry it through review, RC validation, and formal release."
