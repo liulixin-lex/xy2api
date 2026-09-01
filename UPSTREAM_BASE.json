@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "upstream_repo": "Wei-Shaw/sub2api",
+  "upstream_tag": "v0.1.185",
+  "upstream_tag_ref": "sub2api/v0.1.185",
+  "upstream_tag_object": "c8134f0f55b75719ac228b75a0861f2050b4e164",
+  "upstream_tag_signature": "unsigned",
+  "upstream_commit": "2ac784c51a5d0925b324efef2ba6b3446c364781",
+  "merge_base": "52374af94031f04df8de6fc91deb77a179e04b06",
+  "fork_start": "42a62768de382fcfa70886ab6284030af3c7bdfc",
+  "xy2api_version": "0.0.1",
+  "sub2api_compat_version": "0.1.184",
+  "status": "pending",
+  "manual_resolutions": [
+    {
+      "path": "README.md",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "README_CN.md",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/config/config.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "deploy/config.example.yaml",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "deploy/docker-compose.yml",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    }
+  ],
+  "custom_patches": [
+    "legacy-config-path",
+    "legacy-release-binary",
+    "legacy-grok-header",
+    "explicit-app-data-volume",
+    "windows-plugin-archive-close",
+    "migration-checksum-manifest",
+    "dual-version-plugin-compatibility"
+  ]
+}
