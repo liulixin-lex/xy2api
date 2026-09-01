@@ -1,0 +1,236 @@
+name: Upstream Sync
+
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Optional stable Sub2API tag (for example v0.1.185)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPOSITORY: Wei-Shaw/sub2api
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout XY2API main
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Select one stable upstream release
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ github.event.inputs.tag || '' }}
+        run: |
+          set -euo pipefail
+
+          open_sync_prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --label upstream-sync --json number --jq 'length')
+          if [ "$open_sync_prs" -gt 0 ]; then
+            echo "A sync PR is already open; leave newer releases queued."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          tag="$REQUESTED_TAG"
+          if [ -z "$tag" ]; then
+            tag=$(gh api "repos/$UPSTREAM_REPOSITORY/releases?per_page=100" --jq '[.[] | select(.draft == false and .prerelease == false)][0].tag_name')
+          fi
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Refusing non-stable or malformed tag: $tag" >&2
+            exit 1
+          fi
+
+          tag_json=$(gh api "repos/$UPSTREAM_REPOSITORY/git/ref/tags/$tag")
+          object_type=$(jq -r '.object.type' <<<"$tag_json")
+          object_sha=$(jq -r '.object.sha' <<<"$tag_json")
+          if [ "$object_type" != "tag" ]; then
+            echo "Upstream ref $tag is not an annotated tag" >&2
+            exit 1
+          fi
+
+          branch="sync/sub2api-$tag"
+          report="docs/upstream-sync/$tag.json"
+          {
+            echo "skip=false"
+            echo "tag=$tag"
+            echo "branch=$branch"
+            echo "report=$report"
+            echo "expected_tag_object=$object_sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Fetch and pin exact annotated tag
+        id: upstream
+        if: steps.target.outputs.skip != 'true'
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+          EXPECTED_TAG_OBJECT: ${{ steps.target.outputs.expected_tag_object }}
+        run: |
+          set -euo pipefail
+          git remote add upstream "https://github.com/$UPSTREAM_REPOSITORY.git"
+
+          fetched=false
+          for attempt in 1 2 3 4; do
+            if git -c http.version=HTTP/1.1 fetch --no-tags upstream "refs/tags/$TAG:refs/tags/sub2api/$TAG"; then
+              fetched=true
+              break
+            fi
+            sleep "$((attempt * 10))"
+          done
+          if [ "$fetched" != "true" ]; then
+            echo "Unable to fetch $TAG after four attempts" >&2
+            exit 1
+          fi
+
+          actual_tag_object=$(git rev-parse "sub2api/$TAG")
+          if [ "$actual_tag_object" != "$EXPECTED_TAG_OBJECT" ]; then
+            echo "Tag object changed: expected $EXPECTED_TAG_OBJECT, got $actual_tag_object" >&2
+            exit 1
+          fi
+          target_commit=$(git rev-parse "sub2api/$TAG^{commit}")
+
+          already_synced=false
+          if [ -f UPSTREAM_BASE.json ] && jq -e --arg tag "$TAG" '.upstream_tag == $tag' UPSTREAM_BASE.json >/dev/null; then
+            recorded_object=$(jq -r '.upstream_tag_object' UPSTREAM_BASE.json)
+            recorded_commit=$(jq -r '.upstream_commit' UPSTREAM_BASE.json)
+            if [ "$recorded_object" != "$actual_tag_object" ] || [ "$recorded_commit" != "$target_commit" ]; then
+              echo "Previously synchronized tag $TAG changed upstream" >&2
+              exit 1
+            fi
+            already_synced=true
+          fi
+
+          {
+            echo "target_commit=$target_commit"
+            echo "already_synced=$already_synced"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Configure sync commit identity
+        if: steps.target.outputs.skip != 'true' && steps.upstream.outputs.already_synced != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Prepare three-way synchronization
+        id: sync
+        if: steps.target.outputs.skip != 'true' && steps.upstream.outputs.already_synced != 'true'
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+          BRANCH: ${{ steps.target.outputs.branch }}
+          REPORT: ${{ steps.target.outputs.report }}
+          EXPECTED_COMMIT: ${{ steps.upstream.outputs.target_commit }}
+        run: |
+          set -uo pipefail
+          git switch -c "$BRANCH"
+          set +e
+          python tools/upstream-sync/sync.py prepare --tag "$TAG" --expected-commit "$EXPECTED_COMMIT" --report "$REPORT" > upstream-sync.log 2>&1
+          exit_code=$?
+          set -e
+          cat upstream-sync.log
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update blocking issue
+        if: steps.sync.outputs.exit_code != '' && steps.sync.outputs.exit_code != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          title="Upstream sync blocked: Sub2API $TAG"
+          body_file=$(mktemp)
+          {
+            echo "The automated three-way synchronization was blocked. No branch, pull request, or release was published."
+            echo
+            echo "Failure output:"
+            tail -n 200 upstream-sync.log
+            echo
+            echo "Workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > "$body_file"
+
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$title in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file "$body_file"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$body_file"
+          fi
+          exit 1
+
+      - name: Push immutable upstream tag and sync branch
+        if: steps.sync.outputs.exit_code == '0'
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+          BRANCH: ${{ steps.target.outputs.branch }}
+        run: |
+          set -euo pipefail
+          git push origin "refs/tags/sub2api/$TAG"
+          git push --set-upstream origin "$BRANCH"
+
+      - name: Open one draft sync pull request
+        if: steps.sync.outputs.exit_code == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.target.outputs.tag }}
+          BRANCH: ${{ steps.target.outputs.branch }}
+          REPORT: ${{ steps.target.outputs.report }}
+          TARGET_COMMIT: ${{ steps.upstream.outputs.target_commit }}
+        run: |
+          set -euo pipefail
+          gh label create upstream-sync --repo "$GITHUB_REPOSITORY" --color 1D76DB --description "Automated Sub2API synchronization" --force
+
+          body_file=$(mktemp)
+          cat > "$body_file" <<EOF
+          ## Upstream target
+
+          - Sub2API tag: $TAG
+          - Target commit: $TARGET_COMMIT
+          - Machine-readable report: $REPORT
+
+          ## Required human review
+
+          - Resolve every pending entry in UPSTREAM_BASE.json and document the decision.
+          - Update product and compatibility version files deliberately.
+          - Regenerate Ent, Wire, and protobuf output only from source definitions.
+          - Run the full compatibility, migration, backend, frontend, and security gates.
+
+          This workflow never merges or releases automatically. New stable tags remain queued while this PR is open.
+          EOF
+
+          gh pr create --repo "$GITHUB_REPOSITORY" --base "${{ github.event.repository.default_branch }}" --head "$BRANCH" --title "sync: Sub2API $TAG" --body-file "$body_file" --label upstream-sync --draft
+
+      - name: Upload synchronization report
+        if: steps.sync.outputs.exit_code == '0'
+        uses: actions/upload-artifact@v7
+        with:
+          name: upstream-sync-${{ steps.target.outputs.tag }}
+          path: ${{ steps.target.outputs.report }}
+          retention-days: 30
+
+      - name: Report failures outside merge preparation
+        if: failure() && (steps.sync.outputs.exit_code == '' || steps.sync.outputs.exit_code == '0')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.target.outputs.tag || 'unresolved-target' }}
+        run: |
+          set -euo pipefail
+          title="Upstream sync workflow failed: Sub2API $TAG"
+          body="The synchronization stopped before it could produce a reviewable draft PR. Inspect $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. No release was created."
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$title in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi

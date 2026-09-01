@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "upstream_repo": "Wei-Shaw/sub2api",
+  "module_rewrite": {
+    "from": "github.com/Wei-Shaw/sub2api",
+    "to": "github.com/liulixin-lex/xy2api",
+    "extensions": [".go", ".proto"]
+  },
+  "categories": {
+    "upstream": [],
+    "xy_owned": [
+      "backend/cmd/server/VERSION",
+      "backend/cmd/server/SUB2API_COMPAT_VERSION",
+      ".goreleaser*.yaml",
+      ".github/workflows/release.yml",
+      "deploy/install.sh",
+      "deploy/systemd/**",
+      "frontend/src/assets/**"
+    ],
+    "manual_merge": [
+      "README.md",
+      "README_CN.md",
+      "backend/internal/config/config.go",
+      "deploy/config.example.yaml",
+      "deploy/docker-compose.yml",
+      "deploy/README.md",
+      "deploy/DOCKER.md"
+    ],
+    "generated": [
+      "backend/ent/**",
+      "backend/cmd/server/wire_gen.go",
+      "backend/pkg/pluginapi/**/*.pb.go"
+    ],
+    "compat_invariant": [
+      "backend/migrations/*.sql",
+      "backend/pkg/pluginapi/**",
+      "backend/internal/server/routes/gateway.go",
+      "backend/internal/handler/admin/ops_ws_handler.go",
+      "frontend/src/api/admin/ops.ts"
+    ]
+  },
+  "required_literals": [
+    {"path": "backend/go.mod", "value": "module github.com/liulixin-lex/xy2api"},
+    {"path": "backend/internal/server/routes/gateway.go", "value": "/v1/sub2api/billing"},
+    {"path": "backend/pkg/pluginapi/v1/plugin.proto", "value": "package sub2api.plugin.v1;"},
+    {"path": "backend/pkg/pluginapi/v1/plugin.proto", "value": "SUB2API_PLUGIN_MAGIC_COOKIE"},
+    {"path": "backend/internal/handler/admin/ops_ws_handler.go", "value": "sub2api-admin"},
+    {"path": "frontend/src/api/admin/ops.ts", "value": "sub2api-admin"},
+    {"path": "backend/internal/pkg/xai/oauth.go", "value": "referrer=sub2api"},
+    {"path": "backend/internal/config/config.go", "value": "/etc/sub2api"},
+    {"path": "backend/internal/service/update_service.go", "value": "liulixin-lex/xy2api"},
+    {"path": "backend/internal/service/update_service.go", "value": "sub2api.exe"},
+    {"path": "backend/internal/service/openai_gateway_grok_cache.go", "value": "X-Sub2API-Grok-Client-Tool-Cache"},
+    {"path": "deploy/docker-compose.yml", "value": "APP_DATA_VOLUME_NAME"}
+  ],
+  "forbidden_module_paths": [
+    "github.com/Wei-Shaw/sub2api"
+  ],
+  "required_absent_paths": [
+    ".github/workflows/cla.yml",
+    "CLA.md",
+    "frontend/src/components/common/ProxyAdBanner.vue"
+  ],
+  "custom_patches": [
+    "legacy-config-path",
+    "legacy-release-binary",
+    "legacy-grok-header",
+    "explicit-app-data-volume",
+    "windows-plugin-archive-close",
+    "migration-checksum-manifest",
+    "dual-version-plugin-compatibility"
+  ],
+  "custom_patch_tests": [
+    {
+      "id": "legacy-config-path",
+      "path": "backend/internal/config/config_test.go",
+      "literal": "func TestConfigureConfigSourceKeepsLegacyInstallPath"
+    },
+    {
+      "id": "legacy-release-binary",
+      "path": "backend/internal/service/update_service_test.go",
+      "literal": "func TestUpdateServiceExtractBinaryAcceptsLegacySub2APIBinary"
+    },
+    {
+      "id": "legacy-grok-header",
+      "path": "backend/internal/service/openai_gateway_grok_cache_test.go",
+      "literal": "func TestGrokFreeClientToolCacheLegacyRequestHeaderRemainsCompatible"
+    },
+    {
+      "id": "explicit-app-data-volume",
+      "path": "deploy/tests/docker-compose-security-test.sh",
+      "literal": "check_application_data_volume_name"
+    },
+    {
+      "id": "windows-plugin-archive-close",
+      "path": "backend/internal/service/plugin_package_test.go",
+      "literal": "func TestPluginPackageInstallerInstallUnsignedDevelopmentPackage"
+    },
+    {
+      "id": "migration-checksum-manifest",
+      "path": "backend/migrations/branding_compatibility_test.go",
+      "literal": "func TestPublishedMigrationChecksumsAreImmutable"
+    },
+    {
+      "id": "dual-version-plugin-compatibility",
+      "path": "backend/internal/service/plugin_compatibility_test.go",
+      "literal": "func TestEvaluatePluginCompatibilityUsesSub2APIBaselineInsteadOfProductVersion"
+    }
+  ]
+}
