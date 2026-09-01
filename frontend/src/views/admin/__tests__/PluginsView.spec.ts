@@ -99,6 +99,7 @@ const plugin = {
     status: 'compatible' as const,
     message: '',
     current_sub2api_version: '0.1.0',
+    current_xy2api_version: '0.0.1',
     required_sub2api_version: '>=0.1.0',
     recommended_sub2api_version: '0.1.0',
     plugin_protocol: 1,

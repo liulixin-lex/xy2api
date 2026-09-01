@@ -3,8 +3,12 @@
 package service
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -59,6 +63,7 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
 			},
 		},
 		"0.1.132",
+		"0.1.184",
 		"release",
 	)
 
@@ -69,11 +74,39 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoUpdateAvailable)
 }
 
+func TestUpdateServiceExtractBinaryAcceptsLegacySub2APIBinary(t *testing.T) {
+	for _, binaryName := range []string{"sub2api", "sub2api.exe"} {
+		t.Run(binaryName, func(t *testing.T) {
+			payload := []byte("legacy-sub2api-binary")
+			var archive bytes.Buffer
+			writer := tar.NewWriter(&archive)
+			require.NoError(t, writer.WriteHeader(&tar.Header{
+				Name: binaryName,
+				Mode: 0o755,
+				Size: int64(len(payload)),
+			}))
+			_, err := writer.Write(payload)
+			require.NoError(t, err)
+			require.NoError(t, writer.Close())
+
+			archivePath := filepath.Join(t.TempDir(), "release.tar")
+			destination := filepath.Join(t.TempDir(), "xy2api")
+			require.NoError(t, os.WriteFile(archivePath, archive.Bytes(), 0o600))
+
+			require.NoError(t, (&UpdateService{}).extractBinary(archivePath, destination))
+			extracted, err := os.ReadFile(destination)
+			require.NoError(t, err)
+			require.Equal(t, payload, extracted)
+		})
+	}
+}
+
 func newRollbackTestService(current string, releases []*GitHubRelease) *UpdateService {
 	return NewUpdateService(
 		&updateServiceCacheStub{},
 		&updateServiceGitHubClientStub{recentReleases: releases},
 		current,
+		"0.1.184",
 		"release",
 	)
 }
@@ -136,6 +169,7 @@ func TestUpdateServiceListRollbackVersionsPropagatesFetchError(t *testing.T) {
 		&updateServiceCacheStub{},
 		&updateServiceGitHubClientStub{recentErr: errors.New("github unavailable")},
 		"0.1.147",
+		"0.1.184",
 		"release",
 	)
 

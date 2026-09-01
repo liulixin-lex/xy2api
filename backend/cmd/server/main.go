@@ -1,6 +1,6 @@
 package main
 
-//go:generate go run github.com/google/wire/cmd/wire
+//go:generate go run -mod=mod github.com/google/wire/cmd/wire
 
 import (
 	"context"
@@ -29,24 +29,32 @@ import (
 //go:embed VERSION
 var embeddedVersion string
 
+//go:embed SUB2API_COMPAT_VERSION
+var embeddedSub2APICompatVersion string
+
 // Build-time variables (can be set by ldflags)
 var (
-	Version   = ""
-	Commit    = "unknown"
-	Date      = "unknown"
-	BuildType = "source" // "source" for manual builds, "release" for CI builds (set by ldflags)
+	Version              = ""
+	Sub2APICompatVersion = ""
+	Commit               = "unknown"
+	Date                 = "unknown"
+	BuildType            = "source" // "source" for manual builds, "release" for CI builds (set by ldflags)
 )
 
 func init() {
-	// 如果 Version 已通过 ldflags 注入（例如 -X main.Version=...），则不要覆盖。
-	if strings.TrimSpace(Version) != "" {
-		return
+	// 如果版本已通过 ldflags 注入（例如 -X main.Version=...），则保留注入值。
+	if strings.TrimSpace(Version) == "" {
+		Version = strings.TrimSpace(embeddedVersion)
+		if Version == "" {
+			Version = "0.0.0-dev"
+		}
 	}
 
-	// 默认从 embedded VERSION 文件读取版本号（编译期打包进二进制）。
-	Version = strings.TrimSpace(embeddedVersion)
-	if Version == "" {
-		Version = "0.0.0-dev"
+	if strings.TrimSpace(Sub2APICompatVersion) == "" {
+		Sub2APICompatVersion = strings.TrimSpace(embeddedSub2APICompatVersion)
+		if Sub2APICompatVersion == "" {
+			Sub2APICompatVersion = "0.0.0-dev"
+		}
 	}
 }
 
@@ -62,7 +70,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		log.Printf("XY2API %s (commit: %s, built: %s)\n", Version, Commit, Date)
+		log.Printf("XY2API %s (Sub2API compatibility: %s, commit: %s, built: %s)\n", Version, Sub2APICompatVersion, Commit, Date)
 		return
 	}
 
@@ -144,8 +152,9 @@ func runMainServer() {
 	}
 
 	buildInfo := handler.BuildInfo{
-		Version:   Version,
-		BuildType: BuildType,
+		Version:              Version,
+		Sub2APICompatVersion: Sub2APICompatVersion,
+		BuildType:            BuildType,
 	}
 
 	app, err := initializeApplication(buildInfo)

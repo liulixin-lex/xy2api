@@ -61,31 +61,34 @@ type GitHubReleaseClient interface {
 
 // UpdateService handles software updates
 type UpdateService struct {
-	cache          UpdateCache
-	githubClient   GitHubReleaseClient
-	currentVersion string
-	buildType      string // "source" for manual builds, "release" for CI builds
+	cache                UpdateCache
+	githubClient         GitHubReleaseClient
+	currentVersion       string
+	sub2APICompatVersion string
+	buildType            string // "source" for manual builds, "release" for CI builds
 }
 
 // NewUpdateService creates a new UpdateService
-func NewUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, version, buildType string) *UpdateService {
+func NewUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, version, sub2APICompatVersion, buildType string) *UpdateService {
 	return &UpdateService{
-		cache:          cache,
-		githubClient:   githubClient,
-		currentVersion: version,
-		buildType:      buildType,
+		cache:                cache,
+		githubClient:         githubClient,
+		currentVersion:       version,
+		sub2APICompatVersion: sub2APICompatVersion,
+		buildType:            buildType,
 	}
 }
 
 // UpdateInfo contains update information
 type UpdateInfo struct {
-	CurrentVersion string       `json:"current_version"`
-	LatestVersion  string       `json:"latest_version"`
-	HasUpdate      bool         `json:"has_update"`
-	ReleaseInfo    *ReleaseInfo `json:"release_info,omitempty"`
-	Cached         bool         `json:"cached"`
-	Warning        string       `json:"warning,omitempty"`
-	BuildType      string       `json:"build_type"` // "source" or "release"
+	CurrentVersion       string       `json:"current_version"`
+	Sub2APICompatVersion string       `json:"sub2api_compat_version"`
+	LatestVersion        string       `json:"latest_version"`
+	HasUpdate            bool         `json:"has_update"`
+	ReleaseInfo          *ReleaseInfo `json:"release_info,omitempty"`
+	Cached               bool         `json:"cached"`
+	Warning              string       `json:"warning,omitempty"`
+	BuildType            string       `json:"build_type"` // "source" or "release"
 }
 
 // ReleaseInfo contains GitHub release details
@@ -147,11 +150,12 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
 			return cached, nil
 		}
 		return &UpdateInfo{
-			CurrentVersion: s.currentVersion,
-			LatestVersion:  s.currentVersion,
-			HasUpdate:      false,
-			Warning:        err.Error(),
-			BuildType:      s.buildType,
+			CurrentVersion:       s.currentVersion,
+			Sub2APICompatVersion: s.sub2APICompatVersion,
+			LatestVersion:        s.currentVersion,
+			HasUpdate:            false,
+			Warning:              err.Error(),
+			BuildType:            s.buildType,
 		}, nil
 	}
 
@@ -417,9 +421,10 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, er
 	}
 
 	return &UpdateInfo{
-		CurrentVersion: s.currentVersion,
-		LatestVersion:  latestVersion,
-		HasUpdate:      compareVersions(s.currentVersion, latestVersion) < 0,
+		CurrentVersion:       s.currentVersion,
+		Sub2APICompatVersion: s.sub2APICompatVersion,
+		LatestVersion:        latestVersion,
+		HasUpdate:            compareVersions(s.currentVersion, latestVersion) < 0,
 		ReleaseInfo: &ReleaseInfo{
 			Name:        release.Name,
 			Body:        release.Body,
@@ -613,12 +618,13 @@ func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
 	}
 
 	return &UpdateInfo{
-		CurrentVersion: s.currentVersion,
-		LatestVersion:  cached.Latest,
-		HasUpdate:      compareVersions(s.currentVersion, cached.Latest) < 0,
-		ReleaseInfo:    cached.ReleaseInfo,
-		Cached:         true,
-		BuildType:      s.buildType,
+		CurrentVersion:       s.currentVersion,
+		Sub2APICompatVersion: s.sub2APICompatVersion,
+		LatestVersion:        cached.Latest,
+		HasUpdate:            compareVersions(s.currentVersion, cached.Latest) < 0,
+		ReleaseInfo:          cached.ReleaseInfo,
+		Cached:               true,
+		BuildType:            s.buildType,
 	}, nil
 }
 

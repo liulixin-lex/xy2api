@@ -12,11 +12,13 @@ import (
 
 func TestProvideServiceBuildInfo(t *testing.T) {
 	in := handler.BuildInfo{
-		Version:   "v-test",
-		BuildType: "release",
+		Version:              "v-test",
+		Sub2APICompatVersion: "0.1.184",
+		BuildType:            "release",
 	}
 	out := provideServiceBuildInfo(in)
 	require.Equal(t, in.Version, out.Version)
+	require.Equal(t, in.Sub2APICompatVersion, out.Sub2APICompatVersion)
 	require.Equal(t, in.BuildType, out.BuildType)
 }
 
