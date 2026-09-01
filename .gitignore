@@ -132,6 +132,8 @@ scripts
 !backend/scripts/resolve-version.sh
 !skills/xy2api-admin/scripts/
 !skills/xy2api-admin/scripts/xy2api-admin.js
+!skills/xy2api-upstream-sync/scripts/
+!skills/xy2api-upstream-sync/scripts/doctor.py
 .code-review-state
 #openspec/
 code-reviews/

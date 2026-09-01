@@ -4,6 +4,8 @@
 
 本文档规定 XY2API 同步 Sub2API 正式版本的唯一标准流程。同步过程允许出现受控冲突，但合入 `main` 时必须没有未解决冲突、未分类二开差异或被破坏的兼容契约。
 
+支持 Agent Skills 的客户端可直接调用 `$xy2api-upstream-sync`。Skill 位于 `skills/xy2api-upstream-sync/`，负责阶段选择、环境适配和执行门禁；不支持自动发现的客户端也可从其 `SKILL.md` 开始按需读取运行手册。仓库脚本和本文档仍是项目事实来源。
+
 ## 不可破坏的不变量
 
 1. 只同步正式、非 draft、非 prerelease 的 annotated tag，不直接同步移动的 `upstream/main`。
