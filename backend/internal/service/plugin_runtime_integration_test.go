@@ -34,7 +34,7 @@ func TestPluginRuntimeIntegration(t *testing.T) {
 
 	root := t.TempDir()
 	cfg := testPluginConfig(root, false)
-	installer := NewPluginPackageInstaller(cfg, PluginHostInfo{Version: "0.1.179", BuildType: "release"})
+	installer := NewPluginPackageInstaller(cfg, PluginHostInfo{ProductVersion: "0.0.1", Sub2APICompatVersion: "0.1.179", BuildType: "release"})
 	installation, err := installer.Install(context.Background(), packageFile, nil)
 	require.NoError(t, err)
 	assert.Equal(t, PluginSignatureTrusted, installation.SignatureStatus)

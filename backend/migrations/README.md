@@ -72,12 +72,13 @@ Why?
 
 3. **Test locally**
    ```bash
-   # Apply migration
-   make migrate-up
-
-   # Test rollback
-   make migrate-down
+   # Run the migration and repository integration tests.
+   make test-integration
    ```
+
+   The embedded runner is forward-only. If a schema rollback is required,
+   create a new migration that reverses the previous change; never add Down
+   SQL to an already-published file.
 
 4. **Commit and deploy**
    ```bash

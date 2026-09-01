@@ -38,6 +38,18 @@ func TestLoadDefaultPricingRemoteSources(t *testing.T) {
 	require.Equal(t, "https://raw.githubusercontent.com/Wei-Shaw/model-price-repo/main/model_prices_and_context_window.json", cfg.Pricing.RemoteURL)
 	require.Equal(t, "https://raw.githubusercontent.com/Wei-Shaw/model-price-repo/main/model_prices_and_context_window.sha256", cfg.Pricing.HashURL)
 	require.Equal(t, "./resources/model-pricing/model_prices_and_context_window.json", cfg.Pricing.FallbackFile)
+	require.Empty(t, cfg.Pricing.OverrideFile)
+}
+
+func TestLoadPricingOverrideFile(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configFile, []byte("pricing:\n  override_file: ./data/pricing-overrides.json\n"), 0o600))
+	t.Setenv("CONFIG_FILE", configFile)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, "./data/pricing-overrides.json", cfg.Pricing.OverrideFile)
 }
 
 func TestLoadTimezonePrecedence(t *testing.T) {

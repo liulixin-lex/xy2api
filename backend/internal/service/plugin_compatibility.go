@@ -9,18 +9,20 @@ import (
 )
 
 type PluginHostInfo struct {
-	Version   string
-	BuildType string
+	ProductVersion       string
+	Sub2APICompatVersion string
+	BuildType            string
 }
 
 func EvaluatePluginCompatibility(manifest PluginManifest, host PluginHostInfo) PluginCompatibility {
 	result := PluginCompatibility{
-		CurrentXY2API:     host.Version,
-		RequiredXY2API:    manifest.Requires.XY2API,
-		RecommendedXY2API: manifest.Requires.RecommendedXY2APIVersion,
-		PluginProtocol:    manifest.Requires.PluginProtocol,
-		TransportAPI:      manifest.Requires.TransportAPI,
-		UIBridge:          manifest.Requires.UIBridge,
+		CurrentSub2API:     host.Sub2APICompatVersion,
+		CurrentXY2API:      host.ProductVersion,
+		RequiredSub2API:    manifest.Requires.Sub2API,
+		RecommendedSub2API: manifest.Requires.RecommendedSub2APIVersion,
+		PluginProtocol:     manifest.Requires.PluginProtocol,
+		TransportAPI:       manifest.Requires.TransportAPI,
+		UIBridge:           manifest.Requires.UIBridge,
 	}
 	if manifest.Requires.PluginProtocol != pluginv1.ProtocolVersion ||
 		manifest.Requires.TransportAPI != pluginv1.TransportAPIVersion ||
@@ -29,14 +31,14 @@ func EvaluatePluginCompatibility(manifest PluginManifest, host PluginHostInfo) P
 		result.Message = "插件协议版本与当前 XY2API 不兼容"
 		return result
 	}
-	if !matchesSemverRange(host.Version, manifest.Requires.XY2API) {
+	if !matchesSemverRange(host.Sub2APICompatVersion, manifest.Requires.Sub2API) {
 		result.Status = "incompatible"
-		result.Message = fmt.Sprintf("当前 XY2API %s 不满足插件要求 %s", host.Version, manifest.Requires.XY2API)
+		result.Message = fmt.Sprintf("当前 Sub2API 兼容基线 %s 不满足插件要求 %s", host.Sub2APICompatVersion, manifest.Requires.Sub2API)
 		return result
 	}
 	result.Compatible = true
-	for _, tested := range manifest.Requires.TestedXY2APIVersions {
-		if normalizeSemver(tested) == normalizeSemver(host.Version) {
+	for _, tested := range manifest.Requires.TestedSub2APIVersions {
+		if normalizeSemver(tested) == normalizeSemver(host.Sub2APICompatVersion) {
 			result.Tested = true
 			break
 		}
@@ -46,7 +48,7 @@ func EvaluatePluginCompatibility(manifest PluginManifest, host PluginHostInfo) P
 		result.Message = "当前 XY2API 版本已由插件声明测试"
 	} else {
 		result.Status = "untested"
-		result.Message = "版本范围兼容，但插件未声明已测试当前 XY2API 版本"
+		result.Message = "版本范围兼容，但插件未声明已测试当前 Sub2API 兼容基线"
 	}
 	return result
 }

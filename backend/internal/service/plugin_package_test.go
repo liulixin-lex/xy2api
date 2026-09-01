@@ -23,7 +23,7 @@ import (
 
 func TestPluginPackageInstallerInstallUnsignedDevelopmentPackage(t *testing.T) {
 	cfg := testPluginConfig(t.TempDir(), true)
-	installer := NewPluginPackageInstaller(cfg, PluginHostInfo{Version: "0.1.179", BuildType: "release"})
+	installer := NewPluginPackageInstaller(cfg, testPluginHostInfo("0.1.179", "release"))
 	archive := buildTestPluginArchive(t, nil, "")
 
 	installation, err := installer.Install(context.Background(), bytes.NewReader(archive), nil)
@@ -42,7 +42,7 @@ func TestPluginPackageInstallerInstallUnsignedDevelopmentPackage(t *testing.T) {
 
 func TestPluginPackageInstallerAllowsRepeatedIdenticalUpload(t *testing.T) {
 	cfg := testPluginConfig(t.TempDir(), true)
-	installer := NewPluginPackageInstaller(cfg, PluginHostInfo{Version: "0.1.179"})
+	installer := NewPluginPackageInstaller(cfg, testPluginHostInfo("0.1.179", ""))
 	archive := buildTestPluginArchive(t, nil, "")
 
 	first, err := installer.Install(context.Background(), bytes.NewReader(archive), nil)
@@ -58,7 +58,7 @@ func TestPluginPackageInstallerAllowsRepeatedIdenticalUpload(t *testing.T) {
 
 func TestPluginPackageInstallerRejectsUnsignedPackageByDefault(t *testing.T) {
 	cfg := testPluginConfig(t.TempDir(), false)
-	installer := NewPluginPackageInstaller(cfg, PluginHostInfo{Version: "0.1.179"})
+	installer := NewPluginPackageInstaller(cfg, testPluginHostInfo("0.1.179", ""))
 
 	_, err := installer.Install(context.Background(), bytes.NewReader(buildTestPluginArchive(t, nil, "")), nil)
 
@@ -71,7 +71,7 @@ func TestPluginPackageInstallerVerifiesTrustedSignature(t *testing.T) {
 	require.NoError(t, err)
 	cfg := testPluginConfig(t.TempDir(), false)
 	cfg.Plugins.TrustedPublishers["local-test"] = base64.StdEncoding.EncodeToString(publicKey)
-	installer := NewPluginPackageInstaller(cfg, PluginHostInfo{Version: "0.1.179"})
+	installer := NewPluginPackageInstaller(cfg, testPluginHostInfo("0.1.179", ""))
 
 	installation, installErr := installer.Install(
 		context.Background(),
@@ -98,7 +98,7 @@ func TestBuiltInOpenAITransportPublisherDoesNotRequireConfiguration(t *testing.T
 
 func TestPluginPackageInstallerRejectsPathTraversal(t *testing.T) {
 	cfg := testPluginConfig(t.TempDir(), true)
-	installer := NewPluginPackageInstaller(cfg, PluginHostInfo{Version: "0.1.179"})
+	installer := NewPluginPackageInstaller(cfg, testPluginHostInfo("0.1.179", ""))
 	archive := buildTestPluginArchiveWithExtra(t, nil, "", "../escape", []byte("escape"))
 
 	_, err := installer.Install(context.Background(), bytes.NewReader(archive), nil)
@@ -109,7 +109,7 @@ func TestPluginPackageInstallerRejectsPathTraversal(t *testing.T) {
 
 func TestPluginPackageInstallerKeepsHostVersionMismatchDisabled(t *testing.T) {
 	cfg := testPluginConfig(t.TempDir(), true)
-	installer := NewPluginPackageInstaller(cfg, PluginHostInfo{Version: "0.2.0"})
+	installer := NewPluginPackageInstaller(cfg, testPluginHostInfo("0.2.0", ""))
 
 	installation, err := installer.Install(context.Background(), bytes.NewReader(buildTestPluginArchive(t, nil, "")), nil)
 
@@ -120,7 +120,7 @@ func TestPluginPackageInstallerKeepsHostVersionMismatchDisabled(t *testing.T) {
 
 func TestPluginPackageInstallerRejectsHashMismatch(t *testing.T) {
 	cfg := testPluginConfig(t.TempDir(), true)
-	installer := NewPluginPackageInstaller(cfg, PluginHostInfo{Version: "0.1.179"})
+	installer := NewPluginPackageInstaller(cfg, testPluginHostInfo("0.1.179", ""))
 	manifest := testPluginManifest(map[string][]byte{
 		"bin/plugin":    []byte("binary"),
 		"ui/index.html": []byte("<html></html>"),
@@ -139,7 +139,7 @@ func TestPluginPackageInstallerEnforcesActualExtractionLimit(t *testing.T) {
 	require.NoError(t, err)
 	cfg := testPluginConfig(t.TempDir(), true)
 	cfg.Plugins.MaxUncompressedBytes = 8
-	installer := NewPluginPackageInstaller(cfg, PluginHostInfo{Version: "0.1.179"})
+	installer := NewPluginPackageInstaller(cfg, testPluginHostInfo("0.1.179", ""))
 
 	err = installer.extractArchive(context.Background(), archive, testPluginManifest(nil), t.TempDir())
 
@@ -175,12 +175,12 @@ func testPluginManifest(files map[string][]byte) PluginManifest {
 		Name:          "测试 OpenAI Transport",
 		Version:       "0.1.0",
 		Requires: PluginRequirements{
-			XY2API:                   ">=0.1.170 <0.2.0",
-			RecommendedXY2APIVersion: "0.1.179",
-			TestedXY2APIVersions:     []string{"0.1.179"},
-			PluginProtocol:           pluginv1.ProtocolVersion,
-			TransportAPI:             pluginv1.TransportAPIVersion,
-			UIBridge:                 pluginv1.UIBridgeVersion,
+			Sub2API:                   ">=0.1.170 <0.2.0",
+			RecommendedSub2APIVersion: "0.1.179",
+			TestedSub2APIVersions:     []string{"0.1.179"},
+			PluginProtocol:            pluginv1.ProtocolVersion,
+			TransportAPI:              pluginv1.TransportAPIVersion,
+			UIBridge:                  pluginv1.UIBridgeVersion,
 		},
 		Capabilities: []PluginCapability{{
 			ID:          PluginCapabilityOpenAIOAuthOutbound,
@@ -192,6 +192,14 @@ func testPluginManifest(files map[string][]byte) PluginManifest {
 		},
 		UI:    PluginUIManifest{Entrypoint: "ui/index.html"},
 		Files: hashes,
+	}
+}
+
+func testPluginHostInfo(sub2APIVersion, buildType string) PluginHostInfo {
+	return PluginHostInfo{
+		ProductVersion:       "0.0.1",
+		Sub2APICompatVersion: sub2APIVersion,
+		BuildType:            buildType,
 	}
 }
 

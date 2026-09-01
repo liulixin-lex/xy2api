@@ -10,20 +10,20 @@ import (
 
 func TestEvaluatePluginCompatibility(t *testing.T) {
 	manifest := testPluginManifest(nil)
-	host := PluginHostInfo{Version: "0.1.179", BuildType: "release"}
+	host := PluginHostInfo{ProductVersion: "0.0.1", Sub2APICompatVersion: "0.1.179", BuildType: "release"}
 
 	result := EvaluatePluginCompatibility(manifest, host)
 	require.True(t, result.Compatible)
 	assert.True(t, result.Tested)
 	assert.Equal(t, "compatible", result.Status)
 
-	manifest.Requires.TestedXY2APIVersions = []string{"0.1.178"}
+	manifest.Requires.TestedSub2APIVersions = []string{"0.1.178"}
 	result = EvaluatePluginCompatibility(manifest, host)
 	require.True(t, result.Compatible)
 	assert.False(t, result.Tested)
 	assert.Equal(t, "untested", result.Status)
 
-	manifest.Requires.XY2API = ">=0.2.0 <0.3.0"
+	manifest.Requires.Sub2API = ">=0.2.0 <0.3.0"
 	result = EvaluatePluginCompatibility(manifest, host)
 	assert.False(t, result.Compatible)
 	assert.Equal(t, "incompatible", result.Status)
@@ -33,10 +33,21 @@ func TestEvaluatePluginCompatibilityRejectsProtocolMismatch(t *testing.T) {
 	manifest := testPluginManifest(nil)
 	manifest.Requires.PluginProtocol = pluginv1.ProtocolVersion + 1
 
-	result := EvaluatePluginCompatibility(manifest, PluginHostInfo{Version: "0.1.179"})
+	result := EvaluatePluginCompatibility(manifest, PluginHostInfo{ProductVersion: "0.0.1", Sub2APICompatVersion: "0.1.179"})
 
 	assert.False(t, result.Compatible)
 	assert.Equal(t, "incompatible", result.Status)
+}
+
+func TestEvaluatePluginCompatibilityUsesSub2APIBaselineInsteadOfProductVersion(t *testing.T) {
+	manifest := testPluginManifest(nil)
+	host := PluginHostInfo{ProductVersion: "0.0.2", Sub2APICompatVersion: "0.1.185", BuildType: "release"}
+
+	result := EvaluatePluginCompatibility(manifest, host)
+
+	require.True(t, result.Compatible)
+	assert.Equal(t, "0.0.2", result.CurrentXY2API)
+	assert.Equal(t, "0.1.185", result.CurrentSub2API)
 }
 
 func TestMatchesSemverRange(t *testing.T) {

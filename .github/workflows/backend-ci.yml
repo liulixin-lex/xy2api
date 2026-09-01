@@ -8,6 +8,17 @@ permissions:
   contents: read
 
 jobs:
+  upstream-sync-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Upstream sync tool tests
+        run: python -m unittest discover -s tools/tests -p 'test_*.py' -v
+      - name: Upstream provenance and compatibility audit
+        run: python tools/upstream-sync/sync.py audit
+
   shell:
     runs-on: macos-15
     steps:
@@ -40,6 +51,20 @@ jobs:
       - name: Integration tests
         working-directory: backend
         run: make test-integration
+
+  windows-plugin-archive:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: Verify Windows plugin archive handoff
+        working-directory: backend
+        run: go test ./internal/service -run '^TestPluginPackageInstallerInstallUnsignedDevelopmentPackage$' -count=1
 
   frontend:
     runs-on: ubuntu-latest

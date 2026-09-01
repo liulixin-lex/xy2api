@@ -372,15 +372,17 @@ func providePrivacyClientFactory() service.PrivacyClientFactory {
 
 func provideServiceBuildInfo(buildInfo handler.BuildInfo) service.BuildInfo {
 	return service.BuildInfo{
-		Version:   buildInfo.Version,
-		BuildType: buildInfo.BuildType,
+		Version:              buildInfo.Version,
+		Sub2APICompatVersion: buildInfo.Sub2APICompatVersion,
+		BuildType:            buildInfo.BuildType,
 	}
 }
 
 func providePluginHostInfo(buildInfo handler.BuildInfo) service.PluginHostInfo {
 	return service.PluginHostInfo{
-		Version:   buildInfo.Version,
-		BuildType: buildInfo.BuildType,
+		ProductVersion:       buildInfo.Version,
+		Sub2APICompatVersion: buildInfo.Sub2APICompatVersion,
+		BuildType:            buildInfo.BuildType,
 	}
 }
 

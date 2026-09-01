@@ -3,21 +3,53 @@ package migrations
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"io/fs"
+	"sort"
 	"strings"
 	"testing"
 )
 
-// Applied migrations are data contracts. Branding work must never rewrite
-// their contents, including comments, because the startup runner verifies the
-// trimmed SQL with SHA-256 before accepting an already-applied migration.
-func TestBrandingDoesNotRewriteAppliedMigrationChecksums(t *testing.T) {
-	expected := map[string]string{
-		"001_init.sql":                   "9ba0369779484625edcea7a7d1d4582397e31546db9149b05004990a3f16c630",
-		"002_account_type_migration.sql": "aad3816e44f58ff007ea4df8092aae580f3f85180314c1deb1b1054b20892bbf",
-		"003_subscription.sql":           "4642fcb1ccd7954b1d3eef8f795cfba2ce21431257346cc5a7568cde61a60b13",
+type migrationChecksumManifest struct {
+	SchemaVersion    int               `json:"schema_version"`
+	UpstreamBaseline string            `json:"upstream_baseline"`
+	Algorithm        string            `json:"algorithm"`
+	Migrations       map[string]string `json:"migrations"`
+}
+
+// Applied migrations are data contracts. Every published SQL file is pinned
+// with the same strings.TrimSpace + SHA-256 rule used by the startup runner.
+func TestPublishedMigrationChecksumsAreImmutable(t *testing.T) {
+	raw, err := FS.ReadFile("checksums.json")
+	if err != nil {
+		t.Fatalf("read checksum manifest: %v", err)
 	}
 
-	for name, want := range expected {
+	var manifest migrationChecksumManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("parse checksum manifest: %v", err)
+	}
+	if manifest.SchemaVersion != 1 {
+		t.Fatalf("checksum manifest schema_version = %d, want 1", manifest.SchemaVersion)
+	}
+	if manifest.Algorithm != "sha256(strings.TrimSpace(utf8))" {
+		t.Fatalf("unexpected checksum algorithm %q", manifest.Algorithm)
+	}
+
+	files, err := fs.Glob(FS, "*.sql")
+	if err != nil {
+		t.Fatalf("list migrations: %v", err)
+	}
+	sort.Strings(files)
+	if len(files) != len(manifest.Migrations) {
+		t.Fatalf("checksum manifest has %d entries for %d migrations; append new migrations without changing existing entries", len(manifest.Migrations), len(files))
+	}
+
+	for _, name := range files {
+		want, ok := manifest.Migrations[name]
+		if !ok {
+			t.Fatalf("migration %s is missing from checksums.json", name)
+		}
 		name, want := name, want
 		t.Run(name, func(t *testing.T) {
 			content, err := FS.ReadFile(name)

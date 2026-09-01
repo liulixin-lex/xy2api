@@ -1,6 +1,6 @@
 # XY2API 品牌与迁移兼容边界
 
-更新日期：2026-08-31
+更新日期：2026-09-01
 
 本文档用于避免后续同步上游或继续品牌改造时，误把数据协议和持久化标识一起重命名。
 
@@ -44,10 +44,29 @@
 
 ## 启动阻断防回归
 
-前三个历史 migration 的 SHA-256（按运行器的 trim 规则计算）为：
+`backend/migrations/checksums.json` 固定校验当前全部 273 个已发布 migration，规范化算法与启动运行器相同：先按 UTF-8 解码并执行 `strings.TrimSpace`，再计算 SHA-256。
 
-- `001_init.sql`：`9ba0369779484625edcea7a7d1d4582397e31546db9149b05004990a3f16c630`
-- `002_account_type_migration.sql`：`aad3816e44f58ff007ea4df8092aae580f3f85180314c1deb1b1054b20892bbf`
-- `003_subscription.sql`：`4642fcb1ccd7954b1d3eef8f795cfba2ce21431257346cc5a7568cde61a60b13`
+`backend/migrations/branding_compatibility_test.go` 会校验 SQL 文件集合与 manifest 完全一致，并逐个比对 hash。任何品牌改造或上游同步导致既有 SQL 变化，都必须被视为数据兼容性回归；新 migration 只能追加 SQL 和新的 checksum 条目。
 
-`backend/migrations/branding_compatibility_test.go` 会固定校验这些值。任何品牌改造导致它们变化，都必须被视为数据兼容性回归，而不是普通文案修改。
+## 产品版本与兼容基线
+
+XY2API 产品版本和 Sub2API 兼容基线是两个独立概念：
+
+- `backend/cmd/server/VERSION` 表示 XY2API 产品发布版本。
+- `backend/cmd/server/SUB2API_COMPAT_VERSION` 表示完成同步和兼容审计的 Sub2API 基线。
+- 插件 v1 继续使用原有 `requires.sub2api`、`recommended_sub2api_version` 和 `tested_sub2api_versions` JSON 字段，并与兼容基线比较。
+- 插件兼容响应保留 `current_sub2api_version`，同时返回 `current_xy2api_version`，避免现有客户端被破坏。
+
+发布工作流只校验 tag 与产品版本文件一致，不再在发布时修改源码或在发布后回写 `main`。
+
+## 现有部署升级预检
+
+切换镜像前执行只读预检：
+
+```bash
+python tools/xy2api_upgrade_preflight.py --env-file deploy/.env --compose-file deploy/docker-compose.yml
+```
+
+工具检查旧数据库名、Redis DB 与前缀、稳定密钥、Compose 命名卷、bind mount 和常见 systemd 或数据目录。发现不明确或多候选时返回非零状态并阻止升级，不会自动修改配置或搬移数据。
+
+完整上游同步与发布流程见 `docs/UPSTREAM_SYNC.md`。

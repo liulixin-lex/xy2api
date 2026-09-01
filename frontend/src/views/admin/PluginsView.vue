@@ -151,7 +151,13 @@
                 class="mt-3 grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-xs"
               >
                 <dt class="text-gray-500">
-                  {{ t("admin.plugins.currentVersion") }}
+                  {{ t("admin.plugins.currentXY2APIVersion") }}
+                </dt>
+                <dd class="font-mono text-gray-800 dark:text-gray-200">
+                  {{ plugin.compatibility.current_xy2api_version }}
+                </dd>
+                <dt class="text-gray-500">
+                  {{ t("admin.plugins.currentSub2APICompatVersion") }}
                 </dt>
                 <dd class="font-mono text-gray-800 dark:text-gray-200">
                   {{ plugin.compatibility.current_sub2api_version }}

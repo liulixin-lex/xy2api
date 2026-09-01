@@ -78,6 +78,8 @@ Desktop.ini
 # ===================
 # 临时文件
 # ===================
+__pycache__/
+*.py[cod]
 tmp/
 temp/
 *.tmp
@@ -119,6 +121,10 @@ backend/.installed
 tests
 !deploy/tests/
 !deploy/tests/**
+!tools/tests/
+!tools/tests/**
+tools/tests/**/__pycache__/
+tools/tests/**/*.py[cod]
 CLAUDE.md
 .claude
 scripts
@@ -143,7 +149,10 @@ docs/*
 !docs/COMPOSITE_GROUPS.md
 !docs/PLUGIN_DEVELOPMENT.md
 !docs/BRANDING_AND_MIGRATION_COMPATIBILITY.md
+!docs/UPSTREAM_SYNC.md
 !docs/channel-monitor-v2-safe-defaults.md
+!docs/upstream-sync/
+!docs/upstream-sync/**
 !docs/legal/
 !docs/legal/*.md
 !docs/screenshots/

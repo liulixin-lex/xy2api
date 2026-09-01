@@ -45,12 +45,12 @@ type PluginManifest struct {
 }
 
 type PluginRequirements struct {
-	XY2API                   string   `json:"sub2api"`
-	RecommendedXY2APIVersion string   `json:"recommended_sub2api_version,omitempty"`
-	TestedXY2APIVersions     []string `json:"tested_sub2api_versions,omitempty"`
-	PluginProtocol           int      `json:"plugin_protocol"`
-	TransportAPI             int      `json:"transport_api"`
-	UIBridge                 int      `json:"ui_bridge"`
+	Sub2API                   string   `json:"sub2api"`
+	RecommendedSub2APIVersion string   `json:"recommended_sub2api_version,omitempty"`
+	TestedSub2APIVersions     []string `json:"tested_sub2api_versions,omitempty"`
+	PluginProtocol            int      `json:"plugin_protocol"`
+	TransportAPI              int      `json:"transport_api"`
+	UIBridge                  int      `json:"ui_bridge"`
 }
 
 type PluginCapability struct {
@@ -75,16 +75,17 @@ type PluginSignature struct {
 
 // PluginCompatibility 是管理页面展示和启用门禁共同使用的兼容性结论。
 type PluginCompatibility struct {
-	Compatible        bool   `json:"compatible"`
-	Tested            bool   `json:"tested"`
-	Status            string `json:"status"`
-	Message           string `json:"message"`
-	CurrentXY2API     string `json:"current_sub2api_version"`
-	RequiredXY2API    string `json:"required_sub2api_version"`
-	RecommendedXY2API string `json:"recommended_sub2api_version"`
-	PluginProtocol    int    `json:"plugin_protocol"`
-	TransportAPI      int    `json:"transport_api"`
-	UIBridge          int    `json:"ui_bridge"`
+	Compatible         bool   `json:"compatible"`
+	Tested             bool   `json:"tested"`
+	Status             string `json:"status"`
+	Message            string `json:"message"`
+	CurrentSub2API     string `json:"current_sub2api_version"`
+	CurrentXY2API      string `json:"current_xy2api_version"`
+	RequiredSub2API    string `json:"required_sub2api_version"`
+	RecommendedSub2API string `json:"recommended_sub2api_version"`
+	PluginProtocol     int    `json:"plugin_protocol"`
+	TransportAPI       int    `json:"transport_api"`
+	UIBridge           int    `json:"ui_bridge"`
 }
 
 type PluginInstallation struct {
@@ -157,7 +158,7 @@ func (m PluginManifest) Validate() error {
 	if normalizeSemver(m.Version) == "" {
 		return errors.New("插件版本必须是有效的语义化版本")
 	}
-	if strings.TrimSpace(m.Requires.XY2API) == "" {
+	if strings.TrimSpace(m.Requires.Sub2API) == "" {
 		return errors.New("插件必须声明 requires.sub2api")
 	}
 	if m.Requires.PluginProtocol != pluginv1.ProtocolVersion ||
