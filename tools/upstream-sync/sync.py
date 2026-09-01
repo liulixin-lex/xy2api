@@ -30,6 +30,8 @@ def run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         cwd=ROOT,
         check=False,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -75,6 +77,14 @@ def load_policy() -> dict:
     if policy.get("schema_version") != 1:
         raise SyncError("unsupported upstream sync policy schema")
     return policy
+
+
+def print_json(value: object) -> None:
+    payload = json.dumps(value, indent=2, ensure_ascii=False)
+    try:
+        print(payload)
+    except UnicodeEncodeError:
+        print(json.dumps(value, indent=2, ensure_ascii=True))
 
 
 def matches_any(path: str, patterns: list[str]) -> bool:
@@ -185,8 +195,25 @@ def command_report(args: argparse.Namespace) -> int:
     upstream = git_output("rev-parse", args.upstream)
     base = git_output("merge-base", fork, upstream)
     report = build_report(base, upstream, fork, policy)
+    if PROVENANCE_PATH.is_file():
+        provenance = load_json(PROVENANCE_PATH)
+        if provenance.get("upstream_commit") == upstream:
+            report.update(
+                {
+                    "upstream_tag": provenance.get("upstream_tag"),
+                    "upstream_tag_ref": provenance.get("upstream_tag_ref"),
+                    "upstream_tag_object": provenance.get("upstream_tag_object"),
+                    "upstream_tag_signature": provenance.get("upstream_tag_signature"),
+                    "merge_conflicts": [
+                        item.get("path", "")
+                        for item in provenance.get("manual_resolutions", [])
+                    ],
+                    "manual_resolutions": provenance.get("manual_resolutions", []),
+                    "sync_status": provenance.get("status"),
+                }
+            )
     write_json(Path(args.output).resolve(), report)
-    print(json.dumps(report, indent=2, ensure_ascii=False))
+    print_json(report)
     return 0
 
 
@@ -215,7 +242,7 @@ def normalize_module_paths(base: str, upstream: str, policy: dict) -> list[str]:
 def command_normalize(args: argparse.Namespace) -> int:
     policy = load_policy()
     updated = normalize_module_paths(args.base, args.upstream, policy)
-    print(json.dumps({"updated": updated}, indent=2, ensure_ascii=False))
+    print_json({"updated": updated})
     return 0
 
 
@@ -494,7 +521,7 @@ def command_prepare(args: argparse.Namespace) -> int:
     write_json(PROVENANCE_PATH, provenance)
     run_git("add", "UPSTREAM_BASE.json", report_relative)
     run_git("commit", "-m", f"docs: record sub2api {tag} sync provenance")
-    print(json.dumps({"tag": tag, "upstream": upstream, "conflicts": conflicts, "normalized": normalized}, indent=2, ensure_ascii=False))
+    print_json({"tag": tag, "upstream": upstream, "conflicts": conflicts, "normalized": normalized})
     return 0
 
 
