@@ -13,7 +13,7 @@
   "module_normalization_commit": "64c4b979d046cee7275c346f99ea4c9575e813be",
   "manual_resolution_commit": "9c30af3a4acbfc702f9ebad0f4104f1c85d5d68b",
   "sync_branch": "sync/sub2api-v0.2.0",
-  "sync_pr": "",
+  "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/5",
   "xy2api_version": "0.0.2",
   "sub2api_compat_version": "0.2.0",
   "status": "resolved",
