@@ -56,6 +56,18 @@ class UpstreamSyncTests(unittest.TestCase):
             "xy_owned",
         )
 
+    def test_v020_conflicts_are_explicit_manual_merges(self):
+        manual = SYNC.load_policy()["categories"]["manual_merge"]
+        for path in [
+            "README_JA.md",
+            "backend/cmd/server/VERSION",
+            "backend/internal/service/bedrock_request.go",
+            "backend/internal/service/gateway_request.go",
+            "backend/internal/service/openai_oauth_passthrough_test.go",
+        ]:
+            with self.subTest(path=path):
+                self.assertTrue(SYNC.matches_any(path, manual))
+
     def test_migration_checksum_uses_trim_space_rule(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "001.sql"
