@@ -39,7 +39,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          open_sync_prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --label upstream-sync --json number --jq 'length')
+          open_sync_prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --json number,headRefName,labels --jq '[.[] | select((.headRefName | startswith("sync/sub2api-")) or ([.labels[].name] | index("upstream-sync")))] | length')
           if [ "$open_sync_prs" -gt 0 ]; then
             echo "A sync PR is already open; leave newer releases queued."
             echo "skip=true" >> "$GITHUB_OUTPUT"

@@ -1,6 +1,6 @@
 # XY2API 上游同步规范
 
-更新日期：2026-09-02
+更新日期：2026-09-04
 
 本文档规定 XY2API 同步 Sub2API 正式版本的唯一标准流程。同步过程允许出现受控冲突，但合入 `main` 时必须没有未解决冲突、未分类二开差异或被破坏的兼容契约。
 
@@ -123,9 +123,9 @@ chore: prepare xy2api 0.0.2-rc.1
 
 ## 自动同步 PR
 
-`.github/workflows/upstream-sync.yml` 每 3 天在 `03:30 UTC` 检查正式 release：
+`.github/workflows/upstream-sync.yml` 按日号每 3 天一次在 `03:30 UTC` 检查正式 release：
 
-1. 有未完成的 `upstream-sync` PR 时不改变目标，新标签保持排队。
+1. 有带 `upstream-sync` 标签或分支名以 `sync/sub2api-` 开头的未完成 PR 时不改变目标，新标签保持排队。
 2. 从 GitHub API 固定 tag object，再以命名空间标签抓取并二次比对。
 3. 生成同步分支、provenance 和报告，创建 draft PR。
 4. 清单外冲突、标签对象变化、签名验证失败或脚本异常会阻止 PR。
