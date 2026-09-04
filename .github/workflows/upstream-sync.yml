@@ -144,7 +144,7 @@ jobs:
           echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
 
       - name: Report blocking synchronization
-        if: steps.sync.outputs.exit_code != '' && steps.sync.outputs.exit_code != '0'
+        if: steps.sync.outcome == 'success' && steps.sync.outputs.exit_code != '' && steps.sync.outputs.exit_code != '0'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.target.outputs.tag }}
@@ -190,7 +190,7 @@ jobs:
           fi
 
       - name: Push immutable upstream tag and sync branch
-        if: steps.sync.outputs.exit_code == '0'
+        if: steps.sync.outcome == 'success' && steps.sync.outputs.exit_code == '0'
         env:
           TAG: ${{ steps.target.outputs.tag }}
           BRANCH: ${{ steps.target.outputs.branch }}
@@ -200,7 +200,7 @@ jobs:
           git push --set-upstream origin "$BRANCH"
 
       - name: Open one draft sync pull request
-        if: steps.sync.outputs.exit_code == '0'
+        if: steps.sync.outcome == 'success' && steps.sync.outputs.exit_code == '0'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.target.outputs.tag }}
@@ -232,7 +232,7 @@ jobs:
           gh pr create --repo "$GITHUB_REPOSITORY" --base "${{ github.event.repository.default_branch }}" --head "$BRANCH" --title "sync: Sub2API $TAG" --body-file "$body_file" --label upstream-sync --draft
 
       - name: Upload synchronization report
-        if: always() && steps.sync.outputs.exit_code != ''
+        if: always() && steps.sync.outcome == 'success' && steps.sync.outputs.exit_code != ''
         uses: actions/upload-artifact@v7
         with:
           name: upstream-sync-${{ steps.target.outputs.tag }}
@@ -243,7 +243,7 @@ jobs:
           retention-days: 30
 
       - name: Fail blocked synchronization
-        if: steps.sync.outputs.exit_code != '' && steps.sync.outputs.exit_code != '0'
+        if: steps.sync.outcome == 'success' && steps.sync.outputs.exit_code != '' && steps.sync.outputs.exit_code != '0'
         env:
           SYNC_EXIT_CODE: ${{ steps.sync.outputs.exit_code }}
         run: exit "$SYNC_EXIT_CODE"
