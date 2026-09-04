@@ -4,49 +4,52 @@
 
 ## 当前交接状态
 
-最后更新：`2026-09-04T16:22:26Z`（UTC）
+最后更新：`2026-09-04T18:12:06Z`（UTC）
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
-| 当前分支 | `main` |
-| 当前 HEAD | 记忆机制初始化提交；该提交不在自身内容中固化自引用 SHA，其父提交为 `79955dbaa964732429747ae65dabf9a8bfb44a65`，读取时运行 `git rev-parse HEAD` 核实 |
-| 工作树 | 记忆机制初始化变更已纳入本地提交；记录时没有其他用户或 Agent 改动，交付时应为干净状态 |
-| XY2API 产品版本 | `0.0.2` |
-| `main` 已审计 Sub2API 基线 | `v0.1.185` / commit `2ac784c51a5d0925b324efef2ba6b3446c364781` |
-| 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，同步 PR 为 `#2` |
-| 本地远端 | 只有 `origin`；缺少只读 `upstream` remote，因此 Doctor 的 `ready_for_prepare=false` |
+| 当前分支 | 正式版准备分支 `release/v0.0.3`；读取时运行 `git branch --show-current` 核实 |
+| 当前 HEAD | 分支基于同步合并提交 `48f0f0f10b79b32971649e227e4ceb7f8201e4dd`；读取时运行 `git rev-parse HEAD` 核实最新提交 |
+| 工作树 | 正在准备 `0.0.3` 正式版版本提交；交付时应回到 `main` 且工作树干净 |
+| XY2API 产品版本 | 正式版准备分支为 `0.0.3`；当前 `main` / RC 标签为 `0.0.3-rc.1` |
+| `main` 已审计 Sub2API 基线 | `v0.2.0` / commit `aa236488351eb71e120fc2b6fb32e36b0374c918` |
+| 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，同步 PR `#5` 已通过 merge commit 合入 |
+| 本地远端 | `origin` 可读写；`upstream` 仅允许 fetch，push URL 为 `DISABLED` |
 | 当前环境工具 | `git`、`python3 3.12.3`、`gh`、Docker、Node 可用；`python` 命令别名、Go、pnpm 不可用 |
 
-当前没有用户授权的业务功能修改、上游合并、发版或远端写操作。本次任务已建立仓库记忆机制并纳入本地提交，尚未推送。
+用户已授权按最佳规范完成上游同步与发版。Sub2API `v0.2.0` 已合入，RC 已通过产物、全新安装、原地升级与旧镜像回滚验证；当前只剩正式版 PR、正式 Release 验收和清理。
 
 ## 进行中的工作
 
 | 任务 ID | 状态 | Agent | 范围 | 已完成 | 下一步 / 卡点 |
 | --- | --- | --- | --- | --- | --- |
-| `20260904-full-upstream-sync-release-v0.0.3` | 进行中 | Codex | 修复自动同步、集成 Sub2API v0.2.0、RC 验证并发布 XY2API v0.0.3 | 已重新核实本地/远端、PR #5、固定上游标签和单维护者分支保护状态 | 保护本地记忆提交，完善 PR #5，依次通过同步、RC 与正式发布门禁 |
+| `20260904-full-upstream-sync-release-v0.0.3` | 进行中 | Codex | 修复自动同步、集成 Sub2API v0.2.0、RC 验证并发布 XY2API v0.0.3 | PR #5 已合并；自动同步回归和 `v0.0.3-rc.1` 产物、升级、回滚、全新安装门禁均通过 | 完成正式版 PR、`v0.0.3` Release/镜像验收、环境与短期分支清理 |
 
 ## 当前重要事项
 
-### Sub2API v0.2.0 同步尚未进入 main
+### Sub2API v0.2.0 已合入并完成 RC 验证
 
-以下状态于 `2026-09-04T16:04Z` 通过本地 Git 和 `gh` 只读核实：
+以下状态于 `2026-09-04T18:12Z` 通过本地 Git、GitHub Actions、Release 和隔离 Docker 环境核实：
 
-- 远端分支：`origin/sync/sub2api-v0.2.0`，head 为 `e8bfe57df33b19c099b61794df1a376f712d262c`，从当前 `main` 看为 `0 behind / 69 ahead`。
-- Draft PR：[#5](https://github.com/liulixin-lex/xy2api/pull/5)，状态 `OPEN`、`MERGEABLE/CLEAN`，当时已有检查均成功，但仍是 Draft、没有 review decision。
-- PR 对应的 branch provenance 已标记 `resolved`，兼容版本为 `0.2.0`；这不改变 `main` 当前仍只声明兼容 `0.1.185` 的事实。
-- v0.2.0 固定 annotated tag object 为 `dd07c4d8d484878e617c945cc8bacc304a5a6560`，目标 commit 为 `aa236488351eb71e120fc2b6fb32e36b0374c918`，标签未签名但已在 provenance 中记录为 `unsigned`。
-- 同步报告记录：上游 60 个 commit、148 个上游变更文件、87 个双边重叠文件、7 个人工冲突、4 个新 migration；分支已追加 migration checksum、重新生成 Ent，并通过 PR 上的同步审计、后端、前端、lint、安全及 Windows 插件检查。
+- 同步 PR [#5](https://github.com/liulixin-lex/xy2api/pull/5) 的固定 head `b73310ae84d10d675bf6ad7fac0c840559996aea` 已在 16/16 检查通过后，以 merge commit `48f0f0f10b79b32971649e227e4ceb7f8201e4dd` 合入 `main`。
+- v0.2.0 固定 annotated tag object 为 `dd07c4d8d484878e617c945cc8bacc304a5a6560`，目标 commit 为 `aa236488351eb71e120fc2b6fb32e36b0374c918`；标签未签名，provenance 明确记录为 `unsigned`。
+- 7 个冲突已逐项裁决；4 个 additive migration 的 checksum 独立复算一致，迁移记录从 273 增至 277，实际新增 7 个字段；既有 migration 未改写。
+- RC [v0.0.3-rc.1](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.3-rc.1) 为 annotated prerelease，Release run `33903033269` 成功；5 个平台包 SHA256 全部通过，GHCR manifest digest 为 `sha256:aedd8c30a43deda75ae4825678ba39a1cc9c16264b9c5548384eeb700944818f`，包含 `linux/amd64` 与 `linux/arm64`。
+- 隔离验证中，RC 全新安装健康；从正式 `v0.0.2` 原地升级后用户、Redis 与 `/app/data` 数据保留；再回切 `v0.0.2` 镜像仍健康，数据库与数据可读。
 
-未经用户明确要求，不要代为切换/改写该分支、转 Ready、合并、打标签或发版。继续处理前重新读取 PR head、检查结果和 `UPSTREAM_BASE.json`，不能只依赖本快照。
+### 自动同步失败已修复
 
-### 自动同步工作流当前存在待处理问题
+- 2026-09-02 至 09-04 的失败由两个问题叠加：v0.2.0 新冲突路径不在旧 policy 的人工清单中，随后错误报告又尝试写入已关闭的 GitHub Issues，掩盖了首个阻断原因。
+- 工作流现在将阻断写入 Job Summary、上传日志 artifact、显式返回原始失败；已有同步 PR 同时按 `upstream-sync` 标签与 `sync/sub2api-` 分支前缀识别。
+- 另修复 GitHub Actions 对 skipped 步骤空输出进行宽松数值比较导致误执行 push 的问题，所有后续步骤同时要求 sync step 的 outcome 为 success。
+- 分支场景回归 run `33901867104` 与 `main` 已同步场景 run `33902956072` 均成功；两次都只执行必要的选择/标签核验，仓库写操作按预期跳过。
 
-- PR #5 的 `labels=[]`，但 `main` 上 `.github/workflows/upstream-sync.yml` 只用 `upstream-sync` 标签判断是否已有同步 PR。因此 `gh pr list --state open --label upstream-sync` 返回空列表，工作流不能识别现有 Draft PR。
-- `2026-09-02`、`2026-09-03`、`2026-09-04` 三次定时 Upstream Sync 均失败；最近运行 ID 为 `33851921097`。
-- 可确认的失败表象是：同步命令的非零退出码被“Prepare three-way synchronization”步骤捕获，随后“Create or update blocking issue”步骤失败；仓库实际关闭了 GitHub Issues。
-- 高可信推断（未取得原始 `upstream-sync.log`）：`main` 的 policy 尚未包含 v0.2.0 出现的新增人工冲突路径，因此自动 `prepare` 会阻断。PR #5 内已有 `fix: harden upstream sync automation`，补充了这些路径、禁用 Issues 时的报告降级、失败日志 artifact 和显式失败步骤，但这些修复尚未进入 `main`。
-- PR #5 当前无标签与“只能有一个同步 PR”的设计不一致。是否补标签、是否先合并工作流修复，需要维护者决定；本次分析没有执行任何远端修改。
+### v0.0.3 正式发布尚待完成
+
+- `release/v0.0.3` 只将产品版本从 `0.0.3-rc.1` 晋级为 `0.0.3`，不再引入功能或迁移改动。
+- 合并前仍需完整 PR 检查；合并后创建 annotated `v0.0.3` 标签，并独立复核 Release 状态、平台包 checksum、GHCR 双架构清单、OCI 标签和正式镜像全新启动。
+- 任一正式发布门禁失败时，不得把任务标记为完成；应保留可审计状态并记录恢复动作。
 
 ### 文档冲突与操作陷阱
 
@@ -173,3 +176,13 @@ pnpm --dir frontend run build
 - 验证：`git diff --check` 和 Markdown 尾随空白检查通过；同步工具与升级预检单测 8/8 通过；两份协作文档的 `xy_owned` 分类通过；提交后检查本地工作树状态。
 - 卡点/风险：无。
 - 下一步：无需继续操作；若要推送，应由用户另行明确要求。后续任务开始时用 Git 核实本次提交 SHA 和工作树状态。
+
+### 2026-09-04T18:12:06Z — `20260904-full-upstream-sync-release-v0.0.3` — 进行中
+
+- 请求/目标：分析同步失败并按最佳规范修复自动化、集成 Sub2API `v0.2.0`、完成 RC 验证并发布 XY2API `v0.0.3`。
+- 开始状态：本地 `main` 比 `origin/main` 多一个未推送的记忆提交；Draft PR #5 head 为 `e8bfe57df33b19c099b61794df1a376f712d262c`，缺少同步标签；2026-09-02 至 09-04 的定时同步连续失败。
+- 完成操作：通过 PR #6 保护并合入记忆提交；为 PR #5 补标签，修复已有 PR 识别与 skipped-step 守卫，复核固定上游标签、三方差异、7 个冲突和 4 个 migration 后，以 merge commit 合入；手工回归同步工作流；创建并验收 `v0.0.3-rc.1` annotated tag、Release 与双架构镜像；在隔离 Docker 环境完成正式 `v0.0.2` 到 RC 的升级、旧镜像回滚和 RC 全新安装。
+- 修改文件：同步 PR 覆盖 `UPSTREAM_BASE.json`、版本文件、同步报告、工作流/policy、4 个新增 migration、上游功能与测试；正式版分支当前仅准备修改 `backend/cmd/server/VERSION`、`UPSTREAM_BASE.json` 与本记忆文件。
+- 验证：同步工具 9/9、provenance/compatibility audit、Compose 解析、Go 1.27.0 Ent/Wire 零差异、PR #5 的 16/16 GitHub checks、两个同步回归 run、RC Release run、5 个平台包 SHA256、GHCR amd64/arm64、全新安装、原地升级和旧镜像回滚均通过。
+- 卡点/风险：无当前阻塞；正式版本尚未发布。
+- 下一步：完成正式版 PR、`v0.0.3` 标签与产物/镜像/启动验收，清理隔离资源和已合并短期分支，再将本条记录更新为完成。
