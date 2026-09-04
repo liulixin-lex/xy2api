@@ -18,6 +18,7 @@
     "xy_owned": [
       ".dockerignore",
       ".gitignore",
+      "AGENTS.md",
       ".github/workflows/**",
       "CLA.md",
       "DEV_GUIDE.md",
