@@ -2,7 +2,7 @@ name: Upstream Sync
 
 on:
   schedule:
-    - cron: '30 3 * * *'
+    - cron: '30 3 */3 * *'
   workflow_dispatch:
     inputs:
       tag:
@@ -39,7 +39,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          open_sync_prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --label upstream-sync --json number --jq 'length')
+          open_sync_prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --json number,headRefName,labels --jq '[.[] | select((.headRefName | startswith("sync/sub2api-")) or ([.labels[].name] | index("upstream-sync")))] | length')
           if [ "$open_sync_prs" -gt 0 ]; then
             echo "A sync PR is already open; leave newer releases queued."
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -143,34 +143,54 @@ jobs:
           cat upstream-sync.log
           echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
 
-      - name: Create or update blocking issue
-        if: steps.sync.outputs.exit_code != '' && steps.sync.outputs.exit_code != '0'
+      - name: Report blocking synchronization
+        if: steps.sync.outcome == 'success' && steps.sync.outputs.exit_code != '' && steps.sync.outputs.exit_code != '0'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.target.outputs.tag }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           title="Upstream sync blocked: Sub2API $TAG"
           body_file=$(mktemp)
           {
             echo "The automated three-way synchronization was blocked. No branch, pull request, or release was published."
             echo
             echo "Failure output:"
+            echo '```text'
             tail -n 200 upstream-sync.log
+            echo '```'
             echo
             echo "Workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           } > "$body_file"
 
-          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$title in:title" --json number --jq '.[0].number // empty')
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file "$body_file"
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$body_file"
+          {
+            echo "## $title"
+            echo
+            cat "$body_file"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq '.has_issues' 2>/dev/null || echo false)
+          if [ "$has_issues" != "true" ]; then
+            echo "::warning::GitHub Issues are disabled; the blocking report is available in the step summary and artifact."
+            exit 0
           fi
-          exit 1
+
+          if ! existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$title in:title" --json number --jq '.[0].number // empty'); then
+            echo "::warning::Unable to query blocking issues; preserving the original synchronization failure."
+            exit 0
+          fi
+          if [ -n "$existing" ]; then
+            if ! gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file "$body_file"; then
+              echo "::warning::Unable to comment on blocking issue; preserving the original synchronization failure."
+            fi
+          else
+            if ! gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$body_file"; then
+              echo "::warning::Unable to create blocking issue; preserving the original synchronization failure."
+            fi
+          fi
 
       - name: Push immutable upstream tag and sync branch
-        if: steps.sync.outputs.exit_code == '0'
+        if: steps.sync.outcome == 'success' && steps.sync.outputs.exit_code == '0'
         env:
           TAG: ${{ steps.target.outputs.tag }}
           BRANCH: ${{ steps.target.outputs.branch }}
@@ -180,7 +200,7 @@ jobs:
           git push --set-upstream origin "$BRANCH"
 
       - name: Open one draft sync pull request
-        if: steps.sync.outputs.exit_code == '0'
+        if: steps.sync.outcome == 'success' && steps.sync.outputs.exit_code == '0'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.target.outputs.tag }}
@@ -212,12 +232,21 @@ jobs:
           gh pr create --repo "$GITHUB_REPOSITORY" --base "${{ github.event.repository.default_branch }}" --head "$BRANCH" --title "sync: Sub2API $TAG" --body-file "$body_file" --label upstream-sync --draft
 
       - name: Upload synchronization report
-        if: steps.sync.outputs.exit_code == '0'
+        if: always() && steps.sync.outcome == 'success' && steps.sync.outputs.exit_code != ''
         uses: actions/upload-artifact@v7
         with:
           name: upstream-sync-${{ steps.target.outputs.tag }}
-          path: ${{ steps.target.outputs.report }}
+          path: |
+            ${{ steps.target.outputs.report }}
+            upstream-sync.log
+          if-no-files-found: warn
           retention-days: 30
+
+      - name: Fail blocked synchronization
+        if: steps.sync.outcome == 'success' && steps.sync.outputs.exit_code != '' && steps.sync.outputs.exit_code != '0'
+        env:
+          SYNC_EXIT_CODE: ${{ steps.sync.outputs.exit_code }}
+        run: exit "$SYNC_EXIT_CODE"
 
       - name: Report failures outside merge preparation
         if: failure() && (steps.sync.outputs.exit_code == '' || steps.sync.outputs.exit_code == '0')
@@ -225,12 +254,31 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.target.outputs.tag || 'unresolved-target' }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           title="Upstream sync workflow failed: Sub2API $TAG"
           body="The synchronization stopped before it could produce a reviewable draft PR. Inspect $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. No release was created."
-          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$title in:title" --json number --jq '.[0].number // empty')
+          {
+            echo "## $title"
+            echo
+            echo "$body"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          has_issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq '.has_issues' 2>/dev/null || echo false)
+          if [ "$has_issues" != "true" ]; then
+            echo "::warning::GitHub Issues are disabled; failure details remain in the step summary."
+            exit 0
+          fi
+
+          if ! existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$title in:title" --json number --jq '.[0].number // empty'); then
+            echo "::warning::Unable to query workflow failure issues."
+            exit 0
+          fi
           if [ -n "$existing" ]; then
-            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+            if ! gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"; then
+              echo "::warning::Unable to comment on workflow failure issue."
+            fi
           else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+            if ! gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"; then
+              echo "::warning::Unable to create workflow failure issue."
+            fi
           fi

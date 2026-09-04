@@ -44,7 +44,12 @@
     "manual_merge": [
       "README.md",
       "README_CN.md",
+      "README_JA.md",
+      "backend/cmd/server/VERSION",
       "backend/internal/config/config.go",
+      "backend/internal/service/bedrock_request.go",
+      "backend/internal/service/gateway_request.go",
+      "backend/internal/service/openai_oauth_passthrough_test.go",
       "deploy/config.example.yaml",
       "deploy/docker-compose.yml",
       "deploy/README.md",

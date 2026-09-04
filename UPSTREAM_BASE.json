@@ -1,46 +1,57 @@
 {
   "schema_version": 1,
   "upstream_repo": "Wei-Shaw/sub2api",
-  "upstream_tag": "v0.1.185",
-  "upstream_tag_ref": "sub2api/v0.1.185",
-  "upstream_tag_object": "c8134f0f55b75719ac228b75a0861f2050b4e164",
+  "upstream_tag": "v0.2.0",
+  "upstream_tag_ref": "sub2api/v0.2.0",
+  "upstream_tag_object": "dd07c4d8d484878e617c945cc8bacc304a5a6560",
   "upstream_tag_signature": "unsigned",
-  "upstream_commit": "2ac784c51a5d0925b324efef2ba6b3446c364781",
-  "merge_base": "52374af94031f04df8de6fc91deb77a179e04b06",
-  "fork_baseline": "61fdb85a9dc03ac6df49226d5f9f91cd13a4abb2",
-  "fork_start": "42a62768de382fcfa70886ab6284030af3c7bdfc",
-  "merge_commit": "34448ede25e97dac5b048db661ecfb2211a1bf18",
-  "module_normalization_commit": "c72f5e25b460f4c96ff413435af7dda9737355b1",
-  "sync_branch": "sync/sub2api-v0.1.185",
-  "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/2",
-  "xy2api_version": "0.0.2",
-  "sub2api_compat_version": "0.1.185",
+  "upstream_commit": "aa236488351eb71e120fc2b6fb32e36b0374c918",
+  "merge_base": "2ac784c51a5d0925b324efef2ba6b3446c364781",
+  "fork_baseline": "79955dbaa964732429747ae65dabf9a8bfb44a65",
+  "fork_start": "79955dbaa964732429747ae65dabf9a8bfb44a65",
+  "merge_commit": "569c8315840245acdc0754afb674f990e3433e8e",
+  "module_normalization_commit": "64c4b979d046cee7275c346f99ea4c9575e813be",
+  "manual_resolution_commit": "9c30af3a4acbfc702f9ebad0f4104f1c85d5d68b",
+  "sync_branch": "sync/sub2api-v0.2.0",
+  "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/5",
+  "xy2api_version": "0.0.3-rc.1",
+  "sub2api_compat_version": "0.2.0",
   "status": "resolved",
   "manual_resolutions": [
     {
       "path": "README.md",
       "status": "resolved",
-      "resolution": "Kept XY2API branding, repository, images, installation policy, and sponsor-free README; the upstream-only delta was sponsor content with no functional documentation to port."
+      "resolution": "Kept XY2API branding, repository and installation paths, and the sponsor-free documentation policy; the upstream-only overlap was commercial notice and sponsor content with no functional documentation to port."
     },
     {
       "path": "README_CN.md",
       "status": "resolved",
-      "resolution": "Kept the Chinese XY2API README and the sub2api-admin WebSocket compatibility protocol; rejected the upstream sponsor-only delta."
+      "resolution": "Kept the Chinese XY2API branding, repository and deployment instructions, and sponsor-free policy; rejected the upstream commercial notice and sponsor-only delta."
     },
     {
-      "path": "backend/internal/config/config.go",
+      "path": "README_JA.md",
       "status": "resolved",
-      "resolution": "Preserved /etc/xy2api precedence, /etc/sub2api fallback, and XY2API defaults; added the upstream pricing.override_file configuration and default."
+      "resolution": "Kept the Japanese XY2API branding, repository and deployment instructions, and sponsor-free policy; rejected the upstream commercial notice and sponsor-only delta."
     },
     {
-      "path": "deploy/config.example.yaml",
+      "path": "backend/cmd/server/VERSION",
       "status": "resolved",
-      "resolution": "Preserved XY2API paths, branding, database and Redis defaults; added the complete pricing override_file contract and null-deletion documentation."
+      "resolution": "Kept XY2API product versioning independent from the Sub2API tag and advanced it to the 0.0.3-rc.1 release candidate after completing the v0.2.0 compatibility review."
     },
     {
-      "path": "deploy/docker-compose.yml",
+      "path": "backend/internal/service/bedrock_request.go",
       "status": "resolved",
-      "resolution": "Preserved XY2API image, service, network, database defaults and APP_DATA_VOLUME_NAME; adopted the SQL SELECT 1 probe, 60-second database grace period, 18 retries, and 120-second application start period."
+      "resolution": "Adopted the complete upstream Bedrock server-side fallback and fallback-credit sanitization logic, then normalized imports to the XY2API module path."
+    },
+    {
+      "path": "backend/internal/service/gateway_request.go",
+      "status": "resolved",
+      "resolution": "Adopted the complete upstream Anthropic fallback and fallback-credit beta filtering behavior, then normalized imports to the XY2API module path."
+    },
+    {
+      "path": "backend/internal/service/openai_oauth_passthrough_test.go",
+      "status": "resolved",
+      "resolution": "Adopted the upstream OpenAI Fast group coverage and ctxkey usage, normalized imports to XY2API, and preserved the XY2API structured-log service name."
     }
   ],
   "custom_patches": [
