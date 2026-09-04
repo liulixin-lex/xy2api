@@ -14,7 +14,7 @@
   "manual_resolution_commit": "9c30af3a4acbfc702f9ebad0f4104f1c85d5d68b",
   "sync_branch": "sync/sub2api-v0.2.0",
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/5",
-  "xy2api_version": "0.0.2",
+  "xy2api_version": "0.0.3-rc.1",
   "sub2api_compat_version": "0.2.0",
   "status": "resolved",
   "manual_resolutions": [
@@ -36,7 +36,7 @@
     {
       "path": "backend/cmd/server/VERSION",
       "status": "resolved",
-      "resolution": "Kept XY2API product version 0.0.2. Product versioning remains independent from the Sub2API tag, whose v0.2.0 tree still records 0.1.185 in this file."
+      "resolution": "Kept XY2API product versioning independent from the Sub2API tag and advanced it to the 0.0.3-rc.1 release candidate after completing the v0.2.0 compatibility review."
     },
     {
       "path": "backend/internal/service/bedrock_request.go",
