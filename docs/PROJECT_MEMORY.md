@@ -4,27 +4,25 @@
 
 ## 当前交接状态
 
-最后更新：`2026-09-04T18:12:06Z`（UTC）
+最后更新：`2026-09-04T18:43:33Z`（UTC）
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
-| 当前分支 | 正式版准备分支 `release/v0.0.3`；读取时运行 `git branch --show-current` 核实 |
-| 当前 HEAD | 分支基于同步合并提交 `48f0f0f10b79b32971649e227e4ceb7f8201e4dd`；读取时运行 `git rev-parse HEAD` 核实最新提交 |
-| 工作树 | 正在准备 `0.0.3` 正式版版本提交；交付时应回到 `main` 且工作树干净 |
-| XY2API 产品版本 | 正式版准备分支为 `0.0.3`；当前 `main` / RC 标签为 `0.0.3-rc.1` |
+| 当前分支 | 主线 `main`；读取时运行 `git branch --show-current` 核实本地检出分支 |
+| 当前 HEAD | `v0.0.3` 发布源提交为 `a0e68c6e4f649fc58f95bed78aa1b883ab349cf8`；`main` 另含本次发布后的文档收尾提交，读取时运行 `git rev-parse HEAD` 核实 |
+| 工作树 | 同步、发布和环境清理均已完成；交付时本地 `main` 与 `origin/main` 一致且工作树干净 |
+| XY2API 产品版本 | `0.0.3`；当前正式 Release 为 `v0.0.3` |
 | `main` 已审计 Sub2API 基线 | `v0.2.0` / commit `aa236488351eb71e120fc2b6fb32e36b0374c918` |
 | 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，同步 PR `#5` 已通过 merge commit 合入 |
 | 本地远端 | `origin` 可读写；`upstream` 仅允许 fetch，push URL 为 `DISABLED` |
 | 当前环境工具 | `git`、`python3 3.12.3`、`gh`、Docker、Node 可用；`python` 命令别名、Go、pnpm 不可用 |
 
-用户已授权按最佳规范完成上游同步与发版。Sub2API `v0.2.0` 已合入，RC 已通过产物、全新安装、原地升级与旧镜像回滚验证；当前只剩正式版 PR、正式 Release 验收和清理。
+Sub2API `v0.2.0` 同步、自动化修复、RC 验证和 XY2API `v0.0.3` 正式发布已完成。当前无已知同步或发布阻塞；外部状态仍应在后续任务开始时重新核实。
 
 ## 进行中的工作
 
-| 任务 ID | 状态 | Agent | 范围 | 已完成 | 下一步 / 卡点 |
-| --- | --- | --- | --- | --- | --- |
-| `20260904-full-upstream-sync-release-v0.0.3` | 进行中 | Codex | 修复自动同步、集成 Sub2API v0.2.0、RC 验证并发布 XY2API v0.0.3 | PR #5 已合并；自动同步回归和 `v0.0.3-rc.1` 产物、升级、回滚、全新安装门禁均通过 | 完成正式版 PR、`v0.0.3` Release/镜像验收、环境与短期分支清理 |
+当前无进行中的仓库任务。
 
 ## 当前重要事项
 
@@ -45,11 +43,13 @@
 - 另修复 GitHub Actions 对 skipped 步骤空输出进行宽松数值比较导致误执行 push 的问题，所有后续步骤同时要求 sync step 的 outcome 为 success。
 - 分支场景回归 run `33901867104` 与 `main` 已同步场景 run `33902956072` 均成功；两次都只执行必要的选择/标签核验，仓库写操作按预期跳过。
 
-### v0.0.3 正式发布尚待完成
+### v0.0.3 正式发布已完成
 
-- `release/v0.0.3` 只将产品版本从 `0.0.3-rc.1` 晋级为 `0.0.3`，不再引入功能或迁移改动。
-- 合并前仍需完整 PR 检查；合并后创建 annotated `v0.0.3` 标签，并独立复核 Release 状态、平台包 checksum、GHCR 双架构清单、OCI 标签和正式镜像全新启动。
-- 任一正式发布门禁失败时，不得把任务标记为完成；应保留可审计状态并记录恢复动作。
+- 正式版 PR [#7](https://github.com/liulixin-lex/xy2api/pull/7) 的固定 head `bad95a10a6267e2397274324f06a581b67839fba` 在 16/16 检查通过后，以 merge commit `a0e68c6e4f649fc58f95bed78aa1b883ab349cf8` 合入。
+- annotated tag object 为 `bf25502f68bf0a49e6fa73048970ac257d7c0d16`，目标为上述 merge commit；正式 [v0.0.3 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.3) 非 draft、非 prerelease，run `33905898627` 成功。
+- 5 个平台压缩包的 SHA256 已独立复算通过；GHCR manifest digest 为 `sha256:14d79a3cd5f6ef29e96e503f9f60b520f806c1f6f5b5050ff5607d7f43a89a1d`，包含 `linux/amd64` 与 `linux/arm64`，OCI version/revision 为 `0.0.3` / `a0e68c6e4f649fc58f95bed78aa1b883ab349cf8`。
+- 正式镜像已用全空 PostgreSQL、Redis 和 `/app/data` 卷完成首次安装：健康、setup completed、277 条 migration、1 个管理员、7 个 v0.2.0 新字段齐全。
+- RC/正式验证的临时容器、卷、网络和本次新拉取镜像已删除；原有 `book-keeper` 容器、网络、卷和镜像未改动。已合并的记忆、同步、发布短期分支已在本地与远端删除。
 
 ### 文档冲突与操作陷阱
 
@@ -186,3 +186,13 @@ pnpm --dir frontend run build
 - 验证：同步工具 9/9、provenance/compatibility audit、Compose 解析、Go 1.27.0 Ent/Wire 零差异、PR #5 的 16/16 GitHub checks、两个同步回归 run、RC Release run、5 个平台包 SHA256、GHCR amd64/arm64、全新安装、原地升级和旧镜像回滚均通过。
 - 卡点/风险：无当前阻塞；正式版本尚未发布。
 - 下一步：完成正式版 PR、`v0.0.3` 标签与产物/镜像/启动验收，清理隔离资源和已合并短期分支，再将本条记录更新为完成。
+
+### 2026-09-04T18:43:33Z — `20260904-full-upstream-sync-release-v0.0.3` — 完成
+
+- 请求/目标：分析 GitHub 上游同步失败，按最佳规范修复同步链路，集成 Sub2API `v0.2.0` 并发布 XY2API `v0.0.3`。
+- 开始状态：本地有未推送的记忆提交；Draft PR #5 缺少同步标签；旧 policy 未覆盖 v0.2.0 新冲突，阻断报告又写入已关闭的 Issues，导致 2026-09-02 至 09-04 定时同步连续失败。
+- 完成操作：通过 PR #6 纳入记忆机制；修复冲突清单、Job Summary/artifact 报告、已有 PR 识别与 skipped-step 守卫；完成固定标签 provenance、三方差异和 7 个冲突人工裁决，通过 PR #5 合入上游；完成两个同步回归；发布并验收 `v0.0.3-rc.1`；通过独立 PR #7 晋级并发布 `v0.0.3`；删除已合并短期分支和全部任务专用 Docker 资源。
+- 修改文件：同步与上游功能修改详见 PR #5；正式晋级修改 `backend/cmd/server/VERSION`、`UPSTREAM_BASE.json` 和本记忆文件；本收尾提交只更新本记忆文件。
+- 验证：PR #5 与 #7 各 16/16 checks；同步/升级预检 9/9；provenance/compatibility audit、Compose、Ent/Wire 零差异；同步回归 runs `33901867104`、`33902956072`；RC/formal Release runs `33903033269`、`33905898627`；两版各 5 个资产 SHA256；两版 GHCR amd64/arm64 与 OCI 标签；RC 全新安装、v0.0.2 原地升级和旧镜像回滚；正式版全新安装均通过。
+- 卡点/风险：无已知阻塞。4 个新 migration 为 additive，旧镜像已验证可在升级后的 schema 上运行；数据库回滚仍应继续采用升级前备份策略，不宣称 SQL 自动降级。
+- 下一步：无。后续常规维护应保留 `sub2api/v0.2.0`、`v0.0.3-rc.1`、`v0.0.3` 标签，并从本文件、`UPSTREAM_BASE.json` 与 GitHub Release 重新核实动态状态。
