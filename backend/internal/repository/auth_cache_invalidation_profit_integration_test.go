@@ -87,10 +87,10 @@ func TestAuthCacheInvalidationTrigger_ProfitControlColumns(t *testing.T) {
 		"peak_start":                   "peak_start = '08:00'",
 		"peak_end":                     "peak_end = '09:00'",
 		"peak_rate_multiplier":         "peak_rate_multiplier = 1.2",
-		"long_context_pricing_enabled": "long_context_pricing_enabled = true",
+		"long_context_pricing_enabled": "long_context_pricing_enabled = NOT long_context_pricing_enabled",
 		"long_context_pricing_scope":   "long_context_pricing_scope = 'selected'",
 		"long_context_pricing_models":  `long_context_pricing_models = '["gpt-5.6-*"]'::jsonb`,
-		"model_pricing":                `model_pricing = '[]'::jsonb`,
+		"model_pricing":                `model_pricing = '[{"model":"cache-test"}]'::jsonb`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			clear()
