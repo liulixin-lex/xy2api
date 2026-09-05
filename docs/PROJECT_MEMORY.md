@@ -26,8 +26,8 @@ Sub2API `v0.2.0` 同步、自动化修复、RC 验证和 XY2API `v0.0.3` 正式�
 
 - 请求/目标：按仓库标准全流程同步 Sub2API 最新正式版 `v0.2.1`，完成审计、PR 合入、RC/正式发布验证与收尾。
 - 开始状态：本地 `main` 为 `90c46b18dcc0e2146e2e210d6e6b633cfaef07ef`，与本地记录的 `origin/main` 一致，工作树干净；XY2API `0.0.3` / Sub2API compat `0.2.0`；`doctor.py --strict` 通过；上游 GitHub 最新 Release 初步核实为 2026-09-05 发布的 `v0.2.1`。
-- 当前阶段：预备 PR #9 已以 merge commit `c646220e842526aa7edcf943127086049d463ffa` 合入；同步分支已完成受控 merge、模块路径归一化和 9 个冲突逐项裁决。4 个 migration 均为追加项，旧 277 条 checksum 保持不变，新增 checksum 已用 Perl/sha256sum 独立复算；产品候选版本为 `0.0.4-rc.1`，兼容基线为 `0.2.1`。命名空间标签和分支已推送，Draft 同步 PR 为 [#10](https://github.com/liulixin-lex/xy2api/pull/10)。
-- 卡点/风险：无代码阻塞。Go 1.27.0 容器中首次 Ent 编译因 4 GiB 环境内存被 SIGKILL；单并发重试时 Ent 与首轮 Wire 生成成功且产物零差异，随后 `go generate ./cmd/server` 因仓库两个 Wire directive 重复执行，第二轮 Wire 编译再次被 SIGKILL。该环境性失败需在 CI 固定环境中复核完整生成与测试门禁。
+- 当前阶段：预备 PR #9 已以 merge commit `c646220e842526aa7edcf943127086049d463ffa` 合入；同步分支已完成受控 merge、模块路径归一化和 9 个冲突逐项裁决。4 个 migration 均为追加项，旧 277 条 checksum 保持不变，新增 checksum 已用 Perl/sha256sum 独立复算；产品候选版本为 `0.0.4-rc.1`，兼容基线为 `0.2.1`。命名空间标签和分支已推送，Draft 同步 PR 为 [#10](https://github.com/liulixin-lex/xy2api/pull/10)；首轮 CI 发现 3 个归一化后 import 的 gofmt 问题，已按 Go 1.27.0 gofmt 修复。
+- 卡点/风险：无代码阻塞。Go 1.27.0 容器中首次 Ent 编译因 4 GiB 环境内存被 SIGKILL；单并发重试时 Ent 与首轮 Wire 生成成功且产物零差异，随后 `go generate ./cmd/server` 因仓库两个 Wire directive 重复执行，第二轮 Wire 编译再次被 SIGKILL。CI 会完整编译并运行测试/lint；生成零差异证据来自本地已成功完成的唯一 Ent 与 Wire 生成轮次。
 - 下一步：把真实 PR URL 固定到 provenance，等待 PR #10 完整 CI/安全检查；复核固定 head 后转 Ready、留下审计记录并以 merge commit 合入，再执行 RC 验证。
 
 ## 当前重要事项

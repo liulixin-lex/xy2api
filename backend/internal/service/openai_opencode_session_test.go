@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
-	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
