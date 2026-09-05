@@ -22,7 +22,13 @@ Sub2API `v0.2.0` 同步、自动化修复、RC 验证和 XY2API `v0.0.3` 正式�
 
 ## 进行中的工作
 
-当前无进行中的仓库任务。
+### 2026-09-05T11:08:15Z — `20260905-full-upstream-sync-v0.2.1` — 进行中
+
+- 请求/目标：按仓库标准全流程同步 Sub2API 最新正式版 `v0.2.1`，完成审计、PR 合入、RC/正式发布验证与收尾。
+- 开始状态：本地 `main` 为 `90c46b18dcc0e2146e2e210d6e6b633cfaef07ef`，与本地记录的 `origin/main` 一致，工作树干净；XY2API `0.0.3` / Sub2API compat `0.2.0`；`doctor.py --strict` 通过；上游 GitHub 最新 Release 初步核实为 2026-09-05 发布的 `v0.2.1`。
+- 当前阶段：已显式核实 fork 无开放 PR，官方 `v0.2.1` Release 为非 draft、非 prerelease；远端 tag ref 是 annotated tag object `adc26f68f687685e847bfb997559f48e79cac475`，其目标 commit 初步为 `578785ee7fb35030b094b69624efe25670a36f5f`。尚未生成同步分支或修改业务代码。
+- 卡点/风险：无当前阻塞；仍需把固定标签抓取到命名空间、二次核验对象/签名/目标提交，并计算 merge base、影响范围、冲突和 migration。
+- 下一步：先通过文档 PR 保存本进行中记录，再从最新 `main` 固定标签、生成三方报告并按 policy 准备同步分支。
 
 ## 当前重要事项
 
