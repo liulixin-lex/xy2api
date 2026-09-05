@@ -1032,7 +1032,14 @@ export default {
         title: 'Per-model group pricing',
         description: 'Overrides channel and built-in prices for matching models. Long-context tiers come from official presets — do not enter custom intervals. Use per-request tiers such as realtime, tts, and stt for audio.',
         longContext: 'Enable long-context tier pricing',
-        longContextHint: 'When checked, channel intervals or official preset tiers apply. Otherwise the first tier is used unless the account explicitly enables long-context billing.',
+        longContextHint: 'Apply channel intervals and official preset tiers to all models or selected models.',
+        longContextScope: 'Applies to',
+        longContextScopeSelected: 'Selected models',
+        longContextScopeAll: 'All models',
+        longContextModels: 'Tier-priced models',
+        longContextModelsPlaceholder: 'Search or enter a model name',
+        longContextModelsHint: 'Supports exact names and trailing wildcards such as gpt-5.6-*. An empty list enables no models.',
+        removeLongContextModel: 'Remove {model}',
         add: 'Add model price'
       },
       voicePricing: {

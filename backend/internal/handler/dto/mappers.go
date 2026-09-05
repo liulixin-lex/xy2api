@@ -178,6 +178,10 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 }
 
 func groupFromServiceBase(g *service.Group) Group {
+	longContextPricingScope := g.LongContextPricingScope
+	if longContextPricingScope == "" {
+		longContextPricingScope = service.LongContextPricingScopeAll
+	}
 	return Group{
 		ID:                              g.ID,
 		Name:                            g.Name,
@@ -191,6 +195,8 @@ func groupFromServiceBase(g *service.Group) Group {
 		WeeklyLimitUSD:                  g.WeeklyLimitUSD,
 		MonthlyLimitUSD:                 g.MonthlyLimitUSD,
 		LongContextPricingEnabled:       g.LongContextPricingEnabled,
+		LongContextPricingScope:         longContextPricingScope,
+		LongContextPricingModels:        append([]string{}, g.LongContextPricingModels...),
 		AllowImageGeneration:            g.AllowImageGeneration,
 		AllowBatchImageGeneration:       g.AllowBatchImageGeneration,
 		ImageRateIndependent:            g.ImageRateIndependent,

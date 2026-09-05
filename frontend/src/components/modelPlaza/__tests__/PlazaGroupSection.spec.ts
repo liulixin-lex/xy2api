@@ -100,6 +100,16 @@ describe('PlazaGroupSection 长上下文说明', () => {
     expect(wrapper.text()).not.toContain(NOTE)
   })
 
+  it('指定模式下部分模型使用基础档时显示部分启用说明', () => {
+    const model = ladderModel(2)
+    model.long_context_pricing_enabled = false
+    const wrapper = mountSection(group({
+      long_context_pricing_enabled: true,
+      models: [model]
+    }))
+    expect(wrapper.text()).toContain('modelPlaza.detail.longContextPartialNote')
+  })
+
   it('分组关闭但没有官方阶梯模型时不显示', () => {
     const wrapper = mountSection(
       group({ long_context_pricing_enabled: false, models: [ladderModel(1)] })

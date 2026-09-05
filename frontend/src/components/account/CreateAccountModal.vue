@@ -3845,7 +3845,7 @@ import Toggle from '@/components/common/Toggle.vue'
 import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
 import CnBaseUrlPresets from '@/components/account/CnBaseUrlPresets.vue'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
-import { allSelectedGroupsEnableLongContextPricing } from '@/components/account/longContextBilling'
+import { accountLongContextOverrideHasNoEffect } from '@/components/account/longContextBilling'
 import {
   applyAntigravityProjectID,
   applyHeaderOverride,
@@ -3980,7 +3980,7 @@ const emit = defineEmits<{
 const appStore = useAppStore()
 
 const hideAccountLongContextBilling = computed(() => {
-  return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
+  return accountLongContextOverrideHasNoEffect(form.group_ids, props.groups)
 })
 
 // OAuth composables

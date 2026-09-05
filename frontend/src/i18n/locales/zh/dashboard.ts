@@ -628,7 +628,8 @@ export default {
       noModels: '该分组暂未配置模型',
       noPricing: '未配置定价',
       peakNote: '高峰时段 {window} 计费倍率 ×{multiplier}',
-      longContextDisabledNote: '该分组未启用长上下文阶梯计费，超阈值请求仍按基础档计费，官方阶梯仅供参考'
+      longContextDisabledNote: '该分组未启用长上下文阶梯计费，超阈值请求仍按基础档计费，官方阶梯仅供参考',
+      longContextPartialNote: '仅指定模型启用长上下文阶梯计费，其他模型按基础档计费；官方阶梯仅供参考'
     },
     table: {
       model: '模型',

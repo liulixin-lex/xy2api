@@ -1515,6 +1515,14 @@
             <input v-model="createForm.long_context_pricing_enabled" type="checkbox" class="mt-0.5" />
             <span><span class="block text-sm text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.longContext") }}</span><span class="block text-xs text-gray-500">{{ t("admin.groups.modelPricing.longContextHint") }}</span></span>
           </label>
+          <LongContextPricingFields
+            v-if="createForm.long_context_pricing_enabled"
+            v-model:scope="createForm.long_context_pricing_scope"
+            v-model:models="createForm.long_context_pricing_models"
+            input-id="create-long-context-models"
+            :candidates="createLongContextCandidates"
+            :loading="createModelsListLoading"
+          />
           <div class="mt-3 space-y-2">
             <PricingEntryCard v-for="(entry, index) in createForm.model_pricing" :key="index" :entry="entry" :platform="createForm.platform" hide-token-intervals @update="createForm.model_pricing[index] = $event" @remove="createForm.model_pricing.splice(index, 1)" />
           </div>
@@ -3321,6 +3329,14 @@
             <input v-model="editForm.long_context_pricing_enabled" type="checkbox" class="mt-0.5" />
             <span><span class="block text-sm text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.longContext") }}</span><span class="block text-xs text-gray-500">{{ t("admin.groups.modelPricing.longContextHint") }}</span></span>
           </label>
+          <LongContextPricingFields
+            v-if="editForm.long_context_pricing_enabled"
+            v-model:scope="editForm.long_context_pricing_scope"
+            v-model:models="editForm.long_context_pricing_models"
+            input-id="edit-long-context-models"
+            :candidates="editLongContextCandidates"
+            :loading="editModelsListLoading"
+          />
           <div class="mt-3 space-y-2">
             <PricingEntryCard v-for="(entry, index) in editForm.model_pricing" :key="index" :entry="entry" :platform="editForm.platform" hide-token-intervals @update="editForm.model_pricing[index] = $event" @remove="editForm.model_pricing.splice(index, 1)" />
           </div>
@@ -4579,6 +4595,7 @@ import type {
   CompositeRouteEndpoint,
   CompositeRouteMatchType,
   GroupPlatform,
+  LongContextPricingScope,
   SubscriptionType,
 } from "@/types";
 import {
@@ -4601,6 +4618,7 @@ import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesMo
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
+import LongContextPricingFields from "@/components/admin/group/LongContextPricingFields.vue";
 import PricingEntryCard from "@/components/admin/channel/PricingEntryCard.vue";
 import type { PricingFormEntry } from "@/components/admin/channel/types";
 import {
@@ -5209,6 +5227,12 @@ const createModelsListSelectedCount = computed(
 const editModelsListSelectedCount = computed(
   () => editModelsListState.items.filter((item) => item.selected).length,
 );
+const createLongContextCandidates = computed(() =>
+  createModelsListState.items.map((item) => item.id),
+);
+const editLongContextCandidates = computed(() =>
+  editModelsListState.items.map((item) => item.id),
+);
 
 const createForm = reactive({
   name: "",
@@ -5220,7 +5244,9 @@ const createForm = reactive({
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
-  long_context_pricing_enabled: true,
+  long_context_pricing_enabled: false,
+  long_context_pricing_scope: "selected" as LongContextPricingScope,
+  long_context_pricing_models: [] as string[],
   force_openai_fast: false,
   free_openai_fast: false,
   model_pricing: [] as PricingFormEntry[],
@@ -5585,6 +5611,8 @@ const editForm = reactive({
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
   long_context_pricing_enabled: true,
+  long_context_pricing_scope: "all" as LongContextPricingScope,
+  long_context_pricing_models: [] as string[],
   force_openai_fast: false,
   free_openai_fast: false,
   model_pricing: [] as PricingFormEntry[],
@@ -6061,7 +6089,9 @@ const closeCreateModal = () => {
   createForm.video_price_720p = null;
   createForm.video_price_1080p = null;
   createForm.video_model_prices = createVideoModelPricesForm();
-  createForm.long_context_pricing_enabled = true;
+  createForm.long_context_pricing_enabled = false;
+  createForm.long_context_pricing_scope = "selected";
+  createForm.long_context_pricing_models = [];
   createForm.force_openai_fast = false;
   createForm.free_openai_fast = false;
   createForm.model_pricing = [];
@@ -6303,6 +6333,11 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.monthly_limit_usd = group.monthly_limit_usd;
   editForm.long_context_pricing_enabled =
     group.long_context_pricing_enabled ?? true;
+  editForm.long_context_pricing_scope =
+    group.long_context_pricing_scope ?? "all";
+  editForm.long_context_pricing_models = [
+    ...(group.long_context_pricing_models ?? []),
+  ];
   editForm.force_openai_fast = group.force_openai_fast ?? false;
   editForm.free_openai_fast = group.free_openai_fast ?? false;
   editForm.model_pricing = groupPricingFromAPI(group.model_pricing);
@@ -6437,6 +6472,8 @@ const closeEditModal = () => {
   editForm.video_price_1080p = null;
   editForm.video_model_prices = createVideoModelPricesForm();
   editForm.long_context_pricing_enabled = true;
+  editForm.long_context_pricing_scope = "all";
+  editForm.long_context_pricing_models = [];
   editForm.force_openai_fast = false;
   editForm.free_openai_fast = false;
   editForm.model_pricing = [];

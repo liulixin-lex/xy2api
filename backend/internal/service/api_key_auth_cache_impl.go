@@ -14,7 +14,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 )
 
-const apiKeyAuthSnapshotVersion = 23 // v23: group codex_models_manifest_config field
+const apiKeyAuthSnapshotVersion = 24 // v24: group model-scoped long-context pricing fields
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -408,6 +408,8 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			AudioTTSPricePerMillionChars:    apiKey.Group.AudioTTSPricePerMillionChars,
 			AudioSTTPricePerHour:            apiKey.Group.AudioSTTPricePerHour,
 			LongContextPricingEnabled:       apiKey.Group.LongContextPricingEnabled,
+			LongContextPricingScope:         apiKey.Group.LongContextPricingScope,
+			LongContextPricingModels:        append([]string(nil), apiKey.Group.LongContextPricingModels...),
 			ModelPricing:                    apiKey.Group.ModelPricing,
 			ClaudeCodeOnly:                  apiKey.Group.ClaudeCodeOnly,
 			FallbackGroupID:                 apiKey.Group.FallbackGroupID,
@@ -510,6 +512,8 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			AudioTTSPricePerMillionChars:    snapshot.Group.AudioTTSPricePerMillionChars,
 			AudioSTTPricePerHour:            snapshot.Group.AudioSTTPricePerHour,
 			LongContextPricingEnabled:       snapshot.Group.LongContextPricingEnabled,
+			LongContextPricingScope:         snapshot.Group.LongContextPricingScope,
+			LongContextPricingModels:        append([]string(nil), snapshot.Group.LongContextPricingModels...),
 			ModelPricing:                    snapshot.Group.ModelPricing,
 			ClaudeCodeOnly:                  snapshot.Group.ClaudeCodeOnly,
 			FallbackGroupID:                 snapshot.Group.FallbackGroupID,

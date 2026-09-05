@@ -127,6 +127,7 @@ func TestToModelPlazaGroupDTO_UserRateAndFieldWhitelist(t *testing.T) {
 	model := models[0].(map[string]any)
 	require.Contains(t, model, "pricing")
 	require.Contains(t, model, "official_pricing")
+	require.Contains(t, model, "long_context_pricing_enabled")
 	official := model["official_pricing"].(map[string]any)
 	require.Contains(t, official, "input_price")
 	require.Contains(t, official, "cache_read_price")
@@ -159,8 +160,9 @@ func TestToModelPlazaGroupDTO_LongContextTiersAndBasis(t *testing.T) {
 		ID: 3, Name: "ladder", Platform: "openai", SubscriptionType: "standard", RateMultiplier: 1,
 		LongContextPricingEnabled: true,
 		Models: []service.PlazaModel{{
-			Name:     "gpt-5.4",
-			Platform: "openai",
+			Name:                      "gpt-5.4",
+			Platform:                  "openai",
+			LongContextPricingEnabled: true,
 			Pricing: &service.ChannelModelPricing{
 				BillingMode: service.BillingModeToken,
 				InputPrice:  testPtr(2.5e-6),
@@ -187,6 +189,7 @@ func TestToModelPlazaGroupDTO_LongContextTiersAndBasis(t *testing.T) {
 	require.Equal(t, true, decoded["long_context_pricing_enabled"])
 
 	model := decoded["models"].([]any)[0].(map[string]any)
+	require.Equal(t, true, model["long_context_pricing_enabled"])
 	require.Equal(t, "whole_request", model["long_context_basis"])
 
 	pricing := model["pricing"].(map[string]any)

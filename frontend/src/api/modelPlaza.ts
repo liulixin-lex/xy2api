@@ -49,6 +49,8 @@ export interface PlazaModel {
   /** 实收口径的展示定价：多档时 intervals 为各档绝对单价（已由计费服务折算）；均为标准时段价。 */
   pricing: UserSupportedModelPricing | null
   official_pricing: PlazaOfficialPricing | null
+  /** 该分组中这个模型是否实际启用长上下文阶梯计费。 */
+  long_context_pricing_enabled?: boolean
   /** 仅多档模型返回。 */
   long_context_basis?: PlazaLongContextBasis
   /** 仅配置了分时倍率的模型返回。 */

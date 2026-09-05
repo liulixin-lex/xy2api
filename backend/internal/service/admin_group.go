@@ -323,6 +323,13 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	if err != nil {
 		return nil, err
 	}
+	longContextPricingScope, longContextPricingModels, err := NormalizeLongContextPricingConfig(
+		input.LongContextPricingScope,
+		input.LongContextPricingModels,
+	)
+	if err != nil {
+		return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_LONG_CONTEXT_PRICING_CONFIG", "%v", err)
+	}
 	maxReasoningEffort, err := normalizeMaxReasoningEffortForPlatform(platform, input.MaxReasoningEffort)
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_MAX_REASONING_EFFORT", "%v", err)
@@ -486,6 +493,8 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		WeeklyLimitUSD:                  weeklyLimit,
 		MonthlyLimitUSD:                 monthlyLimit,
 		LongContextPricingEnabled:       input.LongContextPricingEnabled,
+		LongContextPricingScope:         longContextPricingScope,
+		LongContextPricingModels:        longContextPricingModels,
 		ModelPricing:                    modelPricing,
 		AllowImageGeneration:            allowImageGeneration,
 		AllowBatchImageGeneration:       allowBatchImageGeneration,
@@ -696,6 +705,21 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.LongContextPricingEnabled != nil {
 		group.LongContextPricingEnabled = *input.LongContextPricingEnabled
+	}
+	if input.LongContextPricingScope != nil || input.LongContextPricingModels != nil {
+		scope := group.LongContextPricingScope
+		models := group.LongContextPricingModels
+		if input.LongContextPricingScope != nil {
+			scope = *input.LongContextPricingScope
+		}
+		if input.LongContextPricingModels != nil {
+			models = *input.LongContextPricingModels
+		}
+		var normalizeErr error
+		group.LongContextPricingScope, group.LongContextPricingModels, normalizeErr = NormalizeLongContextPricingConfig(scope, models)
+		if normalizeErr != nil {
+			return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_LONG_CONTEXT_PRICING_CONFIG", "%v", normalizeErr)
+		}
 	}
 	if input.ModelPricing != nil {
 		modelPricing, normalizeErr := normalizeGroupModelPricing(group.Platform, *input.ModelPricing)

@@ -80,13 +80,17 @@ func TestAuthCacheInvalidationTrigger_ProfitControlColumns(t *testing.T) {
 	require.Zero(t, count(), "利润字段无实际变化的 UPDATE 不得入队")
 
 	for name, update := range map[string]string{
-		"platform":             "platform = 'anthropic'",
-		"subscription_type":    "subscription_type = 'subscription'",
-		"rate_multiplier":      "rate_multiplier = 0.9",
-		"peak_rate_enabled":    "peak_rate_enabled = true",
-		"peak_start":           "peak_start = '08:00'",
-		"peak_end":             "peak_end = '09:00'",
-		"peak_rate_multiplier": "peak_rate_multiplier = 1.2",
+		"platform":                     "platform = 'anthropic'",
+		"subscription_type":            "subscription_type = 'subscription'",
+		"rate_multiplier":              "rate_multiplier = 0.9",
+		"peak_rate_enabled":            "peak_rate_enabled = true",
+		"peak_start":                   "peak_start = '08:00'",
+		"peak_end":                     "peak_end = '09:00'",
+		"peak_rate_multiplier":         "peak_rate_multiplier = 1.2",
+		"long_context_pricing_enabled": "long_context_pricing_enabled = NOT long_context_pricing_enabled",
+		"long_context_pricing_scope":   "long_context_pricing_scope = 'selected'",
+		"long_context_pricing_models":  `long_context_pricing_models = '["gpt-5.6-*"]'::jsonb`,
+		"model_pricing":                `model_pricing = '[{"model":"cache-test"}]'::jsonb`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			clear()

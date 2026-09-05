@@ -201,6 +201,63 @@ func TestAdminService_UpdateGroup_RejectsTimePricing(t *testing.T) {
 	require.Nil(t, repo.updated)
 }
 
+func TestAdminService_CreateGroup_LongContextPricingCompatibility(t *testing.T) {
+	t.Run("omitted new fields keep legacy all-model scope", func(t *testing.T) {
+		repo := &groupRepoStubForAdmin{}
+		svc := &adminServiceImpl{groupRepo: repo}
+
+		created, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+			Name:                      "legacy-client-group",
+			Platform:                  PlatformOpenAI,
+			RateMultiplier:            1,
+			LongContextPricingEnabled: true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, LongContextPricingScopeAll, created.LongContextPricingScope)
+		require.Empty(t, created.LongContextPricingModels)
+	})
+
+	t.Run("selected patterns are normalized and deduplicated", func(t *testing.T) {
+		repo := &groupRepoStubForAdmin{}
+		svc := &adminServiceImpl{groupRepo: repo}
+
+		created, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+			Name:                      "selected-model-group",
+			Platform:                  PlatformOpenAI,
+			RateMultiplier:            1,
+			LongContextPricingEnabled: true,
+			LongContextPricingScope:   LongContextPricingScopeSelected,
+			LongContextPricingModels:  []string{" GPT-5.6-* ", "gpt-5.6-*", "gpt-6-astra"},
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, LongContextPricingScopeSelected, created.LongContextPricingScope)
+		require.Equal(t, []string{"gpt-5.6-*", "gpt-6-astra"}, created.LongContextPricingModels)
+	})
+}
+
+func TestAdminService_UpdateGroup_LongContextPricingPartialUpdate(t *testing.T) {
+	existing := &Group{
+		ID:                        1,
+		Name:                      "selected-model-group",
+		Platform:                  PlatformOpenAI,
+		Status:                    StatusActive,
+		LongContextPricingEnabled: true,
+		LongContextPricingScope:   LongContextPricingScopeSelected,
+		LongContextPricingModels:  []string{"gpt-5.6-*"},
+	}
+	repo := &groupRepoStubForAdmin{getByID: existing}
+	svc := &adminServiceImpl{groupRepo: repo}
+	description := "description-only update"
+
+	updated, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{Description: &description})
+
+	require.NoError(t, err)
+	require.Equal(t, LongContextPricingScopeSelected, updated.LongContextPricingScope)
+	require.Equal(t, []string{"gpt-5.6-*"}, updated.LongContextPricingModels)
+}
+
 func TestNormalizeGroupModelPricing_NormalizesEmptyTimePricing(t *testing.T) {
 	pricing, err := normalizeGroupModelPricing(PlatformOpenAI, []ChannelModelPricing{{
 		Models:      []string{"gpt-5"},

@@ -1175,6 +1175,37 @@ func TestCalculateCostUnified_GroupLongContextToggleUsesPresetLadder(t *testing.
 	require.InDelta(t, disabled.OutputCost*2, enabled.OutputCost, 1e-12)
 }
 
+func TestCalculateCostUnified_SelectedModelsCannotBeOverriddenByAccount(t *testing.T) {
+	svc := newTestBillingServiceWithOpenAILadderCatalog(t)
+	resolver := NewModelPricingResolver(nil, svc)
+	tokens := UsageTokens{InputTokens: 300000, OutputTokens: 2000}
+	accountEnabled := true
+	group := &Group{
+		LongContextPricingEnabled: true,
+		LongContextPricingScope:   LongContextPricingScopeSelected,
+		LongContextPricingModels:  []string{"gpt-5.6-*"},
+	}
+
+	notSelected, err := svc.CalculateCostUnified(CostInput{
+		Model: "gpt-5.4", Group: group, Tokens: tokens, RateMultiplier: 1, Resolver: resolver,
+		LongContextBillingEnabled: &accountEnabled,
+	})
+	require.NoError(t, err)
+	require.False(t, notSelected.LongContextBillingApplied)
+	require.InDelta(t, 300000*2.5e-6, notSelected.InputCost, 1e-10)
+	require.InDelta(t, 2000*15e-6, notSelected.OutputCost, 1e-10)
+
+	group.LongContextPricingModels = []string{"gpt-5.4*"}
+	selected, err := svc.CalculateCostUnified(CostInput{
+		Model: "gpt-5.4", Group: group, Tokens: tokens, RateMultiplier: 1, Resolver: resolver,
+		LongContextBillingEnabled: &accountEnabled,
+	})
+	require.NoError(t, err)
+	require.True(t, selected.LongContextBillingApplied)
+	require.InDelta(t, notSelected.InputCost*2, selected.InputCost, 1e-10)
+	require.InDelta(t, notSelected.OutputCost*1.5, selected.OutputCost, 1e-10)
+}
+
 func TestGetModelPricing_UnknownGrokTextFallsBackToGrok46(t *testing.T) {
 	svc := newTestBillingService()
 	baseline, err := svc.GetModelPricing("grok-4.6")

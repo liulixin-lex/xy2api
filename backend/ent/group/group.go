@@ -96,6 +96,10 @@ const (
 	FieldAudioSttPricePerHour = "audio_stt_price_per_hour"
 	// FieldLongContextPricingEnabled holds the string denoting the long_context_pricing_enabled field in the database.
 	FieldLongContextPricingEnabled = "long_context_pricing_enabled"
+	// FieldLongContextPricingScope holds the string denoting the long_context_pricing_scope field in the database.
+	FieldLongContextPricingScope = "long_context_pricing_scope"
+	// FieldLongContextPricingModels holds the string denoting the long_context_pricing_models field in the database.
+	FieldLongContextPricingModels = "long_context_pricing_models"
 	// FieldModelPricing holds the string denoting the model_pricing field in the database.
 	FieldModelPricing = "model_pricing"
 	// FieldClaudeCodeOnly holds the string denoting the claude_code_only field in the database.
@@ -263,6 +267,8 @@ var Columns = []string{
 	FieldAudioTtsPricePerMillionChars,
 	FieldAudioSttPricePerHour,
 	FieldLongContextPricingEnabled,
+	FieldLongContextPricingScope,
+	FieldLongContextPricingModels,
 	FieldModelPricing,
 	FieldClaudeCodeOnly,
 	FieldFallbackGroupID,
@@ -384,6 +390,10 @@ var (
 	AudioSttPricePerHourValidator func(float64) error
 	// DefaultLongContextPricingEnabled holds the default value on creation for the "long_context_pricing_enabled" field.
 	DefaultLongContextPricingEnabled bool
+	// DefaultLongContextPricingScope holds the default value on creation for the "long_context_pricing_scope" field.
+	DefaultLongContextPricingScope string
+	// DefaultLongContextPricingModels holds the default value on creation for the "long_context_pricing_models" field.
+	DefaultLongContextPricingModels []string
 	// DefaultClaudeCodeOnly holds the default value on creation for the "claude_code_only" field.
 	DefaultClaudeCodeOnly bool
 	// DefaultModelRoutingEnabled holds the default value on creation for the "model_routing_enabled" field.
@@ -637,6 +647,11 @@ func ByAudioSttPricePerHour(opts ...sql.OrderTermOption) OrderOption {
 // ByLongContextPricingEnabled orders the results by the long_context_pricing_enabled field.
 func ByLongContextPricingEnabled(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldLongContextPricingEnabled, opts...).ToFunc()
+}
+
+// ByLongContextPricingScope orders the results by the long_context_pricing_scope field.
+func ByLongContextPricingScope(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldLongContextPricingScope, opts...).ToFunc()
 }
 
 // ByClaudeCodeOnly orders the results by the claude_code_only field.

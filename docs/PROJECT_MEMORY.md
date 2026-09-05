@@ -4,25 +4,25 @@
 
 ## 当前交接状态
 
-最后更新：`2026-09-05T12:57:29Z`（UTC）
+最后更新：`2026-09-05T18:00:29Z`（UTC）
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
-| 当前分支 | 主线 `main`；读取时运行 `git branch --show-current` 核实本地检出分支 |
-| 当前 HEAD | `v0.0.4` 发布源提交为 `ae4c010d0a8aed750936b59655bf7ab8f85a777b`；`main` 另含本次发布后的文档收尾提交，读取时运行 `git rev-parse HEAD` 核实 |
-| 工作树 | 同步、发布和环境清理均已完成；交付时本地 `main` 与 `origin/main` 一致且工作树干净 |
+| 当前分支 | `feat/group-model-long-context-pricing` |
+| 当前 HEAD | `078820857b1c3036769777a7956d17dba431d464`；本次功能尚未提交 |
+| 工作树 | 分组按模型启用长上下文阶梯计费已实现并完成本地验证；业务、迁移、Ent 生成代码、前端和本记忆文件存在未提交改动 |
 | XY2API 产品版本 | `0.0.4`；当前正式 Release 为 `v0.0.4` |
 | `main` 已审计 Sub2API 基线 | `v0.2.1` / commit `578785ee7fb35030b094b69624efe25670a36f5f` |
 | 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，同步 PR `#10` 已通过 merge commit 合入 |
 | 本地远端 | `origin` 可读写；`upstream` 仅允许 fetch，push URL 为 `DISABLED` |
-| 当前环境工具 | `git`、`python3 3.12.3`、`gh`、Docker、Node 可用；`python` 命令别名、Go、pnpm 不可用 |
+| 当前环境工具 | `git`、`python3 3.12.3`、`gh`、Docker、Node、Corepack 可用；本地无 Go、pnpm 命令，已用 Go 1.27 Docker 与 Corepack pnpm 10.28.0 完成验证 |
 
-Sub2API `v0.2.1` 同步、冲突裁决、RC 验证和 XY2API `v0.0.4` 正式发布已完成。当前无已知同步或发布阻塞；外部状态仍应在后续任务开始时重新核实。
+Sub2API `v0.2.1` 同步、冲突裁决、RC 验证和 XY2API `v0.0.4` 正式发布已完成。分组按模型启用长上下文阶梯计费已在特性分支完成实现和验证，等待代码审查与提交；外部状态仍应在后续任务开始时重新核实。
 
 ## 进行中的工作
 
-当前无进行中的工作。
+- `20260905-release-group-model-long-context-pricing`：已获授权将分组按模型启用长上下文阶梯计费功能规范提交、推送并发布为 XY2API `v0.0.5`；当前从特性分支提交与 PR 流程开始，兼容基线保持 Sub2API `v0.2.1`。
 
 ## 当前重要事项
 
@@ -219,3 +219,13 @@ pnpm --dir frontend run build
 - 验证：同步/升级预检 10/10；strict doctor、provenance/compatibility audit、diff/冲突标记、Compose、祖先关系与 migration checksum 通过；PR #10、#11 各 16/16 checks；正式 merge 主线 CI/安全扫描通过；RC/正式 Release runs `33964718089`、`33966678769` 成功；两版各 5 个资产 SHA256、GHCR amd64/arm64 和 OCI 标签通过；RC 全新安装、`v0.0.3` 原地升级、旧镜像回切及正式版全新安装通过。
 - 卡点/风险：无已知阻塞。Go 1.27.0 容器中完整重复生成受 4 GiB 内存限制曾被 SIGKILL，但单并发唯一 Ent/Wire 生成成功且产物零差异，CI 编译、测试与 lint 均通过。4 个新 migration 为 additive，旧镜像回切已验证；生产数据库回滚仍应使用升级前备份，不宣称 SQL 自动降级。同步 merge 的一次主线集成测试因 Docker Hub 拉取 Ryuk 时连接重置失败，后续三套等价集成测试均成功。
 - 下一步：无。后续维护应保留 `sub2api/v0.2.1`、`v0.0.4-rc.1`、`v0.0.4` 标签，并从本文件、`UPSTREAM_BASE.json` 与 GitHub Release 重新核实动态状态。
+
+### 2026-09-05T17:02:30Z — `20260905-group-model-long-context-pricing` — 完成
+
+- 请求/目标：让分组只对指定模型启用长上下文阶梯计费，并让实际扣费、认证缓存与模型广场实付价格保持一致；支持精确名和末尾 `*` 前缀匹配，旧分组继续按全部模型处理。
+- 开始状态：从干净 `main` 的 `078820857b1c3036769777a7956d17dba431d464` 新建 `feat/group-model-long-context-pricing`；本地无 Go、pnpm 命令，Docker、Node 与 Corepack 可用。
+- 完成操作：新增分组范围和模型名单字段、迁移与 Ent 生成代码；在统一定价解析层实现模型匹配和账号开关约束，并覆盖统一、OpenAI 旧计费与模型广场链路；更新认证查询、快照版本和数据库失效触发器；创建、编辑、读取、复制分组完整传递配置；新增管理表单的范围选择、搜索/手动模型标签输入及模型广场部分启用说明。
+- 修改文件：后端涉及 `backend/ent/schema/group.go`、生成的 `backend/ent/`、`backend/migrations/235_group_long_context_pricing_models.sql`、分组管理/仓储/认证缓存/计费/模型广场服务及测试；前端涉及分组类型与管理页、新增 `LongContextPricingFields.vue`、账号提示逻辑、模型广场说明和中英文文案；同步更新本记忆文件。
+- 验证：Go 1.27 Docker 下完整 `internal/service` 单测通过，新增定向 service 测试通过，`internal/handler`、`internal/repository`、`internal/server`、`migrations` 单测通过，真实 PostgreSQL 集成测试 `TestAuthCacheInvalidationTrigger_ProfitControlColumns` 通过；前端定向 14/14 测试、类型检查、全量 lint 和生产构建通过；Ent 再生成前后差异 SHA256 均为 `f16ec3a90a0b20689a0ff7d12430396d98e43dc5d2263a6efb190767fbe33ddd`；新增迁移 checksum 复算一致；Playwright Chromium 在 1440×1000/1100×760 桌面和 390×844 移动视口检查模型广场与真实表单组件，无重叠或布局回归。
+- 卡点/风险：无功能阻塞。默认 Go 编译在 4 GiB 环境中曾因超大 Ent 包被 SIGKILL，改用单并发、关闭测试阶段 vet、禁用内联并降低 GC 阈值后全部通过；Impeccable detector 仅报告 `GroupsView.vue` 四处既有红底灰字警告，本次新增组件无命中。
+- 下一步：审查并提交当前特性分支；本任务未推送、未发布、未部署。

@@ -250,6 +250,11 @@ func LongContextPricingEnabled(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldLongContextPricingEnabled, v))
 }
 
+// LongContextPricingScope applies equality check predicate on the "long_context_pricing_scope" field. It's identical to LongContextPricingScopeEQ.
+func LongContextPricingScope(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldLongContextPricingScope, v))
+}
+
 // ClaudeCodeOnly applies equality check predicate on the "claude_code_only" field. It's identical to ClaudeCodeOnlyEQ.
 func ClaudeCodeOnly(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldClaudeCodeOnly, v))
@@ -2073,6 +2078,71 @@ func LongContextPricingEnabledEQ(v bool) predicate.Group {
 // LongContextPricingEnabledNEQ applies the NEQ predicate on the "long_context_pricing_enabled" field.
 func LongContextPricingEnabledNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldLongContextPricingEnabled, v))
+}
+
+// LongContextPricingScopeEQ applies the EQ predicate on the "long_context_pricing_scope" field.
+func LongContextPricingScopeEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldLongContextPricingScope, v))
+}
+
+// LongContextPricingScopeNEQ applies the NEQ predicate on the "long_context_pricing_scope" field.
+func LongContextPricingScopeNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldLongContextPricingScope, v))
+}
+
+// LongContextPricingScopeIn applies the In predicate on the "long_context_pricing_scope" field.
+func LongContextPricingScopeIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldLongContextPricingScope, vs...))
+}
+
+// LongContextPricingScopeNotIn applies the NotIn predicate on the "long_context_pricing_scope" field.
+func LongContextPricingScopeNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldLongContextPricingScope, vs...))
+}
+
+// LongContextPricingScopeGT applies the GT predicate on the "long_context_pricing_scope" field.
+func LongContextPricingScopeGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldLongContextPricingScope, v))
+}
+
+// LongContextPricingScopeGTE applies the GTE predicate on the "long_context_pricing_scope" field.
+func LongContextPricingScopeGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldLongContextPricingScope, v))
+}
+
+// LongContextPricingScopeLT applies the LT predicate on the "long_context_pricing_scope" field.
+func LongContextPricingScopeLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldLongContextPricingScope, v))
+}
+
+// LongContextPricingScopeLTE applies the LTE predicate on the "long_context_pricing_scope" field.
+func LongContextPricingScopeLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldLongContextPricingScope, v))
+}
+
+// LongContextPricingScopeContains applies the Contains predicate on the "long_context_pricing_scope" field.
+func LongContextPricingScopeContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldLongContextPricingScope, v))
+}
+
+// LongContextPricingScopeHasPrefix applies the HasPrefix predicate on the "long_context_pricing_scope" field.
+func LongContextPricingScopeHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldLongContextPricingScope, v))
+}
+
+// LongContextPricingScopeHasSuffix applies the HasSuffix predicate on the "long_context_pricing_scope" field.
+func LongContextPricingScopeHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldLongContextPricingScope, v))
+}
+
+// LongContextPricingScopeEqualFold applies the EqualFold predicate on the "long_context_pricing_scope" field.
+func LongContextPricingScopeEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldLongContextPricingScope, v))
+}
+
+// LongContextPricingScopeContainsFold applies the ContainsFold predicate on the "long_context_pricing_scope" field.
+func LongContextPricingScopeContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldLongContextPricingScope, v))
 }
 
 // ModelPricingIsNil applies the IsNil predicate on the "model_pricing" field.

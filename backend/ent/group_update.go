@@ -802,6 +802,32 @@ func (_u *GroupUpdate) SetNillableLongContextPricingEnabled(v *bool) *GroupUpdat
 	return _u
 }
 
+// SetLongContextPricingScope sets the "long_context_pricing_scope" field.
+func (_u *GroupUpdate) SetLongContextPricingScope(v string) *GroupUpdate {
+	_u.mutation.SetLongContextPricingScope(v)
+	return _u
+}
+
+// SetNillableLongContextPricingScope sets the "long_context_pricing_scope" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableLongContextPricingScope(v *string) *GroupUpdate {
+	if v != nil {
+		_u.SetLongContextPricingScope(*v)
+	}
+	return _u
+}
+
+// SetLongContextPricingModels sets the "long_context_pricing_models" field.
+func (_u *GroupUpdate) SetLongContextPricingModels(v []string) *GroupUpdate {
+	_u.mutation.SetLongContextPricingModels(v)
+	return _u
+}
+
+// AppendLongContextPricingModels appends value to the "long_context_pricing_models" field.
+func (_u *GroupUpdate) AppendLongContextPricingModels(v []string) *GroupUpdate {
+	_u.mutation.AppendLongContextPricingModels(v)
+	return _u
+}
+
 // SetModelPricing sets the "model_pricing" field.
 func (_u *GroupUpdate) SetModelPricing(v jsontext.Value) *GroupUpdate {
 	_u.mutation.SetModelPricing(v)
@@ -1793,6 +1819,17 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.LongContextPricingEnabled(); ok {
 		_spec.SetField(group.FieldLongContextPricingEnabled, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.LongContextPricingScope(); ok {
+		_spec.SetField(group.FieldLongContextPricingScope, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.LongContextPricingModels(); ok {
+		_spec.SetField(group.FieldLongContextPricingModels, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedLongContextPricingModels(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, group.FieldLongContextPricingModels, value)
+		})
 	}
 	if value, ok := _u.mutation.ModelPricing(); ok {
 		_spec.SetField(group.FieldModelPricing, field.TypeJSON, value)
@@ -2996,6 +3033,32 @@ func (_u *GroupUpdateOne) SetNillableLongContextPricingEnabled(v *bool) *GroupUp
 	return _u
 }
 
+// SetLongContextPricingScope sets the "long_context_pricing_scope" field.
+func (_u *GroupUpdateOne) SetLongContextPricingScope(v string) *GroupUpdateOne {
+	_u.mutation.SetLongContextPricingScope(v)
+	return _u
+}
+
+// SetNillableLongContextPricingScope sets the "long_context_pricing_scope" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableLongContextPricingScope(v *string) *GroupUpdateOne {
+	if v != nil {
+		_u.SetLongContextPricingScope(*v)
+	}
+	return _u
+}
+
+// SetLongContextPricingModels sets the "long_context_pricing_models" field.
+func (_u *GroupUpdateOne) SetLongContextPricingModels(v []string) *GroupUpdateOne {
+	_u.mutation.SetLongContextPricingModels(v)
+	return _u
+}
+
+// AppendLongContextPricingModels appends value to the "long_context_pricing_models" field.
+func (_u *GroupUpdateOne) AppendLongContextPricingModels(v []string) *GroupUpdateOne {
+	_u.mutation.AppendLongContextPricingModels(v)
+	return _u
+}
+
 // SetModelPricing sets the "model_pricing" field.
 func (_u *GroupUpdateOne) SetModelPricing(v jsontext.Value) *GroupUpdateOne {
 	_u.mutation.SetModelPricing(v)
@@ -4017,6 +4080,17 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.LongContextPricingEnabled(); ok {
 		_spec.SetField(group.FieldLongContextPricingEnabled, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.LongContextPricingScope(); ok {
+		_spec.SetField(group.FieldLongContextPricingScope, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.LongContextPricingModels(); ok {
+		_spec.SetField(group.FieldLongContextPricingModels, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedLongContextPricingModels(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, group.FieldLongContextPricingModels, value)
+		})
 	}
 	if value, ok := _u.mutation.ModelPricing(); ok {
 		_spec.SetField(group.FieldModelPricing, field.TypeJSON, value)

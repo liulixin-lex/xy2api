@@ -16,6 +16,11 @@ type GroupModelsListConfig = domain.GroupModelsListConfig
 type GroupCodexModelsManifestConfig = domain.GroupCodexModelsManifestConfig
 type ReasoningEffortMapping = domain.ReasoningEffortMapping
 
+const (
+	LongContextPricingScopeAll      = "all"
+	LongContextPricingScopeSelected = "selected"
+)
+
 type Group struct {
 	ID             int64
 	Name           string
@@ -72,8 +77,11 @@ type Group struct {
 	AudioSTTPricePerHour         *float64
 
 	// ModelPricing overrides channel and built-in prices for matching models.
-	// Token intervals are selected only when LongContextPricingEnabled is true.
+	// Long-context tiers apply to all models or only LongContextPricingModels,
+	// depending on LongContextPricingScope.
 	LongContextPricingEnabled bool
+	LongContextPricingScope   string
+	LongContextPricingModels  []string
 	ModelPricing              []ChannelModelPricing
 
 	// Claude Code 客户端限制

@@ -68,6 +68,8 @@ type modelPlazaModel struct {
 	Platform        string                     `json:"platform"`
 	Pricing         *userSupportedModelPricing `json:"pricing"`
 	OfficialPricing *modelPlazaOfficialPricing `json:"official_pricing"`
+	// LongContextPricingEnabled 表示实付价格是否按上下文长度分档。
+	LongContextPricingEnabled bool `json:"long_context_pricing_enabled"`
 	// LongContextBasis 多档时的计价基准："whole_request"（整单按档）| "marginal"（仅超出部分）。
 	LongContextBasis string `json:"long_context_basis,omitempty"`
 	// TimePricing 分时倍率时段，落在时段内的请求整单乘倍率；无分时省略。
@@ -189,12 +191,13 @@ func toModelPlazaGroupDTO(g *service.PlazaGroup, userRates map[int64]float64) mo
 	for i := range g.Models {
 		m := &g.Models[i]
 		models = append(models, modelPlazaModel{
-			Name:             m.Name,
-			Platform:         m.Platform,
-			Pricing:          toUserPricing(m.Pricing),
-			OfficialPricing:  toModelPlazaOfficialPricing(m.OfficialPricing),
-			LongContextBasis: string(m.LongContextBasis),
-			TimePricing:      toModelPlazaTimePricing(m.TimePricing),
+			Name:                      m.Name,
+			Platform:                  m.Platform,
+			Pricing:                   toUserPricing(m.Pricing),
+			OfficialPricing:           toModelPlazaOfficialPricing(m.OfficialPricing),
+			LongContextPricingEnabled: m.LongContextPricingEnabled,
+			LongContextBasis:          string(m.LongContextBasis),
+			TimePricing:               toModelPlazaTimePricing(m.TimePricing),
 		})
 	}
 	dto := modelPlazaGroup{
