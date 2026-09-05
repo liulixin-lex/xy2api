@@ -4,25 +4,25 @@
 
 ## 当前交接状态
 
-最后更新：`2026-09-05T18:00:29Z`（UTC）
+最后更新：`2026-09-05T18:26:58Z`（UTC）
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
-| 当前分支 | `feat/group-model-long-context-pricing` |
-| 当前 HEAD | `078820857b1c3036769777a7956d17dba431d464`；本次功能尚未提交 |
-| 工作树 | 分组按模型启用长上下文阶梯计费已实现并完成本地验证；业务、迁移、Ent 生成代码、前端和本记忆文件存在未提交改动 |
-| XY2API 产品版本 | `0.0.4`；当前正式 Release 为 `v0.0.4` |
+| 当前分支 | `release/v0.0.5` |
+| 当前 HEAD | `ab9ddee56ad238ec121fbbc9e60e446ad9e2b862`；功能 PR `#13` 已合入 `main` |
+| 工作树 | 正在准备 XY2API `v0.0.5` 版本晋级改动 |
+| XY2API 产品版本 | 目标 `0.0.5`；当前正式 Release 仍为 `v0.0.4` |
 | `main` 已审计 Sub2API 基线 | `v0.2.1` / commit `578785ee7fb35030b094b69624efe25670a36f5f` |
 | 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，同步 PR `#10` 已通过 merge commit 合入 |
 | 本地远端 | `origin` 可读写；`upstream` 仅允许 fetch，push URL 为 `DISABLED` |
 | 当前环境工具 | `git`、`python3 3.12.3`、`gh`、Docker、Node、Corepack 可用；本地无 Go、pnpm 命令，已用 Go 1.27 Docker 与 Corepack pnpm 10.28.0 完成验证 |
 
-Sub2API `v0.2.1` 同步、冲突裁决、RC 验证和 XY2API `v0.0.4` 正式发布已完成。分组按模型启用长上下文阶梯计费已在特性分支完成实现和验证，等待代码审查与提交；外部状态仍应在后续任务开始时重新核实。
+Sub2API `v0.2.1` 同步、冲突裁决、RC 验证和 XY2API `v0.0.4` 正式发布已完成。分组按模型启用长上下文阶梯计费已通过 PR `#13` 合入 `main`，正在晋级并发布 XY2API `v0.0.5`。
 
 ## 进行中的工作
 
-- `20260905-release-group-model-long-context-pricing`：已获授权将分组按模型启用长上下文阶梯计费功能规范提交、推送并发布为 XY2API `v0.0.5`；当前从特性分支提交与 PR 流程开始，兼容基线保持 Sub2API `v0.2.1`。
+- `20260905-release-group-model-long-context-pricing`：功能提交 `2e5218621` 与测试修正 `1c345b4fd` 已推送，PR `#13` 全部保护检查通过后以 merge commit `ab9ddee56` 合入 `main`；当前在 `release/v0.0.5` 准备产品版本晋级，兼容基线保持 Sub2API `v0.2.1`。
 
 ## 当前重要事项
 
