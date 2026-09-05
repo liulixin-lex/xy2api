@@ -283,6 +283,7 @@
     "233_add_usage_log_upstream_request_id_index_notx.sql": "87dea0c4b1d33209eee098cf472ca661011670b7910ebbcf7a611c69db737136",
     "233_group_free_openai_fast.sql": "80925a7deb54ef23ed5fae1eb1e519764d3952686be7101e2cf739028269f9c3",
     "234_channel_max_reasoning_effort_multiplier.sql": "e8f7749b4ed75ab1265a72c4d78b5139374d1edaeb6a4a5070f7f9593fa2bd4f",
-    "234_group_codex_models_manifest_config.sql": "dfab2c7f97f83c77635b5f0d0c19ec9e849cbcd0bf7833583fb6197eac306e7b"
+    "234_group_codex_models_manifest_config.sql": "dfab2c7f97f83c77635b5f0d0c19ec9e849cbcd0bf7833583fb6197eac306e7b",
+    "235_group_long_context_pricing_models.sql": "0ff897689a546b0f89adb75fac2d46e5a0cf496a2ed9e57f4a7b1d8228c55d68"
   }
 }

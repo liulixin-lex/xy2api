@@ -2962,7 +2962,7 @@ import {
   parseDateTimeLocalInput
 } from '@/utils/format'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
-import { allSelectedGroupsEnableLongContextPricing } from '@/components/account/longContextBilling'
+import { accountLongContextOverrideHasNoEffect } from '@/components/account/longContextBilling'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
   OPENAI_WS_MODE_CTX_POOL,
@@ -3005,7 +3005,7 @@ const browserTimeZone = getBrowserTimeZone()
 const isSparkShadow = computed(() => props.account?.parent_account_id != null)
 
 const hideAccountLongContextBilling = computed(() => {
-  return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
+  return accountLongContextOverrideHasNoEffect(form.group_ids, props.groups)
 })
 
 const handleOllamaCloudUsageUpdated = (state: OllamaCloudUsageState) => {

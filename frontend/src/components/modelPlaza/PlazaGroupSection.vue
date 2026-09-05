@@ -112,10 +112,16 @@ const peakNote = computed(() => {
  * 官方阶梯仅供参考。字段缺失(旧后端)不提示。
  */
 const longContextNote = computed(() => {
-  if (props.group.long_context_pricing_enabled !== false) return ''
-  const hasOfficialLadder = props.group.models.some(
-    (m) => (m.official_pricing?.intervals?.length ?? 0) > 1
+  const officialLadderModels = props.group.models.filter(
+    (model) => (model.official_pricing?.intervals?.length ?? 0) > 1
   )
-  return hasOfficialLadder ? t('modelPlaza.detail.longContextDisabledNote') : ''
+  if (officialLadderModels.length === 0) return ''
+  if (props.group.long_context_pricing_enabled === false) {
+    return t('modelPlaza.detail.longContextDisabledNote')
+  }
+  const hasBaseTierOnlyModel = officialLadderModels.some(
+    (model) => model.long_context_pricing_enabled === false
+  )
+  return hasBaseTierOnlyModel ? t('modelPlaza.detail.longContextPartialNote') : ''
 })
 </script>

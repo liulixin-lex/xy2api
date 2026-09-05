@@ -574,6 +574,26 @@ func (_c *GroupCreate) SetNillableLongContextPricingEnabled(v *bool) *GroupCreat
 	return _c
 }
 
+// SetLongContextPricingScope sets the "long_context_pricing_scope" field.
+func (_c *GroupCreate) SetLongContextPricingScope(v string) *GroupCreate {
+	_c.mutation.SetLongContextPricingScope(v)
+	return _c
+}
+
+// SetNillableLongContextPricingScope sets the "long_context_pricing_scope" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableLongContextPricingScope(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetLongContextPricingScope(*v)
+	}
+	return _c
+}
+
+// SetLongContextPricingModels sets the "long_context_pricing_models" field.
+func (_c *GroupCreate) SetLongContextPricingModels(v []string) *GroupCreate {
+	_c.mutation.SetLongContextPricingModels(v)
+	return _c
+}
+
 // SetModelPricing sets the "model_pricing" field.
 func (_c *GroupCreate) SetModelPricing(v jsontext.Value) *GroupCreate {
 	_c.mutation.SetModelPricing(v)
@@ -1123,6 +1143,14 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultLongContextPricingEnabled
 		_c.mutation.SetLongContextPricingEnabled(v)
 	}
+	if _, ok := _c.mutation.LongContextPricingScope(); !ok {
+		v := group.DefaultLongContextPricingScope
+		_c.mutation.SetLongContextPricingScope(v)
+	}
+	if _, ok := _c.mutation.LongContextPricingModels(); !ok {
+		v := group.DefaultLongContextPricingModels
+		_c.mutation.SetLongContextPricingModels(v)
+	}
 	if _, ok := _c.mutation.ClaudeCodeOnly(); !ok {
 		v := group.DefaultClaudeCodeOnly
 		_c.mutation.SetClaudeCodeOnly(v)
@@ -1336,6 +1364,12 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.LongContextPricingEnabled(); !ok {
 		return &ValidationError{Name: "long_context_pricing_enabled", err: errors.New(`ent: missing required field "Group.long_context_pricing_enabled"`)}
+	}
+	if _, ok := _c.mutation.LongContextPricingScope(); !ok {
+		return &ValidationError{Name: "long_context_pricing_scope", err: errors.New(`ent: missing required field "Group.long_context_pricing_scope"`)}
+	}
+	if _, ok := _c.mutation.LongContextPricingModels(); !ok {
+		return &ValidationError{Name: "long_context_pricing_models", err: errors.New(`ent: missing required field "Group.long_context_pricing_models"`)}
 	}
 	if _, ok := _c.mutation.ClaudeCodeOnly(); !ok {
 		return &ValidationError{Name: "claude_code_only", err: errors.New(`ent: missing required field "Group.claude_code_only"`)}
@@ -1604,6 +1638,14 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.LongContextPricingEnabled(); ok {
 		_spec.SetField(group.FieldLongContextPricingEnabled, field.TypeBool, value)
 		_node.LongContextPricingEnabled = value
+	}
+	if value, ok := _c.mutation.LongContextPricingScope(); ok {
+		_spec.SetField(group.FieldLongContextPricingScope, field.TypeString, value)
+		_node.LongContextPricingScope = value
+	}
+	if value, ok := _c.mutation.LongContextPricingModels(); ok {
+		_spec.SetField(group.FieldLongContextPricingModels, field.TypeJSON, value)
+		_node.LongContextPricingModels = value
 	}
 	if value, ok := _c.mutation.ModelPricing(); ok {
 		_spec.SetField(group.FieldModelPricing, field.TypeJSON, value)
@@ -2546,6 +2588,30 @@ func (u *GroupUpsert) SetLongContextPricingEnabled(v bool) *GroupUpsert {
 // UpdateLongContextPricingEnabled sets the "long_context_pricing_enabled" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateLongContextPricingEnabled() *GroupUpsert {
 	u.SetExcluded(group.FieldLongContextPricingEnabled)
+	return u
+}
+
+// SetLongContextPricingScope sets the "long_context_pricing_scope" field.
+func (u *GroupUpsert) SetLongContextPricingScope(v string) *GroupUpsert {
+	u.Set(group.FieldLongContextPricingScope, v)
+	return u
+}
+
+// UpdateLongContextPricingScope sets the "long_context_pricing_scope" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateLongContextPricingScope() *GroupUpsert {
+	u.SetExcluded(group.FieldLongContextPricingScope)
+	return u
+}
+
+// SetLongContextPricingModels sets the "long_context_pricing_models" field.
+func (u *GroupUpsert) SetLongContextPricingModels(v []string) *GroupUpsert {
+	u.Set(group.FieldLongContextPricingModels, v)
+	return u
+}
+
+// UpdateLongContextPricingModels sets the "long_context_pricing_models" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateLongContextPricingModels() *GroupUpsert {
+	u.SetExcluded(group.FieldLongContextPricingModels)
 	return u
 }
 
@@ -3764,6 +3830,34 @@ func (u *GroupUpsertOne) SetLongContextPricingEnabled(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateLongContextPricingEnabled() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateLongContextPricingEnabled()
+	})
+}
+
+// SetLongContextPricingScope sets the "long_context_pricing_scope" field.
+func (u *GroupUpsertOne) SetLongContextPricingScope(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetLongContextPricingScope(v)
+	})
+}
+
+// UpdateLongContextPricingScope sets the "long_context_pricing_scope" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateLongContextPricingScope() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateLongContextPricingScope()
+	})
+}
+
+// SetLongContextPricingModels sets the "long_context_pricing_models" field.
+func (u *GroupUpsertOne) SetLongContextPricingModels(v []string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetLongContextPricingModels(v)
+	})
+}
+
+// UpdateLongContextPricingModels sets the "long_context_pricing_models" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateLongContextPricingModels() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateLongContextPricingModels()
 	})
 }
 
@@ -5210,6 +5304,34 @@ func (u *GroupUpsertBulk) SetLongContextPricingEnabled(v bool) *GroupUpsertBulk 
 func (u *GroupUpsertBulk) UpdateLongContextPricingEnabled() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateLongContextPricingEnabled()
+	})
+}
+
+// SetLongContextPricingScope sets the "long_context_pricing_scope" field.
+func (u *GroupUpsertBulk) SetLongContextPricingScope(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetLongContextPricingScope(v)
+	})
+}
+
+// UpdateLongContextPricingScope sets the "long_context_pricing_scope" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateLongContextPricingScope() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateLongContextPricingScope()
+	})
+}
+
+// SetLongContextPricingModels sets the "long_context_pricing_models" field.
+func (u *GroupUpsertBulk) SetLongContextPricingModels(v []string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetLongContextPricingModels(v)
+	})
+}
+
+// UpdateLongContextPricingModels sets the "long_context_pricing_models" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateLongContextPricingModels() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateLongContextPricingModels()
 	})
 }
 

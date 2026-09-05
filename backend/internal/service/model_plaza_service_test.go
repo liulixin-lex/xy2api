@@ -409,6 +409,39 @@ func TestListGroups_TokenLadderFollowsGroupToggle(t *testing.T) {
 	}
 }
 
+func TestListGroups_TokenLadderFollowsSelectedModels(t *testing.T) {
+	channels := []Channel{{
+		ID: 1, Name: "ch", Status: StatusActive, GroupIDs: []int64{10},
+		ModelPricing: []ChannelModelPricing{
+			{Platform: PlatformOpenAI, Models: []string{"gpt-5.4"}, BillingMode: BillingModeToken},
+			{Platform: PlatformOpenAI, Models: []string{"gpt-5.5-pro"}, BillingMode: BillingModeToken},
+		},
+	}}
+	groups := []Group{{
+		ID: 10, Name: "selected", Platform: PlatformOpenAI, RateMultiplier: 1,
+		LongContextPricingEnabled: true,
+		LongContextPricingScope:   LongContextPricingScopeSelected,
+		LongContextPricingModels:  []string{"gpt-5.4"},
+	}}
+	svc := newPlazaServiceWithBilling(channels, groups, map[int64]string{10: PlatformOpenAI},
+		newStubPricingServiceFromJSON(t, openAILadderCatalogJSON))
+
+	out, err := svc.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	models := plazaModelsByName(out[0].Models)
+
+	selected := models["gpt-5.4"]
+	require.True(t, selected.LongContextPricingEnabled)
+	require.Len(t, selected.Pricing.Intervals, 2)
+	require.Len(t, selected.OfficialPricing.Intervals, 2)
+
+	baseOnly := models["gpt-5.5-pro"]
+	require.False(t, baseOnly.LongContextPricingEnabled)
+	require.Empty(t, baseOnly.Pricing.Intervals)
+	require.Len(t, baseOnly.OfficialPricing.Intervals, 2, "official reference tiers remain visible")
+}
+
 func TestListGroups_GeminiCatalogLadderShownWholeRequest(t *testing.T) {
 	channels := []Channel{{
 		ID: 1, Name: "ch", Status: StatusActive, GroupIDs: []int64{10},

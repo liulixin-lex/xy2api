@@ -190,6 +190,13 @@ func (Group) Fields() []ent.Field {
 		field.Bool("long_context_pricing_enabled").
 			Default(true).
 			Comment("是否按上下文长度应用模型阶梯价格；默认开启以保持官方/渠道长上下文价"),
+		field.String("long_context_pricing_scope").
+			Default("all").
+			Comment("长上下文阶梯计费范围：all=全部模型，selected=仅指定模型"),
+		field.JSON("long_context_pricing_models", []string{}).
+			Default([]string{}).
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
+			Comment("selected 范围下启用长上下文阶梯计费的模型名或尾部通配规则"),
 		field.JSON("model_pricing", json.RawMessage{}).
 			Optional().
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).

@@ -40,7 +40,8 @@ type ResolvedPricing struct {
 	// 渠道定价原始配置（用于区间模式下获取 ImageOutputPrice）
 	channelPricing *ChannelModelPricing
 
-	longContextPricingEnabled bool
+	longContextPricingEnabled         bool
+	longContextAccountOverrideBlocked bool
 }
 
 // ModelPricingResolver 统一模型定价解析器。
@@ -69,7 +70,8 @@ type PricingInput struct {
 // 1. 获取基础定价（LiteLLM → Fallback）
 // 2. 如果指定了 GroupID，查找渠道定价并覆盖
 func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) *ResolvedPricing {
-	longContextPricingEnabled := input.Group == nil || input.Group.LongContextPricingEnabled
+	longContextPricingEnabled := input.Group.LongContextPricingAppliesToModel(input.Model)
+	longContextAccountOverrideBlocked := !input.Group.allowsAccountLongContextPricingOverride()
 	if groupPricing := matchGroupModelPricing(input.Group, input.Model); groupPricing != nil {
 		// Group token cards only override the first-tier / flat rates.
 		// Long-context ladders come from official presets, gated by the checkbox.
@@ -80,6 +82,7 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 		}
 		resolved := r.resolveConfiguredPricing(groupPricing, input.Model, PricingSourceGroup)
 		resolved.longContextPricingEnabled = longContextPricingEnabled
+		resolved.longContextAccountOverrideBlocked = longContextAccountOverrideBlocked
 		return resolved
 	}
 
@@ -98,6 +101,7 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 					channelPricing: chPricing,
 				}
 				resolved.longContextPricingEnabled = longContextPricingEnabled
+				resolved.longContextAccountOverrideBlocked = longContextAccountOverrideBlocked
 				r.applyRequestTierOverrides(chPricing, resolved)
 				return resolved
 			}
@@ -114,6 +118,7 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 		SupportsCacheBreakdown: basePricing != nil && basePricing.SupportsCacheBreakdown,
 	}
 	resolved.longContextPricingEnabled = longContextPricingEnabled
+	resolved.longContextAccountOverrideBlocked = longContextAccountOverrideBlocked
 
 	// 2. 如果有 GroupID，尝试渠道覆盖
 	if chPricing != nil {
