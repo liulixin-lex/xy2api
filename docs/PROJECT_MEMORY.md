@@ -4,27 +4,37 @@
 
 ## 当前交接状态
 
-最后更新：`2026-09-05T18:26:58Z`（UTC）
+最后更新：`2026-09-05T18:56:06Z`（UTC）
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
-| 当前分支 | `release/v0.0.5` |
-| 当前 HEAD | `ab9ddee56ad238ec121fbbc9e60e446ad9e2b862`；功能 PR `#13` 已合入 `main` |
-| 工作树 | 正在准备 XY2API `v0.0.5` 版本晋级改动 |
-| XY2API 产品版本 | 目标 `0.0.5`；当前正式 Release 仍为 `v0.0.4` |
+| 当前分支 | `main`；本次发布记录通过独立文档 PR 收尾 |
+| 当前 HEAD | `38cf85ab4a3870d7fc60041d41f60a8b9b4b0e5b`；XY2API `v0.0.5` 发布源提交 |
+| 工作树 | `v0.0.5` 功能、版本晋级、正式 Release 和交付核验均已完成 |
+| XY2API 产品版本 | `0.0.5`；当前正式 Release 为 `v0.0.5` |
 | `main` 已审计 Sub2API 基线 | `v0.2.1` / commit `578785ee7fb35030b094b69624efe25670a36f5f` |
 | 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，同步 PR `#10` 已通过 merge commit 合入 |
 | 本地远端 | `origin` 可读写；`upstream` 仅允许 fetch，push URL 为 `DISABLED` |
 | 当前环境工具 | `git`、`python3 3.12.3`、`gh`、Docker、Node、Corepack 可用；本地无 Go、pnpm 命令，已用 Go 1.27 Docker 与 Corepack pnpm 10.28.0 完成验证 |
 
-Sub2API `v0.2.1` 同步、冲突裁决、RC 验证和 XY2API `v0.0.4` 正式发布已完成。分组按模型启用长上下文阶梯计费已通过 PR `#13` 合入 `main`，正在晋级并发布 XY2API `v0.0.5`。
+Sub2API `v0.2.1` 同步、冲突裁决和 XY2API `v0.0.4` 发布已完成。分组按模型启用长上下文阶梯计费已通过 PR `#13` 合入，并通过独立版本 PR `#14` 发布为 XY2API `v0.0.5`；正式 Release、平台包校验和及 GHCR 双架构镜像均已验收。
 
 ## 进行中的工作
 
-- `20260905-release-group-model-long-context-pricing`：功能提交 `2e5218621` 与测试修正 `1c345b4fd` 已推送，PR `#13` 全部保护检查通过后以 merge commit `ab9ddee56` 合入 `main`；当前在 `release/v0.0.5` 准备产品版本晋级，兼容基线保持 Sub2API `v0.2.1`。
+- 无。
 
 ## 当前重要事项
+
+### 分组按模型启用长上下文阶梯计费与 XY2API v0.0.5 已完成
+
+以下状态于 `2026-09-05T18:56Z` 通过本地 Git、GitHub Actions、Release 和 GHCR 核实：
+
+- 功能 PR [#13](https://github.com/liulixin-lex/xy2api/pull/13) 的最终 head 为 `1c345b4fd3a1caa65af9afab83a84ea6936a65b8`，全部保护检查通过后以 merge commit `ab9ddee56ad238ec121fbbc9e60e446ad9e2b862` 合入；实现分组阶梯计费的全部模型/指定模型范围、精确与末尾通配匹配、旧分组兼容、统一扣费判断、认证缓存、旧 OpenAI 结算路径、模型广场实付展示和管理表单。
+- 新增 migration `235_group_long_context_pricing_models.sql`，旧迁移及既有 checksum 未改写；新字段纳入 Ent、仓储、API、复制、认证快照版本与数据库缓存失效触发器。指定范围内未匹配模型保持基础档，账号开关不能越过分组名单重新启用阶梯。
+- 正式版 PR [#14](https://github.com/liulixin-lex/xy2api/pull/14) 将产品版本晋级到 `0.0.5`，兼容基线保持 Sub2API `v0.2.1`；全部保护检查通过后以 merge commit `38cf85ab4a3870d7fc60041d41f60a8b9b4b0e5b` 合入。该提交的主线 CI run `33984747838` 与安全扫描 run `33984747861` 均成功。
+- 正式 [v0.0.5 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.5) 非 draft、非 prerelease，且为当前 latest；Release run `33984811500` 成功。annotated tag object 为 `68aabf28257590906279f457e1442c8bf629c528`，目标为上述正式 merge commit。
+- 5 个平台包已下载并通过 `checksums.txt` 的 SHA-256 复算。GHCR `0.0.5` manifest digest 为 `sha256:f7082949109df5f7150d4e4e24eb75476a59e18624d0b3bfa28da2659b9a2415`，包含 `linux/amd64` 与 `linux/arm64`；`0.0`、`0`、`latest` 指向同一 digest，两种架构的 OCI version/revision 均为 `0.0.5` / `38cf85ab4a3870d7fc60041d41f60a8b9b4b0e5b`。
 
 ### Sub2API v0.2.1 与 XY2API v0.0.4 已完成
 
@@ -229,3 +239,13 @@ pnpm --dir frontend run build
 - 验证：Go 1.27 Docker 下完整 `internal/service` 单测通过，新增定向 service 测试通过，`internal/handler`、`internal/repository`、`internal/server`、`migrations` 单测通过，真实 PostgreSQL 集成测试 `TestAuthCacheInvalidationTrigger_ProfitControlColumns` 通过；前端定向 14/14 测试、类型检查、全量 lint 和生产构建通过；Ent 再生成前后差异 SHA256 均为 `f16ec3a90a0b20689a0ff7d12430396d98e43dc5d2263a6efb190767fbe33ddd`；新增迁移 checksum 复算一致；Playwright Chromium 在 1440×1000/1100×760 桌面和 390×844 移动视口检查模型广场与真实表单组件，无重叠或布局回归。
 - 卡点/风险：无功能阻塞。默认 Go 编译在 4 GiB 环境中曾因超大 Ent 包被 SIGKILL，改用单并发、关闭测试阶段 vet、禁用内联并降低 GC 阈值后全部通过；Impeccable detector 仅报告 `GroupsView.vue` 四处既有红底灰字警告，本次新增组件无命中。
 - 下一步：审查并提交当前特性分支；本任务未推送、未发布、未部署。
+
+### 2026-09-05T18:56:06Z — `20260905-release-group-model-long-context-pricing` — 完成
+
+- 请求/目标：规范提交并推送分组按模型启用长上下文阶梯计费功能，使用本机 GitHub CLI 凭据通过受保护分支合入，并正式发布 XY2API `v0.0.5`。
+- 开始状态：位于 `feat/group-model-long-context-pricing`，功能实现和本地验证已完成但尚未提交；`main` 干净，正式版本为 `v0.0.4`，分支保护要求 CI、安全扫描和集成测试通过后才能合入。
+- 完成操作：提交并推送功能改动 `2e5218621`；首次 CI 暴露缓存失效集成测试将布尔字段写为旧默认值的问题，改为确定性翻转布尔值并写入非空模型价格后，提交修正 `1c345b4fd`；通过 PR #13 合入功能。随后在独立分支将产品版本晋级到 `0.0.5`，保持 Sub2API 兼容版本 `0.2.1`，以提交 `d6fe27de0` 经 PR #14 合入。创建并推送 annotated tag `v0.0.5`，完成正式 GitHub Release、平台制品和 GHCR 镜像发布。
+- 修改文件：功能提交覆盖分组 schema/迁移/Ent 生成代码、管理 API 与仓储、认证缓存、统一及旧计费路径、模型广场服务、管理前端与测试；版本晋级修改 `backend/cmd/server/VERSION`、`UPSTREAM_BASE.json` 和本记忆文件；本次收尾仅修改本记忆文件。
+- 验证：功能与发布 PR 的全部必需 CI/安全检查通过；真实 PostgreSQL 缓存失效集成测试通过；正式 merge 的 CI run `33984747838`、安全扫描 run `33984747861` 及 Release run `33984811500` 成功；Release 为正式 latest，5 个平台包 SHA-256 全部通过；远端标签为 annotated tag 并指向 `38cf85ab4`；GHCR `0.0.5`、`0.0`、`0`、`latest` 均为相同 amd64/arm64 manifest，OCI 版本和提交标签正确。
+- 卡点/风险：无已知阻塞。首次 CI 失败来自测试未保证更新值发生变化，修正后本地真实 PostgreSQL 测试及后续两套 PR 检查均通过。新增 migration 为 additive；生产升级仍应按 Release 说明先备份 PostgreSQL、Redis 与 `/app/data`。
+- 下一步：无。后续维护从 `main` 开始，并保留 `v0.0.5` 标签与 Release；动态状态以 GitHub 和 GHCR 重新核实为准。
