@@ -68,6 +68,18 @@ class UpstreamSyncTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(SYNC.matches_any(path, manual))
 
+    def test_v021_conflicts_are_explicit_manual_merges(self):
+        manual = SYNC.load_policy()["categories"]["manual_merge"]
+        for path in [
+            "backend/internal/handler/gemini_v1beta_handler_test.go",
+            "backend/internal/pkg/claude/constants.go",
+            "backend/internal/service/identity_service.go",
+            "backend/internal/service/openai_ws_fallback_test.go",
+            "backend/internal/service/ops_upstream_context.go",
+        ]:
+            with self.subTest(path=path):
+                self.assertTrue(SYNC.matches_any(path, manual))
+
     def test_migration_checksum_uses_trim_space_rule(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "001.sql"
