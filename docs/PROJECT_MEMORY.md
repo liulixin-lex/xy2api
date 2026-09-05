@@ -26,9 +26,9 @@ Sub2API `v0.2.0` 同步、自动化修复、RC 验证和 XY2API `v0.0.3` 正式�
 
 - 请求/目标：按仓库标准全流程同步 Sub2API 最新正式版 `v0.2.1`，完成审计、PR 合入、RC/正式发布验证与收尾。
 - 开始状态：本地 `main` 为 `90c46b18dcc0e2146e2e210d6e6b633cfaef07ef`，与本地记录的 `origin/main` 一致，工作树干净；XY2API `0.0.3` / Sub2API compat `0.2.0`；`doctor.py --strict` 通过；上游 GitHub 最新 Release 初步核实为 2026-09-05 发布的 `v0.2.1`。
-- 当前阶段：预备 PR #9 已以 merge commit `c646220e842526aa7edcf943127086049d463ffa` 合入；同步分支已完成受控 merge、模块路径归一化和 9 个冲突逐项裁决。4 个 migration 均为追加项，旧 277 条 checksum 保持不变，新增 checksum 已用 Perl/sha256sum 独立复算；产品候选版本为 `0.0.4-rc.1`，兼容基线为 `0.2.1`。命名空间标签和分支已推送，Draft 同步 PR 为 [#10](https://github.com/liulixin-lex/xy2api/pull/10)；首轮 CI 发现 3 个归一化后 import 的 gofmt 问题，已按 Go 1.27.0 gofmt 修复。
-- 卡点/风险：无代码阻塞。Go 1.27.0 容器中首次 Ent 编译因 4 GiB 环境内存被 SIGKILL；单并发重试时 Ent 与首轮 Wire 生成成功且产物零差异，随后 `go generate ./cmd/server` 因仓库两个 Wire directive 重复执行，第二轮 Wire 编译再次被 SIGKILL。CI 会完整编译并运行测试/lint；生成零差异证据来自本地已成功完成的唯一 Ent 与 Wire 生成轮次。
-- 下一步：把真实 PR URL 固定到 provenance，等待 PR #10 完整 CI/安全检查；复核固定 head 后转 Ready、留下审计记录并以 merge commit 合入，再执行 RC 验证。
+- 当前阶段：预备 PR [#9](https://github.com/liulixin-lex/xy2api/pull/9) 与同步 PR [#10](https://github.com/liulixin-lex/xy2api/pull/10) 已分别以 merge commit `c646220e842526aa7edcf943127086049d463ffa`、`294528940231ba6ed7764ccdabe4bbdabaa3783d` 合入；固定 head 的 16/16 检查全部通过。RC [v0.0.4-rc.1](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.4-rc.1) 发布 run `33964718089` 成功，5 个平台包 SHA256 全部通过，GHCR manifest digest 为 `sha256:f8e357a3c08b88eda3e6c9c7ca0d8d9119809b8a57553ce7ce324b05112c953c`，含 `linux/amd64` 与 `linux/arm64`，两架构 OCI version/revision 均正确。隔离 Docker 验证已覆盖 RC 全新安装、`v0.0.3` 原地升级和旧镜像回切：迁移从 277 增至 281，管理员、Redis、`/app/data` 数据均保留，四项新 schema 齐全，回切后旧应用健康。
+- 卡点/风险：无当前阻塞。4 个 migration 均为追加项，旧 277 条 checksum 保持不变，新增 checksum 已独立复算；旧镜像回切验证通过，但数据库回滚仍应采用升级前备份，不宣称 SQL 自动降级。Go 1.27.0 容器的完整重复生成曾受 4 GiB 内存限制而 SIGKILL；单并发完成的唯一 Ent/Wire 生成产物零差异，PR CI 的编译、测试与 lint 均通过。
+- 下一步：Draft 正式版 PR [#11](https://github.com/liulixin-lex/xy2api/pull/11) 已创建；以最后固定 head 的全检查结果为准，全部通过后转 Ready 并合入，再创建 annotated 正式标签并验收 Release、双架构镜像和空卷启动，最后清理临时资源与短期分支并完成记忆收尾。
 
 ## 当前重要事项
 
