@@ -14,7 +14,7 @@
   "migration_checksum_commit": "95b67a26a2e0b4a9ecb63147576b08ae200ea2e4",
   "sync_branch": "sync/sub2api-v0.2.1",
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/10",
-  "xy2api_version": "0.0.4",
+  "xy2api_version": "0.0.5",
   "sub2api_compat_version": "0.2.1",
   "status": "resolved",
   "manual_resolutions": [
