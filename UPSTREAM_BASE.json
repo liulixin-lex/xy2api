@@ -8,9 +8,15 @@
   "upstream_commit": "578785ee7fb35030b094b69624efe25670a36f5f",
   "merge_base": "aa236488351eb71e120fc2b6fb32e36b0374c918",
   "fork_start": "c646220e842526aa7edcf943127086049d463ffa",
-  "xy2api_version": "0.0.3",
-  "sub2api_compat_version": "0.2.0",
-  "status": "review",
+  "merge_commit": "efc3017dfbc9dc671fcce4effd956d10f83fb540",
+  "module_normalization_commit": "ac5db12e6be714a66ee6e4d54cfc0e57934c7fb1",
+  "manual_resolution_commit": "d4d747f2e33555c5a1a159539dffc097fe2b4c1a",
+  "migration_checksum_commit": "95b67a26a2e0b4a9ecb63147576b08ae200ea2e4",
+  "sync_branch": "sync/sub2api-v0.2.1",
+  "sync_pr": "pending",
+  "xy2api_version": "0.0.4-rc.1",
+  "sub2api_compat_version": "0.2.1",
+  "status": "resolved",
   "manual_resolutions": [
     {
       "path": "README.md",
