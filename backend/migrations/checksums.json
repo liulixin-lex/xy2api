@@ -276,9 +276,13 @@
     "231_add_usage_log_native_compaction_v2.sql": "7ab597b658dafa31f2b1d64b6057ff9e4c2da5a3b0e6581962d15d66f91ebfe4",
     "231_add_usage_log_requested_reasoning_effort.sql": "a67f2a9dfeaa2bf935801727d97dc2def72e03d6c4e0bf9d503a4f88a03b3851",
     "231_user_restrict_public_groups.sql": "9867df4258aa7c4e55db96998ed07f4369032c6469dcf146a13c9906bb243514",
+    "232_add_usage_log_upstream_request_id.sql": "12c37559a68e6708a36d7f4c020fb20dfa07906639f1eeb3396d60a8069b864d",
     "232_channel_cache_write_1h_pricing.sql": "62279a094bfd2090c4bc8e54e9fb45fd14ca3c361d6dccd2e068361d053dda80",
     "232_group_force_openai_fast.sql": "47ac2b5f0c50685538b642a9ecdd1aaa4fcd820390a4b8b87983a2805dbe1c78",
     "232_group_reasoning_effort_over_limit.sql": "b503ea8571f4f16c3f7de0d45b9035693ee15d708e0c19feb30e247646f00bd6",
-    "233_group_free_openai_fast.sql": "80925a7deb54ef23ed5fae1eb1e519764d3952686be7101e2cf739028269f9c3"
+    "233_add_usage_log_upstream_request_id_index_notx.sql": "87dea0c4b1d33209eee098cf472ca661011670b7910ebbcf7a611c69db737136",
+    "233_group_free_openai_fast.sql": "80925a7deb54ef23ed5fae1eb1e519764d3952686be7101e2cf739028269f9c3",
+    "234_channel_max_reasoning_effort_multiplier.sql": "e8f7749b4ed75ab1265a72c4d78b5139374d1edaeb6a4a5070f7f9593fa2bd4f",
+    "234_group_codex_models_manifest_config.sql": "dfab2c7f97f83c77635b5f0d0c19ec9e849cbcd0bf7833583fb6197eac306e7b"
   }
 }

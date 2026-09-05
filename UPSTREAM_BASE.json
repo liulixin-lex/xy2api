@@ -1,57 +1,67 @@
 {
   "schema_version": 1,
   "upstream_repo": "Wei-Shaw/sub2api",
-  "upstream_tag": "v0.2.0",
-  "upstream_tag_ref": "sub2api/v0.2.0",
-  "upstream_tag_object": "dd07c4d8d484878e617c945cc8bacc304a5a6560",
+  "upstream_tag": "v0.2.1",
+  "upstream_tag_ref": "sub2api/v0.2.1",
+  "upstream_tag_object": "adc26f68f687685e847bfb997559f48e79cac475",
   "upstream_tag_signature": "unsigned",
-  "upstream_commit": "aa236488351eb71e120fc2b6fb32e36b0374c918",
-  "merge_base": "2ac784c51a5d0925b324efef2ba6b3446c364781",
-  "fork_baseline": "79955dbaa964732429747ae65dabf9a8bfb44a65",
-  "fork_start": "79955dbaa964732429747ae65dabf9a8bfb44a65",
-  "merge_commit": "569c8315840245acdc0754afb674f990e3433e8e",
-  "module_normalization_commit": "64c4b979d046cee7275c346f99ea4c9575e813be",
-  "manual_resolution_commit": "9c30af3a4acbfc702f9ebad0f4104f1c85d5d68b",
-  "sync_branch": "sync/sub2api-v0.2.0",
-  "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/5",
-  "xy2api_version": "0.0.3",
-  "sub2api_compat_version": "0.2.0",
+  "upstream_commit": "578785ee7fb35030b094b69624efe25670a36f5f",
+  "merge_base": "aa236488351eb71e120fc2b6fb32e36b0374c918",
+  "fork_start": "c646220e842526aa7edcf943127086049d463ffa",
+  "merge_commit": "efc3017dfbc9dc671fcce4effd956d10f83fb540",
+  "module_normalization_commit": "ac5db12e6be714a66ee6e4d54cfc0e57934c7fb1",
+  "manual_resolution_commit": "d4d747f2e33555c5a1a159539dffc097fe2b4c1a",
+  "migration_checksum_commit": "95b67a26a2e0b4a9ecb63147576b08ae200ea2e4",
+  "sync_branch": "sync/sub2api-v0.2.1",
+  "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/10",
+  "xy2api_version": "0.0.4-rc.1",
+  "sub2api_compat_version": "0.2.1",
   "status": "resolved",
   "manual_resolutions": [
     {
       "path": "README.md",
       "status": "resolved",
-      "resolution": "Kept XY2API branding, repository and installation paths, and the sponsor-free documentation policy; the upstream-only overlap was commercial notice and sponsor content with no functional documentation to port."
+      "resolution": "Kept the XY2API English branding, repository, installation and sponsor-free documentation; the v0.2.1 upstream delta only removed two sponsor entries and contained no functional documentation to port."
     },
     {
       "path": "README_CN.md",
       "status": "resolved",
-      "resolution": "Kept the Chinese XY2API branding, repository and deployment instructions, and sponsor-free policy; rejected the upstream commercial notice and sponsor-only delta."
+      "resolution": "Kept the XY2API Chinese branding, repository, installation and sponsor-free documentation; the v0.2.1 upstream delta only removed two sponsor entries and contained no functional documentation to port."
     },
     {
       "path": "README_JA.md",
       "status": "resolved",
-      "resolution": "Kept the Japanese XY2API branding, repository and deployment instructions, and sponsor-free policy; rejected the upstream commercial notice and sponsor-only delta."
+      "resolution": "Kept the XY2API Japanese branding, repository, installation and sponsor-free documentation; the v0.2.1 upstream delta only removed two sponsor entries and contained no functional documentation to port."
     },
     {
       "path": "backend/cmd/server/VERSION",
       "status": "resolved",
-      "resolution": "Kept XY2API product versioning independent from the Sub2API tag and advanced it to the 0.0.3-rc.1 release candidate after completing the v0.2.0 compatibility review."
+      "resolution": "Kept XY2API product versioning independent from the Sub2API tag; the product version remains 0.0.3 during conflict review and is advanced in the dedicated RC commit."
     },
     {
-      "path": "backend/internal/service/bedrock_request.go",
+      "path": "backend/internal/handler/gemini_v1beta_handler_test.go",
       "status": "resolved",
-      "resolution": "Adopted the complete upstream Bedrock server-side fallback and fallback-credit sanitization logic, then normalized imports to the XY2API module path."
+      "resolution": "Adopted the upstream custom Gemini native model-list tests in full and normalized their imports to the XY2API module path."
     },
     {
-      "path": "backend/internal/service/gateway_request.go",
+      "path": "backend/internal/pkg/claude/constants.go",
       "status": "resolved",
-      "resolution": "Adopted the complete upstream Anthropic fallback and fallback-credit beta filtering behavior, then normalized imports to the XY2API module path."
+      "resolution": "Adopted the upstream runtime Claude CLI version override and its guidance so billing attribution and User-Agent use the same effective version."
     },
     {
-      "path": "backend/internal/service/openai_oauth_passthrough_test.go",
+      "path": "backend/internal/service/identity_service.go",
       "status": "resolved",
-      "resolution": "Adopted the upstream OpenAI Fast group coverage and ctxkey usage, normalized imports to XY2API, and preserved the XY2API structured-log service name."
+      "resolution": "Adopted the upstream effective Claude CLI version in fingerprint validation and defaults, retained the XY2API product wording, and normalized imports."
+    },
+    {
+      "path": "backend/internal/service/openai_ws_fallback_test.go",
+      "status": "resolved",
+      "resolution": "Adopted the upstream WebSocket proxy-attribution regression tests in full and normalized the config import to the XY2API module path."
+    },
+    {
+      "path": "backend/internal/service/ops_upstream_context.go",
+      "status": "resolved",
+      "resolution": "Adopted the upstream immutable proxy-attribution, bounded-attempt and legacy JSON normalization behavior in full, then normalized the ctxkey import to XY2API."
     }
   ],
   "custom_patches": [
