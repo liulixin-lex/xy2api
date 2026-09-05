@@ -4,33 +4,40 @@
 
 ## 当前交接状态
 
-最后更新：`2026-09-04T18:43:33Z`（UTC）
+最后更新：`2026-09-05T12:57:29Z`（UTC）
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
 | 当前分支 | 主线 `main`；读取时运行 `git branch --show-current` 核实本地检出分支 |
-| 当前 HEAD | `v0.0.3` 发布源提交为 `a0e68c6e4f649fc58f95bed78aa1b883ab349cf8`；`main` 另含本次发布后的文档收尾提交，读取时运行 `git rev-parse HEAD` 核实 |
+| 当前 HEAD | `v0.0.4` 发布源提交为 `ae4c010d0a8aed750936b59655bf7ab8f85a777b`；`main` 另含本次发布后的文档收尾提交，读取时运行 `git rev-parse HEAD` 核实 |
 | 工作树 | 同步、发布和环境清理均已完成；交付时本地 `main` 与 `origin/main` 一致且工作树干净 |
-| XY2API 产品版本 | `0.0.3`；当前正式 Release 为 `v0.0.3` |
-| `main` 已审计 Sub2API 基线 | `v0.2.0` / commit `aa236488351eb71e120fc2b6fb32e36b0374c918` |
-| 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，同步 PR `#5` 已通过 merge commit 合入 |
+| XY2API 产品版本 | `0.0.4`；当前正式 Release 为 `v0.0.4` |
+| `main` 已审计 Sub2API 基线 | `v0.2.1` / commit `578785ee7fb35030b094b69624efe25670a36f5f` |
+| 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，同步 PR `#10` 已通过 merge commit 合入 |
 | 本地远端 | `origin` 可读写；`upstream` 仅允许 fetch，push URL 为 `DISABLED` |
 | 当前环境工具 | `git`、`python3 3.12.3`、`gh`、Docker、Node 可用；`python` 命令别名、Go、pnpm 不可用 |
 
-Sub2API `v0.2.0` 同步、自动化修复、RC 验证和 XY2API `v0.0.3` 正式发布已完成。当前无已知同步或发布阻塞；外部状态仍应在后续任务开始时重新核实。
+Sub2API `v0.2.1` 同步、冲突裁决、RC 验证和 XY2API `v0.0.4` 正式发布已完成。当前无已知同步或发布阻塞；外部状态仍应在后续任务开始时重新核实。
 
 ## 进行中的工作
 
-### 2026-09-05T11:08:15Z — `20260905-full-upstream-sync-v0.2.1` — 进行中
-
-- 请求/目标：按仓库标准全流程同步 Sub2API 最新正式版 `v0.2.1`，完成审计、PR 合入、RC/正式发布验证与收尾。
-- 开始状态：本地 `main` 为 `90c46b18dcc0e2146e2e210d6e6b633cfaef07ef`，与本地记录的 `origin/main` 一致，工作树干净；XY2API `0.0.3` / Sub2API compat `0.2.0`；`doctor.py --strict` 通过；上游 GitHub 最新 Release 初步核实为 2026-09-05 发布的 `v0.2.1`。
-- 当前阶段：预备 PR [#9](https://github.com/liulixin-lex/xy2api/pull/9) 与同步 PR [#10](https://github.com/liulixin-lex/xy2api/pull/10) 已分别以 merge commit `c646220e842526aa7edcf943127086049d463ffa`、`294528940231ba6ed7764ccdabe4bbdabaa3783d` 合入；固定 head 的 16/16 检查全部通过。RC [v0.0.4-rc.1](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.4-rc.1) 发布 run `33964718089` 成功，5 个平台包 SHA256 全部通过，GHCR manifest digest 为 `sha256:f8e357a3c08b88eda3e6c9c7ca0d8d9119809b8a57553ce7ce324b05112c953c`，含 `linux/amd64` 与 `linux/arm64`，两架构 OCI version/revision 均正确。隔离 Docker 验证已覆盖 RC 全新安装、`v0.0.3` 原地升级和旧镜像回切：迁移从 277 增至 281，管理员、Redis、`/app/data` 数据均保留，四项新 schema 齐全，回切后旧应用健康。
-- 卡点/风险：无当前阻塞。4 个 migration 均为追加项，旧 277 条 checksum 保持不变，新增 checksum 已独立复算；旧镜像回切验证通过，但数据库回滚仍应采用升级前备份，不宣称 SQL 自动降级。Go 1.27.0 容器的完整重复生成曾受 4 GiB 内存限制而 SIGKILL；单并发完成的唯一 Ent/Wire 生成产物零差异，PR CI 的编译、测试与 lint 均通过。
-- 下一步：Draft 正式版 PR [#11](https://github.com/liulixin-lex/xy2api/pull/11) 已创建；以最后固定 head 的全检查结果为准，全部通过后转 Ready 并合入，再创建 annotated 正式标签并验收 Release、双架构镜像和空卷启动，最后清理临时资源与短期分支并完成记忆收尾。
+当前无进行中的工作。
 
 ## 当前重要事项
+
+### Sub2API v0.2.1 与 XY2API v0.0.4 已完成
+
+以下状态于 `2026-09-05T12:57Z` 通过本地 Git、GitHub Actions、Release 和隔离 Docker 环境核实：
+
+- 上游 annotated tag object 为 `adc26f68f687685e847bfb997559f48e79cac475`，目标 commit 为 `578785ee7fb35030b094b69624efe25670a36f5f`；标签未签名并已在 provenance 中明确记录为 `unsigned`。命名空间标签 `sub2api/v0.2.1` 保留。
+- 预备 PR [#9](https://github.com/liulixin-lex/xy2api/pull/9) 先登记 5 个新人工冲突路径；同步 PR [#10](https://github.com/liulixin-lex/xy2api/pull/10) 的固定 head `8dd45d110dc1832986932178d7b91305feee5fed` 在 16/16 检查通过后，以 merge commit `294528940231ba6ed7764ccdabe4bbdabaa3783d` 合入。9 个冲突已逐项裁决，82 个上游 commit 与 297 个文件变更已纳入审计报告。
+- 4 个新增 migration 均为 additive，既有 277 个 checksum 未改写且新增 checksum 已独立复算；迁移总数为 281。新增内容包括 usage log upstream request ID 及索引、channel reasoning multiplier、group Codex models manifest 配置。
+- RC [v0.0.4-rc.1](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.4-rc.1) 的 annotated tag object 为 `17bcf4009ee9241c8d35b0f5f6ecbcbb3519c20e`，目标为同步 merge commit；Release run `33964718089` 成功，5 个平台包 SHA256 全部通过，GHCR digest 为 `sha256:f8e357a3c08b88eda3e6c9c7ca0d8d9119809b8a57553ce7ce324b05112c953c`，包含 `linux/amd64` 与 `linux/arm64`。
+- 正式版 PR [#11](https://github.com/liulixin-lex/xy2api/pull/11) 的固定 head `6dd99debce540f07a70f9b45ae9f115b5123333e` 在 16/16 检查通过后，以 merge commit `ae4c010d0a8aed750936b59655bf7ab8f85a777b` 合入；该提交的主线 CI run `33966180480` 和安全扫描 run `33966180489` 均成功。
+- 正式 [v0.0.4 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.4) 非 draft、非 prerelease；annotated tag object 为 `7e38081004ce4dea4079a86eabe63624e76428ba`，目标为上述正式 merge commit，Release run `33966678769` 成功。5 个平台包 SHA256 全部通过；GHCR digest 为 `sha256:a4eddd09a4343fd9b2e276bcac7691db395d49697043262378c2db68cec5f9c1`，包含双架构，OCI version/revision 正确，`latest`、`0.0`、`0` 均指向同一 digest。
+- 隔离 Docker 验证覆盖 RC 全新安装、正式 `v0.0.3` 原地升级到 RC、回切 `v0.0.3` 旧镜像和正式 `v0.0.4` 全新安装；健康、初始化、281 条 migration、新 schema、管理员、Redis 与 `/app/data` 持久化均符合预期。任务专用容器、卷、网络、下载文件和镜像已清理，原有 `book-keeper` 资源未改动。
+- 同步 merge 后的主线 CI run `33964691713` 曾因 Docker Hub 拉取 Testcontainers Ryuk 时连接被对端重置而失败，不是代码或测试断言失败；后续 PR 两套集成测试及正式 merge 主线集成测试均通过。
 
 ### Sub2API v0.2.0 已合入并完成 RC 验证
 
@@ -202,3 +209,13 @@ pnpm --dir frontend run build
 - 验证：PR #5 与 #7 各 16/16 checks；同步/升级预检 9/9；provenance/compatibility audit、Compose、Ent/Wire 零差异；同步回归 runs `33901867104`、`33902956072`；RC/formal Release runs `33903033269`、`33905898627`；两版各 5 个资产 SHA256；两版 GHCR amd64/arm64 与 OCI 标签；RC 全新安装、v0.0.2 原地升级和旧镜像回滚；正式版全新安装均通过。
 - 卡点/风险：无已知阻塞。4 个新 migration 为 additive，旧镜像已验证可在升级后的 schema 上运行；数据库回滚仍应继续采用升级前备份策略，不宣称 SQL 自动降级。
 - 下一步：无。后续常规维护应保留 `sub2api/v0.2.0`、`v0.0.3-rc.1`、`v0.0.3` 标签，并从本文件、`UPSTREAM_BASE.json` 与 GitHub Release 重新核实动态状态。
+
+### 2026-09-05T12:57:29Z — `20260905-full-upstream-sync-v0.2.1` — 完成
+
+- 请求/目标：按仓库标准全流程同步 Sub2API 最新正式版 `v0.2.1`，完成审计、PR 合入、RC/正式发布验证与收尾。
+- 开始状态：本地 `main` 为 `90c46b18dcc0e2146e2e210d6e6b633cfaef07ef`，与 `origin/main` 一致且工作树干净；XY2API `0.0.3` / Sub2API compat `0.2.0`；`doctor.py --strict` 通过；上游最新稳定 Release 为 `v0.2.1`。
+- 完成操作：冻结 annotated tag object、目标 commit、fork 起点和 merge base；通过预备 PR #9 扩充具名人工冲突策略；生成三方影响报告并以真实 merge 集成 82 个上游 commit，逐项裁决 9 个冲突，归一化模块路径、复算 4 个新增 migration checksum、确认生成产物零差异；同步 PR #10、正式版 PR #11 均在固定 head 16/16 检查通过后以 merge commit 合入；创建并验收 `v0.0.4-rc.1` 与 `v0.0.4` annotated Release；删除已合并短期分支和全部任务专用环境资源。
+- 修改文件：同步改动与完整矩阵见 `docs/upstream-sync/v0.2.1.json` 和 PR #10；正式晋级仅修改产品版本、provenance 产品版本和本记忆文件；本次收尾仅修改本记忆文件。
+- 验证：同步/升级预检 10/10；strict doctor、provenance/compatibility audit、diff/冲突标记、Compose、祖先关系与 migration checksum 通过；PR #10、#11 各 16/16 checks；正式 merge 主线 CI/安全扫描通过；RC/正式 Release runs `33964718089`、`33966678769` 成功；两版各 5 个资产 SHA256、GHCR amd64/arm64 和 OCI 标签通过；RC 全新安装、`v0.0.3` 原地升级、旧镜像回切及正式版全新安装通过。
+- 卡点/风险：无已知阻塞。Go 1.27.0 容器中完整重复生成受 4 GiB 内存限制曾被 SIGKILL，但单并发唯一 Ent/Wire 生成成功且产物零差异，CI 编译、测试与 lint 均通过。4 个新 migration 为 additive，旧镜像回切已验证；生产数据库回滚仍应使用升级前备份，不宣称 SQL 自动降级。同步 merge 的一次主线集成测试因 Docker Hub 拉取 Ryuk 时连接重置失败，后续三套等价集成测试均成功。
+- 下一步：无。后续维护应保留 `sub2api/v0.2.1`、`v0.0.4-rc.1`、`v0.0.4` 标签，并从本文件、`UPSTREAM_BASE.json` 与 GitHub Release 重新核实动态状态。
