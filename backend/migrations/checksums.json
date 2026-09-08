@@ -284,6 +284,9 @@
     "233_group_free_openai_fast.sql": "80925a7deb54ef23ed5fae1eb1e519764d3952686be7101e2cf739028269f9c3",
     "234_channel_max_reasoning_effort_multiplier.sql": "e8f7749b4ed75ab1265a72c4d78b5139374d1edaeb6a4a5070f7f9593fa2bd4f",
     "234_group_codex_models_manifest_config.sql": "dfab2c7f97f83c77635b5f0d0c19ec9e849cbcd0bf7833583fb6197eac306e7b",
-    "235_group_long_context_pricing_models.sql": "0ff897689a546b0f89adb75fac2d46e5a0cf496a2ed9e57f4a7b1d8228c55d68"
+    "235_group_long_context_pricing_models.sql": "0ff897689a546b0f89adb75fac2d46e5a0cf496a2ed9e57f4a7b1d8228c55d68",
+    "236_group_model_allowlist.sql": "213b4bc4dc5268c86f75caa785f843eb491b279f0a01aa59bb5605a65133ff3a",
+    "237_group_model_allowlist_repair.sql": "c8c7f13a247c2dda6428cc81ae7a7bce8343d42cb2e7869ead5f4b65c039ef2d",
+    "238_group_model_allowlist_auth_cache_invalidation.sql": "5622c9216da5189de21f692287bb542a2d3e94c74955d45f6514d8f5912bfe8a"
   }
 }
