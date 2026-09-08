@@ -4,14 +4,14 @@
 
 ## 当前交接状态
 
-最后更新：`2026-09-08T14:27:42Z`（UTC）
+最后更新：`2026-09-08T14:48:20Z`（UTC）
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
-| 当前分支 | `docs/complete-v0.0.6-release`；基于已发布 `v0.0.6` 的 `main` |
-| 当前 HEAD | 分支基点 `e065f39c7bf62ca2634e8d565f59b01131af744b`；正式标签指向该发布 merge commit |
-| 工作树 | 仅在记录本次同步与发版的最终验证证据；业务、同步和发布工作已完成 |
+| 当前分支 | 稳定交接分支为 `main`；无进行中短期分支 |
+| 发布提交 | `v0.0.6` 标签指向 `e065f39c7bf62ca2634e8d565f59b01131af744b`；`main` 在其后仅有发布记录收尾 |
+| 工作树 | 稳定交接状态为干净；业务、同步、发布和资源清理均已完成 |
 | XY2API 产品版本 | `0.0.6`；正式 [v0.0.6 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.6) 为当前 latest |
 | 已审计的 Sub2API 基线 | `v0.2.3` / commit `8fa67d477d6651a744754392a8982ea589c26ae6`；已通过 PR `#17` 合入 `main` |
 | 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，21 个人工冲突均已记录；同步 PR [#17](https://github.com/liulixin-lex/xy2api/pull/17) 以 merge commit `867097dc4` 合入 |
