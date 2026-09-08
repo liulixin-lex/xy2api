@@ -4,9 +4,9 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/gin-gonic/gin"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/service"
-	"github.com/gin-gonic/gin"
 )
 
 func (h *GatewayHandler) pinnedOpenAIModels(c *gin.Context, group *service.Group) {

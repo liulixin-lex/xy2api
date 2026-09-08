@@ -9,8 +9,8 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/service"
 
-	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/gin-gonic/gin"
+	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/stretchr/testify/require"
 )
 
