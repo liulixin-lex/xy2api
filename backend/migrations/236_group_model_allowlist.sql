@@ -1,4 +1,4 @@
--- 235: groups.models_list_config 更名为 model_allowlist，语义从「仅影响 /v1/models 展示」
+-- 236: groups.models_list_config 更名为 model_allowlist，语义从「仅影响 /v1/models 展示」
 -- 升级为分组级模型白名单（同时约束模型列表接口与请求准入）。数据原样保留。
 DO $$
 BEGIN

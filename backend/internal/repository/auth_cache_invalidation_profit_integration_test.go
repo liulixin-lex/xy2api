@@ -90,6 +90,7 @@ func TestAuthCacheInvalidationTrigger_ProfitControlColumns(t *testing.T) {
 		"long_context_pricing_enabled": "long_context_pricing_enabled = NOT long_context_pricing_enabled",
 		"long_context_pricing_scope":   "long_context_pricing_scope = 'selected'",
 		"long_context_pricing_models":  `long_context_pricing_models = '["gpt-5.6-*"]'::jsonb`,
+		"model_allowlist":              `model_allowlist = '{"enabled":true,"models":["gpt-5.6-*"]}'::jsonb`,
 		"model_pricing":                `model_pricing = '[{"model":"cache-test"}]'::jsonb`,
 	} {
 		t.Run(name, func(t *testing.T) {

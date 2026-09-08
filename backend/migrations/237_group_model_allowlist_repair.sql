@@ -1,8 +1,8 @@
--- 236: 收敛 groups 的模型白名单列，修复 235 未落地却已被记账的实例。
+-- 237: 收敛 groups 的模型白名单列，修复 236 未落地却已被记账的实例。
 --
--- 235 只在「models_list_config 存在且 model_allowlist 不存在」时执行重命名，
+-- 236 只在「models_list_config 存在且 model_allowlist 不存在」时执行重命名，
 -- 而迁移一旦写入 schema_migrations 就会按「文件名 + checksum」整份跳过，不再重跑。
--- 因此只要数据库在 235 之后回到了旧结构——例如为了回滚到旧版本镜像而手工把列名
+-- 因此只要数据库在 236 之后回到了旧结构——例如为了回滚到旧版本镜像而手工把列名
 -- 改回 models_list_config，或者用旧结构的备份做了部分恢复——应用依旧能正常启动，
 -- 但每个关联 groups 的查询都会失败：
 --     pq: column groups.model_allowlist does not exist
