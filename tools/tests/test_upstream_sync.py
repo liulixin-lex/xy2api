@@ -80,6 +80,34 @@ class UpstreamSyncTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(SYNC.matches_any(path, manual))
 
+    def test_v023_conflicts_are_explicit_manual_merges(self):
+        manual = SYNC.load_policy()["categories"]["manual_merge"]
+        for path in [
+            "backend/cmd/server/VERSION",
+            "backend/ent/group.go",
+            "backend/ent/runtime/runtime.go",
+            "backend/internal/handler/admin/account_handler.go",
+            "backend/internal/handler/admin/grok_import_probe.go",
+            "backend/internal/handler/admin/group_handler.go",
+            "backend/internal/handler/gateway_models_test.go",
+            "backend/internal/handler/gemini_v1beta_handler_test.go",
+            "backend/internal/handler/openai_gateway_handler.go",
+            "backend/internal/repository/group_repo_integration_test.go",
+            "backend/internal/server/routes/composite_platform_test.go",
+            "backend/internal/server/routes/gateway.go",
+            "backend/internal/service/admin_account.go",
+            "backend/internal/service/admin_group.go",
+            "backend/internal/service/admin_service.go",
+            "backend/internal/service/admin_service_duplicate_account_test.go",
+            "backend/internal/service/admin_service_group_test.go",
+            "backend/internal/service/api_key_auth_cache_impl.go",
+            "backend/internal/service/openai_gateway_ollama_cloud_max_tokens_test.go",
+            "frontend/src/components/account/EditAccountModal.vue",
+            "frontend/src/views/admin/GroupsView.vue",
+        ]:
+            with self.subTest(path=path):
+                self.assertTrue(SYNC.matches_any(path, manual))
+
     def test_migration_checksum_uses_trim_space_rule(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "001.sql"
