@@ -22,7 +22,12 @@ Sub2API `v0.2.1` 同步、冲突裁决和 XY2API `v0.0.4` 发布已完成。分�
 
 ## 进行中的工作
 
-- 无。
+- `20260908-sub2api-v0.2.3-full-release`
+  - 请求/目标：按仓库标准全流程分析、同步 Sub2API 最新正式版，完成同步 PR、RC 验证、正式发版与收尾。
+  - 开始状态：`main` 为 `5d96e0fc203145981c7eb2ddc78e226ad1502b22`，与 `origin/main` 一致且工作树干净；XY2API `0.0.5` / Sub2API compat `0.2.1`；无开放 PR，最近定时同步和主线 CI 成功。
+  - 当前阶段：已核实上游最新稳定 Release 为 `v0.2.3`，固定 annotated tag object `fe2b5c04b1c9503fba7e01a099b206f14867cfc1`、目标 commit `8fa67d477d6651a744754392a8982ea589c26ae6`、签名状态 `unsigned`，真实 merge base 为 `578785ee7fb35030b094b69624efe25670a36f5f`。三方预检覆盖 111 个上游提交、279 个上游文件、151 个重叠文件和 2 个上游 migration；预测 21 个文本冲突，其中 19 个新路径需先纳入人工裁决清单。
+  - 卡点/风险：无外部阻塞；XY2API 已发布 `235_group_long_context_pricing_models.sql`，上游新增 `235_group_model_allowlist.sql` 和 `236_group_model_allowlist_repair.sql`，正式同步时必须保持已发布 migration 不变并重新编号上游迁移。
+  - 下一步：通过预备 PR 登记新冲突清单与测试；合入后从最新 `main` 执行 `prepare`，逐项完成三方语义裁决、验证、合并和发布。
 
 ## 当前重要事项
 
