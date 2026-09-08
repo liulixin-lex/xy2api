@@ -1492,7 +1492,7 @@
             v-model:models="createForm.long_context_pricing_models"
             input-id="create-long-context-models"
             :candidates="createLongContextCandidates"
-            :loading="createModelsListLoading"
+            :loading="createModelAllowlistLoading"
           />
           <div class="mt-3 space-y-2">
             <PricingEntryCard v-for="(entry, index) in createForm.model_pricing" :key="index" :entry="entry" :platform="createForm.platform" hide-token-intervals @update="createForm.model_pricing[index] = $event" @remove="createForm.model_pricing.splice(index, 1)" />
@@ -3150,7 +3150,7 @@
             v-model:models="editForm.long_context_pricing_models"
             input-id="edit-long-context-models"
             :candidates="editLongContextCandidates"
-            :loading="editModelsListLoading"
+            :loading="editModelAllowlistLoading"
           />
           <div class="mt-3 space-y-2">
             <PricingEntryCard v-for="(entry, index) in editForm.model_pricing" :key="index" :entry="entry" :platform="editForm.platform" hide-token-intervals @update="editForm.model_pricing[index] = $event" @remove="editForm.model_pricing.splice(index, 1)" />
