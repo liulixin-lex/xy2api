@@ -2,7 +2,7 @@
 
 package repository
 
-import "github.com/Wei-Shaw/sub2api/internal/service"
+import "github.com/liulixin-lex/xy2api/internal/service"
 
 func (s *ProxyExpirySuite) TestBackupReferencesAreDirectedAndShareable() {
 	backupID := s.mkProxy("shared-backup", service.FallbackModeNone, nil, nil)
