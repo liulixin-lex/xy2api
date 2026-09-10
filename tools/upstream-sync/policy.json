@@ -117,7 +117,9 @@
     ".github/workflows/cla.yml",
     "CLA.md",
     "frontend/src/components/common/ProxyAdBanner.vue",
-    "assets/partners/logos/axisnow.jpg"
+    "assets/partners/logos/axisnow.jpg",
+    "assets/partners/logos/cola-proxy.jpg",
+    "assets/partners/logos/ppdog.png"
   ],
   "custom_patches": [
     "legacy-config-path",
