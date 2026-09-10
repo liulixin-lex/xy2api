@@ -1,130 +1,51 @@
 {
   "schema_version": 1,
   "upstream_repo": "Wei-Shaw/sub2api",
-  "upstream_tag": "v0.2.3",
-  "upstream_tag_ref": "sub2api/v0.2.3",
-  "upstream_tag_object": "fe2b5c04b1c9503fba7e01a099b206f14867cfc1",
+  "upstream_tag": "v0.2.4",
+  "upstream_tag_ref": "sub2api/v0.2.4",
+  "upstream_tag_object": "d681d0798064ee0ffff376d19687d12f09fe600f",
   "upstream_tag_signature": "unsigned",
-  "upstream_commit": "8fa67d477d6651a744754392a8982ea589c26ae6",
-  "merge_base": "578785ee7fb35030b094b69624efe25670a36f5f",
-  "fork_start": "456c56459d0e6364f78d34d0df9bb3d235137511",
-  "merge_commit": "1610f03c2bb32370cc28d5c5d164b6056038a317",
-  "module_normalization_commit": "25cbbe65252214d44b00302102dbf3beb2033862",
-  "manual_resolution_commit": "93486954124cc134e4a7442b56dac29673da15ed",
-  "generated_commit": "3808dcbd645af0c77b15b09a24d7328af2ae9a15",
-  "migration_adaptation_commit": "8abf2ca6a03d38909fa26d8cc5b9a45912abc563",
-  "migration_checksum_commit": "9e3b7654a6163e48c101587c9a43949e89b9166b",
-  "manual_resolution_record_commit": "77c73af28e7e2c80d381777ced59cb860fa78bf7",
-  "sync_branch": "sync/sub2api-v0.2.3",
-  "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/17",
+  "upstream_commit": "5de5e2bed035d43591a2e10e51f420ef6a84eb98",
+  "merge_base": "8fa67d477d6651a744754392a8982ea589c26ae6",
+  "fork_start": "8c95051b697c7869fd27a8953f14460c898cd595",
   "xy2api_version": "0.0.6",
   "sub2api_compat_version": "0.2.3",
-  "status": "resolved",
+  "status": "pending",
   "manual_resolutions": [
     {
+      "path": "README.md",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "README_CN.md",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "README_JA.md",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
       "path": "backend/cmd/server/VERSION",
-      "status": "resolved",
-      "resolution": "Kept XY2API product versioning independent from Sub2API; 0.0.5 remained in place during conflict review and is advanced only by the dedicated RC commit."
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
-      "path": "backend/ent/group.go",
-      "status": "resolved",
-      "resolution": "Regenerated the Group entity from the merged schema so model_allowlist and XY2API long-context scope/model fields coexist with correct scanners and accessors."
+      "path": "backend/internal/service/ops_settings.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
-      "path": "backend/ent/runtime/runtime.go",
-      "status": "resolved",
-      "resolution": "Regenerated Ent runtime descriptors from the merged field order, retaining XY2API long-context fields and adopting the upstream model_allowlist descriptor."
+      "path": "backend/internal/service/plugin_package.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
-      "path": "backend/internal/handler/admin/account_handler.go",
-      "status": "resolved",
-      "resolution": "Adopted upstream simple-mode account grouping behavior and config dependency while preserving XY2API account extensions and normalized module imports."
-    },
-    {
-      "path": "backend/internal/handler/admin/grok_import_probe.go",
-      "status": "resolved",
-      "resolution": "Adopted the upstream simple-mode guard for Grok imports and retained XY2API error/service behavior with normalized imports."
-    },
-    {
-      "path": "backend/internal/handler/admin/group_handler.go",
-      "status": "resolved",
-      "resolution": "Adopted upstream simple-mode group request shaping and model-allowlist endpoints while retaining XY2API live-attestation and group extensions."
-    },
-    {
-      "path": "backend/internal/handler/gateway_models_test.go",
-      "status": "resolved",
-      "resolution": "Combined upstream OpenAI model-list coverage with XY2API Claude and middleware coverage, using only the XY2API module path."
-    },
-    {
-      "path": "backend/internal/handler/gemini_v1beta_handler_test.go",
-      "status": "resolved",
-      "resolution": "Kept XY2API Gemini-native compatibility tests and integrated the upstream group model-allowlist expectations with normalized imports."
-    },
-    {
-      "path": "backend/internal/handler/openai_gateway_handler.go",
-      "status": "resolved",
-      "resolution": "Adopted upstream request-model prereading required by model-allowlist admission while retaining XY2API security audit, ingress, and gateway extensions."
-    },
-    {
-      "path": "backend/internal/repository/group_repo_integration_test.go",
-      "status": "resolved",
-      "resolution": "Integrated upstream model-allowlist persistence tests with the existing XY2API repository suite and normalized imports."
-    },
-    {
-      "path": "backend/internal/server/routes/composite_platform_test.go",
-      "status": "resolved",
-      "resolution": "Adopted request-model extraction for composite allowlist tests while retaining XY2API composite-provider route coverage."
-    },
-    {
-      "path": "backend/internal/server/routes/gateway.go",
-      "status": "resolved",
-      "resolution": "Adopted upstream centralized request-model extraction and allowlist middleware wiring while retaining XY2API route and ingress compatibility contracts."
-    },
-    {
-      "path": "backend/internal/service/admin_account.go",
-      "status": "resolved",
-      "resolution": "Integrated upstream simple-mode account constraints with existing XY2API account management behavior and normalized imports."
-    },
-    {
-      "path": "backend/internal/service/admin_group.go",
-      "status": "resolved",
-      "resolution": "Integrated upstream simple-mode and model-allowlist group management with XY2API pricing, provider, and long-context fields."
-    },
-    {
-      "path": "backend/internal/service/admin_service.go",
-      "status": "resolved",
-      "resolution": "Adopted the upstream config dependency for simple-mode service boundaries while retaining XY2API admin interfaces."
-    },
-    {
-      "path": "backend/internal/service/admin_service_duplicate_account_test.go",
-      "status": "resolved",
-      "resolution": "Integrated upstream simple-mode duplicate-account assertions with XY2API validation coverage and normalized imports."
-    },
-    {
-      "path": "backend/internal/service/admin_service_group_test.go",
-      "status": "resolved",
-      "resolution": "Integrated upstream simple-mode group assertions with XY2API group behavior and normalized imports."
-    },
-    {
-      "path": "backend/internal/service/api_key_auth_cache_impl.go",
-      "status": "resolved",
-      "resolution": "Carried both model_allowlist and XY2API model-scoped long-context fields in auth snapshots and advanced the cache schema to v25."
-    },
-    {
-      "path": "backend/internal/service/openai_gateway_ollama_cloud_max_tokens_test.go",
-      "status": "resolved",
-      "resolution": "Adopted upstream Ollama Cloud protocol and base-URL clamping coverage while retaining XY2API custom-cap compatibility tests."
-    },
-    {
-      "path": "frontend/src/components/account/EditAccountModal.vue",
-      "status": "resolved",
-      "resolution": "Adopted upstream month/year expiry presets and simple-mode grouping while retaining XY2API long-context override semantics and sponsor-free UI."
-    },
-    {
-      "path": "frontend/src/views/admin/GroupsView.vue",
-      "status": "resolved",
-      "resolution": "Adopted upstream model-allowlist and simple-mode group UI, and retargeted XY2API long-context model candidates to the renamed allowlist state."
+      "path": "deploy/tests/apple-container-test.sh",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     }
   ],
   "custom_patches": [
