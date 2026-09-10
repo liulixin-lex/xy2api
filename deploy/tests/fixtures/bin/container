@@ -44,7 +44,7 @@ inspect_resource() {
         if [[ -s "${STATE_DIR}/network-subnets/${resource_name}" ]]; then
             subnet="$(<"${STATE_DIR}/network-subnets/${resource_name}")"
         fi
-        printf '[{"configuration":{"ipv4Subnet":"%s","labels":{"org.sub2api.stack":"%s"}}}]\n' \
+        printf '[{"configuration":{"ipv4Subnet":"%s","labels":{"org.xy2api.stack":"%s"}}}]\n' \
             "${subnet}" "${label_value}"
         return
     fi
