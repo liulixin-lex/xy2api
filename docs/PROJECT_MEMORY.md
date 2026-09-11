@@ -4,7 +4,7 @@
 
 ## 当前交接状态
 
-最后更新：`2026-09-08T14:48:20Z`（UTC）
+最后更新：`2026-09-10T02:38:00Z`（UTC）
 
 | 项目 | 当前事实 |
 | --- | --- |
@@ -22,7 +22,7 @@ Sub2API `v0.2.3` 已通过同步 PR 合入 `main`，XY2API `v0.0.6-rc.1` 与正�
 
 ## 进行中的工作
 
-- `20260910-sub2api-v0.2.4-full-release`：按仓库标准同步 Sub2API `v0.2.4`，完成预检策略、三方合并、人工裁决、RC、正式版与清理全流程。当前在 `chore/upstream-v0.2.4-preflight` 准备登记 3 个新冲突路径；冻结标识为 tag object `d681d0798064ee0ffff376d19687d12f09fe600f`、目标 commit `5de5e2bed035d43591a2e10e51f420ef6a84eb98`、merge base `8fa67d477d6651a744754392a8982ea589c26ae6`、fork start `33d05a4ebd407351a5ba18747b45d91477164ab9`，计划产品版本 `0.0.7-rc.1` / `0.0.7`。
+- `20260910-sub2api-v0.2.4-full-release`：按仓库标准同步 Sub2API `v0.2.4`，完成预检策略、三方合并、人工裁决、RC、正式版与清理全流程。预检 PR `#21` 已合入；同步 Draft PR [#22](https://github.com/liulixin-lex/xy2api/pull/22) 已创建，70 个上游提交与 7 个冲突完成集成，历史 285 个迁移 checksum 不变，新 MiniMax 迁移顺延为 239。本地 Go unit/integration/build、前端 lint/typecheck/i18n/1,975 tests/build 及同步审计均通过，正在等待 PR 门禁后发布 `0.0.7-rc.1`。冻结标识为 tag object `d681d0798064ee0ffff376d19687d12f09fe600f`、目标 commit `5de5e2bed035d43591a2e10e51f420ef6a84eb98`、merge base `8fa67d477d6651a744754392a8982ea589c26ae6`、fork start `8c95051b697c7869fd27a8953f14460c898cd595`，正式版本计划为 `0.0.7`。
 
 ## 当前重要事项
 
