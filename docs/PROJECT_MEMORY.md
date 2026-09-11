@@ -4,25 +4,25 @@
 
 ## 当前交接状态
 
-最后更新：`2026-09-10T02:38:00Z`（UTC）
+最后更新：`2026-09-11T12:24:47Z`（UTC）
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
-| 当前分支 | 稳定交接分支为 `main`；无进行中短期分支 |
-| 发布提交 | `v0.0.6` 标签指向 `e065f39c7bf62ca2634e8d565f59b01131af744b`；`main` 在其后仅有发布记录收尾 |
-| 工作树 | 稳定交接状态为干净；业务、同步、发布和资源清理均已完成 |
-| XY2API 产品版本 | `0.0.6`；正式 [v0.0.6 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.6) 为当前 latest |
-| 已审计的 Sub2API 基线 | `v0.2.3` / commit `8fa67d477d6651a744754392a8982ea589c26ae6`；已通过 PR `#17` 合入 `main` |
-| 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，21 个人工冲突均已记录；同步 PR [#17](https://github.com/liulixin-lex/xy2api/pull/17) 以 merge commit `867097dc4` 合入 |
+| 当前分支 | 正式版候选分支 `release/0.0.7`；稳定分支为 `main` |
+| 发布提交 | RC `v0.0.7-rc.1` 指向同步 merge commit `ea48f08fc8d436d43dceacdc9728c3928e95cd0d`；正式 `v0.0.7` 待 PR 门禁后发布 |
+| 工作树 | 仅正式版本晋级与发布记录待提交；业务同步改动已合入 `main` |
+| XY2API 产品版本 | `0.0.7-rc.1` 已通过资格验证；正式 [v0.0.6 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.6) 仍为当前 latest |
+| 已审计的 Sub2API 基线 | `v0.2.4` / commit `5de5e2bed035d43591a2e10e51f420ef6a84eb98`；已通过 PR `#22` 合入 `main` |
+| 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，7 个人工冲突均已记录；同步 PR [#22](https://github.com/liulixin-lex/xy2api/pull/22) 以 merge commit `ea48f08fc8` 合入 |
 | 本地远端 | `origin` 可读写；`upstream` 仅允许 fetch，push URL 为 `DISABLED` |
 | 当前环境工具 | `git`、`python3 3.12.3`、`gh`、Docker、Node、Corepack 可用；本地无 Go、pnpm 命令，已用 Go 1.27 Docker 与 Corepack pnpm 9.15.9 完成验证 |
 
-Sub2API `v0.2.3` 已通过同步 PR 合入 `main`，XY2API `v0.0.6-rc.1` 与正式 `v0.0.6` 已完成 Release、多平台制品、双架构镜像和隔离部署验收。当前无进行中同步或发布工作；生产升级前必须备份 PostgreSQL、Redis 和 `/app/data`。
+Sub2API `v0.2.4` 已通过同步 PR 合入 `main`，XY2API `v0.0.7-rc.1` 已完成 Release、五平台制品、双架构镜像、全新安装、从 `v0.0.6` 升级、旧镜像回滚和再前滚验收。当前正在通过独立 PR 晋级正式 `v0.0.7`；生产升级前仍必须备份 PostgreSQL、Redis 和 `/app/data`。
 
 ## 进行中的工作
 
-- `20260910-sub2api-v0.2.4-full-release`：按仓库标准同步 Sub2API `v0.2.4`，完成预检策略、三方合并、人工裁决、RC、正式版与清理全流程。预检 PR `#21` 已合入；同步 Draft PR [#22](https://github.com/liulixin-lex/xy2api/pull/22) 已创建，70 个上游提交与 7 个冲突完成集成，历史 285 个迁移 checksum 不变，新 MiniMax 迁移顺延为 239。本地 Go unit/integration/build、前端 lint/typecheck/i18n/1,975 tests/build 及同步审计均通过，正在等待 PR 门禁后发布 `0.0.7-rc.1`。冻结标识为 tag object `d681d0798064ee0ffff376d19687d12f09fe600f`、目标 commit `5de5e2bed035d43591a2e10e51f420ef6a84eb98`、merge base `8fa67d477d6651a744754392a8982ea589c26ae6`、fork start `8c95051b697c7869fd27a8953f14460c898cd595`，正式版本计划为 `0.0.7`。
+- `20260910-sub2api-v0.2.4-full-release`：按仓库标准同步 Sub2API `v0.2.4`，完成预检策略、三方合并、人工裁决、RC、正式版与清理全流程。预检 PR `#21` 和同步 PR [#22](https://github.com/liulixin-lex/xy2api/pull/22) 已合入；70 个上游提交与 7 个冲突完成集成，历史 285 个迁移 checksum 不变，新 MiniMax 迁移顺延为 239。本地 Go unit/integration/build、前端 lint/typecheck/i18n/1,975 tests/build、同步审计及合并后主线 CI 均通过。RC [v0.0.7-rc.1](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.7-rc.1) 的 Release run `34596879431`、五个制品 SHA-256、双架构 GHCR 及隔离新装/升级/回滚验收均通过；现正通过独立正式版 PR 晋级 `0.0.7`。冻结标识为 tag object `d681d0798064ee0ffff376d19687d12f09fe600f`、目标 commit `5de5e2bed035d43591a2e10e51f420ef6a84eb98`、merge base `8fa67d477d6651a744754392a8982ea589c26ae6`、fork start `8c95051b697c7869fd27a8953f14460c898cd595`。
 
 ## 当前重要事项
 
@@ -274,3 +274,13 @@ pnpm --dir frontend run build
 - 验证：同步工具 11/11、strict doctor、provenance/compatibility audit、冲突标记与 module path 检查、Compose/部署脚本；Go 1.27 unit/integration、真实 PostgreSQL/Redis repository 集成；前端 lint、typecheck、1901 项测试和生产构建；PR #16、#17、#18 所有必需检查；RC/正式 Release runs `34232579648`、`34236559731`；两版各 5 个制品的 SHA-256；双架构 GHCR 与 OCI 标签；RC 全新安装、`v0.0.5` 原地升级、PostgreSQL/Redis/`/app/data` 完整备份恢复回滚，以及正式版全新安装均通过。
 - 卡点/风险：无已知阻塞。上游迁移编号 235 与 XY2API 已发布迁移冲突，已通过只追加 236–238 解决，旧 235 及 checksum 未改写。由于 236 包含列重命名，生产回滚必须恢复升级前 PostgreSQL、Redis 和 `/app/data` 备份，不能仅切换回旧镜像。
 - 下一步：无。后续维护应保留 `sub2api/v0.2.3`、`v0.0.6-rc.1` 和 `v0.0.6` 标签，从 `main`、`UPSTREAM_BASE.json` 与 GitHub Release 重新核实动态状态。
+
+### 2026-09-11T12:24:47Z — `20260910-sub2api-v0.2.4-full-release` — 进行中
+
+- 请求/目标：分析 GitHub 仓库同步状态，按仓库标准完成 Sub2API 下一正式版同步、审计、提交、RC 与 XY2API 正式发版全流程。
+- 开始状态：`main` 为 `33d05a4`，与 `origin/main` 一致且工作树干净；XY2API `0.0.6` / Sub2API compat `0.2.3`；同步机制正常，上游已新发布正式 `v0.2.4`，因此处于正常待同步状态。
+- 完成操作：固定上游 annotated tag object、目标 commit、fork 起点与 merge base；通过预检 PR #21 登记 3 个新冲突路径；生成三方报告并集成 70 个上游提交，裁决 7 个冲突，完成模块归一、迁移编号/checksum、生成代码与 provenance 适配；同步 PR #22 在 16/16 检查通过后以 `ea48f08fc8` 合入；发布并验收 `v0.0.7-rc.1`。
+- 修改文件：完整同步矩阵见 `docs/upstream-sync/v0.2.4.json` 和 PR #22，预检策略见 PR #21；当前正式版候选分支仅修改 `backend/cmd/server/VERSION`、`UPSTREAM_BASE.json` 和本记忆文件。
+- 验证：同步工具 13/13、strict doctor/audit、Compose/部署脚本、Go 1.27 Ent/Wire 零差异、unit/integration/build、前端 lint/typecheck/i18n/1,975 tests/build、PR #21/#22 全部检查及合并后主线 CI/安全扫描均通过。RC Release run `34596879431` 成功，五个平台制品的 SHA-256 全部通过，GHCR digest `sha256:11c2515921c4800ff0a44ff60629573adf0abe1cbc7f2f467eecf22ebc3d9006` 包含 amd64/arm64 且 OCI version/revision 正确。隔离环境中 RC 全新安装、`v0.0.6` 原地升级、旧镜像回切、再前滚、286 条迁移、MiniMax 约束、共享备用代理关系、登录和三类持久化数据均通过；升级前 PostgreSQL/Redis/`/app/data` 备份已生成并复算稳定。
+- 卡点/风险：无当前阻塞。迁移 239 只扩展 CHECK 约束，旧镜像已验证可在升级后 schema 与新关系数据上运行；生产仍应保留升级前三类备份，不宣称 SQL 自动降级。
+- 下一步：通过独立正式版 PR 晋级 `0.0.7`，验收正式 Release/镜像/新装，清理隔离资源与已合并短期分支，再将本记录更新为完成。
