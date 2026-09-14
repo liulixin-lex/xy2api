@@ -1163,3 +1163,8 @@ export const accountsAPI = {
 }
 
 export default accountsAPI
+
+export async function downloadIQCheckDiagnostics(id: number) {
+ const { data } = await apiClient.get(`/admin/accounts/${id}/iq-check/diagnostics`, { responseType: 'blob' })
+ return data as Blob
+}

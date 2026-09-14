@@ -2,13 +2,6 @@
 package iqcheck
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/json"
-	"errors"
-	"io"
-	"strings"
-
 	"github.com/liulixin-lex/xy2api/internal/domain"
 )
 
@@ -26,13 +19,14 @@ const Prompt = `在一个黑色的袋子里放有三种口味的糖果，每种�
 只输出一个 JSON 对象，仅含整数 answer，不输出解释或 Markdown。`
 
 type Result struct {
-	Status           string  `json:"status"`
-	Answer           string  `json:"answer"`
-	Reason           string  `json:"reason,omitempty"`
-	NormalizedAnswer *string `json:"normalized_answer,omitempty"`
-	AnswerFormat     string  `json:"answer_format,omitempty"`
-	FormatCompliant  bool    `json:"format_compliant"`
-	ReportedModel    string  `json:"reported_model,omitempty"`
+	Diagnostic       *Diagnostic `json:"diagnostic,omitempty"`
+	Status           string      `json:"status"`
+	Answer           string      `json:"answer"`
+	Reason           string      `json:"reason,omitempty"`
+	NormalizedAnswer *string     `json:"normalized_answer,omitempty"`
+	AnswerFormat     string      `json:"answer_format,omitempty"`
+	FormatCompliant  bool        `json:"format_compliant"`
+	ReportedModel    string      `json:"reported_model,omitempty"`
 }
 
 func Unknown(reason string) Result { return Result{Status: "unknown", Reason: reason} }
@@ -82,183 +76,4 @@ func Payload(chat bool, profiles ...domain.IQProfile) map[string]any {
 		}
 	}
 	return p
-}
-
-type content struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-type message struct {
-	Phase   string    `json:"phase"`
-	Role    string    `json:"role"`
-	Type    string    `json:"type"`
-	Status  string    `json:"status"`
-	Content []content `json:"content"`
-}
-type response struct {
-	Type     string          `json:"type"`
-	Model    string          `json:"model"`
-	Status   string          `json:"status"`
-	Output   []message       `json:"output"`
-	Response *response       `json:"response"`
-	Error    json.RawMessage `json:"error"`
-	Choices  []struct {
-		Index        int     `json:"index"`
-		FinishReason *string `json:"finish_reason"`
-		Delta        struct {
-			Content string `json:"content"`
-			Refusal string `json:"refusal"`
-		} `json:"delta"`
-		Message struct {
-			Content string `json:"content"`
-			Refusal string `json:"refusal"`
-		} `json:"message"`
-	} `json:"choices"`
-}
-
-func responseAnswer(r response) (string, error) {
-	if r.Status != "completed" {
-		return "", errors.New("incomplete_response")
-	}
-	var answer strings.Builder
-	for _, m := range r.Output {
-		if m.Type != "message" || m.Role != "assistant" || (m.Phase != "" && m.Phase != "final_answer") {
-			continue
-		}
-		if m.Status != "" && m.Status != "completed" {
-			return "", errors.New("incomplete_response")
-		}
-		for _, c := range m.Content {
-			if c.Type == "refusal" {
-				return "", errors.New("refusal")
-			}
-			if c.Type == "output_text" {
-				_, _ = answer.WriteString(c.Text)
-			}
-		}
-	}
-	return answer.String(), nil
-}
-
-// Parse requires a successful terminal event; deltas alone never count as an answer.
-func Parse(body io.Reader, sse, chat bool) Result {
-	raw, err := io.ReadAll(io.LimitReader(body, MaxResponseBytes+1))
-	if err != nil {
-		return Unknown("response_read_failed")
-	}
-	if len(raw) > MaxResponseBytes {
-		return Unknown("response_too_large")
-	}
-	var answer strings.Builder
-	completed := false
-	reportedModel := ""
-	consume := func(data []byte) error {
-		var r response
-		if _, err := uniqueJSON(data); err != nil {
-			return errors.New("invalid_response")
-		}
-		if err := json.Unmarshal(data, &r); err != nil {
-			return errors.New("invalid_response")
-		}
-		if r.Model != "" {
-			reportedModel = r.Model
-		}
-		if len(r.Error) > 0 && string(r.Error) != "null" {
-			return errors.New("upstream_error")
-		}
-		if chat {
-			for _, c := range r.Choices {
-				if c.Delta.Refusal != "" || c.Message.Refusal != "" {
-					return errors.New("refusal")
-				}
-				if c.Index != 0 {
-					continue
-				}
-				if completed && (c.Delta.Content != "" || c.Message.Content != "") {
-					return errors.New("invalid_response")
-				}
-				if sse {
-					_, _ = answer.WriteString(c.Delta.Content)
-				} else {
-					_, _ = answer.WriteString(c.Message.Content)
-				}
-				if c.FinishReason != nil {
-					if *c.FinishReason != "stop" {
-						return errors.New("incomplete_response")
-					}
-					completed = true
-				}
-			}
-		} else {
-			if r.Type == "response.failed" || r.Type == "response.incomplete" || r.Type == "error" {
-				return errors.New("incomplete_response")
-			}
-			if !sse || r.Type == "response.completed" || r.Type == "response.done" {
-				if r.Response != nil {
-					r = *r.Response
-				}
-				if r.Model != "" {
-					reportedModel = r.Model
-				}
-				text, err := responseAnswer(r)
-				if err != nil {
-					return err
-				}
-				if completed && text != answer.String() {
-					return errors.New("conflicting_final_response")
-				}
-				answer.Reset()
-				_, _ = answer.WriteString(text)
-				completed = true
-			}
-		}
-		return nil
-	}
-	if !sse {
-		if err := consume(raw); err != nil {
-			return Unknown(err.Error())
-		}
-	} else {
-		scanner := bufio.NewScanner(bytes.NewReader(raw))
-		scanner.Buffer(make([]byte, 4096), MaxResponseBytes+1)
-		var data []string
-		flush := func() error {
-			if len(data) == 0 {
-				return nil
-			}
-			joined := strings.Join(data, "\n")
-			data = nil
-			if joined == "[DONE]" {
-				return nil
-			}
-			return consume([]byte(joined))
-		}
-		for scanner.Scan() {
-			line := scanner.Text()
-			if line == "" {
-				if err := flush(); err != nil {
-					return Unknown(err.Error())
-				}
-				continue
-			}
-			if strings.HasPrefix(line, "data:") {
-				data = append(data, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
-			}
-		}
-		if scanner.Err() != nil {
-			return Unknown("invalid_response")
-		}
-		if err := flush(); err != nil {
-			return Unknown(err.Error())
-		}
-	}
-	if !completed {
-		return Unknown("incomplete_response")
-	}
-	if len(reportedModel) > 256 {
-		return Unknown("response_too_large")
-	}
-	result := Grade(answer.String())
-	result.ReportedModel = reportedModel
-	return result
 }

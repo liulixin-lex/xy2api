@@ -1222,7 +1222,7 @@ export interface Account {
 
   // Rate limit & scheduling fields
   schedulable: boolean
-  iq_check?: IQCheckSettings & { status: 'smart' | 'degraded' | 'unknown'; reason?: string; last_run_at?: string | null; next_run_at?: string | null }
+  iq_check?: IQCheckSettings & { execution_state?: string; execution_reason?: string; task_id?: string; next_eligible_at?: string | null; freshness?: string; budget_remaining?: number; status: 'smart' | 'degraded' | 'unknown'; reason?: string; last_run_at?: string | null; next_run_at?: string | null }
   rate_limited_at: string | null
   rate_limit_reset_at: string | null
   overload_until: string | null
@@ -1474,10 +1474,12 @@ export interface OpenAIResponsesState {
   openai_responses_supported?: boolean
 }
 
-export interface IQCheckSettings { enabled: boolean; interval_minutes: number; model?: string; reasoning_effort?: string; output_mode?: 'compat' | 'strict' }
+export interface IQCheckSettings { scheduling_mode?: 'fixed' | 'adaptive'; max_interval_minutes?: number; daily_request_limit?: number; timeout_seconds?: number; quota_group?: string; enabled: boolean; interval_minutes: number; model?: string; reasoning_effort?: string; output_mode?: 'compat' | 'strict' }
 export interface IQModel { id: string; display_name: string; source: string; reasoning?: boolean; supported_reasoning_levels?: string[]; default_reasoning_level?: string; capability_sources: Record<string, string> }
 export interface IQModelCatalog { models: IQModel[]; fetched_at: string | null; from_cache: boolean; stale: boolean; error?: string }
-export interface IQCheckRecord { id: number; prompt_version: string; model: string; effort: string; status: 'smart' | 'degraded' | 'unknown'; answer: string; reason?: string; started_at: string; finished_at?: string | null; latency_ms: number; normalized_answer?: string | null; answer_format?: string; output_mode?: string; format_compliant?: boolean | null; grader_version?: string; protocol?: string; reported_model?: string | null; config_revision?: string }
+export interface IQCheckDiagnostic { error_code?: string; error_type?: string; retry_after?: string; retry_after_unbounded?: boolean; input_tokens?: number; output_tokens?: number; reasoning_tokens?: number; retry_visibility?: string; parser_version: string; stage: string; code?: string; http_status?: number; media_type?: string; content_encoding?: string; protocol?: string; transport?: string; format_detected?: boolean; event_type?: string; event_index?: number; field?: string; offset?: number; bytes_read?: number; request_id?: string }
+
+export interface IQCheckRecord { diagnostic?: IQCheckDiagnostic | null; id: number; prompt_version: string; model: string; effort: string; status: 'smart' | 'degraded' | 'unknown'; answer: string; reason?: string; started_at: string; finished_at?: string | null; latency_ms: number; normalized_answer?: string | null; answer_format?: string; output_mode?: string; format_compliant?: boolean | null; grader_version?: string; protocol?: string; reported_model?: string | null; config_revision?: string }
 
 export interface CreateAccountRequest {
   iq_check?: Partial<IQCheckSettings>

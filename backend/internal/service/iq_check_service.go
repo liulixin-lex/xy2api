@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -23,33 +22,36 @@ var ErrIQCheckInvalid = infraerrors.BadRequest("IQ_CHECK_INVALID", "Invalid Open
 var ErrIQCheckDisabled = infraerrors.BadRequest("IQ_CHECK_DISABLED", "IQ check is disabled")
 
 type IQCheckClaim struct {
-	AccountID int64
-	Token     string
-	Revision  string
-	StartedAt time.Time
-	Profile   domain.IQProfile
-	Protocol  string
+	QuotaGroup     string
+	TimeoutSeconds int
+	AccountID      int64
+	Token          string
+	Revision       string
+	StartedAt      time.Time
+	Profile        domain.IQProfile
+	Protocol       string
 }
 
 type IQCheckRecord struct {
-	ID               int64      `json:"id"`
-	PromptVersion    string     `json:"prompt_version"`
-	Model            string     `json:"model"`
-	Effort           string     `json:"effort"`
-	Status           string     `json:"status"`
-	Answer           string     `json:"answer"`
-	Reason           string     `json:"reason,omitempty"`
-	StartedAt        time.Time  `json:"started_at"`
-	FinishedAt       *time.Time `json:"finished_at"`
-	LatencyMS        int64      `json:"latency_ms"`
-	NormalizedAnswer *string    `json:"normalized_answer"`
-	AnswerFormat     string     `json:"answer_format"`
-	OutputMode       string     `json:"output_mode"`
-	FormatCompliant  *bool      `json:"format_compliant"`
-	GraderVersion    string     `json:"grader_version"`
-	Protocol         string     `json:"protocol"`
-	ReportedModel    *string    `json:"reported_model"`
-	ConfigRevision   string     `json:"config_revision"`
+	Diagnostic       *iqcheck.Diagnostic `json:"diagnostic,omitempty"`
+	ID               int64               `json:"id"`
+	PromptVersion    string              `json:"prompt_version"`
+	Model            string              `json:"model"`
+	Effort           string              `json:"effort"`
+	Status           string              `json:"status"`
+	Answer           string              `json:"answer"`
+	Reason           string              `json:"reason,omitempty"`
+	StartedAt        time.Time           `json:"started_at"`
+	FinishedAt       *time.Time          `json:"finished_at"`
+	LatencyMS        int64               `json:"latency_ms"`
+	NormalizedAnswer *string             `json:"normalized_answer"`
+	AnswerFormat     string              `json:"answer_format"`
+	OutputMode       string              `json:"output_mode"`
+	FormatCompliant  *bool               `json:"format_compliant"`
+	GraderVersion    string              `json:"grader_version"`
+	Protocol         string              `json:"protocol"`
+	ReportedModel    *string             `json:"reported_model"`
+	ConfigRevision   string              `json:"config_revision"`
 }
 
 type IQCheckRepository interface {
@@ -87,20 +89,24 @@ func ValidIQStatusFilter(status string) bool {
 }
 
 type IQCheckService struct {
-	repo         IQCheckRepository
-	accounts     AccountRepository
-	tester       *AccountTestService
-	tokens       *OpenAITokenProvider
-	cancel       context.CancelFunc
-	wg           sync.WaitGroup
-	modelsMu     sync.Mutex
-	modelsCache  map[string]IQModelCatalog
-	modelsFlight singleflight.Group
+	concurrency    *ConcurrencyService
+	maxConcurrency int
+	quotaGroups    map[string]IQQuotaPolicy
+	repo           IQCheckRepository
+	accounts       AccountRepository
+	tester         *AccountTestService
+	tokens         *OpenAITokenProvider
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	modelsMu       sync.Mutex
+	modelsCache    map[string]IQModelCatalog
+	modelsFlight   singleflight.Group
 }
 
-func ProvideIQCheckService(accounts AccountRepository, tester *AccountTestService, tokens *OpenAITokenProvider) *IQCheckService {
+func ProvideIQCheckService(accounts AccountRepository, tester *AccountTestService, tokens *OpenAITokenProvider, concurrency *ConcurrencyService) *IQCheckService {
 	repo, ok := accounts.(IQCheckRepository)
-	s := &IQCheckService{repo: repo, accounts: accounts, tester: tester, tokens: tokens}
+	maxConcurrency, quotaGroups := iqMonitoringConfig()
+	s := &IQCheckService{concurrency: concurrency, maxConcurrency: maxConcurrency, quotaGroups: quotaGroups, repo: repo, accounts: accounts, tester: tester, tokens: tokens}
 	if !ok {
 		return s
 	}
@@ -140,7 +146,7 @@ func (s *IQCheckService) run(ctx context.Context) {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
-		claims, err := s.repo.ClaimIQChecks(ctx, time.Now().UTC(), 10)
+		claims, err := s.repo.ClaimIQChecks(ctx, time.Now().UTC(), s.maxConcurrency)
 		if err != nil && ctx.Err() == nil {
 			logger.LegacyPrintf("iq_check", "claim failed: %v", err)
 		}
@@ -148,15 +154,7 @@ func (s *IQCheckService) run(ctx context.Context) {
 			s.wg.Add(1)
 			go func(claim IQCheckClaim) {
 				defer s.wg.Done()
-				probeCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
-				defer cancel()
-				result := s.probe(probeCtx, claim.AccountID, claim)
-				if ctx.Err() != nil {
-					return
-				}
-				if err := s.repo.CompleteIQCheck(ctx, claim, result, time.Now().UTC()); err != nil {
-					logger.LegacyPrintf("iq_check", "complete failed: account=%d err=%v", claim.AccountID, err)
-				}
+				s.execute(ctx, claim)
 			}(claim)
 		}
 		select {
@@ -167,7 +165,12 @@ func (s *IQCheckService) run(ctx context.Context) {
 	}
 }
 
-func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckClaim) iqcheck.Result {
+func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckClaim) (result iqcheck.Result) {
+	defer func() {
+		if result.Diagnostic == nil {
+			result.Diagnostic = (&iqcheck.Diagnostic{ParserVersion: iqcheck.ParserVersion, Stage: "request", Code: result.Reason}).Bounded()
+		}
+	}()
 	if s.tester == nil {
 		return iqcheck.Unknown("transport_unavailable")
 	}
@@ -232,7 +235,7 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 		return iqcheck.Unknown("authentication_unavailable")
 	}
 	payload, _ := json.Marshal(iqcheck.Payload(chat, profile))
-	req, err := http.NewRequestWithContext(WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileOpenAI), http.MethodPost, apiURL, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(WithHTTPUpstreamRedirectsDisabled(WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileOpenAI)), http.MethodPost, apiURL, bytes.NewReader(payload))
 	if err != nil {
 		return iqcheck.Unknown("invalid_endpoint")
 	}
@@ -258,7 +261,7 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 		setOpenAIChatGPTAccountHeaders(req.Header, account)
 		enforceCodexIdentityHeadersWithUA(req.Header, account.GetOpenAIUserAgent())
 	} else {
-		applyOpenAICodexProbeHeaders(req.Header)
+		applyIQAPIKeyHeaders(req.Header)
 	}
 	account.ApplyHeaderOverrides(req.Header)
 	for _, name := range []string{"Session_id", "Conversation_id", "X-Conversation-Id", "Previous_response_id"} {
@@ -276,8 +279,9 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 		return iqcheck.Unknown("request_failed")
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return iqcheck.Unknown(fmt.Sprintf("http_%d", resp.StatusCode))
+	transport := "http"
+	if s.tester.pluginManager != nil && s.tester.pluginManager.ShouldRouteOpenAIOAuth(account) {
+		transport = "plugin"
 	}
-	return iqcheck.Parse(resp.Body, strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream"), chat)
+	return iqcheck.ParseHTTP(resp, chat, transport)
 }

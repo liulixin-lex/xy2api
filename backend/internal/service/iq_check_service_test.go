@@ -27,6 +27,7 @@ type iqProbeTransport struct {
 	HTTPUpstream
 	status   int
 	body     string
+	headers  http.Header
 	failure  error
 	requests []*http.Request
 	bodies   []map[string]any
@@ -42,7 +43,11 @@ func (u *iqProbeTransport) DoWithTLS(req *http.Request, _ string, _ int64, _ int
 	if u.failure != nil {
 		return nil, u.failure
 	}
-	return &http.Response{StatusCode: u.status, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(u.body))}, nil
+	headers := u.headers
+	if headers == nil {
+		headers = http.Header{"Content-Type": []string{"application/json"}}
+	}
+	return &http.Response{StatusCode: u.status, Header: headers, Body: io.NopCloser(strings.NewReader(u.body))}, nil
 }
 func TestIQCheckProbe(t *testing.T) {
 	for _, tc := range []struct {
@@ -157,6 +162,37 @@ func TestIQCheckConfiguredRoutes(t *testing.T) {
 			a.IQCheck.Revision = "changed"
 			require.Equal(t, "unknown", s.probe(context.Background(), 1, claim).Status)
 			require.Len(t, transport.requests, 2)
+		})
+	}
+}
+
+func TestIQCheckCompleteOAuthStream(t *testing.T) {
+	for _, kind := range []string{AccountTypeOAuth, AccountTypeSetupToken, AccountTypeAPIKey} {
+		t.Run(kind, func(t *testing.T) {
+			a := &Account{ID: 1, Platform: PlatformOpenAI, Type: kind, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "fixture", "api_key": "fixture"}, Extra: map[string]any{"openai_responses_mode": "force_responses"}}
+			stream := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"status\":\"in_progress\"}}\n\n" +
+				"data: {\"type\":\"response.auxiliary\",\"response\":\"extension\"}\n\n" +
+				"data: {\"type\":\"response.output_text.delta\",\"delta\":\"29\"}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"21\"}]}]}}\n\n"
+			u := &iqProbeTransport{status: 200, body: stream, headers: http.Header{"Content-Type": {"text/event-stream; charset=utf-8"}, "X-Request-Id": {"fixture-id"}}}
+			s := &IQCheckService{accounts: &iqProbeAccounts{account: a}, tester: &AccountTestService{cfg: &config.Config{}, httpUpstream: u}}
+			for range 2 {
+				result := s.probe(context.Background(), 1)
+				require.Equal(t, "smart", result.Status)
+				require.Equal(t, "21", result.Answer)
+				require.Equal(t, "fixture-id", result.Diagnostic.RequestID)
+				require.Equal(t, 4, result.Diagnostic.EventIndex)
+			}
+			require.Equal(t, u.bodies[0], u.bodies[1])
+			require.NotContains(t, u.bodies[0], "previous_response_id")
+			require.Equal(t, false, u.bodies[0]["store"])
+			require.Equal(t, StatusActive, a.Status)
+			require.True(t, a.Schedulable)
+			u.body = "data: {bad}\n\n"
+			result := s.probe(context.Background(), 1)
+			require.Equal(t, "unknown", result.Status)
+			require.Equal(t, "invalid_event_json", result.Reason)
+			require.NotNil(t, result.Diagnostic)
 		})
 	}
 }

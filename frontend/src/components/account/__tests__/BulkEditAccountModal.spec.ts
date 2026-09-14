@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import BulkEditAccountModal from '../BulkEditAccountModal.vue'
 import ModelWhitelistSelector from '../ModelWhitelistSelector.vue'
+import IQCheckSettings from '../IQCheckSettings.vue'
 import { adminAPI } from '@/api/admin'
 
 const { showError, showSuccess, translate } = vi.hoisted(() => ({
@@ -37,7 +38,8 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: translate
+      t: translate,
+      te: () => false
     })
   }
 })
@@ -88,7 +90,9 @@ describe('BulkEditAccountModal', () => {
     await toggle.get('input').setValue(true)
     const field = wrapper.get('input[type="checkbox"][value="model"]')
     await field.setValue(true)
-    await wrapper.get('input[id$="-model"]').setValue('custom-check-model')
+    const settings = wrapper.getComponent(IQCheckSettings)
+    settings.vm.$emit('update:modelValue', { ...settings.props('modelValue'), model: 'custom-check-model' })
+    await nextTick()
     await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalled()
     expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0][1]?.iq_check).toEqual({ model: 'custom-check-model' })

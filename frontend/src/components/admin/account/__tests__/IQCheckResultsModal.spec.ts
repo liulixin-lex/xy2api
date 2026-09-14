@@ -2,11 +2,36 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { describe, it, expect, vi } from 'vitest'
 import IQCheckResultsModal from '../IQCheckResultsModal.vue'
 import type { Account } from '@/types'
+import { downloadIQCheckDiagnostics } from '@/api/admin/accounts'
+vi.mock('@/api/admin/accounts', () => ({ downloadIQCheckDiagnostics: vi.fn() }))
 const history = vi.hoisted(() => vi.fn())
 vi.mock('@/api/admin', () => ({ adminAPI: { accounts: { getIQCheckResults: history } } }))
 vi.mock('@/utils/format', () => ({ formatDateTime: (s: string) => s }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (s: string) => s, te: () => true }) }))
 describe('IQ results', () => {
+  it('shows three records and keeps them visible when a diagnostic download fails', async () => {
+    history.mockResolvedValue([3, 2, 1].map(id => ({ id, status: 'smart', normalized_answer: '21', started_at: 'now', finished_at: 'now', latency_ms: 1250, model: 'custom', effort: 'low' })))
+    vi.mocked(downloadIQCheckDiagnostics).mockRejectedValueOnce(new Error('offline'))
+    const wrapper = mount(IQCheckResultsModal, { props: { show: true, account: { id: 8 } as Account }, global: { stubs: { BaseDialog: { template: '<div><slot /></div>' } } } })
+    await flushPromises()
+    expect(wrapper.findAll('li')).toHaveLength(3)
+    await wrapper.findAll('button').find(button => button.text().includes('iqDownload'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('li')).toHaveLength(3)
+    expect(wrapper.get('[role="alert"]').text()).toContain('iqDownloadFailed')
+    expect(wrapper.text()).toContain('1.25 s')
+  })
+  it('discards a late response after changing accounts', async () => {
+    let resolve!: (rows: unknown[]) => void
+    history.mockImplementationOnce(() => new Promise(r => { resolve = r }))
+    const wrapper = mount(IQCheckResultsModal, { props: { show: true, account: { id: 8 } as Account }, global: { stubs: { BaseDialog: { template: '<div><slot /></div>' } } } })
+    history.mockResolvedValueOnce([])
+    await wrapper.setProps({ account: { id: 9 } as Account })
+    await flushPromises()
+    resolve([{ id: 1, model: 'old-account' }]); await flushPromises()
+    expect(wrapper.text()).not.toContain('old-account')
+    expect(wrapper.text()).toContain('iqEmpty')
+  })
   it('shows the same extracted answer for JSON and prose while preserving folded originals', async () => {
     history.mockResolvedValue([
       { id: 2, normalized_answer: '21', answer: '{"answer":21}', model: 'custom', effort: 'ultra', protocol: 'responses', output_mode: 'strict', status: 'smart', finished_at: 'now', started_at: 'now', latency_ms: 12, grader_version: 'candy-grader-v2', format_compliant: true },
@@ -14,8 +39,8 @@ describe('IQ results', () => {
     ])
     const wrapper = mount(IQCheckResultsModal, { props: { show: true, account: { id: 8, name: 'fixture' } as Account }, global: { stubs: { BaseDialog: { template: '<div><slot /></div>' } } } })
     await flushPromises()
-    expect(wrapper.findAll('p.font-semibold').map(p => p.text())).toEqual(['21', '21'])
-    expect(wrapper.findAll('details')).toHaveLength(2)
+    expect(wrapper.findAll('[data-testid="iq-answer"]').map(p => p.text())).toEqual(['21', '21'])
+    expect(wrapper.findAll('details')).toHaveLength(4)
     expect(wrapper.findAll('details').every(d => d.attributes('open') === undefined)).toBe(true)
     expect(wrapper.text()).toContain('iqFormatMismatch')
     expect(wrapper.findAll('pre').map(p => p.text())).toEqual(['{"answer":21}', '最终答案是21。解释如下。'])
@@ -28,4 +53,16 @@ describe('IQ results', () => {
     expect(wrapper.text()).toContain('iqLegacyResult')
     expect(wrapper.get('pre').text()).toBe('29')
   })
+  it('shows bounded diagnostics separately from an absent answer', async () => {
+    history.mockResolvedValue([{ id: 1, status: 'unknown', finished_at: 'now', started_at: 'now', answer: '', reason: 'invalid_event_json', diagnostic: { parser_version: 'iq-response-v3', stage: 'decode', code: 'invalid_event_json', event_type: 'response.completed', event_index: 4, http_status: 200, request_id: '<script>alert(1)</script>', unexpected_secret: 'must-not-render' } }])
+    const wrapper = mount(IQCheckResultsModal, { props: { show: true, account: { id: 8 } as Account }, global: { stubs: { BaseDialog: { template: '<div><slot /></div>' } } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('iqReasons.invalid_event_json')
+    expect(wrapper.text()).toContain('response.completed')
+    expect(wrapper.text()).toContain('iq-response-v3')
+    expect(wrapper.text()).not.toContain('must-not-render')
+    expect(wrapper.find('script').exists()).toBe(false)
+    expect(wrapper.findAll('details').every(d => d.attributes('open') === undefined)).toBe(true)
+  })
+
 })
