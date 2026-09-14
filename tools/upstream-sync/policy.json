@@ -38,6 +38,7 @@
       "deploy/**",
       "docs/**",
       "frontend/**",
+      "openspec/changes/stabilize-openai-iq-check/**",
       "skills/**",
       "tools/**"
     ],
