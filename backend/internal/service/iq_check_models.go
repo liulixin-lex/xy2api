@@ -155,7 +155,11 @@ func (s *IQCheckService) Models(ctx context.Context, id int64, refresh bool) (IQ
 			}
 			return IQModelCatalog{Models: []IQModel{}, Error: "model_discovery_failed"}, nil
 		}
-		return result.Val.(IQModelCatalog), nil
+		catalog, ok := result.Val.(IQModelCatalog)
+		if !ok {
+			return IQModelCatalog{}, errors.New("unexpected model catalog result type")
+		}
+		return catalog, nil
 	}
 }
 

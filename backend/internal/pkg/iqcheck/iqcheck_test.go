@@ -121,8 +121,11 @@ func TestConfiguredPayload(t *testing.T) {
 		if chat && p["reasoning_effort"] != "ultra" {
 			t.Fatal(p)
 		}
-		if !chat && p["reasoning"].(map[string]string)["effort"] != "ultra" {
-			t.Fatal(p)
+		if !chat {
+			reasoning, ok := p["reasoning"].(map[string]string)
+			if !ok || reasoning["effort"] != "ultra" {
+				t.Fatal(p)
+			}
 		}
 	}
 }
