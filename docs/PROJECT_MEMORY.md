@@ -4,29 +4,36 @@
 
 ## 当前交接状态
 
-最后更新：`2026-09-13T19:41:31Z`（UTC）
+最后更新：`2026-09-14T03:50:45Z`（UTC）
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
-| 当前分支 | `main`，HEAD `20c307a9b4a6ee1a8ef126d9aa0baa9aa5c500e6`；本次智商检测改动位于本地工作区 |
-| 发布提交 | `v0.0.7` 标签指向 `a3c0209184b65a6a9ae1383b725022f92cb9fb6e`；`main` 在其后仅有发布记录收尾 |
-| 工作树 | OpenAI 智商检测源码、迁移、Ent/Wire、界面与测试已写入标准目录，尚未提交；未做发布或部署 |
-| XY2API 产品版本 | `0.0.7`；正式 [v0.0.7 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.7) 为当前 latest |
+| 当前分支 | 以 `main` 为交接入口；`v0.0.8` 发布提交为 `accb4ad7656a2ca3d2eee3df601e38f4e5b02157`，其后的收尾文档不改变发布源码 |
+| 发布提交 | `v0.0.8` 标签指向 `accb4ad7656a2ca3d2eee3df601e38f4e5b02157`；功能与版本通过 PR #25 合入 |
+| 工作树 | OpenAI 智商检测及发布期间的回归测试修复已提交并发布；本次收尾仅更新仓库记忆，未部署生产 |
+| XY2API 产品版本 | `0.0.8`；正式 [v0.0.8 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.8) 为当前 latest |
 | 已审计的 Sub2API 基线 | `v0.2.4` / commit `5de5e2bed035d43591a2e10e51f420ef6a84eb98`；已通过 PR `#22` 合入 `main` |
 | 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，7 个人工冲突均已记录；同步 PR [#22](https://github.com/liulixin-lex/xy2api/pull/22) 以 merge commit `ea48f08fc8` 合入 |
 | 本地远端 | `origin` 可读写；`upstream` 仅允许 fetch，push URL 为 `DISABLED` |
 | 当前环境工具 | `git`、`python3 3.12.3`、`gh`、Docker、Node、Corepack、pnpm 可用；本地无 Go 命令，已用 Go 1.27 Docker 完成后端验证 |
 
-Sub2API `v0.2.4` 已通过同步 PR 合入 `main`，XY2API `v0.0.7-rc.1` 与正式 `v0.0.7` 已完成 Release、五平台制品、双架构镜像和隔离部署验收。当前无进行中同步或发布工作；生产升级前必须备份 PostgreSQL、Redis 和 `/app/data`。
+Sub2API 兼容基线保持 `v0.2.4`。XY2API `v0.0.8` 已发布，新增 OpenAI 智商检测；Release、五平台制品校验及双架构镜像验证通过。本轮未升级生产实例。
 
 ## 进行中的工作
 
-- 2026-09-14：用户已明确授权使用本机 GitHub 登录态提交、推送并发布下一版。正在将已验证的智商检测功能经 `release/0.0.8` PR 合入受保护主分支，晋级 XY2API `0.0.8`，兼容基线保持 `0.2.4`；随后验证 Release 与制品。
-
-- 2026-09-13：OpenAI 智商检测的源码实施与功能验证已完成。交付归档和可恢复事务使用 `/xy/artifacts/openai-iq-check/verify_transaction.py`；实际执行状态见同目录 `checkpoint.json`，完整输出见 `VERIFICATION.txt`。后续以实际仓库 `/xy/xy2api` 为源码目标。
+- `v0.0.8` 功能、提交、发布和制品验收已完成；本次文档提交记录收尾状态。无待实现的智商检测功能。四项交付文件及发布日志继续保留于 `/xy/artifacts/openai-iq-check/`。
 
 ## 当前重要事项
+
+### OpenAI 智商检测与 XY2API v0.0.8 已完成
+
+- 功能和版本通过 [PR #25](https://github.com/liulixin-lex/xy2api/pull/25) 合入；最终 head `307679ee82407a04c6f4055d8ce68c6d4151b3f5` 的 16/16 检查通过，merge commit 为 `accb4ad7656a2ca3d2eee3df601e38f4e5b02157`。
+- 正式 annotated tag `v0.0.8` 的 tag object 为 `3c646ffd000bfdc052183bd2ec94b9b2d3cfea56`。Release run [34803057678](https://github.com/liulixin-lex/xy2api/actions/runs/34803057678) 成功，Release 非 draft、非 prerelease 且为 latest；合并后的主线 CI `34803053670` 与安全扫描 `34803053686` 均成功。
+- 5 个平台安装包均已实际下载并通过 SHA-256 复算；Linux amd64 二进制 `-version` 显示产品 `0.0.8`、兼容 `0.2.4` 和正确发布提交，退出码为 0。
+- GHCR `0.0.8`、`latest`、`0.0`、`0` 均指向 `sha256:b1aa56e04248f496c8c2bce7230d99d924ac6e13dabac88583f73c479c46237a`，包含 linux/amd64 与 linux/arm64，OCI version/revision 正确。
+- 功能默认关闭；判题接受整数 answer JSON 和明确结论为21的解释，异常为未知。追加 migration 240，历史迁移校验不变。使用说明见 `docs/OPENAI_IQ_CHECK.md`。
+- 发布门禁发现并修复原有清理测试参数、SQL mock 新字段/锁查询，以及新增集成测试遗留 scheduler_outbox 的隔离问题。最终完整单测、集成测试和静态检查通过；本机完整仓储集成包也通过。无真实账号调用或生产部署。
 
 ### Sub2API v0.2.4 与 XY2API v0.0.7 已完成
 
@@ -322,3 +329,13 @@ pnpm --dir frontend run build
 - 交付：固定四角色为 `/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、可执行 `ROLLBACK.sh`。事务脚本在隔离副本上对相同模拟账号状态输入运行原版、修改版、回滚版，验证原始源码哈希及可确定重建的归档哈希；实际状态与字面输出以 `checkpoint.json` 和 `VERIFICATION.txt` 为准。回滚脚本恢复源码，不是数据库降级脚本。
 - 限制：未调用真实账号。浏览器自动化返回 `browser_no_host`，未进行真实浏览器视觉验收；移动端沿用现有 DataTable 的同名单元格插槽。测试期间因4GB内存压力调整为串行构建；已保留失败及重跑日志，不将中断的编译记为通过。
 - 后续：代码可从本地工作区审阅；本任务未授权推送、发布或部署。需要继续交付核验时执行上述事务脚本，它会复用已确认阶段。
+
+### 2026-09-14T03:50:45Z — `20260914-openai-iq-check-v0.0.8-release` — 完成
+
+- 请求/目标：使用本机 GitHub 登录态提交、推送智商检测功能，并发布下一正式版。
+- 开始状态：`main` / `20c307a9b4`，功能已在工作区实现和验证，产品版本 `0.0.7`，尚未推送。用户本轮明确授权提交、推送、合入和发版。
+- 完成操作：以本机 `liulixin-lex` 登录态推送 `release/0.0.8`，通过受保护 PR #25 合入功能、版本晋级及测试修复；推送 annotated `v0.0.8`，由现有 Release 工作流生成正式 latest Release 和镜像；下载制品并校验，更新仓库记忆。
+- 修改文件：功能覆盖 backend/frontend 标准目录、追加 migration 240、Ent/Wire；版本修改 `VERSION` 与 `UPSTREAM_BASE.json`；发布修复覆盖 `wire_gen_test.go`、账号 SQL mock、IQ 集成清理及错误返回值显式处理。本次收尾只更新本文件。
+- 验证：PR 最终16/16检查、主线CI/安全扫描与Release均成功；本机完整仓储单测/集成包、服务清理回归通过；5个平台包SHA-256、Linux版本输出、双架构OCI标签和稳定镜像别名均通过。相同模拟输入完成 BASELINE/MODIFIED/ROLLBACK，补丁可确定重建、回滚源码哈希恢复一致；固定四角色文件保留完整命令和字面日志。
+- 卡点/风险：无发布阻塞。前几轮CI失败和本机过时静态检查中止均保留日志，未将失败记为通过。未进行本轮生产升级或真实账号检测；浏览器视觉验证限制沿用实现记录。
+- 下一步：无待发布事项；后续从 `main` 和正式 `v0.0.8` 重新核实动态状态。原始源码归档和回滚脚本用于源码恢复，不是数据库降级。
