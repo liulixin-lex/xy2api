@@ -16,6 +16,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func cleanupIQTestAccount(t *testing.T, id int64) {
+	t.Helper()
+	_, err := integrationDB.Exec("DELETE FROM accounts WHERE id=$1", id)
+	require.NoError(t, err)
+	_, err = integrationDB.Exec(`DELETE FROM scheduler_outbox WHERE account_id=$1 OR payload->'account_ids' @> jsonb_build_array($1::bigint)`, id)
+	require.NoError(t, err)
+}
+
 func TestIQCheckRepositoryLifecycle(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
@@ -23,7 +31,7 @@ func TestIQCheckRepositoryLifecycle(t *testing.T) {
 	repo := newAccountRepositoryWithSQL(client, integrationDB, cache)
 	a := &service.Account{Name: "iq-lifecycle", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{"api_key": "fixture"}}
 	require.NoError(t, repo.Create(ctx, a))
-	t.Cleanup(func() { _, _ = integrationDB.Exec("DELETE FROM accounts WHERE id=$1", a.ID) })
+	t.Cleanup(func() { cleanupIQTestAccount(t, a.ID) })
 	require.False(t, a.IQCheck.Enabled)
 	require.Equal(t, 15, a.IQCheck.IntervalMinutes)
 	_, err := repo.ConfigureIQCheck(ctx, a.ID, domain.IQCheckSettings{Enabled: true, IntervalMinutes: 15})
@@ -121,16 +129,16 @@ func TestIQCheckClaimsAcrossReplicasAndRestart(t *testing.T) {
 	client := testEntClient(t)
 	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
 	ids := []int64{}
+	t.Cleanup(func() {
+		for _, id := range ids {
+			cleanupIQTestAccount(t, id)
+		}
+	})
 	for i := 0; i < 12; i++ {
 		a := &service.Account{Name: fmt.Sprintf("iq-lease-%d", i), Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, IQCheckSettings: &domain.IQCheckSettings{Enabled: true, IntervalMinutes: 15}}
 		require.NoError(t, repo.Create(ctx, a))
 		ids = append(ids, a.ID)
 	}
-	t.Cleanup(func() {
-		for _, id := range ids {
-			_, _ = integrationDB.Exec("DELETE FROM accounts WHERE id=$1", id)
-		}
-	})
 	now := time.Now().Add(time.Second)
 	var wg sync.WaitGroup
 	results := make(chan []service.IQCheckClaim, 2)
