@@ -22,7 +22,7 @@ Sub2API 兼容基线保持 `v0.2.4`。XY2API `v0.0.8` 已发布，新增 OpenAI 
 
 ## 进行中的工作
 
-- `20260914-v0.0.9-release`：用户明确授权提交、推送和发布0.0.9；复用已完成实现，通过受保护PR、正式标签及制品校验收尾。
+- 无。
 
 - 本轮 `20260914-iq-stability-implementation` 已完成本地实现与验证，无待实施项。工作树尚未提交，未推送、发布或部署；规格与记录见下方日志。
 
@@ -369,3 +369,13 @@ pnpm --dir frontend run build
 - 失败记录：首次构建退出137（4GB内存下并行Go/Vite），改为串行限制Node堆后通过；副本协议命名不一致已修复；测试桩缺字段、断言误读脱敏revision和批量API参数已修正。所有失败及重跑字面stdout/stderr/退出码保存在四角色验证账本，不将中止记为通过。任务专用6个测试容器已清理。
 - 交付：固定 `/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、可执行 `ROLLBACK.sh`，后者依赖同目录保留的 `BASELINE.tar.gz`。最终复验入口 `stability_finalize.py`，机器状态见 `checkpoint.json`。源码回滚不操作生产数据库。
 - 边界：未调用真实账号逐模型组合验收，不能保证第三方模型清单或返回格式始终遵循规范；未对任意自然语言作100%语义识别承诺。新行为是无法可靠提取答案归未知并解除检测自身限制。没有新版本发布，产品仍0.0.8；本轮按批准设计完成本地实现和验证，发布流程单独执行。
+
+
+### 2026-09-14T10:00:39Z — `20260914-openai-iq-check-v0.0.9-release` — 完成
+
+- 请求/目标：提交、推送并发布 XY2API `v0.0.9`。
+- 完成操作：功能分支 `feat/iq-check-stability` 通过 PR #27 合入 `main`；补齐 CI errcheck 后全部必需检查通过；推送 annotated `v0.0.9` 标签并完成正式 Release。
+- 验证：主线 CI run `34829548235`、安全扫描 `34829548211` 与 Release run `34829581131` 成功；Release 为 latest、非 draft、非 prerelease。五个平台制品 SHA-256 通过；Linux amd64 二进制显示 `0.0.9`/Sub2API `0.2.4`；GHCR `0.0.9` 双架构 digest `sha256:b742241597192b6f62dc32898436f78cda6d3f20afe4cc4a1bb4356988b82ab6`，`latest`、`0.0`、`0` 别名一致。
+- 交付：`/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh` 已按最终提交重新打开；源码事务 BASELINE/MODIFIED/ROLLBACK 行为及恢复哈希通过。
+- 卡点/风险：无。未调用真实账号或部署生产。
+- 下一步：无。
