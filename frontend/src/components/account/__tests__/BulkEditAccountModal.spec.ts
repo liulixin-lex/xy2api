@@ -81,6 +81,18 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
 }
 
 describe('BulkEditAccountModal', () => {
+  it('updates only selected IQ fields across accounts', async () => {
+    vi.mocked(adminAPI.accounts.bulkUpdate).mockResolvedValue({ success: 2, failed: 0 } as any)
+    const wrapper = mountModal({ selectedPlatforms: ['openai'] })
+    const toggle = wrapper.findAll('label').find(label => label.text() === 'admin.accounts.iqBulkEdit')!
+    await toggle.get('input').setValue(true)
+    const field = wrapper.get('input[type="checkbox"][value="model"]')
+    await field.setValue(true)
+    await wrapper.get('input[id$="-model"]').setValue('custom-check-model')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalled()
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0][1]?.iq_check).toEqual({ model: 'custom-check-model' })
+  })
   beforeEach(() => {
     vi.mocked(adminAPI.accounts.bulkUpdate).mockReset()
     vi.mocked(adminAPI.accounts.checkMixedChannelRisk).mockReset()

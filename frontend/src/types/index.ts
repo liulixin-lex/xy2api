@@ -1222,7 +1222,7 @@ export interface Account {
 
   // Rate limit & scheduling fields
   schedulable: boolean
-  iq_check?: { enabled: boolean; interval_minutes: number; status: 'smart' | 'degraded' | 'unknown'; reason?: string; last_run_at?: string | null; next_run_at?: string | null }
+  iq_check?: IQCheckSettings & { status: 'smart' | 'degraded' | 'unknown'; reason?: string; last_run_at?: string | null; next_run_at?: string | null }
   rate_limited_at: string | null
   rate_limit_reset_at: string | null
   overload_until: string | null
@@ -1474,11 +1474,13 @@ export interface OpenAIResponsesState {
   openai_responses_supported?: boolean
 }
 
-export interface IQCheckSettings { enabled: boolean; interval_minutes: number }
-export interface IQCheckRecord { id: number; prompt_version: string; model: string; effort: string; status: 'smart' | 'degraded' | 'unknown'; answer: string; reason?: string; started_at: string; finished_at?: string | null; latency_ms: number }
+export interface IQCheckSettings { enabled: boolean; interval_minutes: number; model?: string; reasoning_effort?: string; output_mode?: 'compat' | 'strict' }
+export interface IQModel { id: string; display_name: string; source: string; reasoning?: boolean; supported_reasoning_levels?: string[]; default_reasoning_level?: string; capability_sources: Record<string, string> }
+export interface IQModelCatalog { models: IQModel[]; fetched_at: string | null; from_cache: boolean; stale: boolean; error?: string }
+export interface IQCheckRecord { id: number; prompt_version: string; model: string; effort: string; status: 'smart' | 'degraded' | 'unknown'; answer: string; reason?: string; started_at: string; finished_at?: string | null; latency_ms: number; normalized_answer?: string | null; answer_format?: string; output_mode?: string; format_compliant?: boolean | null; grader_version?: string; protocol?: string; reported_model?: string | null; config_revision?: string }
 
 export interface CreateAccountRequest {
-  iq_check?: IQCheckSettings
+  iq_check?: Partial<IQCheckSettings>
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -1498,7 +1500,7 @@ export interface CreateAccountRequest {
 }
 
 export interface UpdateAccountRequest {
-  iq_check?: IQCheckSettings
+  iq_check?: Partial<IQCheckSettings>
   name?: string
   notes?: string | null
   type?: AccountType

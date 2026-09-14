@@ -4,14 +4,14 @@
 
 ## 当前交接状态
 
-最后更新：`2026-09-14T03:50:45Z`（UTC）
+最后更新：`2026-09-14T09:14:35Z`（UTC）
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
-| 当前分支 | 以 `main` 为交接入口；`v0.0.8` 发布提交为 `accb4ad7656a2ca3d2eee3df601e38f4e5b02157`，其后的收尾文档不改变发布源码 |
+| 当前分支 | `feat/iq-check-stability`，基于 `dff987fb16d206e354a21bd4055987c2b5d73549`；尚未提交/发布改进 |
 | 发布提交 | `v0.0.8` 标签指向 `accb4ad7656a2ca3d2eee3df601e38f4e5b02157`；功能与版本通过 PR #25 合入 |
-| 工作树 | OpenAI 智商检测及发布期间的回归测试修复已提交并发布；本次收尾仅更新仓库记忆，未部署生产 |
+| 工作树 | 稳定检测、自定义模型/深度、只读目录、记录展示已落到 backend/frontend 标准目录；本地测试、前后端构建和四角色源码回滚事务已通过 |
 | XY2API 产品版本 | `0.0.8`；正式 [v0.0.8 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.8) 为当前 latest |
 | 已审计的 Sub2API 基线 | `v0.2.4` / commit `5de5e2bed035d43591a2e10e51f420ef6a84eb98`；已通过 PR `#22` 合入 `main` |
 | 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，7 个人工冲突均已记录；同步 PR [#22](https://github.com/liulixin-lex/xy2api/pull/22) 以 merge commit `ea48f08fc8` 合入 |
@@ -22,7 +22,13 @@ Sub2API 兼容基线保持 `v0.2.4`。XY2API `v0.0.8` 已发布，新增 OpenAI 
 
 ## 进行中的工作
 
-- `v0.0.8` 功能、提交、发布和制品验收已完成；本次文档提交记录收尾状态。无待实现的智商检测功能。四项交付文件及发布日志继续保留于 `/xy/artifacts/openai-iq-check/`。
+- `20260914-v0.0.9-release`：用户明确授权提交、推送和发布0.0.9；复用已完成实现，通过受保护PR、正式标签及制品校验收尾。
+
+- 本轮 `20260914-iq-stability-implementation` 已完成本地实现与验证，无待实施项。工作树尚未提交，未推送、发布或部署；规格与记录见下方日志。
+
+- `20260914-iq-stability-plan` 已由本轮实施承接；完整规格与任务证据在 `openspec/changes/stabilize-openai-iq-check/`。
+
+- `v0.0.8` 功能、提交、发布和制品验收已完成；本次文档提交记录收尾状态。原始 v0.0.8 功能无遗留实施事项；新增改进需求见上一条。四项交付文件及发布日志继续保留于 `/xy/artifacts/openai-iq-check/`。
 
 ## 当前重要事项
 
@@ -339,3 +345,27 @@ pnpm --dir frontend run build
 - 验证：PR 最终16/16检查、主线CI/安全扫描与Release均成功；本机完整仓储单测/集成包、服务清理回归通过；5个平台包SHA-256、Linux版本输出、双架构OCI标签和稳定镜像别名均通过。相同模拟输入完成 BASELINE/MODIFIED/ROLLBACK，补丁可确定重建、回滚源码哈希恢复一致；固定四角色文件保留完整命令和字面日志。
 - 卡点/风险：无发布阻塞。前几轮CI失败和本机过时静态检查中止均保留日志，未将失败记为通过。未进行本轮生产升级或真实账号检测；浏览器视觉验证限制沿用实现记录。
 - 下一步：无待发布事项；后续从 `main` 和正式 `v0.0.8` 重新核实动态状态。原始源码归档和回滚脚本用于源码恢复，不是数据库降级。
+
+### 2026-09-14T07:31:07Z — `20260914-iq-stability-plan` — 规划完成
+
+- 请求/目标：规划规范稳定的糖果题检测；追加在编辑间隔旁配置模型及思考深度，支持账号模型拉取与自定义输入。
+- 开始状态：`main` / `dff987fb16d206e354a21bd4055987c2b5d73549`，工作树干净；四角色交付来自上一版完成状态。
+- 完成操作：核对请求、判分、租约、状态及模型发现接口，实际运行当前解析器边界审计；新增 OpenSpec proposal/design/tasks/spec，明确 JSON/纯数字兼容、精确答案提取、未知原因、只读模型目录、可配置 model/reasoning_effort、旧字段省略保留、任务快照及两轮保留。
+- 关键发现：歧义答案、重复 JSON 键和浮点精度可能误判聪明，解释中的反例可能误判降智；只改间隔会重置状态；模型目录可能回退默认模型，同步接口会写账号元数据，方案将提取只读公共逻辑。
+- 修改文件：只新增 `openspec/changes/stabilize-openai-iq-check/` 中4份方案文档并更新本文件；业务源码、数据库与发布版本未修改。
+- 验证：当前解析器副本审计命令退出0，结果是已复现缺陷而非新功能通过；方案链接、JSON示例和20个 WHEN/THEN 场景结构检查通过，git diff --check通过。OpenSpec CLI未安装，未声称运行官方校验器；首次自写检查误设场景数量17导致退出1，修正为检查场景结构后通过，失败记录保留。固定四角色继续由事务脚本收纳，字面 BASELINE/MODIFIED/ROLLBACK 及哈希以 VERIFICATION.txt 为准。
+- 边界：单次判定和未知解除自身限制保持；无法可靠提取答案改为未知属于拟议行为变更。未调用真实账号，未实现或发布本改进；模型实际支持及任意自然语言准确识别不作保证。
+- 下一步：实施任务见 `openspec/changes/stabilize-openai-iq-check/tasks.md`；不要把方案中的未来行为当作当前代码已实现。
+
+
+### 2026-09-14T09:14:35Z — `20260914-iq-stability-implementation` — 完成
+
+- 请求/目标：执行稳定检测改进方案，账号编辑间隔旁提供自定义模型与思考深度；接受明确最终答案21的解释文字，规范简洁输出并防止歧义误判。
+- 开始状态：`main` / `dff987fb16d206e354a21bd4055987c2b5d73549`，已有4份OpenSpec方案和记忆改动；在 `feat/iq-check-stability` 实施。前一轮四角色完整备份于 `/xy/artifacts/openai-iq-check/pre-stability-implementation/`；原始源码归档不变。
+- 完成操作：`IQCheckSettings` 可选字段 `model/reasoning_effort/output_mode`，默认 Astra/low/compat；只读模型目录、5分钟缓存、来源标记、自定义值和上游默认省略参数；candy-v2 精确答案提取与拒答/冲突/重复JSON/精度边界；任务快照、配置失效、只改间隔保留状态、租约过期释放和周期抖动；双协议规范输出与严格Schema；记录规范化答案及原文折叠；复制/导入保留配置但关闭检测；批量仅修改勾选字段。
+- 文件位置：沿用 `backend/internal/domain/iq_check.go`、`pkg/iqcheck/`、`service/iq_check*.go`、`repository/account_iq_check.go`、原账号管理路由/处理器，前端原组件/types/api/i18n目录。追加迁移241，既有SQL及checksum不变；JSON域与SQL记录表不改变Ent/Wire结构或依赖，未制造生成代码变更。使用及待发布说明写入已跟踪的 `docs/OPENAI_IQ_CHECK.md`。
+- 验证：最终Go相关单测（含配置、三协议模拟、目录只读、精确数值、复制和导入导出）通过；完整repository PostgreSQL/Redis集成通过；前端原相关118项、补充59项（包含重叠复验）及记录弹窗2项通过；全仓lint、类型/i18n、前端生产构建及服务端构建通过。实际Chromium在1280px/390px验证三控件排列、无横向溢出、目录拉取、已知深度校验、上游默认和聚焦；Impeccable detector为[]。
+- 事务：相同模拟输入运行真实 `Account.IsSchedulable()`，BASELINE 的 degraded=true，MODIFIED 的 degraded=false，ROLLBACK 的 degraded=true；人工关闭始终false。补丁可重建同哈希归档；回滚源码manifest SHA-256=`eda4554229078281dcf48cfe8b891f18dfcbf3ef3a0e6d9eef9df91f0820eef7` 与原始一致。额外旧版/新版解析器同输入和回滚输出、追加schema旧列读取/事务回滚均通过。
+- 失败记录：首次构建退出137（4GB内存下并行Go/Vite），改为串行限制Node堆后通过；副本协议命名不一致已修复；测试桩缺字段、断言误读脱敏revision和批量API参数已修正。所有失败及重跑字面stdout/stderr/退出码保存在四角色验证账本，不将中止记为通过。任务专用6个测试容器已清理。
+- 交付：固定 `/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、可执行 `ROLLBACK.sh`，后者依赖同目录保留的 `BASELINE.tar.gz`。最终复验入口 `stability_finalize.py`，机器状态见 `checkpoint.json`。源码回滚不操作生产数据库。
+- 边界：未调用真实账号逐模型组合验收，不能保证第三方模型清单或返回格式始终遵循规范；未对任意自然语言作100%语义识别承诺。新行为是无法可靠提取答案归未知并解除检测自身限制。没有新版本发布，产品仍0.0.8；本轮按批准设计完成本地实现和验证，发布流程单独执行。

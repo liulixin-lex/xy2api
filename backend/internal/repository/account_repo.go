@@ -139,10 +139,10 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		return service.ErrAccountNilInput
 	}
 
-	account.IQCheck = resetIQState(domain.DefaultIQCheck(), account.IQCheckSettings, time.Now().UTC())
 	if err := service.ValidateIQCheckSettings(account.Platform, account.IQCheckSettings); err != nil {
 		return err
 	}
+	account.IQCheck = resetIQState(domain.DefaultIQCheck(), account.IQCheckSettings, time.Now().UTC())
 
 	builder := client.Account.Create().
 		SetName(account.Name).
@@ -567,15 +567,22 @@ func (r *accountRepository) updateLockedAccount(
 			identityChanged = true
 		}
 	}
+	for _, key := range iqTransportExtraKeys {
+		if !reflect.DeepEqual(current.Extra[key], account.Extra[key]) {
+			identityChanged = true
+		}
+	}
+	if !reflect.DeepEqual(current.ProxyID, account.ProxyID) {
+		identityChanged = true
+	}
 	if identityChanged || account.IQCheckSettings != nil {
 		if err := service.ValidateIQCheckSettings(account.Platform, account.IQCheckSettings); err != nil {
 			return nil, err
 		}
-		if identityChanged || state.Enabled != account.IQCheckSettings.Enabled || state.IntervalMinutes != account.IQCheckSettings.IntervalMinutes {
-			state = resetIQState(state, account.IQCheckSettings, time.Now().UTC())
-		}
+		state = applyIQSettings(state, account.IQCheckSettings, identityChanged, time.Now().UTC())
 		builder.SetIqCheck(state)
 	}
+
 	account.IQCheck = state
 
 	if explicitRateMultiplier != nil {
@@ -2630,7 +2637,17 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	}
 
 	clearProbeSnapshot := upstreamBillingProbeExplicitlyDisabled(updates) || upstreamBillingProbeSnapshotClearRequested(updates)
-	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot
+	iqConditions := []string{}
+	for _, key := range iqTransportExtraKeys {
+		if _, ok := updates[key]; ok {
+			iqConditions = append(iqConditions, "extra->'"+key+"' IS DISTINCT FROM $1::jsonb->'"+key+"'")
+		}
+	}
+	iqExpression := ""
+	if len(iqConditions) > 0 {
+		iqExpression = ", iq_check = CASE WHEN platform='openai' THEN xy_iq_apply_settings(iq_check,'{}'::jsonb,(" + joinClauses(iqConditions, " OR ") + "),NOW()) ELSE iq_check END"
+	}
+	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || len(iqConditions) > 0
 	baseCtx := ctx
 	contextTx := dbent.TxFromContext(ctx)
 	client := clientFromContext(ctx, r.client)
@@ -2656,7 +2673,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	}
 	result, err := client.ExecContext(
 		ctx,
-		"UPDATE accounts SET extra = "+extraExpression+", updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL",
+		"UPDATE accounts SET extra = "+extraExpression+iqExpression+", updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL",
 		string(payload), id,
 	)
 
@@ -2994,20 +3011,36 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			}
 		}
 	}
-	iqBase := "iq_check"
+	if ollamaProxyIdentityChanged != "" {
+		iqResetConditions = append(iqResetConditions, ollamaProxyIdentityChanged)
+	}
+	for _, key := range iqTransportExtraKeys {
+		if value, ok := updates.Extra[key]; ok {
+			raw, err := json.Marshal(value)
+			if err != nil {
+				return 0, err
+			}
+			iqResetConditions = append(iqResetConditions, "extra->'"+key+"' IS DISTINCT FROM $"+itoa(idx)+"::jsonb")
+			args = append(args, raw)
+			idx++
+		}
+	}
+	iqPatch := "'{}'::jsonb"
 	if updates.IQCheck != nil {
 		payload, err := json.Marshal(updates.IQCheck)
 		if err != nil {
 			return 0, err
 		}
-		placeholder := "$" + itoa(idx)
+		iqPatch = "$" + itoa(idx) + "::jsonb"
 		idx++
 		args = append(args, payload)
-		iqResetConditions = append(iqResetConditions, "iq_check->'enabled' IS DISTINCT FROM "+placeholder+"::jsonb->'enabled' OR iq_check->'interval_minutes' IS DISTINCT FROM "+placeholder+"::jsonb->'interval_minutes'")
-		iqBase = "(iq_check || " + placeholder + "::jsonb)"
 	}
-	if len(iqResetConditions) > 0 {
-		setClauses = append(setClauses, "iq_check = CASE WHEN platform='openai' AND ("+joinClauses(iqResetConditions, " OR ")+") THEN ("+iqBase+" - 'next_run_at') || jsonb_build_object('status','unknown','reason','','revision',md5(random()::text || clock_timestamp()::text), 'next_run_at', CASE WHEN "+iqBase+"->>'enabled'='true' THEN to_jsonb(NOW()) ELSE 'null'::jsonb END) ELSE iq_check END")
+	if len(iqResetConditions) > 0 || updates.IQCheck != nil {
+		condition := "false"
+		if len(iqResetConditions) > 0 {
+			condition = "(" + joinClauses(iqResetConditions, " OR ") + ")"
+		}
+		setClauses = append(setClauses, "iq_check = CASE WHEN platform='openai' THEN xy_iq_apply_settings(iq_check,"+iqPatch+","+condition+",NOW()) ELSE iq_check END")
 	}
 
 	ollamaGroupIdentityChanges := make([]string, 0, 2)

@@ -34,7 +34,7 @@ func TestIQCheckRepositoryLifecycle(t *testing.T) {
 	t.Cleanup(func() { cleanupIQTestAccount(t, a.ID) })
 	require.False(t, a.IQCheck.Enabled)
 	require.Equal(t, 15, a.IQCheck.IntervalMinutes)
-	_, err := repo.ConfigureIQCheck(ctx, a.ID, domain.IQCheckSettings{Enabled: true, IntervalMinutes: 15})
+	_, err := repo.ConfigureIQCheck(ctx, a.ID, iqTestSettings(true, 15))
 	require.NoError(t, err)
 	run := func(answer string) service.IQCheckClaim {
 		require.NoError(t, repo.QueueIQCheck(ctx, a.ID))
@@ -82,9 +82,9 @@ func TestIQCheckRepositoryLifecycle(t *testing.T) {
 	claims, err := repo.ClaimIQChecks(ctx, time.Now().Add(time.Second), 10)
 	require.NoError(t, err)
 	require.Len(t, claims, 1)
-	_, err = repo.ConfigureIQCheck(ctx, a.ID, domain.IQCheckSettings{Enabled: false, IntervalMinutes: 15})
+	_, err = repo.ConfigureIQCheck(ctx, a.ID, iqTestSettings(false, 15))
 	require.NoError(t, err)
-	_, err = repo.ConfigureIQCheck(ctx, a.ID, domain.IQCheckSettings{Enabled: true, IntervalMinutes: 15})
+	_, err = repo.ConfigureIQCheck(ctx, a.ID, iqTestSettings(true, 15))
 	require.NoError(t, err)
 	overlap, err := repo.ClaimIQChecks(ctx, time.Now().Add(2*time.Second), 10)
 	require.NoError(t, err)
@@ -110,7 +110,7 @@ func TestIQCheckRepositoryLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, revision, fresh.IQCheck.Revision)
 	// Bulk settings and disable remain independent of manual scheduling.
-	_, err = repo.BulkUpdate(ctx, []int64{a.ID}, service.AccountBulkUpdate{IQCheck: &domain.IQCheckSettings{Enabled: false, IntervalMinutes: 30}})
+	_, err = repo.BulkUpdate(ctx, []int64{a.ID}, service.AccountBulkUpdate{IQCheck: iqTestSettingsPtr(false, 30)})
 	require.NoError(t, err)
 	fresh, err = repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
@@ -135,7 +135,7 @@ func TestIQCheckClaimsAcrossReplicasAndRestart(t *testing.T) {
 		}
 	})
 	for i := 0; i < 12; i++ {
-		a := &service.Account{Name: fmt.Sprintf("iq-lease-%d", i), Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, IQCheckSettings: &domain.IQCheckSettings{Enabled: true, IntervalMinutes: 15}}
+		a := &service.Account{Name: fmt.Sprintf("iq-lease-%d", i), Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, IQCheckSettings: iqTestSettingsPtr(true, 15)}
 		require.NoError(t, repo.Create(ctx, a))
 		ids = append(ids, a.ID)
 	}
@@ -180,4 +180,102 @@ func TestIQCheckClaimsAcrossReplicasAndRestart(t *testing.T) {
 	for _, claim := range claims {
 		require.NoError(t, restarted.CompleteIQCheck(ctx, claim, iqcheck.Unknown("request_failed"), now.Add(182*time.Second)))
 	}
+}
+
+func iqTestSettings(enabled bool, interval int) domain.IQCheckSettings {
+	return domain.IQCheckSettings{Enabled: &enabled, IntervalMinutes: &interval}
+}
+func iqTestSettingsPtr(enabled bool, interval int) *domain.IQCheckSettings {
+	s := iqTestSettings(enabled, interval)
+	return &s
+}
+
+func TestIQCheckProfilesAndIntervals(t *testing.T) {
+	ctx := context.Background()
+	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+	a := &service.Account{Name: "iq-profile", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{"api_key": "fixture"}, Extra: map[string]any{"openai_responses_mode": "force_chat_completions"}, IQCheckSettings: iqTestSettingsPtr(true, 15)}
+	require.NoError(t, repo.Create(ctx, a))
+	t.Cleanup(func() { cleanupIQTestAccount(t, a.ID) })
+	now := time.Now().UTC().Add(time.Second)
+	claims, err := repo.ClaimIQChecks(ctx, now, 10)
+	require.NoError(t, err)
+	require.Len(t, claims, 1)
+	require.Equal(t, "gpt-6-astra", claims[0].Profile.Model)
+	require.Equal(t, "chat_completions", claims[0].Protocol)
+	interval := 30
+	state, err := repo.ConfigureIQCheck(ctx, a.ID, domain.IQCheckSettings{IntervalMinutes: &interval})
+	require.NoError(t, err)
+	require.Empty(t, state.Revision) // Public configure response strips lease/revision.
+	current, err := repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, claims[0].Revision, current.IQCheck.Revision)
+	require.NoError(t, repo.CompleteIQCheck(ctx, claims[0], iqcheck.Grade("29"), now.Add(time.Second)))
+	fresh, err := repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, "degraded", fresh.IQCheck.Status)
+	require.WithinRange(t, *fresh.IQCheck.NextRunAt, now.Add(time.Second+30*time.Minute), now.Add(31*time.Second+30*time.Minute))
+	revision := fresh.IQCheck.Revision
+	interval = 45
+	_, err = repo.BulkUpdate(ctx, []int64{a.ID}, service.AccountBulkUpdate{IQCheck: &domain.IQCheckSettings{IntervalMinutes: &interval}})
+	require.NoError(t, err)
+	fresh, err = repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, "degraded", fresh.IQCheck.Status)
+	require.Equal(t, revision, fresh.IQCheck.Revision)
+	require.NoError(t, repo.QueueIQCheck(ctx, a.ID))
+	claims, err = repo.ClaimIQChecks(ctx, now.Add(2*time.Second), 10)
+	require.NoError(t, err)
+	require.Len(t, claims, 1)
+	model, effort, mode := "custom/model", "upstream_default", "strict"
+	_, err = repo.BulkUpdate(ctx, []int64{a.ID}, service.AccountBulkUpdate{IQCheck: &domain.IQCheckSettings{Model: &model, ReasoningEffort: &effort, OutputMode: &mode}})
+	require.NoError(t, err)
+	require.NoError(t, repo.CompleteIQCheck(ctx, claims[0], iqcheck.Grade("29"), now.Add(3*time.Second)))
+	fresh, err = repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, "unknown", fresh.IQCheck.Status)
+	require.True(t, fresh.IQCheck.Enabled)
+	require.Equal(t, 45, fresh.IQCheck.IntervalMinutes)
+	claims, err = repo.ClaimIQChecks(ctx, now.Add(4*time.Second), 10)
+	require.NoError(t, err)
+	require.Len(t, claims, 1)
+	require.Equal(t, model, claims[0].Profile.Model)
+	records, err := repo.ListIQCheckRecords(ctx, a.ID)
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	require.Nil(t, records[0].FinishedAt)
+	require.Equal(t, model, records[0].Model)
+	require.Equal(t, effort, records[0].Effort)
+	require.Equal(t, mode, records[0].OutputMode)
+	require.Equal(t, iqcheck.GraderVersion, records[0].GraderVersion)
+	require.NoError(t, repo.CompleteIQCheck(ctx, claims[0], iqcheck.Grade(`{"answer":21}`), now.Add(5*time.Second)))
+	fresh, err = repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	revision = fresh.IQCheck.Revision
+	require.NoError(t, repo.UpdateExtra(ctx, a.ID, map[string]any{"openai_responses_mode": "force_responses"}))
+	fresh, err = repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, revision, fresh.IQCheck.Revision)
+	require.Equal(t, "unknown", fresh.IQCheck.Status)
+	claims, err = repo.ClaimIQChecks(ctx, now.Add(6*time.Second), 10)
+	require.NoError(t, err)
+	require.Equal(t, "responses", claims[0].Protocol)
+	// A crashed worker must release a previous degraded gate even if no new slot is requested.
+	_, err = integrationDB.Exec(`UPDATE accounts SET iq_check=iq_check || '{"status":"degraded"}'::jsonb WHERE id=$1`, a.ID)
+	require.NoError(t, err)
+	recovered, err := repo.ClaimIQChecks(ctx, now.Add(4*time.Minute), 0)
+	require.NoError(t, err)
+	require.Empty(t, recovered)
+	fresh, err = repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, "unknown", fresh.IQCheck.Status)
+	require.Equal(t, "interrupted", fresh.IQCheck.Reason)
+	records, err = repo.ListIQCheckRecords(ctx, a.ID)
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	require.Equal(t, "interrupted", records[0].Reason)
+	require.NotNil(t, records[0].FinishedAt)
+	require.NoError(t, repo.CompleteIQCheck(ctx, claims[0], iqcheck.Grade("29"), now.Add(5*time.Minute)))
+	fresh, err = repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, "unknown", fresh.IQCheck.Status)
 }

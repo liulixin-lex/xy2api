@@ -123,3 +123,40 @@ func TestIQCheckOAuthPayloadAndStaleCandidate(t *testing.T) {
 	gateway := &OpenAIGatewayService{accountRepo: &iqProbeAccounts{account: &fresh}, schedulerSnapshot: &SchedulerSnapshotService{}}
 	require.Nil(t, gateway.recheckSelectedOpenAIAccountFromDB(context.Background(), &cached, nil, PlatformOpenAI, iqcheck.Model, false, ""))
 }
+
+func TestIQCheckConfiguredRoutes(t *testing.T) {
+	for _, route := range []struct{ kind, mode, protocol string }{
+		{AccountTypeOAuth, "", "responses"}, {AccountTypeAPIKey, "force_responses", "responses"}, {AccountTypeAPIKey, "force_chat_completions", "chat_completions"},
+	} {
+		t.Run(route.kind+route.mode, func(t *testing.T) {
+			a := &Account{ID: 1, Platform: PlatformOpenAI, Type: route.kind, Credentials: map[string]any{"api_key": "fixture", "access_token": "fixture", "base_url": "https://example.test", "model_mapping": map[string]any{"custom/model": "wrong"}}, Extra: map[string]any{"openai_responses_mode": route.mode}, IQCheck: domain.IQCheck{Revision: "revision", Model: "custom/model", ReasoningEffort: "upstream_default", OutputMode: "strict"}}
+			body := `{"status":"completed","model":"upstream-reported","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"21"}]}]}`
+			if route.protocol == "chat_completions" {
+				body = `{"model":"upstream-reported","choices":[{"index":0,"message":{"content":"21"},"finish_reason":"stop"}]}`
+			}
+			transport := &iqProbeTransport{status: 200, body: body}
+			s := &IQCheckService{accounts: &iqProbeAccounts{account: a}, tester: &AccountTestService{cfg: &config.Config{}, httpUpstream: transport}}
+			claim := IQCheckClaim{AccountID: 1, Revision: "revision", Profile: a.IQCheck.Profile(), Protocol: route.protocol}
+			for range 2 {
+				result := s.probe(context.Background(), 1, claim)
+				require.Equal(t, "smart", result.Status, result)
+				require.False(t, result.FormatCompliant)
+				require.Equal(t, "upstream-reported", result.ReportedModel)
+			}
+			require.Equal(t, transport.bodies[0], transport.bodies[1])
+			payload := transport.bodies[0]
+			require.Equal(t, "custom/model", payload["model"])
+			require.NotContains(t, payload, "reasoning")
+			require.NotContains(t, payload, "reasoning_effort")
+			require.NotContains(t, payload, "previous_response_id")
+			if route.protocol == "responses" {
+				require.Contains(t, payload, "text")
+			} else {
+				require.Contains(t, payload, "response_format")
+			}
+			a.IQCheck.Revision = "changed"
+			require.Equal(t, "unknown", s.probe(context.Background(), 1, claim).Status)
+			require.Len(t, transport.requests, 2)
+		})
+	}
+}

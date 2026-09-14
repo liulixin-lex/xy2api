@@ -76,6 +76,24 @@ func (h *AccountHandler) SetUpstreamBillingProbeService(probe *service.UpstreamB
 
 func (h *AccountHandler) SetIQCheckService(check *service.IQCheckService) { h.iqCheckService = check }
 
+func (h *AccountHandler) ListIQCheckModels(c *gin.Context) {
+	if h.iqCheckService == nil {
+		response.ErrorFrom(c, service.ErrIQCheckInvalid)
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.ErrorFrom(c, service.ErrIQCheckInvalid)
+		return
+	}
+	result, err := h.iqCheckService.Models(c.Request.Context(), id, c.Query("refresh") == "true")
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *AccountHandler) ConfigureIQCheck(c *gin.Context) {
 	if h.iqCheckService == nil {
 		response.ErrorFrom(c, service.ErrIQCheckInvalid)

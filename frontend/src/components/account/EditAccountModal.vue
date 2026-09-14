@@ -11,7 +11,7 @@
       @submit.prevent="handleSubmit"
       class="space-y-5"
     >
-      <IQCheckSettings v-if="account.platform === 'openai'" v-model="iqSettings" />
+      <IQCheckSettings v-if="account.platform === 'openai'" v-model="iqSettings" :account-id="account.id" :discovery-disabled="iqDiscoveryDirty" @validity="iqValid = $event" />
       <div>
         <label class="input-label">{{ t('common.name') }}</label>
         <input v-model="form.name" type="text" required class="input" data-tour="edit-account-form-name" />
@@ -2963,6 +2963,7 @@
 
 <script setup lang="ts">
 import IQCheckSettings from './IQCheckSettings.vue'
+import type { IQCheckSettings as IQSettings } from '@/types'
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -3742,7 +3743,11 @@ const mixedChannelWarningMessageText = computed(() => {
   return mixedChannelWarningRawMessage.value
 })
 
-const iqSettings = ref({ enabled: false, interval_minutes: 15 })
+const iqSettings = ref<IQSettings>({ enabled: false, interval_minutes: 15, model: 'gpt-6-astra', reasoning_effort: 'low', output_mode: 'compat' })
+const iqValid = ref(true)
+const iqTransportDraft = () => JSON.stringify([editBaseUrl.value, editApiKey.value, form.proxy_id, openAIResponsesMode.value, openaiPassthroughEnabled.value, tlsFingerprintEnabled.value, tlsFingerprintProfileId.value, customBaseUrlEnabled.value, customBaseUrl.value, headerOverrideEnabled.value, headerOverrideRows.value])
+const iqTransportInitial = ref('')
+const iqDiscoveryDirty = computed(() => iqTransportInitial.value !== iqTransportDraft())
 const form = reactive({
   name: '',
   notes: '',
@@ -4277,8 +4282,9 @@ watch(
       return
     }
     if (!wasShow || newAccount !== previousAccount) {
-      iqSettings.value = { enabled: newAccount.iq_check?.enabled ?? false, interval_minutes: newAccount.iq_check?.interval_minutes || 15 }
+      iqSettings.value = { enabled: newAccount.iq_check?.enabled ?? false, interval_minutes: newAccount.iq_check?.interval_minutes || 15, model: newAccount.iq_check?.model || 'gpt-6-astra', reasoning_effort: newAccount.iq_check?.reasoning_effort || 'low', output_mode: newAccount.iq_check?.output_mode || 'compat' }
       syncFormFromAccount(newAccount)
+      iqTransportInitial.value = iqTransportDraft()
       loadTLSProfiles()
     }
   },
@@ -4848,7 +4854,7 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 }
 
 const handleSubmit = async () => {
-  if (!props.account) return
+  if (!props.account || !iqValid.value) return
   const accountID = props.account.id
 
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
