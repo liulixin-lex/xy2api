@@ -4,14 +4,14 @@
 
 ## 当前交接状态
 
-最后更新：`2026-09-11T13:09:37Z`（UTC）
+最后更新：`2026-09-13T19:41:31Z`（UTC）
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
-| 当前分支 | 稳定交接分支为 `main`；无进行中同步或发布分支 |
+| 当前分支 | `main`，HEAD `20c307a9b4a6ee1a8ef126d9aa0baa9aa5c500e6`；本次智商检测改动位于本地工作区 |
 | 发布提交 | `v0.0.7` 标签指向 `a3c0209184b65a6a9ae1383b725022f92cb9fb6e`；`main` 在其后仅有发布记录收尾 |
-| 工作树 | 稳定交接状态为干净；同步、发布、验收和资源清理均已完成 |
+| 工作树 | OpenAI 智商检测源码、迁移、Ent/Wire、界面与测试已写入标准目录，尚未提交；未做发布或部署 |
 | XY2API 产品版本 | `0.0.7`；正式 [v0.0.7 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.7) 为当前 latest |
 | 已审计的 Sub2API 基线 | `v0.2.4` / commit `5de5e2bed035d43591a2e10e51f420ef6a84eb98`；已通过 PR `#22` 合入 `main` |
 | 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，7 个人工冲突均已记录；同步 PR [#22](https://github.com/liulixin-lex/xy2api/pull/22) 以 merge commit `ea48f08fc8` 合入 |
@@ -22,7 +22,9 @@ Sub2API `v0.2.4` 已通过同步 PR 合入 `main`，XY2API `v0.0.7-rc.1` 与正�
 
 ## 进行中的工作
 
-- 无。
+- 2026-09-14：用户已明确授权使用本机 GitHub 登录态提交、推送并发布下一版。正在将已验证的智商检测功能经 `release/0.0.8` PR 合入受保护主分支，晋级 XY2API `0.0.8`，兼容基线保持 `0.2.4`；随后验证 Release 与制品。
+
+- 2026-09-13：OpenAI 智商检测的源码实施与功能验证已完成。交付归档和可恢复事务使用 `/xy/artifacts/openai-iq-check/verify_transaction.py`；实际执行状态见同目录 `checkpoint.json`，完整输出见 `VERIFICATION.txt`。后续以实际仓库 `/xy/xy2api` 为源码目标。
 
 ## 当前重要事项
 
@@ -309,3 +311,14 @@ pnpm --dir frontend run build
 - 验证：同步工具 13/13、strict doctor/audit、上游标签/祖先/provenance、Compose/部署脚本、Go 1.27 Ent/Wire 零差异、unit/integration/build、前端 lint/typecheck/i18n/1,975 tests/build；PR #21/#22/#23 的全部必需检查与两次合并后主线 CI/安全扫描；RC/正式 Release runs `34596879431` / `34600960509`；两版各五个制品 SHA-256、双架构 GHCR 与 OCI 标签；RC 全新安装、`v0.0.6` 升级/回滚/再前滚、正式版全新安装及三服务重启持久化均通过。
 - 卡点/风险：无已知功能阻塞。迁移 239 为只追加的 CHECK 约束扩展，旧镜像回切已验证；生产仍应备份三类数据。RC 暂时改写稳定 GHCR 别名与 Release Action runtime 弃用提示已登记为后续发布维护项，本次正式别名与发布结果均正常。
 - 下一步：无。后续维护应保留 `sub2api/v0.2.4`、`v0.0.7-rc.1` 和 `v0.0.7` 标签，从 `main`、`UPSTREAM_BASE.json` 与 GitHub Release 重新核实动态状态。
+
+### 2026-09-13T19:41:31Z — `20260913-openai-iq-check` — 源码实施与功能验证完成
+
+- 请求/目标：按用户批准方案实现 OpenAI 周期糖果题检测；用户随后明确允许最终答案为21的解释文字，优先要求简洁JSON，并要求将实现写入真实仓库的标准路径。
+- 开始状态：`main` / `20c307a9b4a6ee1a8ef126d9aa0baa9aa5c500e6`，原工作树干净。最初在独立副本实施；随后按最新要求写入 `/xy/xy2api`，origin 已确认是 `github.com/liulixin-lex/xy2api`。原始源码归档保留于交付目录 `BASELINE.tar.gz`。
+- 完成操作：新增 `Account.IQCheck` 独立调度限制、默认关闭/15分钟的配置、三态筛选、最多10个跨实例租约、120秒请求超时、两轮记录事务保留、失效旧任务保护；复用 OAuth/代理/TLS/插件传输。请求固定 `gpt-6-astra` / `low`、`store:false`，要求整数 `answer` JSON，不注入标准答案且不携带历史；兼容明确解释性结论。创建/更新/批量设置、管理员接口、蓝色开关、频率编辑、立即检测、历史弹窗与中英文文案已接入。
+- 变更位置：`backend/internal/pkg/iqcheck/`、`service/iq_check_service.go`、`repository/account_iq_check.go`、账号 DTO/路由与缓存、追加迁移240及校验清单、Ent/Wire生成文件；前端沿用账号页面及组件目录。使用说明为 `docs/OPENAI_IQ_CHECK.md`。
+- 验证：判分与服务定向测试通过，覆盖JSON/解释/歧义数字、完整与中断响应、OAuth/Setup Token/API key、固定参数、独立请求、异常状态、人工限制与旧缓存候选。真实 PostgreSQL 集成验证了状态过滤、两轮保留、关闭/重开/换凭据、正常刷新、软删除、跨实例10租约和过期恢复。前端269个测试文件、1977项测试通过，lint、类型/i18n检查与生产构建通过；Go服务端构建通过。原有迁移校验值全部不变。
+- 交付：固定四角色为 `/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、可执行 `ROLLBACK.sh`。事务脚本在隔离副本上对相同模拟账号状态输入运行原版、修改版、回滚版，验证原始源码哈希及可确定重建的归档哈希；实际状态与字面输出以 `checkpoint.json` 和 `VERIFICATION.txt` 为准。回滚脚本恢复源码，不是数据库降级脚本。
+- 限制：未调用真实账号。浏览器自动化返回 `browser_no_host`，未进行真实浏览器视觉验收；移动端沿用现有 DataTable 的同名单元格插槽。测试期间因4GB内存压力调整为串行构建；已保留失败及重跑日志，不将中断的编译记为通过。
+- 后续：代码可从本地工作区审阅；本任务未授权推送、发布或部署。需要继续交付核验时执行上述事务脚本，它会复用已确认阶段。

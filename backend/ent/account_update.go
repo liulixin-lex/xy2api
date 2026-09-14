@@ -16,6 +16,7 @@ import (
 	"github.com/liulixin-lex/xy2api/ent/predicate"
 	"github.com/liulixin-lex/xy2api/ent/proxy"
 	"github.com/liulixin-lex/xy2api/ent/usagelog"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 )
 
 // AccountUpdate is the builder for updating Account entities.
@@ -366,6 +367,20 @@ func (_u *AccountUpdate) SetSchedulable(v bool) *AccountUpdate {
 func (_u *AccountUpdate) SetNillableSchedulable(v *bool) *AccountUpdate {
 	if v != nil {
 		_u.SetSchedulable(*v)
+	}
+	return _u
+}
+
+// SetIqCheck sets the "iq_check" field.
+func (_u *AccountUpdate) SetIqCheck(v domain.IQCheck) *AccountUpdate {
+	_u.mutation.SetIqCheck(v)
+	return _u
+}
+
+// SetNillableIqCheck sets the "iq_check" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableIqCheck(v *domain.IQCheck) *AccountUpdate {
+	if v != nil {
+		_u.SetIqCheck(*v)
 	}
 	return _u
 }
@@ -894,6 +909,9 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Schedulable(); ok {
 		_spec.SetField(account.FieldSchedulable, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.IqCheck(); ok {
+		_spec.SetField(account.FieldIqCheck, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.RateLimitedAt(); ok {
 		_spec.SetField(account.FieldRateLimitedAt, field.TypeTime, value)
@@ -1510,6 +1528,20 @@ func (_u *AccountUpdateOne) SetNillableSchedulable(v *bool) *AccountUpdateOne {
 	return _u
 }
 
+// SetIqCheck sets the "iq_check" field.
+func (_u *AccountUpdateOne) SetIqCheck(v domain.IQCheck) *AccountUpdateOne {
+	_u.mutation.SetIqCheck(v)
+	return _u
+}
+
+// SetNillableIqCheck sets the "iq_check" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableIqCheck(v *domain.IQCheck) *AccountUpdateOne {
+	if v != nil {
+		_u.SetIqCheck(*v)
+	}
+	return _u
+}
+
 // SetRateLimitedAt sets the "rate_limited_at" field.
 func (_u *AccountUpdateOne) SetRateLimitedAt(v time.Time) *AccountUpdateOne {
 	_u.mutation.SetRateLimitedAt(v)
@@ -2064,6 +2096,9 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if value, ok := _u.mutation.Schedulable(); ok {
 		_spec.SetField(account.FieldSchedulable, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.IqCheck(); ok {
+		_spec.SetField(account.FieldIqCheck, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.RateLimitedAt(); ok {
 		_spec.SetField(account.FieldRateLimitedAt, field.TypeTime, value)

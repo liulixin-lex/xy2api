@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 )
@@ -156,6 +157,7 @@ type AdminAccountRepository interface {
 // AccountBulkUpdate describes the fields that can be updated in a bulk operation.
 // Nil pointers mean "do not change".
 type AccountBulkUpdate struct {
+	IQCheck        *domain.IQCheckSettings
 	Name           *string
 	ProxyID        *int64
 	Concurrency    *int

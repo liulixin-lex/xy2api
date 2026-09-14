@@ -44,6 +44,11 @@ func (h *AccountHandler) GetUpstreamBillingRates(c *gin.Context) {
 		search = search[:100]
 	}
 	privacyMode := strings.TrimSpace(c.Query("privacy_mode"))
+	iqStatus := strings.TrimSpace(c.Query("iq_status"))
+	if !service.ValidIQStatusFilter(iqStatus) {
+		response.BadRequest(c, "invalid iq_status filter")
+		return
+	}
 	sortBy := c.DefaultQuery("sort_by", "name")
 	sortOrder := c.DefaultQuery("sort_order", "asc")
 
@@ -62,7 +67,7 @@ func (h *AccountHandler) GetUpstreamBillingRates(c *gin.Context) {
 	}
 
 	accounts, total, err := h.adminService.ListAccounts(
-		c.Request.Context(), page, pageSize, platform, accountType, status,
+		service.WithIQStatusFilter(c.Request.Context(), iqStatus), page, pageSize, platform, accountType, status,
 		search, groupID, privacyMode, sortBy, sortOrder,
 	)
 	if err != nil {

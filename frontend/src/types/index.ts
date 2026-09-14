@@ -1222,6 +1222,7 @@ export interface Account {
 
   // Rate limit & scheduling fields
   schedulable: boolean
+  iq_check?: { enabled: boolean; interval_minutes: number; status: 'smart' | 'degraded' | 'unknown'; reason?: string; last_run_at?: string | null; next_run_at?: string | null }
   rate_limited_at: string | null
   rate_limit_reset_at: string | null
   overload_until: string | null
@@ -1473,7 +1474,11 @@ export interface OpenAIResponsesState {
   openai_responses_supported?: boolean
 }
 
+export interface IQCheckSettings { enabled: boolean; interval_minutes: number }
+export interface IQCheckRecord { id: number; prompt_version: string; model: string; effort: string; status: 'smart' | 'degraded' | 'unknown'; answer: string; reason?: string; started_at: string; finished_at?: string | null; latency_ms: number }
+
 export interface CreateAccountRequest {
+  iq_check?: IQCheckSettings
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -1493,6 +1498,7 @@ export interface CreateAccountRequest {
 }
 
 export interface UpdateAccountRequest {
+  iq_check?: IQCheckSettings
   name?: string
   notes?: string | null
   type?: AccountType

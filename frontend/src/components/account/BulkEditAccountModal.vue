@@ -21,6 +21,10 @@
         </p>
       </div>
 
+      <div v-if="targetSelectedPlatforms.length === 1 && targetSelectedPlatforms[0] === 'openai'">
+        <label class="flex items-center gap-2 text-sm"><input v-model="editIQCheck" type="checkbox" class="rounded text-blue-500" />{{ t('admin.accounts.iqBulkEdit') }}</label>
+        <IQCheckSettings v-if="editIQCheck" v-model="iqSettings" />
+      </div>
       <!-- Mixed platform warning -->
       <div v-if="isMixedPlatform" class="rounded-lg bg-amber-50 p-4 dark:bg-amber-900/20">
         <p class="text-sm text-amber-700 dark:text-amber-400">
@@ -1473,6 +1477,7 @@
 </template>
 
 <script setup lang="ts">
+import IQCheckSettings from './IQCheckSettings.vue'
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -1552,6 +1557,8 @@ const allTargetsGrok = computed(
     targetSelectedPlatforms.value.length > 0 &&
     targetSelectedPlatforms.value.every((p) => p === 'grok')
 )
+const editIQCheck = ref(false)
+const iqSettings = ref({ enabled: false, interval_minutes: 15 })
 const isMixedPlatform = computed(() => targetSelectedPlatforms.value.length > 1)
 
 const allOpenAIPassthroughCapable = computed(() => {
@@ -2068,6 +2075,8 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     )
   }
 
+  if (editIQCheck.value) updates.iq_check = { ...iqSettings.value }
+
   if (enableUpstreamBillingAutoProbe.value) {
     updates.upstream_billing_probe_enabled = upstreamBillingAutoProbeMode.value === 'enabled'
   }
@@ -2219,6 +2228,7 @@ const handleSubmit = async () => {
     enableGroups.value ||
     enableOpenAIWSMode.value ||
     enableOpenAIAPIKeyWSMode.value ||
+    editIQCheck.value ||
     enableUpstreamBillingAutoProbe.value ||
     enableCodexCLIOnly.value ||
     enableCodexCLIOnlyAppServer.value ||
@@ -2370,6 +2380,8 @@ watch(
       enableOpenAIResponsesMode.value = false
       enableOpenAIWSMode.value = false
       enableOpenAIAPIKeyWSMode.value = false
+      editIQCheck.value = false
+      iqSettings.value = { enabled: false, interval_minutes: 15 }
       enableUpstreamBillingAutoProbe.value = false
       enableCodexCLIOnly.value = false
       enableCodexCLIOnlyAppServer.value = false

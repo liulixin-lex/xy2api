@@ -288,6 +288,7 @@
     "236_group_model_allowlist.sql": "213b4bc4dc5268c86f75caa785f843eb491b279f0a01aa59bb5605a65133ff3a",
     "237_group_model_allowlist_repair.sql": "c8c7f13a247c2dda6428cc81ae7a7bce8343d42cb2e7869ead5f4b65c039ef2d",
     "238_group_model_allowlist_auth_cache_invalidation.sql": "5622c9216da5189de21f692287bb542a2d3e94c74955d45f6514d8f5912bfe8a",
-    "239_add_minimax_platform.sql": "f4c73d2dbce114ca7ade1aac51998c3465490f4f3c9b3e868e53590f3fa8601b"
+    "239_add_minimax_platform.sql": "f4c73d2dbce114ca7ade1aac51998c3465490f4f3c9b3e868e53590f3fa8601b",
+    "240_account_iq_check.sql": "6014da7136d9aa5db07b0dfe0c4ca6da0d3055deb4bdeed79b343b98c6aa237e"
   }
 }

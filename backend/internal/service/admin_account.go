@@ -408,6 +408,9 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 // Grok media eligibility helpers live in account_grok_media_eligibility.go.
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
+	if err := ValidateIQCheckSettings(input.Platform, input.IQCheck); err != nil {
+		return nil, err
+	}
 	// Probe/session state is system-managed. New accounts always start with automatic refresh disabled.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingRateSyncEnabledExtraKey)
@@ -417,17 +420,18 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, OllamaCloudUsageSnapshotExtraKey)
 	accountExtra = prepareCodexFingerprintExtraForCreate(input.Platform, input.Type, accountExtra)
 	account := &Account{
-		Name:        input.Name,
-		Notes:       normalizeAccountNotes(input.Notes),
-		Platform:    input.Platform,
-		Type:        input.Type,
-		Credentials: input.Credentials,
-		Extra:       accountExtra,
-		ProxyID:     input.ProxyID,
-		Concurrency: normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
-		Priority:    input.Priority,
-		Status:      StatusActive,
-		Schedulable: true,
+		IQCheckSettings: input.IQCheck,
+		Name:            input.Name,
+		Notes:           normalizeAccountNotes(input.Notes),
+		Platform:        input.Platform,
+		Type:            input.Type,
+		Credentials:     input.Credentials,
+		Extra:           accountExtra,
+		ProxyID:         input.ProxyID,
+		Concurrency:     normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
+		Priority:        input.Priority,
+		Status:          StatusActive,
+		Schedulable:     true,
 	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
@@ -568,6 +572,11 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
+	if err := ValidateIQCheckSettings(account.Platform, input.IQCheck); err != nil {
+		return nil, err
+	}
+	account.IQCheckSettings = input.IQCheck
+	account.IQPreserveTokenRotation = input.IQPreserveTokenRotation
 	var normalizedExtra map[string]any
 	if input.Extra != nil {
 		normalizedExtra, err = normalizeOpenAILongContextBillingUpdateExtra(account, input)
@@ -1126,6 +1135,8 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		repoUpdates.Schedulable = input.Schedulable
 	}
 
+	repoUpdates.IQCheck = input.IQCheck
+
 	// Run bulk update for column/jsonb fields first.
 	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
 		return nil, err
@@ -1211,6 +1222,10 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 		groupID = parsedGroupID
 	}
 
+	if !ValidIQStatusFilter(filters.IQStatus) {
+		return nil, ErrIQCheckInvalid
+	}
+	ctx = WithIQStatusFilter(ctx, filters.IQStatus)
 	const pageSize = 500
 	page := 1
 	accountIDs := make([]int64, 0, pageSize)
