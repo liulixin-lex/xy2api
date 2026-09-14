@@ -4,33 +4,33 @@
 
 ## 当前交接状态
 
-最后更新：`2026-09-14T15:12:00Z`（UTC）
+最后更新：`2026-09-14T16:35:00Z`（UTC）
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
-| 当前分支 | `feat/iq-monitoring-controls`，HEAD `ea94b83d1442a2b661b4bba0433cb10d63263868`；此前监测优化已提交，本轮UI与三轮保留改进未提交 |
-| 发布提交 | 已有发布记录：`v0.0.9` / `5e1baf6f4cf9da5a5c9b3ad31958d92779a00cb0`，PR #27 |
-| 工作树 | 原生Select、同步模型按钮、简化检测设置和记录展示、三轮保留已完成；前端70项相关测试、lint、类型/i18n/构建、浏览器及IQ仓储集成通过；新改动未提交，未推送/部署 |
-| XY2API 产品版本 | 本地 `VERSION` 为 `0.0.9`；本轮不发版，不据历史记录断言远端 latest |
+| 当前分支 | 发布已合入 `main`；本条文档在 `docs/v0.0.10-closeout` 收尾，后续用Git核实实际HEAD |
+| 发布提交 | `v0.0.10` / `e695c0356c972f398045f87b28a9cccda8a66176`，PR #29 |
+| 工作树 | 协议解析、低负载监测、原生Select和三轮保留均已提交、推送并发布；本次收尾仅更新记忆 |
+| XY2API 产品版本 | `VERSION` 与 `UPSTREAM_BASE.json.xy2api_version` 均为 `0.0.10`；正式latest及制品已核验 |
 | 已审计的 Sub2API 基线 | `v0.2.4` / commit `5de5e2bed035d43591a2e10e51f420ef6a84eb98`；已通过 PR `#22` 合入 `main` |
 | 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，7 个人工冲突均已记录；同步 PR [#22](https://github.com/liulixin-lex/xy2api/pull/22) 以 merge commit `ea48f08fc8` 合入 |
 | 本地远端 | `origin` 可读写；`upstream` 仅允许 fetch，push URL 为 `DISABLED` |
 | 当前环境工具 | `git`、`python3 3.12.3`、`gh`、Docker、Node、Corepack、pnpm 可用；本地无 Go 命令，已用 Go 1.27 Docker 完成后端验证 |
 
-Sub2API 兼容基线保持 `v0.2.4`。下方历史发布日志保留原样；本轮响应兼容改进仅在本地实施，没有升级生产实例。
+Sub2API 兼容基线保持 `v0.2.4`。下方历史日志保留原样；响应兼容和监测改进已在v0.0.10发布，没有升级生产实例。
 
 ## 进行中的工作
 
-- `20260914-v0.0.10-release`：用户授权远端推送、合并和发布0.0.10；从ea94b83d1及已验证UI改动继续，包含协议解析、低负载监测、原生控件和三轮保留。经受保护PR和Release工作流发布，制品及镜像验收记录沿用openai-iq-check四角色。
+- `20260914-v0.0.10-release`：功能PR #29、主线CI、安全扫描、Release及五平台包/双架构镜像均已通过；发布完成。本条记录随收尾文档合入，实际PR状态以GitHub为准。
 
-- `20260914-iq-ui-refinement`：已先提交既有改动ea94b83d1，再完成本地UI与三轮保留优化。当前源码副本同输入回滚已通过；固定四角色最终一致性见ui-refinement-final-audit.json。新改动未提交，未推送/部署。
+- `20260914-iq-ui-refinement`：已由v0.0.10发布承接；UI和三轮保留已提交发布，未部署生产。
 
-- `20260914-iq-monitoring-implementation`：本地实现与验收完成。相关单测、完整repository集成、CI同配置相关包静态检查、前后端构建及同输入源码回滚通过；四角色沿用原路径，最终一致性见monitor-impl-final-audit.json。未提交、发布或部署；真实账号观察尚未执行。
+- `20260914-iq-monitoring-implementation`：已由v0.0.10发布承接；历史本地验证证据保留，真实账号观察尚未执行。
 
 - `20260914-iq-monitoring-plan`：已由本轮实施承接；原文档验证保持历史记录，当前实现与验收进度以monitoring/tasks.md及monitor-impl-*记录为准。
 
-- `20260914-iq-protocol` 已完成本地实现、前后端构建及四角色回滚核验；未提交、推送、发版或部署，无真实上游调用。
+- `20260914-iq-protocol` 已随v0.0.10提交发布，无真实上游调用或生产部署。
 
 - `20260914-iq-stability-implementation` 的后续发布已在 v0.0.9 日志记录；历史未提交描述不代表当前状态。
 
@@ -429,3 +429,13 @@ pnpm --dir frontend run build
 - 验证：前端70项相关测试、修改文件lint、类型/i18n与生产构建通过；实际Chromium1280/390检查设置、原生下拉弹层和三条记录，无横向溢出。同步/选择、深度验证、Escape及节约模式通过，机械检测为[]。测试桩缺te、旧input选择器和动画断言已修复重跑；浏览器脚本将最大间隔误算成基础间隔的断言已修复，失败日志保留。构建输出AccountsView包含最终蓝色Toggle样式。
 - 事务：相同四次输入在源码中的实际查询上回放（SQLite兼容语法fixture，PostgreSQL验证另见集成）：BASELINE保留[4,3]，MODIFIED保留[4,3,2]，ROLLBACK恢复[4,3]，其他账号记录保持。回滚源码哈希相同，再应用补丁恢复修改版。累计四角色继续使用最初pre-IQ基线，不能将其无IQ功能行为与本轮ea94b83d1基线混同。
 - 交付：固定/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh；最终审计ui-refinement-final-audit.json。预览http://localhost:5188/__iq-review（模拟目录和记录，不使用真实账号）；?view=records显示记录。未提交新UI改动、推送、发版或部署。
+
+### 2026-09-14T16:35:00Z — `20260914-v0.0.10-release` — 发布完成
+
+- 请求：远端推送、合并并发布0.0.10。开始于feat/iq-monitoring-controls / ea94b83d1及已验证的13个UI和三轮保留改动文件。
+- 操作：提交UI与版本f8de1197c，先合入遗留文档PR #28，再合并最新main到功能分支20102fbbb；PR #29固定head全部16项检查通过后合入e695c0356。创建annotated v0.0.10标签，Release run34867937142成功，正式非预发布且为latest。主线CI34867929408及安全扫描34867929289均成功。
+- 制品：五个平台包实际下载并复算SHA-256全部通过，Linux amd64运行时输出0.0.10、兼容0.2.4及正确完整提交。GHCR amd64/arm64版本和revision正确；0.0.10/latest/0.0/0均指向sha256:380c3297e24cfcfd8b2fff9d31ebdaacad0060a7e94fcc709b4f320ab4310a61。
+- 变更：响应协议解析、限额/退避/节约模式、原生检测设置和记录UI、最近三轮保留；追加迁移242/243，历史迁移未修改。VERSION和provenance产品字段为0.0.10，Sub2API兼容仍0.2.4。升级需停止旧检测工作者后统一升级。
+- 事务：沿用固定四角色和原始pre-IQ基线；同输入BASELINE无检测保留功能，MODIFIED第四轮后保留[4,3,2]且采用原生Select，ROLLBACK恢复BASELINE并匹配源码manifest哈希eda4554229078281dcf48cfe8b891f18dfcbf3ef3a0e6d9eef9df91f0820eef7。补丁重建归档一致，额外本轮UI基线两轮→三轮→两轮证据保留。v010-*字面日志扩展VERIFICATION.txt，所有四角色重新打开核验。
+- 失败留存：首次清理过期构建缓存遇目录类型后仅清理普通缓存文件；首次PR28 expected SHA错误被拒后使用实际完整SHA成功；旧gh不支持checks --json，改用pr view。无本轮CI失败，不把准备命令错误当作发布结果。没有生产部署或真实账号检测。
+- 后续：发布已完成；收尾文档经受保护PR合入。动态状态与源码交付最终一致性见openai-iq-check/v010-final-audit.json。
