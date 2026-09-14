@@ -395,7 +395,7 @@ func (r *accountRepository) ListIQCheckRecords(ctx context.Context, id int64) ([
 	if a.Platform != service.PlatformOpenAI {
 		return nil, service.ErrIQCheckInvalid
 	}
-	rows, err := r.sql.QueryContext(ctx, `SELECT id,prompt_version,model,effort,status,answer,reason,started_at,finished_at,latency_ms,normalized_answer,answer_format,output_mode,format_compliant,grader_version,protocol,reported_model,config_revision,diagnostic FROM account_iq_check_results WHERE account_id=$1 ORDER BY id DESC LIMIT 2`, id)
+	rows, err := r.sql.QueryContext(ctx, `SELECT id,prompt_version,model,effort,status,answer,reason,started_at,finished_at,latency_ms,normalized_answer,answer_format,output_mode,format_compliant,grader_version,protocol,reported_model,config_revision,diagnostic FROM account_iq_check_results WHERE account_id=$1 ORDER BY id DESC LIMIT 3`, id)
 	if err != nil {
 		return nil, err
 	}

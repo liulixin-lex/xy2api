@@ -4,14 +4,14 @@
 
 ## 当前交接状态
 
-最后更新：`2026-09-14T14:45:09Z`（UTC）
+最后更新：`2026-09-14T15:12:00Z`（UTC）
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
-| 当前分支 | `feat/iq-monitoring-controls`，基于 `cb5dc5ae060ee2c04ce996a67cfe289f0224f657`；本轮本地改进未提交 |
+| 当前分支 | `feat/iq-monitoring-controls`，HEAD `ea94b83d1442a2b661b4bba0433cb10d63263868`；此前监测优化已提交，本轮UI与三轮保留改进未提交 |
 | 发布提交 | 已有发布记录：`v0.0.9` / `5e1baf6f4cf9da5a5c9b3ad31958d92779a00cb0`，PR #27 |
-| 工作树 | 已整合上一轮协议兼容、诊断及迁移242；监测排期、预算、业务名额、异常暂停、诊断下载及迁移243已通过相关测试、静态检查、前后端构建及四角色回滚事务；未提交/部署 |
+| 工作树 | 原生Select、同步模型按钮、简化检测设置和记录展示、三轮保留已完成；前端70项相关测试、lint、类型/i18n/构建、浏览器及IQ仓储集成通过；新改动未提交，未推送/部署 |
 | XY2API 产品版本 | 本地 `VERSION` 为 `0.0.9`；本轮不发版，不据历史记录断言远端 latest |
 | 已审计的 Sub2API 基线 | `v0.2.4` / commit `5de5e2bed035d43591a2e10e51f420ef6a84eb98`；已通过 PR `#22` 合入 `main` |
 | 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，7 个人工冲突均已记录；同步 PR [#22](https://github.com/liulixin-lex/xy2api/pull/22) 以 merge commit `ea48f08fc8` 合入 |
@@ -21,6 +21,10 @@
 Sub2API 兼容基线保持 `v0.2.4`。下方历史发布日志保留原样；本轮响应兼容改进仅在本地实施，没有升级生产实例。
 
 ## 进行中的工作
+
+- `20260914-v0.0.10-release`：用户授权远端推送、合并和发布0.0.10；从ea94b83d1及已验证UI改动继续，包含协议解析、低负载监测、原生控件和三轮保留。经受保护PR和Release工作流发布，制品及镜像验收记录沿用openai-iq-check四角色。
+
+- `20260914-iq-ui-refinement`：已先提交既有改动ea94b83d1，再完成本地UI与三轮保留优化。当前源码副本同输入回滚已通过；固定四角色最终一致性见ui-refinement-final-audit.json。新改动未提交，未推送/部署。
 
 - `20260914-iq-monitoring-implementation`：本地实现与验收完成。相关单测、完整repository集成、CI同配置相关包静态检查、前后端构建及同输入源码回滚通过；四角色沿用原路径，最终一致性见monitor-impl-final-audit.json。未提交、发布或部署；真实账号观察尚未执行。
 
@@ -415,3 +419,13 @@ pnpm --dir frontend run build
 - 失败留存：内存压力、测试时间精度及测试桩等失败和成功重跑均保留。额外unit标签静态分析报告52项问题，涉及29个未改文件；按仓库CI不附加标签的相关包检查通过，没有为消除历史诊断修改无关文件。
 - 同输入事务：当前源码基线为15分钟/无预算门禁，修改版为60分钟/日预算延期，降智限制仍有效；当前副本回滚后哈希和输出恢复。累计原始BASELINE为pre-IQ源码（无解析器和监测控制），MODIFIED解析合法辅助事件为聪明、损坏/不完整流为未知并执行预算门禁，ROLLBACK恢复BASELINE；三轮退出0。累计源码manifest恢复为eda4554229078281dcf48cfe8b891f18dfcbf3ef3a0e6d9eef9df91f0820eef7。
 - 交付：沿用/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh；基线归档和历次四角色备份保留。字面命令、输出、退出码和哈希见VERIFICATION.txt，最终归档与工作区一致性见monitor-impl-final-audit.json。ROLLBACK.sh只恢复独立源码副本，不操作生产数据库。
+
+### 2026-09-14T15:12:00Z — `20260914-iq-ui-refinement` — 本地完成
+
+- 用户要求先提交既有检测优化，再改进编辑和记录UI、原生模型下拉与同步按钮，并把记录保留从2改为3。先提交44个文件为ea94b83d1，未推送。基线source.tar.gz及原四角色备份位于pre-ui-refinement。
+- UI：直接使用common/Select替代datalist及原生select，支持搜索、自定义模型、键盘选择和关闭、弹层定位及焦点返回；同步按钮沿用ModelWhitelistSelector的绿色描边操作样式。显式同步刷新目录，保持所选模型；失败、重复点击及账号切换处理保留。思考深度显示本地化档位，仍允许未知模型自定义值；已声明不支持的档位禁用且阻止保存。蓝色启闭使用原Toggle组件。
+- 表单和记录：常用设置优先，预算/超时/格式/配额组收进高级设置，批量自动展开；删除面向开发者的大段提示。记录以状态、答案、模型、深度、耗时为主，原文和技术诊断默认折叠。增加刷新、加载失败重试、独立下载错误和过期请求丢弃，下载失败保留列表。
+- 保留：StartIQCheck原子删除和ListIQCheckRecords读取均改为LIMIT 3，诊断下载复用同一查询。第四轮开始删除最早轮，历史记录不补造，无需迁移。真实PostgreSQL/Redis IQ仓储集成通过，断言数据库实际计数为3、最新三条内容和正常状态转换。
+- 验证：前端70项相关测试、修改文件lint、类型/i18n与生产构建通过；实际Chromium1280/390检查设置、原生下拉弹层和三条记录，无横向溢出。同步/选择、深度验证、Escape及节约模式通过，机械检测为[]。测试桩缺te、旧input选择器和动画断言已修复重跑；浏览器脚本将最大间隔误算成基础间隔的断言已修复，失败日志保留。构建输出AccountsView包含最终蓝色Toggle样式。
+- 事务：相同四次输入在源码中的实际查询上回放（SQLite兼容语法fixture，PostgreSQL验证另见集成）：BASELINE保留[4,3]，MODIFIED保留[4,3,2]，ROLLBACK恢复[4,3]，其他账号记录保持。回滚源码哈希相同，再应用补丁恢复修改版。累计四角色继续使用最初pre-IQ基线，不能将其无IQ功能行为与本轮ea94b83d1基线混同。
+- 交付：固定/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh；最终审计ui-refinement-final-audit.json。预览http://localhost:5188/__iq-review（模拟目录和记录，不使用真实账号）；?view=records显示记录。未提交新UI改动、推送、发版或部署。

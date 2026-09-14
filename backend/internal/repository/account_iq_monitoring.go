@@ -190,7 +190,7 @@ func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckC
 		if _, err = db.ExecContext(ctx, `INSERT INTO account_iq_check_results(account_id,lease_token,started_at,prompt_version,grader_version,model,effort,output_mode,protocol,config_revision) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, c.AccountID, c.Token, now, iqcheck.PromptVersion, iqcheck.GraderVersion, s.Model, s.ReasoningEffort, s.OutputMode, c.Protocol, c.Revision); err != nil {
 			return false, err
 		}
-		if _, err = db.ExecContext(ctx, `DELETE FROM account_iq_check_results WHERE account_id=$1 AND id NOT IN (SELECT id FROM account_iq_check_results WHERE account_id=$1 ORDER BY id DESC LIMIT 2)`, c.AccountID); err != nil {
+		if _, err = db.ExecContext(ctx, `DELETE FROM account_iq_check_results WHERE account_id=$1 AND id NOT IN (SELECT id FROM account_iq_check_results WHERE account_id=$1 ORDER BY id DESC LIMIT 3)`, c.AccountID); err != nil {
 			return false, err
 		}
 	}

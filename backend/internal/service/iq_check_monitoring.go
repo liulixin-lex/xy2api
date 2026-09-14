@@ -148,7 +148,7 @@ func (s *IQCheckService) execute(ctx context.Context, c IQCheckClaim) {
 	}
 }
 
-// Download contains no account identity or raw responses. Existing record retention bounds it to two rounds.
+// Download contains no account identity or raw responses. Record retention bounds it to three rounds.
 func (s *IQCheckService) Diagnostics(ctx context.Context, id int64) (any, error) {
 	records, err := s.Records(ctx, id)
 	if err != nil {
