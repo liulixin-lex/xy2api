@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
@@ -346,4 +347,20 @@ func TestDuplicateAccountReturnsExistingCopyForSameOperationKey(t *testing.T) {
 	require.NotEqual(t, first.ID, otherAdminCopy.ID)
 	require.Len(t, repo.accounts, 3)
 	require.NotEmpty(t, first.Extra[duplicateAccountOperationIDExtraKey])
+}
+
+func TestDuplicateAccountPreservesIQProfileButDisablesCheck(t *testing.T) {
+	ctx := context.Background()
+	repo := newDuplicateAccountRepoStub()
+	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+	source := &Account{Name: "source", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Credentials: map[string]any{"api_key": "fixture"}, IQCheck: domain.IQCheck{Enabled: true, IntervalMinutes: 45, Model: "custom-model", ReasoningEffort: "ultra", OutputMode: "strict", Status: "degraded"}}
+	require.NoError(t, repo.Create(ctx, source))
+	copy, err := svc.DuplicateAccount(ctx, source.ID, "admin:1", "")
+	require.NoError(t, err)
+	require.NotNil(t, copy.IQCheckSettings)
+	require.False(t, *copy.IQCheckSettings.Enabled)
+	require.Equal(t, "custom-model", *copy.IQCheckSettings.Model)
+	require.Equal(t, "ultra", *copy.IQCheckSettings.ReasoningEffort)
+	require.Equal(t, 45, *copy.IQCheckSettings.IntervalMinutes)
+	require.False(t, copy.Schedulable)
 }

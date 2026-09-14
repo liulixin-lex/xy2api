@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -37,14 +38,15 @@ type dataProxy struct {
 }
 
 type dataAccount struct {
-	Name        string         `json:"name"`
-	Platform    string         `json:"platform"`
-	Type        string         `json:"type"`
-	Credentials map[string]any `json:"credentials"`
-	Extra       map[string]any `json:"extra"`
-	ProxyKey    *string        `json:"proxy_key"`
-	Concurrency int            `json:"concurrency"`
-	Priority    int            `json:"priority"`
+	IQCheck     *domain.IQCheckSettings `json:"iq_check"`
+	Name        string                  `json:"name"`
+	Platform    string                  `json:"platform"`
+	Type        string                  `json:"type"`
+	Credentials map[string]any          `json:"credentials"`
+	Extra       map[string]any          `json:"extra"`
+	ProxyKey    *string                 `json:"proxy_key"`
+	Concurrency int                     `json:"concurrency"`
+	Priority    int                     `json:"priority"`
 }
 
 func setupAccountDataRouter() (*gin.Engine, *stubAdminService) {
@@ -103,6 +105,7 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 	adminSvc.accounts = []service.Account{
 		{
 			ID:          21,
+			IQCheck:     domain.IQCheck{Enabled: true, IntervalMinutes: 30, Model: "custom-model", ReasoningEffort: "high", OutputMode: "strict", Status: "degraded"},
 			Name:        "account",
 			Platform:    service.PlatformOpenAI,
 			Type:        service.AccountTypeOAuth,
@@ -129,6 +132,9 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 	require.Equal(t, "pass", resp.Data.Proxies[0].Password)
 	require.Len(t, resp.Data.Accounts, 1)
 	require.Equal(t, "secret", resp.Data.Accounts[0].Credentials["token"])
+	require.NotNil(t, resp.Data.Accounts[0].IQCheck)
+	require.False(t, *resp.Data.Accounts[0].IQCheck.Enabled)
+	require.Equal(t, "custom-model", *resp.Data.Accounts[0].IQCheck.Model)
 }
 
 func TestExportDataWithoutProxies(t *testing.T) {
@@ -294,6 +300,7 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 			"accounts": []map[string]any{
 				{
 					"name":        "acc",
+					"iq_check":    map[string]any{"enabled": true, "model": "custom-model", "reasoning_effort": "upstream_default", "output_mode": "strict", "interval_minutes": 45},
 					"platform":    service.PlatformOpenAI,
 					"type":        service.AccountTypeOAuth,
 					"credentials": map[string]any{"token": "x"},
@@ -316,4 +323,10 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 	require.Len(t, adminSvc.createdProxies, 0)
 	require.Len(t, adminSvc.createdAccounts, 1)
 	require.True(t, adminSvc.createdAccounts[0].SkipDefaultGroupBind)
+	settings := adminSvc.createdAccounts[0].IQCheck
+	require.NotNil(t, settings)
+	require.False(t, *settings.Enabled)
+	require.Equal(t, "custom-model", *settings.Model)
+	require.Equal(t, "upstream_default", *settings.ReasoningEffort)
+	require.Equal(t, 45, *settings.IntervalMinutes)
 }

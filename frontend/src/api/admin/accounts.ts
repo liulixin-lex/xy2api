@@ -7,6 +7,8 @@ import { apiClient } from '../client'
 import type {
   Account,
   IQCheckRecord,
+  IQCheckSettings,
+  IQModelCatalog,
   AccountListItem,
   CreateAccountRequest,
   UpdateAccountRequest,
@@ -70,8 +72,13 @@ export async function list(
   return data
 }
 
-export async function setIQCheck(id: number, payload: { enabled: boolean; interval_minutes: number }) {
+export async function setIQCheck(id: number, payload: Partial<IQCheckSettings>) {
   const { data } = await apiClient.put(`/admin/accounts/${id}/iq-check`, payload)
+  return data
+}
+
+export async function getIQCheckModels(id: number, refresh = false, signal?: AbortSignal) {
+  const { data } = await apiClient.get<IQModelCatalog>(`/admin/accounts/${id}/iq-check/models`, { params: { refresh }, signal })
   return data
 }
 
@@ -1116,6 +1123,7 @@ export const accountsAPI = {
   setIQCheck,
   runIQCheck,
   getIQCheckResults,
+  getIQCheckModels,
   getAvailableModels,
   syncUpstreamModels,
   syncUpstreamModelsPreview,

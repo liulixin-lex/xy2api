@@ -11,6 +11,7 @@ import (
 	"log/slog"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/liulixin-lex/xy2api/internal/pkg/response"
@@ -58,18 +59,19 @@ type DataProxy struct {
 // 影子的独立调度配置(priority/并发/分组/status 管理员可单独调)亦不在本备份范围,属已知局限
 // (外审第6轮裁决:保持排除 + 前端警告,而非升级格式做完整往返)。
 type DataAccount struct {
-	Name               string         `json:"name"`
-	Notes              *string        `json:"notes,omitempty"`
-	Platform           string         `json:"platform"`
-	Type               string         `json:"type"`
-	Credentials        map[string]any `json:"credentials"`
-	Extra              map[string]any `json:"extra,omitempty"`
-	ProxyKey           *string        `json:"proxy_key,omitempty"`
-	Concurrency        int            `json:"concurrency"`
-	Priority           int            `json:"priority"`
-	RateMultiplier     *float64       `json:"rate_multiplier,omitempty"`
-	ExpiresAt          *int64         `json:"expires_at,omitempty"`
-	AutoPauseOnExpired *bool          `json:"auto_pause_on_expired,omitempty"`
+	IQCheck            *domain.IQCheckSettings `json:"iq_check,omitempty"`
+	Name               string                  `json:"name"`
+	Notes              *string                 `json:"notes,omitempty"`
+	Platform           string                  `json:"platform"`
+	Type               string                  `json:"type"`
+	Credentials        map[string]any          `json:"credentials"`
+	Extra              map[string]any          `json:"extra,omitempty"`
+	ProxyKey           *string                 `json:"proxy_key,omitempty"`
+	Concurrency        int                     `json:"concurrency"`
+	Priority           int                     `json:"priority"`
+	RateMultiplier     *float64                `json:"rate_multiplier,omitempty"`
+	ExpiresAt          *int64                  `json:"expires_at,omitempty"`
+	AutoPauseOnExpired *bool                   `json:"auto_pause_on_expired,omitempty"`
 }
 
 type DataImportRequest struct {
@@ -199,7 +201,12 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			v := acc.ExpiresAt.Unix()
 			expiresAt = &v
 		}
+		var iqSettings *domain.IQCheckSettings
+		if acc.Platform == service.PlatformOpenAI {
+			iqSettings = acc.IQCheck.CopySettings()
+		}
 		dataAccounts = append(dataAccounts, DataAccount{
+			IQCheck:            iqSettings,
 			Name:               acc.Name,
 			Notes:              acc.Notes,
 			Platform:           acc.Platform,
@@ -450,6 +457,14 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			SkipDefaultGroupBind: skipDefaultGroupBind,
 		}
 
+		if item.IQCheck != nil {
+			if err := service.ValidateIQCheckSettings(item.Platform, item.IQCheck); err != nil {
+				result.AccountFailed++
+				result.Errors = append(result.Errors, DataImportError{Kind: "account", Name: item.Name, Message: err.Error()})
+				continue
+			}
+			accountInput.IQCheck = domain.DefaultIQCheck().WithSettings(item.IQCheck).CopySettings()
+		}
 		created, err := h.adminService.CreateAccount(ctx, accountInput)
 		if err != nil {
 			result.AccountFailed++
