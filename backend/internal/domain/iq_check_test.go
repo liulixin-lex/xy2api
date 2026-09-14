@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestIQCheckPartialSettingsAndCopy(t *testing.T) {
@@ -37,5 +38,37 @@ func TestIQCheckPartialSettingsAndCopy(t *testing.T) {
 	}
 	if *valid.Model != "custom/model" {
 		t.Fatal(valid)
+	}
+}
+
+func TestIQMonitoringBudgetAndFreshness(t *testing.T) {
+	s := DefaultIQCheck()
+	if s.DailyLimit() != 96 || s.TimeoutSeconds != 120 || s.SchedulingMode != "fixed" {
+		t.Fatal(s)
+	}
+	s.IntervalMinutes = 1
+	if s.DailyLimit() != 1440 {
+		t.Fatal(s)
+	}
+	s.DailyRequestLimit = 2
+	s.BudgetDay = "2026-09-14"
+	s.BudgetUsed = 2
+	now := time.Date(2026, 9, 14, 23, 59, 0, 0, time.UTC)
+	last := now
+	s.LastRunAt = &last
+	s.IntervalMinutes = 15
+	next, reason := s.Eligibility(now)
+	if reason != "minimum_interval" || !next.Equal(now.Add(15*time.Minute)) {
+		t.Fatal(next, reason)
+	}
+	next, _ = s.Eligibility(now.Add(time.Minute))
+	if !next.Equal(now.Add(15 * time.Minute)) {
+		t.Fatal("midnight bypass", next)
+	}
+	for _, raw := range []string{`{"timeout_seconds":301}`, `{"daily_request_limit":0}`, `{"scheduling_mode":"random"}`, `{"quota_group":"../bad"}`} {
+		var p IQCheckSettings
+		if json.Unmarshal([]byte(raw), &p) != nil || p.Validate() == nil {
+			t.Fatal(raw)
+		}
 	}
 }

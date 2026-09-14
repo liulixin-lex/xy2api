@@ -2,6 +2,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { describe, it, expect, vi } from 'vitest'
 import IQCheckResultsModal from '../IQCheckResultsModal.vue'
 import type { Account } from '@/types'
+vi.mock('@/api/admin/accounts', () => ({ downloadIQCheckDiagnostics: vi.fn() }))
 const history = vi.hoisted(() => vi.fn())
 vi.mock('@/api/admin', () => ({ adminAPI: { accounts: { getIQCheckResults: history } } }))
 vi.mock('@/utils/format', () => ({ formatDateTime: (s: string) => s }))
@@ -28,4 +29,16 @@ describe('IQ results', () => {
     expect(wrapper.text()).toContain('iqLegacyResult')
     expect(wrapper.get('pre').text()).toBe('29')
   })
+  it('shows bounded diagnostics separately from an absent answer', async () => {
+    history.mockResolvedValue([{ id: 1, status: 'unknown', finished_at: 'now', started_at: 'now', answer: '', reason: 'invalid_event_json', diagnostic: { parser_version: 'iq-response-v3', stage: 'decode', code: 'invalid_event_json', event_type: 'response.completed', event_index: 4, http_status: 200, request_id: '<script>alert(1)</script>', unexpected_secret: 'must-not-render' } }])
+    const wrapper = mount(IQCheckResultsModal, { props: { show: true, account: { id: 8 } as Account }, global: { stubs: { BaseDialog: { template: '<div><slot /></div>' } } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('iqDiagnosticHint')
+    expect(wrapper.text()).toContain('response.completed')
+    expect(wrapper.text()).toContain('iq-response-v3')
+    expect(wrapper.text()).not.toContain('must-not-render')
+    expect(wrapper.find('script').exists()).toBe(false)
+    expect(wrapper.findAll('details').every(d => d.attributes('open') === undefined)).toBe(true)
+  })
+
 })

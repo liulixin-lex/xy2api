@@ -127,11 +127,12 @@ func (h *AccountHandler) RunIQCheck(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if err := h.iqCheckService.Queue(c.Request.Context(), id); err != nil {
+	result, err := h.iqCheckService.QueueStatus(c.Request.Context(), id)
+	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, gin.H{"queued": true})
+	response.Success(c, result)
 }
 
 func (h *AccountHandler) ListIQCheckResults(c *gin.Context) {
@@ -3392,4 +3393,24 @@ func sanitizeExtraBaseRPM(extra map[string]any) {
 		v = 10000
 	}
 	extra["base_rpm"] = v
+}
+
+func (h *AccountHandler) DownloadIQCheckDiagnostics(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if h.iqCheckService == nil {
+		response.ErrorFrom(c, service.ErrIQCheckInvalid)
+		return
+	}
+	result, err := h.iqCheckService.Diagnostics(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	c.Header("Content-Disposition", `attachment; filename="iq-check-diagnostics.json"`)
+	c.Header("Cache-Control", "no-store")
+	c.JSON(200, result)
 }

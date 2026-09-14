@@ -25,6 +25,14 @@
         <p v-if="effortError" role="alert" class="mt-1 text-sm text-red-600 dark:text-red-400">{{ effortError }}</p>
       </div>
     </div>
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <label class="min-w-0"><span class="input-label">{{ t('admin.accounts.iqSchedule') }}</span>
+        <select class="input" :value="modelValue.scheduling_mode ?? 'fixed'" :disabled="!included('scheduling_mode')" @change="updateText('scheduling_mode', $event)"><option value="fixed">{{ t('admin.accounts.iqFixed') }}</option><option value="adaptive">{{ t('admin.accounts.iqAdaptive') }}</option></select>
+      </label>
+      <label v-for="field in monitoringNumbers" :key="field.key" class="min-w-0"><span class="input-label">{{ t(field.label) }}</span><input type="number" class="input" :min="field.min" :max="field.max" :value="modelValue[field.key] ?? field.fallback" :disabled="!included(field.key)" required @input="updateNumber(field.key, $event)" /></label>
+      <label class="min-w-0"><span class="input-label">{{ t('admin.accounts.iqQuotaGroup') }}</span><input class="input" maxlength="64" pattern="[a-zA-Z0-9_-]*" :value="modelValue.quota_group ?? ''" :disabled="!included('quota_group')" @input="updateText('quota_group', $event)" /><span class="input-hint">{{ t('admin.accounts.iqQuotaGroupHint') }}</span></label>
+    </div>
+    <p class="input-hint">{{ t('admin.accounts.iqScheduleHint', { count: Math.ceil(1440 / Math.max(1, modelValue.interval_minutes)), interval: modelValue.scheduling_mode === 'adaptive' ? Math.max(modelValue.interval_minutes, modelValue.max_interval_minutes ?? 60) : modelValue.interval_minutes }) }}</p>
     <details>
       <summary class="cursor-pointer text-sm">{{ t('admin.accounts.iqOutputSettings') }}</summary>
       <label class="mt-2 block text-sm">
@@ -87,5 +95,12 @@ async function fetchModels() {
 }
 const updateEnabled = (event: Event) => emit('update:modelValue', { ...props.modelValue, enabled: (event.target as HTMLInputElement).checked })
 const updateInterval = (event: Event) => emit('update:modelValue', { ...props.modelValue, interval_minutes: Number((event.target as HTMLInputElement).value) })
-const updateText = (field: 'model' | 'reasoning_effort' | 'output_mode', event: Event) => emit('update:modelValue', { ...props.modelValue, [field]: (event.target as HTMLInputElement).value })
+const updateText = (field: 'model' | 'reasoning_effort' | 'output_mode' | 'scheduling_mode' | 'quota_group', event: Event) => emit('update:modelValue', { ...props.modelValue, [field]: (event.target as HTMLInputElement).value })
+type NumericSetting = 'max_interval_minutes' | 'daily_request_limit' | 'timeout_seconds'
+const monitoringNumbers = computed(() => [
+  { key: 'max_interval_minutes' as NumericSetting, label: 'admin.accounts.iqMaxInterval', min: 1, max: 1440, fallback: 60 },
+  { key: 'daily_request_limit' as NumericSetting, label: 'admin.accounts.iqDailyLimit', min: 1, max: 1440, fallback: Math.ceil(1440 / Math.max(1, props.modelValue.interval_minutes)) },
+  { key: 'timeout_seconds' as NumericSetting, label: 'admin.accounts.iqTimeout', min: 30, max: 300, fallback: 120 }
+])
+const updateNumber = (field: NumericSetting, event: Event) => emit('update:modelValue', { ...props.modelValue, [field]: Number((event.target as HTMLInputElement).value) })
 </script>

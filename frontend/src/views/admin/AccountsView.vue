@@ -305,6 +305,12 @@
               <span class="text-xs" :class="row.iq_check?.status === 'smart' ? 'text-green-600' : row.iq_check?.status === 'degraded' ? 'text-yellow-600' : 'text-gray-500'">{{ row.iq_check?.status === 'smart' ? t('admin.accounts.iqCheckStatus.smart') : row.iq_check?.status === 'degraded' ? t('admin.accounts.iqCheckStatus.degraded') : t('admin.accounts.iqCheckStatus.unknown') }}</span>
             </div>
             <span v-else class="text-xs text-gray-400">-</span>
+            <div v-if="row.platform === 'openai' && row.iq_check?.enabled" class="mt-1 max-w-56 break-words text-xs text-gray-500">
+              <p>{{ t('admin.accounts.iqExecution') }}: {{ t(`admin.accounts.iqExecutionStates.${row.iq_check.execution_state || 'idle'}`) }} · {{ t(`admin.accounts.iqFreshness.${row.iq_check.freshness || 'never_checked'}`) }}</p>
+              <p v-if="row.iq_check.execution_reason">{{ te('admin.accounts.iqExecutionReasons.' + row.iq_check.execution_reason) ? t('admin.accounts.iqExecutionReasons.' + row.iq_check.execution_reason) : row.iq_check.execution_reason }}</p>
+              <p v-if="row.iq_check.next_eligible_at">{{ t('admin.accounts.iqNextEligible') }}: {{ formatDateTime(row.iq_check.next_eligible_at) }}</p>
+              <p v-if="row.iq_check.last_run_at">{{ t('admin.accounts.iqLastAssessment') }}: {{ formatDateTime(row.iq_check.last_run_at) }}</p>
+            </div>
           </template>
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
@@ -546,7 +552,7 @@ import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
 import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 
@@ -629,7 +635,7 @@ const togglingSchedulable = ref<number | null>(null)
 const togglingIQCheck = ref(new Set<number>())
 const iqRecordsAccount = ref<Account | null>(null)
 const handleRunIQCheck = async (account: Account) => {
-  try { await adminAPI.accounts.runIQCheck(account.id); appStore.showSuccess(t('admin.accounts.iqQueued')) }
+  try { const result = await adminAPI.accounts.runIQCheck(account.id); appStore.showSuccess(result?.next_eligible_at ? t('admin.accounts.iqQueuedAt', { time: formatDateTime(result.next_eligible_at) }) : t('admin.accounts.iqQueued')); await refreshAccountsIncrementally() }
   catch { appStore.showError(t('admin.accounts.iqFailed')) }
 }
 const menu = reactive<{show:boolean, acc:Account|null, anchorRect:DOMRect|null}>({ show: false, acc: null, anchorRect: null })

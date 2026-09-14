@@ -4,27 +4,31 @@
 
 ## 当前交接状态
 
-最后更新：`2026-09-14T09:14:35Z`（UTC）
+最后更新：`2026-09-14T14:45:09Z`（UTC）
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
-| 当前分支 | `feat/iq-check-stability`，基于 `dff987fb16d206e354a21bd4055987c2b5d73549`；尚未提交/发布改进 |
-| 发布提交 | `v0.0.8` 标签指向 `accb4ad7656a2ca3d2eee3df601e38f4e5b02157`；功能与版本通过 PR #25 合入 |
-| 工作树 | 稳定检测、自定义模型/深度、只读目录、记录展示已落到 backend/frontend 标准目录；本地测试、前后端构建和四角色源码回滚事务已通过 |
-| XY2API 产品版本 | `0.0.8`；正式 [v0.0.8 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.8) 为当前 latest |
+| 当前分支 | `feat/iq-monitoring-controls`，基于 `cb5dc5ae060ee2c04ce996a67cfe289f0224f657`；本轮本地改进未提交 |
+| 发布提交 | 已有发布记录：`v0.0.9` / `5e1baf6f4cf9da5a5c9b3ad31958d92779a00cb0`，PR #27 |
+| 工作树 | 已整合上一轮协议兼容、诊断及迁移242；监测排期、预算、业务名额、异常暂停、诊断下载及迁移243已通过相关测试、静态检查、前后端构建及四角色回滚事务；未提交/部署 |
+| XY2API 产品版本 | 本地 `VERSION` 为 `0.0.9`；本轮不发版，不据历史记录断言远端 latest |
 | 已审计的 Sub2API 基线 | `v0.2.4` / commit `5de5e2bed035d43591a2e10e51f420ef6a84eb98`；已通过 PR `#22` 合入 `main` |
 | 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，7 个人工冲突均已记录；同步 PR [#22](https://github.com/liulixin-lex/xy2api/pull/22) 以 merge commit `ea48f08fc8` 合入 |
 | 本地远端 | `origin` 可读写；`upstream` 仅允许 fetch，push URL 为 `DISABLED` |
 | 当前环境工具 | `git`、`python3 3.12.3`、`gh`、Docker、Node、Corepack、pnpm 可用；本地无 Go 命令，已用 Go 1.27 Docker 完成后端验证 |
 
-Sub2API 兼容基线保持 `v0.2.4`。XY2API `v0.0.8` 已发布，新增 OpenAI 智商检测；Release、五平台制品校验及双架构镜像验证通过。本轮未升级生产实例。
+Sub2API 兼容基线保持 `v0.2.4`。下方历史发布日志保留原样；本轮响应兼容改进仅在本地实施，没有升级生产实例。
 
 ## 进行中的工作
 
-- 无。
+- `20260914-iq-monitoring-implementation`：本地实现与验收完成。相关单测、完整repository集成、CI同配置相关包静态检查、前后端构建及同输入源码回滚通过；四角色沿用原路径，最终一致性见monitor-impl-final-audit.json。未提交、发布或部署；真实账号观察尚未执行。
 
-- 本轮 `20260914-iq-stability-implementation` 已完成本地实现与验证，无待实施项。工作树尚未提交，未推送、发布或部署；规格与记录见下方日志。
+- `20260914-iq-monitoring-plan`：已由本轮实施承接；原文档验证保持历史记录，当前实现与验收进度以monitoring/tasks.md及monitor-impl-*记录为准。
+
+- `20260914-iq-protocol` 已完成本地实现、前后端构建及四角色回滚核验；未提交、推送、发版或部署，无真实上游调用。
+
+- `20260914-iq-stability-implementation` 的后续发布已在 v0.0.9 日志记录；历史未提交描述不代表当前状态。
 
 - `20260914-iq-stability-plan` 已由本轮实施承接；完整规格与任务证据在 `openspec/changes/stabilize-openai-iq-check/`。
 
@@ -379,3 +383,35 @@ pnpm --dir frontend run build
 - 交付：`/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh` 已按最终提交重新打开；源码事务 BASELINE/MODIFIED/ROLLBACK 行为及恢复哈希通过。
 - 卡点/风险：无。未调用真实账号或部署生产。
 - 下一步：无。
+
+
+### 2026-09-14T12:09:54Z — `20260914-iq-protocol` — 本地实现与验证
+
+- 请求：按只读分析方案优化本地xy2api，未授权本轮部署、发版或真实检测请求。开始于docs/v0.0.9-closeout的cb5dc5ae0，实际修改分支fix/iq-response-protocol。
+- 改动：iqcheck.ParseHTTP统一媒体识别和有界解压；SSE按事件类型解析，辅助事件不强制符合Response类型，只从完成终态assistant最终输出判分；重复关键字段、冲突终态、损坏流和超限均未知。新增iq-response-v3诊断，迁移242增加account_iq_check_results.diagnostic，随最近两轮一并清理。界面失败原因提前，诊断可折叠且适配390px。
+- 验证：解析器全包、服务及仓储定向单测通过；完整repository PostgreSQL/Redis集成通过（两轮保留、旧NULL记录、4KiB约束、配置和租约边界）；前端全仓lint、组件/i18n测试、生产构建（含类型）通过；Chromium1280/390布局及键盘交互通过。新增解析模块golangci-lint为0 issues，整个service/repository静态分析运行超过10分钟后主动中止，未标为通过。隔离干净副本上游审计通过。
+- 修复过程：初次类型检查发现重复locale键，已删除后构建通过；Go编译期间变更造成vet导入异常，最终单测重跑通过；迁移242校验改为仓库要求的TrimSpace算法，全部历史校验保持一致；并发构建内存压力导致主动中止前端，串行重跑通过。所有退出码与字面输出保存protocol-*记录，不掩盖失败。
+- 同输入证据：本轮0.0.9基线标准SSE聪明，辅助response扩展及误标SSE未知invalid_response；修改版这三者均聪明，损坏JSON未知invalid_event_json、仅delta未知incomplete_response。执行ROLLBACK_CURRENT.sh后哈希及输出恢复基线，再应用补丁恢复修改版。原累计BASELINE.tar.gz不变，四角色仍沿用openai-iq-check原路径。
+- 限制：fixture为合成样本，没有取得生产失败原文，不能声称主站根因已证明或所有OAuth已恢复。后续部署后可用每轮diagnostic区分真实失败；本轮版本仍0.0.9。服务端构建退出0；累计补丁逐文件重建一致，ROLLBACK恢复原始哈希，协议回放三轮退出0。回放器对空目录误判断的问题已修正后通过；历史失败保留。最终归档结果见同目录VERIFICATION.txt和protocol-final-audit.json。
+
+
+### 2026-09-14T12:56:47Z — `20260914-iq-monitoring-plan` — 规划完成
+
+- 请求：结合AA26-251A与全网资料规划稳定检测。目标对象保持/xy/xy2api，分支fix/iq-response-protocol、HEAD cb5dc5ae0，保留已有未提交修复。
+- 证据：CISA直连403，读取NSA发布页所链同题官方PDF；第13–14页含高置信度恶意蒸馏响应调整建议，不是OpenAI实际部署、阈值或本项目触发原因证明。核对Astra模型/推理/格式/限流/数据控制官方文档；论坛只作体验报告。
+- 方案：真实端点请求配置、共享业务名额、pending/start分离、去重与日预算、Retry-After及原因分类暂停；默认固定间隔，显式节约模式15→30→60；单题21与单次判分保留。排期/旧评分/新鲜度区分，正文仅最近两轮。明确不实施身份伪装、掩盖自动化或绕过反滥用机制；不能保证消除服务方误分类。
+- 文件：openspec/changes/stabilize-openai-iq-check/monitoring/的proposal、design、tasks、spec、sources共5份Markdown，以及本记忆；业务代码未改，生产未查询/修改/探测。模型仍默认gpt-6-astra/low，版本仍0.0.9。
+- 验证：文档结构/链接/26场景通过，逐文件核对业务源码与pre-monitoring-plan归档一致；理论96→24轮/天及75%计算通过，明确排期等待15→60分钟取舍。实际代码回放BASELINE与MODIFIED评分相同，只有方案存在性变化；执行ROLLBACK_CURRENT.sh后哈希及输出恢复，再应用补丁。首次回滚探针误把空目录当作方案，退出1，改检查proposal.md后通过；原失败日志保留。
+- 交付：沿用/xy/artifacts/openai-iq-check/四角色并扩展原验证账本；原四角色备份pre-monitoring-plan，原始BASELINE.tar.gz不变。累计源码补丁/回滚及最终角色哈希以monitoring-transaction-state.json、VERIFICATION.txt为准，不用文档验证冒充未来实现验证。
+- 下一步：按monitoring/tasks.md另行实施并执行相关测试；真实账号验收/提交/发布/部署未在本轮执行。
+
+### 2026-09-14T14:45:09Z — `20260914-iq-monitoring-implementation` — 本地实现与验证完成
+
+- 目标：执行已批准的低负载质量监测方案，保留既有OAuth协议兼容修复；在feat/iq-monitoring-controls实施，基于cb5dc5ae0，产品版本保持0.0.9。没有真实账号调用、提交、推送、发版或部署。
+- 变更：IQCheck增加scheduling_mode/max_interval_minutes/daily_request_limit/timeout_seconds/quota_group，默认fixed和120秒；未显式填写预算时按基础间隔推导。分离pending和实际start，使用业务并发名额、原子日预算、显式共享组预算及冷却；错误分类退避/暂停，遵循Retry-After，手动运行去重。adaptive连续3/6次聪明后延长至2/4倍间隔，单次判题和独立质量限制保持。
+- 协议和诊断：API key使用本应用真实标识并禁用普通HTTP重定向，OAuth保留现有认证协议；不伪装人工会话，不绕过拒绝，不反复请求直到答对。兼容合法辅助SSE事件及有界解压；只有完整最终回答判分。新增白名单错误、用量、冷却和脱敏诊断下载，正文和诊断随最近两轮清理。列表区分执行状态、历史评分及新鲜度；设置和批量编辑支持新字段，省略字段保留原值。
+- 数据：追加迁移243，共享组计数及冷却持久化；保留迁移242。所有历史迁移字节与checksum复验通过，Wire已生成。升级时须停止旧检测工作者后统一升级，避免旧工作者写回JSON丢失新字段。
+- 验证：monitor-impl-unit-coherent、完整PostgreSQL/Redis repository集成、CI同配置相关包golangci-lint（0 issues）、前端66项相关测试、全仓lint、类型/i18n、前后端构建均退出0。Chromium1280/390验证实际Vue控件无横向溢出，模型目录、深度、节约设置及键盘交互通过。测试使用模拟上游，不证明生产OAuth具体根因或服务方误分类率。
+- 失败留存：内存压力、测试时间精度及测试桩等失败和成功重跑均保留。额外unit标签静态分析报告52项问题，涉及29个未改文件；按仓库CI不附加标签的相关包检查通过，没有为消除历史诊断修改无关文件。
+- 同输入事务：当前源码基线为15分钟/无预算门禁，修改版为60分钟/日预算延期，降智限制仍有效；当前副本回滚后哈希和输出恢复。累计原始BASELINE为pre-IQ源码（无解析器和监测控制），MODIFIED解析合法辅助事件为聪明、损坏/不完整流为未知并执行预算门禁，ROLLBACK恢复BASELINE；三轮退出0。累计源码manifest恢复为eda4554229078281dcf48cfe8b891f18dfcbf3ef3a0e6d9eef9df91f0820eef7。
+- 交付：沿用/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh；基线归档和历次四角色备份保留。字面命令、输出、退出码和哈希见VERIFICATION.txt，最终归档与工作区一致性见monitor-impl-final-audit.json。ROLLBACK.sh只恢复独立源码副本，不操作生产数据库。

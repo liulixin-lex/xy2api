@@ -7,6 +7,14 @@ vi.mock('@/api/admin/accounts', () => ({ getIQCheckModels: fetchModels }))
 vi.mock('@/utils/format', () => ({ formatDateTime: (value: string) => value }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 describe('IQ check settings', () => {
+  it('changes only a selected schedule field and keeps model settings', async () => {
+    const value = { enabled: true, interval_minutes: 15, model: 'custom', reasoning_effort: 'high', daily_request_limit: 96 }
+    const wrapper = mount(IQCheckSettings, { props: { modelValue: value, fields: ['scheduling_mode'] } })
+    const schedule = wrapper.findAll('select').find(s => s.find('option[value="adaptive"]').exists())!
+    await schedule.setValue('adaptive')
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([{ ...value, scheduling_mode: 'adaptive' }])
+    expect(wrapper.findAll('input[type="number"]').every(i => i.attributes('disabled') !== undefined)).toBe(true)
+  })
   it('fetches actual models, validates declared effort and permits upstream default', async () => {
     fetchModels.mockResolvedValue({ models: [{ id: 'custom', display_name: 'Custom', supported_reasoning_levels: ['ultra'], capability_sources: { supported_reasoning_levels: 'upstream' } }], fetched_at: null, from_cache: false, stale: false })
     const wrapper = mount(IQCheckSettings, { props: { accountId: 8, modelValue: { enabled: true, interval_minutes: 15, model: 'custom', reasoning_effort: 'low' } } })
