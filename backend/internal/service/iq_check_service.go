@@ -238,7 +238,7 @@ func (s *IQCheckService) probe(ctx context.Context, id int64) iqcheck.Result {
 	if err != nil {
 		return iqcheck.Unknown("request_failed")
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return iqcheck.Unknown(fmt.Sprintf("http_%d", resp.StatusCode))
 	}

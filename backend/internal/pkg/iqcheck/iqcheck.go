@@ -162,7 +162,7 @@ func responseAnswer(r response) (string, error) {
 		}
 		for _, c := range m.Content {
 			if c.Type == "output_text" {
-				answer.WriteString(c.Text)
+				_, _ = answer.WriteString(c.Text)
 			}
 		}
 	}
@@ -197,9 +197,9 @@ func Parse(body io.Reader, sse, chat bool) Result {
 					return errors.New("invalid_response")
 				}
 				if sse {
-					answer.WriteString(c.Delta.Content)
+					_, _ = answer.WriteString(c.Delta.Content)
 				} else {
-					answer.WriteString(c.Message.Content)
+					_, _ = answer.WriteString(c.Message.Content)
 				}
 				if c.FinishReason != nil {
 					if *c.FinishReason != "stop" {
@@ -221,7 +221,7 @@ func Parse(body io.Reader, sse, chat bool) Result {
 					return err
 				}
 				answer.Reset()
-				answer.WriteString(text)
+				_, _ = answer.WriteString(text)
 				completed = true
 			}
 		}

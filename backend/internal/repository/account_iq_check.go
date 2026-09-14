@@ -61,7 +61,7 @@ func (r *accountRepository) mutateIQCheck(ctx context.Context, id int64, fn func
 	if err != nil {
 		return domain.IQCheck{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	client := tx.Client()
 	m, err := client.Account.Query().Where(dbaccount.IDEQ(id)).ForUpdate().Only(ctx)
 	if err != nil {
@@ -119,7 +119,7 @@ func (r *accountRepository) ClaimIQChecks(ctx context.Context, now time.Time, li
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	client := tx.Client()
 	// Serialize only the short claim transaction to enforce the ten-task limit across replicas.
 	if _, err = client.ExecContext(ctx, "SELECT pg_advisory_xact_lock(78421021)"); err != nil {
@@ -133,7 +133,7 @@ func (r *accountRepository) ClaimIQChecks(ctx context.Context, now time.Time, li
 	if rows.Next() {
 		err = rows.Scan(&active)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +169,7 @@ ORDER BY COALESCE((iq_check->>'next_run_at')::timestamptz,'-infinity'),id LIMIT 
 	if err == nil {
 		err = rows.Err()
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +207,7 @@ func (r *accountRepository) CompleteIQCheck(ctx context.Context, claim service.I
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	client := tx.Client()
 	m, err := client.Account.Query().Where(dbaccount.IDEQ(claim.AccountID)).ForUpdate().Only(ctx)
 	if dbent.IsNotFound(err) {
@@ -266,7 +266,7 @@ func (r *accountRepository) ListIQCheckRecords(ctx context.Context, id int64) ([
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]service.IQCheckRecord, 0, 2)
 	for rows.Next() {
 		var item service.IQCheckRecord
