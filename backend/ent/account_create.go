@@ -15,6 +15,7 @@ import (
 	"github.com/liulixin-lex/xy2api/ent/group"
 	"github.com/liulixin-lex/xy2api/ent/proxy"
 	"github.com/liulixin-lex/xy2api/ent/usagelog"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 )
 
 // AccountCreate is the builder for creating a Account entity.
@@ -275,6 +276,20 @@ func (_c *AccountCreate) SetSchedulable(v bool) *AccountCreate {
 func (_c *AccountCreate) SetNillableSchedulable(v *bool) *AccountCreate {
 	if v != nil {
 		_c.SetSchedulable(*v)
+	}
+	return _c
+}
+
+// SetIqCheck sets the "iq_check" field.
+func (_c *AccountCreate) SetIqCheck(v domain.IQCheck) *AccountCreate {
+	_c.mutation.SetIqCheck(v)
+	return _c
+}
+
+// SetNillableIqCheck sets the "iq_check" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableIqCheck(v *domain.IQCheck) *AccountCreate {
+	if v != nil {
+		_c.SetIqCheck(*v)
 	}
 	return _c
 }
@@ -577,6 +592,13 @@ func (_c *AccountCreate) defaults() error {
 		v := account.DefaultSchedulable
 		_c.mutation.SetSchedulable(v)
 	}
+	if _, ok := _c.mutation.IqCheck(); !ok {
+		if account.DefaultIqCheck == nil {
+			return fmt.Errorf("ent: uninitialized account.DefaultIqCheck (forgotten import ent/runtime?)")
+		}
+		v := account.DefaultIqCheck()
+		_c.mutation.SetIqCheck(v)
+	}
 	if _, ok := _c.mutation.QuotaDimension(); !ok {
 		v := account.DefaultQuotaDimension
 		_c.mutation.SetQuotaDimension(v)
@@ -644,6 +666,9 @@ func (_c *AccountCreate) check() error {
 	}
 	if _, ok := _c.mutation.Schedulable(); !ok {
 		return &ValidationError{Name: "schedulable", err: errors.New(`ent: missing required field "Account.schedulable"`)}
+	}
+	if _, ok := _c.mutation.IqCheck(); !ok {
+		return &ValidationError{Name: "iq_check", err: errors.New(`ent: missing required field "Account.iq_check"`)}
 	}
 	if v, ok := _c.mutation.SessionWindowStatus(); ok {
 		if err := account.SessionWindowStatusValidator(v); err != nil {
@@ -764,6 +789,10 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Schedulable(); ok {
 		_spec.SetField(account.FieldSchedulable, field.TypeBool, value)
 		_node.Schedulable = value
+	}
+	if value, ok := _c.mutation.IqCheck(); ok {
+		_spec.SetField(account.FieldIqCheck, field.TypeJSON, value)
+		_node.IqCheck = value
 	}
 	if value, ok := _c.mutation.RateLimitedAt(); ok {
 		_spec.SetField(account.FieldRateLimitedAt, field.TypeTime, value)
@@ -1254,6 +1283,18 @@ func (u *AccountUpsert) SetSchedulable(v bool) *AccountUpsert {
 // UpdateSchedulable sets the "schedulable" field to the value that was provided on create.
 func (u *AccountUpsert) UpdateSchedulable() *AccountUpsert {
 	u.SetExcluded(account.FieldSchedulable)
+	return u
+}
+
+// SetIqCheck sets the "iq_check" field.
+func (u *AccountUpsert) SetIqCheck(v domain.IQCheck) *AccountUpsert {
+	u.Set(account.FieldIqCheck, v)
+	return u
+}
+
+// UpdateIqCheck sets the "iq_check" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateIqCheck() *AccountUpsert {
+	u.SetExcluded(account.FieldIqCheck)
 	return u
 }
 
@@ -1844,6 +1885,20 @@ func (u *AccountUpsertOne) SetSchedulable(v bool) *AccountUpsertOne {
 func (u *AccountUpsertOne) UpdateSchedulable() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateSchedulable()
+	})
+}
+
+// SetIqCheck sets the "iq_check" field.
+func (u *AccountUpsertOne) SetIqCheck(v domain.IQCheck) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetIqCheck(v)
+	})
+}
+
+// UpdateIqCheck sets the "iq_check" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateIqCheck() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateIqCheck()
 	})
 }
 
@@ -2629,6 +2684,20 @@ func (u *AccountUpsertBulk) SetSchedulable(v bool) *AccountUpsertBulk {
 func (u *AccountUpsertBulk) UpdateSchedulable() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateSchedulable()
+	})
+}
+
+// SetIqCheck sets the "iq_check" field.
+func (u *AccountUpsertBulk) SetIqCheck(v domain.IQCheck) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetIqCheck(v)
+	})
+}
+
+// UpdateIqCheck sets the "iq_check" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateIqCheck() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateIqCheck()
 	})
 }
 

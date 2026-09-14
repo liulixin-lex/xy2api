@@ -296,6 +296,16 @@
               <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
             </button>
           </template>
+          <template #cell-iq_check="{ row }">
+            <div v-if="row.platform === 'openai'" class="flex items-center gap-2">
+              <button @click="handleToggleIQCheck(row)" :disabled="togglingIQCheck.has(row.id)" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50" :class="row.iq_check?.enabled ? 'bg-blue-500' : 'bg-gray-200 dark:bg-dark-600'" :title="t('admin.accounts.iqCheck')" role="switch" :aria-checked="!!row.iq_check?.enabled" :aria-label="t('admin.accounts.iqCheck')">
+                <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition" :class="row.iq_check?.enabled ? 'translate-x-4' : 'translate-x-0'" />
+              </button>
+              <span class="inline-block h-2 w-2 rounded-full" :class="row.iq_check?.status === 'smart' ? 'bg-green-500' : row.iq_check?.status === 'degraded' ? 'bg-yellow-500' : 'bg-gray-400'" :title="row.iq_check?.status || 'unknown'" />
+              <span class="text-xs" :class="row.iq_check?.status === 'smart' ? 'text-green-600' : row.iq_check?.status === 'degraded' ? 'text-yellow-600' : 'text-gray-500'">{{ row.iq_check?.status === 'smart' ? t('admin.accounts.iqCheckStatus.smart') : row.iq_check?.status === 'degraded' ? t('admin.accounts.iqCheckStatus.degraded') : t('admin.accounts.iqCheckStatus.unknown') }}</span>
+            </div>
+            <span v-else class="text-xs text-gray-400">-</span>
+          </template>
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
               :stats="todayStatsByAccountId[String(row.id)] ?? null"
@@ -456,7 +466,8 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <IQCheckResultsModal :show="!!iqRecordsAccount" :account="iqRecordsAccount" @close="iqRecordsAccount = null" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -507,6 +518,7 @@ import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrs
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
+import IQCheckResultsModal from '@/components/admin/account/IQCheckResultsModal.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
@@ -614,6 +626,12 @@ const showSchedulePanel = ref(false)
 const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
 const togglingSchedulable = ref<number | null>(null)
+const togglingIQCheck = ref(new Set<number>())
+const iqRecordsAccount = ref<Account | null>(null)
+const handleRunIQCheck = async (account: Account) => {
+  try { await adminAPI.accounts.runIQCheck(account.id); appStore.showSuccess(t('admin.accounts.iqQueued')) }
+  catch { appStore.showError(t('admin.accounts.iqFailed')) }
+}
 const menu = reactive<{show:boolean, acc:Account|null, anchorRect:DOMRect|null}>({ show: false, acc: null, anchorRect: null })
 const exportingData = ref(false)
 const probingUpstreamBilling = reactive(new Set<number>())
@@ -1083,6 +1101,7 @@ const {
     type: '',
     status: '',
     privacy_mode: '',
+    iq_status: '',
     group: '',
     search: '',
     lite: '1',
@@ -1182,6 +1201,7 @@ const buildUpstreamBillingRateFilters = () => {
     group: typeof rawParams.group === 'string' ? rawParams.group : '',
     search: typeof rawParams.search === 'string' ? rawParams.search : '',
     privacy_mode: typeof rawParams.privacy_mode === 'string' ? rawParams.privacy_mode : '',
+    iq_status: typeof rawParams.iq_status === 'string' ? rawParams.iq_status : '',
     sort_by: sortState.sort_by,
     sort_order: sortState.sort_order
   }
@@ -1788,11 +1808,12 @@ const allColumns = computed(() => {
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
-    { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
+    { key: 'iq_check', label: t('admin.accounts.iqCheck'), sortable: false }
   ]
   if (!authStore.isSimpleMode) {
     c.push({ key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false })
   }
+  c.push({ key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false })
   c.push({ key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false })
   c.push(
     { key: 'proxy', label: t('admin.accounts.columns.proxy'), sortable: false },
@@ -2054,6 +2075,7 @@ const buildBulkEditFilterSnapshot = () => {
     group: typeof rawParams.group === 'string' ? rawParams.group : '',
     search: typeof rawParams.search === 'string' ? rawParams.search : '',
     privacy_mode: typeof rawParams.privacy_mode === 'string' ? rawParams.privacy_mode : '',
+    iq_status: typeof rawParams.iq_status === 'string' ? rawParams.iq_status : '',
     sort_by: typeof rawParams.sort_by === 'string' ? rawParams.sort_by : '',
     sort_order: sortOrder
   }
@@ -2130,6 +2152,7 @@ const buildAccountQueryFilters = () => ({
   status: params.status || '',
   group: params.group || '',
   privacy_mode: params.privacy_mode || '',
+  iq_status: params.iq_status || '',
   search: params.search || '',
   sort_by: sortState.sort_by,
   sort_order: sortState.sort_order
@@ -2138,6 +2161,7 @@ const accountMatchesCurrentFilters = (account: Account) => {
   const filters = buildAccountQueryFilters()
   if (filters.platform && account.platform !== filters.platform) return false
   if (filters.type && account.type !== filters.type) return false
+  if (filters.iq_status && (account.platform !== 'openai' || (account.iq_check?.enabled ? account.iq_check.status : 'unknown') !== filters.iq_status)) return false
   if (filters.status) {
     const now = Date.now()
     const rateLimitResetAt = account.rate_limit_reset_at ? new Date(account.rate_limit_reset_at).getTime() : Number.NaN
@@ -2461,6 +2485,19 @@ const handleToggleSchedulable = async (a: Account) => {
   } finally {
     togglingSchedulable.value = null
   }
+}
+const handleToggleIQCheck = async (a: Account) => {
+  if (togglingIQCheck.value.has(a.id)) return
+  togglingIQCheck.value.add(a.id)
+  try {
+    const current = a.iq_check
+    const updated = await adminAPI.accounts.setIQCheck(a.id, { enabled: !current?.enabled, interval_minutes: current?.interval_minutes || 15 })
+    patchAccountInList({ ...a, iq_check: updated })
+    enterAutoRefreshSilentWindow()
+  } catch (error) {
+    console.error('Failed to toggle IQ check:', error)
+    appStore.showError(t('admin.accounts.iqFailed'))
+  } finally { togglingIQCheck.value.delete(a.id) }
 }
 const handleShowTempUnsched = (a: Account) => { tempUnschedAcc.value = a; showTempUnsched.value = true }
 const handleTempUnschedReset = async (updated: Account) => {

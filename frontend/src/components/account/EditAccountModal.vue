@@ -11,6 +11,7 @@
       @submit.prevent="handleSubmit"
       class="space-y-5"
     >
+      <IQCheckSettings v-if="account.platform === 'openai'" v-model="iqSettings" />
       <div>
         <label class="input-label">{{ t('common.name') }}</label>
         <input v-model="form.name" type="text" required class="input" data-tour="edit-account-form-name" />
@@ -2961,6 +2962,7 @@
 </template>
 
 <script setup lang="ts">
+import IQCheckSettings from './IQCheckSettings.vue'
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -3740,6 +3742,7 @@ const mixedChannelWarningMessageText = computed(() => {
   return mixedChannelWarningRawMessage.value
 })
 
+const iqSettings = ref({ enabled: false, interval_minutes: 15 })
 const form = reactive({
   name: '',
   notes: '',
@@ -4274,6 +4277,7 @@ watch(
       return
     }
     if (!wasShow || newAccount !== previousAccount) {
+      iqSettings.value = { enabled: newAccount.iq_check?.enabled ?? false, interval_minutes: newAccount.iq_check?.interval_minutes || 15 }
       syncFormFromAccount(newAccount)
       loadTLSProfiles()
     }
@@ -4860,6 +4864,7 @@ const handleSubmit = async () => {
 	}
 
   const updatePayload: Record<string, unknown> = { ...form }
+  if (props.account.platform === 'openai') updatePayload.iq_check = { ...iqSettings.value }
   try {
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
     if (updatePayload.proxy_id === null) {

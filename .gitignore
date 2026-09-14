@@ -154,6 +154,7 @@ docs/*
 !docs/BRANDING_AND_MIGRATION_COMPATIBILITY.md
 !docs/UPSTREAM_SYNC.md
 !docs/PROJECT_MEMORY.md
+!docs/OPENAI_IQ_CHECK.md
 !docs/channel-monitor-v2-safe-defaults.md
 !docs/upstream-sync/
 !docs/upstream-sync/**

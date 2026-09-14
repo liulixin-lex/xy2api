@@ -6,6 +6,7 @@
 import { apiClient } from '../client'
 import type {
   Account,
+  IQCheckRecord,
   AccountListItem,
   CreateAccountRequest,
   UpdateAccountRequest,
@@ -48,6 +49,7 @@ export async function list(
     group?: string
     search?: string
     privacy_mode?: string
+    iq_status?: string
     lite?: string
     include_scheduler_score?: string
     sort_by?: string
@@ -65,6 +67,21 @@ export async function list(
     },
     signal: options?.signal
   })
+  return data
+}
+
+export async function setIQCheck(id: number, payload: { enabled: boolean; interval_minutes: number }) {
+  const { data } = await apiClient.put(`/admin/accounts/${id}/iq-check`, payload)
+  return data
+}
+
+export async function runIQCheck(id: number) {
+  const { data } = await apiClient.post(`/admin/accounts/${id}/iq-check/run`)
+  return data
+}
+
+export async function getIQCheckResults(id: number) {
+  const { data } = await apiClient.get<IQCheckRecord[]>(`/admin/accounts/${id}/iq-check/results`)
   return data
 }
 
@@ -90,6 +107,7 @@ export async function getUpstreamBillingRatesWithEtag(
     group?: string
     search?: string
     privacy_mode?: string
+    iq_status?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
   },
@@ -123,6 +141,7 @@ export async function listWithEtag(
     group?: string
     search?: string
     privacy_mode?: string
+    iq_status?: string
     lite?: string
     include_scheduler_score?: string
     sort_by?: string
@@ -1094,6 +1113,9 @@ export const accountsAPI = {
   getTempUnschedulableStatus,
   resetTempUnschedulable,
   setSchedulable,
+  setIQCheck,
+  runIQCheck,
+  getIQCheckResults,
   getAvailableModels,
   syncUpstreamModels,
   syncUpstreamModelsPreview,

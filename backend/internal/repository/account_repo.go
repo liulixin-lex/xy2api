@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +27,7 @@ import (
 	dbgroup "github.com/liulixin-lex/xy2api/ent/group"
 	dbpredicate "github.com/liulixin-lex/xy2api/ent/predicate"
 	dbproxy "github.com/liulixin-lex/xy2api/ent/proxy"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -137,6 +139,11 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		return service.ErrAccountNilInput
 	}
 
+	account.IQCheck = resetIQState(domain.DefaultIQCheck(), account.IQCheckSettings, time.Now().UTC())
+	if err := service.ValidateIQCheckSettings(account.Platform, account.IQCheckSettings); err != nil {
+		return err
+	}
+
 	builder := client.Account.Create().
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
@@ -149,6 +156,7 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		SetStatus(account.Status).
 		SetErrorMessage(account.ErrorMessage).
 		SetSchedulable(account.Schedulable).
+		SetIqCheck(account.IQCheck).
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
 
 	if account.RateMultiplier != nil {
@@ -544,6 +552,31 @@ func (r *accountRepository) updateLockedAccount(
 		SetErrorMessage(account.ErrorMessage).
 		SetSchedulable(schedulable).
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
+
+	current, err := client.Account.Query().Where(dbaccount.IDEQ(account.ID)).ForUpdate().Only(ctx)
+	if err != nil {
+		return nil, err
+	}
+	state := current.IqCheck
+	identityChanged := current.Type != account.Type || current.Platform != account.Platform
+	for _, key := range iqIdentityKeys {
+		if account.IQPreserveTokenRotation && (key == "access_token" || key == "refresh_token") {
+			continue
+		}
+		if !reflect.DeepEqual(current.Credentials[key], account.Credentials[key]) {
+			identityChanged = true
+		}
+	}
+	if identityChanged || account.IQCheckSettings != nil {
+		if err := service.ValidateIQCheckSettings(account.Platform, account.IQCheckSettings); err != nil {
+			return nil, err
+		}
+		if identityChanged || state.Enabled != account.IQCheckSettings.Enabled || state.IntervalMinutes != account.IQCheckSettings.IntervalMinutes {
+			state = resetIQState(state, account.IQCheckSettings, time.Now().UTC())
+		}
+		builder.SetIqCheck(state)
+	}
+	account.IQCheck = state
 
 	if explicitRateMultiplier != nil {
 		builder.SetRateMultiplier(*explicitRateMultiplier)
@@ -1011,7 +1044,7 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 }
 
 func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
-	q := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode)
+	q := applyIQStatusFilter(ctx, r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode))
 	// Clone before Count so interceptor-appended predicates (SoftDeleteMixin's
 	// deleted_at IS NULL) don't accumulate on the shared builder and pollute the
 	// subsequent list query. Same pattern used in group_repo/promo_code_repo/user_repo
@@ -1041,7 +1074,7 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 }
 
 func (r *accountRepository) ListAllWithFilters(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, error) {
-	accounts, err := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode).All(ctx)
+	accounts, err := applyIQStatusFilter(ctx, r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode)).All(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1927,8 +1960,10 @@ func (r *accountRepository) ListSchedulableAccountLoads(ctx context.Context) ([]
 func (r *accountRepository) schedulableAccountsQuery(now time.Time) *dbent.AccountQuery {
 	return r.client.Account.Query().
 		Where(
+			iqSchedulablePredicate(),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
+			iqSchedulablePredicate(),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
@@ -2035,6 +2070,7 @@ func (r *accountRepository) ListSchedulableByPlatform(ctx context.Context, platf
 			dbaccount.PlatformEQ(platform),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
+			iqSchedulablePredicate(),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
@@ -2069,6 +2105,7 @@ func (r *accountRepository) ListSchedulableByPlatforms(ctx context.Context, plat
 			dbaccount.PlatformIn(platforms...),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
+			iqSchedulablePredicate(),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
@@ -2089,6 +2126,7 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatform(ctx context.Conte
 			dbaccount.PlatformEQ(platform),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
+			iqSchedulablePredicate(),
 			dbaccount.Not(dbaccount.HasAccountGroups()),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
@@ -2113,6 +2151,7 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatforms(ctx context.Cont
 			dbaccount.PlatformIn(platforms...),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
+			iqSchedulablePredicate(),
 			dbaccount.Not(dbaccount.HasAccountGroups()),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
@@ -2164,6 +2203,7 @@ func (r *accountRepository) ListModelAvailabilityCandidates(
 	preds := []dbpredicate.Account{
 		dbaccount.StatusEQ(service.StatusActive),
 		dbaccount.SchedulableEQ(true),
+		iqSchedulablePredicate(),
 		dbaccount.PlatformIn(platforms...),
 	}
 	if !includeGrouped {
@@ -2855,6 +2895,19 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if len(ids) == 0 {
 		return 0, nil
 	}
+	if updates.IQCheck != nil {
+		if err := service.ValidateIQCheckSettings(service.PlatformOpenAI, updates.IQCheck); err != nil {
+			return 0, err
+		}
+		invalid, err := r.client.Account.Query().Where(dbaccount.IDIn(ids...), dbaccount.PlatformNEQ(service.PlatformOpenAI)).Exist(ctx)
+		if err != nil {
+			return 0, err
+		}
+		if invalid {
+			return 0, service.ErrIQCheckInvalid
+		}
+	}
+
 	updates.Extra = stripCodexFingerprintSeedFromExtraUpdate(updates.Extra)
 
 	setClauses := make([]string, 0, 8)
@@ -2931,6 +2984,30 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		setClauses = append(setClauses, "credentials = COALESCE(credentials, '{}'::jsonb) || "+credentialPlaceholder+"::jsonb")
 		args = append(args, payload)
 		idx++
+	}
+
+	iqResetConditions := make([]string, 0)
+	if credentialPlaceholder != "" {
+		for _, key := range iqIdentityKeys {
+			if _, ok := updates.Credentials[key]; ok {
+				iqResetConditions = append(iqResetConditions, "credentials->'"+key+"' IS DISTINCT FROM "+credentialPlaceholder+"::jsonb->'"+key+"'")
+			}
+		}
+	}
+	iqBase := "iq_check"
+	if updates.IQCheck != nil {
+		payload, err := json.Marshal(updates.IQCheck)
+		if err != nil {
+			return 0, err
+		}
+		placeholder := "$" + itoa(idx)
+		idx++
+		args = append(args, payload)
+		iqResetConditions = append(iqResetConditions, "iq_check->'enabled' IS DISTINCT FROM "+placeholder+"::jsonb->'enabled' OR iq_check->'interval_minutes' IS DISTINCT FROM "+placeholder+"::jsonb->'interval_minutes'")
+		iqBase = "(iq_check || " + placeholder + "::jsonb)"
+	}
+	if len(iqResetConditions) > 0 {
+		setClauses = append(setClauses, "iq_check = CASE WHEN platform='openai' AND ("+joinClauses(iqResetConditions, " OR ")+") THEN ("+iqBase+" - 'next_run_at') || jsonb_build_object('status','unknown','reason','','revision',md5(random()::text || clock_timestamp()::text), 'next_run_at', CASE WHEN "+iqBase+"->>'enabled'='true' THEN to_jsonb(NOW()) ELSE 'null'::jsonb END) ELSE iq_check END")
 	}
 
 	ollamaGroupIdentityChanges := make([]string, 0, 2)
@@ -3091,7 +3168,7 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 		preds = append(preds, dbaccount.PlatformIn(opts.platforms...))
 	}
 	if opts.schedulable {
-		preds = append(preds, dbaccount.SchedulableEQ(true))
+		preds = append(preds, dbaccount.SchedulableEQ(true), iqSchedulablePredicate())
 		if !opts.ignoreTransientState {
 			now := time.Now()
 			preds = append(preds,
@@ -3415,6 +3492,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		CreatedAt:               m.CreatedAt,
 		UpdatedAt:               m.UpdatedAt,
 		Schedulable:             m.Schedulable,
+		IQCheck:                 m.IqCheck,
 		RateLimitedAt:           m.RateLimitedAt,
 		RateLimitResetAt:        m.RateLimitResetAt,
 		OverloadUntil:           m.OverloadUntil,
