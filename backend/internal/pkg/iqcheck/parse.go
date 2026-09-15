@@ -11,6 +11,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -57,8 +58,8 @@ func failure(code string) error       { return &parseFailure{code: code} }
 func validateEvent(raw []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
-	known := map[string]bool{"type": true, "response": true, "status": true, "output": true, "content": true, "text": true, "answer": true, "role": true, "phase": true, "error": true, "model": true, "choices": true, "delta": true, "message": true, "finish_reason": true, "index": true, "id": true, "refusal": true}
-	critical := map[string]bool{"type": true, "response": true, "status": true, "output": true, "content": true, "text": true, "answer": true, "role": true, "phase": true, "error": true, "choices": true, "delta": true, "message": true, "finish_reason": true, "index": true, "model": true, "id": true, "refusal": true}
+	known := map[string]bool{"output_index": true, "item": true, "type": true, "response": true, "status": true, "output": true, "content": true, "text": true, "answer": true, "role": true, "phase": true, "error": true, "model": true, "choices": true, "delta": true, "message": true, "finish_reason": true, "index": true, "id": true, "refusal": true}
+	critical := map[string]bool{"output_index": true, "item": true, "type": true, "response": true, "status": true, "output": true, "content": true, "text": true, "answer": true, "role": true, "phase": true, "error": true, "choices": true, "delta": true, "message": true, "finish_reason": true, "index": true, "model": true, "id": true, "refusal": true}
 	var walk func(int, string) error
 	walk = func(depth int, path string) error {
 		if depth > 32 {
@@ -156,6 +157,8 @@ func decode(raw []byte, v any, field string) error {
 type streamParser struct {
 	chat, sse, completed, done bool
 	answer, model, responseID  string
+	doneItems                  map[int]json.RawMessage
+	itemIDs                    map[string]int
 	d                          *Diagnostic
 }
 
@@ -193,6 +196,8 @@ func (p *streamParser) consume(raw []byte, eventName string) error {
 		return failure(ReadUpstreamError(raw, p.d))
 	case "response.incomplete":
 		return failure("incomplete_response")
+	case "response.output_item.done":
+		return p.collectDone(raw)
 	case "response.completed", "response.done":
 		if len(env.Response) == 0 || string(env.Response) == "null" {
 			return failure("invalid_terminal_response")
@@ -205,6 +210,64 @@ func (p *streamParser) consume(raw []byte, eventName string) error {
 		// evolve independently of the terminal Response schema.
 		return nil
 	}
+}
+
+// Only completed message envelopes are retained; reasoning payloads are discarded.
+func (p *streamParser) collectDone(raw []byte) error {
+	var e struct {
+		Index *int            `json:"output_index"`
+		Item  json.RawMessage `json:"item"`
+	}
+	if err := decode(raw, &e, "output_item.done"); err != nil {
+		return err
+	}
+	if e.Index == nil || *e.Index < 0 || *e.Index >= MaxEvents {
+		return failure("invalid_output_identity")
+	}
+	var item struct {
+		ID     string `json:"id"`
+		Type   string `json:"type"`
+		Role   string `json:"role"`
+		Status string `json:"status"`
+	}
+	if err := decode(e.Item, &item, "item"); err != nil {
+		return err
+	}
+	if item.Type != "message" {
+		p.d.ignoreItem(item.Type)
+		return nil
+	}
+	if item.ID == "" || len(item.ID) > 256 {
+		return failure("invalid_output_identity")
+	}
+	if item.Role != "assistant" || item.Status != "completed" {
+		return failure("invalid_completed_message")
+	}
+	if p.doneItems == nil {
+		p.doneItems = map[int]json.RawMessage{}
+		p.itemIDs = map[string]int{}
+	}
+	if index, exists := p.itemIDs[item.ID]; exists && index != *e.Index {
+		return failure("conflicting_output_identity")
+	}
+	if previous, exists := p.doneItems[*e.Index]; exists {
+		var a, b any
+		_ = json.Unmarshal(previous, &a)
+		_ = json.Unmarshal(e.Item, &b)
+		aa, _ := json.Marshal(a)
+		bb, _ := json.Marshal(b)
+		if !bytes.Equal(aa, bb) {
+			return failure("conflicting_final_response")
+		}
+		return nil
+	}
+	if p.completed {
+		return failure("conflicting_final_response")
+	}
+	p.doneItems[*e.Index] = append(json.RawMessage(nil), e.Item...)
+	p.itemIDs[item.ID] = *e.Index
+	p.d.DoneMessages = len(p.doneItems)
+	return nil
 }
 
 func (p *streamParser) terminal(raw []byte) error {
@@ -228,7 +291,62 @@ func (p *streamParser) terminal(raw []byte) error {
 	if len(r.Model) > 256 {
 		return failure("response_too_large")
 	}
+	p.d.TerminalItems = len(r.Output)
+	p.d.AnswerSource = "terminal_output"
+	// Identity and content must agree wherever the terminal repeats a done item.
+	indexes := make([]int, 0, len(p.doneItems))
+	for index := range p.doneItems {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	for _, index := range indexes {
+		done := p.doneItems[index]
+		var d struct {
+			ID      string          `json:"id"`
+			Role    string          `json:"role"`
+			Phase   string          `json:"phase"`
+			Status  string          `json:"status"`
+			Content json.RawMessage `json:"content"`
+		}
+		if err := decode(done, &d, "item"); err != nil {
+			return err
+		}
+		if d.Role != "assistant" || d.Status != "completed" {
+			return failure("incomplete_response")
+		}
+		found := false
+		for _, terminal := range r.Output {
+			var t struct {
+				ID      string          `json:"id"`
+				Type    string          `json:"type"`
+				Role    string          `json:"role"`
+				Phase   string          `json:"phase"`
+				Status  string          `json:"status"`
+				Content json.RawMessage `json:"content"`
+			}
+			if err := decode(terminal, &t, "response.output[]"); err != nil {
+				return err
+			}
+			if t.ID != d.ID {
+				continue
+			}
+			found = true
+			var dc, tc any
+			_ = json.Unmarshal(d.Content, &dc)
+			_ = json.Unmarshal(t.Content, &tc)
+			db, _ := json.Marshal(dc)
+			tb, _ := json.Marshal(tc)
+			if t.Type != "message" || d.Role != t.Role || d.Phase != t.Phase || t.Status != "" && d.Status != t.Status || !bytes.Equal(db, tb) {
+				return failure("conflicting_final_response")
+			}
+		}
+		if !found {
+			r.Output = append(r.Output, done)
+			p.d.AnswerSource = "completed_items"
+		}
+	}
 	var answer string
+	finalMessages := 0
 	for _, rawItem := range r.Output {
 		var item struct {
 			Type    string          `json:"type"`
@@ -241,8 +359,18 @@ func (p *streamParser) terminal(raw []byte) error {
 			return err
 		}
 		if item.Type != "message" || item.Role != "assistant" || item.Phase != "" && item.Phase != "final_answer" {
+			kind := item.Type
+			if item.Type == "message" {
+				if item.Role != "assistant" {
+					kind = "non_assistant"
+				} else {
+					kind = "commentary"
+				}
+			}
+			p.d.ignoreItem(kind)
 			continue
 		}
+		finalMessages++
 		if item.Status != "" && item.Status != "completed" {
 			return failure("incomplete_response")
 		}
@@ -278,6 +406,11 @@ func (p *streamParser) terminal(raw []byte) error {
 	}
 	ReadUsage(raw, p.d)
 	p.answer, p.model, p.responseID, p.completed = answer, r.Model, r.ID, true
+	if finalMessages == 0 {
+		p.d.Code = "missing_final_message"
+	} else if answer == "" {
+		p.d.Code = "empty_final_text"
+	}
 	return nil
 }
 
@@ -376,6 +509,9 @@ func parse(body io.Reader, sse, chat bool, d *Diagnostic) Result {
 			return finishUnknown(d, "incomplete_response")
 		}
 		d.Stage = "grade"
+		if p.answer == "" && d.Code != "" {
+			return finishUnknown(d, d.Code)
+		}
 		r := Grade(p.answer)
 		d.Code = r.Reason
 		r.ReportedModel = p.model
@@ -470,7 +606,13 @@ func finishUnknown(d *Diagnostic, code string) Result {
 
 // ParseHTTP resolves media type once and parses the decoded response stream.
 // Transport normally decompresses; bounded decoding covers plugin responses too.
-func ParseHTTP(resp *http.Response, chat bool, transport string) Result {
+func ParseHTTP(resp *http.Response, chat bool, transport string) (result Result) {
+	started := time.Now()
+	defer func() {
+		if result.Diagnostic != nil {
+			result.Diagnostic.TotalMS = time.Since(started).Milliseconds()
+		}
+	}()
 	d := &Diagnostic{ParserVersion: ParserVersion, Stage: "format", Protocol: "responses", Transport: transport}
 	if chat {
 		d.Protocol = "chat_completions"
@@ -542,6 +684,9 @@ func ParseHTTP(resp *http.Response, chat bool, transport string) Result {
 		b, e := br.ReadByte()
 		if e != nil {
 			d.Stage = "read"
+			if e == io.EOF && len(prefix) == 0 {
+				return finishUnknown(d, "zero_byte_response")
+			}
 			if errors.Is(e, context.DeadlineExceeded) {
 				return finishUnknown(d, "timeout")
 			}
@@ -552,6 +697,9 @@ func ParseHTTP(resp *http.Response, chat bool, transport string) Result {
 				return finishUnknown(d, "response_decompression_failed")
 			}
 			return finishUnknown(d, "response_read_failed")
+		}
+		if len(prefix) == 0 {
+			d.FirstByteMS = time.Since(started).Milliseconds()
 		}
 		prefix = append(prefix, b)
 		if !strings.ContainsRune(" \r\n\t", rune(b)) {
@@ -573,7 +721,7 @@ func ParseHTTP(resp *http.Response, chat bool, transport string) Result {
 	}
 	d.FormatDetected = (sse && media != "text/event-stream") || (!sse && media != "application/json")
 	d.Stage = "decode"
-	result := parse(io.MultiReader(bytes.NewReader(prefix), br), sse, chat, d)
+	result = parse(io.MultiReader(bytes.NewReader(prefix), br), sse, chat, d)
 	if d.Encoding != "" && d.Encoding != "identity" && result.Reason == "response_read_failed" {
 		result = finishUnknown(result.Diagnostic, "response_decompression_failed")
 	}

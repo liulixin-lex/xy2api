@@ -11,6 +11,7 @@ import (
 func TestIQMonitoringSchedule(t *testing.T) {
 	now := time.Date(2026, 9, 14, 0, 0, 0, 0, time.UTC)
 	s := domain.DefaultIQCheck()
+	s.IntervalMinutes = 15
 	s.Enabled = true
 	s.SchedulingMode = "adaptive"
 	for i := 1; i <= 6; i++ {
@@ -31,7 +32,7 @@ func TestIQMonitoringSchedule(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		finishIQSchedule(&s, iqcheck.Unknown("timeout"), now)
 		require.Equal(t, time.Duration(1<<(i-1))*15*time.Minute, s.NextRunAt.Sub(now))
-		require.False(t, s.BlocksScheduling())
+		require.True(t, s.BlocksScheduling())
 	}
 	after := now.Add(24 * time.Hour)
 	r := iqcheck.Unknown("http_429")
@@ -50,7 +51,8 @@ func TestIQMonitoringSchedule(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		finishIQSchedule(&s, r, now)
 	}
-	require.Equal(t, "paused", s.ExecutionState)
+	require.Equal(t, "deferred", s.ExecutionState)
+	require.Equal(t, "protocol_cooldown", s.ExecutionReason)
 }
 func TestIQMonitoringSettingsPreserveGateAndBudget(t *testing.T) {
 	now := time.Now().UTC()
@@ -71,4 +73,28 @@ func TestIQMonitoringSettingsPreserveGateAndBudget(t *testing.T) {
 	require.Equal(t, "unknown", u.Status)
 	require.Equal(t, 96, u.BudgetUsed)
 	require.False(t, u.NextRunAt.Before(delay))
+}
+
+func TestIQProtocolCooldownRetainsEffectiveAssessment(t *testing.T) {
+	now := time.Now().UTC()
+	s := domain.DefaultIQCheck()
+	s.Enabled = true
+	finishIQSchedule(&s, iqcheck.Grade("29"), now)
+	valid := *s.LastValidAt
+	for i := 1; i <= 4; i++ {
+		now = now.Add(time.Hour)
+		finishIQSchedule(&s, iqcheck.Unknown("missing_final_message"), now)
+		require.True(t, s.BlocksScheduling())
+		require.Equal(t, valid, *s.LastValidAt)
+		if i == 3 {
+			require.Equal(t, 30*time.Minute, s.NextRunAt.Sub(now))
+		}
+		if i == 4 {
+			require.Equal(t, time.Hour, s.NextRunAt.Sub(now))
+		}
+	}
+	now = now.Add(time.Hour)
+	finishIQSchedule(&s, iqcheck.Grade("21"), now)
+	require.False(t, s.BlocksScheduling())
+	require.Zero(t, s.ProtocolFailures)
 }

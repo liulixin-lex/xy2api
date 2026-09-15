@@ -6,7 +6,7 @@
         <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqHistoryRetention') }}</p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <button type="button" class="btn btn-primary inline-flex items-center gap-2" :disabled="!state?.enabled || queuing || state.execution_state === 'running' || state.execution_state === 'pending'" @click="queueCheck">
+        <button type="button" class="btn btn-primary inline-flex items-center gap-2" :disabled="!state?.enabled || queuing || state.execution_state === 'running' || state.execution_state === 'pending' || state.execution_state === 'retry_wait'" @click="queueCheck">
           <Icon name="play" size="sm" />{{ t('admin.accounts.iqRun') }}
         </button>
         <button type="button" class="btn btn-secondary inline-flex items-center gap-2" :disabled="downloading || !account || !records.length" @click="downloadDiagnostics">
@@ -26,7 +26,12 @@
       </div>
       <p v-if="state.enabled && state.execution_reason" class="mt-2 break-words text-sm text-gray-700 dark:text-gray-300">{{ executionReasonLabel(state.execution_reason) }}</p>
       <p v-if="state.enabled && state.execution_reason === 'account_busy' && state.busy_deferrals" class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqBusyDeferrals', { count: state.busy_deferrals }) }}</p>
+      <p v-if="state.last_run_status === 'unknown' && state.last_valid_at" class="mt-2 text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.iqRetainedAssessment') }}</p>
+      <p v-if="state.last_run_reason && state.last_run_reason !== state.execution_reason" class="mt-2 break-words text-sm text-gray-700 dark:text-gray-300">{{ reasonLabel(state.last_run_reason) }}</p>
+      <p v-if="state.budget_warning" class="mt-2 text-sm text-amber-700 dark:text-amber-400">{{ t('admin.accounts.iqBudgetWarning') }}</p>
+      <p v-if="state.execution_reason === 'account_busy'" class="mt-2 text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.iqCapacityHint') }}</p>
       <dl class="mt-4 grid grid-cols-1 gap-x-5 gap-y-3 text-xs sm:grid-cols-3">
+        <div class="min-w-0"><dt class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqLastValid') }}</dt><dd class="mt-1 break-words text-gray-900 dark:text-gray-100">{{ t('admin.accounts.iqCheckStatus.' + (state.status || 'unknown')) + (state.last_valid_at ? ' · ' + formatDateTime(state.last_valid_at) : '') }}</dd></div>
         <div class="min-w-0"><dt class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqLastAssessment') }}</dt><dd class="mt-1 break-words tabular-nums text-gray-900 dark:text-gray-100">{{ state.last_run_at ? formatDateTime(state.last_run_at) : '-' }}</dd></div>
         <div class="min-w-0"><dt class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqNextEligible') }}</dt><dd class="mt-1 break-words tabular-nums text-gray-900 dark:text-gray-100">{{ state.enabled && state.execution_state !== 'paused' && state.next_eligible_at ? formatDateTime(state.next_eligible_at) : '-' }}</dd></div>
         <div class="min-w-0"><dt class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqBudgetRemaining') }}</dt><dd class="mt-1 tabular-nums text-gray-900 dark:text-gray-100">{{ state.budget_remaining ?? '-' }}</dd></div>
@@ -43,7 +48,7 @@
     <ol v-if="records.length" class="divide-y divide-gray-200 dark:divide-dark-600">
       <li v-for="record in records" :key="record.id" class="py-5 first:pt-0 last:pb-0">
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <span class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium" :class="statusClass(record)">{{ record.finished_at ? t('admin.accounts.iqCheckStatus.' + record.status) : t('admin.accounts.iqRunning') }}</span>
+          <span class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium" :class="statusClass(record)">{{ record.finished_at ? t('admin.accounts.iqCheckStatus.' + record.status) : t(state?.execution_state === 'retry_wait' ? 'admin.accounts.iqExecutionStates.retry_wait' : 'admin.accounts.iqRunning') }}</span>
           <time :datetime="record.started_at" class="text-xs tabular-nums text-gray-500 dark:text-dark-400">{{ formatDateTime(record.started_at) }}</time>
         </div>
         <p v-if="record.reason" class="mt-3 break-words text-sm text-gray-700 dark:text-gray-300">{{ reasonLabel(record.reason) }}</p>
@@ -55,7 +60,16 @@
         </dl>
         <details class="mt-4">
           <summary class="cursor-pointer text-sm text-gray-600 dark:text-gray-300">{{ t('admin.accounts.iqRawAnswer') }}</summary>
-          <pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-3 text-sm text-gray-800 dark:bg-dark-700 dark:text-gray-200">{{ record.answer || t('admin.accounts.iqNoAnswer') }}</pre>
+          <pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-3 text-sm text-gray-800 dark:bg-dark-700 dark:text-gray-200">{{ record.answer || (record.reason ? reasonLabel(record.reason) : t('admin.accounts.iqRunning')) }}</pre>
+        </details>
+        <details v-if="record.attempts?.length" class="mt-3" data-testid="iq-attempts">
+          <summary class="cursor-pointer text-sm text-gray-600 dark:text-gray-300">{{ t('admin.accounts.iqAttempts', { count: record.attempts.length }) }}</summary>
+          <ol class="mt-2 divide-y divide-gray-100 dark:divide-dark-700">
+            <li v-for="attempt in record.attempts" :key="attempt.attempt_no" class="flex flex-wrap justify-between gap-2 py-2 text-sm">
+              <span>{{ t('admin.accounts.iqAttemptNumber', { number: attempt.attempt_no }) }} · {{ attempt.finished_at ? reasonLabel(attempt.reason) : t('admin.accounts.iqRunning') }}</span>
+              <span class="tabular-nums">{{ attempt.finished_at ? (attempt.latency_ms / 1000).toFixed(2) + ' s' : '—' }}</span>
+            </li>
+          </ol>
         </details>
         <details class="mt-3">
           <summary class="cursor-pointer text-sm text-gray-600 dark:text-gray-300">{{ t('admin.accounts.iqDiagnostic') }}</summary>
@@ -90,7 +104,7 @@ const emit = defineEmits<{ close: []; updated: [state: NonNullable<Account['iq_c
 const { t, te } = useI18n()
 const reasonLabel = (reason: string) => te(`admin.accounts.iqReasons.${reason}`) ? t(`admin.accounts.iqReasons.${reason}`) : reason
 const executionReasonLabel = (reason: string) => te(`admin.accounts.iqExecutionReasons.${reason}`) ? t(`admin.accounts.iqExecutionReasons.${reason}`) : reasonLabel(reason)
-const diagnosticKeys = ['parser_version', 'stage', 'code', 'http_status', 'media_type', 'content_encoding', 'protocol', 'transport', 'format_detected', 'event_type', 'event_index', 'field', 'offset', 'bytes_read', 'request_id', 'error_code', 'error_type', 'retry_after', 'retry_after_unbounded', 'input_tokens', 'output_tokens', 'reasoning_tokens', 'retry_visibility'] as const
+const diagnosticKeys = ['done_messages', 'terminal_items', 'ignored_items', 'answer_source', 'first_byte_ms', 'total_ms', 'parser_version', 'stage', 'code', 'http_status', 'media_type', 'content_encoding', 'protocol', 'transport', 'format_detected', 'event_type', 'event_index', 'field', 'offset', 'bytes_read', 'request_id', 'error_code', 'error_type', 'retry_after', 'retry_after_unbounded', 'input_tokens', 'output_tokens', 'reasoning_tokens', 'retry_visibility'] as const
 const diagnosticEntries = (record: IQCheckRecord) => diagnosticKeys.flatMap(key => {
   const value = record.diagnostic?.[key]
   return value == null || value === '' || value === false ? [] : [[key, String(value)]]
@@ -128,7 +142,7 @@ function scheduleRefresh() {
   refreshTimer = setTimeout(() => {
     if (document.visibilityState === 'hidden') scheduleRefresh()
     else void loadRecords()
-  }, state.value?.execution_state === 'running' || state.value?.execution_state === 'pending' ? 5000 : 15000)
+  }, state.value?.execution_state === 'running' || state.value?.execution_state === 'pending' || state.value?.execution_state === 'retry_wait' ? 5000 : 15000)
 }
 async function queueCheck() {
   const id = props.account?.id

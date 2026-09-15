@@ -127,4 +127,17 @@ describe('IQ results', () => {
     expect(wrapper.findAll('details').every(d => d.attributes('open') === undefined)).toBe(true)
   })
 
+  it('shows persistent retry and retained assessment without allowing duplicate dispatch', async () => {
+    status.mockResolvedValue({ enabled: true, status: 'degraded', execution_state: 'retry_wait', last_valid_at: '2026-09-15T10:00:00Z', last_run_status: 'unknown', last_run_reason: 'http_503', budget_warning: true })
+    history.mockResolvedValue([{ id: 1, status: 'unknown', reason: 'http_503', started_at: '2026-09-15T10:10:00Z', finished_at: null, attempts: [{ attempt_no: 1, reason: 'http_503', finished_at: '2026-09-15T10:10:01Z', latency_ms: 1000 }] }])
+    const wrapper = mount(IQCheckResultsModal, { props: { show: true, account: { id: 8 } as Account }, global: { stubs: { BaseDialog: { template: '<div><slot /></div>' } } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('iqRetainedAssessment')
+    expect(wrapper.text()).toContain('iqCheckStatus.degraded')
+    expect(wrapper.text()).toContain('iqExecutionStates.retry_wait')
+    expect(wrapper.text()).toContain('iqBudgetWarning')
+    expect(wrapper.get('[data-testid="iq-attempts"]').text()).toContain('1.00 s')
+    expect(wrapper.findAll('button').find(button => button.text().includes('iqRun'))!.attributes('disabled')).toBeDefined()
+  })
+
 })

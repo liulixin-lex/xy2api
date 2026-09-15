@@ -47,6 +47,7 @@
         <input :id="uid + '-max-interval'" type="number" class="input w-full" min="1" max="1440" :value="modelValue.max_interval_minutes ?? 60" :disabled="!included('max_interval_minutes')" required @input="updateNumber('max_interval_minutes', $event)" />
       </div>
     </div>
+    <p v-if="modelValue.enabled && budgetInsufficient" class="text-sm text-amber-700 dark:text-amber-400" role="status">{{ t('admin.accounts.iqBudgetWarning') }}</p>
     <details class="border-t border-gray-100 pt-3 dark:border-dark-700" :open="!!fields">
       <summary class="cursor-pointer text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.accounts.iqAdvanced') }}</summary>
       <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -80,6 +81,7 @@ const props = defineProps<{ modelValue: IQCheckSettings; accountId?: number; dis
 const emit = defineEmits<{ 'update:modelValue': [value: IQCheckSettings]; validity: [valid: boolean] }>()
 const { t, te } = useI18n()
 const uid = 'iq-' + getCurrentInstance()?.uid
+const budgetInsufficient = computed(() => (props.modelValue.daily_request_limit || Math.ceil(1440 / Math.max(1, props.modelValue.interval_minutes))) < 2 * Math.ceil(1440 / Math.max(1, props.modelValue.interval_minutes)))
 const included = (field: keyof IQCheckSettings) => !props.fields || props.fields.includes(field)
 const catalog = ref<IQModelCatalog | null>(null)
 const loading = ref(false)

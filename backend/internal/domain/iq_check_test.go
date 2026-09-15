@@ -43,10 +43,11 @@ func TestIQCheckPartialSettingsAndCopy(t *testing.T) {
 
 func TestIQMonitoringBudgetAndFreshness(t *testing.T) {
 	s := DefaultIQCheck()
-	if s.DailyLimit() != 96 || s.TimeoutSeconds != 120 || s.SchedulingMode != "fixed" {
+	if s.DailyLimit() != 576 || s.TimeoutSeconds != 120 || s.SchedulingMode != "fixed" {
 		t.Fatal(s)
 	}
 	s.IntervalMinutes = 1
+	s.DailyRequestLimit = 0
 	if s.DailyLimit() != 1440 {
 		t.Fatal(s)
 	}

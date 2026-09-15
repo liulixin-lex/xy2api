@@ -22,8 +22,8 @@ event: response.output_text.done
 data: {"type":"response.output_text.done","text":"{\"answer\":21}"}
 
 event: response.output_item.done
-data: {"type":"response.output_item.done","item":{"type":"message","status":"completed"}}
+data: {"type":"response.output_item.done","output_index":1,"item":{"type":"message","role":"assistant","phase":"final_answer","status":"completed","content":[{"type":"output_text","text":"{\"answer\":21}"}],"id":"msg_fixture"}}
 
 event: response.completed
-data: {"type":"response.completed","response":{"id":"fixture","status":"completed","model":"fixture-model","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"Intermediate candidate 29"}]},{"type":"message","role":"assistant","phase":"final_answer","status":"completed","content":[{"type":"output_text","text":"{\"answer\":21}"}]}]}}
+data: {"type":"response.completed","response":{"id":"fixture","status":"completed","model":"fixture-model","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"Intermediate candidate 29"}]},{"type":"message","role":"assistant","phase":"final_answer","status":"completed","content":[{"type":"output_text","text":"{\"answer\":21}"}],"id":"msg_fixture"}]}}
 

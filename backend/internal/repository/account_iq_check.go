@@ -50,6 +50,14 @@ func resetIQState(state domain.IQCheck, settings *domain.IQCheckSettings, now ti
 	state.ExecutionReason = ""
 	state.TaskID = ""
 	state.Status = "unknown"
+	state.LastValidAt = nil
+	state.LastRunStatus = ""
+	state.LastRunReason = ""
+	state.RoundStartedAt = nil
+	state.RoundID = ""
+	state.RoundDeadline = nil
+	state.RetryAt = nil
+	state.AttemptCount = 0
 	state.Reason = ""
 	if state.Enabled {
 		state.Reason = "configuration_changed"
@@ -94,6 +102,25 @@ func (r *accountRepository) mutateIQCheck(ctx context.Context, id int64, fn func
 	state := m.IqCheck
 	if err := fn(&state); err != nil {
 		return state, err
+	}
+	if m.IqCheck.RoundID != "" && state.RoundID == "" && m.IqCheck.StartedAt == nil {
+		if _, err = client.ExecContext(ctx, `UPDATE account_iq_check_results SET finished_at=$2,reason='cancelled_by_account_change' WHERE lease_token=$1 AND finished_at IS NULL`, m.IqCheck.RoundID, time.Now().UTC()); err != nil {
+			return state, err
+		}
+	}
+	if state.RetryAt != nil && state.RoundDeadline != nil && state.NextRunAt != nil && !state.NextRunAt.Before(*state.RoundDeadline) {
+		next := *state.NextRunAt
+		if err = closeIQRetry(ctx, client, id, &state, time.Now().UTC(), state.ExecutionReason); err != nil {
+			return state, err
+		}
+		if state.NextRunAt == nil || next.After(*state.NextRunAt) {
+			state.NextRunAt = &next
+		}
+	}
+	if m.IqCheck.LeaseToken != "" && m.IqCheck.StartedAt == nil && state.LeaseToken == "" && state.ExecutionReason != "" {
+		if err = recordIQMetric(ctx, client, id, time.Now().UTC(), "deferred", state.ExecutionReason, 0); err != nil {
+			return state, err
+		}
 	}
 	if _, err = client.Account.UpdateOneID(id).SetIqCheck(state).Save(ctx); err != nil {
 		return state, err
@@ -157,33 +184,15 @@ func (r *accountRepository) ClaimIQChecks(ctx context.Context, now time.Time, li
 	if _, err = client.ExecContext(ctx, `DELETE FROM iq_check_quota_groups q WHERE q.budget_day < $1 AND COALESCE(q.not_before,'-infinity') < $2 AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.deleted_at IS NULL AND a.iq_check->>'quota_group'=q.id)`, now.UTC().Format("2006-01-02"), now); err != nil {
 		return nil, err
 	}
-	recovered, err := client.QueryContext(ctx, `UPDATE accounts SET iq_check = iq_check || jsonb_build_object('status',CASE WHEN iq_check->>'started_at' IS NOT NULL THEN 'unknown' ELSE COALESCE(iq_check->>'status','unknown') END,'reason',CASE WHEN iq_check->>'started_at' IS NOT NULL THEN 'interrupted' ELSE COALESCE(iq_check->>'reason','') END,'smart_streak',CASE WHEN iq_check->>'started_at' IS NOT NULL THEN 0 ELSE COALESCE((iq_check->>'smart_streak')::int,0) END,'last_run_at',CASE WHEN iq_check->>'started_at' IS NOT NULL THEN to_jsonb($1::timestamptz) ELSE iq_check->'last_run_at' END,'started_at',NULL,'execution_state','pending','lease_token','','lease_until',NULL,'next_run_at',CASE WHEN iq_check->>'enabled'='true' THEN to_jsonb($1::timestamptz) ELSE 'null'::jsonb END)
- WHERE deleted_at IS NULL AND iq_check->>'lease_token' <> '' AND (iq_check->>'lease_until')::timestamptz <= $1 RETURNING id`, now)
+	recoveredIDs, err := recoverIQExpiredLeases(ctx, client, now)
 	if err != nil {
 		return nil, err
 	}
-	recoveredIDs := []int64{}
-	for recovered.Next() {
-		var id int64
-		if err = recovered.Scan(&id); err != nil {
-			break
-		}
-		recoveredIDs = append(recoveredIDs, id)
-	}
-	if err == nil {
-		err = recovered.Err()
-	}
-	_ = recovered.Close()
-	if err != nil {
+	if _, err = client.ExecContext(ctx, `DELETE FROM account_iq_check_metrics_hourly WHERE bucket < $1`, now.AddDate(0, 0, -30)); err != nil {
 		return nil, err
 	}
-	for _, id := range recoveredIDs {
-		if _, err = client.ExecContext(ctx, `UPDATE account_iq_check_results SET status='unknown',finished_at=$2,reason='interrupted' WHERE account_id=$1 AND finished_at IS NULL`, id, now); err != nil {
-			return nil, err
-		}
-		if err = enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-			return nil, err
-		}
+	if err = recoverIQRetryDeadlines(ctx, client, now); err != nil {
+		return nil, err
 	}
 	rows, err := client.QueryContext(ctx, `SELECT count(*) FROM accounts WHERE deleted_at IS NULL AND (iq_check->>'lease_until')::timestamptz > $1`, now)
 	if err != nil {
@@ -271,7 +280,7 @@ ORDER BY COALESCE((iq_check->>'next_run_at')::timestamptz,'-infinity'),id LIMIT 
 		if err = enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &item.id, nil, nil); err != nil {
 			return nil, err
 		}
-		claims = append(claims, service.IQCheckClaim{AccountID: item.id, Token: state.LeaseToken, Revision: state.Revision, StartedAt: now, Profile: state.Profile(), Protocol: item.protocol, TimeoutSeconds: state.TimeoutSeconds, QuotaGroup: state.QuotaGroup})
+		claims = append(claims, service.IQCheckClaim{RoundDeadline: state.RoundDeadline, AccountID: item.id, Token: state.LeaseToken, Revision: state.Revision, StartedAt: now, Profile: state.Profile(), Protocol: item.protocol, TimeoutSeconds: state.TimeoutSeconds, QuotaGroup: state.QuotaGroup})
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
@@ -320,6 +329,17 @@ func (r *accountRepository) CompleteIQCheck(ctx context.Context, claim service.I
 			}
 		}
 	}
+	roundStarted := claim.StartedAt
+	if state.RoundStartedAt != nil {
+		roundStarted = *state.RoundStartedAt
+	}
+	roundID := state.RoundID
+	if roundID == "" {
+		roundID = claim.Token
+	}
+	if _, err = client.ExecContext(ctx, `UPDATE account_iq_check_attempts SET status=$2,reason=$3,finished_at=$4,latency_ms=$5,diagnostic=NULLIF($6::jsonb,'null'::jsonb) WHERE lease_token=$1 AND finished_at IS NULL`, claim.Token, result.Status, result.Reason, now, now.Sub(claim.StartedAt).Milliseconds(), string(result.Diagnostic.JSON())); err != nil {
+		return err
+	}
 	if !state.Enabled || state.Revision != claim.Revision {
 		state.LeaseToken = ""
 		state.LeaseUntil = nil
@@ -330,7 +350,7 @@ func (r *accountRepository) CompleteIQCheck(ctx context.Context, claim service.I
 		if _, err = client.Account.UpdateOneID(m.ID).SetIqCheck(state).Save(ctx); err != nil {
 			return err
 		}
-		if _, err = client.ExecContext(ctx, `UPDATE account_iq_check_results SET reason='cancelled_by_account_change',finished_at=$2,latency_ms=$3 WHERE lease_token=$1`, claim.Token, now, now.Sub(claim.StartedAt).Milliseconds()); err != nil {
+		if _, err = client.ExecContext(ctx, `UPDATE account_iq_check_results SET reason='cancelled_by_account_change',finished_at=$2,latency_ms=$3 WHERE id=(SELECT result_id FROM account_iq_check_attempts WHERE lease_token=$1)`, claim.Token, now, now.Sub(claim.StartedAt).Milliseconds()); err != nil {
 			return err
 		}
 		if err = enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &m.ID, nil, nil); err != nil {
@@ -346,6 +366,9 @@ func (r *accountRepository) CompleteIQCheck(ctx context.Context, claim service.I
 		return nil
 	}
 	if iqcheck.NotSent(result) {
+		if err = recordIQMetric(ctx, client, claim.AccountID, now, "not_sent", result.Reason, 0); err != nil {
+			return err
+		}
 		day := state.StartedAt.UTC().Format("2006-01-02")
 		if state.BudgetDay == day {
 			state.BudgetUsed = max(0, state.BudgetUsed-1)
@@ -356,13 +379,55 @@ func (r *accountRepository) CompleteIQCheck(ctx context.Context, claim service.I
 			}
 		}
 	}
-	finishIQSchedule(&state, result, now)
+	retry := false
+	if state.AttemptCount == 1 && state.RoundDeadline != nil && iqcheck.Retryable(result) {
+		next := now.Add(time.Duration(2+rand.IntN(4)) * time.Second)
+		if state.NotBefore != nil {
+			next = iqLater(next, *state.NotBefore)
+		}
+		if claim.QuotaGroup != "" {
+			rows, e := client.QueryContext(ctx, `SELECT GREATEST(not_before,next_start_at) FROM iq_check_quota_groups WHERE id=$1`, claim.QuotaGroup)
+			if e != nil {
+				return e
+			}
+			var groupNext *time.Time
+			if rows.Next() {
+				e = rows.Scan(&groupNext)
+			}
+			if e == nil {
+				e = rows.Err()
+			}
+			_ = rows.Close()
+			if e != nil {
+				return e
+			}
+			if groupNext != nil {
+				next = iqLater(next, *groupNext)
+			}
+		}
+		if next.Before(*state.RoundDeadline) {
+			retry = true
+			if err = recordIQMetric(ctx, client, claim.AccountID, now, "retry_wait", result.Reason, 0); err != nil {
+				return err
+			}
+			state.RetryAt = &next
+			state.NextRunAt = &next
+			state.ExecutionState = "retry_wait"
+			state.ExecutionReason = result.Reason
+			state.StartedAt = nil
+			state.LeaseToken = ""
+			state.LeaseUntil = nil
+		}
+	}
+	if !retry {
+		finishIQSchedule(&state, result, now)
+	}
 	if claim.QuotaGroup != "" && result.Reason == "quota_exhausted" {
 		if _, err = client.ExecContext(ctx, `UPDATE iq_check_quota_groups SET paused_reason='quota_exhausted' WHERE id=$1`, claim.QuotaGroup); err != nil {
 			return err
 		}
 	}
-	if state.NextRunAt != nil && (state.NotBefore == nil || state.NextRunAt.After(*state.NotBefore)) {
+	if !retry && state.NextRunAt != nil && (state.NotBefore == nil || state.NextRunAt.After(*state.NotBefore)) {
 		next := state.NextRunAt.Add(time.Duration(rand.Int64N(int64(min(30*time.Second, state.EffectiveInterval()/20)) + 1)))
 		state.NextRunAt = &next
 	}
@@ -372,10 +437,23 @@ func (r *accountRepository) CompleteIQCheck(ctx context.Context, claim service.I
 		}
 	}
 
+	if err = recordIQMetric(ctx, client, claim.AccountID, now, "attempt", result.Reason, now.Sub(claim.StartedAt).Milliseconds()); err != nil {
+		return err
+	}
+	if !retry {
+		if err = recordIQMetric(ctx, client, claim.AccountID, now, "round", result.Reason, now.Sub(roundStarted).Milliseconds()); err != nil {
+			return err
+		}
+		if state.AttemptCount == 2 && (result.Status == "smart" || result.Status == "degraded") {
+			if err = recordIQMetric(ctx, client, claim.AccountID, now, "recovered", result.Reason, 0); err != nil {
+				return err
+			}
+		}
+	}
 	if _, err = client.Account.UpdateOneID(m.ID).SetIqCheck(state).Save(ctx); err != nil {
 		return err
 	}
-	if _, err = client.ExecContext(ctx, `UPDATE account_iq_check_results SET status=$2,answer=$3,reason=$4,finished_at=$5,latency_ms=$6,normalized_answer=$7,answer_format=$8,format_compliant=$9,reported_model=$10,diagnostic=NULLIF($11::jsonb,'null'::jsonb) WHERE lease_token=$1`, claim.Token, result.Status, result.Answer, result.Reason, now, now.Sub(claim.StartedAt).Milliseconds(), result.NormalizedAnswer, result.AnswerFormat, result.FormatCompliant, result.ReportedModel, string(result.Diagnostic.JSON())); err != nil {
+	if _, err = client.ExecContext(ctx, `UPDATE account_iq_check_results SET status=$2,answer=$3,reason=$4,finished_at=$5,latency_ms=$6,normalized_answer=$7,answer_format=$8,format_compliant=$9,reported_model=$10,diagnostic=NULLIF($11::jsonb,'null'::jsonb) WHERE lease_token=$1`, roundID, result.Status, result.Answer, result.Reason, iqFinishedAt(retry, now), now.Sub(roundStarted).Milliseconds(), result.NormalizedAnswer, result.AnswerFormat, result.FormatCompliant, result.ReportedModel, string(result.Diagnostic.JSON())); err != nil {
 		return err
 	}
 	if err = enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &m.ID, nil, nil); err != nil {
@@ -396,7 +474,7 @@ func (r *accountRepository) ListIQCheckRecords(ctx context.Context, id int64) ([
 	if a.Platform != service.PlatformOpenAI {
 		return nil, service.ErrIQCheckInvalid
 	}
-	rows, err := r.sql.QueryContext(ctx, `SELECT id,prompt_version,model,effort,status,answer,reason,started_at,finished_at,latency_ms,normalized_answer,answer_format,output_mode,format_compliant,grader_version,protocol,reported_model,config_revision,diagnostic FROM account_iq_check_results WHERE account_id=$1 ORDER BY id DESC LIMIT 3`, id)
+	rows, err := r.sql.QueryContext(ctx, `SELECT id,prompt_version,model,effort,status,answer,reason,started_at,finished_at,latency_ms,normalized_answer,answer_format,output_mode,format_compliant,grader_version,protocol,reported_model,config_revision,diagnostic,COALESCE((SELECT jsonb_agg(to_jsonb(x)-'lease_token'-'result_id' ORDER BY attempt_no) FROM account_iq_check_attempts x WHERE x.result_id=account_iq_check_results.id),'[]'::jsonb) FROM account_iq_check_results WHERE account_id=$1 ORDER BY id DESC LIMIT 3`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -405,13 +483,17 @@ func (r *accountRepository) ListIQCheckRecords(ctx context.Context, id int64) ([
 	for rows.Next() {
 		var item service.IQCheckRecord
 		var diagnostic []byte
-		if err = rows.Scan(&item.ID, &item.PromptVersion, &item.Model, &item.Effort, &item.Status, &item.Answer, &item.Reason, &item.StartedAt, &item.FinishedAt, &item.LatencyMS, &item.NormalizedAnswer, &item.AnswerFormat, &item.OutputMode, &item.FormatCompliant, &item.GraderVersion, &item.Protocol, &item.ReportedModel, &item.ConfigRevision, &diagnostic); err != nil {
+		var attempts []byte
+		if err = rows.Scan(&item.ID, &item.PromptVersion, &item.Model, &item.Effort, &item.Status, &item.Answer, &item.Reason, &item.StartedAt, &item.FinishedAt, &item.LatencyMS, &item.NormalizedAnswer, &item.AnswerFormat, &item.OutputMode, &item.FormatCompliant, &item.GraderVersion, &item.Protocol, &item.ReportedModel, &item.ConfigRevision, &diagnostic, &attempts); err != nil {
 			return nil, err
 		}
 		if len(diagnostic) > 0 {
 			if err = json.Unmarshal(diagnostic, &item.Diagnostic); err != nil {
 				return nil, err
 			}
+		}
+		if err = json.Unmarshal(attempts, &item.Attempts); err != nil {
+			return nil, err
 		}
 		out = append(out, item)
 	}

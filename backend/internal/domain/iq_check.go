@@ -143,6 +143,15 @@ func (s IQCheck) WithSettings(p *IQCheckSettings) IQCheck {
 
 // IQCheck keeps the independent quality gate separate from manual scheduling.
 type IQCheck struct {
+	RoundStartedAt   *time.Time `json:"round_started_at,omitempty"`
+	LastValidAt      *time.Time `json:"last_valid_at,omitempty"`
+	LastRunStatus    string     `json:"last_run_status,omitempty"`
+	LastRunReason    string     `json:"last_run_reason,omitempty"`
+	RoundID          string     `json:"round_id,omitempty"`
+	RoundDeadline    *time.Time `json:"round_deadline,omitempty"`
+	AttemptCount     int        `json:"attempt_count,omitempty"`
+	RetryAt          *time.Time `json:"retry_at,omitempty"`
+	BudgetWarning    bool       `json:"budget_warning,omitempty"`
 	BusyDeferrals    int        `json:"busy_deferrals,omitempty"`
 	LastAttemptAt    *time.Time `json:"last_attempt_at,omitempty"`
 	ExecutionState   string     `json:"execution_state,omitempty"`
@@ -179,7 +188,7 @@ type IQCheck struct {
 }
 
 func DefaultIQCheck() IQCheck {
-	return (IQCheck{IntervalMinutes: 15, Status: "unknown"}).WithSettings(nil)
+	return (IQCheck{IntervalMinutes: 5, DailyRequestLimit: 576, Status: "unknown"}).WithSettings(nil)
 }
 
 func (s IQCheck) Summary() IQCheck {
@@ -193,9 +202,9 @@ func (s IQCheck) Summary() IQCheck {
 
 	now := time.Now().UTC()
 	s.Freshness = "never_checked"
-	if s.LastRunAt != nil {
+	if s.LastValidAt != nil {
 		s.Freshness = "fresh"
-		if now.After(s.LastRunAt.Add(s.EffectiveInterval() + time.Duration(s.TimeoutSeconds)*time.Second + time.Minute)) {
+		if now.After(s.LastValidAt.Add(s.EffectiveInterval() + time.Duration(s.TimeoutSeconds)*time.Second + time.Minute)) {
 			s.Freshness = "stale"
 		}
 	}
@@ -204,11 +213,13 @@ func (s IQCheck) Summary() IQCheck {
 		used = 0
 	}
 	s.BudgetRemaining = max(0, s.DailyLimit()-used)
+	s.BudgetWarning = s.DailyLimit() < 2*((1440+s.IntervalMinutes-1)/s.IntervalMinutes)
 	s.NextEligibleAt = s.NextRunAt
 	if s.ExecutionState == "" {
 		s.ExecutionState = "idle"
 	}
 	s.Revision, s.LeaseToken, s.LeaseUntil = "", "", nil
+	s.RoundID = ""
 	return s
 }
 
@@ -222,10 +233,8 @@ func (s IQCheck) CopySettings() *IQCheckSettings {
 }
 
 func iqCopyBudget(s IQCheck) *int {
-	if s.DailyRequestLimit == 0 {
-		return nil
-	}
-	return &s.DailyRequestLimit
+	limit := s.DailyLimit()
+	return &limit
 }
 func (s IQCheck) DailyLimit() int {
 	if s.DailyRequestLimit > 0 {
@@ -251,18 +260,22 @@ func (s IQCheck) EffectiveInterval() time.Duration {
 func (s IQCheck) Eligibility(now time.Time) (time.Time, string) {
 	next := now
 	reason := ""
-	if s.LastRunAt != nil {
+	if s.RetryAt == nil && s.LastRunAt != nil {
 		t := s.LastRunAt.Add(time.Duration(max(1, s.IntervalMinutes)) * time.Minute)
 		if t.After(next) {
 			next = t
 			reason = "minimum_interval"
 		}
 	}
-	if s.LastAttemptAt != nil {
+	if s.RetryAt == nil && s.LastAttemptAt != nil {
 		t := s.LastAttemptAt.Add(time.Duration(max(1, s.IntervalMinutes)) * time.Minute)
 		if t.After(next) {
 			next, reason = t, "minimum_interval"
 		}
+	}
+	if s.RetryAt != nil && s.RetryAt.After(next) {
+		next = *s.RetryAt
+		reason = "retry_wait"
 	}
 	if s.NotBefore != nil && s.NotBefore.After(next) {
 		next = *s.NotBefore
