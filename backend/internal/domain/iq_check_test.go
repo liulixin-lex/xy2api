@@ -41,35 +41,41 @@ func TestIQCheckPartialSettingsAndCopy(t *testing.T) {
 	}
 }
 
-func TestIQMonitoringBudgetAndFreshness(t *testing.T) {
+func TestIQFixedIntervalEligibility(t *testing.T) {
 	s := DefaultIQCheck()
-	if s.DailyLimit() != 576 || s.TimeoutSeconds != 120 || s.SchedulingMode != "fixed" {
+	if s.IntervalMinutes != 5 || s.TimeoutSeconds != 120 {
 		t.Fatal(s)
 	}
-	s.IntervalMinutes = 1
-	s.DailyRequestLimit = 0
-	if s.DailyLimit() != 1440 {
-		t.Fatal(s)
-	}
-	s.DailyRequestLimit = 2
-	s.BudgetDay = "2026-09-14"
-	s.BudgetUsed = 2
 	now := time.Date(2026, 9, 14, 23, 59, 0, 0, time.UTC)
-	last := now
-	s.LastRunAt = &last
+	s.LastRunAt = &now
 	s.IntervalMinutes = 15
-	next, reason := s.Eligibility(now)
+	next, reason := s.Eligibility(now.Add(time.Minute))
 	if reason != "minimum_interval" || !next.Equal(now.Add(15*time.Minute)) {
 		t.Fatal(next, reason)
 	}
-	next, _ = s.Eligibility(now.Add(time.Minute))
-	if !next.Equal(now.Add(15 * time.Minute)) {
-		t.Fatal("midnight bypass", next)
-	}
-	for _, raw := range []string{`{"timeout_seconds":301}`, `{"daily_request_limit":0}`, `{"scheduling_mode":"random"}`, `{"quota_group":"../bad"}`} {
+	for _, raw := range []string{`{"timeout_seconds":301}`, `{"timeout_seconds":29}`, `{"interval_minutes":1441}`} {
 		var p IQCheckSettings
 		if json.Unmarshal([]byte(raw), &p) != nil || p.Validate() == nil {
 			t.Fatal(raw)
+		}
+	}
+	var legacy IQCheck
+	if err := json.Unmarshal([]byte(`{"enabled":true,"interval_minutes":10,"scheduling_mode":"adaptive","smart_streak":6,"daily_request_limit":1,"budget_used":99,"quota_group":"old"}`), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if legacy.EffectiveInterval() != 10*time.Minute {
+		t.Fatal(legacy)
+	}
+	next, reason = legacy.Eligibility(now)
+	if reason != "" || !next.Equal(now) {
+		t.Fatal(next, reason)
+	}
+	raw, _ := json.Marshal(legacy)
+	var output map[string]any
+	_ = json.Unmarshal(raw, &output)
+	for _, k := range []string{"scheduling_mode", "smart_streak", "daily_request_limit", "budget_used", "quota_group"} {
+		if _, ok := output[k]; ok {
+			t.Fatal(k)
 		}
 	}
 }

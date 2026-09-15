@@ -52,7 +52,7 @@ INSERT INTO account_iq_check_results VALUES
 			require.NotNil(t, state.LastValidAt)
 			require.Equal(t, "http_503", state.LastRunReason)
 			require.Equal(t, 1, state.IntervalMinutes)
-			require.Equal(t, 96, state.DailyRequestLimit)
+			require.Contains(t, string(raw), `"daily_request_limit": 96`)
 		} else {
 			require.Equal(t, "unknown", state.Status)
 			require.Nil(t, state.LastValidAt)
@@ -60,24 +60,19 @@ INSERT INTO account_iq_check_results VALUES
 			if id == 2 {
 				require.NotContains(t, string(raw), "daily_request_limit")
 			} else {
-				require.Equal(t, 123, state.DailyRequestLimit)
+				require.Contains(t, string(raw), `"daily_request_limit": 123`)
 			}
 		}
 	}
 }
 
 func TestIQReliabilityPersistentRecovery(t *testing.T) {
-	for _, scenario := range []string{"recover", "second_failure", "budget", "deadline", "restart_wait", "restart_reserved", "restart_sent", "config_change", "bulk_change"} {
+	for _, scenario := range []string{"recover", "second_failure", "deadline", "restart_wait", "restart_reserved", "restart_sent", "config_change", "bulk_change"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
 			peer := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
 			a := &service.Account{Name: "iq-reliability-" + scenario, Platform: "openai", Type: "apikey", Status: "active", Schedulable: true, IQCheckSettings: iqTestSettingsPtr(true, 15)}
-			limit := 10
-			if scenario == "budget" {
-				limit = 2
-			}
-			a.IQCheckSettings.DailyRequestLimit = &limit
 			require.NoError(t, repo.Create(ctx, a))
 			t.Cleanup(func() { cleanupIQTestAccount(t, a.ID) })
 			now := time.Now().UTC().Truncate(time.Microsecond).Add(time.Second)
@@ -85,7 +80,7 @@ func TestIQReliabilityPersistentRecovery(t *testing.T) {
 				cs, e := repo.ClaimIQChecks(ctx, at, 2)
 				require.NoError(t, e)
 				require.Len(t, cs, 1)
-				ok, e := repo.StartIQCheck(ctx, cs[0], at, nil)
+				ok, e := repo.StartIQCheck(ctx, cs[0], at)
 				require.NoError(t, e)
 				require.True(t, ok)
 				return cs[0]
@@ -105,7 +100,6 @@ func TestIQReliabilityPersistentRecovery(t *testing.T) {
 			require.Equal(t, "retry_wait", current.IQCheck.ExecutionState)
 			require.Empty(t, current.IQCheck.LeaseToken)
 			require.Nil(t, current.IQCheck.StartedAt)
-			require.Equal(t, 2, current.IQCheck.BudgetUsed)
 			records, e := repo.ListIQCheckRecords(ctx, a.ID)
 			require.NoError(t, e)
 			require.Len(t, records, 2)
@@ -170,7 +164,7 @@ func TestIQReliabilityPersistentRecovery(t *testing.T) {
 			errs := make(chan error, 2)
 			for i := 0; i < 2; i++ {
 				wg.Add(1)
-				go func() { defer wg.Done(); ok, e := peer.StartIQCheck(ctx, second, after, nil); started <- ok; errs <- e }()
+				go func() { defer wg.Done(); ok, e := peer.StartIQCheck(ctx, second, after); started <- ok; errs <- e }()
 			}
 			wg.Wait()
 			close(started)
@@ -184,14 +178,6 @@ func TestIQReliabilityPersistentRecovery(t *testing.T) {
 					count++
 				}
 			}
-			if scenario == "budget" {
-				require.Zero(t, count)
-				records, e = repo.ListIQCheckRecords(ctx, a.ID)
-				require.NoError(t, e)
-				require.NotNil(t, records[0].FinishedAt)
-				require.Len(t, records[0].Attempts, 1)
-				return
-			}
 			require.Equal(t, 1, count)
 			if scenario == "restart_sent" {
 				_, e = repo.ClaimIQChecks(ctx, after.Add(181*time.Second), 0)
@@ -204,7 +190,6 @@ func TestIQReliabilityPersistentRecovery(t *testing.T) {
 				current, e = repo.GetByID(ctx, a.ID)
 				require.NoError(t, e)
 				require.True(t, current.IQCheck.BlocksScheduling())
-				require.Equal(t, 3, current.IQCheck.BudgetUsed)
 				return
 			}
 			final := iqcheck.Grade("21")
@@ -214,7 +199,6 @@ func TestIQReliabilityPersistentRecovery(t *testing.T) {
 			require.NoError(t, peer.CompleteIQCheck(ctx, second, final, after.Add(time.Second)))
 			current, e = repo.GetByID(ctx, a.ID)
 			require.NoError(t, e)
-			require.Equal(t, 3, current.IQCheck.BudgetUsed)
 			require.Nil(t, current.IQCheck.RetryAt)
 			require.Equal(t, scenario == "second_failure", current.IQCheck.BlocksScheduling())
 			records, e = repo.ListIQCheckRecords(ctx, a.ID)

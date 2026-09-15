@@ -42,7 +42,6 @@ func applyIQStatusFilter(ctx context.Context, q *dbent.AccountQuery) *dbent.Acco
 
 func resetIQState(state domain.IQCheck, settings *domain.IQCheckSettings, now time.Time) domain.IQCheck {
 	state = state.WithSettings(settings)
-	state.SmartStreak = 0
 	state.BusyDeferrals = 0
 	state.FailureStreak = 0
 	state.ProtocolFailures = 0
@@ -77,7 +76,7 @@ func applyIQSettings(state domain.IQCheck, settings *domain.IQCheckSettings, ide
 	if identityChanged || previous.Enabled != updated.Enabled || previous.Profile() != updated.Profile() || previous.TimeoutSeconds != updated.TimeoutSeconds {
 		return resetIQState(updated, nil, now)
 	}
-	if (previous.IntervalMinutes != updated.IntervalMinutes || previous.SchedulingMode != updated.SchedulingMode || previous.MaxIntervalMinutes != updated.MaxIntervalMinutes || previous.DailyRequestLimit != updated.DailyRequestLimit || previous.QuotaGroup != updated.QuotaGroup) && updated.Enabled && (updated.LeaseUntil == nil || !updated.LeaseUntil.After(now)) {
+	if (previous.IntervalMinutes != updated.IntervalMinutes) && updated.Enabled && (updated.LeaseUntil == nil || !updated.LeaseUntil.After(now)) {
 		if updated.ExecutionState != "paused" {
 			queueIQ(&updated, now)
 		}
@@ -153,13 +152,6 @@ func (r *accountRepository) QueueIQCheck(ctx context.Context, id int64) error {
 	if !a.IQCheck.Enabled {
 		return service.ErrIQCheckDisabled
 	}
-	if a.IQCheck.QuotaGroup != "" {
-		// Explicit administrator requeue acknowledges the shared quota pause;
-		// the time-based cooldown and usage counters remain authoritative.
-		if _, err := r.sql.ExecContext(ctx, `UPDATE iq_check_quota_groups SET paused_reason='' WHERE id=$1`, a.IQCheck.QuotaGroup); err != nil {
-			return err
-		}
-	}
 	_, err = r.mutateIQCheck(ctx, id, func(state *domain.IQCheck) error {
 		if !state.Enabled {
 			return service.ErrIQCheckDisabled
@@ -179,9 +171,6 @@ func (r *accountRepository) ClaimIQChecks(ctx context.Context, now time.Time, li
 	client := tx.Client()
 	// Serialize only the short claim transaction to enforce the ten-task limit across replicas.
 	if _, err = client.ExecContext(ctx, "SELECT pg_advisory_xact_lock(78421021)"); err != nil {
-		return nil, err
-	}
-	if _, err = client.ExecContext(ctx, `DELETE FROM iq_check_quota_groups q WHERE q.budget_day < $1 AND COALESCE(q.not_before,'-infinity') < $2 AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.deleted_at IS NULL AND a.iq_check->>'quota_group'=q.id)`, now.UTC().Format("2006-01-02"), now); err != nil {
 		return nil, err
 	}
 	recoveredIDs, err := recoverIQExpiredLeases(ctx, client, now)
@@ -280,7 +269,7 @@ ORDER BY COALESCE((iq_check->>'next_run_at')::timestamptz,'-infinity'),id LIMIT 
 		if err = enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &item.id, nil, nil); err != nil {
 			return nil, err
 		}
-		claims = append(claims, service.IQCheckClaim{RoundDeadline: state.RoundDeadline, AccountID: item.id, Token: state.LeaseToken, Revision: state.Revision, StartedAt: now, Profile: state.Profile(), Protocol: item.protocol, TimeoutSeconds: state.TimeoutSeconds, QuotaGroup: state.QuotaGroup})
+		claims = append(claims, service.IQCheckClaim{RoundDeadline: state.RoundDeadline, AccountID: item.id, Token: state.LeaseToken, Revision: state.Revision, StartedAt: now, Profile: state.Profile(), Protocol: item.protocol, TimeoutSeconds: state.TimeoutSeconds})
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
@@ -323,11 +312,6 @@ func (r *accountRepository) CompleteIQCheck(ctx context.Context, claim service.I
 		if bound != nil && (state.NotBefore == nil || bound.After(*state.NotBefore)) {
 			state.NotBefore = bound
 		}
-		if claim.QuotaGroup != "" && bound != nil {
-			if _, err = client.ExecContext(ctx, `UPDATE iq_check_quota_groups SET not_before=GREATEST(not_before,$2) WHERE id=$1`, claim.QuotaGroup, bound); err != nil {
-				return err
-			}
-		}
 	}
 	roundStarted := claim.StartedAt
 	if state.RoundStartedAt != nil {
@@ -369,41 +353,12 @@ func (r *accountRepository) CompleteIQCheck(ctx context.Context, claim service.I
 		if err = recordIQMetric(ctx, client, claim.AccountID, now, "not_sent", result.Reason, 0); err != nil {
 			return err
 		}
-		day := state.StartedAt.UTC().Format("2006-01-02")
-		if state.BudgetDay == day {
-			state.BudgetUsed = max(0, state.BudgetUsed-1)
-		}
-		if claim.QuotaGroup != "" {
-			if _, err = client.ExecContext(ctx, `UPDATE iq_check_quota_groups SET used=GREATEST(0,used-1) WHERE id=$1 AND budget_day=$2`, claim.QuotaGroup, day); err != nil {
-				return err
-			}
-		}
 	}
 	retry := false
 	if state.AttemptCount == 1 && state.RoundDeadline != nil && iqcheck.Retryable(result) {
 		next := now.Add(time.Duration(2+rand.IntN(4)) * time.Second)
 		if state.NotBefore != nil {
 			next = iqLater(next, *state.NotBefore)
-		}
-		if claim.QuotaGroup != "" {
-			rows, e := client.QueryContext(ctx, `SELECT GREATEST(not_before,next_start_at) FROM iq_check_quota_groups WHERE id=$1`, claim.QuotaGroup)
-			if e != nil {
-				return e
-			}
-			var groupNext *time.Time
-			if rows.Next() {
-				e = rows.Scan(&groupNext)
-			}
-			if e == nil {
-				e = rows.Err()
-			}
-			_ = rows.Close()
-			if e != nil {
-				return e
-			}
-			if groupNext != nil {
-				next = iqLater(next, *groupNext)
-			}
 		}
 		if next.Before(*state.RoundDeadline) {
 			retry = true
@@ -422,19 +377,9 @@ func (r *accountRepository) CompleteIQCheck(ctx context.Context, claim service.I
 	if !retry {
 		finishIQSchedule(&state, result, now)
 	}
-	if claim.QuotaGroup != "" && result.Reason == "quota_exhausted" {
-		if _, err = client.ExecContext(ctx, `UPDATE iq_check_quota_groups SET paused_reason='quota_exhausted' WHERE id=$1`, claim.QuotaGroup); err != nil {
-			return err
-		}
-	}
 	if !retry && state.NextRunAt != nil && (state.NotBefore == nil || state.NextRunAt.After(*state.NotBefore)) {
 		next := state.NextRunAt.Add(time.Duration(rand.Int64N(int64(min(30*time.Second, state.EffectiveInterval()/20)) + 1)))
 		state.NextRunAt = &next
-	}
-	if claim.QuotaGroup != "" && state.NotBefore != nil {
-		if _, err = client.ExecContext(ctx, `UPDATE iq_check_quota_groups SET not_before=GREATEST(not_before,$2) WHERE id=$1`, claim.QuotaGroup, state.NotBefore); err != nil {
-			return err
-		}
 	}
 
 	if err = recordIQMetric(ctx, client, claim.AccountID, now, "attempt", result.Reason, now.Sub(claim.StartedAt).Milliseconds()); err != nil {

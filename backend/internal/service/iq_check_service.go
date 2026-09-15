@@ -23,7 +23,6 @@ var ErrIQCheckDisabled = infraerrors.BadRequest("IQ_CHECK_DISABLED", "IQ check i
 
 type IQCheckClaim struct {
 	RoundDeadline  *time.Time
-	QuotaGroup     string
 	TimeoutSeconds int
 	AccountID      int64
 	Token          string
@@ -102,7 +101,6 @@ func ValidIQStatusFilter(status string) bool {
 type IQCheckService struct {
 	concurrency    *ConcurrencyService
 	maxConcurrency int
-	quotaGroups    map[string]IQQuotaPolicy
 	repo           IQCheckRepository
 	accounts       AccountRepository
 	tester         *AccountTestService
@@ -117,8 +115,8 @@ type IQCheckService struct {
 
 func ProvideIQCheckService(accounts AccountRepository, tester *AccountTestService, tokens *OpenAITokenProvider, concurrency *ConcurrencyService) *IQCheckService {
 	repo, ok := accounts.(IQCheckRepository)
-	maxConcurrency, quotaGroups := iqMonitoringConfig()
-	s := &IQCheckService{wake: make(chan struct{}, 1), concurrency: concurrency, maxConcurrency: maxConcurrency, quotaGroups: quotaGroups, repo: repo, accounts: accounts, tester: tester, tokens: tokens}
+	maxConcurrency := iqMonitoringConfig()
+	s := &IQCheckService{wake: make(chan struct{}, 1), concurrency: concurrency, maxConcurrency: maxConcurrency, repo: repo, accounts: accounts, tester: tester, tokens: tokens}
 	if !ok {
 		return s
 	}

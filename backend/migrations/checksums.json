@@ -294,6 +294,7 @@
     "242_iq_check_diagnostic.sql": "78ffbc269f8dfdb3eaa0cfa7779cd58f4fe8ae32905e29807c841b1c579567c2",
     "243_iq_check_monitoring.sql": "9fd59a2941a03fa60ff5bb7585fd2a55f2f8013eef83aa39cfe50a91fa8f255c",
     "244_iq_check_bulk_busy_reset.sql": "38ba2fd0db6f474383f2a5deb78a5ec83cd8cead8f5ce609ea72d3bdcb3654c9",
-    "245_iq_check_reliability.sql": "8cb3528634f0356b057de796b8fda0f889599c5ff0d8a89bf73b576a2b5302c5"
+    "245_iq_check_reliability.sql": "8cb3528634f0356b057de796b8fda0f889599c5ff0d8a89bf73b576a2b5302c5",
+    "246_iq_check_simplification.sql": "59626f3e77e6e607e26cf946e39c30fc758c8066fa708dd34fbe8e618bd8aac3"
   }
 }

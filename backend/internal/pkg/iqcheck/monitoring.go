@@ -99,9 +99,9 @@ func FailurePolicy(r Result) (pause, transient, protocol bool) {
 	switch r.Reason {
 	case "zero_byte_response", "missing_final_message", "empty_final_text", "empty_response", "incomplete_response":
 		return false, true, true
-	case "quota_exhausted", "authentication_unavailable", "permission_denied", "policy_denied", "unsupported_model", "unsupported_parameter", "unsupported_account_type", "invalid_endpoint", "http_401", "http_403", "http_400", "http_404":
+	case "quota_exhausted", "authentication_unavailable", "permission_denied", "policy_denied", "unsupported_model", "unsupported_parameter", "unsupported_account_type", "invalid_endpoint", "http_401", "http_400", "http_404":
 		return true, false, false
-	case "timeout", "request_failed", "request_cancelled", "response_read_failed", "rate_limited", "upstream_unavailable", "upstream_error", "interrupted":
+	case "http_403", "timeout", "request_failed", "request_cancelled", "response_read_failed", "rate_limited", "upstream_unavailable", "upstream_error", "interrupted":
 		return false, true, false
 	}
 	if strings.HasPrefix(r.Reason, "http_5") || r.Reason == "http_429" {

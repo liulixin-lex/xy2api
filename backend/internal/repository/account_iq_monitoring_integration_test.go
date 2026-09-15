@@ -37,32 +37,26 @@ func TestIQMonitoringBulkResetBusyDeferrals(t *testing.T) {
 }
 
 func TestIQMonitoringFinalAuditGates(t *testing.T) {
-	for _, scenario := range []string{"quota_changed", "group_pause_preserves_cooldown", "defer_preserves_cooldown"} {
+	for _, scenario := range []string{"quota_changed", "health_cooldown", "defer_preserves_cooldown"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
 			a := &service.Account{Name: "iq-final-gates", Platform: "openai", Type: "apikey", Status: "active", Schedulable: true, IQCheckSettings: iqTestSettingsPtr(true, 15)}
-			group := "iq-final-" + scenario
-			a.IQCheckSettings.QuotaGroup = &group
 			require.NoError(t, repo.Create(ctx, a))
 			t.Cleanup(func() {
 				cleanupIQTestAccount(t, a.ID)
-				_, _ = integrationDB.Exec(`DELETE FROM iq_check_quota_groups WHERE id=$1`, group)
 			})
 			now := time.Now().UTC().Truncate(time.Microsecond).Add(time.Second)
 			claims, err := repo.ClaimIQChecks(ctx, now, 1)
 			require.NoError(t, err)
 			require.Len(t, claims, 1)
 			long := now.Add(time.Hour)
-			_, err = integrationDB.Exec(`INSERT INTO iq_check_quota_groups(id,budget_day,used) VALUES($1,$2,0)`, group, now.Format("2006-01-02"))
-			require.NoError(t, err)
 			switch scenario {
 			case "quota_changed":
 				_, err = integrationDB.Exec(`UPDATE accounts SET extra=COALESCE(extra,'{}'::jsonb)||'{"quota_limit":1,"quota_used":1}'::jsonb WHERE id=$1`, a.ID)
-			case "group_pause_preserves_cooldown":
+			case "health_cooldown":
 				_, err = integrationDB.Exec(`UPDATE accounts SET rate_limit_reset_at=$2 WHERE id=$1`, a.ID, long)
 				require.NoError(t, err)
-				_, err = integrationDB.Exec(`UPDATE iq_check_quota_groups SET paused_reason='quota_exhausted' WHERE id=$1`, group)
 			case "defer_preserves_cooldown":
 				_, err = integrationDB.Exec(`UPDATE accounts SET iq_check=iq_check||jsonb_build_object('not_before',$2::timestamptz) WHERE id=$1`, a.ID, long)
 			}
@@ -70,7 +64,7 @@ func TestIQMonitoringFinalAuditGates(t *testing.T) {
 			if scenario == "defer_preserves_cooldown" {
 				require.NoError(t, repo.DeferIQCheck(ctx, claims[0], "account_busy", now.Add(20*time.Second)))
 			} else {
-				started, err := repo.StartIQCheck(ctx, claims[0], now, map[string]service.IQQuotaPolicy{group: {DailyLimit: 20, MinIntervalSeconds: 1}})
+				started, err := repo.StartIQCheck(ctx, claims[0], now)
 				require.NoError(t, err)
 				require.False(t, started, "a fresh business quota gate must prevent starting")
 			}
@@ -81,11 +75,7 @@ func TestIQMonitoringFinalAuditGates(t *testing.T) {
 			} else {
 				require.Equal(t, long, *after.IQCheck.NextRunAt, "a shorter delay must not erase the latest cooldown")
 			}
-			require.Zero(t, after.IQCheck.BudgetUsed)
 			require.Empty(t, after.IQCheck.LeaseToken)
-			var used int
-			require.NoError(t, integrationDB.QueryRow(`SELECT used FROM iq_check_quota_groups WHERE id=$1`, group).Scan(&used))
-			require.Zero(t, used)
 			records, err := repo.ListIQCheckRecords(ctx, a.ID)
 			require.NoError(t, err)
 			require.Empty(t, records)
@@ -107,14 +97,13 @@ func TestIQMonitoringHealthChangeBeforeStart(t *testing.T) {
 	// Business traffic may place the account in cooldown after the worker reads it.
 	_, err = integrationDB.Exec(`UPDATE accounts SET overload_until=$2,rate_limit_reset_at=$3,temp_unschedulable_until=$2 WHERE id=$1`, a.ID, short, long)
 	require.NoError(t, err)
-	started, err := repo.StartIQCheck(ctx, claims[0], now, nil)
+	started, err := repo.StartIQCheck(ctx, claims[0], now)
 	require.NoError(t, err)
-	require.False(t, started, "a fresh cooldown must prevent transport and budget reservation")
+	require.False(t, started, "a fresh cooldown must prevent transport")
 	after, err := repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.Equal(t, "account_cooldown", after.IQCheck.ExecutionReason)
 	require.Equal(t, long, *after.IQCheck.NextRunAt)
-	require.Zero(t, after.IQCheck.BudgetUsed)
 	require.Empty(t, after.IQCheck.LeaseToken)
 	rows, err := repo.ListIQCheckRecords(ctx, a.ID)
 	require.NoError(t, err)
@@ -123,17 +112,15 @@ func TestIQMonitoringHealthChangeBeforeStart(t *testing.T) {
 	claims, err = repo.ClaimIQChecks(ctx, long, 1)
 	require.NoError(t, err)
 	require.Len(t, claims, 1)
-	started, err = repo.StartIQCheck(ctx, claims[0], long, nil)
+	started, err = repo.StartIQCheck(ctx, claims[0], long)
 	require.NoError(t, err)
 	require.True(t, started)
 }
 
-func TestIQMonitoringBudgetStartAndRecovery(t *testing.T) {
+func TestIQMonitoringStartAndRecovery(t *testing.T) {
 	ctx := context.Background()
 	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
-	limit := 1
-	a := &service.Account{Name: "iq-budget", Platform: "openai", Type: "apikey", Status: "active", Schedulable: true, IQCheckSettings: iqTestSettingsPtr(true, 15)}
-	a.IQCheckSettings.DailyRequestLimit = &limit
+	a := &service.Account{Name: "iq-start-recovery", Platform: "openai", Type: "apikey", Status: "active", Schedulable: true, IQCheckSettings: iqTestSettingsPtr(true, 15)}
 	require.NoError(t, repo.Create(ctx, a))
 	t.Cleanup(func() { cleanupIQTestAccount(t, a.ID) })
 	now := time.Now().UTC().Truncate(time.Microsecond).Add(time.Second)
@@ -156,7 +143,7 @@ func TestIQMonitoringBudgetStartAndRecovery(t *testing.T) {
 	errs := make(chan error, 2)
 	for i := 0; i < 2; i++ {
 		wg.Add(1)
-		go func() { defer wg.Done(); ok, e := repo.StartIQCheck(ctx, cs[0], now, nil); started <- ok; errs <- e }()
+		go func() { defer wg.Done(); ok, e := repo.StartIQCheck(ctx, cs[0], now); started <- ok; errs <- e }()
 	}
 	wg.Wait()
 	close(started)
@@ -176,7 +163,6 @@ func TestIQMonitoringBudgetStartAndRecovery(t *testing.T) {
 	s, err := repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.True(t, s.IQCheck.BlocksScheduling())
-	require.Equal(t, 1, s.IQCheck.BudgetUsed)
 	require.Equal(t, "deferred", s.IQCheck.ExecutionState)
 	_, err = repo.ConfigureIQCheck(ctx, a.ID, iqTestSettings(false, 15))
 	require.NoError(t, err)
@@ -184,7 +170,6 @@ func TestIQMonitoringBudgetStartAndRecovery(t *testing.T) {
 	require.NoError(t, err)
 	s, err = repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
-	require.Equal(t, 1, s.IQCheck.BudgetUsed)
 	// Pending lease expiration preserves an old assessment; only a started attempt becomes unknown.
 	next := *s.IQCheck.NextRunAt
 	cs, err = repo.ClaimIQChecks(ctx, next, 2)
@@ -201,59 +186,6 @@ func TestIQMonitoringBudgetStartAndRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 }
-func TestIQMonitoringSharedQuotaAndPause(t *testing.T) {
-	ctx := context.Background()
-	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
-	group := "monitor-fixture"
-	policies := map[string]service.IQQuotaPolicy{group: {DailyLimit: 2, MinIntervalSeconds: 60}}
-	t.Cleanup(func() {
-		_, e := integrationDB.Exec("DELETE FROM iq_check_quota_groups WHERE id=$1", group)
-		require.NoError(t, e)
-	})
-	ids := []int64{}
-	for i := 0; i < 2; i++ {
-		a := &service.Account{Name: "iq-group", Platform: "openai", Type: "apikey", Status: "active", Schedulable: true, IQCheckSettings: iqTestSettingsPtr(true, 15)}
-		a.IQCheckSettings.QuotaGroup = &group
-		require.NoError(t, repo.Create(ctx, a))
-		ids = append(ids, a.ID)
-	}
-	t.Cleanup(func() {
-		for _, id := range ids {
-			cleanupIQTestAccount(t, id)
-		}
-	})
-	now := time.Now().UTC().Truncate(time.Microsecond).Add(time.Second)
-	cs, e := repo.ClaimIQChecks(ctx, now, 2)
-	require.NoError(t, e)
-	require.Len(t, cs, 2)
-	ok, e := repo.StartIQCheck(ctx, cs[0], now, policies)
-	require.NoError(t, e)
-	require.True(t, ok)
-	ok, e = repo.StartIQCheck(ctx, cs[1], now, policies)
-	require.NoError(t, e)
-	require.False(t, ok)
-	after := now.Add(4 * time.Hour)
-	r := iqcheck.Unknown("http_429")
-	r.Diagnostic = &iqcheck.Diagnostic{RetryAfter: &after}
-	require.NoError(t, repo.CompleteIQCheck(ctx, cs[0], r, now))
-	cs, e = repo.ClaimIQChecks(ctx, now.Add(time.Minute), 2)
-	require.NoError(t, e)
-	require.Len(t, cs, 1)
-	ok, e = repo.StartIQCheck(ctx, cs[0], now.Add(time.Minute), policies)
-	require.NoError(t, e)
-	require.False(t, ok)
-	a, e := repo.GetByID(ctx, cs[0].AccountID)
-	require.NoError(t, e)
-	require.Equal(t, after, *a.IQCheck.NextRunAt)
-	n := 300
-	_, e = repo.BulkUpdate(ctx, []int64{ids[0]}, service.AccountBulkUpdate{IQCheck: &domain.IQCheckSettings{TimeoutSeconds: &n}})
-	require.NoError(t, e)
-	a, e = repo.GetByID(ctx, ids[0])
-	require.NoError(t, e)
-	require.Equal(t, 300, a.IQCheck.TimeoutSeconds)
-	require.False(t, a.IQCheck.NextRunAt.Before(after))
-}
-
 func TestIQMonitoringStaleResultKeepsCooldown(t *testing.T) {
 	ctx := context.Background()
 	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
@@ -264,7 +196,7 @@ func TestIQMonitoringStaleResultKeepsCooldown(t *testing.T) {
 	cs, err := repo.ClaimIQChecks(ctx, now, 2)
 	require.NoError(t, err)
 	require.Len(t, cs, 1)
-	ok, err := repo.StartIQCheck(ctx, cs[0], now, nil)
+	ok, err := repo.StartIQCheck(ctx, cs[0], now)
 	require.NoError(t, err)
 	require.True(t, ok)
 	model := "changed"
@@ -280,7 +212,6 @@ func TestIQMonitoringStaleResultKeepsCooldown(t *testing.T) {
 	require.Equal(t, "configuration_changed", a.IQCheck.Reason)
 	require.Equal(t, after, *a.IQCheck.NotBefore)
 	require.Equal(t, after, *a.IQCheck.NextRunAt)
-	require.Equal(t, 1, a.IQCheck.BudgetUsed)
 }
 
 func TestIQMonitoringReleasesInvalidPendingClaim(t *testing.T) {
@@ -313,7 +244,7 @@ func TestIQMonitoringReleasesInvalidPendingClaim(t *testing.T) {
 			before, err := repo.GetByID(ctx, a.ID)
 			require.NoError(t, err)
 			require.NotEqual(t, claims[0].Revision, before.IQCheck.Revision)
-			started, err := repo.StartIQCheck(ctx, claims[0], now, nil)
+			started, err := repo.StartIQCheck(ctx, claims[0], now)
 			require.NoError(t, err)
 			require.False(t, started)
 			after, err := repo.GetByID(ctx, a.ID)
@@ -323,7 +254,6 @@ func TestIQMonitoringReleasesInvalidPendingClaim(t *testing.T) {
 			require.Equal(t, before.IQCheck.Revision, after.IQCheck.Revision)
 			require.Equal(t, before.IQCheck.Status, after.IQCheck.Status)
 			require.Equal(t, before.IQCheck.Reason, after.IQCheck.Reason)
-			require.Equal(t, before.IQCheck.BudgetUsed, after.IQCheck.BudgetUsed)
 			records, err := repo.ListIQCheckRecords(ctx, a.ID)
 			require.NoError(t, err)
 			require.Empty(t, records)
@@ -361,7 +291,7 @@ func TestIQMonitoringRejectedStartPreservesActiveReservation(t *testing.T) {
 			require.Len(t, claims, 1)
 			claim := claims[0]
 			if alreadyStarted {
-				started, err := repo.StartIQCheck(ctx, claim, now, nil)
+				started, err := repo.StartIQCheck(ctx, claim, now)
 				require.NoError(t, err)
 				require.True(t, started)
 				timeout := 60
@@ -373,7 +303,7 @@ func TestIQMonitoringRejectedStartPreservesActiveReservation(t *testing.T) {
 			}
 			before, err := repo.GetByID(ctx, a.ID)
 			require.NoError(t, err)
-			started, err := repo.StartIQCheck(ctx, claim, now.Add(time.Second), nil)
+			started, err := repo.StartIQCheck(ctx, claim, now.Add(time.Second))
 			require.NoError(t, err)
 			require.False(t, started)
 			after, err := repo.GetByID(ctx, a.ID)
@@ -407,7 +337,6 @@ func TestIQMonitoringDeferRequeuesChangedPendingClaim(t *testing.T) {
 	require.Empty(t, after.IQCheck.LeaseToken)
 	require.NotNil(t, after.IQCheck.NextRunAt)
 	require.Equal(t, "pending", after.IQCheck.ExecutionState)
-	require.Zero(t, after.IQCheck.BudgetUsed)
 	rows, err := repo.ListIQCheckRecords(ctx, a.ID)
 	require.NoError(t, err)
 	require.Empty(t, rows)
@@ -427,13 +356,12 @@ func TestIQMonitoringExpiredClaimCannotStart(t *testing.T) {
 	claims, err := repo.ClaimIQChecks(ctx, now, 1)
 	require.NoError(t, err)
 	require.Len(t, claims, 1)
-	started, err := repo.StartIQCheck(ctx, claims[0], now.Add(10*time.Minute), nil)
+	started, err := repo.StartIQCheck(ctx, claims[0], now.Add(10*time.Minute))
 	require.NoError(t, err)
 	require.False(t, started)
 	after, err := repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.Empty(t, after.IQCheck.LeaseToken)
-	require.Zero(t, after.IQCheck.BudgetUsed)
 	rows, err := repo.ListIQCheckRecords(ctx, a.ID)
 	require.NoError(t, err)
 	require.Empty(t, rows)
@@ -456,7 +384,6 @@ func TestIQMonitoringBusyDeferralsPersistAndReset(t *testing.T) {
 		after, err := repo.GetByID(ctx, a.ID)
 		require.NoError(t, err)
 		require.Equal(t, i, after.IQCheck.BusyDeferrals)
-		require.Zero(t, after.IQCheck.BudgetUsed)
 		require.Equal(t, next, *after.IQCheck.NextRunAt)
 		now = next
 	}
@@ -466,11 +393,10 @@ func TestIQMonitoringBusyDeferralsPersistAndReset(t *testing.T) {
 	claims, err := repo.ClaimIQChecks(ctx, now, 1)
 	require.NoError(t, err)
 	require.Len(t, claims, 1)
-	started, err := repo.StartIQCheck(ctx, claims[0], now, nil)
+	started, err := repo.StartIQCheck(ctx, claims[0], now)
 	require.NoError(t, err)
 	require.True(t, started)
 	after, err := repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.Zero(t, after.IQCheck.BusyDeferrals)
-	require.Equal(t, 1, after.IQCheck.BudgetUsed)
 }

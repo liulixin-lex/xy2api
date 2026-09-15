@@ -9,13 +9,16 @@ vi.mock('@/utils/format', () => ({ formatDateTime: (value: string) => value }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, te: () => false }) }))
 afterEach(() => { document.body.innerHTML = ''; vi.clearAllMocks() })
 describe('IQ check settings', () => {
-  it('changes only a selected schedule field and keeps model settings', async () => {
-    const value = { enabled: true, interval_minutes: 15, model: 'custom', reasoning_effort: 'high', daily_request_limit: 96 }
-    const wrapper = mount(IQCheckSettings, { props: { modelValue: value, fields: ['scheduling_mode'] } })
-    const schedule = wrapper.findAllComponents(Select).find(s => s.props('id')?.endsWith('-schedule'))!
-    schedule.vm.$emit('update:modelValue', 'adaptive')
-    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([{ ...value, scheduling_mode: 'adaptive' }])
-    expect(wrapper.findAll('input[type="number"]').every(i => i.attributes('disabled') !== undefined)).toBe(true)
+  it('edits only the selected timeout and omits retired settings', async () => {
+    const value = { enabled: true, interval_minutes: 15, model: 'custom', reasoning_effort: 'high', timeout_seconds: 120 }
+    const wrapper = mount(IQCheckSettings, { props: { modelValue: value, fields: ['timeout_seconds'] } })
+    await wrapper.get('input[id$="-timeout_seconds"]').setValue('180')
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([{ ...value, timeout_seconds: 180 }])
+    expect(wrapper.get('input[id$="-interval"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('input[id$="-daily_request_limit"]').exists()).toBe(false)
+    expect(wrapper.find('button[id$="-schedule"]').exists()).toBe(false)
+    expect(wrapper.find('input[id$="-group"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('iqCompatDescription')
   })
   it('fetches actual models, validates declared effort and permits upstream default', async () => {
     fetchModels.mockResolvedValue({ models: [{ id: 'custom', display_name: 'Custom', supported_reasoning_levels: ['ultra'], capability_sources: { supported_reasoning_levels: 'upstream' } }], fetched_at: null, from_cache: false, stale: false })
