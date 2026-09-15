@@ -4,6 +4,12 @@
 
 ## 当前交接状态
 
+### v0.0.12发布（2026-09-15）
+
+- 用户补充明确授权最终发布0.0.12，覆盖上一条“暂不发版”，仍不包含生产部署。功能PR #33已在16个检查全部成功后合并为a0aac255d5169f0526da949c49439e33677fce9f，原main已同步且干净。
+- 同一实现副本切换到release/0.0.12，只晋级VERSION与UPSTREAM_BASE.json.xy2api_version为0.0.12，兼容版本0.2.4及已验收功能保持。版本提交经过受保护PR后创建annotated标签，由既有Release工作流发布五平台制品及双架构镜像。
+- 功能合并、源码回滚与四角色复验结果见reliability-merge-result.json。发布PR、标签、Release、SHA-256及GHCR验证的最终状态见交付目录v012-release-result.json及原VERIFICATION.txt；此记录中的“发布”操作在实际结果产生前不代表完成。
+
 ### 稳定性改进提交合并（2026-09-15）
 
 - 用户本轮明确授权提交、推送远端并合并，暂不发版；不创建版本标签或Release，不操作生产。
@@ -76,6 +82,8 @@
 Sub2API 兼容基线保持 `v0.2.4`。下方历史日志保留原样；响应兼容和监测改进已在v0.0.10发布，没有升级生产实例。
 
 ## 进行中的工作
+
+- `20260915-v0.0.12-release`：用户新增授权发布0.0.12，功能PR33已合并；正在版本提交、受保护合并和发布制品核验。无生产操作。
 
 - `20260915-iq-reliability-merge`：功能已提交并推送，受保护合并与最终检查由PR #33跟踪，具体结果写入外部 `reliability-merge-result.json` 及原VERIFICATION.txt；用户明确暂不发版。交接完成后按PR状态重新核实，不能据本文件历史“未提交”描述重复提交功能。
 
@@ -598,3 +606,11 @@ pnpm --dir frontend run build
 - 功能提交76f6c35a1包含30个文件，已推送原仓库分支并创建PR #33。干净提交的upstream-sync audit成功；GitHub已启动CI与Security Scan，不改保护规则。最终head检查通过后执行受保护合并，执行事件与实际merge SHA写原交付账本及reliability-merge-result.json。
 - 原应用测试与构建结果继续有效；本轮重新执行源码BASELINE/MODIFIED/ROLLBACK及累计补丁重建。相同SSE输入仍是unknown/empty_response → smart/correct_answer/21 → unknown/empty_response，回滚基线哈希一致，四角色重新打开核验。
 - 不创建新tag/Release，不改变VERSION，不发布镜像，不连接或部署线上。上线和真实账号24小时验收保留为后续独立授权事项。
+
+### 2026-09-15 — `20260915-v0.0.12-release` — 版本晋级与发布交接
+
+- 用户在合并等待期间新增授权最终发版0.0.12；原先暂不发版限制已被新授权替代，生产部署仍禁止。
+- PR33的最终head952dd0d9a在16/16检查成功后合并为a0aac255d；主仓库已快进，同一实现副本切到release/0.0.12。功能代码不变，仅将两处产品版本晋级至0.0.12，并增加本记录。
+- 干净版本提交执行兼容审计，受保护PR检查成功后合并，再创建不可变annotated v0.0.12标签。发布和制品检查逐条记入原VERIFICATION.txt，最终结果见v012-release-result.json；五平台校验和、Linux版本/commit、GHCR双架构及稳定别名须实际核实。
+- 固定四角色继续使用原路径；随版本提交重建源码归档和累计补丁，重复同输入BASELINE未知、MODIFIED聪明21、ROLLBACK未知及恢复哈希验证。源码回滚不影响数据库。
+- 下一步由本轮执行上述发布验收；无需部署或真实账号检测。后续动态状态应以GitHub Release及外部结果记录核实，不重复历史发布脚本。
