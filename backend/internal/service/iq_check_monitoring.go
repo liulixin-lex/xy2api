@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"math/rand/v2"
 	"os"
 	"strconv"
@@ -13,12 +12,8 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 )
 
-type IQQuotaPolicy struct {
-	DailyLimit         int `json:"daily_limit"`
-	MinIntervalSeconds int `json:"min_interval_seconds"`
-}
 type iqMonitoringRepository interface {
-	StartIQCheck(context.Context, IQCheckClaim, time.Time, map[string]IQQuotaPolicy) (bool, error)
+	StartIQCheck(context.Context, IQCheckClaim, time.Time) (bool, error)
 	DeferIQCheck(context.Context, IQCheckClaim, string, time.Time) error
 }
 
@@ -56,25 +51,12 @@ func (s *IQCheckService) Status(ctx context.Context, id int64) (domain.IQCheck, 
 	return a.IQCheck.Summary(), nil
 }
 
-func iqMonitoringConfig() (int, map[string]IQQuotaPolicy) {
+func iqMonitoringConfig() int {
 	n := 2
 	if v, e := strconv.Atoi(os.Getenv("IQ_CHECK_MAX_CONCURRENCY")); e == nil && v >= 1 && v <= 10 {
 		n = v
 	}
-	groups := map[string]IQQuotaPolicy{}
-	// Invalid quota configuration must not silently permit any grouped requests.
-	raw := os.Getenv("IQ_CHECK_QUOTA_GROUPS")
-	if len(raw) <= 65536 && raw != "" {
-		var parsed map[string]IQQuotaPolicy
-		if json.Unmarshal([]byte(raw), &parsed) == nil {
-			for k, v := range parsed {
-				if v.DailyLimit > 0 && v.DailyLimit <= 1000000 && v.MinIntervalSeconds >= 1 && v.MinIntervalSeconds <= 86400 {
-					groups[k] = v
-				}
-			}
-		}
-	}
-	return n, groups
+	return n
 }
 
 func iqHealth(a *Account, now time.Time) (string, time.Time) {
@@ -163,7 +145,7 @@ func (s *IQCheckService) execute(ctx context.Context, c IQCheckClaim) {
 	}
 	defer slot.ReleaseFunc()
 	now = time.Now().UTC()
-	started, err := repo.StartIQCheck(ctx, c, now, s.quotaGroups)
+	started, err := repo.StartIQCheck(ctx, c, now)
 	if err != nil {
 		deferUnsent("start_unavailable", now.Add(time.Minute))
 		return

@@ -21,7 +21,7 @@ type iqMonitorRepo struct {
 	rejectStart        bool
 }
 
-func (r *iqMonitorRepo) StartIQCheck(_ context.Context, _ IQCheckClaim, now time.Time, _ map[string]IQQuotaPolicy) (bool, error) {
+func (r *iqMonitorRepo) StartIQCheck(_ context.Context, _ IQCheckClaim, now time.Time) (bool, error) {
 	r.started++
 	r.startedAt = now
 	return !r.rejectStart, nil

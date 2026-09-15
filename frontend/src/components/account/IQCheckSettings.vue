@@ -8,6 +8,7 @@
       <div class="min-w-0">
         <label :for="uid + '-interval'" class="input-label">{{ t('admin.accounts.iqInterval') }}</label>
         <input :id="uid + '-interval'" type="number" class="input w-full" min="1" max="1440" step="1" required :disabled="!included('interval_minutes')" :value="modelValue.interval_minutes" @input="updateNumber('interval_minutes', $event)" />
+        <p class="input-hint">{{ t('admin.accounts.iqFixedHint') }}</p>
       </div>
       <div class="min-w-0">
         <label :for="uid + '-model'" class="input-label">{{ t('admin.accounts.iqModel') }}</label>
@@ -19,6 +20,7 @@
         <label :for="uid + '-effort'" class="input-label">{{ t('admin.accounts.iqEffort') }}</label>
         <Select :id="uid + '-effort'" :model-value="modelValue.reasoning_effort ?? 'low'" :options="effortOptions" searchable :creatable="!authoritativeEffort" :creatable-prefix="t('admin.accounts.iqUseCustom')" :aria-label="t('admin.accounts.iqEffort')" :aria-describedby="uid + '-effort-source'" :disabled="!included('reasoning_effort')" :error="!!effortError" @update:model-value="setValue('reasoning_effort', $event)" />
         <p :id="uid + '-effort-source'" class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ capabilitySourceMessage }}</p>
+        <p v-if="modelValue.reasoning_effort === 'upstream_default'" class="input-hint">{{ t('admin.accounts.iqDefaultEffortHint') }}</p>
         <p v-if="effortError" role="alert" class="mt-1 text-sm text-red-600 dark:text-red-400">{{ effortError }}</p>
       </div>
     </div>
@@ -37,17 +39,6 @@
         </template>
       </div>
     </div>
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      <div class="min-w-0">
-        <label :for="uid + '-schedule'" class="input-label">{{ t('admin.accounts.iqSchedule') }}</label>
-        <Select :id="uid + '-schedule'" :model-value="modelValue.scheduling_mode ?? 'fixed'" :options="scheduleOptions" :aria-label="t('admin.accounts.iqSchedule')" :disabled="!included('scheduling_mode')" @update:model-value="setValue('scheduling_mode', $event)" />
-      </div>
-      <div v-if="modelValue.scheduling_mode === 'adaptive' || fields?.includes('max_interval_minutes')" class="min-w-0">
-        <label :for="uid + '-max-interval'" class="input-label">{{ t('admin.accounts.iqMaxInterval') }}</label>
-        <input :id="uid + '-max-interval'" type="number" class="input w-full" min="1" max="1440" :value="modelValue.max_interval_minutes ?? 60" :disabled="!included('max_interval_minutes')" required @input="updateNumber('max_interval_minutes', $event)" />
-      </div>
-    </div>
-    <p v-if="modelValue.enabled && budgetInsufficient" class="text-sm text-amber-700 dark:text-amber-400" role="status">{{ t('admin.accounts.iqBudgetWarning') }}</p>
     <details class="border-t border-gray-100 pt-3 dark:border-dark-700" :open="!!fields">
       <summary class="cursor-pointer text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.accounts.iqAdvanced') }}</summary>
       <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -58,10 +49,7 @@
         <div class="min-w-0">
           <label :for="uid + '-output'" class="input-label">{{ t('admin.accounts.iqOutputMode') }}</label>
           <Select :id="uid + '-output'" :model-value="modelValue.output_mode ?? 'compat'" :options="outputOptions" :aria-label="t('admin.accounts.iqOutputMode')" :disabled="!included('output_mode')" @update:model-value="setValue('output_mode', $event)" />
-        </div>
-        <div class="min-w-0">
-          <label :for="uid + '-group'" class="input-label">{{ t('admin.accounts.iqQuotaGroup') }}</label>
-          <input :id="uid + '-group'" class="input w-full" maxlength="64" pattern="[a-zA-Z0-9_-]*" :value="modelValue.quota_group ?? ''" :disabled="!included('quota_group')" :placeholder="t('admin.accounts.iqGroupPlaceholder')" @input="setValue('quota_group', ($event.target as HTMLInputElement).value)" />
+          <p class="input-hint">{{ t(modelValue.output_mode === 'strict' ? 'admin.accounts.iqStrictDescription' : 'admin.accounts.iqCompatDescription') }}</p>
         </div>
       </div>
     </details>
@@ -79,9 +67,8 @@ import type { IQCheckSettings, IQModelCatalog } from '@/types'
 
 const props = defineProps<{ modelValue: IQCheckSettings; accountId?: number; discoveryDisabled?: boolean; fields?: (keyof IQCheckSettings)[] }>()
 const emit = defineEmits<{ 'update:modelValue': [value: IQCheckSettings]; validity: [valid: boolean] }>()
-const { t, te } = useI18n()
+const { t } = useI18n()
 const uid = 'iq-' + getCurrentInstance()?.uid
-const budgetInsufficient = computed(() => (props.modelValue.daily_request_limit || Math.ceil(1440 / Math.max(1, props.modelValue.interval_minutes))) < 2 * Math.ceil(1440 / Math.max(1, props.modelValue.interval_minutes)))
 const included = (field: keyof IQCheckSettings) => !props.fields || props.fields.includes(field)
 const catalog = ref<IQModelCatalog | null>(null)
 const loading = ref(false)
@@ -103,10 +90,10 @@ const capabilitySourceMessage = computed(() => {
 const authoritativeEffort = computed(() => selectedModel.value?.reasoning === false || selectedModel.value?.capability_sources.supported_reasoning_levels === 'upstream')
 const effortOptions = computed(() => {
   const model = selectedModel.value
-  const levels = model?.reasoning === false ? ['none'] : model?.supported_reasoning_levels?.length ? model.supported_reasoning_levels : ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+  const levels = model?.reasoning === false ? ['none'] : model?.supported_reasoning_levels?.length ? model.supported_reasoning_levels : (props.modelValue.model ?? 'gpt-6-astra') === 'gpt-6-astra' ? ['low', 'medium', 'high', 'xhigh', 'max'] : ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
   const current = props.modelValue.reasoning_effort ?? 'low'
   return [...new Set(['upstream_default', ...levels, current])].map(value => ({
-    value, label: te('admin.accounts.iqEfforts.' + value) ? t('admin.accounts.iqEfforts.' + value) : value,
+    value, label: value === 'upstream_default' ? 'default' : value,
     disabled: authoritativeEffort.value && value !== 'upstream_default' && !levels.includes(value)
   }))
 })
@@ -123,7 +110,6 @@ const effortError = computed(() => {
 // Re-emit on restored settings even when the validation message is unchanged.
 watch([modelError, effortError, () => props.modelValue], ([model, effort]) => emit('validity', !model && !effort), { immediate: true })
 const catalogMessage = computed(() => catalog.value ? catalog.value.models.length ? t('admin.accounts.iqModelsReady', { count: catalog.value.models.length }) : t('admin.accounts.iqModelsEmpty') : '')
-const scheduleOptions = computed(() => [{ value: 'fixed', label: t('admin.accounts.iqFixed') }, { value: 'adaptive', label: t('admin.accounts.iqAdaptive') }])
 const outputOptions = computed(() => [{ value: 'compat', label: t('admin.accounts.iqCompat') }, { value: 'strict', label: t('admin.accounts.iqStrict') }])
 function clearCatalog() { request++; controller?.abort(); catalog.value = null; failed.value = false; loading.value = false }
 watch([() => props.accountId, () => props.discoveryDisabled], clearCatalog)
@@ -142,9 +128,8 @@ function setValue(field: keyof IQCheckSettings, value: string | number | boolean
   if (!included(field)) return
   emit('update:modelValue', { ...props.modelValue, [field]: typeof value === 'string' ? value.trim() : value })
 }
-type NumericSetting = 'interval_minutes' | 'max_interval_minutes' | 'daily_request_limit' | 'timeout_seconds'
+type NumericSetting = 'interval_minutes' | 'timeout_seconds'
 const monitoringNumbers = computed(() => [
-  { key: 'daily_request_limit' as const, label: 'admin.accounts.iqDailyLimit', min: 1, max: 1440, fallback: Math.ceil(1440 / Math.max(1, props.modelValue.interval_minutes)) },
   { key: 'timeout_seconds' as const, label: 'admin.accounts.iqTimeout', min: 30, max: 300, fallback: 120 }
 ])
 const updateNumber = (field: NumericSetting, event: Event) => setValue(field, Number((event.target as HTMLInputElement).value))

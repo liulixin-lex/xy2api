@@ -13,16 +13,9 @@ func TestIQMonitoringSchedule(t *testing.T) {
 	s := domain.DefaultIQCheck()
 	s.IntervalMinutes = 15
 	s.Enabled = true
-	s.SchedulingMode = "adaptive"
 	for i := 1; i <= 6; i++ {
 		finishIQSchedule(&s, iqcheck.Grade("21"), now)
 		want := 15 * time.Minute
-		if i >= 3 {
-			want = 30 * time.Minute
-		}
-		if i >= 6 {
-			want = time.Hour
-		}
 		require.Equal(t, want, s.NextRunAt.Sub(now))
 		now = *s.NextRunAt
 	}
@@ -54,24 +47,20 @@ func TestIQMonitoringSchedule(t *testing.T) {
 	require.Equal(t, "deferred", s.ExecutionState)
 	require.Equal(t, "protocol_cooldown", s.ExecutionReason)
 }
-func TestIQMonitoringSettingsPreserveGateAndBudget(t *testing.T) {
+func TestIQMonitoringSettingsPreserveGateAndCooldown(t *testing.T) {
 	now := time.Now().UTC()
 	s := domain.DefaultIQCheck()
 	s.Enabled = true
 	s.Status = "degraded"
-	s.BudgetDay = now.Format("2006-01-02")
-	s.BudgetUsed = 96
 	s.LastRunAt = &now
 	delay := now.Add(2 * time.Hour)
 	s.NotBefore = &delay
 	n := 30
 	u := applyIQSettings(s, &domain.IQCheckSettings{IntervalMinutes: &n}, false, now)
 	require.True(t, u.BlocksScheduling())
-	require.Equal(t, 96, u.BudgetUsed)
 	timeout := 300
 	u = applyIQSettings(s, &domain.IQCheckSettings{TimeoutSeconds: &timeout}, false, now)
 	require.Equal(t, "unknown", u.Status)
-	require.Equal(t, 96, u.BudgetUsed)
 	require.False(t, u.NextRunAt.Before(delay))
 }
 
@@ -97,4 +86,27 @@ func TestIQProtocolCooldownRetainsEffectiveAssessment(t *testing.T) {
 	finishIQSchedule(&s, iqcheck.Grade("21"), now)
 	require.False(t, s.BlocksScheduling())
 	require.Zero(t, s.ProtocolFailures)
+}
+
+func TestIQForbiddenAutomaticallyResumes(t *testing.T) {
+	now := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
+	s := domain.DefaultIQCheck()
+	s.Enabled = true
+	s.IntervalMinutes = 1
+	finishIQSchedule(&s, iqcheck.Grade("29"), now)
+	for i := 0; i < 4; i++ {
+		now = now.Add(time.Hour)
+		finishIQSchedule(&s, iqcheck.Unknown("http_403"), now)
+		require.NotEqual(t, "paused", s.ExecutionState)
+		require.Equal(t, time.Duration(1<<min(i, 2))*time.Minute, s.NextRunAt.Sub(now))
+		require.True(t, s.BlocksScheduling())
+	}
+	finishIQSchedule(&s, iqcheck.Grade("21"), now)
+	require.Equal(t, time.Minute, s.NextRunAt.Sub(now))
+	require.False(t, s.BlocksScheduling())
+	for _, reason := range []string{"permission_denied", "authentication_unavailable", "quota_exhausted"} {
+		finishIQSchedule(&s, iqcheck.Unknown(reason), now)
+		require.Equal(t, "paused", s.ExecutionState)
+		require.Nil(t, s.NextRunAt)
+	}
 }

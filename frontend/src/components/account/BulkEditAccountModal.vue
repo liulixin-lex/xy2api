@@ -1563,11 +1563,11 @@ const allTargetsGrok = computed(
     targetSelectedPlatforms.value.every((p) => p === 'grok')
 )
 const editIQCheck = ref(false)
-const iqSettings = ref<IQSettings>({ enabled: false, interval_minutes: 15, model: 'gpt-6-astra', reasoning_effort: 'low', output_mode: 'compat', scheduling_mode: 'fixed', max_interval_minutes: 60, daily_request_limit: 96, timeout_seconds: 120, quota_group: '' })
+const iqSettings = ref<IQSettings>({ enabled: false, interval_minutes: 15, model: 'gpt-6-astra', reasoning_effort: 'low', output_mode: 'compat', timeout_seconds: 120, })
 const iqValid = ref(true)
 const iqFields = ref<(keyof IQSettings)[]>([])
 const iqEditableFields: { key: keyof IQSettings; label: string }[] = [
- { key: 'scheduling_mode', label: 'admin.accounts.iqSchedule' },{ key: 'max_interval_minutes', label: 'admin.accounts.iqMaxInterval' },{ key: 'daily_request_limit', label: 'admin.accounts.iqDailyLimit' },{ key: 'timeout_seconds', label: 'admin.accounts.iqTimeout' },{ key: 'quota_group', label: 'admin.accounts.iqQuotaGroup' },
+ { key: 'timeout_seconds', label: 'admin.accounts.iqTimeout' },
   { key: 'enabled', label: 'admin.accounts.iqCheck' }, { key: 'interval_minutes', label: 'admin.accounts.iqInterval' },
   { key: 'model', label: 'admin.accounts.iqModel' }, { key: 'reasoning_effort', label: 'admin.accounts.iqEffort' }, { key: 'output_mode', label: 'admin.accounts.iqOutputMode' }
 ]
@@ -2394,7 +2394,7 @@ watch(
       enableOpenAIWSMode.value = false
       enableOpenAIAPIKeyWSMode.value = false
       editIQCheck.value = false
-      iqSettings.value = { enabled: false, interval_minutes: 15, model: 'gpt-6-astra', reasoning_effort: 'low', output_mode: 'compat', scheduling_mode: 'fixed', max_interval_minutes: 60, daily_request_limit: 96, timeout_seconds: 120, quota_group: '' }
+      iqSettings.value = { enabled: false, interval_minutes: 15, model: 'gpt-6-astra', reasoning_effort: 'low', output_mode: 'compat', timeout_seconds: 120, }
       iqFields.value = []
       enableUpstreamBillingAutoProbe.value = false
       enableCodexCLIOnly.value = false
