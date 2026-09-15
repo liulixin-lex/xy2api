@@ -100,7 +100,26 @@ func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckC
 		return false, err
 	}
 	s := a.IqCheck.WithSettings(nil)
-	if !s.Enabled || s.Revision != c.Revision || s.LeaseToken != c.Token || s.StartedAt != nil {
+	if s.LeaseToken != c.Token || s.StartedAt != nil {
+		return false, nil
+	}
+	if !s.Enabled || s.Revision != c.Revision {
+		// This worker owns an unsent reservation that the current configuration invalidated.
+		s.LeaseToken = ""
+		s.LeaseUntil = nil
+		if s.Enabled {
+			queueIQ(&s, now)
+		}
+		if _, err = db.Account.UpdateOneID(c.AccountID).SetIqCheck(s).Save(ctx); err != nil {
+			return false, err
+		}
+		if err = enqueueSchedulerOutbox(ctx, db, service.SchedulerOutboxEventAccountChanged, &c.AccountID, nil, nil); err != nil {
+			return false, err
+		}
+		if err = tx.Commit(); err != nil {
+			return false, err
+		}
+		r.syncSchedulerAccountSnapshot(ctx, c.AccountID)
 		return false, nil
 	}
 	next, reason := s.Eligibility(now)

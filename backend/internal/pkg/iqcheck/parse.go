@@ -57,8 +57,8 @@ func failure(code string) error       { return &parseFailure{code: code} }
 func validateEvent(raw []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
-	known := map[string]bool{"type": true, "response": true, "status": true, "output": true, "content": true, "text": true, "answer": true, "role": true, "phase": true, "error": true, "model": true, "choices": true, "delta": true, "message": true, "finish_reason": true, "index": true}
-	critical := map[string]bool{"type": true, "response": true, "status": true, "output": true, "content": true, "text": true, "answer": true, "role": true, "phase": true, "error": true, "choices": true, "delta": true, "message": true, "finish_reason": true, "index": true, "model": true}
+	known := map[string]bool{"type": true, "response": true, "status": true, "output": true, "content": true, "text": true, "answer": true, "role": true, "phase": true, "error": true, "model": true, "choices": true, "delta": true, "message": true, "finish_reason": true, "index": true, "id": true, "refusal": true}
+	critical := map[string]bool{"type": true, "response": true, "status": true, "output": true, "content": true, "text": true, "answer": true, "role": true, "phase": true, "error": true, "choices": true, "delta": true, "message": true, "finish_reason": true, "index": true, "model": true, "id": true, "refusal": true}
 	var walk func(int, string) error
 	walk = func(depth int, path string) error {
 		if depth > 32 {
@@ -83,6 +83,15 @@ func validateEvent(raw []byte) error {
 				key, ok := k.(string)
 				if !ok {
 					return failure("invalid_event_json")
+				}
+				// Match encoding/json's case-insensitive field lookup before checking duplicates.
+				if !known[key] {
+					for name := range known {
+						if strings.EqualFold(key, name) {
+							key = name
+							break
+						}
+					}
 				}
 				field := "extension"
 				if known[key] {
@@ -219,7 +228,7 @@ func (p *streamParser) terminal(raw []byte) error {
 	if len(r.Model) > 256 {
 		return failure("response_too_large")
 	}
-	var answer strings.Builder
+	var answer string
 	for _, rawItem := range r.Output {
 		var item struct {
 			Type    string          `json:"type"`
@@ -244,23 +253,31 @@ func (p *streamParser) terminal(raw []byte) error {
 		if err := decode(item.Content, &parts, "response.output[].content"); err != nil {
 			return err
 		}
+		var message strings.Builder
 		for _, part := range parts {
 			if part.Type == "refusal" {
 				return failure("refusal")
 			}
 			if part.Type == "output_text" {
-				_, _ = answer.WriteString(part.Text)
+				_, _ = message.WriteString(part.Text)
 			}
 		}
+		if message.Len() > 0 {
+			// Content parts share a message; independent final messages do not.
+			if answer != "" {
+				return failure("conflicting_final_response")
+			}
+			answer = message.String()
+		}
 	}
-	if answer.Len() > MaxAnswerBytes {
+	if len(answer) > MaxAnswerBytes {
 		return failure("response_too_large")
 	}
-	if p.completed && (p.answer != answer.String() || p.responseID != r.ID || p.model != r.Model) {
+	if p.completed && (p.answer != answer || p.responseID != r.ID || p.model != r.Model) {
 		return failure("conflicting_final_response")
 	}
 	ReadUsage(raw, p.d)
-	p.answer, p.model, p.responseID, p.completed = answer.String(), r.Model, r.ID, true
+	p.answer, p.model, p.responseID, p.completed = answer, r.Model, r.ID, true
 	return nil
 }
 

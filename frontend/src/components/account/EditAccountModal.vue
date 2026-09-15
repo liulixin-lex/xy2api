@@ -1808,8 +1808,8 @@
         v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
-        <div class="flex items-center justify-between">
-          <div>
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div class="min-w-0 flex-1">
             <label class="input-label mb-0">{{ t('admin.accounts.openai.wsMode') }}</label>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.openai.wsModeDesc') }}
@@ -1818,7 +1818,7 @@
               {{ t(openAIWSModeConcurrencyHintKey) }}
             </p>
           </div>
-          <div class="w-52">
+          <div class="w-full sm:w-52 sm:shrink-0">
             <Select v-model="openaiResponsesWebSocketV2Mode" data-testid="edit-openai-ws-mode-select" :options="openAIWSModeOptions" />
           </div>
         </div>
@@ -4282,6 +4282,7 @@ watch(
       return
     }
     if (!wasShow || newAccount !== previousAccount) {
+      iqValid.value = true
       iqSettings.value = { scheduling_mode: newAccount.iq_check?.scheduling_mode ?? 'fixed', max_interval_minutes: newAccount.iq_check?.max_interval_minutes ?? 60, daily_request_limit: newAccount.iq_check?.daily_request_limit || undefined, timeout_seconds: newAccount.iq_check?.timeout_seconds ?? 120, quota_group: newAccount.iq_check?.quota_group ?? '', enabled: newAccount.iq_check?.enabled ?? false, interval_minutes: newAccount.iq_check?.interval_minutes || 15, model: newAccount.iq_check?.model || 'gpt-6-astra', reasoning_effort: newAccount.iq_check?.reasoning_effort || 'low', output_mode: newAccount.iq_check?.output_mode || 'compat' }
       syncFormFromAccount(newAccount)
       iqTransportInitial.value = iqTransportDraft()
@@ -4854,7 +4855,7 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 }
 
 const handleSubmit = async () => {
-  if (!props.account || !iqValid.value) return
+  if (!props.account || (props.account.platform === 'openai' && !iqValid.value)) return
   const accountID = props.account.id
 
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {

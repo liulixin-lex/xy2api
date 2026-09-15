@@ -133,6 +133,7 @@ export default {
       iqModelsStale: "Model list is out of date. Sync again.",
       iqModelsCached: "Cached upstream catalog for this account (5 minutes).",
       iqModelsUpstream: "Returned by this upstream; listing does not guarantee access.",
+      iqModelSourceUnknown: "Model source unknown; custom models can be used.",
       iqModelsEmpty: "No models returned.",
       iqOutputSettings: "Output format settings",
       iqOutputMode: "Answer format",

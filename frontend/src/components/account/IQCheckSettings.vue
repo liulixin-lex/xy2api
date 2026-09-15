@@ -11,12 +11,14 @@
       </div>
       <div class="min-w-0">
         <label :for="uid + '-model'" class="input-label">{{ t('admin.accounts.iqModel') }}</label>
-        <Select :id="uid + '-model'" :model-value="modelValue.model ?? 'gpt-6-astra'" :options="modelOptions" searchable creatable :creatable-prefix="t('admin.accounts.iqUseCustom')" :search-placeholder="t('admin.accounts.iqModelSearch')" :aria-label="t('admin.accounts.iqModel')" :disabled="!included('model')" :loading="loading" :error="!!modelError" @update:model-value="setValue('model', $event)" />
+        <Select :id="uid + '-model'" :model-value="modelValue.model ?? 'gpt-6-astra'" :options="modelOptions" searchable creatable :creatable-prefix="t('admin.accounts.iqUseCustom')" :search-placeholder="t('admin.accounts.iqModelSearch')" :aria-label="t('admin.accounts.iqModel')" :aria-describedby="uid + '-model-source'" :disabled="!included('model')" :loading="loading" :error="!!modelError" @update:model-value="setValue('model', $event)" />
+        <p :id="uid + '-model-source'" class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ modelSourceMessage }}</p>
         <p v-if="modelError" role="alert" class="mt-1 text-sm text-red-600 dark:text-red-400">{{ modelError }}</p>
       </div>
       <div class="min-w-0">
         <label :for="uid + '-effort'" class="input-label">{{ t('admin.accounts.iqEffort') }}</label>
-        <Select :id="uid + '-effort'" :model-value="modelValue.reasoning_effort ?? 'low'" :options="effortOptions" searchable :creatable="!authoritativeEffort" :creatable-prefix="t('admin.accounts.iqUseCustom')" :aria-label="t('admin.accounts.iqEffort')" :disabled="!included('reasoning_effort')" :error="!!effortError" @update:model-value="setValue('reasoning_effort', $event)" />
+        <Select :id="uid + '-effort'" :model-value="modelValue.reasoning_effort ?? 'low'" :options="effortOptions" searchable :creatable="!authoritativeEffort" :creatable-prefix="t('admin.accounts.iqUseCustom')" :aria-label="t('admin.accounts.iqEffort')" :aria-describedby="uid + '-effort-source'" :disabled="!included('reasoning_effort')" :error="!!effortError" @update:model-value="setValue('reasoning_effort', $event)" />
+        <p :id="uid + '-effort-source'" class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ capabilitySourceMessage }}</p>
         <p v-if="effortError" role="alert" class="mt-1 text-sm text-red-600 dark:text-red-400">{{ effortError }}</p>
       </div>
     </div>
@@ -25,7 +27,15 @@
         <Icon name="refresh" size="sm" :class="loading && 'animate-spin'" />
         {{ t(loading ? 'admin.accounts.syncUpstreamModelsLoading' : 'admin.accounts.syncUpstreamModels') }}
       </button>
-      <p class="min-w-0 text-xs" :class="failed ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-dark-400'" aria-live="polite">{{ discoveryDisabled ? t('admin.accounts.iqSaveCredentials') : catalogMessage }}</p>
+      <div class="min-w-0 space-y-1 text-xs text-gray-500 dark:text-dark-400" aria-live="polite">
+        <p v-if="discoveryDisabled">{{ t('admin.accounts.iqSaveCredentials') }}</p>
+        <template v-else>
+          <p v-if="catalog">{{ catalogMessage }}</p>
+          <p v-if="catalog?.from_cache">{{ t('admin.accounts.iqModelsCached') }}</p>
+          <p v-if="catalog?.stale" class="text-amber-600 dark:text-amber-400">{{ t('admin.accounts.iqModelsStale') }}</p>
+          <p v-if="failed || catalog?.error" class="text-red-600 dark:text-red-400">{{ t('admin.accounts.iqModelsFailed') }}</p>
+        </template>
+      </div>
     </div>
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <div class="min-w-0">
@@ -82,6 +92,12 @@ const modelOptions = computed(() => {
   ids.add(props.modelValue.model ?? 'gpt-6-astra')
   return [...ids].filter(Boolean).map(value => ({ value, label: value }))
 })
+const modelSourceMessage = computed(() => selectedModel.value?.source === 'upstream' ? t('admin.accounts.iqModelsUpstream') : t('admin.accounts.iqModelSourceUnknown'))
+const capabilitySourceMessage = computed(() => {
+  const model = selectedModel.value
+  const source = model?.capability_sources[model.reasoning === false ? 'reasoning' : 'supported_reasoning_levels']
+  return source === 'upstream' ? t('admin.accounts.iqCapabilitiesUpstream') : source === 'reference' ? t('admin.accounts.iqCapabilitiesReference') : t('admin.accounts.iqCapabilitiesUnknown')
+})
 const authoritativeEffort = computed(() => selectedModel.value?.reasoning === false || selectedModel.value?.capability_sources.supported_reasoning_levels === 'upstream')
 const effortOptions = computed(() => {
   const model = selectedModel.value
@@ -102,8 +118,9 @@ const effortError = computed(() => {
   if (!/^[a-z0-9_-]{1,32}$/.test(effort)) return t('admin.accounts.iqEffortInvalid')
   return effortOptions.value.find(option => option.value === effort)?.disabled ? t('admin.accounts.iqEffortUnsupported') : ''
 })
-watch([modelError, effortError], ([model, effort]) => emit('validity', !model && !effort), { immediate: true })
-const catalogMessage = computed(() => failed.value || catalog.value?.error ? t('admin.accounts.iqModelsFailed') : catalog.value?.stale ? t('admin.accounts.iqModelsStale') : catalog.value ? catalog.value.models.length ? t('admin.accounts.iqModelsReady', { count: catalog.value.models.length }) : t('admin.accounts.iqModelsEmpty') : '')
+// Re-emit on restored settings even when the validation message is unchanged.
+watch([modelError, effortError, () => props.modelValue], ([model, effort]) => emit('validity', !model && !effort), { immediate: true })
+const catalogMessage = computed(() => catalog.value ? catalog.value.models.length ? t('admin.accounts.iqModelsReady', { count: catalog.value.models.length }) : t('admin.accounts.iqModelsEmpty') : '')
 const scheduleOptions = computed(() => [{ value: 'fixed', label: t('admin.accounts.iqFixed') }, { value: 'adaptive', label: t('admin.accounts.iqAdaptive') }])
 const outputOptions = computed(() => [{ value: 'compat', label: t('admin.accounts.iqCompat') }, { value: 'strict', label: t('admin.accounts.iqStrict') }])
 function clearCatalog() { request++; controller?.abort(); catalog.value = null; failed.value = false; loading.value = false }

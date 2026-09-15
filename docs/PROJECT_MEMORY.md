@@ -4,6 +4,13 @@
 
 ## 当前交接状态
 
+### 本次审计修复PR（2026-09-15T08:17:27+08:00）
+
+- 正式PR：[#31](https://github.com/liulixin-lex/xy2api/pull/31)，状态OPEN、非草稿；来源 `gguuai:fix/v0.0.10-audit`，目标 `liulixin-lex/xy2api:main`。修复提交 `34a12809947d894c075ec165ab502609ad40c3d8`；最终分支头及检查状态以GitHub实时查询为准。
+- 21个文件范围已核对；18个业务/测试Git blob与已验收文件SHA-256完全相同。`git diff --check`、干净提交的upstream-sync audit通过。原项目、冻结修复副本及四角色归档保留。
+- 远端首次CI和Security Scan均为 `action_required`，尚未执行测试；等待原仓库维护者批准，不记为测试失败或通过。诊断下载PARTIAL和既有跳过项仍见审计报告。
+- 本轮仅提交PR，没有合并、发版或部署。下方发布交接表及原操作日志保留为历史。
+
 最后更新：`2026-09-14T16:35:00Z`（UTC）
 
 | 项目 | 当前事实 |
@@ -21,6 +28,8 @@
 Sub2API 兼容基线保持 `v0.2.4`。下方历史日志保留原样；响应兼容和监测改进已在v0.0.10发布，没有升级生产实例。
 
 ## 进行中的工作
+
+- `20260915-v0.0.10-audit-pr`：修复已提交正式PR #31，gguuai:fix/v0.0.10-audit → liulixin-lex:main；本地源码/测试哈希与提交审计通过。首次远端CI及Security Scan为action_required，等待维护者批准运行；未合并、发版或部署。
 
 - `20260914-v0.0.10-release`：功能PR #29、主线CI、安全扫描、Release及五平台包/双架构镜像均已通过；发布完成。本条记录随收尾文档合入，实际PR状态以GitHub为准。
 
@@ -439,3 +448,24 @@ pnpm --dir frontend run build
 - 事务：沿用固定四角色和原始pre-IQ基线；同输入BASELINE无检测保留功能，MODIFIED第四轮后保留[4,3,2]且采用原生Select，ROLLBACK恢复BASELINE并匹配源码manifest哈希eda4554229078281dcf48cfe8b891f18dfcbf3ef3a0e6d9eef9df91f0820eef7。补丁重建归档一致，额外本轮UI基线两轮→三轮→两轮证据保留。v010-*字面日志扩展VERIFICATION.txt，所有四角色重新打开核验。
 - 失败留存：首次清理过期构建缓存遇目录类型后仅清理普通缓存文件；首次PR28 expected SHA错误被拒后使用实际完整SHA成功；旧gh不支持checks --json，改用pr view。无本轮CI失败，不把准备命令错误当作发布结果。没有生产部署或真实账号检测。
 - 后续：发布已完成；收尾文档经受保护PR合入。动态状态与源码交付最终一致性见openai-iq-check/v010-final-audit.json。
+
+### 2026-09-15T08:13:01+08:00 — `20260915-v0.0.10-audit-pr` — 审计修复整理
+
+- 执行者：Codex；当前会话未提供精确模型ID。用户明确授权Fork、提交、推送和正式PR；未授权本轮合并、发版或部署。
+- 起点：v0.0.10 / e695c0356c972f398045f87b28a9cccda8a66176。PR基于原仓库main `c871151e0f4e00589922dc333799a84304b447b4`；两者差异仅发布收尾文档，业务代码一致。保留本文件原有上游记录，不纳入原项目无关本地日志。
+- 修复：IQ量词歧义、关键字段Go大小写折叠重复、独立消息边界、同token未开始失效预留、验证码网络错误分类、同实例编辑弹窗IQ校验、模型及能力来源/陈旧目录提示、390px WS设置横滚。数据库租约事务及验证码认证链路影响已在批准方案说明；未改认证准入、历史迁移、支付、权限或部署配置。
+- 已执行审计：前端271文件/2006测试及lint/typecheck/i18n/build；后端109包default/unit按分组执行和清单补验，静态检查及构建通过；Python13项；真实PG/Redis仓储集成；新装及v0.0.8至v0.0.10升级57检查。integration为4包直接执行加105包等价复用，不称第二次独立全量运行；布局后64项为重叠补测。
+- 边界：浏览器12项通过/修复通过，诊断下载522字节JSON正确但.crdownload未finalize，保留PARTIAL。既有凭据/插件/TLS/平台TODO跳过和原始超时退出124均详见 `docs/AUDIT_v0.0.10.md`。无真实模型账号或供应商OAuth端到端验收，不宣称全仓零bug。
+- 同输入事务：3种误判输入BASELINE为smart、MODIFIED为unknown、ROLLBACK恢复smart；4个兼容控制输入保持，三次exit0；恢复源码哈希与审计基线相等，补丁重新应用与修复归档一致。
+- PR准备：18个业务/测试文件与已验收manifest逐字节一致；2份审计说明按原文复制，本记忆只增加本轮摘要。交付索引2条重复目录误报已更正，原日志/退出码保持；应用全套成功测试未重复运行。
+- 后续：执行提交门禁，向liulixin-lex/xy2api:main创建正式PR并核实head和CI实际状态。MCP记忆写入接口未提供，未同步。
+
+### 2026-09-15T08:17:27+08:00 — `20260915-v0.0.10-audit-pr` — 正式PR已提交，CI待批准
+
+- 执行者：Codex；当前会话未提供精确模型ID。
+- 已完成：创建gguuai/xy2api Fork，从原仓库main c871151e建立独立PR工作区；提交21个文件为34a128099，推送fix/v0.0.10-audit并创建正式PR #31。实际链接：https://github.com/liulixin-lex/xy2api/pull/31。
+- 核查：PR非草稿、OPEN、目标main、来源gguuai、head及21文件列表与本地一致；18个代码/测试blob和审计报告与已验收字节相同，OPENAI_IQ_CHECK.md仅按Git既有规则规范化CRLF。未夹带此前本地日志、归档或构建产物。差异检查及仓库upstream-sync audit退出0；独立侧审未发现必须先修正的问题。
+- 远端结果：CI run34912442447、Security Scan run34912442399均completed/action_required，未产生测试检查；保留等待维护者批准状态。此记录提交后的新head/CI结果以PR实时状态和本地PR_FINAL_RESULT.json为准。
+- 准备错误：Windows CRLF标题匹配与PowerShell管道编码导致两次准备断言；Git文档换行规范化触发一次过严字节断言；gh fork参数及jq引号各一次命令错误。逐项修正后成功，原始stdout/stderr/退出码留存在交付目录；业务代码及已完成应用测试未变。
+- 本轮索引修正：build-evidence-07两条交付根相对路径不再重复拼接目录，missing_streams=0；四角色验证文本随PR日志追加，源码ZIP/补丁/回滚脚本保持。
+- 下一步：维护者批准CI后审阅PR；未执行合并、发版、部署或真实模型请求。MCP记忆写入接口未提供，未同步。
