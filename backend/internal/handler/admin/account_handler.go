@@ -117,6 +117,20 @@ func (h *AccountHandler) ConfigureIQCheck(c *gin.Context) {
 	response.Success(c, state.Summary())
 }
 
+func (h *AccountHandler) GetIQCheckStatus(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 || h.iqCheckService == nil {
+		response.ErrorFrom(c, service.ErrIQCheckInvalid)
+		return
+	}
+	state, err := h.iqCheckService.Status(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, state)
+}
+
 func (h *AccountHandler) RunIQCheck(c *gin.Context) {
 	if h.iqCheckService == nil {
 		response.ErrorFrom(c, service.ErrIQCheckInvalid)

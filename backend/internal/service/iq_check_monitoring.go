@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"math/rand/v2"
 	"os"
 	"strconv"
 	"time"
@@ -41,6 +42,20 @@ func (s *IQCheckService) QueueStatus(ctx context.Context, id int64) (IQQueueResu
 	return IQQueueResult{true, q.ExecutionState, q.TaskID, q.NextEligibleAt, q.ExecutionReason}, nil
 }
 
+func (s *IQCheckService) Status(ctx context.Context, id int64) (domain.IQCheck, error) {
+	if s == nil || s.accounts == nil || id <= 0 {
+		return domain.IQCheck{}, ErrIQCheckInvalid
+	}
+	a, err := s.accounts.GetByID(ctx, id)
+	if err != nil {
+		return domain.IQCheck{}, err
+	}
+	if a.Platform != PlatformOpenAI {
+		return domain.IQCheck{}, ErrIQCheckInvalid
+	}
+	return a.IQCheck.Summary(), nil
+}
+
 func iqMonitoringConfig() (int, map[string]IQQuotaPolicy) {
 	n := 2
 	if v, e := strconv.Atoi(os.Getenv("IQ_CHECK_MAX_CONCURRENCY")); e == nil && v >= 1 && v <= 10 {
@@ -70,18 +85,37 @@ func iqHealth(a *Account, now time.Time) (string, time.Time) {
 	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !a.ExpiresAt.After(now) {
 		return "account_expired", next
 	}
+	cooldownUntil := now
 	for _, t := range []*time.Time{a.OverloadUntil, a.RateLimitResetAt, a.TempUnschedulableUntil} {
-		if t != nil && t.After(now) {
-			if t.After(next) {
-				next = *t
-			}
-			return "account_cooldown", next
+		if t != nil && t.After(cooldownUntil) {
+			cooldownUntil = *t
 		}
+	}
+	if cooldownUntil.After(now) {
+		return "account_cooldown", cooldownUntil
 	}
 	if a.IsAPIKeyOrBedrock() && a.IsQuotaExceeded() {
 		return "account_quota", next
 	}
 	return "", next
+}
+
+// Brief contention gets a bounded wait before becoming a persisted deferral.
+// Each attempt uses the shared atomic limiter, so business capacity remains authoritative.
+func (s *IQCheckService) acquireIQSlot(ctx context.Context, accountID int64, limit int) (*AcquireResult, error) {
+	for attempt := 0; ; attempt++ {
+		slot, err := s.concurrency.AcquireAccountSlot(ctx, accountID, limit)
+		if err != nil || slot == nil || slot.Acquired || attempt == 3 {
+			return slot, err
+		}
+		timer := time.NewTimer((250 * time.Millisecond) << attempt)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func (s *IQCheckService) execute(ctx context.Context, c IQCheckClaim) {
@@ -108,22 +142,26 @@ func (s *IQCheckService) execute(ctx context.Context, c IQCheckClaim) {
 		deferUnsent(reason, next)
 		return
 	}
-	if s.concurrency == nil {
+	if s.concurrency == nil || s.concurrency.cache == nil {
 		deferUnsent("concurrency_unavailable", now.Add(time.Minute))
 		return
 	}
-	// Existing traffic takes priority. The subsequent atomic acquisition enforces the actual cap.
-	busy, err := s.concurrency.cache.GetAccountConcurrency(ctx, a.ID)
-	if err != nil || busy > 0 {
-		deferUnsent("account_busy", now.Add(time.Minute))
+	// Use any free slot immediately; a separate occupancy read can only become stale.
+	slot, err := s.acquireIQSlot(ctx, a.ID, a.Concurrency)
+	now = time.Now().UTC()
+	if err != nil || slot == nil {
+		if ctx.Err() != nil {
+			return
+		}
+		deferUnsent("concurrency_unavailable", now.Add(time.Minute))
 		return
 	}
-	slot, err := s.concurrency.AcquireAccountSlot(ctx, a.ID, a.Concurrency)
-	if err != nil || slot == nil || !slot.Acquired {
-		deferUnsent("account_busy", now.Add(time.Minute))
+	if !slot.Acquired {
+		deferUnsent("account_busy", now.Add(time.Duration(15+rand.IntN(16))*time.Second))
 		return
 	}
 	defer slot.ReleaseFunc()
+	now = time.Now().UTC()
 	started, err := repo.StartIQCheck(ctx, c, now, s.quotaGroups)
 	if err != nil {
 		deferUnsent("start_unavailable", now.Add(time.Minute))

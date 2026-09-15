@@ -1222,7 +1222,7 @@ export interface Account {
 
   // Rate limit & scheduling fields
   schedulable: boolean
-  iq_check?: IQCheckSettings & { execution_state?: string; execution_reason?: string; task_id?: string; next_eligible_at?: string | null; freshness?: string; budget_remaining?: number; status: 'smart' | 'degraded' | 'unknown'; reason?: string; last_run_at?: string | null; next_run_at?: string | null }
+  iq_check?: IQCheckSettings & { busy_deferrals?: number; execution_state?: string; execution_reason?: string; task_id?: string; next_eligible_at?: string | null; freshness?: string; budget_remaining?: number; status: 'smart' | 'degraded' | 'unknown'; reason?: string; last_run_at?: string | null; next_run_at?: string | null }
   rate_limited_at: string | null
   rate_limit_reset_at: string | null
   overload_until: string | null

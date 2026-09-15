@@ -43,6 +43,7 @@ func applyIQStatusFilter(ctx context.Context, q *dbent.AccountQuery) *dbent.Acco
 func resetIQState(state domain.IQCheck, settings *domain.IQCheckSettings, now time.Time) domain.IQCheck {
 	state = state.WithSettings(settings)
 	state.SmartStreak = 0
+	state.BusyDeferrals = 0
 	state.FailureStreak = 0
 	state.ProtocolFailures = 0
 	state.ExecutionState = "idle"

@@ -17,7 +17,7 @@
   "manual_resolution_record_commit": "c4cc81d9c540f71bc9ce64e671c6cc99181b7a7e",
   "sync_branch": "sync/sub2api-v0.2.4",
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/22",
-  "xy2api_version": "0.0.10",
+  "xy2api_version": "0.0.11",
   "sub2api_compat_version": "0.2.4",
   "status": "resolved",
   "manual_resolutions": [

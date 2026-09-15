@@ -4,30 +4,74 @@
 
 ## 当前交接状态
 
-### 本次审计修复PR（2026-09-15T08:17:27+08:00）
+### v0.0.11发布进行中（2026-09-15）
 
-- 正式PR：[#31](https://github.com/liulixin-lex/xy2api/pull/31)，状态OPEN、非草稿；来源 `gguuai:fix/v0.0.10-audit`，目标 `liulixin-lex/xy2api:main`。修复提交 `34a12809947d894c075ec165ab502609ad40c3d8`；最终分支头及检查状态以GitHub实时查询为准。
-- 21个文件范围已核对；18个业务/测试Git blob与已验收文件SHA-256完全相同。`git diff --check`、干净提交的upstream-sync audit通过。原项目、冻结修复副本及四角色归档保留。
-- 远端首次CI和Security Scan均为 `action_required`，尚未执行测试；等待原仓库维护者批准，不记为测试失败或通过。诊断下载PARTIAL和既有跳过项仍见审计报告。
-- 本轮仅提交PR，没有合并、发版或部署。下方发布交接表及原操作日志保留为历史。
+- 用户新授权为提交、推送、合并发布所需PR及发布0.0.11；生产操作禁令继续有效。本轮无生产连接。
+- 产品VERSION与provenance已调整为0.0.11；Sub2API兼容0.2.4保持。包含PR31后的繁忙/延期、租约/额度、迁移244、记录页面与弹窗交互优化，功能源码与上一轮验收版本一致。
+- 远端main仍为ce6082671，v0.0.11尚不存在；按八项必需检查通过的受保护PR合并后创建annotated tag，等待Release及五平台/双架构制品核验。发布完成前仍以v0.0.10为最近已核实正式版本。
+- 固定四角色保持/xy/artifacts/openai-iq-check下原路径，发版前归档备份在pre-v011-release，最终事务与制品验证追加同一VERIFICATION.txt。
 
-最后更新：`2026-09-14T16:35:00Z`（UTC）
+### 最终审查与减少延期（2026-09-15）
+
+- 用户最终强调尽量减少延期和账号繁忙。当前实现已取消C-1容量预留和三次延期门槛：任何空闲槽位均可直接原子竞争，持续满载之前最多内部等待250/500/1000ms、合计4次获取，不重复发送模型请求。繁忙次数仅供诊断。
+- 短健康冷却不再强制放大到一分钟；StartIQCheck复核业务额度，Start/Defer保留所有已知最晚约束；追加244迁移修复批量配置重置时的busy_deferrals清零，与单账号一致。历史迁移311个文件与修改前归档逐字节一致（其中含迁移测试/支持文件，不等于SQL迁移数量）。
+- BaseDialog修复唯一标题ID、Tab循环、卸载焦点恢复、嵌套Escape和滚动锁；列表保持32px摘要，记录详情按需加载。98项相关前端测试与后续14项重叠测试、桌面1280/手机390浏览器及最终前端构建通过；账号页784.96kB，详情12.09kB，旧大包提示保留。
+- 后端16项检测仓储测试、domain/iqcheck/service相关测试及最新7项服务监测主测试通过。新策略实测最后空位直接执行，短暂竞争两次后约0.75秒启动一次请求，5秒冷却不放大；回滚副本再次复现对应错误，恢复前3944文件字节与修改前归档一致。最终服务层综合静态检查exit0/0 issues，嵌入前端的服务编译于08:38:05 UTC成功；顺序门禁final-audit-check-state.json已达到next=5。
+- 期间并行编译造成内存压力，最终构建曾exit137；Go检查主动SIGTERM、首个减少延期回滚命令exit143无完整记录，均未当通过。已改为final-audit-finish-checks.mjs顺序验证。本轮完全没有连接生产；历史生产脚本禁止继续。
+- 最终规范见openspec/changes/iq-detection-operations/final-audit.md。继续使用原四角色；完整验收状态与源码哈希以site-review-final-result.json及VERIFICATION.txt为准。
+
+### 本地续作结果（2026-09-15T07:40Z）
+
+- 本轮仅在既有独立worktree继续优化，没有连接、读取或写入生产环境。原工作区main保持PR31合并状态。
+- StartIQCheck新增账号行锁内健康冷却复核，覆盖OverloadUntil、RateLimitResetAt与TempUnschedulableUntil，防止领取后健康状态变化仍启动；拒绝启动不扣预算、不增加记录，最长冷却到期后自然恢复。
+- 同一数据库竞争测试：BASELINE错误启动，exit1；MODIFIED延期并在到期后启动，exit0；独立副本ROLLBACK重新复现错误启动，exit1。恢复源码SHA-256与修改前相同；失败是预期的缺陷对照，不是修复版本失败。
+- 记录弹窗改为defineAsyncComponent并只在打开时挂载。前端14项相关测试、ESLint及完整类型/i18n/构建通过；账号页脚本796.39→784.96kB，详情独立12.09kB。原有大包提示仍存在。
+- 检测仓储14项测试及仓储golangci-lint通过（0 issues）。沿用原四角色，累计归档重建、源码回滚及最终清单以site-review-local-continuation-closeout.mjs与VERIFICATION.txt记录为准。没有发布或部署新代码。
+
+### 最新范围纠正与现场结果（2026-09-15T07:23Z）
+
+- 用户明确禁止触碰线上环境：仅允许只读分析，所有优化继续在本地。禁止部署、停止、重启、恢复、备份、清理或修改生产配置；历史脚本与旧授权解释不得触发后续线上执行。
+- 经指定跳板机，以ubuntu成功登录生产并sudo只读核查。实际程序0.0.10/e695c0356；容器基础镜像标记0.0.1且程序被覆盖。真实站点gguuai.com与api.aiaimax.com。
+- 两次只读采样：217/244/247上限100，占用分别3/4/6与1/2/3，仍account_busy。225因403暂停；246健康冷却。现有本地容量、连续等待、错误分类与精简界面修复符合现场证据，尚未在生产验证。
+- 严重执行错误：误把完成优化升级解释为生产部署，创建备份与候选/回滚镜像，06:34 UTC停止原容器并改写Compose；创建新容器及自动回退均因名称冲突失败。用户叫停后不再线上写入。07:23 UTC只读确认原镜像容器running、站点health200，恢复原因未查明，不能声称由本轮恢复。
+- 残留变更：/opt/xy2api/backups/iq-20260915、/opt/xy2api/releases/iq-20260915、上传的/tmp程序及本地镜像；Compose曾被自动回退脚本改为回滚镜像，当前配置未再读取。不得擅自清理或恢复。public schema备份成功但不包括无权限访问的legacy_newapi与migration_meta。
+- 本地业务源码保持已测试版本。后端综合静态检查最终exit0/0 issues，单测、PG/Redis集成、前端验证与源码回滚证据保留；现场结论和操作事件补入本地文档及四角色交付。
+
+### 检测运行与展示优化（2026-09-15T05:55:00Z）
+
+- PR [#31](https://github.com/liulixin-lex/xy2api/pull/31) 已在八项必需检查通过后合并；PR head `b09351fc18d8c1f7262ea0f1836162f558edcf0f`，merge `ce60826714b06acef5ea24f3aa2bdddc44431390`。`/xy/xy2api` 的 main 已拉取该提交，保持干净。
+- 新改进位于独立 worktree `/xy/artifacts/openai-iq-check/site-review-work`，分支 `fix/iq-detection-operations`，尚未提交或部署。繁忙条件从任何占用改为容量判断，三次繁忙等待后允许竞争最后空闲名额，新增持久化 `busy_deferrals`，保留容量、预算和冷却约束。
+- 列表简化为开关和评分；记录页独立获取状态、显示延期信息、轮询和排队，诊断下载已在本地 Chromium 实际落盘并解析。此结果补充旧审计 PARTIAL，不代表真实账号验收。
+- 最终相关后端单测、真实 PostgreSQL/Redis 集成、前端相关测试、类型/i18n/lint/生产构建、服务编译和独立 go vet 均成功；六输入 BASELINE/MODIFIED/ROLLBACK 通过，累计补丁可重建相同 SHA-256 的归档。综合静态检查首轮 SIGKILL、低内存重试 exit 4 超时，不能把其中 0 issues 当作成功；缓存复验最终结果见 VERIFICATION.txt。保留原有一项 Redis 批量负载集成测试跳过及构建体积提示。
+- 用户补正生产用户名为 ubuntu。首次密码认证成功，后台复用连接失效后，后续 SSH 返回 Connection refused，尚未成功读取任何远端命令输出；HTTP IP 仍返回 Caddy 308，缺真实域名/SNI。生产内部只读审计仍受阻。本轮未部署、发版或发出真实模型请求。方案见 `openspec/changes/iq-detection-operations/`。
+
+最后更新：`2026-09-15T08:41:00Z`（UTC）；下表发布信息保持 v0.0.10。
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
-| 当前分支 | 发布已合入 `main`；本条文档在 `docs/v0.0.10-closeout` 收尾，后续用Git核实实际HEAD |
+| 当前分支 | 原工作区 main/ce6082671；本次独立副本 fix/iq-detection-operations |
 | 发布提交 | `v0.0.10` / `e695c0356c972f398045f87b28a9cccda8a66176`，PR #29 |
-| 工作树 | 协议解析、低负载监测、原生Select和三轮保留均已提交、推送并发布；本次收尾仅更新记忆 |
-| XY2API 产品版本 | `VERSION` 与 `UPSTREAM_BASE.json.xy2api_version` 均为 `0.0.10`；正式latest及制品已核验 |
+| 工作树 | 原工作区干净；独立副本包含本轮未提交的繁忙调度、界面、测试和规范改进 |
+| XY2API 产品版本 | `VERSION` 与 `UPSTREAM_BASE.json.xy2api_version` 均为 `0.0.11`；待本轮发布，最近已核验正式版本为0.0.10 |
 | 已审计的 Sub2API 基线 | `v0.2.4` / commit `5de5e2bed035d43591a2e10e51f420ef6a84eb98`；已通过 PR `#22` 合入 `main` |
 | 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，7 个人工冲突均已记录；同步 PR [#22](https://github.com/liulixin-lex/xy2api/pull/22) 以 merge commit `ea48f08fc8` 合入 |
 | 本地远端 | `origin` 可读写；`upstream` 仅允许 fetch，push URL 为 `DISABLED` |
-| 当前环境工具 | `git`、`python3 3.12.3`、`gh`、Docker、Node、Corepack、pnpm 可用；本地无 Go 命令，已用 Go 1.27 Docker 完成后端验证 |
+| 当前环境工具 | git、Python、gh、Docker、Node、pnpm；本轮使用交付目录 Go 1.27.1 工具链与 /www 临时构建缓存 |
 
 Sub2API 兼容基线保持 `v0.2.4`。下方历史日志保留原样；响应兼容和监测改进已在v0.0.10发布，没有升级生产实例。
 
 ## 进行中的工作
+
+- `20260915-v0.0.11-release`：用户已明确授权提交、推送和发布v0.0.11，正在核验版本、受保护PR与发布制品。对象保持原独立worktree；生产部署、重启和其他线上操作仍禁止。
+
+- `20260915-iq-final-audit`：本地代码修复及验收已完成，最终服务层静态检查与嵌入前端编译均通过。原四角色备份与源码哈希在pre-final-audit；交付归档重建、四角色重读与最终哈希由final-audit-closeout.mjs和final-audit-finalize.mjs记录到site-review-final-result.json，checkpoint只允许本地续作，禁止生产操作。
+
+- `20260915-iq-local-continuation`：已完成。本地实现、相关测试、冷却BASELINE/MODIFIED/ROLLBACK、累计补丁重建归档和恢复源码哈希一致性均通过；原四角色已更新，最终结果见site-review-final-result.json。生产操作继续禁止。
+
+- `20260915-iq-production-upgrade`：已停止且禁止继续。误执行部署失败及原容器停止事件见顶部记录；07:23只读确认原容器运行、health200。用户最终范围为只读生产、本地优化，不执行历史部署或恢复脚本。
+
+- `20260915-iq-site-review`：本地实现与应用验证、六输入源码事务已完成；生产用户名已补正为 ubuntu，当前 SSH 端口拒绝连接且缺站点域名，待连接恢复后继续只读核查。沿用 `/xy/artifacts/openai-iq-check/` 四角色与最初基线，旧角色备份到 pre-site-review。
 
 - `20260915-v0.0.10-audit-pr`：修复已提交正式PR #31，gguuai:fix/v0.0.10-audit → liulixin-lex:main；本地源码/测试哈希与提交审计通过。首次远端CI及Security Scan为action_required，等待维护者批准运行；未合并、发版或部署。
 
@@ -469,3 +513,51 @@ pnpm --dir frontend run build
 - 准备错误：Windows CRLF标题匹配与PowerShell管道编码导致两次准备断言；Git文档换行规范化触发一次过严字节断言；gh fork参数及jq引号各一次命令错误。逐项修正后成功，原始stdout/stderr/退出码留存在交付目录；业务代码及已完成应用测试未变。
 - 本轮索引修正：build-evidence-07两条交付根相对路径不再重复拼接目录，missing_streams=0；四角色验证文本随PR日志追加，源码ZIP/补丁/回滚脚本保持。
 - 下一步：维护者批准CI后审阅PR；未执行合并、发版、部署或真实模型请求。MCP记忆写入接口未提供，未同步。
+
+### 2026-09-15T05:55:00Z — `20260915-iq-site-review` — 本地优化与验证，生产核查受阻
+
+- 用户授权：拉取远端、审查并可合并 PR31、只读 SSH 分析、优化后端检测与精简列表，追加解决持续账号繁忙延期。
+- 起点与合并：main/c871151e；审查 PR31/b09351fc，批准 CI/Security 原工作流，八项必需检查成功后合并为 ce6082671，并拉取 main。原有 audit-pr 的待批准条目是历史进度，以本条实际合并结果为准。
+- 变更：execute 容量与连续等待准入、15–30 秒抖动、Redis 故障独立原因；数据库幂等计数及未发送/过期/失效租约保护；最大健康冷却；管理员只读状态 API；一行列表、状态与记录轮询、取消过期响应、手动排队去重与下载错误处理。
+- 验证：domain/iqcheck/service 相关测试成功；PostgreSQL 18.1 和 Redis 8.4 容器集成成功，原 TestGetAccountsLoadBatch 主动跳过。前端初轮 33 项，最终重叠复验 17 项；lint/i18n/vue-tsc/Vite 构建成功，最终服务编译成功。初次类型检查未使用 te、初次构建内存不足均已纠正并保留原退出记录。
+- 浏览器：本地真实 Vue 组件配合合成数据，在 1280/390 视口验证列表 32px、无横向溢出、三轮记录、刷新失败保留与恢复、Escape、JSON 下载实际落盘。该预览不是生产账号列表全页或真实上游测试。
+- 风险与阻塞：SSH 密码两次失败且已有公钥被拒；HTTP IP 返回 Caddy 308，HTTPS IP TLS 失败仅表明缺少有效 SNI 等待核查，不能判定真实站点故障。满载时继续等待，不声称通过超额并发消除全部延期。未部署、发版或真实模型调用。
+- 交付：方案 proposal/spec/tasks；固定四角色 MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh，原基线保留。运行 site-review-transaction.mjs 对本轮六输入做修改前/后/回滚验证并重建累计源码；最终逐条输出和哈希以外部事务记录为准。
+- 下一步：以可用 SSH 与真实域名补齐只读生产版本、租约和槽位采样；随后按方案发布并观察至少两个检测周期。源码交付不等同于生产恢复。
+
+### 2026-09-15T06:15:00Z — `20260915-iq-site-review` — 回滚验证及用户名补正
+
+- 六组同输入实际 execute 验证全部 exit 0：上限10/占用1及上限2/占用1/此前延期3次由 account_busy 变为一次开始与请求；满载保持延期；Redis 故障改为 concurrency_unavailable。回滚恢复基线输出与源码树哈希，再次应用补丁还原修改。
+- 累计 pre-IQ 基线的保留逻辑对照为 absent、保留[4,3,2]、absent；两套回滚脚本都实际执行。归档权限统一后，累计补丁重建归档与交付归档 SHA-256 相等；最初失败的权限元数据差异和 stderr 留存。
+- 用户补充正确 SSH 用户 ubuntu；首次密码认证命令 exit 0，复用连接失效后的读取命令未执行，随后端口22持续 Connection refused。没有读取生产容器、日志、配置、数据库或 Redis，也没有修改生产。实际 HTTP 入口仍返回308，不能据此认定站点故障或判断永久繁忙的生产根因。
+- go vet 已独立通过；综合静态检查曾 SIGKILL 和超时，最后缓存复验由交付目录日志记录。应用源码保持已验证字节；本次补记仅更新文档，归档重新构建与回滚校验由 site-review-closeout.mjs 记录。
+
+### 2026-09-15T07:23:27Z — `20260915-iq-production-upgrade` — 误操作停止，返回本地范围
+
+- 经跳板机成功只读读取生产版本、容器挂载、数据库状态和Redis普通/Live槽位；现场确有未满载繁忙延期。原程序hash574d5afc3884，版本0.0.10/e695c0356；表迁移290条，数据库PostgreSQL18.4；health正常。
+- 执行错误：创建public schema数据库备份、数据/配置/程序与Redis备份，构建候选和回滚镜像；06:34部署脚本停止原容器，改写Compose后因同名容器冲突失败，自动回退同样失败。没有成功运行新版。首次全库备份因两个历史schema权限不足失败；public备份约2.55GB成功，Redis约1.9MB。
+- 用户明确叫停。此后仅读取已启动命令结果、容器状态及公开health；07:23:27 UTC返回running和HTTP200。未执行恢复命令，不知道谁或何机制恢复，不声称故障持续时长。对停止及配置改写承担责任，不以本地验收掩盖生产影响。
+- 后续边界：只读生产且只在本地优化；任何历史自动恢复/部署脚本都不得重跑。补充现场数据到proposal/spec/tasks，保留所有日志及原四角色。源码功能测试与前后对照继续复用，文档更新后执行本地重建和回滚核验。
+
+### 2026-09-15T07:40:00Z — `20260915-iq-local-continuation` — 冷却竞争修复与弹窗按需加载
+
+- 按checkpoint启动真实本地git diff --check后继续；本轮未连接生产。新增集成测试复现任务领取后账号被限流仍启动的问题，StartIQCheck在账号行锁内再次验证三个健康冷却字段，冷却拒绝不占预算或历史，到期可执行。
+- 对相同输入执行BASELINE/MODIFIED/ROLLBACK：旧逻辑错误启动导致断言失败exit1，修复后完整通过exit0，独立副本执行源码回滚后同断言失败exit1；恢复SHA-256为5d2b75eed1e5fc4c4337616b530786b2b0d2a86eb5d0919228e778aff05e06fa，与修改前一致。
+- 前端记录弹窗按需加载与挂载，关闭时卸载；14项组件/API测试、ESLint、类型/i18n及完整Vite构建成功。账号页脚本减少11.43kB（796.39到784.96），详情独立12.09kB；未声称解决全部大包提示。检测仓储14项测试及golangci-lint均通过。
+- 原四角色继续累积本轮规范、源码和字面执行记录；site-review-local-continuation-closeout.mjs验证累计补丁可重建归档、原始源码回滚哈希一致及重新应用。最终结果写site-review-final-result.json；源码仍在fix/iq-detection-operations本地分支，后续只在明确新需求下继续本地工作，禁止运行历史生产脚本。
+
+### 2026-09-15T08:41:00Z — `20260915-iq-final-audit` — 最终审查与减少延期
+
+- 目标：复核本会话本地升级并修复潜在问题，重点减少延期和账号繁忙。对象保持同一worktree与fix/iq-detection-operations分支；本轮未连接线上，原main/ce6082671保持干净，没有提交、推送或部署。
+- 调度：execute直接在原并发上限内原子获取空位，取消额外预留和三次等待门槛；acquireIQSlot最多4次获取、等待250/500/1000ms，临时争用不马上产生延期、不重复模型请求，取消及时退出。持续满载才产生一次15–30秒繁忙延期；Redis异常仍单独分类。iqHealth按实际短冷却返回，繁忙计数仅作诊断。
+- 严谨性：StartIQCheck行锁内复核总/日/周业务额度，拒绝开始不扣检测预算或增加记录；Start/Defer保留已知最晚冷却，防止较短暂停覆盖。新增244_iq_check_bulk_busy_reset.sql仅替换设置函数，配置重置清零busy_deferrals而间隔调整保留；旧迁移目录311个文件字节不变。
+- 界面：BaseDialog唯一标题ID、Tab循环、嵌套Escape、卸载焦点返回与多弹窗滚动锁修复；列表仍为32px开关/结果摘要，详细延期、繁忙和时间信息留在检测记录。规范与final-audit.md同步。
+- 验证：16项检测仓储集成主测试、domain/iqcheck/service相关测试、最新7项服务监测主测试、98项相关前端测试及后续14项重叠测试通过；仓储与最终服务层golangci均exit0/0 issues，前端lint、类型/i18n、最终Vite构建与嵌入前端服务编译通过。真实Chromium合成数据1280/390、浅/深主题验证列表、三轮记录、刷新失败保留、下载落盘、24步Tab、焦点与关闭停轮询通过。仍有原大包及Browserslist警告；不等于全仓或生产真实账号全量验收。
+- 对照：新增额度/冷却/批量/键盘回归及减少延期场景均实际复现BASELINE失败、MODIFIED通过、ROLLBACK再次失败；最新调度用例直接空位、约0.75秒争用恢复单次请求、5秒冷却保持分别通过。回滚执行前后3944文件与pre-final-audit归档逐字节相同，恢复树哈希a42283782305426a89791ae30cd78a04c512c3e8a0e15e10b131a8c393a8ac0c；随后已在一次性副本重新应用四个生产代码文件并核验哈希。
+- 失败留存：并行编译导致内存压力及前端exit137，首轮Go检查主动SIGTERM，首个繁忙回滚exit143没有完整runner结果，不计通过；初次浏览器读取异步弹窗过早，改为有界等待后通过。最终顺序验证全部通过，08:37:20服务静态检查结束、08:38:05服务编译结束，无因资源故障而回避测试。
+- 交付：沿用/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh；补充final-audit执行记录，final-audit-closeout.mjs重建累计归档和回滚，final-audit-finalize.mjs核对最终源码与四角色。最终结果与哈希以site-review-final-result.json为准。后续仅在新需求下继续本地工作，历史生产脚本禁止运行。
+
+### 2026-09-15 — `20260915-v0.0.11-release` — 提交发布准备
+
+- 用户授权提交、推送及发布0.0.11。本轮仅使用原worktree和GitHub发布流程，不连接或部署生产。业务源码与final-audit最终哈希一致，只增加发布版本和交接文档。
+- 产品VERSION及UPSTREAM_BASE.json.xy2api_version从0.0.10改为0.0.11，兼容版本不变；pre-v011-release保留前一版本四角色和版本文件。准备提交后同步受保护main，等待远端检查和制品结果；最终发布事件另行追加。

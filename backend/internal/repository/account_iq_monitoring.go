@@ -18,6 +18,7 @@ func finishIQSchedule(s *domain.IQCheck, r iqcheck.Result, now time.Time) {
 	s.StartedAt = nil
 	s.ExecutionState = "idle"
 	s.ExecutionReason = ""
+	s.BusyDeferrals = 0
 	s.TaskID = ""
 	if r.Status == "smart" {
 		s.SmartStreak = min(6, s.SmartStreak+1)
@@ -67,23 +68,35 @@ func finishIQSchedule(s *domain.IQCheck, r iqcheck.Result, now time.Time) {
 // DeferIQCheck releases an unsent reservation without changing the assessment or records.
 func (r *accountRepository) DeferIQCheck(ctx context.Context, c service.IQCheckClaim, reason string, next time.Time) error {
 	_, err := r.mutateIQCheck(ctx, c.AccountID, func(s *domain.IQCheck) error {
-		if s.LeaseToken != c.Token {
+		if s.LeaseToken != c.Token || s.StartedAt != nil {
 			return nil
 		}
 		s.LeaseToken = ""
 		s.LeaseUntil = nil
 		if s.Revision != c.Revision || !s.Enabled {
+			if s.Enabled {
+				queueIQ(s, time.Now().UTC())
+			}
 			return nil
+		}
+		// Preserve constraints that may have changed since the worker read this account.
+		if earliest, constraint := s.Eligibility(time.Now().UTC()); earliest.After(next) {
+			next, reason = earliest, constraint
 		}
 		s.ExecutionState = "deferred"
 		s.ExecutionReason = reason
+		if reason == "account_busy" {
+			s.BusyDeferrals = min(1000, s.BusyDeferrals+1)
+		} else {
+			s.BusyDeferrals = 0
+		}
 		s.NextRunAt = &next
 		return nil
 	})
 	return err
 }
 
-// StartIQCheck rechecks account and shared budgets under the same global lock used by claims.
+// StartIQCheck rechecks account health and budgets under the same global lock used by claims.
 // A committed attempt is conservatively counted even if a process dies before transport delivery.
 func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckClaim, now time.Time, groups map[string]service.IQQuotaPolicy) (bool, error) {
 	tx, err := r.client.Tx(ctx)
@@ -103,7 +116,7 @@ func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckC
 	if s.LeaseToken != c.Token || s.StartedAt != nil {
 		return false, nil
 	}
-	if !s.Enabled || s.Revision != c.Revision {
+	if !s.Enabled || s.Revision != c.Revision || s.LeaseUntil == nil || !s.LeaseUntil.After(now) {
 		// This worker owns an unsent reservation that the current configuration invalidated.
 		s.LeaseToken = ""
 		s.LeaseUntil = nil
@@ -123,21 +136,36 @@ func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckC
 		return false, nil
 	}
 	next, reason := s.Eligibility(now)
+	deferUntil := func(until time.Time, why string) {
+		if reason == "" || until.After(next) {
+			next, reason = until, why
+		}
+	}
 	if s.QuotaGroup != c.QuotaGroup {
-		next, reason = now.Add(time.Minute), "configuration_changed"
+		deferUntil(now.Add(time.Minute), "configuration_changed")
 	}
 	if a.Status != service.StatusActive || !a.Schedulable {
-		next, reason = now.Add(time.Minute), "account_disabled"
+		deferUntil(now.Add(time.Minute), "account_disabled")
 	}
 	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !a.ExpiresAt.After(now) {
-		next, reason = now.Add(time.Minute), "account_expired"
+		deferUntil(now.Add(time.Minute), "account_expired")
+	}
+	// Business traffic can update cooldowns after the worker's initial health check.
+	// Recheck the locked row before reserving budget or recording an attempt.
+	for _, until := range []*time.Time{a.OverloadUntil, a.RateLimitResetAt, a.TempUnschedulableUntil} {
+		if until != nil && until.After(now) {
+			deferUntil(*until, "account_cooldown")
+		}
+	}
+	quotaAccount := &service.Account{Type: a.Type, Extra: a.Extra}
+	if quotaAccount.IsAPIKeyOrBedrock() && quotaAccount.IsQuotaExceeded() {
+		deferUntil(now.Add(time.Minute), "account_quota")
 	}
 	// Shared quota identity is explicit; an unknown group fails closed.
 	if s.QuotaGroup != "" {
 		policy, ok := groups[s.QuotaGroup]
 		if !ok {
-			reason = "quota_group_unconfigured"
-			next = now.Add(time.Minute)
+			deferUntil(now.Add(time.Minute), "quota_group_unconfigured")
 		} else {
 			if _, err = db.ExecContext(ctx, `INSERT INTO iq_check_quota_groups(id,budget_day,used) VALUES($1,$2,0) ON CONFLICT DO NOTHING`, s.QuotaGroup, now.UTC().Format("2006-01-02")); err != nil {
 				return false, err
@@ -164,7 +192,7 @@ func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckC
 				used = 0
 			}
 			if paused != "" {
-				next, reason = now.Add(time.Minute), "group_paused"
+				deferUntil(now.Add(time.Minute), "group_paused")
 			}
 			if used >= policy.DailyLimit {
 				t := now.UTC().Truncate(24 * time.Hour).Add(24 * time.Hour)
@@ -188,12 +216,14 @@ func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckC
 		}
 	}
 	if reason != "" {
+		s.BusyDeferrals = 0
 		s.LeaseToken = ""
 		s.LeaseUntil = nil
 		s.ExecutionState = "deferred"
 		s.ExecutionReason = reason
 		s.NextRunAt = &next
 	} else {
+		s.BusyDeferrals = 0
 		day := now.UTC().Format("2006-01-02")
 		if s.BudgetDay != day {
 			s.BudgetDay = day

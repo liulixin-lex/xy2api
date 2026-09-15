@@ -297,20 +297,7 @@
             </button>
           </template>
           <template #cell-iq_check="{ row }">
-            <div v-if="row.platform === 'openai'" class="flex items-center gap-2">
-              <button @click="handleToggleIQCheck(row)" :disabled="togglingIQCheck.has(row.id)" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50" :class="row.iq_check?.enabled ? 'bg-blue-500' : 'bg-gray-200 dark:bg-dark-600'" :title="t('admin.accounts.iqCheck')" role="switch" :aria-checked="!!row.iq_check?.enabled" :aria-label="t('admin.accounts.iqCheck')">
-                <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition" :class="row.iq_check?.enabled ? 'translate-x-4' : 'translate-x-0'" />
-              </button>
-              <span class="inline-block h-2 w-2 rounded-full" :class="row.iq_check?.status === 'smart' ? 'bg-green-500' : row.iq_check?.status === 'degraded' ? 'bg-yellow-500' : 'bg-gray-400'" :title="row.iq_check?.status || 'unknown'" />
-              <span class="text-xs" :class="row.iq_check?.status === 'smart' ? 'text-green-600' : row.iq_check?.status === 'degraded' ? 'text-yellow-600' : 'text-gray-500'">{{ row.iq_check?.status === 'smart' ? t('admin.accounts.iqCheckStatus.smart') : row.iq_check?.status === 'degraded' ? t('admin.accounts.iqCheckStatus.degraded') : t('admin.accounts.iqCheckStatus.unknown') }}</span>
-            </div>
-            <span v-else class="text-xs text-gray-400">-</span>
-            <div v-if="row.platform === 'openai' && row.iq_check?.enabled" class="mt-1 max-w-56 break-words text-xs text-gray-500">
-              <p>{{ t('admin.accounts.iqExecution') }}: {{ t(`admin.accounts.iqExecutionStates.${row.iq_check.execution_state || 'idle'}`) }} · {{ t(`admin.accounts.iqFreshness.${row.iq_check.freshness || 'never_checked'}`) }}</p>
-              <p v-if="row.iq_check.execution_reason">{{ te('admin.accounts.iqExecutionReasons.' + row.iq_check.execution_reason) ? t('admin.accounts.iqExecutionReasons.' + row.iq_check.execution_reason) : row.iq_check.execution_reason }}</p>
-              <p v-if="row.iq_check.next_eligible_at">{{ t('admin.accounts.iqNextEligible') }}: {{ formatDateTime(row.iq_check.next_eligible_at) }}</p>
-              <p v-if="row.iq_check.last_run_at">{{ t('admin.accounts.iqLastAssessment') }}: {{ formatDateTime(row.iq_check.last_run_at) }}</p>
-            </div>
+            <IQCheckCell :account="row" :busy="togglingIQCheck.has(row.id)" @toggle="handleToggleIQCheck(row)" @records="iqRecordsAccount = row" />
           </template>
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
@@ -472,7 +459,7 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <IQCheckResultsModal :show="!!iqRecordsAccount" :account="iqRecordsAccount" @close="iqRecordsAccount = null" />
+    <IQCheckResultsModal v-if="iqRecordsAccount" :show="true" :account="iqRecordsAccount" @close="iqRecordsAccount = null" @updated="handleIQSummaryUpdated" />
     <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
@@ -503,7 +490,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch, defineAsyncComponent } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -524,7 +511,7 @@ import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrs
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
-import IQCheckResultsModal from '@/components/admin/account/IQCheckResultsModal.vue'
+import IQCheckCell from '@/components/account/IQCheckCell.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
@@ -552,7 +539,8 @@ import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
 import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 
-const { t, te } = useI18n()
+const IQCheckResultsModal = defineAsyncComponent(() => import('@/components/admin/account/IQCheckResultsModal.vue'))
+const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 
@@ -634,6 +622,13 @@ const scheduleModelOptions = ref<SelectOption[]>([])
 const togglingSchedulable = ref<number | null>(null)
 const togglingIQCheck = ref(new Set<number>())
 const iqRecordsAccount = ref<Account | null>(null)
+const handleIQSummaryUpdated = (state: NonNullable<Account['iq_check']>) => {
+  const account = iqRecordsAccount.value
+  if (!account) return
+  iqRecordsAccount.value = { ...account, iq_check: state }
+  const current = accounts.value.find(item => item.id === account.id)
+  if (current) patchAccountInList({ ...current, iq_check: state })
+}
 const handleRunIQCheck = async (account: Account) => {
   try { const result = await adminAPI.accounts.runIQCheck(account.id); appStore.showSuccess(result?.next_eligible_at ? t('admin.accounts.iqQueuedAt', { time: formatDateTime(result.next_eligible_at) }) : t('admin.accounts.iqQueued')); await refreshAccountsIncrementally() }
   catch { appStore.showError(t('admin.accounts.iqFailed')) }
