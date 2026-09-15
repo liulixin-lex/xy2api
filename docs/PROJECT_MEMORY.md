@@ -7,7 +7,8 @@
 ### 稳定性改进提交合并（2026-09-15）
 
 - 用户本轮明确授权提交、推送远端并合并，暂不发版；不创建版本标签或Release，不操作生产。
-- 目标沿用 `reliability-work` / `fix/iq-reliability-v2`，远端main仍为b07824af9。已完成的功能、测试及四角色证据保持；本轮核对已验收源码后提交，并通过受保护PR合并。八项必需检查全部成功后执行合并，实际提交、PR及合并结果追加外部交付账本。
+- 功能提交 `76f6c35a1` 已推送到 `fix/iq-reliability-v2`，正式PR为 [#33](https://github.com/liulixin-lex/xy2api/pull/33)，目标main。源码与已验收归档一致，干净提交上的兼容审计通过。后续提交用于交接或检查修正，最终head、检查与合并提交以PR实时状态及 `/xy/artifacts/openai-iq-check/reliability-merge-result.json` 为准。
+- 本轮交付不包含发版；产品版本保留0.0.11。八项必需检查成功后合并，不绕过分支保护。四角色继续使用原绝对路径，源码归档/补丁随最终提交更新，原BASELINE、MODIFIED、ROLLBACK行为及恢复哈希保留。
 
 ### 智商检测稳定性实施（2026-09-15）
 
@@ -76,7 +77,7 @@ Sub2API 兼容基线保持 `v0.2.4`。下方历史日志保留原样；响应兼
 
 ## 进行中的工作
 
-- `20260915-iq-reliability-merge`：提交、推送和受保护PR合并进行中；用户明确暂不发版。沿用现有四角色，复用已完成验证并执行本轮提交审计与远端检查。
+- `20260915-iq-reliability-merge`：功能已提交并推送，受保护合并与最终检查由PR #33跟踪，具体结果写入外部 `reliability-merge-result.json` 及原VERIFICATION.txt；用户明确暂不发版。交接完成后按PR状态重新核实，不能据本文件历史“未提交”描述重复提交功能。
 
 - `20260915-iq-reliability-v2`：本地实施与验证完成；本轮基线b07824af9，独立副本reliability-work。终态补全、两次尝试、有效判定、统计及新建默认值已实现，存量配置与原题保留。生产观察尚未执行，后续部署另行授权；四角色及交接文档已包含验收与回滚证据。
 
@@ -590,3 +591,10 @@ pnpm --dir frontend run build
 - 事务：同一包含完成消息21但终态output为空的SSE，BASELINE为unknown/empty_response，MODIFIED为smart/correct_answer/21，ROLLBACK恢复unknown/empty_response，三次exit0。b078基线全树恢复哈希一致；历史最初基线亦执行回滚和重建，累计补丁重建tar字节一致，随后重新应用修改。最后文档及静态修正后再次封存四角色，以reliability-delivery.json为最终索引。
 - 失败记录：早期磁盘/内存压力、旧断言与fixture不完整、漏处理Close返回值、构建并发中止、工具PATH和事务脚本插值错误均保留字面退出记录；后续对应成功检查已完成。未以中止或旧测试结果宣称通过新场景。
 - 交接：docs/IQ_RELIABILITY_IMPLEMENTATION.md说明诊断格式变更、镜像digest与二进制hash核验、旧工作者退出和回退要求。99%有效回答率及排队P95为未来24小时真实账号验收目标，不是本轮已证明结果。下一步仅在另行明确授权后发布并做OAuth/API各一账号观察；禁止运行历史生产脚本。
+
+### 2026-09-15 — `20260915-iq-reliability-merge` — 提交、推送与受保护合并交接
+
+- 用户授权提交、推送和合并，暂不发版；原副本及分支保持。获取远端后main仍为b07824af9，无新增冲突；3950个非记忆文件与已验收归档逐字节一致。
+- 功能提交76f6c35a1包含30个文件，已推送原仓库分支并创建PR #33。干净提交的upstream-sync audit成功；GitHub已启动CI与Security Scan，不改保护规则。最终head检查通过后执行受保护合并，执行事件与实际merge SHA写原交付账本及reliability-merge-result.json。
+- 原应用测试与构建结果继续有效；本轮重新执行源码BASELINE/MODIFIED/ROLLBACK及累计补丁重建。相同SSE输入仍是unknown/empty_response → smart/correct_answer/21 → unknown/empty_response，回滚基线哈希一致，四角色重新打开核验。
+- 不创建新tag/Release，不改变VERSION，不发布镜像，不连接或部署线上。上线和真实账号24小时验收保留为后续独立授权事项。
