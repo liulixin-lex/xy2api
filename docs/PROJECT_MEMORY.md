@@ -8,7 +8,7 @@
 
 - 用户明确授权将智商检测简化与普通 HTTP 403 自动续检改动提交、推送远端并发布 0.0.13；授权包含按现有受保护分支流程创建 PR、等待必需检查、合并、创建 annotated `v0.0.13` 标签并核验 Release 制品，不包含生产部署或真实账号探测。
 - 功能提交 `1fd4d04a7` 已由受保护 [PR #35](https://github.com/liulixin-lex/xy2api/pull/35) 合入；两个触发来源的 16 个检查运行实例全部成功，合并提交为 `368bc735d3e5b069b96ef0f33032123c9cef7f6b`。产品 `VERSION` 和 `UPSTREAM_BASE.json.xy2api_version` 已晋级为 0.0.13，Sub2API 兼容版本保持 0.2.4。
-- 当前发布交接分支为 `release/0.0.13`，只补记上述可观察结果。该文档经受保护 PR 合并后，才创建 annotated `v0.0.13` 标签并核验 Release。迁移 246 删除共享配额表；回退旧程序须恢复升级前数据库，不能只替换二进制。最终标签、Release、五平台包和双架构镜像以 `/xy/artifacts/openai-iq-check/v013-release-result.json` 与原 `VERIFICATION.txt` 的实际结果为准。
+- `release/0.0.13` 交接文档已由受保护 [PR #36](https://github.com/liulixin-lex/xy2api/pull/36) 合入，最终 main 提交为 `11790409f602c4c48e68091e5d032af450f226a0`。annotated `v0.0.13` 标签的 tag object 为 `a92fc3f99e`，Release 工作流、主线 CI 与安全扫描均成功；Release 已公开、非草稿、非预发布且为 latest。迁移 246 删除共享配额表；回退旧程序须恢复升级前数据库，不能只替换二进制。五平台包、Linux 二进制、GHCR 双架构和稳定别名的实际结果见 `/xy/artifacts/openai-iq-check/v013-release-result.json` 与 `VERIFICATION.txt`。
 
 ### v0.0.12发布（2026-09-15）
 
@@ -71,14 +71,14 @@
 - 最终相关后端单测、真实 PostgreSQL/Redis 集成、前端相关测试、类型/i18n/lint/生产构建、服务编译和独立 go vet 均成功；六输入 BASELINE/MODIFIED/ROLLBACK 通过，累计补丁可重建相同 SHA-256 的归档。综合静态检查首轮 SIGKILL、低内存重试 exit 4 超时，不能把其中 0 issues 当作成功；缓存复验最终结果见 VERIFICATION.txt。保留原有一项 Redis 批量负载集成测试跳过及构建体积提示。
 - 用户补正生产用户名为 ubuntu。首次密码认证成功，后台复用连接失效后，后续 SSH 返回 Connection refused，尚未成功读取任何远端命令输出；HTTP IP 仍返回 Caddy 308，缺真实域名/SNI。生产内部只读审计仍受阻。本轮未部署、发版或发出真实模型请求。方案见 `openspec/changes/iq-detection-operations/`。
 
-最后更新：`2026-09-15T16:19:03Z`（UTC）；下表记录 v0.0.13 发布候选状态。
+最后更新：`2026-09-15T16:52:18Z`（UTC）；下表记录 v0.0.13 已发布状态。
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
-| 当前分支 | 远端 main/`368bc735d`；本次独立副本 `release/0.0.13` |
-| 发布提交 | 最近已发布为 `v0.0.12` / `63f0a036e`；v0.0.13 功能已由 PR #35 合入，标签待创建 |
-| 工作树 | 原工作区 main 尚待快进；发布副本只包含本轮交接文档更新 |
+| 当前分支 | 远端 main/`11790409f`；发布标签 `v0.0.13` 指向同一合并提交 |
+| 发布提交 | `v0.0.13` / `11790409f602c4c48e68091e5d032af450f226a0`，功能 PR #35、交接 PR #36 |
+| 工作树 | 发布前主线与标签已核对干净；本轮最终状态文档待通过 PR 固化 |
 | XY2API 产品版本 | main 的 `VERSION` 与 provenance 均为 `0.0.13`；兼容版本 `0.2.4` |
 | 已审计的 Sub2API 基线 | `v0.2.4` / commit `5de5e2bed035d43591a2e10e51f420ef6a84eb98`；已通过 PR `#22` 合入 `main` |
 | 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，7 个人工冲突均已记录；同步 PR [#22](https://github.com/liulixin-lex/xy2api/pull/22) 以 merge commit `ea48f08fc8` 合入 |
@@ -89,7 +89,7 @@ Sub2API 兼容基线保持 `v0.2.4`。下方历史日志保留原样；响应兼
 
 ## 进行中的工作
 
-- `20260915-v0.0.13-release`：功能提交已由 PR #35 在 16/16 检查成功后合并为 `368bc735d`；正在将真实合并结果通过 `release/0.0.13` 交接 PR 固化，随后创建并核验 v0.0.13 Release。生产部署不在范围内。
+- `20260915-v0.0.13-release`：功能 PR #35 与交接 PR #36 均在 16/16 检查成功后合并；`v0.0.13` Release、五平台包、Linux 二进制和 GHCR 双架构已核验。仅剩本条最终状态文档通过受保护 PR 固化；生产部署不在范围内。
 
 - `20260915-iq-simplification`：本地实现已完成，副本 simplify-work/fix/iq-simplification，基线63f0a036/v0.0.12。删除日预算、节约模式及共享配额，普通403周期续检，新增迁移246并简化中英文设置和诊断。相关单元、PostgreSQL/Redis集成、导入导出、84项前端测试、前端lint、类型检查、生产构建、嵌入前端的后端构建及1280/390浅深色浏览器验收通过；最终后端静态检查结果与四角色哈希以交付目录 simplify-final-result.json 和 VERIFICATION.txt 为准。相同输入的403/旧预算 BASELINE、MODIFIED、ROLLBACK及补丁重建已验证，完整3951文件基线哈希一致。原仓库未修改，生产仅只读；迁移246删共享配额表，回退旧程序需要恢复升级前数据库，源码回滚脚本仅处理本地副本。
 
@@ -632,3 +632,10 @@ pnpm --dir frontend run build
 - 当前仅追加发布交接文档；业务源码、迁移 246 和版本值不变。交接 PR 通过保护检查并合并后，从最终 main 创建 annotated `v0.0.13` 标签，等待 Release 工作流并逐项核验五个平台包、Linux 二进制版本与提交、GHCR 双架构及稳定别名。
 - 同输入事务继续使用原四角色：普通 403 的 BASELINE 为暂停且无下次时间，MODIFIED 为保留降智并按 1 分钟续检；旧日预算配置的 BASELINE 等待 24 小时，MODIFIED 归一为 10 分钟且无预算原因；ROLLBACK 与 BASELINE 相同并恢复原始树哈希。最终发布事件追加到原 `VERIFICATION.txt` 和 `v013-release-result.json`。
 - 迁移 246 会删除共享配额表；发布源码回滚不等于数据库回滚。升级前需停止旧检测工作者并备份数据库，回退旧程序时恢复升级前数据库。
+
+### 2026-09-15T16:52:18Z — `20260915-v0.0.13-release` — Release 与制品核验完成
+
+- PR #36 合并提交 `11790409f602c4c48e68091e5d032af450f226a0` 已作为最终发布提交。annotated tag `v0.0.13` 的 tag object 为 `a92fc3f99ef849fcf8a7ff03640c3ca3f7d0a18b`，解引用提交一致；Release 工作流 `34996031291`、主线 CI `34995759507`、主线 Security Scan `34995759454`、标签 CI `34996031353` 和标签 Security Scan `34996031295` 全部成功。
+- Release 已在 GitHub 公开发布，`draft=false`、`prerelease=false`、latest=true。五个包的 checksums 已实际下载复算：darwin amd64 `1fa4fc1628884eef28bfcb9453b600683d4d6dbada6f2ffb6932c8dba3bda6fa`，darwin arm64 `2f0331551e26326db9340ff701f41fb7de9c50287caf3e548ff5050663395bcb`，linux amd64 `0fe14186577b142142165ddf2b363dc9720feb76225adcd2910c68297e9b7a8c`，linux arm64 `7fdf0480a70bc4200b203c18fc83a55aee63843d2cc5f25f199d3c63a097f5d3`，windows amd64 `9941d7dc9f629739071ebf623372a631d104c23bba3e28bd687d6994844a4425`。
+- Linux amd64 二进制以退出码 0 报告 `XY2API 0.0.13`、Sub2API compatibility `0.2.4` 及发布提交。GHCR `0.0.13` 的 amd64/arm64 镜像及 `latest`、`0.0`、`0` 别名均指向 `sha256:304b160d8223e7c6ec2a3b7b162390b0f40f89a8d87e782b356c82fac2a90445`。DockerHub 发布步骤因缺少工作流密钥按条件跳过，不影响 GitHub Release 与 GHCR 验收。
+- 源码事务继续保留 3951 文件基线与 3955 文件修改候选；403 BASELINE 为暂停且无下次时间，MODIFIED 为保留降智并按 1 分钟续检，ROLLBACK 恢复 BASELINE，补丁重建候选哈希精确一致。固定四角色绝对路径、哈希及字面输出见 `/xy/artifacts/openai-iq-check/v013-release-result.json` 与 `VERIFICATION.txt`。本轮未部署生产，未执行真实账号探测。
