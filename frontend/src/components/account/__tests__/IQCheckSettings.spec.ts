@@ -1,5 +1,5 @@
 import { mount, flushPromises } from '@vue/test-utils'
-import { afterEach, describe, it, expect, vi } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import Select from '@/components/common/Select.vue'
 import IQCheckSettings from '../IQCheckSettings.vue'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
@@ -110,5 +110,91 @@ describe('IQ check settings', () => {
     expect(iqFilter.text()).toContain('smart'); expect(iqFilter.text()).toContain('unknown')
     await iqFilter.trigger('click')
     expect(wrapper.emitted('update:filters')?.[0]).toEqual([{ platform: 'openai', status: 'active', iq_status: 'degraded' }])
+  })
+})
+
+describe('IQ validity and catalog feedback', () => {
+  let wrapper: ReturnType<typeof mount<typeof IQCheckSettings>>
+  const value = { enabled: true, interval_minutes: 15, model: 'custom', reasoning_effort: 'low' }
+
+  beforeEach(() => fetchModels.mockReset())
+  afterEach(() => wrapper?.unmount())
+
+  it('re-emits invalidity when restored settings have the same validation error', async () => {
+    const invalid = { ...value, model: 'bad model' }
+    wrapper = mount(IQCheckSettings, { props: { modelValue: invalid } })
+    expect(wrapper.emitted('validity')).toEqual([[false]])
+    await wrapper.setProps({ modelValue: { ...invalid } })
+    expect(wrapper.emitted('validity')).toEqual([[false], [false]])
+  })
+
+  it.each([
+    ['upstream', 'iqCapabilitiesUpstream'],
+    ['reference', 'iqCapabilitiesReference'],
+    [undefined, 'iqCapabilitiesUnknown']
+  ])('separates upstream model source from %s effort capabilities', async (source, message) => {
+    fetchModels.mockResolvedValueOnce({
+      models: [{ id: 'custom', display_name: 'Custom', source: 'upstream', supported_reasoning_levels: ['low'], capability_sources: { ...(source ? { supported_reasoning_levels: source } : {}), default_reasoning_level: 'upstream' } }],
+      fetched_at: null, from_cache: false, stale: false
+    })
+    wrapper = mount(IQCheckSettings, { props: { accountId: 8, modelValue: value } })
+    await wrapper.get('[data-testid="iq-sync-models"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[id$="-model-source"]').text()).toBe('admin.accounts.iqModelsUpstream')
+    expect(wrapper.get('[id$="-effort-source"]').text()).toBe('admin.accounts.' + message)
+    expect(wrapper.get('button[id$="-model"]').attributes('aria-describedby')).toBe(wrapper.get('[id$="-model-source"]').attributes('id'))
+    expect(wrapper.get('button[id$="-effort"]').attributes('aria-describedby')).toBe(wrapper.get('[id$="-effort-source"]').attributes('id'))
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+
+  it('uses the reasoning capability source when the model declares no reasoning support', async () => {
+    fetchModels.mockResolvedValueOnce({
+      models: [{ id: 'custom', display_name: 'Custom', source: 'upstream', reasoning: false, capability_sources: { reasoning: 'upstream', supported_reasoning_levels: 'reference' } }],
+      fetched_at: null, from_cache: false, stale: false
+    })
+    wrapper = mount(IQCheckSettings, { props: { accountId: 8, modelValue: { ...value, reasoning_effort: 'none' } } })
+    await wrapper.get('[data-testid="iq-sync-models"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[id$="-effort-source"]').text()).toBe('admin.accounts.iqCapabilitiesUpstream')
+    expect(wrapper.emitted('validity')?.at(-1)).toEqual([true])
+  })
+
+  it('keeps ID-only capabilities and unsynced custom model sources unknown', async () => {
+    wrapper = mount(IQCheckSettings, { props: { accountId: 8, modelValue: { ...value, reasoning_effort: 'custom-effort' } } })
+    expect(wrapper.get('[id$="-model-source"]').text()).toBe('admin.accounts.iqModelSourceUnknown')
+    expect(wrapper.get('[id$="-effort-source"]').text()).toBe('admin.accounts.iqCapabilitiesUnknown')
+    fetchModels.mockResolvedValueOnce({
+      models: [{ id: 'custom', display_name: 'Custom', source: 'upstream', capability_sources: {} }],
+      fetched_at: null, from_cache: false, stale: false
+    })
+    await wrapper.get('[data-testid="iq-sync-models"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[id$="-model-source"]').text()).toBe('admin.accounts.iqModelsUpstream')
+    expect(wrapper.get('[id$="-effort-source"]').text()).toBe('admin.accounts.iqCapabilitiesUnknown')
+    expect(wrapper.findAllComponents(Select).find(select => select.props('id')?.endsWith('-effort'))!.props('creatable')).toBe(true)
+    expect(wrapper.emitted('validity')?.at(-1)).toEqual([true])
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+
+  it.each(['catalog', 'request'])('shows stale, cached and error feedback together after a %s failure without changing selections', async failure => {
+    fetchModels.mockResolvedValueOnce({
+      models: [{ id: 'custom', display_name: 'Custom', source: 'upstream', capability_sources: {} }],
+      fetched_at: null, from_cache: true, stale: true,
+      ...(failure === 'catalog' ? { error: 'model_discovery_failed' } : {})
+    })
+    wrapper = mount(IQCheckSettings, { props: { accountId: 8, modelValue: value } })
+    await wrapper.get('[data-testid="iq-sync-models"]').trigger('click')
+    await flushPromises()
+    if (failure === 'request') {
+      fetchModels.mockRejectedValueOnce(new Error('offline'))
+      await wrapper.get('[data-testid="iq-sync-models"]').trigger('click')
+      await flushPromises()
+    }
+    expect(wrapper.text()).toContain('admin.accounts.iqModelsFailed')
+    expect(wrapper.text()).toContain('admin.accounts.iqModelsStale')
+    expect(wrapper.text()).toContain('admin.accounts.iqModelsCached')
+    expect(wrapper.get('button[id$="-model"]').text()).toContain('custom')
+    expect(wrapper.get('button[id$="-effort"]').text()).toContain('low')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
   })
 })

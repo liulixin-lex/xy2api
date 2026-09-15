@@ -131,6 +131,7 @@ export default {
       iqModelsStale: "模型列表已过期，请重新同步。",
       iqModelsCached: "来自该账号上游的缓存目录（5分钟）。",
       iqModelsUpstream: "来自该账号上游；返回列表不保证每个模型均可调用。",
+      iqModelSourceUnknown: "模型来源未确认，可使用自定义模型。",
       iqModelsEmpty: "未获取到可用模型。",
       iqOutputSettings: "输出格式设置",
       iqOutputMode: "回答格式",

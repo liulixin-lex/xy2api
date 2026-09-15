@@ -16,11 +16,12 @@ type iqMonitorRepo struct {
 	IQCheckRepository
 	started, completed int
 	deferred           string
+	rejectStart        bool
 }
 
 func (r *iqMonitorRepo) StartIQCheck(context.Context, IQCheckClaim, time.Time, map[string]IQQuotaPolicy) (bool, error) {
 	r.started++
-	return true, nil
+	return !r.rejectStart, nil
 }
 func (r *iqMonitorRepo) DeferIQCheck(_ context.Context, _ IQCheckClaim, reason string, _ time.Time) error {
 	r.deferred = reason
@@ -86,4 +87,21 @@ func TestIQMonitoringBusinessSlots(t *testing.T) {
 			require.Empty(t, h.Get("X-Codex-Window-Id"))
 		})
 	}
+}
+
+func TestIQMonitoringRejectedStartDoesNotProbe(t *testing.T) {
+	a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 2, Credentials: map[string]any{"api_key": "fixture"}, IQCheck: domain.DefaultIQCheck()}
+	a.IQCheck.Enabled = true
+	a.IQCheck.Revision = "fixture"
+	cache := &iqMonitorConcurrency{}
+	repo := &iqMonitorRepo{rejectStart: true}
+	upstream := &iqProbeTransport{status: 200, body: `{"choices":[{"index":0,"finish_reason":"stop","message":{"content":"21"}}]}`}
+	s := &IQCheckService{repo: repo, accounts: &iqProbeAccounts{account: a}, concurrency: NewConcurrencyService(cache), tester: &AccountTestService{cfg: &config.Config{}, httpUpstream: upstream}}
+	s.execute(context.Background(), IQCheckClaim{AccountID: 1, Revision: "fixture", Token: "task", Profile: a.IQCheck.Profile()})
+	require.Equal(t, 1, repo.started)
+	require.Zero(t, repo.completed)
+	require.Empty(t, repo.deferred, "a rejected start must not clear another running reservation")
+	require.Empty(t, upstream.requests)
+	require.Equal(t, 1, cache.acquired)
+	require.Equal(t, 1, cache.released)
 }

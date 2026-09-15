@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 
 const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
@@ -49,12 +49,14 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => key
+      t: (key: string) => key,
+      te: () => false
     })
   }
 })
 
 import EditAccountModal from '../EditAccountModal.vue'
+import IQCheckSettings from '../IQCheckSettings.vue'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -1563,6 +1565,118 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).not.toHaveProperty(
       'antigravity_project_id'
     )
+  })
+})
+
+describe('EditAccountModal IQ validity lifecycle', () => {
+  let wrapper: ReturnType<typeof mountModal>
+
+  beforeEach(() => {
+    authIsSimpleMode.value = true
+    updateAccountMock.mockReset().mockResolvedValue(buildAccount())
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+  })
+  afterEach(() => wrapper?.unmount())
+
+  const enterInvalidModel = async () => {
+    const iq = wrapper.getComponent(IQCheckSettings)
+    const model = iq.findAllComponents(SelectStub).find(select => select.attributes('id')?.endsWith('-model'))!
+    model.vm.$emit('update:modelValue', 'bad model')
+    await flushPromises()
+    expect(iq.get('[role="alert"]').text()).toContain('iqModelInvalid')
+    expect(iq.emitted('validity')?.at(-1)).toEqual([false])
+  }
+
+  it.each([true, false])('saves a non-OpenAI account after invalid OpenAI input (close first: %s)', async closeFirst => {
+    wrapper = mountModal()
+    const instance = wrapper.vm.$
+    await enterInvalidModel()
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
+
+    const nextAccount = buildVertexAccount()
+    if (closeFirst) {
+      await wrapper.findAll('button').find(button => button.text() === 'common.cancel')!.trigger('click')
+      expect(wrapper.emitted('close')).toHaveLength(1)
+      await wrapper.setProps({ show: false })
+      expect(wrapper.findComponent(IQCheckSettings).exists()).toBe(false)
+      await wrapper.setProps({ account: nextAccount })
+      await wrapper.setProps({ show: true })
+    } else {
+      await wrapper.setProps({ account: nextAccount })
+    }
+    expect(wrapper.vm.$).toBe(instance)
+    expect(wrapper.findComponent(IQCheckSettings).exists()).toBe(false)
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0][0]).toBe(nextAccount.id)
+    expect(updateAccountMock.mock.calls[0][1]).not.toHaveProperty('iq_check')
+    expect((wrapper.vm as unknown as { iqValid: boolean }).iqValid).toBe(true)
+  })
+
+  it('rehydrates valid saved IQ settings when reopening the same account in the same instance', async () => {
+    const account = buildAccount()
+    account.iq_check = { enabled: true, interval_minutes: 15, model: 'saved-model', reasoning_effort: 'high' }
+    wrapper = mountModal(account)
+    const instance = wrapper.vm.$
+    const iqInstance = wrapper.getComponent(IQCheckSettings).vm.$
+    await enterInvalidModel()
+    await wrapper.setProps({ show: false })
+    expect(wrapper.findComponent(IQCheckSettings).exists()).toBe(false)
+    await wrapper.setProps({ show: true })
+    expect(wrapper.vm.$).toBe(instance)
+    const iq = wrapper.getComponent(IQCheckSettings)
+    expect(iq.vm.$).not.toBe(iqInstance)
+    expect(iq.props('modelValue')).toMatchObject(account.iq_check)
+    expect(iq.emitted('validity')?.at(-1)).toEqual([true])
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0][1].iq_check).toMatchObject(account.iq_check)
+  })
+
+  it('still blocks invalid saved OpenAI settings after closing and reopening', async () => {
+    const account = buildAccount()
+    account.iq_check = { enabled: true, interval_minutes: 15, model: 'bad model', reasoning_effort: 'low' }
+    wrapper = mountModal(account)
+    const instance = wrapper.vm.$
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    expect(wrapper.vm.$).toBe(instance)
+    expect(wrapper.getComponent(IQCheckSettings).emitted('validity')?.at(-1)).toEqual([false])
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { id: 8, model: 'other invalid' },
+    { id: 1, model: 'bad model' }
+  ])('keeps invalid OpenAI settings blocked when replacing the account with id $id and the same validation error', async next => {
+    const account = buildAccount()
+    account.iq_check = { enabled: true, interval_minutes: 15, model: 'bad model', reasoning_effort: 'low' }
+    wrapper = mountModal(account)
+    const instance = wrapper.getComponent(IQCheckSettings).vm.$
+    await wrapper.setProps({ account: { ...account, id: next.id, iq_check: { ...account.iq_check, model: next.model } } })
+    expect(wrapper.getComponent(IQCheckSettings).vm.$).toBe(instance)
+    expect(wrapper.getComponent(IQCheckSettings).get('[role="alert"]').text()).toContain('iqModelInvalid')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).not.toHaveBeenCalled()
+  })
+
+  it('ignores unrelated IQ validity at the non-OpenAI submit entry point', async () => {
+    wrapper = mountModal(buildVertexAccount())
+    const state = wrapper.vm as unknown as { iqValid: boolean }
+    state.iqValid = false
+    expect(state.iqValid).toBe(false)
+    expect(wrapper.findComponent(IQCheckSettings).exists()).toBe(false)
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0][1]).not.toHaveProperty('iq_check')
   })
 })
 

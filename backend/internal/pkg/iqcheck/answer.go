@@ -26,7 +26,7 @@ var leadingNumber = regexp.MustCompile(`^\s*([+-]?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]
 var boxedNumber = regexp.MustCompile(`\\boxed\{\s*([+-]?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)\s*\}`)
 var deduction = regexp.MustCompile(`(?:因此|所以|故|综上)[^0-9+\-\n。！？;；]{0,40}([+-]?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)\s*(?:个|颗)`)
 var standaloneNumber = regexp.MustCompile(`(?m)^\s*([+-]?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)\s*(?:个(?:糖果)?|颗(?:糖果)?)?\s*[。.!！]?\s*$`)
-var ambiguity = regexp.MustCompile(`(?i)^(?:\s*[,，:：]?\s*)(?:或|还是|或者|or\b|either\b|到[0-9]|[-~～][0-9])`)
+var ambiguity = regexp.MustCompile(`(?i)^(?:\s*(?:(?:个|颗)(?:\s*糖果)?)?\s*[,，:：]?\s*)(?:或|还是|或者|or\b|either\b|到[0-9]|[-~～][0-9])`)
 
 // Bound exponents before exact rational parsing: upstream text is untrusted input.
 func exactNumber(text string) (string, bool) {

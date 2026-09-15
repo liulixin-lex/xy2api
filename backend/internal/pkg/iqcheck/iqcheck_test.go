@@ -167,3 +167,23 @@ func TestExactExplainedNumbers(t *testing.T) {
 		}
 	}
 }
+
+func TestGradeQuantityAlternatives(t *testing.T) {
+	for _, tc := range []struct{ name, answer, status, reason string }{
+		{"bare alternative", "最终答案是21或29。", "unknown", "ambiguous_answer"},
+		{"quantity alternative", "最终答案是21个或29个。", "unknown", "ambiguous_answer"},
+		{"candy alternative", "最终答案是21颗糖果或者29颗糖果。", "unknown", "ambiguous_answer"},
+		{"spaced alternative", "最终答案是21 个糖果，还是29个。", "unknown", "ambiguous_answer"},
+		{"quantity range", "最终答案是21个到29个。", "unknown", "ambiguous_answer"},
+		{"JSON explanation", `{"answer":21,"explanation":"最终答案是21个或29个。"}`, "unknown", "ambiguous_answer"},
+		{"single quantity", "最终答案是21个糖果。", "smart", "correct_answer"},
+		{"counterexample", "最终答案是21个。有人认为最少需要29个，但这个说法不成立。", "smart", "correct_answer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := Grade(tc.answer)
+			if r.Status != tc.status || r.Reason != tc.reason || tc.status == "unknown" && r.NormalizedAnswer != nil {
+				t.Fatalf("%q: %+v", tc.answer, r)
+			}
+		})
+	}
+}

@@ -3,11 +3,14 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/alibabacloud-go/tea/dara"
+	"github.com/alibabacloud-go/tea/tea"
 	"github.com/stretchr/testify/require"
 
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -89,5 +92,33 @@ func TestAliyunCaptchaVerifier_TransportError(t *testing.T) {
 	_, err := verifier.VerifyCaptcha(context.Background(), cred, "param")
 	require.Error(t, err)
 	var apiErr *service.AliyunCaptchaAPIError
-	require.False(t, errors.As(err, &apiErr), "transport errors must not be normalized to API errors")
+	require.False(t, errors.As(err, &apiErr), "transport errors must not be normalized to API errors: %v", err)
+}
+
+func TestNormalizeAliyunCaptchaErrorPreservesTransportErrors(t *testing.T) {
+	for name, original := range map[string]error{
+		"tea_without_response":  &tea.SDKError{Code: tea.String("SDKError"), Message: tea.String("connection refused")},
+		"dara_without_response": &dara.SDKError{Code: dara.String("RequestError"), StatusCode: dara.Int(0), Message: dara.String("connection refused")},
+		"wrapped_transport":     fmt.Errorf("request failed: %w", &tea.SDKError{Code: tea.String("SDKError"), StatusCode: tea.Int(0)}),
+		"cancelled":             context.Canceled,
+		"timeout":               context.DeadlineExceeded,
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, original, normalizeAliyunCaptchaError(original))
+		})
+	}
+}
+
+func TestNormalizeAliyunCaptchaErrorWithResponse(t *testing.T) {
+	for name, original := range map[string]error{
+		"tea":  &tea.SDKError{Code: tea.String("SignatureDoesNotMatch"), Message: tea.String("bad signature"), StatusCode: tea.Int(http.StatusForbidden)},
+		"dara": &dara.SDKError{Code: dara.String("SignatureDoesNotMatch"), Message: dara.String("bad signature"), StatusCode: dara.Int(http.StatusForbidden)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var apiErr *service.AliyunCaptchaAPIError
+			require.ErrorAs(t, normalizeAliyunCaptchaError(original), &apiErr)
+			require.Equal(t, "SignatureDoesNotMatch", apiErr.Code)
+			require.Equal(t, "bad signature", apiErr.Message)
+		})
+	}
 }

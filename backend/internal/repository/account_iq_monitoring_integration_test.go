@@ -168,3 +168,104 @@ func TestIQMonitoringStaleResultKeepsCooldown(t *testing.T) {
 	require.Equal(t, after, *a.IQCheck.NextRunAt)
 	require.Equal(t, 1, a.IQCheck.BudgetUsed)
 }
+
+func TestIQMonitoringReleasesInvalidPendingClaim(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		name := "changed_timeout"
+		if disabled {
+			name = "disabled"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+			a := &service.Account{Name: "iq-invalid-pending", Platform: "openai", Type: "apikey", Status: "active", Schedulable: true, IQCheckSettings: iqTestSettingsPtr(true, 15)}
+			require.NoError(t, repo.Create(ctx, a))
+			t.Cleanup(func() { cleanupIQTestAccount(t, a.ID) })
+			now := time.Now().UTC().Truncate(time.Microsecond).Add(time.Second)
+			claims, err := repo.ClaimIQChecks(ctx, now, 1)
+			require.NoError(t, err)
+			require.Len(t, claims, 1)
+			old, err := repo.GetByID(ctx, a.ID)
+			require.NoError(t, err)
+			require.NotNil(t, old.IQCheck.LeaseUntil)
+			timeout := 60
+			settings := domain.IQCheckSettings{TimeoutSeconds: &timeout}
+			if disabled {
+				enabled := false
+				settings.Enabled = &enabled
+			}
+			_, err = repo.ConfigureIQCheck(ctx, a.ID, settings)
+			require.NoError(t, err)
+			before, err := repo.GetByID(ctx, a.ID)
+			require.NoError(t, err)
+			require.NotEqual(t, claims[0].Revision, before.IQCheck.Revision)
+			started, err := repo.StartIQCheck(ctx, claims[0], now, nil)
+			require.NoError(t, err)
+			require.False(t, started)
+			after, err := repo.GetByID(ctx, a.ID)
+			require.NoError(t, err)
+			require.Empty(t, after.IQCheck.LeaseToken, "an invalid unsent claim must release its reservation immediately")
+			require.Nil(t, after.IQCheck.LeaseUntil)
+			require.Equal(t, before.IQCheck.Revision, after.IQCheck.Revision)
+			require.Equal(t, before.IQCheck.Status, after.IQCheck.Status)
+			require.Equal(t, before.IQCheck.Reason, after.IQCheck.Reason)
+			require.Equal(t, before.IQCheck.BudgetUsed, after.IQCheck.BudgetUsed)
+			records, err := repo.ListIQCheckRecords(ctx, a.ID)
+			require.NoError(t, err)
+			require.Empty(t, records)
+			next := now.Add(time.Second)
+			require.True(t, next.Before(*old.IQCheck.LeaseUntil))
+			claims, err = repo.ClaimIQChecks(ctx, next, 1)
+			require.NoError(t, err)
+			if disabled {
+				require.Empty(t, claims)
+				require.Nil(t, after.IQCheck.NextRunAt)
+			} else {
+				require.Len(t, claims, 1)
+				require.Equal(t, after.IQCheck.Revision, claims[0].Revision)
+				require.Equal(t, timeout, claims[0].TimeoutSeconds)
+			}
+		})
+	}
+}
+
+func TestIQMonitoringRejectedStartPreservesActiveReservation(t *testing.T) {
+	for _, alreadyStarted := range []bool{false, true} {
+		name := "different_token"
+		if alreadyStarted {
+			name = "already_started_with_changed_revision"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+			a := &service.Account{Name: "iq-valid-reservation", Platform: "openai", Type: "apikey", Status: "active", Schedulable: true, IQCheckSettings: iqTestSettingsPtr(true, 15)}
+			require.NoError(t, repo.Create(ctx, a))
+			t.Cleanup(func() { cleanupIQTestAccount(t, a.ID) })
+			now := time.Now().UTC().Truncate(time.Microsecond).Add(time.Second)
+			claims, err := repo.ClaimIQChecks(ctx, now, 1)
+			require.NoError(t, err)
+			require.Len(t, claims, 1)
+			claim := claims[0]
+			if alreadyStarted {
+				started, err := repo.StartIQCheck(ctx, claim, now, nil)
+				require.NoError(t, err)
+				require.True(t, started)
+				timeout := 60
+				_, err = repo.ConfigureIQCheck(ctx, a.ID, domain.IQCheckSettings{TimeoutSeconds: &timeout})
+				require.NoError(t, err)
+			} else {
+				claim.Token = "not-the-current-reservation"
+				claim.Revision = "stale-revision"
+			}
+			before, err := repo.GetByID(ctx, a.ID)
+			require.NoError(t, err)
+			started, err := repo.StartIQCheck(ctx, claim, now.Add(time.Second), nil)
+			require.NoError(t, err)
+			require.False(t, started)
+			after, err := repo.GetByID(ctx, a.ID)
+			require.NoError(t, err)
+			require.Equal(t, before.IQCheck, after.IQCheck)
+			require.NotEmpty(t, after.IQCheck.LeaseToken)
+		})
+	}
+}

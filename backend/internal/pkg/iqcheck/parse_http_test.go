@@ -3,9 +3,11 @@ package iqcheck
 import (
 	"bytes"
 	"compress/gzip"
+	"compress/zlib"
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -141,5 +143,103 @@ func TestDiagnosticFailureEventAndCompression(t *testing.T) {
 	r := Parse(strings.NewReader("event: response.completed\ndata: {bad}\n\n"), true, false)
 	if r.Diagnostic.EventType != "response.completed" || r.Diagnostic.EventIndex != 1 {
 		t.Fatal(r.Diagnostic)
+	}
+}
+
+func TestHTTPCaseAliasedFields(t *testing.T) {
+	output := `[{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"21"}]}]`
+	for _, tc := range []struct {
+		name, body, media, status, reason, field string
+		chat                                     bool
+	}{
+		{"status alias", `{"status":"incomplete","Status":"completed","output":` + output + `}`, "application/json", "unknown", "duplicate_critical_field", "root.status", false},
+		{"status reverse order", `{"Status":"incomplete","status":"completed","output":` + output + `}`, "application/json", "unknown", "duplicate_critical_field", "root.status", false},
+		{"Unicode status alias", `{"status":"incomplete","\u017ftatus":"completed","output":` + output + `}`, "application/json", "unknown", "duplicate_critical_field", "root.status", false},
+		{"nested SSE status", strings.Replace(finalEvent("21"), `"status":"completed"`, `"status":"incomplete","Status":"completed"`, 1), "text/event-stream", "unknown", "duplicate_critical_field", "root.response.status", false},
+		{"SSE type alias", strings.Replace(finalEvent("21"), `"type":"response.completed"`, `"type":"response.failed","Type":"response.completed"`, 1), "text/event-stream", "unknown", "duplicate_critical_field", "root.type", false},
+		{"text alias", `{"status":"completed","output":` + strings.Replace(output, `"text":"21"`, `"text":"29","Text":"21"`, 1) + `}`, "application/json", "unknown", "duplicate_critical_field", "root.output[].content[].text", false},
+		{"response ID alias", `{"id":"first","ID":"second","status":"completed","output":` + output + `}`, "application/json", "unknown", "duplicate_critical_field", "root.id", false},
+		{"chat finish alias", `{"choices":[{"index":0,"message":{"content":"21"},"finish_reason":"length","Finish_Reason":"stop"}]}`, "application/json", "unknown", "duplicate_critical_field", "root.choices[].finish_reason", true},
+		{"chat refusal alias", `{"choices":[{"index":0,"message":{"content":"21","refusal":"declined","Refusal":""},"finish_reason":"stop"}]}`, "application/json", "unknown", "duplicate_critical_field", "root.choices[].message.refusal", true},
+		{"single case alias remains compatible", `{"Status":"completed","Output":` + output + `}`, "application/json", "smart", "correct_answer", "", false},
+		{"distinct extension keys remain compatible", "data: {\"type\":\"response.auxiliary\",\"custom\":1,\"Custom\":2}\n\n" + finalEvent("21"), "text/event-stream", "smart", "correct_answer", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {tc.media}}, Body: io.NopCloser(strings.NewReader(tc.body))}, tc.chat, "http")
+			if r.Status != tc.status || r.Reason != tc.reason || r.Diagnostic == nil || r.Diagnostic.Field != tc.field {
+				t.Fatalf("%+v diagnostic=%+v", r, r.Diagnostic)
+			}
+		})
+	}
+}
+
+func TestHTTPFinalMessageBoundaries(t *testing.T) {
+	for _, tc := range []struct{ name, output, status, reason, answer string }{
+		{"independent final messages", `[{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"2"}]},{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"1"}]}]`, "unknown", "conflicting_final_response", ""},
+		{"one message split text", `[{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"2"},{"type":"output_text","text":"1"}]}]`, "smart", "correct_answer", "21"},
+		{"independent JSON fragments", `[{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"{\"answer\":2"}]},{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"1}"}]}]`, "unknown", "conflicting_final_response", ""},
+		{"one message split JSON", `[{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"{\"answer\":2"},{"type":"output_text","text":"1}"}]}]`, "smart", "correct_answer", `{"answer":21}`},
+		{"independent legacy messages", `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"2"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"1"}]}]`, "unknown", "conflicting_final_response", ""},
+		{"empty message before answer", `[{"type":"message","role":"assistant","phase":"final_answer","content":[]},{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"21"}]}]`, "smart", "correct_answer", "21"},
+	} {
+		for _, media := range []string{"application/json", "text/event-stream"} {
+			t.Run(tc.name+"/"+media, func(t *testing.T) {
+				body := `{"id":"fixture","status":"completed","output":` + tc.output + `}`
+				if media == "text/event-stream" {
+					body = `data: {"type":"response.completed","response":` + body + "}\n\n"
+				}
+				r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {media}}, Body: io.NopCloser(strings.NewReader(body))}, false, "http")
+				if r.Status != tc.status || r.Reason != tc.reason || r.Answer != tc.answer {
+					t.Fatalf("%+v diagnostic=%+v", r, r.Diagnostic)
+				}
+			})
+		}
+	}
+}
+
+func TestHTTPCompressedUpstreamRoundTrip(t *testing.T) {
+	for _, encoding := range []string{"gzip", "deflate", "br", "zstd"} {
+		t.Run(encoding, func(t *testing.T) {
+			var encoded bytes.Buffer
+			var writer io.WriteCloser
+			switch encoding {
+			case "gzip":
+				writer = gzip.NewWriter(&encoded)
+			case "deflate":
+				writer = zlib.NewWriter(&encoded)
+			case "br":
+				writer = brotli.NewWriter(&encoded)
+			case "zstd":
+				var err error
+				writer, err = zstd.NewWriter(&encoded)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := io.WriteString(writer, finalEvent("21")); err != nil {
+				t.Fatal(err)
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.Header().Set("Content-Encoding", encoding)
+				_, _ = w.Write(encoded.Bytes())
+			}))
+			defer server.Close()
+			response, err := server.Client().Get(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = response.Body.Close() }()
+			if encoding == "gzip" && !response.Uncompressed {
+				t.Fatal("expected transport gzip decompression")
+			}
+			result := ParseHTTP(response, false, "http")
+			if result.Status != "smart" || result.NormalizedAnswer == nil || *result.NormalizedAnswer != "21" {
+				t.Fatalf("%+v", result)
+			}
+		})
 	}
 }
