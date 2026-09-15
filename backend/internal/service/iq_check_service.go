@@ -22,6 +22,7 @@ var ErrIQCheckInvalid = infraerrors.BadRequest("IQ_CHECK_INVALID", "Invalid Open
 var ErrIQCheckDisabled = infraerrors.BadRequest("IQ_CHECK_DISABLED", "IQ check is disabled")
 
 type IQCheckClaim struct {
+	RoundDeadline  *time.Time
 	QuotaGroup     string
 	TimeoutSeconds int
 	AccountID      int64
@@ -32,7 +33,17 @@ type IQCheckClaim struct {
 	Protocol       string
 }
 
+type IQCheckAttempt struct {
+	Number     int                 `json:"attempt_no"`
+	StartedAt  time.Time           `json:"started_at"`
+	FinishedAt *time.Time          `json:"finished_at"`
+	Status     string              `json:"status"`
+	Reason     string              `json:"reason"`
+	LatencyMS  int64               `json:"latency_ms"`
+	Diagnostic *iqcheck.Diagnostic `json:"diagnostic,omitempty"`
+}
 type IQCheckRecord struct {
+	Attempts         []IQCheckAttempt    `json:"attempts"`
 	Diagnostic       *iqcheck.Diagnostic `json:"diagnostic,omitempty"`
 	ID               int64               `json:"id"`
 	PromptVersion    string              `json:"prompt_version"`
@@ -98,6 +109,7 @@ type IQCheckService struct {
 	tokens         *OpenAITokenProvider
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
+	wake           chan struct{}
 	modelsMu       sync.Mutex
 	modelsCache    map[string]IQModelCatalog
 	modelsFlight   singleflight.Group
@@ -106,7 +118,7 @@ type IQCheckService struct {
 func ProvideIQCheckService(accounts AccountRepository, tester *AccountTestService, tokens *OpenAITokenProvider, concurrency *ConcurrencyService) *IQCheckService {
 	repo, ok := accounts.(IQCheckRepository)
 	maxConcurrency, quotaGroups := iqMonitoringConfig()
-	s := &IQCheckService{concurrency: concurrency, maxConcurrency: maxConcurrency, quotaGroups: quotaGroups, repo: repo, accounts: accounts, tester: tester, tokens: tokens}
+	s := &IQCheckService{wake: make(chan struct{}, 1), concurrency: concurrency, maxConcurrency: maxConcurrency, quotaGroups: quotaGroups, repo: repo, accounts: accounts, tester: tester, tokens: tokens}
 	if !ok {
 		return s
 	}
@@ -133,7 +145,9 @@ func (s *IQCheckService) Queue(ctx context.Context, id int64) error {
 	if s.repo == nil {
 		return ErrIQCheckInvalid
 	}
-	return s.repo.QueueIQCheck(ctx, id)
+	err := s.repo.QueueIQCheck(ctx, id)
+	s.notify()
+	return err
 }
 func (s *IQCheckService) Records(ctx context.Context, id int64) ([]IQCheckRecord, error) {
 	if s.repo == nil {
@@ -143,7 +157,7 @@ func (s *IQCheckService) Records(ctx context.Context, id int64) ([]IQCheckRecord
 }
 
 func (s *IQCheckService) run(ctx context.Context) {
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
 		claims, err := s.repo.ClaimIQChecks(ctx, time.Now().UTC(), s.maxConcurrency)
@@ -161,14 +175,23 @@ func (s *IQCheckService) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		case <-s.wake:
 		}
 	}
 }
 
 func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckClaim) (result iqcheck.Result) {
+	transport := "http"
+	started := time.Now()
 	defer func() {
 		if result.Diagnostic == nil {
-			result.Diagnostic = (&iqcheck.Diagnostic{ParserVersion: iqcheck.ParserVersion, Stage: "request", Code: result.Reason}).Bounded()
+			result.Diagnostic = (&iqcheck.Diagnostic{ParserVersion: iqcheck.ParserVersion, Stage: "request", Code: result.Reason, Transport: transport}).Bounded()
+		}
+		result.Diagnostic.TotalMS = time.Since(started).Milliseconds()
+		if transport == "plugin" {
+			result.Diagnostic.RetryVisibility = "unknown"
+		} else {
+			result.Diagnostic.RetryVisibility = "single_attempt"
 		}
 	}()
 	if s.tester == nil {
@@ -180,6 +203,9 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 	}
 	if account.Platform != PlatformOpenAI || account.IsCredentialShadow() {
 		return iqcheck.Unknown("unsupported_model")
+	}
+	if s.tester.pluginManager != nil && s.tester.pluginManager.ShouldRouteOpenAIOAuth(account) {
+		transport = "plugin"
 	}
 	profile := account.IQCheck.Profile()
 	if len(claims) > 0 {
@@ -239,6 +265,7 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 	if err != nil {
 		return iqcheck.Unknown("invalid_endpoint")
 	}
+	req = req.WithContext(WithHTTPUpstreamSingleAttempt(req.Context()))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	if account.IsOpenAIAgentIdentity() {
@@ -264,6 +291,10 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 		applyIQAPIKeyHeaders(req.Header)
 	}
 	account.ApplyHeaderOverrides(req.Header)
+	// Disable net/http replay of a POST on a reused connection, including overrides.
+	req.GetBody = nil
+	req.Header.Del("Idempotency-Key")
+	req.Header.Del("X-Idempotency-Key")
 	for _, name := range []string{"Session_id", "Conversation_id", "X-Conversation-Id", "Previous_response_id"} {
 		req.Header.Del(name)
 	}
@@ -279,9 +310,17 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 		return iqcheck.Unknown("request_failed")
 	}
 	defer func() { _ = resp.Body.Close() }()
-	transport := "http"
-	if s.tester.pluginManager != nil && s.tester.pluginManager.ShouldRouteOpenAIOAuth(account) {
-		transport = "plugin"
+	headerMS := time.Since(started).Milliseconds()
+	result = iqcheck.ParseHTTP(resp, chat, transport)
+	if result.Diagnostic != nil {
+		result.Diagnostic.FirstByteMS += headerMS
 	}
-	return iqcheck.ParseHTTP(resp, chat, transport)
+	return result
+}
+
+func (s *IQCheckService) notify() {
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
 }

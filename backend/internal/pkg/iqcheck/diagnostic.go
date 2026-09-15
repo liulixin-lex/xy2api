@@ -6,11 +6,18 @@ import (
 	"time"
 )
 
-const ParserVersion = "iq-response-v3"
+const ParserVersion = "iq-response-v4"
 
 // Diagnostic never contains response text, reasoning, credentials or raw errors.
 // Fixed field lengths keep its JSON representation below the database's 4 KiB cap.
 type Diagnostic struct {
+	DoneMessages        int        `json:"done_messages,omitempty"`
+	TerminalItems       int        `json:"terminal_items,omitempty"`
+	IgnoredItems        int        `json:"ignored_items,omitempty"`
+	IgnoredTypes        string     `json:"ignored_types,omitempty"`
+	AnswerSource        string     `json:"answer_source,omitempty"`
+	FirstByteMS         int64      `json:"first_byte_ms"`
+	TotalMS             int64      `json:"total_ms"`
 	ErrorCode           string     `json:"error_code,omitempty"`
 	ErrorType           string     `json:"error_type,omitempty"`
 	RetryAfter          *time.Time `json:"retry_after,omitempty"`
@@ -54,6 +61,8 @@ func (d *Diagnostic) Bounded() *Diagnostic {
 		return nil
 	}
 	v := *d
+	v.AnswerSource = safeToken(v.AnswerSource, 32)
+	v.IgnoredTypes = safeToken(v.IgnoredTypes, 128)
 	v.ErrorCode = safeToken(v.ErrorCode, 64)
 	v.ErrorType = safeToken(v.ErrorType, 64)
 	v.RetryVisibility = safeToken(v.RetryVisibility, 32)
@@ -68,6 +77,24 @@ func (d *Diagnostic) Bounded() *Diagnostic {
 	v.Field = safeToken(v.Field, 128)
 	v.RequestID = safeToken(v.RequestID, 128)
 	return &v
+}
+
+func (d *Diagnostic) ignoreItem(kind string) {
+	d.IgnoredItems++
+	switch kind {
+	case "reasoning", "commentary", "non_assistant", "function_call", "message":
+	default:
+		kind = "other"
+	}
+	for _, prior := range strings.Split(d.IgnoredTypes, "/") {
+		if prior == kind {
+			return
+		}
+	}
+	if d.IgnoredTypes != "" {
+		d.IgnoredTypes += "/"
+	}
+	d.IgnoredTypes += kind
 }
 
 func (d *Diagnostic) JSON() []byte {

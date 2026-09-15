@@ -97,7 +97,7 @@ func ReadUsage(raw []byte, d *Diagnostic) {
 
 func FailurePolicy(r Result) (pause, transient, protocol bool) {
 	switch r.Reason {
-	case "incomplete_response":
+	case "zero_byte_response", "missing_final_message", "empty_final_text", "empty_response", "incomplete_response":
 		return false, true, true
 	case "quota_exhausted", "authentication_unavailable", "permission_denied", "policy_denied", "unsupported_model", "unsupported_parameter", "unsupported_account_type", "invalid_endpoint", "http_401", "http_403", "http_400", "http_404":
 		return true, false, false
@@ -121,6 +121,27 @@ func NotSent(r Result) bool {
 	}
 	switch r.Reason {
 	case "transport_unavailable", "account_unavailable", "unsupported_model", "authentication_unavailable", "invalid_endpoint", "unsupported_account_type", "cancelled_by_account_change":
+		return true
+	}
+	return false
+}
+
+// Retryable is deliberately narrower than the periodic failure policy.
+func Retryable(r Result) bool {
+	if r.Status != "unknown" || r.Diagnostic != nil && (r.Diagnostic.Transport == "plugin" || r.Diagnostic.RetryAfterUnbounded) {
+		return false
+	}
+	if pause, _, _ := FailurePolicy(r); pause {
+		return false
+	}
+	if r.Diagnostic != nil && r.Diagnostic.Stage == "http" {
+		switch r.Diagnostic.HTTPStatus {
+		case 429, 502, 503, 504:
+			return true
+		}
+	}
+	switch r.Reason {
+	case "request_failed", "timeout", "response_read_failed", "rate_limited", "http_429", "http_502", "http_503", "http_504":
 		return true
 	}
 	return false

@@ -68,6 +68,9 @@ func TestIQCheckProbe(t *testing.T) {
 			for i := 0; i < 2; i++ {
 				result := s.probe(context.Background(), 1)
 				require.Equal(t, tc.status, result.Status, result)
+				require.Nil(t, transport.requests[i].GetBody)
+				require.True(t, HTTPUpstreamSingleAttempt(transport.requests[i].Context()))
+				require.Equal(t, "single_attempt", result.Diagnostic.RetryVisibility)
 				require.Equal(t, iqcheck.Model, transport.bodies[i]["model"])
 				require.Equal(t, false, transport.bodies[i]["store"])
 				require.Equal(t, iqcheck.Effort, transport.bodies[i]["reasoning_effort"])

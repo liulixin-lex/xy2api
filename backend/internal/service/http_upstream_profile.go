@@ -72,3 +72,12 @@ func WithHTTPUpstreamPublicHostsOnly(ctx context.Context) context.Context {
 func HTTPUpstreamPublicHostsOnly(ctx context.Context) bool {
 	return ctx != nil && ctx.Value(httpUpstreamPublicHostsOnlyContextKey{}) == true
 }
+
+type httpUpstreamSingleAttemptKey struct{}
+
+func WithHTTPUpstreamSingleAttempt(ctx context.Context) context.Context {
+	return context.WithValue(ctx, httpUpstreamSingleAttemptKey{}, true)
+}
+func HTTPUpstreamSingleAttempt(ctx context.Context) bool {
+	return ctx != nil && ctx.Value(httpUpstreamSingleAttemptKey{}) == true
+}

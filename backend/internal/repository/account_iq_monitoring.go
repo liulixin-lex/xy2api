@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,8 +13,16 @@ import (
 )
 
 func finishIQSchedule(s *domain.IQCheck, r iqcheck.Result, now time.Time) {
-	s.Status = r.Status
-	s.Reason = r.Reason
+	s.LastRunStatus, s.LastRunReason = r.Status, r.Reason
+	if r.Status == "smart" || r.Status == "degraded" {
+		s.Status = r.Status
+		s.Reason = r.Reason
+		s.LastValidAt = &now
+	}
+	s.RoundStartedAt = nil
+	s.RoundID = ""
+	s.RoundDeadline = nil
+	s.RetryAt = nil
 	s.LastRunAt = &now
 	s.StartedAt = nil
 	s.ExecutionState = "idle"
@@ -32,7 +41,7 @@ func finishIQSchedule(s *domain.IQCheck, r iqcheck.Result, now time.Time) {
 		s.FailureStreak = 0
 	}
 	if protocol {
-		s.ProtocolFailures = min(3, s.ProtocolFailures+1)
+		s.ProtocolFailures = min(4, s.ProtocolFailures+1)
 	} else {
 		s.ProtocolFailures = 0
 	}
@@ -56,7 +65,21 @@ func finishIQSchedule(s *domain.IQCheck, r iqcheck.Result, now time.Time) {
 		next = *s.NotBefore
 	}
 	s.NextRunAt = &next
-	if pause || s.ProtocolFailures >= 3 {
+	if s.ProtocolFailures >= 3 {
+		delay := 30 * time.Minute
+		if s.ProtocolFailures >= 4 {
+			delay = time.Hour
+		}
+		next = now.Add(delay)
+		if s.NotBefore != nil {
+			next = iqLater(next, *s.NotBefore)
+		}
+		s.NotBefore = &next
+		s.NextRunAt = &next
+		s.ExecutionState = "deferred"
+		s.ExecutionReason = "protocol_cooldown"
+	}
+	if pause {
 		s.ExecutionState = "paused"
 		s.ExecutionReason = r.Reason
 		s.NextRunAt = nil
@@ -84,6 +107,9 @@ func (r *accountRepository) DeferIQCheck(ctx context.Context, c service.IQCheckC
 			next, reason = earliest, constraint
 		}
 		s.ExecutionState = "deferred"
+		if s.RetryAt != nil {
+			s.ExecutionState = "retry_wait"
+		}
 		s.ExecutionReason = reason
 		if reason == "account_busy" {
 			s.BusyDeferrals = min(1000, s.BusyDeferrals+1)
@@ -122,6 +148,22 @@ func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckC
 		s.LeaseUntil = nil
 		if s.Enabled {
 			queueIQ(&s, now)
+		}
+		if _, err = db.Account.UpdateOneID(c.AccountID).SetIqCheck(s).Save(ctx); err != nil {
+			return false, err
+		}
+		if err = enqueueSchedulerOutbox(ctx, db, service.SchedulerOutboxEventAccountChanged, &c.AccountID, nil, nil); err != nil {
+			return false, err
+		}
+		if err = tx.Commit(); err != nil {
+			return false, err
+		}
+		r.syncSchedulerAccountSnapshot(ctx, c.AccountID)
+		return false, nil
+	}
+	if s.RetryAt != nil && (s.AttemptCount != 1 || s.RoundDeadline == nil || !s.RoundDeadline.After(now)) {
+		if err := closeIQRetry(ctx, db, c.AccountID, &s, now, "retry_deadline_exceeded"); err != nil {
+			return false, err
 		}
 		if _, err = db.Account.UpdateOneID(c.AccountID).SetIqCheck(s).Save(ctx); err != nil {
 			return false, err
@@ -215,11 +257,36 @@ func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckC
 			}
 		}
 	}
+	if reason != "" && s.RetryAt != nil && s.RoundDeadline != nil && !next.Before(*s.RoundDeadline) {
+		if err := closeIQRetry(ctx, db, c.AccountID, &s, now, reason); err != nil {
+			return false, err
+		}
+		if s.NextRunAt == nil || next.After(*s.NextRunAt) {
+			s.NextRunAt = &next
+		}
+		if _, err = db.Account.UpdateOneID(c.AccountID).SetIqCheck(s).Save(ctx); err != nil {
+			return false, err
+		}
+		if err = enqueueSchedulerOutbox(ctx, db, service.SchedulerOutboxEventAccountChanged, &c.AccountID, nil, nil); err != nil {
+			return false, err
+		}
+		if err = tx.Commit(); err != nil {
+			return false, err
+		}
+		r.syncSchedulerAccountSnapshot(ctx, c.AccountID)
+		return false, nil
+	}
 	if reason != "" {
+		if s.RetryAt != nil {
+			s.ExecutionState = "retry_wait"
+		}
 		s.BusyDeferrals = 0
 		s.LeaseToken = ""
 		s.LeaseUntil = nil
 		s.ExecutionState = "deferred"
+		if s.RetryAt != nil {
+			s.ExecutionState = "retry_wait"
+		}
 		s.ExecutionReason = reason
 		s.NextRunAt = &next
 	} else {
@@ -229,17 +296,51 @@ func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckC
 			s.BudgetDay = day
 			s.BudgetUsed = 0
 		}
+		if err = recordIQMetric(ctx, db, c.AccountID, now, "sent", "", 0); err != nil {
+			return false, err
+		}
+		if s.NextRunAt != nil {
+			wait := max(int64(0), now.Sub(*s.NextRunAt).Milliseconds())
+			for _, bound := range []int64{5000, 15000, 30000, 60000} {
+				if wait <= bound {
+					if err = recordIQMetric(ctx, db, c.AccountID, now, "queue_le", fmt.Sprint(bound), wait); err != nil {
+						return false, err
+					}
+				}
+			}
+			if err = recordIQMetric(ctx, db, c.AccountID, now, "queue", "", wait); err != nil {
+				return false, err
+			}
+		}
 		s.BudgetUsed++
+		if s.RoundID == "" {
+			s.RoundStartedAt = &now
+			s.RoundID = c.Token
+			s.AttemptCount = 0
+			deadline := now.Add(time.Duration(2*s.TimeoutSeconds+30) * time.Second)
+			s.RoundDeadline = &deadline
+		}
+		s.AttemptCount++
 		s.StartedAt = &now
 		s.LastAttemptAt = &now
 		s.ExecutionState = "running"
 		s.ExecutionReason = ""
 		until := now.Add(time.Duration(s.TimeoutSeconds+60) * time.Second)
 		s.LeaseUntil = &until
-		if _, err = db.ExecContext(ctx, `INSERT INTO account_iq_check_results(account_id,lease_token,started_at,prompt_version,grader_version,model,effort,output_mode,protocol,config_revision) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, c.AccountID, c.Token, now, iqcheck.PromptVersion, iqcheck.GraderVersion, s.Model, s.ReasoningEffort, s.OutputMode, c.Protocol, c.Revision); err != nil {
+		if s.AttemptCount == 1 {
+			if _, err = db.ExecContext(ctx, `INSERT INTO account_iq_check_results(account_id,lease_token,started_at,prompt_version,grader_version,model,effort,output_mode,protocol,config_revision) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, c.AccountID, c.Token, now, iqcheck.PromptVersion, iqcheck.GraderVersion, s.Model, s.ReasoningEffort, s.OutputMode, c.Protocol, c.Revision); err != nil {
+				return false, err
+			}
+		}
+		if _, err = db.ExecContext(ctx, `INSERT INTO account_iq_check_attempts(result_id,attempt_no,lease_token,started_at) SELECT id,$2,$3,$4 FROM account_iq_check_results WHERE lease_token=$1`, s.RoundID, s.AttemptCount, c.Token, now); err != nil {
 			return false, err
 		}
 		if _, err = db.ExecContext(ctx, `DELETE FROM account_iq_check_results WHERE account_id=$1 AND id NOT IN (SELECT id FROM account_iq_check_results WHERE account_id=$1 ORDER BY id DESC LIMIT 3)`, c.AccountID); err != nil {
+			return false, err
+		}
+	}
+	if reason != "" {
+		if err = recordIQMetric(ctx, db, c.AccountID, now, "deferred", reason, 0); err != nil {
 			return false, err
 		}
 	}
@@ -258,6 +359,9 @@ func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckC
 
 func queueIQ(s *domain.IQCheck, now time.Time) {
 	if s.LeaseUntil != nil && s.LeaseUntil.After(now) {
+		return
+	}
+	if s.RetryAt != nil {
 		return
 	}
 	if s.TaskID == "" {

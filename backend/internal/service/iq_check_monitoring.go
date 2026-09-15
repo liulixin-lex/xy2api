@@ -119,6 +119,7 @@ func (s *IQCheckService) acquireIQSlot(ctx context.Context, accountID int64, lim
 }
 
 func (s *IQCheckService) execute(ctx context.Context, c IQCheckClaim) {
+	defer s.notify()
 	repo, ok := s.repo.(iqMonitoringRepository)
 	if !ok {
 		return
@@ -175,7 +176,11 @@ func (s *IQCheckService) execute(ctx context.Context, c IQCheckClaim) {
 	if timeout == 0 {
 		timeout = 120
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+	if c.RoundDeadline != nil && c.RoundDeadline.Before(deadline) {
+		deadline = *c.RoundDeadline
+	}
+	probeCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	result := s.probe(probeCtx, c.AccountID, c)
 	if ctx.Err() != nil {
@@ -184,6 +189,14 @@ func (s *IQCheckService) execute(ctx context.Context, c IQCheckClaim) {
 	if err := s.repo.CompleteIQCheck(ctx, c, result, time.Now().UTC()); err != nil {
 		logger.LegacyPrintf("iq_check", "complete failed: account=%d err=%v", c.AccountID, err)
 	}
+}
+
+type IQCheckMetric struct {
+	Bucket    time.Time `json:"bucket"`
+	Event     string    `json:"event"`
+	Reason    string    `json:"reason"`
+	Count     int64     `json:"count"`
+	LatencyMS int64     `json:"latency_ms"`
 }
 
 // Download contains no account identity or raw responses. Record retention bounds it to three rounds.
@@ -199,10 +212,24 @@ func (s *IQCheckService) Diagnostics(ctx context.Context, id int64) (any, error)
 		Reason     string              `json:"reason"`
 		Profile    domain.IQProfile    `json:"profile"`
 		Diagnostic *iqcheck.Diagnostic `json:"diagnostic,omitempty"`
+		Attempts   []IQCheckAttempt    `json:"attempts"`
 	}
 	out := make([]item, 0, len(records))
 	for _, r := range records {
-		out = append(out, item{r.StartedAt, r.FinishedAt, r.Status, r.Reason, domain.IQProfile{Model: r.Model, ReasoningEffort: r.Effort, OutputMode: r.OutputMode}, r.Diagnostic.Bounded()})
+		out = append(out, item{r.StartedAt, r.FinishedAt, r.Status, r.Reason, domain.IQProfile{Model: r.Model, ReasoningEffort: r.Effort, OutputMode: r.OutputMode}, r.Diagnostic.Bounded(), r.Attempts})
 	}
-	return out, nil
+	hourly := []IQCheckMetric{}
+	if source, ok := s.repo.(interface {
+		IQCheckMetrics(context.Context, int64) ([]IQCheckMetric, error)
+	}); ok {
+		hourly, err = source.IQCheckMetrics(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return struct {
+		Version int             `json:"version"`
+		Rounds  any             `json:"rounds"`
+		Hourly  []IQCheckMetric `json:"hourly"`
+	}{2, out, hourly}, nil
 }
