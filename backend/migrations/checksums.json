@@ -292,6 +292,7 @@
     "240_account_iq_check.sql": "6014da7136d9aa5db07b0dfe0c4ca6da0d3055deb4bdeed79b343b98c6aa237e",
     "241_iq_check_profiles.sql": "3e22de14a25e17dcd93568a05201df49d01ccbce27e338cc3793a22e67235c1d",
     "242_iq_check_diagnostic.sql": "78ffbc269f8dfdb3eaa0cfa7779cd58f4fe8ae32905e29807c841b1c579567c2",
-    "243_iq_check_monitoring.sql": "9fd59a2941a03fa60ff5bb7585fd2a55f2f8013eef83aa39cfe50a91fa8f255c"
+    "243_iq_check_monitoring.sql": "9fd59a2941a03fa60ff5bb7585fd2a55f2f8013eef83aa39cfe50a91fa8f255c",
+    "244_iq_check_bulk_busy_reset.sql": "38ba2fd0db6f474383f2a5deb78a5ec83cd8cead8f5ce609ea72d3bdcb3654c9"
   }
 }

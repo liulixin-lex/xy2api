@@ -5,7 +5,10 @@
         <p class="break-words text-sm font-medium text-gray-900 dark:text-gray-100">{{ account?.name }}</p>
         <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqHistoryRetention') }}</p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <button type="button" class="btn btn-primary inline-flex items-center gap-2" :disabled="!state?.enabled || queuing || state.execution_state === 'running' || state.execution_state === 'pending'" @click="queueCheck">
+          <Icon name="play" size="sm" />{{ t('admin.accounts.iqRun') }}
+        </button>
         <button type="button" class="btn btn-secondary inline-flex items-center gap-2" :disabled="downloading || !account || !records.length" @click="downloadDiagnostics">
           <Icon name="download" size="sm" />{{ t('admin.accounts.iqDownload') }}
         </button>
@@ -14,14 +17,30 @@
         </button>
       </div>
     </div>
+    <p v-if="queueError" role="alert" class="mb-3 text-sm text-red-600 dark:text-red-400">{{ queueError }}</p>
+    <p v-if="queueMessage" role="status" class="mb-3 text-sm text-gray-700 dark:text-gray-300">{{ queueMessage }}</p>
+    <div v-if="state" class="mb-5 border-b border-gray-200 pb-5 dark:border-dark-600" data-testid="iq-current-state" :aria-label="t('admin.accounts.iqCurrentState')">
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+        <span class="font-medium text-gray-900 dark:text-gray-100">{{ state.enabled ? t('admin.accounts.iqExecutionStates.' + (state.execution_state || 'idle')) : t('admin.accounts.iqOff') }}</span>
+        <span v-if="state.enabled" class="text-xs" :class="state.freshness === 'stale' ? 'text-amber-700 dark:text-amber-400' : 'text-gray-500 dark:text-dark-400'">{{ t('admin.accounts.iqFreshness.' + (state.freshness || 'never_checked')) }}</span>
+      </div>
+      <p v-if="state.enabled && state.execution_reason" class="mt-2 break-words text-sm text-gray-700 dark:text-gray-300">{{ executionReasonLabel(state.execution_reason) }}</p>
+      <p v-if="state.enabled && state.execution_reason === 'account_busy' && state.busy_deferrals" class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqBusyDeferrals', { count: state.busy_deferrals }) }}</p>
+      <dl class="mt-4 grid grid-cols-1 gap-x-5 gap-y-3 text-xs sm:grid-cols-3">
+        <div class="min-w-0"><dt class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqLastAssessment') }}</dt><dd class="mt-1 break-words tabular-nums text-gray-900 dark:text-gray-100">{{ state.last_run_at ? formatDateTime(state.last_run_at) : '-' }}</dd></div>
+        <div class="min-w-0"><dt class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqNextEligible') }}</dt><dd class="mt-1 break-words tabular-nums text-gray-900 dark:text-gray-100">{{ state.enabled && state.execution_state !== 'paused' && state.next_eligible_at ? formatDateTime(state.next_eligible_at) : '-' }}</dd></div>
+        <div class="min-w-0"><dt class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqBudgetRemaining') }}</dt><dd class="mt-1 tabular-nums text-gray-900 dark:text-gray-100">{{ state.budget_remaining ?? '-' }}</dd></div>
+      </dl>
+    </div>
+    <p v-if="statusError" role="alert" class="mb-3 text-sm text-red-600 dark:text-red-400">{{ statusError }}</p>
     <p v-if="downloadError" role="alert" class="mb-3 text-sm text-red-600 dark:text-red-400">{{ downloadError }}</p>
-    <div v-if="loading" role="status" class="flex items-center justify-center gap-2 py-12 text-sm text-gray-500 dark:text-dark-400"><Icon name="refresh" size="sm" class="animate-spin" />{{ t('common.loading') }}</div>
-    <div v-else-if="error" role="alert" class="py-8 text-center">
+    <div v-if="error" role="alert" class="py-4 text-center">
       <p class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
       <button type="button" class="btn btn-secondary mt-3" @click="loadRecords">{{ t('common.refresh') }}</button>
     </div>
-    <div v-else-if="!records.length" class="py-12 text-center text-gray-500 dark:text-dark-400"><Icon name="clock" class="mx-auto mb-3" /><p class="text-sm">{{ t('admin.accounts.iqEmpty') }}</p></div>
-    <ol v-else class="divide-y divide-gray-200 dark:divide-dark-600">
+    <div v-if="loading && !records.length" role="status" class="flex items-center justify-center gap-2 py-12 text-sm text-gray-500 dark:text-dark-400"><Icon name="refresh" size="sm" class="animate-spin" />{{ t('common.loading') }}</div>
+    <div v-else-if="!records.length && !error" class="py-12 text-center text-gray-500 dark:text-dark-400"><Icon name="clock" class="mx-auto mb-3" /><p class="text-sm">{{ t('admin.accounts.iqEmpty') }}</p></div>
+    <ol v-if="records.length" class="divide-y divide-gray-200 dark:divide-dark-600">
       <li v-for="record in records" :key="record.id" class="py-5 first:pt-0 last:pb-0">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <span class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium" :class="statusClass(record)">{{ record.finished_at ? t('admin.accounts.iqCheckStatus.' + record.status) : t('admin.accounts.iqRunning') }}</span>
@@ -67,9 +86,10 @@ import { adminAPI } from '@/api/admin'
 import type { Account, IQCheckRecord } from '@/types'
 import { formatDateTime } from '@/utils/format'
 const props = defineProps<{ show: boolean; account: Account | null }>()
-defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; updated: [state: NonNullable<Account['iq_check']>] }>()
 const { t, te } = useI18n()
 const reasonLabel = (reason: string) => te(`admin.accounts.iqReasons.${reason}`) ? t(`admin.accounts.iqReasons.${reason}`) : reason
+const executionReasonLabel = (reason: string) => te(`admin.accounts.iqExecutionReasons.${reason}`) ? t(`admin.accounts.iqExecutionReasons.${reason}`) : reasonLabel(reason)
 const diagnosticKeys = ['parser_version', 'stage', 'code', 'http_status', 'media_type', 'content_encoding', 'protocol', 'transport', 'format_detected', 'event_type', 'event_index', 'field', 'offset', 'bytes_read', 'request_id', 'error_code', 'error_type', 'retry_after', 'retry_after_unbounded', 'input_tokens', 'output_tokens', 'reasoning_tokens', 'retry_visibility'] as const
 const diagnosticEntries = (record: IQCheckRecord) => diagnosticKeys.flatMap(key => {
   const value = record.diagnostic?.[key]
@@ -85,29 +105,70 @@ async function downloadDiagnostics() {
  const version = ++downloadRequest
  downloading.value = true
  downloadError.value = ''
- try { const blob = await downloadIQCheckDiagnostics(props.account.id); if (version !== downloadRequest) return; const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = 'iq-check-diagnostics.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000) }
+ try { const blob = await downloadIQCheckDiagnostics(props.account.id); if (version !== downloadRequest) return; const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = 'iq-check-diagnostics.json'; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000) }
  catch { if (version === downloadRequest) downloadError.value = t('admin.accounts.iqDownloadFailed') }
  finally { if (version === downloadRequest) downloading.value = false }
 }
 const records = ref<IQCheckRecord[]>([])
 const loading = ref(false)
 const error = ref('')
+const state = ref<Account['iq_check']>()
+const statusError = ref('')
+const queuing = ref(false)
+const queueError = ref('')
+const queueMessage = ref('')
+let queueRequest = 0
 let request = 0
+let controller: AbortController | undefined
+let refreshTimer: ReturnType<typeof setTimeout> | undefined
+function stopRefresh() { clearTimeout(refreshTimer); controller?.abort() }
+function scheduleRefresh() {
+  clearTimeout(refreshTimer)
+  if (!props.show) return
+  refreshTimer = setTimeout(() => {
+    if (document.visibilityState === 'hidden') scheduleRefresh()
+    else void loadRecords()
+  }, state.value?.execution_state === 'running' || state.value?.execution_state === 'pending' ? 5000 : 15000)
+}
+async function queueCheck() {
+  const id = props.account?.id
+  if (!id || !state.value?.enabled || queuing.value) return
+  const version = ++queueRequest
+  queuing.value = true
+  queueError.value = ''; queueMessage.value = ''
+  try {
+    const result = await adminAPI.accounts.runIQCheck(id)
+    if (version !== queueRequest) return
+    queueMessage.value = result?.next_eligible_at ? t('admin.accounts.iqQueuedAt', { time: formatDateTime(result.next_eligible_at) }) : t('admin.accounts.iqQueued')
+    await loadRecords()
+  } catch { if (version === queueRequest) queueError.value = t('admin.accounts.iqFailed') }
+  finally { if (version === queueRequest) queuing.value = false }
+}
 async function loadRecords() {
+  stopRefresh()
   const version = ++request
   const id = props.account?.id
   if (!props.show || !id) return
   loading.value = true
   error.value = ''
-  try { const result = await adminAPI.accounts.getIQCheckResults(id); if (version === request) records.value = result }
-  catch { if (version === request) error.value = t('admin.accounts.iqHistoryFailed') }
-  finally { if (version === request) loading.value = false }
+  statusError.value = ''
+  controller = new AbortController()
+  const signal = controller.signal
+  await Promise.all([
+    adminAPI.accounts.getIQCheckResults(id, signal).then(result => { if (version === request) records.value = result }).catch(() => { if (version === request) error.value = t('admin.accounts.iqHistoryFailed') }),
+    adminAPI.accounts.getIQCheckStatus(id, signal).then(result => {
+      if (version === request) { state.value = result; emit('updated', result) }
+    }).catch(() => { if (version === request) statusError.value = t('admin.accounts.iqStatusFailed') })
+  ])
+  if (version === request) { loading.value = false; scheduleRefresh() }
 }
 watch([() => props.show, () => props.account?.id], () => {
-  request++; downloadRequest++
+  stopRefresh()
+  request++; downloadRequest++; queueRequest++
   records.value = []; error.value = ''; downloadError.value = ''
-  loading.value = false; downloading.value = false
+  state.value = undefined; statusError.value = ''; queueError.value = ''; queueMessage.value = ''
+  loading.value = false; downloading.value = false; queuing.value = false
   void loadRecords()
 }, { immediate: true })
-onBeforeUnmount(() => { request++; downloadRequest++ })
+onBeforeUnmount(() => { request++; downloadRequest++; queueRequest++; stopRefresh() })
 </script>

@@ -143,6 +143,7 @@ func (s IQCheck) WithSettings(p *IQCheckSettings) IQCheck {
 
 // IQCheck keeps the independent quality gate separate from manual scheduling.
 type IQCheck struct {
+	BusyDeferrals    int        `json:"busy_deferrals,omitempty"`
 	LastAttemptAt    *time.Time `json:"last_attempt_at,omitempty"`
 	ExecutionState   string     `json:"execution_state,omitempty"`
 	ExecutionReason  string     `json:"execution_reason,omitempty"`

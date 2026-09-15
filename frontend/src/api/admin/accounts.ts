@@ -87,8 +87,13 @@ export async function runIQCheck(id: number) {
   return data
 }
 
-export async function getIQCheckResults(id: number) {
-  const { data } = await apiClient.get<IQCheckRecord[]>(`/admin/accounts/${id}/iq-check/results`)
+export async function getIQCheckStatus(id: number, signal?: AbortSignal) {
+  const { data } = await apiClient.get<NonNullable<Account['iq_check']>>(`/admin/accounts/${id}/iq-check`, { signal })
+  return data
+}
+
+export async function getIQCheckResults(id: number, signal?: AbortSignal) {
+  const { data } = await apiClient.get<IQCheckRecord[]>(`/admin/accounts/${id}/iq-check/results`, { signal })
   return data
 }
 
@@ -1123,6 +1128,7 @@ export const accountsAPI = {
   setIQCheck,
   runIQCheck,
   getIQCheckResults,
+  getIQCheckStatus,
   getIQCheckModels,
   getAvailableModels,
   syncUpstreamModels,

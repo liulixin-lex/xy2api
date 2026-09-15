@@ -8,10 +8,12 @@
         :aria-labelledby="dialogId"
         role="dialog"
         aria-modal="true"
+        data-base-dialog
+        @keydown.tab="trapFocus"
         @click.self="handleClose"
       >
         <!-- Modal panel -->
-        <div ref="dialogRef" :class="['modal-content', widthClasses]" @click.stop>
+        <div ref="dialogRef" :class="['modal-content', widthClasses]" tabindex="-1" @click.stop>
           <!-- Header -->
           <div class="modal-header">
             <h3 :id="dialogId" class="modal-title">
@@ -42,18 +44,46 @@
   </Teleport>
 </template>
 
+<script lang="ts">
+// Track open instances independently of transition DOM and unmount ordering.
+const openDialogs = new Set<symbol>()
+</script>
+
 <script setup lang="ts">
-import { computed, watch, onMounted, onUnmounted, ref, nextTick } from 'vue'
+import { computed, watch, onMounted, onUnmounted, ref, nextTick, useId } from 'vue'
 import Icon from '@/components/icons/Icon.vue'
 
 // 生成唯一ID以避免多个对话框时ID冲突
-let dialogIdCounter = 0
-const dialogId = `modal-title-${++dialogIdCounter}`
+const dialogId = `modal-title-${useId()}`
+const dialogToken = Symbol('dialog')
 
 // 焦点管理
 const dialogRef = ref<HTMLElement | null>(null)
 const modalBodyRef = ref<HTMLElement | null>(null)
 let previousActiveElement: HTMLElement | null = null
+
+const focusableElements = () => Array.from(dialogRef.value?.querySelectorAll<HTMLElement>(
+  'button, [href], input, select, textarea, summary, [tabindex]'
+) ?? []).filter(element => !element.matches(':disabled, [tabindex="-1"]') &&
+  !element.closest('[hidden], [inert], [aria-hidden="true"]') &&
+  (element.checkVisibility?.({ checkVisibilityCSS: true }) ?? true))
+
+function trapFocus(event: KeyboardEvent) {
+  const elements = focusableElements()
+  const first = elements[0], last = elements[elements.length - 1]
+  if (!first) { event.preventDefault(); dialogRef.value?.focus(); return }
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+}
+
+function releaseDialog() {
+  openDialogs.delete(dialogToken)
+  if (openDialogs.size === 0) {
+    document.body.classList.remove('modal-open')
+  }
+  if (previousActiveElement?.isConnected) previousActiveElement.focus()
+  previousActiveElement = null
+}
 
 type DialogWidth = 'narrow' | 'normal' | 'wide' | 'extra-wide' | 'full'
 
@@ -107,7 +137,10 @@ const handleClose = () => {
 }
 
 const handleEscape = (event: KeyboardEvent) => {
-  if (props.show && props.closeOnEscape && event.key === 'Escape') {
+  const activeDialog = (document.activeElement as HTMLElement | null)?.closest('[data-base-dialog]')
+  if (activeDialog && activeDialog !== dialogRef.value?.closest('[data-base-dialog]')) return
+  if (!event.defaultPrevented && props.show && props.closeOnEscape && event.key === 'Escape') {
+    event.preventDefault()
     emit('close')
   }
 }
@@ -119,27 +152,22 @@ watch(
     if (isOpen) {
       // 保存当前焦点元素
       previousActiveElement = document.activeElement as HTMLElement
+      openDialogs.add(dialogToken)
       // 使用CSS类而不是直接操作style,更易于管理多个对话框
       document.body.classList.add('modal-open')
 
       // 等待DOM更新后设置焦点到对话框
       await nextTick()
+      if (!props.show) return
       if (modalBodyRef.value) {
         modalBodyRef.value.scrollTop = 0
       }
       if (dialogRef.value) {
-        const firstFocusable = dialogRef.value.querySelector<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        )
-        firstFocusable?.focus()
+        const target = focusableElements()[0] ?? dialogRef.value
+        target.focus()
       }
     } else {
-      document.body.classList.remove('modal-open')
-      // 恢复之前的焦点
-      if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
-        previousActiveElement.focus()
-      }
-      previousActiveElement = null
+      releaseDialog()
     }
   },
   { immediate: true }
@@ -152,6 +180,6 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('keydown', handleEscape)
   // 确保组件卸载时移除滚动锁定
-  document.body.classList.remove('modal-open')
+  releaseDialog()
 })
 </script>

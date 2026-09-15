@@ -1,14 +1,76 @@
-import { mount, flushPromises } from '@vue/test-utils'
-import { describe, it, expect, vi } from 'vitest'
+import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import IQCheckResultsModal from '../IQCheckResultsModal.vue'
 import type { Account } from '@/types'
 import { downloadIQCheckDiagnostics } from '@/api/admin/accounts'
 vi.mock('@/api/admin/accounts', () => ({ downloadIQCheckDiagnostics: vi.fn() }))
-const history = vi.hoisted(() => vi.fn())
-vi.mock('@/api/admin', () => ({ adminAPI: { accounts: { getIQCheckResults: history } } }))
+const { history, status, run } = vi.hoisted(() => ({ history: vi.fn(), status: vi.fn(), run: vi.fn() }))
+vi.mock('@/api/admin', () => ({ adminAPI: { accounts: { getIQCheckResults: history, getIQCheckStatus: status, runIQCheck: run } } }))
 vi.mock('@/utils/format', () => ({ formatDateTime: (s: string) => s }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (s: string) => s, te: () => true }) }))
 describe('IQ results', () => {
+  enableAutoUnmount(afterEach)
+  beforeEach(() => {
+    vi.clearAllMocks()
+    status.mockResolvedValue({ enabled: true, status: 'smart', execution_state: 'deferred', execution_reason: 'account_busy', freshness: 'stale', last_run_at: '2026-09-15T04:39:27Z', next_eligible_at: '2026-09-15T05:04:17Z', budget_remaining: 4 })
+  })
+  afterEach(() => { vi.useRealTimers() })
+  it('loads current execution information even when no attempt was started', async () => {
+    history.mockResolvedValue([])
+    const wrapper = mount(IQCheckResultsModal, { props: { show: true, account: { id: 8 } as Account }, global: { stubs: { BaseDialog: { template: '<div><slot /></div>' } } } })
+    await flushPromises()
+    const summary = wrapper.get('[data-testid="iq-current-state"]')
+    expect(summary.text()).toContain('iqExecutionStates.deferred')
+    expect(summary.text()).toContain('iqExecutionReasons.account_busy')
+    expect(summary.text()).toContain('iqFreshness.stale')
+    expect(summary.text()).toContain('2026-09-15T05:04:17Z')
+    expect(wrapper.text()).toContain('iqEmpty')
+    expect(wrapper.emitted('updated')).toHaveLength(1)
+  })
+  it('preserves loaded records on a refresh failure and stops requests on close', async () => {
+    vi.useFakeTimers()
+    history.mockResolvedValue([{ id: 1, status: 'smart', started_at: 'now', finished_at: 'now', latency_ms: 1 }])
+    const wrapper = mount(IQCheckResultsModal, { props: { show: true, account: { id: 8 } as Account }, global: { stubs: { BaseDialog: { template: '<div><slot /></div>' } } } })
+    await flushPromises()
+    history.mockRejectedValueOnce(new Error('offline'))
+    status.mockRejectedValueOnce(new Error('offline'))
+    await wrapper.get('button[aria-label="common.refresh"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('li')).toHaveLength(1)
+    expect(wrapper.text()).toContain('iqHistoryFailed')
+    expect(wrapper.text()).toContain('iqStatusFailed')
+    await wrapper.setProps({ show: false })
+    await vi.advanceTimersByTimeAsync(30000)
+    expect(history).toHaveBeenCalledTimes(2)
+    expect(history.mock.calls[1][1].aborted).toBe(true)
+  })
+  it('does not apply an old account status after switching accounts', async () => {
+    let resolve!: (data: unknown) => void
+    status.mockImplementationOnce(() => new Promise(r => { resolve = r }))
+    history.mockResolvedValue([])
+    const wrapper = mount(IQCheckResultsModal, { props: { show: true, account: { id: 8 } as Account }, global: { stubs: { BaseDialog: { template: '<div><slot /></div>' } } } })
+    await wrapper.setProps({ account: { id: 9 } as Account })
+    await flushPromises()
+    resolve({ enabled: true, execution_reason: 'old-account-secret' })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('old-account-secret')
+    expect(wrapper.emitted('updated')).toHaveLength(1)
+  })
+  it('queues once and refreshes the current state', async () => {
+    history.mockResolvedValue([])
+    let resolve!: (data: unknown) => void
+    run.mockImplementationOnce(() => new Promise(r => { resolve = r }))
+    const wrapper = mount(IQCheckResultsModal, { props: { show: true, account: { id: 8 } as Account }, global: { stubs: { BaseDialog: { template: '<div><slot /></div>' } } } })
+    await flushPromises()
+    const button = wrapper.findAll('button').find(button => button.text().includes('iqRun'))!
+    await button.trigger('click')
+    await button.trigger('click')
+    expect(run).toHaveBeenCalledTimes(1)
+    resolve({ queued: true, next_eligible_at: 'later' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('iqQueuedAt')
+    expect(status).toHaveBeenCalledTimes(2)
+  })
   it('shows three records and keeps them visible when a diagnostic download fails', async () => {
     history.mockResolvedValue([3, 2, 1].map(id => ({ id, status: 'smart', normalized_answer: '21', started_at: 'now', finished_at: 'now', latency_ms: 1250, model: 'custom', effort: 'low' })))
     vi.mocked(downloadIQCheckDiagnostics).mockRejectedValueOnce(new Error('offline'))

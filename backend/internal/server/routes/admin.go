@@ -376,6 +376,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.PUT("/:id/grok-media-eligibility", h.Admin.Account.UpdateGrokMediaEligibility)
 		accounts.PUT("/:id/upstream-billing-probe", h.Admin.Account.SetUpstreamBillingProbeEnabled)
 		accounts.PUT("/:id/iq-check", h.Admin.Account.ConfigureIQCheck)
+		accounts.GET("/:id/iq-check", h.Admin.Account.GetIQCheckStatus)
 		accounts.POST("/:id/iq-check/run", h.Admin.Account.RunIQCheck)
 		accounts.GET("/:id/iq-check/results", h.Admin.Account.ListIQCheckResults)
 		accounts.GET("/:id/iq-check/diagnostics", h.Admin.Account.DownloadIQCheckDiagnostics)
