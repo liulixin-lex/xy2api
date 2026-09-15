@@ -4,13 +4,14 @@
 
 ## 当前交接状态
 
-### v0.0.11发布进行中（2026-09-15）
+### v0.0.11发布完成（2026-09-15T09:31:43Z）
 
-- 用户新授权为提交、推送、合并发布所需PR及发布0.0.11；生产操作禁令继续有效。本轮无生产连接。
-- 产品VERSION与provenance已调整为0.0.11；Sub2API兼容0.2.4保持。包含PR31后的繁忙/延期、租约/额度、迁移244、记录页面与弹窗交互优化，功能源码与上一轮验收版本一致。
-- 发布门禁发现新增244漏登记checksums.json，已追加该条规范化SHA-256，全部旧迁移校验值保持；首次未提交状态的审计exit1保留，提交后复验。
-- 远端main仍为ce6082671，v0.0.11尚不存在；按八项必需检查通过的受保护PR合并后创建annotated tag，等待Release及五平台/双架构制品核验。发布完成前仍以v0.0.10为最近已核实正式版本。
-- 固定四角色保持/xy/artifacts/openai-iq-check下原路径，发版前归档备份在pre-v011-release，最终事务与制品验证追加同一VERIFICATION.txt。
+- 用户授权的提交、推送与发布已完成。PR #32固定head `46785250b5a495fc56318c89ccc008fe694bb78d` 的八项必需检查及合并后主线CI/Security Scan全部通过，合并提交 `b07824af9f94dc5dfd40b5e4789e17a62daae592`。正式annotated tag v0.0.11固定于该提交。
+- Release run `34951805467` 成功；正式Release非draft、非prerelease且为latest。五个平台安装包已实际下载并复算全部SHA-256，Linux amd64运行时显示0.0.11、兼容0.2.4及正确提交。
+- GHCR `0.0.11`、`latest`、`0.0`、`0` 均核实为 `sha256:d3a8d1ca6fe85236dadd6dd559fecae6eaf94de9b2dc7a1e8f4703ebb9db2a97`，包含linux/amd64与linux/arm64，两个架构OCI版本与revision正确。
+- 新版包含减少延期与繁忙、事务额度/冷却/租约保护、追加迁移244、精简列表和检测记录交互，以及PR31修复。发布门禁补齐244的checksums.json登记与规范目录归属；历史SQL和所有既有迁移校验值保持不变。
+- 本轮未连接生产，也未部署、停止、重启、备份或恢复任何线上实例；发布到GitHub/GHCR不等于生产已升级。历史生产脚本继续禁止运行。
+- 收尾记录作为文档提交推送至原fix/iq-detection-operations分支；已发布tag保持不可变。四角色仍位于/xy/artifacts/openai-iq-check，原始0.0.7累计基线保留，补充本轮0.0.10→0.0.11→0.0.10实际对照，源码与交付最终哈希以v011-final-result.json为准。
 
 ### 最终审查与减少延期（2026-09-15）
 
@@ -46,25 +47,25 @@
 - 最终相关后端单测、真实 PostgreSQL/Redis 集成、前端相关测试、类型/i18n/lint/生产构建、服务编译和独立 go vet 均成功；六输入 BASELINE/MODIFIED/ROLLBACK 通过，累计补丁可重建相同 SHA-256 的归档。综合静态检查首轮 SIGKILL、低内存重试 exit 4 超时，不能把其中 0 issues 当作成功；缓存复验最终结果见 VERIFICATION.txt。保留原有一项 Redis 批量负载集成测试跳过及构建体积提示。
 - 用户补正生产用户名为 ubuntu。首次密码认证成功，后台复用连接失效后，后续 SSH 返回 Connection refused，尚未成功读取任何远端命令输出；HTTP IP 仍返回 Caddy 308，缺真实域名/SNI。生产内部只读审计仍受阻。本轮未部署、发版或发出真实模型请求。方案见 `openspec/changes/iq-detection-operations/`。
 
-最后更新：`2026-09-15T08:41:00Z`（UTC）；下表发布信息保持 v0.0.10。
+最后更新：`2026-09-15T09:31:43Z`（UTC）；下表发布信息已更新为 v0.0.11。
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
 | 当前分支 | 原工作区 main/ce6082671；本次独立副本 fix/iq-detection-operations |
-| 发布提交 | `v0.0.10` / `e695c0356c972f398045f87b28a9cccda8a66176`，PR #29 |
-| 工作树 | 原工作区干净；独立副本包含本轮未提交的繁忙调度、界面、测试和规范改进 |
-| XY2API 产品版本 | `VERSION` 与 `UPSTREAM_BASE.json.xy2api_version` 均为 `0.0.11`；待本轮发布，最近已核验正式版本为0.0.10 |
+| 发布提交 | `v0.0.11` / `b07824af9f94dc5dfd40b5e4789e17a62daae592`，PR #32 |
+| 工作树 | 原工作区main干净；独立副本的功能已合入PR #32并发布，收尾文档在原分支提交推送 |
+| XY2API 产品版本 | `VERSION` 与 `UPSTREAM_BASE.json.xy2api_version` 均为 `0.0.11`；正式latest、五平台包与双架构镜像已核验 |
 | 已审计的 Sub2API 基线 | `v0.2.4` / commit `5de5e2bed035d43591a2e10e51f420ef6a84eb98`；已通过 PR `#22` 合入 `main` |
 | 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，7 个人工冲突均已记录；同步 PR [#22](https://github.com/liulixin-lex/xy2api/pull/22) 以 merge commit `ea48f08fc8` 合入 |
 | 本地远端 | `origin` 可读写；`upstream` 仅允许 fetch，push URL 为 `DISABLED` |
 | 当前环境工具 | git、Python、gh、Docker、Node、pnpm；本轮使用交付目录 Go 1.27.1 工具链与 /www 临时构建缓存 |
 
-Sub2API 兼容基线保持 `v0.2.4`。下方历史日志保留原样；响应兼容和监测改进已在v0.0.10发布，没有升级生产实例。
+Sub2API 兼容基线保持 `v0.2.4`。下方历史日志保留原样；最新优化已在v0.0.11发布，本轮没有升级生产实例。
 
 ## 进行中的工作
 
-- `20260915-v0.0.11-release`：用户已明确授权提交、推送和发布v0.0.11，正在核验版本、受保护PR与发布制品。对象保持原独立worktree；生产部署、重启和其他线上操作仍禁止。
+- `20260915-v0.0.11-release`：发布与制品核验完成；PR #32及主线检查、Release、五包校验和及双架构OCI/别名均通过。收尾记录通过原分支推送，四角色最终核验见v011-final-result.json。无生产连接或部署。
 
 - `20260915-iq-final-audit`：本地代码修复及验收已完成，最终服务层静态检查与嵌入前端编译均通过。原四角色备份与源码哈希在pre-final-audit；交付归档重建、四角色重读与最终哈希由final-audit-closeout.mjs和final-audit-finalize.mjs记录到site-review-final-result.json，checkpoint只允许本地续作，禁止生产操作。
 
@@ -562,3 +563,12 @@ pnpm --dir frontend run build
 
 - 用户授权提交、推送及发布0.0.11。本轮仅使用原worktree和GitHub发布流程，不连接或部署生产。业务源码与final-audit最终哈希一致，只增加发布版本和交接文档。
 - 产品VERSION及UPSTREAM_BASE.json.xy2api_version从0.0.10改为0.0.11，兼容版本不变；pre-v011-release保留前一版本四角色和版本文件。准备提交后同步受保护main，等待远端检查和制品结果；最终发布事件另行追加。
+
+### 2026-09-15T09:31:43Z — `20260915-v0.0.11-release` — 发布与制品验收完成
+
+- 执行：提交fe2c965c1后合并既有main，发布门禁发现新增迁移校验清单及新规范目录分类缺漏，分别以0538ce2f5和46785250b修复并通过审计。PR #32八项必需检查全部成功后合入b07824af9f94dc5dfd40b5e4789e17a62daae592，主线CI34950762053与Security Scan34950761965成功。保留首次dirty-tree/missing-manifest及未分类目录审计exit1，不计通过。
+- 发布：annotated v0.0.11固定上述合并提交，Release run34951805467成功，正式非草稿非预发布且为latest。原0.0.10标签未改写。产品版本0.0.11，Sub2API兼容0.2.4。
+- 制品：五个安装包全部下载与checksums.txt逐项复算一致；实际运行Linux amd64的-version成功显示版本、兼容版本和完整提交。GHCR两架构version/revision正确，0.0.11/latest/0.0/0同digest sha256:d3a8d1ca6fe85236dadd6dd559fecae6eaf94de9b2dc7a1e8f4703ebb9db2a97。
+- 源码对照：相同版本检查输入BASELINE为VERSION/provenance 0.0.10、MODIFIED为0.0.11、ROLLBACK恢复0.0.10，全部exit0；两个版本文件恢复哈希相同并重新应用。业务代码四个最终哈希与上一轮功能验收相同；只补版本、校验清单、规范归属及文档。
+- 交付：继续MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt与ROLLBACK.sh；v011-closeout.mjs验证最初累计基线0.0.7→0.0.11→0.0.7、补丁重建归档及回滚源码哈希，v011-finalize.mjs重读四角色与记录最终结果。收尾文档作为原分支后续提交，不移动已发布tag；源码差异仅PROJECT_MEMORY.md。
+- 范围：本轮没有连接任何生产机器，没有部署或恢复。历史误部署事件与用户禁令保留。发布目标已完成，后续只按新指令继续；不得从历史部署脚本恢复自动执行。
