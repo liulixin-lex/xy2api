@@ -39,6 +39,7 @@
       "docs/**",
       "frontend/**",
       "openspec/changes/stabilize-openai-iq-check/**",
+      "openspec/changes/iq-detection-operations/**",
       "skills/**",
       "tools/**"
     ],
