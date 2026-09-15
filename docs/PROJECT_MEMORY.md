@@ -4,6 +4,13 @@
 
 ## 当前交接状态
 
+### 本次审计修复PR（2026-09-15T08:17:27+08:00）
+
+- 正式PR：[#31](https://github.com/liulixin-lex/xy2api/pull/31)，状态OPEN、非草稿；来源 `gguuai:fix/v0.0.10-audit`，目标 `liulixin-lex/xy2api:main`。修复提交 `34a12809947d894c075ec165ab502609ad40c3d8`；最终分支头及检查状态以GitHub实时查询为准。
+- 21个文件范围已核对；18个业务/测试Git blob与已验收文件SHA-256完全相同。`git diff --check`、干净提交的upstream-sync audit通过。原项目、冻结修复副本及四角色归档保留。
+- 远端首次CI和Security Scan均为 `action_required`，尚未执行测试；等待原仓库维护者批准，不记为测试失败或通过。诊断下载PARTIAL和既有跳过项仍见审计报告。
+- 本轮仅提交PR，没有合并、发版或部署。下方发布交接表及原操作日志保留为历史。
+
 最后更新：`2026-09-14T16:35:00Z`（UTC）
 
 | 项目 | 当前事实 |
@@ -22,7 +29,7 @@ Sub2API 兼容基线保持 `v0.2.4`。下方历史日志保留原样；响应兼
 
 ## 进行中的工作
 
-- `20260915-v0.0.10-audit-pr`：基于原仓库main `c871151e` 整理已验证的审计修复；分支 `fix/v0.0.10-audit`，通过gguuai Fork提交正式PR。仅本轮源码/测试/说明；原项目和冻结审计副本保留，不合并、不发版、不部署。登记时间：2026-09-15T08:13:01+08:00。
+- `20260915-v0.0.10-audit-pr`：修复已提交正式PR #31，gguuai:fix/v0.0.10-audit → liulixin-lex:main；本地源码/测试哈希与提交审计通过。首次远端CI及Security Scan为action_required，等待维护者批准运行；未合并、发版或部署。
 
 - `20260914-v0.0.10-release`：功能PR #29、主线CI、安全扫描、Release及五平台包/双架构镜像均已通过；发布完成。本条记录随收尾文档合入，实际PR状态以GitHub为准。
 
@@ -452,3 +459,13 @@ pnpm --dir frontend run build
 - 同输入事务：3种误判输入BASELINE为smart、MODIFIED为unknown、ROLLBACK恢复smart；4个兼容控制输入保持，三次exit0；恢复源码哈希与审计基线相等，补丁重新应用与修复归档一致。
 - PR准备：18个业务/测试文件与已验收manifest逐字节一致；2份审计说明按原文复制，本记忆只增加本轮摘要。交付索引2条重复目录误报已更正，原日志/退出码保持；应用全套成功测试未重复运行。
 - 后续：执行提交门禁，向liulixin-lex/xy2api:main创建正式PR并核实head和CI实际状态。MCP记忆写入接口未提供，未同步。
+
+### 2026-09-15T08:17:27+08:00 — `20260915-v0.0.10-audit-pr` — 正式PR已提交，CI待批准
+
+- 执行者：Codex；当前会话未提供精确模型ID。
+- 已完成：创建gguuai/xy2api Fork，从原仓库main c871151e建立独立PR工作区；提交21个文件为34a128099，推送fix/v0.0.10-audit并创建正式PR #31。实际链接：https://github.com/liulixin-lex/xy2api/pull/31。
+- 核查：PR非草稿、OPEN、目标main、来源gguuai、head及21文件列表与本地一致；18个代码/测试blob和审计报告与已验收字节相同，OPENAI_IQ_CHECK.md仅按Git既有规则规范化CRLF。未夹带此前本地日志、归档或构建产物。差异检查及仓库upstream-sync audit退出0；独立侧审未发现必须先修正的问题。
+- 远端结果：CI run34912442447、Security Scan run34912442399均completed/action_required，未产生测试检查；保留等待维护者批准状态。此记录提交后的新head/CI结果以PR实时状态和本地PR_FINAL_RESULT.json为准。
+- 准备错误：Windows CRLF标题匹配与PowerShell管道编码导致两次准备断言；Git文档换行规范化触发一次过严字节断言；gh fork参数及jq引号各一次命令错误。逐项修正后成功，原始stdout/stderr/退出码留存在交付目录；业务代码及已完成应用测试未变。
+- 本轮索引修正：build-evidence-07两条交付根相对路径不再重复拼接目录，missing_streams=0；四角色验证文本随PR日志追加，源码ZIP/补丁/回滚脚本保持。
+- 下一步：维护者批准CI后审阅PR；未执行合并、发版、部署或真实模型请求。MCP记忆写入接口未提供，未同步。
