@@ -127,6 +127,29 @@ class UpstreamSyncTests(unittest.TestCase):
         self.assertIn("assets/partners/logos/cola-proxy.jpg", absent)
         self.assertIn("assets/partners/logos/ppdog.png", absent)
 
+    def test_v025_conflicts_are_explicit_manual_merges(self):
+        manual = SYNC.load_policy()["categories"]["manual_merge"]
+        for path in [
+            "README.md",
+            "README_CN.md",
+            "README_JA.md",
+            "backend/cmd/server/VERSION",
+            "backend/cmd/server/wire_gen.go",
+            "backend/internal/repository/user_platform_quota_repo.go",
+            "backend/internal/repository/user_platform_quota_repo_integration_test.go",
+            "backend/internal/repository/user_platform_quota_upsert_test.go",
+            "backend/internal/service/openai_gateway_request_body.go",
+            "backend/internal/service/openai_responses_ingress_compat.go",
+            "backend/internal/service/openai_ws_session_preemption_test.go",
+            "backend/internal/setup/setup_test.go",
+            "deploy/APPLE_CONTAINER.md",
+            "deploy/apple-container.sh",
+            "deploy/tests/apple-container-test.sh",
+            "frontend/src/views/__tests__/KeyUsageView.spec.ts",
+        ]:
+            with self.subTest(path=path):
+                self.assertTrue(SYNC.matches_any(path, manual))
+
     def test_migration_checksum_uses_trim_space_rule(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "001.sql"
