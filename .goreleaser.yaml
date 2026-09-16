@@ -130,19 +130,19 @@ docker_manifests:
       - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-arm64"
 
   - name_template: "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:latest"
-    skip_push: '{{ if eq .Env.DOCKERHUB_USERNAME "skip" }}true{{ else }}false{{ end }}'
+    skip_push: '{{ if eq .Env.DOCKERHUB_USERNAME "skip" }}true{{ else }}auto{{ end }}'
     image_templates:
       - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-amd64"
       - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-arm64"
 
   - name_template: "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Major }}.{{ .Minor }}"
-    skip_push: '{{ if eq .Env.DOCKERHUB_USERNAME "skip" }}true{{ else }}false{{ end }}'
+    skip_push: '{{ if eq .Env.DOCKERHUB_USERNAME "skip" }}true{{ else }}auto{{ end }}'
     image_templates:
       - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-amd64"
       - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-arm64"
 
   - name_template: "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Major }}"
-    skip_push: '{{ if eq .Env.DOCKERHUB_USERNAME "skip" }}true{{ else }}false{{ end }}'
+    skip_push: '{{ if eq .Env.DOCKERHUB_USERNAME "skip" }}true{{ else }}auto{{ end }}'
     image_templates:
       - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-amd64"
       - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-arm64"
@@ -154,16 +154,19 @@ docker_manifests:
       - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-arm64"
 
   - name_template: "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:latest"
+    skip_push: auto
     image_templates:
       - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-amd64"
       - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-arm64"
 
   - name_template: "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Major }}.{{ .Minor }}"
+    skip_push: auto
     image_templates:
       - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-amd64"
       - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-arm64"
 
   - name_template: "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Major }}"
+    skip_push: auto
     image_templates:
       - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-amd64"
       - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-arm64"

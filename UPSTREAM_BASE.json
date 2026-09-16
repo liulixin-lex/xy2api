@@ -1,60 +1,107 @@
 {
   "schema_version": 1,
   "upstream_repo": "Wei-Shaw/sub2api",
-  "upstream_tag": "v0.2.4",
-  "upstream_tag_ref": "sub2api/v0.2.4",
-  "upstream_tag_object": "d681d0798064ee0ffff376d19687d12f09fe600f",
+  "upstream_tag": "v0.2.5",
+  "upstream_tag_ref": "sub2api/v0.2.5",
+  "upstream_tag_object": "4af0e80db1b0bc7626dfb8fb76ccaffc6bb0dc17",
   "upstream_tag_signature": "unsigned",
-  "upstream_commit": "5de5e2bed035d43591a2e10e51f420ef6a84eb98",
-  "merge_base": "8fa67d477d6651a744754392a8982ea589c26ae6",
-  "fork_start": "8c95051b697c7869fd27a8953f14460c898cd595",
-  "merge_commit": "8149111e6767546c4c56a1149edcec88d6de95e4",
-  "module_normalization_commit": "600629c9cbdf9b25acbe5e9f3ec1c32571d42130",
-  "manual_resolution_commit": "4273603c3edc7e6e8c8ebc66a510b9994a51ca7d",
-  "compatibility_patch_commit": "c2a564158f63ca60e5335669fae2d9ef2f64bf6e",
-  "migration_adaptation_commit": "350760bbc2122c7178d5f5bf67e490ce9ed400a1",
-  "migration_checksum_commit": "42f64e99eaf881920bf9acb8366e36c31b48f67b",
-  "manual_resolution_record_commit": "c4cc81d9c540f71bc9ce64e671c6cc99181b7a7e",
-  "sync_branch": "sync/sub2api-v0.2.4",
-  "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/22",
-  "xy2api_version": "0.0.13",
-  "sub2api_compat_version": "0.2.4",
+  "upstream_commit": "86f93c28ee34cc74b629dafb748bd5ac5ca8c5ea",
+  "merge_base": "5de5e2bed035d43591a2e10e51f420ef6a84eb98",
+  "fork_start": "24e81a9f219b776cd081ae225a976aa1f97b4b43",
+  "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/39",
+  "xy2api_version": "0.1.0-rc.1",
+  "sub2api_compat_version": "0.2.5",
   "status": "resolved",
   "manual_resolutions": [
     {
       "path": "README.md",
       "status": "resolved",
-      "resolution": "Kept the XY2API product identity, repository, images, installation paths, and sponsor-free README; v0.2.4 feature behavior is documented through release notes and the versioned sync report."
+      "resolution": "retained the XY2API-owned English product documentation and excluded upstream sponsorship content"
     },
     {
       "path": "README_CN.md",
       "status": "resolved",
-      "resolution": "Kept the Chinese XY2API product, deployment, and sponsor-free documentation while integrating v0.2.4 functionality in code and release evidence."
+      "resolution": "retained the XY2API-owned Chinese product documentation and excluded upstream sponsorship content"
     },
     {
       "path": "README_JA.md",
       "status": "resolved",
-      "resolution": "Kept the Japanese XY2API branding and installation contract without importing upstream sponsorship content."
+      "resolution": "retained the XY2API-owned Japanese product documentation and excluded upstream sponsorship content"
     },
     {
       "path": "backend/cmd/server/VERSION",
       "status": "resolved",
-      "resolution": "Kept XY2API product version 0.0.6 independent from Sub2API during integration; it is advanced only by the dedicated RC commit."
+      "resolution": "set the synchronized candidate product version to 0.1.0-rc.1 independently of the upstream compatibility version"
     },
     {
-      "path": "backend/internal/service/ops_settings.go",
+      "path": "backend/cmd/server/wire_gen.go",
       "status": "resolved",
-      "resolution": "Adopted the upstream config-aware cleanup default so persisted ops settings follow ops.cleanup.enabled, with imports normalized to the XY2API module."
+      "resolution": "regenerated from the merged XY2API Wire provider graph using Go 1.27.0"
     },
     {
-      "path": "backend/internal/service/plugin_package.go",
+      "path": "backend/internal/repository/user_platform_quota_repo.go",
       "status": "resolved",
-      "resolution": "Kept XY2API's already validated archive-close implementation, which preserves the same upstream Windows handoff fix while also surfacing close failures before rename."
+      "resolution": "accepted v0.2.5 unlimited-quota row semantics while preserving the XY2API module path"
+    },
+    {
+      "path": "backend/internal/repository/user_platform_quota_repo_integration_test.go",
+      "status": "resolved",
+      "resolution": "accepted v0.2.5 quota repository coverage and normalized the XY2API module path"
+    },
+    {
+      "path": "backend/internal/repository/user_platform_quota_upsert_test.go",
+      "status": "resolved",
+      "resolution": "accepted v0.2.5 unlimited-quota upsert coverage and normalized the XY2API module path"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_request_body.go",
+      "status": "resolved",
+      "resolution": "accepted v0.2.5 large-body, metadata, priority-tier, and DeepSeek request behavior while retaining the XY2API trusted-user marker"
+    },
+    {
+      "path": "backend/internal/service/openai_responses_ingress_compat.go",
+      "status": "resolved",
+      "resolution": "accepted the v0.2.5 raw-body fast path and normalized the XY2API module path"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_session_preemption_test.go",
+      "status": "resolved",
+      "resolution": "accepted v0.2.5 execution-scope preemption coverage and normalized the XY2API module path"
+    },
+    {
+      "path": "backend/internal/setup/setup_test.go",
+      "status": "resolved",
+      "resolution": "accepted v0.2.5 target-database-first bootstrap coverage with XY2API database fixtures"
+    },
+    {
+      "path": "deploy/APPLE_CONTAINER.md",
+      "status": "resolved",
+      "resolution": "accepted the v0.2.5 Web UI update supervisor documentation with XY2API image, paths, and names"
+    },
+    {
+      "path": "deploy/apple-container.sh",
+      "status": "resolved",
+      "resolution": "accepted the v0.2.5 persistent runtime supervisor with XY2API image IDs, executable paths, user, and stack names"
     },
     {
       "path": "deploy/tests/apple-container-test.sh",
       "status": "resolved",
-      "resolution": "Integrated upstream optional subnet and mismatch coverage while retaining XY2API environment variables, resource names, and ownership boundaries."
+      "resolution": "accepted v0.2.5 supervisor assertions with XY2API fixtures and macOS execution semantics"
+    },
+    {
+      "path": "frontend/src/views/__tests__/KeyUsageView.spec.ts",
+      "status": "resolved",
+      "resolution": "accepted v0.2.5 subscription and daily usage coverage while preserving the XY2API site name"
+    }
+  ],
+  "migration_adaptations": [
+    {
+      "upstream": "238_opencode_go_platform.sql",
+      "xy2api": "247_opencode_go_platform.sql"
+    },
+    {
+      "upstream": "238_purge_unlimited_user_platform_quotas.sql",
+      "xy2api": "248_purge_unlimited_user_platform_quotas.sql"
     }
   ],
   "custom_patches": [
