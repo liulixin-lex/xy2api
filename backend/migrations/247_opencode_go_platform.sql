@@ -4,8 +4,8 @@
 -- 2. composite_model_routes.target_platform CHECK
 -- 3. channel_monitors / channel_monitor_request_templates provider CHECK
 --
--- Runs after 237_add_minimax_platform.sql. DROP ... IF EXISTS + 幂等守卫保证可重入；
--- 新约束是 237 的超集，必须同时保留 MiniMax。
+-- Runs after XY2API migration 246. DROP ... IF EXISTS + 幂等守卫保证可重入；
+-- 新约束是 239_add_minimax_platform.sql 的超集，必须同时保留 MiniMax。
 
 ALTER TABLE user_platform_quotas
     DROP CONSTRAINT IF EXISTS user_platform_quotas_platform_check;
