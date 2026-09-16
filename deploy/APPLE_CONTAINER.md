@@ -6,7 +6,7 @@ XY2API can run as a native three-service stack with Apple's `container` CLI. Thi
 
 Apple `container` support is intended for local development and operator-managed deployments on a Mac. Docker Compose remains the recommended production deployment path.
 
-Apple `container` 1.1 does not provide restart policies, automatic startup, workload health scheduling, a Docker API socket, or full Compose orchestration. `apple-container.sh` supplies ordered startup and readiness checks when you invoke it, but it is not a continuously running supervisor.
+Apple `container` 1.1 does not provide restart policies, automatic startup, workload health scheduling, a Docker API socket, or full Compose orchestration. `apple-container.sh` supplies ordered startup and readiness checks when you invoke it. Inside the application container, a small supervisor relaunches the XY2API process after the Web UI requests a restart; it does not restart stopped containers or the stack itself.
 
 ## Requirements
 
@@ -146,7 +146,7 @@ The script creates only resources carrying the `org.xy2api.stack=apple-container
 | Network | `xy2api-apple` |
 | Volumes | `xy2api-apple-data`, `xy2api-apple-postgres-data`, `xy2api-apple-redis-data` |
 
-The PostgreSQL volume is mounted at `/var/lib/postgresql`, retaining PostgreSQL 18's default child data directory. XY2API and Redis also store data in child directories below their Apple volume mount points. This is required because Apple named volumes do not have Docker's copy-up and mount-point ownership behavior.
+The PostgreSQL volume is mounted at `/var/lib/postgresql`, retaining PostgreSQL 18's default child data directory. XY2API data and its updatable runtime binary use separate child directories in `xy2api-apple-data`; Redis also stores data below its Apple volume mount point. This is required because Apple named volumes do not have Docker's copy-up and mount-point ownership behavior.
 
 ## Networking
 
@@ -157,6 +157,14 @@ All three services attach only to the private `xy2api-apple` network. Only the a
 The application container is intentionally recreated by every `up` and `restart` operation because dependency VM addresses can change after they stop. Application data remains in `xy2api-apple-data`.
 
 The script checks the published `/health` endpoint from macOS before reporting success. Approve the Local Network prompt on first startup. If the internal probe succeeds but the host-port probe fails with a connection reset, enable Local Network access for `container-runtime-linux`, run `container system stop` followed by `container system start`, and then run `up` again. Runtime upgrades may prompt for permission again.
+
+## Web UI Updates
+
+The Web UI uses the same update flow as the Docker deployment: it downloads a release over GitHub, atomically replaces the active executable, and asks the application to restart. Docker supplies the restart policy in a Compose deployment; `apple-container.sh` supplies an equivalent process supervisor inside the Apple application container.
+
+The active executable lives in `xy2api-apple-data` so a later `up`, `restart`, or `up --recreate` does not discard an update downloaded from the Web UI. The script records the configured base image ID alongside it; when `APPLE_CONTAINER_XY2API_IMAGE` resolves to a different image ID, the image's `/app/xy2api` becomes the new active executable. This keeps explicit image upgrades authoritative while preserving in-place updates across routine application-container recreation.
+
+If GitHub is not reachable directly, set `UPDATE_PROXY_URL` to a proxy address reachable from the Apple container VM. A proxy listening only on the Mac's `127.0.0.1` is not reachable as `127.0.0.1` from inside the VM; use an appropriately restricted host gateway listener instead.
 
 ## Backup and Upgrade
 
