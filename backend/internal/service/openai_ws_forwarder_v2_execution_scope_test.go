@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
