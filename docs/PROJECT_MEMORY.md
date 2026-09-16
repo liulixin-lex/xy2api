@@ -9,7 +9,7 @@
 - 用户已授权完整同步、受保护 PR 合并、`0.1.0-rc.1` 隔离验证与正式 `0.1.0` 发版；不包含生产部署或真实模型账号探测。
 - 起点为干净且与远端一致的 `main` / `b2c99a3cbcb45abc5aaef5164f8ed92a6c08aad2`，产品 `0.0.13`、兼容基线 `0.2.4`。目标为正式 annotated tag `v0.2.5`，tag object `4af0e80db1b0bc7626dfb8fb76ccaffc6bb0dc17`，commit `86f93c28ee34cc74b629dafb748bd5ac5ca8c5ea`，签名状态 `unsigned`。
 - 三方预检发现 16 个冲突，其中 10 个路径原先未登记。预检策略与 gRPC 安全修复已由受保护 [PR #38](https://github.com/liulixin-lex/xy2api/pull/38) 合入 `main`，合并提交 `24e81a9f219b776cd081ae225a976aa1f97b4b43`；gRPC 最终固定到修复 GO-2026-6443 与 GO-2026-6348 的 `v1.83.2`。
-- 标准同步分支 `sync/sub2api-v0.2.5` 已通过 `sync.py prepare` 生成：merge 提交 `d58eed562`，模块路径归一化提交 `c648844d7`，初始 provenance 提交 `498941314`。16 项人工冲突已逐项裁决，两条上游 `238_*` 迁移按只追加规则映射为 XY2API `247_*` 与 `248_*`；当前候选产品版本为 `0.1.0-rc.1`、兼容版本为 `0.2.5`。
+- 标准同步分支 `sync/sub2api-v0.2.5` 已通过 `sync.py prepare` 生成：merge 提交 `d58eed562`，模块路径归一化提交 `c648844d7`，初始 provenance 提交 `498941314`。16 项人工冲突已逐项裁决，两条上游 `238_*` 迁移按只追加规则映射为 XY2API `247_*` 与 `248_*`；当前候选产品版本为 `0.1.0-rc.1`、兼容版本为 `0.2.5`。同步 draft PR 为 [#39](https://github.com/liulixin-lex/xy2api/pull/39)。
 - 本地同步工具 14 项测试、迁移 295 项 checksum 校验、前端 Key Usage 4 项专项测试已通过；Apple Container 生命周期以受保护 PR 的 `macos-15` 门禁为准。完整 GoReleaser 配置被 v2.18.0 解析为有效但因既有弃用字段返回检查码 2，简化配置检查成功；RC 的稳定别名不变性仍须以实际发布验证。
 
 ### v0.0.13 发布（2026-09-15）
