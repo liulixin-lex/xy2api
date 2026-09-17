@@ -2,7 +2,6 @@ package service
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -54,7 +53,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	}
 
 	// 创建请求
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(body))
+	req, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, upstreamURL, body, GroupPromptAnthropic)
 	if err != nil {
 		return nil, fmt.Errorf("create upstream request: %w", err)
 	}

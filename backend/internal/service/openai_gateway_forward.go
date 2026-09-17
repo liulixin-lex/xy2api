@@ -1404,7 +1404,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// previous_response_id，避免携带状态字段被上游拒绝。
 	body = normalizeDeepSeekResponsesRequestBody(account, body)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
+	req, err := newGroupPromptUpstreamRequest(ctx, "POST", targetURL, body, GroupPromptResponses)
 	if err != nil {
 		return nil, err
 	}

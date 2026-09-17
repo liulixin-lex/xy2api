@@ -328,11 +328,15 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 	}
 
+	wirePayload, promptErr := applyGroupSystemPromptWSMap(ctx, payload)
+	if promptErr != nil {
+		return nil, promptErr
+	}
 	if err := s.performOpenAIWSGeneratePrewarm(
 		ctx,
 		lease,
 		decision,
-		payload,
+		wirePayload,
 		previousResponseID,
 		reqBody,
 		account,
@@ -342,7 +346,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		return nil, err
 	}
 
-	if err := lease.WriteJSONWithContextTimeout(ctx, payload, s.openAIWSWriteTimeout()); err != nil {
+	if err := lease.WriteJSONWithContextTimeout(ctx, wirePayload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
 			"write_request_fail account_id=%d conn_id=%s cause=%s payload_bytes=%d",

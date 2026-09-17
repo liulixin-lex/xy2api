@@ -14,7 +14,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 )
 
-const apiKeyAuthSnapshotVersion = 25 // v25: group model allowlist and model-scoped long-context pricing fields
+const apiKeyAuthSnapshotVersion = 26 // v26: group badge visibility and system prompt policy
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -383,6 +383,8 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			Name:                            apiKey.Group.Name,
 			Platform:                        apiKey.Group.Platform,
 			IsExclusive:                     apiKey.Group.IsExclusive,
+			ShowExclusiveBadge:              apiKey.Group.ShowExclusiveBadge,
+			SystemPromptConfig:              apiKey.Group.SystemPromptConfig.Clone(),
 			Status:                          apiKey.Group.Status,
 			SubscriptionType:                apiKey.Group.SubscriptionType,
 			RateMultiplier:                  apiKey.Group.RateMultiplier,
@@ -486,6 +488,8 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			Name:                            snapshot.Group.Name,
 			Platform:                        snapshot.Group.Platform,
 			IsExclusive:                     snapshot.Group.IsExclusive,
+			ShowExclusiveBadge:              snapshot.Group.ShowExclusiveBadge,
+			SystemPromptConfig:              snapshot.Group.SystemPromptConfig.Clone(),
 			Status:                          snapshot.Group.Status,
 			Hydrated:                        true,
 			SubscriptionType:                snapshot.Group.SubscriptionType,

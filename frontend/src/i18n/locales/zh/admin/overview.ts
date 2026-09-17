@@ -783,6 +783,23 @@ export default {
 
     // Groups Management
     groups: {
+      showExclusiveBadge: '向用户显示专属标识',
+      systemPrompt: {
+        title: '系统提示词',
+        common: '分组通用提示词',
+        scope: '通用提示词应用范围',
+        all: '全部模型',
+        selected: '指定模型',
+        models: '应用模型',
+        model: '模型',
+        modelPlaceholder: '选择或输入模型名称',
+        overrides: '模型独立提示词（覆盖通用）',
+        modelPrompt: '模型独立提示词',
+        addModel: '添加模型配置',
+        selectModelsError: '请至少选择一个应用模型',
+        modelRequired: '请选择或填写模型名称',
+        duplicateModel: '模型 {model} 已有配置，请合并后保存'
+      },
       title: '分组管理',
       description: '管理 API 密钥分组和费率配置',
       searchGroups: '搜索分组...',

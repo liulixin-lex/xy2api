@@ -14,6 +14,7 @@ import (
 type OpenAIMessagesDispatchModelConfig = domain.OpenAIMessagesDispatchModelConfig
 type GroupCodexModelsManifestConfig = domain.GroupCodexModelsManifestConfig
 type ReasoningEffortMapping = domain.ReasoningEffortMapping
+type GroupSystemPromptConfig = domain.GroupSystemPromptConfig
 
 const (
 	LongContextPricingScopeAll      = "all"
@@ -33,6 +34,8 @@ type Group struct {
 	PeakEnd            string
 	PeakRateMultiplier float64
 	IsExclusive        bool
+	ShowExclusiveBadge bool
+	SystemPromptConfig GroupSystemPromptConfig
 	Status             string
 	Hydrated           bool // indicates the group was loaded from a trusted repository source
 	// DuplicateOperationID is internal persistence metadata used only to recover

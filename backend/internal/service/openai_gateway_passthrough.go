@@ -608,7 +608,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	// DeepSeek / Kimi 原生 Responses 端点为无状态实现（见 normalizeDeepSeekResponsesRequestBody）。
 	body = normalizeDeepSeekResponsesRequestBody(account, body)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
+	req, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, targetURL, body, GroupPromptResponses)
 	if err != nil {
 		return nil, err
 	}

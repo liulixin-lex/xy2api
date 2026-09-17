@@ -22148,6 +22148,8 @@ type GroupMutation struct {
 	peak_rate_multiplier                    *float64
 	addpeak_rate_multiplier                 *float64
 	is_exclusive                            *bool
+	show_exclusive_badge                    *bool
+	system_prompt_config                    *domain.GroupSystemPromptConfig
 	status                                  *string
 	duplicate_operation_id                  *string
 	platform                                *string
@@ -22816,6 +22818,78 @@ func (m *GroupMutation) OldIsExclusive(ctx context.Context) (v bool, err error) 
 // ResetIsExclusive resets all changes to the "is_exclusive" field.
 func (m *GroupMutation) ResetIsExclusive() {
 	m.is_exclusive = nil
+}
+
+// SetShowExclusiveBadge sets the "show_exclusive_badge" field.
+func (m *GroupMutation) SetShowExclusiveBadge(b bool) {
+	m.show_exclusive_badge = &b
+}
+
+// ShowExclusiveBadge returns the value of the "show_exclusive_badge" field in the mutation.
+func (m *GroupMutation) ShowExclusiveBadge() (r bool, exists bool) {
+	v := m.show_exclusive_badge
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldShowExclusiveBadge returns the old "show_exclusive_badge" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldShowExclusiveBadge(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldShowExclusiveBadge is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldShowExclusiveBadge requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldShowExclusiveBadge: %w", err)
+	}
+	return oldValue.ShowExclusiveBadge, nil
+}
+
+// ResetShowExclusiveBadge resets all changes to the "show_exclusive_badge" field.
+func (m *GroupMutation) ResetShowExclusiveBadge() {
+	m.show_exclusive_badge = nil
+}
+
+// SetSystemPromptConfig sets the "system_prompt_config" field.
+func (m *GroupMutation) SetSystemPromptConfig(dspc domain.GroupSystemPromptConfig) {
+	m.system_prompt_config = &dspc
+}
+
+// SystemPromptConfig returns the value of the "system_prompt_config" field in the mutation.
+func (m *GroupMutation) SystemPromptConfig() (r domain.GroupSystemPromptConfig, exists bool) {
+	v := m.system_prompt_config
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSystemPromptConfig returns the old "system_prompt_config" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldSystemPromptConfig(ctx context.Context) (v domain.GroupSystemPromptConfig, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSystemPromptConfig is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSystemPromptConfig requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSystemPromptConfig: %w", err)
+	}
+	return oldValue.SystemPromptConfig, nil
+}
+
+// ResetSystemPromptConfig resets all changes to the "system_prompt_config" field.
+func (m *GroupMutation) ResetSystemPromptConfig() {
+	m.system_prompt_config = nil
 }
 
 // SetStatus sets the "status" field.
@@ -26065,7 +26139,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 68)
+	fields := make([]string, 0, 70)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26098,6 +26172,12 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.is_exclusive != nil {
 		fields = append(fields, group.FieldIsExclusive)
+	}
+	if m.show_exclusive_badge != nil {
+		fields = append(fields, group.FieldShowExclusiveBadge)
+	}
+	if m.system_prompt_config != nil {
+		fields = append(fields, group.FieldSystemPromptConfig)
 	}
 	if m.status != nil {
 		fields = append(fields, group.FieldStatus)
@@ -26300,6 +26380,10 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.PeakRateMultiplier()
 	case group.FieldIsExclusive:
 		return m.IsExclusive()
+	case group.FieldShowExclusiveBadge:
+		return m.ShowExclusiveBadge()
+	case group.FieldSystemPromptConfig:
+		return m.SystemPromptConfig()
 	case group.FieldStatus:
 		return m.Status()
 	case group.FieldDuplicateOperationID:
@@ -26445,6 +26529,10 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldPeakRateMultiplier(ctx)
 	case group.FieldIsExclusive:
 		return m.OldIsExclusive(ctx)
+	case group.FieldShowExclusiveBadge:
+		return m.OldShowExclusiveBadge(ctx)
+	case group.FieldSystemPromptConfig:
+		return m.OldSystemPromptConfig(ctx)
 	case group.FieldStatus:
 		return m.OldStatus(ctx)
 	case group.FieldDuplicateOperationID:
@@ -26644,6 +26732,20 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetIsExclusive(v)
+		return nil
+	case group.FieldShowExclusiveBadge:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetShowExclusiveBadge(v)
+		return nil
+	case group.FieldSystemPromptConfig:
+		v, ok := value.(domain.GroupSystemPromptConfig)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSystemPromptConfig(v)
 		return nil
 	case group.FieldStatus:
 		v, ok := value.(string)
@@ -27587,6 +27689,12 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldIsExclusive:
 		m.ResetIsExclusive()
+		return nil
+	case group.FieldShowExclusiveBadge:
+		m.ResetShowExclusiveBadge()
+		return nil
+	case group.FieldSystemPromptConfig:
+		m.ResetSystemPromptConfig()
 		return nil
 	case group.FieldStatus:
 		m.ResetStatus()

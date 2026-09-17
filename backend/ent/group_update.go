@@ -195,6 +195,34 @@ func (_u *GroupUpdate) SetNillableIsExclusive(v *bool) *GroupUpdate {
 	return _u
 }
 
+// SetShowExclusiveBadge sets the "show_exclusive_badge" field.
+func (_u *GroupUpdate) SetShowExclusiveBadge(v bool) *GroupUpdate {
+	_u.mutation.SetShowExclusiveBadge(v)
+	return _u
+}
+
+// SetNillableShowExclusiveBadge sets the "show_exclusive_badge" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableShowExclusiveBadge(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetShowExclusiveBadge(*v)
+	}
+	return _u
+}
+
+// SetSystemPromptConfig sets the "system_prompt_config" field.
+func (_u *GroupUpdate) SetSystemPromptConfig(v domain.GroupSystemPromptConfig) *GroupUpdate {
+	_u.mutation.SetSystemPromptConfig(v)
+	return _u
+}
+
+// SetNillableSystemPromptConfig sets the "system_prompt_config" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableSystemPromptConfig(v *domain.GroupSystemPromptConfig) *GroupUpdate {
+	if v != nil {
+		_u.SetSystemPromptConfig(*v)
+	}
+	return _u
+}
+
 // SetStatus sets the "status" field.
 func (_u *GroupUpdate) SetStatus(v string) *GroupUpdate {
 	_u.mutation.SetStatus(v)
@@ -1631,6 +1659,12 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
 	}
+	if value, ok := _u.mutation.ShowExclusiveBadge(); ok {
+		_spec.SetField(group.FieldShowExclusiveBadge, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.SystemPromptConfig(); ok {
+		_spec.SetField(group.FieldSystemPromptConfig, field.TypeJSON, value)
+	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(group.FieldStatus, field.TypeString, value)
 	}
@@ -2422,6 +2456,34 @@ func (_u *GroupUpdateOne) SetIsExclusive(v bool) *GroupUpdateOne {
 func (_u *GroupUpdateOne) SetNillableIsExclusive(v *bool) *GroupUpdateOne {
 	if v != nil {
 		_u.SetIsExclusive(*v)
+	}
+	return _u
+}
+
+// SetShowExclusiveBadge sets the "show_exclusive_badge" field.
+func (_u *GroupUpdateOne) SetShowExclusiveBadge(v bool) *GroupUpdateOne {
+	_u.mutation.SetShowExclusiveBadge(v)
+	return _u
+}
+
+// SetNillableShowExclusiveBadge sets the "show_exclusive_badge" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableShowExclusiveBadge(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetShowExclusiveBadge(*v)
+	}
+	return _u
+}
+
+// SetSystemPromptConfig sets the "system_prompt_config" field.
+func (_u *GroupUpdateOne) SetSystemPromptConfig(v domain.GroupSystemPromptConfig) *GroupUpdateOne {
+	_u.mutation.SetSystemPromptConfig(v)
+	return _u
+}
+
+// SetNillableSystemPromptConfig sets the "system_prompt_config" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableSystemPromptConfig(v *domain.GroupSystemPromptConfig) *GroupUpdateOne {
+	if v != nil {
+		_u.SetSystemPromptConfig(*v)
 	}
 	return _u
 }
@@ -3891,6 +3953,12 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.ShowExclusiveBadge(); ok {
+		_spec.SetField(group.FieldShowExclusiveBadge, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.SystemPromptConfig(); ok {
+		_spec.SetField(group.FieldSystemPromptConfig, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(group.FieldStatus, field.TypeString, value)

@@ -401,7 +401,7 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 		body = sanitized
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
+	req, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, targetURL, body, GroupPromptAnthropic)
 	if err != nil {
 		return nil, err
 	}
@@ -521,6 +521,10 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 
 	body = sanitizeCountTokensRequestBody(body)
 
+	body, err := ApplyGroupSystemPrompt(ctx, body, GroupPromptAnthropic)
+	if err != nil {
+		return nil, nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err

@@ -786,6 +786,23 @@ export default {
 
     // Groups
     groups: {
+      showExclusiveBadge: 'Show exclusive badge to users',
+      systemPrompt: {
+        title: 'System prompts',
+        common: 'Group default prompt',
+        scope: 'Default prompt scope',
+        all: 'All models',
+        selected: 'Selected models',
+        models: 'Apply to models',
+        model: 'Model',
+        modelPlaceholder: 'Select or enter a model name',
+        overrides: 'Model prompts (override default)',
+        modelPrompt: 'Model system prompt',
+        addModel: 'Add model configuration',
+        selectModelsError: 'Select at least one model',
+        modelRequired: 'Select or enter a model name',
+        duplicateModel: 'Model {model} already has a configuration. Merge its entries before saving.'
+      },
       title: 'Group Management',
       description: 'Manage API key groups and rate multipliers',
       searchGroups: 'Search groups...',

@@ -72,8 +72,15 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	case "generateContent", "streamGenerateContent":
 		// ok
 	case "countTokens":
-		// 直接返回空值，不透传上游
-		c.JSON(http.StatusOK, map[string]any{"totalTokens": 0})
+		countBody, err := ApplyGroupSystemPrompt(ctx, body, GroupPromptGemini)
+		if err != nil {
+			return nil, s.writeGoogleError(c, http.StatusBadRequest, err.Error())
+		}
+		estimated := 0
+		if !bytes.Equal(countBody, body) {
+			estimated = estimateGeminiCountTokens(countBody)
+		}
+		c.JSON(http.StatusOK, map[string]any{"totalTokens": estimated})
 		return &ForwardResult{
 			RequestID:    "",
 			Usage:        ClaudeUsage{},
@@ -203,7 +210,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 
 				fallbackWrapped, err := s.wrapV1InternalRequest(projectID, fallbackModel, injectedBody)
 				if err == nil {
-					fallbackReq, err := antigravity.NewAPIRequest(ctx, upstreamAction, accessToken, fallbackWrapped)
+					fallbackReq, err := newGroupPromptAntigravityRequest(ctx, antigravity.BaseURL, upstreamAction, accessToken, fallbackWrapped)
 					if err == nil {
 						fallbackResp, err := s.httpUpstream.Do(fallbackReq, proxyURL, account.ID, account.Concurrency)
 						if err == nil && fallbackResp.StatusCode < 400 {

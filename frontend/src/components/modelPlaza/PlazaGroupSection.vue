@@ -19,7 +19,7 @@
           always-show-rate
         />
         <span
-          v-if="group.is_exclusive"
+          v-if="group.is_exclusive && group.show_exclusive_badge !== false"
           class="inline-flex items-center gap-1 rounded-md bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-600 dark:bg-purple-900/20 dark:text-purple-400"
         >
           <Icon name="shield" size="xs" class="h-3 w-3" />

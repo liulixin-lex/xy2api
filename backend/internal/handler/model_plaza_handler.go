@@ -90,6 +90,7 @@ type modelPlazaGroup struct {
 	PeakEnd            string   `json:"peak_end"`
 	PeakRateMultiplier float64  `json:"peak_rate_multiplier"`
 	IsExclusive        bool     `json:"is_exclusive"`
+	ShowExclusiveBadge bool     `json:"show_exclusive_badge"`
 	// 生图独立倍率：为 true 时图片计费模型的实付倍率取 ImageRateMultiplier，
 	// 不取分组/用户专属倍率。
 	ImageRateIndependent bool    `json:"image_rate_independent"`
@@ -212,6 +213,7 @@ func toModelPlazaGroupDTO(g *service.PlazaGroup, userRates map[int64]float64) mo
 		PeakEnd:                   g.PeakEnd,
 		PeakRateMultiplier:        g.PeakRateMultiplier,
 		IsExclusive:               g.IsExclusive,
+		ShowExclusiveBadge:        g.ShowExclusiveBadge,
 		ImageRateIndependent:      g.ImageRateIndependent,
 		ImageRateMultiplier:       g.ImageRateMultiplier,
 		LongContextPricingEnabled: g.LongContextPricingEnabled,

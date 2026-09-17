@@ -20,6 +20,15 @@ const componentPath = resolve(dirname(fileURLToPath(import.meta.url)), '../Avail
 const componentSource = readFileSync(componentPath, 'utf8')
 
 describe('AvailableChannelsTable scroll integration', () => {
+  it('keeps hidden exclusive groups visible without a public or exclusive classification', () => {
+    const hiddenRows = structuredClone(rows)
+    hiddenRows[0].platforms[0].groups = [{ ...hiddenRows[0].platforms[0].groups[0], name: 'Neutral group', show_exclusive_badge: false }]
+    const wrapper = mountTable({ rows: hiddenRows })
+    expect(wrapper.text()).toContain('Neutral group')
+    expect(wrapper.text()).not.toContain('availableChannels.exclusive')
+    expect(wrapper.text()).not.toContain('availableChannels.public')
+    expect(wrapper.find('[data-icon="shield"]').exists()).toBe(false)
+  })
   // #4555：根元素必须是 TablePageLayout 滚动链约定的 .table-wrapper，
   // 否则内容超出视口高度时被外层 overflow-hidden 裁剪且没有滚动条。
   it('mounts the table on the .table-wrapper scroll hook', () => {

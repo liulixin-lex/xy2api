@@ -646,7 +646,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 			}
 
 			restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
+			upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, restGeminiReq, GroupPromptGemini)
 			if err != nil {
 				return nil, "", err
 			}
@@ -698,7 +698,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				wrapped["request"] = inner
 				wrappedBytes, _ := json.Marshal(wrapped)
 
-				upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(wrappedBytes))
+				upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, wrappedBytes, GroupPromptGemini)
 				if err != nil {
 					return nil, "", err
 				}
@@ -720,7 +720,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				}
 
 				restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
-				upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
+				upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, restGeminiReq, GroupPromptGemini)
 				if err != nil {
 					return nil, "", err
 				}
@@ -751,7 +751,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 			}
 
 			restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
+			upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, restGeminiReq, GroupPromptGemini)
 			if err != nil {
 				return nil, "", err
 			}
@@ -1168,6 +1168,14 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	// Some Gemini upstreams validate tool call parts strictly; ensure any `functionCall` part includes a
 	// `thoughtSignature` to avoid frequent INVALID_ARGUMENT 400s.
 	body = ensureGeminiFunctionCallThoughtSignatures(body)
+	countBody := body
+	if action == "countTokens" {
+		var err error
+		countBody, err = ApplyGroupSystemPrompt(ctx, body, GroupPromptGemini)
+		if err != nil {
+			return nil, s.writeGoogleError(c, http.StatusBadRequest, err.Error())
+		}
+	}
 
 	mappedModel := originalModel
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
@@ -1210,7 +1218,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				return nil, "", err
 			}
 
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))
+			upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, body, GroupPromptGemini)
 			if err != nil {
 				return nil, "", err
 			}
@@ -1257,7 +1265,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				wrapped["request"] = inner
 				wrappedBytes, _ := json.Marshal(wrapped)
 
-				upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(wrappedBytes))
+				upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, wrappedBytes, GroupPromptGemini)
 				if err != nil {
 					return nil, "", err
 				}
@@ -1278,7 +1286,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					return nil, "", err
 				}
 
-				upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))
+				upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, body, GroupPromptGemini)
 				if err != nil {
 					return nil, "", err
 				}
@@ -1304,7 +1312,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				return nil, "", err
 			}
 
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))
+			upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, body, GroupPromptGemini)
 			if err != nil {
 				return nil, "", err
 			}
@@ -1352,7 +1360,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				continue
 			}
 			if action == "countTokens" {
-				estimated := estimateGeminiCountTokens(body)
+				estimated := estimateGeminiCountTokens(countBody)
 				c.JSON(http.StatusOK, map[string]any{"totalTokens": estimated})
 				return &ForwardResult{
 					RequestID:     "",
@@ -1424,7 +1432,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				continue
 			}
 			if action == "countTokens" {
-				estimated := estimateGeminiCountTokens(body)
+				estimated := estimateGeminiCountTokens(countBody)
 				c.JSON(http.StatusOK, map[string]any{"totalTokens": estimated})
 				return &ForwardResult{
 					RequestID:     "",
@@ -1465,7 +1473,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		// This avoids Gemini SDKs failing hard during preflight token counting.
 		// Checked before error policy so it always works regardless of custom error codes.
 		if action == "countTokens" && isOAuth && isGeminiInsufficientScope(resp.Header, respBody) {
-			estimated := estimateGeminiCountTokens(body)
+			estimated := estimateGeminiCountTokens(countBody)
 			c.JSON(http.StatusOK, map[string]any{"totalTokens": estimated})
 			return &ForwardResult{
 				RequestID:       requestID,

@@ -4,6 +4,14 @@
 
 ## 当前交接状态
 
+### 分组专属标识与系统提示词本地交付（2026-09-17）
+
+- 基线为 `main / 41fd8591c25b075e3f95df58d3b46283a3a70b68`；实现位于 `/xy/artifacts/group-system-prompts/work`，原仓库保持不变。新增 `show_exclusive_badge` 与管理员专用 `system_prompt_config`，专属授权不变，模型独立提示词优先于通用提示词，按映射前客户端模型名匹配。
+- 已接入标准/简易模式的新建与编辑表单、用户模型广场和渠道展示；HTTP 对话协议、token 计数及 Responses WebSocket 在最终出站阶段前置提示词并保留客户端内容。新增迁移 249、Ent 生成代码、认证投影与版本 26 缓存快照、数据库失效触发器。详见 `docs/GROUP_SYSTEM_PROMPTS.md`。
+- 功能验证已通过：后端 domain/service/handler/middleware/routes/repository 定向回归；真实 PostgreSQL 18.1 / Redis 8.4 持久化、认证投影、两个实例的更新/清空失效；59 项前端回归、i18n、类型、lint 和生产构建；1280/390 浏览器表单保存、校验和隐藏标识展示。测试使用本地模拟上游与隔离数据。
+- 固定四角色为 `/xy/artifacts/group-system-prompts/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；回滚依赖同目录 `BASELINE.tar.gz`，只恢复源码归档。最终静态检查、嵌入前端服务构建、BASELINE/MODIFIED/ROLLBACK 对照与补丁重建的字面输出、退出状态及哈希以 `VERIFICATION.txt`、`FINAL_RESULT.json` 为准。首次工具版本不匹配、内存限制中断及测试工厂/模拟接口修正均保留记录，不计为成功。
+- 用户后续授权本地提交；在同一源码副本提交已验收功能，提交结果与四角色重新核验记录见交付目录 `COMMIT_RESULT.json`。不推送、发版、部署生产或调用真实模型账号；本机预览使用模拟数据，不能视为生产网关。
+
 ### Sub2API v0.2.5 / XY2API 0.1.0 同步发布（2026-09-16）
 
 - 用户已授权完整同步、受保护 PR 合并、`0.1.0-rc.1` 隔离验证与正式 `0.1.0` 发版；不包含生产部署或真实模型账号探测。
@@ -102,6 +110,8 @@
 Sub2API 兼容基线已更新到 `v0.2.5`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+- `20260917-group-prompts-commit`：本地提交交接已登记；实际提交 SHA、干净状态与归档一致性由 `COMMIT_RESULT.json` 记录，无后续远端操作。
 
 - `20260916-sub2api-v0.2.5-xy2api-v0.1.0`：同步、RC、正式发版与全部制品/隔离验收已完成；本条最终文档通过受保护 PR 固化后执行本地 main 同步、最终归档和专用测试资源清理。固定证据目录为 `/xy/artifacts/upstream-sync-v0.2.5-xy2api-0.1.0/`，以 `FINAL_RESULT.json` 记录收尾提交与四角色哈希。无生产部署或真实账号探测。
 
@@ -664,3 +674,10 @@ pnpm --dir frontend run build
 - RC `22527fc5c` 与正式 `380a9260e` 标签保持不可变。RC/正式五平台 SHA-256、二进制版本来源、双架构 OCI 与镜像别名均通过；正式 Release latest=true。DockerHub 按缺少凭据跳过。
 - XY2API 0.0.13 与官方 Sub2API 0.2.4 数据库升级到 RC 均成功；实际独立恢复 PostgreSQL、Redis、应用备份后旧版可运行，数据标记和删除前配额恢复。正式镜像全新安装通过。
 - 四角色采用固定路径，源码回滚与补丁重建成功；最终归档随本条文档合并更新。临时构建缓存及 8 GiB 专用 swap 已清理，剩余专用容器/网络/目录由收尾脚本清理，结果记录 `FINAL_RESULT.json`。本轮没有生产部署或真实账号探测。
+
+### 2026-09-17 — `20260917-group-prompts-commit` — 本地提交交接
+
+- 用户要求提交已验收的分组功能；对象仍为 `/xy/artifacts/group-system-prompts/work`，基线 `41fd8591c`，原 `/xy/xy2api` 保持不变。
+- 提交包含 `show_exclusive_badge`、`system_prompt_config`、迁移及生成代码、管理表单、协议注入、回归测试与交接文档。业务源码复用上一轮验收结果，本轮只补充本文件并核验提交内容。
+- 同输入 BASELINE 显示专属标识、MODIFIED 隐藏、ROLLBACK 恢复显示，三者保持专属权限与分组可见；补丁重建与恢复哈希记录继续追加原四角色。实际本地提交和检查退出结果以 `COMMIT_RESULT.json`、`VERIFICATION.txt` 为准。
+- 无远端推送、发布或生产操作；下一步无自动操作。

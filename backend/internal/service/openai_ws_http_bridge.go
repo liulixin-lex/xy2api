@@ -490,7 +490,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	}
 
 	buildUpstreamRequest := func(requestBody []byte) (*http.Request, error) {
-		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(WithGroupSystemPromptModel(ctx, originalModel))
 		defer releaseUpstreamCtx()
 		var upstreamReq *http.Request
 		var buildErr error

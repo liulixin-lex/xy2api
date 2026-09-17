@@ -562,6 +562,13 @@ export interface ReasoningEffortMapping {
   model?: string
 }
 
+export interface GroupSystemPromptConfig {
+  prompt: string
+  scope: 'all' | 'selected'
+  models: string[]
+  model_prompts: Record<string, string>
+}
+
 export interface Group {
   id: number
   name: string
@@ -573,6 +580,7 @@ export interface Group {
   max_reasoning_effort_over_limit?: string // downgrade (default) or deny when over the ceiling
   reasoning_effort_mappings?: ReasoningEffortMapping[]
   is_exclusive: boolean
+  show_exclusive_badge?: boolean
   status: 'active' | 'inactive'
   subscription_type: SubscriptionType
   daily_limit_usd: number | null
@@ -627,6 +635,7 @@ export interface Group {
 }
 
 export interface AdminGroup extends Group {
+  system_prompt_config?: GroupSystemPromptConfig
   force_openai_fast: boolean
   free_openai_fast: boolean
   model_pricing: import('@/api/admin/channels').ChannelModelPricing[]
@@ -791,6 +800,8 @@ export interface UpdateApiKeyRequest {
 }
 
 export interface CreateGroupRequest {
+  show_exclusive_badge?: boolean
+  system_prompt_config?: GroupSystemPromptConfig
   name: string
   description?: string | null
   platform?: GroupPlatform
@@ -858,6 +869,8 @@ export interface CreateGroupRequest {
 }
 
 export interface UpdateGroupRequest {
+  show_exclusive_badge?: boolean
+  system_prompt_config?: GroupSystemPromptConfig
   name?: string
   description?: string | null
   platform?: GroupPlatform

@@ -297,6 +297,7 @@
     "245_iq_check_reliability.sql": "8cb3528634f0356b057de796b8fda0f889599c5ff0d8a89bf73b576a2b5302c5",
     "246_iq_check_simplification.sql": "59626f3e77e6e607e26cf946e39c30fc758c8066fa708dd34fbe8e618bd8aac3",
     "247_opencode_go_platform.sql": "5db6bb01bc5445a5c4e2fed74374faf5b9f27e3a5b0400eff830d8ca45da641c",
-    "248_purge_unlimited_user_platform_quotas.sql": "052756d1b1ac951f002034bf0434f8a6ea943ec0a2a34541ca4374ba6278cce7"
+    "248_purge_unlimited_user_platform_quotas.sql": "052756d1b1ac951f002034bf0434f8a6ea943ec0a2a34541ca4374ba6278cce7",
+    "249_group_system_prompt_policy.sql": "f0546fa9453c59cb1cf01f62c99c1b3f0ce29ff3734d3563245fc3c86c4fdd7d"
   }
 }

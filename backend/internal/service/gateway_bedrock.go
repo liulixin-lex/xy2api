@@ -336,6 +336,10 @@ func (s *GatewayService) buildUpstreamRequestBedrock(
 ) (*http.Request, error) {
 	targetURL := BuildBedrockURL(region, modelID, stream)
 
+	body, err := ApplyGroupSystemPrompt(ctx, body, GroupPromptAnthropic)
+	if err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -363,7 +367,7 @@ func (s *GatewayService) buildUpstreamRequestBedrockAPIKey(
 ) (*http.Request, error) {
 	targetURL := BuildBedrockURL(region, modelID, stream)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
+	req, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, targetURL, body, GroupPromptAnthropic)
 	if err != nil {
 		return nil, err
 	}
