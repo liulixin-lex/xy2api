@@ -810,6 +810,8 @@ export default {
         customMethodDisplayName: '显示名称',
         customMethodDisplayNamePlaceholder: '如：信用卡',
         stripeWebhookHint: '请在 Stripe Dashboard 中将以下地址配置为 Webhook 端点：',
+        stripeHostedWebhookHint: '在 Stripe Dashboard 添加此端点，订阅 checkout.session.completed、checkout.session.async_payment_succeeded、checkout.session.async_payment_failed 和 checkout.session.expired。',
+        stripeHostedSetup: '首次保存后重新打开可复制 Webhook 地址。需配置持久化 TOTP_ENCRYPTION_KEY 与站点前端 HTTPS 地址。付款方式和品牌外观在 Stripe Dashboard 设置。支付页面有效期为 31 分钟至 24 小时；已提交的延迟付款继续等待到账。历史订单引用的密钥和币种不可直接更换，请新建实例。',
         stripeWebhookApiVersionHint: 'Webhook 端点的 API 版本请与当前集成的 Stripe SDK 对齐，建议选择 {version}；版本不一致可能导致回调事件解析失败。',
         airwallexWebhookHint: '请在 Airwallex 后台将以下地址配置为 Webhook 端点；事件至少选择 Payment Intent -> Succeeded（payment_intent.succeeded），建议同时选择 Payment Intent -> Cancelled（payment_intent.cancelled）；API version 选择账户默认或最新稳定版本。',
         airwallexGuideSummary: '创建 Airwallex Scoped API 密钥时，建议只在账户级权限中为 Payment Acceptance 勾选读取和写入。',

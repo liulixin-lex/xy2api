@@ -190,6 +190,7 @@ function handleOrderPageSizeChange(size: number) { orderPagination.page_size = s
 const statusFilterOptions = computed(() => [
   { value: '', label: t('payment.admin.allStatuses') },
   { value: 'PENDING', label: t('payment.status.pending') },
+  { value: 'PROCESSING', label: t('payment.status.processing') },
   { value: 'PAID', label: t('payment.status.paid') },
   { value: 'COMPLETED', label: t('payment.status.completed') },
   { value: 'EXPIRED', label: t('payment.status.expired') },
@@ -206,6 +207,7 @@ const paymentTypeFilterOptions = computed(() => [
   { value: 'alipay', label: t('payment.methods.alipay') },
   { value: 'wxpay', label: t('payment.methods.wxpay') },
   { value: 'stripe', label: t('payment.methods.stripe') },
+  { value: 'stripe_hosted', label: t('payment.methods.stripe_hosted') },
   { value: 'airwallex', label: t('payment.methods.airwallex') },
 ])
 

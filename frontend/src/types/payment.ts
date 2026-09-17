@@ -6,6 +6,7 @@
 
 export type OrderStatus =
   | 'PENDING'
+  | 'PROCESSING'
   | 'PAID'
   | 'RECHARGING'
   | 'COMPLETED'
@@ -19,7 +20,7 @@ export type OrderStatus =
   | 'REFUNDED'
   | 'REFUND_FAILED'
 
-export type PaymentType = 'alipay' | 'wxpay' | 'alipay_direct' | 'wxpay_direct' | 'stripe' | 'easypay' | 'airwallex'
+export type PaymentType = 'alipay' | 'wxpay' | 'alipay_direct' | 'wxpay_direct' | 'stripe' | 'stripe_hosted' | 'easypay' | 'airwallex'
 
 export type OrderType = 'balance' | 'subscription'
 
@@ -199,6 +200,7 @@ export interface WechatJSAPIPayload {
 }
 
 export interface CreateOrderResult {
+	status?: OrderStatus
   order_id: number
   amount: number
   pay_url?: string

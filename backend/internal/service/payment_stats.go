@@ -40,7 +40,7 @@ func (s *PaymentService) GetDashboardStats(ctx context.Context, days int) (*Dash
 	computeBasicStats(st, orders, todayStart)
 
 	st.PendingOrders, err = s.entClient.PaymentOrder.Query().
-		Where(paymentorder.StatusEQ(OrderStatusPending)).
+		Where(paymentorder.StatusIn(OrderStatusPending, OrderStatusProcessing)).
 		Count(ctx)
 	if err != nil {
 		return nil, err

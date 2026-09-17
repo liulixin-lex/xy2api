@@ -122,6 +122,9 @@ func (s *PaymentService) AdminCancelOrder(ctx context.Context, orderID int64) (s
 }
 
 func (s *PaymentService) cancelCore(ctx context.Context, o *dbent.PaymentOrder, fs, op, ad string) (string, error) {
+	if o.PaymentType == payment.TypeStripeHosted {
+		return s.cancelHostedOrder(ctx, o, fs, op)
+	}
 	if o.PaymentTradeNo != "" || o.PaymentType != "" {
 		if s.checkPaid(ctx, o) == checkPaidResultAlreadyPaid {
 			return checkPaidResultAlreadyPaid, nil
@@ -150,6 +153,13 @@ func (s *PaymentService) reconcilePaid(ctx context.Context, o *dbent.PaymentOrde
 }
 
 func (s *PaymentService) checkPaidWithOptions(ctx context.Context, o *dbent.PaymentOrder, opts checkPaidOptions) string {
+	if o.PaymentType == payment.TypeStripeHosted {
+		status, err := s.reconcileHostedOrder(ctx, o)
+		if err == nil && status == payment.ProviderStatusPaid {
+			return checkPaidResultAlreadyPaid
+		}
+		return ""
+	}
 	prov, err := s.getOrderProvider(ctx, o)
 	if err != nil {
 		return ""
@@ -290,9 +300,23 @@ func (s *PaymentService) VerifyOrderByOutTradeNo(ctx context.Context, outTradeNo
 		return nil, infraerrors.Forbidden("FORBIDDEN", "no permission for this order")
 	}
 	// Only verify orders that are still pending or recently expired
-	if o.Status == OrderStatusPending || o.Status == OrderStatusExpired {
+	if o.PaymentType == payment.TypeStripeHosted {
+		if o.Status != OrderStatusCompleted && !psIsRefundStatus(o.Status) {
+			if o.PaymentTradeNo == "" {
+				_, err = s.resumeHostedCreation(ctx, o)
+			} else {
+				_, err = s.reconcileHostedOrder(ctx, o)
+			}
+			if err != nil {
+				return nil, err
+			}
+			return s.entClient.PaymentOrder.Get(ctx, o.ID)
+		}
+		return o, nil
+	}
+	if o.Status == OrderStatusPending || o.Status == OrderStatusExpired || o.Status == OrderStatusProcessing {
 		result := s.reconcilePaid(ctx, o)
-		if result == checkPaidResultAlreadyPaid {
+		if result == checkPaidResultAlreadyPaid || o.PaymentType == payment.TypeStripeHosted {
 			// Reload order to get updated status
 			o, err = s.entClient.PaymentOrder.Get(ctx, o.ID)
 			if err != nil {

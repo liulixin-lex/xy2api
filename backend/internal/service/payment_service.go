@@ -22,6 +22,7 @@ import (
 
 const (
 	OrderStatusPending           = payment.OrderStatusPending
+	OrderStatusProcessing        = payment.OrderStatusProcessing
 	OrderStatusPaid              = payment.OrderStatusPaid
 	OrderStatusRecharging        = payment.OrderStatusRecharging
 	OrderStatusCompleted         = payment.OrderStatusCompleted
@@ -71,6 +72,8 @@ func generateRandomString(n int) string {
 }
 
 type CreateOrderRequest struct {
+	IdempotencyKey  string
+	HostedSnapshot  map[string]any
 	UserID          int64
 	Amount          float64
 	PaymentType     string
@@ -185,6 +188,8 @@ type TopUsersByCurrency map[string][]TopUserStat
 // --- Service ---
 
 type PaymentService struct {
+	hostedReconcileMu        sync.Mutex
+	hostedReconcileCursor    int64
 	providerMu               sync.Mutex
 	providersLoaded          bool
 	entClient                *dbent.Client

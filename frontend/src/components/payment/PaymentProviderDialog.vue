@@ -237,13 +237,19 @@
           <code class="mt-1 block break-all rounded bg-blue-100 px-2 py-1 text-xs text-blue-800 dark:bg-blue-900/40 dark:text-blue-200">
             {{ providerWebhookUrl }}
           </code>
-          <p v-if="form.provider_key === 'stripe'" class="mt-2 text-xs leading-relaxed text-blue-700 dark:text-blue-300">
+          <button v-if="form.provider_key === 'stripe_hosted'" type="button" class="mt-2 inline-flex h-8 w-8 items-center justify-center rounded text-blue-700 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900" :aria-label="t('common.copy')" :title="t('common.copy')" @click="copyWebhook">
+            <Icon name="copy" class="h-4 w-4" />
+          </button>
+          <p v-if="form.provider_key === 'stripe' || form.provider_key === 'stripe_hosted'" class="mt-2 text-xs leading-relaxed text-blue-700 dark:text-blue-300">
             {{ t('admin.settings.payment.stripeWebhookApiVersionHint', { version: STRIPE_SDK_API_VERSION }) }}
           </p>
         </div>
       </div>
 
       <!-- Per-type limits (collapsible) -->
+      <p v-if="form.provider_key === 'stripe_hosted'" class="text-sm leading-relaxed text-gray-600 dark:text-gray-300">
+        {{ t('admin.settings.payment.stripeHostedSetup') }}
+      </p>
       <div v-if="limitableTypes.length" class="border-t border-gray-200 pt-4 dark:border-dark-700">
         <button type="button" @click="limitsExpanded = !limitsExpanded" class="flex w-full items-center justify-between">
           <h4 class="text-sm font-semibold text-gray-900 dark:text-white">
@@ -307,6 +313,7 @@
 <script setup lang="ts">
 import { reactive, computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import Icon from '@/components/icons/Icon.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import Select from '@/components/common/Select.vue'
@@ -380,6 +387,10 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+async function copyWebhook() {
+  const { useClipboard } = await import('@/composables/useClipboard')
+  await useClipboard().copyToClipboard(providerWebhookUrl.value)
+}
 
 interface PaymentGuideItem {
   title: string
@@ -417,11 +428,13 @@ const defaultBaseUrl = typeof window !== 'undefined' ? window.location.origin : 
 
 const providerWebhookHintMap: Record<string, string> = {
   stripe: 'admin.settings.payment.stripeWebhookHint',
+  stripe_hosted: 'admin.settings.payment.stripeHostedWebhookHint',
   airwallex: 'admin.settings.payment.airwallexWebhookHint',
 }
 
 const providerWebhookUrl = computed(() => {
   const path = WEBHOOK_PATHS[form.provider_key]
+  if (form.provider_key === 'stripe_hosted') return props.editing ? `${defaultBaseUrl}${path}/${props.editing.id}` : ''
   return providerWebhookHintMap[form.provider_key] && path ? defaultBaseUrl + path : ''
 })
 
