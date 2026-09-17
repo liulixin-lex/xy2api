@@ -204,7 +204,8 @@ func (s *PaymentService) finishHostedRefund(ctx context.Context, id int64, resp 
 	}
 	u := tx.PaymentOrder.UpdateOneID(id).SetProviderSnapshot(hostedRefundSnapshot(o, j))
 	result := &RefundResult{Success: false, Warning: "gateway refund is pending confirmation"}
-	if resp.Status == payment.ProviderStatusSuccess || resp.Status == payment.ProviderStatusRefunded {
+	switch resp.Status {
+	case payment.ProviderStatusSuccess, payment.ProviderStatusRefunded:
 		if j.RefundID == "" {
 			return nil, fmt.Errorf("hosted refund success missing id")
 		}
@@ -214,7 +215,7 @@ func (s *PaymentService) finishHostedRefund(ctx context.Context, id int64, resp 
 		}
 		u.SetStatus(status).SetRefundAt(time.Now())
 		result = &RefundResult{Success: true, BalanceDeducted: j.BalanceHeld, SubDaysDeducted: j.SubscriptionDays}
-	} else if resp.Status == payment.ProviderStatusFailed {
+	case payment.ProviderStatusFailed:
 		if j.BalanceHeld > 0 {
 			if _, err = tx.User.UpdateOneID(o.UserID).AddBalance(j.BalanceHeld).Save(ctx); err != nil {
 				return nil, err

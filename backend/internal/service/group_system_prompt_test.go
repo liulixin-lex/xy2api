@@ -41,7 +41,7 @@ func TestGroupSystemPromptOutboundProtocolsAndRetries(t *testing.T) {
 				require.NoError(t, err)
 				resp, err := upstream.Client().Do(req)
 				require.NoError(t, err)
-				resp.Body.Close()
+				require.NoError(t, resp.Body.Close())
 			}
 			require.Len(t, captured, 2)
 			require.Equal(t, captured[0], captured[1])

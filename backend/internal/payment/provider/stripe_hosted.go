@@ -86,7 +86,7 @@ func (s *StripeHosted) CreatePayment(ctx context.Context, req payment.CreatePaym
 		return nil, fmt.Errorf("stripe hosted account changed")
 	}
 	u, err := url.Parse(req.ReturnURL)
-	if err != nil || u.Host == "" || u.User != nil || (u.Scheme != "https" && !(u.Scheme == "http" && !s.LiveMode() && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1"))) {
+	if err != nil || u.Host == "" || u.User != nil || (u.Scheme != "https" && (u.Scheme != "http" || s.LiveMode() || (u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1"))) {
 		return nil, fmt.Errorf("stripe hosted invalid return origin")
 	}
 	q := u.Query()

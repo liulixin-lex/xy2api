@@ -83,7 +83,7 @@ func (s *PaymentService) createHostedOrder(ctx context.Context, req CreateOrderR
 		return nil, err
 	}
 	limitAmount := req.Amount
-	orderAmount := req.Amount
+	var orderAmount float64
 	if plan != nil {
 		limitAmount = plan.Price
 		orderAmount = plan.Price
@@ -147,7 +147,7 @@ func (s *PaymentService) createHostedOrder(ctx context.Context, req CreateOrderR
 }
 func hostedReturnURL(origin string, live bool) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(origin))
-	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || (u.Scheme != "https" && !(u.Scheme == "http" && !live && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1"))) {
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || (u.Scheme != "https" && (u.Scheme != "http" || live || (u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1"))) {
 		return "", infraerrors.BadRequest("INVALID_HOSTED_ORIGIN", "hosted checkout requires a trusted HTTPS frontend URL (localhost HTTP is allowed in test mode)")
 	}
 	u.Path = "/payment/result"

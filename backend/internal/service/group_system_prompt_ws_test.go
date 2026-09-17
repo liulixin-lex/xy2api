@@ -25,7 +25,7 @@ func TestGroupSystemPromptWebSocketPassthroughMultiTurn(t *testing.T) {
 	server, _ := startPassthroughHookRecordingServer(t, ctx, newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream), passthroughLifecycleAccount(), hooks)
 	defer server.Close()
 	client := dialPassthroughLifecycleClientWithPayload(t, server, `{"type":"response.create","model":"alias","instructions":"client","input":"hi"}`)
-	defer client.CloseNow()
+	defer func() { _ = client.CloseNow() }()
 	for turn, want := range []string{"common\n\nclient", "specific\n\nclient", "common\n\nclient", "specific\n\nclient"} {
 		if turn > 0 {
 			if turn == 3 {
