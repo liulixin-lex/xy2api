@@ -14,6 +14,7 @@ const (
 	TypeAlipayDirect PaymentType = "alipay_direct"
 	TypeWxpayDirect  PaymentType = "wxpay_direct"
 	TypeStripe       PaymentType = "stripe"
+	TypeStripeHosted PaymentType = "stripe_hosted"
 	TypeCard         PaymentType = "card"
 	TypeLink         PaymentType = "link"
 	TypeEasyPay      PaymentType = "easypay"
@@ -23,6 +24,7 @@ const (
 // Order status constants shared across payment and service layers.
 const (
 	OrderStatusPending           = "PENDING"
+	OrderStatusProcessing        = "PROCESSING"
 	OrderStatusPaid              = "PAID"
 	OrderStatusRecharging        = "RECHARGING"
 	OrderStatusCompleted         = "COMPLETED"
@@ -64,11 +66,13 @@ const (
 // Provider-level status constants returned by provider implementations
 // to the service layer (lowercase, distinct from OrderStatus uppercase constants).
 const (
-	ProviderStatusPending  = "pending"
-	ProviderStatusPaid     = "paid"
-	ProviderStatusSuccess  = "success"
-	ProviderStatusFailed   = "failed"
-	ProviderStatusRefunded = "refunded"
+	ProviderStatusPending    = "pending"
+	ProviderStatusProcessing = "processing"
+	ProviderStatusExpired    = "expired"
+	ProviderStatusPaid       = "paid"
+	ProviderStatusSuccess    = "success"
+	ProviderStatusFailed     = "failed"
+	ProviderStatusRefunded   = "refunded"
 )
 
 // DefaultLoadBalanceStrategy is the default load-balancing strategy
@@ -99,6 +103,8 @@ func GetBasePaymentType(t string) string {
 
 // CreatePaymentRequest holds the parameters for creating a new payment.
 type CreatePaymentRequest struct {
+	ExpiresAt   int64  // Frozen Checkout deadline, in Unix seconds
+	AccountID   string // Pinned Stripe account identity
 	OrderID     string // Internal order ID
 	Amount      string // 支付金额，按服务商实例配置的币种解释
 	PaymentType string // e.g. "alipay", "wxpay", "stripe"
@@ -145,6 +151,7 @@ type WechatJSAPIPayload struct {
 
 // CreatePaymentResponse is returned after successfully initiating a payment.
 type CreatePaymentResponse struct {
+	ExpiresAt    int64                   // Actual provider session expiry
 	TradeNo      string                  // Third-party transaction ID
 	PayURL       string                  // H5 payment URL (alipay/wxpay)
 	QRCode       string                  // QR code content for scanning
@@ -160,11 +167,13 @@ type CreatePaymentResponse struct {
 
 // QueryOrderResponse describes the payment status from the upstream provider.
 type QueryOrderResponse struct {
-	TradeNo  string
-	Status   string  // "pending", "paid", "failed", "refunded"
-	Amount   float64 // 按服务商返回币种解释的金额
-	PaidAt   string  // RFC3339 timestamp or empty
-	Metadata map[string]string
+	TradeNo   string
+	PayURL    string // Hosted Session URL, returned only by authenticated upstream queries.
+	ExpiresAt int64
+	Status    string  // "pending", "paid", "failed", "refunded"
+	Amount    float64 // 按服务商返回币种解释的金额
+	PaidAt    string  // RFC3339 timestamp or empty
+	Metadata  map[string]string
 }
 
 // PaymentNotification is the parsed result of a webhook/notify callback.
@@ -188,10 +197,11 @@ type RefundRequest struct {
 // RefundQueryRequest contains identifiers needed to query a previously
 // requested refund.
 type RefundQueryRequest struct {
-	TradeNo  string
-	OrderID  string
-	RefundID string
-	Amount   string
+	TradeNo    string
+	OrderID    string
+	RefundID   string
+	Amount     string
+	RetryUntil int64 // Safe deadline for replaying the original idempotent request.
 }
 
 // RefundResponse is returned after a refund request.

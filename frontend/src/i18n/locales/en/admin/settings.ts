@@ -815,6 +815,8 @@ export default {
         customMethodDisplayName: 'Display name',
         customMethodDisplayNamePlaceholder: 'e.g. Credit card',
         stripeWebhookHint: 'Configure the following URL as a Webhook endpoint in Stripe Dashboard:',
+        stripeHostedWebhookHint: 'Register this endpoint in Stripe Dashboard for checkout.session.completed, checkout.session.async_payment_succeeded, checkout.session.async_payment_failed and checkout.session.expired.',
+        stripeHostedSetup: 'Save and reopen to copy the Webhook URL. Configure a persistent TOTP_ENCRYPTION_KEY and the public HTTPS frontend URL. Manage payment methods and branding in Stripe Dashboard. Checkout expires after 31 minutes to 24 hours; submitted delayed payments continue awaiting confirmation. Create a new instance to change credentials or currency referenced by historical orders.',
         stripeWebhookApiVersionHint: 'Set this Webhook endpoint API version to match the integrated Stripe SDK. Recommended: {version}. A mismatch can cause webhook parsing errors.',
         airwallexWebhookHint: 'Configure the following URL as a Webhook endpoint in Airwallex. Select at least Payment Intent -> Succeeded (payment_intent.succeeded), preferably also Payment Intent -> Cancelled (payment_intent.cancelled). Use the account default or latest stable API version.',
         airwallexGuideSummary: 'When creating an Airwallex scoped API key, select Read and Write for Payment Acceptance under account-level permissions.',

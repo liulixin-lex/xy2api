@@ -23,10 +23,10 @@
         ]"
         @click="method.available && emit('select', method.type)"
       >
-        <span class="flex w-full min-w-0 items-center justify-center gap-2">
-          <img :src="methodIcon(method.type)" :alt="methodLabel(method)" class="h-7 w-7 shrink-0 object-contain" />
+        <span class="flex w-full min-w-0 items-center justify-center" :class="method.type === 'stripe_hosted' ? 'gap-1' : 'gap-2'">
+          <img :src="methodIcon(method.type)" :alt="methodLabel(method)" class="shrink-0 object-contain" :class="method.type === 'stripe_hosted' ? 'h-5 w-5' : 'h-7 w-7'" />
           <span class="flex min-w-0 flex-col items-start leading-none">
-            <span data-testid="payment-method-label" class="block w-full truncate text-base font-semibold">
+            <span data-testid="payment-method-label" class="block w-full font-semibold" :class="method.type === 'stripe_hosted' ? 'whitespace-normal text-sm leading-tight' : 'truncate text-base'">
               {{ methodLabel(method) }}
             </span>
             <span
@@ -74,6 +74,7 @@ const METHOD_ICONS: Record<string, string> = {
   alipay: alipayIcon,
   wxpay: wxpayIcon,
   stripe: stripeIcon,
+  stripe_hosted: stripeIcon,
   airwallex: airwallexIcon,
   credit_card: paymentIcon,
 }
@@ -101,7 +102,7 @@ function methodLabel(method: PaymentMethodOption): string {
 function methodSelectedClass(type: string): string {
   if (isBuiltInAlipayMethod(type)) return 'border-[#02A9F1] bg-blue-50 text-gray-900 shadow-sm dark:bg-blue-950 dark:text-gray-100'
   if (isBuiltInWxpayMethod(type)) return 'border-[#09BB07] bg-green-50 text-gray-900 shadow-sm dark:bg-green-950 dark:text-gray-100'
-  if (type === 'stripe') return 'border-[#676BE5] bg-indigo-50 text-gray-900 shadow-sm dark:bg-indigo-950 dark:text-gray-100'
+  if (type === 'stripe' || type === 'stripe_hosted') return 'border-[#676BE5] bg-indigo-50 text-gray-900 shadow-sm dark:bg-indigo-950 dark:text-gray-100'
   if (type === 'airwallex') return 'border-[#FF6B3D] bg-orange-50 text-gray-900 shadow-sm dark:border-[#FF8E3C] dark:bg-orange-950 dark:text-gray-100'
   return 'border-primary-500 bg-primary-50 text-gray-900 shadow-sm dark:bg-primary-950 dark:text-gray-100'
 }

@@ -30400,6 +30400,7 @@ type PaymentOrderMutation struct {
 	fee_rate                 *float64
 	addfee_rate              *float64
 	recharge_code            *string
+	idempotency_key          *string
 	out_trade_no             *string
 	payment_type             *string
 	payment_trade_no         *string
@@ -30900,6 +30901,55 @@ func (m *PaymentOrderMutation) OldRechargeCode(ctx context.Context) (v string, e
 // ResetRechargeCode resets all changes to the "recharge_code" field.
 func (m *PaymentOrderMutation) ResetRechargeCode() {
 	m.recharge_code = nil
+}
+
+// SetIdempotencyKey sets the "idempotency_key" field.
+func (m *PaymentOrderMutation) SetIdempotencyKey(s string) {
+	m.idempotency_key = &s
+}
+
+// IdempotencyKey returns the value of the "idempotency_key" field in the mutation.
+func (m *PaymentOrderMutation) IdempotencyKey() (r string, exists bool) {
+	v := m.idempotency_key
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldIdempotencyKey returns the old "idempotency_key" field's value of the PaymentOrder entity.
+// If the PaymentOrder object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PaymentOrderMutation) OldIdempotencyKey(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldIdempotencyKey is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldIdempotencyKey requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldIdempotencyKey: %w", err)
+	}
+	return oldValue.IdempotencyKey, nil
+}
+
+// ClearIdempotencyKey clears the value of the "idempotency_key" field.
+func (m *PaymentOrderMutation) ClearIdempotencyKey() {
+	m.idempotency_key = nil
+	m.clearedFields[paymentorder.FieldIdempotencyKey] = struct{}{}
+}
+
+// IdempotencyKeyCleared returns if the "idempotency_key" field was cleared in this mutation.
+func (m *PaymentOrderMutation) IdempotencyKeyCleared() bool {
+	_, ok := m.clearedFields[paymentorder.FieldIdempotencyKey]
+	return ok
+}
+
+// ResetIdempotencyKey resets all changes to the "idempotency_key" field.
+func (m *PaymentOrderMutation) ResetIdempotencyKey() {
+	m.idempotency_key = nil
+	delete(m.clearedFields, paymentorder.FieldIdempotencyKey)
 }
 
 // SetOutTradeNo sets the "out_trade_no" field.
@@ -32409,7 +32459,7 @@ func (m *PaymentOrderMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *PaymentOrderMutation) Fields() []string {
-	fields := make([]string, 0, 39)
+	fields := make([]string, 0, 40)
 	if m.user != nil {
 		fields = append(fields, paymentorder.FieldUserID)
 	}
@@ -32433,6 +32483,9 @@ func (m *PaymentOrderMutation) Fields() []string {
 	}
 	if m.recharge_code != nil {
 		fields = append(fields, paymentorder.FieldRechargeCode)
+	}
+	if m.idempotency_key != nil {
+		fields = append(fields, paymentorder.FieldIdempotencyKey)
 	}
 	if m.out_trade_no != nil {
 		fields = append(fields, paymentorder.FieldOutTradeNo)
@@ -32551,6 +32604,8 @@ func (m *PaymentOrderMutation) Field(name string) (ent.Value, bool) {
 		return m.FeeRate()
 	case paymentorder.FieldRechargeCode:
 		return m.RechargeCode()
+	case paymentorder.FieldIdempotencyKey:
+		return m.IdempotencyKey()
 	case paymentorder.FieldOutTradeNo:
 		return m.OutTradeNo()
 	case paymentorder.FieldPaymentType:
@@ -32638,6 +32693,8 @@ func (m *PaymentOrderMutation) OldField(ctx context.Context, name string) (ent.V
 		return m.OldFeeRate(ctx)
 	case paymentorder.FieldRechargeCode:
 		return m.OldRechargeCode(ctx)
+	case paymentorder.FieldIdempotencyKey:
+		return m.OldIdempotencyKey(ctx)
 	case paymentorder.FieldOutTradeNo:
 		return m.OldOutTradeNo(ctx)
 	case paymentorder.FieldPaymentType:
@@ -32764,6 +32821,13 @@ func (m *PaymentOrderMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetRechargeCode(v)
+		return nil
+	case paymentorder.FieldIdempotencyKey:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetIdempotencyKey(v)
 		return nil
 	case paymentorder.FieldOutTradeNo:
 		v, ok := value.(string)
@@ -33102,6 +33166,9 @@ func (m *PaymentOrderMutation) ClearedFields() []string {
 	if m.FieldCleared(paymentorder.FieldUserNotes) {
 		fields = append(fields, paymentorder.FieldUserNotes)
 	}
+	if m.FieldCleared(paymentorder.FieldIdempotencyKey) {
+		fields = append(fields, paymentorder.FieldIdempotencyKey)
+	}
 	if m.FieldCleared(paymentorder.FieldPayURL) {
 		fields = append(fields, paymentorder.FieldPayURL)
 	}
@@ -33175,6 +33242,9 @@ func (m *PaymentOrderMutation) ClearField(name string) error {
 	switch name {
 	case paymentorder.FieldUserNotes:
 		m.ClearUserNotes()
+		return nil
+	case paymentorder.FieldIdempotencyKey:
+		m.ClearIdempotencyKey()
 		return nil
 	case paymentorder.FieldPayURL:
 		m.ClearPayURL()
@@ -33264,6 +33334,9 @@ func (m *PaymentOrderMutation) ResetField(name string) error {
 		return nil
 	case paymentorder.FieldRechargeCode:
 		m.ResetRechargeCode()
+		return nil
+	case paymentorder.FieldIdempotencyKey:
+		m.ResetIdempotencyKey()
 		return nil
 	case paymentorder.FieldOutTradeNo:
 		m.ResetOutTradeNo()

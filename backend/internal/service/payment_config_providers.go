@@ -99,6 +99,7 @@ func (s *PaymentConfigService) decryptAndMaskConfig(providerKey, encrypted strin
 // pendingOrderStatuses are order statuses considered "in progress".
 var pendingOrderStatuses = []string{
 	payment.OrderStatusPending,
+	payment.OrderStatusProcessing,
 	payment.OrderStatusPaid,
 	payment.OrderStatusRecharging,
 }
@@ -111,11 +112,12 @@ var pendingOrderStatuses = []string{
 // Key matching is case-insensitive. Non-listed keys (e.g. appId, notifyUrl,
 // stripe publishableKey) are returned in plaintext by the admin GET API.
 var providerSensitiveConfigFields = map[string]map[string]struct{}{
-	payment.TypeEasyPay:   {"pkey": {}},
-	payment.TypeAlipay:    {"privatekey": {}, "publickey": {}, "alipaypublickey": {}},
-	payment.TypeWxpay:     {"privatekey": {}, "apiv3key": {}, "publickey": {}},
-	payment.TypeStripe:    {"secretkey": {}, "webhooksecret": {}},
-	payment.TypeAirwallex: {"apikey": {}, "webhooksecret": {}},
+	payment.TypeEasyPay:      {"pkey": {}},
+	payment.TypeAlipay:       {"privatekey": {}, "publickey": {}, "alipaypublickey": {}},
+	payment.TypeWxpay:        {"privatekey": {}, "apiv3key": {}, "publickey": {}},
+	payment.TypeStripe:       {"secretkey": {}, "webhooksecret": {}},
+	payment.TypeStripeHosted: {"secretkey": {}, "webhooksecret": {}},
+	payment.TypeAirwallex:    {"apikey": {}, "webhooksecret": {}},
 }
 
 // providerPendingOrderProtectedConfigFields lists config keys that cannot be
@@ -123,11 +125,12 @@ var providerSensitiveConfigFields = map[string]map[string]struct{}{
 // all provider identity fields that are snapshotted into orders or used by
 // webhook/refund verification.
 var providerPendingOrderProtectedConfigFields = map[string]map[string]struct{}{
-	payment.TypeEasyPay:   {"pkey": {}, "pid": {}},
-	payment.TypeAlipay:    {"privatekey": {}, "publickey": {}, "alipaypublickey": {}, "appid": {}},
-	payment.TypeWxpay:     {"privatekey": {}, "apiv3key": {}, "publickey": {}, "appid": {}, "mpappid": {}, "mchid": {}, "publickeyid": {}, "certserial": {}},
-	payment.TypeStripe:    {"secretkey": {}, "webhooksecret": {}, "currency": {}},
-	payment.TypeAirwallex: {"clientid": {}, "apikey": {}, "webhooksecret": {}, "apibase": {}, "accountid": {}, "currency": {}},
+	payment.TypeEasyPay:      {"pkey": {}, "pid": {}},
+	payment.TypeAlipay:       {"privatekey": {}, "publickey": {}, "alipaypublickey": {}, "appid": {}},
+	payment.TypeWxpay:        {"privatekey": {}, "apiv3key": {}, "publickey": {}, "appid": {}, "mpappid": {}, "mchid": {}, "publickeyid": {}, "certserial": {}},
+	payment.TypeStripe:       {"secretkey": {}, "webhooksecret": {}, "currency": {}},
+	payment.TypeStripeHosted: {"secretkey": {}, "webhooksecret": {}, "currency": {}},
+	payment.TypeAirwallex:    {"clientid": {}, "apikey": {}, "webhooksecret": {}, "apibase": {}, "accountid": {}, "currency": {}},
 }
 
 func isSensitiveProviderConfigField(providerKey, fieldName string) bool {
@@ -178,10 +181,14 @@ func (s *PaymentConfigService) countPendingOrdersByPlan(ctx context.Context, pla
 }
 
 var validProviderKeys = map[string]bool{
-	payment.TypeEasyPay: true, payment.TypeAlipay: true, payment.TypeWxpay: true, payment.TypeStripe: true, payment.TypeAirwallex: true,
+	payment.TypeStripeHosted: true, payment.TypeEasyPay: true, payment.TypeAlipay: true, payment.TypeWxpay: true, payment.TypeStripe: true, payment.TypeAirwallex: true,
 }
 
 func (s *PaymentConfigService) CreateProviderInstance(ctx context.Context, req CreateProviderInstanceRequest) (*dbent.PaymentProviderInstance, error) {
+	if req.ProviderKey == payment.TypeStripeHosted {
+		req.SupportedTypes = []string{payment.TypeStripeHosted}
+		req.PaymentMode = "redirect"
+	}
 	typesStr := joinTypes(req.SupportedTypes)
 	if err := validateProviderRequest(req.ProviderKey, req.Name, typesStr); err != nil {
 		return nil, err
@@ -199,7 +206,7 @@ func (s *PaymentConfigService) CreateProviderInstance(ctx context.Context, req C
 			return nil, err
 		}
 	}
-	enc, err := s.encryptConfig(req.Config)
+	enc, err := s.storeProviderConfig(req.ProviderKey, req.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -289,9 +296,43 @@ func easyPayCustomMethodTypeConflictsWithBuiltin(methodType string) bool {
 // NOTE: This function exceeds 30 lines due to per-field nil-check patch update
 // boilerplate and pending-order safety checks.
 func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id int64, req UpdateProviderInstanceRequest) (*dbent.PaymentProviderInstance, error) {
+	inst, err := s.entClient.PaymentProviderInstance.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if inst.ProviderKey != payment.TypeStripeHosted {
+		return s.updateProviderInstance(ctx, id, req)
+	}
+	tx, err := s.entClient.Tx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.PaymentProviderInstance.Query().Where(paymentproviderinstance.IDEQ(id)).ForUpdate().Only(ctx); err != nil {
+		return nil, err
+	}
+	scoped := NewPaymentConfigService(tx.Client(), s.settingRepo, s.encryptionKey)
+	updated, err := scoped.updateProviderInstance(ctx, id, req)
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return updated.Unwrap(), nil
+}
+
+func (s *PaymentConfigService) updateProviderInstance(ctx context.Context, id int64, req UpdateProviderInstanceRequest) (*dbent.PaymentProviderInstance, error) {
 	current, err := s.entClient.PaymentProviderInstance.Get(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("load provider instance: %w", err)
+	}
+	if current.ProviderKey == payment.TypeStripeHosted {
+		mode := "redirect"
+		req.PaymentMode = &mode
+		if req.SupportedTypes != nil {
+			req.SupportedTypes = []string{payment.TypeStripeHosted}
+		}
 	}
 	var pendingOrderCount *int
 	getPendingOrderCount := func() (int, error) {
@@ -299,6 +340,9 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 			return *pendingOrderCount, nil
 		}
 		count, err := s.countPendingOrders(ctx, id)
+		if current.ProviderKey == payment.TypeStripeHosted {
+			count, err = s.entClient.PaymentOrder.Query().Where(paymentorder.ProviderInstanceIDEQ(strconv.FormatInt(id, 10))).Count(ctx)
+		}
 		if err != nil {
 			return 0, fmt.Errorf("check pending orders: %w", err)
 		}
@@ -337,7 +381,7 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 			}
 		}
 	}
-	if req.Enabled != nil && !*req.Enabled {
+	if req.Enabled != nil && !*req.Enabled && current.ProviderKey != payment.TypeStripeHosted {
 		count, err := getPendingOrderCount()
 		if err != nil {
 			return nil, err
@@ -376,7 +420,7 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 		u.SetName(*req.Name)
 	}
 	if mergedConfig != nil {
-		enc, err := s.encryptConfig(mergedConfig)
+		enc, err := s.storeProviderConfig(current.ProviderKey, mergedConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -507,9 +551,8 @@ func (s *PaymentConfigService) decryptConfig(stored string) (map[string]string, 
 	if err := json.Unmarshal([]byte(stored), &cfg); err == nil {
 		return cfg, nil
 	}
-	// Deprecated: legacy AES-256-GCM ciphertext fallback — scheduled for removal.
+	// Hosted credentials and historical encrypted records use AES-256-GCM.
 	if len(s.encryptionKey) == payment.AES256KeySize {
-		//nolint:staticcheck // SA1019: intentional legacy fallback, scheduled for removal
 		if plaintext, err := payment.Decrypt(stored, s.encryptionKey); err == nil {
 			if err := json.Unmarshal([]byte(plaintext), &cfg); err == nil {
 				return cfg, nil
@@ -522,6 +565,31 @@ func (s *PaymentConfigService) decryptConfig(stored string) (map[string]string, 
 }
 
 func (s *PaymentConfigService) DeleteProviderInstance(ctx context.Context, id int64) error {
+	inst, err := s.entClient.PaymentProviderInstance.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if inst.ProviderKey == payment.TypeStripeHosted {
+		tx, err := s.entClient.Tx(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if _, err = tx.PaymentProviderInstance.Query().Where(paymentproviderinstance.IDEQ(id)).ForUpdate().Only(ctx); err != nil {
+			return err
+		}
+		count, err := tx.PaymentOrder.Query().Where(paymentorder.ProviderInstanceIDEQ(strconv.FormatInt(id, 10))).Count(ctx)
+		if err != nil {
+			return err
+		}
+		if count > 0 {
+			return infraerrors.Conflict("PROVIDER_IN_USE", "hosted provider is referenced by historical orders; disable it instead")
+		}
+		if err = tx.PaymentProviderInstance.DeleteOneID(id).Exec(ctx); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	count, err := s.countPendingOrders(ctx, id)
 	if err != nil {
 		return fmt.Errorf("check pending orders: %w", err)
@@ -542,4 +610,18 @@ func (s *PaymentConfigService) encryptConfig(cfg map[string]string) (string, err
 		return "", fmt.Errorf("marshal config: %w", err)
 	}
 	return string(data), nil
+}
+
+func (s *PaymentConfigService) storeProviderConfig(key string, cfg map[string]string) (string, error) {
+	if key != payment.TypeStripeHosted {
+		return s.encryptConfig(cfg)
+	}
+	if len(s.encryptionKey) != payment.AES256KeySize {
+		return "", infraerrors.BadRequest("PAYMENT_ENCRYPTION_REQUIRED", "configure a persistent TOTP_ENCRYPTION_KEY before saving hosted credentials")
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return "", err
+	}
+	return payment.Encrypt(string(data), s.encryptionKey)
 }

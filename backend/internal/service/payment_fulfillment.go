@@ -37,6 +37,9 @@ type paymentFulfillmentLease struct {
 // --- Payment Notification & Fulfillment ---
 
 func (s *PaymentService) HandlePaymentNotification(ctx context.Context, n *payment.PaymentNotification, pk string) error {
+	if pk == payment.TypeStripeHosted {
+		return s.handleHostedNotification(ctx, n)
+	}
 	if n.Status != payment.NotificationStatusSuccess {
 		return nil
 	}
@@ -156,6 +159,7 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 		paymentorder.Or(
 			paymentorder.StatusEQ(OrderStatusPending),
 			paymentorder.StatusEQ(OrderStatusCancelled),
+			paymentorder.And(paymentorder.PaymentTypeEQ(payment.TypeStripeHosted), paymentorder.PaidAtIsNil(), paymentorder.StatusIn(OrderStatusProcessing, OrderStatusExpired, OrderStatusFailed)),
 			paymentorder.And(
 				paymentorder.StatusEQ(OrderStatusExpired),
 				paymentorder.UpdatedAtGTE(grace),
@@ -189,6 +193,9 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 func (s *PaymentService) alreadyProcessed(ctx context.Context, o *dbent.PaymentOrder) error {
 	cur, err := s.entClient.PaymentOrder.Get(ctx, o.ID)
 	if err != nil {
+		if o.PaymentType == payment.TypeStripeHosted {
+			return fmt.Errorf("reload hosted fulfillment: %w", err)
+		}
 		return nil
 	}
 	switch cur.Status {

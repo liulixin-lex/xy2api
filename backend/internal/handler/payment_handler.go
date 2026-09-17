@@ -272,6 +272,7 @@ func (h *PaymentHandler) CreateOrder(c *gin.Context) {
 		mobile = *req.IsMobile
 	}
 	result, err := h.paymentService.CreateOrder(c.Request.Context(), service.CreateOrderRequest{
+		IdempotencyKey:  c.GetHeader("Idempotency-Key"),
 		UserID:          subject.UserID,
 		Amount:          req.Amount,
 		PaymentType:     req.PaymentType,

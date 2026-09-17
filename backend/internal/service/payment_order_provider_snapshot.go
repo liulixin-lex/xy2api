@@ -188,7 +188,7 @@ func validateProviderSnapshotMetadata(order *dbent.PaymentOrder, providerKey str
 				return fmt.Errorf("easypay pid mismatch: expected %s, got %s", expected, actual)
 			}
 		}
-	case payment.TypeStripe:
+	case payment.TypeStripe, payment.TypeStripeHosted:
 		if expected := strings.TrimSpace(snapshot.Currency); expected != "" {
 			actual := strings.ToUpper(strings.TrimSpace(metadata["currency"]))
 			if actual == "" {

@@ -8069,7 +8069,7 @@
                     <label class="input-label">{{
                       t("admin.settings.payment.cancelRateLimit")
                     }}</label>
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         :class="[
@@ -12285,6 +12285,7 @@ const allPaymentTypes = computed(() => [
   { value: "alipay", label: t("payment.methods.alipay") },
   { value: "wxpay", label: t("payment.methods.wxpay") },
   { value: "stripe", label: t("payment.methods.stripe") },
+  { value: "stripe_hosted", label: t("payment.methods.stripe_hosted") },
   { value: "airwallex", label: t("payment.methods.airwallex") },
 ]);
 
@@ -12342,6 +12343,7 @@ const providerKeyOptions = computed(() => [
   { value: "alipay", label: t("admin.settings.payment.providerAlipay") },
   { value: "wxpay", label: t("admin.settings.payment.providerWxpay") },
   { value: "stripe", label: t("admin.settings.payment.providerStripe") },
+  { value: "stripe_hosted", label: t("payment.methods.stripe_hosted") },
   { value: "airwallex", label: t("admin.settings.payment.providerAirwallex") },
 ]);
 

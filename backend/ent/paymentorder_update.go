@@ -168,6 +168,26 @@ func (_u *PaymentOrderUpdate) SetNillableRechargeCode(v *string) *PaymentOrderUp
 	return _u
 }
 
+// SetIdempotencyKey sets the "idempotency_key" field.
+func (_u *PaymentOrderUpdate) SetIdempotencyKey(v string) *PaymentOrderUpdate {
+	_u.mutation.SetIdempotencyKey(v)
+	return _u
+}
+
+// SetNillableIdempotencyKey sets the "idempotency_key" field if the given value is not nil.
+func (_u *PaymentOrderUpdate) SetNillableIdempotencyKey(v *string) *PaymentOrderUpdate {
+	if v != nil {
+		_u.SetIdempotencyKey(*v)
+	}
+	return _u
+}
+
+// ClearIdempotencyKey clears the value of the "idempotency_key" field.
+func (_u *PaymentOrderUpdate) ClearIdempotencyKey() *PaymentOrderUpdate {
+	_u.mutation.ClearIdempotencyKey()
+	return _u
+}
+
 // SetOutTradeNo sets the "out_trade_no" field.
 func (_u *PaymentOrderUpdate) SetOutTradeNo(v string) *PaymentOrderUpdate {
 	_u.mutation.SetOutTradeNo(v)
@@ -783,6 +803,11 @@ func (_u *PaymentOrderUpdate) check() error {
 			return &ValidationError{Name: "recharge_code", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.recharge_code": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.IdempotencyKey(); ok {
+		if err := paymentorder.IdempotencyKeyValidator(v); err != nil {
+			return &ValidationError{Name: "idempotency_key", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.idempotency_key": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.OutTradeNo(); ok {
 		if err := paymentorder.OutTradeNoValidator(v); err != nil {
 			return &ValidationError{Name: "out_trade_no", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.out_trade_no": %w`, err)}
@@ -883,6 +908,12 @@ func (_u *PaymentOrderUpdate) sqlSave(ctx context.Context) (_node int, err error
 	}
 	if value, ok := _u.mutation.RechargeCode(); ok {
 		_spec.SetField(paymentorder.FieldRechargeCode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.IdempotencyKey(); ok {
+		_spec.SetField(paymentorder.FieldIdempotencyKey, field.TypeString, value)
+	}
+	if _u.mutation.IdempotencyKeyCleared() {
+		_spec.ClearField(paymentorder.FieldIdempotencyKey, field.TypeString)
 	}
 	if value, ok := _u.mutation.OutTradeNo(); ok {
 		_spec.SetField(paymentorder.FieldOutTradeNo, field.TypeString, value)
@@ -1228,6 +1259,26 @@ func (_u *PaymentOrderUpdateOne) SetNillableRechargeCode(v *string) *PaymentOrde
 	if v != nil {
 		_u.SetRechargeCode(*v)
 	}
+	return _u
+}
+
+// SetIdempotencyKey sets the "idempotency_key" field.
+func (_u *PaymentOrderUpdateOne) SetIdempotencyKey(v string) *PaymentOrderUpdateOne {
+	_u.mutation.SetIdempotencyKey(v)
+	return _u
+}
+
+// SetNillableIdempotencyKey sets the "idempotency_key" field if the given value is not nil.
+func (_u *PaymentOrderUpdateOne) SetNillableIdempotencyKey(v *string) *PaymentOrderUpdateOne {
+	if v != nil {
+		_u.SetIdempotencyKey(*v)
+	}
+	return _u
+}
+
+// ClearIdempotencyKey clears the value of the "idempotency_key" field.
+func (_u *PaymentOrderUpdateOne) ClearIdempotencyKey() *PaymentOrderUpdateOne {
+	_u.mutation.ClearIdempotencyKey()
 	return _u
 }
 
@@ -1859,6 +1910,11 @@ func (_u *PaymentOrderUpdateOne) check() error {
 			return &ValidationError{Name: "recharge_code", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.recharge_code": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.IdempotencyKey(); ok {
+		if err := paymentorder.IdempotencyKeyValidator(v); err != nil {
+			return &ValidationError{Name: "idempotency_key", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.idempotency_key": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.OutTradeNo(); ok {
 		if err := paymentorder.OutTradeNoValidator(v); err != nil {
 			return &ValidationError{Name: "out_trade_no", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.out_trade_no": %w`, err)}
@@ -1976,6 +2032,12 @@ func (_u *PaymentOrderUpdateOne) sqlSave(ctx context.Context) (_node *PaymentOrd
 	}
 	if value, ok := _u.mutation.RechargeCode(); ok {
 		_spec.SetField(paymentorder.FieldRechargeCode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.IdempotencyKey(); ok {
+		_spec.SetField(paymentorder.FieldIdempotencyKey, field.TypeString, value)
+	}
+	if _u.mutation.IdempotencyKeyCleared() {
+		_spec.ClearField(paymentorder.FieldIdempotencyKey, field.TypeString)
 	}
 	if value, ok := _u.mutation.OutTradeNo(); ok {
 		_spec.SetField(paymentorder.FieldOutTradeNo, field.TypeString, value)

@@ -87,6 +87,11 @@
           </div>
         </div>
         <!-- Actions -->
+        <div v-if="hasPaymentType(order) && order.payment_type === 'stripe_hosted'" class="space-y-3">
+          <p v-if="hostedError" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ hostedError }}</p>
+          <button v-if="order.status === 'PENDING'" class="btn btn-primary w-full" :disabled="hostedLoading" @click="resumeHosted">{{ t('payment.hostedContinue') }}</button>
+          <button v-if="isPending" class="btn btn-secondary w-full" :disabled="hostedLoading" @click="refreshHosted">{{ t('payment.hostedRefresh') }}</button>
+        </div>
         <div class="flex gap-3">
           <button class="btn btn-secondary flex-1" @click="router.push('/purchase')">{{ t('payment.result.backToRecharge') }}</button>
           <button class="btn btn-primary flex-1" @click="router.push('/orders')">{{ t('payment.result.viewOrders') }}</button>
@@ -109,6 +114,7 @@ import {
 import { usePaymentStore } from '@/stores/payment'
 import { useAuthStore } from '@/stores/auth'
 import { paymentAPI } from '@/api/payment'
+import { clearHostedRequest, isStripeHostedUrl } from '@/components/payment/stripeHosted'
 import type { PublicOrderVerifyResult } from '@/api/payment'
 import type { OrderStatus, PaymentOrder } from '@/types/payment'
 import { formatPaymentAmount, normalizePaymentCurrency } from '@/components/payment/currency'
@@ -125,6 +131,8 @@ type ResolvedOrder = PaymentOrder | PublicOrderVerifyResult
 
 const order = ref<ResolvedOrder | null>(null)
 const loading = ref(true)
+const hostedLoading = ref(false)
+const hostedError = ref('')
 const currency = ref('CNY')
 
 interface ReturnInfo {
@@ -170,14 +178,21 @@ const localeCode = computed(() => {
 })
 
 const isSuccess = computed(() => {
+  if (hasPaymentType(order.value) && order.value.payment_type === 'stripe_hosted') return order.value.status === 'COMPLETED'
   return isSuccessStatus(order.value?.status)
 })
 
 const isPending = computed(() => {
+  if (hasPaymentType(order.value) && order.value.payment_type === 'stripe_hosted' && ['PAID', 'RECHARGING'].includes(order.value.status)) return true
   return isPendingStatus(order.value?.status)
 })
 
 const statusTitle = computed(() => {
+  if (hasPaymentType(order.value) && order.value.payment_type === 'stripe_hosted') {
+    if (order.value.status === 'PROCESSING') return t('payment.status.processing')
+    if (order.value.status === 'EXPIRED') return t('payment.status.expired')
+    if (order.value.status === 'PAID' || order.value.status === 'RECHARGING') return t('payment.result.processing')
+  }
   if (isSuccess.value) {
     return t('payment.result.success')
   }
@@ -197,10 +212,39 @@ function formatGatewayAmount(value: number): string {
 
 function setResolvedOrder(nextOrder: ResolvedOrder | null): void {
   order.value = nextOrder
+  if (hasPaymentType(nextOrder) && nextOrder.payment_type === 'stripe_hosted' && ['COMPLETED', 'FAILED', 'EXPIRED', 'CANCELLED', 'REFUNDED', 'PARTIALLY_REFUNDED'].includes(nextOrder.status)) {
+    clearHostedRequest(window.sessionStorage, authStore.user?.id || 0, nextOrder.id)
+  }
   if (nextOrder && 'currency' in nextOrder && nextOrder.currency) {
     currency.value = normalizePaymentCurrency(nextOrder.currency)
   }
   refreshUserBalanceForSuccessfulOrder(nextOrder)
+}
+
+async function refreshHosted(): Promise<void> {
+  if (!hasOrderId(order.value) || hostedLoading.value) return
+  hostedLoading.value = true
+  hostedError.value = ''
+  try {
+    const result = await paymentAPI.verifyOrder(order.value.out_trade_no)
+    setResolvedOrder(result.data)
+  } catch { hostedError.value = t('payment.hostedRetry') }
+  finally { hostedLoading.value = false }
+}
+
+async function resumeHosted(): Promise<void> {
+  if (!hasOrderId(order.value) || hostedLoading.value) return
+  hostedLoading.value = true
+  hostedError.value = ''
+  try {
+    const result = await paymentAPI.resumeStripeHostedOrder(order.value.id)
+    if (result.data.status === 'PENDING' && result.data.pay_url && isStripeHostedUrl(result.data.pay_url)) {
+      window.location.assign(result.data.pay_url)
+    } else {
+      setResolvedOrder((await paymentAPI.getOrder(order.value.id)).data)
+    }
+  } catch { hostedError.value = t('payment.hostedRetry') }
+  finally { hostedLoading.value = false }
 }
 
 function refreshUserBalanceForSuccessfulOrder(nextOrder: ResolvedOrder | null): void {
@@ -349,7 +393,7 @@ function scheduleStatusRefresh(refreshOrder: (() => Promise<ResolvedOrder | null
       clearRecoverySnapshotForTerminalStatus(refreshedOrder.status)
     }
 
-    if (isPendingStatus(order.value?.status)) {
+    if (isPending.value) {
       scheduleStatusRefresh(refreshOrder)
     }
   }, STATUS_REFRESH_INTERVAL_MS)
@@ -425,6 +469,10 @@ onMounted(async () => {
   }
 
   const refreshOrder = async (): Promise<ResolvedOrder | null> => {
+    if (hasPaymentType(order.value) && order.value.payment_type === 'stripe_hosted') {
+      try { return (await paymentAPI.verifyOrder(order.value.out_trade_no)).data }
+      catch { return null }
+    }
     if (resumeToken) {
       const resolvedOrder = await resolveOrderFromResumeToken(resumeToken)
       if (resolvedOrder) {
@@ -447,7 +495,7 @@ onMounted(async () => {
     return null
   }
 
-  if (isPendingStatus(order.value?.status)) {
+  if (isPending.value) {
     scheduleStatusRefresh(refreshOrder)
   } else if (order.value) {
     clearRecoverySnapshotForTerminalStatus(order.value.status)

@@ -106,6 +106,12 @@ func (s *PaymentOrderExpiryService) runOnce() {
 		slog.Info("[PaymentOrderExpiry] reconciled paid orders", "count", recovered)
 	}
 
+	hostedCtx, hostedCancel := context.WithTimeout(context.Background(), expiryCheckTimeout)
+	if _, err := s.paymentSvc.reconcileHostedOrders(hostedCtx); err != nil {
+		slog.Warn("hosted reconciliation incomplete", "error", err)
+	}
+	hostedCancel()
+
 	expireCtx, cancel := context.WithTimeout(context.Background(), expiryCheckTimeout)
 	defer cancel()
 	expired, err := s.paymentSvc.ExpireTimedOutOrders(expireCtx)

@@ -296,6 +296,9 @@ func (s *PaymentService) deductAvailableBalance(ctx context.Context, userID int6
 }
 
 func (s *PaymentService) ExecuteRefund(ctx context.Context, p *RefundPlan) (*RefundResult, error) {
+	if p.Order.PaymentType == payment.TypeStripeHosted {
+		return s.executeHostedRefund(ctx, p)
+	}
 	c, err := s.entClient.PaymentOrder.Update().Where(paymentorder.IDEQ(p.OrderID), paymentorder.StatusIn(OrderStatusCompleted, OrderStatusRefundRequested, OrderStatusRefundPending, OrderStatusRefundFailed)).SetStatus(OrderStatusRefunding).Save(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("lock: %w", err)
@@ -348,6 +351,9 @@ func (s *PaymentService) ExecuteRefund(ctx context.Context, p *RefundPlan) (*Ref
 }
 
 func (s *PaymentService) gwRefund(ctx context.Context, p *RefundPlan) (*payment.RefundResponse, error) {
+	if p.Order.PaymentTradeNo == "" && p.Order.PaymentType == payment.TypeStripeHosted {
+		return nil, fmt.Errorf("hosted refund requires a verified paid session")
+	}
 	if p.Order.PaymentTradeNo == "" {
 		s.writeAuditLog(ctx, p.Order.ID, "REFUND_NO_TRADE_NO", "admin", map[string]any{"detail": "skipped"})
 		return &payment.RefundResponse{Status: payment.ProviderStatusSuccess}, nil
@@ -425,6 +431,9 @@ func (s *PaymentService) QueryAndFinalizeRefund(ctx context.Context, oid int64) 
 	}
 	if o.Status != OrderStatusRefundPending {
 		return nil, infraerrors.BadRequest("INVALID_STATUS", "only refund pending orders can be finalized")
+	}
+	if o.PaymentType == payment.TypeStripeHosted {
+		return s.queryHostedRefund(ctx, o)
 	}
 
 	prov, err := s.getRefundProvider(ctx, o)
