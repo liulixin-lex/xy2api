@@ -4,7 +4,7 @@
 
 ## 配置
 
-1. 使用项目要求的 Go 1.27.0 构建后端，部署时执行新增迁移 `249_stripe_hosted_idempotency.sql`。保留迁移 checksum；不要改写历史 SQL。
+1. 使用项目要求的 Go 1.27.0 构建后端，部署时执行新增迁移 `250_stripe_hosted_idempotency.sql`。保留迁移 checksum；不要改写历史 SQL。
 2. 配置并备份持久化 `TOTP_ENCRYPTION_KEY`。托管实例的 Secret Key、Webhook Signing Secret 使用此密钥进行 AES-256-GCM 加密保存。丢失密钥将影响历史订单查单与退款。
 3. 在管理设置中配置可信的「前端地址」，例如 `https://app.example.com`，不带路径、查询参数或片段。仅测试密钥允许 `http://localhost:端口` 或 `http://127.0.0.1:端口`。客户端 Host、Referer 和 return_url 不参与托管返回地址生成。
 4. 启用支付方式「stripe 托管」，新建同名类型实例，配置 Stripe Secret Key、Webhook Signing Secret、币种和限额。无需 Publishable Key；托管方式没有站内弹窗或组件模式。
