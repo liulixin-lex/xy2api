@@ -24,6 +24,7 @@ func RegisterPaymentRoutes(
 ) {
 	// --- User-facing payment endpoints (authenticated) ---
 	authenticated := v1.Group("/payment")
+	authenticated.Use(func(c *gin.Context) { c.Header("Cache-Control", "private, no-store"); c.Next() })
 	authenticated.Use(gin.HandlerFunc(jwtAuth))
 	authenticated.Use(middleware.BackendModeUserGuard(settingService))
 	// 面板全局按用户限流
@@ -41,6 +42,7 @@ func RegisterPaymentRoutes(
 			orders.GET("/my", paymentHandler.GetMyOrders)
 			orders.GET("/:id", paymentHandler.GetOrder)
 			orders.POST("/:id/cancel", paymentHandler.CancelOrder)
+			orders.POST("/:id/stripe-hosted/resume", paymentHandler.ResumeStripeHostedOrder)
 			orders.POST("/:id/refund-request", paymentHandler.RequestRefund)
 			orders.GET("/refund-eligible-providers", paymentHandler.GetRefundEligibleProviders)
 		}
@@ -58,6 +60,7 @@ func RegisterPaymentRoutes(
 
 	// --- Webhook endpoints (no auth) ---
 	webhook := v1.Group("/payment/webhook")
+	webhook.POST("/stripe_hosted/:instance_id", webhookHandler.StripeHostedWebhook)
 	{
 		// EasyPay sends GET callbacks with query params
 		webhook.GET("/easypay", webhookHandler.EasyPayNotify)

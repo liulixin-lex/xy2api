@@ -20,6 +20,7 @@ export interface UserAvailableGroup {
   peak_rate_multiplier: number
   /** true = 专属分组（小范围授权）；false = 公开分组。 */
   is_exclusive: boolean
+  show_exclusive_badge?: boolean
 }
 
 export interface UserPricingInterval {

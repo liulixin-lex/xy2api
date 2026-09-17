@@ -65,6 +65,10 @@ func (Group) Fields() []ent.Field {
 			Comment("高峰时段叠加倍率，仅在 peak_rate_enabled 且处于 [peak_start, peak_end) 时乘入文本倍率"),
 		field.Bool("is_exclusive").
 			Default(false),
+		field.Bool("show_exclusive_badge").Default(true),
+		field.JSON("system_prompt_config", domain.GroupSystemPromptConfig{}).
+			Default(domain.GroupSystemPromptConfig{}.Clone()).
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
 		field.String("status").
 			MaxLen(20).
 			Default(domain.StatusActive),

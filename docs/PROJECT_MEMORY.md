@@ -4,6 +4,43 @@
 
 ## 当前交接状态
 
+### 分组与支付整合发布 0.1.1（2026-09-17）
+
+- 用户已授权提交确认、推送、PR、合并和正式发版0.1.1，覆盖下方两项本地交付记录中的旧远端操作限制。原提交为分组9fd00b81c、支付cd258bdd9，均完整保留在发布分支历史中。
+- 独立候选为/xy/artifacts/release-0.1.1/work，产品VERSION和UPSTREAM_BASE.json.xy2api_version为0.1.1，兼容基线保持0.2.5。两项未发布迁移分别采用249_group_system_prompt_policy.sql和250_stripe_hosted_idempotency.sql；旧迁移字节不变。
+- 正在验证组合版本并通过受保护PR发布，实际结果持续写入/xy/artifacts/release-0.1.1/RELEASE_RESULT.json及两项功能原VERIFICATION.txt。Stripe真实测试账户联调尚未进行，不将模拟验收视为真实支付验收。
+
+
+### 2026-09-17 — `20260917-stripe-hosted` — 本地实现与验收交接
+
+- 按批准方案从 `41fd8591c` 创建独立 `feat/payment-stripe-hosted` worktree；原 `/xy/xy2api` 不修改。本地候选加入官方托管 Checkout，原站内 Stripe、余额与套餐有效期规则保留。
+- 资金链路覆盖服务端计价、用户范围幂等键、冻结 Session 参数、重复/乱序回调、实例和模式校验、精确整数金额、延迟支付、取消竞争、历史实例保护及持久化退款扣回。数据库追加迁移 249 和 Ent 生成代码，旧订单字段可空。
+- 相关 Go 回归和 PostgreSQL 并发下单、到账及退款场景已通过，托管 Provider/服务层 race exit0；前端 130 项测试、lint、最终类型与生产构建、嵌入前端的后端构建通过。手机配置区换行和长支付名称已调整，1280/390 深浅主题浏览器验收通过；返回页保留 PAID/RECHARGING 请求键直到完成履约，网络检查未加载站内 Stripe SDK。浏览器初期模拟响应缺字段导致提示，补齐测试夹具后重新验收，不将模拟提示归为支付源码故障。
+- 同一外部 `acceptance.sh` 和 `acceptance-input.json` 已观察 BASELINE 不支持 `stripe_hosted`、MODIFIED 创建 `hosted_page` Session 且两次事件仅入账 80/COMPLETED、ROLLBACK 与 BASELINE 相同，三者 exit0。独立回滚归档与原始字节一致，补丁重建及回滚后重新应用均通过内容/可执行位/符号链接核验。首轮核验因 git archive 的组写权限差异失败，修正为 Git 保存的模式语义后通过，原失败日志保留。固定四角色路径保持 `/xy/artifacts/stripe-hosted/`，最终哈希及字面记录见 `VERIFICATION.txt`；回滚脚本不修改数据库。
+- 配置指引见 `docs/STRIPE_HOSTED.md`。真实 Stripe 账户未使用，3DS、真实异步支付及退款仍需上线前测试；既有依赖公告及扫描范围记录于 `SECURITY_REVIEW.txt`。下一步只在新授权范围内提交或进行真实账户验收，本轮不推送、合并、发版或部署。
+
+### 2026-09-17 — `20260917-stripe-hosted-commit` — 本地提交交接
+
+- 用户明确要求提交。对象仍为 `feat/payment-stripe-hosted` 独立 worktree，提交消息为 `feat(payment): add Stripe hosted Checkout`，包含已验收的 61 个源码、生成代码、迁移、测试及文档文件；本地依赖链接 `frontend/node_modules` 不纳入。
+- 提交前 `git diff --check` 通过；业务源码保持上一轮验收版本，本轮仅更新本交接记录。固定四角色重新封存并保留同输入 BASELINE、MODIFIED、ROLLBACK 输出，提交命令、最终 SHA 及提交后状态以 `VERIFICATION.txt` 的执行记录为准。
+- 原主工作区保持不变。本轮仅本地提交，未推送或合并，未发版或部署。真实 Stripe 测试账号及既有依赖公告仍按上文作为后续门禁和维护项。
+### 分组专属标识与系统提示词本地交付（2026-09-17）
+
+- 基线为 `main / 41fd8591c25b075e3f95df58d3b46283a3a70b68`；实现位于 `/xy/artifacts/group-system-prompts/work`，原仓库保持不变。新增 `show_exclusive_badge` 与管理员专用 `system_prompt_config`，专属授权不变，模型独立提示词优先于通用提示词，按映射前客户端模型名匹配。
+- 已接入标准/简易模式的新建与编辑表单、用户模型广场和渠道展示；HTTP 对话协议、token 计数及 Responses WebSocket 在最终出站阶段前置提示词并保留客户端内容。新增迁移 249、Ent 生成代码、认证投影与版本 26 缓存快照、数据库失效触发器。详见 `docs/GROUP_SYSTEM_PROMPTS.md`。
+- 功能验证已通过：后端 domain/service/handler/middleware/routes/repository 定向回归；真实 PostgreSQL 18.1 / Redis 8.4 持久化、认证投影、两个实例的更新/清空失效；59 项前端回归、i18n、类型、lint 和生产构建；1280/390 浏览器表单保存、校验和隐藏标识展示。测试使用本地模拟上游与隔离数据。
+- 固定四角色为 `/xy/artifacts/group-system-prompts/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；回滚依赖同目录 `BASELINE.tar.gz`，只恢复源码归档。最终静态检查、嵌入前端服务构建、BASELINE/MODIFIED/ROLLBACK 对照与补丁重建的字面输出、退出状态及哈希以 `VERIFICATION.txt`、`FINAL_RESULT.json` 为准。首次工具版本不匹配、内存限制中断及测试工厂/模拟接口修正均保留记录，不计为成功。
+- 用户后续授权本地提交；在同一源码副本提交已验收功能，提交结果与四角色重新核验记录见交付目录 `COMMIT_RESULT.json`。不推送、发版、部署生产或调用真实模型账号；本机预览使用模拟数据，不能视为生产网关。
+### stripe 托管本地功能分支（2026-09-17）
+
+- 基线为 `/xy/xy2api` 的干净 `main` / `41fd8591c25b075e3f95df58d3b46283a3a70b68`。实现位于独立 worktree `/xy/artifacts/stripe-hosted/work`、分支 `feat/payment-stripe-hosted`；用户已追加授权本地提交，提交身份与实际执行结果记录在固定交付目录 `VERIFICATION.txt`。未授权推送、合并、发版或部署。
+- 新增独立 `stripe_hosted` Provider 和官方 Checkout 托管跳转，使用已有 `stripe-go/v85 v85.0.0`，API `2026-03-25.dahlia`。覆盖余额充值与套餐单次购买，旧 `stripe` 保留为独立备用入口。
+- 新增用户范围幂等请求键、冻结订单报价、实例绑定签名回调、整数金额及账户/模式校验、`PROCESSING`、延迟到账补偿与支付/取消竞争处理。退款先持久化扣回与请求，再向 Stripe 发起；不确定结果保留冻结扣回，确认失败仅恢复一次。追加可空字段迁移 249，历史 SQL 不变。
+- 配置密钥加密脱敏，历史实例受订单引用保护；返回地址由可信前端地址生成，托管 URL 仅允许官方 Checkout。用户界面沿用原主题，托管流程不加载 Stripe.js，支付成功提示以本站履约完成为准。配置及回退说明见 `docs/STRIPE_HOSTED.md`。
+- 相关 Go 回归、真实 PostgreSQL 场景及托管支付 race 通过；前端 lint、130 项测试、类型检查、生产构建及嵌入前端的后端构建通过，独立迁移兼容检查通过。1280/390 深浅主题支付跳转、到账状态、配置弹窗和键盘焦点通过。最终同输入源码事务的实际命令、输出、退出码与哈希统一以 `/xy/artifacts/stripe-hosted/VERIFICATION.txt` 为准。
+- 固定四角色为 `/xy/artifacts/stripe-hosted/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`。源码回滚不撤销数据库迁移，已有托管订单需保留新版本回调及密钥处理历史付款。
+- 真实 Stripe 测试账户未配置，官方托管页、3DS、实际异步支付、CLI/Dashboard 回调和退款仍是上线前门禁。依赖审计记录了既有 xlsx 高危及 x/mod 公告；新支付路径不使用 xlsx，审计不声明全仓无漏洞。详情见交付目录 `SECURITY_REVIEW.txt`。
+
 ### Sub2API v0.2.5 / XY2API 0.1.0 同步发布（2026-09-16）
 
 - 用户已授权完整同步、受保护 PR 合并、`0.1.0-rc.1` 隔离验证与正式 `0.1.0` 发版；不包含生产部署或真实模型账号探测。
@@ -102,6 +139,11 @@
 Sub2API 兼容基线已更新到 `v0.2.5`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+- `20260917-release-0.1.1`：用户授权确认分组与支付提交、推送、PR、合并和正式发布0.1.1。已确认原提交9fd00b81c与cd258bdd9，正在独立release/0.1.1整合并执行保护检查；复用两项功能原四角色，发布事件扩展到/xy/artifacts/release-0.1.1/。
+
+- `20260917-group-prompts-commit`：本地提交交接已登记；实际提交 SHA、干净状态与归档一致性由 `COMMIT_RESULT.json` 记录，无后续远端操作。
+- `20260917-stripe-hosted`：本地实现与验收已完成，独立 worktree `/xy/artifacts/stripe-hosted/work`、分支 `feat/payment-stripe-hosted`，基线 `41fd8591c`，原 main 保留。BASELINE 不支持托管、MODIFIED 创建 Session 且重复两次事件只入账 80、ROLLBACK 恢复基线，三者 exit0；回滚字节及补丁重建均一致。最终四角色哈希见 `/xy/artifacts/stripe-hosted/VERIFICATION.txt`。真实测试账号联调另行完成，不推送或部署。
 
 - `20260916-sub2api-v0.2.5-xy2api-v0.1.0`：同步、RC、正式发版与全部制品/隔离验收已完成；本条最终文档通过受保护 PR 固化后执行本地 main 同步、最终归档和专用测试资源清理。固定证据目录为 `/xy/artifacts/upstream-sync-v0.2.5-xy2api-0.1.0/`，以 `FINAL_RESULT.json` 记录收尾提交与四角色哈希。无生产部署或真实账号探测。
 
@@ -664,3 +706,23 @@ pnpm --dir frontend run build
 - RC `22527fc5c` 与正式 `380a9260e` 标签保持不可变。RC/正式五平台 SHA-256、二进制版本来源、双架构 OCI 与镜像别名均通过；正式 Release latest=true。DockerHub 按缺少凭据跳过。
 - XY2API 0.0.13 与官方 Sub2API 0.2.4 数据库升级到 RC 均成功；实际独立恢复 PostgreSQL、Redis、应用备份后旧版可运行，数据标记和删除前配额恢复。正式镜像全新安装通过。
 - 四角色采用固定路径，源码回滚与补丁重建成功；最终归档随本条文档合并更新。临时构建缓存及 8 GiB 专用 swap 已清理，剩余专用容器/网络/目录由收尾脚本清理，结果记录 `FINAL_RESULT.json`。本轮没有生产部署或真实账号探测。
+
+### 2026-09-17 — `20260917-group-prompts-commit` — 本地提交交接
+
+- 用户要求提交已验收的分组功能；对象仍为 `/xy/artifacts/group-system-prompts/work`，基线 `41fd8591c`，原 `/xy/xy2api` 保持不变。
+- 提交包含 `show_exclusive_badge`、`system_prompt_config`、迁移及生成代码、管理表单、协议注入、回归测试与交接文档。业务源码复用上一轮验收结果，本轮只补充本文件并核验提交内容。
+- 同输入 BASELINE 显示专属标识、MODIFIED 隐藏、ROLLBACK 恢复显示，三者保持专属权限与分组可见；补丁重建与恢复哈希记录继续追加原四角色。实际本地提交和检查退出结果以 `COMMIT_RESULT.json`、`VERIFICATION.txt` 为准。
+- 无远端推送、发布或生产操作；下一步无自动操作。
+### 2026-09-17 — `20260917-stripe-hosted` — 本地实现与验收交接
+
+- 按批准方案从 `41fd8591c` 创建独立 `feat/payment-stripe-hosted` worktree；原 `/xy/xy2api` 不修改。本地候选加入官方托管 Checkout，原站内 Stripe、余额与套餐有效期规则保留。
+- 资金链路覆盖服务端计价、用户范围幂等键、冻结 Session 参数、重复/乱序回调、实例和模式校验、精确整数金额、延迟支付、取消竞争、历史实例保护及持久化退款扣回。数据库追加迁移 249 和 Ent 生成代码，旧订单字段可空。
+- 相关 Go 回归和 PostgreSQL 并发下单、到账及退款场景已通过，托管 Provider/服务层 race exit0；前端 130 项测试、lint、最终类型与生产构建、嵌入前端的后端构建通过。手机配置区换行和长支付名称已调整，1280/390 深浅主题浏览器验收通过；返回页保留 PAID/RECHARGING 请求键直到完成履约，网络检查未加载站内 Stripe SDK。浏览器初期模拟响应缺字段导致提示，补齐测试夹具后重新验收，不将模拟提示归为支付源码故障。
+- 同一外部 `acceptance.sh` 和 `acceptance-input.json` 已观察 BASELINE 不支持 `stripe_hosted`、MODIFIED 创建 `hosted_page` Session 且两次事件仅入账 80/COMPLETED、ROLLBACK 与 BASELINE 相同，三者 exit0。独立回滚归档与原始字节一致，补丁重建及回滚后重新应用均通过内容/可执行位/符号链接核验。首轮核验因 git archive 的组写权限差异失败，修正为 Git 保存的模式语义后通过，原失败日志保留。固定四角色路径保持 `/xy/artifacts/stripe-hosted/`，最终哈希及字面记录见 `VERIFICATION.txt`；回滚脚本不修改数据库。
+- 配置指引见 `docs/STRIPE_HOSTED.md`。真实 Stripe 账户未使用，3DS、真实异步支付及退款仍需上线前测试；既有依赖公告及扫描范围记录于 `SECURITY_REVIEW.txt`。下一步只在新授权范围内提交或进行真实账户验收，本轮不推送、合并、发版或部署。
+
+### 2026-09-17 — `20260917-stripe-hosted-commit` — 本地提交交接
+
+- 用户明确要求提交。对象仍为 `feat/payment-stripe-hosted` 独立 worktree，提交消息为 `feat(payment): add Stripe hosted Checkout`，包含已验收的 61 个源码、生成代码、迁移、测试及文档文件；本地依赖链接 `frontend/node_modules` 不纳入。
+- 提交前 `git diff --check` 通过；业务源码保持上一轮验收版本，本轮仅更新本交接记录。固定四角色重新封存并保留同输入 BASELINE、MODIFIED、ROLLBACK 输出，提交命令、最终 SHA 及提交后状态以 `VERIFICATION.txt` 的执行记录为准。
+- 原主工作区保持不变。本轮仅本地提交，未推送或合并，未发版或部署。真实 Stripe 测试账号及既有依赖公告仍按上文作为后续门禁和维护项。

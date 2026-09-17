@@ -45,8 +45,13 @@ export const paymentAPI = {
   },
 
   /** Create a new payment order */
-  createOrder(data: CreateOrderRequest) {
+  createOrder(data: CreateOrderRequest, idempotencyKey?: string) {
+    if (idempotencyKey) return apiClient.post<CreateOrderResult>('/payment/orders', data, { headers: { 'Idempotency-Key': idempotencyKey } })
     return apiClient.post<CreateOrderResult>('/payment/orders', data)
+  },
+
+  resumeStripeHostedOrder(id: number) {
+    return apiClient.post<CreateOrderResult>(`/payment/orders/${id}/stripe-hosted/resume`)
   },
 
   /** Get current user's orders */

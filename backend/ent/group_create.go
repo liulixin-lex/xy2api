@@ -176,6 +176,34 @@ func (_c *GroupCreate) SetNillableIsExclusive(v *bool) *GroupCreate {
 	return _c
 }
 
+// SetShowExclusiveBadge sets the "show_exclusive_badge" field.
+func (_c *GroupCreate) SetShowExclusiveBadge(v bool) *GroupCreate {
+	_c.mutation.SetShowExclusiveBadge(v)
+	return _c
+}
+
+// SetNillableShowExclusiveBadge sets the "show_exclusive_badge" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableShowExclusiveBadge(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetShowExclusiveBadge(*v)
+	}
+	return _c
+}
+
+// SetSystemPromptConfig sets the "system_prompt_config" field.
+func (_c *GroupCreate) SetSystemPromptConfig(v domain.GroupSystemPromptConfig) *GroupCreate {
+	_c.mutation.SetSystemPromptConfig(v)
+	return _c
+}
+
+// SetNillableSystemPromptConfig sets the "system_prompt_config" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableSystemPromptConfig(v *domain.GroupSystemPromptConfig) *GroupCreate {
+	if v != nil {
+		_c.SetSystemPromptConfig(*v)
+	}
+	return _c
+}
+
 // SetStatus sets the "status" field.
 func (_c *GroupCreate) SetStatus(v string) *GroupCreate {
 	_c.mutation.SetStatus(v)
@@ -1091,6 +1119,14 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultIsExclusive
 		_c.mutation.SetIsExclusive(v)
 	}
+	if _, ok := _c.mutation.ShowExclusiveBadge(); !ok {
+		v := group.DefaultShowExclusiveBadge
+		_c.mutation.SetShowExclusiveBadge(v)
+	}
+	if _, ok := _c.mutation.SystemPromptConfig(); !ok {
+		v := group.DefaultSystemPromptConfig
+		_c.mutation.SetSystemPromptConfig(v)
+	}
 	if _, ok := _c.mutation.Status(); !ok {
 		v := group.DefaultStatus
 		_c.mutation.SetStatus(v)
@@ -1285,6 +1321,12 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.IsExclusive(); !ok {
 		return &ValidationError{Name: "is_exclusive", err: errors.New(`ent: missing required field "Group.is_exclusive"`)}
+	}
+	if _, ok := _c.mutation.ShowExclusiveBadge(); !ok {
+		return &ValidationError{Name: "show_exclusive_badge", err: errors.New(`ent: missing required field "Group.show_exclusive_badge"`)}
+	}
+	if _, ok := _c.mutation.SystemPromptConfig(); !ok {
+		return &ValidationError{Name: "system_prompt_config", err: errors.New(`ent: missing required field "Group.system_prompt_config"`)}
 	}
 	if _, ok := _c.mutation.Status(); !ok {
 		return &ValidationError{Name: "status", err: errors.New(`ent: missing required field "Group.status"`)}
@@ -1522,6 +1564,14 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
 		_node.IsExclusive = value
+	}
+	if value, ok := _c.mutation.ShowExclusiveBadge(); ok {
+		_spec.SetField(group.FieldShowExclusiveBadge, field.TypeBool, value)
+		_node.ShowExclusiveBadge = value
+	}
+	if value, ok := _c.mutation.SystemPromptConfig(); ok {
+		_spec.SetField(group.FieldSystemPromptConfig, field.TypeJSON, value)
+		_node.SystemPromptConfig = value
 	}
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(group.FieldStatus, field.TypeString, value)
@@ -2048,6 +2098,30 @@ func (u *GroupUpsert) SetIsExclusive(v bool) *GroupUpsert {
 // UpdateIsExclusive sets the "is_exclusive" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateIsExclusive() *GroupUpsert {
 	u.SetExcluded(group.FieldIsExclusive)
+	return u
+}
+
+// SetShowExclusiveBadge sets the "show_exclusive_badge" field.
+func (u *GroupUpsert) SetShowExclusiveBadge(v bool) *GroupUpsert {
+	u.Set(group.FieldShowExclusiveBadge, v)
+	return u
+}
+
+// UpdateShowExclusiveBadge sets the "show_exclusive_badge" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateShowExclusiveBadge() *GroupUpsert {
+	u.SetExcluded(group.FieldShowExclusiveBadge)
+	return u
+}
+
+// SetSystemPromptConfig sets the "system_prompt_config" field.
+func (u *GroupUpsert) SetSystemPromptConfig(v domain.GroupSystemPromptConfig) *GroupUpsert {
+	u.Set(group.FieldSystemPromptConfig, v)
+	return u
+}
+
+// UpdateSystemPromptConfig sets the "system_prompt_config" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateSystemPromptConfig() *GroupUpsert {
+	u.SetExcluded(group.FieldSystemPromptConfig)
 	return u
 }
 
@@ -3200,6 +3274,34 @@ func (u *GroupUpsertOne) SetIsExclusive(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateIsExclusive() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateIsExclusive()
+	})
+}
+
+// SetShowExclusiveBadge sets the "show_exclusive_badge" field.
+func (u *GroupUpsertOne) SetShowExclusiveBadge(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetShowExclusiveBadge(v)
+	})
+}
+
+// UpdateShowExclusiveBadge sets the "show_exclusive_badge" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateShowExclusiveBadge() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateShowExclusiveBadge()
+	})
+}
+
+// SetSystemPromptConfig sets the "system_prompt_config" field.
+func (u *GroupUpsertOne) SetSystemPromptConfig(v domain.GroupSystemPromptConfig) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetSystemPromptConfig(v)
+	})
+}
+
+// UpdateSystemPromptConfig sets the "system_prompt_config" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateSystemPromptConfig() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateSystemPromptConfig()
 	})
 }
 
@@ -4674,6 +4776,34 @@ func (u *GroupUpsertBulk) SetIsExclusive(v bool) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateIsExclusive() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateIsExclusive()
+	})
+}
+
+// SetShowExclusiveBadge sets the "show_exclusive_badge" field.
+func (u *GroupUpsertBulk) SetShowExclusiveBadge(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetShowExclusiveBadge(v)
+	})
+}
+
+// UpdateShowExclusiveBadge sets the "show_exclusive_badge" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateShowExclusiveBadge() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateShowExclusiveBadge()
+	})
+}
+
+// SetSystemPromptConfig sets the "system_prompt_config" field.
+func (u *GroupUpsertBulk) SetSystemPromptConfig(v domain.GroupSystemPromptConfig) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetSystemPromptConfig(v)
+	})
+}
+
+// UpdateSystemPromptConfig sets the "system_prompt_config" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateSystemPromptConfig() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateSystemPromptConfig()
 	})
 }
 

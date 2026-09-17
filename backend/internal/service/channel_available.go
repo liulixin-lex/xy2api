@@ -23,6 +23,7 @@ type AvailableGroupRef struct {
 	PeakEnd            string
 	PeakRateMultiplier float64
 	IsExclusive        bool
+	ShowExclusiveBadge bool
 }
 
 // AvailableChannel 可用渠道视图：用于「可用渠道」页面展示渠道基础信息 +
@@ -73,6 +74,7 @@ func (s *ChannelService) ListAvailable(ctx context.Context) ([]AvailableChannel,
 			PeakEnd:            g.PeakEnd,
 			PeakRateMultiplier: g.PeakRateMultiplier,
 			IsExclusive:        g.IsExclusive,
+			ShowExclusiveBadge: g.ShowExclusiveBadge,
 		}
 	}
 

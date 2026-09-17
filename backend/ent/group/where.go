@@ -110,6 +110,11 @@ func IsExclusive(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldIsExclusive, v))
 }
 
+// ShowExclusiveBadge applies equality check predicate on the "show_exclusive_badge" field. It's identical to ShowExclusiveBadgeEQ.
+func ShowExclusiveBadge(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldShowExclusiveBadge, v))
+}
+
 // Status applies equality check predicate on the "status" field. It's identical to StatusEQ.
 func Status(v string) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldStatus, v))
@@ -848,6 +853,16 @@ func IsExclusiveEQ(v bool) predicate.Group {
 // IsExclusiveNEQ applies the NEQ predicate on the "is_exclusive" field.
 func IsExclusiveNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldIsExclusive, v))
+}
+
+// ShowExclusiveBadgeEQ applies the EQ predicate on the "show_exclusive_badge" field.
+func ShowExclusiveBadgeEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldShowExclusiveBadge, v))
+}
+
+// ShowExclusiveBadgeNEQ applies the NEQ predicate on the "show_exclusive_badge" field.
+func ShowExclusiveBadgeNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldShowExclusiveBadge, v))
 }
 
 // StatusEQ applies the EQ predicate on the "status" field.

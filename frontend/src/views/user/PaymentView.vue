@@ -93,7 +93,7 @@
                 <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
                 {{ t('common.processing') }}
               </span>
-              <span v-else>{{ t('payment.createOrder') }} {{ formatSelectedPaymentAmount(totalAmount) }}</span>
+              <span v-else>{{ t(selectedMethod === 'stripe_hosted' ? 'payment.hostedPay' : 'payment.createOrder') }} {{ formatSelectedPaymentAmount(totalAmount) }}</span>
             </button>
             </template>
           </template>
@@ -181,7 +181,7 @@
                   <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
                   {{ t('common.processing') }}
                 </span>
-                <span v-else>{{ t('payment.createOrder') }} {{ formatSelectedPaymentAmount(subTotalAmount) }}</span>
+                <span v-else>{{ t(selectedMethod === 'stripe_hosted' ? 'payment.hostedPay' : 'payment.createOrder') }} {{ formatSelectedPaymentAmount(subTotalAmount) }}</span>
               </button>
               <button class="btn btn-secondary w-full" @click="selectedPlan = null">{{ t('common.cancel') }}</button>
             </template>
@@ -260,7 +260,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -272,6 +272,7 @@ import { useSubscriptionStore } from '@/stores/subscriptions'
 import { useAppStore } from '@/stores'
 import { FeatureFlags, resolveFeatureFlag } from '@/utils/featureFlags'
 import { paymentAPI } from '@/api/payment'
+import { bindHostedRequest, hostedRequestKey, isStripeHostedUrl } from '@/components/payment/stripeHosted'
 import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiError'
 import { isMobileDevice } from '@/utils/device'
 import { hasPeakRate, formatPeakRateWindow, serverTimezoneLabel, type PeakRateFields } from '@/utils/peak-rate'
@@ -328,6 +329,15 @@ function subscriptionPeakRateLabel(sub: { group?: PeakRateFields | null }): stri
 
 const loading = ref(true)
 const submitting = ref(false)
+const hostedRedirecting = ref(false)
+function resetHostedNavigation(event: PageTransitionEvent) {
+  if (event.persisted && hostedRedirecting.value) {
+    hostedRedirecting.value = false
+    submitting.value = false
+  }
+}
+onMounted(() => window.addEventListener('pageshow', resetHostedNavigation))
+onBeforeUnmount(() => window.removeEventListener('pageshow', resetHostedNavigation))
 const errorMessage = ref('')
 const errorHintMessage = ref('')
 const activeTab = ref<'recharge' | 'subscription'>('recharge')
@@ -732,7 +742,7 @@ const paymentButtonClass = computed(() => {
   if (!m) return 'btn-primary'
   if (isBuiltInAlipayMethod(m)) return 'btn-alipay'
   if (isBuiltInWxpayMethod(m)) return 'btn-wxpay'
-  if (m === 'stripe') return 'btn-stripe'
+  if (m === 'stripe' || m === 'stripe_hosted') return 'btn-stripe'
   if (m === 'airwallex') return 'btn-airwallex'
   return 'btn-primary'
 })
@@ -813,7 +823,19 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
       payload.wechat_resume_token = options.wechatResumeToken
     }
 
-    const result = await paymentStore.createOrder(payload) as CreateOrderResult & { resume_token?: string }
+    const requestKey = requestType === 'stripe_hosted'
+      ? hostedRequestKey(window.sessionStorage, authStore.user?.id || 0, payload) : undefined
+    const result = await (requestKey ? paymentStore.createOrder(payload, requestKey) : paymentStore.createOrder(payload)) as CreateOrderResult & { resume_token?: string }
+    if (requestType === 'stripe_hosted') {
+      bindHostedRequest(window.sessionStorage, authStore.user?.id || 0, payload, result.order_id)
+      if (result.status === 'PENDING' && result.pay_url && isStripeHostedUrl(result.pay_url)) {
+        window.location.assign(result.pay_url)
+        hostedRedirecting.value = true
+      } else {
+        await router.push({ path: '/payment/result', query: { order_id: result.order_id, out_trade_no: result.out_trade_no } })
+      }
+      return
+    }
     const openWindow = (url: string) => {
       const win = window.open(url, 'paymentPopup', getPaymentPopupFeatures())
       if (!win || win.closed) {
@@ -971,7 +993,7 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
     }
     appStore.showError(buildPaymentErrorToastMessage(errorMessage.value, errorHintMessage.value))
   } finally {
-    submitting.value = false
+    if (!hostedRedirecting.value) submitting.value = false
   }
 }
 
@@ -1147,7 +1169,7 @@ onMounted(async () => {
         window.localStorage.getItem(PAYMENT_RECOVERY_STORAGE_KEY),
         { resumeToken: routeResumeToken },
       )
-      if (restored) {
+      if (restored && restored.paymentType !== 'stripe_hosted') {
         paymentState.value = restored
         paymentPhase.value = 'paying'
         const restoredMethod = normalizeVisibleMethod(restored.paymentType)

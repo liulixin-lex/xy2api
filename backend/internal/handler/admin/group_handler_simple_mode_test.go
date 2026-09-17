@@ -174,6 +174,7 @@ func TestGroupHandlerSimpleModeResponseUsesFieldAllowlist(t *testing.T) {
 	require.Equal(t, float64(3), item["account_count"])
 	require.ElementsMatch(t, []string{
 		"id", "name", "description", "platform", "status", "account_count",
+		"system_prompt_config",
 		"active_account_count", "rate_limited_account_count", "sort_order", "created_at", "updated_at",
 	}, mapKeys(item))
 	for _, forbidden := range []string{

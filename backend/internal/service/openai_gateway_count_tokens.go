@@ -444,7 +444,7 @@ func (s *OpenAIGatewayService) buildInputTokensUpstreamRequest(
 		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
+	req, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, targetURL, body, GroupPromptResponses)
 	if err != nil {
 		return nil, err
 	}

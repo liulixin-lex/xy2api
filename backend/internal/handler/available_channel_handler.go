@@ -62,6 +62,7 @@ type userAvailableGroup struct {
 	PeakEnd            string  `json:"peak_end"`
 	PeakRateMultiplier float64 `json:"peak_rate_multiplier"`
 	IsExclusive        bool    `json:"is_exclusive"`
+	ShowExclusiveBadge bool    `json:"show_exclusive_badge"`
 }
 
 // userSupportedModelPricing 用户可见的定价字段白名单。
@@ -262,6 +263,7 @@ func filterUserVisibleGroups(
 			PeakEnd:            g.PeakEnd,
 			PeakRateMultiplier: g.PeakRateMultiplier,
 			IsExclusive:        g.IsExclusive,
+			ShowExclusiveBadge: g.ShowExclusiveBadge,
 		})
 	}
 	return visible

@@ -40,6 +40,7 @@ vi.mock('@/stores/payment', () => ({
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     refreshUser,
+    user: { id: 9 },
   }),
 }))
 
@@ -54,6 +55,7 @@ vi.mock('@/api/payment', () => ({
 import PaymentResultView from '../PaymentResultView.vue'
 import { PAYMENT_RECOVERY_STORAGE_KEY } from '@/components/payment/paymentFlow'
 import { formatPaymentAmount } from '@/components/payment/currency'
+import { bindHostedRequest, hostedRequestKey } from '@/components/payment/stripeHosted'
 
 const orderFactory = (status: string) => ({
   id: 42,
@@ -101,10 +103,49 @@ describe('PaymentResultView', () => {
     refreshUser.mockReset()
     refreshUser.mockResolvedValue({})
     window.localStorage.clear()
+    window.sessionStorage.clear()
   })
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('does not trust success return parameters for hosted payments and waits for fulfillment', async () => {
+    vi.useFakeTimers()
+    const request = { payment_type: 'stripe_hosted', amount: 88, order_type: 'balance' as const }
+    const originalKey = hostedRequestKey(window.sessionStorage, 9, request)
+    bindHostedRequest(window.sessionStorage, 9, request, 42)
+    routeState.query = { order_id: '42', out_trade_no: 'sub2_hosted', success: 'true', session_id: 'cs_fake' }
+    pollOrderStatus.mockResolvedValue({ ...orderFactory('PROCESSING'), payment_type: 'stripe_hosted' })
+    verifyOrder.mockResolvedValueOnce({ data: { ...orderFactory('PAID'), payment_type: 'stripe_hosted' } })
+      .mockResolvedValueOnce({ data: { ...orderFactory('COMPLETED'), payment_type: 'stripe_hosted' } })
+    const wrapper = mount(PaymentResultView, { global: { stubs: { OrderStatusBadge: true } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('payment.status.processing')
+    expect(wrapper.text()).not.toContain('payment.result.success')
+    expect(refreshUser).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('payment.result.processing')
+    expect(wrapper.text()).not.toContain('payment.result.success')
+    expect(hostedRequestKey(window.sessionStorage, 9, request)).toBe(originalKey)
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('payment.result.success')
+    expect(refreshUser).toHaveBeenCalledTimes(1)
+    expect(hostedRequestKey(window.sessionStorage, 9, request)).not.toBe(originalKey)
+    wrapper.unmount()
+  })
+
+  it('shows expired hosted sessions without offering another payment session', async () => {
+    routeState.query = { order_id: '42', checkout: 'complete' }
+    pollOrderStatus.mockResolvedValue({ ...orderFactory('EXPIRED'), payment_type: 'stripe_hosted' })
+    const wrapper = mount(PaymentResultView, { global: { stubs: { OrderStatusBadge: true } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('payment.status.expired')
+    expect(wrapper.text()).not.toContain('payment.hostedContinue')
+    expect(refreshUser).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('renders a pending state instead of a failure state when the restored order is still pending', async () => {

@@ -12,7 +12,6 @@ package service
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -174,7 +173,7 @@ func (s *OpenAIGatewayService) buildNativeAnthropicUpstreamRequest(
 	// 地址而非 CC/Responses 地址），详见 helper 注释。
 	body = clampOllamaCloudAnthropicMessagesMaxTokens(account, account.GetAnthropicProtocolBaseURL(), body)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
+	req, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, targetURL, body, GroupPromptAnthropic)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -30,6 +30,8 @@ const (
 	FieldFeeRate = "fee_rate"
 	// FieldRechargeCode holds the string denoting the recharge_code field in the database.
 	FieldRechargeCode = "recharge_code"
+	// FieldIdempotencyKey holds the string denoting the idempotency_key field in the database.
+	FieldIdempotencyKey = "idempotency_key"
 	// FieldOutTradeNo holds the string denoting the out_trade_no field in the database.
 	FieldOutTradeNo = "out_trade_no"
 	// FieldPaymentType holds the string denoting the payment_type field in the database.
@@ -116,6 +118,7 @@ var Columns = []string{
 	FieldPayAmount,
 	FieldFeeRate,
 	FieldRechargeCode,
+	FieldIdempotencyKey,
 	FieldOutTradeNo,
 	FieldPaymentType,
 	FieldPaymentTradeNo,
@@ -168,6 +171,8 @@ var (
 	DefaultFeeRate float64
 	// RechargeCodeValidator is a validator for the "recharge_code" field. It is called by the builders before save.
 	RechargeCodeValidator func(string) error
+	// IdempotencyKeyValidator is a validator for the "idempotency_key" field. It is called by the builders before save.
+	IdempotencyKeyValidator func(string) error
 	// DefaultOutTradeNo holds the default value on creation for the "out_trade_no" field.
 	DefaultOutTradeNo string
 	// OutTradeNoValidator is a validator for the "out_trade_no" field. It is called by the builders before save.
@@ -252,6 +257,11 @@ func ByFeeRate(opts ...sql.OrderTermOption) OrderOption {
 // ByRechargeCode orders the results by the recharge_code field.
 func ByRechargeCode(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRechargeCode, opts...).ToFunc()
+}
+
+// ByIdempotencyKey orders the results by the idempotency_key field.
+func ByIdempotencyKey(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldIdempotencyKey, opts...).ToFunc()
 }
 
 // ByOutTradeNo orders the results by the out_trade_no field.

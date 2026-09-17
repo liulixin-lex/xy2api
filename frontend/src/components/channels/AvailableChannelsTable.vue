@@ -147,6 +147,10 @@
                   </span>
                 </div>
               </div>
+              <div v-for="g in unmarkedGroups(section)" :key="`unmarked-${g.id}`" class="flex min-w-0 flex-wrap items-center gap-1">
+                <GroupBadge :name="g.name" :platform="g.platform as GroupPlatform" :subscription-type="(g.subscription_type || 'standard') as SubscriptionType" :rate-multiplier="g.rate_multiplier" :user-rate-multiplier="userGroupRates[g.id] ?? null" always-show-rate />
+                <span v-if="hasPeakRate(g)" class="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300" :title="peakRateTitle(g)"><Icon name="clock" size="xs" class="h-3 w-3" />{{ peakRateLabel(g) }}</span>
+              </div>
               <span v-if="section.groups.length === 0" class="text-xs text-gray-400">-</span>
             </div>
           </td>
@@ -287,6 +291,10 @@
                       </span>
                     </div>
                   </div>
+                  <div v-for="g in unmarkedGroups(section)" :key="`mobile-unmarked-${g.id}`" class="flex min-w-0 flex-wrap items-center gap-1">
+                    <GroupBadge class="max-w-full" :name="g.name" :platform="g.platform as GroupPlatform" :subscription-type="(g.subscription_type || 'standard') as SubscriptionType" :rate-multiplier="g.rate_multiplier" :user-rate-multiplier="userGroupRates[g.id] ?? null" always-show-rate />
+                    <span v-if="hasPeakRate(g)" class="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300" :title="peakRateTitle(g)"><Icon name="clock" size="xs" class="h-3 w-3" />{{ peakRateLabel(g) }}</span>
+                  </div>
                   <span v-if="section.groups.length === 0" class="text-xs text-gray-400">-</span>
                 </dd>
               </div>
@@ -356,7 +364,11 @@ void props.userGroupRates
 const { t } = useI18n()
 
 function exclusiveGroups(section: UserChannelPlatformSection): UserAvailableGroup[] {
-  return section.groups.filter((g) => g.is_exclusive)
+  return section.groups.filter((g) => g.is_exclusive && g.show_exclusive_badge !== false)
+}
+
+function unmarkedGroups(section: UserChannelPlatformSection): UserAvailableGroup[] {
+  return section.groups.filter((g) => g.is_exclusive && g.show_exclusive_badge === false)
 }
 
 function publicGroups(section: UserChannelPlatformSection): UserAvailableGroup[] {

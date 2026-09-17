@@ -342,7 +342,7 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 			}
 
 			restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
+			upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, restGeminiReq, GroupPromptGemini)
 			if err != nil {
 				return nil, "", err
 			}
@@ -387,7 +387,7 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 					"request": inner,
 				})
 
-				upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(wrappedBytes))
+				upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, wrappedBytes, GroupPromptGemini)
 				if err != nil {
 					return nil, "", err
 				}
@@ -409,7 +409,7 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 			}
 
 			restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
+			upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, restGeminiReq, GroupPromptGemini)
 			if err != nil {
 				return nil, "", err
 			}
@@ -438,7 +438,7 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 			}
 
 			restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
+			upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, restGeminiReq, GroupPromptGemini)
 			if err != nil {
 				return nil, "", err
 			}

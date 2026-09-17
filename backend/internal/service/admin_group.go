@@ -10,6 +10,7 @@ import (
 
 	dbent "github.com/liulixin-lex/xy2api/ent"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/antigravity"
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
@@ -363,7 +364,8 @@ func normalizeCreateGroupInputForSimpleMode(input *CreateGroupInput) {
 	}
 	*input = CreateGroupInput{
 		Name: input.Name, Description: input.Description, Platform: input.Platform,
-		RateMultiplier: 1, SubscriptionType: SubscriptionTypeStandard,
+		SystemPromptConfig: input.SystemPromptConfig,
+		RateMultiplier:     1, SubscriptionType: SubscriptionTypeStandard,
 	}
 }
 
@@ -371,7 +373,7 @@ func normalizeUpdateGroupInputForSimpleMode(input *UpdateGroupInput) {
 	if input == nil {
 		return
 	}
-	*input = UpdateGroupInput{Name: input.Name, Description: input.Description}
+	*input = UpdateGroupInput{Name: input.Name, Description: input.Description, SystemPromptConfig: input.SystemPromptConfig}
 }
 
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
@@ -386,6 +388,11 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 
 	platform := NormalizeGroupPlatform(input.Platform)
+	systemPromptConfig, err := domain.NormalizeGroupSystemPromptConfig(input.SystemPromptConfig)
+	if err != nil {
+		return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_SYSTEM_PROMPT_CONFIG", "%v", err)
+	}
+	showExclusiveBadge := input.ShowExclusiveBadge == nil || *input.ShowExclusiveBadge
 	// 固定账号 manifest 配置：账号绑定发生在创建之后，创建时无法校验成员关系，
 	// 拒绝开启并在创建后的编辑里配置。
 	if normalizeCodexModelsManifestConfig(platform, input.CodexModelsManifestConfig).Enabled {
@@ -565,6 +572,8 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		Platform:                        platform,
 		RateMultiplier:                  input.RateMultiplier,
 		IsExclusive:                     input.IsExclusive,
+		ShowExclusiveBadge:              showExclusiveBadge,
+		SystemPromptConfig:              systemPromptConfig,
 		Status:                          StatusActive,
 		SubscriptionType:                subscriptionType,
 		DailyLimitUSD:                   dailyLimit,
@@ -786,6 +795,16 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.IsExclusive != nil {
 		group.IsExclusive = *input.IsExclusive
+	}
+	if input.ShowExclusiveBadge != nil {
+		group.ShowExclusiveBadge = *input.ShowExclusiveBadge
+	}
+	if input.SystemPromptConfig != nil {
+		config, configErr := domain.NormalizeGroupSystemPromptConfig(*input.SystemPromptConfig)
+		if configErr != nil {
+			return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_SYSTEM_PROMPT_CONFIG", "%v", configErr)
+		}
+		group.SystemPromptConfig = config
 	}
 	if input.Status != "" {
 		group.Status = input.Status

@@ -7,12 +7,15 @@ import (
 	"log/slog"
 	"math"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
 	dbent "github.com/liulixin-lex/xy2api/ent"
 	"github.com/liulixin-lex/xy2api/ent/paymentorder"
+	"github.com/liulixin-lex/xy2api/ent/paymentproviderinstance"
+	userent "github.com/liulixin-lex/xy2api/ent/user"
 	"github.com/liulixin-lex/xy2api/internal/payment"
 	"github.com/liulixin-lex/xy2api/internal/payment/provider"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
@@ -23,6 +26,9 @@ import (
 // --- Order Creation ---
 
 func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest) (*CreateOrderResponse, error) {
+	if req.PaymentType == payment.TypeStripeHosted {
+		return s.createHostedOrder(ctx, req)
+	}
 	if req.OrderType == "" {
 		req.OrderType = payment.OrderTypeBalance
 	}
@@ -155,6 +161,45 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if req.PaymentType == payment.TypeStripeHosted {
+		if _, err := tx.User.Query().Where(userent.IDEQ(req.UserID)).ForUpdate().Only(ctx); err != nil {
+			return nil, err
+		}
+		prior, err := tx.PaymentOrder.Query().Where(paymentorder.UserIDEQ(req.UserID), paymentorder.IdempotencyKeyEQ(req.IdempotencyKey)).Only(ctx)
+		if err == nil {
+			if psSnapshotStringValue(prior.ProviderSnapshot["request_fingerprint"]) != hostedRequestFingerprint(req) {
+				return nil, infraerrors.Conflict("IDEMPOTENCY_CONFLICT", "payment request key was already used for different parameters")
+			}
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			return prior.Unwrap(), nil
+		}
+		if !dbent.IsNotFound(err) {
+			return nil, err
+		}
+		instanceID, err := strconv.ParseInt(sel.InstanceID, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		instance, err := tx.PaymentProviderInstance.Query().Where(paymentproviderinstance.IDEQ(instanceID)).ForUpdate().Only(ctx)
+		if err != nil {
+			return nil, err
+		}
+		currentConfig, err := s.configService.decryptConfig(instance.Config)
+		if err != nil {
+			return nil, err
+		}
+		if currentConfig != nil && instance.PaymentMode != "" {
+			currentConfig["paymentMode"] = instance.PaymentMode
+		}
+		if !instance.Enabled || instance.ProviderKey != payment.TypeStripeHosted || !reflect.DeepEqual(currentConfig, sel.Config) {
+			return nil, infraerrors.Conflict("PROVIDER_CHANGED", "payment configuration changed; retry the request")
+		}
+		if err := checkHostedCapacity(ctx, tx, instance, req.UserID, payAmount, limitAmount, cfg.DailyLimit); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.checkPendingLimit(ctx, tx, req.UserID, cfg.MaxPendingOrders); err != nil {
 		return nil, err
 	}
@@ -165,12 +210,21 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 	if tm <= 0 {
 		tm = defaultOrderTimeoutMin
 	}
+	if req.PaymentType == payment.TypeStripeHosted {
+		tm = max(31, min(tm, 1440))
+	}
 	exp := time.Now().Add(time.Duration(tm) * time.Minute)
 	outTradeNo, err := s.allocateOutTradeNo(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 	providerSnapshot := buildPaymentOrderProviderSnapshot(sel, req)
+	if req.HostedSnapshot != nil {
+		for k, v := range req.HostedSnapshot {
+			providerSnapshot[k] = v
+		}
+		providerSnapshot["hosted_expires_at"] = strconv.FormatInt(exp.Unix(), 10)
+	}
 	selectedInstanceID := ""
 	selectedProviderKey := ""
 	if sel != nil {
@@ -194,6 +248,9 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 		SetExpiresAt(exp).
 		SetClientIP(req.ClientIP).
 		SetSrcHost(req.SrcHost)
+	if req.PaymentType == payment.TypeStripeHosted {
+		b.SetIdempotencyKey(req.IdempotencyKey)
+	}
 	if req.SrcURL != "" {
 		b.SetSrcURL(req.SrcURL)
 	}
@@ -243,7 +300,7 @@ func (s *PaymentService) checkPendingLimit(ctx context.Context, tx *dbent.Tx, us
 	if max <= 0 {
 		max = defaultMaxPendingOrders
 	}
-	c, err := tx.PaymentOrder.Query().Where(paymentorder.UserIDEQ(userID), paymentorder.StatusEQ(OrderStatusPending)).Count(ctx)
+	c, err := tx.PaymentOrder.Query().Where(paymentorder.UserIDEQ(userID), paymentorder.StatusIn(OrderStatusPending, OrderStatusProcessing)).Count(ctx)
 	if err != nil {
 		return fmt.Errorf("count pending orders: %w", err)
 	}
@@ -296,7 +353,7 @@ func buildPaymentOrderProviderSnapshot(sel *payment.InstanceSelection, req Creat
 			snapshot["merchant_id"] = merchantID
 		}
 	}
-	if providerKey == payment.TypeStripe {
+	if providerKey == payment.TypeStripe || providerKey == payment.TypeStripeHosted {
 		snapshot["currency"] = paymentProviderConfigCurrency(providerKey, sel.Config)
 	}
 	if providerKey == payment.TypeAirwallex {

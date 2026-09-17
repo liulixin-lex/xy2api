@@ -18,6 +18,10 @@
       <OrderTable :orders="orders" :loading="loading">
         <template #actions="{ row }">
           <div class="flex items-center gap-2">
+            <button v-if="row.payment_type === 'stripe_hosted'" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20" @click="router.push({ path: '/payment/result', query: { order_id: row.id, out_trade_no: row.out_trade_no } })">
+              <Icon name="arrowRight" size="sm" />
+              <span>{{ t('common.view') }}</span>
+            </button>
             <button v-if="row.status === 'PENDING'" @click="handleCancel(row.id)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-yellow-600 hover:bg-yellow-50 dark:text-yellow-400 dark:hover:bg-yellow-900/20">
               <Icon name="x" size="sm" />
               <span>{{ t('payment.orders.cancel') }}</span>
@@ -112,6 +116,7 @@ const pagination = reactive({ page: 1, page_size: 20, total: 0 })
 const statusFilters = computed(() => [
   { value: '', label: t('common.all') },
   { value: 'PENDING', label: t('payment.status.pending') },
+  { value: 'PROCESSING', label: t('payment.status.processing') },
   { value: 'COMPLETED', label: t('payment.status.completed') },
   { value: 'FAILED', label: t('payment.status.failed') },
   { value: 'REFUNDED', label: t('payment.status.refunded') },

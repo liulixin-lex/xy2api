@@ -91,13 +91,14 @@ type APIKey struct {
 }
 
 type Group struct {
-	ID             int64   `json:"id"`
-	Name           string  `json:"name"`
-	Description    string  `json:"description"`
-	Platform       string  `json:"platform"`
-	RateMultiplier float64 `json:"rate_multiplier"`
-	IsExclusive    bool    `json:"is_exclusive"`
-	Status         string  `json:"status"`
+	ID                 int64   `json:"id"`
+	Name               string  `json:"name"`
+	Description        string  `json:"description"`
+	Platform           string  `json:"platform"`
+	RateMultiplier     float64 `json:"rate_multiplier"`
+	IsExclusive        bool    `json:"is_exclusive"`
+	ShowExclusiveBadge bool    `json:"show_exclusive_badge"`
+	Status             string  `json:"status"`
 
 	SubscriptionType          string   `json:"subscription_type"`
 	DailyLimitUSD             *float64 `json:"daily_limit_usd"`
@@ -168,6 +169,7 @@ type Group struct {
 // 注意：普通用户接口不得返回 model_routing/account_count/account_groups 等内部信息。
 type AdminGroup struct {
 	Group
+	SystemPromptConfig domain.GroupSystemPromptConfig `json:"system_prompt_config"`
 	// ForceOpenAIFast 是管理端请求策略，用户侧分组 DTO 无需暴露。
 	ForceOpenAIFast bool `json:"force_openai_fast"`
 	// FreeOpenAIFast 是管理端计费策略，用户侧分组 DTO 无需暴露。

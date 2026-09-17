@@ -38,6 +38,10 @@ const (
 	FieldPeakRateMultiplier = "peak_rate_multiplier"
 	// FieldIsExclusive holds the string denoting the is_exclusive field in the database.
 	FieldIsExclusive = "is_exclusive"
+	// FieldShowExclusiveBadge holds the string denoting the show_exclusive_badge field in the database.
+	FieldShowExclusiveBadge = "show_exclusive_badge"
+	// FieldSystemPromptConfig holds the string denoting the system_prompt_config field in the database.
+	FieldSystemPromptConfig = "system_prompt_config"
 	// FieldStatus holds the string denoting the status field in the database.
 	FieldStatus = "status"
 	// FieldDuplicateOperationID holds the string denoting the duplicate_operation_id field in the database.
@@ -238,6 +242,8 @@ var Columns = []string{
 	FieldPeakEnd,
 	FieldPeakRateMultiplier,
 	FieldIsExclusive,
+	FieldShowExclusiveBadge,
+	FieldSystemPromptConfig,
 	FieldStatus,
 	FieldDuplicateOperationID,
 	FieldPlatform,
@@ -348,6 +354,10 @@ var (
 	DefaultPeakRateMultiplier float64
 	// DefaultIsExclusive holds the default value on creation for the "is_exclusive" field.
 	DefaultIsExclusive bool
+	// DefaultShowExclusiveBadge holds the default value on creation for the "show_exclusive_badge" field.
+	DefaultShowExclusiveBadge bool
+	// DefaultSystemPromptConfig holds the default value on creation for the "system_prompt_config" field.
+	DefaultSystemPromptConfig domain.GroupSystemPromptConfig
 	// DefaultStatus holds the default value on creation for the "status" field.
 	DefaultStatus string
 	// StatusValidator is a validator for the "status" field. It is called by the builders before save.
@@ -507,6 +517,11 @@ func ByPeakRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 // ByIsExclusive orders the results by the is_exclusive field.
 func ByIsExclusive(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldIsExclusive, opts...).ToFunc()
+}
+
+// ByShowExclusiveBadge orders the results by the show_exclusive_badge field.
+func ByShowExclusiveBadge(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldShowExclusiveBadge, opts...).ToFunc()
 }
 
 // ByStatus orders the results by the status field.

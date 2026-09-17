@@ -122,6 +122,10 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// 为 DeepSeek 系时压到 cap，详见 helper 注释。
 	body = clampOllamaCloudAnthropicMessagesMaxTokens(account, account.GetBaseURL(), body)
 
+	body, err := ApplyGroupSystemPrompt(ctx, body, GroupPromptAnthropic)
+	if err != nil {
+		return nil, nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
@@ -300,7 +304,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(vertexBody))
+	req, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, vertexBody, GroupPromptAnthropic)
 	if err != nil {
 		return nil, err
 	}

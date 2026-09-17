@@ -41,6 +41,7 @@ export const PROVIDER_SUPPORTED_TYPES: Record<string, string[]> = {
   alipay: ['alipay'],
   wxpay: ['wxpay'],
   stripe: ['card', 'alipay', 'wxpay', 'link'],
+  stripe_hosted: ['stripe_hosted'],
   airwallex: ['airwallex'],
 }
 
@@ -48,7 +49,7 @@ export const PROVIDER_SUPPORTED_TYPES: Record<string, string[]> = {
 export const EASYPAY_PAYMENT_MODES = ['qrcode', 'popup'] as const
 
 /** Fixed display order for user-facing payment methods */
-export const METHOD_ORDER = ['alipay', 'alipay_direct', 'wxpay', 'wxpay_direct', 'stripe', 'airwallex'] as const
+export const METHOD_ORDER = ['alipay', 'alipay_direct', 'wxpay', 'wxpay_direct', 'stripe_hosted', 'stripe', 'airwallex'] as const
 
 export function isBuiltInAlipayMethod(type: string): boolean {
   return type === 'alipay' || type === 'alipay_direct'
@@ -109,6 +110,7 @@ export const WEBHOOK_PATHS: Record<string, string> = {
   alipay: '/api/v1/payment/webhook/alipay',
   wxpay: '/api/v1/payment/webhook/wxpay',
   stripe: '/api/v1/payment/webhook/stripe',
+  stripe_hosted: '/api/v1/payment/webhook/stripe_hosted',
   airwallex: '/api/v1/payment/webhook/airwallex',
 }
 
@@ -149,6 +151,11 @@ export const PROVIDER_CONFIG_FIELDS: Record<string, ConfigFieldDef[]> = {
   stripe: [
     { key: 'secretKey', label: '', sensitive: true },
     { key: 'publishableKey', label: '', sensitive: false },
+    { key: 'webhookSecret', label: '', sensitive: true },
+    { key: 'currency', label: '', sensitive: false, defaultValue: 'CNY', hintKey: 'admin.settings.payment.field_paymentCurrencyHint', options: PAYMENT_CURRENCY_OPTIONS },
+  ],
+  stripe_hosted: [
+    { key: 'secretKey', label: '', sensitive: true },
     { key: 'webhookSecret', label: '', sensitive: true },
     { key: 'currency', label: '', sensitive: false, defaultValue: 'CNY', hintKey: 'admin.settings.payment.field_paymentCurrencyHint', options: PAYMENT_CURRENCY_OPTIONS },
   ],

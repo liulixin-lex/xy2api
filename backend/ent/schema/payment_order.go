@@ -53,6 +53,9 @@ func (PaymentOrder) Fields() []ent.Field {
 		field.String("recharge_code").
 			MaxLen(64),
 
+		// Checkout request deduplication; nullable for pre-existing providers.
+		field.String("idempotency_key").Optional().Nillable().MaxLen(128),
+
 		// 支付信息
 		field.String("out_trade_no").
 			MaxLen(64).
@@ -188,6 +191,7 @@ func (PaymentOrder) Indexes() []ent.Index {
 		index.Fields("out_trade_no").
 			Unique().
 			Annotations(entsql.IndexWhere("out_trade_no <> ''")),
+		index.Fields("user_id", "idempotency_key").Unique(),
 		index.Fields("user_id"),
 		index.Fields("status"),
 		index.Fields("expires_at"),

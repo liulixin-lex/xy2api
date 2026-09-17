@@ -74,6 +74,12 @@ function group(overrides: Partial<ModelPlazaGroup> = {}): ModelPlazaGroup {
   }
 }
 
+it.each([[false, false], [false, true], [true, false], [true, true]])('renders badge only for exclusive=%s and show=%s', (exclusive, show) => {
+  const wrapper = mount(PlazaGroupSection, { props: { group: group({ is_exclusive: exclusive, show_exclusive_badge: show }) }, global: { stubs: { PlazaModelPricingTable: true, Icon: true } } })
+  expect(wrapper.text().includes('modelPlaza.badges.exclusive')).toBe(exclusive && show)
+  expect(wrapper.text()).toContain('g')
+})
+
 function mountSection(g: ModelPlazaGroup) {
   return mount(PlazaGroupSection, {
     props: { group: g },

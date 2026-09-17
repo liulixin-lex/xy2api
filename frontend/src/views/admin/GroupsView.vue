@@ -694,7 +694,7 @@
               </div>
             </div>
           </div>
-          <div class="flex items-center gap-3">
+          <div class="flex flex-wrap items-center gap-3">
             <Toggle v-model="createForm.is_exclusive" />
             <span class="text-sm text-gray-500 dark:text-gray-400">
               {{
@@ -703,9 +703,17 @@
                   : t("admin.groups.public")
               }}
             </span>
+            <label class="inline-flex min-w-0 items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+              <Toggle v-model="createForm.show_exclusive_badge" :disabled="!createForm.is_exclusive" :aria-label="t('admin.groups.showExclusiveBadge')" class="disabled:cursor-not-allowed disabled:opacity-50" />
+              <span>{{ t('admin.groups.showExclusiveBadge') }}</span>
+            </label>
           </div>
         </div>
 
+        <label v-if="createForm.subscription_type === 'subscription'" class="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-200">
+          <Toggle v-model="createForm.show_exclusive_badge" :aria-label="t('admin.groups.showExclusiveBadge')" />
+          {{ t('admin.groups.showExclusiveBadge') }}
+        </label>
         <!-- Subscription Configuration -->
         <div class="mt-4 border-t pt-4">
           <div>
@@ -2077,6 +2085,7 @@
           </button>
         </div>
         </template>
+        <GroupSystemPromptFields ref="createSystemPromptRef" v-model="createForm.system_prompt_config" id-prefix="create-system-prompt" :candidates="createLongContextCandidates" :loading="createModelAllowlistLoading" />
       </form>
 
       <template #footer>
@@ -2337,7 +2346,7 @@
               </div>
             </div>
           </div>
-          <div class="flex items-center gap-3">
+          <div class="flex flex-wrap items-center gap-3">
             <Toggle v-model="editForm.is_exclusive" />
             <span class="text-sm text-gray-500 dark:text-gray-400">
               {{
@@ -2346,6 +2355,10 @@
                   : t("admin.groups.public")
               }}
             </span>
+            <label class="inline-flex min-w-0 items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+              <Toggle v-model="editForm.show_exclusive_badge" :disabled="!editForm.is_exclusive" :aria-label="t('admin.groups.showExclusiveBadge')" class="disabled:cursor-not-allowed disabled:opacity-50" />
+              <span>{{ t('admin.groups.showExclusiveBadge') }}</span>
+            </label>
           </div>
         </div>
         <div>
@@ -2353,6 +2366,10 @@
           <Select v-model="editForm.status" :options="editStatusOptions" />
         </div>
 
+        <label v-if="editForm.subscription_type === 'subscription'" class="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-200">
+          <Toggle v-model="editForm.show_exclusive_badge" :disabled="!editForm.is_exclusive" :aria-label="t('admin.groups.showExclusiveBadge')" />
+          {{ t('admin.groups.showExclusiveBadge') }}
+        </label>
         <!-- Subscription Configuration -->
         <div class="mt-4 border-t pt-4">
           <div>
@@ -3734,6 +3751,7 @@
           </button>
         </div>
         </template>
+        <GroupSystemPromptFields ref="editSystemPromptRef" v-model="editForm.system_prompt_config" id-prefix="edit-system-prompt" :candidates="editLongContextCandidates" :loading="editModelAllowlistLoading" />
       </form>
 
       <template #footer>
@@ -4321,6 +4339,8 @@ import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
 import LongContextPricingFields from "@/components/admin/group/LongContextPricingFields.vue";
+import GroupSystemPromptFields from "@/components/admin/group/GroupSystemPromptFields.vue";
+import { cloneGroupSystemPromptConfig } from "@/utils/groupSystemPrompt";
 import PricingEntryCard from "@/components/admin/channel/PricingEntryCard.vue";
 import type { PricingFormEntry } from "@/components/admin/channel/types";
 import {
@@ -4896,6 +4916,8 @@ type ReasoningEffortPolicyFieldsExpose = {
 };
 const createReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | null>(null);
 const editReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | null>(null);
+const createSystemPromptRef = ref<InstanceType<typeof GroupSystemPromptFields> | null>(null);
+const editSystemPromptRef = ref<InstanceType<typeof GroupSystemPromptFields> | null>(null);
 
 // 固定账号获取 Codex Model Manifest（仅 openai 分组编辑对话框）
 type CodexManifestAccountsFieldExpose = {
@@ -4958,6 +4980,8 @@ const createForm = reactive({
   platform: "anthropic" as GroupPlatform,
   rate_multiplier: 1.0,
   is_exclusive: false,
+  show_exclusive_badge: true,
+  system_prompt_config: cloneGroupSystemPromptConfig(),
   subscription_type: "standard" as SubscriptionType,
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
@@ -5324,6 +5348,8 @@ const editForm = reactive({
   platform: "anthropic" as GroupPlatform,
   rate_multiplier: 1.0,
   is_exclusive: false,
+  show_exclusive_badge: true,
+  system_prompt_config: cloneGroupSystemPromptConfig(),
   status: "active" as "active" | "inactive",
   subscription_type: "standard" as SubscriptionType,
   daily_limit_usd: null as number | null,
@@ -5789,6 +5815,8 @@ const closeCreateModal = () => {
   createForm.platform = "anthropic";
   createForm.rate_multiplier = 1.0;
   createForm.is_exclusive = false;
+  createForm.show_exclusive_badge = true;
+  createForm.system_prompt_config = cloneGroupSystemPromptConfig();
   createForm.subscription_type = "standard";
   createForm.daily_limit_usd = null;
   createForm.weekly_limit_usd = null;
@@ -5888,6 +5916,7 @@ const validateProfitControlForm = (form: ProfitControlFormState): boolean => {
 };
 
 const handleCreateGroup = async () => {
+  if (createSystemPromptRef.value && !createSystemPromptRef.value.validate()) return;
   if (!createForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
@@ -6032,6 +6061,7 @@ const handleCreateGroup = async () => {
           name: createForm.name,
           description: createForm.description,
           platform: createForm.platform,
+          system_prompt_config: createForm.system_prompt_config,
         }
       : requestData;
     await adminAPI.groups.create(payload);
@@ -6060,6 +6090,8 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.platform = group.platform;
   editForm.rate_multiplier = group.rate_multiplier;
   editForm.is_exclusive = group.is_exclusive;
+  editForm.show_exclusive_badge = group.show_exclusive_badge ?? true;
+  editForm.system_prompt_config = cloneGroupSystemPromptConfig(group.system_prompt_config);
   editForm.status = group.status;
   editForm.subscription_type = group.subscription_type || "standard";
   editForm.daily_limit_usd = group.daily_limit_usd;
@@ -6225,6 +6257,7 @@ const closeEditModal = () => {
 };
 
 const handleUpdateGroup = async () => {
+  if (editSystemPromptRef.value && !editSystemPromptRef.value.validate()) return;
   if (!editingGroup.value) return;
   if (!editForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
@@ -6388,6 +6421,7 @@ const handleUpdateGroup = async () => {
       ? {
           name: editForm.name,
           description: editForm.description,
+          system_prompt_config: editForm.system_prompt_config,
         }
       : payload;
     await adminAPI.groups.update(editingGroup.value.id, requestData);

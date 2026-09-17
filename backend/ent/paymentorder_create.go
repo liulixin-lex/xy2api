@@ -87,6 +87,20 @@ func (_c *PaymentOrderCreate) SetRechargeCode(v string) *PaymentOrderCreate {
 	return _c
 }
 
+// SetIdempotencyKey sets the "idempotency_key" field.
+func (_c *PaymentOrderCreate) SetIdempotencyKey(v string) *PaymentOrderCreate {
+	_c.mutation.SetIdempotencyKey(v)
+	return _c
+}
+
+// SetNillableIdempotencyKey sets the "idempotency_key" field if the given value is not nil.
+func (_c *PaymentOrderCreate) SetNillableIdempotencyKey(v *string) *PaymentOrderCreate {
+	if v != nil {
+		_c.SetIdempotencyKey(*v)
+	}
+	return _c
+}
+
 // SetOutTradeNo sets the "out_trade_no" field.
 func (_c *PaymentOrderCreate) SetOutTradeNo(v string) *PaymentOrderCreate {
 	_c.mutation.SetOutTradeNo(v)
@@ -585,6 +599,11 @@ func (_c *PaymentOrderCreate) check() error {
 			return &ValidationError{Name: "recharge_code", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.recharge_code": %w`, err)}
 		}
 	}
+	if v, ok := _c.mutation.IdempotencyKey(); ok {
+		if err := paymentorder.IdempotencyKeyValidator(v); err != nil {
+			return &ValidationError{Name: "idempotency_key", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.idempotency_key": %w`, err)}
+		}
+	}
 	if _, ok := _c.mutation.OutTradeNo(); !ok {
 		return &ValidationError{Name: "out_trade_no", err: errors.New(`ent: missing required field "PaymentOrder.out_trade_no"`)}
 	}
@@ -728,6 +747,10 @@ func (_c *PaymentOrderCreate) createSpec() (*PaymentOrder, *sqlgraph.CreateSpec)
 	if value, ok := _c.mutation.RechargeCode(); ok {
 		_spec.SetField(paymentorder.FieldRechargeCode, field.TypeString, value)
 		_node.RechargeCode = value
+	}
+	if value, ok := _c.mutation.IdempotencyKey(); ok {
+		_spec.SetField(paymentorder.FieldIdempotencyKey, field.TypeString, value)
+		_node.IdempotencyKey = &value
 	}
 	if value, ok := _c.mutation.OutTradeNo(); ok {
 		_spec.SetField(paymentorder.FieldOutTradeNo, field.TypeString, value)
@@ -1039,6 +1062,24 @@ func (u *PaymentOrderUpsert) SetRechargeCode(v string) *PaymentOrderUpsert {
 // UpdateRechargeCode sets the "recharge_code" field to the value that was provided on create.
 func (u *PaymentOrderUpsert) UpdateRechargeCode() *PaymentOrderUpsert {
 	u.SetExcluded(paymentorder.FieldRechargeCode)
+	return u
+}
+
+// SetIdempotencyKey sets the "idempotency_key" field.
+func (u *PaymentOrderUpsert) SetIdempotencyKey(v string) *PaymentOrderUpsert {
+	u.Set(paymentorder.FieldIdempotencyKey, v)
+	return u
+}
+
+// UpdateIdempotencyKey sets the "idempotency_key" field to the value that was provided on create.
+func (u *PaymentOrderUpsert) UpdateIdempotencyKey() *PaymentOrderUpsert {
+	u.SetExcluded(paymentorder.FieldIdempotencyKey)
+	return u
+}
+
+// ClearIdempotencyKey clears the value of the "idempotency_key" field.
+func (u *PaymentOrderUpsert) ClearIdempotencyKey() *PaymentOrderUpsert {
+	u.SetNull(paymentorder.FieldIdempotencyKey)
 	return u
 }
 
@@ -1722,6 +1763,27 @@ func (u *PaymentOrderUpsertOne) SetRechargeCode(v string) *PaymentOrderUpsertOne
 func (u *PaymentOrderUpsertOne) UpdateRechargeCode() *PaymentOrderUpsertOne {
 	return u.Update(func(s *PaymentOrderUpsert) {
 		s.UpdateRechargeCode()
+	})
+}
+
+// SetIdempotencyKey sets the "idempotency_key" field.
+func (u *PaymentOrderUpsertOne) SetIdempotencyKey(v string) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetIdempotencyKey(v)
+	})
+}
+
+// UpdateIdempotencyKey sets the "idempotency_key" field to the value that was provided on create.
+func (u *PaymentOrderUpsertOne) UpdateIdempotencyKey() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateIdempotencyKey()
+	})
+}
+
+// ClearIdempotencyKey clears the value of the "idempotency_key" field.
+func (u *PaymentOrderUpsertOne) ClearIdempotencyKey() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.ClearIdempotencyKey()
 	})
 }
 
@@ -2654,6 +2716,27 @@ func (u *PaymentOrderUpsertBulk) SetRechargeCode(v string) *PaymentOrderUpsertBu
 func (u *PaymentOrderUpsertBulk) UpdateRechargeCode() *PaymentOrderUpsertBulk {
 	return u.Update(func(s *PaymentOrderUpsert) {
 		s.UpdateRechargeCode()
+	})
+}
+
+// SetIdempotencyKey sets the "idempotency_key" field.
+func (u *PaymentOrderUpsertBulk) SetIdempotencyKey(v string) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetIdempotencyKey(v)
+	})
+}
+
+// UpdateIdempotencyKey sets the "idempotency_key" field to the value that was provided on create.
+func (u *PaymentOrderUpsertBulk) UpdateIdempotencyKey() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateIdempotencyKey()
+	})
+}
+
+// ClearIdempotencyKey clears the value of the "idempotency_key" field.
+func (u *PaymentOrderUpsertBulk) ClearIdempotencyKey() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.ClearIdempotencyKey()
 	})
 }
 
