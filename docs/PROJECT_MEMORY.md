@@ -142,6 +142,8 @@ Sub2API 兼容基线已更新到 `v0.2.5`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
+- `20260918-sub2api-v0.2.6`：用户授权按标准流程同步并发布。固定上游 v0.2.6 / 49a39b6dc1abed30fd227611e8af1108bc427610，基线远端 main / 2fc681c8a952e9136c489a337ca7ae795d7fc877；独立副本 `/xy/artifacts/upstream-sync-v0.2.6-xy2api-0.1.3/work`，计划产品 0.1.3-rc.1 → 0.1.3。正在登记六处新增人工冲突路径，保留历史迁移与二开支付/分组行为；不部署生产。
+
 
 - `20260917-group-prompts-commit`：本地提交交接已登记；实际提交 SHA、干净状态与归档一致性由 `COMMIT_RESULT.json` 记录，无后续远端操作。
 - `20260917-stripe-hosted`：本地实现与验收已完成，独立 worktree `/xy/artifacts/stripe-hosted/work`、分支 `feat/payment-stripe-hosted`，基线 `41fd8591c`，原 main 保留。BASELINE 不支持托管、MODIFIED 创建 Session 且重复两次事件只入账 80、ROLLBACK 恢复基线，三者 exit0；回滚字节及补丁重建均一致。最终四角色哈希见 `/xy/artifacts/stripe-hosted/VERIFICATION.txt`。真实测试账号联调另行完成，不推送或部署。
