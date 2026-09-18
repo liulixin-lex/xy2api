@@ -1,107 +1,66 @@
 {
   "schema_version": 1,
   "upstream_repo": "Wei-Shaw/sub2api",
-  "upstream_tag": "v0.2.5",
-  "upstream_tag_ref": "sub2api/v0.2.5",
-  "upstream_tag_object": "4af0e80db1b0bc7626dfb8fb76ccaffc6bb0dc17",
+  "upstream_tag": "v0.2.6",
+  "upstream_tag_ref": "sub2api/v0.2.6",
+  "upstream_tag_object": "8f35716ba69976fc0ec950894114d2604bb5454c",
   "upstream_tag_signature": "unsigned",
-  "upstream_commit": "86f93c28ee34cc74b629dafb748bd5ac5ca8c5ea",
-  "merge_base": "5de5e2bed035d43591a2e10e51f420ef6a84eb98",
-  "fork_start": "24e81a9f219b776cd081ae225a976aa1f97b4b43",
-  "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/39",
+  "upstream_commit": "49a39b6dc1abed30fd227611e8af1108bc427610",
+  "merge_base": "86f93c28ee34cc74b629dafb748bd5ac5ca8c5ea",
+  "fork_start": "35d62090079bfab131dfa69e8d3283f1fc1b9363",
   "xy2api_version": "0.1.2",
   "sub2api_compat_version": "0.2.5",
-  "status": "resolved",
+  "status": "pending",
   "manual_resolutions": [
     {
-      "path": "README.md",
-      "status": "resolved",
-      "resolution": "retained the XY2API-owned English product documentation and excluded upstream sponsorship content"
-    },
-    {
-      "path": "README_CN.md",
-      "status": "resolved",
-      "resolution": "retained the XY2API-owned Chinese product documentation and excluded upstream sponsorship content"
-    },
-    {
-      "path": "README_JA.md",
-      "status": "resolved",
-      "resolution": "retained the XY2API-owned Japanese product documentation and excluded upstream sponsorship content"
-    },
-    {
       "path": "backend/cmd/server/VERSION",
-      "status": "resolved",
-      "resolution": "set the synchronized candidate product version to 0.1.0-rc.1 independently of the upstream compatibility version"
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
       "path": "backend/cmd/server/wire_gen.go",
-      "status": "resolved",
-      "resolution": "regenerated from the merged XY2API Wire provider graph using Go 1.27.0"
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
-      "path": "backend/internal/repository/user_platform_quota_repo.go",
-      "status": "resolved",
-      "resolution": "accepted v0.2.5 unlimited-quota row semantics while preserving the XY2API module path"
+      "path": "backend/go.sum",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
-      "path": "backend/internal/repository/user_platform_quota_repo_integration_test.go",
-      "status": "resolved",
-      "resolution": "accepted v0.2.5 quota repository coverage and normalized the XY2API module path"
+      "path": "backend/internal/handler/redeem_handler.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
-      "path": "backend/internal/repository/user_platform_quota_upsert_test.go",
-      "status": "resolved",
-      "resolution": "accepted v0.2.5 unlimited-quota upsert coverage and normalized the XY2API module path"
+      "path": "backend/internal/repository/account_repo_upstream_billing_probe_update_test.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/repository/redeem_code_repo_sort_integration_test.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
       "path": "backend/internal/service/openai_gateway_request_body.go",
-      "status": "resolved",
-      "resolution": "accepted v0.2.5 large-body, metadata, priority-tier, and DeepSeek request behavior while retaining the XY2API trusted-user marker"
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
-      "path": "backend/internal/service/openai_responses_ingress_compat.go",
-      "status": "resolved",
-      "resolution": "accepted the v0.2.5 raw-body fast path and normalized the XY2API module path"
+      "path": "frontend/src/components/common/BaseDialog.vue",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
-      "path": "backend/internal/service/openai_ws_session_preemption_test.go",
-      "status": "resolved",
-      "resolution": "accepted v0.2.5 execution-scope preemption coverage and normalized the XY2API module path"
-    },
-    {
-      "path": "backend/internal/setup/setup_test.go",
-      "status": "resolved",
-      "resolution": "accepted v0.2.5 target-database-first bootstrap coverage with XY2API database fixtures"
-    },
-    {
-      "path": "deploy/APPLE_CONTAINER.md",
-      "status": "resolved",
-      "resolution": "accepted the v0.2.5 Web UI update supervisor documentation with XY2API image, paths, and names"
-    },
-    {
-      "path": "deploy/apple-container.sh",
-      "status": "resolved",
-      "resolution": "accepted the v0.2.5 persistent runtime supervisor with XY2API image IDs, executable paths, user, and stack names"
-    },
-    {
-      "path": "deploy/tests/apple-container-test.sh",
-      "status": "resolved",
-      "resolution": "accepted v0.2.5 supervisor assertions with XY2API fixtures and macOS execution semantics"
-    },
-    {
-      "path": "frontend/src/views/__tests__/KeyUsageView.spec.ts",
-      "status": "resolved",
-      "resolution": "accepted v0.2.5 subscription and daily usage coverage while preserving the XY2API site name"
-    }
-  ],
-  "migration_adaptations": [
-    {
-      "upstream": "238_opencode_go_platform.sql",
-      "xy2api": "247_opencode_go_platform.sql"
-    },
-    {
-      "upstream": "238_purge_unlimited_user_platform_quotas.sql",
-      "xy2api": "248_purge_unlimited_user_platform_quotas.sql"
+      "path": "frontend/src/views/admin/__tests__/ChannelMonitorView.grok.spec.ts",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     }
   ],
   "custom_patches": [
