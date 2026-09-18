@@ -19846,5 +19846,59 @@
   "upstream_tag": "v0.2.6",
   "upstream_tag_ref": "sub2api/v0.2.6",
   "upstream_tag_object": "8f35716ba69976fc0ec950894114d2604bb5454c",
-  "upstream_tag_signature": "unsigned"
+  "upstream_tag_signature": "unsigned",
+  "manual_resolutions": [
+    {
+      "path": "backend/cmd/server/VERSION",
+      "status": "resolved",
+      "resolution": "Preserve independent XY2API product version; promote to 0.1.3-rc.1 in a separate version commit."
+    },
+    {
+      "path": "backend/cmd/server/wire_gen.go",
+      "status": "resolved",
+      "resolution": "Regenerated Wire from the combined provider graph, retaining IQ, group prompts and Stripe hosted services and wiring the upstream Codex ticket lifecycle."
+    },
+    {
+      "path": "backend/go.sum",
+      "status": "resolved",
+      "resolution": "Reconciled upstream dependency bumps with XY2API dependencies using go mod tidy; retain grpc v1.83.2."
+    },
+    {
+      "path": "backend/internal/handler/redeem_handler.go",
+      "status": "resolved",
+      "resolution": "Accept upstream pagination and legacy no-pagination API behavior; normalize only the module imports."
+    },
+    {
+      "path": "backend/internal/repository/account_repo_upstream_billing_probe_update_test.go",
+      "status": "resolved",
+      "resolution": "Accept upstream current_extra snapshot expectations; retain IQ row locking and the IQCheckSettings Ent column fixture."
+    },
+    {
+      "path": "backend/internal/repository/redeem_code_repo_sort_integration_test.go",
+      "status": "resolved",
+      "resolution": "Accept upstream pagination coverage with XY2API module imports."
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "status": "resolved",
+      "resolution": "Merge all four Codex ticket sanitization/preservation calls while retaining IQ validation, copying, filtering and updates."
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_request_body.go",
+      "status": "resolved",
+      "resolution": "Accept DeepSeek Responses tool media lifting and preserve XY2API trusted-user documentation/module imports."
+    },
+    {
+      "path": "frontend/src/components/common/BaseDialog.vue",
+      "status": "resolved",
+      "resolution": "Preserve focus trap, nested Escape, focus restore and stack-based scroll lock; combine Vue useId with a module-scoped sequence for independently mounted app roots."
+    },
+    {
+      "path": "frontend/src/views/admin/__tests__/ChannelMonitorView.grok.spec.ts",
+      "status": "resolved",
+      "resolution": "Retain provider count derived from PROVIDERS.length, covering current and future provider additions."
+    }
+  ],
+  "sync_status": "resolved",
+  "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/47"
 }
