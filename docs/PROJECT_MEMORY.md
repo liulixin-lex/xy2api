@@ -4,6 +4,17 @@
 
 ## 当前交接状态
 
+### Sub2API v0.2.6 / XY2API 0.1.3 正式晋级（2026-09-18）
+
+- 用户授权按项目标准完成上游同步和发版。原 `/xy/xy2api` 保持原始工作树；实现与证据位于 `/xy/artifacts/upstream-sync-v0.2.6-xy2api-0.1.3/`。
+- 固定上游正式 annotated v0.2.6，tag object `8f35716ba69976fc0ec950894114d2604bb5454c`，commit `49a39b6dc1abed30fd227611e8af1108bc427610`，unsigned；真实 merge base `86f93c28ee34cc74b629dafb748bd5ac5ca8c5ea`。预检 PR #46 合并 `35d620900`；标准 prepare、受控模块归一化及 10 项裁决后，同步 PR #47 在固定 head `77bd8641a` 的 16/16 检查通过后合入 `ef3493e13022e0a5a5b190d7c8734cea93729d5f`。
+- 纳入 60 个上游提交，接入兑换分页、分组用量索引查询、默认关闭的 Codex 票据管理及网关/界面修复。保留 IQ 行锁/配置、分组系统提示词、长上下文计费、Stripe 托管与模式单选；弹窗保留焦点/嵌套行为并支持跨挂载根唯一标题。297 条历史迁移及 checksum 不变，无新增 SQL。
+- 本地 2303 项前端测试、lint/类型/生产构建，后端受影响回归、真实 PostgreSQL/Redis 分组用量/兑换/IQ/缓存集成及 Wire 再生成零差异通过。远端完整 unit/integration、lint、跨平台与安全通过。首轮导入排序 lint 和工具/配置错误保留在证据，不计为成功。
+- RC `v0.1.3-rc.1` annotated tag object `c809101321031f011c750b4baa9c850f4e4c84f9` 指向同步合并提交。Release 工作流 `35339800187` 成功；五平台包实际下载并复算 checksum，Linux 版本/兼容/commit 和双架构 OCI 一致。稳定别名保持上一正式版。
+- RC 全新安装、0.1.2 -> RC 升级、回切 0.1.2 通过；每次健康及管理员登录 200，297 条迁移、数据库/Redis/应用目录标记保持；隔离旧版三类备份已保存。源码三态为 BASELINE `0.1.2/0.2.5`、MODIFIED `0.1.3-rc.1/0.2.6`、ROLLBACK 恢复 BASELINE，exit0 且恢复 SHA-256 一致。
+- 固定四角色：`MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh` 位于上述证据目录；补丁重建与重新应用已验证。正式晋级仅改两处产品版本为 0.1.3 及本交接。正式标签、制品和清理结果在本轮收尾记录确认前不得当作已完成。
+- 未部署生产、未调用真实模型或 Stripe 账户。RC 镜像 digest：`sha256:4bedcfe051ce8e679e212a91b97e2e869ba49500c69203fd84304a78febd9a13`。非阻断构建大包提示保留。
+
 ### Stripe 模式单选与支付界面改进 0.1.2 已发布（2026-09-18）
 
 - 基线为原仓库 `main / 9c8abed87987b5f4a8f278cdd411fe3ee7273713`，原工作区保持干净。实现位于 `/xy/artifacts/stripe-hosted/experience-work`；功能提交 `25a983458782962bcb9c25041907de317d50d655` 已通过 [PR #44](https://github.com/liulixin-lex/xy2api/pull/44) 合入，发布提交为 `95a9576d5ff49ccb5c934fdad5c19e46e5d23f1b`。收尾文档分支为 `docs/v0.1.2-closeout`。
@@ -142,7 +153,7 @@ Sub2API 兼容基线已更新到 `v0.2.5`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
-- `20260918-sub2api-v0.2.6`：用户授权按标准流程同步并发布。固定上游 v0.2.6 / 49a39b6dc1abed30fd227611e8af1108bc427610，基线远端 main / 2fc681c8a952e9136c489a337ca7ae795d7fc877；独立副本 `/xy/artifacts/upstream-sync-v0.2.6-xy2api-0.1.3/work`，计划产品 0.1.3-rc.1 → 0.1.3。正在登记六处新增人工冲突路径，保留历史迁移与二开支付/分组行为；不部署生产。
+- `20260918-sub2api-v0.2.6`：同步及 RC 验收完成，正在独立正式版本 PR 晋级 0.1.3；正式发布后核验制品、清理隔离资源并封存四角色。
 
 
 - `20260917-group-prompts-commit`：本地提交交接已登记；实际提交 SHA、干净状态与归档一致性由 `COMMIT_RESULT.json` 记录，无后续远端操作。
@@ -756,3 +767,9 @@ pnpm --dir frontend run build
 - 固定四角色继续使用 `MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`，本次更新包含版本与发布交接。BASELINE 为 stripe 托管／pressed=null，MODIFIED 为 Stripe／pressed=true，ROLLBACK 恢复基线；退出 0、恢复哈希相同、补丁重建和重新应用通过。
 - 初次本地兼容审计因未跟踪的 node_modules 符号链接拒绝，临时移除该链接后审计通过并恢复链接；未将失败作为成功。业务源码复用前轮 133 项前端、支付后端与隔离 PostgreSQL、构建及四种浏览器场景验证。
 - 本条仅更新交接文档，由受保护 PR 固化；发布标签不移动。无生产部署、数据库迁移或真实账号探测。最终文档合并事件追加原验证账本，后续动态状态以 GitHub 及机器结果为准。
+
+### 2026-09-18T11:47:24.654076+00:00 — `20260918-sub2api-v0.2.6` — 同步及 RC 验收完成
+
+- 预检 PR #46 和同步 PR #47 均通过全部保护检查并常规合并；使用固定 annotated tag 和标准 prepare，10 项冲突逐项裁决，完整三方报告保留。
+- RC 五平台 checksum、双架构 OCI、旧版稳定别名不变、隔离新装/升级/回滚及持久化标记通过。无新增迁移，297 条历史 checksum 保持。
+- 当前正在 release/0.1.3 将产品版本从 RC 晋级；正式发布结果由下一条收尾记录确认。完整命令、失败与成功、三态及四角色路径记录于独立证据目录。无生产操作。
