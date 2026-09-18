@@ -494,6 +494,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if err := service.ValidateStripePaymentTypes(req.PaymentEnabledTypes); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	auditReq := settingsAuditRequest(req)
 	omitted := omittedSettingKeys(sentFields)
 

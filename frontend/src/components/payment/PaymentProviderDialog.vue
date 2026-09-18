@@ -7,7 +7,7 @@
   >
     <form id="provider-form" @submit.prevent="handleSave" class="space-y-4">
       <!-- Name + Key -->
-      <div class="grid grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label class="input-label">
             {{ t('admin.settings.payment.providerName') }}
@@ -230,26 +230,28 @@
         </div>
 
         <!-- 服务商 Webhook 提示 -->
-        <div v-if="providerWebhookUrl" class="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800/50 dark:bg-blue-900/20">
-          <p class="text-xs text-blue-700 dark:text-blue-300">
+        <div v-if="providerWebhookUrl" class="mt-4 space-y-2 border-t border-gray-200 pt-4 dark:border-dark-700">
+          <p class="break-words text-xs leading-relaxed text-gray-600 dark:text-gray-300">
             {{ t(providerWebhookHint) }}
           </p>
-          <code class="mt-1 block break-all rounded bg-blue-100 px-2 py-1 text-xs text-blue-800 dark:bg-blue-900/40 dark:text-blue-200">
+          <code class="block break-all rounded bg-gray-50 px-3 py-2 text-xs leading-relaxed text-gray-800 dark:bg-dark-800 dark:text-gray-200">
             {{ providerWebhookUrl }}
           </code>
-          <button v-if="form.provider_key === 'stripe_hosted'" type="button" class="mt-2 inline-flex h-8 w-8 items-center justify-center rounded text-blue-700 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900" :aria-label="t('common.copy')" :title="t('common.copy')" @click="copyWebhook">
+          <button v-if="form.provider_key === 'stripe_hosted'" type="button" class="inline-flex h-9 w-9 items-center justify-center rounded text-gray-600 hover:bg-gray-100 focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-gray-300 dark:hover:bg-dark-700" :aria-label="t('common.copy')" :title="t('common.copy')" @click="copyWebhook">
             <Icon name="copy" class="h-4 w-4" />
           </button>
-          <p v-if="form.provider_key === 'stripe' || form.provider_key === 'stripe_hosted'" class="mt-2 text-xs leading-relaxed text-blue-700 dark:text-blue-300">
+          <p v-if="form.provider_key === 'stripe' || form.provider_key === 'stripe_hosted'" class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
             {{ t('admin.settings.payment.stripeWebhookApiVersionHint', { version: STRIPE_SDK_API_VERSION }) }}
           </p>
         </div>
       </div>
 
       <!-- Per-type limits (collapsible) -->
-      <p v-if="form.provider_key === 'stripe_hosted'" class="text-sm leading-relaxed text-gray-600 dark:text-gray-300">
-        {{ t('admin.settings.payment.stripeHostedSetup') }}
-      </p>
+      <div v-if="form.provider_key === 'stripe_hosted'" class="space-y-2 border-t border-gray-200 pt-4 text-xs leading-relaxed text-gray-600 dark:border-dark-700 dark:text-gray-300">
+        <p>{{ t('admin.settings.payment.stripeHostedSetup') }}</p>
+        <p>{{ t('admin.settings.payment.stripeHostedRequirements') }}</p>
+        <p>{{ t('admin.settings.payment.stripeHostedHistory') }}</p>
+      </div>
       <div v-if="limitableTypes.length" class="border-t border-gray-200 pt-4 dark:border-dark-700">
         <button type="button" @click="limitsExpanded = !limitsExpanded" class="flex w-full items-center justify-between">
           <h4 class="text-sm font-semibold text-gray-900 dark:text-white">

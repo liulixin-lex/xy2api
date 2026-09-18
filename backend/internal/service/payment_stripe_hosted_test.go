@@ -157,6 +157,11 @@ func TestStripeHostedDisabledInstanceRetainsHistory(t *testing.T) {
 	require.Error(t, cfg.DeleteProviderInstance(ctx, inst.ID))
 	_, err = cfg.UpdateProviderInstance(ctx, inst.ID, UpdateProviderInstanceRequest{Config: map[string]string{"secretKey": "sk_test_changed"}})
 	require.Error(t, err)
+	require.Equal(t, "HOSTED_CONFIG_LOCKED", infraerrors.Reason(err))
+	_, err = s.entClient.PaymentOrder.UpdateOneID(o.ID).SetStatus(OrderStatusCompleted).Save(ctx)
+	require.NoError(t, err)
+	_, err = cfg.UpdateProviderInstance(ctx, inst.ID, UpdateProviderInstanceRequest{Config: map[string]string{"currency": "GBP"}})
+	require.Equal(t, "HOSTED_CONFIG_LOCKED", infraerrors.Reason(err))
 }
 
 func TestStripeHostedConcurrentFulfillment(t *testing.T) {

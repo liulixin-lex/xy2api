@@ -9,6 +9,14 @@ vi.mock('vue-i18n', () => ({
 }))
 
 describe('PaymentMethodSelector', () => {
+  it.each(['stripe', 'stripe_hosted'])('shows Stripe but submits the original %s mode', async type => {
+    const wrapper = mount(PaymentMethodSelector, { props: { selected: type, methods: [{ type, display_name: 'Stripe Hosted', fee_rate: 0, available: true }] } })
+    const button = wrapper.get('button')
+    expect(button.text()).toBe('Stripe')
+    expect(button.attributes('aria-pressed')).toBe('true')
+    await button.trigger('click')
+    expect(wrapper.emitted('select')).toEqual([[type]])
+  })
   it('wraps large custom method collections without letting labels widen the selector', () => {
     const methods = Array.from({ length: 12 }, (_, index) => ({
       type: `custom_${index}`,

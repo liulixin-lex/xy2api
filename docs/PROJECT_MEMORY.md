@@ -4,6 +4,15 @@
 
 ## 当前交接状态
 
+### Stripe 模式单选与支付界面改进（2026-09-18）
+
+- 基线为原仓库 `main / 9c8abed87987b5f4a8f278cdd411fe3ee7273713`，原工作区保持干净。实现位于 `/xy/artifacts/stripe-hosted/experience-work`，分支 `fix/stripe-payment-experience`，当前为未提交的本地改进，没有推送、发版或生产操作。
+- `payment_enabled_types` 中 Stripe 改为关闭、站内、托管单选。后端拒绝同时启用两种模式；历史双模式配置读取时优先托管，未选模式不能创建新订单。历史实例、回调、补偿和退款仍按原绑定处理。
+- 用户端支付入口及订单记录统一显示 Stripe；管理员设置、订单筛选及统计保留 Stripe 站内／Stripe 托管区分。服务商说明拆分为地址、环境要求和历史配置保护；已完成订单引用的托管配置修改返回 `HOSTED_CONFIG_LOCKED`，不再误报未完成订单。
+- 支付方式、快捷金额及提交按钮改为细边框、平面色和明确选中态，保留键盘焦点、禁用和加载状态；金额前缀随币种变化。前端 133 项测试、i18n 完整性、定向 ESLint、类型检查，以及后端带 unit 标签的支付回归和隔离 PostgreSQL 并发／履约／退款测试通过。最终构建及 1280/390 深浅主题浏览器结果以固定验证账本为准。
+- 沿用 `/xy/artifacts/stripe-hosted/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`，旧角色保存在 `pre-experience/`。同输入 BASELINE 为 `stripe 托管 / pressed=null`，MODIFIED 为 `Stripe / pressed=true`，ROLLBACK 恢复 BASELINE；三者退出 0，回滚归档与新基线哈希一致，补丁重建逐文件一致。最终制品清单见 `experience/RESULT.json`。
+- 本地预览 `http://127.0.0.1:4185/purchase` 使用模拟 API 和支付跳转，不代表真实 Stripe 收款验收。测试数据库容器已停止。下一步须按新授权提交、发布或部署；不得把此前 0.1.1 发布授权自动延伸到生产操作。
+
 ### 分组与 Stripe 托管支付 0.1.1 已发布（2026-09-17）
 
 - 用户授权的两个原始提交已确认、推送并保留：分组 `9fd00b81cbd66a5ffdbdb4f316059345e708f5e2`，支付 `cd258bdd9f1b3cc10f9aa7ee38d2837dba352046`。通过受保护 [PR #42](https://github.com/liulixin-lex/xy2api/pull/42) 合入，固定 PR head 为 `d58abdb95371ede7852d56c361370f40230e82e5`，合并提交 `570aa14cfbe7fd86c7d6e995e155c5551e729b74`。
@@ -130,6 +139,8 @@
 Sub2API 兼容基线已更新到 `v0.2.5`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+- `20260918-release-0.1.2`：用户已授权提交、推送、PR 合并与发版。沿用 `experience-work / fix/stripe-payment-experience`，以 `9c8abed87` 为基线，发布 0.1.2；保留兼容版本 0.2.5。等待受保护检查和制品核验，不涉及生产部署。实际执行记录继续追加固定 `VERIFICATION.txt`。
 
 - `20260917-group-prompts-commit`：本地提交交接已登记；实际提交 SHA、干净状态与归档一致性由 `COMMIT_RESULT.json` 记录，无后续远端操作。
 - `20260917-stripe-hosted`：本地实现与验收已完成，独立 worktree `/xy/artifacts/stripe-hosted/work`、分支 `feat/payment-stripe-hosted`，基线 `41fd8591c`，原 main 保留。BASELINE 不支持托管、MODIFIED 创建 Session 且重复两次事件只入账 80、ROLLBACK 恢复基线，三者 exit0；回滚字节及补丁重建均一致。最终四角色哈希见 `/xy/artifacts/stripe-hosted/VERIFICATION.txt`。真实测试账号联调另行完成，不推送或部署。
@@ -725,3 +736,11 @@ pnpm --dir frontend run build
 - 边界：未部署生产，Stripe真实测试账户仍需启用前验收；源码回滚不能替代数据库备份恢复，也不能丢弃历史托管订单。无待发布操作。
 
 - 文档整理：删除整合时误复制到顶部的支付历史日志副本，操作日志区原记录完整保留。
+
+### 2026-09-18 — `20260918-stripe-experience` — 模式单选与前端体验本地交接
+
+- 按用户五项要求，在 `9c8abed87` 的独立副本完成用户统一 Stripe 名称、管理员模式区分、收款模式单选、服务商文案和支付按钮改进。模式保存在既有 `payment_enabled_types`，未引入数据库迁移；历史服务商不因模式切换被删除。
+- 后端配置更新和创建订单都验证模式互斥，旧双模式配置优先托管；保护已完成订单引用的密钥和币种，并用准确原因替换未完成订单提示。管理员订单筛选、详情和统计同步保留模式名称，避免两个同名筛选项。
+- 133 项前端回归、i18n、定向 lint、类型检查、生产构建及带 unit 标签的支付相关后端测试通过；隔离 PostgreSQL 实测幂等、并发、到账和退款。浏览器使用本地模拟 API，覆盖手机／桌面、深浅主题、唯一 Stripe 入口、托管跳转、单选与历史服务商编辑；最终运行记录和截图位于固定验证账本及 `experience/screenshots/`。
+- 首轮并行检查和 1536 MiB 堆限制导致内存中断，改为顺序执行及 2800 MiB 堆后通过；首次浏览器阴影断言把透明零尺寸阴影当作可见阴影，修正断言后通过。失败原始记录保留，没有当作成功。
+- 同输入 BASELINE 显示 stripe 托管，MODIFIED 显示 Stripe 并提供 aria-pressed=true，ROLLBACK 恢复原样；归档哈希、补丁重建和重新应用均已验证。四角色路径保持不变，交接文档纳入最终重新封存。原主工作区不变，当前不提交、不推送、不发版、不部署。

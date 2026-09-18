@@ -9,6 +9,12 @@ import type {
 
 export const PAYMENT_RECOVERY_STORAGE_KEY = 'payment.recovery.current'
 
+export function paymentMethodLabelKey(type: string, showCheckoutMode = false): string {
+  if (showCheckoutMode && type === 'stripe') return 'admin.settings.payment.providerStripe'
+  if (showCheckoutMode && type === 'stripe_hosted') return 'admin.settings.payment.providerStripeHosted'
+  return `payment.methods.${type}`
+}
+
 const VISIBLE_METHOD_ALIASES = {
   alipay: 'alipay',
   alipay_direct: 'alipay',
@@ -116,6 +122,8 @@ export function getVisibleMethods(methods: Record<string, MethodLimit>): Record<
     }
   })
 
+  // Match the backend fallback for configurations saved before mode selection.
+  if (visible.stripe_hosted) delete visible.stripe
   return visible
 }
 

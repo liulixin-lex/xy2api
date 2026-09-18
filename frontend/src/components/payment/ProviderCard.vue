@@ -8,7 +8,7 @@
   >
     <div :class="[
       'flex flex-wrap items-center justify-between gap-3 px-4 py-2.5',
-      !enabled && 'pointer-events-none',
+      !enabled && provider.provider_key !== 'stripe' && provider.provider_key !== 'stripe_hosted' && 'pointer-events-none',
     ]">
       <!-- Left: icon + name + key badge + type badges -->
       <div class="flex min-w-0 flex-wrap items-center gap-3">
@@ -76,7 +76,7 @@ const PROVIDER_KEY_LABELS: Record<string, string> = {
   alipay: 'admin.settings.payment.providerAlipay',
   wxpay: 'admin.settings.payment.providerWxpay',
   stripe: 'admin.settings.payment.providerStripe',
-  stripe_hosted: 'payment.methods.stripe_hosted',
+  stripe_hosted: 'admin.settings.payment.providerStripeHosted',
   airwallex: 'admin.settings.payment.providerAirwallex',
 }
 

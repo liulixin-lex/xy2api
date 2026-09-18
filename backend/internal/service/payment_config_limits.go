@@ -23,6 +23,18 @@ func (s *PaymentConfigService) GetAvailableMethodLimits(ctx context.Context) (*M
 	}
 	typeInstances := pcGroupByPaymentType(instances)
 	typeInstances = s.pcApplyEnabledVisibleMethodInstances(ctx, typeInstances, instances)
+	if s.settingRepo != nil {
+		cfg, err := s.GetPaymentConfig(ctx)
+		if err != nil {
+			return nil, err
+		}
+		stripeMode := StripePaymentMode(cfg.EnabledTypes)
+		for _, kind := range []string{payment.TypeStripe, payment.TypeStripeHosted} {
+			if kind != stripeMode {
+				delete(typeInstances, kind)
+			}
+		}
+	}
 	resp := &MethodLimitsResponse{
 		Methods: make(map[string]MethodLimits, len(typeInstances)),
 	}

@@ -244,7 +244,7 @@ func TestGetAvailableMethodLimitsOmitsMixedCurrencyMethod(t *testing.T) {
 		Save(ctx)
 	require.NoError(t, err)
 
-	svc := &PaymentConfigService{entClient: client}
+	svc := &PaymentConfigService{entClient: client, settingRepo: &paymentConfigSettingRepoStub{values: map[string]string{SettingEnabledPaymentTypes: "stripe"}}}
 	resp, err := svc.GetAvailableMethodLimits(ctx)
 	require.NoError(t, err)
 	require.NotContains(t, resp.Methods, payment.TypeStripe)
@@ -268,7 +268,7 @@ func TestGetAvailableMethodLimitsIncludesEasyPayCustomMethodDisplayName(t *testi
 		Save(ctx)
 	require.NoError(t, err)
 
-	svc := &PaymentConfigService{entClient: client}
+	svc := &PaymentConfigService{entClient: client, settingRepo: &paymentConfigSettingRepoStub{values: map[string]string{}}}
 	resp, err := svc.GetAvailableMethodLimits(ctx)
 	require.NoError(t, err)
 

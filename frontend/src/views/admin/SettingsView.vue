@@ -8227,7 +8227,7 @@
                   }}</label>
                   <div class="mt-1.5 flex flex-wrap gap-2">
                     <button
-                      v-for="pt in allPaymentTypes"
+                      v-for="pt in allPaymentTypes.filter(pt => pt.value !== 'stripe' && pt.value !== 'stripe_hosted')"
                       :key="pt.value"
                       type="button"
                       @click="togglePaymentType(pt.value)"
@@ -8241,6 +8241,7 @@
                       {{ pt.label }}
                     </button>
                   </div>
+                  <StripeModeSelector v-model="form.payment_enabled_types" />
                   <p class="mt-2 text-xs text-gray-400 dark:text-gray-500">
                     {{ t("admin.settings.payment.enabledPaymentTypesHint") }}
                     <a
@@ -8888,6 +8889,7 @@ import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiErro
 import { useAppStore } from "@/stores";
 import { useAdminSettingsStore } from "@/stores/adminSettings";
 import { normalizeVisibleMethod } from "@/components/payment/paymentFlow";
+import StripeModeSelector from "@/components/payment/StripeModeSelector.vue";
 import {
   isRegistrationEmailSuffixDomainValid,
   normalizeRegistrationEmailSuffixDomain,
@@ -10841,6 +10843,9 @@ async function loadSettings() {
         (form as Record<string, unknown>)[key] = value;
       }
     }
+    if (form.payment_enabled_types.includes("stripe_hosted")) {
+      form.payment_enabled_types = form.payment_enabled_types.filter(type => type !== "stripe");
+    }
     syncCaptchaProviderSelection();
     if (!form.claude_oauth_system_prompt_blocks?.trim()) {
       form.claude_oauth_system_prompt_blocks =
@@ -12284,8 +12289,8 @@ const allPaymentTypes = computed(() => [
   { value: "easypay", label: t("payment.methods.easypay") },
   { value: "alipay", label: t("payment.methods.alipay") },
   { value: "wxpay", label: t("payment.methods.wxpay") },
-  { value: "stripe", label: t("payment.methods.stripe") },
-  { value: "stripe_hosted", label: t("payment.methods.stripe_hosted") },
+  { value: "stripe", label: t("admin.settings.payment.providerStripe") },
+  { value: "stripe_hosted", label: t("admin.settings.payment.providerStripeHosted") },
   { value: "airwallex", label: t("payment.methods.airwallex") },
 ]);
 
@@ -12343,7 +12348,7 @@ const providerKeyOptions = computed(() => [
   { value: "alipay", label: t("admin.settings.payment.providerAlipay") },
   { value: "wxpay", label: t("admin.settings.payment.providerWxpay") },
   { value: "stripe", label: t("admin.settings.payment.providerStripe") },
-  { value: "stripe_hosted", label: t("payment.methods.stripe_hosted") },
+  { value: "stripe_hosted", label: t("admin.settings.payment.providerStripeHosted") },
   { value: "airwallex", label: t("admin.settings.payment.providerAirwallex") },
 ]);
 
