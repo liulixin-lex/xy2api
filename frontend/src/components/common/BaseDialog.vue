@@ -47,6 +47,7 @@
 <script lang="ts">
 // Track open instances independently of transition DOM and unmount ordering.
 const openDialogs = new Set<symbol>()
+let dialogIdCounter = 0
 </script>
 
 <script setup lang="ts">
@@ -54,7 +55,7 @@ import { computed, watch, onMounted, onUnmounted, ref, nextTick, useId } from 'v
 import Icon from '@/components/icons/Icon.vue'
 
 // 生成唯一ID以避免多个对话框时ID冲突
-const dialogId = `modal-title-${useId()}`
+const dialogId = `modal-title-${useId()}-${++dialogIdCounter}`
 const dialogToken = Symbol('dialog')
 
 // 焦点管理
