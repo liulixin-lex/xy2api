@@ -4,14 +4,16 @@
 
 ## 当前交接状态
 
-### Stripe 模式单选与支付界面改进（2026-09-18）
+### Stripe 模式单选与支付界面改进 0.1.2 已发布（2026-09-18）
 
-- 基线为原仓库 `main / 9c8abed87987b5f4a8f278cdd411fe3ee7273713`，原工作区保持干净。实现位于 `/xy/artifacts/stripe-hosted/experience-work`，分支 `fix/stripe-payment-experience`，当前为未提交的本地改进，没有推送、发版或生产操作。
+- 基线为原仓库 `main / 9c8abed87987b5f4a8f278cdd411fe3ee7273713`，原工作区保持干净。实现位于 `/xy/artifacts/stripe-hosted/experience-work`；功能提交 `25a983458782962bcb9c25041907de317d50d655` 已通过 [PR #44](https://github.com/liulixin-lex/xy2api/pull/44) 合入，发布提交为 `95a9576d5ff49ccb5c934fdad5c19e46e5d23f1b`。收尾文档分支为 `docs/v0.1.2-closeout`。
 - `payment_enabled_types` 中 Stripe 改为关闭、站内、托管单选。后端拒绝同时启用两种模式；历史双模式配置读取时优先托管，未选模式不能创建新订单。历史实例、回调、补偿和退款仍按原绑定处理。
 - 用户端支付入口及订单记录统一显示 Stripe；管理员设置、订单筛选及统计保留 Stripe 站内／Stripe 托管区分。服务商说明拆分为地址、环境要求和历史配置保护；已完成订单引用的托管配置修改返回 `HOSTED_CONFIG_LOCKED`，不再误报未完成订单。
 - 支付方式、快捷金额及提交按钮改为细边框、平面色和明确选中态，保留键盘焦点、禁用和加载状态；金额前缀随币种变化。前端 133 项测试、i18n 完整性、定向 ESLint、类型检查，以及后端带 unit 标签的支付回归和隔离 PostgreSQL 并发／履约／退款测试通过。最终构建及 1280/390 深浅主题浏览器结果以固定验证账本为准。
 - 沿用 `/xy/artifacts/stripe-hosted/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`，旧角色保存在 `pre-experience/`。同输入 BASELINE 为 `stripe 托管 / pressed=null`，MODIFIED 为 `Stripe / pressed=true`，ROLLBACK 恢复 BASELINE；三者退出 0，回滚归档与新基线哈希一致，补丁重建逐文件一致。最终制品清单见 `experience/RESULT.json`。
-- 本地预览 `http://127.0.0.1:4185/purchase` 使用模拟 API 和支付跳转，不代表真实 Stripe 收款验收。测试数据库容器已停止。下一步须按新授权提交、发布或部署；不得把此前 0.1.1 发布授权自动延伸到生产操作。
+- 正式 [v0.1.2 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.1.2) 非草稿、非预发布且为 latest。PR 的 16 项检查、主线及标签 CI／安全扫描、Release 工作流 `35326891540` 全部成功；五个平台包已下载复算 SHA-256。Linux amd64 程序报告产品 0.1.2、兼容 0.2.5 和上述发布提交。
+- GHCR amd64／arm64 的 OCI 版本和提交正确；`0.1.2`、`latest`、`0.1`、`0` 均指向 `sha256:12e7fdc6749b806852b9c72272ee4ab1dbb09bd1cf51fea4f087e7de790f359f`。机器核验结果见 `/xy/artifacts/stripe-hosted/experience/release-0.1.2/RELEASE_RESULT.json`，源码四角色最终清单见 `experience/RESULT.json`。
+- 本地预览 `http://127.0.0.1:4185/purchase` 使用模拟 API 和支付跳转，不代表真实 Stripe 收款验收。测试数据库容器已停止。本次完成提交、推送、合并和发版，没有生产部署；本版本无新增数据库迁移，历史订单配置保护保留。
 
 ### 分组与 Stripe 托管支付 0.1.1 已发布（2026-09-17）
 
@@ -122,15 +124,15 @@
 - 最终相关后端单测、真实 PostgreSQL/Redis 集成、前端相关测试、类型/i18n/lint/生产构建、服务编译和独立 go vet 均成功；六输入 BASELINE/MODIFIED/ROLLBACK 通过，累计补丁可重建相同 SHA-256 的归档。综合静态检查首轮 SIGKILL、低内存重试 exit 4 超时，不能把其中 0 issues 当作成功；缓存复验最终结果见 VERIFICATION.txt。保留原有一项 Redis 批量负载集成测试跳过及构建体积提示。
 - 用户补正生产用户名为 ubuntu。首次密码认证成功，后台复用连接失效后，后续 SSH 返回 Connection refused，尚未成功读取任何远端命令输出；HTTP IP 仍返回 Caddy 308，缺真实域名/SNI。生产内部只读审计仍受阻。本轮未部署、发版或发出真实模型请求。方案见 `openspec/changes/iq-detection-operations/`。
 
-最后更新：`2026-09-17`（UTC）；下表记录 v0.1.1 发布来源，最终交接文档提交位于发布标签之后。
+最后更新：`2026-09-18`（UTC）；下表记录 v0.1.2 发布来源，最终交接文档提交位于发布标签之后。
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
 | 当前分支 | main；最终交接文档由受保护 PR 合并，发布标签保持不可变 |
-| 发布提交 | `v0.1.1` / `570aa14cfbe7fd86c7d6e995e155c5551e729b74`，功能与版本 PR #42 |
+| 发布提交 | `v0.1.2` / `95a9576d5ff49ccb5c934fdad5c19e46e5d23f1b`，功能与版本 PR #44 |
 | 工作树 | 发布来源已核对干净；本表所在文档只补充验收记录 |
-| XY2API 产品版本 | main 的 `VERSION` 与 provenance 均为 `0.1.1`；兼容版本 `0.2.5` |
+| XY2API 产品版本 | 远端 main 的 `VERSION` 与 provenance 均为 `0.1.2`；兼容版本 `0.2.5`；原本地主工作区保留旧基线 |
 | 已审计的 Sub2API 基线 | `v0.2.5` / commit `86f93c28ee34cc74b629dafb748bd5ac5ca8c5ea`；已通过 PR `#39` 合入 `main` |
 | 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，16 个人工冲突均已记录；同步 merge commit `22527fc5c` |
 | 本地远端 | `origin` 可读写；`upstream` 仅允许 fetch，push URL 为 `DISABLED` |
@@ -140,7 +142,6 @@ Sub2API 兼容基线已更新到 `v0.2.5`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
-- `20260918-release-0.1.2`：用户已授权提交、推送、PR 合并与发版。沿用 `experience-work / fix/stripe-payment-experience`，以 `9c8abed87` 为基线，发布 0.1.2；保留兼容版本 0.2.5。等待受保护检查和制品核验，不涉及生产部署。实际执行记录继续追加固定 `VERIFICATION.txt`。
 
 - `20260917-group-prompts-commit`：本地提交交接已登记；实际提交 SHA、干净状态与归档一致性由 `COMMIT_RESULT.json` 记录，无后续远端操作。
 - `20260917-stripe-hosted`：本地实现与验收已完成，独立 worktree `/xy/artifacts/stripe-hosted/work`、分支 `feat/payment-stripe-hosted`，基线 `41fd8591c`，原 main 保留。BASELINE 不支持托管、MODIFIED 创建 Session 且重复两次事件只入账 80、ROLLBACK 恢复基线，三者 exit0；回滚字节及补丁重建均一致。最终四角色哈希见 `/xy/artifacts/stripe-hosted/VERIFICATION.txt`。真实测试账号联调另行完成，不推送或部署。
@@ -744,3 +745,12 @@ pnpm --dir frontend run build
 - 133 项前端回归、i18n、定向 lint、类型检查、生产构建及带 unit 标签的支付相关后端测试通过；隔离 PostgreSQL 实测幂等、并发、到账和退款。浏览器使用本地模拟 API，覆盖手机／桌面、深浅主题、唯一 Stripe 入口、托管跳转、单选与历史服务商编辑；最终运行记录和截图位于固定验证账本及 `experience/screenshots/`。
 - 首轮并行检查和 1536 MiB 堆限制导致内存中断，改为顺序执行及 2800 MiB 堆后通过；首次浏览器阴影断言把透明零尺寸阴影当作可见阴影，修正断言后通过。失败原始记录保留，没有当作成功。
 - 同输入 BASELINE 显示 stripe 托管，MODIFIED 显示 Stripe 并提供 aria-pressed=true，ROLLBACK 恢复原样；归档哈希、补丁重建和重新应用均已验证。四角色路径保持不变，交接文档纳入最终重新封存。原主工作区不变，当前不提交、不推送、不发版、不部署。
+
+### 2026-09-18 — `20260918-release-0.1.2` — 发布与验收完成
+
+- 用户授权提交、推送、合并与发版；沿用原实现副本，功能与版本提交 `25a983458` 经 PR #44 的 16 项检查后正常合并为 `95a9576d5`，未调整分支保护。
+- 产品 `VERSION` 与 provenance 晋级 0.1.2，兼容 0.2.5。annotated `v0.1.2` 指向功能合并提交，Release 工作流 35326891540 成功，正式非预发布且为 latest。主线与标签 CI、安全检查全部通过。
+- 五个平台包实际下载并通过 SHA-256 复算，Linux amd64 二进制版本、兼容版本和完整 commit 正确；GHCR 双架构 OCI 与 0.1.2/latest/0.1/0 别名一致。详细结果在固定交付目录 `experience/release-0.1.2/RELEASE_RESULT.json`。
+- 固定四角色继续使用 `MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`，本次更新包含版本与发布交接。BASELINE 为 stripe 托管／pressed=null，MODIFIED 为 Stripe／pressed=true，ROLLBACK 恢复基线；退出 0、恢复哈希相同、补丁重建和重新应用通过。
+- 初次本地兼容审计因未跟踪的 node_modules 符号链接拒绝，临时移除该链接后审计通过并恢复链接；未将失败作为成功。业务源码复用前轮 133 项前端、支付后端与隔离 PostgreSQL、构建及四种浏览器场景验证。
+- 本条仅更新交接文档，由受保护 PR 固化；发布标签不移动。无生产部署、数据库迁移或真实账号探测。最终文档合并事件追加原验证账本，后续动态状态以 GitHub 及机器结果为准。
