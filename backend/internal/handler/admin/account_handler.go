@@ -66,6 +66,7 @@ type AccountHandler struct {
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
 	iqCheckService          *service.IQCheckService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
+	codexTicketSettings     *service.SettingService
 	cfg                     *config.Config
 }
 
@@ -169,6 +170,11 @@ func (h *AccountHandler) ListIQCheckResults(c *gin.Context) {
 
 func (h *AccountHandler) SetOllamaCloudUsageService(usage *service.OllamaCloudUsageService) {
 	h.ollamaCloudUsage = usage
+}
+
+// SetCodexTicketSettings supplies the live policy without mutating shared config.
+func (h *AccountHandler) SetCodexTicketSettings(settings *service.SettingService) {
+	h.codexTicketSettings = settings
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -435,6 +441,7 @@ const accountListGroupUngroupedQueryValue = "ungrouped"
 
 func (h *AccountHandler) accountResponseFromService(account *service.Account) *dto.Account {
 	out := dto.AccountFromService(account)
+	h.enrichCodexTicketStatus(account, out)
 	if h != nil && h.ollamaCloudUsage != nil && out != nil {
 		h.ollamaCloudUsage.EnrichState(out.OllamaCloudUsage)
 	}
@@ -443,6 +450,7 @@ func (h *AccountHandler) accountResponseFromService(account *service.Account) *d
 
 func (h *AccountHandler) accountListResponseFromService(account *service.Account) *dto.Account {
 	out := dto.AccountFromServiceShallow(account)
+	h.enrichCodexTicketStatus(account, out)
 	if out != nil && account != nil {
 		out.Proxy = dto.ProxyFromService(account.Proxy)
 	}
@@ -450,6 +458,16 @@ func (h *AccountHandler) accountListResponseFromService(account *service.Account
 		h.ollamaCloudUsage.EnrichState(out.OllamaCloudUsage)
 	}
 	return out
+}
+
+func (h *AccountHandler) enrichCodexTicketStatus(account *service.Account, out *dto.Account) {
+	if h != nil && h.cfg != nil && out != nil {
+		cfg := h.cfg.Gateway.OpenAICodexTicket
+		if h.codexTicketSettings != nil {
+			cfg.Enabled = h.codexTicketSettings.GetOpenAICodexTicketEnabled(context.Background(), cfg.Enabled)
+		}
+		out.CodexTurnTickets = service.OpenAICodexTicketStatuses(account, cfg, time.Now())
+	}
 }
 
 func (h *AccountHandler) isSimpleMode() bool {
