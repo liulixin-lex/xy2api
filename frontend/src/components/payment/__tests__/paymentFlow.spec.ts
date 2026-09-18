@@ -4,9 +4,17 @@ import {
   buildCreateOrderPayload,
   decidePaymentLaunch,
   getVisibleMethods,
+  paymentMethodLabelKey,
   readPaymentRecoverySnapshot,
   type PaymentRecoverySnapshot,
 } from '@/components/payment/paymentFlow'
+
+it('distinguishes Stripe modes only in administrator order labels', () => {
+  expect(paymentMethodLabelKey('stripe_hosted')).toBe('payment.methods.stripe_hosted')
+  expect(paymentMethodLabelKey('stripe', true)).toBe('admin.settings.payment.providerStripe')
+  expect(paymentMethodLabelKey('stripe_hosted', true)).toBe('admin.settings.payment.providerStripeHosted')
+  expect(paymentMethodLabelKey('alipay', true)).toBe('payment.methods.alipay')
+})
 
 function methodLimit(overrides: Partial<MethodLimit> = {}): MethodLimit {
   return {
@@ -58,6 +66,11 @@ describe('getVisibleMethods', () => {
 
     expect(visible.alipay.single_min).toBe(2)
     expect(visible.wxpay.fee_rate).toBe(1.2)
+  })
+
+  it('shows one Stripe method when a legacy response contains both modes', () => {
+    const visible = getVisibleMethods({ stripe: methodLimit(), stripe_hosted: methodLimit({ fee_rate: 3 }) })
+    expect(Object.keys(visible)).toEqual(['stripe_hosted'])
   })
 
   it('keeps custom EasyPay methods as visible methods', () => {

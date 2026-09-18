@@ -26,14 +26,14 @@ import (
 // --- Order Creation ---
 
 func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest) (*CreateOrderResponse, error) {
+	if normalized := NormalizeVisibleMethod(req.PaymentType); normalized != "" {
+		req.PaymentType = normalized
+	}
 	if req.PaymentType == payment.TypeStripeHosted {
 		return s.createHostedOrder(ctx, req)
 	}
 	if req.OrderType == "" {
 		req.OrderType = payment.OrderTypeBalance
-	}
-	if normalized := NormalizeVisibleMethod(req.PaymentType); normalized != "" {
-		req.PaymentType = normalized
 	}
 	cfg, err := s.configService.GetPaymentConfig(ctx)
 	if err != nil {
@@ -41,6 +41,9 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	}
 	if !cfg.Enabled {
 		return nil, infraerrors.Forbidden("PAYMENT_DISABLED", "payment system is disabled")
+	}
+	if req.PaymentType == payment.TypeStripe && StripePaymentMode(cfg.EnabledTypes) != payment.TypeStripe {
+		return nil, infraerrors.Forbidden("PAYMENT_TYPE_DISABLED", "this Stripe checkout mode is disabled")
 	}
 	plan, err := s.validateOrderInput(ctx, req, cfg)
 	if err != nil {
@@ -415,6 +418,9 @@ func (s *PaymentService) selectCreateOrderInstance(ctx context.Context, req Crea
 	}
 	if sel == nil {
 		return nil, infraerrors.TooManyRequests("NO_AVAILABLE_INSTANCE", "no_available_instance")
+	}
+	if (sel.ProviderKey == payment.TypeStripe || sel.ProviderKey == payment.TypeStripeHosted) && sel.ProviderKey != StripePaymentMode(cfg.EnabledTypes) {
+		return nil, infraerrors.Forbidden("PAYMENT_TYPE_DISABLED", "this Stripe checkout mode is disabled")
 	}
 	return sel, nil
 }

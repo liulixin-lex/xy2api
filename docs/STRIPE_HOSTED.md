@@ -1,18 +1,18 @@
 # stripe 托管
 
-`stripe_hosted` 是独立的 Stripe Checkout 托管支付方式，支持余额充值和套餐单次购买。原 `stripe` 入口继续使用原站内流程，两者独立配置、独立启停。套餐仍按本站有效期发放，不创建 Stripe 循环订阅。
+Stripe 支持「站内」和「托管」两种收款模式，由管理员在支付设置中单选，用户端统一显示 Stripe。内部仍使用 `stripe` 和 `stripe_hosted` 区分流程，以保留历史订单的到账确认及退款。两种模式均支持余额充值和套餐单次购买；套餐仍按本站有效期发放，不创建 Stripe 循环订阅。
 
 ## 配置
 
 1. 使用项目要求的 Go 1.27.0 构建后端，部署时执行新增迁移 `250_stripe_hosted_idempotency.sql`。保留迁移 checksum；不要改写历史 SQL。
 2. 配置并备份持久化 `TOTP_ENCRYPTION_KEY`。托管实例的 Secret Key、Webhook Signing Secret 使用此密钥进行 AES-256-GCM 加密保存。丢失密钥将影响历史订单查单与退款。
 3. 在管理设置中配置可信的「前端地址」，例如 `https://app.example.com`，不带路径、查询参数或片段。仅测试密钥允许 `http://localhost:端口` 或 `http://127.0.0.1:端口`。客户端 Host、Referer 和 return_url 不参与托管返回地址生成。
-4. 启用支付方式「stripe 托管」，新建同名类型实例，配置 Stripe Secret Key、Webhook Signing Secret、币种和限额。无需 Publishable Key；托管方式没有站内弹窗或组件模式。
-5. 保存后重新打开实例，复制 `/api/v1/payment/webhook/stripe_hosted/<实例ID>` 对应的完整外网 HTTPS 地址。在 Stripe Dashboard 设置该端点，API 版本选择 **2026-03-25.dahlia**，与 `stripe-go/v85 v85.0.0` 对齐。不要使用 preview。
+4. 在「Stripe 收款模式」选择「Stripe 托管」并保存，添加该类型的服务商配置，填写 Stripe Secret Key、Webhook Signing Secret、币种和限额。无需 Publishable Key；托管方式没有站内弹窗或组件模式。
+5. 保存后重新打开服务商，复制 `/api/v1/payment/webhook/stripe_hosted/<实例ID>` 对应的完整外网 HTTPS 地址。末尾编号来自当前部署的服务商记录，请勿照抄其他部署的编号。在 Stripe Dashboard 设置该端点，API 版本选择 **.dahlia 系列**，与 `stripe-go/v85 v85.0.0` 的 **2026-03-25.dahlia** 同系列即可，日期不必一致。不要使用 preview。
 6. 订阅 `checkout.session.completed`、`checkout.session.async_payment_succeeded`、`checkout.session.async_payment_failed`、`checkout.session.expired`。Stripe CLI 本地转发时使用 CLI 输出的签名密钥，不混用 Dashboard 端点密钥。
 7. 付款方式、Logo、品牌颜色在 Stripe Dashboard 管理。首版使用固定金额，关闭 Adaptive Pricing 和自动税费，不启用优惠码、运费及可调整数量。
 
-新旧方式不自动切换。托管配置验收后可关闭旧 `stripe`，需要兼容备用时再手动开启。禁用托管实例只阻止新订单，历史订单的验签、恢复和退款继续可用。被任何订单引用的实例不能删除或直接更换密钥、币种；更换账户或凭据时新建实例，并保留旧实例以处理历史订单。
+切换模式后，新订单只使用已选模式。历史双模式配置读取时优先托管，再次保存不能同时启用两种模式。模式关闭或切换不会删除服务商配置，也不会停用历史订单回调。禁用托管实例只阻止新订单，历史订单的验签、恢复和退款继续可用。被任何订单引用的托管实例不能删除或直接更换密钥、币种，即使订单已完成；更换账户或凭据时新建实例，并保留旧实例以处理历史订单。管理端仍可编辑非当前模式的服务商以维护历史订单。
 
 ## 接口与状态
 

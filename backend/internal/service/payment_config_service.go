@@ -280,7 +280,7 @@ func (s *PaymentConfigService) parsePaymentConfig(vals map[string]string) *Payme
 				types = append(types, t)
 			}
 		}
-		cfg.EnabledTypes = NormalizeVisibleMethods(types)
+		cfg.EnabledTypes = normalizeStripePaymentTypes(types)
 	}
 	return cfg
 }
@@ -322,6 +322,9 @@ func (s *PaymentConfigService) getStripePublishableKey(ctx context.Context) stri
 // nil-check before serialisation — this is inherent to patch-style update patterns
 // and cannot be meaningfully decomposed without introducing unnecessary abstraction.
 func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req UpdatePaymentConfigRequest) error {
+	if err := ValidateStripePaymentTypes(req.EnabledTypes); err != nil {
+		return err
+	}
 	if req.BalanceRechargeMultiplier != nil {
 		if math.IsNaN(*req.BalanceRechargeMultiplier) || math.IsInf(*req.BalanceRechargeMultiplier, 0) || *req.BalanceRechargeMultiplier <= 0 {
 			return infraerrors.BadRequest("INVALID_BALANCE_RECHARGE_MULTIPLIER", "balance recharge multiplier must be greater than 0")

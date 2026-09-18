@@ -39,7 +39,7 @@
               <div v-for="method in stats.payment_methods" :key="method.type" class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
                   <span :class="['inline-block h-3 w-3 rounded-full', methodColor(method.type)]"></span>
-                  <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('payment.methods.' + method.type, method.type) }}</span>
+                  <span class="text-sm text-gray-700 dark:text-gray-300">{{ t(paymentMethodLabelKey(method.type, true), method.type) }}</span>
                 </div>
                 <div class="space-y-1 text-right">
                   <span v-for="[currency, amount] in sortedAmounts(method.amount)" :key="currency" class="block text-sm font-medium text-gray-900 dark:text-white">{{ formatMoney(currency, amount) }}</span>
@@ -76,6 +76,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminPaymentAPI } from '@/api/admin/payment'
 import { extractI18nErrorMessage } from '@/utils/apiError'
+import { paymentMethodLabelKey } from '@/components/payment/paymentFlow'
 import type { CurrencyAmounts, DashboardStats, TopUserPaymentStats } from '@/types/payment'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'

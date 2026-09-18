@@ -376,6 +376,10 @@ func (s *PaymentConfigService) updateProviderInstance(ctx context.Context, id in
 				return nil, err
 			}
 			if count > 0 {
+				if current.ProviderKey == payment.TypeStripeHosted {
+					return nil, infraerrors.Conflict("HOSTED_CONFIG_LOCKED", "historical orders reference these credentials and currency; create a new provider instance").
+						WithMetadata(map[string]string{"count": strconv.Itoa(count)})
+				}
 				return nil, infraerrors.Conflict("PENDING_ORDERS", "instance has pending orders").
 					WithMetadata(map[string]string{"count": strconv.Itoa(count)})
 			}
