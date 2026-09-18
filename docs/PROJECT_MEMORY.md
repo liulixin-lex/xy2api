@@ -4,7 +4,7 @@
 
 ## 当前交接状态
 
-### Sub2API v0.2.6 / XY2API 0.1.3 正式晋级（2026-09-18）
+### Sub2API v0.2.6 / XY2API 0.1.3 已发布（2026-09-18）
 
 - 用户授权按项目标准完成上游同步和发版。原 `/xy/xy2api` 保持原始工作树；实现与证据位于 `/xy/artifacts/upstream-sync-v0.2.6-xy2api-0.1.3/`。
 - 固定上游正式 annotated v0.2.6，tag object `8f35716ba69976fc0ec950894114d2604bb5454c`，commit `49a39b6dc1abed30fd227611e8af1108bc427610`，unsigned；真实 merge base `86f93c28ee34cc74b629dafb748bd5ac5ca8c5ea`。预检 PR #46 合并 `35d620900`；标准 prepare、受控模块归一化及 10 项裁决后，同步 PR #47 在固定 head `77bd8641a` 的 16/16 检查通过后合入 `ef3493e13022e0a5a5b190d7c8734cea93729d5f`。
@@ -12,7 +12,9 @@
 - 本地 2303 项前端测试、lint/类型/生产构建，后端受影响回归、真实 PostgreSQL/Redis 分组用量/兑换/IQ/缓存集成及 Wire 再生成零差异通过。远端完整 unit/integration、lint、跨平台与安全通过。首轮导入排序 lint 和工具/配置错误保留在证据，不计为成功。
 - RC `v0.1.3-rc.1` annotated tag object `c809101321031f011c750b4baa9c850f4e4c84f9` 指向同步合并提交。Release 工作流 `35339800187` 成功；五平台包实际下载并复算 checksum，Linux 版本/兼容/commit 和双架构 OCI 一致。稳定别名保持上一正式版。
 - RC 全新安装、0.1.2 -> RC 升级、回切 0.1.2 通过；每次健康及管理员登录 200，297 条迁移、数据库/Redis/应用目录标记保持；隔离旧版三类备份已保存。源码三态为 BASELINE `0.1.2/0.2.5`、MODIFIED `0.1.3-rc.1/0.2.6`、ROLLBACK 恢复 BASELINE，exit0 且恢复 SHA-256 一致。
-- 固定四角色：`MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh` 位于上述证据目录；补丁重建与重新应用已验证。正式晋级仅改两处产品版本为 0.1.3 及本交接。正式标签、制品和清理结果在本轮收尾记录确认前不得当作已完成。
+- 正式 PR #48 在 16/16 检查通过后合入 `2ba6600027887abc119c2c7e9d5201b79228fe7c`，annotated v0.1.3 tag object `bf46509902b6e42a7f674e353220e7f97c4cba38`；Release 工作流 `35342300372` 成功，Release 非草稿、非预发布且为 latest。五平台 SHA-256、Linux 版本/兼容/提交、双架构 OCI 与 0.1/0/latest 别名一致，正式镜像全新安装通过。
+- 固定四角色：`MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh` 位于上述证据目录，最终源码与补丁重建/回滚哈希见 ARTIFACTS.json。MODIFIED 最终为 `0.1.3/0.2.6`，BASELINE/ROLLBACK 为 `0.1.2/0.2.5`。源码回滚不修改数据库。
+- 官方 Sub2API 0.2.5 初始化数据库升级 RC 通过，286→302 条迁移（保留额外历史迁移记录），用户登录与三类数据标记保持。本地新增票据生命周期 race 与服务构建通过。隔离测试资源在收尾阶段删除，实际清单由 FINAL_RESULT.json 记录。
 - 未部署生产、未调用真实模型或 Stripe 账户。RC 镜像 digest：`sha256:4bedcfe051ce8e679e212a91b97e2e869ba49500c69203fd84304a78febd9a13`。非阻断构建大包提示保留。
 
 ### Stripe 模式单选与支付界面改进 0.1.2 已发布（2026-09-18）
@@ -135,25 +137,24 @@
 - 最终相关后端单测、真实 PostgreSQL/Redis 集成、前端相关测试、类型/i18n/lint/生产构建、服务编译和独立 go vet 均成功；六输入 BASELINE/MODIFIED/ROLLBACK 通过，累计补丁可重建相同 SHA-256 的归档。综合静态检查首轮 SIGKILL、低内存重试 exit 4 超时，不能把其中 0 issues 当作成功；缓存复验最终结果见 VERIFICATION.txt。保留原有一项 Redis 批量负载集成测试跳过及构建体积提示。
 - 用户补正生产用户名为 ubuntu。首次密码认证成功，后台复用连接失效后，后续 SSH 返回 Connection refused，尚未成功读取任何远端命令输出；HTTP IP 仍返回 Caddy 308，缺真实域名/SNI。生产内部只读审计仍受阻。本轮未部署、发版或发出真实模型请求。方案见 `openspec/changes/iq-detection-operations/`。
 
-最后更新：`2026-09-18`（UTC）；下表记录 v0.1.2 发布来源，最终交接文档提交位于发布标签之后。
+最后更新：`2026-09-18`（UTC）；下表记录 v0.1.3 发布来源，最终交接文档提交位于发布标签之后。
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
 | 当前分支 | main；最终交接文档由受保护 PR 合并，发布标签保持不可变 |
-| 发布提交 | `v0.1.2` / `95a9576d5ff49ccb5c934fdad5c19e46e5d23f1b`，功能与版本 PR #44 |
+| 发布提交 | `v0.1.3` / `2ba6600027887abc119c2c7e9d5201b79228fe7c`，版本 PR #48 |
 | 工作树 | 发布来源已核对干净；本表所在文档只补充验收记录 |
-| XY2API 产品版本 | 远端 main 的 `VERSION` 与 provenance 均为 `0.1.2`；兼容版本 `0.2.5`；原本地主工作区保留旧基线 |
-| 已审计的 Sub2API 基线 | `v0.2.5` / commit `86f93c28ee34cc74b629dafb748bd5ac5ca8c5ea`；已通过 PR `#39` 合入 `main` |
-| 基线 provenance | `UPSTREAM_BASE.json` 状态为 `resolved`，16 个人工冲突均已记录；同步 merge commit `22527fc5c` |
+| XY2API 产品版本 | 远端 main 产品 `0.1.3` / 兼容 `0.2.6`；原本地主工作区保留旧基线 |
+| 已审计的 Sub2API 基线 | `v0.2.6` / commit `49a39b6dc1abed30fd227611e8af1108bc427610`；同步 PR #47 |
+| 基线 provenance | resolved，10 项人工裁决；同步 merge `ef3493e13` |
 | 本地远端 | `origin` 可读写；`upstream` 仅允许 fetch，push URL 为 `DISABLED` |
 | 当前环境工具 | git、Python、gh、Docker、Node、pnpm；本轮按仓库固定版本使用 Go 1.27.0 隔离工具链 |
 
-Sub2API 兼容基线已更新到 `v0.2.5`。下方历史日志保留原样；本轮没有升级生产实例。
+Sub2API 兼容基线已更新到 `v0.2.6`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
 
-- `20260918-sub2api-v0.2.6`：同步及 RC 验收完成，正在独立正式版本 PR 晋级 0.1.3；正式发布后核验制品、清理隔离资源并封存四角色。
 
 
 - `20260917-group-prompts-commit`：本地提交交接已登记；实际提交 SHA、干净状态与归档一致性由 `COMMIT_RESULT.json` 记录，无后续远端操作。
@@ -773,3 +774,11 @@ pnpm --dir frontend run build
 - 预检 PR #46 和同步 PR #47 均通过全部保护检查并常规合并；使用固定 annotated tag 和标准 prepare，10 项冲突逐项裁决，完整三方报告保留。
 - RC 五平台 checksum、双架构 OCI、旧版稳定别名不变、隔离新装/升级/回滚及持久化标记通过。无新增迁移，297 条历史 checksum 保持。
 - 当前正在 release/0.1.3 将产品版本从 RC 晋级；正式发布结果由下一条收尾记录确认。完整命令、失败与成功、三态及四角色路径记录于独立证据目录。无生产操作。
+
+### 2026-09-18T12:14:17.316465+00:00 — `20260918-sub2api-v0.2.6` — 正式发布与验收完成
+
+- 预检 #46、同步 #47、版本 #48 通过全部保护检查后常规 merge；正式提交 `2ba6600027887abc119c2c7e9d5201b79228fe7c`，annotated v0.1.3 `bf46509902b6e42a7f674e353220e7f97c4cba38`，Release run `35342300372` 成功。未修改保护规则、移动标签或部署生产。
+- 正式 Release latest=true，五平台包下载 SHA-256、Linux 产品0.1.3/兼容0.2.6/完整commit、amd64/arm64 OCI及稳定别名全部通过。镜像 digest `sha256:366408edf90f1cb08ecd2dfb7089c9484f4f8963ec7acd683c78681926fd1d58`。正式全新安装健康/登录200，297条迁移。
+- RC 已覆盖 XY2API0.1.2升级及旧镜像回滚、官方Sub2API0.2.5数据库升级，持久化标记均保持。本地2303项前端、lint/types/build、后端定向与真实PG/Redis集成、票据生命周期race、Wire零差异和服务构建通过。
+- 首轮5处导入排序、工具版本/包装器目录及新装端口冲突均已修复并保留失败记录。RC稳定别名保持旧版，正式版才更新。无新增SQL，297条历史checksum完全保持。
+- 固定四角色重新封存最终源码，BASELINE/ROLLBACK为0.1.2/0.2.5，MODIFIED为0.1.3/0.2.6；exit0、恢复hash和补丁重建一致。清理结果及最终路径哈希见 `/xy/artifacts/upstream-sync-v0.2.6-xy2api-0.1.3/FINAL_RESULT.json`。原主工作区未改写，无生产或真实账号操作。
