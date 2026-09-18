@@ -44,6 +44,12 @@
       "tools/**"
     ],
     "manual_merge": [
+      "backend/go.sum",
+      "backend/internal/handler/redeem_handler.go",
+      "backend/internal/repository/account_repo_upstream_billing_probe_update_test.go",
+      "backend/internal/repository/redeem_code_repo_sort_integration_test.go",
+      "frontend/src/components/common/BaseDialog.vue",
+      "frontend/src/views/admin/__tests__/ChannelMonitorView.grok.spec.ts",
       "README.md",
       "README_CN.md",
       "README_JA.md",
