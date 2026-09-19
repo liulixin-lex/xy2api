@@ -178,6 +178,9 @@ func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckC
 			next, reason = until, why
 		}
 	}
+	if until := service.CodexTicketProbeLeaseUntil(accountEntityToService(a), now); until != nil {
+		deferUntil(now.Add(6*time.Second), "waiting_state")
+	}
 	if a.Status != service.StatusActive || !a.Schedulable {
 		deferUntil(now.Add(time.Minute), "account_disabled")
 	}

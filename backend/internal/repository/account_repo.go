@@ -146,6 +146,8 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if err := service.ValidateIQCheckSettings(account.Platform, account.IQCheckSettings); err != nil {
 		return err
 	}
+	account.Extra = service.MergeOpenAICodexTicketExtra(account.Extra, nil)
+	service.InitializeNewCodexTicketAccount(account)
 	account.IQCheck = resetIQState(domain.DefaultIQCheck(), account.IQCheckSettings, time.Now().UTC())
 
 	builder := client.Account.Create().

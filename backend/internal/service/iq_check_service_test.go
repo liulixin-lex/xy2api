@@ -24,6 +24,7 @@ type iqProbeAccounts struct {
 func (r *iqProbeAccounts) GetByID(context.Context, int64) (*Account, error) { return r.account, nil }
 
 type iqProbeTransport struct {
+	tlsCalls int
 	HTTPUpstream
 	status   int
 	body     string
@@ -33,7 +34,14 @@ type iqProbeTransport struct {
 	bodies   []map[string]any
 }
 
+func (u *iqProbeTransport) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	return u.doProbe(req)
+}
 func (u *iqProbeTransport) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	u.tlsCalls++
+	return u.doProbe(req)
+}
+func (u *iqProbeTransport) doProbe(req *http.Request) (*http.Response, error) {
 	u.requests = append(u.requests, req)
 	var body map[string]any
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {

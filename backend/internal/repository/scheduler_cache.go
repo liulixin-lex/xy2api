@@ -863,6 +863,13 @@ func (c *schedulerCache) mgetChunked(ctx context.Context, keys []string) ([]any,
 }
 
 func buildSchedulerMetadataAccount(account service.Account) service.Account {
+	extra := filterSchedulerExtra(account.Extra)
+	if summary := service.CodexTicketSchedulingSummary(&account, time.Now()); summary != nil {
+		if extra == nil {
+			extra = make(map[string]any)
+		}
+		extra["codex_ticket_readiness"] = summary
+	}
 	return service.Account{
 		ID:                      account.ID,
 		Name:                    account.Name,
@@ -891,7 +898,7 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 		AccountGroups:           filterSchedulerAccountGroups(account.AccountGroups),
 		GroupIDs:                filterSchedulerGroupIDs(account.GroupIDs, account.AccountGroups),
 		Credentials:             filterSchedulerCredentials(account.Credentials),
-		Extra:                   filterSchedulerExtra(account.Extra),
+		Extra:                   extra,
 	}
 }
 
@@ -1036,6 +1043,9 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"grok_billing_snapshot",
 	}
 	filtered := make(map[string]any)
+	if cfg := service.OpenAICodexTicketSchedulingConfig(extra); cfg != nil {
+		filtered["codex_ticket_config"] = cfg
+	}
 	for _, key := range keys {
 		if value, ok := extra[key]; ok && value != nil {
 			if key == service.UpstreamBillingProbeExtraKey {

@@ -1,0 +1,179 @@
+{
+  "repository": "https://github.com/Wei-Shaw/sub2api.git",
+  "tag": "v0.2.6",
+  "commit": "49a39b6dc1abed30fd227611e8af1108bc427610",
+  "files": {
+    "backend/cmd/server/wire_gen.go": {
+      "base_sha256": "1d72afb21b1bf1b7b8a16b3e4bca40925c8b194d43c4bca63e01dfa38012749f",
+      "overlay_sha256": "76fc6592877d24a0c2f14fe84e629242015a118ecbbf124c551f6fa50648542f"
+    },
+    "backend/internal/config/config.go": {
+      "base_sha256": "6ddc28cfb57aa4b4aa6273fdcafc23015291439a3ef7d8a4e8b809ef80c23edd",
+      "overlay_sha256": "33da23b54be049f3e5fe44473f7cca0eef25c8f97c4828575e97aa0cb1118ea9"
+    },
+    "backend/internal/handler/admin/account_codex_ticket_controls.go": {
+      "base_sha256": null,
+      "overlay_sha256": "4ba895b842034728c06bb5afa59d6a1a1697c5735f8bf1df62eeb85364874b4a"
+    },
+    "backend/internal/handler/admin/account_codex_ticket_controls_test.go": {
+      "base_sha256": null,
+      "overlay_sha256": "13985a889f024e48a1ed9c11926eb92f107389211513c7f39f76ae323e18fb70"
+    },
+    "backend/internal/handler/admin/account_codex_ticket_test.go": {
+      "base_sha256": "84ae97cb9dc80be1e31ac629b6048e24d5ef36b6b69c6dba91883f23109ff2b8",
+      "overlay_sha256": "9dc5c043ba46abe170e746f78680b2346a84216355ec59650d43f9a1e9eafb32"
+    },
+    "backend/internal/handler/admin/account_handler.go": {
+      "base_sha256": "d2a1e568681ce6a3fcd408f0be5d7c48f6dd921264e1b8b2eb04fc6281d2c34a",
+      "overlay_sha256": "1a7535806a6395d9750e2bcce6fc4a42b97b1be1769c076992447dbcb19ab6d7"
+    },
+    "backend/internal/handler/wire.go": {
+      "base_sha256": "db1ac76a975cdd4682cb38b1e400ee428962cfe670fe443fa93e16fb2bdff159",
+      "overlay_sha256": "1cdf392ad1fe5b923840649893779492f27620b65b8b6aed45225d6306a87799"
+    },
+    "backend/internal/server/middleware/audit_log.go": {
+      "base_sha256": "3d481edb59d541604e75fdf44f0346bd6b053c9c08d7dee938296b60655dc9ae",
+      "overlay_sha256": "45972f9c15a23963144009a55c1f0cd4620d23e6932084e65997519e0f0ace63"
+    },
+    "backend/internal/server/middleware/codex_ticket_audit_test.go": {
+      "base_sha256": null,
+      "overlay_sha256": "128d33fd97ef4f3db5cf752d6eab93674e4234311765954c60e6382508e65062"
+    },
+    "backend/internal/server/routes/admin.go": {
+      "base_sha256": "37d5486d04a8e674641c70281e29366fd5e35cd2ecf0bb434d1d15ad70a33039",
+      "overlay_sha256": "d5677fafeaf63a2fac5cc556a282062db7cc56e01f6d041b8eb836e0af2b3b30"
+    },
+    "backend/internal/service/audit_log.go": {
+      "base_sha256": "3ad37413005bf24f6c58f8b247c1ecef6eb71c4236bd2207c62efd8d94db6f36",
+      "overlay_sha256": "fe4610ffaf0217ff5f121cc5d1eb61ce56d588e777ae8e47396f3e07e8925835"
+    },
+    "backend/internal/service/openai_codex_ticket.go": {
+      "base_sha256": "137a96d11e8bb7226a6c760c2929e4c527019887bf68c8b6b4a184490f56bae5",
+      "overlay_sha256": "cf9680ece0cba888f13d0956d4bb6c0db67b43d5d8ec3f2198e0173d0e433e4c"
+    },
+    "backend/internal/service/openai_codex_ticket_account.go": {
+      "base_sha256": null,
+      "overlay_sha256": "5c1768cb8f03dae7eafc7aa0f6b1eda31c8355ac2b2cea4e94f45d45b3fc11b5"
+    },
+    "backend/internal/service/openai_codex_ticket_global_pool_test.go": {
+      "base_sha256": null,
+      "overlay_sha256": "13a9c8d206537235413c494e75a1b3b2b8f20b67dc6a8d30bedc23448c118b2d"
+    },
+    "backend/internal/service/openai_codex_ticket_lifecycle_test.go": {
+      "base_sha256": "c8ba9a58e8dfe1050ba0409e1ab2a5574900995e75cef032fd9b9bd4671df78e",
+      "overlay_sha256": "22afb7423cbfbc2852eab8da7a72088e466ec5f08463d977374f96ee48f0b49e"
+    },
+    "backend/internal/service/openai_codex_ticket_plan_test.go": {
+      "base_sha256": null,
+      "overlay_sha256": "264b563ab61a7592b7bb47336b3a0f6980abfb8915f7058629f3d02f90eb9a1d"
+    },
+    "backend/internal/service/openai_codex_ticket_retention_test.go": {
+      "base_sha256": null,
+      "overlay_sha256": "10b3c8d400312dd8fbf594536b7e635dbf56979f01f069c7ec2062d7bc38f2f5"
+    },
+    "backend/internal/service/openai_codex_ticket_test.go": {
+      "base_sha256": "e8ac51ffb6681d8a7cdec2e2d75152f9dd8bd9916b5df0ac529aae23058e5772",
+      "overlay_sha256": "19ad2c1ccc63b2d9631df9e81ebd44178cc8cd39e2f1efa96a62815f01a94c52"
+    },
+    "backend/internal/service/openai_codex_ticket_transport.go": {
+      "base_sha256": null,
+      "overlay_sha256": "20a2d6648f3dad52a7d6ef0b44e4351fbb014aaf159bc3472468c403b22bfc69"
+    },
+    "backend/internal/service/openai_codex_ticket_transport_test.go": {
+      "base_sha256": null,
+      "overlay_sha256": "ff6d94a5f44f56c2bb833e20ecefc5944ac89345dde1da1f1f5929f75dedd8e1"
+    },
+    "backend/internal/service/openai_codex_ticket_watchdog.go": {
+      "base_sha256": null,
+      "overlay_sha256": "eae20762d58f8aef77db253eb02f1febc02eefde8a548d405b72419f86b9df26"
+    },
+    "backend/internal/service/openai_codex_ticket_watchdog_test.go": {
+      "base_sha256": null,
+      "overlay_sha256": "16482a96a8bf1d511091cd210e6c1d7b1d1b1ba07a2d0991c9c3279c13f53a6a"
+    },
+    "backend/internal/service/openai_gateway_forward.go": {
+      "base_sha256": "ed07b93d05c4ca5047ce316ad30107a59ba35bfcdd933a6f98e17d82909624ff",
+      "overlay_sha256": "1a04998641a59ee52c4fbf2a0a4efc0d71f21a9b17796a52feeba380520b9441"
+    },
+    "backend/internal/service/openai_gateway_messages.go": {
+      "base_sha256": "17ad7ccfcef049b2ae66f081ff1b8b333f06f00f7d06b0ce8f324614e45357c8",
+      "overlay_sha256": "01d684b0c0af5c0a741106e0371aa4011428966f33f187481d9fbd1ea3a16925"
+    },
+    "backend/internal/service/openai_gateway_passthrough.go": {
+      "base_sha256": "9b68c3555070f66bc3dc2f6f45dbfba6b808130accaf46c2e1590f13f80e5c8c",
+      "overlay_sha256": "6b2e159d593f72f97029fb9fe97ff767d6c8efac413e73f7c8f8295d222a7aea"
+    },
+    "backend/internal/service/openai_gateway_service.go": {
+      "base_sha256": "02eb773618b3b1a91ef8cff3236840ae6fe3260671d5ad110f74c940aebc0641",
+      "overlay_sha256": "02988089cd9d2687c84b0936cee4668b1fb7ed74be99081a78ec19dc61c31842"
+    },
+    "backend/internal/service/openai_plugin_transport.go": {
+      "base_sha256": "b0955a1b86682d4dc0736f7e992089dab0034460ef7b781e3408a3bbfa9b079e",
+      "overlay_sha256": "237973a4cc80e63b0bc6fd2e7dec1de5d54413b1b38b25a8880a5951d8db435b"
+    },
+    "backend/internal/service/openai_ws_codex_ticket_test.go": {
+      "base_sha256": null,
+      "overlay_sha256": "fb1590024673ab37084146a856e678a8142322ebed8b1265cf8117ef4fd6d89e"
+    },
+    "backend/internal/service/openai_ws_forwarder_ingress.go": {
+      "base_sha256": "5f62d781a2c3a7f629b8a1d0b84486f25803b1d838ae1f541ee66d8389aa9a04",
+      "overlay_sha256": "31051a27be3a9567ab02fd03db2c0c0cf07223e84a34fb42816efc31f0bd448e"
+    },
+    "backend/internal/service/openai_ws_v2_passthrough_adapter.go": {
+      "base_sha256": "3a3f7a6bf7e368dfa25af4ceb0a5196caf6c2e795642b3e1b04e04618ede93a5",
+      "overlay_sha256": "7ddff104029084136427a0f5a2bf258fae98ef89c0637323d1df2c06c5e269f4"
+    },
+    "backend/internal/service/setting_codex_ticket_test.go": {
+      "base_sha256": "d3c4f3670ff288c38a1901ded9a973d9de0404a99359d6563d9109687649ffe9",
+      "overlay_sha256": "b6a20bb0709e8a5b6ac65e6d5e5dbb68c2f77060ed5f63c805564479f233f733"
+    },
+    "deploy/config.example.yaml": {
+      "base_sha256": "2fd1c809b92da5d764ef7af9ba14ce9ca7894401136d97366ca863fbef8c741a",
+      "overlay_sha256": "d626aa45c0a51677461be36235f88a853d25bc0a84cfc4d27c4d2d8fa6c6ad7f"
+    },
+    "frontend/src/api/admin/codexTickets.ts": {
+      "base_sha256": null,
+      "overlay_sha256": "8d49639c1e01624c31c70dbc0c85c024c6ef8b67e38ab84a4654cdc90ee4f132"
+    },
+    "frontend/src/components/account/AccountUsageCell.vue": {
+      "base_sha256": "db168b09d1917fe9ce63b2e422405c4d8f9bcd784a5a7e98b954a44c103e793c",
+      "overlay_sha256": "0e3fbf073798728ee8ce497090afa977a7bd5f81366034aca18ffe06ee6cd3b2"
+    },
+    "frontend/src/components/account/CodexAccountTicketSettings.vue": {
+      "base_sha256": null,
+      "overlay_sha256": "fbe74470dbc7b6ab58aecf4a2a95acb976ec6c479ec78b98b5e1e441d2286859"
+    },
+    "frontend/src/components/account/EditAccountModal.vue": {
+      "base_sha256": "6169491db19a4338f644826b5de75e42fc892a718ac197bce06eb1d51f96a440",
+      "overlay_sha256": "edde01e8a1b5a75d585d2912b27be5c4284b8f42e534ef289386b6deee011567"
+    },
+    "frontend/src/components/account/__tests__/CodexAccountTicketSettings.spec.ts": {
+      "base_sha256": null,
+      "overlay_sha256": "de009db94752ccd7f96118c24422d895c3c5adf7c6fda9d69b2a6f21feb1e198"
+    },
+    "frontend/src/i18n/locales/en/admin/accounts.ts": {
+      "base_sha256": "0e27441b25d3a8bd7048f7972172c5cb5c81679f30fec88ce70794ea88f62b5e",
+      "overlay_sha256": "a8a6501219486fd18bb60de7a9c4370fd5c9334deb96ffd89112218c54c2a713"
+    },
+    "frontend/src/i18n/locales/en/admin/settings.ts": {
+      "base_sha256": "7e5c3d1f5dd13fdfe10b01b684ffdf5658481b3e8a2193f1baff2602cdf43d68",
+      "overlay_sha256": "3c5b5c490a641517c7af46463759dccbc68be93302efc37e4539ff7a92c25c17"
+    },
+    "frontend/src/i18n/locales/zh/admin/accounts.ts": {
+      "base_sha256": "2d03b3ff311d0d039cd39421aba1b0c048f83dd88d24024ed9d152b18572824d",
+      "overlay_sha256": "ef25a2eedc582ff0889321e81870eb5c87cdbe0788509ef49a386e2ce0d9d084"
+    },
+    "frontend/src/i18n/locales/zh/admin/settings.ts": {
+      "base_sha256": "ece1fc402247e19a23ae8f8f7f72f79b206ac675c7ef598f5824d603d2cbb5fc",
+      "overlay_sha256": "4033e87cf262f8d1b2c5c890ff6cd25cd40a54c7205c7a9e02da1edb7e533858"
+    },
+    "frontend/src/views/admin/SettingsView.vue": {
+      "base_sha256": "af06f6cd0cd8882fe9ac6d1700d0e7118734beb4200467e5fcb965a15b677f06",
+      "overlay_sha256": "63314a9f4617f69697bb3dd104a807817f02733763a4bda53d39299e587c527b"
+    },
+    "frontend/src/views/admin/__tests__/SettingsView.spec.ts": {
+      "base_sha256": "8ca78b9b6dbe0997ed01feb17d50e8124d4d12f4a0a51c146fe59e32464c66c6",
+      "overlay_sha256": "22eaf8c735d737d4d545951e1a8471f2d10110a310c156530355c63d9aaeb97e"
+    }
+  }
+}

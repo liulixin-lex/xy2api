@@ -19,6 +19,11 @@ const Prompt = `在一个黑色的袋子里放有三种口味的糖果，每种�
 只输出一个 JSON 对象，仅含整数 answer，不输出解释或 Markdown。`
 
 type Result struct {
+	StateFingerprint string `json:"-"`
+	StateRevision    string `json:"-"`
+	StateTicketID    string `json:"-"`
+	StateModel       string `json:"-"`
+
 	Diagnostic       *Diagnostic `json:"diagnostic,omitempty"`
 	Status           string      `json:"status"`
 	Answer           string      `json:"answer"`

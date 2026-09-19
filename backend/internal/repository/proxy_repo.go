@@ -255,6 +255,26 @@ func invalidateProxyProbeSnapshots(ctx context.Context, exec sqlExecutor, proxyI
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	_ = rows.Close()
+	// OAuth STATE snapshots also depend on proxy identity. Read IDs without
+	// locking account rows while holding the proxy lock (account -> proxy order).
+	stateRows, e := exec.QueryContext(ctx, `SELECT id FROM accounts WHERE proxy_id=$1 AND platform='openai' AND type<>'apikey' AND deleted_at IS NULL`, proxyID)
+	if e != nil {
+		return nil, e
+	}
+	for stateRows.Next() {
+		var id int64
+		if e = stateRows.Scan(&id); e != nil {
+			_ = stateRows.Close()
+			return nil, e
+		}
+		accountIDs = append(accountIDs, id)
+	}
+	e = stateRows.Err()
+	_ = stateRows.Close()
+	if e != nil {
+		return nil, e
+	}
 	return accountIDs, nil
 }
 
@@ -723,6 +743,24 @@ func (r *proxyRepository) sweepOneExpiredProxy(ctx context.Context, proxyID int6
 
 // sweepOneExpiredProxyOnExec 在给定的 sqlExecutor 上执行：标记 expired + 改投账号。
 func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec sqlExecutor, proxyID int64, target *int64, change bool) ([]int64, error) {
+	if change {
+		locked, err := exec.QueryContext(ctx, `SELECT id FROM accounts WHERE proxy_id=$1 AND platform='openai' AND type<>'apikey' AND deleted_at IS NULL ORDER BY id FOR UPDATE`, proxyID)
+		if err != nil {
+			return nil, err
+		}
+		for locked.Next() {
+			var id int64
+			if err = locked.Scan(&id); err != nil {
+				_ = locked.Close()
+				return nil, err
+			}
+		}
+		err = locked.Err()
+		_ = locked.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
 	if _, err := exec.ExecContext(ctx,
 		`UPDATE proxies SET status=$1, updated_at=NOW() WHERE id=$2 AND deleted_at IS NULL`,
 		service.StatusExpired, proxyID); err != nil {

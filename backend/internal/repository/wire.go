@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"time"
 
 	entsql "entgo.io/ent/dialect/sql"
 	"github.com/google/wire"
@@ -63,6 +65,22 @@ func ProvideSchedulerCache(rdb *redis.Client, cfg *config.Config) service.Schedu
 	return newSchedulerCacheWithChunkSizes(rdb, mgetChunkSize, writeChunkSize)
 }
 
+// ProvideStateReadyAccountRepository finishes the idempotent legacy migration
+// before Wire can construct the gateway and expose any HTTP business routes.
+func ProvideStateReadyAccountRepository(client *ent.Client, db *sql.DB, cache service.SchedulerCache, cfg *config.Config) (service.AccountRepository, error) {
+	repo := newAccountRepositoryWithSQL(client, db, cache)
+	policy := config.OpenAICodexTicketConfig{}
+	if cfg != nil {
+		policy = cfg.Gateway.OpenAICodexTicket
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err := repo.MigrateCodexTicketAccounts(ctx, policy); err != nil {
+		return nil, fmt.Errorf("initialize STATE account migration: %w", err)
+	}
+	return repo, nil
+}
+
 // ProviderSet is the Wire provider set for all repositories
 var ProviderSet = wire.NewSet(
 	NewUserRepository,
@@ -70,7 +88,7 @@ var ProviderSet = wire.NewSet(
 	NewGroupRepository,
 	NewAdminGroupRepository,
 	NewCompositeModelRouteRepository,
-	NewAccountRepository,
+	ProvideStateReadyAccountRepository,
 	NewAdminAccountRepository,
 	NewScheduledTestPlanRepository,   // 定时测试计划仓储
 	NewScheduledTestResultRepository, // 定时测试结果仓储
