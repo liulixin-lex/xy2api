@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -180,11 +181,17 @@ func (s *IQCheckService) run(ctx context.Context) {
 
 func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckClaim) (result iqcheck.Result) {
 	transport := "http"
+	stateProtection := "unmanaged"
+	stateTicketID := ""
+	stateModel := ""
 	started := time.Now()
 	defer func() {
 		if result.Diagnostic == nil {
 			result.Diagnostic = (&iqcheck.Diagnostic{ParserVersion: iqcheck.ParserVersion, Stage: "request", Code: result.Reason, Transport: transport}).Bounded()
 		}
+		result.StateTicketID = stateTicketID
+		result.StateModel = stateModel
+		result.Diagnostic.StateProtection = stateProtection
 		result.Diagnostic.TotalMS = time.Since(started).Milliseconds()
 		if transport == "plugin" {
 			result.Diagnostic.RetryVisibility = "unknown"
@@ -300,12 +307,49 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.tester.doOpenAIAccountTestUpstream(req, proxyURL, account, true)
+	if gateway := s.tester.openaiGatewayService; gateway != nil {
+		outbound := gateway.openAICodexTicketOutboundModel(account, profile.Model, false)
+		// IQ uses the same final outbound model as business routing.
+		if outbound != profile.Model {
+			payloadProfile := profile
+			payloadProfile.Model = outbound
+			encoded, e := json.Marshal(iqcheck.Payload(chat, payloadProfile))
+			if e != nil {
+				return iqcheck.Unknown("request_failed")
+			}
+			req.Body = io.NopCloser(bytes.NewReader(encoded))
+			req.ContentLength = int64(len(encoded))
+			req.GetBody = nil
+		}
+		if codexAccountTicketConfigOf(account).manages(outbound) && gateway.openAICodexTicketEnabledContext(ctx) {
+			stateProtection = "unprotected"
+			stateModel = outbound
+		}
+		if e := gateway.applyOpenAICodexTicketToRequest(ctx, account, outbound, req); e != nil {
+			return iqcheck.Unknown("waiting_state")
+		}
+		if receipt, _ := req.Context().Value(codexTicketReceiptContextKey{}).(*codexTicketReceipt); receipt != nil {
+			stateProtection = "protected"
+			stateModel = receipt.model
+			stateTicketID = receipt.identity()
+		}
+	}
+	var resp *http.Response
+	// STATE-managed probes use the exact business transport. A tester-only TLS
+	// override must not change the transport against which the ticket was verified.
+	if gateway := s.tester.openaiGatewayService; gateway != nil && stateProtection != "unmanaged" {
+		resp, err = gateway.doOpenAIUpstream(req, proxyURL, account)
+	} else {
+		resp, err = s.tester.doOpenAIAccountTestUpstream(req, proxyURL, account, true)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return iqcheck.Unknown("timeout")
 		}
 		return iqcheck.Unknown("request_failed")
+	}
+	if gateway := s.tester.openaiGatewayService; gateway != nil && stateProtection == "unmanaged" {
+		gateway.observeCodexTicketResponse(req, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	headerMS := time.Since(started).Milliseconds()

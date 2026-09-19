@@ -67,6 +67,7 @@ type AccountHandler struct {
 	iqCheckService          *service.IQCheckService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
 	codexTicketSettings     *service.SettingService
+	codexAccountTickets     codexAccountTicketManager
 	cfg                     *config.Config
 }
 

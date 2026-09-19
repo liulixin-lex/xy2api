@@ -732,3 +732,6 @@ func httpCode(status int) string {
 	// No upstream error message/body is retained here.
 	return "http_" + strconv.Itoa(status)
 }
+
+// ValidateResponseEvent rejects ambiguous or damaged protocol JSON without grading.
+func ValidateResponseEvent(raw []byte) error { return validateEvent(raw) }

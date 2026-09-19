@@ -11,6 +11,7 @@ const ParserVersion = "iq-response-v4"
 // Diagnostic never contains response text, reasoning, credentials or raw errors.
 // Fixed field lengths keep its JSON representation below the database's 4 KiB cap.
 type Diagnostic struct {
+	StateProtection     string     `json:"state_protection,omitempty"`
 	DoneMessages        int        `json:"done_messages,omitempty"`
 	TerminalItems       int        `json:"terminal_items,omitempty"`
 	IgnoredItems        int        `json:"ignored_items,omitempty"`
@@ -61,6 +62,9 @@ func (d *Diagnostic) Bounded() *Diagnostic {
 		return nil
 	}
 	v := *d
+	if v.StateProtection != "protected" && v.StateProtection != "unprotected" && v.StateProtection != "unmanaged" {
+		v.StateProtection = ""
+	}
 	v.AnswerSource = safeToken(v.AnswerSource, 32)
 	v.IgnoredTypes = safeToken(v.IgnoredTypes, 128)
 	v.ErrorCode = safeToken(v.ErrorCode, 64)

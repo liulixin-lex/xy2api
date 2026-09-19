@@ -24,7 +24,6 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/platform/liveattestation"
 	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
 	"go.uber.org/zap"
-	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -509,10 +508,16 @@ type OpenAIGatewayService struct {
 	openaiCodexTurnStateOrigins sync.Map
 	openaiCodexTurnStateWrites  atomic.Uint64
 	// openaiCodexTickets: accountID\x00model → *openAICodexTicket，292 长度门票。
+	openaiCodexWatchdogRevoked   sync.Map // account/model -> revocation capture-time watermark
 	openaiCodexTickets           sync.Map
-	openaiCodexTicketFlight      singleflight.Group
+	openaiCodexAccountMu         sync.Mutex
+	openaiCodexTransportMu       sync.RWMutex
+	openaiCodexAccountJobs       map[int64]*codexAccountTicketJob
+	openaiCodexAccountWG         sync.WaitGroup
+	openaiCodexAccountStopping   bool
 	openaiCodexTicketLifecycleMu sync.Mutex
 	openaiCodexTicketCancel      context.CancelFunc
+	openaiCodexTicketContext     context.Context
 	openaiCodexTicketDone        chan struct{}
 	openaiCodexTicketStopped     bool
 }

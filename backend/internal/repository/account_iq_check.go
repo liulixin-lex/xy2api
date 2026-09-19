@@ -324,7 +324,7 @@ func (r *accountRepository) CompleteIQCheck(ctx context.Context, claim service.I
 	if _, err = client.ExecContext(ctx, `UPDATE account_iq_check_attempts SET status=$2,reason=$3,finished_at=$4,latency_ms=$5,diagnostic=NULLIF($6::jsonb,'null'::jsonb) WHERE lease_token=$1 AND finished_at IS NULL`, claim.Token, result.Status, result.Reason, now, now.Sub(claim.StartedAt).Milliseconds(), string(result.Diagnostic.JSON())); err != nil {
 		return err
 	}
-	if !state.Enabled || state.Revision != claim.Revision {
+	if !state.Enabled || state.Revision != claim.Revision || !service.CodexTicketIQResultCurrent(accountEntityToService(m), result, now) {
 		state.LeaseToken = ""
 		state.LeaseUntil = nil
 		state.StartedAt = nil
@@ -395,7 +395,9 @@ func (r *accountRepository) CompleteIQCheck(ctx context.Context, claim service.I
 			}
 		}
 	}
-	if _, err = client.Account.UpdateOneID(m.ID).SetIqCheck(state).Save(ctx); err != nil {
+	updatedAccount := accountEntityToService(m)
+	service.CodexTicketIQResultFinished(updatedAccount, result, now)
+	if _, err = client.Account.UpdateOneID(m.ID).SetIqCheck(state).SetExtra(updatedAccount.Extra).Save(ctx); err != nil {
 		return err
 	}
 	if _, err = client.ExecContext(ctx, `UPDATE account_iq_check_results SET status=$2,answer=$3,reason=$4,finished_at=$5,latency_ms=$6,normalized_answer=$7,answer_format=$8,format_compliant=$9,reported_model=$10,diagnostic=NULLIF($11::jsonb,'null'::jsonb) WHERE lease_token=$1`, roundID, result.Status, result.Answer, result.Reason, iqFinishedAt(retry, now), now.Sub(roundStarted).Milliseconds(), result.NormalizedAnswer, result.AnswerFormat, result.FormatCompliant, result.ReportedModel, string(result.Diagnostic.JSON())); err != nil {

@@ -42,6 +42,9 @@ func (r *settingRepository) GetValue(ctx context.Context, key string) (string, e
 }
 
 func (r *settingRepository) Set(ctx context.Context, key, value string) error {
+	if isCodexTicketGlobalKey(key) {
+		return r.setCodexFenced(ctx, map[string]string{key: value}, "")
+	}
 	now := time.Now()
 	return r.client.Setting.
 		Create().
@@ -70,6 +73,11 @@ func (r *settingRepository) GetMultiple(ctx context.Context, keys []string) (map
 }
 
 func (r *settingRepository) SetMultiple(ctx context.Context, settings map[string]string) error {
+	for key := range settings {
+		if isCodexTicketGlobalKey(key) {
+			return r.setCodexFenced(ctx, settings, "")
+		}
+	}
 	if len(settings) == 0 {
 		return nil
 	}
@@ -100,6 +108,35 @@ func (r *settingRepository) GetAll(ctx context.Context) (map[string]string, erro
 }
 
 func (r *settingRepository) Delete(ctx context.Context, key string) error {
+	if isCodexTicketGlobalKey(key) {
+		return r.setCodexFenced(ctx, nil, key)
+	}
 	_, err := r.client.Setting.Delete().Where(setting.KeyEQ(key)).Exec(ctx)
 	return err
+}
+
+func isCodexTicketGlobalKey(key string) bool {
+	return key == service.SettingKeyOpenAICodexTicketEnabled || key == service.SettingKeyOpenAICodexTicketHarvestProxyURL
+}
+func (r *settingRepository) setCodexFenced(ctx context.Context, values map[string]string, deleteKey string) error {
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	c := tx.Client()
+	if _, err = c.ExecContext(ctx, "SELECT pg_advisory_xact_lock(78421023)"); err != nil {
+		return err
+	}
+	for key, value := range values {
+		if err = c.Setting.Create().SetKey(key).SetValue(value).SetUpdatedAt(time.Now()).OnConflictColumns(setting.FieldKey).UpdateNewValues().Exec(ctx); err != nil {
+			return err
+		}
+	}
+	if deleteKey != "" {
+		if _, err = c.Setting.Delete().Where(setting.KeyEQ(deleteKey)).Exec(ctx); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

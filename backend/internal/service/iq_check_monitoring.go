@@ -121,6 +121,12 @@ func (s *IQCheckService) execute(ctx context.Context, c IQCheckClaim) {
 		deferUnsent(reason, next)
 		return
 	}
+	if s.tester != nil && s.tester.openaiGatewayService != nil {
+		if reason, next := s.tester.openaiGatewayService.codexTicketIQWait(ctx, a); reason != "" {
+			deferUnsent(reason, next)
+			return
+		}
+	}
 	if next, reason := a.IQCheck.Eligibility(now); reason != "" {
 		deferUnsent(reason, next)
 		return
@@ -170,6 +176,8 @@ func (s *IQCheckService) execute(ctx context.Context, c IQCheckClaim) {
 	}
 	if err := s.repo.CompleteIQCheck(ctx, c, result, time.Now().UTC()); err != nil {
 		logger.LegacyPrintf("iq_check", "complete failed: account=%d err=%v", c.AccountID, err)
+	} else if s.tester != nil && s.tester.openaiGatewayService != nil {
+		s.tester.openaiGatewayService.recoverCodexFromIQ(ctx, c, result)
 	}
 }
 

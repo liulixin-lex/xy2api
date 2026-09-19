@@ -4,6 +4,13 @@
 
 ## 当前交接状态
 
+### 292 / STATE 本地融合交接（2026-09-19）
+
+- 已批准基线 `6c12e3f`，社区 `ecf3b9a`；原 `/xy/xy2api` 仍为干净 `9c8abed`。代码在 `/xy/artifacts/codex-state-upgrade/work`，未推送、发布、部署或调用真实账号。
+- 已融合账号独立 Pro/Team、多模型票据、固定业务代理复验、PostgreSQL 条件租约和私有运行状态、完整响应守护、IQ 等票／恢复复检／有限自愈。承接旧全局配置，新账号默认关闭，旧票复验不延长到期。现有 IQ 判分、分组提示词、compact、插件、计费与 Stripe 逻辑保留。
+- 最终后端 7 个受影响包完整 unit、STATE/IQ 定向回归及真实 PostgreSQL/Redis 隔离测试通过；启动前幂等迁移和迁移前后创建账号默认关闭已实测。pnpm 9.15.9 冻结原锁文件后，前端 308 个文件／2319 项回归、ESLint、i18n、类型、生产构建以及嵌入前端的后端构建通过；1280/390 深浅主题的保存、逐模型获取、冷却、轮询和键盘检查通过。全部 7 项 Go 静态检查和 service 的 STATE/IQ/WebSocket race 通过。仓储 race 与四角色三态事务的最终实际结果统一保存在交付目录 VERIFICATION.txt 和 FINAL_RESULT.json，完成标志以该记录为准。
+- 固定交付目录 `/xy/artifacts/codex-state-upgrade/`；维护说明 `docs/CODEX_STATE.md`，来源保存在 `docs/third-party/`。真实测试账号两个续期周期及 24 小时观察仍属上线前步骤。
+
 ### Sub2API v0.2.6 / XY2API 0.1.3 已发布（2026-09-18）
 
 - 用户授权按项目标准完成上游同步和发版。原 `/xy/xy2api` 保持原始工作树；实现与证据位于 `/xy/artifacts/upstream-sync-v0.2.6-xy2api-0.1.3/`。
@@ -154,6 +161,7 @@
 Sub2API 兼容基线已更新到 `v0.2.6`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
 
 
 
@@ -782,3 +790,13 @@ pnpm --dir frontend run build
 - RC 已覆盖 XY2API0.1.2升级及旧镜像回滚、官方Sub2API0.2.5数据库升级，持久化标记均保持。本地2303项前端、lint/types/build、后端定向与真实PG/Redis集成、票据生命周期race、Wire零差异和服务构建通过。
 - 首轮5处导入排序、工具版本/包装器目录及新装端口冲突均已修复并保留失败记录。RC稳定别名保持旧版，正式版才更新。无新增SQL，297条历史checksum完全保持。
 - 固定四角色重新封存最终源码，BASELINE/ROLLBACK为0.1.2/0.2.5，MODIFIED为0.1.3/0.2.6；exit0、恢复hash和补丁重建一致。清理结果及最终路径哈希见 `/xy/artifacts/upstream-sync-v0.2.6-xy2api-0.1.3/FINAL_RESULT.json`。原主工作区未改写，无生产或真实账号操作。
+
+
+### 2026-09-19：292 / STATE 社区扩展本地融合
+
+- 任务：`20260919-codex-state-upgrade`；用户批准按 `6c12e3f` 融合社区 `ecf3b9a`，在独立副本实现并验证，不推送、部署或调用真实账号。
+- 实现：账号独立 Pro/Team 与多模型管理、双阶段完整响应复验、数据库条件租约和共享冷却、精确票据守护、WebSocket 逐轮桥接、IQ 等待／恢复复检／有限自愈、脱敏 API 和原账号弹窗集成。新增账号显式关闭，服务启动前完成旧全局范围幂等迁移，迁移失败不开放业务路由。
+- 保留：IQ 判分与题目配置、分组提示词、模型映射和 compact、插件传输、计费及支付；不修改历史 SQL 迁移、模块依赖或前端锁文件。来源、适配说明见 `docs/third-party/` 和 `docs/CODEX_STATE.md`。
+- 已实测：7 个受影响后端包完整 unit、STATE/IQ 定向回归、真实 PostgreSQL/Redis 集成、全部 7 个 Go 静态检查、service race；冻结原锁文件的前端 2319 项测试、lint、i18n、类型、生产构建和嵌入前端后端构建。1280/390 深浅主题表单、键盘、轮询及冷却通过；upstream sync audit 通过。
+- 交付：`/xy/artifacts/codex-state-upgrade/work`，四角色为同目录的 `MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`。源码哈希及同输入 BASELINE/MODIFIED/ROLLBACK、仓储 race、补丁重建和回滚复原结果以 `FINAL_RESULT.json` 和字面命令日志为准；早期失败与资源中断没有删除或计为成功。
+- 上线前独立步骤：测试账号至少两个续期周期与 24 小时观察。源码回滚不回退数据库；先停止新工作者、关闭 STATE 总开关，按维护文档处理程序和配置回退。

@@ -1036,6 +1036,9 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"grok_billing_snapshot",
 	}
 	filtered := make(map[string]any)
+	if cfg := service.OpenAICodexTicketSchedulingConfig(extra); cfg != nil {
+		filtered["codex_ticket_config"] = cfg
+	}
 	for _, key := range keys {
 		if value, ok := extra[key]; ok && value != nil {
 			if key == service.UpstreamBillingProbeExtraKey {

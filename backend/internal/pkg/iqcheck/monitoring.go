@@ -120,7 +120,7 @@ func NotSent(r Result) bool {
 		return false
 	}
 	switch r.Reason {
-	case "transport_unavailable", "account_unavailable", "unsupported_model", "authentication_unavailable", "invalid_endpoint", "unsupported_account_type", "cancelled_by_account_change":
+	case "waiting_state", "transport_unavailable", "account_unavailable", "unsupported_model", "authentication_unavailable", "invalid_endpoint", "unsupported_account_type", "cancelled_by_account_change":
 		return true
 	}
 	return false
