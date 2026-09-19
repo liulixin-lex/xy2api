@@ -22,12 +22,15 @@ func (r codexTicketReceipt) identity() string {
 
 // CodexTicketIQResultCurrent runs under the account row lock on IQ completion.
 func CodexTicketIQResultCurrent(a *Account, result iqcheck.Result, now time.Time) bool {
+	if result.StateFingerprint != "" && (a == nil || result.StateFingerprint != codexTicketFixedProxyFingerprint(a) || result.StateRevision != codexAccountTicketConfigOf(a).Revision) {
+		return false
+	}
 	if result.StateTicketID == "" {
 		return true
 	}
 	ac := codexAccountTicketConfigOf(a)
 	t := parseOpenAICodexTicketFromAny(a.ID, result.StateModel, a.Extra[openAICodexTicketExtraKey(result.StateModel)])
-	return ac.manages(result.StateModel) && t != nil && t.ConfigRevision == ac.Revision && t.ExpiresAt.After(now) && codexTicketIdentity(t) == result.StateTicketID
+	return ac.manages(result.StateModel) && t.validFor(a, ac, now) && codexTicketIdentity(t) == result.StateTicketID
 }
 func CodexTicketProbeLeaseUntil(a *Account, now time.Time) *time.Time {
 	for _, rt := range codexTicketRuntimes(a) {
@@ -65,7 +68,7 @@ func (s *OpenAIGatewayService) recoverCodexFromIQ(ctx context.Context, c IQCheck
 		return
 	}
 	a, e := s.codexTicketAccountByID(ctx, c.AccountID)
-	if e != nil || a.IQCheck.Revision != c.Revision {
+	if e != nil || a.IQCheck.Revision != c.Revision || !CodexTicketIQResultCurrent(a, result, time.Now()) {
 		return
 	}
 	if result.StateTicketID == "" {
@@ -73,7 +76,7 @@ func (s *OpenAIGatewayService) recoverCodexFromIQ(ctx context.Context, c IQCheck
 			return
 		}
 		_, e = s.mutateCodexTicket(ctx, a.ID, 0, func(live *Account, _ int, now time.Time) (bool, error) {
-			if live.IQCheck.Revision != c.Revision || !codexAccountTicketConfigOf(live).manages(result.StateModel) {
+			if live.IQCheck.Revision != c.Revision || !CodexTicketIQResultCurrent(live, result, now) || !codexAccountTicketConfigOf(live).manages(result.StateModel) {
 				return false, nil
 			}
 			rt := codexTicketRuntimes(live)[result.StateModel]

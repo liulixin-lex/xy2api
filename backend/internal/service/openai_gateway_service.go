@@ -511,10 +511,15 @@ type OpenAIGatewayService struct {
 	openaiCodexWatchdogRevoked   sync.Map // account/model -> revocation capture-time watermark
 	openaiCodexTickets           sync.Map
 	openaiCodexAccountMu         sync.Mutex
+	openaiCodexObservationMu     sync.Mutex
+	openaiCodexObservations      map[string]CodexTicketObservation
 	openaiCodexTransportMu       sync.RWMutex
 	openaiCodexAccountJobs       map[int64]*codexAccountTicketJob
 	openaiCodexAccountWG         sync.WaitGroup
 	openaiCodexAccountStopping   bool
+	openaiCodexScanMu            sync.Mutex
+	openaiCodexScanCursor        int64
+	openaiCodexMigrated          atomic.Bool
 	openaiCodexTicketLifecycleMu sync.Mutex
 	openaiCodexTicketCancel      context.CancelFunc
 	openaiCodexTicketContext     context.Context

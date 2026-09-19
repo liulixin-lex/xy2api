@@ -88,7 +88,7 @@ func TestCodexTicketWSHTTPBridgeRechecksEveryTurn(t *testing.T) {
 				next := *ticket
 				next.CapturedAt = next.CapturedAt.Add(time.Millisecond)
 				next.ExpiresAt = next.CapturedAt.Add(time.Hour)
-				next.State = openAICodexTicketStatePrefix + strings.Repeat("C", next.Length-len(openAICodexTicketStatePrefix))
+				next.State = fakeCodexTicketStateAt(next.Length, fixtureTicketTime.Add(-time.Second))
 				if change == "expire" {
 					next.CapturedAt = time.Now().Add(-2 * time.Hour)
 					next.ExpiresAt = time.Now().Add(-time.Hour)

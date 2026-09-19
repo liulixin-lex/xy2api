@@ -184,6 +184,8 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 	stateProtection := "unmanaged"
 	stateTicketID := ""
 	stateModel := ""
+	stateFingerprint := ""
+	stateRevision := ""
 	started := time.Now()
 	defer func() {
 		if result.Diagnostic == nil {
@@ -191,6 +193,8 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 		}
 		result.StateTicketID = stateTicketID
 		result.StateModel = stateModel
+		result.StateFingerprint = stateFingerprint
+		result.StateRevision = stateRevision
 		result.Diagnostic.StateProtection = stateProtection
 		result.Diagnostic.TotalMS = time.Since(started).Milliseconds()
 		if transport == "plugin" {
@@ -324,6 +328,8 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 		if codexAccountTicketConfigOf(account).manages(outbound) && gateway.openAICodexTicketEnabledContext(ctx) {
 			stateProtection = "unprotected"
 			stateModel = outbound
+			stateFingerprint = codexTicketFixedProxyFingerprint(account)
+			stateRevision = codexAccountTicketConfigOf(account).Revision
 		}
 		if e := gateway.applyOpenAICodexTicketToRequest(ctx, account, outbound, req); e != nil {
 			return iqcheck.Unknown("waiting_state")

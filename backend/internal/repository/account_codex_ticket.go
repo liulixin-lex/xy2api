@@ -14,6 +14,22 @@ import (
 // MutateCodexTicket serializes STATE transitions with ordinary account edits.
 // The callback performs no I/O; network requests run after the transaction commits.
 func (r *accountRepository) MutateCodexTicket(ctx context.Context, id int64, limit int, fn service.CodexTicketMutation) (*service.Account, error) {
+	accounts, err := r.MutateCodexTicketBatch(ctx, []int64{id}, limit, fn)
+	if err != nil {
+		return nil, err
+	}
+	if len(accounts) == 0 {
+		return nil, service.ErrAccountNotFound
+	}
+	return accounts[0], nil
+}
+
+// Batch admission holds the cluster lock once and counts leases once. Callbacks
+// only acquire leases when limit > 0; lifecycle mutations use limit == 0.
+func (r *accountRepository) MutateCodexTicketBatch(ctx context.Context, ids []int64, limit int, fn service.CodexTicketMutation) ([]*service.Account, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
 	tx, err := r.client.Tx(ctx)
 	if err != nil {
 		return nil, err
@@ -59,25 +75,6 @@ func (r *accountRepository) MutateCodexTicket(ctx context.Context, id int64, lim
 			return nil, err
 		}
 	}
-	m, err := c.Account.Query().Where(dbaccount.IDEQ(id)).ForUpdate().Only(ctx)
-	if err != nil {
-		return nil, translatePersistenceError(err, service.ErrAccountNotFound, nil)
-	}
-	a := accountEntityToService(m)
-	if a.ProxyID != nil {
-		p, e := c.Proxy.Get(ctx, *a.ProxyID)
-		if e != nil {
-			return nil, e
-		}
-		a.Proxy = proxyEntityToService(p)
-		matched, e := lockAndMatchProbeProxyIdentity(ctx, c, a)
-		if e != nil {
-			return nil, e
-		}
-		if !matched {
-			return nil, service.ErrCodexTicketConflict
-		}
-	}
 	active := 0
 	// Lease decisions use the database clock, shared by every gateway instance.
 	clockRows, err := c.QueryContext(ctx, "SELECT clock_timestamp()")
@@ -118,25 +115,64 @@ func (r *accountRepository) MutateCodexTicket(ctx context.Context, id int64, lim
 			return nil, err
 		}
 	}
-	changed, err := fn(a, active, now)
-	if err != nil {
-		return nil, err
-	}
-	if changed {
-		if _, err = c.Account.UpdateOneID(id).SetExtra(a.Extra).SetIqCheck(a.IQCheck).Save(ctx); err != nil {
+	accounts := make([]*service.Account, 0, len(ids))
+	var changedIDs []int64
+	for _, id := range sortedUniqueAccountIDs(append([]int64(nil), ids...)) {
+		if len(ids) > 1 && limit > 0 && active >= limit {
+			break
+		}
+		m, err := c.Account.Query().Where(dbaccount.IDEQ(id)).ForUpdate().Only(ctx)
+		if err != nil {
+			return nil, translatePersistenceError(err, service.ErrAccountNotFound, nil)
+		}
+		a := accountEntityToService(m)
+		if a.ProxyID != nil {
+			p, e := c.Proxy.Get(ctx, *a.ProxyID)
+			if e != nil {
+				return nil, e
+			}
+			a.Proxy = proxyEntityToService(p)
+			matched, e := lockAndMatchProbeProxyIdentity(ctx, c, a)
+			if e != nil {
+				return nil, e
+			}
+			if !matched {
+				return nil, service.ErrCodexTicketConflict
+			}
+		}
+		changed, err := fn(a, active, now)
+		if err != nil {
 			return nil, err
 		}
-		if err = enqueueSchedulerOutbox(ctx, c, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-			return nil, err
+		if changed {
+			changedIDs = append(changedIDs, id)
+			if limit > 0 {
+				active++
+			}
+			update := c.Account.UpdateOneID(id).SetExtra(a.Extra)
+			if !service.CodexTicketDiagnosticsOnly(ctx) {
+				update.SetIqCheck(a.IQCheck)
+			}
+			if _, err = update.Save(ctx); err != nil {
+				return nil, err
+			}
+			if !service.CodexTicketDiagnosticsOnly(ctx) {
+				if err = enqueueSchedulerOutbox(ctx, c, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+					return nil, err
+				}
+			}
 		}
+		accounts = append(accounts, a)
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
-	if changed {
-		r.syncSchedulerAccountSnapshot(ctx, id)
+	for _, id := range changedIDs {
+		if !service.CodexTicketDiagnosticsOnly(ctx) {
+			r.syncSchedulerAccountSnapshot(ctx, id)
+		}
 	}
-	return a, nil
+	return accounts, nil
 }
 
 func (r *accountRepository) MigrateCodexTicketAccounts(ctx context.Context, cfg config.OpenAICodexTicketConfig) error {
@@ -149,7 +185,7 @@ func (r *accountRepository) MigrateCodexTicketAccounts(ctx context.Context, cfg 
 	if _, err = c.ExecContext(ctx, "SELECT pg_advisory_xact_lock(78421022)"); err != nil {
 		return err
 	}
-	rows, err := c.QueryContext(ctx, `SELECT value FROM settings WHERE key='codex_ticket_account_migration_v1'`)
+	rows, err := c.QueryContext(ctx, `SELECT value FROM settings WHERE key='codex_ticket_envelope_migration_v2'`)
 	if err != nil {
 		return err
 	}
@@ -161,6 +197,16 @@ func (r *accountRepository) MigrateCodexTicketAccounts(ctx context.Context, cfg 
 	}
 	if done {
 		return tx.Commit()
+	}
+	rows, err = c.QueryContext(ctx, `SELECT value FROM settings WHERE key='codex_ticket_account_migration_v1'`)
+	if err != nil {
+		return err
+	}
+	scopeMigrated := rows.Next()
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return err
 	}
 	rows, err = c.QueryContext(ctx, `SELECT value FROM settings WHERE key=$1 FOR SHARE`, service.SettingKeyOpenAICodexTicketEnabled)
 	if err != nil {
@@ -185,7 +231,11 @@ func (r *accountRepository) MigrateCodexTicketAccounts(ctx context.Context, cfg 
 	}
 	for _, m := range accounts {
 		a := accountEntityToService(m)
-		if service.CodexTicketMigrationExtra(a, cfg) {
+		scopeChanged := false
+		if !scopeMigrated {
+			scopeChanged = service.CodexTicketMigrationExtra(a, cfg)
+		}
+		if service.NormalizeCodexTicketAccountTimes(a, cfg.TTLSeconds) || scopeChanged {
 			if _, err = c.Account.UpdateOneID(m.ID).SetExtra(a.Extra).Save(ctx); err != nil {
 				return err
 			}
@@ -194,7 +244,7 @@ func (r *accountRepository) MigrateCodexTicketAccounts(ctx context.Context, cfg 
 			}
 		}
 	}
-	if _, err = c.ExecContext(ctx, `INSERT INTO settings(key,value,updated_at) VALUES ('codex_ticket_account_migration_v1','1',now())`); err != nil {
+	if _, err = c.ExecContext(ctx, `INSERT INTO settings(key,value,updated_at) VALUES ('codex_ticket_account_migration_v1','1',now()), ('codex_ticket_envelope_migration_v2','1',now()) ON CONFLICT(key) DO NOTHING`); err != nil {
 		return err
 	}
 	return tx.Commit()

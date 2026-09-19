@@ -91,10 +91,10 @@ func TestCodexTicketRepositoryCrossInstanceLeaseAndRollback(t *testing.T) {
 func TestCodexTicketRepositoryLegacyScopeMigration(t *testing.T) {
 	ctx := context.Background()
 	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
-	_, e := integrationDB.Exec(`DELETE FROM settings WHERE key IN ('codex_ticket_account_migration_v1',$1)`, service.SettingKeyOpenAICodexTicketEnabled)
+	_, e := integrationDB.Exec(`DELETE FROM settings WHERE key IN ('codex_ticket_account_migration_v1','codex_ticket_envelope_migration_v2',$1)`, service.SettingKeyOpenAICodexTicketEnabled)
 	require.NoError(t, e)
 	t.Cleanup(func() {
-		_, _ = integrationDB.Exec(`DELETE FROM settings WHERE key='codex_ticket_account_migration_v1'`)
+		_, _ = integrationDB.Exec(`DELETE FROM settings WHERE key IN ('codex_ticket_account_migration_v1','codex_ticket_envelope_migration_v2')`)
 	})
 	create := func(name string) *service.Account {
 		a := &service.Account{Name: name, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "fixture"}}

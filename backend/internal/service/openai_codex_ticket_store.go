@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,6 +32,18 @@ type CodexTicketEvent struct {
 	Reason string    `json:"reason"`
 }
 type codexTicketRuntime struct {
+	LastBusinessAt      *time.Time `json:"last_business_at,omitempty"`
+	LastBusinessResult  string     `json:"last_business_result,omitempty"`
+	BusinessChecked     int64      `json:"business_checked"`
+	BusinessUnconfirmed int64      `json:"business_unconfirmed"`
+
+	LastStage      string     `json:"last_stage,omitempty"`
+	LastCode       string     `json:"last_code,omitempty"`
+	LastReason     string     `json:"last_reason,omitempty"`
+	LastHTTPStatus int        `json:"last_http_status,omitempty"`
+	ObservedLength int        `json:"observed_length,omitempty"`
+	LastReplayAt   *time.Time `json:"last_replay_at,omitempty"`
+
 	AccountRetryAfter *time.Time         `json:"account_retry_after,omitempty"`
 	RoundsStarted     int64              `json:"rounds_started"`
 	RoundsSucceeded   int64              `json:"rounds_succeeded"`
@@ -117,12 +130,31 @@ func codexTicketRecoveryHistory(rt *codexTicketRuntime, now time.Time) {
 	rt.Recoveries = recent
 }
 
-type codexTicketProbeError struct{ retryAt time.Time }
+type codexTicketProbeError struct {
+	retryAt       time.Time
+	reason, code  string
+	stop, account bool
+}
 
 func (e *codexTicketProbeError) Error() string { return "upstream request was rejected" }
 func codexTicketRetryAfter(raw string, now time.Time) time.Time {
-	if seconds, e := strconv.ParseInt(raw, 10, 32); e == nil && seconds > 0 {
-		return now.Add(time.Duration(seconds) * time.Second)
+	raw = strings.TrimSpace(raw)
+	digits := raw != ""
+	for _, c := range raw {
+		if c < '0' || c > '9' {
+			digits = false
+			break
+		}
+	}
+	if digits {
+		// Persist a representable far-future deadline rather than retry early
+		// when an upstream sends a value that overflows Go's duration type.
+		maximum := time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
+		seconds, e := strconv.ParseUint(raw, 10, 64)
+		if e != nil || seconds >= uint64(maximum.Unix()-now.Unix()) {
+			return maximum
+		}
+		return time.Unix(now.Unix()+int64(seconds), int64(now.Nanosecond())).UTC()
 	}
 	if t, e := http.ParseTime(raw); e == nil && t.After(now) {
 		return t
@@ -176,9 +208,16 @@ func (s *OpenAIGatewayService) migrateCodexTicketAccounts(ctx context.Context) e
 	if !ok {
 		return nil
 	}
+	if s.openaiCodexMigrated.Load() {
+		return nil
+	}
 	cfg := s.openAICodexTicketConfig()
 	cfg.Enabled = s.openAICodexTicketEnabledContext(ctx)
-	return repo.MigrateCodexTicketAccounts(ctx, cfg)
+	err := repo.MigrateCodexTicketAccounts(ctx, cfg)
+	if err == nil {
+		s.openaiCodexMigrated.Store(true)
+	}
+	return err
 }
 
 type CodexTicketFence struct {

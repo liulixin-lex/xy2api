@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -77,15 +76,19 @@ func (s *OpenAIGatewayService) applyOpenAICodexTicketToRequest(ctx context.Conte
 }
 
 func (s *OpenAIGatewayService) observeCodexTicketResponse(req *http.Request, resp *http.Response) {
-	if req == nil || resp == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 || resp.Body == nil {
+	if req == nil || resp == nil || resp.Body == nil {
 		return
 	}
 	receipt, _ := req.Context().Value(codexTicketReceiptContextKey{}).(*codexTicketReceipt)
 	if receipt == nil {
 		return
 	}
-	state := strings.TrimSpace(resp.Header.Get(openAICodexTurnStateHeader))
-	resp.Body = &codexTicketWatchdogBody{ReadCloser: resp.Body, ctx: req.Context(), model: receipt.model, encoding: resp.Header.Get("Content-Encoding"), state312: len(state) == 312 && validCodexTicketState(state), trigger: func(reason string) { s.invalidateCodexTicketFromResponse(*receipt, reason) }}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		s.recordCodexTicketObservation(*receipt, "upstream_failed")
+		return
+	}
+	state, _ := uniqueCodexTicketHeader(resp.Header)
+	resp.Body = &codexTicketWatchdogBody{ReadCloser: resp.Body, ctx: req.Context(), model: receipt.model, encoding: resp.Header.Get("Content-Encoding"), state312: len(state) == 312 && validCodexTicketState(state), observe: func(result string) { s.recordCodexTicketObservation(*receipt, result) }, trigger: func(reason string) { s.invalidateCodexTicketFromResponse(*receipt, reason) }}
 }
 func (s *OpenAIGatewayService) invalidateCodexTicketFromResponse(receipt codexTicketReceipt, reason string) {
 	if reason != "model_mismatch" && reason != "state_312" && reason != "iq_degraded" {
@@ -110,8 +113,16 @@ func (s *OpenAIGatewayService) invalidateCodexTicketFromResponse(receipt codexTi
 			}
 			rt.IQRecoveryAt = &now
 		}
-		delete(a.Extra, openAICodexTicketExtraKey(receipt.model))
+		// Keep the original time bound if the pool returns the revoked value again.
+		// It is never injectable or a legacy replay candidate while revoked.
+		current.Verified, current.Revoked = false, true
+		a.Extra[openAICodexTicketExtraKey(receipt.model)] = current
 		rt.TriggerCount++
+		if reason != "iq_degraded" {
+			rt.LastBusinessAt = &now
+			rt.LastBusinessResult = reason
+			rt.BusinessChecked++
+		}
 		rt.Requested = true
 		rt.event(now, reason)
 		codexTicketRecoveryHistory(&rt, now)
@@ -149,6 +160,7 @@ type codexTicketWatchdogBody struct {
 	encoding string
 	state312 bool
 	trigger  func(string)
+	observe  func(string)
 	buffer   []byte
 	overflow bool
 	mu       sync.Mutex
@@ -161,6 +173,7 @@ func (b *codexTicketWatchdogBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
 	b.mu.Lock()
 	reason := ""
+	outcome := ""
 	if !b.finished {
 		if !b.overflow && len(b.buffer)+n <= codexTicketWatchdogBufferLimit {
 			b.buffer = append(b.buffer, p[:n]...)
@@ -170,9 +183,17 @@ func (b *codexTicketWatchdogBody) Read(p []byte) (int, error) {
 		}
 		if err != nil {
 			b.finished = true
+			outcome = "unconfirmed"
+			if b.overflow {
+				outcome = "oversized"
+			}
 			if err == io.EOF && !b.overflow {
 				actual, e := codexTicketResponseModel(bytes.NewReader(b.buffer), b.encoding)
+				if e != nil && e.Error() == "unsupported content encoding" {
+					outcome = "unsupported_encoding"
+				}
 				if e == nil {
+					outcome = "verified"
 					if actual != b.model {
 						reason = "model_mismatch"
 					} else if b.state312 {
@@ -185,6 +206,12 @@ func (b *codexTicketWatchdogBody) Read(p []byte) (int, error) {
 	}
 	b.mu.Unlock()
 	if reason != "" {
+		outcome = reason
+	}
+	if outcome != "" && b.observe != nil {
+		b.observe(outcome)
+	}
+	if reason != "" {
 		b.trigger(reason)
 	}
 	return n, err
@@ -194,6 +221,8 @@ func (b *codexTicketWatchdogBody) Close() error {
 	// their remaining HTTP body for at most 250 ms, without forwarding or replaying
 	// bytes. A transport error, timeout, overflow or conflicting terminal is ignored.
 	b.mu.Lock()
+	alreadyFinished := b.finished
+	wasOverflow := b.overflow
 	drain := !b.finished && !b.overflow && b.reading.Load() == 0
 	captured := append([]byte(nil), b.buffer...)
 	if b.ctx != nil && b.ctx.Err() != nil {
@@ -206,6 +235,10 @@ func (b *codexTicketWatchdogBody) Close() error {
 	b.buffer = nil
 	b.mu.Unlock()
 	reason := ""
+	result := "unconfirmed"
+	if wasOverflow {
+		result = "oversized"
+	}
 	if drain {
 		type outcome struct {
 			data []byte
@@ -222,6 +255,7 @@ func (b *codexTicketWatchdogBody) Close() error {
 			if out.err == nil && len(captured)+len(out.data) <= codexTicketWatchdogBufferLimit {
 				actual, e := codexTicketResponseModel(bytes.NewReader(append(captured, out.data...)), b.encoding)
 				if e == nil {
+					result = "verified"
 					if actual != b.model {
 						reason = "model_mismatch"
 					} else if b.state312 {
@@ -234,6 +268,12 @@ func (b *codexTicketWatchdogBody) Close() error {
 		timer.Stop()
 	}
 	err := b.ReadCloser.Close()
+	if reason != "" {
+		result = reason
+	}
+	if !alreadyFinished && b.observe != nil {
+		b.observe(result)
+	}
 	if reason != "" {
 		b.trigger(reason)
 	}

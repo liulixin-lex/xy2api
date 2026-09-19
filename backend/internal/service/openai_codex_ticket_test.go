@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"maps"
@@ -16,8 +18,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func fakeCodexTicketState(n int) string {
-	return openAICodexTicketStatePrefix + strings.Repeat("B", n-len(openAICodexTicketStatePrefix))
+var fixtureTicketTime = time.Now().UTC().Truncate(time.Second)
+
+func fakeCodexTicketState(n int) string { return fakeCodexTicketStateAt(n, fixtureTicketTime) }
+func fakeCodexTicketStateAt(n int, issued time.Time) string {
+	blocks := map[int]int{292: 10, 312: 11, 332: 12, 356: 13}[n]
+	if blocks == 0 {
+		return strings.Repeat("B", n)
+	}
+	raw := make([]byte, 57+blocks*16)
+	raw[0] = 0x80
+	binary.BigEndian.PutUint64(raw[1:9], uint64(issued.Unix()))
+	return base64.URLEncoding.EncodeToString(raw)
 }
 func ticketTestAccount(id int64) *Account {
 	proxyID := int64(7)
@@ -176,7 +188,8 @@ func TestCodexAccountTicketLiveConfigOverridesStaleScheduler(t *testing.T) {
 	live.Extra = map[string]any{}
 	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, nil)
 	svc.accountRepo = &codexTicketRefreshRepo{accounts: []Account{live}}
-	require.False(t, svc.openAICodexTicketBlocksAccount(stale, openAICodexTicketDefaultModel))
+	// Candidate admission uses the snapshot; final injection independently reads live config.
+	require.True(t, svc.openAICodexTicketBlocksAccount(stale, openAICodexTicketDefaultModel))
 	require.NoError(t, svc.applyOpenAICodexTicket(context.Background(), stale, openAICodexTicketDefaultModel, http.Header{}))
 }
 func TestCodexAccountTicketPrivateConfigPreservationAndRedaction(t *testing.T) {

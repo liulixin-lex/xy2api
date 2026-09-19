@@ -324,7 +324,29 @@ func (r *accountRepository) CompleteIQCheck(ctx context.Context, claim service.I
 	if _, err = client.ExecContext(ctx, `UPDATE account_iq_check_attempts SET status=$2,reason=$3,finished_at=$4,latency_ms=$5,diagnostic=NULLIF($6::jsonb,'null'::jsonb) WHERE lease_token=$1 AND finished_at IS NULL`, claim.Token, result.Status, result.Reason, now, now.Sub(claim.StartedAt).Milliseconds(), string(result.Diagnostic.JSON())); err != nil {
 		return err
 	}
-	if !state.Enabled || state.Revision != claim.Revision || !service.CodexTicketIQResultCurrent(accountEntityToService(m), result, now) {
+	currentAccount := accountEntityToService(m)
+	if (result.StateTicketID != "" || result.StateFingerprint != "") && currentAccount.ProxyID != nil {
+		p, e := client.Proxy.Get(ctx, *currentAccount.ProxyID)
+		if e != nil {
+			return e
+		}
+		currentAccount.Proxy = proxyEntityToService(p)
+		matched, e := lockAndMatchProbeProxyIdentity(ctx, client, currentAccount)
+		if e != nil {
+			return e
+		}
+		if !matched {
+			// The proxy changed between the first read and acquiring FOR SHARE.
+			// Read again under that lock so this completion takes the cancellation
+			// path immediately instead of leaving the IQ lease until expiration.
+			p, e = client.Proxy.Get(ctx, *currentAccount.ProxyID)
+			if e != nil {
+				return e
+			}
+			currentAccount.Proxy = proxyEntityToService(p)
+		}
+	}
+	if !state.Enabled || state.Revision != claim.Revision || !service.CodexTicketIQResultCurrent(currentAccount, result, now) {
 		state.LeaseToken = ""
 		state.LeaseUntil = nil
 		state.StartedAt = nil

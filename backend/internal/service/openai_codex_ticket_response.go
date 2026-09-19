@@ -86,8 +86,8 @@ func codexTicketResponseModel(body io.Reader, encoding string) (string, error) {
 		if typ == "" {
 			typ = event
 		}
-		if typ == "error" || typ == "response.failed" || typ == "response.incomplete" {
-			return errors.New("failed response")
+		if typ == "error" || typ == "response.failed" || typ == "response.incomplete" || (root.Get("error").Exists() && root.Get("error").Type != gjson.Null) {
+			return classifyCodexTicketResponseFailure(root)
 		}
 		response := root
 		if typ == "response.completed" || typ == "response.done" {
@@ -96,9 +96,12 @@ func codexTicketResponseModel(body io.Reader, encoding string) (string, error) {
 			return nil
 		}
 		if response.Get("error").Exists() && response.Get("error").Type != gjson.Null {
-			return errors.New("failed response")
+			return classifyCodexTicketResponseFailure(root)
 		}
 		status := response.Get("status").String()
+		if status == "failed" || status == "incomplete" {
+			return classifyCodexTicketResponseFailure(root)
+		}
 		if status != "completed" && (typ != "response.completed" || status != "") {
 			return errors.New("incomplete response")
 		}
@@ -168,4 +171,31 @@ func validateCodexTicketCompletedModel(body io.Reader, model string) error {
 		return errors.New("returned model differs from requested model")
 	}
 	return nil
+}
+
+// Codes are allowlisted; upstream messages and unknown codes never reach diagnostics.
+type codexTicketResponseFailure struct {
+	reason, code string
+	account      bool
+}
+
+func (e *codexTicketResponseFailure) Error() string { return e.reason }
+func classifyCodexTicketResponseFailure(root gjson.Result) error {
+	code := root.Get("response.error.code").String()
+	if code == "" {
+		code = root.Get("error.code").String()
+	}
+	if code == "" {
+		code = root.Get("code").String()
+	}
+	f := &codexTicketResponseFailure{reason: "response_failed"}
+	switch code {
+	case "rate_limit_exceeded", "insufficient_quota", "usage_limit_reached":
+		f.reason, f.code, f.account = "rate_limited", code, true
+	case "invalid_api_key", "authentication_error", "permission_denied", "account_deactivated":
+		f.reason, f.code, f.account = "auth_rejected", code, true
+	case "server_is_overloaded", "slow_down":
+		f.reason, f.code = "model_capacity", code
+	}
+	return f
 }
