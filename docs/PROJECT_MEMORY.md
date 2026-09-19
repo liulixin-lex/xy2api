@@ -4,6 +4,17 @@
 
 ## 当前交接状态
 
+### STATE 二次优化本地交接（2026-09-19）
+
+- 同一 `feat/codex-state-upgrade` 副本已提交一期 `2a743f0afcf205e1f440d3f15a8655b412b38af9`、二期后端 `322b61486`、前端 `49f0bd098`。原 `/xy/xy2api` 保持干净 `9c8abed`；未推送、发布、部署或调用真实账号。
+- 二期修复内嵌时间／同票不续命、重复 STATE 头、HTTP 200 内的 JSON/SSE 限流与配额错误、固定代理原地编辑后的 IQ 迟到结果。撤销保留不可用私有票据及原期限，重启后取得相同值仍不延长原截止时间。保留合法唯一 312 信号立即撤销策略。
+- 扫描改为每页 100 条元数据、批量领取；调度用不含 STATE 的摘要，注入仍查权威记录。诊断增加阶段、白名单原因、期限和业务核验，普通统计约每 30 秒合并写入。
+- 界面按用户要求精简：套餐与缺票策略并排；每模型直接显示票据、业务模型和 IQ，时间与统计收进详情。与账号模块分隔线、字号和表单协调；保护草稿、键盘焦点与最后数据，隐藏／关闭停止轮询。
+- 最终 7 个受影响后端包 unit、真实 PostgreSQL 18.1／Redis 8.4 集成、service 与 repository race、7 项 Go 静态检查通过。前端全量 308 文件／2321 项测试及后续文案／i18n 回归、ESLint、类型、生产构建、嵌入后端构建通过；1280／390 深浅主题和键盘、轮询、错误反馈通过。
+- 1,000／10,000 账号各两模型的隔离 SQL 模式对照：逐账号模式 4,000／40,000 查询、1,000／10,000 行锁；投影 11／101 分页查询、无领取行锁。最终健康账号扫描回归验证无逐账号领取事务或候选读取；代理编辑竞态实测锁等待后取消旧 IQ 结果。数值不是生产吞吐保证。
+- 固定四角色仍为 `/xy/artifacts/codex-state-upgrade/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`。一期快照在 `phase1/`；累计与仅二期的同输入 BASELINE／MODIFIED／ROLLBACK、补丁重建、源码哈希、最终提交与四角色重新打开结果，以同目录 `FINAL_RESULT.json` 和 `ARTIFACTS.json` 为完成依据。失败批次与资源处理没有删除或计为成功。
+- 维护与来源见 `docs/CODEX_STATE.md` 和 `docs/third-party/codex-state-second-pass-NOTICE.md`。源码回滚不操作数据库；部署前仍须测试账号两个续期周期及 24 小时观察。
+
 ### 292 / STATE 本地融合交接（2026-09-19）
 
 - 已批准基线 `6c12e3f`，社区 `ecf3b9a`；原 `/xy/xy2api` 仍为干净 `9c8abed`。代码在 `/xy/artifacts/codex-state-upgrade/work`，未推送、发布、部署或调用真实账号。
@@ -161,6 +172,7 @@
 Sub2API 兼容基线已更新到 `v0.2.6`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
 
 
 
@@ -800,3 +812,10 @@ pnpm --dir frontend run build
 - 已实测：7 个受影响后端包完整 unit、STATE/IQ 定向回归、真实 PostgreSQL/Redis 集成、全部 7 个 Go 静态检查、service race；冻结原锁文件的前端 2319 项测试、lint、i18n、类型、生产构建和嵌入前端后端构建。1280/390 深浅主题表单、键盘、轮询及冷却通过；upstream sync audit 通过。
 - 交付：`/xy/artifacts/codex-state-upgrade/work`，四角色为同目录的 `MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`。源码哈希及同输入 BASELINE/MODIFIED/ROLLBACK、仓储 race、补丁重建和回滚复原结果以 `FINAL_RESULT.json` 和字面命令日志为准；早期失败与资源中断没有删除或计为成功。
 - 上线前独立步骤：测试账号至少两个续期周期与 24 小时观察。源码回滚不回退数据库；先停止新工作者、关闭 STATE 总开关，按维护文档处理程序和配置回退。
+
+### 2026-09-19T17:04:14.826570+00:00 — `20260919-state-second-pass` — 二期本地实现、提交与验收
+
+- 先提交一期 66 项改动，再提交二期后端一致性／扫描与调度优化及简化界面。核心提交分别为 `2a743f0`、`322b61486`、`49f0bd098`；没有远端和生产操作。
+- 修复四个已复现边界，增加未来时间存量恢复、Retry-After 大数处理、撤销后同票期限保留和代理事务隔离；不改历史迁移、模块依赖或前端锁文件。
+- 最终后端 unit、PostgreSQL／Redis、两组 race、全部启用 Go lint、前端 2321 项全量及定向回归、lint／类型／构建、嵌入构建和四种浏览器布局通过。旧失败、被替代的验证轮次和工具纠错均保留原始日志。
+- 沿用原四角色，新增仅二期的基线与补丁作为补充。实际源码三态行为、退出码、字节恢复、源码哈希及四角色重开事件统一由最终 `VERIFICATION.txt`、`FINAL_RESULT.json` 记录；真实账号续期和 24 小时观察单独进行。
