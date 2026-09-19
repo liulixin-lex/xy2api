@@ -10,7 +10,18 @@ export interface CodexAccountTicketWatchdog {
 }
 
 export interface CodexAccountTicketStatus {
-  counters?: Record<'rounds_started' | 'rounds_succeeded' | 'rounds_failed' | 'watchdog_triggers', number>
+  updated_at?: string
+  issued_at?: string
+  first_observed_at?: string
+  last_replay_at?: string
+  last_business_at?: string
+  last_business_result?: string
+  last_stage?: string
+  last_code?: string
+  last_reason?: string
+  last_http_status?: number
+  observed_length?: number
+  counters?: Record<string, number>
   models?: string[]
   tickets?: CodexAccountTicketStatus[]
   missing_policy?: 'block' | 'allow_unprotected'

@@ -1,21 +1,30 @@
 <template>
-  <section class="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-dark-600" data-testid="codex-account-ticket-settings">
+  <section class="space-y-4 border-t border-gray-200 pt-5 dark:border-dark-600" data-testid="codex-account-ticket-settings">
     <div class="flex items-start justify-between gap-4">
       <div>
-        <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.accounts.stateTicket.title') }}</h3>
+        <h3 class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ t('admin.accounts.stateTicket.title') }}</h3>
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.stateTicket.description') }}</p>
       </div>
       <Toggle v-model="enabled" :disabled="!status || busy" :aria-label="t('admin.accounts.stateTicket.enable')" data-testid="codex-account-ticket-enabled" />
     </div>
     <p v-if="loading" class="text-xs text-gray-500">{{ t('common.loading') }}</p>
     <template v-if="status">
-      <div>
-        <label :for="`codex-account-ticket-plan-${accountId}`" class="input-label">{{ t('admin.accounts.stateTicket.plan') }}</label>
-        <select :id="`codex-account-ticket-plan-${accountId}`" v-model="ticketPlan" class="input w-full text-sm" :disabled="busy" data-testid="codex-account-ticket-plan">
-          <option value="pro">{{ t('admin.accounts.stateTicket.planPro') }}</option>
-          <option value="team">{{ t('admin.accounts.stateTicket.planTeam') }}</option>
-        </select>
-        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.stateTicket.planHint') }}</p>
+      <div class="grid items-start gap-4 sm:grid-cols-2">
+        <div>
+          <label :for="`codex-account-ticket-plan-${accountId}`" class="input-label">{{ t('admin.accounts.stateTicket.plan') }}</label>
+          <select :id="`codex-account-ticket-plan-${accountId}`" v-model="ticketPlan" class="input w-full text-sm" :disabled="busy" data-testid="codex-account-ticket-plan">
+            <option value="pro">{{ t('admin.accounts.stateTicket.planPro') }}</option>
+            <option value="team">{{ t('admin.accounts.stateTicket.planTeam') }}</option>
+          </select>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.stateTicket.planHint') }}</p>
+        </div>
+        <div>
+          <label :for="`state-policy-${accountId}`" class="input-label">{{ t('admin.accounts.stateTicket.missingPolicy') }}</label>
+          <select :id="`state-policy-${accountId}`" v-model="missingPolicy" :disabled="busy" class="input w-full text-sm" data-testid="state-missing-policy">
+            <option value="block">{{ t('admin.accounts.stateTicket.block') }}</option>
+            <option value="allow_unprotected">{{ t('admin.accounts.stateTicket.allowUnprotected') }}</option>
+          </select>
+        </div>
       </div>
       <fieldset :disabled="busy" class="space-y-2">
         <legend class="input-label">{{ t('admin.accounts.stateTicket.models') }}</legend>
@@ -26,13 +35,6 @@
           </label>
         </div>
       </fieldset>
-      <div>
-        <label :for="`state-policy-${accountId}`" class="input-label">{{ t('admin.accounts.stateTicket.missingPolicy') }}</label>
-        <select :id="`state-policy-${accountId}`" v-model="missingPolicy" :disabled="busy" class="input w-full text-sm" data-testid="state-missing-policy">
-          <option value="block">{{ t('admin.accounts.stateTicket.block') }}</option>
-          <option value="allow_unprotected">{{ t('admin.accounts.stateTicket.allowUnprotected') }}</option>
-        </select>
-      </div>
       <p v-if="!status.global_enabled" class="rounded bg-amber-50 p-2 text-xs text-amber-800 dark:bg-amber-900/20 dark:text-amber-200" data-testid="codex-account-ticket-global-off">
         {{ t('admin.accounts.stateTicket.globalOff') }}
         <a href="/admin/settings?tab=gateway" target="_blank" rel="noopener noreferrer" class="font-medium underline">{{ t('admin.accounts.stateTicket.gatewaySettings') }}</a>
@@ -40,7 +42,7 @@
       <div class="text-xs text-gray-500 dark:text-gray-400" data-testid="codex-account-ticket-global-pool">
         <p v-if="status.proxy_configured">{{ t('admin.accounts.stateTicket.globalPoolConfigured', { address: status.proxy_display }) }}</p>
         <p v-else class="text-amber-700 dark:text-amber-300">{{ t('admin.accounts.stateTicket.globalPoolMissing') }}</p>
-        <p>{{ t('admin.accounts.stateTicket.globalPoolHint') }} <a href="/admin/settings?tab=gateway" target="_blank" rel="noopener noreferrer" class="font-medium underline">{{ t('admin.accounts.stateTicket.gatewaySettings') }}</a></p>
+        <p><a href="/admin/settings?tab=gateway" target="_blank" rel="noopener noreferrer" class="font-medium underline">{{ t('admin.accounts.stateTicket.gatewaySettings') }}</a><span class="ml-2">{{ t('admin.accounts.stateTicket.globalPoolHint') }}</span></p>
       </div>
       <div class="divide-y divide-gray-200 dark:divide-dark-600" aria-live="polite" data-testid="state-model-statuses">
         <div v-for="ticket in status.tickets ?? []" :key="ticket.model" class="space-y-2 py-3">
@@ -48,19 +50,30 @@
             <span class="break-all text-sm font-medium text-gray-900 dark:text-white">{{ ticket.model }}</span>
             <button type="button" class="btn btn-secondary btn-sm" :disabled="busy || dirty || proxyChanged || !status.enabled || !status.global_enabled || ticket.state === 'harvesting' || coolingDown(ticket)" @click="harvest(ticket.model)">{{ t('admin.accounts.stateTicket.reacquire') }}</button>
           </div>
-          <dl class="grid gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-300 sm:grid-cols-2">
-            <div><dt class="inline">{{ t('admin.accounts.stateTicket.ticketAvailability') }}: </dt><dd class="inline">{{ ticket.ticket_usable ? t('admin.accounts.stateTicket.ready', { time: formatRemaining(ticket.remaining_seconds) }) : t('admin.accounts.stateTicket.states.waiting') }}</dd></div>
-            <div><dt class="inline">{{ t('admin.accounts.stateTicket.modelVerification') }}: </dt><dd class="inline">{{ ticket.model_verified ? t('admin.accounts.stateTicket.verified') : t('admin.accounts.stateTicket.pending') }}</dd></div>
-            <div><dt class="inline">{{ t('admin.accounts.stateTicket.iqResult') }}: </dt><dd class="inline">{{ t(`admin.accounts.stateTicket.iq.${ticket.iq_status || 'unknown'}`) }}</dd></div>
-            <div v-if="ticket.protection"><dt class="inline">{{ t('admin.accounts.stateTicket.protection') }}: </dt><dd class="inline">{{ t(`admin.accounts.stateTicket.protections.${ticket.protection}`) }}</dd></div>
+          <dl class="grid gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-300 sm:grid-cols-3">
+            <div><dt class="inline">{{ t('admin.accounts.stateTicket.ticketAvailability') }}: </dt><dd class="inline">{{ ticket.ticket_usable ? t('admin.accounts.stateTicket.ready', { time: formatRemaining(ticket.remaining_seconds) }) : t(`admin.accounts.stateTicket.states.${ticket.state === 'ready' ? 'waiting' : ticket.state}`) }}</dd></div>
+            <div><dt class="inline">{{ t('admin.accounts.stateTicket.businessVerification') }}: </dt><dd class="inline" data-testid="state-business-result" :title="businessResult(ticket.last_business_result)">{{ businessSummary(ticket.last_business_result) }}</dd></div>
+            <div><dt class="inline">{{ t('admin.accounts.stateTicket.iqResult') }}: </dt><dd class="inline">{{ t(`admin.accounts.stateTicket.iq.${ticket.iq_status || 'unknown'}`) }}<span v-if="ticket.iq_retest === 'queued'"> · {{ t('admin.accounts.stateTicket.iqRetestQueued') }}</span></dd></div>
           </dl>
-          <p v-if="ticket.ticket_usable && ticket.expires_at" class="text-xs text-gray-600 dark:text-gray-300">{{ t('admin.accounts.stateTicket.expiresAt', { time: formatLocalDate(ticket.expires_at) }) }}</p>
-          <p v-if="ticket.state === 'harvesting'" class="text-xs text-gray-600 dark:text-gray-300">{{ t('admin.accounts.stateTicket.states.harvesting') }} · {{ t('admin.accounts.stateTicket.attempts', { count: ticket.attempts }) }}</p>
-          <p v-if="ticket.watchdog.trigger_count > 0" class="text-xs text-gray-600 dark:text-gray-300">{{ t('admin.accounts.stateTicket.watchdogTriggerCount', { count: ticket.watchdog.trigger_count }) }}<span v-if="ticket.watchdog.last_reason"> · {{ watchdogReason(ticket.watchdog.last_reason) }}</span></p>
-          <p v-if="ticket.refreshing" class="text-xs text-gray-600 dark:text-gray-300">{{ t('admin.accounts.stateTicket.refreshing', { time: formatRemaining(ticket.remaining_seconds) }) }}</p>
-          <p v-if="ticket.iq_retest === 'queued'" class="text-xs text-gray-600 dark:text-gray-300">{{ t('admin.accounts.stateTicket.iqRetestQueued') }}</p>
-          <p v-if="ticket.retry_after" class="text-xs text-amber-700 dark:text-amber-300">{{ t('admin.accounts.stateTicket.retryAfter', { time: formatLocalDate(ticket.retry_after) }) }}</p>
-          <p v-if="ticket.last_error" class="break-words text-xs text-amber-700 dark:text-amber-300">{{ ticket.last_error }}</p>
+          <p v-if="ticket.protection && ticket.protection !== 'protected' && ticket.protection !== 'disabled'" class="text-xs text-amber-700 dark:text-amber-300">{{ t(`admin.accounts.stateTicket.protections.${ticket.protection}`) }}</p>
+          <p v-if="ticket.state === 'harvesting'" class="text-xs text-gray-600 dark:text-gray-300">{{ ticket.ticket_usable ? t('admin.accounts.stateTicket.refreshing', { time: formatRemaining(ticket.remaining_seconds) }) : t('admin.accounts.stateTicket.attempts', { count: ticket.attempts }) }}</p>
+          <p v-if="ticket.last_error || ticket.retry_after" class="break-words text-xs text-amber-700 dark:text-amber-300"><span v-if="ticket.last_error">{{ ticket.last_reason ? failureReason(ticket.last_reason) : ticket.last_error }}</span><span v-if="ticket.retry_after">{{ ticket.last_error ? ' · ' : '' }}{{ t('admin.accounts.stateTicket.retryAfter', { time: formatLocalDate(ticket.retry_after) }) }}</span></p>
+          <details class="text-xs text-gray-600 dark:text-gray-300" data-testid="state-diagnostics">
+            <summary class="cursor-pointer py-1 font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500">{{ t('admin.accounts.stateTicket.diagnostics') }}</summary>
+            <dl class="mt-2 grid gap-2 break-words sm:grid-cols-2">
+              <div><dt>{{ t('admin.accounts.stateTicket.captureVerification') }}</dt><dd>{{ ticket.model_verified ? t('admin.accounts.stateTicket.verified') : t('admin.accounts.stateTicket.pending') }}<span v-if="ticket.last_replay_at"> · {{ formatLocalDate(ticket.last_replay_at) }}</span></dd></div>
+              <div><dt>{{ t('admin.accounts.stateTicket.businessVerification') }}</dt><dd>{{ businessResult(ticket.last_business_result) }}<span v-if="ticket.last_business_at"> · {{ formatLocalDate(ticket.last_business_at) }}</span></dd></div>
+              <div v-if="ticket.watchdog.trigger_count"><dt>{{ t('admin.accounts.stateTicket.watchdog') }}</dt><dd>{{ t('admin.accounts.stateTicket.watchdogTriggerCount', { count: ticket.watchdog.trigger_count }) }} · {{ watchdogReason(ticket.watchdog.last_reason || '') }}</dd></div>
+              <div v-if="ticket.issued_at"><dt>{{ t('admin.accounts.stateTicket.issuedAt') }}</dt><dd>{{ formatLocalDate(ticket.issued_at) }}</dd></div>
+              <div v-if="ticket.first_observed_at"><dt>{{ t('admin.accounts.stateTicket.firstObservedAt') }}</dt><dd>{{ formatLocalDate(ticket.first_observed_at) }}</dd></div>
+              <div v-if="ticket.expires_at"><dt>{{ t('admin.accounts.stateTicket.effectiveExpiry') }}</dt><dd>{{ formatLocalDate(ticket.expires_at) }}</dd></div>
+              <div v-if="ticket.last_stage"><dt>{{ t('admin.accounts.stateTicket.probeStage') }}</dt><dd>{{ ticket.last_stage === 'replay' ? t('admin.accounts.stateTicket.replayStage') : t('admin.accounts.stateTicket.harvestStage') }}<span v-if="ticket.last_http_status"> · HTTP {{ ticket.last_http_status }}</span></dd></div>
+              <div v-if="ticket.observed_length"><dt>{{ t('admin.accounts.stateTicket.observedLength') }}</dt><dd>{{ ticket.observed_length }}</dd></div>
+              <div v-if="ticket.last_reason"><dt>{{ t('admin.accounts.stateTicket.failureReason') }}</dt><dd>{{ failureReason(ticket.last_reason) }}</dd></div>
+              <div v-if="ticket.counters"><dt>{{ t('admin.accounts.stateTicket.observationCoverage') }}</dt><dd>{{ t('admin.accounts.stateTicket.coverageCounts', { checked: ticket.counters.business_checked ?? 0, unconfirmed: ticket.counters.business_unconfirmed ?? 0 }) }}</dd></div>
+            </dl>
+            <p class="mt-2">{{ t('admin.accounts.stateTicket.diagnosticHint') }}</p>
+          </details>
         </div>
       </div>
       <template v-if="!status.tickets?.length">
@@ -103,12 +116,12 @@
         <button type="button" class="btn btn-primary btn-sm" :disabled="busy || !dirty || models.length === 0 || proxyChanged || (enabled && !status.proxy_configured)" data-testid="codex-account-ticket-save" @click="save">
           {{ t('admin.accounts.stateTicket.save') }}
         </button>
-        <button type="button" class="btn btn-secondary btn-sm" :disabled="busy || dirty || proxyChanged || !status.global_enabled || !status.enabled || !status.proxy_configured || (status.state === 'harvesting' || coolingDown(status))" data-testid="codex-account-ticket-harvest" @click="harvest()">
+        <button v-if="!status.tickets?.length || status.tickets.length > 1" type="button" class="btn btn-secondary btn-sm" :disabled="busy || dirty || proxyChanged || !status.global_enabled || !status.enabled || !status.proxy_configured || (status.state === 'harvesting' || coolingDown(status))" data-testid="codex-account-ticket-harvest" @click="harvest()">
           {{ (status.tickets?.length ?? 0) > 1 ? t('admin.accounts.stateTicket.acquireAll') : status.state === 'ready' ? t('admin.accounts.stateTicket.reacquire') : t('admin.accounts.stateTicket.acquire') }}
         </button>
       </div>
-      <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.stateTicket.failureHint') }}</p>
     </template>
+    <p v-if="lastUpdated" class="text-xs text-gray-500 dark:text-gray-400" data-testid="state-last-updated">{{ t('admin.accounts.stateTicket.updatedAt', { time: formatLocalDate(lastUpdated) }) }}</p>
     <p v-if="error" role="alert" class="text-xs text-red-600 dark:text-red-400">{{ error }}</p>
     <p v-if="saved" role="status" class="text-xs text-emerald-700 dark:text-emerald-400">{{ t('admin.accounts.stateTicket.saved') }}</p>
     <button v-if="!status && !loading" type="button" class="btn btn-secondary btn-sm" @click="load(true)">{{ t('admin.accounts.stateTicket.retry') }}</button>
@@ -135,6 +148,7 @@ const loading = ref(false)
 const busy = ref(false)
 const error = ref('')
 const saved = ref(false)
+const lastUpdated = ref('')
 let generation = 0
 let revision = 0
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -194,6 +208,7 @@ async function load(initial = false) {
     if (generation !== currentGeneration || revision !== currentRevision || !props.visible) return
     // Polling updates status only; it must never overwrite an in-progress edit.
     status.value = next
+    lastUpdated.value = next.updated_at ?? new Date().toISOString()
     if (initial) {
       syncDraft(next)
     }
@@ -206,9 +221,11 @@ async function load(initial = false) {
 }
 
 function schedulePoll() {
+  clearTimeout(timer)
+  if (!props.visible || document.hidden) return
   timer = setTimeout(async () => {
     const currentGeneration = generation
-    if (!props.visible) return
+    if (!props.visible || document.hidden) return
     if (!busy.value) await load()
     if (generation === currentGeneration && props.visible) schedulePoll()
   }, 3000)
@@ -230,6 +247,7 @@ async function save() {
     })
     if (generation !== currentGeneration) return
     status.value = next
+    lastUpdated.value = next.updated_at ?? new Date().toISOString()
     syncDraft(next)
     // Keep success feedback after the draft watchers have cleared the old message.
     saved.value = true
@@ -249,7 +267,7 @@ async function harvest(model?: string) {
   const currentGeneration = generation
   try {
     const next = await harvestCodexAccountTicket(props.accountId, model)
-    if (generation === currentGeneration) status.value = next
+    if (generation === currentGeneration) { status.value = next; lastUpdated.value = next.updated_at ?? new Date().toISOString() }
   } catch {
     if (generation === currentGeneration) error.value = t('admin.accounts.stateTicket.harvestFailed')
   } finally {
@@ -262,6 +280,7 @@ watch(() => [props.accountId, props.visible] as const, async () => {
   const currentGeneration = generation
   clearTimeout(timer)
   status.value = null
+  lastUpdated.value = ''
   enabled.value = false
   ticketPlan.value = 'pro'
   error.value = ''
@@ -273,5 +292,23 @@ watch(() => [props.accountId, props.visible] as const, async () => {
   if (generation === currentGeneration && props.visible) schedulePoll()
 }, { immediate: true })
 
-onBeforeUnmount(() => { generation++; clearTimeout(timer) })
+function onVisibilityChange() {
+  clearTimeout(timer)
+  if (!document.hidden && props.visible) schedulePoll()
+}
+document.addEventListener('visibilitychange', onVisibilityChange)
+onBeforeUnmount(() => { generation++; clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibilityChange) })
+
+function businessSummary(result?: string) {
+  if (!result || ['verified', 'model_mismatch', 'state_312'].includes(result)) return businessResult(result)
+  return t('admin.accounts.stateTicket.unconfirmed')
+}
+function businessResult(result?: string) {
+  const known = ['verified', 'model_mismatch', 'state_312', 'oversized', 'unsupported_encoding', 'upstream_failed', 'unconfirmed']
+  return t(`admin.accounts.stateTicket.businessResults.${result && known.includes(result) ? result : 'not_observed'}`)
+}
+function failureReason(reason: string) {
+  const known = ['rate_limited', 'auth_rejected', 'model_capacity', 'response_failed', 'invalid_state_header', 'invalid_ticket_time', 'model_mismatch']
+  return t(`admin.accounts.stateTicket.failureReasons.${known.includes(reason) ? reason : 'unconfirmed'}`)
+}
 </script>
