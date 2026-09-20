@@ -1,11 +1,12 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,6 +37,7 @@ type codexTicketReceipt struct {
 }
 
 type codexTicketReceiptContextKey struct{}
+type codexTicketClientContextKey struct{}
 
 func receiptForCodexTicket(ticket *openAICodexTicket) codexTicketReceipt {
 	return codexTicketReceipt{ticket.AccountID, ticket.Model, ticket.ConfigRevision,
@@ -84,11 +86,20 @@ func (s *OpenAIGatewayService) observeCodexTicketResponse(req *http.Request, res
 		return
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		s.traceCodexTicket(CodexTicketTraceEvent{AccountID: receipt.accountID, Model: receipt.model, Stage: "business", Outcome: "upstream_failed", Detail: CodexTicketTraceDetail{TicketID: receipt.identity(), HTTPStatus: resp.StatusCode}})
 		s.recordCodexTicketObservation(*receipt, "upstream_failed")
 		return
 	}
-	state, _ := uniqueCodexTicketHeader(resp.Header)
-	resp.Body = &codexTicketWatchdogBody{ReadCloser: resp.Body, ctx: req.Context(), model: receipt.model, encoding: resp.Header.Get("Content-Encoding"), state312: len(state) == 312 && validCodexTicketState(state), observe: func(result string) { s.recordCodexTicketObservation(*receipt, result) }, trigger: func(reason string) { s.invalidateCodexTicketFromResponse(*receipt, reason) }}
+	state, headerErr := uniqueCodexTicketHeader(resp.Header)
+	resp.Body = &codexTicketWatchdogBody{ReadCloser: resp.Body, ctx: req.Context(), model: receipt.model, encoding: resp.Header.Get("Content-Encoding"), state312: len(state) == 312 && validCodexTicketState(state), observe: func(result string) {
+		s.recordCodexTicketObservation(*receipt, result)
+		if result == "verified" && headerErr == nil {
+			s.capturePassiveCodexCandidate(*receipt, state)
+		}
+		s.traceCodexTicket(CodexTicketTraceEvent{AccountID: receipt.accountID, Model: receipt.model, Stage: "business", Outcome: result, Detail: CodexTicketTraceDetail{TicketID: receipt.identity(), HTTPStatus: resp.StatusCode, Length: len(state)}})
+	}, diagnostics: func(outcome, reason string) {
+		s.traceCodexTicket(CodexTicketTraceEvent{AccountID: receipt.accountID, Model: receipt.model, Stage: "business_detail", Outcome: outcome, Detail: CodexTicketTraceDetail{TicketID: receipt.identity(), Reason: reason}})
+	}, trigger: func(reason string) { s.invalidateCodexTicketFromResponse(*receipt, reason) }}
 }
 func (s *OpenAIGatewayService) invalidateCodexTicketFromResponse(receipt codexTicketReceipt, reason string) {
 	if reason != "model_mismatch" && reason != "state_312" && reason != "iq_degraded" {
@@ -117,6 +128,9 @@ func (s *OpenAIGatewayService) invalidateCodexTicketFromResponse(receipt codexTi
 		// It is never injectable or a legacy replay candidate while revoked.
 		current.Verified, current.Revoked = false, true
 		a.Extra[openAICodexTicketExtraKey(receipt.model)] = current
+		rememberCodexRevoked(a, receipt.model, current, now)
+		rt.RevokedValues = codexTicketRuntimes(a)[receipt.model].RevokedValues
+		s.promoteCodexStandby(a, receipt.model, now)
 		rt.TriggerCount++
 		if reason != "iq_degraded" {
 			rt.LastBusinessAt = &now
@@ -153,131 +167,158 @@ const codexTicketWatchdogBufferLimit = codexTicketResponseLimit
 // Observes upstream bytes without response rewriting or replay. Early terminal
 // consumers use the bounded completion drain in Close; errors remain inconclusive.
 type codexTicketWatchdogBody struct {
-	ctx     context.Context
-	reading atomic.Int32
+	ctx       context.Context
+	closed    atomic.Bool
+	readMu    sync.Mutex
+	closeOnce sync.Once
+	closeErr  error
+	completed chan struct{}
 	io.ReadCloser
-	model    string
-	encoding string
-	state312 bool
-	trigger  func(string)
-	observe  func(string)
-	buffer   []byte
-	overflow bool
-	mu       sync.Mutex
-	finished bool
+	model       string
+	encoding    string
+	state312    bool
+	trigger     func(string)
+	observe     func(string)
+	diagnostics func(string, string)
+	mu          sync.Mutex
+	once        sync.Once
+	writer      *io.PipeWriter
+	result      chan codexStreamResult
+	finished    bool
+}
+type codexStreamResult struct {
+	model string
+	err   error
 }
 
-func (b *codexTicketWatchdogBody) Read(p []byte) (int, error) {
-	b.reading.Add(1)
-	defer b.reading.Add(-1)
-	n, err := b.ReadCloser.Read(p)
+func (b *codexTicketWatchdogBody) init() {
+	b.once.Do(func() {
+		reader, writer := io.Pipe()
+		b.writer = writer
+		b.result = make(chan codexStreamResult, 1)
+		b.completed = make(chan struct{})
+		go func() {
+			model, err := codexTicketResponseModel(reader, b.encoding)
+			_ = reader.Close()
+			b.result <- codexStreamResult{model, err}
+		}()
+	})
+}
+func (b *codexTicketWatchdogBody) finish(result codexStreamResult, complete bool) {
 	b.mu.Lock()
-	reason := ""
-	outcome := ""
-	if !b.finished {
-		if !b.overflow && len(b.buffer)+n <= codexTicketWatchdogBufferLimit {
-			b.buffer = append(b.buffer, p[:n]...)
-		} else {
-			b.overflow = true
-			b.buffer = nil
-		}
-		if err != nil {
-			b.finished = true
-			outcome = "unconfirmed"
-			if b.overflow {
-				outcome = "oversized"
-			}
-			if err == io.EOF && !b.overflow {
-				actual, e := codexTicketResponseModel(bytes.NewReader(b.buffer), b.encoding)
-				if e != nil && e.Error() == "unsupported content encoding" {
-					outcome = "unsupported_encoding"
-				}
-				if e == nil {
-					outcome = "verified"
-					if actual != b.model {
-						reason = "model_mismatch"
-					} else if b.state312 {
-						reason = "state_312"
-					}
-				}
-			}
-			b.buffer = nil
+	if b.finished {
+		b.mu.Unlock()
+		return
+	}
+	b.finished = true
+	b.mu.Unlock()
+	// Completion includes the observation callbacks, not only the parser result.
+	// Close may return as soon as this signal is received.
+	defer close(b.completed)
+	outcome, reason := "unconfirmed", ""
+	if result.err != nil && result.err.Error() == "unsupported content encoding" {
+		outcome = "unsupported_encoding"
+	}
+	if complete && result.err == nil {
+		outcome = "verified"
+		if result.model != b.model {
+			reason = "model_mismatch"
+		} else if b.state312 {
+			reason = "state_312"
 		}
 	}
-	b.mu.Unlock()
 	if reason != "" {
 		outcome = reason
 	}
-	if outcome != "" && b.observe != nil {
+	if b.diagnostics != nil {
+		detail := ""
+		if !complete || result.err != nil {
+			detail = "incomplete_response"
+			if result.err != nil {
+				switch {
+				case strings.Contains(result.err.Error(), "conflicting"):
+					detail = "conflicting_terminal"
+				case errors.Is(result.err, io.ErrClosedPipe):
+					detail = "closed_before_eof"
+				case errors.Is(result.err, context.DeadlineExceeded):
+					detail = "upstream_timeout"
+				default:
+					detail = "read_or_protocol_error"
+				}
+			}
+			if b.ctx != nil {
+				if client, ok := b.ctx.Value(codexTicketClientContextKey{}).(context.Context); ok && client.Err() != nil {
+					detail = "client_cancelled"
+				}
+			}
+		}
+		b.diagnostics(outcome, detail)
+	}
+	if b.observe != nil {
 		b.observe(outcome)
 	}
-	if reason != "" {
+	if reason != "" && b.trigger != nil {
 		b.trigger(reason)
+	}
+}
+func (b *codexTicketWatchdogBody) Read(p []byte) (int, error) {
+	b.init()
+	b.readMu.Lock()
+	defer b.readMu.Unlock()
+	if b.closed.Load() {
+		return 0, io.ErrClosedPipe
+	}
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 {
+		_, _ = b.writer.Write(p[:n])
+	}
+	if err != nil {
+		if err == io.EOF {
+			_ = b.writer.Close()
+		} else {
+			_ = b.writer.CloseWithError(err)
+		}
+		result := <-b.result
+		// Retain the result for a concurrent or repeated Close/Read.
+		b.result <- result
+		b.finish(result, err == io.EOF)
 	}
 	return n, err
 }
 func (b *codexTicketWatchdogBody) Close() error {
-	// Some conversion/WS consumers stop at response.completed. Finish observing
-	// their remaining HTTP body for at most 250 ms, without forwarding or replaying
-	// bytes. A transport error, timeout, overflow or conflicting terminal is ignored.
-	b.mu.Lock()
-	alreadyFinished := b.finished
-	wasOverflow := b.overflow
-	drain := !b.finished && !b.overflow && b.reading.Load() == 0
-	captured := append([]byte(nil), b.buffer...)
-	if b.ctx != nil && b.ctx.Err() != nil {
-		drain = false
-	}
-	if _, e := codexTicketResponseModel(bytes.NewReader(captured), b.encoding); e != nil {
-		drain = false
-	}
-	b.finished = true
-	b.buffer = nil
-	b.mu.Unlock()
-	reason := ""
-	result := "unconfirmed"
-	if wasOverflow {
-		result = "oversized"
-	}
-	if drain {
-		type outcome struct {
-			data []byte
-			err  error
-		}
-		done := make(chan outcome, 1)
-		go func() {
-			rest, e := io.ReadAll(io.LimitReader(b.ReadCloser, int64(codexTicketWatchdogBufferLimit-len(captured)+1)))
-			done <- outcome{rest, e}
-		}()
-		timer := time.NewTimer(250 * time.Millisecond)
-		select {
-		case out := <-done:
-			if out.err == nil && len(captured)+len(out.data) <= codexTicketWatchdogBufferLimit {
-				actual, e := codexTicketResponseModel(bytes.NewReader(append(captured, out.data...)), b.encoding)
-				if e == nil {
-					result = "verified"
-					if actual != b.model {
-						reason = "model_mismatch"
-					} else if b.state312 {
-						reason = "state_312"
-					}
-				}
+	return b.closeWithCancel(func() {})
+}
+
+// Protocol converters may stop at the terminal event. Finish observation within
+// the deadline, then cancel before Close so context-bound transports cannot hang.
+func (b *codexTicketWatchdogBody) closeWithCancel(cancel context.CancelFunc) error {
+	b.init()
+	b.closeOnce.Do(func() {
+		b.mu.Lock()
+		finished := b.finished
+		b.mu.Unlock()
+		if b.ctx == nil || b.ctx.Err() == nil {
+			// The read lock preserves the byte order with the converter's scanner.
+			// Completion can also come from that scanner, not only our drain.
+			if !finished {
+				go func() { _, _ = io.Copy(io.Discard, b) }()
 			}
-		case <-timer.C:
+			timer := time.NewTimer(250 * time.Millisecond)
+			select {
+			case <-b.completed:
+			case <-timer.C:
+			}
+			timer.Stop()
 		}
-		timer.Stop()
-	}
-	err := b.ReadCloser.Close()
-	if reason != "" {
-		result = reason
-	}
-	if !alreadyFinished && b.observe != nil {
-		b.observe(result)
-	}
-	if reason != "" {
-		b.trigger(reason)
-	}
-	return err
+		b.closed.Store(true)
+		cancel()
+		_ = b.writer.CloseWithError(io.ErrClosedPipe)
+		b.closeErr = b.ReadCloser.Close()
+		result := <-b.result
+		b.result <- result
+		b.finish(result, false)
+	})
+	return b.closeErr
 }
 
 func (s *OpenAIGatewayService) rememberCodexTicketRevocation(receipt codexTicketReceipt) {

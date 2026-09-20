@@ -1,6 +1,40 @@
 export default {
     accounts: {
       stateTicket: {
+        standbyAvailable: 'Standby ready',
+        qualityTask: 'Checking quality',
+        qualityIsolated: 'Quality degraded; model paused',
+        qualityObserve: 'Quality observation',
+        qualityProgress: 'Current set: {count}/12',
+        qualityLatest: 'Last score: {score}/12',
+        qualityUnknown: 'Unconfirmed; last result retained',
+
+      "manualProxy": "Proxy for this task",
+      "autoProxy": "Automatic rotation",
+      "standbyReady": "Standby expires: {time}",
+      "backgroundBudget": "Hourly calls: {used} / {limit}",
+      "tasks": {
+            "queued": "Queued",
+            "harvesting": "Acquiring",
+            "verifying": "Verifying",
+            "waiting": "Waiting",
+            "succeeded": "Acquired",
+            "unchanged": "No update; current ticket valid",
+            "failed": "Acquisition failed",
+            "cancelled": "Cancelled"
+      },
+      "taskReasons": {
+            "upstream_capacity": "Upstream busy",
+            "account_cooldown": "Account cooldown",
+            "account_health": "Account unavailable",
+            "attempt_interval": "Next attempt pending",
+            "execution_slot": "Awaiting capacity",
+            "budget": "Awaiting budget",
+            "proxy_unavailable": "No available proxy",
+            "account_concurrency": "Awaiting account capacity"
+      }
+,
+
         "unconfirmed": "Unconfirmed",
         "captureVerification": "Acquisition replay",
         "businessVerification": "Business model",
@@ -38,7 +72,7 @@ export default {
           "model_mismatch": "Returned model differs",
           "unconfirmed": "No complete valid response"
         },
-        "acquireAll": "Reacquire all",
+        "acquireAll": "Acquire all",
         "iqDegradedRecovery": "Recovery after a valid wrong answer",
         "models": "Enabled models",
         "missingPolicy": "Missing ticket",
@@ -103,7 +137,7 @@ export default {
         "unsaved": "Save settings before acquiring tickets.",
         "save": "Save settings",
         "acquire": "Acquire now",
-        "reacquire": "Reacquire",
+        "reacquire": "Acquire now",
         "failureHint": "When enabled without a valid STATE, only this account’s target model is paused. Turn off the account switch and save to restore normal requests.",
         "saved": "Ticket settings saved.",
         "loadFailed": "Status refresh failed. Please retry.",

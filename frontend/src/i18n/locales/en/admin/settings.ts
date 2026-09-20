@@ -1,5 +1,34 @@
 export default {
     settings: {
+    stateProxies: {
+      networkError: 'Network error',
+      candidateRejected: 'No valid ticket',
+      responseReceived: 'Response received',
+      unknownResult: 'Unknown result',
+      "title": "STATE acquisition proxies",
+      "add": "Add proxy",
+      "hint": "Enabled proxies rotate automatically. Tests show the current exit only.",
+      "empty": "No proxies. Add one to test.",
+      "name": "Proxy {index}",
+      "address": "URL (blank keeps saved value)",
+      "enabled": "Enabled",
+      "testing": "Testing…",
+      "test": "Test connection",
+      "acquisition": "Latest acquisition",
+      "connected": "Connected",
+      "failed": "Connection failed",
+      "sample": "Current exit",
+      "lastSuccess": "Last success",
+      "untested": "Not tested",
+      "saved": "Proxy pool saved",
+      "save": "Save proxy pool",
+      "reload": "Reload",
+      "unknownCountry": "Unknown country",
+      "loadFailed": "Load failed. Try again.",
+      "saveFailed": "Save failed. Check the URL.",
+      "conflict": "Settings changed. Reload to continue."
+},
+
       title: 'System Settings',
       description: 'Manage registration, email verification, default values, and SMTP settings',
       tabs: {

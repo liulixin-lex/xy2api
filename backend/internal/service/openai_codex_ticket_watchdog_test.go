@@ -45,7 +45,9 @@ func TestCodexTicketWatchdogResponseRecoversWithoutReplayingBusiness(t *testing.
 					return resp, nil
 				}
 				probes.Add(1)
-				return codexTicketResponse(), nil
+				response := codexTicketResponse()
+				response.Header.Set(openAICodexTurnStateHeader, fakeCodexTicketStateAt(292, time.Now().Add(10*time.Second)))
+				return response, nil
 			}}
 			s, repo := ticketJobService(t, u)
 			a, err := repo.GetByID(context.Background(), 41)
@@ -306,4 +308,40 @@ func TestCodexTicketWatchdogHarvestRejectsFixedReplay312Signal(t *testing.T) {
 	status, err := s.GetCodexAccountTicketStatus(context.Background(), 41)
 	require.NoError(t, err)
 	require.Equal(t, "ready", status.State)
+}
+
+type codexExclusiveReader struct {
+	inner      io.ReadCloser
+	active     atomic.Int32
+	overlapped atomic.Bool
+	entered    chan struct{}
+	once       sync.Once
+}
+
+func (r *codexExclusiveReader) Read(p []byte) (int, error) {
+	if r.active.Add(1) != 1 {
+		r.overlapped.Store(true)
+	}
+	defer r.active.Add(-1)
+	r.once.Do(func() { close(r.entered) })
+	return r.inner.Read(p)
+}
+func (r *codexExclusiveReader) Close() error { return r.inner.Close() }
+func TestCodexTicketWatchdogSerializesDrainWithScanner(t *testing.T) {
+	pr, pw := io.Pipe()
+	inner := &codexExclusiveReader{inner: pr, entered: make(chan struct{})}
+	observed := make(chan string, 1)
+	body := &codexTicketWatchdogBody{ReadCloser: inner, model: "gpt-6-astra", observe: func(s string) { observed <- s }}
+	readerDone := make(chan struct{})
+	go func() { _, _ = io.Copy(io.Discard, body); close(readerDone) }()
+	<-inner.entered
+	closed := make(chan struct{})
+	go func() { _ = body.Close(); close(closed) }()
+	_, err := pw.Write([]byte(watchdogCompletedEvent("gpt-6-astra")))
+	require.NoError(t, err)
+	require.NoError(t, pw.Close())
+	<-closed
+	<-readerDone
+	require.False(t, inner.overlapped.Load())
+	require.Equal(t, "verified", <-observed)
 }

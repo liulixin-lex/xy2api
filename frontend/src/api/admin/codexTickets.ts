@@ -9,7 +9,21 @@ export interface CodexAccountTicketWatchdog {
   last_triggered_at?: string
 }
 
+export interface CodexTicketTask {
+  id: string
+  source: string
+  state: 'queued' | 'harvesting' | 'verifying' | 'waiting' | 'succeeded' | 'unchanged' | 'failed' | 'cancelled'
+  wait_reason?: string
+  retry_at?: string
+  proxy_id?: string
+  attempts: number
+}
 export interface CodexAccountTicketStatus {
+  quality?: { mode: string; last_result: string; baseline?: number; latest?: { at: string; score: number }; isolated: boolean; completed_questions: number; next_at: string }
+  task?: CodexTicketTask
+  standby?: { usable: boolean; expires_at: string; last_replay_at: string }
+  budget?: { calls: number; model_calls: number; limit: number; model_limit: number; reserved: number; retry_at?: string }
+  config_revision?: string
   updated_at?: string
   issued_at?: string
   first_observed_at?: string
@@ -54,7 +68,8 @@ export interface CodexAccountTicketStatus {
 export interface CodexAccountTicketSettings {
   models?: string[]
   missing_policy?: 'block' | 'allow_unprotected'
-  enabled: boolean
+  enabled?: boolean
+  expected_revision?: string
   model?: string
   ticket_plan?: CodexTicketPlan
 }
@@ -65,11 +80,11 @@ export async function getCodexAccountTicket(accountId: number): Promise<CodexAcc
 }
 
 export async function saveCodexAccountTicket(accountId: number, settings: CodexAccountTicketSettings): Promise<CodexAccountTicketStatus> {
-  const { data } = await apiClient.put<CodexAccountTicketStatus>(`/admin/accounts/${accountId}/codex-ticket`, settings)
+  const { data } = await apiClient.patch<CodexAccountTicketStatus>(`/admin/accounts/${accountId}/codex-ticket`, settings)
   return data
 }
 
-export async function harvestCodexAccountTicket(accountId: number, model?: string): Promise<CodexAccountTicketStatus> {
-  const { data } = await apiClient.post<CodexAccountTicketStatus>(`/admin/accounts/${accountId}/codex-ticket/harvest`, model ? { model } : {})
+export async function harvestCodexAccountTicket(accountId: number, model?: string, proxyId?: string, requestId?: string): Promise<CodexAccountTicketStatus> {
+  const { data } = await apiClient.post<CodexAccountTicketStatus>(`/admin/accounts/${accountId}/codex-ticket/harvest`, { ...(model ? { model } : {}), ...(proxyId ? { proxy_id: proxyId } : {}), ...(requestId ? { request_id: requestId } : {}) })
   return data
 }

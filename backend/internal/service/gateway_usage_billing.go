@@ -529,14 +529,18 @@ func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Cont
 	if !stream {
 		return ctx, func() {}
 	}
-	return context.WithoutCancel(ctx), func() {}
+	// Retain the original cancellation signal for observation only. Billing and
+	// upstream work still use the detached context.
+	return context.WithValue(context.WithoutCancel(ctx), codexTicketClientContextKey{}, ctx), func() {}
 }
 
 func detachUpstreamContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		return context.Background(), func() {}
 	}
-	return context.WithoutCancel(ctx), func() {}
+	// Retain the original cancellation signal for observation only. Billing and
+	// upstream work still use the detached context.
+	return context.WithValue(context.WithoutCancel(ctx), codexTicketClientContextKey{}, ctx), func() {}
 }
 
 // billingDeps 扣费逻辑依赖的服务（由各 gateway service 提供）

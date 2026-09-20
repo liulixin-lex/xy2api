@@ -355,6 +355,9 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 }
 
 func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
+	admin.GET("/settings/codex-ticket/proxies", h.Admin.Account.GetCodexHarvestProxies)
+	admin.PUT("/settings/codex-ticket/proxies", h.Admin.Account.SaveCodexHarvestProxies)
+	admin.POST("/settings/codex-ticket/proxies/test", h.Admin.Account.TestCodexHarvestProxy)
 	accounts := admin.Group("/accounts")
 	{
 		accounts.GET("", h.Admin.Account.List)
@@ -374,7 +377,9 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.PUT("/:id", h.Admin.Account.Update)
 		accounts.GET("/:id/codex-ticket", h.Admin.Account.GetCodexAccountTicket)
 		accounts.GET("/:id/codex-ticket/diagnostics", h.Admin.Account.GetCodexAccountTicketDiagnostics)
+		accounts.GET("/:id/codex-ticket/events", h.Admin.Account.GetCodexTicketEvents)
 		accounts.PUT("/:id/codex-ticket", h.Admin.Account.UpdateCodexAccountTicket)
+		accounts.PATCH("/:id/codex-ticket", h.Admin.Account.UpdateCodexAccountTicket)
 		accounts.POST("/:id/codex-ticket/harvest", h.Admin.Account.HarvestCodexAccountTicket)
 		accounts.GET("/:id/grok-media-eligibility", h.Admin.Account.GetGrokMediaEligibility)
 		accounts.PUT("/:id/grok-media-eligibility", h.Admin.Account.UpdateGrokMediaEligibility)

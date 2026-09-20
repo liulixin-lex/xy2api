@@ -2,10 +2,12 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/ent"
 	dbaccount "github.com/liulixin-lex/xy2api/ent/account"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -41,17 +43,28 @@ func (r *accountRepository) MutateCodexTicketBatch(ctx context.Context, ids []in
 		if _, err = c.ExecContext(ctx, "SELECT pg_advisory_xact_lock(78421023)"); err != nil {
 			return nil, err
 		}
-		rows, e := c.QueryContext(ctx, `SELECT key,value FROM settings WHERE key IN ($1,$2) FOR SHARE`, service.SettingKeyOpenAICodexTicketEnabled, service.SettingKeyOpenAICodexTicketHarvestProxyURL)
+		rows, e := c.QueryContext(ctx, `SELECT key,value FROM settings WHERE key IN ($1,$2,$3) FOR SHARE`, service.SettingKeyOpenAICodexTicketEnabled, service.SettingKeyOpenAICodexTicketHarvestProxyURL, service.SettingKeyCodexTicketProxyPool)
 		if e != nil {
 			return nil, e
 		}
 		enabled := fence.FallbackEnabled
 		pool := fence.FallbackPool
+		poolRevision := ""
 		for rows.Next() {
 			var key, value string
 			if e = rows.Scan(&key, &value); e != nil {
 				_ = rows.Close()
 				return nil, e
+			}
+			if key == service.SettingKeyCodexTicketProxyPool {
+				var p struct {
+					Revision string `json:"revision"`
+				}
+				if json.Unmarshal([]byte(value), &p) != nil {
+					_ = rows.Close()
+					return nil, service.ErrCodexTicketConflict
+				}
+				poolRevision = p.Revision
 			}
 			if key == service.SettingKeyOpenAICodexTicketEnabled {
 				enabled = value == "true"
@@ -65,7 +78,7 @@ func (r *accountRepository) MutateCodexTicketBatch(ctx context.Context, ids []in
 		if e != nil {
 			return nil, e
 		}
-		if !enabled || pool != fence.Pool {
+		if !enabled || poolRevision != fence.PoolRevision || poolRevision == "" && pool != fence.Pool {
 			return nil, service.ErrCodexTicketConflict
 		}
 	}
@@ -117,11 +130,34 @@ func (r *accountRepository) MutateCodexTicketBatch(ctx context.Context, ids []in
 	}
 	accounts := make([]*service.Account, 0, len(ids))
 	var changedIDs []int64
-	for _, id := range sortedUniqueAccountIDs(append([]int64(nil), ids...)) {
+	ordered := sortedUniqueAccountIDs(append([]int64(nil), ids...))
+	locked := map[int64]*ent.Account{}
+	if limit > 0 && len(ordered) > 1 {
+		rows, e := c.Account.Query().Where(dbaccount.IDIn(ordered...)).Order(ent.Asc(dbaccount.FieldID)).ForUpdate().All(ctx)
+		if e != nil {
+			return nil, e
+		}
+		for _, row := range rows {
+			locked[row.ID] = row
+		}
+		ordered = nil
+		seen := map[int64]bool{}
+		for _, id := range ids {
+			if !seen[id] {
+				ordered = append(ordered, id)
+				seen[id] = true
+			}
+		}
+	}
+	for _, id := range ordered {
 		if len(ids) > 1 && limit > 0 && active >= limit {
 			break
 		}
-		m, err := c.Account.Query().Where(dbaccount.IDEQ(id)).ForUpdate().Only(ctx)
+		m := locked[id]
+		var err error
+		if m == nil {
+			m, err = c.Account.Query().Where(dbaccount.IDEQ(id)).ForUpdate().Only(ctx)
+		}
 		if err != nil {
 			return nil, translatePersistenceError(err, service.ErrAccountNotFound, nil)
 		}

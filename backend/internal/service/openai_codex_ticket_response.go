@@ -1,17 +1,13 @@
 package service
 
 import (
-	"bufio"
 	"bytes"
-	"compress/gzip"
-	"compress/zlib"
 	"errors"
 	"io"
 	"strings"
 
-	"github.com/andybalholm/brotli"
-	"github.com/klauspost/compress/zstd"
 	"github.com/liulixin-lex/xy2api/internal/pkg/iqcheck"
+	"github.com/liulixin-lex/xy2api/internal/pkg/statestream"
 	"github.com/tidwall/gjson"
 )
 
@@ -22,44 +18,6 @@ const codexTicketResponseLimit = 2 << 20
 func codexTicketResponseModel(body io.Reader, encoding string) (string, error) {
 	if body == nil {
 		return "", errors.New("missing response")
-	}
-	bounded := io.LimitReader(body, codexTicketResponseLimit+1)
-	reader := bounded
-	switch strings.ToLower(strings.TrimSpace(encoding)) {
-	case "", "identity":
-	case "gzip":
-		r, e := gzip.NewReader(bounded)
-		if e != nil {
-			return "", e
-		}
-		defer func() { _ = r.Close() }()
-		reader = r
-	case "deflate":
-		r, e := zlib.NewReader(bounded)
-		if e != nil {
-			return "", e
-		}
-		defer func() { _ = r.Close() }()
-		reader = r
-	case "br":
-		reader = brotli.NewReader(bounded)
-	case "zstd":
-		r, e := zstd.NewReader(bounded, zstd.WithDecoderMaxMemory(8<<20), zstd.WithDecoderConcurrency(1))
-		if e != nil {
-			return "", e
-		}
-		defer r.Close()
-		reader = r
-	default:
-		return "", errors.New("unsupported content encoding")
-	}
-	raw, e := io.ReadAll(io.LimitReader(reader, codexTicketResponseLimit+1))
-	if e != nil || len(raw) > codexTicketResponseLimit {
-		return "", errors.New("incomplete or oversized response")
-	}
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 {
-		return "", errors.New("empty response")
 	}
 	actual := ""
 	completed := false
@@ -118,45 +76,10 @@ func codexTicketResponseModel(body io.Reader, encoding string) (string, error) {
 		terminalID = id
 		return nil
 	}
-	if raw[0] == '{' {
-		if e := parse(raw, ""); e != nil {
-			return "", e
-		}
-	} else {
-		scanner := bufio.NewScanner(bytes.NewReader(raw))
-		scanner.Buffer(make([]byte, 4096), 1<<20)
-		var data []byte
-		event := ""
-		flush := func() error { e := parse(data, event); data = nil; event = ""; return e }
-		for scanner.Scan() {
-			line := scanner.Text()
-			if line == "" {
-				if e := flush(); e != nil {
-					return "", e
-				}
-				continue
-			}
-			if strings.HasPrefix(line, "event:") {
-				event = strings.TrimSpace(line[6:])
-			}
-			if !strings.HasPrefix(line, "data:") && !strings.HasPrefix(line, "event:") && !strings.HasPrefix(line, "id:") && !strings.HasPrefix(line, "retry:") && !strings.HasPrefix(line, ":") {
-				return "", errors.New("invalid SSE line")
-			}
-			if strings.HasPrefix(line, "data:") {
-				data = append(data, strings.TrimPrefix(line[5:], " ")...)
-				data = append(data, '\n')
-				if len(data) > 1<<20 {
-					return "", errors.New("oversized event")
-				}
-			}
-		}
-		if scanner.Err() != nil {
-			return "", errors.New("invalid response stream")
-		}
-		if e := flush(); e != nil {
-			return "", e
-		}
+	if e := statestream.Walk(body, encoding, parse); e != nil {
+		return "", e
 	}
+
 	if !completed {
 		return "", errors.New("response did not complete")
 	}

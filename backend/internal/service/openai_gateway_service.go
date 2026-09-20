@@ -512,6 +512,8 @@ type OpenAIGatewayService struct {
 	openaiCodexTickets           sync.Map
 	openaiCodexAccountMu         sync.Mutex
 	openaiCodexObservationMu     sync.Mutex
+	openaiCodexEvents            []CodexTicketTraceEvent
+	openaiCodexEventsDropped     int64
 	openaiCodexObservations      map[string]CodexTicketObservation
 	openaiCodexTransportMu       sync.RWMutex
 	openaiCodexAccountJobs       map[int64]*codexAccountTicketJob

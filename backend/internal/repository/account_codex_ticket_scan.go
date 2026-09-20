@@ -21,7 +21,7 @@ func (r *accountRepository) ListCodexTicketScanPage(ctx context.Context, after i
  OR (a.type='setup-token' AND key='access_token')),'{}'::jsonb),
  COALESCE((SELECT jsonb_object_agg(key,CASE WHEN key LIKE 'codex_turn_ticket:%' THEN value-'state' ELSE value END)
  FROM jsonb_each(COALESCE(a.extra,'{}'::jsonb))
- WHERE key LIKE 'codex_turn_ticket:%' OR key IN ('codex_ticket_config','codex_ticket_runtime','codex_fingerprint_mode','codex_fingerprint_seed','enable_tls_fingerprint','tls_fingerprint_profile_id','openai_responses_mode','openai_passthrough')),'{}'::jsonb),
+ WHERE key LIKE 'codex_turn_ticket:%' OR key IN ('codex_ticket_config','codex_ticket_quality','codex_ticket_runtime','codex_fingerprint_mode','codex_fingerprint_seed','enable_tls_fingerprint','tls_fingerprint_profile_id','openai_responses_mode','openai_passthrough')),'{}'::jsonb),
  CASE WHEN p.id IS NULL THEN NULL ELSE jsonb_build_object('ID',p.id,'Protocol',p.protocol,'Host',p.host,'Port',p.port,'Username',p.username,'Password',p.password,'Status',p.status) END
  FROM accounts a LEFT JOIN proxies p ON p.id=a.proxy_id AND p.deleted_at IS NULL
  WHERE a.id>$1 AND a.deleted_at IS NULL AND a.platform='openai' AND a.parent_account_id IS NULL

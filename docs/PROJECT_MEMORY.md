@@ -4,6 +4,16 @@
 
 ## 当前交接状态
 
+### STATE 可靠性升级与本地源码提交（2026-09-20）
+
+- 基线为 `1a4fd39c71eadc4d5d587a39373bcded692e4fa5` / 0.1.4；源码位于 `/xy/artifacts/codex-state-upgrade/reliability-work`，分支 `feat/state-reliability`。用户要求验证后提交源码，并由用户后续推送；本轮不推送、合并、发布、部署或调用真实账号。
+- 已实现 STATE 开关独立即时保存与修订冲突保护、持久手动获取任务、多代理加密配置和同出口检测、健康轮换、完整响应验证、候补与版本隔离、共享预算及独立质量观察。前端按钮和提示精简，预算/质量/诊断放入详情；管理员关闭不受打票中状态阻碍。
+- 所有新策略默认关闭，逐步启用；质量隔离默认关闭。生产成功率、覆盖率、质量保持和 265 限流目标尚未实测，须执行批准的真实账号观察窗口；本地通过不代表这些目标已达到。
+- 后端全量 unit、修复后 STATE 回归、service/parser race（-parallel=1 避免旧 Gin 测试全局变量竞争，保留用例内部并发）、真实 PostgreSQL/Redis STATE 集成与 repository race、全部 7 项 Go lint、Wire 生成、前端类型/i18n/生产构建、嵌入前端后端构建均已通过。前端全量初跑 2326/2327 通过，旧单代理 UI 断言更新后 64 项受影响回归通过，最后 113 项控制/设置/中英文回归通过。1280/390 深浅主题模拟 API 浏览器验证通过。macOS 专用脚本无法用 Linux 的 stat 参数完成，不计为通过。
+- 一个并行只读子智能体完成多轮并发、代理、流验证与回滚脚本审查。静态检查发现的错误处理和表达式问题全部修复；race 发现的完成信号早于回调问题已修复，并原子化有界收尾测试计数；资源中断、一次运行中误清缓存造成的导出文件缺失与后续成功复验均保留字面记录，没有抹掉失败。
+- 四角色继续使用 `/xy/artifacts/codex-state-upgrade/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`。本次同输入三态、源码哈希、补丁重建、Git 提交和主仓库本地分支导入的最终事实以 `reliability-20260920/FINAL_RESULT.json`、`COMMIT_RESULT.json`、`LOCAL_BRANCH.json` 为准；这些记录在事务执行后生成。旧四角色在 `reliability-20260920/previous/` 留存。
+- 原 `/xy/xy2api` 的 main 工作文件保持不变，完成的分支将以本地 Git fetch 导入供后续推送；提交树必须与已验证源码归档一致。源码回滚仅适用于独立副本，不操作生产数据库，不恢复过期或撤销票据。
+
 ### STATE / XY2API 0.1.4 已发布（2026-09-19）
 
 - 用户授权推送、合并及发版；功能与版本 PR [#50](https://github.com/liulixin-lex/xy2api/pull/50) 在 16/16 检查通过后正常合入 `f6161d15eb4d7ac5d51f0badc55d9c5d0e8bc931`。annotated `v0.1.4` 指向该提交，兼容版本保持 Sub2API 0.2.6；没有调整保护规则。
@@ -180,6 +190,8 @@
 Sub2API 兼容基线已更新到 `v0.2.6`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+- `20260920-state-reliability`：实现与代码门禁已完成，正在封存同输入源码三态并创建本地提交；最终 commit/四角色哈希/干净状态/主仓库分支导入见 reliability-20260920 的 FINAL_RESULT.json、COMMIT_RESULT.json、LOCAL_BRANCH.json。无远端推送或生产操作；真实账号灰度仍待执行。
 
 
 
@@ -834,3 +846,13 @@ pnpm --dir frontend run build
 - 已推送 STATE 功能分支，经 PR #50 全部门禁正常合并并发布 annotated v0.1.4；正式五平台包、版本、GHCR 双架构/别名及隔离新装已核验。
 - 发布版本仅晋级 VERSION 与 provenance 产品版本，兼容 0.2.6、业务源码及历史迁移保持。原 /xy/xy2api 未改写，无生产部署或真实账号调用。
 - 四角色及同输入三态、失败纠错、源码恢复哈希继续追加原验证账本；本收尾仅补交接文档，标签不移动。真实账号观察尚未执行。
+
+### 2026-09-20T18:06:35.930885+00:00 — `20260920-state-reliability` — 本地实现与源码交付
+
+- 基线为 `1a4fd39c71eadc4d5d587a39373bcded692e4fa5` / 0.1.4；源码位于 `/xy/artifacts/codex-state-upgrade/reliability-work`，分支 `feat/state-reliability`。用户要求验证后提交源码，并由用户后续推送；本轮不推送、合并、发布、部署或调用真实账号。
+- 已实现 STATE 开关独立即时保存与修订冲突保护、持久手动获取任务、多代理加密配置和同出口检测、健康轮换、完整响应验证、候补与版本隔离、共享预算及独立质量观察。前端按钮和提示精简，预算/质量/诊断放入详情；管理员关闭不受打票中状态阻碍。
+- 所有新策略默认关闭，逐步启用；质量隔离默认关闭。生产成功率、覆盖率、质量保持和 265 限流目标尚未实测，须执行批准的真实账号观察窗口；本地通过不代表这些目标已达到。
+- 后端全量 unit、修复后 STATE 回归、service/parser race（-parallel=1 避免旧 Gin 测试全局变量竞争，保留用例内部并发）、真实 PostgreSQL/Redis STATE 集成与 repository race、全部 7 项 Go lint、Wire 生成、前端类型/i18n/生产构建、嵌入前端后端构建均已通过。前端全量初跑 2326/2327 通过，旧单代理 UI 断言更新后 64 项受影响回归通过，最后 113 项控制/设置/中英文回归通过。1280/390 深浅主题模拟 API 浏览器验证通过。macOS 专用脚本无法用 Linux 的 stat 参数完成，不计为通过。
+- 一个并行只读子智能体完成多轮并发、代理、流验证与回滚脚本审查。静态检查发现的错误处理和表达式问题全部修复；race 发现的完成信号早于回调问题已修复，并原子化有界收尾测试计数；资源中断、一次运行中误清缓存造成的导出文件缺失与后续成功复验均保留字面记录，没有抹掉失败。
+- 四角色继续使用 `/xy/artifacts/codex-state-upgrade/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`。本次同输入三态、源码哈希、补丁重建、Git 提交和主仓库本地分支导入的最终事实以 `reliability-20260920/FINAL_RESULT.json`、`COMMIT_RESULT.json`、`LOCAL_BRANCH.json` 为准；这些记录在事务执行后生成。旧四角色在 `reliability-20260920/previous/` 留存。
+- 原 `/xy/xy2api` 的 main 工作文件保持不变，完成的分支将以本地 Git fetch 导入供后续推送；提交树必须与已验证源码归档一致。源码回滚仅适用于独立副本，不操作生产数据库，不恢复过期或撤销票据。
