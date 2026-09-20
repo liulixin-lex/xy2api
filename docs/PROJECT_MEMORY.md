@@ -12,7 +12,7 @@
 - 后端全量 unit、修复后 STATE 回归、service/parser race（-parallel=1 避免旧 Gin 测试全局变量竞争，保留用例内部并发）、真实 PostgreSQL/Redis STATE 集成与 repository race、全部 7 项 Go lint、Wire 生成、前端类型/i18n/生产构建、嵌入前端后端构建均已通过。前端全量初跑 2326/2327 通过，旧单代理 UI 断言更新后 64 项受影响回归通过，最后 113 项控制/设置/中英文回归通过。1280/390 深浅主题模拟 API 浏览器验证通过。macOS 专用脚本无法用 Linux 的 stat 参数完成，不计为通过。
 - 一个并行只读子智能体完成多轮并发、代理、流验证与回滚脚本审查。静态检查发现的错误处理和表达式问题全部修复；race 发现的完成信号早于回调问题已修复，并原子化有界收尾测试计数；资源中断、一次运行中误清缓存造成的导出文件缺失与后续成功复验均保留字面记录，没有抹掉失败。
 - 四角色继续使用 `/xy/artifacts/codex-state-upgrade/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`。本次同输入三态、源码哈希、补丁重建、Git 提交和主仓库本地分支导入的最终事实以 `reliability-20260920/FINAL_RESULT.json`、`COMMIT_RESULT.json`、`LOCAL_BRANCH.json` 为准；这些记录在事务执行后生成。旧四角色在 `reliability-20260920/previous/` 留存。
-- 原 `/xy/xy2api` 的 main 工作文件保持不变，完成的分支将以本地 Git fetch 导入供后续推送；提交树必须与已验证源码归档一致。源码回滚仅适用于独立副本，不操作生产数据库，不恢复过期或撤销票据。
+- 原 `/xy/xy2api` 的 main 工作文件保持不变，完成的分支已以本地 Git fetch 导入供后续推送；提交树必须与已验证源码归档一致。源码回滚仅适用于独立副本，不操作生产数据库，不恢复过期或撤销票据。
 
 ### STATE / XY2API 0.1.4 已发布（2026-09-19）
 
@@ -191,7 +191,7 @@ Sub2API 兼容基线已更新到 `v0.2.6`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
-- `20260920-state-reliability`：实现与代码门禁已完成，正在封存同输入源码三态并创建本地提交；最终 commit/四角色哈希/干净状态/主仓库分支导入见 reliability-20260920 的 FINAL_RESULT.json、COMMIT_RESULT.json、LOCAL_BRANCH.json。无远端推送或生产操作；真实账号灰度仍待执行。
+- `20260920-state-reliability`：实现、代码门禁、同输入源码三态、补丁重建和本地源码提交均已完成；最终 commit/四角色哈希/干净状态/主仓库分支导入见 reliability-20260920 的 FINAL_RESULT.json、COMMIT_RESULT.json、LOCAL_BRANCH.json。无远端推送或生产操作；真实账号灰度仍待执行。
 
 
 
@@ -856,3 +856,9 @@ pnpm --dir frontend run build
 - 一个并行只读子智能体完成多轮并发、代理、流验证与回滚脚本审查。静态检查发现的错误处理和表达式问题全部修复；race 发现的完成信号早于回调问题已修复，并原子化有界收尾测试计数；资源中断、一次运行中误清缓存造成的导出文件缺失与后续成功复验均保留字面记录，没有抹掉失败。
 - 四角色继续使用 `/xy/artifacts/codex-state-upgrade/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`。本次同输入三态、源码哈希、补丁重建、Git 提交和主仓库本地分支导入的最终事实以 `reliability-20260920/FINAL_RESULT.json`、`COMMIT_RESULT.json`、`LOCAL_BRANCH.json` 为准；这些记录在事务执行后生成。旧四角色在 `reliability-20260920/previous/` 留存。
 - 原 `/xy/xy2api` 的 main 工作文件保持不变，完成的分支将以本地 Git fetch 导入供后续推送；提交树必须与已验证源码归档一致。源码回滚仅适用于独立副本，不操作生产数据库，不恢复过期或撤销票据。
+
+### 2026-09-20 — `20260920-state-reliability` — 源码提交与三态验收完成
+
+- 功能提交 `68d28d7aaa528977f167d815b46fd6381c6d05b0` 已创建，64 个文件；验证源码树与提交树一致。`/xy/xy2api` 已导入同名本地分支 `feat/state-reliability`，原 main / `9c8abed87987b5f4a8f278cdd411fe3ee7273713` 及工作文件保持不变。
+- 同输入的手动软等待跳过、无效草稿下关闭行为为 BASELINE false/false、MODIFIED true/true、ROLLBACK false/false；三者 exit 0。回滚恢复 4,131 个文件与原树哈希一致；严格补丁重建 4,151 个文件与交付树一致，上游审计通过。首次严格补丁因本条新增交接文档末尾空行失败，格式已修复并重建通过。
+- 本条交接只更新文档；最终分支头、四角色哈希及干净状态见交付目录的最终记录。未推送远端，未部署或执行真实账号成功率灰度。
