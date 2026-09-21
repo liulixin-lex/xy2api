@@ -33,10 +33,11 @@ func TestCodexReliabilityProxyEncryptionMigrationRequiresPersistentKey(t *testin
 			// Match config.Load's generated, non-empty key with configured=false.
 			svc.cfg.Totp.EncryptionKey = strings.Repeat("ab", 32)
 			svc.cfg.Totp.EncryptionKeyConfigured = false
-			if source == "configuration" {
+			switch source {
+			case "configuration":
 				delete(repo.values, SettingKeyOpenAICodexTicketHarvestProxyURL)
 				svc.cfg.Gateway.OpenAICodexTicket.HarvestProxyURL = legacy
-			} else if source == "nil_config" {
+			case "nil_config":
 				svc.cfg = nil
 			}
 			svc.codexProxyEncryptor = codexForbiddenCipher{}
