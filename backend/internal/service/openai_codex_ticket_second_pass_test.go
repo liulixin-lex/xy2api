@@ -184,7 +184,7 @@ func TestCodexTicketSecondPassObservationDoesNotChangeResponse(t *testing.T) {
 	for _, tc := range []struct{ body, encoding, result string }{
 		{watchdogCompletedEvent("gpt-6-astra"), "", "verified"},
 		{watchdogCompletedEvent("gpt-5.6-sol"), "", "model_mismatch"},
-		{strings.Repeat("x", codexTicketResponseLimit+1), "", "oversized"},
+		{strings.Repeat("x", codexTicketResponseLimit+1), "", "unconfirmed"},
 		{"truncated", "", "unconfirmed"},
 		{"encoded", "unknown", "unsupported_encoding"},
 	} {
@@ -372,8 +372,8 @@ func TestCodexTicketSecondPassRevokedValueKeepsOriginalDeadline(t *testing.T) {
 	live, err = repo.GetByID(context.Background(), 41)
 	require.NoError(t, err)
 	replacement := parseOpenAICodexTicketFromAny(41, old.Model, live.Extra[openAICodexTicketExtraKey(old.Model)])
-	require.True(t, replacement.validFor(live, codexAccountTicketConfigOf(live), time.Now()))
-	require.EqualValues(t, 2, calls.Load(), "revoked values require acquisition and fixed-proxy replay")
+	require.False(t, replacement.validFor(live, codexAccountTicketConfigOf(live), time.Now()), "rediscovering a revoked value must not resurrect it")
+	require.EqualValues(t, 2, calls.Load(), "rediscovered value is checked but remains revoked")
 	require.True(t, old.ExpiresAt.Equal(replacement.ExpiresAt))
 	require.True(t, old.FirstObservedAt.Equal(replacement.FirstObservedAt))
 }

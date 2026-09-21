@@ -14,6 +14,7 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 	defer func() {
 		if err == nil {
 			s.observeCodexTicketResponse(request, response)
+			s.observeCodexPressure(request, response, account)
 		}
 	}()
 	s.openaiCodexTransportMu.RLock()

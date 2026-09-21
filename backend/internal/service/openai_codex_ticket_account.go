@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -41,37 +42,47 @@ func codexTicketTargetLength(plan string) int {
 
 // This key is server managed and is never accepted through general account edits.
 type codexAccountTicketConfig struct {
-	Models        []string `json:"models,omitempty"`
-	MissingPolicy string   `json:"missing_policy,omitempty"`
-	TicketPlan    string   `json:"ticket_plan"`
-	Enabled       bool     `json:"enabled"`
-	Model         string   `json:"model"`
-	ProxyURL      string   `json:"proxy_url,omitempty"` // Legacy data only; harvesting always uses the global pool.
-	Revision      string   `json:"revision"`
+	ConfigRevision string   `json:"config_revision,omitempty"`
+	Models         []string `json:"models,omitempty"`
+	MissingPolicy  string   `json:"missing_policy,omitempty"`
+	TicketPlan     string   `json:"ticket_plan"`
+	Enabled        bool     `json:"enabled"`
+	Model          string   `json:"model"`
+	ProxyURL       string   `json:"proxy_url,omitempty"` // Legacy data only; harvesting always uses the global pool.
+	Revision       string   `json:"revision"`
 }
 
 type CodexAccountTicketUpdate struct {
-	Models        []string `json:"models,omitempty"`
-	MissingPolicy string   `json:"missing_policy,omitempty"`
-	TicketPlan    string   `json:"ticket_plan"`
-	Enabled       bool     `json:"enabled"`
-	ProxyURL      string   `json:"proxy_url"`
-	Model         string   `json:"model"`
-	ClearProxy    bool     `json:"clear_proxy"`
+	ExpectedRevision string   `json:"expected_revision,omitempty"`
+	RequireRevision  bool     `json:"-"`
+	PreserveEnabled  bool     `json:"-"`
+	GuardEnable      bool     `json:"-"`
+	Models           []string `json:"models,omitempty"`
+	MissingPolicy    string   `json:"missing_policy,omitempty"`
+	TicketPlan       string   `json:"ticket_plan"`
+	Enabled          bool     `json:"enabled"`
+	ProxyURL         string   `json:"proxy_url"`
+	Model            string   `json:"model"`
+	ClearProxy       bool     `json:"clear_proxy"`
 }
 
 type CodexAccountTicketStatus struct {
-	UpdatedAt          time.Time  `json:"updated_at"`
-	IssuedAt           *time.Time `json:"issued_at,omitempty"`
-	FirstObservedAt    *time.Time `json:"first_observed_at,omitempty"`
-	LastReplayAt       *time.Time `json:"last_replay_at,omitempty"`
-	LastBusinessAt     *time.Time `json:"last_business_at,omitempty"`
-	LastBusinessResult string     `json:"last_business_result,omitempty"`
-	LastStage          string     `json:"last_stage,omitempty"`
-	LastCode           string     `json:"last_code,omitempty"`
-	LastReason         string     `json:"last_reason,omitempty"`
-	LastHTTPStatus     int        `json:"last_http_status,omitempty"`
-	ObservedLength     int        `json:"observed_length,omitempty"`
+	Quality            *CodexTicketQualityStatus `json:"quality,omitempty"`
+	Standby            *CodexTicketSlotStatus    `json:"standby,omitempty"`
+	Budget             *CodexTicketBudgetStatus  `json:"budget,omitempty"`
+	Task               *CodexTicketTask          `json:"task,omitempty"`
+	ConfigRevision     string                    `json:"config_revision"`
+	UpdatedAt          time.Time                 `json:"updated_at"`
+	IssuedAt           *time.Time                `json:"issued_at,omitempty"`
+	FirstObservedAt    *time.Time                `json:"first_observed_at,omitempty"`
+	LastReplayAt       *time.Time                `json:"last_replay_at,omitempty"`
+	LastBusinessAt     *time.Time                `json:"last_business_at,omitempty"`
+	LastBusinessResult string                    `json:"last_business_result,omitempty"`
+	LastStage          string                    `json:"last_stage,omitempty"`
+	LastCode           string                    `json:"last_code,omitempty"`
+	LastReason         string                    `json:"last_reason,omitempty"`
+	LastHTTPStatus     int                       `json:"last_http_status,omitempty"`
+	ObservedLength     int                       `json:"observed_length,omitempty"`
 
 	Counters             map[string]int64           `json:"counters"`
 	Models               []string                   `json:"models,omitempty"`
@@ -103,6 +114,13 @@ type CodexAccountTicketStatus struct {
 }
 
 type codexAccountTicketJob struct {
+	quality              bool
+	taskID               string
+	manual               bool
+	startAttempt         int
+	proxy                CodexHarvestProxy
+	poolRevision         string
+	poolURL              string
 	transportFingerprint string
 	model                string
 	leaseToken           string
@@ -117,8 +135,16 @@ type codexAccountTicketJob struct {
 	retryAfter           time.Time
 }
 
-func codexAccountTicketConfigOf(account *Account) codexAccountTicketConfig {
-	out := codexAccountTicketConfig{MissingPolicy: "block", Models: []string{openAICodexTicketDefaultModel, openAICodexTicketDefaultSolModel}, Model: openAICodexTicketDefaultModel, TicketPlan: codexTicketPlanPro}
+func codexAccountTicketConfigOf(account *Account) (out codexAccountTicketConfig) {
+	defer func() {
+		if out.ConfigRevision == "" {
+			out.ConfigRevision = out.Revision
+		}
+		if out.ConfigRevision == "" {
+			out.ConfigRevision = "unconfigured"
+		}
+	}()
+	out = codexAccountTicketConfig{MissingPolicy: "block", Models: []string{openAICodexTicketDefaultModel, openAICodexTicketDefaultSolModel}, Model: openAICodexTicketDefaultModel, TicketPlan: codexTicketPlanPro}
 	if account == nil || account.Extra == nil {
 		return out
 	}
@@ -151,6 +177,9 @@ func codexAccountTicketConfigOf(account *Account) codexAccountTicketConfig {
 	// An incomplete or imported legacy blob must never opt an account in.
 	if out.Revision == "" {
 		out.Enabled = false
+	}
+	if out.ConfigRevision == "" {
+		out.ConfigRevision = out.Revision
 	}
 	return out
 }
@@ -219,11 +248,50 @@ func (s *OpenAIGatewayService) GetCodexAccountTicketStatus(ctx context.Context, 
 	return status, nil
 }
 func (s *OpenAIGatewayService) codexModelTicketStatus(a *Account, ac codexAccountTicketConfig, model, pool string, global bool) *CodexAccountTicketStatus {
-	st := &CodexAccountTicketStatus{UpdatedAt: time.Now(), TicketPlan: ac.TicketPlan, TargetLength: codexTicketTargetLength(ac.TicketPlan), Enabled: ac.Enabled, GlobalEnabled: global, Model: model, MissingPolicy: ac.MissingPolicy, ProxyConfigured: pool != "" && ValidateOpenAICodexTicketHarvestProxyURL(pool) == nil, FixedProxyConfigured: a.Proxy != nil && a.ProxyID != nil, State: "waiting", Protection: "paused", IQStatus: a.IQCheck.Status}
+	st := &CodexAccountTicketStatus{ConfigRevision: ac.ConfigRevision, UpdatedAt: time.Now(), TicketPlan: ac.TicketPlan, TargetLength: codexTicketTargetLength(ac.TicketPlan), Enabled: ac.Enabled, GlobalEnabled: global, Model: model, MissingPolicy: ac.MissingPolicy, ProxyConfigured: pool != "" && ValidateOpenAICodexTicketHarvestProxyURL(pool) == nil, FixedProxyConfigured: a.Proxy != nil && a.ProxyID != nil, State: "waiting", Protection: "paused", IQStatus: a.IQCheck.Status}
 	if u, e := url.Parse(strings.ReplaceAll(pool, "{sid}", "%7Bsid%7D")); e == nil {
 		st.ProxyDisplay = u.Host
 	}
 	rt := codexTicketRuntimes(a)[model]
+	if s.openAICodexTicketConfig().QualityObservationEnabled {
+		q := codexQualityOf(a, model)
+		mode := "observe"
+		if s.openAICodexTicketConfig().QualityIsolationEnabled {
+			mode = "isolate"
+		}
+		st.Quality = &CodexTicketQualityStatus{Version: q.Version, Mode: mode, LastResult: q.LastResult, NextAt: q.NextAt, Baseline: q.Baseline, Isolated: q.Isolated, CompletedQuestions: q.Index}
+		if len(q.Rounds) > 0 {
+			latest := q.Rounds[len(q.Rounds)-1]
+			st.Quality.Latest = &latest
+		}
+	}
+	st.Task = codexTaskStatus(a, rt, time.Now())
+	if st.Task.active() && (rt.LeaseUntil == nil || !rt.LeaseUntil.After(time.Now())) {
+		copyRT := rt
+		activateCodexPendingManual(&copyRT)
+		if _, _, available := s.selectCodexHarvestProxy(&copyRT, time.Now()); !available {
+			st.Task.State = "waiting"
+			st.Task.WaitReason = "proxy_unavailable"
+			if snapshot := s.codexProxySnapshot(); snapshot != nil {
+				for _, entry := range snapshot.Entries {
+					if entry.Enabled && (copyRT.RequestedProxyID == "" || copyRT.RequestedProxyID == entry.ID) && entry.RetryAt.After(time.Now()) && (st.Task.RetryAt == nil || entry.RetryAt.Before(*st.Task.RetryAt)) {
+						retry := entry.RetryAt
+						st.Task.RetryAt = &retry
+					}
+				}
+			}
+		}
+	}
+	if s.openAICodexTicketConfig().AdaptiveSchedulingEnabled || s.openAICodexTicketConfig().QualityObservationEnabled {
+		budget := codexBudgetStatus(a, model, time.Now())
+		st.Budget = &budget
+	}
+	if s.openAICodexTicketConfig().StandbyEnabled {
+		standby := parseOpenAICodexTicketFromAny(a.ID, model, a.Extra[codexStandbyKey(model)])
+		if standby != nil {
+			st.Standby = &CodexTicketSlotStatus{Usable: standby.validFor(a, ac, time.Now()), ExpiresAt: standby.ExpiresAt, LastReplayAt: standby.LastReplayAt}
+		}
+	}
 	st.Counters = map[string]int64{"rounds_started": rt.RoundsStarted, "rounds_succeeded": rt.RoundsSucceeded, "rounds_failed": rt.RoundsFailed, "watchdog_triggers": rt.TriggerCount, "business_checked": rt.BusinessChecked, "business_unconfirmed": rt.BusinessUnconfirmed}
 	st.LastReplayAt, st.LastBusinessAt, st.LastBusinessResult = rt.LastReplayAt, rt.LastBusinessAt, rt.LastBusinessResult
 	st.LastStage, st.LastCode, st.LastReason, st.LastHTTPStatus, st.ObservedLength = rt.LastStage, rt.LastCode, rt.LastReason, rt.LastHTTPStatus, rt.ObservedLength
@@ -328,34 +396,50 @@ func (s *OpenAIGatewayService) ConfigureCodexAccountTicket(ctx context.Context, 
 	_, err = s.mutateCodexTicket(ctx, id, 0, func(a *Account, _ int, _ time.Time) (bool, error) {
 		old := codexAccountTicketConfigOf(a)
 		next := old
-		next.Enabled = input.Enabled
-		if input.TicketPlan != "" {
-			next.TicketPlan = strings.ToLower(strings.TrimSpace(input.TicketPlan))
+		if input.RequireRevision && input.ExpectedRevision == "" || input.ExpectedRevision != "" && input.ExpectedRevision != old.ConfigRevision {
+			return false, ErrCodexTicketConflict
 		}
-		if next.TicketPlan != codexTicketPlanPro && next.TicketPlan != codexTicketPlanTeam {
-			return false, apperrors.BadRequest("CODEX_TICKET_PLAN", "Ticket plan must be pro (292) or team (332)")
+		if !input.PreserveEnabled {
+			next.Enabled = input.Enabled
 		}
-		if input.Models != nil {
-			next.Models = slices.Clone(input.Models)
-		} else if input.Model != "" {
-			next.Models = []string{input.Model}
+		if input.GuardEnable && !old.Enabled && next.Enabled && input.ExpectedRevision == "" {
+			return false, ErrCodexTicketConflict
 		}
-		if len(next.Models) == 0 || len(next.Models) > 20 {
-			return false, apperrors.BadRequest("CODEX_TICKET_MODEL", "Select between 1 and 20 models")
-		}
-		seen := map[string]bool{}
-		for _, m := range next.Models {
-			if strings.TrimSpace(m) != m || m == "" || len(m) > 128 || seen[m] || (!slices.Contains(old.Models, m) && !slices.Contains(s.openAICodexTicketConfig().Models, m) && m != openAICodexTicketDefaultModel && m != openAICodexTicketDefaultSolModel) {
-				return false, apperrors.BadRequest("CODEX_TICKET_MODEL", "Select a supported STATE model")
+		// An explicit off action never depends on unrelated, possibly invalid drafts.
+		disabling := !input.PreserveEnabled && !input.Enabled
+		if !disabling {
+			if input.TicketPlan != "" {
+				next.TicketPlan = strings.ToLower(strings.TrimSpace(input.TicketPlan))
 			}
-			seen[m] = true
+			if next.TicketPlan != codexTicketPlanPro && next.TicketPlan != codexTicketPlanTeam {
+				return false, apperrors.BadRequest("CODEX_TICKET_PLAN", "Ticket plan must be pro (292) or team (332)")
+			}
+			if input.Models != nil {
+				next.Models = slices.Clone(input.Models)
+			} else if input.Model != "" {
+				next.Models = []string{input.Model}
+			}
+			if len(next.Models) == 0 || len(next.Models) > 20 {
+				return false, apperrors.BadRequest("CODEX_TICKET_MODEL", "Select between 1 and 20 models")
+			}
+			seen := map[string]bool{}
+			for _, m := range next.Models {
+				if strings.TrimSpace(m) != m || m == "" || len(m) > 128 || seen[m] || (!slices.Contains(old.Models, m) && !slices.Contains(s.openAICodexTicketConfig().Models, m) && m != openAICodexTicketDefaultModel && m != openAICodexTicketDefaultSolModel) {
+					return false, apperrors.BadRequest("CODEX_TICKET_MODEL", "Select a supported STATE model")
+				}
+				seen[m] = true
+			}
+			next.Model = next.Models[0]
+			if input.MissingPolicy != "" {
+				next.MissingPolicy = input.MissingPolicy
+			}
+			if next.MissingPolicy != "block" && next.MissingPolicy != "allow_unprotected" {
+				return false, apperrors.BadRequest("CODEX_TICKET_POLICY", "Missing policy must be block or allow_unprotected")
+			}
 		}
-		next.Model = next.Models[0]
-		if input.MissingPolicy != "" {
-			next.MissingPolicy = input.MissingPolicy
-		}
-		if next.MissingPolicy != "block" && next.MissingPolicy != "allow_unprotected" {
-			return false, apperrors.BadRequest("CODEX_TICKET_POLICY", "Missing policy must be block or allow_unprotected")
+		configChanged := next.Enabled != old.Enabled || next.TicketPlan != old.TicketPlan || !slices.Equal(next.Models, old.Models) || next.MissingPolicy != old.MissingPolicy || old.ConfigRevision == "" || old.Revision == ""
+		if configChanged {
+			next.ConfigRevision = uuid.NewString()
 		}
 		changed := next.Enabled != old.Enabled || next.TicketPlan != old.TicketPlan || !slices.Equal(next.Models, old.Models) || old.Revision == ""
 		if next.Enabled && (pool == "" || ValidateOpenAICodexTicketHarvestProxyURL(pool) != nil || a.Proxy == nil || a.ProxyID == nil) {
@@ -379,6 +463,17 @@ func (s *OpenAIGatewayService) ConfigureCodexAccountTicket(ctx context.Context, 
 		if a.Extra == nil {
 			a.Extra = map[string]any{}
 		}
+		if disabling {
+			for model, rt := range codexTicketRuntimes(a) {
+				rt.Requested = false
+				rt.NextAttemptAt = nil
+				rt.RequestedProxyID = ""
+				rt.Task.finish("cancelled", time.Now())
+				rt.PendingManual = nil
+				rt.PendingProxyID = ""
+				saveCodexTicketRuntime(a, model, rt)
+			}
+		}
 		a.Extra[codexAccountTicketConfigKey] = next
 		return true, nil
 	})
@@ -401,6 +496,27 @@ func (s *OpenAIGatewayService) HarvestCodexAccountTicket(ctx context.Context, id
 	return s.HarvestCodexAccountTicketModel(ctx, id, "")
 }
 func (s *OpenAIGatewayService) HarvestCodexAccountTicketModel(ctx context.Context, id int64, model string) (*CodexAccountTicketStatus, error) {
+	return s.HarvestCodexAccountTicketOptions(ctx, id, model, "", "")
+}
+func (s *OpenAIGatewayService) HarvestCodexAccountTicketOptions(ctx context.Context, id int64, model, proxyID, requestID string) (*CodexAccountTicketStatus, error) {
+	if len(requestID) > 128 {
+		return nil, apperrors.BadRequest("CODEX_TASK_ID", "Request ID is too long")
+	}
+	if proxyID != "" {
+		proxies, err := s.GetCodexHarvestProxies(ctx)
+		if err != nil {
+			return nil, err
+		}
+		found := false
+		for _, proxy := range proxies.Entries {
+			if proxy.ID == proxyID && proxy.Enabled {
+				found = true
+			}
+		}
+		if !found {
+			return nil, apperrors.BadRequest("CODEX_PROXY_DISABLED", "Select an enabled acquisition proxy")
+		}
+	}
 	a, e := s.codexTicketAccountByID(ctx, id)
 	if e != nil {
 		return nil, e
@@ -432,17 +548,47 @@ func (s *OpenAIGatewayService) HarvestCodexAccountTicketModel(ctx context.Contex
 				continue
 			}
 			rt := codexTicketRuntimes(live)[m]
-			if rt.LeaseUntil == nil || !rt.LeaseUntil.After(now) {
-				rt.Requested = true
-				saveCodexTicketRuntime(live, m, rt)
+			if requestID != "" && rt.Task != nil && rt.Task.RequestID == requestID {
+				continue
 			}
+			if rt.LeaseUntil != nil && rt.LeaseUntil.After(now) && rt.Task != nil {
+				if rt.Task.Source == "quality" || !rt.Task.active() {
+					if rt.PendingManual == nil {
+						rt.PendingManual = &CodexTicketTask{ID: uuid.NewString(), RequestID: requestID, Source: "manual", State: "queued", ProxyID: proxyID, CreatedAt: now}
+						rt.PendingProxyID = proxyID
+						rt.RoundsStarted++
+					}
+					saveCodexTicketRuntime(live, m, rt)
+				}
+				continue
+			}
+			if rt.Task.active() {
+				rt.Task.Source = "manual"
+				if rt.LeaseUntil == nil || !rt.LeaseUntil.After(now) {
+					rt.Requested = true
+					rt.RequestedProxyID = proxyID
+					rt.NextAttemptAt = nil
+					rt.Task.ProxyID = proxyID
+				}
+			} else {
+				rt.RoundsStarted++
+				rt.Task = &CodexTicketTask{ID: uuid.NewString(), RequestID: requestID, Source: "manual", State: "queued", ProxyID: proxyID, CreatedAt: now}
+				if rt.LeaseUntil != nil && rt.LeaseUntil.After(now) {
+					rt.Task.State = "harvesting"
+				} else {
+					rt.Requested = true
+					rt.RequestedProxyID = proxyID
+					rt.NextAttemptAt = nil
+				}
+			}
+			saveCodexTicketRuntime(live, m, rt)
 		}
 		return true, nil
 	})
 	if e != nil {
 		return nil, e
 	}
-	s.startCodexAccountTicketJob(ctx, id, true, model)
+	s.startCodexAccountTicketJob(ctx, id, false, model)
 	return s.GetCodexAccountTicketStatus(ctx, id)
 }
 
@@ -483,12 +629,25 @@ func (s *OpenAIGatewayService) claimCodexTicket(a *Account, active, limit int, n
 	}
 	order := slices.Clone(ac.Models)
 	// Explicit requests take precedence, but never bypass a durable cooldown.
-	slices.SortStableFunc(order, func(a, b string) int {
-		if all[a].Requested && !all[b].Requested {
-			return -1
+	slices.SortStableFunc(order, func(x, y string) int {
+		if s.openAICodexTicketConfig().AdaptiveSchedulingEnabled {
+			tx, ty := s.lookupOpenAICodexTicket(a, x), s.lookupOpenAICodexTicket(a, y)
+			ux, uy := !tx.validFor(a, ac, now), !ty.validFor(a, ac, now)
+			if ux != uy {
+				if ux {
+					return -1
+				}
+				return 1
+			}
 		}
-		if !all[a].Requested && all[b].Requested {
+		if all[x].Requested != all[y].Requested {
+			if all[x].Requested {
+				return -1
+			}
 			return 1
+		}
+		if s.openAICodexTicketConfig().AdaptiveSchedulingEnabled {
+			return all[x].LastAttemptAt.Compare(all[y].LastAttemptAt)
 		}
 		return 0
 	})
@@ -497,23 +656,72 @@ func (s *OpenAIGatewayService) claimCodexTicket(a *Account, active, limit int, n
 			continue
 		}
 		rt := all[m]
-		if rt.RetryAfter != nil && rt.RetryAfter.After(now) {
+		activateCodexPendingManual(&rt)
+		resuming := rt.Task.active() && (rt.NextAttemptAt == nil || !rt.NextAttemptAt.After(now))
+		if resuming && rt.Task.Source != "quality" {
+			rt.Requested = true
+		}
+		if rt.HardRetryAfter != nil && rt.HardRetryAfter.After(now) {
+			continue
+		}
+		if rt.NextAttemptAt != nil && rt.NextAttemptAt.After(now) && !manual && !rt.Requested {
+			continue
+		}
+		if rt.RetryAfter != nil && rt.RetryAfter.After(now) && !manual && (!rt.Task.active() || rt.Task.Source != "manual") {
 			continue
 		}
 		ticket := s.lookupOpenAICodexTicket(a, m)
-		if !manual && !rt.Requested && ticket.validFor(a, ac, now) && !ticket.needsRefresh(now, time.Duration(s.openAICodexTicketConfig().RefreshBeforeSeconds)*time.Second) {
+		lead := time.Duration(s.openAICodexTicketConfig().RefreshBeforeSeconds) * time.Second
+		if s.openAICodexTicketConfig().AdaptiveSchedulingEnabled {
+			lead = codexRenewalLead(&rt, now, time.Duration(s.openAICodexTicketConfig().TTLSeconds)*time.Second)
+		}
+		standby := parseOpenAICodexTicketFromAny(a.ID, m, a.Extra[codexStandbyKey(m)])
+		quality := !manual && !rt.Requested && (s.codexQualityDue(a, m, now) || resuming && rt.Task.Source == "quality") && ticket.validFor(a, ac, now) && !ticket.needsRefresh(now, lead)
+		if s.openAICodexTicketConfig().StandbyEnabled && !manual && !rt.Requested && standby.validFor(a, ac, now) && ticket.validFor(a, ac, now) && ticket.ExpiresAt.After(now.Add(2*time.Minute)) && !quality {
+			continue
+		}
+		if rt.Task.active() && (rt.NextAttemptAt == nil || !rt.NextAttemptAt.After(now)) {
+			rt.Requested = true
+		}
+
+		if !quality && !manual && !rt.Requested && ticket.validFor(a, ac, now) && !ticket.needsRefresh(now, lead) {
+			continue
+		}
+		proxy, poolRevision, available := s.selectCodexHarvestProxy(&rt, now)
+		if !available {
 			continue
 		}
 		until := now.Add(time.Duration(2*s.openAICodexTicketConfig().HarvestAttemptTimeoutSeconds+60) * time.Second)
+		if !quality && rt.RenewalStartedAt == nil {
+			rt.RenewalStartedAt = &now
+		}
+		rt.LastAttemptAt = now
 		rt.LeaseToken = token
 		rt.LeaseUntil = &until
 		rt.Revision = ac.Revision
 		rt.Phase = "harvesting"
-		rt.Attempts = 0
-		rt.RoundsStarted++
+		if !rt.Task.active() {
+			rt.Task = &CodexTicketTask{ID: uuid.NewString(), Source: "automatic", State: "queued", CreatedAt: now}
+			rt.RoundsStarted++
+		}
+		if quality {
+			rt.Task.Source = "quality"
+		}
+		if manual {
+			rt.Task.Source = "manual"
+		}
+		rt.Task.State = "harvesting"
+		rt.Task.WaitReason = ""
+		rt.Task.RetryAt = nil
+		rt.Task.ProxyID = proxy.ID
+		rt.Attempts = rt.Task.Attempts
+		rt.NextAttemptAt = nil
 		rt.Requested = false
 		saveCodexTicketRuntime(a, m, rt)
-		job := &codexAccountTicketJob{transportFingerprint: s.codexTicketTransportFingerprint(a), model: m, leaseToken: token, revision: ac.Revision, fixedFingerprint: codexTicketFixedProxyFingerprint(a), harvestProxyURL: pool, done: make(chan struct{}), running: true}
+		job := &codexAccountTicketJob{quality: quality, taskID: rt.Task.ID, manual: rt.Task.Source == "manual", startAttempt: rt.Task.Attempts, proxy: proxy, poolRevision: poolRevision, poolURL: pool, transportFingerprint: s.codexTicketTransportFingerprint(a), model: m, leaseToken: token, revision: ac.Revision, fixedFingerprint: codexTicketFixedProxyFingerprint(a), harvestProxyURL: pool, done: make(chan struct{}), running: true}
+		if proxy.URL != "" {
+			job.harvestProxyURL = proxy.URL
+		}
 		return job
 	}
 	return nil
@@ -579,20 +787,64 @@ func (s *OpenAIGatewayService) launchCodexTicketJob(ctx context.Context, id int6
 		defer cancel()
 		defer s.openaiCodexAccountWG.Done()
 		defer close(job.done)
-		s.runCodexAccountTicketJob(jobCtx, id, job)
+		if job.quality {
+			s.runCodexQualityJob(jobCtx, id, job)
+		} else {
+			s.runCodexAccountTicketJob(jobCtx, id, job)
+		}
 	}()
 	return job
 }
 
 func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id int64, job *codexAccountTicketJob) {
+	cfg := s.openAICodexTicketConfig()
+	ctx = ContextWithCodexTicketFence(ctx, CodexTicketFence{Pool: job.poolURL, FallbackPool: cfg.HarvestProxyURL, FallbackEnabled: cfg.Enabled, PoolRevision: job.poolRevision})
 	lastError := "Unable to obtain a verified STATE ticket"
+	adaptive := cfg.AdaptiveSchedulingEnabled
+	maxAttempts := codexTicketMaxAttempts
+	if adaptive || job.manual {
+		maxAttempts = 3
+	}
+	resume := false
+	var resumeAt time.Time
+	waitReason := ""
 	var retryAfter time.Time
 	accountRejected := false
 	failureStage, failureCode, failureReason := "harvest", "", ""
 	failureStatus := 0
 	observedLength := 0
+	publicationOutcome := ""
 	stopFailure := func(stage string, status int, err error) bool {
+		if errors.Is(err, errCodexExecutionSlot) || errors.Is(err, errCodexBackgroundBudget) {
+			resume = true
+			resumeAt = time.Now().Add(20 * time.Second)
+			waitReason = "execution_slot"
+			if errors.Is(err, errCodexBackgroundBudget) {
+				waitReason = "budget"
+				resumeAt = time.Now().Add(time.Minute)
+			}
+			_, _ = s.mutateCodexTicket(ctx, id, 0, func(a *Account, _ int, now time.Time) (bool, error) {
+				rt := codexTicketRuntimes(a)[job.model]
+				if !codexTicketLeaseMatches(rt, job, now) {
+					return false, nil
+				}
+				if stage == "harvest" {
+					rt.Attempts--
+					if rt.Task != nil {
+						rt.Task.Attempts--
+					}
+				}
+				saveCodexTicketRuntime(a, job.model, rt)
+				return true, nil
+			})
+			return true
+		}
 		failureStage, failureStatus = stage, status
+		outcome := "response_received"
+		if err != nil {
+			outcome = "rejected"
+		}
+		s.traceCodexTicket(CodexTicketTraceEvent{AccountID: id, Model: job.model, Stage: stage, Outcome: outcome, Detail: CodexTicketTraceDetail{TaskID: job.taskID, ProxyID: job.proxy.ID, HTTPStatus: status, Length: observedLength}})
 		failureReason, failureCode = "", ""
 		if err != nil {
 			failureReason = "unconfirmed"
@@ -608,6 +860,9 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 			}
 			failureCode, failureReason = pe.code, pe.reason
 			if pe.stop {
+				if retryAfter.Before(time.Now().Add(30 * time.Second)) {
+					retryAfter = time.Now().Add(30 * time.Second)
+				}
 				accountRejected = pe.account
 				lastError = pe.reason
 				return true
@@ -626,7 +881,10 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 	defer func() {
 		finishCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		poolChanged := s.openAICodexTicketHarvestProxyURLContext(finishCtx) != job.harvestProxyURL
+		poolChanged := s.openAICodexTicketHarvestProxyURLContext(finishCtx) != job.poolURL
+		if snapshot := s.codexProxySnapshot(); snapshot != nil && snapshot.Revision != job.poolRevision {
+			poolChanged = true
+		}
 		_, _ = s.mutateCodexTicket(finishCtx, id, 0, func(a *Account, _ int, now time.Time) (bool, error) {
 			rt := codexTicketRuntimes(a)[job.model]
 			if rt.LeaseToken != job.leaseToken || rt.Revision != job.revision {
@@ -635,9 +893,41 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 			rt.LeaseToken = ""
 			rt.LeaseUntil = nil
 			rt.Phase = "idle"
+			if resume && codexAccountTicketConfigOf(a).Revision == job.revision && !poolChanged {
+				rt.RetryAfter = nil
+				rt.NextAttemptAt = &resumeAt
+				rt.Phase = "waiting"
+				if rt.Task != nil {
+					rt.Task.State = "waiting"
+					rt.Task.WaitReason = waitReason
+					rt.Task.RetryAt = &resumeAt
+				}
+				activateCodexPendingManual(&rt)
+				saveCodexTicketRuntime(a, job.model, rt)
+				return true, nil
+			}
+			rt.RequestedProxyID = ""
+			rt.NextAttemptAt = nil
+			if !retryAfter.IsZero() {
+				rt.HardRetryAfter = &retryAfter
+			}
+			if lastError != "" {
+				rt.Task.finish("failed", now)
+			}
+			rt.Requested = false
 			rt.LastError = lastError
 			rt.LastStage, rt.LastCode, rt.LastReason, rt.LastHTTPStatus, rt.ObservedLength = failureStage, failureCode, failureReason, failureStatus, observedLength
 			next := now.Add(codexTicketRetryCooldown)
+			if adaptive && !accountRejected {
+				rt.ConsecutiveFailures++
+				delay := 2 * time.Minute
+				if rt.ConsecutiveFailures == 2 {
+					delay = 5 * time.Minute
+				} else if rt.ConsecutiveFailures > 2 {
+					delay = 10 * time.Minute
+				}
+				next = now.Add(delay)
+			}
 			if retryAfter.After(next) {
 				next = retryAfter
 			}
@@ -648,14 +938,18 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 				rt.AccountRetryAfter = &next
 			}
 			if retryAfter.IsZero() && poolChanged {
+				rt.Task.finish("cancelled", now)
 				rt.LastError = ""
 				rt.RetryAfter = nil
+				activateCodexPendingManual(&rt)
 				saveCodexTicketRuntime(a, job.model, rt)
 				return true, nil
 			}
 			if codexAccountTicketConfigOf(a).Revision != job.revision {
+				rt.Task.finish("cancelled", now)
 				rt.LastError = ""
 				rt.RetryAfter = nil
+				activateCodexPendingManual(&rt)
 				saveCodexTicketRuntime(a, job.model, rt)
 				return true, nil
 			}
@@ -667,6 +961,7 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 			} else {
 				rt.RetryAfter = nil
 			}
+			activateCodexPendingManual(&rt)
 			saveCodexTicketRuntime(a, job.model, rt)
 			return true, nil
 		})
@@ -677,8 +972,8 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 		s.openaiCodexAccountMu.Unlock()
 	}()
 	timeout := time.Duration(s.openAICodexTicketConfig().HarvestAttemptTimeoutSeconds) * time.Second
-	for attempt := 1; attempt <= codexTicketMaxAttempts; attempt++ {
-		if ctx.Err() != nil || !s.openAICodexTicketEnabledContext(ctx) || s.openAICodexTicketHarvestProxyURLContext(ctx) != job.harvestProxyURL {
+	for attempt := job.startAttempt + 1; attempt <= maxAttempts; attempt++ {
+		if ctx.Err() != nil || !s.openAICodexTicketEnabledContext(ctx) || s.openAICodexTicketHarvestProxyURLContext(ctx) != job.poolURL {
 			return
 		}
 		account, err := s.mutateCodexTicket(s.codexTicketFencedContext(ctx, job.harvestProxyURL), id, 0, func(a *Account, _ int, now time.Time) (bool, error) {
@@ -691,9 +986,29 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 				retryAfter = next
 				return false, ErrCodexTicketConflict
 			}
+			// Each actual attempt chooses a currently healthy connection. This
+			// also applies to bounded manual rounds when adaptive timing is off.
+			if attempt > job.startAttempt+1 && s.codexProxySnapshot() != nil {
+				proxy, revision, available := s.selectCodexHarvestProxy(&rt, now)
+				if !available {
+					resume, resumeAt, waitReason = true, now.Add(30*time.Second), "proxy_unavailable"
+					return false, ErrCodexTicketConflict
+				}
+				if revision != job.poolRevision {
+					return false, ErrCodexTicketConflict
+				}
+				job.proxy, job.harvestProxyURL = proxy, proxy.URL
+				if rt.Task != nil {
+					rt.Task.ProxyID = proxy.ID
+				}
+			}
 			until := now.Add(2*timeout + time.Minute)
 			rt.LeaseUntil = &until
 			rt.Attempts = attempt
+			if rt.Task != nil {
+				rt.Task.Attempts = attempt
+				rt.Task.State = "harvesting"
+			}
 			saveCodexTicketRuntime(a, job.model, rt)
 			return true, nil
 		})
@@ -711,23 +1026,78 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 		s.openaiCodexAccountMu.Unlock()
 		attemptCtx, attemptCancel := context.WithTimeout(ctx, 2*timeout+30*time.Second)
 		defer attemptCancel()
+		reservation, budgetErr := s.reserveCodexBudget(attemptCtx, id, job.model, 2, "harvest")
+		if budgetErr != nil {
+			lastError = "Background request budget unavailable"
+			resume = true
+			resumeAt = time.Now().Add(time.Minute)
+			waitReason = "budget"
+			if errors.Is(budgetErr, errCodexBackgroundBudget) {
+				st := codexBudgetStatus(account, job.model, time.Now())
+				if st.RetryAt != nil {
+					resumeAt = *st.RetryAt
+				}
+			}
+			// No upstream attempt was made. Restore the attempt count.
+			_, _ = s.mutateCodexTicket(ctx, id, 0, func(live *Account, _ int, now time.Time) (bool, error) {
+				rt := codexTicketRuntimes(live)[job.model]
+				if !codexTicketLeaseMatches(rt, job, now) {
+					return false, ErrCodexTicketConflict
+				}
+				rt.Attempts--
+				if rt.Task != nil {
+					rt.Task.Attempts--
+				}
+				saveCodexTicketRuntime(live, job.model, rt)
+				return true, nil
+			})
+			return
+		}
+		defer s.releaseCodexBudget(id, reservation)
+		attemptCtx = context.WithValue(attemptCtx, codexBudgetContextKey{}, reservation)
 		token, _, err := s.GetAccessToken(attemptCtx, account)
 		if err != nil || (token == "" && !account.IsOpenAIAgentIdentity()) {
 			lastError = "Account authentication failed"
 			return
 		}
+		authAccount, authErr := s.codexTicketAccountByID(attemptCtx, id)
+		if authErr != nil {
+			return
+		}
+		authGeneration := codexCredentialGeneration(authAccount)
+		if !account.IsOpenAIAgentIdentity() && authAccount.GetCredential("access_token") != token {
+			return
+		}
 		// Reverify a legacy ticket without extending its original expiry.
 		legacy := parseOpenAICodexTicketFromAny(id, job.model, account.Extra[openAICodexTicketExtraKey(job.model)])
-		legacyCandidate := attempt == 1 && legacy != nil && !legacy.Verified && !legacy.Revoked && legacy.ExpiresAt.After(time.Now()) && legacy.Length == codexTicketTargetLength(ac.TicketPlan) && validCodexTicketState(legacy.State)
+		standbyCandidate := false
+		if cfg.StandbyEnabled {
+			standby := parseOpenAICodexTicketFromAny(id, job.model, account.Extra[codexStandbyKey(job.model)])
+			if standby.validFor(account, ac, time.Now()) && standby.ExpiresAt.After(time.Now().Add(10*time.Minute)) && (!legacy.validFor(account, ac, time.Now()) || legacy.ExpiresAt.Before(time.Now().Add(2*time.Minute))) {
+				legacy = standby
+				standbyCandidate = true
+			}
+		}
+		passiveCandidate := false
+		if cfg.StandbyEnabled {
+			passive := parseOpenAICodexTicketFromAny(id, job.model, account.Extra[codexCandidateKey(job.model)])
+			if !standbyCandidate && passive != nil && passive.ConfigRevision == ac.Revision && passive.FixedProxyFingerprint == job.fixedFingerprint && passive.TransportFingerprint == job.transportFingerprint && passive.timeUsable(time.Now()) {
+				legacy = passive
+				passiveCandidate = true
+			}
+		}
+		legacyCandidate := passiveCandidate || standbyCandidate || attempt == 1 && legacy != nil && !legacy.Verified && !legacy.Revoked && legacy.ExpiresAt.After(time.Now()) && legacy.Length == codexTicketTargetLength(ac.TicketPlan) && validCodexTicketState(legacy.State)
 		state := ""
 		status := 0
 		if legacyCandidate {
 			state = legacy.State
 		} else {
 			state, status, err = s.fireCodexAccountTicketProbe(attemptCtx, account, token, job.model, freshCodexTicketProxyURL(job.harvestProxyURL), "", timeout)
+			observedLength = len(state)
 			if stopFailure("harvest", status, err) {
 				return
 			}
+			s.recordCodexProxyAcquisition(attemptCtx, job, status, err)
 			observedLength = len(state)
 		}
 		firstObserved := time.Now()
@@ -741,13 +1111,36 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 		} else if err == nil && len(state) != codexTicketTargetLength(ac.TicketPlan) {
 			failureReason = "invalid_state_header"
 		}
-		if (legacyCandidate || (err == nil && status == http.StatusOK && validCodexTicketState(state) && len(state) == codexTicketTargetLength(ac.TicketPlan))) && candidate.timeUsable(time.Now()) {
+		accepted := (legacyCandidate || (err == nil && status == http.StatusOK && validCodexTicketState(state) && len(state) == codexTicketTargetLength(ac.TicketPlan))) && candidate.timeUsable(time.Now())
+		outcome := "rejected"
+		if accepted {
+			outcome = "accepted"
+		}
+		source := "harvest"
+		if passiveCandidate {
+			source = "business"
+		} else if legacyCandidate {
+			source = "stored"
+		}
+		s.traceCodexTicket(CodexTicketTraceEvent{AccountID: id, Model: job.model, Stage: "candidate", Outcome: outcome, Detail: CodexTicketTraceDetail{TaskID: job.taskID, ProxyID: job.proxy.ID, Length: len(state), Source: source}})
+		if accepted {
+			_, _ = s.mutateCodexTicket(ctx, id, 0, func(live *Account, _ int, now time.Time) (bool, error) {
+				rt := codexTicketRuntimes(live)[job.model]
+				if !codexTicketLeaseMatches(rt, job, now) {
+					return false, ErrCodexTicketConflict
+				}
+				if rt.Task != nil {
+					rt.Task.State = "verifying"
+				}
+				saveCodexTicketRuntime(live, job.model, rt)
+				return true, nil
+			})
 			replay, replayStatus, replayErr := s.fireCodexAccountTicketProbe(attemptCtx, account, token, job.model, account.Proxy.URL(), state, timeout)
 			if stopFailure("replay", replayStatus, replayErr) {
 				return
 			}
 			if attemptCtx.Err() == nil && replayErr == nil && replayStatus == http.StatusOK && (len(replay) != 312 || !validCodexTicketState(replay)) {
-				if !s.openAICodexTicketEnabledContext(ctx) || s.openAICodexTicketHarvestProxyURLContext(ctx) != job.harvestProxyURL {
+				if !s.openAICodexTicketEnabledContext(ctx) || s.openAICodexTicketHarvestProxyURLContext(ctx) != job.poolURL {
 					return
 				}
 				_, err = s.mutateCodexTicket(s.codexTicketFencedContext(ctx, job.harvestProxyURL), id, 0, func(live *Account, _ int, now time.Time) (bool, error) {
@@ -767,6 +1160,9 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 						if !expires.After(now) {
 							return false, ErrCodexTicketConflict
 						}
+					}
+					if codexCredentialGeneration(live) != authGeneration {
+						return false, ErrCodexTicketConflict
 					}
 					previous := s.lookupOpenAICodexTicket(live, job.model)
 					if s.codexTicketTransportFingerprint(live) != job.transportFingerprint {
@@ -788,12 +1184,43 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 					rt.LastReplayAt = &now
 					rt.LastBusinessAt = nil
 					rt.LastBusinessResult = ""
-					live.Extra[openAICodexTicketExtraKey(job.model)] = ticket
+					if passiveCandidate {
+						delete(live.Extra, codexCandidateKey(job.model))
+					}
+					result := s.publishCodexTicket(live, job.model, ticket, now)
+
+					if standbyCandidate {
+						stored := parseOpenAICodexTicketFromAny(id, job.model, live.Extra[codexStandbyKey(job.model)])
+						if stored != nil && stored.State == state {
+							stored.LastReplayAt = now
+							live.Extra[codexStandbyKey(job.model)] = stored
+							if s.promoteCodexStandby(live, job.model, now) {
+								result = "active"
+							}
+						}
+					}
+					if result == "unchanged" && !s.lookupOpenAICodexTicket(live, job.model).validFor(live, cfg, now) {
+						return false, ErrCodexTicketConflict
+					}
+					publicationOutcome = result
+					if rt.RenewalStartedAt != nil && result != "unchanged" {
+						rt.Renewals = append(rt.Renewals, codexRenewalSample{StartedAt: *rt.RenewalStartedAt, FinishedAt: now})
+						if len(rt.Renewals) > 100 {
+							rt.Renewals = rt.Renewals[len(rt.Renewals)-100:]
+						}
+						rt.RenewalStartedAt = nil
+					}
 					if !previous.validFor(live, cfg, now) {
 						codexTicketRecoveryHistory(&rt, now)
 						rt.Recoveries = append(rt.Recoveries, now)
 						s.queueCodexIQRetest(live, job.model, &rt, now)
 					}
+					if result == "unchanged" {
+						rt.Task.finish("unchanged", now)
+					} else {
+						rt.Task.finish("succeeded", now)
+					}
+					rt.ConsecutiveFailures = 0
 					rt.RoundsSucceeded++
 					rt.event(now, "verified")
 					rt.LastError = ""
@@ -802,6 +1229,7 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 					return true, nil
 				})
 				if err == nil {
+					s.traceCodexTicket(CodexTicketTraceEvent{AccountID: id, Model: job.model, Stage: "publication", Outcome: publicationOutcome, Detail: CodexTicketTraceDetail{TaskID: job.taskID, ProxyID: job.proxy.ID, TicketID: codexStateDigest(state)}})
 					lastError = ""
 				} else {
 					lastError = "Could not publish verified STATE"
@@ -812,7 +1240,14 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 		} else {
 			lastError = "Harvest did not return a completed target-model response and matching STATE"
 		}
-		if attempt < codexTicketMaxAttempts {
+		if attempt < maxAttempts {
+			if adaptive {
+				// Release the lease and resume this durable task on the next scan.
+				resume = true
+				resumeAt = time.Now().Add(time.Duration(16000+rand.IntN(8001)) * time.Millisecond)
+				waitReason = "attempt_interval"
+				return
+			}
 			timer := time.NewTimer(time.Second)
 			select {
 			case <-ctx.Done():

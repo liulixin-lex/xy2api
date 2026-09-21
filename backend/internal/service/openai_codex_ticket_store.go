@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	apperrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"maps"
 	"net/http"
 	"os"
@@ -20,7 +21,7 @@ import (
 
 const codexTicketRuntimeKey = "codex_ticket_runtime"
 
-var ErrCodexTicketConflict = errors.New("STATE configuration or lease changed")
+var ErrCodexTicketConflict = apperrors.New(409, "CODEX_TICKET_CONFLICT", "STATE configuration or lease changed; reload and retry")
 
 type CodexTicketMutation func(*Account, int, time.Time) (bool, error)
 type CodexTicketRepository interface {
@@ -32,10 +33,23 @@ type CodexTicketEvent struct {
 	Reason string    `json:"reason"`
 }
 type codexTicketRuntime struct {
-	LastBusinessAt      *time.Time `json:"last_business_at,omitempty"`
-	LastBusinessResult  string     `json:"last_business_result,omitempty"`
-	BusinessChecked     int64      `json:"business_checked"`
-	BusinessUnconfirmed int64      `json:"business_unconfirmed"`
+	PendingManual       *CodexTicketTask     `json:"pending_manual,omitempty"`
+	PendingProxyID      string               `json:"pending_proxy_id,omitempty"`
+	RevokedValues       map[string]time.Time `json:"revoked_values,omitempty"`
+	LastAttemptAt       time.Time            `json:"last_attempt_at,omitempty"`
+	Renewals            []codexRenewalSample `json:"renewals,omitempty"`
+	RenewalStartedAt    *time.Time           `json:"renewal_started_at,omitempty"`
+	RenewalComputedAt   time.Time            `json:"renewal_computed_at,omitempty"`
+	RenewalLeadSeconds  int                  `json:"renewal_lead_seconds,omitempty"`
+	Task                *CodexTicketTask     `json:"task,omitempty"`
+	NextAttemptAt       *time.Time           `json:"next_attempt_at,omitempty"`
+	ConsecutiveFailures int                  `json:"consecutive_failures"`
+	ProxyCursor         int                  `json:"proxy_cursor"`
+	RequestedProxyID    string               `json:"requested_proxy_id,omitempty"`
+	LastBusinessAt      *time.Time           `json:"last_business_at,omitempty"`
+	LastBusinessResult  string               `json:"last_business_result,omitempty"`
+	BusinessChecked     int64                `json:"business_checked"`
+	BusinessUnconfirmed int64                `json:"business_unconfirmed"`
 
 	LastStage      string     `json:"last_stage,omitempty"`
 	LastCode       string     `json:"last_code,omitempty"`
@@ -44,6 +58,7 @@ type codexTicketRuntime struct {
 	ObservedLength int        `json:"observed_length,omitempty"`
 	LastReplayAt   *time.Time `json:"last_replay_at,omitempty"`
 
+	HardRetryAfter    *time.Time         `json:"hard_retry_after,omitempty"`
 	AccountRetryAfter *time.Time         `json:"account_retry_after,omitempty"`
 	RoundsStarted     int64              `json:"rounds_started"`
 	RoundsSucceeded   int64              `json:"rounds_succeeded"`
@@ -221,6 +236,7 @@ func (s *OpenAIGatewayService) migrateCodexTicketAccounts(ctx context.Context) e
 }
 
 type CodexTicketFence struct {
+	PoolRevision    string
 	Pool            string
 	FallbackPool    string
 	FallbackEnabled bool
@@ -238,7 +254,14 @@ func CodexTicketFenceFromContext(ctx context.Context) (CodexTicketFence, bool) {
 }
 func (s *OpenAIGatewayService) codexTicketFencedContext(ctx context.Context, pool string) context.Context {
 	cfg := s.openAICodexTicketConfig()
-	return ContextWithCodexTicketFence(ctx, CodexTicketFence{pool, cfg.HarvestProxyURL, cfg.Enabled})
+	if _, ok := CodexTicketFenceFromContext(ctx); ok {
+		return ctx
+	}
+	revision := ""
+	if snapshot := s.codexProxySnapshot(); snapshot != nil {
+		revision = snapshot.Revision
+	}
+	return ContextWithCodexTicketFence(ctx, CodexTicketFence{Pool: pool, FallbackPool: cfg.HarvestProxyURL, FallbackEnabled: cfg.Enabled, PoolRevision: revision})
 }
 
 func (s *OpenAIGatewayService) codexTicketTransportFingerprint(a *Account) string {

@@ -114,3 +114,21 @@ func TestForwardAsChatCompletions_CancelsUpstreamBeforeClosingBody(t *testing.T)
 		t.Fatal("ForwardAsChatCompletions did not cancel upstream before closing the body")
 	}
 }
+
+func TestCodexTicketWatchdogCancelsBlockedTransportAfterBoundedDrain(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := newContextBoundBlockingReadCloser([]byte(watchdogCompletedEvent("gpt-6-astra")))
+	stream.ctx = ctx
+	t.Cleanup(stream.forceUnblock)
+	body := &codexTicketWatchdogBody{ReadCloser: stream, ctx: ctx, model: "gpt-6-astra"}
+	done := make(chan error, 1)
+	go func() { done <- body.closeWithCancel(cancel) }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+		require.ErrorIs(t, ctx.Err(), context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("watchdog shutdown exceeded bounded drain")
+	}
+}

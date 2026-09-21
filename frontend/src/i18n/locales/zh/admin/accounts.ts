@@ -1,6 +1,40 @@
 export default {
     accounts: {
       stateTicket: {
+        standbyAvailable: '候补可用',
+        qualityTask: '质量检测中',
+        qualityIsolated: '质量异常，此模型已暂停',
+        qualityObserve: '质量观察',
+        qualityProgress: '当前 {count}/12 题',
+        qualityLatest: '上次 {score}/12',
+        qualityUnknown: '本次未确认，上次结果保留',
+
+      "manualProxy": "本次代理",
+      "autoProxy": "自动轮换",
+      "standbyReady": "候补到期：{time}",
+      "backgroundBudget": "小时请求：{used} / {limit}",
+      "tasks": {
+            "queued": "已排队",
+            "harvesting": "获取中",
+            "verifying": "验证中",
+            "waiting": "等待中",
+            "succeeded": "已获取",
+            "unchanged": "未更新，当前票仍有效",
+            "failed": "本轮获取失败",
+            "cancelled": "已取消"
+      },
+      "taskReasons": {
+            "upstream_capacity": "上游繁忙",
+            "account_cooldown": "账号冷却",
+            "account_health": "账号暂不可用",
+            "attempt_interval": "等待下一次尝试",
+            "execution_slot": "等待空闲资源",
+            "budget": "等待预算恢复",
+            "proxy_unavailable": "暂无可用代理",
+            "account_concurrency": "等待空闲并发"
+      }
+,
+
         "unconfirmed": "未确认",
         "captureVerification": "采集复验",
         "businessVerification": "业务模型",
@@ -38,7 +72,7 @@ export default {
           "model_mismatch": "实际返回模型不符",
           "unconfirmed": "未取得完整有效响应"
         },
-        "acquireAll": "全部重新获取",
+        "acquireAll": "全部获取",
         "iqDegradedRecovery": "有效答错后恢复",
         "models": "启用模型",
         "missingPolicy": "缺票策略",
@@ -103,7 +137,7 @@ export default {
         "unsaved": "请先保存设置，再获取票据。",
         "save": "保存设置",
         "acquire": "立即获取",
-        "reacquire": "重新获取",
+        "reacquire": "立即获取",
         "failureHint": "每个模型独立续期和守护。无有效票据时按所选策略处理；票据长度、模型核验与智商判定分别展示。",
         "saved": "票据设置已保存。",
         "loadFailed": "状态刷新失败，请稍后重试。",

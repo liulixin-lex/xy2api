@@ -340,6 +340,17 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 			stateTicketID = receipt.identity()
 		}
 	}
+	if gateway := s.tester.openaiGatewayService; gateway != nil && codexAccountTicketConfigOf(account).Enabled {
+		budgetModel := gateway.openAICodexTicketOutboundModel(account, profile.Model, false)
+		reservation, e := gateway.reserveCodexBudget(ctx, account.ID, budgetModel, 1, "iq")
+		if e != nil {
+			return iqcheck.Unknown("background_budget")
+		}
+		defer gateway.releaseCodexBudget(account.ID, reservation)
+		if e = gateway.consumeCodexBudget(ctx, account.ID, budgetModel, "iq", reservation); e != nil {
+			return iqcheck.Unknown("background_budget")
+		}
+	}
 	var resp *http.Response
 	// STATE-managed probes use the exact business transport. A tester-only TLS
 	// override must not change the transport against which the ticket was verified.

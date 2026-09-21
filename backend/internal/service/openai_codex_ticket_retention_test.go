@@ -101,7 +101,9 @@ func (r *codexTicketFailSaveRepo) UpdateExtra(context.Context, int64, map[string
 
 func TestCodexAccountTicketSaveFailurePreservesDurableTicket(t *testing.T) {
 	s, repo := ticketJobService(t, &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
-		return codexTicketResponse(), nil
+		response := codexTicketResponse()
+		response.Header.Set(openAICodexTurnStateHeader, fakeCodexTicketStateAt(292, time.Now().Add(10*time.Second)))
+		return response, nil
 	}})
 	account, err := repo.GetByID(context.Background(), 41)
 	require.NoError(t, err)

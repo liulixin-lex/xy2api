@@ -308,14 +308,15 @@ func TestCodexTicketUpgradeIdentityRotationAndStrictFormat(t *testing.T) {
 
 func TestCodexTicketUpgradeCloseCompletesEarlyTerminalConsumer(t *testing.T) {
 	payload := watchdogCompletedEvent("gpt-5.6-sol")
-	n := 0
-	body := &codexTicketWatchdogBody{ReadCloser: io.NopCloser(strings.NewReader(payload)), model: "gpt-6-astra", trigger: func(string) { n++ }}
+	var n atomic.Int64
+	body := &codexTicketWatchdogBody{ReadCloser: io.NopCloser(strings.NewReader(payload)), model: "gpt-6-astra", trigger: func(string) { n.Add(1) }}
 	consumed := make([]byte, len(payload))
 	_, e := io.ReadFull(body, consumed)
 	require.NoError(t, e)
-	require.Zero(t, n)
+	require.Zero(t, n.Load())
 	require.NoError(t, body.Close())
-	require.Equal(t, 1, n)
+	// Close is bounded: slow callbacks may finish after its deadline.
+	require.Eventually(t, func() bool { return n.Load() == 1 }, time.Second, time.Millisecond)
 	require.Equal(t, payload, string(consumed))
 }
 

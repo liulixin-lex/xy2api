@@ -502,6 +502,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 	auditReq := settingsAuditRequest(req)
 	omitted := omittedSettingKeys(sentFields)
+	if service.IsMaskedProxyURL(strings.TrimSpace(req.OpenAICodexTicketHarvestProxyURL)) {
+		omitted[service.SettingKeyOpenAICodexTicketHarvestProxyURL] = struct{}{}
+	}
 
 	previousSettings, err := h.settingService.GetAllSettings(c.Request.Context())
 	if err != nil {

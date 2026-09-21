@@ -898,6 +898,15 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.OpenAICodexTicketEnabled = s.cfg.Gateway.OpenAICodexTicket.Enabled
 	}
 	result.OpenAICodexTicketHarvestProxyURL = strings.TrimSpace(settings[SettingKeyOpenAICodexTicketHarvestProxyURL])
+	if raw, exists := settings[SettingKeyCodexTicketProxyPool]; exists {
+		result.OpenAICodexTicketHarvestProxyURL = ""
+		var pool storedCodexProxyPool
+		if json.Unmarshal([]byte(raw), &pool) == nil && len(pool.Entries) > 0 && s.codexProxyEncryptor != nil {
+			if value, err := s.codexProxyEncryptor.Decrypt(pool.Entries[0].Secret); err == nil {
+				result.OpenAICodexTicketHarvestProxyURL = value
+			}
+		}
+	}
 	// codex_cli_only 加固
 	result.MinCodexVersion = settings[SettingKeyMinCodexVersion]
 	result.MaxCodexVersion = settings[SettingKeyMaxCodexVersion]

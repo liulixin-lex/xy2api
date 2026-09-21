@@ -397,6 +397,10 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
 	defer func() {
+		if watchdog, ok := resp.Body.(*codexTicketWatchdogBody); ok {
+			_ = watchdog.closeWithCancel(cancelUpstream)
+			return
+		}
 		cancelUpstream()
 		_ = resp.Body.Close()
 	}()

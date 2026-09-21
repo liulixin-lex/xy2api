@@ -559,6 +559,7 @@ function mountView() {
         ProxySelector: true,
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
+        CodexTicketProxyPool: true,
       },
     },
   });
@@ -743,22 +744,14 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     const wrapper = mountView();
     await flushPromises();
-    const input = wrapper.get("#codex-ticket-harvest-proxy");
-    expect(input.attributes("type")).toBe("password");
-    expect((input.element as HTMLInputElement).value).toBe("");
-    expect(wrapper.find('[data-testid="codex-ticket-global-pool-configured"]').exists()).toBe(true);
+    expect(wrapper.find("codex-ticket-proxy-pool-stub").exists()).toBe(true);
+    expect(wrapper.find("#codex-ticket-harvest-proxy").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("old.example.com");
     expect(wrapper.find('a[href="/admin/accounts"]').exists()).toBe(true);
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
-    expect(updateSettings.mock.calls[0]?.[0].openai_codex_ticket_harvest_proxy_url).toBeUndefined();
-    const proxy = "socks5h://pool-sid-{sid}-t-5:new-secret@pool.example.com:3000";
-    await input.setValue(proxy);
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-    expect(updateSettings.mock.calls[1]?.[0].openai_codex_ticket_harvest_proxy_url).toBe(proxy);
-    expect((input.element as HTMLInputElement).value).toBe("");
-    expect(wrapper.text()).not.toContain("new-secret");
-    expect(updateSettings.mock.calls[1]?.[0]).not.toHaveProperty("openai_codex_ticket_harvest_proxy_configured");
+    expect(updateSettings.mock.calls[0]?.[0]).not.toHaveProperty("openai_codex_ticket_harvest_proxy_url");
+    expect(updateSettings.mock.calls[0]?.[0]).not.toHaveProperty("openai_codex_ticket_harvest_proxy_configured");
     wrapper.unmount();
   });
 
@@ -1309,6 +1302,7 @@ describe("admin SettingsView payment visible method controls", () => {
           ProxySelector: true,
           ImageUpload: ImageUploadStub,
           BackupSettings: true,
+        CodexTicketProxyPool: true,
         },
       },
     });
@@ -1607,6 +1601,7 @@ describe("admin SettingsView payment visible method controls", () => {
           ProxySelector: true,
           ImageUpload: ImageUploadStub,
           BackupSettings: true,
+        CodexTicketProxyPool: true,
         },
       },
     });

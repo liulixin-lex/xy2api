@@ -4516,12 +4516,7 @@
                     v-model="form.openai_codex_ticket_enabled"
                   />
                 </div>
-                <div>
-                  <label for="codex-ticket-harvest-proxy" class="input-label">{{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxy") }}</label>
-                  <input id="codex-ticket-harvest-proxy" v-model="form.openai_codex_ticket_harvest_proxy_url" type="password" class="input w-full font-mono text-sm" autocomplete="new-password" spellcheck="false" data-1p-ignore data-lpignore="true" data-bwignore="true" :placeholder="t('admin.settings.gatewayForwarding.codexTicketHarvestProxyPlaceholder')" />
-                  <p v-if="form.openai_codex_ticket_harvest_proxy_configured" class="mt-1 text-xs text-emerald-600 dark:text-emerald-400" data-testid="codex-ticket-global-pool-configured">{{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxyConfigured") }}</p>
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxyDesc") }}</p>
-                </div>
+                <CodexTicketProxyPool />
                 <p class="text-sm text-gray-500 dark:text-gray-400">
                   {{ t("admin.settings.gatewayForwarding.codexTicketAccountHint") }}
                   <a href="/admin/accounts" class="font-medium text-primary-600 underline dark:text-primary-400">{{ t("admin.settings.gatewayForwarding.codexTicketAccountsLink") }}</a>
@@ -8843,6 +8838,7 @@
 </template>
 
 <script setup lang="ts">
+import CodexTicketProxyPool from '@/components/account/CodexTicketProxyPool.vue'
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { adminAPI } from "@/api";
@@ -11481,7 +11477,7 @@ async function saveSettings() {
       openai_codex_version_auto_sync_enabled:
         form.openai_codex_version_auto_sync_enabled,
       openai_codex_ticket_enabled: form.openai_codex_ticket_enabled,
-      openai_codex_ticket_harvest_proxy_url: form.openai_codex_ticket_harvest_proxy_url.trim() || undefined,
+
       min_codex_version: form.min_codex_version?.trim() || "",
       max_codex_version: form.max_codex_version?.trim() || "",
       codex_cli_only_allow_app_server_clients:

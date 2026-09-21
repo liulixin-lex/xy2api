@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/ent"
@@ -116,7 +118,7 @@ func (r *settingRepository) Delete(ctx context.Context, key string) error {
 }
 
 func isCodexTicketGlobalKey(key string) bool {
-	return key == service.SettingKeyOpenAICodexTicketEnabled || key == service.SettingKeyOpenAICodexTicketHarvestProxyURL
+	return key == service.SettingKeyOpenAICodexTicketEnabled || key == service.SettingKeyOpenAICodexTicketHarvestProxyURL || key == service.SettingKeyCodexTicketProxyPool
 }
 func (r *settingRepository) setCodexFenced(ctx context.Context, values map[string]string, deleteKey string) error {
 	tx, err := r.client.Tx(ctx)
@@ -127,6 +129,30 @@ func (r *settingRepository) setCodexFenced(ctx context.Context, values map[strin
 	c := tx.Client()
 	if _, err = c.ExecContext(ctx, "SELECT pg_advisory_xact_lock(78421023)"); err != nil {
 		return err
+	}
+	for key, expected := range service.CodexSettingExpectations(ctx) {
+		current, e := c.Setting.Query().Where(setting.KeyEQ(key)).Only(ctx)
+		if e != nil && !ent.IsNotFound(e) {
+			return e
+		}
+		value := ""
+		if current != nil {
+			value = current.Value
+		}
+		if value != expected {
+			return service.ErrCodexTicketConflict
+		}
+	}
+	if _, legacyWrite := values[service.SettingKeyOpenAICodexTicketHarvestProxyURL]; legacyWrite {
+		pool, e := c.Setting.Query().Where(setting.KeyEQ(service.SettingKeyCodexTicketProxyPool)).Only(ctx)
+		if e != nil && !ent.IsNotFound(e) {
+			return e
+		}
+		if pool != nil {
+			// Once migrated, use the versioned pool endpoint. Never overwrite it
+			// through a stale whole-settings form, including a single-entry pool.
+			return service.ErrCodexTicketConflict
+		}
 	}
 	for key, value := range values {
 		if err = c.Setting.Create().SetKey(key).SetValue(value).SetUpdatedAt(time.Now()).OnConflictColumns(setting.FieldKey).UpdateNewValues().Exec(ctx); err != nil {
@@ -139,4 +165,51 @@ func (r *settingRepository) setCodexFenced(ctx context.Context, values map[strin
 		}
 	}
 	return tx.Commit()
+}
+
+// CompareAndSwapCodexSetting shares the lock used by account publication fences.
+func (r *settingRepository) CompareAndSwapCodexSetting(ctx context.Context, key, old, next string) (bool, error) {
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	c := tx.Client()
+	if _, err = c.ExecContext(ctx, "SELECT pg_advisory_xact_lock(78421023)"); err != nil {
+		return false, err
+	}
+	for key, expected := range service.CodexSettingExpectations(ctx) {
+		current, e := c.Setting.Query().Where(setting.KeyEQ(key)).Only(ctx)
+		if e != nil && !ent.IsNotFound(e) {
+			return false, e
+		}
+		value := ""
+		if current != nil {
+			value = current.Value
+		}
+		if value != expected {
+			return false, nil
+		}
+	}
+	value, err := c.Setting.Query().Where(setting.KeyEQ(key)).Only(ctx)
+	if err != nil && !ent.IsNotFound(err) {
+		return false, err
+	}
+	current := ""
+	if value != nil {
+		current = value.Value
+	}
+	if current != old {
+		return false, nil
+	}
+	if !json.Valid([]byte(next)) {
+		return false, errors.New("invalid STATE settings JSON")
+	}
+	if err = c.Setting.Create().SetKey(key).SetValue(next).SetUpdatedAt(time.Now()).OnConflictColumns(setting.FieldKey).UpdateNewValues().Exec(ctx); err != nil {
+		return false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }

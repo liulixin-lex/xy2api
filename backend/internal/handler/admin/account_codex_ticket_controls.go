@@ -65,21 +65,27 @@ func (h *AccountHandler) UpdateCodexAccountTicket(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Models        []string `json:"models"`
-		MissingPolicy string   `json:"missing_policy"`
-		TicketPlan    string   `json:"ticket_plan"`
-		Enabled       *bool    `json:"enabled"`
-		ProxyURL      string   `json:"proxy_url"`
-		Model         string   `json:"model"`
-		ClearProxy    bool     `json:"clear_proxy"`
+		ExpectedRevision string   `json:"expected_revision"`
+		Models           []string `json:"models"`
+		MissingPolicy    string   `json:"missing_policy"`
+		TicketPlan       string   `json:"ticket_plan"`
+		Enabled          *bool    `json:"enabled"`
+		ProxyURL         string   `json:"proxy_url"`
+		Model            string   `json:"model"`
+		ClearProxy       bool     `json:"clear_proxy"`
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16*1024)
-	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
-		response.BadRequest(c, "Invalid STATE settings; enabled is required")
+	if err := c.ShouldBindJSON(&req); err != nil || (c.Request.Method == http.MethodPut && req.Enabled == nil) || (c.Request.Method == http.MethodPatch && req.ExpectedRevision == "") {
+		response.BadRequest(c, "Invalid STATE settings; PATCH requires expected_revision and PUT requires enabled")
 		return
 	}
+	enabled := false
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
 	status, err := h.codexAccountTickets.ConfigureCodexAccountTicket(c.Request.Context(), id, service.CodexAccountTicketUpdate{
-		Models: req.Models, MissingPolicy: req.MissingPolicy, TicketPlan: req.TicketPlan, Enabled: *req.Enabled, ProxyURL: req.ProxyURL, Model: req.Model, ClearProxy: req.ClearProxy,
+		ExpectedRevision: req.ExpectedRevision, RequireRevision: c.Request.Method == http.MethodPatch, PreserveEnabled: req.Enabled == nil, GuardEnable: true,
+		Models: req.Models, MissingPolicy: req.MissingPolicy, TicketPlan: req.TicketPlan, Enabled: enabled, ProxyURL: req.ProxyURL, Model: req.Model, ClearProxy: req.ClearProxy,
 	})
 	if !codexTicketControlError(c, err) {
 		response.Success(c, status)
@@ -92,7 +98,9 @@ func (h *AccountHandler) HarvestCodexAccountTicket(c *gin.Context) {
 		return
 	}
 	var input struct {
-		Model string `json:"model"`
+		Model     string `json:"model"`
+		ProxyID   string `json:"proxy_id"`
+		RequestID string `json:"request_id"`
 	}
 	if c.Request.ContentLength != 0 {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16*1024)
@@ -104,6 +112,10 @@ func (h *AccountHandler) HarvestCodexAccountTicket(c *gin.Context) {
 	var status *service.CodexAccountTicketStatus
 	var err error
 	if manager, ok := h.codexAccountTickets.(interface {
+		HarvestCodexAccountTicketOptions(context.Context, int64, string, string, string) (*service.CodexAccountTicketStatus, error)
+	}); ok {
+		status, err = manager.HarvestCodexAccountTicketOptions(c.Request.Context(), id, input.Model, input.ProxyID, input.RequestID)
+	} else if manager, ok := h.codexAccountTickets.(interface {
 		HarvestCodexAccountTicketModel(context.Context, int64, string) (*service.CodexAccountTicketStatus, error)
 	}); ok {
 		status, err = manager.HarvestCodexAccountTicketModel(c.Request.Context(), id, input.Model)
@@ -123,5 +135,24 @@ func (h *AccountHandler) GetCodexAccountTicketDiagnostics(c *gin.Context) {
 	status, err := h.codexAccountTickets.GetCodexAccountTicketStatus(c.Request.Context(), id)
 	if !codexTicketControlError(c, err) {
 		response.Success(c, gin.H{"version": 1, "tickets": status.Tickets})
+	}
+}
+
+func (h *AccountHandler) GetCodexTicketEvents(c *gin.Context) {
+	id, ok := h.codexTicketAccountID(c)
+	if !ok {
+		return
+	}
+	before, _ := strconv.ParseInt(c.Query("before"), 10, 64)
+	manager, ok := h.codexAccountTickets.(interface {
+		GetCodexTicketEvents(context.Context, int64, string, int64) ([]service.CodexTicketTraceEvent, error)
+	})
+	if !ok {
+		response.Error(c, http.StatusServiceUnavailable, "STATE event service unavailable")
+		return
+	}
+	events, err := manager.GetCodexTicketEvents(c.Request.Context(), id, c.Query("model"), before)
+	if !codexTicketControlError(c, err) {
+		response.Success(c, gin.H{"events": events})
 	}
 }

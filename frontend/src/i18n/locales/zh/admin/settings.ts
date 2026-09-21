@@ -1,5 +1,34 @@
 export default {
     settings: {
+    stateProxies: {
+      networkError: '网络异常',
+      candidateRejected: '未获合格票',
+      responseReceived: '已收到响应',
+      unknownResult: '结果未知',
+      "title": "STATE 打票代理池",
+      "add": "添加代理",
+      "hint": "启用后自动轮换；检测结果仅代表本次出口。",
+      "empty": "暂无代理，添加后可检测。",
+      "name": "代理 {index}",
+      "address": "地址（留空保留）",
+      "enabled": "启用",
+      "testing": "检测中…",
+      "test": "检测连通性",
+      "acquisition": "最近采集",
+      "connected": "连接成功",
+      "failed": "连接失败",
+      "sample": "本次出口",
+      "lastSuccess": "上次成功",
+      "untested": "尚未检测",
+      "saved": "代理池已保存",
+      "save": "保存代理池",
+      "reload": "重新加载",
+      "unknownCountry": "国家未知",
+      "loadFailed": "加载失败，请重试。",
+      "saveFailed": "保存失败，请检查地址。",
+      "conflict": "配置已更新，请重新加载。"
+},
+
       title: '系统设置',
       description: '管理注册、邮箱验证、默认值和 SMTP 设置',
       tabs: {
