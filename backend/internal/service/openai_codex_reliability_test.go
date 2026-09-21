@@ -55,7 +55,7 @@ func (reliabilityCipher) Decrypt(raw string) (string, error) {
 func reliabilityPoolService(t *testing.T) (*SettingService, *reliabilitySettings) {
 	t.Helper()
 	repo := &reliabilitySettings{values: map[string]string{SettingKeyOpenAICodexTicketHarvestProxyURL: "http://user:private@example.com:8080"}}
-	svc := NewSettingService(repo, &config.Config{})
+	svc := NewSettingService(repo, &config.Config{Totp: config.TotpConfig{EncryptionKey: strings.Repeat("01", 32), EncryptionKeyConfigured: true}})
 	svc.codexProxyEncryptor = reliabilityCipher{}
 	return svc, repo
 }
@@ -203,6 +203,7 @@ func TestCodexReliabilityManualRotatesHealthyProxyWithinRound(t *testing.T) {
 	}})
 	settings, store := reliabilityPoolService(t)
 	store.values[SettingKeyOpenAICodexTicketEnabled] = "true"
+	s.cfg.Totp = settings.cfg.Totp
 	settings.cfg = s.cfg
 	s.settingService = settings
 	ctx := context.Background()

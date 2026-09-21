@@ -88,6 +88,17 @@ Once the pool exists, an empty list is authoritative. Legacy single-address
 updates can replace a single-entry pool atomically; multi-entry pools reject
 legacy replacement. Health checks do not advance pool revisions.
 
+Before upgrading or saving the first proxy, configure a persistent
+`TOTP_ENCRYPTION_KEY` (64 hexadecimal characters) and use the same key on every
+replica and after every restart. Preserve an already configured key: changing it
+also affects other credentials encrypted by the existing service. A non-empty
+automatically generated process key is not persistent. With that temporary key,
+non-empty pool migration, reads and saves return
+`CODEX_PROXY_ENCRYPTION_REQUIRED`; failed migration leaves the legacy address
+untouched and does not create an authoritative pool. Configure the stable key
+and restart before retrying. An empty pool can still be initialized, read or
+saved without encryption, and remains authoritative over legacy configuration.
+
 Account runtime stores revision-bound leases, accepted task state, rolling
 budget calls, quality progress and bounded renewal samples. Account edits,
 imports, duplication and token-refresh paths cannot overwrite these server-owned

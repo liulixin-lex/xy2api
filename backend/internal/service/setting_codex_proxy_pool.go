@@ -15,6 +15,18 @@ import (
 const SettingKeyCodexTicketProxyPool = "openai_codex_ticket_proxy_pool_v1"
 const codexProxyHealthKey = "openai_codex_ticket_proxy_health_v1"
 
+// Config loading also supplies a non-empty key when it generates an ephemeral
+// one. Only the explicit configured flag guarantees persistence across workers.
+func (s *SettingService) requireCodexProxyEncryption() error {
+	if s.cfg == nil || !s.cfg.Totp.EncryptionKeyConfigured {
+		return apperrors.BadRequest("CODEX_PROXY_ENCRYPTION_REQUIRED", "Configure a persistent TOTP_ENCRYPTION_KEY shared by all replicas before storing or reading proxy credentials")
+	}
+	if s.codexProxyEncryptor == nil {
+		return apperrors.New(503, "CODEX_PROXY_ENCRYPTION", "Proxy encryption unavailable")
+	}
+	return nil
+}
+
 type codexSettingCAS interface {
 	CompareAndSwapCodexSetting(context.Context, string, string, string) (bool, error)
 }
@@ -106,9 +118,6 @@ func (s *SettingService) ensureCodexProxyPool(ctx context.Context) (string, erro
 	if err != nil || raw != "" {
 		return raw, err
 	}
-	if s.codexProxyEncryptor == nil {
-		return "", apperrors.New(503, "CODEX_PROXY_ENCRYPTION", "Proxy encryption unavailable")
-	}
 	legacy, err := s.settingRepo.GetValue(ctx, SettingKeyOpenAICodexTicketHarvestProxyURL)
 	if err != nil && !errors.Is(err, ErrSettingNotFound) {
 		return "", err
@@ -119,6 +128,9 @@ func (s *SettingService) ensureCodexProxyPool(ctx context.Context) (string, erro
 	}
 	pool := storedCodexProxyPool{Revision: uuid.NewString(), Entries: []storedCodexProxy{}}
 	if strings.TrimSpace(legacy) != "" {
+		if err := s.requireCodexProxyEncryption(); err != nil {
+			return "", err
+		}
 		if ValidateOpenAICodexTicketHarvestProxyURL(legacy) != nil {
 			return "", apperrors.BadRequest("CODEX_PROXY_URL", "Invalid acquisition proxy URL")
 		}
@@ -151,6 +163,11 @@ func (s *SettingService) GetCodexHarvestProxyPool(ctx context.Context) (*CodexHa
 	var stored storedCodexProxyPool
 	if json.Unmarshal([]byte(raw), &stored) != nil || stored.Revision == "" {
 		return nil, apperrors.New(503, "CODEX_PROXY_DATA", "Proxy pool unavailable")
+	}
+	if len(stored.Entries) > 0 {
+		if err := s.requireCodexProxyEncryption(); err != nil {
+			return nil, err
+		}
 	}
 	health := map[string]codexProxyHealth{}
 	if h, e := s.settingRepo.GetValue(ctx, codexProxyHealthKey); e == nil {
@@ -193,6 +210,11 @@ func (s *SettingService) SaveCodexHarvestProxyPool(ctx context.Context, input Co
 	}
 	if input.ExpectedRevision == "" || old.Revision != input.ExpectedRevision {
 		return nil, ErrCodexTicketConflict
+	}
+	if len(input.Entries) > 0 {
+		if err := s.requireCodexProxyEncryption(); err != nil {
+			return nil, err
+		}
 	}
 	byID := map[string]storedCodexProxy{}
 	for _, entry := range old.Entries {
@@ -340,8 +362,8 @@ func (s *SettingService) prepareLegacyCodexProxyUpdate(ctx context.Context, upda
 	if len(pool.Entries) != 1 {
 		return ctx, ErrCodexTicketConflict
 	}
-	if s.codexProxyEncryptor == nil {
-		return ctx, apperrors.New(503, "CODEX_PROXY_ENCRYPTION", "Proxy encryption unavailable")
+	if err := s.requireCodexProxyEncryption(); err != nil {
+		return ctx, err
 	}
 	previous, decryptErr := s.codexProxyEncryptor.Decrypt(pool.Entries[0].Secret)
 	if decryptErr != nil {
