@@ -135,8 +135,13 @@ contract, then 64 affected tests and the final 113-test control/locale set passe
 The macOS-only deployment script requires macOS and was not accepted as passing
 on this Linux host. Full command records retain failed and interrupted runs.
 
-The verified implementation is committed locally on `feat/state-reliability` and
-imported as a local branch into `/xy/xy2api`; the existing main checkout is retained.
-Use `reliability-20260920/COMMIT_RESULT.json` and `LOCAL_BRANCH.json` for the exact
-commit and clean-tree verification. No remote push or production rollout is part
-of this handoff. The source archive, patch and commit must have the same Git tree.
+The implementation was released as `v0.1.5` through protected PR #52. The release
+tag points to `f0e60e852be01e02bac3917307ec888f6820c7d1`; product version is
+0.1.5 and Sub2API compatibility remains 0.2.6. Final PR, merged-main and tag CI,
+security checks, five-platform checksums and both GHCR architecture labels passed.
+The macOS deployment-script gate also passed on its required macOS runner.
+
+`/xy/xy2api` main contains the merged source. Release and source-transaction
+evidence extends the same four roles under `release-0.1.5/`. Local disposable
+containers verified upgrade and restart behavior; the production site was not
+accessed or changed. Actual account coverage and quality remain rollout goals.
