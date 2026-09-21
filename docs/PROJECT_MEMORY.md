@@ -191,6 +191,8 @@ Sub2API 兼容基线已更新到 `v0.2.6`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
+- `20260921-state-release-0.1.5`：用户已授权推送、受保护 PR 合并和正式发版；从已验收 c0ab50aa / feat/state-reliability 继续，目标 0.1.5，兼容 0.2.6。按现有门禁执行，不调整保护规则；发布验收记录追加原四角色，生产部署及真实账号灰度不在本轮执行范围。
+
 - `20260920-state-reliability`：实现、代码门禁、同输入源码三态、补丁重建和本地源码提交均已完成；最终 commit/四角色哈希/干净状态/主仓库分支导入见 reliability-20260920 的 FINAL_RESULT.json、COMMIT_RESULT.json、LOCAL_BRANCH.json。无远端推送或生产操作；真实账号灰度仍待执行。
 
 
