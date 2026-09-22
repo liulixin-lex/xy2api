@@ -65,7 +65,7 @@ func TestIQAPIProbeFreshSessionAfterOverridesAndMapping(t *testing.T) {
 				for _, name := range []string{"x-opencode-session", "x-codex-turn-state", "x-codex-turn-metadata", "previous_response_id"} {
 					require.Empty(t, req.Header.Get(name), name)
 				}
-				require.Equal(t, "keep", req.Header["x-test-preserved"][0])
+				require.Equal(t, []string{"keep"}, req.Header[resolveWireCasing("x-test-preserved")])
 				require.Equal(t, "Bearer fixture", req.Header.Get("Authorization"))
 				require.Equal(t, "gpt-5.6-sol", u.bodies[i]["model"])
 				for name := range req.Header {
