@@ -224,6 +224,7 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	// 使配置值获得除共享传输层强制头之外的最高优先级。
 	account.ApplyHeaderOverrides(upstreamReq.Header)
 	applyOpenCodeSessionHeader(c, account, targetURL, upstreamReq.Header, body)
+	s.prepareQualityHTTP(ctx, c, account, upstreamReq, body)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

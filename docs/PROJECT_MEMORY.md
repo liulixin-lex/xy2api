@@ -4,6 +4,15 @@
 
 ## 当前交接状态
 
+### GPT-5.6+ 会话质量路由（2026-09-22，准备 0.1.6 发布，未部署）
+
+- 已执行 `git pull --ff-only origin main`，基线为 `021c0d885382ecfb956674e2f8b59a7674e8d912`；实现位于 `/xy/artifacts/gpt-quality-routing/work` 的 `feat/gpt-quality-routing`，原 `/xy/xy2api` 保持干净。没有部署、生产写入或真实模型调用。
+- 新增 `gateway.openai_quality_routing`（默认 enforce，避让 300 秒），以 API Key、分组、稳定会话和模型为作用域；严格比较最终出站模型与原始响应声明。默认 Astra/Sol/Terra→Luna，账号映射 Sol→Terra 不触发。正常缓存标识不变；异常优先不同上游，必要时稳定轮换出站标识。
+- 默认/高级/加权调度、HTTP/SSE、Chat/Messages 转换、WS 原生/桥接/透传已接入；当前响应不重放，不新增模型调用，不写全账号质量降权。完整历史才允许迁移续接，缺少 response.output、工具上下文或存在不透明 compaction/reference 项时保留所有者。异常代次内标识稳定，状态过期后再次异常生成新标识。
+- 用户确认本次聚焦 API 上游号池：新增质量证据、出站标识轮换及 WS 连接代次只对 OpenAI API Key 类型凭据生效，OAuth 原有指纹逻辑不变；不承诺解黏能改善单个 OAuth 账号的质量。只有一个 API 上游时复用稳定的新出站会话标识，实际是否更换隐藏池账号由上游决定。
+- 定向与扩展回归、service/repository race、七项 Go 静态检查通过；真实隔离 Redis 的双客户端并发证据、旧代次绑定拒绝、作用域及 TTL 验证通过。最后五轮模拟上游+Redis健康请求 p95 增量为 -133/-480/296/-216/164 微秒；3030 次请求对应 3030 次上游调用，正文/缓存标识逐字节不变。异常模拟缓存为 0/800/0/800，轮换后一次冷启动。仅隔离负载结果，不代表生产缓存率或首字保证。
+- 同输入基线探针为 first=1、next=1、stable=1，修改版为 first=1、next=2、stable=2。固定四角色位于 `/xy/artifacts/gpt-quality-routing/`，`VERIFICATION.txt` 保存命令、输入、字面输出和退出码；源码回滚、恢复哈希及补丁重建的最终执行结果由同目录 `DELIVERY_RESULT.json` 记录。源码回滚不操作生产数据库。
+
 ### STATE 可靠性 0.1.5 已发布（2026-09-21）
 
 - 用户授权推送、合并和 GitHub 发版，明确主站线上服务不允许操作；本机是开发机，仅使用专用隔离容器验证。整个发布过程没有连接、停止、重启或修改主站服务，也没有真实上游账号调用。
@@ -200,6 +209,8 @@
 Sub2API 兼容基线已更新到 `v0.2.6`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+- `20260922-quality-release-0.1.6`：用户已授权推送、合并、发版；收窄新增检测和标识轮换至 API Key 上游，OAuth 指纹收敛不纳入本次。发布副本为 `/xy/artifacts/gpt-quality-routing/work`，保留原四角色与历史证据，生产不操作。
 
 - `20260921-state-release-0.1.5`：功能/版本 PR #52、正式 Release、五平台与 GHCR 核验已完成；仅剩收尾文档受保护合并及开发机专用测试资源清理，最终事件记录到 release-0.1.5/FINAL_RESULT.json。主站禁止操作。
 
@@ -887,3 +898,13 @@ pnpm --dir frontend run build
 - 独立审查补齐固定共享加密密钥守卫，定向回归通过。新测试staticcheck失败已修正，gh旧版edit遇Projects弃用改REST成功；原失败保留。旧单代理迁移、两条密文、凭据脱敏、409、重启解密均在开发机本地验证。
 - 开发机0.1.4→0.1.5升级及0.1.4旧镜像回切健康/登录/三类数据标记通过；297→298迁移仅追加。首个代理API验收因合成管理员缺少现有初始化确认返回423，补齐测试账号初始化后通过，未更改产品权限逻辑。
 - 用户再次明确仅发布仓库、不动主站，并确认本机是开发机；本轮仅工作区与GitHub/GHCR操作，没有连接或修改主站。后续真实账号灰度仍须独立安排。再前滚后代理池解密与三类标记保留，正式版空卷新装健康/登录200、298条迁移通过。最终收尾PR与开发机资源清理结果由固定验证账本及FINAL_RESULT记录。
+
+### 2026-09-21 — `20260921-gpt-quality-routing` — 会话降档防护本地实现与验证
+
+- 实施前执行 `git pull --ff-only origin main`，固定 `021c0d885382ecfb956674e2f8b59a7674e8d912`。业务变更仅在 `/xy/artifacts/gpt-quality-routing/work` 的 `feat/gpt-quality-routing`；原工作区保持干净，未部署、未修改生产或调用真实模型。
+- 增加 `gateway.openai_quality_routing`（off/observe/enforce，默认 enforce，默认避让 300 秒），严格比较最终出站模型和改写前的原始声明，仅已知 GPT-5.6+ 明确降档对触发。API Key、分组、会话、模型隔离；正常缓存身份不变，异常先换上游、再换凭据，必要时稳定轮换标识。
+- 独立 Redis 状态与粘性键批量读取，Lua 代次和绑定 CAS 防止旧响应覆盖；本机先保护，远端更新预算 50ms。保留共享旧键，HTTP 成功不清除质量状态，不污染全账号质量统计。WS 在未发送下一轮时迁移，历史不足、压缩上下文和不完整工具续接继续绑定所有者。
+- 回归补齐别名/日期/未知后缀、冲突及损坏声明、默认/高级/加权/父会话选路、租户隔离、稳定轮换、状态过期的新身份、Redis 超时取消、WS 完整历史重建与原生透传边界。service/repository race 和七项静态规则通过；首次测试连接关闭未检查返回值的问题已修正。
+- 真实隔离 Redis 双客户端竞争和 TTL 通过。最后五轮健康请求 p95 增量最高 296 微秒，全部低于 2ms；3030 请求/3030 上游调用，正常正文与缓存标识一致。异常缓存模拟为 0/800/0/800，仅一次轮换冷启动；该结果不能外推为生产缓存率或真实首字保证。
+- 同一探针输入在基线持续命中账号 1，修改版后续稳定迁到账号 2。四角色、补丁重建、实际回滚和哈希结果见 `/xy/artifacts/gpt-quality-routing/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh,DELIVERY_RESULT.json}`；回滚依赖同目录校验过的 `BASELINE.tar.gz`，仅恢复独立源码副本。
+- 验证中的磁盘不足、编译资源中断及 lint 分批重跑均保留原始失败记录。缓存和临时构建迁到本机 `/www/gpt-quality-routing-validation/` 后串行完成检查。功能说明为 `docs/OPENAI_QUALITY_ROUTING.md`；生产启用和真实效果观察未在本轮执行。
