@@ -179,6 +179,9 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 
 	currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)
 	attachOpenAILegacySessionHashToGin(c, legacyHash)
+	if c.Request != nil && qualityRequest(c.Request.Context()) == nil {
+		s.AttachOpenAIQualityRouting(c, currentHash, body)
+	}
 	return currentHash
 }
 
@@ -215,6 +218,7 @@ func (s *OpenAIGatewayService) GenerateSessionHashWithFallback(c *gin.Context, b
 
 	currentHash, legacyHash := deriveOpenAISessionHashes(seed)
 	attachOpenAILegacySessionHashToGin(c, legacyHash)
+	s.AttachOpenAIQualityRouting(c, currentHash, body)
 	return currentHash
 }
 

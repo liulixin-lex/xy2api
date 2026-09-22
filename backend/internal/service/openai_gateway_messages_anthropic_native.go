@@ -211,6 +211,7 @@ func (s *OpenAIGatewayService) buildNativeAnthropicUpstreamRequest(
 	account.ApplyHeaderOverrides(req.Header)
 	payloads := append([][]byte{body}, sessionBodies...)
 	applyOpenCodeSessionHeader(c, account, targetURL, req.Header, payloads...)
+	s.prepareQualityHTTP(ctx, c, account, req, body)
 
 	return req, body, nil
 }

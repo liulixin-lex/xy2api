@@ -538,6 +538,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if scope, _ := resolveOpenAIWSExecutionScope(c, payload.rawForHash, apiKeyID); scope != "" {
 			sessionHash = scope
 		}
+		sessionHash = s.qualityConnectionScope(ctx, account, sessionHash)
 		preferredConnID = ""
 		storeDisabled = s.isOpenAIWSStoreDisabledInRequestRaw(payload.payloadRaw, account)
 		if useHTTPBridge {
@@ -958,7 +959,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 	var rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState
 	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string) (*OpenAIForwardResult, error) {
-		responseModelObserver := &upstreamResponseModelObserver{}
+		responseModelObserver := s.qualityObserver(ctx, account, gjson.GetBytes(payload, "model").String())
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
 		}
@@ -968,6 +969,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if promptErr != nil {
 			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, promptErr.Error(), promptErr)
 		}
+		wirePayload = qualityRotateBody(wirePayload, s.qualityRotation(ctx, account), true)
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(wirePayload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
@@ -1264,6 +1266,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					result.wsReplayInput = replayInput
 					result.wsReplayInputExists = true
 				}
+				qualityReplayComplete := (terminalEvent == "response.completed" || terminalEvent == "response.done") && gjson.GetBytes(upstreamMessage, "response.output").IsArray()
+				rememberOpenAIQualityWSTurn(ctx, payload, responseID, replayCollector.AllItems(), qualityReplayComplete)
 				if imageCount > 0 {
 					result.ImageCount = imageCount
 					result.ImageSize = imageSizeTier
