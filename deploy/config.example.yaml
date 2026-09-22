@@ -446,6 +446,12 @@ gateway:
       # 倾向上游声明倍率更低的账号；0 表示关闭（默认），建议启用时从 1.5 开始。
       upstream_cost: 0.0
   # OpenAI 高级调度器补充配置
+  # Session-scoped protection for explicit GPT-5.6+ model downgrades.
+  # No extra model calls; healthy session/cache identities are unchanged.
+  openai_quality_routing:
+    mode: enforce # off | observe | enforce
+    avoid_seconds: 300
+    rules: [] # Additional explicit pairs: [{from: gpt-6-astra, to: gpt-5.6-terra}]
   openai_scheduler:
     # 是否允许 session_hash sticky 在账号健康度恶化时临时逃逸；false 可一键回退旧行为
     sticky_escape_enabled: true

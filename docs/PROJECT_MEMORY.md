@@ -14,6 +14,28 @@
 - 四角色固定在 `/xy/artifacts/usage-export/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`。同6100条输入：BASELINE请求61页遇429；MODIFIED历史请求0、提交1任务；ROLLBACK恢复61页失败。补丁重建一致，回滚归档SHA-256与原基线一致。最终源码/构建/静态检查结果和角色哈希以交付目录 `FINAL_RESULT.json` 与字面账本为准。
 
 
+### IQ API 会话隔离 0.1.7 已发布（2026-09-22，生产未部署）
+
+- 基线 `be451c280`，继续在 `/xy/artifacts/gpt-quality-routing/work` 的 `fix/iq-probe-session-isolation` 实施，原 `/xy/xy2api` 的 `021c0d885` 工作文件保持。IQ 独立探测此前不经过业务会话质量路由；现在每个 API Key 实际检测及持久化补试在最终模型映射、请求头覆写之后生成新会话与 `prompt_cache_key`，清除旧亲和、续接和大小写变体幂等头，保留指定账号、题目、判分、次数和禁止 POST 重放约束。
+- OAuth IQ 不执行 API 随机会话轮换；新调用已有指纹收敛函数，off/device/session/full 按配置工作，设备+会话及完全收敛保持账号稳定 session/thread，逐轮 turn ID 仍遵循原逻辑。正常业务缓存与粘性未改变；IQ 检测放弃跨尝试缓存亲和，第三方是否换隐藏账号由上游实现决定。
+- GPT-6 已在 0.1.6 覆盖，本轮补齐 `gpt-6` 别名、Astra effort/日期变体、正常模型与未知名称回归，文档明确 GPT-5.6、GPT-6 及更新 GPT 文本模型的已登记降档规则。0.1.6 Release 仅更正说明，标签、发布日期及六个附件 ID/大小/校验值回读一致。
+- [PR #56](https://github.com/liulixin-lex/xy2api/pull/56) 最终 head `35b67f4402f2e2988d2640ebea36cbb705dabd8b` 在 16/16 检查成功后普通合并为 `934272ed828b05b4c558ae67837e46d67a86c520`；分支保护保持。[Release v0.1.7](https://github.com/liulixin-lex/xy2api/releases/tag/v0.1.7) 为正式 latest，annotated tag 固定 `934272ed828b05b4c558ae67837e46d67a86c520`；Release run `35696263868` 成功。五平台包下载校验、Linux 产品 0.1.7/兼容 0.2.6/完整 commit、GHCR 双架构与稳定别名通过，digest `sha256:f7d19c1ad818e50019058560b4d16ce8bc95178ef00716f7b8559075b863902c`。
+- IQ、质量路由、指纹、STATE 定向回归与 race、七项静态规则通过；早期测试夹具误用头大小写/轮次字段、CI 静态写法、共享开发机内存不足导致的编译终止，以及工作树未提交时来源审计拒绝均保留原始失败记录，修正后门禁通过。没有真实模型请求。
+- 同一合成号池输入中 BASELINE 三次共用一个隐式会话，结果 degraded/degraded/degraded；MODIFIED 三次使用三个新会话与缓存键，结果 degraded/smart/degraded；ROLLBACK 恢复基线。三态各三次上游调用，均 exit 0。这是可控模拟号池验证，不是生产抽样保证。累计业务质量探针仍为 first/next/stable：1/1/1 → 1/2/2 → 1/1/1。
+- 开发机隔离 0.1.6→0.1.7→0.1.6→0.1.7 健康、管理员登录及 PostgreSQL/Redis/应用目录标记通过，全新安装通过，迁移数保持 298，专用测试容器已清理。未连接或操作生产。固定四角色仍在 `/xy/artifacts/gpt-quality-routing/`；累计补丁重建、源码回滚和恢复哈希由 `DELIVERY_RESULT.json` 与 `iq-session-isolation/FINAL_RESULT.json` 记录，源码回滚恢复原始 `021c0d885`，不操作数据库。
+
+### GPT-5.6+ 会话质量路由 0.1.6 已发布（2026-09-22，生产未部署）
+
+- 已执行 `git pull --ff-only origin main`，基线为 `021c0d885382ecfb956674e2f8b59a7674e8d912`；实现位于 `/xy/artifacts/gpt-quality-routing/work` 的 `feat/gpt-quality-routing`，原 `/xy/xy2api` 保持干净。没有部署、生产写入或真实模型调用。
+- 新增 `gateway.openai_quality_routing`（默认 enforce，避让 300 秒），以 API Key、分组、稳定会话和模型为作用域；严格比较最终出站模型与原始响应声明。默认 Astra/Sol/Terra→Luna，账号映射 Sol→Terra 不触发。正常缓存标识不变；异常优先不同上游，必要时稳定轮换出站标识。
+- 默认/高级/加权调度、HTTP/SSE、Chat/Messages 转换、WS 原生/桥接/透传已接入；当前响应不重放，不新增模型调用，不写全账号质量降权。完整历史才允许迁移续接，缺少 response.output、工具上下文或存在不透明 compaction/reference 项时保留所有者。异常代次内标识稳定，状态过期后再次异常生成新标识。
+- 用户确认本次聚焦 API 上游号池：新增质量证据、出站标识轮换及 WS 连接代次只对 OpenAI API Key 类型凭据生效，OAuth 原有指纹逻辑不变；不承诺解黏能改善单个 OAuth 账号的质量。只有一个 API 上游时复用稳定的新出站会话标识，实际是否更换隐藏池账号由上游决定。
+- 功能/版本 [PR #54](https://github.com/liulixin-lex/xy2api/pull/54) 最终 head `b4b6a26902715ddc56ae1de3575f4bf465f70018` 在 16/16 检查通过后普通合并为 `f0127cc29db7ee5ba2f54849ff14fdfec064bbf0`，分支保护保持。首轮 CI 的两项旧指标快照测试暴露空 map 与零值兼容差异，修复后完整单元、集成及静态检查全部成功。
+- 正式 [Release v0.1.6](https://github.com/liulixin-lex/xy2api/releases/tag/v0.1.6) 为 latest、非草稿、非预发布；annotated tag object `a15aeb9995280994c238ee8863900bb7db285b11` 固定于上述合并提交。Release run `35682383562`、主线和标签 CI/安全扫描全部成功。五平台包实际下载并复算 SHA-256，Linux 二进制产品版本 0.1.6、兼容版本 0.2.6、完整提交正确；GHCR amd64/arm64 及 `0.1.6/latest/0.1/0` 别名均核对一致，digest `sha256:273feaa297e31ecd6247cdf36504a0a6f920c0e44d4c07619b02abb55f56baa8`。
+- 定向与扩展回归、service/repository race、七项 Go 静态检查通过；最终候选的质量路由与原调度组合回归/race 均通过，真实隔离 Redis 双客户端竞争、旧代次绑定拒绝、作用域和 TTL 再次验证通过。最终五轮健康请求 p95 增量为 295/1224/-176/1142/315 微秒，最大 1.224ms，低于 2ms 目标；3030 次请求对应 3030 次上游调用，正常正文/缓存标识逐字节不变。异常模拟缓存为 0/800/0/800，轮换后一次冷启动。仅隔离负载结果，不代表生产缓存率或首字保证。
+- 开发机专用隔离环境实际完成 0.1.5→0.1.6→0.1.5 回切及再次前滚，健康和管理员登录均 200，PostgreSQL/Redis/应用目录标记保留；0.1.6 全新安装也通过。迁移数始终 298，本版无新增数据库迁移。未连接或修改生产服务，没有真实模型调用。
+- 同输入基线探针为 first=1、next=1、stable=1，修改版为 first=1、next=2、stable=2。固定四角色位于 `/xy/artifacts/gpt-quality-routing/`，`VERIFICATION.txt` 保存命令、输入、字面输出和退出码；源码回滚、恢复哈希及补丁重建的最终执行结果由同目录 `DELIVERY_RESULT.json` 记录。源码回滚不操作生产数据库。
+
 ### STATE 可靠性 0.1.5 已发布（2026-09-21）
 
 - 用户授权推送、合并和 GitHub 发版，明确主站线上服务不允许操作；本机是开发机，仅使用专用隔离容器验证。整个发布过程没有连接、停止、重启或修改主站服务，也没有真实上游账号调用。
@@ -210,6 +232,7 @@
 Sub2API 兼容基线已更新到 `v0.2.6`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
 
 - `20260921-state-release-0.1.5`：功能/版本 PR #52、正式 Release、五平台与 GHCR 核验已完成；仅剩收尾文档受保护合并及开发机专用测试资源清理，最终事件记录到 release-0.1.5/FINAL_RESULT.json。主站禁止操作。
 
@@ -909,3 +932,33 @@ pnpm --dir frontend run build
 
 - 用户授权将已验收实现推送并创建 PR，明确不合并、不发版。沿用 feat/usage-export 与四角色交付；业务代码不变，提交包含实现、测试和维护文档。
 - 本地验证结果沿用上一条，远端 PR 与提交身份记录在 /xy/artifacts/usage-export/PR_RESULT.json；远端 CI 状态以 GitHub 为准。
+
+### 2026-09-21 — `20260921-gpt-quality-routing` — 会话降档防护本地实现与验证
+
+- 实施前执行 `git pull --ff-only origin main`，固定 `021c0d885382ecfb956674e2f8b59a7674e8d912`。业务变更仅在 `/xy/artifacts/gpt-quality-routing/work` 的 `feat/gpt-quality-routing`；原工作区保持干净，未部署、未修改生产或调用真实模型。
+- 增加 `gateway.openai_quality_routing`（off/observe/enforce，默认 enforce，默认避让 300 秒），严格比较最终出站模型和改写前的原始声明，仅已知 GPT-5.6+ 明确降档对触发。API Key、分组、会话、模型隔离；正常缓存身份不变，异常先换上游、再换凭据，必要时稳定轮换标识。
+- 独立 Redis 状态与粘性键批量读取，Lua 代次和绑定 CAS 防止旧响应覆盖；本机先保护，远端更新预算 50ms。保留共享旧键，HTTP 成功不清除质量状态，不污染全账号质量统计。WS 在未发送下一轮时迁移，历史不足、压缩上下文和不完整工具续接继续绑定所有者。
+- 回归补齐别名/日期/未知后缀、冲突及损坏声明、默认/高级/加权/父会话选路、租户隔离、稳定轮换、状态过期的新身份、Redis 超时取消、WS 完整历史重建与原生透传边界。service/repository race 和七项静态规则通过；首次测试连接关闭未检查返回值的问题已修正。
+- 真实隔离 Redis 双客户端竞争和 TTL 通过。最后五轮健康请求 p95 增量最高 296 微秒，全部低于 2ms；3030 请求/3030 上游调用，正常正文与缓存标识一致。异常缓存模拟为 0/800/0/800，仅一次轮换冷启动；该结果不能外推为生产缓存率或真实首字保证。
+- 同一探针输入在基线持续命中账号 1，修改版后续稳定迁到账号 2。四角色、补丁重建、实际回滚和哈希结果见 `/xy/artifacts/gpt-quality-routing/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh,DELIVERY_RESULT.json}`；回滚依赖同目录校验过的 `BASELINE.tar.gz`，仅恢复独立源码副本。
+- 验证中的磁盘不足、编译资源中断及 lint 分批重跑均保留原始失败记录。缓存和临时构建迁到本机 `/www/gpt-quality-routing-validation/` 后串行完成检查。功能说明为 `docs/OPENAI_QUALITY_ROUTING.md`；生产启用和真实效果观察未在本轮执行。
+
+### 2026-09-22 — `20260922-quality-release-0.1.6` — 正式发布与验收
+
+- 用户授权推送、合并和发版，并明确暂不处理 OAuth 指纹收敛；新增检测、身份轮换及 WS 连接代次收窄至 OpenAI API Key 凭据，新增 OAuth 排除回归，原指纹逻辑保持。
+- 功能、版本和验证修复分开提交；PR #54 最终 16/16 通过后普通合并为 `f0127cc29`，没有关闭保护或强推。首次完整 CI 暴露两项旧调度指标空值断言，修复零值兼容与独立计数器断言后完整单元、集成、静态检查全部成功；最终质量/调度组合 race exit 0。
+- annotated v0.1.6、正式 Release、五平台下载校验、Linux 二进制完整版本/提交、GHCR 双架构及稳定别名均实际核验；产品 0.1.6、兼容 0.2.6。Release run 35682383562 和主线/标签 CI、安全扫描全部成功。
+- 最终候选五轮健康请求 p95 增量最高 1.224ms（此前本地实现轮次最高 0.296ms，历史记录保留），3030 请求/3030 调用且正常正文一致；异常缓存模拟只出现一次轮换冷启动。真实 Redis 的 32 个重复证据、双客户端代次及作用域隔离通过。
+- 隔离 0.1.5→0.1.6→0.1.5→0.1.6 的健康、登录及三类数据标记通过，全新安装也通过，迁移数保持 298。专用测试资源完成清理，生产未连接、未部署、未修改。
+- 原四角色继续位于 `/xy/artifacts/gpt-quality-routing/`，原版本已备份；发布源码同输入为 BASELINE first=1/next=1/stable=1、MODIFIED first=1/next=2/stable=2、ROLLBACK first=1/next=1/stable=1，全部 exit 0。补丁重建和恢复哈希相等已验证，跨磁盘移动失败及修复续跑、首轮 CI 失败等原始证据均保留。回滚脚本依赖同目录 BASELINE.tar.gz，仅恢复独立源码，不操作生产数据库。
+- 发布标签不移动，收尾记忆通过独立受保护 PR 固化；最终源码/远端提交、交付哈希及清理结果见 `release-0.1.6/FINAL_RESULT.json`。真实生产缓存率和持续避让效果仍需后续部署观察。
+
+### 2026-09-22 — `20260922-iq-session-isolation` — API 检测会话隔离与 0.1.7 发布
+
+- 基线 `be451c280`，继续在 `/xy/artifacts/gpt-quality-routing/work` 的 `fix/iq-probe-session-isolation` 实施，原 `/xy/xy2api` 的 `021c0d885` 工作文件保持。IQ 独立探测此前不经过业务会话质量路由；现在每个 API Key 实际检测及持久化补试在最终模型映射、请求头覆写之后生成新会话与 `prompt_cache_key`，清除旧亲和、续接和大小写变体幂等头，保留指定账号、题目、判分、次数和禁止 POST 重放约束。
+- OAuth IQ 不执行 API 随机会话轮换；新调用已有指纹收敛函数，off/device/session/full 按配置工作，设备+会话及完全收敛保持账号稳定 session/thread，逐轮 turn ID 仍遵循原逻辑。正常业务缓存与粘性未改变；IQ 检测放弃跨尝试缓存亲和，第三方是否换隐藏账号由上游实现决定。
+- GPT-6 已在 0.1.6 覆盖，本轮补齐 `gpt-6` 别名、Astra effort/日期变体、正常模型与未知名称回归，文档明确 GPT-5.6、GPT-6 及更新 GPT 文本模型的已登记降档规则。0.1.6 Release 仅更正说明，标签、发布日期及六个附件 ID/大小/校验值回读一致。
+- [PR #56](https://github.com/liulixin-lex/xy2api/pull/56) 最终 head `35b67f4402f2e2988d2640ebea36cbb705dabd8b` 在 16/16 检查成功后普通合并为 `934272ed828b05b4c558ae67837e46d67a86c520`；分支保护保持。[Release v0.1.7](https://github.com/liulixin-lex/xy2api/releases/tag/v0.1.7) 为正式 latest，annotated tag 固定 `934272ed828b05b4c558ae67837e46d67a86c520`；Release run `35696263868` 成功。五平台包下载校验、Linux 产品 0.1.7/兼容 0.2.6/完整 commit、GHCR 双架构与稳定别名通过，digest `sha256:f7d19c1ad818e50019058560b4d16ce8bc95178ef00716f7b8559075b863902c`。
+- IQ、质量路由、指纹、STATE 定向回归与 race、七项静态规则通过；早期测试夹具误用头大小写/轮次字段、CI 静态写法、共享开发机内存不足导致的编译终止，以及工作树未提交时来源审计拒绝均保留原始失败记录，修正后门禁通过。没有真实模型请求。
+- 同一合成号池输入中 BASELINE 三次共用一个隐式会话，结果 degraded/degraded/degraded；MODIFIED 三次使用三个新会话与缓存键，结果 degraded/smart/degraded；ROLLBACK 恢复基线。三态各三次上游调用，均 exit 0。这是可控模拟号池验证，不是生产抽样保证。累计业务质量探针仍为 first/next/stable：1/1/1 → 1/2/2 → 1/1/1。
+- 开发机隔离 0.1.6→0.1.7→0.1.6→0.1.7 健康、管理员登录及 PostgreSQL/Redis/应用目录标记通过，全新安装通过，迁移数保持 298，专用测试容器已清理。未连接或操作生产。固定四角色仍在 `/xy/artifacts/gpt-quality-routing/`；累计补丁重建、源码回滚和恢复哈希由 `DELIVERY_RESULT.json` 与 `iq-session-isolation/FINAL_RESULT.json` 记录，源码回滚恢复原始 `021c0d885`，不操作数据库。

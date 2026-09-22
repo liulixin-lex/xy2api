@@ -14,7 +14,8 @@ const (
 
 // upstreamResponseModelObserver tracks one forwarding attempt (or one WS turn).
 // A terminal declaration wins over an earlier declaration; otherwise the first
-// declaration is retained. Observation never affects the forwarding path.
+// declaration is retained. The optional quality callback invalidates affinity
+// for later requests without interrupting or retrying the current response.
 //
 // Billing normally ignores the observed model as well; the only exception is a
 // channel explicitly configured with billing_model_source = response_model,
@@ -26,6 +27,7 @@ const (
 // separate from the final outbound request tier until usage recording resolves
 // the billable tier for the selected credential protocol.
 type upstreamResponseModelObserver struct {
+	quality  func(string)
 	first    string
 	terminal string
 	conflict bool
@@ -70,6 +72,9 @@ func normalizeObservedUpstreamResponseModel(model string) string {
 
 func (o *upstreamResponseModelObserver) ObserveOpenAI(payload []byte, eventType string) {
 	model := firstValidTrimmedGJSONString(payload, "response.model", "model")
+	if model != "" {
+		o.inspectQualityDeclaration(payload, "response.model", "model")
+	}
 	terminal := isUpstreamResponseModelTerminalEvent(eventType)
 	o.Observe(model, terminal)
 	// Every payload that declares a service tier also declares a model, so
@@ -89,6 +94,9 @@ func (o *upstreamResponseModelObserver) ObserveOpenAI(payload []byte, eventType 
 
 func (o *upstreamResponseModelObserver) ObserveAnthropic(payload []byte) {
 	model := firstValidTrimmedGJSONString(payload, "message.model", "model")
+	if model != "" {
+		o.inspectQualityDeclaration(payload, "message.model", "model")
+	}
 	o.Observe(model, false)
 	// usage.speed travels with the message object (message_start in streams,
 	// the top-level body otherwise), i.e. only in payloads that declare a model.
