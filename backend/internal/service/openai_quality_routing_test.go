@@ -54,6 +54,7 @@ func TestOpenAIQualityExcludesOAuth(t *testing.T) {
 	require.Equal(t, uint64(1), q.state.Generation)
 	// The same address with API Key credentials remains eligible for protection.
 	a.Type = AccountTypeAPIKey
+	q.state.Avoid["1"] = OpenAIQualityAvoid{Provider: qualityProvider(&a)}
 	require.Equal(t, "rotated", s.qualityRotation(ctx, &a))
 	require.NotEqual(t, session, s.qualityConnectionScope(ctx, &a, session))
 }
