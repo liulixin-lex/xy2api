@@ -8,7 +8,7 @@
   "upstream_commit": "49a39b6dc1abed30fd227611e8af1108bc427610",
   "merge_base": "86f93c28ee34cc74b629dafb748bd5ac5ca8c5ea",
   "fork_start": "35d62090079bfab131dfa69e8d3283f1fc1b9363",
-  "xy2api_version": "0.1.6",
+  "xy2api_version": "0.1.7",
   "sub2api_compat_version": "0.2.6",
   "status": "resolved",
   "manual_resolutions": [

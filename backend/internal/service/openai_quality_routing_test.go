@@ -66,6 +66,11 @@ func TestOpenAIQualityDetection(t *testing.T) {
 		want     bool
 	}{
 		{"gpt-6-astra", "gpt-5.6-luna", true},
+		{"gpt-6", "gpt-5.6-luna", true},
+		{"gpt-6-astra-max", "gpt-5.6-luna-max", true},
+		{"gpt-6-astra-2026-09-01-high", "gpt-5.6-luna", true},
+		{"gpt-6-astra", "gpt-6-astra", false},
+		{"gpt-6-unknown", "gpt-5.6-luna", false},
 		{"gpt-5.6-sol", "gpt-5.6-luna-max", true},
 		{"openai/gpt6_astra", "gpt-5.6-luna-2026-09-01", true},
 		{"vendor/GPT 6 ASTRA", "gpt-5.6-luna-2026-09-01-max", true},

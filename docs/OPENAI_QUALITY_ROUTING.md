@@ -1,4 +1,4 @@
-# OpenAI Session Quality Routing
+# OpenAI Session Quality Routing (GPT-5.6, GPT-6 and newer)
 
 This protects a session after an upstream explicitly reports a configured lower
 model. It does not assess response prose, latency, or reasoning token counts.
@@ -29,6 +29,11 @@ conflicting declaration is logged by the existing observer but cannot undo an
 already observed downgrade. Image-generation requests are excluded.
 
 Built-in evidence pairs are Astra/Sol/Terra to GPT-5.6 Luna, including Luna-max.
+GPT-6 is included: `gpt-6` is a registered alias of `gpt-6-astra`; the default
+rule detects both routing to GPT-5.6 Luna. Registered effort/date variants also
+apply. Version eligibility alone does not make every model mismatch a downgrade;
+unknown model names and unconfigured downgrade pairs still only produce records.
+
 Additional explicit pairs can be appended in configuration:
 
 ```yaml
@@ -101,6 +106,12 @@ history remains pinned and emits `continuation_pinned`. Absence of a tool output
 alone never proves that a referenced response can be removed.
 
 ## Observability and Limits
+
+Account IQ probes use a separate path and do not inherit business-session quality
+state. Each API Key probe attempt, including a scheduled retry, now sends a fresh
+session identity and `prompt_cache_key`; its target credential and fixed question
+stay unchanged. OAuth IQ probes use the configured device/session fingerprint
+convergence policy instead of API pool rotation. See `OPENAI_IQ_CHECK.md`.
 
 Structured `openai_quality_routing` events cover downgrade evidence, sticky
 invalidation, replacement, identity rotation, pinned continuation, and storage

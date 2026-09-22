@@ -85,7 +85,7 @@ func TestIQCheckProbe(t *testing.T) {
 				require.NotContains(t, transport.bodies[i], "previous_response_id")
 				require.NotContains(t, transport.bodies[i], "conversation")
 			}
-			require.Equal(t, transport.bodies[0], transport.bodies[1])
+			requireIQProbePayloadIsolation(t, a, transport.bodies)
 			require.Equal(t, StatusActive, a.Status)
 			require.True(t, a.Schedulable)
 		})
@@ -129,8 +129,13 @@ func TestIQCheckOAuthPayloadAndStaleCandidate(t *testing.T) {
 			require.Equal(t, "smart", result.Status)
 			require.Equal(t, iqcheck.Model, transport.bodies[0]["model"])
 			require.Equal(t, map[string]any{"effort": iqcheck.Effort}, transport.bodies[0]["reasoning"])
-			require.Empty(t, transport.requests[0].Header.Get("Session_id"))
-			require.Empty(t, transport.requests[0].Header.Get("Conversation_id"))
+			if kind == AccountTypeAPIKey {
+				require.NotEmpty(t, transport.requests[0].Header.Get("Session_id"))
+				require.Equal(t, transport.bodies[0]["prompt_cache_key"], transport.requests[0].Header.Get("Conversation_id"))
+			} else {
+				require.Empty(t, transport.requests[0].Header.Get("Session_id"))
+				require.Empty(t, transport.requests[0].Header.Get("Conversation_id"))
+			}
 		})
 	}
 	cached := Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, IQCheck: domain.IQCheck{Enabled: true, Status: "smart"}}
@@ -159,7 +164,7 @@ func TestIQCheckConfiguredRoutes(t *testing.T) {
 				require.False(t, result.FormatCompliant)
 				require.Equal(t, "upstream-reported", result.ReportedModel)
 			}
-			require.Equal(t, transport.bodies[0], transport.bodies[1])
+			requireIQProbePayloadIsolation(t, a, transport.bodies)
 			payload := transport.bodies[0]
 			require.Equal(t, "custom/model", payload["model"])
 			require.NotContains(t, payload, "reasoning")
@@ -194,7 +199,7 @@ func TestIQCheckCompleteOAuthStream(t *testing.T) {
 				require.Equal(t, "fixture-id", result.Diagnostic.RequestID)
 				require.Equal(t, 4, result.Diagnostic.EventIndex)
 			}
-			require.Equal(t, u.bodies[0], u.bodies[1])
+			requireIQProbePayloadIsolation(t, a, u.bodies)
 			require.NotContains(t, u.bodies[0], "previous_response_id")
 			require.Equal(t, false, u.bodies[0]["store"])
 			require.Equal(t, StatusActive, a.Status)
