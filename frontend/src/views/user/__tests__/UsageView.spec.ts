@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 import UsageView from '../UsageView.vue'
+import UsageTable from '@/components/admin/usage/UsageTable.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 
 const {
