@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -43,7 +44,7 @@ func TestIQAPIProbeFreshSessionAfterOverridesAndMapping(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
 				Credentials: map[string]any{"api_key": "fixture", "header_override_enabled": true,
-					"header_overrides": map[string]any{"session_id": "fixed", "SESSION-ID": "fixed", "x-session-affinity": "fixed", "x-opencode-session": "fixed", "x-codex-turn-state": "fixed", "x-codex-turn-metadata": `{"session_id":"fixed"}`, "x-test-preserved": "keep"},
+					"header_overrides": map[string]any{"session_id": "fixed", "SESSION-ID": "fixed", "x-session-affinity": "fixed", "x-opencode-session": "fixed", "x-codex-turn-state": "fixed", "x-codex-turn-metadata": `{"session_id":"fixed"}`, "x-test-preserved": "keep", "idempotency-key": "fixed", "X-Idempotency-Key": "fixed"},
 					"model_mapping":    map[string]any{"gpt-6-astra": "gpt-5.6-sol"}},
 				Extra: map[string]any{"openai_responses_mode": mode}, IQCheck: domain.IQCheck{Model: "gpt-6-astra"}}
 			u := &iqProbeTransport{status: 503, body: `{}`}
@@ -67,6 +68,9 @@ func TestIQAPIProbeFreshSessionAfterOverridesAndMapping(t *testing.T) {
 				require.Equal(t, "keep", req.Header["x-test-preserved"][0])
 				require.Equal(t, "Bearer fixture", req.Header.Get("Authorization"))
 				require.Equal(t, "gpt-5.6-sol", u.bodies[i]["model"])
+				for name := range req.Header {
+					require.NotContains(t, []string{"idempotency-key", "x-idempotency-key"}, strings.ToLower(name))
+				}
 				require.Nil(t, req.GetBody)
 				require.True(t, HTTPUpstreamSingleAttempt(req.Context()))
 				require.NotContains(t, u.bodies[i], "previous_response_id")

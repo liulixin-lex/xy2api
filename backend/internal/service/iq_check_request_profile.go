@@ -42,6 +42,7 @@ func applyIQProbeRequestIdentity(req *http.Request, account *Account) error {
 			"x-session-id", "x-session-affinity", "x-opencode-session", "x-conversation-id",
 			"thread-id", "x-client-request-id", "x-codex-window-id",
 			"previous_response_id", "previous-response-id", "x-codex-turn-state", "x-codex-turn-metadata",
+			"idempotency-key", "x-idempotency-key",
 		} {
 			for key := range req.Header {
 				if strings.EqualFold(key, name) {
