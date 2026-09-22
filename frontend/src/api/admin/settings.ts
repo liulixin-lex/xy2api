@@ -721,6 +721,9 @@ export interface SystemSettings {
   account_quota_notify_enabled: boolean;
   account_quota_notify_emails: NotifyEmailEntry[];
 
+  // Admin-only usage display switches
+  admin_usage_cache_hit_rate_enabled: boolean;
+  admin_usage_token_speed_enabled: boolean;
   // Channel Monitor feature switch
   channel_monitor_enabled: boolean;
   channel_monitor_mode?: 'v1' | 'v2';
@@ -1028,6 +1031,9 @@ export interface UpdateSettingsRequest {
   account_quota_notify_enabled?: boolean;
   account_quota_notify_emails?: NotifyEmailEntry[];
 
+  // Admin-only usage display switches
+  admin_usage_cache_hit_rate_enabled?: boolean;
+  admin_usage_token_speed_enabled?: boolean;
   // Channel Monitor feature switch
   channel_monitor_enabled?: boolean;
   channel_monitor_mode?: 'v1' | 'v2';

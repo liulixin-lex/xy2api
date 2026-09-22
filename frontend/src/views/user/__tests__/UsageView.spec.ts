@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 import UsageView from '../UsageView.vue'
+import UsageTable from '@/components/admin/usage/UsageTable.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 
 const {
@@ -217,6 +218,15 @@ describe('user UsageView', () => {
     listMyErrorRequests.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
     list.mockResolvedValue({ items: [{ id: 1, name: 'demo-key' }], total: 1, page: 1, page_size: 100, pages: 1 })
     getAvailable.mockResolvedValue([{ id: 1, name: 'default' }])
+  })
+
+  it('never enables admin usage metrics on the user page', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+    const table = wrapper.findComponent(UsageTable)
+    expect(table.props('showCacheHitRate')).toBeUndefined()
+    expect(table.props('showTokenSpeed')).toBeUndefined()
+    wrapper.unmount()
   })
 
   it('loads logs, stats, model stats, and snapshot on first render', async () => {

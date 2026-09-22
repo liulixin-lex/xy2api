@@ -330,6 +330,10 @@ type UpdateSettingsRequest struct {
 	// Use Alipay face-to-face precreate and an app deep link on mobile clients.
 	PaymentAlipayMobilePrecreateDeepLink *bool `json:"payment_alipay_mobile_precreate_deep_link"`
 
+	// Admin-only usage display switches. Omitted fields preserve saved values.
+	AdminUsageCacheHitRateEnabled *bool `json:"admin_usage_cache_hit_rate_enabled"`
+	AdminUsageTokenSpeedEnabled   *bool `json:"admin_usage_token_speed_enabled"`
+
 	// Channel Monitor feature switch
 	ChannelMonitorEnabled                *bool   `json:"channel_monitor_enabled"`
 	ChannelMonitorMode                   *string `json:"channel_monitor_mode"`
@@ -1902,6 +1906,18 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.AccountQuotaNotifyEmails
 		}(),
+		AdminUsageCacheHitRateEnabled: func() bool {
+			if req.AdminUsageCacheHitRateEnabled != nil {
+				return *req.AdminUsageCacheHitRateEnabled
+			}
+			return previousSettings.AdminUsageCacheHitRateEnabled
+		}(),
+		AdminUsageTokenSpeedEnabled: func() bool {
+			if req.AdminUsageTokenSpeedEnabled != nil {
+				return *req.AdminUsageTokenSpeedEnabled
+			}
+			return previousSettings.AdminUsageTokenSpeedEnabled
+		}(),
 		ChannelMonitorEnabled: func() bool {
 			if req.ChannelMonitorEnabled != nil {
 				return *req.ChannelMonitorEnabled
@@ -2402,6 +2418,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PaymentAlipayForceQRCode:                               updatedPaymentCfg.AlipayForceQRCode,
 		PaymentAlipayMobilePrecreateDeepLink:                   updatedPaymentCfg.AlipayMobilePrecreateDeepLink,
 
+		AdminUsageCacheHitRateEnabled:        updatedSettings.AdminUsageCacheHitRateEnabled,
+		AdminUsageTokenSpeedEnabled:          updatedSettings.AdminUsageTokenSpeedEnabled,
 		ChannelMonitorEnabled:                updatedSettings.ChannelMonitorEnabled,
 		ChannelMonitorMode:                   updatedSettings.ChannelMonitorMode,
 		ChannelMonitorDefaultIntervalSeconds: updatedSettings.ChannelMonitorDefaultIntervalSeconds,

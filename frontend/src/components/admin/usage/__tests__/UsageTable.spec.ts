@@ -854,3 +854,44 @@ describe('admin UsageTable deleted-user badge', () => {
     expect(wrapper.text()).toContain('active@test.com')
   })
 })
+
+
+describe('admin usage metric visibility', () => {
+  const row = { ...baseImageRow, billing_mode: 'token', image_count: 0, input_tokens: 500, cache_read_tokens: 1500, output_tokens: 100, duration_ms: 3000, first_token_ms: 1000 }
+  const mountMetrics = (props = {}, data = [row]) => mount(UsageTable, {
+    props: { data, columns: [], ...props },
+    global: { stubs: { DataTable: { props: ['data'], template: '<div><template v-for="row in data"><slot name="cell-tokens" :row="row"/><slot name="cell-latency" :row="row"/></template></div>' }, Icon: true, Teleport: true } },
+  })
+  it('hides both metrics by default for shared user rendering', () => {
+    const wrapper = mountMetrics()
+    expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
+  })
+  it.each([[true,true],[true,false],[false,true],[false,false]])('obeys independent flags %s / %s', (showCacheHitRate, showTokenSpeed) => {
+    const wrapper = mountMetrics({ showCacheHitRate, showTokenSpeed })
+    expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(showCacheHitRate)
+    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(showTokenSpeed)
+    if (showCacheHitRate) {
+      const percent = wrapper.get('[data-testid="usage-cache-hit-rate"]')
+      expect(percent.text()).toBe('75.0%')
+      expect(percent.element.parentElement?.textContent?.trim()).toBe('75.0%')
+    }
+    if (showTokenSpeed) expect(wrapper.get('[data-testid="usage-token-speed"]').text()).toBe('50.0 T/s')
+  })
+  it('updates reactively after changing settings', async () => {
+    const wrapper = mountMetrics({ showCacheHitRate: true, showTokenSpeed: true })
+    await wrapper.setProps({ showCacheHitRate: false, showTokenSpeed: false })
+    expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
+  })
+  it('explains the fallback for missing first-token time', () => {
+    const wrapper = mountMetrics({ showTokenSpeed: true }, [{ ...row, first_token_ms: null } as unknown as typeof row])
+    expect(wrapper.get('[data-testid="usage-token-speed"]').text()).toBe('33.3 T/s')
+    expect(wrapper.get('[data-testid="usage-token-speed"]').attributes('title')).toBe('usage.tokenSpeedTotalHint')
+  })
+  it('does not label media requests with token speed or cache rate', () => {
+    const wrapper = mountMetrics({ showCacheHitRate: true, showTokenSpeed: true }, [{ ...row, image_count: 2, billing_mode: 'image' }])
+    expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
+  })
+})

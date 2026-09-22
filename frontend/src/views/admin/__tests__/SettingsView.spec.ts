@@ -132,6 +132,7 @@ vi.mock("@/stores", () => ({
 vi.mock("@/stores/adminSettings", () => ({
   useAdminSettingsStore: () => ({
     fetch: adminSettingsFetch,
+    setUsageMetricsLocal: vi.fn(),
   }),
 }));
 
@@ -719,6 +720,31 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     fetchPublicSettings.mockResolvedValue(undefined);
     adminSettingsFetch.mockResolvedValue(undefined);
+  });
+
+  it.each([[true, true], [true, false], [false, true], [false, false]])("loads and saves admin usage metric switches %s / %s", async (cache, speed) => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, admin_usage_cache_hit_rate_enabled: cache, admin_usage_token_speed_enabled: speed });
+    const wrapper = mountView();
+    await flushPromises();
+    const switches = wrapper.get('[data-testid="admin-usage-metrics-settings"]').findAll('input[type="checkbox"]');
+    expect(switches).toHaveLength(2);
+    expect((switches[0]!.element as HTMLInputElement).checked).toBe(cache);
+    expect((switches[1]!.element as HTMLInputElement).checked).toBe(speed);
+    await switches[0]!.setValue(!cache);
+    await switches[1]!.setValue(!speed);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ admin_usage_cache_hit_rate_enabled: !cache, admin_usage_token_speed_enabled: !speed }));
+    expect(adminSettingsFetch).toHaveBeenCalledWith(true);
+    wrapper.unmount();
+  });
+
+  it("defaults both admin usage metric switches to enabled for older settings responses", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    const switches = wrapper.get('[data-testid="admin-usage-metrics-settings"]').findAll('input[type="checkbox"]');
+    expect(switches.every(node => (node.element as HTMLInputElement).checked)).toBe(true);
+    wrapper.unmount();
   });
 
   it("submits the Codex ticket harvest toggle", async () => {

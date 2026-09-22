@@ -185,6 +185,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpsQueryModeDefault:          "auto",
 		SettingKeyOpsMetricsIntervalSeconds:    "60",
 
+		SettingKeyAdminUsageCacheHitRateEnabled: "true",
+		SettingKeyAdminUsageTokenSpeedEnabled:   "true",
+
 		// Channel monitor defaults (enabled, 60s)
 		SettingKeyChannelMonitorEnabled:                "true",
 		SettingKeyChannelMonitorMode:                   ChannelMonitorModeV1,
@@ -796,6 +799,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 			result.OpsMetricsIntervalSeconds = v
 		}
 	}
+
+	result.AdminUsageCacheHitRateEnabled = !isFalseSettingValue(settings[SettingKeyAdminUsageCacheHitRateEnabled])
+	result.AdminUsageTokenSpeedEnabled = !isFalseSettingValue(settings[SettingKeyAdminUsageTokenSpeedEnabled])
 
 	// Channel monitor feature (default: enabled, 60s)
 	result.ChannelMonitorEnabled = !isFalseSettingValue(settings[SettingKeyChannelMonitorEnabled])

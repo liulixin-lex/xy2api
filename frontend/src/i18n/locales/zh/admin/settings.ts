@@ -43,6 +43,14 @@ export default {
         payment: '支付设置',
       },
       features: {
+        usageMetrics: {
+          title: '管理员使用记录',
+          description: '控制管理员使用记录中的指标显示，不影响统计与计费。',
+          cacheHitRate: '显示缓存命中率',
+          cacheHitRateHint: '在 Token 列显示每条请求的缓存命中百分比。',
+          tokenSpeed: '显示 Token 速度',
+          tokenSpeedHint: '在延迟列显示每秒输出 Token 数，优先按生成阶段耗时计算。',
+        },
         channelMonitor: {
           title: '渠道监控',
           description: '启用后在 V1 主动探测与 V2 被动用量监控中二选一。关闭后两种模式的后台任务均停止，用户端入口隐藏。',
