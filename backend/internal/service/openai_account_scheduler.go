@@ -107,6 +107,7 @@ type OpenAIAccountScheduleDecision struct {
 }
 
 type OpenAIAccountSchedulerMetricsSnapshot struct {
+	QualityRoutingCounters   map[string]uint64
 	SelectTotal              int64
 	StickyPreviousHitTotal   int64
 	StickySessionHitTotal    int64
@@ -2170,6 +2171,15 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	return s.selectAccountWithQualityRouting(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+}
+
+func (s *OpenAIGatewayService) selectAccountWithoutQualityRouting(
+	ctx context.Context, groupID *int64, previousResponseID, sessionHash, requestedModel string,
+	excludedIDs map[int64]struct{}, requiredTransport OpenAIUpstreamTransport,
+	requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability,
+	requireCompact bool, platform string, previousResponseCanMove, useUpstreamTokenCost bool,
+) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	selection, decision, err := s.selectAccountWithSchedulerOnce(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
 	if err == nil || openAIProxyStreamQuarantineBypassed(ctx) {
 		return selection, decision, err
@@ -2472,9 +2482,11 @@ func (s *OpenAIGatewayService) RecordOpenAIAccountSwitch() {
 func (s *OpenAIGatewayService) SnapshotOpenAIAccountSchedulerMetrics() OpenAIAccountSchedulerMetricsSnapshot {
 	scheduler := s.getOpenAIAccountScheduler(context.Background())
 	if scheduler == nil {
-		return OpenAIAccountSchedulerMetricsSnapshot{}
+		return OpenAIAccountSchedulerMetricsSnapshot{QualityRoutingCounters: OpenAIQualityRoutingMetrics()}
 	}
-	return scheduler.SnapshotMetrics()
+	snapshot := scheduler.SnapshotMetrics()
+	snapshot.QualityRoutingCounters = OpenAIQualityRoutingMetrics()
+	return snapshot
 }
 
 func (s *OpenAIGatewayService) openAIWSSessionStickyTTL() time.Duration {

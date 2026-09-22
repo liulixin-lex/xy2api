@@ -197,6 +197,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		"soft_routing_hint",
 	)
 
+	qualityRotateHeaders(headers, s.qualityRotation(ctx, account))
 	return headers, sessionResolution, nil
 }
 

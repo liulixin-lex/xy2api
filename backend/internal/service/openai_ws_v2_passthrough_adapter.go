@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -794,6 +795,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
 	}
 	firstClientMessage = updatedFirst
+	var qualityObserver atomic.Pointer[upstreamResponseModelObserver]
+	var qualityTurnBody atomic.Pointer[[]byte]
+	if qualityRequest(ctx) != nil {
+		qualityFirstBody := firstClientMessage
+		qualityTurnBody.Store(&qualityFirstBody)
+	}
+	qualityObserver.Store(s.qualityObserver(ctx, account, gjson.GetBytes(firstClientMessage, "model").String()))
+	firstClientMessage = qualityRotateBody(firstClientMessage, s.qualityRotation(ctx, account), true)
 	firstClientMessage, policyErr = ApplyGroupSystemPrompt(WithGroupSystemPromptModel(ctx, initialRequestModel), firstClientMessage, GroupPromptResponses)
 	if policyErr != nil {
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
@@ -1127,6 +1136,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					return nil, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, promptErr.Error(), promptErr)
 				}
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
+				qualityObserver.Store(s.qualityObserver(ctx, account, gjson.GetBytes(out, "model").String()))
+				if qualityRequest(ctx) != nil {
+					qualityNextBody := out
+					qualityTurnBody.Store(&qualityNextBody)
+				}
+				out = qualityRotateBody(out, s.qualityRotation(ctx, account), true)
 				_, actualModel := usageMeta.turnModels(requestModelForThisFrame)
 				SetOpsUpstreamModel(c, actualModel)
 				responseCreateAtCopy := responseCreateAt
@@ -1275,6 +1290,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 			},
 			BeforeRelayCancel: func(exit openaiwsv2.RelayExit) {
+				var reroute *OpenAIQualityRerouteError
+				if errors.As(exit.Err, &reroute) {
+					return
+				}
 				if context.Cause(ctx) != nil {
 					return
 				}
@@ -1294,6 +1313,19 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					return nil
 				}
 				eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
+				if observer := qualityObserver.Load(); observer != nil {
+					observer.inspectQualityDeclaration(payload, "response.model", "model")
+				}
+				if qualityRequest(ctx) != nil && (eventType == "response.completed" || eventType == "response.done") {
+					if body := qualityTurnBody.Load(); body != nil {
+						output := gjson.GetBytes(payload, "response.output")
+						var items []json.RawMessage
+						for _, item := range output.Array() {
+							items = append(items, json.RawMessage(item.Raw))
+						}
+						rememberOpenAIQualityWSTurn(ctx, *body, gjson.GetBytes(payload, "response.id").String(), items, output.IsArray())
+					}
+				}
 				if eventType == "response.created" {
 					failureAccountSideEffectsApplied = false
 				}
@@ -1343,6 +1375,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			},
 		},
 	})
+	if relayExit != nil {
+		var reroute *OpenAIQualityRerouteError
+		if errors.As(relayExit.Err, &reroute) {
+			return reroute
+		}
+	}
 	if cause := context.Cause(ctx); cause != nil {
 		if isOpenAIWSSessionPreempted(ctx) {
 			return errOpenAIWSSessionPreempted

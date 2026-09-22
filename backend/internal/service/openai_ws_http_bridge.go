@@ -433,7 +433,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if writeClientMessage == nil {
 		return nil, errors.New("client websocket writer is nil")
 	}
-	responseModelObserver := &upstreamResponseModelObserver{}
+	responseModelObserver := s.qualityObserver(ctx, account, gjson.GetBytes(payload, "model").String())
 
 	body, err := prepareOpenAIWSHTTPBridgeBody(account, payload)
 	if err != nil {
@@ -528,6 +528,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		actualModel = canonicalOpenAIAccountSchedulingModel(account, originalModel)
 	}
 	SetOpsUpstreamModel(c, actualModel)
+	responseModelObserver = s.qualityObserver(ctx, account, actualModel)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -650,6 +651,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 	}
 
+	qualityReplayComplete := false
 	resultWithUsage := func() *OpenAIForwardResult {
 		imageCount := imageCounter.Count()
 		result := &OpenAIForwardResult{
@@ -675,6 +677,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			result.wsReplayInputExists = true
 		}
 		result.wsAccountFailoverReplayInput = replayCollector.AllItems()
+		rememberOpenAIQualityWSTurn(ctx, payload, result.RequestID, result.wsAccountFailoverReplayInput, qualityReplayComplete)
 		if imageCount > 0 {
 			result.ImageCount = imageCount
 			result.ImageSize = imageSizeTier
@@ -758,6 +761,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
 		responseModelObserver.ObserveOpenAI(upstreamMessage, eventType)
+		if eventType == "response.completed" || eventType == "response.done" {
+			qualityReplayComplete = gjson.GetBytes(upstreamMessage, "response.output").IsArray()
+		}
 		if responseID == "" && eventResponseID != "" {
 			responseID = eventResponseID
 		}

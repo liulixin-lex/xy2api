@@ -38,7 +38,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
-	responseModelObserver := &upstreamResponseModelObserver{}
+	responseModelObserver := s.qualityObserver(ctx, account, openAIWSPayloadString(reqBody, "model"))
 
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
 	if err != nil {
@@ -63,6 +63,15 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	)
 
 	payload := s.buildOpenAIWSCreatePayload(reqBody, account)
+	if rotation := s.qualityRotation(ctx, account); rotation != "" {
+		payload["prompt_cache_key"] = rotation
+		clientPromptCacheKey = rotation
+		for _, key := range []string{"session_id", "conversation_id"} {
+			if _, ok := payload[key]; ok {
+				payload[key] = rotation
+			}
+		}
+	}
 	payloadStrategy, removedKeys := applyOpenAIWSRetryPayloadStrategy(payload, attempt)
 	turnState := ""
 	turnMetadata := ""
@@ -131,6 +140,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if executionScope = strings.TrimSpace(executionScope); executionScope != "" {
 		sessionHash = executionScope
 	}
+	sessionHash = s.qualityConnectionScope(ctx, account, sessionHash)
 	if turnState == "" && stateStore != nil && sessionHash != "" {
 		if savedTurnState, ok := stateStore.GetSessionTurnState(groupID, sessionHash); ok {
 			turnState = savedTurnState

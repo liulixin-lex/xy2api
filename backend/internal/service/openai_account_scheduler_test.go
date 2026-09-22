@@ -1581,7 +1581,7 @@ func TestOpenAIGatewayService_OpenAIAccountSchedulerMetrics_DisabledNoOp(t *test
 	svc.RecordOpenAIAccountSwitch()
 
 	snapshot := svc.SnapshotOpenAIAccountSchedulerMetrics()
-	require.Equal(t, OpenAIAccountSchedulerMetricsSnapshot{}, snapshot)
+	require.Equal(t, OpenAIAccountSchedulerMetricsSnapshot{QualityRoutingCounters: OpenAIQualityRoutingMetrics()}, snapshot)
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SkipsQuarantinedSharedProxy(t *testing.T) {
@@ -3609,7 +3609,7 @@ func TestOpenAIGatewayService_SchedulerWrappersAndDefaults(t *testing.T) {
 	svc.ReportOpenAIAccountScheduleResult(&Account{ID: 10}, "", true, &ttft)
 	svc.RecordOpenAIAccountSwitch()
 	snapshot := svc.SnapshotOpenAIAccountSchedulerMetrics()
-	require.Equal(t, OpenAIAccountSchedulerMetricsSnapshot{}, snapshot)
+	require.Equal(t, OpenAIAccountSchedulerMetricsSnapshot{QualityRoutingCounters: OpenAIQualityRoutingMetrics()}, snapshot)
 	require.Equal(t, 7, svc.openAIWSLBTopK())
 	require.Equal(t, openaiStickySessionTTL, svc.openAIWSSessionStickyTTL())
 
