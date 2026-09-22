@@ -1,0 +1,42 @@
+export default {
+  "title": "导出任务",
+  "retention": "文件保留 24 小时。离开页面后仍会继续生成。",
+  "waiting": "请求较多，正在等待恢复。后台任务继续执行。",
+  "rows": "{count} 条记录",
+  "snapshot": "数据快照：{time}",
+  "download": "下载文件",
+  "previous": "上一页",
+  "next": "下一页",
+  "states": {
+    "queued": "排队中",
+    "reading": "正在读取",
+    "formatting": "正在生成文件",
+    "uploading": "正在保存文件",
+    "succeeded": "已完成",
+    "failed": "生成失败",
+    "canceled": "已取消",
+    "expired": "已过期",
+    "deleted": "已删除"
+  },
+  "errors": {
+    "EXPORT_ROW_LIMIT": "记录超过 100 万条，请缩小日期范围后重新导出。",
+    "EXPORT_SIZE_LIMIT": "文件超过大小限制，请缩小筛选范围后重试。",
+    "EXPORT_ALREADY_ACTIVE": "已有任务正在执行，请等待完成或取消后重试。",
+    "EXPORT_DISABLED": "导出功能暂未启用，请联系管理员。",
+    "EXPORT_STORAGE_FULL": "导出存储空间不足，请稍后重试或联系管理员。",
+    "EXPORT_QUEUE_FULL": "导出队列已满，请稍后重试。",
+    "EXPORT_QUEUE_TIMEOUT": "排队等待超时，请重新创建导出任务。",
+    "EXPORT_TIMEOUT": "导出超时，请缩小日期范围后重新导出。",
+    "EXPORT_INTERRUPTED": "生成过程已中断，请重新创建导出任务。",
+    "EXPORT_GENERATION_FAILED": "文件生成失败，请重试；如持续失败，请联系管理员。",
+    "EXPORT_CONNECTION_FAILED": "暂时无法更新任务，请点击刷新。已有后台任务不会取消。",
+    "EXPORT_RATE_LIMITED": "请求频率较高，自动重试已暂停，请稍后刷新。",
+    "EXPORT_EXPIRED": "文件已过期或删除，请重新导出。",
+    "EXPORT_INVALID_TICKET": "下载凭证已失效，请重新点击下载。",
+    "EXPORT_DOWNLOAD_BUSY": "已有文件正在下载，请稍后重试。",
+    "EXPORT_NOT_READY": "文件尚未生成完成，请稍后下载。",
+    "EXPORT_CANCEL_CONFLICT": "任务状态已改变，请刷新后重试。",
+    "EXPORT_CANCEL_FIRST": "请先取消正在执行的任务。",
+    "EXPORT_IDEMPOTENCY_CONFLICT": "导出参数发生冲突，请刷新页面后重新提交。"
+  }
+}

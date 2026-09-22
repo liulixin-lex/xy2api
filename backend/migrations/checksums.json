@@ -300,6 +300,7 @@
     "248_purge_unlimited_user_platform_quotas.sql": "052756d1b1ac951f002034bf0434f8a6ea943ec0a2a34541ca4374ba6278cce7",
     "249_group_system_prompt_policy.sql": "f0546fa9453c59cb1cf01f62c99c1b3f0ce29ff3734d3563245fc3c86c4fdd7d",
     "250_stripe_hosted_idempotency.sql": "da793b89228713f0c9594bcba79da853048b1d4e5792baea6790efe1fd28442c",
-    "251_codex_ticket_observability.sql": "228ff5e146a6dd31e50182327eaf868a961a3ba4e74eb4eeb4b981363feaf51f"
+    "251_codex_ticket_observability.sql": "228ff5e146a6dd31e50182327eaf868a961a3ba4e74eb4eeb4b981363feaf51f",
+    "252_usage_export_tasks.sql": "b66aaaf5003171552b561fa5f2085b1ad357cc8566635c3cca011feb8f6853f1"
   }
 }

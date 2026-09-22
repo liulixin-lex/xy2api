@@ -19,6 +19,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/server"
 	"github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
+	"github.com/liulixin-lex/xy2api/internal/usageexport"
 
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
@@ -84,6 +85,7 @@ func providePluginHostInfo(buildInfo handler.BuildInfo) service.PluginHostInfo {
 }
 
 func provideCleanup(
+	usageExport *usageexport.Engine,
 	entClient *ent.Client,
 	rdb *redis.Client,
 	opsMetricsCollector *service.OpsMetricsCollector,
@@ -230,6 +232,12 @@ func provideCleanup(
 			{"SchedulerSnapshotService", func() error {
 				if schedulerSnapshot != nil {
 					schedulerSnapshot.Stop()
+				}
+				return nil
+			}},
+			{"UsageExport", func() error {
+				if usageExport != nil {
+					usageExport.Stop()
 				}
 				return nil
 			}},

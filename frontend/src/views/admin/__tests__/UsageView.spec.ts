@@ -1,3 +1,8 @@
+const { submitExport } = vi.hoisted(() => ({ submitExport: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('@/components/usage/UsageExportTasks.vue', async () => {
+ const { defineComponent } = await import('vue')
+ return { default: defineComponent({ props: ['scope'], setup(_, { expose }) { expose({ create: submitExport }); return {} }, template: '<div />' }) }
+})
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
@@ -774,29 +779,15 @@ describe('admin UsageView model audit export', () => {
 		vi.useRealTimers()
 	})
 
-	it('exports requested, sent, response, and mismatch as separate admin columns', async () => {
-		const wrapper = mountRouteFilteredUsageView()
-		vi.advanceTimersByTime(120)
-		await flushPromises()
-		;(wrapper.vm as any).filters.native_compaction_v2 = true
-
-		await (wrapper.vm as any).exportToExcel()
-		await flushPromises()
-
-		expect(exportList).toHaveBeenCalledWith(
-			expect.objectContaining({ native_compaction_v2: true }),
-			expect.anything()
-		)
-
-		const headers = aoaToSheet.mock.calls[0][0][0]
-		expect(headers.slice(4, 8)).toEqual([
-			'Requested model',
-			'Sent upstream model',
-			'Upstream response model',
-			'Upstream model mismatch',
-		])
-		const row = sheetAddAoa.mock.calls[0][1][0]
-		expect(row.slice(4, 8)).toEqual(['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4', 'Yes'])
-		expect(saveAs).toHaveBeenCalledTimes(1)
-	})
+	it('submits an admin export task without loading history pages', async () => {
+    const wrapper = mountRouteFilteredUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    ;(wrapper.vm as any).filters.native_compaction_v2 = true
+    exportList.mockClear()
+    await (wrapper.vm as any).exportToExcel()
+    expect(submitExport).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }))
+    expect(exportList).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
 })

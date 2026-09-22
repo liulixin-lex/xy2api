@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/usageexport"
 	"github.com/spf13/viper"
 	"golang.org/x/net/http/httpguts"
 )
@@ -66,6 +67,7 @@ const DefaultUpstreamResponseReadMaxBytes int64 = 128 * 1024 * 1024
 const DefaultModelsListReadMaxBytes int64 = 8 * 1024 * 1024
 
 type Config struct {
+	UsageExport             usageexport.Config            `mapstructure:"usage_export"`
 	Server                  ServerConfig                  `mapstructure:"server"`
 	Log                     LogConfig                     `mapstructure:"log"`
 	CORS                    CORSConfig                    `mapstructure:"cors"`
@@ -2262,6 +2264,33 @@ func setDefaults() {
 	viper.SetDefault("batch_image.vertex_gcs_base_url", "")
 
 	// Image storage (async image task result offload to S3-compatible object storage)
+	viper.SetDefault("usage_export.enabled", false)
+	viper.SetDefault("usage_export.allowed_user_ids", []int64{})
+	viper.SetDefault("usage_export.directory", "./data/usage-exports")
+	viper.SetDefault("usage_export.concurrency", 2)
+	viper.SetDefault("usage_export.queue_limit", 100)
+	viper.SetDefault("usage_export.max_rows", 1000000)
+	viper.SetDefault("usage_export.max_file_bytes", 536870912)
+	viper.SetDefault("usage_export.task_disk_bytes", 4294967296)
+	viper.SetDefault("usage_export.storage_bytes", 21474836480)
+	viper.SetDefault("usage_export.free_bytes", 2147483648)
+	viper.SetDefault("usage_export.read_seconds", 300)
+	viper.SetDefault("usage_export.run_seconds", 900)
+	viper.SetDefault("usage_export.queue_seconds", 1800)
+	viper.SetDefault("usage_export.retention_seconds", 86400)
+	viper.SetDefault("usage_export.metadata_seconds", 604800)
+	viper.SetDefault("usage_export.create_rpm", 5)
+	viper.SetDefault("usage_export.status_rpm", 60)
+	viper.SetDefault("usage_export.ticket_rpm", 10)
+	viper.SetDefault("usage_export.download_concurrency", 2)
+	viper.SetDefault("usage_export.storage.type", "local")
+	viper.SetDefault("usage_export.storage.region", "auto")
+	viper.SetDefault("usage_export.storage.prefix", "usage-exports/")
+	viper.SetDefault("usage_export.storage.endpoint", "")
+	viper.SetDefault("usage_export.storage.bucket", "")
+	viper.SetDefault("usage_export.storage.access_key_id", "")
+	viper.SetDefault("usage_export.storage.secret_access_key", "")
+	viper.SetDefault("usage_export.storage.force_path_style", false)
 	viper.SetDefault("image_storage.enabled", false)
 	viper.SetDefault("image_storage.region", "auto")
 	viper.SetDefault("image_storage.prefix", "images/")
