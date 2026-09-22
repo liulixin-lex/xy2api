@@ -351,6 +351,9 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 			return iqcheck.Unknown("background_budget")
 		}
 	}
+	if err := applyIQProbeRequestIdentity(req, account); err != nil {
+		return iqcheck.Unknown("request_failed")
+	}
 	var resp *http.Response
 	// STATE-managed probes use the exact business transport. A tester-only TLS
 	// override must not change the transport against which the ticket was verified.
