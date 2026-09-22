@@ -88,11 +88,14 @@ var openAIQualityCounters sync.Map // event -> *atomic.Uint64
 var openAIQualitySyncSlots = make(chan struct{}, 64)
 
 func OpenAIQualityRoutingMetrics() map[string]uint64 {
-	out := make(map[string]uint64)
+	var out map[string]uint64
 	openAIQualityCounters.Range(func(k, v any) bool {
 		key, keyOK := k.(string)
 		counter, counterOK := v.(*atomic.Uint64)
 		if keyOK && counterOK {
+			if out == nil {
+				out = make(map[string]uint64)
+			}
 			out[key] = counter.Load()
 		}
 		return true
