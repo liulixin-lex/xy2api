@@ -1,0 +1,42 @@
+export default {
+  "title": "Exports",
+  "retention": "Files are available for 24 hours. Generation continues when you leave this page.",
+  "waiting": "Waiting before trying again. Your export continues in the background.",
+  "rows": "{count} rows",
+  "snapshot": "Data snapshot: {time}",
+  "download": "Download file",
+  "previous": "Previous",
+  "next": "Next",
+  "states": {
+    "queued": "Queued",
+    "reading": "Reading records",
+    "formatting": "Generating file",
+    "uploading": "Saving file",
+    "succeeded": "Ready",
+    "failed": "Failed",
+    "canceled": "Canceled",
+    "expired": "Expired",
+    "deleted": "Deleted"
+  },
+  "errors": {
+    "EXPORT_ROW_LIMIT": "More than one million rows. Choose a smaller date range.",
+    "EXPORT_SIZE_LIMIT": "File size limit reached. Narrow your filters and try again.",
+    "EXPORT_ALREADY_ACTIVE": "An export is already active. Wait for it or cancel it first.",
+    "EXPORT_DISABLED": "Exports are not enabled. Contact your administrator.",
+    "EXPORT_STORAGE_FULL": "Export storage is full. Try later or contact your administrator.",
+    "EXPORT_QUEUE_FULL": "The export queue is full. Try again later.",
+    "EXPORT_QUEUE_TIMEOUT": "The queue wait expired. Create a new export.",
+    "EXPORT_TIMEOUT": "Export timed out. Choose a smaller date range.",
+    "EXPORT_INTERRUPTED": "Generation was interrupted. Create a new export.",
+    "EXPORT_GENERATION_FAILED": "File generation failed. Try again or contact your administrator.",
+    "EXPORT_CONNECTION_FAILED": "Cannot update export status. Refresh to try again. Existing jobs continue.",
+    "EXPORT_RATE_LIMITED": "Too many requests. Automatic retries paused; refresh later.",
+    "EXPORT_EXPIRED": "This file expired or was deleted. Create a new export.",
+    "EXPORT_INVALID_TICKET": "Download authorization expired. Click download again.",
+    "EXPORT_DOWNLOAD_BUSY": "Downloads are already in progress. Try again shortly.",
+    "EXPORT_NOT_READY": "The file is not ready. Wait for generation to finish.",
+    "EXPORT_CANCEL_CONFLICT": "The task state changed. Refresh and try again.",
+    "EXPORT_CANCEL_FIRST": "Cancel the active task first.",
+    "EXPORT_IDEMPOTENCY_CONFLICT": "Export parameters conflict. Refresh the page and try again."
+  }
+}

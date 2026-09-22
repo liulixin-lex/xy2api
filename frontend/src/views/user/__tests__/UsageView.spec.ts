@@ -1,10 +1,13 @@
+const { submitExport } = vi.hoisted(() => ({ submitExport: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('@/components/usage/UsageExportTasks.vue', async () => {
+ const { defineComponent } = await import('vue')
+ return { default: defineComponent({ props: ['scope'], setup(_, { expose }) { expose({ create: submitExport }); return {} }, template: '<div />' }) }
+})
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 import UsageView from '../UsageView.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
-import DateRangePicker from '@/components/common/DateRangePicker.vue'
-import UsageTable from '@/components/admin/usage/UsageTable.vue'
 
 const {
   query,
@@ -373,171 +376,19 @@ describe('user UsageView', () => {
     expect(getDashboardSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: null }))
   })
 
-  it('exports csv with current filters and without admin-only fields', async () => {
+  it('submits the current export filters without requesting history pages', async () => {
     const wrapper = mountUsageView()
     await flushPromises()
     ;(wrapper.vm as any).filters.native_compaction_v2 = true
-
-    let exportedBlob: Blob | null = null
-    let csvContent = ''
-    const OriginalBlob = globalThis.Blob
-    vi.stubGlobal('Blob', vi.fn((parts: BlobPart[], options?: BlobPropertyBag) => {
-      csvContent = parts.map((part) => String(part)).join('')
-      return new OriginalBlob(parts, options)
-    }))
-    const originalCreateObjectURL = window.URL.createObjectURL
-    const originalRevokeObjectURL = window.URL.revokeObjectURL
-    window.URL.createObjectURL = vi.fn((blob: Blob | MediaSource) => {
-      exportedBlob = blob as Blob
-      return 'blob:usage-export'
-    }) as typeof window.URL.createObjectURL
-    window.URL.revokeObjectURL = vi.fn(() => {}) as typeof window.URL.revokeObjectURL
-    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
-
-    await (wrapper.vm as any).exportToCSV()
-
-    expect(exportedBlob).not.toBeNull()
-    expect(query).toHaveBeenCalledWith(expect.objectContaining({
-      page_size: 100,
-      sort_by: 'created_at',
-      sort_order: 'desc',
-      native_compaction_v2: true,
-    }))
-    expect(clickSpy).toHaveBeenCalled()
-    expect(showSuccess).toHaveBeenCalled()
-    expect(csvContent.startsWith('\uFEFF')).toBe(true)
-    expect(csvContent.slice(1)).toBe([
-      'Time,API Key Name,Model,Reasoning Effort,Inbound Endpoint,IP Address,Type,Billing Mode,Input Tokens,Output Tokens,Cache Read Tokens,Cache Creation Tokens,Rate Multiplier,Billed Cost,Original Cost,First Token (ms),Duration (ms)',
-      '2026-03-08T00:00:00Z,demo-key,gpt-5.4,"\'-",,203.0.113.10,Sync,Token,4057,101,278272,4,1,0.09288300,0.09288300,12,345',
-    ].join('\n'))
-    expect(csvContent).toContain('IP Address')
-    expect(csvContent).toContain('203.0.113.10')
-    expect(csvContent).toContain('Billed Cost')
-    expect(csvContent).toContain('Original Cost')
-    expect(csvContent).not.toContain('Upstream Endpoint')
-    expect(csvContent).not.toContain('account_cost')
-    expect(csvContent).not.toContain('account_rate_multiplier')
-
-    window.URL.createObjectURL = originalCreateObjectURL
-    window.URL.revokeObjectURL = originalRevokeObjectURL
-    vi.unstubAllGlobals()
-    clickSpy.mockRestore()
-  })
-
-  it('keeps the initial filters, sort, and filename while exporting multiple pages', async () => {
-    const pageResponse = { items: [usageLog], total: 101, pages: 2 }
-    query.mockResolvedValue(pageResponse)
-    const wrapper = mountUsageView()
-    await flushPromises()
-
-    const datePicker = wrapper.findComponent(DateRangePicker)
-    datePicker.vm.$emit('change', { startDate: '2026-03-01', endDate: '2026-03-08', preset: null })
-    await flushPromises()
-
-    let resolveFirstPage!: (value: typeof pageResponse) => void
-    const firstPage = new Promise<typeof pageResponse>((resolve) => { resolveFirstPage = resolve })
     query.mockClear()
-    query.mockImplementation((params, options) =>
-      !options && params.page === 1 ? firstPage : Promise.resolve(pageResponse)
-    )
-    const originalCreateObjectURL = window.URL.createObjectURL
-    const originalRevokeObjectURL = window.URL.revokeObjectURL
-    window.URL.createObjectURL = vi.fn(() => 'blob:usage-export')
-    window.URL.revokeObjectURL = vi.fn()
-    let filename = ''
-    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () {
-      filename = this.download
-    })
-
-    try {
-      await wrapper.findAll('button').find((button) => button.text() === 'Export CSV')!.trigger('click')
-      const initialParams = { ...query.mock.calls[0][0] }
-      expect(initialParams).toMatchObject({
-        page: 1, page_size: 100, start_date: '2026-03-01', end_date: '2026-03-08',
-        sort_by: 'created_at', sort_order: 'desc',
-      })
-
-      const keySelect = wrapper.findAllComponents(Select).find((select) =>
-        select.props('options').some((option: SelectOption) => option.label === 'All API Keys')
-      )!
-      keySelect.vm.$emit('update:modelValue', 1)
-      keySelect.vm.$emit('change', 1)
-      datePicker.vm.$emit('change', { startDate: '2026-04-01', endDate: '2026-04-08', preset: null })
-      wrapper.findComponent(UsageTable).vm.$emit('sort', 'actual_cost', 'asc')
-      await flushPromises()
-      expect(query).toHaveBeenCalledWith(expect.objectContaining({
-        api_key_id: 1, start_date: '2026-04-01', end_date: '2026-04-08',
-        sort_by: 'actual_cost', sort_order: 'asc',
-      }), expect.anything())
-
-      resolveFirstPage(pageResponse)
-      await flushPromises()
-
-      const exportCalls = query.mock.calls.filter((call) => call.length === 1)
-      expect.soft(exportCalls).toEqual([[initialParams], [{ ...initialParams, page: 2 }]])
-      expect.soft(filename).toBe('usage_2026-03-01_to_2026-03-08.csv')
-      expect(showSuccess).toHaveBeenCalledWith('Export success')
-      expect(showError).not.toHaveBeenCalled()
-    } finally {
-      window.URL.createObjectURL = originalCreateObjectURL
-      window.URL.revokeObjectURL = originalRevokeObjectURL
-      clickSpy.mockRestore()
-      wrapper.unmount()
-    }
-  })
-
-  it('exports historical image rows with image billing mode derived from image_count', async () => {
-    query.mockResolvedValue({
-      items: [
-        {
-          ...usageLog,
-          request_id: 'req-user-export-legacy-image',
-          actual_cost: 0.2,
-          total_cost: 0.2,
-          input_cost: 0,
-          output_cost: 0,
-          cache_creation_cost: 0,
-          cache_read_cost: 0,
-          input_tokens: 0,
-          output_tokens: 0,
-          cache_creation_tokens: 0,
-          cache_read_tokens: 0,
-          image_count: 1,
-          model: 'gpt-image-2',
-          billing_mode: null,
-          ip_address: null,
-        },
-      ],
-      total: 1,
-      pages: 1,
-    })
-
-    const wrapper = mountUsageView()
-    await flushPromises()
-
-    let csvContent = ''
-    const OriginalBlob = globalThis.Blob
-    vi.stubGlobal('Blob', vi.fn((parts: BlobPart[], options?: BlobPropertyBag) => {
-      csvContent = parts.map((part) => String(part)).join('')
-      return new OriginalBlob(parts, options)
-    }))
-    const originalCreateObjectURL = window.URL.createObjectURL
-    const originalRevokeObjectURL = window.URL.revokeObjectURL
-    window.URL.createObjectURL = vi.fn(() => 'blob:usage-export') as typeof window.URL.createObjectURL
-    window.URL.revokeObjectURL = vi.fn(() => {}) as typeof window.URL.revokeObjectURL
-    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
-
     await (wrapper.vm as any).exportToCSV()
-
-    expect(csvContent).toContain('Billing Mode')
-    expect(csvContent).toContain('Image')
-    expect(csvContent).not.toContain(',Token,0,0,0,0,')
-
-    window.URL.createObjectURL = originalCreateObjectURL
-    window.URL.revokeObjectURL = originalRevokeObjectURL
-    vi.unstubAllGlobals()
-    clickSpy.mockRestore()
+    expect(submitExport).toHaveBeenCalledWith(expect.objectContaining({
+      sort_by: 'created_at', sort_order: 'desc', native_compaction_v2: true,
+    }))
+    expect(query).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
+
 })
 
 describe('UsageView subscription feature flag', () => {
