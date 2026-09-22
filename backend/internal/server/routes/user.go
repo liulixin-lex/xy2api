@@ -24,6 +24,17 @@ func RegisterUserRoutes(
 	authenticated.Use(panelRateLimiter.Global())
 	// 用户管理面变更类操作入审计（含 TOTP 启用/禁用、step-up 验证、密码修改等安全事件）
 	authenticated.Use(gin.HandlerFunc(auditLog))
+
+	if h.UsageExport != nil {
+		v1.GET("/usage/exports/:id/download", h.UsageExport.Download)
+		exports := authenticated.Group("/usage/exports")
+		exports.POST("", h.UsageExport.Create)
+		exports.GET("", h.UsageExport.List)
+		exports.GET("/:id", h.UsageExport.Get)
+		exports.POST("/:id/cancel", h.UsageExport.Cancel)
+		exports.DELETE("/:id", h.UsageExport.Delete)
+		exports.POST("/:id/download-ticket", h.UsageExport.Ticket)
+	}
 	{
 		// 用户接口
 		user := authenticated.Group("/user")

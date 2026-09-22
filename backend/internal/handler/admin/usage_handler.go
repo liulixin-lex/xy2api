@@ -59,14 +59,14 @@ type CreateUsageCleanupTaskRequest struct {
 
 // List handles listing all usage records with filters
 // GET /api/v1/admin/usage
-func (h *UsageHandler) List(c *gin.Context) {
+func (h *UsageHandler) ParseExportFilters(c *gin.Context) (pagination.PaginationParams, usagestats.UsageLogFilters, bool) {
 	page, pageSize := response.ParsePagination(c)
 	exactTotal := false
 	if exactTotalRaw := strings.TrimSpace(c.Query("exact_total")); exactTotalRaw != "" {
 		parsed, err := strconv.ParseBool(exactTotalRaw)
 		if err != nil {
 			response.BadRequest(c, "Invalid exact_total value, use true or false")
-			return
+			return pagination.PaginationParams{}, usagestats.UsageLogFilters{}, false
 		}
 		exactTotal = parsed
 	}
@@ -77,7 +77,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		id, err := strconv.ParseInt(userIDStr, 10, 64)
 		if err != nil {
 			response.BadRequest(c, "Invalid user_id")
-			return
+			return pagination.PaginationParams{}, usagestats.UsageLogFilters{}, false
 		}
 		userID = id
 	}
@@ -86,7 +86,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		id, err := strconv.ParseInt(apiKeyIDStr, 10, 64)
 		if err != nil {
 			response.BadRequest(c, "Invalid api_key_id")
-			return
+			return pagination.PaginationParams{}, usagestats.UsageLogFilters{}, false
 		}
 		apiKeyID = id
 	}
@@ -95,7 +95,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		id, err := strconv.ParseInt(accountIDStr, 10, 64)
 		if err != nil {
 			response.BadRequest(c, "Invalid account_id")
-			return
+			return pagination.PaginationParams{}, usagestats.UsageLogFilters{}, false
 		}
 		accountID = id
 	}
@@ -104,7 +104,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		id, err := strconv.ParseInt(groupIDStr, 10, 64)
 		if err != nil {
 			response.BadRequest(c, "Invalid group_id")
-			return
+			return pagination.PaginationParams{}, usagestats.UsageLogFilters{}, false
 		}
 		groupID = id
 	}
@@ -119,7 +119,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		parsed, err := service.ParseUsageRequestType(requestTypeStr)
 		if err != nil {
 			response.BadRequest(c, err.Error())
-			return
+			return pagination.PaginationParams{}, usagestats.UsageLogFilters{}, false
 		}
 		value := int16(parsed)
 		requestType = &value
@@ -127,7 +127,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		val, err := strconv.ParseBool(streamStr)
 		if err != nil {
 			response.BadRequest(c, "Invalid stream value, use true or false")
-			return
+			return pagination.PaginationParams{}, usagestats.UsageLogFilters{}, false
 		}
 		stream = &val
 	}
@@ -135,7 +135,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 	nativeCompactionV2, err := parseOptionalBoolDashboardFilter(c, "native_compaction_v2")
 	if err != nil {
 		response.BadRequest(c, "Invalid native_compaction_v2 value, use true or false")
-		return
+		return pagination.PaginationParams{}, usagestats.UsageLogFilters{}, false
 	}
 
 	var billingType *int8
@@ -143,7 +143,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		val, err := strconv.ParseInt(billingTypeStr, 10, 8)
 		if err != nil {
 			response.BadRequest(c, "Invalid billing_type")
-			return
+			return pagination.PaginationParams{}, usagestats.UsageLogFilters{}, false
 		}
 		bt := int8(val)
 		billingType = &bt
@@ -154,7 +154,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		value, err := strconv.ParseBool(raw)
 		if err != nil {
 			response.BadRequest(c, "Invalid upstream_model_mismatch value, use true or false")
-			return
+			return pagination.PaginationParams{}, usagestats.UsageLogFilters{}, false
 		}
 		upstreamModelMismatch = &value
 	}
@@ -166,7 +166,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		t, err := timezone.ParseInUserLocation("2006-01-02", startDateStr, userTZ)
 		if err != nil {
 			response.BadRequest(c, "Invalid start_date format, use YYYY-MM-DD")
-			return
+			return pagination.PaginationParams{}, usagestats.UsageLogFilters{}, false
 		}
 		startTime = &t
 	}
@@ -175,7 +175,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		t, err := timezone.ParseInUserLocation("2006-01-02", endDateStr, userTZ)
 		if err != nil {
 			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
-			return
+			return pagination.PaginationParams{}, usagestats.UsageLogFilters{}, false
 		}
 		// Use half-open range [start, end), move to next calendar day start (DST-safe).
 		t = t.AddDate(0, 0, 1)
@@ -207,6 +207,14 @@ func (h *UsageHandler) List(c *gin.Context) {
 		ExactTotal:            exactTotal,
 	}
 
+	return params, filters, true
+}
+
+func (h *UsageHandler) List(c *gin.Context) {
+	params, filters, ok := h.ParseExportFilters(c)
+	if !ok {
+		return
+	}
 	records, result, err := h.usageService.ListWithFilters(c.Request.Context(), params, filters)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -217,7 +225,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 	for i := range records {
 		out = append(out, *dto.UsageLogFromServiceAdmin(&records[i]))
 	}
-	response.Paginated(c, out, result.Total, page, pageSize)
+	response.Paginated(c, out, result.Total, params.Page, params.PageSize)
 }
 
 // Stats handles getting usage statistics with filters

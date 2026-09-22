@@ -30,6 +30,17 @@ func RegisterAdminRoutes(
 	// 审计中间件挂在认证之后：所有管理面变更类操作 + 敏感读取入审计日志
 	admin.Use(gin.HandlerFunc(auditLog))
 	admin.Use(middleware.AdminComplianceGuard(settingService))
+
+	if h.UsageExport != nil {
+		v1.GET("/admin/usage/exports/:id/download", h.UsageExport.Download)
+		exports := admin.Group("/usage/exports")
+		exports.POST("", h.UsageExport.Create)
+		exports.GET("", h.UsageExport.List)
+		exports.GET("/:id", h.UsageExport.Get)
+		exports.POST("/:id/cancel", h.UsageExport.Cancel)
+		exports.DELETE("/:id", h.UsageExport.Delete)
+		exports.POST("/:id/download-ticket", h.UsageExport.Ticket)
+	}
 	{
 		// 部署与运营合规确认
 		registerAdminComplianceRoutes(admin, h)

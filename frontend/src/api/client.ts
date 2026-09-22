@@ -157,6 +157,7 @@ apiClient.interceptors.response.use(
           code: apiData.code,
           message: apiData.message || error.message,
           metadata: apiData.metadata,
+        retryAfterMs: parseRetryAfter(error.response.headers['retry-after']),
         })
       }
 
@@ -262,6 +263,7 @@ apiClient.interceptors.response.use(
         error: apiData.error,
         message: apiData.message || apiData.detail || error.message,
         metadata: apiData.metadata,
+        retryAfterMs: parseRetryAfter(error.response.headers['retry-after']),
       })
     }
 
@@ -274,3 +276,16 @@ apiClient.interceptors.response.use(
 )
 
 export default apiClient
+
+export function parseRetryAfter(value: unknown, now = Date.now()): number | undefined {
+  if (typeof value !== 'string' && typeof value !== 'number') return undefined
+  const raw = String(value).trim()
+  if (!raw) return undefined
+  if (/^\d+$/.test(raw)) {
+    const milliseconds = Number(raw) * 1000
+    return Number.isSafeInteger(milliseconds) ? milliseconds : undefined
+  }
+  if (/^[+-]?\d/.test(raw)) return undefined
+  const timestamp = Date.parse(raw)
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - now) : undefined
+}
