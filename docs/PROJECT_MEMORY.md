@@ -931,7 +931,7 @@ pnpm --dir frontend run build
 ### 2026-09-22 — `20260922-usage-export-pr` — 提交与 PR 交接
 
 - 用户授权将已验收实现推送并创建 PR，明确不合并、不发版。沿用 feat/usage-export 与四角色交付；业务代码不变，提交包含实现、测试和维护文档。
-- 本地验证结果沿用上一条，远端 PR 与提交身份记录在 /xy/artifacts/usage-export/PR_RESULT.json；远端 CI 状态以 GitHub 为准。
+- 本地验证结果沿用上一条，PR #58（https://github.com/liulixin-lex/xy2api/pull/58）与提交身份记录在 /xy/artifacts/usage-export/PR_RESULT.json；远端 CI 状态以 GitHub 为准。
 
 ### 2026-09-21 — `20260921-gpt-quality-routing` — 会话降档防护本地实现与验证
 
@@ -962,3 +962,5 @@ pnpm --dir frontend run build
 - IQ、质量路由、指纹、STATE 定向回归与 race、七项静态规则通过；早期测试夹具误用头大小写/轮次字段、CI 静态写法、共享开发机内存不足导致的编译终止，以及工作树未提交时来源审计拒绝均保留原始失败记录，修正后门禁通过。没有真实模型请求。
 - 同一合成号池输入中 BASELINE 三次共用一个隐式会话，结果 degraded/degraded/degraded；MODIFIED 三次使用三个新会话与缓存键，结果 degraded/smart/degraded；ROLLBACK 恢复基线。三态各三次上游调用，均 exit 0。这是可控模拟号池验证，不是生产抽样保证。累计业务质量探针仍为 first/next/stable：1/1/1 → 1/2/2 → 1/1/1。
 - 开发机隔离 0.1.6→0.1.7→0.1.6→0.1.7 健康、管理员登录及 PostgreSQL/Redis/应用目录标记通过，全新安装通过，迁移数保持 298，专用测试容器已清理。未连接或操作生产。固定四角色仍在 `/xy/artifacts/gpt-quality-routing/`；累计补丁重建、源码回滚和恢复哈希由 `DELIVERY_RESULT.json` 与 `iq-session-isolation/FINAL_RESULT.json` 记录，源码回滚恢复原始 `021c0d885`，不操作数据库。
+
+- PR 检查发现 Excelize GO-2026-5960，依照扫描给出的修复版本锁定2.11.0。主线冲突仅为交接文档，已保留双方记录；仅在功能分支接入主线，没有合并PR或发版。
