@@ -13,7 +13,7 @@
 - 最终 7 个文件共 137 项前端回归、i18n 完整性、定向 ESLint、vue-tsc 通过；Go 管理员设置/DTO/服务层相关回归与默认 vet 通过。生产构建将 vue-tsc 与 Vite 打包串行执行，保留原 Vite 配置并仅移除重复并行 checker。最终构建与 1280/390 深浅主题浏览器复验以固定 VERIFICATION.txt 中 `FOLLOWUP_BUILD_SERIAL_FINAL`、`FOLLOWUP_BROWSER_FINAL` 事件为准。
 - 相同输入 BASELINE 无新增指标，MODIFIED `75.0% / 50.0 T/s` 且两个开关四种组合生效，ROLLBACK 无新增指标，均 exit0。4,152 个基线文件与恢复源码哈希一致；4,156 个修改版文件由补丁完整重建，并验证回滚后重新应用补丁。仅源码副本回滚，不操作数据库。
 - 四角色固定为 `/xy/artifacts/admin-usage-metrics/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；基线归档为同目录 `BASELINE.tar.gz`，回滚脚本依赖该兄弟归档，最终哈希见 `ARTIFACTS.json`。命令、stdout/stderr、退出状态和修复后结果保留；内存中断、模板插入错误、测试桩与模拟响应纠错未作为成功。临时 768 MiB swap 已关闭并清理。
-- 浏览器使用本地合成请求和模拟 API，验证显示、保存、刷新保持及普通用户无管理员设置请求，不代表真实上游模型性能测量。PR 已开放评审；本轮授权为提交、推送与 PR，不包含合并 PR、发版或部署。
+- 浏览器使用本地合成请求和模拟 API，验证显示、保存、刷新保持及普通用户无管理员设置请求，不代表真实上游模型性能测量。PR #60 首轮完整 CI 的两个 API 契约测试因预期 JSON 漏掉新增管理员开关失败；现已补齐，保留严格响应比对，未改产品逻辑。修复后完整 CI 状态以固定账本和 GitHub 最新 head 为准。本轮不合并 PR、发版或部署。
 
 ### IQ API 会话隔离 0.1.7 已发布（2026-09-22，生产未部署）
 
@@ -234,7 +234,7 @@ Sub2API 兼容基线已更新到 `v0.2.6`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
-- `20260922-admin-usage-metrics`：PR #60 已创建并同步最新 main，远端 CI 与评审状态以 GitHub 为准；本地实现及算法复核完成。
+- `20260922-admin-usage-metrics`：PR #60 的两处管理员设置 API 契约预期已补齐新增字段，完整 CI 最终状态由固定验证账本及 GitHub 最新 head 记录。
 
 - `20260921-state-release-0.1.5`：功能/版本 PR #52、正式 Release、五平台与 GHCR 核验已完成；仅剩收尾文档受保护合并及开发机专用测试资源清理，最终事件记录到 release-0.1.5/FINAL_RESULT.json。主站禁止操作。
 
@@ -970,3 +970,9 @@ pnpm --dir frontend run build
 - 用户授权提交、推送并创建 PR；功能提交 `017da5ac9` 已推送至 `feat/admin-usage-metrics`，PR #60 面向 main 开放评审。
 - main 在开发期间新增质量路由和 IQ 会话隔离改动，合入 `f4cf08f5f`，唯一冲突为项目记忆文档，保留双方交接和历史日志；本功能业务源码与上一轮已验收归档一致。
 - 四角色继续沿用 `/xy/artifacts/admin-usage-metrics/`，累计源码补丁以原 `021c0d885` 为基线，涵盖本次同步的 main；PR 差异仅为管理员使用记录功能及项目记忆。重新执行同输入三态和源码恢复验证，最终提交、远端 head、PR 可合并状态及 CI 观测由固定账本记录。不合并 PR、不发版、不部署。
+
+### 2026-09-22 — `20260922-admin-usage-metrics` — PR #60 契约测试修复
+
+- 用户要求检查并修复失败 PR。push/pull_request 两组 CI 均仅 test 失败，定位 `TestAPIContracts` 的管理员设置默认与 OAuth 配置回退两个用例：预期 303 个字段，实际 305 个字段。
+- 在两处预期 JSON 中添加 `admin_usage_cache_hit_rate_enabled: true` 和 `admin_usage_token_speed_enabled: true`，继续严格匹配完整响应；产品实现和公共接口不变。前轮前端、静态及安全检查均已通过，原失败日志保留。
+- 本地完整 API 契约与管理员开关回归、修复提交、远端最新 head 全部 CI、同输入三态、补丁重建/源码回滚及四角色重开事件追加原 VERIFICATION.txt，最终状态见 ARTIFACTS.json 和 PR_RESULT.json。不以推送成功代替 CI 成功，不合并 PR 或部署。
