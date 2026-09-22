@@ -4,6 +4,9 @@ import { defineComponent, ref } from 'vue'
 
 import UsageView from '../UsageView.vue'
 
+const metricSettings = vi.hoisted(() => ({ usageCacheHitRateEnabled: true, usageTokenSpeedEnabled: true, fetch: vi.fn() }))
+vi.mock('@/stores/adminSettings', () => ({ useAdminSettingsStore: () => metricSettings }))
+
 const { list, exportList, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, routeQuery, aoaToSheet, sheetAddAoa, saveAs, xlsxWrite } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
@@ -198,6 +201,18 @@ describe('admin UsageView route filters', () => {
   afterEach(() => {
     Object.keys(routeQuery).forEach((key) => delete routeQuery[key])
     vi.useRealTimers()
+  })
+
+  it.each([[true,true],[true,false],[false,true],[false,false]])('passes display settings only through the admin page: %s / %s', async (cache, speed) => {
+    metricSettings.usageCacheHitRateEnabled = cache
+    metricSettings.usageTokenSpeedEnabled = speed
+    const wrapper = mountRouteFilteredUsageView()
+    await flushPromises()
+    const table = wrapper.findComponent({ name: 'UsageTable' })
+    expect(table.props('showCacheHitRate')).toBe(cache)
+    expect(table.props('showTokenSpeed')).toBe(speed)
+    expect(metricSettings.fetch).toHaveBeenCalledWith(true)
+    wrapper.unmount()
   })
 
   it('shows the routed user while applying user_id to usage requests', async () => {

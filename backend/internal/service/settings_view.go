@@ -196,6 +196,10 @@ type SystemSettings struct {
 	OpsQueryModeDefault          string
 	OpsMetricsIntervalSeconds    int
 
+	// Admin-only usage display switches (default: enabled).
+	AdminUsageCacheHitRateEnabled bool `json:"admin_usage_cache_hit_rate_enabled"`
+	AdminUsageTokenSpeedEnabled   bool `json:"admin_usage_token_speed_enabled"`
+
 	// Channel Monitor feature
 	ChannelMonitorEnabled                bool   `json:"channel_monitor_enabled"`
 	ChannelMonitorMode                   string `json:"channel_monitor_mode"`

@@ -7043,6 +7043,28 @@
 
 	        <!-- Tab: Features (功能开关) -->
         <div v-show="activeTab === 'features'" class="space-y-6">
+        <div class="card" data-testid="admin-usage-metrics-settings">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('admin.settings.features.usageMetrics.title') }}</h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.usageMetrics.description') }}</p>
+          </div>
+          <div class="space-y-5 p-6">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label id="usage-cache-hit-rate-label" class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.settings.features.usageMetrics.cacheHitRate') }}</label>
+                <p id="usage-cache-hit-rate-hint" class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.usageMetrics.cacheHitRateHint') }}</p>
+              </div>
+              <Toggle v-model="form.admin_usage_cache_hit_rate_enabled" aria-labelledby="usage-cache-hit-rate-label" aria-describedby="usage-cache-hit-rate-hint" />
+            </div>
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label id="usage-token-speed-label" class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.settings.features.usageMetrics.tokenSpeed') }}</label>
+                <p id="usage-token-speed-hint" class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.usageMetrics.tokenSpeedHint') }}</p>
+              </div>
+              <Toggle v-model="form.admin_usage_token_speed_enabled" aria-labelledby="usage-token-speed-label" aria-describedby="usage-token-speed-hint" />
+            </div>
+          </div>
+        </div>
 
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -9881,6 +9903,8 @@ const form = reactive<SettingsForm>({
   account_quota_notify_enabled: false,
   account_quota_notify_emails: [] as NotifyEmailEntry[],
   // Channel Monitor feature switch
+  admin_usage_cache_hit_rate_enabled: true,
+  admin_usage_token_speed_enabled: true,
   channel_monitor_enabled: true,
   channel_monitor_mode: 'v1' as 'v1' | 'v2',
   channel_monitor_default_interval_seconds: 60,
@@ -10891,6 +10915,8 @@ async function loadSettings() {
       : defaultFingerprintSignalRows();
     form.login_agreement_mode =
       settings.login_agreement_mode === "checkbox" ? "checkbox" : "modal";
+    form.admin_usage_cache_hit_rate_enabled = settings.admin_usage_cache_hit_rate_enabled ?? true;
+    form.admin_usage_token_speed_enabled = settings.admin_usage_token_speed_enabled ?? true;
     form.channel_monitor_mode =
       settings.channel_monitor_mode === "v2" ? "v2" : "v1";
     form.channel_monitor_hide_throughput = Boolean(
@@ -11570,6 +11596,8 @@ async function saveSettings() {
         form.account_quota_notify_emails || []
       ).filter((e) => e.email.trim() !== ""),
       // Channel Monitor feature switch
+      admin_usage_cache_hit_rate_enabled: form.admin_usage_cache_hit_rate_enabled,
+      admin_usage_token_speed_enabled: form.admin_usage_token_speed_enabled,
       channel_monitor_enabled: form.channel_monitor_enabled,
       channel_monitor_mode: form.channel_monitor_mode === 'v1' ? 'v1' : 'v2',
       channel_monitor_default_interval_seconds:
@@ -11632,6 +11660,7 @@ async function saveSettings() {
     const updated = await settingsStepUp.run(() =>
       adminAPI.settings.updateSettings(payload),
     );
+    adminSettingsStore.setUsageMetricsLocal(updated);
     for (const [key, value] of Object.entries(updated)) {
       if (key === "openai_fast_policy_settings") continue;
       if (value !== null && value !== undefined) {

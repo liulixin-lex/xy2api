@@ -418,6 +418,10 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 		updates[SettingKeyOpsMetricsIntervalSeconds] = strconv.Itoa(settings.OpsMetricsIntervalSeconds)
 	}
 
+	// Admin-only usage display switches
+	updates[SettingKeyAdminUsageCacheHitRateEnabled] = strconv.FormatBool(settings.AdminUsageCacheHitRateEnabled)
+	updates[SettingKeyAdminUsageTokenSpeedEnabled] = strconv.FormatBool(settings.AdminUsageTokenSpeedEnabled)
+
 	// Channel monitor feature switch
 	updates[SettingKeyChannelMonitorEnabled] = strconv.FormatBool(settings.ChannelMonitorEnabled)
 	updates[SettingKeyChannelMonitorMode] = normalizeChannelMonitorMode(settings.ChannelMonitorMode)

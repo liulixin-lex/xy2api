@@ -305,7 +305,11 @@ type SystemSettings struct {
 	AccountQuotaNotifyEnabled       bool               `json:"account_quota_notify_enabled"`
 	AccountQuotaNotifyEmails        []NotifyEmailEntry `json:"account_quota_notify_emails"`
 
-	// Channel Monitor feature switch
+	// Admin-only usage display switches (default: enabled).
+	AdminUsageCacheHitRateEnabled bool `json:"admin_usage_cache_hit_rate_enabled"`
+	AdminUsageTokenSpeedEnabled   bool `json:"admin_usage_token_speed_enabled"`
+
+	// Channel Monitor feature
 	ChannelMonitorEnabled                bool   `json:"channel_monitor_enabled"`
 	ChannelMonitorMode                   string `json:"channel_monitor_mode"`
 	ChannelMonitorDefaultIntervalSeconds int    `json:"channel_monitor_default_interval_seconds"`

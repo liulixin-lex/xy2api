@@ -43,6 +43,14 @@ export default {
         payment: 'Payment',
       },
       features: {
+        usageMetrics: {
+          title: 'Admin usage records',
+          description: 'Control metrics shown in admin usage records without changing collection or billing.',
+          cacheHitRate: 'Show cache hit rate',
+          cacheHitRateHint: 'Show the cache hit percentage for each request in the Token column.',
+          tokenSpeed: 'Show token speed',
+          tokenSpeedHint: 'Show output tokens per second in the latency column, using generation time when available.',
+        },
         channelMonitor: {
           title: 'Channel Monitor',
           description: 'Choose either V1 active probes or V2 passive usage monitoring. When disabled, both background jobs stop and the user entry is hidden.',

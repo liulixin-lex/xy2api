@@ -4,6 +4,17 @@ import { adminAPI } from '@/api'
 import type { CustomMenuItem } from '@/types'
 
 export const useAdminSettingsStore = defineStore('adminSettings', () => {
+  // A late settings read must not overwrite a more recent successful save.
+  let usageMetricsRevision = 0
+  const usageCacheHitRateEnabled = ref(false)
+  const usageTokenSpeedEnabled = ref(false)
+
+  function setUsageMetricsLocal(settings: { admin_usage_cache_hit_rate_enabled?: boolean; admin_usage_token_speed_enabled?: boolean }) {
+    usageMetricsRevision++
+    usageCacheHitRateEnabled.value = settings.admin_usage_cache_hit_rate_enabled ?? true
+    usageTokenSpeedEnabled.value = settings.admin_usage_token_speed_enabled ?? true
+  }
+
   const loaded = ref(false)
   const loading = ref(false)
 
@@ -56,11 +67,15 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
     if (loading.value) return
 
     loading.value = true
+    const usageMetricsReadRevision = usageMetricsRevision
     try {
-      const [settings, paymentConfigResp] = await Promise.all([
+      const [settingsResult, paymentResult] = await Promise.allSettled([
         adminAPI.settings.getSettings(),
         adminAPI.payment.getConfig()
       ])
+      if (settingsResult.status === 'rejected') throw settingsResult.reason
+      const settings = settingsResult.value
+      if (usageMetricsReadRevision === usageMetricsRevision) setUsageMetricsLocal(settings)
       opsMonitoringEnabled.value = settings.ops_monitoring_enabled ?? true
       writeCachedBool('ops_monitoring_enabled_cached', opsMonitoringEnabled.value)
 
@@ -72,8 +87,10 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
 
       customMenuItems.value = Array.isArray(settings.custom_menu_items) ? settings.custom_menu_items : []
 
-      paymentEnabled.value = paymentConfigResp.data?.enabled ?? false
-      writeCachedBool('payment_enabled_cached', paymentEnabled.value)
+      if (paymentResult.status === 'fulfilled') {
+        paymentEnabled.value = paymentResult.value.data?.enabled ?? false
+        writeCachedBool('payment_enabled_cached', paymentEnabled.value)
+      }
 
       loaded.value = true
     } catch (err) {
@@ -134,6 +151,9 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
   }
 
   return {
+    usageCacheHitRateEnabled,
+    usageTokenSpeedEnabled,
+    setUsageMetricsLocal,
     loaded,
     loading,
     opsMonitoringEnabled,

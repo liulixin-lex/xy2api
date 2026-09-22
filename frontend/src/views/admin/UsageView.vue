@@ -125,6 +125,8 @@
         <div v-show="activeTab === 'usage'" class="overflow-hidden rounded-b-2xl">
           <UsageTable
             flat
+            :show-cache-hit-rate="adminSettingsStore.usageCacheHitRateEnabled"
+            :show-token-speed="adminSettingsStore.usageTokenSpeedEnabled"
             :data="usageLogs"
             :loading="loading"
             :columns="visibleColumns"
@@ -188,6 +190,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { saveAs } from 'file-saver'
 import { useRoute } from 'vue-router'
+import { useAdminSettingsStore } from '@/stores/adminSettings'
 import { useAppStore } from '@/stores/app'; import { adminAPI } from '@/api/admin'; import { adminUsageAPI } from '@/api/admin/usage'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatReasoningEffort } from '@/utils/format'
@@ -212,6 +215,7 @@ const appStore = useAppStore()
 type DistributionMetric = 'tokens' | 'actual_cost'
 type EndpointSource = 'inbound' | 'upstream' | 'path'
 type ModelDistributionSource = 'requested' | 'upstream' | 'mapping'
+const adminSettingsStore = useAdminSettingsStore()
 const route = useRoute()
 const usageStats = ref<AdminUsageStatsResponse | null>(null); const usageLogs = ref<AdminUsageLog[]>([]); const loading = ref(false); const exporting = ref(false)
 const trendData = ref<TrendDataPoint[]>([]); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('hour')
@@ -532,6 +536,7 @@ const applyFilters = () => {
   }
 }
 const refreshData = () => {
+  void adminSettingsStore.fetch(true)
   invalidateModelStatsCache()
   loadLogs()
   loadStats(true)
@@ -865,6 +870,7 @@ const handleColumnClickOutside = (event: MouseEvent) => {
 }
 
 onMounted(() => {
+  void adminSettingsStore.fetch(true)
   applyRouteQueryFilters()
   void loadRouteUserFilterLabel()
   loadLogs()

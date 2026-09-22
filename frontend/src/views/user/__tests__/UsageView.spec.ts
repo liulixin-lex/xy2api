@@ -216,6 +216,15 @@ describe('user UsageView', () => {
     getAvailable.mockResolvedValue([{ id: 1, name: 'default' }])
   })
 
+  it('never enables admin usage metrics on the user page', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+    const table = wrapper.findComponent(UsageTable)
+    expect(table.props('showCacheHitRate')).toBeUndefined()
+    expect(table.props('showTokenSpeed')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('loads logs, stats, model stats, and snapshot on first render', async () => {
     mountUsageView()
     await flushPromises()

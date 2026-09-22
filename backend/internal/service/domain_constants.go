@@ -485,6 +485,12 @@ const (
 	// Channel Monitor (渠道监控)
 	// =========================
 
+	// AdminUsageCacheHitRateEnabled controls an admin-only usage display; it does not affect collection.
+	SettingKeyAdminUsageCacheHitRateEnabled = "admin_usage_cache_hit_rate_enabled"
+
+	// AdminUsageTokenSpeedEnabled controls an admin-only usage display; it does not affect collection.
+	SettingKeyAdminUsageTokenSpeedEnabled = "admin_usage_token_speed_enabled"
+
 	// SettingKeyChannelMonitorEnabled is a DB-backed soft switch for the channel monitor feature.
 	// When false: runner skips scheduling and user-facing endpoints return an empty list.
 	SettingKeyChannelMonitorEnabled = "channel_monitor_enabled"
