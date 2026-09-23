@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/imroc/req/v3"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/service"
-	"github.com/imroc/req/v3"
 )
 
 // Desktop 26.908.40834, app-primary-44ec287874b7.js: SIt, EIt, PIt, FIt.

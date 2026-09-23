@@ -6,9 +6,9 @@ import (
 	"errors"
 	"time"
 
+	"github.com/lib/pq"
 	dbent "github.com/liulixin-lex/xy2api/ent"
 	"github.com/liulixin-lex/xy2api/internal/service"
-	"github.com/lib/pq"
 )
 
 const (

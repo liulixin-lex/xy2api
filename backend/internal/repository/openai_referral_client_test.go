@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/imroc/req/v3"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/service"
-	"github.com/imroc/req/v3"
 	"github.com/stretchr/testify/require"
 )
 

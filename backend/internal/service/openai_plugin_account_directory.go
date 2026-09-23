@@ -109,6 +109,15 @@ func accountReadableSnapshotJSON(account *Account) []byte {
 	}
 	clone := *account
 	clone.Credentials = nil
+	clone.IQPreserveTokenRotation = false
+	clone.IQCheckSettings = nil
+	// STATE tickets are private credentials, not plugin directory metadata.
+	clone.Extra = make(map[string]any, len(account.Extra))
+	for key, value := range account.Extra {
+		if !IsOpenAICodexTicketPrivateExtraKey(key) {
+			clone.Extra[key] = value
+		}
+	}
 	clone.Groups = nil
 	clone.AccountGroups = nil
 	data, err := json.Marshal(&clone)

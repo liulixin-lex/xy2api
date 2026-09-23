@@ -32,7 +32,7 @@ func TestListPluginAccounts_ScopeAndSchedulable(t *testing.T) {
 		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
 			Name:        "primary",
 			Credentials: map[string]any{"access_token": "SECRET-TOKEN", "refresh_token": "SECRET-REFRESH"},
-			Extra:       map[string]any{"existing_key": "ek-value", "openai_compact_mode": "auto"}},
+			Extra:       map[string]any{"existing_key": "ek-value", "openai_compact_mode": "auto", "codex_turn_ticket:gpt-6-astra": map[string]any{"state": "PRIVATE-STATE-TICKET"}}},
 		// active but temp-unschedulable (paused) — status stays active, must still be
 		// returned, but not schedulable
 		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
@@ -73,6 +73,9 @@ func TestListPluginAccounts_ScopeAndSchedulable(t *testing.T) {
 	meta := string(got[1].MetadataJSON)
 	assert.NotContains(t, meta, "SECRET-TOKEN", "credentials must never appear in metadata")
 	assert.NotContains(t, meta, "SECRET-REFRESH", "credentials must never appear in metadata")
+	assert.NotContains(t, meta, "PRIVATE-STATE-TICKET")
+	assert.NotContains(t, meta, "codex_turn_ticket:")
+	assert.Contains(t, openai[0].Extra, "codex_turn_ticket:gpt-6-astra", "snapshot must not mutate the source account")
 	assert.Contains(t, meta, "ek-value", "Extra is intentionally released")
 	assert.Contains(t, meta, "openai_compact_mode", "Extra is intentionally released")
 	assert.Contains(t, meta, "primary", "readable name must be present in metadata")
@@ -92,11 +95,12 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 	// = relational graphs with back-references that would cycle under encoding/json.
 	stripped := map[string]struct{}{
 		"Credentials": {}, "Groups": {}, "AccountGroups": {},
+		"IQPreserveTokenRotation": {}, "IQCheckSettings": {},
 	}
 	// Fields intentionally exposed as readable metadata (incl. Extra and Proxy —
 	// the proxy password is already handed out via ResolveOutboundIdentity's URL).
 	safeToExpose := map[string]struct{}{
-		"ID": {}, "Name": {}, "Notes": {}, "Platform": {}, "Type": {}, "Extra": {},
+		"ID": {}, "Name": {}, "Notes": {}, "Platform": {}, "Type": {}, "Extra": {}, "IQCheck": {},
 		"Proxy": {}, "ProxyID": {}, "ProxyFallbackOriginID": {}, "ProxyFallbackOriginName": {},
 		"Concurrency": {}, "Priority": {}, "RateMultiplier": {}, "LoadFactor": {},
 		"Status": {}, "ErrorMessage": {}, "LastUsedAt": {}, "ExpiresAt": {},

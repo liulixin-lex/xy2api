@@ -315,8 +315,10 @@ func TestBulkUpdateOpenCodeGoEligiblePredicateIncludesBaseURL(t *testing.T) {
 	query := normalizeSQLWhitespace(exec.execQueries[0])
 	// 第一个 WHEN 分支是 OpenCode 快照失效分支（代理变化），其 eligible 判定必须
 	// 包含 opencode base URL 正则，使 OpenAI+Ollama 行无法命中该分支。
-	caseStart := strings.Index(query, "CASE")
-	firstThen := strings.Index(query, "THEN")
+	caseStart := strings.Index(query, "opencode_go_usage_snapshot")
+	require.NotEqual(t, -1, caseStart)
+	caseStart = strings.LastIndex(query[:caseStart], "WHEN")
+	firstThen := caseStart + strings.Index(query[caseStart:], "THEN")
 	require.NotEqual(t, -1, caseStart)
 	require.NotEqual(t, -1, firstThen)
 	require.Less(t, caseStart, firstThen)
@@ -438,6 +440,9 @@ func TestInvalidateProxyProbeSnapshotsClearsOpenCodeGoSnapshot(t *testing.T) {
 	mock.ExpectQuery(`(?s)UPDATE accounts.*opencode_go_usage_snapshot.*RETURNING id`).
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(17)))
+	mock.ExpectQuery(`SELECT id FROM accounts WHERE proxy_id=\$1 AND platform='openai' AND type<>'apikey' AND deleted_at IS NULL`).
+		WithArgs(int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
 	ids, err := invalidateProxyProbeSnapshots(context.Background(), client, 9)
 
