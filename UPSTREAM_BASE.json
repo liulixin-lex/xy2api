@@ -1,66 +1,231 @@
 {
   "schema_version": 1,
   "upstream_repo": "Wei-Shaw/sub2api",
-  "upstream_tag": "v0.2.6",
-  "upstream_tag_ref": "sub2api/v0.2.6",
-  "upstream_tag_object": "8f35716ba69976fc0ec950894114d2604bb5454c",
+  "upstream_tag": "v0.2.8",
+  "upstream_tag_ref": "sub2api/v0.2.8",
+  "upstream_tag_object": "d7a82d78ca51d42be41cb4daa3510ea401defe9f",
   "upstream_tag_signature": "unsigned",
-  "upstream_commit": "49a39b6dc1abed30fd227611e8af1108bc427610",
-  "merge_base": "86f93c28ee34cc74b629dafb748bd5ac5ca8c5ea",
-  "fork_start": "35d62090079bfab131dfa69e8d3283f1fc1b9363",
+  "upstream_commit": "fd80b08c90b55edcad5b00171b53f08721d30da1",
+  "merge_base": "efe9aab1e4ec89a42ba45e8dac20e882c5409a6a",
+  "fork_start": "f3c36f2a6ba1ba3b211c1b6431265d6da214fb23",
   "xy2api_version": "0.1.8",
   "sub2api_compat_version": "0.2.6",
-  "status": "resolved",
+  "status": "pending",
   "manual_resolutions": [
     {
+      "path": ".github/workflows/release.yml",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": ".gitignore",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
       "path": "backend/cmd/server/VERSION",
-      "status": "resolved",
-      "resolution": "Preserve independent XY2API product version; promote to 0.1.3-rc.1 in a separate version commit."
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
       "path": "backend/cmd/server/wire_gen.go",
-      "status": "resolved",
-      "resolution": "Regenerated Wire from the combined provider graph, retaining IQ, group prompts and Stripe hosted services and wiring the upstream Codex ticket lifecycle."
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
-      "path": "backend/go.sum",
-      "status": "resolved",
-      "resolution": "Reconciled upstream dependency bumps with XY2API dependencies using go mod tidy; retain grpc v1.83.2."
+      "path": "backend/cmd/server/wire_gen_test.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
-      "path": "backend/internal/handler/redeem_handler.go",
-      "status": "resolved",
-      "resolution": "Accept upstream pagination and legacy no-pagination API behavior; normalize only the module imports."
+      "path": "backend/internal/handler/admin/account_handler.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/handler/admin/setting_handler.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/handler/admin/setting_handler_update.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/handler/dto/mappers.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/handler/dto/settings.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/handler/dto/types.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/handler/wire.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/repository/account_repo.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
       "path": "backend/internal/repository/account_repo_upstream_billing_probe_update_test.go",
-      "status": "resolved",
-      "resolution": "Accept upstream current_extra snapshot expectations; retain IQ row locking and the IQCheckSettings Ent column fixture."
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
-      "path": "backend/internal/repository/redeem_code_repo_sort_integration_test.go",
-      "status": "resolved",
-      "resolution": "Accept upstream pagination coverage with XY2API module imports."
+      "path": "backend/internal/repository/http_upstream.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
-      "path": "backend/internal/service/admin_account.go",
-      "status": "resolved",
-      "resolution": "Merge all four Codex ticket sanitization/preservation calls while retaining IQ validation, copying, filtering and updates."
+      "path": "backend/internal/repository/proxy_repo.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
-      "path": "backend/internal/service/openai_gateway_request_body.go",
-      "status": "resolved",
-      "resolution": "Accept DeepSeek Responses tool media lifting and preserve XY2API trusted-user documentation/module imports."
+      "path": "backend/internal/service/billing_service.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/domain_constants.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/gateway_billing_header.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/gemini_messages_compat_service.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/openai_compat_prompt_cache_key.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_anthropic_native.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages_chat_fallback.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_responses_anthropic_native.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_responses_chat_fallback.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/plugin_runtime.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/pricing_service.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/setting_gateway_runtime.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/setting_parse.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/setting_service.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/setting_update.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/settings_view.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/pkg/pluginapi/README.md",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "backend/pkg/pluginapi/v1/plugin.pb.go",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "frontend/src/api/admin/settings.ts",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "frontend/src/components/account/EditAccountModal.vue",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
       "path": "frontend/src/components/common/BaseDialog.vue",
-      "status": "resolved",
-      "resolution": "Preserve focus trap, nested Escape, focus restore and stack-based scroll lock; combine Vue useId with a module-scoped sequence for independently mounted app roots."
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     },
     {
-      "path": "frontend/src/views/admin/__tests__/ChannelMonitorView.grok.spec.ts",
-      "status": "resolved",
-      "resolution": "Retain provider count derived from PROVIDERS.length, covering current and future provider additions."
+      "path": "frontend/src/types/index.ts",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "frontend/src/views/admin/SettingsView.vue",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "frontend/src/views/user/UsageView.vue",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
+    },
+    {
+      "path": "frontend/src/views/user/__tests__/UsageView.spec.ts",
+      "status": "pending",
+      "resolution": "kept XY2API side until human review"
     }
   ],
   "custom_patches": [
@@ -71,6 +236,5 @@
     "windows-plugin-archive-close",
     "migration-checksum-manifest",
     "dual-version-plugin-compatibility"
-  ],
-  "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/47"
+  ]
 }

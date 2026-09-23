@@ -2,9 +2,9 @@
   "schema_version": 1,
   "base": "efe9aab1e4ec89a42ba45e8dac20e882c5409a6a",
   "upstream": "fd80b08c90b55edcad5b00171b53f08721d30da1",
-  "fork": "4974f6612abe9ea23ba70d184869d612d8fcd170",
+  "fork": "f3c36f2a6ba1ba3b211c1b6431265d6da214fb23",
   "upstream_commit_count": 255,
-  "fork_commit_count": 258,
+  "fork_commit_count": 260,
   "upstream_commits": [
     {
       "commit": "89ba561a6f5ee3b6488128c38f537adf65664425",
@@ -3497,6 +3497,8 @@
     "docs/upstream-sync/v0.2.4.json",
     "docs/upstream-sync/v0.2.5.json",
     "docs/upstream-sync/v0.2.6.json",
+    "docs/upstream-sync/v0.2.8-review.md",
+    "docs/upstream-sync/v0.2.8.json",
     "frontend/index.html",
     "frontend/package.json",
     "frontend/public/logo.svg",
@@ -3993,7 +3995,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": ".github/workflows/upstream-sync.yml",
@@ -4007,7 +4009,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": ".goreleaser.simple.yaml",
@@ -4196,7 +4198,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/ent/account.go",
@@ -6947,7 +6949,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/handler/admin/setting_handler_audit.go",
@@ -7038,7 +7040,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/handler/admin/setting_handler_usage_metrics_test.go",
@@ -7472,7 +7474,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/handler/dto/mappers_deleted_user_test.go",
@@ -7507,14 +7509,14 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/handler/dto/types.go",
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/handler/dto/user_mapper_activity_test.go",
@@ -8424,7 +8426,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/integration/e2e_user_flow_test.go",
@@ -9159,7 +9161,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/repository/account_repo_auto_pause_test.go",
@@ -10055,7 +10057,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/repository/http_upstream_benchmark_test.go",
@@ -10503,7 +10505,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/repository/proxy_repo_integration_test.go",
@@ -12862,7 +12864,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/billing_service_test.go",
@@ -13303,7 +13305,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/email_html_escape_test.go",
@@ -13415,7 +13417,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/gateway_billing_header_test.go",
@@ -13828,7 +13830,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/gemini_messages_compat_service_test.go",
@@ -15053,7 +15055,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/openai_compat_prompt_cache_key_test.go",
@@ -15144,7 +15146,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/openai_gateway_chat_completions_cancellation_test.go",
@@ -15158,7 +15160,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/openai_gateway_chat_completions_raw_test.go",
@@ -15319,7 +15321,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/openai_gateway_messages_chat_fallback_test.go",
@@ -15431,14 +15433,14 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/openai_gateway_responses_chat_fallback.go",
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/openai_gateway_responses_chat_fallback_test.go",
@@ -17013,7 +17015,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/plugin_runtime_integration_test.go",
@@ -17041,7 +17043,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/pricing_service_hot_reload_test.go",
@@ -17405,7 +17407,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/setting_oauth.go",
@@ -17426,7 +17428,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/setting_public.go",
@@ -17440,7 +17442,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/setting_service_auth_source_defaults_test.go",
@@ -17524,14 +17526,14 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/settings_view.go",
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/service/subscription_assign_idempotency_test.go",
@@ -17937,7 +17939,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "backend/internal/setup/cli.go",
@@ -18829,6 +18831,20 @@
       "fork_owner": "xy_owned"
     },
     {
+      "path": "docs/upstream-sync/v0.2.8-review.md",
+      "upstream_changed": false,
+      "fork_changed": true,
+      "overlap": false,
+      "fork_owner": "xy_owned"
+    },
+    {
+      "path": "docs/upstream-sync/v0.2.8.json",
+      "upstream_changed": false,
+      "fork_changed": true,
+      "overlap": false,
+      "fork_owner": "xy_owned"
+    },
+    {
       "path": "frontend/index.html",
       "upstream_changed": false,
       "fork_changed": true,
@@ -18973,7 +18989,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "frontend/src/api/admin/system.ts",
@@ -20338,7 +20354,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "frontend/src/types/openaiReferrals.ts",
@@ -20485,7 +20501,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "frontend/src/views/admin/UsageView.vue",
@@ -20758,7 +20774,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "frontend/src/views/user/UserOrdersView.vue",
@@ -20786,7 +20802,7 @@
       "upstream_changed": true,
       "fork_changed": true,
       "overlap": true,
-      "fork_owner": "xy_owned"
+      "fork_owner": "manual_merge"
     },
     {
       "path": "openspec/changes/iq-detection-operations/final-audit.md",
@@ -21041,11 +21057,14 @@
       "backend/pkg/pluginapi/v1/runtime.go"
     ],
     "manual_merge": [
+      ".github/workflows/release.yml",
+      ".gitignore",
       "README.md",
       "README_CN.md",
       "README_JA.md",
       "backend/cmd/server/VERSION",
       "backend/cmd/server/wire_gen.go",
+      "backend/cmd/server/wire_gen_test.go",
       "backend/ent/group.go",
       "backend/ent/runtime/runtime.go",
       "backend/go.sum",
@@ -21053,12 +21072,21 @@
       "backend/internal/handler/admin/account_handler.go",
       "backend/internal/handler/admin/grok_import_probe.go",
       "backend/internal/handler/admin/group_handler.go",
+      "backend/internal/handler/admin/setting_handler.go",
+      "backend/internal/handler/admin/setting_handler_update.go",
+      "backend/internal/handler/dto/mappers.go",
+      "backend/internal/handler/dto/settings.go",
+      "backend/internal/handler/dto/types.go",
       "backend/internal/handler/gateway_models_test.go",
       "backend/internal/handler/gemini_v1beta_handler_test.go",
       "backend/internal/handler/openai_gateway_handler.go",
       "backend/internal/handler/redeem_handler.go",
+      "backend/internal/handler/wire.go",
+      "backend/internal/repository/account_repo.go",
       "backend/internal/repository/account_repo_upstream_billing_probe_update_test.go",
       "backend/internal/repository/group_repo_integration_test.go",
+      "backend/internal/repository/http_upstream.go",
+      "backend/internal/repository/proxy_repo.go",
       "backend/internal/repository/redeem_code_repo_sort_integration_test.go",
       "backend/internal/repository/user_platform_quota_repo.go",
       "backend/internal/repository/user_platform_quota_repo_integration_test.go",
@@ -21071,10 +21099,20 @@
       "backend/internal/service/admin_service_group_test.go",
       "backend/internal/service/api_key_auth_cache_impl.go",
       "backend/internal/service/bedrock_request.go",
+      "backend/internal/service/billing_service.go",
+      "backend/internal/service/domain_constants.go",
+      "backend/internal/service/gateway_billing_header.go",
       "backend/internal/service/gateway_request.go",
+      "backend/internal/service/gemini_messages_compat_service.go",
       "backend/internal/service/identity_service.go",
+      "backend/internal/service/openai_compat_prompt_cache_key.go",
+      "backend/internal/service/openai_gateway_chat_completions_anthropic_native.go",
+      "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "backend/internal/service/openai_gateway_messages_chat_fallback.go",
       "backend/internal/service/openai_gateway_ollama_cloud_max_tokens_test.go",
       "backend/internal/service/openai_gateway_request_body.go",
+      "backend/internal/service/openai_gateway_responses_anthropic_native.go",
+      "backend/internal/service/openai_gateway_responses_chat_fallback.go",
       "backend/internal/service/openai_oauth_passthrough_test.go",
       "backend/internal/service/openai_responses_ingress_compat.go",
       "backend/internal/service/openai_ws_fallback_test.go",
@@ -21082,6 +21120,14 @@
       "backend/internal/service/ops_settings.go",
       "backend/internal/service/ops_upstream_context.go",
       "backend/internal/service/plugin_package.go",
+      "backend/internal/service/plugin_runtime.go",
+      "backend/internal/service/pricing_service.go",
+      "backend/internal/service/setting_gateway_runtime.go",
+      "backend/internal/service/setting_parse.go",
+      "backend/internal/service/setting_service.go",
+      "backend/internal/service/setting_update.go",
+      "backend/internal/service/settings_view.go",
+      "backend/internal/service/wire.go",
       "backend/internal/setup/setup_test.go",
       "deploy/APPLE_CONTAINER.md",
       "deploy/DOCKER.md",
@@ -21090,11 +21136,16 @@
       "deploy/config.example.yaml",
       "deploy/docker-compose.yml",
       "deploy/tests/apple-container-test.sh",
+      "frontend/src/api/admin/settings.ts",
       "frontend/src/components/account/EditAccountModal.vue",
       "frontend/src/components/common/BaseDialog.vue",
+      "frontend/src/types/index.ts",
       "frontend/src/views/__tests__/KeyUsageView.spec.ts",
       "frontend/src/views/admin/GroupsView.vue",
-      "frontend/src/views/admin/__tests__/ChannelMonitorView.grok.spec.ts"
+      "frontend/src/views/admin/SettingsView.vue",
+      "frontend/src/views/admin/__tests__/ChannelMonitorView.grok.spec.ts",
+      "frontend/src/views/user/UsageView.vue",
+      "frontend/src/views/user/__tests__/UsageView.spec.ts"
     ],
     "generated": [
       "backend/ent/account.go",
@@ -21380,9 +21431,7 @@
       ".dockerignore",
       ".github/workflows/backend-ci.yml",
       ".github/workflows/cla.yml",
-      ".github/workflows/release.yml",
       ".github/workflows/upstream-sync.yml",
-      ".gitignore",
       ".goreleaser.simple.yaml",
       ".goreleaser.yaml",
       "AGENTS.md",
@@ -21402,7 +21451,6 @@
       "backend/cmd/server/SUB2API_COMPAT_VERSION",
       "backend/cmd/server/main.go",
       "backend/cmd/server/wire.go",
-      "backend/cmd/server/wire_gen_test.go",
       "backend/go.mod",
       "backend/internal/config/config_test.go",
       "backend/internal/config/openai_quality_routing.go",
@@ -21503,7 +21551,6 @@
       "backend/internal/handler/admin/redeem_handler.go",
       "backend/internal/handler/admin/redeem_handler_test.go",
       "backend/internal/handler/admin/scheduled_test_handler.go",
-      "backend/internal/handler/admin/setting_handler.go",
       "backend/internal/handler/admin/setting_handler_audit.go",
       "backend/internal/handler/admin/setting_handler_auth_source_defaults_test.go",
       "backend/internal/handler/admin/setting_handler_codex_ticket_test.go",
@@ -21515,7 +21562,6 @@
       "backend/internal/handler/admin/setting_handler_platform_quota_test.go",
       "backend/internal/handler/admin/setting_handler_runtime.go",
       "backend/internal/handler/admin/setting_handler_stepup_switch_test.go",
-      "backend/internal/handler/admin/setting_handler_update.go",
       "backend/internal/handler/admin/setting_handler_usage_metrics_test.go",
       "backend/internal/handler/admin/subscription_bulk_action_test.go",
       "backend/internal/handler/admin/subscription_handler.go",
@@ -21576,13 +21622,10 @@
       "backend/internal/handler/dto/group_mapper_openai_fast_test.go",
       "backend/internal/handler/dto/group_mapper_profit_visibility_test.go",
       "backend/internal/handler/dto/group_system_prompt_test.go",
-      "backend/internal/handler/dto/mappers.go",
       "backend/internal/handler/dto/mappers_deleted_user_test.go",
       "backend/internal/handler/dto/mappers_usage_test.go",
       "backend/internal/handler/dto/notify_email_entry.go",
       "backend/internal/handler/dto/public_settings_injection_schema_test.go",
-      "backend/internal/handler/dto/settings.go",
-      "backend/internal/handler/dto/types.go",
       "backend/internal/handler/dto/user_mapper_activity_test.go",
       "backend/internal/handler/endpoint.go",
       "backend/internal/handler/endpoint_test.go",
@@ -21705,7 +21748,6 @@
       "backend/internal/handler/user_handler_test.go",
       "backend/internal/handler/user_msg_queue_helper.go",
       "backend/internal/handler/user_platform_quotas_handler_test.go",
-      "backend/internal/handler/wire.go",
       "backend/internal/integration/e2e_user_flow_test.go",
       "backend/internal/middleware/rate_limiter.go",
       "backend/internal/middleware/rate_limiter_test.go",
@@ -21782,7 +21824,6 @@
       "backend/internal/repository/account_iq_reliability.go",
       "backend/internal/repository/account_iq_reliability_integration_test.go",
       "backend/internal/repository/account_iq_simplification_integration_test.go",
-      "backend/internal/repository/account_repo.go",
       "backend/internal/repository/account_repo_auto_pause_test.go",
       "backend/internal/repository/account_repo_codex_fingerprint_seed_test.go",
       "backend/internal/repository/account_repo_codex_ticket_test.go",
@@ -21900,7 +21941,6 @@
       "backend/internal/repository/group_repo_sort_integration_test.go",
       "backend/internal/repository/group_system_prompt_integration_test.go",
       "backend/internal/repository/group_usage_rollup_trigger_integration_test.go",
-      "backend/internal/repository/http_upstream.go",
       "backend/internal/repository/http_upstream_benchmark_test.go",
       "backend/internal/repository/http_upstream_test.go",
       "backend/internal/repository/idempotency_repo.go",
@@ -21954,7 +21994,6 @@
       "backend/internal/repository/proxy_latency_cache.go",
       "backend/internal/repository/proxy_probe_service.go",
       "backend/internal/repository/proxy_repeated_expiry_integration_test.go",
-      "backend/internal/repository/proxy_repo.go",
       "backend/internal/repository/proxy_repo_integration_test.go",
       "backend/internal/repository/proxy_repo_sort_integration_test.go",
       "backend/internal/repository/proxy_repo_upstream_billing_probe_test.go",
@@ -22260,7 +22299,6 @@
       "backend/internal/service/billing_cache_service_user_platform_quota_test.go",
       "backend/internal/service/billing_context_schedule.go",
       "backend/internal/service/billing_context_schedule_test.go",
-      "backend/internal/service/billing_service.go",
       "backend/internal/service/billing_service_test.go",
       "backend/internal/service/billing_service_unified_test.go",
       "backend/internal/service/billing_token_cost_request_test.go",
@@ -22311,7 +22349,6 @@
       "backend/internal/service/data_management_service.go",
       "backend/internal/service/data_management_service_test.go",
       "backend/internal/service/deepseek_pricing_test.go",
-      "backend/internal/service/domain_constants.go",
       "backend/internal/service/email_html_escape_test.go",
       "backend/internal/service/email_message_test.go",
       "backend/internal/service/email_queue_service.go",
@@ -22327,7 +22364,6 @@
       "backend/internal/service/gateway_anthropic_vertex_beta_filter_test.go",
       "backend/internal/service/gateway_bedrock.go",
       "backend/internal/service/gateway_beta_test.go",
-      "backend/internal/service/gateway_billing_header.go",
       "backend/internal/service/gateway_billing_header_test.go",
       "backend/internal/service/gateway_body_order_test.go",
       "backend/internal/service/gateway_channel_restriction_fallback_test.go",
@@ -22378,7 +22414,6 @@
       "backend/internal/service/gemini_chat_completions_compat_service.go",
       "backend/internal/service/gemini_error_policy_skipped_write_test.go",
       "backend/internal/service/gemini_error_policy_test.go",
-      "backend/internal/service/gemini_messages_compat_service.go",
       "backend/internal/service/gemini_messages_compat_service_test.go",
       "backend/internal/service/gemini_multiplatform_test.go",
       "backend/internal/service/gemini_native_response_signal_test.go",
@@ -22538,7 +22573,6 @@
       "backend/internal/service/openai_compact_stream_bridge_test.go",
       "backend/internal/service/openai_compat_model.go",
       "backend/internal/service/openai_compat_model_test.go",
-      "backend/internal/service/openai_compat_prompt_cache_key.go",
       "backend/internal/service/openai_compat_prompt_cache_key_test.go",
       "backend/internal/service/openai_cyber_session_block.go",
       "backend/internal/service/openai_embeddings.go",
@@ -22551,9 +22585,7 @@
       "backend/internal/service/openai_gateway_anthropic_native_pump_test.go",
       "backend/internal/service/openai_gateway_cc_pipeline.go",
       "backend/internal/service/openai_gateway_chat_completions.go",
-      "backend/internal/service/openai_gateway_chat_completions_anthropic_native.go",
       "backend/internal/service/openai_gateway_chat_completions_cancellation_test.go",
-      "backend/internal/service/openai_gateway_chat_completions_raw.go",
       "backend/internal/service/openai_gateway_chat_completions_raw_test.go",
       "backend/internal/service/openai_gateway_chat_completions_test.go",
       "backend/internal/service/openai_gateway_cn_fixes_test.go",
@@ -22573,7 +22605,6 @@
       "backend/internal/service/openai_gateway_grok_tool_protocol_test.go",
       "backend/internal/service/openai_gateway_messages.go",
       "backend/internal/service/openai_gateway_messages_anthropic_native.go",
-      "backend/internal/service/openai_gateway_messages_chat_fallback.go",
       "backend/internal/service/openai_gateway_messages_chat_fallback_test.go",
       "backend/internal/service/openai_gateway_messages_usage_test.go",
       "backend/internal/service/openai_gateway_model_availability.go",
@@ -22587,8 +22618,6 @@
       "backend/internal/service/openai_gateway_response_failed_passthrough_test.go",
       "backend/internal/service/openai_gateway_response_flush_test.go",
       "backend/internal/service/openai_gateway_response_handling.go",
-      "backend/internal/service/openai_gateway_responses_anthropic_native.go",
-      "backend/internal/service/openai_gateway_responses_chat_fallback.go",
       "backend/internal/service/openai_gateway_responses_chat_fallback_test.go",
       "backend/internal/service/openai_gateway_responses_client_tools_test.go",
       "backend/internal/service/openai_gateway_scheduling.go",
@@ -22778,11 +22807,9 @@
       "backend/internal/service/plugin_manager_routing_test.go",
       "backend/internal/service/plugin_manifest.go",
       "backend/internal/service/plugin_package_test.go",
-      "backend/internal/service/plugin_runtime.go",
       "backend/internal/service/plugin_runtime_integration_test.go",
       "backend/internal/service/plugin_security_regression_test.go",
       "backend/internal/service/post_billing_platform_test.go",
-      "backend/internal/service/pricing_service.go",
       "backend/internal/service/pricing_service_hot_reload_test.go",
       "backend/internal/service/pricing_service_override_test.go",
       "backend/internal/service/pricing_service_test.go",
@@ -22822,12 +22849,9 @@
       "backend/internal/service/setting_codex_proxy_pool_encryption_test.go",
       "backend/internal/service/setting_codex_ticket_test.go",
       "backend/internal/service/setting_features.go",
-      "backend/internal/service/setting_gateway_runtime.go",
       "backend/internal/service/setting_oauth.go",
       "backend/internal/service/setting_panel_rate_limit_test.go",
-      "backend/internal/service/setting_parse.go",
       "backend/internal/service/setting_public.go",
-      "backend/internal/service/setting_service.go",
       "backend/internal/service/setting_service_auth_source_defaults_test.go",
       "backend/internal/service/setting_service_backend_mode_test.go",
       "backend/internal/service/setting_service_claude_oauth_system_prompt_test.go",
@@ -22839,8 +22863,6 @@
       "backend/internal/service/setting_service_update_test.go",
       "backend/internal/service/setting_service_user_error_persist_test.go",
       "backend/internal/service/setting_service_wechat_config_test.go",
-      "backend/internal/service/setting_update.go",
-      "backend/internal/service/settings_view.go",
       "backend/internal/service/subscription_assign_idempotency_test.go",
       "backend/internal/service/subscription_bulk_action.go",
       "backend/internal/service/subscription_bulk_action_test.go",
@@ -22898,7 +22920,6 @@
       "backend/internal/service/video_billing.go",
       "backend/internal/service/websearch_config.go",
       "backend/internal/service/websearch_config_test.go",
-      "backend/internal/service/wire.go",
       "backend/internal/setup/cli.go",
       "backend/internal/setup/handler.go",
       "backend/internal/setup/setup.go",
@@ -22970,6 +22991,8 @@
       "docs/upstream-sync/v0.2.4.json",
       "docs/upstream-sync/v0.2.5.json",
       "docs/upstream-sync/v0.2.6.json",
+      "docs/upstream-sync/v0.2.8-review.md",
+      "docs/upstream-sync/v0.2.8.json",
       "frontend/index.html",
       "frontend/package.json",
       "frontend/public/logo.svg",
@@ -22983,7 +23006,6 @@
       "frontend/src/api/admin/codexTickets.ts",
       "frontend/src/api/admin/groups.ts",
       "frontend/src/api/admin/plugins.ts",
-      "frontend/src/api/admin/settings.ts",
       "frontend/src/api/admin/system.ts",
       "frontend/src/api/channels.ts",
       "frontend/src/api/client.ts",
@@ -23095,7 +23117,6 @@
       "frontend/src/stores/app.ts",
       "frontend/src/stores/payment.ts",
       "frontend/src/styles/onboarding.css",
-      "frontend/src/types/index.ts",
       "frontend/src/types/payment.ts",
       "frontend/src/utils/__tests__/ccswitchImport.spec.ts",
       "frontend/src/utils/__tests__/usageMetrics.spec.ts",
@@ -23106,7 +23127,6 @@
       "frontend/src/views/admin/AccountsView.vue",
       "frontend/src/views/admin/PluginsView.vue",
       "frontend/src/views/admin/ProxiesView.vue",
-      "frontend/src/views/admin/SettingsView.vue",
       "frontend/src/views/admin/UsageView.vue",
       "frontend/src/views/admin/__tests__/GroupsView.codexManifest.spec.ts",
       "frontend/src/views/admin/__tests__/PluginsView.spec.ts",
@@ -23129,10 +23149,8 @@
       "frontend/src/views/user/KeysView.vue",
       "frontend/src/views/user/PaymentResultView.vue",
       "frontend/src/views/user/PaymentView.vue",
-      "frontend/src/views/user/UsageView.vue",
       "frontend/src/views/user/UserOrdersView.vue",
       "frontend/src/views/user/__tests__/PaymentResultView.spec.ts",
-      "frontend/src/views/user/__tests__/UsageView.spec.ts",
       "openspec/changes/iq-detection-operations/final-audit.md",
       "openspec/changes/iq-detection-operations/proposal.md",
       "openspec/changes/iq-detection-operations/spec.md",
@@ -23981,45 +23999,7 @@
     "frontend/src/views/user/UsageView.vue",
     "frontend/src/views/user/__tests__/UsageView.spec.ts"
   ],
-  "unexpected_conflicts": [
-    ".github/workflows/release.yml",
-    ".gitignore",
-    "backend/cmd/server/wire_gen_test.go",
-    "backend/internal/handler/admin/setting_handler.go",
-    "backend/internal/handler/admin/setting_handler_update.go",
-    "backend/internal/handler/dto/mappers.go",
-    "backend/internal/handler/dto/settings.go",
-    "backend/internal/handler/dto/types.go",
-    "backend/internal/handler/wire.go",
-    "backend/internal/repository/account_repo.go",
-    "backend/internal/repository/http_upstream.go",
-    "backend/internal/repository/proxy_repo.go",
-    "backend/internal/service/billing_service.go",
-    "backend/internal/service/domain_constants.go",
-    "backend/internal/service/gateway_billing_header.go",
-    "backend/internal/service/gemini_messages_compat_service.go",
-    "backend/internal/service/openai_compat_prompt_cache_key.go",
-    "backend/internal/service/openai_gateway_chat_completions_anthropic_native.go",
-    "backend/internal/service/openai_gateway_chat_completions_raw.go",
-    "backend/internal/service/openai_gateway_messages_chat_fallback.go",
-    "backend/internal/service/openai_gateway_responses_anthropic_native.go",
-    "backend/internal/service/openai_gateway_responses_chat_fallback.go",
-    "backend/internal/service/plugin_runtime.go",
-    "backend/internal/service/pricing_service.go",
-    "backend/internal/service/setting_gateway_runtime.go",
-    "backend/internal/service/setting_parse.go",
-    "backend/internal/service/setting_service.go",
-    "backend/internal/service/setting_update.go",
-    "backend/internal/service/settings_view.go",
-    "backend/internal/service/wire.go",
-    "backend/pkg/pluginapi/README.md",
-    "backend/pkg/pluginapi/v1/plugin.pb.go",
-    "frontend/src/api/admin/settings.ts",
-    "frontend/src/types/index.ts",
-    "frontend/src/views/admin/SettingsView.vue",
-    "frontend/src/views/user/UsageView.vue",
-    "frontend/src/views/user/__tests__/UsageView.spec.ts"
-  ],
+  "unexpected_conflicts": [],
   "upstream_tag": "v0.2.8",
   "upstream_tag_ref": "sub2api/v0.2.8",
   "upstream_tag_object": "d7a82d78ca51d42be41cb4daa3510ea401defe9f",
