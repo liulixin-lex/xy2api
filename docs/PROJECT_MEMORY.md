@@ -4,13 +4,17 @@
 
 ## 当前交接状态
 
-### Sub2API v0.2.8 / XY2API 0.1.9 全流程同步进行中（2026-09-23）
+### Sub2API v0.2.8 / XY2API 0.1.9 已发布（2026-09-23，生产未部署）
 
-- 用户授权使用本机 GitHub 票据完成标准同步、合并、RC 与正式发布。原 `/xy/xy2api/main` 保持基线 `8a99582ab`；候选副本 `/xy/artifacts/upstream-sync-v0.2.8/work`，分支 `sync/sub2api-v0.2.8`，draft PR #62。
+- 用户授权使用本机 GitHub 票据完成标准同步、合并、RC 与正式发布。起点 `8a99582ab`；同步 PR #62 在固定 head `63390ddd5` 的 18/18 检查通过后合并为 `522494784915bdc5e00c1a87bd26c5b2e0ea45c9`；正式晋级 PR #63 在固定 head `48a29a65e` 的 18/18 检查通过后合并为 `504f633ee5dfae6d21b541b276cb15da3dcbce3e`。
 - 官方标签固定 d7a82d78ca51d42be41cb4daa3510ea401defe9f / fd80b08c90b55edcad5b00171b53f08721d30da1。真实 merge 完成，43 项冲突逐项裁决，来源审计通过；299 个已发布 SQL 字节与 checksum 不变，新增 253–255，总计302。
-- 保留 STATE/IQ/质量路由/后台导出/分组长上下文策略，接入上游模型、用量、推理倍率、网关与插件协议更新。Go1.27.0、pnpm9、protobuf 工具已安装；工具测试、Compose、生成、冻结安装、串行前端类型检查通过，完整门禁进行中。首轮前端类型检查内存终止及一次取消的重复编译保留账本。
-- 固定四角色目录 `/xy/artifacts/upstream-sync-v0.2.8/`，以 VERIFICATION.txt 记录命令/字面输出/退出状态；最终归档与回滚待门禁结束刷新。产品候选0.1.9-rc.1、兼容0.2.8；正式版0.1.9仅在RC制品与隔离验收通过后晋级。尚未合并、发版或部署。
+- 保留 STATE/IQ/质量路由/后台导出/分组长上下文策略，接入上游模型、用量、推理倍率、网关与插件协议更新。工具测试、Compose、生成零差异、前端 348 文件/2629 用例、生产构建、远端完整 Unit/Integration 与安全扫描通过。修复同步后 adminSettings 的付款配置读取失败重试；早期失败及取消记录保留，取消不能视为产品失败。
+- annotated RC 标签 `0021a9afa23e7e8e6ce393bc96a003cab5266774` 指向同步合并提交；RC Release run `35889830544` 成功，五平台包 SHA-256、Linux 产品/兼容版本/提交、GHCR 两架构版本及 revision 通过。RC digest `sha256:8238393e465a7f0a8273a59f2e5e3ff9fc9bbcf38f814f74e554b683eb2e318b`；RC 后 latest/0.1/0 保持旧正式镜像。
+- RC 全新安装 health/login 200、302 migrations；隔离 0.1.8→RC 迁移 299→302，推理定价旧字段转换，数据库/Redis/应用标记保持；恢复预升级 PostgreSQL dump 后旧版 health/login 200、299 migrations、旧定价字段与全部标记恢复。首轮全新安装夹具缺少数据库就绪等待，补齐后通过。没有生产部署或真实模型调用。
+- 正式 annotated `v0.1.9` 标签对象 `7092ad4913b0eab17228677fb472ad3c49e1db38` 指向正式合并提交，Release run `35895236920` 成功；正式版本仅修改 VERSION 与 provenance 产品版本。四角色固定为 `/xy/artifacts/upstream-sync-v0.2.8/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；源码三态为 0.1.8/0.2.6/299 → 0.1.9/0.2.8/302 → 基线，补丁重建、回滚哈希、重新应用均通过。
 
+- 正式 [Release v0.1.9](https://github.com/liulixin-lex/xy2api/releases/tag/v0.1.9) 为非草稿、非预发布；五平台发布包 SHA-256、Linux 产品/兼容版本与完整提交通过。GHCR linux/amd64、linux/arm64 的 version/revision 均与源码一致，digest `sha256:4d58fdc7dd8a6b09b2b935cef9839e2201fa768d669b39603f40bc7a4076dfa5`；0.1.9/latest/0.1/0 一致。正式镜像独立全新安装 health/login 200、302 migrations。
+- 本次 sync/release 短期分支已删除，命名空间上游标签、RC 和正式标签保留。隔离演练资源已清理；源码副本与固定四角色保留。文档收尾前已验证 main=origin/main=正式标签；收尾后 main 仅新增本记忆文档，不移动正式标签。
 
 ### 用量导出与管理员指标 0.1.8 已发布（2026-09-22，生产未部署）
 
@@ -243,25 +247,25 @@
 - 最终相关后端单测、真实 PostgreSQL/Redis 集成、前端相关测试、类型/i18n/lint/生产构建、服务编译和独立 go vet 均成功；六输入 BASELINE/MODIFIED/ROLLBACK 通过，累计补丁可重建相同 SHA-256 的归档。综合静态检查首轮 SIGKILL、低内存重试 exit 4 超时，不能把其中 0 issues 当作成功；缓存复验最终结果见 VERIFICATION.txt。保留原有一项 Redis 批量负载集成测试跳过及构建体积提示。
 - 用户补正生产用户名为 ubuntu。首次密码认证成功，后台复用连接失效后，后续 SSH 返回 Connection refused，尚未成功读取任何远端命令输出；HTTP IP 仍返回 Caddy 308，缺真实域名/SNI。生产内部只读审计仍受阻。本轮未部署、发版或发出真实模型请求。方案见 `openspec/changes/iq-detection-operations/`。
 
-最后更新：`2026-09-18`（UTC）；下表记录 v0.1.3 发布来源，最终交接文档提交位于发布标签之后。
+最后更新：`2026-09-23`（UTC）；下表记录 v0.1.9 发布来源，最终交接文档提交位于发布标签之后。
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 仓库路径 | `/xy/xy2api` |
 | 当前分支 | main；最终交接文档由受保护 PR 合并，发布标签保持不可变 |
-| 发布提交 | `v0.1.3` / `2ba6600027887abc119c2c7e9d5201b79228fe7c`，版本 PR #48 |
+| 发布提交 | `v0.1.9` / `504f633ee5dfae6d21b541b276cb15da3dcbce3e`，版本 PR #63 |
 | 工作树 | 发布来源已核对干净；本表所在文档只补充验收记录 |
-| XY2API 产品版本 | 远端 main 产品 `0.1.3` / 兼容 `0.2.6`；原本地主工作区保留旧基线 |
-| 已审计的 Sub2API 基线 | `v0.2.6` / commit `49a39b6dc1abed30fd227611e8af1108bc427610`；同步 PR #47 |
-| 基线 provenance | resolved，10 项人工裁决；同步 merge `ef3493e13` |
+| XY2API 产品版本 | 本地与远端 main 产品 `0.1.9` / 兼容 `0.2.8` |
+| 已审计的 Sub2API 基线 | `v0.2.8` / commit `fd80b08c90b55edcad5b00171b53f08721d30da1`；同步 PR #62 |
+| 基线 provenance | resolved，43 项人工裁决；同步 merge `522494784` |
 | 本地远端 | `origin` 可读写；`upstream` 仅允许 fetch，push URL 为 `DISABLED` |
 | 当前环境工具 | git、Python、gh、Docker、Node、pnpm；本轮按仓库固定版本使用 Go 1.27.0 隔离工具链 |
 
-Sub2API 兼容基线已更新到 `v0.2.6`。下方历史日志保留原样；本轮没有升级生产实例。
+Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
 
-- `20260923-sub2api-v0.2.8-sync`：用户追加全流程授权，使用本机 GitHub 票据完成同步、受保护合并、RC 与正式发布；Go 1.27.0 已按官方 SHA-256 安装到 `/opt/go1.27.0`。沿用固定 v0.2.8 来源，正在隔离工作副本逐项裁决清单外冲突。
+- `20260923-sub2api-v0.2.8-sync`：实现、合并、RC、正式发布与隔离验收均完成；本收尾 PR 仅归档项目记忆。
 
 - `20260922-release-0.1.8`：两个 PR 已合并，正式发布及制品/隔离验收完成；文档收尾记录最终结果，发布标签保持不变。
 
@@ -1033,3 +1037,12 @@ pnpm --dir frontend run build
 - 报告 `docs/upstream-sync/v0.2.8.json` 显示上游 508 文件、255 commits、双方 226 文件重叠；API 63、配置8、生成产物3 项受影响，新增 migration 238/239/240。当前 XY2API 已使用 238/239/240 编号实现不同 migration，需另行设计新编号并校验 checksums。
 - 官方 `sync.py prepare` 按预期拒绝 43 项冲突中的 37 项清单外冲突，未创建 merge commit 或改动 main。冲突覆盖设置/DTO、计费、插件协议、网关核心、workflow 与忽略规则；不得绕过门禁。仅保留经审查的来源报告和任务启动提交 `4974f6612abe9ea23ba70d184869d612d8fcd170`。
 - `doctor --strict` 初次指出未配置 upstream；配置后再次因当前位于同步分支、且环境缺少 Go 而未就绪。基础报告和 `git diff --check` 通过；尚未执行人工裁决、migration 重编号、生成代码、测试或 PR。下一步需按逐文件三方比较扩展 `manual_merge` 策略（仅有具体裁决时），解决 migration 冲突/重编号并追加 manifest，再运行所需 Go 工具链门禁。未合并、推送、发版或部署。
+
+### 2026-09-23 — `20260923-sub2api-v0.2.8-sync` — 标准同步、发布与验收完成
+
+- 在原预检基础上逐项登记 37 个清单外裁决路径，完成 43 项冲突裁决及真实上游 merge。保持 299 个已发布迁移字节，新增迁移顺延 253–255；保留 STATE/IQ/质量路由/导出/长上下文策略与兼容标识。
+- 同步 PR #62 与晋级 PR #63 各在固定 head 的 18 项检查通过后正常合并；RC 与正式标签为 annotated，制品、镜像、版本与提交均已独立核验。最终发布指向 504f633ee5dfae6d21b541b276cb15da3dcbce3e。
+- 前端完整 2629 项用例和生产构建、完整 Unit/Integration、安全及来源审计通过；RC 全新安装、0.1.8 升级与 PostgreSQL dump 恢复、正式全新安装均通过。运行数据验证覆盖迁移数、定价 JSON 和数据库/Redis/应用标记。
+- 三态源码验收为 0.1.8/0.2.6/299 → 0.1.9/0.2.8/302 → 基线；补丁重建、回滚哈希和重新应用通过，四角色沿用 /xy/artifacts/upstream-sync-v0.2.8/。
+- 早期测试失败、夹具 readiness 修正与工作流取消均保留证据。纠正执行过程中的判断：缺少实时日志不等于卡住；RC 首轮与正式 PR 前两次 CI 被过早取消，最终成功来自同一源码的完整重跑，未放宽任何门禁。
+- 未部署生产、未调用真实模型账号；数据库回退使用升级前备份，不回写已发布 migration。正式标签保持不可变，项目记忆通过独立文档 PR 收尾。
