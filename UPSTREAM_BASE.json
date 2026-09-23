@@ -236,5 +236,6 @@
     "windows-plugin-archive-close",
     "migration-checksum-manifest",
     "dual-version-plugin-compatibility"
-  ]
+  ],
+  "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/62"
 }
