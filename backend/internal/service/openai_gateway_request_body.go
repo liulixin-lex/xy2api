@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"net/http"
 	"strings"
 	"unicode/utf8"
