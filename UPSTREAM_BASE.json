@@ -1,66 +1,231 @@
 {
   "schema_version": 1,
   "upstream_repo": "Wei-Shaw/sub2api",
-  "upstream_tag": "v0.2.6",
-  "upstream_tag_ref": "sub2api/v0.2.6",
-  "upstream_tag_object": "8f35716ba69976fc0ec950894114d2604bb5454c",
+  "upstream_tag": "v0.2.8",
+  "upstream_tag_ref": "sub2api/v0.2.8",
+  "upstream_tag_object": "d7a82d78ca51d42be41cb4daa3510ea401defe9f",
   "upstream_tag_signature": "unsigned",
-  "upstream_commit": "49a39b6dc1abed30fd227611e8af1108bc427610",
-  "merge_base": "86f93c28ee34cc74b629dafb748bd5ac5ca8c5ea",
-  "fork_start": "35d62090079bfab131dfa69e8d3283f1fc1b9363",
-  "xy2api_version": "0.1.8",
-  "sub2api_compat_version": "0.2.6",
+  "upstream_commit": "fd80b08c90b55edcad5b00171b53f08721d30da1",
+  "merge_base": "efe9aab1e4ec89a42ba45e8dac20e882c5409a6a",
+  "fork_start": "f3c36f2a6ba1ba3b211c1b6431265d6da214fb23",
+  "xy2api_version": "0.1.9-rc.1",
+  "sub2api_compat_version": "0.2.8",
   "status": "resolved",
   "manual_resolutions": [
     {
+      "path": ".github/workflows/release.yml",
+      "status": "resolved",
+      "resolution": "Preserve XY2API release artifacts, version checks, GHCR publishing and stable/RC tag separation; upstream workflow remains owned by the fork."
+    },
+    {
+      "path": ".gitignore",
+      "status": "resolved",
+      "resolution": "Keep XY2API documentation exceptions and add the upstream Codex credits documentation exception."
+    },
+    {
       "path": "backend/cmd/server/VERSION",
       "status": "resolved",
-      "resolution": "Preserve independent XY2API product version; promote to 0.1.3-rc.1 in a separate version commit."
+      "resolution": "Preserve independent product version; RC promotion is a separate commit."
     },
     {
       "path": "backend/cmd/server/wire_gen.go",
       "status": "resolved",
-      "resolution": "Regenerated Wire from the combined provider graph, retaining IQ, group prompts and Stripe hosted services and wiring the upstream Codex ticket lifecycle."
+      "resolution": "Regenerate Wire from the combined provider graph, retaining usage exports, STATE and IQ and adding Claude version sync and OpenCode usage lifecycle."
     },
     {
-      "path": "backend/go.sum",
+      "path": "backend/cmd/server/wire_gen_test.go",
       "status": "resolved",
-      "resolution": "Reconciled upstream dependency bumps with XY2API dependencies using go mod tidy; retain grpc v1.83.2."
+      "resolution": "Combine cleanup test arguments for IQ, usage exports, Claude version sync and OpenCode usage."
     },
     {
-      "path": "backend/internal/handler/redeem_handler.go",
+      "path": "backend/internal/handler/admin/account_handler.go",
       "status": "resolved",
-      "resolution": "Accept upstream pagination and legacy no-pagination API behavior; normalize only the module imports."
+      "resolution": "Retain live Codex ticket policy/account ticket services and add OpenCode usage injection and update calls."
+    },
+    {
+      "path": "backend/internal/handler/admin/setting_handler.go",
+      "status": "resolved",
+      "resolution": "Expose both masked STATE configuration and Claude version fields."
+    },
+    {
+      "path": "backend/internal/handler/admin/setting_handler_update.go",
+      "status": "resolved",
+      "resolution": "Merge independent update fields and preserve omitted values and readonly synced versions."
+    },
+    {
+      "path": "backend/internal/handler/dto/mappers.go",
+      "status": "resolved",
+      "resolution": "Exclude both private STATE keys and managed OpenCode/Ollama keys; include both public status DTOs."
+    },
+    {
+      "path": "backend/internal/handler/dto/settings.go",
+      "status": "resolved",
+      "resolution": "Keep STATE settings and append Claude client version settings."
+    },
+    {
+      "path": "backend/internal/handler/dto/types.go",
+      "status": "resolved",
+      "resolution": "Retain IQ and ticket DTO fields; add OpenCode usage to full and lite account DTOs."
+    },
+    {
+      "path": "backend/internal/handler/wire.go",
+      "status": "resolved",
+      "resolution": "Inject both STATE settings/gateway and OpenCode usage service."
+    },
+    {
+      "path": "backend/internal/repository/account_repo.go",
+      "status": "resolved",
+      "resolution": "Retain IQ row locking and current_extra ticket preservation; append OpenCode identity checks and managed usage state atomically."
     },
     {
       "path": "backend/internal/repository/account_repo_upstream_billing_probe_update_test.go",
       "status": "resolved",
-      "resolution": "Accept upstream current_extra snapshot expectations; retain IQ row locking and the IQCheckSettings Ent column fixture."
+      "resolution": "Combine 13-column snapshot fixture and existing IQ row lock expectation."
     },
     {
-      "path": "backend/internal/repository/redeem_code_repo_sort_integration_test.go",
+      "path": "backend/internal/repository/http_upstream.go",
       "status": "resolved",
-      "resolution": "Accept upstream pagination coverage with XY2API module imports."
+      "resolution": "Preserve single-attempt no-replay guard while adopting cancel-before-body-close and HTTP/2 lifecycle."
     },
     {
-      "path": "backend/internal/service/admin_account.go",
+      "path": "backend/internal/repository/proxy_repo.go",
       "status": "resolved",
-      "resolution": "Merge all four Codex ticket sanitization/preservation calls while retaining IQ validation, copying, filtering and updates."
+      "resolution": "Keep OAuth account row locks and ticket invalidation; condition expiry on current snapshot to avoid concurrent renewal loss."
     },
     {
-      "path": "backend/internal/service/openai_gateway_request_body.go",
+      "path": "backend/internal/service/billing_service.go",
       "status": "resolved",
-      "resolution": "Accept DeepSeek Responses tool media lifting and preserve XY2API trusted-user documentation/module imports."
+      "resolution": "Adopt generic reasoning effort billing and new model pricing atomically while retaining group long-context policy."
+    },
+    {
+      "path": "backend/internal/service/domain_constants.go",
+      "status": "resolved",
+      "resolution": "Keep Codex ticket constants and add Claude version constants."
+    },
+    {
+      "path": "backend/internal/service/gateway_billing_header.go",
+      "status": "resolved",
+      "resolution": "Merge normalized imports and final reasoning effort billing propagation."
+    },
+    {
+      "path": "backend/internal/service/gemini_messages_compat_service.go",
+      "status": "resolved",
+      "resolution": "Adopt transport failover and retain countTokens transformed-body estimation."
+    },
+    {
+      "path": "backend/internal/service/openai_compat_prompt_cache_key.go",
+      "status": "resolved",
+      "resolution": "Merge normalized imports preserving quality and existing prompt-cache policy."
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_anthropic_native.go",
+      "status": "resolved",
+      "resolution": "Combine imports and final reasoning effort propagation with quality observer."
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "status": "resolved",
+      "resolution": "Merge normalized imports and upstream raw completion fixes preserving quality routing."
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages_chat_fallback.go",
+      "status": "resolved",
+      "resolution": "Combine imports, upstream effort handling and fork quality observer."
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_responses_anthropic_native.go",
+      "status": "resolved",
+      "resolution": "Merge normalized imports, reasoning pricing and quality observation."
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_responses_chat_fallback.go",
+      "status": "resolved",
+      "resolution": "Merge imports and upstream termination handling with fork quality observer."
+    },
+    {
+      "path": "backend/internal/service/plugin_runtime.go",
+      "status": "resolved",
+      "resolution": "Retain fork module path; add optional host service broker lifecycle."
+    },
+    {
+      "path": "backend/internal/service/pricing_service.go",
+      "status": "resolved",
+      "resolution": "Combine pricing parser updates and scientific-notation boundary support with fork module path."
+    },
+    {
+      "path": "backend/internal/service/setting_gateway_runtime.go",
+      "status": "resolved",
+      "resolution": "Retain STATE policy and add Claude client version runtime cache and nullable OAuth scheduling rates."
+    },
+    {
+      "path": "backend/internal/service/setting_parse.go",
+      "status": "resolved",
+      "resolution": "Preserve encrypted STATE proxy pool parsing while adding Claude version defaults and parsing."
+    },
+    {
+      "path": "backend/internal/service/setting_service.go",
+      "status": "resolved",
+      "resolution": "Keep STATE proxy pools/caches and add independent Claude version cache."
+    },
+    {
+      "path": "backend/internal/service/setting_update.go",
+      "status": "resolved",
+      "resolution": "Invalidate both STATE and Claude runtime caches after updates."
+    },
+    {
+      "path": "backend/internal/service/settings_view.go",
+      "status": "resolved",
+      "resolution": "Keep STATE view and add Claude version view."
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "status": "resolved",
+      "resolution": "Merge providers under fork module path, including new Claude sync and OpenCode usage providers."
+    },
+    {
+      "path": "backend/pkg/pluginapi/README.md",
+      "status": "resolved",
+      "resolution": "Keep XY2API identity and document optional readonly plugin status and host metadata protocol."
+    },
+    {
+      "path": "backend/pkg/pluginapi/v1/plugin.pb.go",
+      "status": "resolved",
+      "resolution": "Regenerate protobuf and gRPC outputs from combined v1 source without renumbering existing fields."
+    },
+    {
+      "path": "frontend/src/api/admin/settings.ts",
+      "status": "resolved",
+      "resolution": "Keep STATE request/response fields and append Claude version fields."
+    },
+    {
+      "path": "frontend/src/components/account/EditAccountModal.vue",
+      "status": "resolved",
+      "resolution": "Keep IQ editor and adopt upstream stale-request handling plus OpenCode refresh toggle."
     },
     {
       "path": "frontend/src/components/common/BaseDialog.vue",
       "status": "resolved",
-      "resolution": "Preserve focus trap, nested Escape, focus restore and stack-based scroll lock; combine Vue useId with a module-scoped sequence for independently mounted app roots."
+      "resolution": "Keep existing symbol-based scroll lock/focus stack; it already implements upstream multi-dialog intent without duplicate state."
     },
     {
-      "path": "frontend/src/views/admin/__tests__/ChannelMonitorView.grok.spec.ts",
+      "path": "frontend/src/types/index.ts",
       "status": "resolved",
-      "resolution": "Retain provider count derived from PROVIDERS.length, covering current and future provider additions."
+      "resolution": "Keep ticket status type and add OpenCode usage type."
+    },
+    {
+      "path": "frontend/src/views/admin/SettingsView.vue",
+      "status": "resolved",
+      "resolution": "Keep STATE, Stripe and usage controls; add Claude version settings and nullable OAuth scheduling fallback."
+    },
+    {
+      "path": "frontend/src/views/user/UsageView.vue",
+      "status": "resolved",
+      "resolution": "Keep durable server-side usage export; upstream synchronous CSV helpers do not apply to this replacement."
+    },
+    {
+      "path": "frontend/src/views/user/__tests__/UsageView.spec.ts",
+      "status": "resolved",
+      "resolution": "Keep durable export regression coverage; synchronous CSV tests are superseded by server-side export tests."
     }
   ],
   "custom_patches": [
@@ -72,5 +237,5 @@
     "migration-checksum-manifest",
     "dual-version-plugin-compatibility"
   ],
-  "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/47"
+  "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/62"
 }

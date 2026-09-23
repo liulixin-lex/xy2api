@@ -236,8 +236,9 @@ type Account struct {
 	CreatedAt               time.Time                         `json:"created_at"`
 	UpdatedAt               time.Time                         `json:"updated_at"`
 
-	Schedulable bool           `json:"schedulable"`
-	IQCheck     domain.IQCheck `json:"iq_check"`
+	Schedulable     bool                          `json:"schedulable"`
+	IQCheck         domain.IQCheck                `json:"iq_check"`
+	OpenCodeGoUsage *service.OpenCodeGoUsageState `json:"opencode_go_usage,omitempty"`
 
 	RateLimitedAt    *time.Time `json:"rate_limited_at"`
 	RateLimitResetAt *time.Time `json:"rate_limit_reset_at"`
@@ -347,6 +348,7 @@ type AccountListItem struct {
 	Extra             map[string]any                    `json:"extra,omitempty"`
 	OllamaCloudUsage  *service.OllamaCloudUsageState    `json:"ollama_cloud_usage,omitempty"`
 	CodexTurnTickets  []service.OpenAICodexTicketStatus `json:"codex_turn_tickets,omitempty"`
+	OpenCodeGoUsage   *service.OpenCodeGoUsageState     `json:"opencode_go_usage,omitempty"`
 
 	ProxyID                 *int64     `json:"proxy_id"`
 	ProxyFallbackOriginID   *int64     `json:"proxy_fallback_origin_id"`

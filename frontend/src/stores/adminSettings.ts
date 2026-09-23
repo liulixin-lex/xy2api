@@ -92,10 +92,9 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
         writeCachedBool('payment_enabled_cached', paymentEnabled.value)
       }
 
-      loaded.value = true
+      loaded.value = paymentResult.status === 'fulfilled'
     } catch (err) {
       // Keep cached/default value: do not "flip" the UI based on a transient fetch failure.
-      loaded.value = true
       console.error('[adminSettings] Failed to fetch settings:', err)
     } finally {
       loading.value = false
