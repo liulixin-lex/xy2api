@@ -4,7 +4,10 @@
   "module_rewrite": {
     "from": "github.com/Wei-Shaw/sub2api",
     "to": "github.com/liulixin-lex/xy2api",
-    "extensions": [".go", ".proto"]
+    "extensions": [
+      ".go",
+      ".proto"
+    ]
   },
   "ownership_priority": [
     "compat_invariant",
@@ -99,7 +102,44 @@
       "deploy/tests/apple-container-test.sh",
       "frontend/src/components/account/EditAccountModal.vue",
       "frontend/src/views/__tests__/KeyUsageView.spec.ts",
-      "frontend/src/views/admin/GroupsView.vue"
+      "frontend/src/views/admin/GroupsView.vue",
+      ".github/workflows/release.yml",
+      ".gitignore",
+      "backend/cmd/server/wire_gen_test.go",
+      "backend/internal/handler/admin/setting_handler.go",
+      "backend/internal/handler/admin/setting_handler_update.go",
+      "backend/internal/handler/dto/mappers.go",
+      "backend/internal/handler/dto/settings.go",
+      "backend/internal/handler/dto/types.go",
+      "backend/internal/handler/wire.go",
+      "backend/internal/repository/account_repo.go",
+      "backend/internal/repository/http_upstream.go",
+      "backend/internal/repository/proxy_repo.go",
+      "backend/internal/service/billing_service.go",
+      "backend/internal/service/domain_constants.go",
+      "backend/internal/service/gateway_billing_header.go",
+      "backend/internal/service/gemini_messages_compat_service.go",
+      "backend/internal/service/openai_compat_prompt_cache_key.go",
+      "backend/internal/service/openai_gateway_chat_completions_anthropic_native.go",
+      "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "backend/internal/service/openai_gateway_messages_chat_fallback.go",
+      "backend/internal/service/openai_gateway_responses_anthropic_native.go",
+      "backend/internal/service/openai_gateway_responses_chat_fallback.go",
+      "backend/internal/service/plugin_runtime.go",
+      "backend/internal/service/pricing_service.go",
+      "backend/internal/service/setting_gateway_runtime.go",
+      "backend/internal/service/setting_parse.go",
+      "backend/internal/service/setting_service.go",
+      "backend/internal/service/setting_update.go",
+      "backend/internal/service/settings_view.go",
+      "backend/internal/service/wire.go",
+      "backend/pkg/pluginapi/README.md",
+      "backend/pkg/pluginapi/v1/plugin.pb.go",
+      "frontend/src/api/admin/settings.ts",
+      "frontend/src/types/index.ts",
+      "frontend/src/views/admin/SettingsView.vue",
+      "frontend/src/views/user/UsageView.vue",
+      "frontend/src/views/user/__tests__/UsageView.spec.ts"
     ],
     "generated": [
       "backend/ent/**",
@@ -115,19 +155,58 @@
     ]
   },
   "required_literals": [
-    {"path": "backend/go.mod", "value": "module github.com/liulixin-lex/xy2api"},
-    {"path": "backend/internal/server/routes/gateway.go", "value": "/sub2api/billing"},
-    {"path": "backend/pkg/pluginapi/v1/plugin.proto", "value": "package sub2api.plugin.v1;"},
-    {"path": "backend/pkg/pluginapi/v1/runtime.go", "value": "SUB2API_PLUGIN_MAGIC_COOKIE"},
-    {"path": "backend/internal/handler/admin/ops_ws_handler.go", "value": "sub2api-admin"},
-    {"path": "frontend/src/api/admin/ops.ts", "value": "sub2api-admin"},
-    {"path": "backend/internal/pkg/xai/oauth.go", "value": "params.Set(\"referrer\", \"sub2api\")"},
-    {"path": "backend/internal/config/config.go", "value": "/etc/sub2api"},
-    {"path": "backend/internal/service/update_service.go", "value": "liulixin-lex/xy2api"},
-    {"path": "backend/internal/service/update_service.go", "value": "sub2api.exe"},
-    {"path": "backend/internal/service/openai_gateway_grok_cache.go", "value": "X-Sub2API-Grok-Client-Tool-Cache"},
-    {"path": "backend/internal/service/openai_messages_todo_guard.go", "value": "<sub2api-claude-code-todo-guard>"},
-    {"path": "deploy/docker-compose.yml", "value": "APP_DATA_VOLUME_NAME"}
+    {
+      "path": "backend/go.mod",
+      "value": "module github.com/liulixin-lex/xy2api"
+    },
+    {
+      "path": "backend/internal/server/routes/gateway.go",
+      "value": "/sub2api/billing"
+    },
+    {
+      "path": "backend/pkg/pluginapi/v1/plugin.proto",
+      "value": "package sub2api.plugin.v1;"
+    },
+    {
+      "path": "backend/pkg/pluginapi/v1/runtime.go",
+      "value": "SUB2API_PLUGIN_MAGIC_COOKIE"
+    },
+    {
+      "path": "backend/internal/handler/admin/ops_ws_handler.go",
+      "value": "sub2api-admin"
+    },
+    {
+      "path": "frontend/src/api/admin/ops.ts",
+      "value": "sub2api-admin"
+    },
+    {
+      "path": "backend/internal/pkg/xai/oauth.go",
+      "value": "params.Set(\"referrer\", \"sub2api\")"
+    },
+    {
+      "path": "backend/internal/config/config.go",
+      "value": "/etc/sub2api"
+    },
+    {
+      "path": "backend/internal/service/update_service.go",
+      "value": "liulixin-lex/xy2api"
+    },
+    {
+      "path": "backend/internal/service/update_service.go",
+      "value": "sub2api.exe"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_grok_cache.go",
+      "value": "X-Sub2API-Grok-Client-Tool-Cache"
+    },
+    {
+      "path": "backend/internal/service/openai_messages_todo_guard.go",
+      "value": "<sub2api-claude-code-todo-guard>"
+    },
+    {
+      "path": "deploy/docker-compose.yml",
+      "value": "APP_DATA_VOLUME_NAME"
+    }
   ],
   "forbidden_module_paths": [
     "github.com/Wei-Shaw/sub2api"
