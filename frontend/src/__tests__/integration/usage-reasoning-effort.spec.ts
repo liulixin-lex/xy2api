@@ -128,6 +128,14 @@ vi.mock('@/stores/app', () => ({
   }),
 }))
 
+vi.mock('@/stores/adminSettings', () => ({
+  useAdminSettingsStore: () => ({
+    usageCacheHitRateEnabled: true,
+    usageTokenSpeedEnabled: true,
+    fetch: vi.fn().mockResolvedValue(undefined),
+  }),
+}))
+
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   return {
