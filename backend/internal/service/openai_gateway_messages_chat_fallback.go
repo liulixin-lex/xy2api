@@ -12,7 +12,6 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
-	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
