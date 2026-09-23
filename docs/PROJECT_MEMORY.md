@@ -253,7 +253,7 @@ Sub2API 兼容基线已更新到 `v0.2.6`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
-- `20260923-sub2api-v0.2.8-sync`：从干净的 `main / 8a99582ab` 建立 `sync/sub2api-v0.2.8`，目标为正式 annotated tag `v0.2.8`；正在按标准上游同步流程固定来源、生成三方报告并裁决可同步变更。未合并、发布或部署。
+- `20260923-sub2api-v0.2.8-sync`：用户追加全流程授权，使用本机 GitHub 票据完成同步、受保护合并、RC 与正式发布；Go 1.27.0 已按官方 SHA-256 安装到 `/opt/go1.27.0`。沿用固定 v0.2.8 来源，正在隔离工作副本逐项裁决清单外冲突。
 
 - `20260922-release-0.1.8`：两个 PR 已合并，正式发布及制品/隔离验收完成；文档收尾记录最终结果，发布标签保持不变。
 
@@ -1018,3 +1018,10 @@ pnpm --dir frontend run build
 - #58/#60 经保护检查正常合并；正式 v0.1.8 指向 `5b475476e`，Release/主线/标签工作流全部成功。版本与 provenance 分开提交，兼容基线保持0.2.6。
 - 五平台包、Linux版本、双架构OCI和稳定别名一致；隔离升级、回切、再前滚及全新安装通过，299条迁移与持久标记保持，管理员设置权限实测通过。
 - 固定四角色沿用原目录，包含同输入三态、源码恢复和补丁重建；初次合并测试导入遗漏、测试账号423及修复过程保留原记录。文档收尾不移动发布标签，不操作生产。
+
+### 2026-09-23 — `20260923-sub2api-v0.2.8-sync` — 上游同步预检受阻
+
+- 从干净 `main / 8a99582abaed61275b5f50b2ec55b98305e5c22e` 建立 `sync/sub2api-v0.2.8`。官方 GitHub Release 为正式、非 draft、非 prerelease；annotated tag object `d7a82d78ca51d42be41cb4daa3510ea401defe9f` 指向 `fd80b08c90b55edcad5b00171b53f08721d30da1`，未签名；共同祖先 `efe9aab1e4ec89a42ba45e8dac20e882c5409a6a`。仅配置 `upstream` fetch remote，push URL 为 `DISABLED`。
+- 报告 `docs/upstream-sync/v0.2.8.json` 显示上游 508 文件、255 commits、双方 226 文件重叠；API 63、配置8、生成产物3 项受影响，新增 migration 238/239/240。当前 XY2API 已使用 238/239/240 编号实现不同 migration，需另行设计新编号并校验 checksums。
+- 官方 `sync.py prepare` 按预期拒绝 43 项冲突中的 37 项清单外冲突，未创建 merge commit 或改动 main。冲突覆盖设置/DTO、计费、插件协议、网关核心、workflow 与忽略规则；不得绕过门禁。仅保留经审查的来源报告和任务启动提交 `4974f6612abe9ea23ba70d184869d612d8fcd170`。
+- `doctor --strict` 初次指出未配置 upstream；配置后再次因当前位于同步分支、且环境缺少 Go 而未就绪。基础报告和 `git diff --check` 通过；尚未执行人工裁决、migration 重编号、生成代码、测试或 PR。下一步需按逐文件三方比较扩展 `manual_merge` 策略（仅有具体裁决时），解决 migration 冲突/重编号并追加 manifest，再运行所需 Go 工具链门禁。未合并、推送、发版或部署。
