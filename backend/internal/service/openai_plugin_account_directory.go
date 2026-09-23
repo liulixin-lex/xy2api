@@ -94,7 +94,7 @@ func accountToPluginInfo(account *Account) PluginAccountInfo {
 //     credential that ResolveOutboundIdentity does NOT hand out (that channel only
 //     mints a short-lived access token). Keeping it out of this list keeps the
 //     credential surface exactly what the outbound-identity channel already
-//     exposes. (Extra and the proxy — including its password, which is already
+//     exposes. (Public Extra and the proxy — including its password, which is already
 //     handed out via the resolved ProxyURL — are intentionally NOT stripped.)
 //   - Groups / AccountGroups: relational graphs with *Group/*Account
 //     back-references. encoding/json does NOT detect reference cycles and would
@@ -111,13 +111,9 @@ func accountReadableSnapshotJSON(account *Account) []byte {
 	clone.Credentials = nil
 	clone.IQPreserveTokenRotation = false
 	clone.IQCheckSettings = nil
-	// STATE tickets are private credentials, not plugin directory metadata.
-	clone.Extra = make(map[string]any, len(account.Extra))
-	for key, value := range account.Extra {
-		if !IsOpenAICodexTicketPrivateExtraKey(key) {
-			clone.Extra[key] = value
-		}
-	}
+	clone.IQCheck = account.IQCheck.Summary()
+	// Reuse the export boundary for private STATE material without mutating Extra.
+	clone.Extra = RedactOpenAICodexTicketExtra(account.Extra)
 	clone.Groups = nil
 	clone.AccountGroups = nil
 	data, err := json.Marshal(&clone)

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,6 +32,7 @@ func TestListPluginAccounts_ScopeAndSchedulable(t *testing.T) {
 		// released.
 		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
 			Name:        "primary",
+			IQCheck:     domain.IQCheck{LeaseToken: "PRIVATE-IQ-LEASE", Revision: "PRIVATE-IQ-REVISION"},
 			Credentials: map[string]any{"access_token": "SECRET-TOKEN", "refresh_token": "SECRET-REFRESH"},
 			Extra:       map[string]any{"existing_key": "ek-value", "openai_compact_mode": "auto", "codex_turn_ticket:gpt-6-astra": map[string]any{"state": "PRIVATE-STATE-TICKET"}}},
 		// active but temp-unschedulable (paused) — status stays active, must still be
@@ -74,6 +76,8 @@ func TestListPluginAccounts_ScopeAndSchedulable(t *testing.T) {
 	assert.NotContains(t, meta, "SECRET-TOKEN", "credentials must never appear in metadata")
 	assert.NotContains(t, meta, "SECRET-REFRESH", "credentials must never appear in metadata")
 	assert.NotContains(t, meta, "PRIVATE-STATE-TICKET")
+	assert.NotContains(t, meta, "PRIVATE-IQ-LEASE")
+	assert.NotContains(t, meta, "PRIVATE-IQ-REVISION")
 	assert.NotContains(t, meta, "codex_turn_ticket:")
 	assert.Contains(t, openai[0].Extra, "codex_turn_ticket:gpt-6-astra", "snapshot must not mutate the source account")
 	assert.Contains(t, meta, "ek-value", "Extra is intentionally released")
