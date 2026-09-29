@@ -45,14 +45,35 @@
               <table class="scheduling-account-table w-full text-left text-sm">
                 <thead><tr class="border-b border-gray-200 dark:border-dark-600">
                   <th class="p-2"><input type="checkbox" :checked="allVisibleSelected" :aria-label="t('admin.scheduling.groupPolicy.selectVisible')" data-testid="select-visible" @change="selectVisible"></th>
-                  <th class="p-2">{{ t('admin.scheduling.account') }}</th><th class="p-2">{{ t('admin.scheduling.priority') }}</th><th class="p-2">{{ t('admin.scheduling.weight') }}</th><th class="p-2">{{ t('admin.scheduling.groupPolicy.status') }}</th>
+                  <th class="p-2">{{ t('admin.scheduling.account') }}</th><th class="p-2">{{ t('admin.scheduling.priority') }}</th><th class="p-2">{{ t('admin.scheduling.weight') }}</th><th class="p-2">{{ t('admin.accounts.columns.schedulable') }}</th><th class="p-2">{{ t('admin.accounts.columns.billingRateMultiplier') }}</th>
                 </tr></thead>
                 <tbody><tr v-for="account in visibleAccounts" :key="account.account_id" class="border-b border-gray-100 last:border-0 dark:border-dark-700" :data-testid="'account-row-' + account.account_id">
                   <td class="p-2"><input v-model="selectedAccounts" type="checkbox" :value="account.account_id" :aria-label="t('admin.scheduling.groupPolicy.selectNamed', { name: accountName(account.account_id) })"></td>
                   <td class="min-w-36 p-2"><div class="font-medium">{{ accountName(account.account_id) }}</div><div class="mt-1 text-xs text-gray-500">#{{ account.account_id }}<span v-if="accountDetails[account.account_id]?.platform"> · {{ accountDetails[account.account_id].platform }}</span></div></td>
                   <td class="p-2" :data-label="t('admin.scheduling.priority')"><input v-model.number="account.priority" type="number" step="1" min="-2147483648" max="2147483647" required class="input w-28" :aria-label="accountName(account.account_id) + ' ' + t('admin.scheduling.priority')" :data-testid="'priority-' + account.account_id"></td>
                   <td class="p-2" :data-label="t('admin.scheduling.weight')"><input v-model.number="account.traffic_weight" type="number" step="1" min="0" max="1000000" required class="input w-28" :aria-label="accountName(account.account_id) + ' ' + t('admin.scheduling.weight')" :data-testid="'weight-' + account.account_id"></td>
-                  <td class="min-w-36 p-2 text-gray-600 dark:text-dark-300">{{ accountStatus(account.account_id, account.traffic_weight) }}</td>
+                  <td class="p-2" :data-label="t('admin.accounts.columns.schedulable')">
+                    <button
+                      type="button"
+                      role="switch"
+                      :aria-checked="accountDetails[account.account_id]?.schedulable === true"
+                      :aria-busy="togglingSchedulable.has(account.account_id)"
+                      :aria-label="t('admin.accounts.columns.schedulable') + ' ' + accountName(account.account_id)"
+                      :title="accountDetails[account.account_id]?.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')"
+                      :disabled="!accountDetails[account.account_id] || togglingSchedulable.has(account.account_id) || refreshingAccountDetails"
+                      :data-testid="'account-schedulable-' + account.account_id"
+                      class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800"
+                      :class="accountDetails[account.account_id]?.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500'"
+                      @click="toggleSchedulable(account.account_id)"
+                    ><span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="accountDetails[account.account_id]?.schedulable ? 'translate-x-4' : 'translate-x-0'" /></button>
+                  </td>
+                  <td class="p-2 font-mono text-gray-700 dark:text-gray-300" :data-label="t('admin.accounts.columns.billingRateMultiplier')" :data-testid="'account-rate-' + account.account_id">
+                    <span v-if="accountDetails[account.account_id]" class="inline-flex items-center gap-1">
+                      {{ formatMultiplier(accountDetails[account.account_id].rate_multiplier ?? 1) }}x
+                      <span v-if="accountDetails[account.account_id].extra?.upstream_billing_rate_sync_enabled === true" class="inline-flex cursor-help text-emerald-600 dark:text-emerald-400" :aria-label="t('admin.accounts.upstreamBilling.syncedRateTooltip')" :title="t('admin.accounts.upstreamBilling.syncedRateTooltip')"><Icon name="sync" size="xs" /></span>
+                    </span>
+                    <span v-else>-</span>
+                  </td>
                 </tr></tbody>
               </table>
               <div v-if="!visibleAccounts.length" class="space-y-3 py-6 text-center text-sm text-gray-600 dark:text-dark-300" data-testid="empty-accounts"><p>{{ t('admin.scheduling.groupPolicy.' + (accountSearch ? 'emptyAccounts' : 'emptyGroup')) }}</p><button v-if="accountSearch" type="button" class="btn btn-secondary" @click="accountSearch = ''">{{ t('admin.scheduling.groupPolicy.clearSearch') }}</button><RouterLink v-else to="/admin/accounts" class="btn btn-secondary">{{ t('admin.scheduling.manageAccounts') }}</RouterLink></div>
@@ -93,6 +114,7 @@ import { useI18n } from 'vue-i18n'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import Icon from '@/components/icons/Icon.vue'
 import { useSchedulingModeStore } from '@/stores/schedulingMode'
 import { useSchedulingFeedback } from '@/composables/useSchedulingFeedback'
 import schedulingAPI from '@/api/admin/scheduling'
@@ -102,6 +124,7 @@ import type { AccountListItem, AdminGroup } from '@/types'
 import type { GroupSchedulingDocument, GroupSchedulingMigrationWarning, GroupSchedulingPolicy } from '@/types/scheduling'
 import { cloneGroupPolicy, groupPolicyFingerprint, isGroupSchedulingConflict, validateGroupPolicy } from '@/utils/groupScheduling'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { formatMultiplier } from '@/utils/formatters'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -125,6 +148,8 @@ const error = ref('')
 const notice = ref('')
 const migrationWarnings = ref<GroupSchedulingMigrationWarning[]>([])
 const accountDetails = ref<Record<number, AccountListItem>>({})
+const togglingSchedulable = ref(new Set<number>())
+const refreshingAccountDetails = ref(false)
 const selectedAccounts = ref<number[]>([])
 const accountSearch = ref('')
 const pageNumber = ref(1)
@@ -139,24 +164,41 @@ let loadGeneration = 0
 let requests = new AbortController()
 let alive = true
 let initializingGroups = false
+let accountDetailsMutationVersion = 0
+const confirmedSchedulingUpdates = new Map<number, { version: number; schedulable: boolean }>()
 const dirty = computed(() => policy.value !== null && groupPolicyFingerprint(policy.value) !== baseline.value)
 watch(dirty, changed => { if (changed) notice.value = '' })
 const filteredAccounts = computed(() => {
   const query = accountSearch.value.toLowerCase()
-  return (policy.value?.accounts ?? []).filter(account => !query || (accountName(account.account_id) + ' ' + account.account_id).toLowerCase().includes(query)).slice().sort((a, b) => displayOrder.value.indexOf(a.account_id) - displayOrder.value.indexOf(b.account_id))
+  const schedulingRank = (id: number) => accountDetails.value[id]?.schedulable === true ? 0 : accountDetails.value[id]?.schedulable === false ? 1 : 2
+  return (policy.value?.accounts ?? []).filter(account => !query || (accountName(account.account_id) + ' ' + account.account_id).toLowerCase().includes(query)).slice().sort((a, b) =>
+    schedulingRank(a.account_id) - schedulingRank(b.account_id) || displayOrder.value.indexOf(a.account_id) - displayOrder.value.indexOf(b.account_id))
 })
 const pageCount = computed(() => Math.max(1, Math.ceil(filteredAccounts.value.length / pageSize)))
 const visibleAccounts = computed(() => filteredAccounts.value.slice((pageNumber.value - 1) * pageSize, pageNumber.value * pageSize))
 watch(accountSearch, () => { pageNumber.value = 1 })
 const allVisibleSelected = computed(() => visibleAccounts.value.length > 0 && visibleAccounts.value.every(account => selectedAccounts.value.includes(account.account_id)))
 function accountName(id: number) { return accountDetails.value[id]?.name || t('admin.scheduling.groupPolicy.accountNumber', { id }) }
-function accountStatus(id: number, weight: number) {
-  if (weight === 0) return t('admin.scheduling.zeroWeight')
+async function toggleSchedulable(id: number) {
   const account = accountDetails.value[id]
-  if (!account) return t('admin.scheduling.groupPolicy.statusUnknown')
-  if (account.schedulable === false) return t('admin.scheduling.groupPolicy.disabled')
-  if (account.status !== 'active') return t('admin.scheduling.groupPolicy.unavailable')
-  return t('admin.scheduling.groupPolicy.available')
+  if (!account || togglingSchedulable.value.has(id) || refreshingAccountDetails.value) return
+  const generation = loadGeneration
+  const nextSchedulable = !account.schedulable
+  togglingSchedulable.value.add(id)
+  accountDetailsMutationVersion++
+  try {
+    const updated = await accountsAPI.setSchedulable(id, nextSchedulable)
+    const schedulable = updated?.schedulable ?? nextSchedulable
+    confirmedSchedulingUpdates.set(id, { version: ++accountDetailsMutationVersion, schedulable })
+    if (alive && accountDetails.value[id]) {
+      accountDetails.value = { ...accountDetails.value, [id]: { ...accountDetails.value[id], schedulable } }
+    }
+  } catch (cause) {
+    if (alive && generation === loadGeneration) error.value = extractApiErrorMessage(cause, t('admin.accounts.failedToToggleSchedulable'))
+  } finally {
+    togglingSchedulable.value.delete(id)
+    accountDetailsMutationVersion++
+  }
 }
 function secondsToMilliseconds(event: Event) { return Number((event.target as HTMLInputElement).value) * 1000 }
 function changeFirstWait(event: Event) {
@@ -191,7 +233,7 @@ function changeGroup(event: Event) {
 }
 function requestReload() {
   if (scopeGroup.value < 0) { void initializeGroups(); return }
-  if (dirty.value) { pendingReload.value = true; return }
+  if (dirty.value) { void refreshAccountDetails(); pendingReload.value = true; return }
   void loadGroup(scopeGroup.value)
 }
 function keepDraft() {
@@ -212,17 +254,17 @@ function acceptDocument(document: GroupSchedulingDocument, groupID: number) {
   loadedVersion.value = document.version
   configured.value = document.configured !== false
   baseline.value = groupPolicyFingerprint(policy.value)
-  displayOrder.value = [...policy.value.accounts].sort((a, b) => a.priority - b.priority || a.account_id - b.account_id).map(account => account.account_id)
+  displayOrder.value = [...policy.value.accounts].sort((a, b) => a.priority - b.priority || b.traffic_weight - a.traffic_weight || a.account_id - b.account_id).map(account => account.account_id)
   automaticTotal.value = policy.value.total_wait_timeout_ms === policy.value.first_output_timeout_ms * 2
   migrationWarnings.value = document.migration_warnings ?? []
   if (groupID === 0 && document.default_scope) defaultScope.value = document.default_scope
 }
-async function loadAccountDetails(groupID: number, document: GroupSchedulingDocument, signal: AbortSignal): Promise<Record<number, AccountListItem>> {
-  const allowed = new Set(document.policy.accounts.map(account => account.account_id))
+async function loadAccountDetails(groupID: number, accounts: GroupSchedulingPolicy['accounts'], scope: GroupSchedulingDocument['default_scope'], signal: AbortSignal): Promise<Record<number, AccountListItem>> {
+  const allowed = new Set(accounts.map(account => account.account_id))
   const result: Record<number, AccountListItem> = {}
   let seen = 0
   for (let page = 1; allowed.size > Object.keys(result).length; page++) {
-    const group = groupID > 0 ? String(groupID) : document.default_scope === 'all_accounts' ? undefined : 'ungrouped'
+    const group = groupID > 0 ? String(groupID) : scope === 'all_accounts' ? undefined : 'ungrouped'
     const response = await accountsAPI.list(page, 100, { group, lite: 'true' }, { signal })
     for (const account of response.items) if (allowed.has(account.id)) result[account.id] = account
     seen += response.items.length
@@ -230,8 +272,28 @@ async function loadAccountDetails(groupID: number, document: GroupSchedulingDocu
   }
   return result
 }
+async function refreshAccountDetails() {
+  if (!policy.value || loading.value || refreshingAccountDetails.value || !modeStore.isControlled) return
+  const generation = loadGeneration
+  const mutationVersion = accountDetailsMutationVersion
+  refreshingAccountDetails.value = true
+  try {
+    const details = await loadAccountDetails(scopeGroup.value, policy.value.accounts, defaultScope.value, requests.signal)
+    if (alive && generation === loadGeneration && !requests.signal.aborted) {
+      for (const [id, update] of confirmedSchedulingUpdates) {
+        if (details[id] && update.version > mutationVersion) details[id] = { ...details[id], schedulable: update.schedulable }
+      }
+      accountDetails.value = details
+    }
+  } catch (cause) {
+    if (alive && generation === loadGeneration && !requests.signal.aborted) notice.value = t('admin.scheduling.groupPolicy.namesUnavailable')
+  } finally { if (generation === loadGeneration) refreshingAccountDetails.value = false }
+}
+function refreshVisibleAccountDetails() { if (!document.hidden) void refreshAccountDetails() }
 async function loadGroup(groupID: number) {
   const generation = ++loadGeneration
+  accountDetailsMutationVersion++
+  refreshingAccountDetails.value = false
   requests.abort(); requests = new AbortController()
   scopeGroup.value = groupID; loading.value = true; policy.value = null; accountDetails.value = {}
   baseline.value = ''; selectedAccounts.value = []; accountSearch.value = ''; pageNumber.value = 1; conflicted.value = false; error.value = ''; notice.value = ''; migrationWarnings.value = []
@@ -240,8 +302,15 @@ async function loadGroup(groupID: number) {
     if (!alive || generation !== loadGeneration) return
     acceptDocument(document, groupID)
     try {
-      const details = await loadAccountDetails(groupID, document, requests.signal)
-      if (alive && generation === loadGeneration) accountDetails.value = details
+      const mutationVersion = accountDetailsMutationVersion
+      const details = await loadAccountDetails(groupID, document.policy.accounts, document.default_scope, requests.signal)
+      if (alive && generation === loadGeneration) {
+        // A toggle may finish while the new group's older metadata request is in flight.
+        for (const [id, update] of confirmedSchedulingUpdates) {
+          if (details[id] && update.version > mutationVersion) details[id] = { ...details[id], schedulable: update.schedulable }
+        }
+        accountDetails.value = details
+      }
     } catch (cause) {
       if (alive && generation === loadGeneration && !requests.signal.aborted) notice.value = t('admin.scheduling.groupPolicy.namesUnavailable')
     }
@@ -294,10 +363,12 @@ watch(() => modeStore.isControlled, value => { if (value) void initializeGroups(
 onMounted(async () => {
   window.addEventListener('beforeunload', beforeUnload)
   window.addEventListener('keydown', saveShortcut)
+  window.addEventListener('focus', refreshVisibleAccountDetails)
+  document.addEventListener('visibilitychange', refreshVisibleAccountDetails)
   await modeStore.fetch()
   if (modeStore.isControlled) void initializeGroups()
 })
-onUnmounted(() => { alive = false; loadGeneration++; requests.abort(); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('keydown', saveShortcut); pendingNavigation.value?.(false) })
+onUnmounted(() => { alive = false; loadGeneration++; requests.abort(); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('keydown', saveShortcut); window.removeEventListener('focus', refreshVisibleAccountDetails); document.removeEventListener('visibilitychange', refreshVisibleAccountDetails); pendingNavigation.value?.(false) })
 </script>
 
 <style scoped>
@@ -312,6 +383,6 @@ onUnmounted(() => { alive = false; loadGeneration++; requests.abort(); window.re
   .scheduling-account-table td:nth-child(2) { grid-column: 1 / -1; padding-right: 36px; }
   .scheduling-account-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 6px; font-size: 12px; }
   .scheduling-account-table td input[type=number] { width: 100%; font-size: 16px; }
-  .scheduling-account-table td:nth-child(5) { font-size: 12px; }
+  .scheduling-account-table td:nth-child(6) { font-size: 12px; }
 }
 </style>

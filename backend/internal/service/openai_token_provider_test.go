@@ -966,3 +966,25 @@ func TestOpenAITokenProvider_NoRefreshTokenExpired_DisablesAccount(t *testing.T)
 	require.Equal(t, account.ID, blocker.accounts[0].ID)
 	require.Equal(t, "missing_refresh_token", blocker.reasons[0])
 }
+
+func TestOpenAITokenProvider_IQProbeMissingRefreshDoesNotDisableAccount(t *testing.T) {
+	cache := newOpenAITokenCacheStub()
+	cache.getErr = errors.New("simulated cache miss")
+	repo := &rateLimitAccountRepoStub{}
+	account := &Account{
+		ID: 2882, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "expired-access-token",
+			"expires_at": time.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
+		},
+	}
+	provider := NewOpenAITokenProvider(repo, cache, nil)
+	blocker := &runtimeBlockRecorder{}
+	provider.SetAccountRuntimeBlocker(blocker)
+
+	token, err := provider.GetAccessTokenForIQProbe(context.Background(), account)
+	require.ErrorContains(t, err, "refresh_token is missing")
+	require.Empty(t, token)
+	require.Zero(t, repo.setErrorCalls)
+	require.Empty(t, blocker.accounts)
+}

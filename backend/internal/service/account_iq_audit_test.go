@@ -24,6 +24,10 @@ func TestAccountIQAuditSchedulingGate(t *testing.T) {
 		{"overloaded", func(a *Account) { a.OverloadUntil = &future }},
 		{"rate_limited", func(a *Account) { a.RateLimitResetAt = &future }},
 		{"temporarily_unschedulable", func(a *Account) { a.TempUnschedulableUntil = &future }},
+		{"quota_exhausted", func(a *Account) {
+			a.Type = AccountTypeAPIKey
+			a.Extra = map[string]any{"quota_limit": 10.0, "quota_used": 10.0}
+		}},
 	}
 	tests := []struct {
 		name    string
@@ -45,6 +49,16 @@ func TestAccountIQAuditSchedulingGate(t *testing.T) {
 			iqCheck: domain.IQCheck{Enabled: true, Status: "unknown"},
 			want:    true,
 		},
+		{
+			name:    "upstream_error_after_smart_allowed",
+			iqCheck: domain.IQCheck{Enabled: true, Status: "unknown", LastValidStatus: "smart", LastRunStatus: "unknown", LastRunReason: "http_503"},
+			want:    true,
+		},
+		{
+			name:    "upstream_error_after_degraded_still_blocked",
+			iqCheck: domain.IQCheck{Enabled: true, Status: "unknown", LastValidStatus: "degraded", LastRunStatus: "unknown", LastRunReason: "http_503"},
+			want:    false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -64,6 +78,13 @@ func TestAccountIQAuditSchedulingGate(t *testing.T) {
 					blocked := account
 					constraint.apply(&blocked)
 					require.False(t, blocked.IsSchedulable())
+					blocked.IQCheck.Enabled = true
+					blocked.IQCheck.ObserveResult("degraded", "wrong_answer", time.Now())
+					blocked.IQCheck.ObserveResult("unknown", "http_503", time.Now())
+					require.True(t, blocked.IQCheck.BlocksScheduling())
+					blocked.IQCheck.ObserveResult("smart", "correct_answer", time.Now())
+					require.False(t, blocked.IQCheck.BlocksScheduling())
+					require.False(t, blocked.IsSchedulable(), "IQ recovery cannot clear another controller's restriction")
 				})
 			}
 		})

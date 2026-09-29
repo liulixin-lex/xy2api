@@ -190,7 +190,8 @@ func (s IQCheck) CurrentAssessment() IQCheck {
 }
 
 // ObserveResult updates current health on every finished attempt, including retries.
-// Only a valid candy answer restores a failed account's quality gate.
+// Availability, protocol and execution errors only update the current health;
+// they cannot change the quality gate established by a valid candy answer.
 func (s *IQCheck) ObserveResult(status, reason string, now time.Time) {
 	*s = s.CurrentAssessment()
 	if status != "smart" && status != "degraded" {
@@ -204,7 +205,9 @@ func (s *IQCheck) ObserveResult(status, reason string, now time.Time) {
 }
 
 func (s IQCheck) BlocksScheduling() bool {
-	return s.Enabled && (s.Status == "degraded" || s.LastRunStatus == "unknown")
+	// CurrentAssessment also recovers the last valid verdict in legacy rows
+	// whose status still contains the assessment from before the last error.
+	return s.Enabled && s.CurrentAssessment().LastValidStatus == "degraded"
 }
 
 // CopySettings carries only editable configuration; duplicates and imports start disabled.

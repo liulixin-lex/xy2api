@@ -51,12 +51,35 @@ function makeAccount(overrides: Partial<Account>): Account {
 }
 
 describe('AccountStatusIndicator', () => {
-  it.each(['smart', 'unknown'] as const)('最近检测失败时避让账号，包括旧的 %s 摘要', async status => {
+  it.each(['smart', 'unknown'] as const)('检测错误不新增 IQ 暂停，包括旧的 %s 摘要', async status => {
     const account = makeAccount({ platform: 'openai', iq_check: { enabled: true, interval_minutes: 5, timeout_seconds: 120, model: 'fixture', reasoning_effort: 'low', output_mode: 'compat', status, last_run_status: 'unknown' } })
     const wrapper = mount(AccountStatusIndicator, { props: { account }, global: { stubs: { Icon: true } } })
-    expect(wrapper.text()).toContain('admin.accounts.iqBlocked')
+    expect(wrapper.text()).not.toContain('admin.accounts.iqBlocked')
+    expect(wrapper.text()).toContain('admin.accounts.status.active')
     await wrapper.setProps({ account: { ...account, iq_check: { ...account.iq_check!, status: 'smart', last_run_status: 'smart' } } })
     expect(wrapper.text()).not.toContain('admin.accounts.iqBlocked')
+    wrapper.unmount()
+  })
+  it.each(['smart', 'degraded'] as const)('检测错误保留最近有效 %s 判定的 IQ 门控', async lastValid => {
+    const account = makeAccount({ iq_check: { enabled: true, interval_minutes: 5, timeout_seconds: 120, model: 'fixture', reasoning_effort: 'low', output_mode: 'compat', status: 'unknown', last_run_status: 'unknown', last_valid_status: lastValid } })
+    const wrapper = mount(AccountStatusIndicator, { props: { account }, global: { stubs: { Icon: true } } })
+    expect(wrapper.text().includes('admin.accounts.iqBlocked')).toBe(lastValid === 'degraded')
+    await wrapper.setProps({ account: { ...account, iq_check: { ...account.iq_check!, status: 'smart', last_valid_status: 'smart', scheduling_blocked: false } } })
+    expect(wrapper.text()).not.toContain('admin.accounts.iqBlocked')
+    wrapper.unmount()
+  })
+  it('服务端门控优先且聪明结果不掩盖管理员停用', () => {
+    const account = makeAccount({ schedulable: false, iq_check: { enabled: true, interval_minutes: 5, timeout_seconds: 120, model: 'fixture', reasoning_effort: 'low', output_mode: 'compat', status: 'degraded', last_valid_status: 'degraded', scheduling_blocked: false } })
+    const wrapper = mount(AccountStatusIndicator, { props: { account }, global: { stubs: { Icon: true } } })
+    expect(wrapper.text()).not.toContain('admin.accounts.iqBlocked')
+    expect(wrapper.text()).toContain('admin.accounts.status.paused')
+    wrapper.unmount()
+  })
+  it('IQ 暂停与管理员停用独立显示', () => {
+    const account = makeAccount({ schedulable: false, iq_check: { enabled: true, interval_minutes: 5, timeout_seconds: 120, model: 'fixture', reasoning_effort: 'low', output_mode: 'compat', status: 'degraded', scheduling_blocked: true } })
+    const wrapper = mount(AccountStatusIndicator, { props: { account }, global: { stubs: { Icon: true } } })
+    expect(wrapper.text()).toContain('admin.accounts.iqBlocked')
+    expect(wrapper.text()).toContain('admin.accounts.status.paused')
     wrapper.unmount()
   })
   it('Claude 5 模型限流时显示 Opus 和 Sonnet 的短别名', () => {

@@ -246,7 +246,7 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 				if !account.IsOpenAIPersonalAccessToken() && expiresAt != nil && !time.Now().Before(*expiresAt) && strings.TrimSpace(account.GetOpenAIRefreshToken()) == "" {
 					return iqcheck.Unknown("authentication_unavailable")
 				}
-				token, err = s.tokens.GetAccessToken(ctx, account)
+				token, err = s.tokens.GetAccessTokenForIQProbe(ctx, account)
 			} else {
 				token = account.GetOpenAIAccessToken()
 			}

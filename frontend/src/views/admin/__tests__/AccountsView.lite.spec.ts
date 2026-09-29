@@ -74,6 +74,7 @@ const DataTableStub = defineComponent({
       <div v-for="row in data" :key="row.id" :data-account-name="row.name">
         <slot name="cell-groups" :row="row" />
         <slot name="cell-schedulable" :row="row" />
+        <span data-test="account-rate"><slot name="cell-rate_multiplier" :row="row" /></span>
         <span data-test="select-account"><slot name="cell-select" :row="row" /></span>
         <slot name="cell-actions" :row="row" />
       </div>
@@ -272,6 +273,73 @@ describe('admin AccountsView lite account list', () => {
     resolveList({ items: [listRow], total: 1, page: 1, page_size: 20, pages: 1 })
     await flushPromises()
     expect(toggle.attributes('aria-checked')).toBe('false')
+    wrapper.unmount()
+  })
+
+  it('keeps unrelated account changes from a list refresh during a toggle', async () => {
+    const second = { ...listRow, id: 43, name: 'second' }
+    listAccounts.mockResolvedValue({ items: [listRow, second], total: 2, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountView(); await flushPromises()
+    let resolveList!: (value: unknown) => void
+    listAccounts.mockReturnValueOnce(new Promise(resolve => { resolveList = resolve }))
+    await wrapper.get('[data-test="refresh-accounts"]').trigger('click')
+    await wrapper.get('[data-account-name="compact row"] button[role="switch"]').trigger('click'); await flushPromises()
+    resolveList({ items: [listRow, { ...second, schedulable: false, rate_multiplier: 0.3 }], total: 2, page: 1, page_size: 20, pages: 1 })
+    await flushPromises()
+    expect(wrapper.get('[data-account-name="compact row"] button[role="switch"]').attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('[data-account-name="second"] button[role="switch"]').attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('[data-account-name="second"] [data-test="account-rate"]').text()).toBe('0.30x')
+    wrapper.unmount()
+  })
+
+  it.each(['focus', 'visibilitychange'])('reads shared scheduling state and account cost on %s', async eventName => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const wrapper = mountView(); await flushPromises()
+    expect(wrapper.get('button[role="switch"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.get('[data-test="account-rate"]').text()).toBe('1.00x')
+    listAccounts.mockResolvedValueOnce({ items: [{ ...listRow, schedulable: false, rate_multiplier: 0.035 }], total: 1, page: 1, page_size: 20, pages: 1 })
+    getBatchTodayStats.mockClear()
+    const target = eventName === 'focus' ? window : document
+    target.dispatchEvent(new Event(eventName)); await flushPromises()
+    expect(listAccounts).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('button[role="switch"]').attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.035x')
+    expect(getBatchTodayStats).not.toHaveBeenCalled()
+    expect(setSchedulable).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('catches a focus refresh failure, keeps the rendered data and permits a later refresh', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const now = vi.spyOn(Date, 'now')
+    const wrapper = mountView(); await flushPromises()
+    const failure = new Error('focus list unavailable')
+    listAccounts.mockRejectedValueOnce(failure)
+    now.mockReturnValue(20000)
+    window.dispatchEvent(new Event('focus')); await flushPromises()
+    expect(logError).toHaveBeenCalledWith('Failed to refresh accounts after returning to the page:', failure)
+    expect(wrapper.get('button[role="switch"]').attributes('aria-checked')).toBe('true')
+    listAccounts.mockResolvedValueOnce({ items: [{ ...listRow, schedulable: false, rate_multiplier: 0.3 }], total: 1, page: 1, page_size: 20, pages: 1 })
+    now.mockReturnValue(22000)
+    window.dispatchEvent(new Event('focus')); await flushPromises()
+    expect(listAccounts).toHaveBeenCalledTimes(3)
+    expect(wrapper.get('button[role="switch"]').attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.30x')
+    wrapper.unmount()
+  })
+
+  it('updates a rate-only change from an automatic ETag refresh', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
+    listWithEtag.mockResolvedValueOnce({ notModified: false, etag: 'changed-cost', data: { items: [{ ...listRow, rate_multiplier: 0.035 }], total: 1, pages: 1 } })
+    const wrapper = mountView(); await flushPromises()
+    expect(wrapper.get('[data-test="account-rate"]').text()).toBe('1.00x')
+    await vi.advanceTimersByTimeAsync(6000); await flushPromises()
+    expect(listWithEtag).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.035x')
+    expect(wrapper.get('button[role="switch"]').attributes('aria-checked')).toBe('true')
     wrapper.unmount()
   })
 

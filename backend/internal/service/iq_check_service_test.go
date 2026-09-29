@@ -148,9 +148,10 @@ func TestIQCheckOAuthPayloadAndStaleCandidate(t *testing.T) {
 	require.Nil(t, gateway.recheckSelectedOpenAIAccountFromDB(context.Background(), &cached, nil, PlatformOpenAI, iqcheck.Model, false, ""))
 	for _, status := range []string{"smart", "unknown"} {
 		fresh.IQCheck.Status = status
+		fresh.IQCheck.LastValidStatus = "smart"
 		fresh.IQCheck.LastRunStatus = "unknown"
 		fresh.IQCheck.LastRunReason = "response_too_large"
-		require.Nil(t, gateway.recheckSelectedOpenAIAccountFromDB(context.Background(), &cached, nil, PlatformOpenAI, iqcheck.Model, false, ""), "stale smart cache must not dispatch an account with a failed probe")
+		require.NotNil(t, gateway.recheckSelectedOpenAIAccountFromDB(context.Background(), &cached, nil, PlatformOpenAI, iqcheck.Model, false, ""), "an inconclusive probe cannot remove an otherwise eligible account from scheduling")
 	}
 	fresh.IQCheck.ObserveResult("smart", "correct_answer", time.Now())
 	require.NotNil(t, gateway.recheckSelectedOpenAIAccountFromDB(context.Background(), &cached, nil, PlatformOpenAI, iqcheck.Model, false, ""))

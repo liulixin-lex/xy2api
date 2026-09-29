@@ -408,6 +408,8 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
+- `20260929-scheduling-account-toggle-rate`：从最新 `origin/main` 的 0.2.1 建立独立功能工作树 `/xy2/scheduling-account-toggle-rate`，智能调度复用账号管理的 `schedulable` 和 `rate_multiplier`；列表按启用状态分段，组内优先级升序、权重降序。用户补充 IQ 权限：任何检测错误不改变 IQ 门控，仅有效 degraded 暂停新请求、有效 smart 解除 IQ 暂停；已开始请求自然完成，管理员开关与其他模块权限独立。并行修正内存/SQL 门控及探针 OAuth 副作用，补齐前端状态和回归；待三态事务与远端 PR。原工作树和发布标签保持。
+
 
 ### 20260929-dual-scheduling — 实施中
 - 按用户最新要求，系统设置提供 Sub2API 原版调度与可控智能调度两种模式，运行路径和界面分别隔离；保留已有分组账号优先级/权重，不增加逐模型配置。

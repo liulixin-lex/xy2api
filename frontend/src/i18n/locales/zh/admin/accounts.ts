@@ -453,7 +453,7 @@ export default {
         total_ms: '请求耗时',
  error_code: "上游错误码", error_type: "错误类型", retry_after: "上游允许重试时间", retry_after_unbounded: "重试等待超出范围，已暂停", input_tokens: "输入 Token", output_tokens: "输出 Token", reasoning_tokens: "推理 Token", retry_visibility: "请求尝试",  parser_version: '解析器版本', stage: '阶段', code: '原因代码', http_status: 'HTTP 状态', media_type: '响应格式', content_encoding: '压缩格式', protocol: '协议', transport: '传输方式', format_detected: '已兼容识别格式', event_type: '事件类型', event_index: '事件序号', field: '字段位置', offset: '字节位置', bytes_read: '读取字节数', request_id: '请求 ID' },
       iqReason: '判定原因',
-      iqTrafficAvoidance: '此账号暂避业务流量；有可用备选账号时自动切换，检测答对后恢复。',
+      iqTrafficAvoidance: '最近有效结果为降智，暂停此账号的新请求，进行中的请求继续完成。判定为聪明后仅解除 IQ 暂停；检测错误不改变暂停状态，管理员开关及其他调度限制仍独立生效。',
       iqCategories: {assessment: '糖果判定', quota: '余额或配额', access: '鉴权或权限', rate_limit: '请求限流', timeout: '超时', upstream: '上游服务', configuration: '请求配置', answer: '答案无法判定', execution: '执行状态', protocol: '响应协议'},
       iqLimits: {response_bytes: '累计响应大小', event_bytes: '单个事件大小', answer_bytes: '最终答案大小'},
       iqCheckStatus: { smart: '聪明', degraded: '降智', unknown: '未知' },
