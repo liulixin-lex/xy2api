@@ -1,7 +1,7 @@
 import type { GroupSchedulingPolicy } from '@/types/scheduling'
 
 export function cloneGroupPolicy(policy: GroupSchedulingPolicy): GroupSchedulingPolicy {
-  return { ...policy, accounts: policy.accounts.map(account => ({ ...account })) }
+  return { ...policy, accounts: policy.accounts.map(account => ({ ...account })), native_stream: { delivery: false, recovery: false, persistence: false, ...policy.native_stream } }
 }
 
 /** Stable comparison ignores display order, never group identity or configured values. */
@@ -11,11 +11,14 @@ export function groupPolicyFingerprint(policy: GroupSchedulingPolicy): string {
     first_output_timeout_ms: policy.first_output_timeout_ms,
     total_wait_timeout_ms: policy.total_wait_timeout_ms,
     max_attempts: policy.max_attempts,
+    native_stream: { delivery: false, recovery: false, persistence: false, ...policy.native_stream },
     accounts: [...policy.accounts].sort((a, b) => a.account_id - b.account_id).map(({ account_id, priority, traffic_weight }) => ({ account_id, priority, traffic_weight }))
   })
 }
 
 export function validateGroupPolicy(policy: GroupSchedulingPolicy): string | null {
+  if (policy.native_stream?.recovery && !policy.native_stream.delivery) return 'recoveryRequiresDelivery'
+  if (policy.native_stream?.persistence) return 'persistenceUnavailable'
   if (!Number.isSafeInteger(policy.group_id) || policy.group_id < 0) return 'selectGroup'
   if (!Number.isSafeInteger(policy.first_output_timeout_ms) || policy.first_output_timeout_ms < 1000 || policy.first_output_timeout_ms > 3600000) return 'invalidWait'
   if (!Number.isSafeInteger(policy.total_wait_timeout_ms) || policy.total_wait_timeout_ms < policy.first_output_timeout_ms || policy.total_wait_timeout_ms > 7200000) return 'invalidTotalWait'

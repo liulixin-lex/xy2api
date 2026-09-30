@@ -237,18 +237,19 @@ func (d *controlledDispatch) classifyFailureDomains(outcome string, err error) s
 	e := d.failureEvidence
 	timedOut := d.timeout
 	transportAttempted := d.sent
+	cancellationReason := d.cancellationReason
 	e.FirstSemanticTimeout = timedOut && !d.clipped && d.semanticObservable
 	e.AttemptTimeout = timedOut && !d.clipped && !d.semanticObservable
 	d.mu.Unlock()
 	d.request.mu.Lock()
 	e.ReplaySafe = d.request.ReplaySafe
 	e.OwnerPinned = d.request.owner
-	e.Committed = d.request.Ledger != nil && d.request.Ledger.Snapshot().Committed
+	e.Committed = d.request.attemptCommitted || (d.request.Ledger != nil && d.request.Ledger.Snapshot().Committed)
 	d.request.mu.Unlock()
 	// A failed local preparation is not evidence against an upstream account.
 	// A dial failure after MarkSent is an attempted transport and may cool down.
 	e.NotSent = outcome == "not_sent" && transportAttempted
-	e.ClientCancelled = (errors.Is(err, context.Canceled) && !timedOut) || (d.request.clientContext != nil && d.request.clientContext.Err() != nil)
+	e.ClientCancelled = cancellationReason.excludesProviderHealth() || (errors.Is(err, context.Canceled) && !timedOut) || (d.request.clientContext != nil && d.request.clientContext.Err() != nil)
 	decision := d.classifySchedulingFailure(e)
 	if decision.Key != "" && (decision.Scope == "quota_pool" || decision.Scope == "availability_pool") && d.request.Ledger != nil {
 		d.request.Ledger.BlockFailureDomain(decision.Key)

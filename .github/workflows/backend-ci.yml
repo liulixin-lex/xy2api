@@ -149,6 +149,181 @@ jobs:
               print(f"{package}: {len(ran)} tests/subtests ran, all {len(expected)} required tests PASS, 0 SKIP")
           PY
 
+      - name: Native stream and response recovery release gate
+        working-directory: backend
+        timeout-minutes: 20
+        env:
+          GOMAXPROCS: '2'
+          SCHEDULING_TEST_POSTGRES_DSN: postgres://postgres:scheduling_ci_fixture@127.0.0.1:15432/scheduling_ci?sslmode=disable
+          SCHEDULING_TEST_REDIS_ADDR: 127.0.0.1:16379
+          XY2_RELAY_ACCEPTANCE_TIMING: '1'
+        run: |
+          set -euo pipefail
+          go test -race -p 1 -parallel 1 -tags=unit \
+            ./internal/service ./internal/handler ./internal/handler/admin ./internal/scheduling ./internal/server/routes \
+            -run '^(TestNativeStream|TestNativeResponse|TestControlledPassthrough|TestControlledOwnerConstraintSurvivesLegacyRollback$|TestAccountPool|TestPriorityWeightsModesAndCapacity$|TestStrictPriorityAllowsSameTierRecoveryProbeOnly$|TestHealthCooldownAndRecovery$|TestGroupPolicyPostgresMembershipAndCAS$|TestGatewayRoutes(NativeResponsesAliasesKeepWebSocketAndCatchAll|OpenAIResponsesCompactPathIsRegistered|ResponsesSubpathRejectsNonConformingSubpaths)$)' \
+            -skip '^TestNativeStreamRelayReadToFlushPerformance$' \
+            -count=1 -timeout=10m -json | tee "$RUNNER_TEMP/native-stream-functional.jsonl"
+          go test -race -p 1 -parallel 1 ./internal/pkg/responseturn \
+            -count=1 -timeout=3m -json | tee "$RUNNER_TEMP/native-stream-turns.jsonl"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          required = {
+              "service": set("""
+                  TestNativeStreamControlledDeliveryRealStores
+                  TestNativeStreamRelayImmediateCompleteEvents
+                  TestNativeStreamRelayErrorBoundary
+                  TestNativeStreamRelayPartialWriteCommits
+                  TestNativeStreamRelayCancellationClosesBody
+                  TestNativeStreamHTTPRealTransportCloseRaces
+                  TestNativeStreamRelayMultilineAndInvalidEvents
+                  TestNativeStreamNoEventFragmentExposure
+                  TestNativeStreamUpstreamContextPreservesCancel
+                  TestNativeStreamWSRealSocketImmediateDelivery
+                  TestNativeStreamWSSentWithoutEventDoesNotRegenerate
+                  TestNativeStreamWSCtxPoolSentCreateDoesNotRetry
+                  TestNativeStreamWSPoolKeyIsolation
+                  TestNativeStreamWSPoolBoundsReturnedIdleAndAge
+                  TestNativeStreamWSPassthroughImmediateCommitAndCancel
+                  TestNativeStreamWSPassthroughPolicyRefreshAtNextTurn
+                  TestNativeStreamObserveDoesNotCommitOrFabricateContent
+                  TestNativeStreamHeartbeatCommitsOnlyHTTP
+                  TestNativeStreamLocalTraceHeaderDoesNotCommitHeartbeat
+                  TestNativeStreamTimeoutCommitRaceCannotAdmitMixedAttempt
+                  TestNativeStreamCancellationReasonsExcludeProviderPenalty
+                  TestNativeStreamCommittedCreatedKeepsContentDeadline
+                  TestNativeStreamFinalBytesReturnBeforeSettlement
+                  TestNativeStreamCommittedTransportFailureCannotFailover
+                  TestNativeStreamIdentityHeaderCommitsBeforeHeartbeatFlush
+                  TestNativeStreamExplicitCancelOutranksContentTimer
+                  TestNativeStreamExecutionBindingPreservesLedgerDeadlineAndOwner
+                  TestNativeStreamExecutionTransferKeepsRetrySelectionAndControl
+                  TestNativeStreamExecutionTransferRejectsLateOrCanceled
+                  TestNativeStreamPassthroughGuardCommitsBeforeFailedWrite
+                  TestNativeStreamPassthroughGuardTimeoutRace
+                  TestNativeStreamPassthroughGuardPreservesLegacyDouble
+                  TestNativeStreamPassthroughGuardObserveOnlyRequest
+                  TestNativeStreamTransactionProbe
+                  TestNativeStreamPolicySnapshotIsImmutable
+                  TestNativeStreamPolicyMiddlewareUsesAuthenticatedGroup
+                  TestNativeStreamPolicyRefreshOnlyChangesNewTurn
+                  TestNativeStreamPolicyRefreshFailureDoesNotMutateSnapshot
+                  TestNativeStreamDiagnosticsScopeAndNoInferredContent
+                  TestNativeStreamDeferredWorkerFlushDoesNotMeasureNetwork
+                  TestNativeStreamDeferredReadTimeConsumedOnce
+                  TestNativeStreamAttachmentFlushUsesOriginalRuntimeAndPolicy
+              """.split()),
+              "handler": set("""
+                  TestNativeResponseHTTPDetachReplayUsesOneGenerationAndUsage
+                  TestNativeResponseHTTPCancelAuthorizationAndNoRevival
+                  TestNativeResponseHTTPOrdinaryDisconnectCancels
+                  TestNativeResponseHTTPPrecommitRetryKeepsLedgerBoundary
+                  TestNativeResponseHTTPAfterCommitFailureNeverMixesAccounts
+                  TestNativeResponseHTTPNonstreamBackgroundIdempotencyRejectsBeforeCreate
+                  TestNativeResponseControlPostOnlyHandlesExactCancel
+              """.split()),
+              "handler/admin": {
+                  "TestNativeStreamGroupPolicyAtomicFeatureValidation",
+                  "TestNativeStreamOldClientPreservesFlags",
+              },
+              "server/routes": {
+                  "TestGatewayRoutesNativeResponsesAliasesKeepWebSocketAndCatchAll",
+                  "TestGatewayRoutesOpenAIResponsesCompactPathIsRegistered",
+                  "TestGatewayRoutesResponsesSubpathRejectsNonConformingSubpaths",
+              },
+              "scheduling": set("""
+                  TestAccountPoolAdmissionThenPriorityThenWeight
+                  TestAccountPoolExhaustsEveryEligibleAccountBeforeLowerTier
+                  TestAccountPoolSWRRRatioAndTwoClientFairness
+                  TestPriorityWeightsModesAndCapacity
+                  TestStrictPriorityAllowsSameTierRecoveryProbeOnly
+                  TestHealthCooldownAndRecovery
+                  TestGroupPolicyPostgresMembershipAndCAS
+              """.split()),
+              "pkg/responseturn": set("""
+                  TestRecoveryEligibilityClosed
+                  TestIdempotencyNormalizedConcurrentScopeAndTombstone
+                  TestLookupScopeAndOwnerImmutable
+                  TestReplayLiveOrderUnknownEventsAndNativeCursor
+                  TestAtomicReplayLiveBoundaryConcurrent
+                  TestEpochReplacementAndSingleWriterFence
+                  TestCumulativeOfflineBudgetNotResetByReconnect
+                  TestExplicitCancellationAndControlDeadlineNeverRevive
+                  TestNativeIdentityDeduplicationAndConflicts
+                  TestQuotaOnlineContinuesOfflineCancelsAndSharedLimits
+                  TestTerminalReplayRetentionSettlementAndStoreFalse
+                  TestNonStreamingBackgroundIgnoresOfflineBudget
+                  TestResourceCapacityAndClose
+                  TestQuotaDegradationRetainsUnreadReplayAccounting
+                  TestIndependentReviewConcurrentFirstCreateAndScope
+                  TestIndependentReviewTerminalTTLReleasesAttachmentReplay
+                  TestIndependentReviewStoreFalseTerminalReleasesQueuedBody
+                  TestIndependentReviewCancelCallbackCanObserveState
+                  TestIndependentReviewClientDetachReasonIsNotUserStop
+                  TestIndependentReviewJitterDoesNotResetOfflineBudget
+                  TestIndependentReviewQuotaOnlinePassesOfflineCancels
+              """.split()),
+          }
+          events = []
+          for filename in ["native-stream-functional.jsonl", "native-stream-turns.jsonl"]:
+              events.extend(json.loads(line) for line in
+                            Path(os.environ["RUNNER_TEMP"], filename).read_text().splitlines()
+                            if line.strip())
+          rejected = [event for event in events if event.get("Action") in {"skip", "fail"}]
+          if rejected:
+              raise SystemExit("Native stream release gate cannot skip or fail: " +
+                               json.dumps(rejected, ensure_ascii=False))
+          for suffix, expected in required.items():
+              package = "github.com/liulixin-lex/xy2api/internal/" + suffix
+              ran = {event.get("Test") for event in events
+                     if event.get("Package") == package and event.get("Action") == "run"}
+              passed = {event.get("Test") for event in events
+                        if event.get("Package") == package and event.get("Action") == "pass"}
+              missing = expected - (ran & passed)
+              if missing or None not in passed:
+                  raise SystemExit(f"{package}: missing completed required tests {sorted(missing)}")
+              print(f"{package}: {len(ran)} tests/subtests ran, all {len(expected)} required tests PASS, 0 SKIP")
+          PY
+      - name: Native stream forwarding latency without race instrumentation
+        working-directory: backend
+        timeout-minutes: 5
+        env:
+          GOMAXPROCS: '2'
+          XY2_NATIVE_RELAY_PERF: '1'
+        run: |
+          set -euo pipefail
+          go test -p 1 -vet=off ./internal/service \
+            -run '^TestNativeStreamRelayReadToFlushPerformance$' \
+            -count=1 -timeout=90s -json | tee "$RUNNER_TEMP/native-stream-performance.jsonl"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          package = "github.com/liulixin-lex/xy2api/internal/service"
+          root = "TestNativeStreamRelayReadToFlushPerformance"
+          required = {root} | {f"{root}/passthrough_{mode}_concurrency_{count}"
+                               for mode in ["false", "true"] for count in [1, 16, 64]}
+          events = [json.loads(line) for line in
+                    Path(os.environ["RUNNER_TEMP"], "native-stream-performance.jsonl").read_text().splitlines()
+                    if line.strip()]
+          rejected = [event for event in events if event.get("Action") in {"skip", "fail"}]
+          if rejected:
+              raise SystemExit("Native stream performance gate cannot skip or fail: " +
+                               json.dumps(rejected, ensure_ascii=False))
+          ran = {event.get("Test") for event in events
+                 if event.get("Package") == package and event.get("Action") == "run"}
+          passed = {event.get("Test") for event in events
+                    if event.get("Package") == package and event.get("Action") == "pass"}
+          missing = required - (ran & passed)
+          if missing or None not in passed:
+              raise SystemExit(f"Native stream performance gate missing completed cases: {sorted(missing)}")
+          print("HTTP ordinary/passthrough at concurrency 1, 16, 64: all 6 cases PASS, 0 SKIP, no race instrumentation")
+          PY
+
   windows-plugin-archive:
     runs-on: windows-latest
     steps:

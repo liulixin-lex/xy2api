@@ -788,6 +788,9 @@ func classifyOpenAIWSReconnectReason(err error) (string, bool) {
 		return "", false
 	}
 	reason := strings.TrimSpace(fallbackErr.Reason)
+	if fallbackErr.RequestSent {
+		return reason, false
+	}
 	if reason == "" {
 		return "", false
 	}

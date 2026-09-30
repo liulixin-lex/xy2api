@@ -3,6 +3,17 @@ import { cloneGroupPolicy, groupPolicyFingerprint, isGroupSchedulingConflict, va
 import type { GroupSchedulingPolicy } from '@/types/scheduling'
 const policy = (): GroupSchedulingPolicy => ({ group_id: 2, version: 7, accounts: [{ account_id: 1, priority: 0, traffic_weight: 1 }, { account_id: 2, priority: 1, traffic_weight: 2 }], first_output_timeout_ms: 120000, total_wait_timeout_ms: 240000, max_attempts: 3 })
 describe('group scheduling contracts', () => {
+  it('clones flags and tracks delivery changes in the existing save fingerprint', () => {
+    const source = { ...policy(), native_stream: { delivery: true, recovery: true, persistence: false } }
+    const copy = cloneGroupPolicy(source)
+    copy.native_stream!.recovery = false
+    expect(source.native_stream.recovery).toBe(true)
+    expect(groupPolicyFingerprint(copy)).not.toBe(groupPolicyFingerprint(source))
+    copy.native_stream!.persistence = true
+    expect(validateGroupPolicy(copy)).toBe('persistenceUnavailable')
+    copy.native_stream = { delivery: false, recovery: true, persistence: false }
+    expect(validateGroupPolicy(copy)).toBe('recoveryRequiresDelivery')
+  })
   it('clones account rules without sharing mutable rows', () => { const original = policy(); const copy = cloneGroupPolicy(original); copy.accounts[0].priority = 9; expect(original.accounts[0].priority).toBe(0) })
   it('tracks scope and account changes but ignores display ordering', () => { const original = policy(); const copy = cloneGroupPolicy(original); copy.accounts.reverse(); expect(groupPolicyFingerprint(copy)).toBe(groupPolicyFingerprint(original)); copy.group_id = 3; expect(groupPolicyFingerprint(copy)).not.toBe(groupPolicyFingerprint(original)) })
   it.each([

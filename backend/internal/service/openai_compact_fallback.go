@@ -245,7 +245,7 @@ func (s *OpenAIGatewayService) prepareOpenAICompactFallbackRetry(
 	upstreamBody []byte,
 	alreadyRetried bool,
 ) ([]byte, string, bool) {
-	if c != nil && c.Request != nil && ControlledSchedulingEnabled(c.Request.Context()) {
+	if c != nil && c.Request != nil && (ControlledSchedulingEnabled(c.Request.Context()) || NativeStreamDeliveryEnabled(c.Request.Context())) {
 		return currentBody, "", false
 	}
 	if alreadyRetried || !isExplicitOpenAICompactRequest(c, currentBody) ||

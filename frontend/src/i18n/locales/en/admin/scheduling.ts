@@ -1,5 +1,54 @@
 export default {
   "scheduling": {
+    "nativeMetrics": {
+  "attemptHistory": "Recorded attempts",
+  "attemptNumber": "Attempt {number}",
+  "attachments": "Attachments",
+  "cancelRequested": "Upstream cancellation requested",
+  "cancelConfirmed": "Upstream cancellation confirmed",
+  "unconfirmed": "Not yet confirmed",
+  "states": {
+    "in_progress": "Generating",
+    "client_detached": "Client detached",
+    "completed": "Completed",
+    "incomplete": "Partial results available",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
+    "replaying": "Replaying",
+    "resuming": "Resuming upstream"
+  },
+      "title": "Native delivery timeline",
+      "unknown": "Not recorded",
+      "legacy": "Native measurements are unavailable or expired. Legacy first-token metrics do not measure the first protocol event.",
+      "failed": "Timeline could not be loaded. Please retry.",
+      "metricHint": "First content excludes heartbeats and created events. Only observed values are shown. Per-attempt times are relative to that attempt; end-to-end content includes retries.",
+      "started": "Request entered",
+      "headers": "Response headers",
+      "firstEvent": "First protocol event",
+      "firstContent": "First content",
+      "overallContent": "End-to-end first content",
+      "flush": "First downstream Flush",
+      "gatewayDelay": "Complete event to Flush",
+      "attempts": "Generation attempts",
+      "priority": "Current priority",
+      "selection": "Selection / owner reason",
+      "certainty": "Send certainty",
+      "finalState": "Execution state",
+      "recovery": "Recovery eligible",
+      "offline": "Remaining offline budget",
+      "replays": "Replayed history events",
+      "reason": "Cancellation / unavailable reason"
+    },
+    "nativeStream": {
+      "title": "Native streaming and recovery",
+      "snapshotHint": "Saving affects new requests in this group. Active responses finish with their original configuration.",
+      "delivery": "Native stream delivery",
+      "deliveryHint": "Deliver complete events immediately, with an irreversible attempt commit and explicit cancellation reasons. Existing wait budgets stay unchanged.",
+      "recovery": "Native disconnect recovery",
+      "recoveryHint": "Only HTTP requests with native background intent, identity, cursors and verified capabilities qualify. Offline generation has a cumulative 120-second limit. WS recovery is unverified; ordinary disconnects still cancel.",
+      "persistence": "Persist recovery records",
+      "persistenceHint": "Planned for a later phase. Records currently live in this process's memory; process crash and cross-instance recovery are unavailable."
+    },
     "modeSettings": {
       "title": "Scheduling mode",
       "hint": "Switching only affects new requests and keeps account enablement unchanged. Active requests continue.",
@@ -21,6 +70,8 @@ export default {
       "defaultPriorityHint": "Used only until a group rule is saved. Edit saved group priorities in Account Scheduling."
     },
     "groupPolicy": {
+      "recoveryRequiresDelivery": "Enable native stream delivery before disconnect recovery.",
+      "persistenceUnavailable": "Recovery persistence is unavailable in this phase.",
       "description": "Choose account order and traffic shares per group. Busy or unavailable accounts are skipped automatically.",
       "selectGroup": "Select a group",
       "ungrouped": "Ungrouped accounts",

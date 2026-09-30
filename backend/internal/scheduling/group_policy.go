@@ -17,13 +17,20 @@ var ErrSchedulingGroupNotFound = errors.New("scheduling group not found")
 
 // GroupPolicy is the single administrator-controlled policy for a group. Model
 // capability is filtered by adapters; it never creates another policy scope.
+type NativeStreamFeatures struct {
+	Delivery    bool `json:"delivery"`
+	Recovery    bool `json:"recovery"`
+	Persistence bool `json:"persistence"`
+}
+
 type GroupPolicy struct {
-	GroupID              int64         `json:"group_id"`
-	Version              int64         `json:"version"`
-	Accounts             []AccountRule `json:"accounts"`
-	FirstOutputTimeoutMS int64         `json:"first_output_timeout_ms"`
-	TotalWaitTimeoutMS   int64         `json:"total_wait_timeout_ms"`
-	MaxAttempts          int           `json:"max_attempts"`
+	GroupID              int64                `json:"group_id"`
+	Version              int64                `json:"version"`
+	Accounts             []AccountRule        `json:"accounts"`
+	FirstOutputTimeoutMS int64                `json:"first_output_timeout_ms"`
+	TotalWaitTimeoutMS   int64                `json:"total_wait_timeout_ms"`
+	MaxAttempts          int                  `json:"max_attempts"`
+	NativeStream         NativeStreamFeatures `json:"native_stream"`
 }
 
 type GroupPolicyWarning struct {
@@ -55,6 +62,12 @@ func DefaultGroupPolicy(groupID int64) GroupPolicy {
 // during a save. Existing account priority is used only by the read projection.
 func ValidateGroupPolicy(p GroupPolicy) error {
 	invalid := func(message string) error { return fmt.Errorf("%w: %s", ErrInvalidControl, message) }
+	if p.NativeStream.Recovery && !p.NativeStream.Delivery {
+		return invalid("native recovery requires atomic native stream delivery")
+	}
+	if p.NativeStream.Persistence {
+		return invalid("recovery persistence is not available in this phase")
+	}
 	if p.GroupID < 0 {
 		return invalid("group_id must be nonnegative")
 	}

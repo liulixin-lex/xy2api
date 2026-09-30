@@ -198,6 +198,10 @@ func controlledBucket(r *ControlledRequest) string {
 }
 func (s *ControlledSchedulingService) selectAccount(ctx context.Context, r *ControlledRequest, accounts []*Account, eligible func(*Account) (bool, string), excluded map[int64]struct{}, acquire bool) (selected *AccountSelectionResult, selectErr error) {
 	r.mu.Lock()
+	if r.cancelReason.excludesProviderHealth() {
+		r.mu.Unlock()
+		return nil, context.Canceled
+	}
 	old := r.Decision
 	pending := r.decisionPending
 	r.decisionPending = false

@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-30",
+  "target": "/xy2/xy2api",
+  "baseline_commit": "9717116f198904442ebb400d7d06792a40dea15c",
+  "candidate": "/xy2/artifacts/native-stream-recovery-20260930/work",
+  "method": "local implementation on isolated copy; no repository merge",
+  "mechanism_references": [
+    {
+      "name": "new-api",
+      "revision": "2035a82aeb54",
+      "source": "user specification",
+      "reference_tree_independently_fetched": false
+    },
+    {
+      "name": "sub2api",
+      "revision": "42bc7f6cffe2",
+      "source": "user specification",
+      "reference_tree_independently_fetched": false
+    },
+    {
+      "name": "CLIProxyAPI",
+      "revision": "a270e7b9e57a",
+      "source": "user specification",
+      "reference_tree_independently_fetched": false
+    }
+  ],
+  "plugin": {
+    "manifest": "/tmp/compat-audit-ws-sse-20260930/manifest.json",
+    "manifest_sha256": "c8a4e2a52071c9a39836e661d0a2243b8f984acd7a69f0f5ee69d751622f1242",
+    "version": "0.2.2",
+    "matching_complete_source_found": false,
+    "xy2api_runtime_compatibility_accepted": false
+  },
+  "deferred": [
+    "stage C persistence and cross-instance recovery",
+    "unverified native upstream resume",
+    "real-client and real-provider recovery certification"
+  ],
+  "unchanged": [
+    "product version",
+    "historical migrations",
+    "complete upstream compatibility baseline",
+    "dependency versions"
+  ],
+  "production_deployed": false
+}

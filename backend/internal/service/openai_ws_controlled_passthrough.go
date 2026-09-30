@@ -142,6 +142,28 @@ func (c *openAIWSControlledPassthroughFrameConn) commitOutput(payload []byte) {
 	}
 }
 
+// tryCommitOutput is the native relay's pre-write guard. Keep the active
+// attempt stable until its atomic coordinator decision has completed. Older
+// test doubles and adapters keep their existing CommitOutput implementation.
+func (c *openAIWSControlledPassthroughFrameConn) tryCommitOutput(payload []byte) error {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := context.Cause(c.ctx); err != nil {
+		return err
+	}
+	if d := c.active; d != nil {
+		if guarded, ok := d.(interface{ TryCommitOutput([]byte) error }); ok {
+			return guarded.TryCommitOutput(payload)
+		}
+		d.CommitOutput(payload)
+		return nil
+	}
+	return CommitControlledOutput(c.requestCtx, payload)
+}
+
 // Relay discovers terminal usage before writing the terminal frame downstream.
 // Bill that turn only after its dispatch has settled so acknowledgement cannot
 // race a later usage_pending write, and never borrow the first turn's ticket.

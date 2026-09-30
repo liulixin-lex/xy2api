@@ -26,6 +26,15 @@ func IsControlledSchedulingStop(err error) bool {
 // Only inference transport errors reach this helper. Local admission decisions
 // and client cancellation retain their identity for the outer request loop.
 func controlledSchedulingTransportFailure(ctx context.Context, err error) error {
+	if NativeStreamDeliveryEnabled(ctx) {
+		state := ControlledStreamSnapshot(ctx)
+		if state.AttemptCommitted {
+			return errors.Join(scheduling.ErrCommitted, err)
+		}
+		if state.CancelReason.excludesProviderHealth() {
+			return errors.Join(context.Canceled, err)
+		}
+	}
 	if !ControlledSchedulingEnabled(ctx) || IsControlledSchedulingStop(err) || ctx.Err() != nil {
 		return err
 	}

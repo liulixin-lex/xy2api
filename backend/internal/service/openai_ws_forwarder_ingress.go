@@ -824,10 +824,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if buildHdrErr != nil {
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
+	controlledTurnCtx := ctx
 	baseAcquireReq := openAIWSAcquireRequest{
-		Account: account,
-		WSURL:   wsURL,
-		Headers: wsHeaders,
+		NativeDelivery: NativeStreamDeliveryEnabled(ctx),
+		Account:        account,
+		WSURL:          wsURL,
+		Headers:        wsHeaders,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
@@ -903,7 +905,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		// dedicated 模式下每次获取均新建连接，避免跨会话复用残留上下文；
 		// 上游读写失败后的重试同样新建，避免再拿到同批陈旧的空闲连接。
 		req.ForceNewConn = dedicatedMode || forceNewConn
-		acquireCtx, acquireCancel := context.WithTimeout(ctx, acquireTimeout)
+		acquireCtx, acquireCancel := context.WithTimeout(controlledTurnCtx, acquireTimeout)
 		lease, acquireErr := pool.Acquire(acquireCtx, req)
 		acquireCancel()
 		var dialErr *openAIWSDialError
@@ -991,7 +993,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return lease, nil
 	}
 
-	controlledTurnCtx := ctx
 	controlledTurnNumber := 0
 	defer func() {
 		if r := controlledRequest(controlledTurnCtx); r != nil && r != controlledRequest(ctx) {
@@ -1259,7 +1260,17 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						clientMessage = rewritten
 					}
 				}
+				if NativeStreamDeliveryEnabled(ctx) {
+					if err := controlledDispatch.TryCommitOutput(clientMessage); err != nil {
+						return nil, err
+					}
+					wroteDownstream = true
+				}
 				if err := writeClientMessage(clientMessage); err != nil {
+					if NativeStreamDeliveryEnabled(ctx) {
+						lease.MarkBroken()
+						return nil, fmt.Errorf("client_detached: %w: %v", context.Canceled, err)
+					}
 					if isOpenAIWSClientDisconnectError(err) {
 						clientDisconnected = true
 						closeStatus, closeReason := summarizeOpenAIWSReadCloseError(err)
@@ -1443,6 +1454,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		preferredConnID = ""
 	}
 	recoverIngressPrevResponseNotFound := func(relayErr error, turn int, connID string) bool {
+		if NativeStreamDeliveryEnabled(controlledTurnCtx) {
+			return false // A sent create belongs to the coordinator, never a transport replay.
+		}
 		if !isOpenAIWSIngressPreviousResponseNotFound(relayErr) {
 			return false
 		}
@@ -1510,6 +1524,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return true
 	}
 	retryIngressTurn := func(relayErr error, turn int, connID string) bool {
+		if NativeStreamDeliveryEnabled(controlledTurnCtx) {
+			return false // A sent create belongs to the coordinator, never a transport replay.
+		}
 		if !isOpenAIWSIngressTurnRetryable(relayErr) || turnRetry >= 1 {
 			return false
 		}
@@ -1547,6 +1564,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				return err
 			}
 			controlledTurnCtx = prepared
+			if baseAcquireReq.NativeDelivery != NativeStreamDeliveryEnabled(prepared) {
+				resetSessionLease(true)
+				baseAcquireReq.NativeDelivery = NativeStreamDeliveryEnabled(prepared)
+			}
 			controlledTurnNumber = turn
 		}
 		// A native connection may predate this account's opt-in. Its handshake
@@ -1768,7 +1789,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					hasReplayToolContext := hasFCOutput &&
 						currentTurnReplayInputExists &&
 						openAIWSRawItemsHaveToolCallContextForOutputs(currentTurnReplayInput)
-					if !turnPrevRecoveryTried && currentPreviousResponseID != "" && (!hasFCOutput || hasReplayToolContext) {
+					if !NativeStreamDeliveryEnabled(controlledTurnCtx) && !turnPrevRecoveryTried && currentPreviousResponseID != "" && (!hasFCOutput || hasReplayToolContext) {
 						updatedPayload, removed, dropErr := dropPreviousResponseIDFromRawPayload(currentPayload)
 						if dropErr != nil || !removed {
 							reason := "not_removed"
@@ -1886,7 +1907,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				return errOpenAIWSSessionPreempted
 			}
 			var rejectedFieldErr *openAIWSRejectedFieldRetryError
-			if errors.As(relayErr, &rejectedFieldErr) && rejectedFieldErr != nil && len(rejectedFieldErr.body) > 0 {
+			if !NativeStreamDeliveryEnabled(controlledTurnCtx) && errors.As(relayErr, &rejectedFieldErr) && rejectedFieldErr != nil && len(rejectedFieldErr.body) > 0 {
 				currentPayload = append([]byte(nil), rejectedFieldErr.body...)
 				currentPayloadBytes = len(currentPayload)
 				skipBeforeTurn = true

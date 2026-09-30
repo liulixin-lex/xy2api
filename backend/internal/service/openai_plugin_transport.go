@@ -1,6 +1,9 @@
 package service
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+)
 
 func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 	s.openaiCodexTransportMu.Lock()
@@ -31,11 +34,24 @@ func (s *OpenAIGatewayService) sendOpenAIUpstream(request *http.Request, proxyUR
 	s.openaiCodexTransportMu.RLock()
 	manager := s.pluginManager
 	s.openaiCodexTransportMu.RUnlock()
-	if manager != nil {
+	// The v1 binary contract does not attest to host-controlled generation retries.
+	// Native delivery uses the auditable host transport until that capability exists.
+	if manager != nil && !NativeStreamDeliveryEnabled(request.Context()) {
 		response, handled, err := manager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {
 			return response, err
 		}
+	}
+	if NativeStreamDeliveryEnabled(request.Context()) {
+		transportCtx, cancel := context.WithCancel(request.Context())
+		request = request.WithContext(transportCtx)
+		response, err = s.httpUpstream.Do(request, proxyURL, account.ID, account.Concurrency)
+		if err != nil || response == nil || response.Body == nil {
+			cancel()
+			return response, err
+		}
+		response.Body = &nativeStreamResponseBody{ReadCloser: response.Body, ctx: transportCtx, cancel: cancel}
+		return response, nil
 	}
 	return s.httpUpstream.Do(request, proxyURL, account.ID, account.Concurrency)
 }

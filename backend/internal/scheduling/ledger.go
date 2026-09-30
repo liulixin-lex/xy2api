@@ -103,7 +103,13 @@ func (l *AttemptLedger) BeginAttempt(accountID int64, priority int, now time.Tim
 	l.lastTier = &p
 	return nil
 }
-func (l *AttemptLedger) MarkSemanticCommit() { l.mu.Lock(); defer l.mu.Unlock(); l.committed = true }
+
+// MarkAttemptCommit shares the admission lock with BeginAttempt. Once an
+// identity or protocol event is exposed, another generation cannot begin.
+func (l *AttemptLedger) MarkAttemptCommit() { l.mu.Lock(); defer l.mu.Unlock(); l.committed = true }
+
+// MarkSemanticCommit retains the legacy adapter contract.
+func (l *AttemptLedger) MarkSemanticCommit() { l.MarkAttemptCommit() }
 func (l *AttemptLedger) MarkFirstOutputTimeout() {
 	l.mu.Lock()
 	defer l.mu.Unlock()

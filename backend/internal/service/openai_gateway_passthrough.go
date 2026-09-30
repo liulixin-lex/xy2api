@@ -392,7 +392,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			resp.Body = io.NopCloser(bytes.NewReader(probeBody))
 			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, probeBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize passthrough rejected Responses field retry body: %w", retryErr)
-			} else if !ControlledSchedulingEnabled(ctx) && changed && rejectedFieldRetryState.Allow(retryBody) {
+			} else if !ControlledSchedulingEnabled(ctx) && !NativeStreamDeliveryEnabled(ctx) && changed && rejectedFieldRetryState.Allow(retryBody) {
 				body = retryBody
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying passthrough request after %s (account: %s)", reason, account.Name)
 				continue
@@ -400,7 +400,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			if repairErr := s.repairControlledAgentIdentityTask(ctx, account, resp.StatusCode, probeBody); repairErr != nil {
 				return nil, repairErr
 			}
-			if !ControlledSchedulingEnabled(ctx) && !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, probeBody) {
+			if !ControlledSchedulingEnabled(ctx) && !NativeStreamDeliveryEnabled(ctx) && !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, probeBody) {
 				agentTaskRecoveryTried = true
 				expectedTaskID := account.GetCredential("task_id")
 				if recoveryErr := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); recoveryErr != nil {
@@ -1869,18 +1869,25 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	originalModel string,
 	mappedModel string,
 ) (*openaiStreamingResultPassthrough, error) {
+	nativeDelivery := NativeStreamDeliveryEnabled(ctx)
+	if nativeDelivery {
+		stopCancel := context.AfterFunc(ctx, func() { _ = resp.Body.Close() })
+		defer stopCancel()
+	}
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
 	}
-	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	if !nativeDelivery {
+		writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	}
 
 	// SSE headers
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Accel-Buffering", "no")
-	if v := resp.Header.Get("x-request-id"); v != "" {
+	if v := resp.Header.Get("x-request-id"); v != "" && !nativeDelivery {
 		c.Header("x-request-id", v)
 	}
 
@@ -1946,7 +1953,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	// compact 标记，而这里是普通 /v1/responses 透传。走到这一行时上游已回
 	// text/event-stream、SSE 响应头也已设好，处于流式上下文是确定的。
 	stopKeepalive := func() {}
-	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
+	if !nativeDelivery && s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
 		stopKeepalive = startOpenAISSEKeepalive(c,
 			time.Duration(s.cfg.Gateway.StreamKeepaliveInterval)*time.Second)
 	}
@@ -2004,7 +2011,29 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	scanBuf := getSSEScannerBuf64K()
 	scanner.Buffer(scanBuf[:0], maxLineSize)
 	defer putSSEScannerBuf64K(scanBuf)
-	documentScanner := newOpenAISSEJSONDocumentScanner(scanner)
+	var documentScanner nativeSSEScanner = newOpenAISSEJSONDocumentScanner(scanner)
+	if nativeDelivery {
+		documentScanner = newNativeSSEEventScanner(documentScanner)
+		interval := 15 * time.Second
+		if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
+			interval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
+		}
+		lastWrite := time.Now()
+		idleScanner := newNativeSSEIdleScanner(ctx, resp.Body, documentScanner, interval, func() error {
+			if len(pendingLines) != 0 || time.Since(lastWrite) < interval {
+				return nil
+			}
+			n, err := w.Write([]byte(":\n\n"))
+			recordOpenAIStreamKeepaliveBytes(c, n)
+			if err == nil {
+				flusher.Flush()
+				lastWrite = time.Now()
+			}
+			return err
+		})
+		documentScanner = idleScanner
+		defer idleScanner.Close()
+	}
 
 	needModelReplace := strings.TrimSpace(originalModel) != "" && strings.TrimSpace(mappedModel) != "" && strings.TrimSpace(originalModel) != strings.TrimSpace(mappedModel)
 	resultWithUsage := func() *openaiStreamingResultPassthrough {
@@ -2022,7 +2051,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		if eventType, ok := extractOpenAISSEEventLine(line); ok {
 			pendingSSEEventType = eventType
 			eventType = strings.TrimSpace(eventType)
-			suppressCurrentEvent = codexFailureTerminal && (eventType == "error" || (sawBareError && !sawResponseFailed && eventType != "response.failed"))
+			suppressCurrentEvent = !nativeDelivery && codexFailureTerminal && (eventType == "error" || (sawBareError && !sawResponseFailed && eventType != "response.failed"))
 		}
 		lineStartsClientOutput := false
 		forceFlushFailedEvent := false
@@ -2061,7 +2090,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				}
 			}
 			eventType := effectiveOpenAISSEEventType(dataBytes, rawEventType)
-			if codexFailureTerminal && sawBareError && !sawResponseFailed && eventType != "response.failed" {
+			if !nativeDelivery && codexFailureTerminal && sawBareError && !sawResponseFailed && eventType != "response.failed" {
 				suppressCurrentEvent = true
 			}
 			if !capacityFailoverSuppressedLogged && account != nil && account.Platform == PlatformOpenAI &&
@@ -2073,7 +2102,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			}
 			cyberHit := false
 			if eventType == "response.failed" || eventType == "error" {
-				if codexFailureTerminal && eventType == "error" {
+				if codexFailureTerminal && eventType == "error" && !nativeDelivery {
 					sawBareError = true
 					bareErrorPayload = append(bareErrorPayload[:0], dataBytes...)
 					suppressCurrentEvent = true
@@ -2107,12 +2136,16 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 					}
 				}
 				if outputStarted && !cyberHit {
-					if codexFailureTerminal && eventType == "error" {
+					if codexFailureTerminal && eventType == "error" && !nativeDelivery {
 						// Wait for the authoritative response.failed before mutating
 						// account health; EOF synthesis applies the pending effect.
 						bareErrorAccountSideEffectsPending = true
 					} else {
-						s.handleOpenAIStreamTerminalAccountSideEffects(c, account, dataBytes, failedMessage, resp.Header, mappedModel)
+						if nativeDelivery {
+							defer s.handleOpenAIStreamTerminalAccountSideEffects(c, account, append([]byte(nil), dataBytes...), failedMessage, resp.Header, mappedModel)
+						} else {
+							s.handleOpenAIStreamTerminalAccountSideEffects(c, account, dataBytes, failedMessage, resp.Header, mappedModel)
+						}
 						bareErrorAccountSideEffectsPending = false
 					}
 					if eventType == "response.failed" {
@@ -2190,7 +2223,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
 				return resultWithUsage(), newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID)
 			}
-			if firstTokenMs == nil && openAIStreamDataStartsTTFT(trimmedData, eventType, forceFlushFailedEvent, ttftMode) {
+			startsTTFT := openAIStreamDataStartsTTFT(trimmedData, eventType, forceFlushFailedEvent, ttftMode)
+			if nativeDelivery {
+				startsTTFT = openAIStreamDataStartsVisibleOutput(trimmedData, eventType)
+			}
+			if firstTokenMs == nil && startsTTFT {
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms
 			}
@@ -2205,7 +2242,43 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			}
 		}
 
-		if !clientDisconnected && !failureDelivered && !suppressCurrentEvent {
+		if nativeDelivery && !clientDisconnected && !failureDelivered && !suppressCurrentEvent {
+			// Stage only the current incomplete event, never a semantic preamble.
+			pendingLines = append(pendingLines, line)
+			if line != "" {
+				continue
+			}
+			frame := []byte(strings.Join(pendingLines, "\n") + "\n")
+			payload := nativeSSEEventData(frame)
+			if err := CommitControlledOutput(ctx, payload); err != nil {
+				_ = resp.Body.Close()
+				return resultWithUsage(), err
+			}
+			if len(payload) > 0 {
+				if !clientOutputStarted && !c.Writer.Written() {
+					writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+					c.Header("Content-Type", "text/event-stream")
+					c.Header("Cache-Control", "no-cache")
+					c.Header("X-Accel-Buffering", "no")
+				}
+				MarkResponseCommitted(c)
+				clientOutputStarted = true
+				RecordNativeStreamEventRead(ctx, nativeSSEReadAt(documentScanner))
+			}
+			n, err := w.Write(frame)
+			if len(payload) == 0 {
+				recordOpenAIStreamKeepaliveBytes(c, n)
+			}
+			if err != nil {
+				_ = resp.Body.Close()
+				return resultWithUsage(), fmt.Errorf("client_detached: %w: %v", context.Canceled, err)
+			}
+			flusher.Flush()
+			if reader, ok := documentScanner.(*nativeSSEIdleScanner); ok && len(payload) > 0 {
+				RecordNativeStreamFlush(ctx, reader.ReadAt(), time.Now())
+			}
+			pendingLines = pendingLines[:0]
+		} else if !clientDisconnected && !failureDelivered && !suppressCurrentEvent {
 			if !clientOutputStarted && !lineStartsClientOutput {
 				pendingLines = append(pendingLines, line)
 				continue

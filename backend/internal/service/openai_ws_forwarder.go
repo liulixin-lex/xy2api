@@ -60,6 +60,8 @@ var openAIWSIngressPreflightPingIdle = 20 * time.Second
 type openAIWSFallbackError struct {
 	Reason string
 	Err    error
+	// RequestSent includes partial writes: execution may already have started.
+	RequestSent bool
 }
 
 func (e *openAIWSFallbackError) Error() string {

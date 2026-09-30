@@ -80,6 +80,8 @@ func RegisterAdminRoutes(
 		registerAnnouncementRoutes(admin, h)
 
 		// OpenAI OAuth
+		admin.GET("/ops/requests/:request_id/native-stream", h.OpenAIGateway.NativeResponseDiagnostics)
+
 		registerOpenAIOAuthRoutes(admin, h)
 
 		// Gemini OAuth

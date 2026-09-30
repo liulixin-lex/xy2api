@@ -54,28 +54,46 @@ type ControlledRequest struct {
 	gateRejections     int
 	admissionRejected  map[int64]bool // Unsent gate failures; never count as upstream attempts.
 	lastBackoffAttempt int
+	currentDispatch    *controlledDispatch
+	httpCommitted      bool
+	attemptCommitted   bool
+	semanticSeen       bool
+	NativeDelivery     bool
+	cancelReason       ControlledCancelReason
+	executionCancel    context.CancelFunc
+	firstReadToFlushMS *float64
+	maxReadToFlushMS   float64
+	firstFlushAt       time.Time
+	flushCount         int64
 }
 
 type SchedulingAttemptTrace struct {
-	AccountID              int64     `json:"account_id"`
-	AttemptID              string    `json:"attempt_id"`
-	Priority               int       `json:"priority"`
-	Reason                 string    `json:"reason"`
-	Started                time.Time `json:"started_at"`
-	Outcome                string    `json:"outcome"`
-	FirstEventMS           *int64    `json:"first_event_ms,omitempty"`
-	FirstSemanticMS        *int64    `json:"first_semantic_ms,omitempty"`
-	FirstAnswerMS          *int64    `json:"first_answer_ms,omitempty"`
-	OverallFirstSemanticMS *int64    `json:"overall_first_semantic_ms,omitempty"`
-	RemainingBudgetMS      *int64    `json:"remaining_budget_ms,omitempty"`
-	StopReason             string    `json:"stop_reason"`
-	PolicyVersion          int64     `json:"policy_version"`
-	MetricVersion          string    `json:"metric_version"`
+	AccountID              int64                   `json:"account_id"`
+	AttemptID              string                  `json:"attempt_id"`
+	Priority               int                     `json:"priority"`
+	Reason                 string                  `json:"reason"`
+	Started                time.Time               `json:"started_at"`
+	Outcome                string                  `json:"outcome"`
+	FirstEventMS           *int64                  `json:"first_event_ms,omitempty"`
+	FirstSemanticMS        *int64                  `json:"first_semantic_ms,omitempty"`
+	FirstAnswerMS          *int64                  `json:"first_answer_ms,omitempty"`
+	OverallFirstSemanticMS *int64                  `json:"overall_first_semantic_ms,omitempty"`
+	RemainingBudgetMS      *int64                  `json:"remaining_budget_ms,omitempty"`
+	StopReason             string                  `json:"stop_reason"`
+	PolicyVersion          int64                   `json:"policy_version"`
+	MetricVersion          string                  `json:"metric_version"`
+	HeadersMS              *int64                  `json:"headers_ms,omitempty"`
+	AttemptCommittedMS     *int64                  `json:"attempt_committed_ms,omitempty"`
+	SendCertainty          ControlledSendCertainty `json:"send_certainty,omitempty"`
+	CancelReason           ControlledCancelReason  `json:"cancel_reason,omitempty"`
+	FirstProtocolEventMS   *int64                  `json:"first_protocol_event_ms,omitempty"`
+	FirstContentMS         *int64                  `json:"first_content_ms,omitempty"`
+	UnknownEventCount      int64                   `json:"unknown_event_count,omitempty"`
 }
 
 func NewControlledRequestContext(ctx context.Context, protocol string) context.Context {
 	deadline, _ := ctx.Deadline()
-	r := &ControlledRequest{ID: uuid.NewString(), Started: time.Now(), ClientDeadline: deadline, clientContext: ctx, Protocol: scheduling.CanonicalTransport(protocol), Reasoning: "unknown", ContextTokens: -1, ReplaySafe: true}
+	r := &ControlledRequest{ID: uuid.NewString(), Started: time.Now(), ClientDeadline: deadline, clientContext: ctx, Protocol: scheduling.CanonicalTransport(protocol), Reasoning: "unknown", ContextTokens: -1, ReplaySafe: true, NativeDelivery: NativeStreamDeliveryEnabled(ctx)}
 	return context.WithValue(ctx, controlledSchedulingContextKey{}, r)
 }
 func controlledRequest(ctx context.Context) *ControlledRequest {
@@ -291,20 +309,23 @@ func controlledMetadataAlias(fields map[string]json.RawMessage, camel, snake str
 func (r *ControlledRequest) markSemantic(at time.Time, answer bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.semanticSeen = true
 	if r.semanticAt.IsZero() {
 		r.semanticAt = at
 	}
 	if answer && r.answerAt.IsZero() {
 		r.answerAt = at
 	}
-	if r.Ledger != nil {
+	if r.Ledger != nil && !r.NativeDelivery {
 		r.Ledger.MarkSemanticCommit()
 	}
 }
 func (r *ControlledRequest) Close() {
 	r.mu.Lock()
 	fn := r.finish
+	executionCancel := r.executionCancel
 	r.finish = nil
+	r.executionCancel = nil
 	ctrl := r.control
 	d := r.Decision
 	pending := r.decisionPending
@@ -312,6 +333,9 @@ func (r *ControlledRequest) Close() {
 	r.mu.Unlock()
 	if fn != nil {
 		fn()
+	}
+	if executionCancel != nil {
+		executionCancel()
 	}
 	if pending && ctrl != nil {
 		parent := r.clientContext
@@ -324,11 +348,26 @@ func (r *ControlledRequest) Close() {
 	}
 	r.mu.Lock()
 	semantic, attempt := r.semanticAt, r.currentAttemptID
+	metrics := map[string]any{}
+	if r.NativeDelivery {
+		metrics["http_committed"] = r.httpCommitted
+		metrics["attempt_committed"] = r.attemptCommitted
+		metrics["semantic_seen"] = r.semanticSeen || !semantic.IsZero()
+		if r.firstReadToFlushMS != nil {
+			metrics["gateway_read_to_flush_ms"] = *r.firstReadToFlushMS
+			metrics["gateway_read_to_flush_max_ms"] = r.maxReadToFlushMS
+			metrics["gateway_flush_count"] = r.flushCount
+			metrics["first_downstream_flush_at"] = r.firstFlushAt.UTC().Format(time.RFC3339Nano)
+		}
+	}
+	if !semantic.IsZero() {
+		metrics["overall_first_semantic_ms"] = semantic.Sub(r.Started).Milliseconds()
+	}
 	r.mu.Unlock()
-	if ctrl != nil && attempt != "" && !semantic.IsZero() {
+	if ctrl != nil && attempt != "" && len(metrics) > 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		_ = ctrl.Store.RecordAttemptMetrics(ctx, attempt, map[string]any{"overall_first_semantic_ms": semantic.Sub(r.Started).Milliseconds()})
+		_ = ctrl.Store.RecordAttemptMetrics(ctx, attempt, metrics)
 	}
 }
 
@@ -360,6 +399,10 @@ func ControlledSchedulingMiddleware(readers ...func(context.Context) (scheduling
 			r.Mode, r.modeResolved = mode, true
 			if mode.Mode == scheduling.ModeSub2API {
 				c.Request = c.Request.WithContext(ctx)
+				if r.NativeDelivery {
+					c.Writer = &schedulingResponseWriter{ResponseWriter: c.Writer, request: r, localRequestID: c.Writer.Header().Get("X-Request-ID")}
+					defer r.Close()
+				}
 				c.Next()
 				return
 			}
@@ -369,7 +412,7 @@ func ControlledSchedulingMiddleware(readers ...func(context.Context) (scheduling
 		if c.Request.Body != nil {
 			c.Request.Body = &schedulingMetadataBody{ReadCloser: c.Request.Body, request: r}
 		}
-		c.Writer = &schedulingResponseWriter{ResponseWriter: c.Writer, request: r}
+		c.Writer = &schedulingResponseWriter{ResponseWriter: c.Writer, request: r, localRequestID: c.Writer.Header().Get("X-Request-ID")}
 		defer r.Close()
 		c.Next()
 	}
@@ -377,12 +420,45 @@ func ControlledSchedulingMiddleware(readers ...func(context.Context) (scheduling
 
 type schedulingResponseWriter struct {
 	gin.ResponseWriter
-	request *ControlledRequest
-	parser  semanticEventParser
+	request  *ControlledRequest
+	parser   semanticEventParser
+	writeMu  sync.Mutex
+	writeErr error
+	// RequestLogger sets this local trace before the scheduling middleware. It
+	// is not an upstream generation identity and cannot commit a heartbeat.
+	localRequestID string
 }
 
 func (w *schedulingResponseWriter) Write(p []byte) (int, error) {
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+	if w.writeErr != nil {
+		return 0, w.writeErr
+	}
+	if err := w.commitIdentityHeaders(); err != nil {
+		w.writeErr = err
+		return 0, err
+	}
+	if w.request.NativeDelivery && len(p) > 0 && w.Status() < 400 {
+		if !strings.Contains(w.Header().Get("Content-Type"), "text/event-stream") || controlledSSEHasProtocolBytes(p) {
+			w.request.mu.Lock()
+			d := w.request.currentDispatch
+			w.request.mu.Unlock()
+			if d != nil {
+				if err := d.tryCommitAttempt(); err != nil {
+					return 0, err
+				}
+			} else {
+				w.request.mu.Lock()
+				w.request.commitAttemptLocked()
+				w.request.mu.Unlock()
+			}
+		}
+	}
 	n, err := w.ResponseWriter.Write(p)
+	if w.Written() || n > 0 {
+		w.markHTTPCommitted()
+	}
 	if n > 0 && w.Status() < 400 {
 		if strings.Contains(w.Header().Get("Content-Type"), "text/event-stream") {
 			w.parser.Feed(p[:n], func(semantic, answer, terminal bool) {
@@ -397,5 +473,79 @@ func (w *schedulingResponseWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 func (w *schedulingResponseWriter) WriteString(s string) (int, error) { return w.Write([]byte(s)) }
+
+func (w *schedulingResponseWriter) markHTTPCommitted() {
+	w.request.mu.Lock()
+	w.request.httpCommitted = true
+	w.request.mu.Unlock()
+}
+
+func (w *schedulingResponseWriter) commitIdentityHeaders() error {
+	if !w.request.NativeDelivery || w.Status() >= 400 {
+		return nil
+	}
+	for _, key := range []string{"X-Request-Id", "Request-Id", "Openai-Request-Id", "Openai-Response-Id", "X-Response-Id"} {
+		value := w.Header().Get(key)
+		if value == "" || (key == "X-Request-Id" && value == w.localRequestID) {
+			continue
+		}
+		w.request.mu.Lock()
+		d := w.request.currentDispatch
+		w.request.mu.Unlock()
+		if d != nil {
+			return d.tryCommitAttempt()
+		}
+		w.request.mu.Lock()
+		defer w.request.mu.Unlock()
+		if w.request.cancelReason.excludesProviderHealth() {
+			return context.Canceled
+		}
+		w.request.commitAttemptLocked()
+		return nil
+	}
+	return nil
+}
+
+func (w *schedulingResponseWriter) WriteHeader(code int) {
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+	w.ResponseWriter.WriteHeader(code)
+	// Gin stages status until WriteHeaderNow, Write or Flush.
+	if w.Written() {
+		w.markHTTPCommitted()
+	}
+}
+
+func (w *schedulingResponseWriter) WriteHeaderNow() {
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+	if w.writeErr != nil {
+		return
+	}
+	if err := w.commitIdentityHeaders(); err != nil {
+		w.writeErr = err
+		return
+	}
+	w.ResponseWriter.WriteHeaderNow()
+	if w.Written() {
+		w.markHTTPCommitted()
+	}
+}
+
+func (w *schedulingResponseWriter) Flush() {
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+	if w.writeErr != nil {
+		return
+	}
+	if err := w.commitIdentityHeaders(); err != nil {
+		w.writeErr = err
+		return
+	}
+	w.ResponseWriter.Flush()
+	if w.Written() {
+		w.markHTTPCommitted()
+	}
+}
 
 var _ http.ResponseWriter = (*schedulingResponseWriter)(nil)

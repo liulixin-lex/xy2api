@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -68,9 +70,10 @@ func (e *openAIWSDialError) Unwrap() error {
 }
 
 type openAIWSAcquireRequest struct {
-	Account *Account
-	WSURL   string
-	Headers http.Header
+	NativeDelivery bool
+	Account        *Account
+	WSURL          string
+	Headers        http.Header
 	// HeadersFactory is evaluated inside dialConn. It exists so credentials
 	// whose authorization is per-dial (Agent Identity) are never cached in
 	// lastAcquire or delayed prewarm state.
@@ -84,6 +87,7 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
+	transportDigest     [32]byte
 	betaFeatures        string
 	codexInstallationID string
 	sessionIDHyphen     string
@@ -274,13 +278,17 @@ func (l *openAIWSConnLease) Release() {
 	}
 	l.conn.release()
 	if l.pool != nil {
+		if l.conn.nativeDelivery {
+			l.pool.trimNativeIdle(l.accountID)
+		}
 		l.pool.notifyAccountPoolChanged(l.accountID)
 	}
 }
 
 type openAIWSConn struct {
-	id string
-	ws openAIWSClientConn
+	nativeDelivery bool
+	id             string
+	ws             openAIWSClientConn
 
 	handshakeHeaders       http.Header
 	handshakeCompatibility openAIWSHandshakeCompatibilityKey
@@ -1107,6 +1115,7 @@ type openAIWSAcquireQueueWait struct {
 }
 
 func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireRequest) (*openAIWSConnLease, error) {
+	req.NativeDelivery = NativeStreamDeliveryEnabled(ctx)
 	if p != nil {
 		p.metrics.acquireTotal.Add(1)
 	}
@@ -1145,7 +1154,7 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 
 retryAcquire:
 	accountID := req.Account.ID
-	compatibility := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	compatibility := normalizeOpenAIWSAcquireCompatibility(req)
 	routingAffinity := normalizeOpenAIWSRoutingAffinity(req.Headers)
 	effectiveMaxConns := p.effectiveMaxConnsByAccount(req.Account)
 	if effectiveMaxConns <= 0 {
@@ -1663,11 +1672,11 @@ func (p *openAIWSConnPool) cleanupAccountLocked(ap *openAIWSAccountPool, now tim
 			evicted = append(evicted, conn)
 			continue
 		}
-		if p.isConnPinnedLocked(ap, id) {
+		if p.isConnPinnedLocked(ap, id) && !conn.nativeDelivery {
 			continue
 		}
 		if !conn.isLeased() && conn.waiters.Load() == 0 &&
-			!conn.supportsIdlePingWithoutReader() &&
+			(conn.nativeDelivery || !conn.supportsIdlePingWithoutReader()) &&
 			conn.idleDuration(now) >= openAIWSConnIdleRecycleAfter {
 			delete(ap.conns, id)
 			if len(ap.pinnedConns) > 0 {
@@ -1844,7 +1853,7 @@ func (p *openAIWSConnPool) ensureTargetIdleAsync(accountID int64) {
 	}
 	ap.mu.Lock()
 	defer ap.mu.Unlock()
-	if ap.lastAcquire == nil {
+	if ap.lastAcquire == nil || ap.lastAcquire.NativeDelivery {
 		return
 	}
 	if ap.prewarmActive {
@@ -2152,7 +2161,8 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	accountID := req.Account.ID
 	evict := func() { p.evictConn(accountID, id) }
 	pooledConn.onPeerClosed.Store(&evict)
-	pooledConn.handshakeCompatibility = normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	pooledConn.handshakeCompatibility = normalizeOpenAIWSAcquireCompatibility(req)
+	pooledConn.nativeDelivery = req.NativeDelivery
 	pooledConn.routingAffinity = normalizeOpenAIWSRoutingAffinity(req.Headers)
 	return pooledConn, nil
 }
@@ -2456,4 +2466,54 @@ func closeOpenAIWSConns(conns []*openAIWSConn) {
 
 func stringsTrim(value string) string {
 	return strings.TrimSpace(value)
+}
+
+// Native transport isolation is a digest: credentials, destination, proxy and
+// handshake session context can change independently under the same account ID.
+func normalizeOpenAIWSAcquireCompatibility(req openAIWSAcquireRequest) openAIWSHandshakeCompatibilityKey {
+	key := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	if !req.NativeDelivery {
+		return key
+	}
+	material := struct {
+		AccountID   int64
+		Credentials map[string]any
+		URL         string
+		Proxy       string
+		Headers     http.Header
+	}{req.Account.ID, req.Account.Credentials, stringsTrim(req.WSURL), stringsTrim(req.ProxyURL), req.Headers}
+	encoded, err := json.Marshal(material)
+	if err != nil { // Unsupported credential values must never cause cross-key reuse.
+		key.transportDigest = sha256.Sum256([]byte(fmt.Sprintf("unreusable:%p:%d", req.Account, time.Now().UnixNano())))
+		return key
+	}
+	key.transportDigest = sha256.Sum256(encoded)
+	return key
+}
+
+// Active leases remain under the existing account capacity. Only returned idle
+// native connections are capped, without background generate requests.
+func (p *openAIWSConnPool) trimNativeIdle(accountID int64) {
+	ap, ok := p.getAccountPool(accountID)
+	if !ok || ap == nil {
+		return
+	}
+	ap.mu.Lock()
+	idle := make([]*openAIWSConn, 0)
+	for _, conn := range ap.conns {
+		if conn != nil && conn.nativeDelivery && !conn.isLeased() && conn.waiters.Load() == 0 {
+			idle = append(idle, conn)
+		}
+	}
+	sort.Slice(idle, func(i, j int) bool { return idle[i].lastUsedAt().Before(idle[j].lastUsedAt()) })
+	evicted := make([]*openAIWSConn, 0)
+	for len(idle) > 2 {
+		conn := idle[0]
+		idle = idle[1:]
+		delete(ap.conns, conn.id)
+		delete(ap.pinnedConns, conn.id)
+		evicted = append(evicted, conn)
+	}
+	ap.mu.Unlock()
+	closeOpenAIWSConns(evicted)
 }

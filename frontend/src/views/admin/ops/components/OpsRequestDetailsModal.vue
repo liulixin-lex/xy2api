@@ -4,6 +4,7 @@ import { useMediaQuery } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Pagination from '@/components/common/Pagination.vue'
+import NativeStreamDiagnostics from '@/components/settings/NativeStreamDiagnostics.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { useAppStore } from '@/stores'
 import { opsAPI, type OpsRequestDetailsParams, type OpsRequestDetail } from '@/api/admin/ops'
@@ -227,6 +228,7 @@ const kindBadgeClass = (kind: string) => {
                       {{ t('admin.ops.requestDetails.copy') }}
                     </button>
                   </div>
+                  <NativeStreamDiagnostics v-if="row.request_id" :request-id="row.request_id" :user-id="row.user_id" :api-key-id="row.api_key_id" :group-id="row.group_id" />
                   <button
                     v-if="row.kind === 'error' && row.error_id"
                     class="w-full rounded-lg bg-red-50 px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/30"
@@ -300,6 +302,7 @@ const kindBadgeClass = (kind: string) => {
                       </button>
                     </div>
                     <span v-else class="text-xs text-gray-400">-</span>
+                    <NativeStreamDiagnostics v-if="row.request_id" :request-id="row.request_id" :user-id="row.user_id" :api-key-id="row.api_key_id" :group-id="row.group_id" />
                   </td>
                   <td class="whitespace-nowrap px-4 py-3 text-right">
                     <button

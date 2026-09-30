@@ -57,6 +57,11 @@ type controlledDispatch struct {
 	commitToolPending    bool
 	transportTerminal    bool
 	responseDrainTimeout bool
+	headersAt            time.Time
+	attemptCommittedAt   time.Time
+	cancellationReason   ControlledCancelReason
+	sendCertainty        ControlledSendCertainty
+	unknownEventCount    int64
 }
 
 func (s *ControlledSchedulingService) beginDispatch(ctx context.Context, accountID int64, concurrency int) (dispatch *controlledDispatch, dispatchErr error) {
@@ -69,6 +74,10 @@ func (s *ControlledSchedulingService) beginDispatch(ctx context.Context, account
 	defer stopPreparation()
 	defer func() { dispatchErr = controlledPreparationError(liveParent, ctx, dispatchErr) }()
 	r.mu.Lock()
+	if r.cancelReason.excludesProviderHealth() {
+		r.mu.Unlock()
+		return nil, context.Canceled
+	}
 	p := r.Policy
 	ledger := r.Ledger
 	decision := r.Decision
@@ -237,7 +246,7 @@ func (s *ControlledSchedulingService) beginDispatch(ctx context.Context, account
 		return nil, e
 	}
 	live, cancel := context.WithCancel(liveParent)
-	d := &controlledDispatch{service: s, request: r, ticket: ticket, budget: br, decision: decision, cancel: cancel, done: make(chan struct{}), semanticReady: make(chan struct{}), semanticObservable: true, healthObservation: healthObservation}
+	d := &controlledDispatch{service: s, request: r, ticket: ticket, budget: br, decision: decision, cancel: cancel, done: make(chan struct{}), semanticReady: make(chan struct{}), semanticObservable: true, healthObservation: healthObservation, sendCertainty: ControlledNotSent}
 	d.ctx = context.WithValue(live, controlledDispatchContextKey{}, d)
 	if leaseErr := (scheduling.RedisFailureDomains{Client: s.redis}).Acquire(ctx, ticket); leaseErr != nil {
 		d.finishPreparationFailure(leaseErr)
@@ -256,6 +265,7 @@ func (s *ControlledSchedulingService) beginDispatch(ctx context.Context, account
 	}
 	s.active.Store(ticket.TicketID, d)
 	r.mu.Lock()
+	r.currentDispatch = d
 	r.finish = func() {
 		d.Finish("handler_returned", false, fmt.Errorf("handler returned without observed upstream terminal"))
 	}
@@ -314,7 +324,12 @@ func (d *controlledDispatch) MarkSent() (sendErr error) {
 	// Complete all fallible preparation before charging the actual-attempt ledger.
 	// A later Redis/cancellation failure is settled as not_sent and compensated;
 	// the statistics query excludes those aborted dispatch tickets.
-	if err := d.service.Store.RecordAttemptMetrics(prepare, d.ticket.TicketID, map[string]any{"sent_at": time.Now().UTC().Format(time.RFC3339Nano), "group_id": p.GroupID, "model": p.Model, "policy_version": p.Version, "dispatch_kind": kind, "attempt_number": attempt, "priority": d.decision.Priority, "reason": d.decision.Reason, "metric_version": SchedulingMetricVersion}); err != nil {
+	metrics := map[string]any{"sent_at": time.Now().UTC().Format(time.RFC3339Nano), "group_id": p.GroupID, "model": p.Model, "policy_version": p.Version, "dispatch_kind": kind, "attempt_number": attempt, "priority": d.decision.Priority, "reason": d.decision.Reason, "metric_version": SchedulingMetricVersion}
+	if NativeStreamDeliveryEnabled(d.ctx) {
+		metrics["metric_version"] = "native-stream-v1"
+		metrics["native_stream_policy_version"] = NativeStreamPolicyFromContext(d.ctx).Version
+	}
+	if err := d.service.Store.RecordAttemptMetrics(prepare, d.ticket.TicketID, metrics); err != nil {
 		return fmt.Errorf("%w: dispatch record: %v", scheduling.ErrSharedState, err)
 	}
 	if p.Enabled {
@@ -341,6 +356,7 @@ func (d *controlledDispatch) MarkSent() (sendErr error) {
 		}
 	}
 	d.sent = true
+	d.sendCertainty = ControlledSendUnknown
 	d.started = time.Now()
 	r.mu.Lock()
 	r.decisionPending = false
@@ -402,8 +418,17 @@ func (d *controlledDispatch) startFirstOutputTimerLocked() {
 	d.timer = time.AfterFunc(window, func() {
 		d.mu.Lock()
 		defer d.mu.Unlock()
+		if NativeStreamDeliveryEnabled(d.ctx) && d.cancellationReason.excludesProviderHealth() {
+			return
+		}
 		if d.semantic.IsZero() {
 			d.timeout = true
+			if NativeStreamDeliveryEnabled(d.ctx) {
+				d.cancellationReason = ControlledStartupTimeout
+				if !d.firstEvent.IsZero() {
+					d.cancellationReason = ControlledContentTimeout
+				}
+			}
 			if d.semanticObservable {
 				ledger.MarkFirstOutputTimeout()
 			}
@@ -423,16 +448,26 @@ func (d *controlledDispatch) noteEvent(semantic, answer, terminal bool) {
 	}
 	if semantic && d.semantic.IsZero() {
 		d.semantic = now
+		if NativeStreamDeliveryEnabled(d.ctx) && d.request != nil {
+			d.request.mu.Lock()
+			d.request.semanticSeen = true
+			d.request.mu.Unlock()
+		}
 		if d.timer != nil {
 			d.timer.Stop()
 		}
-		close(d.semanticReady)
+		if d.semanticReady != nil {
+			close(d.semanticReady)
+		}
 	}
 	if answer && d.answer.IsZero() {
 		d.answer = now
 	}
 	if terminal {
 		d.terminal = true
+		if NativeStreamDeliveryEnabled(d.ctx) && d.timer != nil {
+			d.timer.Stop()
+		}
 	}
 }
 func (d *controlledDispatch) ObserveFrame(frame []byte) {
@@ -451,6 +486,12 @@ func (d *controlledDispatch) ObserveFrame(frame []byte) {
 	incomplete := kind == "response.incomplete" || kind == "response.cancelled" || kind == "response.canceled" ||
 		status == "incomplete" || status == "cancelled" || status == "canceled"
 	d.mu.Lock()
+	if d.sendCertainty != ControlledExternallyCommitted {
+		d.sendCertainty = ControlledResponseReceived
+	}
+	if !semantic && !answer && !terminal && !tool && !failure && !incomplete && kind != "response.created" && kind != "response.in_progress" && kind != "message_start" && kind != "ping" && kind != "content_block_start" {
+		d.unknownEventCount++
+	}
 	if tool {
 		d.toolPending = true
 	}
@@ -498,6 +539,10 @@ func (d *controlledDispatch) CommitOutput(frame []byte) {
 	if d == nil {
 		return
 	}
+	if NativeStreamDeliveryEnabled(d.ctx) {
+		_ = d.TryCommitOutput(frame)
+		return
+	}
 	semantic, answer, terminal, tool := classifySemanticEvent(frame)
 	d.mu.Lock()
 	if tool {
@@ -519,7 +564,7 @@ func (d *controlledDispatch) maintainLease() {
 	// blocked, rather than continuing an unleased stream indefinitely.
 	leaseExpired := make(chan struct{})
 	leaseTimer := time.AfterFunc(time.Until(d.ticket.LeaseUntil), func() {
-		d.cancel()
+		d.cancelWithReason(ControlledLeaseLost)
 		close(leaseExpired)
 	})
 	defer leaseTimer.Stop()
@@ -546,7 +591,7 @@ func (d *controlledDispatch) maintainLease() {
 				} else {
 					// An expired local holder cannot revive itself after losing its
 					// slot, even if a delayed renewal response arrives successfully.
-					d.cancel()
+					d.cancelWithReason(ControlledLeaseLost)
 					cancel()
 					return
 				}
@@ -554,7 +599,7 @@ func (d *controlledDispatch) maintainLease() {
 			requested, e := d.service.Store.AttemptCancellationRequested(ctx, d.ticket.TicketID)
 			if e == nil && requested {
 				d.adminCancelled.Store(true)
-				d.cancel()
+				d.cancelWithReason(ControlledAdminCancel)
 			}
 			cancel()
 		}
@@ -575,6 +620,13 @@ func (d *controlledDispatch) Finish(outcome string, remoteTerminal bool, err err
 		provenNotSent := !sent || outcome == "not_sent"
 		timeout, clipped, upstreamFailure, explicitExcluded, terminal, retryAfter, status := d.timeout, d.clipped, d.upstreamFailure, d.excluded, d.terminal, d.retryAfter, d.status
 		semanticObservable := d.semanticObservable
+		cancellationReason, certaintyState := d.cancellationReason, d.sendCertainty
+		headersAt, committedAt := d.headersAt, d.attemptCommittedAt
+		unknownEvents := d.unknownEventCount
+		if provenNotSent {
+			certaintyState = ControlledNotSent
+			d.sendCertainty = ControlledNotSent
+		}
 		d.mu.Unlock()
 		close(d.done)
 		d.cancel()
@@ -601,6 +653,15 @@ func (d *controlledDispatch) Finish(outcome string, remoteTerminal bool, err err
 		}
 		if r.clientContext != nil && r.clientContext.Err() != nil {
 			outcome = "client_cancelled"
+		}
+		if NativeStreamDeliveryEnabled(d.ctx) {
+			if cancellationReason == "" && r.clientContext != nil && r.clientContext.Err() != nil {
+				cancellationReason = ControlledClientDetached
+			}
+			if cancellationReason != "" {
+				outcome = string(cancellationReason)
+				excluded = excluded || cancellationReason.excludesProviderHealth()
+			}
 		}
 		if !sent {
 			d.service.releaseDecisionContext(ctx, d.decision)
@@ -698,6 +759,16 @@ func (d *controlledDispatch) Finish(outcome string, remoteTerminal bool, err err
 			}
 			v := t.Sub(started).Milliseconds()
 			return &v
+		}
+		if NativeStreamDeliveryEnabled(d.ctx) {
+			trace.HeadersMS = ms(headersAt)
+			trace.AttemptCommittedMS = ms(committedAt)
+			trace.SendCertainty = certaintyState
+			trace.CancelReason = cancellationReason
+			trace.MetricVersion = "native-stream-v1"
+			trace.FirstProtocolEventMS = ms(firstEvent)
+			trace.FirstContentMS = ms(semantic)
+			trace.UnknownEventCount = unknownEvents
 		}
 		trace.FirstEventMS = ms(firstEvent)
 		trace.FirstSemanticMS = ms(semantic)
@@ -827,6 +898,8 @@ func (s *ControlledSchedulingService) roundTrip(req *http.Request, accountID int
 	}()
 	d.mu.Lock()
 	d.status = response.StatusCode
+	d.headersAt = time.Now()
+	d.sendCertainty = ControlledResponseReceived
 	d.upstreamFailure = response.StatusCode == 429 || response.StatusCode >= 500
 	d.excluded = response.StatusCode >= 400 && response.StatusCode < 500 && response.StatusCode != 401 && response.StatusCode != 403 && response.StatusCode != 429
 	if response.StatusCode >= 400 {
@@ -837,7 +910,9 @@ func (s *ControlledSchedulingService) roundTrip(req *http.Request, accountID int
 		d.observeRateLimit(response.Header.Get("Retry-After"))
 	}
 	d.observeFailureResponse(response)
-	d.noteEvent(false, false, false)
+	if !NativeStreamDeliveryEnabled(req.Context()) {
+		d.noteEvent(false, false, false)
+	}
 	d.mu.Lock()
 	d.semanticObservable = !buffered && (strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") || strings.Contains(response.Header.Get("Content-Type"), "application/vnd.amazon.eventstream")) && response.StatusCode < 400
 	if response.StatusCode < 400 {
@@ -847,7 +922,7 @@ func (s *ControlledSchedulingService) roundTrip(req *http.Request, accountID int
 	d.parser.onFrame = d.ObserveFrame
 	body := &controlledResponseBody{ReadCloser: response.Body, dispatch: d, buffered: buffered, sse: strings.Contains(response.Header.Get("Content-Type"), "text/event-stream"), success: response.StatusCode < 400, decoded: strings.Contains(response.Header.Get("Content-Type"), "application/vnd.amazon.eventstream")}
 	response.Body = body
-	if body.sse && !body.buffered && body.success && ControlledSchedulingEnabled(req.Context()) {
+	if body.sse && !body.buffered && body.success && ControlledSchedulingEnabled(req.Context()) && !NativeStreamDeliveryEnabled(req.Context()) {
 		var prefix bytes.Buffer
 		buf := make([]byte, 16*1024)
 		for {
@@ -907,11 +982,20 @@ type controlledResponseBody struct {
 	decoded                bool
 	nonstreamValidated     bool
 	nonstreamValidationErr error
+	pendingReadErr         error
 }
 
 func (b *controlledResponseBody) Read(p []byte) (int, error) {
-	n, e := b.ReadCloser.Read(p)
+	n, e := 0, b.pendingReadErr
+	b.pendingReadErr = nil
+	if e == nil {
+		n, e = b.ReadCloser.Read(p)
+	}
 	e = b.dispatch.responseReadError(e)
+	// Return bytes before terminal bookkeeping can wait on a datastore.
+	if n > 0 && e != nil && NativeStreamDeliveryEnabled(b.dispatch.ctx) {
+		b.pendingReadErr, e = e, nil
+	}
 	if b.decoded {
 		return n, e
 	}

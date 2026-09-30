@@ -435,6 +435,9 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 			if deps.cfg == nil || !deps.cfg.Database.UserPlatformQuotaFlusherEnabled {
 				// 降级路径:flusher 未启用时保留原有异步直写 DB
 				dbCtx, dbCancel := detachUpstreamContext(ctx)
+				if NativeStreamDeliveryEnabled(ctx) {
+					dbCtx, dbCancel = detachedBillingContext(ctx)
+				}
 				userID, platform, cost := p.User.ID, p.Platform, p.Cost.ActualCost
 				go func() {
 					defer func() {
@@ -567,6 +570,9 @@ func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Cont
 	if !stream {
 		return ctx, func() {}
 	}
+	if NativeStreamDeliveryEnabled(ctx) {
+		return context.WithCancel(ctx)
+	}
 	// Retain the original cancellation signal for observation only. Billing and
 	// upstream work still use the detached context.
 	return context.WithValue(context.WithoutCancel(ctx), codexTicketClientContextKey{}, ctx), func() {}
@@ -575,6 +581,11 @@ func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Cont
 func detachUpstreamContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		return context.Background(), func() {}
+	}
+	if NativeStreamDeliveryEnabled(ctx) {
+		// Existing request builders release this preparation handle immediately.
+		// The transport owns its separate cancellation handle until Body.Close.
+		return ctx, func() {}
 	}
 	// Retain the original cancellation signal for observation only. Billing and
 	// upstream work still use the detached context.

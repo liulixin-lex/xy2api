@@ -31,6 +31,10 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	stateStore OpenAIWSStateStore,
 	groupID int64,
 ) error {
+	if NativeStreamDeliveryEnabled(ctx) {
+		return nil
+	}
+
 	if s == nil {
 		return nil
 	}

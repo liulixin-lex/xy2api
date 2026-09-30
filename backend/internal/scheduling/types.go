@@ -23,7 +23,7 @@ var (
 	ErrSharedState          = errors.New("shared scheduling state unavailable")
 	ErrAttemptBudget        = errors.New("request attempt budget exhausted")
 	ErrDeadline             = errors.New("request first-output deadline exhausted")
-	ErrCommitted            = errors.New("response already semantically committed")
+	ErrCommitted            = errors.New("response attempt already committed")
 	ErrUnsafeReplay         = errors.New("request cannot be replayed safely")
 	ErrRetryBudget          = errors.New("shared retry budget exhausted")
 	ErrHealthIdentity       = errors.New("invalid health observation identity")

@@ -35,7 +35,7 @@ func nonstreamReadError(ctx context.Context, resp *http.Response, err error) err
 	}
 	if r := controlledRequest(ctx); r != nil {
 		r.mu.Lock()
-		blocked := !r.ReplaySafe || r.owner || !r.semanticAt.IsZero()
+		blocked := !r.ReplaySafe || r.owner || r.attemptCommitted || !r.semanticAt.IsZero()
 		ledger, limit := r.Ledger, r.Policy.Retry.MaxAttempts
 		r.mu.Unlock()
 		if blocked {

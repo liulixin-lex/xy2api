@@ -31,6 +31,7 @@
       <details v-if="migrationWarnings.length" class="text-sm text-gray-600 dark:text-dark-300"><summary class="cursor-pointer">{{ t('admin.scheduling.groupPolicy.historyNotes') }}</summary><ul class="mt-2 list-inside list-disc"><li v-for="warning in migrationWarnings" :key="warning.code">{{ warning.message }}</li></ul></details>
       <form v-if="policy" class="space-y-5" @submit.prevent="save">
         <fieldset :disabled="saving || loading || !modeStore.isControlled" class="min-w-0 space-y-5">
+          <NativeStreamSettings v-model="policy.native_stream" />
           <section class="scheduling-card">
             <h2 class="font-semibold">{{ t('admin.scheduling.groupPolicy.accountTitle') }}</h2>
             <p class="mt-2 text-sm text-gray-500 dark:text-dark-400">{{ t('admin.scheduling.groupPolicy.accountHint') }}</p>
@@ -115,6 +116,7 @@ import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
+import NativeStreamSettings from '@/components/settings/NativeStreamSettings.vue'
 import { useSchedulingModeStore } from '@/stores/schedulingMode'
 import { useSchedulingFeedback } from '@/composables/useSchedulingFeedback'
 import schedulingAPI from '@/api/admin/scheduling'

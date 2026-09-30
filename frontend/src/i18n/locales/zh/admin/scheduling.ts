@@ -1,5 +1,54 @@
 export default {
   "scheduling": {
+    "nativeMetrics": {
+  "attemptHistory": "各次尝试记录",
+  "attemptNumber": "尝试 {number}",
+  "attachments": "附着次数",
+  "cancelRequested": "已请求上游取消",
+  "cancelConfirmed": "上游确认取消",
+  "unconfirmed": "尚未确认",
+  "states": {
+    "in_progress": "生成中",
+    "client_detached": "客户端暂离",
+    "completed": "完成",
+    "incomplete": "部分结果可读取",
+    "failed": "失败",
+    "cancelled": "取消",
+    "replaying": "补发中",
+    "resuming": "上游续传中"
+  },
+      "title": "原生交付时间线",
+      "unknown": "未记录",
+      "legacy": "该记录没有可用的原生测量数据或已过保留期；旧首字指标不代表首事件时间。",
+      "failed": "暂时无法读取时间线，请重试。",
+      "metricHint": "首内容不含心跳或 created。时间仅来自真实观测，缺失项不推算。单次耗时相对该次尝试；端到端耗时包含重试。",
+      "started": "请求进入",
+      "headers": "响应头耗时",
+      "firstEvent": "首协议事件耗时",
+      "firstContent": "首内容耗时",
+      "overallContent": "端到端首内容",
+      "flush": "首次下游 Flush",
+      "gatewayDelay": "完整事件至 Flush",
+      "attempts": "生成尝试次数",
+      "priority": "当前优先级",
+      "selection": "选择/绑定原因",
+      "certainty": "发送确定性",
+      "finalState": "执行状态",
+      "recovery": "恢复资格",
+      "offline": "剩余累计离线预算",
+      "replays": "历史补发事件数",
+      "reason": "取消/不可恢复原因"
+    },
+    "nativeStream": {
+      "title": "原生流式与恢复",
+      "snapshotHint": "保存后只影响本组新请求；进行中的响应按创建时的配置收尾。",
+      "delivery": "原生流式交付",
+      "deliveryHint": "完整协议事件立即交付，同时启用不可回退的提交边界和明确取消归因。不会缩短已有等待预算。",
+      "recovery": "原生断线恢复",
+      "recoveryHint": "仅对有原生后台意图、身份、游标及已验证能力的 HTTP 请求启用。离线生成累计最多 120 秒。WS 恢复能力未确认，普通断连仍取消。",
+      "persistence": "恢复记录持久化",
+      "persistenceHint": "后续阶段提供。当前记录仅在本进程内存保留，不支持进程崩溃或跨实例恢复。"
+    },
     "modeSettings": {
       "title": "调度模式",
       "hint": "切换只影响新请求，不改变账号的启用状态；正在进行的请求继续完成。",
@@ -21,6 +70,8 @@ export default {
       "defaultPriorityHint": "仅作为未设置分组规则时的默认值；已保存分组的优先级在账号调度中调整。"
     },
     "groupPolicy": {
+      "recoveryRequiresDelivery": "请先开启原生流式交付，再启用断线恢复。",
+      "persistenceUnavailable": "当前阶段尚不支持恢复记录持久化。",
       "description": "按分组安排账号先后和分配比例，自动跳过忙碌或不可用账号。",
       "selectGroup": "选择要调整的分组",
       "ungrouped": "未分组账号",

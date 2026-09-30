@@ -4,6 +4,11 @@ export interface GroupSchedulingAccount {
   priority: number
   traffic_weight: number
 }
+export interface NativeStreamFeatures {
+  delivery: boolean
+  recovery: boolean
+  persistence: boolean
+}
 export interface GroupSchedulingPolicy {
   group_id: number
   version: number
@@ -11,6 +16,7 @@ export interface GroupSchedulingPolicy {
   first_output_timeout_ms: number
   total_wait_timeout_ms: number
   max_attempts: number
+  native_stream?: NativeStreamFeatures
 }
 export interface GroupSchedulingMigrationWarning {
   code: string

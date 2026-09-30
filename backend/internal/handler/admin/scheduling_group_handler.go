@@ -51,9 +51,10 @@ type groupPolicyInput struct {
 		Weight    *int64 `json:"traffic_weight"`
 		FillOrder int    `json:"fill_order"`
 	} `json:"accounts"`
-	FirstOutputTimeoutMS *int64 `json:"first_output_timeout_ms"`
-	TotalWaitTimeoutMS   *int64 `json:"total_wait_timeout_ms"`
-	MaxAttempts          *int   `json:"max_attempts"`
+	FirstOutputTimeoutMS *int64                           `json:"first_output_timeout_ms"`
+	TotalWaitTimeoutMS   *int64                           `json:"total_wait_timeout_ms"`
+	MaxAttempts          *int                             `json:"max_attempts"`
+	NativeStream         *scheduling.NativeStreamFeatures `json:"native_stream"`
 }
 
 func (h *SchedulingHandler) PutGroupPolicy(c *gin.Context) {
@@ -91,6 +92,17 @@ func (h *SchedulingHandler) PutGroupPolicy(c *gin.Context) {
 		return
 	}
 	p := scheduling.GroupPolicy{GroupID: id, Version: input.Version, Accounts: []scheduling.AccountRule{}, FirstOutputTimeoutMS: *input.FirstOutputTimeoutMS, TotalWaitTimeoutMS: *input.TotalWaitTimeoutMS, MaxAttempts: *input.MaxAttempts}
+	if input.NativeStream != nil {
+		p.NativeStream = *input.NativeStream
+	} else {
+		// Older clients preserve feature flags rather than disabling them on save.
+		current, readErr := store.GetGroupPolicy(c.Request.Context(), id)
+		if readErr != nil {
+			groupSchedulingError(c, readErr)
+			return
+		}
+		p.NativeStream = current.Policy.NativeStream
+	}
 	for _, a := range input.Accounts {
 		if a.Weight == nil {
 			response.BadRequest(c, "Every account requires an explicit traffic_weight")

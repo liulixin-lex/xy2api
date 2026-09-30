@@ -941,8 +941,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return errors.New("openai ws passthrough upstream connection does not support frame relay")
 	}
 	var controlledRelay *openAIWSControlledPassthroughFrameConn
+	readTimedUpstream := &nativeWSReadTimedFrameConn{FrameConn: upstreamFrameConn}
 	relayUpstreamFrameConn := &openAIWSPassthroughFirstOutputFrameConn{
-		inner:             upstreamFrameConn,
+		inner:             readTimedUpstream,
 		activeReadTimeout: s.openAIWSPassthroughIdleTimeout(),
 		deadlineChanged:   make(chan struct{}, 1),
 		resolveDeadline: func(payload []byte) openAIWSPassthroughFirstOutputDeadline {
@@ -978,8 +979,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		},
 	}
 
-	var upstreamRelayConn openaiwsv2.FrameConn = relayUpstreamFrameConn
-	if s.controlledScheduling != nil {
+	var upstreamRelayConn openaiwsv2.FrameConn
+	{
+		// Track each turn even when scheduling is observe-only so a long-lived
+		// connection can adopt policy changes at its next create boundary.
 		controlledRelay = newOpenAIWSControlledPassthroughFrameConn(ctx, relayUpstreamFrameConn, func(payload []byte, newTurn bool) (context.Context, controlledPassthroughAttempt, error) {
 			turnModel, _ := usageMeta.turnModels(initialRequestModel)
 			turnCtx, err := s.prepareControlledWSTurn(ctx, c, payload, turnModel, promptCacheKey, newTurn)
@@ -1231,6 +1234,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if writeErr := upstreamFrameConn.WriteFrame(readCtx, msgType, payload); writeErr != nil {
 				return msgType, payload, writeErr
 			}
+			if turnCtx := controlledRelay.turnContext(); NativeStreamDeliveryEnabled(turnCtx) && strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.cancel" {
+				_ = CancelControlledRequest(turnCtx, ControlledUserStop)
+				controlledRelay.cancel(fmt.Errorf("user_stop: %w", context.Canceled))
+				return msgType, payload, context.Canceled
+			}
 		}
 	}
 
@@ -1239,6 +1247,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		firstTurnStartedAt = hooks.InitialTurnStartedAt
 	}
 	failureAccountSideEffectsApplied := false
+	currentTurnContext := func() context.Context {
+		if turnCtx := controlledRelay.turnContext(); turnCtx != nil {
+			return turnCtx
+		}
+		return ctx
+	}
 	relayResult, relayExit := openaiwsv2.RunEntry(openaiwsv2.EntryInput{
 		Ctx:                ctx,
 		ClientConn:         policyClientConn,
@@ -1262,6 +1276,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			FirstMessageSent:                upstreamFirstMessageSent,
 			StartClientAfterFirstDownstream: true,
 			ReadClientFrame:                 readNextClientFrame,
+			CancelUpstreamOnClientDisconnect: func() bool {
+				return NativeStreamDeliveryEnabled(currentTurnContext())
+			},
 			OnUsageParseFailure: func(eventType string, usageRaw string) {
 				logOpenAIWSV2Passthrough(
 					"usage_parse_failed event_type=%s usage_raw=%s",
@@ -1330,8 +1347,26 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 			},
 			AfterClientWrite: func(msgType coderws.MessageType, payload []byte, writeErr error) {
+				turnCtx := currentTurnContext()
+				if NativeStreamDeliveryEnabled(turnCtx) && writeErr != nil {
+					reason := ControlledClientDetached
+					if errors.Is(writeErr, context.DeadlineExceeded) {
+						reason = ControlledSlowConsumer
+					}
+					_ = CancelControlledRequest(turnCtx, reason)
+					writeErr = fmt.Errorf("%s: %w: %v", reason, context.Canceled, writeErr)
+				}
+				if NativeStreamDeliveryEnabled(turnCtx) && writeErr == nil {
+					RecordNativeStreamFlush(turnCtx, readTimedUpstream.readCompletedAt(), time.Now())
+				}
+				if NativeStreamDeliveryEnabled(turnCtx) && msgType == coderws.MessageText && !failureAccountSideEffectsApplied {
+					eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
+					if (eventType == "error" || eventType == "response.failed") && !markOpenAIWSV2PassthroughCyberPolicy(c, payload) {
+						failureAccountSideEffectsApplied = s.handleOpenAIWSFailureAccountSideEffects(turnCtx, account, capturedSessionModel, handshakeHeaders, payload)
+					}
+				}
 				if controlledRelay != nil && (msgType == coderws.MessageText || msgType == coderws.MessageBinary) {
-					if writeErr == nil {
+					if writeErr == nil && !NativeStreamDeliveryEnabled(currentTurnContext()) {
 						controlledRelay.commitOutput(payload)
 					}
 					if openAIWSPassthroughIsTerminalOutput(payload) {
@@ -1347,6 +1382,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 			},
 			BeforeRelayCancel: func(exit openaiwsv2.RelayExit) {
+				if turnCtx := currentTurnContext(); NativeStreamDeliveryEnabled(turnCtx) && (exit.Stage == "read_client" || exit.Stage == "write_client") {
+					reason := ControlledClientDetached
+					if exit.Stage == "write_client" && errors.Is(exit.Err, context.DeadlineExceeded) {
+						reason = ControlledSlowConsumer
+					}
+					_ = CancelControlledRequest(turnCtx, reason)
+					controlledRelay.cancel(fmt.Errorf("%s: %w", reason, context.Canceled))
+				}
 				var reroute *OpenAIQualityRerouteError
 				if errors.As(exit.Err, &reroute) {
 					return
@@ -1365,7 +1408,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				_ = clientConn.Close(status, reason)
 				_ = clientConn.CloseNow()
 			},
-			BeforeWriteClient: func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error {
+			BeforeWriteClient: func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) (guardErr error) {
+				// Classify a retryable startup error before committing; every other
+				// accepted upstream frame commits atomically before any socket write.
+				defer func() {
+					if guardErr == nil && NativeStreamDeliveryEnabled(currentTurnContext()) && (msgType == coderws.MessageText || msgType == coderws.MessageBinary) {
+						guardErr = controlledRelay.tryCommitOutput(payload)
+					}
+				}()
 				if msgType != coderws.MessageText {
 					return nil
 				}
@@ -1391,7 +1441,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(payload)
 				isPreOutputRateLimit := eventType == "error" && !wroteDownstream && isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw)
-				if (eventType == "error" || eventType == "response.failed") && !failureAccountSideEffectsApplied && !isPreOutputRateLimit {
+				if (eventType == "error" || eventType == "response.failed") && !NativeStreamDeliveryEnabled(currentTurnContext()) && !failureAccountSideEffectsApplied && !isPreOutputRateLimit {
 					failureAccountSideEffectsApplied = s.handleOpenAIWSFailureAccountSideEffects(ctx, account, capturedSessionModel, handshakeHeaders, payload)
 				}
 				if eventType != "error" {
@@ -1432,6 +1482,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			},
 		},
 	})
+	if NativeStreamDeliveryEnabled(currentTurnContext()) {
+		if cause := context.Cause(controlledRelay.ctx); cause != nil && errors.Is(cause, context.Canceled) {
+			// A client stop is a canceled generation, even when the WS close
+			// handshake itself completed gracefully. Do not settle it as success.
+			relayExit = &openaiwsv2.RelayExit{Stage: "client_disconnected", Err: cause, WroteDownstream: ControlledStreamSnapshot(currentTurnContext()).AttemptCommitted}
+		}
+	}
 	if relayExit != nil {
 		var reroute *OpenAIQualityRerouteError
 		if errors.As(relayExit.Err, &reroute) {
@@ -1693,4 +1750,26 @@ func logOpenAIWSV2Passthrough(format string, args ...any) {
 		"[OpenAI WS v2 passthrough] %s "+format,
 		append([]any{openaiWSV2PassthroughModeFields}, args...)...,
 	)
+}
+
+// Capture the actual complete WS read before classification, accounting, or
+// protocol conversion. The relay has one upstream reader and one writer.
+type nativeWSReadTimedFrameConn struct {
+	openaiwsv2.FrameConn
+	readAt atomic.Int64
+}
+
+func (c *nativeWSReadTimedFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
+	typ, payload, err := c.FrameConn.ReadFrame(ctx)
+	if err == nil {
+		c.readAt.Store(time.Now().UnixNano())
+	}
+	return typ, payload, err
+}
+func (c *nativeWSReadTimedFrameConn) readCompletedAt() time.Time {
+	ns := c.readAt.Load()
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns)
 }

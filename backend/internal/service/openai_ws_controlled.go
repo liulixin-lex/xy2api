@@ -12,6 +12,13 @@ import (
 // each subsequently accepted turn its own deadline and budget. Session ownership
 // remains stable across turns and does not become ordinary weighted traffic.
 func (s *OpenAIGatewayService) prepareControlledWSTurn(ctx context.Context, c *gin.Context, body []byte, originalModel, sessionID string, newTurn bool) (context.Context, error) {
+	if newTurn {
+		var err error
+		ctx, err = RefreshNativeStreamPolicy(ctx)
+		if err != nil {
+			return ctx, err
+		}
+	}
 	if s == nil || s.controlledScheduling == nil {
 		return ctx, nil
 	}

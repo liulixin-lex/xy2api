@@ -38,6 +38,14 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
+	nativeDelivery := NativeStreamDeliveryEnabled(ctx)
+	requestMayHaveBeenSent := false
+	defer func() {
+		var fallbackErr *openAIWSFallbackError
+		if nativeDelivery && requestMayHaveBeenSent && errors.As(forwardErr, &fallbackErr) {
+			fallbackErr.RequestSent = true
+		}
+	}()
 	responseModelObserver := s.qualityObserver(ctx, account, openAIWSPayloadString(reqBody, "model"))
 
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
@@ -338,7 +346,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		if stateStore != nil && sessionHash != "" {
 			stateStore.BindSessionTurnState(groupID, sessionHash, handshakeTurnState, s.openAIWSSessionStickyTTL())
 		}
-		if c != nil {
+		if c != nil && !nativeDelivery {
 			c.Header(http.CanonicalHeaderKey(openAIWSTurnStateHeader), handshakeTurnState)
 		}
 	}
@@ -383,6 +391,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		controlledDispatch.finishPreparationFailure(err)
 		return nil, err
 	}
+	requestMayHaveBeenSent = true
 	if err := lease.WriteJSONWithContextTimeout(ctx, wirePayload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
@@ -439,7 +448,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 		clientDisconnected = true
 		clientDisconnectDrainStartedAt = time.Now()
-		if !upstreamReadDetached {
+		if !nativeDelivery && !upstreamReadDetached {
 			upstreamReadCtx = context.WithoutCancel(ctx)
 			upstreamReadDetached = true
 		}
@@ -498,6 +507,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 
 	flushBatchSize := s.openAIWSEventFlushBatchSize()
 	flushInterval := s.openAIWSEventFlushInterval()
+	if nativeDelivery {
+		flushBatchSize = 1
+	}
+	var outputCommitErr error
+	var nativeReadAt time.Time
 	pendingFlushEvents := 0
 	lastFlushAt := time.Now()
 	flushStreamWriter := func(force bool) {
@@ -510,6 +524,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			}
 		}
 		flusher.Flush()
+		if nativeDelivery {
+			RecordNativeStreamFlush(ctx, nativeReadAt, time.Now())
+		}
 		pendingFlushEvents = 0
 		lastFlushAt = time.Now()
 	}
@@ -521,6 +538,19 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		frame = append(frame, "data: "...)
 		frame = append(frame, message...)
 		frame = append(frame, '\n', '\n')
+		if nativeDelivery {
+			if err := controlledDispatch.TryCommitOutput(message); err != nil {
+				outputCommitErr = err
+				lease.MarkBroken()
+				return
+			}
+			if handshakeTurnState != "" {
+				c.Header(http.CanonicalHeaderKey(openAIWSTurnStateHeader), handshakeTurnState)
+			}
+			MarkResponseCommitted(c)
+			RecordNativeStreamEventRead(ctx, nativeReadAt)
+			wroteDownstream = true
+		}
 		_, wErr := c.Writer.Write(frame)
 		if wErr == nil {
 			controlledDispatch.CommitOutput(message)
@@ -563,6 +593,13 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 readLoop:
 	for {
 		markClientRequestCanceled()
+		if nativeDelivery && (clientDisconnected || outputCommitErr != nil) {
+			lease.MarkBroken()
+			if outputCommitErr != nil {
+				return resultWithUsage(), outputCommitErr
+			}
+			return resultWithUsage(), fmt.Errorf("client_detached: %w", context.Canceled)
+		}
 		var message []byte
 		var readErr error
 		readUsedDetachedContext := upstreamReadDetached
@@ -596,6 +633,7 @@ readLoop:
 				}
 			}
 		}
+		nativeReadAt = time.Now()
 		markClientRequestCanceled()
 		if readErr == nil && !json.Valid(message) {
 			eventType, _, _ := parseOpenAIWSEventEnvelope(message)
@@ -636,7 +674,7 @@ readLoop:
 				truncateOpenAIWSLogValue(lastEventType, openAIWSLogValueMaxLen),
 			)
 			if clientDisconnected {
-				if !readUsedDetachedContext && errors.Is(readErr, context.Canceled) && clientRequestCanceled() {
+				if !nativeDelivery && !readUsedDetachedContext && errors.Is(readErr, context.Canceled) && clientRequestCanceled() {
 					continue
 				}
 				break
@@ -657,7 +695,7 @@ readLoop:
 			controlledTerminal = true
 		}
 
-		if eventType == "" {
+		if eventType == "" && !nativeDelivery {
 			continue
 		}
 		responseModelObserver.ObserveOpenAI(message, eventType)
@@ -789,7 +827,7 @@ readLoop:
 		if reqStream {
 			// 在首个 token 前先缓冲事件（如 response.created），
 			// 以便上游早期断连时仍可安全回退到 HTTP，不给下游发送半截流。
-			shouldBuffer := firstTokenMs == nil && !isTokenEvent && !isTerminalEvent
+			shouldBuffer := !nativeDelivery && firstTokenMs == nil && !isTokenEvent && !isTerminalEvent
 			if shouldBuffer {
 				buffered := make([]byte, len(message))
 				copy(buffered, message)
@@ -816,6 +854,13 @@ readLoop:
 			}
 		}
 
+		if outputCommitErr != nil {
+			return resultWithUsage(), outputCommitErr
+		}
+		if nativeDelivery && clientDisconnected {
+			lease.MarkBroken()
+			return resultWithUsage(), fmt.Errorf("client_detached: %w", context.Canceled)
+		}
 		if isTerminalEvent {
 			if !clientDisconnected {
 				markOpenAIWSClientVisibleFailure(c, eventType, message)
