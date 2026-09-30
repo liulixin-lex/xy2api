@@ -627,6 +627,7 @@ const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
 const togglingSchedulable = ref(new Set<number>())
 let schedulingMutationVersion = 0
+const confirmedSchedulingUpdates = new Map<number, { version: number; schedulable: boolean }>()
 const togglingIQCheck = ref(new Set<number>())
 const iqRecordsAccount = ref<Account | null>(null)
 const handleIQSummaryUpdated = (state: NonNullable<Account['iq_check']>) => {
@@ -1106,12 +1107,10 @@ const {
   fetchFn: async (...args: Parameters<typeof adminAPI.accounts.list>): ReturnType<typeof adminAPI.accounts.list> => {
     const version = schedulingMutationVersion
     const result = await adminAPI.accounts.list(...args)
-    if (version === schedulingMutationVersion && togglingSchedulable.value.size === 0) return result
-    // A list requested before an account toggle must not restore its old switch state.
-    const confirmed = new Map(accounts.value.map(account => [account.id, account.schedulable]))
-    return { ...result, items: result.items.map(account => confirmed.has(account.id)
-      ? { ...account, schedulable: confirmed.get(account.id)! }
-      : account) }
+    return { ...result, items: result.items.map(account => {
+      const update = confirmedSchedulingUpdates.get(account.id)
+      return update && update.version > version ? { ...account, schedulable: update.schedulable } : account
+    }) }
   },
   initialParams: {
     platform: '',
@@ -1207,6 +1206,15 @@ const reload = async () => {
   pendingTodayStatsRefresh.value = false
   await baseReload()
   await refreshTodayStatsBatch()
+}
+
+let accountFocusRefreshAt = 0
+const refreshAccountListOnFocus = () => {
+  if (document.hidden || loading.value || togglingSchedulable.value.size || Date.now() - accountFocusRefreshAt < 1000) return
+  accountFocusRefreshAt = Date.now()
+  load({ refreshTodayStats: false }).catch((error) => {
+    console.error('Failed to refresh accounts after returning to the page:', error)
+  })
 }
 
 const buildUpstreamBillingRateFilters = () => {
@@ -1426,6 +1434,7 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
     current.current_window_cost !== next.current_window_cost ||
     current.active_sessions !== next.active_sessions ||
     current.schedulable !== next.schedulable ||
+    current.rate_multiplier !== next.rate_multiplier ||
     current.status !== next.status ||
     current.rate_limit_reset_at !== next.rate_limit_reset_at ||
     current.overload_until !== next.overload_until ||
@@ -1984,6 +1993,8 @@ const handleBulkProbeUpstreamBilling = async () => {
 }
 const updateSchedulableInList = (accountIds: number[], schedulable: boolean) => {
   if (accountIds.length === 0) return
+  const version = ++schedulingMutationVersion
+  for (const id of accountIds) confirmedSchedulingUpdates.set(id, { version, schedulable })
   const idSet = new Set(accountIds)
   accounts.value = accounts.value.map((account) => (idSet.has(account.id) ? { ...account, schedulable } : account))
 }
@@ -2620,6 +2631,8 @@ onMounted(async () => {
   }
   window.addEventListener('scroll', handleScroll, true)
   window.addEventListener('resize', handleViewportResize)
+  window.addEventListener('focus', refreshAccountListOnFocus)
+  document.addEventListener('visibilitychange', refreshAccountListOnFocus)
   document.addEventListener('click', handleClickOutside)
 
   if (autoRefreshEnabled.value) {
@@ -2638,6 +2651,8 @@ onUnmounted(() => {
   }
   pendingUsageBatchIds.clear()
   window.removeEventListener('scroll', handleScroll, true)
+  window.removeEventListener('focus', refreshAccountListOnFocus)
+  document.removeEventListener('visibilitychange', refreshAccountListOnFocus)
   window.removeEventListener('resize', handleViewportResize)
   document.removeEventListener('click', handleClickOutside)
   if (desktopViewportMediaQuery && desktopViewportListener) {

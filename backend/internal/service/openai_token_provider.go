@@ -132,6 +132,15 @@ func (p *OpenAITokenProvider) ensureMetrics() {
 
 // GetAccessToken returns a valid access_token.
 func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Account) (string, error) {
+	return p.getAccessToken(ctx, account, true)
+}
+
+// GetAccessTokenForIQProbe does not let a diagnostic probe quarantine the account.
+func (p *OpenAITokenProvider) GetAccessTokenForIQProbe(ctx context.Context, account *Account) (string, error) {
+	return p.getAccessToken(ctx, account, false)
+}
+
+func (p *OpenAITokenProvider) getAccessToken(ctx context.Context, account *Account, quarantineMissingRefresh bool) (string, error) {
 	p.ensureMetrics()
 	if account == nil {
 		return "", errors.New("account is nil")
@@ -162,7 +171,9 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 			const reason = "openai access_token expired and refresh_token is missing"
 			// 永久故障：缺失 refresh_token 时账号无法自愈，必须立即从调度池剔除，
 			// 否则会被反复选中、每次都在 token 阶段直接返回错误，对用户呈现持续 502。
-			p.disableAccountMissingRefreshToken(account, reason)
+			if quarantineMissingRefresh {
+				p.disableAccountMissingRefreshToken(account, reason)
+			}
 			return "", errors.New(reason)
 		}
 		needsRefresh = false

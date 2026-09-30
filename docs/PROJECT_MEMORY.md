@@ -4,6 +4,21 @@
 
 ## 当前交接状态
 
+### 0.2.2 协议验收补修（2026-09-30，待后继最终门禁）
+
+- 04b661b 的9类CI和候选状态码检查通过后，独立逐条原始HTTP审查发现 /v1/responses 非法reasoning参数先写400 JSON、后被handler重复追加SSE终止事件。该候选已阻断，原成功状态码检查与失败协议证据均保留，未合并或发布。
+- 最小修复仅调整 openAIForwardErrorAlreadyCommunicated：排除keepalive字节后，实际非空正文已写、HTTP>=400且精确application/json才认为错误已告知；保留空响应、HTTP200部分输出、SSE心跳及原terminal/cyber契约。service、调度策略、依赖、前端不变。
+- 新回归用真实Forward与外层fallback组合覆盖APIKey/OAuth、stream false/true、none/minimal；另验证charset/大小写、JSONP/problem+json、空400、未写及SSE边界。相同输入BASELINE-02退出1、MODIFIED退出0，2主18子通过；最初编译接参错误保留后已修正。
+- 后继必须重新获得精确head CI和严格镜像验收；原始runtime仅PASS状态码不再作为完整协议通过。严格验收要求两模式三接口的非法参数返回单个可解析JSON，含流式/非流式请求。完整新结果及四角色由外部发布账本记录。
+
+### 0.2.2 合并发布候选（2026-09-30，待最终门禁）
+
+- 用户明确授权合并 #73 并发布 0.2.2；#74/#75 已进入 main 8ef2327。本候选在 PR73 原 head 605091c 上标准合并 main，仅解决记忆文档冲突并保留双方历史；产品版本 0.2.2，完整 Sub2API 兼容基线仍 0.2.8。
+- 本轮修复 pnpm audit 错误/空报告误放行，增加13项CLI回归并留存实际退出码；删除无业务入口的 xlsx 及其8个独占传递依赖、死mock/分包规则，同时删除对应两项高危例外，服务端 xlsx 导出保留。新依赖审计 high/critical 均0，moderate13/low1按原门禁政策保留并在安全报告披露。
+- 发布前发现 GoReleaser 的 tidy hook 会改动模块元数据，已提前归整；实际 go list -m all 前后一致，tidy -diff 复验退出0，没有升级模块版本。backend业务与既有修复一致。
+- 当前仅冻结候选，最终精确 head CI、前端全套、IQ真实存储、构建、运行/升级/回滚以及正式制品结果由 /xy2/artifacts/release-0.2.2-20260930 外部账本记录；未完成结果不得称通过。正式发布仍需门禁成功，本轮不部署生产。
+- 原始 /xy2/scheduling-account-toggle-rate 与旧5702副本保持；沿用 /xy2/artifacts/scheduling-account-toggle-rate-20260929 的同一四角色，完成新制品验收后才发布累计事务。最终交接另用文档副本记录，不改不可变发行源码。
+
 ### GPT-6.1 Sol 单功能适配源码冻结（2026-09-30）
 
 - 根执行者已确认事故修复PR #74的d72在9项检查通过后合并为97d0f0626b9fb97fd4a9adfd10ab1c93c1802774；本阶段从该提交建立独立model-support副本，保留事故四角色与旧候选。不把含PR73的联合6393结果冒称新主线已包含PR73。
@@ -29,6 +44,13 @@
 - 文档包括 docs/V021_RELIABILITY_FIX.md 以及修复PR版 V021_ISSUE_SUMMARY.md、V021_REMEDIATION_PLAN.md、ISSUES_AND_CHANGES.md；后三份从原检查资料整理，仅覆盖本次修复，不提交此前功能升级的详细方案。外部父目录保留 VALIDATION.json、PR_BODY.md 与原始日志。真实供应商、跳过项、浏览器/功能整合/部署边界不变，三个临时容器已清理。
 - 已通过既有gguuai/xy2api fork正常推送并创建官方PR #74：https://github.com/liulixin-lex/xy2api/pull/74；目标liulixin-lex/xy2api:main，基线仍e17664144。创建时head8e7c45bab、OPEN/非draft、31个文件，mergeable=true，未合并。远端文件清单与仅修复范围一致，四份问题/修复/验证文档齐全；CI已启动，初始部分检查成功，其余运行中，不能称全部CI通过。后续交接只改文档，同分支最新head和检查以PR实际状态为准。
 - 认证使用用户已配置的root标准gh目录；代理默认HOME不同，不复制Token、不借用其他项目密钥、不改origin或全局凭据。提交任务完成，等待维护者评审；不自行合并、发布、部署或恢复旧功能整合。过去缺认证记录为历史，不代表当前阻塞。
+
+### 智能调度账号开关、倍率与 IQ 门控（2026-09-29，PR #73 开放）
+
+- 独立工作树 `/xy2/scheduling-account-toggle-rate` 基于最新 `origin/main` `e17664144`；功能提交 `85d93946c` 已推送，PR [#73](https://github.com/liulixin-lex/xy2api/pull/73) 开放。智能调度与账号管理共用 `accounts.schedulable` 开关及账号倍率，已启用账号置顶，组内按优先级升序、权重降序排列；回焦刷新合并并发开关结果。移动端主区过渡仅在桌面生效。
+- IQ 检测只控制自身质量门控：有效 `degraded` 拒绝该账号新准入，有效 `smart` 解除 IQ 暂停；任何探针错误只更新诊断，不改变最后有效 IQ 判定，也不通过探针凭据路径把账号标记为错误。管理员开关、故障与容量调度继续由各自模块控制，已有请求不被 IQ 判定断开。内存、SQL 与展示状态一致。
+- 本地前端 353 文件/2715 测试、typecheck、ESLint、构建通过；真实 Chromium 16 断言、桌面/390px 截图及两页开关同步通过。后端 IQ 定向单测、真实 PostgreSQL 集成及 race 通过。固定四角色 `/xy2/artifacts/scheduling-account-toggle-rate-20260929/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}` 保存同输入源码三态；最终以该目录的实际记录为准。未部署、未调用真实上游。
+- 生产只读核查于 19:33 UTC 观察到 0.1.9 回滚镜像及 `sub2api` 模式、高级调度关闭；该运行版本不使用保存的分组权重。组 18 的策略优先级 1 账号 323 不属于该组，实际可用 244/281 的数据库优先级均为 2、317 为 500；策略内所有权重均为 1。启动后的 113 次组内 `gpt-6-astra` 用量分布为 244=94、281=19，不能据此归因具体负载或会话影响，也不能代表先前镜像行为。本轮未修改服务器。
 
 ### 0.2.1 远端推送与正式发布（2026-09-29，已完成）
 
@@ -433,6 +455,14 @@
 Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+### PR #73 合并与 XY2API 0.2.2 发版（2026-09-30，进行中）
+
+- 用户明确授权合并 PR #73、确认 #74/#75 修复并发布 0.2.2；本轮使用独立 release 副本，不修改受保护原始工作树或部署生产。
+- #74/#75 已进入 main 8ef2327；#73 与 main 仅记忆文档冲突，采用仅插入合并保留双方历史，业务树与前轮已验收联合候选 5702c417 一致。
+- 将产品版本及 UPSTREAM_BASE.xy2api_version 同步 0.2.2，Sub2API 兼容基线保持 0.2.8；以最终 head 的 CI、安全审查、镜像运行和回滚结果为发布门禁，随后核验实际发行资产。
+- 并行安全复核实际发现依赖审计门禁对错误 JSON/空对象会误判通过；本轮把该问题列为发布阻断，最小修复解析和证据留存，不放宽或延长漏洞例外。最终结果以发布外部证据及冻结 head 检查为准。
+
 
 ### 20260930-gpt61-sol-support — 源码冻结，交根执行CI与制品验收
 
@@ -1474,3 +1504,24 @@ pnpm --dir frontend run build
 - conversation_context负责catalog/alias/apicompat/billing/pricing及来源；pr74_review负责native/passthrough/WS；根负责IQ参考选项、前端及CI；scheduling_audit负责真实存储4测试和e176原生目录三态。各分工结果见顶部，其他任务和历史保持。
 - 核心三个包定向、gateway5主/46子、真实存储4项、前端全量2701及最终构建实际通过；失败原始记录保留。来源manifest记录30文件原hash、官方descriptor、两项精准前置依赖、排除项与CI最终hash。
 - 本记忆随源码冻结；根继续单次commit/push、远端CI、正式构建和新模型fresh实际HTTP。此前八阶段升级/备份恢复只按原镜像复用，原四角色沿用固定路径，生产只读边界继续。
+
+### 2026-09-29 — 20260929-scheduling-account-toggle-rate — PR #73 与只读诊断
+
+- 从 `origin/main` `e17664144` 建立独立工作树并实现共用账号开关/倍率、启用置顶和组内优先级/权重排序；IQ 错误不改变最后有效质量门控，探针 OAuth 缺失刷新凭据不隔离账号。并行审查修复回焦刷新与开关并发时遗漏其他账号变化的问题。
+- 功能提交 `85d93946c` 已推送，PR #73 已在 `liulixin-lex/xy2api` 创建；首次未指定 `-R` 的 `gh pr create` 意外选中 `Wei-Shaw/sub2api` 并报无差异，核对远端引用后指定正确仓库成功。未合并、未发版或部署。
+- 前端完整 353 文件/2715 项测试、类型、ESLint、构建通过；真实 Chromium 16 断言通过。后端 IQ 定向单测、PostgreSQL SQL/内存门控一致性集成及 race 通过；旧版基线/修改版/回滚副本的同输入行为与原始哈希恢复由本轮四角色记录。测试使用隔离数据，已删除本轮临时 PostgreSQL/Redis 容器。
+- 服务器仅通过 `ubuntu` SSH 只读查询。核查时运行 0.1.9 回滚镜像且为 `sub2api` 模式，旧版不读取保存的组权重；组 18 的优先级 1 账号未加入该组，当前实际可用最高层为数据库优先级 2 的 244/281。策略权重全为 1；不能把当前 113 次请求的 94:19 分布误作按保存权重执行，也不能反推先前镜像的路由。未写入、重启或更改线上服务。
+- 交接：PR 检查以 PR head 的远端实际结果为准；本轮不承诺真实上游性能或零潜在问题。离线 `ROLLBACK.sh` 只恢复源码副本，不用于线上数据或部署回退。
+
+
+### 2026-09-30 — release-0.2.2 — 合并与安全门禁候选冻结
+
+- PR73/main标准整合、VERSION与provenance产品版本同步、审计fail-closed修复及无用xlsx移除完成；13CLI、YAML/6段shell语法、实际高危清零与tidy幂等已有真实证据。旧错误报告误放行和首轮tidy失败记录保留。
+- 根继续一次推送PR73新head、等待对应检查后常规合并并按正式tag工作流发版；前端全套、IQ、Go风险报告与四角色准备由三个代理并行完成。生产只读边界保持，剩余中低危与不可达模块发现不写成零漏洞。
+
+- 冻结审计首轮拒绝新差异 .github/audit-exceptions.yml；该文件承载 XY2API 自有发行依赖例外，已按既有所有权规则仅加入该精确路径为 XY_OWNED，不扩大通配、不修改审计器、不延长或增加漏洞例外。修复后重新提交并运行相同来源审计。
+
+
+### 2026-09-30 — release-0.2.2-protocol — 原始HTTP错误体补修
+
+- 候选04b的独立审查阻止了JSON/SSE混写流入发行；最小handler修复与18子用例已在隔离副本实际通过。新提交继续同一PR73，不改历史标签、不部署生产。前端按hash、IQ按严格依赖闭包复用，真实新镜像严格校验和正式资产验收完成后再交付。

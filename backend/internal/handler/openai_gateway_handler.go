@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"runtime/debug"
 	"strconv"
@@ -3713,6 +3714,15 @@ func openAIForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForwa
 	if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) == writerSizeBeforeForward ||
 		service.OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c) == writerSizeBeforeForward {
 		return false
+	}
+	// Forward may reject a request locally after writing a complete JSON error.
+	// Appending a streaming fallback would corrupt that response. Headers alone,
+	// successful partial responses, and SSE heartbeats still need the fallback.
+	if c.Writer.Written() && c.Writer.Size() > 0 && c.Writer.Status() >= http.StatusBadRequest {
+		mediaType, _, parseErr := mime.ParseMediaType(c.Writer.Header().Get("Content-Type"))
+		if parseErr == nil && mediaType == "application/json" {
+			return true
+		}
 	}
 
 	// cyber_policy 命中时上游原始错误体已透传给客户端（非流式 c.Data 写出 400 body，

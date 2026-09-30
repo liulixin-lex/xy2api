@@ -455,7 +455,7 @@ export default {
         total_ms: 'Total time (ms)',
  error_code: "Upstream error code", error_type: "Error type", retry_after: "Upstream retry time", retry_after_unbounded: "Retry delay unbounded; paused", input_tokens: "Input tokens", output_tokens: "Output tokens", reasoning_tokens: "Reasoning tokens", retry_visibility: "Request attempts",  parser_version: 'Parser version', stage: 'Stage', code: 'Reason code', http_status: 'HTTP status', media_type: 'Media type', content_encoding: 'Compression', protocol: 'Protocol', transport: 'Transport', format_detected: 'Format detected', event_type: 'Event type', event_index: 'Event index', field: 'Field path', offset: 'Byte offset', bytes_read: 'Bytes read', request_id: 'Upstream request ID' },
       iqReason: 'Reason',
-      iqTrafficAvoidance: 'Business traffic avoids this account and uses eligible alternatives. A correct probe restores eligibility.',
+      iqTrafficAvoidance: 'The last valid verdict was degraded, so new requests avoid this account while ongoing requests finish. A smart verdict clears only the IQ pause. Probe errors leave it unchanged; administrator switches and other scheduling limits remain independent.',
       iqCategories: {assessment: 'Candy assessment', quota: 'Balance or quota', access: 'Authentication or access', rate_limit: 'Rate limit', timeout: 'Timeout', upstream: 'Upstream service', configuration: 'Request configuration', answer: 'Unclear answer', execution: 'Execution', protocol: 'Response protocol'},
       iqLimits: {response_bytes: 'Total response bytes', event_bytes: 'Single event bytes', answer_bytes: 'Final answer bytes'},
       iqCheckStatus: { smart: 'Smart', degraded: 'Degraded', unknown: 'Unknown' },

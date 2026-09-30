@@ -23,7 +23,9 @@ var iqTransportExtraKeys = []string{"openai_responses_mode", "openai_responses_s
 func iqSchedulablePredicate() dbpredicate.Account {
 	return func(s *entsql.Selector) {
 		c := s.C("iq_check")
-		s.Where(entsql.ExprP("NOT (COALESCE(" + c + "->>'enabled','false') = 'true' AND (COALESCE(" + c + "->>'status','unknown') = 'degraded' OR COALESCE(" + c + "->>'last_run_status','') = 'unknown'))"))
+		// Keep this aligned with IQCheck.BlocksScheduling: errors do not create
+		// or clear an IQ pause; only the last valid assessment owns that gate.
+		s.Where(entsql.ExprP("NOT (COALESCE(" + c + "->>'enabled','false') = 'true' AND COALESCE(NULLIF(" + c + "->>'last_valid_status','')," + c + "->>'status','unknown') = 'degraded')"))
 	}
 }
 

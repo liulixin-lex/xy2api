@@ -13,7 +13,7 @@ func TestIQCurrentHealthTransitions(t *testing.T) {
 			s.Enabled = true
 			s.ObserveResult(previous, "fixture", now)
 			s.ObserveResult("unknown", reason, now.Add(time.Second))
-			if s.Status != "unknown" || s.Summary().Status != "unknown" || s.Reason != reason || !s.BlocksScheduling() {
+			if s.Status != "unknown" || s.Summary().Status != "unknown" || s.Reason != reason || s.BlocksScheduling() != (previous == "degraded") {
 				t.Fatalf("%s -> %s: %+v", previous, reason, s)
 			}
 			if s.LastValidStatus != previous || !s.LastValidAt.Equal(now) {
@@ -34,7 +34,11 @@ func TestIQCurrentHealthTransitions(t *testing.T) {
 		}
 	}
 	legacy := IQCheck{Enabled: true, Status: "smart", Reason: "correct_answer", LastRunStatus: "unknown", LastRunReason: "http_503", LastValidAt: &now}
-	if s := legacy.Summary(); s.Status != "unknown" || s.LastValidStatus != "smart" || !s.SchedulingBlocked {
+	if s := legacy.Summary(); s.Status != "unknown" || s.LastValidStatus != "smart" || s.SchedulingBlocked {
+		t.Fatal(s)
+	}
+	legacy.Status, legacy.Reason = "degraded", "wrong_answer"
+	if s := legacy.Summary(); s.Status != "unknown" || s.LastValidStatus != "degraded" || !s.SchedulingBlocked {
 		t.Fatal(s)
 	}
 	if s := (IQCheck{Enabled: true, Status: "unknown"}); s.BlocksScheduling() {

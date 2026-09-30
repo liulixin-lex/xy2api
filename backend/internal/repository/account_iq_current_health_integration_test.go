@@ -5,9 +5,11 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
+	dbaccount "github.com/liulixin-lex/xy2api/ent/account"
 	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/iqcheck"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
@@ -15,6 +17,30 @@ import (
 	"github.com/liulixin-lex/xy2api/migrations"
 	"github.com/stretchr/testify/require"
 )
+
+func TestIQSchedulingGateSQLMatchesMemory(t *testing.T) {
+	ctx := context.Background()
+	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+	a := &service.Account{Name: "iq-sql-parity", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true}
+	require.NoError(t, repo.Create(ctx, a))
+	t.Cleanup(func() { cleanupIQTestAccount(t, a.ID) })
+	for _, enabled := range []bool{false, true} {
+		for _, status := range []string{"", "unknown", "smart", "degraded"} {
+			for _, lastValid := range []string{"", "smart", "degraded"} {
+				for _, lastRun := range []string{"", "unknown", "smart", "degraded"} {
+					t.Run(fmt.Sprintf("enabled=%t/status=%s/valid=%s/run=%s", enabled, status, lastValid, lastRun), func(t *testing.T) {
+						state := domain.IQCheck{Enabled: enabled, Status: status, LastValidStatus: lastValid, LastRunStatus: lastRun}
+						_, err := testEntClient(t).Account.UpdateOneID(a.ID).SetIqCheck(state).Save(ctx)
+						require.NoError(t, err)
+						eligible, err := testEntClient(t).Account.Query().Where(dbaccount.IDEQ(a.ID), iqSchedulablePredicate()).Exist(ctx)
+						require.NoError(t, err)
+						require.Equal(t, !state.BlocksScheduling(), eligible, "database candidate gate and in-memory gate must agree")
+					})
+				}
+			}
+		}
+	}
+}
 
 func TestIQCurrentHealthMigration(t *testing.T) {
 	tx, err := integrationDB.BeginTx(context.Background(), nil)
@@ -41,7 +67,7 @@ INSERT INTO accounts VALUES
 			require.False(t, state.BlocksScheduling())
 		} else {
 			require.Equal(t, "unknown", state.Status)
-			require.True(t, state.BlocksScheduling())
+			require.Equal(t, id == 2, state.BlocksScheduling(), "only the previous valid degraded verdict retains an IQ pause")
 		}
 		if id == 2 {
 			require.Equal(t, "degraded", state.LastValidStatus)
@@ -96,9 +122,9 @@ func TestIQCurrentHealthAvoidanceAndRecovery(t *testing.T) {
 	require.Equal(t, "unknown", fresh.IQCheck.Status)
 	require.Equal(t, "smart", fresh.IQCheck.LastValidStatus)
 	require.True(t, fresh.Schedulable, "IQ isolation must not overwrite the manual switch")
-	require.False(t, fresh.IsSchedulable())
-	require.False(t, cache.accounts[probe.ID].IsSchedulable())
-	require.True(t, buildSchedulerMetadataAccount(*fresh).IQCheck.BlocksScheduling())
+	require.True(t, fresh.IsSchedulable())
+	require.True(t, cache.accounts[probe.ID].IsSchedulable())
+	require.False(t, buildSchedulerMetadataAccount(*fresh).IQCheck.BlocksScheduling())
 	require.Equal(t, "deferred", fresh.IQCheck.ExecutionState)
 	require.Nil(t, fresh.IQCheck.RetryAt, "balance failures must not spend immediate retry requests")
 	require.NotNil(t, fresh.IQCheck.NextRunAt)
@@ -106,11 +132,12 @@ func TestIQCurrentHealthAvoidanceAndRecovery(t *testing.T) {
 	require.True(t, !recoveryAt.Before(now.Add(15*time.Minute)))
 	candidates, err := repo.ListSchedulable(ctx)
 	require.NoError(t, err)
-	foundAlternative := false
+	foundAlternative, foundProbe := false, false
 	for _, a := range candidates {
-		require.NotEqual(t, probe.ID, a.ID)
+		foundProbe = foundProbe || a.ID == probe.ID
 		foundAlternative = foundAlternative || a.ID == alternative.ID
 	}
+	require.True(t, foundProbe, "an IQ transport error must not exclude the account from routing")
 	require.True(t, foundAlternative, "healthy alternative remains in the routing pool")
 	items, _, err := repo.ListWithFilters(service.WithIQStatusFilter(ctx, "unknown"), pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", "", 0, "")
 	require.NoError(t, err)
@@ -130,7 +157,49 @@ func TestIQCurrentHealthAvoidanceAndRecovery(t *testing.T) {
 	fresh, err = repo.GetByID(ctx, probe.ID)
 	require.NoError(t, err)
 	require.True(t, fresh.IsSchedulable())
+	// The account switch remains the administrator's authority, regardless of IQ recovery.
+	require.True(t, fresh.Schedulable)
 	records, err := repo.ListIQCheckRecords(ctx, probe.ID)
 	require.NoError(t, err)
 	require.Len(t, records[1].Attempts, 1)
+
+	claim = start(*fresh.IQCheck.NextRunAt)
+	require.NoError(t, repo.CompleteIQCheck(ctx, claim, iqcheck.Grade("29"), claim.StartedAt.Add(time.Second)))
+	fresh, err = repo.GetByID(ctx, probe.ID)
+	require.NoError(t, err)
+	require.True(t, fresh.Schedulable)
+	require.False(t, fresh.IsSchedulable(), "a valid degraded verdict pauses new requests")
+	require.False(t, cache.accounts[probe.ID].IsSchedulable())
+	candidates, err = repo.ListSchedulable(ctx)
+	require.NoError(t, err)
+	for _, a := range candidates {
+		require.NotEqual(t, probe.ID, a.ID)
+	}
+
+	claim = start(*fresh.IQCheck.NextRunAt)
+	require.NoError(t, repo.CompleteIQCheck(ctx, claim, iqcheck.Unknown("http_503"), claim.StartedAt.Add(time.Second)))
+	fresh, err = repo.GetByID(ctx, probe.ID)
+	require.NoError(t, err)
+	require.Equal(t, "unknown", fresh.IQCheck.Status)
+	require.Equal(t, "degraded", fresh.IQCheck.LastValidStatus)
+	require.False(t, fresh.IsSchedulable(), "an IQ error cannot clear the previous degraded pause")
+	candidates, err = repo.ListSchedulable(ctx)
+	require.NoError(t, err)
+	for _, a := range candidates {
+		require.NotEqual(t, probe.ID, a.ID)
+	}
+
+	claim = start(*fresh.IQCheck.NextRunAt)
+	require.NoError(t, repo.CompleteIQCheck(ctx, claim, iqcheck.Grade("21"), claim.StartedAt.Add(time.Second)))
+	fresh, err = repo.GetByID(ctx, probe.ID)
+	require.NoError(t, err)
+	require.Equal(t, "smart", fresh.IQCheck.LastValidStatus)
+	require.True(t, fresh.IsSchedulable(), "only a valid smart verdict clears the IQ pause")
+	candidates, err = repo.ListSchedulable(ctx)
+	require.NoError(t, err)
+	foundProbe = false
+	for _, a := range candidates {
+		foundProbe = foundProbe || a.ID == probe.ID
+	}
+	require.True(t, foundProbe)
 }

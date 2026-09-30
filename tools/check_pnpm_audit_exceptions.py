@@ -139,14 +139,88 @@ def parse_date(value: str) -> date | None:
         return None
 
 
+def validate_audit_report(data: object, audit_exit_code: int | None = None) -> list[str]:
+    """Reject command errors and unrecognized reports before applying exceptions."""
+    errors = []
+    if audit_exit_code is not None and audit_exit_code not in (0, 1):
+        errors.append(f"pnpm audit failed with exit status {audit_exit_code}")
+    if not isinstance(data, dict):
+        return errors + ["Audit report must be a JSON object"]
+    if "error" in data:
+        return errors + ["Audit report contains an error response"]
+    formats = [key for key in ("advisories", "vulnerabilities") if key in data]
+    if not formats:
+        return errors + ["Audit report has no recognized advisories or vulnerabilities object"]
+    severities = {"info", "low", "moderate", "high", "critical"}
+    for key in formats:
+        entries = data[key]
+        if not isinstance(entries, dict):
+            errors.append(f"Audit {key} must be an object")
+            continue
+        for name, entry in entries.items():
+            if not isinstance(entry, dict):
+                errors.append(f"Audit {key} entry {name} must be an object")
+                continue
+            severity = entry.get("severity")
+            sev = normalize_severity(severity) if isinstance(severity, str) else ""
+            if sev not in severities:
+                errors.append(f"Audit {key} entry {name} has an invalid severity")
+            if key == "advisories" and not (entry.get("module_name") or entry.get("name")):
+                errors.append(f"Audit advisory {name} has no package name")
+            if key == "vulnerabilities":
+                via = entry.get("via")
+                if not isinstance(via, (list, str)):
+                    errors.append(f"Audit vulnerability {name} has an invalid via field")
+                elif sev in HIGH_SEVERITIES and not via:
+                    errors.append(f"High/Critical vulnerability {name} has no advisory evidence")
+    metadata = data.get("metadata")
+    if metadata is not None and not isinstance(metadata, dict):
+        errors.append("Audit metadata must be an object")
+    counts = metadata.get("vulnerabilities") if isinstance(metadata, dict) else None
+    if counts is not None and (not isinstance(counts, dict) or any(
+        not isinstance(value, int) or isinstance(value, bool) or value < 0
+        for value in counts.values()
+    )):
+        errors.append("Audit vulnerability counts must be nonnegative integers")
+    if errors:
+        return errors
+    try:
+        findings = list(iter_vulns(data))
+    except (AttributeError, TypeError, ValueError):
+        return ["Audit report contains malformed advisory evidence"]
+    for name, entry in data.get("vulnerabilities", {}).items():
+        if normalize_severity(entry["severity"]) in HIGH_SEVERITIES and not any(
+            row[0] == name and row[2] for row in findings
+        ):
+            errors.append(f"High/Critical vulnerability {name} has no advisory evidence")
+    if isinstance(counts, dict):
+        for level in sorted(HIGH_SEVERITIES):
+            if counts.get(level, 0) and not any(
+                normalize_severity(row[1]) == level for row in findings
+            ):
+                errors.append(f"Audit reports {level} counts without same-severity advisory details")
+    if audit_exit_code == 1 and not any(data[key] for key in formats):
+        errors.append("pnpm audit exited with findings but the report contains none")
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--audit", required=True)
     parser.add_argument("--exceptions", required=True)
+    parser.add_argument("--audit-exit-code", type=int)
     args = parser.parse_args()
 
-    with open(args.audit, "r", encoding="utf-8") as handle:
-        audit = json.load(handle)
+    try:
+        with open(args.audit, "r", encoding="utf-8") as handle:
+            audit = json.load(handle)
+    except (OSError, ValueError) as exc:
+        sys.stderr.write(f"Cannot read audit report: {exc}\n")
+        return 1
+    report_errors = validate_audit_report(audit, args.audit_exit_code)
+    if report_errors:
+        sys.stderr.write("\n".join(report_errors) + "\n")
+        return 1
 
     # 读取异常清单并建立索引，便于快速匹配包名 + advisory。
     exceptions = parse_exceptions(args.exceptions)

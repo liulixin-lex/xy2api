@@ -12,7 +12,7 @@ import UsageView from '../UsageView.vue'
 const metricSettings = vi.hoisted(() => ({ usageCacheHitRateEnabled: true, usageTokenSpeedEnabled: true, fetch: vi.fn() }))
 vi.mock('@/stores/adminSettings', () => ({ useAdminSettingsStore: () => metricSettings }))
 
-const { list, exportList, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, routeQuery, aoaToSheet, sheetAddAoa, saveAs, xlsxWrite } = vi.hoisted(() => {
+const { list, exportList, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, routeQuery, saveAs } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -28,10 +28,7 @@ const { list, exportList, getStats, getSnapshotV2, getById, getModelStats, listE
     getModelStats: vi.fn(),
     listErrorLogs: vi.fn(),
     routeQuery: {} as Record<string, string>,
-		aoaToSheet: vi.fn(() => ({})),
-		sheetAddAoa: vi.fn(),
 		saveAs: vi.fn(),
-		xlsxWrite: vi.fn(() => new Uint8Array([1, 2, 3])),
   }
 })
 
@@ -80,16 +77,6 @@ vi.mock('@/api/admin/usage', () => ({
 }))
 
 vi.mock('file-saver', () => ({ saveAs }))
-
-vi.mock('xlsx', () => ({
-	utils: {
-		aoa_to_sheet: aoaToSheet,
-		sheet_add_aoa: sheetAddAoa,
-		book_new: vi.fn(() => ({})),
-		book_append_sheet: vi.fn(),
-	},
-	write: xlsxWrite,
-}))
 
 vi.mock('@/api/admin/ops', () => ({
   listErrorLogs,
@@ -784,10 +771,7 @@ describe('admin UsageView model audit export', () => {
 		})
 		getSnapshotV2.mockReset().mockResolvedValue({ trend: [], models: [], groups: [] })
 		getModelStats.mockReset().mockResolvedValue({ models: [] })
-		aoaToSheet.mockClear()
-		sheetAddAoa.mockClear()
 		saveAs.mockClear()
-		xlsxWrite.mockClear()
 	})
 
 	afterEach(() => {
