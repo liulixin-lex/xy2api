@@ -1511,3 +1511,5 @@ pnpm --dir frontend run build
 
 - PR73/main标准整合、VERSION与provenance产品版本同步、审计fail-closed修复及无用xlsx移除完成；13CLI、YAML/6段shell语法、实际高危清零与tidy幂等已有真实证据。旧错误报告误放行和首轮tidy失败记录保留。
 - 根继续一次推送PR73新head、等待对应检查后常规合并并按正式tag工作流发版；前端全套、IQ、Go风险报告与四角色准备由三个代理并行完成。生产只读边界保持，剩余中低危与不可达模块发现不写成零漏洞。
+
+- 冻结审计首轮拒绝新差异 .github/audit-exceptions.yml；该文件承载 XY2API 自有发行依赖例外，已按既有所有权规则仅加入该精确路径为 XY_OWNED，不扩大通配、不修改审计器、不延长或增加漏洞例外。修复后重新提交并运行相同来源审计。

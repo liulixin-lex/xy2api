@@ -23,6 +23,7 @@
       ".gitignore",
       "AGENTS.md",
       ".github/workflows/**",
+      ".github/audit-exceptions.yml",
       "CLA.md",
       "DEV_GUIDE.md",
       "README_JA.md",
