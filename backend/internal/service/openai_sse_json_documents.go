@@ -71,19 +71,24 @@ func (s *openAISSEJSONDocumentScanner) Scan() bool {
 		return false
 	}
 
-	line := s.scanner.Text()
-	data, ok := extractOpenAISSEDataLine(line)
-	if !ok {
-		s.current = line
+	// The scanner owns these bytes until its next Scan. Validate/repair them
+	// synchronously, then retain only the immutable string exposed to callers.
+	line := s.scanner.Bytes()
+	if !bytes.HasPrefix(line, []byte("data:")) {
+		s.current = string(line)
 		return true
+	}
+	data := line[len("data:"):]
+	for len(data) > 0 && (data[0] == ' ' || data[0] == '\t') {
+		data = data[1:]
 	}
 	if len(data) > maxOpenAIConcatenatedJSONBytes {
-		s.current = line
+		s.current = string(line)
 		return true
 	}
-	documents, repaired := splitOpenAIConcatenatedJSONDocuments([]byte(data))
+	documents, repaired := splitOpenAIConcatenatedJSONDocuments(data)
 	if !repaired {
-		s.current = line
+		s.current = string(line)
 		return true
 	}
 

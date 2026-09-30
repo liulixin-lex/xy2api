@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiClient } from '@/api/client'
 const props = defineProps<{ requestId: string; userId?: number | null; apiKeyId?: number | null; groupId?: number | null }>()
@@ -17,6 +17,23 @@ const loading = ref(false)
 const unavailable = ref(false)
 const failed = ref(false)
 const data = ref<Diagnostics | null>(null)
+const details = ref<HTMLDetailsElement | null>(null)
+let requestEpoch = 0
+let controller: AbortController | null = null
+function invalidateRequest() {
+  requestEpoch++
+  controller?.abort()
+  controller = null
+  loading.value = false
+  unavailable.value = false
+  failed.value = false
+  data.value = null
+}
+watch(() => [props.requestId, props.userId, props.apiKeyId, props.groupId], () => {
+  invalidateRequest()
+  if (details.value?.open) void fetchTrace()
+})
+onBeforeUnmount(invalidateRequest)
 const last = computed(() => data.value?.delivery.attempts[data.value.delivery.attempts.length - 1])
 const unknown = () => t('admin.scheduling.nativeMetrics.unknown')
 const stateLabel = (state?: string) => state && ['in_progress', 'client_detached', 'completed', 'incomplete', 'failed', 'cancelled', 'replaying', 'resuming'].includes(state) ? t('admin.scheduling.nativeMetrics.states.' + state) : state || unknown()
@@ -25,23 +42,29 @@ async function fetchTrace(event?: Event) {
   if (event && !(event.target as HTMLDetailsElement).open) return
   if (loading.value || (event && data.value)) return
   if (!props.userId || !props.apiKeyId) { unavailable.value = true; return }
+  const epoch = ++requestEpoch
+  controller = new AbortController()
   loading.value = true; failed.value = false; unavailable.value = false
   try {
     const result = await apiClient.get<Diagnostics>(
       '/admin/ops/requests/' + encodeURIComponent(props.requestId) + '/native-stream',
-      { params: { user_id: props.userId, api_key_id: props.apiKeyId, group_id: props.groupId ?? 0 } }
+      { params: { user_id: props.userId, api_key_id: props.apiKeyId, group_id: props.groupId ?? 0 }, signal: controller.signal }
     )
+    if (epoch !== requestEpoch) return
     data.value = result.data
   } catch (e) {
+    if (epoch !== requestEpoch) return
     const error = e as { status?: number; response?: { status?: number } }
     unavailable.value = (error.status ?? error.response?.status) === 404
     failed.value = !unavailable.value
-  } finally { loading.value = false }
+  } finally {
+    if (epoch === requestEpoch) { loading.value = false; controller = null }
+  }
 }
 </script>
 
 <template>
-  <details class="mt-2 max-w-xl whitespace-normal text-left text-xs" @toggle="fetchTrace">
+  <details ref="details" class="mt-2 max-w-xl whitespace-normal text-left text-xs" @toggle="fetchTrace">
     <summary class="cursor-pointer font-medium text-gray-700 dark:text-gray-200">{{ t('admin.scheduling.nativeMetrics.title') }}</summary>
     <p v-if="loading" role="status" class="mt-2">{{ t('common.loading') }}</p>
     <p v-else-if="unavailable" class="mt-2 text-gray-600 dark:text-dark-300">{{ t('admin.scheduling.nativeMetrics.legacy') }}</p>

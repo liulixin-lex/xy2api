@@ -121,6 +121,7 @@ func provideCleanup(
 	antigravityOAuth *service.AntigravityOAuthService,
 	grokOAuth *service.GrokOAuthService,
 	openAIGateway *service.OpenAIGatewayService,
+	openAIHandler *handler.OpenAIGatewayHandler,
 	scheduledTestRunner *service.ScheduledTestRunnerService,
 	backupSvc *service.BackupService,
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
@@ -139,6 +140,14 @@ func provideCleanup(
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+
+		// Detached native responses still own account slots and may settle usage.
+		// Drain them before stopping billing workers, transports, or databases.
+		if openAIHandler != nil {
+			if err := openAIHandler.ShutdownNativeResponses(ctx); err != nil {
+				log.Printf("[Cleanup] NativeResponses failed: %v", err)
+			}
+		}
 
 		type cleanupStep struct {
 			name string

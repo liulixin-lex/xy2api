@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/responseturn"
 	"github.com/liulixin-lex/xy2api/internal/scheduling"
@@ -38,8 +39,11 @@ type nativeRecoveryFixture struct {
 	upstream        *httptest.Server
 	scope           responseturn.Scope
 	createCount     atomic.Int64
+	wsCreateCount   atomic.Int64
 	cancelCount     atomic.Int64
+	pollCount       atomic.Int64
 	createCancelled atomic.Bool
+	accessRevoked   atomic.Bool
 	emit            chan struct{}
 	finish          chan struct{}
 	emitOnce        sync.Once
@@ -50,15 +54,107 @@ type nativeRecoveryFixture struct {
 
 func (f *nativeRecoveryFixture) emitNext()   { f.emitOnce.Do(func() { close(f.emit) }) }
 func (f *nativeRecoveryFixture) finishNext() { f.finishOnce.Do(func() { close(f.finish) }) }
+
+type nativeRecoveryAPIKeyRepo struct {
+	service.APIKeyRepository
+	fixture *nativeRecoveryFixture
+}
+
+func (r *nativeRecoveryAPIKeyRepo) GetByID(_ context.Context, id int64) (*service.APIKey, error) {
+	f := r.fixture
+	if id != f.scope.APIKeyID {
+		return nil, service.ErrAPIKeyNotFound
+	}
+	status := service.StatusActive
+	if f.accessRevoked.Load() {
+		status = service.StatusAPIKeyDisabled
+	}
+	group := f.scope.GroupID
+	return &service.APIKey{ID: id, UserID: f.scope.UserID, Status: status, GroupID: &group, User: &service.User{ID: f.scope.UserID, Status: service.StatusActive}, Group: &service.Group{ID: group, Platform: service.PlatformOpenAI, Status: service.StatusActive, RateMultiplier: 1}}, nil
+}
+
+type nativeRecoveryOptions struct {
+	billingRepo           service.UsageBillingRepository
+	userRepo              service.UserRepository
+	standard              bool
+	terminalStatus        string
+	unsupportedBackground bool
+	cancelGate            <-chan struct{}
+	pollError             bool
+	executionTimeout      time.Duration
+	configureControl      func(*service.OpenAIGatewayService, service.AccountRepository, *service.ConcurrencyService) *service.ControlledSchedulingService
+	webSocket             bool
+}
+
 func newNativeRecoveryFixture(t *testing.T, modes ...string) *nativeRecoveryFixture {
 	mode := ""
 	if len(modes) > 0 {
 		mode = modes[0]
 	}
+	return newNativeRecoveryFixtureOptions(t, mode, nativeRecoveryOptions{})
+}
+func newNativeRecoveryFixtureOptions(t *testing.T, mode string, options nativeRecoveryOptions) *nativeRecoveryFixture {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	f := &nativeRecoveryFixture{scope: responseturn.Scope{UserID: 71, APIKeyID: 72, GroupID: 73, Interface: "responses"}, emit: make(chan struct{}), finish: make(chan struct{}), usage: make(chan *service.UsageLog, 8)}
 	f.upstream = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if options.webSocket && websocket.IsWebSocketUpgrade(r) {
+			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer func() { _ = conn.Close() }()
+			_, body, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			f.createCount.Add(1)
+			f.wsCreateCount.Add(1)
+			background := gjson.GetBytes(body, "background").Bool()
+			_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf(`{"type":"response.created","sequence_number":0,"response":{"id":"resp_fixture","status":"in_progress","background":%v}}`, background)))
+			status := options.terminalStatus
+			if status == "" {
+				status = "completed"
+			}
+			if status == "bare_then_failed" {
+				_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","sequence_number":1,"code":"server_error","message":"fixture failure"}`))
+				status = "failed"
+			}
+			_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf(`{"type":%q,"sequence_number":2,"response":{"id":"resp_fixture","status":%q,"model":"gpt-5.6-sol","background":%v,"output":[],"usage":{"input_tokens":4,"output_tokens":1}}}`, "response."+status, status, background)))
+			return
+		}
+		if mode == "background" && r.Method == http.MethodGet && r.URL.Path == "/v1/responses/resp_fixture" {
+			f.pollCount.Add(1)
+			if options.pollError && f.cancelCount.Load() == 0 {
+				http.Error(w, "fixture polling failure", http.StatusServiceUnavailable)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			cancelled := f.cancelCount.Load() > 0
+			if options.cancelGate != nil {
+				select {
+				case <-options.cancelGate:
+				default:
+					cancelled = false
+				}
+			}
+			if cancelled {
+				_, _ = io.WriteString(w, `{"id":"resp_fixture","object":"response","status":"cancelled","background":true,"model":"gpt-5.6-sol","output":[],"usage":{"input_tokens":4,"output_tokens":1}}`)
+				return
+			}
+			select {
+			case <-f.finish:
+				status := options.terminalStatus
+				if status == "" {
+					status = "completed"
+				}
+				_, _ = fmt.Fprintf(w, `{"id":"resp_fixture","object":"response","status":%q,"background":true,"model":"gpt-5.6-sol","output":[],"usage":{"input_tokens":4,"output_tokens":1}}`, status)
+			default:
+				_, _ = io.WriteString(w, `{"id":"resp_fixture","object":"response","status":"in_progress","background":true,"model":"gpt-5.6-sol","output":[]}`)
+			}
+			return
+		}
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			t.Error("real HTTP fixture does not support Flush")
@@ -66,6 +162,13 @@ func newNativeRecoveryFixture(t *testing.T, modes ...string) *nativeRecoveryFixt
 		}
 		if r.URL.Path == "/v1/responses/resp_fixture/cancel" {
 			f.cancelCount.Add(1)
+			if options.cancelGate != nil {
+				select {
+				case <-options.cancelGate:
+				case <-r.Context().Done():
+					return
+				}
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, `{"id":"resp_fixture","status":"cancelled"}`)
 			return
@@ -75,6 +178,18 @@ func newNativeRecoveryFixture(t *testing.T, modes ...string) *nativeRecoveryFixt
 			return
 		}
 		count := f.createCount.Add(1)
+		if mode == "json_error" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"id":"resp_fixture","error":{"type":"invalid_request_error","message":"fixture invalid request","code":"fixture_bad_request"}}`)
+			return
+		}
+		if mode == "background" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Request-Id", "fixture-background-usage-id")
+			_, _ = io.WriteString(w, `{"id":"resp_fixture","object":"response","status":"queued","background":true,"model":"gpt-5.6-sol","output":[]}`)
+			return
+		}
 		if mode == "retry" && count == 1 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(500)
@@ -105,15 +220,41 @@ func newNativeRecoveryFixture(t *testing.T, modes ...string) *nativeRecoveryFixt
 			f.createCancelled.Store(true)
 			return
 		}
-		_, _ = io.WriteString(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":3,\"response\":{\"id\":\"resp_fixture\",\"status\":\"completed\",\"model\":\"gpt-5.6-sol\",\"background\":true,\"output\":[{\"id\":\"item_fixture\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}],\"usage\":{\"input_tokens\":4,\"output_tokens\":1}}}\n\n")
+		if options.terminalStatus != "" {
+			status := options.terminalStatus
+			if status == "bare_then_failed" {
+				_, _ = io.WriteString(w, "event: error\ndata: {\"type\":\"error\",\"sequence_number\":3,\"code\":\"server_error\",\"message\":\"fixture failure\"}\n\n")
+				status = "failed"
+			}
+			_, _ = fmt.Fprintf(w, "event: response.%s\ndata: {\"type\":%q,\"sequence_number\":4,\"response\":{\"id\":\"resp_fixture\",\"status\":%q,\"model\":\"gpt-5.6-sol\",\"background\":%v,\"output\":[],\"usage\":{\"input_tokens\":4,\"output_tokens\":1}}}\n\n", status, "response."+status, status, background)
+		} else {
+			_, _ = io.WriteString(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":3,\"response\":{\"id\":\"resp_fixture\",\"status\":\"completed\",\"model\":\"gpt-5.6-sol\",\"background\":true,\"output\":[{\"id\":\"item_fixture\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}],\"usage\":{\"input_tokens\":4,\"output_tokens\":1}}}\n\n")
+		}
 		flusher.Flush()
 	}))
 	cfg := &config.Config{RunMode: config.RunModeSimple}
+	if options.standard {
+		cfg.RunMode = config.RunModeStandard
+	}
 	cfg.Default.RateMultiplier = 1
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	cfg.Gateway.MaxAccountSwitches = 1
-	account := service.Account{ID: 74, Name: "native-fixture", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+	if options.webSocket {
+		cfg.Gateway.OpenAIWS.Enabled = true
+		cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+		cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+		cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 2
+		cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 2
+	}
+	account := service.Account{ID: 74, Name: "native-fixture", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{73},
 		Credentials: map[string]any{"api_key": "fixture-secret", "base_url": f.upstream.URL}, Extra: map[string]any{"openai_passthrough": true, "openai_responses_supported": true}}
+	if options.unsupportedBackground {
+		account.Extra["openai_responses_supported"] = false
+	}
+	if options.webSocket {
+		delete(account.Extra, "openai_passthrough")
+		account.Extra["responses_websockets_v2_enabled"] = true
+	}
 	var repo service.AccountRepository = &openAIWSUsageHandlerAccountRepoStub{account: account}
 	if mode == "retry" {
 		second := account
@@ -121,26 +262,38 @@ func newNativeRecoveryFixture(t *testing.T, modes ...string) *nativeRecoveryFixt
 		second.Name = "second-native-fixture"
 		repo = &openAIWSFailoverHandlerAccountRepoStub{accounts: []service.Account{account, second}}
 	}
-	billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	billing := service.NewBillingCacheService(nil, options.userRepo, nil, nil, nil, nil, cfg, nil)
 	usage := &openAIWSUsageHandlerUsageLogRepoStub{created: f.usage}
 	f.slots = &concurrencyCacheMock{acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil }, acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil }}
 	concurrency := service.NewConcurrencyService(f.slots)
-	gateway := service.NewOpenAIGatewayService(repo, usage, nil, nil, nil, nil, nil, cfg, nil, concurrency, service.NewBillingService(cfg, nil), nil, billing, &nativeRecoveryHTTPTransport{client: f.upstream.Client()}, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)
-	f.handler = NewOpenAIGatewayHandler(gateway, concurrency, billing, service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
+	gateway := service.NewOpenAIGatewayService(repo, usage, options.billingRepo, options.userRepo, nil, nil, nil, cfg, nil, concurrency, service.NewBillingService(cfg, nil), nil, billing, &nativeRecoveryHTTPTransport{client: f.upstream.Client()}, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)
+	var control *service.ControlledSchedulingService
+	if options.configureControl != nil {
+		control = options.configureControl(gateway, repo, concurrency)
+	}
+	f.handler = NewOpenAIGatewayHandler(gateway, concurrency, billing, service.NewAPIKeyService(&nativeRecoveryAPIKeyRepo{fixture: f}, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
+		if options.executionTimeout > 0 {
+			ctx, stop := context.WithTimeout(c.Request.Context(), options.executionTimeout)
+			defer stop()
+			c.Request = c.Request.WithContext(ctx)
+		}
 		user := f.scope.UserID
 		if c.GetHeader("X-Fixture-User") == "other" {
 			user = 99
 		}
 		group := f.scope.GroupID
-		key := &service.APIKey{ID: f.scope.APIKeyID, UserID: user, GroupID: &group, User: &service.User{ID: user, Status: service.StatusActive}, Group: &service.Group{ID: group, Platform: service.PlatformOpenAI, Status: service.StatusActive, RateMultiplier: 1}}
+		key := &service.APIKey{ID: f.scope.APIKeyID, UserID: user, Status: service.StatusActive, GroupID: &group, User: &service.User{ID: user, Status: service.StatusActive}, Group: &service.Group{ID: group, Platform: service.PlatformOpenAI, Status: service.StatusActive, RateMultiplier: 1}}
 		c.Set(string(middleware2.ContextKeyAPIKey), key)
 		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: user, Concurrency: 1})
 		c.Request = c.Request.WithContext(service.WithNativeStreamPolicy(c.Request.Context(), service.NativeStreamPolicy{Version: 1, Delivery: true, Recovery: true}))
 		c.Next()
 	})
 	router.Use(service.ControlledSchedulingMiddleware(func(context.Context) (scheduling.ModeSnapshot, error) {
+		if control != nil {
+			return scheduling.ModeSnapshot{Mode: scheduling.ModeControlled}, nil
+		}
 		return scheduling.ModeSnapshot{Mode: scheduling.ModeSub2API}, nil
 	}))
 	router.POST("/v1/responses", f.handler.Responses)
@@ -154,9 +307,16 @@ func newNativeRecoveryFixture(t *testing.T, modes ...string) *nativeRecoveryFixt
 	t.Cleanup(func() {
 		f.emitNext()
 		f.finishNext()
-		_ = f.handler.NativeResponseManager().Close()
+		shutdownCtx, stop := context.WithTimeout(context.Background(), 7*time.Second)
+		_ = f.handler.ShutdownNativeResponses(shutdownCtx)
+		stop()
 		f.server.Close()
 		f.upstream.Close()
+		if control != nil {
+			control.Close()
+		}
+		gateway.StopOpenAICodexTicketHarvester()
+		gateway.CloseOpenAIWSPool()
 		billing.Stop()
 	})
 	return f
@@ -320,10 +480,10 @@ func TestNativeResponseHTTPAfterCommitFailureNeverMixesAccounts(t *testing.T) {
 	require.NotEqual(t, responseturn.StateCompleted, f.turn(t).Snapshot().State)
 }
 
-func TestNativeResponseHTTPNonstreamBackgroundIdempotencyRejectsBeforeCreate(t *testing.T) {
+func TestNativeResponseHTTPNonstreamBackgroundIdempotencyPollsBeforeSettlement(t *testing.T) {
 	for _, stream := range []string{"", `,"stream":false`} {
 		t.Run(stream, func(t *testing.T) {
-			f := newNativeRecoveryFixture(t)
+			f := newNativeRecoveryFixture(t, "background")
 			body := `{"model":"gpt-5.6-sol","input":"fixture","background":true` + stream + "}"
 			request, err := http.NewRequest(http.MethodPost, f.server.URL+"/v1/responses", strings.NewReader(body))
 			require.NoError(t, err)
@@ -334,9 +494,11 @@ func TestNativeResponseHTTPNonstreamBackgroundIdempotencyRejectsBeforeCreate(t *
 			data, err := io.ReadAll(response.Body)
 			require.NoError(t, err)
 			_ = response.Body.Close()
-			require.Equal(t, http.StatusBadRequest, response.StatusCode)
-			require.Equal(t, "unsupported_background_idempotency", gjson.GetBytes(data, "error.code").String())
-			require.Zero(t, f.createCount.Load(), "unsupported background idempotency must not start generation")
+			require.Equal(t, http.StatusOK, response.StatusCode)
+			require.Equal(t, "queued", gjson.GetBytes(data, "status").String())
+			require.Equal(t, int64(1), f.createCount.Load())
+			f.finishNext()
+			require.Eventually(t, func() bool { return f.turn(t).Snapshot().State == responseturn.StateCompleted }, 2*time.Second, time.Millisecond)
 		})
 	}
 }

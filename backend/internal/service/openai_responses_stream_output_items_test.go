@@ -1,7 +1,11 @@
 package service
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -114,4 +118,71 @@ func TestNormalizeResponsesStreamingTerminalOutputLeavesCompleteOutputAlone(t *t
 	normalized, changed := normalizeResponsesStreamingTerminalOutput(raw, nil, doneItems, nil)
 	require.False(t, changed)
 	require.Equal(t, string(raw), string(normalized))
+}
+
+func TestReviewNativeStreamOutputJSONKeepsReconstruction(t *testing.T) {
+	text := strings.Repeat("escaped \"value\" <&> 中文\n", 2048)
+	newAccumulator := func() *apicompat.BufferedResponseAccumulator {
+		acc := apicompat.NewBufferedResponseAccumulator()
+		acc.ProcessEvent(&apicompat.ResponsesStreamEvent{Type: "response.reasoning_text.delta", Delta: "reason <&> 中文"})
+		acc.ProcessEvent(&apicompat.ResponsesStreamEvent{Type: "response.output_text.delta", Delta: text})
+		acc.ProcessEvent(&apicompat.ResponsesStreamEvent{Type: "response.output_item.added", OutputIndex: 2, Item: &apicompat.ResponsesOutput{Type: "function_call", CallID: "call_original", Name: "fixture_tool"}})
+		acc.ProcessEvent(&apicompat.ResponsesStreamEvent{Type: "response.function_call_arguments.delta", OutputIndex: 2, Delta: "{\"x\":1}"})
+		return acc
+	}
+	image := json.RawMessage("{\"id\":\"image_original\",\"type\":\"image_generation_call\",\"status\":\"completed\",\"result\":\"fixture-image\"}")
+	for _, withImage := range []bool{false, true} {
+		name := "text_reasoning_tools"
+		var images []json.RawMessage
+		if withImage {
+			name = "mixed_image"
+			images = []json.RawMessage{image}
+		}
+		t.Run(name, func(t *testing.T) {
+			payload := []byte("{\"type\":\"response.completed\",\"sequence_number\":19,\"response\":{\"id\":\"resp_original\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":4,\"output_tokens\":1}}}")
+			normalized, changed := normalizeResponsesStreamingTerminalOutput(payload, newAccumulator(), newResponsesStreamOutputItems(), images)
+			require.True(t, changed)
+			require.True(t, json.Valid(normalized))
+			require.Equal(t, "resp_original", gjson.GetBytes(normalized, "response.id").String())
+			require.Equal(t, int64(19), gjson.GetBytes(normalized, "sequence_number").Int())
+			require.Equal(t, int64(4), gjson.GetBytes(normalized, "response.usage.input_tokens").Int())
+			require.Equal(t, int64(1), gjson.GetBytes(normalized, "response.usage.output_tokens").Int())
+			output := gjson.GetBytes(normalized, "response.output").Array()
+			require.Len(t, output, 3+len(images))
+			require.Equal(t, "reasoning", output[0].Get("type").String())
+			require.Equal(t, "reason <&> 中文", output[0].Get("summary.0.text").String())
+			require.Equal(t, "message", output[1].Get("type").String())
+			require.Equal(t, text, output[1].Get("content.0.text").String())
+			require.Equal(t, "function_call", output[2].Get("type").String())
+			require.Equal(t, "call_original", output[2].Get("call_id").String())
+			require.Equal(t, "fixture_tool", output[2].Get("name").String())
+			require.Equal(t, "{\"x\":1}", output[2].Get("arguments").String())
+			if withImage {
+				require.Equal(t, "image_original", output[3].Get("id").String())
+				require.Equal(t, "fixture-image", output[3].Get("result").String())
+			}
+		})
+	}
+
+	t.Run("authoritative_custom_tool", func(t *testing.T) {
+		done := newResponsesStreamOutputItems()
+		item := "{\"id\":\"tool_original\",\"type\":\"custom_tool_call\",\"call_id\":\"call_custom\",\"name\":\"custom_fixture\",\"input\":\"print(\\\"<&>中文\\\")\",\"vendor_field\":\"preserve\"}"
+		done.Observe([]byte("{\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":" + item + "}"))
+		normalized, changed := normalizeResponsesStreamingTerminalOutput([]byte("{\"type\":\"response.completed\",\"sequence_number\":20,\"response\":{\"id\":\"resp_custom\",\"status\":\"completed\",\"output\":[]}}"), newAccumulator(), done, nil)
+		require.True(t, changed)
+		require.Len(t, gjson.GetBytes(normalized, "response.output").Array(), 1, "authoritative tool item must win over fallback text/reasoning")
+		require.JSONEq(t, item, gjson.GetBytes(normalized, "response.output.0").Raw)
+		require.Equal(t, "resp_custom", gjson.GetBytes(normalized, "response.id").String())
+		require.Equal(t, int64(20), gjson.GetBytes(normalized, "sequence_number").Int())
+	})
+	t.Run("image_only", func(t *testing.T) {
+		built, ok := buildResponsesOutputJSON(nil, []json.RawMessage{image})
+		require.True(t, ok)
+		require.JSONEq(t, "["+string(image)+"]", string(built))
+	})
+	t.Run("empty", func(t *testing.T) {
+		built, ok := buildResponsesOutputJSON(apicompat.NewBufferedResponseAccumulator(), nil)
+		require.False(t, ok)
+		require.Nil(t, built)
+	})
 }

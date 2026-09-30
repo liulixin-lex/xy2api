@@ -35,13 +35,16 @@ func (h *OpenAIGatewayHandler) NativeResponseManager() *responseturn.Manager {
 }
 
 type nativeResponseExecution struct {
-	mu                sync.Mutex
-	turn              *responseturn.Turn
-	requestContext    context.Context
-	recoveryRequested bool
-	accountEligible   bool
-	recoveryConfirmed bool
-	accountID         int64
+	mu                  sync.Mutex
+	turn                *responseturn.Turn
+	requestContext      context.Context
+	recoveryRequested   bool
+	backgroundRequested bool
+	accountEligible     bool
+	recoveryConfirmed   bool
+	accountID           int64
+	account             *service.Account
+	cancelDone          chan struct{}
 }
 
 // Values are preserved explicitly, while cancellation is supplied by the host
@@ -81,9 +84,6 @@ func (h *OpenAIGatewayHandler) handleNativeResponseCreate(c *gin.Context) bool {
 		return false
 	}
 	key := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
-	if key == "" && !policy.Recovery {
-		return false
-	}
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
 		if tooLarge, ok := extractMaxBytesError(err); ok {
@@ -99,12 +99,9 @@ func (h *OpenAIGatewayHandler) handleNativeResponseCreate(c *gin.Context) bool {
 	}
 	background := gjson.GetBytes(body, "background")
 	stream := gjson.GetBytes(body, "stream")
-	if key != "" && background.Type == gjson.True && (!stream.Exists() || stream.Type == gjson.False) {
-		writeNativeResponseError(c, &responseturn.Error{Code: "unsupported_background_idempotency", Status: http.StatusBadRequest, Message: "Idempotent non-streaming background responses require native status polling, which is not enabled"})
-		return true
-	}
 	recoveryRequested := policy.Recovery && background.Type == gjson.True && stream.Type == gjson.True && gjson.GetBytes(body, "store").Type != gjson.False
-	if key == "" && !recoveryRequested {
+	backgroundRequested := background.Type == gjson.True && (!stream.Exists() || stream.Type == gjson.False)
+	if key == "" && !recoveryRequested && !backgroundRequested {
 		return false
 	}
 	scope, _, ok := nativeResponseScope(c)
@@ -113,8 +110,22 @@ func (h *OpenAIGatewayHandler) handleNativeResponseCreate(c *gin.Context) bool {
 		return true
 	}
 	clientContext := c.Request.Context()
+	h.nativeResponseLifecycleMu.Lock()
+	if h.nativeResponseClosing {
+		h.nativeResponseLifecycleMu.Unlock()
+		writeNativeResponseError(c, &responseturn.Error{Code: "gateway_shutting_down", Status: http.StatusServiceUnavailable, Message: "Native response execution is shutting down"})
+		return true
+	}
+	h.nativeResponseWorkers.Add(1)
+	h.nativeResponseLifecycleMu.Unlock()
 	control, cancel := context.WithCancelCause(context.Background())
-	defer cancel(context.Canceled)
+	workerOwnsControl := false
+	defer func() {
+		if !workerOwnsControl {
+			cancel(context.Canceled)
+			h.nativeResponseWorkers.Done()
+		}
+	}()
 	base := nativeExecutionContext{Context: control, values: clientContext}
 	deadline, _ := clientContext.Deadline()
 	turn, created, err := h.NativeResponseManager().Create(responseturn.CreateOptions{Scope: scope, IdempotencyKey: key, Body: body,
@@ -125,8 +136,12 @@ func (h *OpenAIGatewayHandler) handleNativeResponseCreate(c *gin.Context) bool {
 	}
 	if !created {
 		snapshot := turn.Snapshot()
-		if len(snapshot.Result) > 0 && snapshot.State != responseturn.StateRunning && snapshot.State != responseturn.StateDetached {
-			c.Data(http.StatusOK, "application/json", snapshot.Result)
+		if err := h.validateNativeResponseAccess(clientContext, snapshot.Scope, snapshot.Model); err != nil {
+			writeNativeResponseError(c, err)
+			return true
+		}
+		if snapshot.State != responseturn.StateRunning && snapshot.State != responseturn.StateDetached {
+			writeNativeResponseSnapshot(c, snapshot)
 		} else {
 			writeNativeResponseError(c, responseturn.ErrActive)
 		}
@@ -137,25 +152,38 @@ func (h *OpenAIGatewayHandler) handleNativeResponseCreate(c *gin.Context) bool {
 		writeNativeResponseError(c, err)
 		return true
 	}
-	execution := &nativeResponseExecution{turn: turn, requestContext: clientContext, recoveryRequested: recoveryRequested}
+	execution := &nativeResponseExecution{turn: turn, requestContext: clientContext, recoveryRequested: recoveryRequested, backgroundRequested: backgroundRequested}
 	stopClient := context.AfterFunc(clientContext, func() {
 		execution.mu.Lock()
 		confirmed := execution.recoveryConfirmed
 		execution.mu.Unlock()
-		if !confirmed {
+		if !confirmed && !turn.Snapshot().BackgroundAccepted {
 			turn.Cancel(responseturn.ReasonClientDetached)
 		}
 		attachment.Close()
 	})
-	defer stopClient()
 	// No middleware-owned gin context is shared with the generation goroutine.
 	executionContext, bindErr := service.TransferControlledExecutionContext(clientContext, turn.Context())
 	if bindErr != nil {
+		stopClient()
 		turn.Cancel(responseturn.ReasonClientDetached)
 		attachment.Close()
 		writeNativeResponseError(c, responseturn.ErrUnavailable)
 		return true
 	}
+	releaseExecution := func() {}
+	if backgroundRequested {
+		executionContext = service.WithNativeBackgroundExecution(executionContext)
+		releaseExecution, bindErr = service.RetainControlledExecution(executionContext)
+		if bindErr != nil {
+			stopClient()
+			turn.Cancel(responseturn.ReasonClientDetached)
+			attachment.Close()
+			writeNativeResponseError(c, responseturn.ErrUnavailable)
+			return true
+		}
+	}
+	h.nativeResponseExecutions.Store(turn.ID(), execution)
 	worker := c.Copy()
 	worker.Request = c.Request.Clone(service.WithNativeStreamDeferredFlush(executionContext))
 	worker.Request.Body = io.NopCloser(bytes.NewReader(body))
@@ -164,22 +192,33 @@ func (h *OpenAIGatewayHandler) handleNativeResponseCreate(c *gin.Context) bool {
 	worker.Writer = writer
 	done := make(chan struct{})
 	stopCancel := context.AfterFunc(turn.Context(), func() { h.cancelAcceptedNativeResponse(turn) })
-	defer stopCancel()
+	stopAccess := h.watchNativeResponseAccess(turn, done)
+	workerOwnsControl = true
 	go func() {
-		defer close(done)
-		defer writer.finish()
+		defer func() {
+			writer.finish()
+			if turn.Snapshot().State == responseturn.StateCancelled {
+				h.cancelAcceptedNativeResponse(turn)
+			}
+			stopAccess()
+			stopCancel()
+			stopClient()
+			h.nativeResponseExecutions.Delete(turn.ID())
+			cancel(context.Canceled)
+			releaseExecution()
+			h.nativeResponseWorkers.Done()
+			close(done)
+		}()
 		h.Responses(worker)
 	}()
 	h.relayNativeAttachment(c, attachment, writer)
 	attachment.Close()
-	// The original ControlledSchedulingMiddleware.Close and user/account release
-	// defers remain alive until the one original worker exits, including offline
-	// execution. Attachment requests never own these generation resources.
-	<-done
-	snapshot := turn.Snapshot()
-	if snapshot.State == responseturn.StateCancelled {
-		h.cancelAcceptedNativeResponse(turn)
+	// A verified non-stream background acknowledgement finishes this HTTP
+	// request. The worker owns the original execution and all generation slots.
+	if backgroundRequested && turn.Snapshot().BackgroundAccepted {
+		return true
 	}
+	<-done
 	return true
 }
 
@@ -201,7 +240,12 @@ func (h *OpenAIGatewayHandler) bindNativeResponseAccount(c *gin.Context, account
 		return responseturn.ErrOwner
 	}
 	execution.accountID = account.ID
+	copyAccount := *account
+	execution.account = &copyAccount
 	supported, _ := account.Extra["openai_responses_supported"].(bool)
+	if execution.backgroundRequested && (!account.IsOpenAIApiKey() || !supported || !account.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityResponses)) {
+		return &responseturn.Error{Code: "unsupported_background_response", Status: http.StatusBadRequest, Message: "The selected account cannot retrieve native background responses"}
+	}
 	execution.accountEligible = execution.recoveryRequested && account.IsOpenAIApiKey() && supported && account.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityResponses)
 
 	return nil
@@ -219,14 +263,22 @@ func (e *nativeResponseExecution) acceptNativeProof(data []byte) {
 		return
 	}
 	sequence := parsed.Get("sequence_number")
-	if sequence.Type != gjson.Number || sequence.Int() < 0 || sequence.Float() != float64(sequence.Int()) || parsed.Get("response.id").String() == "" || parsed.Get("response.background").Type != gjson.True {
+	nativeSequence, sequenceErr := strconv.ParseInt(sequence.Raw, 10, 64)
+	if sequence.Type != gjson.Number || sequenceErr != nil || nativeSequence < 0 || parsed.Get("response.id").String() == "" || parsed.Get("response.background").Type != gjson.True {
 		return
+	}
+	capabilities := responseturn.Capabilities{Protocol: "responses_http_sse", Verified: true, Retrieve: true, NativeCursor: true}
+	recordCancelledControl := func() {
+		_ = e.turn.RecordCancelledBackgroundControl(e.accountID, parsed.Get("response.id").String(), []byte(parsed.Get("response").Raw), capabilities)
 	}
 	if err := e.turn.BindOwner(e.accountID, parsed.Get("response.id").String()); err != nil {
+		recordCancelledControl()
 		return
 	}
-	if err := e.turn.ConfirmRecovery(responseturn.Capabilities{Protocol: "responses_http_sse", Verified: true, Retrieve: true, NativeCursor: true}); err == nil {
+	if err := e.turn.ConfirmRecovery(capabilities); err == nil {
 		e.recoveryConfirmed = true
+	} else {
+		recordCancelledControl()
 	}
 }
 
@@ -292,6 +344,10 @@ func (h *OpenAIGatewayHandler) lookupNativeResponse(c *gin.Context, cancel bool)
 		return nil, false
 	}
 	snapshot := turn.Snapshot()
+	if err := h.validateNativeResponseAccess(c.Request.Context(), snapshot.Scope, snapshot.Model); err != nil {
+		writeNativeResponseError(c, err)
+		return nil, false
+	}
 	if key.Group != nil && key.Group.ModelAllowlistEnabled() && !key.Group.ModelAllowlist.Allows(snapshot.Model) {
 		writeNativeResponseError(c, responseturn.ErrNotFound)
 		return nil, false
@@ -304,16 +360,7 @@ func (h *OpenAIGatewayHandler) NativeResponseRetrieve(c *gin.Context) {
 		return
 	}
 	if c.Query("stream") != "true" {
-		snapshot := turn.Snapshot()
-		if len(snapshot.Result) > 0 {
-			c.Data(200, "application/json", snapshot.Result)
-			return
-		}
-		status := string(snapshot.State)
-		if snapshot.State == responseturn.StateDetached {
-			status = "in_progress"
-		}
-		c.JSON(200, gin.H{"id": snapshot.UpstreamResponseID, "object": "response", "status": status, "model": snapshot.Model, "output": []any{}})
+		writeNativeResponseSnapshot(c, turn.Snapshot())
 		return
 	}
 	var cursor *int64
@@ -340,17 +387,51 @@ func (h *OpenAIGatewayHandler) NativeResponseCancel(c *gin.Context) {
 	}
 	turn.Cancel(responseturn.ReasonUserStop)
 	_ = service.CancelControlledRequest(turn.Context(), service.ControlledUserStop)
-	h.cancelAcceptedNativeResponse(turn)
-	snapshot := turn.Snapshot()
-	c.JSON(200, gin.H{"id": snapshot.UpstreamResponseID, "object": "response", "status": snapshot.State})
+	go h.cancelAcceptedNativeResponse(turn)
+	writeNativeResponseSnapshot(c, turn.Snapshot())
 }
 func (h *OpenAIGatewayHandler) cancelAcceptedNativeResponse(turn *responseturn.Turn) {
 	snapshot := turn.Snapshot()
-	if snapshot.State != responseturn.StateCancelled || !turn.BeginUpstreamCancel() {
+	if snapshot.State != responseturn.StateCancelled {
 		return
+	}
+	var account *service.Account
+	var cancelDone chan struct{}
+	if raw, ok := h.nativeResponseExecutions.Load(turn.ID()); ok {
+		if execution, valid := raw.(*nativeResponseExecution); valid {
+			execution.mu.Lock()
+			if execution.cancelDone != nil {
+				done := execution.cancelDone
+				execution.mu.Unlock()
+				<-done
+				return
+			}
+			if !turn.BeginUpstreamCancel() {
+				execution.mu.Unlock()
+				return
+			}
+			cancelDone = make(chan struct{})
+			execution.cancelDone = cancelDone
+			account = execution.account
+			execution.mu.Unlock()
+		}
+	}
+	if cancelDone == nil {
+		if !turn.BeginUpstreamCancel() {
+			return
+		}
+	} else {
+		// The worker's deferred cleanup must wait for an AfterFunc or cancel
+		// handler that already owns the bounded POST before shutdown tears
+		// down the shared upstream transport.
+		defer close(cancelDone)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	ctx = service.WithNativeResponseControlAccount(ctx, account)
+	// A late acceptance may register its identity after the initial state check.
+	// BeginUpstreamCancel proves that identity exists; read it after claiming.
+	snapshot = turn.Snapshot()
 	confirmed, err := h.gatewayService.CancelNativeResponse(ctx, snapshot.OwnerAccountID, snapshot.UpstreamResponseID, turn.MarkUpstreamCancelRequested)
 	if err == nil && confirmed {
 		turn.ConfirmUpstreamCancel()
@@ -359,6 +440,7 @@ func (h *OpenAIGatewayHandler) cancelAcceptedNativeResponse(turn *responseturn.T
 
 func (h *OpenAIGatewayHandler) relayNativeAttachment(c *gin.Context, a *responseturn.Attachment, source *nativeJournalWriter) {
 	started := false
+	responseComplete := false
 	for {
 		readContext, stopRead := context.WithTimeout(c.Request.Context(), 15*time.Second)
 		err := a.WriteNext(readContext, func(event responseturn.Event) error {
@@ -377,36 +459,33 @@ func (h *OpenAIGatewayHandler) relayNativeAttachment(c *gin.Context, a *response
 				c.Header("Cache-Control", "no-cache")
 				c.Header("X-Accel-Buffering", "no")
 				c.Status(status)
+				if !strings.Contains(strings.ToLower(c.Writer.Header().Get("Content-Type")), "text/event-stream") {
+					c.Header("Content-Length", strconv.Itoa(len(event.Data)))
+					responseComplete = true
+				}
 				started = true
 			}
 			// HTTP servers supporting ResponseController get a bounded write. Existing
 			// proxy/server write deadlines remain authoritative when unsupported.
-			controller := http.NewResponseController(c.Writer)
-			_ = controller.SetWriteDeadline(time.Now().Add(30 * time.Second))
-			n, err := c.Writer.Write(event.Data)
+			n, err := service.WriteNativeStreamFrame(c.Request.Context(), c.Writer, event.Data)
 			if err == nil && n != len(event.Data) {
 				err = io.ErrShortWrite
 			}
 			if err == nil {
-				c.Writer.Flush()
 				if !event.Replay && !event.Local {
 					service.RecordNativeAttachmentFlush(c.Request.Context(), event.ReceivedAt, time.Now())
 				}
 			}
-			_ = controller.SetWriteDeadline(time.Time{})
 			return err
 		})
 		stopRead()
+		if err == nil && responseComplete {
+			return
+		}
 		if errors.Is(err, context.DeadlineExceeded) && c.Request.Context().Err() == nil {
 			if started && strings.Contains(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
 				err = a.Write(func() error {
-					controller := http.NewResponseController(c.Writer)
-					_ = controller.SetWriteDeadline(time.Now().Add(30 * time.Second))
-					_, writeErr := c.Writer.Write([]byte(": keepalive\n\n"))
-					if writeErr == nil {
-						c.Writer.Flush()
-					}
-					_ = controller.SetWriteDeadline(time.Time{})
+					_, writeErr := service.WriteNativeStreamFrame(c.Request.Context(), c.Writer, []byte(": keepalive\n\n"))
 					return writeErr
 				})
 				if err != nil {
@@ -429,18 +508,20 @@ func (h *OpenAIGatewayHandler) relayNativeAttachment(c *gin.Context, a *response
 // prelude events. Only incomplete network fragments are buffered. The normal
 // protocol line limit remains with the existing forwarding parser.
 type nativeJournalWriter struct {
-	header     http.Header
-	mu         sync.Mutex
-	writeMu    sync.Mutex
-	status     int
-	size       int
-	committed  bool
-	sentHeader http.Header
-	pending    []byte
-	jsonBody   []byte
-	execution  *nativeResponseExecution
-	ctx        context.Context
-	handler    *OpenAIGatewayHandler
+	header            http.Header
+	mu                sync.Mutex
+	writeMu           sync.Mutex
+	status            int
+	size              int
+	committed         bool
+	sentHeader        http.Header
+	pending           []byte
+	jsonBody          []byte
+	jsonHandled       bool
+	protocolErrorSeen bool
+	execution         *nativeResponseExecution
+	ctx               context.Context
+	handler           *OpenAIGatewayHandler
 }
 
 func newNativeJournalWriter(e *nativeResponseExecution, ctx context.Context, h *OpenAIGatewayHandler) *nativeJournalWriter {
@@ -537,7 +618,7 @@ func (w *nativeJournalWriter) publishFrame(frame []byte) error {
 	if bytes.Equal(bytes.TrimSpace(payload), []byte("[DONE]")) {
 		return nil
 	}
-	if !gjson.ValidBytes(payload) {
+	if _, err := responseturn.NormalizedBodyHash(payload); err != nil {
 		return errors.New("invalid native response SSE JSON")
 	}
 	w.execution.acceptNativeProof(payload)
@@ -553,8 +634,12 @@ func (w *nativeJournalWriter) publishFrame(frame []byte) error {
 	parsed := gjson.ParseBytes(payload)
 	responseID := parsed.Get("response.id").String()
 	event := responseturn.Event{Data: frame, Identity: identity, ResponseID: responseID, ReceivedAt: service.ConsumeNativeStreamEventReadTime(w.ctx)}
-	if n := parsed.Get("sequence_number"); n.Type == gjson.Number && n.Int() >= 0 && n.Float() == float64(n.Int()) {
-		v := n.Int()
+	if n := parsed.Get("sequence_number"); n.Exists() {
+		v, parseErr := strconv.ParseInt(n.Raw, 10, 64)
+		if parseErr != nil || n.Type != gjson.Number || v < 0 {
+			_ = w.execution.turn.Finish(responseturn.StateFailed, responseturn.ReasonConsistency, nil)
+			return responseturn.ErrConsistency
+		}
 		event.NativeSequence = &v
 	}
 	typ := parsed.Get("type").String()
@@ -562,8 +647,12 @@ func (w *nativeJournalWriter) publishFrame(frame []byte) error {
 	switch typ {
 	case "response.completed":
 		event.Terminal = responseturn.StateCompleted
-	case "response.failed", "error":
+	case "response.failed":
 		event.Terminal = responseturn.StateFailed
+	case "error":
+		// A bare error may precede response.failed carrying final usage. Forward
+		// it now, but keep the journal open for the verified response terminal.
+		w.protocolErrorSeen = true
 	case "response.incomplete":
 		event.Terminal = responseturn.StatePartial
 	case "response.cancelled":
@@ -571,6 +660,10 @@ func (w *nativeJournalWriter) publishFrame(frame []byte) error {
 	}
 	if event.Terminal != "" {
 		if response := parsed.Get("response"); response.IsObject() {
+			if status := response.Get("status").String(); status != "" && nativeResponseTerminalState(status) != event.Terminal {
+				_ = w.execution.turn.Finish(responseturn.StateFailed, responseturn.ReasonConsistency, nil)
+				return responseturn.ErrConsistency
+			}
 			event.Result = []byte(response.Raw)
 		}
 	}
@@ -580,22 +673,25 @@ func (w *nativeJournalWriter) publishFrame(frame []byte) error {
 func (w *nativeJournalWriter) finish() {
 	w.writeMu.Lock()
 	defer w.writeMu.Unlock()
-	if len(w.jsonBody) > 0 {
+	if len(w.jsonBody) > 0 && !w.jsonHandled {
 		status := w.Status()
-		terminal := responseturn.StateCompleted
+		terminal := nativeResponseTerminalState(gjson.GetBytes(w.jsonBody, "status").String())
 		if status >= 400 {
+			terminal = responseturn.StateFailed
+		}
+		if terminal == "" {
 			terminal = responseturn.StateFailed
 		}
 		responseID := gjson.GetBytes(w.jsonBody, "id").String()
 		if strings.HasPrefix(responseID, "resp_") {
 			_ = w.execution.turn.BindOwner(w.execution.accountID, responseID)
 		}
-		_, _ = w.execution.turn.Publish(w.ctx, responseturn.Event{Data: w.jsonBody, ResponseID: responseID, Terminal: terminal, Result: w.jsonBody})
+		_, _ = w.execution.turn.Publish(w.ctx, responseturn.Event{Data: w.jsonBody, HTTPStatus: status, JSONResponse: true, ResponseID: responseID, Terminal: terminal, Result: w.jsonBody})
 	}
 	snapshot := w.execution.turn.Snapshot()
 	if snapshot.State == responseturn.StateRunning || snapshot.State == responseturn.StateDetached {
 		state := responseturn.StateFailed
-		if snapshot.JournalEvents > 0 {
+		if snapshot.JournalEvents > 0 && !w.protocolErrorSeen {
 			state = responseturn.StatePartial
 		}
 		_ = w.execution.turn.Finish(state, responseturn.ReasonUpstreamFailure, nil)
@@ -621,6 +717,8 @@ func cancelNativeControlledReason(ctx context.Context, reason responseturn.Reaso
 		selected = service.ControlledContentTimeout
 	case responseturn.ReasonUpstreamFailure, responseturn.ReasonConsistency:
 		selected = service.ControlledUpstreamFailure
+	case responseturn.Reason("authorization_unavailable"), responseturn.Reason("permission_revoked"):
+		selected = service.ControlledAdminCancel
 	}
 	_ = service.CancelControlledRequest(ctx, selected)
 }

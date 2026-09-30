@@ -160,115 +160,227 @@ jobs:
         run: |
           set -euo pipefail
           go test -race -p 1 -parallel 1 -tags=unit \
-            ./internal/service ./internal/handler ./internal/handler/admin ./internal/scheduling ./internal/server/routes \
-            -run '^(TestNativeStream|TestNativeResponse|TestControlledPassthrough|TestControlledOwnerConstraintSurvivesLegacyRollback$|TestAccountPool|TestPriorityWeightsModesAndCapacity$|TestStrictPriorityAllowsSameTierRecoveryProbeOnly$|TestHealthCooldownAndRecovery$|TestGroupPolicyPostgresMembershipAndCAS$|TestGatewayRoutes(NativeResponsesAliasesKeepWebSocketAndCatchAll|OpenAIResponsesCompactPathIsRegistered|ResponsesSubpathRejectsNonConformingSubpaths)$)' \
+            ./internal/service ./internal/handler ./internal/handler/admin ./internal/scheduling ./internal/server/routes ./internal/server/middleware \
+            -run '^(TestReviewNative|TestAccountPoolCancelsAttemptBeforeNextTransport$|TestAccountPoolEntryExplicitGroupExcludesOutsideSimplePool$|TestAccountPoolEntryOwnerCannotEscapeExplicitGroup$|TestAccountPoolEntrySharedModelWeightsAndIndependentGroups$|TestAccountPoolEntrySimpleDefaultScopeStillIncludesAllAccounts$|TestAccountPoolGPT61SolCancellationBoundary$|TestAccountPoolGPT61SolExhaustsSameTier$|TestAccountPoolGPT61SolInvalidEffortDoesNotMutateAdmission$|TestAccountPoolGPT61SolSharedWeightsAliasesAndGroups$|TestAccountPoolOwnerUnsentAdmissionReleasesRecoveryProbe$|TestAccountPoolRealDispatchExhaustsEligibleTier$|TestControlledBufferedAnthropicTerminalValidation$|TestControlledBufferedBridgesRealSSE$|TestControlledBufferedFailureParityRealSSE$|TestControlledBufferedGeminiCollectorsRealSSE$|TestControlledBufferedNativeFailureParityRealSSE$|TestControlledBufferedResponseFailuresRealSSE$|TestControlledBufferedSSEEOFWaitsForAdapter$|TestControlledBufferedSSEForwardAdapters$|TestControlledCallerDeadlineDoesNotWaitForTerminalStoreLock$|TestControlledCandidateAdmissionBatchMatchesExistingDomains$|TestControlledCandidateAdmissionFiltersBeforeSharedReads$|TestControlledCrossProcessDomainProbeSurvivesRedisLoss$|TestControlledFailureModelFallbackUsesMappingAndDeadline$|TestControlledFallbackUsesRemainingAttemptBudget$|TestControlledFinalModelRevalidatesHealthAndProbeCapacity$|TestControlledGroupPolicyOwnerGuard$|TestControlledHTTPAuthenticationTerminalNeverRecoversHealth$|TestControlledImagesNonstreamNativeErrorAttribution$|TestControlledLeaseReviewCancelsHTTPDuringBlockedStorePoll$|TestControlledPreparationDeadlineBoundsStoreWaits$|TestControlledPreparationDeadlineDoesNotCancelCompletedLongStream$|TestControlledPrepareFailuresNeverCountActualDispatch$|TestControlledProtocolErrorBodyDeadline$|TestControlledProtocolLongStreamSurvivesD$|TestControlledProtocolNonstreamAcceptance$|TestControlledRealStoresAndHTTP$|TestControlledTerminalUsageCertainty$|TestExplainRealPostgresRedisIsPureAndPredictsNextSelection$|TestNativeStreamControlledDeliveryRealStores$|TestOneClickAccountSwitchLetsActiveSSEComplete$|TestOneClickAccountSwitchLetsActiveWSTurnFinishAndRejectsNextTurn$|TestReviewPR74BufferedAttemptTimeoutAllowsFailover$|TestReviewPR74ProtocolEnvelopeCooldown$|TestReviewV021BufferedReadFailureAllowsFailover$|TestReviewV021ProvenNotSentHasNoPendingUsage$|TestReviewV021ProviderCooldownSurvivesRedisHealthLoss$|TestSchedulingModeAuxiliaryUsesGroupRulesWithoutGenerationReservations$|TestSchedulingModeSub2APIBypassesControlledDispatchStore$|TestNativeStream|TestNativeResponse|TestControlledPassthrough|TestControlledOwnerConstraintSurvivesLegacyRollback$|TestAccountPool|TestPriorityWeightsModesAndCapacity$|TestStrictPriorityAllowsSameTierRecoveryProbeOnly$|TestHealthCooldownAndRecovery$|TestGroupPolicyPostgresMembershipAndCAS$|TestGatewayRoutes(NativeResponsesAliasesKeepWebSocketAndCatchAll|OpenAIResponsesCompactPathIsRegistered|ResponsesSubpathRejectsNonConformingSubpaths)$)' \
             -skip '^TestNativeStreamRelayReadToFlushPerformance$' \
             -count=1 -timeout=10m -json | tee "$RUNNER_TEMP/native-stream-functional.jsonl"
           go test -race -p 1 -parallel 1 ./internal/pkg/responseturn \
             -count=1 -timeout=3m -json | tee "$RUNNER_TEMP/native-stream-turns.jsonl"
+          go test -race -p 1 -parallel 1 -tags=integration \
+            ./internal/handler -run '^TestReviewNative(BackgroundRealBilling|StreamRealBilling)' \
+            -count=1 -timeout=3m -json | tee "$RUNNER_TEMP/native-stream-billing.jsonl"
+          go test -race -p 1 -parallel 1 -tags=unit \
+            ./cmd/server -run '^TestProvideCleanup_WithMinimalDependencies_NoPanic$' \
+            -count=1 -timeout=60s -json | tee "$RUNNER_TEMP/native-stream-cleanup.jsonl"
           python3 - <<'PY'
           import json
           import os
           from pathlib import Path
 
-          required = {
-              "service": set("""
-                  TestNativeStreamControlledDeliveryRealStores
-                  TestNativeStreamRelayImmediateCompleteEvents
-                  TestNativeStreamRelayErrorBoundary
-                  TestNativeStreamRelayPartialWriteCommits
-                  TestNativeStreamRelayCancellationClosesBody
-                  TestNativeStreamHTTPRealTransportCloseRaces
-                  TestNativeStreamRelayMultilineAndInvalidEvents
-                  TestNativeStreamNoEventFragmentExposure
-                  TestNativeStreamUpstreamContextPreservesCancel
-                  TestNativeStreamWSRealSocketImmediateDelivery
-                  TestNativeStreamWSSentWithoutEventDoesNotRegenerate
-                  TestNativeStreamWSCtxPoolSentCreateDoesNotRetry
-                  TestNativeStreamWSPoolKeyIsolation
-                  TestNativeStreamWSPoolBoundsReturnedIdleAndAge
-                  TestNativeStreamWSPassthroughImmediateCommitAndCancel
-                  TestNativeStreamWSPassthroughPolicyRefreshAtNextTurn
-                  TestNativeStreamObserveDoesNotCommitOrFabricateContent
-                  TestNativeStreamHeartbeatCommitsOnlyHTTP
-                  TestNativeStreamLocalTraceHeaderDoesNotCommitHeartbeat
-                  TestNativeStreamTimeoutCommitRaceCannotAdmitMixedAttempt
-                  TestNativeStreamCancellationReasonsExcludeProviderPenalty
-                  TestNativeStreamCommittedCreatedKeepsContentDeadline
-                  TestNativeStreamFinalBytesReturnBeforeSettlement
-                  TestNativeStreamCommittedTransportFailureCannotFailover
-                  TestNativeStreamIdentityHeaderCommitsBeforeHeartbeatFlush
-                  TestNativeStreamExplicitCancelOutranksContentTimer
-                  TestNativeStreamExecutionBindingPreservesLedgerDeadlineAndOwner
-                  TestNativeStreamExecutionTransferKeepsRetrySelectionAndControl
-                  TestNativeStreamExecutionTransferRejectsLateOrCanceled
-                  TestNativeStreamPassthroughGuardCommitsBeforeFailedWrite
-                  TestNativeStreamPassthroughGuardTimeoutRace
-                  TestNativeStreamPassthroughGuardPreservesLegacyDouble
-                  TestNativeStreamPassthroughGuardObserveOnlyRequest
-                  TestNativeStreamTransactionProbe
-                  TestNativeStreamPolicySnapshotIsImmutable
-                  TestNativeStreamPolicyMiddlewareUsesAuthenticatedGroup
-                  TestNativeStreamPolicyRefreshOnlyChangesNewTurn
-                  TestNativeStreamPolicyRefreshFailureDoesNotMutateSnapshot
-                  TestNativeStreamDiagnosticsScopeAndNoInferredContent
-                  TestNativeStreamDeferredWorkerFlushDoesNotMeasureNetwork
-                  TestNativeStreamDeferredReadTimeConsumedOnce
-                  TestNativeStreamAttachmentFlushUsesOriginalRuntimeAndPolicy
-              """.split()),
-              "handler": set("""
-                  TestNativeResponseHTTPDetachReplayUsesOneGenerationAndUsage
-                  TestNativeResponseHTTPCancelAuthorizationAndNoRevival
-                  TestNativeResponseHTTPOrdinaryDisconnectCancels
-                  TestNativeResponseHTTPPrecommitRetryKeepsLedgerBoundary
-                  TestNativeResponseHTTPAfterCommitFailureNeverMixesAccounts
-                  TestNativeResponseHTTPNonstreamBackgroundIdempotencyRejectsBeforeCreate
-                  TestNativeResponseControlPostOnlyHandlesExactCancel
-              """.split()),
-              "handler/admin": {
-                  "TestNativeStreamGroupPolicyAtomicFeatureValidation",
-                  "TestNativeStreamOldClientPreservesFlags",
-              },
-              "server/routes": {
-                  "TestGatewayRoutesNativeResponsesAliasesKeepWebSocketAndCatchAll",
-                  "TestGatewayRoutesOpenAIResponsesCompactPathIsRegistered",
-                  "TestGatewayRoutesResponsesSubpathRejectsNonConformingSubpaths",
-              },
-              "scheduling": set("""
-                  TestAccountPoolAdmissionThenPriorityThenWeight
-                  TestAccountPoolExhaustsEveryEligibleAccountBeforeLowerTier
-                  TestAccountPoolSWRRRatioAndTwoClientFairness
-                  TestPriorityWeightsModesAndCapacity
-                  TestStrictPriorityAllowsSameTierRecoveryProbeOnly
-                  TestHealthCooldownAndRecovery
-                  TestGroupPolicyPostgresMembershipAndCAS
-              """.split()),
-              "pkg/responseturn": set("""
-                  TestRecoveryEligibilityClosed
-                  TestIdempotencyNormalizedConcurrentScopeAndTombstone
-                  TestLookupScopeAndOwnerImmutable
-                  TestReplayLiveOrderUnknownEventsAndNativeCursor
-                  TestAtomicReplayLiveBoundaryConcurrent
-                  TestEpochReplacementAndSingleWriterFence
-                  TestCumulativeOfflineBudgetNotResetByReconnect
-                  TestExplicitCancellationAndControlDeadlineNeverRevive
-                  TestNativeIdentityDeduplicationAndConflicts
-                  TestQuotaOnlineContinuesOfflineCancelsAndSharedLimits
-                  TestTerminalReplayRetentionSettlementAndStoreFalse
-                  TestNonStreamingBackgroundIgnoresOfflineBudget
-                  TestResourceCapacityAndClose
-                  TestQuotaDegradationRetainsUnreadReplayAccounting
-                  TestIndependentReviewConcurrentFirstCreateAndScope
-                  TestIndependentReviewTerminalTTLReleasesAttachmentReplay
-                  TestIndependentReviewStoreFalseTerminalReleasesQueuedBody
-                  TestIndependentReviewCancelCallbackCanObserveState
-                  TestIndependentReviewClientDetachReasonIsNotUserStop
-                  TestIndependentReviewJitterDoesNotResetOfflineBudget
-                  TestIndependentReviewQuotaOnlinePassesOfflineCancels
-              """.split()),
-          }
+          required = {'cmd/server': {'TestProvideCleanup_WithMinimalDependencies_NoPanic'},
+           'handler': {'TestNativeResponseControlPostOnlyHandlesExactCancel',
+                       'TestNativeResponseHTTPAfterCommitFailureNeverMixesAccounts',
+                       'TestNativeResponseHTTPCancelAuthorizationAndNoRevival',
+                       'TestNativeResponseHTTPDetachReplayUsesOneGenerationAndUsage',
+                       'TestNativeResponseHTTPNonstreamBackgroundIdempotencyPollsBeforeSettlement',
+                       'TestNativeResponseHTTPOrdinaryDisconnectCancels',
+                       'TestNativeResponseHTTPPrecommitRetryKeepsLedgerBoundary',
+                       'TestReviewNativeBackgroundAcceptedAfterCancellationStillCancelsOriginal',
+                       'TestReviewNativeBackgroundCancelAndRevocationSettleOnce',
+                       'TestReviewNativeBackgroundCancelDoesNotReplayQueuedOrReleaseEarly',
+                       'TestReviewNativeBackgroundIdempotencyPollsOriginalUntilTerminal',
+                       'TestReviewNativeBackgroundKeepaliveReturnsWhileCapacityRetained',
+                       'TestReviewNativeBackgroundNoKeyStoreFalseUsesOriginalDeadline',
+                       'TestReviewNativeBackgroundPollingFailureCancelsOriginal',
+                       'TestReviewNativeBackgroundRealBillingControlledCancellation',
+                       'TestReviewNativeBackgroundRealBillingSettlesOnce',
+                       'TestReviewNativeBackgroundRealBillingTerminalAndCancellation',
+                       'TestReviewNativeBackgroundShutdownIsBoundedAndRejectsNewAdmission',
+                       'TestReviewNativeBackgroundUnsupportedAccountRejectsBeforeCreate',
+                       'TestReviewNativeJSONErrorStatusPreservedByDuplicateCreate',
+                       'TestReviewNativeJSONProtocolTerminalState',
+                       'TestReviewNativeOuterTerminalDeliveredOnceAndUsagePreserved',
+                       'TestReviewNativeSSELateProofCancelsOriginalWithoutRevival',
+                       'TestReviewNativeSSEShutdownWaitsForConcurrentCancel',
+                       'TestReviewNativeStreamRealBillingTerminalReplaySettlesOnce'},
+           'handler/admin': {'TestNativeStreamGroupPolicyAtomicFeatureValidation',
+                             'TestNativeStreamOldClientPreservesFlags'},
+           'pkg/responseturn': {'TestAtomicReplayLiveBoundaryConcurrent',
+                                'TestCumulativeOfflineBudgetNotResetByReconnect',
+                                'TestEpochReplacementAndSingleWriterFence',
+                                'TestExplicitCancellationAndControlDeadlineNeverRevive',
+                                'TestIdempotencyNormalizedConcurrentScopeAndTombstone',
+                                'TestIndependentReviewCancelCallbackCanObserveState',
+                                'TestIndependentReviewClientDetachReasonIsNotUserStop',
+                                'TestIndependentReviewConcurrentFirstCreateAndScope',
+                                'TestIndependentReviewJitterDoesNotResetOfflineBudget',
+                                'TestIndependentReviewQuotaOnlinePassesOfflineCancels',
+                                'TestIndependentReviewStoreFalseTerminalReleasesQueuedBody',
+                                'TestIndependentReviewTerminalTTLReleasesAttachmentReplay',
+                                'TestLookupScopeAndOwnerImmutable',
+                                'TestNativeIdentityDeduplicationAndConflicts',
+                                'TestNonStreamingBackgroundIgnoresOfflineBudget',
+                                'TestQuotaDegradationRetainsUnreadReplayAccounting',
+                                'TestQuotaOnlineContinuesOfflineCancelsAndSharedLimits',
+                                'TestRecoveryEligibilityClosed',
+                                'TestReplayLiveOrderUnknownEventsAndNativeCursor',
+                                'TestResourceCapacityAndClose',
+                                'TestReviewAmbiguousDuplicateKeysRejected',
+                                'TestReviewBackgroundAcceptancePollingAndTerminal',
+                                'TestReviewBackgroundCancellationResultPreservesTerminal',
+                                'TestReviewBackgroundCapabilityIdentityAndStorePolicy',
+                                'TestReviewBackgroundSnapshotQuotaAndDeadline',
+                                'TestReviewCancellationCannotWaitForCallback',
+                                'TestReviewCancelledBackgroundControlRejectsUnverifiedIdentity',
+                                'TestReviewCancelledBackgroundLateAcknowledgementKeepsControl',
+                                'TestReviewCancelledBackgroundLateAcknowledgementRejectsForeignProof',
+                                'TestReviewCancelledSSEBackgroundLateAcknowledgementKeepsControl',
+                                'TestReviewCompletedEventWinsBlockedDeliveryCancellation',
+                                'TestReviewEveryVerifiedTerminalReachesWriterBeforeEOF',
+                                'TestReviewExpiredHandleCannotRemoveNewIdempotentTurn',
+                                'TestReviewHTTPStatusRejectsInvalidAndConflictingValues',
+                                'TestReviewNonstreamHTTPStatusPreservedForIdempotency',
+                                'TestReviewQuotaExpiryNeverMakesAccountingNegative',
+                                'TestReviewStreamRequestInitialJSONErrorPreservesStatus',
+                                'TestReviewStreamingEventCannotChangeHTTPStatus',
+                                'TestReviewTerminalRetentionOutlivesCreationKeyTTL',
+                                'TestTerminalReplayRetentionSettlementAndStoreFalse'},
+           'scheduling': {'TestAccountPoolAdmissionThenPriorityThenWeight',
+                          'TestAccountPoolExhaustsEveryEligibleAccountBeforeLowerTier',
+                          'TestAccountPoolSWRRRatioAndTwoClientFairness',
+                          'TestGroupPolicyPostgresMembershipAndCAS',
+                          'TestHealthCooldownAndRecovery',
+                          'TestNativeStreamGroupPolicyPostgresRoundTripAndIsolation',
+                          'TestPriorityWeightsModesAndCapacity',
+                          'TestStrictPriorityAllowsSameTierRecoveryProbeOnly'},
+           'server/middleware': {'TestNativeResponseControlAuthAfterGenerationSpend',
+                                 'TestNativeResponseControlAuthDoesNotBypassGenerationOrPermissions'},
+           'server/routes': {'TestGatewayRoutesNativeResponsesAliasesKeepWebSocketAndCatchAll',
+                             'TestGatewayRoutesOpenAIResponsesCompactPathIsRegistered',
+                             'TestGatewayRoutesResponsesSubpathRejectsNonConformingSubpaths'},
+           'service': {'TestAccountPoolCancelsAttemptBeforeNextTransport',
+                       'TestAccountPoolEntryExplicitGroupExcludesOutsideSimplePool',
+                       'TestAccountPoolEntryOwnerCannotEscapeExplicitGroup',
+                       'TestAccountPoolEntrySharedModelWeightsAndIndependentGroups',
+                       'TestAccountPoolEntrySimpleDefaultScopeStillIncludesAllAccounts',
+                       'TestAccountPoolGPT61SolCancellationBoundary',
+                       'TestAccountPoolGPT61SolExhaustsSameTier',
+                       'TestAccountPoolGPT61SolInvalidEffortDoesNotMutateAdmission',
+                       'TestAccountPoolGPT61SolSharedWeightsAliasesAndGroups',
+                       'TestAccountPoolOwnerUnsentAdmissionReleasesRecoveryProbe',
+                       'TestAccountPoolRealDispatchExhaustsEligibleTier',
+                       'TestControlledBufferedAnthropicTerminalValidation',
+                       'TestControlledBufferedBridgesRealSSE',
+                       'TestControlledBufferedFailureParityRealSSE',
+                       'TestControlledBufferedGeminiCollectorsRealSSE',
+                       'TestControlledBufferedNativeFailureParityRealSSE',
+                       'TestControlledBufferedResponseFailuresRealSSE',
+                       'TestControlledBufferedSSEEOFWaitsForAdapter',
+                       'TestControlledBufferedSSEForwardAdapters',
+                       'TestControlledCallerDeadlineDoesNotWaitForTerminalStoreLock',
+                       'TestControlledCandidateAdmissionBatchMatchesExistingDomains',
+                       'TestControlledCandidateAdmissionFiltersBeforeSharedReads',
+                       'TestControlledCrossProcessDomainProbeSurvivesRedisLoss',
+                       'TestControlledFailureModelFallbackUsesMappingAndDeadline',
+                       'TestControlledFallbackUsesRemainingAttemptBudget',
+                       'TestControlledFinalModelRevalidatesHealthAndProbeCapacity',
+                       'TestControlledGroupPolicyOwnerGuard',
+                       'TestControlledHTTPAuthenticationTerminalNeverRecoversHealth',
+                       'TestControlledImagesNonstreamNativeErrorAttribution',
+                       'TestControlledLeaseReviewCancelsHTTPDuringBlockedStorePoll',
+                       'TestControlledPreparationDeadlineBoundsStoreWaits',
+                       'TestControlledPreparationDeadlineDoesNotCancelCompletedLongStream',
+                       'TestControlledPrepareFailuresNeverCountActualDispatch',
+                       'TestControlledProtocolErrorBodyDeadline',
+                       'TestControlledProtocolLongStreamSurvivesD',
+                       'TestControlledProtocolNonstreamAcceptance',
+                       'TestControlledRealStoresAndHTTP',
+                       'TestControlledTerminalUsageCertainty',
+                       'TestExplainRealPostgresRedisIsPureAndPredictsNextSelection',
+                       'TestNativeStreamAttachmentFlushUsesOriginalRuntimeAndPolicy',
+                       'TestNativeStreamCancellationReasonsExcludeProviderPenalty',
+                       'TestNativeStreamCommittedCreatedKeepsContentDeadline',
+                       'TestNativeStreamCommittedTransportFailureCannotFailover',
+                       'TestNativeStreamControlledDeliveryRealStores',
+                       'TestNativeStreamDeferredReadTimeConsumedOnce',
+                       'TestNativeStreamDeferredWorkerFlushDoesNotMeasureNetwork',
+                       'TestNativeStreamDiagnosticsScopeAndNoInferredContent',
+                       'TestNativeStreamExecutionBindingPreservesLedgerDeadlineAndOwner',
+                       'TestNativeStreamExecutionTransferKeepsRetrySelectionAndControl',
+                       'TestNativeStreamExecutionTransferRejectsLateOrCanceled',
+                       'TestNativeStreamExplicitCancelOutranksContentTimer',
+                       'TestNativeStreamFinalBytesReturnBeforeSettlement',
+                       'TestNativeStreamHTTPRealTransportCloseRaces',
+                       'TestNativeStreamHeartbeatCommitsOnlyHTTP',
+                       'TestNativeStreamIdentityHeaderCommitsBeforeHeartbeatFlush',
+                       'TestNativeStreamLocalTraceHeaderDoesNotCommitHeartbeat',
+                       'TestNativeStreamNoEventFragmentExposure',
+                       'TestNativeStreamObserveDoesNotCommitOrFabricateContent',
+                       'TestNativeStreamPassthroughGuardCommitsBeforeFailedWrite',
+                       'TestNativeStreamPassthroughGuardObserveOnlyRequest',
+                       'TestNativeStreamPassthroughGuardPreservesLegacyDouble',
+                       'TestNativeStreamPassthroughGuardTimeoutRace',
+                       'TestNativeStreamPolicyMiddlewareUsesAuthenticatedGroup',
+                       'TestNativeStreamPolicyRefreshFailureDoesNotMutateSnapshot',
+                       'TestNativeStreamPolicyRefreshOnlyChangesNewTurn',
+                       'TestNativeStreamPolicySnapshotIsImmutable',
+                       'TestNativeStreamRelayCancellationClosesBody',
+                       'TestNativeStreamRelayErrorBoundary',
+                       'TestNativeStreamRelayImmediateCompleteEvents',
+                       'TestNativeStreamRelayLocalErrorContinuesSequence',
+                       'TestNativeStreamRelayMultilineAndInvalidEvents',
+                       'TestNativeStreamRelayPartialWriteCommits',
+                       'TestNativeStreamTimeoutCommitRaceCannotAdmitMixedAttempt',
+                       'TestNativeStreamTransactionProbe',
+                       'TestNativeStreamUpstreamContextPreservesCancel',
+                       'TestNativeStreamWSCtxPoolSentCreateDoesNotRetry',
+                       'TestNativeStreamWSPassthroughExplicitCancel',
+                       'TestNativeStreamWSPassthroughImmediateCommitAndCancel',
+                       'TestNativeStreamWSPassthroughPolicyRefreshAtNextTurn',
+                       'TestNativeStreamWSPoolBoundsReturnedIdleAndAge',
+                       'TestNativeStreamWSPoolKeyIsolation',
+                       'TestNativeStreamWSRealSocketImmediateDelivery',
+                       'TestNativeStreamWSSentWithoutEventDoesNotRegenerate',
+                       'TestOneClickAccountSwitchLetsActiveSSEComplete',
+                       'TestOneClickAccountSwitchLetsActiveWSTurnFinishAndRejectsNextTurn',
+                       'TestReviewNativeSSEScannerRetainsOwnedLines',
+                       'TestReviewNativeStreamBackgroundAcceptanceIsClosed',
+                       'TestReviewNativeStreamBackgroundAcceptanceKeepsOriginalDispatch',
+                       'TestReviewNativeStreamBackgroundRealStores',
+                       'TestReviewNativeStreamBareErrorDrainIsBounded',
+                       'TestReviewNativeStreamCommentWriteFailureDoesNotCommitAttempt',
+                       'TestReviewNativeStreamCreatedKeepsLegacyContentDeadline',
+                       'TestReviewNativeStreamDeltaTypeDoesNotInventContent',
+                       'TestReviewNativeStreamDoneDoesNotProveResponsesSuccess',
+                       'TestReviewNativeStreamDownstreamDeadlineAndCancellation',
+                       'TestReviewNativeStreamEmptyDataIsNotComment',
+                       'TestReviewNativeStreamErrorKeepsFollowingTerminalUsage',
+                       'TestReviewNativeStreamExplicitCancellationCauseWins',
+                       'TestReviewNativeStreamFlushFailureCannotSucceed',
+                       'TestReviewNativeStreamForwardRetainsTerminalUsage',
+                       'TestReviewNativeStreamHTTPBackgroundKeepsHTTPWhenWSEnabled',
+                       'TestReviewNativeStreamIncompleteTerminalCannotSucceed',
+                       'TestReviewNativeStreamKnownNonTextContentStopsStartupTimer',
+                       'TestReviewNativeStreamMultiLineReassemblyIsBounded',
+                       'TestReviewNativeStreamObserverDoesNotInventEOFTerminal',
+                       'TestReviewNativeStreamOpaqueWriterFailsBeforeWrite',
+                       'TestReviewNativeStreamOutputJSONKeepsReconstruction',
+                       'TestReviewNativeStreamRetainedExecutionClosesOnce',
+                       'TestReviewNativeStreamScannerRejectsIncompleteEOF',
+                       'TestReviewNativeStreamSchedulingWriterExposesDeadlineControl',
+                       'TestReviewNativeStreamTerminalMustBeVerified',
+                       'TestReviewNativeStreamUpstreamCommentDoesNotCommitAttempt',
+                       'TestReviewNativeStreamValidationRepresentations',
+                       'TestReviewNativeStreamWSTerminalAndFailureUsage',
+                       'TestReviewPR74BufferedAttemptTimeoutAllowsFailover',
+                       'TestReviewPR74ProtocolEnvelopeCooldown',
+                       'TestReviewV021BufferedReadFailureAllowsFailover',
+                       'TestReviewV021ProvenNotSentHasNoPendingUsage',
+                       'TestReviewV021ProviderCooldownSurvivesRedisHealthLoss',
+                       'TestSchedulingModeAuxiliaryUsesGroupRulesWithoutGenerationReservations',
+                       'TestSchedulingModeSub2APIBypassesControlledDispatchStore'}}
           events = []
-          for filename in ["native-stream-functional.jsonl", "native-stream-turns.jsonl"]:
+          for filename in ["native-stream-functional.jsonl", "native-stream-turns.jsonl", "native-stream-billing.jsonl", "native-stream-cleanup.jsonl"]:
               events.extend(json.loads(line) for line in
                             Path(os.environ["RUNNER_TEMP"], filename).read_text().splitlines()
                             if line.strip())
@@ -277,7 +389,7 @@ jobs:
               raise SystemExit("Native stream release gate cannot skip or fail: " +
                                json.dumps(rejected, ensure_ascii=False))
           for suffix, expected in required.items():
-              package = "github.com/liulixin-lex/xy2api/internal/" + suffix
+              package = "github.com/liulixin-lex/xy2api/" + (suffix if suffix.startswith("cmd/") else "internal/" + suffix)
               ran = {event.get("Test") for event in events
                      if event.get("Package") == package and event.get("Action") == "run"}
               passed = {event.get("Test") for event in events

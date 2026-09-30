@@ -2,6 +2,7 @@ package responseturn
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"sync"
@@ -32,7 +33,7 @@ func (t *Turn) Attach(scope Scope, startingAfter *int64, replace bool) (*Attachm
 	m := t.manager
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.sweepLocked(m.cfg.Now())
+	m.sweepTurnLocked(t, m.cfg.Now())
 	if m.closed {
 		return nil, ErrClosed
 	}
@@ -180,7 +181,7 @@ func (a *Attachment) next(ctx context.Context) (Event, error) {
 		}
 		// Release replay references as soon as the history/live boundary is crossed.
 		a.replay = nil
-		terminal := t.isTerminalLocked()
+		terminal := t.terminalClosed
 		m.mu.Unlock()
 		select {
 		case e := <-a.live:
@@ -256,6 +257,29 @@ func (t *Turn) Publish(ctx context.Context, event Event) (PublishResult, error) 
 		t.cancelLocked(CancellationReason(context.Cause(t.ctx)), m.cfg.Now())
 		m.mu.Unlock()
 		return PublishResult{}, err
+	}
+	if e.JSONResponse && (e.Local || !json.Valid(e.Data) || e.NativeSequence != nil || t.sequence != 0) {
+		t.failConsistencyLocked()
+		m.mu.Unlock()
+		return PublishResult{}, ErrConsistency
+	}
+	if (!t.stream || e.JSONResponse) && !e.Local {
+		status := e.HTTPStatus
+		if status == 0 {
+			status = t.httpStatus
+			if status == 0 {
+				status = 200
+			}
+		}
+		if status < 200 || status > 599 || (t.httpStatus != 0 && t.httpStatus != status) {
+			t.failConsistencyLocked()
+			m.mu.Unlock()
+			return PublishResult{}, ErrConsistency
+		}
+		t.httpStatus = status
+		e.HTTPStatus = status
+	} else {
+		e.HTTPStatus = 0
 	}
 	if e.NativeSequence != nil && *e.NativeSequence < 0 {
 		t.failConsistencyLocked()
@@ -348,6 +372,10 @@ func (t *Turn) Publish(ctx context.Context, event Event) (PublishResult, error) 
 		}
 	}
 	result := t.publishResultLocked()
+	t.publishing = true
+	if e.terminal() {
+		t.finishLocked(e.Terminal, "", m.cfg.Now())
+	}
 	m.mu.Unlock()
 	var sendErr error
 	if a != nil {
@@ -366,8 +394,9 @@ func (t *Turn) Publish(ctx context.Context, event Event) (PublishResult, error) 
 	if a != nil && a.closed {
 		a.drainLiveLocked()
 	}
-	if e.terminal() && !t.isTerminalLocked() {
-		t.finishLocked(e.Terminal, "", m.cfg.Now())
+	t.publishing = false
+	if t.isTerminalLocked() {
+		t.closeTerminalLocked()
 	}
 	m.mu.Unlock()
 	return result, sendErr

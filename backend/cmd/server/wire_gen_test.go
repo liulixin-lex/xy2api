@@ -6,6 +6,7 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/handler"
+	"github.com/liulixin-lex/xy2api/internal/pkg/responseturn"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -53,6 +54,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 	schedulerSnapshotSvc := service.NewSchedulerSnapshotService(nil, nil, nil, nil, cfg)
 	opsSystemLogSinkSvc := service.NewOpsSystemLogSink(nil)
 
+	nativeHandler := &handler.OpenAIGatewayHandler{}
 	cleanup := provideCleanup(
 		nil, // usage export engine
 		nil, // entClient
@@ -90,6 +92,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		antigravityOAuthSvc,
 		nil,                       // grokOAuth
 		nil,                       // openAIGateway
+		nativeHandler,             // native responses must stop before workers and stores
 		nil,                       // scheduledTestRunner
 		nil,                       // backupSvc
 		nil,                       // paymentOrderExpiry
@@ -109,4 +112,9 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 	require.NotPanics(t, func() {
 		cleanup()
 	})
+	_, _, err := nativeHandler.NativeResponseManager().Create(responseturn.CreateOptions{
+		Scope: responseturn.Scope{UserID: 1, APIKeyID: 1, Interface: "responses"},
+		Body:  []byte(`{"model":"fixture","input":"after shutdown"}`),
+	})
+	require.ErrorIs(t, err, responseturn.ErrClosed)
 }

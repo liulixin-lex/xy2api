@@ -129,3 +129,5 @@ func TestNativeStreamHTTPRealTransportCloseRaces(t *testing.T) {
 		}
 	}
 }
+
+func (*nativeRelaySignalWriter) NativeStreamMemoryWriter() bool { return true }

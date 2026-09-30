@@ -62,6 +62,7 @@ type Turn struct {
 	stopControl    func() bool
 	policyVersion  string
 	stream         bool
+	httpStatus     int
 	store          bool
 	recoverable    bool
 	unavailable    string
@@ -83,6 +84,8 @@ type Turn struct {
 	epoch          uint64
 	attachment     *Attachment
 	terminal       chan struct{}
+	publishing     bool
+	terminalClosed bool
 	settle         sync.Once
 }
 
@@ -136,9 +139,12 @@ func (m *Manager) Create(o CreateOptions) (*Turn, bool, error) {
 	if m.closed {
 		return nil, false, ErrClosed
 	}
-	m.sweepLocked(now)
 	if o.IdempotencyKey != "" {
-		if t := m.keys[idempotencyID{o.Scope, o.IdempotencyKey}]; t != nil {
+		key := idempotencyID{o.Scope, o.IdempotencyKey}
+		if t := m.keys[key]; t != nil {
+			m.sweepTurnLocked(t, now)
+		}
+		if t := m.keys[key]; t != nil {
 			if t.hash != hash {
 				return nil, false, ErrConflict
 			}
@@ -149,7 +155,10 @@ func (m *Manager) Create(o CreateOptions) (*Turn, bool, error) {
 		}
 	}
 	if len(m.turns) >= m.cfg.MaxTurns {
-		return nil, false, ErrCapacity
+		m.sweepLocked(now)
+		if len(m.turns) >= m.cfg.MaxTurns {
+			return nil, false, ErrCapacity
+		}
 	}
 	id, err := newID("turn_")
 	if err != nil {
@@ -173,7 +182,7 @@ func (m *Manager) Create(o CreateOptions) (*Turn, bool, error) {
 	background, _ := body["background"].(bool)
 	store := body["store"] != false
 	capable := o.Capabilities.Verified && o.Capabilities.Protocol != "" && o.Capabilities.Retrieve && o.Capabilities.NativeCursor
-	eligible := background && store && capable
+	eligible := stream && background && store && capable
 	unavailable := ""
 	if !background {
 		unavailable = "native_background_intent_required"
@@ -184,7 +193,7 @@ func (m *Manager) Create(o CreateOptions) (*Turn, bool, error) {
 	}
 	t := &Turn{onCancel: o.OnCancel, manager: m, id: id, attemptID: attempt, scope: o.Scope, key: o.IdempotencyKey, hash: hash, created: now,
 		ctx: execution, cancel: cancel, deadlineCancel: deadlineCancel, policyVersion: o.PolicyVersion,
-		stream: stream, store: store, recoverable: eligible, background: background, backgroundAccepted: eligible, model: model, unavailable: unavailable, state: StateRunning,
+		stream: stream, store: store, recoverable: eligible, background: background, model: model, unavailable: unavailable, state: StateRunning,
 		identities: map[string][32]byte{}, terminal: make(chan struct{})}
 	m.turns[id] = t
 	if o.IdempotencyKey != "" {
@@ -215,6 +224,10 @@ func (t *Turn) BindOwner(accountID int64, upstreamResponseID string) error {
 	if m.closed {
 		return ErrClosed
 	}
+	return t.bindOwnerLocked(accountID, upstreamResponseID)
+}
+func (t *Turn) bindOwnerLocked(accountID int64, upstreamResponseID string) error {
+	m := t.manager
 	if accountID < 0 || (t.owner != 0 && accountID != 0 && t.owner != accountID) {
 		return ErrOwner
 	}
@@ -243,12 +256,15 @@ func (m *Manager) Lookup(scope Scope, id string) (*Turn, error) {
 	if m.closed {
 		return nil, ErrClosed
 	}
-	m.sweepLocked(m.cfg.Now())
 	t := m.responses[responseID{scope, id}]
 	if t == nil {
 		t = m.turns[id]
 	}
 	if t == nil || t.scope != scope {
+		return nil, ErrNotFound
+	}
+	m.sweepTurnLocked(t, m.cfg.Now())
+	if m.turns[t.id] != t {
 		return nil, ErrNotFound
 	}
 	if t.expired {
@@ -279,24 +295,32 @@ func (t *Turn) finishLocked(state State, reason Reason, now time.Time) {
 	t.state = state
 	t.reason = reason
 	t.finished = now
-	close(t.terminal)
+	// A verified upstream terminal commits before delivery. Delay only the EOF
+	// signal until the in-flight event has reached its bounded delivery queue.
+	if !t.publishing {
+		t.closeTerminalLocked()
+	}
 	if !t.store {
 		t.clearBodyLocked()
 		t.expired = true
 	}
-	if state == StateCancelled || state == StateFailed {
+	if (state == StateCancelled || state == StateFailed) && (!t.publishing || reason != "") {
+		// Cancellation is a control action, not a notification callback outcome.
+		// The cause remains available even if the host callback blocks.
+		t.cancel(&Cancellation{reason})
 		if t.onCancel != nil {
 			callback := t.onCancel
 			go func() {
-				// State is committed before invoking the host. Callbacks may safely inspect
-				// Snapshot without reentering the manager mutex. Control attribution runs
-				// before execution cancellation reaches transport observers.
-				defer t.cancel(&Cancellation{reason})
+				// Callbacks may safely inspect Snapshot without reentering the manager.
 				callback(reason)
 			}()
-		} else {
-			t.cancel(&Cancellation{reason})
 		}
+	}
+}
+func (t *Turn) closeTerminalLocked() {
+	if !t.terminalClosed {
+		t.terminalClosed = true
+		close(t.terminal)
 	}
 }
 func (t *Turn) cancelLocked(reason Reason, now time.Time) {
@@ -344,19 +368,26 @@ func (t *Turn) Finish(state State, reason Reason, result []byte) error {
 func (t *Turn) Snapshot() Snapshot {
 	m := t.manager
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.sweepLocked(m.cfg.Now())
+	m.sweepTurnLocked(t, m.cfg.Now())
 	used := t.offlineUsedLocked(m.cfg.Now())
 	remaining := m.cfg.OfflineBudget - used
 	if remaining < 0 {
 		remaining = 0
 	}
-	return Snapshot{Model: t.model, FirstEventAt: t.firstEventAt, FirstContentAt: t.firstContentAt, ReplayEvents: t.replayEvents, Attachments: t.epoch, CancelRequested: t.cancelRequested, CancelConfirmed: t.cancelConfirmed, TurnID: t.id, AttemptID: t.attemptID, UpstreamResponseID: t.responseID, OwnerAccountID: t.owner,
+	result := t.result // Stored slices are immutable and replaced, never reused.
+	status := t.httpStatus
+	if status == 0 {
+		status = 200
+	}
+	snapshot := Snapshot{HTTPStatus: status, BackgroundAccepted: t.backgroundAccepted, Model: t.model, FirstEventAt: t.firstEventAt, FirstContentAt: t.firstContentAt, ReplayEvents: t.replayEvents, Attachments: t.epoch, CancelRequested: t.cancelRequested, CancelConfirmed: t.cancelConfirmed, TurnID: t.id, AttemptID: t.attemptID, UpstreamResponseID: t.responseID, OwnerAccountID: t.owner,
 		Scope: t.scope, State: t.state, Reason: t.reason, Recoverable: t.recoverable && !t.expired,
 		RecoveryUnavailableReason: t.unavailable, Stream: t.stream, Store: t.store, PolicyVersion: t.policyVersion,
 		CreatedAt: t.created, FinishedAt: t.finished, OfflineUsed: used, OfflineRemaining: remaining,
 		JournalBytes: t.journalBytes + t.resultBytes, JournalEvents: len(t.events), AttachmentEpoch: t.epoch,
-		Attached: t.attachment != nil, Result: append([]byte(nil), t.result...)}
+		Attached: t.attachment != nil}
+	m.mu.Unlock()
+	snapshot.Result = append([]byte(nil), result...)
+	return snapshot
 }
 
 // SettleOnce is a per-execution fence, not a substitute for the existing durable
@@ -415,43 +446,52 @@ func (t *Turn) reserveResultLocked(result []byte) bool {
 
 func (m *Manager) Sweep() { m.mu.Lock(); defer m.mu.Unlock(); m.sweepLocked(m.cfg.Now()) }
 func (m *Manager) sweepLocked(now time.Time) {
-	for id, t := range m.turns {
-		if !t.isTerminalLocked() {
-			if err := t.ctx.Err(); err != nil {
-				t.cancelLocked(CancellationReason(context.Cause(t.ctx)), now)
-			}
-			if t.stream && !t.detachedAt.IsZero() && t.offlineUsedLocked(now) >= m.cfg.OfflineBudget {
-				t.cancelLocked(ReasonOfflineBudget, now)
-			}
+	for _, t := range m.turns {
+		m.sweepTurnLocked(t, now)
+	}
+}
+
+// Hot paths inspect their own execution; only the periodic/capacity sweep
+// scans retained tombstones process-wide.
+func (m *Manager) sweepTurnLocked(t *Turn, now time.Time) {
+	if m.turns[t.id] != t {
+		return
+	}
+	if !t.isTerminalLocked() {
+		if err := t.ctx.Err(); err != nil {
+			t.cancelLocked(CancellationReason(context.Cause(t.ctx)), now)
 		}
-		if t.isTerminalLocked() && !t.expired && now.Sub(t.finished) >= m.cfg.TerminalTTL {
-			if t.attachment != nil {
-				t.attachment.closeLocked()
-				t.attachment = nil
-			}
-			t.clearBodyLocked()
-			t.expired = true
-			t.recoverable = false
-			t.unavailable = "result_expired"
+		if t.stream && !t.detachedAt.IsZero() && t.offlineUsedLocked(now) >= m.cfg.OfflineBudget {
+			t.cancelLocked(ReasonOfflineBudget, now)
 		}
-		if t.isTerminalLocked() && now.Sub(t.created) >= m.cfg.IdempotencyTTL {
-			t.clearBodyLocked()
-			if t.stopControl != nil {
-				t.stopControl()
-			}
-			t.deadlineCancel()
-			t.cancel(&Cancellation{t.reason})
-			if t.attachment != nil {
-				t.attachment.closeLocked()
-				t.attachment = nil
-			}
-			delete(m.turns, id)
-			if t.key != "" {
-				delete(m.keys, idempotencyID{t.scope, t.key})
-			}
-			if t.responseID != "" {
-				delete(m.responses, responseID{t.scope, t.responseID})
-			}
+	}
+	if t.isTerminalLocked() && !t.expired && now.Sub(t.finished) >= m.cfg.TerminalTTL {
+		if t.attachment != nil {
+			t.attachment.closeLocked()
+			t.attachment = nil
+		}
+		t.clearBodyLocked()
+		t.expired = true
+		t.recoverable = false
+		t.unavailable = "result_expired"
+	}
+	if t.isTerminalLocked() && t.expired && now.Sub(t.created) >= m.cfg.IdempotencyTTL {
+		if t.stopControl != nil {
+			t.stopControl()
+		}
+		t.deadlineCancel()
+		t.cancel(&Cancellation{t.reason})
+		if t.attachment != nil {
+			t.attachment.closeLocked()
+			t.attachment = nil
+		}
+		t.clearBodyLocked()
+		delete(m.turns, t.id)
+		if t.key != "" {
+			delete(m.keys, idempotencyID{t.scope, t.key})
+		}
+		if t.responseID != "" {
+			delete(m.responses, responseID{t.scope, t.responseID})
 		}
 	}
 }
@@ -491,7 +531,7 @@ func (m *Manager) Close() error {
 func eventFingerprint(e Event) [32]byte {
 	h := sha256.New()
 	_, _ = h.Write(e.Data)
-	_, _ = fmt.Fprintf(h, "\x00%s\x00%s\x00%s", e.Identity, e.ResponseID, e.Terminal)
+	_, _ = fmt.Fprintf(h, "\x00%s\x00%s\x00%s\x00%d\x00%t", e.Identity, e.ResponseID, e.Terminal, e.HTTPStatus, e.JSONResponse)
 	if e.NativeSequence != nil {
 		_, _ = fmt.Fprintf(h, "\x00%d", *e.NativeSequence)
 	}

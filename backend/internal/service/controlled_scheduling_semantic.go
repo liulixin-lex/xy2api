@@ -101,12 +101,14 @@ func classifySemanticEvent(data []byte) (bool, bool, bool, bool) {
 		return text("delta"), text("delta"), false, false
 	case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
 		return text("delta"), false, false, false
-	case "response.function_call_arguments.delta":
+	case "response.function_call_arguments.delta", "response.custom_tool_call_input.delta":
 		return text("delta"), false, false, false
+	case "response.image_generation_call.partial_image":
+		return text("partial_image_b64"), text("partial_image_b64"), false, false
 	case "response.output_item.added":
-		return false, false, false, v.Get("item.type").String() == "function_call" && text("item.name")
+		return false, false, false, (v.Get("item.type").String() == "function_call" || v.Get("item.type").String() == "custom_tool_call") && text("item.name")
 	case "response.output_item.done":
-		if v.Get("item.type").String() == "function_call" && text("item.name") {
+		if (v.Get("item.type").String() == "function_call" || v.Get("item.type").String() == "custom_tool_call") && text("item.name") {
 			return true, false, false, false
 		}
 	case "response.completed", "response.done":

@@ -154,6 +154,9 @@ func validateControlledNonstreamResponse(resp *http.Response, body []byte, proto
 			protocol = "voice_json"
 		}
 	}
+	if acceptControlledNativeBackground(b, body, protocol) {
+		return nil
+	}
 	valid, healthy := controlledNonstreamSuccess(body, protocol)
 	b.dispatch.request.mu.Lock()
 	enabled := b.dispatch.request.Policy.Enabled
@@ -211,10 +214,14 @@ func finishControlledNonstreamResponse(resp *http.Response, adapterErr *error) {
 	b.dispatch.mu.Lock()
 	terminal, valid, validationErr := b.dispatch.transportTerminal, b.nonstreamValidated, b.nonstreamValidationErr
 	upstreamFailure := b.dispatch.upstreamFailure
+	backgroundAccepted := b.backgroundAccepted
 	b.dispatch.mu.Unlock()
 	err := *adapterErr
 	if err == nil {
 		err = validationErr
+	}
+	if backgroundAccepted && err == nil {
+		return
 	}
 	if err != nil {
 		// Images adapters can return a parsed request rejection before generic

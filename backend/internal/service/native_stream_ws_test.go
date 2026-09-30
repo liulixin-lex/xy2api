@@ -116,7 +116,7 @@ func TestNativeStreamWSSentWithoutEventDoesNotRegenerate(t *testing.T) {
 	defer upstream.Close()
 	svc, account, httpTransport := nativeWSFixtureService(t, upstream.URL)
 	ctx := nativeRelayContext(context.Background())
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c, _ := gin.CreateTestContext(newNativeStreamTestRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
 	_, err := svc.Forward(ctx, c, account, []byte("{\"model\":\"gpt-5.1\",\"stream\":true,\"input\":\"fixture\"}"))
 	require.Error(t, err)
@@ -416,4 +416,85 @@ func TestNativeStreamWSCtxPoolSentCreateDoesNotRetry(t *testing.T) {
 	require.Equal(t, 1, dialer.DialCount())
 	require.Empty(t, second.writes)
 	t.Log("native_ctx_pool_turn2_write_uncertain=true replacement_dials=0 new_create_replay=0")
+}
+
+func (*nativeRelayObservedWriter) NativeStreamMemoryWriter() bool { return true }
+
+func TestReviewNativeStreamWSTerminalAndFailureUsage(t *testing.T) {
+	for _, status := range []string{"failed", "incomplete", "cancelled", "bare_then_failed", "contradictory"} {
+		t.Run(status, func(t *testing.T) {
+			var creates atomic.Int32
+			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := upgrader.Upgrade(w, r, nil)
+				if err != nil {
+					return
+				}
+				defer func() { _ = conn.Close() }()
+				if _, _, err = conn.ReadMessage(); err != nil {
+					return
+				}
+				creates.Add(1)
+				_ = conn.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_ws_terminal\"}}"))
+				terminalStatus := status
+				if status == "bare_then_failed" {
+					_ = conn.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"error\",\"sequence_number\":1,\"code\":\"server_error\",\"message\":\"fixture\"}"))
+					terminalStatus = "failed"
+				}
+				kind := "response." + terminalStatus
+				if status == "contradictory" {
+					kind = "response.completed"
+					terminalStatus = "failed"
+				}
+				message := fmt.Sprintf("{\"type\":%q,\"sequence_number\":2,\"response\":{\"id\":\"resp_ws_terminal\",\"status\":%q,\"output\":[],\"usage\":{\"input_tokens\":21,\"output_tokens\":3}}}", kind, terminalStatus)
+				_ = conn.WriteMessage(websocket.TextMessage, []byte(message))
+			}))
+			defer upstream.Close()
+			svc, account, httpTransport := nativeWSFixtureService(t, upstream.URL)
+			ctx := nativeRelayContext(context.Background())
+			out := newNativeStreamTestRecorder()
+			c, _ := gin.CreateTestContext(out)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+			result, err := svc.Forward(ctx, c, account, []byte("{\"model\":\"gpt-5.1\",\"stream\":true,\"input\":\"fixture\"}"))
+			require.Error(t, err, "non-success WS terminal must not report success")
+			require.Equal(t, status != "contradictory", IsNativeResponsesTerminalError(err))
+			require.NotNil(t, result, "observed terminal usage must survive failure")
+			require.EqualValues(t, 21, result.Usage.InputTokens)
+			require.EqualValues(t, 3, result.Usage.OutputTokens)
+			if status == "bare_then_failed" {
+				require.Contains(t, out.Body.String(), "response.failed")
+			}
+			require.EqualValues(t, 1, creates.Load())
+			require.Empty(t, httpTransport.requests)
+		})
+	}
+}
+
+func TestReviewNativeStreamHTTPBackgroundKeepsHTTPWhenWSEnabled(t *testing.T) {
+	var wsAttempts atomic.Int32
+	wsTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		wsAttempts.Add(1)
+		http.Error(w, "background must never reach the WS create adapter", http.StatusBadRequest)
+	}))
+	defer wsTarget.Close()
+	svc, account, transport := nativeWSFixtureService(t, wsTarget.URL)
+	account.Extra["openai_responses_supported"] = true
+	frames := nativeRelaySSE("response.created", "\"sequence_number\":0,\"response\":{\"id\":\"resp_background_http\",\"status\":\"in_progress\",\"background\":true}") +
+		nativeRelaySSE("response.completed", "\"sequence_number\":1,\"response\":{\"id\":\"resp_background_http\",\"status\":\"completed\",\"background\":true,\"usage\":{\"input_tokens\":4,\"output_tokens\":1}}")
+	transport.resp = &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(frames))}
+	ctx := nativeRelayContext(context.Background())
+	out := newNativeStreamTestRecorder()
+	c, _ := gin.CreateTestContext(out)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+	result, err := svc.Forward(ctx, c, account, []byte("{\"model\":\"gpt-5.1\",\"input\":\"fixture\",\"stream\":true,\"background\":true}"))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.OpenAIWSMode)
+	require.NotNil(t, transport.lastReq)
+	require.Equal(t, gjson.True, gjson.GetBytes(transport.lastBody, "background").Type, "native background intent must reach HTTP unchanged")
+	require.Zero(t, wsAttempts.Load(), "no WS handshake/create may silently downgrade background intent")
+	require.Equal(t, "resp_background_http", result.ResponseID)
+	require.Equal(t, 4, result.Usage.InputTokens)
+	require.Equal(t, 1, result.Usage.OutputTokens)
 }

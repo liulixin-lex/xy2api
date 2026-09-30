@@ -356,6 +356,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
 	var resp *http.Response
 	var usage *OpenAIUsage
+	var forwardErr error
 	var firstTokenMs *int
 	responseID := ""
 	imageCount := 0
@@ -469,8 +470,13 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 					}
 					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
 				}
-				_ = resp.Body.Close()
-				return nil, handleErr
+				if !NativeStreamDeliveryEnabled(ctx) || result == nil {
+					_ = resp.Body.Close()
+					return nil, handleErr
+				}
+				// A failed original execution can still contain verified usage.
+				// Preserve its result without converting the error into success.
+				forwardErr = handleErr
 			}
 			usage = result.usage
 			firstTokenMs = result.firstTokenMs
@@ -537,6 +543,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		ReasoningEffort:               reasoningEffort,
 		Stream:                        reqStream,
 		OpenAIWSMode:                  false,
+		UpstreamTerminalEvent:         nativeResponsesTerminalEvent(forwardErr),
 		Duration:                      time.Since(startTime),
 		FirstTokenMs:                  firstTokenMs,
 	}
@@ -547,7 +554,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		forwardResult.ImageOutputSizes = imageOutputSizes
 		forwardResult.BillingModel = imageBillingModel
 	}
-	return forwardResult, nil
+	return forwardResult, forwardErr
 }
 
 func logOpenAIPassthroughInstructionsRejected(
@@ -1870,6 +1877,12 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	mappedModel string,
 ) (*openaiStreamingResultPassthrough, error) {
 	nativeDelivery := NativeStreamDeliveryEnabled(ctx)
+	var nativeTerminalEffect func()
+	defer func() {
+		if nativeTerminalEffect != nil {
+			nativeTerminalEffect()
+		}
+	}()
 	if nativeDelivery {
 		stopCancel := context.AfterFunc(ctx, func() { _ = resp.Body.Close() })
 		defer stopCancel()
@@ -1905,6 +1918,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	clientDisconnected := false
 	sawDone := false
 	sawTerminalEvent := false
+	var nativeTerminalErr error
 	sawFailedEvent := false
 	sawBareError := false
 	sawResponseFailed := false
@@ -2011,23 +2025,22 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	scanBuf := getSSEScannerBuf64K()
 	scanner.Buffer(scanBuf[:0], maxLineSize)
 	defer putSSEScannerBuf64K(scanBuf)
+	lastNativeWrite := time.Now()
 	var documentScanner nativeSSEScanner = newOpenAISSEJSONDocumentScanner(scanner)
 	if nativeDelivery {
-		documentScanner = newNativeSSEEventScanner(documentScanner)
+		documentScanner = newNativeSSEEventScanner(documentScanner, maxLineSize)
 		interval := 15 * time.Second
 		if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
 			interval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
 		}
-		lastWrite := time.Now()
 		idleScanner := newNativeSSEIdleScanner(ctx, resp.Body, documentScanner, interval, func() error {
-			if len(pendingLines) != 0 || time.Since(lastWrite) < interval {
+			if len(pendingLines) != 0 || time.Since(lastNativeWrite) < interval {
 				return nil
 			}
-			n, err := w.Write([]byte(":\n\n"))
+			n, err := WriteNativeStreamFrame(ctx, w, []byte(":\n\n"))
 			recordOpenAIStreamKeepaliveBytes(c, n)
 			if err == nil {
-				flusher.Flush()
-				lastWrite = time.Now()
+				lastNativeWrite = time.Now()
 			}
 			return err
 		})
@@ -2090,6 +2103,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				}
 			}
 			eventType := effectiveOpenAISSEEventType(dataBytes, rawEventType)
+			if nativeDelivery {
+				if terminalErr := nativeResponsesTerminalError(dataBytes, eventType); terminalErr != nil {
+					nativeTerminalErr = terminalErr
+				}
+			}
 			if !nativeDelivery && codexFailureTerminal && sawBareError && !sawResponseFailed && eventType != "response.failed" {
 				suppressCurrentEvent = true
 			}
@@ -2109,7 +2127,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				} else if codexFailureTerminal && eventType == "response.failed" {
 					sawResponseFailed = true
 				}
-				responseFailedPending = !codexFailureTerminal || eventType == "response.failed"
+				responseFailedPending = (!nativeDelivery && !codexFailureTerminal) || eventType == "response.failed"
 				failedMessage = extractOpenAISSEErrorMessage(dataBytes)
 				if failedMessage == "" {
 					failedMessage = "Upstream response failed"
@@ -2142,7 +2160,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 						bareErrorAccountSideEffectsPending = true
 					} else {
 						if nativeDelivery {
-							defer s.handleOpenAIStreamTerminalAccountSideEffects(c, account, append([]byte(nil), dataBytes...), failedMessage, resp.Header, mappedModel)
+							payload, message := append([]byte(nil), dataBytes...), failedMessage
+							nativeTerminalEffect = func() {
+								s.handleOpenAIStreamTerminalAccountSideEffects(c, account, payload, message, resp.Header, mappedModel)
+							}
 						} else {
 							s.handleOpenAIStreamTerminalAccountSideEffects(c, account, dataBytes, failedMessage, resp.Header, mappedModel)
 						}
@@ -2191,7 +2212,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				sawDone = true
 				terminalEventType = "[DONE]"
 			}
-			if openAIStreamEventIsTerminalWithType(trimmedData, eventType) {
+			if openAIStreamEventIsTerminalWithType(trimmedData, eventType) && (!nativeDelivery || eventType != "error") {
 				sawTerminalEvent = true
 				if trimmedData != "[DONE]" {
 					terminalEventType = eventType
@@ -2250,11 +2271,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			}
 			frame := []byte(strings.Join(pendingLines, "\n") + "\n")
 			payload := nativeSSEEventData(frame)
-			if err := CommitControlledOutput(ctx, payload); err != nil {
-				_ = resp.Body.Close()
-				return resultWithUsage(), err
-			}
 			if len(payload) > 0 {
+				if err := CommitControlledOutput(ctx, payload); err != nil {
+					_ = resp.Body.Close()
+					return resultWithUsage(), err
+				}
 				if !clientOutputStarted && !c.Writer.Written() {
 					writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 					c.Header("Content-Type", "text/event-stream")
@@ -2265,7 +2286,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				clientOutputStarted = true
 				RecordNativeStreamEventRead(ctx, nativeSSEReadAt(documentScanner))
 			}
-			n, err := w.Write(frame)
+			n, err := WriteNativeStreamFrame(ctx, w, frame)
 			if len(payload) == 0 {
 				recordOpenAIStreamKeepaliveBytes(c, n)
 			}
@@ -2273,7 +2294,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				_ = resp.Body.Close()
 				return resultWithUsage(), fmt.Errorf("client_detached: %w: %v", context.Canceled, err)
 			}
-			flusher.Flush()
+			lastNativeWrite = time.Now()
 			if reader, ok := documentScanner.(*nativeSSEIdleScanner); ok && len(payload) > 0 {
 				RecordNativeStreamFlush(ctx, reader.ReadAt(), time.Now())
 			}
@@ -2319,6 +2340,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	}
 	ensureResponseFailedTerminal()
 	if err := documentScanner.Err(); err != nil {
+		if nativeTerminalErr != nil {
+			return resultWithUsage(), markNativeResponsesTerminalDelivered(nativeTerminalErr, !clientDisconnected)
+		}
 		if (sawDone || sawTerminalEvent) && !sawFailedEvent {
 			s.clearOpenAIProxyStreamDisconnect(account)
 			return resultWithUsage(), nil
@@ -2352,6 +2376,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			err,
 		)
 		return resultWithUsage(), fmt.Errorf("stream read error: %w", err)
+	}
+	if nativeTerminalErr != nil {
+		return resultWithUsage(), markNativeResponsesTerminalDelivered(nativeTerminalErr, !clientDisconnected)
 	}
 	if sawFailedEvent {
 		return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)

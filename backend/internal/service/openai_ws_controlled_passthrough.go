@@ -68,6 +68,9 @@ func (c *openAIWSControlledPassthroughFrameConn) ReadFrame(ctx context.Context) 
 		return typ, payload, context.Cause(c.ctx)
 	}
 	if err == nil && (typ == coderws.MessageText || typ == coderws.MessageBinary) {
+		if NativeStreamDeliveryEnabled(c.turnContext()) && !nativeStreamEventJSONValid(payload) {
+			return typ, nil, errNativeStreamEventJSON
+		}
 		if d := c.activeAttempt(); d != nil {
 			d.ObserveFrame(payload)
 		}

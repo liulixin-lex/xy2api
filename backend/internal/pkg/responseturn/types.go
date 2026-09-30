@@ -170,6 +170,12 @@ func CancellationReason(err error) Reason {
 // native identity and sequence are never rewritten. InternalSequence is private
 // journal progress and MUST NOT be rendered as native sequence_number.
 type Event struct {
+	// HTTPStatus is optional metadata for a non-stream JSON response only.
+	// Streaming events cannot rewrite a response's already committed status.
+	HTTPStatus int
+	// JSONResponse marks an actual complete JSON response, including a JSON
+	// error returned before any SSE event for a stream:true request.
+	JSONResponse     bool
 	ReceivedAt       time.Time
 	Replay           bool
 	Local            bool
@@ -200,6 +206,8 @@ func (e Event) cost() int64 {
 }
 
 type Snapshot struct {
+	HTTPStatus                int
+	BackgroundAccepted        bool
 	Model                     string
 	FirstEventAt              time.Time
 	FirstContentAt            time.Time

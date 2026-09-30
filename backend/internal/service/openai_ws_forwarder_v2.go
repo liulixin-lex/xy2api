@@ -39,6 +39,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
 	nativeDelivery := NativeStreamDeliveryEnabled(ctx)
+	var nativeFailureEffect func()
 	requestMayHaveBeenSent := false
 	defer func() {
 		var fallbackErr *openAIWSFallbackError
@@ -372,6 +373,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			}
 		}()
 	}
+	defer func() {
+		if nativeFailureEffect != nil {
+			nativeFailureEffect()
+		}
+	}()
 	if err := s.performOpenAIWSGeneratePrewarm(
 		ctx,
 		lease,
@@ -434,6 +440,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	firstEventType := ""
 	lastEventType := ""
 	upstreamTerminalEvent := ""
+	var nativeFailureErr error
+	var nativeFailureDeadline time.Time
 	clientDisconnected := false
 	clientDisconnectDrainStartedAt := time.Time{}
 	readTimeout := s.openAIWSReadTimeout()
@@ -550,6 +558,13 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			MarkResponseCommitted(c)
 			RecordNativeStreamEventRead(ctx, nativeReadAt)
 			wroteDownstream = true
+			if _, err := WriteNativeStreamFrame(ctx, c.Writer, frame); err != nil {
+				outputCommitErr = err
+				lease.MarkBroken()
+				return
+			}
+			RecordNativeStreamFlush(ctx, nativeReadAt, time.Now())
+			return
 		}
 		_, wErr := c.Writer.Write(frame)
 		if wErr == nil {
@@ -608,6 +623,15 @@ readLoop:
 			pendingJSONDocuments = pendingJSONDocuments[1:]
 		} else {
 			currentReadTimeout := readTimeout
+			if !nativeFailureDeadline.IsZero() {
+				remaining := time.Until(nativeFailureDeadline)
+				if remaining <= 0 {
+					return resultWithUsage(), nativeFailureErr
+				}
+				if currentReadTimeout <= 0 || remaining < currentReadTimeout {
+					currentReadTimeout = remaining
+				}
+			}
 			if clientDisconnected && !clientDisconnectDrainStartedAt.IsZero() {
 				remaining := readTimeout - time.Since(clientDisconnectDrainStartedAt)
 				if remaining <= 0 {
@@ -635,7 +659,7 @@ readLoop:
 		}
 		nativeReadAt = time.Now()
 		markClientRequestCanceled()
-		if readErr == nil && !json.Valid(message) {
+		if readErr == nil && ((!nativeDelivery && !json.Valid(message)) || (nativeDelivery && !nativeStreamEventJSONValid(message))) {
 			eventType, _, _ := parseOpenAIWSEventEnvelope(message)
 			if eventType == "" {
 				eventType = "unknown"
@@ -656,6 +680,9 @@ readLoop:
 		}
 		if readErr != nil {
 			lease.MarkBroken()
+			if nativeFailureErr != nil {
+				return resultWithUsage(), nativeFailureErr
+			}
 			closeStatus, closeReason := summarizeOpenAIWSReadCloseError(readErr)
 			logOpenAIWSModeInfo(
 				"read_fail account_id=%d conn_id=%s wrote_downstream=%v close_status=%s close_reason=%s cause=%s events=%d token_events=%d terminal_events=%d buffered_pending=%d buffered_flushed=%d first_event=%s last_event=%s",
@@ -691,7 +718,7 @@ readLoop:
 
 		controlledDispatch.ObserveFrame(message)
 		eventType, eventResponseID, responseField := parseOpenAIWSEventEnvelope(message)
-		if eventType == "error" || isOpenAIWSTerminalEvent(eventType) {
+		if (eventType == "error" && !nativeDelivery) || isOpenAIWSTerminalEvent(eventType) {
 			controlledTerminal = true
 		}
 
@@ -756,9 +783,17 @@ readLoop:
 		}
 
 		if eventType == "error" {
-			s.handleOpenAIWSErrorEventTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), message)
 			errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(message)
-			s.persistOpenAIWSRateLimitSignal(ctx, account, lease.HandshakeHeaders(), message, errCodeRaw, errTypeRaw, errMsgRaw, mappedModel)
+			applyErrorEffects := func(payload []byte) {
+				s.handleOpenAIWSErrorEventTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), payload)
+				s.persistOpenAIWSRateLimitSignal(ctx, account, lease.HandshakeHeaders(), payload, errCodeRaw, errTypeRaw, errMsgRaw, mappedModel)
+			}
+			if nativeDelivery {
+				payload := append([]byte(nil), message...)
+				nativeFailureEffect = func() { applyErrorEffects(payload) }
+			} else {
+				applyErrorEffects(message)
+			}
 			errMsg := strings.TrimSpace(errMsgRaw)
 			if errMsg == "" {
 				errMsg = "Upstream websocket error"
@@ -821,6 +856,16 @@ readLoop:
 					},
 				})
 			}
+			if nativeDelivery && reqStream {
+				if outputCommitErr != nil {
+					return resultWithUsage(), outputCommitErr
+				}
+				nativeFailureErr = fmt.Errorf("openai ws error event: %s", errMsg)
+				if nativeFailureDeadline.IsZero() {
+					nativeFailureDeadline = time.Now().Add(nativeStreamFailureDrainTimeout)
+				}
+				continue
+			}
 			return nil, fmt.Errorf("openai ws error event: %s", errMsg)
 		}
 
@@ -864,6 +909,14 @@ readLoop:
 		if isTerminalEvent {
 			if !clientDisconnected {
 				markOpenAIWSClientVisibleFailure(c, eventType, message)
+			}
+			if nativeDelivery {
+				if terminalErr := nativeResponsesTerminalError(message, eventType); terminalErr != nil {
+					nativeFailureErr = terminalErr
+				}
+				if eventType == "response.failed" {
+					nativeFailureEffect = nil
+				}
 			}
 			upstreamTerminalEvent = s.handleOpenAIWSTerminalTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), message)
 			// A terminal event must be the final JSON document in its WS message.
@@ -945,7 +998,10 @@ readLoop:
 	result := resultWithUsage()
 	result.ImageCount = imageCounter.Count()
 	result.ImageOutputSizes = imageCounter.Sizes()
-	return result, nil
+	if outputCommitErr != nil {
+		return result, outputCommitErr
+	}
+	return result, markNativeResponsesTerminalDelivered(nativeFailureErr, reqStream && wroteDownstream && !clientDisconnected)
 }
 
 // ProxyResponsesWebSocketFromClient 处理客户端入站 WebSocket（OpenAI Responses WS Mode）并转发到上游。

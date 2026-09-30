@@ -62,6 +62,7 @@ type controlledDispatch struct {
 	cancellationReason   ControlledCancelReason
 	sendCertainty        ControlledSendCertainty
 	unknownEventCount    int64
+	backgroundResponseID string
 }
 
 func (s *ControlledSchedulingService) beginDispatch(ctx context.Context, accountID int64, concurrency int) (dispatch *controlledDispatch, dispatchErr error) {
@@ -422,6 +423,10 @@ func (d *controlledDispatch) startFirstOutputTimerLocked() {
 			return
 		}
 		if d.semantic.IsZero() {
+			if end, ok := d.ctx.Deadline(); NativeStreamDeliveryEnabled(d.ctx) && ok && !r.ClientDeadline.IsZero() && !end.After(r.ClientDeadline) && !time.Now().Before(end) {
+				d.cancellationReason = ControlledDeadline
+				return // The inherited deadline supplies the authoritative cancellation cause.
+			}
 			d.timeout = true
 			if NativeStreamDeliveryEnabled(d.ctx) {
 				d.cancellationReason = ControlledStartupTimeout
@@ -477,7 +482,13 @@ func (d *controlledDispatch) ObserveFrame(frame []byte) {
 	if !gjson.ValidBytes(frame) && !bytes.Equal(bytes.TrimSpace(frame), []byte("[DONE]")) {
 		return // partial JSON cannot prove remote completion or provider failure
 	}
+	if NativeStreamDeliveryEnabled(d.ctx) && !bytes.Equal(bytes.TrimSpace(frame), []byte("[DONE]")) && !nativeStreamEventJSONValid(frame) {
+		return
+	}
 	semantic, answer, terminal, tool := classifySemanticEvent(frame)
+	if NativeStreamDeliveryEnabled(d.ctx) && bytes.Equal(bytes.TrimSpace(frame), []byte("[DONE]")) && d.request != nil && (d.request.Protocol == "responses" || d.request.Protocol == "ws") {
+		terminal = false
+	}
 	v := gjson.ParseBytes(frame)
 	kind := v.Get("type").String()
 	status := controlledProtocolResponseStatus(v)
@@ -655,6 +666,9 @@ func (d *controlledDispatch) Finish(outcome string, remoteTerminal bool, err err
 			outcome = "client_cancelled"
 		}
 		if NativeStreamDeliveryEnabled(d.ctx) {
+			if reason := controlledContextCancelReason(r.clientContext); reason != "" {
+				cancellationReason = reason
+			}
 			if cancellationReason == "" && r.clientContext != nil && r.clientContext.Err() != nil {
 				cancellationReason = ControlledClientDetached
 			}
@@ -980,6 +994,7 @@ type controlledResponseBody struct {
 	sse, success           bool
 	buffered               bool
 	decoded                bool
+	backgroundAccepted     bool
 	nonstreamValidated     bool
 	nonstreamValidationErr error
 	pendingReadErr         error
@@ -1002,7 +1017,7 @@ func (b *controlledResponseBody) Read(p []byte) (int, error) {
 	if n > 0 && b.success && b.sse && !b.buffered {
 		b.dispatch.parser.Feed(p[:n], nil)
 	}
-	if e == io.EOF && b.success && b.sse && !b.buffered {
+	if e == io.EOF && b.success && b.sse && !b.buffered && !NativeStreamDeliveryEnabled(b.dispatch.ctx) {
 		b.dispatch.parser.Feed([]byte("\n\n"), nil)
 	}
 	if e != nil {
@@ -1011,7 +1026,11 @@ func (b *controlledResponseBody) Read(p []byte) (int, error) {
 			// The adapter confirms its parsed result before health/recovery credit.
 			b.dispatch.mu.Lock()
 			b.dispatch.transportTerminal = true
-			if b.dispatch.timer != nil {
+			backgroundIntent := false
+			if b.dispatch.ctx != nil {
+				backgroundIntent, _ = b.dispatch.ctx.Value(nativeBackgroundExecutionContextKey{}).(bool)
+			}
+			if b.dispatch.timer != nil && !backgroundIntent {
 				b.dispatch.timer.Stop()
 			}
 			b.dispatch.mu.Unlock()
@@ -1053,7 +1072,11 @@ func (b *controlledResponseBody) Close() error {
 	terminal := b.dispatch.terminal
 	transportTerminal := b.dispatch.transportTerminal
 	validationErr := b.nonstreamValidationErr
+	backgroundAccepted := b.backgroundAccepted
 	b.dispatch.mu.Unlock()
+	if backgroundAccepted && err == nil {
+		return nil // The accepted background generation owns this dispatch until polling settles it.
+	}
 	outcome := "body_closed"
 	if terminal && b.success {
 		outcome = "completed"

@@ -38,6 +38,11 @@ import (
 type OpenAIGatewayHandler struct {
 	nativeResponseOnce         sync.Once
 	nativeResponseTurns        *responseturn.Manager
+	nativeResponseExecutions   sync.Map
+	nativeResponseLifecycleMu  sync.Mutex
+	nativeResponseClosing      bool
+	nativeResponseWorkers      sync.WaitGroup
+	nativeResponseShutdownDone chan struct{}
 	gatewayService             *service.OpenAIGatewayService
 	billingCacheService        *service.BillingCacheService
 	apiKeyService              *service.APIKeyService
@@ -731,6 +736,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			if selection.ReleaseFunc != nil {
 				selection.ReleaseFunc()
 			}
+			var nativeError *responseturn.Error
+			if errors.As(err, &nativeError) {
+				writeNativeResponseError(c, nativeError)
+				return
+			}
 			h.errorResponse(c, http.StatusConflict, "response_owner_conflict", "The original response execution cannot switch accounts")
 			return
 		}
@@ -791,7 +801,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
+			result, err := h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
+			if err == nil {
+				return h.completeNativeBackgroundResponse(c, account, result)
+			}
+			return result, err
 		}()
 		recordNativeResponseDiagnostics(c, result)
 		var cyberBlockBodyHTTP []byte
@@ -824,36 +838,40 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 			sessionID := service.ExtractClientSessionID(c)
 			cyberBlocked := service.GetOpsCyberPolicy(c) != nil
-			h.submitOpenAIUsageRecordTask(c.Request.Context(), res, func(ctx context.Context) {
-				if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-					Result:             res,
-					APIKey:             apiKey,
-					User:               apiKey.User,
-					Account:            account,
-					Subscription:       subscription,
-					InboundEndpoint:    inboundEndpoint,
-					UpstreamEndpoint:   upstreamEndpoint,
-					UserAgent:          userAgent,
-					IPAddress:          clientIP,
-					RequestPayloadHash: requestPayloadHash,
-					APIKeyService:      h.apiKeyService,
-					QuotaPlatform:      quotaPlatform,
-					SessionID:          sessionID,
-					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, res.UpstreamModel),
-					PricingAt:          pricingAt,
-					CyberBlocked:       cyberBlocked,
-					NativeCompactionV2: nativeV2,
-				}); err != nil {
-					logger.L().With(
-						zap.String("component", "handler.openai_gateway.responses"),
-						zap.Int64("user_id", subject.UserID),
-						zap.Int64("api_key_id", apiKey.ID),
-						zap.Any("group_id", apiKey.GroupID),
-						zap.String("model", reqModel),
-						zap.Int64("account_id", account.ID),
-					).Error("openai.record_usage_failed", zap.Error(err))
-				}
-			})
+			channelUsageFields := clientRequestedUsageFields(c, channelMapping, reqModel, res.UpstreamModel)
+			submit := func() {
+				h.submitOpenAIUsageRecordTask(c.Request.Context(), res, func(ctx context.Context) {
+					if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
+						Result:             res,
+						APIKey:             apiKey,
+						User:               apiKey.User,
+						Account:            account,
+						Subscription:       subscription,
+						InboundEndpoint:    inboundEndpoint,
+						UpstreamEndpoint:   upstreamEndpoint,
+						UserAgent:          userAgent,
+						IPAddress:          clientIP,
+						RequestPayloadHash: requestPayloadHash,
+						APIKeyService:      h.apiKeyService,
+						QuotaPlatform:      quotaPlatform,
+						SessionID:          sessionID,
+						ChannelUsageFields: channelUsageFields,
+						PricingAt:          pricingAt,
+						CyberBlocked:       cyberBlocked,
+						NativeCompactionV2: nativeV2,
+					}); err != nil {
+						logger.L().With(
+							zap.String("component", "handler.openai_gateway.responses"),
+							zap.Int64("user_id", subject.UserID),
+							zap.Int64("api_key_id", apiKey.ID),
+							zap.Any("group_id", apiKey.GroupID),
+							zap.String("model", reqModel),
+							zap.Int64("account_id", account.ID),
+						).Error("openai.record_usage_failed", zap.Error(err))
+					}
+				})
+			}
+			settleNativeResponseUsage(c, submit)
 		}
 		if err != nil {
 			if result != nil && result.ClientDisconnect {
@@ -880,6 +898,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				)
 			} else {
 				if handleControlledSchedulingStop(c, err) {
+					submitResponsesUsage(result)
 					return
 				}
 				var failoverErr *service.UpstreamFailoverError
@@ -2078,7 +2097,7 @@ func (h *OpenAIGatewayHandler) acquireResponsesUserSlot(
 		h.handleConcurrencyError(c, err, "user", *streamStarted)
 		return nil, false
 	}
-	return wrapReleaseOnDone(ctx, userReleaseFunc), true
+	return wrapNativeResponseRelease(c, ctx, userReleaseFunc), true
 }
 
 // openAISlotAcquireResult 是账号槽位获取的三态结果。
@@ -2210,7 +2229,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 				reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
-		return wrapReleaseOnDone(ctx, selection.ReleaseFunc), openAISlotAcquireOK
+		return wrapNativeResponseRelease(c, ctx, selection.ReleaseFunc), openAISlotAcquireOK
 	}
 	if selection.WaitPlan == nil {
 		markOpsRoutingCapacityLimited(c)
@@ -2245,7 +2264,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 		if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
 			reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		}
-		return wrapReleaseOnDone(ctx, fastReleaseFunc), openAISlotAcquireOK
+		return wrapNativeResponseRelease(c, ctx, fastReleaseFunc), openAISlotAcquireOK
 	}
 
 	canWait, waitErr := h.concurrencyHelper.IncrementAccountWaitCount(ctx, account.ID, selection.WaitPlan.MaxWaiting)
@@ -2301,7 +2320,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
 		reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 	}
-	return wrapReleaseOnDone(ctx, accountReleaseFunc), openAISlotAcquireOK
+	return wrapNativeResponseRelease(c, ctx, accountReleaseFunc), openAISlotAcquireOK
 }
 
 // ResponsesWebSocket handles OpenAI Responses API WebSocket ingress endpoint
@@ -3728,6 +3747,9 @@ func openAIForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForwa
 	if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) == writerSizeBeforeForward ||
 		service.OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c) == writerSizeBeforeForward {
 		return false
+	}
+	if service.IsNativeResponsesTerminalError(err) {
+		return true
 	}
 	// Forward may reject a request locally after writing a complete JSON error.
 	// Appending a streaming fallback would corrupt that response. Headers alone,

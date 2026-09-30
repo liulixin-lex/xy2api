@@ -12,6 +12,12 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+type nativeResponseControlAccountKey struct{}
+
+func WithNativeResponseControlAccount(ctx context.Context, account *Account) context.Context {
+	return context.WithValue(ctx, nativeResponseControlAccountKey{}, account)
+}
+
 // CancelNativeResponse sends only the original response's native cancellation
 // operation. It never schedules an account, issues a create, or enters the
 // generation ledger. The caller provides a separate short cleanup deadline.
@@ -23,9 +29,13 @@ func (s *OpenAIGatewayService) CancelNativeResponse(ctx context.Context, account
 	if accountID <= 0 || !strings.HasPrefix(responseID, "resp_") || strings.ContainsAny(responseID, "/?#%\\") {
 		return false, errors.New("invalid native response identity")
 	}
-	account, err := s.accountRepo.GetByID(ctx, accountID)
-	if err != nil {
-		return false, err
+	account, _ := ctx.Value(nativeResponseControlAccountKey{}).(*Account)
+	if account == nil || account.ID != accountID {
+		var err error
+		account, err = s.accountRepo.GetByID(ctx, accountID)
+		if err != nil {
+			return false, err
+		}
 	}
 	if account == nil || !account.IsOpenAIApiKey() {
 		return false, errors.New("native response control unsupported")

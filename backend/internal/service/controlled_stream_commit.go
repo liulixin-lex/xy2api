@@ -6,27 +6,48 @@ import (
 	"errors"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/responseturn"
 	"github.com/liulixin-lex/xy2api/internal/scheduling"
-	"github.com/tidwall/gjson"
 )
 
 // Cancellation is control evidence, not an inferred provider failure.
 type ControlledCancelReason string
 
 const (
-	ControlledClientDetached  ControlledCancelReason = "client_detached"
-	ControlledUserStop        ControlledCancelReason = "user_stop"
-	ControlledStartupTimeout  ControlledCancelReason = "startup_timeout"
-	ControlledContentTimeout  ControlledCancelReason = "content_timeout"
-	ControlledAdminCancel     ControlledCancelReason = "admin_cancel"
-	ControlledLeaseLost       ControlledCancelReason = "lease_lost"
-	ControlledUpstreamFailure ControlledCancelReason = "upstream_failure"
-	ControlledSlowConsumer    ControlledCancelReason = "slow_consumer"
+	ControlledDeadline                 ControlledCancelReason = "deadline_exceeded"
+	ControlledClientDetached           ControlledCancelReason = "client_detached"
+	ControlledUserStop                 ControlledCancelReason = "user_stop"
+	ControlledStartupTimeout           ControlledCancelReason = "startup_timeout"
+	ControlledContentTimeout           ControlledCancelReason = "content_timeout"
+	ControlledAdminCancel              ControlledCancelReason = "admin_cancel"
+	ControlledLeaseLost                ControlledCancelReason = "lease_lost"
+	ControlledUpstreamFailure          ControlledCancelReason = "upstream_failure"
+	ControlledSlowConsumer             ControlledCancelReason = "slow_consumer"
+	ControlledPermissionRevoked        ControlledCancelReason = "permission_revoked"
+	ControlledAuthorizationUnavailable ControlledCancelReason = "authorization_unavailable"
 )
+
+// A turn cancellation is synchronous while its notification hook may run later.
+// Read the authoritative cause so user_stop/admin_cancel/lease_lost cannot race
+// into generic client_detached attribution.
+func controlledContextCancelReason(ctx context.Context) ControlledCancelReason {
+	if ctx == nil {
+		return ""
+	}
+	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+		return ControlledDeadline
+	}
+	var cancellation *responseturn.Cancellation
+	if errors.As(context.Cause(ctx), &cancellation) {
+		return ControlledCancelReason(cancellation.Reason)
+	}
+	return ""
+}
 
 func (r ControlledCancelReason) excludesProviderHealth() bool {
 	switch r {
-	case ControlledClientDetached, ControlledUserStop, ControlledAdminCancel, ControlledLeaseLost, ControlledSlowConsumer:
+	case ControlledClientDetached, ControlledUserStop, ControlledAdminCancel, ControlledLeaseLost, ControlledSlowConsumer,
+		ControlledPermissionRevoked, ControlledAuthorizationUnavailable, ControlledDeadline:
 		return true
 	default:
 		return false
@@ -65,11 +86,15 @@ func ControlledStreamSnapshot(ctx context.Context) ControlledStreamState {
 	state.HTTPCommitted, state.AttemptCommitted, state.SemanticSeen = r.httpCommitted, r.attemptCommitted, r.semanticSeen || !r.semanticAt.IsZero()
 	state.CancelReason = r.cancelReason
 	d := r.currentDispatch
+	executionCtx := r.clientContext
 	r.mu.Unlock()
 	if d != nil {
 		d.mu.Lock()
 		state.SendCertainty, state.CancelReason = d.sendCertainty, d.cancellationReason
 		d.mu.Unlock()
+	}
+	if reason := controlledContextCancelReason(executionCtx); reason != "" {
+		state.CancelReason = reason
 	}
 	return state
 }
@@ -82,8 +107,8 @@ func CommitControlledOutput(ctx context.Context, frame []byte) error {
 	if ctx == nil || !NativeStreamDeliveryEnabled(ctx) {
 		return nil
 	}
-	if !gjson.ValidBytes(frame) && !bytes.Equal(bytes.TrimSpace(frame), []byte("[DONE]")) {
-		return nil
+	if !nativeStreamEventJSONValid(frame) && !bytes.Equal(bytes.TrimSpace(frame), []byte("[DONE]")) {
+		return errNativeStreamEventJSON
 	}
 	return CommitControlledIdentity(ctx)
 }
@@ -263,8 +288,8 @@ func (d *controlledDispatch) TryCommitOutput(frame []byte) error {
 		d.CommitOutput(frame)
 		return nil
 	}
-	if !gjson.ValidBytes(frame) && !bytes.Equal(bytes.TrimSpace(frame), []byte("[DONE]")) {
-		return nil
+	if !nativeStreamEventJSONValid(frame) && !bytes.Equal(bytes.TrimSpace(frame), []byte("[DONE]")) {
+		return errNativeStreamEventJSON
 	}
 	if err := d.tryCommitAttempt(); err != nil {
 		return err
@@ -305,7 +330,8 @@ func (d *controlledDispatch) cancelWithReason(reason ControlledCancelReason) {
 // detaches cancellation propagation or grants recovery eligibility.
 func CancelControlledRequest(ctx context.Context, reason ControlledCancelReason) error {
 	switch reason {
-	case ControlledClientDetached, ControlledUserStop, ControlledAdminCancel, ControlledLeaseLost, ControlledSlowConsumer:
+	case ControlledClientDetached, ControlledUserStop, ControlledAdminCancel, ControlledLeaseLost, ControlledSlowConsumer,
+		ControlledPermissionRevoked, ControlledAuthorizationUnavailable, ControlledDeadline:
 	default:
 		return errors.New("invalid controlled cancellation reason")
 	}

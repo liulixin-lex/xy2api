@@ -49,6 +49,9 @@ type ControlledRequest struct {
 	history            []SchedulingAttemptTrace
 	semanticAt         time.Time
 	answerAt           time.Time
+	retainedExecutions int
+	closeRequested     bool
+	closed             bool
 	finish             func()
 	currentAttemptID   string
 	gateRejections     int
@@ -322,6 +325,12 @@ func (r *ControlledRequest) markSemantic(at time.Time, answer bool) {
 }
 func (r *ControlledRequest) Close() {
 	r.mu.Lock()
+	r.closeRequested = true
+	if r.closed || r.retainedExecutions > 0 {
+		r.mu.Unlock()
+		return
+	}
+	r.closed = true
 	fn := r.finish
 	executionCancel := r.executionCancel
 	r.finish = nil
@@ -428,6 +437,8 @@ type schedulingResponseWriter struct {
 	// is not an upstream generation identity and cannot commit a heartbeat.
 	localRequestID string
 }
+
+func (w *schedulingResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *schedulingResponseWriter) Write(p []byte) (int, error) {
 	w.writeMu.Lock()

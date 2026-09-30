@@ -4,15 +4,15 @@
 
 ## 当前交接状态
 
-### 原生流式与进程内恢复本地候选（2026-09-30，未发布）
+### 原生流式与恢复综合审查修复（2026-09-30，默认关闭的灰度候选）
 
-- 唯一原始TARGET=/xy2/xy2api，基线9717116f198904442ebb400d7d06792a40dea15c；仅修改/xy2/artifacts/native-stream-recovery-20260930/work。原始逐文件SHA与同目录BASELINE.tar保留；最终固定提交、来源审计、三态和四角色由该外部目录记账。
-- 阶段A去除调度/普通Responses/HTTP透传语义等待，HTTP及真实WS路径先原子commit再写；本地追踪头和心跳不锁定上游尝试，发送后超时不暗中HTTP重发，普通断线及时取消。实际HTTP取消死锁已从宿主运输上下文修复，并测试200轮收尾；旧CI、全单测SIGQUIT堆栈及初始lint失败均保留。
-- 阶段B有界内存turn/journal、幂等、原ID查询/游标补发/cancel、原账号固定、单writer epoch、累计120秒离线预算、配额和一次结算。四个独立反例（TTL正文引用、store:false队列、cancel callback锁、断连归因）先实证失败再按原测试race通过。生产版本、历史迁移、依赖和完整兼容基线保持。
-- 既有组策略原生开关默认关闭并沿用CAS；长WS每新turn读新快照，旧turn不变。新增元数据诊断不记录正文/凭据，缺失时间不推算；当前为5分钟有界快照，不是持续直播或持久化全量时间线。
-- 已观察：82项required联合门禁254项测试/子项全部PASS、0SKIP；前端355文件2730项通过，增补诊断9项、最终lint/build和真实桌面/390px复审ship。0.2/5/20秒同夹具feature-off的created为5004/5006ms，feature-on为201/201ms；首次passthrough心跳误判失败保留并修正夹具。全unit初次因旧cancel死锁失败，修复后六个受影响包整包通过；全integration通过，普通套件的非必需跳过逐项记录，存储依赖的协议用例另用真实PG/Redis补验。最终性能/构建/事务结果见外部证据，不借用旧run冒称本次全部发布门禁满足。
-- 最终独占性能实际2026-09-30 16:37:02–16:37:06 UTC完成：ordinary并发1/16/64 p95=1.246/2.970/9.364ms、p99=1.246/4.901/23.282ms；passthrough p95=0.661/1.558/4.088ms、p99=0.661/2.367/9.517ms，六子例RUN/PASS、0SKIP，均满足10/30ms。真实PG/Redis协议补验49主/450项RUN/PASS、0SKIP/FAIL，已闭合相关旧存储跳过。后继封装不修改业务源码。
-- 未完成发布能力：非stream background+Idempotency-Key在新功能开启时明确400且零生成，待同账号retrieve/poll/终态计费补齐；WS原生同响应续接、真实外部客户端/供应商及代理层验收未确认；阶段C持久化/跨实例未实现。不得标记整体“原生流式与可靠恢复优化完成”。未推送、发布、部署或调用真实收费生成。
+- 原TARGET=/xy2/xy2api和基线9717116f198904442ebb400d7d06792a40dea15c保持，唯一候选=/xy2/artifacts/native-stream-recovery-20260930/work；沿用同一四角色和所有历史失败证据。当前提交、远端推送/CI、三态归档结果以该目录FINAL_DELIVERY.json为准。
+- 完成取消与真实终态优先级、TTL/配额、重复JSON键、背压/Flush、完整事件边界、错误状态、控制鉴权与UI迟到数据修复。完整审查、根因及已执行门禁见docs/NATIVE_STREAM_REVIEW.md。
+- 非流式后台原账号轮询、及时返回HTTP、原ticket/用户/账号额度持有、原deadline与权限撤销、终态一次账单已实现并经真实PG验证。显式background保持HTTP，前台才可按能力转WS；WS游标恢复明确不可用。
+- 最后端到端审查实际发现并修复wrapper丢usage、旧EOF空context、异步取消完成前停机和迟到proof旧身份竞态。原失败记录保留；outer HTTP/真实WS与迟到/停机三轮race 75次通过。
+- 本轮全unit 23683 / 全integration 13396 含子测试通过、全量lint 0 issues；202 required四命令实际通过及负向守卫成功；前端355文件2733测试/lint/build通过。普通大套件可选skip保留，不伪装为全量零skip。
+- 独立六组性能最差p95=3.299ms/p99=11.832ms，满足10/30ms；真实Caddy夹具验证即时SSE。生产版本、后端依赖、历史迁移和完整compat未改；前端仅Axios按安全审计升至1.20.0，高危清零，残余非当前可达告警保留分析。
+- 原生开关默认全关；阶段C持久化/跨实例未实现，WS/上游同响应续接及真实外部客户端/供应商认证仍未完成。不能标记整个规范完成或全量生产零风险；本任务授权feature推送，不包含合并、正式发布、生产部署或收费测试。
 
 ### 0.2.2 协议验收补修（2026-09-30，待后继最终门禁）
 
@@ -466,11 +466,11 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
-### 20260930-native-stream-recovery — 本地候选已实现，发布能力仍受门禁约束
+### 20260930-native-stream-comprehensive-review — 修复与本地门禁完成，交付按固定账本
 
-- 源码和既有管理扩展已完成本地验证，当前仅封存本地提交、执行来源审计及固定四角色同输入事务；外部完整账本/后续动作：/xy2/artifacts/native-stream-recovery-20260930/STATE.json。
-- 未完成边界见顶部同名交接及docs/NATIVE_STREAM_RECOVERY.md；需真实客户端、代理、非流式后台幂等与后续阶段验收，不能把本地候选当正式上线版本。
-- 四角色继续固定MODIFIED_FILE.tar、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh，不重建另一套，不修改原TARGET，不触碰生产。新turn准入关闭与离线源码回滚是不同动作。
+- 全面复审、反例、根因修复和最终本地门禁完成；源码冻结后仅推进精确提交、来源审计、构建、三态事务、授权分支推送及该HEAD的远端CI。最终结果/阻断/下一步以 /xy2/artifacts/native-stream-recovery-20260930/STATE.json 与 FINAL_DELIVERY.json 为准。
+- 本轮及原20260930-native-stream-recovery沿用同一TARGET与四角色，旧记录只追加保留；已经补齐非流式后台幂等和真PG计费，剩余能力仅为顶部明确的后续阶段/外部认证。离线源码回滚不等于在线连接或数据库回滚。
+
 
 ### PR #73 合并与 XY2API 0.2.2 发版（2026-09-30，进行中）
 
@@ -1555,3 +1555,10 @@ pnpm --dir frontend run build
 
 - 本轮恢复沿用同一TARGET和四角色。复核原始4567文件SHA与原HEAD保持，版本/依赖/历史迁移/完整兼容基线无变化；最终性能六子例实际exit0，真实存储49主用例全部执行通过。新增实施和来源文档因既有docs通配忽略，采用精确路径纳入源码，不更改忽略规则。
 - 当前业务源码冻结，后继只执行本地提交、干净树来源audit、embed构建、同输入BASELINE/MODIFIED/ROLLBACK及四角色重开；最终实际结果保存外部VERIFICATION.txt/STATE.json，不能提前称其通过。仍保留顶部未完成能力及未发布边界。
+
+### 2026-09-30 — 全面复审、根因修复与冻结门禁
+
+- 用户要求全面审查并落实所有发现的问题，通过后推送远端。多代理分别核对核心生命周期、调度/传输、handler/账务及管理UI，root完成跨层整合和最终门禁，始终只改独立候选。
+- 新增真实反例覆盖取消回调、终态背压、TTL/负配额、重复键、SSE截断/慢写、JSON状态与权限、后台HTTP返回/容量/停机/迟到确认、wrapper丢usage及后台WS降级。全部初次FAIL保留；修复后focused race与真实PG账务通过。
+- 完整unit/integration、lint、前端、202 required实际四命令、负向日志守卫及独立六组性能均通过，详见docs/NATIVE_STREAM_REVIEW.md。原始4567文件、版本/后端依赖/历史迁移及来源政策保持；前端Axios最小安全升级的两文件按独立精确manifest审计；无需以新增总后台执行时限改变用户原预算。
+- 后继精确提交audit/build/BASELINE-MODIFIED-ROLLBACK及远端CI以外部固定账本记录；它们不由本日志提前宣称通过。授权仅feature分支推送，没有合并、发布、部署或真实收费调用。后续外部认证/阶段C能力保持未确认/关闭。

@@ -123,8 +123,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
-	// 仅允许 WS 入站请求走 WS 上游，避免出现 HTTP -> WS 协议混用。
-	wsDecision = resolveOpenAIWSDecisionByClientTransport(wsDecision, GetOpenAIClientTransport(c))
+	// Native delivery can convert a capability-approved foreground WS stream
+	// to SSE. The WS create schema drops background, so explicit native
+	// background intent must stay on HTTP instead of silently becoming foreground.
+	if !NativeStreamDeliveryEnabled(ctx) || !gjson.GetBytes(body, "stream").Bool() || gjson.GetBytes(body, "background").Type == gjson.True {
+		wsDecision = resolveOpenAIWSDecisionByClientTransport(wsDecision, GetOpenAIClientTransport(c))
+	}
 	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
 	compactPath := isOpenAIResponsesCompactPath(c)
 	if shouldFlattenOpenAIResponsesNamespaces(account, wsDecision.Transport, passthroughEnabled, compactPath) {
@@ -1044,6 +1048,20 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			return wsResult, nil
 		}
+
+		if NativeStreamDeliveryEnabled(ctx) && wsResult != nil {
+			// An observed failed terminal still carries billable usage from this
+			// original execution. Forward the error and its result together.
+			wsResult.UpstreamModel = upstreamModel
+			if wsResult.BillingModel == "" {
+				wsResult.BillingModel = billingModel
+			}
+			if wsResult.ImageCount > 0 {
+				wsResult.ImageSize, wsResult.ImageInputSize = imageSizeTier, imageInputSize
+				wsResult.BillingModel = imageBillingModel
+			}
+			return wsResult, s.finalizeControlledWSError(ctx, c, account, wsErr)
+		}
 		return nil, s.finalizeControlledWSError(ctx, c, account, wsErr)
 	}
 
@@ -1250,6 +1268,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Handle normal response
 		var usage *OpenAIUsage
+		var forwardErr error
 		var firstTokenMs *int
 		responseID := ""
 		imageCount := 0
@@ -1294,7 +1313,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					}
 					return s.handleErrorResponse(ctx, compactResp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 				}
-				return nil, err
+				if !NativeStreamDeliveryEnabled(ctx) || streamResult == nil {
+					return nil, err
+				}
+				// Return the observed usage and the original error together;
+				// the handler settles this execution without synthesizing success.
+				forwardErr = err
 			}
 			usage = streamResult.usage
 			firstTokenMs = streamResult.firstTokenMs
@@ -1357,6 +1381,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			ReasoningEffort:               reasoningEffort,
 			Stream:                        reqStream,
 			OpenAIWSMode:                  false,
+			UpstreamTerminalEvent:         nativeResponsesTerminalEvent(forwardErr),
 			Duration:                      time.Since(startTime),
 			FirstTokenMs:                  firstTokenMs,
 		}
@@ -1374,7 +1399,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			forwardResult.SearchCount = searchCount
 		}
 		stampOpenAIResponsesUpstreamEndpoint(c, forwardResult)
-		return forwardResult, nil
+		return forwardResult, forwardErr
 	}
 }
 

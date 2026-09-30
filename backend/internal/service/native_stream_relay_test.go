@@ -145,7 +145,7 @@ func TestNativeStreamRelayErrorBoundary(t *testing.T) {
 		for _, created := range []bool{false, true} {
 			t.Run(fmt.Sprintf("passthrough_%v_created_%v", passthrough, created), func(t *testing.T) {
 				ctx := nativeRelayContext(context.Background())
-				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c, _ := gin.CreateTestContext(newNativeStreamTestRecorder())
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
 				body := nativeRelaySSE("response.failed", "\"response\":{\"id\":\"resp_failed\",\"error\":{\"code\":\"server_error\",\"message\":\"overloaded\"}}")
 				if created {
@@ -222,7 +222,7 @@ func TestNativeStreamRelayCancellationClosesBody(t *testing.T) {
 			reader, writer := io.Pipe()
 			defer func() { _ = writer.Close() }()
 			body := &nativeRelayCloseBody{reader: reader, closed: make(chan struct{})}
-			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c, _ := gin.CreateTestContext(newNativeStreamTestRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
 			done := make(chan error, 1)
 			go func() {
@@ -264,7 +264,7 @@ func TestNativeStreamRelayMultilineAndInvalidEvents(t *testing.T) {
 		for _, valid := range []bool{false, true} {
 			t.Run(fmt.Sprintf("passthrough_%v_valid_%v", passthrough, valid), func(t *testing.T) {
 				ctx := nativeRelayContext(context.Background())
-				rec := httptest.NewRecorder()
+				rec := newNativeStreamTestRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
 				frame := "event: response.created\ndata: {\"type\":\"response.created\",\ndata: \"sequence_number\":0,\"response\":{\"id\":\"resp_multiline\"}}\n\n"
@@ -297,7 +297,7 @@ func TestNativeStreamRelayMultilineAndInvalidEvents(t *testing.T) {
 
 func TestNativeStreamRelayLocalErrorContinuesSequence(t *testing.T) {
 	ctx := nativeRelayContext(context.Background())
-	w := httptest.NewRecorder()
+	w := newNativeStreamTestRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
 	input := nativeRelaySSE("response.created", "\"sequence_number\":7,\"response\":{\"id\":\"resp_partial\"}") + "data: {invalid}\n\n"
@@ -308,3 +308,5 @@ func TestNativeStreamRelayLocalErrorContinuesSequence(t *testing.T) {
 	require.Contains(t, w.Body.String(), "\"type\":\"error\",\"sequence_number\":8")
 	require.NotContains(t, w.Body.String(), "{invalid}")
 }
+
+func (*nativeRelayPartialWriter) NativeStreamMemoryWriter() bool { return true }
