@@ -4,6 +4,32 @@
 
 ## 当前交接状态
 
+### GPT-6.1 Sol 单功能适配源码冻结（2026-09-30）
+
+- 根执行者已确认事故修复PR #74的d72在9项检查通过后合并为97d0f0626b9fb97fd4a9adfd10ab1c93c1802774；本阶段从该提交建立独立model-support副本，保留事故四角色与旧候选。不把含PR73的联合6393结果冒称新主线已包含PR73。
+- 只适配官方9688571a83775b87db85917398c628b7cdfe8276的30文件新模型功能；补精准reasoning/Anthropic effort、最终mapping后原生HTTP/WS校验、APIKey映射别名禁Lite及IQ参考能力。来源见docs/GPT61_SOL_SUPPORT.md和GPT61_SOL_PROVENANCE.json；完整compat仍0.2.8，VERSION/UPSTREAM_BASE/policy/313条SQL不变。
+- core-focused-01三个受影响Go包定向实际exit0，覆盖别名、拒绝、转换、目录、计价、旧模型隔离及原生协议；逐测试证据见外部model-support-evidence。gateway独立5主/46子通过、0skip，PR74关键文件字节保持。前端353文件/2701项全量及lint通过；ES2020 replaceAll构建错误修为等价regex后，25项IQ回归/lint/build复验通过，失败保留。
+- scheduling_audit最终4个真实PG18/Redis8.4测试RUN/PASS、0FAIL/0SKIP；40次实际合成HTTP验证两组共用模型/别名权重，group7=14/6、group8=6/14，同层序列[2,4,5,3]，取消max_active1，无效effort本地400且不新增Ledger/PG门/Redis状态。前两次夹具白名单/平分顺序预期错误保留。原生目录三态probe实际1/0/1，旧count0、新count1、回滚count0。
+- CI复用既有service race构建，新增4个真实存储及5个HTTP/WS关键主测试required，service required共23，保留零跳过守卫。源码在此冻结；根继续实际提交、远端同HEAD CI、构建和新模型fresh合成HTTP，结果追加外部账本，不回填冻结源码。旧complete-05八阶段升级恢复按原镜像身份复用，本轮不冒称重跑；没有生产部署或真实供应商调用。
+
+### PR #74 三项补修本地候选（2026-09-30）
+
+- 新增CI专用PG18/Redis8.4及15432/16379端口，只向新step注入fixture环境，保留原unit/integration；串行三包race的JSON守卫要求关键测试run+PASS、全范围0SKIP，拒绝空匹配。工作流本地校验和CI后继HEAD见pr74-final-evidence/CI_FINAL.json；真实GitHub门禁由根执行者推送后核对。
+- 联合候选6393e1812全后端unit/integration/lint均exit0；complete-05和独立审计PASS，48基础HTTP/56调度请求、30:10权重、升级及备份恢复通过。其含PR73，不能冒称PR74独立镜像已测；本CI后继不改业务或冻结制品。
+- 唯一候选 /xy2/artifacts/production-incident-20260930/pr74-final，起点85d5165788d0e4ee345a4c887e34704085e17392；仅冻结bffc16+cfa25三项补修、对应测试和本PR修复文档，无PR73前端/IQ、版本或迁移变化。原PR和两独立审查源码保持。
+- 已观察到原版三个递归崩溃、原PR普通JSON无PG冷却/内部正文超时不回退、simple显式组越界反例。补修后定向13/126、race9/88、13适配器同ledger继续选择和成员31/33相关回归通过；成员三态1/0/1保留。标准默认组边界为源码交叉核对，不额外声称该入口实测。
+- 本轮仅本地交付，Git身份沿用原仓local Codex。精确本地HEAD、文件范围、diff检查、干净树来源审计和可推送命令统一保存于pr74-final-evidence；不拿历史原PR全量结果代表这个后继。根执行者继续联合全量/制品/升级门禁并自行处理PR74远端，未授权本子任务push/合并/部署。
+- 真实供应商、历史pending修复和生产零风险均不由本地验证保证；完整新旧失败证据见pr74-review/review-evidence.json与scheduler-review。自身审查夹具已清理，原有服务与日志保留。
+
+### v0.2.1 仅修复 PR #74 已提交，等待官方审核（2026-09-29）
+
+- 当前为独立修复副本 /opt/xy2api-v021-fix-20260929-anp5W2/work，分支 fix/v021-gateway-reliability-20260929，固定官方基线 e17664144。用户授权纯官方 D0～D4/G1、本地提交、推送 liulixin-lex/xy2api 和创建 PR，由维护者决定合并；不合并多组/活动二开，不自行合并 PR、发布或部署。
+- 已修 XY-001/002/007/008/009：非递归终端发送、13 条同步非流式路径安全读取回退、可信协议失败的 PG 账号模型冷却、明确未发送的 pending 判定；保留预算、deadline、owner、语义输出后禁重放及普通 30 秒冷却。18 个生产 Go 文件、7 个测试文件和修复记录为本轮差异，原前端/迁移/版本/provenance 不变。
+- 验证：全后端首轮 61 包通过、service 两项测试断言修正后整包复验通过（8022 顶层/7950 子项，11 skip）；首轮失败保留。隔离 repository/migrations 701/1206、handler 三轮 race 54/60、scheduling race 160/113、service 三轮关键 race 21/237、广泛守卫 race 104/555 均通过且无数据竞争。两轮 lint 均 0 issues，构建和 14 项同步工具测试通过；修复提交 94ce2793177eadc595c2c6f6ef6207d222e4510f 后 clean-tree 来源审计 exit 0，D0～D4/G1 本地完成。
+- 文档包括 docs/V021_RELIABILITY_FIX.md 以及修复PR版 V021_ISSUE_SUMMARY.md、V021_REMEDIATION_PLAN.md、ISSUES_AND_CHANGES.md；后三份从原检查资料整理，仅覆盖本次修复，不提交此前功能升级的详细方案。外部父目录保留 VALIDATION.json、PR_BODY.md 与原始日志。真实供应商、跳过项、浏览器/功能整合/部署边界不变，三个临时容器已清理。
+- 已通过既有gguuai/xy2api fork正常推送并创建官方PR #74：https://github.com/liulixin-lex/xy2api/pull/74；目标liulixin-lex/xy2api:main，基线仍e17664144。创建时head8e7c45bab、OPEN/非draft、31个文件，mergeable=true，未合并。远端文件清单与仅修复范围一致，四份问题/修复/验证文档齐全；CI已启动，初始部分检查成功，其余运行中，不能称全部CI通过。后续交接只改文档，同分支最新head和检查以PR实际状态为准。
+- 认证使用用户已配置的root标准gh目录；代理默认HOME不同，不复制Token、不借用其他项目密钥、不改origin或全局凭据。提交任务完成，等待维护者评审；不自行合并、发布、部署或恢复旧功能整合。过去缺认证记录为历史，不代表当前阻塞。
+
 ### 智能调度账号开关、倍率与 IQ 门控（2026-09-29，PR #73 开放）
 
 - 独立工作树 `/xy2/scheduling-account-toggle-rate` 基于最新 `origin/main` `e17664144`；功能提交 `85d93946c` 已推送，PR [#73](https://github.com/liulixin-lex/xy2api/pull/73) 开放。智能调度与账号管理共用 `accounts.schedulable` 开关及账号倍率，已启用账号置顶，组内按优先级升序、权重降序排列；回焦刷新合并并发开关结果。移动端主区过渡仅在桌面生效。
@@ -420,6 +446,15 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 用户明确授权合并 PR #73、确认 #74/#75 修复并发布 0.2.2；本轮使用独立 release 副本，不修改受保护原始工作树或部署生产。
 - #74/#75 已进入 main 8ef2327；#73 与 main 仅记忆文档冲突，采用仅插入合并保留双方历史，业务树与前轮已验收联合候选 5702c417 一致。
 - 将产品版本及 UPSTREAM_BASE.xy2api_version 同步 0.2.2，Sub2API 兼容基线保持 0.2.8；以最终 head 的 CI、安全审查、镜像运行和回滚结果为发布门禁，随后核验实际发行资产。
+
+
+### 20260930-gpt61-sol-support — 源码冻结，交根执行CI与制品验收
+
+- 根执行者确认事故阶段已完成，PR #74 合并为97d0f0626b9fb97fd4a9adfd10ab1c93c1802774；本任务从该干净提交建立独立model-support副本，分支feat/gpt61-sol-support-20260930，不修改final-work或旧候选。
+- 按用户追加要求只适配官方Sub2API v0.2.11中9688571a83775b87db85917398c628b7cdfe8276的新模型功能；不执行完整上游同步，完整审计兼容基线保持0.2.8，版本、迁移和既有provenance不改。固定来源及30文件处置详见外部next-model-support-plan.md。
+- conversation_context负责首批补丁、catalog/alias/apicompat/billing/pricing、功能来源说明及本轮记忆；pr74_review接管gateway/native/passthrough/WS校验，根负责frontend/IQ体验。共享工作树按文件分工，冻结前不commit/push；真实命令与失败记录放在model-support-evidence。
+- 保留PR74终端发送、读取回退、PG故障冷却及成员边界修复，精准补齐新模型reasoning与Anthropic兼容前置依赖，不扩大其他模型行为。本地实现及受影响验证已完成；最终远端、构建、runtime与四角色由根按真实HEAD收口，不调用生产或真实供应商。
+
 
 
 
@@ -1404,6 +1439,55 @@ pnpm --dir frontend run build
 - 修改文件：本后继交接仅修改 docs/PROJECT_MEMORY.md 顶部本轮状态、移除本轮进行中条目并追加本日志；其他 Agent 条目与所有历史日志保持。纯文档分支正常推送、PR、保护检查和合并结果统一记录在 release-0.2.1/handoff-closeout/RESULT.json，不触发新 Release。
 - 卡点/风险：没有待执行发布动作；首轮宿主状态变化未确定起因，不能据后续 PASS 抹去；没有真实供应商、生产首字或计费取消保证。本次发布未替换测试站或生产服务；测试站仍使用此前本地验收镜像。
 - 下一步：最终交付见 /xy2/artifacts/scheduling-optimization-20260928/release-0.2.1/FINAL_DELIVERY.json。后续 Agent 先读该记录及本次纯文档 PR 结果，按对应 HEAD 重新核实远端状态，避免重复发版或误移动标签。
+
+### 2026-09-29 — 20260929-v021-reliability-fix — 纯官方修复与本地验证
+
+- 用户授权按修复开发文档 D0～D4/G1 实施，追加授权统一提交官方 PR；建立独立分支固定 e17664144，保留 /opt/xy2api 的 feat/dynamic-promotion/43437e224、既有二开/文档及两个旧准备/证据副本，不恢复被暂停的合并。
+- 实际生产变更：终端发送函数切断 OpenAI 调度旁路递归；统一非流式可恢复读取分类，13 条同步适配路径在写响应前交给原 handler；验证的服务端协议错误写入既有失败域/身份 fence/PG 冷却；取消或超时重命名 outcome 前保留未发送证据，并统一 terminal intent/settle 的 pending。没有重写调度器、放宽预算/降级阈值或 owner/语义后禁重放，不扩展异步和 WS 重放，不修历史数据库。
+- 新增4个正式测试文件、更新3个既有测试：有界子进程、真实本机截断/拨号、独立 PG/Redis、协议正负例、取消/预算/owner/确认幂等和真实认证 Gin handler；handler 仓库为合成 stub、simple 模式隔离计费，不能称全数据库认证/付费上游端到端。
+- 原始诊断失败保留；相邻七条读取故障复现后修复，Codex direct images 已有外层转换，错误层级断言排除但不报为新增缺陷。新测试转义错误、Images 方法夹具错误、race 二进制错误 cwd 和 python 命令缺失均保留日志。首次完整 unit 的 buffered_sse 夹具层级及 compact 旧契约断言经定点修正，增强强 owner 对照后重跑整个 service，而非只删失败断言。
+- 结果：其余61包首轮 PASS，加 service 全量复验 PASS；隔离 repository/migrations、handler/scheduling/service 各 race 范围通过，0 data race。全部数字、跳过名称/原因和日志 SHA 见父目录 VALIDATION.json，11 个 service skip、41 个初轮 unit skip 不隐瞒；调度三个 Redis opt-in 已在 race 实跑。两轮静态检查0 issues，后端构建/version、14工具测试通过。未改前端/迁移/版本/provenance；来源审计提交前因 dirty 正确拒绝，待干净提交后重跑。
+- 收尾资源：仅移除本轮标签 xy2api.task=v021-fix-anp5w2 的三个临时容器及 tmpfs 合成数据，完整 ID/名称确认、标签无残留；日志/二进制和源码保留。无真实付费调用、站点库、测试站/其他服务、发版或远端合并操作。
+- 阻塞：HTTPS push --dry-run 退出128且未认证。邮箱不能替代凭据；不使用其他项目私钥。准备本地提交和 PR_BODY.md；GitHub 未推送/未创建PR。用户配置身份后复核远端和分支再推送、创建PR，维护者自行决定合并。收尾文档首次工具包装因反引号语法错误未执行，纠正后通过 apply_patch 写入，没有部分覆盖。
+
+### 2026-09-29 — 20260929-v021-reliability-fix — 本地提交与来源审计完成
+
+- 仅在独立修复分支提交本轮28文件，修复提交94ce2793177eadc595c2c6f6ef6207d222e4510f；使用既有代理身份 Codex，不冒用用户邮箱或维护者身份。修复提交后工作树干净，正常 python3 tools/upstream-sync/sync.py audit 退出0，日志 sync-audit-clean.log。前端、313条官方迁移、版本/provenance/policy 的相对基线差异为零。
+- 本追加仅更新报告和交接，不再修改或重复构建已经验证的业务源码；原功能工作区仅维护其问题文档，不合入此PR。D0～D4/G1完成，D5～D8保持暂停。
+- GitHub缺认证仍阻止推送/创建PR，未作任何远端写操作、部署或数据修复。待用户在服务器配置身份后继续；保留进行中条目的认证阻塞和明确下一步，而不虚报整个PR交付完成。
+
+### 2026-09-29 — 20260929-v021-fix-pr — 仅修复 PR 的文档与权限准备
+
+- 用户要求将修复和检查问题/修复/验证文档一起提交，但暂不提交之前功能升级。确认认证账户gguuai、官方main固定e17664144和既有个人fork权限；使用指定gh配置目录及单命令credential helper，不复制Token、不读取其他项目密钥、不改全局登录或origin。
+- 在修复分支新增三份仅修复范围的文档和精确.gitignore白名单，原本地含升级方案的文档完整保留、不复制进PR。补当前验证报告导航及状态，更新PR描述；业务/测试相对已验94ce27931零差异，前端/历史迁移/版本/provenance/policy相对官方基线零差异。文档链接/敏感标记检查通过。
+- 本轮只补交文档，不重复运行已完成的长业务回归；提交后重跑来源审计，并核对远端head、PR目标/来源、提交文件清单与CI初始状态。默认HOME下初次gh无认证及只读脚本正则转义错误已纠正，未造成远端写入或凭据泄露。最终提交与PR结果在后续日志记录。
+
+### 2026-09-29 — 20260929-v021-fix-pr — 官方 PR #74 创建并核对
+
+- 补文档提交8e7c45bab3bae17c27bf575c9e9d687453be953a，新增问题报告/修复开发文档/变更台账三个修复PR版本，连同现有修复验证记录提交；原完整功能升级规划保留在原工作区，不纳入PR。业务/测试与已验94ce27931完全相同，来源审计exit0、文档链接/敏感标记/空白检查通过。
+- 使用账号gguuai对既有fork推送单个fix/v021-gateway-reliability-20260929分支，没有force、all或tags；官方无直推权限，不尝试主线写入。远端分支sha与本地一致后创建liulixin-lex/xy2api PR #74，目标main/e17664144，OPEN/非draft、未合并、允许维护者编辑。
+- 创建后API逐项回读来源仓库、目标、head、31文件清单及checks。没有旧功能Go/Vue/迁移，只有18生产Go文件、7测试文件、5文档和.gitignore。创建时mergeable=true，来源审计等部分CI已成功，其他运行中；不将本地验收等同远端全绿。初次gh查询使用不支持的baseRefOid字段失败，改为支持字段并用REST核对base.sha，未重复创建PR。
+- 原始回读保存在候选父目录PR_SUBMISSION.readback.json，最终同分支交接head另由PR_SUBMISSION.final.json核实。此追加仅文档收尾，结束本任务并清理自己的进行中条目；原功能工作区/其他任务保留，不部署、不发版、不自行合并或变更站点数据。后续由维护者评审，用户另行指示才恢复功能升级。
+
+### 2026-09-30 — 20260930-pr74-production-followup — 仅修复后继交付
+
+- 以85d51657克隆独立pr74-final；先登记再应用两份SHA固定补丁，只改变4生产Go文件、3测试文件及5份既有修复/记忆文档。不从组合候选复制PR73功能，原分支未被重写。
+- 将三项新反例、取消/预算/owner边界、13适配器与PG/Redis实测、成员三态和静态/运行证据差别补入现有文档。历史日志及其他进行中条目保留。
+- 本地提交与标准python3 tools/upstream-sync/sync.py audit在干净树上的真实命令、退出码、HEAD与diff范围保存在pr74-final-evidence；最终检查不得用旧head替代。任何审计失败保留并反馈根执行者，不放宽policy或provenance。
+- 交接根执行者继续最终组合验收、CI和PR74远端操作；本子任务无push/merge/tag/deploy/生产操作。不存在本子任务待修业务代码；后续只有实际门禁失败才重新评估源码。
+
+### 2026-09-30 — 20260930-pr74-ci-storage-gate — CI真实存储防跳过
+
+- 在b284142b5后仅增强backend-ci及说明，加入专用PG18/Redis8.4健康服务与真实存储串行race。核对AccountPool/ReviewPR74/ReviewV021/读取安全/协议/发送确定性/认证handler实际函数，JSON拒绝skip/fail/空包或未完成的关键测试。环境不传入原unit/integration。
+- 本地验证为YAML解析、包/函数元数据、shell语法和日志守卫，不重跑已验业务代码。字面命令、退出码和独立patch见pr74-final-evidence；尚未执行的新GitHub步骤不写为PASS，根执行者在最终head核对逐case。
+- 已重开联合6393全量/complete-05/独立审计证据，文档保留与PR74独立后继的身份区别。后续上游新模型支持不混入当前修复。本子任务无push/merge/deploy或生产操作。
+
+### 2026-09-30 — 20260930-gpt61-sol-support — 单功能实现与本地验证冻结
+
+- 在独立97d0副本登记后应用固定968857原30文件patch；27文件直接落地，Anthropic前置helper和两fallback import共3处按hunk适配。原始apply-check/reject、修复脚本与文档包装语法错误及成功重试保留，没有整文件覆盖或全量同步。
+- conversation_context负责catalog/alias/apicompat/billing/pricing及来源；pr74_review负责native/passthrough/WS；根负责IQ参考选项、前端及CI；scheduling_audit负责真实存储4测试和e176原生目录三态。各分工结果见顶部，其他任务和历史保持。
+- 核心三个包定向、gateway5主/46子、真实存储4项、前端全量2701及最终构建实际通过；失败原始记录保留。来源manifest记录30文件原hash、官方descriptor、两项精准前置依赖、排除项与CI最终hash。
+- 本记忆随源码冻结；根继续单次commit/push、远端CI、正式构建和新模型fresh实际HTTP。此前八阶段升级/备份恢复只按原镜像复用，原四角色沿用固定路径，生产只读边界继续。
 
 ### 2026-09-29 — 20260929-scheduling-account-toggle-rate — PR #73 与只读诊断
 

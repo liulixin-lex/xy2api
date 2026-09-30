@@ -692,6 +692,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
 	}
+	originalFirstClientMessage := firstClientMessage
 	if isOpenAIResponsesLiteWebSocketPayload(firstClientMessage) {
 		liteFirstMessage, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(firstClientMessage, account)
 		if liteErr != nil {
@@ -699,7 +700,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		}
 		firstClientMessage = liteFirstMessage
 	}
-	originalFirstClientMessage := firstClientMessage
 	if next, policyErr := applyOpenAIWSReasoningEffortPolicy(firstClientMessage, hooks); policyErr != nil {
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
 	} else {
@@ -746,6 +746,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		}
 	}
 	capturedSessionModel := openAIWSPassthroughPolicyModelForFrame(account, firstClientMessage)
+	if err := validateGPT61SolCompatRequest(originalFirstClientMessage, capturedSessionModel); err != nil {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+	}
 	if capturedSessionModel != "" && capturedSessionModel != strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String()) {
 		firstClientMessage = s.ReplaceModelInBody(firstClientMessage, capturedSessionModel)
 	}
@@ -1025,6 +1028,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
 				return payload, nil, nil
 			}
+			originalPayload := payload
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 			isResponseCreate := eventType == "response.create"
 			responseCreateAt := time.Time{}
@@ -1139,6 +1143,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			model := openAIWSPassthroughPolicyModelForFrame(account, payload)
 			if model == "" {
 				model = capturedSessionModel
+			}
+			validationBody := originalPayload
+			if eventType == "session.update" {
+				validationBody = []byte(gjson.GetBytes(originalPayload, "session").Raw)
+			}
+			if isResponseCreate || eventType == "session.update" {
+				if err := validateGPT61SolCompatRequest(validationBody, model); err != nil {
+					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+				}
 			}
 			if isResponseCreate && model != "" && model != strings.TrimSpace(gjson.GetBytes(payload, "model").String()) {
 				payload = s.ReplaceModelInBody(payload, model)

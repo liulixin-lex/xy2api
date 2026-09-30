@@ -172,6 +172,47 @@ func (d *controlledDispatch) observeFailureResponse(response *http.Response) {
 
 type failureReadError struct{ err error }
 
+// Responses JSON places its terminal status at the root; SSE wraps it in response.
+// Only the response object envelope supplies a root status, so unrelated provider
+// fields cannot turn arbitrary errors into cancellation/incompletion evidence.
+func controlledProtocolResponseStatus(v gjson.Result) string {
+	status := v.Get("response.status").String()
+	if status == "" && v.Get("object").String() == "response" {
+		status = v.Get("status").String()
+	}
+	return status
+}
+
+// Called with d.mu held, only for a validated failure frame. Protocol evidence
+// is local to this account/model: an SSE code alone cannot prove shared scope.
+func (d *controlledDispatch) observeProtocolFailureLocked(v gjson.Result) {
+	if d.status < http.StatusOK || d.status >= http.StatusMultipleChoices {
+		return
+	}
+	kind, status := v.Get("type").String(), controlledProtocolResponseStatus(v)
+	if kind != "error" && kind != "response.failed" && status != "failed" && !v.Get("error").IsObject() && !v.Get("response.error").IsObject() {
+		return
+	}
+	detail := v.Get("error")
+	if nested := v.Get("response.error"); nested.IsObject() {
+		detail = nested
+	}
+	if !detail.IsObject() {
+		return
+	}
+	code := detail.Get("code")
+	if !code.Exists() || code.Type == gjson.Null || code.String() == "" {
+		code = detail.Get("type")
+	}
+	if code.Type != gjson.String {
+		return
+	}
+	switch code.String() {
+	case "server_error", "internal_error", "internal_server_error", "overloaded_error", "service_unavailable":
+		d.failureEvidence = scheduling.FailureEvidence{Status: d.status, Code: code.String(), Trusted: true, ProtocolFailure: true, ReplaySafe: true}
+	}
+}
+
 func (r *failureReadError) Read([]byte) (int, error) {
 	err := r.err
 	if err == nil {

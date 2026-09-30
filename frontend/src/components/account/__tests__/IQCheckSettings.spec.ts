@@ -201,3 +201,40 @@ describe('IQ validity and catalog feedback', () => {
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
   })
 })
+
+
+describe('GPT-6.1 Sol IQ reference capabilities', () => {
+  beforeEach(() => fetchModels.mockReset())
+  const value = { enabled: true, interval_minutes: 15, model: 'gpt-6.1-sol', reasoning_effort: 'low' }
+  it.each(['gpt-6.1-sol', 'openai/GPT_6.1_SOL', 'gpt-6.1-sol-max'])('offers sourced reference levels without changing %s settings', model => {
+    const wrapper = mount(IQCheckSettings, { props: { modelValue: { ...value, model } } })
+    const options = wrapper.findAllComponents(Select).find(select => select.props('id')?.endsWith('-effort'))!.props('options')
+    expect(options.map(option => option.value)).toEqual(['upstream_default', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
+    expect(wrapper.get('[id$="-effort-source"]').text()).toBe('admin.accounts.iqCapabilitiesReference')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    wrapper.unmount()
+  })
+  it.each(['none', 'minimal'])('preserves saved unsupported %s while marking it invalid', reasoning_effort => {
+    const wrapper = mount(IQCheckSettings, { props: { modelValue: { ...value, reasoning_effort } } })
+    expect(wrapper.get('button[id$="-effort"]').text()).toContain(reasoning_effort)
+    expect(wrapper.emitted('validity')?.at(-1)).toEqual([false])
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    wrapper.unmount()
+  })
+  it.each(['gpt-6.1-solitude', 'gpt-6.1-sol-preview'])('keeps unknown model %s unrestricted', model => {
+    const wrapper = mount(IQCheckSettings, { props: { modelValue: { ...value, model, reasoning_effort: 'none' } } })
+    expect(wrapper.get('[id$="-effort-source"]').text()).toBe('admin.accounts.iqCapabilitiesUnknown')
+    expect(wrapper.emitted('validity')?.at(-1)).toEqual([true])
+    wrapper.unmount()
+  })
+  it.each([{ levels: ['future-effort'] }, { levels: [] }])('keeps authoritative upstream effort list $levels unchanged', async ({ levels }) => {
+    fetchModels.mockResolvedValueOnce({ models: [{ id: value.model, source: 'upstream', supported_reasoning_levels: levels, capability_sources: { supported_reasoning_levels: 'upstream' } }], fetched_at: null, from_cache: false, stale: false })
+    const wrapper = mount(IQCheckSettings, { props: { accountId: 8, modelValue: value } })
+    await wrapper.get('[data-testid="iq-sync-models"]').trigger('click'); await flushPromises()
+    expect(wrapper.get('[id$="-effort-source"]').text()).toBe('admin.accounts.iqCapabilitiesUpstream')
+    const options = wrapper.findAllComponents(Select).find(select => select.props('id')?.endsWith('-effort'))!.props('options')
+    expect(options.filter(option => !option.disabled).map(option => option.value)).toEqual(['upstream_default', ...levels])
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    wrapper.unmount()
+  })
+})

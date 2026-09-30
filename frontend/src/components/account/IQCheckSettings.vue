@@ -76,6 +76,11 @@ const failed = ref(false)
 let request = 0
 let controller: AbortController | undefined
 const selectedModel = computed(() => catalog.value?.models.find(item => item.id === (props.modelValue.model ?? 'gpt-6-astra')))
+// Reference-only hints from the pinned GPT-6.1 Sol descriptor. Upstream capabilities stay authoritative.
+const gpt61SolReferenceLevels = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']
+const isGPT61Sol = computed(() => /(?:^|\/)gpt-6\.1-sol(?:-(?:none|minimal|low|medium|high|xhigh|max|ultra))?(?:\/compact)?$/.test((props.modelValue.model ?? '').trim().toLowerCase().replace(/_/g, '-')))
+const useGPT61SolReference = computed(() => isGPT61Sol.value && selectedModel.value?.reasoning !== false && selectedModel.value?.capability_sources.supported_reasoning_levels !== 'upstream' && !selectedModel.value?.supported_reasoning_levels?.length)
+
 const modelOptions = computed(() => {
   const ids = new Set(catalog.value?.models.map(item => item.id) ?? [])
   ids.add(props.modelValue.model ?? 'gpt-6-astra')
@@ -85,16 +90,16 @@ const modelSourceMessage = computed(() => selectedModel.value?.source === 'upstr
 const capabilitySourceMessage = computed(() => {
   const model = selectedModel.value
   const source = model?.capability_sources[model.reasoning === false ? 'reasoning' : 'supported_reasoning_levels']
-  return source === 'upstream' ? t('admin.accounts.iqCapabilitiesUpstream') : source === 'reference' ? t('admin.accounts.iqCapabilitiesReference') : t('admin.accounts.iqCapabilitiesUnknown')
+  return source === 'upstream' ? t('admin.accounts.iqCapabilitiesUpstream') : source === 'reference' || useGPT61SolReference.value ? t('admin.accounts.iqCapabilitiesReference') : t('admin.accounts.iqCapabilitiesUnknown')
 })
 const authoritativeEffort = computed(() => selectedModel.value?.reasoning === false || selectedModel.value?.capability_sources.supported_reasoning_levels === 'upstream')
 const effortOptions = computed(() => {
   const model = selectedModel.value
-  const levels = model?.reasoning === false ? ['none'] : model?.supported_reasoning_levels?.length ? model.supported_reasoning_levels : (props.modelValue.model ?? 'gpt-6-astra') === 'gpt-6-astra' ? ['low', 'medium', 'high', 'xhigh', 'max'] : ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+  const levels = model?.reasoning === false ? ['none'] : isGPT61Sol.value && authoritativeEffort.value ? model?.supported_reasoning_levels ?? [] : useGPT61SolReference.value ? gpt61SolReferenceLevels : model?.supported_reasoning_levels?.length ? model.supported_reasoning_levels : (props.modelValue.model ?? 'gpt-6-astra') === 'gpt-6-astra' ? ['low', 'medium', 'high', 'xhigh', 'max'] : ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
   const current = props.modelValue.reasoning_effort ?? 'low'
   return [...new Set(['upstream_default', ...levels, current])].map(value => ({
     value, label: value === 'upstream_default' ? 'default' : value,
-    disabled: authoritativeEffort.value && value !== 'upstream_default' && !levels.includes(value)
+    disabled: (authoritativeEffort.value && value !== 'upstream_default' && !levels.includes(value)) || (useGPT61SolReference.value && ['none', 'minimal'].includes(value))
   }))
 })
 const modelError = computed(() => {
