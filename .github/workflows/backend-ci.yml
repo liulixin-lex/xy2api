@@ -86,7 +86,7 @@ jobs:
           set -euo pipefail
           go test -race -p 1 -parallel 1 -tags=unit \
             ./internal/service ./internal/handler ./internal/scheduling \
-            -run '^(TestAccountPool|TestReviewPR74|TestReviewV021|TestNonstreamReadErrorSafety$|TestControlledProtocolFailureEvidence$|TestControlledTerminalUsageCertainty$|TestGatewayBufferedReadFailureAuthenticatedFailover$)' \
+            -run '^(TestAccountPool|TestGPT61Sol(NativeHTTP|HTTPValidation|WS)|TestReviewPR74|TestReviewV021|TestNonstreamReadErrorSafety$|TestControlledProtocolFailureEvidence$|TestControlledTerminalUsageCertainty$|TestGatewayBufferedReadFailureAuthenticatedFailover$)' \
             -count=1 -timeout=10m -json | tee "$RUNNER_TEMP/scheduling-reliability.jsonl"
           python3 - <<'PY'
           import json
@@ -95,6 +95,15 @@ jobs:
 
           required = {
               "service": {
+                  "TestGPT61SolNativeHTTPValidationBeforeNormalization",
+                  "TestGPT61SolHTTPValidationUsesActualCompactAndPassthroughModel",
+                  "TestGPT61SolWSFirstFrameValidationUsesMappedModel",
+                  "TestGPT61SolWSLaterTurnValidationAndSessionModel",
+                  "TestGPT61SolWSMappedOutKeepsTargetReasoningRules",
+                  "TestAccountPoolGPT61SolSharedWeightsAliasesAndGroups",
+                  "TestAccountPoolGPT61SolExhaustsSameTier",
+                  "TestAccountPoolGPT61SolCancellationBoundary",
+                  "TestAccountPoolGPT61SolInvalidEffortDoesNotMutateAdmission",
                   "TestAccountPoolEntryExplicitGroupExcludesOutsideSimplePool",
                   "TestAccountPoolEntrySharedModelWeightsAndIndependentGroups",
                   "TestAccountPoolEntrySimpleDefaultScopeStillIncludesAllAccounts",

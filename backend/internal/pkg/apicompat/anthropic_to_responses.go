@@ -13,6 +13,9 @@ import (
 // Chat Completions intermediary round-trip (e.g. thinking, cache_control,
 // structured system prompts).
 func AnthropicToResponses(req *AnthropicRequest) (*ResponsesRequest, error) {
+	if err := openai.ValidateGPT61SolReasoningEffort(req.Model, gpt61SolAnthropicReasoningEffort(req)); err != nil {
+		return nil, err
+	}
 	input, err := convertAnthropicToResponsesInput(req.System, req.Messages)
 	if err != nil {
 		return nil, err
@@ -69,6 +72,9 @@ func AnthropicToResponses(req *AnthropicRequest) (*ResponsesRequest, error) {
 		Effort:  mapAnthropicEffortToResponses(effort),
 		Summary: "auto",
 	}
+	if openai.IsGPT61SolModelSpelling(req.Model) {
+		out.Reasoning.Effort = gpt61SolAnthropicReasoningEffort(req)
+	}
 
 	// Convert tool_choice
 	if len(req.ToolChoice) > 0 {
@@ -80,6 +86,20 @@ func AnthropicToResponses(req *AnthropicRequest) (*ResponsesRequest, error) {
 	}
 
 	return out, nil
+}
+
+// gpt61SolAnthropicReasoningEffort preserves explicit GPT-6.1 Sol intent.
+// This scoped adaptation keeps the established behavior of older models.
+func gpt61SolAnthropicReasoningEffort(req *AnthropicRequest) string {
+	if req.Thinking != nil && strings.EqualFold(strings.TrimSpace(req.Thinking.Type), "disabled") {
+		return "none"
+	}
+	if req.OutputConfig != nil {
+		if effort := strings.ToLower(strings.TrimSpace(req.OutputConfig.Effort)); effort != "" {
+			return effort
+		}
+	}
+	return "medium"
 }
 
 // convertAnthropicToolChoiceToResponses maps Anthropic tool_choice to Responses format.
@@ -472,7 +492,7 @@ func boolPtr(v bool) *bool {
 // All gpt-5.x models are reasoning-only; the Responses API returns
 // "Unsupported parameter: temperature" if these fields are present.
 func isReasoningModel(model string) bool {
-	return strings.HasPrefix(model, "gpt-5") || openai.IsGPT6SolOrLunaModelSpelling(model)
+	return strings.HasPrefix(model, "gpt-5") || openai.IsGPT6SolOrLunaModelSpelling(model) || openai.IsGPT61SolModelSpelling(model)
 }
 
 // normalizeToolParameters ensures the tool parameter schema is valid for

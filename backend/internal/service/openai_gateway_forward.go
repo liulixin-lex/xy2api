@@ -19,6 +19,20 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	// Validate the original request before compatibility filters can discard an
+	// explicit effort. Use the same final account/compact model as forwarding.
+	requestedValidationModel := gjson.GetBytes(body, "model").String()
+	compactValidation := isOpenAIResponsesCompactPath(c)
+	_, validationModel := resolveOpenAIForwardMappedModels(account, requestedValidationModel, compactValidation)
+	if compactValidation && !shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
+		if mapped := s.resolveOpenAICompactFallbackModel(account, requestedValidationModel); mapped != "" {
+			validationModel = mapped
+		}
+	}
+	if err := validateGPT61SolCompatRequest(body, validationModel); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+		return nil, err
+	}
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
