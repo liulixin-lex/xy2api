@@ -4,6 +4,13 @@
 
 ## 当前交接状态
 
+### 0.2.2 协议验收补修（2026-09-30，待后继最终门禁）
+
+- 04b661b 的9类CI和候选状态码检查通过后，独立逐条原始HTTP审查发现 /v1/responses 非法reasoning参数先写400 JSON、后被handler重复追加SSE终止事件。该候选已阻断，原成功状态码检查与失败协议证据均保留，未合并或发布。
+- 最小修复仅调整 openAIForwardErrorAlreadyCommunicated：排除keepalive字节后，实际非空正文已写、HTTP>=400且精确application/json才认为错误已告知；保留空响应、HTTP200部分输出、SSE心跳及原terminal/cyber契约。service、调度策略、依赖、前端不变。
+- 新回归用真实Forward与外层fallback组合覆盖APIKey/OAuth、stream false/true、none/minimal；另验证charset/大小写、JSONP/problem+json、空400、未写及SSE边界。相同输入BASELINE-02退出1、MODIFIED退出0，2主18子通过；最初编译接参错误保留后已修正。
+- 后继必须重新获得精确head CI和严格镜像验收；原始runtime仅PASS状态码不再作为完整协议通过。严格验收要求两模式三接口的非法参数返回单个可解析JSON，含流式/非流式请求。完整新结果及四角色由外部发布账本记录。
+
 ### 0.2.2 合并发布候选（2026-09-30，待最终门禁）
 
 - 用户明确授权合并 #73 并发布 0.2.2；#74/#75 已进入 main 8ef2327。本候选在 PR73 原 head 605091c 上标准合并 main，仅解决记忆文档冲突并保留双方历史；产品版本 0.2.2，完整 Sub2API 兼容基线仍 0.2.8。
@@ -1513,3 +1520,8 @@ pnpm --dir frontend run build
 - 根继续一次推送PR73新head、等待对应检查后常规合并并按正式tag工作流发版；前端全套、IQ、Go风险报告与四角色准备由三个代理并行完成。生产只读边界保持，剩余中低危与不可达模块发现不写成零漏洞。
 
 - 冻结审计首轮拒绝新差异 .github/audit-exceptions.yml；该文件承载 XY2API 自有发行依赖例外，已按既有所有权规则仅加入该精确路径为 XY_OWNED，不扩大通配、不修改审计器、不延长或增加漏洞例外。修复后重新提交并运行相同来源审计。
+
+
+### 2026-09-30 — release-0.2.2-protocol — 原始HTTP错误体补修
+
+- 候选04b的独立审查阻止了JSON/SSE混写流入发行；最小handler修复与18子用例已在隔离副本实际通过。新提交继续同一PR73，不改历史标签、不部署生产。前端按hash、IQ按严格依赖闭包复用，真实新镜像严格校验和正式资产验收完成后再交付。
