@@ -1,0 +1,219 @@
+{
+  "format_version": 1,
+  "scope": "XY_OWNED selective GPT-6.1 Sol adaptation; not a full v0.2.11 synchronization",
+  "verified_date": "2026-09-30",
+  "xy2api_baseline_commit": "97d0f0626b9fb97fd4a9adfd10ab1c93c1802774",
+  "product_version": "0.2.1",
+  "full_audited_sub2api_compatibility": "0.2.8",
+  "upstream_repository": "Wei-Shaw/sub2api",
+  "feature_commit": "9688571a83775b87db85917398c628b7cdfe8276",
+  "release_tag": "v0.2.11",
+  "release_tag_object": "881a722349105e21aaa38e11de90dd05046ebe4a",
+  "release_commit": "96f4c115c9749078f90cbf210a01d39baf3f53b6",
+  "release_signature_status": "unsigned",
+  "codex_descriptor_source": {
+    "repository": "openai/codex",
+    "commit": "b1e72963c3b71a9265a551e54beff078384efed9",
+    "path": "codex-rs/models-manager/models.json",
+    "model": "gpt-6.1-sol",
+    "adapted_file": "backend/internal/pkg/openai/codex_gpt61_sol.json",
+    "sha256": "7aeb4ed98fc9a4db530c0c92d0cbe2370b767a0554dcced995f44363b6ad2bab"
+  },
+  "original_patch_sha256": "ec09e8752378d9d5e15a9d260c592e940f66f259f2cc017490c4f6c1e383f799",
+  "upstream_feature_files": [
+    {
+      "path": "backend/internal/handler/gateway_models_test.go",
+      "upstream_sha256": "309c1f69a1e569ee614520a5ed84da9372a919719c4e6c0a1b8103bfe8c91954",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/pkg/apicompat/anthropic_responses_test.go",
+      "upstream_sha256": "e2a0e467eadc3c826df6462e16ee2941a722ce7cf975b584b60adab0367a195e",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/pkg/apicompat/anthropic_to_responses.go",
+      "upstream_sha256": "167dde29672d1f1ca55cbcf32fd38c710ef77b722082efb4da9655caa6d39740",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/pkg/apicompat/chatcompletions_to_responses.go",
+      "upstream_sha256": "1395520f453d407cea577a33df5821ad5d160db1b67fa59a384dabf81053efed",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/pkg/openai/codex_gpt61_sol.json",
+      "upstream_sha256": "7aeb4ed98fc9a4db530c0c92d0cbe2370b767a0554dcced995f44363b6ad2bab",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/pkg/openai/constants.go",
+      "upstream_sha256": "420ea6f3185e2c13867ae4b4a7b61d14f436038bdc0a51b3b45f37ca1575a5c5",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/pkg/openai/constants_test.go",
+      "upstream_sha256": "2cec1c703fa659a864f5b356bb5f099612954fc345fdd4165b4e690c743d587c",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/billing_service.go",
+      "upstream_sha256": "ef12ba584061a87168a83a72d470ccb5d4b028e1d06df57d1dc65eb0f99c8aca",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/billing_service_test.go",
+      "upstream_sha256": "d2c146e79a619300b460a3bcba41514932f492d2bfb3fecd097f3394a6897909",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/openai_codex_model_metadata.go",
+      "upstream_sha256": "d51e7bcdbe61215b58b08900beddbd2a3a7b19c3111bcf2a69dc5f6aac7df0c3",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/openai_codex_models_service.go",
+      "upstream_sha256": "b88d2584cdd5f85441301ab94002d49b686de1d08e768f46965335d09ba434ce",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/openai_codex_models_service_test.go",
+      "upstream_sha256": "ec9ed4f505d5e87c8f2d38d8926dbd9cd57646e9d2275bd14996b4f26d3c29e8",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/openai_codex_transform.go",
+      "upstream_sha256": "acbb1f051ac0031d18c6439f01c5adf9724d5e49f990a7fac0794fc7cb0d521c",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/openai_compat_model.go",
+      "upstream_sha256": "3abd0206f1f53a18729e7704788e8451e80c38db2fd2daea88cc26f61d69f04f",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/openai_compat_prompt_cache_key.go",
+      "upstream_sha256": "f7ef48041f9e9b82b23b6de794bba564fb0964f01147fe8340a28d1efd706d85",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/openai_compat_prompt_cache_key_test.go",
+      "upstream_sha256": "82b948cf7c40333889c6a815c2ff7fd2936183fd9730e21c3cbfeb34094aff5e",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "upstream_sha256": "95d619177feba348cbc9354d5765585a6296972ea390099c02c86be053d4bbf9",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "upstream_sha256": "8f4d780b01e7d22aaab50b140d5f4fcb1ab419c46890dfdd5e25a6e6f0fe381b",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_test.go",
+      "upstream_sha256": "3c477cc3220a58fe083cbd91f9a73ee785a9d38ffb8b91a44fc2f79db9003f6a",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "upstream_sha256": "dbe53fc353a9cca9fc530f472ccf7ac1b6ea0fa4abf1a3edfe40d6548bb34a24",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages_chat_fallback.go",
+      "upstream_sha256": "2a3f63edd3e6211c3a6abb577c3ba0f88f0cc74befa6adb3caaa8f16bf4e159a",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_request_body.go",
+      "upstream_sha256": "b7cf920f1013a2cd0dbfdf9c0d306da7deeff94e2fb25f764b242f23fe4f6bcb",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_responses_chat_fallback.go",
+      "upstream_sha256": "a66bfe1d6300a67d0af6edbd208d3332835ca3ea4f2172405dc064c2d75c4f88",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/openai_model_alias.go",
+      "upstream_sha256": "142aa4bdb9f2cc947867e06830001fc18bc85ab63a2371a40e26229a5b10655e",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/internal/service/pricing_service.go",
+      "upstream_sha256": "8e77d9960b537dcb0c30295c870445f3c468b8ace86dcfc0fc97ff5181d17a57",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "backend/resources/model-pricing/model_prices_and_context_window.json",
+      "upstream_sha256": "8490b7b9ad0e928a5b1a0e244fa61b5698600a33e47adaba22bed6f45632ce3f",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "frontend/src/components/keys/UseKeyModal.vue",
+      "upstream_sha256": "658f9b4ea5c21fbeddeb8ddf074a76a59a9771f04e277197d17277fcbeed1411",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "frontend/src/components/keys/__tests__/UseKeyModal.spec.ts",
+      "upstream_sha256": "2f2da4989ce376a6c6a97fd7aa513e1c8f2053f28df54a9e345cae014c361146",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "frontend/src/composables/__tests__/useModelWhitelist.spec.ts",
+      "upstream_sha256": "b50f97ef507a9d23b16fc27a0a8d4d6e7f86895f4780492a7da4a648de564adb",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    },
+    {
+      "path": "frontend/src/composables/useModelWhitelist.ts",
+      "upstream_sha256": "f896f3e2d159540a5c2d3b0a4a9810a4151445b05c5eb7ca1b303f3e3efad2d8",
+      "disposition": "Adapt feature hunks; preserve XY2API behavior and PR74 repairs."
+    }
+  ],
+  "prerequisite_adaptations": [
+    {
+      "upstream_commit": "82b092ffc20f32b0d485fff57c65b88ab1dc5dcf",
+      "decision": "Only exact GPT-6.1 Sol reasoning detection; no future GPT family broadening."
+    },
+    {
+      "upstream_commit": "2fc91663d25ae31e2d0f06a979ab4c0cd0c15381",
+      "decision": "Scoped GPT-6.1 Sol Anthropic effort helper; retain older models thinking precedence."
+    }
+  ],
+  "local_adaptations": [
+    "Native HTTP and WebSocket validation after final mapping, before lossy normalization.",
+    "Exact aliases retain invalid effort intent; unpublished date and unknown suffixes stay unknown.",
+    "API-key mapped/provider aliases also disable Responses Lite and retain authoritative metadata.",
+    "IQ reference-only options preserve configured values and authoritative capabilities.",
+    "Storage, native protocol, pricing, catalog and isolated source transaction regressions."
+  ],
+  "ci_gate": {
+    "path": ".github/workflows/backend-ci.yml",
+    "sha256": "b8bbc20313095d6e2182ebcbe8211d26c0f59fc2f83d60dce94ac163d0b694ef",
+    "new_required_tests": [
+      "TestAccountPoolGPT61SolCancellationBoundary",
+      "TestAccountPoolGPT61SolExhaustsSameTier",
+      "TestAccountPoolGPT61SolInvalidEffortDoesNotMutateAdmission",
+      "TestAccountPoolGPT61SolSharedWeightsAliasesAndGroups",
+      "TestGPT61SolHTTPValidationUsesActualCompactAndPassthroughModel",
+      "TestGPT61SolNativeHTTPValidationBeforeNormalization",
+      "TestGPT61SolWSFirstFrameValidationUsesMappedModel",
+      "TestGPT61SolWSLaterTurnValidationAndSessionModel",
+      "TestGPT61SolWSMappedOutKeepsTargetReasoningRules"
+    ],
+    "note": "Actual head check results are recorded in the external evidence ledger."
+  },
+  "excluded_commits": [
+    "c91bb6124a71920e8f9ef91103518556076c7e8b",
+    "e6d191a83f0b37df3cb5b183e9cfd42e47b47a1d"
+  ],
+  "unchanged_contracts": [
+    "UPSTREAM_BASE.json",
+    "tools/upstream-sync/policy.json",
+    "backend/cmd/server/VERSION",
+    "backend/cmd/server/SUB2API_COMPAT_VERSION",
+    "backend/migrations"
+  ]
+}

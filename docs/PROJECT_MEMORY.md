@@ -4,6 +4,14 @@
 
 ## 当前交接状态
 
+### GPT-6.1 Sol 单功能适配源码冻结（2026-09-30）
+
+- 根执行者已确认事故修复PR #74的d72在9项检查通过后合并为97d0f0626b9fb97fd4a9adfd10ab1c93c1802774；本阶段从该提交建立独立model-support副本，保留事故四角色与旧候选。不把含PR73的联合6393结果冒称新主线已包含PR73。
+- 只适配官方9688571a83775b87db85917398c628b7cdfe8276的30文件新模型功能；补精准reasoning/Anthropic effort、最终mapping后原生HTTP/WS校验、APIKey映射别名禁Lite及IQ参考能力。来源见docs/GPT61_SOL_SUPPORT.md和GPT61_SOL_PROVENANCE.json；完整compat仍0.2.8，VERSION/UPSTREAM_BASE/policy/313条SQL不变。
+- core-focused-01三个受影响Go包定向实际exit0，覆盖别名、拒绝、转换、目录、计价、旧模型隔离及原生协议；逐测试证据见外部model-support-evidence。gateway独立5主/46子通过、0skip，PR74关键文件字节保持。前端353文件/2701项全量及lint通过；ES2020 replaceAll构建错误修为等价regex后，25项IQ回归/lint/build复验通过，失败保留。
+- scheduling_audit最终4个真实PG18/Redis8.4测试RUN/PASS、0FAIL/0SKIP；40次实际合成HTTP验证两组共用模型/别名权重，group7=14/6、group8=6/14，同层序列[2,4,5,3]，取消max_active1，无效effort本地400且不新增Ledger/PG门/Redis状态。前两次夹具白名单/平分顺序预期错误保留。原生目录三态probe实际1/0/1，旧count0、新count1、回滚count0。
+- CI复用既有service race构建，新增4个真实存储及5个HTTP/WS关键主测试required，service required共23，保留零跳过守卫。源码在此冻结；根继续实际提交、远端同HEAD CI、构建和新模型fresh合成HTTP，结果追加外部账本，不回填冻结源码。旧complete-05八阶段升级恢复按原镜像身份复用，本轮不冒称重跑；没有生产部署或真实供应商调用。
+
 ### PR #74 三项补修本地候选（2026-09-30）
 
 - 新增CI专用PG18/Redis8.4及15432/16379端口，只向新step注入fixture环境，保留原unit/integration；串行三包race的JSON守卫要求关键测试run+PASS、全范围0SKIP，拒绝空匹配。工作流本地校验和CI后继HEAD见pr74-final-evidence/CI_FINAL.json；真实GitHub门禁由根执行者推送后核对。
@@ -425,6 +433,13 @@
 Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+### 20260930-gpt61-sol-support — 源码冻结，交根执行CI与制品验收
+
+- 根执行者确认事故阶段已完成，PR #74 合并为97d0f0626b9fb97fd4a9adfd10ab1c93c1802774；本任务从该干净提交建立独立model-support副本，分支feat/gpt61-sol-support-20260930，不修改final-work或旧候选。
+- 按用户追加要求只适配官方Sub2API v0.2.11中9688571a83775b87db85917398c628b7cdfe8276的新模型功能；不执行完整上游同步，完整审计兼容基线保持0.2.8，版本、迁移和既有provenance不改。固定来源及30文件处置详见外部next-model-support-plan.md。
+- conversation_context负责首批补丁、catalog/alias/apicompat/billing/pricing、功能来源说明及本轮记忆；pr74_review接管gateway/native/passthrough/WS校验，根负责frontend/IQ体验。共享工作树按文件分工，冻结前不commit/push；真实命令与失败记录放在model-support-evidence。
+- 保留PR74终端发送、读取回退、PG故障冷却及成员边界修复，精准补齐新模型reasoning与Anthropic兼容前置依赖，不扩大其他模型行为。本地实现及受影响验证已完成；最终远端、构建、runtime与四角色由根按真实HEAD收口，不调用生产或真实供应商。
 
 
 
@@ -1452,3 +1467,10 @@ pnpm --dir frontend run build
 - 在b284142b5后仅增强backend-ci及说明，加入专用PG18/Redis8.4健康服务与真实存储串行race。核对AccountPool/ReviewPR74/ReviewV021/读取安全/协议/发送确定性/认证handler实际函数，JSON拒绝skip/fail/空包或未完成的关键测试。环境不传入原unit/integration。
 - 本地验证为YAML解析、包/函数元数据、shell语法和日志守卫，不重跑已验业务代码。字面命令、退出码和独立patch见pr74-final-evidence；尚未执行的新GitHub步骤不写为PASS，根执行者在最终head核对逐case。
 - 已重开联合6393全量/complete-05/独立审计证据，文档保留与PR74独立后继的身份区别。后续上游新模型支持不混入当前修复。本子任务无push/merge/deploy或生产操作。
+
+### 2026-09-30 — 20260930-gpt61-sol-support — 单功能实现与本地验证冻结
+
+- 在独立97d0副本登记后应用固定968857原30文件patch；27文件直接落地，Anthropic前置helper和两fallback import共3处按hunk适配。原始apply-check/reject、修复脚本与文档包装语法错误及成功重试保留，没有整文件覆盖或全量同步。
+- conversation_context负责catalog/alias/apicompat/billing/pricing及来源；pr74_review负责native/passthrough/WS；根负责IQ参考选项、前端及CI；scheduling_audit负责真实存储4测试和e176原生目录三态。各分工结果见顶部，其他任务和历史保持。
+- 核心三个包定向、gateway5主/46子、真实存储4项、前端全量2701及最终构建实际通过；失败原始记录保留。来源manifest记录30文件原hash、官方descriptor、两项精准前置依赖、排除项与CI最终hash。
+- 本记忆随源码冻结；根继续单次commit/push、远端CI、正式构建和新模型fresh实际HTTP。此前八阶段升级/备份恢复只按原镜像复用，原四角色沿用固定路径，生产只读边界继续。
