@@ -72,7 +72,7 @@ func TestOpsNativeStreamRealNetwork(t *testing.T) {
 					client.Timeout = 5 * time.Second
 					response, err := client.Post(server.URL+"/v1/"+endpoint, "application/json", strings.NewReader(`{"stream":true}`))
 					require.NoError(t, err)
-					defer response.Body.Close()
+					defer func() { _ = response.Body.Close() }()
 					reader := bufio.NewReader(response.Body)
 					line, readErr := reader.ReadString('\n')
 					close(finish)
