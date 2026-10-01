@@ -305,7 +305,9 @@ func TestNativeStreamRelayLocalErrorContinuesSequence(t *testing.T) {
 	_, err := nativeRelayService().handleStreamingResponse(ctx, resp, c, nativeRelayAccount(), time.Now(), "fixture", "fixture")
 	require.Error(t, err)
 	require.Contains(t, w.Body.String(), "\"sequence_number\":7")
-	require.Contains(t, w.Body.String(), "\"type\":\"error\",\"sequence_number\":8")
+	require.Contains(t, w.Body.String(), "\"type\":\"response.failed\",\"sequence_number\":8")
+	require.Equal(t, 1, strings.Count(w.Body.String(), "event: response.failed\n"))
+	require.Contains(t, w.Body.String(), `"id":"resp_partial"`)
 	require.NotContains(t, w.Body.String(), "{invalid}")
 }
 

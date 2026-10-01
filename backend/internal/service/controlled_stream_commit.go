@@ -134,6 +134,9 @@ func CommitControlledIdentity(ctx context.Context) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.localFailureStarted {
+		return scheduling.ErrCommitted
+	}
 	if r.cancelReason.excludesProviderHealth() {
 		return context.Canceled
 	}
@@ -263,6 +266,9 @@ func (d *controlledDispatch) tryCommitAttempt() error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.localFailureStarted {
+		return scheduling.ErrCommitted
+	}
 	if r.cancelReason.excludesProviderHealth() {
 		return context.Canceled
 	}
@@ -312,15 +318,20 @@ func (d *controlledDispatch) cancelWithReason(reason ControlledCancelReason) {
 	if NativeStreamDeliveryEnabled(d.ctx) && reason.excludesProviderHealth() && d.timer != nil {
 		d.timer.Stop()
 	}
+	var failureCancel context.CancelFunc
 	if NativeStreamDeliveryEnabled(d.ctx) && reason.excludesProviderHealth() && d.request != nil {
 		d.request.mu.Lock()
 		if d.request.cancelReason == "" {
 			d.request.cancelReason = reason
 		}
+		failureCancel = d.request.localFailureCancel
 		d.request.mu.Unlock()
 	}
 	cancel := d.cancel
 	d.mu.Unlock()
+	if failureCancel != nil {
+		failureCancel()
+	}
 	if cancel != nil {
 		cancel()
 	}
@@ -347,7 +358,11 @@ func CancelControlledRequest(ctx context.Context, reason ControlledCancelReason)
 		r.cancelReason = reason
 	}
 	d := r.currentDispatch
+	failureCancel := r.localFailureCancel
 	r.mu.Unlock()
+	if failureCancel != nil {
+		failureCancel()
+	}
 	if d != nil {
 		d.cancelWithReason(reason)
 	}

@@ -203,7 +203,9 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	// the outbound request (for example GLM xhigh is forwarded as max).
 	reasoningEffort := extractOpenAIReasoningEffortFromBody(upstreamBody, upstreamModel, billingModel, originalModel)
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, upstreamBody, upstreamModel)
+	stopHeaderKeepalive := s.startOpenAIHeaderKeepalive(c, clientStream)
 	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, upstreamBody, clientStream, token, customUA, grokCacheIdentity)
+	stopHeaderKeepalive()
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +307,36 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
-	scanner := s.newUpstreamSSEScanner(resp.Body)
+	ctx := c.Request.Context()
+	nativeDelivery := NativeStreamDeliveryEnabled(ctx)
+	var scanner nativeSSEScanner = s.newUpstreamSSEScanner(resp.Body)
+	lastDownstreamWrite := time.Now()
+	var nativeLines []string
+	var nativeIdleScanner *nativeSSEIdleScanner
+	if nativeDelivery {
+		interval := 15 * time.Second
+		if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
+			interval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
+		}
+		maxLineSize := defaultMaxLineSize
+		if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
+			maxLineSize = s.cfg.Gateway.MaxLineSize
+		}
+		idle := newNativeSSEIdleScanner(ctx, resp.Body, newNativeSSEEventScanner(scanner, maxLineSize), interval, func() error {
+			if len(nativeLines) != 0 || time.Since(lastDownstreamWrite) < interval {
+				return nil
+			}
+			if err := writeNativeChatHeartbeat(ctx, c); err != nil {
+				return err
+			}
+			lastDownstreamWrite = time.Now()
+			nativeIdleScanner.ResetHeartbeat()
+			return nil
+		})
+		nativeIdleScanner = idle
+		scanner = idle
+		defer idle.Close()
+	}
 
 	var usage OpenAIUsage
 	var firstTokenMs *int
@@ -314,9 +345,46 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	pendingLines := make([]string, 0, 8)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var terminal openAIRawStreamTerminalState
+	var nativeWriteErr error
+	var nativeTerminalErr error
 
 	writeLine := func(line string) {
 		if clientDisconnected {
+			return
+		}
+		if nativeDelivery {
+			nativeLines = append(nativeLines, line)
+			if line != "" {
+				return
+			}
+			frame := []byte(strings.Join(nativeLines, "\n") + "\n")
+			nativeLines = nativeLines[:0]
+			payload := nativeSSEEventData(frame)
+			c.Header("Content-Type", "text/event-stream")
+			c.Header("Cache-Control", "no-cache")
+			c.Header("X-Accel-Buffering", "no")
+			if len(payload) > 0 {
+				if err := CommitControlledOutput(ctx, payload); err != nil {
+					nativeWriteErr = err
+					return
+				}
+				writeStreamHeaders()
+			}
+			n, err := WriteNativeStreamFrame(ctx, c.Writer, frame)
+			if len(payload) == 0 {
+				recordOpenAIStreamKeepaliveBytes(c, n)
+			}
+			if err != nil {
+				nativeWriteErr = err
+				clientDisconnected = ctx.Err() != nil || ControlledStreamSnapshot(ctx).CancelReason.excludesProviderHealth()
+				return
+			}
+			if upstreamError := gjson.GetBytes(payload, "error"); upstreamError.IsObject() && upstreamError.Get("message").Type == gjson.String && strings.TrimSpace(upstreamError.Get("message").String()) != "" {
+				nativeTerminalErr = &nativeChatDeliveredTerminalError{message: upstreamError.Get("message").String()}
+			}
+			clientOutputStarted = clientOutputStarted || len(payload) > 0
+			lastDownstreamWrite = time.Now()
+			nativeIdleScanner.ResetHeartbeat()
 			return
 		}
 		if !clientOutputStarted && !refusalDetector.ShouldReleaseClientOutput() {
@@ -359,7 +427,8 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 				if u := extractCCStreamUsage(payload); u != nil {
 					usage = *u
 				}
-				if firstTokenMs == nil && !usageOnlyChunk {
+				semantic, _, _, _ := classifySemanticEvent([]byte(payload))
+				if firstTokenMs == nil && !usageOnlyChunk && (!nativeDelivery || semantic) {
 					elapsed := int(time.Since(startTime).Milliseconds())
 					firstTokenMs = &elapsed
 				}
@@ -370,6 +439,16 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 
 		line = s.replaceModelInSSELine(line, upstreamModel, originalModel)
 		writeLine(line)
+		if nativeDelivery {
+			if nativeWriteErr != nil {
+				_ = resp.Body.Close()
+				break
+			}
+			if (terminal.sawDone || nativeTerminalErr != nil) && line == "" {
+				break
+			}
+			continue
+		}
 		if line == "" {
 			if !clientDisconnected && clientOutputStarted {
 				c.Writer.Flush()
@@ -400,7 +479,16 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		}
 	}
 
-	scanErr := scanner.Err()
+	scanErr := errors.Join(scanner.Err(), nativeWriteErr)
+	if nativeWriteErr != nil {
+		if nativeStreamAttemptReadFailure(ctx, nativeWriteErr) && !ControlledStreamSnapshot(ctx).AttemptCommitted && !clientOutputStarted {
+			return resultWithUsage(), nativeStreamReadFailover(ctx, nativeWriteErr)
+		}
+		return resultWithUsage(), nativeWriteErr
+	}
+	if nativeTerminalErr != nil {
+		return resultWithUsage(), nativeTerminalErr
+	}
 	if scanErr != nil && !errors.Is(scanErr, context.Canceled) && !errors.Is(scanErr, context.DeadlineExceeded) {
 		logger.L().Warn("openai chat_completions raw: stream read error",
 			zap.Error(scanErr),
@@ -410,9 +498,11 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 
 	// 客户端取消/断开后上游读失败与上游截断不可区分（取消会连带取消上游请求），
 	// 沿用既有语义：按已收到的用量正常收尾计费，不判为上游故障。
-	clientAborted := clientDisconnected ||
-		errors.Is(scanErr, context.Canceled) ||
-		errors.Is(scanErr, context.DeadlineExceeded)
+	clientAborted := clientDisconnected || c.Request.Context().Err() != nil ||
+		(!nativeDelivery && (errors.Is(scanErr, context.Canceled) || errors.Is(scanErr, context.DeadlineExceeded)))
+	if nativeStreamAttemptReadFailure(ctx, scanErr) && !ControlledStreamSnapshot(ctx).AttemptCommitted && !clientOutputStarted {
+		return resultWithUsage(), nativeStreamReadFailover(ctx, scanErr)
+	}
 
 	// 上游在任何终止信号之前结束：连接被 reset（scanErr != nil）或干净 EOF。
 	// 两者都不能再记成功——此前统一返回 nil error，把上游截断伪装成

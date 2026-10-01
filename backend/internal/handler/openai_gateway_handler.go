@@ -3603,8 +3603,8 @@ func (h *OpenAIGatewayHandler) mapUpstreamError(statusCode int) (int, string, st
 }
 
 // handleStreamingAwareError handles errors that may occur after streaming has started
-func (h *OpenAIGatewayHandler) handleStreamingAwareError(c *gin.Context, status int, errType, message string, streamStarted bool) {
-	h.handleStreamingAwareErrorWithCode(c, status, errType, "", message, streamStarted, false)
+func (h *OpenAIGatewayHandler) handleStreamingAwareError(c *gin.Context, status int, errType, message string, streamStarted bool) bool {
+	return h.handleStreamingAwareErrorWithCode(c, status, errType, "", message, streamStarted, false)
 }
 
 func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
@@ -3615,7 +3615,7 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 	message string,
 	streamStarted bool,
 	countTowardsSLA bool,
-) {
+) bool {
 	// body-signal compact 心跳可能已把响应头提交为 200：先停心跳（建立
 	// happens-before，接管 ResponseWriter），并升级为流内错误处理。
 	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
@@ -3632,52 +3632,42 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 		// 通用 `event: error` 帧不被识别为终止事件，会导致
 		// "stream closed before response.completed"。
 		if inboundIsResponses(c) {
-			if writeResponsesFailedSSE(c, errType, code, message) {
-				return
-			}
+			return writeResponsesFailedSSE(c, errType, code, message)
 		}
-		// Stream already started, send error as SSE event then close
-		flusher, ok := c.Writer.(http.Flusher)
-		if ok {
-			errorObject := gin.H{"type": errType, "message": message}
-			if code != "" {
-				errorObject["code"] = code
-			}
-			payload, err := json.Marshal(gin.H{"error": errorObject})
-			if err != nil {
-				payload = []byte(`{"error":{"type":"upstream_error","message":"Upstream request failed"}}`)
-			}
-			errorEvent := "event: error\ndata: " + string(payload) + "\n\n"
-			if _, err := fmt.Fprint(c.Writer, errorEvent); err != nil {
-				_ = c.Error(err)
-			}
-			flusher.Flush()
+		errorObject := gin.H{"type": errType, "message": message}
+		if code != "" {
+			errorObject["code"] = code
 		}
-		return
+		payload, err := json.Marshal(gin.H{"error": errorObject})
+		if err != nil {
+			_ = c.Error(err)
+			return false
+		}
+		return writeLocalStreamFailure(c, []byte("event: error\ndata: "+string(payload)+"\n\n"))
 	}
 
 	// Normal case: return JSON response with proper status code
 	if code == "" {
 		h.errorResponse(c, status, errType, message)
-		return
+		return c.Writer.Size() > 0
 	}
 	c.JSON(status, gin.H{"error": gin.H{
 		"type": errType, "code": code, "message": message,
 	}})
+	return c.Writer.Size() > 0
 }
 
 func (h *OpenAIGatewayHandler) ensureOpenAIStreamReadErrorResponse(c *gin.Context, err error, streamStarted bool) bool {
 	code, message, ok := service.OpenAIUpstreamStreamReadErrorDetails(err)
-	if !ok || c == nil || c.Writer == nil || service.IsResponseCommitted(c) {
+	if !ok || c == nil || c.Writer == nil || openAILocalFailureAlreadyWritten(c) || (service.IsResponseCommitted(c) && !openAINativeFailureAllowed(c)) {
 		return false
 	}
 	if c.Writer.Written() {
 		streamStarted = true
 	}
-	h.handleStreamingAwareErrorWithCode(
+	return h.handleStreamingAwareErrorWithCode(
 		c, http.StatusBadGateway, "upstream_error", code, message, streamStarted, true,
 	)
-	return true
 }
 
 // ensureForwardErrorResponse 在 Forward 返回错误但尚未写响应时补写统一错误响应。
@@ -3685,7 +3675,7 @@ func (h *OpenAIGatewayHandler) ensureForwardErrorResponse(c *gin.Context, stream
 	if c == nil || c.Writer == nil {
 		return false
 	}
-	if c.Request != nil && errors.Is(c.Request.Context().Err(), context.Canceled) {
+	if c.Request != nil && c.Request.Context().Err() != nil {
 		failoverClientGone(c)
 		return false
 	}
@@ -3707,14 +3697,21 @@ func (h *OpenAIGatewayHandler) ensureForwardErrorResponse(c *gin.Context, stream
 	// Compact keepalive may have committed 200 headers without writing a
 	// semantic SSE event. In that case the Responses stream still needs its
 	// protocol-correct terminal response.failed event.
-	if (service.IsResponseCommitted(c) && (!compactKeepaliveCommitted || compactKeepaliveHasMeaningfulOutput)) || (!compactKeepaliveCommitted && imageKeepaliveResponseWritten) {
+	if openAILocalFailureAlreadyWritten(c) || (service.IsResponseCommitted(c) && !openAINativeFailureAllowed(c) && (!compactKeepaliveCommitted || compactKeepaliveHasMeaningfulOutput)) || (!compactKeepaliveCommitted && imageKeepaliveResponseWritten) {
 		return false
 	}
 	if c.Writer.Written() && !imageKeepalivePaddingOnly {
 		streamStarted = true
 	}
-	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed", streamStarted)
-	return true
+	return h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed", streamStarted)
+}
+
+func openAILocalFailureAlreadyWritten(c *gin.Context) bool {
+	return c != nil && (c.GetBool(localStreamFailureWrittenKey) || (c.Request != nil && service.ControlledStreamFailureWritten(c.Request.Context())))
+}
+
+func openAINativeFailureAllowed(c *gin.Context) bool {
+	return c != nil && c.Request != nil && service.NativeStreamDeliveryEnabled(c.Request.Context()) && !openAILocalFailureAlreadyWritten(c)
 }
 
 func shouldLogOpenAIForwardFailureAsWarn(c *gin.Context, wroteFallback bool) bool {
@@ -3742,13 +3739,16 @@ func openAIForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForwa
 	if err == nil || c == nil || c.Writer == nil {
 		return false
 	}
+	if openAILocalFailureAlreadyWritten(c) {
+		return true
+	}
 	// 与快照同口径：排除 compact 心跳字节，避免"仅心跳写出"被误判为
 	// 响应已写出（#3887）。
 	if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) == writerSizeBeforeForward ||
 		service.OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c) == writerSizeBeforeForward {
 		return false
 	}
-	if service.IsNativeResponsesTerminalError(err) {
+	if service.IsNativeResponsesTerminalError(err) || service.IsNativeChatTerminalError(err) {
 		return true
 	}
 	// Forward may reject a request locally after writing a complete JSON error.

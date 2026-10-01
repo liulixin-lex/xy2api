@@ -186,9 +186,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				recordOpenAIStreamKeepaliveBytes(c, n)
 			}
 			if err != nil {
-				return fmt.Errorf("client_detached: %w: %v", context.Canceled, err)
+				return err
 			}
 			if len(payload) > 0 {
+				recordNativeResponsesDeliveredIdentity(c, payload)
 				RecordNativeStreamFlush(ctx, nativeReadAt, time.Now())
 			}
 			return nil
@@ -293,6 +294,12 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	// can buffer response.created / response.in_progress, so keepalive must be
 	// based on downstream idle time.
 	lastDownstreamWriteAt := time.Now()
+	noteDownstreamWrite := func() {
+		lastDownstreamWriteAt = time.Now()
+		if nativeDelivery && keepaliveTicker != nil {
+			keepaliveTicker.Reset(keepaliveInterval)
+		}
+	}
 
 	// 仅发送一次错误事件，避免多次写入导致协议混乱。
 	// 注意：OpenAI `/v1/responses` streaming 事件必须符合 OpenAI Responses schema；
@@ -332,8 +339,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	eventShouldFlush := false
 	handlePendingWriteError := func(err error) {
 		if nativeDelivery {
-			clientDisconnected = true
+			clientDisconnected = ctx.Err() != nil || ControlledStreamSnapshot(ctx).CancelReason.excludesProviderHealth()
 			streamEarlyErr = err
+			if nativeStreamAttemptReadFailure(ctx, err) {
+				streamEarlyErr = nativeStreamReadFailover(ctx, err)
+			}
 			_ = resp.Body.Close()
 			return
 		}
@@ -372,7 +382,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming flush, continuing to drain upstream for billing")
 				} else {
 					clientOutputStarted = clientOutputStarted || !nativeDelivery || completeNativeData
-					lastDownstreamWriteAt = time.Now()
+					noteDownstreamWrite()
 				}
 			}
 		}
@@ -394,6 +404,18 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			return
 		}
 		errorEventSent = true
+		if nativeDelivery {
+			// The local terminal belongs to the live request, not to the
+			// upstream attempt which may already be expired.
+			nativeEvent.Reset()
+			if err := writeNativeResponsesFailure(ctx, c, responseID, lastNativeSequence+1, code, message); err != nil {
+				clientDisconnected = true
+				return
+			}
+			clientOutputStarted = true
+			noteDownstreamWrite()
+			return
+		}
 		// Responses error events use top-level code/message/param fields. A nested
 		// Chat Completions error envelope loses the classification in strict clients.
 		sequence := int64(0)
@@ -414,7 +436,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			return
 		}
 		clientOutputStarted = true
-		lastDownstreamWriteAt = time.Now()
+		noteDownstreamWrite()
 		// The handler must not append its generic failure after this error event.
 		MarkResponseCommitted(c)
 	}
@@ -448,7 +470,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			return
 		}
 		clientOutputStarted = true
-		lastDownstreamWriteAt = time.Now()
+		noteDownstreamWrite()
 	}
 	finalizeStream := func() (*openaiStreamingResult, error) {
 		if stageFirstOutput && eventInProgress {
@@ -532,6 +554,14 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		// 客户端断开/取消请求时，上游读取往往会返回 context canceled。
 		// /v1/responses 的 SSE 事件必须符合 OpenAI 协议；这里不注入自定义 error event，避免下游 SDK 解析失败。
 		if errors.Is(scanErr, context.Canceled) || errors.Is(scanErr, context.DeadlineExceeded) {
+			if nativeStreamAttemptReadFailure(ctx, scanErr) {
+				if !ControlledStreamSnapshot(ctx).AttemptCommitted && !clientOutputStarted {
+					return resultWithUsage(), nativeStreamReadFailover(ctx, scanErr), true
+				}
+				code, message := nativeStreamTimeoutCode(scanErr)
+				sendErrorEvent(code, message)
+				return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", scanErr), true
+			}
 			if eventShouldFlush {
 				flushPending("Client disconnected during canceled stream flush, returning collected usage")
 			}
@@ -921,11 +951,15 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				eventInProgress = line != ""
 				if shouldFlush {
 					if err := flushBuffered(); err != nil {
-						clientDisconnected = true
-						logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming flush, continuing to drain upstream for billing")
+						if nativeDelivery {
+							handlePendingWriteError(err)
+						} else {
+							clientDisconnected = true
+							logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming flush, continuing to drain upstream for billing")
+						}
 					} else {
 						clientOutputStarted = true
-						lastDownstreamWriteAt = time.Now()
+						noteDownstreamWrite()
 					}
 				}
 			}
@@ -1137,7 +1171,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				if err != nil {
 					if nativeDelivery {
 						_ = resp.Body.Close()
-						return resultWithUsage(), fmt.Errorf("client_detached: %w: %v", context.Canceled, err)
+						if nativeStreamAttemptReadFailure(ctx, err) {
+							return resultWithUsage(), nativeStreamReadFailover(ctx, err)
+						}
+						return resultWithUsage(), err
 					}
 					clientDisconnected = true
 					logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming, continuing to drain upstream for billing")
@@ -1146,7 +1183,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				if !nativeDelivery {
 					flusher.Flush()
 				}
-				lastDownstreamWriteAt = time.Now()
+				noteDownstreamWrite()
 				continue
 			}
 			if _, err := writePendingString(":\n\n"); err != nil {
@@ -1155,10 +1192,14 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				continue
 			}
 			if err := flushBuffered(); err != nil {
+				if nativeDelivery {
+					handlePendingWriteError(err)
+					return resultWithUsage(), streamEarlyErr
+				}
 				clientDisconnected = true
 				logger.LegacyPrintf("service.openai_gateway", "Client disconnected during keepalive flush, continuing to drain upstream for billing")
 			} else {
-				lastDownstreamWriteAt = time.Now()
+				noteDownstreamWrite()
 			}
 		}
 	}
@@ -2087,9 +2128,14 @@ func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string
 	if !gjson.GetBytes(updated, "response").Exists() {
 		return updated, !bytes.Equal(updated, payload)
 	}
+	// The terminal schema requires output even when its verbose contents are
+	// omitted. Keep an empty array so strict Responses clients can parse failure.
+	updated, err := sjson.SetRawBytes(updated, "response.output", []byte("[]"))
+	if err != nil {
+		return payload, false
+	}
 	for _, path := range []string{
 		"response.instructions",
-		"response.output",
 		"response.usage",
 		"response.metadata",
 		"response.reasoning",

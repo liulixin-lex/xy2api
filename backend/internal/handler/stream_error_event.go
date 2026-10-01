@@ -2,7 +2,7 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
 // responsesFailedError 对齐 OpenAI Responses 协议 error 子对象。
@@ -54,22 +55,22 @@ type responsesFailedEvent struct {
 // 字段集对齐 apicompat.makeResponsesCompletedEvent：id/object/model/status/output/error。
 // sequence_number 始终写出（未知时为 0）：OpenAI spec 标可选，但 grok-build 当必填。
 //
-// 返回 true 表示已尝试 SSE 写出（不论 Write 是否成功，caller 都应直接 return）。
-// 返回 false 表示 writer 不支持 Flusher，无法以 SSE 形式回报错误；
-// 此时 caller 也无法回退到 JSON（HTTP 200 已固化），通常意味着连接已经损坏，
-// 应当让请求处理函数 return，由上层关闭连接。
+// 返回值只表示完整帧 Write 和 Flush 成功。失败后不能再追加其他协议帧。
 func writeResponsesFailedSSE(c *gin.Context, errType, code, message string) bool {
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
-		return false
+	id, sequence, createdAt := service.NativeResponsesFailureIdentity(c)
+	if id == "" {
+		id = synthesizeResponseID(c)
 	}
-
+	if createdAt <= 0 {
+		createdAt = time.Now().Unix()
+	}
 	payload, err := json.Marshal(responsesFailedEvent{
-		Type: "response.failed",
+		Type:           "response.failed",
+		SequenceNumber: int(sequence),
 		Response: responsesFailedBody{
-			ID:        synthesizeResponseID(c),
+			ID:        id,
 			Object:    "response",
-			CreatedAt: time.Now().Unix(),
+			CreatedAt: createdAt,
 			Model:     requestModel(c),
 			Status:    "failed",
 			Output:    []any{},
@@ -81,14 +82,40 @@ func writeResponsesFailedSSE(c *gin.Context, errType, code, message string) bool
 	})
 	if err != nil {
 		_ = c.Error(err)
-		return true
+		return false
 	}
+	return writeLocalStreamFailure(c, []byte("event: response.failed\ndata: "+string(payload)+"\n\n"))
+}
 
-	if _, err := fmt.Fprintf(c.Writer, "event: response.failed\ndata: %s\n\n", payload); err != nil {
-		_ = c.Error(err)
-		return true
+const localStreamFailureWrittenKey = "local_stream_failure_written"
+
+// Local failures use the live request's bounded writer, independently of an
+// expired upstream attempt. A failed or partial write is never called delivery.
+func writeLocalStreamFailure(c *gin.Context, frame []byte) bool {
+	if c == nil || c.Writer == nil || c.GetBool(localStreamFailureWrittenKey) {
+		return false
 	}
-	flusher.Flush()
+	var n int
+	var err error
+	if c.Request != nil && service.NativeStreamDeliveryEnabled(c.Request.Context()) {
+		n, err = service.WriteControlledStreamFailure(c.Request.Context(), c.Writer, frame)
+	} else {
+		n, err = c.Writer.Write(frame)
+		if err == nil && n != len(frame) {
+			err = io.ErrShortWrite
+		}
+		if err == nil {
+			err = http.NewResponseController(c.Writer).Flush()
+		}
+	}
+	if err != nil {
+		_ = c.Error(err)
+		return false
+	}
+	if n != len(frame) {
+		return false
+	}
+	c.Set(localStreamFailureWrittenKey, true)
 	return true
 }
 

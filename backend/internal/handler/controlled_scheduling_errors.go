@@ -32,6 +32,7 @@ func handleControlledSchedulingStop(c *gin.Context, err error) bool {
 	case errors.Is(err, scheduling.ErrCapacity):
 		code, message = "scheduling_capacity_exhausted", "Eligible accounts have no available capacity"
 	}
+	service.StopOpenAICompactSSEKeepaliveCommitted(c)
 	c.Set("scheduling_stop_reason", code)
 	if c.Request != nil {
 		defer service.RecordControlledSchedulingStop(c.Request.Context(), code)
@@ -43,6 +44,9 @@ func handleControlledSchedulingStop(c *gin.Context, err error) bool {
 			c.AbortWithStatusJSON(status, gin.H{"type": "error", "error": gin.H{"type": code, "code": code, "message": message}})
 		}
 	} else {
+		if inboundIsResponses(c) || (c.Request != nil && strings.Contains(c.Request.URL.Path, "/chat/completions")) {
+			(&OpenAIGatewayHandler{}).handleStreamingAwareErrorWithCode(c, status, "upstream_error", code, message, true, false)
+		}
 		c.Abort()
 	}
 	return true

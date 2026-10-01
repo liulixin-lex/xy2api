@@ -378,7 +378,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 
 		upstreamStart := time.Now()
+		stopHeaderKeepalive := s.startOpenAIHeaderKeepalive(c, reqStream)
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+		stopHeaderKeepalive()
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {
 			// Transport-level failure (proxy/DNS/TCP/TLS — no HTTP response). Convert to
@@ -1914,6 +1916,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	imageCounter := newOpenAIImageOutputCounter()
 	var firstTokenMs *int
 	responseID := ""
+	lastNativeSequence := int64(-1)
 	ttftMode := s.openAITTFTMode(ctx)
 	clientDisconnected := false
 	sawDone := false
@@ -2026,6 +2029,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	scanner.Buffer(scanBuf[:0], maxLineSize)
 	defer putSSEScannerBuf64K(scanBuf)
 	lastNativeWrite := time.Now()
+	var nativeIdleScanner *nativeSSEIdleScanner
 	var documentScanner nativeSSEScanner = newOpenAISSEJSONDocumentScanner(scanner)
 	if nativeDelivery {
 		documentScanner = newNativeSSEEventScanner(documentScanner, maxLineSize)
@@ -2041,9 +2045,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			recordOpenAIStreamKeepaliveBytes(c, n)
 			if err == nil {
 				lastNativeWrite = time.Now()
+				nativeIdleScanner.ResetHeartbeat()
 			}
 			return err
 		})
+		nativeIdleScanner = idleScanner
 		documentScanner = idleScanner
 		defer idleScanner.Close()
 	}
@@ -2070,6 +2076,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		forceFlushFailedEvent := false
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
+			if sequence := gjson.GetBytes(dataBytes, "sequence_number"); nativeDelivery && sequence.Type == gjson.Number && sequence.Int() > lastNativeSequence {
+				lastNativeSequence = sequence.Int()
+			}
 			trimmedData := strings.TrimSpace(data)
 			rawEventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
 			observer.ObserveOpenAI(dataBytes, rawEventType)
@@ -2274,6 +2283,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			if len(payload) > 0 {
 				if err := CommitControlledOutput(ctx, payload); err != nil {
 					_ = resp.Body.Close()
+					if nativeStreamAttemptReadFailure(ctx, err) {
+						return resultWithUsage(), nativeStreamReadFailover(ctx, err)
+					}
 					return resultWithUsage(), err
 				}
 				if !clientOutputStarted && !c.Writer.Written() {
@@ -2292,9 +2304,16 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			}
 			if err != nil {
 				_ = resp.Body.Close()
-				return resultWithUsage(), fmt.Errorf("client_detached: %w: %v", context.Canceled, err)
+				if nativeStreamAttemptReadFailure(ctx, err) {
+					return resultWithUsage(), nativeStreamReadFailover(ctx, err)
+				}
+				return resultWithUsage(), err
 			}
 			lastNativeWrite = time.Now()
+			nativeIdleScanner.ResetHeartbeat()
+			if len(payload) > 0 {
+				recordNativeResponsesDeliveredIdentity(c, payload)
+			}
 			if reader, ok := documentScanner.(*nativeSSEIdleScanner); ok && len(payload) > 0 {
 				RecordNativeStreamFlush(ctx, reader.ReadAt(), time.Now())
 			}
@@ -2351,6 +2370,15 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			if nativeStreamAttemptReadFailure(ctx, err) {
+				if !ControlledStreamSnapshot(ctx).AttemptCommitted && !clientOutputStarted {
+					return resultWithUsage(), nativeStreamReadFailover(ctx, err)
+				}
+				code, message := nativeStreamTimeoutCode(err)
+				if writeErr := writeNativeResponsesFailure(ctx, c, responseID, lastNativeSequence+1, code, message); writeErr != nil {
+					return resultWithUsage(), errors.Join(err, writeErr)
+				}
+			}
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", err)
 		}
 		if errors.Is(err, bufio.ErrTooLong) {

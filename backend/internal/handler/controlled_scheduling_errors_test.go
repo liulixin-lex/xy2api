@@ -34,6 +34,8 @@ func TestControlledSchedulingStopResponse(t *testing.T) {
 	c.Writer.WriteHeader(http.StatusOK)
 	_, _ = c.Writer.WriteString("data: existing output\n\n")
 	require.True(t, handleControlledSchedulingStop(c, scheduling.ErrCommitted))
-	require.Equal(t, "data: existing output\n\n", rec.Body.String())
+	require.Contains(t, rec.Body.String(), "data: existing output\n\n")
+	require.Contains(t, rec.Body.String(), "event: response.failed\n")
+	require.Contains(t, rec.Body.String(), `"code":"scheduling_response_committed"`)
 	require.False(t, handleControlledSchedulingStop(c, errors.New("ordinary upstream error")))
 }

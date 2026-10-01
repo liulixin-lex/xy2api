@@ -12,6 +12,17 @@ import (
 
 const nativeStreamWriteTimeout = 30 * time.Second
 
+// Only a scheduler gate can attach this marker. A real network error can carry
+// the same context sentinel, so error identity alone cannot classify the source.
+type controlledStreamWriteRejection struct{ cause error }
+
+func (e *controlledStreamWriteRejection) Error() string { return e.cause.Error() }
+func (e *controlledStreamWriteRejection) Unwrap() error { return e.cause }
+
+func rejectControlledStreamWrite(err error) error {
+	return &controlledStreamWriteRejection{cause: err}
+}
+
 // WriteNativeStreamFrame gives one network Write+Flush a bounded lifetime. The
 // caller remains the sole writer; cancellation only expires its socket deadline.
 // Journal/memory writers may not expose network deadlines and remain synchronous.
@@ -81,6 +92,10 @@ func flushNativeStreamWriter(writer http.ResponseWriter) error {
 }
 
 func nativeStreamDownstreamError(ctx context.Context, err error) error {
+	var rejection *controlledStreamWriteRejection
+	if errors.As(err, &rejection) {
+		return err
+	}
 	reason := ControlledClientDetached
 	explicitReason := controlledContextCancelReason(ctx)
 	var networkError net.Error

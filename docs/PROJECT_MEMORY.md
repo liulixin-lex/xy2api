@@ -4,6 +4,13 @@
 
 ## 当前交接状态
 
+### 高并发原生流式空回补修（2026-10-01，候选待替换test）
+
+- 固定原TARGET=/xy2/xy2api，缺陷版本44d86563f保持；本轮副本为 /xy2/artifacts/native-stream-recovery-20260930/concurrent-empty-response-20261001/work。用户授权直接诊断、保留原生delivery、修复并替换本机8093 test，未授权扩大到其他生产实例。
+- 真实日志6次约30秒超时；策略v9首字30秒/总等待60秒。根因是上游尝试取消误当客户端断开、已提交身份阻断网关失败终态、响应头等待及Chat保活缺口。并发TCP验收另发现Responses失败清洗删除必填output和Chat重复错误；新增调度写拒绝来源标记，避免过期心跳误取消真实请求。
+- 可信失败只跳过过期尝试提交门，保留Ops/网络写期限、真实父请求取消和管理员/租约/慢消费者约束；完整Write+Flush才记录身份和终态，最多一次。原生Chat仅语义内容计首字；排队/响应头/流内保活均不提交提供商身份，不阻断合法提交前重试。
+- 详细方案和每次真实命令保存在本轮SOLUTION.md及audit-*账本。最终冻结矩阵、完整service/handler、race/lint、源码/二进制回滚、构建、策略120000/240000ms的版本CAS和test替换由外部FINAL_RESULT.json记录，未执行结果不得视为通过。继续沿用原累计四角色。
+
 ### 原生流式空回补修（2026-10-01，本地候选）
 
 - 测试站 26f19556 在原生 delivery=true 时，Responses 实测 HTTP200/0字节；日志报 feature not supported 后转成 client_detached。根因为 OpsErrorLogger 的 opsCaptureWriter 没有转发 ResponseController.SetWriteDeadline，首帧写入前中止。独立真实网络测试在两种协议、两种调度模式、两种 SSE 格式共8种组合稳定复现；修后均交付首帧与终态。
@@ -472,6 +479,9 @@
 Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+- 20261001-native-stream-concurrency：根因复现与修复已落实，真实调度存储race、59项真实服务race及43项写入/取消race通过。modified03真实TCP矩阵90子例/1230请求通过，同输入baseline10仍123空回；最后心跳错误归因一行补修后继续最终矩阵与上线。精确候选及最终状态以外部FINAL_RESULT.json为准，原44d86563f保持。
+
 
 
 

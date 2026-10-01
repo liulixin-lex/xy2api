@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -32,8 +33,23 @@ type openAICompactSSEKeepalive struct {
 	// bytes 是心跳已写出的注释字节数。心跳不构成语义响应，handler 的
 	// "Forward 期间是否已写响应"判定（failover 放弃换号的依据）必须扣除
 	// 这部分字节，见 OpenAICompactKeepaliveAdjustedWrittenSize。
-	bytes int
-	stop  chan struct{}
+	bytes        int
+	stop         chan struct{}
+	writeContext context.Context
+}
+
+// startOpenAIHeaderKeepalive is scoped strictly to the blocking upstream HTTP
+// call. Stop restores exclusive writer ownership before headers/body handling.
+// Only comments are sent: waiting never commits a provider identity or content.
+func (s *OpenAIGatewayService) startOpenAIHeaderKeepalive(c *gin.Context, stream bool) func() {
+	if !stream || c == nil || c.Request == nil || !NativeStreamDeliveryEnabled(c.Request.Context()) {
+		return func() {}
+	}
+	interval := 15 * time.Second
+	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
+		interval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
+	}
+	return startOpenAISSEKeepalive(c, interval)
 }
 
 // StartOpenAICompactSSEKeepalive 为已标记 body-signal 客户端流式的 compact
@@ -59,10 +75,27 @@ func startOpenAISSEKeepalive(c *gin.Context, interval time.Duration) func() {
 	if c == nil || c.Writer == nil || interval <= 0 {
 		return func() {}
 	}
+	// A retry can have several header waits. Preserve the cumulative comment
+	// count and committed HTTP state, without stacking old writer wrappers.
+	committed := false
+	if value, ok := c.Get(openAICompactSSEKeepaliveKey); ok {
+		if previous, valid := value.(*openAICompactSSEKeepalive); valid && previous != nil {
+			previous.Stop()
+			committed = previous.started
+			recordOpenAIStreamKeepaliveBytes(c, previous.bytes)
+			if current, wrapped := c.Writer.(*openAICompactKeepaliveWriter); wrapped && current.k == previous {
+				c.Writer = current.ResponseWriter
+			}
+		}
+	}
 	originalWriter := c.Writer
 	k := &openAICompactSSEKeepalive{
-		writer: originalWriter,
-		stop:   make(chan struct{}),
+		writer:  originalWriter,
+		stop:    make(chan struct{}),
+		started: committed,
+	}
+	if c.Request != nil && NativeStreamDeliveryEnabled(c.Request.Context()) {
+		k.writeContext = c.Request.Context()
 	}
 	c.Set(openAICompactSSEKeepaliveKey, k)
 	wrappedWriter := &openAICompactKeepaliveWriter{ResponseWriter: originalWriter, k: k}
@@ -116,13 +149,21 @@ func (k *openAICompactSSEKeepalive) beat() bool {
 		k.writer.WriteHeader(http.StatusOK)
 		k.started = true
 	}
-	n, err := k.writer.Write([]byte(": keepalive\n\n"))
+	var n int
+	var err error
+	if k.writeContext != nil {
+		n, err = WriteNativeStreamFrame(k.writeContext, k.writer, []byte(": keepalive\n\n"))
+	} else {
+		n, err = k.writer.Write([]byte(": keepalive\n\n"))
+		if err == nil {
+			k.writer.Flush()
+		}
+	}
 	k.bytes += n
 	if err != nil {
-		k.stopped = true
+		k.markStoppedLocked()
 		return false
 	}
-	k.writer.Flush()
 	return true
 }
 
@@ -265,6 +306,22 @@ func (w *openAICompactKeepaliveWriter) Flush() {
 		return
 	}
 	w.ResponseWriter.Flush()
+}
+
+func (w *openAICompactKeepaliveWriter) SetWriteDeadline(deadline time.Time) error {
+	w.suspend()
+	if w.ResponseWriter == nil {
+		return errors.New("response writer released")
+	}
+	return http.NewResponseController(w.ResponseWriter).SetWriteDeadline(deadline)
+}
+
+func (w *openAICompactKeepaliveWriter) FlushError() error {
+	w.suspend()
+	if w.ResponseWriter == nil {
+		return errors.New("response writer released")
+	}
+	return flushNativeStreamWriter(w.ResponseWriter)
 }
 
 func (w *openAICompactKeepaliveWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {

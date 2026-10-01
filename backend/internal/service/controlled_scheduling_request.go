@@ -68,6 +68,10 @@ type ControlledRequest struct {
 	maxReadToFlushMS   float64
 	firstFlushAt       time.Time
 	flushCount         int64
+
+	localFailureStarted   bool
+	localFailureDelivered bool
+	localFailureCancel    context.CancelFunc
 }
 
 type SchedulingAttemptTrace struct {
@@ -445,12 +449,18 @@ func (w *schedulingResponseWriter) Unwrap() http.ResponseWriter { return w.Respo
 func (w *schedulingResponseWriter) Write(p []byte) (int, error) {
 	w.writeMu.Lock()
 	defer w.writeMu.Unlock()
+	w.request.mu.Lock()
+	finished := w.request.localFailureStarted
+	w.request.mu.Unlock()
+	if finished {
+		return 0, rejectControlledStreamWrite(scheduling.ErrCommitted)
+	}
 	if w.writeErr != nil {
 		return 0, w.writeErr
 	}
 	if err := w.commitIdentityHeaders(); err != nil {
-		w.writeErr = err
-		return 0, err
+		w.writeErr = rejectControlledStreamWrite(err)
+		return 0, w.writeErr
 	}
 	if w.request.NativeDelivery && len(p) > 0 && w.Status() < 400 {
 		if !strings.Contains(w.Header().Get("Content-Type"), "text/event-stream") || controlledSSEHasProtocolBytes(p) {
@@ -459,7 +469,7 @@ func (w *schedulingResponseWriter) Write(p []byte) (int, error) {
 			w.request.mu.Unlock()
 			if d != nil {
 				if err := d.tryCommitAttempt(); err != nil {
-					return 0, err
+					return 0, rejectControlledStreamWrite(err)
 				}
 			} else {
 				w.request.mu.Lock()
@@ -536,7 +546,7 @@ func (w *schedulingResponseWriter) WriteHeaderNow() {
 		return
 	}
 	if err := w.commitIdentityHeaders(); err != nil {
-		w.writeErr = err
+		w.writeErr = rejectControlledStreamWrite(err)
 		return
 	}
 	w.ResponseWriter.WriteHeaderNow()
@@ -552,7 +562,7 @@ func (w *schedulingResponseWriter) Flush() {
 		return
 	}
 	if err := w.commitIdentityHeaders(); err != nil {
-		w.writeErr = err
+		w.writeErr = rejectControlledStreamWrite(err)
 		return
 	}
 	w.ResponseWriter.Flush()

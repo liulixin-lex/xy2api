@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -56,6 +55,7 @@ type nativeSSEIdleScanner struct {
 	done         chan struct{}
 	stopped      chan struct{}
 	ticker       *time.Ticker
+	interval     time.Duration
 	heartbeat    func() error
 	line         string
 	readAt       time.Time
@@ -66,7 +66,7 @@ type nativeSSEIdleScanner struct {
 
 func newNativeSSEIdleScanner(ctx context.Context, body io.ReadCloser, scanner nativeSSEScanner, interval time.Duration, heartbeat func() error) *nativeSSEIdleScanner {
 	events := make(chan nativeSSEScanEvent, 1)
-	s := &nativeSSEIdleScanner{ctx: ctx, body: body, events: events, done: make(chan struct{}), stopped: make(chan struct{}), heartbeat: heartbeat}
+	s := &nativeSSEIdleScanner{ctx: ctx, body: body, events: events, done: make(chan struct{}), stopped: make(chan struct{}), heartbeat: heartbeat, interval: interval}
 	if interval > 0 {
 		s.ticker = time.NewTicker(interval)
 	}
@@ -106,7 +106,7 @@ func (s *nativeSSEIdleScanner) Scan() bool {
 			return false
 		case <-tick:
 			if err := s.heartbeat(); err != nil {
-				s.err = fmt.Errorf("client_detached: %w: %v", context.Canceled, err)
+				s.err = err
 				_ = s.body.Close()
 				return false
 			}
@@ -125,6 +125,14 @@ func (s *nativeSSEIdleScanner) Scan() bool {
 			s.line, s.err, s.readAt = event.line, event.err, event.readAt
 			return event.err == nil
 		}
+	}
+}
+
+// ResetHeartbeat is called only by the sole downstream writer after delivery.
+// Measure idle time from the last write instead of the scanner's construction.
+func (s *nativeSSEIdleScanner) ResetHeartbeat() {
+	if s.ticker != nil {
+		s.ticker.Reset(s.interval)
 	}
 }
 func (s *nativeSSEIdleScanner) Text() string { return s.line }
