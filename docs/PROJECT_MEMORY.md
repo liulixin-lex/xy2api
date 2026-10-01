@@ -4,6 +4,13 @@
 
 ## 当前交接状态
 
+### 首答案前恢复补修（2026-10-01，构建部署核验中）
+
+- 固定候选仍为 concurrent-empty-response-20261001/work，线上仅授权替换本机 8093 test。旧服务 5bcd87b90、策略 v12 为 delivery/recovery=true、首输出30秒/总预算60秒。
+- 真实日志中五个 content_timeout 仅一次尝试；response.created 提交账号及 reasoning 停止计时是已证实根因。9423c557d 增加首答案暂存与计时边界，但部署前真实存储双账号测试又发现空 message 提交、透传上游注释释放暂存及快速 reasoning 分支错误计首字，继续补修，不部署失败候选。
+- 当前12个真实PG/Redis子例已12/12通过，旧版12/12失败。全量回归的两项service失败源于 network=none 下域名解析失败；六项handler失败源于夹具在新首答案提交边界之前等待 response.created，当前将提交后恢复/取消夹具调整为先产生真实答案，再执行原完整断言。所有失败保留。
+- 用户再次明确立即替换线上test。实际源码HEAD=9423c557d加三项未提交修复，并非上一回复误称的d2af6948b最终版；本轮冻结完整修复、运行门禁、构建唯一新镜像并保留旧容器回滚。原始证据和三态执行继续放在 first-answer-recovery-20261001T1233，不改其他服务/账号优先级/组策略。
+
 ### 高并发原生流式空回补修（2026-10-01，候选待替换test）
 
 - 固定原TARGET=/xy2/xy2api，缺陷版本44d86563f保持；本轮副本为 /xy2/artifacts/native-stream-recovery-20260930/concurrent-empty-response-20261001/work。用户授权直接诊断、保留原生delivery、修复并替换本机8093 test，未授权扩大到其他生产实例。

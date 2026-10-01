@@ -202,9 +202,6 @@ func newNativeRecoveryFixtureOptions(t *testing.T, mode string, options nativeRe
 		w.Header().Set("X-Request-Id", "fixture-usage-id")
 		_, _ = fmt.Fprintf(w, "event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_fixture\",\"status\":\"in_progress\",\"background\":%v}}\n\n", background)
 		flusher.Flush()
-		if mode == "after_commit" {
-			return
-		}
 		select {
 		case <-f.emit:
 		case <-r.Context().Done():
@@ -214,6 +211,9 @@ func newNativeRecoveryFixtureOptions(t *testing.T, mode string, options nativeRe
 		_, _ = io.WriteString(w, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":1,\"item_id\":\"item_fixture\",\"delta\":\"hello\"}\n\n")
 		_, _ = io.WriteString(w, "event: response.future_event\ndata: {\"type\":\"response.future_event\",\"sequence_number\":2,\"value\":\"preserved\"}\n\n")
 		flusher.Flush()
+		if mode == "after_commit" {
+			return
+		}
 		select {
 		case <-f.finish:
 		case <-r.Context().Done():
@@ -354,6 +354,8 @@ func (f *nativeRecoveryFixture) turn(t *testing.T) *responseturn.Turn {
 
 func TestNativeResponseHTTPDetachReplayUsesOneGenerationAndUsage(t *testing.T) {
 	f := newNativeRecoveryFixture(t)
+	// Recovery now commits at the first answer, not response.created.
+	f.emitNext()
 	body := `{"model":"gpt-5.6-sol","input":"fixture","stream":true,"background":true}`
 	response := f.create(t, body)
 	first := readNativeFrame(t, bufio.NewReader(response.Body))
@@ -409,6 +411,8 @@ func TestNativeResponseHTTPDetachReplayUsesOneGenerationAndUsage(t *testing.T) {
 
 func TestNativeResponseHTTPCancelAuthorizationAndNoRevival(t *testing.T) {
 	f := newNativeRecoveryFixture(t)
+	// Recovery now commits at the first answer, not response.created.
+	f.emitNext()
 	response := f.create(t, `{"model":"gpt-5.6-sol","input":"fixture","stream":true,"background":true}`)
 	_ = readNativeFrame(t, bufio.NewReader(response.Body))
 	turn := f.turn(t)
@@ -444,6 +448,8 @@ func TestNativeResponseHTTPCancelAuthorizationAndNoRevival(t *testing.T) {
 
 func TestNativeResponseHTTPOrdinaryDisconnectCancels(t *testing.T) {
 	f := newNativeRecoveryFixture(t)
+	// Recovery now commits at the first answer, not response.created.
+	f.emitNext()
 	response := f.create(t, `{"model":"gpt-5.6-sol","input":"fixture","stream":true}`)
 	_ = readNativeFrame(t, bufio.NewReader(response.Body))
 	turn := f.turn(t)
@@ -457,6 +463,8 @@ func TestNativeResponseHTTPOrdinaryDisconnectCancels(t *testing.T) {
 
 func TestNativeResponseHTTPPrecommitRetryKeepsLedgerBoundary(t *testing.T) {
 	f := newNativeRecoveryFixture(t, "retry")
+	// Recovery now commits at the first answer, not response.created.
+	f.emitNext()
 	response := f.create(t, `{"model":"gpt-5.6-sol","input":"fixture","stream":true,"background":true}`)
 	first := readNativeFrame(t, bufio.NewReader(response.Body))
 	require.Contains(t, first, "response.created")
@@ -472,11 +480,13 @@ func TestNativeResponseHTTPPrecommitRetryKeepsLedgerBoundary(t *testing.T) {
 }
 func TestNativeResponseHTTPAfterCommitFailureNeverMixesAccounts(t *testing.T) {
 	f := newNativeRecoveryFixture(t, "after_commit")
+	f.emitNext()
 	response := f.create(t, `{"model":"gpt-5.6-sol","input":"fixture","stream":true,"background":true}`)
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	_ = response.Body.Close()
 	require.Contains(t, string(body), "response.created")
+	require.Contains(t, string(body), `"delta":"hello"`)
 	require.Equal(t, int64(1), f.createCount.Load())
 	require.NotEqual(t, responseturn.StateCompleted, f.turn(t).Snapshot().State)
 }

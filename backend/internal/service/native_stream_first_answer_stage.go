@@ -31,7 +31,28 @@ func nativeResponsesPreAnswerBoundary(payload []byte) bool {
 		"response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
 		return false
 	case "response.output_item.added", "response.output_item.done":
-		return strings.TrimSpace(gjson.GetBytes(payload, "item.type").String()) != "reasoning"
+		item := gjson.GetBytes(payload, "item")
+		switch strings.TrimSpace(item.Get("type").String()) {
+		case "reasoning":
+			return false
+		case "message":
+			for _, part := range item.Get("content").Array() {
+				kind := part.Get("type").String()
+				if kind != "output_text" && kind != "refusal" {
+					return true
+				}
+				if part.Get("text").String() != "" || part.Get("refusal").String() != "" {
+					return true
+				}
+			}
+			return false
+		default:
+			return true
+		}
+	case "response.output_text.delta", "response.refusal.delta":
+		return gjson.GetBytes(payload, "delta").String() != ""
+	case "response.output_text.done", "response.refusal.done":
+		return gjson.GetBytes(payload, "text").String() != "" || gjson.GetBytes(payload, "refusal").String() != ""
 	case "response.content_part.added", "response.content_part.done":
 		part := gjson.GetBytes(payload, "part")
 		kind := strings.TrimSpace(part.Get("type").String())

@@ -2320,7 +2320,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				clientOutputStarted = true
 				RecordNativeStreamEventRead(ctx, nativeSSEReadAt(documentScanner))
 			}
-			if nativeFirstAnswerStage != nil {
+			if nativeFirstAnswerStage != nil && len(payload) > 0 {
 				if _, err := nativeFirstAnswerStage.Commit(ctx, w, c); err != nil {
 					_ = resp.Body.Close()
 					return resultWithUsage(), err

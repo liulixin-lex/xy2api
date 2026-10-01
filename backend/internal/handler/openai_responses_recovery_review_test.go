@@ -287,6 +287,7 @@ func TestReviewNativeSSEShutdownWaitsForConcurrentCancel(t *testing.T) {
 	unblock := func() { once.Do(func() { close(gate) }) }
 	defer unblock()
 	f := newNativeRecoveryFixtureOptions(t, "", nativeRecoveryOptions{cancelGate: gate})
+	f.emitNext() // Reach the first-answer commit boundary before testing shutdown.
 	f.server.Client().Timeout = 2 * time.Second
 	response := f.create(t, `{"model":"gpt-5.6-sol","input":"SSE shutdown fixture","background":true,"stream":true}`)
 	defer func() { _ = response.Body.Close() }()

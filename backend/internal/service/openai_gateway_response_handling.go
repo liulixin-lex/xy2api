@@ -855,7 +855,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					if simpleDelta {
 						// The complete native event was already strictly validated by
 						// the scanner. Reuse its typed delta instead of scanning again.
-						startsVisibleOutput = simpleDeltaHasContent
+						startsVisibleOutput = simpleDeltaHasContent && (eventType == "response.output_text.delta" || eventType == "response.refusal.delta")
 					} else {
 						startsVisibleOutput = nativeResponsesFirstAnswerOutput([]byte(data))
 					}
