@@ -4,6 +4,13 @@
 
 ## 当前交接状态
 
+### 原生流式空回补修（2026-10-01，本地候选）
+
+- 测试站 26f19556 在原生 delivery=true 时，Responses 实测 HTTP200/0字节；日志报 feature not supported 后转成 client_detached。根因为 OpsErrorLogger 的 opsCaptureWriter 没有转发 ResponseController.SetWriteDeadline，首帧写入前中止。独立真实网络测试在两种协议、两种调度模式、两种 SSE 格式共8种组合稳定复现；修后均交付首帧与终态。
+- opsCaptureWriter 用现有 generation/inFlight 租约转发 SetWriteDeadline 和 FlushError，不暴露可绕开租约的 Unwrap；Gin 静默丢弃的底层 Flush 错误能够传播。ControlledSchedulingMiddleware 返回时恢复进入前 writer，避免外层中间件读已释放对象的 status0。
+- handler 全包通过；新增错误传播、陈旧租约与在途调用释放测试；既有原生 recovery 网络夹具加入实际 OpsErrorLogger。并发检测、静态检查、构建和测试站最终复测以 /xy2/artifacts/native-stream-recovery-20260930/empty-response-fix-20261001 的实测账本为准。原 work/26f19556 与历史四角色证据保留；只授权本机测试站修复，不推送或发布。
+
+
 ### 原生流式与恢复综合审查修复（2026-09-30，默认关闭的灰度候选）
 
 - 原TARGET=/xy2/xy2api和基线9717116f198904442ebb400d7d06792a40dea15c保持，唯一候选=/xy2/artifacts/native-stream-recovery-20260930/work；沿用同一四角色和所有历史失败证据。当前提交、远端推送/CI、三态归档结果以该目录FINAL_DELIVERY.json为准。
@@ -465,6 +472,8 @@
 Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+
 
 ### 20260930-native-stream-comprehensive-review — 修复与本地门禁完成，交付按固定账本
 
@@ -1562,3 +1571,7 @@ pnpm --dir frontend run build
 - 新增真实反例覆盖取消回调、终态背压、TTL/负配额、重复键、SSE截断/慢写、JSON状态与权限、后台HTTP返回/容量/停机/迟到确认、wrapper丢usage及后台WS降级。全部初次FAIL保留；修复后focused race与真实PG账务通过。
 - 完整unit/integration、lint、前端、202 required实际四命令、负向日志守卫及独立六组性能均通过，详见docs/NATIVE_STREAM_REVIEW.md。原始4567文件、版本/后端依赖/历史迁移及来源政策保持；前端Axios最小安全升级的两文件按独立精确manifest审计；无需以新增总后台执行时限改变用户原预算。
 - 后继精确提交audit/build/BASELINE-MODIFIED-ROLLBACK及远端CI以外部固定账本记录；它们不由本日志提前宣称通过。授权仅feature分支推送，没有合并、发布、部署或真实收费调用。后续外部认证/阶段C能力保持未确认/关闭。
+
+### 2026-10-01 — native-stream-empty-response — 首帧写控制补修
+
+- 从已部署26f19556独立复制；仅两个业务文件和相关回归修改。BASELINE与回滚副本均8项空回，修后8项流式正文与终态成功，handler全包通过。已读取本机最新失败日志并用现有组/密钥发合成短请求：Responses 0字节，Chat本次1047字节且完整终态。保留delivery=true，继续确切构建与部署验证；所有后继观察写外部账本，不将健康页代替生成链路验证。

@@ -273,6 +273,7 @@ func newNativeRecoveryFixtureOptions(t *testing.T, mode string, options nativeRe
 	}
 	f.handler = NewOpenAIGatewayHandler(gateway, concurrency, billing, service.NewAPIKeyService(&nativeRecoveryAPIKeyRepo{fixture: f}, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
 	router := gin.New()
+	router.Use(OpsErrorLoggerMiddleware(nil))
 	router.Use(func(c *gin.Context) {
 		if options.executionTimeout > 0 {
 			ctx, stop := context.WithTimeout(c.Request.Context(), options.executionTimeout)

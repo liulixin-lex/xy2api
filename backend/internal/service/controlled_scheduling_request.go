@@ -384,6 +384,8 @@ func (r *ControlledRequest) Close() {
 // request context for each response.create, rather than sharing a connection one.
 func ControlledSchedulingMiddleware(readers ...func(context.Context) (scheduling.ModeSnapshot, error)) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		originalWriter := c.Writer
+		defer func() { c.Writer = originalWriter }()
 		protocol := "http"
 		if strings.Contains(c.Request.URL.Path, "messages") {
 			protocol = "messages"

@@ -772,13 +772,42 @@ func (w *opsCaptureWriter) Written() bool {
 	return rw.Written()
 }
 func (w *opsCaptureWriter) Flush() {
+	_ = w.FlushError()
+}
+
+// Forward response control while retaining the state lease. Exposing Unwrap
+// would let a stale handle bypass the generation check and pooled-state fence.
+func (w *opsCaptureWriter) SetWriteDeadline(deadline time.Time) error {
 	state, rw := w.beginDelegatedCall()
 	if state == nil {
-		return
+		return net.ErrClosed
 	}
 	state.mu.Unlock()
 	defer finishDelegatedCall(state)
-	rw.Flush()
+	return http.NewResponseController(rw).SetWriteDeadline(deadline)
+}
+
+func (w *opsCaptureWriter) FlushError() error {
+	state, rw := w.beginDelegatedCall()
+	if state == nil {
+		return net.ErrClosed
+	}
+	state.mu.Unlock()
+	defer finishDelegatedCall(state)
+	rw.WriteHeaderNow()
+	// Gin's Flush drops the network error. Stage wrapper headers, then reach
+	// the underlying error-aware flusher without letting its writer escape.
+	var writer http.ResponseWriter = rw
+	for {
+		if flusher, ok := writer.(interface{ FlushError() error }); ok {
+			return flusher.FlushError()
+		}
+		if wrapper, ok := writer.(interface{ Unwrap() http.ResponseWriter }); ok {
+			writer = wrapper.Unwrap()
+			continue
+		}
+		return http.NewResponseController(writer).Flush()
+	}
 }
 func (w *opsCaptureWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	state, rw := w.beginDelegatedCall()
