@@ -10,6 +10,8 @@
 - 真实日志6次约30秒超时；策略v9首字30秒/总等待60秒。根因是上游尝试取消误当客户端断开、已提交身份阻断网关失败终态、响应头等待及Chat保活缺口。并发TCP验收另发现Responses失败清洗删除必填output和Chat重复错误；新增调度写拒绝来源标记，避免过期心跳误取消真实请求。
 - 可信失败只跳过过期尝试提交门，保留Ops/网络写期限、真实父请求取消和管理员/租约/慢消费者约束；完整Write+Flush才记录身份和终态，最多一次。原生Chat仅语义内容计首字；排队/响应头/流内保活均不提交提供商身份，不阻断合法提交前重试。
 - 详细方案和每次真实命令保存在本轮SOLUTION.md及audit-*账本。最终冻结矩阵、完整service/handler、race/lint、源码/二进制回滚、构建、策略120000/240000ms的版本CAS和test替换由外部FINAL_RESULT.json记录，未执行结果不得视为通过。继续沿用原累计四角色。
+- d2af6948b已替换test并保留旧容器，组2策略v10仍启用native delivery。真实默认UA触发账号1/3的403/1010，账号级UA固定后并发1/2/4/8共15次成功且无空回；账号3后续503保持正常冷却/回退。真实日志另暴露Chat成功后读线程继续读取导致stream_error结算竞态，转换路径现复用完整终态停读扫描器，独立PG/Redis与真实TCP三次race回归reads=1、settled/completed。最终补修的完整门禁、构建和再次替换仍在进行，不把客户端成功等同调度结算成功。
+- 终态补修冻结：完整service、相关service/handler race和lint实际exit0；modified-06同夹具并发矩阵1230请求/90子例全部通过，0空回/0race。BASELINE和源码回滚复现123空回，Chat定点回滚再次reads=2/exit1；修改版reads=1/exit0。后继仅本地提交、累计归档、构建、排空替换与真实逐请求结算验收；最终完成记录写独立handoff副本及外部FINAL_RESULT，不为回填结果改变冻结源码。
 
 ### 原生流式空回补修（2026-10-01，本地候选）
 
@@ -1585,3 +1587,9 @@ pnpm --dir frontend run build
 ### 2026-10-01 — native-stream-empty-response — 首帧写控制补修
 
 - 从已部署26f19556独立复制；仅两个业务文件和相关回归修改。BASELINE与回滚副本均8项空回，修后8项流式正文与终态成功，handler全包通过。已读取本机最新失败日志并用现有组/密钥发合成短请求：Responses 0字节，Chat本次1047字节且完整终态。保留delivery=true，继续确切构建与部署验证；所有后继观察写外部账本，不将健康页代替生成链路验证。
+
+### 2026-10-01 — concurrent-empty-response — 最终终态结算补修冻结
+
+- 原TARGET和用户既有记忆字节保持，候选分支fix/native-stream-concurrency-20261001。先前超时/失败交付/首字/三阶段保活修复和组策略v10已部署本机test。真实403/1010的UA对照、账号级配置及回滚副本记录在account-ua；15次默认客户端生成成功记录保留。
+- 定点真实日志发现Chat成功输出与调度stream_error不一致。只对nativeDelivery的转换Chat复用完整SSE终态扫描器，阻止成功终态之后读取网络导致关流结算竞态。真实TCP保持连接开启，独立PG/Redis回归三次race通过；旧代码及回滚副本reads=2/exit1，修改后reads=1、settled/completed/exit0，不虚报旧代码每次都结算失败。
+- 完整service/相关race/lint和最新1230请求并发矩阵通过，累计BASELINE/MODIFIED/ROLLBACK仍为123/0/123空回及exit1/0/1。所有失败、字面命令和哈希延续固定四角色。后继精确提交、归档、构建和test替换、并发16真实探针及逐请求数据库结算需以外部最终账本观察为准；无远端push/发版/其他生产实例改动。

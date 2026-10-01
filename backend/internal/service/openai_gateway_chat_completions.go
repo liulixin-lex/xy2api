@@ -778,7 +778,16 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		observer = beginUpstreamResponseModelObservation(c)
 	}
 
-	scanner := s.newUpstreamSSEScanner(resp.Body)
+	var scanner nativeSSEScanner = s.newUpstreamSSEScanner(resp.Body)
+	if nativeDelivery {
+		maxLineSize := defaultMaxLineSize
+		if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
+			maxLineSize = s.cfg.Gateway.MaxLineSize
+		}
+		// Stop read-ahead at the complete terminal before closing the body can
+		// turn a successful generation into a scheduling stream error.
+		scanner = newNativeSSEEventScanner(scanner, maxLineSize)
+	}
 
 	streamInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
