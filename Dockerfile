@@ -147,7 +147,7 @@ RUN mkdir -p /app/data && chown xy2api:xy2api /app/data
 
 # Copy entrypoint script (fixes volume permissions then drops to xy2api)
 COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+RUN chmod 755 /app/docker-entrypoint.sh
 
 # Expose port (can be overridden by SERVER_PORT env var)
 EXPOSE 8080

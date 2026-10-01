@@ -6,6 +6,8 @@
 
 ### 首答案前恢复补修（2026-10-01，构建部署核验中）
 
+- f631374a7完整service/handler回归、12项真实PG/Redis恢复、1230请求并发矩阵及handler三轮race全部通过。第一次镜像替换遇到入口脚本COPY继承0600、chmod +x只得到0711，在线1000用户不能读取脚本；已实测自动恢复原容器和health=ok。Dockerfile改为明确chmod 755，重建后必须以线上同UID检查再替换，原失败和回滚记录保留。
+
 - 固定候选仍为 concurrent-empty-response-20261001/work，线上仅授权替换本机 8093 test。旧服务 5bcd87b90、策略 v12 为 delivery/recovery=true、首输出30秒/总预算60秒。
 - 真实日志中五个 content_timeout 仅一次尝试；response.created 提交账号及 reasoning 停止计时是已证实根因。9423c557d 增加首答案暂存与计时边界，但部署前真实存储双账号测试又发现空 message 提交、透传上游注释释放暂存及快速 reasoning 分支错误计首字，继续补修，不部署失败候选。
 - 当前12个真实PG/Redis子例已12/12通过，旧版12/12失败。全量回归的两项service失败源于 network=none 下域名解析失败；六项handler失败源于夹具在新首答案提交边界之前等待 response.created，当前将提交后恢复/取消夹具调整为先产生真实答案，再执行原完整断言。所有失败保留。
