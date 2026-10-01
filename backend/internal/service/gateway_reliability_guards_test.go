@@ -144,7 +144,7 @@ func TestControlledTerminalUsageCertainty(t *testing.T) {
 				d.adminCancelled.Store(true)
 				outcome, terminal = "not_sent", true
 			case "semantic_unknown":
-				d.noteEvent(true, true, false)
+				d.noteEvent(true, true, false, false)
 				r.markSemantic(time.Now(), true)
 			case "terminal_usage_late":
 				outcome, terminal, cause = "completed", true, nil

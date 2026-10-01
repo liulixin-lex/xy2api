@@ -1879,6 +1879,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	mappedModel string,
 ) (*openaiStreamingResultPassthrough, error) {
 	nativeDelivery := NativeStreamDeliveryEnabled(ctx)
+	nativeFirstAnswerRecovery := nativeDelivery && NativeStreamFirstAnswerRecoveryEnabled(ctx)
 	var nativeTerminalEffect func()
 	defer func() {
 		if nativeTerminalEffect != nil {
@@ -1939,6 +1940,16 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
 	// pendingLines 在首个可见输出前保留前导事件，确保无输出失败仍可安全 failover。
 	pendingLines := make([]string, 0, 8)
+	var nativeFirstAnswerStage *nativeFirstAnswerStage
+	if nativeFirstAnswerRecovery {
+		stage := newNativeFirstAnswerStage()
+		nativeFirstAnswerStage = stage
+		defer func() {
+			if err := stage.Close(); err != nil {
+				logger.LegacyPrintf("service.openai_gateway", "Native passthrough first-answer staging cleanup failed: account=%d model=%s error=%v", account.ID, originalModel, err)
+			}
+		}()
+	}
 
 	// ── 首个可见输出之前的下游 keepalive ──────────────────────────────────
 	//
@@ -2242,7 +2253,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			}
 			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(trimmedData, eventType)
 			if lineStartsClientOutput && trimmedData != "[DONE]" && !openAIStreamEventTypeIsTerminal(eventType) {
-				semanticOutputSeen = true
+				semanticOutputSeen = !nativeFirstAnswerRecovery || nativeResponsesPreAnswerBoundary(dataBytes)
 			}
 			// OpenAI Responses streams that terminate with an empty
 			// response.completed (no output, no usage, no error, nothing sent
@@ -2255,7 +2266,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			}
 			startsTTFT := openAIStreamDataStartsTTFT(trimmedData, eventType, forceFlushFailedEvent, ttftMode)
 			if nativeDelivery {
-				startsTTFT = openAIStreamDataStartsVisibleOutput(trimmedData, eventType)
+				startsTTFT = nativeResponsesFirstAnswerOutput(dataBytes)
 			}
 			if firstTokenMs == nil && startsTTFT {
 				ms := int(time.Since(startTime).Milliseconds())
@@ -2280,6 +2291,17 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			}
 			frame := []byte(strings.Join(pendingLines, "\n") + "\n")
 			payload := nativeSSEEventData(frame)
+			if nativeFirstAnswerStage != nil && len(payload) > 0 && !nativeResponsesPreAnswerBoundary(payload) {
+				if err := nativeFirstAnswerStage.Stage(frame, payload); err != nil {
+					_ = resp.Body.Close()
+					if errors.Is(err, errOpenAIFirstOutputStageLimit) {
+						return resultWithUsage(), nativeStreamReadFailover(ctx, context.DeadlineExceeded)
+					}
+					return resultWithUsage(), err
+				}
+				pendingLines = pendingLines[:0]
+				continue
+			}
 			if len(payload) > 0 {
 				if err := CommitControlledOutput(ctx, payload); err != nil {
 					_ = resp.Body.Close()
@@ -2297,6 +2319,13 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				MarkResponseCommitted(c)
 				clientOutputStarted = true
 				RecordNativeStreamEventRead(ctx, nativeSSEReadAt(documentScanner))
+			}
+			if nativeFirstAnswerStage != nil {
+				if _, err := nativeFirstAnswerStage.Commit(ctx, w, c); err != nil {
+					_ = resp.Body.Close()
+					return resultWithUsage(), err
+				}
+				nativeFirstAnswerStage = nil
 			}
 			n, err := WriteNativeStreamFrame(ctx, w, frame)
 			if len(payload) == 0 {

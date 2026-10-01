@@ -46,6 +46,27 @@ func TestNativeStreamObserveDoesNotCommitOrFabricateContent(t *testing.T) {
 	require.ErrorIs(t, r.Ledger.CanAttempt(2, 0, time.Now(), true), scheduling.ErrCommitted)
 }
 
+func TestNativeStreamRecoveryKeepsPreambleRetryableUntilAnswerBoundary(t *testing.T) {
+	ctx, r, d := nativeCommitFixture(t)
+	d.firstAnswerRecovery = true
+
+	created := []byte(`{"type":"response.created","response":{"id":"resp_first"}}`)
+	reasoning := []byte(`{"type":"response.reasoning_text.delta","delta":"thinking"}`)
+	for _, frame := range [][]byte{created, reasoning} {
+		d.ObserveFrame(frame)
+	}
+	require.False(t, d.answerBoundary)
+	require.False(t, r.Ledger.Snapshot().Committed)
+	require.NoError(t, r.Ledger.CanAttempt(2, 0, time.Now(), true), "a pre-answer attempt must remain eligible for account failover")
+
+	answer := []byte(`{"type":"response.output_text.delta","delta":"hello"}`)
+	d.ObserveFrame(answer)
+	require.True(t, d.answerBoundary)
+	require.NoError(t, CommitControlledOutput(ctx, answer))
+	require.True(t, r.Ledger.Snapshot().Committed)
+	require.ErrorIs(t, r.Ledger.CanAttempt(2, 0, time.Now(), true), scheduling.ErrCommitted)
+}
+
 func TestNativeStreamHeartbeatCommitsOnlyHTTP(t *testing.T) {
 	ctx, r, _ := nativeCommitFixture(t)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

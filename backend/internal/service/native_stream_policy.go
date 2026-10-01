@@ -54,6 +54,23 @@ func NativeStreamDeliveryEnabled(ctx context.Context) bool {
 	return NativeStreamPolicyFromContext(ctx).Delivery
 }
 
+// NativeStreamFirstAnswerRecoveryEnabled keeps the recovery contract explicit:
+// delivery-only policies retain their established wire behaviour, while a
+// recovery policy may withhold a replay-safe pre-answer preamble.
+func NativeStreamFirstAnswerRecoveryEnabled(ctx context.Context) bool {
+	p := NativeStreamPolicyFromContext(ctx)
+	if !p.Delivery || !p.Recovery {
+		return false
+	}
+	r := controlledRequest(ctx)
+	if r == nil {
+		return true
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ReplaySafe && !r.owner && r.ownerAccountID == 0 && !r.attemptCommitted && !r.localFailureStarted
+}
+
 // Install after authentication, before allocating or parsing a generation.
 func NativeStreamPolicyMiddleware(reader func(context.Context, int64) (NativeStreamPolicy, error)) gin.HandlerFunc {
 	return func(c *gin.Context) {

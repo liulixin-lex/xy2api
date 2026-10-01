@@ -104,6 +104,18 @@ type nativeResponsesDeliveredIdentity struct {
 	Model     string
 }
 
+// nativeResponsesIdentityUpdate retains only identity fields, never a staged
+// protocol payload. This lets the pre-answer spool stay bounded by its own
+// configured limit even when it moves to an unlinked file.
+type nativeResponsesIdentityUpdate struct {
+	id         string
+	sequence   int64
+	hasSeq     bool
+	createdAt  int64
+	hasCreated bool
+	model      string
+}
+
 func nativeResponsesDeliveredIdentityFromContext(c *gin.Context) (nativeResponsesDeliveredIdentity, bool) {
 	if c == nil {
 		return nativeResponsesDeliveredIdentity{}, false
@@ -123,22 +135,46 @@ func NativeResponsesFailureIdentity(c *gin.Context) (id string, nextSequence, cr
 	return identity.ID, identity.Sequence + 1, identity.CreatedAt
 }
 
-func recordNativeResponsesDeliveredIdentity(c *gin.Context, frame []byte) {
+func nativeResponsesIdentityUpdateFromFrame(frame []byte) nativeResponsesIdentityUpdate {
+	update := nativeResponsesIdentityUpdate{}
+	if id := extractOpenAIResponseIDFromJSONBytes(frame); id != "" {
+		update.id = id
+	}
+	if sequence := gjson.GetBytes(frame, "sequence_number"); sequence.Type == gjson.Number {
+		update.sequence = sequence.Int()
+		update.hasSeq = true
+	}
+	if created := gjson.GetBytes(frame, "response.created_at").Int(); created > 0 {
+		update.createdAt = created
+		update.hasCreated = true
+	}
+	update.model = gjson.GetBytes(frame, "response.model").String()
+	return update
+}
+
+func recordNativeResponsesDeliveredIdentityUpdate(c *gin.Context, update nativeResponsesIdentityUpdate) {
+	if c == nil {
+		return
+	}
 	identity, ok := nativeResponsesDeliveredIdentityFromContext(c)
 	if !ok {
 		identity.Sequence = -1
 	}
-	if id := extractOpenAIResponseIDFromJSONBytes(frame); id != "" {
-		identity.ID = id
+	if update.id != "" {
+		identity.ID = update.id
 	}
-	if sequence := gjson.GetBytes(frame, "sequence_number"); sequence.Type == gjson.Number && sequence.Int() > identity.Sequence {
-		identity.Sequence = sequence.Int()
+	if update.hasSeq && update.sequence > identity.Sequence {
+		identity.Sequence = update.sequence
 	}
-	if created := gjson.GetBytes(frame, "response.created_at").Int(); created > 0 {
-		identity.CreatedAt = created
+	if update.hasCreated {
+		identity.CreatedAt = update.createdAt
 	}
-	if model := gjson.GetBytes(frame, "response.model").String(); model != "" {
-		identity.Model = model
+	if update.model != "" {
+		identity.Model = update.model
 	}
 	c.Set(nativeResponsesDeliveredIdentityKey, identity)
+}
+
+func recordNativeResponsesDeliveredIdentity(c *gin.Context, frame []byte) {
+	recordNativeResponsesDeliveredIdentityUpdate(c, nativeResponsesIdentityUpdateFromFrame(frame))
 }

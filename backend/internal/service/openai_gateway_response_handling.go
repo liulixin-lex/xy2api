@@ -62,6 +62,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	}
 	guardFirstOutput := firstOutputTimeout > 0
 	nativeDelivery := NativeStreamDeliveryEnabled(ctx)
+	nativeFirstAnswerRecovery := nativeDelivery && NativeStreamFirstAnswerRecoveryEnabled(ctx)
 	var nativeTerminalEffect func()
 	defer func() {
 		if nativeTerminalEffect != nil {
@@ -139,11 +140,21 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	var nativeEvent bytes.Buffer
 	var nativeReadAt time.Time
 	var firstOutputStage *openAIFirstOutputStage
+	var nativeFirstAnswerStage *nativeFirstAnswerStage
 	if stageFirstOutput && !nativeDelivery {
 		firstOutputStage = newDefaultOpenAIFirstOutputStage()
 		defer func() {
 			if err := firstOutputStage.Close(); err != nil {
 				logger.LegacyPrintf("service.openai_gateway", "OpenAI first-output staging cleanup failed: account=%d model=%s error=%v", account.ID, originalModel, err)
+			}
+		}()
+	}
+	if nativeFirstAnswerRecovery {
+		stage := newNativeFirstAnswerStage()
+		nativeFirstAnswerStage = stage
+		defer func() {
+			if err := stage.Close(); err != nil {
+				logger.LegacyPrintf("service.openai_gateway", "Native first-answer staging cleanup failed: account=%d model=%s error=%v", account.ID, originalModel, err)
 			}
 		}()
 	}
@@ -165,13 +176,28 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		return int64(bufferedWriter.Buffered())
 	}
+	nativeFrameDelivered := false
 	flushBuffered := func() error {
 		if nativeDelivery {
 			if nativeEvent.Len() == 0 {
 				return nil
 			}
+			frame := append([]byte(nil), nativeEvent.Bytes()...)
+			nativeEvent.Reset()
+			payload := nativeSSEEventData(frame)
+			nativeFrameDelivered = false
+			if len(payload) == 0 {
+				n, err := WriteNativeStreamFrame(ctx, w, frame)
+				recordOpenAIStreamKeepaliveBytes(c, n)
+				return err
+			}
+			if nativeFirstAnswerStage != nil && !nativeResponsesPreAnswerBoundary(payload) {
+				if err := nativeFirstAnswerStage.Stage(frame, payload); err != nil {
+					return err
+				}
+				return nil
+			}
 			// Commit before any byte: a partial write cannot restore retry eligibility.
-			payload := nativeSSEEventData(nativeEvent.Bytes())
 			if len(payload) > 0 {
 				if err := CommitControlledOutput(ctx, payload); err != nil {
 					return err
@@ -180,18 +206,19 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				MarkResponseCommitted(c)
 				RecordNativeStreamEventRead(ctx, nativeReadAt)
 			}
-			n, err := WriteNativeStreamFrame(ctx, w, nativeEvent.Bytes())
-			nativeEvent.Reset()
-			if len(payload) == 0 {
-				recordOpenAIStreamKeepaliveBytes(c, n)
+			if nativeFirstAnswerStage != nil {
+				if _, err := nativeFirstAnswerStage.Commit(ctx, w, c); err != nil {
+					return err
+				}
+				nativeFirstAnswerStage = nil
 			}
+			_, err := WriteNativeStreamFrame(ctx, w, frame)
 			if err != nil {
 				return err
 			}
-			if len(payload) > 0 {
-				recordNativeResponsesDeliveredIdentity(c, payload)
-				RecordNativeStreamFlush(ctx, nativeReadAt, time.Now())
-			}
+			recordNativeResponsesDeliveredIdentity(c, payload)
+			RecordNativeStreamFlush(ctx, nativeReadAt, time.Now())
+			nativeFrameDelivered = true
 			return nil
 		}
 		if firstOutputStage != nil && !firstOutputStage.closed {
@@ -341,7 +368,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if nativeDelivery {
 			clientDisconnected = ctx.Err() != nil || ControlledStreamSnapshot(ctx).CancelReason.excludesProviderHealth()
 			streamEarlyErr = err
-			if nativeStreamAttemptReadFailure(ctx, err) {
+			if nativeFirstAnswerRecovery && errors.Is(err, errOpenAIFirstOutputStageLimit) {
+				streamEarlyErr = nativeStreamReadFailover(ctx, context.DeadlineExceeded)
+			} else if nativeStreamAttemptReadFailure(ctx, err) {
 				streamEarlyErr = nativeStreamReadFailover(ctx, err)
 			}
 			_ = resp.Body.Close()
@@ -365,7 +394,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	completeGuardedEvent := func(queueDrained bool) {
 		completedProgressEvent := eventStartsClientOutput
 		completedTTFTEvent := eventStartsTTFTOutput
-		completeNativeData := nativeDelivery && len(nativeSSEEventData(nativeEvent.Bytes())) > 0
 		shouldFlush := (nativeDelivery && pendingBytes() > 0) || eventShouldFlush || (queueDrained && clientOutputStarted)
 		eventInProgress = false
 		if !clientDisconnected {
@@ -381,7 +409,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					clientDisconnected = true
 					logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming flush, continuing to drain upstream for billing")
 				} else {
-					clientOutputStarted = clientOutputStarted || !nativeDelivery || completeNativeData
+					clientOutputStarted = clientOutputStarted || !nativeDelivery || nativeFrameDelivered
 					noteDownstreamWrite()
 				}
 			}
@@ -829,7 +857,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						// the scanner. Reuse its typed delta instead of scanning again.
 						startsVisibleOutput = simpleDeltaHasContent
 					} else {
-						startsVisibleOutput = openAIStreamDataStartsVisibleOutput(data, eventType)
+						startsVisibleOutput = nativeResponsesFirstAnswerOutput([]byte(data))
 					}
 				}
 				startsTTFTOutput = startsVisibleOutput
@@ -846,7 +874,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				}
 			}
 			if startsClientOutput && !openAIStreamEventTypeIsTerminal(eventType) {
-				responsesSemanticOutputSeen = true
+				responsesSemanticOutputSeen = !nativeFirstAnswerRecovery || nativeResponsesPreAnswerBoundary(dataBytes)
 			}
 			// OpenAI Responses streams that terminate with an empty
 			// response.completed (no output, no usage, no error, nothing sent

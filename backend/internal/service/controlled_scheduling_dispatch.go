@@ -34,6 +34,8 @@ type controlledDispatch struct {
 	sent                 bool
 	semantic             time.Time
 	answer               time.Time
+	answerBoundary       bool
+	firstAnswerRecovery  bool
 	firstEvent           time.Time
 	started              time.Time
 	attemptDeadline      time.Time
@@ -247,7 +249,7 @@ func (s *ControlledSchedulingService) beginDispatch(ctx context.Context, account
 		return nil, e
 	}
 	live, cancel := context.WithCancel(liveParent)
-	d := &controlledDispatch{service: s, request: r, ticket: ticket, budget: br, decision: decision, cancel: cancel, done: make(chan struct{}), semanticReady: make(chan struct{}), semanticObservable: true, healthObservation: healthObservation, sendCertainty: ControlledNotSent}
+	d := &controlledDispatch{service: s, request: r, ticket: ticket, budget: br, decision: decision, cancel: cancel, done: make(chan struct{}), semanticReady: make(chan struct{}), semanticObservable: true, healthObservation: healthObservation, sendCertainty: ControlledNotSent, firstAnswerRecovery: NativeStreamFirstAnswerRecoveryEnabled(ctx)}
 	d.ctx = context.WithValue(live, controlledDispatchContextKey{}, d)
 	if leaseErr := (scheduling.RedisFailureDomains{Client: s.redis}).Acquire(ctx, ticket); leaseErr != nil {
 		d.finishPreparationFailure(leaseErr)
@@ -376,7 +378,10 @@ func (d *controlledDispatch) startFirstOutputTimerLocked() {
 	if d.timer != nil {
 		d.timer.Stop()
 	}
-	if !d.semantic.IsZero() {
+	if !d.firstAnswerRecovery && !d.semantic.IsZero() {
+		return
+	}
+	if d.firstAnswerRecovery && d.answerBoundary {
 		return
 	}
 	r := d.request
@@ -422,7 +427,11 @@ func (d *controlledDispatch) startFirstOutputTimerLocked() {
 		if NativeStreamDeliveryEnabled(d.ctx) && d.cancellationReason.excludesProviderHealth() {
 			return
 		}
-		if d.semantic.IsZero() {
+		pending := d.semantic.IsZero()
+		if d.firstAnswerRecovery {
+			pending = !d.answerBoundary
+		}
+		if pending {
 			if end, ok := d.ctx.Deadline(); NativeStreamDeliveryEnabled(d.ctx) && ok && !r.ClientDeadline.IsZero() && !end.After(r.ClientDeadline) && !time.Now().Before(end) {
 				d.cancellationReason = ControlledDeadline
 				return // The inherited deadline supplies the authoritative cancellation cause.
@@ -441,7 +450,7 @@ func (d *controlledDispatch) startFirstOutputTimerLocked() {
 		}
 	})
 }
-func (d *controlledDispatch) noteEvent(semantic, answer, terminal bool) {
+func (d *controlledDispatch) noteEvent(semantic, answer, terminal, unsafe bool) {
 	if d == nil {
 		return
 	}
@@ -451,22 +460,36 @@ func (d *controlledDispatch) noteEvent(semantic, answer, terminal bool) {
 	if d.firstEvent.IsZero() {
 		d.firstEvent = now
 	}
-	if semantic && d.semantic.IsZero() {
+	firstSemantic := semantic && d.semantic.IsZero()
+	if firstSemantic {
 		d.semantic = now
 		if NativeStreamDeliveryEnabled(d.ctx) && d.request != nil {
 			d.request.mu.Lock()
 			d.request.semanticSeen = true
 			d.request.mu.Unlock()
 		}
+	}
+	if answer && d.answer.IsZero() {
+		d.answer = now
+	}
+	if answer || terminal || unsafe {
+		d.answerBoundary = true
+	}
+	ready := firstSemantic
+	if d.firstAnswerRecovery {
+		ready = d.answerBoundary
+	}
+	if ready {
 		if d.timer != nil {
 			d.timer.Stop()
 		}
 		if d.semanticReady != nil {
-			close(d.semanticReady)
+			select {
+			case <-d.semanticReady:
+			default:
+				close(d.semanticReady)
+			}
 		}
-	}
-	if answer && d.answer.IsZero() {
-		d.answer = now
 	}
 	if terminal {
 		d.terminal = true
@@ -543,7 +566,8 @@ func (d *controlledDispatch) ObserveFrame(frame []byte) {
 		}
 	}
 	d.mu.Unlock()
-	d.noteEvent(semantic, answer, terminal)
+	unsafe := d.firstAnswerRecovery && nativeResponsesPreAnswerBoundary(frame) && !answer && !terminal
+	d.noteEvent(semantic, answer, terminal, unsafe)
 }
 
 func (d *controlledDispatch) CommitOutput(frame []byte) {
@@ -754,8 +778,12 @@ func (d *controlledDispatch) Finish(outcome string, remoteTerminal bool, err err
 			o.AttributableFailure = !excluded && (upstreamFailure || (err != nil && !timeout) || (p.AccountPool && timeout && !clipped && !semanticObservable))
 			o.Excluded = excluded
 			o.RetryAfter = retryAfter
-			if !semantic.IsZero() {
-				o.TTFT = semantic.Sub(started)
+			latencyPoint := semantic
+			if d.firstAnswerRecovery {
+				latencyPoint = answer
+			}
+			if !latencyPoint.IsZero() {
+				o.TTFT = latencyPoint.Sub(started)
 			} else if timeout && semanticObservable {
 				o.TTFT = time.Since(started)
 			}
@@ -925,7 +953,7 @@ func (s *ControlledSchedulingService) roundTrip(req *http.Request, accountID int
 	}
 	d.observeFailureResponse(response)
 	if !NativeStreamDeliveryEnabled(req.Context()) {
-		d.noteEvent(false, false, false)
+		d.noteEvent(false, false, false, false)
 	}
 	d.mu.Lock()
 	d.semanticObservable = !buffered && (strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") || strings.Contains(response.Header.Get("Content-Type"), "application/vnd.amazon.eventstream")) && response.StatusCode < 400
