@@ -909,6 +909,13 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					"message": defaultMsg,
 				},
 			})
+			if nativeDelivery {
+				writeStreamHeaders()
+				if _, err := writeStreamData("data: " + string(errorPayload) + "\n\n"); err == nil {
+					streamNonFailoverErr = &nativeChatDeliveredTerminalError{message: defaultMsg}
+				}
+				return true
+			}
 			if c != nil && c.Writer != nil && !c.Writer.Written() {
 				writeChatCompletionsError(c, defaultStatus, defaultErrType, defaultMsg)
 				clientOutputStarted = true

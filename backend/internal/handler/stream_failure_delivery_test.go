@@ -54,3 +54,21 @@ func TestControlledSchedulingStopAfterHeartbeatEndsOnce(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeForwardErrorPrefixNeverProvesDelivery(t *testing.T) {
+	for _, path := range []string{"/v1/responses", "/v1/chat/completions"} {
+		for _, message := range []string{"upstream response failed: fixture", "non-streaming openai protocol error: fixture"} {
+			t.Run(path+"/"+message, func(t *testing.T) {
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, path, nil)
+				c.Request = c.Request.WithContext(service.WithNativeStreamPolicy(c.Request.Context(), service.NativeStreamPolicy{Delivery: true}))
+				c.Header("Content-Type", "text/event-stream")
+				before := c.Writer.Size()
+				_, err := c.Writer.WriteString("data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n")
+				require.NoError(t, err)
+				require.False(t, openAIForwardErrorAlreadyCommunicated(c, before, errors.New(message)))
+			})
+		}
+	}
+}

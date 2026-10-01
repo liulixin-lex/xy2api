@@ -503,11 +503,18 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	if nativeStreamAttemptReadFailure(ctx, scanErr) && !ControlledStreamSnapshot(ctx).AttemptCommitted && !clientOutputStarted {
 		return resultWithUsage(), nativeStreamReadFailover(ctx, scanErr)
 	}
+	// Usage and finish_reason can precede a failed read. They must never hide
+	// an observed upstream error while the downstream request remains live.
+	if nativeDelivery && scanErr != nil && !clientAborted {
+		recordOpenAIRawStreamTruncation(c, account, requestID, scanErr, "http_error")
+		return resultWithUsage(), newOpenAIUpstreamStreamReadError(scanErr)
+	}
 
 	// 上游在任何终止信号之前结束：连接被 reset（scanErr != nil）或干净 EOF。
 	// 两者都不能再记成功——此前统一返回 nil error，把上游截断伪装成
 	// `HTTP 200 + usage 0/0`，客户端收到半截回答且 Ops 侧完全无感。
-	if !clientAborted && terminal.IsTruncated(clientOutputStarted) {
+	nativeMissingTerminal := nativeDelivery && terminal.sawUsage && !terminal.sawDone && !terminal.sawFinishReason
+	if !clientAborted && (terminal.IsTruncated(clientOutputStarted) || nativeMissingTerminal) {
 		cause := scanErr
 		if cause == nil {
 			cause = ErrOpenAIUpstreamStreamTruncated

@@ -134,6 +134,78 @@ func TestNativeRawChatAttemptCancellationNeverSucceeds(t *testing.T) {
 	}
 }
 
+func TestNativeRawChatReadErrorAfterTerminalMetadataNeverSucceeds(t *testing.T) {
+	for _, payload := range []string{
+		`{"choices":[],"usage":{}}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+	} {
+		for _, failure := range []error{context.Canceled, context.DeadlineExceeded, io.ErrUnexpectedEOF} {
+			t.Run(payload+"/"+failure.Error(), func(t *testing.T) {
+				rec := newNativeStreamTestRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(nativeRelayContext(context.Background()))
+				resp := &http.Response{Header: make(http.Header), Body: &openAIChatStreamReadErrorCloser{payload: []byte("data: " + payload + "\n\n"), err: failure}}
+				result, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}).streamRawChatCompletions(c, resp, rawChatCompletionsTestAccount(), "fixture", "fixture", "fixture", nil, nil, time.Now(), 1)
+				require.Error(t, err)
+				require.ErrorIs(t, err, failure)
+				require.Nil(t, result.FirstTokenMs)
+				require.False(t, IsNativeChatTerminalError(err))
+			})
+		}
+	}
+}
+
+func TestNativeRawChatUsageAloneCannotCompleteResponse(t *testing.T) {
+	for _, preamble := range []bool{false, true} {
+		t.Run(fmt.Sprint(preamble), func(t *testing.T) {
+			rec := newNativeStreamTestRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(nativeRelayContext(context.Background()))
+			body := ""
+			if preamble {
+				body = "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"
+			}
+			body += "data: {\"choices\":[],\"usage\":{}}\n\n"
+			resp := &http.Response{Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
+			result, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}).streamRawChatCompletions(c, resp, rawChatCompletionsTestAccount(), "fixture", "fixture", "fixture", nil, nil, time.Now(), 1)
+			require.ErrorIs(t, err, ErrOpenAIUpstreamStreamTruncated)
+			require.False(t, IsNativeChatTerminalError(err))
+			if !preamble {
+				require.Nil(t, result.FirstTokenMs)
+			}
+		})
+	}
+}
+
+func TestNativeRawChatValidEmptyTerminalRemainsValid(t *testing.T) {
+	for _, body := range []string{
+		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"content_filter\"}]}\n\n",
+		"data: [DONE]\n\n",
+	} {
+		t.Run(body, func(t *testing.T) {
+			rec := newNativeStreamTestRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(nativeRelayContext(context.Background()))
+			resp := &http.Response{Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
+			result, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}).streamRawChatCompletions(c, resp, rawChatCompletionsTestAccount(), "fixture", "fixture", "fixture", nil, nil, time.Now(), 1)
+			require.NoError(t, err)
+			require.Nil(t, result.FirstTokenMs)
+			require.Equal(t, body, rec.Body.String(), "do not append an error after a valid provider terminal")
+		})
+	}
+}
+
+func TestNativeRawChatDeliveredDoneDoesNotWaitForReadError(t *testing.T) {
+	rec := newNativeStreamTestRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(nativeRelayContext(context.Background()))
+	body := "data: [DONE]\n\n"
+	resp := &http.Response{Header: make(http.Header), Body: &openAIChatStreamReadErrorCloser{payload: []byte(body), err: context.DeadlineExceeded}}
+	_, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}).streamRawChatCompletions(c, resp, rawChatCompletionsTestAccount(), "fixture", "fixture", "fixture", nil, nil, time.Now(), 1)
+	require.NoError(t, err)
+	require.Equal(t, body, rec.Body.String())
+}
+
 func TestNativeChatParentCancellationDoesNotEmitLocalFailure(t *testing.T) {
 	for _, raw := range []bool{false, true} {
 		t.Run(fmt.Sprint(raw), func(t *testing.T) {
@@ -227,6 +299,85 @@ func TestNativeRawChatUpstreamErrorMarksOnlyDeliveredTerminal(t *testing.T) {
 				require.ErrorIs(t, err, context.Canceled)
 			}
 		})
+	}
+}
+
+type nativeConvertedChatFailureWriter struct {
+	*httptest.ResponseRecorder
+	failWrite       bool
+	failFlush       bool
+	errorFrame      bool
+	errorWrites     int
+	errorFlushes    int
+	deadlineUpdates int
+}
+
+func (w *nativeConvertedChatFailureWriter) Write(p []byte) (int, error) {
+	w.errorFrame = strings.Contains(string(p), `"error":`)
+	if w.errorFrame {
+		w.errorWrites++
+		if w.failWrite {
+			return 0, io.ErrClosedPipe
+		}
+	}
+	return w.ResponseRecorder.Write(p)
+}
+
+func (w *nativeConvertedChatFailureWriter) FlushError() error {
+	if w.errorFrame {
+		w.errorFlushes++
+		if w.failFlush {
+			return io.ErrClosedPipe
+		}
+	}
+	w.ResponseRecorder.Flush()
+	return nil
+}
+
+func (w *nativeConvertedChatFailureWriter) SetWriteDeadline(time.Time) error {
+	w.deadlineUpdates++
+	return nil
+}
+
+func TestNativeConvertedChatUpstreamErrorMarksOnlyDeliveredTerminal(t *testing.T) {
+	for _, preamble := range []bool{false, true} {
+		for _, failure := range []string{"none", "write", "flush"} {
+			t.Run(fmt.Sprintf("preamble_%v_%s", preamble, failure), func(t *testing.T) {
+				writer := &nativeConvertedChatFailureWriter{
+					ResponseRecorder: httptest.NewRecorder(),
+					failWrite:        failure == "write",
+					failFlush:        failure == "flush",
+				}
+				c, _ := gin.CreateTestContext(writer)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(nativeRelayContext(context.Background()))
+				body := ""
+				if preamble {
+					body = nativeRelaySSE("response.output_text.delta", `"delta":"partial"`)
+				}
+				body += nativeRelaySSE("response.failed", `"response":{"id":"resp_failed","status":"failed","error":{"code":"invalid_request_error","message":"provider rejected request"}}`)
+				resp := &http.Response{Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
+				result, err := nativeRelayService().handleChatStreamingResponse(resp, c, nativeRelayAccount(), "fixture", "fixture", "fixture", time.Now(), 1)
+				require.Error(t, err)
+				require.Equal(t, failure == "none", IsNativeChatTerminalError(err))
+				require.Equal(t, 1, writer.errorWrites)
+				require.GreaterOrEqual(t, writer.deadlineUpdates, 2, "the error frame must use the bounded writer")
+				require.NotContains(t, writer.Body.String(), "[DONE]")
+				if failure != "none" {
+					require.ErrorIs(t, err, context.Canceled)
+					require.NotContains(t, err.Error(), "upstream response failed:")
+				} else {
+					require.Equal(t, 1, strings.Count(writer.Body.String(), `"error":`))
+				}
+				if failure == "write" {
+					require.Zero(t, writer.errorFlushes)
+				} else {
+					require.Equal(t, 1, writer.errorFlushes)
+				}
+				if !preamble {
+					require.Nil(t, result.FirstTokenMs, "failure is not semantic output")
+				}
+			})
+		}
 	}
 }
 
