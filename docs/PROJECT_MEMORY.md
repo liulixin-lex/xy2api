@@ -1628,3 +1628,5 @@ pnpm --dir frontend run build
 ### 2026-10-02 调度首字修复最终本地验收
 
 完成普通 Responses 即时事件提交/Flush、首事件启动计时、答案 TTFT 分类、一次最终 metadata 扫描及异常终态边界修复。完整 service/handler（18,140 PASS / 14 条件 SKIP）、原生 CI 四命令 required 守卫、真实存储调度 race、定向边界/后台 race、lint 均通过。默认 GC 的原性能门禁六组通过（最差 p95 9.628ms / p99 24.400ms），GOGC40 基线和修改的压力失败以及早期失败均保留。只读复审未见新增源码阻断；独立部署脚本已修正暂停准入后异常补偿，故障注入仍独立记录。此文档提交时 8093 仍为 291ce0cba；后继准确提交/构建/部署/探针/远端状态以 ttft-review-20261002 外部 STATE/RESULT 账本为准。历史过期 unknown 和 pending usage 不伪造结算，原四角色与 BASELINE/ROLLBACK 证据保持。
+
+- 2026-10-02 补充指标核对：17 次尝试的 dispatch→MarkSent 为 4.883–7.716ms；该埋点属于发送准备，不能当作完整调度或 socket 发送时间。10 个有调度请求中 6 个经历 HTTP 错误、5 个经历超时、4 个两者兼有，不能相加；另 4 个未选号 503。51 条历史 usage_pending 尚不能证明供应商成本已核实。后继探针须用原生诊断的 scheduling_request_id 精确关联，不按时间或账号猜配。
