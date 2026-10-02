@@ -172,8 +172,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if nativeEvent.Len() == 0 {
 				return nil
 			}
-			frame := append([]byte(nil), nativeEvent.Bytes()...)
-			nativeEvent.Reset()
+			// The single writer consumes the frame synchronously. Keep the buffer
+			// intact through Flush and identity recording, then reuse its storage.
+			frame := nativeEvent.Bytes()
+			defer nativeEvent.Reset()
 			payload := nativeSSEEventData(frame)
 			nativeFrameDelivered = false
 			if len(payload) == 0 {
@@ -1641,13 +1643,19 @@ func mergeHostedImageGenToolUsage(imageGen gjson.Result, usage *OpenAIUsage) {
 }
 
 func extractOpenAIResponseIDFromJSONBytes(body []byte) string {
-	if len(body) == 0 || !gjson.ValidBytes(body) {
+	if len(body) == 0 {
 		return ""
 	}
-	if id := strings.TrimSpace(gjson.GetBytes(body, "id").String()); id != "" {
-		return id
+	id := strings.TrimSpace(gjson.GetBytes(body, "id").String())
+	if id == "" {
+		id = strings.TrimSpace(gjson.GetBytes(body, "response.id").String())
 	}
-	return strings.TrimSpace(gjson.GetBytes(body, "response.id").String())
+	// Common deltas have no response identity. A missing candidate needs no
+	// second full JSON validation; any identity we actually accept still does.
+	if id == "" || !gjson.ValidBytes(body) {
+		return ""
+	}
+	return id
 }
 
 const openAIHTTPResponseOwnerContextKey = "openai_http_response_owner"

@@ -492,10 +492,36 @@ func TestOpenAIGatewayService_GenerateSessionHash_AttachesLegacyHashToContext(t 
 }
 
 func TestExtractOpenAIResponseIDFromJSONBytes(t *testing.T) {
-	require.Equal(t, "resp_json", extractOpenAIResponseIDFromJSONBytes([]byte(`{"id":"resp_json"}`)))
-	require.Equal(t, "resp_sse", extractOpenAIResponseIDFromJSONBytes([]byte(`{"type":"response.completed","response":{"id":"resp_sse"}}`)))
-	require.Empty(t, extractOpenAIResponseIDFromJSONBytes([]byte(`{"response":{}}`)))
-	require.Empty(t, extractOpenAIResponseIDFromJSONBytes([]byte(`not-json`)))
+	cases := []struct {
+		name, body, want string
+	}{
+		{"top_level", `{"id":"resp_json"}`, "resp_json"},
+		{"nested", `{"type":"response.completed","response":{"id":"resp_sse"}}`, "resp_sse"},
+		{"missing", `{"response":{}}`, ""},
+		{"invalid", `not-json`, ""},
+		{"empty", "", ""},
+		{"top_level_precedence", `{"id":"resp_top","response":{"id":"resp_nested"}}`, "resp_top"},
+		{"trimmed_top_level", `{"id":"  resp_top\t","response":{"id":"resp_nested"}}`, "resp_top"},
+		{"blank_top_level_falls_back", `{"id":" \t\n ","response":{"id":" resp_nested "}}`, "resp_nested"},
+		{"null_top_level_falls_back", `{"id":null,"response":{"id":"resp_nested"}}`, "resp_nested"},
+		{"escaped_identity", `{"id":"resp_\u0061"}`, "resp_a"},
+		// Preserve the existing gjson.String conversion contract; this optimization
+		// must not silently introduce a new string-only identity restriction.
+		{"numeric_identity_compatibility", `{"id":42,"response":{"id":"resp_nested"}}`, "42"},
+		{"boolean_identity_compatibility", `{"id":false}`, "false"},
+		{"object_identity_compatibility", `{"id":{"opaque":1}}`, `{"opaque":1}`},
+		{"truncated_top_level_candidate", `{"id":"resp_rejected"`, ""},
+		{"truncated_nested_candidate", `{"response":{"id":"resp_rejected"}`, ""},
+		{"trailing_garbage_after_candidate", `{"id":"resp_rejected"} trailing`, ""},
+		{"trailing_document_after_candidate", `{"id":"resp_rejected"}{"id":"second"}`, ""},
+		{"malformed_sibling_after_candidate", `{"id":"resp_rejected","other":}`, ""},
+		{"large_delta_without_identity", `{"type":"response.output_text.delta","delta":"` + strings.Repeat("x", 63*1024) + `"}`, ""},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, extractOpenAIResponseIDFromJSONBytes([]byte(test.body)))
+		})
+	}
 }
 
 // 复现 #4386：gpt-image-2 /v1/images/edits 的 usage 携带 input_tokens_details.image_tokens，

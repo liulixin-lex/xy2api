@@ -346,6 +346,7 @@ jobs:
                        'TestNativeStreamRelayLocalErrorContinuesSequence',
                        'TestNativeStreamRelayMultilineAndInvalidEvents',
                        'TestNativeStreamRelayPartialWriteCommits',
+                       'TestNativeStreamRelayReusedBufferPreservesFrames',
                        'TestNativeStreamTimeoutCommitRaceCannotAdmitMixedAttempt',
                        'TestNativeStreamTransactionProbe',
                        'TestNativeStreamUpstreamContextPreservesCancel',

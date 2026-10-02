@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func nativeRelayContext(parent context.Context) context.Context {
@@ -312,3 +313,82 @@ func TestNativeStreamRelayLocalErrorContinuesSequence(t *testing.T) {
 }
 
 func (*nativeRelayPartialWriter) NativeStreamMemoryWriter() bool { return true }
+
+func TestNativeStreamRelayReusedBufferPreservesFrames(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		t.Run(fmt.Sprintf("passthrough_%v", passthrough), func(t *testing.T) {
+			out := newNativeStreamTestRecorder()
+			c, _ := gin.CreateTestContext(out)
+			var flushed []string
+			var identities []nativeResponsesDeliveredIdentity
+			ctx := context.WithValue(nativeRelayContext(context.Background()), nativeStreamFlushObserverKey{}, func(_, _ time.Time) {
+				require.True(t, out.Flushed, "the snapshot must follow a completed Flush")
+				flushed = append(flushed, out.Body.String())
+				identity, ok := nativeResponsesDeliveredIdentityFromContext(c)
+				require.True(t, ok, "successful delivery must retain the response identity")
+				identities = append(identities, identity)
+			})
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+			texts := []string{strings.Repeat("a", 40*1024), strings.Repeat("b", 40*1024)}
+			frames := []string{
+				nativeRelaySSE("response.created", `"sequence_number":0,"response":{"id":"resp_reused_buffer","created_at":42,"model":"fixture"}`),
+				nativeRelaySSE("response.output_text.delta", `"sequence_number":1,"delta":"`+texts[0]+`"`),
+				nativeRelaySSE("response.output_text.delta", `"sequence_number":2,"delta":"`+texts[1]+`"`),
+				nativeRelaySSE("response.completed", `"sequence_number":3,"response":{"id":"resp_reused_buffer","status":"completed","usage":{"input_tokens":1,"output_tokens":2}}`),
+			}
+			require.Greater(t, len(frames[1]), 32*1024)
+			require.Greater(t, len(frames[2]), 32*1024)
+			resp := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(strings.Join(frames, "")))}
+			svc := nativeRelayService()
+			if passthrough {
+				result, err := svc.handleStreamingResponsePassthrough(ctx, resp, c, nativeRelayAccount(), time.Now(), "fixture", "fixture")
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Equal(t, "resp_reused_buffer", result.responseID)
+			} else {
+				result, err := svc.handleStreamingResponse(ctx, resp, c, nativeRelayAccount(), time.Now(), "fixture", "fixture")
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Equal(t, "resp_reused_buffer", result.responseID)
+			}
+			require.Len(t, flushed, len(frames))
+			require.Len(t, identities, len(frames))
+			for i := 0; i < len(frames)-1; i++ {
+				// Recheck earlier snapshots after every later frame has reused the
+				// buffer; neither the first large delta nor its identity may change.
+				require.Equal(t, strings.Join(frames[:i+1], ""), flushed[i])
+			}
+			require.Equal(t, out.Body.String(), flushed[len(flushed)-1])
+			reader := bufio.NewReader(strings.NewReader(out.Body.String()))
+			for i := range frames {
+				frame, err := nativeRelayReadEvent(reader)
+				require.NoError(t, err)
+				payload := nativeSSEEventData([]byte(frame))
+				require.True(t, gjson.ValidBytes(payload))
+				require.Equal(t, int64(i), gjson.GetBytes(payload, "sequence_number").Int())
+				require.Equal(t, "resp_reused_buffer", identities[i].ID)
+				require.Equal(t, int64(i), identities[i].Sequence)
+				require.Equal(t, int64(42), identities[i].CreatedAt)
+				require.Equal(t, "fixture", identities[i].Model)
+				if i < len(frames)-1 {
+					require.Equal(t, frames[i], frame)
+				} else {
+					require.Equal(t, "response.completed", gjson.GetBytes(payload, "type").String())
+					require.Equal(t, "resp_reused_buffer", gjson.GetBytes(payload, "response.id").String())
+					require.Equal(t, "completed", gjson.GetBytes(payload, "response.status").String())
+					if passthrough {
+						require.Equal(t, frames[i], frame)
+					} else {
+						require.Equal(t, texts[0]+texts[1], gjson.GetBytes(payload, "response.output.0.content.0.text").String())
+					}
+				}
+			}
+			_, err := nativeRelayReadEvent(reader)
+			require.ErrorIs(t, err, io.EOF)
+			id, nextSequence, createdAt := NativeResponsesFailureIdentity(c)
+			require.Equal(t, "resp_reused_buffer", id)
+			require.Equal(t, int64(4), nextSequence)
+			require.Equal(t, int64(42), createdAt)
+		})
+	}
+}
