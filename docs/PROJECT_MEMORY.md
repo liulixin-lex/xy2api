@@ -4,11 +4,11 @@
 
 ## 当前交接状态
 
-### 调度与首字复审（2026-10-02，已替换 test、元数据补修门禁通过待部署）
+### 调度与首字复审（2026-10-02，观测补修已部署且现场验证通过）
 
-- 唯一候选仍为 concurrent-empty-response-20261001/work、分支 fix/native-stream-concurrency-20261001；运行站点现为 15ca705eb（业务修复 d8b29ccc3），旧 291 容器保留。首轮账号暂停/恢复因数据库单调 updated_at 触发器失败，已恢复全部原开关并改为真实 PG 验证的空闲短事务准入锁；第二次替换成功。
+- 唯一候选仍为 concurrent-empty-response-20261001/work、分支 fix/native-stream-concurrency-20261001；运行站点现为 4eb7f8aa2（业务修复 d8b29ccc3、观测补修 4eb7f8aa2），旧 291 容器保留。首轮账号暂停/恢复因数据库单调 updated_at 触发器失败，已恢复全部原开关并改为真实 PG 验证的空闲短事务准入锁；第二次替换成功。
 - 部署后 8 个短/长真实请求全部 completed，每个 trace 唯一对应一条 usage 和 dedup；15,025 token 长输入首内容 3.499–4.582s，短输入仍有 25.706s 首事件尾延迟，尚不能准确归因。旧探针漏采既有 X-Scheduling-Request-Id 且内存诊断已过 5 分钟；不能伪补身份。有效管理员认证现已验证，凭据不写入仓库或报告。
-- 新发现 RecordAttemptMetrics 白名单静默丢弃原生 Flush/提交/响应头等指标。已补齐有类型约束的元数据白名单及同次写入的入口 trace 绑定（不增加首字前 I/O、不将 trace 当恢复身份）；探针新增采集原生调度身份头。此补修尚未部署，执行证据放 ttft-review-20261002/observability。
+- 新发现 RecordAttemptMetrics 白名单静默丢弃原生 Flush/提交/响应头等指标。已补齐有类型约束的元数据白名单及同次写入的入口 trace 绑定（不增加首字前 I/O、不将 trace 当恢复身份）；探针新增采集原生调度身份头。此补修已于 17:56 UTC 部署，执行证据放 ttft-review-20261002/observability。
 - 根因是 Recovery 开关把普通 Responses 的 created/推理事件扣留至答案；同一门槛还把正常长推理判为 30 秒内容超时并重试。上游真实生成慢和独立 502/503 是另两类原因，不能由路由算法保证消除。保留最高可用优先级、同层 SWRR、原 Ledger 和发送前权威准入。
 - 删除首答案暂存、首完整事件提交并 Flush；答案 TTFT 排除推理摘要；最终出站 metadata 只扫描一次。异常 EOF/裸 DONE/无效或超长帧在可写的原响应内失败，不跨账号拼流。透传复用已有上游空闲配置；非流式原生后台仍保留原截止时间。
 - 独立同输入三态 -race：BASELINE/ROLLBACK 两条路径在答案释放前写 0 字节、未 Flush，exit 1；MODIFIED created/推理已真实 Flush，exit 0。恢复归档哈希相等。调度包真实 PG/Redis race 274 PASS，1 个仅由父测试调用的 worker helper SKIP；新增边界 84/84、后台 12/12 通过。完整回归首轮发现并修正后台停表、重复错误终态及测试语义问题，失败记录保留。
@@ -18,7 +18,10 @@
 
 - 观测补修最终 service/handler/scheduling 18,458 RUN / 18,440 PASS / 18 条条件 SKIP，exit 0；原生 CI 1,084/1,084、218 个 required（含 cmd/server 1 项）无关键跳过，lint 0 issues。更正：旧摘要的 214 个 required 漏计 cmd/server，当轮应为 215，本轮新增 3 项后为 218。3,147 个 Go 文件冻结哈希全部相符。
 - 同一 timeline 夹具和命令：BASELINE/ROLLBACK exit 1，及时流仍正常但真实 PG 缺失 http_request_id；MODIFIED exit 0，created 209.5ms、内容 5.010s、完成 20.011s，指标与入口身份实际落库。独立 store 三态亦 1/0/1，真 PG race 33 项通过。
-- 最后一轮默认 GC 六组性能全部通过，最差 p95=6.985ms、p99=20.307ms，未修改阈值。后继仅提交、clean-tree 来源审计、构建、空闲切换与精确身份现场核验；测试站当前仍为 15ca705eb。
+- 最后一轮默认 GC 六组性能全部通过，最差 p95=6.985ms、p99=20.307ms，未修改阈值。clean-tree 来源审计、构建及空闲短事务切换通过，原 15ca 容器保留；这次切换未修改账号开关。
+
+- 17:56–17:57 UTC 新版5次真实探针（短4并发、长1）均非空 completed；原生调度头、管理员诊断和PG逐次精确关联：每次1 attempt、1 usage、1 dedup，ack成功、容量释放，无身份串配。短首内容4.470–6.505s，15,025输入token长首内容9.896s；ControlledRequest起点到MarkSent为18.981–41.969ms，完整事件到Flush各请求最大0.415–1.378ms。该起点不含此前认证/策略读取，MarkSent不代表socket发送完成。新样本不能证明历史25.706s根因或供应商总体尾延迟。
+- 当前业务二进制固定4eb7f8aa2，后继交接提交仅修改文档；远端推送和精确head CI以外部FINAL_RESULT.json为准。仅测试站更新，未合并、正式发布或部署其他实例。
 
 ### 首答案前恢复补修（2026-10-01，已替换本机test）
 
@@ -1642,3 +1645,9 @@ pnpm --dir frontend run build
 - 修复 PostgresStore.RecordAttemptMetrics 静默丢弃时序、Flush、提交及追踪字段；ControlledRequest.addTraceMetrics 在 MarkSent 原有写入追加入口身份，未增加首字前 SQL 或长正文扫描。原生重试/所有权/优先级算法未改。
 - 全量回归、原生 CI、lint、同输入 PG timeline 和真实归档回滚、默认 GC 性能均完成；原始失败与 GOGC40 性能失败继续保留。新版构建、test 替换、真实 trace/attempt/usage/dedup 闭环和远端推送以外部 STATE/FINAL_RESULT 为准，尚未执行结果不冒称通过。
 - 旧真实请求 25.706s 离群值仍缺精确尝试关联，不反推、不改写旧探针；本轮补采原生调度身份头和有界入口 trace 后，用新请求验证。原 v1.0 的 WS 同响应恢复、持久化及跨实例阶段仍未认证。
+
+### 2026-10-02 观测补修测试站验收与交接
+
+- 4eb7f8aa2二进制SHA256为16a76676939016c6b10e613d9096d72350dc59a7f2cfa17525d42e01faae654d；本机8093 healthy。模式和账号短事务锁下空闲切换，旧版本容器保留，配置和四账号开关保持。
+- 新版真实5请求完成身份、attempt、结算、ack及容量闭环，数据见ttft-review-20261002/observability/LIVE_SUMMARY.json。此前8请求仍保留原证据，其中25.706s无法精确归因，未回填或删改。
+- 当前提交只更新交接文档，3,147项Go哈希与已构建/部署源码一致。累计四角色、回滚证明、精确远端SHA和CI结果写外部账本；远端fix分支授权推送，不合并或发行。
