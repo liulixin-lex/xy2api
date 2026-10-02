@@ -74,6 +74,9 @@ func writeNativeChatHeartbeat(ctx context.Context, c *gin.Context) error {
 }
 
 func nativeStreamTimeoutCode(err error) (string, string) {
+	if errors.Is(err, errNativeSSEUpstreamIdle) {
+		return "stream_timeout", "Upstream response stream was idle beyond the configured interval"
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "content_timeout", "Upstream produced no content before the deadline"
 	}

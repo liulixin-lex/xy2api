@@ -2,7 +2,9 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -306,6 +308,17 @@ func newOpenAIResponsesEmptyCompletedFailoverError(c *gin.Context, account *Acco
 		ResponseBody:    openAISilentRefusalErrorBody(),
 		ResponseHeaders: headers,
 	}
+}
+
+func (s *OpenAIGatewayService) deliverOpenAIResponsesEmptyCompletedFailure(
+	ctx context.Context, c *gin.Context, account *Account, passthrough bool,
+	upstreamRequestID, responseID string, sequence int64,
+) error {
+	s.recordOpenAIStreamUpstreamError(c, account, passthrough, upstreamRequestID,
+		"stream_failed", nil, openAIResponsesEmptyCompletedMessage)
+	terminalErr := writeNativeResponsesFailure(ctx, c, responseID, sequence,
+		openAISilentRefusalErrorCode, openAIResponsesEmptyCompletedMessage)
+	return errors.Join(errors.New(openAIResponsesEmptyCompletedMessage), terminalErr)
 }
 
 func openAISilentRefusalErrorBody() []byte {

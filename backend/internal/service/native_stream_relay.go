@@ -5,14 +5,42 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/tidwall/gjson"
 )
 
 const nativeStreamFailureDrainTimeout = 3 * time.Second
+
+var errNativeSSEUpstreamIdle = fmt.Errorf("upstream SSE idle timeout: %w", context.DeadlineExceeded)
+
+// Track actual upstream bytes, including fragments of an event. A complete-frame
+// scanner cannot distinguish a large event still arriving from an idle body.
+type nativeSSEReadProgressBody struct {
+	io.ReadCloser
+	started  time.Time
+	lastRead atomic.Int64
+}
+
+func newNativeSSEReadProgressBody(body io.ReadCloser) *nativeSSEReadProgressBody {
+	return &nativeSSEReadProgressBody{ReadCloser: body, started: time.Now()}
+}
+
+func (b *nativeSSEReadProgressBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 {
+		b.lastRead.Store(int64(time.Since(b.started)))
+	}
+	return n, err
+}
+
+func (b *nativeSSEReadProgressBody) LastReadAt() time.Time {
+	return b.started.Add(time.Duration(b.lastRead.Load()))
+}
 
 // Only protocol data commits a generation. SSE comments remain local liveness.
 func nativeSSEEventData(frame []byte) []byte {
@@ -56,6 +84,8 @@ type nativeSSEIdleScanner struct {
 	stopped      chan struct{}
 	ticker       *time.Ticker
 	interval     time.Duration
+	upstreamIdle time.Duration
+	idleTimer    *time.Timer
 	heartbeat    func() error
 	line         string
 	readAt       time.Time
@@ -64,9 +94,12 @@ type nativeSSEIdleScanner struct {
 	failureDone  <-chan time.Time
 }
 
-func newNativeSSEIdleScanner(ctx context.Context, body io.ReadCloser, scanner nativeSSEScanner, interval time.Duration, heartbeat func() error) *nativeSSEIdleScanner {
+func newNativeSSEIdleScanner(ctx context.Context, body io.ReadCloser, scanner nativeSSEScanner, interval time.Duration, heartbeat func() error, upstreamIdle ...time.Duration) *nativeSSEIdleScanner {
 	events := make(chan nativeSSEScanEvent, 1)
 	s := &nativeSSEIdleScanner{ctx: ctx, body: body, events: events, done: make(chan struct{}), stopped: make(chan struct{}), heartbeat: heartbeat, interval: interval}
+	if len(upstreamIdle) > 0 {
+		s.upstreamIdle = upstreamIdle[0]
+	}
 	if interval > 0 {
 		s.ticker = time.NewTicker(interval)
 	}
@@ -94,6 +127,16 @@ func (s *nativeSSEIdleScanner) Scan() bool {
 	if s.ticker != nil {
 		tick = s.ticker.C
 	}
+	var idle <-chan time.Time
+	waitStarted := time.Now()
+	if s.upstreamIdle > 0 {
+		if s.idleTimer == nil {
+			s.idleTimer = time.NewTimer(s.upstreamIdle)
+		} else {
+			s.idleTimer.Reset(s.upstreamIdle)
+		}
+		idle = s.idleTimer.C
+	}
 	for {
 		select {
 		case <-s.failureDone:
@@ -104,6 +147,25 @@ func (s *nativeSSEIdleScanner) Scan() bool {
 			s.err = s.ctx.Err()
 			_ = s.body.Close()
 			return false
+		case <-idle:
+			// A queued read wins a timer race; downstream writing time is excluded
+			// because the deadline is armed only while Scan waits for upstream.
+			select {
+			case event, ok := <-s.events:
+				return s.accept(event, ok)
+			default:
+			}
+			lastProgress := waitStarted
+			if progress, ok := s.body.(interface{ LastReadAt() time.Time }); ok && progress.LastReadAt().After(lastProgress) {
+				lastProgress = progress.LastReadAt()
+			}
+			if remaining := s.upstreamIdle - time.Since(lastProgress); remaining > 0 {
+				s.idleTimer.Reset(remaining)
+				continue
+			}
+			s.err = errNativeSSEUpstreamIdle
+			_ = s.body.Close()
+			return false
 		case <-tick:
 			if err := s.heartbeat(); err != nil {
 				s.err = err
@@ -111,21 +173,25 @@ func (s *nativeSSEIdleScanner) Scan() bool {
 				return false
 			}
 		case event, ok := <-s.events:
-			if s.ctx.Err() != nil {
-				s.err = s.ctx.Err()
-				return false
-			}
-			if !ok {
-				return false
-			}
-			if data, ok := extractOpenAISSEDataLine(event.line); ok && gjson.Get(data, "type").String() == "error" && s.failureTimer == nil {
-				s.failureTimer = time.NewTimer(nativeStreamFailureDrainTimeout)
-				s.failureDone = s.failureTimer.C
-			}
-			s.line, s.err, s.readAt = event.line, event.err, event.readAt
-			return event.err == nil
+			return s.accept(event, ok)
 		}
 	}
+}
+
+func (s *nativeSSEIdleScanner) accept(event nativeSSEScanEvent, ok bool) bool {
+	if s.ctx.Err() != nil {
+		s.err = s.ctx.Err()
+		return false
+	}
+	if !ok {
+		return false
+	}
+	if data, ok := extractOpenAISSEDataLine(event.line); ok && gjson.Get(data, "type").String() == "error" && s.failureTimer == nil {
+		s.failureTimer = time.NewTimer(nativeStreamFailureDrainTimeout)
+		s.failureDone = s.failureTimer.C
+	}
+	s.line, s.err, s.readAt = event.line, event.err, event.readAt
+	return event.err == nil
 }
 
 // ResetHeartbeat is called only by the sole downstream writer after delivery.
@@ -144,6 +210,9 @@ func (s *nativeSSEIdleScanner) Close() {
 	}
 	if s.ticker != nil {
 		s.ticker.Stop()
+	}
+	if s.idleTimer != nil {
+		s.idleTimer.Stop()
 	}
 	_ = s.body.Close()
 	<-s.stopped

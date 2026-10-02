@@ -53,7 +53,11 @@ func TestReviewNativeStreamDeltaTypeDoesNotInventContent(t *testing.T) {
 					require.Empty(t, gjson.GetBytes(completed, "response.output").Array(), "non-string or empty delta must not become reconstructed model text")
 					require.Nil(t, result.firstTokenMs, "non-string or empty delta must not start the content clock")
 				} else {
-					require.NotNil(t, result.firstTokenMs)
+					if kind == "response.output_text.delta" {
+						require.NotNil(t, result.firstTokenMs)
+					} else {
+						require.Nil(t, result.firstTokenMs, "reasoning is delivered immediately but does not start the answer clock")
+					}
 					path := "response.output.0.content.0.text"
 					if kind != "response.output_text.delta" {
 						path = "response.output.0.summary.0.text"

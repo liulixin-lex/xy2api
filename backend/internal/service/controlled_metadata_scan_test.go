@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/stretchr/testify/require"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +67,29 @@ func TestControlledWSMetadataAndSelectedFields(t *testing.T) {
 	require.True(t, valid)
 	raw, _ := json.Marshal(fields)
 	require.NotContains(t, string(raw), "secret")
+}
+
+func TestControlledOutboundMetadataOnlyScansOnce(t *testing.T) {
+	body := `{"input":"` + strings.Repeat("x", 10<<20) + `","model":"final-model","stream":true}`
+	req, err := http.NewRequest(http.MethodPost, "http://upstream/v1/responses", strings.NewReader(body))
+	require.NoError(t, err)
+	getBody := req.GetBody
+	reads := 0
+	req.GetBody = func() (io.ReadCloser, error) {
+		reads++
+		return getBody()
+	}
+	first, metadata, err := controlledOutboundMetadataForRequest(req)
+	require.NoError(t, err)
+	require.Equal(t, controlledOutboundMetadata{model: "final-model", stream: true, valid: true}, metadata)
+	second, reused, err := controlledOutboundMetadataForRequest(first)
+	require.NoError(t, err)
+	require.Equal(t, metadata, reused)
+	require.Equal(t, 1, reads)
+	require.Same(t, first, second)
+	forwarded, err := io.ReadAll(second.Body)
+	require.NoError(t, err)
+	require.Equal(t, body, string(forwarded), "metadata capture must not consume or rewrite the live body")
 }
 
 // Run independently with -run '^$' -bench BenchmarkControlledMetadataBoundedRetention

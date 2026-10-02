@@ -3,9 +3,11 @@ package service
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
 )
 
 // Keep selected scalars, never another copy of prompts or tool schemas.
@@ -266,4 +268,30 @@ func ReadControlledOutboundMetadata(reader io.Reader) (model string, stream bool
 		return "", false, false
 	}
 	return model, stream, true
+}
+
+type controlledOutboundMetadata struct {
+	model  string
+	stream bool
+	valid  bool
+}
+
+type controlledOutboundMetadataKey struct{}
+
+// The final outbound body is immutable between admission and send. Reuse its
+// validated metadata so large prompts are not scanned twice before dispatch.
+func controlledOutboundMetadataForRequest(req *http.Request) (*http.Request, controlledOutboundMetadata, error) {
+	if cached, ok := req.Context().Value(controlledOutboundMetadataKey{}).(controlledOutboundMetadata); ok {
+		return req, cached, nil
+	}
+	var metadata controlledOutboundMetadata
+	if req.GetBody != nil {
+		reader, err := req.GetBody()
+		if err != nil {
+			return req, metadata, err
+		}
+		metadata.model, metadata.stream, metadata.valid = ReadControlledOutboundMetadata(reader)
+		_ = reader.Close()
+	}
+	return req.WithContext(context.WithValue(req.Context(), controlledOutboundMetadataKey{}, metadata)), metadata, nil
 }

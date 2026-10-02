@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -40,6 +41,37 @@ func TestReviewNativeStreamIncompleteTerminalCannotSucceed(t *testing.T) {
 			}
 			require.Error(t, err, "EOF without the dispatching blank line is not a complete terminal event")
 			require.NotContains(t, out.Body.String(), "resp_incomplete", "incomplete upstream identity must not be exposed")
+		})
+	}
+}
+
+func TestReviewNativeStreamEmptyCompletedAfterCreatedFailsSameResponse(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		t.Run(fmt.Sprint(passthrough), func(t *testing.T) {
+			ctx := nativeRelayContext(context.Background())
+			out := newNativeStreamTestRecorder()
+			c, _ := gin.CreateTestContext(out)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+			body := nativeRelaySSE("response.created", `"sequence_number":0,"response":{"id":"resp_empty","created_at":123,"model":"fixture"}`) +
+				nativeRelaySSE("response.completed", `"sequence_number":1,"response":{"id":"resp_empty","status":"completed","output":[]}`)
+			resp := &http.Response{Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
+			svc := nativeRelayService()
+			var err error
+			if passthrough {
+				_, err = svc.handleStreamingResponsePassthrough(ctx, resp, c, nativeRelayAccount(), time.Now(), "fixture", "fixture")
+			} else {
+				_, err = svc.handleStreamingResponse(ctx, resp, c, nativeRelayAccount(), time.Now(), "fixture", "fixture")
+			}
+			require.Error(t, err)
+			var failover *UpstreamFailoverError
+			require.False(t, errors.As(err, &failover), "delivered response identity forbids retry")
+			output := out.Body.String()
+			require.Contains(t, output, "event: response.created\n")
+			require.NotContains(t, output, "event: response.completed\n")
+			require.Equal(t, 1, strings.Count(output, "event: response.failed\n"))
+			require.Contains(t, output, `"code":"openai_silent_refusal"`)
+			require.Contains(t, output, `"sequence_number":1`)
+			require.Contains(t, output, `"id":"resp_empty"`)
 		})
 	}
 }
@@ -210,35 +242,56 @@ func TestReviewNativeStreamKnownNonTextContentStopsStartupTimer(t *testing.T) {
 	}
 }
 
-func TestReviewNativeStreamCreatedKeepsLegacyContentDeadline(t *testing.T) {
+func TestReviewNativeStreamCreatedDisarmsStartupDeadline(t *testing.T) {
 	ctx, cancel := context.WithCancel(nativeRelayContext(context.Background()))
 	defer cancel()
 	reader, writer := io.Pipe()
 	defer func() { _ = writer.Close() }()
-	out := newNativeStreamTestRecorder()
+	out := &notifyingNativeStreamRecorder{nativeStreamTestRecorder: newNativeStreamTestRecorder(), writes: make(chan []byte, 8)}
 	c, _ := gin.CreateTestContext(out)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
 	svc := nativeRelayService()
 	svc.cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 1
-	completed := make(chan error, 1)
+	type result struct {
+		first *int
+		err   error
+	}
+	completed := make(chan result, 1)
 	go func() {
-		_, err := svc.handleStreamingResponse(ctx, &http.Response{Header: make(http.Header), Body: reader}, c, nativeRelayAccount(), time.Now().Add(-900*time.Millisecond), "fixture", "fixture")
-		completed <- err
+		stream, err := svc.handleStreamingResponse(ctx, &http.Response{Header: make(http.Header), Body: reader}, c, nativeRelayAccount(), time.Now(), "fixture", "fixture")
+		completed <- result{first: stream.firstTokenMs, err: err}
 	}()
 	_, err := io.WriteString(writer, nativeRelaySSE("response.created", "\"sequence_number\":0,\"response\":{\"id\":\"resp_idle\"}"))
 	require.NoError(t, err)
-	select {
-	case err := <-completed:
-		require.Error(t, err)
-		require.Contains(t, out.Body.String(), "resp_idle")
-		require.Contains(t, out.Body.String(), "content_timeout")
-		var failover *UpstreamFailoverError
-		require.False(t, errors.As(err, &failover), "committed created cannot authorize another generation")
-	case <-time.After(400 * time.Millisecond):
-		cancel()
-		<-completed
-		t.Fatal("created incorrectly disarmed the configured content deadline")
+	_, err = io.WriteString(writer, nativeRelaySSE("response.reasoning_text.delta", "\"sequence_number\":1,\"delta\":\"thinking\""))
+	require.NoError(t, err)
+	for i := 0; i < 2; i++ {
+		select {
+		case <-out.writes:
+		case <-time.After(time.Second):
+			t.Fatal("preamble event was not flushed")
+		}
 	}
+	time.Sleep(1200 * time.Millisecond)
+	select {
+	case result := <-completed:
+		t.Fatalf("stream terminated during valid upstream reasoning: %v", result.err)
+	default:
+	}
+	_, err = io.WriteString(writer, nativeRelaySSE("response.output_text.delta", "\"sequence_number\":2,\"delta\":\"answer\""))
+	require.NoError(t, err)
+	_, err = io.WriteString(writer, nativeRelaySSE("response.completed", "\"sequence_number\":3,\"response\":{\"id\":\"resp_idle\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	select {
+	case result := <-completed:
+		require.NoError(t, result.err)
+		require.NotNil(t, result.first)
+		require.GreaterOrEqual(t, *result.first, 1000)
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream did not finish after the answer")
+	}
+	require.NotContains(t, out.Body.String(), "content_timeout")
 }
 
 func TestReviewNativeStreamTerminalMustBeVerified(t *testing.T) {
@@ -325,13 +378,78 @@ func TestReviewNativeStreamObserverDoesNotInventEOFTerminal(t *testing.T) {
 }
 
 func TestReviewNativeStreamDoneDoesNotProveResponsesSuccess(t *testing.T) {
-	for _, protocol := range []string{"responses", "chat"} {
+	for _, protocol := range []string{"responses", "ws", "chat"} {
 		t.Run(protocol, func(t *testing.T) {
 			_, r, d := nativeCommitFixture(t)
 			r.Protocol = protocol
 			d.ObserveFrame([]byte("[DONE]"))
 			require.Equal(t, protocol == "chat", d.terminal)
+			require.Equal(t, protocol != "chat", d.firstEvent.IsZero())
 		})
+	}
+}
+
+func TestReviewNativeStreamMissingEventTypeDoesNotStopStartupDeadline(t *testing.T) {
+	for _, frame := range []string{`{}`, `{"response":{"id":"resp_no_type"}}`, `{"type":null}`, `{"type":7}`} {
+		t.Run(frame, func(t *testing.T) {
+			_, _, d := nativeCommitFixture(t)
+			d.ObserveFrame([]byte(frame))
+			require.True(t, d.firstEvent.IsZero())
+			require.True(t, d.semantic.IsZero())
+			select {
+			case <-d.semanticReady:
+				t.Fatal("invalid event stopped startup deadline")
+			default:
+			}
+		})
+	}
+}
+
+type reviewNativeReadError struct{ err error }
+
+func (r reviewNativeReadError) Read([]byte) (int, error) { return 0, r.err }
+
+func TestReviewNativeStreamPostcommitReadFailureEndsSameResponse(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, failure := range []string{"eof", "done", "malformed", "too_long", "read_error"} {
+			t.Run(fmt.Sprintf("passthrough_%v/%s", passthrough, failure), func(t *testing.T) {
+				ctx := nativeRelayContext(context.Background())
+				out := newNativeStreamTestRecorder()
+				c, _ := gin.CreateTestContext(out)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+				body := nativeRelaySSE("response.created", `"sequence_number":4,"response":{"id":"resp_read_error","created_at":123,"model":"fixture"}`)
+				switch failure {
+				case "done":
+					body += "data: [DONE]\n\n"
+				case "malformed":
+					body += "data: {bad-json}\n\n"
+				case "too_long":
+					body += "data: " + strings.Repeat("x", 128*1024) + "\n\n"
+				}
+				var reader io.Reader = strings.NewReader(body)
+				if failure == "read_error" {
+					reader = io.MultiReader(reader, reviewNativeReadError{err: errors.New("fixture upstream failure")})
+				}
+				resp := &http.Response{Header: make(http.Header), Body: io.NopCloser(reader)}
+				svc := nativeRelayService()
+				svc.cfg.Gateway.MaxLineSize = 64 * 1024
+				var err error
+				if passthrough {
+					_, err = svc.handleStreamingResponsePassthrough(ctx, resp, c, nativeRelayAccount(), time.Now(), "fixture", "fixture")
+				} else {
+					_, err = svc.handleStreamingResponse(ctx, resp, c, nativeRelayAccount(), time.Now(), "fixture", "fixture")
+				}
+				require.Error(t, err)
+				var retry *UpstreamFailoverError
+				require.NotErrorAs(t, err, &retry)
+				require.Equal(t, 1, strings.Count(out.Body.String(), "event: response.created\n"))
+				require.Equal(t, 1, strings.Count(out.Body.String(), "event: response.failed\n"))
+				require.Contains(t, out.Body.String(), `"sequence_number":5`)
+				require.Contains(t, out.Body.String(), `"id":"resp_read_error"`)
+				require.NotContains(t, out.Body.String(), "[DONE]")
+				require.NotContains(t, out.Body.String(), "event: response.completed\n")
+			})
+		}
 	}
 }
 

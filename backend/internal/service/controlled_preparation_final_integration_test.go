@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -19,36 +20,61 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestControlledOutboundRequestScannedOnceBeforeSend(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream_%t", stream), func(t *testing.T) {
+			s, _, _, accounts := controlledIntegration(t, false)
+			ctx, r := controlledIntegrationRequest(t, s)
+			a := controlledPick(t, s, ctx, r, accounts[:1])
+			body := `{"input":"` + strings.Repeat("x", 10<<20) + fmt.Sprintf(`","model":"test-model","stream":%t}`, stream)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unused", strings.NewReader(body))
+			require.NoError(t, err)
+			getBody := req.GetBody
+			reads := 0
+			req.GetBody = func() (io.ReadCloser, error) {
+				reads++
+				return getBody()
+			}
+			sends := 0
+			response, err := s.roundTrip(req, a.ID, 10, func(sent *http.Request) (*http.Response, error) {
+				sends++
+				d := sent.Context().Value(controlledDispatchContextKey{}).(*controlledDispatch)
+				require.Equal(t, stream, d.semanticObservable)
+				require.Equal(t, "test-model", d.healthObservation.Model)
+				forwarded, e := io.ReadAll(sent.Body)
+				require.NoError(t, e)
+				require.Equal(t, body, string(forwarded))
+				return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"object":"response","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`))}, nil
+			})
+			require.NoError(t, err)
+			controlledConsume(t, response)
+			require.Equal(t, 1, sends)
+			t.Logf("GetBody calls=%d input_bytes=%d stream=%t sends=%d", reads, len(body), stream, sends)
+			require.Equal(t, 1, reads, "the final outbound body must be scanned once across admission and send")
+		})
+	}
+}
+
 func TestControlledCallerDeadlineDoesNotWaitForTerminalStoreLock(t *testing.T) {
 	s, db, _, accounts := controlledIntegration(t, true)
 	ctx, r := controlledIntegrationRequest(t, s)
 	a := controlledPick(t, s, ctx, r, accounts[:1])
-	req, err := http.NewRequestWithContext(ctx, "POST", "http://unused", strings.NewReader("{\"model\":\"test-model\",\"stream\":false}"))
+	d, err := s.beginDispatch(ctx, a.ID, 10)
 	require.NoError(t, err)
-	original := req.GetBody
-	reads := 0
 	var lock *sql.Tx
-	req.GetBody = func() (io.ReadCloser, error) {
-		reads++
-		if reads == 2 {
-			var e error
-			lock, e = db.Begin()
-			require.NoError(t, e)
-			t.Cleanup(func() { _ = lock.Rollback() })
-			_, e = lock.Exec("LOCK TABLE scheduling_attempts IN ACCESS EXCLUSIVE MODE")
-			require.NoError(t, e)
-			controlledShortBudget(r, 150*time.Millisecond)
-		}
-		return original()
-	}
-	sends := 0
+	lock, err = db.Begin()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lock.Rollback() })
+	_, err = lock.Exec("LOCK TABLE scheduling_attempts IN ACCESS EXCLUSIVE MODE")
+	require.NoError(t, err)
+	controlledShortBudget(r, 150*time.Millisecond)
 	started := time.Now()
-	_, err = s.roundTrip(req, a.ID, 10, func(*http.Request) (*http.Response, error) { sends++; return nil, nil })
+	err = d.MarkSent()
+	d.finishPreparationFailure(err)
 	elapsed := time.Since(started)
 	require.ErrorIs(t, err, scheduling.ErrDeadline)
 	require.NotNil(t, lock)
 	require.Less(t, elapsed, time.Second, "caller must return while the terminal table lock is still held")
-	require.Zero(t, sends)
 	require.Zero(t, r.Ledger.Snapshot().Attempts)
 	var active int
 	require.NoError(t, lock.QueryRow("SELECT COUNT(*) FROM scheduling_attempts WHERE request_id=$1 AND state<>'settled'", r.ID).Scan(&active))
@@ -61,7 +87,7 @@ func TestControlledCallerDeadlineDoesNotWaitForTerminalStoreLock(t *testing.T) {
 		var count int
 		return db.QueryRow("SELECT COUNT(*) FROM scheduling_attempts WHERE request_id=$1 AND state='settled' AND outcome='not_sent'", r.ID).Scan(&count) == nil && count == 1
 	}, 3*time.Second, 10*time.Millisecond)
-	t.Logf("roundTrip=%s held_lock_active=1 actual_attempts=0 sends=0 settled_not_sent=1", elapsed)
+	t.Logf("MarkSent=%s held_lock_active=1 actual_attempts=0 settled_not_sent=1", elapsed)
 }
 
 func seedControlledActualModelHealth(t *testing.T, s *ControlledSchedulingService, r *ControlledRequest, a *Account, model string, state scheduling.HealthState) scheduling.HealthSnapshot {

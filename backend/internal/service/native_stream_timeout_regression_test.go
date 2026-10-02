@@ -17,7 +17,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/scheduling"
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/gjson"
 )
 
 type nativeAttemptTimeoutReadCloser struct {
@@ -55,6 +54,10 @@ func TestNativeStreamAttemptDeadlineDeliversFailureOrSafeFailover(t *testing.T) 
 					defer close(writerDone)
 					if created {
 						_, _ = io.WriteString(pw, nativeRelaySSE("response.created", `"sequence_number":7,"response":{"id":"resp_timeout","created_at":12345,"model":"fixture"}`))
+						time.Sleep(150 * time.Millisecond)
+						_, _ = io.WriteString(pw, nativeRelaySSE("response.completed", `"sequence_number":8,"response":{"id":"resp_timeout","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}`))
+						_ = pw.Close()
+						return
 					}
 					<-d.ctx.Done()
 					_ = pw.CloseWithError(context.Canceled)
@@ -75,24 +78,16 @@ func TestNativeStreamAttemptDeadlineDeliversFailureOrSafeFailover(t *testing.T) 
 					err, first = e, result.firstTokenMs
 				}
 				<-writerDone
-				require.Error(t, err)
 				require.NoError(t, ctx.Err(), "the downstream request remains live after attempt cancellation")
 				require.Nil(t, first, "created and a local failure are not semantic output")
 				if created {
-					require.ErrorIs(t, err, context.DeadlineExceeded)
-					require.True(t, ControlledStreamFailureWritten(ctx))
-					require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.failed\n"))
-					chunks := strings.Split(rec.Body.String(), "\n\n")
-					data := nativeSSEEventData([]byte(chunks[1]))
-					require.Equal(t, "resp_timeout", gjson.GetBytes(data, "response.id").String())
-					require.EqualValues(t, 12345, gjson.GetBytes(data, "response.created_at").Int())
-					require.Equal(t, "fixture", gjson.GetBytes(data, "response.model").String())
-					require.EqualValues(t, 8, gjson.GetBytes(data, "sequence_number").Int())
-					require.Equal(t, "content_timeout", gjson.GetBytes(data, "response.error.code").String())
-					before := rec.Body.String()
-					require.NoError(t, writeNativeResponsesFailure(ctx, c, "resp_timeout", 9, "upstream_error", "duplicate"))
-					require.Equal(t, before, rec.Body.String(), "failure delivery must be exactly once")
+					require.NoError(t, err, "created disarms the startup timer while upstream generates")
+					require.False(t, ControlledStreamFailureWritten(ctx))
+					require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.created\n"))
+					require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.completed\n"))
+					require.True(t, ControlledStreamSnapshot(ctx).AttemptCommitted)
 				} else {
+					require.Error(t, err)
 					var failover *UpstreamFailoverError
 					require.ErrorAs(t, err, &failover)
 					require.Equal(t, http.StatusGatewayTimeout, failover.StatusCode)
@@ -391,4 +386,88 @@ func TestNativeStreamHeartbeatPreservesSchedulerDeadline(t *testing.T) {
 	require.False(t, scanner.Scan())
 	require.ErrorIs(t, scanner.Err(), context.DeadlineExceeded)
 	require.NotErrorIs(t, scanner.Err(), context.Canceled)
+}
+
+func TestNativePassthroughUpstreamIdleTimeoutRespectsCommit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, created := range []bool{false, true} {
+		t.Run(fmt.Sprint(created), func(t *testing.T) {
+			ctx, r, _ := nativeCommitFixture(t)
+			r.policyLoaded = true
+			pr, pw := io.Pipe()
+			defer pw.Close()
+			defer pr.Close()
+			if created {
+				go func() {
+					_, _ = io.WriteString(pw, nativeRelaySSE("response.created", `"sequence_number":7,"response":{"id":"resp_idle","created_at":12345,"model":"fixture"}`))
+				}()
+			}
+			rec := newNativeStreamTestRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+			c.Writer = &schedulingResponseWriter{ResponseWriter: c.Writer, request: r}
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: pr}
+			svc := nativeRelayService()
+			svc.cfg.Gateway.StreamDataIntervalTimeout = 1
+			_, err := svc.handleStreamingResponsePassthrough(ctx, resp, c, nativeRelayAccount(), time.Now(), "fixture", "fixture")
+			require.Error(t, err)
+			require.NoError(t, ctx.Err())
+			if created {
+				require.True(t, ControlledStreamSnapshot(ctx).AttemptCommitted)
+				require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.created\n"))
+				require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.failed\n"))
+				require.Contains(t, rec.Body.String(), `"id":"resp_idle"`)
+				require.Contains(t, rec.Body.String(), `"sequence_number":8`)
+				require.Contains(t, rec.Body.String(), `"code":"stream_timeout"`)
+				var failover *UpstreamFailoverError
+				require.NotErrorAs(t, err, &failover)
+			} else {
+				require.False(t, ControlledStreamSnapshot(ctx).AttemptCommitted)
+				var failover *UpstreamFailoverError
+				require.ErrorAs(t, err, &failover)
+				require.Empty(t, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestNativeSSEHeartbeatDoesNotExtendUpstreamIdle(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	heartbeats := 0
+	scanner := newNativeSSEIdleScanner(context.Background(), pr, bufio.NewScanner(pr), 20*time.Millisecond, func() error {
+		heartbeats++
+		return nil
+	}, 150*time.Millisecond)
+	defer scanner.Close()
+	started := time.Now()
+	require.False(t, scanner.Scan())
+	require.ErrorIs(t, scanner.Err(), errNativeSSEUpstreamIdle)
+	require.Greater(t, heartbeats, 0)
+	require.Less(t, time.Since(started), time.Second)
+}
+
+func TestNativeSSEUpstreamFragmentsResetIdleWithoutWaitingForEvent(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	body := newNativeSSEReadProgressBody(pr)
+	scanner := newNativeSSEIdleScanner(context.Background(), body, newNativeSSEEventScanner(bufio.NewScanner(body)), 0, nil, 100*time.Millisecond)
+	defer scanner.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for _, fragment := range []string{"data: {\"type\":", "\"response.created\",", "\"response\":{\"id\":\"resp_fragments\"}}", "\n\n"} {
+			if _, err := io.WriteString(pw, fragment); err != nil {
+				return
+			}
+			time.Sleep(60 * time.Millisecond)
+		}
+		_ = pw.Close()
+	}()
+	started := time.Now()
+	require.True(t, scanner.Scan())
+	require.Contains(t, scanner.Text(), "resp_fragments")
+	require.NoError(t, scanner.Err())
+	require.Greater(t, time.Since(started), 100*time.Millisecond)
+	<-done
 }

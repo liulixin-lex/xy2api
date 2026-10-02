@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -62,7 +63,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	}
 	guardFirstOutput := firstOutputTimeout > 0
 	nativeDelivery := NativeStreamDeliveryEnabled(ctx)
-	nativeFirstAnswerRecovery := nativeDelivery && NativeStreamFirstAnswerRecoveryEnabled(ctx)
 	var nativeTerminalEffect func()
 	defer func() {
 		if nativeTerminalEffect != nil {
@@ -140,21 +140,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	var nativeEvent bytes.Buffer
 	var nativeReadAt time.Time
 	var firstOutputStage *openAIFirstOutputStage
-	var nativeFirstAnswerStage *nativeFirstAnswerStage
 	if stageFirstOutput && !nativeDelivery {
 		firstOutputStage = newDefaultOpenAIFirstOutputStage()
 		defer func() {
 			if err := firstOutputStage.Close(); err != nil {
 				logger.LegacyPrintf("service.openai_gateway", "OpenAI first-output staging cleanup failed: account=%d model=%s error=%v", account.ID, originalModel, err)
-			}
-		}()
-	}
-	if nativeFirstAnswerRecovery {
-		stage := newNativeFirstAnswerStage()
-		nativeFirstAnswerStage = stage
-		defer func() {
-			if err := stage.Close(); err != nil {
-				logger.LegacyPrintf("service.openai_gateway", "Native first-answer staging cleanup failed: account=%d model=%s error=%v", account.ID, originalModel, err)
 			}
 		}()
 	}
@@ -191,12 +181,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				recordOpenAIStreamKeepaliveBytes(c, n)
 				return err
 			}
-			if nativeFirstAnswerStage != nil && !nativeResponsesPreAnswerBoundary(payload) {
-				if err := nativeFirstAnswerStage.Stage(frame, payload); err != nil {
-					return err
-				}
-				return nil
-			}
 			// Commit before any byte: a partial write cannot restore retry eligibility.
 			if len(payload) > 0 {
 				if err := CommitControlledOutput(ctx, payload); err != nil {
@@ -205,12 +189,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				applyAttemptResponseHeaders()
 				MarkResponseCommitted(c)
 				RecordNativeStreamEventRead(ctx, nativeReadAt)
-			}
-			if nativeFirstAnswerStage != nil {
-				if _, err := nativeFirstAnswerStage.Commit(ctx, w, c); err != nil {
-					return err
-				}
-				nativeFirstAnswerStage = nil
 			}
 			_, err := WriteNativeStreamFrame(ctx, w, frame)
 			if err != nil {
@@ -368,9 +346,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if nativeDelivery {
 			clientDisconnected = ctx.Err() != nil || ControlledStreamSnapshot(ctx).CancelReason.excludesProviderHealth()
 			streamEarlyErr = err
-			if nativeFirstAnswerRecovery && errors.Is(err, errOpenAIFirstOutputStageLimit) {
-				streamEarlyErr = nativeStreamReadFailover(ctx, context.DeadlineExceeded)
-			} else if nativeStreamAttemptReadFailure(ctx, err) {
+			if nativeStreamAttemptReadFailure(ctx, err) {
 				streamEarlyErr = nativeStreamReadFailover(ctx, err)
 			}
 			_ = resp.Body.Close()
@@ -410,6 +386,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming flush, continuing to drain upstream for billing")
 				} else {
 					clientOutputStarted = clientOutputStarted || !nativeDelivery || nativeFrameDelivered
+					if nativeDelivery && nativeFrameDelivered {
+						stopFirstOutputTimer()
+					}
 					noteDownstreamWrite()
 				}
 			}
@@ -534,6 +513,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if !sawTerminalEvent {
 			if openAIStreamClientOutputStarted(c, clientOutputStarted) && !clientDisconnected {
 				s.recordOpenAIProxyStreamDisconnect(account, errors.New("stream ended before terminal event"), upstreamRequestID)
+				if nativeDelivery && ctx.Err() == nil && !sawFailedEvent {
+					sendErrorEvent("upstream_error", "Upstream response stream ended before a terminal event")
+				}
 			}
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
 		}
@@ -553,7 +535,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if scanErr == nil {
 			return nil, nil, false
 		}
-		if errors.Is(scanErr, errOpenAIFirstOutputScannerLimit) && !firstOutputProgressObserved {
+		if errors.Is(scanErr, errOpenAIFirstOutputScannerLimit) && !firstOutputProgressObserved && (!nativeDelivery || !openAIStreamClientOutputStarted(c, clientOutputStarted)) {
 			logger.LegacyPrintf("service.openai_gateway", "SSE token exceeded guarded first-output limit: account=%d limit=%d error=%v", account.ID, openAIFirstOutputStageMaxBytes+openAIFirstOutputScannerFramingAllowance, scanErr)
 			failoverErr := s.newOpenAIStreamFailoverError(
 				c, account, false, upstreamRequestID, nil,
@@ -562,7 +544,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			failoverErr.SafeToFailoverAfterWrite = true
 			return resultWithUsage(), failoverErr, true
 		}
-		if errors.Is(scanErr, bufio.ErrTooLong) && stageFirstOutput && !firstOutputProgressObserved {
+		if errors.Is(scanErr, bufio.ErrTooLong) && stageFirstOutput && !firstOutputProgressObserved && (!nativeDelivery || !openAIStreamClientOutputStarted(c, clientOutputStarted)) {
 			logger.LegacyPrintf("service.openai_gateway", "SSE line too long before first output: account=%d max_size=%d error=%v", account.ID, maxLineSize, scanErr)
 			failoverErr := s.newOpenAIStreamFailoverError(
 				c, account, false, upstreamRequestID, nil,
@@ -628,6 +610,15 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		// Extract data from SSE line (supports both "data: " and "data:" formats)
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
+			if nativeDelivery && strings.TrimSpace(data) == "[DONE]" {
+				streamEarlyErr = fmt.Errorf("response terminal was not verified: %w", io.ErrUnexpectedEOF)
+				if !ControlledStreamSnapshot(ctx).AttemptCommitted && !clientOutputStarted {
+					streamEarlyErr = s.newOpenAIStreamFailoverError(c, account, false, upstreamRequestID, nil, streamEarlyErr.Error())
+				} else if ctx.Err() == nil {
+					sendErrorEvent("upstream_error", "Upstream response stream ended before a terminal event")
+				}
+				return
+			}
 			eventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
 			if nativeDelivery {
 				if terminalErr := nativeResponsesTerminalError(dataBytes, eventType); terminalErr != nil {
@@ -874,19 +865,24 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				}
 			}
 			if startsClientOutput && !openAIStreamEventTypeIsTerminal(eventType) {
-				responsesSemanticOutputSeen = !nativeFirstAnswerRecovery || nativeResponsesPreAnswerBoundary(dataBytes)
+				responsesSemanticOutputSeen = responsesSemanticOutputSeen || !nativeDelivery || startsVisibleOutput
 			}
-			// OpenAI Responses streams that terminate with an empty
-			// response.completed (no output, no usage, no error, nothing sent
-			// to the client) are silent upstream refusals: fail over instead of
-			// recording a successful 0/0 usage turn (issue #5009).
+			// An empty completed event is a silent upstream refusal. Once an
+			// upstream event was delivered, report it on the same response.
 			if account != nil && account.Platform == PlatformOpenAI &&
 				(eventType == "response.completed" || eventType == "response.done") &&
-				!sawFailedEvent && !responsesSemanticOutputSeen && !clientOutputStarted &&
+				!sawFailedEvent && !responsesSemanticOutputSeen &&
 				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
 				sawTerminalEvent = true
-				streamEarlyErr = newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID)
-				return
+				if nativeDelivery && (ControlledStreamSnapshot(ctx).AttemptCommitted || clientOutputStarted) {
+					streamEarlyErr = s.deliverOpenAIResponsesEmptyCompletedFailure(ctx, c, account, false,
+						upstreamRequestID, responseID, lastNativeSequence+1)
+				} else if !clientOutputStarted {
+					streamEarlyErr = newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID)
+				}
+				if streamEarlyErr != nil {
+					return
+				}
 			}
 
 			// 写入客户端（客户端断开后继续 drain 上游）

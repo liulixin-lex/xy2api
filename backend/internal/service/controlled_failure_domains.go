@@ -25,17 +25,13 @@ func (s *ControlledSchedulingService) prepareControlledFailureRequest(req *http.
 	prepare, stopPreparation := controlledPreparationContext(req.Context(), controlledRequest(req.Context()))
 	defer stopPreparation()
 	defer func() { prepareErr = controlledPreparationError(req.Context(), prepare, prepareErr) }()
+	req, metadata, err := controlledOutboundMetadataForRequest(req)
+	if err != nil {
+		return req, err
+	}
 	model := ""
-	if req.GetBody != nil {
-		reader, err := req.GetBody()
-		if err != nil {
-			return req, err
-		}
-		outboundModel, _, valid := ReadControlledOutboundMetadata(reader)
-		_ = reader.Close()
-		if valid {
-			model = outboundModel
-		}
+	if metadata.valid {
+		model = metadata.model
 	}
 	if model == "" {
 		path := req.URL.Path

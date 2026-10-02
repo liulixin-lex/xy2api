@@ -34,8 +34,6 @@ type controlledDispatch struct {
 	sent                 bool
 	semantic             time.Time
 	answer               time.Time
-	answerBoundary       bool
-	firstAnswerRecovery  bool
 	firstEvent           time.Time
 	started              time.Time
 	attemptDeadline      time.Time
@@ -249,7 +247,7 @@ func (s *ControlledSchedulingService) beginDispatch(ctx context.Context, account
 		return nil, e
 	}
 	live, cancel := context.WithCancel(liveParent)
-	d := &controlledDispatch{service: s, request: r, ticket: ticket, budget: br, decision: decision, cancel: cancel, done: make(chan struct{}), semanticReady: make(chan struct{}), semanticObservable: true, healthObservation: healthObservation, sendCertainty: ControlledNotSent, firstAnswerRecovery: NativeStreamFirstAnswerRecoveryEnabled(ctx)}
+	d := &controlledDispatch{service: s, request: r, ticket: ticket, budget: br, decision: decision, cancel: cancel, done: make(chan struct{}), semanticReady: make(chan struct{}), semanticObservable: true, healthObservation: healthObservation, sendCertainty: ControlledNotSent}
 	d.ctx = context.WithValue(live, controlledDispatchContextKey{}, d)
 	if leaseErr := (scheduling.RedisFailureDomains{Client: s.redis}).Acquire(ctx, ticket); leaseErr != nil {
 		d.finishPreparationFailure(leaseErr)
@@ -378,10 +376,7 @@ func (d *controlledDispatch) startFirstOutputTimerLocked() {
 	if d.timer != nil {
 		d.timer.Stop()
 	}
-	if !d.firstAnswerRecovery && !d.semantic.IsZero() {
-		return
-	}
-	if d.firstAnswerRecovery && d.answerBoundary {
+	if (NativeStreamDeliveryEnabled(d.ctx) && d.semanticObservable && !d.firstEvent.IsZero()) || !d.semantic.IsZero() {
 		return
 	}
 	r := d.request
@@ -428,8 +423,8 @@ func (d *controlledDispatch) startFirstOutputTimerLocked() {
 			return
 		}
 		pending := d.semantic.IsZero()
-		if d.firstAnswerRecovery {
-			pending = !d.answerBoundary
+		if NativeStreamDeliveryEnabled(d.ctx) && d.semanticObservable {
+			pending = d.firstEvent.IsZero()
 		}
 		if pending {
 			if end, ok := d.ctx.Deadline(); NativeStreamDeliveryEnabled(d.ctx) && ok && !r.ClientDeadline.IsZero() && !end.After(r.ClientDeadline) && !time.Now().Before(end) {
@@ -450,7 +445,7 @@ func (d *controlledDispatch) startFirstOutputTimerLocked() {
 		}
 	})
 }
-func (d *controlledDispatch) noteEvent(semantic, answer, terminal, unsafe bool) {
+func (d *controlledDispatch) noteEvent(semantic, answer, terminal bool) {
 	if d == nil {
 		return
 	}
@@ -472,13 +467,9 @@ func (d *controlledDispatch) noteEvent(semantic, answer, terminal, unsafe bool) 
 	if answer && d.answer.IsZero() {
 		d.answer = now
 	}
-	if answer || terminal || unsafe {
-		d.answerBoundary = true
-	}
-	ready := firstSemantic
-	if d.firstAnswerRecovery {
-		ready = d.answerBoundary
-	}
+	// Nonstream background acceptance records protocol progress but must retain
+	// its original completion deadline until polling verifies the terminal.
+	ready := firstSemantic || (NativeStreamDeliveryEnabled(d.ctx) && d.semanticObservable)
 	if ready {
 		if d.timer != nil {
 			d.timer.Stop()
@@ -502,6 +493,12 @@ func (d *controlledDispatch) ObserveFrame(frame []byte) {
 	if d == nil {
 		return
 	}
+	if NativeStreamDeliveryEnabled(d.ctx) && d.request != nil && (d.request.Protocol == "responses" || d.request.Protocol == "ws") {
+		eventType := gjson.GetBytes(frame, "type")
+		if bytes.Equal(bytes.TrimSpace(frame), []byte("[DONE]")) || eventType.Type != gjson.String || strings.TrimSpace(eventType.String()) == "" {
+			return
+		}
+	}
 	if !gjson.ValidBytes(frame) && !bytes.Equal(bytes.TrimSpace(frame), []byte("[DONE]")) {
 		return // partial JSON cannot prove remote completion or provider failure
 	}
@@ -509,8 +506,9 @@ func (d *controlledDispatch) ObserveFrame(frame []byte) {
 		return
 	}
 	semantic, answer, terminal, tool := classifySemanticEvent(frame)
-	if NativeStreamDeliveryEnabled(d.ctx) && bytes.Equal(bytes.TrimSpace(frame), []byte("[DONE]")) && d.request != nil && (d.request.Protocol == "responses" || d.request.Protocol == "ws") {
-		terminal = false
+	if NativeStreamDeliveryEnabled(d.ctx) && d.request != nil && (d.request.Protocol == "responses" || d.request.Protocol == "ws") {
+		answer = answer || nativeResponsesFirstAnswerOutput(frame)
+		semantic = semantic || answer
 	}
 	v := gjson.ParseBytes(frame)
 	kind := v.Get("type").String()
@@ -566,8 +564,7 @@ func (d *controlledDispatch) ObserveFrame(frame []byte) {
 		}
 	}
 	d.mu.Unlock()
-	unsafe := d.firstAnswerRecovery && nativeResponsesPreAnswerBoundary(frame) && !answer && !terminal
-	d.noteEvent(semantic, answer, terminal, unsafe)
+	d.noteEvent(semantic, answer, terminal)
 }
 
 func (d *controlledDispatch) CommitOutput(frame []byte) {
@@ -779,7 +776,7 @@ func (d *controlledDispatch) Finish(outcome string, remoteTerminal bool, err err
 			o.Excluded = excluded
 			o.RetryAfter = retryAfter
 			latencyPoint := semantic
-			if d.firstAnswerRecovery {
+			if NativeStreamDeliveryEnabled(d.ctx) {
 				latencyPoint = answer
 			}
 			if !latencyPoint.IsZero() {
@@ -891,16 +888,11 @@ func (s *ControlledSchedulingService) roundTrip(req *http.Request, accountID int
 		return send(req)
 	}
 	buffered, _ := req.Context().Value(controlledBufferedResponseContextKey{}).(bool)
-	// Read a duplicate body only when the transport supplied a safe GetBody.
 	// Unknown/multipart input has no observable TTFT until an SSE header proves it.
 	d.semanticObservable = !buffered && (strings.Contains(req.URL.Path, "streamGenerateContent") || strings.HasSuffix(req.URL.Path, "/invoke-with-response-stream"))
-	if !buffered && req.GetBody != nil {
-		if duplicate, e := req.GetBody(); e == nil {
-			_, stream, valid := ReadControlledOutboundMetadata(duplicate)
-			_ = duplicate.Close()
-			if valid {
-				d.semanticObservable = d.semanticObservable || stream
-			}
+	if !buffered {
+		if metadata, ok := req.Context().Value(controlledOutboundMetadataKey{}).(controlledOutboundMetadata); ok && metadata.valid {
+			d.semanticObservable = d.semanticObservable || metadata.stream
 		}
 	}
 	if err = d.MarkSent(); err != nil {
@@ -953,7 +945,7 @@ func (s *ControlledSchedulingService) roundTrip(req *http.Request, accountID int
 	}
 	d.observeFailureResponse(response)
 	if !NativeStreamDeliveryEnabled(req.Context()) {
-		d.noteEvent(false, false, false, false)
+		d.noteEvent(false, false, false)
 	}
 	d.mu.Lock()
 	d.semanticObservable = !buffered && (strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") || strings.Contains(response.Header.Get("Content-Type"), "application/vnd.amazon.eventstream")) && response.StatusCode < 400

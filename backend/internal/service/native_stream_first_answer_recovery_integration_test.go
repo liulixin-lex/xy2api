@@ -4,11 +4,11 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,9 +18,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNativeFirstAnswerRecoveryRealStores(t *testing.T) {
+func TestNativeCommittedPreambleCannotFailoverRealStores(t *testing.T) {
 	for _, passthrough := range []bool{false, true} {
-		for _, mode := range []string{"created_timeout", "reasoning_timeout", "message_timeout", "comment_timeout", "eof", "failed"} {
+		for _, mode := range []string{"eof", "failed"} {
 			t.Run(fmt.Sprintf("passthrough_%v/%s", passthrough, mode), func(t *testing.T) {
 				s, db, _, accounts := controlledIntegration(t, false)
 				parent, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -45,25 +45,10 @@ func TestNativeFirstAnswerRecoveryRealStores(t *testing.T) {
 					_, _ = io.Copy(io.Discard, q.Body)
 					w.Header().Set("Content-Type", "text/event-stream")
 					fmt.Fprint(w, "data: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_failed_candidate\"}}\n\n")
-					if mode == "reasoning_timeout" {
-						fmt.Fprint(w, "data: {\"type\":\"response.reasoning_summary_text.delta\",\"sequence_number\":1,\"delta\":\"thinking\"}\n\n")
-					}
-					if mode == "message_timeout" {
-						fmt.Fprint(w, "data: {\"type\":\"response.output_item.added\",\"sequence_number\":1,\"item\":{\"id\":\"msg_failed\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\n")
-					}
-					if mode == "comment_timeout" {
-						fmt.Fprint(w, ": provider-heartbeat\n\n")
-					}
 					if mode == "failed" {
 						fmt.Fprint(w, "data: {\"type\":\"response.failed\",\"sequence_number\":2,\"response\":{\"id\":\"resp_failed_candidate\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"upstream unavailable\"}}}\n\n")
 					}
 					w.(http.Flusher).Flush()
-					if strings.HasSuffix(mode, "timeout") {
-						select {
-						case <-q.Context().Done():
-						case <-time.After(2500 * time.Millisecond):
-						}
-					}
 				})
 				require.NoError(t, err)
 				started := time.Now()
@@ -77,48 +62,25 @@ func TestNativeFirstAnswerRecoveryRealStores(t *testing.T) {
 				}
 				firstToken, err := forward(response, first)
 				_ = response.Body.Close()
-				before := rec.Body.String()
-				t.Logf("FIRST mode=%s passthrough=%v committed=%v bytes=%d error=%v", mode, passthrough, ControlledStreamSnapshot(ctx).AttemptCommitted, len(before), err)
+				body := rec.Body.String()
+				t.Logf("FIRST mode=%s passthrough=%v committed=%v bytes=%d error=%v", mode, passthrough, ControlledStreamSnapshot(ctx).AttemptCommitted, len(body), err)
 				var failover *UpstreamFailoverError
-				require.ErrorAs(t, err, &failover)
+				require.Error(t, err)
+				require.False(t, errors.As(err, &failover), "delivered response identity forbids another generation")
 				require.Nil(t, firstToken)
-				require.NotContains(t, before, "resp_failed_candidate")
-				require.NotContains(t, before, "thinking")
-				require.False(t, ControlledStreamSnapshot(ctx).AttemptCommitted)
-				if strings.HasSuffix(mode, "timeout") {
-					require.Contains(t, before, ":")
-					require.Less(t, time.Since(started), 2*time.Second, "reasoning and message headers must not disable answer timeout")
-				}
+				require.Contains(t, body, "resp_failed_candidate")
+				require.True(t, ControlledStreamSnapshot(ctx).AttemptCommitted)
 				select {
 				case <-cancelled:
 				case <-time.After(time.Second):
-					t.Fatal("first upstream not cancelled before retry")
+					t.Fatal("upstream did not terminate")
 				}
-				second := controlledPick(t, s, ctx, r, accounts)
-				require.NotEqual(t, first.ID, second.ID)
-				response, err = controlledHTTP(t, s, ctx, second.ID, func(w http.ResponseWriter, q *http.Request) {
-					_, _ = io.Copy(io.Discard, q.Body)
-					w.Header().Set("Content-Type", "text/event-stream")
-					fmt.Fprint(w, "data: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_recovered\"}}\n\n")
-					fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"sequence_number\":1,\"delta\":\"OK\"}\n\n")
-					fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"sequence_number\":2,\"response\":{\"id\":\"resp_recovered\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")
-				})
-				require.NoError(t, err)
-				answer, err := forward(response, second)
-				_ = response.Body.Close()
-				require.NoError(t, err)
-				require.NotNil(t, answer)
-				require.NotContains(t, rec.Body.String(), "resp_failed_candidate")
-				require.Contains(t, rec.Body.String(), "resp_recovered")
-				require.Contains(t, rec.Body.String(), `"delta":"OK"`)
-				require.Equal(t, 1, strings.Count(rec.Body.String(), `"type":"response.completed"`))
-				require.Equal(t, 2, r.Ledger.Snapshot().Attempts)
-				var complete, active, attempts int
-				require.NoError(t, db.QueryRow("SELECT count(*),count(*) FILTER(WHERE outcome='completed' AND state='settled'),count(*) FILTER(WHERE state='dispatched') FROM scheduling_attempts WHERE request_id=$1", r.ID).Scan(&attempts, &complete, &active))
-				require.Equal(t, 2, attempts)
-				require.Equal(t, 1, complete)
+				require.Equal(t, 1, r.Ledger.Snapshot().Attempts)
+				var attempts, active int
+				require.NoError(t, db.QueryRow("SELECT count(*),count(*) FILTER(WHERE state='dispatched') FROM scheduling_attempts WHERE request_id=$1", r.ID).Scan(&attempts, &active))
+				require.Equal(t, 1, attempts)
 				require.Zero(t, active)
-				t.Logf("RECOVERED first=%d second=%d attempts=%d completed=%d live_dispatches=%d answer_ms=%d heartbeat=%v", first.ID, second.ID, attempts, complete, active, *answer, strings.Contains(before, ":"))
+				t.Logf("COMMITTED first=%d attempts=%d live_dispatches=%d", first.ID, attempts, active)
 			})
 		}
 	}

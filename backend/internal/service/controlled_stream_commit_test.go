@@ -46,25 +46,30 @@ func TestNativeStreamObserveDoesNotCommitOrFabricateContent(t *testing.T) {
 	require.ErrorIs(t, r.Ledger.CanAttempt(2, 0, time.Now(), true), scheduling.ErrCommitted)
 }
 
-func TestNativeStreamRecoveryKeepsPreambleRetryableUntilAnswerBoundary(t *testing.T) {
+func TestNativeStreamAnswerTimingExcludesSummaryPart(t *testing.T) {
+	_, _, d := nativeCommitFixture(t)
+	d.ObserveFrame([]byte(`{"type":"response.content_part.done","part":{"type":"summary_text","text":"thinking"}}`))
+	require.True(t, d.answer.IsZero())
+	d.ObserveFrame([]byte(`{"type":"response.content_part.done","part":{"type":"output_text","text":"answer"}}`))
+	require.False(t, d.answer.IsZero())
+	require.False(t, d.semantic.IsZero())
+}
+
+func TestNativeStreamRecoveryCommitsCreatedBeforeAnswer(t *testing.T) {
 	ctx, r, d := nativeCommitFixture(t)
-	d.firstAnswerRecovery = true
 
 	created := []byte(`{"type":"response.created","response":{"id":"resp_first"}}`)
 	reasoning := []byte(`{"type":"response.reasoning_text.delta","delta":"thinking"}`)
-	for _, frame := range [][]byte{created, reasoning} {
-		d.ObserveFrame(frame)
-	}
-	require.False(t, d.answerBoundary)
+	d.ObserveFrame(created)
 	require.False(t, r.Ledger.Snapshot().Committed)
-	require.NoError(t, r.Ledger.CanAttempt(2, 0, time.Now(), true), "a pre-answer attempt must remain eligible for account failover")
+	require.NoError(t, CommitControlledOutput(ctx, created))
+	require.True(t, r.Ledger.Snapshot().Committed)
+	require.ErrorIs(t, r.Ledger.CanAttempt(2, 0, time.Now(), true), scheduling.ErrCommitted)
+	d.ObserveFrame(reasoning)
 
 	answer := []byte(`{"type":"response.output_text.delta","delta":"hello"}`)
 	d.ObserveFrame(answer)
-	require.True(t, d.answerBoundary)
-	require.NoError(t, CommitControlledOutput(ctx, answer))
-	require.True(t, r.Ledger.Snapshot().Committed)
-	require.ErrorIs(t, r.Ledger.CanAttempt(2, 0, time.Now(), true), scheduling.ErrCommitted)
+	require.False(t, d.answer.IsZero())
 }
 
 func TestNativeStreamHeartbeatCommitsOnlyHTTP(t *testing.T) {
@@ -137,23 +142,23 @@ func TestNativeStreamCancellationReasonsExcludeProviderPenalty(t *testing.T) {
 	}
 }
 
-func TestNativeStreamCommittedCreatedKeepsContentDeadline(t *testing.T) {
+func TestNativeStreamCommittedCreatedStopsStartupDeadline(t *testing.T) {
 	ctx, r, d := nativeCommitFixture(t)
 	r.Profile = scheduling.LatencyProfile{AttemptTimeoutMS: 30, TotalBudgetMS: 1000}
 	r.Ledger = scheduling.NewAttemptLedger(r.Policy.Retry, r.Profile, time.Now(), time.Time{})
 	require.NoError(t, r.Ledger.BeginAttempt(1, 0, time.Now(), true))
-	created := []byte("{\"type\":\"response.created\"}")
-	d.ObserveFrame(created)
-	require.NoError(t, CommitControlledOutput(ctx, created))
 	d.mu.Lock()
 	d.startFirstOutputTimerLocked()
 	d.mu.Unlock()
+	created := []byte("{\"type\":\"response.created\"}")
+	d.ObserveFrame(created)
+	require.NoError(t, CommitControlledOutput(ctx, created))
 	select {
 	case <-d.ctx.Done():
-	case <-time.After(time.Second):
-		t.Fatal("created improperly disabled content deadline")
+		t.Fatal("committed first event was canceled by the startup deadline")
+	case <-time.After(100 * time.Millisecond):
 	}
-	require.Equal(t, ControlledContentTimeout, ControlledStreamSnapshot(ctx).CancelReason)
+	require.Empty(t, ControlledStreamSnapshot(ctx).CancelReason)
 	require.False(t, ControlledStreamSnapshot(ctx).SemanticSeen)
 	require.ErrorIs(t, r.Ledger.CanAttempt(2, 0, time.Now(), true), scheduling.ErrCommitted)
 }

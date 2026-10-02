@@ -52,7 +52,7 @@ func TestNativeStreamHTTPRealTransportCloseRaces(t *testing.T) {
 								return
 							}
 							if mode == "terminal" {
-								_, _ = io.WriteString(w, nativeRelaySSE("response.completed", "\"sequence_number\":1,\"response\":{\"id\":\"resp_close\",\"status\":\"completed\"}"))
+								_, _ = io.WriteString(w, nativeRelaySSE("response.completed", "\"sequence_number\":1,\"response\":{\"id\":\"resp_close\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}"))
 								_ = http.NewResponseController(w).Flush()
 								return
 							}
