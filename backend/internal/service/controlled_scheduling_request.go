@@ -10,9 +10,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/scheduling"
 )
 
@@ -106,6 +108,30 @@ func NewControlledRequestContext(ctx context.Context, protocol string) context.C
 func controlledRequest(ctx context.Context) *ControlledRequest {
 	r, _ := ctx.Value(controlledSchedulingContextKey{}).(*ControlledRequest)
 	return r
+}
+
+// Preserve ingress tracing in the existing attempt-metadata write. These are
+// correlation labels only: they never replace the independent ledger ID, prove
+// ownership, or enable replay. Outbound header rewrites cannot change them.
+func (r *ControlledRequest) addTraceMetrics(metrics map[string]any) {
+	r.mu.Lock()
+	ctx, started := r.clientContext, r.Started
+	r.mu.Unlock()
+	if !started.IsZero() {
+		metrics["request_started_at"] = started.UTC().Format(time.RFC3339Nano)
+	}
+	if ctx == nil {
+		return
+	}
+	for key, name := range map[ctxkey.Key]string{
+		ctxkey.RequestID: "http_request_id", ctxkey.ClientRequestID: "client_request_id",
+	} {
+		value, _ := ctx.Value(key).(string)
+		value = strings.TrimSpace(value)
+		if value != "" && len(value) <= 64 && utf8.ValidString(value) {
+			metrics[name] = value
+		}
+	}
 }
 
 // Freeze WS metadata before selecting the first account. Waiting for a client

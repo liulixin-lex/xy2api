@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lib/pq"
 )
@@ -110,6 +112,15 @@ func (s *PostgresStore) RecordAttemptMetrics(ctx context.Context, ticketID strin
 		"priority": "number", "reason": "string", "metric_version": "string", "policy_version": "number",
 		"first_event_ms": "number", "first_semantic_ms": "number", "first_answer_ms": "number",
 		"overall_first_semantic_ms": "number", "remaining_budget_ms": "number", "stop_reason": "string",
+		"native_stream_policy_version": "number", "headers_ms": "number", "attempt_committed_ms": "number",
+		"first_protocol_event_ms": "number", "first_content_ms": "number", "unknown_event_count": "number",
+		"send_certainty": "certainty", "cancel_reason": "string", "started_at": "time",
+		"request_started_at": "time", "first_downstream_flush_at": "time",
+		"http_committed": "bool", "attempt_committed": "bool", "semantic_seen": "bool",
+		"gateway_read_to_flush_ms": "delay", "gateway_read_to_flush_max_ms": "delay", "gateway_flush_count": "number",
+		// These are trace aliases only. Attempt ownership and recovery identity
+		// remain the authoritative scheduling_attempts columns.
+		"http_request_id": "trace", "client_request_id": "trace",
 	}
 	safe := make(map[string]json.RawMessage)
 	for key, kind := range allowed {
@@ -117,9 +128,13 @@ func (s *PostgresStore) RecordAttemptMetrics(ctx context.Context, ticketID strin
 		if !exists || string(value) == "null" {
 			continue
 		}
-		if kind == "string" || kind == "time" || kind == "kind" {
+		switch kind {
+		case "string", "time", "kind", "trace", "certainty":
 			var v string
 			if json.Unmarshal(value, &v) != nil || len(v) > 256 {
+				return ErrInvalidControl
+			}
+			if kind == "trace" && (len(v) == 0 || len(v) > 64 || strings.TrimSpace(v) != v || !utf8.ValidString(v)) {
 				return ErrInvalidControl
 			}
 			if kind == "time" {
@@ -132,7 +147,20 @@ func (s *PostgresStore) RecordAttemptMetrics(ctx context.Context, ticketID strin
 			if kind == "kind" && v != "ordinary_first" && v != "retry" && v != "probe" && v != "pin" && v != "owner" && v != "fallback" {
 				return ErrInvalidControl
 			}
-		} else {
+			if kind == "certainty" && v != "not_sent" && v != "sent_execution_unknown" && v != "response_received" && v != "externally_committed" {
+				return ErrInvalidControl
+			}
+		case "bool":
+			var v bool
+			if json.Unmarshal(value, &v) != nil {
+				return ErrInvalidControl
+			}
+		case "delay":
+			var v float64
+			if json.Unmarshal(value, &v) != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+				return ErrInvalidControl
+			}
+		default:
 			var v int64
 			if json.Unmarshal(value, &v) != nil {
 				return ErrInvalidControl

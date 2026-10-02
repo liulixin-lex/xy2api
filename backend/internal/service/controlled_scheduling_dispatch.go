@@ -329,6 +329,7 @@ func (d *controlledDispatch) MarkSent() (sendErr error) {
 	if NativeStreamDeliveryEnabled(d.ctx) {
 		metrics["metric_version"] = "native-stream-v1"
 		metrics["native_stream_policy_version"] = NativeStreamPolicyFromContext(d.ctx).Version
+		r.addTraceMetrics(metrics)
 	}
 	if err := d.service.Store.RecordAttemptMetrics(prepare, d.ticket.TicketID, metrics); err != nil {
 		return fmt.Errorf("%w: dispatch record: %v", scheduling.ErrSharedState, err)

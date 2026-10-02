@@ -5,6 +5,7 @@ package service
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,13 +14,16 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/scheduling"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNativeStreamControlledDeliveryRealStores(t *testing.T) {
-	s, _, _, accounts := controlledIntegration(t, false)
-	ctx := NewControlledRequestContext(WithNativeStreamPolicy(context.Background(), NativeStreamPolicy{Version: 1, Delivery: true}), "responses")
+	s, db, _, accounts := controlledIntegration(t, false)
+	base := context.WithValue(context.Background(), ctxkey.RequestID, "trace-native-timeline")
+	base = context.WithValue(base, ctxkey.ClientRequestID, "ingress-client-native")
+	ctx := NewControlledRequestContext(WithNativeStreamPolicy(base, NativeStreamPolicy{Version: 1, Delivery: true}), "responses")
 	group := int64(7)
 	r, on, err := s.loadPolicy(ctx, &group, "test-model", "")
 	require.NoError(t, err)
@@ -60,6 +64,7 @@ func TestNativeStreamControlledDeliveryRealStores(t *testing.T) {
 	defer upstream.Close()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstream.URL, strings.NewReader("{\"model\":\"test-model\",\"stream\":true}"))
 	require.NoError(t, err)
+	req.Header.Set("X-Client-Request-ID", "rewritten-outbound-id")
 	response, err := s.roundTrip(req, a.ID, 10, upstream.Client().Do)
 	require.NoError(t, err)
 	defer response.Body.Close()
@@ -112,4 +117,23 @@ func TestNativeStreamControlledDeliveryRealStores(t *testing.T) {
 	require.Equal(t, 1, r.Ledger.Snapshot().Attempts)
 	require.Equal(t, int64(3), r.flushCount)
 	t.Logf("timeline created=%s content=%s completed=%s attempts=%d gateway_first_read_to_flush_ms=%.3f gateway_max_read_to_flush_ms=%.3f", arrived[0], arrived[1], arrived[2], r.Ledger.Snapshot().Attempts, *r.firstReadToFlushMS, r.maxReadToFlushMS)
+	r.Close()
+	var raw []byte
+	require.NoError(t, db.QueryRow("SELECT metrics FROM scheduling_attempts WHERE ticket_id=$1", r.history[0].AttemptID).Scan(&raw))
+	var persisted map[string]any
+	require.NoError(t, json.Unmarshal(raw, &persisted))
+	require.Equal(t, "trace-native-timeline", persisted["http_request_id"])
+	require.Equal(t, "ingress-client-native", persisted["client_request_id"])
+	require.Equal(t, r.Started.UTC().Format(time.RFC3339Nano), persisted["request_started_at"])
+	require.Equal(t, float64(1), persisted["native_stream_policy_version"])
+	for _, key := range []string{"http_committed", "attempt_committed", "semantic_seen"} {
+		require.Equal(t, true, persisted[key], key)
+	}
+	require.Equal(t, float64(3), persisted["gateway_flush_count"])
+	require.Equal(t, *r.firstReadToFlushMS, persisted["gateway_read_to_flush_ms"])
+	require.Equal(t, r.maxReadToFlushMS, persisted["gateway_read_to_flush_max_ms"])
+	require.Equal(t, r.firstFlushAt.UTC().Format(time.RFC3339Nano), persisted["first_downstream_flush_at"])
+	require.Equal(t, float64(*r.history[0].HeadersMS), persisted["headers_ms"])
+	require.Equal(t, float64(*r.history[0].FirstProtocolEventMS), persisted["first_protocol_event_ms"])
+	require.Equal(t, float64(*r.history[0].FirstContentMS), persisted["first_content_ms"])
 }

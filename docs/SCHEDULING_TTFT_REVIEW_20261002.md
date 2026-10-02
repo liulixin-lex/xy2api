@@ -43,3 +43,11 @@
 - 最终冻结源码上的同输入三态补验：MODIFIED 3 RUN / 3 PASS / 0 SKIP，两路径均在答案被阻塞时将 created/推理真实 Flush；BASELINE 与 ROLLBACK 仍复现原暂存问题。3,145 个 Go 文件执行前后哈希一致。
 - 性能使用原门禁模板（GOMAXPROCS=2，默认 GC）、相同 64KiB 内事件和 1/16/64 并发：基线和修改均达 p95<=10ms / p99<=30ms，修改最差为 9.628ms / 24.400ms。首次误附加 GOGC=40 的压力测试失败；补测基线在同 GC40 配置也失败，完整对照见外部 PERF_VERDICT.json。未改阈值或夹具，不把通过结果泛化到 GC40。
 - 运行期验收仍须由后继构建、排空部署和真实短/长请求完成；此源码文档是部署前的冻结记录，不宣称站点已替换。
+
+## 观测补修与追加验证（2026-10-02）
+
+- 测试站已运行首轮业务修复 15ca705eb，8 个短/长请求均收到非空答案与 completed，唯一 usage/dedup 已验证；其中短请求首答案 25.706s，因旧探针未采调度身份且内存诊断过期，无法精确归因，不能据此保证尾延迟已消失。新探针采集现有 X-Scheduling-Request-Id。
+- RecordAttemptMetrics 的数据库白名单丢弃了业务层已有时序/Flush/提交指标。补修保留有类型约束的字段，在 MarkSent 原有数据库写入追加入口 request/client trace；从原始 context 取值，避免出站头改写，trace 不作为执行或恢复身份。没有新增首字前 SQL 调用。
+- 全量 service/handler/scheduling 18,458 RUN、18,440 PASS、18 条条件 SKIP，exit 0；CI 1,084/1,084 PASS，218 required 零跳过，lint 0 issues。上一节 214 required 是漏计 cmd/server 1 项的旧统计，应为 215；本次新增 3 项后为 218。
+- 同输入 timeline 三态 1/0/1：旧版和回滚版虽已及时转发，但 PG 缺失 http_request_id；修改版约 209.5ms 交付 created、5.010s 内容、20.011s 完成，真实 PG 身份与时序正确。独立 store 的真实 PG race 33 项及同输入三态通过。
+- 3,147 个 Go 文件冻结；最终默认 GC 六组性能 p95 最差 6.985ms、p99 最差 20.307ms，阈值和夹具不变。部署及真实精确关联是下一门禁，外部账本保存原始命令和结果。
