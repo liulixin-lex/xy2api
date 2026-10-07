@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liulixin-lex/xy2api/internal/service"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )

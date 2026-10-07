@@ -86,8 +86,7 @@ func (s *PaymentService) createHostedOrder(ctx context.Context, req CreateOrderR
 	if err != nil {
 		return nil, err
 	}
-	limitAmount := req.Amount
-	var orderAmount, bonusAmount float64
+	var limitAmount, orderAmount, bonusAmount float64
 	if plan != nil {
 		limitAmount = plan.Price
 		orderAmount = plan.Price

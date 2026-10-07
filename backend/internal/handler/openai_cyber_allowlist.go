@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
 func (h *OpenAIGatewayHandler) cyberPolicyLogOnly(c *gin.Context, apiKey *service.APIKey) bool {
