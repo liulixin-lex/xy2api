@@ -22,6 +22,10 @@ describe('Claude cache fallback settings', () => {
   expect(w.text()).toContain('claudeCacheFallback.saveFailed'); expect(saveButton(w).attributes('disabled')).toBeUndefined()
   await saveButton(w).trigger('click'); await flushPromises(); expect(mocks.save.mock.calls[1][0].claude_cache_fallback_policy.enabled).toBe(false)
  })
+ it('does not claim success when an older backend ignores the policy', async () => {
+  mocks.save.mockResolvedValue({}); const w=mountSettings(); await flushPromises(); await w.get('[data-toggle]').trigger('click'); await saveButton(w).trigger('click'); await flushPromises()
+  expect(w.text()).toContain('claudeCacheFallback.saveFailed'); expect(w.text()).not.toContain('claudeCacheFallback.saved'); expect(saveButton(w).attributes('disabled')).toBeUndefined()
+ })
  it('does not expose a save action on read failure and recovers by explicit reload', async () => {
   mocks.get.mockRejectedValueOnce(new Error('unavailable')); const w=mountSettings(); await flushPromises()
   expect(saveButton(w)).toBeUndefined(); expect(mocks.save).not.toHaveBeenCalled()

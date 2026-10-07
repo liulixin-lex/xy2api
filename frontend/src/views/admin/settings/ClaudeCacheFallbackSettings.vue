@@ -80,7 +80,8 @@ async function save() {
   try {
     const result = await adminAPI.settings.updateSettings({ claude_cache_fallback_policy: policy })
     if (disposed) return
-    draft.value = result.claude_cache_fallback_policy ?? policy
+    if (!result.claude_cache_fallback_policy) throw new Error('Cache policy was not returned by the server')
+    draft.value = result.claude_cache_fallback_policy
     baseline.value = JSON.stringify(draft.value); saved.value = true
   } catch { if (!disposed) error.value = t('admin.settings.claudeCacheFallback.saveFailed') }
   finally { if (!disposed) saving.value = false }
