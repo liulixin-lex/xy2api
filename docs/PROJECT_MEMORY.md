@@ -6,7 +6,7 @@
 
 ### 计费修复远端PR与合并（2026-10-07，执行中）
 
-- 用户已明确授权本轮推送、创建PR及合并。分支 `fix/billing-integrity-20261007`，业务提交 `efade20e1006747ebbe9ce4ae747bac81d7332c6`；完整修复与本地验证保持，后续提交仅登记本轮交接。
+- 用户已明确授权本轮推送、创建PR及合并。分支 `fix/billing-integrity-20261007`，业务提交 `efade20e1006747ebbe9ce4ae747bac81d7332c6`；[PR #78](https://github.com/liulixin-lex/xy2api/pull/78) 首轮CI发现前端依赖高危及新增测试数据污染，正补修依赖与测试隔离后复验。
 - GitHub官方设备登录已完成；目标固定 `liulixin-lex/xy2api:main`，严格8项状态检查且enforce_admins=true。等待精确PR head的实际远端CI通过后常规merge；未执行发布、部署或历史补扣。
 - PR正文与最终身份、CI、merge/main回读记录位于 `/lex/billing-fix-20261007/pr-merge/`；上轮“未提交/未推送”仅描述本地实施结束时状态，当前状态以本条及远端实际结果为准。
 
@@ -478,6 +478,9 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 计划使用独立fix/billing-integrity-20261007分支，绑定PR精确head检查，全部门禁通过后常规merge；不更改版本、不发版、不部署或补扣。延续标准来源审计与迁移不变量。
 - 首个业务提交efade20e1006747ebbe9ce4ae747bac81d7332c6已冻结并通过来源审计，14项同步工具测试通过。用户已通过GitHub官方设备流程完成liulixin-lex账号登录；实际权限包含push/maintain/admin。main严格要求8项检查，管理员同样受约束，所需批准数为0；正常PR合并，不绕过保护。
 - PR正文、提交/检查/合并回读与最终远端状态统一记录于 `/lex/billing-fix-20261007/pr-merge/`。后续只有实际远端门禁失败才修改业务并重新验证，避免为重复push/PR触发而重跑成功检查。
+
+- 已创建PR #78，原head b44b5246的安全门禁检出9项已有前端依赖高危告警；按已核验官方补丁升级Axios1.20.0、Vue3.5.42、source-map-js1.2.2，未变更豁免或安全政策。新审计高危/严重0，校验器exit0；13 moderate/4 low保留披露。前端完整验证进行中，完成后单独提交并绑定新head复验。
+- 首轮完整集成发现新增计费fixture提交的9条usage污染共享数据库，导致2项既有dashboard统计失败；相同组合本地已复现，新增按fixture Key清理意图/去重/用量及按ticket清理调度记录，不改生产统计与断言。升级依赖后的前端353文件/2724断言虽全通过，仍有1项te缺失的异步mock错误，已补齐i18n、导出API mock及卸载；该首轮exit1不能算全套通过，最终全量正在重跑。
 
 
 ### 20261007-billing-integrity — 本地修复与验证完成（未部署）

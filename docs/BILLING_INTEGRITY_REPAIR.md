@@ -125,4 +125,14 @@ flowchart LR
 
 完整单测首轮曾发现新增 Wire 清理依赖接参遗漏及未知定价错误码旧断言，两处均修正后重新执行完整单测成功。早期失败日志未删除，不能把第一次执行说成通过。
 
-原始证据在 `/lex/billing-fix-20261007/`，包含 `baseline.log`、`full-unit.log`、`final-unit.log`、`final-integration.log`、`final-build.log`、`final-lint.log`、`final-sync-audit.log`、`validation-results.json` 和 `verified-source-sha256.json`。集成测试临时容器已清理，原有应用容器保持。生产升级/回滚演练、容量压测与历史候选逐笔核验仍属于上线阶段；上述本地验证不替代生产验收。本轮未执行远端 CI、生产部署、历史补扣或版本发布。
+原始证据在 `/lex/billing-fix-20261007/`，包含 `baseline.log`、`full-unit.log`、`final-unit.log`、`final-integration.log`、`final-build.log`、`final-lint.log`、`final-sync-audit.log`、`validation-results.json` 和 `verified-source-sha256.json`。集成测试临时容器已清理，原有应用容器保持。生产升级/回滚演练、容量压测与历史候选逐笔核验仍属于上线阶段；上述本地验证不替代生产验收。该本地实施阶段未执行远端 CI；后续PR门禁补修见第10节。生产部署、历史补扣或版本发布仍未执行。
+
+## 10. PR #78 的远端门禁补修（2026-10-07）
+
+用户随后授权推送和合并。[PR #78](https://github.com/liulixin-lex/xy2api/pull/78) 的首轮远端安全扫描发现9项依赖高危告警：Axios 7项、source-map-js 1项、Vue server-renderer 1项；原计费代码没有变化。保留失败工作流及原始audit证据，不增加或延期漏洞豁免。
+
+按官方修复版本将 Axios 1.18.1 升至1.20.0，Vue 3.5.26及配套运行时/SSR升至3.5.42，并约束旧source-map-js升级为1.2.2。来源：[Axios公告](https://github.com/advisories/GHSA-c29m-xwm3-cm6r)、[source-map-js公告](https://github.com/advisories/GHSA-68fv-2mgg-jv7q)、[Vue公告](https://github.com/advisories/GHSA-g2v6-rqmx-r4w6)。依赖清单/锁文件为本轮额外修改范围，前端业务源码、审计政策和旧迁移保持。
+
+本地生产依赖审计 high=0、critical=0，仓库严格audit校验通过；仍报告13项moderate、4项low，依既有门禁政策披露。pnpm原始audit退出1保留，表示报告仍有较低级别告警，不能改写成零漏洞。前端完整验证及最终PR精确head的CI、合并回读见 `/lex/billing-fix-20261007/pr-merge/`；合并须等待全部必需检查通过。
+
+首轮完整集成另发现新增计费fixture的9条已提交用量污染后续dashboard统计；本地组合回归复现相同2项失败后，按测试Key清理其意图、去重与用量，按ticket清理调度记录，不调整生产统计或既有断言。前端升级后的首次全套虽有353文件/2724断言通过，仍因旧页面测试缺少`te` mock而exit 1；补齐翻译与导出API mock、自动卸载组件后重新完整验证。两次失败证据均保留。

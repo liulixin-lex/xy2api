@@ -377,6 +377,51 @@
       "production upgrade/rollback rehearsal",
       "production capacity testing",
       "historical backcharge"
-    ]
+    ],
+    "stage": "local billing implementation before PR creation"
+  },
+  "pr_followup": {
+    "pr": "https://github.com/liulixin-lex/xy2api/pull/78",
+    "reason": "Required remote gates reported nine high dependency advisories and shared-database pollution from committed billing test fixtures.",
+    "dependencies": {
+      "axios": {
+        "from": "1.18.1",
+        "to": "1.20.0"
+      },
+      "vue": {
+        "from": "3.5.26",
+        "to": "3.5.42"
+      },
+      "source-map-js": {
+        "from": "1.2.1",
+        "to": "1.2.2"
+      }
+    },
+    "audit": {
+      "high": 0,
+      "critical": 0,
+      "moderate": 13,
+      "low": 4,
+      "raw_exit_code": 1,
+      "repository_gate_exit_code": 0
+    },
+    "exceptions_changed": false,
+    "validation_evidence": "/lex/billing-fix-20261007/pr-merge/",
+    "status": "PR checks must pass on the final head before merge; full local rerun logs and remote readbacks are retained in validation_evidence.",
+    "production_backend_source_changed": false,
+    "test_fixes": [
+      "Clean fixture-owned billing intents, dedup rows and usage logs after each independently committed settlement test; clean its scheduling attempt. Existing dashboard assertions remain unchanged.",
+      "Complete reasoning-effort page i18n and export API mocks and unmount each wrapper to prevent leaked asynchronous render errors."
+    ],
+    "baseline_integration_reproduction": {
+      "exit_code": 1,
+      "failing_dashboard_subtests": 2
+    },
+    "frontend_first_full_run": {
+      "test_files_passed": 353,
+      "assertions_passed": 2724,
+      "unhandled_errors": 1,
+      "exit_code": 1
+    }
   }
 }
