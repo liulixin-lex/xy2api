@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math"
 	"strings"
+	"time"
 
 	dbent "github.com/liulixin-lex/xy2api/ent"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
@@ -27,9 +29,26 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 		return nil, errors.New("usage billing repository db is nil")
 	}
 
+	if err := cmd.Validate(); err != nil {
+		return nil, err
+	}
 	cmd.Normalize()
 	if cmd.RequestID == "" {
 		return nil, service.ErrUsageBillingRequestIDRequired
+	}
+	original := cmd
+	if cmd.Usage != nil {
+		cmd, err = r.prepareBillingIntent(ctx, cmd)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if err != nil {
+				failureCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				r.recordBillingIntentFailure(failureCtx, cmd, err)
+			}
+		}()
 	}
 
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -42,23 +61,38 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 		}
 	}()
 
+	if cmd.Usage != nil {
+		if err := lockBillingIntent(ctx, tx, cmd); err != nil {
+			return nil, err
+		}
+	}
 	applied, err := r.claimUsageBillingKey(ctx, tx, cmd)
 	if err != nil {
 		return nil, err
 	}
-	if !applied {
+	if !applied && cmd.Usage == nil {
 		return &service.UsageBillingApplyResult{Applied: false}, nil
 	}
 
-	result := &service.UsageBillingApplyResult{Applied: true}
-	if err := r.applyUsageBillingEffects(ctx, tx, cmd, result); err != nil {
-		return nil, err
+	result := &service.UsageBillingApplyResult{Applied: applied}
+	if applied {
+		if err := r.applyUsageBillingEffects(ctx, tx, cmd, result); err != nil {
+			return nil, err
+		}
+	}
+	if cmd.Usage != nil {
+		if err := persistSettledBillingUsage(ctx, tx, cmd, applied); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	tx = nil
+	if cmd.Usage != nil {
+		original.Usage = cmd.Usage
+	}
 	return result, nil
 }
 
@@ -132,7 +166,14 @@ func (r *usageBillingRepository) applyBatchImageBalanceHold(
 	if r == nil || r.db == nil {
 		return nil, errors.New("usage billing repository db is nil")
 	}
+	for _, amount := range []float64{cmd.HoldAmount, cmd.ActualAmount} {
+		if amount < 0 || amount >= 1e12 || math.IsNaN(amount) || math.IsInf(amount, 0) {
+			return nil, service.ErrUsageBillingInvalidAmount
+		}
+	}
 	cmd.Normalize()
+	cmd.HoldAmount = service.QuantizeUsageBillingAmount(cmd.HoldAmount)
+	cmd.ActualAmount = service.QuantizeUsageBillingAmount(cmd.ActualAmount)
 	if cmd.RequestID == "" {
 		return nil, service.ErrUsageBillingRequestIDRequired
 	}
@@ -185,18 +226,26 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 		}
 		result.NewBalance = &newBalance
 		result.BalanceOverdrafted = !sufficient
+		if cmd.QuotaPlatform != "" {
+			if err := incrementBillingPlatformQuota(ctx, tx, cmd.UserID, cmd.QuotaPlatform, cmd.BalanceCost); err != nil {
+				return err
+			}
+			result.PlatformQuotaApplied = true
+		}
 	}
 
+	// API Key 在请求进行中被删除时，其自身的额度/限速计数已无意义，跳过即可；
+	// 但用户余额、订阅与账号额度必须照常结算，不能因此回滚整个计费事务。
 	if cmd.APIKeyQuotaCost > 0 {
 		exhausted, err := incrementUsageBillingAPIKeyQuota(ctx, tx, cmd.APIKeyID, cmd.APIKeyQuotaCost)
-		if err != nil {
+		if err != nil && !errors.Is(err, service.ErrAPIKeyNotFound) {
 			return err
 		}
 		result.APIKeyQuotaExhausted = exhausted
 	}
 
 	if cmd.APIKeyRateLimitCost > 0 {
-		if err := incrementUsageBillingAPIKeyRateLimit(ctx, tx, cmd.APIKeyID, cmd.APIKeyRateLimitCost); err != nil {
+		if err := incrementUsageBillingAPIKeyRateLimit(ctx, tx, cmd.APIKeyID, cmd.APIKeyRateLimitCost); err != nil && !errors.Is(err, service.ErrAPIKeyNotFound) {
 			return err
 		}
 	}
@@ -222,9 +271,7 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 			updated_at = NOW()
 		FROM groups g
 		WHERE us.id = $2
-			AND us.deleted_at IS NULL
 			AND us.group_id = g.id
-			AND g.deleted_at IS NULL
 	`
 	res, err := tx.ExecContext(ctx, updateSQL, costUSD, subscriptionID)
 	if err != nil {
@@ -246,7 +293,7 @@ func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, am
 		UPDATE users
 		SET balance = balance - $1,
 			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL AND balance >= $1
+		WHERE id = $2 AND balance >= $1
 		RETURNING balance
 	`, amount, userID).Scan(&newBalance)
 	if err == nil {
@@ -260,7 +307,7 @@ func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, am
 		UPDATE users
 		SET balance = balance - $1,
 			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL
+		WHERE id = $2
 		RETURNING balance
 	`, amount, userID).Scan(&newBalance)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -314,7 +361,7 @@ func captureUsageBillingBatchImageBalance(ctx context.Context, tx *sql.Tx, cmd *
 				- CASE WHEN $2 > $1 THEN $2 - $1 ELSE 0 END,
 			frozen_balance = COALESCE(frozen_balance, 0) - $1,
 			updated_at = NOW()
-		WHERE id = $3 AND deleted_at IS NULL AND COALESCE(frozen_balance, 0) >= $1
+		WHERE id = $3 AND COALESCE(frozen_balance, 0) >= $1
 		RETURNING balance, frozen_balance
 	`, cmd.HoldAmount, cmd.ActualAmount, cmd.UserID).Scan(&balance, &frozen)
 	if err == nil {
@@ -351,7 +398,7 @@ func releaseUsageBillingBatchImageBalance(ctx context.Context, tx *sql.Tx, cmd *
 		SET balance = balance + $1,
 			frozen_balance = COALESCE(frozen_balance, 0) - $1,
 			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL AND COALESCE(frozen_balance, 0) >= $1
+		WHERE id = $2 AND COALESCE(frozen_balance, 0) >= $1
 		RETURNING balance, frozen_balance
 	`, cmd.HoldAmount, cmd.UserID).Scan(&balance, &frozen)
 	if err == nil {
@@ -500,7 +547,7 @@ func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountI
 				   ELSE '{}'::jsonb END
 			ELSE '{}'::jsonb END
 		), updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL
+		WHERE id = $2
 		RETURNING
 			COALESCE((extra->>'quota_used')::numeric, 0),
 			COALESCE((extra->>'quota_limit')::numeric, 0),

@@ -110,6 +110,10 @@ func acknowledgeSchedulingUsage(ctx context.Context, control *ControlledScheduli
 // A controlled attempt acknowledges accounting only after durable log storage.
 // Legacy requests keep their existing batching behavior.
 func writeSchedulingUsageLog(ctx context.Context, repo UsageLogRepository, usageLog *UsageLog, logKey string) error {
+	if usageLog != nil && usageLog.ID > 0 {
+		// Unified billing has already committed this log in the money transaction.
+		return nil
+	}
 	if !schedulingUsageBound(ctx) {
 		writeUsageLogBestEffort(ctx, repo, usageLog, logKey)
 		return nil

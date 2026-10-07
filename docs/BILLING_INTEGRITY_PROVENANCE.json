@@ -1,0 +1,382 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-07",
+  "scope": "selective billing security and accounting integrity fixes; not a full upstream release sync",
+  "fork_base": "9717116f198904442ebb400d7d06792a40dea15c",
+  "product_version": "0.2.2",
+  "full_sub2api_compat_version": "0.2.8",
+  "upstream_base_commit": "fd80b08c90b55edcad5b00171b53f08721d30da1",
+  "upstream_releases": [
+    {
+      "release": "v0.2.9",
+      "tag_object": "8532ec28b56188d3c845ed97070e6ee5136bd9bd",
+      "commit": "4c00df2e0183e2c70b7fa8ba45914205e36aad0c",
+      "url": "https://github.com/Wei-Shaw/sub2api/releases/tag/v0.2.9"
+    },
+    {
+      "release": "v0.2.10",
+      "tag_object": "e8cbebf37505922d30ffccd0a5bc19c4beec60ac",
+      "commit": "2f3fed2fdb0787141294cec81487a5df30426f7f",
+      "url": "https://github.com/Wei-Shaw/sub2api/releases/tag/v0.2.10"
+    },
+    {
+      "release": "v0.2.11",
+      "tag_object": "881a722349105e21aaa38e11de90dd05046ebe4a",
+      "commit": "96f4c115c9749078f90cbf210a01d39baf3f53b6",
+      "url": "https://github.com/Wei-Shaw/sub2api/releases/tag/v0.2.11"
+    },
+    {
+      "release": "v0.2.12",
+      "tag_object": "cbe9966432317e6757b47f598a103d2132ec27db",
+      "commit": "5106065716e494204fc0e8db16f68f6e9d576be0",
+      "url": "https://github.com/Wei-Shaw/sub2api/releases/tag/v0.2.12"
+    },
+    {
+      "release": "v0.2.13",
+      "tag_object": "7d0c0067f406c380f0a94cfc3879cdae7049b467",
+      "commit": "3040209f205472038c1ba745a1bedd2edd9053b1",
+      "url": "https://github.com/Wei-Shaw/sub2api/releases/tag/v0.2.13"
+    },
+    {
+      "release": "v0.2.14",
+      "tag_object": "1400a7b482974d98db5b284a8b2afbe3eaf9aaef",
+      "commit": "0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d",
+      "url": "https://github.com/Wei-Shaw/sub2api/releases/tag/v0.2.14"
+    }
+  ],
+  "impact_report": {
+    "command": "python3 tools/upstream-sync/sync.py report --upstream sub2api/v0.2.14 --fork 9717116f198904442ebb400d7d06792a40dea15c --output /lex/billing-fix-20261007/upstream-impact.json",
+    "sha256": "7a6b667dc467bf9b57f59d050d6e8c88a71119174306fd545075df22a8d59cf2"
+  },
+  "ported_commits": [
+    {
+      "commit": "c2d5bbd93edfb3a14f7da28d2e62c9216f0bbc86",
+      "subject": "fix(billing): settle usage when the API key is deleted before billing completes",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/c2d5bbd93edfb3a14f7da28d2e62c9216f0bbc86",
+      "paths": [
+        "backend/internal/repository/usage_billing_repo.go",
+        "backend/internal/repository/usage_billing_repo_integration_test.go",
+        "backend/internal/repository/usage_billing_repo_unit_test.go"
+      ],
+      "method": "scoped patch with Go module import normalization; reviewed local adaptations",
+      "first_release": "v0.2.13"
+    },
+    {
+      "commit": "d1aac6b98989b79d66c0f52bd18dc8c3142e7601",
+      "subject": "fix(payment): close EasyPay forged-callback sign reuse (fixes #7881)",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/d1aac6b98989b79d66c0f52bd18dc8c3142e7601",
+      "paths": [
+        "backend/internal/payment/provider/easypay.go",
+        "backend/internal/payment/provider/easypay_notify_security_test.go",
+        "backend/internal/service/payment_resume_service.go",
+        "backend/internal/service/payment_resume_service_test.go"
+      ],
+      "method": "scoped patch with Go module import normalization; reviewed local adaptations",
+      "first_release": "v0.2.14"
+    },
+    {
+      "commit": "a2007db707b18b9f23d67762fcc8e9c0b2ca1b35",
+      "subject": "fix(billing): keep catalog image prices when channel pricing leaves them unset",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/a2007db707b18b9f23d67762fcc8e9c0b2ca1b35",
+      "paths": [
+        "backend/internal/service/billing_service.go",
+        "backend/internal/service/billing_service_test.go",
+        "backend/internal/service/model_pricing_resolver.go",
+        "backend/internal/service/model_pricing_resolver_test.go"
+      ],
+      "method": "scoped patch with Go module import normalization; reviewed local adaptations",
+      "first_release": "v0.2.9"
+    },
+    {
+      "commit": "fd7af1d462a57a363af848354968b9f2d3b97670",
+      "subject": "fix(billing): honor long-context gate in account stats pricing",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/fd7af1d462a57a363af848354968b9f2d3b97670",
+      "paths": [
+        "backend/internal/service/account_stats_pricing.go",
+        "backend/internal/service/account_stats_pricing_test.go",
+        "backend/internal/service/gateway_usage_billing.go",
+        "backend/internal/service/openai_gateway_usage.go"
+      ],
+      "method": "scoped patch with Go module import normalization; reviewed local adaptations",
+      "first_release": "v0.2.9"
+    },
+    {
+      "commit": "1d126c833b848a677a14f35e9527a932dda5140c",
+      "subject": "fix(openai): require a successful completion before billing an alpha search fallback",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/1d126c833b848a677a14f35e9527a932dda5140c",
+      "paths": [
+        "backend/internal/service/openai_alpha_search.go",
+        "backend/internal/service/openai_alpha_search_completion_test.go",
+        "backend/internal/service/openai_alpha_search_test.go"
+      ],
+      "method": "scoped patch with Go module import normalization; reviewed local adaptations",
+      "first_release": "v0.2.9"
+    },
+    {
+      "commit": "3c5ea297ffe82521e0209aea9cfb1cf397434cc6",
+      "subject": "fix(billing): keep zero-cost usage log when Free Fast has no pricing",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/3c5ea297ffe82521e0209aea9cfb1cf397434cc6",
+      "paths": [
+        "backend/internal/service/openai_gateway_record_usage_test.go",
+        "backend/internal/service/openai_gateway_usage.go"
+      ],
+      "method": "scoped patch with Go module import normalization; reviewed local adaptations",
+      "first_release": "v0.2.9"
+    },
+    {
+      "commit": "b13200d7a18486797f77b7833f4b2e35c00be7ff",
+      "subject": "fix(gateway): forward received chat stream usage",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/b13200d7a18486797f77b7833f4b2e35c00be7ff",
+      "paths": [
+        "backend/internal/service/anthropic_chat_stream_usage_test.go",
+        "backend/internal/service/gateway_forward_as_chat_completions.go",
+        "backend/internal/service/gateway_forward_as_chat_completions_test.go",
+        "backend/internal/service/openai_gateway_anthropic_native_pump_test.go",
+        "backend/internal/service/openai_gateway_chat_completions_anthropic_native.go"
+      ],
+      "method": "scoped patch with Go module import normalization; reviewed local adaptations",
+      "first_release": "v0.2.10"
+    },
+    {
+      "commit": "ece1ecccca842585c99bc738bb93115bd1455e3e",
+      "subject": "fix(gateway): normalize streamed Anthropic usage",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/ece1ecccca842585c99bc738bb93115bd1455e3e",
+      "paths": [
+        "backend/internal/service/anthropic_chat_stream_usage_test.go",
+        "backend/internal/service/gateway_forward_as_chat_completions.go",
+        "backend/internal/service/gateway_forward_as_responses.go",
+        "backend/internal/service/gateway_forward_as_responses_test.go",
+        "backend/internal/service/openai_gateway_chat_completions_anthropic_native.go",
+        "backend/internal/service/openai_gateway_cn_fixes_test.go",
+        "backend/internal/service/openai_gateway_responses_anthropic_native.go"
+      ],
+      "method": "scoped patch with Go module import normalization; reviewed local adaptations",
+      "first_release": "v0.2.10"
+    },
+    {
+      "commit": "0416c9ede47e8fbab4a705dc3eeb8b21bf928d73",
+      "subject": "fix(gateway): avoid ambiguous late-cache input subtraction",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/0416c9ede47e8fbab4a705dc3eeb8b21bf928d73",
+      "paths": [
+        "backend/internal/service/anthropic_chat_stream_usage_test.go",
+        "backend/internal/service/gateway_forward_as_responses.go",
+        "backend/internal/service/gateway_forward_as_responses_test.go",
+        "backend/internal/service/openai_gateway_cn_fixes_test.go"
+      ],
+      "method": "scoped patch with Go module import normalization; reviewed local adaptations",
+      "first_release": "v0.2.10"
+    },
+    {
+      "commit": "9ecb3408223bbfc6a2fde9f60b7ddd24d622a8ab",
+      "subject": "feat(api-key): 增加 API Key 创建数量与频率限制",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/9ecb3408223bbfc6a2fde9f60b7ddd24d622a8ab",
+      "paths": [
+        "backend/internal/config/config.go",
+        "backend/internal/repository/api_key_cache.go",
+        "backend/internal/repository/api_key_cache_integration_test.go",
+        "backend/internal/repository/api_key_create_count_test.go",
+        "backend/internal/server/api_contract_test.go",
+        "backend/internal/service/api_key_service.go",
+        "backend/internal/service/api_key_service_cache_test.go",
+        "backend/internal/service/api_key_service_create_limit_test.go",
+        "backend/internal/service/api_key_service_delete_test.go",
+        "backend/internal/service/api_key_service_quota_test.go",
+        "backend/internal/service/auth_cache_invalidation_outbox_test.go",
+        "deploy/config.example.yaml"
+      ],
+      "method": "scoped patch with Go module import normalization; reviewed local adaptations",
+      "first_release": "v0.2.11"
+    },
+    {
+      "commit": "017bbcb901c6f030992a84fffad2f309d20bb7a6",
+      "subject": "chore(api-key): 创建频率默认值调整为每小时 60 次",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/017bbcb901c6f030992a84fffad2f309d20bb7a6",
+      "paths": [
+        "backend/internal/config/config.go",
+        "deploy/config.example.yaml"
+      ],
+      "method": "scoped patch with Go module import normalization; reviewed local adaptations",
+      "first_release": "v0.2.11"
+    },
+    {
+      "commit": "43f88c99aa3efea40eb76fb55b48ae88a9f5dc13",
+      "subject": "fix(billing): reserve in-flight balance to prevent concurrent overdraft",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/43f88c99aa3efea40eb76fb55b48ae88a9f5dc13",
+      "paths": [
+        "backend/internal/config/config.go",
+        "backend/internal/handler/gateway_handler.go",
+        "backend/internal/handler/gateway_handler_chat_completions.go",
+        "backend/internal/handler/gateway_handler_responses.go",
+        "backend/internal/handler/gateway_inflight_reservation.go",
+        "backend/internal/handler/gateway_inflight_reservation_test.go",
+        "backend/internal/handler/gemini_v1beta_handler.go",
+        "backend/internal/handler/openai_chat_completions.go",
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/repository/billing_inflight_cache.go",
+        "backend/internal/repository/billing_inflight_cache_test.go",
+        "backend/internal/service/billing_inflight_reservation.go",
+        "backend/internal/service/billing_inflight_reservation_test.go",
+        "deploy/config.example.yaml"
+      ],
+      "method": "scoped patch with Go module import normalization; reviewed local adaptations",
+      "first_release": "v0.2.11"
+    },
+    {
+      "commit": "52c123e6f4a71effe970d7505b1dc66e03ecfce4",
+      "subject": "fix(billing): hold inflight reservation until billing lands; price estimate like billing; wire remaining endpoints",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/52c123e6f4a71effe970d7505b1dc66e03ecfce4",
+      "paths": [
+        "backend/internal/config/config.go",
+        "backend/internal/handler/gateway_handler.go",
+        "backend/internal/handler/gateway_handler_chat_completions.go",
+        "backend/internal/handler/gateway_handler_responses.go",
+        "backend/internal/handler/gateway_inflight_reservation.go",
+        "backend/internal/handler/gateway_inflight_reservation_test.go",
+        "backend/internal/handler/gateway_web_search.go",
+        "backend/internal/handler/gemini_v1beta_handler.go",
+        "backend/internal/handler/grok_audio.go",
+        "backend/internal/handler/grok_media.go",
+        "backend/internal/handler/openai_alpha_search.go",
+        "backend/internal/handler/openai_chat_completions.go",
+        "backend/internal/handler/openai_embeddings.go",
+        "backend/internal/handler/openai_gateway_handler.go",
+        "backend/internal/handler/openai_images.go",
+        "backend/internal/repository/billing_inflight_cache.go",
+        "backend/internal/repository/billing_inflight_cache_test.go",
+        "backend/internal/service/billing_inflight_reservation.go",
+        "backend/internal/service/billing_inflight_reservation_test.go",
+        "backend/internal/service/gateway_usage_billing.go",
+        "deploy/config.example.yaml"
+      ],
+      "method": "scoped patch with Go module import normalization; reviewed local adaptations",
+      "first_release": "v0.2.11"
+    },
+    {
+      "commit": "652a7d74f924e19d0d3f5671b5a5ca72a812c13d",
+      "subject": "fix(billing): estimate unpriced aliases via billing fallback models; don't renew expired reservations",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/652a7d74f924e19d0d3f5671b5a5ca72a812c13d",
+      "paths": [
+        "backend/internal/repository/billing_inflight_cache.go",
+        "backend/internal/repository/billing_inflight_cache_test.go",
+        "backend/internal/service/billing_inflight_reservation.go",
+        "backend/internal/service/billing_inflight_reservation_test.go"
+      ],
+      "method": "scoped patch with Go module import normalization; reviewed local adaptations",
+      "first_release": "v0.2.11"
+    },
+    {
+      "commit": "b886fb8edb9a9b889570616d3238cc9f280b4667",
+      "subject": "fix(billing): read account-level mappings from scheduler snapshot only when unpriced",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/b886fb8edb9a9b889570616d3238cc9f280b4667",
+      "paths": [
+        "backend/internal/service/billing_inflight_reservation.go",
+        "backend/internal/service/billing_inflight_reservation_test.go"
+      ],
+      "method": "scoped patch with Go module import normalization; reviewed local adaptations",
+      "first_release": "v0.2.11"
+    },
+    {
+      "commit": "cf19f30d26bfb5da2d26844fd41e9f6f2d4d8341",
+      "subject": "fix(payment): rate-limit anonymous public order verify endpoint",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/cf19f30d26bfb5da2d26844fd41e9f6f2d4d8341",
+      "paths": [
+        "backend/internal/server/router.go",
+        "backend/internal/server/routes/payment.go",
+        "backend/internal/server/routes/payment_public_rate_limit_test.go"
+      ],
+      "method": "scoped patch with Go module import normalization; reviewed local adaptations",
+      "first_release": "v0.2.12"
+    },
+    {
+      "commit": "11ffee55431c038771102f2996104b7f12c3b237",
+      "subject": "fix: recognize OpenRouter Claude Opus 5.5 alias for billing",
+      "url": "https://github.com/Wei-Shaw/sub2api/commit/11ffee55431c038771102f2996104b7f12c3b237",
+      "paths": [
+        "backend/internal/pkg/claude/effort_catalog.go",
+        "backend/internal/pkg/claude/effort_catalog_test.go",
+        "backend/internal/service/billing_service_test.go"
+      ],
+      "method": "scoped patch with Go module import normalization",
+      "first_release": "v0.2.9"
+    }
+  ],
+  "local_adaptations": [
+    "Preserve controlled scheduling attempt context while passing inflight reservation to accounting.",
+    "Preserve native Anthropic failover/response-model handling around streaming usage changes.",
+    "Deleted users, subscriptions/groups and accounts retain existing usage liabilities; batch holds can settle/refund to a deleted owner.",
+    "Durable credential-free billing intents; transactional usage logs; restart recovery; cache invalidation checkpoint; no automatic historical backcharge.",
+    "Financial handler tasks execute inline before handler completion; no drop/sample or volatile queue acceptance.",
+    "Platform quotas commit in the money transaction; legacy absolute Redis snapshot flusher must be drained and disabled.",
+    "API key creation adds a per-user database lock and counts recent tombstones, supplementing upstream Redis limits.",
+    "Reject duplicate EasyPay callback parameters.",
+    "Every positive inflight reservation, including the first, must fit its estimated available balance; cache failure defaults to fail closed.",
+    "Unpriced paid admission defaults to fail closed; explicitly zero-priced/free groups still pass.",
+    "Persist scheduling attempt IDs and acknowledge the scheduler after recovery; immediately complete cache checkpoints on normal requests, including deduplicated retries."
+  ],
+  "validation_status": "local implementation and validation passed; production rollout and historical reconciliation not executed",
+  "historical_audit": "Aggregated facts only; private production records and credentials are not included.",
+  "reviewed_not_ported": [
+    {
+      "commit": "b5b5f1f94bfcf0badfb49bd50cf38ae48e492f5d",
+      "reason": "Model Plaza display enhancement; local video billing already applies the independent video multiplier. No frontend change in this settlement repair."
+    }
+  ],
+  "validation": {
+    "go_version": "1.27.0",
+    "unit": {
+      "command": "go test -p 1 -tags unit ./... -count=1",
+      "exit_code": 0,
+      "passed_packages": 62,
+      "packages_without_tests": 51
+    },
+    "integration": {
+      "command": "CI=true go test -p 1 -tags integration ./internal/repository -run 'BillingIntent|UsageBilling|BatchImageBalance|APIKeyCreateLimits' -count=1 -v",
+      "exit_code": 0,
+      "passed_main_tests": 20,
+      "passed_subtests": 4,
+      "skipped": 0,
+      "postgres": "18.1",
+      "redis": "8.4"
+    },
+    "build": {
+      "command": "go build -o /lex/billing-fix-20261007/xy2api-billing-check ./cmd/server",
+      "exit_code": 0
+    },
+    "lint": {
+      "version": "2.13.2",
+      "command": "golangci-lint run --timeout=30m ./...",
+      "exit_code": 0,
+      "issues": 0
+    },
+    "source_audit": {
+      "command": "python3 tools/upstream-sync/sync.py audit",
+      "exit_code": 0,
+      "context": "isolated clean local review snapshot; main worktree remains uncommitted"
+    },
+    "migrations": {
+      "unchanged_historical_sql": 313,
+      "new_migration": "267_usage_billing_intents.sql",
+      "checksums_matching": 314
+    },
+    "wire_generated": true,
+    "changed_go_files_gofmt_clean": 81,
+    "example_yaml_parsed": true,
+    "baseline_regression": {
+      "exit_code": 1,
+      "confirmed_failures": [
+        "deleted API key rolls back settlement",
+        "EasyPay signature-reuse forgery accepted"
+      ],
+      "evidence": "/lex/billing-fix-20261007/baseline.log"
+    },
+    "evidence_directory": "/lex/billing-fix-20261007",
+    "source_hash_manifest": "/lex/billing-fix-20261007/verified-source-sha256.json",
+    "not_executed": [
+      "remote CI",
+      "production deployment",
+      "production upgrade/rollback rehearsal",
+      "production capacity testing",
+      "historical backcharge"
+    ]
+  }
+}

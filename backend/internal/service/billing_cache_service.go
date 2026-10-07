@@ -407,6 +407,13 @@ func (s *BillingCacheService) InvalidateUserBalance(ctx context.Context, userID 
 	return nil
 }
 
+func (s *BillingCacheService) InvalidateUserPlatformQuota(ctx context.Context, userID int64, platform string) error {
+	if s.cache == nil || platform == "" {
+		return nil
+	}
+	return s.cache.DeleteUserPlatformQuotaCache(ctx, userID, platform)
+}
+
 // ============================================
 // 订阅缓存方法
 // ============================================
