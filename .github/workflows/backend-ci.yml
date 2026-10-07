@@ -149,6 +149,52 @@ jobs:
               print(f"{package}: {len(ran)} tests/subtests ran, all {len(expected)} required tests PASS, 0 SKIP")
           PY
 
+
+      - name: TypeSafe scheduling and hosted recharge integration
+        working-directory: backend
+        timeout-minutes: 15
+        env:
+          SCHEDULING_TEST_POSTGRES_DSN: postgres://postgres:scheduling_ci_fixture@127.0.0.1:15432/scheduling_ci?sslmode=disable
+          SCHEDULING_TEST_REDIS_ADDR: 127.0.0.1:16379
+          STRIPE_HOSTED_TEST_DSN: postgres://postgres:scheduling_ci_fixture@127.0.0.1:15432/scheduling_ci?sslmode=disable
+        run: |
+          set -euo pipefail
+          go test -race -p 1 -parallel 1 -tags=unit ./internal/service \
+            -run '^TestControlledProtocolNonstreamAcceptance$/^systemone$' \
+            -count=1 -timeout=5m -json > "$RUNNER_TEMP/upstream-cross-paths.jsonl"
+          go test -race -p 1 -parallel 1 -tags=unit ./internal/service \
+            -run '^TestStripeHostedDatabase' \
+            -count=1 -timeout=5m -json >> "$RUNNER_TEMP/upstream-cross-paths.jsonl"
+          python3 - <<'PYCODE'
+          import json
+          import os
+          from pathlib import Path
+
+          events = [json.loads(line) for line in
+                    Path(os.environ["RUNNER_TEMP"], "upstream-cross-paths.jsonl").read_text().splitlines()
+                    if line.strip()]
+          rejected = [event for event in events if event.get("Action") in {"skip", "fail"}]
+          if rejected:
+              raise SystemExit("Cross-path gate cannot skip or fail: " + json.dumps(rejected))
+          passed = {event.get("Test") for event in events if event.get("Action") == "pass"}
+          expected = {
+              "TestControlledProtocolNonstreamAcceptance/systemone/valid",
+              "TestControlledProtocolNonstreamAcceptance/systemone/html",
+              "TestControlledProtocolNonstreamAcceptance/systemone/error_object",
+              "TestControlledProtocolNonstreamAcceptance/systemone/empty",
+              "TestControlledProtocolNonstreamAcceptance/systemone/null",
+              "TestControlledProtocolNonstreamAcceptance/systemone/wrong_schema",
+              "TestControlledProtocolNonstreamAcceptance/systemone/empty_result_object",
+              "TestStripeHostedDatabaseCreateRecoveryAndConcurrentLimits/no_promotion",
+              "TestStripeHostedDatabaseCreateRecoveryAndConcurrentLimits/bonus",
+              "TestStripeHostedDatabaseCreateRecoveryAndConcurrentLimits/discount",
+              "TestStripeHostedDatabaseSerializesNewRequests",
+          }
+          if expected - passed:
+              raise SystemExit("Missing required cross-path tests: " + repr(expected - passed))
+          print(f"All {len(expected)} required cross-path tests PASS, 0 SKIP")
+          PYCODE
+
   windows-plugin-archive:
     runs-on: windows-latest
     steps:
