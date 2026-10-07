@@ -140,7 +140,56 @@
       "frontend/src/types/index.ts",
       "frontend/src/views/admin/SettingsView.vue",
       "frontend/src/views/user/UsageView.vue",
-      "frontend/src/views/user/__tests__/UsageView.spec.ts"
+      "frontend/src/views/user/__tests__/UsageView.spec.ts",
+      ".github/audit-exceptions.yml",
+      "backend/internal/handler/gateway_handler.go",
+      "backend/internal/handler/gateway_handler_chat_completions.go",
+      "backend/internal/handler/gateway_handler_responses.go",
+      "backend/internal/handler/gateway_inflight_reservation.go",
+      "backend/internal/handler/gateway_inflight_reservation_test.go",
+      "backend/internal/handler/gemini_v1beta_handler.go",
+      "backend/internal/handler/openai_alpha_search.go",
+      "backend/internal/integration/e2e_user_flow_test.go",
+      "backend/internal/payment/provider/easypay.go",
+      "backend/internal/payment/provider/easypay_notify_security_test.go",
+      "backend/internal/pkg/apicompat/anthropic_to_responses.go",
+      "backend/internal/pkg/claude/effort_catalog.go",
+      "backend/internal/pkg/claude/effort_catalog_test.go",
+      "backend/internal/pkg/openai/constants.go",
+      "backend/internal/repository/billing_inflight_cache.go",
+      "backend/internal/repository/billing_inflight_cache_test.go",
+      "backend/internal/repository/usage_billing_repo.go",
+      "backend/internal/server/routes/payment.go",
+      "backend/internal/server/routes/payment_public_rate_limit_test.go",
+      "backend/internal/service/account.go",
+      "backend/internal/service/anthropic_chat_stream_usage_test.go",
+      "backend/internal/service/api_key_service_create_limit_test.go",
+      "backend/internal/service/billing_inflight_reservation.go",
+      "backend/internal/service/billing_inflight_reservation_test.go",
+      "backend/internal/service/billing_service_test.go",
+      "backend/internal/service/gateway_hotpath_optimization_test.go",
+      "backend/internal/service/gateway_upstream_transport_error.go",
+      "backend/internal/service/gateway_usage_billing.go",
+      "backend/internal/service/gemini_upstream_transport_error.go",
+      "backend/internal/service/openai_alpha_search_completion_test.go",
+      "backend/internal/service/openai_codex_models_service_test.go",
+      "backend/internal/service/openai_compat_model.go",
+      "backend/internal/service/openai_upstream_transport_error.go",
+      "backend/internal/setup/setup.go",
+      "deploy/.env.example",
+      "deploy/docker-compose.dev.yml",
+      "deploy/docker-compose.local.yml",
+      "deploy/docker-compose.standalone.yml",
+      "frontend/package.json",
+      "frontend/pnpm-lock.yaml",
+      "frontend/src/components/account/__tests__/AccountStatusIndicator.spec.ts",
+      "frontend/src/components/keys/UseKeyModal.vue",
+      "frontend/src/components/keys/__tests__/UseKeyModal.spec.ts",
+      "frontend/src/components/payment/AmountInput.vue",
+      "frontend/src/i18n/locales/en/dashboard.ts",
+      "frontend/src/i18n/locales/zh/dashboard.ts",
+      "frontend/src/views/user/KeysView.vue",
+      "frontend/src/views/user/PaymentView.vue"
     ],
     "generated": [
       "backend/ent/**",
@@ -227,7 +276,11 @@
     "explicit-app-data-volume",
     "windows-plugin-archive-close",
     "migration-checksum-manifest",
-    "dual-version-plugin-compatibility"
+    "dual-version-plugin-compatibility",
+    "typesafe-controlled-settlement",
+    "hosted-recharge-quote-snapshot",
+    "v0214-append-only-upgrade",
+    "gpt61-exact-model-aliases"
   ],
   "custom_patch_tests": [
     {
@@ -264,6 +317,26 @@
       "id": "dual-version-plugin-compatibility",
       "path": "backend/internal/service/plugin_compatibility_test.go",
       "literal": "func TestEvaluatePluginCompatibilityUsesSub2APIBaselineInsteadOfProductVersion"
+    },
+    {
+      "id": "typesafe-controlled-settlement",
+      "path": "backend/internal/service/controlled_protocol_acceptance_test.go",
+      "literal": "{\"systemone\","
+    },
+    {
+      "id": "hosted-recharge-quote-snapshot",
+      "path": "backend/internal/service/payment_stripe_hosted_database_test.go",
+      "literal": "func TestStripeHostedDatabaseCreateRecoveryAndConcurrentLimits"
+    },
+    {
+      "id": "v0214-append-only-upgrade",
+      "path": "backend/internal/repository/upstream_v0214_migration_integration_test.go",
+      "literal": "func TestUpstreamV0214MigrationUpgrade"
+    },
+    {
+      "id": "gpt61-exact-model-aliases",
+      "path": "backend/internal/service/gpt61_sol_support_test.go",
+      "literal": "func TestGPT61SolAliasIdentityRemainsExact"
     }
   ]
 }

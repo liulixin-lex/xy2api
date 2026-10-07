@@ -28,7 +28,10 @@ func TestGPT61SolAnthropicEffortAndLegacyIsolation(t *testing.T) {
 	for _, model := range []string{"gpt-5.6-sol", "gpt-6-sol", "gpt-6-luna"} {
 		out, err := AnthropicToResponses(&AnthropicRequest{Model: model, Thinking: &AnthropicThinking{Type: "disabled"}, OutputConfig: &AnthropicOutputConfig{Effort: "max"}})
 		require.NoError(t, err)
-		require.Equal(t, "xhigh", out.Reasoning.Effort, "older model conversion remains unchanged")
+		require.Equal(t, "none", out.Reasoning.Effort, "upstream thinking disable takes precedence for older models")
+		out, err = AnthropicToResponses(&AnthropicRequest{Model: model, OutputConfig: &AnthropicOutputConfig{Effort: "max"}})
+		require.NoError(t, err)
+		require.Equal(t, "xhigh", out.Reasoning.Effort, "older models still map max to xhigh when thinking is enabled")
 	}
 }
 

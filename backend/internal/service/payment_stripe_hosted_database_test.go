@@ -122,6 +122,22 @@ func TestStripeHostedCancelPaymentRace(t *testing.T) {
 }
 
 func TestStripeHostedDatabaseCreateRecoveryAndConcurrentLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name, mode, tiers        string
+		credited, charged, bonus float64
+	}{
+		{"no_promotion", "bonus", "[]", 160, 84, 0},
+		{"bonus", "bonus", `[{"min_amount":80,"bonus_percent":20}]`, 192, 84, 32},
+		{"discount", "discount", `[{"min_amount":80,"bonus_percent":20}]`, 160, 67.2, 32},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testStripeHostedDatabaseCreateRecovery(t, tc.mode, tc.tiers, tc.credited, tc.charged, tc.bonus)
+		})
+	}
+}
+
+func testStripeHostedDatabaseCreateRecovery(t *testing.T, mode, tiers string, credited, charged, bonus float64) {
+	t.Helper()
 	if os.Getenv("STRIPE_HOSTED_TEST_DSN") == "" {
 		t.Skip("requires disposable PostgreSQL for row locks")
 	}
@@ -132,6 +148,7 @@ func TestStripeHostedDatabaseCreateRecoveryAndConcurrentLimits(t *testing.T) {
 		SettingPaymentEnabled: "true", SettingEnabledPaymentTypes: "stripe_hosted",
 		SettingKeyFrontendURL: "https://app.example", SettingMaxPendingOrders: "1",
 		SettingBalanceRechargeMult: "2", SettingRechargeFeeRate: "5", SettingOrderTimeoutMinutes: "5",
+		SettingRechargeBonusMode: mode, SettingRechargeBonusTiers: tiers,
 	}}
 	cfg := NewPaymentConfigService(client, settings, key)
 	inst, err := cfg.CreateProviderInstance(ctx, CreateProviderInstanceRequest{Name: "Hosted", ProviderKey: "stripe_hosted", Enabled: true, Config: map[string]string{"secretKey": "sk_test_fixture", "webhookSecret": "whsec_fixture", "currency": "CNY"}})
@@ -182,6 +199,10 @@ func TestStripeHostedDatabaseCreateRecoveryAndConcurrentLimits(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, orders, 1)
 	require.Equal(t, "PENDING", orders[0].Status)
+	require.Equal(t, bonus, orders[0].BonusAmount)
+	// Retries must retain the durable original quote even after promotions change.
+	settings.values[SettingRechargeBonusTiers] = `[{"min_amount":1,"bonus_percent":50}]`
+	settings.values[SettingRechargeBonusMode] = "discount"
 	results := make(chan *CreateOrderResponse, 6)
 	errs := make(chan error, 6)
 	var wg sync.WaitGroup
@@ -198,12 +219,13 @@ func TestStripeHostedDatabaseCreateRecoveryAndConcurrentLimits(t *testing.T) {
 	for r := range results {
 		require.Equal(t, orders[0].ID, r.OrderID)
 		require.Equal(t, "redirect", r.PaymentMode)
-		require.Equal(t, 160.0, r.Amount)
-		require.Equal(t, 84.0, r.PayAmount)
+		require.Equal(t, credited, r.Amount)
+		require.Equal(t, charged, r.PayAmount)
+		require.Equal(t, bonus, r.BonusAmount)
 		require.Empty(t, r.ClientSecret)
 		require.Contains(t, r.PayURL, "checkout.stripe.com")
 	}
-	require.Equal(t, "8400", frozen.Get("line_items[0][price_data][unit_amount]"))
+	require.Equal(t, fmt.Sprintf("%.0f", charged*100), frozen.Get("line_items[0][price_data][unit_amount]"))
 	require.NotContains(t, frozen.Get("success_url"), "attacker")
 	require.GreaterOrEqual(t, orders[0].ExpiresAt.Sub(orders[0].CreatedAt), 30*time.Minute)
 	count, err := client.PaymentOrder.Query().Where(paymentorder.UserIDEQ(u.ID)).Count(ctx)
@@ -221,7 +243,10 @@ func TestStripeHostedDatabaseCreateRecoveryAndConcurrentLimits(t *testing.T) {
 	r, err := svc.ResumeStripeHostedOrder(ctx, orders[0].ID, u.ID)
 	require.NoError(t, err)
 	require.NotEmpty(t, r.PayURL)
-	fmt.Printf("HOSTED_DATABASE order_count=%d retry_session=%s credited_quote=160 charged_minor=8400 max_pending_enforced=true\n", count, session.ID)
+	require.Equal(t, credited, r.Amount)
+	require.Equal(t, charged, r.PayAmount)
+	require.Equal(t, bonus, r.BonusAmount)
+	t.Logf("HOSTED_DATABASE order_count=%d retry_session=%s credited_quote=%v charged=%v bonus=%v max_pending_enforced=true", count, session.ID, credited, charged, bonus)
 }
 
 func TestStripeHostedDatabaseSerializesNewRequests(t *testing.T) {
@@ -254,7 +279,7 @@ func TestStripeHostedDatabaseSerializesNewRequests(t *testing.T) {
 					}
 					req := CreateOrderRequest{UserID: user.ID, Amount: 80, OrderType: "balance", PaymentType: "stripe_hosted", IdempotencyKey: id}
 					req.HostedSnapshot = map[string]any{"request_fingerprint": hostedRequestFingerprint(req)}
-					_, err := svc.createOrderInTx(ctx, req, &User{ID: user.ID, Email: user.Email}, nil, &PaymentConfig{MaxPendingOrders: 1, DailyLimit: 100}, 80, 80, 0, 80, sel)
+					_, err := svc.createOrderInTx(ctx, req, &User{ID: user.ID, Email: user.Email}, nil, &PaymentConfig{MaxPendingOrders: 1, DailyLimit: 100}, 80, 80, 0, 80, 0, sel)
 					if err == nil {
 						successes.Add(1)
 					}

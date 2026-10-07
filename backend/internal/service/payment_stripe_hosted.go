@@ -82,17 +82,19 @@ func (s *PaymentService) createHostedOrder(ctx context.Context, req CreateOrderR
 	if err = s.checkCancelRateLimit(ctx, req.UserID, cfg); err != nil {
 		return nil, err
 	}
-	limitAmount := req.Amount
-	var orderAmount float64
+	currency, err := s.configService.ValidateMethodCurrencyConsistency(ctx, payment.TypeStripeHosted)
+	if err != nil {
+		return nil, err
+	}
+	var limitAmount, orderAmount, bonusAmount float64
 	if plan != nil {
 		limitAmount = plan.Price
 		orderAmount = plan.Price
 	} else {
-		orderAmount = calculateCreditedBalance(req.Amount, cfg.BalanceRechargeMultiplier)
-	}
-	currency, err := s.configService.ValidateMethodCurrencyConsistency(ctx, payment.TypeStripeHosted)
-	if err != nil {
-		return nil, err
+		quote := quoteRechargeBonus(cfg, req.Amount, currency)
+		limitAmount = quote.PayBase
+		orderAmount = quote.Credited
+		bonusAmount = quote.Bonus
 	}
 	amountStr, payAmount, err := calculateCreateOrderPayAmountForOrderType(limitAmount, cfg.RechargeFeeRate, currency, req.OrderType, cfg.SubscriptionUSDToCNYRate)
 	if err != nil {
@@ -134,7 +136,7 @@ func (s *PaymentService) createHostedOrder(ctx context.Context, req CreateOrderR
 	}
 	req.HostedSnapshot = map[string]any{"request_fingerprint": hostedRequestFingerprint(req), "account_id": account, "livemode": strconv.FormatBool(prov.LiveMode()), "hosted_amount": amountStr, "hosted_limit_amount": strconv.FormatFloat(limitAmount, 'f', -1, 64), "hosted_subject": s.buildPaymentSubject(plan, limitAmount, cfg, sel), "hosted_return_url": returnURL}
 	sel.PaymentMode = "redirect"
-	order, err := s.createOrderInTx(ctx, req, user, plan, cfg, orderAmount, limitAmount, cfg.RechargeFeeRate, payAmount, sel)
+	order, err := s.createOrderInTx(ctx, req, user, plan, cfg, orderAmount, limitAmount, cfg.RechargeFeeRate, payAmount, bonusAmount, sel)
 	if err != nil {
 		if dbent.IsConstraintError(err) {
 			if previous, lookupErr := s.hostedRequestOrder(ctx, req); lookupErr == nil && previous != nil {
@@ -271,7 +273,7 @@ func (s *PaymentService) resumeHostedCreation(ctx context.Context, o *dbent.Paym
 	return hostedOrderResponse(o), nil
 }
 func hostedOrderResponse(o *dbent.PaymentOrder) *CreateOrderResponse {
-	r := &CreateOrderResponse{OrderID: o.ID, OutTradeNo: o.OutTradeNo, Amount: o.Amount, PayAmount: o.PayAmount, FeeRate: o.FeeRate, Status: o.Status, PaymentType: payment.TypeStripeHosted, PaymentMode: "redirect", Currency: PaymentOrderCurrency(o), ExpiresAt: o.ExpiresAt, ResultType: payment.CreatePaymentResultOrderCreated}
+	r := &CreateOrderResponse{OrderID: o.ID, OutTradeNo: o.OutTradeNo, Amount: o.Amount, BonusAmount: o.BonusAmount, PayAmount: o.PayAmount, FeeRate: o.FeeRate, Status: o.Status, PaymentType: payment.TypeStripeHosted, PaymentMode: "redirect", Currency: PaymentOrderCurrency(o), ExpiresAt: o.ExpiresAt, ResultType: payment.CreatePaymentResultOrderCreated}
 	if o.Status == OrderStatusPending && time.Now().Before(o.ExpiresAt) && o.PayURL != nil && provider.ValidStripeCheckoutURL(*o.PayURL) {
 		r.PayURL = *o.PayURL
 	}

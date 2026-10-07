@@ -316,6 +316,8 @@
     "263_dual_scheduling_mode.sql": "ecb348c8069a09d7341f74a521adfa423035ef838326ce334fd5b29f072cd6f2",
     "265_single_account_scheduling_switch.sql": "cee85a299f8a623ec96cdb85871c9bfbc67c7f120fcc57adb0d1167173ab247c",
     "266_account_monotonic_updated_at.sql": "9a4dcdaa665e20f9aa5b6c6957794ea69abdafb2c490184a176e956b8fa01935",
-    "267_usage_billing_intents.sql": "9460d97d3647b1f2000ab5d6360c98d69d61607485738b3fb3031565908f7ff1"
+    "267_usage_billing_intents.sql": "9460d97d3647b1f2000ab5d6360c98d69d61607485738b3fb3031565908f7ff1",
+    "268_add_payment_order_bonus_amount.sql": "18b6a524a9873d3e4a45e6f9bd03b6e69f4384b701825c659817e017f2e8244f",
+    "269_add_typesafe_platform.sql": "b6559525bf8d0b5d7c617e7415944f0d1fae8c408e9131ace84139795f66dcd2"
   }
 }

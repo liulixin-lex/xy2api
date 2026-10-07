@@ -76,6 +76,11 @@ func protocolAdapters() []protocolAdapterCase {
 		}},
 		{"embeddings", `{"data":[{"embedding":[0.1,0.2],"index":0}]}`, controlledEmbeddingsAdapter},
 		{"embeddings_base64", `{"data":[{"embedding":"zczMPc3MTD4=","index":0}]}`, controlledEmbeddingsAdapter},
+		{"systemone", `{"model":"jev-latest","answers":{"q":{"type":"noul","noul":0.9}},"usage":{"input_tokens":1,"output_tokens":1}}`, func(ctx context.Context, r *http.Response, c *gin.Context, a *Account) error {
+			svc := &GatewayService{cfg: &config.Config{}, httpUpstream: &httpUpstreamRecorder{resp: r}}
+			_, err := svc.ForwardSystemOne(ctx, c, controlledProtocolAPIKey(a, PlatformTypeSafe), []byte(`{"model":"jev-latest","state":"fixture","questions":{"q":{"type":"noul"}}}`))
+			return err
+		}},
 		{"alpha_search", `{"results":[]}`, func(ctx context.Context, r *http.Response, c *gin.Context, a *Account) error {
 			svc := controlledProtocolGateway(r)
 			_, e := svc.ForwardAlphaSearch(ctx, c, controlledProtocolAPIKey(a, PlatformOpenAI), []byte(`{"model":"test-model","commands":{}}`))
