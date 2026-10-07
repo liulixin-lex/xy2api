@@ -369,5 +369,6 @@
     "typesafe-controlled-settlement",
     "hosted-recharge-quote-snapshot",
     "v0214-append-only-upgrade"
-  ]
+  ],
+  "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/79"
 }
