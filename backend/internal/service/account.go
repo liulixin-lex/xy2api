@@ -15,6 +15,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/geminicli"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai_compat"
+	"github.com/liulixin-lex/xy2api/internal/pkg/typesafe"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
 )
 
@@ -250,6 +251,10 @@ func (a *Account) IsGemini() bool {
 
 func (a *Account) IsGrok() bool {
 	return a.Platform == PlatformGrok
+}
+
+func (a *Account) IsTypeSafe() bool {
+	return a != nil && a.Platform == PlatformTypeSafe
 }
 
 func (a *Account) IsGrokOAuth() bool {
@@ -904,6 +909,10 @@ func (a *Account) GetBaseURL() string {
 	}
 	baseURL := a.GetCredential("base_url")
 	if baseURL == "" {
+		// TypeSafe keys must never fall back to the Anthropic host.
+		if a.Platform == PlatformTypeSafe {
+			return typesafe.DefaultBaseURL
+		}
 		return "https://api.anthropic.com"
 	}
 	if a.Platform == PlatformAntigravity {
@@ -923,6 +932,28 @@ func (a *Account) GetGeminiBaseURL(defaultBaseURL string) string {
 		return strings.TrimRight(baseURL, "/") + "/antigravity"
 	}
 	return baseURL
+}
+
+func (a *Account) GetTypeSafeBaseURL() string {
+	if a == nil || !a.IsTypeSafe() || a.Type != AccountTypeAPIKey {
+		return ""
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(a.GetCredential("base_url")), "/")
+	// The System One path already carries /v1; accept a base URL pasted with it.
+	if len(baseURL) >= 3 && strings.EqualFold(baseURL[len(baseURL)-3:], "/v1") {
+		baseURL = strings.TrimRight(baseURL[:len(baseURL)-3], "/")
+	}
+	if baseURL == "" {
+		return typesafe.DefaultBaseURL
+	}
+	return baseURL
+}
+
+func (a *Account) GetTypeSafeAPIKey() string {
+	if a == nil || !a.IsTypeSafe() || a.Type != AccountTypeAPIKey {
+		return ""
+	}
+	return strings.TrimSpace(a.GetCredential("api_key"))
 }
 
 func (a *Account) GetExtraString(key string) string {
