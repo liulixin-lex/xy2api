@@ -34,7 +34,7 @@
 - PR #78的耐久计费意图、删除主体后结算、余额/用量/平台额度同事务、恢复与确认继续有效。新SystemOne用量也经过本项目持久化交接。首请求余额预留以及未知价格/缓存失败继续fail-closed。
 - TypeSafe非流式入口接入可控调度元数据、停止错误、响应验收与一次结算；有效answer envelope才计为健康，HTML/错误/空体/无关JSON不能恢复账号健康。沿用上游对模型与usage形状的宽容解析。
 - Stripe托管入口使用与普通支付相同的赠金/折扣报价，冻结到账/实付/赠金快照；配置变更后幂等重试仍复用原报价。真实PG测试覆盖无优惠、赠金、折扣及并发唯一订单。
-- GPT6.1 Sol仍拒绝none/minimal及禁用思考，保留大小写/下划线/前缀别名校验和采样参数过滤；其它模型接收上游“disabled优先于output_config”的修复，max在启用思考时仍映射xhigh。
+- GPT6.1 Sol仍拒绝none/minimal及禁用思考，保留大小写/下划线/前缀别名校验和采样参数过滤，不将未经登记的日期后缀降级为正式模型；其它模型接收上游“disabled优先于output_config”的修复，max在启用思考时仍映射xhigh。
 - EasyPay同时保留上游验签修复与本项目拒绝重复参数的约束。首次安装生成邮箱保留XY2API域名，既有管理员不受影响。
 - Ent/Wire从源定义重新生成，修正合并后字段偏移；pnpm按合并manifest重建并frozen安装，保留已修复的Axios/source-map-js版本，不恢复xlsx及其高危例外。
 
@@ -53,7 +53,8 @@
 
 本地原始日志与最终结果位于 `/lex/upstream-sync-v0.2.14-20261007`。首轮发现重复导入、GPT别名采样及6个旧前端断言，已分别修正；资源不足造成的编译终止保留为失败，不计成功。
 
-- 已完成：14项同步工具测试、干净树来源审计、316项checksum/314条字节不变、Compose解析、前端frozen install/typecheck/lint/生产构建、43项受影响前端回归。
+- 已完成：14项同步工具测试、干净树来源审计、316项checksum/314条字节不变、Compose解析、前端frozen install/typecheck/lint/生产构建、43项受影响前端回归及完整357文件/2827项Vitest。
+- 首轮远端安全、shell、Windows插件、frontend与release-helpers均通过；lint发现三个module归一化后的格式问题和一个无效初值已修。完整unit发现上游新增日期后缀归一化与既有精确别名契约冲突，已保留精确模型匹配。所有失败保留，不复用旧head门禁。
 - 合并前继续要求完整unit/integration、lint、生成零差异、完整前端Vitest及固定PR head全部required CI/security成功。不得以本段或旧head结果代替最终门禁。
 - CI新增真实PG/Redis的TypeSafe成功/异常结算和Stripe托管优惠快照race回归，明确拒绝skip与空匹配，保留原29项调度可靠性门禁。
 - 产品正式发布、镜像升级/回滚、真实供应商请求和生产数据操作不在此次集成验证范围内。
