@@ -279,7 +279,8 @@
     "dual-version-plugin-compatibility",
     "typesafe-controlled-settlement",
     "hosted-recharge-quote-snapshot",
-    "v0214-append-only-upgrade"
+    "v0214-append-only-upgrade",
+    "gpt61-exact-model-aliases"
   ],
   "custom_patch_tests": [
     {
@@ -331,6 +332,11 @@
       "id": "v0214-append-only-upgrade",
       "path": "backend/internal/repository/upstream_v0214_migration_integration_test.go",
       "literal": "func TestUpstreamV0214MigrationUpgrade"
+    },
+    {
+      "id": "gpt61-exact-model-aliases",
+      "path": "backend/internal/service/gpt61_sol_support_test.go",
+      "literal": "func TestGPT61SolAliasIdentityRemainsExact"
     }
   ]
 }

@@ -54,7 +54,8 @@
 本地原始日志与最终结果位于 `/lex/upstream-sync-v0.2.14-20261007`。首轮发现重复导入、GPT别名采样及6个旧前端断言，已分别修正；资源不足造成的编译终止保留为失败，不计成功。
 
 - 已完成：14项同步工具测试、干净树来源审计、316项checksum/314条字节不变、Compose解析、前端frozen install/typecheck/lint/生产构建、43项受影响前端回归及完整357文件/2827项Vitest。
-- 首轮远端安全、shell、Windows插件、frontend与release-helpers均通过；lint发现三个module归一化后的格式问题和一个无效初值已修。完整unit发现上游新增日期后缀归一化与既有精确别名契约冲突，已保留精确模型匹配。所有失败保留，不复用旧head门禁。
+- 真实存储专项先验证TypeSafe成功/异常均正确settled、健康与失败门状态匹配；发现托管订单数据库已保存赠金但重试响应遗漏bonus_amount，已补齐创建/恢复响应并保留回归。
+- 首轮远端安全、shell、Windows插件、frontend与release-helpers均通过；lint发现module归一化后的导入格式问题和一个无效初值，已对变化Go文件全量gofmt检查并修正。完整unit发现上游新增日期后缀归一化与既有精确别名契约冲突，已保留精确模型匹配。所有失败保留，不复用旧head门禁。
 - 合并前继续要求完整unit/integration、lint、生成零差异、完整前端Vitest及固定PR head全部required CI/security成功。不得以本段或旧head结果代替最终门禁。
 - CI新增真实PG/Redis的TypeSafe成功/异常结算和Stripe托管优惠快照race回归，明确拒绝skip与空匹配，保留原29项调度可靠性门禁。
 - 产品正式发布、镜像升级/回滚、真实供应商请求和生产数据操作不在此次集成验证范围内。

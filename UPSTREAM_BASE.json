@@ -368,7 +368,8 @@
     "dual-version-plugin-compatibility",
     "typesafe-controlled-settlement",
     "hosted-recharge-quote-snapshot",
-    "v0214-append-only-upgrade"
+    "v0214-append-only-upgrade",
+    "gpt61-exact-model-aliases"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/79"
 }
