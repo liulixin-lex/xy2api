@@ -935,11 +935,16 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		)
 	}
 
+	cacheSettlementOutcome := "pending"
+	defer func() {
+		logClaudeCacheBilling(result, usageLog, input.ForceCacheBilling, cacheTTLOverridden, cacheSettlementOutcome)
+	}()
 	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, apiKey)
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
 		if e := writeSchedulingUsageLog(ctx, s.usageLogRepo, usageLog, "service.gateway"); e != nil {
 			return e
 		}
+		cacheSettlementOutcome = "usage_only"
 		logger.LegacyPrintf("service.gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
 		return acknowledgeSchedulingUsage(ctx, s.controlledScheduling, account.ID)
@@ -970,6 +975,9 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		SimpleModeKeyRateLimitOnly: simpleModeKeyRateLimitOnly,
 	}, s.billingDeps(), s.usageBillingRepo)
 
+	if billingErr == nil {
+		cacheSettlementOutcome = "settled"
+	}
 	if billingErr != nil {
 		// The durable billing intent owns retry. A failed settlement is not a free request.
 		return billingErr

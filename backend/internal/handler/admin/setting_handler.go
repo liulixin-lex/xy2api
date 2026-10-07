@@ -381,6 +381,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		PaymentAlipayForceQRCode:                               paymentCfg.AlipayForceQRCode,
 		PaymentAlipayMobilePrecreateDeepLink:                   paymentCfg.AlipayMobilePrecreateDeepLink,
 
+		ClaudeCacheFallbackPolicy:            settings.ClaudeCacheFallbackPolicy,
 		AdminUsageCacheHitRateEnabled:        settings.AdminUsageCacheHitRateEnabled,
 		AdminUsageTokenSpeedEnabled:          settings.AdminUsageTokenSpeedEnabled,
 		ChannelMonitorEnabled:                settings.ChannelMonitorEnabled,

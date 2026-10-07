@@ -315,10 +315,11 @@ const (
 
 // InflightEstimateRequest 单请求估算输入。
 type InflightEstimateRequest struct {
-	Model     string
-	BodyBytes int
-	MaxTokens int
-	Kind      InflightEstimateKind
+	Model                string
+	ClaudeCacheColdWrite bool // Internal admission flag, never decoded from user JSON.
+	BodyBytes            int
+	MaxTokens            int
+	Kind                 InflightEstimateKind
 	// Units 按次/按张数量（<=0 视为 1）。
 	Units int
 	// SearchCalls 叠加的搜索次数（按分组 search_price_per_1k 计）。
@@ -513,7 +514,15 @@ func (d inflightEstimateDeps) estimateOne(ctx context.Context, apiKey *APIKey, m
 		if pricing == nil {
 			return 0
 		}
-		return (float64(inputTokens)*pricing.InputPricePerToken + float64(outputTokens)*pricing.OutputPricePerToken) * textRate
+		inputPrice := pricing.InputPricePerToken
+		if req.ClaudeCacheColdWrite {
+			writePrice := pricing.CacheCreationPricePerToken
+			if pricing.SupportsCacheBreakdown && (pricing.CacheCreation5mPrice > 0 || pricing.CacheCreation1hPrice > 0) {
+				writePrice = pricing.CacheCreation5mPrice
+			}
+			inputPrice = math.Max(inputPrice, writePrice)
+		}
+		return (float64(inputTokens)*inputPrice + float64(outputTokens)*pricing.OutputPricePerToken) * textRate
 	}
 
 	var cost float64
@@ -685,7 +694,28 @@ func (s *GatewayService) EstimateInflightReservation(ctx context.Context, apiKey
 	if s == nil {
 		return 0, false
 	}
-	return s.inflightEstimateDeps().estimate(ctx, apiKey, req)
+	deps := s.inflightEstimateDeps()
+	state, _ := ctx.Value(claudeCacheRequestKey{}).(*claudeCacheRequest)
+	var rules []ClaudeCacheFallbackRule
+	if state != nil && !state.declared && state.admitted != nil && apiKey != nil && apiKey.GroupID != nil && *apiKey.GroupID == state.groupID {
+		rules = state.admitted.policy.scopeRules(state.groupID, apiKey.ID)
+	}
+	req.ClaudeCacheColdWrite = len(rules) > 0
+	best, priced := deps.estimate(ctx, apiKey, req)
+	// Before account selection, conservatively include every explicitly allowed
+	// final model. This may hold extra balance; it never changes settlement cost.
+	if req.ClaudeCacheColdWrite {
+		textRate, imageRate := deps.rates(ctx, apiKey)
+		for _, rule := range rules {
+			for _, model := range rule.Models {
+				cost := deps.estimateOne(ctx, apiKey, model, req, textRate, imageRate)
+				if cost > best {
+					best, priced = cost, true
+				}
+			}
+		}
+	}
+	return best, priced
 }
 
 func (s *OpenAIGatewayService) inflightEstimateDeps() inflightEstimateDeps {

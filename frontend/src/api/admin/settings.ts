@@ -1,3 +1,16 @@
+export interface ClaudeCacheFallbackRule {
+  id: string;
+  group_id: number;
+  api_key_ids: number[];
+  account_id: number;
+  base_url: string;
+  models: string[];
+}
+export interface ClaudeCacheFallbackPolicy {
+  enabled: boolean;
+  rules: ClaudeCacheFallbackRule[];
+}
+
 /**
  * Admin Settings API endpoints
  * Handles system settings management for administrators
@@ -633,6 +646,7 @@ export interface SystemSettings {
   claude_oauth_system_prompt: string;
   claude_oauth_system_prompt_blocks: string;
   enable_anthropic_cache_ttl_1h_injection: boolean;
+  claude_cache_fallback_policy?: ClaudeCacheFallbackPolicy;
   rewrite_message_cache_control: boolean;
   enable_client_dateline_normalization: boolean;
   antigravity_user_agent_version: string;
@@ -967,6 +981,7 @@ export interface UpdateSettingsRequest {
   claude_oauth_system_prompt?: string;
   claude_oauth_system_prompt_blocks?: string;
   enable_anthropic_cache_ttl_1h_injection?: boolean;
+  claude_cache_fallback_policy?: ClaudeCacheFallbackPolicy;
   rewrite_message_cache_control?: boolean;
   enable_client_dateline_normalization?: boolean;
   antigravity_user_agent_version?: string;

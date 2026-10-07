@@ -42,12 +42,14 @@
       "deploy/**",
       "docs/**",
       "frontend/**",
+      "openspec/changes/add-claude-cache-fallback/**",
       "openspec/changes/stabilize-openai-iq-check/**",
       "openspec/changes/iq-detection-operations/**",
       "skills/**",
       "tools/**"
     ],
     "manual_merge": [
+      "Makefile",
       "backend/go.sum",
       "backend/internal/handler/redeem_handler.go",
       "backend/internal/repository/account_repo_upstream_billing_probe_update_test.go",

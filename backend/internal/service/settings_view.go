@@ -12,6 +12,7 @@ func firstNonEmpty(values ...string) string {
 }
 
 type SystemSettings struct {
+	ClaudeCacheFallbackPolicy           ClaudeCacheFallbackPolicy `json:"claude_cache_fallback_policy"`
 	RegistrationEnabled                 bool
 	EmailVerifyEnabled                  bool
 	RegistrationEmailSuffixWhitelist    []string

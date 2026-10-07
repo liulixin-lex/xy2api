@@ -6406,6 +6406,7 @@
         </div>
         </div>
         <!-- /Tab: Gateway — Claude Code, Scheduling -->
+        <ClaudeCacheFallbackSettings v-if="activeTab === 'gateway' && !loading && !loadFailed" />
 
         <!-- Tab: General -->
         <div v-show="activeTab === 'general'" class="space-y-6">
@@ -9100,6 +9101,7 @@ import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiErro
 import { useAppStore } from "@/stores";
 import { useAdminSettingsStore } from "@/stores/adminSettings";
 import { useSchedulingModeStore } from "@/stores/schedulingMode";
+import ClaudeCacheFallbackSettings from "@/views/admin/settings/ClaudeCacheFallbackSettings.vue";
 import SchedulingModeSettings from "@/components/settings/SchedulingModeSettings.vue";
 import { normalizeVisibleMethod } from "@/components/payment/paymentFlow";
 import StripeModeSelector from "@/components/payment/StripeModeSelector.vue";

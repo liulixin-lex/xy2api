@@ -48,7 +48,7 @@ func (s *SettingService) UpdateSettingsOmitting(ctx context.Context, settings *S
 		return err
 	}
 
-	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
+	if err := s.writeSettingsWithClaudeCache(ctx, updates); err != nil {
 		return err
 	}
 	s.refreshCachedSettingsAfterWrite(ctx, settings, omitted)
@@ -82,7 +82,7 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 		return err
 	}
 
-	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
+	if err := s.writeSettingsWithClaudeCache(ctx, updates); err != nil {
 		return err
 	}
 	s.refreshCachedSettingsAfterWrite(ctx, settings, omitted)
@@ -419,6 +419,17 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	}
 
 	// Admin-only usage display switches
+	if settings.ClaudeCacheFallbackPolicy.Rules == nil {
+		settings.ClaudeCacheFallbackPolicy.Rules = []ClaudeCacheFallbackRule{}
+	}
+	cachePolicyJSON, err := json.Marshal(settings.ClaudeCacheFallbackPolicy)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := ParseClaudeCacheFallbackPolicy(cachePolicyJSON); err != nil {
+		return nil, err
+	}
+	updates[SettingKeyClaudeCacheFallbackPolicy] = string(cachePolicyJSON)
 	updates[SettingKeyAdminUsageCacheHitRateEnabled] = strconv.FormatBool(settings.AdminUsageCacheHitRateEnabled)
 	updates[SettingKeyAdminUsageTokenSpeedEnabled] = strconv.FormatBool(settings.AdminUsageTokenSpeedEnabled)
 
