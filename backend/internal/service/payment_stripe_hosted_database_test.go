@@ -243,6 +243,9 @@ func testStripeHostedDatabaseCreateRecovery(t *testing.T, mode, tiers string, cr
 	r, err := svc.ResumeStripeHostedOrder(ctx, orders[0].ID, u.ID)
 	require.NoError(t, err)
 	require.NotEmpty(t, r.PayURL)
+	require.Equal(t, credited, r.Amount)
+	require.Equal(t, charged, r.PayAmount)
+	require.Equal(t, bonus, r.BonusAmount)
 	t.Logf("HOSTED_DATABASE order_count=%d retry_session=%s credited_quote=%v charged=%v bonus=%v max_pending_enforced=true", count, session.ID, credited, charged, bonus)
 }
 

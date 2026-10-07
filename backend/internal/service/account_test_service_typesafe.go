@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/liulixin-lex/xy2api/internal/pkg/typesafe"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/typesafe"
 )
 
 const (
