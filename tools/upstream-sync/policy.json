@@ -49,6 +49,7 @@
       "tools/**"
     ],
     "manual_merge": [
+      "Makefile",
       "backend/go.sum",
       "backend/internal/handler/redeem_handler.go",
       "backend/internal/repository/account_repo_upstream_billing_probe_update_test.go",
