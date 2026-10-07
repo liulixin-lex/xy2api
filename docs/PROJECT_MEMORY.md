@@ -4,14 +4,16 @@
 
 ## 当前交接状态
 
-### Claude 缓存补齐实施及发布（2026-10-08，验证中）
+### Claude 缓存补齐 0.2.4（2026-10-08，RC 发布及正式晋级中）
 
-- 用户已明确授权按方案实现、推送、合并和发版；分支 `feat/claude-cache-fallback-20261008`，工作树 `/lex/xy2api-claude-cache`，目标产品 `0.2.4-rc.1`，兼容版本保持 `0.2.14`。
-- 已实现强类型默认关闭规则、原始声明保护、最终原生出口补齐、冷写保守预留、原始/结算数值诊断和独立管理组件，无新迁移。修正成功 wire body 同步会污染后续尝试的问题；请求 admission 冻结、发送重新检查开关。
-- 定向 Go 转发/设置/预留/API 契约通过；前端 lint/typecheck/critical 318 项及独立新增 3 项通过。首次并行 Go 编译遇到本地内存限制，现串行重跑，不将编译被杀标为测试通过。完整结果以 `/lex/claude-cache-implementation-20261008/` 为准。
-- 未推送或发布，下一步完成后端/race/集成、界面和大请求验证后走 PR、RC、正式发布。用户没有要求生产部署，本轮不部署、不启用生产规则，不新增付费上游调用。
+- 用户已明确授权实现、推送、合并和发版。功能 [PR #81](https://github.com/liulixin-lex/xy2api/pull/81) 已常规合并，验收 head `044bcf68f43bb684f17a31a750bed2e2cf6f751e`，merge `a35c5c28267015e46b602deb5c2bbd41dcc4dbd5`；两者 tree 相同。所有固定 head 检查通过，完整后端/集成/真实存储调度检查见 CI `37661770962`。
+- 实现默认关闭的强类型精确规则、原始/最终声明保护、原生 API Key 出口 5m 补齐、冷写保守预留、原始与结算数值诊断、独立管理界面。请求 admission 冻结，发送重新检查开关；补齐不会写回共享正文。旧后端忽略新字段时不误报保存成功。
+- 本地全量 unit、缓存/预留/设置 race、真实 PostgreSQL/Redis 27 项集成（零跳过）、前端 lint/typecheck/318 项原 critical + 4 项新增组件、生产构建均通过。2.65 MB 补齐辅助路径基准（不含完整 Forward/网络）OFF 1.4µs/264B，ON 命中 34ms/10.6MB；桌面/手机无溢出或脚本错误。初次并行编译 OOM、lint 文本大小写问题均已修复或成功重验；不删除失败记录。
+- RC 标签 `v0.2.4-rc.1` 固定于上述 merge，Release workflow `37664827099` 成功；GitHub 附件校验和、双架构 GHCR manifest 与版本/提交标签均核对通过。隔离旧版升级烟测返回健康、登录和静态资源正常；fresh/rollback 未执行。
+- 正式准备分支 `release/0.2.4` 位于 `/lex/xy2api-claude-cache`，只晋级产品版本与交接/验收文档，业务代码保持 RC。兼容版本仍为 0.2.14，没有新增迁移。来源审计通过，Makefile 新增关键用例入口登记为精确 manual_merge。
+- 证据及当前阶段账本：`/lex/claude-cache-implementation-20261008/`。使用说明：[Claude 缓存补齐](CLAUDE_CACHE_FALLBACK.md)。未部署生产、未自动启用规则、未新增付费上游调用；历史低命中归因及 NewAPI/供应商账单仍不在已验证范围。
 
-### Claude 缓存缺失补齐方案（2026-10-08，规划完成、实施未开始）
+### Claude 缓存缺失补齐前期规划（2026-10-08，以下保留规划时边界，实施以顶部为准）
 
 - 用户要求同步最新仓库、新建分支并规划。已 fetch 并通过 ls-remote 核对 `origin/main=317b019134a09f1a5cb16f8c15b0a3365f9ee920`，产品 0.2.3 / 兼容 0.2.14；在 `/lex/xy2api-claude-cache` 建立 `plan/claude-cache-fallback-20261008`。原 `/lex/xy2api` 的 main 和未提交记忆文件保持，文件哈希已核验。
 - 方案入口：[proposal](../openspec/changes/add-claude-cache-fallback/proposal.md)，另有 design、行为规格与 tasks。首版默认关闭，只覆盖原生 Messages 到已验证 Anthropic API Key 上游；按组/可选 Key/账号/完整地址/最终模型精确限定，无声明时补顶层默认 5m，保护原始及最终已有声明。
@@ -503,6 +505,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 用户明确授权按既有方案实现、推送、合并与发版；沿用 `/lex/xy2api-claude-cache`，起点 c9f9adf64，远端 main 317b01913。原工作树保持。
 - 默认关闭、精确规则、原始声明保护、真实 usage 计费与冷写预留一并实施；保留既有迁移、调度与兼容基线。通过本地验证和固定 head 的远端门禁后完成 RC 验收及正式发布；不部署生产或自动启用规则。
 - 证据目录 `/lex/claude-cache-implementation-20261008/`，待完成项以 OpenSpec tasks 和实际执行记录为准。
+- 进展：PR #81 已合并，固定 head 门禁、本地 unit/race/27 项真实存储集成及前端验证通过；RC GitHub 制品和镜像检查通过，隔离旧版升级烟测通过。fresh/rollback 未执行；正式 PR/标签/制品验收仍待完成。本轮不操作部署或容器清理。
 
 ### 20261007-release-0.2.3 — 正式 PR 与标签
 
@@ -1627,3 +1630,11 @@ pnpm --dir frontend run build
 - 验证：链接/结构/敏感模式与原目录哈希检查通过，同步工具10项测试通过。标准来源审计在干净本地提交后执行，字面命令、退出码与最终SHA存外部 `/lex/claude-cache-plan-20261008-evidence/`；不预先声明成功。没有 OpenSpec CLI，未运行其校验；方案阶段未跑业务测试。
 - 卡点/风险：规划无阻塞。缺失补齐只能解决声明缺失一类问题；真实用户历史根因和两端账本仍未验证。首次冷写可能增加实际费用和预留需求，多实例设置传播上界60秒。
 - 下一步：按 tasks 实现并完成真实 Forward/费用/低余额并发回归后再灰度。本地规划分支不推送，不创建PR或部署；其他工作树和历史日志保持。
+
+
+### 2026-10-08 — 20261008-claude-cache-fallback-implementation — 功能合并与 RC
+
+- 用户追加明确实现、推送、合并、发版授权；在原独立 worktree 的 feature 分支完成，不修改原工作区的既有脏记忆。PR #81 验收 head 044bcf68f，普通 merge a35c5c282，固定 head 的全部 CI/Security 检查通过。
+- 新增精确开关与快照、原始声明保护、最终 wire 补齐、保守冷写预留、数值诊断及独立后台组件；修正 wire 回写污染共享正文、忽略新字段误报保存、Go 错误文本 lint。没有改变收费公式、迁移、调度规则或现有 TTL/强制计费开关。
+- 单元、race、27 项真实 PG/Redis 定向集成、前端 lint/类型/关键用例/构建、双视口及 2.65 MB 基准通过；详细命令与失败到成功记录位于外部证据目录，真实上游没有新增模型调用。
+- 发布：v0.2.4-rc.1 固定于 merge，workflow 37664827099 成功；GitHub assets/checksum/GHCR 双架构及版本标签通过，隔离旧版升级的健康/登录/静态资源烟测通过。fresh/rollback 未执行。下一步以业务代码不变的 release/0.2.4 走正式 PR、标签及 GitHub 制品验证；不操作部署或容器清理，生产保持原状，默认不开启新规则。
