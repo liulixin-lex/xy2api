@@ -297,6 +297,7 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		AccountID:          p.Account.ID,
 		AccountType:        p.Account.Type,
 		RequestPayloadHash: strings.TrimSpace(p.RequestPayloadHash),
+		Usage:              BillingUsageSnapshot(usageLog),
 	}
 	if usageLog != nil {
 		cmd.Model = usageLog.Model
@@ -334,6 +335,7 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		cmd.SubscriptionCost = p.Cost.ActualCost
 	} else if p.Cost.ActualCost > 0 {
 		cmd.BalanceCost = p.Cost.ActualCost
+		cmd.QuotaPlatform = p.Platform
 	}
 
 	if p.shouldDeductAPIKeyQuota() {
@@ -354,11 +356,26 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 	if p == nil || deps == nil {
 		return false, nil
 	}
+	if p.Cost != nil {
+		for _, amount := range []float64{p.Cost.ActualCost, p.Cost.TotalCost, p.Cost.InputCost, p.Cost.OutputCost, p.Cost.CacheCreationCost, p.Cost.CacheReadCost, p.Cost.ImageInputCost, p.Cost.ImageOutputCost} {
+			if !validUsageBillingAmount(amount) {
+				return false, ErrUsageBillingInvalidAmount
+			}
+		}
+	}
 
 	cmd := buildUsageBillingCommand(requestID, usageLog, p)
+	if cmd != nil {
+		cmd.SchedulingAttemptID = SchedulingAttemptIDFromContext(ctx)
+	}
 	if cmd == nil || cmd.RequestID == "" || repo == nil {
 		if p.SimpleModeKeyRateLimitOnly {
 			return false, ErrSimpleModeKeyRateLimitBillingUnavailable
+		}
+		// Unconfigured test fixtures retain the legacy adapter. A configured
+		// server must never acknowledge non-atomic, best-effort monetary writes.
+		if deps.cfg != nil && deps.cfg.RunMode != "" {
+			return false, ErrUsageBillingUnavailable
 		}
 		// The legacy path is only a fallback for standard billing. Simple mode
 		// must retain request-id deduplication and never bill other balances.
@@ -372,6 +389,24 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 	result, err := repo.Apply(billingCtx, cmd)
 	if err != nil {
 		return false, err
+	}
+	if usageLog != nil && cmd.Usage != nil && cmd.Usage.ID > 0 {
+		usageLog.ID, usageLog.CreatedAt, usageLog.ActualCost = cmd.Usage.ID, cmd.Usage.CreatedAt, cmd.Usage.ActualCost
+	}
+	if durable, ok := repo.(UsageBillingRecoveryRepository); ok && cmd.Usage != nil && result != nil {
+		// Invalidate instead of replaying cache deltas. A lost commit acknowledgement
+		// can safely repeat this path, including when Applied is false.
+		result.CachesManagedDurably = true
+		cacheErr := invalidateBillingCommandCaches(billingCtx, deps.billingCacheService, cmd)
+		if cacheErr == nil {
+			cacheErr = acknowledgeSchedulingUsage(WithSchedulingUsageAttempt(billingCtx, cmd.SchedulingAttemptID), deps.controlledScheduling, cmd.AccountID)
+		}
+		if cacheErr == nil {
+			cacheErr = durable.CompleteBillingCacheInvalidation(billingCtx, cmd)
+		}
+		if cacheErr != nil {
+			slog.Error("billing.cache_recovery_pending", "request_id", cmd.RequestID, "api_key_id", cmd.APIKeyID, "error", cacheErr)
+		}
 	}
 
 	if result == nil || !result.Applied {
@@ -407,6 +442,12 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 		deps.deferredService.ScheduleLastUsedUpdate(p.Account.ID)
 		return
 	}
+	if result != nil && result.CachesManagedDurably {
+		deps.deferredService.ScheduleLastUsedUpdate(p.Account.ID)
+		go notifyBalanceLow(p, deps, result)
+		go notifyAccountQuota(p, deps, result)
+		return
+	}
 
 	if p.IsSubscriptionBill {
 		if p.Cost.ActualCost > 0 && p.User != nil && p.APIKey != nil && p.APIKey.GroupID != nil {
@@ -429,7 +470,11 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 	//     限制在并发 in-flight 请求数量内（旧实现的异步入队会让超支无限累积直到 worker 处理）
 	//   - DB 异步(flusher_enabled=false):在独立 goroutine 中走 detached context,失败用 ALERT log 触发 oncall 对账
 	//   - flusher_enabled=true:不直写 DB,由 flusher 异步批量刷（markDirty 已在 IncrementUserPlatformQuotaUsage 内部完成）
-	if !p.IsSubscriptionBill && p.Platform != "" && p.Cost.ActualCost > 0 && p.User != nil && deps.userPlatformQuotaRepo != nil && deps.billingCacheService != nil {
+	if result != nil && result.PlatformQuotaApplied && deps.billingCacheService != nil {
+		if err := deps.billingCacheService.InvalidateUserPlatformQuota(ctx, p.User.ID, p.Platform); err != nil {
+			slog.Error("billing.platform_cache_invalidation_failed", "user_id", p.User.ID, "error", err)
+		}
+	} else if !p.IsSubscriptionBill && p.Platform != "" && p.Cost.ActualCost > 0 && p.User != nil && deps.userPlatformQuotaRepo != nil && deps.billingCacheService != nil {
 		if deps.billingCacheService.HasUserPlatformQuotaLimit(ctx, p.User.ID, p.Platform) {
 			deps.billingCacheService.IncrementUserPlatformQuotaUsage(p.User.ID, p.Platform, p.Cost.ActualCost)
 			if deps.cfg == nil || !deps.cfg.Database.UserPlatformQuotaFlusherEnabled {
@@ -476,6 +521,16 @@ func syncBalanceCacheAfterDeduction(ctx context.Context, p *postUsageBillingPara
 			)
 		}
 		return
+	}
+	if deps.billingCacheService.InflightReservationEnabled() {
+		// 在途预留开启时同步扣减余额缓存：计费任务结束后才会释放预留，
+		// 必须保证此时准入读取的缓存余额已反映本次扣费，否则释放与扣减之间
+		// 仍存在「在途=0 且余额未扣」的窗口。此步骤在同步计费尾部完成。
+		err := deps.billingCacheService.DeductBalanceCache(ctx, p.User.ID, p.Cost.ActualCost)
+		if err == nil {
+			return
+		}
+		logger.LegacyPrintf("service.gateway", "Warning: sync deduct balance cache failed for user %d, falling back to queue: %v", p.User.ID, err)
 	}
 	deps.billingCacheService.QueueDeductBalance(p.User.ID, p.Cost.ActualCost)
 }
@@ -590,6 +645,7 @@ type billingDeps struct {
 	deferredService       *DeferredService
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
+	controlledScheduling  *ControlledSchedulingService
 	cfg                   *config.Config
 }
 
@@ -602,6 +658,7 @@ func (s *GatewayService) billingDeps() *billingDeps {
 		deferredService:       s.deferredService,
 		balanceNotifyService:  s.balanceNotifyService,
 		userPlatformQuotaRepo: s.userPlatformQuotaRepo,
+		controlledScheduling:  s.controlledScheduling,
 		cfg:                   s.cfg,
 	}
 }
@@ -874,6 +931,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 				ImageOutputTokens:   result.Usage.ImageOutputTokens,
 			},
 			cost.TotalCost, pricingAt,
+			accountStatsLongContextPricingEnabled(nil),
 		)
 	}
 
@@ -913,8 +971,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	}, s.billingDeps(), s.usageBillingRepo)
 
 	if billingErr != nil {
-		usageLog.ActualCost = 0
-		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
+		// The durable billing intent owns retry. A failed settlement is not a free request.
 		return billingErr
 	}
 	if e := writeSchedulingUsageLog(ctx, s.usageLogRepo, usageLog, "service.gateway"); e != nil {

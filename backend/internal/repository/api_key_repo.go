@@ -43,7 +43,53 @@ func (r *apiKeyRepository) activeQuery() *dbent.APIKeyQuery {
 }
 
 func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) error {
-	builder := r.client.APIKey.Create().
+	return createAPIKeyWithClient(ctx, r.client, key)
+}
+
+// Serialize per owner so concurrent creations cannot all pass CountByUserID.
+// Count recently created tombstones too: deleting a key never refunds this budget.
+func (r *apiKeyRepository) CreateWithLimits(ctx context.Context, key *service.APIKey, maxActive, maxPerHour int) error {
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	client := tx.Client()
+	if _, err := client.User.Query().Where(user.IDEQ(key.UserID), user.DeletedAtIsNil()).ForUpdate().Only(ctx); err != nil {
+		return translatePersistenceError(err, service.ErrUserNotFound, nil)
+	}
+	rows, err := client.QueryContext(ctx, `SELECT COUNT(*) FILTER (WHERE deleted_at IS NULL),
+		COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '1 hour') FROM api_keys WHERE user_id = $1`, key.UserID)
+	if err != nil {
+		return err
+	}
+	var active, recent int64
+	if !rows.Next() {
+		err = rows.Err()
+		if err == nil {
+			err = sql.ErrNoRows
+		}
+	} else {
+		err = rows.Scan(&active, &recent)
+	}
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	if maxActive > 0 && active >= int64(maxActive) {
+		return service.ErrAPIKeyCountExceeded
+	}
+	if maxPerHour > 0 && recent >= int64(maxPerHour) {
+		return service.ErrAPIKeyCreateLimited
+	}
+	if err := createAPIKeyWithClient(ctx, client, key); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func createAPIKeyWithClient(ctx context.Context, client *dbent.Client, key *service.APIKey) error {
+	builder := client.APIKey.Create().
 		SetUserID(key.UserID).
 		SetKey(key.Key).
 		SetName(key.Name).

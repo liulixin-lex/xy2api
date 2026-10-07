@@ -12,7 +12,7 @@ import (
 )
 
 // 本文件覆盖：worker 池已停止（进程关停窗口）时，计费任务不得静默丢失，
-// 必须降级为内联同步执行；显式配置的 drop/sample 溢出丢弃仍按配置语义保留。
+// 必须降级为内联同步执行；drop/sample 仅适用于非财务任务，计费必须同步交接。
 
 func newStoppedUsageRecordPoolForTest() *service.UsageRecordWorkerPool {
 	pool := service.NewUsageRecordWorkerPoolWithOptions(service.UsageRecordWorkerPoolOptions{
@@ -45,7 +45,7 @@ func TestOpenAIGatewayHandlerSubmitUsageRecordTask_StoppedPoolFallsBackToSync(t 
 	require.True(t, executed, "池已停止时计费任务必须内联同步执行")
 }
 
-func TestGatewayHandlerSubmitUsageRecordTask_DropPolicyOverflowStillDrops(t *testing.T) {
+func TestGatewayHandlerSubmitUsageRecordTask_DropPolicyOverflowStillBills(t *testing.T) {
 	pool := service.NewUsageRecordWorkerPoolWithOptions(service.UsageRecordWorkerPoolOptions{
 		WorkerCount:    1,
 		QueueSize:      1,
@@ -73,5 +73,5 @@ func TestGatewayHandlerSubmitUsageRecordTask_DropPolicyOverflowStillDrops(t *tes
 		executed.Store(true)
 	})
 	time.Sleep(50 * time.Millisecond)
-	require.False(t, executed.Load(), "drop 溢出策略是运维显式配置的取舍，不应被同步兜底覆盖")
+	require.True(t, executed.Load(), "队列已满时财务任务仍必须执行")
 }

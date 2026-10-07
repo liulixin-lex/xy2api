@@ -14,6 +14,8 @@ import (
 
 var ErrUsageBillingRequestIDRequired = errors.New("usage billing request_id is required")
 var ErrUsageBillingRequestConflict = errors.New("usage billing request fingerprint conflict")
+var ErrUsageBillingInvalidAmount = errors.New("usage billing amount must be finite, non-negative and below 1e12")
+var ErrUsageBillingUnavailable = errors.New("atomic usage billing unavailable")
 
 // UsageBillingCommand describes one billable request that must be applied at most once.
 type UsageBillingCommand struct {
@@ -42,6 +44,51 @@ type UsageBillingCommand struct {
 	APIKeyQuotaCost     float64
 	APIKeyRateLimitCost float64
 	AccountQuotaCost    float64
+
+	// Usage is the immutable, credential-free snapshot persisted before settlement.
+	// It is deliberately excluded from the historical dedup fingerprint algorithm.
+	Usage *UsageLog `json:",omitempty"`
+	// Platform quota follows this frozen bill and commits with its balance debit.
+	QuotaPlatform       string `json:",omitempty"`
+	SchedulingAttemptID string `json:",omitempty"`
+}
+
+func (c *UsageBillingCommand) Validate() error {
+	if c == nil {
+		return nil
+	}
+	for _, amount := range []float64{c.BalanceCost, c.SubscriptionCost, c.APIKeyQuotaCost, c.APIKeyRateLimitCost, c.AccountQuotaCost} {
+		if !validUsageBillingAmount(amount) {
+			return ErrUsageBillingInvalidAmount
+		}
+	}
+	if c.Usage != nil {
+		u := c.Usage
+		if strings.TrimSpace(u.RequestID) != strings.TrimSpace(c.RequestID) || u.APIKeyID != c.APIKeyID || u.UserID != c.UserID || u.AccountID != c.AccountID {
+			return ErrUsageBillingRequestConflict
+		}
+		for _, amount := range []float64{u.ActualCost, u.TotalCost, u.InputCost, u.OutputCost, u.CacheCreationCost, u.CacheReadCost, u.ImageInputCost, u.ImageOutputCost} {
+			if !validUsageBillingAmount(amount) {
+				return ErrUsageBillingInvalidAmount
+			}
+		}
+	}
+	return nil
+}
+
+func validUsageBillingAmount(amount float64) bool {
+	return !math.IsNaN(amount) && !math.IsInf(amount, 0) && amount >= 0 && amount < 1e12
+}
+
+// BillingUsageSnapshot must never serialize joined users, API-key secrets or account credentials.
+func BillingUsageSnapshot(usage *UsageLog) *UsageLog {
+	if usage == nil {
+		return nil
+	}
+	snapshot := *usage
+	snapshot.User, snapshot.APIKey, snapshot.Account, snapshot.Group, snapshot.Subscription = nil, nil, nil, nil, nil
+	snapshot.ActualCost = QuantizeUsageBillingAmount(snapshot.ActualCost)
+	return &snapshot
 }
 
 func (c *UsageBillingCommand) Normalize() {
@@ -49,6 +96,9 @@ func (c *UsageBillingCommand) Normalize() {
 		return
 	}
 	c.RequestID = strings.TrimSpace(c.RequestID)
+	if c.Usage != nil {
+		c.Usage.RequestID = strings.TrimSpace(c.Usage.RequestID)
+	}
 	if strings.TrimSpace(c.RequestFingerprint) == "" {
 		c.RequestFingerprint = buildUsageBillingFingerprint(c)
 	}
@@ -163,6 +213,8 @@ type AccountQuotaState struct {
 }
 
 type UsageBillingApplyResult struct {
+	CachesManagedDurably bool
+	PlatformQuotaApplied bool
 	Applied              bool
 	APIKeyQuotaExhausted bool
 	NewBalance           *float64           // post-deduction balance (nil = no balance deduction)

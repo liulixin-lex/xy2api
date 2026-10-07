@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent } from 'vue'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, ref } from 'vue'
 
 import UserUsageView from '@/views/user/UsageView.vue'
 import AdminUsageView from '@/views/admin/UsageView.vue'
+
+enableAutoUnmount(afterEach)
 
 const {
   userQuery,
@@ -119,6 +121,12 @@ vi.mock('@/api/admin/ops', () => ({
   listErrorLogs,
 }))
 
+vi.mock('@/api/usageExport', () => ({
+  usageExportAPI: {
+    list: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+  },
+}))
+
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
     showError: vi.fn(),
@@ -142,6 +150,8 @@ vi.mock('vue-i18n', async () => {
     ...actual,
     useI18n: () => ({
       t: (key: string) => messages[key] ?? key,
+      te: (key: string) => Object.prototype.hasOwnProperty.call(messages, key),
+      locale: ref('en'),
     }),
   }
 })
