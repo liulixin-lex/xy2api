@@ -115,25 +115,25 @@ func (s *SettingService) validateClaudeCacheScope(ctx context.Context, p ClaudeC
 		return nil
 	}
 	if s.claudeCacheGroupRepo == nil || s.claudeCacheAccountRepo == nil || s.claudeCacheKeyRepo == nil {
-		return fmt.Errorf("Claude cache scope validation unavailable")
+		return fmt.Errorf("claude cache scope validation unavailable")
 	}
 	for _, r := range p.Rules {
 		group, err := s.claudeCacheGroupRepo.GetByID(ctx, r.GroupID)
 		if err != nil || group == nil || (group.Platform != PlatformAnthropic && group.Platform != PlatformComposite) {
-			return fmt.Errorf("Claude cache rule %s: invalid group", r.ID)
+			return fmt.Errorf("claude cache rule %s: invalid group", r.ID)
 		}
 		account, err := s.claudeCacheAccountRepo.GetByID(ctx, r.AccountID)
 		if err != nil || !claudeCacheAccountSupported(account) || !slices.Contains(account.GroupIDs, r.GroupID) {
-			return fmt.Errorf("Claude cache rule %s: account must be a native Anthropic API key in this group", r.ID)
+			return fmt.Errorf("claude cache rule %s: account must be a native Anthropic API key in this group", r.ID)
 		}
 		base, err := normalizeClaudeCacheBaseURL(account.GetBaseURL())
 		if err != nil || base != r.BaseURL {
-			return fmt.Errorf("Claude cache rule %s: upstream URL does not match account", r.ID)
+			return fmt.Errorf("claude cache rule %s: upstream URL does not match account", r.ID)
 		}
 		for _, id := range r.APIKeyIDs {
 			key, err := s.claudeCacheKeyRepo.GetByID(ctx, id)
 			if err != nil || key == nil || key.GroupID == nil || *key.GroupID != r.GroupID {
-				return fmt.Errorf("Claude cache rule %s: API key must belong to this group", r.ID)
+				return fmt.Errorf("claude cache rule %s: API key must belong to this group", r.ID)
 			}
 		}
 	}
