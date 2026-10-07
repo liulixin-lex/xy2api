@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/gin-gonic/gin/binding"
 	"github.com/lib/pq"
 	"gopkg.in/yaml.v3"
