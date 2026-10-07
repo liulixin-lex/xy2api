@@ -25,6 +25,15 @@ func newBillingIntentFixture(t *testing.T) (*usageBillingRepository, *service.Us
 	client := testEntClient(t)
 	u := mustCreateUser(t, client, &service.User{Email: uuid.NewString() + "@example.com", PasswordHash: "hash", Balance: 100})
 	k := mustCreateApiKey(t, client, &service.APIKey{UserID: u.ID, Key: "sk-test-" + uuid.NewString(), Name: "billing-intent", Quota: 100})
+	// Apply commits its own transactions, so the shared integration database
+	// cannot rely on a test transaction rollback to isolate usage/recovery rows.
+	t.Cleanup(func() {
+		for _, table := range []string{"usage_billing_intents", "usage_billing_dedup", "usage_billing_dedup_archive", "usage_logs"} {
+			if _, err := integrationDB.Exec("DELETE FROM "+table+" WHERE api_key_id = $1", k.ID); err != nil {
+				t.Errorf("clean billing fixture %s: %v", table, err)
+			}
+		}
+	})
 	a := mustCreateAccount(t, client, &service.Account{Name: uuid.NewString(), Type: service.AccountTypeAPIKey, Extra: map[string]any{"quota_limit": 100.0}})
 	c := &service.UsageBillingCommand{RequestID: uuid.NewString(), UserID: u.ID, APIKeyID: k.ID, AccountID: a.ID,
 		AccountType: a.Type, Model: "test-model", BalanceCost: 1.25, APIKeyQuotaCost: 1.25, APIKeyRateLimitCost: 1.25, AccountQuotaCost: 1.25}
@@ -248,6 +257,10 @@ func TestBillingIntent_RecoveryAcknowledgesSchedulingAfterLostAck(t *testing.T) 
 		(ticket_id, request_id, account_id, family_id, node_id, account_epoch, family_epoch, state, usage_pending, lease_until)
 		VALUES ($1, $2, $3, $3, 'billing-test', 0, 0, 'settled', TRUE, NOW())`, c.SchedulingAttemptID, c.RequestID, c.AccountID)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := integrationDB.Exec("DELETE FROM scheduling_attempts WHERE ticket_id = $1", c.SchedulingAttemptID)
+		require.NoError(t, err)
+	})
 	_, err = r.Apply(context.Background(), c)
 	require.NoError(t, err)
 	_, err = integrationDB.Exec("UPDATE usage_billing_intents SET next_attempt_at = NOW() WHERE request_id = $1 AND api_key_id = $2", c.RequestID, c.APIKeyID)
