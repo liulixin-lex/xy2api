@@ -804,6 +804,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		}
 	}
 
+	result.ClaudeCacheFallbackPolicy, _ = ParseClaudeCacheFallbackPolicy([]byte(settings[SettingKeyClaudeCacheFallbackPolicy]))
 	result.AdminUsageCacheHitRateEnabled = !isFalseSettingValue(settings[SettingKeyAdminUsageCacheHitRateEnabled])
 	result.AdminUsageTokenSpeedEnabled = !isFalseSettingValue(settings[SettingKeyAdminUsageTokenSpeedEnabled])
 

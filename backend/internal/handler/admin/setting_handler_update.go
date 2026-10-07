@@ -337,8 +337,9 @@ type UpdateSettingsRequest struct {
 	PaymentAlipayMobilePrecreateDeepLink *bool `json:"payment_alipay_mobile_precreate_deep_link"`
 
 	// Admin-only usage display switches. Omitted fields preserve saved values.
-	AdminUsageCacheHitRateEnabled *bool `json:"admin_usage_cache_hit_rate_enabled"`
-	AdminUsageTokenSpeedEnabled   *bool `json:"admin_usage_token_speed_enabled"`
+	ClaudeCacheFallbackPolicy     json.RawMessage `json:"claude_cache_fallback_policy"`
+	AdminUsageCacheHitRateEnabled *bool           `json:"admin_usage_cache_hit_rate_enabled"`
+	AdminUsageTokenSpeedEnabled   *bool           `json:"admin_usage_token_speed_enabled"`
 
 	// Channel Monitor feature switch
 	ChannelMonitorEnabled                *bool   `json:"channel_monitor_enabled"`
@@ -521,6 +522,14 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
+	}
+	cachePolicy := previousSettings.ClaudeCacheFallbackPolicy
+	if raw, sent := sentFields[service.SettingKeyClaudeCacheFallbackPolicy]; sent {
+		cachePolicy, err = service.ParseClaudeCacheFallbackPolicy(raw)
+		if err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
 	}
 	previousAuthSourceDefaults, err := h.settingService.GetAuthSourceDefaultSettings(c.Request.Context())
 	if err != nil {
@@ -1945,6 +1954,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.AccountQuotaNotifyEmails
 		}(),
+		ClaudeCacheFallbackPolicy: cachePolicy,
 		AdminUsageCacheHitRateEnabled: func() bool {
 			if req.AdminUsageCacheHitRateEnabled != nil {
 				return *req.AdminUsageCacheHitRateEnabled
@@ -2472,6 +2482,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PaymentAlipayForceQRCode:                               updatedPaymentCfg.AlipayForceQRCode,
 		PaymentAlipayMobilePrecreateDeepLink:                   updatedPaymentCfg.AlipayMobilePrecreateDeepLink,
 
+		ClaudeCacheFallbackPolicy:            updatedSettings.ClaudeCacheFallbackPolicy,
 		AdminUsageCacheHitRateEnabled:        updatedSettings.AdminUsageCacheHitRateEnabled,
 		AdminUsageTokenSpeedEnabled:          updatedSettings.AdminUsageTokenSpeedEnabled,
 		ChannelMonitorEnabled:                updatedSettings.ChannelMonitorEnabled,

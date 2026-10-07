@@ -94,7 +94,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	if err != nil {
 		return nil, err
 	}
-	settingService := service.ProvideSettingService(settingRepository, groupRepository, proxyRepository, configConfig, secretEncryptor)
+	settingService := service.ProvideSettingService(settingRepository, groupRepository, proxyRepository, configConfig, secretEncryptor, accountRepository, apiKeyRepository)
 	geminiTokenCache := repository.NewGeminiTokenCache(redisClient)
 	compositeTokenCacheInvalidator := service.NewCompositeTokenCacheInvalidator(geminiTokenCache)
 	httpUpstream := repository.NewHTTPUpstream(configConfig)

@@ -15,6 +15,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 
 	"github.com/gin-gonic/gin"
 )
@@ -93,6 +94,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if parsed == nil {
 		return nil, fmt.Errorf("parse request: empty request")
 	}
+	ctx, cacheDecision := s.beginClaudeCacheAttempt(ctx, parsed, account)
+	defer func() { finishClaudeCacheAttempt(cacheDecision, result) }()
 	// API-key mappings and OAuth native IDs are resolved before mimicry.
 	validationModel := parsed.Model
 	if account != nil {
@@ -172,6 +175,18 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 		body = parsed.Body.Bytes()
 		return nil
+	}
+	// Keep fallback declarations local to this account's wire request. Other
+	// successful wire transformations still update ParsedRequest as before.
+	syncWireBody := func(wire []byte) error {
+		if cacheDecision != nil && cacheDecision.Reason == "injected" {
+			clean, err := sjson.DeleteBytes(wire, "cache_control")
+			if err != nil {
+				return fmt.Errorf("remove attempt cache declaration: %w", err)
+			}
+			wire = clean
+		}
+		return replaceBody(wire)
 	}
 	reqModel := parsed.Model
 	reqStream := parsed.Stream
@@ -469,7 +484,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 							if retryResp.StatusCode < 400 {
 								// 重试请求被上游接受后同步 ParsedRequest，保证 usage/日志看到真实请求体。
 								lastWireBody = retryWireBody
-								if err := replaceBody(retryWireBody); err != nil {
+								if err := syncWireBody(retryWireBody); err != nil {
 									_ = retryResp.Body.Close()
 									return nil, err
 								}
@@ -512,7 +527,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 											if retryResp2.StatusCode < 400 {
 												// 二阶段工具块降级成功时也必须更新当前 body。
 												lastWireBody = retryWireBody2
-												if err := replaceBody(retryWireBody2); err != nil {
+												if err := syncWireBody(retryWireBody2); err != nil {
 													_ = retryResp2.Body.Close()
 													return nil, err
 												}
@@ -595,7 +610,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 								if budgetRetryResp.StatusCode < 400 {
 									// budget 修正请求成功后，ParsedRequest 也要描述被接受的修正版。
 									lastWireBody = budgetWireBody
-									if err := replaceBody(budgetWireBody); err != nil {
+									if err := syncWireBody(budgetWireBody); err != nil {
 										_ = budgetRetryResp.Body.Close()
 										return nil, err
 									}
@@ -806,7 +821,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 	if !bytes.Equal(lastWireBody, body) {
 		// 成功后再同步最终 wire body，避免失败重试从已签名 CCH 的 body 继续派生。
-		if err := replaceBody(lastWireBody); err != nil {
+		if err := syncWireBody(lastWireBody); err != nil {
 			return nil, err
 		}
 	}

@@ -313,8 +313,9 @@ type SystemSettings struct {
 	AccountQuotaNotifyEmails        []NotifyEmailEntry `json:"account_quota_notify_emails"`
 
 	// Admin-only usage display switches (default: enabled).
-	AdminUsageCacheHitRateEnabled bool `json:"admin_usage_cache_hit_rate_enabled"`
-	AdminUsageTokenSpeedEnabled   bool `json:"admin_usage_token_speed_enabled"`
+	ClaudeCacheFallbackPolicy     service.ClaudeCacheFallbackPolicy `json:"claude_cache_fallback_policy"`
+	AdminUsageCacheHitRateEnabled bool                              `json:"admin_usage_cache_hit_rate_enabled"`
+	AdminUsageTokenSpeedEnabled   bool                              `json:"admin_usage_token_speed_enabled"`
 
 	// Channel Monitor feature
 	ChannelMonitorEnabled                bool   `json:"channel_monitor_enabled"`
