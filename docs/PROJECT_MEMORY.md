@@ -4,13 +4,14 @@
 
 ## 当前交接状态
 
-### Claude 缓存补齐 0.2.4（2026-10-08，RC 发布及正式晋级中）
+### Claude 缓存补齐 0.2.4（2026-10-08，GitHub 正式发布完成）
 
 - 用户已明确授权实现、推送、合并和发版。功能 [PR #81](https://github.com/liulixin-lex/xy2api/pull/81) 已常规合并，验收 head `044bcf68f43bb684f17a31a750bed2e2cf6f751e`，merge `a35c5c28267015e46b602deb5c2bbd41dcc4dbd5`；两者 tree 相同。所有固定 head 检查通过，完整后端/集成/真实存储调度检查见 CI `37661770962`。
 - 实现默认关闭的强类型精确规则、原始/最终声明保护、原生 API Key 出口 5m 补齐、冷写保守预留、原始与结算数值诊断、独立管理界面。请求 admission 冻结，发送重新检查开关；补齐不会写回共享正文。旧后端忽略新字段时不误报保存成功。
 - 本地全量 unit、缓存/预留/设置 race、真实 PostgreSQL/Redis 27 项集成（零跳过）、前端 lint/typecheck/318 项原 critical + 4 项新增组件、生产构建均通过。2.65 MB 补齐辅助路径基准（不含完整 Forward/网络）OFF 1.4µs/264B，ON 命中 34ms/10.6MB；桌面/手机无溢出或脚本错误。初次并行编译 OOM、lint 文本大小写问题均已修复或成功重验；不删除失败记录。
 - RC 标签 `v0.2.4-rc.1` 固定于上述 merge，Release workflow `37664827099` 成功；GitHub 附件校验和、双架构 GHCR manifest 与版本/提交标签均核对通过。隔离旧版升级烟测返回健康、登录和静态资源正常；fresh/rollback 未执行。
-- 正式准备分支 `release/0.2.4` 位于 `/lex/xy2api-claude-cache`，只晋级产品版本与交接/验收文档，业务代码保持 RC。兼容版本仍为 0.2.14，没有新增迁移。来源审计通过，Makefile 新增关键用例入口登记为精确 manual_merge。
+- 正式 PR [#82](https://github.com/liulixin-lex/xy2api/pull/82) 已在全部保护检查通过后普通合并，merge `1012973a7c828be5bf0cf8ae3570b45747d1a415`；正式标签 `v0.2.4` 为该提交上的不可移动 annotated tag。Release workflow [37670849179](https://github.com/liulixin-lex/xy2api/actions/runs/37670849179) 成功，GitHub Release 已发布五个跨平台归档及 `checksums.txt`，下载后五项校验均通过；主分支 push CI、标签 CI [37670849015](https://github.com/liulixin-lex/xy2api/actions/runs/37670849015) 与 Security Scan [37670848840](https://github.com/liulixin-lex/xy2api/actions/runs/37670848840) 均成功。GoReleaser 已通过 GHCR 发布步骤。
+- 正式准备分支 `release/0.2.4` 位于 `/lex/xy2api-claude-cache`，只晋级产品版本与交接/验收文档，业务代码保持 RC。兼容版本仍为 0.2.14，没有新增迁移。来源审计通过，Makefile 新增关键用例入口登记为精确 manual_merge；本次只完成 GitHub 合并、标签和制品发布，不部署线上服务。
 - 证据及当前阶段账本：`/lex/claude-cache-implementation-20261008/`。使用说明：[Claude 缓存补齐](CLAUDE_CACHE_FALLBACK.md)。未部署生产、未自动启用规则、未新增付费上游调用；历史低命中归因及 NewAPI/供应商账单仍不在已验证范围。
 
 ### Claude 缓存缺失补齐前期规划（2026-10-08，以下保留规划时边界，实施以顶部为准）
