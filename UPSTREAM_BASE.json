@@ -9,353 +9,353 @@
   "merge_base": "fd80b08c90b55edcad5b00171b53f08721d30da1",
   "fork_start": "515f5250ccb558f4b8a0f75d1cc617dc51760493",
   "xy2api_version": "0.2.2",
-  "sub2api_compat_version": "0.2.8",
-  "status": "pending",
+  "sub2api_compat_version": "0.2.14",
+  "status": "resolved",
   "manual_resolutions": [
     {
       "path": ".github/audit-exceptions.yml",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Keep removal of unused xlsx and its exceptions; do not restore or extend obsolete vulnerability exemptions."
     },
     {
       "path": "README.md",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Adopt generated administrator email/password documentation while retaining XY2API service and distribution identity."
     },
     {
       "path": "README_CN.md",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Adopt generated administrator email/password documentation while retaining XY2API service and distribution identity."
     },
     {
       "path": "README_JA.md",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Adopt generated administrator email/password documentation while retaining XY2API service and distribution identity."
     },
     {
       "path": "backend/cmd/server/VERSION",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Retain independent XY2API product version until separate candidate-version commit."
     },
     {
       "path": "backend/cmd/server/wire_gen.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Regenerate from combined providers, retaining controlled scheduling and durable billing and adding Claude reset credits."
     },
     {
       "path": "backend/internal/config/config.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Keep first-request balance enforcement and fail-closed unpriced/cache-error policy from PR #78; accept unrelated upstream configuration outside the conflict."
     },
     {
       "path": "backend/internal/handler/admin/account_handler.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Combine controlled scheduling injection with Claude reset credit service and keep both lifecycles."
     },
     {
       "path": "backend/internal/handler/admin/group_handler.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Add TypeSafe platform validation while preserving group system prompts, exclusive-badge control and long-context pricing scope."
     },
     {
       "path": "backend/internal/handler/gateway_handler.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Retain controlled scheduling stop semantics and adopt client-disconnection short circuit; preserve durable inline billing instead of discardable worker submission. Preserve synchronous durable billing handoff and accept upstream disconnect handling elsewhere in the handler."
     },
     {
       "path": "backend/internal/handler/gateway_handler_chat_completions.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Retain controlled scheduling stop semantics and adopt client-disconnection short circuit; preserve durable inline billing instead of discardable worker submission."
     },
     {
       "path": "backend/internal/handler/gateway_handler_responses.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Retain controlled scheduling stop semantics and adopt client-disconnection short circuit; preserve durable inline billing instead of discardable worker submission."
     },
     {
       "path": "backend/internal/handler/gateway_inflight_reservation.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Already ported upstream file: retain reviewed XY2API import ordering and stronger first-request/fail-closed reservation or duplicate-notification tests; complete ours/upstream delta reviewed."
     },
     {
       "path": "backend/internal/handler/gateway_inflight_reservation_test.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Already ported upstream file: retain reviewed XY2API import ordering and stronger first-request/fail-closed reservation or duplicate-notification tests; complete ours/upstream delta reviewed."
     },
     {
       "path": "backend/internal/handler/gemini_v1beta_handler.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Retain controlled scheduling stop semantics and adopt client-disconnection short circuit; preserve durable inline billing instead of discardable worker submission."
     },
     {
       "path": "backend/internal/handler/openai_alpha_search.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Adopt disconnected-client early return while keeping request-context scheduling settlement."
     },
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Keep durable usage wrapper, reservation ownership and mandatory synchronous financial handoff; accept independent upstream routing and disconnect fixes."
     },
     {
       "path": "backend/internal/handler/wire.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Combine controlled scheduling injection with Claude reset credit service and keep both lifecycles."
     },
     {
       "path": "backend/internal/integration/e2e_user_flow_test.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Require explicit administrator email for E2E credentials because fresh setup no longer has a predictable login."
     },
     {
       "path": "backend/internal/payment/provider/easypay.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Keep upstream notification allowlist plus XY2API duplicate-parameter rejection."
     },
     {
       "path": "backend/internal/payment/provider/easypay_notify_security_test.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Already ported upstream file: retain reviewed XY2API import ordering and stronger first-request/fail-closed reservation or duplicate-notification tests; complete ours/upstream delta reviewed."
     },
     {
       "path": "backend/internal/pkg/apicompat/anthropic_to_responses.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Adopt complete upstream thinking/effort normalization and numeric GPT generation recognition; native mapped-model validation remains in XY2API gateway."
     },
     {
       "path": "backend/internal/pkg/claude/effort_catalog.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Combine already ported GPT-6.1/Opus tests with upstream Sonnet 5.5 and Astra Ultrafast capability/pricing coverage."
     },
     {
       "path": "backend/internal/pkg/claude/effort_catalog_test.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Combine already ported GPT-6.1/Opus tests with upstream Sonnet 5.5 and Astra Ultrafast capability/pricing coverage."
     },
     {
       "path": "backend/internal/pkg/openai/constants.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Keep stricter GPT-6.1 disabled-effort alias validation and canonical model spelling, including mapped HTTP/WebSocket behavior."
     },
     {
       "path": "backend/internal/repository/billing_inflight_cache.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Already ported upstream file: retain reviewed XY2API import ordering and stronger first-request/fail-closed reservation or duplicate-notification tests; complete ours/upstream delta reviewed."
     },
     {
       "path": "backend/internal/repository/billing_inflight_cache_test.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Already ported upstream file: retain reviewed XY2API import ordering and stronger first-request/fail-closed reservation or duplicate-notification tests; complete ours/upstream delta reviewed."
     },
     {
       "path": "backend/internal/repository/usage_billing_repo.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Keep deleted-key billing explanation and XY2API durable transactional settlement, recovery and cache confirmation."
     },
     {
       "path": "backend/internal/server/routes/payment.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Normalized module imports in base/upstream and merged both independent changes without remaining content conflict; preserve fork behavior and upstream additions."
     },
     {
       "path": "backend/internal/server/routes/payment_public_rate_limit_test.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Already ported upstream file: retain reviewed XY2API import ordering and stronger first-request/fail-closed reservation or duplicate-notification tests; complete ours/upstream delta reviewed."
     },
     {
       "path": "backend/internal/service/account.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Normalized module imports in base/upstream and merged both independent changes without remaining content conflict; preserve fork behavior and upstream additions."
     },
     {
       "path": "backend/internal/service/admin_account.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Validate TypeSafe API-key-only credentials while retaining IQ settings and private STATE metadata management."
     },
     {
       "path": "backend/internal/service/admin_group.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Normalized module imports in base/upstream and merged both independent changes without remaining content conflict; preserve fork behavior and upstream additions."
     },
     {
       "path": "backend/internal/service/anthropic_chat_stream_usage_test.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Already ported upstream file: retain reviewed XY2API import ordering and stronger first-request/fail-closed reservation or duplicate-notification tests; complete ours/upstream delta reviewed."
     },
     {
       "path": "backend/internal/service/api_key_service_create_limit_test.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Already ported upstream file: retain reviewed XY2API import ordering and stronger first-request/fail-closed reservation or duplicate-notification tests; complete ours/upstream delta reviewed."
     },
     {
       "path": "backend/internal/service/billing_inflight_reservation.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Already ported upstream file: retain reviewed XY2API import ordering and stronger first-request/fail-closed reservation or duplicate-notification tests; complete ours/upstream delta reviewed."
     },
     {
       "path": "backend/internal/service/billing_inflight_reservation_test.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Already ported upstream file: retain reviewed XY2API import ordering and stronger first-request/fail-closed reservation or duplicate-notification tests; complete ours/upstream delta reviewed."
     },
     {
       "path": "backend/internal/service/billing_service_test.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Combine already ported GPT-6.1/Opus tests with upstream Sonnet 5.5 and Astra Ultrafast capability/pricing coverage."
     },
     {
       "path": "backend/internal/service/gateway_hotpath_optimization_test.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Normalized module imports in base/upstream and merged both independent changes without remaining content conflict; preserve fork behavior and upstream additions."
     },
     {
       "path": "backend/internal/service/gateway_upstream_transport_error.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Preserve controlled scheduling stop handling and adopt client-canceled transport classification."
     },
     {
       "path": "backend/internal/service/gateway_usage_billing.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Preserve synchronous durable billing-tail cache deduction documentation and financial recovery semantics."
     },
     {
       "path": "backend/internal/service/gemini_upstream_transport_error.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Preserve controlled scheduling stop handling and adopt client-canceled transport classification."
     },
     {
       "path": "backend/internal/service/openai_alpha_search_completion_test.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Already ported upstream file: retain reviewed XY2API import ordering and stronger first-request/fail-closed reservation or duplicate-notification tests; complete ours/upstream delta reviewed."
     },
     {
       "path": "backend/internal/service/openai_codex_models_service_test.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Combine already ported GPT-6.1/Opus tests with upstream Sonnet 5.5 and Astra Ultrafast capability/pricing coverage."
     },
     {
       "path": "backend/internal/service/openai_compat_model.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Normalized module imports in base/upstream and merged both independent changes without remaining content conflict; preserve fork behavior and upstream additions."
     },
     {
       "path": "backend/internal/service/openai_gateway_messages_chat_fallback.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Normalized module imports in base/upstream and merged both independent changes without remaining content conflict; preserve fork behavior and upstream additions."
     },
     {
       "path": "backend/internal/service/openai_gateway_request_body.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Keep stricter GPT-6.1 disabled-effort alias validation and canonical model spelling, including mapped HTTP/WebSocket behavior."
     },
     {
       "path": "backend/internal/service/openai_gateway_responses_anthropic_native.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Normalized module imports in base/upstream and merged both independent changes without remaining content conflict; preserve fork behavior and upstream additions."
     },
     {
       "path": "backend/internal/service/openai_gateway_responses_chat_fallback.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Normalized module imports in base/upstream and merged both independent changes without remaining content conflict; preserve fork behavior and upstream additions."
     },
     {
       "path": "backend/internal/service/openai_upstream_transport_error.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Preserve controlled scheduling stop handling and adopt client-canceled transport classification."
     },
     {
       "path": "backend/internal/service/wire.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Keep controlled scheduling provider and append independent Claude reset-credit provider."
     },
     {
       "path": "backend/internal/setup/setup.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Adopt empty administrator email default, randomized login, email validation and password-length guard for fresh setup."
     },
     {
       "path": "deploy/.env.example",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Remove predictable administrator email from new-install examples; retain fork deployment conventions."
     },
     {
       "path": "deploy/README.md",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Adopt generated administrator email/password documentation while retaining XY2API service and distribution identity."
     },
     {
       "path": "deploy/config.example.yaml",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Keep first-request balance enforcement and fail-closed unpriced/cache-error policy from PR #78; accept unrelated upstream configuration outside the conflict."
     },
     {
       "path": "deploy/docker-compose.dev.yml",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Remove fixed administrator email fallback while preserving XY2API images, services, volumes and Redis exec-form shutdown."
     },
     {
       "path": "deploy/docker-compose.local.yml",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Remove fixed administrator email fallback while preserving XY2API images, services, volumes and Redis exec-form shutdown."
     },
     {
       "path": "deploy/docker-compose.standalone.yml",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Remove fixed administrator email fallback while preserving XY2API images, services, volumes and Redis exec-form shutdown."
     },
     {
       "path": "deploy/docker-compose.yml",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Remove fixed administrator email fallback while preserving XY2API images, services, volumes and Redis exec-form shutdown."
     },
     {
       "path": "frontend/package.json",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Upgrade Vue to upstream 3.5.43 while retaining GSAP, removed xlsx, patched Axios and exact source-map-js security override."
     },
     {
       "path": "frontend/pnpm-lock.yaml",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Regenerate pnpm lockfile from combined manifest using pnpm 9.15.9; retain removal of xlsx and security overrides."
     },
     {
       "path": "frontend/src/components/account/__tests__/AccountStatusIndicator.spec.ts",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Preserve independent IQ/admin scheduling regressions alongside upstream Claude-family status aliases."
     },
     {
       "path": "frontend/src/components/keys/UseKeyModal.vue",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Adopt remote Codex catalog, API-key discovery, local-file fallback and Windows tilde path while retaining XY2API provider/environment identity."
     },
     {
       "path": "frontend/src/components/keys/__tests__/UseKeyModal.spec.ts",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Adopt remote Codex catalog, API-key discovery, local-file fallback and Windows tilde path while retaining XY2API provider/environment identity."
     },
     {
       "path": "frontend/src/components/payment/AmountInput.vue",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Combine recharge bonus/discount badges with existing thin-border payment controls, focus ring and currency behavior."
     },
     {
       "path": "frontend/src/i18n/locales/en/dashboard.ts",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Use updated remote/local Codex catalog guidance with XY2API environment variable identity in both languages."
     },
     {
       "path": "frontend/src/i18n/locales/zh/dashboard.ts",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Use updated remote/local Codex catalog guidance with XY2API environment variable identity in both languages."
     },
     {
       "path": "frontend/src/views/user/KeysView.vue",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Use upstream CC Switch usage helper to fix duplicated /v1 paths while retaining XY2API provider default."
     },
     {
       "path": "frontend/src/views/user/PaymentView.vue",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Add recharge bonus, discount and multiplier inputs to existing currency-aware hosted/embedded Stripe payment flow."
     }
   ],
   "custom_patches": [
@@ -365,6 +365,9 @@
     "explicit-app-data-volume",
     "windows-plugin-archive-close",
     "migration-checksum-manifest",
-    "dual-version-plugin-compatibility"
+    "dual-version-plugin-compatibility",
+    "typesafe-controlled-settlement",
+    "hosted-recharge-quote-snapshot",
+    "v0214-append-only-upgrade"
   ]
 }
