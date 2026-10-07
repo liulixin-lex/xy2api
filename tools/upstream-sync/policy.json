@@ -42,6 +42,7 @@
       "deploy/**",
       "docs/**",
       "frontend/**",
+      "openspec/changes/add-claude-cache-fallback/**",
       "openspec/changes/stabilize-openai-iq-check/**",
       "openspec/changes/iq-detection-operations/**",
       "skills/**",
