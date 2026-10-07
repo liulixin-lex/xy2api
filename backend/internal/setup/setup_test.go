@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/gin-gonic/gin/binding"
 	"github.com/lib/pq"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"gopkg.in/yaml.v3"
 )
 
@@ -414,8 +414,8 @@ func TestPrepareAdminCredentialsGeneratesMissingValues(t *testing.T) {
 	if !emailGenerated || !passwordGenerated {
 		t.Fatalf("generated flags = (%v, %v), want (true, true)", emailGenerated, passwordGenerated)
 	}
-	if !regexp.MustCompile(`^admin-[0-9a-f]{12}@sub2api\.local$`).MatchString(admin.Email) {
-		t.Fatalf("generated email = %q, want admin-<12 hex>@sub2api.local", admin.Email)
+	if !regexp.MustCompile(`^admin-[0-9a-f]{12}@xy2api\.local$`).MatchString(admin.Email) {
+		t.Fatalf("generated email = %q, want admin-<12 hex>@xy2api.local", admin.Email)
 	}
 	// 生成的邮箱必须能通过登录接口的 binding:"required,email" 校验。
 	loginReq := struct {
@@ -608,8 +608,8 @@ func TestBootstrapAdminUserCreatesAdminWithGeneratedCredentials(t *testing.T) {
 	if err != nil || !created || reason != adminBootstrapReasonEmptyDatabase {
 		t.Fatalf("bootstrapAdminUser() = (%v, %q, %v), want (true, %q, nil)", created, reason, err, adminBootstrapReasonEmptyDatabase)
 	}
-	if !regexp.MustCompile(`^admin-[0-9a-f]{12}@sub2api\.local$`).MatchString(cfg.Admin.Email) {
-		t.Fatalf("admin email = %q, want generated admin-<12 hex>@sub2api.local", cfg.Admin.Email)
+	if !regexp.MustCompile(`^admin-[0-9a-f]{12}@xy2api\.local$`).MatchString(cfg.Admin.Email) {
+		t.Fatalf("admin email = %q, want generated admin-<12 hex>@xy2api.local", cfg.Admin.Email)
 	}
 	if len(cfg.Admin.Password) != 32 {
 		t.Fatalf("admin password length = %d, want generated 32", len(cfg.Admin.Password))

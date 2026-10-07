@@ -3,7 +3,6 @@ package service
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"net/url"
 	"strings"
 

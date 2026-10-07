@@ -8,7 +8,7 @@ import (
 )
 
 func TestTypeSafePlatformMigration(t *testing.T) {
-	content, err := FS.ReadFile("241_add_typesafe_platform.sql")
+	content, err := FS.ReadFile("269_add_typesafe_platform.sql")
 	require.NoError(t, err)
 
 	sql := strings.Join(strings.Fields(string(content)), " ")

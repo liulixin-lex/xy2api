@@ -276,7 +276,10 @@
     "explicit-app-data-volume",
     "windows-plugin-archive-close",
     "migration-checksum-manifest",
-    "dual-version-plugin-compatibility"
+    "dual-version-plugin-compatibility",
+    "typesafe-controlled-settlement",
+    "hosted-recharge-quote-snapshot",
+    "v0214-append-only-upgrade"
   ],
   "custom_patch_tests": [
     {
@@ -313,6 +316,21 @@
       "id": "dual-version-plugin-compatibility",
       "path": "backend/internal/service/plugin_compatibility_test.go",
       "literal": "func TestEvaluatePluginCompatibilityUsesSub2APIBaselineInsteadOfProductVersion"
+    },
+    {
+      "id": "typesafe-controlled-settlement",
+      "path": "backend/internal/service/controlled_protocol_acceptance_test.go",
+      "literal": "{\"systemone\","
+    },
+    {
+      "id": "hosted-recharge-quote-snapshot",
+      "path": "backend/internal/service/payment_stripe_hosted_database_test.go",
+      "literal": "func TestStripeHostedDatabaseCreateRecoveryAndConcurrentLimits"
+    },
+    {
+      "id": "v0214-append-only-upgrade",
+      "path": "backend/internal/repository/upstream_v0214_migration_integration_test.go",
+      "literal": "func TestUpstreamV0214MigrationUpgrade"
     }
   ]
 }

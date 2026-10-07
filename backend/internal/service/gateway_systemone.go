@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liulixin-lex/xy2api/internal/pkg/typesafe"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/typesafe"
 )
 
 type SystemOneForwardResult struct {
@@ -30,7 +30,7 @@ func (e *SystemOneUpstreamError) Error() string {
 	return fmt.Sprintf("typesafe upstream rejected request with status %d", e.StatusCode)
 }
 
-func (s *GatewayService) ForwardSystemOne(ctx context.Context, c *gin.Context, account *Account, body []byte) (*SystemOneForwardResult, error) {
+func (s *GatewayService) ForwardSystemOne(ctx context.Context, c *gin.Context, account *Account, body []byte) (_ *SystemOneForwardResult, retErr error) {
 	started := time.Now()
 	if account == nil || !account.IsTypeSafe() || account.Type != AccountTypeAPIKey {
 		return nil, errors.New("invalid typesafe account")
@@ -43,7 +43,7 @@ func (s *GatewayService) ForwardSystemOne(ctx context.Context, c *gin.Context, a
 	if err != nil {
 		return nil, err
 	}
-	req, err := typesafe.NewSystemOneRequest(ctx, baseURL, key, body)
+	req, err := typesafe.NewSystemOneRequest(withControlledBufferedResponse(ctx), baseURL, key, body)
 	if err != nil {
 		return nil, err
 	}
@@ -60,6 +60,7 @@ func (s *GatewayService) ForwardSystemOne(ctx context.Context, c *gin.Context, a
 		})
 	}
 	defer func() { _ = resp.Body.Close() }()
+	defer finishControlledNonstreamResponse(resp, &retErr)
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, s.handleSystemOneErrorResponse(ctx, c, account, resp, upstreamURL)
@@ -67,6 +68,7 @@ func (s *GatewayService) ForwardSystemOne(ctx context.Context, c *gin.Context, a
 
 	decoded, err := typesafe.DecodeSystemOneResponse(resp.Body)
 	if err != nil {
+		rejectControlledNonstreamResponse(resp, err)
 		// The upstream accepted (and may have charged) this request but the
 		// gateway cannot relay it; keep an ops trail for reconciliation.
 		setOpsUpstreamError(c, resp.StatusCode, err.Error(), "")
@@ -83,6 +85,9 @@ func (s *GatewayService) ForwardSystemOne(ctx context.Context, c *gin.Context, a
 			Kind:               "response_error",
 			Message:            err.Error(),
 		})
+		return nil, err
+	}
+	if err := validateControlledNonstreamResponse(resp, decoded.Body, "systemone"); err != nil {
 		return nil, err
 	}
 	return &SystemOneForwardResult{

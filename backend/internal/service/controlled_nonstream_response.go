@@ -402,6 +402,12 @@ func controlledNonstreamSuccess(body []byte, protocol string) (bool, bool) {
 			}
 		}
 		return true, true
+	case "systemone":
+		// Model and usage are intentionally lenient in the native decoder.
+		// Only an answer envelope proves provider completion and availability.
+		answers := v.Get("answers")
+		valid := answers.IsObject() && len(answers.Map()) > 0
+		return valid, valid
 	case "alpha_search":
 		output, encrypted := v.Get("output"), v.Get("encrypted_output")
 		valid := output.Type == gjson.String || output.IsArray() || v.Get("results").IsArray() ||

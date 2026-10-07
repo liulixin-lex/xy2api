@@ -7,12 +7,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ip"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/typesafe"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
-	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
 
@@ -79,6 +79,7 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 		return
 	}
 
+	service.CaptureControlledRequestMetadata(c.Request.Context(), body, model, false)
 	setOpsRequestContext(c, model, false)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
@@ -131,6 +132,9 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 			err = service.ErrNoAvailableAccounts
 		}
 		if err != nil {
+			if handleControlledSchedulingStop(c, err) {
+				return
+			}
 			if failoverClientGone(c) {
 				reqLog.Info("systemone.account_select_aborted_client_disconnected", zap.Error(err))
 				return
@@ -204,6 +208,9 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, time.Since(forwardStart).Milliseconds())
 
 		if forwardErr != nil {
+			if handleControlledSchedulingStop(c, forwardErr) {
+				return
+			}
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(forwardErr, &failoverErr) {
 				switch fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr) {
