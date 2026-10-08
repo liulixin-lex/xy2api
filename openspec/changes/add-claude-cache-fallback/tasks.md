@@ -1,3 +1,7 @@
+# 任务记录
+
+以下 0–7 节为 0.2.4 历史交付，当前行为以 proposal/design/spec 和末尾第 8 节为准。旧的单 Key 灰度与精确规则不适用于当前分组版本。
+
 ## 0. 当前规划交付
 
 - [x] fetch 并核对 XY2API `origin/main`，基线 `317b019134a09f1a5cb16f8c15b0a3365f9ee920`。
@@ -60,3 +64,17 @@
 - [ ] 独立 fresh/rollback 未执行；不作为本轮 GitHub 发布操作的一部分。
 - [x] 正式版本 PR #82、完整门禁、普通合并及不可变 `v0.2.4` 标签完成；merge `1012973a7c828be5bf0cf8ae3570b45747d1a415`。
 - [x] 正式 GitHub Release 附件及校验文件已验证，五项 checksum 全通过；Release workflow、标签 CI 与 Security Scan 均成功，GHCR 发布步骤完成。不操作部署或容器清理，生产规则保持关闭。
+
+## 8. 分组自动缓存迭代（2026-10-08，本地开发）
+
+- [x] 从最新 origin/main `309afb6af` 创建本地 `feat/claude-cache-groups-20261008`；不推送、发版或部署。
+- [x] 固定并核对 LiteLLM / Sub2API 的参考逻辑，改为 enabled + group_ids，覆盖选中组全部账号、Key、模型。
+- [x] 旧规则读取保留分组且禁用；严格拒绝旧格式写入，保留省略字段的部分更新。
+- [x] 内容块默认 5m 补齐：尾部/system/tools/前一 user 锚点，保留现有网关/OAuth 断点、四断点上限及 TTL 顺序。
+- [x] 接入原生、OAuth/SetupToken、透传、Vertex、Bedrock 和 Chat/Responses 转换；共享请求还原、发送时再次检查分组。
+- [x] 冷写预留考虑账号映射模型；真实 usage 结算保持，诊断在既有 TTL/ForceCacheBilling 覆写前记录原始数值。
+- [x] 简化中英文设置页面，删除规则编辑器；目录失败/保存重试/旧后端兼容及 9 项交互测试通过。
+- [x] 前端 lint、typecheck、327 项关键回归及生产构建通过；桌面/手机/暗色浏览器与键盘操作通过，无溢出和脚本错误。
+- [ ] 最终全量后端 unit、build、相关 race、golangci-lint 与标准来源审计。
+- [ ] 2.65 MB 新算法辅助路径性能复测及最终本地交接。
+- [ ] 真实上游冷写/热读、NewAPI/供应商账单核验（不属于本轮授权与完成声明）。

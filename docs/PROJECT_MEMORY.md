@@ -4,6 +4,15 @@
 
 ## 当前交接状态
 
+### Claude 自动缓存分组迭代（2026-10-08，本地验证中）
+
+- 用户要求参考 LiteLLM 与 Sub2API OAuth 缓存逻辑，把精确规则改为开关和分组选择，覆盖选中组的所有账号、Key 与模型，精简前端。本轮仅本地开发，不推送、合并、发版、部署或访问真实供应商。
+- `/lex/xy2api-claude-cache` 的 `feat/claude-cache-groups-20261008` 基于 `origin/main=309afb6afd4240aceaecd2c0296a3b669309e795`。新配置 enabled/group_ids；旧规则只迁移分组选择且关闭，需明确启用保存。
+- 新 helper 补内容块默认 5m，保护原始声明、现有 OAuth 断点、四点额度与长 TTL 在前约束；包含 Anthropic API Key/OAuth/SetupToken/透传/Vertex/Bedrock 和 Chat/Responses 转换。其他协议和 count_tokens 不接入。冷写预留考虑账号映射模型，真实结算与原有覆写保持，额外在覆写前采集数值诊断。
+- 前端 9 项新增交互、全量 lint/typecheck、327 项 critical 与生产构建通过；桌面/手机/暗色和键盘操作无溢出或脚本错误。后端最终 unit/build/race/lint 与来源审计仍在验证，不把早期测试失败记为通过。证据 `/lex/claude-cache-groups-20261008/`。
+- 当前使用说明及 OpenSpec 已替换为分组行为；0.2.4 历史记录保留，产品/兼容版本与数据库迁移均不变。
+
+
 ### Claude 缓存补齐 0.2.4（2026-10-08，GitHub 正式发布完成）
 
 - 用户已明确授权实现、推送、合并和发版。功能 [PR #81](https://github.com/liulixin-lex/xy2api/pull/81) 已常规合并，验收 head `044bcf68f43bb684f17a31a750bed2e2cf6f751e`，merge `a35c5c28267015e46b602deb5c2bbd41dcc4dbd5`；两者 tree 相同。所有固定 head 检查通过，完整后端/集成/真实存储调度检查见 CI `37661770962`。
@@ -500,6 +509,12 @@
 Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+### 20261008-claude-cache-groups — 本地分组缓存迭代
+
+- 用户要求参考 LiteLLM 和 Sub2API OAuth 缓存逻辑，将精确规则改为开关与分组多选，覆盖选中分组的账号、调用 Key 和模型，精简前端；本轮仅本地开发，不推送、合并、发版或部署。
+- 分支 `feat/claude-cache-groups-20261008` 基于正式发布收尾后的 origin/main；沿用 `/lex/xy2api-claude-cache`，保留其他工作区。实现前核对已有声明、OAuth 重写、协议转换和冷写预留；验证使用本地合成请求，不调用真实供应商。
+- 状态：分组契约、跨出口块级补齐、映射模型预留与界面完成；前端关键回归/构建与视觉验证通过，后端最终 unit/race/lint 及本地来源审计进行中。
 
 ### 20261008-claude-cache-fallback-implementation — 实施及发布
 

@@ -96,6 +96,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
+	c.Request = c.Request.WithContext(h.gatewayService.WithClaudeCacheFallbackRequest(c.Request.Context(), apiKey, body))
 	service.CaptureControlledRequestMetadata(c.Request.Context(), body, reqModel, reqStream)
 	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
@@ -170,6 +171,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	if parsedReq == nil {
 		parsedReq = &service.ParsedRequest{Model: reqModel, Stream: reqStream, Body: bodyRef}
 	}
+	parsedReq.GroupID = apiKey.GroupID
 	parsedReq.SessionContext = &service.SessionContext{
 		ClientIP:  ip.GetClientIP(c),
 		UserAgent: c.GetHeader("User-Agent"),

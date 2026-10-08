@@ -34,8 +34,10 @@ func (s *GatewayService) ForwardAsResponses(
 	account *Account,
 	body []byte,
 	parsed *ParsedRequest,
-) (*ForwardResult, error) {
+) (result *ForwardResult, err error) {
 	startTime := time.Now()
+	ctx, cacheDecision := s.beginClaudeCacheAttempt(ctx, parsed, account)
+	defer func() { finishClaudeCacheAttempt(cacheDecision, result) }()
 
 	normalizedBody, normalized, err := normalizeOpenAIResponsesLegacyIngress(body)
 	if err != nil {
@@ -198,7 +200,6 @@ func (s *GatewayService) ForwardAsResponses(
 	}
 
 	// 13. Handle normal response (convert Anthropic → Responses)
-	var result *ForwardResult
 	var handleErr error
 	if clientStream {
 		result, handleErr = s.handleResponsesStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping)

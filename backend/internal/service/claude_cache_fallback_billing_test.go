@@ -53,3 +53,21 @@ func TestClaudeCacheActualUsageIndependentCost(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeCacheReservationIncludesAccountMappedModel(t *testing.T) {
+	fixture, key, _ := cacheFixture(t)
+	svc := newInflightEstimateGateway(t, nil)
+	svc.settingService = fixture.settingService
+	snap := &inflightSnapshotCacheStub{byBucket: map[string][]Account{inflightBucketKey(*key.GroupID, PlatformAnthropic): {{ID: 11, Platform: PlatformAnthropic, Credentials: map[string]any{"model_mapping": map[string]any{"claude-sonnet-4-5": "claude-opus-4-1"}}}}}}
+	repo := attachInflightSnapshot(svc, snap)
+	req := InflightEstimateRequest{Model: "claude-sonnet-4-5", BodyBytes: 4000, MaxTokens: 100}
+	ctx := svc.WithClaudeCacheFallbackRequest(context.Background(), key, []byte(`{"messages":[]}`))
+	reserved, priced := svc.EstimateInflightReservation(ctx, key, req)
+	require.True(t, priced)
+	req.Model = "claude-opus-4-1"
+	direct, priced := svc.EstimateInflightReservation(ctx, key, req)
+	require.True(t, priced)
+	require.InDelta(t, direct, reserved, 1e-12)
+	require.Greater(t, snap.reads.Load(), int64(0))
+	require.Zero(t, repo.dbCalls.Load())
+}

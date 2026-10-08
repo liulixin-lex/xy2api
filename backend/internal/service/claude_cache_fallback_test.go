@@ -25,7 +25,7 @@ const cacheTestModel = "claude-opus-5-5"
 
 func cacheFixture(t testing.TB) (*GatewayService, *APIKey, *Account) {
 	t.Helper()
-	p := ClaudeCacheFallbackPolicy{Enabled: true, Rules: []ClaudeCacheFallbackRule{{ID: "pilot", GroupID: 7, APIKeyIDs: []int64{9}, AccountID: 11, BaseURL: "https://api.anthropic.com", Models: []string{cacheTestModel}}}}
+	p := ClaudeCacheFallbackPolicy{Enabled: true, GroupIDs: []int64{7}}
 	raw, err := json.Marshal(p)
 	require.NoError(t, err)
 	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
@@ -62,10 +62,10 @@ func TestClaudeCachePolicyValidation(t *testing.T) {
 		path  string
 		value any
 	}{
-		{"enabled", nil}, {"enabled", "true"}, {"rules", nil}, {"unexpected", true},
-		{"rules.0.id", "bad\nlog"}, {"rules.0.group_id", 0}, {"rules.0.account_id", -1},
-		{"rules.0.base_url", "https://secret:password@example.com"}, {"rules.0.base_url", "https://example.com?token=secret"},
-		{"rules.0.models", []string{"claude-*"}}, {"rules.0.models", []string{}}, {"rules.0.api_key_ids", []int64{9, 9}},
+		{"enabled", nil}, {"enabled", "true"}, {"group_ids", nil}, {"unexpected", true},
+		{"group_ids", []int64{}}, {"group_ids", []int64{0}}, {"group_ids", []int64{-1}},
+		{"group_ids", []int64{7, 7}}, {"group_ids", []any{7, "8"}}, {"group_ids", []any{1.5}},
+		{"rules", []any{}},
 	} {
 		t.Run(tt.path+fmt.Sprint(tt.value), func(t *testing.T) {
 			bad, e := sjson.SetBytes(raw, tt.path, tt.value)
@@ -75,12 +75,7 @@ func TestClaudeCachePolicyValidation(t *testing.T) {
 			require.NotContains(t, e.Error(), "password")
 		})
 	}
-	a, e := normalizeClaudeCacheBaseURL("https://PROVIDER.example/tenant/a/")
-	require.NoError(t, e)
-	require.Equal(t, "https://provider.example/tenant/a", a)
-	b, e := normalizeClaudeCacheBaseURL("https://provider.example/tenant/b")
-	require.NoError(t, e)
-	require.NotEqual(t, a, b)
+
 }
 
 func TestClaudeCacheScopeAndOriginalProtection(t *testing.T) {
@@ -96,27 +91,27 @@ func TestClaudeCacheScopeAndOriginalProtection(t *testing.T) {
 		{name: "off", mutate: func(s *GatewayService, _ *APIKey, _ *Account, _ *ParsedRequest) {
 			s.settingService.claudeCacheSnapshot.Store(&cachedClaudeCachePolicy{policy: emptyClaudeCachePolicy(), expiresAt: time.Now().Add(time.Minute)})
 		}, reason: "disabled"},
-		{name: "key", mutate: func(_ *GatewayService, k *APIKey, _ *Account, _ *ParsedRequest) { k.ID = 90 }, reason: "scope_mismatch"},
-		{name: "account", mutate: func(_ *GatewayService, _ *APIKey, a *Account, _ *ParsedRequest) { a.ID = 99 }, reason: "scope_mismatch"},
+		{name: "key", mutate: func(_ *GatewayService, k *APIKey, _ *Account, _ *ParsedRequest) { k.ID = 90 }, reason: "injected"},
+		{name: "account", mutate: func(_ *GatewayService, _ *APIKey, a *Account, _ *ParsedRequest) { a.ID = 99 }, reason: "injected"},
 		{name: "address_path", mutate: func(_ *GatewayService, _ *APIKey, a *Account, _ *ParsedRequest) {
 			a.Credentials["base_url"] = "https://api.anthropic.com/other"
-		}, reason: "scope_mismatch"},
-		{name: "mapping", mutate: func(_ *GatewayService, _ *APIKey, _ *Account, p *ParsedRequest) { p.Model = "unverified" }, reason: "scope_mismatch"},
+		}, reason: "injected"},
+		{name: "mapping", mutate: func(_ *GatewayService, _ *APIKey, _ *Account, p *ParsedRequest) { p.Model = "unverified" }, reason: "injected"},
 		{name: "group_fallback", mutate: func(_ *GatewayService, _ *APIKey, a *Account, p *ParsedRequest) {
 			gid := int64(8)
 			p.GroupID = &gid
 			a.GroupIDs = []int64{7, 8}
 		}, reason: "scope_mismatch"},
-		{name: "oauth", mutate: func(_ *GatewayService, _ *APIKey, a *Account, _ *ParsedRequest) { a.Type = AccountTypeOAuth }, reason: "unsupported_route"},
-		{name: "setup", mutate: func(_ *GatewayService, _ *APIKey, a *Account, _ *ParsedRequest) { a.Type = AccountTypeSetupToken }, reason: "unsupported_route"},
-		{name: "vertex", mutate: func(_ *GatewayService, _ *APIKey, a *Account, _ *ParsedRequest) { a.Type = AccountTypeServiceAccount }, reason: "unsupported_route"},
+		{name: "oauth", mutate: func(_ *GatewayService, _ *APIKey, a *Account, _ *ParsedRequest) { a.Type = AccountTypeOAuth }, reason: "injected"},
+		{name: "setup", mutate: func(_ *GatewayService, _ *APIKey, a *Account, _ *ParsedRequest) { a.Type = AccountTypeSetupToken }, reason: "injected"},
+		{name: "vertex", mutate: func(_ *GatewayService, _ *APIKey, a *Account, _ *ParsedRequest) { a.Type = AccountTypeServiceAccount }, reason: "injected"},
 		{name: "other_platform", mutate: func(_ *GatewayService, _ *APIKey, a *Account, _ *ParsedRequest) { a.Platform = PlatformAntigravity }, reason: "unsupported_route"},
 		{name: "passthrough", mutate: func(_ *GatewayService, _ *APIKey, a *Account, _ *ParsedRequest) {
 			a.Extra = map[string]any{"anthropic_passthrough": true}
-		}, reason: "unsupported_route"},
+		}, reason: "injected"},
 		{name: "original_null_removed", original: `{"cache_control":null}`, reason: "client_declared"},
 		{name: "original_thinking_removed", original: `{"messages":[{"content":[{"type":"thinking","cache_control":null}]}]}`, reason: "client_declared"},
-		{name: "final_system", final: `{"system":[{"type":"text","text":"group","cache_control":{"type":"ephemeral"}}]}`, reason: "final_declared"},
+		{name: "final_system", final: `{"system":[{"type":"text","text":"group","cache_control":{"type":"ephemeral"}}]}`, reason: "no_cacheable_content"},
 		{name: "bad_json", final: `{`, reason: "invalid_body"},
 	}
 	for _, tt := range cases {
@@ -141,11 +136,9 @@ func TestClaudeCacheScopeAndOriginalProtection(t *testing.T) {
 			require.Equal(t, tt.reason, d.Reason)
 			require.Equal(t, before, string(final), "shared input must remain immutable")
 			if tt.reason == "injected" {
-				require.Equal(t, "ephemeral", gjson.GetBytes(out, "cache_control.type").String())
-				require.False(t, gjson.GetBytes(out, "cache_control.ttl").Exists())
-				clean, e := sjson.DeleteBytes(out, "cache_control")
-				require.NoError(t, e)
-				require.JSONEq(t, string(body), string(clean))
+				require.Equal(t, "ephemeral", gjson.GetBytes(out, "messages.0.content.0.cache_control.type").String())
+				require.False(t, gjson.GetBytes(out, "cache_control").Exists())
+				require.Equal(t, final, withoutClaudeCacheFallback(ctx, out))
 				again := svc.applyClaudeCacheFallback(ctx, a, out, parsed.Model)
 				require.Equal(t, out, again)
 			} else {
@@ -179,7 +172,7 @@ func TestClaudeCacheForwardWire(t *testing.T) {
 			result, e := svc.Forward(ctx, c, a, parsed)
 			require.NoError(t, e)
 			require.NotNil(t, result)
-			require.Equal(t, "ephemeral", gjson.GetBytes(upstream.lastBody, "cache_control.type").String())
+			require.Equal(t, "ephemeral", gjson.GetBytes(upstream.lastBody, "messages.0.content.0.cache_control.type").String())
 			require.False(t, HasClaudeCacheControl(parsed.Body.Bytes()))
 			require.Equal(t, 2, result.Usage.InputTokens)
 			require.Equal(t, 200, result.Usage.CacheCreationInputTokens)
@@ -188,6 +181,7 @@ func TestClaudeCacheForwardWire(t *testing.T) {
 			// A new attempt with another account cannot inherit A's wire-body insertion.
 			a2 := *a
 			a2.ID = 12
+			a2.GroupIDs = []int64{8}
 			actx, d := svc.beginClaudeCacheAttempt(ctx, parsed, &a2)
 			req, out, e := svc.buildUpstreamRequest(actx, c, &a2, []byte(raw), "fixture", "apikey", cacheTestModel, stream, false)
 			require.NoError(t, e)
@@ -209,20 +203,6 @@ type cacheGroupReader struct {
 }
 
 func (r cacheGroupReader) GetByID(context.Context, int64) (*Group, error) { return r.group, nil }
-
-type cacheAccountReader struct {
-	AccountRepository
-	account *Account
-}
-
-func (r cacheAccountReader) GetByID(context.Context, int64) (*Account, error) { return r.account, nil }
-
-type cacheKeyReader struct {
-	APIKeyRepository
-	key *APIKey
-}
-
-func (r cacheKeyReader) GetByID(context.Context, int64) (*APIKey, error) { return r.key, nil }
 
 type cacheConcurrentRepo struct {
 	SettingRepository
@@ -252,13 +232,13 @@ func (r *cacheConcurrentRepo) SetMultiple(_ context.Context, v map[string]string
 }
 
 func TestClaudeCacheSnapshotSaveExpiryAndIsolation(t *testing.T) {
-	svc, key, a := cacheFixture(t)
+	svc, key, _ := cacheFixture(t)
 	p := svc.settingService.claudeCachePolicy(context.Background()).policy
 	raw, e := json.Marshal(p)
 	require.NoError(t, e)
 	repo := &cacheConcurrentRepo{raw: string(raw)}
 	settings := NewSettingService(repo, nil)
-	settings.SetClaudeCacheScopeRepositories(cacheGroupReader{group: key.Group}, cacheAccountReader{account: a}, cacheKeyReader{key: key})
+	settings.SetClaudeCacheGroupRepository(cacheGroupReader{group: key.Group})
 	other := NewSettingService(repo, nil)
 	require.True(t, settings.claudeCachePolicy(context.Background()).policy.Enabled)
 	require.True(t, other.claudeCachePolicy(context.Background()).policy.Enabled)
@@ -274,7 +254,7 @@ func TestClaudeCacheSnapshotSaveExpiryAndIsolation(t *testing.T) {
 	}
 	wg.Wait()
 	require.Equal(t, 2, repo.reads)
-	require.NoError(t, settings.writeSettingsWithClaudeCache(context.Background(), map[string]string{SettingKeyClaudeCacheFallbackPolicy: `{"enabled":false,"rules":[]}`}))
+	require.NoError(t, settings.writeSettingsWithClaudeCache(context.Background(), map[string]string{SettingKeyClaudeCacheFallbackPolicy: `{"enabled":false,"group_ids":[]}`}))
 	require.False(t, settings.claudeCachePolicy(context.Background()).policy.Enabled)
 	require.True(t, other.claudeCachePolicy(context.Background()).policy.Enabled)
 	other.claudeCacheSnapshot.Store(&cachedClaudeCachePolicy{policy: p, expiresAt: time.Now().Add(-time.Second)})
@@ -326,22 +306,18 @@ func BenchmarkClaudeCacheFallbackLarge(b *testing.B) {
 }
 
 func TestClaudeCacheScopeSaveValidation(t *testing.T) {
-	svc, key, a := cacheFixture(t)
+	svc, key, _ := cacheFixture(t)
 	settings := svc.settingService
-	settings.SetClaudeCacheScopeRepositories(cacheGroupReader{group: key.Group}, cacheAccountReader{account: a}, cacheKeyReader{key: key})
+	settings.SetClaudeCacheGroupRepository(cacheGroupReader{group: key.Group})
 	p := settings.claudeCachePolicy(context.Background()).policy
 	require.NoError(t, settings.validateClaudeCacheScope(context.Background(), p))
-	a.GroupIDs = nil
-	require.Error(t, settings.validateClaudeCacheScope(context.Background(), p))
-	a.GroupIDs = []int64{7}
-	a.Credentials["base_url"] = "https://api.anthropic.com/different"
-	require.Error(t, settings.validateClaudeCacheScope(context.Background(), p))
-	a.Credentials["base_url"] = "https://api.anthropic.com"
-	other := int64(99)
-	key.GroupID = &other
+	// Only group existence is required, not individual accounts, keys or models.
+	key.Group.Platform = PlatformComposite
+	require.NoError(t, settings.validateClaudeCacheScope(context.Background(), p))
+	settings.SetClaudeCacheGroupRepository(cacheGroupReader{})
 	require.Error(t, settings.validateClaudeCacheScope(context.Background(), p))
 	p.Enabled = false
-	require.NoError(t, settings.validateClaudeCacheScope(context.Background(), p), "emergency disable survives removed or moved resources")
+	require.NoError(t, settings.validateClaudeCacheScope(context.Background(), p), "disable survives deleted groups")
 }
 
 func TestClaudeCacheGroupPromptAndConcurrentBody(t *testing.T) {
@@ -359,7 +335,7 @@ func TestClaudeCacheGroupPromptAndConcurrentBody(t *testing.T) {
 			req, wire, e := svc.buildUpstreamRequest(actx, nil, a, body, "fixture", "apikey", cacheTestModel, false, false)
 			require.NoError(t, e)
 			require.NoError(t, req.Body.Close())
-			require.Equal(t, "admin\n\nclient", gjson.GetBytes(wire, "system").String())
+			require.Equal(t, "admin\n\nclient", gjson.GetBytes(wire, "system.0.text").String())
 			require.Equal(t, "injected", d.Reason)
 		}()
 	}
@@ -408,5 +384,241 @@ func TestClaudeCacheForwardFailuresDoNotProbeOrReplay(t *testing.T) {
 				require.Equal(t, result.Usage, result.ClaudeCacheFallback.RawUsage)
 			}
 		})
+	}
+}
+
+func TestClaudeCacheLegacyMigrationIsDisabled(t *testing.T) {
+	legacy := []byte(`{"enabled":true,"rules":[{"id":"pilot","group_id":8,"account_id":11,"api_key_ids":[9],"models":["one-model"]},{"group_id":7},{"group_id":8}]}`)
+	require.Equal(t, ClaudeCacheFallbackPolicy{GroupIDs: []int64{7, 8}}, readClaudeCacheFallbackPolicy(legacy))
+	_, err := ParseClaudeCacheFallbackPolicy(legacy)
+	require.Error(t, err, "old writes cannot silently expand scope")
+	require.Equal(t, emptyClaudeCachePolicy(), readClaudeCacheFallbackPolicy([]byte(`{"enabled":true,"group_ids":null,"rules":[{"group_id":7}]}`)))
+	svc, _, _ := cacheFixture(t)
+	svc.settingService = NewSettingService(&gatewayTTLSettingRepo{data: map[string]string{SettingKeyClaudeCacheFallbackPolicy: string(legacy)}}, nil)
+	require.False(t, svc.settingService.claudeCachePolicy(context.Background()).policy.Enabled)
+}
+
+func TestClaudeCacheBreakpoints(t *testing.T) {
+	for _, tc := range []struct {
+		name, body   string
+		want, absent []string
+	}{
+		{"prefixes_and_conversation", `{"tools":[{"name":"lookup","input_schema":{"properties":{"cache_control":{}}}}],"system":"rules","messages":[{"role":"user","content":"first"},{"role":"assistant","content":"one"},{"role":"user","content":"second"},{"role":"assistant","content":"two"},{"role":"user","content":"third"}]}`, []string{"tools.0", "system.0", "messages.2.content.0", "messages.4.content.0"}, []string{"messages.0.content.0"}},
+		{"thinking_and_deferred", `{"tools":[{"name":"ready"},{"name":"deferred","defer_loading":true}],"system":"","messages":[{"role":"assistant","content":[{"type":"text","text":"answer"},{"type":"thinking","thinking":"private"},{"type":"redacted_thinking","data":"opaque"}]}]}`, []string{"tools.0", "messages.0.content.0"}, []string{"tools.1", "messages.0.content.1", "messages.0.content.2", "system"}},
+		{"tool_result", `{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"OK"}]}]}`, []string{"messages.0.content.0"}, nil},
+		{"empty_or_unknown", `{"messages":[{"role":"user","content":[{"type":"text","text":""},{"type":"future","data":"opaque"}]}]}`, nil, []string{"messages.0.content.0", "messages.0.content.1"}},
+		{"gateway_hour_before_tail", `{"tools":[{"name":"lookup"}],"system":[{"type":"text","text":"system","cache_control":{"type":"ephemeral","ttl":"1h"}}],"messages":[{"role":"user","content":"hello"}]}`, []string{"system.0", "messages.0.content.0"}, []string{"tools.0"}},
+		{"gateway_hour_in_later_message", `{"tools":[{"name":"lookup"}],"system":"system","messages":[{"role":"user","content":"first"},{"role":"assistant","content":"one"},{"role":"user","content":[{"type":"text","text":"second","cache_control":{"type":"ephemeral","ttl":"1h"}}]},{"role":"assistant","content":"two"},{"role":"user","content":"third"}]}`, []string{"messages.2.content.0", "messages.4.content.0"}, []string{"tools.0", "system.0"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(tc.body)
+			out := addClaudeCacheFallbackBreakpoints(body)
+			require.Equal(t, tc.body, string(body))
+			require.False(t, gjson.GetBytes(out, "cache_control").Exists())
+			for _, p := range tc.want {
+				require.Equal(t, "ephemeral", gjson.GetBytes(out, p+".cache_control.type").String(), p)
+			}
+			for _, p := range tc.absent {
+				require.False(t, gjson.GetBytes(out, p+".cache_control").Exists(), p)
+			}
+			require.Equal(t, out, addClaudeCacheFallbackBreakpoints(out), "idempotent insertion")
+			require.True(t, claudeCacheTTLOrderValid(out))
+			_, messages, tools, system := collectCacheControlPaths(out)
+			require.LessOrEqual(t, len(messages)+len(tools)+len(system), 4)
+			if strings.Contains(tc.name, "hour") {
+				require.Contains(t, string(out), `"ttl":"1h"`)
+			}
+		})
+	}
+}
+
+func TestClaudeCacheGatewayMarkersConsumeBudget(t *testing.T) {
+	for n := 3; n <= 5; n++ {
+		blocks := make([]map[string]any, n)
+		for i := range blocks {
+			blocks[i] = map[string]any{"type": "text", "text": "system", "cache_control": map[string]string{"type": "ephemeral"}}
+		}
+		body, err := json.Marshal(map[string]any{"system": blocks, "tools": []any{map[string]string{"name": "lookup"}}, "messages": []any{map[string]string{"role": "user", "content": "tail"}}})
+		require.NoError(t, err)
+		out := addClaudeCacheFallbackBreakpoints(body)
+		if n == 3 {
+			require.Equal(t, "ephemeral", gjson.GetBytes(out, "messages.0.content.0.cache_control.type").String())
+			require.False(t, gjson.GetBytes(out, "tools.0.cache_control").Exists())
+		} else {
+			require.Equal(t, body, out, "do not replace preexisting markers")
+		}
+		require.JSONEq(t, gjson.GetBytes(body, "system").Raw, gjson.GetBytes(out, "system").Raw)
+	}
+}
+
+func TestClaudeCacheConvertedProtocolDeclarations(t *testing.T) {
+	for _, raw := range []string{
+		`{"tools":[{"type":"function","function":{"name":"tool","cache_control":null}}]}`,
+		`{"input":[{"role":"user","content":[{"type":"input_text","text":"hi","cache_control":null}]}]}`,
+		`{"input":[{"type":"message","role":"user","content":"hi","cache_control":null}]}`,
+	} {
+		require.True(t, HasClaudeCacheControl([]byte(raw)), raw)
+	}
+	require.False(t, HasClaudeCacheControl([]byte(`{"input":[{"type":"function_call_output","output":{"cache_control":null}}]}`)))
+}
+
+func TestClaudeCacheRemovalAtSend(t *testing.T) {
+	svc, key, a := cacheFixture(t)
+	body := []byte(`{"messages":[{"role":"user","content":"hello"}]}`)
+	ctx := svc.WithClaudeCacheFallbackRequest(context.Background(), key, body)
+	svc.settingService.claudeCacheSnapshot.Store(&cachedClaudeCachePolicy{policy: ClaudeCacheFallbackPolicy{Enabled: true, GroupIDs: []int64{8}}, expiresAt: time.Now().Add(time.Minute)})
+	actx, d := svc.beginClaudeCacheAttempt(ctx, &ParsedRequest{GroupID: key.GroupID}, a)
+	require.Equal(t, body, svc.applyClaudeCacheFallback(actx, a, body, "arbitrary"))
+	require.Equal(t, "scope_mismatch", d.Reason)
+}
+
+func TestClaudeCacheAllAnthropicBuilders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, route := range []string{"apikey", "oauth", "setup-token", "passthrough", "vertex", "bedrock-bearer", "bedrock-sigv4"} {
+		t.Run(route, func(t *testing.T) {
+			svc, key, a := cacheFixture(t)
+			body := []byte(`{"model":"any-model","max_tokens":8,"system":"stable","messages":[{"role":"user","content":"hello"}]}`)
+			switch route {
+			case "oauth":
+				a.Type = AccountTypeOAuth
+			case "setup-token":
+				a.Type = AccountTypeSetupToken
+			case "vertex":
+				a.Type = AccountTypeServiceAccount
+				a.Credentials = map[string]any{"project_id": "fixture", "location": "us-east5"}
+			case "bedrock-bearer", "bedrock-sigv4":
+				a.Type = AccountTypeBedrock
+			}
+			ctx := svc.WithClaudeCacheFallbackRequest(context.Background(), key, body)
+			ctx, d := svc.beginClaudeCacheAttempt(ctx, &ParsedRequest{GroupID: key.GroupID}, a)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			var req *http.Request
+			var err error
+			switch route {
+			case "passthrough":
+				req, _, err = svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(ctx, c, a, body, "fixture")
+			case "bedrock-bearer":
+				req, err = svc.buildUpstreamRequestBedrockAPIKey(ctx, body, "any-model", "us-east-1", false, "fixture")
+			case "bedrock-sigv4":
+				req, err = svc.buildUpstreamRequestBedrock(ctx, body, "any-model", "us-east-1", false, NewBedrockSigner("fixture-id", "fixture-secret", "", "us-east-1"))
+			default:
+				tokenType := "apikey"
+				if a.IsOAuth() {
+					tokenType = "oauth"
+				}
+				req, _, err = svc.buildUpstreamRequest(ctx, c, a, body, "fixture", tokenType, "any-model", false, false)
+			}
+			require.NoError(t, err)
+			defer req.Body.Close()
+			wire, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.Equal(t, "ephemeral", gjson.GetBytes(wire, "messages.0.content.0.cache_control.type").String())
+			require.Equal(t, "ephemeral", gjson.GetBytes(wire, "system.0.cache_control.type").String())
+			require.False(t, gjson.GetBytes(wire, "cache_control").Exists())
+			require.Equal(t, "injected", d.Reason)
+			require.False(t, HasClaudeCacheControl(body))
+			if route == "bedrock-sigv4" {
+				require.Contains(t, req.Header.Get("Authorization"), "AWS4-HMAC-SHA256")
+			}
+		})
+	}
+}
+
+func TestClaudeCacheConvertedForwardWire(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, route := range []string{"chat", "responses"} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/%t", route, stream), func(t *testing.T) {
+				svc, key, a := cacheFixture(t)
+				var raw string
+				if route == "chat" {
+					raw = fmt.Sprintf(`{"model":"claude-sonnet-4-5","stream":%t,"messages":[{"role":"user","content":"hello"}]}`, stream)
+				} else {
+					raw = fmt.Sprintf(`{"model":"claude-sonnet-4-5","stream":%t,"input":"hello"}`, stream)
+				}
+				sse := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_fixture\",\"model\":\"claude-sonnet-4-5\",\"role\":\"assistant\",\"content\":[],\"usage\":{\"input_tokens\":2,\"cache_creation_input_tokens\":200,\"cache_read_input_tokens\":9000,\"cache_creation\":{\"ephemeral_5m_input_tokens\":200,\"ephemeral_1h_input_tokens\":0}}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+				upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(sse))}}
+				svc.httpUpstream = upstream
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/"+route, nil)
+				ctx := svc.WithClaudeCacheFallbackRequest(c.Request.Context(), key, []byte(raw))
+				c.Request = c.Request.WithContext(ctx)
+				parsed := &ParsedRequest{GroupID: key.GroupID}
+				var result *ForwardResult
+				var err error
+				if route == "chat" {
+					result, err = svc.ForwardAsChatCompletions(ctx, c, a, []byte(raw), parsed)
+				} else {
+					result, err = svc.ForwardAsResponses(ctx, c, a, []byte(raw), parsed)
+				}
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Equal(t, "injected", result.ClaudeCacheFallback.Reason)
+				require.Equal(t, "ephemeral", gjson.GetBytes(upstream.lastBody, "messages.0.content.0.cache_control.type").String())
+				require.Equal(t, 200, result.Usage.CacheCreationInputTokens)
+				require.Equal(t, 9000, result.Usage.CacheReadInputTokens)
+				require.Equal(t, result.Usage, result.ClaudeCacheFallback.RawUsage)
+			})
+		}
+	}
+}
+
+func TestClaudeCacheRawUsageBeforeOverrides(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, oauth := range []bool{false, true} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("oauth=%t/stream=%t", oauth, stream), func(t *testing.T) {
+				svc, key, a := cacheFixture(t)
+				gatewayForwardingSF.Forget("gateway_forwarding")
+				gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{})
+				t.Cleanup(func() {
+					gatewayForwardingSF.Forget("gateway_forwarding")
+					gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{})
+				})
+				if oauth {
+					a.Type = AccountTypeOAuth
+					a.Credentials["access_token"] = "fixture"
+					svc.settingService.settingRepo.(*gatewayTTLSettingRepo).data[SettingKeyEnableAnthropicCacheTTL1hInjection] = "true"
+				} else {
+					a.Type = AccountTypeSetupToken
+					a.Credentials["access_token"] = "fixture"
+					a.Extra = map[string]any{"cache_ttl_override_enabled": true, "cache_ttl_override_target": "5m"}
+				}
+				raw := fmt.Sprintf(`{"model":"claude-sonnet-4-5","stream":%t,"max_tokens":8,"system":"stable","tools":[{"name":"lookup","description":"Find a fixture","input_schema":{"type":"object","properties":{}}}],"messages":[{"role":"user","content":"hello"}]}`, stream)
+				response := `{"id":"msg_test","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":5,"cache_creation_input_tokens":200,"cache_read_input_tokens":9000,"cache_creation":{"ephemeral_5m_input_tokens":50,"ephemeral_1h_input_tokens":150}}}`
+				contentType := "application/json"
+				if stream {
+					contentType = "text/event-stream"
+					response = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":" + response + "}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5,\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+				}
+				upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(response))}}
+				svc.httpUpstream = upstream
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+				ctx := svc.WithClaudeCacheFallbackRequest(c.Request.Context(), key, []byte(raw))
+				c.Request = c.Request.WithContext(ctx)
+				parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(raw)), PlatformAnthropic)
+				require.NoError(t, err)
+				parsed.GroupID = key.GroupID
+				result, err := svc.Forward(ctx, c, a, parsed)
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Equal(t, "injected", result.ClaudeCacheFallback.Reason)
+				require.Equal(t, 50, result.ClaudeCacheFallback.RawUsage.CacheCreation5mTokens)
+				require.Equal(t, 150, result.ClaudeCacheFallback.RawUsage.CacheCreation1hTokens)
+				require.Equal(t, 200, result.Usage.CacheCreation5mTokens)
+				require.Zero(t, result.Usage.CacheCreation1hTokens)
+				require.Equal(t, 9000, result.ClaudeCacheFallback.RawUsage.CacheReadInputTokens)
+				tail := len(gjson.GetBytes(upstream.lastBody, "messages").Array()) - 1
+				require.GreaterOrEqual(t, tail, 0)
+				require.Equal(t, "ephemeral", gjson.GetBytes(upstream.lastBody, fmt.Sprintf("messages.%d.content.0.cache_control.type", tail)).String())
+				require.False(t, gjson.GetBytes(parsed.Body.Bytes(), fmt.Sprintf("messages.%d.content.0.cache_control", tail)).Exists())
+				require.True(t, claudeCacheTTLOrderValid(upstream.lastBody))
+				if oauth {
+					require.Contains(t, string(upstream.lastBody), `"ttl":"1h"`, "existing OAuth checkpoints retain configured TTL")
+				}
+			})
+		}
 	}
 }

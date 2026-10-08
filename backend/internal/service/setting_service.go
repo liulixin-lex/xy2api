@@ -120,8 +120,6 @@ type SettingService struct {
 	claudeCacheMu                      sync.Mutex
 	claudeCacheSnapshot                atomic.Pointer[cachedClaudeCachePolicy]
 	claudeCacheGroupRepo               GroupRepository
-	claudeCacheAccountRepo             AccountRepository
-	claudeCacheKeyRepo                 APIKeyRepository
 	codexProxySnapshot                 atomic.Value
 	codexProxyProbeSF                  singleflight.Group
 	codexProxyProbeOnce                sync.Once

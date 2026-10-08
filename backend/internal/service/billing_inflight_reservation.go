@@ -342,7 +342,7 @@ type inflightEstimateDeps struct {
 	// accountMappedModels 返回调度器可选账号对 model 的账号级映射结果（去重，不含 model 本身）。
 	// 准入时账号尚未选定，计费侧 billableModelWithFallback 会回退到实际转发模型（UpstreamModel，
 	// 即账号映射后的模型），因此这里取所有候选映射模型的最高估算。
-	// 仅在首选/渠道候选均无法定价（或 composite 分组）时才调用；实现只读调度器快照，
+	// 仅在首选/渠道候选均无法定价、composite 分组或缓存冷写预留时调用；实现只读调度器快照，
 	// 不在请求路径上直接查库，也不按模型名缓存（内存不随请求模型名增长）。
 	accountMappedModels func(ctx context.Context, apiKey *APIKey, model string) []string
 }
@@ -617,13 +617,13 @@ func (d inflightEstimateDeps) estimate(ctx context.Context, apiKey *APIKey, req 
 	// composite 分组：计费侧除非别名有显式渠道价，否则按实际转发的具体模型计费；
 	// 别名本身可能命中家族模糊价（低估），因此与候选具体模型一起取最高。
 	composite := apiKey.Group != nil && apiKey.Group.Platform == PlatformComposite
-	if best <= 0 || composite {
+	if best <= 0 || composite || req.ClaudeCacheColdWrite {
 		// 与 billableModelWithFallback 同口径：首选模型无价时回退到实际转发模型。
 		if c := bestOf(fallbacks); c > best {
 			best = c
 		}
-		// 账号级映射候选（读调度器快照）仅在仍无法定价或 composite 时才查，已定价模型不触发。
-		if (best <= 0 || composite) && d.accountMappedModels != nil {
+		// 无价、composite 或缓存冷写预留均检查账号级映射（调度器快照），避免低估最终模型。
+		if (best <= 0 || composite || req.ClaudeCacheColdWrite) && d.accountMappedModels != nil {
 			if c := bestOf(d.accountMappedModels(ctx, apiKey, upstreamInput)); c > best {
 				best = c
 			}
@@ -696,26 +696,8 @@ func (s *GatewayService) EstimateInflightReservation(ctx context.Context, apiKey
 	}
 	deps := s.inflightEstimateDeps()
 	state, _ := ctx.Value(claudeCacheRequestKey{}).(*claudeCacheRequest)
-	var rules []ClaudeCacheFallbackRule
-	if state != nil && !state.declared && state.admitted != nil && apiKey != nil && apiKey.GroupID != nil && *apiKey.GroupID == state.groupID {
-		rules = state.admitted.policy.scopeRules(state.groupID, apiKey.ID)
-	}
-	req.ClaudeCacheColdWrite = len(rules) > 0
-	best, priced := deps.estimate(ctx, apiKey, req)
-	// Before account selection, conservatively include every explicitly allowed
-	// final model. This may hold extra balance; it never changes settlement cost.
-	if req.ClaudeCacheColdWrite {
-		textRate, imageRate := deps.rates(ctx, apiKey)
-		for _, rule := range rules {
-			for _, model := range rule.Models {
-				cost := deps.estimateOne(ctx, apiKey, model, req, textRate, imageRate)
-				if cost > best {
-					best, priced = cost, true
-				}
-			}
-		}
-	}
-	return best, priced
+	req.ClaudeCacheColdWrite = state != nil && !state.declared && state.admitted != nil && apiKey != nil && apiKey.GroupID != nil && *apiKey.GroupID == state.groupID && state.admitted.policy.includesGroup(state.groupID)
+	return deps.estimate(ctx, apiKey, req)
 }
 
 func (s *OpenAIGatewayService) inflightEstimateDeps() inflightEstimateDeps {
