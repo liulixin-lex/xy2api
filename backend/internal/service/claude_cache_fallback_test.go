@@ -510,7 +510,7 @@ func TestClaudeCacheAllAnthropicBuilders(t *testing.T) {
 				req, _, err = svc.buildUpstreamRequest(ctx, c, a, body, "fixture", tokenType, "any-model", false, false)
 			}
 			require.NoError(t, err)
-			defer req.Body.Close()
+			t.Cleanup(func() { require.NoError(t, req.Body.Close()) })
 			wire, err := io.ReadAll(req.Body)
 			require.NoError(t, err)
 			require.Equal(t, "ephemeral", gjson.GetBytes(wire, "messages.0.content.0.cache_control.type").String())
@@ -579,7 +579,9 @@ func TestClaudeCacheRawUsageBeforeOverrides(t *testing.T) {
 				if oauth {
 					a.Type = AccountTypeOAuth
 					a.Credentials["access_token"] = "fixture"
-					svc.settingService.settingRepo.(*gatewayTTLSettingRepo).data[SettingKeyEnableAnthropicCacheTTL1hInjection] = "true"
+					repo, ok := svc.settingService.settingRepo.(*gatewayTTLSettingRepo)
+					require.True(t, ok)
+					require.NoError(t, repo.Set(context.Background(), SettingKeyEnableAnthropicCacheTTL1hInjection, "true"))
 				} else {
 					a.Type = AccountTypeSetupToken
 					a.Credentials["access_token"] = "fixture"
