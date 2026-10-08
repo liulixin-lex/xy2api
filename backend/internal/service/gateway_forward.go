@@ -15,7 +15,6 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 
 	"github.com/gin-gonic/gin"
 )
@@ -179,13 +178,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	// Keep fallback declarations local to this account's wire request. Other
 	// successful wire transformations still update ParsedRequest as before.
 	syncWireBody := func(wire []byte) error {
-		if cacheDecision != nil && cacheDecision.Reason == "injected" {
-			clean, err := sjson.DeleteBytes(wire, "cache_control")
-			if err != nil {
-				return fmt.Errorf("remove attempt cache declaration: %w", err)
-			}
-			wire = clean
-		}
+		wire = withoutClaudeCacheFallback(ctx, wire)
 		return replaceBody(wire)
 	}
 	reqModel := parsed.Model

@@ -4,6 +4,17 @@
 
 ## 当前交接状态
 
+### Claude 自动缓存分组迭代（2026-10-08，GitHub 发布进行中）
+
+- 用户要求参考 LiteLLM 与 Sub2API OAuth 缓存逻辑，把精确规则改为开关和分组选择，覆盖选中组的所有账号、Key 与模型，精简前端。开发阶段已完成；用户最新明确授权推送、合并与发版，范围仅 GitHub 与发行制品，不部署或访问真实供应商。
+- `/lex/xy2api-claude-cache` 的 `feat/claude-cache-groups-20261008` 基于 `origin/main=309afb6afd4240aceaecd2c0296a3b669309e795`。新配置 enabled/group_ids；旧规则只迁移分组选择且关闭，需明确启用保存。
+- 新 helper 补内容块默认 5m，保护原始声明、现有 OAuth 断点、四点额度与长 TTL 在前约束；包含 Anthropic API Key/OAuth/SetupToken/透传/Vertex/Bedrock 和 Chat/Responses 转换。其他协议和 count_tokens 不接入。冷写预留考虑账号映射模型，真实结算与原有覆写保持，额外在覆写前采集数值诊断。
+- 前端 9 项新增交互、全量 lint/typecheck、327 项 critical 与生产构建通过；桌面/手机/暗色和键盘操作无溢出或脚本错误。后端 62 包 unit（先精确排除两个 DNS 依赖子用例）、构建、缓存/预留/TTL/API 合约三包 race 均通过；两个排除用例再于同一隔离容器设置固定公网地址的域名映射，所在矩阵 9 子用例全部通过，无真实供应商访问。最终全仓 golangci-lint 为 0 issues/exit 0，首轮失败、测试 lint 修正与中间超时记录保留。证据 `/lex/claude-cache-groups-20261008/`。
+- 2.65 MB 合成请求辅助路径基准 100 次：关闭 1.795µs/320B；开启 72.97ms/29.20MB（46 次分配）。只含准入/补齐，不含完整转发或网络；块级补齐会复制大请求正文，不把本结果表述为端到端吞吐或生产压测。
+- 当前使用说明及 OpenSpec 已替换为分组行为；0.2.4 历史记录保留，准备产品 0.2.5-rc.1 并通过正式版本 PR 晋级 0.2.5；兼容版本 0.2.14 与数据库迁移不变。
+- 本地实现提交 `55002ca83`，收尾提交 `53d6a12ca` 仅包含测试错误检查及验收/记忆记录。标准来源审计通过，结果与身份回读保存于外部证据目录。发布按受保护 PR、固定 head 检查、常规 merge、不可变 annotated 标签执行；真实上游支持、命中率和供应商/NewAPI 账单仍需后续验证。
+
+
 ### Claude 缓存补齐 0.2.4（2026-10-08，GitHub 正式发布完成）
 
 - 用户已明确授权实现、推送、合并和发版。功能 [PR #81](https://github.com/liulixin-lex/xy2api/pull/81) 已常规合并，验收 head `044bcf68f43bb684f17a31a750bed2e2cf6f751e`，merge `a35c5c28267015e46b602deb5c2bbd41dcc4dbd5`；两者 tree 相同。所有固定 head 检查通过，完整后端/集成/真实存储调度检查见 CI `37661770962`。
@@ -500,6 +511,12 @@
 Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+### 20261008-claude-cache-groups-release — 推送、合并与 GitHub 发版
+
+- 用户最新授权远端交付；当前独立工作树 `/lex/xy2api-claude-cache`，分支 `feat/claude-cache-groups-20261008`，已验本地 head `53d6a12ca`；核对远端 main 仍为 `309afb6af`。
+- 准备产品 0.2.5-rc.1，经完整保护检查后合并并核验 RC 附件和 GHCR；随后独立正式版本 PR 晋级 0.2.5、合并、打标签并核验正式制品。不直推 main、不绕过门禁、不移动已有标签。
+- 证据目录 `/lex/claude-cache-groups-20261008/release/`。仅 GitHub 操作与本地制品核验，不连接或修改线上服务、不调用真实模型。完成后更新本条与顶部状态并追加日志。
 
 ### 20261008-claude-cache-fallback-implementation — 实施及发布
 
@@ -1639,3 +1656,12 @@ pnpm --dir frontend run build
 - 新增精确开关与快照、原始声明保护、最终 wire 补齐、保守冷写预留、数值诊断及独立后台组件；修正 wire 回写污染共享正文、忽略新字段误报保存、Go 错误文本 lint。没有改变收费公式、迁移、调度规则或现有 TTL/强制计费开关。
 - 单元、race、27 项真实 PG/Redis 定向集成、前端 lint/类型/关键用例/构建、双视口及 2.65 MB 基准通过；详细命令与失败到成功记录位于外部证据目录，真实上游没有新增模型调用。
 - 发布：v0.2.4-rc.1 固定于 merge，workflow 37664827099 成功；GitHub assets/checksum/GHCR 双架构及版本标签通过，隔离旧版升级的健康/登录/静态资源烟测通过。fresh/rollback 未执行。下一步以业务代码不变的 release/0.2.4 走正式 PR、标签及 GitHub 制品验证；不操作部署或容器清理，生产保持原状，默认不开启新规则。
+
+### 2026-10-08 — 20261008-claude-cache-groups — 本地分组缓存迭代完成
+
+- 用户本轮明确只开发，不推送或发版。起点 `origin/main=309afb6afd4240aceaecd2c0296a3b669309e795`，本地分支 `feat/claude-cache-groups-20261008`；未写 GitHub、未接触线上服务、未调用真实模型上游。原工作树保留。
+- 参考固定 LiteLLM/Sub2API 源码及 Anthropic 协议约束，实现开关与分组选择，去掉规则/Key/账号/地址/模型名单；旧格式读为关闭并保留分组。原始客户端声明优先，默认 5m 内容块断点兼容现有 OAuth 断点和 TTL 顺序，覆盖原生、转换与云端 Anthropic 出口。
+- 保留计费公式和商业覆写；补充按账号映射模型保守预留、覆写前原始数值诊断、重试共享正文保护。精简中英文设置组件、删除旧规则编辑器、更新 OpenSpec 和使用说明，无新迁移或版本变化。
+- 本地验证：前端全量 lint/typecheck/构建，22 文件/327 项 critical（含 9 项新组件交互），桌面/手机/暗色及键盘操作均通过；后端 62 包 unit 排除两个 DNS 依赖子用例后通过，随后对整个 9 子用例矩阵以隔离容器域名映射补验通过，未改变测试源码和断言。构建、三包重点 race、最后全仓 golangci-lint 0 issues/exit 0、10 项同步工具测试通过。
+- 2.65 MB 辅助路径基准 100 次：OFF 1.795µs/320B；ON 72.97ms/29.20MB/46 allocations。只报告本地 helper 开销，不宣称端到端性能或全体上游能力。首次 DNS 失败、前端 worker 超时、测试 fixture/错误检查修正、包级 lint 超时等证据保留，最终结果见 `/lex/claude-cache-groups-20261008/verification.md`。
+- 清理自己的进行中事项。实现与收尾只做本地提交，最终干净树来源审计/身份保存在同一证据目录；测试容器运行后自动移除，临时前端预览已关闭。后续若交付 GitHub 需新的用户指令；真实上游命中与两端账单核验仍不属于本轮完成声明。

@@ -312,7 +312,12 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 	if err != nil {
 		return nil, err
 	}
-	req, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, vertexBody, GroupPromptAnthropic)
+	vertexBody, err = ApplyGroupSystemPrompt(ctx, vertexBody, GroupPromptAnthropic)
+	if err != nil {
+		return nil, err
+	}
+	vertexBody = s.applyClaudeCacheFallback(ctx, account, vertexBody, modelID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(vertexBody))
 	if err != nil {
 		return nil, err
 	}

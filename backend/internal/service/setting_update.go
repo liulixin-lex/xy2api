@@ -419,8 +419,8 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	}
 
 	// Admin-only usage display switches
-	if settings.ClaudeCacheFallbackPolicy.Rules == nil {
-		settings.ClaudeCacheFallbackPolicy.Rules = []ClaudeCacheFallbackRule{}
+	if settings.ClaudeCacheFallbackPolicy.GroupIDs == nil {
+		settings.ClaudeCacheFallbackPolicy.GroupIDs = []int64{}
 	}
 	cachePolicyJSON, err := json.Marshal(settings.ClaudeCacheFallbackPolicy)
 	if err != nil {

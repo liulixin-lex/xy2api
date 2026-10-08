@@ -1,14 +1,6 @@
-export interface ClaudeCacheFallbackRule {
-  id: string;
-  group_id: number;
-  api_key_ids: number[];
-  account_id: number;
-  base_url: string;
-  models: string[];
-}
 export interface ClaudeCacheFallbackPolicy {
   enabled: boolean;
-  rules: ClaudeCacheFallbackRule[];
+  group_ids: number[];
 }
 
 /**

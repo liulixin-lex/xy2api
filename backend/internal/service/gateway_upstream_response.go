@@ -958,6 +958,8 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			}
 		}
 
+		s.captureClaudeCacheRawUsageEvent(ctx, event)
+
 		// Cache TTL Override: 重写 SSE 事件中的 cache_creation 分类。
 		// 账号级设置优先；全局 1h 请求注入开启时，默认把 usage 计费归回 5m。
 		if overrideTarget, ok := s.resolveCacheTTLUsageOverrideTarget(ctx, account); ok {
@@ -1439,6 +1441,8 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 			}
 		}
 	}
+
+	captureClaudeCacheRawUsage(ctx, response.Usage)
 
 	// Cache TTL Override: 重写 non-streaming 响应中的 cache_creation 分类。
 	// 账号级设置优先；全局 1h 请求注入开启时，默认把 usage 计费归回 5m。

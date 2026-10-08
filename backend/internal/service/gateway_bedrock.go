@@ -343,6 +343,7 @@ func (s *GatewayService) buildUpstreamRequestBedrock(
 	if err != nil {
 		return nil, err
 	}
+	body = s.applyClaudeCacheFallbackForAttempt(ctx, body, modelID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -370,7 +371,12 @@ func (s *GatewayService) buildUpstreamRequestBedrockAPIKey(
 ) (*http.Request, error) {
 	targetURL := BuildBedrockURL(region, modelID, stream)
 
-	req, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, targetURL, body, GroupPromptAnthropic)
+	body, err := ApplyGroupSystemPrompt(ctx, body, GroupPromptAnthropic)
+	if err != nil {
+		return nil, err
+	}
+	body = s.applyClaudeCacheFallbackForAttempt(ctx, body, modelID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

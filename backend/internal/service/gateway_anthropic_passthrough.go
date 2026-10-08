@@ -329,7 +329,12 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	// base 取值同源（GetBaseURL），详见 helper 注释。
 	body = clampOllamaCloudAnthropicMessagesMaxTokens(account, account.GetBaseURL(), body)
 
-	req, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, targetURL, body, GroupPromptAnthropic)
+	body, err := ApplyGroupSystemPrompt(ctx, body, GroupPromptAnthropic)
+	if err != nil {
+		return nil, nil, err
+	}
+	body = s.applyClaudeCacheFallback(ctx, account, body, gjson.GetBytes(body, "model").String())
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -878,6 +883,7 @@ func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 	}
 
 	usage := parseClaudeUsageFromResponseBody(body)
+	captureClaudeCacheRawUsage(ctx, *usage)
 	if IsForceCacheBilling(ctx) && usage.InputTokens > 0 {
 		body, err = classifyAnthropicResponseInputAsCacheRead(body, usage)
 		if err != nil {

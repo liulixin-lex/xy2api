@@ -32,8 +32,10 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	account *Account,
 	body []byte,
 	parsed *ParsedRequest,
-) (*ForwardResult, error) {
+) (result *ForwardResult, err error) {
 	startTime := time.Now()
+	ctx, cacheDecision := s.beginClaudeCacheAttempt(ctx, parsed, account)
+	defer func() { finishClaudeCacheAttempt(cacheDecision, result) }()
 
 	// 1. Parse Chat Completions request
 	var ccReq apicompat.ChatCompletionsRequest
@@ -187,7 +189,6 @@ func (s *GatewayService) ForwardAsChatCompletions(
 
 	// 13. Handle normal response
 	// Read Anthropic SSE → convert to Responses events → convert to CC format
-	var result *ForwardResult
 	var handleErr error
 	if clientStream {
 		result, handleErr = s.handleCCStreamingFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
