@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -158,9 +157,6 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	// Antigravity 上游只支持流式请求，统一使用 streamGenerateContent
 	// 如果客户端请求非流式，在响应处理阶段会收集完整流式响应后返回
 	upstreamAction := "streamGenerateContent"
-	if !stream {
-		ctx = withControlledBufferedResponse(ctx)
-	}
 
 	// 执行带重试的请求
 	result, err := s.antigravityRetryLoop(antigravityRetryLoopParams{
@@ -182,18 +178,6 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		sessionHash:     forwardOpts.sessionHash,
 	})
 	if err != nil {
-		if IsControlledSchedulingStop(err) {
-			return nil, err
-		}
-		if ControlledSchedulingEnabled(ctx) {
-			var failover *UpstreamFailoverError
-			if errors.As(err, &failover) {
-				return nil, failover
-			}
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-		}
 		// 检查是否是账号切换信号，转换为 UpstreamFailoverError 让 Handler 切换账号
 		if switchErr, ok := IsAntigravityAccountSwitchError(err); ok {
 			return nil, &UpstreamFailoverError{
@@ -222,7 +206,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
 		// 模型兜底：模型不存在且开启 fallback 时，自动用 fallback 模型重试一次
-		if !ControlledSchedulingEnabled(ctx) && s.settingService != nil && s.settingService.IsModelFallbackEnabled(ctx) &&
+		if s.settingService != nil && s.settingService.IsModelFallbackEnabled(ctx) &&
 			isModelNotFoundError(resp.StatusCode, respBody) {
 			fallbackModel := s.settingService.GetFallbackModel(ctx, PlatformAntigravity)
 			if fallbackModel != "" && fallbackModel != mappedModel {
@@ -251,7 +235,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		if unwrapped, unwrapErr := s.unwrapV1InternalResponse(respBody); unwrapErr == nil && len(unwrapped) > 0 {
 			signatureCheckBody = unwrapped
 		}
-		if !ControlledSchedulingEnabled(ctx) && resp.StatusCode == http.StatusBadRequest &&
+		if resp.StatusCode == http.StatusBadRequest &&
 			s.settingService != nil &&
 			s.settingService.IsSignatureRectifierEnabled(ctx) &&
 			isSignatureRelatedError(signatureCheckBody) &&

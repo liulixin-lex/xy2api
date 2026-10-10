@@ -359,9 +359,6 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		setOpenAICompatMessagesBridgeContext(c, true)
 	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-	if !clientStream {
-		upstreamCtx = withControlledBufferedResponse(upstreamCtx)
-	}
 	var upstreamReq *http.Request
 	if account.Platform == PlatformGrok {
 		upstreamReq, err = buildGrokResponsesRequest(upstreamCtx, c, account, responsesBody, token, grokCacheIdentity, s.cfg, s.settingService)
@@ -429,7 +426,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		if err != nil {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 		}
-		if ControlledSchedulingEnabled(ctx) || account.Platform != PlatformGrok || attempt > 0 || resp.StatusCode != http.StatusBadRequest {
+		if account.Platform != PlatformGrok || attempt > 0 || resp.StatusCode != http.StatusBadRequest {
 			break
 		}
 		respBody := s.readUpstreamErrorBody(resp)
@@ -465,17 +462,14 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// 8. Handle error response with failover
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
-		if repairErr := s.repairControlledAgentIdentityTask(ctx, account, resp.StatusCode, respBody); repairErr != nil {
-			return nil, repairErr
-		}
-		if !ControlledSchedulingEnabled(ctx) && !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
+		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 			expectedTaskID := account.GetCredential("task_id")
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
 				return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
 			}
 			return s.ForwardAsAnthropic(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel)
 		}
-		if !ControlledSchedulingEnabled(ctx) && previousResponseID != "" && (isOpenAICompatPreviousResponseNotFound(resp.StatusCode, upstreamMsg, respBody) || isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody)) {
+		if previousResponseID != "" && (isOpenAICompatPreviousResponseNotFound(resp.StatusCode, upstreamMsg, respBody) || isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody)) {
 			if isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody) {
 				s.disableOpenAICompatSessionContinuation(ctx, c, account, promptCacheKey)
 			} else {
@@ -491,7 +485,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		// Grok account-switched history often fails decrypt; strip encrypted
 		// reasoning once at the client-body level so failover accounts can accept
 		// the multi-turn tool continuation instead of cascading 400s.
-		if !ControlledSchedulingEnabled(ctx) && account.Platform == PlatformGrok &&
+		if account.Platform == PlatformGrok &&
 			isGrokInvalidEncryptedContentResponse(resp.StatusCode, respBody) &&
 			!grokEncryptedContentStripRetried(ctx) {
 			if strippedBody, ok := stripAnthropicThinkingSignatures(body); ok {
@@ -609,7 +603,6 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	upstreamModel string,
 	startTime time.Time,
 ) (_ *OpenAIForwardResult, retErr error) {
-	defer finishControlledNonstreamResponse(resp, &retErr)
 	requestID := resp.Header.Get("x-request-id")
 
 	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, "openai messages buffered", requestID)
@@ -623,7 +616,6 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 
 	if finalResponse == nil {
 		err := fmt.Errorf("upstream stream ended without terminal event")
-		rejectControlledNonstreamResponse(resp, err)
 		writeAnthropicError(c, http.StatusBadGateway, "api_error", "Upstream stream ended without a terminal response event")
 		return nil, err
 	}
@@ -679,9 +671,6 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	// When the terminal event has an empty output array, reconstruct from
 	// accumulated delta events so the client receives the full content.
 	acc.SupplementResponseOutput(finalResponse)
-	if err := validateOpenAICompatBufferedResponse(resp, finalResponse); err != nil {
-		return nil, err
-	}
 
 	anthropicResp := apicompat.ResponsesToAnthropic(finalResponse, originalModel)
 
@@ -714,27 +703,6 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		}
 	}
 	return result, nil
-}
-
-func validateOpenAICompatBufferedResponse(resp *http.Response, response *apicompat.ResponsesResponse) error {
-	if resp == nil {
-		return nil
-	}
-	b, ok := resp.Body.(*controlledResponseBody)
-	if !ok || !b.buffered {
-		return nil
-	}
-	b.dispatch.request.mu.Lock()
-	enabled := b.dispatch.request.Policy.Enabled
-	b.dispatch.request.mu.Unlock()
-	if !enabled {
-		return validateControlledNonstreamResponse(resp, nil, "responses")
-	}
-	body, err := json.Marshal(response)
-	if err != nil {
-		return err
-	}
-	return validateControlledNonstreamResponse(resp, body, "responses")
 }
 
 func isOpenAICompatResponsesTerminalEvent(eventType string) bool {
@@ -902,7 +870,6 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 							if response.Usage != nil {
 								usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
 							}
-							markControlledNonstreamTerminal(resp, []byte(payload))
 							return response, usage, acc, nil
 						}
 					}
@@ -952,7 +919,6 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 				if response.Usage != nil {
 					usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
 				}
-				markControlledNonstreamTerminal(resp, []byte(payload))
 				return response, usage, acc, nil
 			}
 

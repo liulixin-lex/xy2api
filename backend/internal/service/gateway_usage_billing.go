@@ -365,9 +365,6 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 	}
 
 	cmd := buildUsageBillingCommand(requestID, usageLog, p)
-	if cmd != nil {
-		cmd.SchedulingAttemptID = SchedulingAttemptIDFromContext(ctx)
-	}
 	if cmd == nil || cmd.RequestID == "" || repo == nil {
 		if p.SimpleModeKeyRateLimitOnly {
 			return false, ErrSimpleModeKeyRateLimitBillingUnavailable
@@ -398,9 +395,6 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 		// can safely repeat this path, including when Applied is false.
 		result.CachesManagedDurably = true
 		cacheErr := invalidateBillingCommandCaches(billingCtx, deps.billingCacheService, cmd)
-		if cacheErr == nil {
-			cacheErr = acknowledgeSchedulingUsage(WithSchedulingUsageAttempt(billingCtx, cmd.SchedulingAttemptID), deps.controlledScheduling, cmd.AccountID)
-		}
 		if cacheErr == nil {
 			cacheErr = durable.CompleteBillingCacheInvalidation(billingCtx, cmd)
 		}
@@ -645,7 +639,6 @@ type billingDeps struct {
 	deferredService       *DeferredService
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
-	controlledScheduling  *ControlledSchedulingService
 	cfg                   *config.Config
 }
 
@@ -658,9 +651,17 @@ func (s *GatewayService) billingDeps() *billingDeps {
 		deferredService:       s.deferredService,
 		balanceNotifyService:  s.balanceNotifyService,
 		userPlatformQuotaRepo: s.userPlatformQuotaRepo,
-		controlledScheduling:  s.controlledScheduling,
 		cfg:                   s.cfg,
 	}
+}
+
+// writeUsageLogAfterBilling skips logs already committed by unified billing in
+// the money transaction; other logs keep the best-effort writer.
+func writeUsageLogAfterBilling(ctx context.Context, repo UsageLogRepository, usageLog *UsageLog, logKey string) {
+	if usageLog != nil && usageLog.ID > 0 {
+		return
+	}
+	writeUsageLogBestEffort(ctx, repo, usageLog, logKey)
 }
 
 func writeUsageLogBestEffort(ctx context.Context, repo UsageLogRepository, usageLog *UsageLog, logKey string) {
@@ -916,6 +917,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	accountRateMultiplier := account.BillingRateMultiplier()
 	usageLog := s.buildRecordUsageLog(ctx, input, result, apiKey, user, account, subscription,
 		requestedModel, multiplier, imageMultiplier, accountRateMultiplier, billingType, cacheTTLOverridden, cost)
+	s.shareScheduling.observeUsage(ctx, usageLog)
 
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
 	if apiKey.GroupID != nil {
@@ -941,13 +943,11 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	}()
 	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, apiKey)
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
-		if e := writeSchedulingUsageLog(ctx, s.usageLogRepo, usageLog, "service.gateway"); e != nil {
-			return e
-		}
+		writeUsageLogAfterBilling(ctx, s.usageLogRepo, usageLog, "service.gateway")
 		cacheSettlementOutcome = "usage_only"
 		logger.LegacyPrintf("service.gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
-		return acknowledgeSchedulingUsage(ctx, s.controlledScheduling, account.ID)
+		return nil
 	}
 
 	// 配额平台由 handler 在请求 ctx 内经 QuotaPlatform() 算定并通过 input 传入；
@@ -982,11 +982,9 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		// The durable billing intent owns retry. A failed settlement is not a free request.
 		return billingErr
 	}
-	if e := writeSchedulingUsageLog(ctx, s.usageLogRepo, usageLog, "service.gateway"); e != nil {
-		return e
-	}
+	writeUsageLogAfterBilling(ctx, s.usageLogRepo, usageLog, "service.gateway")
 
-	return acknowledgeSchedulingUsage(ctx, s.controlledScheduling, account.ID)
+	return nil
 }
 
 // calculateRecordUsageCost 根据请求类型计算费用。

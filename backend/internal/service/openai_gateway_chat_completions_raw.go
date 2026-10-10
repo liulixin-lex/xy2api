@@ -514,7 +514,6 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 	serviceTier *string,
 	startTime time.Time,
 ) (_ *OpenAIForwardResult, retErr error) {
-	defer finishControlledNonstreamResponse(resp, &retErr)
 	requestID := resp.Header.Get("x-request-id")
 
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
@@ -528,9 +527,6 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 			writeChatCompletionsError(c, http.StatusBadGateway, "api_error", "Failed to read upstream response")
 		}
 		return nil, fmt.Errorf("read upstream body: %w", err)
-	}
-	if err := validateControlledNonstreamResponse(resp, respBody, "chat"); err != nil {
-		return nil, err
 	}
 
 	observer := upstreamResponseModelObserverFromContext(c)

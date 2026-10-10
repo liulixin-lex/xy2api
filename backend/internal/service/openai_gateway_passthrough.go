@@ -367,9 +367,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 		SetOpsUpstreamModel(c, actualModel)
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-		if !reqStream {
-			upstreamCtx = withControlledBufferedResponse(upstreamCtx)
-		}
 		upstreamReq, buildErr := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, token)
 		releaseUpstreamCtx()
 		if buildErr != nil {
@@ -392,15 +389,12 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			resp.Body = io.NopCloser(bytes.NewReader(probeBody))
 			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, probeBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize passthrough rejected Responses field retry body: %w", retryErr)
-			} else if !ControlledSchedulingEnabled(ctx) && changed && rejectedFieldRetryState.Allow(retryBody) {
+			} else if changed && rejectedFieldRetryState.Allow(retryBody) {
 				body = retryBody
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying passthrough request after %s (account: %s)", reason, account.Name)
 				continue
 			}
-			if repairErr := s.repairControlledAgentIdentityTask(ctx, account, resp.StatusCode, probeBody); repairErr != nil {
-				return nil, repairErr
-			}
-			if !ControlledSchedulingEnabled(ctx) && !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, probeBody) {
+			if !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, probeBody) {
 				agentTaskRecoveryTried = true
 				expectedTaskID := account.GetCredential("task_id")
 				if recoveryErr := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); recoveryErr != nil {
@@ -2312,13 +2306,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	originalModel string,
 	mappedModel string,
 ) (_ *openaiNonStreamingResultPassthrough, retErr error) {
-	defer finishControlledNonstreamResponse(resp, &retErr)
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		return nil, nonstreamReadError(ctx, resp, err)
-	}
-	if err := validateControlledNonstreamResponse(resp, body, "responses"); err != nil {
-		return nil, err
 	}
 
 	observer := upstreamResponseModelObserverFromContext(c)

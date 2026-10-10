@@ -47,16 +47,15 @@ func ProvideAdminHandlers(
 	affiliateHandler *admin.AffiliateHandler,
 	complianceHandler *admin.ComplianceHandler,
 	auditLogHandler *admin.AuditLogHandler,
+	shareSchedulingHandler *admin.ShareSchedulingHandler,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	iqCheckService *service.IQCheckService,
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 	settingService *service.SettingService,
 	codexTicketGateway *service.OpenAIGatewayService,
 	opencodeGoUsage *service.OpenCodeGoUsageService,
-	controlled *service.ControlledSchedulingService,
 	claudeResetCredits *service.ClaudeResetCreditService,
 ) *AdminHandlers {
-	accountHandler.SetSchedulingController(controlled.Store)
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetIQCheckService(iqCheckService)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
@@ -65,7 +64,6 @@ func ProvideAdminHandlers(
 	accountHandler.SetOpenCodeGoUsageService(opencodeGoUsage)
 	accountHandler.SetClaudeResetCreditService(claudeResetCredits)
 	return &AdminHandlers{
-		Scheduling:             admin.NewSchedulingHandler(controlled.Store, controlled.Explain),
 		Dashboard:              dashboardHandler,
 		User:                   userHandler,
 		Group:                  groupHandler,
@@ -102,6 +100,7 @@ func ProvideAdminHandlers(
 		Affiliate:              affiliateHandler,
 		Compliance:             complianceHandler,
 		AuditLog:               auditLogHandler,
+		ShareScheduling:        shareSchedulingHandler,
 	}
 }
 
@@ -301,6 +300,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewAffiliateHandler,
 	admin.NewComplianceHandler,
 	admin.NewAuditLogHandler,
+	admin.NewShareSchedulingHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

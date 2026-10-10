@@ -166,9 +166,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	apiKey := input.APIKey
 	user := input.User
 	account := input.Account
-	if result != nil {
-		ctx = WithSchedulingUsageAttempt(ctx, result.SchedulingAttemptID)
-	}
 	subscription := input.Subscription
 	billingAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {
@@ -491,14 +488,13 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		)
 	}
 
+	s.shareScheduling.observeUsage(ctx, usageLog)
 	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, apiKey)
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
-		if e := writeSchedulingUsageLog(ctx, s.usageLogRepo, usageLog, "service.openai_gateway"); e != nil {
-			return e
-		}
+		writeUsageLogAfterBilling(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 		logger.LegacyPrintf("service.openai_gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
-		return acknowledgeSchedulingUsage(ctx, s.controlledScheduling, account.ID)
+		return nil
 	}
 
 	// Async usage billing runs outside the original request context, so it
@@ -526,11 +522,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		// Retain the frozen pending intent instead of misreporting a free request.
 		return billingErr
 	}
-	if e := writeSchedulingUsageLog(ctx, s.usageLogRepo, usageLog, "service.openai_gateway"); e != nil {
-		return e
-	}
+	writeUsageLogAfterBilling(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 
-	return acknowledgeSchedulingUsage(ctx, s.controlledScheduling, account.ID)
+	return nil
 }
 
 // hasIdentifiedOpenAIResponsePricing 判断上游自报的响应模型是否可以作为计费基准，

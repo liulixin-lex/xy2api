@@ -126,9 +126,6 @@ func (s *GatewayService) ForwardAsChatCompletions(
 
 	// 10. Build upstream request
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
-	if !clientStream {
-		upstreamCtx = withControlledBufferedResponse(upstreamCtx)
-	}
 	upstreamReq, forwardedBody, err := s.buildUpstreamRequest(upstreamCtx, c, account, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
 	releaseUpstreamCtx()
 	if err != nil {
@@ -231,7 +228,6 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 	reasoningEffort *string,
 	startTime time.Time,
 ) (_ *ForwardResult, retErr error) {
-	defer finishControlledNonstreamResponse(resp, &retErr)
 	requestID := resp.Header.Get("x-request-id")
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -242,7 +238,6 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
 
 	var finalResp *apicompat.AnthropicResponse
-	terminal, failed := false, false
 	var usage ClaudeUsage
 
 	for scanner.Scan() {
@@ -267,11 +262,6 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		}
 
 		// message_start carries the initial response structure and cache usage
-		terminal = terminal || event.Type == "message_stop"
-		failed = failed || event.Type == "error"
-		if event.Type == "error" {
-			observeControlledBufferedFailure(resp, []byte(payload))
-		}
 
 		if event.Type == "message_start" && event.Message != nil {
 			finalResp = event.Message
@@ -316,7 +306,6 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 
 	if finalResp == nil {
 		err := fmt.Errorf("upstream stream ended without response")
-		rejectControlledNonstreamResponse(resp, err)
 		writeGatewayCCError(c, http.StatusBadGateway, "server_error", "Upstream stream ended without a response")
 		return nil, err
 	}
@@ -332,9 +321,6 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 	}
 
 	// Chain: Anthropic → Responses → Chat Completions
-	if err := validateAnthropicBufferedResponse(resp, finalResp, terminal && !failed); err != nil {
-		return nil, err
-	}
 
 	responsesResp := apicompat.AnthropicToResponsesResponse(finalResp)
 	ccResp := apicompat.ResponsesToChatCompletions(responsesResp, originalModel)

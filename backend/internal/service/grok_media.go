@@ -734,7 +734,6 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	defer finishControlledNonstreamResponse(resp, &retErr)
 
 	requestIDHeader := firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id"))
 	requestModel := requestInfo.Model
@@ -755,15 +754,6 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 				ResponseBody:    respBody,
 				ResponseHeaders: resp.Header.Clone(),
 			}
-		}
-	}
-	if endpoint.IsGenerationRequest() {
-		protocol := "grok_video_create"
-		if endpoint == GrokMediaEndpointImagesGenerations || endpoint == GrokMediaEndpointImagesEdits {
-			protocol = "grok_images"
-		}
-		if err := validateControlledNonstreamResponse(resp, respBody, protocol); err != nil {
-			return nil, err
 		}
 	}
 	if endpoint == GrokMediaEndpointVideoStatus {

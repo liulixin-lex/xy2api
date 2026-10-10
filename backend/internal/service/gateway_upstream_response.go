@@ -107,9 +107,6 @@ func sseEventIndex(event map[string]any) (int, bool) {
 // 的 400 不是签名缺失问题，retry 任何 thinking 变形都会破坏「原样回传」契约——直接透传
 // 错误给客户端。详见 thinking_protocol.go。
 func (s *GatewayService) shouldRectifySignatureError(ctx context.Context, account *Account, respBody []byte, mappedModel string) bool {
-	if ControlledSchedulingEnabled(ctx) {
-		return false
-	}
 	if !ShouldRectifyThinkingSignatureError(mappedModel) {
 		return false
 	}
@@ -1393,17 +1390,13 @@ func (s *GatewayService) resolveCacheTTLUsageOverrideTarget(ctx context.Context,
 	return "", false
 }
 
-func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (_ *ClaudeUsage, retErr error) {
-	defer finishControlledNonstreamResponse(resp, &retErr)
+func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (*ClaudeUsage, error) {
 	// 更新5h窗口状态
 	s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
 
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, anthropicTooLargeError)
 	if err != nil {
 		return nil, nonstreamReadError(ctx, resp, err)
-	}
-	if err := validateControlledNonstreamResponse(resp, body, "messages"); err != nil {
-		return nil, err
 	}
 
 	observer := upstreamResponseModelObserverFromContext(c)

@@ -1928,7 +1928,7 @@ func TestOpenAIGatewayService_OpenAIPassthrough_CompactNetworkErrorsTriggerFailo
 		resp           *http.Response
 		err            error
 		expectFailover bool
-		owner          bool
+		replayUnsafe   bool
 	}{
 		{
 			name:           "request_error",
@@ -1946,13 +1946,14 @@ func TestOpenAIGatewayService_OpenAIPassthrough_CompactNetworkErrorsTriggerFailo
 			expectFailover: true,
 		},
 		{
-			name: "read_error_owned",
+			name: "read_error_replay_unsafe",
 			resp: &http.Response{
 				StatusCode: http.StatusOK,
 				Header:     http.Header{"Content-Type": []string{"application/json"}},
 				Body:       passthroughErrReadCloser{err: io.ErrUnexpectedEOF},
 			},
-			owner: true,
+			// Provider-executed tools may have run upstream; never replay them.
+			replayUnsafe: true,
 		},
 	}
 
@@ -1963,9 +1964,8 @@ func TestOpenAIGatewayService_OpenAIPassthrough_CompactNetworkErrorsTriggerFailo
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader(nil))
 			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 			ctx := context.Background()
-			if tt.owner {
-				ctx = NewControlledRequestContext(ctx, "responses")
-				controlledRequest(ctx).owner = true
+			if tt.replayUnsafe {
+				ctx = WithRequestReplaySafety(ctx, []byte(`{"tools":[{"type":"web_search"}]}`), false)
 			}
 			c.Request = c.Request.WithContext(ctx)
 

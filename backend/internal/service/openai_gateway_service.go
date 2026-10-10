@@ -233,9 +233,8 @@ type OpenAIUsage struct {
 
 // OpenAIForwardResult represents the result of forwarding
 type OpenAIForwardResult struct {
-	SchedulingAttemptID string `json:"-"`
-	RequestID           string
-	ResponseID          string
+	RequestID  string
+	ResponseID string
 	// UpstreamHeaders 是直接上游的响应头，用于按账户配置解析上游请求标识。
 	UpstreamHeaders http.Header
 	Usage           OpenAIUsage
@@ -443,7 +442,6 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
-	controlledScheduling  *ControlledSchedulingService
 	openaiQualityStates   sync.Map // scoped digest -> *openAIQualityLocal
 	openaiQualityWrites   atomic.Uint64
 	accountRepo           AccountRepository
@@ -532,6 +530,8 @@ type OpenAIGatewayService struct {
 	openaiCodexTicketContext     context.Context
 	openaiCodexTicketDone        chan struct{}
 	openaiCodexTicketStopped     bool
+	// shareScheduling 由 ProvideShareSchedulingService 注入；nil 时保持原版调度。
+	shareScheduling *ShareSchedulingService
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
@@ -716,7 +716,6 @@ func (s *OpenAIGatewayService) billingDeps() *billingDeps {
 		deferredService:       s.deferredService,
 		balanceNotifyService:  s.balanceNotifyService,
 		userPlatformQuotaRepo: s.userPlatformQuotaRepo,
-		controlledScheduling:  s.controlledScheduling,
 		cfg:                   s.cfg,
 	}
 }

@@ -205,8 +205,24 @@ func qualityDigest(value string) string {
 	return hex.EncodeToString(h[:])
 }
 
+type openAIQualityRoutingKey struct{}
+
+// withOpenAIQualityRouting opts a request into session quality routing. The
+// original Sub2API scheduler never does, so quality routing stays inert until a
+// scheduler opts in explicitly.
+func withOpenAIQualityRouting(ctx context.Context) context.Context {
+	return context.WithValue(ctx, openAIQualityRoutingKey{}, true)
+}
+
+// openAIQualityRoutingActive reports whether session quality routing may act on
+// a request.
+func openAIQualityRoutingActive(ctx context.Context) bool {
+	active, _ := ctx.Value(openAIQualityRoutingKey{}).(bool)
+	return active
+}
+
 func qualityRequest(ctx context.Context) *openAIQualityRequest {
-	if ctx == nil || Sub2APISchedulingEnabled(ctx) {
+	if ctx == nil || !openAIQualityRoutingActive(ctx) {
 		return nil
 	}
 	q, _ := ctx.Value(openAIQualityContextKey{}).(*openAIQualityRequest)
@@ -215,7 +231,7 @@ func qualityRequest(ctx context.Context) *openAIQualityRequest {
 
 func CopyOpenAIQualityRoutingContext(ctx, source context.Context) context.Context {
 	if q := qualityRequest(source); q != nil {
-		return context.WithValue(ctx, openAIQualityContextKey{}, q)
+		return context.WithValue(withOpenAIQualityRouting(ctx), openAIQualityContextKey{}, q)
 	}
 	return ctx
 }
@@ -320,7 +336,7 @@ func rememberOpenAIQualityWSTurn(ctx context.Context, body []byte, response stri
 // AttachOpenAIQualityRouting is called after the final local session identity
 // is resolved. It never changes that identity or the incoming request bytes.
 func (s *OpenAIGatewayService) AttachOpenAIQualityRouting(c *gin.Context, session string, body []byte) {
-	if s == nil || c == nil || c.Request == nil || session == "" || s.qualityConfig().EffectiveMode() == "off" || Sub2APISchedulingEnabled(c.Request.Context()) || isGrokRequestContext(c) {
+	if s == nil || c == nil || c.Request == nil || session == "" || s.qualityConfig().EffectiveMode() == "off" || !openAIQualityRoutingActive(c.Request.Context()) || isGrokRequestContext(c) {
 		return
 	}
 	apiID := getAPIKeyIDFromContext(c)

@@ -106,9 +106,6 @@ type smartRetryResult struct {
 // handleSmartRetry 处理 OAuth 账号的智能重试逻辑
 // 将 429/503 限流处理逻辑抽取为独立函数，减少 antigravityRetryLoop 的复杂度
 func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParams, resp *http.Response, respBody []byte, baseURL string, urlIdx int, availableURLs []string) *smartRetryResult {
-	if ControlledSchedulingEnabled(p.ctx) {
-		return &smartRetryResult{action: smartRetryActionContinue}
-	}
 	// "Resource has been exhausted" 是 URL 级别限流，切换 URL（仅 429）
 	if resp.StatusCode == http.StatusTooManyRequests && isURLLevelRateLimit(respBody) && urlIdx < len(availableURLs)-1 {
 		logger.LegacyPrintf("service.antigravity_gateway", "%s URL fallback (429): %s -> %s", p.prefix, baseURL, availableURLs[urlIdx+1])
@@ -469,9 +466,6 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 // antigravityRetryLoop 执行带 URL fallback 的重试循环
 func (s *AntigravityGatewayService) antigravityRetryLoop(p antigravityRetryLoopParams) (*antigravityRetryLoopResult, error) {
 	maxAttempts := antigravityMaxRetries
-	if ControlledSchedulingEnabled(p.ctx) {
-		maxAttempts = 1
-	}
 	// 预检查：模型限流 + overages 启用 + 积分未耗尽 → 直接注入 AI Credits
 	overagesInjected := false
 	if p.requestedModel != "" && p.account.Platform == PlatformAntigravity &&
@@ -579,9 +573,6 @@ urlFallbackLoop:
 				}
 				logger.LegacyPrintf("service.antigravity_gateway", "%s status=request_failed retries_exhausted error=%v", p.prefix, err)
 				setOpsUpstreamError(p.c, 0, safeErr, "")
-				if ControlledSchedulingEnabled(p.ctx) {
-					return nil, controlledSchedulingTransportFailure(p.ctx, err)
-				}
 				return nil, fmt.Errorf("upstream request failed after retries: %w", err)
 			}
 
@@ -700,7 +691,7 @@ urlFallbackLoop:
 				}
 
 				// INTERNAL 500 渐进惩罚：3 次重试全部命中特定 500 时递增计数器并惩罚
-				if !ControlledSchedulingEnabled(p.ctx) && allAttemptsInternal500 && isAntigravityInternalServerError(resp.StatusCode, respBody) {
+				if allAttemptsInternal500 && isAntigravityInternalServerError(resp.StatusCode, respBody) {
 					s.handleInternal500RetryExhausted(p.ctx, p.prefix, p.account)
 				}
 
@@ -723,7 +714,7 @@ urlFallbackLoop:
 	}
 
 	// 成功响应时清零 INTERNAL 500 连续失败计数器（覆盖所有成功路径，含 smart retry）
-	if !ControlledSchedulingEnabled(p.ctx) && resp != nil && resp.StatusCode < 400 {
+	if resp != nil && resp.StatusCode < 400 {
 		s.resetInternal500Counter(p.ctx, p.prefix, p.account.ID)
 	}
 
@@ -830,9 +821,6 @@ const emptyResponseCooldown = 1 * time.Minute
 // tempUnscheduleEmptyResponse 对空流式响应触发临时封禁，
 // 避免短时间内反复调度到同一个返回空响应的账号。
 func tempUnscheduleEmptyResponse(ctx context.Context, repo AccountRepository, accountID int64, logPrefix string) {
-	if ControlledSchedulingEnabled(ctx) {
-		return
-	}
 	until := time.Now().Add(emptyResponseCooldown)
 	reason := "empty stream response (auto temp-unschedule 1m)"
 	if err := repo.SetTempUnschedulable(ctx, accountID, until, reason); err != nil {

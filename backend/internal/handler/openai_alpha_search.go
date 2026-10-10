@@ -206,9 +206,6 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			return
 		}
 
-		if handleControlledSchedulingStop(c, err) {
-			return
-		}
 		var failoverErr *service.UpstreamFailoverError
 		if !errors.As(err, &failoverErr) {
 			h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestedModel, false, result), false, nil, err)
@@ -235,9 +232,9 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			)
 			return
 		}
-		if failoverErr.RetryableOnSameAccount && !service.ControlledSchedulingEnabled(c.Request.Context()) {
+		if failoverErr.RetryableOnSameAccount {
 			retryLimit := account.GetPoolModeRetryCount()
-			if sameAccountRetryAllowedWithContext(c.Request.Context(), failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
+			if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
 				sameAccountRetryCount[account.ID]++
 				retryDelay := sameAccountRetryDelayFor(failoverErr, sameAccountRetryCount[account.ID])
 				reqLog.Warn("openai_alpha_search.same_account_retry",
@@ -258,12 +255,12 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		h.gatewayService.RecordOpenAIAccountSwitch()
 		failedAccountIDs[account.ID] = struct{}{}
 		lastFailoverErr = failoverErr
-		if controlledAccountSwitchExhausted(c, switchCount, h.maxAccountSwitches) {
+		if switchCount >= h.maxAccountSwitches {
 			h.handleFailoverExhausted(c, failoverErr, false)
 			return
 		}
 		switchCount++
-		if !service.ControlledSchedulingEnabled(c.Request.Context()) && h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
+		if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
 			h.handleFailoverExhausted(c, failoverErr, false)
 			return
 		}

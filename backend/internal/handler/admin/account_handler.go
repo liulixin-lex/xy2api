@@ -30,7 +30,6 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/timezone"
 	"github.com/liulixin-lex/xy2api/internal/pkg/typesafe"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
-	"github.com/liulixin-lex/xy2api/internal/scheduling"
 	"github.com/liulixin-lex/xy2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -51,7 +50,6 @@ func NewOAuthHandler(oauthService *service.OAuthService) *OAuthHandler {
 
 // AccountHandler handles admin account management
 type AccountHandler struct {
-	schedulingController    scheduling.SchedulingAdminStore
 	claudeResetCredits      claudeResetReader
 	adminService            service.AdminService
 	oauthService            *service.OAuthService
