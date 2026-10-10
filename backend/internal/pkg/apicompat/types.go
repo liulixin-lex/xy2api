@@ -7,6 +7,9 @@ package apicompat
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
+
+	"github.com/tidwall/gjson"
 )
 
 // ---------------------------------------------------------------------------
@@ -227,24 +230,26 @@ type AnthropicDelta struct {
 
 // ResponsesRequest is the request body for POST /v1/responses.
 type ResponsesRequest struct {
-	PromptCacheOptions json.RawMessage     `json:"prompt_cache_options,omitempty"`
-	Model              string              `json:"model"`
-	Instructions       string              `json:"instructions,omitempty"`
-	Input              json.RawMessage     `json:"input"` // string or []ResponsesInputItem
-	MaxOutputTokens    *int                `json:"max_output_tokens,omitempty"`
-	Temperature        *float64            `json:"temperature,omitempty"`
-	TopP               *float64            `json:"top_p,omitempty"`
-	Stream             bool                `json:"stream,omitempty"`
-	Tools              []ResponsesTool     `json:"tools,omitempty"`
-	Include            []string            `json:"include,omitempty"`
-	Store              *bool               `json:"store,omitempty"`
-	ParallelToolCalls  *bool               `json:"parallel_tool_calls,omitempty"`
-	Reasoning          *ResponsesReasoning `json:"reasoning,omitempty"`
-	Text               *ResponsesText      `json:"text,omitempty"`
-	ToolChoice         json.RawMessage     `json:"tool_choice,omitempty"`
-	ServiceTier        string              `json:"service_tier,omitempty"`
-	PromptCacheKey     string              `json:"prompt_cache_key,omitempty"`
-	PreviousResponseID string              `json:"previous_response_id,omitempty"`
+	PromptCacheRetention string              `json:"prompt_cache_retention,omitempty"`
+	SafetyIdentifier     string              `json:"safety_identifier,omitempty"`
+	PromptCacheOptions   json.RawMessage     `json:"prompt_cache_options,omitempty"`
+	Model                string              `json:"model"`
+	Instructions         string              `json:"instructions,omitempty"`
+	Input                json.RawMessage     `json:"input"` // string or []ResponsesInputItem
+	MaxOutputTokens      *int                `json:"max_output_tokens,omitempty"`
+	Temperature          *float64            `json:"temperature,omitempty"`
+	TopP                 *float64            `json:"top_p,omitempty"`
+	Stream               bool                `json:"stream,omitempty"`
+	Tools                []ResponsesTool     `json:"tools,omitempty"`
+	Include              []string            `json:"include,omitempty"`
+	Store                *bool               `json:"store,omitempty"`
+	ParallelToolCalls    *bool               `json:"parallel_tool_calls,omitempty"`
+	Reasoning            *ResponsesReasoning `json:"reasoning,omitempty"`
+	Text                 *ResponsesText      `json:"text,omitempty"`
+	ToolChoice           json.RawMessage     `json:"tool_choice,omitempty"`
+	ServiceTier          string              `json:"service_tier,omitempty"`
+	PromptCacheKey       string              `json:"prompt_cache_key,omitempty"`
+	PreviousResponseID   string              `json:"previous_response_id,omitempty"`
 }
 
 // ResponsesReasoning configures reasoning effort in the Responses API.
@@ -361,8 +366,9 @@ func (t *ResponsesTool) UnmarshalJSON(data []byte) error {
 
 // ResponsesResponse is the non-streaming response from POST /v1/responses.
 type ResponsesResponse struct {
-	ID     string `json:"id"`
-	Object string `json:"object"` // "response"
+	PromptCacheDiagnostics json.RawMessage `json:"prompt_cache_diagnostics,omitempty"`
+	ID                     string          `json:"id"`
+	Object                 string          `json:"object"` // "response"
 	// CreatedAt is the unix creation timestamp. Strict Responses clients declare
 	// it non-optional and abort with `missing field 'created_at'` when it is
 	// absent, so it is always emitted — no omitempty. Same rule as ID (see the
@@ -506,10 +512,12 @@ type ResponsesSummary struct {
 
 // ResponsesUsage holds token counts in Responses API format.
 type ResponsesUsage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	TotalTokens              int `json:"total_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadSource          string `json:"-"`
+	CacheWriteSource         string `json:"-"`
+	InputTokens              int    `json:"input_tokens"`
+	OutputTokens             int    `json:"output_tokens"`
+	TotalTokens              int    `json:"total_tokens"`
+	CacheCreationInputTokens int    `json:"cache_creation_input_tokens,omitempty"`
 
 	// Optional detailed breakdown
 	InputTokensDetails  *ResponsesInputTokensDetails  `json:"input_tokens_details,omitempty"`
@@ -518,68 +526,40 @@ type ResponsesUsage struct {
 
 func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 	type responsesUsageAlias ResponsesUsage
-	type cacheTokenPresence struct {
-		CacheCreationTokens *int `json:"cache_creation_tokens"`
-		CacheWriteTokens    *int `json:"cache_write_tokens"`
-	}
 	var aux struct {
 		responsesUsageAlias
-		PromptTokens            int                           `json:"prompt_tokens"`
-		CompletionTokens        int                           `json:"completion_tokens"`
-		CacheCreationTokens     int                           `json:"cache_creation_tokens"`
-		CacheWriteInputTokens   int                           `json:"cache_write_input_tokens"`
-		CacheWriteTokens        int                           `json:"cache_write_tokens"`
 		PromptTokensDetails     *ResponsesInputTokensDetails  `json:"prompt_tokens_details,omitempty"`
 		CompletionTokensDetails *ResponsesOutputTokensDetails `json:"completion_tokens_details,omitempty"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
-	var nestedPresence struct {
-		InputTokensDetails  *cacheTokenPresence `json:"input_tokens_details"`
-		PromptTokensDetails *cacheTokenPresence `json:"prompt_tokens_details"`
-	}
-	if err := json.Unmarshal(data, &nestedPresence); err != nil {
-		return err
-	}
 	*u = ResponsesUsage(aux.responsesUsageAlias)
-	if u.InputTokens == 0 && aux.PromptTokens != 0 {
-		u.InputTokens = aux.PromptTokens
-	}
-	if u.OutputTokens == 0 && aux.CompletionTokens != 0 {
-		u.OutputTokens = aux.CompletionTokens
-	}
-	if u.CacheCreationInputTokens == 0 {
-		switch {
-		case aux.CacheWriteInputTokens > 0:
-			u.CacheCreationInputTokens = aux.CacheWriteInputTokens
-		case aux.CacheCreationTokens > 0:
-			u.CacheCreationInputTokens = aux.CacheCreationTokens
-		case aux.CacheWriteTokens > 0:
-			u.CacheCreationInputTokens = aux.CacheWriteTokens
-		}
-	}
 	if u.InputTokensDetails == nil && aux.PromptTokensDetails != nil {
 		u.InputTokensDetails = aux.PromptTokensDetails
 	}
 	if u.OutputTokensDetails == nil && aux.CompletionTokensDetails != nil {
 		u.OutputTokensDetails = aux.CompletionTokensDetails
 	}
-	var canonicalCacheCreationTokens *int
-	switch {
-	case nestedPresence.InputTokensDetails != nil && nestedPresence.InputTokensDetails.CacheWriteTokens != nil:
-		canonicalCacheCreationTokens = nestedPresence.InputTokensDetails.CacheWriteTokens
-	case nestedPresence.PromptTokensDetails != nil && nestedPresence.PromptTokensDetails.CacheWriteTokens != nil:
-		canonicalCacheCreationTokens = nestedPresence.PromptTokensDetails.CacheWriteTokens
-	case nestedPresence.InputTokensDetails != nil && nestedPresence.InputTokensDetails.CacheCreationTokens != nil:
-		canonicalCacheCreationTokens = nestedPresence.InputTokensDetails.CacheCreationTokens
-	case nestedPresence.PromptTokensDetails != nil && nestedPresence.PromptTokensDetails.CacheCreationTokens != nil:
-		canonicalCacheCreationTokens = nestedPresence.PromptTokensDetails.CacheCreationTokens
+	counts := ParseOpenAIUsageCounts(gjson.ParseBytes(data))
+	u.InputTokens, u.OutputTokens = counts.InputTokens, counts.OutputTokens
+	u.CacheCreationInputTokens = counts.CacheWriteTokens
+	u.CacheReadSource, u.CacheWriteSource = counts.CacheReadSource, counts.CacheWriteSource
+	if u.InputTokensDetails == nil && (counts.CacheReadSource != "" || (counts.CacheWriteSource != "" && counts.CacheWriteSource != "cache_creation_input_tokens")) {
+		u.InputTokensDetails = &ResponsesInputTokensDetails{}
 	}
-	if canonicalCacheCreationTokens != nil {
-		u.CacheCreationInputTokens = max(*canonicalCacheCreationTokens, 0)
+	if u.InputTokensDetails != nil {
+		u.InputTokensDetails.CacheCreationTokens = 0
+		u.InputTokensDetails.CacheWriteTokens = counts.CacheWriteTokens
+		if strings.Contains(counts.CacheWriteSource, "cache_creation") {
+			u.InputTokensDetails.CacheCreationTokens = counts.CacheWriteTokens
+			u.InputTokensDetails.CacheWriteTokens = 0
+		}
 	}
-	if u.TotalTokens == 0 && (u.InputTokens != 0 || u.OutputTokens != 0) {
+	if counts.CacheReadSource != "" {
+		u.InputTokensDetails.CachedTokens = counts.CacheReadTokens
+	}
+	if u.TotalTokens == 0 {
 		u.TotalTokens = u.InputTokens + u.OutputTokens
 	}
 	return nil
@@ -587,7 +567,7 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 
 // ResponsesInputTokensDetails breaks down input token usage.
 type ResponsesInputTokensDetails struct {
-	CachedTokens        int `json:"cached_tokens,omitempty"`
+	CachedTokens        int `json:"cached_tokens"`
 	AudioTokens         int `json:"audio_tokens,omitempty"`
 	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
 	CacheWriteTokens    int `json:"cache_write_tokens,omitempty"`
@@ -658,23 +638,26 @@ type ResponsesStreamEvent struct {
 
 // ChatCompletionsRequest is the request body for POST /v1/chat/completions.
 type ChatCompletionsRequest struct {
-	PromptCacheOptions  json.RawMessage    `json:"prompt_cache_options,omitempty"`
-	Model               string             `json:"model"`
-	Messages            []ChatMessage      `json:"messages"`
-	Instructions        string             `json:"instructions,omitempty"` // OpenAI Responses API compat
-	MaxTokens           *int               `json:"max_tokens,omitempty"`
-	MaxCompletionTokens *int               `json:"max_completion_tokens,omitempty"`
-	Temperature         *float64           `json:"temperature,omitempty"`
-	TopP                *float64           `json:"top_p,omitempty"`
-	Stream              bool               `json:"stream,omitempty"`
-	StreamOptions       *ChatStreamOptions `json:"stream_options,omitempty"`
-	Tools               []ChatTool         `json:"tools,omitempty"`
-	ParallelToolCalls   *bool              `json:"parallel_tool_calls,omitempty"`
-	ToolChoice          json.RawMessage    `json:"tool_choice,omitempty"`
-	ReasoningEffort     string             `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high" | "xhigh"
-	ServiceTier         string             `json:"service_tier,omitempty"`
-	Stop                json.RawMessage    `json:"stop,omitempty"` // string or []string
-	ResponseFormat      json.RawMessage    `json:"response_format,omitempty"`
+	PromptCacheKey       string             `json:"prompt_cache_key,omitempty"`
+	PromptCacheRetention string             `json:"prompt_cache_retention,omitempty"`
+	SafetyIdentifier     string             `json:"safety_identifier,omitempty"`
+	PromptCacheOptions   json.RawMessage    `json:"prompt_cache_options,omitempty"`
+	Model                string             `json:"model"`
+	Messages             []ChatMessage      `json:"messages"`
+	Instructions         string             `json:"instructions,omitempty"` // OpenAI Responses API compat
+	MaxTokens            *int               `json:"max_tokens,omitempty"`
+	MaxCompletionTokens  *int               `json:"max_completion_tokens,omitempty"`
+	Temperature          *float64           `json:"temperature,omitempty"`
+	TopP                 *float64           `json:"top_p,omitempty"`
+	Stream               bool               `json:"stream,omitempty"`
+	StreamOptions        *ChatStreamOptions `json:"stream_options,omitempty"`
+	Tools                []ChatTool         `json:"tools,omitempty"`
+	ParallelToolCalls    *bool              `json:"parallel_tool_calls,omitempty"`
+	ToolChoice           json.RawMessage    `json:"tool_choice,omitempty"`
+	ReasoningEffort      string             `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high" | "xhigh"
+	ServiceTier          string             `json:"service_tier,omitempty"`
+	Stop                 json.RawMessage    `json:"stop,omitempty"` // string or []string
+	ResponseFormat       json.RawMessage    `json:"response_format,omitempty"`
 
 	// Legacy function calling (deprecated but still supported)
 	Functions    []ChatFunction  `json:"functions,omitempty"`
@@ -763,14 +746,15 @@ type ChatFunctionCall struct {
 
 // ChatCompletionsResponse is the non-streaming response from POST /v1/chat/completions.
 type ChatCompletionsResponse struct {
-	ID                string       `json:"id"`
-	Object            string       `json:"object"` // "chat.completion"
-	Created           int64        `json:"created"`
-	Model             string       `json:"model"`
-	Choices           []ChatChoice `json:"choices"`
-	Usage             *ChatUsage   `json:"usage,omitempty"`
-	SystemFingerprint string       `json:"system_fingerprint,omitempty"`
-	ServiceTier       string       `json:"service_tier,omitempty"`
+	PromptCacheDiagnostics json.RawMessage `json:"prompt_cache_diagnostics,omitempty"`
+	ID                     string          `json:"id"`
+	Object                 string          `json:"object"` // "chat.completion"
+	Created                int64           `json:"created"`
+	Model                  string          `json:"model"`
+	Choices                []ChatChoice    `json:"choices"`
+	Usage                  *ChatUsage      `json:"usage,omitempty"`
+	SystemFingerprint      string          `json:"system_fingerprint,omitempty"`
+	ServiceTier            string          `json:"service_tier,omitempty"`
 }
 
 // ChatChoice is a single completion choice.
@@ -789,6 +773,34 @@ type ChatUsage struct {
 	CompletionTokensDetails *ChatTokenDetails `json:"completion_tokens_details,omitempty"`
 }
 
+func (u *ChatUsage) UnmarshalJSON(data []byte) error {
+	type alias ChatUsage
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*u = ChatUsage(decoded)
+	counts := ParseOpenAIUsageCounts(gjson.ParseBytes(data))
+	u.PromptTokens, u.CompletionTokens = counts.InputTokens, counts.OutputTokens
+	if counts.CacheReadSource != "" || counts.CacheWriteSource != "" {
+		if u.PromptTokensDetails == nil {
+			u.PromptTokensDetails = &ChatTokenDetails{}
+		}
+		u.PromptTokensDetails.CachedTokens = counts.CacheReadTokens
+		u.PromptTokensDetails.CacheWriteTokens = counts.CacheWriteTokens
+		u.PromptTokensDetails.CacheCreationTokens = 0
+		if strings.Contains(counts.CacheWriteSource, "cache_creation") {
+			u.PromptTokensDetails.CacheCreationTokens = counts.CacheWriteTokens
+			u.PromptTokensDetails.CacheWriteTokens = 0
+		}
+		u.PromptTokensDetails.CachedTokensPresent = counts.CacheReadSource != ""
+	}
+	if u.TotalTokens == 0 {
+		u.TotalTokens = u.PromptTokens + u.CompletionTokens
+	}
+	return nil
+}
+
 // ChatTokenDetails provides a breakdown of token usage. The same type is
 // reused for both prompt_tokens_details and completion_tokens_details;
 // unset fields are omitted so each side only emits the fields that apply.
@@ -798,25 +810,38 @@ type ChatUsage struct {
 //   - completion_tokens_details: reasoning_tokens, audio_tokens,
 //     accepted_prediction_tokens, rejected_prediction_tokens
 type ChatTokenDetails struct {
-	CachedTokens             int `json:"cached_tokens,omitempty"`
-	AudioTokens              int `json:"audio_tokens,omitempty"`
-	CacheCreationTokens      int `json:"cache_creation_tokens,omitempty"`
-	CacheWriteTokens         int `json:"cache_write_tokens,omitempty"`
-	ReasoningTokens          int `json:"reasoning_tokens,omitempty"`
-	AcceptedPredictionTokens int `json:"accepted_prediction_tokens,omitempty"`
-	RejectedPredictionTokens int `json:"rejected_prediction_tokens,omitempty"`
+	CachedTokensPresent      bool `json:"-"`
+	CachedTokens             int  `json:"cached_tokens,omitempty"`
+	AudioTokens              int  `json:"audio_tokens,omitempty"`
+	CacheCreationTokens      int  `json:"cache_creation_tokens,omitempty"`
+	CacheWriteTokens         int  `json:"cache_write_tokens,omitempty"`
+	ReasoningTokens          int  `json:"reasoning_tokens,omitempty"`
+	AcceptedPredictionTokens int  `json:"accepted_prediction_tokens,omitempty"`
+	RejectedPredictionTokens int  `json:"rejected_prediction_tokens,omitempty"`
+}
+
+func (d ChatTokenDetails) MarshalJSON() ([]byte, error) {
+	type alias ChatTokenDetails
+	if !d.CachedTokensPresent {
+		return json.Marshal(alias(d))
+	}
+	return json.Marshal(struct {
+		alias
+		CachedTokens int `json:"cached_tokens"`
+	}{alias(d), d.CachedTokens})
 }
 
 // ChatCompletionsChunk is a single streaming chunk from POST /v1/chat/completions.
 type ChatCompletionsChunk struct {
-	ID                string            `json:"id"`
-	Object            string            `json:"object"` // "chat.completion.chunk"
-	Created           int64             `json:"created"`
-	Model             string            `json:"model"`
-	Choices           []ChatChunkChoice `json:"choices"`
-	Usage             *ChatUsage        `json:"usage,omitempty"`
-	SystemFingerprint string            `json:"system_fingerprint,omitempty"`
-	ServiceTier       string            `json:"service_tier,omitempty"`
+	PromptCacheDiagnostics json.RawMessage   `json:"prompt_cache_diagnostics,omitempty"`
+	ID                     string            `json:"id"`
+	Object                 string            `json:"object"` // "chat.completion.chunk"
+	Created                int64             `json:"created"`
+	Model                  string            `json:"model"`
+	Choices                []ChatChunkChoice `json:"choices"`
+	Usage                  *ChatUsage        `json:"usage,omitempty"`
+	SystemFingerprint      string            `json:"system_fingerprint,omitempty"`
+	ServiceTier            string            `json:"service_tier,omitempty"`
 }
 
 // ChatChunkChoice is a single choice in a streaming chunk.

@@ -210,6 +210,9 @@ func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any
 	}
 
 	delete(payload, "background")
+	for _, field := range openAIUnsupportedCacheFields(account, "") {
+		delete(payload, field)
+	}
 	if _, exists := payload["stream"]; !exists {
 		payload["stream"] = true
 	}

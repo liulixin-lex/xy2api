@@ -159,6 +159,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if result == nil {
 		return errors.New("openai usage result is nil")
 	}
+	s.observeCacheUsage(result, input.Account, time.Now())
 	if s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
 		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)
 	}
@@ -471,6 +472,12 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	// 添加 SessionID（客户端显式会话标识；缺失/无效时保持 nil）
 	usageLog.SessionID = optionalTrimmedStringPtr(input.SessionID)
+	if usageLog.SessionID == nil {
+		usageLog.SessionID = optionalTrimmedStringPtr(result.RoutingSessionID)
+	}
+	if usageLog.SessionID == nil && result.CacheDiagnostic != nil {
+		usageLog.SessionID = optionalTrimmedStringPtr(result.CacheDiagnostic.Session)
+	}
 
 	if apiKey.GroupID != nil {
 		usageLog.GroupID = apiKey.GroupID
@@ -493,6 +500,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
 		writeUsageLogAfterBilling(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 		logger.LegacyPrintf("service.openai_gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
+		s.logCacheSettlement(result, usageLog)
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
 		return nil
 	}
@@ -523,6 +531,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		return billingErr
 	}
 	writeUsageLogAfterBilling(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+	s.logCacheSettlement(result, usageLog)
 
 	return nil
 }

@@ -388,12 +388,42 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		req.RequirePrivacySet = true
 	}
 	start := time.Now()
-	// 命名返回值保证 defer 写入的耗时同时返回给调用方。
 	defer func() {
 		decision.LatencyMs = time.Since(start).Milliseconds()
-		s.metrics.recordSelect(decision)
+		if ctx.Value(openAIStickyReconciledKey{}) == nil {
+			s.metrics.recordSelect(decision)
+		}
 	}()
-
+	if s != nil && s.service != nil && req.PreviousResponseID == "" && openAIAtomicStickySession(req.SessionHash) && NormalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI && !req.PreserveStickyBinding && !req.StickyWeighted && !gatewayProfitControlGateActive(ctx) && !s.service.qualityOwnsSticky(ctx, req.GroupID, req.SessionHash) && ctx.Value(openAIStickyReconciledKey{}) == nil {
+		if cache, atomic := s.service.cache.(OpenAIStickyAtomicCache); atomic {
+			initialOwner, _ := s.service.getStickySessionAccountID(ctx, req.GroupID, req.SessionHash)
+			defer func() {
+				if err != nil || selection == nil || selection.Account == nil {
+					return
+				}
+				owner := initialOwner
+				var readErr error
+				if initialOwner > 0 {
+					owner, readErr = s.service.getStickySessionAccountID(ctx, req.GroupID, req.SessionHash)
+				}
+				if initialOwner == 0 {
+					owner, readErr = cache.ClaimSessionAccountID(ctx, derefGroupID(req.GroupID), s.service.openAISessionCacheKey(req.SessionHash), selection.Account.ID, 30*time.Second, false)
+				}
+				if readErr != nil || owner <= 0 || owner == selection.Account.ID {
+					return
+				}
+				if initialOwner > 0 {
+					selection.StickyCapacitySpillover = true
+					return
+				}
+				if selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
+				req.StickyAccountID = owner
+				selection, decision, err = s.Select(context.WithValue(ctx, openAIStickyReconciledKey{}, owner), req)
+			}()
+		}
+	}
 	previousResponseID := strings.TrimSpace(req.PreviousResponseID)
 	if previousResponseID != "" && NormalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI &&
 		(!req.StickyWeighted || !req.PreviousResponseCanMove) {
@@ -505,7 +535,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	accountID := req.StickyAccountID
 	clearBinding := func() {
 		if !req.PreserveStickyBinding {
-			_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+			_ = s.service.deleteStickySessionAccountIDIfOwner(ctx, req.GroupID, sessionHash, accountID)
 		}
 	}
 	if accountID <= 0 {
@@ -578,7 +608,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	}
 	if acquireErr == nil && result != nil && result.Acquired {
 		if !req.PreserveStickyBinding {
-			_ = s.service.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.service.openAIWSSessionStickyTTL())
+			_ = s.service.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.service.openAIWSSessionStickyTTL(), accountID)
 		}
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 			Account:     account,
@@ -1049,6 +1079,9 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 	}
 
 	plan.selectionOrder = s.buildOpenAISelectionOrder(req, plan)
+	if req.PreviousResponseID == "" && req.StickyAccountID == 0 && req.StickyPreviousAccountID == 0 && !req.StickyWeighted {
+		s.service.preferCacheScoredCandidates(ctx, plan.selectionOrder, req.RequestedModel)
+	}
 	return plan
 }
 
@@ -1293,13 +1326,13 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 		account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if account == nil {
 			if accountID == req.StickyAccountID && strings.TrimSpace(req.SessionHash) != "" {
-				_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, req.SessionHash)
+				_ = s.service.deleteStickySessionAccountIDIfOwner(ctx, req.GroupID, req.SessionHash, accountID)
 			}
 			continue
 		}
 		if !s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) {
 			if accountID == req.StickyAccountID && strings.TrimSpace(req.SessionHash) != "" {
-				_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, req.SessionHash)
+				_ = s.service.deleteStickySessionAccountIDIfOwner(ctx, req.GroupID, req.SessionHash, accountID)
 			}
 			continue
 		}

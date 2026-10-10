@@ -134,7 +134,7 @@ jobs:
           cache-dependency-path: backend/go.sum
 
       - name: Verify Go version
-        run: go version | grep -q 'go1.27.0'
+        run: go version | grep -q 'go1.27.2'
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

@@ -274,6 +274,33 @@ func TestRelay_BasicRelayAndUsage(t *testing.T) {
 	require.JSONEq(t, `{"type":"response.completed","response":{"id":"resp_123","usage":{"input_tokens":7,"output_tokens":3,"input_tokens_details":{"cached_tokens":2}}}}`, string(clientWrites[0].payload))
 }
 
+func TestOpenAICacheWSUsageAliasesAndExplicitZero(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields, source string
+		read                 int
+	}{
+		{"alias", `"cache_read_input_tokens":1024`, "cache_read_input_tokens", 1024},
+		{"prompt", `"prompt_tokens_details":{"cached_tokens":1024}`, "prompt_tokens_details.cached_tokens", 1024},
+		{"zero", `"input_tokens_details":{"cached_tokens":0},"cache_read_tokens":1024`, "input_tokens_details.cached_tokens", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := &relayState{}
+			failed := false
+			usage := parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":2048,"output_tokens":2,"cache_write_tokens":100,`+tc.fields+`}}}`), "response.completed", func(string, string) { failed = true })
+			require.False(t, failed)
+			require.Equal(t, tc.read, usage.CacheReadInputTokens)
+			require.Equal(t, tc.source, usage.CacheReadSource)
+			require.Equal(t, 100, usage.CacheCreationInputTokens)
+			require.Equal(t, "cache_write_tokens", usage.CacheWriteSource)
+		})
+	}
+	state := &relayState{}
+	parseUsageAndAccumulate(state, []byte(`{"usage":{"input_tokens":2048,"output_tokens":1,"cache_read_tokens":1024}}`), "response.in_progress", nil)
+	parseUsageAndAccumulate(state, []byte(`{"usage":{"input_tokens":2048,"output_tokens":2,"input_tokens_details":{"cached_tokens":0}}}`), "response.in_progress", nil)
+	require.Zero(t, state.turnUsage.CacheReadInputTokens, "an explicit zero replaces earlier provisional cache usage")
+	require.Equal(t, "input_tokens_details.cached_tokens", state.turnUsage.CacheReadSource)
+}
+
 func TestRelay_FunctionCallOutputBytesPreserved(t *testing.T) {
 	t.Parallel()
 

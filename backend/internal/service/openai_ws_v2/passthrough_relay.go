@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/tidwall/gjson"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
 )
 
@@ -25,6 +27,8 @@ type FrameConn interface {
 }
 
 type Usage struct {
+	CacheReadSource          string
+	CacheWriteSource         string
 	InputTokens              int
 	OutputTokens             int
 	CacheCreationInputTokens int
@@ -1121,7 +1125,7 @@ func parseUsageAndAccumulate(
 	requireTotals := isTerminalEvent(strings.TrimSpace(eventType))
 	inputTokens, inputOK := parseUsageIntField(inputResult, requireTotals)
 	outputTokens, outputOK := parseUsageIntField(outputResult, requireTotals)
-	cachedTokens, cachedOK := parseUsageIntField(cachedResult, false)
+	_, cachedOK := parseUsageIntField(cachedResult, false)
 	if !inputOK || !outputOK || !cachedOK {
 		recordUsageParseFailure()
 		if onParseFailure != nil {
@@ -1140,12 +1144,15 @@ func parseUsageAndAccumulate(
 		))
 	}
 	parsedUsage := Usage{
-		InputTokens:              inputTokens,
-		OutputTokens:             outputTokens,
-		CacheCreationInputTokens: openAICacheCreationTokensFromUsage(usageResult),
-		CacheReadInputTokens:     cachedTokens,
-		ImageOutputTokens:        int(imageTokens),
+		InputTokens:       max(inputTokens, 0),
+		OutputTokens:      outputTokens,
+		ImageOutputTokens: int(imageTokens),
 	}
+	counts := apicompat.ParseOpenAIUsageCounts(usageResult)
+	parsedUsage.CacheCreationInputTokens = counts.CacheWriteTokens
+	parsedUsage.CacheReadInputTokens = counts.CacheReadTokens
+	parsedUsage.CacheReadSource = counts.CacheReadSource
+	parsedUsage.CacheWriteSource = counts.CacheWriteSource
 
 	if isTerminalEvent(strings.TrimSpace(eventType)) {
 		if relayUsageHasTokens(parsedUsage) || !relayUsageHasTokens(state.turnUsage) {
@@ -1174,11 +1181,13 @@ func mergeRelayUsageNonZero(dst *Usage, src Usage) {
 	if src.OutputTokens > 0 {
 		dst.OutputTokens = src.OutputTokens
 	}
-	if src.CacheCreationInputTokens > 0 {
+	if src.CacheWriteSource != "" || src.CacheCreationInputTokens > 0 {
 		dst.CacheCreationInputTokens = src.CacheCreationInputTokens
+		dst.CacheWriteSource = src.CacheWriteSource
 	}
-	if src.CacheReadInputTokens > 0 {
+	if src.CacheReadSource != "" || src.CacheReadInputTokens > 0 {
 		dst.CacheReadInputTokens = src.CacheReadInputTokens
+		dst.CacheReadSource = src.CacheReadSource
 	}
 	if src.ImageOutputTokens > 0 {
 		dst.ImageOutputTokens = src.ImageOutputTokens
@@ -1195,6 +1204,12 @@ func finalizeRelayTurnUsage(state *relayState) Usage {
 	state.usage.CacheCreationInputTokens += turnUsage.CacheCreationInputTokens
 	state.usage.CacheReadInputTokens += turnUsage.CacheReadInputTokens
 	state.usage.ImageOutputTokens += turnUsage.ImageOutputTokens
+	if turnUsage.CacheReadSource != "" {
+		state.usage.CacheReadSource = turnUsage.CacheReadSource
+	}
+	if turnUsage.CacheWriteSource != "" {
+		state.usage.CacheWriteSource = turnUsage.CacheWriteSource
+	}
 	state.turnUsage = Usage{}
 	return turnUsage
 }
@@ -1206,32 +1221,18 @@ func parseUsageIntField(value gjson.Result, required bool) (int, bool) {
 	if value.Type != gjson.Number {
 		return 0, false
 	}
-	return int(value.Int()), true
+	n := value.Float()
+	if math.IsNaN(n) || math.IsInf(n, 0) || n >= float64(math.MaxInt) || math.Trunc(n) != n {
+		return 0, false
+	}
+	if n <= 0 {
+		return 0, true
+	}
+	return int(n), true
 }
 
 func openAICacheCreationTokensFromUsage(value gjson.Result) int {
-	for _, field := range []string{
-		"input_tokens_details.cache_write_tokens",
-		"prompt_tokens_details.cache_write_tokens",
-		"input_tokens_details.cache_creation_tokens",
-		"prompt_tokens_details.cache_creation_tokens",
-	} {
-		result := value.Get(field)
-		if result.Exists() {
-			return max(int(result.Int()), 0)
-		}
-	}
-	for _, field := range []string{
-		"cache_write_tokens",
-		"cache_creation_input_tokens",
-		"cache_write_input_tokens",
-		"cache_creation_tokens",
-	} {
-		if tokens := int(value.Get(field).Int()); tokens > 0 {
-			return tokens
-		}
-	}
-	return 0
+	return apicompat.ParseOpenAIUsageCounts(value).CacheWriteTokens
 }
 
 func enrichResult(result *RelayResult, state *relayState, duration time.Duration) {

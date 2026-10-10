@@ -234,6 +234,7 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	account.ApplyHeaderOverrides(upstreamReq.Header)
 	applyOpenCodeSessionHeader(c, account, targetURL, upstreamReq.Header, body)
 	s.prepareQualityHTTP(ctx, c, account, upstreamReq, body)
+	s.captureCacheRequestDiagnostic(c, upstreamReq)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

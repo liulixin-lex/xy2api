@@ -52,6 +52,16 @@
 - 仿真（标准库、固定种子，exit 0）：HRW 5:3:2 份额误差 ≤0.1pp、账号退出精确最小迁移、改权重迁移 13.27%（理论 13.33%）；会话亲和下请求份额偏差均值 1.5%（纠偏 1.0%），重尾成本 8.3%（纠偏 6.1%）为物理边界。
 - 下一步：用户确认 proposal 中 D1–D7 后按 tasks 阶段 1（只删 controlled、回到原版）独立 PR 实施；阶段 2–4 再做份额调度。是否先同步上游 v0.2.15（今日发布，调度文件与 0.2.14 相同）待定。
 
+### GPT 缓存可靠性 0.2.6（2026-10-10，GitHub 正式发布完成）
+
+- 用户授权同步最新主线、新建分支、实施全站 GPT 缓存方案，完成验证后提交、推送、常规合并及 GitHub 发版。独立工作树 `/lex/xy2api-gpt-cache`；功能分支基于 `3569d4f00aae3eada079eb7ac058dc62256a66b8`，正式版本分支 `release/0.2.6` 基于功能合并提交 `3cf8406e5cfff94c488bfa58d0ba5b198e8ae1cf`；其他工作树未提交文件保持。
+- 统一 Responses、Chat/SSE、Messages 转换和 WebSocket 的真实 usage 别名及显式零优先级，保留 API Key 缓存选项和终态诊断。租户/分组/模型隔离的 `v2:` 会话身份、Redis 原子首次绑定及所有者保护、HTTP/WS 溢出准入保护已实现；保留利润门、质量门、权重及 previous_response_id 优先约束。
+- 新增有界进程内隐私诊断与同优先级、同负载候选的缓存偏好，两项均默认关闭，灰度比例为零。诊断只记录 HMAC 和数值，偏好仅训练有明确真实 usage 的可比续请求，不推算计费用量或增加付费模型调用。使用说明：[OpenAI 缓存可靠性](openai-cache-reliability.md)。
+- 最终后端 unit 62 包/23,646 主子测试 PASS（543 既有条件性跳过），integration 56 包/15,164 PASS（102 条件性跳过）；六包真实 PostgreSQL/Redis race 483 PASS，工作流三段守卫的 29 调度、15 缓存、11 跨路径必需用例均实际执行、零失败零跳过。最后测试类型断言修改后 Redis race 再验通过。前端 lint/typecheck、327 项 critical、生产构建和严格依赖审计通过；全仓 golangci-lint 0 issues/exit 0，嵌入前端 RC 二进制构建和版本/提交自检通过。共享 Anthropic Chat 写入字段和渐进 usage 合并兼容回归已按既有契约修复，原失败证据保留。
+- RC 产品版本 `0.2.6-rc.1` 已在功能 [PR #86](https://github.com/liulixin-lex/xy2api/pull/86) 固定 head `251ac014533c546c38e7aebc1bb343e5791713f1` 的 18 项检查全绿后常规合并，merge `3cf8406e5cfff94c488bfa58d0ba5b198e8ae1cf` 与 head 的 tree 一致。RC 注释标签固定该 merge，Release 成功；五平台归档 SHA、Go 1.27.2/x/net 0.60.0 构建信息、双架构 GHCR 与提交标签均已核验。独立 fresh、0.2.5 升级、数据库与应用数据备份恢复回退均通过，迁移数 316 不变。
+- 正式 [PR #87](https://github.com/liulixin-lex/xy2api/pull/87) 仅晋级产品版本、来源清单版本和交接记录，固定 head `6a243849833c1d8b85b03da3fe249c6bdfcf8b5e` 的 18 项检查全绿后常规合并为 `1f0aa3255034786618c8ae6e14e8459369469ad6`，树与 head 一致。注释标签 `v0.2.6` 固定该提交；[Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.2.6)、主线/标签 CI 与 Security Scan 均成功。五平台归档 SHA、构建元数据、双架构 GHCR 和 `latest`/`0.2`/`0` 别名已独立核验。正式镜像的隔离 fresh 健康、登录、认证资料、六个静态资源和 316 条迁移通过。兼容版本仍为 `0.2.14`；证据 `/lex/gpt-cache-reliability-20261010/`。本轮不部署生产，实际命中收益需部署后灰度观察。
+- 首轮 Security Scan 检出 Go 1.27.0 标准库和 x/net 的 12 项可达漏洞；升级 Go 1.27.2、x/net 0.60.0 及必要关联依赖，不改变例外政策。新组合全量 unit 62 包/23,646 PASS、integration 56 包/15,164 PASS；HTTP/2 迁移后七包真实 PostgreSQL/Redis race 538 PASS、三段工作流守卫 29/15/11 必跑用例 PASS；最近 30 分钟样本窗口修复后五包缓存 race 40 PASS、16 项缓存守卫全部 RUN/PASS，均零失败。最终源码全仓 lint 0 issues，govulncheck 可达/导入包漏洞 0，7 项仅存在于未调用依赖模块。旧工具链证据和首轮失败记录保留。
+
 ### Claude 自动缓存分组迭代（2026-10-08，GitHub 发布进行中）
 
 - 用户要求参考 LiteLLM 与 Sub2API OAuth 缓存逻辑，把精确规则改为开关和分组选择，覆盖选中组的所有账号、Key 与模型，精简前端。开发阶段已完成；用户最新明确授权推送、合并与发版，范围仅 GitHub 与发行制品，不部署或访问真实供应商。
@@ -1780,6 +1790,16 @@ pnpm --dir frontend run build
   - 仿真参数（延迟、价格、负载）为假设，只能比较策略相对差异；真实效果需阶段 0 基线、阶段 2.0 缓存归因、影子运行与灰度门禁验证。
   - 1 小时缓存场景的回升滞留与原版相近，严格回升需显式截止并付出约 1pp 命中代价。
 - 下一步：等待用户确认 D1–D10；随后按 tasks 阶段 0（只读度量）与阶段 1（剔除 controlled）推进。本轮未提交、未推送、未建 PR、未部署；`/tmp/xy2-research/`、`/tmp/xy2-sim/`、`/tmp/xy2-checks/` 为临时只读/草稿目录，可删除。
+
+### 2026-10-10T05:13:27Z — `20261010-gpt-cache-reliability` — GitHub 发布完成
+
+- 请求/目标：只读分析目标用户及全站 GPT 缓存低命中，基于最新 XY2API 主线实施网关优化，验证、提交、推送、合并并发布。
+- 开始状态：原 `/lex/xy2api` 工作树包含其他任务未提交变更；独立 `/lex/xy2api-gpt-cache` 基于 `3569d4f00aae3eada079eb7ac058dc62256a66b8`，不改写原工作树。发布时功能 PR #86、正式 PR #87 均按受保护 main 的固定 head 检查完成常规合并。
+- 完成操作：统一真实缓存 usage 和参数透传，修复会话隔离、首次并发绑定及容量溢出粘性；增加默认关闭的隐私诊断与缓存感知排序，保持现有计费/利润/质量/权重及 previous_response_id 约束。升级 Go 1.27.2/x/net 0.60.0 清除可达漏洞；无新迁移。RC `v0.2.6-rc.1` 和正式 `v0.2.6` 均为固定合并提交的注释标签，正式 merge `1f0aa3255034786618c8ae6e14e8459369469ad6`，未移动标签或绕过保护。
+- 修改文件：功能范围详见 PR #86 和 [使用说明](openai-cache-reliability.md)；正式版 PR #87 只改产品版本、来源清单版本和本记忆。收尾记录仅改本文件；完整证据与动态验收结果在 `/lex/gpt-cache-reliability-20261010/verification.md`。
+- 验证：最终 Go 1.27.2 组合 unit 62 包/23,646、integration 56 包/15,164 通过；七包真实 PostgreSQL/Redis race 538 通过，29/15/11 项关键守卫全 RUN/PASS，最近窗口修复的 40 项 race 与 16 项缓存守卫全通过。前端 lint/typecheck/327 项关键测试/生产构建、全仓 lint、源码 govulncheck 和来源审计通过。两 PR 固定 head 均 18/18 检查成功；正式主线/标签 CI、安全扫描及 Release 成功。RC 五平台制品、隔离 fresh/0.2.5 升级/备份恢复回退与正式五平台制品、隔离 fresh 均通过，正式 GHCR digest `sha256:77212b1dcfb1a8045bc6a1bbc61e1b304f29272f4ad1c0daba61f71a368711cc`，316 条迁移保持。
+- 卡点/风险：无发布卡点。未部署生产、未启用诊断/偏好、未新增付费模型调用；历史低命中的具体请求体和上游账单不足以证明单一根因，生产改善须部署后灰度观察。
+- 下一步：GitHub 发布已完成；后续部署时先启用诊断、按真实 usage 和账单分组核对，再小比例启用缓存偏好。收尾记录走独立受保护文档 PR，不改已发布标签或业务树。
 
 ### 2026-10-10T18:25:00Z — `20261010-share-scheduling-dev` — 阶段 3 前端完成与参考项目学习
 

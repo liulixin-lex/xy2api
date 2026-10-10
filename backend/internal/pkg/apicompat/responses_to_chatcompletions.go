@@ -23,11 +23,12 @@ func ResponsesToChatCompletions(resp *ResponsesResponse, model string) *ChatComp
 	}
 
 	out := &ChatCompletionsResponse{
-		ID:          id,
-		Object:      "chat.completion",
-		Created:     time.Now().Unix(),
-		Model:       model,
-		ServiceTier: resp.ServiceTier,
+		ID:                     id,
+		Object:                 "chat.completion",
+		Created:                time.Now().Unix(),
+		Model:                  model,
+		ServiceTier:            resp.ServiceTier,
+		PromptCacheDiagnostics: resp.PromptCacheDiagnostics,
 	}
 
 	var contentText string
@@ -364,6 +365,9 @@ func resToChatHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 
 	var chunks []ChatCompletionsChunk
 	chunks = append(chunks, makeChatFinishChunk(state, finishReason))
+	if evt.Response != nil {
+		chunks[0].PromptCacheDiagnostics = evt.Response.PromptCacheDiagnostics
+	}
 
 	if state.IncludeUsage && state.Usage != nil {
 		chunks = append(chunks, ChatCompletionsChunk{
@@ -403,16 +407,13 @@ func chatUsageFromResponsesUsage(u *ResponsesUsage) *ChatUsage {
 }
 
 // promptDetailsFromResponses maps Responses-API input_tokens_details into a
-// Chat-Completions prompt_tokens_details. Returns nil when nothing would be
-// emitted, so upstreams that do not break down prompt usage stay clean.
+// Chat-Completions prompt_tokens_details, preserving an explicit cached zero.
 func promptDetailsFromResponses(src *ResponsesInputTokensDetails) *ChatTokenDetails {
 	if src == nil {
 		return nil
 	}
-	if src.CachedTokens == 0 && src.AudioTokens == 0 && src.CacheCreationTokens == 0 && src.CacheWriteTokens == 0 {
-		return nil
-	}
 	return &ChatTokenDetails{
+		CachedTokensPresent: true,
 		CachedTokens:        src.CachedTokens,
 		AudioTokens:         src.AudioTokens,
 		CacheCreationTokens: src.CacheCreationTokens,
