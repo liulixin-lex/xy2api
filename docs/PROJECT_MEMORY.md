@@ -4,31 +4,23 @@
 
 ## 当前交接状态
 
-### 份额调度本地实施（2026-10-10，阶段 1–3 本地完成，未提交、未推送）
+### 份额调度实施完成并提交 PR（2026-10-10，阶段 1–3 完成、阶段 4 本地验收完成；PR 待审，未合并、未发版、未部署）
 
-- 本机 `/Users/admin/XIN-MAC-XN/xy2api`，分支 `feat/share-scheduling-20261010`，HEAD = main `3569d4f00`（产品 0.2.5）；全部改动未提交，只做本地开发与验证。
-- 已完成：
-  - 阶段 1：剔除智能可控调度，回到原版；
-  - 阶段 2：`internal/sharesched` 内核、Gateway/OpenAI/Gemini 适配、缓存归因、迁移 270；
-  - 阶段 3：`/api/v1/admin/share-scheduling` 管理接口，前端「份额调度」页（策略/报表/解释）与「系统设置 → 网关」卡片、中英文 i18n、使用文档 `docs/SHARE_SCHEDULING.md`。
-- 参考用户提供的 37 个 Sub2API 精选项目（只读、按设计学习，不复制许可证未确认的代码），落地两项：
-  - 报表新增「账号表现」：按账号被跳过次数与原因、跳过率，以及按账号首字 P50/P95（借鉴 sub2api-guardian 的按渠道首字分位与满载信号），只提示调权，不自动调权；
-  - 等待中客户端断开时立即释放排队计数并停止尝试后续账号，不把未尝试账号计为满载（借鉴 ranxi2001 等待队列生命周期测试）。
-- 未采纳：
-  - 自动调权与熔断（guardian、transit-hub）：等价于已移除的可控调度；
-  - 新会话慢启动：与份额精度目标冲突，冷窗口重对齐已渐进；
-  - KlN-4096 gwpool 与 state-kit 的 Codex 票据机制：与份额调度无关。
-- 验证：
-  - 后端：`go test -tags=unit` service/sharesched/handler/repository 通过，share 测试 `-race` 通过，golangci-lint service 0 问题；
-  - 前端：vue-tsc、eslint 通过，vitest 358 文件 2799 例通过。
-- 未完成：
-  - tasks 2.0：servertiming RTT 计数；
-  - tasks 2.14：真实 PG/Redis（本机无 Docker）、双实例与 500 账号基准；
-  - tasks 3.2：按层拖拽、账号详情只读显示；
-  - tasks 3.4：真实浏览器验收；
-  - 干净树上的 `sync.py audit`。
-- 已知：`SettingsView.spec.ts` 的 “normalizes null supported_types” 用例在既有代码上偶发失败（与本改动无关）。
-- 下一步：用户决定是否提交与开 PR；之后补真实 PG/Redis 集成与浏览器验收。
+- 本机 `/Users/admin/XIN-MAC-XN/xy2api`，分支 `feat/share-scheduling-20261010`，起点 main `3569d4f00`（产品 0.2.5），共 9 个提交（`58a355a7` 起）；推送 origin 并向 main 开 PR，编号与 CI 结果见本任务日志。
+- 范围：
+  - 剔除智能可控调度，行为回到 Sub2API 原版（旧表与设置保留至 D7，旧管理接口统一 410）；
+  - 份额调度：`internal/sharesched` 内核、Gateway/OpenAI/Gemini 适配、缓存归因与选号开销、迁移 270（旧策略导入为未生效草稿）；
+  - 管理接口与前端：策略（层级卡片拖拽、行内/批量编辑、预览、冲突合并）、报表（含选号开销与账号表现）、解释、重平衡、账号编辑弹窗只读规则；
+  - CI：原版调度差异白名单 `sync.py scheduler-diff`、controlled 残留测试；
+  - 只读基线脚本 `tools/share-scheduling/baseline.sql`（tasks 0.4–0.6）。
+- 验证：tasks.md 文末「验证记录」——unit 61 包、CI “Gateway reliability” 复现、`-race`、golangci-lint 0、真实 PG/Redis 集成（repository 705 通过）、500 账号基准、前端 359 文件 2802 例与构建、工具 19 例、隔离升级/两种回退/新装、Chrome 桌面与手机 × 深浅色 × 中英文 × 键盘。
+- 本轮新发现：
+  - 选号开销的 Redis/DB 指标依赖 `server.enable_server_timing` 安装的计时钩子，默认关闭时恒为 0；已改为按采集样本（`io_samples`）统计，无样本返回 `null`。开启后实测份额 10.0 次 / 原版 10.2 次 Redis 往返。
+  - 页头长描述在 1440px 溢出、账号弹窗规则框挤在优先级列，均已修复。
+  - 上游既有问题（未改）：`internal/setup` 用 `password=%s` 拼键值 DSN，数据库密码为空时 lib/pq 把后续 `dbname=...` 当成密码值，自动安装连到 `postgres` 库并在其中建表、建管理员（已用本地测试证实；`password=''` 可避免）。生产使用非空密码不受影响，可另行修复。
+- 未完成（合并后执行或需另行授权）：tasks 0.4–0.6 生产只读基线（脚本已备）、4.5 RC 制品、4.6 影子运行 ≥3 天、4.7 灰度、4.8 D7 删表与退役路由删除。
+- 本地环境：Go 工具链 `/tmp/xy2-toolchain`；本机经 Homebrew 安装 `postgresql@18` 与 `redis`，测试数据在 `/tmp/xy2-infra`（`start.sh`/`stop.sh`），收尾已停止；`/tmp/xy2-smoke/{scripts,shots}` 为演练脚本与截图（无凭据），均可删除。
+- 下一步：CI 通过后等待人工审核；合并、发版、部署与生产只读度量需用户另行授权。
 
 ### 份额调度缓存命中与首字专项修订（2026-10-10，规划修订完成；D1–D10 已定稿并进入实施，见上）
 
@@ -570,7 +562,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
-### 20261010-share-scheduling-dev — 剔除智能可控调度并开发份额调度（本地实施中）
+### 20261010-share-scheduling-dev — 剔除智能可控调度并开发份额调度（已提交，PR 待审）
 
 - 用户授权按方案全权决策 D5/D8/D9/D10 并开始开发；D1–D10 均按 proposal 建议值定稿。本机 `/Users/admin/XIN-MAC-XN/xy2api`，起点 main `3569d4f00`，沿用未提交规划文件。
 - 顺序：阶段 1 剔除 controlled、回到原版 → 阶段 2 缓存归因与份额调度内核/适配/迁移 → 阶段 3 管理接口与前端。只做本地开发与验证，不提交、不推送、不部署、不访问生产或真实上游。
@@ -586,6 +578,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
   - 后端修正：活动层改为可空指针（支持负层级）；无法解析的已存策略以默认值展示；`wire_gen_test` 参数数量；SA9004。
 - 参考项目学习（同日）：落地「账号表现」报表与等待取消即停，详见顶部交接状态与 design §17 新增两行。
 - 剩余：tasks 2.0、2.14、3.2、3.4 及干净树 `sync.py audit`，见顶部。
+- 收尾（2026-10-10 续）：用户授权提交并自主完成剩余任务后开 PR。已完成 2.0、2.14、3.2、3.4、4.1–4.4 与本地隔离演练（4.5 的本地部分），0.2 决定不合入 v0.2.15，0.3 差异白名单接入 CI；验证与偏差见 tasks.md「验证记录」、design §17。剩余为合并后事项（见顶部），不再阻塞本 PR。
 
 ### 20261008-claude-cache-groups-release — 推送、合并与 GitHub 发版
 
@@ -1813,3 +1806,23 @@ pnpm --dir frontend run build
   - 用户决定是否提交与开 PR；
   - 补 tasks 2.0、2.14、3.2、3.4 与干净树 `sync.py audit`。
 - 本轮未提交、未推送、未部署、未访问生产。
+
+### 2026-10-10T20:15:00Z — `20261010-share-scheduling-dev` — 收尾、全量验证与提交
+
+- 请求/目标：用户要求提交后继续完成全部后续任务，确认无潜在问题后开 PR，期间自主决策。
+- 开始状态：分支 `feat/share-scheduling-20261010`，HEAD `b1c2cb42`（4 个提交），工作树含 tasks 2.0/2.14/3.2/4.x 的未提交实现与临时集成接线。
+- 完成操作：
+  - 功能：选号开销计量（`servertiming` 摘要）、隐式缓存域 `account:<id>` 与保留前缀校验、账号规则接口与弹窗、层级卡片拖拽、报表选号开销表；
+  - 测试：合成上游 E2E（4.1–4.4）、影子逐请求一致、两实例一致、500 账号成本与基准、repository 真实存储集成；
+  - 工具：原版调度差异白名单与 CI、controlled 残留测试、只读基线脚本（合成数据验证）；
+  - 隔离烟测：0.2.5 → 新版本升级、同库直接回退与备份恢复回退、全新安装、Chrome 无头浏览器检查；由此修复 Redis/DB 指标恒 0、页头溢出、弹窗布局三处问题；
+  - 文档：`docs/SHARE_SCHEDULING.md`、design §17、tasks 勾选与验证记录、本记忆。
+- 修改文件：见提交 `5f13d79c`、`85edba2b`、`2ae53886`、`3028bb31` 与本文档提交；临时 harness 接线已还原（未提交）。
+- 验证：见 tasks.md 文末「验证记录」；敏感信息扫描（含演练口令前缀）无命中；`git diff --check` 通过。
+- 卡点/风险：
+  - 首字统计沿用原版 `first_token_ms`（上游首个流事件），只覆盖流式请求；
+  - 选号开销的 I/O 指标需要节点开启 `server.enable_server_timing`；
+  - 500 账号下份额选号均值比原版多约 0.18ms（预算 1ms），P99 未单独测；
+  - 上游安装 DSN 空密码问题未修，见顶部。
+- 下一步：干净树 `sync.py audit`、推送、开 PR 并跟进 CI；合并、发版、部署需另行授权。
+- 本轮未合并、未打标签、未发版、未部署、未访问生产；演练只用本机回环地址，结束后已删除演练库、Redis DB 5/6 与凭据文件。
