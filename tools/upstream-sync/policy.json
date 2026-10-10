@@ -45,6 +45,7 @@
       "openspec/changes/add-claude-cache-fallback/**",
       "openspec/changes/stabilize-openai-iq-check/**",
       "openspec/changes/iq-detection-operations/**",
+      "openspec/changes/replace-controlled-with-share-scheduling/**",
       "skills/**",
       "tools/**"
     ],
@@ -258,6 +259,34 @@
     {
       "path": "deploy/docker-compose.yml",
       "value": "APP_DATA_VOLUME_NAME"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "s.shareSchedulingHook(ctx, group, groupID, sessionHash, requestedModel, excludedIDs)"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "s.shareRecordSelection(ctx, hydrated)"
+    },
+    {
+      "path": "backend/internal/service/gateway_service.go",
+      "value": "s.shareSessionHash(parsed)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "s.shareSchedulingHook(ctx, openAIShareSelection{"
+    },
+    {
+      "path": "backend/internal/service/openai_profit_control.go",
+      "value": "applyDeferredShareBinding(ctx, groupID, s.openAISessionCacheKey(sessionHash), accountID)"
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "value": "s.shareScheduling.observeUsage(ctx, usageLog)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "s.shareScheduling.observeUsage(ctx, usageLog)"
     }
   ],
   "forbidden_module_paths": [
@@ -279,10 +308,12 @@
     "windows-plugin-archive-close",
     "migration-checksum-manifest",
     "dual-version-plugin-compatibility",
-    "typesafe-controlled-settlement",
     "hosted-recharge-quote-snapshot",
     "v0214-append-only-upgrade",
-    "gpt61-exact-model-aliases"
+    "gpt61-exact-model-aliases",
+    "share-scheduling-gateway-hooks",
+    "share-scheduling-openai-hooks",
+    "share-scheduling-cache-attribution"
   ],
   "custom_patch_tests": [
     {
@@ -321,11 +352,6 @@
       "literal": "func TestEvaluatePluginCompatibilityUsesSub2APIBaselineInsteadOfProductVersion"
     },
     {
-      "id": "typesafe-controlled-settlement",
-      "path": "backend/internal/service/controlled_protocol_acceptance_test.go",
-      "literal": "{\"systemone\","
-    },
-    {
       "id": "hosted-recharge-quote-snapshot",
       "path": "backend/internal/service/payment_stripe_hosted_database_test.go",
       "literal": "func TestStripeHostedDatabaseCreateRecoveryAndConcurrentLimits"
@@ -339,6 +365,21 @@
       "id": "gpt61-exact-model-aliases",
       "path": "backend/internal/service/gpt61_sol_support_test.go",
       "literal": "func TestGPT61SolAliasIdentityRemainsExact"
+    },
+    {
+      "id": "share-scheduling-gateway-hooks",
+      "path": "backend/internal/service/share_scheduling_gateway_test.go",
+      "literal": "func TestShareSchedulingFallbackWaitDefersBinding"
+    },
+    {
+      "id": "share-scheduling-openai-hooks",
+      "path": "backend/internal/service/share_scheduling_openai_test.go",
+      "literal": "func TestOpenAIShareSchedulingAdmissionBindKeepsPlannedBinding"
+    },
+    {
+      "id": "share-scheduling-cache-attribution",
+      "path": "backend/internal/service/share_scheduling_attribution_test.go",
+      "literal": "func TestShareAttributionFollowsServedPlacements"
     }
   ]
 }

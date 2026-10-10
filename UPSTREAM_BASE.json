@@ -366,10 +366,12 @@
     "windows-plugin-archive-close",
     "migration-checksum-manifest",
     "dual-version-plugin-compatibility",
-    "typesafe-controlled-settlement",
     "hosted-recharge-quote-snapshot",
     "v0214-append-only-upgrade",
-    "gpt61-exact-model-aliases"
+    "gpt61-exact-model-aliases",
+    "share-scheduling-gateway-hooks",
+    "share-scheduling-openai-hooks",
+    "share-scheduling-cache-attribution"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/79"
 }

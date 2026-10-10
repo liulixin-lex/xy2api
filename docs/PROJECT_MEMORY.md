@@ -4,6 +4,62 @@
 
 ## 当前交接状态
 
+### 份额调度本地实施（2026-10-10，阶段 1–3 本地完成，未提交、未推送）
+
+- 本机 `/Users/admin/XIN-MAC-XN/xy2api`，分支 `feat/share-scheduling-20261010`，HEAD = main `3569d4f00`（产品 0.2.5）；全部改动未提交，只做本地开发与验证。
+- 已完成：
+  - 阶段 1：剔除智能可控调度，回到原版；
+  - 阶段 2：`internal/sharesched` 内核、Gateway/OpenAI/Gemini 适配、缓存归因、迁移 270；
+  - 阶段 3：`/api/v1/admin/share-scheduling` 管理接口，前端「份额调度」页（策略/报表/解释）与「系统设置 → 网关」卡片、中英文 i18n、使用文档 `docs/SHARE_SCHEDULING.md`。
+- 参考用户提供的 37 个 Sub2API 精选项目（只读、按设计学习，不复制许可证未确认的代码），落地两项：
+  - 报表新增「账号表现」：按账号被跳过次数与原因、跳过率，以及按账号首字 P50/P95（借鉴 sub2api-guardian 的按渠道首字分位与满载信号），只提示调权，不自动调权；
+  - 等待中客户端断开时立即释放排队计数并停止尝试后续账号，不把未尝试账号计为满载（借鉴 ranxi2001 等待队列生命周期测试）。
+- 未采纳：
+  - 自动调权与熔断（guardian、transit-hub）：等价于已移除的可控调度；
+  - 新会话慢启动：与份额精度目标冲突，冷窗口重对齐已渐进；
+  - KlN-4096 gwpool 与 state-kit 的 Codex 票据机制：与份额调度无关。
+- 验证：
+  - 后端：`go test -tags=unit` service/sharesched/handler/repository 通过，share 测试 `-race` 通过，golangci-lint service 0 问题；
+  - 前端：vue-tsc、eslint 通过，vitest 358 文件 2799 例通过。
+- 未完成：
+  - tasks 2.0：servertiming RTT 计数；
+  - tasks 2.14：真实 PG/Redis（本机无 Docker）、双实例与 500 账号基准；
+  - tasks 3.2：按层拖拽、账号详情只读显示；
+  - tasks 3.4：真实浏览器验收；
+  - 干净树上的 `sync.py audit`。
+- 已知：`SettingsView.spec.ts` 的 “normalizes null supported_types” 用例在既有代码上偶发失败（与本改动无关）。
+- 下一步：用户决定是否提交与开 PR；之后补真实 PG/Redis 集成与浏览器验收。
+
+### 份额调度缓存命中与首字专项修订（2026-10-10，规划修订完成；D1–D10 已定稿并进入实施，见上）
+
+- 用户要求继续深入检索，完善调度方案，确保不影响缓存命中率与 TTFT。沿用本机 `plan/share-scheduling-20261009`（HEAD `3569d4f00`，未提交、未推送），只改规划文档与本记忆，无业务代码变更。
+- 新发现：
+  - 原版 Anthropic 无会话标识客户端的会话哈希会逐轮变化，或跨 Key 共用；
+  - 原版粘性排队最长 120 秒，排队满即永久改绑，限流 1 秒也删除绑定；
+  - 2026-10-09 初版份额规则（满载立即溢出且不改绑、高层稳定 120 秒即迁回）在离散事件仿真中缓存命中率比原版低 3.3–6.5pp。
+- 修订规则（design §6.2–§6.8、§12、§14；proposal D5、新增 D8–D10）：
+  - 跨轮稳定的亲和键（显式会话标识 → 对话锚点）；
+  - 按缓存价值有界等待（100ms/1k Token、≤15 秒、排队 ≤3），超时溢出并改绑；
+  - 短时不可用（≤300 秒且恢复时缓存仍热）软溢出；
+  - 改权重、回升、排空只在缓存变冷时迁移，默认无强制截止；
+  - 缓存域与同类优先的溢出次序；
+  - 选择阶段 Redis 往返不多于原版；
+  - 缓存归因（原版分组同口径）、影子运行与灰度门禁（缓存读占比 ≥ 基线 −0.5pp，首字 P50/P95 ≤ +3%/+5%）。
+- 仿真 `simulation/cache_ttft_sim.py`（标准库，5 个固定种子，两次运行逐字一致）：
+  - 修订版在事件/稳态 × 5 分钟/1 小时四个场景下，缓存命中率与原版持平（逐种子 −0.3~+0.4pp）；
+  - TTFT P95 为原版的 0.67–0.93 倍，P99 为原版的 0.70–0.91 倍；
+  - 第 1 层份额 49.5/32.9/17.7（原版约 39/34/27）；
+  - 严格回升截止约损失 1pp，故默认关闭。
+- 下一步：用户确认 D1–D10 后按 tasks 阶段 1 实施；阶段 0 的首字斜率校准、会话键画像与基线度量可先做（只读）。
+
+### 调度现状分析与“份额调度”规划（2026-10-09，规划完成；亲和/回升规则已被 2026-10-10 修订取代）
+
+- 用户要求分析账号调度、调研开源网关与 Sub2API 二开项目，规划“保留 Sub2API 原版、完全剔除智能可控调度、另行开发新调度”。本轮只分析与规划：本机克隆 `/Users/admin/XIN-MAC-XN/xy2api`，起点 main=`3569d4f00`，本地分支 `plan/share-scheduling-20261009`，未提交、未推送、未改业务代码。
+- 现状结论：模式表无记录时默认 controlled，且网关每请求读一次 PG 取模式、失败 503；原版无账号权重，OpenAI 实验调度器的优先级是软因子（仿真备用层空闲时拿 33.3%）；controlled 分配随候选集合分桶、叠加健康/溢出/爬坡且无会话亲和，侵入 65 个非测试文件。详见 `docs/SCHEDULING_ANALYSIS.md`。
+- 新方案“份额调度”（`share`，按分组开启）：分组层级+权重+排空为唯一意图；层级严格；新会话按加权会话一致性哈希（HRW）分配并保持亲和；自动机制只复用原版闸门排除或做有界纠偏；全程原因码、报表、Explain/Preview；热路径零新增 PG。规划见 `openspec/changes/replace-controlled-with-share-scheduling/`（proposal/design/tasks/两份 spec/可复现仿真）。
+- 仿真（标准库、固定种子，exit 0）：HRW 5:3:2 份额误差 ≤0.1pp、账号退出精确最小迁移、改权重迁移 13.27%（理论 13.33%）；会话亲和下请求份额偏差均值 1.5%（纠偏 1.0%），重尾成本 8.3%（纠偏 6.1%）为物理边界。
+- 下一步：用户确认 proposal 中 D1–D7 后按 tasks 阶段 1（只删 controlled、回到原版）独立 PR 实施；阶段 2–4 再做份额调度。是否先同步上游 v0.2.15（今日发布，调度文件与 0.2.14 相同）待定。
+
 ### Claude 自动缓存分组迭代（2026-10-08，GitHub 发布进行中）
 
 - 用户要求参考 LiteLLM 与 Sub2API OAuth 缓存逻辑，把精确规则改为开关和分组选择，覆盖选中组的所有账号、Key 与模型，精简前端。开发阶段已完成；用户最新明确授权推送、合并与发版，范围仅 GitHub 与发行制品，不部署或访问真实供应商。
@@ -513,6 +569,23 @@
 Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+### 20261010-share-scheduling-dev — 剔除智能可控调度并开发份额调度（本地实施中）
+
+- 用户授权按方案全权决策 D5/D8/D9/D10 并开始开发；D1–D10 均按 proposal 建议值定稿。本机 `/Users/admin/XIN-MAC-XN/xy2api`，起点 main `3569d4f00`，沿用未提交规划文件。
+- 顺序：阶段 1 剔除 controlled、回到原版 → 阶段 2 缓存归因与份额调度内核/适配/迁移 → 阶段 3 管理接口与前端。只做本地开发与验证，不提交、不推送、不部署、不访问生产或真实上游。
+- Go 工具链按 go.mod 固定 1.27.0，隔离安装于 `/tmp/xy2-toolchain`（校验 SHA256）；本机无 Docker，真实 PG/Redis 集成测试本轮可能无法执行，届时如实记录。
+- 2026-10-10 进展：阶段 1（tasks 1.1–1.11）本地完成。`go build`、`go vet`（unit/integration/e2e）、`go test -tags=unit ./...`（60 包）、默认与 integration 套件全部退出 0；repository 集成测试因无 Docker 由 harness 跳过（新增的旧格式计费意图恢复测试只编译未执行）。前端 lint/typecheck/test（353 文件 2774 例）/build 通过。新 CI “Gateway reliability” 门禁本地 `-race` 模拟通过。
+- 关键决定：质量路由改为上下文显式 opt-in（生产从不 opt-in，等价原版）；`typesafe-controlled-settlement` 补丁同时从 policy 与 `UPSTREAM_BASE.json` 的 custom_patches 移除（audit 要求两处一致，历史同步报告不改）。
+- 阶段 2 进展：`backend/internal/sharesched` 纯内核与 23 项测试完成（份额比例、最小扰动、层级严格、绑定生命周期、缓存保护性质）。下一步：迁移 270 与策略仓储、绑定 GET+PTTL、Gateway/OpenAI/Gemini 适配。
+- 阶段 2 进展（2026-10-10 续）：迁移 270、策略仓储/Redis store、`ShareSchedulingService`、绑定 GET+PTTL/SET NX、共用执行器 `share_scheduling_exec.go`、Gateway 与 OpenAI 适配（含响应续链/guardian 优先、legacy 会话键回读、codex 压力并发、影子对比、请求 trace）均已接入并有 unit 测试；`go test -tags=unit` service/handler/repository/sharesched 全部通过，share 测试 `-race` 通过。
+- 关键决定：份额放置的绑定意图总随选号结果下发，已即时写入时 handler 的准入后绑定变为 no-op（避免 WS 入口覆盖 spill_keep/soft_spill 保留的绑定）；compact、图片请求及质量路由持有的会话保持原版调度。
+- 续（同日）：Gemini v1beta/Antigravity 生成路径均经已挂钩的 Gateway 选号（AI Studio 元数据与 count_tokens 保持原版）；usage 侧缓存归因（含部分读取=前缀漂移、按决策类型 TTFT 直方图）已接入两个 RecordUsage；upstream-sync 登记 3 个 custom patch + 7 个钩子 required_literals，审计检查（除工作树干净门）0 错误；CI “Gateway reliability” 加入份额测试并本地 `-race` 模拟通过。阶段 3 后端 `/api/v1/admin/share-scheduling`（settings/groups/policy CAS/preview/explain/report/decisions/rebalance）与服务/handler 测试完成。下一步：前端页面与设置、i18n、文档与 design/tasks 偏差说明、golangci-lint 与全量验证。
+- 阶段 3 前端完成（2026-10-10 续）：
+  - 内容：份额调度页（分组列表、策略编辑含批量与预览/冲突三方合并、报表、解释）、设置卡片、路由与侧栏、i18n、5 个新 spec 已加入 `FRONTEND_CRITICAL_VITEST`；
+  - 后端修正：活动层改为可空指针（支持负层级）；无法解析的已存策略以默认值展示；`wire_gen_test` 参数数量；SA9004。
+- 参考项目学习（同日）：落地「账号表现」报表与等待取消即停，详见顶部交接状态与 design §17 新增两行。
+- 剩余：tasks 2.0、2.14、3.2、3.4 及干净树 `sync.py audit`，见顶部。
 
 ### 20261008-claude-cache-groups-release — 推送、合并与 GitHub 发版
 
@@ -1668,3 +1741,75 @@ pnpm --dir frontend run build
 - 本地验证：前端全量 lint/typecheck/构建，22 文件/327 项 critical（含 9 项新组件交互），桌面/手机/暗色及键盘操作均通过；后端 62 包 unit 排除两个 DNS 依赖子用例后通过，随后对整个 9 子用例矩阵以隔离容器域名映射补验通过，未改变测试源码和断言。构建、三包重点 race、最后全仓 golangci-lint 0 issues/exit 0、10 项同步工具测试通过。
 - 2.65 MB 辅助路径基准 100 次：OFF 1.795µs/320B；ON 72.97ms/29.20MB/46 allocations。只报告本地 helper 开销，不宣称端到端性能或全体上游能力。首次 DNS 失败、前端 worker 超时、测试 fixture/错误检查修正、包级 lint 超时等证据保留，最终结果见 `/lex/claude-cache-groups-20261008/verification.md`。
 - 清理自己的进行中事项。实现与收尾只做本地提交，最终干净树来源审计/身份保存在同一证据目录；测试容器运行后自动移除，临时前端预览已关闭。后续若交付 GitHub 需新的用户指令；真实上游命中与两端账单核验仍不属于本轮完成声明。
+
+### 2026-10-09T17:10:17Z — `20261009-share-scheduling-plan` — 规划完成
+
+- 请求/目标：分析账号调度模块现状与算法，全网调研开源网关与 Sub2API 二开项目，规划“保留 Sub2API 原版调度、完全剔除智能可控调度、重新开发另一种调度”。仅分析与规划。
+- 开始状态：本机全新克隆 `/Users/admin/XIN-MAC-XN/xy2api`，main=`3569d4f00aae3eada079eb7ac058dc62256a66b8`（= origin/main，产品 0.2.5，兼容 0.2.14），工作树干净；新建本地分支 `plan/share-scheduling-20261009`。
+- 完成操作：逐文件阅读原版选号路径（Gateway/OpenAI 旧路径/实验调度器/Gemini 兼容）与 controlled 内核、适配、中间件、迁移、CI 与同步策略；与上游 v0.2.14/v0.2.15 只读克隆对比（调度三文件两版零差异）；只读调研 new-api、ranxi2001/sub2api、OmniRoute、claude-relay-service 源码及 LiteLLM、Portkey、APISIX、Kong、Envoy AI Gateway、Higress、Bifrost、AxonHub、uni-api、CLIProxyAPI、OpenRouter 文档，核对 Anthropic/OpenAI 官方提示缓存隔离与价格；编写标准库仿真验证 HRW 比例性、最小扰动与份额精度边界。
+- 修改文件：新增 `docs/SCHEDULING_ANALYSIS.md` 及其 `.gitignore` 精确白名单；新增 `openspec/changes/replace-controlled-with-share-scheduling/`（proposal、design、tasks、specs/share-scheduling、specs/controlled-scheduling-retirement、simulation/share_sim.py、simulation/RESULTS.md）；`tools/upstream-sync/policy.json` 仅追加该 OpenSpec 精确目录为 XY_OWNED；本记忆顶部状态与本日志。无业务源码、SQL、版本、兼容基线变更。
+- 验证：`python3 -I openspec/changes/replace-controlled-with-share-scheduling/simulation/share_sim.py` exit 0，两次运行输出逐字一致并写入 RESULTS.md；policy JSON 解析通过，`python3 -I -m unittest discover -s tools/tests -p 'test_*.py'` 14 项 OK；新文档相对链接 0 断链；`git diff --check` 通过；敏感模式扫描无命中。未运行 Go/前端测试（未改代码）；未安装 OpenSpec CLI，未运行其校验；未执行来源审计（工作树未提交）。
+- 卡点/风险：无阻塞。方案依赖用户确认 D1–D7（升级落点、命名、质量路由、Codex 压力并发、回升默认、份额单位、历史表删除时间）。重尾成本份额无法靠调度消除，已在规格中写明边界。
+- 下一步：用户确认决策后，按 tasks 阶段 1 独立 PR 剔除 controlled（只删不增）；提交前需在干净树运行 `python3 tools/upstream-sync/sync.py audit`。本轮未提交、未推送、未建 PR、未部署；上游只读克隆位于 `/tmp/xy2-research/`，可随时删除。
+
+### 2026-10-10T02:40:00Z — `20261010-share-scheduling-cache-ttft` — 缓存命中与首字专项修订完成
+
+- 请求/目标：继续深入广泛检索，完善调度设计方案，确保不影响缓存命中率和 TTFT。仅规划，不实施代码。
+- 开始状态：本机 `plan/share-scheduling-20261009`，HEAD `3569d4f00`；工作树含上一轮未提交的规划文件（`.gitignore`、本记忆、`tools/upstream-sync/policy.json`、`docs/SCHEDULING_ANALYSIS.md`、OpenSpec 变更目录），均为本人上一轮产物。
+- 完成操作：
+  - 核对代码事实：
+    - Anthropic 会话哈希三级回退；
+    - 粘性 TTL 命中续期，等待 3 人/120 秒；
+    - 负载均衡层改绑、限流删绑；
+    - Gemini 摘要链进程内存储；
+    - OpenAI 会话键与 `prompt_cache_key` 账号命名空间；
+    - 签名整流重试；
+    - 连接池 `account_proxy` 隔离、空闲 90 秒；
+    - `usage_logs` 首字与缓存字段、`sticky.hash_source` 日志、`servertiming` 采集器。
+  - 官方文档核对：Anthropic、OpenAI 提示缓存（workspace 隔离、寿命从请求开始计、并发可见性、GPT-5.6+ 30 分钟）。
+  - 检索外部实践：OpenRouter、LiteLLM（含 2026-07-31 基准博客）、Portkey、SGLang、KubeAI CHWBL、Dynamo、llm-d、DualMap、CacheRoute、DLPM、Prequal。
+  - 本地阅读 new-api 渠道亲和源码；只读查看 Sub2API issue #5241、#2517、#7400。
+  - 编写离散事件仿真，逐原因归因失效读，扫描等待系数、改绑、重对齐与软溢出上限，据此修订规则。
+- 修改文件：
+  - 新增 `simulation/cache_ttft_sim.py`；
+  - 重写 `design.md`、`tasks.md`、`specs/share-scheduling/spec.md`；
+  - 更新 `proposal.md`（D5 改为 cold，新增 D8–D10）与 `simulation/RESULTS.md`（第二部分）；
+  - `docs/SCHEDULING_ANALYSIS.md` 新增第 7 节，更正 §2.1；
+  - 本记忆顶部与日志。
+  - 无业务源码、SQL、版本、兼容基线变更。
+- 验证：
+  - `python3 -I openspec/changes/replace-controlled-with-share-scheduling/simulation/cache_ttft_sim.py` 三次 exit 0，输出逐字一致并写入 RESULTS；`share_sim.py` exit 0。
+  - 两个脚本语法解析通过；新旧文档相对链接 0 断链；`git diff --check` exit 0（首次发现分析文档末尾多余空行，已修正后重验）；policy JSON 解析通过。
+  - 敏感模式扫描在本轮新增内容中无命中，仅命中记忆文件中既有的账号名，非密钥。
+  - 扫描参数时以模块方式导入脚本，在 simulation 目录生成了 `__pycache__`（git 忽略），已删除。
+  - 未运行 Go/前端测试（未改代码）；未安装 OpenSpec CLI；未执行来源审计（工作树未提交）。
+- 卡点/风险：
+  - 仿真参数（延迟、价格、负载）为假设，只能比较策略相对差异；真实效果需阶段 0 基线、阶段 2.0 缓存归因、影子运行与灰度门禁验证。
+  - 1 小时缓存场景的回升滞留与原版相近，严格回升需显式截止并付出约 1pp 命中代价。
+- 下一步：等待用户确认 D1–D10；随后按 tasks 阶段 0（只读度量）与阶段 1（剔除 controlled）推进。本轮未提交、未推送、未建 PR、未部署；`/tmp/xy2-research/`、`/tmp/xy2-sim/`、`/tmp/xy2-checks/` 为临时只读/草稿目录，可删除。
+
+### 2026-10-10T18:25:00Z — `20261010-share-scheduling-dev` — 阶段 3 前端完成与参考项目学习
+
+- 请求/目标：继续开发；参考用户上传的《Sub2API 精选项目》清单（37 个仓库），学习其中可借鉴的实现。
+- 开始状态：分支 `feat/share-scheduling-20261010`，HEAD `3569d4f00`；工作树为本任务阶段 1–3 的未提交改动。
+- 完成操作：
+  - 用 `gh api` 只读审阅固定 SHA 的源码：sub2api-guardian（scoring、decide）、transit-hub（健康状态机）、KlN-4096 gwpool（等待、排序、冷却）、sub2api-state-kit、Ember1012 FastScheduler、ranxi2001/DeanZFC 目录；对比上游 main 与 v0.2.14 的调度相关变更。
+  - 对照份额调度内核，确认已覆盖：429 不当故障、保底不全排空、回升稳定期、强制迁移错峰、退出时绑定格式兼容原版。
+  - 落地两项：
+    - 每次选号记录 `skip:<账号>:<原因>`，归因样本记录 `acct_ttft:<账号>:<桶>`；报表 `actual[]` 新增 `skipped` 与 `ttft`，前端「账号表现」区块在尝试 ≥ 10 次且跳过率 ≥ 20% 时给出调权提示；
+    - `shareExecutor.acquire` 在上下文取消后停止尝试，不记满载。
+- 修改文件：
+  - `backend/internal/service/share_scheduling_{stats,record,attribution,admin,exec}.go`，以及 admin、gateway 两个测试文件；
+  - `frontend/src/api/admin/shareScheduling.ts`、`ShareReportPanel.vue`、中英文 `shareScheduling.ts`、`ShareSchedulingView.spec.ts`；
+  - `docs/SHARE_SCHEDULING.md`、design §17、本记忆。
+- 验证：
+  - 新增 `TestShareAdminReportShowsAccountSkipsAndLatency`、`TestShareSchedulingCanceledWaitReleasesQueueAndStops`；去掉取消检查后后者失败，恢复后通过；
+  - `go test -tags=unit` service/sharesched/handler/...、repository 全部 ok；share 测试 `-race` ok；golangci-lint service 0 问题；
+  - 前端 vue-tsc、eslint 通过，vitest 358 文件 2799 例通过。
+- 卡点/风险：
+  - 按账号首字直方图使 Redis 计数字段随活跃账号数增长（约账号数 × 命中桶数/分钟），受归因抽样与 `maxShareStatsCounters` 限制；500 账号分组的报表读取成本未实测。
+  - 参考项目多数许可证未确认，只学习设计，未复制代码。
+- 下一步：
+  - 用户决定是否提交与开 PR；
+  - 补 tasks 2.0、2.14、3.2、3.4 与干净树 `sync.py audit`。
+- 本轮未提交、未推送、未部署、未访问生产。
