@@ -120,6 +120,9 @@ func (s *OpenAIGatewayService) openAIStickyLegacyTTL(ttl time.Duration) time.Dur
 }
 
 func (s *OpenAIGatewayService) getStickySessionAccountID(ctx context.Context, groupID *int64, sessionHash string) (int64, error) {
+	if owner, ok := ctx.Value(openAIStickyReconciledKey{}).(int64); ok && owner > 0 && !s.qualityOwnsSticky(ctx, groupID, sessionHash) {
+		return owner, nil
+	}
 	if id, handled := s.qualitySticky(ctx, groupID, sessionHash); handled {
 		return id, nil
 	}
@@ -166,8 +169,16 @@ func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, gr
 		return nil
 	}
 
-	if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), primaryKey, accountID, ttl); err != nil {
-		return err
+	if cache, ok := s.cache.(OpenAIStickyAtomicCache); ok && openAIAtomicStickySession(sessionHash) {
+		promote, _ := ctx.Value(openAIStickyPromotionKey{}).(bool)
+		owner, err := cache.ClaimSessionAccountID(ctx, derefGroupID(groupID), primaryKey, accountID, ttl, promote)
+		if err != nil || owner != accountID {
+			return err
+		}
+	} else {
+		if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), primaryKey, accountID, ttl); err != nil {
+			return err
+		}
 	}
 
 	if !s.openAISessionHashDualWriteOldEnabled() {
@@ -184,7 +195,7 @@ func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, gr
 	return nil
 }
 
-func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, groupID *int64, sessionHash string, ttl time.Duration) error {
+func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, groupID *int64, sessionHash string, ttl time.Duration, expectedOwner ...int64) error {
 	if s.qualityOwnsSticky(ctx, groupID, sessionHash) {
 		return nil
 	}
@@ -196,7 +207,15 @@ func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, grou
 		return nil
 	}
 
-	err := s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), primaryKey, ttl)
+	var err error
+	if cache, ok := s.cache.(OpenAIStickyAtomicCache); ok && openAIAtomicStickySession(sessionHash) && len(expectedOwner) > 0 {
+		owner, claimErr := cache.ClaimSessionAccountID(ctx, derefGroupID(groupID), primaryKey, expectedOwner[0], ttl, true)
+		if claimErr != nil || owner != expectedOwner[0] {
+			return claimErr
+		}
+	} else {
+		err = s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), primaryKey, ttl)
+	}
 	if !s.openAISessionHashReadOldFallbackEnabled() && !s.openAISessionHashDualWriteOldEnabled() {
 		return err
 	}

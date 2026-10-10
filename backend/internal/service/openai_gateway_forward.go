@@ -18,7 +18,11 @@ import (
 )
 
 // Forward forwards request to OpenAI API
-func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
+	defer func() { s.finishCacheDiagnostic(c, body, result) }()
+	if c != nil {
+		c.Set("openai_cache_diagnostic", nil)
+	}
 	// Validate the original request before compatibility filters can discard an
 	// explicit effort. Use the same final account/compact model as forwarding.
 	requestedValidationModel := gjson.GetBytes(body, "model").String()
@@ -32,6 +36,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if err := validateGPT61SolCompatRequest(body, validationModel); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
 		return nil, err
+	}
+	var cacheControlErr error
+	body, cacheControlErr = normalizeOpenAICacheControls(account, body)
+	if cacheControlErr != nil {
+		return nil, cacheControlErr
 	}
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
@@ -635,11 +644,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		if gjson.GetBytes(body, "max_completion_tokens").Exists() && (account.Type == AccountTypeAPIKey || account.Platform != PlatformOpenAI) {
 			markPatchDelete("max_completion_tokens")
-		}
-		for _, unsupportedField := range []string{"prompt_cache_retention", "safety_identifier", "prompt_cache_options"} {
-			if gjson.GetBytes(body, unsupportedField).Exists() {
-				markPatchDelete(unsupportedField)
-			}
 		}
 	}
 	// Ollama Cloud（实际 Responses 上游为 ollama.com）输出上限 clamp：对 Codex 与
@@ -1399,6 +1403,11 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
+	var cacheControlErr error
+	body, cacheControlErr = normalizeOpenAICacheControls(account, body)
+	if cacheControlErr != nil {
+		return nil, cacheControlErr
+	}
 	// Determine target URL based on account type
 	var targetURL string
 	switch account.Type {
@@ -1558,6 +1567,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	setOpenAICodexRoutingHintFromBody(req.Header, account, body)
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http", req.Header, body, "not_applicable")
 	s.prepareQualityHTTP(ctx, c, account, req, body)
+	s.captureCacheRequestDiagnostic(c, req)
 
 	if err := applyMappedGPT55LiteCompatibility(req, account, body); err != nil {
 		return nil, err

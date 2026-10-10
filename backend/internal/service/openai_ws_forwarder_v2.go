@@ -383,6 +383,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		controlledDispatch.finishPreparationFailure(err)
 		return nil, err
 	}
+	if s.cfg != nil && (s.cfg.Gateway.OpenAICache.DiagnosticsEnabled || s.cfg.Gateway.OpenAICache.AwareRoutingEnabled) {
+		s.captureCacheDiagnostic(c, payloadAsJSONBytes(wirePayload))
+	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, wirePayload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(

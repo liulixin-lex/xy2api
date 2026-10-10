@@ -31,8 +31,6 @@ import (
 // with the list in openai_gateway_service.go:2034 used by the /v1/responses
 // passthrough path.
 var cursorResponsesUnsupportedFields = []string{
-	"prompt_cache_retention",
-	"safety_identifier",
 	"metadata",
 	"stream_options",
 }
@@ -58,7 +56,11 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	body []byte,
 	promptCacheKey string,
 	defaultMappedModel string,
-) (*OpenAIForwardResult, error) {
+) (result *OpenAIForwardResult, forwardErr error) {
+	defer func() { s.finishCacheDiagnostic(c, body, result) }()
+	if c != nil {
+		c.Set("openai_cache_diagnostic", nil)
+	}
 	return s.forwardAsChatCompletions(ctx, c, account, body, promptCacheKey, defaultMappedModel, false)
 }
 
@@ -71,6 +73,11 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
 ) (*OpenAIForwardResult, error) {
+	var cacheControlErr error
+	body, cacheControlErr = normalizeOpenAICacheControls(account, body)
+	if cacheControlErr != nil {
+		return nil, cacheControlErr
+	}
 	rememberOpenCodeInboundBody(c, body)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
@@ -251,6 +258,12 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		for _, field := range cursorResponsesUnsupportedFields {
 			if stripped, derr := sjson.DeleteBytes(responsesBody, field); derr == nil {
 				responsesBody = stripped
+			}
+		}
+		for _, field := range openAIUnsupportedCacheFields(account, upstreamModel) {
+			responsesBody, err = sjson.DeleteBytes(responsesBody, field)
+			if err != nil {
+				return nil, fmt.Errorf("filter unsupported cache field: %w", err)
 			}
 		}
 		var normalizedServiceTier string
@@ -811,12 +824,6 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)
 		if isTerminalEvent {
 			terminalEventType = strings.TrimSpace(event.Type)
-			if event.Usage != nil {
-				usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
-			}
-			if event.Response != nil && event.Response.Usage != nil {
-				usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
-			}
 		}
 		if strings.TrimSpace(event.Type) == "response.failed" || strings.TrimSpace(event.Type) == "error" {
 			payloadBytes := []byte(payload)

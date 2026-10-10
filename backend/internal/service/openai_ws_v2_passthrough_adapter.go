@@ -134,6 +134,7 @@ func openAIWSPassthroughPolicyModelFromSessionFrame(account *Account, payload []
 }
 
 type openAIWSPassthroughUsageMeta struct {
+	cacheDiagnostic          atomic.Pointer[OpenAICacheDiagnostic]
 	serviceTier              atomic.Pointer[string]
 	reasoningEffort          atomic.Pointer[string]
 	requestedReasoningEffort atomic.Pointer[string]
@@ -825,6 +826,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	// goroutine）和 OnTurnComplete / final result（runUpstreamToClient
 	// goroutine）之间同步当前 turn 的 usage metadata。
 	usageMeta.initFromFirstFrame(firstClientMessage, capturedSessionModel)
+	usageMeta.cacheDiagnostic.Store(s.newCacheDiagnostic(c, firstClientMessage, "wire"))
+	routingSession, _ := c.Get(openAICacheSessionGinKey)
+	routingSessionID, _ := routingSession.(string)
 	usageMeta.captureRequestedReasoningEffort(originalFirstClientMessage, capturedSessionModel)
 	_, initialUpstreamModel := usageMeta.turnModels(initialRequestModel)
 	SetOpsUpstreamModel(c, initialUpstreamModel)
@@ -1184,6 +1188,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					qualityTurnBody.Store(&qualityNextBody)
 				}
 				out = qualityRotateBody(out, s.qualityRotation(ctx, account), true)
+				out, promptErr = normalizeOpenAICacheControls(account, out)
+				if promptErr != nil {
+					return nil, nil, promptErr
+				}
+				usageMeta.cacheDiagnostic.Store(s.newCacheDiagnostic(c, out, "wire"))
 				_, actualModel := usageMeta.turnModels(requestModelForThisFrame)
 				SetOpsUpstreamModel(c, actualModel)
 				responseCreateAtCopy := responseCreateAt
@@ -1276,8 +1285,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				turnRequestModel, turnUpstreamModel := usageMeta.turnModels(turn.RequestModel)
 				turnResult := &OpenAIForwardResult{
-					RequestID: turn.RequestID,
+					RoutingSessionID: routingSessionID,
+					RequestID:        turn.RequestID,
 					Usage: OpenAIUsage{
+						CacheReadSource:          turn.Usage.CacheReadSource,
+						CacheWriteSource:         turn.Usage.CacheWriteSource,
 						InputTokens:              turn.Usage.InputTokens,
 						OutputTokens:             turn.Usage.OutputTokens,
 						CacheCreationInputTokens: turn.Usage.CacheCreationInputTokens,
@@ -1298,6 +1310,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					ResponseHeaders:               cloneHeader(handshakeHeaders),
 					Duration:                      turn.Duration,
 					FirstTokenMs:                  turn.FirstTokenMs,
+				}
+				if d := usageMeta.cacheDiagnostic.Load(); d != nil {
+					copy := *d
+					copy.Model = openAICacheModelLabel(turnUpstreamModel)
+					turnResult.CacheDiagnostic = &copy
 				}
 				logOpenAIWSV2Passthrough(
 					"relay_turn_completed account_id=%d turn=%d request_id=%s terminal_event=%s turn_requested_model=%s turn_upstream_model=%s duration_ms=%d first_token_ms=%d input_tokens=%d output_tokens=%d cache_read_tokens=%d",
@@ -1455,8 +1472,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 
 	resultRequestModel, resultUpstreamModel := usageMeta.turnModels(relayResult.RequestModel)
 	result := &OpenAIForwardResult{
-		RequestID: relayResult.RequestID,
+		RoutingSessionID: routingSessionID,
+		RequestID:        relayResult.RequestID,
 		Usage: OpenAIUsage{
+			CacheReadSource:          relayResult.Usage.CacheReadSource,
+			CacheWriteSource:         relayResult.Usage.CacheWriteSource,
 			InputTokens:              relayResult.Usage.InputTokens,
 			OutputTokens:             relayResult.Usage.OutputTokens,
 			CacheCreationInputTokens: relayResult.Usage.CacheCreationInputTokens,

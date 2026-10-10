@@ -1051,6 +1051,7 @@ type GatewayConfig struct {
 	// OpenAIScheduler: OpenAI 高级调度器粘性逃逸配置
 	OpenAIScheduler      GatewayOpenAISchedulerConfig `mapstructure:"openai_scheduler"`
 	OpenAIQualityRouting OpenAIQualityRoutingConfig   `mapstructure:"openai_quality_routing"`
+	OpenAICache          OpenAICacheConfig            `mapstructure:"openai_cache"`
 	// OpenAIHTTP2: OpenAI HTTP 上游协议策略（默认启用 HTTP/2，可按代理能力回退 HTTP/1.1）
 	OpenAIHTTP2 GatewayOpenAIHTTP2Config `mapstructure:"openai_http2"`
 	// OpenAIProxyStreamCircuit: Responses SSE 代理断流熔断策略。
@@ -1140,6 +1141,12 @@ type GatewayConfig struct {
 	// CNProviders: 国产 OpenAI 兼容供应商（kimi/zhipu/deepseek）的余额检测配置。
 	// 仅作用于 payg（按量付费）账号：周期探测余额，低于阈值则临时停调。
 	CNProviders GatewayCNProvidersConfig `mapstructure:"cn_providers"`
+}
+
+type OpenAICacheConfig struct {
+	DiagnosticsEnabled  bool `mapstructure:"diagnostics_enabled"`
+	AwareRoutingEnabled bool `mapstructure:"aware_routing_enabled"`
+	RolloutPercent      int  `mapstructure:"rollout_percent"`
 }
 
 // GatewayGrokConfig holds Grok-specific gateway scheduling knobs.
@@ -2542,6 +2549,9 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.dial_timeout_seconds", 10)
 	viper.SetDefault("gateway.openai_quality_routing.mode", "enforce")
 	viper.SetDefault("gateway.openai_quality_routing.avoid_seconds", 300)
+	viper.SetDefault("gateway.openai_cache.diagnostics_enabled", false)
+	viper.SetDefault("gateway.openai_cache.aware_routing_enabled", false)
+	viper.SetDefault("gateway.openai_cache.rollout_percent", 0)
 	viper.SetDefault("gateway.openai_ws.read_timeout_seconds", 900)
 	viper.SetDefault("gateway.openai_ws.write_timeout_seconds", 120)
 	viper.SetDefault("gateway.openai_ws.pool_target_utilization", 0.7)
@@ -3701,6 +3711,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.OpenAIScheduler.StickyEscapeErrorRate < 0 || c.Gateway.OpenAIScheduler.StickyEscapeErrorRate > 1 {
 		return fmt.Errorf("gateway.openai_scheduler.sticky_escape_error_rate must be between 0 and 1")
+	}
+	if c.Gateway.OpenAICache.RolloutPercent < 0 || c.Gateway.OpenAICache.RolloutPercent > 100 {
+		return fmt.Errorf("gateway.openai_cache.rollout_percent must be between 0 and 100")
 	}
 	if c.Gateway.MaxLineSize < 0 {
 		return fmt.Errorf("gateway.max_line_size must be non-negative")

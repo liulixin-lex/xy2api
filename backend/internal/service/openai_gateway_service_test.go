@@ -762,7 +762,7 @@ func (c *stubGatewayCache) GetSessionAccountID(ctx context.Context, groupID int6
 	if id, ok := c.sessionBindings[sessionHash]; ok {
 		return id, nil
 	}
-	return 0, errors.New("not found")
+	return 0, ErrStickySessionNotFound
 }
 
 func (c *stubGatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
@@ -1256,7 +1256,7 @@ func TestOpenAISelectAccountWithLoadAwareness_StickyWaitPlan(t *testing.T) {
 }
 
 func TestOpenAISelectAccountWithLoadAwareness_StickyCapacitySpilloverKeepsBinding(t *testing.T) {
-	sessionHash := "sticky-spillover"
+	sessionHash := "v2:sticky-spillover"
 	groupID := int64(1)
 	repo := stubOpenAIAccountRepo{
 		accounts: []Account{
@@ -1292,6 +1292,7 @@ func TestOpenAISelectAccountWithLoadAwareness_StickyCapacitySpilloverKeepsBindin
 	require.NotNil(t, selection.Account)
 	require.Equal(t, int64(2), selection.Account.ID, "capacity spillover should use the other account for this request")
 	require.True(t, selection.Acquired)
+	require.True(t, selection.StickyCapacitySpillover)
 	require.Equal(t, int64(1), cache.sessionBindings["openai:"+sessionHash], "capacity spillover must not migrate the durable sticky binding")
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()

@@ -1264,11 +1264,13 @@ func mergeOpenAIUsageNonZero(dst *OpenAIUsage, src OpenAIUsage) {
 	if src.OutputTokens > 0 {
 		dst.OutputTokens = src.OutputTokens
 	}
-	if src.CacheCreationInputTokens > 0 {
+	if src.CacheCreationInputTokens > 0 || (dst.CacheCreationInputTokens == 0 && src.CacheWriteSource != "") {
 		dst.CacheCreationInputTokens = src.CacheCreationInputTokens
+		dst.CacheWriteSource = src.CacheWriteSource
 	}
-	if src.CacheReadInputTokens > 0 {
+	if src.CacheReadInputTokens > 0 || (dst.CacheReadInputTokens == 0 && src.CacheReadSource != "") {
 		dst.CacheReadInputTokens = src.CacheReadInputTokens
+		dst.CacheReadSource = src.CacheReadSource
 	}
 	if src.ImageOutputTokens > 0 {
 		dst.ImageOutputTokens = src.ImageOutputTokens
@@ -1518,14 +1520,8 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 	if !value.Exists() || !value.IsObject() {
 		return OpenAIUsage{}, false
 	}
-	inputTokens := value.Get("input_tokens").Int()
-	if inputTokens == 0 {
-		inputTokens = value.Get("prompt_tokens").Int()
-	}
-	outputTokens := value.Get("output_tokens").Int()
-	if outputTokens == 0 {
-		outputTokens = value.Get("completion_tokens").Int()
-	}
+	counts := apicompat.ParseOpenAIUsageCounts(value)
+	inputTokens, outputTokens := int64(counts.InputTokens), int64(counts.OutputTokens)
 	// xAI reports visible output separately from reasoning_tokens; OpenAI
 	// folds reasoning into completion/output. Use total_tokens to tell them apart.
 	reasoningTokens := max(int(firstPositiveGJSONInt(
@@ -1537,8 +1533,8 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 			inputTokens, outputTokens, value.Get("total_tokens").Int(), int64(reasoningTokens),
 		)
 	}
-	cacheReadTokens := openAICacheReadTokensFromUsage(value)
-	cacheCreationTokens := openAICacheCreationTokensFromUsage(value)
+	cacheReadTokens := counts.CacheReadTokens
+	cacheCreationTokens := counts.CacheWriteTokens
 	imageOutputTokens := value.Get("output_tokens_details.image_tokens").Int()
 	if imageOutputTokens == 0 {
 		imageOutputTokens = value.Get("completion_tokens_details.image_tokens").Int()
@@ -1551,6 +1547,8 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 		value.Get("prompt_tokens_details.image_tokens"),
 	)
 	return OpenAIUsage{
+		CacheReadSource:          counts.CacheReadSource,
+		CacheWriteSource:         counts.CacheWriteSource,
 		InputTokens:              int(inputTokens),
 		ImageInputTokens:         imageInputTokens,
 		OutputTokens:             int(outputTokens),
@@ -1561,40 +1559,11 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 }
 
 func openAICacheReadTokensFromUsage(value gjson.Result) int {
-	for _, nested := range []gjson.Result{
-		value.Get("input_tokens_details.cached_tokens"),
-		value.Get("prompt_tokens_details.cached_tokens"),
-	} {
-		if nested.Exists() {
-			return max(int(nested.Int()), 0)
-		}
-	}
-
-	return firstPositiveGJSONInt(
-		value.Get("cache_read_input_tokens"),
-		value.Get("cache_read_tokens"),
-		value.Get("cached_tokens"),
-	)
+	return apicompat.ParseOpenAIUsageCounts(value).CacheReadTokens
 }
 
 func openAICacheCreationTokensFromUsage(value gjson.Result) int {
-	for _, nested := range []gjson.Result{
-		value.Get("input_tokens_details.cache_write_tokens"),
-		value.Get("prompt_tokens_details.cache_write_tokens"),
-		value.Get("input_tokens_details.cache_creation_tokens"),
-		value.Get("prompt_tokens_details.cache_creation_tokens"),
-	} {
-		if nested.Exists() {
-			return max(int(nested.Int()), 0)
-		}
-	}
-
-	return firstPositiveGJSONInt(
-		value.Get("cache_write_tokens"),
-		value.Get("cache_creation_input_tokens"),
-		value.Get("cache_write_input_tokens"),
-		value.Get("cache_creation_tokens"),
-	)
+	return apicompat.ParseOpenAIUsageCounts(value).CacheWriteTokens
 }
 
 func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (_ *openaiNonStreamingResult, retErr error) {
