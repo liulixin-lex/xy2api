@@ -4,9 +4,9 @@
 
 ## 当前交接状态
 
-### 份额调度实施完成并提交 PR（2026-10-10，阶段 1–3 完成、阶段 4 本地验收完成；PR 待审，未合并、未发版、未部署）
+### 份额调度实施完成，PR #90 待审（2026-10-10，阶段 1–3 完成、阶段 4 本地验收完成；CI 全绿，未合并、未发版、未部署）
 
-- 本机 `/Users/admin/XIN-MAC-XN/xy2api`，分支 `feat/share-scheduling-20261010`，起点 main `3569d4f00`（产品 0.2.5），`58a355a7` 起的功能提交后合并 origin/main `7b1d5d8c`（0.2.6 GPT 缓存可靠性，合并提交 `3c0e4b6a`）；推送 origin 并向 main 开 PR，编号与 CI 结果见本任务日志。
+- 本机 `/Users/admin/XIN-MAC-XN/xy2api`，分支 `feat/share-scheduling-20261010`，起点 main `3569d4f00`（产品 0.2.5），`58a355a7` 起的功能提交后合并 origin/main `7b1d5d8c`（0.2.6 GPT 缓存可靠性，合并提交 `3c0e4b6a`）；已推送 origin 并开 PR [#90](https://github.com/liulixin-lex/xy2api/pull/90)（base main），`eeab1b66` 上 CI 18 项检查全部通过（含 Integration tests、Gateway reliability、OpenAI cache reliability、Original scheduler diff allowlist），GitHub 显示可合并（CLEAN）。
 - 与 0.2.6 的关系：份额钩子在 `scheduler.Select` 之前返回，`applyDeferredShareBinding` 先于 0.2.6 原子粘性守卫处理准入绑定；0.2.6 对原版调度文件的改动已作为已审 hunk 加入 `scheduler-diff.json`。合并后在 Go 1.27.2、golangci-lint v2.14.0 下复验通过（tasks.md「合并 main … 后复验」）。
 - 范围：
   - 剔除智能可控调度，行为回到 Sub2API 原版（旧表与设置保留至 D7，旧管理接口统一 410）；
@@ -21,7 +21,7 @@
   - 上游既有问题（未改）：`internal/setup` 用 `password=%s` 拼键值 DSN，数据库密码为空时 lib/pq 把后续 `dbname=...` 当成密码值，自动安装连到 `postgres` 库并在其中建表、建管理员（已用本地测试证实；`password=''` 可避免）。生产使用非空密码不受影响，可另行修复。
 - 未完成（合并后执行或需另行授权）：tasks 0.4–0.6 生产只读基线（脚本已备）、4.5 RC 制品、4.6 影子运行 ≥3 天、4.7 灰度、4.8 D7 删表与退役路由删除。
 - 本地环境：Go 工具链 `/tmp/xy2-toolchain`（1.27.0 与合并后所需 1.27.2，均校验 SHA256）；本机经 Homebrew 安装 `postgresql@18` 与 `redis`，测试数据在 `/tmp/xy2-infra`（`start.sh`/`stop.sh`），收尾已停止；`/tmp/xy2-smoke/{scripts,shots}` 为演练脚本与截图（无凭据），均可删除。
-- 下一步：CI 通过后等待人工审核；合并、发版、部署与生产只读度量需用户另行授权。
+- 下一步：人工审核 PR #90；合并、发版（含 4.5 RC 制品）、部署与生产只读度量（0.4–0.6）需用户另行授权。
 
 ### 份额调度缓存命中与首字专项修订（2026-10-10，规划修订完成；D1–D10 已定稿并进入实施，见上）
 
@@ -573,7 +573,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
-### 20261010-share-scheduling-dev — 剔除智能可控调度并开发份额调度（已提交，PR 待审）
+### 20261010-share-scheduling-dev — 剔除智能可控调度并开发份额调度（PR #90 已开、CI 全绿，待人工审核；本 Agent 无进行中操作）
 
 - 用户授权按方案全权决策 D5/D8/D9/D10 并开始开发；D1–D10 均按 proposal 建议值定稿。本机 `/Users/admin/XIN-MAC-XN/xy2api`，起点 main `3569d4f00`，沿用未提交规划文件。
 - 顺序：阶段 1 剔除 controlled、回到原版 → 阶段 2 缓存归因与份额调度内核/适配/迁移 → 阶段 3 管理接口与前端。只做本地开发与验证，不提交、不推送、不部署、不访问生产或真实上游。
@@ -590,7 +590,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 参考项目学习（同日）：落地「账号表现」报表与等待取消即停，详见顶部交接状态与 design §17 新增两行。
 - 剩余：tasks 2.0、2.14、3.2、3.4 及干净树 `sync.py audit`，见顶部。
 - 收尾（2026-10-10 续）：用户授权提交并自主完成剩余任务后开 PR。已完成 2.0、2.14、3.2、3.4、4.1–4.4 与本地隔离演练（4.5 的本地部分），0.2 决定不合入 v0.2.15，0.3 差异白名单接入 CI；验证与偏差见 tasks.md「验证记录」、design §17。剩余为合并后事项（见顶部），不再阻塞本 PR。
-- 合并 main（同日续）：origin/main 已前进到 0.2.6（`7b1d5d8c`），按常规 merge 并入功能分支（非上游同步），冲突按“保留 0.2.6 缓存可靠性 + 份额绑定优先 + controlled 字段继续删除”解决，合并后全量复验通过；接着推送并开 PR。
+- 合并 main（同日续）：origin/main 已前进到 0.2.6（`7b1d5d8c`），按常规 merge 并入功能分支（非上游同步），冲突按“保留 0.2.6 缓存可靠性 + 份额绑定优先 + controlled 字段继续删除”解决，合并后全量复验通过；已推送并开 PR #90，CI 全部通过。合并与后续事项待用户授权。
 
 ### 20261008-claude-cache-groups-release — 推送、合并与 GitHub 发版
 
@@ -1861,3 +1861,15 @@ pnpm --dir frontend run build
 - 验证：见 tasks.md「合并 main … 后复验」——unit 61 包、Gateway reliability 138 例、OpenAI 缓存门禁 40 例（16 必需全执行）、integration 55 包、lint 0 issues、tools 19 例、干净树 `sync.py audit` 与 `scheduler-diff` 通过。临时 harness 接线已还原。
 - 卡点/风险：无新增；0.2.6 的 `v2:` 会话哈希与原子首次绑定只作用于原版/OpenAI 调度路径，份额路径沿用自己的绑定（GET+PTTL/SET NX），二者在同一请求中不会同时写入。
 - 下一步：推送、开 PR、跟进 CI；合并、发版、部署需另行授权。
+
+### 2026-10-10T22:10:00Z — `20261010-share-scheduling-dev` — 推送、开 PR 与 CI
+
+- 请求/目标：完成用户授权的最后一步——推送并向 main 开 PR，跟进 CI 至通过；不合并、不发版、不部署。
+- 开始状态：HEAD `eeab1b66`，工作树干净，origin/main `7b1d5d8c`。
+- 完成操作：
+  - 推送 `feat/share-scheduling-20261010`。Git Credential Manager 在非交互环境下卡住，已终止该次推送，改用已登录的 `gh auth git-credential` 作为一次性凭据助手完成推送，未改 git 配置；
+  - 开 PR [#90](https://github.com/liulixin-lex/xy2api/pull/90)「feat: replace controlled scheduling with share scheduling」，描述包含变更、默认值、回退、验证、合并后事项和上游安装 DSN 空密码问题；
+  - 两组工作流共 18 项检查全部通过：test 作业的 Unit/Integration/Gateway reliability（30 个 `TestShareScheduling*` 通过）/OpenAI cache reliability/Hosted recharge，upstream-sync-audit 作业的 Original scheduler diff allowlist，以及 lint、前端、安全扫描、shell、release-helpers、windows-plugin-archive。PR 状态为 MERGEABLE/CLEAN。
+- 修改文件：仅本记忆（记录 PR 与 CI）。
+- 收尾：已停止本地 PG/Redis（`/tmp/xy2-infra/stop.sh`）。保留本机 Homebrew `postgresql@18`/`redis`、`/tmp/xy2-toolchain`（Go 1.27.0/1.27.2、golangci-lint）、`/tmp/xy2-infra`（数据与脚本）、`/tmp/xy2-smoke/{scripts,shots}`，均无凭据，可删除。
+- 下一步：人工审核与合并 PR #90；合并后按 tasks 执行 0.4–0.6 基线、4.5 RC、4.6 影子、4.7 灰度、4.8 D7，均需用户授权。
