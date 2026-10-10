@@ -151,6 +151,11 @@ def build_report(root: Path, run_audit: bool) -> dict[str, object]:
         audit = {"requested": True, "passed": code == 0, "output": stdout or stderr}
         if code != 0:
             warnings.append("upstream sync audit failed")
+        code, stdout, stderr = run(root, sys.executable, "tools/upstream-sync/sync.py", "scheduler-diff")
+        audit["passed"] = audit["passed"] and code == 0
+        audit["output"] = "\n".join(part for part in (audit["output"], stdout or stderr) if part)
+        if code != 0:
+            warnings.append("original scheduler diff needs review (sync.py scheduler-diff)")
 
     upstream_ok = not upstream_fetch.startswith("ERROR:") and "Wei-Shaw/sub2api" in upstream_fetch
     provenance_ok = (
@@ -229,7 +234,7 @@ def print_human(report: dict[str, object]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path.cwd(), help="repository path or a child path")
-    parser.add_argument("--audit", action="store_true", help="also run the repository upstream-sync audit")
+    parser.add_argument("--audit", action="store_true", help="also run the repository upstream-sync audit and scheduler diff check")
     parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
     parser.add_argument("--strict", action="store_true", help="return non-zero unless ready_for_prepare is true")
     args = parser.parse_args()
