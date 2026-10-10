@@ -57,6 +57,41 @@
         </label>
       </div>
 
+      <div v-if="tiers.length" class="mt-3 flex flex-wrap gap-2" data-testid="share-tiers">
+        <div
+          v-for="tier in tiers"
+          :key="tier.tier"
+          class="min-w-44 rounded-xl border p-3 text-xs transition-colors"
+          :class="[tierFilter === tier.tier ? 'border-primary-400 bg-primary-50 dark:border-primary-700 dark:bg-primary-900/20' : 'border-gray-200 dark:border-dark-600', dropTarget === tier.tier ? 'ring-2 ring-primary-400' : '']"
+          :data-testid="'share-tier-card-' + tier.tier"
+          @dragover.prevent="dropTarget = tier.tier"
+          @dragleave="dropTarget = null"
+          @drop.prevent="dropOnTier(tier.tier)"
+        >
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-semibold text-gray-900 dark:text-white">{{ t('admin.shareScheduling.policy.tierCard.title', { tier: tier.tier }) }}</span>
+            <span v-if="shares.activeTier === tier.tier" class="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">{{ t('admin.shareScheduling.policy.tierCard.active') }}</span>
+          </div>
+          <div class="mt-1 text-gray-600 dark:text-dark-300">{{ t('admin.shareScheduling.policy.tierCard.summary', { count: tier.count, weight: tier.weight }) }}</div>
+          <div class="text-gray-600 dark:text-dark-300">{{ t('admin.shareScheduling.policy.tierCard.effective', { value: formatSharePercent(tier.effective) }) }}</div>
+          <div class="mt-2 flex flex-wrap gap-1">
+            <button type="button" class="btn btn-ghost btn-sm" :disabled="busy" :data-testid="'share-tier-pick-' + tier.tier" @click="pickTier(tier.tier)">{{ t('admin.shareScheduling.policy.tierCard.pick') }}</button>
+            <button type="button" class="btn btn-ghost btn-sm" :aria-pressed="tierFilter === tier.tier" :data-testid="'share-tier-only-' + tier.tier" @click="toggleTierFilter(tier.tier)">{{ t('admin.shareScheduling.policy.tierCard.only') }}</button>
+          </div>
+        </div>
+        <div
+          class="flex min-w-44 items-center justify-center rounded-xl border border-dashed p-3 text-center text-xs text-gray-500 dark:text-dark-400"
+          :class="dropTarget === newTier ? 'border-primary-400 ring-2 ring-primary-400' : 'border-gray-300 dark:border-dark-500'"
+          data-testid="share-tier-card-new"
+          @dragover.prevent="dropTarget = newTier"
+          @dragleave="dropTarget = null"
+          @drop.prevent="dropOnTier(newTier)"
+        >
+          {{ t('admin.shareScheduling.policy.tierCard.newTier', { tier: newTier }) }}
+        </div>
+        <p class="w-full text-xs text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.policy.tierCard.hint') }}</p>
+      </div>
+
       <div v-if="picked.length" class="mt-3 flex flex-wrap items-end gap-3 rounded-xl bg-gray-50 p-3 dark:bg-dark-700/60" data-testid="share-batch">
         <span class="w-full text-xs font-medium text-gray-600 dark:text-dark-300">{{ t('admin.shareScheduling.policy.selected', { count: picked.length }) }}</span>
         <label class="w-28 text-xs text-gray-600 dark:text-dark-300">{{ t('admin.shareScheduling.policy.batch.tier') }}
@@ -100,7 +135,18 @@
             <tr v-for="row in pageRows" :key="row.account_id" class="border-b border-gray-100 align-top last:border-0 dark:border-dark-700" :data-testid="'share-row-' + row.account_id">
               <td class="p-2"><input v-model="picked" type="checkbox" :value="row.account_id" :aria-label="t('admin.shareScheduling.policy.selectNamed', { name: rowName(row) })"></td>
               <td class="min-w-40 p-2">
-                <div class="font-medium text-gray-900 dark:text-white">{{ rowName(row) }}</div>
+                <div class="flex items-center gap-1.5 font-medium text-gray-900 dark:text-white">
+                  <span
+                    :draggable="!busy"
+                    class="cursor-grab select-none text-gray-400 dark:text-dark-400"
+                    :title="t('admin.shareScheduling.policy.tierCard.drag')"
+                    aria-hidden="true"
+                    :data-testid="'share-drag-' + row.account_id"
+                    @dragstart="startDrag(row, $event)"
+                    @dragend="endDrag"
+                  >⠿</span>
+                  {{ rowName(row) }}
+                </div>
                 <div class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">#{{ row.account_id }} · {{ row.platform }}/{{ row.type }} · P{{ row.priority }} · C{{ row.concurrency }}</div>
                 <span class="mt-1 inline-block rounded px-1.5 py-0.5 text-[11px]" :class="row.configured ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300' : 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-dark-400'">
                   {{ row.configured ? t('admin.shareScheduling.policy.configured') : t('admin.shareScheduling.policy.usingDefault') }}
@@ -362,19 +408,76 @@ const filteredRows = computed(() => {
   const rows = entry.value?.draft.rows ?? []
   const q = search.value.toLowerCase()
   return (q ? rows.filter(row => `${row.name} ${row.account_id} ${row.cache_domain}`.toLowerCase().includes(q)) : rows)
-    .slice()
+    .filter(row => tierFilter.value === null || row.tier === tierFilter.value)
     .sort((a, b) => a.tier - b.tier || a.account_id - b.account_id)
 })
+
+// One card per tier: members, open weight and the share of new sessions
+// the tier takes now. Cards are drop targets for rows.
+const tiers = computed(() => {
+  const byTier = new Map<number, { tier: number; count: number; weight: number; effective: number }>()
+  for (const row of entry.value?.draft.rows ?? []) {
+    const item = byTier.get(row.tier) ?? { tier: row.tier, count: 0, weight: 0, effective: 0 }
+    item.count++
+    if (!row.drain) item.weight += row.weight
+    item.effective += sharesOf(row).effective
+    byTier.set(row.tier, item)
+  }
+  return [...byTier.values()].sort((a, b) => a.tier - b.tier)
+})
+const newTier = computed(() => (tiers.value.length ? tiers.value[tiers.value.length - 1].tier + 1 : 1))
+const tierFilter = ref<number | null>(null)
+const dragged = ref<number[]>([])
+const dropTarget = ref<number | null>(null)
 const pageRows = computed(() => filteredRows.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 const allVisiblePicked = computed(() => pageRows.value.length > 0 && pageRows.value.every(row => picked.value.includes(row.account_id)))
 
-watch(search, () => { page.value = 1 })
+watch([search, tierFilter], () => { page.value = 1 })
+watch(tiers, list => {
+  if (tierFilter.value !== null && !list.some(item => item.tier === tierFilter.value)) tierFilter.value = null
+})
 watch(() => store.selected, () => {
   search.value = ''
   page.value = 1
   picked.value = []
+  tierFilter.value = null
   rebalanceOpen.value = false
 })
+
+function pickTier(tier: number) {
+  const ids = (entry.value?.draft.rows ?? []).filter(row => row.tier === tier).map(row => row.account_id)
+  picked.value = [...new Set([...picked.value, ...ids])]
+}
+
+function toggleTierFilter(tier: number) {
+  tierFilter.value = tierFilter.value === tier ? null : tier
+}
+
+// Dragging a selected row moves every selected row; any other row moves alone.
+function startDrag(row: ShareDraftRow, event: DragEvent) {
+  dragged.value = picked.value.includes(row.account_id) ? [...picked.value] : [row.account_id]
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', dragged.value.join(','))
+  }
+}
+
+function endDrag() {
+  dragged.value = []
+  dropTarget.value = null
+}
+
+function dropOnTier(tier: number) {
+  const ids = new Set(dragged.value)
+  if (!busy.value) {
+    for (const row of entry.value?.draft.rows ?? []) {
+      if (!ids.has(row.account_id)) continue
+      row.tier = tier
+      row.configured = true
+    }
+  }
+  endDrag()
+}
 
 function toggleVisible() {
   const ids = pageRows.value.map(row => row.account_id)

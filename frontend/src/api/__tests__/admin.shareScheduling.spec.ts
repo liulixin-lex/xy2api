@@ -22,13 +22,15 @@ describe('share scheduling admin API', () => {
     await shareSchedulingAPI.report(5, '6h')
     await shareSchedulingAPI.decisions(5, 50)
     expect(await shareSchedulingAPI.rebalance(5, 'cold')).toEqual({ mode: 'cold', cleared: 3 })
+    await shareSchedulingAPI.accountRules(12)
 
     expect(get.mock.calls.map(call => call[0])).toEqual([
       '/admin/share-scheduling/settings',
       '/admin/share-scheduling/groups',
       '/admin/share-scheduling/groups/5/policy',
       '/admin/share-scheduling/groups/5/report',
-      '/admin/share-scheduling/groups/5/decisions'
+      '/admin/share-scheduling/groups/5/decisions',
+      '/admin/share-scheduling/accounts/12/rules'
     ])
     expect(get).toHaveBeenCalledWith('/admin/share-scheduling/groups/5/report', { params: { window: '6h' } })
     expect(get).toHaveBeenCalledWith('/admin/share-scheduling/groups/5/decisions', { params: { limit: 50 } })
@@ -43,5 +45,6 @@ describe('share scheduling admin API', () => {
     vi.spyOn(apiClient, 'get').mockResolvedValue({ data: null })
     expect(await shareSchedulingAPI.listGroups()).toEqual([])
     expect(await shareSchedulingAPI.decisions(5)).toEqual([])
+    expect(await shareSchedulingAPI.accountRules(12)).toEqual([])
   })
 })

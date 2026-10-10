@@ -1,11 +1,25 @@
 export default {
   shareScheduling: {
     title: '份额调度',
+    // 页头只放短句，完整说明在页面内。
+    subtitle: '按分组设置账号层级与权重，保住提示缓存与首字速度',
     description: '按分组设置账号层级与权重：新会话按份额分配，已绑定会话优先留在原账号以保住提示缓存与首字速度。',
     globalOff: '总开关未开启：所有分组都使用原版调度，影子对比也不会运行。',
     globalOn: '总开关已开启',
     openSettings: '前往系统设置',
     loadSettingsFailed: '无法读取份额调度总开关状态。',
+    accountRules: {
+      title: '份额调度',
+      hint: '所在分组启用份额调度时按以下层级与权重选号，账号优先级只作为未配置账号的默认层级。',
+      tier: '层级 {tier}',
+      weight: '权重 {weight}',
+      domain: '缓存域 {domain}',
+      ownDomain: '缓存域：自成一域',
+      drain: '排空中',
+      defaults: '按默认值',
+      notEffective: '未生效',
+      manage: '前往份额调度'
+    },
     schedulers: {
       sub2api: '原版调度',
       shadow: '影子对比',
@@ -90,6 +104,17 @@ export default {
       selectNamed: '选择 {name}',
       accountNumber: '账号 #{id}',
       selected: '已选 {count} 个账号',
+      tierCard: {
+        title: '层级 {tier}',
+        active: '接收新会话',
+        summary: '{count} 个账号 · 开放权重 {weight}',
+        effective: '新会话份额 {value}',
+        pick: '选中本层',
+        only: '只看本层',
+        newTier: '拖到这里新建层级 {tier}',
+        drag: '拖到层级卡片以改层；已选中多行时一起移动',
+        hint: '拖动账号名左侧的把手到层级卡片即可改层，已选中的多行会一起移动；也可以“选中本层”后在批量编辑里修改层级。数字越小越优先。'
+      },
       batch: {
         tier: '层级',
         weight: '权重',
@@ -202,6 +227,7 @@ export default {
         weightRange: '账号 #{id} 的权重需在 {min} 到 {max} 之间。',
         drainUntil: '账号 #{id} 的强制迁移截止时间无效。',
         cacheDomain: '账号 #{id} 的缓存域只能包含字母、数字及 . _ : -，最长 {max} 个字符。',
+        cacheDomainReserved: '账号 #{id} 的缓存域不能以 {prefix} 开头，该前缀保留给未填写缓存域的账号。',
         cacheDomainPlatform: '缓存域 {domain} 混合了不同平台的账号。',
         allDrained: '启用时至少保留一个未排空的账号。',
         affinityTTL: '绑定空闲过期需在 300 到 86400 秒之间。',
@@ -313,6 +339,19 @@ export default {
         p50: 'P50',
         p95: 'P95',
         p99: 'P99'
+      },
+      selection: {
+        title: '选号开销（采样）',
+        hint: '每次采样选号的平均耗时与存储访问；切换调度器前后对比即可看出份额调度的额外开销。',
+        unmetered: '部分或全部节点未开启 server.enable_server_timing，Redis 与数据库指标只统计已开启节点的样本，没有样本时显示“—”。',
+        columns: {
+          scheduler: '调度器',
+          samples: '样本',
+          avgMs: '平均耗时',
+          redisTrips: 'Redis 往返',
+          redisMs: 'Redis 耗时',
+          dbQueries: '数据库查询'
+        }
       },
       decisions: '最近决策',
       decisionColumns: {

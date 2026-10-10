@@ -70,7 +70,13 @@ beforeEach(() => {
     members: [shareMember(1, { effective_share: 0.5 }), shareMember(2, { effective_share: 0.5 })],
     actual: [{ account_id: 1, placed: 6, placed_share: 0.6, requests: 0, request_share: 0, tokens: 0, token_share: 0, standard_cost: 0, cost_share: 0, skipped: { saturated: 3, session_limit: 1 }, ttft: { count: 5, p50_ms: 500, p95_ms: 2000, p99_ms: 3000 } }],
     decisions: { requests: 10, reasons: { affinity_hit: 7, new_session: 3 }, key_sources: {}, ideal_skips: {}, hot_migrations: 0, hot_reasons: {}, wait_count: 0, wait_hit: 0, avg_wait_ms: 0, attempts: 10, shadow: 0, shadow_agree: 0, shadow_agree_rate: 0, shadow_reasons: {}, rebalance_cleared: 0, dropped: 0 },
-    cache: { requests: 4, classes: {}, class_tokens: { cache_hit: 900, miss_new_session: 100 }, prompt_tokens: 1000, cache_read_tokens: 900, cache_creation_tokens: 0, read_ratio: 0.9, scheduling_miss_ratio: 0, ttft: { affinity_hit: { count: 4, p50_ms: 500, p95_ms: 1000, p99_ms: null } }, dropped: 0 }
+    cache: { requests: 4, classes: {}, class_tokens: { cache_hit: 900, miss_new_session: 100 }, prompt_tokens: 1000, cache_read_tokens: 900, cache_creation_tokens: 0, read_ratio: 0.9, scheduling_miss_ratio: 0, ttft: { affinity_hit: { count: 4, p50_ms: 500, p95_ms: 1000, p99_ms: null } },
+      selection: {
+        original: { samples: 3, avg_ms: 0.4, io_samples: 0, avg_redis_round_trips: null, avg_redis_ms: null, avg_db_queries: null },
+        share: { samples: 5, avg_ms: 0.62, io_samples: 5, avg_redis_round_trips: 3, avg_redis_ms: 0.25, avg_db_queries: 1 },
+        shadow: { samples: 0, avg_ms: 0, io_samples: 0, avg_redis_round_trips: null, avg_redis_ms: null, avg_db_queries: null }
+      },
+      dropped: 0 }
   })
   api.decisions.mockResolvedValue([{ at: '2026-10-10T08:00:00Z', version: 1, scheduler: 'share', key_source: 'key_session', reason: 'affinity_hit', bound: 1, served: 1, attempts: 1, elapsed_us: 30 }])
 })
@@ -139,6 +145,33 @@ describe('share scheduling page', () => {
     expect(w.get('[data-testid="share-problems"]').text()).toContain('problems.weightRange')
   })
 
+  it('moves accounts between tiers by dragging and by tier selection', async () => {
+    const w = mountView()
+    await openGroup(w)
+    expect(w.get('[data-testid="share-tier-card-1"]').text()).toContain('"count":2')
+    expect(w.find('[data-testid="share-tier-card-2"]').exists()).toBe(false)
+
+    // Drag account 2 onto the new-tier card.
+    await w.get('[data-testid="share-drag-2"]').trigger('dragstart')
+    await w.get('[data-testid="share-tier-card-new"]').trigger('drop')
+    expect((w.get('[data-testid="share-tier-2"]').element as HTMLInputElement).value).toBe('2')
+    expect(w.get('[data-testid="share-tier-card-2"]').text()).toContain('"count":1')
+    expect(w.get('[data-testid="share-draft-status"]').text()).toBe('admin.shareScheduling.policy.dirty')
+
+    // Only this tier filters the table; selecting a tier feeds the batch editor.
+    await w.get('[data-testid="share-tier-only-2"]').trigger('click')
+    expect(w.find('[data-testid="share-row-1"]').exists()).toBe(false)
+    await w.get('[data-testid="share-tier-pick-2"]').trigger('click')
+    expect(w.get('[data-testid="share-batch"]').text()).toContain('"count":1')
+
+    // Dragging a selected row moves the whole selection back to tier 1.
+    await w.get('[data-testid="share-tier-only-2"]').trigger('click')
+    await w.get('[data-testid="share-drag-2"]').trigger('dragstart')
+    await w.get('[data-testid="share-tier-card-1"]').trigger('drop')
+    expect((w.get('[data-testid="share-tier-2"]').element as HTMLInputElement).value).toBe('1')
+    expect(w.find('[data-testid="share-tier-card-2"]').exists()).toBe(false)
+  })
+
   it('asks before leaving with unsaved drafts', async () => {
     const w = mountView()
     await openGroup(w)
@@ -165,6 +198,12 @@ describe('share scheduling page', () => {
     expect(busy).toContain('≤ 2.0 s')
     expect(w.get('[data-testid="share-account-2"]').text()).toContain('-')
     expect(w.find('[data-testid="share-account-busy"]').exists()).toBe(true)
+    const selection = w.get('[data-testid="share-selection-cost"]')
+    expect(selection.findAll('tbody tr').map(row => row.attributes('data-testid'))).toEqual(['share-selection-share', 'share-selection-original'])
+    expect(w.get('[data-testid="share-selection-share"]').text()).toContain('0.62 ms')
+    expect(w.get('[data-testid="share-selection-share"]').text()).toContain('3.0')
+    expect(w.get('[data-testid="share-selection-original"]').text()).toContain('—')
+    expect(w.find('[data-testid="share-selection-unmetered"]').exists()).toBe(true)
     expect(w.get('[data-testid="share-decisions"]').text()).toContain('reasons.affinity_hit')
 
     api.explain.mockResolvedValue({

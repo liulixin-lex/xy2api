@@ -1,11 +1,25 @@
 export default {
   shareScheduling: {
     title: 'Share Scheduling',
+    // Short line for the page header; the page itself shows the full description.
+    subtitle: 'Per-group account tiers and weights that keep prompt caches warm',
     description: 'Set account tiers and weights per group: new sessions are placed by share, and bound sessions stay on their account to keep prompt-cache hits and fast first tokens.',
     globalOff: 'The master switch is off: every group uses the original scheduler and shadow comparison does not run.',
     globalOn: 'Master switch on',
     openSettings: 'Open system settings',
     loadSettingsFailed: 'Could not read the share scheduling master switch.',
+    accountRules: {
+      title: 'Share scheduling',
+      hint: 'Groups with share scheduling place requests by these tiers and weights; the account priority is only the default tier of unconfigured accounts.',
+      tier: 'Tier {tier}',
+      weight: 'Weight {weight}',
+      domain: 'Cache domain {domain}',
+      ownDomain: 'Cache domain: its own',
+      drain: 'Draining',
+      defaults: 'Defaults',
+      notEffective: 'Not in effect',
+      manage: 'Open share scheduling'
+    },
     schedulers: {
       sub2api: 'Original',
       shadow: 'Shadow',
@@ -90,6 +104,17 @@ export default {
       selectNamed: 'Select {name}',
       accountNumber: 'Account #{id}',
       selected: '{count} accounts selected',
+      tierCard: {
+        title: 'Tier {tier}',
+        active: 'Takes new sessions',
+        summary: '{count} accounts · open weight {weight}',
+        effective: 'New-session share {value}',
+        pick: 'Select tier',
+        only: 'Only this tier',
+        newTier: 'Drop here for a new tier {tier}',
+        drag: 'Drag onto a tier card to move; selected rows move together',
+        hint: 'Drag the handle left of an account name onto a tier card to move it; selected rows move together. Or select a tier and change its tier in the batch editor. Lower numbers come first.'
+      },
       batch: {
         tier: 'Tier',
         weight: 'Weight',
@@ -202,6 +227,7 @@ export default {
         weightRange: 'Account #{id}: weight must be between {min} and {max}.',
         drainUntil: 'Account #{id}: the forced migration deadline is invalid.',
         cacheDomain: 'Account #{id}: cache domain may only contain letters, digits and . _ : - (at most {max} characters).',
+        cacheDomainReserved: 'Account #{id}: cache domains starting with {prefix} are reserved for accounts without one.',
         cacheDomainPlatform: 'Cache domain {domain} mixes accounts of different platforms.',
         allDrained: 'Keep at least one account undrained while scheduling is active.',
         affinityTTL: 'Binding idle expiry must be 300–86400 seconds.',
@@ -313,6 +339,19 @@ export default {
         p50: 'P50',
         p95: 'P95',
         p99: 'P99'
+      },
+      selection: {
+        title: 'Selection cost (sampled)',
+        hint: 'Average time and storage calls per sampled selection; compare before and after switching schedulers to see the share overhead.',
+        unmetered: 'Some or all nodes run without server.enable_server_timing. Redis and database figures only cover samples from nodes with it enabled and show "—" without any.',
+        columns: {
+          scheduler: 'Scheduler',
+          samples: 'Samples',
+          avgMs: 'Avg time',
+          redisTrips: 'Redis round trips',
+          redisMs: 'Redis time',
+          dbQueries: 'DB queries'
+        }
       },
       decisions: 'Recent decisions',
       decisionColumns: {

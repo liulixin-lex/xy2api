@@ -13,6 +13,8 @@ export const SHARE_MAX_CACHE_DOMAIN = 64
 const TIER_MIN = -2147483648
 const TIER_MAX = 2147483647
 const cacheDomainPattern = /^[A-Za-z0-9._:-]+$/
+/** Prefix of the implicit per-account domains, reserved by the backend. */
+const OWN_CACHE_DOMAIN_PREFIX = 'account:'
 
 export interface ShareDraftRow {
   account_id: number
@@ -130,6 +132,10 @@ export function validateShareDraft(draft: ShareDraft): ShareProblem[] {
     if (!domain) continue
     if (domain.length > SHARE_MAX_CACHE_DOMAIN || !cacheDomainPattern.test(domain)) {
       problems.push({ key: 'cacheDomain', params: { id, max: SHARE_MAX_CACHE_DOMAIN } })
+      continue
+    }
+    if (domain.startsWith(OWN_CACHE_DOMAIN_PREFIX)) {
+      problems.push({ key: 'cacheDomainReserved', params: { id, prefix: OWN_CACHE_DOMAIN_PREFIX } })
       continue
     }
     const platform = domains.get(domain)

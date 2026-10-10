@@ -71,6 +71,8 @@ describe('share scheduling drafts', () => {
     const bad = draftFromView(shareView(5))
     Object.assign(bad.rows[0], { configured: true, cache_domain: 'has space', tier: 1.5 })
     expect(validateShareDraft(bad).map(p => p.key)).toEqual(['tierRange', 'cacheDomain'])
+    Object.assign(bad.rows[0], { cache_domain: 'account:2', tier: 1 })
+    expect(validateShareDraft(bad).map(p => p.key)).toEqual(['cacheDomainReserved'])
   })
 
   it('computes shares like the backend, including negative tiers', () => {

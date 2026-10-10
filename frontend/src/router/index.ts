@@ -534,7 +534,7 @@ const routes: RouteRecordRaw[] = [
       requiresAdmin: true,
       title: 'Share Scheduling',
       titleKey: 'admin.shareScheduling.title',
-      descriptionKey: 'admin.shareScheduling.description'
+      descriptionKey: 'admin.shareScheduling.subtitle'
     }
   },
   {

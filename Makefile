@@ -25,6 +25,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/stores/__tests__/shareScheduling.spec.ts \
 	src/utils/__tests__/shareScheduling.spec.ts \
 	src/api/__tests__/admin.shareScheduling.spec.ts \
+	src/components/account/__tests__/ShareAccountRules.spec.ts \
 	src/features/channel-monitor-v2/__tests__/designSystem.structure.spec.ts \
 	src/features/channel-monitor-v2/__tests__/monitorFormat.spec.ts \
 	src/features/channel-monitor-v2/__tests__/monitorZoom.spec.ts

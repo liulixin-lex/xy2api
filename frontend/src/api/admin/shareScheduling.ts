@@ -235,10 +235,36 @@ export interface ShareReport {
     read_ratio: number
     scheduling_miss_ratio: number
     ttft: Record<string, ShareTTFT>
+    /** Sampled selection cost keyed by share, shadow or original. */
+    selection?: Record<string, ShareSelectionCost>
     dropped: number
   }
   corrections?: Record<string, number>
   counters_error?: string
+}
+
+/** An account's resolved rule in one group that stores a policy. */
+export interface ShareAccountGroupRule {
+  group_id: number
+  group_name: string
+  scheduler: ShareScheduler
+  effective: boolean
+  configured: boolean
+  tier: number
+  weight: number
+  drain: boolean
+  drain_until?: string
+  cache_domain: string
+}
+
+/** Redis and database figures need server.enable_server_timing; they are null without metered samples. */
+export interface ShareSelectionCost {
+  samples: number
+  avg_ms: number
+  io_samples: number
+  avg_redis_round_trips: number | null
+  avg_redis_ms: number | null
+  avg_db_queries: number | null
 }
 
 export interface ShareDecisionSample {
@@ -321,6 +347,11 @@ export async function decisions(groupId: number, limit = 100): Promise<ShareDeci
   return data ?? []
 }
 
+export async function accountRules(accountId: number): Promise<ShareAccountGroupRule[]> {
+  const { data } = await apiClient.get<ShareAccountGroupRule[]>(`${base}/accounts/${accountId}/rules`)
+  return data ?? []
+}
+
 export async function rebalance(groupId: number, mode: ShareRebalanceMode): Promise<{ mode: ShareRebalanceMode; cleared: number }> {
   const { data } = await apiClient.post<{ mode: ShareRebalanceMode; cleared: number }>(`${base}/groups/${groupId}/rebalance`, { mode })
   return data
@@ -336,7 +367,8 @@ export const shareSchedulingAPI = {
   explain,
   report,
   decisions,
-  rebalance
+  rebalance,
+  accountRules
 }
 
 export default shareSchedulingAPI

@@ -138,6 +138,36 @@
         <p v-else class="mt-2 text-sm text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.report.noData') }}</p>
       </section>
 
+      <section v-if="selectionRows.length" class="card p-5">
+        <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('admin.shareScheduling.report.selection.title') }}</h3>
+        <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.report.selection.hint') }}</p>
+        <p v-if="selectionUnmetered" class="mt-1 text-xs text-amber-600 dark:text-amber-400" data-testid="share-selection-unmetered">{{ t('admin.shareScheduling.report.selection.unmetered') }}</p>
+        <div class="mt-3 overflow-x-auto">
+          <table class="w-full text-left text-sm" data-testid="share-selection-cost">
+            <thead>
+              <tr class="border-b border-gray-200 text-xs text-gray-500 dark:border-dark-600 dark:text-dark-400">
+                <th class="p-2">{{ t('admin.shareScheduling.report.selection.columns.scheduler') }}</th>
+                <th class="p-2 text-right">{{ t('admin.shareScheduling.report.selection.columns.samples') }}</th>
+                <th class="p-2 text-right">{{ t('admin.shareScheduling.report.selection.columns.avgMs') }}</th>
+                <th class="p-2 text-right">{{ t('admin.shareScheduling.report.selection.columns.redisTrips') }}</th>
+                <th class="p-2 text-right">{{ t('admin.shareScheduling.report.selection.columns.redisMs') }}</th>
+                <th class="p-2 text-right">{{ t('admin.shareScheduling.report.selection.columns.dbQueries') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in selectionRows" :key="row.mode" class="border-b border-gray-100 last:border-0 dark:border-dark-700" :data-testid="'share-selection-' + row.mode">
+                <td class="p-2">{{ labels.scheduler(row.mode === 'original' ? 'sub2api' : row.mode) }}</td>
+                <td class="p-2 text-right font-mono">{{ formatNumber(row.samples) }}</td>
+                <td class="p-2 text-right font-mono">{{ fineMs(row.avg_ms) }}</td>
+                <td class="p-2 text-right font-mono">{{ row.avg_redis_round_trips === null ? '—' : row.avg_redis_round_trips.toFixed(1) }}</td>
+                <td class="p-2 text-right font-mono">{{ row.avg_redis_ms === null ? '—' : fineMs(row.avg_redis_ms) }}</td>
+                <td class="p-2 text-right font-mono">{{ row.avg_db_queries === null ? '—' : row.avg_db_queries.toFixed(1) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section class="card p-5">
         <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('admin.shareScheduling.report.decisions') }}</h3>
         <div v-if="decisions.length" class="mt-3 max-h-[480px] overflow-auto">
@@ -272,6 +302,18 @@ const ttftRows = computed(() => Object.entries(report.value?.cache.ttft ?? {})
   .filter(([, value]) => value.count > 0)
   .map(([reason, value]) => ({ reason, ...value }))
   .sort((a, b) => b.count - a.count))
+
+const SELECTION_ORDER = ['share', 'shadow', 'original']
+const selectionRows = computed(() => Object.entries(report.value?.cache.selection ?? {})
+  .filter(([, value]) => value.samples > 0)
+  .map(([mode, value]) => ({ mode, ...value }))
+  .sort((a, b) => SELECTION_ORDER.indexOf(a.mode) - SELECTION_ORDER.indexOf(b.mode)))
+const selectionUnmetered = computed(() => selectionRows.value.some(row => !row.io_samples))
+
+// Selections take well under a millisecond; keep two decimals there.
+function fineMs(ms: number): string {
+  return ms < 10 ? `${ms.toFixed(2)} ms` : formatShareMs(ms)
+}
 
 function bucket(ms: number | null): string {
   return ms === null ? '> 30 s' : `≤ ${formatShareMs(ms)}`
