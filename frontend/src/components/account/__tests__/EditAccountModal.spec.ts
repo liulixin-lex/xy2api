@@ -1,4 +1,3 @@
-import { useSchedulingModeStore } from '@/stores/schedulingMode'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -328,8 +327,7 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
-  it.each(['controlled', 'sub2api'] as const)('keeps account editing free of scheduling scope and failure-domain settings in %s mode', async mode => {
-    useSchedulingModeStore().document = { mode, version: 1 }
+  it('keeps account editing free of scheduling scope and failure-domain settings', async () => {
     const wrapper = mountModal()
     await flushPromises()
     expect(wrapper.text()).not.toMatch(/failureDomains|controlTitle|credentialFamily|diagnosticsTitle/)

@@ -769,7 +769,7 @@
               class="input-label mb-0"
               for="bulk-edit-priority-enabled"
             >
-              {{ t(schedulingModeStore.isControlled ? 'admin.scheduling.modeSettings.defaultPriority' : 'admin.accounts.priority') }}
+              {{ t('admin.accounts.priority') }}
             </label>
             <input
               v-model="enablePriority"
@@ -1482,8 +1482,6 @@
 </template>
 
 <script setup lang="ts">
-import { useSchedulingModeStore } from '@/stores/schedulingMode'
-const schedulingModeStore = useSchedulingModeStore()
 import IQCheckSettings from './IQCheckSettings.vue'
 import type { IQCheckSettings as IQSettings } from '@/types'
 import { ref, watch, computed } from 'vue'

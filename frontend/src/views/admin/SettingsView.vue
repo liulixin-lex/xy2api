@@ -203,7 +203,7 @@
 
         <!-- Tab: Gateway -->
         <div v-show="activeTab === 'gateway'" class="space-y-6">
-          <SchedulingModeSettings />
+          <ShareSchedulingSettings v-if="activeTab === 'gateway' && !loading && !loadFailed" />
           <!-- Overload Cooldown (529) Settings -->
           <div class="card">
             <div
@@ -5014,7 +5014,6 @@
             </div>
           </div>
 
-
           <!-- Gateway Scheduling Settings -->
           <div class="card">
             <div
@@ -5114,7 +5113,6 @@
                 </div>
               </div>
 
-              <template v-if="schedulingModeStore.isSub2API">
               <div
                 v-if="!form.openai_advanced_scheduler_enabled"
                 class="flex items-center justify-between border-t border-gray-100 pt-5 dark:border-dark-700"
@@ -5292,7 +5290,6 @@
                   </label>
                 </div>
               </div>
-              </template>
             </div>
           </div>
 
@@ -9100,9 +9097,8 @@ import { affiliatesAPI, type AffiliateAdminEntry, type SimpleUser as AffiliateSi
 import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiError";
 import { useAppStore } from "@/stores";
 import { useAdminSettingsStore } from "@/stores/adminSettings";
-import { useSchedulingModeStore } from "@/stores/schedulingMode";
 import ClaudeCacheFallbackSettings from "@/views/admin/settings/ClaudeCacheFallbackSettings.vue";
-import SchedulingModeSettings from "@/components/settings/SchedulingModeSettings.vue";
+import ShareSchedulingSettings from "@/views/admin/settings/ShareSchedulingSettings.vue";
 import { normalizeVisibleMethod } from "@/components/payment/paymentFlow";
 import StripeModeSelector from "@/components/payment/StripeModeSelector.vue";
 import {
@@ -9123,7 +9119,6 @@ const appStore = useAppStore();
 // 关闭 step-up 开关是敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 码重试
 const settingsStepUp = useStepUp();
 const adminSettingsStore = useAdminSettingsStore();
-const schedulingModeStore = useSchedulingModeStore();
 const isZhLocale = computed(() => locale.value.startsWith("zh"));
 
 function localText(zh: string, en: string): string {

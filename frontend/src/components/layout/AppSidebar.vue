@@ -192,7 +192,6 @@ import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'v
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
-import { useSchedulingModeStore } from '@/stores/schedulingMode'
 import VersionBadge from '@/components/common/VersionBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
@@ -774,7 +773,6 @@ const customMenuItemsForAdmin = computed(() => {
 })
 
 // Admin navigation items
-const schedulingModeStore = useSchedulingModeStore()
 const adminNavItems = computed((): NavItem[] => {
   const baseItems: NavItem[] = [
     { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon },
@@ -795,7 +793,7 @@ const adminNavItems = computed((): NavItem[] => {
     // 「仅充值」站点连管理端的「订阅管理」入口也一并收起（路由本身不拦截）。
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
-    { path: '/admin/scheduling', label: t('admin.scheduling.title'), icon: SignalIcon, featureFlag: () => schedulingModeStore.isControlled },
+    { path: '/admin/share-scheduling', label: t('nav.shareScheduling'), icon: SignalIcon },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
@@ -951,20 +949,15 @@ watch(
   (v) => {
     if (v) {
       adminSettingsStore.fetch()
-      void schedulingModeStore.fetch()
-    } else { schedulingModeStore.reset() }
+    }
   },
   { immediate: true }
 )
 
-function refreshSchedulingMode() { if (isAdmin.value && document.visibilityState === 'visible') void schedulingModeStore.fetch(true) }
-
 onMounted(() => {
-  window.addEventListener('focus', refreshSchedulingMode)
   void refreshBatchImageAccess()
   if (isAdmin.value) {
     adminSettingsStore.fetch()
-    void schedulingModeStore.fetch(true)
   }
   // Restore sidebar scroll position after route change re-mounts the component
   if (appStore.sidebarScrollTop > 0 && sidebarNavRef.value) {
@@ -977,7 +970,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('focus', refreshSchedulingMode)
   if (sidebarNavRef.value) {
     appStore.sidebarScrollTop = sidebarNavRef.value.scrollTop
   }

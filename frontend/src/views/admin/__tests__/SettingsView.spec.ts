@@ -1,4 +1,3 @@
-import { useSchedulingModeStore } from '@/stores/schedulingMode';
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
@@ -8,7 +7,6 @@ import enSettings from "@/i18n/locales/en/admin/settings";
 import zhCommon from "@/i18n/locales/zh/common";
 import zhSettings from "@/i18n/locales/zh/admin/settings";
 import SettingsView from "../SettingsView.vue";
-beforeEach(() => { useSchedulingModeStore().document = { mode: "sub2api", version: 1 }; });
 
 const {
   getSettings,
@@ -563,6 +561,7 @@ function mountView() {
         PaymentProviderDialog: true,
         GroupBadge: true,
         GroupOptionItem: true,
+        ShareSchedulingSettings: true,
         ProxySelector: true,
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
@@ -636,7 +635,6 @@ describe("admin SettingsView email domain quota copy", () => {
 
 describe("admin SettingsView payment visible method controls", () => {
   beforeEach(() => {
-    useSchedulingModeStore().document = { mode: 'sub2api', version: 1 };
     getSettings.mockReset();
     updateSettings.mockReset();
     getWebSearchEmulationConfig.mockReset();
@@ -1426,6 +1424,7 @@ describe("admin SettingsView payment visible method controls", () => {
           PaymentProviderDialog: true,
           GroupBadge: true,
           GroupOptionItem: true,
+          ShareSchedulingSettings: true,
           ProxySelector: true,
           ImageUpload: ImageUploadStub,
           BackupSettings: true,
@@ -1443,13 +1442,10 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(getProviders).toHaveBeenCalledTimes(2);
   });
 
-  it("shows upstream settings only in original mode", async () => {
+  it("always shows the original upstream scheduling settings", async () => {
     const wrapper = mountView(); await flushPromises(); await openGatewayTab(wrapper);
     expect(wrapper.find('[data-testid="openai-advanced-scheduler-toggle"]').exists()).toBe(true);
-    useSchedulingModeStore().document = { mode: 'controlled', version: 2 }; await flushPromises();
-    expect(wrapper.find('[data-testid="openai-advanced-scheduler-toggle"]').exists()).toBe(false);
-    expect(wrapper.find('[data-testid="openai-low-rate-priority-toggle"]').exists()).toBe(false);
-    expect(wrapper.find('[data-testid="scheduling-mode-settings"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="scheduling-mode-settings"]').exists()).toBe(false);
   });
 
   it("renders advanced scheduler copy as local experimental gateway policy", async () => {
@@ -1782,6 +1778,7 @@ describe("admin SettingsView payment visible method controls", () => {
           PaymentProviderDialog: true,
           GroupBadge: true,
           GroupOptionItem: true,
+          ShareSchedulingSettings: true,
           ProxySelector: true,
           ImageUpload: ImageUploadStub,
           BackupSettings: true,

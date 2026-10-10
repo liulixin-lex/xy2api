@@ -3041,7 +3041,7 @@
           <p class="input-hint">{{ t('admin.accounts.loadFactorHint') }}</p>
         </div>
         <div>
-          <label class="input-label">{{ t(schedulingModeStore.isControlled ? 'admin.scheduling.modeSettings.defaultPriority' : 'admin.accounts.priority') }}</label>
+          <label class="input-label">{{ t('admin.accounts.priority') }}</label>
           <input
             v-model.number="form.priority"
             type="number"
@@ -3049,7 +3049,7 @@
             class="input"
             data-tour="account-form-priority"
           />
-          <p class="input-hint">{{ t(schedulingModeStore.isControlled ? 'admin.scheduling.modeSettings.defaultPriorityHint' : 'admin.accounts.priorityHint') }}</p>
+          <p class="input-hint">{{ t('admin.accounts.priorityHint') }}</p>
         </div>
         <div>
           <label class="input-label">{{ t('admin.accounts.billingRateMultiplier') }}</label>
@@ -3901,8 +3901,6 @@
 </template>
 
 <script setup lang="ts">
-import { useSchedulingModeStore } from '@/stores/schedulingMode'
-const schedulingModeStore = useSchedulingModeStore()
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
