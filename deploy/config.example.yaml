@@ -460,6 +460,13 @@ gateway:
     mode: enforce # off | observe | enforce
     avoid_seconds: 300
     rules: [] # Additional explicit pairs: [{from: gpt-6-astra, to: gpt-5.6-terra}]
+  # Privacy-safe cache diagnostics and optional cold-session tie-breaker.
+  # Existing owners, health, priority, capacity and admission remain authoritative.
+  # See docs/openai-cache-reliability.md for rollout and rollback.
+  openai_cache:
+    diagnostics_enabled: false
+    aware_routing_enabled: false
+    rollout_percent: 0 # 0..100, stable authenticated session cohorts
   openai_scheduler:
     # 是否允许 session_hash sticky 在账号健康度恶化时临时逃逸；false 可一键回退旧行为
     sticky_escape_enabled: true

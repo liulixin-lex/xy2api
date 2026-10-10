@@ -396,8 +396,8 @@ func TestRelayUsageTerminalNonZeroReplacesFallbackAsWhole(t *testing.T) {
 	parseUsageAndAccumulate(state, []byte(`{"type":"response.in_progress","usage":{"input_tokens":9,"output_tokens":4,"input_tokens_details":{"cached_tokens":2}}}`), "response.in_progress", nil)
 	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","usage":{"input_tokens":3,"output_tokens":0,"input_tokens_details":{"cached_tokens":0}}}`), "response.completed", nil)
 
-	require.Equal(t, Usage{InputTokens: 3}, finalizeRelayTurnUsage(state))
-	require.Equal(t, Usage{InputTokens: 3}, state.usage)
+	require.Equal(t, Usage{InputTokens: 3, CacheReadSource: "input_tokens_details.cached_tokens"}, finalizeRelayTurnUsage(state))
+	require.Equal(t, Usage{InputTokens: 3, CacheReadSource: "input_tokens_details.cached_tokens"}, state.usage)
 }
 
 func TestObserveUpstreamMessageBareErrorClearsTurnStateAndFinalizesUsageOnce(t *testing.T) {

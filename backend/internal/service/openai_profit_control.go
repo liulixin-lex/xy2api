@@ -349,11 +349,8 @@ func (s *OpenAIGatewayService) bindOpenAIStickySessionDuringSelection(ctx contex
 }
 
 // BindStickySessionAfterProfitAdmission records the terminally admitted
-// account. Without a profit gate it preserves the pre-existing eager binding
-// behavior at the handler bind points. With a gate it never overwrites a
-// different binding that already exists, so a temporarily ineligible account
-// remains sticky and becomes eligible again automatically after its rate
-// recovers.
+// account without replacing another owner. Temporary spillover therefore
+// preserves affinity; successful admission promotes a short reservation.
 func (s *OpenAIGatewayService) BindStickySessionAfterProfitAdmission(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
 	if sessionHash == "" || accountID <= 0 {
 		return nil
@@ -361,7 +358,7 @@ func (s *OpenAIGatewayService) BindStickySessionAfterProfitAdmission(ctx context
 	if preserveOpenAIGuardianParentBinding(ctx, sessionHash) {
 		return nil
 	}
-	if !gatewayProfitControlGateActive(ctx) {
+	if !openAIAtomicStickySession(sessionHash) && !gatewayProfitControlGateActive(ctx) {
 		return s.BindStickySession(ctx, groupID, sessionHash, accountID)
 	}
 	existingAccountID, err := s.getStickySessionAccountID(ctx, groupID, sessionHash)
@@ -372,7 +369,7 @@ func (s *OpenAIGatewayService) BindStickySessionAfterProfitAdmission(ctx context
 	if existingAccountID > 0 && existingAccountID != accountID {
 		return nil
 	}
-	return s.BindStickySession(ctx, groupID, sessionHash, accountID)
+	return s.BindStickySession(context.WithValue(ctx, openAIStickyPromotionKey{}, true), groupID, sessionHash, accountID)
 }
 
 // ---- 可观测性：按分组累计计数 + 采样日志（无逐请求输出） ----

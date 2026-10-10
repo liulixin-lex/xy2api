@@ -150,6 +150,51 @@ jobs:
           PY
 
 
+      - name: OpenAI cache reliability with real Redis
+        working-directory: backend
+        timeout-minutes: 15
+        env:
+          SCHEDULING_TEST_REDIS_ADDR: 127.0.0.1:16379
+        run: |
+          set -euo pipefail
+          go test -race -p 1 -tags=unit \
+            ./internal/pkg/apicompat ./internal/service ./internal/service/openai_ws_v2 ./internal/repository ./internal/handler \
+            -run '^(TestOpenAICache|TestCacheControls|TestOpenAIUsageCanonical|TestOpenAIUsageConversion|TestOpenAISelectAccountWithLoadAwareness_StickyCapacity)' \
+            -count=1 -timeout=10m -json | tee "$RUNNER_TEMP/openai-cache-reliability.jsonl"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          events = [json.loads(line) for line in
+                    Path(os.environ["RUNNER_TEMP"], "openai-cache-reliability.jsonl").read_text().splitlines()
+                    if line.strip()]
+          rejected = [e for e in events if e.get("Action") in {"skip", "fail"}]
+          if rejected:
+              raise SystemExit("Cache gate cannot skip or fail: " + json.dumps(rejected))
+          expected = {
+              "TestOpenAIUsageCanonicalPrecedence",
+              "TestOpenAIUsageConversionExplicitZeroAndWritePrecedence",
+              "TestCacheControlsAndDiagnosticsSurviveConversion",
+              "TestOpenAICacheIdentityTenantScope",
+              "TestOpenAICacheStableLeadingPrefix",
+              "TestOpenAICacheCapabilityIgnoresUserAgent",
+              "TestOpenAICacheDiagnosticPrivacyAndTraining",
+              "TestOpenAICacheDiagnosticUsesFinalRequest",
+              "TestOpenAICachePreferencePreservesPriorityLoadAndUnknowns",
+              "TestOpenAICacheConcurrentColdSelection",
+              "TestOpenAICacheSpilloverAdmissionPreservesAffinity",
+              "TestOpenAICacheWSUsageAliasesAndExplicitZero",
+              "TestOpenAICacheStickyAtomic",
+              "TestOpenAICacheUnadmittedReservationExpires",
+              "TestOpenAISelectAccountWithLoadAwareness_StickyCapacitySpilloverKeepsBinding",
+          }
+          ran = {e.get("Test") for e in events if e.get("Action") == "run"}
+          passed = {e.get("Test") for e in events if e.get("Action") == "pass"}
+          if expected - (ran & passed):
+              raise SystemExit("Missing cache tests: " + repr(expected - (ran & passed)))
+          print(f"All {len(expected)} required cache tests PASS, 0 SKIP")
+          PY
+
       - name: TypeSafe scheduling and hosted recharge integration
         working-directory: backend
         timeout-minutes: 15

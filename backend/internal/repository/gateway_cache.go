@@ -53,6 +53,44 @@ func (c *gatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, s
 	return c.rdb.Set(ctx, key, accountID, ttl).Err()
 }
 
+var claimOpenAIStickyAccountScript = redis.NewScript(`
+local current = redis.call('GET', KEYS[1])
+if current == false then
+  redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2], 'NX')
+  return tonumber(ARGV[1])
+end
+if current == ARGV[1] and ARGV[3] == '1' then
+  redis.call('PEXPIRE', KEYS[1], ARGV[2])
+end
+return tonumber(current)
+`)
+
+var deleteOpenAIStickyAccountScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  redis.call('DEL', KEYS[1])
+end
+return 1
+`)
+
+func (c *gatewayCache) ClaimSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration, promote bool) (int64, error) {
+	if accountID <= 0 || sessionHash == "" || ttl <= 0 {
+		return 0, errors.New("invalid sticky binding claim")
+	}
+	flag := 0
+	if promote {
+		flag = 1
+	} else if ttl > 30*time.Second {
+		ttl = 30 * time.Second
+	}
+	return claimOpenAIStickyAccountScript.Run(ctx, c.rdb, []string{buildSessionKey(groupID, sessionHash)}, accountID, ttl.Milliseconds(), flag).Int64()
+}
+
+func (c *gatewayCache) DeleteSessionAccountIDIfOwner(ctx context.Context, groupID int64, sessionHash string, owner int64) error {
+	return deleteOpenAIStickyAccountScript.Run(ctx, c.rdb, []string{buildSessionKey(groupID, sessionHash)}, owner).Err()
+}
+
+var _ service.OpenAIStickyAtomicCache = (*gatewayCache)(nil)
+
 func (c *gatewayCache) RefreshSessionTTL(ctx context.Context, groupID int64, sessionHash string, ttl time.Duration) error {
 	key := buildSessionKey(groupID, sessionHash)
 	return c.rdb.Expire(ctx, key, ttl).Err()
