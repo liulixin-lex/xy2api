@@ -23,14 +23,20 @@ func hrwUniform(salt int64, key string, accountID int64) float64 {
 	return float64(digest.Sum64()>>11+1) / float64(uint64(1)<<53)
 }
 
-// hrwScore is the weighted rendezvous score; the minimum wins and the full
-// ascending order is the session's stable fallback order. A non-positive
-// weight never wins.
-func hrwScore(salt int64, key string, accountID int64, weight float64) float64 {
+// hrwDraw is the weight-independent part of the weighted rendezvous score,
+// so one hash serves several weights of the same account.
+func hrwDraw(salt int64, key string, accountID int64) float64 {
+	return -math.Log(hrwUniform(salt, key, accountID))
+}
+
+// hrwWeighted is the weighted rendezvous score; the minimum wins and the
+// full ascending order is the session's stable fallback order. A
+// non-positive weight never wins.
+func hrwWeighted(draw, weight float64) float64 {
 	if weight <= 0 {
 		return math.Inf(1)
 	}
-	return -math.Log(hrwUniform(salt, key, accountID)) / weight
+	return draw / weight
 }
 
 // deadlineStagger spreads forced migrations of one deadline over ten minutes

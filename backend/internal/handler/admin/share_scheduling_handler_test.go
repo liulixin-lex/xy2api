@@ -41,6 +41,7 @@ func newShareSchedulingRouter(settings service.SettingRepository) *gin.Engine {
 	share.GET("/groups/:id/report", h.Report)
 	share.GET("/groups/:id/decisions", h.Decisions)
 	share.POST("/groups/:id/rebalance", h.Rebalance)
+	share.GET("/accounts/:id/rules", h.AccountRules)
 	return router
 }
 
@@ -78,10 +79,13 @@ func TestShareSchedulingHandlerRejectsMalformedRequests(t *testing.T) {
 		{http.MethodGet, "/share-scheduling/groups/7/report?window=48h", ""},
 		{http.MethodGet, "/share-scheduling/groups/7/decisions?limit=0", ""},
 		{http.MethodPost, "/share-scheduling/groups/7/rebalance", `{"mode":"cold","dry_run":true}`},
+		{http.MethodGet, "/share-scheduling/accounts/0/rules", ""},
 	} {
 		w := schedulingTestCall(router, call.method, call.path, call.body)
 		require.Equal(t, http.StatusBadRequest, w.Code, "%s %s", call.method, call.path)
 	}
 	w := schedulingTestCall(router, http.MethodGet, "/share-scheduling/groups", "")
 	require.Equal(t, http.StatusServiceUnavailable, w.Code, "without storage the API says so instead of returning empty data")
+	w = schedulingTestCall(router, http.MethodGet, "/share-scheduling/accounts/7/rules", "")
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 }

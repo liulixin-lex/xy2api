@@ -54,6 +54,7 @@ func TestDecodePolicyRejectsMalformedDocuments(t *testing.T) {
 		{"weight_high", `{"schema":1,"scheduler":"share","accounts":[{"account_id":1,"tier":1,"weight":1000001}]}`, "weight must be"},
 		{"tier_high", `{"schema":1,"scheduler":"share","accounts":[{"account_id":1,"tier":2147483648,"weight":1}]}`, "tier out of range"},
 		{"bad_domain", `{"schema":1,"scheduler":"share","accounts":[{"account_id":1,"tier":1,"weight":1,"cache_domain":"a b"}]}`, "cache_domain"},
+		{"reserved_domain", `{"schema":1,"scheduler":"share","accounts":[{"account_id":1,"tier":1,"weight":1,"cache_domain":"account:2"}]}`, "reserved prefix"},
 		{"drain_until_without_drain", `{"schema":1,"scheduler":"share","accounts":[{"account_id":1,"tier":1,"weight":1,"drain_until":"2026-10-11T00:00:00Z"}]}`, "requires drain"},
 		{"schema", `{"schema":2,"scheduler":"share"}`, "schema"},
 		{"scheduler", `{"schema":1,"scheduler":"controlled"}`, "scheduler"},

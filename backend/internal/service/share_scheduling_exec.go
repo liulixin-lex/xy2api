@@ -7,6 +7,7 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	"github.com/liulixin-lex/xy2api/internal/pkg/servertiming"
 	"github.com/liulixin-lex/xy2api/internal/sharesched"
 )
 
@@ -28,6 +29,13 @@ type shareSelectionTrace struct {
 	// scheduler has chosen; nil outside shadow groups.
 	shadow     func(original int64)
 	shadowDone bool
+	// sampled selections feed cache attribution and the selection cost;
+	// meter, when the timing hooks are installed, counts their Redis and
+	// database calls up to the selection result.
+	sampled  bool
+	costDone bool
+	meter    *servertiming.Collector
+	start    time.Time
 }
 
 type shareSelectionTraceKey struct{}
@@ -37,7 +45,14 @@ func (s *ShareSchedulingService) withSelectionTrace(ctx context.Context, groupID
 	if s == nil {
 		return ctx, nil
 	}
-	trace := &shareSelectionTrace{groupID: groupID, sessionKey: sessionKey, switched: switched}
+	trace := &shareSelectionTrace{groupID: groupID, sessionKey: sessionKey, switched: switched, start: time.Now()}
+	if settings := s.Settings(); settings.CacheAttribution && shareAttributionSampled(sessionKey, settings.AttributionSampleRate) {
+		trace.sampled = true
+		if s.meterIO && !servertiming.Active(ctx) {
+			trace.meter = servertiming.New(trace.start)
+			ctx = servertiming.WithCollector(ctx, trace.meter)
+		}
+	}
 	return context.WithValue(ctx, shareSelectionTraceKey{}, trace), trace
 }
 
@@ -55,10 +70,14 @@ func (s *ShareSchedulingService) recordSelection(ctx context.Context, account *A
 	if trace == nil {
 		return
 	}
-	if settings := s.Settings(); settings.CacheAttribution && shareAttributionSampled(trace.sessionKey, settings.AttributionSampleRate) {
+	if trace.sampled {
 		requestID, _ := ctx.Value(ctxkey.RequestID).(string)
 		s.traces.put(requestID, shareTrace{groupID: trace.groupID, sessionKey: trace.sessionKey, accountID: account.ID,
 			platform: account.Platform, reason: trace.reason, switched: trace.switched, at: time.Now()})
+	}
+	if trace.sampled && !trace.costDone {
+		trace.costDone = true
+		s.recordSelectionCost(trace)
 	}
 	if trace.shadow != nil && !trace.shadowDone {
 		trace.shadowDone = true
@@ -72,6 +91,35 @@ func (s *ShareSchedulingService) recordSelection(ctx context.Context, account *A
 			run(account.ID)
 		}()
 	}
+}
+
+// recordSelectionCost adds a sampled selection's time, and when metered its
+// Redis round trips and database queries, to the counters of its scheduler:
+// share, shadow (the original choice plus the shadow binding read) or
+// original.
+func (s *ShareSchedulingService) recordSelectionCost(trace *shareSelectionTrace) {
+	mode := shareTTFTOriginal
+	switch {
+	case trace.reason != "":
+		mode = string(sharesched.SchedulerShare)
+	case trace.shadow != nil:
+		mode = string(sharesched.SchedulerShadow)
+	}
+	now := time.Now()
+	prefix := shareStatsSelectionPrefix + mode + ":"
+	gid := trace.groupID
+	s.stats.add(shareStatsKindCache, gid, now, prefix+shareSelectionSamples, 1)
+	s.stats.add(shareStatsKindCache, gid, now, prefix+shareSelectionMicros, now.Sub(trace.start).Microseconds()+1)
+	if trace.meter == nil {
+		return
+	}
+	redis := trace.meter.Summary(servertiming.MetricRedis)
+	db := trace.meter.Summary(servertiming.MetricDatabase)
+	s.stats.add(shareStatsKindCache, gid, now, prefix+shareSelectionIOSamples, 1)
+	s.stats.add(shareStatsKindCache, gid, now, prefix+shareSelectionRedisTrips, int64(redis.RoundTrips))
+	s.stats.add(shareStatsKindCache, gid, now, prefix+shareSelectionRedisMicros, redis.Busy.Microseconds())
+	s.stats.add(shareStatsKindCache, gid, now, prefix+shareSelectionDBQueries, db.Count)
+	trace.meter = nil
 }
 
 // newRequest builds the kernel request of one selection.

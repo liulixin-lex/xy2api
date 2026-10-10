@@ -23,5 +23,6 @@ func registerShareSchedulingRoutes(admin *gin.RouterGroup, h *handler.Handlers) 
 		share.GET("/groups/:id/report", h.Admin.ShareScheduling.Report)
 		share.GET("/groups/:id/decisions", h.Admin.ShareScheduling.Decisions)
 		share.POST("/groups/:id/rebalance", h.Admin.ShareScheduling.Rebalance)
+		share.GET("/accounts/:id/rules", h.Admin.ShareScheduling.AccountRules)
 	}
 }

@@ -1089,8 +1089,9 @@ func ProvideClaudeResetCreditService(accounts AccountRepository, tokens *ClaudeT
 // ProvideShareSchedulingService installs share scheduling into the gateway
 // services after they exist, so their constructors stay stable for tests.
 // Until an administrator enables it every group keeps the original scheduler.
-func ProvideShareSchedulingService(repo ShareSchedulingRepository, store ShareSchedulingStore, settingRepo SettingRepository, gateway *GatewayService, openai *OpenAIGatewayService) *ShareSchedulingService {
+func ProvideShareSchedulingService(repo ShareSchedulingRepository, store ShareSchedulingStore, settingRepo SettingRepository, gateway *GatewayService, openai *OpenAIGatewayService, cfg *config.Config) *ShareSchedulingService {
 	s := NewShareSchedulingService(repo, store, settingRepo)
+	s.meterIO = cfg != nil && cfg.Server.EnableServerTiming
 	gateway.shareScheduling = s
 	openai.shareScheduling = s
 	s.attachGateways(gateway, openai)

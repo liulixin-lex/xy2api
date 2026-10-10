@@ -297,7 +297,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	auditLogHandler := admin.NewAuditLogHandler(auditLogService, totpService)
 	shareSchedulingRepository := repository.NewShareSchedulingRepository(db)
 	shareSchedulingStore := repository.NewShareSchedulingStore(redisClient)
-	shareSchedulingService := service.ProvideShareSchedulingService(shareSchedulingRepository, shareSchedulingStore, settingRepository, gatewayService, openAIGatewayService)
+	shareSchedulingService := service.ProvideShareSchedulingService(shareSchedulingRepository, shareSchedulingStore, settingRepository, gatewayService, openAIGatewayService, configConfig)
 	shareSchedulingHandler := admin.NewShareSchedulingHandler(shareSchedulingService)
 	upstreamBillingProbeService := service.ProvideUpstreamBillingProbeService(accountRepository, accountTestService, settingService, leaderLockCache, db)
 	iqCheckService := service.ProvideIQCheckService(accountRepository, accountTestService, openAITokenProvider, concurrencyService)

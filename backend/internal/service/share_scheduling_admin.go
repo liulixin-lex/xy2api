@@ -127,9 +127,10 @@ func shareMemberViews(p *sharesched.Policy, accounts []Account, now time.Time) (
 	views := make([]ShareSchedulingMemberView, 0, len(accounts))
 	type totals struct{ weight, healthyWeight, concurrency float64 }
 	tiers := map[int]*totals{}
+	resolve := p.Resolver()
 	for i := range accounts {
 		acc := &accounts[i]
-		rule, configured := p.ResolveRule(acc.ID, acc.Priority, acc.Concurrency)
+		rule, configured := resolve(acc.ID, acc.Priority, acc.Concurrency)
 		v := ShareSchedulingMemberView{AccountID: acc.ID, Name: acc.Name, Platform: acc.Platform, Type: acc.Type,
 			Priority: acc.Priority, Concurrency: acc.Concurrency, Status: acc.Status, Schedulable: acc.Schedulable,
 			Healthy: acc.IsSchedulable(), Tier: rule.Tier, Weight: rule.Weight, Configured: configured,
@@ -382,6 +383,73 @@ func (s *ShareSchedulingService) GetPolicy(ctx context.Context, groupID int64) (
 	}
 	view.Members, view.ActiveTier = shareMemberViews(&policy, accounts, time.Now())
 	return view, nil
+}
+
+// ShareSchedulingAccountRule is an account's resolved rule in one group that
+// stores a share scheduling policy.
+type ShareSchedulingAccountRule struct {
+	GroupID     int64      `json:"group_id"`
+	GroupName   string     `json:"group_name"`
+	Scheduler   string     `json:"scheduler"`
+	Effective   bool       `json:"effective"`
+	Configured  bool       `json:"configured"`
+	Tier        int        `json:"tier"`
+	Weight      int        `json:"weight"`
+	Drain       bool       `json:"drain"`
+	DrainUntil  *time.Time `json:"drain_until,omitempty"`
+	CacheDomain string     `json:"cache_domain"`
+}
+
+// AccountRules lists the account's rules in its groups that store a share
+// scheduling policy, for the read-only account details. Groups without a
+// stored policy or with an undecodable one run the original scheduler and
+// are left out.
+func (s *ShareSchedulingService) AccountRules(ctx context.Context, accountID int64) ([]ShareSchedulingAccountRule, error) {
+	if s.gateway == nil || s.gateway.accountRepo == nil || s.gateway.groupRepo == nil || s.repo == nil {
+		return nil, ErrShareSchedulingUnavailable
+	}
+	account, err := s.gateway.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	groupIDs := account.GroupIDs
+	if len(groupIDs) == 0 {
+		for _, ag := range account.AccountGroups {
+			groupIDs = append(groupIDs, ag.GroupID)
+		}
+	}
+	out := []ShareSchedulingAccountRule{}
+	if len(groupIDs) == 0 {
+		return out, nil
+	}
+	rows, err := s.repo.ListPolicies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byGroup := make(map[int64]*ShareSchedulingPolicyRow, len(rows))
+	for i := range rows {
+		byGroup[rows[i].GroupID] = &rows[i]
+	}
+	for _, groupID := range groupIDs {
+		row := byGroup[groupID]
+		if row == nil {
+			continue
+		}
+		policy, err := sharesched.DecodePolicy(row.Policy)
+		if err != nil {
+			continue
+		}
+		rule, configured := policy.ResolveRule(account.ID, account.Priority, account.Concurrency)
+		v := ShareSchedulingAccountRule{GroupID: groupID, Scheduler: row.Scheduler, Effective: s.groupPolicy(groupID) != nil,
+			Configured: configured, Tier: rule.Tier, Weight: rule.Weight, Drain: rule.Drain, DrainUntil: rule.DrainUntil,
+			CacheDomain: rule.CacheDomain}
+		if group, err := s.gateway.groupRepo.GetByIDLite(ctx, groupID); err == nil && group != nil {
+			v.GroupName = group.Name
+		}
+		out = append(out, v)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].GroupID < out[j].GroupID })
+	return out, nil
 }
 
 // SavePolicy strictly validates and stores a policy when the stored version
@@ -675,12 +743,9 @@ func (s *ShareSchedulingService) Explain(ctx context.Context, groupID int64, in 
 		EstimatedTokens: req.Cache.EstimatedTokens, Cacheable: req.Cache.Cacheable, Warm: req.Cache.Warm(req.Binding.Idle),
 		WaitBudgetMs: d.Wait.Milliseconds(), Reason: string(d.Reason), Steps: make([]int64, len(d.Steps)),
 		Write: shareWriteName(d.Write), SpillWrite: shareWriteName(d.Spill), SpillReason: string(d.SpillReason),
-		MaxWaiting: d.MaxWaiting, Target: d.Target, Ideal: d.Ideal, ActiveTier: d.ActiveTier, Entries: d.Entries}
+		MaxWaiting: d.MaxWaiting, Target: d.Target, Ideal: d.Ideal, ActiveTier: d.ActiveTier, Entries: d.ExplainedEntries()}
 	for i, step := range d.Steps {
 		out.Steps[i] = step.AccountID
-	}
-	if out.Entries == nil {
-		out.Entries = []sharesched.Entry{}
 	}
 	return out, nil
 }
@@ -747,7 +812,23 @@ type ShareSchedulingCacheStats struct {
 	ReadRatio           float64                        `json:"read_ratio"`
 	SchedulingMissRatio float64                        `json:"scheduling_miss_ratio"`
 	TTFT                map[string]ShareSchedulingTTFT `json:"ttft"`
-	Dropped             int64                          `json:"dropped"`
+	// Selection is the sampled selection cost by scheduler (share, shadow,
+	// original).
+	Selection map[string]ShareSchedulingSelectionCost `json:"selection"`
+	Dropped   int64                                   `json:"dropped"`
+}
+
+// ShareSchedulingSelectionCost averages the sampled selections of one
+// scheduler, from the start of selection to its result. Redis and database
+// figures average the IOSamples taken on nodes with server timing enabled
+// and are nil without any.
+type ShareSchedulingSelectionCost struct {
+	Samples       int64    `json:"samples"`
+	AvgMs         float64  `json:"avg_ms"`
+	IOSamples     int64    `json:"io_samples"`
+	AvgRedisTrips *float64 `json:"avg_redis_round_trips"`
+	AvgRedisMs    *float64 `json:"avg_redis_ms"`
+	AvgDBQueries  *float64 `json:"avg_db_queries"`
 }
 
 // ShareSchedulingReport is target against actual shares plus the decision,
@@ -921,7 +1002,7 @@ func newShareCacheStats(c map[string]int64) ShareSchedulingCacheStats {
 		Requests: c[shareStatsRequestsField], Classes: collectPrefixed(c, shareStatsClassPrefix),
 		ClassTokens: collectPrefixed(c, shareStatsClassTokensPrefix), PromptTokens: c[shareStatsPromptTokensField],
 		CacheReadTokens: c[shareStatsCacheReadField], CacheCreationTokens: c[shareStatsCacheCreationField],
-		TTFT: map[string]ShareSchedulingTTFT{}, Dropped: c[shareStatsDroppedField],
+		TTFT: map[string]ShareSchedulingTTFT{}, Selection: shareSelectionCosts(c), Dropped: c[shareStatsDroppedField],
 	}
 	if stats.PromptTokens > 0 {
 		stats.ReadRatio = float64(stats.CacheReadTokens) / float64(stats.PromptTokens)
@@ -948,6 +1029,38 @@ func newShareCacheStats(c map[string]int64) ShareSchedulingCacheStats {
 		stats.TTFT[reason] = shareTTFTSummary(buckets)
 	}
 	return stats
+}
+
+func shareSelectionCosts(c map[string]int64) map[string]ShareSchedulingSelectionCost {
+	sums := map[string]map[string]int64{}
+	for field, n := range collectPrefixed(c, shareStatsSelectionPrefix) {
+		mode, name, ok := strings.Cut(field, ":")
+		if !ok {
+			continue
+		}
+		if sums[mode] == nil {
+			sums[mode] = map[string]int64{}
+		}
+		sums[mode][name] += n
+	}
+	out := map[string]ShareSchedulingSelectionCost{}
+	for mode, sum := range sums {
+		samples := sum[shareSelectionSamples]
+		if samples <= 0 {
+			continue
+		}
+		cost := ShareSchedulingSelectionCost{Samples: samples, AvgMs: float64(sum[shareSelectionMicros]) / 1000 / float64(samples)}
+		if io := sum[shareSelectionIOSamples]; io > 0 {
+			cost.IOSamples = io
+			avg := func(name string, scale float64) *float64 {
+				v := float64(sum[name]) / scale / float64(io)
+				return &v
+			}
+			cost.AvgRedisTrips, cost.AvgRedisMs, cost.AvgDBQueries = avg(shareSelectionRedisTrips, 1), avg(shareSelectionRedisMicros, 1000), avg(shareSelectionDBQueries, 1)
+		}
+		out[mode] = cost
+	}
+	return out
 }
 
 // shareTTFTSummary reads percentiles off a bucketed histogram.

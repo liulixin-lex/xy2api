@@ -343,6 +343,17 @@ func TestSpillOrderPrefersCacheDomainThenClass(t *testing.T) {
 	reason, write = Plan(p, bound("spill", 1, time.Minute), cands).Outcome(2)
 	require.Equal(t, ReasonSpillKeep, reason)
 	require.Equal(t, WriteNone, write)
+
+	// Accounts without a configured domain each form their own: account 3
+	// shares nothing with 4, so its class peer 2 comes first.
+	cands = eligible(1, 2, 3, 4, 5)
+	cands[1].Class, cands[2].Class = "openai/oauth", "openai/oauth"
+	d = Plan(p, bound("spill", 3, time.Minute), cands)
+	require.Equal(t, []int64{3, 2}, []int64{d.Steps[0].AccountID, d.Steps[1].AccountID})
+	explained := d.ExplainedEntries()
+	require.Equal(t, "account:3", explained[2].CacheDomain)
+	require.Equal(t, "ws-a", explained[0].CacheDomain)
+	require.Empty(t, d.Entries[2].CacheDomain, "Plan itself leaves the implicit domain unnamed")
 }
 
 func TestSaturationAndFailurePolicies(t *testing.T) {

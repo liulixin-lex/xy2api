@@ -164,6 +164,10 @@ type ShareSchedulingService struct {
 	// gateway and openai give the admin operations the live candidate gates.
 	gateway *GatewayService
 	openai  *OpenAIGatewayService
+	// meterIO is set when the repository timing hooks are installed
+	// (server.enable_server_timing). Without them a selection's Redis and
+	// database calls are invisible, so only its duration is recorded.
+	meterIO bool
 
 	mu        sync.Mutex
 	cancel    context.CancelFunc

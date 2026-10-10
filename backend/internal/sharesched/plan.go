@@ -159,30 +159,68 @@ func (d Decision) IdealSkipReason(served int64, skipped map[int64]Reason) Reason
 // ResolveRule returns the tier, weight, drain flag and cache domain for a
 // member, applying Defaults to members without an explicit rule.
 func (p *Policy) ResolveRule(accountID int64, priority, concurrency int) (rule AccountRule, configured bool) {
-	for _, r := range p.Accounts {
-		if r.AccountID == accountID {
-			if r.CacheDomain == "" {
-				r.CacheDomain = ownDomain(accountID)
-			}
-			return r, true
-		}
-	}
-	weight := 1
-	if p.Defaults.Weight == DefaultWeightConcurrency {
-		weight = min(max(concurrency, MinWeight), MaxWeight)
-	}
-	return AccountRule{AccountID: accountID, Tier: priority, Weight: weight, CacheDomain: ownDomain(accountID)}, false
+	return p.Resolver()(accountID, priority, concurrency)
 }
 
-func ownDomain(accountID int64) string { return "account:" + strconv.FormatInt(accountID, 10) }
+// Resolver is ResolveRule for many members of one policy: it indexes the
+// rules once instead of scanning them per member.
+func (p *Policy) Resolver() func(accountID int64, priority, concurrency int) (rule AccountRule, configured bool) {
+	rules := p.ruleIndex()
+	return func(accountID int64, priority, concurrency int) (AccountRule, bool) {
+		rule, configured := rules[accountID]
+		if !configured {
+			rule = p.defaultRule(accountID, priority, concurrency)
+		}
+		if rule.CacheDomain == "" {
+			rule.CacheDomain = OwnCacheDomain(accountID)
+		}
+		return rule, configured
+	}
+}
 
-// Plan computes the placement for one request. It is a pure function of its
-// inputs: identical inputs give identical decisions on every instance.
-func Plan(p *Policy, req Request, cands []Candidate) Decision {
+func (p *Policy) ruleIndex() map[int64]AccountRule {
 	rules := make(map[int64]AccountRule, len(p.Accounts))
 	for _, r := range p.Accounts {
 		rules[r.AccountID] = r
 	}
+	return rules
+}
+
+// defaultRule is the rule of a member without an explicit one. Its cache
+// domain stays empty: the account is a domain of its own.
+func (p *Policy) defaultRule(accountID int64, priority, concurrency int) AccountRule {
+	weight := 1
+	if p.Defaults.Weight == DefaultWeightConcurrency {
+		weight = min(max(concurrency, MinWeight), MaxWeight)
+	}
+	return AccountRule{AccountID: accountID, Tier: priority, Weight: weight}
+}
+
+// OwnCacheDomain names the cache domain of an account without a configured
+// one. The prefix is reserved so no configured domain can join it.
+func OwnCacheDomain(accountID int64) string {
+	return ownCacheDomainPrefix + strconv.FormatInt(accountID, 10)
+}
+
+const ownCacheDomainPrefix = "account:"
+
+// ExplainedEntries returns the entries with implicit cache domains spelled
+// out. Plan leaves them empty to keep the request path free of allocations.
+func (d Decision) ExplainedEntries() []Entry {
+	out := make([]Entry, len(d.Entries))
+	for i, e := range d.Entries {
+		if e.CacheDomain == "" {
+			e.CacheDomain = OwnCacheDomain(e.AccountID)
+		}
+		out[i] = e
+	}
+	return out
+}
+
+// Plan computes the placement for one request. It is a pure function of its
+// inputs: identical inputs give identical decisions on every instance.
+func Plan(p *Policy, req Request, cands []Candidate) Decision {
+	rules := p.ruleIndex()
 	entries := make([]Entry, 0, len(cands)+len(p.Accounts))
 	present := make(map[int64]struct{}, len(cands))
 	for _, c := range cands {
@@ -190,7 +228,10 @@ func Plan(p *Policy, req Request, cands []Candidate) Decision {
 			continue
 		}
 		present[c.AccountID] = struct{}{}
-		rule, configured := p.ResolveRule(c.AccountID, c.Priority, c.Concurrency)
+		rule, configured := rules[c.AccountID]
+		if !configured {
+			rule = p.defaultRule(c.AccountID, c.Priority, c.Concurrency)
+		}
 		factor := 1.0
 		if f, ok := req.Correction[c.AccountID]; ok && f > 0 {
 			factor = f
@@ -215,24 +256,19 @@ func Plan(p *Policy, req Request, cands []Candidate) Decision {
 		if _, ok := present[r.AccountID]; ok {
 			continue
 		}
-		rule, _ := p.ResolveRule(r.AccountID, 0, 0)
-		entries = append(entries, Entry{AccountID: r.AccountID, Tier: rule.Tier, Weight: rule.Weight,
-			EffectiveWeight: float64(rule.Weight), Configured: true, Drain: rule.Drain,
-			CacheDomain: rule.CacheDomain, Reason: ReasonNotSchedulable, drainUntil: rule.DrainUntil})
+		entries = append(entries, Entry{AccountID: r.AccountID, Tier: r.Tier, Weight: r.Weight,
+			EffectiveWeight: float64(r.Weight), Configured: true, Drain: r.Drain,
+			CacheDomain: r.CacheDomain, Reason: ReasonNotSchedulable, drainUntil: r.DrainUntil})
 	}
 
 	for i := range entries {
 		e := &entries[i]
-		weight := e.EffectiveWeight
+		weight, configWeight := e.EffectiveWeight, float64(e.Weight)
 		if e.Drain {
-			weight = 0
+			weight, configWeight = 0, 0
 		}
-		e.score = hrwScore(req.GroupID, req.Key, e.AccountID, weight)
-		configWeight := float64(e.Weight)
-		if e.Drain {
-			configWeight = 0
-		}
-		e.configScore = hrwScore(req.GroupID, req.Key, e.AccountID, configWeight)
+		draw := hrwDraw(req.GroupID, req.Key, e.AccountID)
+		e.score, e.configScore = hrwWeighted(draw, weight), hrwWeighted(draw, configWeight)
 	}
 
 	d := Decision{Entries: entries, Bound: req.Binding.AccountID}
@@ -314,12 +350,8 @@ func Plan(p *Policy, req Request, cands []Candidate) Decision {
 		for i, e := range order {
 			d.Steps[i] = Step{AccountID: e.AccountID, Tier: e.Tier}
 		}
-		rank := make(map[int64]int, len(order))
 		for i, e := range order {
-			rank[e.AccountID] = i + 1
-		}
-		for i := range d.Entries {
-			d.Entries[i].Rank = rank[d.Entries[i].AccountID]
+			e.Rank = i + 1
 		}
 		return d
 	}
@@ -417,12 +449,13 @@ func softSpill(p *Policy, req Request, bound *Entry, idle time.Duration) bool {
 	return float64(remaining+idle) < 0.8*float64(req.Cache.TTL)
 }
 
-// partition orders spill candidates: same cache domain, then same class.
+// partition orders spill candidates: same cache domain, then same class. An
+// empty domain is the account's own, shared with no other account.
 func partition(bound, e *Entry) int {
 	switch {
 	case bound == nil:
 		return 2
-	case e.CacheDomain == bound.CacheDomain:
+	case e.CacheDomain != "" && e.CacheDomain == bound.CacheDomain:
 		return 0
 	case e.Class != "" && e.Class == bound.Class:
 		return 1

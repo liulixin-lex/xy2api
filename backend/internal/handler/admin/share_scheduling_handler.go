@@ -60,6 +60,21 @@ func shareGroupID(c *gin.Context) (int64, bool) {
 	return id, true
 }
 
+// AccountRules returns an account's rules in its share scheduling groups.
+// GET /api/v1/admin/share-scheduling/accounts/:id/rules
+func (h *ShareSchedulingHandler) AccountRules(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || accountID <= 0 {
+		response.BadRequest(c, "Invalid account id")
+		return
+	}
+	rules, err := h.svc.AccountRules(c.Request.Context(), accountID)
+	if response.ErrorFrom(c, err) {
+		return
+	}
+	response.Success(c, rules)
+}
+
 // GetSettings returns the global settings.
 // GET /api/v1/admin/share-scheduling/settings
 func (h *ShareSchedulingHandler) GetSettings(c *gin.Context) {

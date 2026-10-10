@@ -466,6 +466,37 @@ func TestShareAdminReportShowsAccountSkipsAndLatency(t *testing.T) {
 	require.Equal(t, 3000, *actual[2].TTFT.P95Ms)
 }
 
+func TestShareAdminAccountRulesShowResolvedRules(t *testing.T) {
+	env := newShareAdminEnv(t, Account{ID: 1}, Account{ID: 2, Priority: 4, Concurrency: 7}, Account{ID: 3})
+	ctx := context.Background()
+	rules, err := env.share.AccountRules(ctx, 1)
+	require.NoError(t, err)
+	require.Empty(t, rules, "no group stores a policy yet")
+
+	_, err = env.save(t, 0, `{"scheduler":"shadow","accounts":[{"account_id":1,"tier":2,"weight":9,"cache_domain":"ws-a"}]}`)
+	require.NoError(t, err)
+	rules, err = env.share.AccountRules(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, []ShareSchedulingAccountRule{{GroupID: shareTestGroupID, GroupName: "share-group", Scheduler: "shadow",
+		Effective: true, Configured: true, Tier: 2, Weight: 9, CacheDomain: "ws-a"}}, rules)
+
+	rules, err = env.share.AccountRules(ctx, 2)
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	require.False(t, rules[0].Configured)
+	require.Equal(t, 4, rules[0].Tier, "an unconfigured member's tier follows its priority")
+	require.Equal(t, 7, rules[0].Weight, "and its weight its concurrency")
+	require.Equal(t, "account:2", rules[0].CacheDomain)
+
+	env.repo.accountsByID[3].AccountGroups = nil
+	rules, err = env.share.AccountRules(ctx, 3)
+	require.NoError(t, err)
+	require.Empty(t, rules)
+
+	_, err = env.share.AccountRules(ctx, 99)
+	require.Error(t, err)
+}
+
 func TestShareAdminSettingsRoundTrip(t *testing.T) {
 	env := newShareAdminEnv(t, Account{ID: 1}, Account{ID: 2})
 	_, err := env.share.UpdateSettings(context.Background(), ShareSchedulingSettings{Enabled: true, AttributionSampleRate: 0})

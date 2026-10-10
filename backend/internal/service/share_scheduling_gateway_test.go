@@ -146,7 +146,7 @@ func shareTestPolicy(scheduler sharesched.Scheduler, rules ...sharesched.Account
 	return p
 }
 
-func newShareTestEnv(t *testing.T, policy sharesched.Policy, accounts ...Account) *shareTestEnv {
+func newShareTestEnv(t testing.TB, policy sharesched.Policy, accounts ...Account) *shareTestEnv {
 	t.Helper()
 	require.NoError(t, policy.Validate())
 	repo := &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{}}

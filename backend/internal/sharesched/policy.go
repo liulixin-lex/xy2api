@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -299,6 +300,8 @@ func (p Policy) Validate() error {
 		}
 		if rule.CacheDomain != "" && (len(rule.CacheDomain) > MaxCacheDomainLen || !cacheDomainPattern.MatchString(rule.CacheDomain)) {
 			add("account %d cache_domain must be 1-%d characters of letters, digits, '.', '_', ':' or '-'", rule.AccountID, MaxCacheDomainLen)
+		} else if strings.HasPrefix(rule.CacheDomain, ownCacheDomainPrefix) {
+			add("account %d cache_domain must not start with the reserved prefix %q", rule.AccountID, ownCacheDomainPrefix)
 		}
 	}
 	if p.Defaults.Tier != DefaultTierAccountPriority {
