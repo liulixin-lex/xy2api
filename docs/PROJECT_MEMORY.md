@@ -4,13 +4,14 @@
 
 ## 当前交接状态
 
-### GPT 缓存可靠性 0.2.6（2026-10-10，正式版本晋级中）
+### GPT 缓存可靠性 0.2.6（2026-10-10，GitHub 正式发布完成）
 
-- 用户授权同步最新主线、新建分支、实施全站 GPT 缓存方案，完成验证后提交、推送、常规合并及 GitHub 发版。独立工作树 `/lex/xy2api-gpt-cache`；功能分支基于 `3569d4f00aae3eada079eb7ac058dc62256a66b8`，当前正式版本分支 `release/0.2.6` 基于功能合并提交 `3cf8406e5cfff94c488bfa58d0ba5b198e8ae1cf`；其他工作树未提交文件保持。
+- 用户授权同步最新主线、新建分支、实施全站 GPT 缓存方案，完成验证后提交、推送、常规合并及 GitHub 发版。独立工作树 `/lex/xy2api-gpt-cache`；功能分支基于 `3569d4f00aae3eada079eb7ac058dc62256a66b8`，正式版本分支 `release/0.2.6` 基于功能合并提交 `3cf8406e5cfff94c488bfa58d0ba5b198e8ae1cf`；其他工作树未提交文件保持。
 - 统一 Responses、Chat/SSE、Messages 转换和 WebSocket 的真实 usage 别名及显式零优先级，保留 API Key 缓存选项和终态诊断。租户/分组/模型隔离的 `v2:` 会话身份、Redis 原子首次绑定及所有者保护、HTTP/WS 溢出准入保护已实现；保留利润门、质量门、权重及 previous_response_id 优先约束。
 - 新增有界进程内隐私诊断与同优先级、同负载候选的缓存偏好，两项均默认关闭，灰度比例为零。诊断只记录 HMAC 和数值，偏好仅训练有明确真实 usage 的可比续请求，不推算计费用量或增加付费模型调用。使用说明：[OpenAI 缓存可靠性](openai-cache-reliability.md)。
 - 最终后端 unit 62 包/23,646 主子测试 PASS（543 既有条件性跳过），integration 56 包/15,164 PASS（102 条件性跳过）；六包真实 PostgreSQL/Redis race 483 PASS，工作流三段守卫的 29 调度、15 缓存、11 跨路径必需用例均实际执行、零失败零跳过。最后测试类型断言修改后 Redis race 再验通过。前端 lint/typecheck、327 项 critical、生产构建和严格依赖审计通过；全仓 golangci-lint 0 issues/exit 0，嵌入前端 RC 二进制构建和版本/提交自检通过。共享 Anthropic Chat 写入字段和渐进 usage 合并兼容回归已按既有契约修复，原失败证据保留。
-- RC 产品版本 `0.2.6-rc.1` 已在功能 [PR #86](https://github.com/liulixin-lex/xy2api/pull/86) 固定 head `251ac014533c546c38e7aebc1bb343e5791713f1` 的 18 项检查全绿后常规合并，merge `3cf8406e5cfff94c488bfa58d0ba5b198e8ae1cf` 与 head 的 tree 一致。RC 注释标签固定该 merge，Release 成功；五平台归档 SHA、Go 1.27.2/x/net 0.60.0 构建信息、双架构 GHCR 与提交标签均已核验。独立 fresh、0.2.5 升级、数据库与应用数据备份恢复回退均通过，迁移数 316 不变。当前仅晋级产品版本 `0.2.6` 与来源清单，兼容版本保持 `0.2.14`；正式 PR、正式制品和 fresh 验收待完成。证据 `/lex/gpt-cache-reliability-20261010/`；本轮不部署生产，实际命中收益需部署后灰度观察。
+- RC 产品版本 `0.2.6-rc.1` 已在功能 [PR #86](https://github.com/liulixin-lex/xy2api/pull/86) 固定 head `251ac014533c546c38e7aebc1bb343e5791713f1` 的 18 项检查全绿后常规合并，merge `3cf8406e5cfff94c488bfa58d0ba5b198e8ae1cf` 与 head 的 tree 一致。RC 注释标签固定该 merge，Release 成功；五平台归档 SHA、Go 1.27.2/x/net 0.60.0 构建信息、双架构 GHCR 与提交标签均已核验。独立 fresh、0.2.5 升级、数据库与应用数据备份恢复回退均通过，迁移数 316 不变。
+- 正式 [PR #87](https://github.com/liulixin-lex/xy2api/pull/87) 仅晋级产品版本、来源清单版本和交接记录，固定 head `6a243849833c1d8b85b03da3fe249c6bdfcf8b5e` 的 18 项检查全绿后常规合并为 `1f0aa3255034786618c8ae6e14e8459369469ad6`，树与 head 一致。注释标签 `v0.2.6` 固定该提交；[Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.2.6)、主线/标签 CI 与 Security Scan 均成功。五平台归档 SHA、构建元数据、双架构 GHCR 和 `latest`/`0.2`/`0` 别名已独立核验。正式镜像的隔离 fresh 健康、登录、认证资料、六个静态资源和 316 条迁移通过。兼容版本仍为 `0.2.14`；证据 `/lex/gpt-cache-reliability-20261010/`。本轮不部署生产，实际命中收益需部署后灰度观察。
 - 首轮 Security Scan 检出 Go 1.27.0 标准库和 x/net 的 12 项可达漏洞；升级 Go 1.27.2、x/net 0.60.0 及必要关联依赖，不改变例外政策。新组合全量 unit 62 包/23,646 PASS、integration 56 包/15,164 PASS；HTTP/2 迁移后七包真实 PostgreSQL/Redis race 538 PASS、三段工作流守卫 29/15/11 必跑用例 PASS；最近 30 分钟样本窗口修复后五包缓存 race 40 PASS、16 项缓存守卫全部 RUN/PASS，均零失败。最终源码全仓 lint 0 issues，govulncheck 可达/导入包漏洞 0，7 项仅存在于未调用依赖模块。旧工具链证据和首轮失败记录保留。
 
 ### Claude 自动缓存分组迭代（2026-10-08，GitHub 发布进行中）
@@ -522,14 +523,6 @@
 Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
-
-### 20261010-gpt-cache-reliability — 全站 GPT 缓存优化及发布
-
-- 用户授权同步最新仓库、新建分支、依次实施此前只读诊断方案，验证后提交、推送、合并及 GitHub 发版。独立工作树 `/lex/xy2api-gpt-cache`，分支 `feat/gpt-cache-reliability-20261010`，基线 `3569d4f00aae3eada079eb7ac058dc62256a66b8`。
-- 范围：统一缓存用量解析、按上游能力保留缓存参数、稳定租户会话身份、并发绑定与容量溢出保护、隐私诊断及默认关闭的缓存感知选路；覆盖 Sub2API 和现有转换/WS 路径。保留其他工作树未提交文件与历史迁移。
-- 本地回归及真实隔离存储验证后走固定 head 保护检查、常规 merge、RC 验收和不可变正式标签。证据目录 `/lex/gpt-cache-reliability-20261010/`；不部署生产、不自动启用选路策略、不调用付费上游。
-- 进展：方案已实现；完整 unit 23,646、integration 15,164 和六包真实存储 race 483 个主子测试通过，三段工作流关键守卫零跳过，最后 Redis 测试断言定向复验通过。前端 lint/typecheck/327 项关键测试、生产构建和严格依赖审计通过；共享 Anthropic 写入字段及渐进 usage 合并回归已修复，保留首轮失败证据。全仓 golangci-lint 0 issues/exit 0，`0.2.6-rc.1` 嵌入前端二进制构建及版本/兼容版本/基线提交自检通过；功能提交 `28b7fec91` 的干净树来源审计通过。继续提交记忆进度、复验来源审计、固定 head CI 和 RC/正式制品验收。生产收益不能从本地测试外推。
-- 新进展：PR #86 固定 head 18/18 检查通过后常规合并，RC 标签、Release 附件/GHCR 和隔离 fresh/升级/备份恢复回退通过。Go/x/net 升级后客户端 HTTP/2 使用标准库配置，真实 CONNECT 代理协商与服务端 H1/H2 独立超时已覆盖。缓存偏好严格要求 20 个最近 30 分钟可比样本，新回归先复现旧行为失败，再在修复后通过。当前正式分支仅晋级产品版本与来源清单；固定 head CI、正式制品和隔离 fresh 待验，全部成功前不创建正式发行标签。
 
 ### 20261008-claude-cache-groups-release — 推送、合并与 GitHub 发版
 
@@ -1685,3 +1678,13 @@ pnpm --dir frontend run build
 - 本地验证：前端全量 lint/typecheck/构建，22 文件/327 项 critical（含 9 项新组件交互），桌面/手机/暗色及键盘操作均通过；后端 62 包 unit 排除两个 DNS 依赖子用例后通过，随后对整个 9 子用例矩阵以隔离容器域名映射补验通过，未改变测试源码和断言。构建、三包重点 race、最后全仓 golangci-lint 0 issues/exit 0、10 项同步工具测试通过。
 - 2.65 MB 辅助路径基准 100 次：OFF 1.795µs/320B；ON 72.97ms/29.20MB/46 allocations。只报告本地 helper 开销，不宣称端到端性能或全体上游能力。首次 DNS 失败、前端 worker 超时、测试 fixture/错误检查修正、包级 lint 超时等证据保留，最终结果见 `/lex/claude-cache-groups-20261008/verification.md`。
 - 清理自己的进行中事项。实现与收尾只做本地提交，最终干净树来源审计/身份保存在同一证据目录；测试容器运行后自动移除，临时前端预览已关闭。后续若交付 GitHub 需新的用户指令；真实上游命中与两端账单核验仍不属于本轮完成声明。
+
+### 2026-10-10T05:13:27Z — `20261010-gpt-cache-reliability` — GitHub 发布完成
+
+- 请求/目标：只读分析目标用户及全站 GPT 缓存低命中，基于最新 XY2API 主线实施网关优化，验证、提交、推送、合并并发布。
+- 开始状态：原 `/lex/xy2api` 工作树包含其他任务未提交变更；独立 `/lex/xy2api-gpt-cache` 基于 `3569d4f00aae3eada079eb7ac058dc62256a66b8`，不改写原工作树。发布时功能 PR #86、正式 PR #87 均按受保护 main 的固定 head 检查完成常规合并。
+- 完成操作：统一真实缓存 usage 和参数透传，修复会话隔离、首次并发绑定及容量溢出粘性；增加默认关闭的隐私诊断与缓存感知排序，保持现有计费/利润/质量/权重及 previous_response_id 约束。升级 Go 1.27.2/x/net 0.60.0 清除可达漏洞；无新迁移。RC `v0.2.6-rc.1` 和正式 `v0.2.6` 均为固定合并提交的注释标签，正式 merge `1f0aa3255034786618c8ae6e14e8459369469ad6`，未移动标签或绕过保护。
+- 修改文件：功能范围详见 PR #86 和 [使用说明](openai-cache-reliability.md)；正式版 PR #87 只改产品版本、来源清单版本和本记忆。收尾记录仅改本文件；完整证据与动态验收结果在 `/lex/gpt-cache-reliability-20261010/verification.md`。
+- 验证：最终 Go 1.27.2 组合 unit 62 包/23,646、integration 56 包/15,164 通过；七包真实 PostgreSQL/Redis race 538 通过，29/15/11 项关键守卫全 RUN/PASS，最近窗口修复的 40 项 race 与 16 项缓存守卫全通过。前端 lint/typecheck/327 项关键测试/生产构建、全仓 lint、源码 govulncheck 和来源审计通过。两 PR 固定 head 均 18/18 检查成功；正式主线/标签 CI、安全扫描及 Release 成功。RC 五平台制品、隔离 fresh/0.2.5 升级/备份恢复回退与正式五平台制品、隔离 fresh 均通过，正式 GHCR digest `sha256:77212b1dcfb1a8045bc6a1bbc61e1b304f29272f4ad1c0daba61f71a368711cc`，316 条迁移保持。
+- 卡点/风险：无发布卡点。未部署生产、未启用诊断/偏好、未新增付费模型调用；历史低命中的具体请求体和上游账单不足以证明单一根因，生产改善须部署后灰度观察。
+- 下一步：GitHub 发布已完成；后续部署时先启用诊断、按真实 usage 和账单分组核对，再小比例启用缓存偏好。收尾记录走独立受保护文档 PR，不改已发布标签或业务树。
