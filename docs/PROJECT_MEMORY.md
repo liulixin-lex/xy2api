@@ -6,7 +6,8 @@
 
 ### 份额调度实施完成并提交 PR（2026-10-10，阶段 1–3 完成、阶段 4 本地验收完成；PR 待审，未合并、未发版、未部署）
 
-- 本机 `/Users/admin/XIN-MAC-XN/xy2api`，分支 `feat/share-scheduling-20261010`，起点 main `3569d4f00`（产品 0.2.5），共 9 个提交（`58a355a7` 起）；推送 origin 并向 main 开 PR，编号与 CI 结果见本任务日志。
+- 本机 `/Users/admin/XIN-MAC-XN/xy2api`，分支 `feat/share-scheduling-20261010`，起点 main `3569d4f00`（产品 0.2.5），`58a355a7` 起的功能提交后合并 origin/main `7b1d5d8c`（0.2.6 GPT 缓存可靠性，合并提交 `3c0e4b6a`）；推送 origin 并向 main 开 PR，编号与 CI 结果见本任务日志。
+- 与 0.2.6 的关系：份额钩子在 `scheduler.Select` 之前返回，`applyDeferredShareBinding` 先于 0.2.6 原子粘性守卫处理准入绑定；0.2.6 对原版调度文件的改动已作为已审 hunk 加入 `scheduler-diff.json`。合并后在 Go 1.27.2、golangci-lint v2.14.0 下复验通过（tasks.md「合并 main … 后复验」）。
 - 范围：
   - 剔除智能可控调度，行为回到 Sub2API 原版（旧表与设置保留至 D7，旧管理接口统一 410）；
   - 份额调度：`internal/sharesched` 内核、Gateway/OpenAI/Gemini 适配、缓存归因与选号开销、迁移 270（旧策略导入为未生效草稿）；
@@ -19,7 +20,7 @@
   - 页头长描述在 1440px 溢出、账号弹窗规则框挤在优先级列，均已修复。
   - 上游既有问题（未改）：`internal/setup` 用 `password=%s` 拼键值 DSN，数据库密码为空时 lib/pq 把后续 `dbname=...` 当成密码值，自动安装连到 `postgres` 库并在其中建表、建管理员（已用本地测试证实；`password=''` 可避免）。生产使用非空密码不受影响，可另行修复。
 - 未完成（合并后执行或需另行授权）：tasks 0.4–0.6 生产只读基线（脚本已备）、4.5 RC 制品、4.6 影子运行 ≥3 天、4.7 灰度、4.8 D7 删表与退役路由删除。
-- 本地环境：Go 工具链 `/tmp/xy2-toolchain`；本机经 Homebrew 安装 `postgresql@18` 与 `redis`，测试数据在 `/tmp/xy2-infra`（`start.sh`/`stop.sh`），收尾已停止；`/tmp/xy2-smoke/{scripts,shots}` 为演练脚本与截图（无凭据），均可删除。
+- 本地环境：Go 工具链 `/tmp/xy2-toolchain`（1.27.0 与合并后所需 1.27.2，均校验 SHA256）；本机经 Homebrew 安装 `postgresql@18` 与 `redis`，测试数据在 `/tmp/xy2-infra`（`start.sh`/`stop.sh`），收尾已停止；`/tmp/xy2-smoke/{scripts,shots}` 为演练脚本与截图（无凭据），均可删除。
 - 下一步：CI 通过后等待人工审核；合并、发版、部署与生产只读度量需用户另行授权。
 
 ### 份额调度缓存命中与首字专项修订（2026-10-10，规划修订完成；D1–D10 已定稿并进入实施，见上）
@@ -589,6 +590,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 参考项目学习（同日）：落地「账号表现」报表与等待取消即停，详见顶部交接状态与 design §17 新增两行。
 - 剩余：tasks 2.0、2.14、3.2、3.4 及干净树 `sync.py audit`，见顶部。
 - 收尾（2026-10-10 续）：用户授权提交并自主完成剩余任务后开 PR。已完成 2.0、2.14、3.2、3.4、4.1–4.4 与本地隔离演练（4.5 的本地部分），0.2 决定不合入 v0.2.15，0.3 差异白名单接入 CI；验证与偏差见 tasks.md「验证记录」、design §17。剩余为合并后事项（见顶部），不再阻塞本 PR。
+- 合并 main（同日续）：origin/main 已前进到 0.2.6（`7b1d5d8c`），按常规 merge 并入功能分支（非上游同步），冲突按“保留 0.2.6 缓存可靠性 + 份额绑定优先 + controlled 字段继续删除”解决，合并后全量复验通过；接着推送并开 PR。
 
 ### 20261008-claude-cache-groups-release — 推送、合并与 GitHub 发版
 
@@ -1846,3 +1848,16 @@ pnpm --dir frontend run build
   - 上游安装 DSN 空密码问题未修，见顶部。
 - 下一步：干净树 `sync.py audit`、推送、开 PR 并跟进 CI；合并、发版、部署需另行授权。
 - 本轮未合并、未打标签、未发版、未部署、未访问生产；演练只用本机回环地址，结束后已删除演练库、Redis DB 5/6 与凭据文件。
+
+### 2026-10-10T21:30:00Z — `20261010-share-scheduling-dev` — 合并 main 0.2.6 与复验
+
+- 请求/目标：延续“提交、完成剩余任务、无潜在问题后开 PR”的授权；开 PR 前发现 origin/main 已发布 0.2.6，先并入以免 PR 冲突。
+- 开始状态：HEAD `d2d75a65`，工作树干净；origin/main `7b1d5d8c`。
+- 完成操作：
+  - `git merge origin/main`，解决 8 个冲突文件（backend-ci.yml、openai_gateway_service/usage/profit_control/ws_forwarder_v2、openai_cache_diagnostics、scheduler-diff.json、本记忆），合并提交 `3c0e4b6a`；
+  - 去掉 0.2.6 诊断中来自已删除 controlled 调度器的 attempt id 字段；
+  - `scheduler-diff.json` 追加 `openai-cache-reliability` 已审 hunk（openai_account_scheduler.go、openai_gateway_scheduling.go）；
+  - 按 go.mod 新版本隔离安装 Go 1.27.2（校验 SHA256），lint 换用 CI 同版 v2.14.0。
+- 验证：见 tasks.md「合并 main … 后复验」——unit 61 包、Gateway reliability 138 例、OpenAI 缓存门禁 40 例（16 必需全执行）、integration 55 包、lint 0 issues、tools 19 例、干净树 `sync.py audit` 与 `scheduler-diff` 通过。临时 harness 接线已还原。
+- 卡点/风险：无新增；0.2.6 的 `v2:` 会话哈希与原子首次绑定只作用于原版/OpenAI 调度路径，份额路径沿用自己的绑定（GET+PTTL/SET NX），二者在同一请求中不会同时写入。
+- 下一步：推送、开 PR、跟进 CI；合并、发版、部署需另行授权。

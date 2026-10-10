@@ -189,3 +189,15 @@
 5. 浏览器（Chrome 无头 + DevTools 协议）：桌面 1440×900 与手机 390×844 × 浅/深色 × 中/英文，份额调度页三个标签与账号编辑弹窗无横向溢出、无控制台错误或 4xx/5xx；键盘 Tab 顺序为侧栏 → 页头 → 分组 → 标签页 → 操作 → 调度器 → 层级卡片 → 账号行，Enter 切换标签，Esc 关闭弹窗，焦点样式可见。修复了页头描述溢出与弹窗规则框布局两处问题。
 6. 回退：0.2.5 直接运行在已迁移的库上（旧表与设置未动）健康、登录、流式/非流式请求正常；另以升级前备份恢复（回到 269、无新表）后 0.2.5 同样正常。
 7. 全新安装：新版本空库迁移至 270（317 条），建数据、请求、保存并启用份额策略正常，日志无 ERROR。
+
+合并 main（0.2.6 GPT 缓存可靠性，`7b1d5d8c`）后复验（Go 1.27.2，golangci-lint v2.14.0，与 CI 一致）：
+
+| 项目 | 结果 |
+|---|---|
+| `go build ./...`、`go vet`（默认 / unit / integration） | exit 0 |
+| `go test -tags=unit ./...` | exit 0，61 个包 ok |
+| CI “Gateway reliability” 复现（`-race`） | exit 0，138 个顶层用例通过 |
+| CI “OpenAI cache reliability with real Redis” 复现（本地 Redis） | exit 0，40 例通过，16 个必需用例全部实际执行 |
+| `go test -tags=integration -count=1 ./...`（本地服务接线同上，未提交） | exit 0，55 个包 ok（含 repository） |
+| golangci-lint v2.14.0 | 0 issues |
+| `tools/tests`、`sync.py scheduler-diff`、`sync.py audit`（干净树） | 19 例通过；白名单一致（新增 0.2.6 已审 hunk）；审计通过 |
