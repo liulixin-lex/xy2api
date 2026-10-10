@@ -19,6 +19,8 @@ import (
 
 type openAICacheDiagnosticKey struct{}
 
+const openAICacheMinSamples = 20
+
 func openAICacheModelLabel(model string) string {
 	if len(model) == 0 || len(model) > 100 {
 		return "other"
@@ -46,6 +48,8 @@ type openAICacheHistory struct {
 
 type openAICacheSample struct {
 	count                    int
+	sampleCursor             int
+	recent                   [openAICacheMinSamples]time.Time
 	input, read, write, ttft float64
 	at                       time.Time
 }
@@ -241,7 +245,9 @@ func (s *OpenAIGatewayService) observeCacheUsage(result *OpenAIForwardResult, ac
 		if result.FirstTokenMs != nil {
 			value.ttft = (1-alpha)*value.ttft + alpha*float64(max(*result.FirstTokenMs, 0))
 		}
-		value.count++
+		value.recent[value.sampleCursor] = now
+		value.sampleCursor = (value.sampleCursor + 1) % len(value.recent)
+		value.count = min(value.count+1, len(value.recent))
 		value.at = now
 		if len(t.scores) >= 4096 {
 			for oldKey, sample := range t.scores {
@@ -277,8 +283,14 @@ func (s *OpenAIGatewayService) cachePreference(ctx context.Context, account *Acc
 	t.mu.Lock()
 	value := t.scores[cacheSampleKey(d, account, normalizeOpenAIModelForUpstream(account, account.GetMappedModel(model)))]
 	t.mu.Unlock()
-	if value.count < 20 || value.input <= 0 || time.Since(value.at) > 30*time.Minute {
+	if value.count < openAICacheMinSamples || value.input <= 0 || time.Since(value.at) > 30*time.Minute {
 		return 0, false
+	}
+	now := time.Now()
+	for _, sampleAt := range value.recent {
+		if sampleAt.IsZero() || now.Sub(sampleAt) > 30*time.Minute {
+			return 0, false
+		}
 	}
 	// Normalized input cost plus a bounded TTFT penalty. This is a tie-breaker,
 	// not a replacement for account health, priority, ownership or admission.

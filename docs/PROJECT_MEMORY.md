@@ -4,13 +4,14 @@
 
 ## 当前交接状态
 
-### GPT 缓存可靠性 0.2.6（2026-10-10，本地验收中）
+### GPT 缓存可靠性 0.2.6（2026-10-10，PR 最终验证中）
 
 - 用户授权同步最新主线、新建分支、实施全站 GPT 缓存方案，完成验证后提交、推送、常规合并及 GitHub 发版。独立工作树 `/lex/xy2api-gpt-cache` 的 `feat/gpt-cache-reliability-20261010` 基于主线 `3569d4f00aae3eada079eb7ac058dc62256a66b8`；其他工作树未提交文件保持。
 - 统一 Responses、Chat/SSE、Messages 转换和 WebSocket 的真实 usage 别名及显式零优先级，保留 API Key 缓存选项和终态诊断。租户/分组/模型隔离的 `v2:` 会话身份、Redis 原子首次绑定及所有者保护、HTTP/WS 溢出准入保护已实现；保留利润门、质量门、权重及 previous_response_id 优先约束。
 - 新增有界进程内隐私诊断与同优先级、同负载候选的缓存偏好，两项均默认关闭，灰度比例为零。诊断只记录 HMAC 和数值，偏好仅训练有明确真实 usage 的可比续请求，不推算计费用量或增加付费模型调用。使用说明：[OpenAI 缓存可靠性](openai-cache-reliability.md)。
 - 最终后端 unit 62 包/23,646 主子测试 PASS（543 既有条件性跳过），integration 56 包/15,164 PASS（102 条件性跳过）；六包真实 PostgreSQL/Redis race 483 PASS，工作流三段守卫的 29 调度、15 缓存、11 跨路径必需用例均实际执行、零失败零跳过。最后测试类型断言修改后 Redis race 再验通过。前端 lint/typecheck、327 项 critical、生产构建和严格依赖审计通过；全仓 golangci-lint 0 issues/exit 0，嵌入前端 RC 二进制构建和版本/提交自检通过。共享 Anthropic Chat 写入字段和渐进 usage 合并兼容回归已按既有契约修复，原失败证据保留。
 - 候选产品版本 `0.2.6-rc.1`，兼容版本保持 `0.2.14`，不新增数据库迁移。功能提交 `28b7fec913495f68d7666ea16dd7123a2d3e53a5` 的干净树来源审计已通过；固定 head 保护门禁、RC 五平台制品与双架构镜像、独立 fresh/0.2.5 升级/备份恢复回退验收通过后，再以版本 PR 晋级 `0.2.6`。证据 `/lex/gpt-cache-reliability-20261010/`；本轮不部署生产，实际命中收益需部署后灰度观察。
+- 功能 [PR #86](https://github.com/liulixin-lex/xy2api/pull/86) 已创建，未合并。首轮 Security Scan 检出 Go 1.27.0 标准库和 x/net 的 12 项可达漏洞；升级 Go 1.27.2、x/net 0.60.0 及必要关联依赖，同步模块、CI、Docker 入口，不改变例外政策。新组合全量 unit 62 包/23,646 PASS、integration 56 包/15,164 PASS；HTTP/2 迁移后七包真实 PostgreSQL/Redis race 538 PASS、三段工作流守卫 29/15/11 必跑用例 PASS；最近 30 分钟样本窗口修复后五包缓存 race 40 PASS、16 项缓存守卫全部 RUN/PASS，均零失败。最终源码全仓 lint 0 issues；govulncheck 可达/导入包漏洞 0，7 项仅存在于未调用依赖模块。旧工具链证据和首轮失败记录保留，嵌入前端构建、最终提交树来源审计和远端固定 head 门禁仍待完成。
 
 ### Claude 自动缓存分组迭代（2026-10-08，GitHub 发布进行中）
 
@@ -528,6 +529,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 范围：统一缓存用量解析、按上游能力保留缓存参数、稳定租户会话身份、并发绑定与容量溢出保护、隐私诊断及默认关闭的缓存感知选路；覆盖 Sub2API 和现有转换/WS 路径。保留其他工作树未提交文件与历史迁移。
 - 本地回归及真实隔离存储验证后走固定 head 保护检查、常规 merge、RC 验收和不可变正式标签。证据目录 `/lex/gpt-cache-reliability-20261010/`；不部署生产、不自动启用选路策略、不调用付费上游。
 - 进展：方案已实现；完整 unit 23,646、integration 15,164 和六包真实存储 race 483 个主子测试通过，三段工作流关键守卫零跳过，最后 Redis 测试断言定向复验通过。前端 lint/typecheck/327 项关键测试、生产构建和严格依赖审计通过；共享 Anthropic 写入字段及渐进 usage 合并回归已修复，保留首轮失败证据。全仓 golangci-lint 0 issues/exit 0，`0.2.6-rc.1` 嵌入前端二进制构建及版本/兼容版本/基线提交自检通过；功能提交 `28b7fec91` 的干净树来源审计通过。继续提交记忆进度、复验来源审计、固定 head CI 和 RC/正式制品验收。生产收益不能从本地测试外推。
+- 新进展：PR #86 首轮安全门禁真实失败；Go/x/net 升级后客户端 HTTP/2 使用标准库配置，真实 CONNECT 代理协商与服务端 H1/H2 独立超时已覆盖。缓存偏好严格要求 20 个最近 30 分钟可比样本，新回归先复现旧行为失败，再在修复后通过。完整回归、真实存储 race、最终 lint/govulncheck 已通过；构建和远端固定 head CI 待验。保留失败日志与 Wire 工具校验和；全部检查成功前不合并、不创建发行标签。
 
 ### 20261008-claude-cache-groups-release — 推送、合并与 GitHub 发版
 

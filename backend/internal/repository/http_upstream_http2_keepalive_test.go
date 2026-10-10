@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,10 +26,7 @@ func http2KeepAliveTestPoolSettings() poolSettings {
 	}
 }
 
-// requireHTTP2Configured 断言 http2 已显式挂到 http.Transport 上。
-// x/net/http2 在 go1.27 && !http2legacy 下是标准库 HTTP/2 的包装：ConfigureTransports 通过
-// Transport.RegisterProtocol("http/2") 注册配置并打开 Protocols.HTTP2（TLSNextProto 不承载 h2 入口），
-// ReadIdleTimeout/PingTimeout 在建连时映射为 http.HTTP2Config.SendPingTimeout/PingTimeout。
+// requireHTTP2Configured checks the standard library's explicit HTTP/2 configuration.
 func requireHTTP2Configured(t *testing.T, tr *http.Transport, msg string) {
 	t.Helper()
 	require.NotNil(t, tr.Protocols, msg)
@@ -49,11 +49,10 @@ func TestEnableHTTP2KeepAlive_EnablesPingHealthCheck(t *testing.T) {
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
 			tr := &http.Transport{}
-			h2, err := enableHTTP2KeepAlive(tr, tc.mode)
-			require.NoError(t, err)
-			require.NotNil(t, h2, "必须返回已配置的 *http2.Transport")
-			require.Equal(t, tc.readIdleTimeout, h2.ReadIdleTimeout)
-			require.Equal(t, tc.pingTimeout, h2.PingTimeout, "各模式应使用独立的 PING 应答期限")
+			enableHTTP2KeepAlive(tr, tc.mode)
+			require.NotNil(t, tr.HTTP2)
+			require.Equal(t, tc.readIdleTimeout, tr.HTTP2.SendPingTimeout)
+			require.Equal(t, tc.pingTimeout, tr.HTTP2.PingTimeout, "各模式应使用独立的 PING 应答期限")
 			requireHTTP2Configured(t, tr, "http2 必须已挂到底层 http.Transport 上")
 		})
 	}
@@ -133,4 +132,77 @@ func TestBuildUpstreamTransport_HTTP2_WithHTTPProxy_EnablesKeepAlive(t *testing.
 			require.NotNil(t, tr.Proxy, "HTTP 代理仍须通过 Transport.Proxy 生效")
 		})
 	}
+}
+
+func TestBuildUpstreamTransport_HTTP2NegotiatesThroughCONNECTProxy(t *testing.T) {
+	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor != 2 {
+			http.Error(w, "HTTP/2 required", http.StatusBadRequest)
+			return
+		}
+		_, _ = io.WriteString(w, "via-proxy")
+	}))
+	upstream.EnableHTTP2 = true
+	upstream.StartTLS()
+	defer upstream.Close()
+	target, err := url.Parse(upstream.URL)
+	require.NoError(t, err)
+	var proxyCalls atomic.Int64
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect || r.Host != target.Host {
+			http.Error(w, "unexpected proxy target", http.StatusBadRequest)
+			return
+		}
+		remote, dialErr := net.DialTimeout("tcp", target.Host, time.Second)
+		if dialErr != nil {
+			http.Error(w, "upstream unavailable", http.StatusBadGateway)
+			return
+		}
+		defer func() { _ = remote.Close() }()
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "proxy hijacking unavailable", http.StatusInternalServerError)
+			return
+		}
+		client, buffered, hijackErr := hijacker.Hijack()
+		if hijackErr != nil {
+			return
+		}
+		defer func() { _ = client.Close() }()
+		if _, writeErr := buffered.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n"); writeErr != nil {
+			return
+		}
+		if flushErr := buffered.Flush(); flushErr != nil {
+			return
+		}
+		proxyCalls.Add(1)
+		go func() {
+			_, _ = io.Copy(remote, buffered)
+			_ = remote.Close()
+		}()
+		_, _ = io.Copy(client, remote)
+	}))
+	defer proxy.Close()
+	proxyURL, err := url.Parse(proxy.URL)
+	require.NoError(t, err)
+	for _, mode := range []string{upstreamProtocolModeOpenAIH2, upstreamProtocolModeLongStreamH2} {
+		t.Run(mode, func(t *testing.T) {
+			transport, buildErr := buildUpstreamTransport(http2KeepAliveTestPoolSettings(), proxyURL, mode)
+			require.NoError(t, buildErr)
+			defer transport.CloseIdleConnections()
+			roots := x509.NewCertPool()
+			roots.AddCert(upstream.Certificate())
+			transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}
+			client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
+			response, requestErr := client.Get(upstream.URL)
+			require.NoError(t, requestErr)
+			defer func() { _ = response.Body.Close() }()
+			body, readErr := io.ReadAll(response.Body)
+			require.NoError(t, readErr)
+			require.Equal(t, http.StatusOK, response.StatusCode)
+			require.Equal(t, 2, response.ProtoMajor)
+			require.Equal(t, "via-proxy", string(body))
+		})
+	}
+	require.EqualValues(t, 2, proxyCalls.Load())
 }
