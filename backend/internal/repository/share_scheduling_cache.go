@@ -14,14 +14,32 @@ import (
 )
 
 const (
-	shareSchedulingChannel     = "xy2:share:policy"
+	shareSchedulingChannel = "xy2:share:policy"
+	// Counters are kept per minute for short windows and per hour for the
+	// day: per-account fields grow with the group, and a day of minute
+	// buckets would hold 1440 copies of them.
+	shareSchedulingMinuteTTL   = 2*time.Hour + 10*time.Minute
 	shareSchedulingCounterTTL  = 26 * time.Hour
 	shareSchedulingDecisionTTL = 24 * time.Hour
 	shareSchedulingDecisionMax = 500
-	// shareSchedulingMaxMinutes bounds one report read to a day of buckets.
-	shareSchedulingMaxMinutes = 24*60 + 1
-	shareSchedulingScanCount  = 500
+	// shareSchedulingMinuteSpan is the longest window read minute by minute.
+	// Longer windows read whole hours from the one nearest the window start,
+	// plus the minutes of the current hour.
+	shareSchedulingMinuteSpan = 2 * time.Hour
+	// shareSchedulingMaxWindow bounds one report read to a day.
+	shareSchedulingMaxWindow = 24 * time.Hour
+	shareSchedulingScanCount = 500
 )
+
+// shareDeleteBindingIfOwner deletes a session binding only while it still
+// points at the account the rebalance read, so a session that was rebound in
+// between keeps its new binding. It returns 1 when it deleted.
+const shareDeleteBindingIfOwner = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`
 
 type shareSchedulingStore struct {
 	rdb *redis.Client
@@ -34,6 +52,10 @@ func NewShareSchedulingStore(rdb *redis.Client) service.ShareSchedulingStore {
 
 func shareCounterKey(kind string, groupID, minute int64) string {
 	return fmt.Sprintf("xy2:%s:attr:%d:%d", kind, groupID, minute)
+}
+
+func shareHourCounterKey(kind string, groupID, hour int64) string {
+	return fmt.Sprintf("xy2:%s:attrh:%d:%d", kind, groupID, hour)
 }
 
 func shareDecisionKey(groupID int64) string {
@@ -81,14 +103,17 @@ func (s *shareSchedulingStore) SubscribeChanges(ctx context.Context, handler fun
 
 func (s *shareSchedulingStore) WriteStats(ctx context.Context, batch service.ShareSchedulingStatsBatch) error {
 	pipe := s.rdb.Pipeline()
-	expire := map[string]struct{}{}
+	expire := map[string]time.Duration{}
 	for counter, n := range batch.Counters {
-		key := shareCounterKey(counter.Kind, counter.GroupID, counter.Minute)
-		pipe.HIncrBy(ctx, key, counter.Field, n)
-		expire[key] = struct{}{}
+		minuteKey := shareCounterKey(counter.Kind, counter.GroupID, counter.Minute)
+		hourKey := shareHourCounterKey(counter.Kind, counter.GroupID, counter.Minute/60)
+		pipe.HIncrBy(ctx, minuteKey, counter.Field, n)
+		pipe.HIncrBy(ctx, hourKey, counter.Field, n)
+		expire[minuteKey] = shareSchedulingMinuteTTL
+		expire[hourKey] = shareSchedulingCounterTTL
 	}
-	for key := range expire {
-		pipe.Expire(ctx, key, shareSchedulingCounterTTL)
+	for key, ttl := range expire {
+		pipe.Expire(ctx, key, ttl)
 	}
 	for groupID, samples := range batch.Decisions {
 		if len(samples) == 0 {
@@ -108,15 +133,22 @@ func (s *shareSchedulingStore) WriteStats(ctx context.Context, batch service.Sha
 }
 
 func (s *shareSchedulingStore) ReadCounters(ctx context.Context, kind string, groupID int64, from, to time.Time) (map[string]int64, error) {
-	first, last := from.Unix()/60, to.Unix()/60
-	if last < first {
+	if to.Before(from) {
 		return map[string]int64{}, nil
 	}
-	if last-first >= shareSchedulingMaxMinutes {
-		first = last - shareSchedulingMaxMinutes + 1
+	if to.Sub(from) > shareSchedulingMaxWindow {
+		from = to.Add(-shareSchedulingMaxWindow)
 	}
+	first, last := from.Unix()/60, to.Unix()/60
 	pipe := s.rdb.Pipeline()
-	cmds := make([]*redis.MapStringStringCmd, 0, last-first+1)
+	var cmds []*redis.MapStringStringCmd
+	if to.Sub(from) > shareSchedulingMinuteSpan {
+		current := to.Unix() / 3600
+		for hour := (from.Unix() + 1800) / 3600; hour < current; hour++ {
+			cmds = append(cmds, pipe.HGetAll(ctx, shareHourCounterKey(kind, groupID, hour)))
+		}
+		first = current * 60
+	}
 	for minute := first; minute <= last; minute++ {
 		cmds = append(cmds, pipe.HGetAll(ctx, shareCounterKey(kind, groupID, minute)))
 	}
@@ -161,7 +193,8 @@ func (s *shareSchedulingStore) SwapCacheSession(ctx context.Context, groupID int
 }
 
 // ClearBindings scans the group's session bindings. Protocol continuation
-// and ownership keys stored under the same prefix are never touched.
+// and ownership keys stored under the same prefix are never touched, and a
+// binding is only deleted while it still holds the account that was read.
 func (s *shareSchedulingStore) ClearBindings(ctx context.Context, groupID int64, clear func(service.ShareSchedulingBinding) bool) (int, error) {
 	prefix := buildSessionKey(groupID, "")
 	var cursor uint64
@@ -188,19 +221,24 @@ func (s *shareSchedulingStore) ClearBindings(ctx context.Context, groupID int64,
 			if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 				return deleted, err
 			}
-			var remove []string
+			var removes []*redis.Cmd
+			removePipe := s.rdb.Pipeline()
 			for i, key := range candidates {
 				accountID, err := gets[i].Int64()
 				if err != nil {
 					continue
 				}
 				if clear(service.ShareSchedulingBinding{AccountID: accountID, Remaining: ttls[i].Val()}) {
-					remove = append(remove, key)
+					removes = append(removes, removePipe.Eval(ctx, shareDeleteBindingIfOwner, []string{key}, strconv.FormatInt(accountID, 10)))
 				}
 			}
-			if len(remove) > 0 {
-				n, err := s.rdb.Del(ctx, remove...).Result()
-				deleted += int(n)
+			if len(removes) > 0 {
+				_, err := removePipe.Exec(ctx)
+				for _, cmd := range removes {
+					if n, cmdErr := cmd.Int64(); cmdErr == nil {
+						deleted += int(n)
+					}
+				}
 				if err != nil {
 					return deleted, err
 				}

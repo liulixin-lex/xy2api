@@ -787,6 +787,7 @@ type ShareSchedulingDecisionStats struct {
 	ShadowAgree     int64            `json:"shadow_agree"`
 	ShadowAgreeRate float64          `json:"shadow_agree_rate"`
 	ShadowReasons   map[string]int64 `json:"shadow_reasons"`
+	ShadowSkipped   int64            `json:"shadow_skipped"`
 	RebalanceClears int64            `json:"rebalance_cleared"`
 	Dropped         int64            `json:"dropped"`
 }
@@ -985,8 +986,9 @@ func newShareDecisionStats(c map[string]int64) ShareSchedulingDecisionStats {
 		HotMigrations: c[shareStatsHotMigrationField], HotReasons: collectPrefixed(c, shareStatsHotPrefix),
 		WaitCount: c[shareStatsWaitCountField], WaitHit: c[shareStatsWaitHitField], Attempts: c[shareStatsAttemptsField],
 		Shadow: c[shareStatsShadowField], ShadowAgree: c[shareStatsShadowAgreeField],
-		ShadowReasons: collectPrefixed(c, shareStatsShadowPrefix), RebalanceClears: c[shareStatsRebalanceField],
-		Dropped: c[shareStatsDroppedField],
+		ShadowReasons: collectPrefixed(c, shareStatsShadowPrefix), ShadowSkipped: c[shareStatsShadowSkippedField],
+		RebalanceClears: c[shareStatsRebalanceField],
+		Dropped:         c[shareStatsDroppedField],
 	}
 	if stats.WaitCount > 0 {
 		stats.AvgWaitMs = float64(c[shareStatsWaitMsField]) / float64(stats.WaitCount)

@@ -69,8 +69,8 @@ beforeEach(() => {
     group_id: 5, scheduler: 'share', version: 1, unit: 'sessions', from: '', to: '', active_tier: 1,
     members: [shareMember(1, { effective_share: 0.5 }), shareMember(2, { effective_share: 0.5 })],
     actual: [{ account_id: 1, placed: 6, placed_share: 0.6, requests: 0, request_share: 0, tokens: 0, token_share: 0, standard_cost: 0, cost_share: 0, skipped: { saturated: 3, session_limit: 1 }, ttft: { count: 5, p50_ms: 500, p95_ms: 2000, p99_ms: 3000 } }],
-    decisions: { requests: 10, reasons: { affinity_hit: 7, new_session: 3 }, key_sources: {}, ideal_skips: {}, hot_migrations: 0, hot_reasons: {}, wait_count: 0, wait_hit: 0, avg_wait_ms: 0, attempts: 10, shadow: 0, shadow_agree: 0, shadow_agree_rate: 0, shadow_reasons: {}, rebalance_cleared: 0, dropped: 0 },
-    cache: { requests: 4, classes: {}, class_tokens: { cache_hit: 900, miss_new_session: 100 }, prompt_tokens: 1000, cache_read_tokens: 900, cache_creation_tokens: 0, read_ratio: 0.9, scheduling_miss_ratio: 0, ttft: { affinity_hit: { count: 4, p50_ms: 500, p95_ms: 1000, p99_ms: null } },
+    decisions: { requests: 10, reasons: { affinity_hit: 7, new_session: 3 }, key_sources: {}, ideal_skips: {}, hot_migrations: 0, hot_reasons: {}, wait_count: 0, wait_hit: 0, avg_wait_ms: 0, attempts: 10, shadow: 0, shadow_agree: 0, shadow_agree_rate: 0, shadow_reasons: {}, shadow_skipped: 3, rebalance_cleared: 0, dropped: 0 },
+    cache: { requests: 4, classes: {}, class_tokens: { cache_hit: 900, miss_new_session: 100 }, prompt_tokens: 1000, cache_read_tokens: 900, cache_creation_tokens: 0, read_ratio: 0.9, scheduling_miss_ratio: 0, ttft: { affinity_hit: { count: 120, p50_ms: 500, p95_ms: 1000, p99_ms: null }, spill_rebind: { count: 8, p50_ms: 300, p95_ms: 750, p99_ms: 1000 } },
       selection: {
         original: { samples: 3, avg_ms: 0.4, io_samples: 0, avg_redis_round_trips: null, avg_redis_ms: null, avg_db_queries: null },
         share: { samples: 5, avg_ms: 0.62, io_samples: 5, avg_redis_round_trips: 3, avg_redis_ms: 0.25, avg_db_queries: 1 },
@@ -190,12 +190,17 @@ describe('share scheduling page', () => {
     await flushPromises()
     expect(api.report).toHaveBeenCalledWith(5, '1h')
     expect(w.get('[data-testid="share-card-cacheRead"]').text()).toBe('90.0%')
+    expect(w.get('[data-testid="share-card-shadowSkipped"]').text()).toBe('3')
     expect(w.get('[data-testid="share-report-row-1"]').text()).toContain('60.0%')
-    expect(w.get('[data-testid="share-ttft"]').text()).toContain('> 30 s')
+    const ttft = w.get('[data-testid="share-ttft"]').findAll('tbody tr').map(row => row.findAll('td').map(cell => cell.text()))
+    expect(ttft[0].slice(2)).toEqual(['≤ 500 ms', '≤ 1.0 s', '> 30 s'])
+    expect(ttft[1].slice(2)).toEqual(['≤ 300 ms', '—', '—'])
+    expect(w.find('[data-testid="share-ttft-min-samples"]').exists()).toBe(true)
     const busy = w.get('[data-testid="share-account-1"]').text()
     expect(busy).toContain('40.0%')
     expect(busy).toContain('admin.shareScheduling.reasons.saturated 3 · admin.shareScheduling.reasons.session_limit 1')
-    expect(busy).toContain('≤ 2.0 s')
+    expect(busy).toContain('≤ 500 ms')
+    expect(busy).not.toContain('≤ 2.0 s')
     expect(w.get('[data-testid="share-account-2"]').text()).toContain('-')
     expect(w.find('[data-testid="share-account-busy"]').exists()).toBe(true)
     const selection = w.get('[data-testid="share-selection-cost"]')

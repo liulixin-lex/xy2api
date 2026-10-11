@@ -308,6 +308,7 @@ export default {
         waitHit: 'Wait hits',
         avgWait: 'Average wait',
         shadowAgree: 'Shadow agreement',
+        shadowSkipped: 'Shadow comparisons skipped (load cap)',
         attempts: 'Accounts tried'
       },
       shares: {
@@ -333,6 +334,7 @@ export default {
       keySources: 'Affinity key sources',
       cacheClasses: 'Cache attribution (by prompt tokens)',
       ttft: 'First-token latency by decision type',
+      ttftMinSamples: 'P50 / P95 / P99 show once there are at least 5 / 20 / 100 samples, so a handful of requests does not mislead.',
       ttftColumns: {
         reason: 'Decision',
         count: 'Samples',

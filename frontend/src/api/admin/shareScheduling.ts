@@ -222,6 +222,8 @@ export interface ShareReport {
     shadow_agree: number
     shadow_agree_rate: number
     shadow_reasons: Record<string, number>
+    /** Shadow comparisons skipped at the concurrency bound. */
+    shadow_skipped?: number
     rebalance_cleared: number
     dropped: number
   }

@@ -179,6 +179,9 @@ func (p *Policy) Resolver() func(accountID int64, priority, concurrency int) (ru
 }
 
 func (p *Policy) ruleIndex() map[int64]AccountRule {
+	if p.rules != nil {
+		return p.rules
+	}
 	rules := make(map[int64]AccountRule, len(p.Accounts))
 	for _, r := range p.Accounts {
 		rules[r.AccountID] = r

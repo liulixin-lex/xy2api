@@ -60,6 +60,17 @@ type Policy struct {
 	Cache     Cache         `json:"cache"`
 	Tiers     Tiers         `json:"tiers"`
 	Balance   Balance       `json:"balance"`
+
+	// rules indexes Accounts once the policy is frozen; see Freeze.
+	rules map[int64]AccountRule
+}
+
+// Freeze indexes the account rules for a policy that is no longer modified,
+// so Plan does not rebuild the index per request. Modifying Accounts after
+// Freeze is not allowed.
+func (p *Policy) Freeze() {
+	p.rules = nil
+	p.rules = p.ruleIndex()
 }
 
 // AccountRule is the administrator's intent for one group member. Members

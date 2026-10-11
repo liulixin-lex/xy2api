@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"log/slog"
+	"maps"
+	"sync/atomic"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
@@ -15,6 +17,7 @@ const (
 	shareWaitInitialBackoff = 20 * time.Millisecond
 	shareWaitMaxBackoff     = 250 * time.Millisecond
 	shareShadowTimeout      = 3 * time.Second
+	shareShadowConcurrency  = 32
 )
 
 // shareSelectionTrace follows one selection call. The share executor fills
@@ -81,16 +84,28 @@ func (s *ShareSchedulingService) recordSelection(ctx context.Context, account *A
 	}
 	if trace.shadow != nil && !trace.shadowDone {
 		trace.shadowDone = true
-		run := trace.shadow
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					slog.Warn("share_scheduling.shadow_panic", "group_id", trace.groupID, "panic", r)
-				}
-			}()
-			run(account.ID)
-		}()
+		s.startShadow(trace.groupID, trace.shadow, account.ID)
 	}
+}
+
+// startShadow runs a shadow comparison off the request path, or counts it as
+// skipped when shareShadowConcurrency comparisons are already running.
+func (s *ShareSchedulingService) startShadow(groupID int64, run func(original int64), original int64) {
+	select {
+	case s.shadows <- struct{}{}:
+	default:
+		s.stats.add(shareStatsKindShare, groupID, time.Now(), shareStatsShadowSkippedField, 1)
+		return
+	}
+	go func() {
+		defer func() { <-s.shadows }()
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Warn("share_scheduling.shadow_panic", "group_id", groupID, "panic", r)
+			}
+		}()
+		run(original)
+	}()
 }
 
 // recordSelectionCost adds a sampled selection's time, and when metered its
@@ -151,9 +166,35 @@ func (s *ShareSchedulingService) shareMissingBoundCandidate(acc *Account, now ti
 		Priority: acc.Priority, Concurrency: acc.EffectiveLoadFactor(), Reason: reason, RecoverAt: recoverAt}, true
 }
 
+// shareClassNames interns account class names; building one per candidate
+// per request would allocate for every member of a large group. The map is
+// replaced on insert, so lookups need no lock.
+var shareClassNames atomic.Pointer[map[[2]string]string]
+
+const maxShareClassNames = 256
+
 // shareAccountClass groups accounts whose request rewriting is identical.
 func shareAccountClass(acc *Account) string {
-	return acc.Platform + "/" + acc.Type
+	key := [2]string{acc.Platform, acc.Type}
+	current := shareClassNames.Load()
+	if current != nil {
+		if name, ok := (*current)[key]; ok {
+			return name
+		}
+	}
+	name := acc.Platform + "/" + acc.Type
+	for current == nil || len(*current) < maxShareClassNames {
+		next := make(map[[2]string]string, 1)
+		if current != nil {
+			next = maps.Clone(*current)
+		}
+		next[key] = name
+		if shareClassNames.CompareAndSwap(current, &next) {
+			break
+		}
+		current = shareClassNames.Load()
+	}
+	return name
 }
 
 // shareAccountStateReason maps Account.IsSchedulable onto reason codes and
@@ -367,7 +408,10 @@ func (e *shareExecutor) finish(acc *Account, acquired bool, release func(), wait
 // waitForSlot waits up to budget for the bound account, counted in the
 // account's wait queue so max_waiting holds across instances.
 func (e *shareExecutor) waitForSlot(acc *Account, limit int, budget time.Duration, maxWaiting int) (*AcquireResult, time.Duration) {
-	if e.concurrency == nil || budget <= 0 {
+	// The wait counter fails open on Redis errors: with a cancelled context
+	// the increment fails yet reports success, and the deferred decrement
+	// would then lower another waiter's count.
+	if e.concurrency == nil || budget <= 0 || e.ctx.Err() != nil {
 		return nil, 0
 	}
 	start := time.Now()

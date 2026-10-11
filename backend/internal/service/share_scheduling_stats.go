@@ -34,6 +34,9 @@ const (
 	shareStatsShadowField       = "shadow"
 	shareStatsShadowAgreeField  = "shadow_agree"
 	shareStatsShadowPrefix      = "shadow_reason:"
+	// shareStatsShadowSkippedField counts shadow comparisons skipped at the
+	// concurrency bound; the agreement rate covers the rest.
+	shareStatsShadowSkippedField = "shadow_skipped"
 )
 
 // shareStatsRecorder aggregates counters in memory until the next flush.
@@ -60,6 +63,43 @@ func (r *shareStatsRecorder) add(kind string, groupID int64, at time.Time, field
 		return
 	}
 	r.counters[key] += n
+}
+
+// shareStatsDelta is one field increment of addAll.
+type shareStatsDelta struct {
+	field string
+	n     int64
+}
+
+// addAll adds several fields of one group and minute under one lock: a
+// decision updates about ten counters.
+func (r *shareStatsRecorder) addAll(kind string, groupID int64, at time.Time, deltas []shareStatsDelta) {
+	minute := at.Unix() / 60
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, d := range deltas {
+		if d.n == 0 {
+			continue
+		}
+		key := ShareSchedulingCounter{Kind: kind, GroupID: groupID, Minute: minute, Field: d.field}
+		if _, ok := r.counters[key]; !ok && len(r.counters) >= maxShareStatsCounters {
+			r.dropped++
+			continue
+		}
+		r.counters[key] += d.n
+	}
+}
+
+// decisionRoom reports whether a decision sample of the group would be kept,
+// so callers skip encoding samples the flush would drop.
+func (r *shareStatsRecorder) decisionRoom(groupID int64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.decisions[groupID]) >= maxShareDecisionsPerFlush {
+		r.dropped++
+		return false
+	}
+	return true
 }
 
 func (r *shareStatsRecorder) addDecision(groupID int64, sample []byte) {

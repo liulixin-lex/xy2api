@@ -146,7 +146,7 @@ func TestShareSchedulingAccountUsage(t *testing.T) {
 	insert(groupID, accounts[0], 100, 10, 5, 1000, 0.5, now.Add(-10*time.Minute))
 	insert(groupID, accounts[0], 200, 20, 0, 0, 0.25, now.Add(-5*time.Minute))
 	insert(groupID, accounts[1], 50, 5, 0, 0, 0.1, now.Add(-time.Minute))
-	insert(groupID, accounts[1], 999, 999, 0, 0, 9, now.Add(-2*time.Hour))   // outside the window
+	insert(groupID, accounts[1], 999, 999, 0, 0, 9, now.Add(-2*time.Hour))    // outside the window
 	insert(otherGroup, accounts[1], 999, 999, 0, 0, 9, now.Add(-time.Minute)) // another group
 
 	usage, err := repo.AccountUsage(ctx, groupID, now.Add(-time.Hour))
@@ -168,6 +168,7 @@ func TestShareSchedulingStoreCountersAndDecisions(t *testing.T) {
 		b := service.ShareSchedulingStatsBatch{Counters: map[service.ShareSchedulingCounter]int64{
 			{Kind: "share", GroupID: groupID, Minute: minute, Field: "requests"}:         n,
 			{Kind: "share", GroupID: groupID, Minute: minute - 30, Field: "requests"}:    n,
+			{Kind: "share", GroupID: groupID, Minute: minute - 200, Field: "requests"}:   n,
 			{Kind: "share", GroupID: groupID, Minute: minute - 3000, Field: "requests"}:  n,
 			{Kind: "cache", GroupID: groupID, Minute: minute, Field: "acct_ttft:7:1000"}: n,
 		}, Decisions: map[int64][][]byte{}}
@@ -182,14 +183,20 @@ func TestShareSchedulingStoreCountersAndDecisions(t *testing.T) {
 	hour, err := store.ReadCounters(ctx, "share", groupID, now.Add(-time.Hour), now)
 	require.NoError(t, err)
 	require.Equal(t, map[string]int64{"requests": 10}, hour, "both flushes add up; older minutes stay outside")
+	six, err := store.ReadCounters(ctx, "share", groupID, now.Add(-6*time.Hour), now)
+	require.NoError(t, err)
+	require.Equal(t, int64(15), six["requests"], "long windows read hour buckets plus the minutes of the current hour, without double counting")
 	day, err := store.ReadCounters(ctx, "share", groupID, now.Add(-72*time.Hour), now)
 	require.NoError(t, err)
-	require.Equal(t, int64(10), day["requests"], "a read covers at most one day")
+	require.Equal(t, int64(15), day["requests"], "a read covers at most one day")
 	cache, err := store.ReadCounters(ctx, "cache", groupID, now.Add(-time.Minute), now)
 	require.NoError(t, err)
 	require.Equal(t, int64(5), cache["acct_ttft:7:1000"])
 
 	ttl, err := rdb.TTL(ctx, shareCounterKey("share", groupID, minute)).Result()
+	require.NoError(t, err)
+	assertTTLWithin(t, ttl, 2*time.Hour, shareSchedulingMinuteTTL)
+	ttl, err = rdb.TTL(ctx, shareHourCounterKey("share", groupID, minute/60)).Result()
 	require.NoError(t, err)
 	assertTTLWithin(t, ttl, 25*time.Hour, 26*time.Hour)
 
@@ -283,6 +290,21 @@ func TestShareSchedulingBindingsOnRedis(t *testing.T) {
 	exists, err := rdb.Exists(ctx, buildSessionKey(groupID, "openai:response:resp_1")).Result()
 	require.NoError(t, err)
 	require.Equal(t, int64(1), exists)
+
+	// A session rebound between the scan's read and its delete keeps the
+	// new binding: only the account that was read is cleared.
+	require.NoError(t, cache.SetSessionAccountID(ctx, groupID, "moved", 7, time.Minute))
+	cleared, err = store.ClearBindings(ctx, groupID, func(b service.ShareSchedulingBinding) bool {
+		if b.AccountID == 7 {
+			require.NoError(t, cache.SetSessionAccountID(ctx, groupID, "moved", 8, time.Minute))
+		}
+		return b.AccountID == 7
+	})
+	require.NoError(t, err)
+	require.Zero(t, cleared)
+	id, _, err = cache.GetSessionAccountIDWithTTL(ctx, groupID, "moved")
+	require.NoError(t, err)
+	require.Equal(t, int64(8), id)
 }
 
 func TestShareSchedulingCacheSessionSwap(t *testing.T) {

@@ -308,6 +308,7 @@ export default {
         waitHit: '等待命中',
         avgWait: '平均等待',
         shadowAgree: '影子一致率',
+        shadowSkipped: '影子对比跳过（负载上限）',
         attempts: '尝试账号次数'
       },
       shares: {
@@ -333,6 +334,7 @@ export default {
       keySources: '亲和键来源',
       cacheClasses: '缓存归因（按输入 Token）',
       ttft: '首字延迟（按决策类型）',
+      ttftMinSamples: '样本少于 5 / 20 / 100 时不显示对应的 P50 / P95 / P99，以免少量请求误导判断。',
       ttftColumns: {
         reason: '决策类型',
         count: '样本',

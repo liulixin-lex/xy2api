@@ -69,40 +69,40 @@ func shareHotMigration(d sharesched.Decision, served int64, write sharesched.Wri
 func (s *ShareSchedulingService) recordDecision(rec shareDecisionRecord, d sharesched.Decision, out *shareOutcome) {
 	now := time.Now()
 	gid := rec.gp.groupID
-	r := s.stats
-	r.add(shareStatsKindShare, gid, now, shareStatsRequestsField, 1)
-	r.add(shareStatsKindShare, gid, now, shareStatsReasonPrefix+string(out.reason), 1)
-	r.add(shareStatsKindShare, gid, now, shareStatsKeySourcePrefix+string(rec.source), 1)
+	var buf [16]shareStatsDelta
+	deltas := append(buf[:0],
+		shareStatsDelta{shareStatsRequestsField, 1},
+		shareStatsDelta{shareStatsReasonPrefix + string(out.reason), 1},
+		shareStatsDelta{shareStatsKeySourcePrefix + string(rec.source), 1},
+		shareStatsDelta{shareStatsAttemptsField, int64(out.attempts)})
 	if rec.routing != "" {
-		r.add(shareStatsKindShare, gid, now, shareStatsReasonPrefix+string(rec.routing), 1)
+		deltas = append(deltas, shareStatsDelta{shareStatsReasonPrefix + string(rec.routing), 1})
 	}
 	if out.served > 0 {
-		r.add(shareStatsKindShare, gid, now, shareStatsServedPrefix+strconv.FormatInt(out.served, 10), 1)
+		deltas = append(deltas, shareStatsDelta{shareStatsServedPrefix + strconv.FormatInt(out.served, 10), 1})
 	}
 	if d.Ideal > 0 {
-		r.add(shareStatsKindShare, gid, now, shareStatsIdealPrefix+strconv.FormatInt(d.Ideal, 10), 1)
+		deltas = append(deltas, shareStatsDelta{shareStatsIdealPrefix + strconv.FormatInt(d.Ideal, 10), 1})
 	}
 	for id, reason := range out.skipped {
-		r.add(shareStatsKindShare, gid, now, shareStatsSkipPrefix+strconv.FormatInt(id, 10)+":"+string(reason), 1)
+		deltas = append(deltas, shareStatsDelta{shareStatsSkipPrefix + strconv.FormatInt(id, 10) + ":" + string(reason), 1})
 	}
 	idealSkip := d.IdealSkipReason(out.served, out.skipped)
 	if idealSkip != "" {
-		r.add(shareStatsKindShare, gid, now, shareStatsIdealSkipPrefix+string(idealSkip), 1)
+		deltas = append(deltas, shareStatsDelta{shareStatsIdealSkipPrefix + string(idealSkip), 1})
 	}
-	r.add(shareStatsKindShare, gid, now, shareStatsAttemptsField, int64(out.attempts))
 	if out.waited > 0 {
-		r.add(shareStatsKindShare, gid, now, shareStatsWaitCountField, 1)
-		r.add(shareStatsKindShare, gid, now, shareStatsWaitMsField, out.waited.Milliseconds())
+		deltas = append(deltas, shareStatsDelta{shareStatsWaitCountField, 1}, shareStatsDelta{shareStatsWaitMsField, out.waited.Milliseconds()})
 		if out.waitHit {
-			r.add(shareStatsKindShare, gid, now, shareStatsWaitHitField, 1)
+			deltas = append(deltas, shareStatsDelta{shareStatsWaitHitField, 1})
 		}
 	}
 	hot := shareHotMigration(d, out.served, out.write, rec.cache, rec.idle)
 	if hot {
-		r.add(shareStatsKindShare, gid, now, shareStatsHotMigrationField, 1)
-		r.add(shareStatsKindShare, gid, now, shareStatsHotPrefix+string(out.reason), 1)
+		deltas = append(deltas, shareStatsDelta{shareStatsHotMigrationField, 1}, shareStatsDelta{shareStatsHotPrefix + string(out.reason), 1})
 	}
-	if !s.Settings().DecisionSamples {
+	s.stats.addAll(shareStatsKindShare, gid, now, deltas)
+	if !s.Settings().DecisionSamples || !s.stats.decisionRoom(gid) {
 		return
 	}
 	sample := s.newDecisionSample(rec, d, now)
@@ -110,7 +110,7 @@ func (s *ShareSchedulingService) recordDecision(rec shareDecisionRecord, d share
 	sample.Attempts, sample.WaitMs, sample.HotMigration = out.attempts, out.waited.Milliseconds(), hot
 	sample.Queued = out.result != nil && !out.result.Acquired
 	if raw, err := json.Marshal(sample); err == nil {
-		r.addDecision(gid, raw)
+		s.stats.addDecision(gid, raw)
 	}
 }
 
@@ -124,31 +124,32 @@ func (s *ShareSchedulingService) recordShadow(rec shareDecisionRecord, d sharesc
 		first = d.Steps[0].AccountID
 	}
 	agree := first == original
-	r := s.stats
-	r.add(shareStatsKindShare, gid, now, shareStatsShadowField, 1)
+	var buf [8]shareStatsDelta
+	deltas := append(buf[:0],
+		shareStatsDelta{shareStatsShadowField, 1},
+		shareStatsDelta{shareStatsShadowPrefix + string(d.Reason), 1},
+		shareStatsDelta{shareStatsKeySourcePrefix + string(rec.source), 1})
 	if agree {
-		r.add(shareStatsKindShare, gid, now, shareStatsShadowAgreeField, 1)
+		deltas = append(deltas, shareStatsDelta{shareStatsShadowAgreeField, 1})
 	}
-	r.add(shareStatsKindShare, gid, now, shareStatsShadowPrefix+string(d.Reason), 1)
-	r.add(shareStatsKindShare, gid, now, shareStatsKeySourcePrefix+string(rec.source), 1)
 	if d.Ideal > 0 {
-		r.add(shareStatsKindShare, gid, now, shareStatsIdealPrefix+strconv.FormatInt(d.Ideal, 10), 1)
+		deltas = append(deltas, shareStatsDelta{shareStatsIdealPrefix + strconv.FormatInt(d.Ideal, 10), 1})
 	}
 	if original > 0 {
-		r.add(shareStatsKindShare, gid, now, shareStatsServedPrefix+strconv.FormatInt(original, 10), 1)
+		deltas = append(deltas, shareStatsDelta{shareStatsServedPrefix + strconv.FormatInt(original, 10), 1})
 	}
 	hot := shareHotMigration(d, first, d.Write, rec.cache, rec.idle)
 	if hot {
-		r.add(shareStatsKindShare, gid, now, shareStatsHotMigrationField, 1)
-		r.add(shareStatsKindShare, gid, now, shareStatsHotPrefix+string(d.Reason), 1)
+		deltas = append(deltas, shareStatsDelta{shareStatsHotMigrationField, 1}, shareStatsDelta{shareStatsHotPrefix + string(d.Reason), 1})
 	}
-	if !s.Settings().DecisionSamples {
+	s.stats.addAll(shareStatsKindShare, gid, now, deltas)
+	if !s.Settings().DecisionSamples || !s.stats.decisionRoom(gid) {
 		return
 	}
 	sample := s.newDecisionSample(rec, d, now)
 	sample.Reason, sample.Served, sample.Original, sample.Agree, sample.HotMigration = string(d.Reason), first, original, &agree, hot
 	if raw, err := json.Marshal(sample); err == nil {
-		r.addDecision(gid, raw)
+		s.stats.addDecision(gid, raw)
 	}
 }
 

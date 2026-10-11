@@ -492,3 +492,32 @@ func TestPolicyChangesNeverMoveWarmSessions(t *testing.T) {
 		require.Equal(t, boundID, firstStep(t, d), "trial %d", trial)
 	}
 }
+
+func TestFrozenPolicyPlansIdentically(t *testing.T) {
+	open := sharePolicy(rule(1, 1, 3), rule(2, 1, 1), rule(3, 2, 5), AccountRule{AccountID: 4, Tier: 1, Weight: 2, Drain: true})
+	frozen := *open
+	frozen.Freeze()
+	cands := append(eligible(1, 2, 3, 4, 5), Candidate{AccountID: 6, Eligible: false, Reason: ReasonRateLimited})
+	for i := range 200 {
+		req := newSession(fmt.Sprintf("frozen-%d", i))
+		if i%3 == 0 {
+			req.Binding = Binding{AccountID: int64(i%6 + 1), Idle: time.Duration(i) * time.Second}
+		}
+		require.Equal(t, Plan(open, req, cands), Plan(&frozen, req, cands))
+	}
+
+	// Large policies are where the per-request index cost shows.
+	rules := make([]AccountRule, 0, 100)
+	ids := make([]int64, 0, 100)
+	for id := int64(1); id <= 100; id++ {
+		rules = append(rules, rule(id, 1, int(id%7)+1))
+		ids = append(ids, id)
+	}
+	large := sharePolicy(rules...)
+	largeFrozen := *large
+	largeFrozen.Freeze()
+	many := eligible(ids...)
+	allocsOpen := testing.AllocsPerRun(50, func() { Plan(large, newSession("a"), many) })
+	allocsFrozen := testing.AllocsPerRun(50, func() { Plan(&largeFrozen, newSession("a"), many) })
+	require.Less(t, allocsFrozen, allocsOpen, "the frozen index is not rebuilt per request")
+}

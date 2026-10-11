@@ -171,6 +171,7 @@ func (e *shareE2E) setPolicy(policy sharesched.Policy) {
 	e.version++
 	state := e.env.share.state.Load()
 	groups := maps.Clone(state.groups)
+	policy.Freeze()
 	groups[shareTestGroupID] = &shareGroupPolicy{groupID: shareTestGroupID, version: e.version, policy: policy}
 	e.env.share.state.Store(&shareSchedulingState{settings: state.settings, groups: groups})
 }

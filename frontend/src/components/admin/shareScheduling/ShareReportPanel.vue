@@ -93,8 +93,8 @@
                 </td>
                 <td class="p-2 text-right font-mono" :class="row.busy ? 'text-amber-700 dark:text-amber-300' : 'text-gray-600 dark:text-dark-300'">{{ row.placed + row.skipped > 0 ? formatSharePercent(row.skipRate) : '-' }}</td>
                 <td class="p-2 text-right font-mono">{{ row.ttft ? formatNumber(row.ttft.count) : '-' }}</td>
-                <td class="p-2 text-right font-mono">{{ row.ttft ? bucket(row.ttft.p50_ms) : '-' }}</td>
-                <td class="p-2 text-right font-mono">{{ row.ttft ? bucket(row.ttft.p95_ms) : '-' }}</td>
+                <td class="p-2 text-right font-mono">{{ row.ttft ? percentile(row.ttft, 'p50') : '-' }}</td>
+                <td class="p-2 text-right font-mono">{{ row.ttft ? percentile(row.ttft, 'p95') : '-' }}</td>
               </tr>
             </tbody>
           </table>
@@ -128,13 +128,14 @@
               <tr v-for="row in ttftRows" :key="row.reason" class="border-b border-gray-100 last:border-0 dark:border-dark-700">
                 <td class="p-2">{{ labels.reason(row.reason) }}</td>
                 <td class="p-2 text-right font-mono">{{ formatNumber(row.count) }}</td>
-                <td class="p-2 text-right font-mono">{{ bucket(row.p50_ms) }}</td>
-                <td class="p-2 text-right font-mono">{{ bucket(row.p95_ms) }}</td>
-                <td class="p-2 text-right font-mono">{{ bucket(row.p99_ms) }}</td>
+                <td class="p-2 text-right font-mono">{{ percentile(row, 'p50') }}</td>
+                <td class="p-2 text-right font-mono">{{ percentile(row, 'p95') }}</td>
+                <td class="p-2 text-right font-mono">{{ percentile(row, 'p99') }}</td>
               </tr>
             </tbody>
           </table>
         </div>
+        <p v-if="ttftRows.length" class="mt-2 text-xs text-gray-500 dark:text-dark-400" data-testid="share-ttft-min-samples">{{ t('admin.shareScheduling.report.ttftMinSamples') }}</p>
         <p v-else class="mt-2 text-sm text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.report.noData') }}</p>
       </section>
 
@@ -215,7 +216,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ShareBarList from './ShareBarList.vue'
 import shareSchedulingAPI from '@/api/admin/shareScheduling'
-import type { ShareDecisionSample, ShareReport } from '@/api/admin/shareScheduling'
+import type { ShareDecisionSample, ShareReport, ShareTTFT } from '@/api/admin/shareScheduling'
 import { useShareSchedulingLabels } from '@/composables/useShareSchedulingLabels'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatNumber, formatTime } from '@/utils/format'
@@ -295,6 +296,7 @@ const cards = computed(() => {
     { key: 'attempts', value: formatNumber(d.attempts) }
   ]
   if (d.shadow > 0) out.push({ key: 'shadowAgree', value: formatSharePercent(d.shadow_agree_rate) })
+  if (d.shadow_skipped) out.push({ key: 'shadowSkipped', value: formatNumber(d.shadow_skipped) })
   return out
 })
 
@@ -317,6 +319,15 @@ function fineMs(ms: number): string {
 
 function bucket(ms: number | null): string {
   return ms === null ? '> 30 s' : `≤ ${formatShareMs(ms)}`
+}
+
+// A percentile read off a handful of samples misleads, so it is shown only
+// once the histogram has enough of them.
+const PERCENTILE_MIN_SAMPLES = { p50: 5, p95: 20, p99: 100 } as const
+
+function percentile(ttft: ShareTTFT, key: keyof typeof PERCENTILE_MIN_SAMPLES): string {
+  if (ttft.count < PERCENTILE_MIN_SAMPLES[key]) return '—'
+  return bucket(ttft[`${key}_ms`])
 }
 
 function signedPercent(value: number): string {

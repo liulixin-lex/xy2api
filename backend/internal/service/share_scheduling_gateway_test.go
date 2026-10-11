@@ -177,6 +177,7 @@ func newShareTestEnv(t testing.TB, policy sharesched.Policy, accounts ...Account
 	cache := newShareTestCache()
 	conc := newShareTestConcurrency()
 	share := NewShareSchedulingService(nil, nil, nil)
+	policy.Freeze() // as decodeShareGroupPolicy does
 	share.state.Store(&shareSchedulingState{
 		settings: ShareSchedulingSettings{Enabled: true, CacheAttribution: true, AttributionSampleRate: 1, DecisionSamples: true},
 		groups:   map[int64]*shareGroupPolicy{shareTestGroupID: {groupID: shareTestGroupID, version: 3, policy: policy}},

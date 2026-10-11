@@ -152,6 +152,9 @@ type ShareSchedulingService struct {
 
 	state       atomic.Pointer[shareSchedulingState]
 	corrections atomic.Pointer[map[int64]map[int64]float64]
+	// correctionRuns records, per group, the last successful correction
+	// query; only the refresh loop touches it.
+	correctionRuns map[int64]shareCorrectionRun
 	// ineligible holds, per account, when it was last seen failing a health
 	// gate. Tier return waits until an account has been healthy for
 	// tiers.stable_seconds.
@@ -161,6 +164,10 @@ type ShareSchedulingService struct {
 	// attribution bounds the concurrent session-history lookups of cache
 	// attribution; observations beyond it are dropped, never queued.
 	attribution chan struct{}
+	// shadows bounds the concurrent shadow comparisons the same way: under
+	// load the agreement rate is computed from fewer requests instead of
+	// piling up goroutines.
+	shadows chan struct{}
 	// gateway and openai give the admin operations the live candidate gates.
 	gateway *GatewayService
 	openai  *OpenAIGatewayService
@@ -181,7 +188,8 @@ type ShareSchedulingService struct {
 func NewShareSchedulingService(repo ShareSchedulingRepository, store ShareSchedulingStore, settings SettingRepository) *ShareSchedulingService {
 	node, _ := os.Hostname()
 	s := &ShareSchedulingService{repo: repo, store: store, settings: settings, node: node,
-		stats: newShareStatsRecorder(), traces: newShareTraceTable(), attribution: make(chan struct{}, shareAttributionConcurrency)}
+		stats: newShareStatsRecorder(), traces: newShareTraceTable(), attribution: make(chan struct{}, shareAttributionConcurrency),
+		shadows: make(chan struct{}, shareShadowConcurrency)}
 	s.state.Store(&shareSchedulingState{settings: DefaultShareSchedulingSettings(), groups: map[int64]*shareGroupPolicy{}})
 	empty := map[int64]map[int64]float64{}
 	s.corrections.Store(&empty)
@@ -252,8 +260,8 @@ func (s *ShareSchedulingService) refreshLoop(ctx context.Context) {
 			if err := s.reloadAll(loadCtx); err != nil {
 				slog.Warn("share_scheduling.refresh_failed", "error", err)
 			}
-			s.refreshCorrections(loadCtx)
 			cancel()
+			s.refreshCorrections(ctx, time.Now())
 		}
 	}
 }
@@ -392,6 +400,7 @@ func decodeShareGroupPolicy(row *ShareSchedulingPolicyRow) *shareGroupPolicy {
 		slog.Warn("share_scheduling.policy_decode_failed", "group_id", row.GroupID, "version", row.Version, "error", err)
 		return nil
 	}
+	policy.Freeze()
 	return &shareGroupPolicy{groupID: row.GroupID, version: row.Version, policy: policy}
 }
 
@@ -465,32 +474,88 @@ func (s *ShareSchedulingService) correctionsFor(groupID int64) map[int64]float64
 	return (*s.corrections.Load())[groupID]
 }
 
-// refreshCorrections recomputes the optional share correction of every
-// active group from usage_logs. Failures keep the previous factors.
-func (s *ShareSchedulingService) refreshCorrections(ctx context.Context) {
+// shareCorrectionRun is the last successful correction query of a group.
+type shareCorrectionRun struct {
+	at      time.Time
+	version int64
+}
+
+const (
+	shareCorrectionMinInterval  = 30 * time.Second
+	shareCorrectionMaxInterval  = 15 * time.Minute
+	shareCorrectionQueryTimeout = 3 * time.Second
+	shareCorrectionBudget       = 10 * time.Second
+	shareCorrectionMinStale     = 10 * time.Minute
+)
+
+// shareCorrectionInterval spaces the usage aggregation of one group: the
+// factors follow a window-long average, so re-reading the whole window every
+// 30 seconds would only add database load.
+func shareCorrectionInterval(windowMinutes int) time.Duration {
+	interval := time.Duration(windowMinutes) * time.Minute / 12
+	switch {
+	case interval < shareCorrectionMinInterval:
+		return shareCorrectionMinInterval
+	case interval > shareCorrectionMaxInterval:
+		return shareCorrectionMaxInterval
+	}
+	return interval
+}
+
+// refreshCorrections recomputes the optional share correction of active
+// groups whose interval has passed or whose policy changed, each query with
+// its own timeout and the whole pass within shareCorrectionBudget so a slow
+// database cannot hold up the policy refresh. A failed or unreached query
+// keeps the previous factors until they are a window (at least ten minutes)
+// old; after that the group runs uncorrected.
+func (s *ShareSchedulingService) refreshCorrections(ctx context.Context, now time.Time) {
 	if s.repo == nil {
 		return
 	}
+	ctx, cancelAll := context.WithTimeout(ctx, shareCorrectionBudget)
+	defer cancelAll()
 	state := s.state.Load()
 	next := make(map[int64]map[int64]float64)
 	previous := *s.corrections.Load()
+	runs := make(map[int64]shareCorrectionRun, len(s.correctionRuns))
+	keep := func(groupID int64, run shareCorrectionRun) {
+		runs[groupID] = run
+		if factors, ok := previous[groupID]; ok {
+			next[groupID] = factors
+		}
+	}
 	for groupID, gp := range state.groups {
 		balance := gp.policy.Balance
 		if !state.settings.Enabled || gp.policy.Scheduler == sharesched.SchedulerSub2API || balance.Correction == sharesched.CorrectionOff {
 			continue
 		}
-		usage, err := s.repo.AccountUsage(ctx, groupID, time.Now().Add(-time.Duration(balance.WindowMinutes)*time.Minute))
+		window := time.Duration(balance.WindowMinutes) * time.Minute
+		stale := window
+		if stale < shareCorrectionMinStale {
+			stale = shareCorrectionMinStale
+		}
+		run, ran := s.correctionRuns[groupID]
+		ran = ran && run.version == gp.version
+		if ran && now.Sub(run.at) < shareCorrectionInterval(balance.WindowMinutes) {
+			keep(groupID, run)
+			continue
+		}
+		queryCtx, cancel := context.WithTimeout(ctx, shareCorrectionQueryTimeout)
+		usage, err := s.repo.AccountUsage(queryCtx, groupID, now.Add(-window))
+		cancel()
 		if err != nil {
 			slog.Debug("share_scheduling.correction_usage_failed", "group_id", groupID, "error", err)
-			if factors, ok := previous[groupID]; ok {
-				next[groupID] = factors
+			if ran && now.Sub(run.at) <= stale {
+				keep(groupID, run)
 			}
 			continue
 		}
+		runs[groupID] = shareCorrectionRun{at: now, version: gp.version}
 		if factors := shareCorrectionFactors(&gp.policy, usage); len(factors) > 0 {
 			next[groupID] = factors
 		}
 	}
+	s.correctionRuns = runs
 	s.corrections.Store(&next)
 }
 

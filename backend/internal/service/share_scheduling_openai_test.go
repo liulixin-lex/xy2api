@@ -35,6 +35,7 @@ func newOpenAIShareTestEnv(t *testing.T, policy sharesched.Policy, ids ...int64)
 	cache := newShareTestCache()
 	conc := newShareTestConcurrency()
 	share := NewShareSchedulingService(nil, nil, nil)
+	policy.Freeze() // as decodeShareGroupPolicy does
 	share.state.Store(&shareSchedulingState{
 		settings: ShareSchedulingSettings{Enabled: true, CacheAttribution: true, AttributionSampleRate: 1, DecisionSamples: true},
 		groups:   map[int64]*shareGroupPolicy{shareTestGroupID: {groupID: shareTestGroupID, version: 1, policy: policy}},
