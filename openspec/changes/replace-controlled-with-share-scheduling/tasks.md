@@ -240,3 +240,6 @@
 | 真实存储集成 | `go test -tags=integration -count=1 ./...`（本地服务接线，未提交） | exit 0，55 个包 ok；份额 8 个用例含重平衡“已改绑”与小时桶 |
 | 前端 | `eslint`、`vue-tsc --noEmit`、`vitest run`、`check:i18n`、`vue-tsc -b && vite build` | 全部 exit 0；vitest 359 文件 2802 例 |
 | 工具与同步 | `tools/tests`、`sync.py scheduler-diff`、`git diff --check` | 19 例通过；白名单一致；无空白错误 |
+
+PR #90 推送后，CI 的 Unit tests 首次失败：`TestShareSchedulingShadowMatchesOriginalPerRequest` 连续发出 400 个请求，影子对比在后台排队。CI 机器负载高时，未完成的对比超过 32 个上限，多出的被跳过，用例一直等不到 400 次对比。这是上限按设计生效，不是行为错误。
+回放用例改为每个请求等待其影子对比记录完成（同时统计 `shadow_skipped`），再断言 400 次全部比较、跳过为 0。本地以 `-cpu 1,2 -race -count=3` 运行，并在全量单测并行时以 `-cpu 1 -count=10` 压测，均通过。

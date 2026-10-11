@@ -1937,3 +1937,4 @@ pnpm --dir frontend run build
   - 前端 lint、tsc、vitest 2802 例、i18n、build；
   - tools 19 例、scheduler-diff、`git diff --check`。
 - 下一步：推送后跟进 PR #90 的 CI。人工审核与合并需用户授权。上游 v0.2.15 缓存 TTL 修复建议另行按同步机制处理。
+- 更正与补充（同日）：推送 `1cce53e0` 后，CI 的 Unit tests 失败。原因是 `TestShareSchedulingShadowMatchesOriginalPerRequest` 在负载下累计的影子对比超过 32 个上限，多出的被跳过（上限按设计生效）。回放用例改为逐个等待影子对比完成，并统计 `shadow_skipped`。本地 `-cpu 1,2 -race`、全量单测并行时 `-cpu 1 -count=10` 压测、全量 unit 61 包均通过。修复后另行提交推送，需重新跟进 CI。

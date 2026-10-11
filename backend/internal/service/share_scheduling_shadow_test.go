@@ -81,6 +81,9 @@ type shadowSide struct {
 func replayShadow(t *testing.T, steps []shadowStep, original, shadow shadowSide) {
 	t.Helper()
 	outcomes := map[string]int{}
+	compared := func() int64 {
+		return shadow.counter(shareStatsShadowField) + shadow.counter(shareStatsShadowSkippedField)
+	}
 	for i, step := range steps {
 		var got [2]string
 		for j, side := range []shadowSide{original, shadow} {
@@ -102,12 +105,17 @@ func replayShadow(t *testing.T, steps []shadowStep, original, shadow shadowSide)
 		require.Equal(t, got[0], got[1], "request %d (session %q)", i, step.key)
 		require.Equal(t, shadowSideEffects(original), shadowSideEffects(shadow), "bindings and slot requests after request %d", i)
 		outcomes[strings.Fields(got[0])[1]]++
+		// Comparisons run in the background under a concurrency bound; on a
+		// loaded machine they could fall behind and be skipped, so each one
+		// finishes before the next request.
+		require.Eventually(t, func() bool { return compared() == int64(i+1) }, 5*time.Second, time.Millisecond, "shadow of request %d", i)
 	}
 	t.Logf("outcomes %v", outcomes)
 	require.Positive(t, outcomes["acquired=false"], "some requests got a wait plan")
 
 	total := int64(len(steps))
-	require.Eventually(t, func() bool { return shadow.counter(shareStatsShadowField) == total }, 5*time.Second, 10*time.Millisecond)
+	require.Zero(t, shadow.counter(shareStatsShadowSkippedField))
+	require.Equal(t, total, shadow.counter(shareStatsShadowField))
 	agree := shadow.counter(shareStatsShadowAgreeField)
 	t.Logf("shadow agreed on %d of %d", agree, total)
 	require.Less(t, agree, total, "the shadow plans disagree with the original")
