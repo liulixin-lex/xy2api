@@ -6,7 +6,7 @@
 
 ### 份额调度上线前加固与压测（2026-10-11，随 PR #90 更新；未合并、未发版、未部署）
 
-- 在 `feat/share-scheduling-20261010` 上追加加固提交并推送，PR #90 描述新增「上线前加固与压测」一节。设计见 design §18，压测与验证见 tasks.md「上线前加固与压测（2026-10-11）」。
+- 在 `feat/share-scheduling-20261010` 上追加 `b967c0ae`（加固）、`1cce53e0`（文档）、`76efcdae`（影子回放用例在 CI 负载下的确定性修复）并推送，PR #90 描述新增「上线前加固与压测」一节。`76efcdae` 上 CI 18 项全部通过，PR 为 MERGEABLE/CLEAN。设计见 design §18，压测与验证见 tasks.md「上线前加固与压测（2026-10-11）」。
 - 修复内容：
   - 影子对比并发上限 32，超出计 `shadow_skipped`；
   - 重平衡按所有者用 Lua 删除绑定；
@@ -1938,3 +1938,15 @@ pnpm --dir frontend run build
   - tools 19 例、scheduler-diff、`git diff --check`。
 - 下一步：推送后跟进 PR #90 的 CI。人工审核与合并需用户授权。上游 v0.2.15 缓存 TTL 修复建议另行按同步机制处理。
 - 更正与补充（同日）：推送 `1cce53e0` 后，CI 的 Unit tests 失败。原因是 `TestShareSchedulingShadowMatchesOriginalPerRequest` 在负载下累计的影子对比超过 32 个上限，多出的被跳过（上限按设计生效）。回放用例改为逐个等待影子对比完成，并统计 `shadow_skipped`。本地 `-cpu 1,2 -race`、全量单测并行时 `-cpu 1 -count=10` 压测、全量 unit 61 包均通过。修复后另行提交推送，需重新跟进 CI。
+- CI 结果：`76efcdae` 上 18 项检查全部通过，包括 test 作业的 Unit、Integration、Gateway reliability、OpenAI cache reliability。PR #90 为 MERGEABLE/CLEAN。
+- 收尾：
+  - 压测网关与合成上游已停止；
+  - 已删除 `xy2soak` 库、Redis DB 7 数据、含凭据的 env 与 state 文件；
+  - 已停止本地 PG/Redis（`/tmp/xy2-infra/stop.sh`）。
+  - 保留的产物（均无凭据，可删除）：
+    - `/tmp/xy2-soak/{bin,scripts,logs,out}`（压测脚本、日志与结果）；
+    - `/tmp/xy2-research`（调研克隆）；
+    - `/tmp/xy2-toolchain`；
+    - `/tmp/xy2-infra`；
+    - Homebrew `postgresql@18`/`redis`。
+- 下一步：人工审核与合并 PR #90（需用户授权）。上游 v0.2.15 缓存 TTL 修复建议另行按同步机制处理。
