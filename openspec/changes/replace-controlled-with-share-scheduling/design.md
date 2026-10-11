@@ -283,7 +283,7 @@ budget > 0 且 排队人数 < max_waiting → 等待绑定账号（原版等待�
 | PostgreSQL `share_scheduling_policies` | `group_id` 主键、`version`、`scheduler`、`policy JSONB`、`imported_from`、`updated_by`、`updated_at`。由新迁移创建，并把 `scheduling_group_policies` 导入为未启用草稿：`scheduler='sub2api'`，`priority→tier`，`traffic_weight→weight`，权重 0 转为 `drain=true, weight=1` |
 | settings 表 | `share_scheduling_enabled`、默认值模板、观测设置 |
 | Redis（已有） | 粘性绑定键（格式不变，读取改为 `GET`+`PTTL` 管道）、并发槽、等待计数（全部沿用原版） |
-| Redis（新增） | `xy2:share:attr:{gid}:{分钟}`：选择归因计数，异步批量 HINCRBY，TTL 26 小时<br>`xy2:cache:attr:{gid}:{分钟}`：缓存归因的请求数与 Token 数，原版与份额分组都写，TTL 26 小时<br>`xy2:cache:sess:{gid}:{会话指纹}`：抽样会话的上一请求 `{账号, 开始时间, 输入总量}`，TTL 1 小时<br>`xy2:share:dec:{gid}`：最近 500 条决策，LPUSH/LTRIM，TTL 24 小时<br>`xy2:share:policy`：策略变更广播 |
+| Redis（新增） | `xy2:share:attr:{gid}:{分钟}`：选择归因计数，异步批量 HINCRBY，TTL 26 小时（2026-10-11 起分钟桶 2 小时 10 分，另写小时桶 `xy2:share:attrh:{gid}:{小时}` 保留 26 小时，见 §18）<br>`xy2:cache:attr:{gid}:{分钟}`：缓存归因的请求数与 Token 数，原版与份额分组都写，TTL 同上（小时桶 `xy2:cache:attrh`）<br>`xy2:cache:sess:{gid}:{会话指纹}`：抽样会话的上一请求 `{账号, 开始时间, 输入总量}`，TTL 1 小时<br>`xy2:share:dec:{gid}`：最近 500 条决策，LPUSH/LTRIM，TTL 24 小时<br>`xy2:share:policy`：策略变更广播 |
 | 进程内 | 策略缓存（版本号）、纠偏系数（30 秒）、账号最近不合格时间、影子运行累计 |
 
 策略变更流程：管理员保存 → 数据库 CAS 成功 → 广播 `{group_id, version}` → 各实例重新加载该组。另有 30 秒全量刷新兜底。决策记录携带策略版本，便于排查“某节点仍用旧版本”。会话指纹为键哈希的截断值，不存原始会话标识与内容。
@@ -528,3 +528,23 @@ budget > 0 且 排队人数 < max_waiting → 等待绑定账号（原版等待�
 | 选号开销 | 以 `servertiming` 按请求记录 Redis 往返与耗时 | 抽样选号都记录耗时；Redis 往返、耗时与数据库查询依赖仓储层计时钩子，只在开启 `server.enable_server_timing` 的节点采集，按采集样本（`io_samples`）求平均，无样本时接口返回 `null`、页面显示“—”。不为此在默认配置下常开钩子，以免改变上游开关语义 |
 | 4.1 份额误差 | 3000 会话误差 ≤1 个百分点 | 3000 会话下 5:3:2 各份额的抽样标准差约 0.7–0.9 个百分点，1 个百分点低于抽样噪声；端到端改为 3σ 容差，≤1 个百分点由内核 1 万会话比例性测试保证 |
 | 首字统计 | 首字 | 沿用原版 `first_token_ms`，取上游首个流事件的时间，只有流式请求有值 |
+
+## 18. 上线前加固（2026-10-11）
+
+复审对照外部二开仓库的调度审计清单（候选键覆盖完整候选集、配置失败时有时限地沿用上次结果、资源有界、负载信息缺失与非有限值、快照持有可变指针）以及上游“健康评分前先要求样本量”的做法，修正以下问题：
+
+| 问题 | 风险 | 处理 | 测试 |
+|---|---|---|---|
+| 影子对比每个请求起一个 goroutine | 高并发时影子计算无上限，挤占选号与上游转发 | 同时运行的影子对比最多 32 个，超出直接跳过并计入 `shadow_skipped`，报表显示「影子对比跳过（负载上限）」；跳过不影响原版选号 | `TestShareSchedulingShadowComparisonsAreBounded` |
+| 重平衡先读后删绑定 | 读与删之间会话已改绑到别的账号时，会误删新绑定，造成一次多余的换号 | 删除改为 Lua 比对：绑定仍指向被清除的账号才删除，返回实际删除数 | `TestShareSchedulingBindingsOnRedis`（moved 用例） |
+| 已取消的请求仍进入等待 | 等待计数失败放行后，延迟递减会扣掉其他等待者的计数 | 进入等待前检查请求是否已取消，已取消直接返回 | `TestShareSchedulingWaitSkipsCancelledRequests` |
+| 每个请求重建账号规则索引 | 规则多时每次选号多做一次 map 构建 | 策略加载时冻结规则索引（`Policy.Freeze`），请求路径只读；未冻结的策略行为不变 | `TestFrozenPolicyPlansIdentically`（200 次决策一致，100 条规则时分配更少） |
+| 纠偏每 30 秒按全窗口聚合 `usage_logs` | 长窗口、多分组时数据库压力随分组数线性增长；查询失败立即清空系数导致份额跳变 | 每组按窗口 1/12 刷新（30 秒–15 分钟），策略版本变化立即重算；单组查询 3 秒超时，整轮不超过 10 秒（数据库卡住时不拖住策略刷新）；失败时沿用上次系数，最长 max(窗口, 10 分钟)，之后按无纠偏运行 | `TestShareSchedulingCorrectionRefreshIsSpacedAndBounded`、`TestShareSchedulingCorrectionRefreshEndsWithItsContext` |
+| 决策记录逐项加锁、先序列化再判断是否保留样本 | 高并发时锁竞争与无用的 JSON 序列化 | 一次加锁累加全部计数；每组每次刷写最多保留 100 条样本，超出只计丢弃数、不再序列化，计数照常 | `TestShareSchedulingDecisionSamplesCappedPerFlush` |
+| 账号类别字符串每次拼接 | 每次选号额外分配 | 类别名按（平台, 类型）驻留，写时复制，最多 256 项 | 基准 |
+| 计数按分钟保留 26 小时 | 每分钟一个哈希，含按账号的选中、理想、跳过与首字桶字段；500 个活跃账号的分组每分钟约 3000 个字段，超过 listpack 上限后一天约 400 MB，24 小时报表要读 2880 个哈希 | 分钟桶只保留 2 小时 10 分，同时写小时桶保留 26 小时；不超过 2 小时的窗口按分钟读，更长的窗口读整点小时（起点取最近的整点，误差 ≤30 分钟）加当前小时的分钟桶。同等规模约 40 MB，24 小时报表读约 110 个哈希 | `TestShareSchedulingStoreCountersAndDecisions`；本地压测按字段实测估算 |
+| 首字分位样本少时也显示 | 少量请求的 P95/P99 误导调权 | 样本数低于 5 / 20 / 100 时 P50 / P95 / P99 显示「—」并加注说明 | `ShareSchedulingView.spec.ts` |
+
+500 账号基准（`BenchmarkShareSchedulingSelection500`）：份额调度每次选号分配从约 1088 次降到约 585 次、内存约 2.16 MB 降到 2.08 MB；剩余分配主要来自与原版共用的账号列表与上游模型限流键。
+
+未采纳：外部项目“全部账号失败时放行全部”的兜底（与原版行为不一致，原版此时返回无可用账号）；流式卡顿检测可作为后续独立改进。上游 v0.2.15 的 Anthropic OAuth 缓存 TTL 顺序修复（`da4419e62`）与调度无关，应按同步机制单独同步。

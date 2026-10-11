@@ -4,6 +4,36 @@
 
 ## 当前交接状态
 
+### 份额调度上线前加固与压测（2026-10-11，随 PR #90 更新；未合并、未发版、未部署）
+
+- 在 `feat/share-scheduling-20261010` 上追加加固提交并推送，PR #90 描述新增「上线前加固与压测」一节。设计见 design §18，压测与验证见 tasks.md「上线前加固与压测（2026-10-11）」。
+- 修复内容：
+  - 影子对比并发上限 32，超出计 `shadow_skipped`；
+  - 重平衡按所有者用 Lua 删除绑定；
+  - 已取消请求不进入等待；
+  - 策略加载时冻结规则索引；
+  - 纠偏按窗口 1/12 刷新，单组 3 秒、整轮 10 秒，失败时有时限地沿用上次系数；
+  - 决策计数批量加锁、样本超额不再序列化；
+  - 账号类别名驻留；
+  - 计数改为分钟桶（2 小时 10 分）+ 小时桶（26 小时），超过 2 小时的窗口按整点小时汇总；
+  - 首字分位按样本量（5/20/100）显示。
+- 压测：本地双实例、合成上游，原版与份额同一时间线注入故障。份额与原版对比：
+  - 稳态后续轮缓存命中 98.9% vs 90.7%，后续轮首字 P95 205 vs 334 ms；
+  - 故障阶段成功率 100% vs 99.97%；
+  - 过载阶段首字 P95 1171 vs 2261 ms；
+  - Redis 清空重启后份额 10 秒内恢复；
+  - 压测后无残留槽位、无 panic，协程数回到基线。
+- 全量门禁（Go 1.27.2）：
+  - unit 61 包；
+  - Gateway reliability `-race` 143 例；
+  - OpenAI cache reliability 40 例；
+  - integration 55 包；
+  - lint 0；
+  - 前端 2802 例与构建；
+  - 工具 19 例与 scheduler-diff。
+- 范围外建议：上游 v0.2.15 `da4419e62`（Anthropic OAuth 模拟路径缓存 TTL 顺序 400 修复）与调度无关，应按同步机制另行同步。
+- 下一步：人工审核 PR #90。合并、发版、部署与生产只读度量需用户另行授权。
+
 ### 份额调度实施完成，PR #90 待审（2026-10-10，阶段 1–3 完成、阶段 4 本地验收完成；CI 全绿，未合并、未发版、未部署）
 
 - 本机 `/Users/admin/XIN-MAC-XN/xy2api`，分支 `feat/share-scheduling-20261010`，起点 main `3569d4f00`（产品 0.2.5），`58a355a7` 起的功能提交后合并 origin/main `7b1d5d8c`（0.2.6 GPT 缓存可靠性，合并提交 `3c0e4b6a`）；已推送 origin 并开 PR [#90](https://github.com/liulixin-lex/xy2api/pull/90)（base main），`eeab1b66` 上 CI 18 项检查全部通过（含 Integration tests、Gateway reliability、OpenAI cache reliability、Original scheduler diff allowlist），GitHub 显示可合并（CLEAN）。
@@ -572,6 +602,12 @@
 Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+### 20261011-share-scheduling-hardening — 份额调度稳定性审查、外部方案吸收与压测（已完成，随 PR #90 推送；本 Agent 无进行中操作）
+
+- 用户要求继续参考更多二开仓库，全面测试和审查调度功能，修复潜在稳定性问题、吸收更优思路，模拟测试达到上线标准后提交并推送 PR。沿用分支 `feat/share-scheduling-20261010`（PR #90 未合并），新提交随 PR #90 更新。
+- 外部调研：用户提供的候选清单（349 个仓库）复制到 `/tmp/xy2-research/candidates.csv`；只读稀疏克隆 23 个仓库到 `/tmp/xy2-research/repos`（不执行其代码）。重点：ranxi2001 优先调度审查记录（缓存键、失败保留、资源上限、快照所有权）、metapi 路由、上游 0.2.15 的 Anthropic 缓存 TTL 顺序修复（非调度，建议另行同步）。
+- 审查发现均已修复。修复项与测试见 design §18；压测与门禁见 tasks.md「上线前加固与压测（2026-10-11）」。压测中量化了按分钟计数的内存：500 个活跃账号一天约 400 MB。因此计数改为分钟桶加小时桶，同等规模约 40 MB。
 
 ### 20261010-share-scheduling-dev — 剔除智能可控调度并开发份额调度（PR #90 已开、CI 全绿，待人工审核；本 Agent 无进行中操作）
 
@@ -1873,3 +1909,31 @@ pnpm --dir frontend run build
 - 修改文件：仅本记忆（记录 PR 与 CI）。
 - 收尾：已停止本地 PG/Redis（`/tmp/xy2-infra/stop.sh`）。保留本机 Homebrew `postgresql@18`/`redis`、`/tmp/xy2-toolchain`（Go 1.27.0/1.27.2、golangci-lint）、`/tmp/xy2-infra`（数据与脚本）、`/tmp/xy2-smoke/{scripts,shots}`，均无凭据，可删除。
 - 下一步：人工审核与合并 PR #90；合并后按 tasks 执行 0.4–0.6 基线、4.5 RC、4.6 影子、4.7 灰度、4.8 D7，均需用户授权。
+
+### 2026-10-11T12:00:00Z — `20261011-share-scheduling-hardening` — 加固、压测、全量门禁与提交
+
+- 请求/目标：用户要求参考更多二开仓库，全面测试和审查调度功能，修复潜在稳定性问题，吸收更优思路，模拟测试达到上线标准后提交并推送 PR。不合并、不发版、不部署。
+- 开始状态：HEAD `fe4d54b0`，PR #90 开放且 CI 全绿。
+- 调研：
+  - 候选清单 349 个仓库，只读稀疏克隆 23 个，不执行其代码；
+  - 采纳：审计清单（失败时有时限地沿用上次结果、资源有界、快照所有权）、按样本量展示分位；
+  - 未采纳：“全部失败时放行全部”（与原版不一致）；
+  - 流式卡顿检测留作后续。
+- 修改：
+  - 后端：service（影子上限、等待前取消检查、纠偏刷新、批量计数、类别驻留）、sharesched（`Policy.Freeze`）、repository（按所有者删除绑定、分钟桶加小时桶）及对应测试，新增 `share_scheduling_hardening_test.go`；
+  - 前端：报表首字分位样本门槛、影子跳过卡片、中英文文案与测试；
+  - 文档：design §18、tasks 验证记录、`docs/SHARE_SCHEDULING.md`。
+- 压测：本地 PG/Redis，两个网关实例，合成上游，`/tmp/xy2-soak`（凭据仅在权限 600 的 env 文件中，收尾删除）。共 10 个阶段，另用新构建复测份额稳态与影子。
+  - 过程中发现：原版粘性等待队列满时返回 429，份额无此问题。
+  - 修复纠偏刷新整轮无总时限的问题。
+  - 修复按分钟计数的内存问题（改为分钟桶加小时桶）。
+- 验证：
+  - `go build` 与 `go vet`（默认、unit、integration）；
+  - unit 61 包；
+  - Gateway reliability `-race` 143 例；
+  - OpenAI cache reliability 40 例；
+  - integration 55 包（本地接线，未提交）；
+  - golangci-lint 0；
+  - 前端 lint、tsc、vitest 2802 例、i18n、build；
+  - tools 19 例、scheduler-diff、`git diff --check`。
+- 下一步：推送后跟进 PR #90 的 CI。人工审核与合并需用户授权。上游 v0.2.15 缓存 TTL 修复建议另行按同步机制处理。
