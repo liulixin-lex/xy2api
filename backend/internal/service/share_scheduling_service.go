@@ -101,9 +101,7 @@ type ShareSchedulingCounter struct {
 
 // ShareSchedulingStatsBatch is one asynchronous flush.
 type ShareSchedulingStatsBatch struct {
-	CreatedAt time.Time
-	ID        string
-	Counters  map[ShareSchedulingCounter]int64
+	Counters map[ShareSchedulingCounter]int64
 	// Decisions holds JSON samples per group, oldest first.
 	Decisions map[int64][][]byte
 }
@@ -147,14 +145,10 @@ type shareSchedulingState struct {
 // failures keep the last known state, and a cold start without storage keeps
 // every group on the original scheduler.
 type ShareSchedulingService struct {
-	settingsWriteMu sync.Mutex
-	settingsEpoch   uint64
-	statsFlushMu    sync.Mutex
-	pendingStats    *ShareSchedulingStatsBatch
-	repo            ShareSchedulingRepository
-	store           ShareSchedulingStore
-	settings        SettingRepository
-	node            string
+	repo     ShareSchedulingRepository
+	store    ShareSchedulingStore
+	settings SettingRepository
+	node     string
 
 	state       atomic.Pointer[shareSchedulingState]
 	corrections atomic.Pointer[map[int64]map[int64]float64]
@@ -182,11 +176,16 @@ type ShareSchedulingService struct {
 	// database calls are invisible, so only its duration is recorded.
 	meterIO bool
 
-	mu        sync.Mutex
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	startOnce sync.Once
-	stopOnce  sync.Once
+	mu sync.Mutex
+	// settingsEpoch counts settings writes; a reload that read settings
+	// before a write must not publish them over it. settingsWriteMu keeps
+	// stored and published settings in the same order.
+	settingsEpoch   uint64
+	settingsWriteMu sync.Mutex
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
+	startOnce       sync.Once
+	stopOnce        sync.Once
 }
 
 // NewShareSchedulingService creates the service. Start loads state and
@@ -211,14 +210,6 @@ func (s *ShareSchedulingService) Start() {
 	s.startOnce.Do(func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		s.cancel = cancel
-		// A restart may lose the last unflushed interval. Mark it globally,
-		// rather than presenting a crash-truncated window as complete.
-		s.stats.mu.Lock()
-		minute := time.Now().Unix() / 60
-		for m := minute - 24*60; m <= minute; m++ {
-			s.stats.markIncompleteKey(ShareSchedulingCounter{GroupID: 0, Minute: m})
-		}
-		s.stats.mu.Unlock()
 		loadCtx, loadCancel := context.WithTimeout(ctx, shareSchedulingLoadTimeout)
 		if err := s.reloadAll(loadCtx); err != nil {
 			slog.Warn("share_scheduling.initial_load_failed", "error", err)
@@ -301,34 +292,19 @@ func (s *ShareSchedulingService) flushLoop(ctx context.Context) {
 	}
 }
 
+// flushStats writes the recorder's batch. Statistics are best effort: a
+// failed write is dropped and counted, so the report shows the gap.
 func (s *ShareSchedulingService) flushStats(ctx context.Context) {
-	s.statsFlushMu.Lock()
-	defer s.statsFlushMu.Unlock()
-	if s.pendingStats != nil && !s.pendingStats.CreatedAt.IsZero() && time.Since(s.pendingStats.CreatedAt) >= 24*time.Hour {
-		slog.Warn("share_scheduling.stats_retry_expired", "batch_id", s.pendingStats.ID)
-		s.pendingStats = nil
-	}
-	if s.pendingStats != nil {
-		if err := s.store.WriteStats(ctx, *s.pendingStats); err != nil {
-			slog.Warn("share_scheduling.stats_retry_failed", "batch_id", s.pendingStats.ID, "error", err)
-			return
-		}
-		s.pendingStats = nil
-	}
 	batch := s.stats.drain()
 	if len(batch.Counters) == 0 && len(batch.Decisions) == 0 {
 		return
 	}
 	if s.store == nil {
-		s.stats.markIncomplete(batch)
 		return
 	}
 	if err := s.store.WriteStats(ctx, batch); err != nil {
-		// Keep exactly one bounded batch. Later records remain in the
-		// bounded recorder; overflow explicitly invalidates their windows.
-		s.pendingStats = &batch
-		s.stats.markIncomplete(batch)
-		slog.Warn("share_scheduling.stats_flush_failed", "batch_id", batch.ID, "error", err)
+		s.stats.addDropped(int64(len(batch.Counters)))
+		slog.Debug("share_scheduling.stats_flush_failed", "error", err)
 	}
 }
 
@@ -362,6 +338,8 @@ func (s *ShareSchedulingService) reloadAll(ctx context.Context) error {
 		next.settings = settings
 	}
 	if groups != nil {
+		// Keep what a save published while this reload read the table: a
+		// newer version, or a group whose row the listing did not include.
 		for id, previous := range current.groups {
 			version, exists := versions[id]
 			if (exists && previous.version > version) || (!exists && before.groups[id] != previous) {
@@ -486,42 +464,6 @@ func (s *ShareSchedulingService) groupPolicy(groupID int64) *shareGroupPolicy {
 		return nil
 	}
 	return gp
-}
-
-func (s *ShareSchedulingService) accountDisabled(groupID *int64, accountID int64) bool {
-	gp := s.groupPolicy(derefGroupID(groupID))
-	if gp == nil || gp.policy.Scheduler != sharesched.SchedulerShare {
-		return false
-	}
-	rule, _ := gp.policy.ResolveRule(accountID, 0, 0)
-	return rule.Disabled
-}
-
-// excludeDisabled applies the explicit per-group stop to OpenAI paths that
-// retain the original scheduler (quality routing, compact and images too).
-// It copies the caller's exclusions and is inert outside an active share group.
-func (s *ShareSchedulingService) excludeDisabled(groupID *int64, excluded map[int64]struct{}) map[int64]struct{} {
-	gp := s.groupPolicy(derefGroupID(groupID))
-	if gp == nil || gp.policy.Scheduler != sharesched.SchedulerShare {
-		return excluded
-	}
-	var result map[int64]struct{}
-	for _, rule := range gp.policy.Accounts {
-		if !rule.Disabled {
-			continue
-		}
-		if result == nil {
-			result = make(map[int64]struct{}, len(excluded)+1)
-			for id := range excluded {
-				result[id] = struct{}{}
-			}
-		}
-		result[rule.AccountID] = struct{}{}
-	}
-	if result == nil {
-		return excluded
-	}
-	return result
 }
 
 // shareSchedulingActive reports whether the group routes by share scheduling.

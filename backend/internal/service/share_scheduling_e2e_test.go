@@ -88,15 +88,6 @@ func (c *shareSimCache) RefreshSessionTTL(ctx context.Context, groupID int64, ke
 	return err
 }
 
-func (c *shareSimCache) UpdateSessionAccountIDIfOwner(ctx context.Context, groupID int64, key string, expected, accountID int64, ttl time.Duration) (int64, error) {
-	c.remaining(key)
-	owner, err := c.shareTestCache.UpdateSessionAccountIDIfOwner(ctx, groupID, key, expected, accountID, ttl)
-	if err == nil && owner == accountID {
-		c.touch(key)
-	}
-	return owner, err
-}
-
 // shareSyntheticUpstream keeps each account's prompt caches: a session's
 // prefix is read back while warm and every request rewrites it.
 type shareSyntheticUpstream struct {

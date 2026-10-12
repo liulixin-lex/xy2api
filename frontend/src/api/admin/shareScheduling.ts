@@ -18,8 +18,6 @@ export interface ShareAccountRule {
   account_id: number
   tier: number
   weight: number
-  disabled?: boolean
-  drain_fallback?: boolean
   drain?: boolean
   drain_until?: string
   cache_domain?: string
@@ -69,8 +67,6 @@ export interface ShareMember {
   tier: number
   weight: number
   configured: boolean
-  disabled?: boolean
-  drain_fallback?: boolean
   drain: boolean
   drain_until?: string
   cache_domain: string
@@ -97,7 +93,6 @@ export interface ShareGroupSummary {
 }
 
 export interface SharePolicyView {
-  applied_version?: number
   group_id: number
   group_name: string
   platform: string
@@ -144,8 +139,6 @@ export interface ShareExplainEntry {
   weight: number
   effective_weight: number
   configured: boolean
-  disabled?: boolean
-  drain_fallback?: boolean
   drain: boolean
   cache_domain: string
   class?: string
@@ -205,8 +198,6 @@ export interface ShareTTFT {
 }
 
 export interface ShareReport {
-  counters_complete?: boolean
-  counter_precision?: 'minute' | 'hour_rounded'
   group_id: number
   scheduler: ShareScheduler
   version: number
@@ -217,7 +208,6 @@ export interface ShareReport {
   members: ShareMember[]
   actual: ShareAccountActual[]
   decisions: {
-    binding_outcomes?: Record<string, number>
     requests: number
     reasons: Record<string, number>
     key_sources: Record<string, number>
@@ -253,6 +243,8 @@ export interface ShareReport {
   }
   corrections?: Record<string, number>
   counters_error?: string
+  /** 'hour_rounded' when the window is read from hourly buckets. */
+  counter_precision?: 'minute' | 'hour_rounded'
 }
 
 /** An account's resolved rule in one group that stores a policy. */
@@ -264,8 +256,6 @@ export interface ShareAccountGroupRule {
   configured: boolean
   tier: number
   weight: number
-  disabled?: boolean
-  drain_fallback?: boolean
   drain: boolean
   drain_until?: string
   cache_domain: string

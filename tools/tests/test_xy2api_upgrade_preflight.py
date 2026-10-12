@@ -82,33 +82,5 @@ class UpgradePreflightTest(unittest.TestCase):
         self.assertIn("legacy-bind-mount", {item.code for item in findings})
 
 
-class SchedulingPreflightTest(unittest.TestCase):
-    def inventory(self):
-        return dict(controlled_mode=True, cutover_acknowledged=True,
-                    legacy_rule_count=8, zero_weight_count=2, skipped_rule_count=1,
-                    skipped_rules_reviewed=True, legacy_clients_acknowledged=True)
-
-    def test_requires_explicit_cutover_and_client_review(self):
-        inventory = self.inventory()
-        inventory.update(cutover_acknowledged=False, legacy_clients_acknowledged=False)
-        codes = {f.code for f in MODULE.evaluate_scheduling(inventory) if f.level == "error"}
-        self.assertEqual(codes, {"controlled-cutover-unacknowledged", "retired-scheduling-clients"})
-
-    def test_rejects_unreviewed_skipped_rules(self):
-        inventory = self.inventory()
-        inventory["skipped_rules_reviewed"] = False
-        self.assertIn("skipped-scheduling-rules", {f.code for f in MODULE.evaluate_scheduling(inventory)})
-
-    def test_accepts_review_and_explains_inactive_zero_weights(self):
-        findings = MODULE.evaluate_scheduling(self.inventory())
-        self.assertFalse([f for f in findings if f.level == "error"])
-        self.assertIn("zero-weight-import", {f.code for f in findings})
-
-    def test_rejects_missing_or_invalid_inventory(self):
-        for inventory in ({}, None, {**self.inventory(), "legacy_rule_count": True},
-                          {**self.inventory(), "zero_weight_count": 99}):
-            self.assertEqual(MODULE.evaluate_scheduling(inventory)[0].code, "scheduling-inventory-invalid")
-
-
 if __name__ == "__main__":
     unittest.main()

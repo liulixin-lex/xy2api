@@ -76,28 +76,24 @@ func (p *Policy) Freeze() {
 // AccountRule is the administrator's intent for one group member. Members
 // without a rule use Defaults.
 type AccountRule struct {
-	AccountID     int64      `json:"account_id"`
-	Tier          int        `json:"tier"`
-	Weight        int        `json:"weight"`
-	Disabled      bool       `json:"disabled,omitempty"`
-	DrainFallback bool       `json:"drain_fallback,omitempty"`
-	Drain         bool       `json:"drain,omitempty"`
-	DrainUntil    *time.Time `json:"drain_until,omitempty"`
-	CacheDomain   string     `json:"cache_domain,omitempty"`
+	AccountID   int64      `json:"account_id"`
+	Tier        int        `json:"tier"`
+	Weight      int        `json:"weight"`
+	Drain       bool       `json:"drain,omitempty"`
+	DrainUntil  *time.Time `json:"drain_until,omitempty"`
+	CacheDomain string     `json:"cache_domain,omitempty"`
 }
 
 // UnmarshalJSON requires account_id, tier and weight so an omitted tier can
 // never silently become the highest-priority tier 0.
 func (r *AccountRule) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		AccountID     *int64     `json:"account_id"`
-		Tier          *int       `json:"tier"`
-		Weight        *int       `json:"weight"`
-		Disabled      bool       `json:"disabled"`
-		DrainFallback bool       `json:"drain_fallback"`
-		Drain         bool       `json:"drain"`
-		DrainUntil    *time.Time `json:"drain_until"`
-		CacheDomain   string     `json:"cache_domain"`
+		AccountID   *int64     `json:"account_id"`
+		Tier        *int       `json:"tier"`
+		Weight      *int       `json:"weight"`
+		Drain       bool       `json:"drain"`
+		DrainUntil  *time.Time `json:"drain_until"`
+		CacheDomain string     `json:"cache_domain"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
@@ -112,7 +108,7 @@ func (r *AccountRule) UnmarshalJSON(data []byte) error {
 	case raw.Weight == nil:
 		return fmt.Errorf("account %d requires weight", *raw.AccountID)
 	}
-	*r = AccountRule{AccountID: *raw.AccountID, Tier: *raw.Tier, Weight: *raw.Weight, Disabled: raw.Disabled, DrainFallback: raw.DrainFallback, Drain: raw.Drain, DrainUntil: raw.DrainUntil, CacheDomain: raw.CacheDomain}
+	*r = AccountRule{AccountID: *raw.AccountID, Tier: *raw.Tier, Weight: *raw.Weight, Drain: raw.Drain, DrainUntil: raw.DrainUntil, CacheDomain: raw.CacheDomain}
 	return nil
 }
 
@@ -310,9 +306,6 @@ func (p Policy) Validate() error {
 		if rule.Weight < MinWeight || rule.Weight > MaxWeight {
 			add("account %d weight must be %d-%d", rule.AccountID, MinWeight, MaxWeight)
 		}
-		if rule.DrainFallback && !rule.Drain {
-			problems = append(problems, fmt.Sprintf("account %d drain_fallback requires drain", rule.AccountID))
-		}
 		if rule.DrainUntil != nil && !rule.Drain {
 			add("account %d drain_until requires drain", rule.AccountID)
 		}
@@ -433,15 +426,14 @@ func (p Policy) ValidateMembers(members map[int64]Member) error {
 		}
 	}
 	if p.Scheduler != SchedulerSub2API {
-		open, allDisabled := false, len(members) > 0
+		open := false
 		for id := range members {
-			rule, ok := explicit[id]
-			allDisabled = allDisabled && ok && rule.Disabled
-			if !ok || (!rule.Disabled && (!rule.Drain || rule.DrainFallback)) {
+			if rule, ok := explicit[id]; !ok || !rule.Drain {
 				open = true
+				break
 			}
 		}
-		if !open && !allDisabled {
+		if !open {
 			problems = append(problems, "at least one account must accept new sessions (not drained)")
 		}
 	}

@@ -162,22 +162,6 @@
           "_ = s.service.deleteStickySessionAccountIDIfOwner(ctx, req.GroupID, req.SessionHash, accountID)",
           "_ = s.service.deleteStickySessionAccountIDIfOwner(ctx, req.GroupID, req.SessionHash, accountID)"
         ]
-      },
-      {
-        "block": "share-disabled-exclusions",
-        "note": "Explicit per-group disabled accounts are excluded before quality/original/compact/image scheduling; inert for non-share groups and preserves caller exclusions.",
-        "removed": [],
-        "added": [
-          "if strings.TrimSpace(previousResponseID) == \"\" {",
-          "excludedIDs = s.shareScheduling.excludeDisabled(groupID, excludedIDs)",
-          "}",
-          "if err == nil && selection != nil && selection.Account != nil && s.shareScheduling.accountDisabled(groupID, selection.Account.ID) {",
-          "if selection.ReleaseFunc != nil {",
-          "selection.ReleaseFunc()",
-          "}",
-          "return nil, decision, ErrNoAvailableAccounts",
-          "}"
-        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [

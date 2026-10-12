@@ -66,7 +66,7 @@ beforeEach(() => {
   }))
   api.preview.mockResolvedValue({ active_tier: 1, members: [shareMember(1, { effective_share: 0.75 })], placement_change: 0.25, sampled_keys: 400, estimated_migrations: 0, warnings: [{ code: 'global_switch_off' }] })
   api.report.mockResolvedValue({
-    group_id: 5, scheduler: 'share', version: 1, unit: 'sessions', from: '', to: '', active_tier: 1,
+    group_id: 5, scheduler: 'share', version: 1, unit: 'sessions', from: '', to: '', active_tier: 1, counter_precision: 'minute',
     members: [shareMember(1, { effective_share: 0.5 }), shareMember(2, { effective_share: 0.5 })],
     actual: [{ account_id: 1, placed: 6, placed_share: 0.6, requests: 0, request_share: 0, tokens: 0, token_share: 0, standard_cost: 0, cost_share: 0, skipped: { saturated: 3, session_limit: 1 }, ttft: { count: 5, p50_ms: 500, p95_ms: 2000, p99_ms: 3000 } }],
     decisions: { requests: 10, reasons: { affinity_hit: 7, new_session: 3 }, key_sources: {}, ideal_skips: {}, hot_migrations: 0, hot_reasons: {}, wait_count: 0, wait_hit: 0, avg_wait_ms: 0, attempts: 10, shadow: 0, shadow_agree: 0, shadow_agree_rate: 0, shadow_reasons: {}, shadow_skipped: 3, rebalance_cleared: 0, dropped: 0 },
@@ -196,6 +196,7 @@ describe('share scheduling page', () => {
     expect(ttft[0].slice(2)).toEqual(['≤ 500 ms', '≤ 1.0 s', '> 30 s'])
     expect(ttft[1].slice(2)).toEqual(['≤ 300 ms', '—', '—'])
     expect(w.find('[data-testid="share-ttft-min-samples"]').exists()).toBe(true)
+    expect(w.find('[data-testid="share-hour-rounded"]').exists()).toBe(false)
     const busy = w.get('[data-testid="share-account-1"]').text()
     expect(busy).toContain('40.0%')
     expect(busy).toContain('admin.shareScheduling.reasons.saturated 3 · admin.shareScheduling.reasons.session_limit 1')
@@ -231,5 +232,18 @@ describe('share scheduling page', () => {
     await flushPromises()
     expect(api.explain).toHaveBeenCalledWith(5, { model: 'claude-x', session_hash: 'sess', cache_one_hour: false })
     expect(w.get('[data-testid="share-explain-steps"]').text()).toContain('1. acct-2 #2')
+  })
+
+  it('notes hour-rounded counters on long report windows', async () => {
+    const w = mountView()
+    await openGroup(w)
+    await w.get('[data-testid="share-tab-report"]').trigger('click')
+    await flushPromises()
+    const report = await api.report.mock.results[0].value
+    api.report.mockResolvedValue({ ...report, counter_precision: 'hour_rounded' })
+    await w.get('[data-testid="share-report-window"]').setValue('24h')
+    await flushPromises()
+    expect(api.report).toHaveBeenLastCalledWith(5, '24h')
+    expect(w.find('[data-testid="share-hour-rounded"]').exists()).toBe(true)
   })
 })

@@ -280,15 +280,11 @@ func TestDrain(t *testing.T) {
 	p.Accounts[0].DrainUntil = &future
 	require.Equal(t, ReasonAffinityHit, Plan(p, bound(key, 1, time.Second), eligible(1, 2)).Reason)
 
-	// Drain remains closed even when every open account is unusable.
+	// When every open account is unusable, a drained one still serves.
 	cands := eligible(1, 2)
 	cands[1].Eligible = false
 	d = Plan(p, newSession(key), cands)
-	require.Empty(t, d.Steps)
-	p.Accounts[0].DrainFallback = true
-	d = Plan(p, newSession(key), cands)
 	require.Equal(t, int64(1), firstStep(t, d))
-	require.Equal(t, ReasonEmergencyDrain, d.Reason)
 }
 
 func TestTierReturn(t *testing.T) {

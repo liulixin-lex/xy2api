@@ -146,7 +146,7 @@ func (s *GatewayService) selectAccountWithShareScheduling(ctx context.Context, g
 	req, source := svc.newRequest(ctx, gp, in.platform, requestedModel, sessionHash, binding)
 	rec := shareDecisionRecord{gp: gp, source: source, platform: in.platform, model: requestedModel,
 		session: key, idle: req.Binding.Idle, cache: req.Cache, start: start}
-	exec := &shareExecutor{service: svc, ctx: ctx, gp: gp, cache: s.cache, concurrency: s.concurrencyService, cfg: s.schedulingConfig(),
+	exec := &shareExecutor{ctx: ctx, gp: gp, cache: s.cache, concurrency: s.concurrencyService, cfg: s.schedulingConfig(),
 		key: key, ttl: time.Duration(gp.policy.Affinity.TTLSeconds) * time.Second, accounts: in.accounts,
 		limit: func(acc *Account) int { return acc.Concurrency },
 		admit: func(acc *Account) bool { return s.checkAndRegisterSession(ctx, acc, sessionHash) },

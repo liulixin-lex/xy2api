@@ -15,9 +15,7 @@
     </div>
 
     <template v-if="report">
-      <p v-if="report.counters_complete === false" role="alert" class="rounded-xl bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200" data-testid="share-counters-incomplete">{{ t('admin.shareScheduling.report.incomplete') }}</p>
-      <p v-if="report.counter_precision === 'hour_rounded'" class="text-xs text-gray-600 dark:text-dark-300">{{ t('admin.shareScheduling.report.hourRounded') }}</p>
-      <p class="text-xs text-gray-600 dark:text-dark-300">{{ t('admin.shareScheduling.report.denominator') }}</p>
+      <p v-if="report.counter_precision === 'hour_rounded'" class="text-xs text-gray-500 dark:text-dark-400" data-testid="share-hour-rounded">{{ t('admin.shareScheduling.report.hourRounded') }}</p>
       <p v-if="report.counters_error" role="alert" class="rounded-xl bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">{{ t('admin.shareScheduling.report.countersError', { error: report.counters_error }) }}</p>
 
       <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -106,7 +104,6 @@
       </section>
 
       <section class="card grid gap-6 p-5 md:grid-cols-2">
-        <ShareBarList v-if="report.decisions.binding_outcomes && Object.keys(report.decisions.binding_outcomes).length" :title="t('admin.shareScheduling.report.bindingOutcomes')" :values="report.decisions.binding_outcomes" :label="labels.reason" :empty="t('admin.shareScheduling.report.noData')" />
         <ShareBarList :title="t('admin.shareScheduling.report.reasons')" :values="report.decisions.reasons" :label="labels.reason" :empty="t('admin.shareScheduling.report.noData')" />
         <ShareBarList :title="t('admin.shareScheduling.report.cacheClasses')" :values="report.cache.class_tokens" :label="labels.cacheClass" :empty="t('admin.shareScheduling.report.noData')" bar-class="bg-emerald-500" />
         <ShareBarList :title="t('admin.shareScheduling.report.keySources')" :values="report.decisions.key_sources" :label="labels.keySource" :empty="t('admin.shareScheduling.report.noData')" bar-class="bg-sky-500" />

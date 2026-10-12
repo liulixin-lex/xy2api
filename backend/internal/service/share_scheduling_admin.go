@@ -16,8 +16,11 @@ import (
 )
 
 const (
-	shareAdminDefaultWindow   = time.Hour
-	shareAdminMaxWindow       = 24 * time.Hour
+	shareAdminDefaultWindow = time.Hour
+	shareAdminMaxWindow     = 24 * time.Hour
+	// shareCounterMinuteSpan mirrors the store: longer windows are read from
+	// hourly buckets.
+	shareCounterMinuteSpan    = 2 * time.Hour
 	shareAdminSummaryWorkers  = 8
 	shareAdminPreviewMaxKeys  = 2000
 	shareAdminPreviewMinKeys  = 200
@@ -98,8 +101,6 @@ type ShareSchedulingMemberView struct {
 	Tier           int        `json:"tier"`
 	Weight         int        `json:"weight"`
 	Configured     bool       `json:"configured"`
-	Disabled       bool       `json:"disabled"`
-	DrainFallback  bool       `json:"drain_fallback"`
 	Drain          bool       `json:"drain"`
 	DrainUntil     *time.Time `json:"drain_until,omitempty"`
 	CacheDomain    string     `json:"cache_domain"`
@@ -140,7 +141,7 @@ func shareMemberViews(p *sharesched.Policy, accounts []Account, now time.Time) (
 		v := ShareSchedulingMemberView{AccountID: acc.ID, Name: acc.Name, Platform: acc.Platform, Type: acc.Type,
 			Priority: acc.Priority, Concurrency: acc.Concurrency, Status: acc.Status, Schedulable: acc.Schedulable,
 			Healthy: acc.IsSchedulable(), Tier: rule.Tier, Weight: rule.Weight, Configured: configured,
-			Disabled: rule.Disabled, DrainFallback: rule.DrainFallback, Drain: rule.Drain, DrainUntil: rule.DrainUntil, CacheDomain: rule.CacheDomain}
+			Drain: rule.Drain, DrainUntil: rule.DrainUntil, CacheDomain: rule.CacheDomain}
 		if !v.Healthy {
 			reason, recoverAt := shareAccountStateReason(acc, now)
 			v.Reason = string(reason)
@@ -149,7 +150,7 @@ func shareMemberViews(p *sharesched.Policy, accounts []Account, now time.Time) (
 			}
 		}
 		views = append(views, v)
-		if v.Drain || v.Disabled {
+		if v.Drain {
 			continue
 		}
 		t := tiers[v.Tier]
@@ -171,26 +172,10 @@ func shareMemberViews(p *sharesched.Policy, accounts []Account, now time.Time) (
 			active = &lowest
 		}
 	}
-	emergencyWeights := map[int]float64{}
-	if active == nil {
-		for _, v := range views {
-			if v.Disabled || !v.Drain || !v.DrainFallback || !v.Healthy || (v.DrainUntil != nil && !now.Before(*v.DrainUntil)) {
-				continue
-			}
-			emergencyWeights[v.Tier] += float64(v.Weight)
-			if active == nil || v.Tier < *active {
-				tier := v.Tier
-				active = &tier
-			}
-		}
-	}
 	for i := range views {
 		v := &views[i]
 		t := tiers[v.Tier]
-		if v.Drain && v.DrainFallback && !v.Disabled && v.Healthy && active != nil && v.Tier == *active && emergencyWeights[v.Tier] > 0 {
-			v.EffectiveShare = float64(v.Weight) / emergencyWeights[v.Tier]
-		}
-		if v.Drain || v.Disabled || t == nil {
+		if v.Drain || t == nil {
 			continue
 		}
 		if t.weight > 0 {
@@ -316,20 +301,19 @@ func (s *ShareSchedulingService) fillGroupSummaries(ctx context.Context, views [
 
 // ShareSchedulingPolicyView is a group's stored policy with its members.
 type ShareSchedulingPolicyView struct {
-	AppliedVersion int64                       `json:"applied_version"`
-	GroupID        int64                       `json:"group_id"`
-	GroupName      string                      `json:"group_name"`
-	Platform       string                      `json:"platform"`
-	Version        int64                       `json:"version"`
-	Scheduler      string                      `json:"scheduler"`
-	Effective      bool                        `json:"effective"`
-	Policy         json.RawMessage             `json:"policy"`
-	Invalid        string                      `json:"invalid,omitempty"`
-	ImportedFrom   string                      `json:"imported_from,omitempty"`
-	UpdatedBy      *int64                      `json:"updated_by,omitempty"`
-	UpdatedAt      *time.Time                  `json:"updated_at,omitempty"`
-	ActiveTier     *int                        `json:"active_tier"`
-	Members        []ShareSchedulingMemberView `json:"members"`
+	GroupID      int64                       `json:"group_id"`
+	GroupName    string                      `json:"group_name"`
+	Platform     string                      `json:"platform"`
+	Version      int64                       `json:"version"`
+	Scheduler    string                      `json:"scheduler"`
+	Effective    bool                        `json:"effective"`
+	Policy       json.RawMessage             `json:"policy"`
+	Invalid      string                      `json:"invalid,omitempty"`
+	ImportedFrom string                      `json:"imported_from,omitempty"`
+	UpdatedBy    *int64                      `json:"updated_by,omitempty"`
+	UpdatedAt    *time.Time                  `json:"updated_at,omitempty"`
+	ActiveTier   *int                        `json:"active_tier"`
+	Members      []ShareSchedulingMemberView `json:"members"`
 }
 
 func (s *ShareSchedulingService) shareGroup(ctx context.Context, groupID int64) (*Group, error) {
@@ -381,13 +365,17 @@ func (s *ShareSchedulingService) GetPolicy(ctx context.Context, groupID int64) (
 	if err != nil {
 		return nil, err
 	}
-	row, policy := stored.row, stored.policy
 	accounts, err := s.shareMembers(ctx, groupID)
 	if err != nil {
 		return nil, err
 	}
-	view := &ShareSchedulingPolicyView{GroupID: groupID, GroupName: group.Name, Platform: group.Platform,
-		Scheduler: string(policy.Scheduler), Effective: s.groupPolicy(groupID) != nil}
+	return s.policyView(group, stored, accounts)
+}
+
+func (s *ShareSchedulingService) policyView(group *Group, stored shareStoredPolicy, accounts []Account) (*ShareSchedulingPolicyView, error) {
+	row, policy := stored.row, stored.policy
+	view := &ShareSchedulingPolicyView{GroupID: group.ID, GroupName: group.Name, Platform: group.Platform,
+		Scheduler: string(policy.Scheduler), Effective: s.groupPolicy(group.ID) != nil}
 	if row != nil {
 		view.Version, view.ImportedFrom, view.UpdatedBy = row.Version, row.ImportedFrom, row.UpdatedBy
 		updated := row.UpdatedAt
@@ -401,11 +389,9 @@ func (s *ShareSchedulingService) GetPolicy(ctx context.Context, groupID int64) (
 	if stored.invalid != nil {
 		view.Invalid = stored.invalid.Error()
 	}
+	var err error
 	if view.Policy, err = json.Marshal(policy); err != nil {
 		return nil, err
-	}
-	if applied := s.state.Load().groups[groupID]; applied != nil {
-		view.AppliedVersion = applied.version
 	}
 	view.Members, view.ActiveTier = shareMemberViews(&policy, accounts, time.Now())
 	return view, nil
@@ -414,18 +400,16 @@ func (s *ShareSchedulingService) GetPolicy(ctx context.Context, groupID int64) (
 // ShareSchedulingAccountRule is an account's resolved rule in one group that
 // stores a share scheduling policy.
 type ShareSchedulingAccountRule struct {
-	GroupID       int64      `json:"group_id"`
-	GroupName     string     `json:"group_name"`
-	Scheduler     string     `json:"scheduler"`
-	Effective     bool       `json:"effective"`
-	Configured    bool       `json:"configured"`
-	Tier          int        `json:"tier"`
-	Weight        int        `json:"weight"`
-	Disabled      bool       `json:"disabled"`
-	DrainFallback bool       `json:"drain_fallback"`
-	Drain         bool       `json:"drain"`
-	DrainUntil    *time.Time `json:"drain_until,omitempty"`
-	CacheDomain   string     `json:"cache_domain"`
+	GroupID     int64      `json:"group_id"`
+	GroupName   string     `json:"group_name"`
+	Scheduler   string     `json:"scheduler"`
+	Effective   bool       `json:"effective"`
+	Configured  bool       `json:"configured"`
+	Tier        int        `json:"tier"`
+	Weight      int        `json:"weight"`
+	Drain       bool       `json:"drain"`
+	DrainUntil  *time.Time `json:"drain_until,omitempty"`
+	CacheDomain string     `json:"cache_domain"`
 }
 
 // AccountRules lists the account's rules in its groups that store a share
@@ -469,7 +453,7 @@ func (s *ShareSchedulingService) AccountRules(ctx context.Context, accountID int
 		}
 		rule, configured := policy.ResolveRule(account.ID, account.Priority, account.Concurrency)
 		v := ShareSchedulingAccountRule{GroupID: groupID, Scheduler: row.Scheduler, Effective: s.groupPolicy(groupID) != nil,
-			Configured: configured, Tier: rule.Tier, Weight: rule.Weight, Disabled: rule.Disabled, DrainFallback: rule.DrainFallback, Drain: rule.Drain, DrainUntil: rule.DrainUntil,
+			Configured: configured, Tier: rule.Tier, Weight: rule.Weight, Drain: rule.Drain, DrainUntil: rule.DrainUntil,
 			CacheDomain: rule.CacheDomain}
 		if group, err := s.gateway.groupRepo.GetByIDLite(ctx, groupID); err == nil && group != nil {
 			v.GroupName = group.Name
@@ -506,18 +490,11 @@ func (s *ShareSchedulingService) SavePolicy(ctx context.Context, groupID, expect
 	if err != nil {
 		return nil, err
 	}
-	// The committed row is authoritative. Do not turn a subsequent read
-	// failure into a failed save or leave this node on its old snapshot.
+	// The committed row is authoritative: publish it without reading it back,
+	// so a failing read cannot report a committed save as failed.
 	s.installGroup(row)
 	s.publishChange(ctx, groupID)
-	view := &ShareSchedulingPolicyView{GroupID: groupID, GroupName: group.Name, Platform: group.Platform,
-		Version: row.Version, Scheduler: row.Scheduler, Policy: normalized, ImportedFrom: row.ImportedFrom,
-		UpdatedBy: row.UpdatedBy, UpdatedAt: &row.UpdatedAt, Effective: s.groupPolicy(groupID) != nil}
-	if applied := s.state.Load().groups[groupID]; applied != nil {
-		view.AppliedVersion = applied.version
-	}
-	view.Members, view.ActiveTier = shareMemberViews(&policy, accounts, time.Now())
-	return view, nil
+	return s.policyView(group, shareStoredPolicy{row: row, policy: policy}, accounts)
 }
 
 // ---- preview ----
@@ -810,7 +787,6 @@ type ShareSchedulingAccountActual struct {
 
 // ShareSchedulingDecisionStats are the selection counters of a window.
 type ShareSchedulingDecisionStats struct {
-	BindingOutcomes map[string]int64 `json:"binding_outcomes"`
 	Requests        int64            `json:"requests"`
 	Reasons         map[string]int64 `json:"reasons"`
 	KeySources      map[string]int64 `json:"key_sources"`
@@ -873,21 +849,22 @@ type ShareSchedulingSelectionCost struct {
 // ShareSchedulingReport is target against actual shares plus the decision,
 // cache and latency statistics of a window.
 type ShareSchedulingReport struct {
-	CountersComplete bool                           `json:"counters_complete"`
-	CounterPrecision string                         `json:"counter_precision"`
-	GroupID          int64                          `json:"group_id"`
-	Scheduler        string                         `json:"scheduler"`
-	Version          int64                          `json:"version"`
-	Unit             string                         `json:"unit"`
-	From             time.Time                      `json:"from"`
-	To               time.Time                      `json:"to"`
-	ActiveTier       *int                           `json:"active_tier"`
-	Members          []ShareSchedulingMemberView    `json:"members"`
-	Actual           []ShareSchedulingAccountActual `json:"actual"`
-	Decisions        ShareSchedulingDecisionStats   `json:"decisions"`
-	Cache            ShareSchedulingCacheStats      `json:"cache"`
-	Corrections      map[int64]float64              `json:"corrections,omitempty"`
-	CountersError    string                         `json:"counters_error,omitempty"`
+	GroupID       int64                          `json:"group_id"`
+	Scheduler     string                         `json:"scheduler"`
+	Version       int64                          `json:"version"`
+	Unit          string                         `json:"unit"`
+	From          time.Time                      `json:"from"`
+	To            time.Time                      `json:"to"`
+	ActiveTier    *int                           `json:"active_tier"`
+	Members       []ShareSchedulingMemberView    `json:"members"`
+	Actual        []ShareSchedulingAccountActual `json:"actual"`
+	Decisions     ShareSchedulingDecisionStats   `json:"decisions"`
+	Cache         ShareSchedulingCacheStats      `json:"cache"`
+	Corrections   map[int64]float64              `json:"corrections,omitempty"`
+	CountersError string                         `json:"counters_error,omitempty"`
+	// CounterPrecision is "minute", or "hour_rounded" when the window is read
+	// from hourly buckets starting at the nearest hour.
+	CounterPrecision string `json:"counter_precision"`
 }
 
 // Report builds the group's report over the window (default one hour, at
@@ -912,8 +889,8 @@ func (s *ShareSchedulingService) Report(ctx context.Context, groupID int64, wind
 	to := time.Now()
 	from := to.Add(-window)
 	out := &ShareSchedulingReport{GroupID: groupID, Scheduler: string(policy.Scheduler), Unit: policy.Balance.Unit,
-		From: from, To: to, Corrections: s.correctionsFor(groupID), CountersComplete: true, CounterPrecision: "minute"}
-	if window > 2*time.Hour {
+		From: from, To: to, Corrections: s.correctionsFor(groupID), CounterPrecision: "minute"}
+	if window > shareCounterMinuteSpan {
 		out.CounterPrecision = "hour_rounded"
 	}
 	if row != nil {
@@ -931,15 +908,6 @@ func (s *ShareSchedulingService) Report(ctx context.Context, groupID int64, wind
 		cache, cacheErr = s.store.ReadCounters(ctx, shareStatsKindCache, groupID, from, to)
 		if joined := errors.Join(shareErr, cacheErr); joined != nil {
 			out.CountersError = joined.Error()
-		}
-	}
-	if s.store == nil || out.CountersError != "" || s.incompleteWindow(groupID, from, to) || share[shareStatsIncompleteField] > 0 {
-		out.CountersComplete = false
-	}
-	if s.store != nil && groupID != 0 {
-		global, globalErr := s.store.ReadCounters(ctx, shareStatsKindShare, 0, from, to)
-		if globalErr != nil || global[shareStatsIncompleteField] > 0 {
-			out.CountersComplete = false
 		}
 	}
 	out.Decisions = newShareDecisionStats(share)
@@ -1033,7 +1001,7 @@ func collectPrefixed(counters map[string]int64, prefix string) map[string]int64 
 
 func newShareDecisionStats(c map[string]int64) ShareSchedulingDecisionStats {
 	stats := ShareSchedulingDecisionStats{
-		BindingOutcomes: collectPrefixed(c, "binding:"), Requests: c[shareStatsRequestsField], Reasons: collectPrefixed(c, shareStatsReasonPrefix),
+		Requests: c[shareStatsRequestsField], Reasons: collectPrefixed(c, shareStatsReasonPrefix),
 		KeySources: collectPrefixed(c, shareStatsKeySourcePrefix), IdealSkips: collectPrefixed(c, shareStatsIdealSkipPrefix),
 		HotMigrations: c[shareStatsHotMigrationField], HotReasons: collectPrefixed(c, shareStatsHotPrefix),
 		WaitCount: c[shareStatsWaitCountField], WaitHit: c[shareStatsWaitHitField], Attempts: c[shareStatsAttemptsField],

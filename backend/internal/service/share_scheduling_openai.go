@@ -67,21 +67,11 @@ func (s *OpenAIGatewayService) selectAccountWithShareScheduling(ctx context.Cont
 	start := time.Now()
 	svc := s.shareScheduling
 	decision := OpenAIAccountScheduleDecision{Layer: openAIAccountScheduleLayerShare}
-	if in.guardianParentID > 0 && svc.accountDisabled(in.groupID, in.guardianParentID) {
-		return nil, decision, ErrNoAvailableAccounts
-	}
 	selection, layer, err := s.selectOpenAIShareOwner(ctx, in)
 	if err != nil {
 		return nil, decision, err
 	}
 	if selection != nil {
-		rule, _ := gp.policy.ResolveRule(selection.Account.ID, selection.Account.Priority, selection.Account.Concurrency)
-		if rule.Disabled {
-			if selection.ReleaseFunc != nil {
-				selection.ReleaseFunc()
-			}
-			return nil, decision, ErrNoAvailableAccounts
-		}
 		decision.Layer = layer
 		decision.StickyPreviousHit = layer == openAIAccountScheduleLayerPreviousResponse
 		decision.StickySessionHit = layer == openAIAccountScheduleLayerGuardianParent
@@ -119,7 +109,7 @@ func (s *OpenAIGatewayService) selectAccountWithShareScheduling(ctx context.Cont
 	req, source := svc.newRequest(ctx, gp, in.platform, in.model, sessionHash, binding)
 	rec := shareDecisionRecord{gp: gp, source: source, platform: in.platform, model: in.model,
 		session: key, idle: req.Binding.Idle, cache: req.Cache, start: start}
-	exec := &shareExecutor{service: svc, ctx: ctx, gp: gp, cache: s.cache, concurrency: s.concurrencyService, cfg: s.schedulingConfig(),
+	exec := &shareExecutor{ctx: ctx, gp: gp, cache: s.cache, concurrency: s.concurrencyService, cfg: s.schedulingConfig(),
 		key: cacheKey, ttl: time.Duration(gp.policy.Affinity.TTLSeconds) * time.Second, accounts: accounts, createOnRefresh: legacy,
 		limit: func(acc *Account) int { return s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency) },
 		verify: func(acc *Account) (*Account, sharesched.Reason) {

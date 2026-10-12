@@ -11,9 +11,6 @@ type Reason string
 
 // Selection reasons.
 const (
-	ReasonEmergencyDrain          Reason = "emergency_drain_fallback"
-	ReasonBindingConflictSpill    Reason = "binding_conflict_spill"
-	ReasonBindingUncertain        Reason = "binding_uncertain"
 	ReasonOwnerContinuation       Reason = "owner_continuation"
 	ReasonAffinityHit             Reason = "affinity_hit"
 	ReasonAffinityWait            Reason = "affinity_wait"

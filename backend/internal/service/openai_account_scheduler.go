@@ -2209,17 +2209,8 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
-	if strings.TrimSpace(previousResponseID) == "" {
-		excludedIDs = s.shareScheduling.excludeDisabled(groupID, excludedIDs)
-	}
 	ctx = s.withOpenAIShareTrace(ctx, groupID, sessionHash, excludedIDs, requiredImageCapability)
 	selection, decision, err := s.selectAccountWithQualityRouting(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
-	if err == nil && selection != nil && selection.Account != nil && s.shareScheduling.accountDisabled(groupID, selection.Account.ID) {
-		if selection.ReleaseFunc != nil {
-			selection.ReleaseFunc()
-		}
-		return nil, decision, ErrNoAvailableAccounts
-	}
 	if err == nil && selection != nil {
 		s.shareScheduling.recordSelection(ctx, selection.Account)
 	}

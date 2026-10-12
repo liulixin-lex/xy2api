@@ -97,9 +97,7 @@ describe('share scheduling store', () => {
     expect(store.rebasedVersion).toBe(3)
     expect(entry.draft.policy.scheduler).toBe('share')
     expect(entry.draft.policy.cache).toEqual({ ttl_seconds: 600, realign: 'off' })
-    expect(entry.mergeConflicts.map(c => c.id)).toEqual(['rows.1.weight'])
-    expect(await store.requestPreview()).toBe(false)
-    store.resolveConflict('rows.1.weight', 'mine')
+    // Row 1: my weight survives the other administrator's tier change.
     expect(entry.draft.rows.map(r => [r.account_id, r.configured, r.tier, r.weight])).toEqual([
       [1, true, 5, 30],
       [2, true, 2, 4],
@@ -140,14 +138,13 @@ describe('share scheduling store', () => {
   })
 })
 
-
 function deferred<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(done => { resolve = done })
   return { promise, resolve }
 }
 
-describe('share scheduling review regressions', () => {
+describe('share scheduling store races and merges', () => {
   it('merges different leaves in the same nested section', async () => {
     const store = await editedStore()
     store.current!.draft.policy.affinity.wait.max_ms = 12000
@@ -156,18 +153,27 @@ describe('share scheduling review regressions', () => {
     api.getPolicy.mockResolvedValue(latest)
     await store.rebase()
     expect(store.current!.draft.policy.affinity.wait).toMatchObject({ max_ms: 12000, max_waiting: 8 })
-    expect(store.current!.mergeConflicts).toEqual([])
   })
 
-  it('does not resurrect removed members and reports lost draft edits', async () => {
+  it('keeps my value where both administrators changed a field', async () => {
+    const store = await editedStore()
+    store.current!.draft.policy.affinity.wait.max_ms = 12000
+    const latest = shareView(5, { version: 2, policy: sharePolicy() })
+    latest.policy.affinity.wait.max_ms = 9000
+    api.getPolicy.mockResolvedValue(latest)
+    await store.rebase()
+    expect(store.current!.draft.policy.affinity.wait.max_ms).toBe(12000)
+    expect(await store.requestPreview()).toBe(true)
+  })
+
+  it('does not resurrect removed members', async () => {
     const store = await editedStore()
     api.getPolicy.mockResolvedValue(shareView(5, { version: 2, members: [shareMember(2)] }))
     await store.rebase()
     expect(store.current!.draft.rows.map(row => row.account_id)).toEqual([2])
-    expect(store.current!.removedEdits).toEqual([1])
   })
 
-  it('requires a choice when a rule reset conflicts with an edit', async () => {
+  it('keeps my reset of a rule over a concurrent edit of it', async () => {
     const store = useShareSchedulingStore()
     const base = shareView(5, { policy: sharePolicy({ accounts: [{ account_id: 1, tier: 1, weight: 5 }] }) })
     api.getPolicy.mockResolvedValueOnce(base)
@@ -175,10 +181,19 @@ describe('share scheduling review regressions', () => {
     store.current!.draft.rows[0].configured = false
     api.getPolicy.mockResolvedValue(shareView(5, { version: 2, policy: sharePolicy({ accounts: [{ account_id: 1, tier: 1, weight: 8 }] }) }))
     await store.rebase()
-    expect(store.current!.mergeConflicts[0].id).toBe('rows.1')
-    expect(await store.requestPreview()).toBe(false)
-    store.resolveConflict('rows.1', 'latest')
-    expect(store.current!.draft.rows[0]).toMatchObject({ configured: true, weight: 8 })
+    expect(store.current!.draft.rows[0].configured).toBe(false)
+    expect(store.current!.draft.rows[0].weight).not.toBe(8)
+  })
+
+  it('keeps my edit of a rule another administrator reset', async () => {
+    const store = useShareSchedulingStore()
+    const base = shareView(5, { policy: sharePolicy({ accounts: [{ account_id: 1, tier: 1, weight: 5 }] }) })
+    api.getPolicy.mockResolvedValueOnce(base)
+    await store.select(5)
+    store.current!.draft.rows[0].weight = 9
+    api.getPolicy.mockResolvedValue(shareView(5, { version: 2, policy: sharePolicy({ accounts: [] }) }))
+    await store.rebase()
+    expect(store.current!.draft.rows[0]).toMatchObject({ configured: true, weight: 9 })
   })
 
   it('rejects an old preview after switching between identical group drafts', async () => {

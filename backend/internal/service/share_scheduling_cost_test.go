@@ -45,11 +45,6 @@ func (c meteredCache) SetSessionAccountIDIfAbsent(ctx context.Context, groupID i
 	return c.shareTestCache.SetSessionAccountIDIfAbsent(ctx, groupID, key, accountID, ttl)
 }
 
-func (c meteredCache) UpdateSessionAccountIDIfOwner(ctx context.Context, groupID int64, key string, expected, accountID int64, ttl time.Duration) (int64, error) {
-	meterCall(ctx, servertiming.MetricRedis)
-	return c.shareTestCache.UpdateSessionAccountIDIfOwner(ctx, groupID, key, expected, accountID, ttl)
-}
-
 func (c meteredCache) RefreshSessionTTL(ctx context.Context, groupID int64, key string, ttl time.Duration) error {
 	meterCall(ctx, servertiming.MetricRedis)
 	return c.shareTestCache.RefreshSessionTTL(ctx, groupID, key, ttl)

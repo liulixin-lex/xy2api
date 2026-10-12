@@ -26,8 +26,6 @@ export interface ShareDraftRow {
   configured: boolean
   tier: number
   weight: number
-  disabled: boolean
-  drain_fallback: boolean
   drain: boolean
   drain_until: string
   cache_domain: string
@@ -73,8 +71,6 @@ export function draftFromView(view: SharePolicyView): ShareDraft {
       configured: Boolean(rule),
       tier: rule?.tier ?? fallback.tier,
       weight: rule?.weight ?? fallback.weight,
-      disabled: rule?.disabled ?? false,
-      drain_fallback: rule?.drain_fallback ?? false,
       drain: rule?.drain ?? false,
       drain_until: rule?.drain_until ?? '',
       cache_domain: rule?.cache_domain ?? ''
@@ -89,7 +85,7 @@ export function draftFromView(view: SharePolicyView): ShareDraft {
 /** Restores a row to the policy defaults and drops its explicit rule. */
 export function resetShareRow(draft: ShareDraft, row: ShareDraftRow): void {
   const fallback = shareDefaultRule(draft.policy, row)
-  Object.assign(row, { configured: false, tier: fallback.tier, weight: fallback.weight, disabled: false, drain_fallback: false, drain: false, drain_until: '', cache_domain: '' })
+  Object.assign(row, { configured: false, tier: fallback.tier, weight: fallback.weight, drain: false, drain_until: '', cache_domain: '' })
 }
 
 /** Keeps unconfigured rows in step with a changed default weight mode. */
@@ -105,8 +101,6 @@ export function policyFromDraft(draft: ShareDraft): SharePolicy {
     .filter(row => row.configured)
     .map(row => {
       const rule: ShareAccountRule = { account_id: row.account_id, tier: row.tier, weight: row.weight }
-      if (row.disabled) rule.disabled = true
-      if (row.drain && row.drain_fallback) rule.drain_fallback = true
       if (row.drain) rule.drain = true
       if (row.drain && row.drain_until) rule.drain_until = row.drain_until
       if (row.cache_domain.trim()) rule.cache_domain = row.cache_domain.trim()
@@ -148,7 +142,7 @@ export function validateShareDraft(draft: ShareDraft): ShareProblem[] {
     if (platform === undefined) domains.set(domain, row.platform)
     else if (platform !== row.platform) problems.push({ key: 'cacheDomainPlatform', params: { domain } })
   }
-  if (draft.policy.scheduler !== 'sub2api' && draft.rows.length > 0 && draft.rows.every(row => row.disabled || (row.drain && !row.drain_fallback)) && !draft.rows.every(row => row.disabled)) {
+  if (draft.policy.scheduler !== 'sub2api' && draft.rows.length > 0 && draft.rows.every(row => row.drain)) {
     problems.push({ key: 'allDrained' })
   }
   const { affinity, cache, tiers, balance } = draft.policy
@@ -186,7 +180,7 @@ export interface ShareDraftShares {
 export function draftShares(draft: ShareDraft, healthy: (accountId: number) => boolean): ShareDraftShares {
   const tiers = new Map<number, { weight: number; healthyWeight: number; concurrency: number }>()
   for (const row of draft.rows) {
-    if (row.drain || row.disabled) continue
+    if (row.drain) continue
     const totals = tiers.get(row.tier) ?? { weight: 0, healthyWeight: 0, concurrency: 0 }
     totals.weight += row.weight
     totals.concurrency += Math.max(row.concurrency, 0)
@@ -197,22 +191,11 @@ export function draftShares(draft: ShareDraft, healthy: (accountId: number) => b
   for (const [tier, totals] of tiers) {
     if (totals.healthyWeight > 0 && (activeTier === null || tier < activeTier)) activeTier = tier
   }
-  const emergencyWeights = new Map<number, number>()
-  if (activeTier === null) {
-    for (const row of draft.rows) {
-      if (row.disabled || !row.drain || !row.drain_fallback || !healthy(row.account_id) || (row.drain_until && Date.parse(row.drain_until) <= Date.now())) continue
-      emergencyWeights.set(row.tier, (emergencyWeights.get(row.tier) ?? 0) + row.weight)
-      if (activeTier === null || row.tier < activeTier) activeTier = row.tier
-    }
-  }
   const byAccount = new Map<number, ShareRowShares>()
   for (const row of draft.rows) {
     const totals = tiers.get(row.tier)
     const shares: ShareRowShares = { target: 0, effective: 0, capacity: 0 }
-    if (!row.disabled && row.drain && row.drain_fallback && row.tier === activeTier && healthy(row.account_id)) {
-      shares.effective = row.weight / (emergencyWeights.get(row.tier) || Infinity)
-    }
-    if (!row.drain && !row.disabled && totals) {
+    if (!row.drain && totals) {
       if (totals.weight > 0) shares.target = row.weight / totals.weight
       if (totals.concurrency > 0) shares.capacity = Math.max(row.concurrency, 0) / totals.concurrency
       if (row.tier === activeTier && healthy(row.account_id) && totals.healthyWeight > 0) {

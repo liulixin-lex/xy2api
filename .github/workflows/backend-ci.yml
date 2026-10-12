@@ -85,7 +85,7 @@ jobs:
           set -euo pipefail
           go test -race -p 1 -parallel 1 -tags=unit \
             ./internal/service ./internal/handler ./internal/handler/admin \
-            -run '^(TestGPT61Sol(NativeHTTP|HTTPValidation|WS)|TestNonstreamReadErrorSafety$|TestRequestBodyReplaySafety$|TestOpenAIQualityRoutingInertWithoutOptIn$|TestGatewayBufferedReadFailureAuthenticatedFailover$|TestRetiredSchedulingRoutesAnswerGone$|TestShareScheduling|TestOpenAIShareScheduling|TestShareAttribution|TestShareReview)' \
+            -run '^(TestGPT61Sol(NativeHTTP|HTTPValidation|WS)|TestNonstreamReadErrorSafety$|TestRequestBodyReplaySafety$|TestOpenAIQualityRoutingInertWithoutOptIn$|TestGatewayBufferedReadFailureAuthenticatedFailover$|TestRetiredSchedulingRoutesAnswerGone$|TestShareScheduling|TestOpenAIShareScheduling|TestShareAttribution)' \
             -count=1 -timeout=10m -json | tee "$RUNNER_TEMP/gateway-reliability.jsonl"
           python3 - <<'PY'
           import json
@@ -109,15 +109,6 @@ jobs:
                   "TestOpenAIShareSchedulingAdmissionBindKeepsPlannedBinding",
                   "TestOpenAIShareSchedulingHonoursResponseOwner",
                   "TestShareAttributionFollowsServedPlacements",
-                  "TestShareReviewWaitErrorsNeverReleaseAnotherAttempt",
-                  "TestShareReviewWaitBudgetAlsoBoundsRedisSlotCall",
-                  "TestShareReviewDefaultWeightsMatchBothAdapters",
-                  "TestShareReviewBindingRaceReconcilesOrReportsSpill",
-                  "TestShareReviewStatsFailureRetriesAndInvalidatesWindow",
-                  "TestShareReviewCommittedSaveNeedsNoPostCommitRead",
-                  "TestShareReviewAppliedVersionReportsLoadedPolicies",
-                  "TestShareReviewDisabledResponseOwnerFailsWithoutMovingProtocolState",
-                  "TestShareReviewDisabledExclusionsPreserveOtherGates",
               },
               "handler": {
                   "TestGatewayBufferedReadFailureAuthenticatedFailover",
@@ -155,7 +146,7 @@ jobs:
           set -euo pipefail
           go test -race -p 1 -tags=unit \
             ./internal/pkg/apicompat ./internal/service ./internal/service/openai_ws_v2 ./internal/repository ./internal/handler \
-            -run '^(TestOpenAICache|TestCacheControls|TestOpenAIUsageCanonical|TestOpenAIUsageConversion|TestOpenAISelectAccountWithLoadAwareness_StickyCapacity|TestShareReview)' \
+            -run '^(TestOpenAICache|TestCacheControls|TestOpenAIUsageCanonical|TestOpenAIUsageConversion|TestOpenAISelectAccountWithLoadAwareness_StickyCapacity)' \
             -count=1 -timeout=10m -json | tee "$RUNNER_TEMP/openai-cache-reliability.jsonl"
           python3 - <<'PY'
           import json
@@ -184,10 +175,6 @@ jobs:
               "TestOpenAICacheStickyAtomic",
               "TestOpenAICacheUnadmittedReservationExpires",
               "TestOpenAISelectAccountWithLoadAwareness_StickyCapacitySpilloverKeepsBinding",
-              "TestShareReviewWaitOwnershipAndReleaseFence",
-              "TestShareReviewWaitLimitAcrossInstances",
-              "TestShareReviewBindingCompareAndSetKeepsConcurrentWinner",
-              "TestShareReviewStatsRetryIsIdempotentAndBucketsAtomic",
           }
           ran = {e.get("Test") for e in events if e.get("Action") == "run"}
           passed = {e.get("Test") for e in events if e.get("Action") == "pass"}

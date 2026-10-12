@@ -34,67 +34,55 @@ export interface ShareGroupEntry {
   version: number
   /** Set after a 409: the latest version, or 0 when it could not be read. */
   conflict: number | null
-  mergeConflicts: ShareMergeConflict[]
-  removedEdits: number[]
 }
 
 export type ShareLoadState = 'idle' | 'loading' | 'failed' | 'unavailable'
 
-type ShareRowRule = Pick<ShareDraftRow, 'configured' | 'tier' | 'weight' | 'disabled' | 'drain_fallback' | 'drain' | 'drain_until' | 'cache_domain'>
-export interface ShareMergeConflict {
-  id: string
-  path: string[]
-  base: unknown
-  mine: unknown
-  latest: unknown
-}
+type ShareRowRule = Pick<ShareDraftRow, 'configured' | 'tier' | 'weight' | 'drain' | 'drain_until' | 'cache_domain'>
+
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
-const copy = (value: unknown): unknown => value === undefined ? undefined : cloneShareJSON(value)
+const copy = (value: unknown): unknown => (value === undefined ? undefined : cloneShareJSON(value))
+const isRecord = (value: unknown) => value !== null && typeof value === 'object' && !Array.isArray(value)
+
 function rowRule(row: ShareDraftRow): ShareRowRule {
-  return { configured: row.configured, tier: row.tier, weight: row.weight, disabled: row.disabled,
-    drain_fallback: row.drain_fallback, drain: row.drain, drain_until: row.drain_until, cache_domain: row.cache_domain }
+  return { configured: row.configured, tier: row.tier, weight: row.weight, drain: row.drain, drain_until: row.drain_until, cache_domain: row.cache_domain }
 }
 
-/** Field-level three-way merge. Concurrent changes to one field require a
- * choice; resetting an explicit rule conflicts with changes to that rule. */
-export function rebaseShareDraft(latest: SharePolicyView, edited: ShareDraft, base: ShareDraft) {
-  const draft = draftFromView(latest)
-  const conflicts: ShareMergeConflict[] = []
-  const removedEdits: number[] = []
-  function merge(before: unknown, mine: unknown, theirs: unknown, path: string[]): unknown {
-    if (equal(mine, before)) return copy(theirs)
-    if (equal(theirs, before) || equal(mine, theirs)) return copy(mine)
-    if ([before, mine, theirs].every(v => v !== null && typeof v === 'object' && !Array.isArray(v))) {
-      const b = before as Record<string, unknown>, m = mine as Record<string, unknown>, t = theirs as Record<string, unknown>
-      return Object.fromEntries([...new Set([...Object.keys(b), ...Object.keys(m), ...Object.keys(t)])]
-        .map(key => [key, merge(b[key], m[key], t[key], [...path, key])]))
-    }
-    conflicts.push({ id: path.join('.'), path, base: copy(before), mine: copy(mine), latest: copy(theirs) })
-    return copy(theirs)
+/** Three-way merge: unchanged fields take theirs; a field both changed keeps mine. */
+function mergeField(before: unknown, mine: unknown, theirs: unknown): unknown {
+  if (equal(mine, before)) return copy(theirs)
+  if ([before, mine, theirs].every(isRecord)) {
+    const b = before as Record<string, unknown>, m = mine as Record<string, unknown>, t = theirs as Record<string, unknown>
+    return Object.fromEntries([...new Set([...Object.keys(b), ...Object.keys(m), ...Object.keys(t)])]
+      .map(key => [key, mergeField(b[key], m[key], t[key])]))
   }
+  return copy(mine)
+}
+
+/**
+ * Reapplies the administrator's own edits (draft versus the version it was
+ * based on) onto a freshly loaded policy, field by field. Fields the draft
+ * did not change take the latest values, so another administrator's edits
+ * survive; a field both changed keeps the draft's value, and the preview
+ * shows the result before it is saved.
+ */
+export function rebaseShareDraft(latest: SharePolicyView, edited: ShareDraft, base: ShareDraft): ShareDraft {
+  const draft = draftFromView(latest)
   const { accounts: _base, ...basePolicy } = base.policy
   const { accounts: _mine, ...minePolicy } = edited.policy
   const { accounts: _latest, ...latestPolicy } = draft.policy
-  Object.assign(draft.policy, merge(basePolicy, minePolicy, latestPolicy, ['policy']))
+  Object.assign(draft.policy, mergeField(basePolicy, minePolicy, latestPolicy))
   const baseRows = new Map(base.rows.map(row => [row.account_id, row]))
   const editedRows = new Map(edited.rows.map(row => [row.account_id, row]))
-  const latestIds = new Set(draft.rows.map(row => row.account_id))
-  for (const own of edited.rows) {
-    const before = baseRows.get(own.account_id)
-    if (!latestIds.has(own.account_id) && before && !equal(rowRule(own), rowRule(before))) removedEdits.push(own.account_id)
-  }
   for (const row of draft.rows) {
     const own = editedRows.get(row.account_id), before = baseRows.get(row.account_id)
-    if (!own || !before) continue
-    const b = rowRule(before), m = rowRule(own), t = rowRule(row)
-    const path = ['rows', String(row.account_id)]
-    if (!equal(m, b) && !equal(t, b) && !equal(m, t) &&
-        ((b.configured && !m.configured) || (b.configured && !t.configured))) {
-      conflicts.push({ id: path.join('.'), path, base: b, mine: m, latest: t })
-    } else Object.assign(row, merge(b, m, t, path))
+    if (!own || !before || equal(rowRule(own), rowRule(before))) continue
+    // An edited row keeps its explicit or default choice, so a concurrent
+    // reset cannot silently drop the edit.
+    Object.assign(row, mergeField(rowRule(before), rowRule(own), rowRule(row)), { configured: own.configured })
   }
   refreshShareDefaults(draft)
-  return { draft, conflicts, removedEdits }
+  return draft
 }
 
 export const useShareSchedulingStore = defineStore('shareScheduling', () => {
@@ -146,7 +134,7 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
 
   function accept(view: SharePolicyView): ShareGroupEntry {
     const draft = draftFromView(view)
-    const entry: ShareGroupEntry = { view, draft, baseline: draftFingerprint(draft), version: view.version, conflict: null, mergeConflicts: [], removedEdits: [] }
+    const entry: ShareGroupEntry = { view, draft, baseline: draftFingerprint(draft), version: view.version, conflict: null }
     entries.value[view.group_id] = entry
     const summary = groups.value.find(group => group.group_id === view.group_id)
     if (summary) {
@@ -216,8 +204,6 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
     if (!entry) return
     entry.draft = draftFromView(entry.view)
     entry.conflict = null
-    entry.mergeConflicts = []
-    entry.removedEdits = []
     invalidateActions()
     clearFeedback()
   }
@@ -233,11 +219,8 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
     try {
       const latest = await shareSchedulingAPI.getPolicy(groupId)
       if (!owns(epoch, groupId, entry) || draftFingerprint(entry.draft) !== fingerprint) return
-      const merged = rebaseShareDraft(latest, edited, draftFromView(entry.view))
-      const next = accept(latest)
-      next.draft = merged.draft
-      next.mergeConflicts = merged.conflicts
-      next.removedEdits = merged.removedEdits
+      const draft = rebaseShareDraft(latest, edited, draftFromView(entry.view))
+      accept(latest).draft = draft
       clearFeedback()
       rebasedVersion.value = latest.version
     } catch (err) {
@@ -245,33 +228,10 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
     }
   }
 
-  function resolveConflict(id: string, choice: 'mine' | 'latest') {
-    const entry = current.value
-    const conflict = entry?.mergeConflicts.find(item => item.id === id)
-    if (!entry || !conflict) return
-    const value = copy(conflict[choice])
-    const path = [...conflict.path]
-    let target: Record<string, unknown>
-    if (path.shift() === 'rows') {
-      const row = entry.draft.rows.find(row => row.account_id === Number(path.shift()))
-      if (!row) return
-      target = row as unknown as Record<string, unknown>
-    } else target = entry.draft.policy as unknown as Record<string, unknown>
-    if (!path.length) Object.assign(target, value)
-    else {
-      const key = path.pop()!
-      for (const part of path) target = target[part] as Record<string, unknown>
-      target[key] = value
-    }
-    entry.mergeConflicts = entry.mergeConflicts.filter(item => item.id !== id)
-    refreshShareDefaults(entry.draft)
-    invalidateActions()
-  }
-
   /** Validates the draft and asks the server for its preview. */
   async function requestPreview(): Promise<boolean> {
     const entry = current.value
-    if (!entry || selected.value === null || previewing.value || saving.value || entry.mergeConflicts.length) return false
+    if (!entry || selected.value === null || previewing.value || saving.value) return false
     clearFeedback()
     problems.value = validateShareDraft(entry.draft)
     if (problems.value.length) return false
@@ -299,7 +259,7 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
   /** Saves the previewed draft with the expected version. */
   async function save(): Promise<boolean> {
     const entry = current.value
-    if (!entry || selected.value === null || saving.value || entry.mergeConflicts.length) return false
+    if (!entry || selected.value === null || saving.value) return false
     const groupId = selected.value, epoch = actionEpoch
     const fingerprint = draftFingerprint(entry.draft)
     if (!preview.value || !previewContext || previewContext.groupId !== groupId ||
@@ -312,12 +272,8 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
       if (!owns(epoch, groupId, entry)) return false
       const edited = cloneShareJSON(entry.draft)
       const next = accept(view)
-      if (draftFingerprint(edited) !== fingerprint) {
-        const merged = rebaseShareDraft(view, edited, submitted)
-        next.draft = merged.draft
-        next.mergeConflicts = merged.conflicts
-        next.removedEdits = merged.removedEdits
-      }
+      // Edits made while the save was in flight stay as a draft on top of it.
+      if (draftFingerprint(edited) !== fingerprint) next.draft = rebaseShareDraft(view, edited, submitted)
       invalidateActions()
       savedVersion.value = view.version
       return true
@@ -389,7 +345,6 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
     reload,
     discard,
     rebase,
-    resolveConflict,
     requestPreview,
     save,
     closePreview,
