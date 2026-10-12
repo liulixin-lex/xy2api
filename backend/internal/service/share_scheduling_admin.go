@@ -404,7 +404,7 @@ func (s *ShareSchedulingService) GetPolicy(ctx context.Context, groupID int64) (
 	if view.Policy, err = json.Marshal(policy); err != nil {
 		return nil, err
 	}
-	if applied := s.groupPolicy(groupID); applied != nil {
+	if applied := s.state.Load().groups[groupID]; applied != nil {
 		view.AppliedVersion = applied.version
 	}
 	view.Members, view.ActiveTier = shareMemberViews(&policy, accounts, time.Now())
@@ -513,7 +513,7 @@ func (s *ShareSchedulingService) SavePolicy(ctx context.Context, groupID, expect
 	view := &ShareSchedulingPolicyView{GroupID: groupID, GroupName: group.Name, Platform: group.Platform,
 		Version: row.Version, Scheduler: row.Scheduler, Policy: normalized, ImportedFrom: row.ImportedFrom,
 		UpdatedBy: row.UpdatedBy, UpdatedAt: &row.UpdatedAt, Effective: s.groupPolicy(groupID) != nil}
-	if applied := s.groupPolicy(groupID); applied != nil {
+	if applied := s.state.Load().groups[groupID]; applied != nil {
 		view.AppliedVersion = applied.version
 	}
 	view.Members, view.ActiveTier = shareMemberViews(&policy, accounts, time.Now())

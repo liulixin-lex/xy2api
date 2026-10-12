@@ -115,6 +115,7 @@ jobs:
                   "TestShareReviewBindingRaceReconcilesOrReportsSpill",
                   "TestShareReviewStatsFailureRetriesAndInvalidatesWindow",
                   "TestShareReviewCommittedSaveNeedsNoPostCommitRead",
+                  "TestShareReviewAppliedVersionReportsLoadedPolicies",
                   "TestShareReviewDisabledResponseOwnerFailsWithoutMovingProtocolState",
                   "TestShareReviewDisabledExclusionsPreserveOtherGates",
               },

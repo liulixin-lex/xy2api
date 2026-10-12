@@ -188,6 +188,34 @@ func TestShareReviewCommittedSaveNeedsNoPostCommitRead(t *testing.T) {
 	require.Equal(t, int64(1), env.share.groupPolicy(shareTestGroupID).version)
 }
 
+func TestShareReviewAppliedVersionReportsLoadedPolicies(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		for _, scheduler := range []sharesched.Scheduler{sharesched.SchedulerSub2API, sharesched.SchedulerShare} {
+			t.Run(string(scheduler)+"/"+map[bool]string{false: "off", true: "on"}[enabled], func(t *testing.T) {
+				env := newShareAdminEnv(t, Account{ID: 1}, Account{ID: 2}, Account{ID: 3})
+				settings := env.share.Settings()
+				settings.Enabled = enabled
+				_, err := env.share.UpdateSettings(context.Background(), settings)
+				require.NoError(t, err)
+				policy, err := sharesched.DecodePolicy([]byte(shareAdminPolicy))
+				require.NoError(t, err)
+				policy.Scheduler = scheduler
+				raw, err := json.Marshal(policy)
+				require.NoError(t, err)
+				saved, err := env.save(t, 0, string(raw))
+				require.NoError(t, err)
+				loaded, err := env.share.GetPolicy(context.Background(), shareTestGroupID)
+				require.NoError(t, err)
+				for _, view := range []*ShareSchedulingPolicyView{saved, loaded} {
+					require.Equal(t, int64(1), view.Version)
+					require.Equal(t, view.Version, view.AppliedVersion)
+					require.Equal(t, enabled && scheduler == sharesched.SchedulerShare, view.Effective)
+				}
+			})
+		}
+	}
+}
+
 func TestShareReviewDisabledExclusionsPreserveOtherGates(t *testing.T) {
 	env := newShareTestEnv(t, shareTestPolicy(sharesched.SchedulerShare, sharesched.AccountRule{AccountID: 1, Tier: 1, Weight: 1, Disabled: true}), Account{ID: 1}, Account{ID: 2})
 	gid := shareTestGroupID
