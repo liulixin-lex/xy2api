@@ -4,6 +4,14 @@
 
 ## 当前交接状态
 
+### 异步生图任务 v2（2026-10-12，分支已推送，合并与发版待授权）
+
+- 用户（生图站 XY-image 维护方，agent01 执行）授权拉取最新仓库、新建分支开发异步生图功能并推送分支；合并、标签、Release、部署主站均未授权。分支 `feat/async-image-tasks-v2-20261012`，起点 `main` / `7b1d5d8c3`（0.2.6），四个分层提交：规格 → 可控调度修复 → 功能 → 文档，外加本记录。
+- 修复：可控调度模式下异步任务继承提交请求的 `ControlledRequest`，202 返回后中间件关闭它，`beginDispatch` 检查到已结束的客户端 context，任务立即 502 "context canceled"。新增 `DetachControlledRequest` 让任务持有绑定执行 context 的独立账本。
+- 新能力（只做加法，不改已有路由与字段语义、无迁移）：幂等键、任务内计费状态与请求 ID（按 `usage_logs`/`usage_billing_intents` 查询）、心跳 + 在途索引 + 清扫锁收尾崩溃实例的任务、优雅退出排空、终态只写一次、转存重试与 `result_storage_failed`、每 Key/每实例准入上限、查询限流、长轮询、DELETE、能力发现、`Prefer: respond-async`、异步失败写入错误日志。配置段 `image_tasks`。说明见 [ASYNC_IMAGE_TASKS.md](ASYNC_IMAGE_TASKS.md)「Version 2 additions」，规格见 `openspec/changes/async-image-tasks-v2/`。
+- 验证：后端完整 unit（61 个测试包）、golangci-lint v2.14.0 0 issues、来源审计、图片任务相关 `-race` 均通过；GitHub 分支 CI（`5217d43e3`）7 项作业（含 test、golangci-lint、upstream-sync-audit）与 Security Scan 全部成功。下游生图站实验室（模拟上游、真实 PostgreSQL/Redis/S3 兼容存储）将实验主站临时换成本分支构建，7 项演练与生图站现有异步客户端 3 项演练全部通过，之后恢复实验主站固定版本。
+- 下一步：等待用户授权开 PR、合并及发版（建议 0.2.7）；主站部署另需授权。部署前建议主站对象存储只针对 `images/` 前缀配置生命周期规则。
+
 ### GPT 缓存可靠性 0.2.6（2026-10-10，GitHub 正式发布完成）
 
 - 用户授权同步最新主线、新建分支、实施全站 GPT 缓存方案，完成验证后提交、推送、常规合并及 GitHub 发版。独立工作树 `/lex/xy2api-gpt-cache`；功能分支基于 `3569d4f00aae3eada079eb7ac058dc62256a66b8`，正式版本分支 `release/0.2.6` 基于功能合并提交 `3cf8406e5cfff94c488bfa58d0ba5b198e8ae1cf`；其他工作树未提交文件保持。
@@ -524,7 +532,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
-### 20261012-async-image-tasks-v2 — 异步生图任务 v2（开发中）
+### 20261012-async-image-tasks-v2 — 异步生图任务 v2（开发完成，分支已推送，待授权 PR/合并/发版）
 
 - 用户（生图站 XY-image 维护方，agent01 执行）授权：拉取最新仓库、新建分支开发异步生图功能。起点 `main` / `7b1d5d8c3`（0.2.6），分支 `feat/async-image-tasks-v2-20261012`。推送分支属授权范围；合并、标签、Release、部署主站均未授权，需另行确认。
 - 范围：在 0.2.6 已有 `/v1/images/{generations,edits}/async`、`/v1/images/tasks/{id}` 上只做加法——修复可控调度模式下任务立即 `context canceled`；幂等键、计费状态与请求 ID、心跳/清扫/优雅退出、转存重试、在途上限与轮询限流、错误日志、能力发现、DELETE、长轮询、`Prefer: respond-async`。规格见 `openspec/changes/async-image-tasks-v2/`。
@@ -1694,3 +1702,13 @@ pnpm --dir frontend run build
 - 验证：最终 Go 1.27.2 组合 unit 62 包/23,646、integration 56 包/15,164 通过；七包真实 PostgreSQL/Redis race 538 通过，29/15/11 项关键守卫全 RUN/PASS，最近窗口修复的 40 项 race 与 16 项缓存守卫全通过。前端 lint/typecheck/327 项关键测试/生产构建、全仓 lint、源码 govulncheck 和来源审计通过。两 PR 固定 head 均 18/18 检查成功；正式主线/标签 CI、安全扫描及 Release 成功。RC 五平台制品、隔离 fresh/0.2.5 升级/备份恢复回退与正式五平台制品、隔离 fresh 均通过，正式 GHCR digest `sha256:77212b1dcfb1a8045bc6a1bbc61e1b304f29272f4ad1c0daba61f71a368711cc`，316 条迁移保持。
 - 卡点/风险：无发布卡点。未部署生产、未启用诊断/偏好、未新增付费模型调用；历史低命中的具体请求体和上游账单不足以证明单一根因，生产改善须部署后灰度观察。
 - 下一步：GitHub 发布已完成；后续部署时先启用诊断、按真实 usage 和账单分组核对，再小比例启用缓存偏好。收尾记录走独立受保护文档 PR，不改已发布标签或业务树。
+
+### 2026-10-12T10:25:07Z — `20261012-async-image-tasks-v2` — 开发完成，分支已推送
+
+- 请求/目标：用户授权拉取最新仓库、新建分支，开发异步生图功能（下游生图站 G7 方案第 2 期）；推送分支属授权范围，PR、合并、版本与主站部署未授权。
+- 开始状态：`main` / `7b1d5d8c3`（0.2.6）；0.2.6 已有 `/v1/images/{generations,edits}/async` 与 `/v1/images/tasks/{id}`。已知缺口：可控调度模式下任务立即 "context canceled"、无幂等、无计费字段、进程退出后任务长期 processing、转存失败但已计费时标失败、无准入上限、失败不进错误日志。
+- 完成操作：分支 `feat/async-image-tasks-v2-20261012`，提交 `50b7b32b7`（规格）、`02f0a21d3`（可控调度修复）、`71ead40f0`（功能）、`5217d43e3`（文档）及本记录；已推送。任务存储改为 WATCH/MULTI 更新；新增 Redis 协调器（幂等、在途索引、清扫锁、查询限流）与账本查询；错误日志中间件后处理抽出为 `recordOpsErrorAfterRequest` 供异步复用；清理阶段先排空异步任务再停清扫器；Wire 重新生成。无迁移。
+- 修改文件：`backend/internal/service/{image_task,image_storage,controlled_scheduling_request,wire}.go`、`backend/internal/repository/{image_task_store,image_task_coordinator,image_task_billing,image_storage_s3,wire}.go`、`backend/internal/handler/{image_task_handler,ops_error_logger}.go`、`backend/internal/server/{routes/gateway,middleware/api_key_auth}.go`、`backend/internal/config/config.go`、`backend/cmd/server/{wire,wire_gen}.go` 及相应测试；`docs/ASYNC_IMAGE_TASKS.md`、`deploy/config.example.yaml`、`tools/upstream-sync/policy.json`（openspec 变更目录归 xy_owned）、`openspec/changes/async-image-tasks-v2/`、本文件。
+- 验证：Go 1.27.2 后端完整 unit 61 个测试包通过（含 `cmd/server` 清理顺序与提示词审核先于副作用的守卫）；golangci-lint v2.14.0 全仓 0 issues；`sync.py audit` 通过，`tools/tests` 14 项通过；图片任务相关测试 `-race` 通过；GitHub 分支 CI 7 项作业与 Security Scan 全部成功。实验环境（模拟上游）把实验主站换成本分支构建后：能力发现与查询限流、可控模式出图（扣费一次、用量一条）、幂等重放与 422、`Prefer`、DELETE（记录与存储对象均删除）、`docker stop` 排空（等待 13 秒后完成并扣费）、`docker kill` 后 119 秒内清扫收尾为 `task_interrupted`/不扣费/错误日志一条，7 项通过；生图站现有异步客户端 image/resume/edge 3 项不改代码通过；演练后实验主站恢复固定版本。
+- 卡点/风险：未在生产主站运行；Gemini 异步不在本轮。`openai_token_provider_test.go` 的 gofmt 差异为既有问题，未改。
+- 下一步：等待用户授权开 PR、合并与发版（建议 0.2.7）；主站部署另需授权，部署前建议为对象存储 `images/` 前缀配置生命周期规则。

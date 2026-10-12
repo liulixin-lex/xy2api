@@ -25,10 +25,10 @@
 ## 4. 验证
 
 - [x] service / repository / handler / server 相关单测（Go 1.27.2）。
-- [ ] 后端完整 unit、golangci-lint、来源审计（干净提交后）。
-- [ ] 真实 PostgreSQL/Redis 环境的端到端演练（可控模式出图、重启中断收尾、幂等重放、DELETE），在下游生图站实验室进行。
+- [x] 后端完整 unit（61 个测试包）、golangci-lint v2.14.0（0 issues）、来源审计（干净提交后通过）；图片任务相关测试 `-race` 通过。
+- [x] 真实 PostgreSQL/Redis 环境的端到端演练：下游生图站实验室（模拟上游）把实验主站临时换成本分支构建，7 项全部通过——能力发现与查询限流、可控模式出图并扣费一次、幂等重放与 422、`Prefer: respond-async`、DELETE（含存储对象）、`docker stop` 排空后完成、`docker kill` 后清扫收尾为 `task_interrupted`/不扣费并写入错误日志；生图站现有异步客户端（image、resume、edge）不改代码通过。演练后实验主站恢复固定版本。
 
 ## 5. 交付
 
-- [ ] 推送分支（已授权）。
+- [x] 推送分支（已授权）。
 - [ ] PR、合并、版本、主站部署：等待用户另行授权。
