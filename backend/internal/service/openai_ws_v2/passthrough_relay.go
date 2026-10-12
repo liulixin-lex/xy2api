@@ -30,6 +30,7 @@ type Usage struct {
 	CacheReadSource          string
 	CacheWriteSource         string
 	InputTokens              int
+	ImageInputTokens         int
 	OutputTokens             int
 	CacheCreationInputTokens int
 	CacheReadInputTokens     int
@@ -1121,6 +1122,21 @@ func parseUsageAndAccumulate(
 	if imageTokens == 0 {
 		imageTokens = usageResult.Get("completion_tokens_details.image_tokens").Int()
 	}
+	imageInputTokens := usageResult.Get("input_tokens_details.image_tokens").Int()
+	if imageInputTokens <= 0 {
+		imageInputTokens = usageResult.Get("prompt_tokens_details.image_tokens").Int()
+	}
+	// 与 HTTP Responses 同口径：usage 缺图片计数时由托管工具 tool_usage.image_gen 回填。
+	imageGen := gjson.GetBytes(message, "response.tool_usage.image_gen")
+	if !imageGen.Exists() {
+		imageGen = gjson.GetBytes(message, "tool_usage.image_gen")
+	}
+	if imageTokens <= 0 {
+		imageTokens = max(imageGen.Get("output_tokens_details.image_tokens").Int(), 0)
+	}
+	if imageInputTokens <= 0 {
+		imageInputTokens = max(imageGen.Get("input_tokens_details.image_tokens").Int(), 0)
+	}
 
 	requireTotals := isTerminalEvent(strings.TrimSpace(eventType))
 	inputTokens, inputOK := parseUsageIntField(inputResult, requireTotals)
@@ -1145,6 +1161,7 @@ func parseUsageAndAccumulate(
 	}
 	parsedUsage := Usage{
 		InputTokens:       max(inputTokens, 0),
+		ImageInputTokens:  int(imageInputTokens),
 		OutputTokens:      outputTokens,
 		ImageOutputTokens: int(imageTokens),
 	}
@@ -1168,7 +1185,7 @@ func parseUsageAndAccumulate(
 func relayUsageHasTokens(usage Usage) bool {
 	return usage.InputTokens > 0 || usage.OutputTokens > 0 ||
 		usage.CacheCreationInputTokens > 0 || usage.CacheReadInputTokens > 0 ||
-		usage.ImageOutputTokens > 0
+		usage.ImageInputTokens > 0 || usage.ImageOutputTokens > 0
 }
 
 func mergeRelayUsageNonZero(dst *Usage, src Usage) {
@@ -1189,6 +1206,9 @@ func mergeRelayUsageNonZero(dst *Usage, src Usage) {
 		dst.CacheReadInputTokens = src.CacheReadInputTokens
 		dst.CacheReadSource = src.CacheReadSource
 	}
+	if src.ImageInputTokens > 0 {
+		dst.ImageInputTokens = src.ImageInputTokens
+	}
 	if src.ImageOutputTokens > 0 {
 		dst.ImageOutputTokens = src.ImageOutputTokens
 	}
@@ -1200,6 +1220,7 @@ func finalizeRelayTurnUsage(state *relayState) Usage {
 	}
 	turnUsage := state.turnUsage
 	state.usage.InputTokens += turnUsage.InputTokens
+	state.usage.ImageInputTokens += turnUsage.ImageInputTokens
 	state.usage.OutputTokens += turnUsage.OutputTokens
 	state.usage.CacheCreationInputTokens += turnUsage.CacheCreationInputTokens
 	state.usage.CacheReadInputTokens += turnUsage.CacheReadInputTokens
