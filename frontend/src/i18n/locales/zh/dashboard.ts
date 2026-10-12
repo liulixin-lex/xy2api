@@ -404,6 +404,8 @@ export default {
     tokenSpeedHint: '估算速度：输出 Token ÷（总耗时 − 首字耗时），耗时按秒换算。输出可能包含思考 Token，结果受首字统计口径影响。',
     tokenSpeedTotalHint: '缺少首字耗时，按总耗时估算：输出 Token ÷ 总秒数。输出可能包含思考 Token。',
     latencyDuration: '总耗时',
+    outputTps: '输出 TPS',
+    outputTpsHint: '输出 Token ÷ 总耗时（包含首字等待），单位 tok/s。输出 Token 可能包含推理 Token。',
     time: '时间',
     ws: 'WS',
     stream: '流式',
