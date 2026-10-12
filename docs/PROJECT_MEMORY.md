@@ -524,6 +524,14 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
+### 20261013-sub2api-v0.2.15-full-release — 三方同步、备份修复、开放 PR 与发版
+
+- 用户授权拉取最新 XY2API 与 Sub2API 正式版、建立同步分支、按规范三方合并、修复自动备份、合并当前开放 PR 并完成正式发版。全程不部署生产。
+- 起点为远端 `main` `7b1d5d8c387c461a660befa3ac936b39715b4bf0`，产品版本 `0.2.6`、已审兼容基线 `0.2.14`。工作在 `/lex/xy2api-sync-20261013` 独立 clone，原 `/lex/xy2api` 的未提交项目记忆保留。
+- 最新官方正式 annotated tag 固定为 `v0.2.15`，tag object `86a80c13dcba86f52f9ca815b5a471cecc236227`（unsigned），目标 `f2669c8cf62555cd92389b3f55920e9e6e7c6ff2`，实际 merge base `0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d`。本地分支 `sync/sub2api-v0.2.15`，同步报告 `docs/upstream-sync/v0.2.15.json`。
+- 开始时开放 PR #90（份额调度替换）与 #91（异步图像任务 v2）各 8 项必需检查通过；合并前按最终 head 重查。备份排查已确认 Provider 会调用 `Start()`；启动时配置读取失败后目前只记录日志并返回，自动重试为待验证的候选修复方向。
+- 尚未完成三方裁决、备份修复、开放 PR 合并、RC/正式发版或任何生产操作。每阶段只在关键事实变化时更新本条，最终补记精确检查、合并、制品与隔离升级/回滚结果。
+
 ### 20261008-claude-cache-groups-release — 推送、合并与 GitHub 发版
 
 - 用户最新授权远端交付；当前独立工作树 `/lex/xy2api-claude-cache`，分支 `feat/claude-cache-groups-20261008`，已验本地 head `53d6a12ca`；核对远端 main 仍为 `309afb6af`。
