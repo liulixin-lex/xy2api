@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	coderws "github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
 )

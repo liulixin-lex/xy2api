@@ -3,7 +3,7 @@ package admin
 import (
 	"fmt"
 
-	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/gin-gonic/gin/binding"
 	"github.com/go-playground/validator/v10"
 )

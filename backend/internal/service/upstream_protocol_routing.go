@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 )
 
 // resolveUpstreamProtocol 决定 OpenAI 网关本次请求发往上游的协议

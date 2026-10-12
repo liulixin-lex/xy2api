@@ -6,9 +6,9 @@ import (
 	"context"
 	"testing"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
-	"github.com/Wei-Shaw/sub2api/internal/service"
-	dbmigrations "github.com/Wei-Shaw/sub2api/migrations"
+	dbent "github.com/liulixin-lex/xy2api/ent"
+	"github.com/liulixin-lex/xy2api/internal/service"
+	dbmigrations "github.com/liulixin-lex/xy2api/migrations"
 	"github.com/stretchr/testify/require"
 )
 

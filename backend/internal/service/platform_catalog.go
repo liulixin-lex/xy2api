@@ -3,7 +3,7 @@ package service
 import (
 	"sort"
 
-	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 )
 
 // PlatformCatalog 是前端使用的平台清单：domain 平台清单加上多协议供应商的
