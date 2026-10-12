@@ -34,6 +34,7 @@
   - 双实例压测 7 个阶段与同负载 A/B；
   - 0.2.6 回退与前滚演练。
 - 上一条“PR #90 审查修复交付”中涉及 271、`disabled`、租约、批次标记、`applied_version` 与 `docs/share-scheduling-hardening.md` 的描述已被本条取代。
+- 提交 `a2a6c2c8`（精简）、`7c763280`（文档）已推送，PR 描述新增「复审精简（2026-10-12）」一节。`7c763280` 上 CI 18 项全部通过，test 作业的 Unit、Integration、Gateway reliability、OpenAI cache、Hosted recharge 均成功；PR 为 MERGEABLE/CLEAN。
 - 下一步：人工审核 PR #90。合并、发版、部署与生产只读基线、影子运行、灰度需用户另行授权。
 
 ### PR #90 审查修复交付（2026-10-12，本地实施与隔离验收完成）
@@ -2036,3 +2037,4 @@ pnpm --dir frontend run build
   - 0.2.6 回退与前滚正常。
 - 卡点/风险：过载时全满载的新会话排队在权重最高的账号上，偶有 30 秒排队超时（5/13034），少于原版；生产等待预算需按基线首字斜率校准。
 - 下一步：推送后跟进 PR #90 的 CI；人工审核与合并需用户授权。本地保留的产物均无凭据，可删除：`/tmp/xy2-soak/{bin,logs,out,scripts}`、`/tmp/xy2-research`、`/tmp/xy2-toolchain`、`/tmp/xy2-infra`。
+- CI 结果（追加）：`7c763280` 上 18 项检查全部通过，PR #90 为 MERGEABLE/CLEAN。已停止本地 PG/Redis。
