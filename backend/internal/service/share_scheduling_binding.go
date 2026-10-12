@@ -95,11 +95,6 @@ func writeShareBinding(ctx context.Context, cache GatewayCache, groupID int64, k
 	return shareBindingWriteResult{}, nil
 }
 
-func applyShareBindingWrite(ctx context.Context, cache GatewayCache, groupID int64, key string, accountID int64, write sharesched.Write, ttl time.Duration) error {
-	_, err := writeShareBinding(ctx, cache, groupID, key, accountID, accountID, write, ttl)
-	return err
-}
-
 // shareBindingIntent is the binding update of a share placement, carried to
 // the handler. It is pending while the request still has to wait for a slot
 // or pass the profit gate's final check; once done, the handler's admission

@@ -29,7 +29,8 @@ func shareReviewRedis(t *testing.T) *redis.Client {
 }
 func TestShareReviewWaitOwnershipAndReleaseFence(t *testing.T) {
 	r := shareReviewRedis(t)
-	c := NewConcurrencyCache(r, 15, 900).(*concurrencyCache)
+	c, concrete := NewConcurrencyCache(r, 15, 900).(*concurrencyCache)
+	require.True(t, concrete)
 	ctx := context.Background()
 	id := time.Now().UnixNano()
 	t.Cleanup(func() {
@@ -68,7 +69,8 @@ func TestShareReviewWaitOwnershipAndReleaseFence(t *testing.T) {
 }
 func TestShareReviewBindingCompareAndSetKeepsConcurrentWinner(t *testing.T) {
 	r := shareReviewRedis(t)
-	cache := NewGatewayCache(r).(*gatewayCache)
+	cache, concrete := NewGatewayCache(r).(*gatewayCache)
+	require.True(t, concrete)
 	ctx := context.Background()
 	key := uuid.NewString()
 	group := int64(-902)
@@ -125,9 +127,11 @@ func TestShareReviewStatsRetryIsIdempotentAndBucketsAtomic(t *testing.T) {
 func TestShareReviewWaitLimitAcrossInstances(t *testing.T) {
 	r := shareReviewRedis(t)
 	two := redis.NewClient(r.Options())
-	defer two.Close()
-	a := NewConcurrencyCache(r, 15, 900).(*concurrencyCache)
-	b := NewConcurrencyCache(two, 15, 900).(*concurrencyCache)
+	t.Cleanup(func() { require.NoError(t, two.Close()) })
+	a, concrete := NewConcurrencyCache(r, 15, 900).(*concurrencyCache)
+	require.True(t, concrete)
+	b, concrete := NewConcurrencyCache(two, 15, 900).(*concurrencyCache)
+	require.True(t, concrete)
 	ctx := context.Background()
 	id := time.Now().UnixNano()
 	attempts := make(chan string, 60)
