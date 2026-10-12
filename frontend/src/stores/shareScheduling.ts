@@ -34,38 +34,67 @@ export interface ShareGroupEntry {
   version: number
   /** Set after a 409: the latest version, or 0 when it could not be read. */
   conflict: number | null
+  mergeConflicts: ShareMergeConflict[]
+  removedEdits: number[]
 }
 
 export type ShareLoadState = 'idle' | 'loading' | 'failed' | 'unavailable'
 
-type ShareRowRule = Pick<ShareDraftRow, 'configured' | 'tier' | 'weight' | 'drain' | 'drain_until' | 'cache_domain'>
-
+type ShareRowRule = Pick<ShareDraftRow, 'configured' | 'tier' | 'weight' | 'disabled' | 'drain_fallback' | 'drain' | 'drain_until' | 'cache_domain'>
+export interface ShareMergeConflict {
+  id: string
+  path: string[]
+  base: unknown
+  mine: unknown
+  latest: unknown
+}
+const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+const copy = (value: unknown): unknown => value === undefined ? undefined : cloneShareJSON(value)
 function rowRule(row: ShareDraftRow): ShareRowRule {
-  return { configured: row.configured, tier: row.tier, weight: row.weight, drain: row.drain, drain_until: row.drain_until, cache_domain: row.cache_domain }
+  return { configured: row.configured, tier: row.tier, weight: row.weight, disabled: row.disabled,
+    drain_fallback: row.drain_fallback, drain: row.drain, drain_until: row.drain_until, cache_domain: row.cache_domain }
 }
 
-/**
- * Reapplies the administrator's own edits (draft versus the version it was
- * based on) onto a freshly loaded policy. Sections and rows the draft did not
- * change take the latest values, so another administrator's edits survive.
- */
-function rebaseDraft(latest: SharePolicyView, edited: ShareDraft, base: ShareDraft): ShareDraft {
+/** Field-level three-way merge. Concurrent changes to one field require a
+ * choice; resetting an explicit rule conflicts with changes to that rule. */
+export function rebaseShareDraft(latest: SharePolicyView, edited: ShareDraft, base: ShareDraft) {
   const draft = draftFromView(latest)
-  const policy = draft.policy as unknown as Record<string, unknown>
-  const mine = edited.policy as unknown as Record<string, unknown>
-  const before = base.policy as unknown as Record<string, unknown>
-  for (const key of Object.keys(mine)) {
-    if (key === 'accounts') continue
-    if (JSON.stringify(mine[key]) !== JSON.stringify(before[key])) policy[key] = cloneShareJSON(mine[key])
+  const conflicts: ShareMergeConflict[] = []
+  const removedEdits: number[] = []
+  function merge(before: unknown, mine: unknown, theirs: unknown, path: string[]): unknown {
+    if (equal(mine, before)) return copy(theirs)
+    if (equal(theirs, before) || equal(mine, theirs)) return copy(mine)
+    if ([before, mine, theirs].every(v => v !== null && typeof v === 'object' && !Array.isArray(v))) {
+      const b = before as Record<string, unknown>, m = mine as Record<string, unknown>, t = theirs as Record<string, unknown>
+      return Object.fromEntries([...new Set([...Object.keys(b), ...Object.keys(m), ...Object.keys(t)])]
+        .map(key => [key, merge(b[key], m[key], t[key], [...path, key])]))
+    }
+    conflicts.push({ id: path.join('.'), path, base: copy(before), mine: copy(mine), latest: copy(theirs) })
+    return copy(theirs)
   }
-  const baseRows = new Map(base.rows.map(row => [row.account_id, JSON.stringify(rowRule(row))]))
+  const { accounts: _base, ...basePolicy } = base.policy
+  const { accounts: _mine, ...minePolicy } = edited.policy
+  const { accounts: _latest, ...latestPolicy } = draft.policy
+  Object.assign(draft.policy, merge(basePolicy, minePolicy, latestPolicy, ['policy']))
+  const baseRows = new Map(base.rows.map(row => [row.account_id, row]))
   const editedRows = new Map(edited.rows.map(row => [row.account_id, row]))
+  const latestIds = new Set(draft.rows.map(row => row.account_id))
+  for (const own of edited.rows) {
+    const before = baseRows.get(own.account_id)
+    if (!latestIds.has(own.account_id) && before && !equal(rowRule(own), rowRule(before))) removedEdits.push(own.account_id)
+  }
   for (const row of draft.rows) {
-    const own = editedRows.get(row.account_id)
-    if (own && JSON.stringify(rowRule(own)) !== baseRows.get(row.account_id)) Object.assign(row, rowRule(own))
+    const own = editedRows.get(row.account_id), before = baseRows.get(row.account_id)
+    if (!own || !before) continue
+    const b = rowRule(before), m = rowRule(own), t = rowRule(row)
+    const path = ['rows', String(row.account_id)]
+    if (!equal(m, b) && !equal(t, b) && !equal(m, t) &&
+        ((b.configured && !m.configured) || (b.configured && !t.configured))) {
+      conflicts.push({ id: path.join('.'), path, base: b, mine: m, latest: t })
+    } else Object.assign(row, merge(b, m, t, path))
   }
   refreshShareDefaults(draft)
-  return draft
+  return { draft, conflicts, removedEdits }
 }
 
 export const useShareSchedulingStore = defineStore('shareScheduling', () => {
@@ -87,6 +116,19 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
   const savedVersion = ref<number | null>(null)
   const rebasedVersion = ref<number | null>(null)
   let policyRequest = 0
+  let actionEpoch = 0
+  let previewContext: { groupId: number; version: number; fingerprint: string; epoch: number } | null = null
+  function invalidateActions() {
+    actionEpoch++
+    preview.value = null
+    previewContext = null
+    previewFingerprint.value = ''
+    previewing.value = false
+    saving.value = false
+  }
+  function owns(epoch: number, groupId: number, entry: ShareGroupEntry) {
+    return epoch === actionEpoch && selected.value === groupId && current.value === entry
+  }
 
   const current = computed(() => (selected.value === null ? null : entries.value[selected.value] ?? null))
   const isDirty = (entry: ShareGroupEntry | null | undefined) => Boolean(entry && draftFingerprint(entry.draft) !== entry.baseline)
@@ -104,7 +146,7 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
 
   function accept(view: SharePolicyView): ShareGroupEntry {
     const draft = draftFromView(view)
-    const entry: ShareGroupEntry = { view, draft, baseline: draftFingerprint(draft), version: view.version, conflict: null }
+    const entry: ShareGroupEntry = { view, draft, baseline: draftFingerprint(draft), version: view.version, conflict: null, mergeConflicts: [], removedEdits: [] }
     entries.value[view.group_id] = entry
     const summary = groups.value.find(group => group.group_id === view.group_id)
     if (summary) {
@@ -138,11 +180,11 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
     policyError.value = ''
     try {
       const view = await shareSchedulingAPI.getPolicy(groupId)
-      if (request !== policyRequest) return
+      if (request !== policyRequest || selected.value !== groupId) return
       accept(view)
       policyState.value = 'idle'
     } catch (err) {
-      if (request !== policyRequest) return
+      if (request !== policyRequest || selected.value !== groupId) return
       policyState.value = isShareUnavailable(err) ? 'unavailable' : 'failed'
       policyError.value = extractApiErrorMessage(err, '')
     }
@@ -150,8 +192,9 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
 
   /** Selects a group; a kept draft is shown as is instead of reloading. */
   async function select(groupId: number) {
+    policyRequest++
+    invalidateActions()
     selected.value = groupId
-    preview.value = null
     clearFeedback()
     if (entries.value[groupId]) {
       policyState.value = 'idle'
@@ -163,7 +206,7 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
   /** Reloads the selected group, discarding its draft. */
   async function reload() {
     if (selected.value === null) return
-    preview.value = null
+    invalidateActions()
     clearFeedback()
     await loadPolicy(selected.value)
   }
@@ -173,7 +216,9 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
     if (!entry) return
     entry.draft = draftFromView(entry.view)
     entry.conflict = null
-    preview.value = null
+    entry.mergeConflicts = []
+    entry.removedEdits = []
+    invalidateActions()
     clearFeedback()
   }
 
@@ -181,85 +226,129 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
   async function rebase() {
     const entry = current.value
     if (!entry || selected.value === null) return
-    const groupId = selected.value
+    invalidateActions()
+    const groupId = selected.value, epoch = actionEpoch
+    const edited = cloneShareJSON(entry.draft), fingerprint = draftFingerprint(entry.draft)
     actionError.value = ''
     try {
       const latest = await shareSchedulingAPI.getPolicy(groupId)
-      const draft = rebaseDraft(latest, entry.draft, draftFromView(entry.view))
+      if (!owns(epoch, groupId, entry) || draftFingerprint(entry.draft) !== fingerprint) return
+      const merged = rebaseShareDraft(latest, edited, draftFromView(entry.view))
       const next = accept(latest)
-      next.draft = draft
-      preview.value = null
+      next.draft = merged.draft
+      next.mergeConflicts = merged.conflicts
+      next.removedEdits = merged.removedEdits
       clearFeedback()
       rebasedVersion.value = latest.version
     } catch (err) {
-      actionError.value = extractApiErrorMessage(err, '')
+      if (owns(epoch, groupId, entry)) actionError.value = extractApiErrorMessage(err, '')
     }
+  }
+
+  function resolveConflict(id: string, choice: 'mine' | 'latest') {
+    const entry = current.value
+    const conflict = entry?.mergeConflicts.find(item => item.id === id)
+    if (!entry || !conflict) return
+    const value = copy(conflict[choice])
+    const path = [...conflict.path]
+    let target: Record<string, unknown>
+    if (path.shift() === 'rows') {
+      const row = entry.draft.rows.find(row => row.account_id === Number(path.shift()))
+      if (!row) return
+      target = row as unknown as Record<string, unknown>
+    } else target = entry.draft.policy as unknown as Record<string, unknown>
+    if (!path.length) Object.assign(target, value)
+    else {
+      const key = path.pop()!
+      for (const part of path) target = target[part] as Record<string, unknown>
+      target[key] = value
+    }
+    entry.mergeConflicts = entry.mergeConflicts.filter(item => item.id !== id)
+    refreshShareDefaults(entry.draft)
+    invalidateActions()
   }
 
   /** Validates the draft and asks the server for its preview. */
   async function requestPreview(): Promise<boolean> {
     const entry = current.value
-    if (!entry || selected.value === null || previewing.value || saving.value) return false
+    if (!entry || selected.value === null || previewing.value || saving.value || entry.mergeConflicts.length) return false
     clearFeedback()
     problems.value = validateShareDraft(entry.draft)
     if (problems.value.length) return false
+    invalidateActions()
     previewing.value = true
+    const groupId = selected.value, epoch = actionEpoch, version = entry.version
     const fingerprint = draftFingerprint(entry.draft)
     try {
-      preview.value = await shareSchedulingAPI.preview(selected.value, policyFromDraft(entry.draft))
+      const result = await shareSchedulingAPI.preview(groupId, policyFromDraft(entry.draft))
+      if (!owns(epoch, groupId, entry) || entry.version !== version || draftFingerprint(entry.draft) !== fingerprint) return false
+      preview.value = result
       previewFingerprint.value = fingerprint
+      previewContext = { groupId, version, fingerprint, epoch }
       return true
     } catch (err) {
+      if (!owns(epoch, groupId, entry)) return false
       serverProblems.value = sharePolicyProblems(err)
       if (!serverProblems.value.length) actionError.value = extractApiErrorMessage(err, '')
       return false
     } finally {
-      previewing.value = false
+      if (epoch === actionEpoch) previewing.value = false
     }
   }
 
   /** Saves the previewed draft with the expected version. */
   async function save(): Promise<boolean> {
     const entry = current.value
-    if (!entry || selected.value === null || saving.value) return false
-    const groupId = selected.value
+    if (!entry || selected.value === null || saving.value || entry.mergeConflicts.length) return false
+    const groupId = selected.value, epoch = actionEpoch
     const fingerprint = draftFingerprint(entry.draft)
-    if (!preview.value || previewFingerprint.value !== fingerprint) return false
+    if (!preview.value || !previewContext || previewContext.groupId !== groupId ||
+        previewContext.version !== entry.version || previewContext.epoch !== epoch || previewFingerprint.value !== fingerprint) return false
+    const submitted = cloneShareJSON(entry.draft)
     saving.value = true
     actionError.value = ''
     try {
-      const view = await shareSchedulingAPI.updatePolicy(groupId, entry.version, policyFromDraft(entry.draft))
-      accept(view)
-      preview.value = null
+      const view = await shareSchedulingAPI.updatePolicy(groupId, entry.version, policyFromDraft(submitted))
+      if (!owns(epoch, groupId, entry)) return false
+      const edited = cloneShareJSON(entry.draft)
+      const next = accept(view)
+      if (draftFingerprint(edited) !== fingerprint) {
+        const merged = rebaseShareDraft(view, edited, submitted)
+        next.draft = merged.draft
+        next.mergeConflicts = merged.conflicts
+        next.removedEdits = merged.removedEdits
+      }
+      invalidateActions()
       savedVersion.value = view.version
       return true
     } catch (err) {
+      if (!owns(epoch, groupId, entry)) return false
       preview.value = null
+      previewContext = null
       if (isShareConflict(err)) {
         entry.conflict = 0
         try {
           const latest = await shareSchedulingAPI.getPolicy(groupId)
-          entry.conflict = latest.version
-        } catch {
-          // The draft stays; the version is only informational.
-        }
+          if (owns(epoch, groupId, entry)) entry.conflict = latest.version
+        } catch { /* Draft and unknown conflict version are retained. */ }
       } else {
         serverProblems.value = sharePolicyProblems(err)
         if (!serverProblems.value.length) actionError.value = extractApiErrorMessage(err, '')
       }
       return false
     } finally {
-      saving.value = false
+      if (epoch === actionEpoch) saving.value = false
     }
   }
 
   function closePreview() {
-    preview.value = null
+    invalidateActions()
   }
 
   /** Forgets every loaded policy and draft (the page was left). */
   function clear() {
     policyRequest++
+    invalidateActions()
     selected.value = null
     entries.value = {}
     policyState.value = 'idle'
@@ -300,6 +389,7 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
     reload,
     discard,
     rebase,
+    resolveConflict,
     requestPreview,
     save,
     closePreview,

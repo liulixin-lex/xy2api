@@ -47,7 +47,8 @@
       "openspec/changes/iq-detection-operations/**",
       "openspec/changes/replace-controlled-with-share-scheduling/**",
       "skills/**",
-      "tools/**"
+      "tools/**",
+      "backend/migrations/271_share_scheduling_disabled.sql"
     ],
     "manual_merge": [
       "Makefile",

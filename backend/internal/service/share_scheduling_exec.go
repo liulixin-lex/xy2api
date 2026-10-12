@@ -163,7 +163,7 @@ func (s *ShareSchedulingService) shareMissingBoundCandidate(acc *Account, now ti
 	}
 	s.observeEligibility(acc.ID, false, reason, now)
 	return sharesched.Candidate{AccountID: acc.ID, Platform: acc.Platform, Class: shareAccountClass(acc),
-		Priority: acc.Priority, Concurrency: acc.EffectiveLoadFactor(), Reason: reason, RecoverAt: recoverAt}, true
+		Priority: acc.Priority, Concurrency: acc.Concurrency, Reason: reason, RecoverAt: recoverAt}, true
 }
 
 // shareClassNames interns account class names; building one per candidate
@@ -239,11 +239,14 @@ type shareOutcome struct {
 // shareExecutor tries a plan's steps with the platform's own slot, session
 // and freshness gates.
 type shareExecutor struct {
-	ctx         context.Context
-	gp          *shareGroupPolicy
-	cache       GatewayCache
-	concurrency *ConcurrencyService
-	cfg         config.GatewaySchedulingConfig
+	service       *ShareSchedulingService
+	expectedOwner int64
+	plan          sharesched.Decision
+	ctx           context.Context
+	gp            *shareGroupPolicy
+	cache         GatewayCache
+	concurrency   *ConcurrencyService
+	cfg           config.GatewaySchedulingConfig
 	// key is the binding cache key; empty for sessionless requests.
 	key      string
 	ttl      time.Duration
@@ -273,10 +276,14 @@ func (e *shareExecutor) skip(id int64, reason sharesched.Reason) {
 }
 
 func (e *shareExecutor) tryAcquire(acc *Account, limit int) *AcquireResult {
+	return e.tryAcquireContext(e.ctx, acc, limit)
+}
+
+func (e *shareExecutor) tryAcquireContext(ctx context.Context, acc *Account, limit int) *AcquireResult {
 	if e.concurrency == nil {
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}
 	}
-	res, err := e.concurrency.AcquireAccountSlot(e.ctx, acc.ID, limit)
+	res, err := e.concurrency.AcquireAccountSlot(ctx, acc.ID, limit)
 	if err != nil || res == nil || !res.Acquired {
 		return nil
 	}
@@ -286,6 +293,7 @@ func (e *shareExecutor) tryAcquire(acc *Account, limit int) *AcquireResult {
 // acquire walks the steps in order. Only the bound account of an affinity
 // hit is waited for, within the plan's budget; everything else spills.
 func (e *shareExecutor) acquire(d sharesched.Decision) *shareOutcome {
+	e.plan = d
 	for i, step := range d.Steps {
 		acc := e.accounts[step.AccountID]
 		if acc == nil {
@@ -346,6 +354,7 @@ func (e *shareExecutor) acquire(d sharesched.Decision) *shareOutcome {
 // fallbackWait is the original last layer: queue on the first step that
 // passes the session limit, preferring the bound account's warm cache.
 func (e *shareExecutor) fallbackWait(d sharesched.Decision) *shareOutcome {
+	e.plan = d
 	for i, step := range d.Steps {
 		serving := e.accounts[step.AccountID]
 		if serving == nil {
@@ -384,13 +393,26 @@ func (e *shareExecutor) finish(acc *Account, acquired bool, release func(), wait
 	}
 	var intent *shareBindingIntent
 	if e.key != "" {
-		intent = &shareBindingIntent{cache: e.cache, groupID: e.gp.groupID, key: e.key, write: write, ttl: e.ttl}
+		intent = &shareBindingIntent{cache: e.cache, groupID: e.gp.groupID, key: e.key, write: write, ttl: e.ttl,
+			expectedOwner: e.expectedOwner, service: e.service}
 		if acquired && !gatewayProfitControlGateActive(e.ctx) {
-			intent.done = true
-			if err := applyShareBindingWrite(e.ctx, e.cache, e.gp.groupID, e.key, acc.ID, write, e.ttl); err != nil {
-				slog.Debug("share_scheduling.binding_write_failed", "group_id", e.gp.groupID, "account_id", acc.ID, "error", err)
+			binding, err := writeShareBinding(e.ctx, e.cache, e.gp.groupID, e.key, acc.ID, e.expectedOwner, write, e.ttl)
+			if err != nil || !binding.confirmed {
+				reason = sharesched.ReasonBindingUncertain
+				slog.Warn("share_scheduling.binding_unconfirmed", "group_id", e.gp.groupID, "account_id", acc.ID, "error", err)
+			} else if binding.owner != acc.ID {
+				if owner, slot := e.acquireBindingOwner(binding.owner); owner != nil {
+					if release != nil {
+						release()
+					}
+					acc, release, reason = owner, slot.ReleaseFunc, sharesched.ReasonAffinityHit
+				} else {
+					reason = sharesched.ReasonBindingConflictSpill
+				}
 			}
+			intent.done = err == nil && binding.confirmed
 		}
+
 	}
 	if trace := shareSelectionTraceFrom(e.ctx); trace != nil {
 		trace.reason = reason
@@ -405,22 +427,63 @@ func (e *shareExecutor) finish(acc *Account, acquired bool, release func(), wait
 	return &shareOutcome{result: result, err: err, served: acc.ID, reason: reason, write: write, attempts: e.attempts, skipped: e.skipped}
 }
 
+// acquireBindingOwner reconciles one NX/CAS loser with the winning owner.
+// It reuses all request gates and refuses excluded, disabled or expired-drain
+// members. If it cannot take a slot, the admitted request is an explicit spill.
+func (e *shareExecutor) acquireBindingOwner(id int64) (*Account, *AcquireResult) {
+	eligible := false
+	for _, entry := range e.plan.Entries {
+		if entry.AccountID == id {
+			eligible = entry.Eligible && !entry.Excluded && !entry.Disabled
+			break
+		}
+	}
+	acc := e.accounts[id]
+	if !eligible || acc == nil {
+		return nil, nil
+	}
+	rule, _ := e.gp.policy.ResolveRule(id, acc.Priority, acc.Concurrency)
+	if rule.Drain && rule.DrainUntil != nil && !time.Now().Before(*rule.DrainUntil) {
+		return nil, nil
+	}
+	if e.verify != nil {
+		acc, _ = e.verify(acc)
+	}
+	if acc == nil {
+		return nil, nil
+	}
+	e.attempts++
+	slot := e.tryAcquire(acc, e.limit(acc))
+	if slot == nil {
+		return nil, nil
+	}
+	if !e.admit(acc) {
+		slot.ReleaseFunc()
+		return nil, nil
+	}
+	return acc, slot
+}
+
 // waitForSlot waits up to budget for the bound account, counted in the
 // account's wait queue so max_waiting holds across instances.
 func (e *shareExecutor) waitForSlot(acc *Account, limit int, budget time.Duration, maxWaiting int) (*AcquireResult, time.Duration) {
-	// The wait counter fails open on Redis errors: with a cancelled context
-	// the increment fails yet reports success, and the deferred decrement
-	// would then lower another waiter's count.
 	if e.concurrency == nil || budget <= 0 || e.ctx.Err() != nil {
 		return nil, 0
 	}
 	start := time.Now()
-	if ok, err := e.concurrency.IncrementAccountWaitCount(e.ctx, acc.ID, maxWaiting); err != nil || !ok {
+	release, ok := e.concurrency.registerShareWait(e.ctx, acc.ID, maxWaiting, budget)
+	if !ok {
 		return nil, 0
 	}
-	defer e.concurrency.DecrementAccountWaitCount(e.ctx, acc.ID)
-	deadline := time.NewTimer(budget)
+	defer release()
+	remaining := budget - time.Since(start)
+	if remaining <= 0 {
+		return nil, time.Since(start)
+	}
+	deadline := time.NewTimer(remaining)
 	defer deadline.Stop()
+	waitCtx, cancel := context.WithDeadline(e.ctx, start.Add(budget))
+	defer cancel()
 	backoff := shareWaitInitialBackoff
 	for {
 		poll := time.NewTimer(backoff)
@@ -433,7 +496,7 @@ func (e *shareExecutor) waitForSlot(acc *Account, limit int, budget time.Duratio
 			return nil, time.Since(start)
 		case <-poll.C:
 		}
-		if res := e.tryAcquire(acc, limit); res != nil {
+		if res := e.tryAcquireContext(waitCtx, acc, limit); res != nil {
 			return res, time.Since(start)
 		}
 		backoff = min(backoff*3/2, shareWaitMaxBackoff)
@@ -443,6 +506,7 @@ func (e *shareExecutor) waitForSlot(acc *Account, limit int, budget time.Duratio
 // run executes a plan: model routing first when configured, then the whole
 // group, then the original fallback wait.
 func (e *shareExecutor) run(rec *shareDecisionRecord, req sharesched.Request, cands []sharesched.Candidate, routing []int64) (*shareOutcome, sharesched.Decision) {
+	e.expectedOwner = req.Binding.AccountID
 	if len(routing) > 0 {
 		allowed := make(map[int64]struct{}, len(routing))
 		for _, id := range routing {

@@ -182,6 +182,10 @@ func newShareAdminEnv(t *testing.T, accounts ...Account) *shareAdminEnv {
 	store := &shareAdminStore{cache: env.cache}
 	settings := &shareMemorySettings{values: map[string]string{}}
 	env.share.repo, env.share.store, env.share.settings = repo, store, settings
+	// An empty persistent repository has no applied policy yet. Keep the
+	// fixture consistent so monotonic snapshot publication can be exercised.
+	state := env.share.state.Load()
+	env.share.state.Store(&shareSchedulingState{settings: state.settings, groups: map[int64]*shareGroupPolicy{}})
 	env.gateway.accountRepo = shareAdminAccountRepo{env.repo}
 	env.gateway.groupRepo = shareAdminGroupRepo{env.gateway.groupRepo.(*mockGroupRepoForGateway)}
 	env.share.attachGateways(env.gateway, nil)

@@ -53,6 +53,18 @@ export default {
       version: '版本 {version}'
     },
     policy: {
+      disable: '停用所选账号',
+      enable: '启用所选账号',
+      disabled: '在本分组停用',
+      disabledHint: '阻断本分组的新会话和已绑定会话。协议续接不能迁移到其他账号，可能直接失败。',
+      drainFallback: '允许应急回退',
+      drainFallbackHint: '仅在没有可用的开放账号时，允许新会话使用此账号；停用的账号始终阻断。',
+      mergeConflicts: '以下字段被同时修改，请逐项选择后再预览和保存。',
+      mergeValues: '我的值：{mine} · 最新值：{latest}',
+      keepMine: '保留我的值',
+      useLatest: '采用最新值',
+      removedEdits: '账号 {ids} 已离开分组，未重新应用这些账号的草稿修改。',
+
       loadFailed: '策略读取失败。',
       reload: '重新读取',
       unavailable: '份额调度存储暂不可用，请稍后重试。',
@@ -213,7 +225,8 @@ export default {
       previewSave: '预览并保存',
       previewing: '正在预览…',
       saving: '正在保存…',
-      saved: '已保存为版本 {version}，各实例会在数秒内生效。',
+      saved: '已保存为版本 {version}。其他实例通过广播或周期刷新载入，需分别确认。',
+      appliedVersion: '响应实例载入版本 {version}；是否参与调度还取决于总开关与分组模式。',
       saveFailed: '保存失败。',
       previewFailed: '预览失败。',
       conflict: '其他管理员已修改此策略（最新版本 {version}）。你的修改仍保留在草稿中，请载入最新版本后核对再保存。',
@@ -288,6 +301,11 @@ export default {
       failed: '重平衡失败。'
     },
     report: {
+      bindingOutcomes: '准入后绑定异常',
+      incomplete: '统计窗口包含写入失败、溢出或进程重启，数据不完整，不能用于灰度放行。',
+      hourRounded: '长窗口计数按整点小时汇总，边界与用量数据库的精确时间窗口不同。',
+      denominator: '目标份额描述当前可用层的新会话；实际请求、Token 与费用份额还包含协议续接及原版调度绕行，请结合决策数和选号来源比较。',
+
       window: '时间窗口',
       windows: {
         m15: '15 分钟',
@@ -435,6 +453,10 @@ export default {
       key_none: '无会话'
     },
     reasons: {
+      emergency_drain_fallback: '应急排空回退',
+      binding_conflict_spill: '绑定竞争溢出',
+      binding_uncertain: '绑定状态未确认',
+
       original: '原版调度',
       owner_continuation: '协议续接',
       affinity_hit: '亲和命中',

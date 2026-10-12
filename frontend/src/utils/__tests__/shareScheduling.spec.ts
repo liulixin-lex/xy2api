@@ -103,3 +103,24 @@ describe('share scheduling drafts', () => {
     expect(fromLocalInput('nonsense')).toBe('')
   })
 })
+
+it('keeps stop, strict drain and emergency fallback distinct', () => {
+  const draft = draftFromView(shareView(5, { policy: sharePolicy({ scheduler: 'share', accounts: [
+    { account_id: 1, tier: 1, weight: 3, disabled: true },
+    { account_id: 2, tier: 1, weight: 1, drain: true, drain_fallback: true }
+  ] }) }))
+  expect(validateShareDraft(draft)).toEqual([])
+  expect(policyFromDraft(draft).accounts).toEqual([
+    { account_id: 1, tier: 1, weight: 3, disabled: true },
+    { account_id: 2, tier: 1, weight: 1, drain: true, drain_fallback: true }
+  ])
+  const shares = draftShares(draft, () => true)
+  expect(shares.byAccount.get(1)?.effective).toBe(0)
+  expect(shares.byAccount.get(2)?.effective).toBe(1)
+  draft.rows[1].drain_fallback = false
+  expect(validateShareDraft(draft).map(p => p.key)).toContain('allDrained')
+  draft.rows[1].disabled = true
+  expect(validateShareDraft(draft)).toEqual([])
+  resetShareRow(draft, draft.rows[0])
+  expect(draft.rows[0]).toMatchObject({ disabled: false, drain: false, drain_fallback: false })
+})

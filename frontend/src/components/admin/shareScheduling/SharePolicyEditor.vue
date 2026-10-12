@@ -7,6 +7,9 @@
           <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">
             {{ entry.view.version > 0 && entry.view.updated_at ? t('admin.shareScheduling.policy.updated', { version: entry.view.version, time: formatDateTime(entry.view.updated_at) }) : t('admin.shareScheduling.policy.neverSaved') }}
           </p>
+          <p v-if="entry.view.applied_version !== undefined" class="mt-1 text-xs text-gray-500 dark:text-dark-400" data-testid="share-applied-version">
+            {{ t('admin.shareScheduling.policy.appliedVersion', { version: entry.view.applied_version }) }}
+          </p>
         </div>
         <div class="flex flex-wrap gap-2">
           <button type="button" class="btn btn-secondary btn-sm" :disabled="busy" data-testid="share-rebalance" @click="rebalanceOpen = true">{{ t('admin.shareScheduling.rebalance.action') }}</button>
@@ -104,6 +107,8 @@
           <input v-model.trim="batch.domain" type="text" :maxlength="SHARE_MAX_CACHE_DOMAIN" class="input mt-1" :placeholder="t('admin.shareScheduling.policy.batch.noChange')" data-testid="share-batch-domain">
         </label>
         <button type="button" class="btn btn-secondary btn-sm" :disabled="busy || (batch.tier === '' && batch.weight === '' && batch.domain === '')" data-testid="share-batch-apply" @click="applyBatch">{{ t('admin.shareScheduling.policy.batch.apply') }}</button>
+        <button type="button" class="btn btn-danger btn-sm" :disabled="busy" @click="setDisabled(true)">{{ t('admin.shareScheduling.policy.disable') }}</button>
+        <button type="button" class="btn btn-secondary btn-sm" :disabled="busy" @click="setDisabled(false)">{{ t('admin.shareScheduling.policy.enable') }}</button>
         <button type="button" class="btn btn-secondary btn-sm" :disabled="busy" @click="setDrain(true)">{{ t('admin.shareScheduling.policy.batch.drain') }}</button>
         <button type="button" class="btn btn-secondary btn-sm" :disabled="busy" @click="setDrain(false)">{{ t('admin.shareScheduling.policy.batch.undrain') }}</button>
         <button type="button" class="btn btn-secondary btn-sm" :disabled="busy" @click="resetPicked">{{ t('admin.shareScheduling.policy.batch.reset') }}</button>
@@ -166,9 +171,19 @@
                 <input v-model.number="row.weight" type="number" :min="SHARE_MIN_WEIGHT" :max="SHARE_MAX_WEIGHT" step="1" class="input w-28" :aria-label="rowName(row) + ' ' + t('admin.shareScheduling.policy.columns.weight')" :data-testid="'share-weight-' + row.account_id" :disabled="busy" @input="row.configured = true">
               </td>
               <td class="min-w-44 p-2">
+                <label class="mb-2 flex items-center gap-2 text-xs text-gray-700 dark:text-dark-200">
+                  <input v-model="row.disabled" type="checkbox" :disabled="busy" :data-testid="'share-disabled-' + row.account_id" @change="row.configured = true">
+                  {{ t('admin.shareScheduling.policy.disabled') }}
+                  <HelpTooltip :content="t('admin.shareScheduling.policy.disabledHint')" />
+                </label>
                 <label class="inline-flex items-center gap-2 text-xs text-gray-700 dark:text-dark-200">
                   <input v-model="row.drain" type="checkbox" :aria-label="t('admin.shareScheduling.policy.drainNamed', { name: rowName(row) })" :data-testid="'share-drain-' + row.account_id" :disabled="busy" @change="onDrainChange(row)">
                   {{ t('admin.shareScheduling.policy.columns.drain') }}
+                </label>
+                <label v-if="row.drain" class="my-2 flex items-center gap-2 text-xs text-gray-700 dark:text-dark-200">
+                  <input v-model="row.drain_fallback" type="checkbox" :disabled="busy || row.disabled" @change="row.configured = true">
+                  {{ t('admin.shareScheduling.policy.drainFallback') }}
+                  <HelpTooltip :content="t('admin.shareScheduling.policy.drainFallbackHint')" />
                 </label>
                 <label v-if="row.drain" class="mt-1 block text-[11px] text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.policy.drainUntil') }}
                   <input type="datetime-local" class="input mt-1 text-xs" :value="toLocalInput(row.drain_until)" :disabled="busy" @change="setDrainUntil(row, $event)">
@@ -318,6 +333,18 @@
     </details>
 
     <section class="space-y-3">
+      <div v-if="entry.mergeConflicts.length" class="space-y-3 rounded-xl bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-900/20 dark:text-amber-100" role="alert" data-testid="share-merge-conflicts">
+        <p>{{ t('admin.shareScheduling.policy.mergeConflicts') }}</p>
+        <div v-for="conflict in entry.mergeConflicts" :key="conflict.id" class="space-y-2">
+          <p class="break-all font-medium">{{ conflict.id }}</p>
+          <p class="break-all">{{ t('admin.shareScheduling.policy.mergeValues', { mine: JSON.stringify(conflict.mine), latest: JSON.stringify(conflict.latest) }) }}</p>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" class="btn btn-secondary btn-sm" @click="store.resolveConflict(conflict.id, 'mine')">{{ t('admin.shareScheduling.policy.keepMine') }}</button>
+            <button type="button" class="btn btn-secondary btn-sm" @click="store.resolveConflict(conflict.id, 'latest')">{{ t('admin.shareScheduling.policy.useLatest') }}</button>
+          </div>
+        </div>
+      </div>
+      <p v-if="entry.removedEdits.length" role="status" class="text-sm text-amber-800 dark:text-amber-200">{{ t('admin.shareScheduling.policy.removedEdits', { ids: entry.removedEdits.join(', ') }) }}</p>
       <div v-if="entry.conflict !== null" class="flex flex-wrap items-center gap-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200" role="alert" data-testid="share-conflict">
         <p class="min-w-0 flex-1">{{ entry.conflict > 0 ? t('admin.shareScheduling.policy.conflict', { version: entry.conflict }) : t('admin.shareScheduling.policy.conflictUnknown') }}</p>
         <button type="button" class="btn btn-secondary btn-sm" :disabled="busy" data-testid="share-rebase" @click="store.rebase()">{{ t('admin.shareScheduling.policy.rebase') }}</button>
@@ -341,7 +368,7 @@
         <p class="text-sm" :class="store.dirty ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500 dark:text-dark-400'" data-testid="share-draft-status">{{ store.dirty ? t('admin.shareScheduling.policy.dirty') : t('admin.shareScheduling.policy.clean') }}</p>
         <div class="flex flex-wrap gap-2">
           <button v-if="store.dirty" type="button" class="btn btn-secondary" :disabled="busy" data-testid="share-discard" @click="store.discard()">{{ t('admin.shareScheduling.policy.discard') }}</button>
-          <button type="button" class="btn btn-primary" :disabled="busy || !store.dirty || entry.conflict !== null" data-testid="share-preview-save" @click="store.requestPreview()">
+          <button type="button" class="btn btn-primary" :disabled="busy || !store.dirty || entry.conflict !== null || entry.mergeConflicts.length > 0" data-testid="share-preview-save" @click="store.requestPreview()">
             {{ store.previewing ? t('admin.shareScheduling.policy.previewing') : t('admin.shareScheduling.policy.previewSave') }}
           </button>
         </div>
@@ -419,7 +446,7 @@ const tiers = computed(() => {
   for (const row of entry.value?.draft.rows ?? []) {
     const item = byTier.get(row.tier) ?? { tier: row.tier, count: 0, weight: 0, effective: 0 }
     item.count++
-    if (!row.drain) item.weight += row.weight
+    if (!row.drain && !row.disabled) item.weight += row.weight
     item.effective += sharesOf(row).effective
     byTier.set(row.tier, item)
   }
@@ -503,10 +530,17 @@ function applyBatch() {
   batch.domain = ''
 }
 
+function setDisabled(disabled: boolean) {
+  for (const row of pickedRows()) {
+    row.disabled = disabled
+    row.configured = true
+  }
+}
+
 function setDrain(drain: boolean) {
   for (const row of pickedRows()) {
     row.drain = drain
-    if (!drain) row.drain_until = ''
+    if (!drain) { row.drain_until = ''; row.drain_fallback = false }
     row.configured = true
   }
 }
@@ -518,7 +552,7 @@ function resetPicked() {
 
 function onDrainChange(row: ShareDraftRow) {
   row.configured = true
-  if (!row.drain) row.drain_until = ''
+  if (!row.drain) { row.drain_until = ''; row.drain_fallback = false }
 }
 
 function setDrainUntil(row: ShareDraftRow, event: Event) {

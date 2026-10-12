@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/sharesched"
@@ -52,25 +53,51 @@ func readShareBinding(ctx context.Context, cache GatewayCache, groupID int64, ke
 	return sharesched.Binding{AccountID: accountID}, nil
 }
 
-// applyShareBindingWrite performs a plan's binding update.
-func applyShareBindingWrite(ctx context.Context, cache GatewayCache, groupID int64, key string, accountID int64, write sharesched.Write, ttl time.Duration) error {
-	if cache == nil || key == "" || accountID <= 0 {
-		return nil
+// gatewaySessionBindingUpdater changes or refreshes a binding only while its
+// owner still matches the plan's observation. The returned ID is its owner.
+type gatewaySessionBindingUpdater interface {
+	UpdateSessionAccountIDIfOwner(context.Context, int64, string, int64, int64, time.Duration) (int64, error)
+}
+
+type shareBindingWriteResult struct {
+	owner     int64
+	confirmed bool
+}
+
+func writeShareBinding(ctx context.Context, cache GatewayCache, groupID int64, key string, accountID, expectedOwner int64, write sharesched.Write, ttl time.Duration) (shareBindingWriteResult, error) {
+	if cache == nil || key == "" || accountID <= 0 || write == sharesched.WriteNone {
+		return shareBindingWriteResult{owner: accountID, confirmed: true}, nil
 	}
-	switch write {
-	case sharesched.WriteRefresh:
-		return cache.RefreshSessionTTL(ctx, groupID, key, ttl)
-	case sharesched.WriteIfAbsent:
-		if creator, ok := cache.(gatewaySessionBindingCreator); ok {
-			_, err := creator.SetSessionAccountIDIfAbsent(ctx, groupID, key, accountID, ttl)
-			return err
+	if write == sharesched.WriteIfAbsent {
+		creator, ok := cache.(gatewaySessionBindingCreator)
+		if !ok {
+			return shareBindingWriteResult{}, nil
 		}
-		return cache.SetSessionAccountID(ctx, groupID, key, accountID, ttl)
-	case sharesched.WriteReplace:
-		return cache.SetSessionAccountID(ctx, groupID, key, accountID, ttl)
-	default:
-		return nil
+		created, err := creator.SetSessionAccountIDIfAbsent(ctx, groupID, key, accountID, ttl)
+		if err != nil {
+			return shareBindingWriteResult{}, err
+		}
+		if created {
+			return shareBindingWriteResult{owner: accountID, confirmed: true}, nil
+		}
+		owner, err := cache.GetSessionAccountID(ctx, groupID, key)
+		return shareBindingWriteResult{owner: owner, confirmed: err == nil && owner > 0}, err
 	}
+	if updater, ok := cache.(gatewaySessionBindingUpdater); ok {
+		if write == sharesched.WriteRefresh {
+			expectedOwner = accountID
+		}
+		owner, err := updater.UpdateSessionAccountIDIfOwner(ctx, groupID, key, expectedOwner, accountID, ttl)
+		return shareBindingWriteResult{owner: owner, confirmed: err == nil && owner > 0}, err
+	}
+	// Compatibility caches cannot confirm atomic ownership. Preserve the
+	// binding and make the uncertainty visible instead of overwriting it.
+	return shareBindingWriteResult{}, nil
+}
+
+func applyShareBindingWrite(ctx context.Context, cache GatewayCache, groupID int64, key string, accountID int64, write sharesched.Write, ttl time.Duration) error {
+	_, err := writeShareBinding(ctx, cache, groupID, key, accountID, accountID, write, ttl)
+	return err
 }
 
 // shareBindingIntent is the binding update of a share placement, carried to
@@ -78,12 +105,15 @@ func applyShareBindingWrite(ctx context.Context, cache GatewayCache, groupID int
 // or pass the profit gate's final check; once done, the handler's admission
 // bind is a no-op so it cannot overwrite a binding the plan chose to keep.
 type shareBindingIntent struct {
-	cache   GatewayCache
-	groupID int64
-	key     string
-	write   sharesched.Write
-	ttl     time.Duration
-	done    bool
+	cache         GatewayCache
+	groupID       int64
+	key           string
+	write         sharesched.Write
+	ttl           time.Duration
+	done          bool
+	expectedOwner int64
+	service       *ShareSchedulingService
+	mu            sync.Mutex
 }
 
 type shareBindingIntentKey struct{}
@@ -103,10 +133,32 @@ func applyDeferredShareBinding(ctx context.Context, groupID *int64, key string, 
 	if intent == nil || intent.key != key || intent.groupID != derefGroupID(groupID) {
 		return false, nil
 	}
+	intent.mu.Lock()
+	defer intent.mu.Unlock()
 	if intent.done {
 		return true, nil
 	}
-	return true, applyShareBindingWrite(ctx, intent.cache, intent.groupID, intent.key, accountID, intent.write, intent.ttl)
+	result, err := writeShareBinding(ctx, intent.cache, intent.groupID, intent.key, accountID, intent.expectedOwner, intent.write, intent.ttl)
+	// The account has already passed final admission; preserve availability
+	// and the winning owner, and report this request as an explicit spill.
+	reason := sharesched.Reason("")
+	if err != nil || !result.confirmed {
+		reason = sharesched.ReasonBindingUncertain
+	} else if result.owner != accountID {
+		reason = sharesched.ReasonBindingConflictSpill
+	}
+	if reason != "" {
+		if trace := shareSelectionTraceFrom(ctx); trace != nil {
+			trace.reason = reason
+		}
+		if intent.service != nil {
+			intent.service.stats.add(shareStatsKindShare, intent.groupID, time.Now(), "binding:"+string(reason), 1)
+		}
+	}
+	if err == nil {
+		intent.done = true
+	}
+	return true, err
 }
 
 // shareBindingTTL is the binding lifetime of a share-scheduled group.

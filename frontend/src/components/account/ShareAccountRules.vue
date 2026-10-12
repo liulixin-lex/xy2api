@@ -11,6 +11,7 @@
         <span>{{ t('admin.shareScheduling.accountRules.tier', { tier: rule.tier }) }}</span>
         <span>{{ t('admin.shareScheduling.accountRules.weight', { weight: rule.weight }) }}</span>
         <span>{{ ownDomain(rule) ? t('admin.shareScheduling.accountRules.ownDomain') : t('admin.shareScheduling.accountRules.domain', { domain: rule.cache_domain }) }}</span>
+        <span v-if="rule.disabled" class="text-red-700 dark:text-red-300">{{ t('admin.shareScheduling.policy.disabled') }}</span>
         <span v-if="rule.drain" class="text-amber-600 dark:text-amber-400">{{ t('admin.shareScheduling.accountRules.drain') }}</span>
         <span v-if="!rule.configured" class="text-gray-400 dark:text-dark-400">{{ t('admin.shareScheduling.accountRules.defaults') }}</span>
       </li>

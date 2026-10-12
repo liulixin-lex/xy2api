@@ -120,6 +120,29 @@ def evaluate(
     return findings
 
 
+def evaluate_scheduling(snapshot: dict) -> list[Finding]:
+    """Review a read-only inventory; never connect to a production database."""
+    counts = ("legacy_rule_count", "zero_weight_count", "skipped_rule_count")
+    flags = ("controlled_mode", "cutover_acknowledged", "skipped_rules_reviewed", "legacy_clients_acknowledged")
+    if (not isinstance(snapshot, dict)
+            or any(type(snapshot.get(k)) is not int or snapshot[k] < 0 for k in counts)
+            or any(type(snapshot.get(k)) is not bool for k in flags)
+            or snapshot["zero_weight_count"] > snapshot["legacy_rule_count"]):
+        return [Finding("error", "scheduling-inventory-invalid", "Scheduling inventory is missing required counts or acknowledgements.")]
+    findings = []
+    if snapshot["controlled_mode"] and not snapshot["cutover_acknowledged"]:
+        findings.append(Finding("error", "controlled-cutover-unacknowledged", "Upgrade retires controlled scheduling and immediately uses the original scheduler. Imported share rules are inactive drafts; explicitly review this cutover before upgrading."))
+    if snapshot["skipped_rule_count"] and not snapshot["skipped_rules_reviewed"]:
+        findings.append(Finding("error", "skipped-scheduling-rules", f'{snapshot["skipped_rule_count"]} malformed, duplicate or non-member rules need review before import.'))
+    if snapshot["zero_weight_count"]:
+        findings.append(Finding("warning", "zero-weight-import", f'{snapshot["zero_weight_count"]} zero-weight rules become disabled in imported drafts after migration 271. They take effect only after share scheduling is explicitly enabled.'))
+    if not snapshot["legacy_clients_acknowledged"]:
+        findings.append(Finding("error", "retired-scheduling-clients", "Legacy scheduling management routes return HTTP 410. Inventory scripts and monitoring clients and acknowledge their migration."))
+    if not findings:
+        findings.append(Finding("info", "scheduling-inventory-reviewed", "Scheduling cutover inventory and legacy API retirement have been reviewed."))
+    return findings
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-file", type=Path, required=True)
@@ -129,6 +152,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-postgres-db", default="sub2api")
     parser.add_argument("--expected-redis-db", default="0")
     parser.add_argument("--expected-dashboard-prefix", default="sub2api:")
+    parser.add_argument("--scheduling-inventory", type=Path, help="read-only legacy scheduling inventory JSON; see docs/share-scheduling-hardening.md")
     parser.add_argument("--json", action="store_true", dest="json_output")
     return parser
 
@@ -148,6 +172,13 @@ def main() -> int:
         args.expected_redis_db,
         args.expected_dashboard_prefix,
     )
+    if args.scheduling_inventory:
+        try:
+            findings.extend(evaluate_scheduling(json.loads(args.scheduling_inventory.read_text(encoding="utf-8"))))
+        except (OSError, ValueError):
+            findings.append(Finding("error", "scheduling-inventory-unreadable", "Cannot read scheduling inventory JSON."))
+    else:
+        findings.append(Finding("warning", "scheduling-inventory-missing", "Supply --scheduling-inventory before a share-scheduling upgrade; scheduling cutover has not been checked."))
     if args.json_output:
         print(json.dumps([asdict(item) for item in findings], indent=2, ensure_ascii=False))
     else:

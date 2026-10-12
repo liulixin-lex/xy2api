@@ -84,6 +84,21 @@ func (c *shareTestCache) RefreshSessionTTL(_ context.Context, _ int64, key strin
 	return nil
 }
 
+func (c *shareTestCache) UpdateSessionAccountIDIfOwner(_ context.Context, _ int64, key string, expected, accountID int64, ttl time.Duration) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if owner := c.sessionBindings[key]; owner > 0 && owner != expected {
+		return owner, nil
+	}
+	c.sessionBindings[key], c.ttls[key] = accountID, ttl
+	if expected == accountID {
+		c.refreshed = append(c.refreshed, key)
+	} else {
+		c.replaced = append(c.replaced, key)
+	}
+	return accountID, nil
+}
+
 // shareTestConcurrency rejects the first busy[id] slot requests of an
 // account and tracks the wait queue.
 type shareTestConcurrency struct {
@@ -93,11 +108,12 @@ type shareTestConcurrency struct {
 	attempts map[int64]int
 	waiting  map[int64]int
 	maxSeen  map[int64]int
+	leases   map[string]int64
 }
 
 func newShareTestConcurrency() *shareTestConcurrency {
 	return &shareTestConcurrency{mockConcurrencyCache: &mockConcurrencyCache{}, busy: map[int64]int{},
-		attempts: map[int64]int{}, waiting: map[int64]int{}, maxSeen: map[int64]int{}}
+		attempts: map[int64]int{}, waiting: map[int64]int{}, maxSeen: map[int64]int{}, leases: map[string]int64{}}
 }
 
 func (c *shareTestConcurrency) AcquireAccountSlot(_ context.Context, accountID int64, _ int, _ string) (bool, error) {
@@ -128,6 +144,33 @@ func (c *shareTestConcurrency) DecrementAccountWaitCount(_ context.Context, acco
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.waiting[accountID]--
+	return nil
+}
+
+func (c *shareTestConcurrency) RegisterAccountWait(ctx context.Context, accountID int64, attempt string, maxWaiting int, _ time.Duration) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	if owner, ok := c.leases[attempt]; ok {
+		return owner == accountID, nil
+	}
+	if c.waiting[accountID] >= maxWaiting {
+		return false, nil
+	}
+	c.leases[attempt] = accountID
+	c.waiting[accountID]++
+	c.maxSeen[accountID] = max(c.maxSeen[accountID], c.waiting[accountID])
+	return true, nil
+}
+func (c *shareTestConcurrency) ReleaseAccountWait(_ context.Context, accountID int64, attempt string, _ time.Duration) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.leases[attempt] == accountID {
+		c.waiting[accountID]--
+		c.leases[attempt] = -1
+	}
 	return nil
 }
 

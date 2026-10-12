@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -101,32 +102,74 @@ func (s *shareSchedulingStore) SubscribeChanges(ctx context.Context, handler fun
 	}()
 }
 
+// A bucket and its hourly copy commit together. Batch markers make retries
+// safe after a partial pipeline failure or a lost ACK: neither counters nor
+// decision samples can be counted twice.
+const shareWriteCounterBucket = `
+if redis.call('EXISTS', KEYS[3]) == 1 then return 0 end
+for i=1,2 do
+  local typ = redis.call('TYPE', KEYS[i]).ok
+  if typ ~= 'none' and typ ~= 'hash' then return redis.error_reply('invalid stats bucket type') end
+  for j=3,#ARGV,2 do
+    local old = redis.call('HGET', KEYS[i], ARGV[j])
+    local n = tonumber(ARGV[j+1])
+    if not string.match(ARGV[j+1], '^%-?%d+$') or not n or (old and not string.match(old, '^%-?%d+$')) or math.abs(tonumber(old or '0')+n) > 9000000000000000 then
+      return redis.error_reply('invalid stats counter')
+    end
+  end
+end
+for j=3,#ARGV,2 do
+  redis.call('HINCRBY', KEYS[1], ARGV[j], ARGV[j+1])
+  redis.call('HINCRBY', KEYS[2], ARGV[j], ARGV[j+1])
+end
+redis.call('EXPIRE', KEYS[1], ARGV[1])
+redis.call('EXPIRE', KEYS[2], ARGV[2])
+redis.call('SET', KEYS[3], '1', 'EX', ARGV[2])
+return 1
+`
+const shareWriteDecisionBatch = `
+if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
+local typ = redis.call('TYPE', KEYS[1]).ok
+if typ ~= 'none' and typ ~= 'list' then return redis.error_reply('invalid decision list type') end
+for i=3,#ARGV do redis.call('LPUSH', KEYS[1], ARGV[i]) end
+redis.call('LTRIM', KEYS[1], 0, tonumber(ARGV[2])-1)
+redis.call('EXPIRE', KEYS[1], ARGV[1])
+redis.call('SET', KEYS[2], '1', 'EX', ARGV[1])
+return 1
+`
+
 func (s *shareSchedulingStore) WriteStats(ctx context.Context, batch service.ShareSchedulingStatsBatch) error {
-	pipe := s.rdb.Pipeline()
-	expire := map[string]time.Duration{}
-	for counter, n := range batch.Counters {
-		minuteKey := shareCounterKey(counter.Kind, counter.GroupID, counter.Minute)
-		hourKey := shareHourCounterKey(counter.Kind, counter.GroupID, counter.Minute/60)
-		pipe.HIncrBy(ctx, minuteKey, counter.Field, n)
-		pipe.HIncrBy(ctx, hourKey, counter.Field, n)
-		expire[minuteKey] = shareSchedulingMinuteTTL
-		expire[hourKey] = shareSchedulingCounterTTL
+	id := batch.ID
+	if id == "" {
+		id = rand.Text()
 	}
-	for key, ttl := range expire {
-		pipe.Expire(ctx, key, ttl)
+	type bucket struct {
+		kind          string
+		group, minute int64
+	}
+	buckets := map[bucket][]any{}
+	for counter, n := range batch.Counters {
+		key := bucket{counter.Kind, counter.GroupID, counter.Minute}
+		buckets[key] = append(buckets[key], counter.Field, n)
+	}
+	pipe := s.rdb.Pipeline()
+	for b, fields := range buckets {
+		minute := shareCounterKey(b.kind, b.group, b.minute)
+		hour := shareHourCounterKey(b.kind, b.group, b.minute/60)
+		marker := fmt.Sprintf("xy2:stats:batch:%s:%s:%d:%d", id, b.kind, b.group, b.minute)
+		args := append([]any{int64(shareSchedulingMinuteTTL / time.Second), int64(shareSchedulingCounterTTL / time.Second)}, fields...)
+		pipe.Eval(ctx, shareWriteCounterBucket, []string{minute, hour, marker}, args...)
 	}
 	for groupID, samples := range batch.Decisions {
 		if len(samples) == 0 {
 			continue
 		}
 		key := shareDecisionKey(groupID)
-		values := make([]any, len(samples))
-		for i, sample := range samples {
-			values[i] = sample
+		args := []any{int64(shareSchedulingDecisionTTL / time.Second), shareSchedulingDecisionMax}
+		for _, sample := range samples {
+			args = append(args, sample)
 		}
-		pipe.LPush(ctx, key, values...)
-		pipe.LTrim(ctx, key, 0, shareSchedulingDecisionMax-1)
-		pipe.Expire(ctx, key, shareSchedulingDecisionTTL)
+		pipe.Eval(ctx, shareWriteDecisionBatch, []string{key, key + ":batch:" + id}, args...)
 	}
 	_, err := pipe.Exec(ctx)
 	return err
@@ -158,9 +201,11 @@ func (s *shareSchedulingStore) ReadCounters(ctx context.Context, kind string, gr
 	out := map[string]int64{}
 	for _, cmd := range cmds {
 		for field, raw := range cmd.Val() {
-			if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
-				out[field] += n
+			n, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil {
+				return nil, errors.New("invalid share scheduling counter value")
 			}
+			out[field] += n
 		}
 	}
 	return out, nil

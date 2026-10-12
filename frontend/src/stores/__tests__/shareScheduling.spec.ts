@@ -97,8 +97,11 @@ describe('share scheduling store', () => {
     expect(store.rebasedVersion).toBe(3)
     expect(entry.draft.policy.scheduler).toBe('share')
     expect(entry.draft.policy.cache).toEqual({ ttl_seconds: 600, realign: 'off' })
+    expect(entry.mergeConflicts.map(c => c.id)).toEqual(['rows.1.weight'])
+    expect(await store.requestPreview()).toBe(false)
+    store.resolveConflict('rows.1.weight', 'mine')
     expect(entry.draft.rows.map(r => [r.account_id, r.configured, r.tier, r.weight])).toEqual([
-      [1, true, 1, 30],
+      [1, true, 5, 30],
       [2, true, 2, 4],
       [3, false, 1, 10]
     ])
@@ -134,5 +137,123 @@ describe('share scheduling store', () => {
     expect(store.selected).toBe(6)
     expect(store.current?.view.group_id).toBe(6)
     expect(store.policyState).toBe('idle')
+  })
+})
+
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(done => { resolve = done })
+  return { promise, resolve }
+}
+
+describe('share scheduling review regressions', () => {
+  it('merges different leaves in the same nested section', async () => {
+    const store = await editedStore()
+    store.current!.draft.policy.affinity.wait.max_ms = 12000
+    const latest = shareView(5, { version: 2, policy: sharePolicy() })
+    latest.policy.affinity.wait.max_waiting = 8
+    api.getPolicy.mockResolvedValue(latest)
+    await store.rebase()
+    expect(store.current!.draft.policy.affinity.wait).toMatchObject({ max_ms: 12000, max_waiting: 8 })
+    expect(store.current!.mergeConflicts).toEqual([])
+  })
+
+  it('does not resurrect removed members and reports lost draft edits', async () => {
+    const store = await editedStore()
+    api.getPolicy.mockResolvedValue(shareView(5, { version: 2, members: [shareMember(2)] }))
+    await store.rebase()
+    expect(store.current!.draft.rows.map(row => row.account_id)).toEqual([2])
+    expect(store.current!.removedEdits).toEqual([1])
+  })
+
+  it('requires a choice when a rule reset conflicts with an edit', async () => {
+    const store = useShareSchedulingStore()
+    const base = shareView(5, { policy: sharePolicy({ accounts: [{ account_id: 1, tier: 1, weight: 5 }] }) })
+    api.getPolicy.mockResolvedValueOnce(base)
+    await store.select(5)
+    store.current!.draft.rows[0].configured = false
+    api.getPolicy.mockResolvedValue(shareView(5, { version: 2, policy: sharePolicy({ accounts: [{ account_id: 1, tier: 1, weight: 8 }] }) }))
+    await store.rebase()
+    expect(store.current!.mergeConflicts[0].id).toBe('rows.1')
+    expect(await store.requestPreview()).toBe(false)
+    store.resolveConflict('rows.1', 'latest')
+    expect(store.current!.draft.rows[0]).toMatchObject({ configured: true, weight: 8 })
+  })
+
+  it('rejects an old preview after switching between identical group drafts', async () => {
+    const store = await editedStore()
+    const pending = deferred<typeof preview>()
+    api.preview.mockReturnValueOnce(pending.promise)
+    const result = store.requestPreview()
+    await store.select(6)
+    pending.resolve(preview)
+    expect(await result).toBe(false)
+    expect(store.preview).toBeNull()
+    expect(await store.save()).toBe(false)
+    expect(api.updatePolicy).not.toHaveBeenCalled()
+  })
+
+  it.each(['discard', 'clear', 'closePreview'] as const)('invalidates a pending preview on %s', async action => {
+    const store = await editedStore()
+    const pending = deferred<typeof preview>()
+    api.preview.mockReturnValueOnce(pending.promise)
+    const result = store.requestPreview()
+    store[action]()
+    pending.resolve(preview)
+    expect(await result).toBe(false)
+    expect(store.preview).toBeNull()
+    expect(store.previewing).toBe(false)
+  })
+
+  it('rejects a preview if the draft changed while it was running', async () => {
+    const store = await editedStore()
+    const pending = deferred<typeof preview>()
+    api.preview.mockReturnValueOnce(pending.promise)
+    const result = store.requestPreview()
+    store.current!.draft.rows[0].weight = 99
+    pending.resolve(preview)
+    expect(await result).toBe(false)
+    expect(store.preview).toBeNull()
+  })
+
+  it('does not apply late save feedback or overwrite a different group', async () => {
+    const store = await editedStore()
+    await store.requestPreview()
+    const pending = deferred<ReturnType<typeof shareView>>()
+    api.updatePolicy.mockReturnValueOnce(pending.promise)
+    const saving = store.save()
+    await store.select(6)
+    pending.resolve(shareView(5, { version: 2 }))
+    expect(await saving).toBe(false)
+    expect(store.selected).toBe(6)
+    expect(store.savedVersion).toBeNull()
+    expect(store.current!.version).toBe(1)
+  })
+
+  it('preserves edits made while a save is in flight', async () => {
+    const store = await editedStore()
+    await store.requestPreview()
+    const pending = deferred<ReturnType<typeof shareView>>()
+    api.updatePolicy.mockReturnValueOnce(pending.promise)
+    const saving = store.save()
+    store.current!.draft.rows[0].weight = 99
+    pending.resolve(shareView(5, { version: 2, policy: sharePolicy({ scheduler: 'share', accounts: [{ account_id: 1, tier: 1, weight: 30 }] }) }))
+    expect(await saving).toBe(true)
+    expect(store.current!.version).toBe(2)
+    expect(store.current!.draft.rows[0].weight).toBe(99)
+    expect(store.dirty).toBe(true)
+  })
+
+  it('invalidates a pending load when switching to an already cached group', async () => {
+    const store = await editedStore()
+    const pending = deferred<ReturnType<typeof shareView>>()
+    api.getPolicy.mockReturnValueOnce(pending.promise)
+    const loading = store.select(6)
+    await store.select(5)
+    pending.resolve(shareView(6))
+    await loading
+    expect(store.current!.draft.rows[0].weight).toBe(30)
+    expect(store.entries[6]).toBeUndefined()
   })
 })

@@ -18,6 +18,7 @@ const (
 	maxShareTraces              = 100000
 	shareTraceLifetime          = 15 * time.Minute
 	shareStatsDroppedField      = "dropped"
+	shareStatsIncompleteField   = "incomplete"
 	shareStatsRequestsField     = "requests"
 	shareStatsReasonPrefix      = "reason:"
 	shareStatsServedPrefix      = "served:"
@@ -41,14 +42,16 @@ const (
 
 // shareStatsRecorder aggregates counters in memory until the next flush.
 type shareStatsRecorder struct {
-	mu        sync.Mutex
-	counters  map[ShareSchedulingCounter]int64
-	decisions map[int64][][]byte
-	dropped   int64
+	mu              sync.Mutex
+	counters        map[ShareSchedulingCounter]int64
+	decisions       map[int64][][]byte
+	dropped         int64
+	incomplete      map[ShareSchedulingCounter]int64
+	integrityMinute int64
 }
 
 func newShareStatsRecorder() *shareStatsRecorder {
-	return &shareStatsRecorder{counters: map[ShareSchedulingCounter]int64{}, decisions: map[int64][][]byte{}}
+	return &shareStatsRecorder{incomplete: map[ShareSchedulingCounter]int64{}, counters: map[ShareSchedulingCounter]int64{}, decisions: map[int64][][]byte{}}
 }
 
 func (r *shareStatsRecorder) add(kind string, groupID int64, at time.Time, field string, n int64) {
@@ -60,6 +63,7 @@ func (r *shareStatsRecorder) add(kind string, groupID int64, at time.Time, field
 	defer r.mu.Unlock()
 	if _, ok := r.counters[key]; !ok && len(r.counters) >= maxShareStatsCounters {
 		r.dropped++
+		r.markIncompleteKey(key)
 		return
 	}
 	r.counters[key] += n
@@ -84,6 +88,7 @@ func (r *shareStatsRecorder) addAll(kind string, groupID int64, at time.Time, de
 		key := ShareSchedulingCounter{Kind: kind, GroupID: groupID, Minute: minute, Field: d.field}
 		if _, ok := r.counters[key]; !ok && len(r.counters) >= maxShareStatsCounters {
 			r.dropped++
+			r.markIncompleteKey(key)
 			continue
 		}
 		r.counters[key] += d.n
@@ -115,7 +120,11 @@ func (r *shareStatsRecorder) addDecision(groupID int64, sample []byte) {
 func (r *shareStatsRecorder) drain() ShareSchedulingStatsBatch {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	batch := ShareSchedulingStatsBatch{Counters: r.counters, Decisions: r.decisions}
+	batch := ShareSchedulingStatsBatch{CreatedAt: time.Now(), ID: generateRequestID(), Counters: r.counters, Decisions: r.decisions}
+	for key := range r.incomplete {
+		batch.Counters[key] = 1
+	}
+	r.incomplete = map[ShareSchedulingCounter]int64{}
 	if r.dropped > 0 {
 		key := ShareSchedulingCounter{Kind: shareStatsKindShare, Minute: time.Now().Unix() / 60, Field: shareStatsDroppedField}
 		batch.Counters[key] += r.dropped
@@ -124,6 +133,56 @@ func (r *shareStatsRecorder) drain() ShareSchedulingStatsBatch {
 	r.counters = map[ShareSchedulingCounter]int64{}
 	r.decisions = map[int64][][]byte{}
 	return batch
+}
+
+// markIncompleteKey is called under mu. If marker cardinality also reaches
+// its bound, invalidate all groups for that interval using group 0.
+func (r *shareStatsRecorder) markIncompleteKey(key ShareSchedulingCounter) {
+	minute := time.Now().Unix() / 60
+	if r.integrityMinute != minute {
+		for previous := range r.incomplete {
+			if previous.Minute < minute-26*60 {
+				delete(r.incomplete, previous)
+			}
+		}
+		r.integrityMinute = minute
+	}
+	key.Kind, key.Field = shareStatsKindShare, shareStatsIncompleteField
+	if len(r.incomplete) >= 2048 {
+		key.GroupID = 0
+	}
+	r.incomplete[key] = 1
+}
+
+func (r *shareStatsRecorder) markIncomplete(batch ShareSchedulingStatsBatch) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key := range batch.Counters {
+		r.markIncompleteKey(key)
+	}
+}
+
+func (s *ShareSchedulingService) incompleteWindow(groupID int64, from, to time.Time) bool {
+	s.statsFlushMu.Lock()
+	defer s.statsFlushMu.Unlock()
+	matches := func(key ShareSchedulingCounter) bool {
+		return (key.GroupID == groupID || key.GroupID == 0) && key.Minute >= from.Unix()/60 && key.Minute <= to.Unix()/60
+	}
+	if s.pendingStats != nil {
+		for key := range s.pendingStats.Counters {
+			if matches(key) {
+				return true
+			}
+		}
+	}
+	s.stats.mu.Lock()
+	defer s.stats.mu.Unlock()
+	for key := range s.stats.incomplete {
+		if matches(key) {
+			return true
+		}
+	}
+	return false
 }
 
 // shareTrace links a selection to the usage it produces, so cache outcomes

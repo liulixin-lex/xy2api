@@ -76,6 +76,8 @@ type Entry struct {
 	Weight          int     `json:"weight"`
 	EffectiveWeight float64 `json:"effective_weight"`
 	Configured      bool    `json:"configured"`
+	Disabled        bool    `json:"disabled"`
+	DrainFallback   bool    `json:"drain_fallback"`
 	Drain           bool    `json:"drain"`
 	CacheDomain     string  `json:"cache_domain"`
 	Class           string  `json:"class,omitempty"`
@@ -91,7 +93,7 @@ type Entry struct {
 	present         bool
 }
 
-func (e *Entry) usable() bool { return e.present && e.Eligible && !e.Excluded }
+func (e *Entry) usable() bool { return e.present && e.Eligible && !e.Excluded && !e.Disabled }
 
 // Decision is the plan for one request. The adapter tries Steps in order and
 // reports which one served through Outcome.
@@ -114,6 +116,9 @@ type Decision struct {
 
 // Outcome returns the reason and binding write when Steps[index] served.
 func (d Decision) Outcome(index int) (Reason, Write) {
+	if d.Reason == ReasonEmergencyDrain {
+		return ReasonEmergencyDrain, d.Write
+	}
 	if index <= 0 || index >= len(d.Steps) {
 		return d.Reason, d.Write
 	}
@@ -242,9 +247,13 @@ func Plan(p *Policy, req Request, cands []Candidate) Decision {
 		e := Entry{
 			AccountID: c.AccountID, Tier: rule.Tier, Weight: rule.Weight,
 			EffectiveWeight: float64(rule.Weight) * factor, Configured: configured,
-			Drain: rule.Drain, CacheDomain: rule.CacheDomain, Class: c.Class,
+			Disabled: rule.Disabled, DrainFallback: rule.DrainFallback, Drain: rule.Drain, CacheDomain: rule.CacheDomain, Class: c.Class,
 			Eligible: c.Eligible, Excluded: c.Excluded, Reason: c.Reason,
 			recoverAt: c.RecoverAt, stableSince: c.StableSince, drainUntil: rule.DrainUntil, present: true,
+		}
+		if e.Disabled {
+			e.Eligible = false
+			e.Reason = ReasonDisabled
 		}
 		if e.Eligible {
 			e.Reason = ""
@@ -260,14 +269,14 @@ func Plan(p *Policy, req Request, cands []Candidate) Decision {
 			continue
 		}
 		entries = append(entries, Entry{AccountID: r.AccountID, Tier: r.Tier, Weight: r.Weight,
-			EffectiveWeight: float64(r.Weight), Configured: true, Drain: r.Drain,
+			EffectiveWeight: float64(r.Weight), Configured: true, Disabled: r.Disabled, DrainFallback: r.DrainFallback, Drain: r.Drain,
 			CacheDomain: r.CacheDomain, Reason: ReasonNotSchedulable, drainUntil: r.DrainUntil})
 	}
 
 	for i := range entries {
 		e := &entries[i]
 		weight, configWeight := e.EffectiveWeight, float64(e.Weight)
-		if e.Drain {
+		if e.Drain || e.Disabled {
 			weight, configWeight = 0, 0
 		}
 		draw := hrwDraw(req.GroupID, req.Key, e.AccountID)
@@ -280,7 +289,7 @@ func Plan(p *Policy, req Request, cands []Candidate) Decision {
 	var ideal *Entry
 	for i := range entries {
 		e := &entries[i]
-		if e.Drain {
+		if e.Drain || e.Disabled {
 			continue
 		}
 		if ideal == nil || e.Tier < ideal.Tier || (e.Tier == ideal.Tier && less(e.configScore, e.AccountID, ideal.configScore, ideal.AccountID)) {
@@ -297,7 +306,7 @@ func Plan(p *Policy, req Request, cands []Candidate) Decision {
 	baseTier, hasBase := 0, false
 	for i := range entries {
 		e := &entries[i]
-		if e.Drain || !e.present || !e.Eligible {
+		if e.Drain || e.Disabled || !e.present || !e.Eligible {
 			continue
 		}
 		if !hasBase || e.Tier < baseTier {
@@ -307,13 +316,28 @@ func Plan(p *Policy, req Request, cands []Candidate) Decision {
 			activeTier, hasOpen = e.Tier, true
 		}
 	}
+	emergencyTier, hasEmergency := 0, false
+	if !hasOpen {
+		for i := range entries {
+			e := &entries[i]
+			if e.Drain && e.DrainFallback && e.usable() && (e.drainUntil == nil || req.Now.Before(*e.drainUntil)) {
+				if !hasEmergency || e.Tier < emergencyTier {
+					emergencyTier, hasEmergency = e.Tier, true
+				}
+				e.score = hrwWeighted(hrwDraw(req.GroupID, req.Key, e.AccountID), e.EffectiveWeight)
+			}
+		}
+	}
 	d.ActiveTier = activeTier
+	if !hasOpen && hasEmergency {
+		d.ActiveTier = emergencyTier
+	}
 
 	admit := func(e *Entry) bool {
 		if !e.usable() {
 			return false
 		}
-		if hasOpen && e.Drain {
+		if e.Drain && (hasOpen || !e.DrainFallback || (e.drainUntil != nil && !req.Now.Before(*e.drainUntil))) {
 			return false
 		}
 		if p.Tiers.OnFailed == OnFailedStop && hasBase && e.Tier > baseTier {
@@ -360,10 +384,17 @@ func Plan(p *Policy, req Request, cands []Candidate) Decision {
 	}
 
 	if req.Sessionless || req.Key == "" {
-		return finish(ReasonSessionless, placement, WriteNone, WriteNone)
+		reason := ReasonSessionless
+		if len(placement) > 0 && placement[0].Drain {
+			reason = ReasonEmergencyDrain
+		}
+		return finish(reason, placement, WriteNone, WriteNone)
 	}
 
 	newSessionReason := func() Reason {
+		if len(placement) > 0 && placement[0].Drain {
+			return ReasonEmergencyDrain
+		}
 		if ideal != nil && len(placement) > 0 && placement[0].Tier > ideal.Tier {
 			return ReasonTierOverflowUnavailable
 		}
@@ -384,7 +415,7 @@ func Plan(p *Policy, req Request, cands []Candidate) Decision {
 	}
 
 	switch {
-	case bound == nil:
+	case bound == nil || bound.Disabled:
 		return finish(ReasonRebindUnavailable, placement, WriteReplace, WriteReplace)
 	case bound.Excluded:
 		return finish(ReasonFailoverNext, spillFrom(bound), WriteReplace, WriteReplace)
@@ -400,7 +431,7 @@ func Plan(p *Policy, req Request, cands []Candidate) Decision {
 		if bound.drainUntil != nil && !now.Before(bound.drainUntil.Add(deadlineStagger(req.Key))) {
 			return finish(ReasonDrainDeadline, placement, WriteReplace, WriteReplace)
 		}
-		if !warm && hasOpen {
+		if !warm {
 			return finish(ReasonDrainCold, placement, WriteReplace, WriteReplace)
 		}
 	} else if len(placement) > 0 && placement[0].AccountID != bound.AccountID {
@@ -456,7 +487,7 @@ func softSpill(p *Policy, req Request, bound *Entry, idle time.Duration) bool {
 // empty domain is the account's own, shared with no other account.
 func partition(bound, e *Entry) int {
 	switch {
-	case bound == nil:
+	case bound == nil || bound.Disabled:
 		return 2
 	case e.CacheDomain != "" && e.CacheDomain == bound.CacheDomain:
 		return 0

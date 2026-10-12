@@ -53,6 +53,18 @@ export default {
       version: 'Version {version}'
     },
     policy: {
+      disable: 'Disable selected',
+      enable: 'Enable selected',
+      disabled: 'Disabled in this group',
+      disabledHint: 'Blocks new and bound sessions in this group. Protocol continuations cannot move to another account and may fail.',
+      drainFallback: 'Allow emergency fallback',
+      drainFallbackHint: 'Only when no open account is usable, allow new sessions here. Disabled accounts remain blocked.',
+      mergeConflicts: 'Choose a value for each conflicting field before previewing or saving.',
+      mergeValues: 'Mine: {mine} · Latest: {latest}',
+      keepMine: 'Keep mine',
+      useLatest: 'Use latest',
+      removedEdits: 'Accounts {ids} left the group. Their draft changes were not reapplied.',
+
       loadFailed: 'Could not load the policy.',
       reload: 'Reload',
       unavailable: 'Share scheduling storage is unavailable. Try again later.',
@@ -213,7 +225,8 @@ export default {
       previewSave: 'Preview and save',
       previewing: 'Previewing…',
       saving: 'Saving…',
-      saved: 'Saved as version {version}. Every instance applies it within seconds.',
+      saved: 'Saved as version {version}. Other instances load it through broadcast or periodic refresh; verify them separately.',
+      appliedVersion: 'Responding instance loaded version {version}; routing also depends on the global switch and group mode.',
       saveFailed: 'Save failed.',
       previewFailed: 'Preview failed.',
       conflict: 'Another administrator changed this policy (latest version {version}). Your changes are kept in the draft; load the latest version, review and save again.',
@@ -288,6 +301,11 @@ export default {
       failed: 'Rebalance failed.'
     },
     report: {
+      bindingOutcomes: 'Binding outcomes after admission',
+      incomplete: 'This window includes failed writes, overflow or a restart. Its counters are incomplete and cannot qualify a canary.',
+      hourRounded: 'Long-window counters use rounded hourly buckets; their boundaries differ from the exact usage database window.',
+      denominator: 'Targets describe new sessions in the currently usable tier. Actual requests, tokens and costs also include protocol continuations and original-scheduler bypasses; compare decision counts and selection sources.',
+
       window: 'Window',
       windows: {
         m15: '15 minutes',
@@ -435,6 +453,10 @@ export default {
       key_none: 'Sessionless'
     },
     reasons: {
+      emergency_drain_fallback: 'Emergency drain fallback',
+      binding_conflict_spill: 'Binding conflict spill',
+      binding_uncertain: 'Binding unconfirmed',
+
       original: 'Original scheduler',
       owner_continuation: 'Protocol continuation',
       affinity_hit: 'Affinity hit',
