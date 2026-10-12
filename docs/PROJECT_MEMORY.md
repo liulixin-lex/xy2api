@@ -524,6 +524,12 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
+### 20261012-async-image-tasks-v2 — 异步生图任务 v2（开发中）
+
+- 用户（生图站 XY-image 维护方，agent01 执行）授权：拉取最新仓库、新建分支开发异步生图功能。起点 `main` / `7b1d5d8c3`（0.2.6），分支 `feat/async-image-tasks-v2-20261012`。推送分支属授权范围；合并、标签、Release、部署主站均未授权，需另行确认。
+- 范围：在 0.2.6 已有 `/v1/images/{generations,edits}/async`、`/v1/images/tasks/{id}` 上只做加法——修复可控调度模式下任务立即 `context canceled`；幂等键、计费状态与请求 ID、心跳/清扫/优雅退出、转存重试、在途上限与轮询限流、错误日志、能力发现、DELETE、长轮询、`Prefer: respond-async`。规格见 `openspec/changes/async-image-tasks-v2/`。
+- 不新增迁移、不改已发布路由与字段语义；Gemini 异步不在本轮。本机磁盘不足，Go 构建与测试在独立开发机执行（Go 1.27.2），不连接任何生产服务。
+
 ### 20261008-claude-cache-groups-release — 推送、合并与 GitHub 发版
 
 - 用户最新授权远端交付；当前独立工作树 `/lex/xy2api-claude-cache`，分支 `feat/claude-cache-groups-20261008`，已验本地 head `53d6a12ca`；核对远端 main 仍为 `309afb6af`。
