@@ -399,3 +399,43 @@ func (w *schedulingResponseWriter) Write(p []byte) (int, error) {
 func (w *schedulingResponseWriter) WriteString(s string) (int, error) { return w.Write([]byte(s)) }
 
 var _ http.ResponseWriter = (*schedulingResponseWriter)(nil)
+
+// DetachControlledRequest gives an accepted asynchronous request (an async
+// image task) its own scheduling ledger bound to the task's execution context.
+//
+// The ledger installed by ControlledSchedulingMiddleware belongs to the short
+// submit request: its clientContext is cancelled as soon as the 202 has been
+// written and the middleware has already Closed it. A background task that
+// reused it failed every dispatch with "context canceled" in controlled mode.
+// The detached ledger keeps the mode snapshot taken at submit (requests keep
+// the mode they started with), re-reads metadata from the buffered body, and
+// keeps the submit's scheduling request id so X-Scheduling-Request-Id still
+// identifies the attempts. Call the returned func when the task ends.
+func DetachControlledRequest(execCtx context.Context, body []byte) (context.Context, func()) {
+	parent := controlledRequest(execCtx)
+	if parent == nil {
+		return execCtx, func() {}
+	}
+	parent.mu.Lock()
+	id, protocol, mode, resolved, auxiliary := parent.ID, parent.Protocol, parent.Mode, parent.modeResolved, parent.Auxiliary
+	parent.mu.Unlock()
+	ctx := NewControlledRequestContext(execCtx, protocol)
+	r := controlledRequest(ctx)
+	r.ID = id
+	r.Mode, r.modeResolved, r.Auxiliary = mode, resolved, auxiliary
+	if !resolved || mode.Mode != scheduling.ModeSub2API {
+		r.metadata(body)
+	}
+	return ctx, r.Close
+}
+
+// WrapControlledResponseWriter installs the same first-output observer the
+// middleware installs on live requests, for a detached request's writer.
+// Sub2API mode and requests without a ledger are returned unchanged.
+func WrapControlledResponseWriter(ctx context.Context, w gin.ResponseWriter) gin.ResponseWriter {
+	r := controlledRequest(ctx)
+	if r == nil || Sub2APISchedulingEnabled(ctx) {
+		return w
+	}
+	return &schedulingResponseWriter{ResponseWriter: w, request: r}
+}
