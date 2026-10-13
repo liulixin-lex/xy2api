@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"

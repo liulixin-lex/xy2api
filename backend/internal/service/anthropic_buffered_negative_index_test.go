@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/stretchr/testify/require"
 )
 
