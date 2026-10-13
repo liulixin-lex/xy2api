@@ -1,0 +1,58 @@
+# 用量指标口径
+
+适用于本次同步 Sub2API v0.2.15 后的用量明细、Token 趋势和运维页面。指标基于已记录的用量与耗时，不根据页面刷新速度或流式文本长度估算。设置键保留 `admin_usage_cache_hit_rate_enabled` 与 `admin_usage_token_speed_enabled`，避免升级丢失原有开关状态。
+
+## 平均输出速率
+
+页面统一使用 **平均输出速率**，单位 **tokens/s**：
+
+```text
+单次请求平均输出速率 = output_tokens × 1000 / duration_ms
+```
+
+`duration_ms` 是该用量记录的完整请求耗时，包含首 Token 等待。流式与非流式使用相同公式。比如输出 100 Token、总耗时 3000 ms、首 Token 耗时 1000 ms，结果为 33.3 tokens/s；缺少首 Token 时间时仍是 33.3 tokens/s。
+
+不能把完整输出数量除以 `duration_ms - first_token_ms` 后称为统一的输出速率：输出可能包含首个可见 Token 前的推理 Token，也可能直到结束才返回缓冲的工具输出。缺少首 Token 数据时退回总耗时会让同名指标混用两种口径。现有记录没有可靠的逐 Token 生成时间，不能据此计算模型纯解码速度。
+
+用量明细仅展示适用的 Token 请求，排除图片输出、视频、非 Token 计费和 Live/未知请求类型；旧记录缺少请求类型或计费模式时仍允许按已有 Token 数据计算。输出或耗时不是有限正数时显示 `—`，不伪造 0 tokens/s。输出计数已经可能包含推理 Token，不再额外相加。原有显示开关继续生效，默认关闭，不因上游组件更新而绕过设置。
+
+运维中的 P5/P10/P50 是筛选范围内各条有效记录速率的分位数，Avg 是这些单次速率的算术平均；不把小时分位数平均成整个窗口的分位数。它们与全站吞吐量含义不同，样本仍沿用运维后端的筛选契约；明细额外保留本地的非 Token 计费排除规则。
+
+## 缓存读取占比
+
+用量日志记录的是 **计费用量**，页面使用 **缓存读取占比**，不将它描述为上游真实缓存命中率：
+
+```text
+缓存读取占比 = cache_read_tokens
+             / (input_tokens + cache_creation_tokens + cache_read_tokens) × 100%
+```
+
+持久化的三类输入 Token 是互斥桶：
+
+| 字段 | 含义 |
+| --- | --- |
+| `input_tokens` | 未缓存输入 |
+| `cache_creation_tokens` | 缓存创建 |
+| `cache_read_tokens` | 缓存读取 |
+
+OpenAI 原始总输入含缓存明细，在 `backend/internal/service/openai_gateway_usage.go` 的 `RecordUsage` 中先减去缓存读取与创建再写入 `input_tokens`；Anthropic 的输入本来就不含缓存桶。不要在展示层再扣一次缓存，也不要将 `cache_creation_5m_tokens`/`cache_creation_1h_tokens` 再加到已经包含它们的创建总量上。
+
+强制缓存计费会在 `backend/internal/service/gateway_usage_billing.go` 中将普通输入转为缓存读取，然后写入日志。因此这组持久化计数无法还原强制计费前的真实上游命中情况，也不能当作请求命中次数占比。没有有效输入（分母为 0）、字段缺失、负数或非有限值时，用量明细显示 `—`，Token 趋势保留断点；有输入但没有缓存读取时才显示 0.0%。
+
+趋势和区间统计先累加三类 Token，再使用同一公式，不能平均各请求的百分比。例如一个 100 Token 全命中请求与一个 900 Token 未命中请求，区间占比是 10%，不是 50%。现有 `usage_log_repo_trend.go` 和 `channel_monitor_v2_repo.go` 已按桶累加，无需改写历史数据或迁移。
+
+渠道监控的用户 API 会隐藏分子、分母等绝对流量；现有契约对无有效输入返回数值 0。该页面不能通过已隐藏的分母区分“无输入”和“有输入但未读取缓存”，本次仅统一其指标名称与说明，未更改此 API 或推测隐藏样本量。
+
+## Token 吞吐量
+
+渠道监控和运维流量卡的 **Token 吞吐量（tokens/s）** 是统计窗口内全部计费 Token 除以窗口秒数，包含输入、输出、缓存创建及缓存读取。它随请求并发量变化，不能与单次请求平均输出速率直接比较。渠道监控的 `TPM ÷ 60` 与上述窗口计算等价。
+
+## 参考与实现依据
+
+核对日期：2026-10-13。引用固定提交，避免后续分支移动改变依据。
+
+- 官方 Sub2API v0.2.15 [`latencyHealth.ts`](https://github.com/Wei-Shaw/sub2api/blob/f2669c8cf62555cd92389b3f55920e9e6e7c6ff2/frontend/src/utils/latencyHealth.ts) 与 [`ops_repo_dashboard.go`](https://github.com/Wei-Shaw/sub2api/blob/f2669c8cf62555cd92389b3f55920e9e6e7c6ff2/backend/internal/repository/ops_repo_dashboard.go)：完整耗时计算单次速率，排除无效样本，按单次样本计算分位数。
+- nianzs/sub2api [`latencyHealth.ts`](https://github.com/nianzs/sub2api/blob/370c3eb512b1eed3f83585f9e5acb12a6b6421a9/frontend/src/utils/latencyHealth.ts)：使用与官方一致的完整耗时口径。
+- ranxi2001/sub2api [`usageTps.ts`](https://github.com/ranxi2001/sub2api/blob/1d2ed630e292eaaac95454c1786bf3b7e5ed0828/frontend/src/utils/usageTps.ts)：明确说明推理 Token、缓冲工具输出与 TTFT 分母不匹配的问题，并使用完整耗时。本项目采用官方的正输出样本条件和统一一位小数，未引入该二开项目的最少 2 Token 条件或速度分档。
+
+前端公式集中在 `frontend/src/utils/usageMetrics.ts`；上游的 `formatUsageOutputRate` 导入路径保留为同一实现的导出，避免两套算法再次分叉。定向测试覆盖单位、TTFT 独立性、无效/媒体样本、加权汇总、开关独立性、空区间和中英消息编译。

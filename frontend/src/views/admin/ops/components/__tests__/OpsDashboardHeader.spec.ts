@@ -30,7 +30,7 @@ describe('OpsDashboardHeader output TPS', () => {
     expect(card.get('[data-testid="output-tps-p10"]').text()).toBe('3.7')
     expect(card.get('[data-testid="output-tps-avg"]').text()).toBe('277.8')
     expect(card.get('[data-testid="output-tps-samples"]').text()).toContain('4')
-    expect(card.text()).toContain('tok/s (P50)')
+    expect(card.text()).toContain('tokens/s (P50)')
     expect(card.text()).not.toContain('242.7')
     await wrapper.setProps({ fullscreen: true, overview: { ...overview, output_tps: { p5: 0.01, p10: 0.02, p50: 0.04, avg: 0.05, sample_count: 1 } } })
     expect(card.get('[data-testid="output-tps-p50"]').text()).toBe('0.0')

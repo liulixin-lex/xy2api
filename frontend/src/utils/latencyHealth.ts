@@ -1,4 +1,5 @@
-import type { UsageLog } from '@/types'
+// Keep the upstream import path while sharing one rate formula across the UI.
+export { formatTokenSpeed as formatUsageOutputRate } from './usageMetrics'
 
 /**
  * 请求延迟健康度分档（用于用量明细"延迟"列的纵向健康扫视）。
@@ -68,18 +69,4 @@ export const LATENCY_BAR_TO_CLASSES: Record<LatencySeverity, string> = {
   warn: 'to-amber-400',
   slow: 'to-orange-500',
   critical: 'to-red-500',
-}
-
-// 与运维 Token 请求统计一致：使用完整耗时，输出可能包含推理 Token。
-export const formatUsageOutputRate = (row: Pick<UsageLog,
-  'output_tokens' | 'duration_ms' | 'image_count' | 'image_output_tokens' | 'billing_mode' | 'request_type'
->): string => {
-  const { output_tokens: outputTokens, duration_ms: durationMs } = row
-  if (row.image_count > 0 || row.image_output_tokens > 0 || row.billing_mode === 'image'
-    || (row.request_type && !['sync', 'stream', 'ws_v2', 'cyber'].includes(row.request_type))
-    || !Number.isFinite(outputTokens) || outputTokens <= 0
-    || durationMs == null || !Number.isFinite(durationMs) || durationMs <= 0) {
-    return '—'
-  }
-  return `${(outputTokens * 1000 / durationMs).toFixed(1)} tok/s`
 }

@@ -35,12 +35,12 @@ describe('formatUsageOutputRate', () => {
 
   it.each(['sync', 'stream', 'ws_v2', 'cyber', undefined] as const)(
     'uses total duration for %s requests', (request_type) => {
-      expect(formatUsageOutputRate({ ...row, request_type })).toBe('50.0 tok/s')
+      expect(formatUsageOutputRate({ ...row, request_type })).toBe('50.0 tokens/s')
     }
   )
 
   it('rounds to one decimal place', () => {
-    expect(formatUsageOutputRate({ ...row, output_tokens: 101, duration_ms: 3000 })).toBe('33.7 tok/s')
+    expect(formatUsageOutputRate({ ...row, output_tokens: 101, duration_ms: 3000 })).toBe('33.7 tokens/s')
   })
 
   it.each([null, 0, -1, NaN, Infinity])('does not invent a rate for duration %s', (duration_ms) => {

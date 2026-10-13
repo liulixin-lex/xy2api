@@ -6,6 +6,11 @@ import TokenUsageTrend from '../TokenUsageTrend.vue'
 const messages: Record<string, string> = {
   'admin.dashboard.tokenUsageTrend': 'Token Usage Trend',
   'admin.dashboard.noDataAvailable': 'No data available',
+  'usage.cacheHitRate': 'Cache read share',
+  'usage.inputTokens': 'Uncached input tokens',
+  'usage.outputTokens': 'Output tokens',
+  'usage.cacheCreate': 'Cache creation',
+  'usage.cacheHit': 'Cache read',
 }
 
 vi.mock('vue-i18n', async () => {
@@ -26,7 +31,7 @@ vi.mock('vue-chartjs', () => ({
 }))
 
 describe('TokenUsageTrend', () => {
-  it('calculates cache hit rate against all prompt tokens', () => {
+  it('calculates cache read share against all prompt tokens', () => {
     const wrapper = mount(TokenUsageTrend, {
       props: {
         trendData: [
@@ -51,13 +56,13 @@ describe('TokenUsageTrend', () => {
 
     const chartData = JSON.parse(wrapper.find('.chart-data').text())
     const hitRateDataset = chartData.datasets.find(
-      (ds: any) => ds.label === 'Cache Hit Rate'
+      (ds: any) => ds.label === 'Cache read share'
     )
     // Hit rate = 1500 / (500 + 1500 + 0) * 100 = 75%
     expect(hitRateDataset.data[0]).toBe(75)
   })
 
-  it('returns 0 hit rate when all prompt tokens are zero', () => {
+  it('leaves a gap when all prompt tokens are zero', () => {
     const wrapper = mount(TokenUsageTrend, {
       props: {
         trendData: [
@@ -82,9 +87,9 @@ describe('TokenUsageTrend', () => {
 
     const chartData = JSON.parse(wrapper.find('.chart-data').text())
     const hitRateDataset = chartData.datasets.find(
-      (ds: any) => ds.label === 'Cache Hit Rate'
+      (ds: any) => ds.label === 'Cache read share'
     )
-    expect(hitRateDataset.data[0]).toBe(0)
+    expect(hitRateDataset.data[0]).toBeNull()
   })
 
   it('includes cache_creation_tokens in denominator for Anthropic models', () => {
@@ -112,7 +117,7 @@ describe('TokenUsageTrend', () => {
 
     const chartData = JSON.parse(wrapper.find('.chart-data').text())
     const hitRateDataset = chartData.datasets.find(
-      (ds: any) => ds.label === 'Cache Hit Rate'
+      (ds: any) => ds.label === 'Cache read share'
     )
     // Hit rate = 500 / (200 + 500 + 300) * 100 = 50%
     expect(hitRateDataset.data[0]).toBe(50)

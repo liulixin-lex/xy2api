@@ -33,7 +33,7 @@ const localizedMessages: Record<'en' | 'zh', Record<string, string>> = {
 }
 
 const messages: Record<string, string> = {
-  'usage.outputTps': 'Output TPS',
+  'usage.outputTps': 'Average output rate',
   'admin.usage.userDeletedBadge': 'Deleted',
   'usage.costDetails': 'Cost Breakdown',
   'admin.usage.inputCost': 'Input Cost',
@@ -145,18 +145,19 @@ const baseImageRow = {
 }
 
 describe('admin UsageTable tooltip', () => {
-  it('shows output TPS in the latency cell using total duration', () => {
+  it('shows enabled average output rate using total duration and excludes media rows', () => {
     const row = { ...baseImageRow, image_count: 0, billing_mode: 'token', output_tokens: 1000, duration_ms: 20_000, first_token_ms: 10_000 }
     const wrapper = mount(UsageTable, {
       props: {
         data: [row, { ...row, request_id: 'no-duration', duration_ms: null }, { ...row, request_id: 'image', image_count: 1 }],
         loading: false,
+        showTokenSpeed: true,
         columns: [{ key: 'latency', label: 'Latency' }],
       },
       global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
     })
-    expect(wrapper.findAll('[data-testid="output-tps"]').map(cell => cell.text())).toEqual(['50.0 tok/s', '—', '—'])
-    expect(wrapper.text()).toContain('Output TPS')
+    expect(wrapper.findAll('[data-testid="usage-token-speed"]').map(cell => cell.text())).toEqual(['50.0 tokens/s', '—'])
+    expect(wrapper.text()).toContain('Average output rate')
   })
 
   beforeEach(() => {
@@ -926,6 +927,8 @@ describe('admin usage metric visibility', () => {
     const wrapper = mountMetrics()
     expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('tokens/s')
+    expect(wrapper.text()).not.toContain('Average output rate')
   })
   it.each([[true,true],[true,false],[false,true],[false,false]])('obeys independent flags %s / %s', (showCacheHitRate, showTokenSpeed) => {
     const wrapper = mountMetrics({ showCacheHitRate, showTokenSpeed })
@@ -936,7 +939,8 @@ describe('admin usage metric visibility', () => {
       expect(percent.text()).toBe('75.0%')
       expect(percent.element.parentElement?.textContent?.trim()).toBe('75.0%')
     }
-    if (showTokenSpeed) expect(wrapper.get('[data-testid="usage-token-speed"]').text()).toBe('50.0 T/s')
+    if (showTokenSpeed) expect(wrapper.get('[data-testid="usage-token-speed"]').text()).toBe('33.3 tokens/s')
+    else expect(wrapper.text()).not.toContain('tokens/s')
   })
   it('updates reactively after changing settings', async () => {
     const wrapper = mountMetrics({ showCacheHitRate: true, showTokenSpeed: true })
@@ -944,10 +948,10 @@ describe('admin usage metric visibility', () => {
     expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
   })
-  it('explains the fallback for missing first-token time', () => {
+  it('uses the same rate and explanation when first-token time is missing', () => {
     const wrapper = mountMetrics({ showTokenSpeed: true }, [{ ...row, first_token_ms: null } as unknown as typeof row])
-    expect(wrapper.get('[data-testid="usage-token-speed"]').text()).toBe('33.3 T/s')
-    expect(wrapper.get('[data-testid="usage-token-speed"]').attributes('title')).toBe('usage.tokenSpeedTotalHint')
+    expect(wrapper.get('[data-testid="usage-token-speed"]').text()).toBe('33.3 tokens/s')
+    expect(wrapper.get('[data-testid="usage-token-speed"]').attributes('title')).toBe('usage.outputTpsHint')
   })
   it('does not label media requests with token speed or cache rate', () => {
     const wrapper = mountMetrics({ showCacheHitRate: true, showTokenSpeed: true }, [{ ...row, image_count: 2, billing_mode: 'image' }])

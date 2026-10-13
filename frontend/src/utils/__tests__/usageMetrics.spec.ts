@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cacheHitRate, tokenSpeed, formatCacheHitRate, formatTokenSpeed } from '../usageMetrics'
+import { cacheHitRate, cacheReadRatio, tokenSpeed, formatCacheHitRate, formatTokenSpeed } from '../usageMetrics'
 
 const row = { input_tokens: 500, cache_read_tokens: 1500, cache_creation_tokens: 0, output_tokens: 100, duration_ms: 3000, first_token_ms: 1000, image_count: 0, billing_mode: 'token' }
 
@@ -21,18 +21,18 @@ describe('per-request usage metrics', () => {
     expect(requests.map(formatCacheHitRate)).toEqual(['75.0%', '0.0%', '50.0%', '60.0%'])
     expect(requests.reverse().map(formatCacheHitRate)).toEqual(['60.0%', '50.0%', '0.0%', '75.0%'])
   })
-  it('calculates generation speed and falls back only when first-token time is absent', () => {
-    expect(tokenSpeed(row)).toBe(50)
-    expect(formatTokenSpeed(row)).toBe('50.0 T/s')
-    expect(formatTokenSpeed({ ...row, first_token_ms: null })).toBe('33.3 T/s')
-    expect(formatTokenSpeed({ ...row, first_token_ms: 0 })).toBe('33.3 T/s')
-    expect(formatTokenSpeed({ ...row, output_tokens: 0 })).toBe('0.0 T/s')
+  it('uses complete request duration even when first-token time is available', () => {
+    expect(tokenSpeed(row)).toBeCloseTo(100 / 3)
+    expect(formatTokenSpeed(row)).toBe('33.3 tokens/s')
+    expect(formatTokenSpeed({ ...row, first_token_ms: null })).toBe('33.3 tokens/s')
+    expect(formatTokenSpeed({ ...row, first_token_ms: 0 })).toBe('33.3 tokens/s')
+    expect(formatTokenSpeed({ ...row, output_tokens: 0 })).toBe('—')
   })
   it.each([0, -1, null, NaN, Infinity])('handles invalid duration %s', duration_ms => {
     expect(formatTokenSpeed({ ...row, duration_ms })).toBe('—')
   })
-  it.each([-1, 3000, 4000, NaN, Infinity])('handles invalid first-token time %s', first_token_ms => {
-    expect(formatTokenSpeed({ ...row, first_token_ms })).toBe('—')
+  it.each([-1, 3000, 4000, NaN, Infinity])('does not use unrelated first-token timing %s', first_token_ms => {
+    expect(formatTokenSpeed({ ...row, first_token_ms })).toBe('33.3 tokens/s')
   })
   it.each([-1, NaN, Infinity])('handles invalid token count %s', value => {
     expect(formatTokenSpeed({ ...row, output_tokens: value })).toBe('—')
@@ -42,9 +42,27 @@ describe('per-request usage metrics', () => {
   })
   it('handles empty input and inapplicable media billing', () => {
     expect(formatCacheHitRate({ ...row, input_tokens: 0, cache_read_tokens: 0 })).toBe('—')
-    for (const media of [{ image_count: 1 }, { billing_mode: 'image' }, { billing_mode: 'video' }, { billing_mode: 'per_request' }]) {
+    for (const media of [{ image_count: 1 }, { image_output_tokens: 100 }, { video_count: 1 }, { billing_mode: 'image' }, { billing_mode: 'video' }, { billing_mode: 'per_request' }, { request_type: 'live' as const }, { request_type: 'unknown' as const }]) {
       expect(formatCacheHitRate({ ...row, ...media })).toBe('—')
       expect(formatTokenSpeed({ ...row, ...media })).toBe('—')
     }
+  })
+  it('weights aggregated cache share by tokens instead of averaging request percentages', () => {
+    // A small request is 100% cached, a large request is 0%: total share is 10%, not 50%.
+    const requests = [
+      { input_tokens: 0, cache_read_tokens: 100, cache_creation_tokens: 0 },
+      { input_tokens: 900, cache_read_tokens: 0, cache_creation_tokens: 0 },
+    ]
+    const totals = requests.reduce((sum, item) => ({
+      input_tokens: sum.input_tokens + item.input_tokens,
+      cache_read_tokens: sum.cache_read_tokens + item.cache_read_tokens,
+      cache_creation_tokens: sum.cache_creation_tokens + item.cache_creation_tokens,
+    }))
+    expect(cacheReadRatio(totals)).toBe(10)
+  })
+  it('rejects missing and overflowing counts without treating them as zero', () => {
+    expect(cacheReadRatio({ ...row, input_tokens: undefined as unknown as number })).toBeNull()
+    expect(cacheReadRatio({ ...row, input_tokens: Number.MAX_VALUE, cache_read_tokens: Number.MAX_VALUE })).toBeNull()
+    expect(tokenSpeed({ ...row, output_tokens: Number.MAX_VALUE, duration_ms: Number.MIN_VALUE })).toBeNull()
   })
 })

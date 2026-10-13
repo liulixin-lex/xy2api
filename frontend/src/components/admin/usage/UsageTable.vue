@@ -180,7 +180,7 @@
                 </div>
               </div>
               <div v-if="props.showCacheHitRate && hasUsageTokenMetrics(row)" class="flex items-center gap-2 text-xs" :title="t('usage.cacheHitRateHint')">
-                <span data-testid="usage-cache-hit-rate" class="font-medium tabular-nums text-sky-600 dark:text-sky-400">{{ formatCacheHitRate(row) }}</span>
+                <span data-testid="usage-cache-hit-rate" :aria-label="`${t('usage.cacheHitRate')}: ${formatCacheHitRate(row)}`" class="font-medium tabular-nums text-sky-600 dark:text-sky-400">{{ formatCacheHitRate(row) }}</span>
               </div>
               <div v-if="hasImageInputTokens(row)" class="flex items-center gap-2">
                 <div class="inline-flex items-center gap-1">
@@ -252,12 +252,8 @@
               <span class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyDuration') }}</span>
               <span class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms ?? 0)]">{{ formatDuration(row.duration_ms) }}</span>
               <template v-if="props.showTokenSpeed && hasUsageTokenMetrics(row)">
-                <span class="text-gray-500 dark:text-gray-400">{{ t('usage.tokenSpeed') }}</span>
-                <span data-testid="usage-token-speed" class="whitespace-nowrap font-medium tabular-nums text-gray-700 dark:text-gray-300" :title="t(row.first_token_ms == null ? 'usage.tokenSpeedTotalHint' : 'usage.tokenSpeedHint')">{{ formatTokenSpeed(row) }}</span>
-              </template>
-              <template v-else>
-              <span class="text-gray-400 dark:text-gray-500" :title="t('usage.outputTpsHint')">{{ t('usage.outputTps') }}</span>
-              <span data-testid="output-tps" class="font-medium tabular-nums text-gray-700 dark:text-gray-300">{{ formatUsageOutputRate(row) }}</span>
+                <span class="text-gray-500 dark:text-gray-400" :title="t('usage.outputTpsHint')">{{ t('usage.outputTps') }}</span>
+                <span data-testid="usage-token-speed" class="whitespace-nowrap font-medium tabular-nums text-gray-700 dark:text-gray-300" :title="t('usage.outputTpsHint')">{{ formatTokenSpeed(row) }}</span>
               </template>
             </div>
           </div>
@@ -559,7 +555,6 @@ import {
   LATENCY_TEXT_CLASSES,
   durationSeverity,
   firstTokenSeverity,
-  formatUsageOutputRate,
 } from '@/utils/latencyHealth'
 import {
   BILLING_MODE_TOKEN,
