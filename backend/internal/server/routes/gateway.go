@@ -75,6 +75,11 @@ func RegisterGatewayRoutes(
 		return getGroupPlatform(c) == service.PlatformOpenAI
 	}
 	imagesHandler := func(c *gin.Context) {
+		// `Prefer: respond-async` turns the call into an async task when the
+		// feature is enabled; otherwise the preference is ignored (RFC 7240).
+		if h.AsyncImage.HandlePreferAsync(c) {
+			return
+		}
 		switch getGroupPlatform(c) {
 		case service.PlatformOpenAI:
 			h.OpenAIGateway.Images(c)
@@ -257,6 +262,8 @@ func RegisterGatewayRoutes(
 		gateway.POST("/images/generations/async", h.AsyncImage.Submit)
 		gateway.POST("/images/edits/async", h.AsyncImage.Submit)
 		gateway.GET("/images/tasks/:task_id", h.AsyncImage.Get)
+		gateway.DELETE("/images/tasks/:task_id", h.AsyncImage.Delete)
+		gateway.GET("/images/async/capabilities", h.AsyncImage.Capabilities)
 		gateway.POST("/images/batches", h.BatchImage.Submit)
 		gateway.GET("/images/batches", h.BatchImage.List)
 		gateway.GET("/images/batches/models", h.BatchImage.Models)
@@ -420,6 +427,8 @@ func RegisterGatewayRoutes(
 	rootRoute(http.MethodPost, "/images/generations/async", bodyLimit, h.AsyncImage.Submit)
 	rootRoute(http.MethodPost, "/images/edits/async", bodyLimit, h.AsyncImage.Submit)
 	rootRoute(http.MethodGet, "/images/tasks/:task_id", bodyLimit, h.AsyncImage.Get)
+	rootRoute(http.MethodDelete, "/images/tasks/:task_id", bodyLimit, h.AsyncImage.Delete)
+	rootRoute(http.MethodGet, "/images/async/capabilities", bodyLimit, h.AsyncImage.Capabilities)
 	rootRoute(http.MethodPost, "/videos", bodyLimit, videoGenerationHandler)
 	rootRoute(http.MethodPost, "/videos/generations", bodyLimit, videoGenerationHandler)
 	rootRoute(http.MethodPost, "/videos/edits", bodyLimit, videoEditHandler)

@@ -78,3 +78,19 @@ func (s *S3ImageStorage) Save(ctx context.Context, key, contentType string, data
 	}
 	return result.URL, nil
 }
+
+var _ service.ImageObjectDeleter = (*S3ImageStorage)(nil)
+
+// Delete 删除一个已转存的对象。S3 对不存在的键同样返回成功，因此重复删除是安全的。
+func (s *S3ImageStorage) Delete(ctx context.Context, key string) error {
+	finish := servertiming.ObserveDependency(ctx, "s3")
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: &s.bucket,
+		Key:    &key,
+	})
+	finish()
+	if err != nil {
+		return fmt.Errorf("S3 DeleteObject: %w", err)
+	}
+	return nil
+}

@@ -1091,193 +1091,201 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		c.Next()
 		w.finalizeCapture()
 
-		if _, rejected := middleware2.GetIngressRejectReason(c); rejected {
-			return
-		}
+		recordOpsErrorAfterRequest(c, ops, w)
+	}
+}
 
-		if ops == nil {
-			return
-		}
-		if !ops.IsMonitoringEnabled(c.Request.Context()) {
-			return
-		}
-		if c.GetBool(opsDedicatedErrorRecordedKey) {
-			return
-		}
+// recordOpsErrorAfterRequest classifies a finished request and enqueues its
+// ops_error_logs row. The middleware runs it for every gateway request; async
+// image tasks run it after their detached execution, which the middleware of
+// the submit request (already answered with 202) can no longer observe.
+func recordOpsErrorAfterRequest(c *gin.Context, ops *service.OpsService, w *opsCaptureWriter) {
+	if _, rejected := middleware2.GetIngressRejectReason(c); rejected {
+		return
+	}
 
-		if shouldSkipOpsErrorLogForCyber(c) {
-			return
-		}
+	if ops == nil {
+		return
+	}
+	if !ops.IsMonitoringEnabled(c.Request.Context()) {
+		return
+	}
+	if c.GetBool(opsDedicatedErrorRecordedKey) {
+		return
+	}
 
-		status := c.Writer.Status()
-		body := w.capturedBytes()
-		parsed := parseOpsErrorResponse(body)
-		if !parsed.StreamFailure {
-			if terminal, ok := w.capturedTerminalError(); ok {
-				parsed = terminal
-			}
+	if shouldSkipOpsErrorLogForCyber(c) {
+		return
+	}
+
+	status := c.Writer.Status()
+	body := w.capturedBytes()
+	parsed := parseOpsErrorResponse(body)
+	if !parsed.StreamFailure {
+		if terminal, ok := w.capturedTerminalError(); ok {
+			parsed = terminal
 		}
-		if status < 400 {
-			if parsed.StreamFailure {
-				status = inferStreamFailureStatus(c, parsed)
-			} else {
-				// A marked in-band error is a visible request failure even though its
-				// wire status is already 200. Otherwise retain recovered attempts as a
-				// provider-health row whose 2xx status keeps it outside request SLA.
-				if streamErrs := service.GetOpsStreamErrors(c); len(streamErrs) > 0 {
-					logOpsStreamError(c, ops, status)
-					// 请求级带内结果不承载上游归因，此前尝试的上游错误仍按恢复行记录。
-					if opsStreamErrorsAllRequestScoped(streamErrs) {
-						logOpsRecoveredUpstream(c, ops, status)
-					}
-				} else {
+	}
+	if status < 400 {
+		if parsed.StreamFailure {
+			status = inferStreamFailureStatus(c, parsed)
+		} else {
+			// A marked in-band error is a visible request failure even though its
+			// wire status is already 200. Otherwise retain recovered attempts as a
+			// provider-health row whose 2xx status keeps it outside request SLA.
+			if streamErrs := service.GetOpsStreamErrors(c); len(streamErrs) > 0 {
+				logOpsStreamError(c, ops, status)
+				// 请求级带内结果不承载上游归因，此前尝试的上游错误仍按恢复行记录。
+				if opsStreamErrorsAllRequestScoped(streamErrs) {
 					logOpsRecoveredUpstream(c, ops, status)
 				}
-				return
+			} else {
+				logOpsRecoveredUpstream(c, ops, status)
 			}
-		}
-
-		// Skip logging if a passthrough rule with skip_monitoring=true matched.
-		if shouldSkipFinalOpsFailure(c) {
 			return
 		}
-
-		// Skip logging if the error should be filtered based on settings
-		if shouldSkipOpsErrorLog(c.Request.Context(), ops, parsed.Message, string(body), c.Request.URL.Path) {
-			return
-		}
-		if shouldSkipOpsClientClosed(c, ops, status) {
-			return
-		}
-
-		apiKey := getOpsAPIKey(c)
-
-		clientRequestID, _ := c.Request.Context().Value(ctxkey.ClientRequestID).(string)
-
-		model, _ := c.Get(opsModelKey)
-		streamV, _ := c.Get(opsStreamKey)
-		accountIDV, _ := c.Get(opsAccountIDKey)
-
-		var modelName string
-		if s, ok := model.(string); ok {
-			modelName = s
-		}
-		stream := false
-		if b, ok := streamV.(bool); ok {
-			stream = b
-		}
-		var accountID *int64
-		if v, ok := accountIDV.(int64); ok && v > 0 {
-			accountID = &v
-		}
-
-		fallbackPlatform := guessPlatformFromPath(c.Request.URL.Path)
-		platform := resolveOpsPlatform(c.Request.Context(), apiKey, fallbackPlatform)
-
-		requestID, _ := c.Request.Context().Value(ctxkey.RequestID).(string)
-		requestID = strings.TrimSpace(requestID)
-		if requestID == "" {
-			requestID = c.Writer.Header().Get("X-Request-Id")
-			if requestID == "" {
-				requestID = c.Writer.Header().Get("x-request-id")
-			}
-		}
-
-		normalizedType := normalizeOpsErrorType(parsed.ErrorType, parsed.Code)
-
-		phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, normalizedType, parsed.Message, parsed.Code, status)
-
-		entry := &service.OpsInsertErrorLogInput{
-			RequestID:       requestID,
-			ClientRequestID: clientRequestID,
-
-			AccountID: accountID,
-			Platform:  platform,
-			Model:     modelName,
-			RequestPath: func() string {
-				if c.Request != nil && c.Request.URL != nil {
-					return c.Request.URL.Path
-				}
-				return ""
-			}(),
-			Stream:           stream,
-			InboundEndpoint:  GetInboundEndpoint(c),
-			UpstreamEndpoint: GetUpstreamEndpoint(c, platform),
-			RequestedModel:   modelName,
-			UpstreamModel: func() string {
-				if v, ok := c.Get(opsUpstreamModelKey); ok {
-					if s, ok := v.(string); ok {
-						return strings.TrimSpace(s)
-					}
-				}
-				return ""
-			}(),
-			RequestType: func() *int16 {
-				if v, ok := c.Get(opsRequestTypeKey); ok {
-					switch t := v.(type) {
-					case int16:
-						return &t
-					case int:
-						v16 := int16(t)
-						return &v16
-					}
-				}
-				return nil
-			}(),
-			UserAgent: c.GetHeader("User-Agent"),
-
-			ErrorPhase:        phase,
-			ErrorType:         normalizedType,
-			Severity:          classifyOpsSeverity(normalizedType, status),
-			StatusCode:        status,
-			IsBusinessLimited: isBusinessLimited,
-			IsCountTokens:     isCountTokensRequest(c),
-
-			ErrorMessage: parsed.Message,
-			// Sanitize each SSE data payload before the body enters the async queue.
-			ErrorBody:   sanitizeOpsSSEDataForPersistence(body),
-			ErrorSource: errorSource,
-			ErrorOwner:  errorOwner,
-
-			CreatedAt: time.Now(),
-		}
-		applyOpsLatencyFieldsFromContext(c, entry)
-		applyOpsUpstreamFieldsFromContext(c, entry)
-		if parsed.StreamFailure {
-			if message := strings.TrimSpace(parsed.Message); message != "" {
-				entry.UpstreamErrorMessage = &message
-			}
-			if status >= 400 {
-				finalStatus := status
-				entry.UpstreamStatusCode = &finalStatus
-			}
-		}
-		suppressOpsUpstreamAttributionForLocalModelConfiguration(c, entry)
-
-		if apiKey != nil {
-			entry.APIKeyID = &apiKey.ID
-			// 有效 key 报错时快照前缀，key 之后被删也保留。
-			entry.APIKeyPrefix = keyPrefix(apiKey.Key, 8)
-			if apiKey.User != nil {
-				entry.UserID = &apiKey.User.ID
-			}
-			if apiKey.GroupID != nil {
-				entry.GroupID = apiKey.GroupID
-			}
-			// Prefer group platform if present (more stable than inferring from path).
-			if apiKey.Group != nil && apiKey.Group.Platform != "" {
-				entry.Platform = apiKey.Group.Platform
-			}
-		}
-
-		var clientIP string
-		if ip := strings.TrimSpace(ip.GetClientIP(c)); ip != "" {
-			clientIP = ip
-			entry.ClientIP = &clientIP
-		}
-
-		enqueueOpsErrorLog(ops, entry)
 	}
+
+	// Skip logging if a passthrough rule with skip_monitoring=true matched.
+	if shouldSkipFinalOpsFailure(c) {
+		return
+	}
+
+	// Skip logging if the error should be filtered based on settings
+	if shouldSkipOpsErrorLog(c.Request.Context(), ops, parsed.Message, string(body), c.Request.URL.Path) {
+		return
+	}
+	if shouldSkipOpsClientClosed(c, ops, status) {
+		return
+	}
+
+	apiKey := getOpsAPIKey(c)
+
+	clientRequestID, _ := c.Request.Context().Value(ctxkey.ClientRequestID).(string)
+
+	model, _ := c.Get(opsModelKey)
+	streamV, _ := c.Get(opsStreamKey)
+	accountIDV, _ := c.Get(opsAccountIDKey)
+
+	var modelName string
+	if s, ok := model.(string); ok {
+		modelName = s
+	}
+	stream := false
+	if b, ok := streamV.(bool); ok {
+		stream = b
+	}
+	var accountID *int64
+	if v, ok := accountIDV.(int64); ok && v > 0 {
+		accountID = &v
+	}
+
+	fallbackPlatform := guessPlatformFromPath(c.Request.URL.Path)
+	platform := resolveOpsPlatform(c.Request.Context(), apiKey, fallbackPlatform)
+
+	requestID, _ := c.Request.Context().Value(ctxkey.RequestID).(string)
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		requestID = c.Writer.Header().Get("X-Request-Id")
+		if requestID == "" {
+			requestID = c.Writer.Header().Get("x-request-id")
+		}
+	}
+
+	normalizedType := normalizeOpsErrorType(parsed.ErrorType, parsed.Code)
+
+	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, normalizedType, parsed.Message, parsed.Code, status)
+
+	entry := &service.OpsInsertErrorLogInput{
+		RequestID:       requestID,
+		ClientRequestID: clientRequestID,
+
+		AccountID: accountID,
+		Platform:  platform,
+		Model:     modelName,
+		RequestPath: func() string {
+			if c.Request != nil && c.Request.URL != nil {
+				return c.Request.URL.Path
+			}
+			return ""
+		}(),
+		Stream:           stream,
+		InboundEndpoint:  GetInboundEndpoint(c),
+		UpstreamEndpoint: GetUpstreamEndpoint(c, platform),
+		RequestedModel:   modelName,
+		UpstreamModel: func() string {
+			if v, ok := c.Get(opsUpstreamModelKey); ok {
+				if s, ok := v.(string); ok {
+					return strings.TrimSpace(s)
+				}
+			}
+			return ""
+		}(),
+		RequestType: func() *int16 {
+			if v, ok := c.Get(opsRequestTypeKey); ok {
+				switch t := v.(type) {
+				case int16:
+					return &t
+				case int:
+					v16 := int16(t)
+					return &v16
+				}
+			}
+			return nil
+		}(),
+		UserAgent: c.GetHeader("User-Agent"),
+
+		ErrorPhase:        phase,
+		ErrorType:         normalizedType,
+		Severity:          classifyOpsSeverity(normalizedType, status),
+		StatusCode:        status,
+		IsBusinessLimited: isBusinessLimited,
+		IsCountTokens:     isCountTokensRequest(c),
+
+		ErrorMessage: parsed.Message,
+		// Sanitize each SSE data payload before the body enters the async queue.
+		ErrorBody:   sanitizeOpsSSEDataForPersistence(body),
+		ErrorSource: errorSource,
+		ErrorOwner:  errorOwner,
+
+		CreatedAt: time.Now(),
+	}
+	applyOpsLatencyFieldsFromContext(c, entry)
+	applyOpsUpstreamFieldsFromContext(c, entry)
+	if parsed.StreamFailure {
+		if message := strings.TrimSpace(parsed.Message); message != "" {
+			entry.UpstreamErrorMessage = &message
+		}
+		if status >= 400 {
+			finalStatus := status
+			entry.UpstreamStatusCode = &finalStatus
+		}
+	}
+	suppressOpsUpstreamAttributionForLocalModelConfiguration(c, entry)
+
+	if apiKey != nil {
+		entry.APIKeyID = &apiKey.ID
+		// 有效 key 报错时快照前缀，key 之后被删也保留。
+		entry.APIKeyPrefix = keyPrefix(apiKey.Key, 8)
+		if apiKey.User != nil {
+			entry.UserID = &apiKey.User.ID
+		}
+		if apiKey.GroupID != nil {
+			entry.GroupID = apiKey.GroupID
+		}
+		// Prefer group platform if present (more stable than inferring from path).
+		if apiKey.Group != nil && apiKey.Group.Platform != "" {
+			entry.Platform = apiKey.Group.Platform
+		}
+	}
+
+	var clientIP string
+	if ip := strings.TrimSpace(ip.GetClientIP(c)); ip != "" {
+		clientIP = ip
+		entry.ClientIP = &clientIP
+	}
+
+	enqueueOpsErrorLog(ops, entry)
 }
 
 func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatus int) {

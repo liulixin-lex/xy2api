@@ -166,9 +166,9 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, apiKey.User.ID)
 		c.Request = c.Request.WithContext(ctx)
 		billingInfoRequest := c.Request.URL.Path == "/v1/sub2api/billing"
-		// Async image task polling only reads data that already belongs to the
-		// authenticated key and must remain available after the completed
-		// generation consumes the key's remaining balance.
+		// Async image task polling/deleting only touches data that already
+		// belongs to the authenticated key and must remain available after the
+		// completed generation consumes the key's remaining balance.
 		skipBilling := c.Request.URL.Path == "/v1/usage" || billingInfoRequest || isAsyncImageTaskRead(c.Request.Method, c.Request.URL.Path)
 
 		// ── 4. SimpleMode → early return ─────────────────────────────
@@ -333,11 +333,17 @@ func isOpenAICompatibleAPIKeyRequest(c *gin.Context) bool {
 	return false
 }
 
+// isAsyncImageTaskRead covers the async image task calls that never start a
+// generation: polling, deleting a finished task, and capability discovery.
 func isAsyncImageTaskRead(method, path string) bool {
-	if method != http.MethodGet {
-		return false
+	switch method {
+	case http.MethodGet:
+		return strings.HasPrefix(path, "/v1/images/tasks/") || strings.HasPrefix(path, "/images/tasks/") ||
+			path == "/v1/images/async/capabilities" || path == "/images/async/capabilities"
+	case http.MethodDelete:
+		return strings.HasPrefix(path, "/v1/images/tasks/") || strings.HasPrefix(path, "/images/tasks/")
 	}
-	return strings.HasPrefix(path, "/v1/images/tasks/") || strings.HasPrefix(path, "/images/tasks/")
+	return false
 }
 
 // GetAPIKeyFromContext 从上下文中获取API key

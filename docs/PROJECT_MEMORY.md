@@ -128,6 +128,16 @@
 - 仿真（标准库、固定种子，exit 0）：HRW 5:3:2 份额误差 ≤0.1pp、账号退出精确最小迁移、改权重迁移 13.27%（理论 13.33%）；会话亲和下请求份额偏差均值 1.5%（纠偏 1.0%），重尾成本 8.3%（纠偏 6.1%）为物理边界。
 - 下一步：用户确认 proposal 中 D1–D7 后按 tasks 阶段 1（只删 controlled、回到原版）独立 PR 实施；阶段 2–4 再做份额调度。是否先同步上游 v0.2.15（今日发布，调度文件与 0.2.14 相同）待定。
 
+### 异步生图任务 v2（2026-10-12，PR #91 已开，合并与发版待授权）
+
+- 用户（生图站 XY-image 维护方，agent01 执行）授权拉取最新仓库、新建分支开发异步生图功能并推送分支；合并、标签、Release、部署主站均未授权。分支 `feat/async-image-tasks-v2-20261012`，起点 `main` / `7b1d5d8c3`（0.2.6），四个分层提交：规格 → 可控调度修复 → 功能 → 文档，外加本记录。
+- 修复：可控调度模式下异步任务继承提交请求的 `ControlledRequest`，202 返回后中间件关闭它，`beginDispatch` 检查到已结束的客户端 context，任务立即 502 "context canceled"。新增 `DetachControlledRequest` 让任务持有绑定执行 context 的独立账本。
+- 新能力（只做加法，不改已有路由与字段语义、无迁移）：幂等键、任务内计费状态与请求 ID（按 `usage_logs`/`usage_billing_intents` 查询）、心跳 + 在途索引 + 清扫锁收尾崩溃实例的任务、优雅退出排空、终态只写一次、转存重试与 `result_storage_failed`、每 Key/每实例准入上限、查询限流、长轮询、DELETE、能力发现、`Prefer: respond-async`、异步失败写入错误日志。配置段 `image_tasks`。说明见 [ASYNC_IMAGE_TASKS.md](ASYNC_IMAGE_TASKS.md)「Version 2 additions」，规格见 `openspec/changes/async-image-tasks-v2/`。
+- 验证：后端完整 unit（61 个测试包）、golangci-lint v2.14.0 0 issues、来源审计、图片任务相关 `-race` 均通过；GitHub 分支 CI（`5217d43e3`）7 项作业（含 test、golangci-lint、upstream-sync-audit）与 Security Scan 全部成功。下游生图站实验室（模拟上游、真实 PostgreSQL/Redis/S3 兼容存储）将实验主站临时换成本分支构建，7 项演练与生图站现有异步客户端 3 项演练全部通过，之后恢复实验主站固定版本。
+- 用户随后授权开 PR：[PR #91](https://github.com/liulixin-lex/xy2api/pull/91)（`feat/async-image-tasks-v2-20261012` → `main`）。用户明确：暂不部署主站；对象存储生命周期规则暂不考虑。合并与发版仍未授权。
+- 与 [PR #90](https://github.com/liulixin-lex/xy2api/pull/90)（share scheduling 取代 controlled scheduling，删除 `controlled_scheduling_request.go` 与调度中间件）冲突：该文件（删/改）、`cmd/server` 的 Wire 三个文件、本文件。#90 先合并则本分支变基时去掉 `DetachControlledRequest`/`WrapControlledResponseWriter` 及调用和测试（请求级账本不存在，原问题随之消失），重新生成 Wire 后复测；本 PR 先合并则 #90 解决冲突时同样处理。
+- 下一步：等待维护者确认合并顺序与合并；发版（建议 0.2.7）和主站部署另需授权。
+
 ### GPT 缓存可靠性 0.2.6（2026-10-10，GitHub 正式发布完成）
 
 - 用户授权同步最新主线、新建分支、实施全站 GPT 缓存方案，完成验证后提交、推送、常规合并及 GitHub 发版。独立工作树 `/lex/xy2api-gpt-cache`；功能分支基于 `3569d4f00aae3eada079eb7ac058dc62256a66b8`，正式版本分支 `release/0.2.6` 基于功能合并提交 `3cf8406e5cfff94c488bfa58d0ba5b198e8ae1cf`；其他工作树未提交文件保持。
@@ -684,6 +694,12 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 剩余：tasks 2.0、2.14、3.2、3.4 及干净树 `sync.py audit`，见顶部。
 - 收尾（2026-10-10 续）：用户授权提交并自主完成剩余任务后开 PR。已完成 2.0、2.14、3.2、3.4、4.1–4.4 与本地隔离演练（4.5 的本地部分），0.2 决定不合入 v0.2.15，0.3 差异白名单接入 CI；验证与偏差见 tasks.md「验证记录」、design §17。剩余为合并后事项（见顶部），不再阻塞本 PR。
 - 合并 main（同日续）：origin/main 已前进到 0.2.6（`7b1d5d8c`），按常规 merge 并入功能分支（非上游同步），冲突按“保留 0.2.6 缓存可靠性 + 份额绑定优先 + controlled 字段继续删除”解决，合并后全量复验通过；已推送并开 PR #90，CI 全部通过。合并与后续事项待用户授权。
+
+### 20261012-async-image-tasks-v2 — 异步生图任务 v2（PR #91 已开，待授权合并/发版）
+
+- 用户（生图站 XY-image 维护方，agent01 执行）授权：拉取最新仓库、新建分支开发异步生图功能。起点 `main` / `7b1d5d8c3`（0.2.6），分支 `feat/async-image-tasks-v2-20261012`。推送分支属授权范围；合并、标签、Release、部署主站均未授权，需另行确认。
+- 范围：在 0.2.6 已有 `/v1/images/{generations,edits}/async`、`/v1/images/tasks/{id}` 上只做加法——修复可控调度模式下任务立即 `context canceled`；幂等键、计费状态与请求 ID、心跳/清扫/优雅退出、转存重试、在途上限与轮询限流、错误日志、能力发现、DELETE、长轮询、`Prefer: respond-async`。规格见 `openspec/changes/async-image-tasks-v2/`。
+- 不新增迁移、不改已发布路由与字段语义；Gemini 异步不在本轮。本机磁盘不足，Go 构建与测试在独立开发机执行（Go 1.27.2），不连接任何生产服务。
 
 ### 20261008-claude-cache-groups-release — 推送、合并与 GitHub 发版
 
@@ -2046,3 +2062,23 @@ pnpm --dir frontend run build
 - 卡点/风险：过载时全满载的新会话排队在权重最高的账号上，偶有 30 秒排队超时（5/13034），少于原版；生产等待预算需按基线首字斜率校准。
 - 下一步：推送后跟进 PR #90 的 CI；人工审核与合并需用户授权。本地保留的产物均无凭据，可删除：`/tmp/xy2-soak/{bin,logs,out,scripts}`、`/tmp/xy2-research`、`/tmp/xy2-toolchain`、`/tmp/xy2-infra`。
 - CI 结果（追加）：`7c763280` 上 18 项检查全部通过，PR #90 为 MERGEABLE/CLEAN。已停止本地 PG/Redis。
+
+### 2026-10-12T10:25:07Z — `20261012-async-image-tasks-v2` — 开发完成，分支已推送
+
+- 请求/目标：用户授权拉取最新仓库、新建分支，开发异步生图功能（下游生图站 G7 方案第 2 期）；推送分支属授权范围，PR、合并、版本与主站部署未授权。
+- 开始状态：`main` / `7b1d5d8c3`（0.2.6）；0.2.6 已有 `/v1/images/{generations,edits}/async` 与 `/v1/images/tasks/{id}`。已知缺口：可控调度模式下任务立即 "context canceled"、无幂等、无计费字段、进程退出后任务长期 processing、转存失败但已计费时标失败、无准入上限、失败不进错误日志。
+- 完成操作：分支 `feat/async-image-tasks-v2-20261012`，提交 `50b7b32b7`（规格）、`02f0a21d3`（可控调度修复）、`71ead40f0`（功能）、`5217d43e3`（文档）及本记录；已推送。任务存储改为 WATCH/MULTI 更新；新增 Redis 协调器（幂等、在途索引、清扫锁、查询限流）与账本查询；错误日志中间件后处理抽出为 `recordOpsErrorAfterRequest` 供异步复用；清理阶段先排空异步任务再停清扫器；Wire 重新生成。无迁移。
+- 修改文件：`backend/internal/service/{image_task,image_storage,controlled_scheduling_request,wire}.go`、`backend/internal/repository/{image_task_store,image_task_coordinator,image_task_billing,image_storage_s3,wire}.go`、`backend/internal/handler/{image_task_handler,ops_error_logger}.go`、`backend/internal/server/{routes/gateway,middleware/api_key_auth}.go`、`backend/internal/config/config.go`、`backend/cmd/server/{wire,wire_gen}.go` 及相应测试；`docs/ASYNC_IMAGE_TASKS.md`、`deploy/config.example.yaml`、`tools/upstream-sync/policy.json`（openspec 变更目录归 xy_owned）、`openspec/changes/async-image-tasks-v2/`、本文件。
+- 验证：Go 1.27.2 后端完整 unit 61 个测试包通过（含 `cmd/server` 清理顺序与提示词审核先于副作用的守卫）；golangci-lint v2.14.0 全仓 0 issues；`sync.py audit` 通过，`tools/tests` 14 项通过；图片任务相关测试 `-race` 通过；GitHub 分支 CI 7 项作业与 Security Scan 全部成功。实验环境（模拟上游）把实验主站换成本分支构建后：能力发现与查询限流、可控模式出图（扣费一次、用量一条）、幂等重放与 422、`Prefer`、DELETE（记录与存储对象均删除）、`docker stop` 排空（等待 13 秒后完成并扣费）、`docker kill` 后 119 秒内清扫收尾为 `task_interrupted`/不扣费/错误日志一条，7 项通过；生图站现有异步客户端 image/resume/edge 3 项不改代码通过；演练后实验主站恢复固定版本。
+- 卡点/风险：未在生产主站运行；Gemini 异步不在本轮。`openai_token_provider_test.go` 的 gofmt 差异为既有问题，未改。
+- 下一步：等待用户授权开 PR、合并与发版（建议 0.2.7）；主站部署另需授权，部署前建议为对象存储 `images/` 前缀配置生命周期规则。
+
+### 2026-10-12T10:39:30Z — `20261012-async-image-tasks-v2` — 开 PR #91
+
+- 请求/目标：用户授权「xy2api开PR，暂不部署主站，备份桶自动删除暂不考虑」。
+- 开始状态：分支 `feat/async-image-tasks-v2-20261012` / `4d70bf5c9` 已推送，分支 CI 与 Security Scan 全部成功；`origin/main` 仍为 `7b1d5d8c3`。
+- 完成操作：开 [PR #91](https://github.com/liulixin-lex/xy2api/pull/91)（→ `main`，非草稿），正文写明改动、验证、与 PR #90 的冲突及两种合并顺序的处理方式；更新本文件。未合并、未打标签、未部署。
+- 修改文件：仅本文件。
+- 验证：本地对 PR #90 head `a30fc223d` 试合并（`git merge-tree`）：冲突为 `controlled_scheduling_request.go`（#90 删除、本分支修改）、`cmd/server/{wire,wire_gen,wire_gen_test}.go`、本文件；#90 中已无 `ControlledSchedulingMiddleware`、`clientContext`、`beginDispatch`。
+- 卡点/风险：合并顺序由维护者决定；后合并的一方需按上文处理冲突并复测。
+- 下一步：等待合并授权；发版与主站部署另需授权。

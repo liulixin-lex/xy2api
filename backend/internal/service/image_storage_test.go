@@ -24,9 +24,16 @@ type savedImage struct {
 }
 
 type fakeImageStorage struct {
-	saved []savedImage
-	url   string
-	err   error
+	saved    []savedImage
+	deleted  []string
+	url      string
+	err      error
+	failures int // fail this many Save calls before succeeding
+}
+
+func (f *fakeImageStorage) Delete(_ context.Context, key string) error {
+	f.deleted = append(f.deleted, key)
+	return nil
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -38,6 +45,10 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 func (f *fakeImageStorage) Save(_ context.Context, key, contentType string, data []byte) (string, error) {
 	if f.err != nil {
 		return "", f.err
+	}
+	if f.failures > 0 {
+		f.failures--
+		return "", errors.New("transient upload failure")
 	}
 	f.saved = append(f.saved, savedImage{key: key, contentType: contentType, data: append([]byte(nil), data...)})
 	if f.url != "" {
@@ -228,9 +239,11 @@ func TestImageTaskServiceCompleteOffloadFailureMarksFailed(t *testing.T) {
 	storage := &fakeImageStorage{err: errors.New("bucket unreachable")}
 	uploader := NewImageResultUploader(storage, "images/", 0, nil)
 	svc := NewImageTaskServiceWithUploader(store, uploader, time.Hour, time.Minute)
+	waits := 0
+	svc.sleep = func(context.Context, time.Duration) error { waits++; return nil }
 
 	owner := ImageTaskOwner{UserID: 1, APIKeyID: 2}
-	created, err := svc.Create(context.Background(), owner)
+	created, err := svc.CreateTask(context.Background(), ImageTaskSpec{Owner: owner, RequestID: "client:offload"})
 	require.NoError(t, err)
 
 	b64 := base64.StdEncoding.EncodeToString(pngBytes)
@@ -243,4 +256,8 @@ func TestImageTaskServiceCompleteOffloadFailureMarksFailed(t *testing.T) {
 	require.Equal(t, http.StatusBadGateway, got.HTTPStatus)
 	require.Contains(t, string(got.Error), "object storage")
 	require.NotContains(t, string(got.Result), "b64_json", "failed offload must not persist base64 to Redis")
+	// v2: retried three times, then reported as billed with a dedicated code.
+	require.Equal(t, 3, waits)
+	require.Equal(t, ImageTaskErrorStorageFailed, imageTaskErrorCode(got.Error))
+	require.Equal(t, &ImageTaskBilling{Status: ImageTaskBillingCharged, RequestID: "client:offload"}, got.Billing)
 }

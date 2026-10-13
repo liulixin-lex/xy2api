@@ -43,6 +43,7 @@
       "docs/**",
       "frontend/**",
       "openspec/changes/add-claude-cache-fallback/**",
+      "openspec/changes/async-image-tasks-v2/**",
       "openspec/changes/stabilize-openai-iq-check/**",
       "openspec/changes/iq-detection-operations/**",
       "openspec/changes/replace-controlled-with-share-scheduling/**",

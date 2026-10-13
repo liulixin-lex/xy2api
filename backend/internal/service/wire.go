@@ -707,8 +707,34 @@ func ProvideImageStorageSettingService(
 // 对象存储是异步图片任务的启用前提：仅当开关打开且凭证齐全时功能才可用，否则整体禁用
 // （handler 返回 404，不创建任务、不写 Redis），从而避免大 base64 结果撑爆 Redis。
 // 启用状态由 settings 服务在运行时解析，因此后台改开关后无需重启即可生效。
-func ProvideImageTaskService(store ImageTaskStore, settings *ImageStorageSettingService) *ImageTaskService {
-	return NewImageTaskServiceWithResolver(store, settings.Resolver(), defaultImageTaskTTL, defaultImageTaskExecutionTimeout)
+//
+// v2：同时接入 Redis 协调器（幂等键、在途上限、清扫锁、查询限流）、计费查询与错误日志，
+// 并启动清扫器，把心跳超过 2 分钟的任务收尾为 task_interrupted。
+func ProvideImageTaskService(
+	store ImageTaskStore,
+	settings *ImageStorageSettingService,
+	coordinator ImageTaskCoordinator,
+	billing ImageTaskBillingLookup,
+	ops *OpsService,
+	cfg *config.Config,
+) *ImageTaskService {
+	svc := NewImageTaskServiceWithResolver(store, settings.Resolver(), defaultImageTaskTTL, defaultImageTaskExecutionTimeout)
+	limits := DefaultImageTaskLimits()
+	if cfg != nil {
+		tasks := cfg.ImageTasks
+		limits.MaxInFlightPerKey = tasks.MaxInFlightPerKey
+		limits.MaxInFlightPerInstance = tasks.MaxInFlightPerInstance
+		limits.LongPollMax = time.Duration(tasks.LongPollMaxSeconds) * time.Second
+		limits.PollRatePerSecond = tasks.PollRatePerSecond
+		limits.DrainTimeout = time.Duration(tasks.DrainTimeoutSeconds) * time.Second
+	}
+	deps := ImageTaskDependencies{Coordinator: coordinator, Billing: billing, Limits: &limits}
+	if ops != nil {
+		deps.Ops = ops
+	}
+	svc.Configure(deps)
+	svc.StartSweeper()
+	return svc
 }
 
 // ProvideBackupService creates and starts BackupService
