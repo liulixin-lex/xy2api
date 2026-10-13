@@ -101,9 +101,6 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	defer releaseUpstreamCtx()
-	if !reqStream {
-		upstreamCtx = withControlledBufferedResponse(upstreamCtx)
-	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -127,7 +124,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		// xAI can reject encrypted reasoning or a compaction blob copied from a
 		// different decoder/cache context. Retry once on the same account after
 		// preserving visible summaries and removing only opaque replay state.
-		if ControlledSchedulingEnabled(ctx) || attempt > 0 || (resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusUnprocessableEntity) {
+		if attempt > 0 || (resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusUnprocessableEntity) {
 			break
 		}
 		respBody := s.readUpstreamErrorBody(resp)
@@ -1414,7 +1411,6 @@ func (s *OpenAIGatewayService) describeGrokComposerImage(
 		return "", OpenAIUsage{}, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	defer finishControlledNonstreamResponse(resp, &retErr)
 
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
@@ -1458,10 +1454,6 @@ func (s *OpenAIGatewayService) describeGrokComposerImage(
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, nil)
 	if err != nil {
 		return "", OpenAIUsage{}, fmt.Errorf("read grok composer image bridge response: %w", err)
-	}
-
-	if err := validateControlledNonstreamResponse(resp, respBody, "responses"); err != nil {
-		return "", OpenAIUsage{}, err
 	}
 
 	var parsed apicompat.ResponsesResponse
@@ -1897,7 +1889,6 @@ func (s *OpenAIGatewayService) rateLimitGrok(ctx context.Context, account *Accou
 	// no-op inside markGrokTeamModelRateLimit.
 	if model, _ := ctx.Value(grokTeamRateLimitModelContextKey{}).(string); model != "" {
 		markGrokTeamModelRateLimit(account, model, resolveGrokTeamRateLimitUntil(resetAt, now))
-		blockControlledGrokTeamModelLimit(ctx, account, model)
 	}
 }
 
@@ -2084,7 +2075,7 @@ func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Contex
 		// updateGrokUsageSnapshot installs rate-limit state for non-pool accounts.
 		// Free-usage 429 was already cooled above via body classification.
 	default:
-		if !ControlledSchedulingEnabled(ctx) && statusCode >= 500 {
+		if statusCode >= 500 {
 			s.tempUnscheduleGrok(ctx, account, 2*time.Minute, "grok upstream temporary error")
 		}
 	}

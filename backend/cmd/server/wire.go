@@ -136,6 +136,7 @@ func provideCleanup(
 	openAIAutoReset *service.OpenAIQuotaAutoResetService,
 	promptAudit *securityaudit.PromptService,
 	pluginManager *service.PluginManager,
+	shareScheduling *service.ShareSchedulingService,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -150,6 +151,10 @@ func provideCleanup(
 		parallelSteps := []cleanupStep{
 			{"UsageBillingRecoveryService", func() error {
 				billingRecovery.Stop()
+				return nil
+			}},
+			{"ShareSchedulingService", func() error {
+				shareScheduling.Stop()
 				return nil
 			}},
 			{"PluginManager", func() error {
@@ -351,7 +356,6 @@ func provideCleanup(
 			{"OpenAIWSPool", func() error {
 				if openAIGateway != nil {
 					openAIGateway.CloseOpenAIWSPool()
-					openAIGateway.CloseControlledScheduling()
 				}
 				return nil
 			}},

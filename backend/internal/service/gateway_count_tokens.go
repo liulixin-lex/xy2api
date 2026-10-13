@@ -177,10 +177,6 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Upstream response too large")
 	}
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, countTokensTooLarge)
-	if err == nil {
-		err = validateControlledNonstreamResponse(resp, respBody, "count_tokens")
-	}
-	finishControlledNonstreamResponse(resp, &err)
 	_ = resp.Body.Close()
 	if err != nil {
 		if !errors.Is(err, ErrUpstreamResponseBodyTooLarge) {
@@ -204,10 +200,6 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 				}
 				resp = retryResp
 				respBody, err = ReadUpstreamResponseBody(resp.Body, s.cfg, c, countTokensTooLarge)
-				if err == nil {
-					err = validateControlledNonstreamResponse(resp, respBody, "count_tokens")
-				}
-				finishControlledNonstreamResponse(resp, &err)
 				_ = resp.Body.Close()
 				if err != nil {
 					if !errors.Is(err, ErrUpstreamResponseBodyTooLarge) {
@@ -320,10 +312,6 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Upstream response too large")
 	}
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, countTokensTooLarge)
-	if err == nil {
-		err = validateControlledNonstreamResponse(resp, respBody, "count_tokens")
-	}
-	finishControlledNonstreamResponse(resp, &err)
 	_ = resp.Body.Close()
 	if err != nil {
 		if !errors.Is(err, ErrUpstreamResponseBodyTooLarge) {

@@ -110,7 +110,6 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	defer finishControlledNonstreamResponse(resp, &retErr)
 
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
@@ -165,9 +164,6 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 			writeOpenAIEmbeddingsError(c, http.StatusBadGateway, "api_error", "Failed to read upstream response")
 		}
 		return nil, fmt.Errorf("read upstream body: %w", err)
-	}
-	if err := validateControlledNonstreamResponse(resp, respBody, "embeddings"); err != nil {
-		return nil, err
 	}
 
 	writeOpenAIEmbeddingsUpstreamResponse(c, resp, respBody, s.responseHeaderFilter)

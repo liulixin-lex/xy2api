@@ -944,7 +944,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if !ok {
 		return errors.New("openai ws passthrough upstream connection does not support frame relay")
 	}
-	var controlledRelay *openAIWSControlledPassthroughFrameConn
 	relayUpstreamFrameConn := &openAIWSPassthroughFirstOutputFrameConn{
 		inner:             upstreamFrameConn,
 		activeReadTimeout: s.openAIWSPassthroughIdleTimeout(),
@@ -957,14 +956,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			timeout := s.openAIFirstOutputTimeout(reasoningEffort)
 			if timeout <= 0 {
 				timeout = s.openAIWSPassthroughIdleTimeout()
-			}
-			if controlledRelay != nil {
-				if turnCtx := controlledRelay.turnContext(); turnCtx != nil && ControlledSchedulingEnabled(turnCtx) {
-					// The request ledger owns model-specific T/D. Unconfigured models
-					// remain observe-only; the legacy global first-output timer must not
-					// override that contract. Active stream idle protection is retained.
-					timeout = 0
-				}
 			}
 			model := openAIWSPassthroughRequestModelForFrame(payload)
 			if model == "" {
@@ -983,25 +974,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 
 	var upstreamRelayConn openaiwsv2.FrameConn = relayUpstreamFrameConn
-	if s.controlledScheduling != nil {
-		controlledRelay = newOpenAIWSControlledPassthroughFrameConn(ctx, relayUpstreamFrameConn, func(payload []byte, newTurn bool) (context.Context, controlledPassthroughAttempt, error) {
-			turnModel, _ := usageMeta.turnModels(initialRequestModel)
-			turnCtx, err := s.prepareControlledWSTurn(ctx, c, payload, turnModel, promptCacheKey, newTurn)
-			if err != nil {
-				return turnCtx, nil, err
-			}
-			dispatch, err := s.controlledScheduling.beginDispatch(turnCtx, account.ID, account.Concurrency)
-			if err != nil {
-				return turnCtx, nil, err
-			}
-			if dispatch == nil {
-				return turnCtx, nil, nil
-			}
-			return turnCtx, dispatch, nil
-		})
-		upstreamRelayConn = controlledRelay
-		defer func() { _ = controlledRelay.Close() }()
-	}
 	completedTurns := atomic.Int32{}
 	turnLifecycle := newOpenAIWSPassthroughTurnLifecycle(true)
 	var acceptedTurnStartedAt atomic.Pointer[time.Time]
@@ -1332,14 +1304,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					turnResult.Usage.CacheReadInputTokens,
 				)
 				if hooks != nil && hooks.AfterTurn != nil {
-					if controlledRelay != nil {
-						controlledRelay.afterTurnSettlement(func(turnCtx context.Context) {
-							turnResult.SchedulingAttemptID = SchedulingAttemptIDFromContext(turnCtx)
-							hooks.AfterTurn(turnNo, turnResult, nil)
-						})
-					} else {
-						hooks.AfterTurn(turnNo, turnResult, nil)
-					}
+					hooks.AfterTurn(turnNo, turnResult, nil)
 				}
 			},
 			BeforeClientWrite: func(msgType coderws.MessageType, payload []byte) {
@@ -1348,14 +1313,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 			},
 			AfterClientWrite: func(msgType coderws.MessageType, payload []byte, writeErr error) {
-				if controlledRelay != nil && (msgType == coderws.MessageText || msgType == coderws.MessageBinary) {
-					if writeErr == nil {
-						controlledRelay.commitOutput(payload)
-					}
-					if openAIWSPassthroughIsTerminalOutput(payload) {
-						controlledRelay.finishTurn(gjson.GetBytes(payload, "type").String(), true, writeErr)
-					}
-				}
 				if msgType == coderws.MessageText && writeErr == nil {
 					eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 					markOpenAIWSClientVisibleFailure(c, eventType, payload)

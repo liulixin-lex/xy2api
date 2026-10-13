@@ -28,9 +28,7 @@ func (s *oneClickAccountService) SetAccountSchedulable(ctx context.Context, id i
 func TestOneClickSchedulingSwitchPersistsOnlyTargetAccount(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc := &oneClickAccountService{stubAdminService: &stubAdminService{}, enabled: map[int64]bool{1: true, 2: true}}
-	oldControl := &schedulingAdminStub{}
 	h := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	h.SetSchedulingController(oldControl)
 	router := gin.New()
 	router.POST("/accounts/:id/schedulable", h.SetSchedulable)
 	for _, enabled := range []bool{false, true, false} {
@@ -39,13 +37,11 @@ func TestOneClickSchedulingSwitchPersistsOnlyTargetAccount(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		var response struct{ Data struct{ Schedulable bool } }
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-		t.Logf("requested=%v persisted_target=%v response=%v other=%v old_control_writes=%d", enabled, svc.enabled[1], response.Data.Schedulable, svc.enabled[2], oldControl.writes)
 		require.Equal(t, enabled, svc.enabled[1], "the original switch must persist its value")
 		require.Equal(t, enabled, response.Data.Schedulable)
 		require.True(t, svc.enabled[2], "another account is outside this operation")
 	}
 	require.Equal(t, []int64{1, 1, 1}, svc.writes)
-	require.Zero(t, oldControl.writes, "retired pause/resume is not a second switch")
 }
 func TestOneClickSchedulingSwitchRejectsAmbiguousInput(t *testing.T) {
 	gin.SetMode(gin.TestMode)

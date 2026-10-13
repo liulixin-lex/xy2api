@@ -160,6 +160,67 @@ class UpstreamSyncTests(unittest.TestCase):
                 hashlib.sha256(b"SELECT 1;").hexdigest(),
             )
 
+    def test_scheduler_hunks_cancel_import_moves_only(self):
+        upstream = b"""import (
+\t"context"
+\t"github.com/gin-gonic/gin"
+\t"github.com/liulixin-lex/xy2api/internal/config"
+)
+
+func pick() {
+\tcheckA()
+\tcheckB()
+}
+"""
+        current = b"""import (
+\t"context"
+\t"github.com/liulixin-lex/xy2api/internal/config"
+\t"github.com/gin-gonic/gin"
+)
+
+func pick() {
+\tcheckB()
+\tcheckA()
+
+\thook()
+}
+"""
+        hunks = SYNC.scheduler_hunks(upstream, current)
+        removed = [line for hunk in hunks for line in hunk["removed"]]
+        added = [line for hunk in hunks for line in hunk["added"]]
+
+        self.assertNotIn('"github.com/gin-gonic/gin"', removed + added)
+        self.assertEqual(len(removed), 1, "a reordered statement still counts")
+        self.assertIn(removed[0], ("checkA()", "checkB()"))
+        self.assertEqual(sorted(added), sorted([removed[0], "hook()"]))
+
+    def test_scheduler_diff_allowlist_matches_the_fork(self):
+        errors: list[str] = []
+        SYNC.audit_scheduler_diff(SYNC.load_policy(), errors)
+        self.assertEqual(errors, [])
+
+    def test_scheduler_diff_allowlist_tracks_the_recorded_upstream(self):
+        allowlist = SYNC.load_json(SYNC.SCHEDULER_DIFF_PATH)
+        provenance = SYNC.load_json(SYNC.PROVENANCE_PATH)
+        self.assertEqual(allowlist["upstream_commit"], provenance["upstream_commit"])
+        self.assertEqual(
+            sorted(allowlist["files"]),
+            sorted(
+                f"backend/internal/service/{name}"
+                for name in (
+                    "gateway_scheduling.go",
+                    "openai_account_scheduler.go",
+                    "openai_gateway_scheduling.go",
+                    "gemini_messages_compat_service.go",
+                )
+            ),
+        )
+        for path, blocks in allowlist["files"].items():
+            for block in blocks:
+                with self.subTest(path=path, block=block.get("block")):
+                    self.assertTrue(block.get("block") and block.get("note"))
+                    self.assertNotEqual(block["block"], "unreviewed")
+
 
 if __name__ == "__main__":
     unittest.main()

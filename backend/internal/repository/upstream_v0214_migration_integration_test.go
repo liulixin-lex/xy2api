@@ -33,7 +33,7 @@ func TestUpstreamV0214MigrationUpgrade(t *testing.T) {
 	names, err := fs.Glob(migrations.FS, "*.sql")
 	require.NoError(t, err)
 	for _, name := range names {
-		if name == "268_add_payment_order_bonus_amount.sql" || name == "269_add_typesafe_platform.sql" {
+		if name == "268_add_payment_order_bonus_amount.sql" || name == "269_add_typesafe_platform.sql" || name == "270_share_scheduling.sql" {
 			continue
 		}
 		body, err := fs.ReadFile(migrations.FS, name)

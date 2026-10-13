@@ -60,6 +60,18 @@ git merge-base --is-ancestor 52374af94031f04df8de6fc91deb77a179e04b06 'sub2api/v
 
 `python tools/upstream-sync/sync.py audit` 会拒绝未分类差异、上游 module path 残留、兼容字面量丢失、CLA/广告文件回流和二开补丁清单漂移。
 
+### 原版调度差异白名单
+
+`python tools/upstream-sync/sync.py scheduler-diff` 把原版调度文件（`gateway_scheduling.go`、`openai_account_scheduler.go`、`openai_gateway_scheduling.go`、`gemini_messages_compat_service.go`）与 `UPSTREAM_BASE.json` 记录的上游提交逐行比对（先做 module path 改写，忽略缩进、空行和 gofmt 造成的 import 移位），差异必须与 `tools/upstream-sync/scheduler-diff.json` 中已审查的二开块完全一致：多出的行、白名单中已不存在的行都会失败。CI 的 `upstream-sync-audit` 作业执行该检查。
+
+同步新上游版本后 `upstream_commit` 会变化，检查会要求重新审查：
+
+1. `python tools/upstream-sync/sync.py scheduler-diff --draft` 输出当前差异（块名为 `unreviewed`）；
+2. 逐块确认只包含模块路径、品牌标识、份额调度钩子、`requireCompact`、质量路由、分组提示词等已登记的二开改动，按块命名并写明 `note`；
+3. 更新白名单的 `upstream_commit` 与 `files`，在同步 PR 中说明调度文件的差异变化。
+
+`--draft` 只用于辅助审查，不得把未审查的输出直接提交。
+
 ## 标准同步步骤
 
 从已经加固并通过 CI 的 `main` 开始：
@@ -138,6 +150,7 @@ chore: prepare xy2api 0.0.2-rc.1
 ```bash
 python -m unittest discover -s tools/tests -p 'test_*.py' -v
 python tools/upstream-sync/sync.py audit
+python tools/upstream-sync/sync.py scheduler-diff
 git diff --check
 docker compose --env-file deploy/.env.example -f deploy/docker-compose.yml config --quiet
 ```

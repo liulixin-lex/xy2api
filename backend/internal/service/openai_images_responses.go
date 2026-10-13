@@ -1336,7 +1336,6 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
 	responseFormat string,
 	fallbackModel string,
 ) (_ OpenAIUsage, _ int, _ []string, retErr error) {
-	defer finishControlledNonstreamResponse(resp, &retErr)
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		if shouldClassifyOpenAIUpstreamStreamReadError(err, c.Request.Context()) {
@@ -1355,9 +1354,6 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
 	}
 	if len(results) == 0 {
 		if upstreamErr := extractOpenAIImagesUpstreamError(body); upstreamErr != nil {
-			if IsOpenAIImagesRetryableUpstreamError(upstreamErr) {
-				rejectControlledNonstreamResponse(resp, upstreamErr)
-			}
 			setOpsUpstreamError(c, upstreamErr.clientStatusCode(), upstreamErr.clientMessage(), "")
 			if !IsOpenAIImagesRetryableUpstreamError(upstreamErr) {
 				writeOpenAIImagesUpstreamErrorResponse(c, upstreamErr)
@@ -1383,9 +1379,6 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
 			ResponseBody:           body,
 			RetryableOnSameAccount: true,
 		}
-	}
-	if err := validateControlledNonstreamResponse(resp, body, "responses"); err != nil {
-		return OpenAIUsage{}, 0, nil, err
 	}
 	if strings.TrimSpace(firstMeta.Model) == "" {
 		firstMeta.Model = strings.TrimSpace(fallbackModel)
@@ -1823,9 +1816,6 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	)
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	defer releaseUpstreamCtx()
-	if !parsed.Stream {
-		upstreamCtx = withControlledBufferedResponse(upstreamCtx)
-	}
 
 	token, _, err := s.GetAccessToken(upstreamCtx, account)
 	if err != nil {

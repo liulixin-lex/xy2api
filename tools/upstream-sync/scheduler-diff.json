@@ -1,0 +1,379 @@
+{
+  "schema_version": 1,
+  "upstream_commit": "0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d",
+  "description": "Reviewed differences between the original Sub2API scheduler files and the recorded upstream commit. Any other change, or a changed upstream commit, fails `sync.py scheduler-diff` until reviewed.",
+  "files": {
+    "backend/internal/service/gateway_scheduling.go": [
+      {
+        "block": "brand-identifier",
+        "note": "Parameter renamed by the XY2API identity rewrite; no behaviour change.",
+        "removed": [
+          "// sub2apiUserID: 系统用户 ID，用于二维亲和调度",
+          "func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {"
+        ],
+        "added": [
+          "// xy2apiUserID: 系统用户 ID，用于二维亲和调度",
+          "func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, xy2apiUserID int64) (*AccountSelectionResult, error) {"
+        ]
+      },
+      {
+        "block": "share-hook",
+        "note": "Share scheduling entry hook and selection trace; groups on the original scheduler pass through unchanged.",
+        "removed": [],
+        "added": [
+          "}",
+          "ctx, shareResult, shareHandled, shareErr := s.shareSchedulingHook(ctx, group, groupID, sessionHash, requestedModel, excludedIDs)",
+          "if shareHandled {",
+          "return shareResult, shareErr",
+          "s.shareRecordSelection(ctx, hydrated)"
+        ]
+      }
+    ],
+    "backend/internal/service/openai_account_scheduler.go": [
+      {
+        "block": "quality-routing-metrics",
+        "note": "Quality routing counters in the scheduler metrics snapshot; selection unaffected.",
+        "removed": [
+          "return OpenAIAccountSchedulerMetricsSnapshot{}",
+          "return scheduler.SnapshotMetrics()"
+        ],
+        "added": [
+          "QualityRoutingCounters   map[string]uint64",
+          "return OpenAIAccountSchedulerMetricsSnapshot{QualityRoutingCounters: OpenAIQualityRoutingMetrics()}",
+          "snapshot := scheduler.SnapshotMetrics()",
+          "snapshot.QualityRoutingCounters = OpenAIQualityRoutingMetrics()",
+          "return snapshot"
+        ]
+      },
+      {
+        "block": "require-compact",
+        "note": "Runtime blocking honours compact-only requests (requireCompact).",
+        "removed": [
+          "if s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel) {",
+          "if s != nil && s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel) {"
+        ],
+        "added": [
+          "if s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {",
+          "if s != nil && s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {"
+        ]
+      },
+      {
+        "block": "share-trace-and-quality-routing-entry",
+        "note": "Entry wrapper: records the share trace, then runs quality routing, which only applies to requests that opt in and otherwise calls the original selection unchanged.",
+        "removed": [],
+        "added": [
+          "ctx = s.withOpenAIShareTrace(ctx, groupID, sessionHash, excludedIDs, requiredImageCapability)",
+          "selection, decision, err := s.selectAccountWithQualityRouting(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)",
+          "if err == nil && selection != nil {",
+          "s.shareScheduling.recordSelection(ctx, selection.Account)",
+          "}",
+          "return selection, decision, err",
+          "}",
+          "func (s *OpenAIGatewayService) selectAccountWithoutQualityRouting(",
+          "ctx context.Context, groupID *int64, previousResponseID, sessionHash, requestedModel string,",
+          "excludedIDs map[int64]struct{}, requiredTransport OpenAIUpstreamTransport,",
+          "requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability,",
+          "requireCompact bool, platform string, previousResponseCanMove, useUpstreamTokenCost bool,",
+          ") (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {"
+        ]
+      },
+      {
+        "block": "share-hook",
+        "note": "Share scheduling entry hook and selection trace; groups on the original scheduler pass through unchanged.",
+        "removed": [],
+        "added": [
+          "}",
+          "if selection, shareDecision, handled, err := s.shareSchedulingHook(ctx, openAIShareSelection{",
+          "groupID: groupID, previousResponse: previousResponseID, sessionHash: sessionHash, model: requestedModel,",
+          "excluded: excludedIDs, transport: requiredTransport, capability: requiredCapability, platform: platform,",
+          "guardianParentID: guardianParentAccountID, preserveBinding: preserveGuardianParentBinding,",
+          "}, requireCompact, requiredImageCapability); handled {",
+          "return selection, shareDecision, err"
+        ]
+      },
+      {
+        "block": "health-report-context",
+        "note": "Schedule result reports carry the request context to the API-key health observer.",
+        "removed": [
+          "s.rateLimitService.ObserveOpenAIAPIKeyHealthSuccess(context.Background(), account)",
+          "healthTripped = s.rateLimitService.ObserveOpenAIAPIKeyHealthFailure(context.Background(), account, observedErr[0])",
+          "scheduler := s.getOpenAIAccountScheduler(context.Background())"
+        ],
+        "added": [
+          "return s.ReportOpenAIAccountScheduleResultWithContext(context.Background(), account, model, success, firstTokenMs, observedErr...)",
+          "}",
+          "// ReportOpenAIAccountScheduleResultWithContext reports a request outcome to the",
+          "// scheduler and API-key health observer. Credential, quota and provider",
+          "// Retry-After handlers remain independent.",
+          "func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResultWithContext(ctx context.Context, account *Account, model string, success bool, firstTokenMs *int, observedErr ...error) bool {",
+          "s.rateLimitService.ObserveOpenAIAPIKeyHealthSuccess(ctx, account)",
+          "healthTripped = s.rateLimitService.ObserveOpenAIAPIKeyHealthFailure(ctx, account, observedErr[0])",
+          "scheduler := s.getOpenAIAccountScheduler(ctx)"
+        ]
+      },
+      {
+        "block": "openai-cache-reliability",
+        "note": "XY2API 0.2.6 GPT prompt cache reliability (PR #86): tenant-scoped v2 session seeds and cache diagnostics at session hashing, atomic sticky claims with owner-checked delete and refresh, cache-scored candidate preference, and sticky capacity spillover marking. Share scheduling groups return from their hook before these paths.",
+        "removed": [
+          "// 命名返回值保证 defer 写入的耗时同时返回给调用方。",
+          "_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)",
+          "_ = s.service.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.service.openAIWSSessionStickyTTL())",
+          "_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, req.SessionHash)",
+          "_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, req.SessionHash)"
+        ],
+        "added": [
+          "if ctx.Value(openAIStickyReconciledKey{}) == nil {",
+          "}",
+          "if s != nil && s.service != nil && req.PreviousResponseID == \"\" && openAIAtomicStickySession(req.SessionHash) && NormalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI && !req.PreserveStickyBinding && !req.StickyWeighted && !gatewayProfitControlGateActive(ctx) && !s.service.qualityOwnsSticky(ctx, req.GroupID, req.SessionHash) && ctx.Value(openAIStickyReconciledKey{}) == nil {",
+          "if cache, atomic := s.service.cache.(OpenAIStickyAtomicCache); atomic {",
+          "initialOwner, _ := s.service.getStickySessionAccountID(ctx, req.GroupID, req.SessionHash)",
+          "defer func() {",
+          "if err != nil || selection == nil || selection.Account == nil {",
+          "return",
+          "}",
+          "owner := initialOwner",
+          "var readErr error",
+          "if initialOwner > 0 {",
+          "owner, readErr = s.service.getStickySessionAccountID(ctx, req.GroupID, req.SessionHash)",
+          "}",
+          "if initialOwner == 0 {",
+          "owner, readErr = cache.ClaimSessionAccountID(ctx, derefGroupID(req.GroupID), s.service.openAISessionCacheKey(req.SessionHash), selection.Account.ID, 30*time.Second, false)",
+          "}",
+          "if readErr != nil || owner <= 0 || owner == selection.Account.ID {",
+          "return",
+          "}",
+          "if initialOwner > 0 {",
+          "selection.StickyCapacitySpillover = true",
+          "return",
+          "}",
+          "if selection.ReleaseFunc != nil {",
+          "selection.ReleaseFunc()",
+          "}",
+          "req.StickyAccountID = owner",
+          "selection, decision, err = s.Select(context.WithValue(ctx, openAIStickyReconciledKey{}, owner), req)",
+          "}()",
+          "}",
+          "}",
+          "_ = s.service.deleteStickySessionAccountIDIfOwner(ctx, req.GroupID, sessionHash, accountID)",
+          "_ = s.service.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.service.openAIWSSessionStickyTTL(), accountID)",
+          "if req.PreviousResponseID == \"\" && req.StickyAccountID == 0 && req.StickyPreviousAccountID == 0 && !req.StickyWeighted {",
+          "s.service.preferCacheScoredCandidates(ctx, plan.selectionOrder, req.RequestedModel)",
+          "}",
+          "_ = s.service.deleteStickySessionAccountIDIfOwner(ctx, req.GroupID, req.SessionHash, accountID)",
+          "_ = s.service.deleteStickySessionAccountIDIfOwner(ctx, req.GroupID, req.SessionHash, accountID)"
+        ]
+      }
+    ],
+    "backend/internal/service/openai_gateway_scheduling.go": [
+      {
+        "block": "quality-routing-request",
+        "note": "Attaches quality routing request data; selection is unaffected unless a request opts in.",
+        "removed": [],
+        "added": [
+          "if c.Request != nil && qualityRequest(c.Request.Context()) == nil {",
+          "s.AttachOpenAIQualityRouting(c, currentHash, body)",
+          "}",
+          "s.AttachOpenAIQualityRouting(c, currentHash, body)"
+        ]
+      },
+      {
+        "block": "share-binding-ttl",
+        "note": "Share groups write bindings with the policy TTL so idle time can be derived; other groups keep the original TTL.",
+        "removed": [],
+        "added": [
+          "}",
+          "if shareTTL, ok := s.shareScheduling.shareBindingTTL(derefGroupID(groupID)); ok {",
+          "ttl = shareTTL"
+        ]
+      },
+      {
+        "block": "require-compact",
+        "note": "Runtime blocking honours compact-only requests (requireCompact).",
+        "removed": [
+          "if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel) {",
+          "} else if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel) {",
+          "if s.isOpenAIAccountRequestRuntimeBlocked(acc, requestedModel) {",
+          "if s.isOpenAIAccountRequestRuntimeBlocked(fresh, requestedModel) {",
+          "if s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel) {"
+        ],
+        "added": [
+          "if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel, requireCompact) {",
+          "} else if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel, requireCompact) {",
+          "if s.isOpenAIAccountRequestRuntimeBlocked(acc, requestedModel, requireCompact) {",
+          "if s.isOpenAIAccountRequestRuntimeBlocked(fresh, requestedModel, requireCompact) {",
+          "if s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel, requireCompact) {"
+        ]
+      },
+      {
+        "block": "openai-cache-reliability",
+        "note": "XY2API 0.2.6 GPT prompt cache reliability (PR #86): tenant-scoped v2 session seeds and cache diagnostics at session hashing, atomic sticky claims with owner-checked delete and refresh, cache-scored candidate preference, and sticky capacity spillover marking. Share scheduling groups return from their hook before these paths.",
+        "removed": [
+          "_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)",
+          "_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)",
+          "_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)",
+          "_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)",
+          "_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)",
+          "_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, openaiStickySessionTTL)",
+          "func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (*AccountSelectionResult, error) {",
+          "_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)",
+          "_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)",
+          "_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)",
+          "_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)",
+          "_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)",
+          "_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)",
+          "_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, openaiStickySessionTTL)",
+          "return selection, true, nil",
+          "return selection, nil",
+          "return s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{"
+        ],
+        "added": [
+          "if c == nil {",
+          "return \"\"",
+          "}",
+          "sessionID = s.scopedOpenAISessionSeed(c, body, sessionID)",
+          "if strings.HasPrefix(sessionID, \"openai-routing-v2:\") {",
+          "currentHash = \"v2:\" + currentHash",
+          "legacyHash = \"\"",
+          "}",
+          "c.Set(openAICacheSessionGinKey, currentHash)",
+          "if c.Request != nil {",
+          "if diagnostic := s.newCacheDiagnostic(c, body, \"ingress\"); diagnostic != nil {",
+          "c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAICacheDiagnosticKey{}, diagnostic))",
+          "}",
+          "}",
+          "sessionID = s.scopedOpenAISessionSeed(c, body, sessionID)",
+          "if strings.HasPrefix(sessionID, \"openai-routing-v2:\") {",
+          "currentHash = \"v2:\" + currentHash",
+          "legacyHash = \"\"",
+          "}",
+          "c.Set(openAICacheSessionGinKey, currentHash)",
+          "if c.Request != nil {",
+          "if diagnostic := s.newCacheDiagnostic(c, body, \"ingress\"); diagnostic != nil {",
+          "c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAICacheDiagnosticKey{}, diagnostic))",
+          "}",
+          "}",
+          "}",
+          "if c == nil {",
+          "return \"\"",
+          "}",
+          "seed = s.scopedOpenAISessionSeed(c, body, seed)",
+          "if strings.HasPrefix(seed, \"openai-routing-v2:\") {",
+          "currentHash = \"v2:\" + currentHash",
+          "legacyHash = \"\"",
+          "}",
+          "c.Set(openAICacheSessionGinKey, currentHash)",
+          "if c.Request != nil {",
+          "if diagnostic := s.newCacheDiagnostic(c, body, \"ingress\"); diagnostic != nil {",
+          "c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAICacheDiagnosticKey{}, diagnostic))",
+          "}",
+          "}",
+          "}",
+          "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
+          "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
+          "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
+          "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
+          "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
+          "_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, openaiStickySessionTTL, accountID)",
+          "func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (selection *AccountSelectionResult, selectionErr error) {",
+          "if cache, atomic := s.cache.(OpenAIStickyAtomicCache); atomic && openAIAtomicStickySession(sessionHash) && NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !s.qualityOwnsSticky(ctx, groupID, sessionHash) && ctx.Value(openAIStickyReconciledKey{}) == nil {",
+          "initialOwner, _ := s.getStickySessionAccountID(ctx, groupID, sessionHash)",
+          "defer func() {",
+          "if selectionErr != nil || selection == nil || selection.Account == nil || initialOwner > 0 || gatewayProfitControlGateActive(ctx) {",
+          "return",
+          "}",
+          "owner, err := cache.ClaimSessionAccountID(ctx, derefGroupID(groupID), s.openAISessionCacheKey(sessionHash), selection.Account.ID, 30*time.Second, false)",
+          "if err != nil || owner <= 0 || owner == selection.Account.ID {",
+          "return",
+          "}",
+          "if selection.ReleaseFunc != nil {",
+          "selection.ReleaseFunc()",
+          "}",
+          "selection, selectionErr = s.selectAccountWithLoadAwareness(context.WithValue(ctx, openAIStickyReconciledKey{}, owner), groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost)",
+          "}()",
+          "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
+          "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
+          "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
+          "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
+          "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
+          "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
+          "_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, openaiStickySessionTTL, stickyAccountID)",
+          "if !rateOrder.enabled && !stickySpillover && stickyAccountID == 0 {",
+          "s.preferCacheCandidates(ctx, available, requestedModel)",
+          "return markOpenAIStickySpillover(selection, stickySpillover && openAIAtomicStickySession(sessionHash)), true, nil",
+          "return markOpenAIStickySpillover(selection, stickySpillover && openAIAtomicStickySession(sessionHash)), nil",
+          "selection, err := s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{",
+          "return markOpenAIStickySpillover(selection, stickySpillover && openAIAtomicStickySession(sessionHash)), err"
+        ]
+      }
+    ],
+    "backend/internal/service/gemini_messages_compat_service.go": [
+      {
+        "block": "group-system-prompt",
+        "note": "Group system prompt applied to Gemini upstream requests and token counts.",
+        "removed": [
+          "upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))",
+          "upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(wrappedBytes))",
+          "upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))",
+          "upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))",
+          "upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))",
+          "upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(wrappedBytes))",
+          "upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))",
+          "upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))",
+          "estimated := estimateGeminiCountTokens(body)",
+          "estimated := estimateGeminiCountTokens(body)",
+          "estimated := estimateGeminiCountTokens(body)"
+        ],
+        "added": [
+          "upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, restGeminiReq, GroupPromptGemini)",
+          "upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, wrappedBytes, GroupPromptGemini)",
+          "upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, restGeminiReq, GroupPromptGemini)",
+          "upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, restGeminiReq, GroupPromptGemini)",
+          "countBody := body",
+          "if action == \"countTokens\" {",
+          "var err error",
+          "countBody, err = ApplyGroupSystemPrompt(ctx, body, GroupPromptGemini)",
+          "if err != nil {",
+          "return nil, s.writeGoogleError(c, http.StatusBadRequest, err.Error())",
+          "}",
+          "}",
+          "upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, body, GroupPromptGemini)",
+          "upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, wrappedBytes, GroupPromptGemini)",
+          "upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, body, GroupPromptGemini)",
+          "upstreamReq, err := newGroupPromptUpstreamRequest(ctx, http.MethodPost, fullURL, body, GroupPromptGemini)",
+          "estimated := estimateGeminiCountTokens(countBody)",
+          "estimated := estimateGeminiCountTokens(countBody)",
+          "estimated := estimateGeminiCountTokens(countBody)"
+        ]
+      },
+      {
+        "block": "gemini-sse-collector",
+        "note": "Unused collectGeminiSSE wrapper inlined into its only caller.",
+        "removed": [
+          "collected, usageObj, err := collectGeminiSSE(resp.Body, true)",
+          "func collectGeminiSSE(body io.Reader, isOAuth bool) (map[string]any, *ClaudeUsage, error) {",
+          "collected, usage, _, err := collectGeminiSSEObserved(body, isOAuth, nil)",
+          "return collected, usage, err",
+          "}"
+        ],
+        "added": [
+          "collected, usageObj, _, err := collectGeminiSSEObserved(resp.Body, true, nil)"
+        ]
+      },
+      {
+        "block": "nonstream-read-failover",
+        "note": "Non-streaming read failures are classified so failover can switch accounts before output.",
+        "removed": [
+          "return nil, err"
+        ],
+        "added": [
+          "classified := nonstreamReadError(c.Request.Context(), resp, err)",
+          "var failover *UpstreamFailoverError",
+          "if errors.As(classified, &failover) {",
+          "return nil, classified",
+          "}",
+          "return nil, nonstreamReadError(c.Request.Context(), resp, err)"
+        ]
+      }
+    ]
+  }
+}

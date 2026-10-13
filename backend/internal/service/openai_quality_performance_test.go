@@ -105,6 +105,7 @@ func TestOpenAIQualityHealthyPerformance(t *testing.T) {
 		start := time.Now()
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+		c.Request = c.Request.WithContext(withOpenAIQualityRouting(c.Request.Context()))
 		c.Set("api_key", &APIKey{ID: 909})
 		hash := s.GenerateSessionHash(c, body)
 		selected, _, err := s.SelectAccountWithScheduler(c.Request.Context(), nil, "", hash, "gpt-6-astra", nil, OpenAIUpstreamTransportHTTPSSE, false)

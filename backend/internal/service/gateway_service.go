@@ -587,6 +587,8 @@ type AccountSelectionResult struct {
 	// 局部 ctx 上，handler 必须经 ContextWithSelectionProfitGate 重放后才能在
 	// 调度栈之外做抢槽后终检与准入后粘性绑定。
 	profitGate *openAIProfitControlGate
+	// shareBinding 是份额调度推迟到 handler 准入后执行的绑定写入（nil 表示无）。
+	shareBinding *shareBindingIntent
 }
 
 // ProfitGateActive 报告本次选号是否处于利润门之下。
@@ -773,7 +775,6 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 
 // GatewayService handles API gateway operations
 type GatewayService struct {
-	controlledScheduling  *ControlledSchedulingService
 	accountRepo           AccountRepository
 	groupRepo             GroupRepository
 	usageLogRepo          UsageLogRepository
@@ -811,6 +812,8 @@ type GatewayService struct {
 	tlsFPProfileService   *TLSFingerprintProfileService
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
+	// shareScheduling 由 ProvideShareSchedulingService 注入；nil 时保持原版调度。
+	shareScheduling *ShareSchedulingService
 }
 
 // NewGatewayService creates a new GatewayService
@@ -904,6 +907,9 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	if parsed == nil {
 		return ""
 	}
+	if anchor := s.shareSessionHash(parsed); anchor != "" {
+		return anchor
+	}
 
 	// 1. 最高优先级：从 metadata.user_id 提取 session_xxx
 	if parsed.MetadataUserID != "" {
@@ -971,7 +977,11 @@ func (s *GatewayService) BindStickySession(ctx context.Context, groupID *int64, 
 	if sessionHash == "" || accountID <= 0 || s.cache == nil {
 		return nil
 	}
-	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, stickySessionTTL)
+	ttl := stickySessionTTL
+	if shareTTL, ok := s.shareScheduling.shareBindingTTL(derefGroupID(groupID)); ok {
+		ttl = shareTTL
+	}
+	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, ttl)
 }
 
 // bindGatewayStickySessionDuringSelection preserves the normal eager sticky
@@ -994,6 +1004,9 @@ func (s *GatewayService) bindGatewayStickySessionDuringSelection(ctx context.Con
 func (s *GatewayService) BindStickySessionAfterProfitAdmission(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
 	if sessionHash == "" || accountID <= 0 || s.cache == nil {
 		return nil
+	}
+	if handled, err := applyDeferredShareBinding(ctx, groupID, sessionHash, accountID); handled {
+		return err
 	}
 	if !gatewayProfitControlGateActive(ctx) {
 		return s.BindStickySession(ctx, groupID, sessionHash, accountID)
@@ -1321,7 +1334,7 @@ func (s *GatewayService) getOAuthToken(ctx context.Context, account *Account) (s
 // DoGrokNativeResponsesJSON POSTs a non-streaming Responses body to the account's
 // Grok upstream and returns the raw JSON body. Used by /v1/web_search.
 // Gin-free: UA is always the pinned Grok CLI identity (resolveGrokUpstreamUserAgent ignores inbound).
-func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account *Account, body []byte) (_ []byte, retErr error) {
+func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account *Account, body []byte) ([]byte, error) {
 	if s == nil || s.httpUpstream == nil {
 		return nil, errors.New("http upstream not configured")
 	}
@@ -1369,7 +1382,6 @@ func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account 
 		return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway, Reason: GatewayFailureReason("grok_search_transport")}
 	}
 	defer func() { _ = resp.Body.Close() }()
-	defer finishControlledNonstreamResponse(resp, &retErr)
 	respBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if readErr != nil {
 		return nil, &UpstreamFailoverError{
@@ -1386,9 +1398,6 @@ func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account 
 			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBytes}
 		}
 		return nil, fmt.Errorf("grok upstream %d: %s", resp.StatusCode, msg)
-	}
-	if err := validateControlledNonstreamResponse(resp, respBytes, "responses"); err != nil {
-		return nil, err
 	}
 	return respBytes, nil
 }

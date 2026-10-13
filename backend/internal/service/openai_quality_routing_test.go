@@ -19,6 +19,7 @@ import (
 func qualityTestContext(s *OpenAIGatewayService, api, group int64, model, extra string) (*gin.Context, []byte, string) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	c.Request = c.Request.WithContext(withOpenAIQualityRouting(c.Request.Context()))
 	key := &APIKey{ID: api}
 	if group != 0 {
 		key.GroupID = &group
@@ -32,6 +33,17 @@ func qualityTestContext(s *OpenAIGatewayService, api, group int64, model, extra 
 func qualityTestAccount(id int64, provider string) Account {
 	return Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive,
 		Schedulable: true, Concurrency: 10, Priority: int(id), Credentials: map[string]any{"base_url": provider}}
+}
+
+func TestOpenAIQualityRoutingInertWithoutOptIn(t *testing.T) {
+	s := &OpenAIGatewayService{}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	c.Set("api_key", &APIKey{ID: 1})
+	s.AttachOpenAIQualityRouting(c, "same-session", []byte(`{"model":"gpt-6-astra","input":"hello"}`))
+	require.Nil(t, qualityRequest(c.Request.Context()), "original Sub2API scheduling never attaches quality routing")
+	opted, _, _ := qualityTestContext(s, 1, 0, "gpt-6-astra", "")
+	require.NotNil(t, qualityRequest(opted.Request.Context()))
 }
 
 func TestOpenAIQualityExcludesOAuth(t *testing.T) {

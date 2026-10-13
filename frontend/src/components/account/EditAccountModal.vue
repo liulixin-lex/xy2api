@@ -1699,7 +1699,7 @@
           <p class="input-hint">{{ t('admin.accounts.loadFactorHint') }}</p>
         </div>
         <div>
-          <label class="input-label">{{ t(schedulingModeStore.isControlled ? 'admin.scheduling.modeSettings.defaultPriority' : 'admin.accounts.priority') }}</label>
+          <label class="input-label">{{ t('admin.accounts.priority') }}</label>
           <input
             v-model.number="form.priority"
             type="number"
@@ -1707,7 +1707,7 @@
             class="input"
             data-tour="account-form-priority"
           />
-          <p class="input-hint">{{ t(schedulingModeStore.isControlled ? 'admin.scheduling.modeSettings.defaultPriorityHint' : 'admin.accounts.priorityHint') }}</p>
+          <p class="input-hint">{{ t('admin.accounts.priorityHint') }}</p>
         </div>
         <div>
           <label class="input-label">{{ t('admin.accounts.billingRateMultiplier') }}</label>
@@ -1750,6 +1750,7 @@
           </div>
         </div>
       </div>
+      <ShareAccountRules v-if="account" :account-id="account.id" />
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
@@ -3132,8 +3133,6 @@
 </template>
 
 <script setup lang="ts">
-import { useSchedulingModeStore } from '@/stores/schedulingMode'
-const schedulingModeStore = useSchedulingModeStore()
 import IQCheckSettings from './IQCheckSettings.vue'
 import type { IQCheckSettings as IQSettings } from '@/types'
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
@@ -3166,6 +3165,7 @@ import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import CodexAccountTicketSettings from '@/components/account/CodexAccountTicketSettings.vue'
+import ShareAccountRules from '@/components/account/ShareAccountRules.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'

@@ -115,9 +115,6 @@ func isClientCanceledTransportError(ctx context.Context, err error) bool {
 //
 // passthrough tags the Ops error event for the OpenAI passthrough forward path.
 func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool) error {
-	if IsControlledSchedulingStop(err) {
-		return err
-	}
 	if isClientCanceledTransportError(ctx, err) {
 		return err
 	}
@@ -153,7 +150,7 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 		return err
 	}
 
-	if !ControlledSchedulingEnabled(ctx) && classifyUpstreamTransportError(err).Persistent {
+	if classifyUpstreamTransportError(err).Persistent {
 		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
 	}
 

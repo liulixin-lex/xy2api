@@ -852,7 +852,6 @@ func ProvideAPIKeyService(
 
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
-	ProvideControlledSchedulingService,
 	// Core services
 	ProvideAuthService,
 	NewPasskeyService,
@@ -897,6 +896,7 @@ var ProviderSet = wire.NewSet(
 	ProvideOAuthRefreshAPI,
 	ProvideGeminiTokenProvider,
 	NewGeminiMessagesCompatService,
+	ProvideShareSchedulingService,
 	ProvideAntigravityTokenProvider,
 	ProvideGrokTokenProvider,
 	ProvideOpenAITokenProvider,
@@ -1078,29 +1078,23 @@ func ProvideChannelMonitorV2Aggregator(repo ChannelMonitorV2Repository, db *sql.
 	return aggregator
 }
 
-// ProvideControlledSchedulingService installs shared policy and dispatch gates
-// after normal services exist. Constructors used by isolated tests stay stable.
-func ProvideControlledSchedulingService(db *sql.DB, rdb *redis.Client, accounts AccountRepository, concurrency *ConcurrencyService, openai *OpenAIGatewayService, gateway *GatewayService, gemini *GeminiMessagesCompatService, antigravity *AntigravityGatewayService) *ControlledSchedulingService {
-	s := newControlledSchedulingService(db, rdb, accounts, concurrency, openai.cfg != nil && openai.cfg.RunMode == config.RunModeSimple)
-	// Initialize the read-only proxy circuit pointer before services become concurrent.
-	openai.getOpenAIProxyStreamCircuit()
-	s.SetExplainEligibility(openai.ExplainSchedulingEligibility, gateway.ExplainSchedulingEligibility)
-	openai.controlledScheduling = s
-	gateway.controlledScheduling = s
-	gemini.controlledScheduling = s
-	antigravity.controlledScheduling = s
-	openai.httpUpstream = &controlledHTTPUpstream{base: openai.httpUpstream, service: s}
-	gateway.httpUpstream = &controlledHTTPUpstream{base: gateway.httpUpstream, service: s}
-	gemini.httpUpstream = &controlledHTTPUpstream{base: gemini.httpUpstream, service: s}
-	antigravity.httpUpstream = &controlledHTTPUpstream{base: antigravity.httpUpstream, service: s}
-	s.Start()
-	return s
-}
-
 // ProvideClaudeResetCreditService wires the Claude reset query and, with the
 // idempotency store and Redis leases, manual redemption.
 func ProvideClaudeResetCreditService(accounts AccountRepository, tokens *ClaudeTokenProvider, proxies ProxyRepository, settings *SettingService, idem *IdempotencyCoordinator, locks LeaderLockCache) *ClaudeResetCreditService {
 	s := NewClaudeResetCreditService(accounts, tokens, proxies, settings)
 	s.ConfigureRedemption(idem, locks)
+	return s
+}
+
+// ProvideShareSchedulingService installs share scheduling into the gateway
+// services after they exist, so their constructors stay stable for tests.
+// Until an administrator enables it every group keeps the original scheduler.
+func ProvideShareSchedulingService(repo ShareSchedulingRepository, store ShareSchedulingStore, settingRepo SettingRepository, gateway *GatewayService, openai *OpenAIGatewayService, cfg *config.Config) *ShareSchedulingService {
+	s := NewShareSchedulingService(repo, store, settingRepo)
+	s.meterIO = cfg != nil && cfg.Server.EnableServerTiming
+	gateway.shareScheduling = s
+	openai.shareScheduling = s
+	s.attachGateways(gateway, openai)
+	s.Start()
 	return s
 }

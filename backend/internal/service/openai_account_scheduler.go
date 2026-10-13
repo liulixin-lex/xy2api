@@ -2209,23 +2209,12 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
-	if s.controlledScheduling != nil {
-		request, enabled, err := s.controlledScheduling.loadPolicy(ctx, groupID, requestedModel, sessionHash)
-		if err != nil {
-			return nil, OpenAIAccountScheduleDecision{}, err
-		}
-		if enabled {
-			return s.selectControlledOpenAI(ctx, request, OpenAIAccountScheduleRequest{GroupID: groupID, PreviousResponseID: previousResponseID, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability, RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, Platform: platform, PreviousResponseCanMove: previousResponseCanMove})
-		}
-
-		if Sub2APISchedulingEnabled(ctx) {
-			return s.selectAccountWithoutQualityRouting(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
-		}
-		if selection, decision, handled, e := s.selectLegacyControlledOwner(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, PreviousResponseID: previousResponseID, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability, RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, Platform: platform}); handled {
-			return selection, decision, e
-		}
+	ctx = s.withOpenAIShareTrace(ctx, groupID, sessionHash, excludedIDs, requiredImageCapability)
+	selection, decision, err := s.selectAccountWithQualityRouting(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+	if err == nil && selection != nil {
+		s.shareScheduling.recordSelection(ctx, selection.Account)
 	}
-	return s.selectAccountWithQualityRouting(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+	return selection, decision, err
 }
 
 func (s *OpenAIGatewayService) selectAccountWithoutQualityRouting(
@@ -2386,6 +2375,13 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	guardianParentAccountID := int64(0)
 	if strings.TrimSpace(previousResponseID) == "" {
 		guardianParentAccountID = s.resolveOpenAIGuardianParentAccountID(ctx, groupID)
+	}
+	if selection, shareDecision, handled, err := s.shareSchedulingHook(ctx, openAIShareSelection{
+		groupID: groupID, previousResponse: previousResponseID, sessionHash: sessionHash, model: requestedModel,
+		excluded: excludedIDs, transport: requiredTransport, capability: requiredCapability, platform: platform,
+		guardianParentID: guardianParentAccountID, preserveBinding: preserveGuardianParentBinding,
+	}, requireCompact, requiredImageCapability); handled {
+		return selection, shareDecision, err
 	}
 	scheduler := s.getOpenAIAccountScheduler(ctx)
 	if scheduler == nil {
@@ -2575,13 +2571,10 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Accoun
 	return s.ReportOpenAIAccountScheduleResultWithContext(context.Background(), account, model, success, firstTokenMs, observedErr...)
 }
 
-// ReportOpenAIAccountScheduleResultWithContext preserves the legacy reporting
-// entrypoint, but controlled requests use only their normalized terminal observer.
-// Credential, quota and provider Retry-After handlers remain independent.
+// ReportOpenAIAccountScheduleResultWithContext reports a request outcome to the
+// scheduler and API-key health observer. Credential, quota and provider
+// Retry-After handlers remain independent.
 func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResultWithContext(ctx context.Context, account *Account, model string, success bool, firstTokenMs *int, observedErr ...error) bool {
-	if ControlledSchedulingEnabled(ctx) {
-		return false
-	}
 	if account == nil {
 		return false
 	}
@@ -2609,9 +2602,6 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResultWithContext(ctx 
 // ObserveOpenAIAccountHealthFailure records failures that cannot reach the
 // scheduler-result path, for example after semantic response bytes were sent.
 func (s *OpenAIGatewayService) ObserveOpenAIAccountHealthFailure(ctx context.Context, account *Account, observedErr error) bool {
-	if ControlledSchedulingEnabled(ctx) {
-		return false
-	}
 	if s == nil || s.rateLimitService == nil || account == nil || observedErr == nil {
 		return false
 	}

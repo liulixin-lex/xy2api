@@ -111,9 +111,6 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		useUpstreamStream,
 	)
 
-	if useUpstreamStream && !clientStream {
-		ctx = withControlledBufferedResponse(ctx)
-	}
 	var resp *http.Response
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
 		upstreamReq, idHeader, err := buildReq(ctx)
@@ -151,7 +148,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 			if resp.StatusCode == http.StatusTooManyRequests {
 				s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 			}
-			if !ControlledSchedulingEnabled(ctx) && attempt < geminiMaxRetries {
+			if attempt < geminiMaxRetries {
 				upstreamReqID := resp.Header.Get(requestIDHeader)
 				if upstreamReqID == "" {
 					upstreamReqID = resp.Header.Get("x-goog-request-id")
@@ -184,9 +181,6 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		break
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if useUpstreamStream && !clientStream {
-		defer finishControlledNonstreamResponse(resp, &retErr)
-	}
 
 	requestID := resp.Header.Get(requestIDHeader)
 	if requestID == "" {
@@ -249,15 +243,9 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		usage = streamRes.usage
 		firstTokenMs = streamRes.firstTokenMs
 	} else if useUpstreamStream {
-		collected, usageObj, stats, err := collectGeminiSSEObserved(resp.Body, account.Type == AccountTypeOAuth, nil)
+		collected, usageObj, _, err := collectGeminiSSEObserved(resp.Body, account.Type == AccountTypeOAuth, nil)
 		if err != nil {
 			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Failed to read upstream stream")
-		}
-		if stats.sawDone {
-			markControlledNonstreamTerminal(resp)
-		}
-		if err := validateControlledGeminiCollection(resp, collected, stats.terminalResponse); err != nil {
-			return nil, err
 		}
 		collectedBytes, _ := json.Marshal(collected)
 		chatResp, usageObj2, err := geminiResponseToChatCompletions(collected, originalModel, collectedBytes, usageObj)
@@ -451,13 +439,9 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsNonStreamingResponseF
 	originalModel string,
 	isOAuth bool,
 ) (_ *ClaudeUsage, retErr error) {
-	defer finishControlledNonstreamResponse(resp, &retErr)
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		return nil, nonstreamReadError(c.Request.Context(), resp, err)
-	}
-	if err := validateControlledNonstreamResponse(resp, respBody, "gemini"); err != nil {
-		return nil, err
 	}
 
 	if isOAuth {

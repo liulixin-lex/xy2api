@@ -39,10 +39,6 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 		return nil
 	}
 	connID := strings.TrimSpace(lease.ConnID())
-	// Explicit mode never sends hidden generate=false requests outside its ledger.
-	if ControlledSchedulingEnabled(ctx) {
-		return nil
-	}
 	if !s.isOpenAIWSGeneratePrewarmEnabled() {
 		return nil
 	}
@@ -560,9 +556,8 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		// A transient lookup failure must not destroy strong response ownership.
 		return 0, nil, "", nil
 	}
-	var continuationAllowed bool
-	account, continuationAllowed = s.controlledOwnerForContinuation(ctx, account)
-	if !continuationAllowed {
+	// Generic account disable always applies, including to continuation owners.
+	if !account.Schedulable {
 		return 0, nil, "", nil
 	}
 	// OAuth/SetupToken continuation state lives on the WSv2 session and cannot
@@ -604,8 +599,7 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		if latestErr != nil || latest == nil {
 			return 0, nil, "", nil
 		}
-		latest, continuationAllowed = s.controlledOwnerForContinuation(ctx, latest)
-		if !continuationAllowed {
+		if !latest.Schedulable {
 			return 0, nil, "", nil
 		}
 		if shouldClearStickySession(latest, requestedModel) || !latest.IsOpenAI() || !latest.IsSchedulable() {

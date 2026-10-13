@@ -525,3 +525,28 @@ func (c *gatewayCache) MarkLiveCallClosed(ctx context.Context, callHash string, 
 	result, err := markLiveCallClosedScript.Run(ctx, c.rdb, []string{liveCallKey(callHash)}, int64(ttl.Seconds())).Int()
 	return result == 1, err
 }
+
+// GetSessionAccountIDWithTTL reads a binding and its remaining lifetime in
+// one round trip. A key without expiry reports a negative remaining time.
+func (c *gatewayCache) GetSessionAccountIDWithTTL(ctx context.Context, groupID int64, sessionHash string) (int64, time.Duration, error) {
+	key := buildSessionKey(groupID, sessionHash)
+	pipe := c.rdb.Pipeline()
+	get := pipe.Get(ctx, key)
+	pttl := pipe.PTTL(ctx, key)
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return 0, 0, err
+	}
+	accountID, err := get.Int64()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return 0, 0, service.ErrStickySessionNotFound
+		}
+		return 0, 0, err
+	}
+	return accountID, pttl.Val(), nil
+}
+
+// SetSessionAccountIDIfAbsent creates a binding unless one already exists.
+func (c *gatewayCache) SetSessionAccountIDIfAbsent(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) (bool, error) {
+	return c.rdb.SetNX(ctx, buildSessionKey(groupID, sessionHash), accountID, ttl).Result()
+}

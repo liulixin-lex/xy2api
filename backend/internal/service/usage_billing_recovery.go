@@ -17,16 +17,15 @@ type UsageBillingRecoveryRepository interface {
 }
 
 type UsageBillingRecoveryService struct {
-	repo                 UsageBillingRecoveryRepository
-	cache                *BillingCacheService
-	controlledScheduling *ControlledSchedulingService
-	cancel               context.CancelFunc
-	done                 chan struct{}
-	stop                 sync.Once
+	repo   UsageBillingRecoveryRepository
+	cache  *BillingCacheService
+	cancel context.CancelFunc
+	done   chan struct{}
+	stop   sync.Once
 }
 
-func ProvideUsageBillingRecoveryService(repo UsageBillingRepository, cache *BillingCacheService, control *ControlledSchedulingService) *UsageBillingRecoveryService {
-	s := &UsageBillingRecoveryService{cache: cache, controlledScheduling: control, done: make(chan struct{})}
+func ProvideUsageBillingRecoveryService(repo UsageBillingRepository, cache *BillingCacheService) *UsageBillingRecoveryService {
+	s := &UsageBillingRecoveryService{cache: cache, done: make(chan struct{})}
 	s.repo, _ = repo.(UsageBillingRecoveryRepository)
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
@@ -75,9 +74,6 @@ func (s *UsageBillingRecoveryService) recoverBatch(ctx context.Context) {
 		_, err := s.repo.Apply(billCtx, cmd)
 		if err == nil {
 			err = s.invalidateCache(billCtx, cmd)
-		}
-		if err == nil {
-			err = acknowledgeSchedulingUsage(WithSchedulingUsageAttempt(billCtx, cmd.SchedulingAttemptID), s.controlledScheduling, cmd.AccountID)
 		}
 		if err == nil {
 			err = s.repo.CompleteBillingCacheInvalidation(billCtx, cmd)

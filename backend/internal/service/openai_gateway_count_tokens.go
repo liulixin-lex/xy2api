@@ -91,7 +91,6 @@ func (s *OpenAIGatewayService) ForwardResponsesInputTokens(
 		return fmt.Errorf("responses input_tokens: upstream request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	defer finishControlledNonstreamResponse(resp, &retErr)
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -116,9 +115,6 @@ func (s *OpenAIGatewayService) ForwardResponsesInputTokens(
 		return fmt.Errorf("responses input_tokens: upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
 	}
 
-	if err := validateControlledNonstreamResponse(resp, respBody, "count_tokens"); err != nil {
-		return err
-	}
 	inputTokens := gjson.GetBytes(respBody, "input_tokens")
 	if !inputTokens.Exists() {
 		writeOpenAIResponsesInputTokensError(c, http.StatusBadGateway, "upstream_error", "Upstream response missing input_tokens")
@@ -335,7 +331,6 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 		return fmt.Errorf("openai input_tokens upstream request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	defer finishControlledNonstreamResponse(resp, &retErr)
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -383,9 +378,6 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 		return fmt.Errorf("input_tokens upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
 	}
 
-	if err := validateControlledNonstreamResponse(resp, respBody, "count_tokens"); err != nil {
-		return err
-	}
 	inputTokens := gjson.GetBytes(respBody, "input_tokens")
 	if !inputTokens.Exists() {
 		writeAnthropicCountTokensError(c, http.StatusBadGateway, "upstream_error", "Upstream response missing input_tokens")
