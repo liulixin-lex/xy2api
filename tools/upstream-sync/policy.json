@@ -210,7 +210,8 @@
       "frontend/src/api/__tests__/settings.authSourceDefaults.spec.ts",
       "frontend/src/components/account/__tests__/EditAccountModal.spec.ts",
       "frontend/src/components/admin/account/AccountTableFilters.vue",
-      "frontend/src/components/admin/usage/UsageTable.vue"
+      "frontend/src/components/admin/usage/UsageTable.vue",
+      "backend/Makefile"
     ],
     "generated": [
       "backend/ent/**",

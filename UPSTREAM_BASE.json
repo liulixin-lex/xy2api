@@ -146,6 +146,11 @@
       "path": "frontend/src/components/keys/__tests__/UseKeyModal.spec.ts",
       "status": "resolved",
       "resolution": "Merge upstream feature-section-independent assertions while retaining api_key_model_discovery checks for fork remote catalog mode."
+    },
+    {
+      "path": "backend/Makefile",
+      "status": "resolved",
+      "resolution": "After Ent/Wire generation, run go mod tidy to remove generation-only tool checksums before release. The exact RC release hook was reproduced to change only ten unused go.sum records; go.mod, generated application sources and runtime dependencies remain identical. A full make generate round-trip and tidy diff leave the committed tree clean."
     }
   ],
   "custom_patches": [
