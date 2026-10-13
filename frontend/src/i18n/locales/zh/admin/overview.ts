@@ -82,8 +82,21 @@ export default {
     },
 
     backup: {
+      scope: {
+        label: "备份范围",
+        database: "整个数据库",
+        public: "应用数据（public schema）",
+        databaseHint: "导出整个数据库，数据库账号必须能读取所有 schema 和表。不会跳过无权限的数据。",
+        publicHint: "仅导出 public schema 中的应用数据。不包含其他 schema、Redis、应用文件或加密密钥。",
+        saveHint: "保存后同时用于手动和定时备份；不会更改已有备份。",
+        active: "当前已保存的备份范围：",
+        unknown: "尚未加载",
+        failureDetails: "查看失败原因",
+        unsupported: "服务器未确认所选备份范围。请刷新设置并确认后端已升级。",
+        restorePublicConfirm: "从此备份恢复 public schema 中的应用数据？会覆盖备份内对应的表和数据，其他 schema 不受影响。",
+      },
       title: '数据库备份',
-      description: '全量数据库备份到 S3 兼容存储，支持定时备份与恢复',
+      description: '按选定范围备份数据库到 S3 兼容存储，支持手动、定时备份与恢复',
       s3: {
         title: 'S3 存储配置',
         description: '配置 S3 兼容存储（支持 Cloudflare R2）',
@@ -117,8 +130,8 @@ export default {
         saved: '异步生图对象存储配置已保存'
       },
       schedule: {
-        title: '定时备份',
-        description: '配置自动定时备份',
+        title: '备份策略',
+        description: '设置手动和定时备份范围、自动备份时间及保留规则',
         enabled: '启用定时备份',
         cronExpr: 'Cron 表达式',
         cronHint: '例如 "0 2 * * *" 表示每天凌晨 2 点',

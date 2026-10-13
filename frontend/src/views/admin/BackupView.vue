@@ -140,6 +140,15 @@
           </p>
         </div>
         <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div class="md:col-span-2">
+            <label for="backup-scope" class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.backup.scope.label') }}</label>
+            <select id="backup-scope" v-model="scheduleForm.backup_scope" class="input w-full" aria-describedby="backup-scope-hint">
+              <option value="database">{{ t('admin.backup.scope.database') }}</option>
+              <option value="public">{{ t('admin.backup.scope.public') }}</option>
+            </select>
+            <p id="backup-scope-hint" class="mt-2 text-sm text-gray-600 dark:text-gray-300">{{ t(scheduleForm.backup_scope === 'public' ? 'admin.backup.scope.publicHint' : 'admin.backup.scope.databaseHint') }}</p>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.backup.scope.saveHint') }}</p>
+          </div>
           <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 md:col-span-2">
             <input v-model="scheduleForm.enabled" type="checkbox" />
             <span>{{ t('admin.backup.schedule.enabled') }}</span>
@@ -185,13 +194,16 @@
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
               {{ t('admin.backup.operations.description') }}
             </p>
+            <p class="mt-1 text-sm text-gray-600 dark:text-gray-300" data-testid="backup-saved-scope">
+              {{ t('admin.backup.scope.active') }} {{ t(savedBackupScope ? `admin.backup.scope.${savedBackupScope}` : 'admin.backup.scope.unknown') }}
+            </p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <div class="flex items-center gap-1">
               <label class="text-xs text-gray-600 dark:text-gray-400">{{ t('admin.backup.operations.expireDays') }}</label>
               <input v-model.number="manualExpireDays" type="number" min="0" class="input w-20 text-xs" />
             </div>
-            <button type="button" class="btn btn-primary btn-sm" :disabled="creatingBackup" @click="createBackup">
+            <button type="button" class="btn btn-primary btn-sm" :disabled="creatingBackup || !savedBackupScope" @click="createBackup">
               {{ creatingBackup ? t('admin.backup.operations.backing') : t('admin.backup.operations.createBackup') }}
             </button>
             <button type="button" class="btn btn-secondary btn-sm" :disabled="loadingBackups" @click="loadBackups">
@@ -230,11 +242,16 @@
                 </td>
                 <td class="py-3 pr-4 text-xs">
                   {{ record.file_name }}
+                  <div class="mt-1 text-gray-600 dark:text-gray-300" data-testid="backup-record-scope">{{ t(record.backup_scope === 'public' ? 'admin.backup.scope.public' : 'admin.backup.scope.database') }}</div>
+                  <details v-if="record.error_message" class="mt-2 max-w-lg whitespace-normal break-words text-red-700 dark:text-red-300">
+                    <summary class="cursor-pointer font-medium">{{ t('admin.backup.scope.failureDetails') }}</summary>
+                    <p class="mt-1 whitespace-pre-wrap">{{ record.error_message }}</p>
+                  </details>
                   <span v-if="record.monthly_archive" class="ml-1 inline-block rounded bg-primary-50 px-1.5 py-0.5 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">{{ t('admin.backup.archive.badge') }}</span>
                   <div v-if="record.monthly_archive" class="mt-1 text-gray-500 dark:text-gray-400">{{ record.monthly_archive.dates.join(' / ') }}</div>
                 </td>
                 <td class="py-3 pr-4 text-xs">{{ formatSize(record.size_bytes) }}</td>
-                <td class="py-3 pr-4 text-xs">{{ record.parts?.length || (record.status === 'running' ? '-' : 1) }}</td>
+                <td class="py-3 pr-4 text-xs">{{ record.parts?.length || (record.status === 'completed' ? 1 : '—') }}</td>
                 <td class="py-3 pr-4 text-xs">
                   {{ record.monthly_archive
                     ? record.monthly_archive.retain_count === 0 ? t('admin.backup.archive.forever') : t('admin.backup.archive.retainLatest', { count: record.monthly_archive.retain_count })
@@ -420,6 +437,7 @@ import { adminAPI } from '@/api'
 import { useAppStore } from '@/stores'
 import type {
   BackupS3Config,
+  BackupScope,
   BackupScheduleConfig,
   BackupMonthlyArchiveConfig,
   BackupRecord,
@@ -480,7 +498,9 @@ const savingImageStorage = ref(false)
 const testingImageStorage = ref(false)
 
 // Schedule config
+const savedBackupScope = ref<BackupScope | null>(null)
 const scheduleForm = ref<BackupScheduleConfig>({
+  backup_scope: 'database',
   enabled: false,
   cron_expr: '0 2 * * *',
   retain_days: 14,
@@ -755,7 +775,11 @@ async function testS3() {
 async function loadSchedule() {
   try {
     const cfg = await adminAPI.backup.getSchedule()
+    const scope = cfg.backup_scope || 'database'
+    if (scope !== 'database' && scope !== 'public') throw new Error(t('admin.backup.scope.unsupported'))
+    savedBackupScope.value = scope
     scheduleForm.value = {
+      backup_scope: scope,
       enabled: cfg.enabled,
       cron_expr: cfg.cron_expr || '0 2 * * *',
       retain_days: cfg.retain_days ?? 14,
@@ -778,7 +802,10 @@ async function saveSchedule() {
   savingSchedule.value = true
   try {
     const archive = archivePayload.value
-    await adminAPI.backup.updateSchedule({ ...scheduleForm.value, monthly_archive: archive })
+    const saved = await adminAPI.backup.updateSchedule({ ...scheduleForm.value, monthly_archive: archive })
+    const returnedScope = saved.backup_scope || 'database'
+    if (returnedScope !== scheduleForm.value.backup_scope) throw new Error(t('admin.backup.scope.unsupported'))
+    savedBackupScope.value = returnedScope
     savedArchive.value = cloneArchive(archive)
     appStore.showSuccess(t('admin.backup.schedule.saved'))
   } catch (error) {
@@ -855,7 +882,8 @@ function closeDownloadParts() {
 }
 
 async function restoreBackup(id: string) {
-  if (!window.confirm(t('admin.backup.actions.restoreConfirm'))) return
+  const scope = backups.value.find(record => record.id === id)?.backup_scope
+  if (!window.confirm(t(scope === 'public' ? 'admin.backup.scope.restorePublicConfirm' : 'admin.backup.actions.restoreConfirm'))) return
   const password = window.prompt(t('admin.backup.actions.restorePasswordPrompt'))
   if (!password) return
   restoringId.value = id

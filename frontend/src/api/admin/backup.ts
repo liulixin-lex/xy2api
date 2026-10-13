@@ -10,7 +10,10 @@ export interface BackupS3Config {
   force_path_style: boolean
 }
 
+export type BackupScope = 'database' | 'public'
+
 export interface BackupScheduleConfig {
+  backup_scope?: BackupScope
   enabled: boolean
   cron_expr: string
   retain_days: number
@@ -31,6 +34,7 @@ export interface BackupMonthlyArchive {
 }
 
 export interface BackupRecord {
+  backup_scope?: BackupScope
   id: string
   status: 'pending' | 'running' | 'completed' | 'failed'
   backup_type: string

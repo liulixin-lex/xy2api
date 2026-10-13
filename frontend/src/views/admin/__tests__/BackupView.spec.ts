@@ -181,7 +181,7 @@ describe('admin BackupView', () => {
     const wrapper = mountBackupView()
     await flushPromises()
 
-    expect(wrapper.find('tbody tr td:nth-child(5)').text()).toBe('-')
+    expect(wrapper.find('tbody tr td:nth-child(5)').text()).toBe('—')
     expect(wrapper.findAll('button').some(button => button.text() === 'common.delete')).toBe(false)
   })
 
@@ -299,4 +299,45 @@ describe('admin BackupView', () => {
     await flushPromises()
     expect(deleteBackup).toHaveBeenCalledWith('archived', true)
   })
+  it('keeps legacy backups explicitly scoped to the full database', async () => {
+    listBackups.mockResolvedValue({ items: [baseRecord('legacy')] })
+    const wrapper = mountBackupView()
+    await flushPromises()
+    expect((wrapper.get('#backup-scope').element as HTMLSelectElement).value).toBe('database')
+    expect(wrapper.get('[data-testid="backup-record-scope"]').text()).toBe('admin.backup.scope.database')
+  })
+
+  it('changes the effective manual and scheduled scope only after a confirmed save', async () => {
+    updateSchedule.mockResolvedValue({ backup_scope: 'public' })
+    const wrapper = mountBackupView()
+    await flushPromises()
+    await wrapper.get('#backup-scope').setValue('public')
+    expect(wrapper.get('#backup-scope-hint').text()).toBe('admin.backup.scope.publicHint')
+    expect(wrapper.get('[data-testid="backup-saved-scope"]').text()).toContain('admin.backup.scope.database')
+    await wrapper.get('[data-testid="backup-schedule"] .btn-primary').trigger('click')
+    await flushPromises()
+    expect(updateSchedule).toHaveBeenCalledWith(expect.objectContaining({ backup_scope: 'public' }))
+    expect(wrapper.get('[data-testid="backup-saved-scope"]').text()).toContain('admin.backup.scope.public')
+  })
+
+  it('does not claim the selected scope was saved by an older backend', async () => {
+    updateSchedule.mockResolvedValue({})
+    const wrapper = mountBackupView()
+    await flushPromises()
+    await wrapper.get('#backup-scope').setValue('public')
+    await wrapper.get('[data-testid="backup-schedule"] .btn-primary').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="backup-saved-scope"]').text()).toContain('admin.backup.scope.database')
+  })
+
+  it('shows persisted scope and actionable failure details on backup records', async () => {
+    listBackups.mockResolvedValue({ items: [{ ...baseRecord('failed'), backup_scope: 'public', status: 'failed', error_message: 'pg_dump: permission denied for table example' }] })
+    const wrapper = mountBackupView()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="backup-record-scope"]').text()).toBe('admin.backup.scope.public')
+    expect(wrapper.get('details summary').text()).toBe('admin.backup.scope.failureDetails')
+    expect(wrapper.get('details').text()).toContain('permission denied for table example')
+    expect(wrapper.get('tbody tr td:nth-child(5)').text()).toBe('—')
+  })
+
 })

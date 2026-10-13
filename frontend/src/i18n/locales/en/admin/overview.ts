@@ -82,8 +82,21 @@ export default {
     },
 
     backup: {
+      scope: {
+        label: "Backup scope",
+        database: "Entire database",
+        public: "Application data (public schema)",
+        databaseHint: "Exports the entire database. The database role must be able to read every schema and table. Inaccessible data is not skipped.",
+        publicHint: "Exports application data in the public schema only. Other schemas, Redis, application files and encryption keys are not included.",
+        saveHint: "After saving, this applies to both manual and scheduled backups. Existing backups are unchanged.",
+        active: "Saved backup scope:",
+        unknown: "Not loaded",
+        failureDetails: "View failure details",
+        unsupported: "The server did not confirm the selected backup scope. Reload settings and verify that the backend has been upgraded.",
+        restorePublicConfirm: "Restore application data in the public schema from this backup? Tables and data included in the backup will be overwritten. Other schemas will remain unchanged.",
+      },
       title: 'Database Backup',
-      description: 'Full database backup to S3-compatible storage with scheduled backup and restore',
+      description: 'Back up the selected database scope to S3-compatible storage, manually or on a schedule, with restore support',
       s3: {
         title: 'S3 Storage Configuration',
         description: 'Configure S3-compatible storage (supports Cloudflare R2)',
@@ -117,8 +130,8 @@ export default {
         saved: 'Async image object storage saved'
       },
       schedule: {
-        title: 'Scheduled Backup',
-        description: 'Configure automatic scheduled backups',
+        title: 'Backup Policy',
+        description: 'Choose the scope for manual and scheduled backups, the schedule and retention rules',
         enabled: 'Enable Scheduled Backup',
         cronExpr: 'Cron Expression',
         cronHint: 'e.g. "0 2 * * *" means every day at 2:00 AM',
