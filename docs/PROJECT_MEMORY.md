@@ -4,16 +4,20 @@
 
 ## 当前交接状态
 
-### Sub2API 0.2.15 / XY2API 0.3.0 正式晋级（2026-10-13，RC 全部门禁完成）
+### Sub2API 0.2.15 / XY2API 0.3.0 正式发布完成（2026-10-13）
 
 - 独立工作树 `/lex/xy2api-sync-20261013`；起始main `7b1d5d8c387c461a660befa3ac936b39715b4bf0`。固定官方annotated v0.2.15（object `86a80c13dcba86f52f9ca815b5a471cecc236227`，target `f2669c8cf62555cd92389b3f55920e9e6e7c6ff2`），真实base `0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d`。146个上游提交、27项冲突裁决见[同步说明](UPSTREAM_SYNC_V0215.md)。
 - [同步PR #92](https://github.com/liulixin-lex/xy2api/pull/92)已按固定head `bcb62e5801996fb3b3a3411096cae22f5fa2651c`、18/18成功检查合入main `8f47f8fb2ee82d9cd85acd7d7d9353c64e41e614`。PR90、91已自动标记merged，原head分别`2c8507f8b8ff695f4a4f20689535aa9df1098455`、`5eec0830aad240e0b3d2171505fa7299e84225a6`；保留真实merge历史。
 - 备份现场经授权只读确认：应用角色无法读历史外部schema，客户端18.6/数据库18.4及TLS正常。用户选择public；新显式scope保留旧全库默认，升级后须在页面选择并保存public。native TOC保留public与管理员pg_trgm，真实PG覆盖函数/类型/序列/数据、其他schema不变及SQL错误事务回滚。恢复目标须先初始化本版本schema/扩展。见[备份说明](BACKUP_RELIABILITY.md)。生产未改权限/配置/服务，未执行导出或恢复。
 - controlled退役，share默认关闭，旧策略只导入未启用草稿；异步图片独立context与R1–R4心跳/对象清理/账本/存储关闭修复均已回归。tokens/s采用完整请求耗时，缓存改称基于互斥计费Token桶的读取占比；中英文与显示开关一致，见[统计口径](USAGE_METRICS.md)。
 - 316条已发布SQL/checksum保持，仅追加270/271，总计318。安装空密码DSN使用统一构造；来源审计、调度差异白名单、生成后零diff、完整Go lint 0 issues及embed构建通过。前端384文件/3026项、最后文案38项、lint/typecheck/build与24张浏览器截图通过。后端本地unit62包/23651测试及子测试通过（40条件跳过）；原integration唯一迁移242引用失败修正为271，四项真实PG复验通过，最终head远端完整integration/race/真实Redis/PG及安全门禁再次全绿。最初gofmt同类报告上限3掩盖余10处import，已按全部改动Go文件一次修正，失败记录保留。
-- [RC v0.3.0-rc.1](https://github.com/liulixin-lex/xy2api/releases/tag/v0.3.0-rc.1) annotated object `e96985ec1a7a6afb8704d788763756dd7f73d707` → `8f47f8fb2ee82d9cd85acd7d7d9353c64e41e614`；[Release run38345930894](https://github.com/liulixin-lex/xy2api/actions/runs/38345930894)成功。5平台包+checksums六资产196948970字节独立双SHA校验通过；双架构image index `sha256:f5b7500bc785c679f200266d312ec695f1857904618116d072fb1af20ba8c563`，labels版本/revision/source一致；prerelease=true/draft=false且stable aliases未移动。RC制品vcs.modified=true已在隔离checkout复现：发布前tidy删除10条生成工具多余go.sum，go.mod与5个平台二进制运行依赖未变；前端资源本身不会使工作树变脏。正式晋级纳入相同checksum整理，并在make generate末尾tidy，实际重新生成后工作树为零diff；正式制品将额外要求vcs.modified=false。
+- [RC v0.3.0-rc.1](https://github.com/liulixin-lex/xy2api/releases/tag/v0.3.0-rc.1) annotated object `e96985ec1a7a6afb8704d788763756dd7f73d707` → `8f47f8fb2ee82d9cd85acd7d7d9353c64e41e614`；[Release run38345930894](https://github.com/liulixin-lex/xy2api/actions/runs/38345930894)成功。5平台包+checksums六资产196948970字节独立双SHA校验通过；双架构image index `sha256:f5b7500bc785c679f200266d312ec695f1857904618116d072fb1af20ba8c563`，labels版本/revision/source一致；prerelease=true/draft=false且stable aliases未移动。RC制品vcs.modified=true已在隔离checkout复现：发布前tidy删除10条生成工具多余go.sum，go.mod与5个平台二进制运行依赖未变；前端资源本身不会使工作树变脏。正式晋级纳入相同checksum整理，并在make generate末尾tidy，实际重新生成后工作树为零diff；正式五平台制品已逐一验证vcs.modified=false。
 - 真实发行RC镜像完成全新318迁移、0.2.6的316→318升级、成套PostgreSQL/Redis/app-data恢复再运行旧版，health/login/me/6静态资源均通过；恢复snapshot与baseline同为`50674a127239ee9e5ee307f8ecc0eb71ad2020a4ab27534a69145c9333e85378`。三个PG客户端均18.6。4个既有部署ID、状态、配置和挂载摘要全部不变。
-- 进入独立`release/0.3.0`晋级，改产品版本/记忆及上述生成流程与checksum整理，补登记backend/Makefile人工裁决；不改变已验业务/前端/SQL或依赖版本。仍须该PR精确head完整CI/安全通过、受保护merge、annotated正式tag、正式制品独立校验及新装/清理；不提前宣称正式发布完成。全部证据 `/lex/xy2api-release-20261013/`；专属演练PG/Redis暂留待正式版，其他原工作树与部署保持。
+- [正式晋级PR #93](https://github.com/liulixin-lex/xy2api/pull/93)最终head `77d43e92b924ec22311487c4b5821521d56cdd41`两组18/18检查成功，常规merge为`1e0fbdd704b9080bb730d337e2003136c683ab78`；[正式v0.3.0](https://github.com/liulixin-lex/xy2api/releases/tag/v0.3.0) annotated object `db6f317ef6af57c74aef55112ccd8fe58d220c92`指向该提交。[Release run38353591650](https://github.com/liulixin-lex/xy2api/actions/runs/38353591650)成功，draft=false/prerelease=false。
+- 正式六资产196942614字节双SHA、五平台原生格式/源码revision/版本与vcs.modified=false全部通过；GHCR linux/amd64与linux/arm64、标签version/revision/source及latest/0.3/0全部一致，index `sha256:5560a67e10b463dbab3e20fca5e719b2933f93dd9f341e890bfe34a12f7f7281`。
+- 正式真实镜像全新318迁移、health/login/me与静态资源通过，pg_dump/pg_restore/psql均18.6。本任务容器/网络/卷及7处演练凭据、备份和应用数据路径已删除；4个既有部署ID/状态/配置/挂载均与起始完全相同。临时dirty复现clone已删除，诊断与校验报告保留在`/lex/xy2api-release-20261013/`。生产仅只读诊断，未部署或改变权限/设置。
+- 收尾按AGENTS要求在发行后补记本文件，单独走纯文档PR；不移动已发布标签。故收尾后main可比正式tag多纯记忆提交，非本记忆文件与正式tag必须零差异，发行源始终固定为1e0fbdd704。同步/晋级短期分支待该纯文档收尾合并后删除；保留原用户feature分支和全部不可变标签。
+- 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ### PR #90 复审精简（2026-10-12，随 PR #90 推送；未合并、未发版、未部署）
 
@@ -668,12 +672,6 @@
 Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
-
-### 20261013-sub2api-v0.2.15-full-release — RC 通过，正式版晋级
-
-- 用户授权完整同步/修复/开放PR整合/发版；生产仅只读，未部署。
-- 同步PR92已合并，PR90/91已merged；v0.3.0-rc.1发布、六资产/双架构独立校验、新装/升级/成套恢复全部通过，精确来源与证据见顶部。
-- 当前只做独立release/0.3.0版本晋级及交接记录；待最终head CI/安全、正式tag/Release制品校验、新装和隔离资源清理。没有未完成业务修复，不得把RC结果直接当作正式制品成功。
 
 ### 20261012-pr90-slim — PR #90 复审、精简与上线验收（已完成，随 PR #90 推送；本 Agent 无进行中操作）
 
@@ -2118,3 +2116,11 @@ pnpm --dir frontend run build
 - RC五个平台的vcs.modified=true不是前端产物导致；精确RC隔离clone下载实际前端artifact后status仍空，随后与发布流程相同的Go1.27.2 tidy仅删除5个未使用工具模块的10条go.sum记录，go.mod完全不变，5个模块均不在已发RC二进制dep中。
 - 正式PR93追加该checksum整理，并让make generate在Ent/Wire后执行tidy，避免工具生成再次引入多余sum。完整make generate与git diff --exit-code实跑通过，未改运行时代码、SQL、前端或依赖版本；backend/Makefile经审查登记manual_merge及resolved来源说明。
 - PR93原head ab0af029两组18项检查已全部通过；追加修正后须以新精确head重新通过完整CI/安全，不复用旧head为最终通过。正式资产核验提高为require-clean-vcs。RC标签保持不动，升级/回退证据继续适用于相同业务代码和运行依赖。
+
+### 2026-10-13 — 20261013-sub2api-v0.2.15-full-release — 正式发行与清理完成
+
+- 正式PR93最终77d43e92两组18/18检查全绿，以merge commit1e0fbdd704合入受保护main，annotated v0.3.0 objectdb6f317e指向该源码；未force push、未改既有tag或分支保护。Release38353591650成功，正式flags正确。
+- 独立六资产双SHA、五平台buildinfo（均vcs.modified=false）、双架构image index5560a67e10b463dbab3e20fca5e719b2933f93dd9f341e890bfe34a12f7f7281及version/revision/source/stable aliases全部通过。正式镜像新装318迁移与三个PG18.6客户端通过；RC已完成316→318升级与PG/Redis/app-data成套恢复。
+- 清理仅本任务prefix+label容器/网络/卷和指定敏感fixture路径；保留hash/JSON/日志，4个既有部署完全不变。临时VCS复现clone已删；生产没有写入或部署。
+- 按AGENTS在正式发行后补齐记忆并清理本任务进行中条目，本收尾仅改PROJECT_MEMORY，使用独立PR和完整保护检查。不可变发行tag保持1e0fbdd704；收尾main的业务树与正式tag完全一致，此纯文档领先记录是对runbook收尾“main等于tag”的明确例外，避免为补记发行结果移动标签。
+- 没有未完成业务修复或发行验收；后续仅为用户实际部署时的public设置、生产恢复验证与可选share影子/灰度，未在此次只读生产授权外执行。证据及历史失败/中断均保留，未保证无法证明的零风险。
