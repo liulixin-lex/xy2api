@@ -8,7 +8,7 @@
   "upstream_commit": "f2669c8cf62555cd92389b3f55920e9e6e7c6ff2",
   "merge_base": "0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d",
   "fork_start": "dbfe5f545a2e88a6e9247d0e3723a9b206d5ebbc",
-  "xy2api_version": "0.3.0-rc.1",
+  "xy2api_version": "0.3.0",
   "sub2api_compat_version": "0.2.15",
   "status": "resolved",
   "manual_resolutions": [
@@ -146,6 +146,11 @@
       "path": "frontend/src/components/keys/__tests__/UseKeyModal.spec.ts",
       "status": "resolved",
       "resolution": "Merge upstream feature-section-independent assertions while retaining api_key_model_discovery checks for fork remote catalog mode."
+    },
+    {
+      "path": "backend/Makefile",
+      "status": "resolved",
+      "resolution": "After Ent/Wire generation, run go mod tidy to remove generation-only tool checksums before release. The exact RC release hook was reproduced to change only ten unused go.sum records; go.mod, generated application sources and runtime dependencies remain identical. A full make generate round-trip and tidy diff leave the committed tree clean."
     }
   ],
   "custom_patches": [

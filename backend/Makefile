@@ -9,6 +9,7 @@ build:
 generate:
 	go generate ./ent
 	go generate ./cmd/server
+	go mod tidy
 
 test:
 	go test ./...
