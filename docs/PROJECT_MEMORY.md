@@ -4,15 +4,16 @@
 
 ## 当前交接状态
 
-### Sub2API 0.2.15 / XY2API 0.3.0 集成候选（2026-10-13，最终门禁进行中）
+### Sub2API 0.2.15 / XY2API 0.3.0 正式晋级（2026-10-13，RC 全部门禁完成）
 
-- 独立工作树 `/lex/xy2api-sync-20261013`，分支 `sync/sub2api-v0.2.15`，起始远端 `7b1d5d8c387c461a660befa3ac936b39715b4bf0`。按仓库 Skill 固定正式 annotated `v0.2.15`（object `86a80c13dcba86f52f9ca815b5a471cecc236227`，target `f2669c8cf62555cd92389b3f55920e9e6e7c6ff2`），以真实祖先 `0363b8cd` 三方合并。146 个上游提交、278 个文件、27 个冲突逐项裁决；报告和完整来源见 [同步说明](UPSTREAM_SYNC_V0215.md)。
-- 已在本地以常规 merge 整合固定 head 的 PR #90、#91，保留其完整历史。controlled 退役、share 默认关闭；异步图片任务使用独立执行 context。独立审查修复转存心跳中断、失败遗失对象列表、错误声明charged及关闭存储后原始base64落Redis四项问题。调度差异白名单已对新上游重新核对。
-- 用户明确授权对生产只读核查；现场确认应用角色无权读取历史外部 schema，而客户端18.6、数据库18.4、TLS连接均正常。用户选择应用public备份；新增显式scope并保留旧全库默认，线上未改配置/权限/服务且未运行导出。native TOC方案保留public及管理员拥有的pg_trgm，完整函数/类型/序列/数据与事务恢复已在隔离PG验证。详见 [备份说明](BACKUP_RELIABILITY.md)。上线后须显式保存public，目标恢复库需先初始化XY2API所需扩展。
-- tokens/s统一完整请求耗时的平均输出速率，缓存改称基于计费用量的缓存读取占比；中英页面/趋势/运维文案一致，缺数据不伪造0。参考上游及两个固定二开实现，见 [统计口径](USAGE_METRICS.md)。真实浏览器中英桌面/手机、开关和备份范围已验。
-- 316条已发布迁移及checksum逐项保持，仅追加270/271，总计318；补0.2.6→新schema升级回归。安装空密码DSN改用统一构造，避免数据库名被吞掉。
-- 验证截至此条：同步工具19、发布工具10、源码规则预检与scheduler-diff通过；备份scope定向82主+11子、最终repository/真实PG17主+2子通过。前端完整384文件/3026项复验通过，首轮IQ筛选测试索引失败记录保留；最后4条文案另补38项locale检查、lint与最终构建通过。后端最终unit为62包/23651测试及子测试通过，40项外部依赖/条件测试跳过；全量integration继续串行执行，关键真实数据库与Redis门禁另要求零跳过。资源争用中断未计为成功。
-- 同步分支及不可变上游命名空间标签已推送，草稿[PR #92](https://github.com/liulixin-lex/xy2api/pull/92)已登记真实来源链接；产品已独立升为0.3.0-rc.1。尚未合并main或发布；0.3.0需独立正式晋级PR，固定head CI、安全检查、RC升级回滚与正式制品门禁全部通过后执行。首轮CI仅发现3个归一化import的gofmt问题，已纯格式修正并保留失败记录。证据 `/lex/xy2api-release-20261013/`，既有工作树与运行部署保持。
+- 独立工作树 `/lex/xy2api-sync-20261013`；起始main `7b1d5d8c387c461a660befa3ac936b39715b4bf0`。固定官方annotated v0.2.15（object `86a80c13dcba86f52f9ca815b5a471cecc236227`，target `f2669c8cf62555cd92389b3f55920e9e6e7c6ff2`），真实base `0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d`。146个上游提交、27项冲突裁决见[同步说明](UPSTREAM_SYNC_V0215.md)。
+- [同步PR #92](https://github.com/liulixin-lex/xy2api/pull/92)已按固定head `bcb62e5801996fb3b3a3411096cae22f5fa2651c`、18/18成功检查合入main `8f47f8fb2ee82d9cd85acd7d7d9353c64e41e614`。PR90、91已自动标记merged，原head分别`2c8507f8b8ff695f4a4f20689535aa9df1098455`、`5eec0830aad240e0b3d2171505fa7299e84225a6`；保留真实merge历史。
+- 备份现场经授权只读确认：应用角色无法读历史外部schema，客户端18.6/数据库18.4及TLS正常。用户选择public；新显式scope保留旧全库默认，升级后须在页面选择并保存public。native TOC保留public与管理员pg_trgm，真实PG覆盖函数/类型/序列/数据、其他schema不变及SQL错误事务回滚。恢复目标须先初始化本版本schema/扩展。见[备份说明](BACKUP_RELIABILITY.md)。生产未改权限/配置/服务，未执行导出或恢复。
+- controlled退役，share默认关闭，旧策略只导入未启用草稿；异步图片独立context与R1–R4心跳/对象清理/账本/存储关闭修复均已回归。tokens/s采用完整请求耗时，缓存改称基于互斥计费Token桶的读取占比；中英文与显示开关一致，见[统计口径](USAGE_METRICS.md)。
+- 316条已发布SQL/checksum保持，仅追加270/271，总计318。安装空密码DSN使用统一构造；来源审计、调度差异白名单、生成后零diff、完整Go lint 0 issues及embed构建通过。前端384文件/3026项、最后文案38项、lint/typecheck/build与24张浏览器截图通过。后端本地unit62包/23651测试及子测试通过（40条件跳过）；原integration唯一迁移242引用失败修正为271，四项真实PG复验通过，最终head远端完整integration/race/真实Redis/PG及安全门禁再次全绿。最初gofmt同类报告上限3掩盖余10处import，已按全部改动Go文件一次修正，失败记录保留。
+- [RC v0.3.0-rc.1](https://github.com/liulixin-lex/xy2api/releases/tag/v0.3.0-rc.1) annotated object `e96985ec1a7a6afb8704d788763756dd7f73d707` → `8f47f8fb2ee82d9cd85acd7d7d9353c64e41e614`；[Release run38345930894](https://github.com/liulixin-lex/xy2api/actions/runs/38345930894)成功。5平台包+checksums六资产196948970字节独立双SHA校验通过；双架构image index `sha256:f5b7500bc785c679f200266d312ec695f1857904618116d072fb1af20ba8c563`，labels版本/revision/source一致；prerelease=true/draft=false且stable aliases未移动。制品vcs.modified=true沿用既有生成/嵌入构建流程，如实记录，不宣称clean-vcs构建。
+- 真实发行RC镜像完成全新318迁移、0.2.6的316→318升级、成套PostgreSQL/Redis/app-data恢复再运行旧版，health/login/me/6静态资源均通过；恢复snapshot与baseline同为`50674a127239ee9e5ee307f8ecc0eb71ad2020a4ab27534a69145c9333e85378`。三个PG客户端均18.6。4个既有部署ID、状态、配置和挂载摘要全部不变。
+- 进入独立`release/0.3.0`晋级，只改产品版本与本记忆，不改变已验业务/前端/SQL。仍须该PR精确head完整CI/安全通过、受保护merge、annotated正式tag、正式制品独立校验及新装/清理；不提前宣称正式发布完成。全部证据 `/lex/xy2api-release-20261013/`；专属演练PG/Redis暂留待正式版，其他原工作树与部署保持。
 
 ### PR #90 复审精简（2026-10-12，随 PR #90 推送；未合并、未发版、未部署）
 
@@ -668,13 +669,11 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
-### 20261013-sub2api-v0.2.15-full-release — 集成 PR #92、候选验收与正式发布
+### 20261013-sub2api-v0.2.15-full-release — RC 通过，正式版晋级
 
-- 用户已授权完整三方同步、修复、开放PR整合与发版；生产只读诊断已完成，没有生产配置/权限/数据写入或部署。
-- 工作在独立 `/lex/xy2api-sync-20261013`；上游固定v0.2.15，真实三方裁决、PR90/91合并、生成代码及备份/指标/异步图片专项修复已提交。具体来源、默认行为与迁移见顶部交接状态及版本化说明。
-- 不可变命名空间标签与同步分支已推送，草稿PR #92已创建，UPSTREAM_BASE.sync_pr登记。XY2API为0.3.0-rc.1，Sub2API兼容基线0.2.15。原两PR的远端状态待随集成合并后确认。
-- 前端全量/构建、后端全量unit、备份真实PG与定向回归已通过；完整integration、生成一致性、静态检查及固定head远端CI继续执行。首轮CI仅3个gofmt诊断已修正；不将旧head通过或中断视为最终门禁成功。
-- 下一步：固定最终head全绿后审计/merge PR92；候选制品独立校验、新装/0.2.6升级/成套回退；独立release/0.3.0 PR、正式发行制品校验与资源清理。证据仅在 `/lex/xy2api-release-20261013/`，不记录生产凭据。
+- 用户授权完整同步/修复/开放PR整合/发版；生产仅只读，未部署。
+- 同步PR92已合并，PR90/91已merged；v0.3.0-rc.1发布、六资产/双架构独立校验、新装/升级/成套恢复全部通过，精确来源与证据见顶部。
+- 当前只做独立release/0.3.0版本晋级及交接记录；待最终head CI/安全、正式tag/Release制品校验、新装和隔离资源清理。没有未完成业务修复，不得把RC结果直接当作正式制品成功。
 
 ### 20261012-pr90-slim — PR #90 复审、精简与上线验收（已完成，随 PR #90 推送；本 Agent 无进行中操作）
 
@@ -2106,3 +2105,10 @@ pnpm --dir frontend run build
 - 前端最终3026项完整测试、38项文案补验及构建通过；后端最终unit62包/23651测试及子测试通过（40项依赖条件跳过），完整integration与固定head远端门禁进行中。
 - CI静态检查发现3个上游归一化文件import未gofmt，纯格式修正；原始失败日志保留。已通过前后端安全、前端、Windows插件、shell、审计与发布辅助上下文，仍须新head全部通过。
 - RC/正式发布仍未执行，本记录不构成发行成功结论。生产只读故障定位完成，备份验证临时容器/进程/归档已独立核查无残留。
+
+### 2026-10-13 — 20261013-sub2api-v0.2.15-full-release — 集成合并、RC 发布与制品演练
+
+- PR92最终bcb62e580两组18项检查成功，精确head审计comment后常规merge成8f47f8fb2；PR90/91自动merged且历史保持。未绕过保护或force push。
+- RC annotated e96985ec1→8f47f8fb2，Release run38345930894成功；六资产双SHA、五平台二进制、GHCR双架构labels与stable aliases保持通过。镜像index f5b7500bc785c679f200266d312ec695f1857904618116d072fb1af20ba8c563。
+- 真实发行镜像新装、316→318升级、完整PG/Redis/app-data备份恢复到0.2.6通过；3个PG客户端18.6，4个既有部署完全不变。原本地integration242引用失败及gofmt截断诊断已闭环，但原失败日志仍保留。
+- 正式晋级从main独立创建release/0.3.0，VERSION与provenance产品版本提交独立于记忆；业务/前端/SQL与已验RC保持。正式外部发布门禁尚待执行，不能视作已完成。生产没有写入或部署。
