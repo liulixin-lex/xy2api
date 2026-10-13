@@ -6,9 +6,9 @@ import (
 	"sync"
 	"testing"
 
+	coderws "github.com/coder/websocket"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/service"
-	coderws "github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
 )
 

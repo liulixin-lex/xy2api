@@ -1,10 +1,10 @@
 package service
 
 import (
-	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
-	"github.com/liulixin-lex/xy2api/internal/util/logredact"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/util/logredact"
 	"go.uber.org/zap"
 )
 
