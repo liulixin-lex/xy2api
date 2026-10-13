@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "upstream_commit": "0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d",
-  "description": "Reviewed differences between the original Sub2API scheduler files and the recorded upstream commit. Any other change, or a changed upstream commit, fails `sync.py scheduler-diff` until reviewed.",
+  "upstream_commit": "f2669c8cf62555cd92389b3f55920e9e6e7c6ff2",
+  "description": "Reviewed differences between the original Sub2API scheduler files and the recorded upstream commit. Any other change, or a changed upstream commit, fails `sync.py scheduler-diff` until reviewed. Reviewed for v0.2.15: all existing XY2API difference blocks are unchanged; the upstream NormalizeOpenAICompatiblePlatform change to domain.UsesOpenAIGateway is adopted verbatim after module-path normalization.",
   "files": {
     "backend/internal/service/gateway_scheduling.go": [
       {

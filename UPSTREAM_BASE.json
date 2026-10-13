@@ -9,143 +9,143 @@
   "merge_base": "0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d",
   "fork_start": "dbfe5f545a2e88a6e9247d0e3723a9b206d5ebbc",
   "xy2api_version": "0.2.6",
-  "sub2api_compat_version": "0.2.14",
-  "status": "pending",
+  "sub2api_compat_version": "0.2.15",
+  "status": "resolved",
   "manual_resolutions": [
     {
       "path": ".github/workflows/release.yml",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Retain XY2API tag/version verification, Go 1.27.2, five-platform GoReleaser and image publishing. The upstream target-matrix fragment relies on a different prepare job and is not grafted into the fork workflow."
     },
     {
       "path": "backend/cmd/server/VERSION",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Keep independent product version 0.2.6 during synchronization; RC and formal promotion are separate commits."
     },
     {
       "path": "backend/ent/schema/composite_model_route.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Accept platform-catalog validator from upstream; normalize only exact Go module imports. Regenerate Ent from combined schemas."
     },
     {
       "path": "backend/ent/schema/user_platform_quota.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Accept catalog-based platform validation while retaining existing schema annotations and fork settlement fields; old SQL remains immutable."
     },
     {
       "path": "backend/go.sum",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Keep the security-patched dependency graph already on XY2API 0.2.6; go mod tidy on Go 1.27.2 reconciles the combined imports without dependency downgrades."
     },
     {
       "path": "backend/internal/handler/admin/account_handler_available_models_test.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Merge normalized imports and new platform model catalog cases with existing account/group behavior tests."
     },
     {
       "path": "backend/internal/handler/admin/channel_handler.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Accept platform-list channel validation with fork admin API behavior and exact module imports."
     },
     {
       "path": "backend/internal/handler/admin/group_handler.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Use upstream group_platform validator while retaining system prompts, exclusive badge control and scoped long-context pricing fields."
     },
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Accept WebSocket image-input usage and group pricing updates; preserve durable billing, cache owner and cancellation boundaries. Later PR90 removes retired controlled hooks."
     },
     {
       "path": "backend/internal/handler/openai_gateway_handler_test.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Merge new protocol expectations and imports with fork usage/cache regression coverage."
     },
     {
       "path": "backend/internal/repository/user_platform_quota_repo.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Adopt domain catalog membership validation without removing atomic durable quota settlement or existing synchronization rules."
     },
     {
       "path": "backend/internal/server/routes/gateway.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Preserve published XY2API async image and gateway routes; accept upstream platform routing. PR91 adds backward-compatible async capabilities and task deletion."
     },
     {
       "path": "backend/internal/service/admin_group.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Accept new platform catalog validation with fork group prompt, pricing and cache invalidation behavior."
     },
     {
       "path": "backend/internal/service/channel_service.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Accept upstream catalog-based channel capabilities and retain fork group rate/pricing contracts."
     },
     {
       "path": "backend/internal/service/composite_platform.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Accept unified concrete-platform catalog and gateway eligibility while retaining composite routing behavior."
     },
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Recognize upstream thinking_signature_invalid encrypted-content errors in the bounded retry path. PR90 removes only the retired controlled mode guard; all upstream retry conditions remain."
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Accept domain.UsesOpenAIGateway platform eligibility. Preserve cache-owner protections and PR90 share hooks; all four scheduler allowlist file diffs independently checked against the new baseline."
     },
     {
       "path": "backend/internal/service/openai_ws_v2/passthrough_relay.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Add upstream image input/tool_usage accounting while retaining canonical cache aliases, explicit-zero precedence, provenance diagnostics and nonnegative total input."
     },
     {
       "path": "backend/internal/service/opencode_go.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Merge model catalog/gateway support and exact module imports while keeping existing fork integration."
     },
     {
       "path": "backend/internal/service/scheduler_snapshot_service.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Accept unified platform catalog with existing monotonic snapshot, group lifecycle, and fork cache protections."
     },
     {
       "path": "backend/internal/service/upstream_billing_probe.go",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Keep UUID-based cross-instance probe ownership and import upstream domain catalog; both independent behaviors retained."
     },
     {
       "path": "frontend/src/api/__tests__/settings.authSourceDefaults.spec.ts",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Replace stale six-platform expectations with upstream complete platform catalog; preserve default-null quota semantics."
     },
     {
       "path": "frontend/src/components/account/__tests__/EditAccountModal.spec.ts",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Combine platform catalog mocks and cases with fork async flushPromises and IQ/account editing tests."
     },
     {
       "path": "frontend/src/components/admin/account/AccountTableFilters.vue",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Accept responsive primary/secondary filter layout and retain IQ filter, accessible label and secondary active count."
     },
     {
       "path": "frontend/src/components/admin/usage/UsageTable.vue",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Combine upstream average output rate with fork feature toggles and cache display; one shared total-duration formula, tokens/s unit, no bypass of disabled toggles. Cache read share explicitly refers to billing token buckets."
     },
     {
       "path": "frontend/src/components/common/BaseDialog.vue",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Retain nested focus and defaultPrevented Escape handling and use topmost dialogToken stack check; symbol identity matches the existing stack."
     },
     {
       "path": "frontend/src/components/keys/__tests__/UseKeyModal.spec.ts",
-      "status": "pending",
-      "resolution": "kept XY2API side until human review"
+      "status": "resolved",
+      "resolution": "Merge upstream feature-section-independent assertions while retaining api_key_model_discovery checks for fork remote catalog mode."
     }
   ],
   "custom_patches": [
@@ -161,6 +161,10 @@
     "gpt61-exact-model-aliases",
     "share-scheduling-gateway-hooks",
     "share-scheduling-openai-hooks",
-    "share-scheduling-cache-attribution"
+    "share-scheduling-cache-attribution",
+    "v0215-append-only-upgrade",
+    "explicit-backup-scope-and-diagnostics",
+    "async-image-storage-lifecycle",
+    "usage-metrics-consistent-units"
   ]
 }

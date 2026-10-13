@@ -331,7 +331,11 @@
     "gpt61-exact-model-aliases",
     "share-scheduling-gateway-hooks",
     "share-scheduling-openai-hooks",
-    "share-scheduling-cache-attribution"
+    "share-scheduling-cache-attribution",
+    "v0215-append-only-upgrade",
+    "explicit-backup-scope-and-diagnostics",
+    "async-image-storage-lifecycle",
+    "usage-metrics-consistent-units"
   ],
   "custom_patch_tests": [
     {
@@ -398,6 +402,26 @@
       "id": "share-scheduling-cache-attribution",
       "path": "backend/internal/service/share_scheduling_attribution_test.go",
       "literal": "func TestShareAttributionFollowsServedPlacements"
+    },
+    {
+      "id": "v0215-append-only-upgrade",
+      "path": "backend/internal/repository/upstream_v0215_migration_integration_test.go",
+      "literal": "func TestUpstreamV0215MigrationUpgrade"
+    },
+    {
+      "id": "explicit-backup-scope-and-diagnostics",
+      "path": "backend/internal/repository/backup_pg_dumper_test.go",
+      "literal": "func TestPgDumperPublicScopeIsExplicitAndStrict"
+    },
+    {
+      "id": "async-image-storage-lifecycle",
+      "path": "backend/internal/handler/image_task_handler_v2_test.go",
+      "literal": "func TestAsyncImageV2HeartbeatCoversResultStorage"
+    },
+    {
+      "id": "usage-metrics-consistent-units",
+      "path": "frontend/src/utils/__tests__/usageMetrics.spec.ts",
+      "literal": "uses complete request duration even when first-token time is available"
     }
   ]
 }
