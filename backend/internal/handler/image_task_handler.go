@@ -608,15 +608,18 @@ func (h *AsyncImageHandler) run(taskID string, apiKeyID int64, platform string, 
 	h.tasks.Start(context.Background(), taskID)
 	logger.L().Info("image_task.started", zap.String("task_id", taskID), zap.Int64("api_key_id", apiKeyID))
 	stopHeartbeat := h.startHeartbeat(taskID, apiKeyID)
+	// Upload retries are part of the running task. Keep proving liveness until
+	// the terminal state is stored, and stop on panic as well as normal return.
+	defer stopHeartbeat()
 
 	// Run the gateway call under the same ops capture the request pipeline
 	// uses, so a failed task lands in ops_error_logs like a synchronous call.
 	capture := acquireOpsCaptureWriter(job.ctx.Writer)
+	defer releaseOpsCaptureWriter(capture)
 	capture.setContext(job.ctx)
 	job.ctx.Writer = capture
 	h.execute(platform, job.ctx)
 	capture.finalizeCapture()
-	stopHeartbeat()
 
 	body := bytes.TrimSpace(job.recorder.Body.Bytes())
 	statusCode := job.recorder.Code
@@ -654,7 +657,6 @@ func (h *AsyncImageHandler) run(taskID string, apiKeyID int64, platform string, 
 	if h.ops != nil {
 		recordOpsErrorAfterRequest(job.ctx, h.ops, capture)
 	}
-	releaseOpsCaptureWriter(capture)
 }
 
 func (h *AsyncImageHandler) startHeartbeat(taskID string, apiKeyID int64) func() {

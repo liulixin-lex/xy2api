@@ -51,7 +51,7 @@ image_storage:
   max_download_bytes: 33554432     # cap when re-hosting an upstream image URL (32MB)
 ```
 
-When a task completes, each generated image is uploaded to the bucket and the result is rewritten to a compact form: `data[].url` points at the stored object (a permanent `public_base_url/key` link, or a time-limited presigned URL) and `b64_json` is removed. Only this small JSON is stored in Redis. A failed upload is retried three times (after 1 s, 3 s and 9 s); if it still fails the task is marked `failed` with `error.code = result_storage_failed` and `billing.status = charged` rather than persisting the raw base64.
+When a task completes, each generated image is uploaded to the bucket and the result is rewritten to a compact form: `data[].url` points at the stored object (a permanent `public_base_url/key` link, or a time-limited presigned URL) and `b64_json` is removed. Only this small JSON is stored in Redis. A failed upload is retried three times (after 1 s, 3 s and 9 s); if it still fails the task is marked `failed` with `error.code = result_storage_failed`. Billing is read independently from the ledger. Partial uploads remain tracked privately so deleting the failed task also removes them; raw base64 is never persisted.
 
 To support a different vendor beyond the S3-compatible client, implement the `service.ImageStorage` interface (`Save(ctx, key, contentType, data) (url, error)`) and provide it in place of the S3 implementation.
 
@@ -203,10 +203,10 @@ The 202 and the task view carry `request_id`, the `usage_logs.request_id` the ge
 | `billing.status` | Meaning |
 | --- | --- |
 | `pending` | The task is still running, or the ledger has not settled yet; poll again. |
-| `charged` | A usage row with `billing.request_id` exists. Always the case for `completed`. |
-| `not_charged` | No usage was recorded: the upstream refused or failed before producing billable output. |
+| `charged` | A usage row with `billing.request_id` exists. |
+| `not_charged` | Neither a usage row nor an unsettled billing intent exists for the request. |
 
-The conclusion for a failed task comes from the gateway's own ledger (`usage_logs`, plus unsettled rows of `usage_billing_intents` as `pending`), so it always matches what the account was billed. The task view also adds `model`, `endpoint` (`generations` or `edits`), `started_at` and `heartbeat_at`.
+The conclusion for every terminal task comes from the gateway's own ledger (`usage_logs`, plus unsettled rows of `usage_billing_intents` as `pending`). Successful generation alone does not prove settlement: completed tasks can remain `pending`, and polling refreshes that state after settlement. An unavailable ledger lookup also leaves billing `pending`. The task view adds `model`, `endpoint` (`generations` or `edits`), `started_at` and `heartbeat_at`.
 
 ### Idempotent submission
 
@@ -249,7 +249,7 @@ Submission is still a normal gateway request: rate limits, balance checks and mo
 - **Sweeper.** Every instance checks once a minute (one at a time, via a Redis lock) for tasks whose heartbeat is older than two minutes, and concludes them as `failed` with `error.code = task_interrupted` and the billing conclusion from the ledger. Tasks are never re-run: a re-run would be a second paid upstream call.
 - **Graceful shutdown.** On SIGTERM new submissions get `503 IMAGE_TASK_UNAVAILABLE` (not submitted) and running tasks get up to `image_tasks.drain_timeout_seconds` (default 600) to finish. Tasks still running then are cancelled and concluded as `task_interrupted`. Give the container a matching stop grace period (`docker stop -t`, Compose `stop_grace_period`); with Docker's default 10 seconds the sweeper of the next instance concludes the tasks instead.
 - **Terminal states are final.** A late result for a task that was already concluded is dropped and logged as `image_task.late_result_dropped`.
-- **Controlled scheduling.** Tasks get their own scheduling ledger, so they run in `controlled` mode as well. In 0.2.6 they failed right after the 202 with `upstream request failed: context canceled` in that mode.
+- **Scheduling and liveness.** Tasks retain a detached execution context after the 202 under the original or share scheduler. Heartbeats continue through result upload and retries until the terminal task state is stored. The retired `controlled` request ledger is no longer used.
 
 ### Error codes assigned by the gateway
 
@@ -258,7 +258,7 @@ Submission is still a normal gateway request: rate limits, balance checks and mo
 | (upstream error) | upstream status | Refusal or failure reported by the upstream, unchanged | from the ledger, normally `not_charged` |
 | `timeout` | 504 | The 30-minute execution limit passed | from the ledger |
 | `task_interrupted` | 502 / 503 | The instance stopped (sweeper) or shut down (drain) | from the ledger |
-| `result_storage_failed` | 502 | Generated and billed, but storing the images failed three times | `charged` |
+| `result_storage_failed` | 502 | Image generation succeeded, but storage failed after three retries | from the ledger |
 
 ### Observability
 

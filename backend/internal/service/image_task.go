@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -307,7 +308,7 @@ func NewImageTaskServiceWithResolver(store ImageTaskStore, resolve ImageStorageR
 
 // ImageTaskDependencies wires the v2 collaborators. Each one is optional: a
 // nil coordinator disables idempotency, admission and the sweeper; a nil
-// billing lookup leaves failed tasks at billing "pending".
+// billing lookup leaves terminal tasks at billing "pending".
 type ImageTaskDependencies struct {
 	Coordinator ImageTaskCoordinator
 	Billing     ImageTaskBillingLookup
@@ -495,10 +496,10 @@ func (s *ImageTaskService) getOwned(ctx context.Context, owner ImageTaskOwner, i
 	return task, nil
 }
 
-// refreshBilling re-reads the ledger for a failed task whose conclusion was
+// refreshBilling re-reads the ledger for a terminal task whose conclusion was
 // still pending (an unsettled billing intent, or the lookup failed at finish).
 func (s *ImageTaskService) refreshBilling(ctx context.Context, task *ImageTaskRecord) *ImageTaskRecord {
-	if task == nil || task.Status != ImageTaskStatusFailed || task.Billing == nil ||
+	if task == nil || task.Status == ImageTaskStatusProcessing || task.Billing == nil ||
 		task.Billing.Status != ImageTaskBillingPending || task.Billing.RequestID == "" || s.billing == nil {
 		return task
 	}
@@ -638,17 +639,32 @@ func (s *ImageTaskService) AllowPoll(ctx context.Context, apiKeyID int64) bool {
 
 // Complete stores a successful generation. Images are offloaded to object
 // storage first (retried with backoff); if every attempt fails the task fails
-// with result_storage_failed — the generation was billed, so the task says so.
+// with result_storage_failed. Billing is independently read from the ledger.
 func (s *ImageTaskService) Complete(ctx context.Context, id string, statusCode int, result json.RawMessage) error {
 	if !json.Valid(result) {
 		return s.FailWithCode(ctx, id, http.StatusBadGateway, imageTaskErrorJSON("api_error", "upstream returned a non-JSON image response"), "")
 	}
+	uploader, _ := s.current()
+	if s.resolve != nil && uploader == nil {
+		// Settings can change after the 202. Never bypass required object
+		// storage and persist an unbounded base64 response in Redis.
+		failErr := s.finishFailed(ctx, id, http.StatusBadGateway,
+			imageTaskCodedErrorJSON("api_error", ImageTaskErrorStorageFailed, "object storage became unavailable before the image result could be stored"), nil)
+		s.recordOps(ctx, id, http.StatusBadGateway, ImageTaskErrorStorageFailed, "async image object storage became unavailable")
+		return failErr
+	}
 	var keys []string
-	if uploader, _ := s.current(); uploader != nil {
+	if uploader != nil {
 		var rewritten json.RawMessage
 		var err error
 		for attempt := 0; ; attempt++ {
-			rewritten, keys, err = uploader.RewriteWithKeys(ctx, id, result)
+			var attemptKeys []string
+			rewritten, attemptKeys, err = uploader.RewriteWithKeys(ctx, id, result)
+			for _, key := range attemptKeys {
+				if !slices.Contains(keys, key) {
+					keys = append(keys, key)
+				}
+			}
 			if err == nil {
 				break
 			}
@@ -664,13 +680,14 @@ func (s *ImageTaskService) Complete(ctx context.Context, id string, statusCode i
 			// 转存失败不回退存 base64，避免大 blob 撑爆 Redis：直接把任务标记为失败。
 			logger.L().Error("image_task.offload_failed", zap.String("task_id", id), zap.Error(err))
 			failErr := s.finishFailed(ctx, id, http.StatusBadGateway,
-				imageTaskCodedErrorJSON("api_error", ImageTaskErrorStorageFailed, "the image was generated and billed, but storing it to object storage failed"),
-				ImageTaskBillingCharged)
+				imageTaskCodedErrorJSON("api_error", ImageTaskErrorStorageFailed, "the image was generated, but storing it to object storage failed; see billing.status for the billing outcome"),
+				keys)
 			s.recordOps(ctx, id, http.StatusBadGateway, ImageTaskErrorStorageFailed, "async image result could not be stored to object storage")
 			return failErr
 		}
 		result = rewritten
 	}
+	billing := s.lookupBilling(ctx, id)
 	_, err := s.finish(ctx, id, func(rec *ImageTaskRecord, now time.Time) {
 		rec.Status = ImageTaskStatusCompleted
 		rec.HTTPStatus = statusCode
@@ -678,7 +695,7 @@ func (s *ImageTaskService) Complete(ctx context.Context, id string, statusCode i
 		rec.Error = nil
 		rec.ObjectKeys = keys
 		if rec.RequestID != "" {
-			rec.Billing = &ImageTaskBilling{Status: ImageTaskBillingCharged, RequestID: rec.RequestID}
+			rec.Billing = &ImageTaskBilling{Status: billing, RequestID: rec.RequestID}
 		}
 	})
 	return err
@@ -699,20 +716,18 @@ func (s *ImageTaskService) FailWithCode(ctx context.Context, id string, statusCo
 	if code != "" {
 		taskErr = withImageTaskErrorCode(taskErr, code)
 	}
-	return s.finishFailed(ctx, id, statusCode, taskErr, "")
+	return s.finishFailed(ctx, id, statusCode, taskErr, nil)
 }
 
-// finishFailed resolves billing (unless forced) and writes the failed state.
-func (s *ImageTaskService) finishFailed(ctx context.Context, id string, statusCode int, taskErr json.RawMessage, forcedBilling string) error {
-	billing := forcedBilling
-	if billing == "" {
-		billing = s.lookupBilling(ctx, id)
-	}
+// finishFailed resolves billing and retains any partial uploads for DELETE.
+func (s *ImageTaskService) finishFailed(ctx context.Context, id string, statusCode int, taskErr json.RawMessage, objectKeys []string) error {
+	billing := s.lookupBilling(ctx, id)
 	_, err := s.finish(ctx, id, func(rec *ImageTaskRecord, now time.Time) {
 		rec.Status = ImageTaskStatusFailed
 		rec.HTTPStatus = statusCode
 		rec.Result = nil
 		rec.Error = taskErr
+		rec.ObjectKeys = objectKeys
 		if rec.RequestID != "" {
 			rec.Billing = &ImageTaskBilling{Status: billing, RequestID: rec.RequestID}
 		}

@@ -72,7 +72,8 @@ func (u *ImageResultUploader) Rewrite(ctx context.Context, taskID string, result
 }
 
 // RewriteWithKeys 与 Rewrite 相同，另外返回写入的对象键，任务记录据此在 DELETE 时清理对象。
-// 对象键按任务 ID 和序号确定，重试会覆盖同一批对象，不会留下孤儿。
+// 对象键按任务 ID 和序号确定。失败时也返回已尝试写入的键，供任务清理；
+// 上传返回错误时远端可能已经接收对象，删除不存在的键是幂等的。
 func (u *ImageResultUploader) RewriteWithKeys(ctx context.Context, taskID string, result json.RawMessage) (json.RawMessage, []string, error) {
 	if u == nil || u.storage == nil {
 		return result, nil, nil
@@ -97,17 +98,17 @@ func (u *ImageResultUploader) RewriteWithKeys(ctx context.Context, taskID string
 	for i, item := range items {
 		data, contentType, err := u.fetchImageBytes(ctx, item)
 		if err != nil {
-			return nil, nil, fmt.Errorf("image %d: %w", i, err)
+			return nil, keys, fmt.Errorf("image %d: %w", i, err)
 		}
 		key := u.buildKey(taskID, i, contentType)
+		keys = append(keys, key)
 		url, err := u.storage.Save(ctx, key, contentType, data)
 		if err != nil {
-			return nil, nil, fmt.Errorf("image %d: upload to object storage: %w", i, err)
+			return nil, keys, fmt.Errorf("image %d: upload to object storage: %w", i, err)
 		}
-		keys = append(keys, key)
 		urlRaw, err := json.Marshal(url)
 		if err != nil {
-			return nil, nil, fmt.Errorf("image %d: encode url: %w", i, err)
+			return nil, keys, fmt.Errorf("image %d: encode url: %w", i, err)
 		}
 		item["url"] = urlRaw
 		delete(item, "b64_json")
@@ -115,12 +116,12 @@ func (u *ImageResultUploader) RewriteWithKeys(ctx context.Context, taskID string
 	}
 	newData, err := json.Marshal(items)
 	if err != nil {
-		return nil, nil, fmt.Errorf("encode image response data: %w", err)
+		return nil, keys, fmt.Errorf("encode image response data: %w", err)
 	}
 	top["data"] = newData
 	out, err := json.Marshal(top)
 	if err != nil {
-		return nil, nil, fmt.Errorf("encode image response: %w", err)
+		return nil, keys, fmt.Errorf("encode image response: %w", err)
 	}
 	return out, keys, nil
 }

@@ -239,6 +239,9 @@ func TestImageTaskServiceCompleteOffloadFailureMarksFailed(t *testing.T) {
 	storage := &fakeImageStorage{err: errors.New("bucket unreachable")}
 	uploader := NewImageResultUploader(storage, "images/", 0, nil)
 	svc := NewImageTaskServiceWithUploader(store, uploader, time.Hour, time.Minute)
+	svc.Configure(ImageTaskDependencies{Billing: &imageTaskStaticBilling{
+		statuses: map[string]string{"client:offload": ImageTaskBillingCharged},
+	}})
 	waits := 0
 	svc.sleep = func(context.Context, time.Duration) error { waits++; return nil }
 
@@ -256,7 +259,7 @@ func TestImageTaskServiceCompleteOffloadFailureMarksFailed(t *testing.T) {
 	require.Equal(t, http.StatusBadGateway, got.HTTPStatus)
 	require.Contains(t, string(got.Error), "object storage")
 	require.NotContains(t, string(got.Result), "b64_json", "failed offload must not persist base64 to Redis")
-	// v2: retried three times, then reported as billed with a dedicated code.
+	// Storage retries fail, while the independently settled ledger is charged.
 	require.Equal(t, 3, waits)
 	require.Equal(t, ImageTaskErrorStorageFailed, imageTaskErrorCode(got.Error))
 	require.Equal(t, &ImageTaskBilling{Status: ImageTaskBillingCharged, RequestID: "client:offload"}, got.Billing)

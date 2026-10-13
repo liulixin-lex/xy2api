@@ -318,7 +318,8 @@ func TestImageTaskServiceMapsStoreFailures(t *testing.T) {
 }
 
 func TestImageTaskServiceV2CompletedIsCharged(t *testing.T) {
-	svc, _, coordinator, _, _, _ := newV2ImageTaskService(t, nil)
+	svc, _, coordinator, billing, _, _ := newV2ImageTaskService(t, nil)
+	billing.set("client:abc", ImageTaskBillingCharged)
 	owner := ImageTaskOwner{UserID: 7, APIKeyID: 9}
 	id := NewImageTaskID()
 	require.NoError(t, svc.Admit(context.Background(), owner.APIKeyID, id, 4))
@@ -512,6 +513,88 @@ func TestImageTaskServiceOffloadRetries(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ImageTaskStatusCompleted, got.Status)
 	require.Equal(t, []time.Duration{time.Second, 3 * time.Second}, waits)
+}
+
+func TestImageTaskServiceCompletedBillingRefreshesFromLedger(t *testing.T) {
+	for _, initial := range []string{ImageTaskBillingPending, ImageTaskBillingNotCharged} {
+		t.Run(initial, func(t *testing.T) {
+			svc, store, _, billing, _, _ := newV2ImageTaskService(t, nil)
+			owner := ImageTaskOwner{UserID: 7, APIKeyID: 9}
+			billing.set("client:settling", initial)
+			task, err := svc.CreateTask(context.Background(), ImageTaskSpec{Owner: owner, RequestID: "client:settling"})
+			require.NoError(t, err)
+			require.NoError(t, svc.Complete(context.Background(), task.ID, http.StatusOK, json.RawMessage(`{"data":[]}`)))
+			got, err := svc.Get(context.Background(), owner, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, initial, got.Billing.Status, "2xx generation alone cannot prove billing settled")
+			if initial == ImageTaskBillingPending {
+				billing.set("client:settling", ImageTaskBillingCharged)
+				got, err = svc.Get(context.Background(), owner, task.ID)
+				require.NoError(t, err)
+				require.Equal(t, ImageTaskBillingCharged, got.Billing.Status)
+				stored, err := store.Get(context.Background(), task.ID)
+				require.NoError(t, err)
+				require.Equal(t, ImageTaskBillingCharged, stored.Billing.Status)
+			}
+		})
+	}
+}
+
+func TestImageTaskServiceStorageFailureKeepsPartialUploadsForDelete(t *testing.T) {
+	storage := &fakeImageStorage{}
+	svc, store, _, billing, _, _ := newV2ImageTaskService(t, NewImageResultUploader(storage, "images/", 0, nil))
+	owner := ImageTaskOwner{UserID: 7, APIKeyID: 9}
+	billing.set("client:partial", ImageTaskBillingPending)
+	task, err := svc.CreateTask(context.Background(), ImageTaskSpec{Owner: owner, RequestID: "client:partial"})
+	require.NoError(t, err)
+	b64 := base64.StdEncoding.EncodeToString(pngBytes)
+	// The first object is stored on every attempt; decoding the second fails.
+	require.NoError(t, svc.Complete(context.Background(), task.ID, http.StatusOK,
+		json.RawMessage(`{"data":[{"b64_json":"`+b64+`"},{"b64_json":"not-base64!"}]}`)))
+	got, err := svc.Get(context.Background(), owner, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, ImageTaskStatusFailed, got.Status)
+	require.Equal(t, ImageTaskErrorStorageFailed, imageTaskErrorCode(got.Error))
+	require.Equal(t, ImageTaskBillingPending, got.Billing.Status)
+	stored, err := store.Get(context.Background(), task.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"images/" + task.ID + "-0.png"}, stored.ObjectKeys)
+	require.Len(t, storage.saved, 4)
+	require.NoError(t, svc.Delete(context.Background(), owner, task.ID))
+	require.Equal(t, stored.ObjectKeys, storage.deleted)
+	_, err = store.Get(context.Background(), task.ID)
+	require.ErrorIs(t, err, ErrImageTaskNotFound)
+}
+
+func TestImageTaskServiceStorageDisabledAfterAcceptanceNeverStoresBase64(t *testing.T) {
+	uploader := NewImageResultUploader(&fakeImageStorage{}, "images/", 0, nil)
+	svc, store, _, billing, ops, _ := newV2ImageTaskService(t, uploader)
+	enabled := true
+	svc.resolve = func() (*ImageResultUploader, bool) {
+		if enabled {
+			return uploader, true
+		}
+		return nil, false
+	}
+	owner := ImageTaskOwner{UserID: 7, APIKeyID: 9}
+	billing.set("client:disabled", ImageTaskBillingCharged)
+	require.True(t, svc.Enabled())
+	task, err := svc.CreateTask(context.Background(), ImageTaskSpec{Owner: owner, RequestID: "client:disabled"})
+	require.NoError(t, err)
+	enabled = false
+	b64 := base64.StdEncoding.EncodeToString(pngBytes)
+	require.NoError(t, svc.Complete(context.Background(), task.ID, http.StatusOK,
+		json.RawMessage(`{"data":[{"b64_json":"`+b64+`"}]}`)))
+	stored, err := store.Get(context.Background(), task.ID)
+	require.NoError(t, err)
+	require.Equal(t, ImageTaskStatusFailed, stored.Status)
+	require.Equal(t, ImageTaskErrorStorageFailed, imageTaskErrorCode(stored.Error))
+	require.Equal(t, ImageTaskBillingCharged, stored.Billing.Status)
+	require.Empty(t, stored.Result, "raw image data must never become a Redis fallback")
+	require.Len(t, ops.entries, 1)
+	got, err := svc.Get(context.Background(), owner, task.ID)
+	require.NoError(t, err, "accepted tasks stay pollable after disabling new submissions")
+	require.Equal(t, ImageTaskStatusFailed, got.Status)
 }
 
 func TestUsageBillingRequestIDFromContext(t *testing.T) {

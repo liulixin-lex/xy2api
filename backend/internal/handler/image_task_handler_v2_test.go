@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -145,7 +146,7 @@ func TestAsyncImageV2AcceptCarriesRequestIDAndBilling(t *testing.T) {
 
 	close(hr.release)
 	done := hr.waitStatus(id, service.ImageTaskStatusCompleted)
-	require.Equal(t, &service.ImageTaskBilling{Status: service.ImageTaskBillingCharged, RequestID: "client:cid-a"}, done.Billing)
+	require.Equal(t, &service.ImageTaskBilling{Status: service.ImageTaskBillingPending, RequestID: "client:cid-a"}, done.Billing, "without a ledger lookup, successful generation does not prove settlement")
 	require.NotNil(t, done.StartedAt)
 }
 
@@ -503,4 +504,70 @@ func (c *asyncImageMemoryCoordinator) AllowPoll(_ context.Context, apiKeyID int6
 	key := fmt.Sprintf("%d:%d", apiKeyID, now.Unix())
 	c.polls[key]++
 	return c.polls[key] <= perSecond, nil
+}
+
+// The accepted task must survive completion of the HTTP submission without
+// depending on the removed controlled-scheduling request ledger.
+func TestAsyncImageV2SubmitCancellationDoesNotCancelExecution(t *testing.T) {
+	hr := newAsyncV2Harness(t, time.Minute, service.DefaultImageTaskLimits())
+	submitCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", strings.NewReader(asyncV2Body)).WithContext(submitCtx)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	hr.router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	id := taskIDOf(t, decodeTaskBody(t, w))
+	cancel()
+	close(hr.release)
+	task := hr.waitStatus(id, service.ImageTaskStatusCompleted)
+	require.Equal(t, http.StatusOK, task.HTTPStatus)
+	require.Equal(t, int32(1), hr.executed.Load())
+}
+
+type asyncImageBlockingStorage struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *asyncImageBlockingStorage) Save(ctx context.Context, key, _ string, _ []byte) (string, error) {
+	close(s.entered)
+	select {
+	case <-s.release:
+		return "https://cdn.test/" + key, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+func TestAsyncImageV2HeartbeatCoversResultStorage(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		hr := newAsyncV2Harness(t, 10*time.Minute, service.DefaultImageTaskLimits())
+		storage := &asyncImageBlockingStorage{entered: make(chan struct{}), release: make(chan struct{})}
+		var releaseOnce sync.Once
+		defer releaseOnce.Do(func() { close(storage.release) })
+		store := &asyncImageMemoryStore{tasks: make(map[string]*service.ImageTaskRecord)}
+		hr.tasks = service.NewImageTaskServiceWithUploader(store, service.NewImageResultUploader(storage, "images/", 0, nil), time.Hour, 10*time.Minute)
+		hr.tasks.Configure(service.ImageTaskDependencies{Coordinator: newAsyncImageMemoryCoordinator()})
+		hr.handler.tasks = hr.tasks
+		hr.respond = func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"data": []gin.H{{"b64_json": "aW1hZ2U="}}})
+		}
+		close(hr.release)
+		w := hr.do(http.MethodPost, "/v1/images/generations/async", asyncV2Body, nil)
+		require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+		id := taskIDOf(t, decodeTaskBody(t, w))
+		<-storage.entered
+
+		// Virtual time exercises multiple real heartbeat ticks while upload is
+		// blocked beyond the stale threshold, without a multi-minute test.
+		time.Sleep(service.ImageTaskStaleAfter + time.Minute)
+		synctest.Wait()
+		require.Zero(t, hr.tasks.Sweep(context.Background()), "an uploading task still belongs to a live instance")
+		require.Equal(t, service.ImageTaskStatusProcessing, hr.task(id).Status)
+		releaseOnce.Do(func() { close(storage.release) })
+		synctest.Wait()
+		require.Equal(t, service.ImageTaskStatusCompleted, hr.task(id).Status)
+		require.Zero(t, hr.handler.running.Load())
+	})
 }
