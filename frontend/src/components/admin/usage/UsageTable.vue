@@ -180,7 +180,7 @@
                 </div>
               </div>
               <div v-if="props.showCacheHitRate && hasUsageTokenMetrics(row)" class="flex items-center gap-2 text-xs" :title="t('usage.cacheHitRateHint')">
-                <span data-testid="usage-cache-hit-rate" class="font-medium tabular-nums text-sky-600 dark:text-sky-400">{{ formatCacheHitRate(row) }}</span>
+                <span data-testid="usage-cache-hit-rate" :aria-label="`${t('usage.cacheHitRate')}: ${formatCacheHitRate(row)}`" class="font-medium tabular-nums text-sky-600 dark:text-sky-400">{{ formatCacheHitRate(row) }}</span>
               </div>
               <div v-if="hasImageInputTokens(row)" class="flex items-center gap-2">
                 <div class="inline-flex items-center gap-1">
@@ -215,8 +215,9 @@
               <span
                 v-if="row.long_context_billing_applied"
                 data-testid="long-context-billing-marker"
+                :title="t('admin.usage.longContextPricingTooltip')"
                 class="inline-flex items-center rounded px-1 py-px text-[10px] font-semibold leading-tight bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:ring-amber-500/30"
-              >x2</span>
+              >{{ t('admin.usage.longContext') }}</span>
               <!-- Cost Detail Tooltip -->
               <div
                 class="group relative"
@@ -251,8 +252,8 @@
               <span class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyDuration') }}</span>
               <span class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms ?? 0)]">{{ formatDuration(row.duration_ms) }}</span>
               <template v-if="props.showTokenSpeed && hasUsageTokenMetrics(row)">
-                <span class="text-gray-500 dark:text-gray-400">{{ t('usage.tokenSpeed') }}</span>
-                <span data-testid="usage-token-speed" class="whitespace-nowrap font-medium tabular-nums text-gray-700 dark:text-gray-300" :title="t(row.first_token_ms == null ? 'usage.tokenSpeedTotalHint' : 'usage.tokenSpeedHint')">{{ formatTokenSpeed(row) }}</span>
+                <span class="text-gray-500 dark:text-gray-400" :title="t('usage.outputTpsHint')">{{ t('usage.outputTps') }}</span>
+                <span data-testid="usage-token-speed" class="whitespace-nowrap font-medium tabular-nums text-gray-700 dark:text-gray-300" :title="t('usage.outputTpsHint')">{{ formatTokenSpeed(row) }}</span>
               </template>
             </div>
           </div>
@@ -504,7 +505,7 @@
           </div>
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.rate') }}</span>
-            <span class="font-semibold text-blue-400">{{ formatMultiplier(tooltipData?.rate_multiplier || 1) }}x</span>
+            <span class="font-semibold text-blue-400">{{ formatMultiplier(tooltipData?.rate_multiplier ?? 1) }}x</span>
           </div>
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.original') }}</span>

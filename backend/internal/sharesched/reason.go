@@ -1,0 +1,84 @@
+// Package sharesched is the pure share-scheduling kernel: policy validation,
+// weighted rendezvous ordering and the per-request placement plan. It holds no
+// I/O and no service types so every rule can be tested exhaustively; the
+// gateway adapters supply candidates and execute the plan.
+package sharesched
+
+// Reason is a stable code explaining a placement decision or an exclusion.
+// Codes are persisted in decision samples and translated by the admin UI, so
+// existing values must never change meaning.
+type Reason string
+
+// Selection reasons.
+const (
+	ReasonOwnerContinuation       Reason = "owner_continuation"
+	ReasonAffinityHit             Reason = "affinity_hit"
+	ReasonAffinityWait            Reason = "affinity_wait"
+	ReasonSpillRebind             Reason = "spill_rebind"
+	ReasonSpillKeep               Reason = "spill_keep"
+	ReasonSoftSpill               Reason = "soft_spill"
+	ReasonNewSession              Reason = "new_session"
+	ReasonSessionless             Reason = "sessionless"
+	ReasonRealignCold             Reason = "realign_cold"
+	ReasonReturnCold              Reason = "return_cold"
+	ReasonReturnImmediate         Reason = "return_immediate"
+	ReasonReturnDeadline          Reason = "return_deadline"
+	ReasonDrainCold               Reason = "drain_cold"
+	ReasonDrainDeadline           Reason = "drain_deadline"
+	ReasonRebindUnavailable       Reason = "rebind_unavailable"
+	ReasonTierOverflowSaturated   Reason = "tier_overflow_saturated"
+	ReasonTierOverflowUnavailable Reason = "tier_overflow_unavailable"
+	ReasonFailoverNext            Reason = "failover_next"
+	ReasonAdminRebalance          Reason = "admin_rebalance"
+	ReasonModelRouting            Reason = "model_routing"
+	ReasonModelRoutingFallback    Reason = "model_routing_fallback"
+)
+
+// Exclusion and skip reasons. Adapters map the original Sub2API gates onto
+// these codes; the kernel itself only produces the share-specific ones.
+const (
+	ReasonDisabled            Reason = "disabled"
+	ReasonInactive            Reason = "inactive"
+	ReasonNotSchedulable      Reason = "not_schedulable"
+	ReasonExpired             Reason = "expired"
+	ReasonRateLimited         Reason = "rate_limited"
+	ReasonOverloaded          Reason = "overloaded"
+	ReasonTempUnschedulable   Reason = "temp_unschedulable"
+	ReasonQuotaExceeded       Reason = "quota_exceeded"
+	ReasonModelUnsupported    Reason = "model_unsupported"
+	ReasonModelRateLimited    Reason = "model_rate_limited"
+	ReasonWindowCost          Reason = "window_cost"
+	ReasonRPMLimit            Reason = "rpm_limit"
+	ReasonSessionLimit        Reason = "session_limit"
+	ReasonIQDegraded          Reason = "iq_degraded"
+	ReasonQuotaAutoPause      Reason = "quota_auto_pause"
+	ReasonShadowParent        Reason = "shadow_parent_unhealthy"
+	ReasonGrokQuota           Reason = "grok_quota"
+	ReasonChannelRestricted   Reason = "channel_restricted"
+	ReasonProfitGate          Reason = "profit_gate"
+	ReasonPrivacyRequired     Reason = "privacy_required"
+	ReasonPlatformMismatch    Reason = "platform_mismatch"
+	ReasonTransportMismatch   Reason = "transport_mismatch"
+	ReasonCapabilityMismatch  Reason = "capability_mismatch"
+	ReasonCompactUnsupported  Reason = "compact_unsupported"
+	ReasonRuntimeBlocked      Reason = "runtime_blocked"
+	ReasonProxyQuarantined    Reason = "proxy_quarantined"
+	ReasonSchedulingThreshold Reason = "scheduling_threshold"
+	ReasonExcludedInRequest   Reason = "excluded_in_request"
+	ReasonDrained             Reason = "drained"
+	ReasonSaturated           Reason = "saturated"
+	ReasonCodexPressure       Reason = "codex_pressure"
+	ReasonIneligible          Reason = "ineligible"
+)
+
+// KeySource records where the affinity key came from.
+type KeySource string
+
+const (
+	KeyContinuation KeySource = "key_continuation"
+	KeySession      KeySource = "key_session"
+	KeyPromptCache  KeySource = "key_prompt_cache_key"
+	KeyAnchor       KeySource = "key_anchor"
+	KeyPrefix       KeySource = "key_prefix"
+	KeyNone         KeySource = "key_none"
+)

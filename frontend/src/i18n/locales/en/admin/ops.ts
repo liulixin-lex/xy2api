@@ -4,6 +4,8 @@ export default {
       description: 'Operational monitoring and troubleshooting',
       // Dashboard
       systemHealth: 'System Health',
+      outputTps: 'Average output rate per request',
+      outputTpsSamples: 'Valid samples: {count}',
       overview: 'Overview',
       noSystemMetrics: 'No system metrics collected yet.',
       collectedAt: 'Collected at:',
@@ -88,13 +90,13 @@ export default {
       requestsTotal: 'Requests (total)',
       slaScope: 'SLA scope:',
       tokens: 'Tokens',
-      tps: 'TPS:',
+      tps: 'Throughput (tokens/s)',
       current: 'current',
       peak: 'peak',
       average: 'average',
       totalRequests: 'Total Requests',
       avgQps: 'Avg QPS',
-      avgTps: 'Avg TPS',
+      avgTps: 'Avg throughput (tokens/s)',
       avgLatency: 'Avg Request Duration',
       avgTtft: 'Avg TTFT',
       exceptions: 'Exceptions',
@@ -176,7 +178,7 @@ export default {
         table: {
           model: 'Model',
           requestCount: 'Requests',
-          avgTokensPerSec: 'Avg Tokens/sec',
+          avgTokensPerSec: 'Average output rate (tokens/s)',
           avgFirstTokenMs: 'Avg First Token Latency (ms)',
           totalOutputTokens: 'Total Output Tokens',
           avgDurationMs: 'Avg Duration (ms)',
@@ -803,6 +805,7 @@ export default {
         accountError: 'Error'
       },
       tooltips: {
+        outputTps: 'Percentiles of each valid usage record’s output tokens / total duration, including first-token wait, within the selected time, platform and group. Output may include reasoning tokens; they are not added again. P50 is the median; P5/P10 show slower requests. Higher is faster. Excludes images, Live and records without positive output or duration. Samples come from retained usage logs; — means no samples or temporarily unavailable statistics.',
         totalRequests: 'Total number of requests (including both successful and failed requests) in the selected time window.',
         throughputTrend: 'Requests/QPS + Tokens/TPS in the selected window.',
         switchRateTrend: 'Trend of account switches / total requests over the last 5 hours (avg switches).',

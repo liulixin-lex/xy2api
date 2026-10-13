@@ -707,8 +707,34 @@ func ProvideImageStorageSettingService(
 // 对象存储是异步图片任务的启用前提：仅当开关打开且凭证齐全时功能才可用，否则整体禁用
 // （handler 返回 404，不创建任务、不写 Redis），从而避免大 base64 结果撑爆 Redis。
 // 启用状态由 settings 服务在运行时解析，因此后台改开关后无需重启即可生效。
-func ProvideImageTaskService(store ImageTaskStore, settings *ImageStorageSettingService) *ImageTaskService {
-	return NewImageTaskServiceWithResolver(store, settings.Resolver(), defaultImageTaskTTL, defaultImageTaskExecutionTimeout)
+//
+// v2：同时接入 Redis 协调器（幂等键、在途上限、清扫锁、查询限流）、计费查询与错误日志，
+// 并启动清扫器，把心跳超过 2 分钟的任务收尾为 task_interrupted。
+func ProvideImageTaskService(
+	store ImageTaskStore,
+	settings *ImageStorageSettingService,
+	coordinator ImageTaskCoordinator,
+	billing ImageTaskBillingLookup,
+	ops *OpsService,
+	cfg *config.Config,
+) *ImageTaskService {
+	svc := NewImageTaskServiceWithResolver(store, settings.Resolver(), defaultImageTaskTTL, defaultImageTaskExecutionTimeout)
+	limits := DefaultImageTaskLimits()
+	if cfg != nil {
+		tasks := cfg.ImageTasks
+		limits.MaxInFlightPerKey = tasks.MaxInFlightPerKey
+		limits.MaxInFlightPerInstance = tasks.MaxInFlightPerInstance
+		limits.LongPollMax = time.Duration(tasks.LongPollMaxSeconds) * time.Second
+		limits.PollRatePerSecond = tasks.PollRatePerSecond
+		limits.DrainTimeout = time.Duration(tasks.DrainTimeoutSeconds) * time.Second
+	}
+	deps := ImageTaskDependencies{Coordinator: coordinator, Billing: billing, Limits: &limits}
+	if ops != nil {
+		deps.Ops = ops
+	}
+	svc.Configure(deps)
+	svc.StartSweeper()
+	return svc
 }
 
 // ProvideBackupService creates and starts BackupService
@@ -852,7 +878,6 @@ func ProvideAPIKeyService(
 
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
-	ProvideControlledSchedulingService,
 	// Core services
 	ProvideAuthService,
 	NewPasskeyService,
@@ -897,6 +922,7 @@ var ProviderSet = wire.NewSet(
 	ProvideOAuthRefreshAPI,
 	ProvideGeminiTokenProvider,
 	NewGeminiMessagesCompatService,
+	ProvideShareSchedulingService,
 	ProvideAntigravityTokenProvider,
 	ProvideGrokTokenProvider,
 	ProvideOpenAITokenProvider,
@@ -1078,29 +1104,23 @@ func ProvideChannelMonitorV2Aggregator(repo ChannelMonitorV2Repository, db *sql.
 	return aggregator
 }
 
-// ProvideControlledSchedulingService installs shared policy and dispatch gates
-// after normal services exist. Constructors used by isolated tests stay stable.
-func ProvideControlledSchedulingService(db *sql.DB, rdb *redis.Client, accounts AccountRepository, concurrency *ConcurrencyService, openai *OpenAIGatewayService, gateway *GatewayService, gemini *GeminiMessagesCompatService, antigravity *AntigravityGatewayService) *ControlledSchedulingService {
-	s := newControlledSchedulingService(db, rdb, accounts, concurrency, openai.cfg != nil && openai.cfg.RunMode == config.RunModeSimple)
-	// Initialize the read-only proxy circuit pointer before services become concurrent.
-	openai.getOpenAIProxyStreamCircuit()
-	s.SetExplainEligibility(openai.ExplainSchedulingEligibility, gateway.ExplainSchedulingEligibility)
-	openai.controlledScheduling = s
-	gateway.controlledScheduling = s
-	gemini.controlledScheduling = s
-	antigravity.controlledScheduling = s
-	openai.httpUpstream = &controlledHTTPUpstream{base: openai.httpUpstream, service: s}
-	gateway.httpUpstream = &controlledHTTPUpstream{base: gateway.httpUpstream, service: s}
-	gemini.httpUpstream = &controlledHTTPUpstream{base: gemini.httpUpstream, service: s}
-	antigravity.httpUpstream = &controlledHTTPUpstream{base: antigravity.httpUpstream, service: s}
-	s.Start()
-	return s
-}
-
 // ProvideClaudeResetCreditService wires the Claude reset query and, with the
 // idempotency store and Redis leases, manual redemption.
 func ProvideClaudeResetCreditService(accounts AccountRepository, tokens *ClaudeTokenProvider, proxies ProxyRepository, settings *SettingService, idem *IdempotencyCoordinator, locks LeaderLockCache) *ClaudeResetCreditService {
 	s := NewClaudeResetCreditService(accounts, tokens, proxies, settings)
 	s.ConfigureRedemption(idem, locks)
+	return s
+}
+
+// ProvideShareSchedulingService installs share scheduling into the gateway
+// services after they exist, so their constructors stay stable for tests.
+// Until an administrator enables it every group keeps the original scheduler.
+func ProvideShareSchedulingService(repo ShareSchedulingRepository, store ShareSchedulingStore, settingRepo SettingRepository, gateway *GatewayService, openai *OpenAIGatewayService, cfg *config.Config) *ShareSchedulingService {
+	s := NewShareSchedulingService(repo, store, settingRepo)
+	s.meterIO = cfg != nil && cfg.Server.EnableServerTiming
+	gateway.shareScheduling = s
+	openai.shareScheduling = s
+	s.attachGateways(gateway, openai)
+	s.Start()
 	return s
 }

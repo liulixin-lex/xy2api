@@ -63,10 +63,10 @@ export default {
         usageMetrics: {
           title: 'Admin usage records',
           description: 'Control metrics shown in admin usage records without changing collection or billing.',
-          cacheHitRate: 'Show cache hit rate',
-          cacheHitRateHint: 'Show the cache hit percentage for each request in the Token column.',
-          tokenSpeed: 'Show token speed',
-          tokenSpeedHint: 'Show output tokens per second in the latency column, using generation time when available.',
+          cacheHitRate: 'Show cache read share',
+          cacheHitRateHint: 'Show cache read tokens as a share of all input billing tokens in the Token column. Forced cache billing affects this ratio.',
+          tokenSpeed: 'Show average output rate',
+          tokenSpeedHint: 'Show output tokens ÷ total request duration, including first-token wait, in the latency column. Unit: tokens/s.',
         },
         channelMonitor: {
           title: 'Channel Monitor',

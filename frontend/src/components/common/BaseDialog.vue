@@ -140,7 +140,7 @@ const handleClose = () => {
 const handleEscape = (event: KeyboardEvent) => {
   const activeDialog = (document.activeElement as HTMLElement | null)?.closest('[data-base-dialog]')
   if (activeDialog && activeDialog !== dialogRef.value?.closest('[data-base-dialog]')) return
-  if (!event.defaultPrevented && props.show && props.closeOnEscape && event.key === 'Escape') {
+  if (!event.defaultPrevented && props.show && props.closeOnEscape && event.key === 'Escape' && [...openDialogs].pop() === dialogToken) {
     event.preventDefault()
     emit('close')
   }

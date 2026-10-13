@@ -4,6 +4,7 @@
       <template #filters>
         <div class="flex flex-wrap-reverse items-start justify-between gap-3">
           <AccountTableFilters
+            class="lg:w-auto lg:flex-1"
             v-model:searchQuery="params.search"
             :filters="params"
             :groups="groups"
@@ -17,7 +18,6 @@
             @create="showCreate = true"
           >
             <template #after>
-              <RouterLink v-if="schedulingModeStore.isControlled" :to="{ path: '/admin/scheduling', query: /^\d+$/.test(String(params.group)) && Number(params.group) > 0 ? { group_id: String(params.group) } : {} }" class="btn btn-secondary">{{ /^\d+$/.test(String(params.group)) && Number(params.group) > 0 ? t('admin.scheduling.groupPolicy.quickAdjust') : t('admin.scheduling.title') }}</RouterLink>
               <!-- Auto Refresh Dropdown -->
               <div class="relative" ref="autoRefreshDropdownRef">
                 <button
@@ -293,7 +293,7 @@
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
             </div>
           </template>
-          <template #header-schedulable="{ column }"><div class="flex items-center gap-1"><span>{{ column.label }}</span><HelpTooltip :content="t('admin.scheduling.accountSwitchHint')" width-class="w-72" /></div></template>
+          <template #header-schedulable="{ column }"><div class="flex items-center gap-1"><span>{{ column.label }}</span><HelpTooltip :content="t('admin.accounts.schedulableHint')" width-class="w-72" /></div></template>
           <template #cell-schedulable="{ row }">
             <div class="flex flex-col items-start gap-1.5">
             <button type="button" role="switch" :aria-checked="row.schedulable" :aria-busy="togglingSchedulable.has(row.id)" :aria-label="t('admin.accounts.columns.schedulable') + ' ' + row.name" @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable.has(row.id)" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
@@ -521,7 +521,6 @@ import AccountTableActions from '@/components/admin/account/AccountTableActions.
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import IQCheckCell from '@/components/account/IQCheckCell.vue'
-import { useSchedulingModeStore } from '@/stores/schedulingMode'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
@@ -554,7 +553,6 @@ const IQCheckResultsModal = defineAsyncComponent(() => import('@/components/admi
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
-const schedulingModeStore = useSchedulingModeStore()
 const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
 const groupsByID = computed(() => new Map(groups.value.map(group => [group.id, group])))
@@ -1091,7 +1089,7 @@ const toggleColumn = (key: string) => {
 }
 
 const isColumnVisible = (key: string) => !hiddenColumns.has(key)
-const shouldIncludeSchedulerScore = () => schedulingModeStore.isSub2API && isColumnVisible('scheduler_score')
+const shouldIncludeSchedulerScore = () => isColumnVisible('scheduler_score')
 const syncAccountListDerivedParams = () => {
   // Keep every load path, including auto-refresh and sorting, aligned with the current column visibility.
   const requestParams = params as any
@@ -1850,7 +1848,7 @@ const allColumns = computed(() => {
   c.push({ key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false })
   c.push(
     { key: 'proxy', label: t('admin.accounts.columns.proxy'), sortable: false },
-    { key: 'priority', label: t(schedulingModeStore.isControlled ? 'admin.scheduling.modeSettings.defaultPriority' : 'admin.accounts.columns.priority'), sortable: true },
+    { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: true },
     { key: 'scheduler_score', label: t('admin.accounts.columns.schedulerScore'), sortable: false },
     { key: 'rate_multiplier', label: t('admin.accounts.columns.billingRateMultiplier'), sortable: true },
     { key: 'upstream_billing_rate', label: t('admin.accounts.columns.upstreamBillingRate'), sortable: true },
@@ -1860,7 +1858,7 @@ const allColumns = computed(() => {
     { key: 'notes', label: t('admin.accounts.columns.notes'), sortable: false },
     { key: 'actions', label: t('admin.accounts.columns.actions'), sortable: false }
   )
-  return c.filter(column => column.key !== 'scheduler_score' || schedulingModeStore.isSub2API)
+  return c
 })
 
 // Columns that can be toggled (exclude select, name, and actions)
@@ -2601,8 +2599,6 @@ const handleClickOutside = (event: MouseEvent) => {
     showAutoRefreshDropdown.value = false
   }
 }
-
-watch(() => schedulingModeStore.isSub2API, () => { void load() })
 
 onMounted(async () => {
   if (typeof window !== 'undefined') {

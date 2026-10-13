@@ -1,5 +1,7 @@
 # 智能可控调度：配置与运行说明
 
+> 已退役（2026-10-10）：智能可控调度已从代码中完全移除，网关回到 Sub2API 原版调度，旧管理接口返回 `410 SCHEDULING_RETIRED`。当前说明见 [账号调度](account-scheduling.md)；本文仅供追溯。
+
 > 历史文档（截至 2026-09-28）。本分支已于 2026-09-29 替换为分组独立的账号优先级与权重调度；当前使用说明见 [分组账号调度](account-scheduling.md)。下文逐模型策略、Profiles、legacy 模式与旧策略 API 不再作为当前配置方式，保留仅用于追溯。
 
 本实现默认保留 legacy。新增迁移 `257_explicit_account_scheduling.sql` 创建调度策略、人工控制、attempt 和会话排空表；不改已有账号 priority 的方向，也不把 load_factor 换算成流量比例。

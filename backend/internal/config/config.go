@@ -107,6 +107,7 @@ type Config struct {
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
 	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
 	ImageStorage            ImageStorageConfig            `mapstructure:"image_storage"`
+	ImageTasks              ImageTasksConfig              `mapstructure:"image_tasks"`
 	Plugins                 PluginConfig                  `mapstructure:"plugins"`
 
 	// Enforce only API-key spending windows in simple mode.
@@ -274,6 +275,21 @@ type ImageStorageConfig struct {
 	PublicBaseURL   string `mapstructure:"public_base_url"`      // 配了则返回 public_base_url/key 直链；否则 presigned
 	PresignExpiry   int    `mapstructure:"presign_expiry_hours"` // public_base_url 为空时的 presigned 过期时长(小时)
 	MaxDownloadByte int64  `mapstructure:"max_download_bytes"`   // 下载上游 url 图片的字节上限
+}
+
+// ImageTasksConfig 配置异步图片任务的运行边界（v2）。开关仍由 image_storage 决定。
+type ImageTasksConfig struct {
+	// 每个 API Key 同时进行的任务上限；0 表示按用户并发 ×2（至少 2）推导。
+	MaxInFlightPerKey int `mapstructure:"max_in_flight_per_key"`
+	// 单实例同时执行的任务上限。
+	MaxInFlightPerInstance int `mapstructure:"max_in_flight_per_instance"`
+	// GET /v1/images/tasks/{id}?wait=N 的最长等待秒数（上限 60）。
+	LongPollMaxSeconds int `mapstructure:"long_poll_max_seconds"`
+	// 每个 API Key 每秒允许的查询次数；0 表示不限。
+	PollRatePerSecond int `mapstructure:"poll_rate_per_second"`
+	// 收到 SIGTERM 后等待在途任务完成的秒数；超时仍未完成的任务被取消并标记 task_interrupted。
+	// 容器的停止宽限期（docker stop -t / stop_grace_period）需不小于该值才能生效。
+	DrainTimeoutSeconds int `mapstructure:"drain_timeout_seconds"`
 }
 
 // IsConfigured 检查对象存储必要字段是否已配置
@@ -2367,6 +2383,11 @@ func setDefaults() {
 	viper.SetDefault("image_storage.access_key_id", "")
 	viper.SetDefault("image_storage.secret_access_key", "")
 	viper.SetDefault("image_storage.public_base_url", "")
+	viper.SetDefault("image_tasks.max_in_flight_per_key", 0)
+	viper.SetDefault("image_tasks.max_in_flight_per_instance", 256)
+	viper.SetDefault("image_tasks.long_poll_max_seconds", 30)
+	viper.SetDefault("image_tasks.poll_rate_per_second", 10)
+	viper.SetDefault("image_tasks.drain_timeout_seconds", 600)
 
 	// Ops (vNext)
 	viper.SetDefault("ops.enabled", true)

@@ -51,7 +51,7 @@ image_storage:
   max_download_bytes: 33554432     # cap when re-hosting an upstream image URL (32MB)
 ```
 
-When a task completes, each generated image is uploaded to the bucket and the result is rewritten to a compact form: `data[].url` points at the stored object (a permanent `public_base_url/key` link, or a time-limited presigned URL) and `b64_json` is removed. Only this small JSON is stored in Redis. If an upload fails, the task is marked `failed` rather than persisting the raw base64.
+When a task completes, each generated image is uploaded to the bucket and the result is rewritten to a compact form: `data[].url` points at the stored object (a permanent `public_base_url/key` link, or a time-limited presigned URL) and `b64_json` is removed. Only this small JSON is stored in Redis. A failed upload is retried three times (after 1 s, 3 s and 9 s); if it still fails the task is marked `failed` with `error.code = result_storage_failed`. Billing is read independently from the ledger. Partial uploads remain tracked privately so deleting the failed task also removes them; raw base64 is never persisted.
 
 To support a different vendor beyond the S3-compatible client, implement the `service.ImageStorage` interface (`Save(ctx, key, contentType, data) (url, error)`) and provide it in place of the S3 implementation.
 
@@ -164,3 +164,102 @@ For URL responses, `image_url` mirrors the first `data[].url` for simple clients
 All submit and poll responses include `Cache-Control: no-store`, preventing a CDN from caching the `processing` state. Tasks and results expire 24 hours after their latest state update. A task executes for at most 30 minutes.
 
 Task ownership is scoped to both user and API key. Unknown task IDs and IDs owned by another key both return `404`, avoiding task-existence disclosure. Polling remains available when the completed generation used the key's remaining balance; normal authentication, disabled-key, user, IP, and group checks still apply.
+
+## Version 2 additions
+
+Version 2 only adds to the API above: every path, field and status of 0.2.6 keeps its meaning, so 0.2.6 clients need no change. Treat any status other than `completed` and `failed` as still running.
+
+### Discover what the gateway supports
+
+```bash
+curl https://api.example.com/v1/images/async/capabilities -H 'Authorization: Bearer sk-...'
+```
+
+```json
+{
+  "object": "image.async.capabilities",
+  "version": 2,
+  "enabled": true,
+  "platform": "openai",
+  "endpoints": ["generations", "edits"],
+  "prefer_respond_async": true,
+  "idempotency": true,
+  "billing_in_task": true,
+  "delete": true,
+  "long_poll_max_seconds": 30,
+  "poll_rate_per_second": 10,
+  "max_in_flight_per_key": 8,
+  "task_ttl_seconds": 86400,
+  "execution_timeout_seconds": 1800
+}
+```
+
+A 0.2.6 gateway answers this path with 404, which is how a client tells the versions apart.
+
+### Request id and billing on every task
+
+The 202 and the task view carry `request_id`, the `usage_logs.request_id` the generation is billed under (`client:<X-Client-Request-ID of the submit response>`), and a `billing` object:
+
+| `billing.status` | Meaning |
+| --- | --- |
+| `pending` | The task is still running, or the ledger has not settled yet; poll again. |
+| `charged` | A usage row with `billing.request_id` exists. |
+| `not_charged` | Neither a usage row nor an unsettled billing intent exists for the request. |
+
+The conclusion for every terminal task comes from the gateway's own ledger (`usage_logs`, plus unsettled rows of `usage_billing_intents` as `pending`). Successful generation alone does not prove settlement: completed tasks can remain `pending`, and polling refreshes that state after settlement. An unavailable ledger lookup also leaves billing `pending`. The task view adds `model`, `endpoint` (`generations` or `edits`), `started_at` and `heartbeat_at`.
+
+### Idempotent submission
+
+Send `Idempotency-Key` (1–128 characters of `A-Z a-z 0-9 . _ : -`) to make a retry of a lost 202 safe. Keys are scoped to the user and API key and live as long as the task.
+
+| Situation | Response |
+| --- | --- |
+| First submission | `202` as usual, the body echoes `idempotency_key` |
+| Same key, same request | `200` with the existing task view plus `poll_url`, header `Idempotent-Replayed: true`. No second generation. |
+| Same key, different request | `422 idempotency_key_reused` |
+| Same key while the first submission is still being accepted | `409 idempotency_in_progress`, `Retry-After: 1` |
+
+JSON bodies are compared byte for byte; multipart bodies are compared by their parts (field name, file name, content), so a client that rebuilds the form with a new boundary still matches. A submission refused before the 202 (validation, moderation, limits) releases its key.
+
+### `Prefer: respond-async`
+
+`POST /v1/images/generations` and `/v1/images/edits` with `Prefer: respond-async` (RFC 7240) behave like the `/async` paths and answer `202` with `Preference-Applied: respond-async`. When async tasks are disabled the preference is ignored and the call stays synchronous (`200`).
+
+### Long polling
+
+`GET /v1/images/tasks/{id}?wait=25` holds the request until the task finishes or `wait` seconds pass (capped by `image_tasks.long_poll_max_seconds`, default 30, far below proxy timeouts such as Cloudflare's 100–125 s).
+
+### Deleting a finished task
+
+`DELETE /v1/images/tasks/{id}` removes the stored images and the task record and returns `{"deleted": true}`. A task that is still `processing` returns `409 IMAGE_TASK_RUNNING`: deleting is not cancelling, the generation continues and is billed. Call it once the images have been downloaded; the bucket's lifecycle rule remains the safety net.
+
+### Limits
+
+| Limit | Default | Response |
+| --- | --- | --- |
+| Running tasks per API key | user concurrency × 2, at least 2 (`image_tasks.max_in_flight_per_key` overrides) | `429 too_many_tasks`, `Retry-After: 5` |
+| Running tasks per instance | 256 (`max_in_flight_per_instance`) | `429 too_many_tasks`, `Retry-After: 5` |
+| Polls and deletes per API key | 10 per second (`poll_rate_per_second`) | `429 too_many_requests`, `Retry-After: 1` |
+
+Submission is still a normal gateway request: rate limits, balance checks and moderation apply before the 202, and every failure before the 202 means no task, no generation and no usage.
+
+### Reliability
+
+- **Heartbeat.** A running task refreshes `heartbeat_at` every 15 seconds.
+- **Sweeper.** Every instance checks once a minute (one at a time, via a Redis lock) for tasks whose heartbeat is older than two minutes, and concludes them as `failed` with `error.code = task_interrupted` and the billing conclusion from the ledger. Tasks are never re-run: a re-run would be a second paid upstream call.
+- **Graceful shutdown.** On SIGTERM new submissions get `503 IMAGE_TASK_UNAVAILABLE` (not submitted) and running tasks get up to `image_tasks.drain_timeout_seconds` (default 600) to finish. Tasks still running then are cancelled and concluded as `task_interrupted`. Give the container a matching stop grace period (`docker stop -t`, Compose `stop_grace_period`); with Docker's default 10 seconds the sweeper of the next instance concludes the tasks instead.
+- **Terminal states are final.** A late result for a task that was already concluded is dropped and logged as `image_task.late_result_dropped`.
+- **Scheduling and liveness.** Tasks retain a detached execution context after the 202 under the original or share scheduler. Heartbeats continue through result upload and retries until the terminal task state is stored. The retired `controlled` request ledger is no longer used.
+
+### Error codes assigned by the gateway
+
+| `error.code` | `http_status` | Meaning | `billing.status` |
+| --- | --- | --- | --- |
+| (upstream error) | upstream status | Refusal or failure reported by the upstream, unchanged | from the ledger, normally `not_charged` |
+| `timeout` | 504 | The 30-minute execution limit passed | from the ledger |
+| `task_interrupted` | 502 / 503 | The instance stopped (sweeper) or shut down (drain) | from the ledger |
+| `result_storage_failed` | 502 | Image generation succeeded, but storage failed after three retries | from the ledger |
+
+### Observability
+
+Structured log events `image_task.submitted`, `started`, `completed`, `failed`, `interrupted`, `offload_retry`, `offload_failed`, `deleted` and `late_result_dropped` carry `task_id`, `request_id`, `user_id`, `api_key_id`, `group_id`, `model`, `endpoint`, `duration_ms`, `error_code` and `billing_status`; prompts and links are never logged. A failed task also writes an `ops_error_logs` row whose `request_path` is the submit path (for example `/v1/images/generations/async`) and whose `client_request_id` is the task's request id, so it shows up in the admin error log next to synchronous failures.

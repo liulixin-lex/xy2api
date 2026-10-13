@@ -262,7 +262,7 @@ func (s *OpenAIGatewayService) observeCacheUsage(result *OpenAIForwardResult, ac
 	}
 	t.mu.Unlock()
 	if s.cfg != nil && s.cfg.Gateway.OpenAICache.DiagnosticsEnabled {
-		slog.Info("openai_cache_usage", "session_digest", d.Session, "prefix_hmac", d.WirePrefix, "fingerprint_source", d.Source, "account_id", account.ID, "group_id", d.GroupID, "model", d.Model, "cache_mode", d.Mode, "format", d.Format, "length_bucket", d.LengthBucket, "reason", reason, "input_tokens", usage.InputTokens, "cache_read_tokens", usage.CacheReadInputTokens, "cache_write_tokens", usage.CacheCreationInputTokens, "read_source", usage.CacheReadSource, "write_source", usage.CacheWriteSource, "attempt_id", result.SchedulingAttemptID, "request_id_hmac", s.cacheIdentityDigest("openai-request", result.RequestID))
+		slog.Info("openai_cache_usage", "session_digest", d.Session, "prefix_hmac", d.WirePrefix, "fingerprint_source", d.Source, "account_id", account.ID, "group_id", d.GroupID, "model", d.Model, "cache_mode", d.Mode, "format", d.Format, "length_bucket", d.LengthBucket, "reason", reason, "input_tokens", usage.InputTokens, "cache_read_tokens", usage.CacheReadInputTokens, "cache_write_tokens", usage.CacheCreationInputTokens, "read_source", usage.CacheReadSource, "write_source", usage.CacheWriteSource, "request_id_hmac", s.cacheIdentityDigest("openai-request", result.RequestID))
 	}
 }
 

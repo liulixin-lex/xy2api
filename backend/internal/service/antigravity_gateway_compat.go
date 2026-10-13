@@ -176,9 +176,6 @@ func (s *AntigravityGatewayService) forwardAntigravityCompat(
 		return nil, err
 	}
 
-	if !request.clientStream {
-		ctx = withControlledBufferedResponse(ctx)
-	}
 	result, err := s.antigravityRetryLoop(antigravityRetryLoopParams{
 		ctx:             ctx,
 		prefix:          call.prefix,
@@ -567,7 +564,6 @@ func (s *AntigravityGatewayService) handleChatCompletionsNonStreamingFromAntigra
 	startTime time.Time,
 	originalModel string,
 ) (_ *antigravityStreamResult, retErr error) {
-	defer finishControlledNonstreamResponse(resp, &retErr)
 	claudeResponse, result, err := s.collectClaudeStreamResponse(c, resp, startTime, originalModel)
 	if err != nil {
 		return nil, s.mapAntigravityCompatCollectionError(c, err)
@@ -587,7 +583,6 @@ func (s *AntigravityGatewayService) handleResponsesNonStreamingFromAntigravity(
 	startTime time.Time,
 	originalModel string,
 ) (_ *antigravityStreamResult, retErr error) {
-	defer finishControlledNonstreamResponse(resp, &retErr)
 	claudeResponse, result, err := s.collectClaudeStreamResponse(c, resp, startTime, originalModel)
 	if err != nil {
 		return nil, s.mapAntigravityCompatCollectionError(c, err)

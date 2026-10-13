@@ -15,7 +15,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/config"
-	"github.com/liulixin-lex/xy2api/internal/scheduling"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -250,33 +249,26 @@ func TestBillingIntent_ReadOnlyAuditScript(t *testing.T) {
 	assertBillingIntentMoney(t, c, 98.75, 1)
 }
 
-func TestBillingIntent_RecoveryAcknowledgesSchedulingAfterLostAck(t *testing.T) {
+func TestBillingIntent_RecoveryIgnoresRetiredSchedulingAttempt(t *testing.T) {
 	r, c := newBillingIntentFixture(t)
+	// Intents persisted by 0.2.5 controlled scheduling carry an attempt ID. The
+	// retired scheduler no longer acknowledges it; recovery must still finish.
 	c.SchedulingAttemptID = uuid.NewString()
-	_, err := integrationDB.Exec(`INSERT INTO scheduling_attempts
-		(ticket_id, request_id, account_id, family_id, node_id, account_epoch, family_epoch, state, usage_pending, lease_until)
-		VALUES ($1, $2, $3, $3, 'billing-test', 0, 0, 'settled', TRUE, NOW())`, c.SchedulingAttemptID, c.RequestID, c.AccountID)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_, err := integrationDB.Exec("DELETE FROM scheduling_attempts WHERE ticket_id = $1", c.SchedulingAttemptID)
-		require.NoError(t, err)
-	})
-	_, err = r.Apply(context.Background(), c)
+	_, err := r.Apply(context.Background(), c)
 	require.NoError(t, err)
 	_, err = integrationDB.Exec("UPDATE usage_billing_intents SET next_attempt_at = NOW() WHERE request_id = $1 AND api_key_id = $2", c.RequestID, c.APIKeyID)
 	require.NoError(t, err)
 	cache := service.NewBillingCacheService(&billingCache{rdb: integrationRedis}, nil, nil, nil, nil, nil, &config.Config{}, nil)
 	defer cache.Stop()
-	control := &service.ControlledSchedulingService{Store: scheduling.NewPostgresStore(integrationDB)}
-	recovery := service.ProvideUsageBillingRecoveryService(r, cache, control)
+	recovery := service.ProvideUsageBillingRecoveryService(r, cache)
 	defer recovery.Stop()
 	require.Eventually(t, func() bool {
-		var acknowledged, pending bool
-		if err := integrationDB.QueryRow(`SELECT a.usage_acknowledged, i.cache_pending FROM scheduling_attempts a
-			JOIN usage_billing_intents i ON i.request_id = a.request_id WHERE a.ticket_id = $1`, c.SchedulingAttemptID).Scan(&acknowledged, &pending); err != nil {
+		var pending bool
+		if err := integrationDB.QueryRow(`SELECT cache_pending FROM usage_billing_intents
+			WHERE request_id = $1 AND api_key_id = $2`, c.RequestID, c.APIKeyID).Scan(&pending); err != nil {
 			return false
 		}
-		return acknowledged && !pending
+		return !pending
 	}, 10*time.Second, 20*time.Millisecond)
 	assertBillingIntentMoney(t, c, 98.75, 1)
 }

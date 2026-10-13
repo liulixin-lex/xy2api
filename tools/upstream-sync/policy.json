@@ -43,8 +43,10 @@
       "docs/**",
       "frontend/**",
       "openspec/changes/add-claude-cache-fallback/**",
+      "openspec/changes/async-image-tasks-v2/**",
       "openspec/changes/stabilize-openai-iq-check/**",
       "openspec/changes/iq-detection-operations/**",
+      "openspec/changes/replace-controlled-with-share-scheduling/**",
       "skills/**",
       "tools/**"
     ],
@@ -191,7 +193,24 @@
       "frontend/src/i18n/locales/en/dashboard.ts",
       "frontend/src/i18n/locales/zh/dashboard.ts",
       "frontend/src/views/user/KeysView.vue",
-      "frontend/src/views/user/PaymentView.vue"
+      "frontend/src/views/user/PaymentView.vue",
+      "backend/ent/schema/composite_model_route.go",
+      "backend/ent/schema/user_platform_quota.go",
+      "backend/internal/handler/admin/account_handler_available_models_test.go",
+      "backend/internal/handler/admin/channel_handler.go",
+      "backend/internal/handler/openai_gateway_handler_test.go",
+      "backend/internal/service/channel_service.go",
+      "backend/internal/service/composite_platform.go",
+      "backend/internal/service/openai_gateway_forward.go",
+      "backend/internal/service/openai_gateway_scheduling.go",
+      "backend/internal/service/openai_ws_v2/passthrough_relay.go",
+      "backend/internal/service/opencode_go.go",
+      "backend/internal/service/scheduler_snapshot_service.go",
+      "backend/internal/service/upstream_billing_probe.go",
+      "frontend/src/api/__tests__/settings.authSourceDefaults.spec.ts",
+      "frontend/src/components/account/__tests__/EditAccountModal.spec.ts",
+      "frontend/src/components/admin/account/AccountTableFilters.vue",
+      "frontend/src/components/admin/usage/UsageTable.vue"
     ],
     "generated": [
       "backend/ent/**",
@@ -258,6 +277,34 @@
     {
       "path": "deploy/docker-compose.yml",
       "value": "APP_DATA_VOLUME_NAME"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "s.shareSchedulingHook(ctx, group, groupID, sessionHash, requestedModel, excludedIDs)"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "s.shareRecordSelection(ctx, hydrated)"
+    },
+    {
+      "path": "backend/internal/service/gateway_service.go",
+      "value": "s.shareSessionHash(parsed)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "s.shareSchedulingHook(ctx, openAIShareSelection{"
+    },
+    {
+      "path": "backend/internal/service/openai_profit_control.go",
+      "value": "applyDeferredShareBinding(ctx, groupID, s.openAISessionCacheKey(sessionHash), accountID)"
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "value": "s.shareScheduling.observeUsage(ctx, usageLog)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "s.shareScheduling.observeUsage(ctx, usageLog)"
     }
   ],
   "forbidden_module_paths": [
@@ -279,10 +326,16 @@
     "windows-plugin-archive-close",
     "migration-checksum-manifest",
     "dual-version-plugin-compatibility",
-    "typesafe-controlled-settlement",
     "hosted-recharge-quote-snapshot",
     "v0214-append-only-upgrade",
-    "gpt61-exact-model-aliases"
+    "gpt61-exact-model-aliases",
+    "share-scheduling-gateway-hooks",
+    "share-scheduling-openai-hooks",
+    "share-scheduling-cache-attribution",
+    "v0215-append-only-upgrade",
+    "explicit-backup-scope-and-diagnostics",
+    "async-image-storage-lifecycle",
+    "usage-metrics-consistent-units"
   ],
   "custom_patch_tests": [
     {
@@ -321,11 +374,6 @@
       "literal": "func TestEvaluatePluginCompatibilityUsesSub2APIBaselineInsteadOfProductVersion"
     },
     {
-      "id": "typesafe-controlled-settlement",
-      "path": "backend/internal/service/controlled_protocol_acceptance_test.go",
-      "literal": "{\"systemone\","
-    },
-    {
       "id": "hosted-recharge-quote-snapshot",
       "path": "backend/internal/service/payment_stripe_hosted_database_test.go",
       "literal": "func TestStripeHostedDatabaseCreateRecoveryAndConcurrentLimits"
@@ -339,6 +387,41 @@
       "id": "gpt61-exact-model-aliases",
       "path": "backend/internal/service/gpt61_sol_support_test.go",
       "literal": "func TestGPT61SolAliasIdentityRemainsExact"
+    },
+    {
+      "id": "share-scheduling-gateway-hooks",
+      "path": "backend/internal/service/share_scheduling_gateway_test.go",
+      "literal": "func TestShareSchedulingFallbackWaitDefersBinding"
+    },
+    {
+      "id": "share-scheduling-openai-hooks",
+      "path": "backend/internal/service/share_scheduling_openai_test.go",
+      "literal": "func TestOpenAIShareSchedulingAdmissionBindKeepsPlannedBinding"
+    },
+    {
+      "id": "share-scheduling-cache-attribution",
+      "path": "backend/internal/service/share_scheduling_attribution_test.go",
+      "literal": "func TestShareAttributionFollowsServedPlacements"
+    },
+    {
+      "id": "v0215-append-only-upgrade",
+      "path": "backend/internal/repository/upstream_v0215_migration_integration_test.go",
+      "literal": "func TestUpstreamV0215MigrationUpgrade"
+    },
+    {
+      "id": "explicit-backup-scope-and-diagnostics",
+      "path": "backend/internal/repository/backup_pg_dumper_test.go",
+      "literal": "func TestPgDumperPublicScopeIsExplicitAndStrict"
+    },
+    {
+      "id": "async-image-storage-lifecycle",
+      "path": "backend/internal/handler/image_task_handler_v2_test.go",
+      "literal": "func TestAsyncImageV2HeartbeatCoversResultStorage"
+    },
+    {
+      "id": "usage-metrics-consistent-units",
+      "path": "frontend/src/utils/__tests__/usageMetrics.spec.ts",
+      "literal": "uses complete request duration even when first-token time is available"
     }
   ]
 }

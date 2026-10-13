@@ -1,3 +1,6 @@
+// Keep the upstream import path while sharing one rate formula across the UI.
+export { formatTokenSpeed as formatUsageOutputRate } from './usageMetrics'
+
 /**
  * 请求延迟健康度分档（用于用量明细"延迟"列的纵向健康扫视）。
  *

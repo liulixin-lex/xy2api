@@ -634,3 +634,17 @@ func TestPrepareAdminCredentialsAcceptsMinimumLengthPassword(t *testing.T) {
 		t.Fatalf("password = %q, want unchanged", admin.Password)
 	}
 }
+
+func TestDatabaseConnectionEmptyPasswordPreservesTargetDatabase(t *testing.T) {
+	cfg := &DatabaseConfig{Host: "db", Port: 5432, User: "xy2api", DBName: "app_db", SSLMode: "disable"}
+	dsn := buildPostgresDSN(cfg, cfg.DBName)
+	if strings.Contains(dsn, "password=") {
+		t.Fatal("empty password must not consume the following database option")
+	}
+	if !strings.Contains(dsn, "dbname=app_db") {
+		t.Fatal("setup must target the configured database")
+	}
+	if _, err := pq.NewConnector(dsn); err != nil {
+		t.Fatalf("driver rejected setup connection: %v", err)
+	}
+}

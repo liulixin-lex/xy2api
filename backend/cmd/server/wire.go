@@ -136,8 +136,21 @@ func provideCleanup(
 	openAIAutoReset *service.OpenAIQuotaAutoResetService,
 	promptAudit *securityaudit.PromptService,
 	pluginManager *service.PluginManager,
+	shareScheduling *service.ShareSchedulingService,
+	imageTasks *service.ImageTaskService,
+	asyncImage *handler.AsyncImageHandler,
 ) func() {
 	return func() {
+		// Async image tasks run in this process. Let them finish (bounded by
+		// image_tasks.drain_timeout_seconds) while Redis and the database are
+		// still open, so each one ends with a stored result and billing status.
+		if asyncImage != nil {
+			asyncImage.Drain()
+		}
+		if imageTasks != nil {
+			imageTasks.StopSweeper()
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
@@ -150,6 +163,10 @@ func provideCleanup(
 		parallelSteps := []cleanupStep{
 			{"UsageBillingRecoveryService", func() error {
 				billingRecovery.Stop()
+				return nil
+			}},
+			{"ShareSchedulingService", func() error {
+				shareScheduling.Stop()
 				return nil
 			}},
 			{"PluginManager", func() error {
@@ -351,7 +368,6 @@ func provideCleanup(
 			{"OpenAIWSPool", func() error {
 				if openAIGateway != nil {
 					openAIGateway.CloseOpenAIWSPool()
-					openAIGateway.CloseControlledScheduling()
 				}
 				return nil
 			}},

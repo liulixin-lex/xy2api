@@ -4,6 +4,150 @@
 
 ## 当前交接状态
 
+### Sub2API 0.2.15 / XY2API 0.3.0 集成候选（2026-10-13，最终门禁进行中）
+
+- 独立工作树 `/lex/xy2api-sync-20261013`，分支 `sync/sub2api-v0.2.15`，起始远端 `7b1d5d8c387c461a660befa3ac936b39715b4bf0`。按仓库 Skill 固定正式 annotated `v0.2.15`（object `86a80c13dcba86f52f9ca815b5a471cecc236227`，target `f2669c8cf62555cd92389b3f55920e9e6e7c6ff2`），以真实祖先 `0363b8cd` 三方合并。146 个上游提交、278 个文件、27 个冲突逐项裁决；报告和完整来源见 [同步说明](UPSTREAM_SYNC_V0215.md)。
+- 已在本地以常规 merge 整合固定 head 的 PR #90、#91，保留其完整历史。controlled 退役、share 默认关闭；异步图片任务使用独立执行 context。独立审查修复转存心跳中断、失败遗失对象列表、错误声明charged及关闭存储后原始base64落Redis四项问题。调度差异白名单已对新上游重新核对。
+- 用户明确授权对生产只读核查；现场确认应用角色无权读取历史外部 schema，而客户端18.6、数据库18.4、TLS连接均正常。用户选择应用public备份；新增显式scope并保留旧全库默认，线上未改配置/权限/服务且未运行导出。native TOC方案保留public及管理员拥有的pg_trgm，完整函数/类型/序列/数据与事务恢复已在隔离PG验证。详见 [备份说明](BACKUP_RELIABILITY.md)。上线后须显式保存public，目标恢复库需先初始化XY2API所需扩展。
+- tokens/s统一完整请求耗时的平均输出速率，缓存改称基于计费用量的缓存读取占比；中英页面/趋势/运维文案一致，缺数据不伪造0。参考上游及两个固定二开实现，见 [统计口径](USAGE_METRICS.md)。真实浏览器中英桌面/手机、开关和备份范围已验。
+- 316条已发布迁移及checksum逐项保持，仅追加270/271，总计318；补0.2.6→新schema升级回归。安装空密码DSN改用统一构造，避免数据库名被吞掉。
+- 验证截至此条：同步工具19、发布工具10、源码规则预检与scheduler-diff通过；备份scope定向82主+11子、最终repository/真实PG17主+2子通过。前端完整384文件/3026项复验通过，首轮IQ筛选测试索引失败记录保留；最后4条文案另补38项locale检查、lint与最终构建通过。后端最终unit为62包/23651测试及子测试通过，40项外部依赖/条件测试跳过；全量integration继续串行执行，关键真实数据库与Redis门禁另要求零跳过。资源争用中断未计为成功。
+- 同步分支及不可变上游命名空间标签已推送，草稿[PR #92](https://github.com/liulixin-lex/xy2api/pull/92)已登记真实来源链接；产品已独立升为0.3.0-rc.1。尚未合并main或发布；0.3.0需独立正式晋级PR，固定head CI、安全检查、RC升级回滚与正式制品门禁全部通过后执行。首轮CI仅发现3个归一化import的gofmt问题，已纯格式修正并保留失败记录。证据 `/lex/xy2api-release-20261013/`，既有工作树与运行部署保持。
+
+### PR #90 复审精简（2026-10-12，随 PR #90 推送；未合并、未发版、未部署）
+
+- 用户认为其他模型追加的“独立审查加固”（`85eae404`–`23f191fc`，PR 头 CI 的 Integration tests 失败）臃肿、兜底过多，要求复审后精简到上线标准。决策与理由见 design §19，验证见 tasks.md「PR #90 复审精简后验证」。
+- 删除的内容：
+  - 迁移 271（CI 失败的原因）；
+  - 按分组 `disabled` 和 `drain_fallback`，以及对原版 OpenAI 调度的改动；
+  - 等待租约；
+  - 绑定 CAS 与对胜出账号的槽位协调；
+  - 统计批次标记、重试与“不完整”标记；
+  - 升级盘点 SQL 与预检确认项；
+  - `applied_version`；
+  - `docs/share-scheduling-hardening.md`。
+  排空恢复原语义；原版调度文件与 `scheduler-diff.json` 回到 `a30fc223`。
+- 保留的内容：
+  - 默认权重取并发数；
+  - 设置写入纪元、全量刷新不回退新版本、保存不回读；
+  - 等待内槽位调用受预算约束；
+  - 前端过期结果防护与字段级合并（双方改同一字段时以自己为准）；
+  - 长窗口 `counter_precision`；
+  - 统计写失败计入丢弃数。
+- 验证（Go 1.27.2）：
+  - unit 61 包；
+  - Gateway reliability `-race` 154 例；
+  - OpenAI cache 40 例；
+  - integration 55 包（含 `TestUpstreamV0214MigrationUpgrade`）；
+  - lint 0；
+  - 前端 2816 例与构建；
+  - 双实例压测 7 个阶段与同负载 A/B；
+  - 0.2.6 回退与前滚演练。
+- 上一条“PR #90 审查修复交付”中涉及 271、`disabled`、租约、批次标记、`applied_version` 与 `docs/share-scheduling-hardening.md` 的描述已被本条取代。
+- 提交 `a2a6c2c8`（精简）、`7c763280`（文档）已推送，PR 描述新增「复审精简（2026-10-12）」一节。`7c763280` 上 CI 18 项全部通过，test 作业的 Unit、Integration、Gateway reliability、OpenAI cache、Hosted recharge 均成功；PR 为 MERGEABLE/CLEAN。
+- 下一步：人工审核 PR #90。合并、发版、部署与生产只读基线、影子运行、灰度需用户另行授权。
+
+### PR #90 审查修复交付（2026-10-12，本地实施与隔离验收完成）
+
+- 用户已授权执行独立审查方案、保留 PR #90 优秀逻辑，并允许释放磁盘空间。本轮完成本地修复与交付，没有推送、修改 PR、合并、标签/Release、部署、生产数据操作或付费模型调用。
+- 固定基线：PR #90 `a30fc223da2dbde25913a7b010b7c0d4db0d1f54`；远端 main `7b1d5d8c387c461a660befa3ac936b39715b4bf0`，收尾只读核对均未变化。候选分支 `fix/pr90-review-20261012` 位于 `/xy/worktrees/pr90-hardening`；业务最终提交 `e79f6bec893b25fde691e420b53275e8b8adc316`，此前实现/静态修正为 `85eae404a`、`2cbb5262d`。后续仅本记忆文档收尾，不改业务。
+- 保留 PR 的层级、加权 HRW、会话/缓存亲和、有界等待、资格/利润/协议边界及不可变快照。修复 R1–R7 的权重口径、等待 attempt 所有权、字段合并、迟到结果、绑定竞争、统计完整性及人工停用/严格排空；R8 只追加 271、只读升级盘点与预检，270 原文及 317 个旧校验值保持。saved/applied 区分响应实例载入与是否参与调度，制品实测补修了总开关关闭时版本错误归零。
+- 验证：前端全量 359 文件/2,814 PASS，类型/lint 与串行生产打包；后端四改动包 unit 17,516 PASS/0 FAIL/17 条件性 SKIP、定向 111 PASS/0 SKIP、真实 PostgreSQL/Redis 13 PASS/0 SKIP、23 项工具；gateway/cache/kernel race 分别 159/69/61 PASS，均零失败/跳过。最终补修 25 PASS/0 SKIP；新 CI 必测 26/20 项全部已有 RUN/PASS。最后版本反馈仅两处只读表达式，运行时选择/所有权/统计/Redis/纯算法字节不变，按范围复用先前 race，不声称新 case 又跑了一轮 race。最终业务 HEAD 全后端 golangci-lint 2.14.0 为 0 issues，来源与调度差异门禁通过。
+- 固定嵌入制品 `0.2.6-pr90.review.1` 对应 `e79f6bec8`，vcs.modified=false，二进制 SHA-256 `b5a22662f924a2f9502c9ece819fbf6c02e06249fd85a8de9f463682e9a9dd52`。实际 fresh 318 迁移、官方 0.2.6 基线 316、升级到 318/导入 v2/默认关闭/410、保存 CAS、双实例应用、全员停用、0.2.6 应用回退及成套备份恢复全部通过。1440/390、明暗主题、键盘停用、无整页溢出/页面异常通过；截图已查看，不构成全站无障碍认证。
+- 交付：`/xy/artifacts/pr90-hardening-20261012/IMPLEMENTATION.md`、`VALIDATION.md`、`validation.json`、补丁和本地制品归档；失败/OOM/ENOSPC/lint/中断与升级发现均保留。原独立审查 36 项目/140 固定 SHA 来源保留；审查源码逐文件验证后位于持久 `/xy/worktrees/pr90-reviewed`。运行契约见候选 `docs/share-scheduling-hardening.md`。
+- 空间：按用户授权清理可再生成缓存、未使用可再拉取镜像和归档日志，保存历史镜像 digest；没有删除运行应用或 `/var/backups`。本任务容器、临时工具/缓存均清理，收尾根盘约 3.1GB 可用、/dev/shm 为空，全部源码与证据保留。
+- 尚未完成的生产门槛：远端最终 HEAD 标准 CI、标准优化构建性能复测、生产基线、三天影子及逐组灰度/真实账单。共享主机关闭 service 内联的合成 P99 为原版 10.593ms/share 13.704ms，差约 3.111ms，尚不能认定 1ms 设计目标达成。本地回归与 RC 演练通过不能宣称生产全面上线；等待预算和实际缓存/首字收益需真实环境验证。
+
+
+### 份额调度上线前加固与压测（2026-10-11，随 PR #90 更新；未合并、未发版、未部署）
+
+- 在 `feat/share-scheduling-20261010` 上追加 `b967c0ae`（加固）、`1cce53e0`（文档）、`76efcdae`（影子回放用例在 CI 负载下的确定性修复）并推送，PR #90 描述新增「上线前加固与压测」一节。`76efcdae` 上 CI 18 项全部通过，PR 为 MERGEABLE/CLEAN。设计见 design §18，压测与验证见 tasks.md「上线前加固与压测（2026-10-11）」。
+- 修复内容：
+  - 影子对比并发上限 32，超出计 `shadow_skipped`；
+  - 重平衡按所有者用 Lua 删除绑定；
+  - 已取消请求不进入等待；
+  - 策略加载时冻结规则索引；
+  - 纠偏按窗口 1/12 刷新，单组 3 秒、整轮 10 秒，失败时有时限地沿用上次系数；
+  - 决策计数批量加锁、样本超额不再序列化；
+  - 账号类别名驻留；
+  - 计数改为分钟桶（2 小时 10 分）+ 小时桶（26 小时），超过 2 小时的窗口按整点小时汇总；
+  - 首字分位按样本量（5/20/100）显示。
+- 压测：本地双实例、合成上游，原版与份额同一时间线注入故障。份额与原版对比：
+  - 稳态后续轮缓存命中 98.9% vs 90.7%，后续轮首字 P95 205 vs 334 ms；
+  - 故障阶段成功率 100% vs 99.97%；
+  - 过载阶段首字 P95 1171 vs 2261 ms；
+  - Redis 清空重启后份额 10 秒内恢复；
+  - 压测后无残留槽位、无 panic，协程数回到基线。
+- 全量门禁（Go 1.27.2）：
+  - unit 61 包；
+  - Gateway reliability `-race` 143 例；
+  - OpenAI cache reliability 40 例；
+  - integration 55 包；
+  - lint 0；
+  - 前端 2802 例与构建；
+  - 工具 19 例与 scheduler-diff。
+- 范围外建议：上游 v0.2.15 `da4419e62`（Anthropic OAuth 模拟路径缓存 TTL 顺序 400 修复）与调度无关，应按同步机制另行同步。
+- 下一步：人工审核 PR #90。合并、发版、部署与生产只读度量需用户另行授权。
+
+### 份额调度实施完成，PR #90 待审（2026-10-10，阶段 1–3 完成、阶段 4 本地验收完成；CI 全绿，未合并、未发版、未部署）
+
+- 本机 `/Users/admin/XIN-MAC-XN/xy2api`，分支 `feat/share-scheduling-20261010`，起点 main `3569d4f00`（产品 0.2.5），`58a355a7` 起的功能提交后合并 origin/main `7b1d5d8c`（0.2.6 GPT 缓存可靠性，合并提交 `3c0e4b6a`）；已推送 origin 并开 PR [#90](https://github.com/liulixin-lex/xy2api/pull/90)（base main），`eeab1b66` 上 CI 18 项检查全部通过（含 Integration tests、Gateway reliability、OpenAI cache reliability、Original scheduler diff allowlist），GitHub 显示可合并（CLEAN）。
+- 与 0.2.6 的关系：份额钩子在 `scheduler.Select` 之前返回，`applyDeferredShareBinding` 先于 0.2.6 原子粘性守卫处理准入绑定；0.2.6 对原版调度文件的改动已作为已审 hunk 加入 `scheduler-diff.json`。合并后在 Go 1.27.2、golangci-lint v2.14.0 下复验通过（tasks.md「合并 main … 后复验」）。
+- 范围：
+  - 剔除智能可控调度，行为回到 Sub2API 原版（旧表与设置保留至 D7，旧管理接口统一 410）；
+  - 份额调度：`internal/sharesched` 内核、Gateway/OpenAI/Gemini 适配、缓存归因与选号开销、迁移 270（旧策略导入为未生效草稿）；
+  - 管理接口与前端：策略（层级卡片拖拽、行内/批量编辑、预览、冲突合并）、报表（含选号开销与账号表现）、解释、重平衡、账号编辑弹窗只读规则；
+  - CI：原版调度差异白名单 `sync.py scheduler-diff`、controlled 残留测试；
+  - 只读基线脚本 `tools/share-scheduling/baseline.sql`（tasks 0.4–0.6）。
+- 验证：tasks.md 文末「验证记录」——unit 61 包、CI “Gateway reliability” 复现、`-race`、golangci-lint 0、真实 PG/Redis 集成（repository 705 通过）、500 账号基准、前端 359 文件 2802 例与构建、工具 19 例、隔离升级/两种回退/新装、Chrome 桌面与手机 × 深浅色 × 中英文 × 键盘。
+- 本轮新发现：
+  - 选号开销的 Redis/DB 指标依赖 `server.enable_server_timing` 安装的计时钩子，默认关闭时恒为 0；已改为按采集样本（`io_samples`）统计，无样本返回 `null`。开启后实测份额 10.0 次 / 原版 10.2 次 Redis 往返。
+  - 页头长描述在 1440px 溢出、账号弹窗规则框挤在优先级列，均已修复。
+  - 上游既有问题（未改）：`internal/setup` 用 `password=%s` 拼键值 DSN，数据库密码为空时 lib/pq 把后续 `dbname=...` 当成密码值，自动安装连到 `postgres` 库并在其中建表、建管理员（已用本地测试证实；`password=''` 可避免）。生产使用非空密码不受影响，可另行修复。
+- 未完成（合并后执行或需另行授权）：tasks 0.4–0.6 生产只读基线（脚本已备）、4.5 RC 制品、4.6 影子运行 ≥3 天、4.7 灰度、4.8 D7 删表与退役路由删除。
+- 本地环境：Go 工具链 `/tmp/xy2-toolchain`（1.27.0 与合并后所需 1.27.2，均校验 SHA256）；本机经 Homebrew 安装 `postgresql@18` 与 `redis`，测试数据在 `/tmp/xy2-infra`（`start.sh`/`stop.sh`），收尾已停止；`/tmp/xy2-smoke/{scripts,shots}` 为演练脚本与截图（无凭据），均可删除。
+- 下一步：人工审核 PR #90；合并、发版（含 4.5 RC 制品）、部署与生产只读度量（0.4–0.6）需用户另行授权。
+
+### 份额调度缓存命中与首字专项修订（2026-10-10，规划修订完成；D1–D10 已定稿并进入实施，见上）
+
+- 用户要求继续深入检索，完善调度方案，确保不影响缓存命中率与 TTFT。沿用本机 `plan/share-scheduling-20261009`（HEAD `3569d4f00`，未提交、未推送），只改规划文档与本记忆，无业务代码变更。
+- 新发现：
+  - 原版 Anthropic 无会话标识客户端的会话哈希会逐轮变化，或跨 Key 共用；
+  - 原版粘性排队最长 120 秒，排队满即永久改绑，限流 1 秒也删除绑定；
+  - 2026-10-09 初版份额规则（满载立即溢出且不改绑、高层稳定 120 秒即迁回）在离散事件仿真中缓存命中率比原版低 3.3–6.5pp。
+- 修订规则（design §6.2–§6.8、§12、§14；proposal D5、新增 D8–D10）：
+  - 跨轮稳定的亲和键（显式会话标识 → 对话锚点）；
+  - 按缓存价值有界等待（100ms/1k Token、≤15 秒、排队 ≤3），超时溢出并改绑；
+  - 短时不可用（≤300 秒且恢复时缓存仍热）软溢出；
+  - 改权重、回升、排空只在缓存变冷时迁移，默认无强制截止；
+  - 缓存域与同类优先的溢出次序；
+  - 选择阶段 Redis 往返不多于原版；
+  - 缓存归因（原版分组同口径）、影子运行与灰度门禁（缓存读占比 ≥ 基线 −0.5pp，首字 P50/P95 ≤ +3%/+5%）。
+- 仿真 `simulation/cache_ttft_sim.py`（标准库，5 个固定种子，两次运行逐字一致）：
+  - 修订版在事件/稳态 × 5 分钟/1 小时四个场景下，缓存命中率与原版持平（逐种子 −0.3~+0.4pp）；
+  - TTFT P95 为原版的 0.67–0.93 倍，P99 为原版的 0.70–0.91 倍；
+  - 第 1 层份额 49.5/32.9/17.7（原版约 39/34/27）；
+  - 严格回升截止约损失 1pp，故默认关闭。
+- 下一步：用户确认 D1–D10 后按 tasks 阶段 1 实施；阶段 0 的首字斜率校准、会话键画像与基线度量可先做（只读）。
+
+### 调度现状分析与“份额调度”规划（2026-10-09，规划完成；亲和/回升规则已被 2026-10-10 修订取代）
+
+- 用户要求分析账号调度、调研开源网关与 Sub2API 二开项目，规划“保留 Sub2API 原版、完全剔除智能可控调度、另行开发新调度”。本轮只分析与规划：本机克隆 `/Users/admin/XIN-MAC-XN/xy2api`，起点 main=`3569d4f00`，本地分支 `plan/share-scheduling-20261009`，未提交、未推送、未改业务代码。
+- 现状结论：模式表无记录时默认 controlled，且网关每请求读一次 PG 取模式、失败 503；原版无账号权重，OpenAI 实验调度器的优先级是软因子（仿真备用层空闲时拿 33.3%）；controlled 分配随候选集合分桶、叠加健康/溢出/爬坡且无会话亲和，侵入 65 个非测试文件。详见 `docs/SCHEDULING_ANALYSIS.md`。
+- 新方案“份额调度”（`share`，按分组开启）：分组层级+权重+排空为唯一意图；层级严格；新会话按加权会话一致性哈希（HRW）分配并保持亲和；自动机制只复用原版闸门排除或做有界纠偏；全程原因码、报表、Explain/Preview；热路径零新增 PG。规划见 `openspec/changes/replace-controlled-with-share-scheduling/`（proposal/design/tasks/两份 spec/可复现仿真）。
+- 仿真（标准库、固定种子，exit 0）：HRW 5:3:2 份额误差 ≤0.1pp、账号退出精确最小迁移、改权重迁移 13.27%（理论 13.33%）；会话亲和下请求份额偏差均值 1.5%（纠偏 1.0%），重尾成本 8.3%（纠偏 6.1%）为物理边界。
+- 下一步：用户确认 proposal 中 D1–D7 后按 tasks 阶段 1（只删 controlled、回到原版）独立 PR 实施；阶段 2–4 再做份额调度。是否先同步上游 v0.2.15（今日发布，调度文件与 0.2.14 相同）待定。
+
+### 异步生图任务 v2（2026-10-12，PR #91 已开，合并与发版待授权）
+
+- 用户（生图站 XY-image 维护方，agent01 执行）授权拉取最新仓库、新建分支开发异步生图功能并推送分支；合并、标签、Release、部署主站均未授权。分支 `feat/async-image-tasks-v2-20261012`，起点 `main` / `7b1d5d8c3`（0.2.6），四个分层提交：规格 → 可控调度修复 → 功能 → 文档，外加本记录。
+- 修复：可控调度模式下异步任务继承提交请求的 `ControlledRequest`，202 返回后中间件关闭它，`beginDispatch` 检查到已结束的客户端 context，任务立即 502 "context canceled"。新增 `DetachControlledRequest` 让任务持有绑定执行 context 的独立账本。
+- 新能力（只做加法，不改已有路由与字段语义、无迁移）：幂等键、任务内计费状态与请求 ID（按 `usage_logs`/`usage_billing_intents` 查询）、心跳 + 在途索引 + 清扫锁收尾崩溃实例的任务、优雅退出排空、终态只写一次、转存重试与 `result_storage_failed`、每 Key/每实例准入上限、查询限流、长轮询、DELETE、能力发现、`Prefer: respond-async`、异步失败写入错误日志。配置段 `image_tasks`。说明见 [ASYNC_IMAGE_TASKS.md](ASYNC_IMAGE_TASKS.md)「Version 2 additions」，规格见 `openspec/changes/async-image-tasks-v2/`。
+- 验证：后端完整 unit（61 个测试包）、golangci-lint v2.14.0 0 issues、来源审计、图片任务相关 `-race` 均通过；GitHub 分支 CI（`5217d43e3`）7 项作业（含 test、golangci-lint、upstream-sync-audit）与 Security Scan 全部成功。下游生图站实验室（模拟上游、真实 PostgreSQL/Redis/S3 兼容存储）将实验主站临时换成本分支构建，7 项演练与生图站现有异步客户端 3 项演练全部通过，之后恢复实验主站固定版本。
+- 用户随后授权开 PR：[PR #91](https://github.com/liulixin-lex/xy2api/pull/91)（`feat/async-image-tasks-v2-20261012` → `main`）。用户明确：暂不部署主站；对象存储生命周期规则暂不考虑。合并与发版仍未授权。
+- 与 [PR #90](https://github.com/liulixin-lex/xy2api/pull/90)（share scheduling 取代 controlled scheduling，删除 `controlled_scheduling_request.go` 与调度中间件）冲突：该文件（删/改）、`cmd/server` 的 Wire 三个文件、本文件。#90 先合并则本分支变基时去掉 `DetachControlledRequest`/`WrapControlledResponseWriter` 及调用和测试（请求级账本不存在，原问题随之消失），重新生成 Wire 后复测；本 PR 先合并则 #90 解决冲突时同样处理。
+- 下一步：等待维护者确认合并顺序与合并；发版（建议 0.2.7）和主站部署另需授权。
+
 ### GPT 缓存可靠性 0.2.6（2026-10-10，GitHub 正式发布完成）
 
 - 用户授权同步最新主线、新建分支、实施全站 GPT 缓存方案，完成验证后提交、推送、常规合并及 GitHub 发版。独立工作树 `/lex/xy2api-gpt-cache`；功能分支基于 `3569d4f00aae3eada079eb7ac058dc62256a66b8`，正式版本分支 `release/0.2.6` 基于功能合并提交 `3cf8406e5cfff94c488bfa58d0ba5b198e8ae1cf`；其他工作树未提交文件保持。
@@ -523,6 +667,49 @@
 Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+### 20261013-sub2api-v0.2.15-full-release — 集成 PR #92、候选验收与正式发布
+
+- 用户已授权完整三方同步、修复、开放PR整合与发版；生产只读诊断已完成，没有生产配置/权限/数据写入或部署。
+- 工作在独立 `/lex/xy2api-sync-20261013`；上游固定v0.2.15，真实三方裁决、PR90/91合并、生成代码及备份/指标/异步图片专项修复已提交。具体来源、默认行为与迁移见顶部交接状态及版本化说明。
+- 不可变命名空间标签与同步分支已推送，草稿PR #92已创建，UPSTREAM_BASE.sync_pr登记。XY2API为0.3.0-rc.1，Sub2API兼容基线0.2.15。原两PR的远端状态待随集成合并后确认。
+- 前端全量/构建、后端全量unit、备份真实PG与定向回归已通过；完整integration、生成一致性、静态检查及固定head远端CI继续执行。首轮CI仅3个gofmt诊断已修正；不将旧head通过或中断视为最终门禁成功。
+- 下一步：固定最终head全绿后审计/merge PR92；候选制品独立校验、新装/0.2.6升级/成套回退；独立release/0.3.0 PR、正式发行制品校验与资源清理。证据仅在 `/lex/xy2api-release-20261013/`，不记录生产凭据。
+
+### 20261012-pr90-slim — PR #90 复审、精简与上线验收（已完成，随 PR #90 推送；本 Agent 无进行中操作）
+
+- 起点 `23f191fc`（CI test 作业因迁移 271 失败）。审查发现、取舍与验证见顶部当前状态、design §19 与 tasks.md。
+
+### 20261011-share-scheduling-hardening — 份额调度稳定性审查、外部方案吸收与压测（已完成，随 PR #90 推送；本 Agent 无进行中操作）
+
+- 用户要求继续参考更多二开仓库，全面测试和审查调度功能，修复潜在稳定性问题、吸收更优思路，模拟测试达到上线标准后提交并推送 PR。沿用分支 `feat/share-scheduling-20261010`（PR #90 未合并），新提交随 PR #90 更新。
+- 外部调研：用户提供的候选清单（349 个仓库）复制到 `/tmp/xy2-research/candidates.csv`；只读稀疏克隆 23 个仓库到 `/tmp/xy2-research/repos`（不执行其代码）。重点：ranxi2001 优先调度审查记录（缓存键、失败保留、资源上限、快照所有权）、metapi 路由、上游 0.2.15 的 Anthropic 缓存 TTL 顺序修复（非调度，建议另行同步）。
+- 审查发现均已修复。修复项与测试见 design §18；压测与门禁见 tasks.md「上线前加固与压测（2026-10-11）」。压测中量化了按分钟计数的内存：500 个活跃账号一天约 400 MB。因此计数改为分钟桶加小时桶，同等规模约 40 MB。
+
+### 20261010-share-scheduling-dev — 剔除智能可控调度并开发份额调度（PR #90 已开、CI 全绿，待人工审核；本 Agent 无进行中操作）
+
+- 用户授权按方案全权决策 D5/D8/D9/D10 并开始开发；D1–D10 均按 proposal 建议值定稿。本机 `/Users/admin/XIN-MAC-XN/xy2api`，起点 main `3569d4f00`，沿用未提交规划文件。
+- 顺序：阶段 1 剔除 controlled、回到原版 → 阶段 2 缓存归因与份额调度内核/适配/迁移 → 阶段 3 管理接口与前端。只做本地开发与验证，不提交、不推送、不部署、不访问生产或真实上游。
+- Go 工具链按 go.mod 固定 1.27.0，隔离安装于 `/tmp/xy2-toolchain`（校验 SHA256）；本机无 Docker，真实 PG/Redis 集成测试本轮可能无法执行，届时如实记录。
+- 2026-10-10 进展：阶段 1（tasks 1.1–1.11）本地完成。`go build`、`go vet`（unit/integration/e2e）、`go test -tags=unit ./...`（60 包）、默认与 integration 套件全部退出 0；repository 集成测试因无 Docker 由 harness 跳过（新增的旧格式计费意图恢复测试只编译未执行）。前端 lint/typecheck/test（353 文件 2774 例）/build 通过。新 CI “Gateway reliability” 门禁本地 `-race` 模拟通过。
+- 关键决定：质量路由改为上下文显式 opt-in（生产从不 opt-in，等价原版）；`typesafe-controlled-settlement` 补丁同时从 policy 与 `UPSTREAM_BASE.json` 的 custom_patches 移除（audit 要求两处一致，历史同步报告不改）。
+- 阶段 2 进展：`backend/internal/sharesched` 纯内核与 23 项测试完成（份额比例、最小扰动、层级严格、绑定生命周期、缓存保护性质）。下一步：迁移 270 与策略仓储、绑定 GET+PTTL、Gateway/OpenAI/Gemini 适配。
+- 阶段 2 进展（2026-10-10 续）：迁移 270、策略仓储/Redis store、`ShareSchedulingService`、绑定 GET+PTTL/SET NX、共用执行器 `share_scheduling_exec.go`、Gateway 与 OpenAI 适配（含响应续链/guardian 优先、legacy 会话键回读、codex 压力并发、影子对比、请求 trace）均已接入并有 unit 测试；`go test -tags=unit` service/handler/repository/sharesched 全部通过，share 测试 `-race` 通过。
+- 关键决定：份额放置的绑定意图总随选号结果下发，已即时写入时 handler 的准入后绑定变为 no-op（避免 WS 入口覆盖 spill_keep/soft_spill 保留的绑定）；compact、图片请求及质量路由持有的会话保持原版调度。
+- 续（同日）：Gemini v1beta/Antigravity 生成路径均经已挂钩的 Gateway 选号（AI Studio 元数据与 count_tokens 保持原版）；usage 侧缓存归因（含部分读取=前缀漂移、按决策类型 TTFT 直方图）已接入两个 RecordUsage；upstream-sync 登记 3 个 custom patch + 7 个钩子 required_literals，审计检查（除工作树干净门）0 错误；CI “Gateway reliability” 加入份额测试并本地 `-race` 模拟通过。阶段 3 后端 `/api/v1/admin/share-scheduling`（settings/groups/policy CAS/preview/explain/report/decisions/rebalance）与服务/handler 测试完成。下一步：前端页面与设置、i18n、文档与 design/tasks 偏差说明、golangci-lint 与全量验证。
+- 阶段 3 前端完成（2026-10-10 续）：
+  - 内容：份额调度页（分组列表、策略编辑含批量与预览/冲突三方合并、报表、解释）、设置卡片、路由与侧栏、i18n、5 个新 spec 已加入 `FRONTEND_CRITICAL_VITEST`；
+  - 后端修正：活动层改为可空指针（支持负层级）；无法解析的已存策略以默认值展示；`wire_gen_test` 参数数量；SA9004。
+- 参考项目学习（同日）：落地「账号表现」报表与等待取消即停，详见顶部交接状态与 design §17 新增两行。
+- 剩余：tasks 2.0、2.14、3.2、3.4 及干净树 `sync.py audit`，见顶部。
+- 收尾（2026-10-10 续）：用户授权提交并自主完成剩余任务后开 PR。已完成 2.0、2.14、3.2、3.4、4.1–4.4 与本地隔离演练（4.5 的本地部分），0.2 决定不合入 v0.2.15，0.3 差异白名单接入 CI；验证与偏差见 tasks.md「验证记录」、design §17。剩余为合并后事项（见顶部），不再阻塞本 PR。
+- 合并 main（同日续）：origin/main 已前进到 0.2.6（`7b1d5d8c`），按常规 merge 并入功能分支（非上游同步），冲突按“保留 0.2.6 缓存可靠性 + 份额绑定优先 + controlled 字段继续删除”解决，合并后全量复验通过；已推送并开 PR #90，CI 全部通过。合并与后续事项待用户授权。
+
+### 20261012-async-image-tasks-v2 — 异步生图任务 v2（PR #91 已开，待授权合并/发版）
+
+- 用户（生图站 XY-image 维护方，agent01 执行）授权：拉取最新仓库、新建分支开发异步生图功能。起点 `main` / `7b1d5d8c3`（0.2.6），分支 `feat/async-image-tasks-v2-20261012`。推送分支属授权范围；合并、标签、Release、部署主站均未授权，需另行确认。
+- 范围：在 0.2.6 已有 `/v1/images/{generations,edits}/async`、`/v1/images/tasks/{id}` 上只做加法——修复可控调度模式下任务立即 `context canceled`；幂等键、计费状态与请求 ID、心跳/清扫/优雅退出、转存重试、在途上限与轮询限流、错误日志、能力发现、DELETE、长轮询、`Prefer: respond-async`。规格见 `openspec/changes/async-image-tasks-v2/`。
+- 不新增迁移、不改已发布路由与字段语义；Gemini 异步不在本轮。本机磁盘不足，Go 构建与测试在独立开发机执行（Go 1.27.2），不连接任何生产服务。
 
 ### 20261008-claude-cache-groups-release — 推送、合并与 GitHub 发版
 
@@ -1679,6 +1866,52 @@ pnpm --dir frontend run build
 - 2.65 MB 辅助路径基准 100 次：OFF 1.795µs/320B；ON 72.97ms/29.20MB/46 allocations。只报告本地 helper 开销，不宣称端到端性能或全体上游能力。首次 DNS 失败、前端 worker 超时、测试 fixture/错误检查修正、包级 lint 超时等证据保留，最终结果见 `/lex/claude-cache-groups-20261008/verification.md`。
 - 清理自己的进行中事项。实现与收尾只做本地提交，最终干净树来源审计/身份保存在同一证据目录；测试容器运行后自动移除，临时前端预览已关闭。后续若交付 GitHub 需新的用户指令；真实上游命中与两端账单核验仍不属于本轮完成声明。
 
+### 2026-10-09T17:10:17Z — `20261009-share-scheduling-plan` — 规划完成
+
+- 请求/目标：分析账号调度模块现状与算法，全网调研开源网关与 Sub2API 二开项目，规划“保留 Sub2API 原版调度、完全剔除智能可控调度、重新开发另一种调度”。仅分析与规划。
+- 开始状态：本机全新克隆 `/Users/admin/XIN-MAC-XN/xy2api`，main=`3569d4f00aae3eada079eb7ac058dc62256a66b8`（= origin/main，产品 0.2.5，兼容 0.2.14），工作树干净；新建本地分支 `plan/share-scheduling-20261009`。
+- 完成操作：逐文件阅读原版选号路径（Gateway/OpenAI 旧路径/实验调度器/Gemini 兼容）与 controlled 内核、适配、中间件、迁移、CI 与同步策略；与上游 v0.2.14/v0.2.15 只读克隆对比（调度三文件两版零差异）；只读调研 new-api、ranxi2001/sub2api、OmniRoute、claude-relay-service 源码及 LiteLLM、Portkey、APISIX、Kong、Envoy AI Gateway、Higress、Bifrost、AxonHub、uni-api、CLIProxyAPI、OpenRouter 文档，核对 Anthropic/OpenAI 官方提示缓存隔离与价格；编写标准库仿真验证 HRW 比例性、最小扰动与份额精度边界。
+- 修改文件：新增 `docs/SCHEDULING_ANALYSIS.md` 及其 `.gitignore` 精确白名单；新增 `openspec/changes/replace-controlled-with-share-scheduling/`（proposal、design、tasks、specs/share-scheduling、specs/controlled-scheduling-retirement、simulation/share_sim.py、simulation/RESULTS.md）；`tools/upstream-sync/policy.json` 仅追加该 OpenSpec 精确目录为 XY_OWNED；本记忆顶部状态与本日志。无业务源码、SQL、版本、兼容基线变更。
+- 验证：`python3 -I openspec/changes/replace-controlled-with-share-scheduling/simulation/share_sim.py` exit 0，两次运行输出逐字一致并写入 RESULTS.md；policy JSON 解析通过，`python3 -I -m unittest discover -s tools/tests -p 'test_*.py'` 14 项 OK；新文档相对链接 0 断链；`git diff --check` 通过；敏感模式扫描无命中。未运行 Go/前端测试（未改代码）；未安装 OpenSpec CLI，未运行其校验；未执行来源审计（工作树未提交）。
+- 卡点/风险：无阻塞。方案依赖用户确认 D1–D7（升级落点、命名、质量路由、Codex 压力并发、回升默认、份额单位、历史表删除时间）。重尾成本份额无法靠调度消除，已在规格中写明边界。
+- 下一步：用户确认决策后，按 tasks 阶段 1 独立 PR 剔除 controlled（只删不增）；提交前需在干净树运行 `python3 tools/upstream-sync/sync.py audit`。本轮未提交、未推送、未建 PR、未部署；上游只读克隆位于 `/tmp/xy2-research/`，可随时删除。
+
+### 2026-10-10T02:40:00Z — `20261010-share-scheduling-cache-ttft` — 缓存命中与首字专项修订完成
+
+- 请求/目标：继续深入广泛检索，完善调度设计方案，确保不影响缓存命中率和 TTFT。仅规划，不实施代码。
+- 开始状态：本机 `plan/share-scheduling-20261009`，HEAD `3569d4f00`；工作树含上一轮未提交的规划文件（`.gitignore`、本记忆、`tools/upstream-sync/policy.json`、`docs/SCHEDULING_ANALYSIS.md`、OpenSpec 变更目录），均为本人上一轮产物。
+- 完成操作：
+  - 核对代码事实：
+    - Anthropic 会话哈希三级回退；
+    - 粘性 TTL 命中续期，等待 3 人/120 秒；
+    - 负载均衡层改绑、限流删绑；
+    - Gemini 摘要链进程内存储；
+    - OpenAI 会话键与 `prompt_cache_key` 账号命名空间；
+    - 签名整流重试；
+    - 连接池 `account_proxy` 隔离、空闲 90 秒；
+    - `usage_logs` 首字与缓存字段、`sticky.hash_source` 日志、`servertiming` 采集器。
+  - 官方文档核对：Anthropic、OpenAI 提示缓存（workspace 隔离、寿命从请求开始计、并发可见性、GPT-5.6+ 30 分钟）。
+  - 检索外部实践：OpenRouter、LiteLLM（含 2026-07-31 基准博客）、Portkey、SGLang、KubeAI CHWBL、Dynamo、llm-d、DualMap、CacheRoute、DLPM、Prequal。
+  - 本地阅读 new-api 渠道亲和源码；只读查看 Sub2API issue #5241、#2517、#7400。
+  - 编写离散事件仿真，逐原因归因失效读，扫描等待系数、改绑、重对齐与软溢出上限，据此修订规则。
+- 修改文件：
+  - 新增 `simulation/cache_ttft_sim.py`；
+  - 重写 `design.md`、`tasks.md`、`specs/share-scheduling/spec.md`；
+  - 更新 `proposal.md`（D5 改为 cold，新增 D8–D10）与 `simulation/RESULTS.md`（第二部分）；
+  - `docs/SCHEDULING_ANALYSIS.md` 新增第 7 节，更正 §2.1；
+  - 本记忆顶部与日志。
+  - 无业务源码、SQL、版本、兼容基线变更。
+- 验证：
+  - `python3 -I openspec/changes/replace-controlled-with-share-scheduling/simulation/cache_ttft_sim.py` 三次 exit 0，输出逐字一致并写入 RESULTS；`share_sim.py` exit 0。
+  - 两个脚本语法解析通过；新旧文档相对链接 0 断链；`git diff --check` exit 0（首次发现分析文档末尾多余空行，已修正后重验）；policy JSON 解析通过。
+  - 敏感模式扫描在本轮新增内容中无命中，仅命中记忆文件中既有的账号名，非密钥。
+  - 扫描参数时以模块方式导入脚本，在 simulation 目录生成了 `__pycache__`（git 忽略），已删除。
+  - 未运行 Go/前端测试（未改代码）；未安装 OpenSpec CLI；未执行来源审计（工作树未提交）。
+- 卡点/风险：
+  - 仿真参数（延迟、价格、负载）为假设，只能比较策略相对差异；真实效果需阶段 0 基线、阶段 2.0 缓存归因、影子运行与灰度门禁验证。
+  - 1 小时缓存场景的回升滞留与原版相近，严格回升需显式截止并付出约 1pp 命中代价。
+- 下一步：等待用户确认 D1–D10；随后按 tasks 阶段 0（只读度量）与阶段 1（剔除 controlled）推进。本轮未提交、未推送、未建 PR、未部署；`/tmp/xy2-research/`、`/tmp/xy2-sim/`、`/tmp/xy2-checks/` 为临时只读/草稿目录，可删除。
+
 ### 2026-10-10T05:13:27Z — `20261010-gpt-cache-reliability` — GitHub 发布完成
 
 - 请求/目标：只读分析目标用户及全站 GPT 缓存低命中，基于最新 XY2API 主线实施网关优化，验证、提交、推送、合并并发布。
@@ -1688,3 +1921,188 @@ pnpm --dir frontend run build
 - 验证：最终 Go 1.27.2 组合 unit 62 包/23,646、integration 56 包/15,164 通过；七包真实 PostgreSQL/Redis race 538 通过，29/15/11 项关键守卫全 RUN/PASS，最近窗口修复的 40 项 race 与 16 项缓存守卫全通过。前端 lint/typecheck/327 项关键测试/生产构建、全仓 lint、源码 govulncheck 和来源审计通过。两 PR 固定 head 均 18/18 检查成功；正式主线/标签 CI、安全扫描及 Release 成功。RC 五平台制品、隔离 fresh/0.2.5 升级/备份恢复回退与正式五平台制品、隔离 fresh 均通过，正式 GHCR digest `sha256:77212b1dcfb1a8045bc6a1bbc61e1b304f29272f4ad1c0daba61f71a368711cc`，316 条迁移保持。
 - 卡点/风险：无发布卡点。未部署生产、未启用诊断/偏好、未新增付费模型调用；历史低命中的具体请求体和上游账单不足以证明单一根因，生产改善须部署后灰度观察。
 - 下一步：GitHub 发布已完成；后续部署时先启用诊断、按真实 usage 和账单分组核对，再小比例启用缓存偏好。收尾记录走独立受保护文档 PR，不改已发布标签或业务树。
+
+### 2026-10-10T18:25:00Z — `20261010-share-scheduling-dev` — 阶段 3 前端完成与参考项目学习
+
+- 请求/目标：继续开发；参考用户上传的《Sub2API 精选项目》清单（37 个仓库），学习其中可借鉴的实现。
+- 开始状态：分支 `feat/share-scheduling-20261010`，HEAD `3569d4f00`；工作树为本任务阶段 1–3 的未提交改动。
+- 完成操作：
+  - 用 `gh api` 只读审阅固定 SHA 的源码：sub2api-guardian（scoring、decide）、transit-hub（健康状态机）、KlN-4096 gwpool（等待、排序、冷却）、sub2api-state-kit、Ember1012 FastScheduler、ranxi2001/DeanZFC 目录；对比上游 main 与 v0.2.14 的调度相关变更。
+  - 对照份额调度内核，确认已覆盖：429 不当故障、保底不全排空、回升稳定期、强制迁移错峰、退出时绑定格式兼容原版。
+  - 落地两项：
+    - 每次选号记录 `skip:<账号>:<原因>`，归因样本记录 `acct_ttft:<账号>:<桶>`；报表 `actual[]` 新增 `skipped` 与 `ttft`，前端「账号表现」区块在尝试 ≥ 10 次且跳过率 ≥ 20% 时给出调权提示；
+    - `shareExecutor.acquire` 在上下文取消后停止尝试，不记满载。
+- 修改文件：
+  - `backend/internal/service/share_scheduling_{stats,record,attribution,admin,exec}.go`，以及 admin、gateway 两个测试文件；
+  - `frontend/src/api/admin/shareScheduling.ts`、`ShareReportPanel.vue`、中英文 `shareScheduling.ts`、`ShareSchedulingView.spec.ts`；
+  - `docs/SHARE_SCHEDULING.md`、design §17、本记忆。
+- 验证：
+  - 新增 `TestShareAdminReportShowsAccountSkipsAndLatency`、`TestShareSchedulingCanceledWaitReleasesQueueAndStops`；去掉取消检查后后者失败，恢复后通过；
+  - `go test -tags=unit` service/sharesched/handler/...、repository 全部 ok；share 测试 `-race` ok；golangci-lint service 0 问题；
+  - 前端 vue-tsc、eslint 通过，vitest 358 文件 2799 例通过。
+- 卡点/风险：
+  - 按账号首字直方图使 Redis 计数字段随活跃账号数增长（约账号数 × 命中桶数/分钟），受归因抽样与 `maxShareStatsCounters` 限制；500 账号分组的报表读取成本未实测。
+  - 参考项目多数许可证未确认，只学习设计，未复制代码。
+- 下一步：
+  - 用户决定是否提交与开 PR；
+  - 补 tasks 2.0、2.14、3.2、3.4 与干净树 `sync.py audit`。
+- 本轮未提交、未推送、未部署、未访问生产。
+
+### 2026-10-10T20:15:00Z — `20261010-share-scheduling-dev` — 收尾、全量验证与提交
+
+- 请求/目标：用户要求提交后继续完成全部后续任务，确认无潜在问题后开 PR，期间自主决策。
+- 开始状态：分支 `feat/share-scheduling-20261010`，HEAD `b1c2cb42`（4 个提交），工作树含 tasks 2.0/2.14/3.2/4.x 的未提交实现与临时集成接线。
+- 完成操作：
+  - 功能：选号开销计量（`servertiming` 摘要）、隐式缓存域 `account:<id>` 与保留前缀校验、账号规则接口与弹窗、层级卡片拖拽、报表选号开销表；
+  - 测试：合成上游 E2E（4.1–4.4）、影子逐请求一致、两实例一致、500 账号成本与基准、repository 真实存储集成；
+  - 工具：原版调度差异白名单与 CI、controlled 残留测试、只读基线脚本（合成数据验证）；
+  - 隔离烟测：0.2.5 → 新版本升级、同库直接回退与备份恢复回退、全新安装、Chrome 无头浏览器检查；由此修复 Redis/DB 指标恒 0、页头溢出、弹窗布局三处问题；
+  - 文档：`docs/SHARE_SCHEDULING.md`、design §17、tasks 勾选与验证记录、本记忆。
+- 修改文件：见提交 `5f13d79c`、`85edba2b`、`2ae53886`、`3028bb31` 与本文档提交；临时 harness 接线已还原（未提交）。
+- 验证：见 tasks.md 文末「验证记录」；敏感信息扫描（含演练口令前缀）无命中；`git diff --check` 通过。
+- 卡点/风险：
+  - 首字统计沿用原版 `first_token_ms`（上游首个流事件），只覆盖流式请求；
+  - 选号开销的 I/O 指标需要节点开启 `server.enable_server_timing`；
+  - 500 账号下份额选号均值比原版多约 0.18ms（预算 1ms），P99 未单独测；
+  - 上游安装 DSN 空密码问题未修，见顶部。
+- 下一步：干净树 `sync.py audit`、推送、开 PR 并跟进 CI；合并、发版、部署需另行授权。
+- 本轮未合并、未打标签、未发版、未部署、未访问生产；演练只用本机回环地址，结束后已删除演练库、Redis DB 5/6 与凭据文件。
+
+### 2026-10-10T21:30:00Z — `20261010-share-scheduling-dev` — 合并 main 0.2.6 与复验
+
+- 请求/目标：延续“提交、完成剩余任务、无潜在问题后开 PR”的授权；开 PR 前发现 origin/main 已发布 0.2.6，先并入以免 PR 冲突。
+- 开始状态：HEAD `d2d75a65`，工作树干净；origin/main `7b1d5d8c`。
+- 完成操作：
+  - `git merge origin/main`，解决 8 个冲突文件（backend-ci.yml、openai_gateway_service/usage/profit_control/ws_forwarder_v2、openai_cache_diagnostics、scheduler-diff.json、本记忆），合并提交 `3c0e4b6a`；
+  - 去掉 0.2.6 诊断中来自已删除 controlled 调度器的 attempt id 字段；
+  - `scheduler-diff.json` 追加 `openai-cache-reliability` 已审 hunk（openai_account_scheduler.go、openai_gateway_scheduling.go）；
+  - 按 go.mod 新版本隔离安装 Go 1.27.2（校验 SHA256），lint 换用 CI 同版 v2.14.0。
+- 验证：见 tasks.md「合并 main … 后复验」——unit 61 包、Gateway reliability 138 例、OpenAI 缓存门禁 40 例（16 必需全执行）、integration 55 包、lint 0 issues、tools 19 例、干净树 `sync.py audit` 与 `scheduler-diff` 通过。临时 harness 接线已还原。
+- 卡点/风险：无新增；0.2.6 的 `v2:` 会话哈希与原子首次绑定只作用于原版/OpenAI 调度路径，份额路径沿用自己的绑定（GET+PTTL/SET NX），二者在同一请求中不会同时写入。
+- 下一步：推送、开 PR、跟进 CI；合并、发版、部署需另行授权。
+
+### 2026-10-10T22:10:00Z — `20261010-share-scheduling-dev` — 推送、开 PR 与 CI
+
+- 请求/目标：完成用户授权的最后一步——推送并向 main 开 PR，跟进 CI 至通过；不合并、不发版、不部署。
+- 开始状态：HEAD `eeab1b66`，工作树干净，origin/main `7b1d5d8c`。
+- 完成操作：
+  - 推送 `feat/share-scheduling-20261010`。Git Credential Manager 在非交互环境下卡住，已终止该次推送，改用已登录的 `gh auth git-credential` 作为一次性凭据助手完成推送，未改 git 配置；
+  - 开 PR [#90](https://github.com/liulixin-lex/xy2api/pull/90)「feat: replace controlled scheduling with share scheduling」，描述包含变更、默认值、回退、验证、合并后事项和上游安装 DSN 空密码问题；
+  - 两组工作流共 18 项检查全部通过：test 作业的 Unit/Integration/Gateway reliability（30 个 `TestShareScheduling*` 通过）/OpenAI cache reliability/Hosted recharge，upstream-sync-audit 作业的 Original scheduler diff allowlist，以及 lint、前端、安全扫描、shell、release-helpers、windows-plugin-archive。PR 状态为 MERGEABLE/CLEAN。
+- 修改文件：仅本记忆（记录 PR 与 CI）。
+- 收尾：已停止本地 PG/Redis（`/tmp/xy2-infra/stop.sh`）。保留本机 Homebrew `postgresql@18`/`redis`、`/tmp/xy2-toolchain`（Go 1.27.0/1.27.2、golangci-lint）、`/tmp/xy2-infra`（数据与脚本）、`/tmp/xy2-smoke/{scripts,shots}`，均无凭据，可删除。
+- 下一步：人工审核与合并 PR #90；合并后按 tasks 执行 0.4–0.6 基线、4.5 RC、4.6 影子、4.7 灰度、4.8 D7，均需用户授权。
+
+### 2026-10-11T12:00:00Z — `20261011-share-scheduling-hardening` — 加固、压测、全量门禁与提交
+
+- 请求/目标：用户要求参考更多二开仓库，全面测试和审查调度功能，修复潜在稳定性问题，吸收更优思路，模拟测试达到上线标准后提交并推送 PR。不合并、不发版、不部署。
+- 开始状态：HEAD `fe4d54b0`，PR #90 开放且 CI 全绿。
+- 调研：
+  - 候选清单 349 个仓库，只读稀疏克隆 23 个，不执行其代码；
+  - 采纳：审计清单（失败时有时限地沿用上次结果、资源有界、快照所有权）、按样本量展示分位；
+  - 未采纳：“全部失败时放行全部”（与原版不一致）；
+  - 流式卡顿检测留作后续。
+- 修改：
+  - 后端：service（影子上限、等待前取消检查、纠偏刷新、批量计数、类别驻留）、sharesched（`Policy.Freeze`）、repository（按所有者删除绑定、分钟桶加小时桶）及对应测试，新增 `share_scheduling_hardening_test.go`；
+  - 前端：报表首字分位样本门槛、影子跳过卡片、中英文文案与测试；
+  - 文档：design §18、tasks 验证记录、`docs/SHARE_SCHEDULING.md`。
+- 压测：本地 PG/Redis，两个网关实例，合成上游，`/tmp/xy2-soak`（凭据仅在权限 600 的 env 文件中，收尾删除）。共 10 个阶段，另用新构建复测份额稳态与影子。
+  - 过程中发现：原版粘性等待队列满时返回 429，份额无此问题。
+  - 修复纠偏刷新整轮无总时限的问题。
+  - 修复按分钟计数的内存问题（改为分钟桶加小时桶）。
+- 验证：
+  - `go build` 与 `go vet`（默认、unit、integration）；
+  - unit 61 包；
+  - Gateway reliability `-race` 143 例；
+  - OpenAI cache reliability 40 例；
+  - integration 55 包（本地接线，未提交）；
+  - golangci-lint 0；
+  - 前端 lint、tsc、vitest 2802 例、i18n、build；
+  - tools 19 例、scheduler-diff、`git diff --check`。
+- 下一步：推送后跟进 PR #90 的 CI。人工审核与合并需用户授权。上游 v0.2.15 缓存 TTL 修复建议另行按同步机制处理。
+- 更正与补充（同日）：推送 `1cce53e0` 后，CI 的 Unit tests 失败。原因是 `TestShareSchedulingShadowMatchesOriginalPerRequest` 在负载下累计的影子对比超过 32 个上限，多出的被跳过（上限按设计生效）。回放用例改为逐个等待影子对比完成，并统计 `shadow_skipped`。本地 `-cpu 1,2 -race`、全量单测并行时 `-cpu 1 -count=10` 压测、全量 unit 61 包均通过。修复后另行提交推送，需重新跟进 CI。
+- CI 结果：`76efcdae` 上 18 项检查全部通过，包括 test 作业的 Unit、Integration、Gateway reliability、OpenAI cache reliability。PR #90 为 MERGEABLE/CLEAN。
+- 收尾：
+  - 压测网关与合成上游已停止；
+  - 已删除 `xy2soak` 库、Redis DB 7 数据、含凭据的 env 与 state 文件；
+  - 已停止本地 PG/Redis（`/tmp/xy2-infra/stop.sh`）。
+  - 保留的产物（均无凭据，可删除）：
+    - `/tmp/xy2-soak/{bin,scripts,logs,out}`（压测脚本、日志与结果）；
+    - `/tmp/xy2-research`（调研克隆）；
+    - `/tmp/xy2-toolchain`；
+    - `/tmp/xy2-infra`；
+    - Homebrew `postgresql@18`/`redis`。
+- 下一步：人工审核与合并 PR #90（需用户授权）。上游 v0.2.15 缓存 TTL 修复建议另行按同步机制处理。
+
+### 2026-10-12 — `20261012-pr90-hardening` — 独立审查修复与本地制品验收完成
+
+- 请求/起点：用户明确执行审查方案并保留 PR #90 优秀代码；基于固定 `a30fc223d` 建立独立 `fix/pr90-review-20261012`。原 main、其他任务改动和全部历史日志保持。后续授权自由释放磁盘，未扩大为发布或生产写授权。
+- 完成操作：修复 R1–R7 及 saved/applied，追加 271 与升级盘点/预检，保留层级/HRW/缓存亲和/资格/计费/协议所有权；不恢复旧 controlled 调度器。实现吸收 guardian、ranxi2001、cost-console、state-kit、sub2api-plus 的设计原则，固定 36 项目/140 来源沿用原审查。源码提交 `85eae404a`、`2cbb5262d`、`e79f6bec8` 只保留本地。
+- 验证与纠正：前端全量 2,814、后端四改动包 17,516（17 条件性跳过）、定向 111、真实 PG/Redis 13、工具 23；关键 race 159/69/61 全零失败/跳过；最后版本反馈与成本补修 25 全通过。静态门禁先检出测试错误检查/无用函数后修正，最终业务 HEAD 0 issues。实际二进制演练发现关闭总开关时 applied_version 错归零，补四组合回归后重新构建；不是只修改验收脚本或放宽断言。原始失败与重试完整保留。
+- 制品与回退：固定 `e79f6bec8` 的嵌入候选/哈希核验，fresh、0.2.6 升级、双实例、停用、应用回退和成套备份恢复 8 项通过；浏览器桌面/手机/明暗/键盘通过。候选是本地审查制品，Go service 内联为共享环境关闭，标准 pnpm build 的 OOM 改以独立类型检查加同配置 Vite 串行验证，均在报告披露。
+- 资源与交接：用户授权后只清理缓存/未使用镜像/归档日志，生产备份和运行容器保持；临时 PG/Redis、工具与任务缓存清理。原审查源码持久迁至 `/xy/worktrees/pr90-reviewed` 并核对 4,582 文件；候选与全部证据见顶部。自己的进行中条目已清理，后续文档收尾提交与干净树审计身份写入外部 validation.json，不预写未知提交。
+- 风险/下一步：不宣称生产全面上线；标准优化构建 P99 目标、远端固定 HEAD CI、真实基线/三天影子/灰度及缓存/费用账单仍待对应授权环境。本地合成差约 3.111ms 未证明 1ms 设计目标达到。当前无本轮未完成业务修复，没有推送/PR/合并/发版/部署/生产操作。
+
+### 2026-10-12T16:00:00Z — `20261012-pr90-slim` — 复审精简、验证与提交
+
+- 请求/目标：用户认为 PR #90 被其他模型更新后臃肿、兜底策略过多，要求参考二开项目复审合理性与可用性，修复潜在问题、删除不必要功能，达到上线标准后交付。不合并、不发版、不部署。
+- 开始状态：本地分支快进到远端 `23f191fc`（PR 头，CI 18 项中 test 失败）。
+- 完成操作：
+  - 查明 CI 失败由迁移 271 改变升级前迁移数引起。
+  - 对照 guardian（人工暂停用宿主 `schedulable`）与 ranxi2001（API Key 排队状态机）核实被引用做法的原始场景。
+  - 删除 271、按分组停用/应急排空、等待租约、绑定 CAS 协调、统计批次去重/重试/不完整标记、升级盘点、`applied_version`。
+  - 保留默认权重口径、设置纪元与版本防回退、保存不回读、等待预算约束、前端过期防护与字段级合并、长窗口精度标记。
+  - 补 5 个一致性用例与前端用例，并做反向验证。
+  - 中途磁盘写满导致首轮后端门禁编译失败：清理自建的 Go 编译缓存（约 40 GB，可再生）后重跑通过。
+- 修改文件：
+  - 后端：份额 service/sharesched/repository、`openai_account_scheduler.go` 回到 `a30fc223`，删除迁移 271；
+  - 前端：份额 API 类型、编辑器、报表、store、文案与测试；
+  - 工具：`tools`、CI 工作流回到 `a30fc223`；
+  - 文档：design §19、tasks、`docs/SHARE_SCHEDULING.md`、本记忆，删除 `docs/share-scheduling-hardening.md`。
+- 验证：
+  - unit 61 包；
+  - Gateway reliability `-race` 154 例；
+  - OpenAI cache 40 例；
+  - integration 55 包；
+  - lint 0；
+  - 前端 359 文件 2816 例与构建；
+  - 基准：份额比原版多约 0.18 ms；
+  - 压测 7 阶段：份额阶段成功率除过载外均为 100%；同负载下扣除亲和等待后选号 2.03 / 1.68 ms；
+  - 0.2.6 回退与前滚正常。
+- 卡点/风险：过载时全满载的新会话排队在权重最高的账号上，偶有 30 秒排队超时（5/13034），少于原版；生产等待预算需按基线首字斜率校准。
+- 下一步：推送后跟进 PR #90 的 CI；人工审核与合并需用户授权。本地保留的产物均无凭据，可删除：`/tmp/xy2-soak/{bin,logs,out,scripts}`、`/tmp/xy2-research`、`/tmp/xy2-toolchain`、`/tmp/xy2-infra`。
+- CI 结果（追加）：`7c763280` 上 18 项检查全部通过，PR #90 为 MERGEABLE/CLEAN。已停止本地 PG/Redis。
+
+### 2026-10-12T10:25:07Z — `20261012-async-image-tasks-v2` — 开发完成，分支已推送
+
+- 请求/目标：用户授权拉取最新仓库、新建分支，开发异步生图功能（下游生图站 G7 方案第 2 期）；推送分支属授权范围，PR、合并、版本与主站部署未授权。
+- 开始状态：`main` / `7b1d5d8c3`（0.2.6）；0.2.6 已有 `/v1/images/{generations,edits}/async` 与 `/v1/images/tasks/{id}`。已知缺口：可控调度模式下任务立即 "context canceled"、无幂等、无计费字段、进程退出后任务长期 processing、转存失败但已计费时标失败、无准入上限、失败不进错误日志。
+- 完成操作：分支 `feat/async-image-tasks-v2-20261012`，提交 `50b7b32b7`（规格）、`02f0a21d3`（可控调度修复）、`71ead40f0`（功能）、`5217d43e3`（文档）及本记录；已推送。任务存储改为 WATCH/MULTI 更新；新增 Redis 协调器（幂等、在途索引、清扫锁、查询限流）与账本查询；错误日志中间件后处理抽出为 `recordOpsErrorAfterRequest` 供异步复用；清理阶段先排空异步任务再停清扫器；Wire 重新生成。无迁移。
+- 修改文件：`backend/internal/service/{image_task,image_storage,controlled_scheduling_request,wire}.go`、`backend/internal/repository/{image_task_store,image_task_coordinator,image_task_billing,image_storage_s3,wire}.go`、`backend/internal/handler/{image_task_handler,ops_error_logger}.go`、`backend/internal/server/{routes/gateway,middleware/api_key_auth}.go`、`backend/internal/config/config.go`、`backend/cmd/server/{wire,wire_gen}.go` 及相应测试；`docs/ASYNC_IMAGE_TASKS.md`、`deploy/config.example.yaml`、`tools/upstream-sync/policy.json`（openspec 变更目录归 xy_owned）、`openspec/changes/async-image-tasks-v2/`、本文件。
+- 验证：Go 1.27.2 后端完整 unit 61 个测试包通过（含 `cmd/server` 清理顺序与提示词审核先于副作用的守卫）；golangci-lint v2.14.0 全仓 0 issues；`sync.py audit` 通过，`tools/tests` 14 项通过；图片任务相关测试 `-race` 通过；GitHub 分支 CI 7 项作业与 Security Scan 全部成功。实验环境（模拟上游）把实验主站换成本分支构建后：能力发现与查询限流、可控模式出图（扣费一次、用量一条）、幂等重放与 422、`Prefer`、DELETE（记录与存储对象均删除）、`docker stop` 排空（等待 13 秒后完成并扣费）、`docker kill` 后 119 秒内清扫收尾为 `task_interrupted`/不扣费/错误日志一条，7 项通过；生图站现有异步客户端 image/resume/edge 3 项不改代码通过；演练后实验主站恢复固定版本。
+- 卡点/风险：未在生产主站运行；Gemini 异步不在本轮。`openai_token_provider_test.go` 的 gofmt 差异为既有问题，未改。
+- 下一步：等待用户授权开 PR、合并与发版（建议 0.2.7）；主站部署另需授权，部署前建议为对象存储 `images/` 前缀配置生命周期规则。
+
+### 2026-10-12T10:39:30Z — `20261012-async-image-tasks-v2` — 开 PR #91
+
+- 请求/目标：用户授权「xy2api开PR，暂不部署主站，备份桶自动删除暂不考虑」。
+- 开始状态：分支 `feat/async-image-tasks-v2-20261012` / `4d70bf5c9` 已推送，分支 CI 与 Security Scan 全部成功；`origin/main` 仍为 `7b1d5d8c3`。
+- 完成操作：开 [PR #91](https://github.com/liulixin-lex/xy2api/pull/91)（→ `main`，非草稿），正文写明改动、验证、与 PR #90 的冲突及两种合并顺序的处理方式；更新本文件。未合并、未打标签、未部署。
+- 修改文件：仅本文件。
+- 验证：本地对 PR #90 head `a30fc223d` 试合并（`git merge-tree`）：冲突为 `controlled_scheduling_request.go`（#90 删除、本分支修改）、`cmd/server/{wire,wire_gen,wire_gen_test}.go`、本文件；#90 中已无 `ControlledSchedulingMiddleware`、`clientContext`、`beginDispatch`。
+- 卡点/风险：合并顺序由维护者决定；后合并的一方需按上文处理冲突并复测。
+- 下一步：等待合并授权；发版与主站部署另需授权。
+
+### 2026-10-13 — 20261013-sub2api-v0.2.15-full-release — 本地集成与专项修复
+
+- 请求范围含标准上游同步、备份修复、开放PR整合、指标算法/文案及发版；用户追加并行开发和生产只读分析。执行使用独立clone并保留原main未提交记忆。
+- 通过doctor严格预检后prepare首次被17个新冲突阻断，核对后独立登记policy并重新执行；保留原失败报告。官方merge、归一、人工裁决、两PR merge、生成代码、备份/指标/图像修复分别提交，旧迁移不改写。
+- 备份：生产版本/权限只读确认后选择public；普通表范围演练曾通过，但扩展索引演练实际失败（DROP SCHEMA遇pg_trgm依赖），因此没有放行；最终采用原生TOC精确省略namespace元条目、保留业务对象/数据，新恢复矩阵通过。旧psql SQL错误会回滚但退出0，新参数消除误报成功；没有声称旧版部分提交。
+- 验证失败和资源中断分别保留：初轮后端旧charged fixture、前端IQ筛选旧索引，以及多并发编译造成内存压力。改为单个重型Go进程、低并发前端，未改断言来掩盖业务问题。最终全量及远端/制品工作仍在进行，以上条目不是发版完成记录。
+
+### 2026-10-13 — 20261013-sub2api-v0.2.15-full-release — 草稿 PR 与首轮最终门禁
+
+- 创建独立RC版本提交并推送同步分支/不可变sub2api/v0.2.15标签，开草稿PR #92，单独提交真实sync_pr来源；main和已发布标签保持原状态。
+- 前端最终3026项完整测试、38项文案补验及构建通过；后端最终unit62包/23651测试及子测试通过（40项依赖条件跳过），完整integration与固定head远端门禁进行中。
+- CI静态检查发现3个上游归一化文件import未gofmt，纯格式修正；原始失败日志保留。已通过前后端安全、前端、Windows插件、shell、审计与发布辅助上下文，仍须新head全部通过。
+- RC/正式发布仍未执行，本记录不构成发行成功结论。生产只读故障定位完成，备份验证临时容器/进程/归档已独立核查无残留。

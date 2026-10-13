@@ -595,23 +595,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		bridgeReplayInputExists := false
 		var bridgeAccountFailoverInput []json.RawMessage
 		bridgeAccountFailoverInputExists := false
-		bridgeTurnCtx := ctx
-		defer func() {
-			if r := controlledRequest(bridgeTurnCtx); r != nil && r != controlledRequest(ctx) {
-				r.Close()
-			}
-		}()
 		for turn := 1; ; turn++ {
-			if turn > 1 {
-				if r := controlledRequest(bridgeTurnCtx); r != nil && r != controlledRequest(ctx) {
-					r.Close()
-				}
-			}
-			prepared, prepareErr := s.prepareControlledWSTurn(ctx, c, currentBridgePayload.payloadRaw, currentBridgePayload.originalModel, sessionHash, turn > 1)
-			if prepareErr != nil {
-				return prepareErr
-			}
-			bridgeTurnCtx = prepared
 			if turn > 1 && hooks != nil && hooks.BeforeRequest != nil {
 				if err := hooks.BeforeRequest(turn, currentBridgePayload.rawForHash, currentBridgePayload.originalModel); err != nil {
 					return err
@@ -705,7 +689,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 			result, bridgeErr := s.proxyOpenAIWSHTTPBridgeTurn(
-				bridgeTurnCtx,
+				ctx,
 				c,
 				account,
 				token,
@@ -717,21 +701,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				currentBridgePayload.imageInputSize,
 				grokCacheIdentity,
 				turn,
-				func(message []byte) error {
-					err := writeClientMessage(message)
-					if err == nil {
-						if semantic, answer, _, _ := classifySemanticEvent(message); semantic {
-							if r := controlledRequest(bridgeTurnCtx); r != nil {
-								r.markSemantic(time.Now(), answer)
-							}
-						}
-					}
-					return err
-				},
+				writeClientMessage,
 			)
-			if result != nil {
-				result.SchedulingAttemptID = SchedulingAttemptIDFromContext(bridgeTurnCtx)
-			}
 			if bridgeErr != nil && isOpenAIWSSessionPreempted(ctx) {
 				return errOpenAIWSSessionPreempted
 			}
@@ -996,17 +967,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return lease, nil
 	}
 
-	controlledTurnCtx := ctx
-	controlledTurnNumber := 0
-	defer func() {
-		if r := controlledRequest(controlledTurnCtx); r != nil && r != controlledRequest(ctx) {
-			r.Close()
-		}
-	}()
 	var rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState
-	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string) (forwardResult *OpenAIForwardResult, forwardErr error) {
-		ctx := controlledTurnCtx
-
+	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string) (*OpenAIForwardResult, error) {
 		responseModelObserver := s.qualityObserver(ctx, account, gjson.GetBytes(payload, "model").String())
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
@@ -1018,25 +980,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, promptErr.Error(), promptErr)
 		}
 		wirePayload = qualityRotateBody(wirePayload, s.qualityRotation(ctx, account), true)
-		controlledTerminal := false
-		controlledPreparationFinished := false
-		controlledDispatch, controlledErr := s.controlledScheduling.beginDispatch(ctx, account.ID, account.Concurrency)
-		if controlledErr != nil {
-			return nil, controlledErr
-		}
-		if controlledDispatch != nil {
-			ctx = controlledDispatch.Context()
-			defer func() {
-				if !controlledPreparationFinished {
-					controlledDispatch.Finish("websocket_turn", controlledTerminal, forwardErr)
-				}
-			}()
-		}
-		if err := controlledDispatch.MarkSent(); err != nil {
-			controlledPreparationFinished = true
-			controlledDispatch.finishPreparationFailure(err)
-			return nil, err
-		}
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(wirePayload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
@@ -1098,11 +1041,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				upstreamMessage = normalized
 			}
 
-			controlledDispatch.ObserveFrame(upstreamMessage)
 			eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
-			if eventType == "error" || isOpenAIWSTerminalEvent(eventType) {
-				controlledTerminal = true
-			}
 
 			responseModelObserver.ObserveOpenAI(upstreamMessage, eventType)
 			if responseID == "" && eventResponseID != "" {
@@ -1284,7 +1223,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						)
 					}
 				} else {
-					controlledDispatch.CommitOutput(clientMessage)
 					wroteDownstream = true
 					markOpenAIWSClientVisibleFailure(c, eventType, upstreamMessage)
 				}
@@ -1544,19 +1482,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return true
 	}
 	for {
-		if turn != controlledTurnNumber {
-			if controlledTurnNumber > 0 {
-				if r := controlledRequest(controlledTurnCtx); r != nil && r != controlledRequest(ctx) {
-					r.Close()
-				}
-			}
-			prepared, err := s.prepareControlledWSTurn(ctx, c, currentPayload, currentOriginalModel, sessionHash, controlledTurnNumber > 0)
-			if err != nil {
-				return err
-			}
-			controlledTurnCtx = prepared
-			controlledTurnNumber = turn
-		}
 		// A native connection may predate this account's opt-in. Its handshake
 		// cannot receive a newly harvested STATE; reconnect into the HTTP bridge.
 		if err := s.checkOpenAICodexTicketNativeTurn(ctx, account); err != nil {
@@ -1909,9 +1834,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 
 		result, relayErr := sendAndRelay(turn, sessionLease, currentPayload, currentPayloadBytes, currentOriginalModel, currentImageBillingModel, currentImageSizeTier, currentImageInputSize, currentRequestedReasoningEffort)
-		if result != nil {
-			result.SchedulingAttemptID = SchedulingAttemptIDFromContext(controlledTurnCtx)
-		}
 		if relayErr != nil {
 			lastTurnClean = false
 			if isOpenAIWSSessionPreempted(ctx) {

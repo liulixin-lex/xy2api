@@ -7,7 +7,8 @@ description: Synchronize a stable Sub2API release into XY2API using pinned three
 
 Use the repository's synchronization machinery instead of rebuilding the process from memory:
 
-- `tools/upstream-sync/sync.py`: prepare, report, normalize, and audit.
+- `tools/upstream-sync/sync.py`: prepare, report, normalize, audit, and scheduler-diff.
+- `tools/upstream-sync/scheduler-diff.json`: reviewed fork blocks in the original scheduler files; a new upstream commit requires re-review (see `docs/UPSTREAM_SYNC.md`).
 - `tools/upstream-sync/policy.json`: ownership, compatibility invariants, and named patch tests.
 - `UPSTREAM_BASE.json`: immutable provenance and current compatibility baseline.
 - `docs/UPSTREAM_SYNC.md`: repository policy and project-specific contracts.
@@ -45,7 +46,7 @@ Read [references/runbook.md](references/runbook.md) when executing any stage bey
 
 - Freeze exact identifiers first: tag, tag object, target commit, merge base, fork start, branch, RC version, and final version.
 - Use the generated three-way report and ownership policy to focus review on overlap and affected domains; do not reread the entire repository.
-- Run cheap deterministic gates before long suites: clean tree, tool tests, sync audit, `git diff --check`, conflict-marker scan, migration manifest, and Compose parsing.
+- Run cheap deterministic gates before long suites: clean tree, tool tests, sync audit, scheduler diff allowlist, `git diff --check`, conflict-marker scan, migration manifest, and Compose parsing.
 - Run impacted local tests first. Let CI provide the complete fixed-toolchain matrix when the local machine lacks Go, Node, Docker, or platform-specific runners.
 - Monitor checks by required context. Push and PR triggers may produce duplicate runs; do not restart successful work solely because two instances exist.
 - After every external mutation, re-read the authoritative state before continuing: PR head SHA, merge commit, tag target, workflow result, release flags, asset digests, and image manifest.

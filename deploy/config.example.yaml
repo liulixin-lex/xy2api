@@ -1348,3 +1348,19 @@ image_storage:
   presign_expiry_hours: 24
   # 当上游返回的是图片 url 时，下载该图片再转存的字节上限（默认 32MB）
   max_download_bytes: 33554432
+
+# =============================================================================
+# 异步图片任务运行边界（v2）。功能开关仍是上面的 image_storage。
+# =============================================================================
+image_tasks:
+  # 每个 API Key 同时进行的任务上限；0 = 按用户并发 ×2（至少 2）
+  max_in_flight_per_key: 0
+  # 单实例同时执行的任务上限
+  max_in_flight_per_instance: 256
+  # GET /v1/images/tasks/{id}?wait=N 最长挂起秒数（最大 60）
+  long_poll_max_seconds: 30
+  # 每个 API Key 每秒查询/删除次数上限；0 = 不限
+  poll_rate_per_second: 10
+  # 收到 SIGTERM 后等待在途任务的秒数，超时的任务以 task_interrupted 收尾。
+  # 容器停止宽限期（docker stop -t / compose stop_grace_period）要不小于它才有效。
+  drain_timeout_seconds: 600

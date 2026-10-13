@@ -169,6 +169,8 @@ docs/*
 !docs/CONTROLLED_SCHEDULING.md
 !docs/CONTROLLED_SCHEDULING_ACCEPTANCE.md
 !docs/account-scheduling.md
+!docs/SCHEDULING_ANALYSIS.md
+!docs/SHARE_SCHEDULING.md
 !docs/IQ_RELIABILITY_IMPLEMENTATION.md
 !docs/channel-monitor-v2-safe-defaults.md
 !docs/upstream-sync/
@@ -198,3 +200,7 @@ issues/
 
 !docs/ui-scheduling-one-click.md
 !docs/openai-cache-reliability.md
+
+!docs/USAGE_METRICS.md
+!docs/BACKUP_RELIABILITY.md
+!docs/UPSTREAM_SYNC_V0215.md

@@ -4,6 +4,8 @@ export default {
       description: '运维监控与排障',
       // Dashboard
       systemHealth: '系统健康',
+      outputTps: '单次请求平均输出速率',
+      outputTpsSamples: '有效样本：{count}',
       overview: '概览',
       noSystemMetrics: '尚未收集系统指标。',
       collectedAt: '采集时间：',
@@ -88,13 +90,13 @@ export default {
       requestsTotal: '请求（总计）',
       slaScope: 'SLA 范围：',
       tokens: 'Token数',
-      tps: 'TPS',
+      tps: '吞吐量 (tokens/s)',
       current: '当前',
       peak: '峰值',
       average: '平均',
       totalRequests: '总请求',
       avgQps: '平均 QPS',
-      avgTps: '平均 TPS',
+      avgTps: '平均吞吐量 (tokens/s)',
       avgLatency: '平均请求时长',
       avgTtft: '平均首 Token 延迟',
       exceptions: '异常数',
@@ -172,7 +174,7 @@ export default {
         table: {
           model: '模型',
           requestCount: '请求数',
-          avgTokensPerSec: '平均 Tokens/秒',
+          avgTokensPerSec: '平均输出速率 (tokens/s)',
           avgFirstTokenMs: '平均首 Token 延迟(ms)',
           totalOutputTokens: '输出 Token 总数',
           avgDurationMs: '平均时长(ms)',
@@ -804,6 +806,7 @@ export default {
         accountError: '异常'
       },
       tooltips: {
+        outputTps: '每条有效用量记录的输出 Token ÷ 总耗时（含首字等待），再按当前时间、平台和分组计算分位数。输出可含推理 Token，不重复相加。P50 为中位数，P5/P10 反映较慢请求；数值越高越快。排除图片、Live、无有效输出或耗时的记录。样本来自仍保留的使用明细；无样本或统计暂不可用时显示 —。',
         totalRequests: '当前时间窗口内的总请求数和Token消耗量。',
         throughputTrend: '当前窗口内的请求/QPS 与 token/TPS 趋势。',
         switchRateTrend: '近5小时内账号切换次数 / 请求总数的趋势（平均切换次数）。',

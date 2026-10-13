@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
-	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,12 +38,4 @@ func TestOpenAISubmitUsageRecordTaskCopiesRequestContext(t *testing.T) {
 
 	require.Equal(t, "openai-client-request-123", gotClientRequestID)
 	require.Equal(t, "openai-request-456", gotRequestID)
-}
-
-func TestOpenAISubmitUsageFreezesExplicitTurnTicket(t *testing.T) {
-	parent := service.WithSchedulingUsageAttempt(context.Background(), "first-turn")
-	h := &OpenAIGatewayHandler{}
-	var got string
-	h.submitOpenAIUsageRecordTask(parent, &service.OpenAIForwardResult{SchedulingAttemptID: "second-turn"}, func(ctx context.Context) { got = service.SchedulingAttemptIDFromContext(ctx) })
-	require.Equal(t, "second-turn", got)
 }

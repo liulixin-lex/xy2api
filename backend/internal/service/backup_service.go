@@ -78,6 +78,17 @@ type DBDumper interface {
 	Restore(ctx context.Context, data io.Reader) error
 }
 
+// DBSchemaDumper optionally supports an explicitly selected application schema.
+// A dumper without this capability must never silently fall back to a full dump.
+type DBSchemaDumper interface {
+	DumpSchema(ctx context.Context, schema string) (io.ReadCloser, error)
+}
+
+const (
+	BackupScopeDatabase = "database"
+	BackupScopePublic   = "public"
+)
+
 // BackupObjectStore abstracts object storage for backup files
 type BackupObjectStore interface {
 	Upload(ctx context.Context, key string, body io.Reader, contentType string) (sizeBytes int64, err error)
@@ -109,8 +120,9 @@ func (c *BackupS3Config) IsConfigured() bool {
 	return c.Bucket != "" && c.AccessKeyID != "" && c.SecretAccessKey != ""
 }
 
-// BackupScheduleConfig 定时备份配置
+// BackupScheduleConfig 备份策略；范围同时作用于手动与定时备份。
 type BackupScheduleConfig struct {
+	BackupScope    string                      `json:"backup_scope"` // database (default), public
 	Enabled        bool                        `json:"enabled"`
 	CronExpr       string                      `json:"cron_expr"`    // cron 表达式，如 "0 2 * * *" 每天凌晨2点
 	RetainDays     int                         `json:"retain_days"`  // 备份文件过期天数，默认14，0=不自动清理
@@ -123,6 +135,7 @@ type BackupRecord struct {
 	ID               string                `json:"id"`
 	Status           string                `json:"status"`      // pending, running, completed, failed
 	BackupType       string                `json:"backup_type"` // postgres
+	BackupScope      string                `json:"backup_scope"`
 	FileName         string                `json:"file_name"`
 	S3Key            string                `json:"s3_key"`
 	Parts            []BackupPart          `json:"parts,omitempty"`
@@ -464,16 +477,34 @@ func (s *BackupService) GetSchedule(ctx context.Context) (*BackupScheduleConfig,
 		return nil, fmt.Errorf("load backup schedule: %w", err)
 	}
 	if raw == "" {
-		return &BackupScheduleConfig{RetainDays: 14, RetainCount: 10}, nil
+		return &BackupScheduleConfig{BackupScope: BackupScopeDatabase, RetainDays: 14, RetainCount: 10}, nil
 	}
 	var cfg BackupScheduleConfig
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		return nil, infraerrors.InternalServer("BACKUP_SCHEDULE_CORRUPT", "backup schedule data is corrupted")
 	}
+	cfg.BackupScope, err = normalizeBackupScope(cfg.BackupScope)
+	if err != nil {
+		return nil, infraerrors.InternalServer("BACKUP_SCHEDULE_CORRUPT", "backup schedule has an invalid backup scope")
+	}
 	return &cfg, nil
 }
 
 func (s *BackupService) UpdateSchedule(ctx context.Context, cfg BackupScheduleConfig) (*BackupScheduleConfig, error) {
+	if cfg.BackupScope == "" {
+		// Older clients omit this field when editing the schedule or retention.
+		// Preserve an explicit scope instead of unexpectedly broadening a backup.
+		previous, err := s.GetSchedule(ctx)
+		if err != nil {
+			return nil, err
+		}
+		cfg.BackupScope = previous.BackupScope
+	}
+	var err error
+	cfg.BackupScope, err = normalizeBackupScope(cfg.BackupScope)
+	if err != nil {
+		return nil, err
+	}
 	if err := validateBackupRetention(&cfg); err != nil {
 		return nil, err
 	}
@@ -594,7 +625,7 @@ func (s *BackupService) runScheduledBackup() {
 
 // ─── 备份/恢复核心 ───
 
-// CreateBackup 创建全量数据库备份并上传到 S3。
+// CreateBackup 按保存的范围创建数据库备份并上传到 S3。
 // expireDays: 备份过期天数，0=永不过期，默认14天
 func (s *BackupService) CreateBackup(ctx context.Context, triggeredBy string, expireDays int) (*BackupRecord, error) {
 	return s.createBackup(ctx, triggeredBy, expireDays, nil)
@@ -618,6 +649,17 @@ func (s *BackupService) createBackup(ctx context.Context, triggeredBy string, ex
 		s.opMu.Unlock()
 	}()
 
+	if schedule == nil {
+		var err error
+		schedule, err = s.GetSchedule(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	scope, err := normalizeBackupScope(schedule.BackupScope)
+	if err != nil {
+		return nil, err
+	}
 	s3Cfg, err := s.loadS3Config(ctx)
 	if err != nil {
 		return nil, err
@@ -645,6 +687,7 @@ func (s *BackupService) createBackup(ctx context.Context, triggeredBy string, ex
 		ID:          backupID,
 		Status:      "running",
 		BackupType:  "postgres",
+		BackupScope: scope,
 		FileName:    fileName,
 		S3Key:       s3Key,
 		TriggeredBy: triggeredBy,
@@ -652,7 +695,7 @@ func (s *BackupService) createBackup(ctx context.Context, triggeredBy string, ex
 		ExpiresAt:   expiresAt,
 	}
 
-	archivePath, sizeBytes, err := s.createCompressedBackupFile(ctx)
+	archivePath, sizeBytes, err := s.createCompressedBackupFile(ctx, record.BackupScope)
 	if err != nil {
 		record.Status = "failed"
 		record.ErrorMsg = err.Error()
@@ -706,6 +749,12 @@ func (s *BackupService) StartBackup(ctx context.Context, triggeredBy string, exp
 		}
 	}()
 
+	// Snapshot the saved scope before launching the background operation. A
+	// later policy edit must not change what this record claims to contain.
+	schedule, err := s.GetSchedule(ctx)
+	if err != nil {
+		return nil, err
+	}
 	// 在返回前加载 S3 配置和创建 store，避免 goroutine 中配置被修改
 	s3Cfg, err := s.loadS3Config(ctx)
 	if err != nil {
@@ -734,6 +783,7 @@ func (s *BackupService) StartBackup(ctx context.Context, triggeredBy string, exp
 		ID:          backupID,
 		Status:      "running",
 		BackupType:  "postgres",
+		BackupScope: schedule.BackupScope,
 		FileName:    fileName,
 		S3Key:       s3Key,
 		TriggeredBy: triggeredBy,
@@ -782,7 +832,7 @@ func (s *BackupService) executeBackup(record *BackupRecord, objectStore BackupOb
 	// 阶段1: pg_dump -> gzip 临时文件
 	record.Progress = "dumping"
 	_ = s.saveRecord(ctx, record)
-	archivePath, sizeBytes, err := s.createCompressedBackupFile(ctx)
+	archivePath, sizeBytes, err := s.createCompressedBackupFile(ctx, record.BackupScope)
 	if err != nil {
 		record.Status = "failed"
 		record.ErrorMsg = err.Error()
@@ -815,8 +865,32 @@ func (s *BackupService) executeBackup(record *BackupRecord, objectStore BackupOb
 	}
 }
 
-func (s *BackupService) createCompressedBackupFile(ctx context.Context) (string, int64, error) {
-	dumpReader, err := s.dumper.Dump(ctx)
+func normalizeBackupScope(scope string) (string, error) {
+	switch scope {
+	case "", BackupScopeDatabase:
+		return BackupScopeDatabase, nil
+	case BackupScopePublic:
+		return BackupScopePublic, nil
+	default:
+		return "", infraerrors.BadRequest("INVALID_BACKUP_SCOPE", "backup scope must be database or public")
+	}
+}
+
+func (s *BackupService) createCompressedBackupFile(ctx context.Context, scope string) (string, int64, error) {
+	scope, err := normalizeBackupScope(scope)
+	if err != nil {
+		return "", 0, err
+	}
+	var dumpReader io.ReadCloser
+	if scope == BackupScopePublic {
+		dumper, ok := s.dumper.(DBSchemaDumper)
+		if !ok {
+			return "", 0, errors.New("database dumper does not support the public backup scope")
+		}
+		dumpReader, err = dumper.DumpSchema(ctx, BackupScopePublic)
+	} else {
+		dumpReader, err = s.dumper.Dump(ctx)
+	}
 	if err != nil {
 		return "", 0, fmt.Errorf("pg_dump: %w", err)
 	}
@@ -1387,6 +1461,11 @@ func (s *BackupService) loadRecordsLocked(ctx context.Context) ([]BackupRecord, 
 	var records []BackupRecord
 	if err := json.Unmarshal([]byte(raw), &records); err != nil {
 		return nil, ErrBackupRecordsCorrupt
+	}
+	for i := range records {
+		if records[i].BackupScope == "" {
+			records[i].BackupScope = BackupScopeDatabase
+		}
 	}
 	return records, nil
 }

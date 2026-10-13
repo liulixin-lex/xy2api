@@ -1,4 +1,3 @@
-import { useSchedulingModeStore } from '@/stores/schedulingMode'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
@@ -168,7 +167,6 @@ const fullAccount = {
 
 describe('admin AccountsView lite account list', () => {
   beforeEach(() => {
-  useSchedulingModeStore().document = { mode: 'sub2api', version: 1 }
     localStorage.clear()
     listAccounts.mockReset().mockResolvedValue({ items: [listRow], total: 1, page: 1, page_size: 20, pages: 1 })
     listWithEtag.mockReset().mockResolvedValue({ notModified: true, etag: 'compact-etag', data: null })
@@ -189,8 +187,7 @@ describe('admin AccountsView lite account list', () => {
     vi.restoreAllMocks()
   })
 
-  it.each(['controlled', 'sub2api'] as const)('toggles scheduling immediately without a dialog in %s mode', async mode => {
-    useSchedulingModeStore().document = { mode, version: 1 }
+  it('toggles scheduling immediately without a dialog', async () => {
     const wrapper = mountView()
     await flushPromises()
     const toggle = wrapper.get('button[role="switch"]')

@@ -1,5 +1,7 @@
 # 双模式调度界面说明
 
+> 已退役（2026-10-10）：智能可控调度已从代码中完全移除，网关回到 Sub2API 原版调度，旧管理接口返回 `410 SCHEDULING_RETIRED`。当前说明见 [账号调度](account-scheduling.md)；本文仅供追溯。
+
 目标源码：artifacts/scheduling-optimization-20260928/dual-mode-20260929/work。验收日期：2026-09-29。
 
 ## 使用方式

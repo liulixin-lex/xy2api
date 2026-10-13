@@ -49,7 +49,9 @@ type UsageBillingCommand struct {
 	// It is deliberately excluded from the historical dedup fingerprint algorithm.
 	Usage *UsageLog `json:",omitempty"`
 	// Platform quota follows this frozen bill and commits with its balance debit.
-	QuotaPlatform       string `json:",omitempty"`
+	QuotaPlatform string `json:",omitempty"`
+	// SchedulingAttemptID is retained only so intents persisted by 0.2.5 decode
+	// unchanged. Retired controlled scheduling wrote it; nothing reads it now.
 	SchedulingAttemptID string `json:",omitempty"`
 }
 

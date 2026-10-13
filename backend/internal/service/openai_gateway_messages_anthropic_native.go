@@ -132,14 +132,20 @@ func (s *OpenAIGatewayService) nativeAnthropicTargetURL(account *Account) (strin
 	if err != nil {
 		return "", fmt.Errorf("invalid base_url: %w", err)
 	}
-	if account.IsOpenCodeGo() {
-		// OpenCode Go 的 Chat Completions base 带 /v1；用版本感知拼接避免 /v1/v1/messages。
-		return buildOpenAIEndpointURL(validatedURL, "/v1/messages"), nil
-	}
-	return strings.TrimRight(validatedURL, "/") + "/v1/messages", nil
+	return nativeAnthropicMessagesURL(account, validatedURL), nil
 }
 
-func resolveOpenCodeGoMappedModel(account *Account, body []byte, defaultMappedModel string) string {
+// nativeAnthropicMessagesURL 由已校验的 Anthropic 协议基址拼出 messages 端点，转发与
+// 连接测试共用。按模型分流的聚合平台（OpenCode、Command Code 等）的基址可能沿用带 /v1
+// 的 Chat Completions 基址，用版本感知拼接避免 /v1/v1/messages；其余供应商朴素拼接。
+func nativeAnthropicMessagesURL(account *Account, validatedBaseURL string) string {
+	if account.routesByModel() {
+		return buildOpenAIEndpointURL(validatedBaseURL, "/v1/messages")
+	}
+	return strings.TrimRight(validatedBaseURL, "/") + "/v1/messages"
+}
+
+func resolveMappedUpstreamModel(account *Account, body []byte, defaultMappedModel string) string {
 	original := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	billing := resolveOpenAIForwardModel(account, original, defaultMappedModel)
 	return normalizeOpenAIModelForUpstream(account, billing)
@@ -234,7 +240,6 @@ func (s *OpenAIGatewayService) handleNativeAnthropicBufferedResponse(
 	reasoningEffort *string,
 	startTime time.Time,
 ) (_ *OpenAIForwardResult, retErr error) {
-	defer finishControlledNonstreamResponse(resp, &retErr)
 	if s.rateLimitService != nil {
 		s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
 	}
@@ -242,9 +247,6 @@ func (s *OpenAIGatewayService) handleNativeAnthropicBufferedResponse(
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, anthropicTooLargeError)
 	if err != nil {
 		return nil, nonstreamReadError(ctx, resp, err)
-	}
-	if err := validateControlledNonstreamResponse(resp, body, "messages"); err != nil {
-		return nil, err
 	}
 
 	observer := upstreamResponseModelObserverFromContext(c)

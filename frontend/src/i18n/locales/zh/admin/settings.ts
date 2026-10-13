@@ -63,10 +63,10 @@ export default {
         usageMetrics: {
           title: '管理员使用记录',
           description: '控制管理员使用记录中的指标显示，不影响统计与计费。',
-          cacheHitRate: '显示缓存命中率',
-          cacheHitRateHint: '在 Token 列显示每条请求的缓存命中百分比。',
-          tokenSpeed: '显示 Token 速度',
-          tokenSpeedHint: '在延迟列显示每秒输出 Token 数，优先按生成阶段耗时计算。',
+          cacheHitRate: '显示缓存读取占比',
+          cacheHitRateHint: '在 Token 列显示缓存读取占全部输入的计费用量比例。强制缓存计费会影响此比例。',
+          tokenSpeed: '显示平均输出速率',
+          tokenSpeedHint: '在延迟列显示输出 Token ÷ 请求总耗时（含首 Token 等待），单位 tokens/s。',
         },
         channelMonitor: {
           title: '渠道监控',

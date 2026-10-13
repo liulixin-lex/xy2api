@@ -14,7 +14,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/antigravity"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
-	"github.com/tidwall/gjson"
 )
 
 type antigravityStreamResult struct {
@@ -335,8 +334,7 @@ func (s *AntigravityGatewayService) handleGeminiStreamingResponse(c *gin.Context
 
 // handleGeminiStreamToNonStreaming 读取上游流式响应，合并为非流式响应返回给客户端
 // Gemini 流式响应是增量的，需要累积所有 chunk 的内容
-func (s *AntigravityGatewayService) handleGeminiStreamToNonStreaming(c *gin.Context, resp *http.Response, startTime time.Time) (_ *antigravityStreamResult, retErr error) {
-	defer finishControlledNonstreamResponse(resp, &retErr)
+func (s *AntigravityGatewayService) handleGeminiStreamToNonStreaming(c *gin.Context, resp *http.Response, startTime time.Time) (*antigravityStreamResult, error) {
 	if upstreamResponseModelObserverFromContext(c) == nil {
 		beginUpstreamResponseModelObservation(c)
 	}
@@ -351,7 +349,6 @@ func (s *AntigravityGatewayService) handleGeminiStreamToNonStreaming(c *gin.Cont
 	usage := &ClaudeUsage{}
 	var firstTokenMs *int
 	var last map[string]any
-	var terminalResponse map[string]any
 	var lastWithParts map[string]any
 	var collectedImageParts []map[string]any // 收集所有包含图片的 parts
 	var collectedTextParts []string          // 收集所有文本片段
@@ -450,9 +447,6 @@ func (s *AntigravityGatewayService) handleGeminiStreamToNonStreaming(c *gin.Cont
 			}
 
 			last = parsed
-			if extractGeminiFinishReason(parsed) != "" || gjson.GetBytes(inner, "promptFeedback.blockReason").String() != "" {
-				terminalResponse = parsed
-			}
 
 			// 提取 usage
 			if u := extractGeminiUsage(inner); u != nil {
@@ -522,9 +516,6 @@ returnResponse:
 		finalResponse = mergeTextPartsToResponse(finalResponse, collectedTextParts)
 	}
 
-	if err := validateControlledGeminiCollection(resp, finalResponse, terminalResponse); err != nil {
-		return nil, err
-	}
 	respBody, err := json.Marshal(finalResponse)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal response: %w", err)
@@ -836,7 +827,6 @@ func (s *AntigravityGatewayService) collectClaudeStreamResponse(c *gin.Context, 
 
 	var firstTokenMs *int
 	var last map[string]any
-	var terminalResponse map[string]any
 	var lastWithParts map[string]any
 	var collectedParts []map[string]any // 收集所有 parts（包括 text、thinking、functionCall、inlineData 等）
 	var meaningfulResponse bool
@@ -929,9 +919,6 @@ func (s *AntigravityGatewayService) collectClaudeStreamResponse(c *gin.Context, 
 			}
 
 			last = parsed
-			if extractGeminiFinishReason(parsed) != "" || gjson.GetBytes(inner, "promptFeedback.blockReason").String() != "" {
-				terminalResponse = parsed
-			}
 
 			// 保留最后一个有 parts 的响应，并收集所有 parts
 			parts := extractGeminiParts(parsed)
@@ -979,9 +966,6 @@ returnResponse:
 	}
 
 	// 序列化为 JSON（Gemini 格式）
-	if err := validateControlledGeminiCollection(resp, finalResponse, terminalResponse); err != nil {
-		return nil, nil, err
-	}
 	geminiBody, err := json.Marshal(finalResponse)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to marshal gemini response: %w", err)
@@ -1008,8 +992,7 @@ returnResponse:
 
 // handleClaudeStreamToNonStreaming 收集上游流式响应，转换为 Claude 非流式格式返回
 // 用于处理客户端非流式请求但上游只支持流式的情况
-func (s *AntigravityGatewayService) handleClaudeStreamToNonStreaming(c *gin.Context, resp *http.Response, startTime time.Time, originalModel string) (_ *antigravityStreamResult, retErr error) {
-	defer finishControlledNonstreamResponse(resp, &retErr)
+func (s *AntigravityGatewayService) handleClaudeStreamToNonStreaming(c *gin.Context, resp *http.Response, startTime time.Time, originalModel string) (*antigravityStreamResult, error) {
 	claudeResp, streamRes, err := s.collectClaudeStreamResponse(c, resp, startTime, originalModel)
 	if err != nil {
 		var failoverErr *UpstreamFailoverError

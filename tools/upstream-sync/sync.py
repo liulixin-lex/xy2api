@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import fnmatch
 import hashlib
 import json
+import re
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 
@@ -18,6 +21,8 @@ PROVENANCE_PATH = ROOT / "UPSTREAM_BASE.json"
 MIGRATION_MANIFEST_PATH = ROOT / "backend" / "migrations" / "checksums.json"
 PRODUCT_VERSION_PATH = ROOT / "backend" / "cmd" / "server" / "VERSION"
 COMPAT_VERSION_PATH = ROOT / "backend" / "cmd" / "server" / "SUB2API_COMPAT_VERSION"
+SCHEDULER_DIFF_PATH = Path(__file__).with_name("scheduler-diff.json")
+IMPORT_SPEC = re.compile(r'^(?:[A-Za-z_.][A-Za-z0-9_]*\s+)?"[^"\s]+"$')
 
 
 class SyncError(RuntimeError):
@@ -452,6 +457,99 @@ def command_audit(_args: argparse.Namespace) -> int:
     return 0
 
 
+def scheduler_hunks(upstream: bytes, current: bytes) -> list[dict[str, list[str]]]:
+    """Return the removed and added lines of each changed hunk.
+
+    Lines are stripped and blank lines dropped, so only gofmt-stable content
+    counts. Import specs that merely moved (gofmt reorders imports after the
+    module rewrite) cancel out; any other moved line still counts.
+    """
+    old = [line.strip() for line in upstream.decode("utf-8").splitlines()]
+    new = [line.strip() for line in current.decode("utf-8").splitlines()]
+    hunks: list[dict[str, list[str]]] = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+        if tag != "equal":
+            hunks.append({"removed": [line for line in old[i1:i2] if line], "added": [line for line in new[j1:j2] if line]})
+    removed = Counter(line for hunk in hunks for line in hunk["removed"])
+    added = Counter(line for hunk in hunks for line in hunk["added"])
+    moved = Counter({line: count for line, count in (removed & added).items() if IMPORT_SPEC.match(line)})
+    budget = {"removed": moved.copy(), "added": moved.copy()}
+    out: list[dict[str, list[str]]] = []
+    for hunk in hunks:
+        kept: dict[str, list[str]] = {"removed": [], "added": []}
+        for side in ("removed", "added"):
+            for line in hunk[side]:
+                if budget[side][line] > 0:
+                    budget[side][line] -= 1
+                else:
+                    kept[side].append(line)
+        if kept["removed"] or kept["added"]:
+            out.append(kept)
+    return out
+
+
+def scheduler_file_hunks(commit: str, relative: str, policy: dict) -> list[dict[str, list[str]]]:
+    shown = run_git_bytes("show", f"{commit}:{relative}", check=False)
+    if shown.returncode != 0:
+        raise SyncError(f"{relative} does not exist at upstream {commit}")
+    path = ROOT / relative
+    if not path.is_file():
+        raise SyncError(f"{relative} is missing from the fork")
+    rewrite = policy["module_rewrite"]
+    upstream = normalize_module_bytes(shown.stdout, rewrite["from"].encode(), rewrite["to"].encode())
+    return scheduler_hunks(upstream, path.read_bytes())
+
+
+def audit_scheduler_diff(policy: dict, errors: list[str]) -> None:
+    """Keep the original Sub2API scheduler files at upstream plus reviewed blocks."""
+    allowlist = load_json(SCHEDULER_DIFF_PATH)
+    name = SCHEDULER_DIFF_PATH.relative_to(ROOT)
+    if allowlist.get("schema_version") != 1:
+        errors.append(f"{name} has an unsupported schema")
+        return
+    commit = load_json(PROVENANCE_PATH).get("upstream_commit", "")
+    if allowlist.get("upstream_commit") != commit:
+        errors.append(
+            f"{name} was reviewed against {allowlist.get('upstream_commit')} but UPSTREAM_BASE.json records "
+            f"{commit}; review the original scheduler diff and update the allowlist"
+        )
+        return
+    for relative, blocks in allowlist.get("files", {}).items():
+        try:
+            hunks = scheduler_file_hunks(commit, relative, policy)
+        except SyncError as exc:
+            errors.append(str(exc))
+            continue
+        actual = {side: Counter(line for hunk in hunks for line in hunk[side]) for side in ("removed", "added")}
+        allowed = {side: Counter(line.strip() for block in blocks for line in block.get(side, []) if line.strip())
+                   for side in ("removed", "added")}
+        for side in ("removed", "added"):
+            for line in sorted((actual[side] - allowed[side]).elements()):
+                errors.append(f"{relative}: unreviewed {side} line: {line}")
+            for line in sorted((allowed[side] - actual[side]).elements()):
+                errors.append(f"{relative}: allowlisted {side} line no longer differs: {line}")
+
+
+def command_scheduler_diff(args: argparse.Namespace) -> int:
+    policy = load_policy()
+    if args.draft:
+        commit = load_json(PROVENANCE_PATH).get("upstream_commit", "")
+        allowlist = load_json(SCHEDULER_DIFF_PATH)
+        files = {}
+        for relative in allowlist.get("files", {}):
+            files[relative] = [{"block": "unreviewed", **hunk} for hunk in scheduler_file_hunks(commit, relative, policy)]
+        print_json({"schema_version": 1, "upstream_commit": commit, "files": files})
+        return 0
+    errors: list[str] = []
+    audit_scheduler_diff(policy, errors)
+    if errors:
+        for error in errors:
+            print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+    print("original scheduler diff matches the reviewed allowlist")
+    return 0
+
+
 def command_prepare(args: argparse.Namespace) -> int:
     if git_output("status", "--porcelain"):
         raise SyncError("prepare requires a clean working tree")
@@ -542,6 +640,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     audit = subparsers.add_parser("audit")
     audit.set_defaults(func=command_audit)
+
+    scheduler_diff = subparsers.add_parser("scheduler-diff")
+    scheduler_diff.add_argument("--draft", action="store_true", help="print the current diff in allowlist form")
+    scheduler_diff.set_defaults(func=command_scheduler_diff)
 
     prepare = subparsers.add_parser("prepare")
     prepare.add_argument("--tag", required=True)

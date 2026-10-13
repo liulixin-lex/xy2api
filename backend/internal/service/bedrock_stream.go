@@ -2,7 +2,6 @@ package service
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -53,15 +52,10 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 	// 每个帧结构：total_length(4) + headers_length(4) + prelude_crc(4) + headers + payload + message_crc(4)
 	// 但更实用的方式是使用行扫描找 JSON chunks，因为 Bedrock 的响应在二进制帧中。
 	// 我们使用 EventStream decoder 来正确解析。
-	observer, controlled := resp.Body.(schedulingFrameObserver)
-	if controlled {
-		observer.BeginSchedulingFrames()
-	}
 	decoder := newBedrockEventStreamDecoder(resp.Body)
 
 	type decodeEvent struct {
 		payload []byte
-		state   schedulingFrameState
 		err     error
 	}
 	events := make(chan decodeEvent, 16)
@@ -82,9 +76,6 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 		for {
 			payload, err := decoder.Decode()
 			if err != nil {
-				if controlled {
-					observer.FinishSchedulingFrames(err)
-				}
 				if err == io.EOF {
 					return
 				}
@@ -92,16 +83,7 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 				return
 			}
 			lastReadAt.Store(time.Now().UnixNano())
-			// Observe decoded JSON before a subsequent buffered read can reach EOF.
-			data := extractBedrockChunkData(payload)
-			if data == nil {
-				continue
-			}
-			ev := decodeEvent{payload: data}
-			if controlled {
-				ev.state = observer.ObserveSchedulingFrame(data)
-			}
-			if !sendEvent(ev) {
+			if !sendEvent(decodeEvent{payload: payload}) {
 				return
 			}
 		}
@@ -122,46 +104,16 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 		intervalCh = intervalTicker.C
 	}
 
-	var staged bytes.Buffer
-	beforeOutputError := func(err error) error {
-		if !controlled || clientDisconnected {
-			return err
-		}
-		state := observer.SchedulingFrameState()
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if state.Semantic || state.Excluded {
-			return err
-		}
-		status := http.StatusBadGateway
-		body := gatewayTransportFailoverBody
-		if state.TimedOut {
-			status = http.StatusGatewayTimeout
-			body = []byte("{\"type\":\"error\",\"error\":{\"type\":\"first_output_timeout\",\"message\":\"Upstream first semantic output timed out\"}}")
-		}
-		return &UpstreamFailoverError{StatusCode: status, ResponseBody: body, SafeToFailoverAfterWrite: true}
-	}
-
 	for {
 		select {
 		case ev, ok := <-events:
 			if !ok {
-				if controlled {
-					state := observer.SchedulingFrameState()
-					if !state.Semantic || !state.Terminal || state.Failed {
-						return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, beforeOutputError(io.ErrUnexpectedEOF)
-					}
-				}
 				if !clientDisconnected {
 					flusher.Flush()
 				}
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
 			}
 			if ev.err != nil {
-				if controlled {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, beforeOutputError(ev.err)
-				}
 				if clientDisconnected {
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, nil
 				}
@@ -171,12 +123,14 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("bedrock stream read error: %w", ev.err)
 			}
 
-			sseData := ev.payload
-			if firstTokenMs == nil && (!controlled || ev.state.Semantic) {
+			// payload 是 JSON，提取 chunk.bytes（base64 编码的 Claude SSE 事件数据）
+			sseData := extractBedrockChunkData(ev.payload)
+			if sseData == nil {
+				continue
+			}
+
+			if firstTokenMs == nil {
 				ms := int(time.Since(startTime).Milliseconds())
-				if controlled {
-					ms = ev.state.FirstSemanticMS
-				}
 				firstTokenMs = &ms
 			}
 
@@ -190,35 +144,13 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 			// 确定 SSE event type
 			eventType := gjson.GetBytes(sseData, "type").String()
 
-			// Retain metadata until semantic output makes this attempt usable.
-			// The bounded stage keeps an empty message_start replayable.
-			var frame []byte
-			if eventType != "" {
-				frame = []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, sseData))
-			} else {
-				frame = []byte(fmt.Sprintf("data: %s\n\n", sseData))
-			}
-			if controlled && !ev.state.Semantic {
-				if ev.state.Failed || ev.state.Excluded {
-					return &streamingResult{usage: usage}, beforeOutputError(errors.New("bedrock upstream returned an error before semantic output"))
-				}
-				if staged.Len()+len(frame) > openAIFirstOutputStageMaxBytes {
-					err := errors.New("bedrock pre-semantic stage exceeded limit")
-					observer.FinishSchedulingFrames(err)
-					return &streamingResult{usage: usage}, beforeOutputError(err)
-				}
-				_, _ = staged.Write(frame)
-				continue
-			}
 			// 写入标准 SSE 格式
 			if !clientDisconnected {
 				var writeErr error
-				if staged.Len() > 0 {
-					_, writeErr = w.Write(staged.Bytes())
-					staged.Reset()
-				}
-				if writeErr == nil {
-					_, writeErr = w.Write(frame)
+				if eventType != "" {
+					_, writeErr = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, sseData)
+				} else {
+					_, writeErr = fmt.Fprintf(w, "data: %s\n\n", sseData)
 				}
 				if writeErr != nil {
 					clientDisconnected = true
@@ -240,11 +172,7 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 			if s.rateLimitService != nil {
 				s.rateLimitService.HandleStreamTimeout(ctx, account, model)
 			}
-			err := errors.New("stream data interval timeout")
-			if controlled {
-				observer.FinishSchedulingFrames(err)
-			}
-			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, beforeOutputError(err)
+			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream data interval timeout")
 		}
 	}
 }

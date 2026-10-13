@@ -288,6 +288,9 @@ func attachSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult)
 // （ProfitControlVetoLatest / GatewayProfitControlVetoLatest）与准入后粘性
 // 绑定，否则这两步会因为看不到调度栈内安装的门而退化为空操作。
 func ContextWithSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult) context.Context {
+	if sel != nil && sel.shareBinding != nil {
+		ctx = contextWithShareBindingIntent(ctx, sel.shareBinding)
+	}
 	if sel == nil || sel.profitGate == nil {
 		return ctx
 	}
@@ -357,6 +360,9 @@ func (s *OpenAIGatewayService) BindStickySessionAfterProfitAdmission(ctx context
 	}
 	if preserveOpenAIGuardianParentBinding(ctx, sessionHash) {
 		return nil
+	}
+	if handled, err := applyDeferredShareBinding(ctx, groupID, s.openAISessionCacheKey(sessionHash), accountID); handled {
+		return err
 	}
 	if !openAIAtomicStickySession(sessionHash) && !gatewayProfitControlGateActive(ctx) {
 		return s.BindStickySession(ctx, groupID, sessionHash, accountID)

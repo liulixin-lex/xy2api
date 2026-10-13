@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,6 +43,34 @@ func (s *asyncImageMemoryStore) Get(_ context.Context, id string) (*service.Imag
 	copy.Result = append(json.RawMessage(nil), task.Result...)
 	copy.Error = append(json.RawMessage(nil), task.Error...)
 	return &copy, nil
+}
+
+func (s *asyncImageMemoryStore) Update(_ context.Context, id string, _ time.Duration, mutate func(*service.ImageTaskRecord) error) (*service.ImageTaskRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	task := s.tasks[id]
+	if task == nil {
+		return nil, service.ErrImageTaskNotFound
+	}
+	copy := *task
+	copy.Result = append(json.RawMessage(nil), task.Result...)
+	copy.Error = append(json.RawMessage(nil), task.Error...)
+	if err := mutate(&copy); err != nil {
+		if errors.Is(err, service.ErrImageTaskUnchanged) {
+			unchanged := *task
+			return &unchanged, nil
+		}
+		return nil, err
+	}
+	s.tasks[id] = &copy
+	return &copy, nil
+}
+
+func (s *asyncImageMemoryStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.tasks, id)
+	return nil
 }
 
 func TestAsyncImageHandlerSubmitAndPoll(t *testing.T) {

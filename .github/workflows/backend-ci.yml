@@ -18,6 +18,8 @@ jobs:
         run: python -m unittest discover -s tools/tests -p 'test_*.py' -v
       - name: Upstream provenance and compatibility audit
         run: python tools/upstream-sync/sync.py audit
+      - name: Original scheduler diff allowlist
+        run: python tools/upstream-sync/sync.py scheduler-diff
 
   shell:
     runs-on: macos-15
@@ -76,18 +78,15 @@ jobs:
       - name: Integration tests
         working-directory: backend
         run: make test-integration
-      - name: Scheduling reliability with real PostgreSQL and Redis
+      - name: Gateway reliability
         working-directory: backend
         timeout-minutes: 20
-        env:
-          SCHEDULING_TEST_POSTGRES_DSN: postgres://postgres:scheduling_ci_fixture@127.0.0.1:15432/scheduling_ci?sslmode=disable
-          SCHEDULING_TEST_REDIS_ADDR: 127.0.0.1:16379
         run: |
           set -euo pipefail
           go test -race -p 1 -parallel 1 -tags=unit \
-            ./internal/service ./internal/handler ./internal/scheduling \
-            -run '^(TestAccountPool|TestGPT61Sol(NativeHTTP|HTTPValidation|WS)|TestReviewPR74|TestReviewV021|TestNonstreamReadErrorSafety$|TestControlledProtocolFailureEvidence$|TestControlledTerminalUsageCertainty$|TestGatewayBufferedReadFailureAuthenticatedFailover$)' \
-            -count=1 -timeout=10m -json | tee "$RUNNER_TEMP/scheduling-reliability.jsonl"
+            ./internal/service ./internal/handler ./internal/handler/admin \
+            -run '^(TestGPT61Sol(NativeHTTP|HTTPValidation|WS)|TestNonstreamReadErrorSafety$|TestRequestBodyReplaySafety$|TestOpenAIQualityRoutingInertWithoutOptIn$|TestGatewayBufferedReadFailureAuthenticatedFailover$|TestRetiredSchedulingRoutesAnswerGone$|TestShareScheduling|TestOpenAIShareScheduling|TestShareAttribution)' \
+            -count=1 -timeout=10m -json | tee "$RUNNER_TEMP/gateway-reliability.jsonl"
           python3 - <<'PY'
           import json
           import os
@@ -100,42 +99,30 @@ jobs:
                   "TestGPT61SolWSFirstFrameValidationUsesMappedModel",
                   "TestGPT61SolWSLaterTurnValidationAndSessionModel",
                   "TestGPT61SolWSMappedOutKeepsTargetReasoningRules",
-                  "TestAccountPoolGPT61SolSharedWeightsAliasesAndGroups",
-                  "TestAccountPoolGPT61SolExhaustsSameTier",
-                  "TestAccountPoolGPT61SolCancellationBoundary",
-                  "TestAccountPoolGPT61SolInvalidEffortDoesNotMutateAdmission",
-                  "TestAccountPoolEntryExplicitGroupExcludesOutsideSimplePool",
-                  "TestAccountPoolEntrySharedModelWeightsAndIndependentGroups",
-                  "TestAccountPoolEntrySimpleDefaultScopeStillIncludesAllAccounts",
-                  "TestAccountPoolEntryOwnerCannotEscapeExplicitGroup",
-                  "TestReviewPR74ProtocolEnvelopeCooldown",
-                  "TestReviewPR74BufferedAttemptTimeoutAllowsFailover",
-                  "TestReviewPR74AttemptTimeoutCancellationBoundary",
-                  "TestReviewV021OpenAITransportNoRecursiveDispatch",
-                  "TestReviewV021BufferedReadFailureAllowsFailover",
-                  "TestReviewV021ProviderCooldownSurvivesRedisHealthLoss",
-                  "TestReviewV021ProvenNotSentHasNoPendingUsage",
                   "TestNonstreamReadErrorSafety",
-                  "TestControlledProtocolFailureEvidence",
-                  "TestControlledTerminalUsageCertainty",
+                  "TestRequestBodyReplaySafety",
+                  "TestOpenAIQualityRoutingInertWithoutOptIn",
+                  "TestShareSchedulingDisabledKeepsOriginalScheduler",
+                  "TestShareSchedulingFallbackWaitDefersBinding",
+                  "TestShareSchedulingSoftSpillKeepsBindingThroughShortOutage",
+                  "TestShareSchedulingWaitsBoundedlyForWarmBoundAccount",
+                  "TestOpenAIShareSchedulingAdmissionBindKeepsPlannedBinding",
+                  "TestOpenAIShareSchedulingHonoursResponseOwner",
+                  "TestShareAttributionFollowsServedPlacements",
               },
               "handler": {
                   "TestGatewayBufferedReadFailureAuthenticatedFailover",
               },
-              "scheduling": {
-                  "TestAccountPoolAdmissionThenPriorityThenWeight",
-                  "TestAccountPoolExhaustsEveryEligibleAccountBeforeLowerTier",
-                  "TestAccountPoolSWRRRatioAndTwoClientFairness",
-                  "TestAccountPoolFailureClassifierKeepsAuthoritativeScopeAndReplayStops",
-                  "TestAccountPoolDoesNotConsultOrMutateLegacyRetryCredit",
+              "handler/admin": {
+                  "TestRetiredSchedulingRoutesAnswerGone",
               },
           }
           events = [json.loads(line) for line in
-                    Path(os.environ["RUNNER_TEMP"], "scheduling-reliability.jsonl").read_text().splitlines()
+                    Path(os.environ["RUNNER_TEMP"], "gateway-reliability.jsonl").read_text().splitlines()
                     if line.strip()]
           rejected = [event for event in events if event.get("Action") in {"skip", "fail"}]
           if rejected:
-              raise SystemExit("Scheduling reliability gate cannot skip or fail: " +
+              raise SystemExit("Gateway reliability gate cannot skip or fail: " +
                                json.dumps(rejected, ensure_ascii=False))
           for name, expected in required.items():
               package = "github.com/liulixin-lex/xy2api/internal/" + name
@@ -196,21 +183,16 @@ jobs:
           print(f"All {len(expected)} required cache tests PASS, 0 SKIP")
           PY
 
-      - name: TypeSafe scheduling and hosted recharge integration
+      - name: Hosted recharge integration with real PostgreSQL
         working-directory: backend
         timeout-minutes: 15
         env:
-          SCHEDULING_TEST_POSTGRES_DSN: postgres://postgres:scheduling_ci_fixture@127.0.0.1:15432/scheduling_ci?sslmode=disable
-          SCHEDULING_TEST_REDIS_ADDR: 127.0.0.1:16379
           STRIPE_HOSTED_TEST_DSN: postgres://postgres:scheduling_ci_fixture@127.0.0.1:15432/scheduling_ci?sslmode=disable
         run: |
           set -euo pipefail
           go test -race -p 1 -parallel 1 -tags=unit ./internal/service \
-            -run '^TestControlledProtocolNonstreamAcceptance$/^systemone$' \
-            -count=1 -timeout=5m -json > "$RUNNER_TEMP/upstream-cross-paths.jsonl"
-          go test -race -p 1 -parallel 1 -tags=unit ./internal/service \
             -run '^TestStripeHostedDatabase' \
-            -count=1 -timeout=5m -json >> "$RUNNER_TEMP/upstream-cross-paths.jsonl"
+            -count=1 -timeout=5m -json > "$RUNNER_TEMP/upstream-cross-paths.jsonl"
           python3 - <<'PYCODE'
           import json
           import os
@@ -224,13 +206,6 @@ jobs:
               raise SystemExit("Cross-path gate cannot skip or fail: " + json.dumps(rejected))
           passed = {event.get("Test") for event in events if event.get("Action") == "pass"}
           expected = {
-              "TestControlledProtocolNonstreamAcceptance/systemone/valid",
-              "TestControlledProtocolNonstreamAcceptance/systemone/html",
-              "TestControlledProtocolNonstreamAcceptance/systemone/error_object",
-              "TestControlledProtocolNonstreamAcceptance/systemone/empty",
-              "TestControlledProtocolNonstreamAcceptance/systemone/null",
-              "TestControlledProtocolNonstreamAcceptance/systemone/wrong_schema",
-              "TestControlledProtocolNonstreamAcceptance/systemone/empty_result_object",
               "TestStripeHostedDatabaseCreateRecoveryAndConcurrentLimits/no_promotion",
               "TestStripeHostedDatabaseCreateRecoveryAndConcurrentLimits/bonus",
               "TestStripeHostedDatabaseCreateRecoveryAndConcurrentLimits/discount",

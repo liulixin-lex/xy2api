@@ -33,7 +33,7 @@ func TestUpstreamV0214MigrationUpgrade(t *testing.T) {
 	names, err := fs.Glob(migrations.FS, "*.sql")
 	require.NoError(t, err)
 	for _, name := range names {
-		if name == "268_add_payment_order_bonus_amount.sql" || name == "269_add_typesafe_platform.sql" {
+		if name >= "268_" {
 			continue
 		}
 		body, err := fs.ReadFile(migrations.FS, name)
@@ -67,8 +67,8 @@ func TestUpstreamV0214MigrationUpgrade(t *testing.T) {
 	require.NoError(t, err)
 	_, err = db.Exec(`INSERT INTO composite_model_routes(group_id,public_model,target_platform) VALUES($1,'jev-latest','typesafe')`, groupID)
 	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO user_platform_quotas(user_id,platform,daily_limit_usd) VALUES($1,'invalid-platform',10)`, userID)
-	require.Error(t, err, "platform constraint must remain enforced")
+	_, err = db.Exec(`INSERT INTO user_platform_quotas(user_id,platform,daily_limit_usd) VALUES($1,'cline',10)`, userID)
+	require.NoError(t, err, "v0.2.15 platform catalog admits Cline without a database whitelist")
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM composite_model_routes WHERE group_id=$1`, groupID).Scan(&count))
 	require.Equal(t, 2, count, "old and new platform routes coexist")
 }
