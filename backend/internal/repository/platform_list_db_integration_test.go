@@ -29,7 +29,7 @@ WHERE ns.nspname = 'public' AND tbl.relname = $1 AND c.conname = $2`, table, con
 
 // 迁移 242 删除平台白名单 CHECK 约束：旧库（约束仍在）上可重复执行，执行后
 // 新登记的平台无需再做数据库迁移即可写入。
-func TestMigration242DropsPlatformCheckConstraints(t *testing.T) {
+func TestMigration271DropsPlatformCheckConstraints(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)
 	client := tx.Client()
@@ -51,7 +51,7 @@ func TestMigration242DropsPlatformCheckConstraints(t *testing.T) {
 	require.True(t, platformConstraintExists(t, ctx, client, "user_platform_quotas", "user_platform_quotas_platform_check"))
 	require.True(t, platformConstraintExists(t, ctx, client, "composite_model_routes", "composite_model_routes_target_platform_check"))
 
-	migrationSQL, err := dbmigrations.FS.ReadFile("242_drop_platform_check_constraints.sql")
+	migrationSQL, err := dbmigrations.FS.ReadFile("271_drop_platform_check_constraints.sql")
 	require.NoError(t, err)
 	for range 2 {
 		_, err = client.ExecContext(ctx, string(migrationSQL))
