@@ -18,7 +18,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 const defaultFilters = () => ({
-  platform: '', type: '', status: '', privacy_mode: '', group: '',
+  platform: '', type: '', status: '', privacy_mode: '', iq_status: '', group: '',
   search: 'existing search', lite: '1', sort_by: 'priority', sort_order: 'asc'
 })
 
@@ -70,7 +70,9 @@ describe('AccountTableFilters', () => {
     for (const [filters, count] of [
       [{ type: 'oauth', privacy_mode: '', group: '' }, 1],
       [{ type: 'setup-token', privacy_mode: '__unset__', group: 'ungrouped' }, 3],
-      [{ type: '', privacy_mode: 'training_off', group: '42' }, 2]
+      [{ type: '', privacy_mode: 'training_off', group: '42' }, 2],
+      [{ type: '', privacy_mode: '', iq_status: 'degraded', group: '' }, 1],
+      [{ type: 'oauth', privacy_mode: '__unset__', iq_status: 'smart', group: '42' }, 4]
     ] as const) {
       await wrapper.setProps({ filters: { ...defaultFilters(), ...filters } })
       expect(toggle.get('span').text()).toBe(String(count))
@@ -84,7 +86,7 @@ describe('AccountTableFilters', () => {
   })
 
   it('preserves every option and emits a merged filter snapshot plus change for every selection', async () => {
-    const filters = { ...defaultFilters(), platform: 'openai', type: 'oauth', status: 'active', privacy_mode: '__unset__', group: '42' }
+    const filters = { ...defaultFilters(), platform: 'openai', type: 'oauth', status: 'active', privacy_mode: '__unset__', iq_status: 'smart', group: '42' }
     const wrapper = mountFilters(filters)
     await wrapper.get('button[aria-controls]').trigger('click')
     const expectedOptions = [
@@ -92,6 +94,7 @@ describe('AccountTableFilters', () => {
       ['status', ['', 'active', 'inactive', 'error', 'rate_limited', 'temp_unschedulable', 'unschedulable']],
       ['type', ['', 'oauth', 'setup-token', 'apikey', 'bedrock']],
       ['privacy_mode', ['', '__unset__', 'training_off', 'training_set_cf_blocked', 'training_set_failed']],
+      ['iq_status', ['', 'smart', 'degraded', 'unknown']],
       ['group', ['', 'ungrouped', '42']]
     ] as const
     let changes = 0
@@ -109,7 +112,7 @@ describe('AccountTableFilters', () => {
         expect(wrapper.props('filters')).toEqual(filters)
       }
     }
-    expect(wrapper.findAllComponents(Select)[4].props('options')[2].label).toBe('A very long group name')
+    expect(wrapper.findAllComponents(Select)[5].props('options')[2].label).toBe('A very long group name')
     wrapper.unmount()
   })
 
