@@ -182,10 +182,13 @@ func NeedsSetup() bool {
 }
 
 func buildPostgresDSN(cfg *DatabaseConfig, dbName string) string {
-	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		cfg.Host, cfg.Port, cfg.User, cfg.Password, dbName, cfg.SSLMode,
-	)
+	// Use the runtime builder so an empty password cannot consume dbname as
+	// its value and send setup/migrations to the default postgres database.
+	database := config.DatabaseConfig{
+		Host: cfg.Host, Port: cfg.Port, User: cfg.User,
+		Password: cfg.Password, DBName: dbName, SSLMode: cfg.SSLMode,
+	}
+	return database.DSN()
 }
 
 func isDatabaseNotFoundError(err error) bool {
@@ -366,11 +369,7 @@ func createInstallLock() error {
 }
 
 func initializeDatabase(cfg *SetupConfig) error {
-	dsn := fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		cfg.Database.Host, cfg.Database.Port, cfg.Database.User,
-		cfg.Database.Password, cfg.Database.DBName, cfg.Database.SSLMode,
-	)
+	dsn := buildPostgresDSN(&cfg.Database, cfg.Database.DBName)
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -396,11 +395,7 @@ func (cfg *SetupConfig) migrationTimeout() time.Duration {
 }
 
 func createAdminUser(cfg *SetupConfig) (bool, string, error) {
-	dsn := fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		cfg.Database.Host, cfg.Database.Port, cfg.Database.User,
-		cfg.Database.Password, cfg.Database.DBName, cfg.Database.SSLMode,
-	)
+	dsn := buildPostgresDSN(&cfg.Database, cfg.Database.DBName)
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
