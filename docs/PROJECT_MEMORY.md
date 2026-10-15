@@ -4,9 +4,9 @@
 
 ## 当前交接状态
 
-### 网关韧性优化方案（2026-10-15，方案完成、待授权开发；未改生产、未提交）
+### 网关韧性 0.4.0（2026-10-15，开发中：任务 1–9 已在本地分支提交；未推送、未改生产）
 
-- 方案：`openspec/changes/gateway-resilience-20261015/`，含 proposal、design、tasks、runbook、staging-validation、xy-image-appendix、8 个 spec（42 条需求、65 个场景）与 `evidence/` 两份证据。位于本机分支 `analysis/prod-ux-20261015`（基于 origin/main `f8fec15a2`），未提交、未推送。
+- 方案：`openspec/changes/gateway-resilience-20261015/`，含 proposal、design、tasks、runbook、staging-validation、xy-image-appendix、8 个 spec（42 条需求、65 个场景）与 `evidence/` 两份证据。开发在本机分支 `feat/gateway-resilience-20261015`（基于 origin/main `f8fec15a2`，未推送），进度见“进行中的工作”与 tasks.md 勾选。
 - 目标：xy2api 0.4.0（先 RC）加 XY-image 0.0.17；访谈定稿的决策 D1–D33 见 proposal。不做灰度，开发后在测试服务器完整验证，全部闭环再提 PR、发版。
 - 生产分析：完整报告 `docs/PROD_UX_ANALYSIS_20261015.md`（被 `docs/*` 忽略，不入库）；去标识摘要见方案 `evidence/production-analysis.md`。
 - 仓库外产物（本机仓库同级目录 `xy2api-artifacts/gateway-resilience-20261015/`）：
@@ -15,11 +15,12 @@
   - `private/HOSTS.md`：生产主机与测试服务器的地址、容器、路径与共存服务清单，不含凭据。
 - 本仓库公开：主机地址、宿主机路径与内网网段只写私有清单，入库文档只用代称；证据只放聚合数字。
 - 生产现状：0.3.0（00:46Z 切换流量，份额调度未启用）。用户已把 ESA 回源超时调为 300s（约 06:40Z）、429 冷却调为 45s（07:05Z）、过载冷却调为 2 分钟。
-- 下一步（每项都需用户授权）：
-  1. 开发：从 origin/main 新建 `feat/gateway-resilience-20261015`，按 tasks 第 0–11 节实现；
-  2. 测试服务器：按 staging-validation 部署隔离环境。测试 DNS 记录（`stg-api`、`stg-cf`）与真实测试 Key（总预算不超过 20 美元）需用户提供或授权；
-  3. staging-validation 第 9 节全部勾选后提 PR，发 0.4.0-rc.1，再发 0.4.0；
-  4. 生产部署按 runbook，每次单独授权。
+- 下一步（用户已于 2026-10-15T11:30Z 授权执行到 PR 与发版；生产部署仍需单独授权）：
+  1. 开发剩余：任务 10（上游同步登记、VERSION 0.4.0）、任务 0（故障上游、CDN 模拟、基线与 E2E 脚本）、任务 11（XY-image 0.0.17）；
+  2. 测试服务器：按 staging-validation 部署隔离环境验证（任务 12）；真实测试 Key 在需要时向用户索取；
+  3. 推送前改写本分支的方案提交 `eb361690e`，使历史中不含宿主机路径与端口（当前文件已改为代称，历史仍有）；
+  4. staging-validation 第 9 节全部勾选后提 PR，发 0.4.0-rc.1，再发 0.4.0；
+  5. 生产部署按 runbook，每次单独授权。
 - 安全提醒：
   - 两台主机的 SSH 密码在对话中出现过，建议改用密钥登录并更换密码；
   - 只读分析时，工具输出曾短暂显示 `openai_codex_ticket_proxy_pool_v1` 设置中的部分凭据片段和一个已退役的 Caddy 金丝雀 token。两者都没有写入任何文件，建议轮换。
@@ -711,6 +712,15 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 2026-10-15T20:00Z 任务 6（首包前保活、首输出超时、停滞、终止帧）代码完成并提交（`38e65c253`、`aaa154f03`），6.7 留待测试服务器 CDN 模拟验证。要点：预热复用 compact 心跳上下文键；`X-XY-Edge` 只信任 `SERVER_TRUSTED_PROXIES` 内的对端（部署前提，需写入 runbook）；Anthropic 首事件守卫取消不再被当作客户端断开。
   - 教训：handler 包里无 build tag 的测试文件引用了 unit tag 文件中的辅助函数，导致 `go test ./...`（Makefile test 目标）与 integration/e2e 构建失败；已把辅助文件去掉 tag。今后改测试后要分别跑 `go vet`、`-tags=unit`、`-tags=integration`、`-tags=e2e`。
 - 2026-10-15T22:00Z 任务 7（客户端断开与计费）完成并提交（`28326275d`）：迁移 272–275 已一次写入（含任务 8 的两列），临时 PostgreSQL 全量迁移与仓储 SQL 验证通过；真实连接端到端测试证明未送达断开会立即取消上游。滥用保护采用“超阈值不取消上游、拿到用量按上游成本计费”的实现（偏差记在 tasks 7.5）。
+
+- 2026-10-15 任务 8（无号兜底分组）提交（`2a98b7d9a`）：鉴权后中间件在主组无无罚账号且兜底组有时换组；按 Key 记忆（Redis，600 秒），主组稳定 120 秒后切回；保存校验自引用、环、平台与余额计费；`usage_logs.origin_group_id` 四条写入路径在临时 PostgreSQL 上验证。
+- 2026-10-15 任务 9（设置、管理界面、可观测、文档）提交（`2fb125ded`）：
+  - 后端：进程内分钟计数与 `GET /admin/resilience/stats`；用量读取回填 `origin_group_id` 与原分组名；可用渠道接口返回各组兜底分组与倍率；`keepalive_committed` 日志带 `edge`；管理员关注的事件为 warn（进运维系统日志），量大的保持 info。
+  - 前端：网关韧性设置卡、运维页韧性面板、账号余额徽标与“已充值”、分组兜底选择器、用量兜底标记、可用渠道兜底标签。
+  - 文档：`docs/GATEWAY_RESILIENCE.md`（已加入 `.gitignore` 白名单）；runbook 增加 `SERVER_TRUSTED_PROXIES` 前提；方案文件中的宿主机路径与端口改为代称。
+  - 验证：前端 lint、vue-tsc、全量 vitest（387 文件 / 3041 用例）、构建通过；后端 gofmt、四种构建标签 vet、全量 unit 通过。浏览器检查（9.6）随任务 12。
+  - 注意：`/tmp/xy2-toolchain/gocache` 曾涨到 36G 把磁盘写满，导致链接失败；已 `go clean -cache`。长时间开发时留意磁盘余量。
+  - 本机 pnpm 版本与 lockfile 的 `pnpm.overrides` 不兼容，`pnpm run` 会拒绝执行；直接用 `node_modules/.bin/{vitest,vue-tsc,eslint,vite}`，不要运行 `pnpm install`。
 
 ### 20261015-prod-ux-analysis — 生产请求日志只读分析与上线级优化方案（已完成，由 20261015-gateway-resilience 承接）
 
