@@ -84,7 +84,7 @@
   - 完成（2026-10-16）：余额耗尽改为 `balance_exhausted` 且不带 `RecoverAt`（修正份额调度下余额耗尽仍软溢出保留绑定，违反“余额耗尽立即改绑”）；会话回避的排除与改绑记 `resil_failure_streak`；末位兜底记 `last_resort_soft`。其他临时不可调度原因保持原处理（Q8）。`fallback_return` 不是份额放置决策，由韧性指标记录（偏差记入 design §4）。
 - [x] 3.4 末位兜底（两种调度器都要实现）：先转投兜底组（任务 8），否则在最高的有软罚账号的那一层，取罚期最短者；不受单次首输出超时约束。
   - 进度（2026-10-15）：兜底组转投随任务 8 实现。
-- [ ] 3.5 Explain：份额调度的 Explain 显示罚则、计数、回避与兜底；原版调度新增只读 Explain。
+- [x] 3.5 Explain：份额调度的 Explain 显示罚则、计数、回避与兜底；原版调度新增只读 Explain。
 - [ ] 3.6 在 `tools/upstream-sync/scheduler-diff.json` 中登记新增块，`sync.py scheduler-diff` 通过。
 - [ ] 3.7 验证：
   - 矩阵测试：原版或份额调度 × 单号或多号组 × 软罚、硬罚、连续失败 × 有无兜底组；

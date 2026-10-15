@@ -126,13 +126,15 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 ### 5.1 管理端
 
 - 运维页“网关韧性”面板：当前实例最近 5 分钟至 1 小时的计数、账号余额状态分布、未送达请求列表。
+- 韧性 Explain：运维页面板底部可选任一分组（含原版调度），可选填模型与会话哈希，只读查看每个账号的硬、软档与原因、恢复时间、余额状态、会话失败次数与是否回避，以及末位兜底账号与兜底分组决策；份额调度 Explain 的结果中附同样的韧性视图。末位兜底账号不计模型、渠道、额度等逐请求条件，实际选中的可能是后一个候选。
 - 账号列表：余额状态非 `OK` 时显示徽标，悬停可见下次复检时间与证据；“已充值”按钮立即复检。
 - 运维错误详情：每次上游失败带失败分类 `resilience_category`（如 `BALANCE`、`TRANSIENT`、`CAPACITY_SHED`）。
 - 告警：新增指标“上游余额不足账号数”（`account_balance_exhausted_count`）与“上游余额长期未恢复账号数”（`account_balance_unrecovered_count`，阈值时长为 `balance.notify_after_hours`），升级时预置同名规则并开启邮件通知；账号恢复后告警自动解除。
 - 接口：
   - `GET /api/v1/admin/resilience/stats?window=15m`（窗口最长 1 小时，计数为单实例内存口径）；
   - `GET /api/v1/admin/resilience/undelivered?page=&page_size=&user_id=&api_key_id=&group_id=&since=&until=`（时间为 RFC3339）；
-  - `POST /api/v1/admin/accounts/:id/balance/recheck`。
+  - `POST /api/v1/admin/accounts/:id/balance/recheck`；
+  - `GET /api/v1/admin/resilience/groups/:id/explain?session_hash=&model=`（只读）。
 
 ### 5.2 计数项
 

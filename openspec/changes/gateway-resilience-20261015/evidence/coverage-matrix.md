@@ -43,6 +43,8 @@ Every scenario of the eight specs, mapped to the automated tests that cover it a
 | Hard state with no alternative | `TestGatewayLastResortNeverUsesHardStates` | — |
 | Emergency off | `TestMasterSwitchDisablesEverything`, `TestResilienceOffKeepsLegacyPenalties`, `TestRetryHintsOffRestoresLegacy`, `TestTurnCapOffKeepsRetryAfter` | — |
 
+The Explain part of “Explainability and configuration” has no scenario of its own: `TestResilienceExplainShowsPenaltiesSessionLastResortAndFallback` (service), `ResilienceExplainResult.spec.ts`, `OpsResilienceExplain.spec.ts` and the share Explain case of `ShareSchedulingView.spec.ts` (frontend); staging calls the endpoint and checks the ops page.
+
 ## request-budget-and-retry
 
 | Scenario | Unit tests | Staging |

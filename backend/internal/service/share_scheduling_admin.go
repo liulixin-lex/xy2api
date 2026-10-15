@@ -682,6 +682,9 @@ type ShareSchedulingExplanation struct {
 	Ideal           int64              `json:"ideal,omitempty"`
 	ActiveTier      int                `json:"active_tier"`
 	Entries         []sharesched.Entry `json:"entries"`
+	// Resilience is the gateway-resilience view of the group and session
+	// (penalties, failures, avoid set, last resort, fallback; design §4).
+	Resilience *ResilienceExplanation `json:"resilience,omitempty"`
 }
 
 func shareWriteName(w sharesched.Write) string {
@@ -760,6 +763,9 @@ func (s *ShareSchedulingService) Explain(ctx context.Context, groupID int64, in 
 		MaxWaiting: d.MaxWaiting, Target: d.Target, Ideal: d.Ideal, ActiveTier: d.ActiveTier, Entries: d.ExplainedEntries()}
 	for i, step := range d.Steps {
 		out.Steps[i] = step.AccountID
+	}
+	if r := Resilience(); r != nil {
+		out.Resilience, _ = r.Explain(ctx, groupID, in.SessionHash, in.Model)
 	}
 	return out, nil
 }

@@ -4,6 +4,7 @@
  */
 
 import { apiClient } from '../client'
+import type { ResilienceExplanation } from './resilience'
 
 export type ShareScheduler = 'sub2api' | 'shadow' | 'share'
 
@@ -172,6 +173,8 @@ export interface ShareExplanation {
   ideal?: number
   active_tier: number
   entries: ShareExplainEntry[]
+  /** Gateway resilience view of the group and session (design §4.4). */
+  resilience?: ResilienceExplanation
 }
 
 export interface ShareAccountActual {

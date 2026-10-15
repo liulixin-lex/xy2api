@@ -112,6 +112,58 @@ export default {
         streaming: '输出中'
       }
     },
+    explain: {
+      title: '韧性 Explain',
+      hint: '网关韧性对该分组与会话的当前判断：罚则档位、会话失败与回避、末位兜底与兜底分组。',
+      opsHint: '只读查看任一分组（含原版调度）的罚则档位、会话失败计数与回避集、末位兜底与兜底分组决策。',
+      group: '分组',
+      groupPlaceholder: '选择分组',
+      model: '模型（可选）',
+      sessionHash: '会话哈希（可选）',
+      run: '查看',
+      running: '查询中…',
+      failed: '无法读取韧性 Explain。',
+      groupsFailed: '无法读取分组列表。',
+      none: '无',
+      yes: '是',
+      no: '否',
+      noAccounts: '分组内没有账号。',
+      recoverAt: '{time} 恢复',
+      fallbackNone: '未配置',
+      fallbackUnusable: '{group} 不可用（未启用、平台不同或订阅分组）',
+      fallbackMove: '转入 {group}',
+      fallbackUnhealthy: '{group} 也无健康账号，不转入',
+      fallbackStay: '{group} 可用；主分组有健康账号，不转入',
+      summary: {
+        enabled: '网关韧性已开启',
+        healthy: '健康账号数',
+        lastResort: '末位兜底账号',
+        fallback: '兜底分组',
+        sessionFailures: '会话失败次数',
+        sessionAvoided: '会话回避账号'
+      },
+      columns: {
+        account: '账号',
+        priority: '优先级',
+        tier: '档位',
+        reason: '原因',
+        recoverAt: '恢复时间',
+        balance: '余额状态',
+        sessionFailures: '会话失败',
+        avoided: '回避'
+      },
+      tiers: { none: '健康', soft: '软罚', hard: '硬罚' },
+      reasons: {
+        unavailable: '停用或不可调度',
+        expired: '已过期',
+        quota_exceeded: '额度用尽',
+        balance_exhausted: '上游余额不足',
+        temp_unschedulable: '临时不可调度',
+        rate_limited: '限流',
+        overloaded: '过载',
+        model_rate_limited: '模型限流'
+      }
+    },
     account: {
       balance: '上游余额',
       nextCheck: '下次复检 {time}',

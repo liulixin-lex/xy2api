@@ -113,6 +113,8 @@
         </tbody>
       </table>
     </div>
+
+    <OpsResilienceExplain class="mt-6" />
   </section>
 </template>
 
@@ -120,6 +122,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select from '@/components/common/Select.vue'
+import OpsResilienceExplain from './OpsResilienceExplain.vue'
 import { adminAPI } from '@/api/admin'
 import type { ResilienceMetricRow, ResilienceStats, UndeliveredRequest } from '@/api/admin/resilience'
 import { formatCostFixed, formatDateTime, formatNumber } from '@/utils/format'

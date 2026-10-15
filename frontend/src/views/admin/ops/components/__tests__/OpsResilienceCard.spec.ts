@@ -8,7 +8,7 @@ vi.mock('@/utils/format', () => ({ formatNumber: (n: number) => String(n), forma
 vi.mock('@/api/admin', () => ({ adminAPI: { resilience: { stats: mocks.stats, listUndelivered: mocks.list } } }))
 
 function mountCard(refreshToken = 0) {
-  return mount(OpsResilienceCard, { props: { refreshToken }, global: { stubs: { Select: true } } })
+  return mount(OpsResilienceCard, { props: { refreshToken }, global: { stubs: { Select: true, OpsResilienceExplain: true } } })
 }
 
 describe('ops resilience card', () => {

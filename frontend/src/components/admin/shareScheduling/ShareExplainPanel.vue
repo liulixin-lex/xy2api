@@ -74,6 +74,11 @@
           </table>
         </div>
       </div>
+      <div v-if="result.resilience" data-testid="share-explain-resilience">
+        <h4 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.resilience.explain.title') }}</h4>
+        <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.resilience.explain.hint') }}</p>
+        <ResilienceExplainResult class="mt-3" :explanation="result.resilience" />
+      </div>
     </section>
   </div>
 </template>
@@ -81,6 +86,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ResilienceExplainResult from '@/components/admin/resilience/ResilienceExplainResult.vue'
 import shareSchedulingAPI from '@/api/admin/shareScheduling'
 import type { ShareExplainInput, ShareExplanation, ShareMember } from '@/api/admin/shareScheduling'
 import { useShareSchedulingLabels } from '@/composables/useShareSchedulingLabels'

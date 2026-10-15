@@ -2,6 +2,7 @@ package admin
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -101,4 +102,22 @@ func (h *ResilienceHandler) Stats(c *gin.Context) {
 		window = d
 	}
 	response.Success(c, h.svc.Stats(c.Request.Context(), window))
+}
+
+// Explain shows how gateway resilience sees a group and optionally one
+// session: penalty tiers, the session's failures and avoid set, the
+// last-resort pick and the availability fallback decision. Read-only; it is
+// the Explain of groups on the original scheduler (design §4).
+// GET /api/v1/admin/resilience/groups/:id/explain?session_hash=&model=
+func (h *ResilienceHandler) Explain(c *gin.Context) {
+	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		response.BadRequest(c, "Invalid group ID")
+		return
+	}
+	out, err := h.svc.Explain(c.Request.Context(), groupID, strings.TrimSpace(c.Query("session_hash")), strings.TrimSpace(c.Query("model")))
+	if response.ErrorFrom(c, err) {
+		return
+	}
+	response.Success(c, out)
 }

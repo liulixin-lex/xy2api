@@ -114,6 +114,36 @@ export interface BalanceRecord {
   last_evidence?: string
 }
 
+/** One account as gateway resilience sees it (design §4.4). */
+export interface ResilienceAccountExplanation {
+  account_id: number
+  name: string
+  platform: string
+  priority: number
+  tier: 'none' | 'soft' | 'hard'
+  reason?: string
+  recover_at?: string
+  balance_state?: string
+  session_failures?: number
+  avoided?: boolean
+}
+
+/** Read-only resilience view of a group and, when given, one session. */
+export interface ResilienceExplanation {
+  group_id: number
+  enabled: boolean
+  healthy_count: number
+  accounts: ResilienceAccountExplanation[]
+  last_resort?: { account_id: number; recover_at?: string }
+  fallback_group?: { group_id: number; name: string; usable: boolean; fallback_healthy: boolean; would_move: boolean }
+  session?: { failures: number; avoided: number[] }
+}
+
+export interface ResilienceExplainQuery {
+  session_hash?: string
+  model?: string
+}
+
 const base = '/admin'
 
 export async function getSettings(): Promise<GatewayResilienceSettingsResponse> {
@@ -141,12 +171,18 @@ export async function recheckBalance(accountId: number): Promise<BalanceRecord> 
   return data
 }
 
+export async function explain(groupId: number, query: ResilienceExplainQuery = {}): Promise<ResilienceExplanation> {
+  const { data } = await apiClient.get<ResilienceExplanation>(`${base}/resilience/groups/${groupId}/explain`, { params: query })
+  return data
+}
+
 export const resilienceAPI = {
   getSettings,
   updateSettings,
   stats,
   listUndelivered,
-  recheckBalance
+  recheckBalance,
+  explain
 }
 
 export default resilienceAPI

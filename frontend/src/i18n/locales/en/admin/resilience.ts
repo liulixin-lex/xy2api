@@ -112,6 +112,58 @@ export default {
         streaming: 'Streaming'
       }
     },
+    explain: {
+      title: 'Resilience explain',
+      hint: 'How gateway resilience sees this group and session now: penalty tiers, session failures and avoided accounts, last resort and fallback group.',
+      opsHint: 'Read-only view of any group (original scheduler included): penalty tiers, session failure counts and avoid set, last-resort pick and fallback group decision.',
+      group: 'Group',
+      groupPlaceholder: 'Select a group',
+      model: 'Model (optional)',
+      sessionHash: 'Session hash (optional)',
+      run: 'Explain',
+      running: 'Loading…',
+      failed: 'Failed to load the resilience explanation.',
+      groupsFailed: 'Failed to load groups.',
+      none: 'None',
+      yes: 'Yes',
+      no: 'No',
+      noAccounts: 'The group has no accounts.',
+      recoverAt: 'recovers {time}',
+      fallbackNone: 'Not configured',
+      fallbackUnusable: '{group} is not usable (inactive, other platform or subscription group)',
+      fallbackMove: 'Moves to {group}',
+      fallbackUnhealthy: '{group} has no healthy account either; stays',
+      fallbackStay: '{group} is usable; the group has a healthy account, stays',
+      summary: {
+        enabled: 'Gateway resilience on',
+        healthy: 'Healthy accounts',
+        lastResort: 'Last-resort account',
+        fallback: 'Fallback group',
+        sessionFailures: 'Session failures',
+        sessionAvoided: 'Avoided by the session'
+      },
+      columns: {
+        account: 'Account',
+        priority: 'Priority',
+        tier: 'Tier',
+        reason: 'Reason',
+        recoverAt: 'Recovers at',
+        balance: 'Balance',
+        sessionFailures: 'Session failures',
+        avoided: 'Avoided'
+      },
+      tiers: { none: 'Healthy', soft: 'Soft', hard: 'Hard' },
+      reasons: {
+        unavailable: 'Inactive or unschedulable',
+        expired: 'Expired',
+        quota_exceeded: 'Quota used up',
+        balance_exhausted: 'Upstream balance exhausted',
+        temp_unschedulable: 'Temporarily unschedulable',
+        rate_limited: 'Rate limited',
+        overloaded: 'Overloaded',
+        model_rate_limited: 'Model rate limited'
+      }
+    },
     account: {
       balance: 'Upstream balance',
       nextCheck: 'Next check {time}',

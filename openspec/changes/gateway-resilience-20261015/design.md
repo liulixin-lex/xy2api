@@ -168,6 +168,8 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 
 份额调度的 Explain 以及新增的原版调度 Explain 只读接口，对每个候选显示：硬、软档；罚则原因；`recoverAt`；会话失败计数；是否在回避集；末位兜底与兜底分组决策。所有阈值都可在“网关韧性”设置中调整。
 
+原版调度 Explain 为 `GET /api/v1/admin/resilience/groups/:id/explain?session_hash=&model=`，对任何分组可用，入口在运维页“网关韧性”面板；份额调度 Explain 的结果附同一结构（`resilience` 字段）。末位兜底只显示按档位与恢复时间排序后的首个候选，不计模型、渠道、额度等逐请求条件。
+
 ## 5. 无号兜底分组（D8）
 
 - **字段：** `groups.availability_fallback_group_id`（可空，迁移 272），与现有 `fallback_group_id`（仅限 Claude Code 用）互不影响。
@@ -473,7 +475,7 @@ Codex 对带 `Retry-After` 的 5xx 没有次数上限：传输层每轮 5 次请
   - 失败回合封顶；
   - 余额状态分布；
   - 推断的 CDN 切断（499 且阶段为首输出前，时长按 90、125、300 秒分桶）。
-- **运维页**新增“网关韧性”面板；账号列表显示余额状态与下次复检时间，提供“已充值”按钮（`POST /api/v1/admin/accounts/:id/balance/recheck`）；未送达记录可查询（`GET /api/v1/admin/resilience/undelivered`）。
+- **运维页**新增“网关韧性”面板；账号列表显示余额状态与下次复检时间，提供“已充值”按钮（`POST /api/v1/admin/accounts/:id/balance/recheck`）；未送达记录可查询（`GET /api/v1/admin/resilience/undelivered`）；面板底部为韧性 Explain（§4.4）。
 - **降低日志噪声**：
   - `upstream_billing_rate_sync_applied` 从 info 降为 debug；
   - 余额批量探测不写审计日志；
