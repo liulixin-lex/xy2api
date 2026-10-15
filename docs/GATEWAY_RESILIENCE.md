@@ -58,6 +58,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | `273_add_usage_logs_origin_group.sql` | `usage_logs.origin_group_id`（不加外键与默认值，只改元数据） |
 | `274_create_gateway_undelivered_requests.sql` | 未送达请求表（保留 30 天，每 6 小时清理） |
 | `275_add_ops_error_logs_disconnect_stage.sql` | 运维错误日志的断开阶段与已送达字节 |
+| `276_seed_balance_alert_rules.sql` | 两条默认告警规则：“上游余额不足”“上游余额长期未恢复”（按名称幂等插入，已存在则不改） |
 
 ## 3. 客户端可见的行为
 
@@ -127,6 +128,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 - 运维页“网关韧性”面板：当前实例最近 5 分钟至 1 小时的计数、账号余额状态分布、未送达请求列表。
 - 账号列表：余额状态非 `OK` 时显示徽标，悬停可见下次复检时间与证据；“已充值”按钮立即复检。
 - 运维错误详情：每次上游失败带失败分类 `resilience_category`（如 `BALANCE`、`TRANSIENT`、`CAPACITY_SHED`）。
+- 告警：新增指标“上游余额不足账号数”（`account_balance_exhausted_count`）与“上游余额长期未恢复账号数”（`account_balance_unrecovered_count`，阈值时长为 `balance.notify_after_hours`），升级时预置同名规则并开启邮件通知；账号恢复后告警自动解除。
 - 接口：
   - `GET /api/v1/admin/resilience/stats?window=15m`（窗口最长 1 小时，计数为单实例内存口径）；
   - `GET /api/v1/admin/resilience/undelivered?page=&page_size=&user_id=&api_key_id=&group_id=&since=&until=`（时间为 RFC3339）；

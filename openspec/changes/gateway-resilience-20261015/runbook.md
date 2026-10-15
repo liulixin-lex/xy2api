@@ -108,7 +108,7 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
    - 镜像固定为 `ghcr.io/liulixin-lex/xy2api:0.4.0@sha256:<正式 digest>`；
    - 容器名取 blue 容器名加 `-green` 后缀，端口 `127.0.0.1:<GREEN_PORT>:8080`（与 blue 错开）；
    - 环境文件、挂载、网络与当前实例相同。
-2. 启动 green。0.4.0 启动时执行迁移 272–275，全部只追加，0.3.0 实例可以继续服务。
+2. 启动 green。0.4.0 启动时执行迁移 272–276，全部只追加，0.3.0 实例可以继续服务。
    - 观察迁移日志与耗时；
    - `curl -fsS 127.0.0.1:<GREEN_PORT>/health` 返回 200。
 3. 冒烟（直连 `<GREEN_PORT>`，不经 Caddy）：

@@ -439,6 +439,7 @@ Codex 对带 `Retry-After` 的 5xx 没有次数上限：传输层每轮 5 次请
 | `273_add_usage_logs_origin_group.sql` | `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS origin_group_id BIGINT NULL;`（不加外键与默认值，大表上只改元数据） |
 | `274_create_gateway_undelivered_requests.sql` | 新表 `gateway_undelivered_requests`（字段见 §8.2）；索引 `(created_at)`、`(api_key_id, created_at)`、`(user_id, created_at)`；按 `ops_advanced_settings.data_retention` 清理，默认 30 天 |
 | `275_add_ops_error_logs_disconnect_stage.sql` | `ALTER TABLE ops_error_logs ADD COLUMN IF NOT EXISTS disconnect_stage VARCHAR(32) NULL, ADD COLUMN IF NOT EXISTS delivered_bytes BIGINT NULL;` |
+| `276_seed_balance_alert_rules.sql` | 预置告警规则“上游余额不足”（`account_balance_exhausted_count > 0`，P2）与“上游余额长期未恢复”（`account_balance_unrecovered_count > 0`，P1），`ON CONFLICT (name) DO NOTHING`；0.3.0 不认识这两个指标，评估时跳过 |
 
 - `migrations/checksums.json` 只追加；已发布的 318 条不变。
 - Ent schema（`groups`、`usage_logs`、`ops_error_logs` 与新表）同步更新，并重新生成 `ent/`。

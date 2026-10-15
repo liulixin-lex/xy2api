@@ -69,7 +69,8 @@
   - Redis 单飞锁；
   - 探测返回 401 时转凭据路径。
 - [x] 2.5 `RECOVERING` 半开：临时并发上限 1，满 3 次成功或 120 秒后回到 `OK`。
-- [ ] 2.6 管理接口 `POST /api/v1/admin/accounts/:id/balance/recheck`；账号列表显示余额状态与下次复检时间；进入、恢复以及超过 72 小时未恢复时，通过现有告警与邮件通知管理员。
+- [x] 2.6 管理接口 `POST /api/v1/admin/accounts/:id/balance/recheck`；账号列表显示余额状态与下次复检时间；进入、恢复以及超过 72 小时未恢复时，通过现有告警与邮件通知管理员。
+  - 2026-10-16：复检接口与账号徽标随任务 9 完成；通知走现有告警：新增指标 `account_balance_exhausted_count`、`account_balance_unrecovered_count`（时长取 `balance.notify_after_hours`），迁移 276 预置同名规则并开启邮件；进入时触发、恢复时解除。
   - 进度（2026-10-15）：recheck 接口与 72 小时未恢复判定已完成；账号列表展示与通知接入待任务 9。
 - [x] 2.7 非 OpenAI 平台的 403 统一为“豁免、计数、冷却”。
 - [ ] 2.8 验证：单测加真实 PostgreSQL/Redis 集成（状态迁移、单飞、半开、多实例）；`-race`；用故障注入上游演练“没钱 → 充值 → 自动恢复”。

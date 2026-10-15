@@ -234,6 +234,22 @@ const metricDefinitions = computed(() => {
       recommendedThreshold: 0
     },
     {
+      type: 'account_balance_exhausted_count',
+      group: 'account',
+      label: t('admin.ops.alertRules.metrics.accountBalanceExhaustedCount'),
+      description: t('admin.ops.alertRules.metricDescriptions.accountBalanceExhaustedCount'),
+      recommendedOperator: '>',
+      recommendedThreshold: 0
+    },
+    {
+      type: 'account_balance_unrecovered_count',
+      group: 'account',
+      label: t('admin.ops.alertRules.metrics.accountBalanceUnrecoveredCount'),
+      description: t('admin.ops.alertRules.metricDescriptions.accountBalanceUnrecoveredCount'),
+      recommendedOperator: '>',
+      recommendedThreshold: 0
+    },
+    {
       type: 'overload_account_count',
       group: 'account',
       label: t('admin.ops.alertRules.metrics.overloadAccountCount'),
