@@ -137,7 +137,7 @@ SYNTH = """
 INSERT INTO users (email, password_hash, balance, created_at, updated_at)
   SELECT 'synth'||i||'@drill.local', 'x', (random()*100)::numeric(20,8), now(), now() FROM generate_series(1,1900) i;
 INSERT INTO accounts (name, platform, type, credentials, extra, created_at, updated_at)
-  SELECT 'synth-acct-'||i, 'openai', 'apikey', '{}'::jsonb, '{}'::jsonb, now(), now() FROM generate_series(1,400) i;
+  SELECT 'synth-acct-'||i, 'openai', 'apikey', '{{}}'::jsonb, '{{}}'::jsonb, now(), now() FROM generate_series(1,400) i;
 INSERT INTO api_keys (user_id, key, name, group_id, created_at, updated_at)
   SELECT (SELECT min(id) FROM users) + (i % 1900), 'sk-synth-'||md5(i::text), 'synth-'||i, {group_id}, now(), now()
   FROM generate_series(1,25000) i;
@@ -158,7 +158,7 @@ INSERT INTO usage_billing_dedup (request_id, api_key_id, request_fingerprint, cr
     ("ops_system_logs", 5_800_000, """
 INSERT INTO ops_system_logs (created_at, level, component, message, extra)
   SELECT now() - make_interval(secs => (i % 2592000)), CASE WHEN i % 10 = 0 THEN 'error' ELSE 'warn' END,
-         'synth', 'synth event '||(i % 50), '{}'::jsonb
+         'synth', 'synth event '||(i % 50), '{{}}'::jsonb
   FROM generate_series({lo},{hi}) i"""),
     ("ops_error_logs", 370_000, """
 INSERT INTO ops_error_logs (error_phase, error_type, status_code, user_id, api_key_id, group_id, model, created_at)
