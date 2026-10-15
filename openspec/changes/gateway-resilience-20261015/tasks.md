@@ -104,6 +104,7 @@
 - [x] 4.6 用户余额：两条路径统一为 403 `INSUFFICIENT_BALANCE` 并换用新文案；在途预留超额改为 429 `concurrent_balance_reserved` 加 `Retry-After: 5`；估算改为缓存感知并以 P99 输出为上限。验收：用生产 7 天数据只读回放，余额为正的用户被拒次数减少 ≥90%，余额为负的金额不增加。（实现完成；生产只读回放验收在 12 执行）
 - [x] 4.7 `image_task_handler.go`：准入检查放到内容审计之前；审计失败时释放准入。
 - [x] 4.9 失败回合封顶（design §9.7，测试服务器发现）：会话连续第 5 次耗尽失败改为终止应答（无 `Retry-After`、`x-should-retry: false`、`server_is_overloaded`、5xx 改 503）；真正成功或间隔超过 120 秒清零。原因：Codex 对带 `Retry-After` 的 5xx 一个回合重试 30 次、历时 871 秒；流内失败重试 6 次。
+- [x] 4.10 续链被拒时整轮重放（design §9.8，测试服务器用真实中转发现）：附带 `previous_response_id` 的 Messages 转 Responses 请求收到笼统 4xx 时去掉续链完整重放一次，并对该会话关闭续链。
 - [x] 4.8 验证：单测、handler 集成测试；真实客户端测试中 Codex 一个失败回合的请求数 ≤5。
   - Codex 全失败回合 5 次请求、92.5 秒（修复前 30 次、871 秒）；流内失败 5 次。
 

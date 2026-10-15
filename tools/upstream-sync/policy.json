@@ -415,6 +415,14 @@
     {
       "path": "backend/internal/handler/gateway_handler.go",
       "value": "status = applyExhaustedRetryHint(c, h.gatewayService, status)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "isOpenAICompatContinuationRejected(resp.StatusCode, respBody)"
+    },
+    {
+      "path": "backend/internal/service/openai_messages_continuation.go",
+      "value": "func isOpenAICompatContinuationRejected(statusCode int, upstreamBody []byte) bool"
     }
   ],
   "forbidden_module_paths": [

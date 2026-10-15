@@ -75,6 +75,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 换号耗尽的 429/5xx | 带 `Retry-After`：上游给出的值按 2–30 秒封顶，没有时取分组最早恢复时间 |
 | 同一会话连续第 5 次耗尽失败（无号、换号耗尽、流内失败） | 终止应答：不带 `Retry-After`，`x-should-retry: false`，`error.code` 为 `server_is_overloaded`，5xx 改为 503（429 保持）。Codex 对带 `Retry-After` 的 5xx 没有次数上限，一个回合最多约 30 次请求；封顶后不超过 5 次。会话真正成功一次或两次失败相隔超过 120 秒后重新计数 |
 | 中转站在 `response.created` 前插入的 `SSE-Keep-Alive` 空 delta 帧 | 直接丢弃，不转发、不算首输出（openai-python 遇到会报错，网关也会因此提前放弃换号） |
+| Claude 请求分发到 GPT 中转时，中转站拒绝续链（`previous_response_id`）并返回笼统的 4xx | 去掉续链按完整历史重放一次，并对该会话在该账号上关闭续链；上下文超长、内容审核、图片、模型不存在等错误照常返回 |
 
 ## 4. 配置
 

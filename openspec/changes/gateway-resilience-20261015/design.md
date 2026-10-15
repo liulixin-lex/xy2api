@@ -388,6 +388,14 @@ Codex 对带 `Retry-After` 的 5xx 没有次数上限：传输层每轮 5 次请
 - 进程内尽力而为。快速失败（§9.3）的原样返回发生在选号之前，不参与计数；封顶后的终止应答只属于一个会话，也不计入快速失败（否则重放时会补上 `Retry-After`，让 Codex 重新开始重试）。
 - 指标 `turn_cap`，日志 `resilience.turn_cap`（warn）。
 
+### 9.8 续链被拒时整轮重放（测试服务器发现）
+
+Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网关按会话附带上一轮的 `previous_response_id`，只发送最后一轮输入。真实多账号中转站会把上一轮响应存在另一个上游账号上，再次请求时返回笼统的 400（如 “Upstream request failed”“The request could not be processed”），而不是可识别的“previous response not found”。0.3.0 只在可识别时才去掉续链重试，于是该会话从第二轮起每轮都是 400；按 §2 这类 400 属于客户端错误，不换号。
+
+- 附带续链的请求收到 400/404/409/422，且不是完整重放同样会失败的错误（上下文超长、内容审核、图片、模型不存在）时，去掉续链按完整历史重放一次；
+- 同时对该会话在该账号上关闭续链（与“上游不支持续链”相同，时长为原有粘性 TTL），后续轮次直接完整重放，不再先失败一次；
+- 可识别的“续链不存在”仍按原逻辑只删除绑定。
+
 ## 10. 配置项（`gateway_resilience_settings`）
 
 存于 `settings` 表（JSON）。管理接口为 `GET/PUT /api/v1/admin/settings/gateway-resilience`，前端为“网关韧性”设置卡。缺省值即设计值：

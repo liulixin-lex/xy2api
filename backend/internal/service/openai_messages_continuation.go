@@ -122,6 +122,36 @@ func isOpenAICompatPreviousResponseNotFound(statusCode int, upstreamMsg string, 
 		check(gjson.GetBytes(upstreamBody, "error.message").String())
 }
 
+// isOpenAICompatContinuationRejected reports a vague 4xx to a request that
+// carried previous_response_id. Pooled relays answer it with generic errors
+// ("Upstream request failed", "The request could not be processed") when the
+// stored response lives on another upstream account, so every later turn of
+// the session would fail the same way. The caller replays the turn in full
+// once and keeps continuation off for the session (xy2api gateway
+// resilience). Errors a full replay would hit as well are excluded.
+func isOpenAICompatContinuationRejected(statusCode int, upstreamBody []byte) bool {
+	switch statusCode {
+	case http.StatusBadRequest, http.StatusNotFound, http.StatusConflict, http.StatusUnprocessableEntity:
+	default:
+		return false
+	}
+	text := strings.ToLower(gjson.GetBytes(upstreamBody, "error.code").String() + " " +
+		gjson.GetBytes(upstreamBody, "error.type").String() + " " +
+		gjson.GetBytes(upstreamBody, "error.message").String())
+	if strings.TrimSpace(text) == "" {
+		text = strings.ToLower(string(upstreamBody))
+	}
+	for _, s := range []string{
+		"context_length", "context length", "maximum context", "too long", "too many tokens",
+		"content_policy", "moderation", "safety", "image", "model_not_found", "does not exist", "unsupported_model",
+	} {
+		if strings.Contains(text, s) {
+			return false
+		}
+	}
+	return true
+}
+
 func isOpenAICompatPreviousResponseUnsupported(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
 	if statusCode != http.StatusBadRequest {
 		return false
