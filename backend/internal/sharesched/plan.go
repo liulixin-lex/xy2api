@@ -146,6 +146,9 @@ func (d Decision) IdealSkipReason(served int64, skipped map[int64]Reason) Reason
 			}
 			return ReasonIneligible
 		case e.Excluded:
+			if e.Reason == ReasonResilFailureStreak {
+				return e.Reason
+			}
 			return ReasonExcludedInRequest
 		}
 		if reason, ok := skipped[d.Ideal]; ok {
@@ -246,9 +249,12 @@ func Plan(p *Policy, req Request, cands []Candidate) Decision {
 			Eligible: c.Eligible, Excluded: c.Excluded, Reason: c.Reason,
 			recoverAt: c.RecoverAt, stableSince: c.StableSince, drainUntil: rule.DrainUntil, present: true,
 		}
-		if e.Eligible {
+		switch {
+		case e.Excluded && c.Reason == ReasonResilFailureStreak:
+			// Keep why the session left the account (gateway resilience).
+		case e.Eligible:
 			e.Reason = ""
-		} else if e.Reason == "" {
+		case e.Reason == "":
 			e.Reason = ReasonIneligible
 		}
 		entries = append(entries, e)
@@ -387,6 +393,10 @@ func Plan(p *Policy, req Request, cands []Candidate) Decision {
 	case bound == nil:
 		return finish(ReasonRebindUnavailable, placement, WriteReplace, WriteReplace)
 	case bound.Excluded:
+		if bound.Reason == ReasonResilFailureStreak {
+			// The session kept failing on its account: move it.
+			return finish(ReasonResilFailureStreak, spillFrom(bound), WriteReplace, WriteReplace)
+		}
 		return finish(ReasonFailoverNext, spillFrom(bound), WriteReplace, WriteReplace)
 	case !bound.Eligible:
 		if softSpill(p, req, bound, idle) {

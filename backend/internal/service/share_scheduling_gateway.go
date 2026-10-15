@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/sharesched"
 )
 
@@ -69,6 +70,9 @@ func (s *GatewayService) shareGatewayCandidates(ctx context.Context, group *Grou
 			Priority: acc.Priority, Concurrency: acc.Concurrency}
 		if _, excluded := excludedIDs[acc.ID]; excluded {
 			c.Excluded, c.Eligible = true, true
+			if resilience.StateFrom(ctx).Avoided(acc.ID) {
+				c.Reason = sharesched.ReasonResilFailureStreak
+			}
 			in.cands = append(in.cands, c)
 			continue
 		}

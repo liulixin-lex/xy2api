@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/sharesched"
 )
 
@@ -215,6 +216,9 @@ func (s *OpenAIGatewayService) shareOpenAICandidates(ctx context.Context, in ope
 			Priority: acc.Priority, Concurrency: acc.Concurrency}
 		if _, excluded := in.excluded[acc.ID]; excluded {
 			c.Excluded, c.Eligible = true, true
+			if resilience.StateFrom(ctx).Avoided(acc.ID) {
+				c.Reason = sharesched.ReasonResilFailureStreak
+			}
 			stats.exclude("excluded")
 			cands = append(cands, c)
 			continue

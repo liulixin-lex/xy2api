@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"github.com/liulixin-lex/xy2api/internal/sharesched"
 )
 
 // lastResortCandidateTTL bounds how long the group account list used by
@@ -252,19 +253,16 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 func (s *GatewayService) noteLastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time) {
 	resilience.StateFrom(ctx).SetLastResort(account.ID)
 	s.resilience.noteLastResortSelected(account.ID)
+	s.shareScheduling.noteResilienceReason(derefGroupID(groupID), sharesched.ReasonLastResortSoft)
 	resilience.Count(resilience.MetricLastResort, derefGroupID(groupID), account.ID, account.Platform)
 	slog.Warn("resilience.last_resort",
 		"group_id", derefGroupID(groupID),
 		"account_id", account.ID,
 		"platform", account.Platform,
 		"recover_at", recoverAt,
-		"reason", string(sharedReasonLastResortSoft),
+		"reason", string(sharesched.ReasonLastResortSoft),
 	)
 }
-
-// sharedReasonLastResortSoft is the reason code recorded for last-resort
-// selection (design §4.3).
-const sharedReasonLastResortSoft = "last_resort_soft"
 
 // noteLastResortSelected remembers that an account served as last resort so
 // that a success lifts its transient cooldown early.
@@ -401,13 +399,14 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time) {
 	resilience.StateFrom(ctx).SetLastResort(account.ID)
 	s.resilience.noteLastResortSelected(account.ID)
+	s.shareScheduling.noteResilienceReason(derefGroupID(groupID), sharesched.ReasonLastResortSoft)
 	resilience.Count(resilience.MetricLastResort, derefGroupID(groupID), account.ID, account.Platform)
 	slog.Warn("resilience.last_resort",
 		"group_id", derefGroupID(groupID),
 		"account_id", account.ID,
 		"platform", account.Platform,
 		"recover_at", recoverAt,
-		"reason", sharedReasonLastResortSoft,
+		"reason", string(sharesched.ReasonLastResortSoft),
 	)
 }
 
@@ -552,6 +551,7 @@ func (r *ResilienceService) sessionAvoid(ctx context.Context, groupID *int64, se
 	if err != nil || len(avoid) == 0 {
 		return nil
 	}
+	resilience.StateFrom(ctx).SetAvoided(avoid)
 	return avoid
 }
 

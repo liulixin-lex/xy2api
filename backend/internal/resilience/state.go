@@ -54,6 +54,9 @@ type RequestState struct {
 	turnSession string
 	turnNoted   bool
 	turnFailed  bool
+
+	// avoided is the session's avoid set read at selection (design §4.2).
+	avoided map[int64]struct{}
 }
 
 // SessionRecorder records attempt outcomes of a sticky session. The service
@@ -71,6 +74,28 @@ func (s *RequestState) SetSession(groupID int64, sessionHash string, rec Session
 	s.mu.Lock()
 	s.sessionGroupID, s.sessionHash, s.sessionRec = groupID, sessionHash, rec
 	s.mu.Unlock()
+}
+
+// SetAvoided records the session's avoid set so schedulers can tell an
+// account the session moved away from from one that failed in this request.
+func (s *RequestState) SetAvoided(ids map[int64]struct{}) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.avoided = ids
+	s.mu.Unlock()
+}
+
+// Avoided reports whether accountID is in the session's avoid set.
+func (s *RequestState) Avoided(accountID int64) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.avoided[accountID]
+	return ok
 }
 
 // NoteTurn records the conversation the request belongs to. Selection calls

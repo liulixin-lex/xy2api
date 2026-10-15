@@ -150,7 +150,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 
 **原版调度的语义调整**（钩子位于 `openai_account_scheduler.go` 的 `selectBySessionHash`，以及 `gateway_scheduling.go` 中对应的粘性路径）：绑定账号处于软罚时，**不再清除绑定**，只在本次请求跳过它（临时溢出）；硬状态仍按原样清除。
 
-**份额调度**通过 `shareMissingBoundCandidate` 与候选构造钩子，把软罚账号表示为 `Eligible=false` 并带 `RecoverAt`（不超过 300 秒），由现有的 `softSpill` 逻辑决定保留绑定、临时溢出。会话回避集中的账号对该会话标为 `Excluded`。硬状态的账号 `RecoverAt` 为零，走 `rebind_unavailable`。
+**份额调度**通过 `shareMissingBoundCandidate` 与候选构造钩子，把软罚账号表示为 `Eligible=false` 并带 `RecoverAt`，由现有的 `softSpill` 逻辑（`soft_spill_max_seconds`，缺省 300 秒）决定保留绑定、临时溢出。会话回避集中的账号对该会话标为 `Excluded`，原因 `resil_failure_streak`，改绑决策也记为 `resil_failure_streak`。余额耗尽（`balance:exhausted`）的账号原因为 `balance_exhausted`、`RecoverAt` 为零，走改绑；其他已有的临时不可调度原因保持 0.3.0 的处理，避免绑定释放过严（Q8）。末位兜底选中软罚账号时，在该组份额统计中记 `last_resort_soft`。兜底分组的转投与切回不是份额放置决策，计入韧性指标 `fallback_group`、`fallback_return`。
 
 两种调度都**按优先级或层级、再按权重**选择替代账号：先在同层；只有整层不可用时才按份额调度现有的 `tier_overflow_unavailable` 规则降层。
 

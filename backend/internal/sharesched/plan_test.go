@@ -256,6 +256,16 @@ func TestBindingLifecycle(t *testing.T) {
 		require.Equal(t, []Step{{AccountID: target, Tier: 1}}, d.Steps)
 		require.Equal(t, WriteReplace, d.Write)
 	})
+	t.Run("failure streak moves the session with its own reason", func(t *testing.T) {
+		// Gateway resilience: the session's avoid set excludes its account.
+		cands := eligible(1, 2)
+		cands[other-1].Excluded = true
+		cands[other-1].Reason = ReasonResilFailureStreak
+		d := Plan(twoAccounts, bound(key, other, 0), cands)
+		require.Equal(t, ReasonResilFailureStreak, d.Reason)
+		require.Equal(t, []Step{{AccountID: target, Tier: 1}}, d.Steps)
+		require.Equal(t, WriteReplace, d.Write)
+	})
 }
 
 func TestDrain(t *testing.T) {

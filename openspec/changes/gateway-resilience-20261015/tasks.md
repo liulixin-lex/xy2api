@@ -79,8 +79,9 @@
 
 - [x] 3.1 会话失败计数与回避集（Redis，TTL 600 秒），成功时清零。
 - [x] 3.2 原版调度钩子（`openai_account_scheduler.go` 的 `selectBySessionHash`、`gateway_scheduling.go` 的粘性路径、`gateway_service.go` 的 `shouldClearStickySession`）：软罚时保留绑定、本次请求跳过；硬状态才清除；连续失败达到阈值时按 owner 删除并加入回避。
-- [ ] 3.3 份额调度适配（`share_scheduling_exec.go` 与候选构造）：软罚表示为 `RecoverAt`；回避表示为 `Excluded`；硬状态不带 `RecoverAt`；新增原因 `resil_failure_streak`、`last_resort_soft`、`fallback_return`。
+- [x] 3.3 份额调度适配（`share_scheduling_exec.go` 与候选构造）：软罚表示为 `RecoverAt`；回避表示为 `Excluded`；硬状态不带 `RecoverAt`；新增原因 `resil_failure_streak`、`last_resort_soft`、`fallback_return`。
   - 进度（2026-10-15）：未开始：份额调度显式 `RecoverAt`/新原因码。
+  - 完成（2026-10-16）：余额耗尽改为 `balance_exhausted` 且不带 `RecoverAt`（修正份额调度下余额耗尽仍软溢出保留绑定，违反“余额耗尽立即改绑”）；会话回避的排除与改绑记 `resil_failure_streak`；末位兜底记 `last_resort_soft`。其他临时不可调度原因保持原处理（Q8）。`fallback_return` 不是份额放置决策，由韧性指标记录（偏差记入 design §4）。
 - [x] 3.4 末位兜底（两种调度器都要实现）：先转投兜底组（任务 8），否则在最高的有软罚账号的那一层，取罚期最短者；不受单次首输出超时约束。
   - 进度（2026-10-15）：兜底组转投随任务 8 实现。
 - [ ] 3.5 Explain：份额调度的 Explain 显示罚则、计数、回避与兜底；原版调度新增只读 Explain。
