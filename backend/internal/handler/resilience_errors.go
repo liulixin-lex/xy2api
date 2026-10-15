@@ -1,0 +1,126 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
+	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
+	"github.com/liulixin-lex/xy2api/internal/service"
+)
+
+// Internal error types translated by the response writers (design §9.5).
+const (
+	// errTypeInsufficientBalance is the user's own balance being too low.
+	errTypeInsufficientBalance = "insufficient_balance"
+	// errTypeBalanceReserved is a positive balance held by in-flight
+	// requests; it is written as rate_limit_error.
+	errTypeBalanceReserved = "concurrent_balance_reserved"
+
+	// userInsufficientBalanceMessage keeps the "insufficient balance" words so
+	// downstream sub2api-style sites still recognise it, while naming this
+	// platform so users know whose balance ran out.
+	userInsufficientBalanceMessage = resilience.UserInsufficientBalanceMessage
+
+	// ginKeyResilienceRetryAfter carries the Retry-After seconds chosen for a
+	// no-account response to the writers, which add the message hint.
+	ginKeyResilienceRetryAfter = "xy_resilience_retry_after"
+)
+
+// resilienceTranslateError maps internal error types to the client-facing
+// type and code, and appends the retry hint to no-account messages.
+func resilienceTranslateError(c *gin.Context, status int, errType, code, message string) (string, string, string) {
+	switch errType {
+	case errTypeInsufficientBalance:
+		if code == "" {
+			code = "INSUFFICIENT_BALANCE"
+		}
+	case errTypeBalanceReserved:
+		errType = "rate_limit_error"
+		if code == "" {
+			code = "concurrent_balance_reserved"
+		}
+	}
+	if c != nil && (status == http.StatusServiceUnavailable || status == http.StatusTooManyRequests) {
+		if secs := c.GetInt(ginKeyResilienceRetryAfter); secs > 0 && !strings.Contains(strings.ToLower(message), "try again in") {
+			message = strings.TrimRight(strings.TrimSpace(message), ". ") + fmt.Sprintf(". Please try again in %ds.", secs)
+		}
+	}
+	return errType, code, message
+}
+
+// noAccountRetryAdvisor is implemented by the gateway services.
+type noAccountRetryAdvisor interface {
+	NoAccountRetryAfter(ctx context.Context, groupID *int64, model string) time.Duration
+}
+
+// applyNoAccountRetryHints sets the retry headers of a no-account response
+// (design §9.1): configuration failures get Retry-After 60 and
+// x-should-retry: false; temporary ones the clamped time until the group's
+// earliest recovery. Status codes and messages stay as they are.
+func applyNoAccountRetryHints(c *gin.Context, diag any, apiKey *service.APIKey, routingModel string, cls noAccountErrorClassification) {
+	cfg := resilience.Current()
+	if c == nil || c.Request == nil || !cfg.ErrorsOn() || cls.ModelNotFound {
+		return
+	}
+	ctx := c.Request.Context()
+	if resilience.StateFrom(ctx).ConfigError() {
+		c.Header("Retry-After", strconv.Itoa(cfg.Errors.ConfigRetryAfterSeconds))
+		c.Header("x-should-retry", "false")
+		return
+	}
+	var wait time.Duration
+	if advisor, ok := diag.(noAccountRetryAdvisor); ok && apiKey != nil {
+		wait = advisor.NoAccountRetryAfter(ctx, apiKey.GroupID, routingModel)
+	}
+	if wait <= 0 {
+		// Nothing recovers on its own: ask clients to back off longest.
+		wait = time.Duration(cfg.Errors.NoAccountRetryAfter.Max) * time.Second
+	}
+	secs := resilience.ClampRetryAfter(wait, cfg.Errors.NoAccountRetryAfter.Min, cfg.Errors.NoAccountRetryAfter.Max)
+	c.Header("Retry-After", strconv.Itoa(secs))
+	c.Set(ginKeyResilienceRetryAfter, secs)
+}
+
+// stashResilienceErrorResponse records a JSON error response for the per-key
+// fast fail (design §9.3). Only 503 responses are ever replayed.
+func stashResilienceErrorResponse(c *gin.Context, status int, errType, message string, obj any) {
+	if c == nil || status != http.StatusServiceUnavailable || !resilience.Current().ErrorsOn() {
+		return
+	}
+	body, err := json.Marshal(obj)
+	if err != nil {
+		return
+	}
+	c.Set(resilience.GinKeyErrorResponse, resilience.ErrorResponse{Status: status, ErrType: errType, Message: message, Body: body})
+}
+
+// resilienceHideUpstreamBalance turns an exhausted failover whose last
+// failure was an upstream balance problem into the standard temporary 503
+// (design §9.4). Administrators keep the original text through the ops
+// upstream error. It reports false when the failure is not a balance one.
+func resilienceHideUpstreamBalance(c *gin.Context, diag any, failoverErr *service.UpstreamFailoverError) (int, string, string, bool) {
+	cfg := resilience.Current()
+	if c == nil || failoverErr == nil || !cfg.ErrorsOn() {
+		return 0, "", "", false
+	}
+	isBalance := failoverErr.Reason == service.OpenAIImagesInsufficientBalanceReason ||
+		service.ClassifyFailoverError(failoverErr).Category == resilience.CategoryBalance
+	if !isBalance {
+		return 0, "", "", false
+	}
+	upstreamMsg := service.SanitizeUpstreamErrorMessage(service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody))
+	if upstreamMsg == "" {
+		upstreamMsg = strings.TrimSpace(failoverErr.ClientMessage)
+	}
+	service.SetOpsUpstreamError(c, failoverErr.StatusCode, upstreamMsg, "")
+	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
+	applyNoAccountRetryHints(c, diag, apiKey, "", noAccountErrorClassification{Status: http.StatusServiceUnavailable})
+	return http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable", true
+}

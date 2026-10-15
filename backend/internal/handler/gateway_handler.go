@@ -26,6 +26,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/timezone"
 	"github.com/liulixin-lex/xy2api/internal/pkg/typesafe"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/securityaudit"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -1949,6 +1950,13 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 		}
 	}
 
+	// xy2api resilience: upstream balance problems are only shown to
+	// administrators (design §9.4).
+	if status, errType, errMsg, hidden := resilienceHideUpstreamBalance(c, h.gatewayService, failoverErr); hidden {
+		h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
+		return
+	}
+
 	// 记录原始上游状态码，以便 ops 错误日志捕获真实的上游错误
 	upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)
 	service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
@@ -1988,6 +1996,7 @@ func (h *GatewayHandler) handleStreamingAwareError(c *gin.Context, status int, e
 }
 
 func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, status int, errType, code, message string, streamStarted bool) {
+	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
 	if streamStarted {
 		// 响应状态码已固化为 200（ping/部分数据已 flush），错误只能就地以 SSE 帧回传。
 		// 标记本次流内错误，供 ops_error_logger 补记——否则该中间件按 status>=400 采集，
@@ -2010,7 +2019,9 @@ func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, statu
 			if code != "" {
 				errorCode = `,"code":` + strconv.Quote(code)
 			}
-			errorEvent := `data: {"type":"error","error":{"type":` + strconv.Quote(errType) + errorCode + `,"message":` + strconv.Quote(message) + `}}` + "\n\n"
+			// xy2api G3: Anthropic SDKs only surface named events, so the
+			// frame carries "event: error".
+			errorEvent := "event: error\n" + `data: {"type":"error","error":{"type":` + strconv.Quote(errType) + errorCode + `,"message":` + strconv.Quote(message) + `}}` + "\n\n"
 			if _, err := fmt.Fprint(c.Writer, errorEvent); err != nil {
 				_ = c.Error(err)
 			}
@@ -2121,14 +2132,17 @@ func (h *GatewayHandler) errorResponse(c *gin.Context, status int, errType, mess
 }
 
 func (h *GatewayHandler) errorResponseWithCode(c *gin.Context, status int, errType, code, message string) {
+	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
 	errorObject := gin.H{"type": errType, "message": message}
 	if code != "" {
 		errorObject["code"] = code
 	}
-	c.JSON(status, gin.H{
+	body := gin.H{
 		"type":  "error",
 		"error": errorObject,
-	})
+	}
+	stashResilienceErrorResponse(c, status, errType, message, body)
+	c.JSON(status, body)
 }
 
 // CountTokens handles token counting endpoint
@@ -2526,6 +2540,17 @@ func billingErrorDetails(err error) (status int, code, message string, retryAfte
 		// 错误码用 rate_limit_exceeded 与 OpenAI 兼容客户端一致；细分类型由 ErrCode + window_resets_at metadata 区分。
 		msg := pkgerrors.Message(err)
 		return http.StatusTooManyRequests, "rate_limit_exceeded", msg, extractQuotaResetSeconds(err)
+	}
+	// xy2api resilience (design §9.5): a positive balance held by in-flight
+	// requests is a short wait (429); the user's own empty balance is one
+	// 403 with a platform-specific message.
+	if resilience.Current().ErrorsOn() {
+		if errors.Is(err, service.ErrInflightBalanceReserved) {
+			return http.StatusTooManyRequests, errTypeBalanceReserved, pkgerrors.Message(err), resilience.JitterSeconds(resilience.Current().Errors.ReservationRetryAfterSeconds, 1)
+		}
+		if errors.Is(err, service.ErrInsufficientBalance) {
+			return http.StatusForbidden, errTypeInsufficientBalance, userInsufficientBalanceMessage, 0
+		}
 	}
 	msg := pkgerrors.Message(err)
 	if msg == "" {

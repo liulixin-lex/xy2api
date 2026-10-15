@@ -31,6 +31,11 @@ type RequestState struct {
 	originGroupID int64
 	fallbackUsed  bool
 
+	// configError is set when selection failed for a configuration reason
+	// (channel pricing restriction, Claude-Code-only group) so the response
+	// carries x-should-retry: false (design §9.1).
+	configError bool
+
 	// session identifies the request's sticky session for failure streaks.
 	sessionGroupID int64
 	sessionHash    string
@@ -227,4 +232,24 @@ func (s *RequestState) OriginGroupID() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.originGroupID
+}
+
+// MarkConfigError records a configuration-caused selection failure.
+func (s *RequestState) MarkConfigError() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.configError = true
+	s.mu.Unlock()
+}
+
+// ConfigError reports a configuration-caused selection failure.
+func (s *RequestState) ConfigError() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.configError
 }

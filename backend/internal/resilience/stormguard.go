@@ -1,6 +1,7 @@
 package resilience
 
 import (
+	"math/rand/v2"
 	"net/http"
 	"sync"
 	"time"
@@ -27,6 +28,17 @@ func (r CachedResponse) RetryAfterSeconds(now time.Time) int {
 	}
 	return secs
 }
+
+var (
+	processNegativeCache = NewNegativeCache()
+	processFastFail      = NewFastFail()
+)
+
+// ProcessNegativeCache returns the process-wide no-account cache.
+func ProcessNegativeCache() *NegativeCache { return processNegativeCache }
+
+// ProcessFastFail returns the process-wide per-key fast-fail tracker.
+func ProcessFastFail() *FastFail { return processFastFail }
 
 // NegativeCache remembers "no available account" per (group, platform,
 // model) for a short time (design §9.2). It is in-process and best effort.
@@ -217,6 +229,19 @@ func ClampRetryAfter(d time.Duration, lo, hi int) int {
 	return secs
 }
 
+// JitterSeconds spreads a Retry-After of secs by up to ±spread seconds so
+// that clients rejected together do not retry together; the result is at
+// least 1.
+func JitterSeconds(secs, spread int) int {
+	if spread > 0 {
+		secs += rand.IntN(2*spread+1) - spread
+	}
+	if secs < 1 {
+		secs = 1
+	}
+	return secs
+}
+
 func itoa64(v int64) string {
 	if v == 0 {
 		return "0"
@@ -238,3 +263,20 @@ func itoa64(v int64) string {
 	}
 	return string(b[i:])
 }
+
+// GinKeyErrorResponse is the gin context key under which gateway error
+// writers stash the JSON error response they wrote, for per-key fast fail.
+const GinKeyErrorResponse = "xy_resilience_error_response"
+
+// ErrorResponse is a stashed gateway JSON error response.
+type ErrorResponse struct {
+	Status  int
+	ErrType string
+	Message string
+	Body    []byte
+}
+
+// UserInsufficientBalanceMessage is the client message for the user's own
+// empty balance (design §9.5). It keeps "insufficient balance" so that
+// downstream sub2api-style sites still recognise it.
+const UserInsufficientBalanceMessage = "Insufficient balance on your xy2api account, please recharge"

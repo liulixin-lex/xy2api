@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,6 +17,8 @@ type promptAuditOrderCase struct {
 	file       string
 	function   string
 	auditToken string
+	// allowBefore lists side effects that may precede the audit.
+	allowBefore []string
 }
 
 func TestPromptAuditGatePrecedesAccountBillingAndUpstreamSideEffects(t *testing.T) {
@@ -31,7 +34,10 @@ func TestPromptAuditGatePrecedesAccountBillingAndUpstreamSideEffects(t *testing.
 		{file: "grok_media.go", function: "handleGrokMedia", auditToken: "checkSecurityAudit"},
 		{file: "openai_embeddings.go", function: "Embeddings", auditToken: "checkSecurityAudit"},
 		{file: "openai_alpha_search.go", function: "AlphaSearch", auditToken: "checkSecurityAudit"},
-		{file: "image_task_handler.go", function: "Submit", auditToken: "checkSecurityAuditBeforeSubmit"},
+		// xy2api resilience (design §9.6): admission precedes the audit so a
+		// rejected re-submission costs no moderation call; a failed audit
+		// releases the admission.
+		{file: "image_task_handler.go", function: "Submit", auditToken: "checkSecurityAuditBeforeSubmit", allowBefore: []string{"h.tasks.Admit("}},
 		{file: "batch_image_handler.go", function: "Submit", auditToken: "checkSecurityAuditBeforeSubmit"},
 	}
 	sideEffectTokens := []string{
@@ -46,6 +52,9 @@ func TestPromptAuditGatePrecedesAccountBillingAndUpstreamSideEffects(t *testing.
 			require.NotEqual(t, -1, auditIndex, "missing Prompt Audit gate")
 			foundSideEffect := false
 			for _, sideEffect := range sideEffectTokens {
+				if slices.Contains(tt.allowBefore, sideEffect) {
+					continue
+				}
 				index := strings.Index(functionSource, sideEffect)
 				if index < 0 {
 					continue

@@ -107,8 +107,8 @@ func NewResilienceService(settingRepo SettingRepository, store ResilienceStore) 
 	s := &ResilienceService{
 		settingRepo: settingRepo,
 		store:       store,
-		negCache:    resilience.NewNegativeCache(),
-		fastFail:    resilience.NewFastFail(),
+		negCache:    resilience.ProcessNegativeCache(),
+		fastFail:    resilience.ProcessFastFail(),
 	}
 	empty := map[int64]time.Time{}
 	s.recovering.Store(&empty)

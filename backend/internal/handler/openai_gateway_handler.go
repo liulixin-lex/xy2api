@@ -3525,6 +3525,12 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", message, streamStarted)
 		return
 	}
+	// xy2api resilience: upstream balance problems (including image account
+	// 402) are only shown to administrators (design §9.4).
+	if status, errType, errMsg, hidden := resilienceHideUpstreamBalance(c, h.gatewayService, failoverErr); hidden {
+		h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
+		return
+	}
 	if failoverErr.Reason == service.OpenAIImagesInsufficientBalanceReason {
 		status := failoverErr.ClientStatusCode
 		if status <= 0 {
@@ -3680,6 +3686,7 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 	streamStarted bool,
 	countTowardsSLA bool,
 ) {
+	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
 	// body-signal compact 心跳可能已把响应头提交为 200：先停心跳（建立
 	// happens-before，接管 ResponseWriter），并升级为流内错误处理。
 	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
@@ -3725,9 +3732,11 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 		h.errorResponse(c, status, errType, message)
 		return
 	}
-	c.JSON(status, gin.H{"error": gin.H{
+	body := gin.H{"error": gin.H{
 		"type": errType, "code": code, "message": message,
-	}})
+	}}
+	stashResilienceErrorResponse(c, status, errType, message, body)
+	c.JSON(status, body)
 }
 
 func (h *OpenAIGatewayHandler) ensureOpenAIStreamReadErrorResponse(c *gin.Context, err error, streamStarted bool) bool {
@@ -3872,6 +3881,20 @@ func openAIFirstOutputFailoverExhausted(failoverErr *service.UpstreamFailoverErr
 
 // errorResponse returns OpenAI API format error response
 func (h *OpenAIGatewayHandler) errorResponse(c *gin.Context, status int, errType, message string) {
+	var code string
+	errType, code, message = resilienceTranslateError(c, status, errType, "", message)
+	if code != "" {
+		if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
+			service.MarkOpsStreamError(c, errType, message, status)
+			if writeResponsesFailedSSE(c, errType, code, message) {
+				return
+			}
+		}
+		body := gin.H{"error": gin.H{"type": errType, "code": code, "message": message}}
+		stashResilienceErrorResponse(c, status, errType, message, body)
+		c.JSON(status, body)
+		return
+	}
 	// body-signal compact 心跳可能已把响应头提交为 200：JSON 错误体会与已
 	// 提交的 SSE 流交错，必须降级为 response.failed 终止事件（#3887）。
 	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
@@ -3880,12 +3903,14 @@ func (h *OpenAIGatewayHandler) errorResponse(c *gin.Context, status int, errType
 			return
 		}
 	}
-	c.JSON(status, gin.H{
+	body := gin.H{
 		"error": gin.H{
 			"type":    errType,
 			"message": message,
 		},
-	})
+	}
+	stashResilienceErrorResponse(c, status, errType, message, body)
+	c.JSON(status, body)
 }
 
 // openAICompactKeepaliveInterval 复用流式 keepalive 配置作为 compact 下游

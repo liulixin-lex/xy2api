@@ -320,3 +320,20 @@ func TestClampRetryAfter(t *testing.T) {
 	require.Equal(t, 2, TerminalRetrySeconds(time.Second))
 	require.Equal(t, 30, TerminalRetrySeconds(time.Minute))
 }
+
+func TestJitterSeconds(t *testing.T) {
+	seen := map[int]bool{}
+	for i := 0; i < 200; i++ {
+		v := JitterSeconds(5, 1)
+		if v < 4 || v > 6 {
+			t.Fatalf("out of range: %d", v)
+		}
+		seen[v] = true
+	}
+	if len(seen) < 2 {
+		t.Fatalf("no spread: %v", seen)
+	}
+	if JitterSeconds(1, 3) < 1 || JitterSeconds(0, 0) != 1 {
+		t.Fatal("floor of 1 violated")
+	}
+}

@@ -22,7 +22,11 @@ func withResilienceSettings(t *testing.T, mutate func(*resilience.Settings)) {
 		mutate(&s)
 	}
 	resilience.Publish(s)
-	t.Cleanup(func() { resilience.Publish(orig) })
+	resilience.ProcessNegativeCache().InvalidateGroup(0)
+	t.Cleanup(func() {
+		resilience.Publish(orig)
+		resilience.ProcessNegativeCache().InvalidateGroup(0)
+	})
 }
 
 func TestResilienceSettingsLifecycle(t *testing.T) {

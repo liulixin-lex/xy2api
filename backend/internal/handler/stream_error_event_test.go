@@ -241,7 +241,8 @@ func TestGatewayAdmissionError_MessagesStreamingIncludesGatewayCode(t *testing.T
 		gatewayConcurrencyLimitCode, "Concurrency limit exceeded for account, please retry later", true)
 
 	body := w.Body.String()
-	assert.True(t, strings.HasPrefix(body, `data: {"type":"error"`))
+	// xy2api G3: Anthropic SDKs drop data frames without an event line.
+	assert.True(t, strings.HasPrefix(body, "event: error\ndata: {\"type\":\"error\""), "got: %q", body)
 	payload := body[strings.Index(body, "{"):]
 	assert.Equal(t, "rate_limit_error", gjson.Get(payload, "error.type").String())
 	assert.Equal(t, gatewayConcurrencyLimitCode, gjson.Get(payload, "error.code").String())
@@ -257,15 +258,16 @@ func TestGatewayAdmissionError_BareResponsesFailedIncludesGatewayCode(t *testing
 	assert.Equal(t, gatewayQueueFullCode, errObj["code"])
 }
 
-// Gateway handler: /v1/messages preserves the legacy data:{type:error,...} format
-// (Anthropic spec accepts a type:"error" stream event).
+// Gateway handler: /v1/messages keeps the {type:error,...} payload and, since
+// xy2api G3, names the event: Anthropic SDKs only surface named events and
+// silently drop a bare data frame.
 func TestGatewayHandleStreamingAwareError_MessagesStreamingKeepsLegacy(t *testing.T) {
 	c, w := newGinContextForEndpoint(t, EndpointMessages)
 	h := &GatewayHandler{}
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)
 
 	body := w.Body.String()
-	assert.True(t, strings.HasPrefix(body, `data: {"type":"error"`), "got: %q", body)
+	assert.True(t, strings.HasPrefix(body, "event: error\ndata: {\"type\":\"error\""), "got: %q", body)
 }
 
 // 项目里 /responses 注册在多组路由：/v1/responses（gateway）、裸 /responses（top-level）、

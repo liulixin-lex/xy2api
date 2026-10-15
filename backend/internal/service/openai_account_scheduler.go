@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"hash/fnv"
 	"log/slog"
 	"math"
@@ -17,6 +16,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -2220,10 +2220,19 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	origExcluded := excludedIDs
+	negativeCacheable := strings.TrimSpace(previousResponseID) == "" && requiredImageCapability == "" && !requireCompact
+	negativeCtx := ctx
+	if negativeCacheable && groupID != nil && resilience.Current().ErrorsOn() {
+		negativeCtx = s.withOpenAIProfitControlGate(ctx, groupID)
+	}
+	if cachedErr := resilienceNegativeCacheHit(negativeCtx, groupID, requestedModel, origExcluded); cachedErr != nil && negativeCacheable {
+		return nil, OpenAIAccountScheduleDecision{}, cachedErr
+	}
 	avoided := s.resilience.sessionAvoid(ctx, groupID, sessionHash)
 	excludedIDs = mergeExcluded(excludedIDs, avoided)
 	ctx = s.withOpenAIShareTrace(ctx, groupID, sessionHash, excludedIDs, requiredImageCapability)
 	selection, decision, err := s.selectAccountWithQualityRouting(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+	markResilienceConfigError(ctx, err)
 	// xy2api resilience: last-resort soft selection instead of "no available
 	// account" (design §4.3). Continuations owned by an account keep failing
 	// as before.
@@ -2241,6 +2250,8 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			selection, err = lr, nil
 			decision.SelectedAccountID = lr.Account.ID
 			decision.SelectedAccountType = lr.Account.Type
+		} else if negativeCacheable {
+			resilienceNegativeCachePut(negativeCtx, groupID, requestedModel, origExcluded, err)
 		}
 	}
 	if err == nil && selection != nil {

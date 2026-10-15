@@ -4,11 +4,11 @@ package service
 
 import (
 	"context"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"net/http"
 	"testing"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
 

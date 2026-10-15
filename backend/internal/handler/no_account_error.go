@@ -152,6 +152,8 @@ func classifyNoAccountErrorFromGin(
 	if classification.ModelNotFound {
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 	}
+	// xy2api resilience: Retry-After / x-should-retry (design §9.1).
+	applyNoAccountRetryHints(c, diag, apiKey, routingModel, classification)
 	return classification
 }
 

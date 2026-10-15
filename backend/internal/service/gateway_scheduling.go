@@ -7,7 +7,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"log/slog"
 	mathrand "math/rand"
 	"sort"
@@ -19,6 +18,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/usagestats"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 // SelectAccount 选择账号（粘性会话+优先级）
@@ -115,6 +115,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	// 检查 Claude Code 客户端限制（可能会替换 groupID 为降级分组）
 	group, groupID, err := s.checkClaudeCodeRestriction(ctx, groupID)
 	if err != nil {
+		markResilienceConfigError(ctx, err)
 		return nil, err
 	}
 	ctx = s.withGroupContext(ctx, group)
@@ -127,6 +128,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	defer func() {
 		result, err = s.resilienceGatewaySelectionEpilogue(ctx, group, groupID, sessionHash, requestedModel, origExcluded, avoided, result, err)
 	}()
+	if cachedErr := resilienceNegativeCacheHit(ctx, groupID, requestedModel, origExcluded); cachedErr != nil {
+		return nil, cachedErr
+	}
 
 	// Claude Code 限制可能已将 groupID 解析为 fallback group，
 	// 渠道限制预检查必须使用解析后的分组。

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"math"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -10,8 +11,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/timezone"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 // InflightBalanceReservationCache 余额在途预留的缓存能力（可选）。
@@ -282,6 +285,13 @@ func (s *BillingCacheService) reserveInflight(ctx context.Context, user *User, g
 	}
 	if !allowed {
 		logger.LegacyPrintf("service.billing_cache", "inflight reservation rejected: user=%d balance=%.6f inflight=%.6f estimate=%.6f", user.ID, balance, inflight, estimate)
+		// xy2api resilience: a balance that covers this request but is held
+		// by other in-flight requests is a short wait, not "insufficient
+		// balance" (design §9.5). When the balance alone cannot cover the
+		// estimate, waiting does not help.
+		if inflight > 0 && balance > 0 && balance >= estimate && resilience.Current().ErrorsOn() {
+			return nil, NewInflightBalanceReservedError(balance, inflight)
+		}
 		return nil, ErrInsufficientBalance
 	}
 
@@ -731,4 +741,15 @@ func (s *OpenAIGatewayService) EstimateInflightReservation(ctx context.Context, 
 		return 0, false
 	}
 	return s.inflightEstimateDeps().estimate(ctx, apiKey, req)
+}
+
+// ErrInflightBalanceReserved reports that the user's positive balance is
+// held by in-flight requests; the request may succeed shortly.
+var ErrInflightBalanceReserved = infraerrors.TooManyRequests("CONCURRENT_BALANCE_RESERVED", "available balance is reserved by in-flight requests")
+
+// NewInflightBalanceReservedError builds the client-facing reservation error
+// with the available and reserved amounts.
+func NewInflightBalanceReservedError(balance, inflight float64) error {
+	return infraerrors.Newf(http.StatusTooManyRequests, "CONCURRENT_BALANCE_RESERVED",
+		"Available balance is reserved by in-flight requests (available $%.4f, reserved $%.4f); please retry shortly", balance, inflight)
 }

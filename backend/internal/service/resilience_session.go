@@ -278,10 +278,12 @@ func lastResortTierAllowed(tier resilience.PenaltyTier, accountID int64, avoided
 // turns "no available account" into a last-resort selection and attaches the
 // session failure recorder.
 func (s *GatewayService) resilienceGatewaySelectionEpilogue(ctx context.Context, group *Group, groupID *int64, sessionHash, requestedModel string, excludedIDs, avoided map[int64]struct{}, result *AccountSelectionResult, err error) (*AccountSelectionResult, error) {
-	if err != nil && isNoAccountSelectionError(err) {
+	markResilienceConfigError(ctx, err)
+	if err != nil && isNoAccountSelectionError(err) && !errors.Is(err, errNegativeCached) {
 		if lr := s.resilienceGatewayLastResort(ctx, group, groupID, sessionHash, requestedModel, excludedIDs, avoided); lr != nil {
 			result, err = lr, nil
 		} else {
+			resilienceNegativeCachePut(ctx, groupID, requestedModel, excludedIDs, err)
 			return result, err
 		}
 	}
