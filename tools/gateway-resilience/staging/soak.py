@@ -1,0 +1,314 @@
+#!/usr/bin/env python3
+"""24-hour soak on the staging stack (staging-validation §8).
+
+Load: 20-50 concurrent clients (the target moves between the two every hour)
+send Responses, Chat, Messages, Gemini and image requests, streaming and
+non-streaming 7:3, against fault-upstream groups that inject about 5% of each
+fault type. About 2% of streams disconnect early. Every hour the single
+account of G-soak-bal runs out of balance for ten minutes.
+
+Every minute it samples memory, goroutines, database connections, Redis keys
+(concurrency slots, in-flight reservations, resilience state) and log volume.
+After the load it idles until the counters settle and checks: resources back
+to the baseline, no orphan slots or reservations, no panic, no credential in
+the logs, no duplicate usage or undelivered rows.
+
+Usage (on the staging host, after fixtures.py):
+    set -a; . ./.env; set +a
+    python3 soak.py --hours 24 --evidence evidence/soak
+    python3 soak.py --check-only --evidence evidence/soak   # re-run the checks
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime
+import http.client
+import json
+import os
+import random
+import re
+import subprocess
+import threading
+import time
+import urllib.request
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+APP, FAULT, CDN125 = 18210, 18211, 18213
+PROJECT = "xy2api-staging"
+KEYS = json.load(open(os.path.join(HERE, "fixtures", "keys.json")))["keys"]
+MODEL = "gpt-6.1-sol"
+
+# (weight, name, group, path, body builder)
+MIX = [
+    (35, "responses", "G-soak-openai", "/v1/responses",
+     lambda s: {"model": MODEL, "input": "soak", "stream": s, "prompt_cache_key": session()}),
+    (20, "chat", "G-soak-openai", "/v1/chat/completions",
+     lambda s: {"model": MODEL, "messages": [{"role": "user", "content": "soak " + session()}], "stream": s}),
+    (20, "messages", "G-soak-anthropic", "/v1/messages",
+     lambda s: {"model": "claude-sonnet-5-5", "max_tokens": 64, "stream": s,
+                "messages": [{"role": "user", "content": "soak " + session()}]}),
+    (10, "gemini", "G-soak-gemini", None,
+     lambda s: {"contents": [{"role": "user", "parts": [{"text": "soak " + session()}]}]}),
+    (3, "image", "G-soak-image", "/v1/images/generations",
+     lambda s: {"model": "gpt-image-2", "prompt": "soak", "n": 1, "size": "1024x1024"}),
+    (5, "balance", "G-soak-bal", "/v1/responses",
+     lambda s: {"model": MODEL, "input": "soak", "stream": s, "prompt_cache_key": session()}),
+    (7, "slow", "G-soak-slow", "/v1/responses",
+     lambda s: {"model": MODEL, "input": "soak", "stream": True, "prompt_cache_key": session()}),
+]
+SECRET = re.compile(r"sk-[A-Za-z0-9_-]{16,}")
+
+
+def session() -> str:
+    # A few conversations per worker repeat, the rest are new.
+    return f"soak-{random.randint(0, 400)}"
+
+
+def now() -> float:
+    return time.time()
+
+
+class Stats:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.minute: dict[str, int] = {}
+        self.total: dict[str, int] = {}
+
+    def add(self, key: str):
+        with self.lock:
+            self.minute[key] = self.minute.get(key, 0) + 1
+            self.total[key] = self.total.get(key, 0) + 1
+
+    def take(self) -> dict[str, int]:
+        with self.lock:
+            out, self.minute = self.minute, {}
+            return out
+
+
+def one_request(stats: Stats):
+    weights = [w for w, *_ in MIX]
+    _, name, group, path, build = random.choices(MIX, weights=weights)[0]
+    stream = random.random() < 0.7 and name != "image"
+    body = build(stream)
+    if name == "gemini":
+        verb = "streamGenerateContent?alt=sse" if stream else "generateContent"
+        path = f"/v1beta/models/gemini-3.8-flash:{verb}"
+    port = CDN125 if random.random() < 0.2 else APP
+    disconnect = None
+    if name == "slow":
+        disconnect = 2.0  # before the first token (6 s): undelivered
+    elif stream and random.random() < 0.02:
+        disconnect = random.uniform(0.05, 1.5)
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=disconnect or 330)
+    outcome = "error"
+    try:
+        conn.request("POST", path, body=json.dumps(body), headers={
+            "Content-Type": "application/json", "Authorization": "Bearer " + KEYS[group],
+            "x-api-key": KEYS[group], "User-Agent": "xy2api-staging-soak/1.0", "Connection": "close"})
+        resp = conn.getresponse()
+        started = now()
+        while True:
+            if disconnect is not None and now() - started > disconnect:
+                outcome = "disconnected"
+                break
+            chunk = resp.read1(8192) if hasattr(resp, "read1") else resp.read(8192)
+            if not chunk:
+                outcome = str(resp.status)
+                break
+    except TimeoutError:
+        outcome = "disconnected"
+    except Exception as exc:  # noqa: BLE001
+        outcome = type(exc).__name__
+    finally:
+        try:
+            if conn.sock:
+                conn.sock.close()
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+    stats.add(f"{name}:{outcome}")
+
+
+def worker(idx: int, target: list[int], stop: threading.Event, stats: Stats):
+    while not stop.is_set():
+        if idx >= target[0]:
+            stop.wait(5)
+            continue
+        one_request(stats)
+        stop.wait(random.uniform(2, 6))
+
+
+def sh(cmd: str, timeout=60) -> str:
+    return subprocess.run(cmd, shell=True, cwd=HERE, capture_output=True, text=True, timeout=timeout).stdout.strip()
+
+
+def psql(sql: str) -> str:
+    return sh(f"docker compose -p {PROJECT} exec -T postgres psql -U xy2api -d xy2api -At -c {json.dumps(sql)}")
+
+
+# Counts keys matching ARGV[1]; with ARGV[2] == "members", sums ZCARD of the
+# sorted sets instead (slot holders).
+REDIS_SCAN = """
+local total, cursor = 0, "0"
+repeat
+  local r = redis.call('SCAN', cursor, 'MATCH', ARGV[1], 'COUNT', 1000)
+  cursor = r[1]
+  for _, k in ipairs(r[2]) do
+    if ARGV[2] == 'members' then
+      if redis.call('TYPE', k).ok == 'zset' then total = total + redis.call('ZCARD', k) end
+    else
+      total = total + 1
+    end
+  end
+until cursor == "0"
+return total
+"""
+
+
+def redis_scan(pattern: str, mode: str = "keys") -> int:
+    out = subprocess.run(["docker", "compose", "-p", PROJECT, "exec", "-T", "redis", "redis-cli", "EVAL", REDIS_SCAN, "0", pattern, mode],
+                         cwd=HERE, capture_output=True, text=True, timeout=60).stdout.strip()
+    return int(out) if out.lstrip("-").isdigit() else -1
+
+
+def sample(stats: Stats | None) -> dict:
+    mem = sh(f"docker stats --no-stream --format '{{{{.MemUsage}}}}' {PROJECT}-app-1").split("/")[0].strip()
+    row = psql("SELECT goroutine_count, db_conn_active, db_conn_idle FROM ops_system_metrics ORDER BY created_at DESC LIMIT 1")
+    gor, active, idle = (row.split("|") + ["", "", ""])[:3] if row else ("", "", "")
+    return {
+        "at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "app_mem": mem,
+        "goroutines": int(gor) if gor.isdigit() else None,
+        "db_conn_active": int(active) if active.isdigit() else None,
+        "db_conn_idle": int(idle) if idle.isdigit() else None,
+        "pg_backends": int(psql("SELECT count(*) FROM pg_stat_activity WHERE datname = 'xy2api'") or 0),
+        "slots_account": redis_scan("concurrency:account:*", "members"),
+        "slots_user": redis_scan("concurrency:user:*", "members"),
+        "slots_key": redis_scan("concurrency:api_key:*", "members"),
+        "slots_live": redis_scan("concurrency:live:*", "members"),
+        "inflight_keys": redis_scan("billing:inflight*"),
+        "resil_keys": redis_scan("xy:resil:*"),
+        "redis_keys": int(sh(f"docker compose -p {PROJECT} exec -T redis redis-cli DBSIZE") or 0),
+        "log_lines_1m": int(sh(f"docker logs --since 60s {PROJECT}-app-1 2>&1 | wc -l") or 0),
+        "requests_1m": stats.take() if stats else {},
+    }
+
+
+def set_balance(value: float):
+    urllib.request.urlopen(f"http://127.0.0.1:{FAULT}/_control/balance?key=soak-bal&value={value}", timeout=10).read()
+
+
+def mem_mib(text: str) -> float:
+    m = re.match(r"([\d.]+)\s*([KMG]i?B)", text or "")
+    if not m:
+        return 0.0
+    return float(m.group(1)) * {"KiB": 1 / 1024, "MiB": 1, "GiB": 1024, "KB": 1 / 1024, "MB": 1, "GB": 1024}[m.group(2)]
+
+
+def checks(evidence: str, started_at: str) -> dict:
+    samples = [json.loads(l) for l in open(os.path.join(evidence, "metrics.jsonl"))]
+    base, last = samples[0], samples[-1]
+    peak_mem = max(mem_mib(s["app_mem"]) for s in samples)
+    logs = sh(f"docker logs --since {started_at} {PROJECT}-app-1 2>&1", timeout=600)
+    secrets = list(KEYS.values())
+    for n in (1, 2, 3):
+        if os.environ.get(f"REAL{n}_API_KEY"):
+            secrets.append(os.environ[f"REAL{n}_API_KEY"])
+    leaked = sum(logs.count(s) for s in secrets if s)
+    dup_usage = psql(f"SELECT count(*) FROM (SELECT request_id FROM usage_logs WHERE created_at >= '{started_at}' "
+                     "AND request_id <> '' GROUP BY request_id, api_key_id HAVING count(*) > 1) d")
+    dup_undelivered = psql(f"SELECT count(*) FROM (SELECT request_id FROM gateway_undelivered_requests WHERE created_at >= '{started_at}' "
+                           "AND request_id <> '' GROUP BY request_id HAVING count(*) > 1) d")
+    both = psql(f"SELECT count(*) FROM gateway_undelivered_requests g JOIN usage_logs u ON u.request_id = g.request_id "
+                f"WHERE g.created_at >= '{started_at}' AND g.billed = false AND g.request_id <> ''")
+    result = {
+        "samples": len(samples),
+        "baseline": {k: base[k] for k in base if k != "requests_1m"},
+        "final": {k: last[k] for k in last if k != "requests_1m"},
+        "peak_app_mem_mib": round(peak_mem, 1),
+        "panics": len(re.findall(r"\bpanic\b|goroutine \d+ \[running\]", logs)),
+        "credential_hits_in_logs": leaked,
+        "masked_key_like_strings": len(SECRET.findall(logs)),
+        "duplicate_usage_rows": int(dup_usage or 0),
+        "duplicate_undelivered_rows": int(dup_undelivered or 0),
+        "unbilled_undelivered_with_usage": int(both or 0),
+    }
+    ok = {
+        "no orphan account/user/key slots": all(last[k] == 0 for k in ("slots_account", "slots_user", "slots_key", "slots_live")),
+        "no orphan in-flight reservations": last["inflight_keys"] == 0,
+        "goroutines back to baseline (+50)": base["goroutines"] is None or last["goroutines"] is None
+        or last["goroutines"] <= base["goroutines"] + 50,
+        "pg backends back to baseline (+3)": last["pg_backends"] <= base["pg_backends"] + 3,
+        "app memory back within 1.5x baseline": mem_mib(last["app_mem"]) <= max(1.5 * mem_mib(base["app_mem"]), mem_mib(base["app_mem"]) + 64),
+        "no panic": result["panics"] == 0,
+        "no credential in logs": leaked == 0,
+        "no duplicate usage rows": result["duplicate_usage_rows"] == 0,
+        "no duplicate undelivered rows": result["duplicate_undelivered_rows"] == 0,
+        "undelivered and unbilled requests have no usage row": result["unbilled_undelivered_with_usage"] == 0,
+    }
+    result["checks"] = [{"check": k, "ok": v} for k, v in ok.items()]
+    result["ok"] = all(ok.values())
+    return result
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--hours", type=float, default=24)
+    parser.add_argument("--min", type=int, default=20)
+    parser.add_argument("--max", type=int, default=50)
+    parser.add_argument("--settle-minutes", type=int, default=10)
+    parser.add_argument("--evidence", default=os.path.join(HERE, "evidence", "soak"))
+    parser.add_argument("--check-only", action="store_true")
+    args = parser.parse_args()
+    os.makedirs(args.evidence, exist_ok=True)
+    meta_path = os.path.join(args.evidence, "meta.json")
+    metrics_path = os.path.join(args.evidence, "metrics.jsonl")
+
+    if not args.check_only:
+        started_at = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+        json.dump({"started_at": started_at, "hours": args.hours, "min": args.min, "max": args.max}, open(meta_path, "w"))
+        set_balance(1000)
+        with open(metrics_path, "w") as fh:
+            fh.write(json.dumps(sample(None)) + "\n")
+        stats, stop, target = Stats(), threading.Event(), [args.min]
+        threads = [threading.Thread(target=worker, args=(i, target, stop, stats), daemon=True) for i in range(args.max)]
+        for t in threads:
+            t.start()
+        end = now() + args.hours * 3600
+        start = now()
+        while now() < end:
+            elapsed_min = (now() - start) / 60
+            hour_phase = (elapsed_min % 60) / 60
+            # Up to max over the first half of each hour, back to min after.
+            target[0] = args.min + round((args.max - args.min) * (1 - abs(2 * hour_phase - 1)))
+            # Minutes 30-40 of every hour: the single balance account runs dry.
+            set_balance(0 if 30 <= elapsed_min % 60 < 40 else 1000)
+            time.sleep(60)
+            s = sample(stats)
+            s["target"] = target[0]
+            with open(metrics_path, "a") as fh:
+                fh.write(json.dumps(s) + "\n")
+            print(f"{s['at']} target={target[0]} mem={s['app_mem']} gor={s['goroutines']} slots={s['slots_account']} "
+                  f"inflight={s['inflight_keys']} req={sum(s['requests_1m'].values())}", flush=True)
+        stop.set()
+        set_balance(1000)
+        for t in threads:
+            t.join(timeout=400)
+        json.dump({"totals": stats.total}, open(os.path.join(args.evidence, "requests.json"), "w"), indent=1)
+        for _ in range(args.settle_minutes):
+            time.sleep(60)
+            with open(metrics_path, "a") as fh:
+                fh.write(json.dumps(sample(None)) + "\n")
+
+    meta = json.load(open(meta_path))
+    result = checks(args.evidence, meta["started_at"])
+    json.dump(result, open(os.path.join(args.evidence, "RESULT.json"), "w"), indent=1)
+    for c in result["checks"]:
+        print(f"{'PASS' if c['ok'] else 'FAIL'} {c['check']}", flush=True)
+    print(json.dumps({"ok": result["ok"], "panics": result["panics"], "peak_app_mem_mib": result["peak_app_mem_mib"]}), flush=True)
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

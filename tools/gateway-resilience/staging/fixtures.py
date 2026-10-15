@@ -61,6 +61,13 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-anthropic-overloaded": ("anthropic", [("anth-529", "F16", 1)], {}),
     "G-claude-only": ("anthropic", [("cc-only", "F00", 1)], {"claude_code_only": True}),
     "G-gemini": ("gemini", [("gem-ok", "F22;first=1", 1)], {}),
+    # 24-hour soak (soak.py): MIX injects each fault type at about 1% per attempt.
+    "G-soak-openai": ("openai", [("soak-oa-a", "MIX;p=1", 1), ("soak-oa-b", "MIX;p=1", 1), ("soak-oa-ok", "F00", 2)], {}),
+    "G-soak-anthropic": ("anthropic", [("soak-an-a", "MIX;p=1", 1), ("soak-an-ok", "F00", 2)], {}),
+    "G-soak-gemini": ("gemini", [("soak-gm-a", "MIX;p=1", 1), ("soak-gm-ok", "F22;first=1", 2)], {}),
+    "G-soak-image": ("openai", [("soak-img", "F18;secs=8", 1)], {}),
+    "G-soak-bal": ("openai", [("soak-bal", "BAL;key=soak-bal", 1)], {}),
+    "G-soak-slow": ("openai", [("soak-slow", "F17;first=6", 1)], {}),
 }
 
 # Groups with real relay accounts (staging-validation §6.2), created only

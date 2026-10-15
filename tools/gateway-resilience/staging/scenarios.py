@@ -27,8 +27,9 @@ import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP, FAULT, CDN90, CDN125, CDN300, DIRECT = 18210, 18211, 18212, 18213, 18214, 18215
-# Real Cloudflare (orange cloud) and the DNS-only host of the same Caddy site.
-REAL_CF, REAL_DIRECT = "stg-cf.example.test", "stg-direct.example.test"
+# Real Cloudflare (orange cloud) and the DNS-only host of the same Caddy site,
+# from the staging .env (STG_CF_HOST, STG_DIRECT_HOST).
+REAL_CF, REAL_DIRECT = os.environ.get("STG_CF_HOST", ""), os.environ.get("STG_DIRECT_HOST", "")
 KEYS = json.load(open(os.path.join(HERE, "fixtures", "keys.json")))["keys"]
 
 
