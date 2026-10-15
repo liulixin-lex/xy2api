@@ -236,10 +236,19 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 					)
 					return
 				}
+				// xy2api resilience: one attempt budget per request (design §6).
+				if resilienceAttemptFailed(c.Request.Context(), account.ID, failoverErr) {
+					h.handleFailoverExhausted(c, failoverErr, false)
+					return
+				}
 				h.gatewayService.RecordOpenAIAccountSwitch()
 				failedAccountIDs[account.ID] = struct{}{}
 				lastFailoverErr = failoverErr
 				if switchCount >= maxAccountSwitches {
+					h.handleFailoverExhausted(c, failoverErr, false)
+					return
+				}
+				if resilienceBeforeSwitch(c.Request.Context(), h.gatewayService, account.ID, failoverErr, failedAccountIDs) {
 					h.handleFailoverExhausted(c, failoverErr, false)
 					return
 				}

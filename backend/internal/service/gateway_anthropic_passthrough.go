@@ -122,7 +122,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 
 		// 透传分支禁止 400 请求体降级重试（该重试会改写请求体）
 		if resp.StatusCode >= 400 && resp.StatusCode != 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
-			if attempt < maxRetryAttempts {
+			if attempt < maxRetryAttempts && resilienceInServiceRetryAllowed(ctx, account.ID, resp.StatusCode) {
 				elapsed := time.Since(retryStart)
 				if elapsed >= maxRetryElapsed {
 					break

@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"go.uber.org/zap"
 )
@@ -209,10 +210,14 @@ func (s *FailoverState) HandleFailoverError(
 	if failoverErr == nil || !failoverErr.ShouldRetryNextAccount() {
 		return FailoverExhausted
 	}
+	// xy2api resilience: one attempt budget per request (design §6).
+	if resilienceAttemptFailed(ctx, accountID, failoverErr) {
+		return FailoverExhausted
+	}
 
 	// 同账号重试不算切换账号，粘性会话仅在实际切换时强制缓存计费。
 	retryCount := s.SameAccountRetryCount[accountID]
-	sameAccountRetry := sameAccountRetryAllowed(failoverErr, retryCount, retryLimit)
+	sameAccountRetry := sameAccountRetryAllowedCtx(ctx, accountID, failoverErr, retryCount, retryLimit)
 	if needForceCacheBilling(s.hasBoundSession, failoverErr, sameAccountRetry) {
 		s.ForceCacheBilling = true
 	}
@@ -221,7 +226,7 @@ func (s *FailoverState) HandleFailoverError(
 	// 重试次数上限 retryLimit 由调用方传入（账号级 pool_mode_retry_count 配置）。
 	if sameAccountRetry {
 		s.SameAccountRetryCount[accountID]++
-		retryDelay := sameAccountRetryDelayFor(failoverErr, s.SameAccountRetryCount[accountID])
+		retryDelay := resilienceRetryDelay(ctx, sameAccountRetryDelayFor(failoverErr, s.SameAccountRetryCount[accountID]))
 		logger.FromContext(ctx).Warn("gateway.failover_same_account_retry",
 			zap.Int64("account_id", accountID),
 			zap.Int("upstream_status", failoverErr.StatusCode),
@@ -245,6 +250,10 @@ func (s *FailoverState) HandleFailoverError(
 
 	// 检查是否耗尽
 	if s.SwitchCount >= s.MaxSwitches {
+		return FailoverExhausted
+	}
+	// xy2api resilience: capacity shedding switches once, to another host.
+	if resilienceBeforeSwitch(ctx, gatewayService, accountID, failoverErr, s.FailedAccountIDs) {
 		return FailoverExhausted
 	}
 
@@ -280,6 +289,17 @@ func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAc
 	// 不代表账号耗尽，直接按取消终止。
 	if ctx.Err() != nil {
 		return FailoverCanceled
+	}
+	// xy2api resilience: back-off re-selection draws from the request budget;
+	// after the capacity switch only other hosts may serve (design §6.3).
+	if b := requestBudget(ctx); b != nil {
+		if !b.CanAttempt(time.Now()) {
+			return FailoverExhausted
+		}
+		if b.CapacitySwitchUsed() && s.LastFailoverErr != nil &&
+			service.ClassifyFailoverError(s.LastFailoverErr).Category == resilience.CategoryCapacityShed {
+			return FailoverExhausted
+		}
 	}
 
 	if s.LastFailoverErr != nil &&

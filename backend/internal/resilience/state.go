@@ -14,6 +14,9 @@ type RequestState struct {
 
 	budget *Budget
 
+	// groupID is the API key's group (0 when ungrouped or unknown).
+	groupID int64
+
 	// stickyOwner is the account the session was bound to when selection
 	// started; keptSticky is set when that binding must survive this request
 	// because its account is only soft-penalised (design §4.2).
@@ -106,6 +109,26 @@ func StateFrom(ctx context.Context) *RequestState {
 	}
 	st, _ := ctx.Value(stateKey{}).(*RequestState)
 	return st
+}
+
+// SetGroup records the API key's group.
+func (s *RequestState) SetGroup(groupID int64) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.groupID = groupID
+	s.mu.Unlock()
+}
+
+// GroupID returns the API key's group (0 when unknown).
+func (s *RequestState) GroupID() int64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.groupID
 }
 
 // SetBudget stores the request budget.

@@ -2,7 +2,9 @@ package middleware
 
 import (
 	"context"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -32,7 +34,7 @@ func ClientRequestID() gin.HandlerFunc {
 			}
 			c.Header(clientRequestIDHeader, v)
 			ctx := context.WithValue(c.Request.Context(), ctxkey.ClientRequestID, v)
-			ctx = withResilienceRequestState(ctx)
+			ctx = withResilienceRequestState(ctx, c.Request)
 			c.Request = c.Request.WithContext(ctx)
 			c.Next()
 			return
@@ -43,17 +45,36 @@ func ClientRequestID() gin.HandlerFunc {
 		ctx := context.WithValue(c.Request.Context(), ctxkey.ClientRequestID, id)
 		requestLogger := logger.FromContext(ctx).With(zap.String("client_request_id", strings.TrimSpace(id)))
 		ctx = logger.IntoContext(ctx, requestLogger)
-		ctx = withResilienceRequestState(ctx)
+		ctx = withResilienceRequestState(ctx, c.Request)
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
 }
 
 // withResilienceRequestState attaches the per-request gateway resilience
-// state (xy2api). Every gateway route runs this middleware first.
-func withResilienceRequestState(ctx context.Context) context.Context {
+// state and request budget (xy2api). Every gateway route runs this
+// middleware first.
+func withResilienceRequestState(ctx context.Context, r *http.Request) context.Context {
 	if resilience.StateFrom(ctx) != nil {
 		return ctx
 	}
-	return resilience.WithRequestState(ctx, resilience.NewRequestState())
+	st := resilience.NewRequestState()
+	if kind, ok := resilienceRequestKind(r); ok {
+		st.SetBudget(resilience.NewBudget(ctx, resilience.Current(), kind, time.Now()))
+	}
+	return resilience.WithRequestState(ctx, st)
+}
+
+// resilienceRequestKind selects the budget shape of a request (design §6.1):
+// image and video generation have no pre-output deadline, and WebSocket
+// connections get no connection-wide budget.
+func resilienceRequestKind(r *http.Request) (resilience.RequestKind, bool) {
+	if r == nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket") {
+		return resilience.KindText, false
+	}
+	path := r.URL.Path
+	if strings.Contains(path, "/images/") || strings.HasSuffix(path, "/images") || strings.Contains(path, "/videos") {
+		return resilience.KindImage, true
+	}
+	return resilience.KindText, true
 }

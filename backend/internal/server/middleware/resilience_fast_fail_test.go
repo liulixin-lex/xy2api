@@ -122,3 +122,32 @@ func TestFastFailOffAndSuccessReset(t *testing.T) {
 	}
 	require.Equal(t, before+5, calls, "the streak restarted after the success")
 }
+
+func TestResilienceRequestBudgetKinds(t *testing.T) {
+	for _, tc := range []struct {
+		path, upgrade string
+		kind          resilience.RequestKind
+		budget        bool
+	}{
+		{"/v1/responses", "", resilience.KindText, true},
+		{"/v1/messages", "", resilience.KindText, true},
+		{"/v1/images/generations", "", resilience.KindImage, true},
+		{"/v1/images/edits/async", "", resilience.KindImage, true},
+		{"/v1/videos/generations", "", resilience.KindImage, true},
+		{"/v1/responses", "websocket", resilience.KindText, false},
+	} {
+		r := httptest.NewRequest(http.MethodPost, tc.path, nil)
+		if tc.upgrade != "" {
+			r.Header.Set("Upgrade", tc.upgrade)
+		}
+		ctx := withResilienceRequestState(r.Context(), r)
+		b := resilience.StateFrom(ctx).Budget()
+		if !tc.budget {
+			require.Nil(t, b, tc.path)
+			continue
+		}
+		require.NotNil(t, b, tc.path)
+		require.Equal(t, tc.kind, b.Kind(), tc.path)
+		require.Equal(t, tc.kind == resilience.KindText, b.HasDeadline(), tc.path)
+	}
+}

@@ -232,11 +232,16 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			)
 			return
 		}
+		// xy2api resilience: one attempt budget per request (design §6).
+		if resilienceAttemptFailed(c.Request.Context(), account.ID, failoverErr) {
+			h.handleFailoverExhausted(c, failoverErr, false)
+			return
+		}
 		if failoverErr.RetryableOnSameAccount {
 			retryLimit := account.GetPoolModeRetryCount()
-			if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
+			if sameAccountRetryAllowedCtx(c.Request.Context(), account.ID, failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
 				sameAccountRetryCount[account.ID]++
-				retryDelay := sameAccountRetryDelayFor(failoverErr, sameAccountRetryCount[account.ID])
+				retryDelay := resilienceRetryDelay(c.Request.Context(), sameAccountRetryDelayFor(failoverErr, sameAccountRetryCount[account.ID]))
 				reqLog.Warn("openai_alpha_search.same_account_retry",
 					zap.Int64("account_id", account.ID),
 					zap.Int("upstream_status", failoverErr.StatusCode),
@@ -256,6 +261,10 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		failedAccountIDs[account.ID] = struct{}{}
 		lastFailoverErr = failoverErr
 		if switchCount >= h.maxAccountSwitches {
+			h.handleFailoverExhausted(c, failoverErr, false)
+			return
+		}
+		if resilienceBeforeSwitch(c.Request.Context(), h.gatewayService, account.ID, failoverErr, failedAccountIDs) {
 			h.handleFailoverExhausted(c, failoverErr, false)
 			return
 		}

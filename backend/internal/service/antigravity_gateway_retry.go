@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/antigravity"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 // antigravityRetryLoopParams 重试循环的参数
@@ -201,6 +202,12 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 		}
 
 		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			// xy2api resilience: platform smart retries wait only within the
+			// request's pre-output budget and the Retry-After cap (design §6);
+			// they do not count as attempts.
+			if b := resilience.StateFrom(p.ctx).Budget(); b != nil && b.ClampWait(waitDuration, time.Now()) < waitDuration {
+				break
+			}
 			log.Printf("%s status=%d oauth_smart_retry attempt=%d/%d delay=%v model=%s account=%d",
 				p.prefix, resp.StatusCode, attempt, maxAttempts, waitDuration, modelName, p.account.ID)
 
@@ -563,7 +570,7 @@ urlFallbackLoop:
 					logger.LegacyPrintf("service.antigravity_gateway", "%s URL fallback (connection error): %s -> %s", p.prefix, baseURL, availableURLs[urlIdx+1])
 					continue urlFallbackLoop
 				}
-				if attempt < maxAttempts {
+				if attempt < maxAttempts && resilience.StateFrom(p.ctx).Budget().ConsumeInPlaceRetry(p.account.ID, false, time.Now()) {
 					logger.LegacyPrintf("service.antigravity_gateway", "%s status=request_failed retry=%d/%d error=%v", p.prefix, attempt, maxAttempts, err)
 					if !sleepAntigravityBackoffWithContext(p.ctx, attempt) {
 						logger.LegacyPrintf("service.antigravity_gateway", "%s status=context_canceled_during_backoff", p.prefix)
@@ -624,7 +631,7 @@ urlFallbackLoop:
 					// smartRetryActionContinue: 继续默认重试逻辑
 
 					// 账户/模型配额限流，重试 3 次（指数退避）- 默认逻辑（非 OAuth 账号或解析失败）
-					if attempt < maxAttempts {
+					if attempt < maxAttempts && resilience.StateFrom(p.ctx).Budget().ConsumeInPlaceRetry(p.account.ID, false, time.Now()) {
 						upstreamMsg := strings.TrimSpace(extractAntigravityErrorMessage(respBody))
 						upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 						appendOpsUpstreamError(p.c, OpsUpstreamErrorEvent{
@@ -661,7 +668,7 @@ urlFallbackLoop:
 
 				// 其他可重试错误（500/502/504/529，不包括 429 和 503）
 				if shouldRetryAntigravityError(resp.StatusCode) {
-					if attempt < maxAttempts {
+					if attempt < maxAttempts && resilience.StateFrom(p.ctx).Budget().ConsumeInPlaceRetry(p.account.ID, false, time.Now()) {
 						upstreamMsg := strings.TrimSpace(extractAntigravityErrorMessage(respBody))
 						upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 						appendOpsUpstreamError(p.c, OpsUpstreamErrorEvent{

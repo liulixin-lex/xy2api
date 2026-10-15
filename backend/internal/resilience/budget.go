@@ -40,6 +40,8 @@ type Budget struct {
 	started        time.Time
 	maxAttempts    int
 	attempts       int
+	lastMark       time.Time
+	lastAttempt    time.Duration
 	deadline       time.Time
 	sameAccountMax int
 	sameAccount    map[int64]int
@@ -58,6 +60,7 @@ func NewBudget(ctx context.Context, s *Settings, kind RequestKind, now time.Time
 	b := &Budget{
 		kind:           kind,
 		started:        now,
+		lastMark:       now,
 		maxAttempts:    s.Budget.MaxAttempts,
 		sameAccountMax: s.Budget.SameAccountRetryMax,
 		sameAccount:    map[int64]int{},
@@ -124,13 +127,43 @@ func (b *Budget) OutputStarted() bool {
 }
 
 // RecordAttempt counts one finished upstream attempt.
-func (b *Budget) RecordAttempt() {
+func (b *Budget) RecordAttempt() { b.RecordAttemptAt(time.Now()) }
+
+// RecordAttemptAt counts one finished upstream attempt and returns its
+// approximate duration: the time since the request started or since the
+// previous attempt ended (selection time is included and small).
+func (b *Budget) RecordAttemptAt(now time.Time) time.Duration {
 	if b == nil {
-		return
+		return 0
 	}
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.attempts++
-	b.mu.Unlock()
+	d := now.Sub(b.lastMark)
+	b.lastMark = now
+	if d < 0 {
+		d = 0
+	}
+	b.lastAttempt = d
+	return d
+}
+
+// LastAttemptDuration returns the duration of the latest recorded attempt.
+func (b *Budget) LastAttemptDuration() time.Duration {
+	if b == nil {
+		return 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.lastAttempt
+}
+
+// RetryAfterCap returns the configured cap of upstream-requested waits.
+func (b *Budget) RetryAfterCap() time.Duration {
+	if b == nil {
+		return 0
+	}
+	return b.retryAfterCap
 }
 
 // Attempts returns the number of finished attempts.
@@ -239,6 +272,48 @@ func (b *Budget) AllowCapacitySwitch() bool {
 	}
 	b.capacitySwitch++
 	return true
+}
+
+// ConsumeInPlaceRetry counts a failed attempt that a service retries in
+// place, but only when the budget still allows another attempt afterwards
+// (and, for sameAccount, the per-account retry cap allows one more);
+// otherwise it changes nothing and the failure surfaces to the handler,
+// which records it there.
+func (b *Budget) ConsumeInPlaceRetry(accountID int64, sameAccount bool, now time.Time) bool {
+	if b == nil {
+		return true
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	switch {
+	case b.ctx != nil && b.ctx.Err() != nil:
+		return false
+	case b.attempts+1 >= b.maxAttempts:
+		return false
+	case !b.outputStarted && !b.deadline.IsZero() && b.deadline.Sub(now) < minAttemptWindow:
+		return false
+	case sameAccount && b.sameAccount[accountID] >= b.sameAccountMax:
+		return false
+	}
+	b.attempts++
+	if d := now.Sub(b.lastMark); d > 0 {
+		b.lastAttempt = d
+	}
+	b.lastMark = now
+	if sameAccount {
+		b.sameAccount[accountID]++
+	}
+	return true
+}
+
+// CapacitySwitchUsed reports whether the capacity-shedding switch was used.
+func (b *Budget) CapacitySwitchUsed() bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.capacitySwitch > 0
 }
 
 // ClampWait bounds an upstream-requested wait by the configured cap and the

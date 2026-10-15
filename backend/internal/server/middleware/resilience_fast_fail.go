@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
 // resilienceFastFailEligible reports whether a request takes part in the
@@ -107,4 +108,13 @@ func resilienceUserBalanceMessage() string {
 		return resilience.UserInsufficientBalanceMessage
 	}
 	return "Insufficient account balance"
+}
+
+// resilienceNoteGroup records the API key's group on the request state so
+// failover can find accounts sharing a relay host (design §6.3).
+func resilienceNoteGroup(c *gin.Context, apiKey *service.APIKey) {
+	if c == nil || c.Request == nil || apiKey == nil || apiKey.GroupID == nil {
+		return
+	}
+	resilience.StateFrom(c.Request.Context()).SetGroup(*apiKey.GroupID)
 }

@@ -93,16 +93,20 @@
 
 ## 5 请求预算与重试（spec: request-budget-and-retry）
 
-- [ ] 5.1 `resilience.Budget`：上下文挂载，包含最多尝试数 4、首输出前截止 240 秒（文本）、每账号同号重试计数，以及 `Canceled()`。
-- [ ] 5.2 接入 OpenAI 的 Responses、Chat、Messages、Images 循环；移除首输出超时只换 1 次的限制；有效换号上限取预算与 `max_account_switches` 的较小值。
-- [ ] 5.3 接入 Anthropic 网关循环（Messages、Responses、Chat 兼容）。
-- [ ] 5.4 Gemini 原地重试从 5 次降为 1 次，等待改为可取消。
-- [ ] 5.5 同号重试只用于容量降载与池模式配置码，每账号最多 1 次；容量降载只换到不同主机；账号级错误直接换号。
-- [ ] 5.6 退避加 ±20% 抖动；上游 `Retry-After` 封顶 60 秒且不超出剩余预算。
+- [x] 5.1 `resilience.Budget`：上下文挂载，包含最多尝试数 4、首输出前截止 240 秒（文本）、每账号同号重试计数，以及 `Canceled()`。
+  - 预算由中间件按路径挂到请求状态（图片、视频无首输出截止；WebSocket 不挂连接级预算）。尝试进行中到达截止时取消，随任务 6 的首输出超时一起实现。
+- [x] 5.2 接入 OpenAI 的 Responses、Chat、Messages、Images 循环；移除首输出超时只换 1 次的限制；有效换号上限取预算与 `max_account_switches` 的较小值。
+  - 偏差：WebSocket 建连首回合的换号仍按 `max_account_switches`（连接级预算会误伤长连接）；Grok 媒体、alpha search、embeddings 循环同样接入预算。
+- [x] 5.3 接入 Anthropic 网关循环（Messages、Responses、Chat 兼容）。
+- [x] 5.4 Gemini 原地重试从 5 次降为 1 次，等待改为可取消。
+  - 偏差：Antigravity 平台的智能重试（模型容量 1 秒间隔）只受首输出前截止与 `Retry-After` 上限约束，不计尝试次数；其通用重试计入预算。服务内 Anthropic 转发、透传、Bedrock 的原地重试在预算下只用于 529。
+- [x] 5.5 同号重试只用于容量降载与池模式配置码，每账号最多 1 次；容量降载只换到不同主机；账号级错误直接换号。
+- [x] 5.6 退避加 ±20% 抖动；上游 `Retry-After` 封顶 60 秒且不超出剩余预算。
 - [ ] 5.7 验证：spec 全部场景；故障注入上游组合场景；`-race`。
 
 ## 6 首包前保活、首输出超时、停滞与提交后的失败（spec: pre-output-keepalive）
 
+  - 进度（2026-10-15）：spec 场景单测与 `-race` 通过；故障注入组合场景待任务 0.5 与 12。
 - [ ] 6.1 应用侧：仅当对端是受信代理时解析 `X-XY-Edge`；按 `keepalive.edges` 判断是否经 CDN。
 - [ ] 6.2 泛化 compact 心跳原语为 `PreOutputKeepalive`：
   - 首拍延迟 15 秒、之后间隔 10 秒；

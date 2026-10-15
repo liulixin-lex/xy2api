@@ -13,7 +13,6 @@ import (
 	"io"
 	"log"
 	"math"
-	mathrand "math/rand"
 	"net/http"
 	"regexp"
 	"sort"
@@ -25,6 +24,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/geminicli"
 	"github.com/liulixin-lex/xy2api/internal/pkg/googleapi"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
 	"github.com/liulixin-lex/xy2api/internal/util/urlvalidator"
 
@@ -804,6 +804,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 
 	var resp *http.Response
 	signatureRetryStage := 0
+	inPlaceRetries := 0
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
 		upstreamReq, idHeader, err := buildReq(ctx)
 		if err != nil {
@@ -879,7 +880,9 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: detected signature-related 400, retrying with downgraded Claude blocks (%s)", account.ID, stageName)
 					geminiReq = retryGeminiReq
 					// Consume one retry budget attempt and continue with the updated request payload.
-					sleepGeminiBackoff(1)
+					if !sleepGeminiBackoffCtx(ctx, 1) {
+						return nil, ctx.Err()
+					}
 					continue
 				}
 			}
@@ -917,7 +920,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				// Mark as rate-limited early so concurrent requests avoid this account.
 				s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 			}
-			if attempt < geminiMaxRetries {
+			if attempt < geminiMaxRetries && geminiInPlaceRetryAllowed(ctx, &inPlaceRetries) {
 				upstreamReqID := resp.Header.Get(requestIDHeader)
 				if upstreamReqID == "" {
 					upstreamReqID = resp.Header.Get("x-goog-request-id")
@@ -946,7 +949,9 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				})
 
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
-				sleepGeminiBackoff(attempt)
+				if !sleepGeminiBackoffCtx(ctx, attempt) {
+					return nil, ctx.Err()
+				}
 				continue
 			}
 			// Final attempt: surface the upstream error body (mapped below) instead of a generic retry error.
@@ -1347,6 +1352,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	}
 
 	var resp *http.Response
+	inPlaceRetries := 0
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
 		upstreamReq, idHeader, err := buildReq(ctx)
 		if err != nil {
@@ -1405,7 +1411,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			if resp.StatusCode == 429 {
 				s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 			}
-			if attempt < geminiMaxRetries {
+			if attempt < geminiMaxRetries && geminiInPlaceRetryAllowed(ctx, &inPlaceRetries) {
 				upstreamReqID := resp.Header.Get(requestIDHeader)
 				if upstreamReqID == "" {
 					upstreamReqID = resp.Header.Get("x-goog-request-id")
@@ -1434,7 +1440,9 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				})
 
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
-				sleepGeminiBackoff(attempt)
+				if !sleepGeminiBackoffCtx(ctx, attempt) {
+					return nil, ctx.Err()
+				}
 				continue
 			}
 			if action == "countTokens" {
@@ -1821,20 +1829,39 @@ func (s *GeminiMessagesCompatService) writeGeminiNativeUpstreamError(c *gin.Cont
 	return fmt.Errorf("gemini upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
 }
 
-func sleepGeminiBackoff(attempt int) {
+// sleepGeminiBackoffCtx waits the exponential back-off of an in-place retry
+// with ±20 % jitter, bounded by the request budget. It returns false as soon
+// as the client is gone (xy2api resilience §6.2: no uncancellable sleeps).
+func sleepGeminiBackoffCtx(ctx context.Context, attempt int) bool {
 	delay := geminiRetryBaseDelay * time.Duration(1<<uint(attempt-1))
 	if delay > geminiRetryMaxDelay {
 		delay = geminiRetryMaxDelay
 	}
-
-	// +/- 20% jitter
-	r := mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
-	jitter := time.Duration(float64(delay) * 0.2 * (r.Float64()*2 - 1))
-	sleepFor := delay + jitter
-	if sleepFor < 0 {
-		sleepFor = 0
+	delay = resilience.Jitter(delay, 0.2)
+	if b := resilience.StateFrom(ctx).Budget(); b != nil {
+		delay = b.ClampWait(delay, time.Now())
 	}
-	time.Sleep(sleepFor)
+	return resilience.Sleep(ctx, delay)
+}
+
+// geminiInPlaceRetryAllowed reports whether a transient upstream failure may
+// be retried on the same account. Under the request budget only
+// budget.gemini_same_account_retries retries are made and each draws from
+// the budget; otherwise the 0.3.0 limit applies.
+func geminiInPlaceRetryAllowed(ctx context.Context, retries *int) bool {
+	cfg := resilience.Current()
+	if !cfg.BudgetOn() {
+		*retries++
+		return true
+	}
+	if *retries >= cfg.Budget.GeminiSameAccountRetries {
+		return false
+	}
+	if !resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(0, false, time.Now()) {
+		return false
+	}
+	*retries++
+	return true
 }
 
 var (

@@ -337,3 +337,29 @@ func TestJitterSeconds(t *testing.T) {
 		t.Fatal("floor of 1 violated")
 	}
 }
+
+func TestBudgetInPlaceRetryAndAttemptDuration(t *testing.T) {
+	s := Defaults()
+	b := NewBudget(context.Background(), &s, KindText, t0)
+	require.Equal(t, 5*time.Second, b.RecordAttemptAt(t0.Add(5*time.Second)))
+	require.Equal(t, 5*time.Second, b.LastAttemptDuration())
+
+	// A same-account in-place retry is allowed once per account.
+	require.True(t, b.ConsumeInPlaceRetry(1, true, t0.Add(6*time.Second)))
+	require.False(t, b.ConsumeInPlaceRetry(1, true, t0.Add(7*time.Second)))
+	require.Equal(t, 2, b.Attempts(), "a refused retry records nothing")
+
+	// The last attempt is never consumed in place: the handler records it.
+	require.True(t, b.ConsumeInPlaceRetry(2, false, t0.Add(8*time.Second)))
+	require.False(t, b.ConsumeInPlaceRetry(3, false, t0.Add(9*time.Second)))
+	require.Equal(t, 3, b.Attempts())
+
+	// Capacity switch bookkeeping.
+	require.False(t, b.CapacitySwitchUsed())
+	require.True(t, b.AllowCapacitySwitch())
+	require.True(t, b.CapacitySwitchUsed())
+
+	var nb *Budget
+	require.True(t, nb.ConsumeInPlaceRetry(1, true, t0))
+	require.Zero(t, nb.LastAttemptDuration())
+}

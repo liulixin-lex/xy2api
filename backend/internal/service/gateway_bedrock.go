@@ -211,7 +211,7 @@ func (s *GatewayService) executeBedrockUpstream(
 		}
 
 		if resp.StatusCode >= 400 && resp.StatusCode != 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
-			if attempt < maxRetryAttempts {
+			if attempt < maxRetryAttempts && resilienceInServiceRetryAllowed(ctx, account.ID, resp.StatusCode) {
 				elapsed := time.Since(retryStart)
 				if elapsed >= maxRetryElapsed {
 					break
