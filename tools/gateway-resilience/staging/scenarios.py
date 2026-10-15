@@ -261,6 +261,22 @@ def ka8():
     return r, checks
 
 
+@scenario("CONT-1", "Claude dispatched to a pooled relay that rejects previous_response_id: every turn succeeds")
+def cont1():
+    checks = []
+    if "R-chain-reject" not in KEYS:
+        return {"skipped": "needs .env.real"}, [{"check": "R-chain-reject fixture present", "ok": False}]
+    prompt = "Reply with one word: pong " + uuid.uuid4().hex[:8]
+    body = {"model": "claude-sonnet-5-5", "max_tokens": 64, "stream": True, "messages": [{"role": "user", "content": prompt}]}
+    mark = fault_last_id()
+    turns = [stream_request(DIRECT, "/v1/messages", KEYS["R-chain-reject"], body) for _ in range(3)]
+    recs = [x for x in fault_records_since(mark) if x["fault"] == "F25"]
+    result = {"statuses": [t["status"] for t in turns], "upstream": [x["outcome"] for x in recs]}
+    check(all(t["status"] == 200 and any("message_stop" in l for _, l in t["lines"]) for t in turns), "all three turns answered", checks)
+    check(result["upstream"].count("error_status") == 1, "one rejected chain, then continuation stays off", checks)
+    return result, checks
+
+
 @scenario("KA-4", "Heartbeat committed, then every account fails: Responses terminal frame")
 def ka4():
     checks = []

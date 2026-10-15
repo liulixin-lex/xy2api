@@ -88,6 +88,8 @@ REAL_GROUPS: dict[str, tuple[list[tuple[str, str, int]], dict]] = {
     "R-busy-stream": ([("rb-busy", "F02;after=20", 1)], {}),
     "R-claude": ([("rc-real", "REAL1", 1), ("rc-real2", "REAL3", 1)],
                  {"allow_messages_dispatch": True, "default_mapped_model": REAL_MODEL}),
+    # Claude dispatched to a pooled relay that rejects continuation (F25).
+    "R-chain-reject": ([("rcr-pooled", "F25", 1)], {"allow_messages_dispatch": True, "default_mapped_model": REAL_MODEL}),
 }
 
 USERS = {

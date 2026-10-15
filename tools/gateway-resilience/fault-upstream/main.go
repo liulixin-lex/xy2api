@@ -57,6 +57,7 @@ var scenarios = map[string]string{
 	"F22": "Gemini stream (first=seconds)",
 	"F23": "slow stream: a delta every `every` seconds for `secs` seconds, then completed with usage",
 	"F24": "relay keep-alive: empty SSE-Keep-Alive deltas (one before response.created) every `every` seconds for `secs` seconds, then response.failed busy",
+	"F25": "pooled relay: a Responses request carrying previous_response_id gets a vague 400 (Upstream request failed); others answer normally",
 	"BAL": "normal while the balance of state key=… is positive, F12 otherwise",
 	"MIX": "random fault with probability p percent (default 5), otherwise normal",
 }
@@ -438,7 +439,7 @@ func nonStreamBody(p protocol, model string, u usage) any {
 
 func answersNormally(f fault, key string) bool {
 	switch f.id {
-	case "F00", "F17", "F22", "F23", "F24":
+	case "F00", "F17", "F22", "F23", "F24", "F25":
 		return true
 	case "BAL":
 		return balances.get(key) > 0
@@ -536,6 +537,9 @@ func handle(w http.ResponseWriter, r *http.Request) {
 	if p == protoResponses && !stream && bytes.Contains(raw, []byte(`"tool_choice":"required"`)) {
 		f.params["tool"] = "1"
 	}
+	if f.id == "F25" && p == protoResponses && bytes.Contains(raw, []byte(`"previous_response_id"`)) {
+		f.params["chained"] = "1"
+	}
 	model := body.Model
 	if model == "" {
 		model = "fault-model"
@@ -594,6 +598,12 @@ func serve(ctx context.Context, w http.ResponseWriter, p protocol, path, model s
 			return normal(ctx, w, p, model, stream, 200*time.Millisecond, 0, "", 0)
 		}
 		return relayKeepalive(ctx, w, model, f.secs("secs", 3), f.secs("every", 1))
+	case "F25":
+		if f.params["chained"] == "1" {
+			apiError(w, p, http.StatusBadRequest, "invalid_request_error", "", "Upstream request failed")
+			return "error_status"
+		}
+		return normal(ctx, w, p, model, stream, f.secs("first", 0.2), 0, "", 0)
 	case "F00", "F17", "F22":
 		return normal(ctx, w, p, model, stream, f.secs("first", 0.2), 0, "", 0)
 	case "F01":

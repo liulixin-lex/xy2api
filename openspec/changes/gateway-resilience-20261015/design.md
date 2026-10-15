@@ -395,6 +395,7 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
 - 附带续链的请求收到 400/404/409/422，且不是完整重放同样会失败的错误（上下文超长、内容审核、图片、模型不存在）时，去掉续链按完整历史重放一次；
 - 同时对该会话在该账号上关闭续链（与“上游不支持续链”相同，时长为原有粘性 TTL），后续轮次直接完整重放，不再先失败一次；
 - 可识别的“续链不存在”仍按原逻辑只删除绑定。
+- 验证：单测 `TestForwardAsAnthropic_ContinuationRejectedReplaysAndStaysOff`；测试服务器场景 CONT-1（fault-upstream F25 模拟拒绝续链的中转）与真实中转复测。
 
 ## 10. 配置项（`gateway_resilience_settings`）
 
