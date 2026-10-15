@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -114,6 +115,7 @@ func TestOpenAIAdmissionError_ResponsesFailedIncludesGatewayCode(t *testing.T) {
 }
 
 func TestOpenAIAdmissionError_StreamingNonResponsesIncludesGatewayCode(t *testing.T) {
+	withHandlerResilience(t, func(s *resilience.Settings) { s.Keepalive.Enabled = false })
 	c, w := newGinContextForEndpoint(t, EndpointChatCompletions)
 	h := &OpenAIGatewayHandler{}
 	h.handleStreamingAwareErrorWithCode(c, http.StatusTooManyRequests, "rate_limit_error",
@@ -203,12 +205,36 @@ func TestOpenAIHandleStreamingAwareError_ResponsesStreamingJSONEscaping(t *testi
 // OpenAI handler: /v1/chat/completions streaming keeps the legacy event: error format
 // (out of scope for this fix; covered to prevent regression of unrelated paths).
 func TestOpenAIHandleStreamingAwareError_ChatCompletionsStreamingKeepsLegacy(t *testing.T) {
+	// xy2api resilience off: the 0.3.0 "event: error" frame.
+	withHandlerResilience(t, func(s *resilience.Settings) { s.Keepalive.Enabled = false })
 	c, w := newGinContextForEndpoint(t, EndpointChatCompletions)
 	h := &OpenAIGatewayHandler{}
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)
 
 	body := w.Body.String()
 	assert.True(t, strings.HasPrefix(body, "event: error\n"), "got: %q", body)
+}
+
+func TestChatCompletionsStreamingTerminalFrame(t *testing.T) {
+	// Design §7.6: data line with the original status, then [DONE].
+	withHandlerResilience(t, nil)
+	for _, write := range []func(c *gin.Context){
+		func(c *gin.Context) {
+			(&OpenAIGatewayHandler{}).handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)
+		},
+		func(c *gin.Context) {
+			(&GatewayHandler{}).handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)
+		},
+	} {
+		c, w := newGinContextForEndpoint(t, EndpointChatCompletions)
+		write(c)
+		body := w.Body.String()
+		require.True(t, strings.HasPrefix(body, "data: {"), "got: %q", body)
+		require.True(t, strings.HasSuffix(body, "\n\ndata: [DONE]\n\n"), "got: %q", body)
+		payload := strings.TrimPrefix(strings.SplitN(body, "\n", 2)[0], "data: ")
+		require.Equal(t, "upstream_error", gjson.Get(payload, "error.type").String())
+		require.Equal(t, int64(http.StatusBadGateway), gjson.Get(payload, "error.status").Int())
+	}
 }
 
 // Gateway (Anthropic-backed) handler: /v1/responses path also must emit response.failed.

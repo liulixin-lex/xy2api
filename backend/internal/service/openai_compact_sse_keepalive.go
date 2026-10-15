@@ -34,6 +34,14 @@ type openAICompactSSEKeepalive struct {
 	// 这部分字节，见 OpenAICompactKeepaliveAdjustedWrittenSize。
 	bytes int
 	stop  chan struct{}
+
+	// xy2api resilience pre-output keepalive (design §7.2): the heartbeat
+	// frame of the inbound protocol, and the protocol whose terminal frame
+	// replaces an error response written after the heartbeat committed 200.
+	frame       []byte
+	protocol    string
+	errStatus   int
+	errReplaced bool
 }
 
 // StartOpenAICompactSSEKeepalive 为已标记 body-signal 客户端流式的 compact
@@ -56,13 +64,26 @@ func StartOpenAICompactSSEKeepalive(c *gin.Context, interval time.Duration) func
 // 心跳字节由 OpenAICompactKeepaliveAdjustedWrittenSize 统一排除，因此不会污染
 // "是否已向客户端写出语义响应"的 failover 判定（见 #3887）。
 func startOpenAISSEKeepalive(c *gin.Context, interval time.Duration) func() {
+	return startSSEKeepalive(c, interval, interval, nil, "")
+}
+
+// startSSEKeepalive starts a heartbeat whose first beat comes after
+// firstDelay and the following ones every interval. frame nil writes the
+// compact comment line; a non-empty protocol enables the committed-error
+// rewrite of the pre-output keepalive.
+func startSSEKeepalive(c *gin.Context, firstDelay, interval time.Duration, frame []byte, protocol string) func() {
 	if c == nil || c.Writer == nil || interval <= 0 {
 		return func() {}
 	}
+	if firstDelay < 0 {
+		firstDelay = 0
+	}
 	originalWriter := c.Writer
 	k := &openAICompactSSEKeepalive{
-		writer: originalWriter,
-		stop:   make(chan struct{}),
+		writer:   originalWriter,
+		stop:     make(chan struct{}),
+		frame:    frame,
+		protocol: protocol,
 	}
 	c.Set(openAICompactSSEKeepaliveKey, k)
 	wrappedWriter := &openAICompactKeepaliveWriter{ResponseWriter: originalWriter, k: k}
@@ -73,7 +94,7 @@ func startOpenAISSEKeepalive(c *gin.Context, interval time.Duration) func() {
 		reqDone = c.Request.Context().Done()
 	}
 	go func() {
-		timer := time.NewTimer(interval)
+		timer := time.NewTimer(firstDelay)
 		defer timer.Stop()
 		for {
 			select {
@@ -116,7 +137,11 @@ func (k *openAICompactSSEKeepalive) beat() bool {
 		k.writer.WriteHeader(http.StatusOK)
 		k.started = true
 	}
-	n, err := k.writer.Write([]byte(": keepalive\n\n"))
+	frame := k.frame
+	if len(frame) == 0 {
+		frame = []byte(": keepalive\n\n")
+	}
+	n, err := k.writer.Write(frame)
 	k.bytes += n
 	if err != nil {
 		k.stopped = true
@@ -232,6 +257,9 @@ func (w *openAICompactKeepaliveWriter) Write(data []byte) (int, error) {
 	if w.ResponseWriter == nil {
 		return 0, nil
 	}
+	if n, replaced := w.k.replaceCommittedErrorBody(w.ResponseWriter, data); replaced {
+		return n, nil
+	}
 	return w.ResponseWriter.Write(data)
 }
 
@@ -240,12 +268,18 @@ func (w *openAICompactKeepaliveWriter) WriteString(s string) (int, error) {
 	if w.ResponseWriter == nil {
 		return 0, nil
 	}
+	if n, replaced := w.k.replaceCommittedErrorBody(w.ResponseWriter, []byte(s)); replaced {
+		return n, nil
+	}
 	return w.ResponseWriter.WriteString(s)
 }
 
 func (w *openAICompactKeepaliveWriter) WriteHeader(code int) {
 	w.suspend()
 	if w.ResponseWriter == nil {
+		return
+	}
+	if w.k.noteCommittedErrorStatus(code) {
 		return
 	}
 	w.ResponseWriter.WriteHeader(code)

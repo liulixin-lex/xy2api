@@ -3,11 +3,14 @@ package middleware
 import (
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
@@ -117,4 +120,63 @@ func resilienceNoteGroup(c *gin.Context, apiKey *service.APIKey) {
 		return
 	}
 	resilience.StateFrom(c.Request.Context()).SetGroup(*apiKey.GroupID)
+}
+
+// resilienceNoteEdge records the CDN edge marker set by the reverse proxy
+// (design §7.1). The header is only trusted when the TCP peer is one of the
+// configured trusted proxies; anything else could be forged by the client.
+func resilienceNoteEdge(c *gin.Context, cfg *config.Config) {
+	if c == nil || c.Request == nil {
+		return
+	}
+	raw := c.GetHeader(resilience.EdgeHeader)
+	if raw == "" {
+		return
+	}
+	trusted := cfg != nil && cfg.Server.TrustedProxiesConfigured && peerIsTrustedProxy(c.RemoteIP(), cfg.Server.TrustedProxies)
+	if edge := resilience.EdgeOf(raw, trusted, resilience.Current().Keepalive.Edges); edge != "" {
+		resilience.StateFrom(c.Request.Context()).SetEdge(edge)
+	}
+}
+
+type trustedProxySet struct {
+	src      []string
+	prefixes []netip.Prefix
+}
+
+var trustedProxyCache atomic.Pointer[trustedProxySet]
+
+// peerIsTrustedProxy reports whether peer belongs to the trusted proxy list
+// (IPs or CIDRs). The parsed list is cached for the static configuration.
+func peerIsTrustedProxy(peer string, proxies []string) bool {
+	if len(proxies) == 0 {
+		return false
+	}
+	addr, err := netip.ParseAddr(strings.TrimSpace(peer))
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap()
+	set := trustedProxyCache.Load()
+	if set == nil || len(set.src) != len(proxies) || &set.src[0] != &proxies[0] {
+		set = &trustedProxySet{src: proxies}
+		for _, entry := range proxies {
+			entry = strings.TrimSpace(entry)
+			if prefix, err := netip.ParsePrefix(entry); err == nil {
+				set.prefixes = append(set.prefixes, prefix.Masked())
+				continue
+			}
+			if ip, err := netip.ParseAddr(entry); err == nil {
+				ip = ip.Unmap()
+				set.prefixes = append(set.prefixes, netip.PrefixFrom(ip, ip.BitLen()))
+			}
+		}
+		trustedProxyCache.Store(set)
+	}
+	for _, prefix := range set.prefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }

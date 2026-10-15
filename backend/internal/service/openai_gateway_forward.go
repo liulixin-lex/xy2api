@@ -923,7 +923,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if wsErr == nil {
 				break
 			}
-			if c != nil && c.Writer != nil && c.Writer.Written() {
+			// xy2api resilience: pre-output heartbeats are not client output.
+			if c != nil && c.Writer != nil && openAIStreamClientOutputStarted(c, false) {
 				break
 			}
 			var taskRecoveredErr *agentIdentityTaskRecoveredError

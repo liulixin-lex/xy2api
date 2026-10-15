@@ -904,7 +904,8 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 
 	finalizeStream := func() (*OpenAIForwardResult, error) {
 		if streamFailoverErr != nil {
-			if c == nil || c.Writer == nil || !c.Writer.Written() {
+			// xy2api resilience: pre-output heartbeats are not client output.
+			if c == nil || c.Writer == nil || !openAIStreamClientOutputStarted(c, false) {
 				return nil, streamFailoverErr
 			}
 			return resultWithUsage(), streamFailoverErr

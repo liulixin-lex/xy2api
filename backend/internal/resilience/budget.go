@@ -92,6 +92,14 @@ func BudgetFrom(ctx context.Context) *Budget {
 	return b
 }
 
+// Started returns when the request started.
+func (b *Budget) Started() time.Time {
+	if b == nil {
+		return time.Time{}
+	}
+	return b.started
+}
+
 // Kind returns the request kind.
 func (b *Budget) Kind() RequestKind {
 	if b == nil {

@@ -151,3 +151,40 @@ func TestResilienceRequestBudgetKinds(t *testing.T) {
 		require.Equal(t, tc.kind == resilience.KindText, b.HasDeadline(), tc.path)
 	}
 }
+
+func TestResilienceEdgeMarkerTrustsOnlyProxies(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{}
+	cfg.Server.TrustedProxiesConfigured = true
+	cfg.Server.TrustedProxies = []string{"10.0.0.0/8", "127.0.0.1"}
+	for _, tc := range []struct {
+		peer, header, want string
+	}{
+		{"127.0.0.1:5000", "cf", "cf"},
+		{"10.1.2.3:5000", "ESA", "esa"},
+		{"203.0.113.9:5000", "cf", ""},   // forged by a direct client
+		{"127.0.0.1:5000", "akamai", ""}, // not an allowed edge
+		{"127.0.0.1:5000", "", ""},
+	} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		r := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		r.RemoteAddr = tc.peer
+		if tc.header != "" {
+			r.Header.Set(resilience.EdgeHeader, tc.header)
+		}
+		c.Request = r.WithContext(resilience.WithRequestState(r.Context(), resilience.NewRequestState()))
+		resilienceNoteEdge(c, cfg)
+		require.Equal(t, tc.want, resilience.StateFrom(c.Request.Context()).Edge(), tc.peer+" "+tc.header)
+	}
+
+	// Trusted proxies not configured: never trusted.
+	unconfigured := &config.Config{}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	r := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	r.RemoteAddr = "127.0.0.1:1"
+	r.Header.Set(resilience.EdgeHeader, "cf")
+	c.Request = r.WithContext(resilience.WithRequestState(r.Context(), resilience.NewRequestState()))
+	resilienceNoteEdge(c, unconfigured)
+	require.Empty(t, resilience.StateFrom(c.Request.Context()).Edge())
+}
