@@ -34,7 +34,8 @@
   - 实现：场景 F00–F22、`BAL`（按状态键切换余额）、`MIX`（按比例随机注入）；每个请求记录结局（完成、取消、断开、流内失败、错误状态），用于证明断开即取消上游。
 - [x] 0.6 CDN 模拟代理：可配置“首字节前读超时”和“空闲读超时”（90、125、300 秒），并能注入 `X-XY-Edge` 标记。
   - 实现：首字节超时返回 524 并取消回源，空闲超时断开客户端并取消回源；`EDGE=none` 作直连计数代理；`/_cuts`、`/_requests` 记录。
-- [ ] 0.7 真实客户端端到端测试脚本：驱动 Codex CLI、Claude Code、OpenAI/Anthropic SDK、OpenCode、go-genai/python-genai、curl，统计每个回合的请求数、最终错误文案与耗时。
+- [x] 0.7 真实客户端端到端测试脚本：驱动 Codex CLI、Claude Code、OpenAI/Anthropic SDK、OpenCode、go-genai/python-genai、curl，统计每个回合的请求数、最终错误文案与耗时。
+  - 实现：`tools/gateway-resilience/staging/clients.py`，15 个用例（隔离 HOME），按代理计数统计每回合请求数、退出码、输出尾部与耗时。
 
 ## 1 上游失败分类（spec: upstream-failure-classification）
 
@@ -73,7 +74,8 @@
   - 2026-10-16：复检接口与账号徽标随任务 9 完成；通知走现有告警：新增指标 `account_balance_exhausted_count`、`account_balance_unrecovered_count`（时长取 `balance.notify_after_hours`），迁移 276 预置同名规则并开启邮件；进入时触发、恢复时解除。
   - 进度（2026-10-15）：recheck 接口与 72 小时未恢复判定已完成；账号列表展示与通知接入待任务 9。
 - [x] 2.7 非 OpenAI 平台的 403 统一为“豁免、计数、冷却”。
-- [ ] 2.8 验证：单测加真实 PostgreSQL/Redis 集成（状态迁移、单飞、半开、多实例）；`-race`；用故障注入上游演练“没钱 → 充值 → 自动恢复”。
+- [x] 2.8 验证：单测加真实 PostgreSQL/Redis 集成（状态迁移、单飞、半开、多实例）；`-race`；用故障注入上游演练“没钱 → 充值 → 自动恢复”。
+  - `resilience_integration_test.go`（真实 PostgreSQL 18、Redis 8.4，测试服务器上以 testcontainers 运行）：会话失败与回避、16 路并发争探测锁只一个成功、RECOVERING 窗口、分组稳定、余额状态统计；韧性相关包 `-race` 通过；BAL-1、BAL-2 与浸泡中每小时断余额再恢复。
 
 ## 3 会话失败处理与末位兜底（spec: session-failure-handling）
 
@@ -85,8 +87,9 @@
 - [x] 3.4 末位兜底（两种调度器都要实现）：先转投兜底组（任务 8），否则在最高的有软罚账号的那一层，取罚期最短者；不受单次首输出超时约束。
   - 进度（2026-10-15）：兜底组转投随任务 8 实现。
 - [x] 3.5 Explain：份额调度的 Explain 显示罚则、计数、回避与兜底；原版调度新增只读 Explain。
-- [ ] 3.6 在 `tools/upstream-sync/scheduler-diff.json` 中登记新增块，`sync.py scheduler-diff` 通过。
-- [ ] 3.7 验证：
+- [x] 3.6 在 `tools/upstream-sync/scheduler-diff.json` 中登记新增块，`sync.py scheduler-diff` 通过。
+- [x] 3.7 验证：
+  - `TestResilienceSchedulingMatrix` 24 例覆盖矩阵（经中间件转组判定与组内选号两步）；份额调度与 Gateway reliability 测试随全量 unit 通过；`BenchmarkShareSchedulingSelection500` 与 0.3.0 持平（份额约 476→481 µs，原版约 309→311 µs）。缓存命中与首字在生产按 14.2 复核（测试环境流量为合成，不可比）。
   - 矩阵测试：原版或份额调度 × 单号或多号组 × 软罚、硬罚、连续失败 × 有无兜底组；
   - 现有份额调度与 Gateway reliability 测试全部通过；
   - 用现有份额调度仿真与压测工具回归，确认缓存命中与首字不劣化（design §14 最后一行）。
@@ -101,7 +104,8 @@
 - [x] 4.6 用户余额：两条路径统一为 403 `INSUFFICIENT_BALANCE` 并换用新文案；在途预留超额改为 429 `concurrent_balance_reserved` 加 `Retry-After: 5`；估算改为缓存感知并以 P99 输出为上限。验收：用生产 7 天数据只读回放，余额为正的用户被拒次数减少 ≥90%，余额为负的金额不增加。（实现完成；生产只读回放验收在 12 执行）
 - [x] 4.7 `image_task_handler.go`：准入检查放到内容审计之前；审计失败时释放准入。
 - [x] 4.9 失败回合封顶（design §9.7，测试服务器发现）：会话连续第 5 次耗尽失败改为终止应答（无 `Retry-After`、`x-should-retry: false`、`server_is_overloaded`、5xx 改 503）；真正成功或间隔超过 120 秒清零。原因：Codex 对带 `Retry-After` 的 5xx 一个回合重试 30 次、历时 871 秒；流内失败重试 6 次。
-- [ ] 4.8 验证：单测、handler 集成测试；真实客户端测试中 Codex 一个失败回合的请求数 ≤5。
+- [x] 4.8 验证：单测、handler 集成测试；真实客户端测试中 Codex 一个失败回合的请求数 ≤5。
+  - Codex 全失败回合 5 次请求、92.5 秒（修复前 30 次、871 秒）；流内失败 5 次。
 
 ## 5 请求预算与重试（spec: request-budget-and-retry）
 
@@ -114,7 +118,8 @@
   - 偏差：Antigravity 平台的智能重试（模型容量 1 秒间隔）只受首输出前截止与 `Retry-After` 上限约束，不计尝试次数；其通用重试计入预算。服务内 Anthropic 转发、透传、Bedrock 的原地重试在预算下只用于 529。
 - [x] 5.5 同号重试只用于容量降载与池模式配置码，每账号最多 1 次；容量降载只换到不同主机；账号级错误直接换号。
 - [x] 5.6 退避加 ±20% 抖动；上游 `Retry-After` 封顶 60 秒且不超出剩余预算。
-- [ ] 5.7 验证：spec 全部场景；故障注入上游组合场景；`-race`。
+- [x] 5.7 验证：spec 全部场景；故障注入上游组合场景；`-race`。
+  - 见 `evidence/coverage-matrix.md`；BUD-1、SW-1、FO-1、RL-1、ANT-2 等场景；resilience、middleware、handler、service 相关 `-race` 通过（修复一处测试数据竞争）。
 
 ## 6 首包前保活、首输出超时、停滞与提交后的失败（spec: pre-output-keepalive）
 
@@ -160,7 +165,8 @@
 - [x] 7.5 滥用保护：每 Key 每小时超过 30 次后按上游成本计费，`billing_mode='undelivered_abuse'`。
   - 实现：每 Key 每小时计数在断开判定时递增一次；超过阈值的未送达请求不取消上游（按部分送达的读取上限），拿到用量后按上游成本（账号统计成本或 total_cost × 账号倍率）计费并标 `undelivered_abuse`。上游未报用量时不计费。
 - [x] 7.6 迁移 275：`ops_error_logs` 的断开阶段与已送达字节数；499 补全耗时。
-- [ ] 7.7 验证：
+- [x] 7.7 验证：
+  - 未送达无用量行（DC-1、浸泡检查、集成测试）；XY-image 核对器（实验室与在线测试，未扣费）；计费与预留一致（单测、浸泡的重复行与孤儿预留检查）；真实 PostgreSQL 集成（`TestUndeliveredRepositoryRoundTripAndRetention`）。
   - 未送达请求在 `usage_logs` 中没有行；
   - XY-image 的核对器按“查不到即未扣费”收敛；
   - 计费与预留的账目一致性测试；
@@ -179,7 +185,8 @@
   - 实现：按兜底组倍率计费，`usage_logs.group_id` 为兜底组、`origin_group_id` 为原组；用量读取随关联批量加载原分组名，管理端与用户用量列表显示“兜底：原分组 → 实际分组”；可用渠道页的分组旁显示兜底分组与倍率（优先用户专属倍率）。
 - [x] 8.5 主组稳定 120 秒后切回（Redis 时间戳）；兜底组内绑定的 TTL 为 600 秒。
   - 偏差：“已在兜底组”的记忆按 API Key（Redis，TTL `binding_ttl_seconds`）而非会话；兜底组内的粘性绑定沿用原有 TTL。
-- [ ] 8.6 验证：spec 场景；计费与用量正确；切回不抖动；与仅限 Claude Code 的 `fallback_group_id` 互不影响。
+- [x] 8.6 验证：spec 场景；计费与用量正确；切回不抖动；与仅限 Claude Code 的 `fallback_group_id` 互不影响。
+  - FB-1、FB-2（`origin_group_id`、按兜底组倍率）；`TestAvailabilityFallbackReturnAndFlapping`；`TestAvailabilityFallbackIndependentOfClaudeCodeFallback`。
 
 ## 9 设置、管理界面、可观测与文档
 
