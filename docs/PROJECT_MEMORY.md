@@ -710,6 +710,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 2026-10-15T18:00Z 任务 5（请求预算与重试）完成并提交（`cea0fd5de`）：中间件按路径挂预算；FailoverState 与 OpenAI 各循环计尝试、同号重试按账号级失败与上限收紧、容量降载只换一次且换主机、Gemini 原地重试 5→1 且可取消。全量 unit 与相关 `-race` 通过。偏差（WebSocket 首回合、Antigravity 智能重试）记在 tasks 5.2/5.4；尝试中途到截止时取消随任务 6 实现。
 - 2026-10-15T20:00Z 任务 6（首包前保活、首输出超时、停滞、终止帧）代码完成并提交（`38e65c253`、`aaa154f03`），6.7 留待测试服务器 CDN 模拟验证。要点：预热复用 compact 心跳上下文键；`X-XY-Edge` 只信任 `SERVER_TRUSTED_PROXIES` 内的对端（部署前提，需写入 runbook）；Anthropic 首事件守卫取消不再被当作客户端断开。
   - 教训：handler 包里无 build tag 的测试文件引用了 unit tag 文件中的辅助函数，导致 `go test ./...`（Makefile test 目标）与 integration/e2e 构建失败；已把辅助文件去掉 tag。今后改测试后要分别跑 `go vet`、`-tags=unit`、`-tags=integration`、`-tags=e2e`。
+- 2026-10-15T22:00Z 任务 7（客户端断开与计费）完成并提交（`28326275d`）：迁移 272–275 已一次写入（含任务 8 的两列），临时 PostgreSQL 全量迁移与仓储 SQL 验证通过；真实连接端到端测试证明未送达断开会立即取消上游。滥用保护采用“超阈值不取消上游、拿到用量按上游成本计费”的实现（偏差记在 tasks 7.5）。
 
 ### 20261015-prod-ux-analysis — 生产请求日志只读分析与上线级优化方案（已完成，由 20261015-gateway-resilience 承接）
 
