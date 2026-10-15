@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -29,6 +30,23 @@ type deliveryWriter struct {
 	heartbeat atomic.Int64
 	sse       atomic.Pointer[openAICompactSSEKeepalive]
 	images    atomic.Pointer[openAIImagesJSONKeepalive]
+
+	// state of the request, for the edge marker (WriteHeader).
+	state *resilience.RequestState
+}
+
+// WriteHeader answers 503 instead of 502/504 to a request that came through
+// a CDN edge. Cloudflare replaces an origin 502 or 504 with its own plain
+// "error code: 502" page, which drops the JSON error, Retry-After and the
+// request id (staging CF-3); it passes a 503 through unchanged. Direct
+// clients keep the original status. X-XY-Upstream-Status tells which it was.
+func (w *deliveryWriter) WriteHeader(code int) {
+	if (code == http.StatusBadGateway || code == http.StatusGatewayTimeout) && !w.Written() &&
+		w.state != nil && w.state.Edge() != "" && resilience.Current().ErrorsOn() {
+		w.Header().Set("X-XY-Upstream-Status", strconv.Itoa(code))
+		code = http.StatusServiceUnavailable
+	}
+	w.ResponseWriter.WriteHeader(code)
 }
 
 func deliveryWriterFrom(c *gin.Context) *deliveryWriter {
@@ -106,7 +124,7 @@ func InstallDeliveryTracking(c *gin.Context, started time.Time) {
 	if st == nil {
 		return
 	}
-	w := &deliveryWriter{ResponseWriter: c.Writer}
+	w := &deliveryWriter{ResponseWriter: c.Writer, state: st}
 	c.Writer = w
 	c.Set(deliveryWriterKey, w)
 	st.InitDelivery(c.Request.Context(), started, w.semanticBytes)

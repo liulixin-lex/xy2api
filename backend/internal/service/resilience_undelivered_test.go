@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -152,4 +153,33 @@ func TestRecordUndeliveredRequest(t *testing.T) {
 	// Without a configured service nothing happens.
 	undeliveredRecorder.Store(nil)
 	RecordUndeliveredRequest(&UndeliveredRequest{})
+}
+
+func TestEdgeRequestsGet503InsteadOf502(t *testing.T) {
+	// Staging CF-3: Cloudflare replaces an origin 502/504 with its own plain
+	// page; a 503 keeps the JSON error and Retry-After.
+	withResilienceSettings(t, nil)
+	for _, tc := range []struct {
+		edge   string
+		status int
+		want   int
+	}{
+		{"cf", http.StatusBadGateway, http.StatusServiceUnavailable},
+		{"esa", http.StatusGatewayTimeout, http.StatusServiceUnavailable},
+		{"", http.StatusBadGateway, http.StatusBadGateway},
+		{"cf", http.StatusInternalServerError, http.StatusInternalServerError},
+	} {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		st := resilience.NewRequestState()
+		st.SetEdge(tc.edge)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(resilience.WithRequestState(context.Background(), st))
+		InstallDeliveryTracking(c, time.Now())
+		c.JSON(tc.status, gin.H{"error": gin.H{"type": "upstream_error", "message": "Upstream service temporarily unavailable"}})
+		require.Equal(t, tc.want, rec.Code, "edge=%q status=%d", tc.edge, tc.status)
+		if tc.want != tc.status {
+			require.Equal(t, strconv.Itoa(tc.status), rec.Header().Get("X-XY-Upstream-Status"))
+			require.Contains(t, rec.Body.String(), "upstream_error")
+		}
+	}
 }

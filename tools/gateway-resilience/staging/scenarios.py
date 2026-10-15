@@ -26,6 +26,8 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP, FAULT, CDN90, CDN125, CDN300, DIRECT = 18210, 18211, 18212, 18213, 18214, 18215
+# Real Cloudflare (orange cloud) and the DNS-only host of the same Caddy site.
+REAL_CF, REAL_DIRECT = "stg-cf.example.test", "stg-direct.example.test"
 KEYS = json.load(open(os.path.join(HERE, "fixtures", "keys.json")))["keys"]
 
 
@@ -35,9 +37,13 @@ def now() -> float:
 
 # ---- HTTP helpers -------------------------------------------------------------
 
-def stream_request(port: int, path: str, key: str, body: dict, *, headers=None, disconnect_after=None, timeout=330):
-    """Sends a request and records every received line with its offset."""
-    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=disconnect_after if disconnect_after else timeout)
+def stream_request(port, path: str, key: str, body: dict, *, headers=None, disconnect_after=None, timeout=330):
+    """Sends a request and records every received line with its offset.
+    port is a local port, or an https host name (real Cloudflare tests)."""
+    if isinstance(port, str):
+        conn = http.client.HTTPSConnection(port, 443, timeout=disconnect_after if disconnect_after else timeout)
+    else:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=disconnect_after if disconnect_after else timeout)
     hdrs = {"Content-Type": "application/json", "Authorization": "Bearer " + key,
             "User-Agent": "xy2api-staging-scenarios/1.0", "Connection": "close"}
     if headers:
@@ -430,6 +436,48 @@ def gem1():
                        {"contents": [{"role": "user", "parts": [{"text": "hello"}]}]})
     check(r["status"] == 200, "status 200", checks)
     check(not any(l.startswith(":") for _, l in r["lines"]), "no comment lines for Gemini clients", checks)
+    return r, checks
+
+
+@scenario("CF-1", "Real Cloudflare: upstream headers after 150 s, heartbeat keeps the request past the 100-125 s edge timeout")
+def cf1():
+    checks = []
+    r = stream_request(REAL_CF, "/v1/responses", KEYS["G-slow-150"], responses_body())
+    hb = heartbeats(r)
+    check(r["status"] == 200, "status 200", checks)
+    check(r["headers"].get("server") == "cloudflare", "answered through Cloudflare", checks)
+    check(bool(hb) and hb[0] <= 20, "heartbeat from about 15 s", checks)
+    check(any("response.completed" in l for _, l in r["lines"]), "completed after 150 s", checks)
+    return r, checks
+
+
+@scenario("CF-2", "DNS-only host: no edge marker, so no early heartbeat")
+def cf2():
+    checks = []
+    r = stream_request(REAL_DIRECT, "/v1/responses", KEYS["G-slow-150"], responses_body())
+    check(r["status"] == 200, "status 200", checks)
+    check(not heartbeats(r) or heartbeats(r)[0] >= 140, "no pre-output heartbeat", checks)
+    check(any("response.completed" in l for _, l in r["lines"]), "completed", checks)
+    return r, checks
+
+
+@scenario("CF-3", "Real Cloudflare passes the gateway's Retry-After")
+def cf3():
+    checks = []
+    r = stream_request(REAL_CF, "/v1/responses", KEYS["G-503-single"], responses_body(stream=False))
+    ra = int(r["headers"].get("retry-after", "0") or 0)
+    check(r["status"] in (502, 503), "error status", checks)
+    check(2 <= ra <= 30, f"Retry-After {ra} reached the client", checks)
+    return r, checks
+
+
+@scenario("CF-4", "Real Cloudflare: Anthropic slow headers kept alive with ping events")
+def cf4():
+    checks = []
+    r = stream_request(REAL_CF, "/v1/messages", KEYS["G-anthropic-slow"], anthropic_body())
+    check(r["status"] == 200, "status 200", checks)
+    check(any(l == "event: ping" for _, l in r["lines"]), "ping heartbeats", checks)
+    check(any("message_stop" in l for _, l in r["lines"]), "message_stop", checks)
     return r, checks
 
 

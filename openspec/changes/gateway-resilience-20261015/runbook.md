@@ -58,7 +58,7 @@
 
 API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JSON：
 
-- 状态码与原错误相同（502/503/504）；
+- 状态码一律为 503：Cloudflare 会把源站的 502/504 换成自己的纯文本页面，丢掉正文与头部（测试服务器 CF-3 实测），503 原样透传；
 - 正文：`{"error":{"type":"api_error","code":"proxy_upstream_unavailable","message":"Service temporarily unavailable, please retry"}}`；
 - 头部：`Retry-After: 5`、`X-XY-Proxy-Error: upstream_unavailable`。
 

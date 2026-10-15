@@ -7,7 +7,8 @@ base URL path, so every group behaves deterministically. Generated API keys
 are written to fixtures/keys.json (mode 0600) and never printed.
 
 Usage (on the staging host):
-    ADMIN_EMAIL=... ADMIN_PASSWORD=... [ACCEPT_ADMIN_COMPLIANCE=1] python3 fixtures.py http://127.0.0.1:18210
+    set -a; . ./.env; [ -f .env.real ] && . ./.env.real; set +a
+    [ACCEPT_ADMIN_COMPLIANCE=1] python3 fixtures.py http://127.0.0.1:18210
 
 ACCEPT_ADMIN_COMPLIANCE=1 accepts the admin compliance commitment on this
 instance and must only be set with the operator's approval.
@@ -57,6 +58,20 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-anthropic-overloaded": ("anthropic", [("anth-529", "F16", 1)], {}),
     "G-claude-only": ("anthropic", [("cc-only", "F00", 1)], {"claude_code_only": True}),
     "G-gemini": ("gemini", [("gem-ok", "F22;first=1", 1)], {}),
+}
+
+# Groups with real relay accounts (staging-validation §6.2), created only
+# when .env.real provides REAL<n>_BASE_URL / REAL<n>_API_KEY. "REAL<n>" in an
+# account spec means that relay; anything else is a fault-upstream scenario.
+REAL_MODEL = "gpt-6-astra"
+REAL_GROUPS: dict[str, tuple[list[tuple[str, str, int]], dict]] = {
+    "R-ok": ([("real-1", "REAL1", 1), ("real-2", "REAL2", 1), ("real-3", "REAL3", 1)], {}),
+    "R-fail-first": ([("rf-502", "F07", 1), ("rf-real", "REAL1", 2)], {}),
+    "R-slow-first": ([("rs-slow", "F01;secs=600", 1), ("rs-real", "REAL2", 2)], {}),
+    "R-all-fail": ([("ra-502", "F07", 1), ("ra-503", "F09", 1)], {}),
+    "R-busy-stream": ([("rb-busy", "F02;after=20", 1)], {}),
+    "R-claude": ([("rc-real", "REAL1", 1), ("rc-real2", "REAL3", 1)],
+                 {"allow_messages_dispatch": True, "default_mapped_model": REAL_MODEL}),
 }
 
 USERS = {
@@ -110,11 +125,22 @@ def main() -> int:
             raise SystemExit("admin compliance not accepted; set ACCEPT_ADMIN_COMPLIANCE=1 only with operator approval")
         api.call("POST", "/api/v1/admin/compliance/accept", {"phrase": status["ack_phrase_zh"], "language": "zh"})
 
+    real = {}
+    for n in (1, 2, 3):
+        if os.environ.get(f"REAL{n}_BASE_URL") and os.environ.get(f"REAL{n}_API_KEY"):
+            real[f"REAL{n}"] = (os.environ[f"REAL{n}_BASE_URL"], os.environ[f"REAL{n}_API_KEY"])
+    if len(real) == 3:
+        for name, (accounts, opts) in REAL_GROUPS.items():
+            GROUPS[name] = ("openai", accounts, opts)
+
     groups = {g["name"]: g for g in items(api.call("GET", "/api/v1/admin/groups/all"))}
     for name, (platform, _, opts) in GROUPS.items():
         if name not in groups:
             body = {"name": name, "platform": platform, "rate_multiplier": 1, "subscription_type": "standard",
                     "claude_code_only": bool(opts.get("claude_code_only"))}
+            if opts.get("allow_messages_dispatch"):
+                body["allow_messages_dispatch"] = True
+                body["default_mapped_model"] = opts["default_mapped_model"]
             groups[name] = api.call("POST", "/api/v1/admin/groups", body)
     for name, (_, _, opts) in GROUPS.items():
         target = opts.get("availability_fallback")
@@ -127,8 +153,12 @@ def main() -> int:
         for aname, spec, priority in accounts:
             if aname in existing:
                 continue
+            if spec in real:
+                credentials = {"api_key": real[spec][1], "base_url": real[spec][0]}
+            else:
+                credentials = {"api_key": "sk-fault-" + aname, "base_url": FAULT + spec}
             body = {"name": aname, "platform": platform, "type": "apikey",
-                    "credentials": {"api_key": "sk-fault-" + aname, "base_url": FAULT + spec},
+                    "credentials": credentials,
                     "group_ids": [groups[gname]["id"]], "concurrency": 20, "priority": priority}
             existing[aname] = api.call("POST", "/api/v1/admin/accounts", body)
 
