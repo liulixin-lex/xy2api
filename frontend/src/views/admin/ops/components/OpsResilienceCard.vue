@@ -37,7 +37,7 @@
         </div>
       </div>
       <div class="mb-6 max-h-72 overflow-auto rounded-xl border border-gray-200 dark:border-dark-700">
-        <table class="min-w-full text-left text-xs">
+        <table class="min-w-full whitespace-nowrap text-left text-xs">
           <thead class="sticky top-0 bg-white dark:bg-dark-800">
             <tr class="border-b border-gray-200 text-gray-500 dark:border-dark-700 dark:text-gray-400">
               <th class="px-2 py-2 font-semibold">{{ t('admin.resilience.panel.metric') }}</th>
@@ -78,7 +78,7 @@
       {{ t('admin.resilience.undelivered.empty') }}
     </div>
     <div v-else class="max-h-96 overflow-auto rounded-xl border border-gray-200 dark:border-dark-700">
-      <table class="min-w-full text-left text-xs" data-testid="resilience-undelivered-table">
+      <table class="min-w-full whitespace-nowrap text-left text-xs" data-testid="resilience-undelivered-table">
         <thead class="sticky top-0 bg-white dark:bg-dark-800">
           <tr class="border-b border-gray-200 text-gray-500 dark:border-dark-700 dark:text-gray-400">
             <th class="px-2 py-2 font-semibold">{{ t('admin.resilience.undelivered.time') }}</th>
@@ -95,14 +95,14 @@
         </thead>
         <tbody>
           <tr v-for="rec in undelivered" :key="rec.id" class="border-b border-gray-100 text-gray-700 last:border-b-0 dark:border-dark-800 dark:text-gray-200">
-            <td class="whitespace-nowrap px-2 py-1.5">{{ formatDateTime(rec.created_at) }}</td>
+            <td class="px-2 py-1.5">{{ formatDateTime(rec.created_at) }}</td>
             <td class="px-2 py-1.5">{{ stageLabel(rec.disconnect_stage) }}</td>
-            <td class="whitespace-nowrap px-2 py-1.5">{{ formatSeconds(rec.duration_ms) }}</td>
+            <td class="px-2 py-1.5">{{ formatSeconds(rec.duration_ms) }}</td>
             <td class="px-2 py-1.5">{{ rec.user_id ? `#${rec.user_id}` : '-' }}</td>
             <td class="px-2 py-1.5">{{ rec.api_key_id ? `#${rec.api_key_id}` : '-' }}</td>
             <td class="px-2 py-1.5">{{ rec.group_id ? `#${rec.group_id}` : '-' }}</td>
-            <td class="break-all px-2 py-1.5">{{ rec.model || '-' }}</td>
-            <td class="break-all px-2 py-1.5">{{ rec.inbound_endpoint || '-' }}</td>
+            <td class="px-2 py-1.5">{{ rec.model || '-' }}</td>
+            <td class="px-2 py-1.5">{{ rec.inbound_endpoint || '-' }}</td>
             <td class="px-2 py-1.5 text-right">{{ rec.estimated_upstream_cost > 0 ? formatCostFixed(rec.estimated_upstream_cost, 6) : '-' }}</td>
             <td class="px-2 py-1.5">
               <span :class="rec.billed ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'">
