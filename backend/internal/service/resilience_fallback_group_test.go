@@ -218,3 +218,35 @@ func TestSoleCandidateIsLastCandidate(t *testing.T) {
 	r.lastResortGroups.entries = nil
 	require.True(t, resilienceLastCandidate(ctx, 2), "other platforms do not count")
 }
+
+func TestAvailabilityFallbackIndependentOfClaudeCodeFallback(t *testing.T) {
+	// Spec: availability_fallback_group_id is independent of the
+	// Claude-Code-only fallback_group_id.
+	ctx := context.Background()
+	cc, back := int64(6), int64(1)
+	repo := &fallbackGroupRepo{groups: map[int64]*Group{
+		1: {ID: 1, Platform: PlatformOpenAI, Status: StatusActive, ClaudeCodeOnly: true, FallbackGroupID: &cc},
+		6: {ID: 6, Platform: PlatformOpenAI, Status: StatusActive, FallbackGroupID: &back},
+	}}
+	svc := &adminServiceImpl{groupRepo: repo}
+	require.NoError(t, svc.validateAvailabilityFallbackGroup(ctx, 1, PlatformOpenAI, "", 6),
+		"Claude Code fallbacks are not part of the availability chain")
+
+	// At run time the key moves to the availability fallback group, never to
+	// the Claude Code one, and the group keeps its Claude Code fallback.
+	r, _, _, key := newFallbackFixture(t)
+	key.Group.ClaudeCodeOnly, key.Group.FallbackGroupID = true, &cc
+	fb := r.AvailabilityFallbackGroup(ctx, key)
+	require.NotNil(t, fb)
+	require.Equal(t, int64(20), fb.ID)
+	moved := CloneAPIKeyWithGroup(key, fb)
+	require.Equal(t, int64(20), *moved.GroupID)
+	require.Equal(t, int64(6), *key.Group.FallbackGroupID)
+	require.True(t, key.Group.ClaudeCodeOnly)
+
+	// A healthy group stays; the Claude Code routing is left to its own path.
+	r2, _, accounts2, key2 := newFallbackFixture(t)
+	accounts2.byGroup[10] = []Account{healthyAccount(1)}
+	key2.Group.ClaudeCodeOnly, key2.Group.FallbackGroupID = true, &cc
+	require.Nil(t, r2.AvailabilityFallbackGroup(ctx, key2))
+}
