@@ -37,7 +37,7 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-anthropic-slow": ("anthropic", [("anth-slow150", "F01;secs=150", 1)], {}),
     "G-slow-stream": ("openai", [("slow-stream", "F23;secs=60;every=5", 1)], {}),
     "G-abuse": ("openai", [("abuse", "F17;first=150", 1)], {}),
-    "G-image-long": ("openai", [("img-long", "F18;secs=260", 1)], {}),
+    "G-image-long": ("openai", [("img-long", "F18;secs=260", 1)], {"images": True}),
     "G-busy-stream": ("openai", [("busy-a", "F02;after=20", 1), ("busy-ok", "F00", 2)], {}),
     "G-ratelimit-stream": ("openai", [("rl-stream", "F03;after=20", 1)], {}),
     "G-ctx-overflow": ("openai", [("ctx", "F05;after=1", 1)], {}),
@@ -50,7 +50,7 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-rate-noreset": ("openai", [("rl-noreset", "F14", 1)], {}),
     "G-invalid-key": ("openai", [("bad-key", "F15", 1), ("good-key", "F00", 2)], {}),
     "G-overloaded": ("openai", [("ovl-a", "F16;status=503", 1), ("ovl-ok", "F00", 2)], {}),
-    "G-image": ("openai", [("img", "F18;secs=60", 1)], {}),
+    "G-image": ("openai", [("img", "F18;secs=60", 1)], {"images": True}),
     "G-mix": ("openai", [("mix-a", "MIX;p=1", 1), ("mix-b", "MIX;p=1", 1), ("mix-c", "MIX;p=1", 1)], {}),
     # availability fallback
     "G-fallback-backup": ("openai", [("fb-backup", "F00", 1)], {}),
@@ -69,7 +69,7 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-soak-openai": ("openai", [("soak-oa-a", "MIX;p=1", 1), ("soak-oa-b", "MIX;p=1", 1), ("soak-oa-ok", "F00", 2)], {}),
     "G-soak-anthropic": ("anthropic", [("soak-an-a", "MIX;p=1", 1), ("soak-an-ok", "F00", 2)], {}),
     "G-soak-gemini": ("gemini", [("soak-gm-a", "MIX;p=1", 1), ("soak-gm-ok", "F22;first=1", 2)], {}),
-    "G-soak-image": ("openai", [("soak-img", "F18;secs=8", 1)], {}),
+    "G-soak-image": ("openai", [("soak-img", "F18;secs=8", 1)], {"images": True}),
     "G-soak-bal": ("openai", [("soak-bal", "BAL;key=soak-bal", 1)], {}),
     "G-soak-slow": ("openai", [("soak-slow", "F17;first=6", 1)], {}),
 }
@@ -162,6 +162,8 @@ def main() -> int:
                     "allow_messages_dispatch": True, "default_mapped_model": model,
                     "messages_dispatch_model_config": dispatch})
     for name, (_, _, opts) in GROUPS.items():
+        if opts.get("images") and not groups[name].get("allow_image_generation"):
+            groups[name] = api.call("PUT", f"/api/v1/admin/groups/{groups[name]['id']}", {"allow_image_generation": True})
         target = opts.get("availability_fallback")
         if target and groups[name].get("availability_fallback_group_id") != groups[target]["id"]:
             groups[name] = api.call("PUT", f"/api/v1/admin/groups/{groups[name]['id']}",
