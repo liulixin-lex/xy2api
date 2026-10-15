@@ -76,6 +76,7 @@ func (s *RateLimitService) resilienceHandleUpstreamError(ctx context.Context, ac
 		return false, false
 	}
 	res := classifyUpstreamHTTP(statusCode, headers, responseBody, upstreamMsg)
+	logUnclassified(account, statusCode, responseBody, upstreamMsg, res)
 	switch res.Category {
 	case resilience.CategoryBalance:
 		if !cfg.BalanceOn() || !resilienceBalanceEligible(account) {
@@ -390,4 +391,82 @@ func ClassifyFailoverError(e *UpstreamFailoverError) resilience.Result {
 	}
 	msg := strings.TrimSpace(extractUpstreamErrorMessage(e.ResponseBody))
 	return classifyUpstreamHTTP(e.StatusCode, e.ResponseHeaders, e.ResponseBody, msg)
+}
+
+// opsResilienceCategory classifies an upstream error event for the ops
+// record (design §2, tasks 1.2): HTTP answers by status and body, failed
+// stream events (status 200) by their code and message.
+func opsResilienceCategory(ev *OpsUpstreamErrorEvent) string {
+	if ev == nil || !resilience.Current().FailureOn() {
+		return ""
+	}
+	body := []byte(ev.UpstreamResponseBody)
+	switch {
+	case ev.UpstreamStatusCode >= 400:
+		return string(classifyUpstreamHTTP(ev.UpstreamStatusCode, nil, body, ev.Message).Category)
+	case ev.UpstreamStatusCode == http.StatusOK && (len(body) > 0 || ev.Message != ""):
+		// A Responses response.failed carries its error under "response".
+		code := strings.TrimSpace(gjson.GetBytes(body, "response.error.code").String())
+		if code == "" {
+			code = extractUpstreamErrorCode(body)
+		}
+		return string(resilience.Classify(resilience.Outcome{
+			Source:     resilience.SourceStreamEvent,
+			StatusCode: http.StatusOK,
+			Code:       code,
+			Message:    ev.Message,
+			Body:       body,
+		}, resilience.Current().Failure.BalanceKeywordsExtra).Category)
+	}
+	return ""
+}
+
+// unclassifiedSampler limits the sampled log of upstream 4xx answers that no
+// rule recognised (tasks 1.3) to about ten lines a minute per process.
+var unclassifiedSampler = struct {
+	mu     sync.Mutex
+	tokens float64
+	last   time.Time
+}{tokens: unclassifiedSampleBurst}
+
+const (
+	unclassifiedSampleBurst  = 10
+	unclassifiedSamplePerSec = 10.0 / 60
+)
+
+func sampleUnclassified(now time.Time) bool {
+	unclassifiedSampler.mu.Lock()
+	defer unclassifiedSampler.mu.Unlock()
+	if !unclassifiedSampler.last.IsZero() {
+		unclassifiedSampler.tokens = min(unclassifiedSampleBurst,
+			unclassifiedSampler.tokens+now.Sub(unclassifiedSampler.last).Seconds()*unclassifiedSamplePerSec)
+	}
+	unclassifiedSampler.last = now
+	if unclassifiedSampler.tokens < 1 {
+		return false
+	}
+	unclassifiedSampler.tokens--
+	return true
+}
+
+// logUnclassified writes a scrubbed, length-limited sample of an upstream 4xx
+// answer that only its status code classified, so new relay wordings can be
+// added to failure.balance_keywords_extra or the built-in rules.
+func logUnclassified(account *Account, statusCode int, body []byte, upstreamMsg string, res resilience.Result) {
+	// 401 and 402 mean what their status says; a 403 classified by status
+	// alone may be a balance answer in unknown words, so it is sampled.
+	if account == nil || statusCode < 400 || statusCode >= 500 || statusCode == http.StatusUnauthorized ||
+		statusCode == http.StatusPaymentRequired || !res.StatusOnly() || !sampleUnclassified(time.Now()) {
+		return
+	}
+	message := SanitizeUpstreamErrorMessage(firstNonEmpty(upstreamMsg, ExtractUpstreamErrorMessage(body)))
+	slog.Info("resilience.unclassified",
+		"account_id", account.ID,
+		"platform", account.Platform,
+		"status", statusCode,
+		"category", string(res.Category),
+		"error_type", truncateString(strings.TrimSpace(gjson.GetBytes(body, "error.type").String()), 64),
+		"error_code", truncateString(extractUpstreamErrorCode(body), 64),
+		"message", truncateString(message, 300),
+	)
 }

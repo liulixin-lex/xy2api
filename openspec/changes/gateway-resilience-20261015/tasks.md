@@ -39,17 +39,21 @@
 ## 1 上游失败分类（spec: upstream-failure-classification）
 
 - [x] 1.1 新增 `internal/resilience/classify.go`，按 design §2 实现：先看文本与 code，再看状态码；解析 `retry_after`（头、JSON 正文、Cloudflare 错误页）。
-- [ ] 1.2 在以下路径接入分类，结果写入请求上下文与 ops 记录：
+- [x] 1.2 在以下路径接入分类，结果写入请求上下文与 ops 记录：
   - `ratelimit_service.go` 的 `HandleUpstreamErrorRaw`；
   - OpenAI 上游错误与流内 failed 事件；
   - Anthropic 网关；
   - Gemini 兼容服务；
   - 透传路径。
   - 进度（2026-10-15）：共用入口 `HandleUpstreamErrorRaw` 与 `FailoverState.HandleFailoverError` 已接入；分类结果写入 ops 记录待任务 9。
-- [ ] 1.3 关键字集合可配置（`failure.balance_keywords_extra`）；未分类的上游 4xx 正文做脱敏、限长的采样日志。
+  - 完成（2026-10-16）：所有路径的上游失败事件都经 `appendOpsUpstreamError` 汇总，在那里按状态码与正文（流内失败按 `response.error.code`）补写 `resilience_category`；总开关关闭时不写。
+- [x] 1.3 关键字集合可配置（`failure.balance_keywords_extra`）；未分类的上游 4xx 正文做脱敏、限长的采样日志。
   - 进度（2026-10-15）：`balance_keywords_extra` 已生效；未分类 4xx 采样日志待做。
-- [ ] 1.4 确保本站计费错误不进入分类。
-- [ ] 1.5 验证：表驱动单测覆盖 spec 中的所有场景，以及生产采样到的文案（脱敏后）；`go test -race ./internal/resilience/...`。
+  - 完成（2026-10-16）：只按状态码归类的 4xx（401、402 除外）以 `resilience.unclassified` 采样（每进程每分钟约 10 条，文案脱敏并截断到 300 字符）。
+- [x] 1.4 确保本站计费错误不进入分类。
+  - 本站的用户余额与在途预留错误在选号前后由 `CheckBillingEligibility` 直接写回，不经过上游失败处理；多级中转时，上游 xy2api 的这类答复按含义分类（预留 429 为限流、用户余额 403 为余额、终止应答为请求级降载），见 `TestChainedGatewayErrorShapes`。
+- [x] 1.5 验证：表驱动单测覆盖 spec 中的所有场景，以及生产采样到的文案（脱敏后）；`go test -race ./internal/resilience/...`。
+  - 2026-10-16：补测生产与常见中转文案时发现 new-api 的“该令牌额度已用尽”“quota is not enough”“预扣费额度失败”被判为 AUTH（403）或限流（429），已加入内置余额关键字（`TestClassifyRelayWordings`）；`-race` 通过。
 
 ## 2 账号罚则与余额恢复（spec: account-penalties-and-balance-recovery）
 

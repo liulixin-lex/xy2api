@@ -126,6 +126,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 - 运维页“网关韧性”面板：当前实例最近 5 分钟至 1 小时的计数、账号余额状态分布、未送达请求列表。
 - 账号列表：余额状态非 `OK` 时显示徽标，悬停可见下次复检时间与证据；“已充值”按钮立即复检。
+- 运维错误详情：每次上游失败带失败分类 `resilience_category`（如 `BALANCE`、`TRANSIENT`、`CAPACITY_SHED`）。
 - 接口：
   - `GET /api/v1/admin/resilience/stats?window=15m`（窗口最长 1 小时，计数为单实例内存口径）；
   - `GET /api/v1/admin/resilience/undelivered?page=&page_size=&user_id=&api_key_id=&group_id=&since=&until=`（时间为 RFC3339）；
@@ -162,6 +163,7 @@ warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 info 级，只写应用标准输出（量大，明细已有计数或未送达表）：
 
 - `keepalive_committed`（含 `group_id`、`protocol`、`edge`）；
+- `unclassified`：只按状态码归类的上游 4xx 文案采样（脱敏、截断，每分钟约 10 条），发现新的余额文案时加入 `failure.balance_keywords_extra`；
 - `undelivered`（含阶段、耗时、推断的 CDN 切断与 `edge`）；
 - `transient_cooldown`、`transient_lifted`、`undelivered_cleanup`。
 

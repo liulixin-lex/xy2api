@@ -58,7 +58,7 @@
 
 | 类别 | 主要判据 | 换号 | 同号重试 | 账号罚则 | 会话（D4） |
 |---|---|---|---|---|---|
-| `BALANCE` | 402；code 为 `insufficient_quota`、`insufficient_user_quota`、`pre_consume_token_quota_failed`、`credit_balance_exhausted`；文本含 insufficient (account) balance、余额不足、额度不足、credit balance、usage balance exhausted 等（关键字集合可配置） | 是 | 否 | 进入余额状态机（§3.2，硬） | 立即改绑 |
+| `BALANCE` | 402；code 为 `insufficient_quota`、`insufficient_user_quota`、`pre_consume_token_quota_failed`、`credit_balance_exhausted`；文本含 insufficient (account) balance、余额不足、额度不足、credit balance、usage balance exhausted，以及 new-api 的 quota is not enough、额度已用尽、预扣费额度失败等（关键字集合可配置） | 是 | 否 | 进入余额状态机（§3.2，硬） | 立即改绑 |
 | `AUTH` | 401、invalid/revoked key；结构化的账号停用 code（`deactivated_workspace` 等） | 是 | 否 | 硬：OpenAI 维持现有 3 次规则；其他平台改为计数加临时冷却（§3.3） | 立即改绑 |
 | `RATE_LIMIT_RESET` | 429，且带明确的重置时间（头部或正文） | 是 | 否 | 软，冷却到重置时间；重置时间超过 300 秒视为硬 | 不超过 300 秒时只临时溢出；超过则改绑 |
 | `RATE_LIMIT` | 429 无重置时间；流内 `rate_limit_exceeded`；“The service is busy” 等 | 是 | 否 | 软，冷却时长取设置 `rate_limit_429_cooldown_settings`（当前 45 秒） | 计入失败计数 |
@@ -458,6 +458,7 @@ Codex 对带 `Retry-After` 的 5xx 没有次数上限：传输层每轮 5 次请
   - `resilience.undelivered`
   - `resilience.fast_fail`
   - `resilience.turn_cap`
+- **分类结果**写入每次上游失败的 ops 记录（`upstream_errors[].resilience_category`）；只按状态码归类的上游 4xx（401、402 除外）以 info 级 `resilience.unclassified` 采样记录脱敏、截断后的文案（每进程每分钟约 10 条），用于补充关键字。
   - `resilience.abuse_guard`
 - **统计接口**：`GET /api/v1/admin/resilience/stats?window=`，按分组与账号汇总以下指标：
   - 首包前心跳提交数；

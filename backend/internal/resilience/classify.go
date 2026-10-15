@@ -77,6 +77,11 @@ type Result struct {
 	Reason string
 }
 
+// StatusOnly reports whether no text, code or type rule matched and the
+// category comes from the status code alone (design §2: such 4xx bodies are
+// sampled so that new relay wordings can be added).
+func (r Result) StatusOnly() bool { return strings.HasPrefix(r.Reason, "status_") }
+
 // Hard reports whether the category puts the account in a hard state.
 func (r Result) Hard() bool {
 	switch r.Category {
@@ -160,6 +165,12 @@ var defaultBalanceKeywords = []string{
 	"not enough balance",
 	"balance exhausted",
 	"exceeded your current quota",
+	// new-api / one-api relays (token or user quota used up, pre-charge
+	// refused); without these a 403 reads as an auth failure.
+	"quota is not enough",
+	"预扣费额度失败",
+	"额度已用尽",
+	"额度用尽",
 	"余额不足",
 	"额度不足",
 	"账户余额不足",

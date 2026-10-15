@@ -258,3 +258,56 @@ func TestRetryAfterFrom(t *testing.T) {
 	require.Equal(t, time.Duration(0), RetryAfterFrom(nil, []byte(`nothing here`)))
 	require.Equal(t, 45*time.Second, RetryAfterFrom(nil, []byte(`retry_after: 45`)))
 }
+
+func TestChainedGatewayErrorShapes(t *testing.T) {
+	// tasks 1.4: this gateway's own billing answers never enter
+	// classification (they are written before any upstream attempt). Seen
+	// from a gateway that uses another xy2api as its upstream, they classify
+	// by what they mean for that account.
+	for _, tc := range []struct {
+		status int
+		body   string
+		want   Category
+	}{
+		{429, `{"error":{"type":"rate_limit_error","code":"concurrent_balance_reserved","message":"Available balance is reserved by in-flight requests (available $0.0400, reserved $0.0800); please retry shortly"}}`, CategoryRateLimit},
+		{403, `{"error":{"type":"insufficient_balance","code":"INSUFFICIENT_BALANCE","message":"Insufficient balance on your xy2api account, please recharge"}}`, CategoryBalance},
+		{503, `{"error":{"type":"api_error","code":"server_is_overloaded","message":"Upstream service temporarily unavailable"}}`, CategoryCapacityShed},
+		{503, `{"error":{"type":"api_error","code":"proxy_upstream_unavailable","message":"Service temporarily unavailable, please retry"}}`, CategoryTransient},
+	} {
+		r := Classify(Outcome{Source: SourceHTTP, StatusCode: tc.status, Body: []byte(tc.body), Message: tc.body}, nil)
+		require.Equal(t, tc.want, r.Category, tc.body)
+	}
+	require.True(t, Classify(Outcome{Source: SourceHTTP, StatusCode: 400, Body: []byte(`{"error":{"message":"bad"}}`)}, nil).StatusOnly())
+	require.False(t, Classify(Outcome{Source: SourceHTTP, StatusCode: 429, Message: "insufficient balance"}, nil).StatusOnly())
+}
+
+func TestClassifyRelayWordings(t *testing.T) {
+	// tasks 1.5: wordings seen from production relays and the common
+	// new-api / one-api answers (scrubbed). Quota used up at a relay is a
+	// recoverable balance state, never an auth failure.
+	for _, tc := range []struct {
+		status int
+		msg    string
+		want   Category
+	}{
+		{403, "该令牌额度已用尽 (request id: 2026101612)", CategoryBalance},
+		{429, "该令牌额度已用尽", CategoryBalance},
+		{403, "token quota is not enough, token remain quota: $0.01, need quota: $0.08", CategoryBalance},
+		{403, "user quota is not enough", CategoryBalance},
+		{403, "预扣费额度失败, 用户剩余额度: $0.01, 需要预扣费额度: $0.08", CategoryBalance},
+		{403, "用户额度不足, 剩余额度: $0.00", CategoryBalance},
+		{403, "billing_error: insufficient balance", CategoryBalance},
+		{403, "Insufficient account balance", CategoryBalance},
+		{429, "Upstream rate limit exceeded, please retry later", CategoryRateLimit},
+		{429, "当前分组上游负载已饱和，请稍后再试", CategoryRateLimit},
+		{429, "Resource has been exhausted (e.g. check quota).", CategoryRateLimit},
+		{503, "当前分组 default 下对于模型 gpt-6.1-sol 无可用渠道", CategoryTransient},
+		{403, "Your account has been suspended", CategoryAuth},
+	} {
+		r := Classify(Outcome{Source: SourceHTTP, StatusCode: tc.status, Message: tc.msg}, nil)
+		require.Equal(t, tc.want, r.Category, "%d %s", tc.status, tc.msg)
+	}
+	r := Classify(Outcome{Source: SourceStreamEvent, StatusCode: 200, Code: "rate_limit_exceeded",
+		Message: "Upstream rate limit exceeded, please retry later"}, nil)
+	require.Equal(t, CategoryRateLimit, r.Category, "in-stream relay rate limit")
+}
