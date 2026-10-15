@@ -954,6 +954,20 @@ func (_c *GroupCreate) SetNillableProfitSafetyBuffer(v *float64) *GroupCreate {
 	return _c
 }
 
+// SetAvailabilityFallbackGroupID sets the "availability_fallback_group_id" field.
+func (_c *GroupCreate) SetAvailabilityFallbackGroupID(v int64) *GroupCreate {
+	_c.mutation.SetAvailabilityFallbackGroupID(v)
+	return _c
+}
+
+// SetNillableAvailabilityFallbackGroupID sets the "availability_fallback_group_id" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableAvailabilityFallbackGroupID(v *int64) *GroupCreate {
+	if v != nil {
+		_c.SetAvailabilityFallbackGroupID(*v)
+	}
+	return _c
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_c *GroupCreate) AddAPIKeyIDs(ids ...int64) *GroupCreate {
 	_c.mutation.AddAPIKeyIDs(ids...)
@@ -1800,6 +1814,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ProfitSafetyBuffer(); ok {
 		_spec.SetField(group.FieldProfitSafetyBuffer, field.TypeFloat64, value)
 		_node.ProfitSafetyBuffer = value
+	}
+	if value, ok := _c.mutation.AvailabilityFallbackGroupID(); ok {
+		_spec.SetField(group.FieldAvailabilityFallbackGroupID, field.TypeInt64, value)
+		_node.AvailabilityFallbackGroupID = &value
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -3058,6 +3076,30 @@ func (u *GroupUpsert) UpdateProfitSafetyBuffer() *GroupUpsert {
 // AddProfitSafetyBuffer adds v to the "profit_safety_buffer" field.
 func (u *GroupUpsert) AddProfitSafetyBuffer(v float64) *GroupUpsert {
 	u.Add(group.FieldProfitSafetyBuffer, v)
+	return u
+}
+
+// SetAvailabilityFallbackGroupID sets the "availability_fallback_group_id" field.
+func (u *GroupUpsert) SetAvailabilityFallbackGroupID(v int64) *GroupUpsert {
+	u.Set(group.FieldAvailabilityFallbackGroupID, v)
+	return u
+}
+
+// UpdateAvailabilityFallbackGroupID sets the "availability_fallback_group_id" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateAvailabilityFallbackGroupID() *GroupUpsert {
+	u.SetExcluded(group.FieldAvailabilityFallbackGroupID)
+	return u
+}
+
+// AddAvailabilityFallbackGroupID adds v to the "availability_fallback_group_id" field.
+func (u *GroupUpsert) AddAvailabilityFallbackGroupID(v int64) *GroupUpsert {
+	u.Add(group.FieldAvailabilityFallbackGroupID, v)
+	return u
+}
+
+// ClearAvailabilityFallbackGroupID clears the value of the "availability_fallback_group_id" field.
+func (u *GroupUpsert) ClearAvailabilityFallbackGroupID() *GroupUpsert {
+	u.SetNull(group.FieldAvailabilityFallbackGroupID)
 	return u
 }
 
@@ -4394,6 +4436,34 @@ func (u *GroupUpsertOne) AddProfitSafetyBuffer(v float64) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateProfitSafetyBuffer() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateProfitSafetyBuffer()
+	})
+}
+
+// SetAvailabilityFallbackGroupID sets the "availability_fallback_group_id" field.
+func (u *GroupUpsertOne) SetAvailabilityFallbackGroupID(v int64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetAvailabilityFallbackGroupID(v)
+	})
+}
+
+// AddAvailabilityFallbackGroupID adds v to the "availability_fallback_group_id" field.
+func (u *GroupUpsertOne) AddAvailabilityFallbackGroupID(v int64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddAvailabilityFallbackGroupID(v)
+	})
+}
+
+// UpdateAvailabilityFallbackGroupID sets the "availability_fallback_group_id" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateAvailabilityFallbackGroupID() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateAvailabilityFallbackGroupID()
+	})
+}
+
+// ClearAvailabilityFallbackGroupID clears the value of the "availability_fallback_group_id" field.
+func (u *GroupUpsertOne) ClearAvailabilityFallbackGroupID() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearAvailabilityFallbackGroupID()
 	})
 }
 
@@ -5896,6 +5966,34 @@ func (u *GroupUpsertBulk) AddProfitSafetyBuffer(v float64) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateProfitSafetyBuffer() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateProfitSafetyBuffer()
+	})
+}
+
+// SetAvailabilityFallbackGroupID sets the "availability_fallback_group_id" field.
+func (u *GroupUpsertBulk) SetAvailabilityFallbackGroupID(v int64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetAvailabilityFallbackGroupID(v)
+	})
+}
+
+// AddAvailabilityFallbackGroupID adds v to the "availability_fallback_group_id" field.
+func (u *GroupUpsertBulk) AddAvailabilityFallbackGroupID(v int64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddAvailabilityFallbackGroupID(v)
+	})
+}
+
+// UpdateAvailabilityFallbackGroupID sets the "availability_fallback_group_id" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateAvailabilityFallbackGroupID() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateAvailabilityFallbackGroupID()
+	})
+}
+
+// ClearAvailabilityFallbackGroupID clears the value of the "availability_fallback_group_id" field.
+func (u *GroupUpsertBulk) ClearAvailabilityFallbackGroupID() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearAvailabilityFallbackGroupID()
 	})
 }
 

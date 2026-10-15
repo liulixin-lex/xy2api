@@ -501,6 +501,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	s.shareScheduling.observeUsage(ctx, usageLog)
 	// xy2api resilience: a client that left before any output is not billed,
 	// except at upstream cost under the abuse guard (design §8.2).
+	resilienceAnnotateUsage(ctx, usageLog)
 	if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {
 		return nil
 	}

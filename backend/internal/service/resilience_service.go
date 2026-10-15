@@ -53,6 +53,13 @@ type ResilienceStore interface {
 	// IncrUndelivered counts undelivered requests of an API key in one hour.
 	IncrUndelivered(ctx context.Context, apiKeyID int64, hour string) (int64, error)
 
+	// MarkFallbackKey remembers for ttl that an API key was served by the
+	// availability fallback group of groupID; FallbackKey reads and
+	// ClearFallbackKey forgets it (design §5).
+	MarkFallbackKey(ctx context.Context, groupID, apiKeyID int64, ttl time.Duration) error
+	FallbackKey(ctx context.Context, groupID, apiKeyID int64) (bool, error)
+	ClearFallbackKey(ctx context.Context, groupID, apiKeyID int64) error
+
 	// SetSessionCacheRatio stores the latest cache-read share of a session.
 	SetSessionCacheRatio(ctx context.Context, key string, ratio float64, ttl time.Duration) error
 	// SessionCacheRatio returns the stored share, ok=false when absent.
@@ -106,6 +113,11 @@ type ResilienceService struct {
 
 	// undelivered stores requests abandoned before any output.
 	undelivered UndeliveredRepository
+
+	// availability fallback groups (design §5)
+	fallbackAccounts   AccountRepository
+	fallbackGroups     GroupRepository
+	fallbackGroupCache fallbackGroupCache
 }
 
 // NewResilienceService creates the service; Start loads the settings and

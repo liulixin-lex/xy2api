@@ -302,7 +302,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	resilienceStore := repository.NewResilienceStore(redisClient)
 	resilienceRepository := repository.NewResilienceRepository(db)
 	undeliveredRepository := repository.NewUndeliveredRepository(db)
-	resilienceService := service.ProvideResilienceService(settingRepository, resilienceStore, resilienceRepository, undeliveredRepository, accountRepository, accountTestService, rateLimitService, concurrencyService, gatewayService, openAIGatewayService)
+	resilienceService := service.ProvideResilienceService(settingRepository, resilienceStore, resilienceRepository, undeliveredRepository, accountRepository, groupRepository, accountTestService, rateLimitService, concurrencyService, gatewayService, openAIGatewayService)
 	resilienceHandler := admin.NewResilienceHandler(resilienceService)
 	upstreamBillingProbeService := service.ProvideUpstreamBillingProbeService(accountRepository, accountTestService, settingService, leaderLockCache, db)
 	iqCheckService := service.ProvideIQCheckService(accountRepository, accountTestService, openAITokenProvider, concurrencyService)

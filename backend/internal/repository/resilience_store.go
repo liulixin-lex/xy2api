@@ -21,6 +21,7 @@ const (
 	resilienceGroupStablePrefix    = "xy:resil:group_stable:"
 	resilienceUndeliveredPrefix    = "xy:resil:undelivered:"
 	resilienceCacheRatioPrefix     = "xy:resil:cache_ratio:"
+	resilienceFallbackKeyPrefix    = "xy:resil:fb_key:"
 
 	// resilienceGroupStableTTL bounds a stale stability marker; the marker is
 	// refreshed whenever the group is evaluated healthy.
@@ -209,4 +210,21 @@ func (s *resilienceStore) SessionCacheRatio(ctx context.Context, key string) (fl
 		return 0, false, nil
 	}
 	return f, true, nil
+}
+
+func resilienceFallbackKey(groupID, apiKeyID int64) string {
+	return resilienceFallbackKeyPrefix + strconv.FormatInt(groupID, 10) + ":" + strconv.FormatInt(apiKeyID, 10)
+}
+
+func (s *resilienceStore) MarkFallbackKey(ctx context.Context, groupID, apiKeyID int64, ttl time.Duration) error {
+	return s.rdb.Set(ctx, resilienceFallbackKey(groupID, apiKeyID), "1", ttl).Err()
+}
+
+func (s *resilienceStore) FallbackKey(ctx context.Context, groupID, apiKeyID int64) (bool, error) {
+	n, err := s.rdb.Exists(ctx, resilienceFallbackKey(groupID, apiKeyID)).Result()
+	return n > 0, err
+}
+
+func (s *resilienceStore) ClearFallbackKey(ctx context.Context, groupID, apiKeyID int64) error {
+	return s.rdb.Del(ctx, resilienceFallbackKey(groupID, apiKeyID)).Err()
 }

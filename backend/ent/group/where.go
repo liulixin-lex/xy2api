@@ -355,6 +355,11 @@ func ProfitSafetyBuffer(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldProfitSafetyBuffer, v))
 }
 
+// AvailabilityFallbackGroupID applies equality check predicate on the "availability_fallback_group_id" field. It's identical to AvailabilityFallbackGroupIDEQ.
+func AvailabilityFallbackGroupID(v int64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldAvailabilityFallbackGroupID, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldCreatedAt, v))
@@ -2733,6 +2738,56 @@ func ProfitSafetyBufferLT(v float64) predicate.Group {
 // ProfitSafetyBufferLTE applies the LTE predicate on the "profit_safety_buffer" field.
 func ProfitSafetyBufferLTE(v float64) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldProfitSafetyBuffer, v))
+}
+
+// AvailabilityFallbackGroupIDEQ applies the EQ predicate on the "availability_fallback_group_id" field.
+func AvailabilityFallbackGroupIDEQ(v int64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldAvailabilityFallbackGroupID, v))
+}
+
+// AvailabilityFallbackGroupIDNEQ applies the NEQ predicate on the "availability_fallback_group_id" field.
+func AvailabilityFallbackGroupIDNEQ(v int64) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldAvailabilityFallbackGroupID, v))
+}
+
+// AvailabilityFallbackGroupIDIn applies the In predicate on the "availability_fallback_group_id" field.
+func AvailabilityFallbackGroupIDIn(vs ...int64) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldAvailabilityFallbackGroupID, vs...))
+}
+
+// AvailabilityFallbackGroupIDNotIn applies the NotIn predicate on the "availability_fallback_group_id" field.
+func AvailabilityFallbackGroupIDNotIn(vs ...int64) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldAvailabilityFallbackGroupID, vs...))
+}
+
+// AvailabilityFallbackGroupIDGT applies the GT predicate on the "availability_fallback_group_id" field.
+func AvailabilityFallbackGroupIDGT(v int64) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldAvailabilityFallbackGroupID, v))
+}
+
+// AvailabilityFallbackGroupIDGTE applies the GTE predicate on the "availability_fallback_group_id" field.
+func AvailabilityFallbackGroupIDGTE(v int64) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldAvailabilityFallbackGroupID, v))
+}
+
+// AvailabilityFallbackGroupIDLT applies the LT predicate on the "availability_fallback_group_id" field.
+func AvailabilityFallbackGroupIDLT(v int64) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldAvailabilityFallbackGroupID, v))
+}
+
+// AvailabilityFallbackGroupIDLTE applies the LTE predicate on the "availability_fallback_group_id" field.
+func AvailabilityFallbackGroupIDLTE(v int64) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldAvailabilityFallbackGroupID, v))
+}
+
+// AvailabilityFallbackGroupIDIsNil applies the IsNil predicate on the "availability_fallback_group_id" field.
+func AvailabilityFallbackGroupIDIsNil() predicate.Group {
+	return predicate.Group(sql.FieldIsNull(FieldAvailabilityFallbackGroupID))
+}
+
+// AvailabilityFallbackGroupIDNotNil applies the NotNil predicate on the "availability_fallback_group_id" field.
+func AvailabilityFallbackGroupIDNotNil() predicate.Group {
+	return predicate.Group(sql.FieldNotNull(FieldAvailabilityFallbackGroupID))
 }
 
 // HasAPIKeys applies the HasEdge predicate on the "api_keys" edge.

@@ -54,6 +54,17 @@ type UndeliveredRepository interface {
 	DeleteUndeliveredBefore(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
+// resilienceAnnotateUsage records the group the request was made for when
+// an availability fallback group served it (design §5).
+func resilienceAnnotateUsage(ctx context.Context, usageLog *UsageLog) {
+	if usageLog == nil {
+		return
+	}
+	if origin := resilience.StateFrom(ctx).OriginGroupID(); origin > 0 {
+		usageLog.OriginGroupID = &origin
+	}
+}
+
 // resilienceUndeliveredUsage applies the undelivered rules to a usage record
 // about to be billed. It returns true when the request must not be billed
 // at all (no usage_logs row). Under the abuse guard it rewrites the charge

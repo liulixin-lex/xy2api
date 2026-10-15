@@ -25,12 +25,13 @@ type memResilienceStore struct {
 	stable     map[int64]time.Time
 	undeliv    map[string]int64
 	ratios     map[string]float64
+	fbKeys     map[string]time.Time
 }
 
 func newMemResilienceStore() *memResilienceStore {
 	return &memResilienceStore{locks: map[int64]bool{}, gen: map[string]int64{}, recovering: map[int64]time.Time{},
 		sf: map[string]map[int64]int64{}, avoid: map[string]map[int64]time.Time{}, stable: map[int64]time.Time{},
-		undeliv: map[string]int64{}, ratios: map[string]float64{}}
+		undeliv: map[string]int64{}, ratios: map[string]float64{}, fbKeys: map[string]time.Time{}}
 }
 
 func memSessionKey(g int64, h string) string { return h + "#" + time.Duration(g).String() }
@@ -348,4 +349,29 @@ func TestVerdictFromNewAPI(t *testing.T) {
 	require.Equal(t, resilience.ProbeNegative, v)
 	_, _, ok = verdictFromNewAPI(0, 0)
 	require.False(t, ok)
+}
+
+func memFallbackKey(g, k int64) string {
+	return time.Duration(g).String() + "#" + time.Duration(k).String()
+}
+
+func (m *memResilienceStore) MarkFallbackKey(_ context.Context, g, k int64, ttl time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.fbKeys[memFallbackKey(g, k)] = time.Now().Add(ttl)
+	return nil
+}
+
+func (m *memResilienceStore) FallbackKey(_ context.Context, g, k int64) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	until, ok := m.fbKeys[memFallbackKey(g, k)]
+	return ok && time.Now().Before(until), nil
+}
+
+func (m *memResilienceStore) ClearFallbackKey(_ context.Context, g, k int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.fbKeys, memFallbackKey(g, k))
+	return nil
 }

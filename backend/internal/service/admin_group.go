@@ -527,6 +527,16 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 			return nil, err
 		}
 	}
+	// xy2api resilience: availability fallback group (design §5)
+	availabilityFallback := input.AvailabilityFallbackGroupID
+	if availabilityFallback != nil && *availabilityFallback <= 0 {
+		availabilityFallback = nil
+	}
+	if availabilityFallback != nil {
+		if err := s.validateAvailabilityFallbackGroup(ctx, 0, platform, subscriptionType, *availabilityFallback); err != nil {
+			return nil, err
+		}
+	}
 
 	// MCPXMLInject：默认为 true，仅当显式传入 false 时关闭
 	mcpXMLInject := true
@@ -622,6 +632,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		ClaudeCodeOnly:                  input.ClaudeCodeOnly,
 		FallbackGroupID:                 input.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: fallbackOnInvalidRequest,
+		AvailabilityFallbackGroupID:     availabilityFallback,
 		ModelRouting:                    input.ModelRouting,
 		MCPXMLInject:                    mcpXMLInject,
 		SupportedModelScopes:            input.SupportedModelScopes,
@@ -1006,6 +1017,22 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		}
 	}
 	group.FallbackGroupIDOnInvalidRequest = fallbackOnInvalidRequest
+
+	// xy2api resilience: availability fallback group (design §5)
+	availabilityFallback := group.AvailabilityFallbackGroupID
+	if input.AvailabilityFallbackGroupID != nil {
+		if *input.AvailabilityFallbackGroupID > 0 {
+			availabilityFallback = input.AvailabilityFallbackGroupID
+		} else {
+			availabilityFallback = nil
+		}
+	}
+	if availabilityFallback != nil {
+		if err := s.validateAvailabilityFallbackGroup(ctx, id, group.Platform, group.SubscriptionType, *availabilityFallback); err != nil {
+			return nil, err
+		}
+	}
+	group.AvailabilityFallbackGroupID = availabilityFallback
 
 	// 模型路由配置
 	if input.ModelRouting != nil {

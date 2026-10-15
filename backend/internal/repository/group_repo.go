@@ -136,6 +136,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetClaudeCodeOnly(groupIn.ClaudeCodeOnly).
 		SetNillableFallbackGroupID(groupIn.FallbackGroupID).
 		SetNillableFallbackGroupIDOnInvalidRequest(groupIn.FallbackGroupIDOnInvalidRequest).
+		SetNillableAvailabilityFallbackGroupID(groupIn.AvailabilityFallbackGroupID).
 		SetModelRoutingEnabled(groupIn.ModelRoutingEnabled).
 		SetMcpXMLInject(groupIn.MCPXMLInject).
 		SetAllowMessagesDispatch(groupIn.AllowMessagesDispatch).
@@ -427,6 +428,12 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		builder = builder.SetFallbackGroupIDOnInvalidRequest(*groupIn.FallbackGroupIDOnInvalidRequest)
 	} else {
 		builder = builder.ClearFallbackGroupIDOnInvalidRequest()
+	}
+	// xy2api resilience: availability fallback group
+	if groupIn.AvailabilityFallbackGroupID != nil {
+		builder = builder.SetAvailabilityFallbackGroupID(*groupIn.AvailabilityFallbackGroupID)
+	} else {
+		builder = builder.ClearAvailabilityFallbackGroupID()
 	}
 
 	// 处理 ModelRouting：nil 时清除，否则设置
