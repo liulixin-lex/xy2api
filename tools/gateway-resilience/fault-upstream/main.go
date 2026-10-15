@@ -55,6 +55,7 @@ var scenarios = map[string]string{
 	"F21": "Anthropic stream: message_start, then stall (secs)",
 	"F22": "Gemini stream (first=seconds)",
 	"F23": "slow stream: a delta every `every` seconds for `secs` seconds, then completed with usage",
+	"F24": "relay keep-alive: empty SSE-Keep-Alive deltas (one before response.created) every `every` seconds for `secs` seconds, then response.failed busy",
 	"BAL": "normal while the balance of state key=… is positive, F12 otherwise",
 	"MIX": "random fault with probability p percent (default 5), otherwise normal",
 }
@@ -322,6 +323,28 @@ func normal(ctx context.Context, w http.ResponseWriter, p protocol, model string
 	return "completed"
 }
 
+// relayKeepalive imitates relays that send empty "SSE-Keep-Alive" deltas,
+// the first one before response.created, and then fails before any output.
+func relayKeepalive(ctx context.Context, w http.ResponseWriter, model string, total, every time.Duration) string {
+	startSSE(w)
+	keepalive := map[string]any{"type": "response.output_text.delta", "item_id": "SSE-Keep-Alive", "output_index": 0,
+		"content_index": 0, "delta": "", "SSE-Keep-Alive": true}
+	_ = sse(w, "response.output_text.delta", keepalive)
+	id := fmt.Sprintf("resp_fault_%d", time.Now().UnixNano())
+	_ = sse(w, "response.created", map[string]any{"type": "response.created", "response": map[string]any{"id": id, "status": "in_progress", "model": model}})
+	deadline := time.Now().Add(total)
+	for time.Now().Before(deadline) {
+		if !sleepCtx(ctx, every) {
+			return "cancelled"
+		}
+		if err := sse(w, "response.output_text.delta", keepalive); err != nil {
+			return "cancelled"
+		}
+	}
+	writeFailFrame(w, protoResponses, "busy")
+	return "failed_in_stream"
+}
+
 // slowStream sends a delta every `every` until `total` has passed, then
 // finishes normally with usage (a long generation a client may abandon).
 func slowStream(ctx context.Context, w http.ResponseWriter, p protocol, model string, total, every time.Duration) string {
@@ -531,6 +554,11 @@ func serve(ctx context.Context, w http.ResponseWriter, p protocol, path, model s
 	switch f.id {
 	case "F23":
 		return slowStream(ctx, w, p, model, f.secs("secs", 60), f.secs("every", 5))
+	case "F24":
+		if p != protoResponses || !stream {
+			return normal(ctx, w, p, model, stream, 200*time.Millisecond, 0, "", 0)
+		}
+		return relayKeepalive(ctx, w, model, f.secs("secs", 3), f.secs("every", 1))
 	case "F00", "F17", "F22":
 		return normal(ctx, w, p, model, stream, f.secs("first", 0.2), 0, "", 0)
 	case "F01":

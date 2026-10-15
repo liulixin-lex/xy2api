@@ -396,6 +396,39 @@ def fb1():
     return {"response": r, "usage": row}, checks
 
 
+@scenario("FB-2", "Failover exhaustion stays in the primary group; the next request goes to the fallback group")
+def fb2():
+    checks = []
+    session = fresh_session()
+    first = stream_request(DIRECT, "/v1/responses", KEYS["G-fb2-primary"], responses_body(stream=False, session=session))
+    time.sleep(1)
+    second = stream_request(DIRECT, "/v1/responses", KEYS["G-fb2-primary"], responses_body(stream=False, session=session))
+    time.sleep(3)
+    row = psql("select g.name||'|'||coalesce(og.name,'') from usage_logs u join groups g on g.id=u.group_id "
+               "left join groups og on og.id=u.origin_group_id order by u.id desc limit 1")
+    check(first["status"] in (502, 503), "first request ends with the primary group's error", checks)
+    check(second["status"] == 200, "next request served", checks)
+    check(row == "G-fb2-backup|G-fb2-primary", f"served by the fallback group: {row}", checks)
+    return {"first": first, "second": second, "usage": row}, checks
+
+
+@scenario("KA-7", "Relay keep-alive deltas before any output: dropped, and the gateway still switches accounts")
+def ka7():
+    checks = []
+    mark = fault_last_id()
+    r = stream_request(DIRECT, "/v1/responses", KEYS["G-ka-relay"], responses_body())
+    recs = fault_records_since(mark)
+    lines = [l for _, l in r["lines"]]
+    first_data = next((l for l in lines if l.startswith("data:")), "")
+    r["upstream"] = [x["fault"] for x in recs]
+    check(r["status"] == 200, "status 200", checks)
+    check(not any("SSE-Keep-Alive" in l for l in lines), "no keep-alive frame reaches the client", checks)
+    check('"response.created"' in first_data, "first event is response.created", checks)
+    check(any("response.completed" in l for l in lines), "completed by the next account", checks)
+    check("F24" in r["upstream"] and "F00" in r["upstream"], "switched from the keep-alive relay", checks)
+    return r, checks
+
+
 @scenario("DC-1", "Client leaves before any output: upstream cancelled within 2 s, no usage row, undelivered record")
 def dc1():
     checks = []

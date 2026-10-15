@@ -8,7 +8,7 @@ Tools for the 0.4.0 gateway resilience work (`openspec/changes/gateway-resilienc
 | `first_token_calibration.sql` | First token latency per model and reasoning effort over N days (P50–P99.9) and the share above 60/120/180 seconds, to calibrate `budget.first_output_timeout_seconds`. |
 | `caddy_cuts.py` | CDN cut rate per entry (Cloudflare, ESA, direct) from Caddy JSON access logs; with `--app`, matches each cut to the application log to find requests completed (and billed) after the client was cut; share of 503 responses with `Retry-After`. |
 | `session_streaks.py` | From application JSON logs: consecutive failures of one session on one account, and the latency of requests that switched accounts and still succeeded. |
-| `fault-upstream/` | Fault-injecting upstream (Go, standard library only) with OpenAI Responses/Chat, Anthropic, Gemini, image, `/v1/usage` and new-api billing shapes. Scenarios F00–F22, `BAL` and `MIX`. |
+| `fault-upstream/` | Fault-injecting upstream (Go, standard library only) with OpenAI Responses/Chat, Anthropic, Gemini, image, `/v1/usage` and new-api billing shapes. Scenarios F00–F24, `BAL` and `MIX`. |
 | `cdn-sim/` | CDN edge simulator (Go, standard library only): first-byte and idle read timeouts, `X-XY-Edge` injection, cut and request logs. |
 
 ## Database scripts
@@ -56,6 +56,7 @@ http://fault-upstream:8080/f/F06;secs=200      (account base_url)
 | F19 / F20 | `/v1/usage` and new-api billing endpoints | `key` |
 | F21 | Anthropic `message_start`, then stall | `secs` |
 | F23 | Slow stream: a delta every `every` seconds for `secs` seconds, then completion with usage | `secs`, `every` |
+| F24 | Relay keep-alive: empty `SSE-Keep-Alive` deltas (the first before `response.created`), then `response.failed` busy (Responses streams) | `secs`, `every` |
 | BAL | Normal while the balance of `key` is positive, F12 otherwise | `key`, `first` |
 | MIX | A random fault with probability `p` percent per fault type, otherwise normal | `p` |
 

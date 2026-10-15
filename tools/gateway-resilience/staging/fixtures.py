@@ -55,6 +55,10 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     # availability fallback
     "G-fallback-backup": ("openai", [("fb-backup", "F00", 1)], {}),
     "G-fallback-primary": ("openai", [("fb-primary", "BAL;key=fb-primary", 1)], {"availability_fallback": "G-fallback-backup"}),
+    "G-fb2-backup": ("openai", [("fb2-backup", "F00", 1)], {}),
+    "G-fb2-primary": ("openai", [("fb2-a", "F07", 1), ("fb2-b", "F07", 1)], {"availability_fallback": "G-fb2-backup"}),
+    # A relay that sends SSE-Keep-Alive deltas and then fails before output.
+    "G-ka-relay": ("openai", [("ka-relay", "F24;secs=3", 1), ("ka-relay-ok", "F00", 2)], {}),
     # Anthropic and Gemini shapes
     "G-anthropic": ("anthropic", [("anth-ok", "F00", 1)], {}),
     "G-anthropic-stall": ("anthropic", [("anth-stall", "F21;secs=200", 1), ("anth-ok2", "F00", 2)], {}),
