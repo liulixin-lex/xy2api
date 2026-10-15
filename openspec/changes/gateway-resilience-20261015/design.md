@@ -449,8 +449,7 @@ Codex 对带 `Retry-After` 的 5xx 没有次数上限：传输层每轮 5 次请
 
 ## 12. 可观测性与管理界面
 
-- **结构化日志**（warn 级，进入 `ops_system_logs`），消息模板固定，正文与上游原文放在 `extra`：
-  - `resilience.classified`
+- **结构化日志**（管理员关注的为 warn 级，进入 `ops_system_logs`；量大的 `keepalive_committed`、`undelivered`、`transient_*` 为 info），消息模板固定，正文与上游原文放在 `extra`。失败分类不单独记日志，由 `resilience.transient_cooldown`、`resilience.balance_transition` 与 ops 记录的 `resilience_category` 承担：
   - `resilience.balance_transition`
   - `resilience.session_rebind`
   - `resilience.last_resort`
@@ -461,8 +460,8 @@ Codex 对带 `Retry-After` 的 5xx 没有次数上限：传输层每轮 5 次请
   - `resilience.undelivered`
   - `resilience.fast_fail`
   - `resilience.turn_cap`
-- **分类结果**写入每次上游失败的 ops 记录（`upstream_errors[].resilience_category`）；只按状态码归类的上游 4xx（401、402 除外）以 info 级 `resilience.unclassified` 采样记录脱敏、截断后的文案（每进程每分钟约 10 条），用于补充关键字。
   - `resilience.abuse_guard`
+- **分类结果**写入每次上游失败的 ops 记录（`upstream_errors[].resilience_category`）；只按状态码归类的上游 4xx（401、402 除外）以 info 级 `resilience.unclassified` 采样记录脱敏、截断后的文案（每进程每分钟约 10 条），用于补充关键字。
 - **统计接口**：`GET /api/v1/admin/resilience/stats?window=`，按分组与账号汇总以下指标：
   - 首包前心跳提交数；
   - 首输出超时换号；

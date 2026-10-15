@@ -12,8 +12,8 @@ already been cut off.
 
 Also reports how many API 503 responses carried a Retry-After header.
 
-Only aggregates are printed. Usage:
-    caddy_cuts.py [--app app.log ...] caddy.log [caddy.log.gz ...]
+Only aggregates are printed (--json: one JSON object). Usage:
+    caddy_cuts.py [--json] [--app app.log ...] caddy.log [caddy.log.gz ...]
 """
 
 from __future__ import annotations
@@ -49,6 +49,28 @@ def json_lines(paths: list[str]) -> Iterator[dict]:
                     yield json.loads(line)
                 except json.JSONDecodeError:
                     continue
+
+
+def app_line(line: str) -> dict | None:
+    """One application log line: JSON, or the console format (time, level,
+    caller, [logger,] message and JSON fields, tab separated). Kept in both
+    log scripts so each runs as a single file (python3 - on the host)."""
+    line = line.strip()
+    if line.startswith("{"):
+        try:
+            return json.loads(line)
+        except json.JSONDecodeError:
+            return None
+    parts = line.split("\t")
+    if len(parts) < 4 or not parts[-1].startswith("{"):
+        return None
+    try:
+        d = json.loads(parts[-1])
+    except json.JSONDecodeError:
+        return None
+    d.setdefault("time", parts[0])
+    d.setdefault("msg", parts[-2])
+    return d
 
 
 def first(values) -> str:
@@ -112,52 +134,49 @@ def parse_app_time(value: str) -> float | None:
 
 def app_completions(paths: list[str]) -> list[dict]:
     done = []
-    for d in json_lines(paths):
-        if d.get("msg") != "http request completed":
-            continue
-        end = parse_app_time(d.get("time") or d.get("ts") or "")
-        if end is None:
-            continue
-        latency = float(d.get("latency_ms") or 0) / 1000
-        done.append({
-            "start": end - latency,
-            "status": int(d.get("status_code") or 0),
-            "ip": d.get("client_ip") or "",
-            "path": d.get("path") or "",
-        })
+    for path in paths:
+        with open_text(path) as fh:
+            for line in fh:
+                d = app_line(line)
+                if d is None or d.get("msg") != "http request completed":
+                    continue
+                end = parse_app_time(d.get("time") or d.get("ts") or "")
+                if end is None:
+                    continue
+                latency = float(d.get("latency_ms") or 0) / 1000
+                done.append({
+                    "start": end - latency,
+                    "status": int(d.get("status_code") or 0),
+                    "ip": d.get("client_ip") or "",
+                    "path": d.get("path") or "",
+                })
     return done
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--app", action="append", default=[], help="application JSON log (repeatable)")
-    parser.add_argument("caddy", nargs="+", help="Caddy JSON access log(s)")
-    args = parser.parse_args()
-
-    rows = caddy_rows(args.caddy)
+def analyse(caddy_paths: list[str], app_paths: list[str]) -> dict:
+    """Cut and Retry-After aggregates; empty when no API row was found."""
+    rows = caddy_rows(caddy_paths)
     if not rows:
-        print("no API rows found", file=sys.stderr)
-        return 1
-    span = (datetime.datetime.fromtimestamp(min(r["ts"] for r in rows), datetime.timezone.utc),
-            datetime.datetime.fromtimestamp(max(r["ts"] for r in rows), datetime.timezone.utc))
-    print(f"window: {span[0]:%Y-%m-%dT%H:%MZ} -> {span[1]:%Y-%m-%dT%H:%MZ}, API rows: {len(rows)}")
-
+        return {}
     cuts = [r for r in rows if r["status"] in (0, 499) and r["size"] == 0 and cut_bucket(r["duration"])]
-    print("\ncut rate by entry (target < 0.3%):")
     total = collections.Counter(r["entry"] for r in rows)
     cut_by_entry = collections.Counter(r["entry"] for r in cuts)
-    for entry, n in total.most_common():
-        c = cut_by_entry.get(entry, 0)
-        print(f"  {entry:8s} requests={n:7d} cuts={c:5d} rate={100.0 * c / n:.2f}%")
-    print("cuts by timeout:", dict(collections.Counter(cut_bucket(r["duration"]) for r in cuts)))
-
+    out = {
+        "since": min(r["ts"] for r in rows),
+        "until": max(r["ts"] for r in rows),
+        "api_rows": len(rows),
+        "entries": {entry: {"requests": n, "cuts": cut_by_entry.get(entry, 0),
+                            "cut_rate_pct": round(100.0 * cut_by_entry.get(entry, 0) / n, 3)}
+                    for entry, n in total.most_common()},
+        "cuts_by_timeout": dict(collections.Counter(cut_bucket(r["duration"]) for r in cuts)),
+    }
     s503 = [r for r in rows if r["status"] == 503]
     if s503:
         with_hint = sum(1 for r in s503 if r["retry_after"])
-        print(f"\n503 with Retry-After: {with_hint}/{len(s503)} ({100.0 * with_hint / len(s503):.1f}%; target 100%)")
-
-    if args.app:
-        done = app_completions(args.app)
+        out["status_503"] = len(s503)
+        out["status_503_retry_after_pct"] = round(100.0 * with_hint / len(s503), 1)
+    if app_paths:
+        done = app_completions(app_paths)
         result = collections.Counter()
         for cut in cuts:
             candidates = [a for a in done if a["ip"] == cut["ip"] and a["path"] == cut["path"]
@@ -167,8 +186,37 @@ def main() -> int:
                 continue
             best = min(candidates, key=lambda a: abs(a["start"] - cut["start"]))
             result["app_200_after_cut" if best["status"] == 200 else f"app_{best['status']}"] += 1
+        out["cut_matches"] = dict(result)
+        out["app_200_after_cut"] = result.get("app_200_after_cut", 0)
+    return out
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--app", action="append", default=[], help="application JSON log (repeatable)")
+    parser.add_argument("--json", action="store_true", help="print one JSON object instead of text")
+    parser.add_argument("caddy", nargs="+", help="Caddy JSON access log(s)")
+    args = parser.parse_args()
+
+    out = analyse(args.caddy, args.app)
+    if not out:
+        print("no API rows found", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(out))
+        return 0
+    span = (datetime.datetime.fromtimestamp(out["since"], datetime.timezone.utc),
+            datetime.datetime.fromtimestamp(out["until"], datetime.timezone.utc))
+    print(f"window: {span[0]:%Y-%m-%dT%H:%MZ} -> {span[1]:%Y-%m-%dT%H:%MZ}, API rows: {out['api_rows']}")
+    print("\ncut rate by entry (target < 0.3%):")
+    for entry, e in out["entries"].items():
+        print(f"  {entry:8s} requests={e['requests']:7d} cuts={e['cuts']:5d} rate={e['cut_rate_pct']:.2f}%")
+    print("cuts by timeout:", out["cuts_by_timeout"])
+    if "status_503" in out:
+        print(f"\n503 with Retry-After: {out['status_503_retry_after_pct']}% of {out['status_503']} (target 100%)")
+    if "cut_matches" in out:
         print("\ncuts matched to application completions (target app_200_after_cut = 0):")
-        for key, n in result.most_common():
+        for key, n in sorted(out["cut_matches"].items(), key=lambda kv: -kv[1]):
             print(f"  {key}: {n}")
     return 0
 

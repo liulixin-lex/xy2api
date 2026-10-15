@@ -235,6 +235,7 @@
 - [ ] 12.8 XY-image 0.0.17 测试实例接入测试 xy2api，覆盖生图（同步与异步）、对话、余额核对。
 - [ ] 12.9 24 小时浸泡（混合负载与故障注入）：协程、并发槽位、预留、Redis 键、内存无泄漏；日志里没有凭据。
 - [ ] 12.10 按 design §14 核验指标；生产回放用的对照脚本输出达标报告。
+  - 对照脚本：`tools/gateway-resilience/metrics_report.py`（`collect`、`report`），配合 `metrics.sql`、`caddy_cuts.py --json`、`session_streaks.py --json`；生产 0.3.0 基线已采集（私有目录）。待最终候选浸泡后出正式报告。
 - [ ] 12.11 退出条件（全部闭环）：所有 Scenario 通过、P0/P1 缺陷为零、指标达标、升级与回退通过、真实客户端与真实 CDN 通过、XY-image 实验室通过。全部满足后才能提 PR。
 
 ## 13 PR 与发版
