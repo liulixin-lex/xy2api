@@ -163,6 +163,7 @@ var ProviderSet = wire.NewSet(
 	NewChannelCache,
 	NewShareSchedulingStore,
 	NewResilienceStore,
+	NewResilienceRepository,
 	NewContentModerationHashCache,
 
 	// Encryptors

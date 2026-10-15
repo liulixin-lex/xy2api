@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"strconv"
+
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/response"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -36,4 +38,20 @@ func (h *ResilienceHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"settings": updated, "defaults": resilience.Defaults()})
+}
+
+// RecheckBalance probes an account's upstream balance immediately, for
+// example after the administrator topped it up.
+// POST /api/v1/admin/accounts/:id/balance/recheck
+func (h *ResilienceHandler) RecheckBalance(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "Invalid account id")
+		return
+	}
+	rec, err := h.svc.RecheckBalance(c.Request.Context(), id)
+	if response.ErrorFrom(c, err) {
+		return
+	}
+	response.Success(c, rec)
 }

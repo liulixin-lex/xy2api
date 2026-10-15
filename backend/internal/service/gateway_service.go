@@ -814,6 +814,8 @@ type GatewayService struct {
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 	// shareScheduling 由 ProvideShareSchedulingService 注入；nil 时保持原版调度。
 	shareScheduling *ShareSchedulingService
+	// resilience is the xy2api gateway resilience runtime (optional).
+	resilience *ResilienceService
 }
 
 // NewGatewayService creates a new GatewayService

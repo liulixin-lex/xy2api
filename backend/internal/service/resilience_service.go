@@ -88,6 +88,7 @@ type ResilienceService struct {
 
 	successes resilienceSuccessTracker
 	rateLimit *RateLimitService
+	probe     *balanceProbeDeps
 }
 
 // NewResilienceService creates the service; Start loads the settings and

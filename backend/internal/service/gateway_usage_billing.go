@@ -814,6 +814,7 @@ func logResponseModelBillingApplied(component string, account *Account, requestI
 
 // recordUsageCore 是 RecordUsage 的核心实现。
 func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsageCoreInput) error {
+	s.resilience.NoteAccountSuccess(ctx, input.Account)
 	result := input.Result
 	apiKey := input.APIKey
 	user := input.User
