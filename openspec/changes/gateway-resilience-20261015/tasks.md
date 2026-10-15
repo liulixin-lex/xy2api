@@ -145,7 +145,8 @@
   - Anthropic：`event: error`（修复 G3）；
   - 写完立即关流。
   - 实现：已提交后的失败在消息中带 “Please try again in Ns.”（N 为组内最早恢复，2–30 秒）；Responses 码按设计映射；Chat 为 data+[DONE]；服务内的 stream_timeout 帧保持原样。
-- [ ] 6.7 验证：
+- [x] 6.7 验证：
+  - 最终候选 `d80f35fdb`：KA-1（125 秒）、KA-3（90 秒）、KA-8（300 秒）均无切断；快速失败保持原状态码（ERR-4 与单测）；心跳后换号（FO-1）；预算耗尽给可重试终止帧（KA-4、KA-8、C-codex-busy-stream）；anthropic-python 把已提交流里的 `event: error` 抛为 `APIStatusError`（C-anthropic-py-committed-error）；Gemini 不注入心跳（GEM-1），官方 OAuth 例外由单测覆盖；经真实 Cloudflare 心跳与 SSE 不被缓冲（CF-1、CF-4）。
   - 用 CDN 模拟代理验证 90、125、300 秒三档都不再切断；
   - 快速失败仍返回原状态码；
   - 心跳后仍可换号；
@@ -207,7 +208,8 @@
 - [x] 9.4 降噪：`upstream_billing_rate_sync_applied` 降为 debug；余额批量探测不写审计；`ops_system_logs.message` 只保留模板。
 - [x] 9.5 文档 `docs/GATEWAY_RESILIENCE.md`（管理员说明与配置），并加入 `.gitignore` 的 docs 白名单；更新本记忆。
   - 另：runbook 增加 `SERVER_TRUSTED_PROXIES` 前提与基于 `keepalive_committed` 的 `edge` 校验；方案文件中的主机路径与端口改为代称（真实值在仓库外私有清单）。
-- [ ] 9.6 验证：前端 lint、typecheck、全量 vitest、构建；浏览器检查 1440/390 宽度、明暗主题、键盘操作；后端 handler 与 repository 测试。
+- [x] 9.6 验证：前端 lint、typecheck、全量 vitest、构建；浏览器检查 1440/390 宽度、明暗主题、键盘操作；后端 handler 与 repository 测试。
+  - 前端 lint、vue-tsc、全量 vitest（389 文件 / 3045 用例）、构建通过；浏览器 1440/390 × 明暗共 28 次页面加载无控制台错误、无横向溢出（含运维页 Explain）；键盘可完整操作运维页 Explain，Tab 到达的元素焦点可见；handler、repository（含 PostgreSQL/Redis 集成）测试通过。
   - 进度（2026-10-15）：前端 lint、vue-tsc、全量 vitest（387 文件 / 3041 用例）与构建通过；后端 gofmt、四种构建标签的 vet、全量 unit 测试通过。浏览器检查在测试服务器上随任务 12 进行。
 
 ## 10 上游同步登记
@@ -226,21 +228,29 @@
 
 ## 12 测试服务器集成验证（见 staging-validation.md）
 
-- [ ] 12.1 部署隔离环境：Compose 项目 `xy2api-staging`，包括候选镜像、PostgreSQL 18、Redis 8、故障注入上游、CDN 模拟、测试用 Caddy 站点；不触碰已有服务。
-- [ ] 12.2 测试数据：
+- [x] 12.1 部署隔离环境：Compose 项目 `xy2api-staging`，包括候选镜像、PostgreSQL 18、Redis 8、故障注入上游、CDN 模拟、测试用 Caddy 站点；不触碰已有服务。
+  - 测试服务器独立 Compose 项目，未触碰已有服务。
+- [x] 12.2 测试数据：
+  - 夹具分组、用户与 Key、3 个真实中转 Key（只存测试服务器 0600 文件）；真实流量费用很低，中转余额下降主要来自测试环境之外。
   - 夹具分组（单号、双号、多号；原版与份额调度；有无兜底组）；
   - 用户与 Key；
   - 用户提供的真实中转测试 Key（低价模型，总预算不超过 20 美元）。
-- [ ] 12.3 故障注入矩阵：逐条覆盖 8 个 spec 的全部 Scenario，留存证据。
-- [ ] 12.4 真实客户端端到端矩阵（design §15），统计每回合请求数、错误文案与耗时。
-- [ ] 12.5 真实 CDN：经用户授权，在 Cloudflare 添加橙云测试子域，验证切断消失与心跳格式；ESA 视条件而定。
-- [ ] 12.6 用真实 new-api 系中转实测余额接口；不支持的类型确认会降级到生成探测。
-- [ ] 12.7 升级与回退演练：
+- [x] 12.3 故障注入矩阵：逐条覆盖 8 个 spec 的全部 Scenario，留存证据。
+  - 最终候选 `d80f35fdb` 场景 37/37（含新增 KA-8、CONT-1）。
+- [x] 12.4 真实客户端端到端矩阵（design §15），统计每回合请求数、错误文案与耗时。
+  - 最终候选 16/16；Codex 全失败回合 5 次请求、92.5 秒。
+- [x] 12.5 真实 CDN：经用户授权，在 Cloudflare 添加橙云测试子域，验证切断消失与心跳格式；ESA 视条件而定。
+  - CF-1..5 通过；ESA 无测试站点，以 cdn-sim 90 秒档（KA-3）验证。
+- [x] 12.6 用真实 new-api 系中转实测余额接口；不支持的类型确认会降级到生成探测。
+  - 三个中转为 sub2api 系（`/v1/usage`），强制复检 EXHAUSTED → RECOVERING；new-api 形态由 F20 与单测覆盖。
+- [x] 12.7 升级与回退演练：
+  - 最终候选（迁移至 276）：升级启动 1.2 秒、usage_logs 最长阻塞 0.11 秒；回退 0.3.0、前滚、全库备份恢复行数一致。
   - 生产只导出表结构（只读），加同量级合成数据（usage_logs 约 330 万、ops_system_logs 约 580 万、ops_error_logs 约 37 万、api_keys 约 2.5 万等）；
   - 完成 0.3.0 → 0.4.0-rc 升级，记录迁移耗时与锁；
   - 回退到 0.3.0 镜像后能正常运行；
   - 再前滚回 0.4.0-rc。
-- [ ] 12.8 XY-image 0.0.17 测试实例接入测试 xy2api，覆盖生图（同步与异步）、对话、余额核对。
+- [x] 12.8 XY-image 0.0.17 测试实例接入测试 xy2api，覆盖生图（同步与异步）、对话、余额核对。
+  - 实验室录制 59 个场景，与 0.3.0 的差异仅为新增 `Retry-After` 与 `availability_fallback_group_id`；0.0.17 与 0.0.16 回放均 181/181；在线对话 4/4。测试环境未启用对象存储，异步生图由单测与 handler 测试覆盖。
 - [ ] 12.9 24 小时浸泡（混合负载与故障注入）：协程、并发槽位、预留、Redis 键、内存无泄漏；日志里没有凭据。
 - [ ] 12.10 按 design §14 核验指标；生产回放用的对照脚本输出达标报告。
   - 对照脚本：`tools/gateway-resilience/metrics_report.py`（`collect`、`report`），配合 `metrics.sql`、`caddy_cuts.py --json`、`session_streaks.py --json`；生产 0.3.0 基线已采集（私有目录）。待最终候选浸泡后出正式报告。
