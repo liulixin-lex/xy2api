@@ -47,6 +47,7 @@
       "openspec/changes/stabilize-openai-iq-check/**",
       "openspec/changes/iq-detection-operations/**",
       "openspec/changes/replace-controlled-with-share-scheduling/**",
+      "openspec/changes/gateway-resilience-20261015/**",
       "skills/**",
       "tools/**"
     ],
@@ -306,6 +307,86 @@
     {
       "path": "backend/internal/service/openai_gateway_usage.go",
       "value": "s.shareScheduling.observeUsage(ctx, usageLog)"
+    },
+    {
+      "path": "backend/internal/service/ratelimit_service.go",
+      "value": "if handled, disable := s.resilienceHandleUpstreamError(ctx, account, statusCode, headers, responseBody, upstreamMsg); handled {"
+    },
+    {
+      "path": "backend/internal/handler/failover_loop.go",
+      "value": "if resilienceAttemptFailed(ctx, accountID, failoverErr) {"
+    },
+    {
+      "path": "backend/internal/service/gemini_messages_compat_service.go",
+      "value": "geminiInPlaceRetryAllowed(ctx, &inPlaceRetries)"
+    },
+    {
+      "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
+      "value": "geminiInPlaceRetryAllowed(ctx, &inPlaceRetries)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward.go",
+      "value": "resilienceInServiceRetryAllowed(ctx, account.ID, resp.StatusCode)"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "result, err = s.resilienceGatewaySelectionEpilogue(ctx, group, groupID, sessionHash, requestedModel, origExcluded, avoided, result, err)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "if lr := s.resilienceOpenAILastResort(lrCtx, OpenAIAccountScheduleRequest{"
+    },
+    {
+      "path": "backend/internal/service/gateway_service.go",
+      "value": "if resilienceKeepsSoftStickyBinding(account, requestedModel) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if !resilienceBindAllowed(ctx, accountID) {"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "armPreOutputKeepalive(c, service.PreOutputProtocolAnthropic, reqStream, account)"
+    },
+    {
+      "path": "backend/internal/service/gateway_upstream_response.go",
+      "value": "stallCheckBase := resilienceStallCheckBase(streamInterval)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "stallCheckBase := resilienceStallCheckBase(streamInterval)"
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "value": "if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {"
+    },
+    {
+      "path": "backend/internal/server/middleware/client_request_id.go",
+      "value": "resilienceTrackDelivery(c)"
+    },
+    {
+      "path": "backend/internal/handler/no_account_error.go",
+      "value": "applyNoAccountRetryHints(c, diag, apiKey, routingModel, classification)"
+    },
+    {
+      "path": "backend/internal/server/middleware/api_key_auth.go",
+      "value": "if resilienceFastFailReplay(c, apiKey.ID) {"
+    },
+    {
+      "path": "backend/internal/handler/gateway_inflight_reservation.go",
+      "value": "SessionKey: requestCacheSessionKey(body),"
+    },
+    {
+      "path": "backend/internal/handler/image_task_handler.go",
+      "value": "xy2api resilience: admission runs before the"
+    },
+    {
+      "path": "backend/internal/server/routes/gateway.go",
+      "value": "availabilityFallback := middleware.ResilienceAvailabilityFallback()"
     }
   ],
   "forbidden_module_paths": [
@@ -336,7 +417,14 @@
     "v0215-append-only-upgrade",
     "explicit-backup-scope-and-diagnostics",
     "async-image-storage-lifecycle",
-    "usage-metrics-consistent-units"
+    "usage-metrics-consistent-units",
+    "xy-resilience-classify-hook",
+    "xy-resilience-budget-hook",
+    "xy-resilience-session-hook",
+    "xy-resilience-keepalive-hook",
+    "xy-resilience-disconnect-hook",
+    "xy-resilience-errors-hook",
+    "xy-resilience-fallback-hook"
   ],
   "custom_patch_tests": [
     {
@@ -423,6 +511,41 @@
       "id": "usage-metrics-consistent-units",
       "path": "frontend/src/utils/__tests__/usageMetrics.spec.ts",
       "literal": "uses complete request duration even when first-token time is available"
+    },
+    {
+      "id": "xy-resilience-classify-hook",
+      "path": "backend/internal/service/resilience_penalty_test.go",
+      "literal": "func TestApplyResilienceOutcomeStreamBalanceAndStall"
+    },
+    {
+      "id": "xy-resilience-budget-hook",
+      "path": "backend/internal/handler/resilience_budget_test.go",
+      "literal": "func TestBudgetFourAttemptsAtMost"
+    },
+    {
+      "id": "xy-resilience-session-hook",
+      "path": "backend/internal/service/resilience_session_test.go",
+      "literal": "func TestSessionFailureStreakRebindsAndAvoids"
+    },
+    {
+      "id": "xy-resilience-keepalive-hook",
+      "path": "backend/internal/handler/resilience_keepalive_test.go",
+      "literal": "func TestHeartbeatThenFailoverKeepsSwitching"
+    },
+    {
+      "id": "xy-resilience-disconnect-hook",
+      "path": "backend/internal/server/middleware/resilience_delivery_test.go",
+      "literal": "func TestUndeliveredDisconnectCancelsUpstream"
+    },
+    {
+      "id": "xy-resilience-errors-hook",
+      "path": "backend/internal/handler/resilience_errors_test.go",
+      "literal": "func TestNoAccountResponseCarriesRetryAfter"
+    },
+    {
+      "id": "xy-resilience-fallback-hook",
+      "path": "backend/internal/server/middleware/resilience_fallback_test.go",
+      "literal": "func TestAvailabilityFallbackMiddlewareMovesKey"
     }
   ]
 }
