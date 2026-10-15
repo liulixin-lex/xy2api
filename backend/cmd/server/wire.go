@@ -137,6 +137,7 @@ func provideCleanup(
 	promptAudit *securityaudit.PromptService,
 	pluginManager *service.PluginManager,
 	shareScheduling *service.ShareSchedulingService,
+	resilienceSvc *service.ResilienceService,
 	imageTasks *service.ImageTaskService,
 	asyncImage *handler.AsyncImageHandler,
 ) func() {
@@ -167,6 +168,10 @@ func provideCleanup(
 			}},
 			{"ShareSchedulingService", func() error {
 				shareScheduling.Stop()
+				return nil
+			}},
+			{"ResilienceService", func() error {
+				resilienceSvc.Stop()
 				return nil
 			}},
 			{"PluginManager", func() error {

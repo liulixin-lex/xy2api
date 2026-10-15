@@ -61,6 +61,9 @@ func RegisterAdminRoutes(
 		// 份额调度
 		registerShareSchedulingRoutes(admin, h)
 
+		// 网关韧性
+		registerResilienceRoutes(admin, h)
+
 		// 公告管理
 		registerAnnouncementRoutes(admin, h)
 

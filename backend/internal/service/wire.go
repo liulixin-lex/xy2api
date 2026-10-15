@@ -923,6 +923,7 @@ var ProviderSet = wire.NewSet(
 	ProvideGeminiTokenProvider,
 	NewGeminiMessagesCompatService,
 	ProvideShareSchedulingService,
+	ProvideResilienceService,
 	ProvideAntigravityTokenProvider,
 	ProvideGrokTokenProvider,
 	ProvideOpenAITokenProvider,
@@ -1121,6 +1122,15 @@ func ProvideShareSchedulingService(repo ShareSchedulingRepository, store ShareSc
 	gateway.shareScheduling = s
 	openai.shareScheduling = s
 	s.attachGateways(gateway, openai)
+	s.Start()
+	return s
+}
+
+// ProvideResilienceService creates the gateway resilience runtime, attaches
+// it to the gateway services and starts the settings refresh. With no stored
+// settings every capability uses its documented default.
+func ProvideResilienceService(settingRepo SettingRepository, store ResilienceStore) *ResilienceService {
+	s := NewResilienceService(settingRepo, store)
 	s.Start()
 	return s
 }
