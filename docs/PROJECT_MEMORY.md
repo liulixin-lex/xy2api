@@ -4,7 +4,7 @@
 
 ## 当前交接状态
 
-### 网关韧性 0.4.0（2026-10-15，开发中：任务 1–9 已在本地分支提交；未推送、未改生产）
+### 网关韧性 0.4.0（2026-10-15T20:40Z，开发项全部完成，最终候选待测试服务器复验与 24 小时浸泡；未推送、未改生产）
 
 - 方案：`openspec/changes/gateway-resilience-20261015/`，含 proposal、design、tasks、runbook、staging-validation、xy-image-appendix、8 个 spec（42 条需求、65 个场景）与 `evidence/` 两份证据。开发在本机分支 `feat/gateway-resilience-20261015`（基于 origin/main `f8fec15a2`，未推送），进度见“进行中的工作”与 tasks.md 勾选。
 - 目标：xy2api 0.4.0（先 RC）加 XY-image 0.0.17；访谈定稿的决策 D1–D33 见 proposal。不做灰度，开发后在测试服务器完整验证，全部闭环再提 PR、发版。
@@ -16,11 +16,11 @@
 - 本仓库公开：主机地址、宿主机路径与内网网段只写私有清单，入库文档只用代称；证据只放聚合数字。
 - 生产现状：0.3.0（00:46Z 切换流量，份额调度未启用）。用户已把 ESA 回源超时调为 300s（约 06:40Z）、429 冷却调为 45s（07:05Z）、过载冷却调为 2 分钟。
 - 下一步（用户已于 2026-10-15T11:30Z 授权执行到 PR 与发版；生产部署仍需单独授权）：
-  1. 开发剩余：任务 10（上游同步登记、VERSION 0.4.0）、任务 0（故障上游、CDN 模拟、基线与 E2E 脚本）、任务 11（XY-image 0.0.17）；
-  2. 测试服务器：按 staging-validation 部署隔离环境验证（任务 12）；真实测试 Key 在需要时向用户索取；
-  3. 推送前改写本分支的方案提交 `eb361690e`，使历史中不含宿主机路径与端口（当前文件已改为代称，历史仍有）；
-  4. staging-validation 第 9 节全部勾选后提 PR，发 0.4.0-rc.1，再发 0.4.0；
-  5. 生产部署按 runbook，每次单独授权。
+  1. 最终候选（本地分支 HEAD）部署测试服务器（`/tmp/xy2-staging/redeploy2.sh`），复跑全量场景、真实客户端矩阵、浏览器检查（含 Explain 与窄屏表格）、升级演练（迁移 276）、XY-image 实验室回放；新开 24 小时浸泡（旧候选 `ed3e826f7` 的浸泡已被取代）；用 `tools/gateway-resilience/metrics_report.py` 对照生产 0.3.0 基线出指标报告；
+  2. 定稿私有目录 `staging/STAGING_REPORT.md`（含真实中转余额下降的说明：主要来自测试环境之外的使用）；
+  3. 推送分支、开 PR（CI 全绿）、0.4.0-rc.1、用 RC 制品复跑关键子集，再发 0.4.0；之后 XY-image 0.0.17（录制 0.4.0 夹具、`XY2API_VERIFIED_VERSIONS`，先给 XY-image 交接留言并经用户确认）；
+  4. 生产部署按 runbook，每次单独授权。
+- 已完成的推送前准备：分支历史已改写，不含宿主机路径与端口（本地备份分支 `backup/gateway-resilience-pre-rewrite`，验证后删除）。
 - 安全提醒：
   - 两台主机的 SSH 密码在对话中出现过，建议改用密钥登录并更换密码；
   - 只读分析时，工具输出曾短暂显示 `openai_codex_ticket_proxy_pool_v1` 设置中的部分凭据片段和一个已退役的 Caddy 金丝雀 token。两者都没有写入任何文件，建议轮换。
@@ -751,6 +751,14 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
   - XY-image：候选版本录制 59 个场景；0.0.17 与 0.0.16 回放均 181/181；新增可选在线对话测试（`6049848`，本地）4/4；Caddy 错误标记（直连与经 Cloudflare）均为 503 + `X-XY-Proxy-Error`，XY-image 映射为 `xy2api_unavailable`、未扣费、可重试。
   - 24 小时浸泡已于 18:58Z 在测试服务器启动（`soak.py`，证据目录 `soak-ed3e826f7`），预计 2026-10-16T19:10Z 结束并自动检查。
   - 分支历史已用 `git filter-branch` 改写：两份方案文档早期版本中的宿主机路径与生产端口替换为代称，39 个提交均无残留，最终树不变；改写前的本地备份分支 `backup/gateway-resilience-pre-rewrite`（不推送，验证后可删）。origin/main 仍为 `f8fec15a2`。
+- 2026-10-15T20:40Z 剩余开发与验证（本地提交至 `e378daedf`，未推送）：
+  - 新增开发：1.2–1.5（ops 记录带 `resilience_category`、按状态码归类的 4xx 采样）、2.6（余额告警指标与迁移 276 预置规则）、3.3（份额调度按罚则档位与原因码）、3.5（`GET /admin/resilience/groups/:id/explain` 只读 Explain，运维页入口；份额 Explain 附同一视图）、12.10 工具（`metrics.sql`、`metrics_report.py`，日志脚本支持 `--json` 与控制台格式）。
+  - 新增测试：调度矩阵 24 例（原版/份额 × 单/双号 × 软罚/硬罚/连败 × 有无兜底）；韧性 Redis/PostgreSQL 集成 6 例（测试服务器上用 golang 容器 + testcontainers 跑，真实 PG 18、Redis 8.4，全过）；可用性兜底与 Claude Code 兜底互不影响。
+  - `-race` 发现并修复一处测试数据竞争（图片 JSON 保活测试在心跳协程写入时读 recorder）。
+  - 完整集成测试仅 `TestPgDumperRealPostgresBackupAndAtomicRestore` 失败：容器无 `pg_restore`，v0.3.0 同样失败，属环境原因（CI 环境另行验证）。
+  - 选号基准与 0.3.0 持平（份额约 476→481 µs，原版约 309→311 µs）。前端 lint、vue-tsc、全量 vitest（389 文件 / 3045 用例）、构建通过。
+  - 生产 0.3.0 指标基线已只读采集（数据库 48 小时、Caddy 约 2.7 小时、应用日志约 19 小时），文件在仓库外 `metrics/`。注意：用户调整 CDN 超时后，生产 CF 切断率已降到 0.03%、ESA 为 0；无号 503 为 9786 次/48 小时，最长整组无号 85 分钟；生产日志只有少数请求带会话哈希，基线的“连败 P99=9”是同 Key 口径。
+  - 测试环境当前浸泡（旧候选）中的无号 503 全部来自 `G-soak-bal`：每小时刻意断余额 10 分钟、未配兜底，恢复需等下一次复检（约 18 分钟），属设计行为。
 
 ### 20261015-prod-ux-analysis — 生产请求日志只读分析与上线级优化方案（已完成，由 20261015-gateway-resilience 承接）
 
