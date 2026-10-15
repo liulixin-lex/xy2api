@@ -698,6 +698,12 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 2026-10-15T11:30Z 用户授权“开始执行”：按 `openspec/changes/gateway-resilience-20261015/tasks.md` 开发，在测试服务器部署隔离环境验证；Cloudflare 测试 DNS 已由用户配置；真实测试 Key 由用户在需要时提供。PR、发版、生产部署仍按方案在全部闭环后进行。
 - 本机分支 `feat/gateway-resilience-20261015`（基于 origin/main `f8fec15a2`，已取消上游跟踪，未推送）。Go 1.27.2 工具链在 `/tmp/xy2-toolchain`（`source /tmp/xy2-toolchain/env.sh`，SHA256 已校验）。
 - 进度以 tasks.md 勾选为准；关键发现与验证结果追加到操作日志。
+- 2026-10-15T13:30Z 已提交（本地，未推送）：核心包 `internal/resilience`（分类、预算、帧、防风暴、余额状态机，`17821b1fd`）；罚则与余额状态机接入 `HandleUpstreamError`（`9ff90e446`）；余额探测循环、`POST /admin/accounts/:id/balance/recheck`、RECOVERING 并发上限（`1279a2aea`）；会话失败改绑、回避集与两种调度器的末位兜底（`230a738a1`）。每个切片 unit 全绿（service/handler/routes/server）。
+- 注意：
+  - 运行 wire 生成必须用 `/tmp/xy2-toolchain/wiregen.sh`（会还原 go.mod/go.sum，避免发版校验和问题）；
+  - gofmt 只对自己的文件执行，`openai_token_provider_test.go` 是仓库原有未格式化文件，不要动；
+  - 调度相关上游文件的新增块要在任务 10 登记 `scheduler-diff.json`，否则 CI 的 Original scheduler diff allowlist 会失败；
+  - `TestServerTimingConnectorRecordsDriverCallsWithoutRowLifetime` 在全量并发下偶发失败、单跑通过，与本改动无关。
 
 ### 20261015-prod-ux-analysis — 生产请求日志只读分析与上线级优化方案（已完成，由 20261015-gateway-resilience 承接）
 
