@@ -64,6 +64,7 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-anthropic": ("anthropic", [("anth-ok", "F00", 1)], {}),
     "G-anthropic-stall": ("anthropic", [("anth-stall", "F21;secs=200", 1), ("anth-ok2", "F00", 2)], {}),
     "G-anthropic-overloaded": ("anthropic", [("anth-529", "F16", 1)], {}),
+    "G-anthropic-late-529": ("anthropic", [("anth-late-529", "F16;delay=20", 1)], {}),
     "G-claude-only": ("anthropic", [("cc-only", "F00", 1)], {"claude_code_only": True}),
     "G-gemini": ("gemini", [("gem-ok", "F22;first=1", 1)], {}),
     # 24-hour soak (soak.py): MIX injects each fault type at about 1% per attempt.

@@ -83,6 +83,8 @@ http://fault-upstream:8080/f/F06;secs=200      (account base_url)
 | BAL | Normal while the balance of `key` is positive, F12 otherwise | `key`, `first` |
 | MIX | A random fault with probability `p` percent per fault type, otherwise normal | `p` |
 
+Any scenario accepts `delay` (seconds) to hold the answer back, for example `F16;delay=20` to return 529 after the gateway's pre-output heartbeats.
+
 Control endpoints: `GET /_scenarios`, `GET /_requests?since=N` (outcome per request: `completed`, `cancelled`, `dropped`, `failed_in_stream`, `error_status`), `GET|POST /_control/balance?key=K&value=V`, `GET /healthz`.
 
 ## cdn-sim

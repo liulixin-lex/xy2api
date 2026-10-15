@@ -580,6 +580,12 @@ func serve(ctx context.Context, w http.ResponseWriter, p protocol, path, model s
 		return "completed"
 	}
 
+	// delay holds any scenario back, so an error can follow the gateway's
+	// pre-output heartbeats.
+	if d := f.secs("delay", 0); d > 0 && !sleepCtx(ctx, d) {
+		return "cancelled"
+	}
+
 	switch f.id {
 	case "F23":
 		return slowStream(ctx, w, p, model, f.secs("secs", 60), f.secs("every", 5))

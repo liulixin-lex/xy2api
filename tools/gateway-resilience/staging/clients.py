@@ -198,6 +198,7 @@ CASES = {
     "C-openai-py-all-fail": ("openai-py", "R-all-fail", DIRECT, "failure", 3),
     "C-openai-chat-py-cdn90": ("openai-chat-py", "R-ok", CDN90, "success", 1),
     "C-anthropic-py-ok": ("anthropic-py", "R-claude", DIRECT, "success", 1),
+    "C-anthropic-py-committed-error": ("anthropic-py", "G-anthropic-late-529", CDN125, "api_error", 1),
     "C-genai-py-cdn": ("genai-py", "G-gemini", CDN125, "success", 1),
     "C-curl-ok": ("curl", "R-ok", DIRECT, "success", 1),
 }
@@ -229,6 +230,11 @@ def run_case(cid: str, outdir: str) -> dict:
     checks = []
     if expect == "success":
         checks.append({"check": "client got an answer", "ok": succeeded})
+    elif expect == "api_error":
+        # An error event after the heartbeats committed the stream (status
+        # 200) must surface as the SDK's API error, not a parse failure.
+        checks.append({"check": "stream committed (status 200)", "ok": bool(model_reqs) and all(r["status"] == 200 for r in model_reqs)})
+        checks.append({"check": "SDK raised its API error", "ok": code != 0 and "APIStatusError" in text})
     else:
         checks.append({"check": "client failed cleanly", "ok": code != 0 or "error" in text.lower()})
     checks.append({"check": f"client requests <= {max_requests}", "ok": len(model_reqs) <= max_requests})
