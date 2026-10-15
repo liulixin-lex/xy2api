@@ -173,6 +173,12 @@ def main() -> int:
     for gname, (platform, accounts, _) in GROUPS.items():
         for aname, spec, priority in accounts:
             if aname in existing:
+                # Accounts probed before fault-upstream answered the gateway's
+                # tool probe were routed through Chat Completions; re-probe.
+                extra = existing[aname].get("extra") or {}
+                if platform == "openai" and spec not in real and extra.get("openai_responses_supported") is False:
+                    api.call("PUT", f"/api/v1/admin/accounts/{existing[aname]['id']}",
+                             {"credentials": {"api_key": "sk-fault-" + aname, "base_url": FAULT + spec}})
                 continue
             if spec in real:
                 credentials = {"api_key": real[spec][1], "base_url": real[spec][0]}

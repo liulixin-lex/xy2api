@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -435,6 +436,23 @@ func nonStreamBody(p protocol, model string, u usage) any {
 	return map[string]any{"ok": true}
 }
 
+func answersNormally(f fault, key string) bool {
+	switch f.id {
+	case "F00", "F17", "F22", "F23", "F24":
+		return true
+	case "BAL":
+		return balances.get(key) > 0
+	}
+	return false
+}
+
+func toolCallBody(model string) any {
+	return map[string]any{"id": "resp_fault_probe", "object": "response", "status": "completed", "model": model,
+		"output": []any{map[string]any{"type": "function_call", "id": "fc_fault", "call_id": "call_fault",
+			"name": "probe_ping", "arguments": `{"ok":true}`, "status": "completed"}},
+		"usage": map[string]any{"input_tokens": 40, "output_tokens": 8, "total_tokens": 48}}
+}
+
 func writeFailFrame(w http.ResponseWriter, p protocol, code string) {
 	messages := map[string]string{
 		"busy":                    "The server is busy. Please try again later.",
@@ -515,6 +533,9 @@ func handle(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(raw, &body)
 	p := protocolOf(path)
 	stream := body.Stream || strings.Contains(path, ":streamGenerateContent")
+	if p == protoResponses && !stream && bytes.Contains(raw, []byte(`"tool_choice":"required"`)) {
+		f.params["tool"] = "1"
+	}
 	model := body.Model
 	if model == "" {
 		model = "fault-model"
@@ -548,6 +569,14 @@ func serve(ctx context.Context, w http.ResponseWriter, p protocol, path, model s
 		return "completed"
 	case strings.HasSuffix(path, "/models"):
 		writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": []any{map[string]any{"id": model, "object": "model"}}})
+		return "completed"
+	}
+
+	// Real relays support tools: answer the gateway's Responses capability
+	// probe (tool_choice "required") with a function call whenever the
+	// scenario would answer normally, so accounts keep the native path.
+	if f.params["tool"] == "1" && answersNormally(f, key) {
+		writeJSON(w, http.StatusOK, toolCallBody(model))
 		return "completed"
 	}
 
