@@ -37,15 +37,22 @@ def now() -> float:
 
 def stream_request(port: int, path: str, key: str, body: dict, *, headers=None, disconnect_after=None, timeout=330):
     """Sends a request and records every received line with its offset."""
-    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
-    hdrs = {"Content-Type": "application/json", "Authorization": "Bearer " + key, "User-Agent": "xy2api-staging-scenarios/1.0"}
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=disconnect_after if disconnect_after else timeout)
+    hdrs = {"Content-Type": "application/json", "Authorization": "Bearer " + key,
+            "User-Agent": "xy2api-staging-scenarios/1.0", "Connection": "close"}
     if headers:
         hdrs.update(headers)
     start = now()
     out = {"port": port, "path": path, "status": None, "headers": {}, "lines": [], "error": None, "elapsed": None}
     try:
         conn.request("POST", path, body=json.dumps(body), headers=hdrs)
-        resp = conn.getresponse()
+        try:
+            resp = conn.getresponse()
+        except TimeoutError:
+            # Leave before the response headers arrived.
+            out["disconnected_at"] = round(now() - start, 2)
+            conn.sock.close()
+            return out
         out["status"] = resp.status
         out["headers"] = {k.lower(): v for k, v in resp.getheaders()}
         out["header_at"] = round(now() - start, 2)
@@ -54,11 +61,12 @@ def stream_request(port: int, path: str, key: str, body: dict, *, headers=None, 
                 remaining = disconnect_after - (now() - start)
                 if remaining <= 0:
                     out["disconnected_at"] = round(now() - start, 2)
-                    conn.sock.close()
+                    if conn.sock:
+                        conn.sock.close()
                     break
                 conn.sock.settimeout(remaining)
             try:
-                line = resp.fp.readline()
+                line = resp.readline()
             except TimeoutError:
                 continue
             except OSError as exc:  # connection dropped by the peer
@@ -149,10 +157,10 @@ def check(cond: bool, label: str, checks: list):
     checks.append({"check": label, "ok": bool(cond)})
 
 
-@scenario("KA-1", "CDN 125 s: heartbeat from 15 s keeps a 150 s first output alive")
+@scenario("KA-1", "CDN 125 s: upstream headers after 150 s, pre-output heartbeat from 15 s keeps the request alive")
 def ka1():
     checks = []
-    r = stream_request(CDN125, "/v1/responses", KEYS["G-long-first"], responses_body())
+    r = stream_request(CDN125, "/v1/responses", KEYS["G-slow-150"], responses_body())
     hb = heartbeats(r)
     check(r["status"] == 200, "status 200", checks)
     check(bool(hb) and 13 <= hb[0] <= 18, "first heartbeat at about 15 s", checks)
@@ -161,24 +169,45 @@ def ka1():
     return r, checks
 
 
-@scenario("KA-2", "Direct path: no heartbeat, output after 150 s")
+@scenario("KA-2", "Direct path: upstream headers after 150 s, no pre-output heartbeat")
 def ka2():
     checks = []
-    r = stream_request(DIRECT, "/v1/responses", KEYS["G-long-first"], responses_body())
+    r = stream_request(DIRECT, "/v1/responses", KEYS["G-slow-150"], responses_body())
     check(r["status"] == 200, "status 200", checks)
     check(not heartbeats(r), "no heartbeat without an edge marker", checks)
     check(any("response.completed" in l for _, l in r["lines"]), "stream completed", checks)
     return r, checks
 
 
-@scenario("KA-3", "CDN 90 s (ESA): Chat Completions heartbeat keeps the stream alive")
+@scenario("KA-3", "CDN 90 s (ESA): Chat Completions pre-output heartbeat keeps a 150 s header wait alive")
 def ka3():
     checks = []
-    r = stream_request(CDN90, "/v1/chat/completions", KEYS["G-long-first"], chat_body())
+    r = stream_request(CDN90, "/v1/chat/completions", KEYS["G-slow-150"], chat_body())
     hb = heartbeats(r)
     check(r["status"] == 200, "status 200", checks)
     check(bool(hb), "comment heartbeats present", checks)
     check(any("[DONE]" in l for _, l in r["lines"]), "stream finished with [DONE]", checks)
+    return r, checks
+
+
+@scenario("KA-5", "Existing stream keepalive: upstream headers at once, first token after 150 s through CDN 125 s")
+def ka5():
+    checks = []
+    r = stream_request(CDN125, "/v1/responses", KEYS["G-long-first"], responses_body())
+    check(r["status"] == 200, "status 200", checks)
+    check(bool(heartbeats(r)), "heartbeats present", checks)
+    check(any("response.completed" in l for _, l in r["lines"]), "stream completed", checks)
+    return r, checks
+
+
+@scenario("KA-6", "Anthropic: upstream headers after 150 s through CDN 125 s, ping heartbeat keeps it alive")
+def ka6():
+    checks = []
+    r = stream_request(CDN125, "/v1/messages", KEYS["G-anthropic-slow"], anthropic_body())
+    hb = heartbeats(r)
+    check(r["status"] == 200, "status 200", checks)
+    check(bool(hb) and 13 <= hb[0] <= 18, "first ping at about 15 s", checks)
+    check(any("message_stop" in l for _, l in r["lines"]), "message_stop", checks)
     return r, checks
 
 
@@ -197,7 +226,7 @@ def bud1():
     checks = []
     mark = fault_last_id()
     r = stream_request(DIRECT, "/v1/responses", KEYS["G-all-502"], responses_body())
-    attempts = [x for x in fault_records_since(mark) if x["path"].endswith("/responses")]
+    attempts = [x for x in fault_records_since(mark) if x["fault"] == "F07"]
     r["upstream_attempts"] = len(attempts)
     check(r["status"] in (502, 503), "error status", checks)
     check(len(attempts) <= 4, "at most 4 upstream attempts", checks)
@@ -349,25 +378,27 @@ def dc1():
         started = datetime.datetime.fromisoformat(cancelled[0]["started"].replace("Z", "+00:00")).timestamp()
         r["upstream_cancel_after_s"] = round(ended - started, 2)
     check(bool(cancelled), "upstream request cancelled", checks)
-    check(bool(cancelled) and r.get("upstream_cancel_after_s", 99) <= 5 + 2, "cancelled within 2 s of the disconnect", checks)
+    check(bool(cancelled) and r.get("upstream_cancel_after_s", 99) <= r.get("disconnected_at", 5) + 2,
+          "cancelled within 2 s of the disconnect", checks)
     check(usage_before == usage_after, "no usage row", checks)
-    check(und.endswith("|f"), f"undelivered record {und}", checks)
+    check(und.endswith(("|f", "|false")), f"undelivered record {und}", checks)
     return r, checks
 
 
-@scenario("RES-1", "Small balance held by in-flight requests: 429 concurrent_balance_reserved with Retry-After")
+@scenario("RES-1", "Small balance held by an in-flight request: 429 concurrent_balance_reserved with Retry-After")
 def res1():
     checks = []
-    key = KEYS["small:G-single"]
-    with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
-        futures = [pool.submit(stream_request, DIRECT, "/v1/responses", key, responses_body()) for _ in range(12)]
-        results = [f.result() for f in futures]
-    statuses = [x["status"] for x in results]
-    reserved = [x for x in results if x["status"] == 429]
-    r = {"statuses": statuses, "bodies": [x["lines"][:1] for x in reserved][:3],
-         "retry_after": [x["headers"].get("retry-after") for x in reserved]}
-    check(any("concurrent_balance_reserved" in json.dumps(x["lines"]) for x in reserved) or not reserved,
-          "reservation 429 uses concurrent_balance_reserved", checks)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        holder = pool.submit(stream_request, DIRECT, "/v1/responses", KEYS["small:G-long-first"], responses_body(), disconnect_after=20)
+        time.sleep(3)
+        others = [pool.submit(stream_request, DIRECT, "/v1/responses", KEYS["small:G-single"], responses_body(stream=False)) for _ in range(3)]
+        results = [f.result() for f in others]
+        held = holder.result()
+    r = {"holder_status": held["status"], "statuses": [x["status"] for x in results],
+         "bodies": [x["lines"][:1] for x in results], "retry_after": [x["headers"].get("retry-after") for x in results]}
+    check(held["status"] == 200, "first request runs", checks)
+    check(all(x["status"] == 429 for x in results), "others get 429", checks)
+    check(all("concurrent_balance_reserved" in json.dumps(x["lines"]) for x in results), "code concurrent_balance_reserved", checks)
     check(all(ra for ra in r["retry_after"]), "Retry-After on every 429", checks)
     return r, checks
 
@@ -421,20 +452,20 @@ def run(sid: str, outdir: str):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--only", default="")
-    parser.add_argument("--evidence", default=os.path.join(HERE, "evidence", datetime.datetime.utcnow().strftime("%Y%m%dT%H%MZ")))
+    parser.add_argument("--evidence", default=os.path.join(HERE, "evidence", datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%MZ")))
     parser.add_argument("--parallel", type=int, default=6)
     args = parser.parse_args()
     os.makedirs(args.evidence, exist_ok=True)
     ids = [s for s in (args.only.split(",") if args.only else SCENARIOS) if s]
     # Balance and fallback scenarios change shared upstream state; run them alone.
-    serial = [s for s in ids if s.startswith(("BAL", "FB", "RES", "ERR-3"))]
+    serial = [s for s in ids if s.startswith(("BAL", "FB", "RES", "ERR-3", "BUD"))]
     parallel = [s for s in ids if s not in serial]
     records = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.parallel) as pool:
         records += list(pool.map(lambda s: run(s, args.evidence), parallel))
     for s in serial:
         records.append(run(s, args.evidence))
-    summary = {"at": datetime.datetime.utcnow().isoformat() + "Z", "passed": sum(r["ok"] for r in records),
+    summary = {"at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "passed": sum(r["ok"] for r in records),
                "total": len(records), "failed": [r["id"] for r in records if not r["ok"]]}
     with open(os.path.join(args.evidence, "SUMMARY.json"), "w") as fh:
         json.dump(summary, fh, indent=1)

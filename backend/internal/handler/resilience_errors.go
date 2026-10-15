@@ -115,13 +115,16 @@ func applyNoAccountRetryHints(c *gin.Context, diag any, apiKey *service.APIKey, 
 	c.Set(ginKeyResilienceRetryAfter, secs)
 }
 
-// applyExhaustedRetryHint gives an exhausted failover that ends in 429 or 503
-// a server-capped Retry-After (design §9.1): an upstream value is clamped,
-// otherwise the time to the group's earliest recovery is used.
+// applyExhaustedRetryHint gives an exhausted failover that ends in 429 or a
+// 5xx a server-capped Retry-After (design §9.1): an upstream value copied
+// onto the response is clamped (a 502 used to pass a Cloudflare page's 60 s,
+// or any larger value, straight through), otherwise the time to the group's
+// earliest recovery is used. Clients such as Codex retry a 5xx without
+// Retry-After many times in a row, so 502/504 get the hint too.
 func applyExhaustedRetryHint(c *gin.Context, diag any, status int) {
 	cfg := resilience.Current()
 	if c == nil || c.Request == nil || !cfg.ErrorsOn() ||
-		(status != http.StatusTooManyRequests && status != http.StatusServiceUnavailable && !resilienceTerminalHint(c, status)) {
+		(status != http.StatusTooManyRequests && status < http.StatusInternalServerError && !resilienceTerminalHint(c, status)) {
 		return
 	}
 	lo, hi := cfg.Errors.NoAccountRetryAfter.Min, cfg.Errors.NoAccountRetryAfter.Max
@@ -132,11 +135,12 @@ func applyExhaustedRetryHint(c *gin.Context, diag any, status int) {
 		} else if at, err := http.ParseTime(v); err == nil {
 			secs = resilience.ClampRetryAfter(time.Until(at), lo, hi)
 		}
-		if secs > 0 {
-			c.Header("Retry-After", strconv.Itoa(secs))
-			c.Set(ginKeyResilienceRetryAfter, secs)
-			return
+		if secs <= 0 {
+			secs = lo
 		}
+		c.Header("Retry-After", strconv.Itoa(secs))
+		c.Set(ginKeyResilienceRetryAfter, secs)
+		return
 	}
 	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
 	applyNoAccountRetryHints(c, diag, apiKey, "", noAccountErrorClassification{Status: status})

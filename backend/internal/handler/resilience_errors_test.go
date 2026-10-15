@@ -147,3 +147,34 @@ func TestExhaustedRateLimitCarriesCappedRetryAfter(t *testing.T) {
 	}, false)
 	require.Equal(t, "3600", w.Header().Get("Retry-After"))
 }
+
+func TestExhaustedBadGatewayCapsUpstreamRetryAfter(t *testing.T) {
+	// Spec: every Retry-After sent by the gateway is capped by the server; a
+	// Cloudflare 502 page's 60 s used to pass through unchanged (staging BUD-1).
+	withHandlerResilience(t, nil)
+	c, w := newResilienceTestContext(t)
+	(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, &service.UpstreamFailoverError{
+		StatusCode:      http.StatusBadGateway,
+		ResponseHeaders: http.Header{"Retry-After": []string{"60"}},
+		ResponseBody:    []byte(`<html>502 Bad gateway</html>`),
+	}, false)
+	require.Equal(t, http.StatusBadGateway, w.Code)
+	require.Equal(t, "30", w.Header().Get("Retry-After"))
+
+	// No upstream value: a 5xx still tells the client when to come back.
+	c, w = newResilienceTestContext(t)
+	(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, &service.UpstreamFailoverError{StatusCode: http.StatusServiceUnavailable}, false)
+	ra, err := strconv.Atoi(w.Header().Get("Retry-After"))
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, ra, 2)
+	require.LessOrEqual(t, ra, 30)
+
+	// Switch off: the upstream value passes through as in 0.3.0.
+	withHandlerResilience(t, func(s *resilience.Settings) { s.Errors.Enabled = false })
+	c, w = newResilienceTestContext(t)
+	(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, &service.UpstreamFailoverError{
+		StatusCode:      http.StatusBadGateway,
+		ResponseHeaders: http.Header{"Retry-After": []string{"60"}},
+	}, false)
+	require.Equal(t, "60", w.Header().Get("Retry-After"))
+}

@@ -32,6 +32,8 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-fail-then-ok": ("openai", [("fto-bad", "F07", 1), ("fto-ok", "F00", 2)], {}),
     "G-slow-headers": ("openai", [("slow-a", "F01;secs=200", 1), ("slow-ok", "F00", 2)], {}),
     "G-long-first": ("openai", [("long-first", "F17;first=150", 1)], {}),
+    "G-slow-150": ("openai", [("slow150", "F01;secs=150", 1)], {}),
+    "G-anthropic-slow": ("anthropic", [("anth-slow150", "F01;secs=150", 1)], {}),
     "G-busy-stream": ("openai", [("busy-a", "F02;after=20", 1), ("busy-ok", "F00", 2)], {}),
     "G-ratelimit-stream": ("openai", [("rl-stream", "F03;after=20", 1)], {}),
     "G-ctx-overflow": ("openai", [("ctx", "F05;after=1", 1)], {}),
@@ -59,7 +61,8 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
 
 USERS = {
     "stg-user@xy2api-staging.local": 1000.0,
-    "stg-small@xy2api-staging.local": 0.05,
+    # One in-flight estimate (about 0.08 USD) fits, two do not (RES-1).
+    "stg-small@xy2api-staging.local": 0.12,
 }
 
 
@@ -138,6 +141,9 @@ def main() -> int:
         if email not in users:
             users[email] = api.call("POST", "/api/v1/admin/users",
                                     {"email": email, "password": password, "balance": balance, "concurrency": 100})
+        else:
+            api.call("POST", f"/api/v1/admin/users/{users[email]['id']}/balance",
+                     {"balance": balance, "operation": "set", "notes": "staging fixtures"})
     owner = "stg-user@xy2api-staging.local"
     user_token = api.login(owner, keys["users"][owner])
     have = {k["name"]: k for k in items(api.call("GET", "/api/v1/keys?page=1&page_size=200", token=user_token))}
@@ -152,6 +158,9 @@ def main() -> int:
     if "key-small" not in have_small:
         have_small["key-small"] = api.call("POST", "/api/v1/keys", {"name": "key-small", "group_id": groups["G-single"]["id"]}, token=small_token)
     keys["keys"]["small:G-single"] = have_small["key-small"]["key"]
+    if "key-small-long" not in have_small:
+        have_small["key-small-long"] = api.call("POST", "/api/v1/keys", {"name": "key-small-long", "group_id": groups["G-long-first"]["id"]}, token=small_token)
+    keys["keys"]["small:G-long-first"] = have_small["key-small-long"]["key"]
 
     os.makedirs(os.path.dirname(keys_path), exist_ok=True)
     fd = os.open(keys_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
