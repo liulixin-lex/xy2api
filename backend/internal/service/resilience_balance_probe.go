@@ -38,6 +38,10 @@ type ResilienceRepository interface {
 	// ListBalanceTrackedAccountIDs returns accounts with a non-OK balance
 	// record or a balance pause.
 	ListBalanceTrackedAccountIDs(ctx context.Context) ([]int64, error)
+	// OutputTokenP99ByModel returns the P99 output tokens per requested
+	// model since the given time, for models with at least minSamples
+	// requests.
+	OutputTokenP99ByModel(ctx context.Context, since time.Time, minSamples int) (map[string]int, error)
 }
 
 // balanceProbeDeps are the collaborators of the balance probe loop.

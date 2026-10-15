@@ -1132,6 +1132,7 @@ func ProvideShareSchedulingService(repo ShareSchedulingRepository, store ShareSc
 func ProvideResilienceService(settingRepo SettingRepository, store ResilienceStore, repo ResilienceRepository, accounts AccountRepository, accountTest *AccountTestService, rateLimit *RateLimitService, concurrency *ConcurrencyService, gateway *GatewayService, openai *OpenAIGatewayService) *ResilienceService {
 	s := NewResilienceService(settingRepo, store)
 	s.ConfigureBalanceProbe(repo, accounts, accountTest)
+	s.ConfigureOutputP99(repo)
 	s.rateLimit = rateLimit
 	rateLimit.SetResilienceService(s)
 	concurrency.resilience = s

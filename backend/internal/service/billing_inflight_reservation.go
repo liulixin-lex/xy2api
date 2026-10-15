@@ -69,6 +69,10 @@ type InflightReservation struct {
 	closeOnce   sync.Once
 	stopRenew   chan struct{}
 	renewDone   chan struct{}
+
+	// cacheSession is the user-scoped client session of the request whose
+	// cache-read share the billing task records (resilience §9.5).
+	cacheSession string
 }
 
 // Amount 预留金额。
@@ -340,6 +344,13 @@ type InflightEstimateRequest struct {
 	// 音频：模式（tts/stt/realtime）与计量单位（百万字符/小时/分钟）。
 	AudioMode  string
 	AudioUnits float64
+	// SessionKey 客户端会话标识（prompt_cache_key / metadata.user_id），
+	// 用于按会话最近一次的缓存读比例估算输入（resilience §9.5）。
+	SessionKey string
+
+	// outputCap 与 cacheRatio 由 estimate 按 resilience 设置填充。
+	outputCap  int
+	cacheRatio float64
 }
 
 // inflightEstimateDeps 两种网关 service 共用的估算依赖。
@@ -355,6 +366,9 @@ type inflightEstimateDeps struct {
 	// 仅在首选/渠道候选均无法定价、composite 分组或缓存冷写预留时调用；实现只读调度器快照，
 	// 不在请求路径上直接查库，也不按模型名缓存（内存不随请求模型名增长）。
 	accountMappedModels func(ctx context.Context, apiKey *APIKey, model string) []string
+	// cacheRatio 返回会话最近一次的缓存读比例；outputCap 返回模型近期 P99 输出上限（0 为未知）。
+	cacheRatio func(ctx context.Context, userID int64, sessionKey string) (float64, bool)
+	outputCap  func(model string) int
 }
 
 // inflightSnapshotLister 调度器快照读取（与账号选择同源：Redis 快照，未命中时由快照服务自身回源并回填）。
@@ -513,6 +527,9 @@ func (d inflightEstimateDeps) estimateOne(ctx context.Context, apiKey *APIKey, m
 	}
 
 	inputTokens, outputTokens := tokenCounts(cfg, req.BodyBytes, req.MaxTokens)
+	if req.outputCap > 0 && outputTokens > req.outputCap {
+		outputTokens = req.outputCap
+	}
 	tokenCost := func() float64 {
 		var pricing *ModelPricing
 		if resolved != nil && (resolved.Mode == BillingModeToken || resolved.Mode == "") && d.resolver != nil {
@@ -531,6 +548,9 @@ func (d inflightEstimateDeps) estimateOne(ctx context.Context, apiKey *APIKey, m
 				writePrice = pricing.CacheCreation5mPrice
 			}
 			inputPrice = math.Max(inputPrice, writePrice)
+		} else if req.cacheRatio > 0 && pricing.CacheReadPricePerToken > 0 && pricing.CacheReadPricePerToken < inputPrice {
+			// 会话最近一次的缓存读比例按缓存读价格计入。
+			inputPrice = (1-req.cacheRatio)*inputPrice + req.cacheRatio*pricing.CacheReadPricePerToken
 		}
 		return (float64(inputTokens)*inputPrice + float64(outputTokens)*pricing.OutputPricePerToken) * textRate
 	}
@@ -613,6 +633,16 @@ func (d inflightEstimateDeps) estimate(ctx context.Context, apiKey *APIKey, req 
 		// 免费分组：不计费，也无需预留。
 		return 0, true
 	}
+	if req.Kind == InflightEstimateToken {
+		if d.outputCap != nil {
+			req.outputCap = d.outputCap(req.Model)
+		}
+		if d.cacheRatio != nil && !req.ClaudeCacheColdWrite {
+			if ratio, ok := d.cacheRatio(ctx, apiKey.User.ID, req.SessionKey); ok {
+				req.cacheRatio = ratio
+			}
+		}
+	}
 	primary, fallbacks, upstreamInput := inflightBillingModelCandidates(ctx, d, apiKey, req.Model)
 	bestOf := func(models []string) float64 {
 		best := 0.0
@@ -678,6 +708,10 @@ func inflightReservationCfg(cfg *config.Config) config.InflightReservationConfig
 
 func (s *GatewayService) inflightEstimateDeps() inflightEstimateDeps {
 	d := inflightEstimateDeps{cfg: s.cfg, billing: s.billingService, resolver: s.resolver}
+	if s.resilience != nil {
+		d.cacheRatio = s.resilience.sessionCacheRatio
+		d.outputCap = s.resilience.outputP99Cap
+	}
 	if s.channelService != nil {
 		d.resolveMapping = s.channelService.ResolveChannelMapping
 	}
@@ -712,6 +746,10 @@ func (s *GatewayService) EstimateInflightReservation(ctx context.Context, apiKey
 
 func (s *OpenAIGatewayService) inflightEstimateDeps() inflightEstimateDeps {
 	d := inflightEstimateDeps{cfg: s.cfg, billing: s.billingService, resolver: s.resolver}
+	if s.resilience != nil {
+		d.cacheRatio = s.resilience.sessionCacheRatio
+		d.outputCap = s.resilience.outputP99Cap
+	}
 	if s.channelService != nil {
 		d.resolveMapping = s.channelService.ResolveChannelMapping
 	}

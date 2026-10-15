@@ -202,3 +202,10 @@ func TestWebSearch_RejectsWhenInflightExceedsBalance(t *testing.T) {
 	require.Contains(t, w.Body.String(), "balance")
 	require.Equal(t, 1, cache.count(), "rejected request must not leave a reservation behind")
 }
+
+func TestRequestCacheSessionKey(t *testing.T) {
+	require.Equal(t, "prompt_cache_key=c1", requestCacheSessionKey([]byte(`{"prompt_cache_key":"c1","metadata":{"user_id":"u"}}`)))
+	require.Equal(t, "metadata.user_id=user_x_session_1", requestCacheSessionKey([]byte(`{"metadata":{"user_id":"user_x_session_1"}}`)))
+	require.Empty(t, requestCacheSessionKey([]byte(`{"model":"m"}`)))
+	require.Equal(t, "prompt_cache_key=c1", tokenInflightEstimate("m", []byte(`{"prompt_cache_key":"c1"}`)).SessionKey)
+}

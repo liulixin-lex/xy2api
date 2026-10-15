@@ -384,6 +384,14 @@ func (s *Settings) ErrorsOn() bool { return s.master() && s.Errors.Enabled }
 // FallbackGroupOn reports whether availability fallback groups are active.
 func (s *Settings) FallbackGroupOn() bool { return s.master() && s.FallbackGroup.Enabled }
 
+// CacheAwareEstimateOn reports whether reservation estimates price the
+// session's cached input share at the cache-read price.
+func (s *Settings) CacheAwareEstimateOn() bool { return s.master() && s.Reservation.CacheAwareEstimate }
+
+// OutputP99CapOn reports whether reservation estimates cap output tokens at
+// the model's recent P99.
+func (s *Settings) OutputP99CapOn() bool { return s.master() && s.Reservation.OutputP99Cap }
+
 // FailureOn reports whether classification-driven penalties are active. It
 // follows the master switch only; individual penalties have their own gates.
 func (s *Settings) FailureOn() bool { return s.master() }

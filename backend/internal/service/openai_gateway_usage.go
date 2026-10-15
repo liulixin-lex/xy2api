@@ -161,6 +161,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 	s.observeCacheUsage(result, input.Account, time.Now())
 	s.resilience.NoteAccountSuccess(ctx, input.Account)
+	// OpenAI input_tokens already include cache reads and writes.
+	s.resilience.NoteSessionCacheUsage(ctx, result.Usage.CacheReadInputTokens, result.Usage.InputTokens)
 	if s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
 		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)
 	}

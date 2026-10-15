@@ -77,13 +77,13 @@
 
 ## 4 错误语义与防风暴（spec: error-semantics-and-storm-protection）
 
-- [ ] 4.1 选号层返回“组内最早解冻时间”；无号 503 与全部限流 429 加 `Retry-After`（2–30 秒），正文加 `Please try again in Ns.`。
-- [ ] 4.2 配置类 503 加 `Retry-After: 60` 与 `x-should-retry: false`，状态码与文案不变（D14）。
-- [ ] 4.3 无号负缓存（2 秒），账号恢复事件触发失效。
-- [ ] 4.4 同 Key 快速失败（30 秒内 ≥10 次相同 503 时原样返回），按 spec 豁免。
-- [ ] 4.5 上游余额对用户隐藏，包括图片余额 402。
-- [ ] 4.6 用户余额：两条路径统一为 403 `INSUFFICIENT_BALANCE` 并换用新文案；在途预留超额改为 429 `concurrent_balance_reserved` 加 `Retry-After: 5`；估算改为缓存感知并以 P99 输出为上限。验收：用生产 7 天数据只读回放，余额为正的用户被拒次数减少 ≥90%，余额为负的金额不增加。
-- [ ] 4.7 `image_task_handler.go`：准入检查放到内容审计之前；审计失败时释放准入。
+- [x] 4.1 选号层返回“组内最早解冻时间”；无号 503 与全部限流 429 加 `Retry-After`（2–30 秒），正文加 `Please try again in Ns.`。
+- [x] 4.2 配置类 503 加 `Retry-After: 60` 与 `x-should-retry: false`，状态码与文案不变（D14）。
+- [x] 4.3 无号负缓存（2 秒），账号恢复事件触发失效。
+- [x] 4.4 同 Key 快速失败（30 秒内 ≥10 次相同 503 时原样返回），按 spec 豁免。
+- [x] 4.5 上游余额对用户隐藏，包括图片余额 402。
+- [x] 4.6 用户余额：两条路径统一为 403 `INSUFFICIENT_BALANCE` 并换用新文案；在途预留超额改为 429 `concurrent_balance_reserved` 加 `Retry-After: 5`；估算改为缓存感知并以 P99 输出为上限。验收：用生产 7 天数据只读回放，余额为正的用户被拒次数减少 ≥90%，余额为负的金额不增加。（实现完成；生产只读回放验收在 12 执行）
+- [x] 4.7 `image_task_handler.go`：准入检查放到内容审计之前；审计失败时释放准入。
 - [ ] 4.8 验证：单测、handler 集成测试；真实客户端测试中 Codex 一个失败回合的请求数 ≤5。
 
 ## 5 请求预算与重试（spec: request-budget-and-retry）

@@ -23,13 +23,25 @@ func requestMaxOutputTokens(body []byte) int {
 	return 0
 }
 
+// requestCacheSessionKey 从请求体提取客户端会话标识（Codex 的 prompt_cache_key、
+// Claude Code 的 metadata.user_id），用于缓存感知的预留估算；没有时返回空。
+func requestCacheSessionKey(body []byte) string {
+	for _, path := range []string{"prompt_cache_key", "metadata.user_id"} {
+		if v := gjson.GetBytes(body, path); v.Type == gjson.String && v.Str != "" {
+			return path + "=" + v.Str
+		}
+	}
+	return ""
+}
+
 // tokenInflightEstimate 文本类请求的估算输入。
 func tokenInflightEstimate(model string, body []byte) service.InflightEstimateRequest {
 	return service.InflightEstimateRequest{
-		Model:     model,
-		BodyBytes: len(body),
-		MaxTokens: requestMaxOutputTokens(body),
-		Kind:      service.InflightEstimateToken,
+		Model:      model,
+		BodyBytes:  len(body),
+		MaxTokens:  requestMaxOutputTokens(body),
+		Kind:       service.InflightEstimateToken,
+		SessionKey: requestCacheSessionKey(body),
 	}
 }
 
@@ -90,6 +102,7 @@ func reserveInflightBalanceCtx(
 	if res == nil {
 		return ctx, inflightNoop, nil
 	}
+	res.SetCacheSession(req.SessionKey)
 	return service.WithInflightReservation(ctx, res), res.HandlerDone, nil
 }
 

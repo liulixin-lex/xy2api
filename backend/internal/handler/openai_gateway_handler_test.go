@@ -2466,7 +2466,8 @@ func TestOpenAIResponses_APIKeyPassthroughSSERateLimitUsesConfiguredPoolRetry(t 
 
 	require.Equal(t, []int64{9912, 9912}, upstream.calls())
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
-	require.Equal(t, "1", rec.Header().Get("Retry-After"))
+	// xy2api resilience: the upstream Retry-After (1 s) is clamped to 2-30 s.
+	require.Equal(t, "2", rec.Header().Get("Retry-After"))
 	require.Equal(t, "rate_limit_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 	require.Equal(t, "Upstream rate limit exceeded, please retry later", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
 }

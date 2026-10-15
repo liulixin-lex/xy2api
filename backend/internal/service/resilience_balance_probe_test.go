@@ -161,10 +161,18 @@ func (m *memResilienceStore) SessionCacheRatio(_ context.Context, key string) (f
 	return v, ok, nil
 }
 
-type fakeResilienceRepo struct{ ids []int64 }
+type fakeResilienceRepo struct {
+	ids    []int64
+	p99    map[string]int
+	p99Err error
+}
 
 func (f *fakeResilienceRepo) ListBalanceTrackedAccountIDs(context.Context) ([]int64, error) {
 	return f.ids, nil
+}
+
+func (f *fakeResilienceRepo) OutputTokenP99ByModel(context.Context, time.Time, int) (map[string]int, error) {
+	return f.p99, f.p99Err
 }
 
 type probeFixture struct {

@@ -99,6 +99,10 @@ type ResilienceService struct {
 	failingSessions sync.Map
 	// avoidingSessions marks sessions with avoid entries (key -> expiry).
 	avoidingSessions sync.Map
+
+	// outputP99 is the per-model output-token P99 of recent usage
+	// (lower-cased model -> tokens) for reservation estimates.
+	outputP99 atomic.Pointer[map[string]int]
 }
 
 // NewResilienceService creates the service; Start loads the settings and

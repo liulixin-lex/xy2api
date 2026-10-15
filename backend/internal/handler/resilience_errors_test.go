@@ -119,3 +119,31 @@ func TestHideUpstreamBalanceOnExhaustedFailover(t *testing.T) {
 	require.NotContains(t, w.Body.String(), "insufficient")
 	require.NotEmpty(t, w.Header().Get("Retry-After"))
 }
+
+func TestExhaustedRateLimitCarriesCappedRetryAfter(t *testing.T) {
+	// Spec: all-accounts-rate-limited 429 carries Retry-After clamped to 2-30 s.
+	withHandlerResilience(t, nil)
+	c, w := newResilienceTestContext(t)
+	(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, &service.UpstreamFailoverError{
+		StatusCode:      http.StatusTooManyRequests,
+		ResponseHeaders: http.Header{"Retry-After": []string{"3600"}},
+		ResponseBody:    []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`),
+	}, false)
+	require.Equal(t, http.StatusTooManyRequests, w.Code)
+	require.Equal(t, "30", w.Header().Get("Retry-After"), "upstream value capped by the server")
+	require.NotContains(t, gjson.GetBytes(w.Body.Bytes(), "error.message").String(), "try again in", "429 keeps its message")
+
+	c, w = newResilienceTestContext(t)
+	(&GatewayHandler{}).handleFailoverExhausted(c, &service.UpstreamFailoverError{StatusCode: http.StatusTooManyRequests}, service.PlatformAnthropic, false)
+	require.Equal(t, http.StatusTooManyRequests, w.Code)
+	require.Equal(t, "30", w.Header().Get("Retry-After"), "nothing recovering: longest back-off")
+
+	// Switch off: upstream value passes through as before.
+	withHandlerResilience(t, func(s *resilience.Settings) { s.Errors.Enabled = false })
+	c, w = newResilienceTestContext(t)
+	(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, &service.UpstreamFailoverError{
+		StatusCode:      http.StatusTooManyRequests,
+		ResponseHeaders: http.Header{"Retry-After": []string{"3600"}},
+	}, false)
+	require.Equal(t, "3600", w.Header().Get("Retry-After"))
+}

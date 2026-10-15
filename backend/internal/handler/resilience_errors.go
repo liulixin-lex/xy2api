@@ -47,7 +47,7 @@ func resilienceTranslateError(c *gin.Context, status int, errType, code, message
 			code = "concurrent_balance_reserved"
 		}
 	}
-	if c != nil && (status == http.StatusServiceUnavailable || status == http.StatusTooManyRequests) {
+	if c != nil && status == http.StatusServiceUnavailable {
 		if secs := c.GetInt(ginKeyResilienceRetryAfter); secs > 0 && !strings.Contains(strings.ToLower(message), "try again in") {
 			message = strings.TrimRight(strings.TrimSpace(message), ". ") + fmt.Sprintf(". Please try again in %ds.", secs)
 		}
@@ -86,6 +86,29 @@ func applyNoAccountRetryHints(c *gin.Context, diag any, apiKey *service.APIKey, 
 	secs := resilience.ClampRetryAfter(wait, cfg.Errors.NoAccountRetryAfter.Min, cfg.Errors.NoAccountRetryAfter.Max)
 	c.Header("Retry-After", strconv.Itoa(secs))
 	c.Set(ginKeyResilienceRetryAfter, secs)
+}
+
+// applyExhaustedRetryHint gives an exhausted failover that ends in 429 or 503
+// a server-capped Retry-After (design §9.1): an upstream value is clamped,
+// otherwise the time to the group's earliest recovery is used.
+func applyExhaustedRetryHint(c *gin.Context, diag any, status int) {
+	cfg := resilience.Current()
+	if c == nil || c.Request == nil || !cfg.ErrorsOn() || (status != http.StatusTooManyRequests && status != http.StatusServiceUnavailable) {
+		return
+	}
+	lo, hi := cfg.Errors.NoAccountRetryAfter.Min, cfg.Errors.NoAccountRetryAfter.Max
+	if v := strings.TrimSpace(c.Writer.Header().Get("Retry-After")); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil {
+			c.Header("Retry-After", strconv.Itoa(resilience.ClampRetryAfter(time.Duration(secs)*time.Second, lo, hi)))
+			return
+		}
+		if at, err := http.ParseTime(v); err == nil {
+			c.Header("Retry-After", strconv.Itoa(resilience.ClampRetryAfter(time.Until(at), lo, hi)))
+			return
+		}
+	}
+	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
+	applyNoAccountRetryHints(c, diag, apiKey, "", noAccountErrorClassification{Status: status})
 }
 
 // stashResilienceErrorResponse records a JSON error response for the per-key
