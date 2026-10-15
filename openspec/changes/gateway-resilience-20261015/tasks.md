@@ -191,9 +191,12 @@
 
 ## 10 上游同步登记
 
-- [ ] 10.1 `policy.json` 与 `UPSTREAM_BASE.json`：登记 7 个具名补丁（design §13），每个带 required_literals 与绑定测试。
-- [ ] 10.2 `scheduler-diff.json` 白名单更新；`sync.py audit` 在干净工作树上通过。
-- [ ] 10.3 `VERSION` 升为 0.4.0；`SUB2API_COMPAT_VERSION` 不变。
+- [x] 10.1 `policy.json` 与 `UPSTREAM_BASE.json`：登记 7 个具名补丁（design §13），每个带 required_literals 与绑定测试。
+  - 实现：`xy-resilience-{classify,budget,session,keepalive,disconnect,errors,fallback}-hook` 共 22 条字面量；方案目录登记为 XY_OWNED。偏差：`openai_gateway_upstream_errors.go`、`share_scheduling_exec.go` 实际无钩子，未登记；兜底钩子在路由中间件而非 `gateway_scheduling.go`。
+- [x] 10.2 `scheduler-diff.json` 白名单更新；`sync.py audit` 在干净工作树上通过。
+  - 实现：四个调度文件各加 `gateway-resilience` 块；原 `brand-identifier`、`require-compact` 块中被韧性改写的两行移入新块。`sync.py audit`、`scheduler-diff` 与 `tools/tests` 均通过。
+- [x] 10.3 `VERSION` 升为 0.4.0；`SUB2API_COMPAT_VERSION` 不变。
+  - 按仓库 RC 惯例先设为 `0.4.0-rc.1`（`VERSION` 与 `UPSTREAM_BASE.json` 一致），测试服务器验证后在发版时提升为 0.4.0。
 
 ## 11 XY-image 0.0.17（见 xy-image-appendix.md）
 
