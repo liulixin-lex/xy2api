@@ -130,9 +130,9 @@ func TestFirstOutputTimeoutTiers(t *testing.T) {
 	})
 	svc := &OpenAIGatewayService{cfg: &config.Config{}}
 	ctx := budgetTestCtx(resilience.KindText)
-	require.Equal(t, 60*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", ""))
-	require.Equal(t, 120*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "xhigh"))
-	require.Equal(t, 180*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "max"))
+	require.Equal(t, 180*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", ""))
+	require.Equal(t, 200*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "xhigh"))
+	require.Equal(t, 220*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "max"))
 	require.Equal(t, 200*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5-pro-2026", "low"))
 
 	// The last usable candidate only answers to the pre-output deadline.

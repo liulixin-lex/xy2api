@@ -21,7 +21,7 @@ function settings(): Settings {
     },
     budget: {
       enabled: true, max_attempts: 4, pre_output_budget_seconds: 240,
-      first_output_timeout_seconds: { default: 60, high: 120, xhigh: 180, max: 180 },
+      first_output_timeout_seconds: { default: 180, high: 180, xhigh: 200, max: 220 },
       anthropic_first_event_timeout_seconds: 90, gemini_first_event_timeout_seconds: 90, model_overrides: {},
       same_account_retry_max: 1, gemini_same_account_retries: 1, upstream_retry_after_cap_seconds: 30
     },

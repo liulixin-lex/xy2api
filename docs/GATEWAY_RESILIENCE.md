@@ -85,7 +85,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 |---|---|---|
 | `budget.max_attempts` | 4 | 1–10 |
 | `budget.pre_output_budget_seconds` | 240 | 60–290 |
-| `budget.first_output_timeout_seconds` | default 60 / high 120 / xhigh 120 / max 180 | 5–预算 |
+| `budget.first_output_timeout_seconds` | default 180 / high 180 / xhigh 200 / max 220（按生产 7 天首字分布校准，超出比例约 0.1%–0.2%） | 5–预算 |
 | `budget.anthropic_first_event_timeout_seconds` | 90 | 5–预算 |
 | `budget.same_account_retry_max` | 1 | 0–5 |
 | `keepalive.delay_seconds` / `interval_seconds` | 15 / 10 | 5–60 / 5–30 |

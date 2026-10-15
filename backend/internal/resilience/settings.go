@@ -172,11 +172,13 @@ func Defaults() Settings {
 			GenerationProbeDailyBudget: 48,
 			NotifyAfterHours:           72,
 		},
+		// First-output tiers are calibrated on 7 days of production first-token
+		// latency (tasks 0.4): about 0.1-0.2% of successful streams exceed them.
 		Budget: BudgetSettings{
 			Enabled:                           true,
 			MaxAttempts:                       4,
 			PreOutputBudgetSeconds:            240,
-			FirstOutputTimeoutSeconds:         FirstOutputTimeouts{Default: 60, High: 120, XHigh: 120, Max: 180},
+			FirstOutputTimeoutSeconds:         FirstOutputTimeouts{Default: 180, High: 180, XHigh: 200, Max: 220},
 			AnthropicFirstEventTimeoutSeconds: 90,
 			GeminiFirstEventTimeoutSeconds:    90,
 			ModelOverrides:                    map[string]int{},

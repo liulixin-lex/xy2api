@@ -9,15 +9,18 @@
 ## 0 准备与工具
 
 - [x] 0.1 建开发分支，在 `docs/PROJECT_MEMORY.md` 的“进行中的工作”登记。
-- [ ] 0.2 基线与度量工具 `tools/gateway-resilience/`：
+- [x] 0.2 基线与度量工具 `tools/gateway-resilience/`：
   - `baseline.sql`：只读统计 design §14 的全部指标；
   - `caddy_cuts.py`：按入口统计 CDN 切断，并把切断记录与应用日志、用量逐条匹配；
   - `session_streaks.py`：统计同一会话在同一账号上的连续失败。
 
   基于本次分析脚本整理，不含凭据。
-- [ ] 0.3 在生产只读环境采集一次基线（沿用已授权的只读范围），结果写入证据目录。
-- [ ] 0.4 首输出阈值校准：只读导出生产 7 天“模型 × effort”的首字分布（P50/P95/P99/P99.9），确认 60/120/180 秒的分档与按模型覆盖值。
-- [ ] 0.5 故障注入上游 `tools/gateway-resilience/fault-upstream/`（Go，无外部依赖）。以 OpenAI Responses、Chat、Anthropic Messages、Gemini、`/v1/usage`、new-api 计费接口的形状，按请求参数或头选择场景：
+  - 另有 `first_token_calibration.sql`；三个工具只输出聚合结果，已在临时 PostgreSQL 与合成日志上验证。
+- [x] 0.3 在生产只读环境采集一次基线（沿用已授权的只读范围），结果写入证据目录。
+  - 2026-10-15T16:15Z 采集 48 小时基线（仓库外 `production/` 目录）：无号 503 共 9710 次（13 个分组），最长整组无号连续 85 分钟；余额原因停用事件 47 次；“余额不足”展示 2431 次（其中 1994 次的用户当前余额为正，近似口径）；同 Key 同账号连续失败 P99 为 11、最大 322；流式首字 P50/P95：OpenAI 5.1/33.1 秒、Anthropic 3.8/9.7 秒。Caddy 切断率需在部署窗口用 `caddy_cuts.py` 采集（Caddy 日志只保留约 2 小时）。
+- [x] 0.4 首输出阈值校准：只读导出生产 7 天“模型 × effort”的首字分布（P50/P95/P99/P99.9），确认 60/120/180 秒的分档与按模型覆盖值。
+  - 结论：生产 0.3.0 未启用首输出超时；原分档会误切约 1.3%（OpenAI 默认档 60 秒）与 0.4%（xhigh 120 秒、max 180 秒）的成功请求。缺省改为 default 180 / high 180 / xhigh 200 / max 220 秒，各档超出比例约 0.10%–0.26%，仍给第二次尝试留出 20–60 秒；暂不设按模型覆盖。240 秒首输出前总时长会截断约 0.04%–0.16% 的成功请求（max 档最高），维持设计取值。
+- [x] 0.5 故障注入上游 `tools/gateway-resilience/fault-upstream/`（Go，无外部依赖）。以 OpenAI Responses、Chat、Anthropic Messages、Gemini、`/v1/usage`、new-api 计费接口的形状，按请求参数或头选择场景：
   - 慢响应头（可设秒数）；
   - 先 200 SSE，再在 N 秒后发出 `response.failed`（忙、限流、余额、上下文超长）；
   - 已输出后停滞；
@@ -28,7 +31,9 @@
   - 529 与 `server_is_overloaded`；
   - 正常长推理（可设首字时间）；
   - 图片长耗时。
-- [ ] 0.6 CDN 模拟代理：可配置“首字节前读超时”和“空闲读超时”（90、125、300 秒），并能注入 `X-XY-Edge` 标记。
+  - 实现：场景 F00–F22、`BAL`（按状态键切换余额）、`MIX`（按比例随机注入）；每个请求记录结局（完成、取消、断开、流内失败、错误状态），用于证明断开即取消上游。
+- [x] 0.6 CDN 模拟代理：可配置“首字节前读超时”和“空闲读超时”（90、125、300 秒），并能注入 `X-XY-Edge` 标记。
+  - 实现：首字节超时返回 524 并取消回源，空闲超时断开客户端并取消回源；`EDGE=none` 作直连计数代理；`/_cuts`、`/_requests` 记录。
 - [ ] 0.7 真实客户端端到端测试脚本：驱动 Codex CLI、Claude Code、OpenAI/Anthropic SDK、OpenCode、go-genai/python-genai、curl，统计每个回合的请求数、最终错误文案与耗时。
 
 ## 1 上游失败分类（spec: upstream-failure-classification）
