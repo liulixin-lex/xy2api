@@ -722,6 +722,16 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
   - 注意：`/tmp/xy2-toolchain/gocache` 曾涨到 36G 把磁盘写满，导致链接失败；已 `go clean -cache`。长时间开发时留意磁盘余量。
   - 本机 pnpm 版本与 lockfile 的 `pnpm.overrides` 不兼容，`pnpm run` 会拒绝执行；直接用 `node_modules/.bin/{vitest,vue-tsc,eslint,vite}`，不要运行 `pnpm install`。
 
+- 2026-10-15T17:30Z 任务 0、10 完成，任务 11、12 进行中：
+  - 任务 10：7 个具名补丁、22 条字面量、调度白名单 `gateway-resilience` 块；`sync.py audit`、`scheduler-diff` 通过；版本 `0.4.0-rc.1`（RC 惯例）。
+  - 任务 0：`tools/gateway-resilience/`（基线 SQL、首字校准、Caddy 切断与会话连败脚本、fault-upstream、cdn-sim、测试环境 compose/夹具/场景/真实客户端/升级演练脚本）。生产只读基线（48h）：无号 503 共 9710 次、最长整组无号 85 分钟、同 Key 同账号连败 P99=11；证据在仓库外 `production/`。
+  - 首输出分档校准：生产 0.3.0 实际未启用首输出超时；原 60/120/120/180 秒会误切约 1.3%（OpenAI 默认档）成功请求，缺省改为 180/180/200/220 秒。
+  - 测试服务器隔离环境已部署（独立 Compose 项目、独立网络与端口段、独立 Caddy 片段，测试域名 stg-api 灰云、stg-cf 橙云已生效）。用户 2026-10-15 授权：仅在该隔离测试实例上代为确认管理员合规承诺；提供 3 个 GPT 上游测试 Key（只存测试服务器 0600 文件，不入 Git/记忆）；要求真实客户端测试用 gpt-6.1-sol 或 gpt-6-astra。
+  - 自动化场景第 4 轮 22/22 通过。测试中发现并修复 5 个后端问题：耗尽 502 透传未封顶的上游 Retry-After；换号耗尽的 5xx 无重试提示；慢响应头到达时按“剩余预算”计算首输出上限导致立即误切；单账号分组被按单次档位切断（唯一可用账号现视为最后候选）；经 Cloudflare 时源站 502/504 被替换为纯文本页（经 CDN 边缘的请求改答 503 并带 `X-XY-Upstream-Status`）。另外 Caddy API 错误页统一 503。
+  - 真实 Cloudflare：150 秒慢首包请求经心跳穿过 CF 边缘超时，直连不发早期心跳，Anthropic ping 心跳正常；CF-3 待新候选复测。
+  - XY-image 0.0.17（任务 11）在独立副本分支开发，X1–X7 与实验室模拟上游完成，962 个单测通过；已在 XY-image 交接文件第 4 节登记并留言；`XY2API_VERIFIED_VERSIONS` 加 0.4.0 需等 0.4.0 正式镜像录制后进行。
+  - 注意：客户端（Codex、Claude Code、OpenCode、SDK）装在测试目录、以隔离 HOME 运行，不碰测试机全局配置；测试机有其他服务，场景脚本只用自己的分组与端口。
+
 ### 20261015-prod-ux-analysis — 生产请求日志只读分析与上线级优化方案（已完成，由 20261015-gateway-resilience 承接）
 
 - 用户授权只读 SSH 生产主机（地址与账号见仓库外私有清单；sudo 只用于读取 docker 日志、Caddy 日志与只读 psql），分析近 48 小时请求、错误、断连、重试/回退与账号调度，并实时抓取最新请求。不改生产配置、数据或服务。
