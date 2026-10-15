@@ -365,11 +365,13 @@ def fb1():
 def dc1():
     checks = []
     mark = fault_last_id()
-    usage_before = psql("select count(*) from usage_logs")
+    since = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    key_filter = "api_key_id=(select id from api_keys where name='key-G-long-first' and deleted_at is null)"
     r = stream_request(DIRECT, "/v1/responses", KEYS["G-long-first"], responses_body(), disconnect_after=5)
     time.sleep(4)
     recs = fault_records_since(mark)
-    usage_after = psql("select count(*) from usage_logs")
+    usage_after = psql(f"select count(*) from usage_logs where {key_filter} and created_at > '{since}'")
+    usage_before = "0"
     und = psql("select disconnect_stage||'|'||billed from gateway_undelivered_requests order by id desc limit 1")
     r["upstream"] = recs
     cancelled = [x for x in recs if x["outcome"] == "cancelled"]
@@ -458,7 +460,7 @@ def main() -> int:
     os.makedirs(args.evidence, exist_ok=True)
     ids = [s for s in (args.only.split(",") if args.only else SCENARIOS) if s]
     # Balance and fallback scenarios change shared upstream state; run them alone.
-    serial = [s for s in ids if s.startswith(("BAL", "FB", "RES", "ERR-3", "BUD"))]
+    serial = [s for s in ids if s.startswith(("BAL", "FB", "RES", "ERR-3", "BUD", "DC"))]
     parallel = [s for s in ids if s not in serial]
     records = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.parallel) as pool:

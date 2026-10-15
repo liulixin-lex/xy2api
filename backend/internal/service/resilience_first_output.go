@@ -22,7 +22,47 @@ func resilienceLastCandidate(ctx context.Context, accountID int64) bool {
 		return true
 	}
 	b := st.Budget()
-	return b != nil && b.Attempts()+1 >= b.MaxAttempts()
+	if b != nil && b.Attempts()+1 >= b.MaxAttempts() {
+		return true
+	}
+	return Resilience().soleCandidate(ctx, st.GroupID(), accountID)
+}
+
+// soleCandidate reports whether the request's group has no other account
+// that could take it after this one: every other account is inactive,
+// unschedulable, of another platform or under a hard penalty (soft-penalised
+// accounts still count, last-resort selection may use them). Cutting the
+// only account short only turns a slow answer into an error (staging KA-6:
+// a single-account Anthropic group lost a 150 s answer at the 90 s guard).
+// Unknown (no group, lookup failed) counts as "not sole".
+func (r *ResilienceService) soleCandidate(ctx context.Context, groupID, accountID int64) bool {
+	if r == nil || r.fallbackAccounts == nil || groupID <= 0 || accountID <= 0 {
+		return false
+	}
+	accounts, err := r.groupAccountsForLastResort(ctx, r.fallbackAccounts, groupID)
+	if err != nil {
+		return false
+	}
+	platform := ""
+	for i := range accounts {
+		if accounts[i].ID == accountID {
+			platform = accounts[i].Platform
+		}
+	}
+	if platform == "" {
+		return false
+	}
+	now := time.Now()
+	for i := range accounts {
+		a := &accounts[i]
+		if a.ID == accountID || a.Platform != platform {
+			continue
+		}
+		if tier, _, _ := resiliencePenaltyOf(a, "", now); tier != resilience.TierHard {
+			return false
+		}
+	}
+	return true
 }
 
 // resilienceTextBudget returns the request budget when it governs a text
@@ -39,15 +79,21 @@ func resilienceTextBudget(ctx context.Context) *resilience.Budget {
 }
 
 // openAIFirstOutputTimeoutFor returns the first-output timeout of an OpenAI
-// attempt: under the request budget the effort tier (or model override)
-// bounded by the remaining budget, otherwise the 0.3.0 configuration.
-func (s *OpenAIGatewayService) openAIFirstOutputTimeoutFor(ctx context.Context, accountID int64, model, reasoningEffort string) time.Duration {
+// attempt, measured from attemptStart: under the request budget the effort
+// tier (or model override) bounded by the budget left at attemptStart,
+// otherwise the 0.3.0 configuration. The stream handler asks again when the
+// upstream headers arrive; measuring the budget from that moment instead
+// cut a slow-header attempt the instant its headers came (staging KA-1).
+func (s *OpenAIGatewayService) openAIFirstOutputTimeoutFor(ctx context.Context, accountID int64, model, reasoningEffort string, attemptStart time.Time) time.Duration {
 	b := resilienceTextBudget(ctx)
 	if b == nil {
 		return s.openAIFirstOutputTimeout(reasoningEffort)
 	}
 	tier := resilience.FirstOutputTier(resilience.Current(), model, reasoningEffort)
-	return b.AttemptTimeout(tier, resilienceLastCandidate(ctx, accountID), time.Now())
+	if attemptStart.IsZero() {
+		attemptStart = time.Now()
+	}
+	return b.AttemptTimeout(tier, resilienceLastCandidate(ctx, accountID), attemptStart)
 }
 
 // resilienceFirstEventTimeout returns the first-upstream-event timeout of a

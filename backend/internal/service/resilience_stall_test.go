@@ -130,25 +130,38 @@ func TestFirstOutputTimeoutTiers(t *testing.T) {
 	})
 	svc := &OpenAIGatewayService{cfg: &config.Config{}}
 	ctx := budgetTestCtx(resilience.KindText)
-	require.Equal(t, 180*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", ""))
-	require.Equal(t, 200*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "xhigh"))
-	require.Equal(t, 220*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "max"))
-	require.Equal(t, 200*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5-pro-2026", "low"))
+	require.Equal(t, 180*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "", time.Time{}))
+	require.Equal(t, 200*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "xhigh", time.Time{}))
+	require.Equal(t, 220*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "max", time.Time{}))
+	require.Equal(t, 200*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5-pro-2026", "low", time.Time{}))
 
 	// The last usable candidate only answers to the pre-output deadline.
 	resilience.StateFrom(ctx).SetLastResort(7)
-	last := svc.openAIFirstOutputTimeoutFor(ctx, 7, "gpt-5.5", "")
+	last := svc.openAIFirstOutputTimeoutFor(ctx, 7, "gpt-5.5", "", time.Time{})
 	require.Greater(t, last, 230*time.Second)
 	require.LessOrEqual(t, last, 240*time.Second)
 
 	// No budget (WebSocket, switch off): the 0.3.0 configuration.
 	svc.cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 45
-	require.Equal(t, 45*time.Second, svc.openAIFirstOutputTimeoutFor(context.Background(), 1, "gpt-5.5", ""))
-	require.Zero(t, svc.openAIFirstOutputTimeoutFor(budgetTestCtx(resilience.KindImage), 1, "gpt-image-1", "")-45*time.Second)
+	require.Equal(t, 45*time.Second, svc.openAIFirstOutputTimeoutFor(context.Background(), 1, "gpt-5.5", "", time.Time{}))
+	require.Zero(t, svc.openAIFirstOutputTimeoutFor(budgetTestCtx(resilience.KindImage), 1, "gpt-image-1", "", time.Time{})-45*time.Second)
 
 	// Anthropic and Gemini first events.
 	require.Equal(t, 90*time.Second, resilienceFirstEventTimeout(budgetTestCtx(resilience.KindText), 1, PlatformAnthropic))
 	require.Equal(t, 90*time.Second, resilienceFirstEventTimeout(budgetTestCtx(resilience.KindText), 1, PlatformGemini))
 	require.Zero(t, resilienceFirstEventTimeout(context.Background(), 1, PlatformAnthropic))
 	require.Zero(t, resilienceFirstEventTimeout(budgetTestCtx(resilience.KindImage), 1, PlatformAnthropic))
+}
+
+func TestFirstOutputTimeoutMeasuredFromAttemptStart(t *testing.T) {
+	// Staging KA-1: the stream handler asks again when slow upstream headers
+	// arrive; the budget must be measured from the attempt start, not from
+	// that moment (240 - 150 = 90 s would fire at once).
+	withResilienceSettings(t, nil)
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	st := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(context.Background(), st)
+	start := time.Now().Add(-150 * time.Second)
+	st.SetBudget(resilience.NewBudget(ctx, resilience.Current(), resilience.KindText, start))
+	require.Equal(t, 180*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "", start))
 }

@@ -188,3 +188,33 @@ func TestAvailabilityFallbackOfIgnoresHealth(t *testing.T) {
 	var nilService *ResilienceService
 	require.Nil(t, nilService.AvailabilityFallbackOf(context.Background(), key.Group))
 }
+
+func TestSoleCandidateIsLastCandidate(t *testing.T) {
+	// Staging KA-6: the only account of a group must not be cut at the
+	// per-attempt tier; there is nobody to switch to.
+	r, _, accounts, _ := newFallbackFixture(t)
+	SetResilienceInstance(r)
+	t.Cleanup(func() { SetResilienceInstance(nil) })
+	st := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(context.Background(), st)
+	st.SetGroup(20)
+
+	accounts.byGroup[20] = []Account{healthyAccount(2)}
+	require.True(t, resilienceLastCandidate(ctx, 2), "single account")
+
+	hard := healthyAccount(3)
+	hard.Schedulable = false
+	accounts.byGroup[20] = []Account{healthyAccount(2), hard}
+	r.lastResortGroups.entries = nil
+	require.True(t, resilienceLastCandidate(ctx, 2), "the other account is unusable")
+
+	accounts.byGroup[20] = []Account{healthyAccount(2), softAccount(4)}
+	r.lastResortGroups.entries = nil
+	require.False(t, resilienceLastCandidate(ctx, 2), "a soft-penalised account may still take the request")
+
+	other := healthyAccount(5)
+	other.Platform = PlatformAnthropic
+	accounts.byGroup[20] = []Account{healthyAccount(2), other}
+	r.lastResortGroups.entries = nil
+	require.True(t, resilienceLastCandidate(ctx, 2), "other platforms do not count")
+}
