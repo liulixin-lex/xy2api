@@ -61,7 +61,7 @@ The gateway MUST count consecutive exhausted failures of one conversation (API k
 - `error.code` `server_is_overloaded`, in the HTTP body and in a committed stream's terminal frame;
 - a 5xx status becomes 503; 429 stays 429.
 
-A successful request of the conversation, or a gap longer than `errors.turn_cap.window_seconds` (default 120 s) between failures, MUST reset the count. A 200 response that carried an in-stream failure MUST NOT reset it. Every request MUST still go through normal account selection.
+A successful request of the conversation, or a gap longer than `errors.turn_cap.window_seconds` (default 120 s) between failures, MUST reset the count. A 200 response that carried an in-stream failure MUST NOT reset it. Every request MUST still go through normal account selection. Final answers MUST NOT feed the per-key fast fail, whose replay would add `Retry-After` again.
 
 #### Scenario: Codex stops after five requests
 - **WHEN** Codex sends a turn to a group whose accounts all fail

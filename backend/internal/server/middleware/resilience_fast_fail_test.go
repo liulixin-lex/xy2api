@@ -224,3 +224,23 @@ func TestTurnCapResetOnlyOnRealSuccess(t *testing.T) {
 	serve(stateFirst, http.MethodPost, "/v1/messages", apiKey, nil)
 	require.Equal(t, 1, resilience.ProcessTurnCap().Fail(key, time.Minute, now), "success resets")
 }
+
+func TestFastFailIgnoresCappedTurns(t *testing.T) {
+	// A capped turn's final 503 has no Retry-After; the fast fail must not
+	// replay it with one, which would restart Codex's retries.
+	orig := *resilience.Current()
+	resilience.Publish(resilience.Defaults())
+	t.Cleanup(func() { resilience.Publish(orig) })
+	calls := 0
+	router, key := newFastFailRouter(t, 9103, func(c *gin.Context) {
+		calls++
+		c.Set(resilience.GinKeyTurnCapped, true)
+		c.Set(resilience.GinKeyErrorResponse, resilience.ErrorResponse{Status: 503, ErrType: "api_error", Message: "x", Body: []byte(`{}`)})
+		c.JSON(http.StatusServiceUnavailable, gin.H{})
+	})
+	for i := 0; i < 15; i++ {
+		w := serve(router, http.MethodPost, "/v1/messages", key, nil)
+		require.Empty(t, w.Header().Get("Retry-After"))
+	}
+	require.Equal(t, 15, calls)
+}

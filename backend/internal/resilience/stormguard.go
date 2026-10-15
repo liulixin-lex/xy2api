@@ -336,6 +336,11 @@ func itoa64(v int64) string {
 // writers stash the JSON error response they wrote, for per-key fast fail.
 const GinKeyErrorResponse = "xy_resilience_error_response"
 
+// GinKeyTurnCapped marks a failure that ended the client's turn (design
+// §9.7). It belongs to one conversation and is never replayed by the
+// per-key fast fail.
+const GinKeyTurnCapped = "xy_resilience_turn_capped"
+
 // ErrorResponse is a stashed gateway JSON error response.
 type ErrorResponse struct {
 	Status  int

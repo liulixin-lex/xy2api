@@ -74,7 +74,9 @@ func resilienceFastFailObserve(c *gin.Context, apiKeyID int64) {
 		resilience.ProcessFastFail().Reset(apiKeyID)
 		return
 	}
-	if status != http.StatusServiceUnavailable {
+	if status != http.StatusServiceUnavailable || c.GetBool(resilience.GinKeyTurnCapped) {
+		// A capped turn's final answer carries no Retry-After; replaying it
+		// with one would restart the client's retries (design §9.7).
 		return
 	}
 	v, ok := c.Get(resilience.GinKeyErrorResponse)

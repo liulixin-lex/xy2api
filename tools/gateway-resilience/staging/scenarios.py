@@ -23,6 +23,7 @@ import sys
 import threading
 import time
 import urllib.request
+import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP, FAULT, CDN90, CDN125, CDN300, DIRECT = 18210, 18211, 18212, 18213, 18214, 18215
@@ -126,11 +127,19 @@ def first_data(result) -> float | None:
     return None
 
 
-def responses_body(model="gpt-6.1-sol", stream=True, effort=None):
+def responses_body(model="gpt-6.1-sol", stream=True, effort=None, session=None):
     body = {"model": model, "input": "hello from staging", "stream": stream}
     if effort:
         body["reasoning"] = {"effort": effort}
+    if session:
+        # Own conversation: the failed-turn cap counts per conversation, and
+        # identical bodies without one share a content-derived session.
+        body["prompt_cache_key"] = session
     return body
+
+
+def fresh_session() -> str:
+    return "stg-" + uuid.uuid4().hex
 
 
 def chat_body(model="gpt-6.1-sol", stream=True):
@@ -231,7 +240,7 @@ def ka4():
 def bud1():
     checks = []
     mark = fault_last_id()
-    r = stream_request(DIRECT, "/v1/responses", KEYS["G-all-502"], responses_body())
+    r = stream_request(DIRECT, "/v1/responses", KEYS["G-all-502"], responses_body(session=fresh_session()))
     attempts = [x for x in fault_records_since(mark) if x["fault"] == "F07"]
     r["upstream_attempts"] = len(attempts)
     check(r["status"] in (502, 503), "error status", checks)
@@ -287,7 +296,7 @@ def ctx1():
 @scenario("ERR-1", "Single-account group answering 503: no-account 503 with Retry-After 2-30 s")
 def err1():
     checks = []
-    r = stream_request(DIRECT, "/v1/responses", KEYS["G-503-single"], responses_body(stream=False))
+    r = stream_request(DIRECT, "/v1/responses", KEYS["G-503-single"], responses_body(stream=False, session=fresh_session()))
     ra = int(r["headers"].get("retry-after", "0") or 0)
     check(r["status"] in (502, 503), "error status", checks)
     check(2 <= ra <= 30, "Retry-After between 2 and 30", checks)
@@ -305,24 +314,43 @@ def err2():
     return r, checks
 
 
-@scenario("ERR-3", "Repeated identical 503s on one key are answered fast")
+@scenario("ERR-3", "One conversation failing repeatedly: Retry-After four times, then a final answer")
 def err3():
     checks = []
-    results = []
-    for _ in range(14):
-        results.append(stream_request(DIRECT, "/v1/responses", KEYS["G-503-single"], responses_body(stream=False)))
-    times = [x["elapsed"] for x in results]
-    r = {"elapsed_each": times, "statuses": [x["status"] for x in results],
-         "retry_after": [x["headers"].get("retry-after") for x in results]}
+    session = fresh_session()
+    results = [stream_request(DIRECT, "/v1/responses", KEYS["G-503-single"], responses_body(stream=False, session=session))
+               for _ in range(6)]
+    r = {"statuses": [x["status"] for x in results],
+         "retry_after": [x["headers"].get("retry-after") for x in results],
+         "should_retry": [x["headers"].get("x-should-retry") for x in results],
+         "overloaded": [any("server_is_overloaded" in l for _, l in x["lines"]) for x in results]}
+    check(all(s in (502, 503) for s in r["statuses"][:4]), "first four rejected", checks)
+    check(all(r["retry_after"][:4]), "first four carry Retry-After", checks)
+    check(r["statuses"][4:] == [503, 503], "then 503", checks)
+    check(not any(r["retry_after"][4:]), "final answers have no Retry-After", checks)
+    check(r["should_retry"][4:] == ["false", "false"], "final answers say x-should-retry false", checks)
+    check(all(r["overloaded"][4:]), "final answers carry server_is_overloaded", checks)
+    return r, checks
+
+
+@scenario("ERR-4", "Many conversations of one key failing once each: every answer keeps Retry-After")
+def err4():
+    checks = []
+    results = [stream_request(DIRECT, "/v1/responses", KEYS["G-503-single"], responses_body(stream=False, session=fresh_session()))
+               for _ in range(14)]
+    r = {"statuses": [x["status"] for x in results],
+         "retry_after": [x["headers"].get("retry-after") for x in results],
+         "fast_fail": [x["headers"].get("x-xy-fast-fail") for x in results],
+         "elapsed_each": [x["elapsed"] for x in results]}
     check(all(s in (502, 503) for s in r["statuses"]), "all rejected", checks)
-    check(all(x for x in r["retry_after"]), "every answer has Retry-After", checks)
+    check(all(r["retry_after"]), "every answer has Retry-After", checks)
     return r, checks
 
 
 @scenario("RL-1", "429 with reset time: Retry-After carried, capped")
 def rl1():
     checks = []
-    r = stream_request(DIRECT, "/v1/responses", KEYS["G-rate-reset"], responses_body(stream=False))
+    r = stream_request(DIRECT, "/v1/responses", KEYS["G-rate-reset"], responses_body(stream=False, session=fresh_session()))
     check(r["status"] in (429, 503), "rate limited or no account", checks)
     check("retry-after" in r["headers"], "Retry-After present", checks)
     return r, checks
@@ -464,7 +492,7 @@ def cf2():
 @scenario("CF-3", "Real Cloudflare passes the gateway's Retry-After")
 def cf3():
     checks = []
-    r = stream_request(REAL_CF, "/v1/responses", KEYS["G-503-single"], responses_body(stream=False))
+    r = stream_request(REAL_CF, "/v1/responses", KEYS["G-503-single"], responses_body(stream=False, session=fresh_session()))
     ra = int(r["headers"].get("retry-after", "0") or 0)
     check(r["status"] in (502, 503), "error status", checks)
     check(2 <= ra <= 30, f"Retry-After {ra} reached the client", checks)
@@ -623,7 +651,7 @@ def main() -> int:
     os.makedirs(args.evidence, exist_ok=True)
     ids = [s for s in (args.only.split(",") if args.only else SCENARIOS) if s]
     # Balance and fallback scenarios change shared upstream state; run them alone.
-    serial = [s for s in ids if s.startswith(("BAL", "FB", "RES", "ERR-3", "BUD", "DC"))]
+    serial = [s for s in ids if s.startswith(("BAL", "FB", "RES", "ERR-3", "ERR-4", "BUD", "DC"))]
     # DC-2 waits for a 150 s upstream; run it last.
     serial.sort(key=lambda s: s == "DC-2")
     parallel = [s for s in ids if s not in serial]

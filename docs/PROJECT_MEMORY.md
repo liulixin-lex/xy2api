@@ -731,6 +731,12 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
   - 真实 Cloudflare：150 秒慢首包请求经心跳穿过 CF 边缘超时，直连不发早期心跳，Anthropic ping 心跳正常；CF-3 待新候选复测。
   - XY-image 0.0.17（任务 11）在独立副本分支开发，X1–X7 与实验室模拟上游完成，962 个单测通过；已在 XY-image 交接文件第 4 节登记并留言；`XY2API_VERIFIED_VERSIONS` 加 0.4.0 需等 0.4.0 正式镜像录制后进行。
   - 注意：客户端（Codex、Claude Code、OpenCode、SDK）装在测试目录、以隔离 HOME 运行，不碰测试机全局配置；测试机有其他服务，场景脚本只用自己的分组与端口。
+- 2026-10-15T18:10Z 真实客户端矩阵第 1 轮 10/15 通过，5 项失败的原因与处理（`025706c22`、`b118624e3`，本地未推送）：
+  - Codex 全失败回合 30 次请求、871 秒；流内失败重试 6 次。读 codex-rs 源码确认：带 `Retry-After` 的 5xx 传输层每轮 5 次、回合层 5 轮，不封顶；`server_is_overloaded` 与 429 只有服务端给延迟才重试。新增失败回合封顶（design §9.7，`errors.turn_cap`）：同会话连续第 5 次耗尽失败改为终止应答。
+  - 真实中转站在 `response.created` 前发 `SSE-Keep-Alive` 空 delta 帧：openai-python 报错，网关还会把它当首输出、放弃换号与首输出超时。读取上游 SSE 时丢弃（design §7.8）。
+  - 测试脚本问题：Claude Code 缺 `ANTHROPIC_BASE_URL/API_KEY`；Claude 模型的分发要设按族映射（`default_mapped_model` 对 Claude 不生效）。
+  - 顺带把 design 与 spec 的首输出分档改为校准后的 180/180/200/220 秒。
+  - 下一步：复测这 5 项，再跑全量场景（含 CF-3、CF-5、DC-2..4、IMG-1、BAL-2）与完整客户端矩阵。
 
 ### 20261015-prod-ux-analysis — 生产请求日志只读分析与上线级优化方案（已完成，由 20261015-gateway-resilience 承接）
 

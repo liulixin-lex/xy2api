@@ -35,7 +35,7 @@ const (
 
 	// ginKeyResilienceTurnCapped marks a failure that ends the client's turn
 	// (design §9.7); the writers give it the code server_is_overloaded.
-	ginKeyResilienceTurnCapped = "xy_resilience_turn_capped"
+	ginKeyResilienceTurnCapped = resilience.GinKeyTurnCapped
 
 	// codeServerIsOverloaded ends a Codex turn when no delay is given: it is
 	// only retried with a server-advised delay.
