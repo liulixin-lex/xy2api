@@ -244,7 +244,8 @@ func TestGatewayHandleStreamingAwareError_ResponsesStreamingEmitsResponseFailed(
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "upstream gone", true)
 
 	_, errObj := parseResponsesFailedSSE(t, w.Body.String())
-	assert.Equal(t, "upstream_error", errObj["code"])
+	// xy2api resilience (design §7.6): committed upstream failures use server_error.
+	assert.Equal(t, "server_error", errObj["code"])
 	assert.Equal(t, "upstream gone", errObj["message"])
 }
 
@@ -387,6 +388,8 @@ func TestSynthesizeResponseID_FallbackUUID(t *testing.T) {
 }
 
 func TestMapResponsesErrorCode(t *testing.T) {
+	// 0.3.0 mapping with the resilience switch off.
+	withHandlerResilience(t, func(s *resilience.Settings) { s.Keepalive.Enabled = false })
 	cases := []struct{ in, out string }{
 		{"rate_limit_error", "rate_limit_exceeded"},
 		{"invalid_request_error", "invalid_request"},
@@ -402,4 +405,34 @@ func TestMapResponsesErrorCode(t *testing.T) {
 		assert.Equal(t, tc.out, mapResponsesErrorCode(tc.in, ""), "in=%q", tc.in)
 	}
 	assert.Equal(t, gatewayQueueFullCode, mapResponsesErrorCode("rate_limit_error", gatewayQueueFullCode))
+}
+
+func TestMapResponsesErrorCodeResilience(t *testing.T) {
+	// Design §7.6: rate limits and overload retry as rate_limit_exceeded,
+	// other upstream failures as server_error; explicit codes win.
+	withHandlerResilience(t, nil)
+	for in, out := range map[string]string{
+		"rate_limit_error":      "rate_limit_exceeded",
+		"overloaded_error":      "rate_limit_exceeded",
+		"upstream_error":        "server_error",
+		"api_error":             "server_error",
+		"":                      "server_error",
+		"invalid_request_error": "invalid_request",
+	} {
+		assert.Equal(t, out, mapResponsesErrorCode(in, ""), "in=%q", in)
+	}
+	assert.Equal(t, gatewayQueueFullCode, mapResponsesErrorCode("rate_limit_error", gatewayQueueFullCode))
+}
+
+func TestCommittedFailureCarriesRetryHint(t *testing.T) {
+	// Design §7.6: once committed, the message is the only retry signal.
+	withHandlerResilience(t, nil)
+	c, w := newGinContextForEndpoint(t, EndpointResponses)
+	c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
+	_, _ = c.Writer.WriteString(":\n\n")
+	applyExhaustedRetryHint(c, nil, http.StatusBadGateway)
+	(&GatewayHandler{}).handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream service temporarily unavailable", true)
+	_, errObj := parseResponsesFailedSSE(t, strings.TrimPrefix(w.Body.String(), ":\n\n"))
+	assert.Equal(t, "server_error", errObj["code"])
+	assert.Equal(t, "Upstream service temporarily unavailable. Please try again in 30s.", errObj["message"])
 }

@@ -757,10 +757,17 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	}
 	var lastReadAt int64
 	atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())
+	// xy2api resilience: the first upstream line disarms the first-event
+	// timeout of the attempt (design §7.4).
+	var firstEvent *firstEventGuard
+	if resp.Request != nil {
+		firstEvent = firstEventGuardFrom(resp.Request.Context())
+	}
 	go func(scanBuf *sseScannerBuf64K) {
 		defer putSSEScannerBuf64K(scanBuf)
 		defer close(events)
 		for scanner.Scan() {
+			firstEvent.Disarm()
 			atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())
 			if !sendEvent(scanEvent{line: scanner.Text()}) {
 				return
@@ -777,9 +784,12 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
 	}
 	// 仅监控上游数据间隔超时，避免下游写入阻塞导致误判
+	// xy2api resilience: check often enough to notice a stall within 5 s,
+	// and apply the text stall threshold after output (design §7.5).
+	stallCheckBase := resilienceStallCheckBase(streamInterval)
 	var intervalTicker *time.Ticker
-	if streamInterval > 0 {
-		intervalTicker = time.NewTicker(streamInterval)
+	if stallCheckBase > 0 {
+		intervalTicker = time.NewTicker(resilienceStallCheckPeriod(stallCheckBase))
 		defer intervalTicker.Stop()
 	}
 	var intervalCh <-chan time.Time
@@ -1029,6 +1039,11 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				if sawTerminalEvent {
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
 				}
+				// xy2api resilience: the first-event timeout cancelled the attempt;
+				// with nothing delivered it fails over (design §7.4).
+				if firstEvent.Fired() && !openAIStreamClientOutputStarted(c, false) {
+					return nil, firstEvent.failoverError(c, account, "first_event")
+				}
 				// 检测 context 取消（客户端断开会导致 context 取消，进而影响上游读取）
 				if errors.Is(ev.err, context.Canceled) || errors.Is(ev.err, context.DeadlineExceeded) {
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete: %w", ev.err)
@@ -1118,18 +1133,20 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 
 		case <-intervalCh:
 			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
-			if time.Since(lastRead) < streamInterval {
+			stallThreshold := resilienceStallThreshold(streamInterval, openAIStreamClientOutputStarted(c, false))
+			if stallThreshold <= 0 || time.Since(lastRead) < stallThreshold {
 				continue
 			}
 			if clientDisconnected {
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete after timeout")
 			}
-			logger.LegacyPrintf("service.gateway", "Stream data interval timeout: account=%d model=%s interval=%s", account.ID, originalModel, streamInterval)
+			logger.LegacyPrintf("service.gateway", "Stream data interval timeout: account=%d model=%s interval=%s", account.ID, originalModel, stallThreshold)
 			// 处理流超时，可能标记账户为临时不可调度或错误状态
 			if s.rateLimitService != nil {
 				s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 			}
-			sendErrorEvent("stream_timeout", fmt.Sprintf("upstream stream idle for %s", streamInterval))
+			noteResilienceStall(ctx, s.rateLimitService, account)
+			sendErrorEvent("stream_timeout", fmt.Sprintf("upstream stream idle for %s", stallThreshold))
 			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream data interval timeout")
 
 		case <-keepaliveCh:

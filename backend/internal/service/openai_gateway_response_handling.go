@@ -55,7 +55,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	}
 	firstOutputTimeout := time.Duration(0)
 	if account != nil && account.Platform == PlatformOpenAI {
-		firstOutputTimeout = s.openAIFirstOutputTimeout(reasoningEffort)
+		firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, originalModel, reasoningEffort)
 	}
 	guardFirstOutput := firstOutputTimeout > 0
 	stageFirstOutput := account != nil && account.Platform == PlatformOpenAI
@@ -159,6 +159,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 
 	usage := &OpenAIUsage{}
 	imageCounter := newOpenAIImageOutputCounter()
+	// xy2api resilience: image generation keeps the image stall threshold.
+	imageGenerationSeen := false
 	responseID := ""
 	var firstOutputScanGuard atomic.Bool
 	firstOutputScanGuard.Store(stageFirstOutput)
@@ -185,9 +187,12 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		streamInterval = resolveGrokStreamIdleTimeout(cfgSec)
 	}
 	// 仅监控上游数据间隔超时，不被下游写入阻塞影响
+	// xy2api resilience: check often enough to notice a stall within 5 s,
+	// and apply the text stall threshold after output (design §7.5).
+	stallCheckBase := resilienceStallCheckBase(streamInterval)
 	var intervalTicker *time.Ticker
-	if streamInterval > 0 {
-		intervalTicker = time.NewTicker(streamInterval)
+	if stallCheckBase > 0 {
+		intervalTicker = time.NewTicker(resilienceStallCheckPeriod(stallCheckBase))
 		defer intervalTicker.Stop()
 	}
 	var intervalCh <-chan time.Time
@@ -616,6 +621,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				line = "data: " + data
 			}
 			imageCounter.AddSSEData(dataBytes)
+			if !imageGenerationSeen && bytes.Contains(dataBytes, []byte("image_generation_call")) {
+				imageGenerationSeen = true
+			}
 			searchCounter += countGrokNativeSearchCallsInSSEDataDedup(dataBytes, streamSearchSeen)
 
 			// Correct Codex tool calls if needed (apply_patch -> edit, etc.)
@@ -912,7 +920,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 			}
 			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
-			if time.Since(lastRead) < streamInterval {
+			stallThreshold := resilienceStallThreshold(streamInterval, openAIStreamClientOutputStarted(c, clientOutputStarted) && !imageGenerationSeen)
+			if stallThreshold <= 0 || time.Since(lastRead) < stallThreshold {
 				continue
 			}
 			if codexFailureTerminal && sawBareError && !sawResponseFailed {
@@ -922,11 +931,12 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if clientDisconnected {
 				return resultWithUsage(), fmt.Errorf("stream usage incomplete after timeout")
 			}
-			logger.LegacyPrintf("service.openai_gateway", "Stream data interval timeout: account=%d model=%s interval=%s", account.ID, originalModel, streamInterval)
+			logger.LegacyPrintf("service.openai_gateway", "Stream data interval timeout: account=%d model=%s interval=%s", account.ID, originalModel, stallThreshold)
 			// 处理流超时，可能标记账户为临时不可调度或错误状态
 			if s.rateLimitService != nil {
 				s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 			}
+			noteResilienceStall(ctx, s.rateLimitService, account)
 			// Grok: short cool + account failover when no client-visible bytes
 			// were committed yet (pre-commit). After output started we keep the
 			// legacy stream_timeout path so partial SSE is not dual-written.

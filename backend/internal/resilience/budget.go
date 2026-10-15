@@ -174,6 +174,14 @@ func (b *Budget) RetryAfterCap() time.Duration {
 	return b.retryAfterCap
 }
 
+// MaxAttempts returns the attempt limit.
+func (b *Budget) MaxAttempts() int {
+	if b == nil {
+		return 0
+	}
+	return b.maxAttempts
+}
+
 // Attempts returns the number of finished attempts.
 func (b *Budget) Attempts() int {
 	if b == nil {

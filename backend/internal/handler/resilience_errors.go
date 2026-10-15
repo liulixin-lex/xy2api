@@ -47,12 +47,39 @@ func resilienceTranslateError(c *gin.Context, status int, errType, code, message
 			code = "concurrent_balance_reserved"
 		}
 	}
-	if c != nil && status == http.StatusServiceUnavailable {
+	if c != nil && (status == http.StatusServiceUnavailable || resilienceTerminalHint(c, status)) {
 		if secs := c.GetInt(ginKeyResilienceRetryAfter); secs > 0 && !strings.Contains(strings.ToLower(message), "try again in") {
 			message = strings.TrimRight(strings.TrimSpace(message), ". ") + fmt.Sprintf(". Please try again in %ds.", secs)
 		}
 	}
 	return errType, code, message
+}
+
+// resilienceTerminalHint reports whether a failure is written into an
+// already committed stream, where the message is the only way to tell the
+// client when to retry (design §7.6).
+func resilienceTerminalHint(c *gin.Context, status int) bool {
+	if c == nil || c.Writer == nil || !resilience.Current().KeepaliveOn() {
+		return false
+	}
+	return (status == http.StatusTooManyRequests || status >= http.StatusInternalServerError) && c.Writer.Written()
+}
+
+// resilienceResponsesCode maps a committed Responses failure to the codes
+// Codex understands (design §7.6): rate limits and overload are retried as
+// rate_limit_exceeded, other upstream failures as server_error. It returns
+// "" when the 0.3.0 mapping applies.
+func resilienceResponsesCode(errType, code string) string {
+	if code != "" || !resilience.Current().KeepaliveOn() {
+		return ""
+	}
+	switch errType {
+	case "rate_limit_error", "overloaded_error":
+		return "rate_limit_exceeded"
+	case "upstream_error", "api_error", "server_error", "":
+		return "server_error"
+	}
+	return ""
 }
 
 // noAccountRetryAdvisor is implemented by the gateway services.
@@ -93,17 +120,21 @@ func applyNoAccountRetryHints(c *gin.Context, diag any, apiKey *service.APIKey, 
 // otherwise the time to the group's earliest recovery is used.
 func applyExhaustedRetryHint(c *gin.Context, diag any, status int) {
 	cfg := resilience.Current()
-	if c == nil || c.Request == nil || !cfg.ErrorsOn() || (status != http.StatusTooManyRequests && status != http.StatusServiceUnavailable) {
+	if c == nil || c.Request == nil || !cfg.ErrorsOn() ||
+		(status != http.StatusTooManyRequests && status != http.StatusServiceUnavailable && !resilienceTerminalHint(c, status)) {
 		return
 	}
 	lo, hi := cfg.Errors.NoAccountRetryAfter.Min, cfg.Errors.NoAccountRetryAfter.Max
 	if v := strings.TrimSpace(c.Writer.Header().Get("Retry-After")); v != "" {
-		if secs, err := strconv.Atoi(v); err == nil {
-			c.Header("Retry-After", strconv.Itoa(resilience.ClampRetryAfter(time.Duration(secs)*time.Second, lo, hi)))
-			return
+		secs := 0
+		if n, err := strconv.Atoi(v); err == nil {
+			secs = resilience.ClampRetryAfter(time.Duration(n)*time.Second, lo, hi)
+		} else if at, err := http.ParseTime(v); err == nil {
+			secs = resilience.ClampRetryAfter(time.Until(at), lo, hi)
 		}
-		if at, err := http.ParseTime(v); err == nil {
-			c.Header("Retry-After", strconv.Itoa(resilience.ClampRetryAfter(time.Until(at), lo, hi)))
+		if secs > 0 {
+			c.Header("Retry-After", strconv.Itoa(secs))
+			c.Set(ginKeyResilienceRetryAfter, secs)
 			return
 		}
 	}

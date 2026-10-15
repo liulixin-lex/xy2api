@@ -398,6 +398,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
+		// xy2api resilience: first upstream event timeout (design §7.4).
+		var firstEvent *firstEventGuard
+		if reqStream {
+			upstreamCtx, firstEvent = newFirstEventGuard(upstreamCtx, resilienceFirstEventTimeout(ctx, account.ID, account.Platform))
+			defer firstEvent.Release()
+		}
 		upstreamReq, wireBody, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 		releaseUpstreamCtx()
 		if err != nil {
@@ -411,6 +417,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
+			}
+			if firstEvent.Fired() {
+				return nil, firstEvent.failoverError(c, account, "response_headers")
 			}
 			return nil, s.handleUpstreamTransportError(ctx, c, account, err, OpsUpstreamErrorEvent{
 				UpstreamURL: safeUpstreamURL(upstreamReq.URL.String()),

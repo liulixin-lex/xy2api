@@ -116,13 +116,16 @@
   - 换号时不重置计时。
 - [x] 6.3 各协议的心跳帧；Gemini 与官方 OAuth 账号不提前提交；图片与异步端点不提前提交。
   - 实现说明：复用 compact 心跳的上下文键，现有“已提交→流内终止帧”和“扣除心跳字节”的判定全部生效；心跳提交后若仍有代码写 JSON 错误，写入器把它改写为对应协议的终止帧。服务内三处“未输出才可换号”的判定改为语义输出口径。前提：`SERVER_TRUSTED_PROXIES` 必须包含 Caddy 到应用的对端地址（写入 runbook）。
-- [ ] 6.4 首输出超时：OpenAI 按 effort 分档（60/120/180 秒）并支持按模型覆盖；Anthropic 与 Gemini 首事件超时 90 秒；最后一个候选不设单次超时。
-- [ ] 6.5 修复 G2：按 `min(T/4, 5 秒)` 检查；文本已输出后停滞 120 秒判定为断流；图片维持 900 秒。
-- [ ] 6.6 提交后的终止帧：
+- [x] 6.4 首输出超时：OpenAI 按 effort 分档（60/120/180 秒）并支持按模型覆盖；Anthropic 与 Gemini 首事件超时 90 秒；最后一个候选不设单次超时。
+  - 实现：OpenAI 复用现有首输出守卫（原生 HTTP Responses），预算开启时按分档并受剩余预算约束；Anthropic 流式转发新增首事件守卫（头部等待与首行两阶段，守卫取消不被误判为客户端断开）。偏差：Gemini compat 服务的首事件守卫未接入，由停滞检测兜底；WebSocket 维持原配置。
+- [x] 6.5 修复 G2：按 `min(T/4, 5 秒)` 检查；文本已输出后停滞 120 秒判定为断流；图片维持 900 秒。
+  - 实现：检测周期 min(T/4, 5 秒)；语义输出后取 min(配置间隔, 120 秒)，输出前沿用配置间隔；Responses 出现 image_generation_call 后豁免文本阈值；停滞时对账号施加 STALL 软冷却。
+- [x] 6.6 提交后的终止帧：
   - Responses：`response.failed`，带 code 与 “try again in Ns”；
   - Chat：`data:{error}` 加 `[DONE]`；
   - Anthropic：`event: error`（修复 G3）；
   - 写完立即关流。
+  - 实现：已提交后的失败在消息中带 “Please try again in Ns.”（N 为组内最早恢复，2–30 秒）；Responses 码按设计映射；Chat 为 data+[DONE]；服务内的 stream_timeout 帧保持原样。
 - [ ] 6.7 验证：
   - 用 CDN 模拟代理验证 90、125、300 秒三档都不再切断；
   - 快速失败仍返回原状态码；

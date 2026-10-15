@@ -158,6 +158,9 @@ func requestModel(c *gin.Context) string {
 // mapResponsesErrorCode 把内部 errType 映射为 Responses 协议常见的 error.code。
 // 无明确映射时原样返回，保证至少可读。
 func mapResponsesErrorCode(errType, code string) string {
+	if mapped := resilienceResponsesCode(errType, code); mapped != "" {
+		return mapped
+	}
 	if code != "" {
 		return code
 	}
