@@ -196,6 +196,23 @@ func TestTransientCooldownHonoursRetryAfter(t *testing.T) {
 	require.WithinDuration(t, time.Now().Add(120*time.Second), repo3.tempUntil, 3*time.Second)
 }
 
+func TestTransientCooldownRefreshesGroupSnapshot(t *testing.T) {
+	// Staging FB-2: the fallback decision and Retry-After of the next request
+	// read a 2 s group snapshot taken before the cooldown, so the request
+	// stayed in the primary group with "retry in 2 s".
+	svc, _, account, r := newPenaltyFixture(t, PlatformAnthropic)
+	account.GroupIDs = []int64{77}
+	r.lastResortGroups.entries = map[int64]lastResortGroupEntry{
+		77: {accounts: []Account{*account}, expires: time.Now().Add(time.Minute)},
+		78: {accounts: []Account{}, expires: time.Now().Add(time.Minute)},
+	}
+	svc.HandleUpstreamError(context.Background(), account, 524, http.Header{}, []byte(`gateway timeout`))
+	_, cached := r.lastResortGroups.entries[77]
+	require.False(t, cached, "the cooled-down account's group is re-read")
+	_, other := r.lastResortGroups.entries[78]
+	require.True(t, other, "other groups keep their snapshot")
+}
+
 func TestTransientCooldownOpenAIOnlyWithRetryAfter(t *testing.T) {
 	svc, repo, account, _ := newPenaltyFixture(t, PlatformOpenAI)
 	svc.HandleUpstreamError(context.Background(), account, http.StatusBadGateway, http.Header{}, []byte(`{"error":{"message":"bad gateway"}}`))

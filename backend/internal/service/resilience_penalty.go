@@ -145,6 +145,9 @@ func (s *RateLimitService) applyTransientCooldown(ctx context.Context, account *
 		slog.Warn("resilience.transient_cooldown_failed", "account_id", account.ID, "error", err)
 		return
 	}
+	// The next request's fallback decision and Retry-After must see the
+	// cooldown, not a group snapshot taken before it.
+	s.resilience.invalidateAccountGroups(account)
 	slog.Info("resilience.transient_cooldown",
 		"account_id", account.ID,
 		"platform", account.Platform,
@@ -356,18 +359,20 @@ func (r *ResilienceService) setRecovering(ctx context.Context, accountID int64, 
 	}
 }
 
-// invalidateAccountGroups drops negative-cache entries of the account's
-// groups after its availability changed.
+// invalidateAccountGroups drops the negative-cache entries and the cached
+// account lists of the account's groups after its availability changed.
 func (r *ResilienceService) invalidateAccountGroups(account *Account) {
 	if r == nil || account == nil {
 		return
 	}
 	if len(account.GroupIDs) == 0 {
 		r.negCache.InvalidateGroup(0)
+		r.lastResortGroups.drop(0)
 		return
 	}
 	for _, gid := range account.GroupIDs {
 		r.negCache.InvalidateGroup(gid)
+		r.lastResortGroups.drop(gid)
 	}
 }
 

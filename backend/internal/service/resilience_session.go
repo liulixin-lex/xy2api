@@ -127,6 +127,17 @@ type lastResortGroupEntry struct {
 	expires  time.Time
 }
 
+// drop forgets the cached accounts of a group; groupID <= 0 forgets all.
+func (c *lastResortGroupCache) drop(groupID int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if groupID <= 0 {
+		c.entries = nil
+		return
+	}
+	delete(c.entries, groupID)
+}
+
 func (r *ResilienceService) groupAccountsForLastResort(ctx context.Context, repo AccountRepository, groupID int64) ([]Account, error) {
 	now := time.Now()
 	if r != nil {
