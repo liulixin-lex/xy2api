@@ -273,10 +273,39 @@ func (r *ResilienceService) NoteAccountSuccess(ctx context.Context, account *Acc
 	}
 	now := time.Now()
 	r.successes.last.Store(account.ID, now)
-	if r.rateLimit == nil || r.RecoveringCap(account.ID, now) == 0 {
+	resilience.StateFrom(ctx).SessionSuccess(ctx, account.ID)
+	if r.rateLimit == nil {
+		return
+	}
+	// A last-resort account that served successfully has recovered: lift its
+	// transient cooldown so normal selection uses it again (design §4.3).
+	if v, ok := r.lastResortUsed.LoadAndDelete(account.ID); ok {
+		if at, _ := v.(time.Time); now.Sub(at) < 10*time.Minute {
+			r.rateLimit.liftTransientCooldown(ctx, account.ID)
+		}
+	}
+	if r.RecoveringCap(account.ID, now) == 0 {
 		return
 	}
 	r.rateLimit.noteRecoveringSuccess(ctx, account.ID, now)
+}
+
+// liftTransientCooldown clears a soft transient cooldown after the account
+// served a request successfully; other pauses stay.
+func (s *RateLimitService) liftTransientCooldown(ctx context.Context, accountID int64) {
+	stateCtx, cancel := resilienceStateContext(ctx)
+	defer cancel()
+	fresh, err := s.accountRepo.GetByID(stateCtx, accountID)
+	if err != nil || fresh == nil || fresh.TempUnschedulableUntil == nil ||
+		!strings.HasPrefix(fresh.TempUnschedulableReason, resilience.ReasonPrefixTransient) {
+		return
+	}
+	if err := s.accountRepo.ClearTempUnschedulable(stateCtx, accountID); err != nil {
+		slog.Warn("resilience.transient_lift_failed", "account_id", accountID, "error", err)
+		return
+	}
+	s.resilience.invalidateAccountGroups(fresh)
+	slog.Info("resilience.transient_lifted", "account_id", accountID)
 }
 
 func (r *ResilienceService) recentSuccess(accountID int64, within time.Duration) bool {
@@ -340,4 +369,20 @@ func (r *ResilienceService) invalidateAccountGroups(account *Account) {
 	for _, gid := range account.GroupIDs {
 		r.negCache.InvalidateGroup(gid)
 	}
+}
+
+// ClassifyFailoverError classifies a failed upstream attempt reported to the
+// handler failover loop.
+func ClassifyFailoverError(e *UpstreamFailoverError) resilience.Result {
+	if e == nil {
+		return resilience.Result{Category: resilience.CategorySuccess}
+	}
+	if e.RequestScopedTransient {
+		return resilience.Result{Category: resilience.CategoryCapacityShed, Reason: "request_scoped"}
+	}
+	if e.IsCredentialFailure() {
+		return resilience.Result{Category: resilience.CategoryAuth, Reason: "credential_failure"}
+	}
+	msg := strings.TrimSpace(extractUpstreamErrorMessage(e.ResponseBody))
+	return classifyUpstreamHTTP(e.StatusCode, e.ResponseHeaders, e.ResponseBody, msg)
 }

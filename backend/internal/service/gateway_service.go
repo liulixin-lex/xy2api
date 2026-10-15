@@ -559,6 +559,11 @@ func shouldClearStickySession(account *Account, requestedModel string) bool {
 	if account == nil {
 		return false
 	}
+	// xy2api resilience: a soft penalty keeps the binding; the request is
+	// served elsewhere and the session returns afterwards (design §4.2).
+	if resilienceKeepsSoftStickyBinding(account, requestedModel) {
+		return false
+	}
 	if !account.IsSchedulable() {
 		return true
 	}
@@ -977,6 +982,9 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 // BindStickySession sets session -> account binding with standard TTL.
 func (s *GatewayService) BindStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
 	if sessionHash == "" || accountID <= 0 || s.cache == nil {
+		return nil
+	}
+	if !s.resilienceGatewayBindAllowed(ctx, accountID) {
 		return nil
 	}
 	ttl := stickySessionTTL

@@ -89,6 +89,16 @@ type ResilienceService struct {
 	successes resilienceSuccessTracker
 	rateLimit *RateLimitService
 	probe     *balanceProbeDeps
+
+	lastResortGroups lastResortGroupCache
+	// lastResortUsed records accounts recently served as last resort
+	// (id -> time) so a success lifts their transient cooldown early.
+	lastResortUsed sync.Map
+	// failingSessions marks sessions with failure counts on this instance
+	// (key -> expiry) so successes only reset counts when needed.
+	failingSessions sync.Map
+	// avoidingSessions marks sessions with avoid entries (key -> expiry).
+	avoidingSessions sync.Map
 }
 
 // NewResilienceService creates the service; Start loads the settings and
