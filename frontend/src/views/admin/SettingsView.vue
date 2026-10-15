@@ -204,6 +204,7 @@
         <!-- Tab: Gateway -->
         <div v-show="activeTab === 'gateway'" class="space-y-6">
           <ShareSchedulingSettings v-if="activeTab === 'gateway' && !loading && !loadFailed" />
+          <GatewayResilienceSettings v-if="activeTab === 'gateway' && !loading && !loadFailed" />
           <!-- Overload Cooldown (529) Settings -->
           <div class="card">
             <div
@@ -9100,6 +9101,7 @@ import { useAppStore } from "@/stores";
 import { useAdminSettingsStore } from "@/stores/adminSettings";
 import ClaudeCacheFallbackSettings from "@/views/admin/settings/ClaudeCacheFallbackSettings.vue";
 import ShareSchedulingSettings from "@/views/admin/settings/ShareSchedulingSettings.vue";
+import GatewayResilienceSettings from "@/views/admin/settings/GatewayResilienceSettings.vue";
 import { normalizeVisibleMethod } from "@/components/payment/paymentFlow";
 import StripeModeSelector from "@/components/payment/StripeModeSelector.vue";
 import {

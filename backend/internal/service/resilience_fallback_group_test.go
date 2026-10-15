@@ -169,3 +169,22 @@ func TestPublishedInstance(t *testing.T) {
 	t.Cleanup(func() { SetResilienceInstance(nil) })
 	require.Same(t, r, Resilience())
 }
+
+func TestAvailabilityFallbackOfIgnoresHealth(t *testing.T) {
+	r, _, accounts, key := newFallbackFixture(t)
+	// The relationship is shown even while the fallback group is unhealthy.
+	accounts.byGroup[20] = []Account{softAccount(2)}
+	fb := r.AvailabilityFallbackOf(context.Background(), key.Group)
+	require.NotNil(t, fb)
+	require.Equal(t, int64(20), fb.ID)
+	require.Equal(t, 1.5, fb.RateMultiplier)
+
+	require.Nil(t, r.AvailabilityFallbackOf(context.Background(), &Group{ID: 20, Platform: PlatformOpenAI}))
+	other := *key.Group
+	other.Platform = PlatformAnthropic
+	require.Nil(t, r.AvailabilityFallbackOf(context.Background(), &other))
+	withResilienceSettings(t, func(s *resilience.Settings) { s.FallbackGroup.Enabled = false })
+	require.Nil(t, r.AvailabilityFallbackOf(context.Background(), key.Group))
+	var nilService *ResilienceService
+	require.Nil(t, nilService.AvailabilityFallbackOf(context.Background(), key.Group))
+}

@@ -175,6 +175,8 @@ type UsageLog struct {
 	// OriginGroupID is the group the request was made for when an
 	// availability fallback group served it (xy2api resilience).
 	OriginGroupID *int64
+	// OriginGroupName is loaded with the associations for display.
+	OriginGroupName string
 
 	BillingType        int8
 	RequestType        RequestType

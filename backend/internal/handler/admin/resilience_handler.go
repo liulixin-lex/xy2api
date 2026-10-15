@@ -86,3 +86,19 @@ func (h *ResilienceHandler) ListUndelivered(c *gin.Context) {
 	}
 	response.Paginated(c, items, result.Total, result.Page, result.PageSize)
 }
+
+// Stats returns this instance's resilience counters over a window (at most
+// one hour) and the balance state distribution.
+// GET /api/v1/admin/resilience/stats?window=15m
+func (h *ResilienceHandler) Stats(c *gin.Context) {
+	window := time.Hour
+	if raw := c.Query("window"); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d <= 0 {
+			response.BadRequest(c, "Invalid window (Go duration expected, e.g. 15m)")
+			return
+		}
+		window = d
+	}
+	response.Success(c, h.svc.Stats(c.Request.Context(), window))
+}

@@ -53,7 +53,8 @@ func resilienceAttemptFailed(ctx context.Context, accountID int64, failoverErr *
 	if failoverErr != nil {
 		fields = append(fields, zap.Int("upstream_status", failoverErr.StatusCode))
 	}
-	logger.FromContext(ctx).Warn("gateway.resilience_budget_exhausted", fields...)
+	resilience.Count(resilience.MetricBudgetExhausted, resilience.StateFrom(ctx).GroupID(), accountID, b.Exhausted())
+	logger.FromContext(ctx).Warn("resilience.budget_exhausted", fields...)
 	return true
 }
 
@@ -123,7 +124,7 @@ func resilienceBeforeSwitch(ctx context.Context, hosts any, accountID int64, fai
 		return false
 	}
 	if !b.AllowCapacitySwitch() {
-		logger.FromContext(ctx).Warn("gateway.resilience_capacity_switch_exhausted", zap.Int64("account_id", accountID))
+		logger.FromContext(ctx).Warn("resilience.capacity_switch_exhausted", zap.Int64("account_id", accountID))
 		return true
 	}
 	if sharer, ok := hosts.(resilienceHostSharer); ok && excluded != nil {

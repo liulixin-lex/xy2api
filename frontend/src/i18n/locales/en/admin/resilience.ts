@@ -1,0 +1,128 @@
+export default {
+  resilience: {
+    settings: {
+      title: 'Gateway Resilience',
+      hint: 'Controls upstream failure classification, cooldowns and balance recovery, session rebinding, request budgets, pre-output keepalive, disconnect billing and no-account fallback. Turning the master switch off restores the previous behaviour.',
+      openPanel: 'Open ops panel',
+      enabled: 'Master switch',
+      enabledHint: 'When off, every resilience feature is disabled and the gateway behaves as before.',
+      sections: {
+        session: 'Session rebinding',
+        sessionHint: 'After 2 consecutive failures of a session on one account, the session is rebound and avoids that account for 10 minutes.',
+        lastResort: 'Last-resort selection',
+        lastResortHint: 'Without healthy accounts, serve on the soft-penalised account whose cooldown ends first, so single-account groups stay available.',
+        balance: 'Recoverable balance',
+        balanceHint: 'Accounts out of upstream balance are re-checked after 1/2/5/10/15 minutes and recover automatically after a top-up.',
+        budget: 'Request budget',
+        budgetHint: 'Maximum attempts per request and total time before the first output; same-account retries only for capacity shedding.',
+        keepalive: 'Pre-output keepalive',
+        keepaliveHint: 'Streaming requests through a CDN get periodic heartbeats before the first output, so CDN idle timeouts do not cut them.',
+        stall: 'Stall detection',
+        stallHint: 'A stream that stops after output for too long is ended as stalled.',
+        disconnect: 'Disconnect billing',
+        disconnectHint: 'A client leaving before any output cancels the upstream and is not billed; after partial output the upstream is read for a bounded time and the usage obtained is billed.',
+        errors: 'Error semantics and storm protection',
+        errorsHint: 'No-account and rate-limit responses carry Retry-After, a short negative cache, and fast replies to repeated identical 503s per key.',
+        fallbackGroup: 'No-account fallback groups',
+        fallbackGroupHint: 'A group without available accounts is served by its fallback group and returns once stable.',
+        cacheAware: 'Cache-aware reservations',
+        cacheAwareHint: 'In-flight reservations price input with the session\'s latest cache-read share.',
+        outputP99: 'Output P99 cap',
+        outputP99Hint: 'In-flight reservations cap output tokens at the model\'s 7-day P99 (at least 1024).'
+      },
+      fields: {
+        maxAttempts: 'Maximum attempts',
+        preOutputBudget: 'Total time before first output (s)',
+        keepaliveDelay: 'First heartbeat delay (s)',
+        keepaliveInterval: 'Heartbeat interval (s)',
+        edges: 'Edge markers treated as CDN',
+        edgesHint: 'Values of X-XY-Edge set by the reverse proxy, comma separated.',
+        textStall: 'Text stall threshold (s)',
+        partialDrain: 'Maximum read after partial output (s)',
+        abuseThreshold: 'Undelivered abuse threshold (per key and hour)',
+        negativeCache: 'No-account negative cache (s)',
+        returnStable: 'Stable time before returning to the group (s)'
+      },
+      advanced: 'Advanced (full JSON)',
+      advancedHint: 'Contains every setting; the server validates it on save and rejects invalid documents.',
+      applyAdvanced: 'Apply JSON to the form',
+      invalidJson: 'Invalid JSON',
+      resetDefaults: 'Reset to defaults',
+      save: 'Save',
+      saved: 'Saved',
+      saveFailed: 'Save failed',
+      loadFailed: 'Could not load the gateway resilience settings.',
+      reload: 'Reload',
+      invalidNumber: '{field} must be an integer between {min} and {max}'
+    },
+    panel: {
+      title: 'Gateway Resilience',
+      hint: 'In-memory counters of this instance (last hour); with several instances each reports its own.',
+      window: 'Window',
+      refresh: 'Refresh',
+      loadFailed: 'Could not load resilience statistics.',
+      empty: 'No resilience events in this window.',
+      metric: 'Metric',
+      group: 'Group',
+      account: 'Account',
+      label: 'Detail',
+      count: 'Count',
+      balanceStates: 'Account balance states',
+      metrics: {
+        keepalive_committed: 'Pre-output heartbeats committed',
+        first_output_timeout: 'First-output timeouts',
+        budget_exhausted: 'Budgets exhausted',
+        last_resort: 'Last-resort selections',
+        fallback_group: 'Served by fallback group',
+        fallback_return: 'Returned to group',
+        session_rebind: 'Session rebinds',
+        undelivered: 'Undelivered',
+        cdn_cut: 'Inferred CDN cuts',
+        fast_fail: 'Fast fails',
+        abuse_guard: 'Abuse guard charges',
+        stall: 'Stalled streams'
+      },
+      states: {
+        OK: 'OK',
+        SUSPECT: 'Suspect',
+        EXHAUSTED: 'Exhausted',
+        RECOVERING: 'Recovering'
+      }
+    },
+    undelivered: {
+      title: 'Undelivered requests',
+      hint: 'Requests whose client left before any output: the upstream was cancelled and nothing was billed (unless over the abuse threshold).',
+      empty: 'No undelivered requests.',
+      loadFailed: 'Could not load undelivered requests.',
+      time: 'Time',
+      stage: 'Stage',
+      duration: 'Duration',
+      user: 'User',
+      apiKey: 'Key',
+      model: 'Model',
+      endpoint: 'Endpoint',
+      cost: 'Estimated upstream cost',
+      billed: 'Billed',
+      notBilled: 'Not billed',
+      stages: {
+        select: 'Selecting or waiting for a slot',
+        header_wait: 'Waiting for upstream headers',
+        pre_output: 'Before first output',
+        streaming: 'Streaming'
+      }
+    },
+    account: {
+      balance: 'Upstream balance',
+      nextCheck: 'Next check {time}',
+      recheck: 'Topped up',
+      recheckHint: 'Re-check this account\'s upstream balance now',
+      rechecking: 'Checking…',
+      recheckDone: 'Re-checked: {state}',
+      recheckFailed: 'Re-check failed'
+    },
+    usage: {
+      fallback: 'Fallback: {origin} → {group}',
+      fallbackTitle: 'The original group had no available account; the fallback group served the request at its rate'
+    }
+  }
+}

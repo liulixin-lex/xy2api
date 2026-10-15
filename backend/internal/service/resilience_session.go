@@ -241,6 +241,7 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 func (s *GatewayService) noteLastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time) {
 	resilience.StateFrom(ctx).SetLastResort(account.ID)
 	s.resilience.noteLastResortSelected(account.ID)
+	resilience.Count(resilience.MetricLastResort, derefGroupID(groupID), account.ID, account.Platform)
 	slog.Warn("resilience.last_resort",
 		"group_id", derefGroupID(groupID),
 		"account_id", account.ID,
@@ -387,6 +388,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time) {
 	resilience.StateFrom(ctx).SetLastResort(account.ID)
 	s.resilience.noteLastResortSelected(account.ID)
+	resilience.Count(resilience.MetricLastResort, derefGroupID(groupID), account.ID, account.Platform)
 	slog.Warn("resilience.last_resort",
 		"group_id", derefGroupID(groupID),
 		"account_id", account.ID,
@@ -444,6 +446,7 @@ func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, s
 	_ = rec.r.store.AddSessionAvoid(stateCtx, groupID, sessionHash, accountID, avoid)
 	rec.r.avoidingSessions.Store(sessionMarkKey(groupID, sessionHash), time.Now().Add(avoid))
 	_ = rec.r.store.ClearSessionFailure(stateCtx, groupID, sessionHash, accountID)
+	resilience.Count(resilience.MetricSessionRebind, groupID, accountID, "resil_failure_streak")
 	slog.Warn("resilience.session_rebind",
 		"group_id", groupID,
 		"session", shortSessionHash(sessionHash),

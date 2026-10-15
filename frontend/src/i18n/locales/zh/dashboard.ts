@@ -631,6 +631,8 @@ export default {
     public: '公开',
     exclusiveTooltip: '管理员授权给你的专属分组',
     publicTooltip: '对所有用户公开的分组',
+    availabilityFallback: '无号兜底：{name} ×{rate}',
+    availabilityFallbackTooltip: '该分组暂无可用账号时，请求由兜底分组承接并按其倍率计费；主分组恢复后自动切回',
     columns: {
       name: '渠道名',
       description: '描述',

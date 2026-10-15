@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -55,7 +56,13 @@ func resilienceStallThreshold(legacy time.Duration, outputStarted bool) time.Dur
 
 // noteResilienceStall puts a soft STALL cooldown on the account.
 func noteResilienceStall(ctx context.Context, rl *RateLimitService, account *Account) {
-	if rl == nil || account == nil || !resilience.Current().StallOn() {
+	if account == nil || !resilience.Current().StallOn() {
+		return
+	}
+	groupID := resilience.StateFrom(ctx).GroupID()
+	resilience.Count(resilience.MetricStall, groupID, account.ID, account.Platform)
+	slog.Warn("resilience.stall", "group_id", groupID, "account_id", account.ID, "platform", account.Platform)
+	if rl == nil {
 		return
 	}
 	rl.ApplyResilienceOutcome(ctx, account, resilience.Classify(resilience.Outcome{Source: resilience.SourceStall}, nil), "stream stalled")

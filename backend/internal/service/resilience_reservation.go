@@ -154,3 +154,35 @@ func (r *ResilienceService) refreshOutputP99(ctx context.Context, repo Resilienc
 	}
 	r.outputP99.Store(&normalized)
 }
+
+// ResilienceStats is the payload of GET /admin/resilience/stats (design §12).
+type ResilienceStats struct {
+	WindowSeconds int64                  `json:"window_seconds"`
+	Scope         string                 `json:"scope"`
+	Counters      []resilience.MetricRow `json:"counters"`
+	BalanceStates map[string]int64       `json:"balance_states"`
+}
+
+// Stats sums this instance's resilience counters over window and reports
+// the account balance state distribution.
+func (r *ResilienceService) Stats(ctx context.Context, window time.Duration) ResilienceStats {
+	if window <= 0 || window > resilience.MetricsRetention {
+		window = resilience.MetricsRetention
+	}
+	out := ResilienceStats{
+		WindowSeconds: int64(window / time.Second),
+		Scope:         "instance",
+		Counters:      resilience.Snapshot(window),
+		BalanceStates: map[string]int64{},
+	}
+	if r != nil && r.probe != nil && r.probe.repo != nil {
+		qctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if states, err := r.probe.repo.CountBalanceStates(qctx); err == nil {
+			out.BalanceStates = states
+		} else {
+			slog.Warn("resilience.balance_states_failed", "error", err)
+		}
+	}
+	return out
+}

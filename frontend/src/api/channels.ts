@@ -21,6 +21,8 @@ export interface UserAvailableGroup {
   /** true = 专属分组（小范围授权）；false = 公开分组。 */
   is_exclusive: boolean
   show_exclusive_badge?: boolean
+  /** 无号兜底分组（网关韧性）：本组无可用账号时承接请求并按其倍率计费。 */
+  availability_fallback?: { id: number; name: string; rate_multiplier: number }
 }
 
 export interface UserPricingInterval {

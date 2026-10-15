@@ -121,6 +121,9 @@ func (g *firstEventGuard) Release() {
 // failoverError is the failover error of a fired guard; it records the
 // timeout as an upstream attempt for the ops views.
 func (g *firstEventGuard) failoverError(c *gin.Context, account *Account, phase string) *UpstreamFailoverError {
+	if account != nil && c != nil && c.Request != nil {
+		resilience.Count(resilience.MetricFirstOutputTimeout, resilience.StateFrom(c.Request.Context()).GroupID(), account.ID, phase)
+	}
 	if account != nil {
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,

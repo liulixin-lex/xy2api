@@ -19,7 +19,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
-const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, upstream_response_model, upstream_model_mismatch, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, image_input_tokens, image_input_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, video_count, video_resolution, video_duration_seconds, service_tier, reasoning_effort, requested_reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, long_context_billing_applied, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, upstream_request_id, session_id, native_compaction_v2, created_at"
+const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, upstream_response_model, upstream_model_mismatch, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, image_input_tokens, image_input_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, video_count, video_resolution, video_duration_seconds, service_tier, reasoning_effort, requested_reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, long_context_billing_applied, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, upstream_request_id, session_id, native_compaction_v2, created_at, origin_group_id"
 
 func (r *usageLogRepository) GetByID(ctx context.Context, id int64) (log *service.UsageLog, err error) {
 	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE id = $1"
@@ -272,6 +272,11 @@ func (r *usageLogRepository) hydrateUsageLogAssociations(ctx context.Context, lo
 				logs[i].Group = group
 			}
 		}
+		if logs[i].OriginGroupID != nil {
+			if group, ok := groups[*logs[i].OriginGroupID]; ok {
+				logs[i].OriginGroupName = group.Name
+			}
+		}
 		if logs[i].SubscriptionID != nil {
 			if sub, ok := subs[*logs[i].SubscriptionID]; ok {
 				logs[i].Subscription = sub
@@ -304,6 +309,9 @@ func collectUsageLogIDs(logs []service.UsageLog) usageLogIDs {
 		accountIDs[logs[i].AccountID] = struct{}{}
 		if logs[i].GroupID != nil {
 			groupIDs[*logs[i].GroupID] = struct{}{}
+		}
+		if logs[i].OriginGroupID != nil {
+			groupIDs[*logs[i].OriginGroupID] = struct{}{}
 		}
 		if logs[i].SubscriptionID != nil {
 			subscriptionIDs[*logs[i].SubscriptionID] = struct{}{}
@@ -460,6 +468,7 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		sessionID                 sql.NullString
 		nativeCompactionV2        bool
 		createdAt                 time.Time
+		originGroupID             sql.NullInt64
 	)
 
 	if err := scanner.Scan(
@@ -526,6 +535,7 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		&sessionID,
 		&nativeCompactionV2,
 		&createdAt,
+		&originGroupID,
 	); err != nil {
 		return nil, err
 	}
@@ -572,6 +582,10 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 
 	if requestID.Valid {
 		log.RequestID = requestID.String
+	}
+	if originGroupID.Valid {
+		origin := originGroupID.Int64
+		log.OriginGroupID = &origin
 	}
 	if groupID.Valid {
 		value := groupID.Int64

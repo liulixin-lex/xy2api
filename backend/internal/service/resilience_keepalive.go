@@ -4,11 +4,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
 
@@ -44,7 +46,25 @@ func StartPreOutputKeepalive(c *gin.Context, protocol string, firstDelay, interv
 	if protocol == PreOutputProtocolAnthropic {
 		frame = preOutputPingFrame
 	}
-	return startSSEKeepalive(c, firstDelay, interval, frame, protocol)
+	stop := startSSEKeepalive(c, firstDelay, interval, frame, protocol)
+	if k := keepaliveFrom(c); k != nil && c.Request != nil {
+		state := resilience.StateFrom(c.Request.Context())
+		k.mu.Lock()
+		k.metricGroup = state.GroupID()
+		k.edge = state.Edge()
+		k.mu.Unlock()
+	}
+	return stop
+}
+
+// noteCommitted counts a pre-output heartbeat that committed the response
+// (called with k.mu held).
+func (k *openAICompactSSEKeepalive) noteCommitted() {
+	if k.protocol == "" {
+		return
+	}
+	resilience.Count(resilience.MetricKeepaliveCommitted, k.metricGroup, 0, k.protocol)
+	slog.Info("resilience.keepalive_committed", "group_id", k.metricGroup, "protocol", k.protocol, "edge", k.edge)
 }
 
 // PreOutputKeepaliveCommitted reports, without stopping it, whether the

@@ -158,30 +158,36 @@
   - 进度（2026-10-15）：真实连接端到端测试（未送达立即取消、部分送达限时读取）、计费闸门与滥用计费单测、仓储 SQL 在临时 PostgreSQL 上验证通过；XY-image 对账与生产口径回放待任务 11、12。
 - [x] 8.1 迁移 272、273，以及 Ent schema 与重新生成的代码。
   - 实现：Ent 字段追加在 Fields 末尾（runtime 下标不变，减少同步冲突）；usage_logs 四条写入路径追加 `origin_group_id` 并在临时 PostgreSQL 上验证。
-- [ ] 8.2 分组管理接口与前端：选择兜底组，校验环与平台。
-  - 进度：后端接口与保存校验完成（自引用、环、平台一致、两侧均为余额计费）；前端选择器随任务 9。
+- [x] 8.2 分组管理接口与前端：选择兜底组，校验环与平台。
+  - 实现：后端保存校验（自引用、环、平台一致、两侧均为余额计费）；分组创建与编辑表单提供同平台、启用、非订阅分组的选择器，清空时提交 0。
 - [x] 8.3 选号集成：只在无号时触发，每请求一次，兜底组的资格约束全部生效。
   - 实现：鉴权后、模型白名单前的中间件判定“主组无任何无罚账号”时把本次请求的 API Key 换成兜底组，因此白名单、系统提示词、组合路由、选号、限额与计费都按兜底组；兜底组自身也须有无罚账号，否则留在主组（由末位兜底处理）。换号耗尽不跨组（判定只在请求入口）。
-- [ ] 8.4 计费：按兜底组倍率；`origin_group_id`；用户用量列表与可用分组页显示兜底关系。
-  - 进度：按兜底组倍率计费、`usage_logs.group_id` 为兜底组、`origin_group_id` 为原组已完成；用户用量列表与可用分组页展示随任务 9。
+- [x] 8.4 计费：按兜底组倍率；`origin_group_id`；用户用量列表与可用分组页显示兜底关系。
+  - 实现：按兜底组倍率计费，`usage_logs.group_id` 为兜底组、`origin_group_id` 为原组；用量读取随关联批量加载原分组名，管理端与用户用量列表显示“兜底：原分组 → 实际分组”；可用渠道页的分组旁显示兜底分组与倍率（优先用户专属倍率）。
 - [x] 8.5 主组稳定 120 秒后切回（Redis 时间戳）；兜底组内绑定的 TTL 为 600 秒。
   - 偏差：“已在兜底组”的记忆按 API Key（Redis，TTL `binding_ttl_seconds`）而非会话；兜底组内的粘性绑定沿用原有 TTL。
 - [ ] 8.6 验证：spec 场景；计费与用量正确；切回不抖动；与仅限 Claude Code 的 `fallback_group_id` 互不影响。
 
 ## 9 设置、管理界面、可观测与文档
 
-- [ ] 9.1 `gateway_resilience_settings`：服务层、`GET/PUT /api/v1/admin/settings/gateway-resilience`、校验规则（design §10）、读取失败时用最后已知值。
-- [ ] 9.2 前端（中英文）：
+- [x] 9.1 `gateway_resilience_settings`：服务层、`GET/PUT /api/v1/admin/settings/gateway-resilience`、校验规则（design §10）、读取失败时用最后已知值。
+  - 实现：随任务 1 完成；每 10 秒刷新，读取失败或文档非法时保留最后有效值。
+- [x] 9.2 前端（中英文）：
   - “网关韧性”设置卡；
   - 运维页的韧性面板；
   - 账号余额状态与“已充值”按钮；
   - 未送达记录列表；
   - 分组兜底字段；
   - 用量中的兜底标记。
-- [ ] 9.3 结构化日志（design §12）与统计接口 `GET /api/v1/admin/resilience/stats`。
-- [ ] 9.4 降噪：`upstream_billing_rate_sync_applied` 降为 debug；余额批量探测不写审计；`ops_system_logs.message` 只保留模板。
-- [ ] 9.5 文档 `docs/GATEWAY_RESILIENCE.md`（管理员说明与配置），并加入 `.gitignore` 的 docs 白名单；更新本记忆。
+  - 实现：系统设置“网关”页的“网关韧性”卡（总开关、各能力开关、常用数值、完整 JSON，范围与服务端一致）；运维页“网关韧性”面板（计数汇总与明细、余额状态分布、未送达列表）；账号状态列的余额徽标与“已充值”复检；分组表单兜底选择器；用量表兜底标记；可用渠道页兜底分组标签。
+- [x] 9.3 结构化日志（design §12）与统计接口 `GET /api/v1/admin/resilience/stats`。
+  - 实现：进程内按分钟分桶的计数（保留 1 小时，每桶最多 4096 个键，超出折叠为 overflow），统计接口按窗口汇总并附余额状态分布。
+  - 偏差：计数为单实例口径；`keepalive_committed`、`undelivered`、`transient_*` 量大，保持 info（不进 `ops_system_logs`），其余管理员关注的事件为 warn；`resilience.classified` 由 `transient_cooldown` 与 `balance_transition` 分别承担。
+- [x] 9.4 降噪：`upstream_billing_rate_sync_applied` 降为 debug；余额批量探测不写审计；`ops_system_logs.message` 只保留模板。
+- [x] 9.5 文档 `docs/GATEWAY_RESILIENCE.md`（管理员说明与配置），并加入 `.gitignore` 的 docs 白名单；更新本记忆。
+  - 另：runbook 增加 `SERVER_TRUSTED_PROXIES` 前提与基于 `keepalive_committed` 的 `edge` 校验；方案文件中的主机路径与端口改为代称（真实值在仓库外私有清单）。
 - [ ] 9.6 验证：前端 lint、typecheck、全量 vitest、构建；浏览器检查 1440/390 宽度、明暗主题、键盘操作；后端 handler 与 repository 测试。
+  - 进度（2026-10-15）：前端 lint、vue-tsc、全量 vitest（387 文件 / 3041 用例）与构建通过；后端 gofmt、四种构建标签的 vet、全量 unit 测试通过。浏览器检查在测试服务器上随任务 12 进行。
 
 ## 10 上游同步登记
 

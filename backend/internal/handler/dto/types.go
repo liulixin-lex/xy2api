@@ -638,6 +638,10 @@ type UsageLog struct {
 	RequestType  string `json:"request_type"`
 	Stream       bool   `json:"stream"`
 	OpenAIWSMode bool   `json:"openai_ws_mode"`
+	// OriginGroupID is the group the request was made for when an
+	// availability fallback group served it (xy2api resilience).
+	OriginGroupID   *int64 `json:"origin_group_id,omitempty"`
+	OriginGroupName string `json:"origin_group_name,omitempty"`
 	// NativeCompactionV2 is true only for requests positively identified at
 	// runtime as the native OpenAI remote compaction v2 wire.
 	NativeCompactionV2 bool `json:"native_compaction_v2"`

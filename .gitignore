@@ -171,6 +171,7 @@ docs/*
 !docs/account-scheduling.md
 !docs/SCHEDULING_ANALYSIS.md
 !docs/SHARE_SCHEDULING.md
+!docs/GATEWAY_RESILIENCE.md
 !docs/IQ_RELIABILITY_IMPLEMENTATION.md
 !docs/channel-monitor-v2-safe-defaults.md
 !docs/upstream-sync/

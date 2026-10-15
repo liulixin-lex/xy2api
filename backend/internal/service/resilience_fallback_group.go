@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -102,7 +103,8 @@ func (r *ResilienceService) AvailabilityFallbackGroup(ctx context.Context, apiKe
 		}
 		if err == nil && now.Sub(since) >= time.Duration(cfg.FallbackGroup.ReturnStableSeconds)*time.Second {
 			_ = r.store.ClearFallbackKey(ctx, primary.ID, apiKey.ID)
-			slog.Info("resilience.fallback_return", "group_id", primary.ID, "api_key_id", apiKey.ID, "reason", "fallback_return")
+			resilience.Count(resilience.MetricFallbackReturn, primary.ID, 0, "")
+			slog.Warn("resilience.fallback_return", "group_id", primary.ID, "api_key_id", apiKey.ID, "reason", "fallback_return")
 			return nil
 		}
 	} else {
@@ -117,8 +119,9 @@ func (r *ResilienceService) AvailabilityFallbackGroup(ctx context.Context, apiKe
 	if err := r.store.MarkFallbackKey(ctx, primary.ID, apiKey.ID, ttl); err != nil {
 		slog.Warn("resilience.fallback_mark_failed", "group_id", primary.ID, "error", err)
 	}
+	resilience.Count(resilience.MetricFallbackGroup, primary.ID, 0, strconv.FormatInt(fallback.ID, 10))
 	if !remembered {
-		slog.Info("resilience.availability_fallback", "group_id", primary.ID, "fallback_group_id", fallback.ID, "api_key_id", apiKey.ID)
+		slog.Warn("resilience.fallback_group", "group_id", primary.ID, "fallback_group_id", fallback.ID, "api_key_id", apiKey.ID)
 	}
 	return fallback
 }
@@ -161,6 +164,23 @@ func (r *ResilienceService) loadFallbackGroup(ctx context.Context, id int64, now
 	r.fallbackGroupCache.entries[id] = fallbackGroupEntry{group: g, expires: now.Add(fallbackGroupCacheTTL)}
 	r.fallbackGroupCache.mu.Unlock()
 	return g
+}
+
+// AvailabilityFallbackOf returns the usable availability fallback group
+// configured for group, regardless of current account health, so user pages
+// can show the relationship and its rate (design §9.2). It returns nil when
+// the feature is off or the fallback group is unusable.
+func (r *ResilienceService) AvailabilityFallbackOf(ctx context.Context, group *Group) *Group {
+	if r == nil || r.fallbackGroups == nil || !resilience.Current().FallbackGroupOn() ||
+		group == nil || group.AvailabilityFallbackGroupID == nil || group.SubscriptionType == SubscriptionTypeSubscription {
+		return nil
+	}
+	fallback := r.loadFallbackGroup(ctx, *group.AvailabilityFallbackGroupID, time.Now())
+	if fallback == nil || fallback.Status != StatusActive || fallback.Platform != group.Platform ||
+		fallback.SubscriptionType == SubscriptionTypeSubscription {
+		return nil
+	}
+	return fallback
 }
 
 // CloneAPIKeyWithGroup returns a copy of apiKey bound to group.

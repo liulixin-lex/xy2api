@@ -166,6 +166,7 @@ type fakeResilienceRepo struct {
 	ids    []int64
 	p99    map[string]int
 	p99Err error
+	states map[string]int64
 }
 
 func (f *fakeResilienceRepo) ListBalanceTrackedAccountIDs(context.Context) ([]int64, error) {
@@ -174,6 +175,10 @@ func (f *fakeResilienceRepo) ListBalanceTrackedAccountIDs(context.Context) ([]in
 
 func (f *fakeResilienceRepo) OutputTokenP99ByModel(context.Context, time.Time, int) (map[string]int, error) {
 	return f.p99, f.p99Err
+}
+
+func (f *fakeResilienceRepo) CountBalanceStates(context.Context) (map[string]int64, error) {
+	return f.states, nil
 }
 
 type probeFixture struct {
@@ -374,4 +379,25 @@ func (m *memResilienceStore) ClearFallbackKey(_ context.Context, g, k int64) err
 	defer m.mu.Unlock()
 	delete(m.fbKeys, memFallbackKey(g, k))
 	return nil
+}
+
+func TestResilienceStatsReportsCountersAndBalanceStates(t *testing.T) {
+	f := newProbeFixture(t)
+	f.r.ConfigureBalanceProbe(&fakeResilienceRepo{states: map[string]int64{"OK": 5, "EXHAUSTED": 1}}, f.repo, nil)
+	resilience.Count(resilience.MetricStall, 9101, 0, "stats_test")
+
+	stats := f.r.Stats(context.Background(), 0)
+	require.Equal(t, int64(resilience.MetricsRetention/time.Second), stats.WindowSeconds, "an unset window covers the retention")
+	require.Equal(t, "instance", stats.Scope)
+	require.Equal(t, map[string]int64{"OK": 5, "EXHAUSTED": 1}, stats.BalanceStates)
+	found := false
+	for _, row := range stats.Counters {
+		if row.Name == resilience.MetricStall && row.GroupID == 9101 && row.Label == "stats_test" {
+			found = row.Count >= 1
+		}
+	}
+	require.True(t, found)
+
+	var nilService *ResilienceService
+	require.Empty(t, nilService.Stats(context.Background(), 15*time.Minute).BalanceStates)
 }

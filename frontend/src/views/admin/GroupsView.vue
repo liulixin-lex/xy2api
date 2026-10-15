@@ -1912,6 +1912,25 @@
           </p>
         </div>
 
+        <!-- 无号兜底分组（网关韧性）：本组无可用账号时由该分组承接 -->
+        <div
+          v-if="createForm.subscription_type !== 'subscription'"
+          class="border-t pt-4"
+          data-testid="availability-fallback-field"
+        >
+          <label class="input-label">{{
+            t("admin.groups.availabilityFallback.title")
+          }}</label>
+          <Select
+            v-model="createForm.availability_fallback_group_id"
+            :options="availabilityFallbackOptions"
+            :placeholder="t('admin.groups.availabilityFallback.none')"
+          />
+          <p class="input-hint">
+            {{ t("admin.groups.availabilityFallback.hint") }}
+          </p>
+        </div>
+
         <!-- 模型路由配置（仅 anthropic 平台） -->
         <div v-if="createForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -3578,6 +3597,25 @@
           </p>
         </div>
 
+        <!-- 无号兜底分组（网关韧性）：本组无可用账号时由该分组承接 -->
+        <div
+          v-if="editForm.subscription_type !== 'subscription'"
+          class="border-t pt-4"
+          data-testid="availability-fallback-field"
+        >
+          <label class="input-label">{{
+            t("admin.groups.availabilityFallback.title")
+          }}</label>
+          <Select
+            v-model="editForm.availability_fallback_group_id"
+            :options="availabilityFallbackOptionsForEdit"
+            :placeholder="t('admin.groups.availabilityFallback.none')"
+          />
+          <p class="input-hint">
+            {{ t("admin.groups.availabilityFallback.hint") }}
+          </p>
+        </div>
+
         <!-- 模型路由配置（仅 anthropic 平台） -->
         <div v-if="editForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -4742,6 +4780,37 @@ const fallbackGroupOptionsForEdit = computed(() => {
   return options;
 });
 
+// 无号兜底分组选项（网关韧性）：同平台、启用、非订阅的其他分组；环由后端校验。
+function availabilityFallbackOptionsFor(platform: string, currentId?: number) {
+  const options: { value: number | null; label: string }[] = [
+    { value: null, label: t("admin.groups.availabilityFallback.none") },
+  ];
+  groups.value
+    .filter(
+      (g) =>
+        g.platform === platform &&
+        g.status === "active" &&
+        g.subscription_type !== "subscription" &&
+        g.id !== currentId,
+    )
+    .forEach((g) => {
+      options.push({
+        value: g.id,
+        label: t("admin.groups.availabilityFallback.option", {
+          name: g.name,
+          rate: g.rate_multiplier,
+        }),
+      });
+    });
+  return options;
+}
+const availabilityFallbackOptions = computed(() =>
+  availabilityFallbackOptionsFor(createForm.platform),
+);
+const availabilityFallbackOptionsForEdit = computed(() =>
+  availabilityFallbackOptionsFor(editForm.platform, editingGroup.value?.id),
+);
+
 // 无效请求兜底分组选项（创建时）- 仅包含 anthropic 平台、非订阅且未配置兜底的分组
 const invalidRequestFallbackOptions = computed(() => {
   const options: { value: number | null; label: string }[] = [
@@ -5038,6 +5107,7 @@ const createForm = reactive({
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
+  availability_fallback_group_id: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
   allow_live: false,
@@ -5407,6 +5477,7 @@ const editForm = reactive({
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
+  availability_fallback_group_id: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
   allow_live: false,
@@ -5867,6 +5938,7 @@ const closeCreateModal = () => {
   createForm.claude_code_only = false;
   createForm.fallback_group_id = null;
   createForm.fallback_group_id_on_invalid_request = null;
+  createForm.availability_fallback_group_id = null;
   resetMessagesDispatchFormState(createForm);
   createForm.allow_live = false;
   createForm.require_oauth_only = false;
@@ -6168,6 +6240,8 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.fallback_group_id = group.fallback_group_id;
   editForm.fallback_group_id_on_invalid_request =
     group.fallback_group_id_on_invalid_request;
+  editForm.availability_fallback_group_id =
+    group.availability_fallback_group_id ?? null;
   const messagesDispatchFormState = messagesDispatchConfigToFormState(
     group.messages_dispatch_model_config,
   );
@@ -6350,6 +6424,10 @@ const handleUpdateGroup = async () => {
         editForm.fallback_group_id_on_invalid_request === null
           ? 0
           : editForm.fallback_group_id_on_invalid_request,
+      availability_fallback_group_id:
+        editForm.availability_fallback_group_id === null
+          ? 0
+          : editForm.availability_fallback_group_id,
       model_routing: convertRoutingRulesToApiFormat(
         editModelRoutingRules.value,
       ),
@@ -6725,6 +6803,7 @@ watch(
     if (newVal === "subscription") {
       createForm.is_exclusive = true;
       createForm.fallback_group_id_on_invalid_request = null;
+      createForm.availability_fallback_group_id = null;
     } else {
       createForm.peak_rate_enabled = false;
       createForm.peak_start = "";
@@ -6750,6 +6829,8 @@ watch(
 watch(
   () => createForm.platform,
   (newVal) => {
+    // 无号兜底分组须同平台
+    createForm.availability_fallback_group_id = null;
     if (!["anthropic", "antigravity"].includes(newVal)) {
       createForm.fallback_group_id_on_invalid_request = null;
     }

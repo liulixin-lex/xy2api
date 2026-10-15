@@ -42,6 +42,8 @@ type ResilienceRepository interface {
 	// model since the given time, for models with at least minSamples
 	// requests.
 	OutputTokenP99ByModel(ctx context.Context, since time.Time, minSamples int) (map[string]int, error)
+	// CountBalanceStates returns the number of accounts per balance state.
+	CountBalanceStates(ctx context.Context) (map[string]int64, error)
 }
 
 // balanceProbeDeps are the collaborators of the balance probe loop.

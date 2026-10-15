@@ -93,6 +93,9 @@
         />
       </div>
 
+      <!-- Gateway Resilience -->
+      <OpsResilienceCard v-if="opsEnabled && !(loading && !hasLoadedOnce)" :refresh-token="dashboardRefreshToken" />
+
       <!-- Alert Events -->
       <OpsAlertEventsCard v-if="opsEnabled && showAlertEvents && !(loading && !hasLoadedOnce)" />
 
@@ -173,6 +176,7 @@ import OpsSystemLogTable from './components/OpsSystemLogTable.vue'
 import OpsRequestDetailsModal, { type OpsRequestDetailsPreset } from './components/OpsRequestDetailsModal.vue'
 import OpsSettingsDialog from './components/OpsSettingsDialog.vue'
 import OpsAlertRulesCard from './components/OpsAlertRulesCard.vue'
+import OpsResilienceCard from './components/OpsResilienceCard.vue'
 
 const route = useRoute()
 const router = useRouter()

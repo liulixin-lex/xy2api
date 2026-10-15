@@ -2,6 +2,7 @@ package resilience
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -164,14 +165,31 @@ func (s *RequestState) ResolveDisconnect() (disconnected, delivered, abuse bool)
 			s.d.stageAtCut = StageStreaming
 		}
 		apiKeyID := s.d.apiKeyID
+		stage := s.d.stageAtCut
+		elapsed := s.d.disconnectAt.Sub(s.d.started)
 		s.d.mu.Unlock()
-		if deliveredBytes > 0 || apiKeyID <= 0 {
+		if deliveredBytes > 0 {
+			return
+		}
+		groupID := s.GroupID()
+		Count(MetricUndelivered, groupID, 0, stage)
+		cut := ""
+		if stage == StageHeaderWait || stage == StagePreOutput {
+			cut = CDNCutBucket(elapsed)
+			Count(MetricCDNCut, groupID, 0, cut)
+		}
+		// Info: frequent, and every record is kept in the undelivered table.
+		slog.Info("resilience.undelivered", "group_id", groupID, "api_key_id", apiKeyID, "stage", stage,
+			"elapsed_ms", elapsed.Milliseconds(), "cdn_cut", cut, "edge", s.Edge())
+		if apiKeyID <= 0 {
 			return
 		}
 		if fn := undeliveredAbuseCheck.Load(); fn != nil && (*fn)(apiKeyID) {
 			s.d.mu.Lock()
 			s.d.abuse = true
 			s.d.mu.Unlock()
+			Count(MetricAbuseGuard, groupID, 0, "")
+			slog.Warn("resilience.abuse_guard", "group_id", groupID, "api_key_id", apiKeyID, "stage", stage)
 		}
 	})
 	s.d.mu.Lock()

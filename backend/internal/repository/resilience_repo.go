@@ -69,3 +69,27 @@ func (r *resilienceRepository) OutputTokenP99ByModel(ctx context.Context, since 
 	}
 	return out, rows.Err()
 }
+
+// CountBalanceStates returns the number of live accounts per resilience
+// balance state (accounts without a record are OK).
+func (r *resilienceRepository) CountBalanceStates(ctx context.Context) (map[string]int64, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT COALESCE(extra->'resilience_balance'->>'state', 'OK') AS state, COUNT(*)
+		FROM accounts
+		WHERE deleted_at IS NULL
+		GROUP BY 1`)
+	if err != nil {
+		return nil, fmt.Errorf("count balance states: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]int64{}
+	for rows.Next() {
+		var state string
+		var n int64
+		if err := rows.Scan(&state, &n); err != nil {
+			return nil, fmt.Errorf("scan balance state: %w", err)
+		}
+		out[state] = n
+	}
+	return out, rows.Err()
+}

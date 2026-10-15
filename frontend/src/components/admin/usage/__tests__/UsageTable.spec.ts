@@ -270,6 +270,35 @@ describe('admin UsageTable tooltip', () => {
     expect(wrapper.get('[data-testid="native-compaction-badge"]').text()).toBe('Compaction')
   })
 
+  it('marks rows served by an availability fallback group', () => {
+    const DataTableGroupStub = {
+      props: ['data'],
+      template: `
+        <div>
+          <div v-for="row in data" :key="row.request_id" :data-request-id="row.request_id">
+            <slot name="cell-group" :row="row" />
+          </div>
+        </div>
+      `,
+    }
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [
+          { ...baseImageRow, request_id: 'req-fallback', group_id: 8, group: { id: 8, name: 'Backup' }, origin_group_id: 3, origin_group_name: 'Main' },
+          { ...baseImageRow, request_id: 'req-plain', group_id: 3, group: { id: 3, name: 'Main' } },
+        ],
+        loading: false,
+        columns: [],
+      },
+      global: { stubs: { DataTable: DataTableGroupStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+
+    const markers = wrapper.findAll('[data-testid="usage-fallback-marker"]')
+    expect(markers).toHaveLength(1)
+    expect(wrapper.get('[data-request-id="req-fallback"]').find('[data-testid="usage-fallback-marker"]').exists()).toBe(true)
+    expect(markers[0].attributes('title')).toBe('admin.resilience.usage.fallbackTitle')
+  })
+
   it.each([
     [0, '0.0x'],
     [0.5, '0.50x'],

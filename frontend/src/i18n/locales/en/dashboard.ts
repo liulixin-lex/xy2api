@@ -626,6 +626,8 @@ export default {
     public: 'Public',
     exclusiveTooltip: 'Exclusive groups granted to you by an admin',
     publicTooltip: 'Groups open to all users',
+    availabilityFallback: 'Fallback: {name} ×{rate}',
+    availabilityFallbackTooltip: 'When this group has no available account, requests are served by the fallback group at its rate and return once this group recovers',
     columns: {
       name: 'Channel',
       description: 'Description',

@@ -28,8 +28,9 @@
    - 确认 PITR 备份最近一次全量与 WAL 正常；
    - 额外导出 `settings` 表与应用数据目录（只读打包到宿主机备份目录）；
    - 备份 Caddy 主配置与全部片段。
-3. 记录基线：用 `tools/gateway-resilience/baseline.sql` 与 `caddy_cuts.py` 采集最近 24 小时的指标，作为上线对照。
-4. 选择低峰时段：从生产数据看，北京时间凌晨（UTC 18:00–22:00）的请求量最低。
+3. 核对应用环境：`SERVER_TRUSTED_PROXIES` 已配置并包含 Caddy 到应用的对端地址（见 §3.1）。
+4. 记录基线：用 `tools/gateway-resilience/baseline.sql` 与 `caddy_cuts.py` 采集最近 24 小时的指标，作为上线对照。
+5. 选择低峰时段：从生产数据看，北京时间凌晨（UTC 18:00–22:00）的请求量最低。
 
 ## 3. Caddy 配置
 
@@ -50,7 +51,8 @@
 - 在 `gguuai.com`、`api.aiaimax.com` 站点的 `route` 开头 `import xy_edge_marker`。
 - `remote_ip` 匹配的是直连对端，不受客户端头影响。XY-image 的内网请求与本机脚本不会被标记。
 - 校验：`caddy validate`。
-- 用测试请求确认：经 CF 的请求在应用日志中带 `edge=cf`；直连请求不带标记。
+- 用测试请求确认：经 CF 的慢首包流式请求，在第 15 秒左右出现 `resilience.keepalive_committed` 日志且带 `edge=cf`；直连请求不出现该日志。
+- 应用只在对端属于 `SERVER_TRUSTED_PROXIES` 时读取该头。该列表必须包含 Caddy 到应用的对端地址（同机部署时为容器网络网关或回环地址），否则所有请求都按直连处理，首包前保活不会生效。
 
 ### 3.2 错误页（避免纯文本 5xx）
 

@@ -56,6 +56,7 @@ func resilienceFastFailReplay(c *gin.Context, apiKeyID int64) bool {
 		c.Header("Retry-After", strconv.Itoa(secs))
 	}
 	c.Header("X-XY-Fast-Fail", "1")
+	resilience.Count(resilience.MetricFastFail, resilience.StateFrom(c.Request.Context()).GroupID(), 0, strconv.Itoa(resp.Status))
 	c.Data(resp.Status, "application/json", resp.Body)
 	c.Abort()
 	return true

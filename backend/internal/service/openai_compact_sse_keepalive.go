@@ -42,6 +42,8 @@ type openAICompactSSEKeepalive struct {
 	protocol    string
 	errStatus   int
 	errReplaced bool
+	metricGroup int64
+	edge        string
 }
 
 // StartOpenAICompactSSEKeepalive 为已标记 body-signal 客户端流式的 compact
@@ -137,6 +139,7 @@ func (k *openAICompactSSEKeepalive) beat() bool {
 		header.Set("X-Accel-Buffering", "no")
 		k.writer.WriteHeader(http.StatusOK)
 		k.started = true
+		k.noteCommitted()
 	}
 	frame := k.frame
 	if len(frame) == 0 {
