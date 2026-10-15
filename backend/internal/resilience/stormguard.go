@@ -217,6 +217,74 @@ func (f *FastFail) gcLocked(now time.Time, window time.Duration) {
 	}
 }
 
+var processTurnCap = NewTurnCap()
+
+// ProcessTurnCap returns the process-wide failed-turn tracker.
+func ProcessTurnCap() *TurnCap { return processTurnCap }
+
+// TurnCap counts consecutive exhausted failures of one conversation (design
+// §9.7). Codex honours Retry-After without limit and retries a failed turn
+// up to about 30 times; after the cap the gateway answers with a response
+// that ends the turn. It is in-process and best effort.
+type TurnCap struct {
+	mu      sync.Mutex
+	entries map[string]turnCapEntry
+}
+
+type turnCapEntry struct {
+	count int
+	last  time.Time
+}
+
+// NewTurnCap creates an empty tracker.
+func NewTurnCap() *TurnCap {
+	return &TurnCap{entries: map[string]turnCapEntry{}}
+}
+
+// TurnKey identifies a conversation: API key, group, model and the sticky
+// session hash ("" when the client sends none).
+func TurnKey(apiKeyID, groupID int64, model, sessionHash string) string {
+	return itoa64(apiKeyID) + "\x00" + itoa64(groupID) + "\x00" + model + "\x00" + sessionHash
+}
+
+// Fail records one exhausted failure of key and returns the number of
+// consecutive failures; a gap longer than window starts a new streak.
+func (t *TurnCap) Fail(key string, window time.Duration, now time.Time) int {
+	if t == nil || key == "" {
+		return 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.entries) > 4096 {
+		for k, e := range t.entries {
+			if now.Sub(e.last) > window {
+				delete(t.entries, k)
+			}
+		}
+		if len(t.entries) > 4096 {
+			t.entries = map[string]turnCapEntry{}
+		}
+	}
+	e := t.entries[key]
+	if now.Sub(e.last) > window {
+		e.count = 0
+	}
+	e.count++
+	e.last = now
+	t.entries[key] = e
+	return e.count
+}
+
+// Reset clears a conversation after a successful request.
+func (t *TurnCap) Reset(key string) {
+	if t == nil || key == "" {
+		return
+	}
+	t.mu.Lock()
+	delete(t.entries, key)
+	t.mu.Unlock()
+}
+
 // ClampRetryAfter bounds a retry delay to [lo, hi] seconds.
 func ClampRetryAfter(d time.Duration, lo, hi int) int {
 	secs := int((d + time.Second - 1) / time.Second)

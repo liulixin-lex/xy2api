@@ -313,6 +313,45 @@ func TestFastFailTripsAfterThreshold(t *testing.T) {
 	require.False(t, f3.Observe(1, sig, resp, 30*time.Second, 10, t0.Add(31*time.Second)))
 }
 
+func TestTurnCapCountsConsecutiveFailures(t *testing.T) {
+	// Spec: a conversation's exhausted failures are counted in a row; a gap
+	// longer than the window or a success starts over.
+	tc := NewTurnCap()
+	key := TurnKey(7, 28, "gpt-6.1-sol", "sess")
+	for i := 1; i <= 5; i++ {
+		require.Equal(t, i, tc.Fail(key, 120*time.Second, t0.Add(time.Duration(i)*30*time.Second)))
+	}
+	require.Equal(t, 1, tc.Fail(TurnKey(7, 28, "gpt-6.1-sol", "other"), 120*time.Second, t0), "other conversations are independent")
+	require.Equal(t, 1, tc.Fail(key, 120*time.Second, t0.Add(150*time.Second+121*time.Second)), "gap above the window")
+	tc.Reset(key)
+	require.Equal(t, 1, tc.Fail(key, 120*time.Second, t0.Add(300*time.Second)), "reset after success")
+	require.Equal(t, 0, tc.Fail("", 120*time.Second, t0))
+
+	s := Defaults()
+	require.Equal(t, TurnCapSettings{Enabled: true, Failures: 5, WindowSeconds: 120}, s.Errors.TurnCap)
+	s.Errors.TurnCap.Failures = 1
+	require.Error(t, s.Validate())
+	s.Errors.TurnCap.Failures = 5
+	s.Errors.TurnCap.WindowSeconds = 5
+	require.Error(t, s.Validate())
+}
+
+func TestRequestStateTurnKey(t *testing.T) {
+	st := NewRequestState()
+	require.Empty(t, st.TurnKey(), "no selection yet")
+	st.NoteTurn(28, "gpt-6.1-sol", "sess")
+	require.Empty(t, st.TurnKey(), "no API key")
+	st.SetAPIKey(7)
+	require.Equal(t, TurnKey(7, 28, "gpt-6.1-sol", "sess"), st.TurnKey())
+	require.False(t, st.TurnFailed())
+	st.MarkTurnFailed()
+	require.True(t, st.TurnFailed())
+	var nilState *RequestState
+	nilState.NoteTurn(1, "m", "s")
+	nilState.MarkTurnFailed()
+	require.Empty(t, nilState.TurnKey())
+}
+
 func TestClampRetryAfter(t *testing.T) {
 	require.Equal(t, 2, ClampRetryAfter(0, 2, 30))
 	require.Equal(t, 30, ClampRetryAfter(time.Hour, 2, 30))

@@ -72,6 +72,8 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 心跳帧 | Responses / Chat 为 SSE 注释行 `:`；Anthropic 为 `event: ping` |
 | 经 CDN 的请求遇到 502/504 | 改为 503，正文不变，并带 `X-XY-Upstream-Status: 502/504`。Cloudflare 会把源站的 502/504 换成自己的纯文本页面，丢掉 JSON 错误、`Retry-After` 和请求 ID；503 原样透传。直连请求保持原状态码 |
 | 换号耗尽的 429/5xx | 带 `Retry-After`：上游给出的值按 2–30 秒封顶，没有时取分组最早恢复时间 |
+| 同一会话连续第 5 次耗尽失败（无号、换号耗尽、流内失败） | 终止应答：不带 `Retry-After`，`x-should-retry: false`，`error.code` 为 `server_is_overloaded`，5xx 改为 503（429 保持）。Codex 对带 `Retry-After` 的 5xx 没有次数上限，一个回合最多约 30 次请求；封顶后不超过 5 次。会话真正成功一次或两次失败相隔超过 120 秒后重新计数 |
+| 中转站在 `response.created` 前插入的 `SSE-Keep-Alive` 空 delta 帧 | 直接丢弃，不转发、不算首输出（openai-python 遇到会报错，网关也会因此提前放弃换号） |
 
 ## 4. 配置
 
@@ -98,6 +100,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | `errors.no_account_retry_after` | 2–30 | 1 ≤ min ≤ max ≤ 300 |
 | `errors.negative_cache_seconds` | 2 | 1–60 |
 | `errors.fast_fail` | 30 秒内 10 次 | 窗口 1–3600，阈值 2–10000 |
+| `errors.turn_cap` | 连续 5 次，间隔 120 秒内 | 次数 2–30，窗口 10–3600 |
 | `fallback_group.return_stable_seconds` | 120 | 1–86400 |
 | `fallback_group.binding_ttl_seconds` | 600 | 1–86400 |
 | `balance.recheck_schedule_seconds` | `[60,120,300,600,900]` | 1–16 项，每项 10–86400 |
@@ -140,6 +143,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | `session_rebind` | 会话失败改绑 |
 | `undelivered` / `cdn_cut` | 未送达；按耗时推断的 CDN 切断（90 秒、125 秒、300 秒） |
 | `fast_fail` | 同一 Key 的重复 503 快速返回 |
+| `turn_cap` | 会话连续耗尽失败到达上限，改为终止应答 |
 | `abuse_guard` | 未送达滥用保护计费 |
 | `stall` | 停滞断流 |
 
@@ -153,7 +157,7 @@ warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 - `session_rebind`、`last_resort`；
 - `fallback_group`、`fallback_return`；
 - `budget_exhausted`、`capacity_switch_exhausted`；
-- `stall`、`fast_fail`、`abuse_guard`。
+- `stall`、`fast_fail`、`turn_cap`、`abuse_guard`。
 
 info 级，只写应用标准输出（量大，明细已有计数或未送达表）：
 
@@ -174,6 +178,7 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 - 统计计数保存在进程内存，多实例部署时按实例分别统计，重启后清零。
 - WebSocket 不挂连接级预算，建连首回合的换号仍按 `max_account_switches`；Gemini compat 服务未接入首事件守卫，由停滞检测兜底。
 - 断开阶段粒度为选号、等待响应头、首输出前、输出中四段。
+- 失败回合计数在进程内，多实例时各自计数；快速失败的原样返回发生在选号之前，不参与计数。
 - 未送达表固定保留 30 天。
 - 滥用保护只在上游返回用量时按成本计费。
 - 兜底分组仅支持标准（余额）分组；进入兜底的记忆按 API Key 而非会话。

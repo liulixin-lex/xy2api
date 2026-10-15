@@ -185,7 +185,7 @@
       },
       {
         "block": "gateway-resilience",
-        "note": "Gateway resilience (0.4.0): soft-penalised sticky owners keep the binding, last-resort gate relaxes runtime blocks and proxy quarantine, and the scheduling wrapper adds the session avoid set, negative cache, config-error marking, last-resort selection and session recording.",
+        "note": "Gateway resilience (0.4.0): soft-penalised sticky owners keep the binding, last-resort gate relaxes runtime blocks and proxy quarantine, and the scheduling wrapper adds the session avoid set, negative cache, config-error marking, last-resort selection, session recording and the conversation note for the failed-turn cap.",
         "removed": [
           "if s != nil && s.service != nil && s.service.isOpenAIProxyStreamQuarantined(ctx, account) {"
         ],
@@ -224,6 +224,7 @@
           "negativeCtx = s.withOpenAIProfitControlGate(ctx, groupID)",
           "origExcluded := excludedIDs",
           "resilience.StateFrom(ctx).KeepSticky(accountID)",
+          "resilience.StateFrom(ctx).NoteTurn(derefGroupID(groupID), requestedModel, sessionHash)",
           "resilience.StateFrom(ctx).SetSession(derefGroupID(groupID), sessionHash, s.openAISessionRecorder())",
           "resilienceNegativeCachePut(negativeCtx, groupID, requestedModel, origExcluded, err)",
           "return nil, OpenAIAccountScheduleDecision{}, cachedErr",

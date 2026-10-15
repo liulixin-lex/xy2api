@@ -1994,7 +1994,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		flushPendingOutput()
 	}
 
-	scanner := bufio.NewScanner(resp.Body)
+	scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(resp.Body))
 	maxLineSize := defaultMaxLineSize
 	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
 		maxLineSize = s.cfg.Gateway.MaxLineSize

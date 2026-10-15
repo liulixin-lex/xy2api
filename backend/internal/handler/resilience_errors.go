@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -31,6 +32,14 @@ const (
 	// ginKeyResilienceRetryAfter carries the Retry-After seconds chosen for a
 	// no-account response to the writers, which add the message hint.
 	ginKeyResilienceRetryAfter = "xy_resilience_retry_after"
+
+	// ginKeyResilienceTurnCapped marks a failure that ends the client's turn
+	// (design §9.7); the writers give it the code server_is_overloaded.
+	ginKeyResilienceTurnCapped = "xy_resilience_turn_capped"
+
+	// codeServerIsOverloaded ends a Codex turn when no delay is given: it is
+	// only retried with a server-advised delay.
+	codeServerIsOverloaded = "server_is_overloaded"
 )
 
 // resilienceTranslateError maps internal error types to the client-facing
@@ -46,6 +55,9 @@ func resilienceTranslateError(c *gin.Context, status int, errType, code, message
 		if code == "" {
 			code = "concurrent_balance_reserved"
 		}
+	}
+	if c != nil && c.GetBool(ginKeyResilienceTurnCapped) {
+		code = codeServerIsOverloaded
 	}
 	if c != nil && (status == http.StatusServiceUnavailable || resilienceTerminalHint(c, status)) {
 		if secs := c.GetInt(ginKeyResilienceRetryAfter); secs > 0 && !strings.Contains(strings.ToLower(message), "try again in") {
@@ -102,6 +114,17 @@ func applyNoAccountRetryHints(c *gin.Context, diag any, apiKey *service.APIKey, 
 		c.Header("x-should-retry", "false")
 		return
 	}
+	if resilienceCapTurn(c) {
+		return
+	}
+	setNoAccountRetryAfter(c, diag, apiKey, routingModel)
+}
+
+// setNoAccountRetryAfter sets Retry-After to the clamped time until the
+// group's earliest recovery.
+func setNoAccountRetryAfter(c *gin.Context, diag any, apiKey *service.APIKey, routingModel string) {
+	cfg := resilience.Current()
+	ctx := c.Request.Context()
 	var wait time.Duration
 	if advisor, ok := diag.(noAccountRetryAdvisor); ok && apiKey != nil {
 		wait = advisor.NoAccountRetryAfter(ctx, apiKey.GroupID, routingModel)
@@ -120,12 +143,19 @@ func applyNoAccountRetryHints(c *gin.Context, diag any, apiKey *service.APIKey, 
 // onto the response is clamped (a 502 used to pass a Cloudflare page's 60 s,
 // or any larger value, straight through), otherwise the time to the group's
 // earliest recovery is used. Clients such as Codex retry a 5xx without
-// Retry-After many times in a row, so 502/504 get the hint too.
-func applyExhaustedRetryHint(c *gin.Context, diag any, status int) {
+// Retry-After many times in a row, so 502/504 get the hint too. It returns
+// the status to write: a capped turn (design §9.7) ends a 5xx as 503.
+func applyExhaustedRetryHint(c *gin.Context, diag any, status int) int {
 	cfg := resilience.Current()
 	if c == nil || c.Request == nil || !cfg.ErrorsOn() ||
 		(status != http.StatusTooManyRequests && status < http.StatusInternalServerError && !resilienceTerminalHint(c, status)) {
-		return
+		return status
+	}
+	if resilienceCapTurn(c) {
+		if status >= http.StatusInternalServerError {
+			return http.StatusServiceUnavailable
+		}
+		return status
 	}
 	lo, hi := cfg.Errors.NoAccountRetryAfter.Min, cfg.Errors.NoAccountRetryAfter.Max
 	if v := strings.TrimSpace(c.Writer.Header().Get("Retry-After")); v != "" {
@@ -140,10 +170,41 @@ func applyExhaustedRetryHint(c *gin.Context, diag any, status int) {
 		}
 		c.Header("Retry-After", strconv.Itoa(secs))
 		c.Set(ginKeyResilienceRetryAfter, secs)
-		return
+		return status
 	}
 	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
-	applyNoAccountRetryHints(c, diag, apiKey, "", noAccountErrorClassification{Status: status})
+	setNoAccountRetryAfter(c, diag, apiKey, "")
+	return status
+}
+
+// resilienceCapTurn counts an exhausted failure toward the conversation's
+// streak (design §9.7). Codex follows every Retry-After and would retry a
+// failed turn about 30 times; from the cap on, the failure is final: no
+// Retry-After, x-should-retry: false (OpenAI and Anthropic SDKs, Claude
+// Code) and the code server_is_overloaded, which Codex does not retry
+// without a delay. It reports whether this failure reached the cap.
+func resilienceCapTurn(c *gin.Context) bool {
+	cfg := resilience.Current()
+	tc := cfg.Errors.TurnCap
+	if c == nil || c.Request == nil || !cfg.ErrorsOn() || !tc.Enabled {
+		return false
+	}
+	st := resilience.StateFrom(c.Request.Context())
+	key := st.TurnKey()
+	if key == "" {
+		return false
+	}
+	st.MarkTurnFailed()
+	n := resilience.ProcessTurnCap().Fail(key, time.Duration(tc.WindowSeconds)*time.Second, time.Now())
+	if n < tc.Failures {
+		return false
+	}
+	c.Writer.Header().Del("Retry-After")
+	c.Header("x-should-retry", "false")
+	c.Set(ginKeyResilienceTurnCapped, true)
+	resilience.Count(resilience.MetricTurnCap, st.GroupID(), 0, "")
+	slog.Warn("resilience.turn_cap", "group_id", st.GroupID(), "failures", n)
+	return true
 }
 
 // stashResilienceErrorResponse records a JSON error response for the per-key

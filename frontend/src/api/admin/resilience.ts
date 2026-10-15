@@ -52,6 +52,7 @@ export interface GatewayResilienceSettings {
     reservation_retry_after_seconds: number
     negative_cache_seconds: number
     fast_fail: { enabled: boolean; window_seconds: number; threshold: number }
+    turn_cap: { enabled: boolean; failures: number; window_seconds: number }
   }
   fallback_group: { enabled: boolean; return_stable_seconds: number; binding_ttl_seconds: number }
   reservation: { cache_aware_estimate: boolean; output_p99_cap: boolean }

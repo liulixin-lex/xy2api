@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -177,4 +178,103 @@ func TestExhaustedBadGatewayCapsUpstreamRetryAfter(t *testing.T) {
 		ResponseHeaders: http.Header{"Retry-After": []string{"60"}},
 	}, false)
 	require.Equal(t, "60", w.Header().Get("Retry-After"))
+}
+
+// turnCapContext is a request of conversation (key 9301, group 28) after
+// selection noted it.
+func turnCapContext(t *testing.T, endpoint string) (*gin.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	var c *gin.Context
+	var w *httptest.ResponseRecorder
+	if endpoint == "" {
+		c, w = newResilienceTestContext(t)
+	} else {
+		c, w = newGinContextForEndpoint(t, endpoint)
+		c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
+	}
+	st := resilience.StateFrom(c.Request.Context())
+	st.SetAPIKey(9301)
+	st.NoteTurn(28, "gpt-6.1-sol", "sess")
+	return c, w
+}
+
+func resetTurnCap(t *testing.T) {
+	t.Helper()
+	key := resilience.TurnKey(9301, 28, "gpt-6.1-sol", "sess")
+	resilience.ProcessTurnCap().Reset(key)
+	t.Cleanup(func() { resilience.ProcessTurnCap().Reset(key) })
+}
+
+func TestTurnCapEndsCodexTurn(t *testing.T) {
+	// Spec: Codex follows every Retry-After and retried one failed turn 30
+	// times on staging; the fifth exhausted failure in a row is final: 503
+	// server_is_overloaded, no Retry-After, x-should-retry: false.
+	withHandlerResilience(t, nil)
+	resetTurnCap(t)
+	for i := 1; i <= 4; i++ {
+		c, w := turnCapContext(t, "")
+		status := applyExhaustedRetryHint(c, nil, http.StatusBadGateway)
+		(&OpenAIGatewayHandler{}).handleStreamingAwareError(c, status, "upstream_error", "Upstream service temporarily unavailable", false)
+		require.Equal(t, http.StatusBadGateway, w.Code, "failure %d", i)
+		require.Equal(t, "30", w.Header().Get("Retry-After"))
+		require.Empty(t, gjson.GetBytes(w.Body.Bytes(), "error.code").String())
+	}
+	c, w := turnCapContext(t, "")
+	c.Header("Retry-After", "60") // copied from the upstream page
+	status := applyExhaustedRetryHint(c, nil, http.StatusBadGateway)
+	(&OpenAIGatewayHandler{}).handleStreamingAwareError(c, status, "upstream_error", "Upstream service temporarily unavailable", false)
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Empty(t, w.Header().Get("Retry-After"))
+	require.Equal(t, "false", w.Header().Get("x-should-retry"))
+	require.Equal(t, "server_is_overloaded", gjson.GetBytes(w.Body.Bytes(), "error.code").String())
+	require.NotContains(t, gjson.GetBytes(w.Body.Bytes(), "error.message").String(), "try again in")
+
+	// A 429 stays 429 without Retry-After, which Codex does not retry.
+	c, w = turnCapContext(t, "")
+	status = applyExhaustedRetryHint(c, nil, http.StatusTooManyRequests)
+	(&OpenAIGatewayHandler{}).handleStreamingAwareError(c, status, "rate_limit_error", "Upstream rate limit exceeded, please retry later", false)
+	require.Equal(t, http.StatusTooManyRequests, w.Code)
+	require.Empty(t, w.Header().Get("Retry-After"))
+	require.Equal(t, "false", w.Header().Get("x-should-retry"))
+}
+
+func TestTurnCapNoAccountAndCommittedStream(t *testing.T) {
+	// Spec: no-account 503s count toward the same streak; a failure written
+	// into a committed Responses stream ends the turn the same way.
+	withHandlerResilience(t, nil)
+	resetTurnCap(t)
+	groupID := int64(28)
+	for i := 1; i <= 4; i++ {
+		c, w := turnCapContext(t, "")
+		cls := classifyNoAccountErrorFromGin(c, fakeRetryAdvisor{wait: 12 * time.Second}, &service.APIKey{GroupID: &groupID}, "gpt-6.1-sol", "gpt-6.1-sol", service.PlatformOpenAI)
+		(&GatewayHandler{}).handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, false)
+		require.Equal(t, "12", w.Header().Get("Retry-After"), "failure %d", i)
+	}
+	c, w := turnCapContext(t, EndpointResponses)
+	_, _ = c.Writer.WriteString(":\n\n")
+	status := applyExhaustedRetryHint(c, nil, http.StatusBadGateway)
+	(&GatewayHandler{}).handleStreamingAwareError(c, status, "upstream_error", "Upstream service temporarily unavailable", true)
+	_, errObj := parseResponsesFailedSSE(t, strings.TrimPrefix(w.Body.String(), ":\n\n"))
+	require.Equal(t, "server_is_overloaded", errObj["code"])
+	require.Equal(t, "Upstream service temporarily unavailable", errObj["message"])
+	require.True(t, resilience.StateFrom(c.Request.Context()).TurnFailed(), "a 200 carrying the failure must not reset the streak")
+
+	// Without a noted conversation (failure before selection) nothing counts.
+	c, w = newResilienceTestContext(t)
+	for i := 0; i < 6; i++ {
+		require.False(t, resilienceCapTurn(c))
+	}
+	require.Empty(t, w.Header().Get("x-should-retry"))
+}
+
+func TestTurnCapOffKeepsRetryAfter(t *testing.T) {
+	withHandlerResilience(t, func(s *resilience.Settings) { s.Errors.TurnCap.Enabled = false })
+	resetTurnCap(t)
+	for i := 1; i <= 6; i++ {
+		c, w := turnCapContext(t, "")
+		status := applyExhaustedRetryHint(c, nil, http.StatusBadGateway)
+		(&OpenAIGatewayHandler{}).handleStreamingAwareError(c, status, "upstream_error", "Upstream service temporarily unavailable", false)
+		require.Equal(t, http.StatusBadGateway, w.Code)
+		require.Equal(t, "30", w.Header().Get("Retry-After"))
+	}
 }

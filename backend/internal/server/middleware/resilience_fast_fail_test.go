@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
@@ -187,4 +188,39 @@ func TestResilienceEdgeMarkerTrustsOnlyProxies(t *testing.T) {
 	c.Request = r.WithContext(resilience.WithRequestState(r.Context(), resilience.NewRequestState()))
 	resilienceNoteEdge(c, unconfigured)
 	require.Empty(t, resilience.StateFrom(c.Request.Context()).Edge())
+}
+
+func TestTurnCapResetOnlyOnRealSuccess(t *testing.T) {
+	// Spec: a successful request ends the conversation's failed-turn streak;
+	// a 200 that carried an in-stream failure does not.
+	orig := *resilience.Current()
+	resilience.Publish(resilience.Defaults())
+	t.Cleanup(func() { resilience.Publish(orig) })
+	key := resilience.TurnKey(9102, 0, "m", "s")
+	t.Cleanup(func() { resilience.ProcessTurnCap().Reset(key) })
+	failInStream := false
+	router, apiKey := newFastFailRouter(t, 9102, func(c *gin.Context) {
+		st := resilience.StateFrom(c.Request.Context())
+		st.NoteTurn(0, "m", "s")
+		if failInStream {
+			st.MarkTurnFailed()
+		}
+		c.Status(http.StatusOK)
+	})
+	stateFirst := gin.New()
+	stateFirst.Use(func(c *gin.Context) {
+		c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
+		router.HandleContext(c)
+		c.Abort()
+	})
+	now := time.Now()
+	for i := 0; i < 3; i++ {
+		resilience.ProcessTurnCap().Fail(key, time.Minute, now)
+	}
+	failInStream = true
+	serve(stateFirst, http.MethodPost, "/v1/messages", apiKey, nil)
+	require.Equal(t, 4, resilience.ProcessTurnCap().Fail(key, time.Minute, now), "in-stream failure keeps the streak")
+	failInStream = false
+	serve(stateFirst, http.MethodPost, "/v1/messages", apiKey, nil)
+	require.Equal(t, 1, resilience.ProcessTurnCap().Fail(key, time.Minute, now), "success resets")
 }

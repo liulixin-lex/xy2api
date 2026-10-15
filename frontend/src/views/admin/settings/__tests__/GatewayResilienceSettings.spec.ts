@@ -34,7 +34,8 @@ function settings(): Settings {
     errors: {
       enabled: true, no_account_retry_after: { min: 2, max: 30 }, config_retry_after_seconds: 60,
       reservation_retry_after_seconds: 5, negative_cache_seconds: 2,
-      fast_fail: { enabled: true, window_seconds: 10, threshold: 3 }
+      fast_fail: { enabled: true, window_seconds: 10, threshold: 3 },
+      turn_cap: { enabled: true, failures: 5, window_seconds: 120 }
     },
     fallback_group: { enabled: true, return_stable_seconds: 120, binding_ttl_seconds: 600 },
     reservation: { cache_aware_estimate: true, output_p99_cap: true }

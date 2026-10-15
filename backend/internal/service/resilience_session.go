@@ -276,10 +276,12 @@ func lastResortTierAllowed(tier resilience.PenaltyTier, accountID int64, avoided
 
 // resilienceGatewaySelectionEpilogue runs after gateway selection: it keeps a
 // soft-penalised session binding when another account serves this request,
-// turns "no available account" into a last-resort selection and attaches the
-// session failure recorder.
+// turns "no available account" into a last-resort selection, attaches the
+// session failure recorder and records the conversation for the failed-turn
+// cap.
 func (s *GatewayService) resilienceGatewaySelectionEpilogue(ctx context.Context, group *Group, groupID *int64, sessionHash, requestedModel string, excludedIDs, avoided map[int64]struct{}, result *AccountSelectionResult, err error) (*AccountSelectionResult, error) {
 	markResilienceConfigError(ctx, err)
+	resilience.StateFrom(ctx).NoteTurn(derefGroupID(groupID), requestedModel, sessionHash)
 	if err != nil && isNoAccountSelectionError(err) && !errors.Is(err, errNegativeCached) {
 		if lr := s.resilienceGatewayLastResort(ctx, group, groupID, sessionHash, requestedModel, excludedIDs, avoided); lr != nil {
 			result, err = lr, nil

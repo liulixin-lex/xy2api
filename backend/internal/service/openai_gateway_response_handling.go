@@ -167,7 +167,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	responseID := ""
 	var firstOutputScanGuard atomic.Bool
 	firstOutputScanGuard.Store(stageFirstOutput)
-	scanner := bufio.NewScanner(resp.Body)
+	scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(resp.Body))
 	scanBuf := getSSEScannerBuf64K()
 	scanner.Buffer(scanBuf[:0], maxLineSize)
 	if stageFirstOutput {

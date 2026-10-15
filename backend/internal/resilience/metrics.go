@@ -22,6 +22,7 @@ const (
 	MetricUndelivered        = "undelivered"
 	MetricCDNCut             = "cdn_cut"
 	MetricFastFail           = "fast_fail"
+	MetricTurnCap            = "turn_cap"
 	MetricAbuseGuard         = "abuse_guard"
 	MetricStall              = "stall"
 )

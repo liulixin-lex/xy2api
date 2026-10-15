@@ -79,6 +79,7 @@ export default {
         undelivered: '未送达',
         cdn_cut: '推断的 CDN 切断',
         fast_fail: '快速失败',
+        turn_cap: '失败回合封顶',
         abuse_guard: '滥用保护计费',
         stall: '停滞断流'
       },

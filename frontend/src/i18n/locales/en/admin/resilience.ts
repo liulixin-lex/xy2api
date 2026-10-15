@@ -79,6 +79,7 @@ export default {
         undelivered: 'Undelivered',
         cdn_cut: 'Inferred CDN cuts',
         fast_fail: 'Fast fails',
+        turn_cap: 'Failed turns ended',
         abuse_guard: 'Abuse guard charges',
         stall: 'Stalled streams'
       },

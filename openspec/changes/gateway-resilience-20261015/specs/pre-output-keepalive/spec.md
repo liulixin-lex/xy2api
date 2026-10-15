@@ -63,21 +63,33 @@ Heartbeat bytes MUST NOT count as client output when deciding whether failover i
 
 ### Requirement: First-output timeout
 
-For OpenAI text requests, each attempt MUST have a first-output timeout equal to the smaller of the remaining pre-output budget and:
-- 60 s for reasoning effort none, minimal, low or medium;
-- 120 s for high or xhigh;
-- 180 s for max;
+For OpenAI text requests, each attempt MUST have a first-output timeout, measured from the start of the attempt, equal to the smaller of the remaining pre-output budget and:
+- 180 s for reasoning effort none, minimal, low, medium or high;
+- 200 s for xhigh;
+- 220 s for max;
 - any per-model override.
 
-Anthropic and Gemini attempts MUST have a first-upstream-event timeout (default 90 s). On timeout the attempt MUST be classified `FIRST_OUTPUT_TIMEOUT` and the gateway MUST switch accounts within the budget. The attempt on the last available candidate MUST NOT have a per-attempt timeout, only the pre-output deadline. The previous limit of one first-output switch MUST be removed.
+Anthropic and Gemini attempts MUST have a first-upstream-event timeout (default 90 s). On timeout the attempt MUST be classified `FIRST_OUTPUT_TIMEOUT` and the gateway MUST switch accounts within the budget. The attempt on the last available candidate, including the only usable account of a group, MUST NOT have a per-attempt timeout, only the pre-output deadline. The previous limit of one first-output switch MUST be removed.
 
 #### Scenario: Slow relay is abandoned in time
-- **WHEN** a medium-effort request gets no output from account A within 60 s and account B is available
+- **WHEN** a medium-effort request gets no output from account A within 180 s and account B is available
 - **THEN** the gateway cancels the attempt on A, soft-penalises A and tries B.
 
 #### Scenario: Last candidate waits for the budget
 - **WHEN** account A is the only candidate
-- **THEN** the attempt continues past 60 s until output arrives or the 240 s pre-output deadline ends it.
+- **THEN** the attempt continues past 180 s until output arrives or the 240 s pre-output deadline ends it.
+
+### Requirement: Relay keep-alive frames are not output
+
+Frames that some relays inject into Responses streams, of type `response.output_text.delta` with an empty `delta` and `item_id` `SSE-Keep-Alive` (or a `SSE-Keep-Alive: true` field), MUST be dropped when the upstream stream is read. They MUST NOT reach the client and MUST NOT count as semantic output. All other bytes MUST pass through unchanged.
+
+#### Scenario: Keep-alive before response.created
+- **WHEN** a relay sends such a frame before `response.created`
+- **THEN** the client's first event is `response.created` and the openai-python stream helper completes.
+
+#### Scenario: Keep-alive does not disarm failover
+- **WHEN** a relay sends only such frames and then fails before real output
+- **THEN** the gateway still switches accounts as before output.
 
 ### Requirement: Accurate stall detection
 

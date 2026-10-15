@@ -387,6 +387,34 @@
     {
       "path": "backend/internal/server/routes/gateway.go",
       "value": "availabilityFallback := middleware.ResilienceAvailabilityFallback()"
+    },
+    {
+      "path": "backend/internal/server/middleware/api_key_auth.go",
+      "value": "resilienceTurnCapObserve(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "resilience.StateFrom(ctx).NoteTurn(derefGroupID(groupID), requestedModel, sessionHash)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(resp.Body))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(resp.Body))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(r))"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "status = applyExhaustedRetryHint(c, h.gatewayService, status)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "status = applyExhaustedRetryHint(c, h.gatewayService, status)"
     }
   ],
   "forbidden_module_paths": [

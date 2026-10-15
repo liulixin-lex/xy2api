@@ -261,14 +261,15 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 
 ### 7.4 首输出超时（D16）
 
-- **OpenAI：** 启用并扩展现有的 `openai_first_output_timeout`（`openai_first_output_timeout.go`）。单次超时 = min(分档阈值, 剩余预算)：
-  - `reasoning_effort` 为空、minimal、low、medium：60 秒；
-  - high、xhigh：120 秒；
-  - max：180 秒；
+- **OpenAI：** 启用并扩展现有的 `openai_first_output_timeout`（`openai_first_output_timeout.go`）。单次超时 = min(分档阈值, 剩余预算)，从本次尝试开始计时：
+  - `reasoning_effort` 为空、minimal、low、medium：180 秒；
+  - high：180 秒；xhigh：200 秒；
+  - max：220 秒；
   - 可按模型覆盖（`model_overrides`）。
+  - 分档按生产 7 天首字分布校准（tasks 0.4）：原 60/120/180 秒会误切约 1.3% 的成功请求，现各档超出比例约 0.10%–0.26%。
 - **Anthropic、Gemini：** 新增“首个上游事件或首块”超时，默认 90 秒。
 - 取消“首输出超时只换 1 次”的限制（`openAIFirstOutputFailoverExhausted`），改由预算约束。
-- **最后一个可用候选**（没有其他健康候选，或已是末位兜底）不设单次超时，只受 `PreOutputDeadline` 约束。
+- **最后一个可用候选**（没有其他健康候选、分组内只有这一个可用账号，或已是末位兜底）不设单次超时，只受 `PreOutputDeadline` 约束。
 - 图片端点与异步图片任务不适用。
 
 ### 7.5 停滞判定（G2 修复）
@@ -290,6 +291,17 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 ### 7.7 与现有流内 keepalive 的关系
 
 上游响应头到达后，仍由现有的 10 秒流内 keepalive 负责，口径不变。首包前心跳与它共享“已输出”扣除口径，换号判定以语义输出为准。G8（暂存账号头丢失）由 D21 规避：官方 OAuth 账号不提前提交。现有流内 keepalive 下也存在的 G8 影响列为 P2 观察项（tasks 12）。
+
+### 7.8 中转站伪保活帧（测试服务器发现）
+
+部分中转站会在 `response.created` 之前插入伪保活帧：
+
+```text
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":"","SSE-Keep-Alive":true}
+```
+
+它不属于协议。原样转发会让严格 SDK 报错（openai-python：“Expected to have received response.created before response.output_text.delta”）。网关还会把它当成语义输出，从而提前放弃换号和首输出超时。因此读取上游 SSE 时直接丢弃这类帧：类型为 `response.output_text.delta`、`delta` 为空，且 `item_id` 为 `SSE-Keep-Alive` 或带 `SSE-Keep-Alive: true`。其他字节原样通过。总开关关闭时不过滤。
 
 ## 8. 客户端断开与计费（D2、D9、D20）
 
@@ -360,6 +372,20 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 
 在 `image_task_handler.go` 中，把“每实例与每 Key 的准入检查”放到 `checkSecurityAuditBeforeSubmit` 之前。被拒的请求不再消耗内容审计，也不读取完整请求体。审计未通过时释放准入。
 
+### 9.7 失败回合封顶（测试服务器发现）
+
+Codex 对带 `Retry-After` 的 5xx 没有次数上限：传输层每轮 5 次请求，回合层再重试 5 轮。测试服务器上，一个全失败分组的回合产生了 30 次请求、历时 871 秒。流内失败（已提交后的 `response.failed`）也会被回合层重试 5 次。
+
+- **计数：** 按会话（API Key、分组、模型、粘性会话哈希）统计连续的“耗尽”失败，即无号 503、换号耗尽后的 429/5xx，以及已提交流里的同类失败。选号时记录会话；首次选号前的失败不计。
+- **封顶：** 连续第 `errors.turn_cap.failures`（5）次失败改为终止应答：
+  - 不带 `Retry-After`，加 `x-should-retry: false`（OpenAI、Anthropic SDK 与 Claude Code 据此停止重试）；
+  - `error.code` 为 `server_is_overloaded`：Codex 只在服务端给出延迟时才重试它（HTTP 与流内都一样）；
+  - 5xx 改为 503（Codex 只在 503 上识别这个 code）；429 保持 429，不带 `Retry-After` 的 429 Codex 直接终止。
+- **重置：** 同一会话一次真正的成功（2xx 且未在流内失败）清零；两次失败间隔超过 `window_seconds`（120 秒）重新计数。
+- 封顶只改变失败应答的形态，每次请求仍正常选号与尝试，分组恢复后立即成功。
+- 进程内尽力而为。快速失败（§9.3）的原样返回发生在选号之前，不参与计数。
+- 指标 `turn_cap`，日志 `resilience.turn_cap`（warn）。
+
 ## 10. 配置项（`gateway_resilience_settings`）
 
 存于 `settings` 表（JSON）。管理接口为 `GET/PUT /api/v1/admin/settings/gateway-resilience`，前端为“网关韧性”设置卡。缺省值即设计值：
@@ -375,7 +401,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
                "suspect_ttl_seconds": 90, "recovering_concurrency": 1, "recovering_window_seconds": 120,
                "recovering_success_target": 3, "generation_probe_daily_budget": 48, "notify_after_hours": 72 },
   "budget": { "enabled": true, "max_attempts": 4, "pre_output_budget_seconds": 240,
-              "first_output_timeout_seconds": { "default": 60, "high": 120, "xhigh": 120, "max": 180 },
+              "first_output_timeout_seconds": { "default": 180, "high": 180, "xhigh": 200, "max": 220 },
               "anthropic_first_event_timeout_seconds": 90, "gemini_first_event_timeout_seconds": 90,
               "model_overrides": {}, "same_account_retry_max": 1, "gemini_same_account_retries": 1,
               "upstream_retry_after_cap_seconds": 60 },
@@ -386,7 +412,8 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
                   "abuse_guard": { "enabled": true, "threshold_per_hour": 30, "mode": "bill_upstream_cost" } },
   "errors": { "enabled": true, "no_account_retry_after": { "min": 2, "max": 30 }, "config_retry_after_seconds": 60,
               "reservation_retry_after_seconds": 5, "negative_cache_seconds": 2,
-              "fast_fail": { "enabled": true, "window_seconds": 30, "threshold": 10 } },
+              "fast_fail": { "enabled": true, "window_seconds": 30, "threshold": 10 },
+              "turn_cap": { "enabled": true, "failures": 5, "window_seconds": 120 } },
   "fallback_group": { "enabled": true, "return_stable_seconds": 120, "binding_ttl_seconds": 600 },
   "reservation": { "cache_aware_estimate": true, "output_p99_cap": true }
 }
@@ -399,6 +426,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 - 每个首输出阈值不得超过预算；
 - `text_stall_seconds` 取 30–280；
 - `max_attempts` 取 1–10；
+- `errors.turn_cap.failures` 取 2–30，`window_seconds` 取 10–3600；
 - 所有 TTL ≥1 秒。
 
 某个子开关为 false 时，对应能力回到 0.3.0 行为。读取失败时使用最后已知值；冷启动无值时用缺省值。
@@ -429,6 +457,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
   - `resilience.stall`
   - `resilience.undelivered`
   - `resilience.fast_fail`
+  - `resilience.turn_cap`
   - `resilience.abuse_guard`
 - **统计接口**：`GET /api/v1/admin/resilience/stats?window=`，按分组与账号汇总以下指标：
   - 首包前心跳提交数；
@@ -439,6 +468,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
   - 改绑（按原因）；
   - 未送达（按阶段）；
   - 快速失败；
+  - 失败回合封顶；
   - 余额状态分布；
   - 推断的 CDN 切断（499 且阶段为首输出前，时长按 90、125、300 秒分桶）。
 - **运维页**新增“网关韧性”面板；账号列表显示余额状态与下次复检时间，提供“已充值”按钮（`POST /api/v1/admin/accounts/:id/balance/recheck`）；未送达记录可查询（`GET /api/v1/admin/resilience/undelivered`）。

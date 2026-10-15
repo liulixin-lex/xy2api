@@ -2220,6 +2220,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	origExcluded := excludedIDs
+	resilience.StateFrom(ctx).NoteTurn(derefGroupID(groupID), requestedModel, sessionHash)
 	negativeCacheable := strings.TrimSpace(previousResponseID) == "" && requiredImageCapability == "" && !requireCompact
 	negativeCtx := ctx
 	if negativeCacheable && groupID != nil && resilience.Current().ErrorsOn() {

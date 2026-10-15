@@ -294,6 +294,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		}
 		c.Next()
 		resilienceFastFailObserve(c, apiKey.ID)
+		resilienceTurnCapObserve(c)
 	}
 }
 

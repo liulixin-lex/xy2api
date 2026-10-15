@@ -131,6 +131,13 @@ type FastFailSettings struct {
 	Threshold     int  `json:"threshold"`
 }
 
+// TurnCapSettings tunes the failed-turn cap (design §9.7).
+type TurnCapSettings struct {
+	Enabled       bool `json:"enabled"`
+	Failures      int  `json:"failures"`
+	WindowSeconds int  `json:"window_seconds"`
+}
+
 // ErrorSettings tunes error semantics and storm protection.
 type ErrorSettings struct {
 	Enabled                      bool             `json:"enabled"`
@@ -139,6 +146,7 @@ type ErrorSettings struct {
 	ReservationRetryAfterSeconds int              `json:"reservation_retry_after_seconds"`
 	NegativeCacheSeconds         int              `json:"negative_cache_seconds"`
 	FastFail                     FastFailSettings `json:"fast_fail"`
+	TurnCap                      TurnCapSettings  `json:"turn_cap"`
 }
 
 // FallbackSettings tunes the availability fallback group.
@@ -201,6 +209,7 @@ func Defaults() Settings {
 			ReservationRetryAfterSeconds: 5,
 			NegativeCacheSeconds:         2,
 			FastFail:                     FastFailSettings{Enabled: true, WindowSeconds: 30, Threshold: 10},
+			TurnCap:                      TurnCapSettings{Enabled: true, Failures: 5, WindowSeconds: 120},
 		},
 		FallbackGroup: FallbackSettings{Enabled: true, ReturnStableSeconds: 120, BindingTTLSeconds: 600},
 		Reservation:   ReservationSettings{CacheAwareEstimate: true, OutputP99Cap: true},
@@ -291,6 +300,8 @@ func (s Settings) Validate() error {
 	check(in(e.NegativeCacheSeconds, 1, 60), "errors.negative_cache_seconds must be 1-60")
 	check(in(e.FastFail.WindowSeconds, 1, 3600), "errors.fast_fail.window_seconds must be 1-3600")
 	check(in(e.FastFail.Threshold, 2, 10000), "errors.fast_fail.threshold must be 2-10000")
+	check(in(e.TurnCap.Failures, 2, 30), "errors.turn_cap.failures must be 2-30")
+	check(in(e.TurnCap.WindowSeconds, 10, 3600), "errors.turn_cap.window_seconds must be 10-3600")
 
 	f := s.FallbackGroup
 	check(in(f.ReturnStableSeconds, 1, 86400), "fallback_group.return_stable_seconds must be 1-86400")

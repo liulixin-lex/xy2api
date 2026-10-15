@@ -94,6 +94,7 @@
 - [x] 4.5 上游余额对用户隐藏，包括图片余额 402。
 - [x] 4.6 用户余额：两条路径统一为 403 `INSUFFICIENT_BALANCE` 并换用新文案；在途预留超额改为 429 `concurrent_balance_reserved` 加 `Retry-After: 5`；估算改为缓存感知并以 P99 输出为上限。验收：用生产 7 天数据只读回放，余额为正的用户被拒次数减少 ≥90%，余额为负的金额不增加。（实现完成；生产只读回放验收在 12 执行）
 - [x] 4.7 `image_task_handler.go`：准入检查放到内容审计之前；审计失败时释放准入。
+- [x] 4.9 失败回合封顶（design §9.7，测试服务器发现）：会话连续第 5 次耗尽失败改为终止应答（无 `Retry-After`、`x-should-retry: false`、`server_is_overloaded`、5xx 改 503）；真正成功或间隔超过 120 秒清零。原因：Codex 对带 `Retry-After` 的 5xx 一个回合重试 30 次、历时 871 秒；流内失败重试 6 次。
 - [ ] 4.8 验证：单测、handler 集成测试；真实客户端测试中 Codex 一个失败回合的请求数 ≤5。
 
 ## 5 请求预算与重试（spec: request-budget-and-retry）
@@ -121,7 +122,8 @@
   - 换号时不重置计时。
 - [x] 6.3 各协议的心跳帧；Gemini 与官方 OAuth 账号不提前提交；图片与异步端点不提前提交。
   - 实现说明：复用 compact 心跳的上下文键，现有“已提交→流内终止帧”和“扣除心跳字节”的判定全部生效；心跳提交后若仍有代码写 JSON 错误，写入器把它改写为对应协议的终止帧。服务内三处“未输出才可换号”的判定改为语义输出口径。前提：`SERVER_TRUSTED_PROXIES` 必须包含 Caddy 到应用的对端地址（写入 runbook）。
-- [x] 6.4 首输出超时：OpenAI 按 effort 分档（60/120/180 秒）并支持按模型覆盖；Anthropic 与 Gemini 首事件超时 90 秒；最后一个候选不设单次超时。
+- [x] 6.8 中转站伪保活帧（design §7.8，测试服务器发现）：读取上游 SSE 时丢弃 `SSE-Keep-Alive` 空 delta 帧，不转发、不算语义输出。原因：真实中转站在 `response.created` 前发送该帧，openai-python 报错，且网关会提前放弃换号与首输出超时。
+- [x] 6.4 首输出超时：OpenAI 按 effort 分档（校准后 180/180/200/220 秒，见 0.4）并支持按模型覆盖；Anthropic 与 Gemini 首事件超时 90 秒；最后一个候选不设单次超时。
   - 实现：OpenAI 复用现有首输出守卫（原生 HTTP Responses），预算开启时按分档并受剩余预算约束；Anthropic 流式转发新增首事件守卫（头部等待与首行两阶段，守卫取消不被误判为客户端断开）。偏差：Gemini compat 服务的首事件守卫未接入，由停滞检测兜底；WebSocket 维持原配置。
 - [x] 6.5 修复 G2：按 `min(T/4, 5 秒)` 检查；文本已输出后停滞 120 秒判定为断流；图片维持 900 秒。
   - 实现：检测周期 min(T/4, 5 秒)；语义输出后取 min(配置间隔, 120 秒)，输出前沿用配置间隔；Responses 出现 image_generation_call 后豁免文本阈值；停滞时对账号施加 STALL 软冷却。

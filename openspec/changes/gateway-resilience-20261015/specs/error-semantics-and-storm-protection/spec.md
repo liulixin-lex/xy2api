@@ -54,6 +54,27 @@ Fast-failed requests MUST NOT count as account failures.
 - **WHEN** one key sends 200 requests per minute to a group whose only account is exhausted
 - **THEN** after the tenth identical 503 within 30 s, the following requests return the same 503 immediately.
 
+### Requirement: Failed turns end after a bounded number of attempts
+
+The gateway MUST count consecutive exhausted failures of one conversation (API key, group, model and sticky session hash): no-account responses, 429 or 5xx after failover is exhausted, and the same failures written into a committed stream. From the `errors.turn_cap.failures`-th (default 5) failure in a row, the failure MUST be final:
+- no `Retry-After`, and `x-should-retry: false`;
+- `error.code` `server_is_overloaded`, in the HTTP body and in a committed stream's terminal frame;
+- a 5xx status becomes 503; 429 stays 429.
+
+A successful request of the conversation, or a gap longer than `errors.turn_cap.window_seconds` (default 120 s) between failures, MUST reset the count. A 200 response that carried an in-stream failure MUST NOT reset it. Every request MUST still go through normal account selection.
+
+#### Scenario: Codex stops after five requests
+- **WHEN** Codex sends a turn to a group whose accounts all fail
+- **THEN** the first four failures carry `Retry-After`, the fifth is final and the turn ends after at most 5 requests.
+
+#### Scenario: In-stream failures end the turn
+- **WHEN** every attempt of a conversation fails after output has started
+- **THEN** the fifth terminal frame carries `server_is_overloaded` and Codex does not retry it.
+
+#### Scenario: Recovery is not delayed
+- **WHEN** the group recovers while a conversation's count is at the cap
+- **THEN** the next request succeeds and the count resets.
+
 ### Requirement: Upstream balance problems are hidden from users
 
 Upstream `BALANCE` failures, including image-account 402 responses, MUST NOT be shown to end users. When they leave no available account, the user MUST receive the standard 503 `Service temporarily unavailable` with `Retry-After`. Administrators MUST see the original upstream message in operations views and alerts.

@@ -105,6 +105,23 @@ func resilienceFastFailObserve(c *gin.Context, apiKeyID int64) {
 	}
 }
 
+// resilienceTurnCapObserve ends a conversation's failed-turn streak (design
+// §9.7) when a request succeeded; a 200 that carried an in-stream failure
+// counted as a failure and keeps it.
+func resilienceTurnCapObserve(c *gin.Context) {
+	if c == nil || c.Request == nil {
+		return
+	}
+	if status := c.Writer.Status(); status < 200 || status >= 300 {
+		return
+	}
+	st := resilience.StateFrom(c.Request.Context())
+	if st.TurnFailed() {
+		return
+	}
+	resilience.ProcessTurnCap().Reset(st.TurnKey())
+}
+
 // resilienceUserBalanceMessage is the middleware message for an empty user
 // balance.
 func resilienceUserBalanceMessage() string {

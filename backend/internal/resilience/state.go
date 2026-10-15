@@ -46,6 +46,14 @@ type RequestState struct {
 	sessionGroupID int64
 	sessionHash    string
 	sessionRec     SessionRecorder
+
+	// turn identifies the conversation for the failed-turn cap (design
+	// §9.7); turnFailed is set once the request counted as a failure.
+	turnGroupID int64
+	turnModel   string
+	turnSession string
+	turnNoted   bool
+	turnFailed  bool
 }
 
 // SessionRecorder records attempt outcomes of a sticky session. The service
@@ -63,6 +71,55 @@ func (s *RequestState) SetSession(groupID int64, sessionHash string, rec Session
 	s.mu.Lock()
 	s.sessionGroupID, s.sessionHash, s.sessionRec = groupID, sessionHash, rec
 	s.mu.Unlock()
+}
+
+// NoteTurn records the conversation the request belongs to. Selection calls
+// it on every attempt, including ones that find no account.
+func (s *RequestState) NoteTurn(groupID int64, model, sessionHash string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.turnGroupID, s.turnModel, s.turnSession, s.turnNoted = groupID, model, sessionHash, true
+	s.mu.Unlock()
+}
+
+// TurnKey returns the conversation key, or "" before selection or without
+// an API key.
+func (s *RequestState) TurnKey() string {
+	if s == nil {
+		return ""
+	}
+	s.d.mu.Lock()
+	apiKeyID := s.d.apiKeyID
+	s.d.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.turnNoted || apiKeyID <= 0 {
+		return ""
+	}
+	return TurnKey(apiKeyID, s.turnGroupID, s.turnModel, s.turnSession)
+}
+
+// MarkTurnFailed records that the request counted as a failed turn attempt,
+// so a 200 that later carries an in-stream failure does not reset the streak.
+func (s *RequestState) MarkTurnFailed() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.turnFailed = true
+	s.mu.Unlock()
+}
+
+// TurnFailed reports whether MarkTurnFailed was called.
+func (s *RequestState) TurnFailed() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.turnFailed
 }
 
 func (s *RequestState) session() (int64, string, SessionRecorder) {
