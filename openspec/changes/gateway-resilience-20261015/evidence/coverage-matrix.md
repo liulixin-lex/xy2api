@@ -69,7 +69,7 @@ The Explain part of “Explainability and configuration” has no scenario of it
 | Gemini is excluded | `TestArmPreOutputKeepaliveConditions` | GEM-1 |
 | Failover after heartbeats | `TestHeartbeatThenFailoverKeepsSwitching` | — |
 | Slow relay is abandoned in time | `TestFirstOutputTimeoutTiers`, `TestFirstOutputTimeoutMeasuredFromAttemptStart` | FO-1 |
-| Last candidate waits for the budget | `TestSoleCandidateIsLastCandidate`, `TestOpenAILastResortSingleAccount` | C-codex-slow-first-cdn, C-openai-py-slow-first-cdn |
+| Last candidate waits for the budget | `TestSoleCandidateIsLastCandidate`, `TestOpenAILastResortSingleAccount` | C-codex-slow-first-cdn, C-openai-py-slow-first-cdn, KA-8 (CDN 300 s) |
 | Keep-alive before response.created | `TestRelayKeepaliveFramesAreDropped` | KA-7, C-openai-py-fail-first |
 | Keep-alive does not disarm failover | `TestRelayKeepaliveFramesAreDropped` | KA-7 |
 | Stall detected within the threshold | `TestStallDetectedWithinFiveSecondsAfterOutput`, `TestStallCheckPeriodAndThreshold` | ST-1 |

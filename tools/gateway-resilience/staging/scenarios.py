@@ -239,6 +239,28 @@ def ka6():
     return r, checks
 
 
+def cdn_cuts(port: int) -> list[dict]:
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/_cuts", timeout=10) as resp:
+        return json.loads(resp.read() or b"[]") or []
+
+
+@scenario("KA-8", "CDN 300 s: upstream headers after 280 s; heartbeats and the 240 s budget end the request before the edge")
+def ka8():
+    checks = []
+    before = len(cdn_cuts(CDN300))
+    r = stream_request(CDN300, "/v1/responses", KEYS["G-slow-280"], responses_body(session=fresh_session()))
+    hb = heartbeats(r)
+    lines = [l for _, l in r["lines"]]
+    gaps = [b - a for a, b in zip([0.0] + hb, hb)]
+    r["cuts"] = cdn_cuts(CDN300)[before:]
+    check(r["status"] == 200, "status 200 (committed by heartbeats)", checks)
+    check(bool(hb) and max(gaps) <= 20, "no silence longer than 20 s before the end", checks)
+    check(any("response.failed" in l for l in lines), "ends with a retryable response.failed", checks)
+    check(r["elapsed"] < 260, "ended by the 240 s budget, before the 280 s upstream and the 300 s edge", checks)
+    check(not r["cuts"], "the edge cut nothing", checks)
+    return r, checks
+
+
 @scenario("KA-4", "Heartbeat committed, then every account fails: Responses terminal frame")
 def ka4():
     checks = []

@@ -34,6 +34,7 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-slow-headers": ("openai", [("slow-a", "F01;secs=200", 1), ("slow-ok", "F00", 2)], {}),
     "G-long-first": ("openai", [("long-first", "F17;first=150", 1)], {}),
     "G-slow-150": ("openai", [("slow150", "F01;secs=150", 1)], {}),
+    "G-slow-280": ("openai", [("slow280", "F01;secs=280", 1)], {}),
     "G-anthropic-slow": ("anthropic", [("anth-slow150", "F01;secs=150", 1)], {}),
     "G-slow-stream": ("openai", [("slow-stream", "F23;secs=60;every=5", 1)], {}),
     "G-abuse": ("openai", [("abuse", "F17;first=150", 1)], {}),
