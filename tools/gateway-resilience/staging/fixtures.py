@@ -90,7 +90,7 @@ REAL_GROUPS: dict[str, tuple[list[tuple[str, str, int]], dict]] = {
 
 USERS = {
     "stg-user@xy2api-staging.local": 1000.0,
-    # One in-flight estimate (about 0.08 USD) fits, two do not (RES-1).
+    # RES-1 resizes this balance around the live reservation estimate.
     "stg-small@xy2api-staging.local": 0.12,
 }
 

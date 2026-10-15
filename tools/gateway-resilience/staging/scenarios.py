@@ -152,6 +152,18 @@ def anthropic_body(model="claude-sonnet-5-5", stream=True):
     return {"model": model, "max_tokens": 64, "messages": [{"role": "user", "content": "hello"}], "stream": stream}
 
 
+def redis_cli(*args: str) -> str:
+    cmd = ["docker", "compose", "-p", "xy2api-staging", "exec", "-T", "redis", "redis-cli", *args]
+    return subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=60).stdout.strip()
+
+
+def admin_api():
+    from fixtures import API  # same directory
+    api = API(f"http://127.0.0.1:{APP}")
+    api.token = api.login(os.environ["ADMIN_EMAIL"], os.environ["ADMIN_PASSWORD"])
+    return api
+
+
 def psql(sql: str) -> str:
     cmd = ["docker", "compose", "-p", "xy2api-staging", "exec", "-T", "postgres", "psql", "-U", "xy2api", "-d", "xy2api", "-At", "-c", sql]
     return subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=60).stdout.strip()
@@ -458,14 +470,28 @@ def dc1():
 @scenario("RES-1", "Small balance held by an in-flight request: 429 concurrent_balance_reserved with Retry-After")
 def res1():
     checks = []
+    api = admin_api()
+    from fixtures import items
+    user = next(u for u in items(api.call("GET", "/api/v1/admin/users?page=1&page_size=200"))
+                if u["email"] == "stg-small@xy2api-staging.local")
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-        holder = pool.submit(stream_request, DIRECT, "/v1/responses", KEYS["small:G-long-first"], responses_body(), disconnect_after=20)
+        holder = pool.submit(stream_request, DIRECT, "/v1/responses", KEYS["small:G-long-first"],
+                             responses_body(session=fresh_session()), disconnect_after=20)
         time.sleep(3)
-        others = [pool.submit(stream_request, DIRECT, "/v1/responses", KEYS["small:G-single"], responses_body(stream=False)) for _ in range(3)]
+        # The estimate depends on pricing and the recent output P99; size the
+        # balance so that the holder's reservation fits and one more does not.
+        held_amounts = redis_cli("HVALS", f"billing:inflight_amt:{{{user['id']}}}").split()
+        estimate = max((float(x) for x in held_amounts), default=0.0)
+        api.call("POST", f"/api/v1/admin/users/{user['id']}/balance",
+                 {"balance": round(estimate * 1.5, 6), "operation": "set", "notes": "staging RES-1"})
+        others = [pool.submit(stream_request, DIRECT, "/v1/responses", KEYS["small:G-single"],
+                              responses_body(stream=False, session=fresh_session())) for _ in range(3)]
         results = [f.result() for f in others]
         held = holder.result()
-    r = {"holder_status": held["status"], "statuses": [x["status"] for x in results],
+    api.call("POST", f"/api/v1/admin/users/{user['id']}/balance", {"balance": 0.12, "operation": "set", "notes": "staging RES-1"})
+    r = {"estimate": estimate, "holder_status": held["status"], "statuses": [x["status"] for x in results],
          "bodies": [x["lines"][:1] for x in results], "retry_after": [x["headers"].get("retry-after") for x in results]}
+    check(estimate > 0, "the holder reserved its estimate", checks)
     check(held["status"] == 200, "first request runs", checks)
     check(all(x["status"] == 429 for x in results), "others get 429", checks)
     check(all("concurrent_balance_reserved" in json.dumps(x["lines"]) for x in results), "code concurrent_balance_reserved", checks)
@@ -570,6 +596,11 @@ def cf5():
 def dc2():
     checks = []
     key = KEYS["G-abuse"]
+    key_id = psql("select id from api_keys where name='key-G-abuse' and deleted_at is null")
+    # The hourly counter is shared with earlier runs in the same hour.
+    redis_cli("EVAL", "for _, k in ipairs(redis.call('KEYS', ARGV[1])) do redis.call('DEL', k) end return 0", "0",
+              f"xy:resil:undelivered:{key_id}:*")
+    since = datetime.datetime.now(datetime.timezone.utc).isoformat()
     mark = fault_last_id()
     for _ in range(31):
         stream_request(DIRECT, "/v1/responses", key, responses_body(), disconnect_after=1)
@@ -580,8 +611,8 @@ def dc2():
     deadline = now() + 200
     billed = ""
     while now() < deadline:
-        billed = psql("select count(*) from usage_logs where billing_mode='undelivered_abuse' and "
-                      "api_key_id=(select id from api_keys where name='key-G-abuse' and deleted_at is null)")
+        billed = psql(f"select count(*) from usage_logs where billing_mode='undelivered_abuse' and api_key_id={key_id} "
+                      f"and created_at > '{since}'")
         if billed not in ("", "0"):
             break
         time.sleep(10)
