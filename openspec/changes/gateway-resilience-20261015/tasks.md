@@ -8,7 +8,7 @@
 
 ## 0 准备与工具
 
-- [ ] 0.1 建开发分支，在 `docs/PROJECT_MEMORY.md` 的“进行中的工作”登记。
+- [x] 0.1 建开发分支，在 `docs/PROJECT_MEMORY.md` 的“进行中的工作”登记。
 - [ ] 0.2 基线与度量工具 `tools/gateway-resilience/`：
   - `baseline.sql`：只读统计 design §14 的全部指标；
   - `caddy_cuts.py`：按入口统计 CDN 切断，并把切断记录与应用日志、用量逐条匹配；
@@ -33,41 +33,46 @@
 
 ## 1 上游失败分类（spec: upstream-failure-classification）
 
-- [ ] 1.1 新增 `internal/resilience/classify.go`，按 design §2 实现：先看文本与 code，再看状态码；解析 `retry_after`（头、JSON 正文、Cloudflare 错误页）。
+- [x] 1.1 新增 `internal/resilience/classify.go`，按 design §2 实现：先看文本与 code，再看状态码；解析 `retry_after`（头、JSON 正文、Cloudflare 错误页）。
 - [ ] 1.2 在以下路径接入分类，结果写入请求上下文与 ops 记录：
   - `ratelimit_service.go` 的 `HandleUpstreamErrorRaw`；
   - OpenAI 上游错误与流内 failed 事件；
   - Anthropic 网关；
   - Gemini 兼容服务；
   - 透传路径。
+  - 进度（2026-10-15）：共用入口 `HandleUpstreamErrorRaw` 与 `FailoverState.HandleFailoverError` 已接入；分类结果写入 ops 记录待任务 9。
 - [ ] 1.3 关键字集合可配置（`failure.balance_keywords_extra`）；未分类的上游 4xx 正文做脱敏、限长的采样日志。
+  - 进度（2026-10-15）：`balance_keywords_extra` 已生效；未分类 4xx 采样日志待做。
 - [ ] 1.4 确保本站计费错误不进入分类。
 - [ ] 1.5 验证：表驱动单测覆盖 spec 中的所有场景，以及生产采样到的文案（脱敏后）；`go test -race ./internal/resilience/...`。
 
 ## 2 账号罚则与余额恢复（spec: account-penalties-and-balance-recovery）
 
-- [ ] 2.1 `PenaltyOf`：区分硬、软，返回 `recoverAt` 与原因；`temp_unschedulable` 的 `reason` 前缀约定。
-- [ ] 2.2 瞬时失败的软冷却（30 秒；有上游 `retry_after` 时取 min(retry_after, 120 秒)）。
-- [ ] 2.3 余额状态机：
+- [x] 2.1 `PenaltyOf`：区分硬、软，返回 `recoverAt` 与原因；`temp_unschedulable` 的 `reason` 前缀约定。
+- [x] 2.2 瞬时失败的软冷却（30 秒；有上游 `retry_after` 时取 min(retry_after, 120 秒)）。
+- [x] 2.3 余额状态机：
   - 存储 `accounts.extra.resilience_balance`；
   - 实现状态迁移与复检时间表（1/2/5/10/15 分钟，±15% 抖动）；
   - 把以下现有分支改走可恢复路径：Anthropic credit、402、非 OpenAI 403、余额类 429、图片 402。
-- [ ] 2.4 `BalanceProbeService`：
+- [x] 2.4 `BalanceProbeService`：
   - 泛化 `CNProviderBalanceCheckService`；
   - 支持 sub2api 系 `/v1/usage`、new-api 计费接口、1 Token 生成探测（日预算 48）；
   - Redis 单飞锁；
   - 探测返回 401 时转凭据路径。
-- [ ] 2.5 `RECOVERING` 半开：临时并发上限 1，满 3 次成功或 120 秒后回到 `OK`。
+- [x] 2.5 `RECOVERING` 半开：临时并发上限 1，满 3 次成功或 120 秒后回到 `OK`。
 - [ ] 2.6 管理接口 `POST /api/v1/admin/accounts/:id/balance/recheck`；账号列表显示余额状态与下次复检时间；进入、恢复以及超过 72 小时未恢复时，通过现有告警与邮件通知管理员。
-- [ ] 2.7 非 OpenAI 平台的 403 统一为“豁免、计数、冷却”。
+  - 进度（2026-10-15）：recheck 接口与 72 小时未恢复判定已完成；账号列表展示与通知接入待任务 9。
+- [x] 2.7 非 OpenAI 平台的 403 统一为“豁免、计数、冷却”。
 - [ ] 2.8 验证：单测加真实 PostgreSQL/Redis 集成（状态迁移、单飞、半开、多实例）；`-race`；用故障注入上游演练“没钱 → 充值 → 自动恢复”。
 
 ## 3 会话失败处理与末位兜底（spec: session-failure-handling）
 
-- [ ] 3.1 会话失败计数与回避集（Redis，TTL 600 秒），成功时清零。
-- [ ] 3.2 原版调度钩子（`openai_account_scheduler.go` 的 `selectBySessionHash`、`gateway_scheduling.go` 的粘性路径、`gateway_service.go` 的 `shouldClearStickySession`）：软罚时保留绑定、本次请求跳过；硬状态才清除；连续失败达到阈值时按 owner 删除并加入回避。
+- [x] 3.1 会话失败计数与回避集（Redis，TTL 600 秒），成功时清零。
+- [x] 3.2 原版调度钩子（`openai_account_scheduler.go` 的 `selectBySessionHash`、`gateway_scheduling.go` 的粘性路径、`gateway_service.go` 的 `shouldClearStickySession`）：软罚时保留绑定、本次请求跳过；硬状态才清除；连续失败达到阈值时按 owner 删除并加入回避。
 - [ ] 3.3 份额调度适配（`share_scheduling_exec.go` 与候选构造）：软罚表示为 `RecoverAt`；回避表示为 `Excluded`；硬状态不带 `RecoverAt`；新增原因 `resil_failure_streak`、`last_resort_soft`、`fallback_return`。
-- [ ] 3.4 末位兜底（两种调度器都要实现）：先转投兜底组（任务 8），否则在最高的有软罚账号的那一层，取罚期最短者；不受单次首输出超时约束。
+  - 进度（2026-10-15）：未开始：份额调度显式 `RecoverAt`/新原因码。
+- [x] 3.4 末位兜底（两种调度器都要实现）：先转投兜底组（任务 8），否则在最高的有软罚账号的那一层，取罚期最短者；不受单次首输出超时约束。
+  - 进度（2026-10-15）：兜底组转投随任务 8 实现。
 - [ ] 3.5 Explain：份额调度的 Explain 显示罚则、计数、回避与兜底；原版调度新增只读 Explain。
 - [ ] 3.6 在 `tools/upstream-sync/scheduler-diff.json` 中登记新增块，`sync.py scheduler-diff` 通过。
 - [ ] 3.7 验证：

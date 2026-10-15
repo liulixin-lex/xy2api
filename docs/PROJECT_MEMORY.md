@@ -704,6 +704,9 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
   - gofmt 只对自己的文件执行，`openai_token_provider_test.go` 是仓库原有未格式化文件，不要动；
   - 调度相关上游文件的新增块要在任务 10 登记 `scheduler-diff.json`，否则 CI 的 Original scheduler diff allowlist 会失败；
   - `TestServerTimingConnectorRecordsDriverCallsWithoutRowLifetime` 在全量并发下偶发失败、单跑通过，与本改动无关。
+- 2026-10-15T16:30Z 任务 4（错误语义与防风暴）完成并提交（`5d9c46707`、`efe8af053`）：无号/限流 Retry-After（2–30 秒，服务端封顶）、配置类 `Retry-After: 60` + `x-should-retry: false`、2 秒负缓存、同 Key 快速失败、上游余额隐藏、用户余额统一文案、在途预留 429（仅当余额本身够付且被其他在途占用）、缓存感知估算与 7 天 P99 输出上限、异步图片准入前移。service/handler/repository/server unit 全绿。
+  - 发现并修复：选号诊断文本恒含 `profit_threshold=0`，原先按子串排除 profit 导致网关负缓存永不生效；改为只匹配非零计数。
+  - 4.6 的生产 7 天只读回放验收、4.8 的真实客户端验证留到任务 12。
 
 ### 20261015-prod-ux-analysis — 生产请求日志只读分析与上线级优化方案（已完成，由 20261015-gateway-resilience 承接）
 
