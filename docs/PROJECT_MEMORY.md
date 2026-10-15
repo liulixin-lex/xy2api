@@ -4,6 +4,26 @@
 
 ## 当前交接状态
 
+### 网关韧性优化方案（2026-10-15，方案完成、待授权开发；未改生产、未提交）
+
+- 方案：`openspec/changes/gateway-resilience-20261015/`，含 proposal、design、tasks、runbook、staging-validation、xy-image-appendix、8 个 spec（42 条需求、65 个场景）与 `evidence/` 两份证据。位于本机分支 `analysis/prod-ux-20261015`（基于 origin/main `f8fec15a2`），未提交、未推送。
+- 目标：xy2api 0.4.0（先 RC）加 XY-image 0.0.17；访谈定稿的决策 D1–D33 见 proposal。不做灰度，开发后在测试服务器完整验证，全部闭环再提 PR、发版。
+- 生产分析：完整报告 `docs/PROD_UX_ANALYSIS_20261015.md`（被 `docs/*` 忽略，不入库）；去标识摘要见方案 `evidence/production-analysis.md`。
+- 仓库外产物（本机仓库同级目录 `xy2api-artifacts/gateway-resilience-20261015/`）：
+  - `research/`：三份完整调研报告，含第三方源码引用，部分来源无许可证，不入库；
+  - `production/`：完整分析报告副本；
+  - `private/HOSTS.md`：生产主机与测试服务器的地址、容器、路径与共存服务清单，不含凭据。
+- 本仓库公开：主机地址、宿主机路径与内网网段只写私有清单，入库文档只用代称；证据只放聚合数字。
+- 生产现状：0.3.0（00:46Z 切换流量，份额调度未启用）。用户已把 ESA 回源超时调为 300s（约 06:40Z）、429 冷却调为 45s（07:05Z）、过载冷却调为 2 分钟。
+- 下一步（每项都需用户授权）：
+  1. 开发：从 origin/main 新建 `feat/gateway-resilience-20261015`，按 tasks 第 0–11 节实现；
+  2. 测试服务器：按 staging-validation 部署隔离环境。测试 DNS 记录（`stg-api`、`stg-cf`）与真实测试 Key（总预算不超过 20 美元）需用户提供或授权；
+  3. staging-validation 第 9 节全部勾选后提 PR，发 0.4.0-rc.1，再发 0.4.0；
+  4. 生产部署按 runbook，每次单独授权。
+- 安全提醒：
+  - 两台主机的 SSH 密码在对话中出现过，建议改用密钥登录并更换密码；
+  - 只读分析时，工具输出曾短暂显示 `openai_codex_ticket_proxy_pool_v1` 设置中的部分凭据片段和一个已退役的 Caddy 金丝雀 token。两者都没有写入任何文件，建议轮换。
+
 ### Sub2API 0.2.15 / XY2API 0.3.0 正式发布完成（2026-10-13）
 
 - 独立工作树 `/lex/xy2api-sync-20261013`；起始main `7b1d5d8c387c461a660befa3ac936b39715b4bf0`。固定官方annotated v0.2.15（object `86a80c13dcba86f52f9ca815b5a471cecc236227`，target `f2669c8cf62555cd92389b3f55920e9e6e7c6ff2`），真实base `0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d`。146个上游提交、27项冲突裁决见[同步说明](UPSTREAM_SYNC_V0215.md)。
@@ -672,6 +692,17 @@
 Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+### 20261015-gateway-resilience — 网关韧性 0.4.0 开发与测试服务器验证（进行中）
+
+- 2026-10-15T11:30Z 用户授权“开始执行”：按 `openspec/changes/gateway-resilience-20261015/tasks.md` 开发，在测试服务器部署隔离环境验证；Cloudflare 测试 DNS 已由用户配置；真实测试 Key 由用户在需要时提供。PR、发版、生产部署仍按方案在全部闭环后进行。
+- 本机分支 `feat/gateway-resilience-20261015`（基于 origin/main `f8fec15a2`，已取消上游跟踪，未推送）。Go 1.27.2 工具链在 `/tmp/xy2-toolchain`（`source /tmp/xy2-toolchain/env.sh`，SHA256 已校验）。
+- 进度以 tasks.md 勾选为准；关键发现与验证结果追加到操作日志。
+
+### 20261015-prod-ux-analysis — 生产请求日志只读分析与上线级优化方案（已完成，由 20261015-gateway-resilience 承接）
+
+- 用户授权只读 SSH 生产主机（地址与账号见仓库外私有清单；sudo 只用于读取 docker 日志、Caddy 日志与只读 psql），分析近 48 小时请求、错误、断连、重试/回退与账号调度，并实时抓取最新请求。不改生产配置、数据或服务。
+- 本机分支 `analysis/prod-ux-20261015`（基于 origin/main `f8fec15a2`）；生产运行 `ghcr.io/liulixin-lex/xy2api:0.3.0`（2026-10-15 00:42Z 由他人替换上线）。只新增分析文档、OpenSpec 方案与本记忆条目，未提交。
 
 ### 20261012-pr90-slim — PR #90 复审、精简与上线验收（已完成，随 PR #90 推送；本 Agent 无进行中操作）
 
@@ -2124,3 +2155,108 @@ pnpm --dir frontend run build
 - 清理仅本任务prefix+label容器/网络/卷和指定敏感fixture路径；保留hash/JSON/日志，4个既有部署完全不变。临时VCS复现clone已删；生产没有写入或部署。
 - 按AGENTS在正式发行后补齐记忆并清理本任务进行中条目，本收尾仅改PROJECT_MEMORY，使用独立PR和完整保护检查。不可变发行tag保持1e0fbdd704；收尾main的业务树与正式tag完全一致，此纯文档领先记录是对runbook收尾“main等于tag”的明确例外，避免为补记发行结果移动标签。
 - 没有未完成业务修复或发行验收；后续仅为用户实际部署时的public设置、生产恢复验证与可选share影子/灰度，未在此次只读生产授权外执行。证据及历史失败/中断均保留，未保证无法证明的零风险。
+
+### 2026-10-15T03:20Z — `20261015-prod-ux-analysis` — 完成
+
+- 请求/目标：用户授权只读 SSH 生产，分析近 48 小时全部请求、错误、用户断连、重试/回退与账号调度，实时抓取最新请求，规划除上游自身原因以外的体验优化方向。
+- 开始状态：本机原在 `feat/share-scheduling-20261010`（已随 v0.3.0 合入）；fetch 后基于 origin/main `f8fec15a2` 新建 `analysis/prod-ux-20261015`。生产运行 `xy2api:0.3.0`（他人于 00:42Z 部署、00:46Z 切换流量）。
+- 完成操作：
+  - 只读 psql（`default_transaction_read_only=on`）统计 `usage_logs`、`ops_error_logs`、`ops_system_logs`、`ops_system_metrics`、`settings`、`accounts`、`groups`、`audit_logs`；
+  - 下载应用日志（约 2 小时）与 Caddy 轮转日志，实时抓取约 25 分钟；
+  - 对照 v0.3.0 源码核实重试、换号、冷却、keepalive 与错误映射；
+  - 用“IP、路径、开始时间”把 CDN 切断与应用结果逐条对应。
+- 修改文件：新增 `docs/PROD_UX_ANALYSIS_20261015.md`；更新本文件。没有业务代码改动。
+- 验证：所有数字来自上述只读查询与日志脚本，报告中注明了口径和样本窗口；未运行构建或测试（无代码改动）。
+- 卡点/风险：
+  - Caddy 日志只保留约 2 小时，CDN 层结论是样本外推；
+  - 00:46Z 切换后 3.5 分钟不可用的确切原因（健康检查状态）未能确认；
+  - 旧镜像期间“余额不足同号重试”的触发条件在 0.3.0 下没有复现，需另行回归。
+- 下一步：等待用户确认优化规划与计费决策。本地已删除下载的生产日志副本，SSH 连接已关闭；分析脚本在 `/tmp/xy2-prodana/bin`，不含凭据，可删除。
+
+### 2026-10-15T03:40Z — `20261015-prod-ux-analysis` — 补充 CDN 超时建议
+
+- 核对官方文档：ESA 回源 HTTP 请求超时默认 30s、上限 300s；Cloudflare 的 Proxy Read Timeout 默认 125s，仅 Enterprise 可调（最多 6000s）。已把报告 7.1 第 1 项改为：ESA 设 300s；Cloudflare 不升级套餐，改走 ESA 或仅 DNS 子域名，并与网关首包心跳、首包超时换号一起实施。只改了本地未提交的报告与本记忆。
+
+### 2026-10-15T06:55Z — `20261015-prod-ux-analysis` — Codex 重连现象排查（只读）
+
+- 用户反馈 ESA 改为 300s 后 Codex 出现“idle timeout waiting for SSE”及两种 429。只读排查结论：与 ESA 调整无关。
+  - ESA 约在 06:40Z 生效；同类错误 06:20 起已在账号 292 出现，Cloudflare 链路也有；
+  - 两种 429 来自上游账号 307、292 在流内发出的忙或限流失败，网关原样透传，只冷却 2s，粘性会话又把请求送回同一账号；
+  - idle timeout 是 Codex 自身 300s 的事件空闲计时，起因是上游中途停住。
+- 已追加到报告第 8 节（建议把 429 冷却调到 30–60s、对问题账号降权，并做流内失败换号与改绑等代码改进）。生产未做任何修改。
+- 补充（同日）：核实了“为何没有换号”。0.3.0 只在客户端尚无输出时才允许换号；这几次失败前已向客户端写出 2.3–3.8KB 真实内容（心跳会被扣除）。客户端重连后，又因 429 冷却只有 2s、sticky escape 只看账号整体指标、没有按会话连续失败改绑的规则，回到同一账号。已追加到报告第 8 节。
+
+### 2026-10-15T07:10Z — `20261015-prod-ux-analysis` — 复核用户配置调整并更新剩余清单
+
+- 只读确认生产配置：429 冷却 45s（07:05:04 修改）、过载冷却 2 分钟、ESA 300s。429 冷却每次从库中读取，立即生效。
+- 最近 60 分钟仍然突出的问题：
+  - 组 28 只剩账号 158 可用，出现重试风暴；
+  - 组 53 的 `gpt-5.5` 定价限制返回 503，约 94 次/小时；
+  - 组 72 两个 OAuth 账号均已 revoked；
+  - 多名用户在同一不稳定账号上连续失败。
+- 已把进度与剩余清单写入报告第 9 节。没有修改生产或代码。
+
+### 2026-10-15T07:40Z — `20261015-prod-ux-analysis` — 优化规划访谈（grilling）进行中
+
+- 用户要求全量读取两份生态 CSV（精选 36 项、候选 349 项，其中 140 项为无独有描述的通用 fork），参考生态实现，并结合线上请求与 XY-image 代码，规划可上线的优化方案。已派出 3 个只读研究代理：生态调度与健康、生态重试与保活、XY-image 集成；报告写入 `/tmp/xy2-grill/research/`。
+- 第 1 轮已定稿：
+  - 范围为 P0 与 P1 做到可上线，P2 只给进入条件，交付 OpenSpec 加运维 runbook；
+  - 零字节未送达：立即取消上游且不向用户计费；
+  - 流式请求延迟提交 SSE 头加心跳（通过校验与选号后，T=15s 仍无上游响应头才提交）；
+  - 余额不足进入可恢复的独立状态；
+  - 采用“xy2api 自有模块加最少钩子”，不向 Sub2API 官方提交任何改动；
+  - 本次不修改 XY-image，xy2api 必须保持对它兼容；
+  - 会话改绑必须照顾单号组，不能因为一次波动导致整组无号。
+- 更正：`fallback_group_id` 不是无号兜底，只用于仅限 Claude Code 分组的降级；报告第 7.1、9 节已改，并补充第 10 节更正记录。
+- 第 2 轮定稿（2026-10-15）：
+  - Q10 同源联动：不做。
+  - Q12：未送达的请求不写用量行，单独存一份仅运营可见的记录。
+  - Q8、Q9、Q11 按生态调研结论执行：
+    - Q8 失败即按 owner 解绑；回避集 60–120s，10 分钟内失败 ≥2 次延长到 10 分钟；选号分三遍；并发满、TTFT 抖动、客户端错误不改绑。
+    - Q9 余额状态机 OK/SUSPECT/EXHAUSTED/RECOVERING；复检间隔 1→2→5→10→15 分钟；探测优先 sub2api 的 `/v1/usage`，其次 new-api（待实测），最后 1 token 生成探测（有日预算）；半开逐步恢复。
+    - Q11 无号兜底组：只在无可用账号时触发、每个请求一次、同平台、按兜底组计费并对用户可见；先走兜底组，再在兜底组里取最不坏的账号，没有兜底组才在原组取最不坏的。
+  - 用户改为允许修改 XY-image。XY-image 调研结论见 `/tmp/xy2-grill/research/xy-image-integration.md`；生产为 v0.0.16（258c0c9），生图并发 16。生态调度调研见 `/tmp/xy2-grill/research/ecosystem-scheduling.md`。
+- 第 3 轮（2026-10-15）：
+  - Q16：状态码维持不变（C）。
+  - Q13、Q14 按推荐：XY-image 修高危问题；只对经 CDN 的请求提前提交。
+  - 用户新增要求：Q8 的绑定释放规则太严，必须与份额调度一致，层级与权重由管理员掌控。已改为分级处理，等待确认。
+  - Q11 主组恢复后要切回；Q15 上游余额只给管理员看。
+- 已核实的事实：
+  - 用户看到的“余额不足”几乎都来自本站计费：48h 内 1457 次是真余额 ≤0，约 500 次是在途预留之和超过余额（用户余额为正），上游余额泄漏只有 4 次（图片账号 402）。
+  - xy2api 现存缺陷：
+    - G2：流间隔检测的 ticker 周期等于阈值，实际在 T 到 2T 之间才触发；
+    - G3：Anthropic 心跳后的错误帧缺 `event: error`，SDK 静默丢弃（`gateway_handler.go` 约 2012 行）；
+    - G8：暂存的账号响应头（含 `x-codex-turn-state`）只在首次写出前生效，心跳先写出后会丢失。
+- 研究报告：
+  - `/tmp/xy2-grill/research/ecosystem-retry-keepalive.md`。要点：Codex 300s 空闲计时不被注释行重置；5xx 不带 Retry-After 时一个回合约产生 30 次请求；Retry-After 无上限；429 不带 Retry-After 即终止。
+  - Gemini SDK 遇注释行会报错；上游 sub2api 在 v0.2.15 之后没有相关修复。
+- 第 4 轮（2026-10-15）：
+  - Q8、Q11、Q15、Q17–Q24 按调研方案执行（Q23 选 B，其余为 A）。
+  - Q26 改为不做灰度：直接开发，在用户指定的测试服务器（地址见仓库外私有清单）上测试与预上线，确认全部闭环后再提 PR、发版。凭据只存放在本机临时文件，不写入 Git 或记忆。
+  - 测试服务器只读勘察：
+    - Ubuntu 26.04，8 核，15G 内存，可用磁盘 133G；是共享开发测试机。
+    - 已有多套服务：旧版 xy2api、旧测试站、两套 XY-image（其中一套调用生产主站）以及若干主机服务。清单见私有清单，本方案一律不碰。
+    - 测试域名所在区在 Cloudflare 上，但都是灰云直连。
+  - 需要新建一套完全隔离的预上线环境。
+
+### 2026-10-15T11:10Z — `20261015-prod-ux-analysis` — 上线级优化方案（OpenSpec）完成
+
+- 请求/目标：用户确认访谈结论后要求“先完善整个方案”，随后指示“按上述方案执行”，即完成整套方案文档。开发、测试服务器部署、DNS、PR、发版、生产部署都不在本轮范围内。
+- 完成内容：
+  - 新增 `openspec/changes/gateway-resilience-20261015/`：proposal（含决策 D1–D33）、design（§0–§17）、tasks（第 0–15 节）、runbook、staging-validation、xy-image-appendix、8 个 spec（42 条需求、65 个场景），以及 `evidence/production-analysis.md`（去标识的生产分析摘要）、`evidence/research-summary.md`（34 个第三方仓库的固定 SHA、许可证与借鉴取舍，不含第三方代码）。
+  - 复核两份 CSV 行数（精选 36、候选 349）。修正两处交叉引用：proposal 的 P2 进入条件指向 tasks 第 15 节；design 中 new-api 余额接口实测指向 tasks 12.6。
+- 安全与数据处理：
+  - 发现 liulixin-lex/xy2api 为公开仓库。已把方案文件与本轮新增（尚未提交）的记忆条目中的两台主机地址、测试机共存服务与端口、宿主机路径和内网网段改为代称；原信息移到仓库外的 `xy2api-artifacts/gateway-resilience-20261015/private/HOSTS.md`（0600，不含凭据）。
+  - spec 场景中的生产账号编号改为 account A。
+  - 完整生产报告副本放到仓库外 `production/` 目录。
+  - 删除本机残留的生产日志摘录 `/tmp/xy2-prodana/data/inflight_rej.txt`，结论此前已记录。
+  - 本机辅助脚本只从环境变量读取口令，不落盘。
+- 验证：
+  - 本机没有 OpenSpec CLI，改用脚本做结构检查：每个 spec 都有 ADDED 段；每条需求都含 MUST/SHALL 且至少有一个带 WHEN/THEN 的场景。结果没有结构问题。
+  - 方案目录的敏感信息扫描（口令、主机地址、`ubuntu@`/`root@`、本机绝对路径、生产编号）为零命中。
+  - 没有代码改动，未运行构建或测试。
+- 未完成、卡点与下一步：
+  - 等用户授权开始开发。授权后从 origin/main 新建 `feat/gateway-resilience-20261015`，并把本方案目录带到该分支。
+  - 测试服务器部署要用户确认；测试 DNS 记录和真实测试 Key 由用户提供或授权。
+  - PR、发版、生产部署各需单独授权。
+  - 本分支与工作树改动都未提交、未推送。

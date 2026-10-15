@@ -1,0 +1,185 @@
+# 测试服务器验证与预上线方案
+
+> 目标：0.4.0 候选在测试服务器上经故障注入、真实客户端、真实 CDN、升级回退与浸泡全部闭环后，才提 PR、发版（D24）。
+> 凭据（SSH、真实测试 Key、数据库口令）只保存在测试服务器的 `.env`（0600）或本机临时目录，不写入 Git、PR、记忆或报告。
+> 本仓库公开。测试服务器的地址、已有服务与端口清单只记在仓库外的私有清单 `xy2api-artifacts/gateway-resilience-20261015/private/HOSTS.md`。
+
+## 1. 服务器现状（2026-10-15 只读勘察）
+
+- Ubuntu 26.04，8 核，15G 内存（可用约 9.4G），根盘可用 133G。
+- 这是共享开发测试机，已在运行多套服务，**本方案一律不碰**：
+  - 一套旧版 xy2api（0.2.5）和一个旧测试站；
+  - 两套 XY-image，**其中一套经私网与公网备份路由调用生产主站**；
+  - 一个独立的 Sub2API 实例，以及若干主机服务。
+- Caddy 已承载 7 个站点。测试域名所在区在 Cloudflare 上，现有记录都是灰云直连。
+- 部署前后对比已有容器的 ID 与启动时间、Caddy 站点列表，作为“未影响已有服务”的证据。
+
+## 2. 环境布局（D28）
+
+| 项 | 规划 |
+|---|---|
+| 目录 | 测试服务器上的独立目录（路径见私有主机清单）：`compose.yaml`、`.env`（0600）、`src/`、`fault-upstream/`、`cdn-sim/`、`fixtures/`、`evidence/`、`data/` |
+| Compose 项目 | `xy2api-staging`；网络 `xy2api-staging-net`（内部） |
+| 服务 | `app`（候选镜像，127.0.0.1:18210）、`postgres`（18，仅内部）、`redis`（8，仅内部）、`fault-upstream`（127.0.0.1:18211）、`cdn-sim-90`/`cdn-sim-125`/`cdn-sim-300`（127.0.0.1:18212–18214） |
+| 升级演练库 | 同一个 postgres 中的独立数据库 `xy2api_upgrade`，与功能测试库隔离 |
+| Caddy | 新增独立片段 `xy2api-staging.caddy`，在主配置末尾 import；改前备份、`caddy validate`，然后平滑 reload |
+| 域名 | `stg-direct.example.test`（灰云，直连）与 `stg-cf.example.test`（橙云，经 Cloudflare）；ESA 测试站点视条件而定。**DNS 修改需用户授权** |
+| XY-image 测试实例 | 独立目录，使用 XY-image 仓库的 `deploy/xy2api-lab` 或精简自托管栈，端口与已有两套错开；`XY2API_BASE_URL` 指向 `stg-api` |
+| 资源上限 | 每个容器设内存与 CPU 上限，并设 `oom_score_adj`，避免影响已有服务 |
+
+## 3. 镜像与版本
+
+- **开发期：**
+  - 用 `git archive` 把分支源码同步到 `src/`；
+  - 在服务器上 `docker build`，镜像打 `xy2api-staging:<短提交号>` 标签，并记录 digest；
+  - 前端嵌入构建与正式发布流程一致。
+- **RC 期：** 直接使用 GHCR 上的 `0.4.0-rc.1` 镜像（固定 digest），复跑关键子集。
+- 每次部署都记录：提交号、digest、迁移数、设置快照。
+
+## 4. 数据（D30）
+
+- **功能测试库：**
+  - 全新安装后，用 `fixtures/` 脚本经管理接口建立夹具：
+
+    | 夹具分组 | 用途 |
+    |---|---|
+    | G-single | 单账号，原版调度 |
+    | G-pair | 双账号，原版调度 |
+    | G-share | 份额调度，两层，每层两个账号 |
+    | G-fallback-primary / G-fallback-backup | 无号兜底 |
+    | G-claude-only | 仅限 Claude Code |
+    | G-pricing-restricted | 渠道定价限制 |
+    | G-image | 图片 |
+
+  - 另建若干用户与 Key，包括小余额用户（用来验证在途预留 429）。
+- **升级演练库：**
+  - 从生产只读导出表结构：`pg_dump --schema-only`，不带数据；
+  - 用 `tools/gateway-resilience/synth_data.py` 生成同量级数据：usage_logs 约 330 万、ops_system_logs 约 580 万、ops_error_logs 约 37 万、usage_billing_dedup 约 330 万、accounts 约 400、users 约 1900、api_keys 约 2.5 万；
+  - 真实用户数据不离开生产。
+
+## 5. 上游（D29）
+
+- **故障注入上游**（`fault-upstream`）：每个场景有固定 ID，由请求头 `X-Fault: <id>[;param=…]` 或账号 base_url 路径前缀选择：
+
+| 场景 ID | 行为 |
+|---|---|
+| F01 | 慢响应头（参数：秒） |
+| F02 | 先 200 SSE，N 秒后 `response.failed`：busy |
+| F03 | 同 F02：rate_limit_exceeded |
+| F04 | 同 F02：insufficient_quota |
+| F05 | 同 F02：context_length_exceeded |
+| F06 | 已输出后停滞（参数：秒） |
+| F07 | 502 Cloudflare 错误页，`retry_after:60` |
+| F08 | 524，`retry_after:120` |
+| F09 | 503 无正文 |
+| F10 | 402 余额 |
+| F11 | 403 “insufficient balance” |
+| F12 | 429 “Insufficient account balance” |
+| F13 | 429 带重置时间 |
+| F14 | 429 无重置时间 |
+| F15 | 401 invalid key |
+| F16 | 529 / `server_is_overloaded` |
+| F17 | 正常长推理（参数：首字秒数） |
+| F18 | 图片长耗时（参数：秒） |
+| F19 | `/v1/usage` 余额（可切换为 0 或正数） |
+| F20 | new-api 计费接口 |
+| F21 | Anthropic 流式，先 `message_start` 后停滞 |
+| F22 | Gemini 流式 |
+
+- **真实测试 Key：** 由用户提供少量专用中转 Key，只配低价模型，总预算不超过 20 美元。每次真实测试前后记录余额，用于真实客户端与 new-api 余额接口实测；生产 Key 一律不复制。
+
+## 6. 测试矩阵
+
+### 6.1 规格场景（自动化）
+
+8 个 spec 中的每个 Scenario 都对应一个测试编号 `S-<spec缩写>-<序号>`，例如 `S-CLS-1`、`S-PEN-3`、`S-SES-2`、`S-FB-4`、`S-BUD-2`、`S-KA-5`、`S-DC-3`、`S-ERR-6`：
+
+- 能在 Go 集成测试中覆盖的，用真实 PostgreSQL/Redis 加 `fault-upstream`，纳入 CI 的“Gateway resilience”作业；
+- 依赖时间或 CDN 的，在测试服务器上用脚本执行，输出 JSON 证据。
+
+### 6.2 真实客户端端到端
+
+| 客户端 | 路径 | 场景 |
+|---|---|---|
+| Codex CLI 与 Desktop（最新版）、Claude Code（最新版）、OpenAI Python/Node SDK、Anthropic SDK、OpenCode（AI SDK）、go-genai/python-genai、curl | 直连 `stg-api`；`cdn-sim` 90/125/300；真实 CF（`stg-cf`） | 首拍前失败（应得原状态码与 `Retry-After`）、心跳后换号成功、预算耗尽、已输出后忙或限流、停滞、断开、单号组余额耗尽、单号组瞬时故障（末位兜底）、兜底组切换与切回、配置类 503、快速失败 |
+
+每个用例记录：客户端版本、回合请求数、最终错误文案、端到端耗时、网关日志中的分类与动作。验收要点：
+
+- Codex 一个失败回合的请求数 ≤5；
+- Claude Code 能显示 `event: error` 的真实原因；
+- Gemini SDK 不受心跳影响；
+- 经 CDN 的长请求不再被切断。
+
+### 6.3 真实 CDN（D31）
+
+经授权建立 `stg-cf` 橙云记录后，用真实客户端经 Cloudflare 访问，验证：
+
+- 首字超过 125 秒的请求不再被切断；
+- 心跳格式；
+- `Retry-After` 透传；
+- 边缘标记只出现在 CF 请求上。
+
+有 ESA 测试站点时同样验证 90 秒与 300 秒。
+
+### 6.4 XY-image（D32）
+
+XY-image 0.0.17 测试实例接入测试 xy2api，覆盖：
+
+- 对话：普通、上下文超长压缩、心跳后错误；
+- 同步生图：Gemini 长耗时；
+- 异步生图：批量、每 Key 在途上限、`too_many_tasks`；
+- 余额不足提示、未送达核对、Caddy 错误标记。
+
+同时用 XY-image 0.0.16 对测试 xy2api 跑一遍兼容性。
+
+## 7. 升级、回退与前滚（升级演练库）
+
+1. 在 `xy2api_upgrade` 上先启动 0.3.0，确认健康。
+2. 换成 0.4.0 候选：记录迁移 272–275 的耗时、锁等待与表大小变化，确认没有长时间锁住 usage_logs。
+3. 回退到 0.3.0 镜像：健康、登录、网关请求、计费都正常，新列与新表被忽略。
+4. 再前滚到 0.4.0：设置与数据保持。
+5. 还原演练：用 pg_dump/pg_restore 做一次成套备份与恢复（含 `settings`）。
+
+## 8. 浸泡（24 小时）
+
+- **负载：**
+  - 并发 20–50，混合 Responses、Chat、Messages、Gemini、图片，流式与非流式按 7:3；
+  - 每类故障按约 5% 注入；
+  - 每小时人为让一个单号组的账号余额耗尽，再恢复。
+- **监控：** 协程数、并发槽位、在途预留余额、Redis 键数量（会话计数、回避集、锁）、PostgreSQL 连接、进程内存、日志量。
+- **验收：**
+  - 结束时各项回到基线；
+  - 没有孤儿预留与槽位；
+  - 没有 panic；
+  - 日志中没有凭据；
+  - 未送达记录与用量没有重复。
+
+## 9. 退出条件（全部闭环，D24）
+
+- [ ] 8 个 spec 的全部 Scenario 都有通过证据。
+- [ ] 真实客户端矩阵通过；Codex 一个失败回合 ≤5 次请求。
+- [ ] `cdn-sim` 三档与真实 CF 验证通过。
+- [ ] 升级、回退、前滚与成套备份恢复通过。
+- [ ] 24 小时浸泡通过。
+- [ ] XY-image 0.0.17 实验室与兼容测试通过；0.0.16 对 0.4.0 兼容。
+- [ ] design §14 的指标在测试环境回放中达标。
+- [ ] 未关闭的 P0/P1 缺陷为零；已知限制都写进 PR 与文档。
+- [ ] 上游同步审计、scheduler-diff、lint、全量单测与集成测试通过。
+
+全部勾选后，才进入 tasks 第 13 节（PR 与发版）。
+
+## 10. 证据与报告
+
+- 测试服务器的 `evidence/<日期>/<测试编号>/`：输入、命令、输出 JSON、相关日志片段（脱敏）、退出码。
+- 汇总报告 `STAGING_REPORT.md`，同时复制到本机仓库同级目录 `xy2api-artifacts/gateway-resilience-20261015/staging/`。
+- 失败记录保留，不删除、不改写。
+
+## 11. 清理
+
+正式发布并完成生产部署验证后，或用户另有要求时：
+
+- 仅对 `xy2api-staging` 项目执行 `docker compose down -v`；
+- 删除 `xy2api-staging.caddy` 片段的 import，并平滑 reload；
+- 经授权删除测试 DNS 记录；
+- 请用户吊销测试 Key；
+- 已有服务的状态与配置保持不变（清理前后对比容器 ID、启动时间与 Caddy 站点）。
