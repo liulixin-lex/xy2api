@@ -85,6 +85,9 @@ type ResilienceService struct {
 
 	// background holds optional loops registered before Start.
 	background []func(ctx context.Context)
+
+	successes resilienceSuccessTracker
+	rateLimit *RateLimitService
 }
 
 // NewResilienceService creates the service; Start loads the settings and

@@ -300,7 +300,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	shareSchedulingService := service.ProvideShareSchedulingService(shareSchedulingRepository, shareSchedulingStore, settingRepository, gatewayService, openAIGatewayService, configConfig)
 	shareSchedulingHandler := admin.NewShareSchedulingHandler(shareSchedulingService)
 	resilienceStore := repository.NewResilienceStore(redisClient)
-	resilienceService := service.ProvideResilienceService(settingRepository, resilienceStore)
+	resilienceService := service.ProvideResilienceService(settingRepository, resilienceStore, rateLimitService)
 	resilienceHandler := admin.NewResilienceHandler(resilienceService)
 	upstreamBillingProbeService := service.ProvideUpstreamBillingProbeService(accountRepository, accountTestService, settingService, leaderLockCache, db)
 	iqCheckService := service.ProvideIQCheckService(accountRepository, accountTestService, openAITokenProvider, concurrencyService)

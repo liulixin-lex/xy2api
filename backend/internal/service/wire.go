@@ -1129,8 +1129,10 @@ func ProvideShareSchedulingService(repo ShareSchedulingRepository, store ShareSc
 // ProvideResilienceService creates the gateway resilience runtime, attaches
 // it to the gateway services and starts the settings refresh. With no stored
 // settings every capability uses its documented default.
-func ProvideResilienceService(settingRepo SettingRepository, store ResilienceStore) *ResilienceService {
+func ProvideResilienceService(settingRepo SettingRepository, store ResilienceStore, rateLimit *RateLimitService) *ResilienceService {
 	s := NewResilienceService(settingRepo, store)
+	s.rateLimit = rateLimit
+	rateLimit.SetResilienceService(s)
 	s.Start()
 	return s
 }

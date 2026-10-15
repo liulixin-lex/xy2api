@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"net/http"
 	"testing"
 
@@ -162,6 +163,9 @@ func TestHandleUpstreamError_OpenAIStructured403StillPenalizes(t *testing.T) {
 }
 
 // 作用域守卫：放行只针对 OpenAI 平台。其他平台的 403 处理不受影响。
+// xy2api resilience (design §3.3): API-key accounts of every platform use the
+// OpenAI 403 policy, so an HTML 403 page is exempt from account penalties.
+// With the resilience master switch off the 0.3.0 behaviour (SetError) holds.
 func TestHandleUpstreamError_HTML403OnOtherPlatformsUnchanged(t *testing.T) {
 	for _, platform := range []string{PlatformAnthropic, PlatformGemini} {
 		t.Run(platform, func(t *testing.T) {
@@ -173,8 +177,21 @@ func TestHandleUpstreamError_HTML403OnOtherPlatformsUnchanged(t *testing.T) {
 				context.Background(), account, http.StatusForbidden, http.Header{}, []byte(openAI403HTMLBody),
 			)
 
+			require.False(t, shouldDisable)
+			require.Equal(t, 0, repo.setErrorCalls, "HTML 403 不构成账号失效证据")
+		})
+		t.Run(platform+"_resilience_off", func(t *testing.T) {
+			withResilienceSettings(t, func(s *resilience.Settings) { s.Enabled = false })
+			repo := &rateLimitAccountRepoStub{}
+			svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			account := &Account{ID: 507, Platform: platform, Type: AccountTypeAPIKey}
+
+			shouldDisable := svc.HandleUpstreamError(
+				context.Background(), account, http.StatusForbidden, http.Header{}, []byte(openAI403HTMLBody),
+			)
+
 			require.True(t, shouldDisable)
-			require.Equal(t, 1, repo.setErrorCalls, "其他平台保持原有 SetError 行为")
+			require.Equal(t, 1, repo.setErrorCalls, "关闭韧性后保持原有 SetError 行为")
 		})
 	}
 }

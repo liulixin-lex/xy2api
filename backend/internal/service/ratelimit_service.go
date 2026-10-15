@@ -42,6 +42,9 @@ type RateLimitService struct {
 	// OpenAI Team 联动熔断的进程内去重：teamID → 去重窗口截止时间
 	openaiTeamLinkedMu     sync.Mutex
 	openaiTeamLinkedRecent map[string]time.Time
+
+	// resilience is the optional gateway resilience runtime (xy2api).
+	resilience *ResilienceService
 }
 
 type AccountRuntimeBlocker interface {
@@ -419,6 +422,12 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		if statusCode == http.StatusPaymentRequired {
 			return false
 		}
+	}
+
+	// xy2api resilience: balance failures become a recoverable state and
+	// account-scoped 5xx failures a soft cooldown (design §3).
+	if handled, disable := s.resilienceHandleUpstreamError(ctx, account, statusCode, headers, responseBody, upstreamMsg); handled {
+		return disable
 	}
 
 	switch statusCode {
@@ -1029,6 +1038,11 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 	if account.Platform == PlatformOpenAI || account.IsMultiProtocolAPIKey() {
 		return s.handleOpenAI403(ctx, account, upstreamMsg, responseBody)
 	}
+	// xy2api resilience: API-key accounts of every platform use the same
+	// counted soft cooldown (design §3.3).
+	if resilienceUniform403Eligible(account) {
+		return s.handleCounted403(ctx, account, upstreamMsg, responseBody)
+	}
 	// 非 Antigravity 平台：保持原有行为
 	msg := buildForbiddenErrorMessage(
 		"Access forbidden (403):",
@@ -1041,6 +1055,10 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 }
 
 func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte) (shouldDisable bool) {
+	return s.handleCounted403WithReason(ctx, account, upstreamMsg, responseBody, "OpenAI 403 temporary cooldown")
+}
+
+func (s *RateLimitService) handleCounted403WithReason(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte, reasonPrefix string) (shouldDisable bool) {
 	// 上游代理 / CDN 在请求到达 OpenAI API 之前就拦下时，回的是 HTML 403 页面而不是
 	// {"error":{...}} 结构化错误。这类响应描述的是「这条链路 / 这个端点被挡了」，
 	// 不构成账号凭据或权限失效的证据——例如无效的 /v1/responses 子路径（#5334）。
@@ -1098,7 +1116,7 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 	}
 
 	until := time.Now().Add(time.Duration(openAI403CooldownMinutesDefault) * time.Minute)
-	reason := fmt.Sprintf("OpenAI 403 temporary cooldown (%d/%d): %s", count, openAI403DisableThreshold, msg)
+	reason := fmt.Sprintf("%s (%d/%d): %s", reasonPrefix, count, openAI403DisableThreshold, msg)
 	s.notifyAccountSchedulingBlocked(account, until, "openai_403_temp")
 	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
 		slog.Warn("openai_403_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)

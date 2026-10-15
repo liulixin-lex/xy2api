@@ -27,6 +27,18 @@ type systemOnePolicyAccountRepo struct {
 	rateLimitedCalls int
 	overloadedCalls  int
 	errorCalls       int
+	tempUnschedCalls int
+	tempUnschedWhy   string
+}
+
+func (r *systemOnePolicyAccountRepo) UpdateExtra(context.Context, int64, map[string]any) error {
+	return nil
+}
+
+func (r *systemOnePolicyAccountRepo) SetTempUnschedulable(_ context.Context, _ int64, _ time.Time, reason string) error {
+	r.tempUnschedCalls++
+	r.tempUnschedWhy = reason
+	return nil
 }
 
 func (r *systemOnePolicyAccountRepo) GetByID(context.Context, int64) (*Account, error) {
@@ -279,8 +291,11 @@ func TestForwardSystemOneAccountLevelFailuresFailOver(t *testing.T) {
 		name      string
 		status    int
 		wantError int
+		// wantBalance: xy2api resilience treats 402 as a recoverable balance
+		// state (balance:exhausted pause) instead of an error state.
+		wantBalance bool
 	}{
-		{name: "payment required", status: http.StatusPaymentRequired, wantError: 1},
+		{name: "payment required", status: http.StatusPaymentRequired, wantError: 0, wantBalance: true},
 		{name: "forbidden", status: http.StatusForbidden, wantError: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -296,6 +311,10 @@ func TestForwardSystemOneAccountLevelFailuresFailOver(t *testing.T) {
 			require.True(t, failoverErr.ShouldRetryNextAccount())
 			require.Equal(t, tc.status, failoverErr.StatusCode)
 			require.Equal(t, tc.wantError, repo.errorCalls)
+			if tc.wantBalance {
+				require.Equal(t, 1, repo.tempUnschedCalls)
+				require.True(t, strings.HasPrefix(repo.tempUnschedWhy, "balance:exhausted"), repo.tempUnschedWhy)
+			}
 			require.Equal(t, "failover", systemOneOpsEvents(t, c)[0].Kind)
 		})
 	}
