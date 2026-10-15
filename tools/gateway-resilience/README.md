@@ -55,6 +55,7 @@ http://fault-upstream:8080/f/F06;secs=200      (account base_url)
 | F18 | Image generation | `secs` |
 | F19 / F20 | `/v1/usage` and new-api billing endpoints | `key` |
 | F21 | Anthropic `message_start`, then stall | `secs` |
+| F23 | Slow stream: a delta every `every` seconds for `secs` seconds, then completion with usage | `secs`, `every` |
 | BAL | Normal while the balance of `key` is positive, F12 otherwise | `key`, `first` |
 | MIX | A random fault with probability `p` percent per fault type, otherwise normal | `p` |
 

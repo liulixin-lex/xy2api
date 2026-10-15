@@ -35,6 +35,9 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-long-first": ("openai", [("long-first", "F17;first=150", 1)], {}),
     "G-slow-150": ("openai", [("slow150", "F01;secs=150", 1)], {}),
     "G-anthropic-slow": ("anthropic", [("anth-slow150", "F01;secs=150", 1)], {}),
+    "G-slow-stream": ("openai", [("slow-stream", "F23;secs=60;every=5", 1)], {}),
+    "G-abuse": ("openai", [("abuse", "F17;first=150", 1)], {}),
+    "G-image-long": ("openai", [("img-long", "F18;secs=260", 1)], {}),
     "G-busy-stream": ("openai", [("busy-a", "F02;after=20", 1), ("busy-ok", "F00", 2)], {}),
     "G-ratelimit-stream": ("openai", [("rl-stream", "F03;after=20", 1)], {}),
     "G-ctx-overflow": ("openai", [("ctx", "F05;after=1", 1)], {}),
@@ -138,10 +141,15 @@ def main() -> int:
         if name not in groups:
             body = {"name": name, "platform": platform, "rate_multiplier": 1, "subscription_type": "standard",
                     "claude_code_only": bool(opts.get("claude_code_only"))}
-            if opts.get("allow_messages_dispatch"):
-                body["allow_messages_dispatch"] = True
-                body["default_mapped_model"] = opts["default_mapped_model"]
             groups[name] = api.call("POST", "/api/v1/admin/groups", body)
+        if opts.get("allow_messages_dispatch"):
+            # Family mappings win over default_mapped_model for Claude models.
+            model = opts["default_mapped_model"]
+            dispatch = {"opus_mapped_model": model, "sonnet_mapped_model": model, "haiku_mapped_model": model}
+            if groups[name].get("messages_dispatch_model_config") != dispatch:
+                groups[name] = api.call("PUT", f"/api/v1/admin/groups/{groups[name]['id']}", {
+                    "allow_messages_dispatch": True, "default_mapped_model": model,
+                    "messages_dispatch_model_config": dispatch})
     for name, (_, _, opts) in GROUPS.items():
         target = opts.get("availability_fallback")
         if target and groups[name].get("availability_fallback_group_id") != groups[target]["id"]:

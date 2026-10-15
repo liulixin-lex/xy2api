@@ -63,6 +63,11 @@ def env_for(key: str, port: int) -> dict:
         "PYTHONPATH": PY,
         "STG_KEY": key,
         "STG_BASE": f"http://127.0.0.1:{port}",
+        # Claude Code reads its endpoint and key from these.
+        "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{port}",
+        "ANTHROPIC_API_KEY": key,
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        "DISABLE_AUTOUPDATER": "1",
         "NO_COLOR": "1",
         "CI": "1",
     })

@@ -54,6 +54,7 @@ var scenarios = map[string]string{
 	"F20": "new-api billing endpoints (state key=…)",
 	"F21": "Anthropic stream: message_start, then stall (secs)",
 	"F22": "Gemini stream (first=seconds)",
+	"F23": "slow stream: a delta every `every` seconds for `secs` seconds, then completed with usage",
 	"BAL": "normal while the balance of state key=… is positive, F12 otherwise",
 	"MIX": "random fault with probability p percent (default 5), otherwise normal",
 }
@@ -321,6 +322,33 @@ func normal(ctx context.Context, w http.ResponseWriter, p protocol, model string
 	return "completed"
 }
 
+// slowStream sends a delta every `every` until `total` has passed, then
+// finishes normally with usage (a long generation a client may abandon).
+func slowStream(ctx context.Context, w http.ResponseWriter, p protocol, model string, total, every time.Duration) string {
+	startSSE(w)
+	id := fmt.Sprintf("resp_fault_%d", time.Now().UnixNano())
+	if p == protoResponses {
+		_ = sse(w, "response.created", map[string]any{"type": "response.created", "response": map[string]any{"id": id, "status": "in_progress", "model": model}})
+	}
+	if p == protoAnthropic {
+		_ = sse(w, "message_start", map[string]any{"type": "message_start", "message": map[string]any{
+			"id": id, "type": "message", "role": "assistant", "model": model, "content": []any{},
+			"usage": map[string]any{"input_tokens": 120, "output_tokens": 1}}})
+		_ = sse(w, "content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}})
+	}
+	deadline := time.Now().Add(total)
+	for time.Now().Before(deadline) {
+		if err := writeDelta(w, p, id, model); err != nil {
+			return "cancelled"
+		}
+		if !sleepCtx(ctx, every) {
+			return "cancelled"
+		}
+	}
+	writeStreamEnd(w, p, id, model, defaultUsage())
+	return "completed"
+}
+
 func writeDelta(w http.ResponseWriter, p protocol, id, model string) error {
 	switch p {
 	case protoResponses:
@@ -501,6 +529,8 @@ func serve(ctx context.Context, w http.ResponseWriter, p protocol, path, model s
 	}
 
 	switch f.id {
+	case "F23":
+		return slowStream(ctx, w, p, model, f.secs("secs", 60), f.secs("every", 5))
 	case "F00", "F17", "F22":
 		return normal(ctx, w, p, model, stream, f.secs("first", 0.2), 0, "", 0)
 	case "F01":

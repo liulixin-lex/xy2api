@@ -481,6 +481,121 @@ def cf4():
     return r, checks
 
 
+def admin_token() -> str:
+    env = {}
+    for line in open(os.path.join(HERE, ".env")):
+        if "=" in line:
+            k, v = line.rstrip("\n").split("=", 1)
+            env[k] = v
+    req = urllib.request.Request(f"http://127.0.0.1:{APP}/api/v1/auth/login", method="POST",
+                                 data=json.dumps({"email": env["ADMIN_EMAIL"], "password": env["ADMIN_PASSWORD"]}).encode())
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read())["data"]["access_token"]
+
+
+@scenario("CF-5", "A client-supplied X-XY-Edge is removed by the proxy: no early heartbeat")
+def cf5():
+    checks = []
+    r = stream_request(REAL_DIRECT, "/v1/responses", KEYS["G-slow-150"], responses_body(), headers={"X-XY-Edge": "cf"})
+    hb = heartbeats(r)
+    check(r["status"] == 200, "status 200", checks)
+    check(not hb or hb[0] >= 140, "spoofed marker ignored", checks)
+    return r, checks
+
+
+@scenario("DC-2", "A key that keeps leaving before output: the 31st request in an hour runs on and is billed at upstream cost")
+def dc2():
+    checks = []
+    key = KEYS["G-abuse"]
+    mark = fault_last_id()
+    for _ in range(31):
+        stream_request(DIRECT, "/v1/responses", key, responses_body(), disconnect_after=1)
+    time.sleep(5)
+    recs = [x for x in fault_records_since(mark) if x["fault"] == "F17"]
+    cancelled = [x for x in recs if x["outcome"] == "cancelled"]
+    running = [x for x in recs if not x.get("ended") or x["ended"].startswith("0001")]
+    deadline = now() + 200
+    billed = ""
+    while now() < deadline:
+        billed = psql("select count(*) from usage_logs where billing_mode='undelivered_abuse' and "
+                      "api_key_id=(select id from api_keys where name='key-G-abuse' and deleted_at is null)")
+        if billed not in ("", "0"):
+            break
+        time.sleep(10)
+    und = psql("select count(*)||'/'||count(*) filter (where billed) from gateway_undelivered_requests where "
+               "api_key_id=(select id from api_keys where name='key-G-abuse' and deleted_at is null)")
+    r = {"upstream_records": len(recs), "cancelled": len(cancelled), "still_running_after_5s": len(running),
+         "abuse_billed_rows": billed, "undelivered_total_billed": und}
+    check(len(cancelled) >= 30, "the first 30 were cancelled", checks)
+    check(billed not in ("", "0"), "the abusive request was billed (undelivered_abuse)", checks)
+    return r, checks
+
+
+@scenario("DC-3", "Client leaves while the upstream headers are still awaited: stage header_wait")
+def dc3():
+    checks = []
+    r = stream_request(DIRECT, "/v1/responses", KEYS["G-slow-150"], responses_body(), disconnect_after=5)
+    time.sleep(3)
+    und = psql("select disconnect_stage from gateway_undelivered_requests where "
+               "api_key_id=(select id from api_keys where name='key-G-slow-150' and deleted_at is null) order by id desc limit 1")
+    r["stage"] = und
+    check(und == "header_wait", f"recorded stage {und}", checks)
+    return r, checks
+
+
+@scenario("DC-4", "Client leaves after output started: the upstream is read to the end and billed")
+def dc4():
+    checks = []
+    mark = fault_last_id()
+    since = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    r = stream_request(DIRECT, "/v1/responses", KEYS["G-slow-stream"], responses_body(), disconnect_after=12)
+    deadline = now() + 120
+    usage = "0"
+    while now() < deadline:
+        usage = psql("select count(*) from usage_logs where created_at > '" + since + "' and "
+                     "api_key_id=(select id from api_keys where name='key-G-slow-stream' and deleted_at is null)")
+        if usage not in ("", "0"):
+            break
+        time.sleep(5)
+    recs = [x for x in fault_records_since(mark) if x["fault"] == "F23"]
+    r["upstream"] = [{k: x[k] for k in ("outcome", "started", "ended")} for x in recs]
+    r["usage_rows"] = usage
+    check(any(x["outcome"] == "completed" for x in recs), "upstream read to the end", checks)
+    check(usage not in ("", "0"), "usage recorded", checks)
+    return r, checks
+
+
+@scenario("IMG-1", "Image generation is exempt from the 240 s pre-output budget (260 s image)")
+def img1():
+    checks = []
+    r = stream_request(DIRECT, "/v1/images/generations", KEYS["G-image-long"],
+                       {"model": "gpt-image-2", "prompt": "a cat", "size": "1024x1024"}, timeout=400)
+    check(r["status"] == 200, "status 200", checks)
+    check(r["elapsed"] >= 255, "took the full 260 s", checks)
+    return r, checks
+
+
+@scenario("BAL-2", "Administrator confirms a top-up: recheck recovers the account at once")
+def bal2():
+    checks = []
+    set_balance("single", 0)
+    stream_request(DIRECT, "/v1/responses", KEYS["G-single"], responses_body(stream=False))
+    before = psql("select coalesce(extra->'resilience_balance'->>'state','OK') from accounts where name='single-ok'")
+    set_balance("single", 100)
+    acct = psql("select id from accounts where name='single-ok'")
+    req = urllib.request.Request(f"http://127.0.0.1:{APP}/api/v1/admin/accounts/{acct}/balance/recheck", method="POST", data=b"{}")
+    req.add_header("Authorization", "Bearer " + admin_token())
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        body = json.loads(resp.read())
+    after = psql("select coalesce(extra->'resilience_balance'->>'state','OK') from accounts where name='single-ok'")
+    r = {"before": before, "recheck": body.get("data"), "after": after}
+    check(before in ("EXHAUSTED", "SUSPECT"), f"exhausted first ({before})", checks)
+    check(after in ("RECOVERING", "OK"), f"recovered at once ({after})", checks)
+    return r, checks
+
+
 def run(sid: str, outdir: str):
     title, fn = SCENARIOS[sid]
     started = now()
@@ -509,6 +624,8 @@ def main() -> int:
     ids = [s for s in (args.only.split(",") if args.only else SCENARIOS) if s]
     # Balance and fallback scenarios change shared upstream state; run them alone.
     serial = [s for s in ids if s.startswith(("BAL", "FB", "RES", "ERR-3", "BUD", "DC"))]
+    # DC-2 waits for a 150 s upstream; run it last.
+    serial.sort(key=lambda s: s == "DC-2")
     parallel = [s for s in ids if s not in serial]
     records = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.parallel) as pool:
