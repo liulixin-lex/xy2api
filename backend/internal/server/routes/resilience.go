@@ -15,4 +15,5 @@ func registerResilienceRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	admin.GET("/settings/gateway-resilience", r.GetSettings)
 	admin.PUT("/settings/gateway-resilience", r.UpdateSettings)
 	admin.POST("/accounts/:id/balance/recheck", r.RecheckBalance)
+	admin.GET("/resilience/undelivered", r.ListUndelivered)
 }

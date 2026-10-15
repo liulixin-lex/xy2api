@@ -103,6 +103,9 @@ type ResilienceService struct {
 	// outputP99 is the per-model output-token P99 of recent usage
 	// (lower-cased model -> tokens) for reservation estimates.
 	outputP99 atomic.Pointer[map[string]int]
+
+	// undelivered stores requests abandoned before any output.
+	undelivered UndeliveredRepository
 }
 
 // NewResilienceService creates the service; Start loads the settings and

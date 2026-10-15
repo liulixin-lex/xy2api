@@ -23,6 +23,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/ip"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/requestmodel"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/securityaudit"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -258,6 +259,14 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 		base = context.WithValue(base, ctxkey.RequestID, strings.TrimSpace(requestID))
 	}
 	base = service.WithInflightReservation(base, service.InflightReservationFromContext(parent))
+	// xy2api resilience: billing needs the request's delivery state; a client
+	// already gone is resolved now (design §8.2).
+	if st := resilience.StateFrom(parent); st != nil {
+		if parent.Err() != nil {
+			st.ResolveDisconnect()
+		}
+		base = resilience.WithRequestState(base, st)
+	}
 	return base
 }
 

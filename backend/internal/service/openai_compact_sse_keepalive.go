@@ -86,6 +86,7 @@ func startSSEKeepalive(c *gin.Context, firstDelay, interval time.Duration, frame
 		protocol: protocol,
 	}
 	c.Set(openAICompactSSEKeepaliveKey, k)
+	noteDeliveryHeartbeat(c, k, nil, 0)
 	wrappedWriter := &openAICompactKeepaliveWriter{ResponseWriter: originalWriter, k: k}
 	c.Writer = wrappedWriter
 

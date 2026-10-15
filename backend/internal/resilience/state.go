@@ -17,6 +17,9 @@ type RequestState struct {
 	// groupID is the API key's group (0 when ungrouped or unknown).
 	groupID int64
 
+	// d tracks client delivery and disconnects (design §8).
+	d delivery
+
 	// stickyOwner is the account the session was bound to when selection
 	// started; keptSticky is set when that binding must survive this request
 	// because its account is only soft-penalised (design §4.2).

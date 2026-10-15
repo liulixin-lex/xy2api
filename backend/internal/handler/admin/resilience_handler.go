@@ -2,8 +2,10 @@ package admin
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 	"github.com/liulixin-lex/xy2api/internal/pkg/response"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -54,4 +56,33 @@ func (h *ResilienceHandler) RecheckBalance(c *gin.Context) {
 		return
 	}
 	response.Success(c, rec)
+}
+
+// ListUndelivered lists requests whose client left before any output.
+// GET /api/v1/admin/resilience/undelivered?page=&page_size=&user_id=&api_key_id=&group_id=&since=&until=
+func (h *ResilienceHandler) ListUndelivered(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	filter := service.UndeliveredFilter{}
+	filter.UserID, _ = strconv.ParseInt(c.Query("user_id"), 10, 64)
+	filter.APIKeyID, _ = strconv.ParseInt(c.Query("api_key_id"), 10, 64)
+	filter.GroupID, _ = strconv.ParseInt(c.Query("group_id"), 10, 64)
+	for key, dst := range map[string]*time.Time{"since": &filter.Since, "until": &filter.Until} {
+		if raw := c.Query(key); raw != "" {
+			t, err := time.Parse(time.RFC3339, raw)
+			if err != nil {
+				response.BadRequest(c, "Invalid "+key+" (RFC3339 expected)")
+				return
+			}
+			*dst = t
+		}
+	}
+	items, result, err := h.svc.ListUndelivered(c.Request.Context(), filter, pagination.PaginationParams{Page: page, PageSize: pageSize})
+	if response.ErrorFrom(c, err) {
+		return
+	}
+	if items == nil {
+		items = []service.UndeliveredRequest{}
+	}
+	response.Paginated(c, items, result.Total, result.Page, result.PageSize)
 }

@@ -1092,6 +1092,8 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		w.finalizeCapture()
 
 		recordOpsErrorAfterRequest(c, ops, w)
+		// xy2api resilience: requests abandoned before any output (design §8.2).
+		recordResilienceUndelivered(c)
 	}
 }
 
@@ -1677,6 +1679,7 @@ func applyOpsLatencyFieldsFromContext(c *gin.Context, entry *service.OpsInsertEr
 	entry.UpstreamLatencyMs = getContextLatencyMs(c, service.OpsUpstreamLatencyMsKey)
 	entry.ResponseLatencyMs = getContextLatencyMs(c, service.OpsResponseLatencyMsKey)
 	entry.TimeToFirstTokenMs = getContextLatencyMs(c, service.OpsTimeToFirstTokenMsKey)
+	applyResilienceDisconnectFields(c, entry)
 }
 
 // applyOpsUpstreamFieldsFromContext captures attempt-level upstream context.

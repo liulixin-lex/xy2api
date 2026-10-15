@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -701,6 +702,8 @@ func partialStreamUsageResult(c *gin.Context, resp *http.Response, streamResult 
 }
 
 func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string, mimicClaudeCode bool) (*streamingResult, error) {
+	// xy2api resilience: upstream headers arrived (design §8.2 stages).
+	resilience.StateFrom(ctx).SetStage(resilience.StagePreOutput)
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)

@@ -499,6 +499,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	s.shareScheduling.observeUsage(ctx, usageLog)
+	// xy2api resilience: a client that left before any output is not billed,
+	// except at upstream cost under the abuse guard (design §8.2).
+	if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {
+		return nil
+	}
 	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, apiKey)
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
 		writeUsageLogAfterBilling(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")

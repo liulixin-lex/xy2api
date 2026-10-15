@@ -24,7 +24,12 @@ const ginKeyPreOutputKeepaliveStop = "xy_resilience_pre_output_keepalive_stop"
 // and is not reset by account switches; later calls are no-ops, except that
 // an uncommitted heartbeat stops when an official OAuth account takes over.
 func armPreOutputKeepalive(c *gin.Context, protocol string, stream bool, account *service.Account) {
-	if c == nil || c.Request == nil || !stream {
+	if c == nil || c.Request == nil {
+		return
+	}
+	// The attempt is about to wait for upstream headers (design §8.2 stages).
+	resilience.StateFrom(c.Request.Context()).SetStage(resilience.StageHeaderWait)
+	if !stream {
 		return
 	}
 	cfg := resilience.Current()

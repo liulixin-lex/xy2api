@@ -11,6 +11,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"go.uber.org/zap"
 )
 
@@ -36,7 +37,7 @@ func ClientRequestID() gin.HandlerFunc {
 			ctx := context.WithValue(c.Request.Context(), ctxkey.ClientRequestID, v)
 			ctx = withResilienceRequestState(ctx, c.Request)
 			c.Request = c.Request.WithContext(ctx)
-			c.Next()
+			resilienceTrackDelivery(c)
 			return
 		}
 
@@ -47,7 +48,7 @@ func ClientRequestID() gin.HandlerFunc {
 		ctx = logger.IntoContext(ctx, requestLogger)
 		ctx = withResilienceRequestState(ctx, c.Request)
 		c.Request = c.Request.WithContext(ctx)
-		c.Next()
+		resilienceTrackDelivery(c)
 	}
 }
 
@@ -63,6 +64,27 @@ func withResilienceRequestState(ctx context.Context, r *http.Request) context.Co
 		st.SetBudget(resilience.NewBudget(ctx, resilience.Current(), kind, time.Now()))
 	}
 	return resilience.WithRequestState(ctx, st)
+}
+
+// resilienceTrackDelivery runs the rest of the chain with client delivery
+// tracking (design §8): it counts the bytes reaching the client, resolves a
+// client disconnect once when it happens, and marks the request finished so
+// the normal end of the connection context is not taken for a disconnect.
+func resilienceTrackDelivery(c *gin.Context) {
+	st := resilience.StateFrom(c.Request.Context())
+	if st == nil {
+		c.Next()
+		return
+	}
+	client := c.Request.Context()
+	service.InstallDeliveryTracking(c, time.Now())
+	stop := context.AfterFunc(client, func() { st.ResolveDisconnect() })
+	defer stop()
+	c.Next()
+	if client.Err() != nil {
+		st.ResolveDisconnect()
+	}
+	st.MarkFinished()
 }
 
 // resilienceRequestKind selects the budget shape of a request (design §6.1):

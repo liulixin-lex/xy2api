@@ -1072,6 +1072,7 @@ func recordOpenAIStreamKeepaliveBytes(c *gin.Context, written int) {
 		current, _ = value.(int)
 	}
 	c.Set(openAIStreamKeepaliveBytesKey, current+written)
+	noteDeliveryHeartbeat(c, nil, nil, written)
 }
 
 func openAIStreamClientOutputStarted(c *gin.Context, localStarted bool) bool {
