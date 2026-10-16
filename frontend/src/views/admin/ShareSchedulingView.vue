@@ -1,20 +1,11 @@
 <template>
   <AppLayout>
     <div class="w-full min-w-0 space-y-5 pb-8">
-      <header class="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700 sm:p-6">
-        <div class="flex flex-wrap items-start justify-between gap-3">
-          <div class="min-w-0 max-w-3xl">
-            <h1 class="text-xl font-black text-gray-900 dark:text-white">{{ t('admin.shareScheduling.title') }}</h1>
-            <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.shareScheduling.description') }}</p>
-          </div>
-          <div class="flex flex-wrap items-center gap-2">
-            <span v-if="store.settings?.enabled" class="rounded-lg bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300" data-testid="share-global-on">{{ t('admin.shareScheduling.globalOn') }}</span>
-            <RouterLink to="/admin/settings?tab=gateway" class="btn btn-secondary btn-sm">{{ t('admin.shareScheduling.openSettings') }}</RouterLink>
-          </div>
-        </div>
-        <p v-if="store.settings && !store.settings.enabled" class="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200" data-testid="share-global-off">{{ t('admin.shareScheduling.globalOff') }}</p>
-        <p v-if="store.settingsFailed" class="mt-4 text-sm text-red-700 dark:text-red-300" role="alert">{{ t('admin.shareScheduling.loadSettingsFailed') }}</p>
-      </header>
+      <div v-if="store.settings && !store.settings.enabled" class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200" data-testid="share-global-off">
+        <span>{{ t('admin.shareScheduling.globalOff') }}</span>
+        <RouterLink to="/admin/settings?tab=gateway" class="btn btn-secondary btn-sm">{{ t('admin.shareScheduling.openSettings') }}</RouterLink>
+      </div>
+      <p v-if="store.settingsFailed" class="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300" role="alert">{{ t('admin.shareScheduling.loadSettingsFailed') }}</p>
 
       <p v-if="store.groupsState === 'unavailable'" role="alert" class="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">{{ t('admin.shareScheduling.policy.unavailable') }}</p>
 

@@ -249,7 +249,7 @@ describe('share scheduling page', () => {
     await flushPromises()
     const report = await api.report.mock.results[0].value
     api.report.mockResolvedValue({ ...report, counter_precision: 'hour_rounded' })
-    await w.get('[data-testid="share-report-window"]').setValue('24h')
+    w.findAllComponents({ name: 'Select' }).find(c => c.attributes('data-testid') === 'share-report-window')!.vm.$emit('update:modelValue', '24h')
     await flushPromises()
     expect(api.report).toHaveBeenLastCalledWith(5, '24h')
     expect(w.find('[data-testid="share-hour-rounded"]').exists()).toBe(true)

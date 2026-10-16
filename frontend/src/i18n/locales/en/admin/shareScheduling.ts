@@ -1,11 +1,9 @@
 export default {
   shareScheduling: {
     title: 'Share Scheduling',
-    // Short line for the page header; the page itself shows the full description.
+    // Page header subtitle.
     subtitle: 'Per-group account tiers and weights that keep prompt caches warm',
-    description: 'Set account tiers and weights per group: new sessions are placed by share, and bound sessions stay on their account to keep prompt-cache hits and fast first tokens.',
     globalOff: 'The master switch is off: every group uses the original scheduler and shadow comparison does not run.',
-    globalOn: 'Master switch on',
     openSettings: 'Open system settings',
     loadSettingsFailed: 'Could not read the share scheduling master switch.',
     accountRules: {
@@ -370,6 +368,7 @@ export default {
       disagree: 'Differ',
       original: 'Original chose #{id}',
       noData: 'No data in this window.',
+      noDistributions: 'No decisions, cache attribution or hot migrations in this window yet.',
       noDecisions: 'No decision samples. Turn on “Keep decision samples” in system settings.'
     },
     explain: {

@@ -23,12 +23,12 @@
         <tbody>
           <tr v-for="acc in explanation.accounts" :key="acc.account_id" class="border-b border-gray-100 last:border-0 dark:border-dark-700">
             <td class="p-2">{{ accountLabel(acc) }}</td>
-            <td class="p-2 text-right font-mono">{{ acc.priority }}</td>
+            <td class="p-2 text-right tabular-nums">{{ acc.priority }}</td>
             <td class="p-2"><span :class="['rounded-full px-2 py-0.5 font-medium', tierClass(acc.tier)]">{{ t('admin.resilience.explain.tiers.' + acc.tier) }}</span></td>
             <td class="p-2">{{ acc.reason ? reasonLabel(acc.reason) : '-' }}</td>
             <td class="p-2">{{ acc.recover_at ? formatDateTime(acc.recover_at) : '-' }}</td>
             <td class="p-2">{{ acc.balance_state ? balanceLabel(acc.balance_state) : '-' }}</td>
-            <td class="p-2 text-right font-mono">{{ acc.session_failures || '-' }}</td>
+            <td class="p-2 text-right tabular-nums">{{ acc.session_failures || '-' }}</td>
             <td class="p-2">{{ acc.avoided ? t('admin.resilience.explain.yes') : '-' }}</td>
           </tr>
         </tbody>

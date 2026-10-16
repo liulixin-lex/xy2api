@@ -1,11 +1,9 @@
 export default {
   shareScheduling: {
     title: '份额调度',
-    // 页头只放短句，完整说明在页面内。
+    // 页头副标题。
     subtitle: '按分组设置账号层级与权重，保住提示缓存与首字速度',
-    description: '按分组设置账号层级与权重：新会话按份额分配，已绑定会话优先留在原账号以保住提示缓存与首字速度。',
     globalOff: '总开关未开启：所有分组都使用原版调度，影子对比也不会运行。',
-    globalOn: '总开关已开启',
     openSettings: '前往系统设置',
     loadSettingsFailed: '无法读取份额调度总开关状态。',
     accountRules: {
@@ -370,6 +368,7 @@ export default {
       disagree: '分歧',
       original: '原版选择 #{id}',
       noData: '该时间窗口内暂无数据。',
+      noDistributions: '该时间窗口内还没有决策、缓存归因或热迁移数据。',
       noDecisions: '暂无决策样本。可在系统设置中开启“保存决策样本”。'
     },
     explain: {

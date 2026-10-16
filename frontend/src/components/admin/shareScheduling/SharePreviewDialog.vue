@@ -37,8 +37,8 @@
             <tbody>
               <tr v-for="change in changes" :key="change.id" class="border-b border-gray-100 last:border-0 dark:border-dark-700">
                 <td class="p-2">{{ change.name }} <span class="text-xs text-gray-500 dark:text-dark-400">#{{ change.id }}</span></td>
-                <td class="p-2 text-right font-mono">{{ formatSharePercent(change.before) }}</td>
-                <td class="p-2 text-right font-mono" :class="change.after > change.before ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'">{{ formatSharePercent(change.after) }}</td>
+                <td class="p-2 text-right tabular-nums">{{ formatSharePercent(change.before) }}</td>
+                <td class="p-2 text-right tabular-nums" :class="change.after > change.before ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'">{{ formatSharePercent(change.after) }}</td>
               </tr>
             </tbody>
           </table>
