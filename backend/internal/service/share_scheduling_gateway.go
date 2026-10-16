@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -196,6 +197,50 @@ func (s *GatewayService) selectAccountWithShareScheduling(ctx context.Context, g
 	}
 	svc.recordDecision(rec, decision, out)
 	return out.result, out.err
+}
+
+// shareGatewayLastResort is last-resort selection in a share group: the
+// share plan over the group with soft penalties relaxed, served by the same
+// executor as normal placement (slots, session limits, binding intent).
+func (s *GatewayService) shareGatewayLastResort(ctx context.Context, gp *shareGroupPolicy, group *Group, groupID *int64, sessionHash, requestedModel string, excludedIDs, avoided map[int64]struct{}) *AccountSelectionResult {
+	platform, hasForcePlatform, err := s.resolvePlatform(ctx, groupID, group, requestedModel)
+	if err != nil {
+		return nil
+	}
+	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
+	accounts, err := s.resilience.groupAccountsForLastResort(ctx, s.accountRepo, *groupID)
+	if err != nil {
+		slog.Warn("resilience.last_resort_list_failed", "group_id", *groupID, "error", err)
+		return nil
+	}
+	svc := s.shareScheduling
+	key, _ := shareAffinityKey(&gp.policy, sessionHash)
+	binding := svc.readBinding(ctx, s.cache, gp, key)
+	ctx = s.withWindowCostPrefetch(ctx, accounts)
+	ctx = s.withRPMPrefetch(ctx, accounts)
+	gates := s.newGatewayCandidateGates(ctx, groupID, platform, useMixed, requestedModel)
+	gateCtx := withResilienceLastResortGate(ctx)
+	now := time.Now()
+	round := svc.newShareLastResortRound(accounts, requestedModel, excludedIDs, avoided, binding.AccountID, now, nil,
+		func(acc *Account, sticky bool) sharesched.Reason {
+			reason, _ := gates.candidateReason(gateCtx, acc, sticky, now)
+			return reason
+		})
+	req, _ := svc.newRequest(ctx, gp, platform, requestedModel, sessionHash, binding)
+	exec := &shareExecutor{ctx: ctx, gp: gp, cache: s.cache, concurrency: s.concurrencyService, cfg: s.schedulingConfig(),
+		key: key, ttl: time.Duration(gp.policy.Affinity.TTLSeconds) * time.Second, accounts: round.accounts,
+		reason: sharesched.ReasonLastResortSoft,
+		limit:  func(acc *Account) int { return acc.Concurrency },
+		admit:  func(acc *Account) bool { return s.checkAndRegisterSession(ctx, acc, sessionHash) },
+		newResult: func(acc *Account, acquired bool, release func(), wait *AccountWaitPlan) (*AccountSelectionResult, error) {
+			return s.newSelectionResult(ctx, acc, acquired, release, wait)
+		}}
+	out := exec.serve(round.plan(&gp.policy, req))
+	if out == nil || out.err != nil || out.result == nil {
+		return nil
+	}
+	s.noteLastResort(ctx, groupID, out.result.Account, round.recoverAt[out.served])
+	return out.result
 }
 
 // newShareShadow reads the binding before the original scheduler refreshes

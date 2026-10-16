@@ -122,6 +122,109 @@ func pickLastResort(cands []lastResortCandidate) []lastResortCandidate {
 	return cands
 }
 
+// shareLastResortRound is the last-resort round of a share group (design
+// §4.3): the share plan runs once more over the group with soft-penalised
+// accounts, and accounts the session only avoids, counted as eligible, so
+// tiers, drain, weights and cache domains apply exactly as in normal
+// placement. Hard states and every other gate still exclude.
+type shareLastResortRound struct {
+	cands []sharesched.Candidate
+	// accounts are the eligible accounts with their soft restrictions
+	// cleared, as they serve.
+	accounts  map[int64]*Account
+	recoverAt map[int64]time.Time
+	// keep is the bound account unless it is hard-penalised, avoided or
+	// rejected by a gate: the binding stays with it whichever account
+	// serves, as a soft-penalised owner keeps it in normal selection
+	// (design §4.2).
+	keep int64
+	// rebind marks a binding to an account the session avoids: the
+	// session is placed afresh and its binding moves to the serving account.
+	rebind bool
+}
+
+// newShareLastResortRound evaluates the group's accounts for the round.
+// include filters the accounts the scheduler considers at all; gate applies
+// its original gates, in a last-resort context, to an account whose soft
+// restrictions are cleared.
+func (s *ShareSchedulingService) newShareLastResortRound(accounts []Account, model string, excluded, avoided map[int64]struct{}, boundID int64, now time.Time,
+	include func(*Account) bool, gate func(acc *Account, sticky bool) sharesched.Reason) *shareLastResortRound {
+	r := &shareLastResortRound{accounts: map[int64]*Account{}, recoverAt: map[int64]time.Time{}}
+	for i := range accounts {
+		acc := accounts[i]
+		if include != nil && !include(&acc) {
+			continue
+		}
+		c := sharesched.Candidate{AccountID: acc.ID, Platform: acc.Platform, Class: shareAccountClass(&acc),
+			Priority: acc.Priority, Concurrency: acc.Concurrency}
+		tier, recoverAt, why := resiliencePenaltyOf(&acc, model, now)
+		_, isAvoided := avoided[acc.ID]
+		if acc.ID == boundID && !isAvoided && tier != resilience.TierHard {
+			r.keep = acc.ID
+		}
+		if acc.ID == boundID && isAvoided {
+			r.rebind = true
+		}
+		switch _, failed := excluded[acc.ID]; {
+		case failed:
+			// Failed in this request: as in normal placement it only anchors
+			// on_failed=stop.
+			c.Excluded, c.Eligible = true, true
+		case tier == resilience.TierHard:
+			c.Reason = shareLastResortHardReason(&acc, why, now)
+		case !lastResortTierAllowed(tier, acc.ID, avoided):
+			// Healthy accounts the first round could not use stay out.
+			c.Reason = sharesched.ReasonIneligible
+		default:
+			candidate := withoutSoftPenalties(acc, now)
+			if c.Reason = gate(candidate, acc.ID == boundID); c.Reason == "" {
+				c.Eligible = true
+				// Read-only for eligible accounts: when the account last
+				// failed a health gate, which defers tier return.
+				c.StableSince = s.observeEligibility(acc.ID, true, "", now)
+				r.accounts[acc.ID], r.recoverAt[acc.ID] = candidate, recoverAt
+			} else if acc.ID == boundID {
+				r.keep = 0
+			}
+		}
+		r.cands = append(r.cands, c)
+	}
+	return r
+}
+
+// shareLastResortHardReason names the hard state that keeps an account out
+// of the round.
+func shareLastResortHardReason(a *Account, why string, now time.Time) sharesched.Reason {
+	switch why {
+	case "balance_exhausted":
+		return sharesched.ReasonBalanceExhausted
+	case "model_rate_limited":
+		return sharesched.ReasonModelRateLimited
+	}
+	reason, _ := shareAccountStateReason(a, now)
+	return reason
+}
+
+// plan runs the share plan over the round with the binding writes of last
+// resort: a soft-penalised owner keeps the binding, a binding to an avoided
+// account moves, and anything else follows the plan.
+func (r *shareLastResortRound) plan(p *sharesched.Policy, req sharesched.Request) sharesched.Decision {
+	if r.rebind {
+		req.Binding = sharesched.Binding{}
+	}
+	d := sharesched.Plan(p, req, r.cands)
+	switch {
+	case r.rebind:
+		d.Write, d.Spill = sharesched.WriteReplace, sharesched.WriteReplace
+	case r.keep > 0:
+		if len(d.Steps) == 0 || d.Steps[0].AccountID != r.keep {
+			d.Write = sharesched.WriteNone
+		}
+		d.Spill = sharesched.WriteNone
+	}
+	return d
+}
+
 // lastResortGroupCache keeps the group account list for a short time.
 type lastResortGroupCache struct {
 	mu      sync.Mutex
@@ -181,10 +284,15 @@ func isNoAccountSelectionError(err error) bool {
 
 // resilienceGatewayLastResort selects a soft-penalised account of the group
 // when normal selection found none (design §4.3). It returns nil when no
-// soft candidate exists.
+// soft candidate exists. Share groups run the share plan's last-resort
+// round; the original scheduler orders by priority, then by the end of the
+// penalty.
 func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group *Group, groupID *int64, sessionHash, requestedModel string, excludedIDs, avoided map[int64]struct{}) *AccountSelectionResult {
 	if s == nil || s.resilience == nil || groupID == nil || s.accountRepo == nil || !resilience.Current().LastResortOn() || ctx.Err() != nil {
 		return nil
+	}
+	if gp := s.shareScheduling.groupPolicy(*groupID); gp != nil && gp.policy.Scheduler == sharesched.SchedulerShare {
+		return s.shareGatewayLastResort(ctx, gp, group, groupID, sessionHash, requestedModel, excludedIDs, avoided)
 	}
 	platform, hasForcePlatform, err := s.resolvePlatform(ctx, groupID, group, requestedModel)
 	if err != nil {
@@ -354,10 +462,15 @@ func resilienceBindAllowed(ctx context.Context, accountID int64) bool {
 
 // resilienceOpenAILastResort is the OpenAI-scheduler variant of last-resort
 // selection. It reuses the scheduler's per-account request gate on a copy
-// with the soft restrictions cleared.
+// with the soft restrictions cleared. Requests that share scheduling places
+// run the share plan's last-resort round instead.
 func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, req OpenAIAccountScheduleRequest, avoided map[int64]struct{}) *AccountSelectionResult {
 	if s == nil || s.resilience == nil || req.GroupID == nil || s.accountRepo == nil || !resilience.Current().LastResortOn() || ctx.Err() != nil {
 		return nil
+	}
+	if gp := s.shareScheduling.groupPolicy(*req.GroupID); gp != nil && gp.policy.Scheduler == sharesched.SchedulerShare &&
+		!req.RequireCompact && req.RequiredImageCapability == "" && !s.qualityOwnsSticky(ctx, req.GroupID, req.SessionHash) {
+		return s.shareOpenAILastResort(ctx, gp, req, avoided)
 	}
 	accounts, err := s.resilience.groupAccountsForLastResort(ctx, s.accountRepo, *req.GroupID)
 	if err != nil {

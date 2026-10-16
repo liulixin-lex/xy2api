@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -140,6 +141,53 @@ func (s *OpenAIGatewayService) selectAccountWithShareScheduling(ctx context.Cont
 		decision.StickySessionHit = d.Bound > 0 && out.served == d.Bound
 	}
 	return out.result, decision, out.err
+}
+
+// shareOpenAILastResort is last-resort selection in a share group: the
+// share plan over the group with soft penalties relaxed, served with the
+// adaptive Codex limit and the binding intent of normal placement.
+func (s *OpenAIGatewayService) shareOpenAILastResort(ctx context.Context, gp *shareGroupPolicy, req OpenAIAccountScheduleRequest, avoided map[int64]struct{}) *AccountSelectionResult {
+	accounts, err := s.resilience.groupAccountsForLastResort(ctx, s.accountRepo, *req.GroupID)
+	if err != nil {
+		slog.Warn("resilience.last_resort_list_failed", "group_id", *req.GroupID, "error", err)
+		return nil
+	}
+	svc := s.shareScheduling
+	platform := NormalizeOpenAICompatiblePlatform(req.Platform)
+	sessionHash := req.SessionHash
+	if preserveOpenAIGuardianParentBinding(ctx, sessionHash) {
+		sessionHash = ""
+	}
+	key, _ := shareAffinityKey(&gp.policy, sessionHash)
+	cacheKey := ""
+	if key != "" {
+		cacheKey = s.openAISessionCacheKey(sessionHash)
+	}
+	binding, legacy := s.readOpenAIShareBinding(ctx, gp, cacheKey, sessionHash)
+	gates := s.newOpenAIShareGates(withResilienceLastResortGate(ctx), openAIShareSelection{groupID: req.GroupID,
+		model: req.RequestedModel, transport: req.RequiredTransport, capability: req.RequiredCapability, platform: platform})
+	now := time.Now()
+	round := svc.newShareLastResortRound(accounts, req.RequestedModel, req.ExcludedIDs, avoided, binding.AccountID, now,
+		func(acc *Account) bool { return acc.Platform == platform && acc.IsOpenAICompatible() },
+		func(acc *Account, _ bool) sharesched.Reason {
+			reason, _ := gates.candidateReason(acc, now)
+			return reason
+		})
+	shareReq, _ := svc.newRequest(ctx, gp, platform, req.RequestedModel, sessionHash, binding)
+	exec := &shareExecutor{ctx: ctx, gp: gp, cache: s.cache, concurrency: s.concurrencyService, cfg: s.schedulingConfig(),
+		key: cacheKey, ttl: time.Duration(gp.policy.Affinity.TTLSeconds) * time.Second, accounts: round.accounts,
+		createOnRefresh: legacy, reason: sharesched.ReasonLastResortSoft,
+		limit: func(acc *Account) int { return s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency) },
+		admit: func(*Account) bool { return true },
+		newResult: func(acc *Account, acquired bool, release func(), wait *AccountWaitPlan) (*AccountSelectionResult, error) {
+			return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: acc, Acquired: acquired, ReleaseFunc: release, WaitPlan: wait}), nil
+		}}
+	out := exec.serve(round.plan(&gp.policy, shareReq))
+	if out == nil || out.err != nil || out.result == nil {
+		return nil
+	}
+	s.noteOpenAILastResort(ctx, req.GroupID, out.result.Account, round.recoverAt[out.served])
+	return out.result
 }
 
 // selectOpenAIShareOwner serves a response continuation on the account that
@@ -294,13 +342,18 @@ func (g *openAIShareGates) lookup(id int64) *Account {
 	return acc
 }
 
-// candidateReason mirrors the advanced scheduler's candidate filter.
+// candidateReason mirrors the advanced scheduler's candidate filter. In a
+// last-resort context the caller has cleared the soft account states, and
+// the scheduler's soft restrictions pass as in the original last resort:
+// short per-model rate limits and in-memory runtime blocks (design §4.3).
 func (g *openAIShareGates) candidateReason(acc *Account, now time.Time) (sharesched.Reason, time.Time) {
 	if !acc.IsSchedulable() {
 		return shareAccountStateReason(acc, now)
 	}
+	lastResort := resilienceLastResortGate(g.ctx)
 	switch reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(g.ctx, acc, g.in.platform, g.in.model, false, g.in.capability); {
 	case reason == "":
+	case reason == "model_rate_limited" && lastResortModelLimitSoft(g.ctx, acc, g.in.model):
 	case reason == "model_rate_limited":
 		var recoverAt time.Time
 		if remaining := acc.GetRateLimitRemainingTimeWithContext(g.ctx, g.in.model); remaining > 0 {
@@ -321,9 +374,9 @@ func (g *openAIShareGates) candidateReason(acc *Account, now time.Time) (sharesc
 	switch {
 	case g.privacy && !acc.IsPrivacySet():
 		return sharesched.ReasonPrivacyRequired, time.Time{}
-	case g.s.isOpenAIAccountRequestRuntimeBlocked(acc, g.in.model, false):
+	case !lastResort && g.s.isOpenAIAccountRequestRuntimeBlocked(acc, g.in.model, false):
 		return sharesched.ReasonRuntimeBlocked, time.Time{}
-	case g.s.isOpenAIProxyStreamQuarantined(g.ctx, acc):
+	case !lastResort && g.s.isOpenAIProxyStreamQuarantined(g.ctx, acc):
 		return sharesched.ReasonProxyQuarantined, time.Time{}
 	case !parentHealthyForShadow(acc, g.lookup):
 		return sharesched.ReasonShadowParent, time.Time{}
@@ -338,7 +391,8 @@ func (g *openAIShareGates) candidateReason(acc *Account, now time.Time) (sharesc
 }
 
 // requestReason covers the request-specific gates that the snapshot and
-// database rechecks do not repeat.
+// database rechecks do not repeat. Last resort treats the in-memory Grok
+// blocks like the other runtime blocks.
 func (g *openAIShareGates) requestReason(acc *Account, now time.Time) sharesched.Reason {
 	if g.channelCheck && g.in.groupID != nil && g.s.isUpstreamModelRestrictedByChannel(g.ctx, *g.in.groupID, acc, g.in.model, false) {
 		return sharesched.ReasonChannelRestricted
@@ -346,7 +400,7 @@ func (g *openAIShareGates) requestReason(acc *Account, now time.Time) sharesched
 	if !g.s.isOpenAIAccountTransportCompatible(acc, g.in.transport) {
 		return sharesched.ReasonTransportMismatch
 	}
-	if acc.IsGrok() && strings.TrimSpace(g.in.model) != "" {
+	if acc.IsGrok() && strings.TrimSpace(g.in.model) != "" && !resilienceLastResortGate(g.ctx) {
 		model := canonicalOpenAIAccountSchedulingModel(acc, g.in.model)
 		if isGrokTeamModelRateLimited(acc, model, now) {
 			return sharesched.ReasonModelRateLimited
