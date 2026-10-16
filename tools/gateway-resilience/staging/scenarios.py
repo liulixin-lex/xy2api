@@ -468,6 +468,43 @@ def pe4():
     return {"res": res, "attempts": len(attempts), "account": row}, checks
 
 
+def web_search_history_body() -> dict:
+    # A compacted Codex turn: replays a hosted web search, declares no tools.
+    return {"model": "gpt-6.1-sol", "stream": True, "tools": [], "prompt_cache_key": fresh_session(), "input": [
+        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "look it up"}]},
+        {"type": "web_search_call", "id": "ws_stg_1", "status": "completed", "action": {"type": "search", "query": "staging"}},
+        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "and now?"}]},
+    ]}
+
+
+@scenario("PE-3", "API-key relay rejects web_search history: one replay with the declaration, then the account gets it up front")
+def pe3():
+    checks = []
+    rid = fault_last_id()
+    first = stream_request(DIRECT, "/v1/responses", KEYS["G-web-search"], web_search_history_body())
+    first_attempts = [r for r in fault_records_since(rid) if r["fault"] == "F29" and r["path"].endswith("/responses")]
+    rid = fault_last_id()
+    second = stream_request(DIRECT, "/v1/responses", KEYS["G-web-search"], web_search_history_body())
+    second_attempts = [r for r in fault_records_since(rid) if r["fault"] == "F29" and r["path"].endswith("/responses")]
+    check(first["status"] == 200 and "response.completed" in json.dumps(first["lines"]), "first request completes after the replay", checks)
+    check([r["outcome"] for r in first_attempts] == ["failed_in_stream", "completed"], f"rejected once, replayed once ({[r['outcome'] for r in first_attempts]})", checks)
+    check(second["status"] == 200 and [r["outcome"] for r in second_attempts] == ["completed"], "next request declares web_search up front", checks)
+    return {"first": first, "second": second}, checks
+
+
+@scenario("PE-7", "Anthropic in-stream rate_limit_error before output: switch and succeed; a single account answers 429 with Retry-After")
+def pe7():
+    checks = []
+    ok = stream_request(DIRECT, "/v1/messages", KEYS["G-anthropic-rl"], anthropic_body())
+    single = stream_request(DIRECT, "/v1/messages", KEYS["G-anthropic-rl-single"], anthropic_body())
+    text = json.dumps(single["lines"])
+    check(ok["status"] == 200 and "message_stop" in json.dumps(ok["lines"]), "switched to the second account", checks)
+    check(single["status"] == 429, f"single account: 429, not 502 ({single['status']})", checks)
+    check(single["headers"].get("retry-after", "").isdigit(), f"Retry-After {single['headers'].get('retry-after')}", checks)
+    check("forbidden" not in text.lower(), "no 'access forbidden' text", checks)
+    return {"ok": ok, "single": single}, checks
+
+
 @scenario("FB-1", "Primary group without a usable account: fallback group serves, usage keeps origin_group_id")
 def fb1():
     checks = []

@@ -73,6 +73,11 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-grok-balance": ("grok", [("grok-bal", "BAL;key=grok-bal;reset=1700", 1)], {}),
     # R4: an upstream content-safety 403 is the request's fault on every account.
     "G-content-safety": ("openai", [("cs-block", "F27", 1), ("cs-ok", "F00", 2)], {}),
+    # R3: a Codex backend relay rejects web_search_call history without the declaration.
+    "G-web-search": ("openai", [("ws-relay", "F29", 1)], {}),
+    # R7: an Anthropic relay's in-stream rate_limit_error before any output.
+    "G-anthropic-rl": ("anthropic", [("anth-rl", "F03;after=2", 1), ("anth-rl-ok", "F00", 2)], {}),
+    "G-anthropic-rl-single": ("anthropic", [("anth-rl-1", "F03;after=2", 1)], {}),
     # 24-hour soak (soak.py): MIX injects each fault type at about 1% per attempt.
     "G-soak-openai": ("openai", [("soak-oa-a", "MIX;p=1", 1), ("soak-oa-b", "MIX;p=1", 1), ("soak-oa-ok", "F00", 2)], {}),
     "G-soak-anthropic": ("anthropic", [("soak-an-a", "MIX;p=1", 1), ("soak-an-ok", "F00", 2)], {}),
