@@ -32,9 +32,19 @@ Only the response headers and body hints defined below are added. The single exc
 
 The gateway MUST cache a "no available account" result per (group, model) — for OpenAI-compatible selection also per transport, endpoint capability and platform — for `errors.negative_cache_seconds` (default 2 s). During that time it MUST return the same response with the remaining `Retry-After`, without querying the database or the scheduler snapshot. Transient cooldowns that the resilience layer applies or lifts and balance state changes MUST invalidate the entries of the account's groups; other changes (429 cooldowns, error states, administrator edits, other instances) MAY take effect when the entry expires.
 
+Only a result that holds for every request of the group and model MAY be cached: no account of the group that supports the model on the request's platform is free of penalties. A route that forces a platform MUST be cached apart from the group's other routes.
+
 #### Scenario: Burst of retries
 - **WHEN** 50 requests for the same group and model arrive within 2 s after a no-account result
 - **THEN** only the first performs account selection.
+
+#### Scenario: Sticky-only accounts keep serving bound sessions
+- **WHEN** the only account of a group is past its RPM threshold and serves only its bound sessions, and a new session gets no account
+- **THEN** the result is not cached and a bound session right after is served.
+
+#### Scenario: A forced platform does not answer the group's other routes
+- **WHEN** a request on `/antigravity` finds no account
+- **THEN** requests of the same group and model on the normal routes still perform account selection.
 
 ### Requirement: Per-key fast fail returns the identical response
 
@@ -48,11 +58,17 @@ The following MUST be exempt and MUST never trigger it:
 - `/v1/models`;
 - idempotent replays.
 
+Only 503 responses that hold for every request of the key and model MUST count: group-level no-account results (as for the negative cache, including replays from it) and configuration errors. A 503 that concerned one session MUST NOT count.
+
 Fast-failed requests MUST NOT count as account failures.
 
 #### Scenario: Retry storm on a single-account group
 - **WHEN** one key sends 200 requests per minute to a group whose only account is exhausted
 - **THEN** after the tenth identical 503 within 30 s, the following requests return the same 503 immediately.
+
+#### Scenario: One session's 503s do not stop the key
+- **WHEN** a key with several sessions gets twelve identical 503s that concerned only new sessions of a sticky-only group
+- **THEN** every request still reaches account selection.
 
 ### Requirement: Failed turns end after a bounded number of attempts
 

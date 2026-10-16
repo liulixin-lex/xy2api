@@ -20,6 +20,10 @@ Every retry path MUST draw from this budget: OpenAI, Anthropic and Gemini handle
   - with the uncommitted error response, if the SSE headers were not committed;
   - with a protocol terminal frame, if they were.
 
+#### Scenario: A slot wait ends with the budget
+- **WHEN** a text request waits for an account slot whose wait plan allows 120 s while 30 s of the pre-output budget remain
+- **THEN** the wait ends after at most 30 s and the request ends as for an exhausted budget.
+
 #### Scenario: Images are exempt from the deadline
 - **WHEN** a 4K image generation takes 200 s
 - **THEN** it is neither cancelled by the pre-output deadline nor by a text first-output timeout.

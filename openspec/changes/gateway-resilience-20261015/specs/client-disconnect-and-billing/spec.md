@@ -5,13 +5,17 @@
 ### Requirement: Delivery state
 
 Each request MUST track its delivery state:
-- `undelivered`: no semantic byte written. Committed headers and heartbeat bytes do not count; for non-streaming requests, the body has not been written.
+- `undelivered`: no semantic byte written. Committed headers and heartbeat bytes do not count, including the pings written while the request waits for a user or account slot or the user message queue; for non-streaming requests, the body has not been written.
 - `partial`: some semantic bytes written, but not complete.
 - `complete`.
 
 #### Scenario: Heartbeats only
 - **WHEN** a request has written SSE headers and heartbeats but no semantic event
 - **THEN** its delivery state is `undelivered`.
+
+#### Scenario: Queued and pinged, then abandoned
+- **WHEN** a streaming request waits for an account slot long enough to receive pings, gets the slot and the client leaves before the upstream's first output
+- **THEN** the request is `undelivered`: the upstream is cancelled, it is not billed and an undelivered record is written.
 
 ### Requirement: Undelivered requests are cancelled and not billed
 

@@ -213,7 +213,8 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 - OpenAI 的 Responses、Chat、Messages、Images 换号循环（`openai_gateway_handler.go`、`openai_chat_completions.go`、`openai_images.go`、`openai_gateway_messages` 相关 handler）；
 - Anthropic 网关循环（`gateway_handler.go`、`gateway_handler_responses.go`、`gateway_handler_chat_completions.go`）；
 - Gemini 兼容服务的原地重试（`gemini_*_compat_service.go`）；
-- 透传传输重试。
+- 透传传输重试；
+- 用户与账号槽位等待（`waitForSlotWithPingTimeout`）：等待时长截到剩余的首输出前时间，否则排队的流可能越过 240 秒、由客户端自己的空闲超时结束，而不是收到终止应答（审查 F12）。
 
 每次失败尝试后记一次（`RecordAttemptAt`），再由 `CanAttempt` 判断能否继续，耗尽则结束：
 
@@ -325,7 +326,7 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 
 | 状态 | 判定 |
 |---|---|
-| `undelivered` | 尚未写出任何语义字节（心跳与已提交的头不算；非流式则是响应体尚未写出） |
+| `undelivered` | 尚未写出任何语义字节（心跳与已提交的头不算，包括等待用户槽、账号槽和用户消息队列时发出的 ping（审查 F1）；非流式则是响应体尚未写出） |
 | `partial` | 已写出语义字节，但未完成 |
 | `complete` | 正常完成 |
 
@@ -361,11 +362,13 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 
 ### 9.2 无号负缓存
 
-在进程内缓存“(分组, 平台, 模型) 无可用账号”的结论 `negative_cache_seconds`（2 秒），期间直接返回相同的 503 和剩余的 `Retry-After`，不重复查库与快照。键由分组与模型构成（分组决定平台，组合分组的目标平台由模型决定）；OpenAI 选号另按传输方式、端点能力与平台区分，一种请求的结论不回答另一种。带 `previous_response_id`、图片能力或 compact 的 OpenAI 选号以及利润控制分组不缓存；重放出的结论不会再次写入，条目按时过期。本网关施加或解除冷却、余额状态变化时主动失效对应分组的条目；管理员改动等其他来源靠 2 秒过期，最多 2 秒后可见。
+在进程内缓存“(分组, 平台, 模型) 无可用账号”的结论 `negative_cache_seconds`（2 秒），期间直接返回相同的 503 和剩余的 `Retry-After`，不重复查库与快照。键由分组与模型构成（分组决定平台，组合分组的目标平台由模型决定）；OpenAI 选号另按传输方式、端点能力与平台区分，一种请求的结论不回答另一种。带 `previous_response_id`、图片能力或 compact 的 OpenAI 选号以及利润控制分组不缓存；重放出的结论不会再次写入，条目按时过期。
+
+- **只缓存组级结论（审查 F2）：** 选号在粘性查找之前查负缓存，而“无号”可能只对本请求成立：超过 RPM 或窗口费用阈值的 Anthropic OAuth 账号只服务已绑定会话，会话数上限只拦新会话。所以只有组内不存在“平台匹配、支持该模型且无罚”的账号时才写入（判定用 2 秒的分组账号列表）；否则一个新会话的结论会让已绑定会话持续 503。强制平台的路由（`/antigravity`）把平台写进键，不回答同组普通路由。本网关施加或解除冷却、余额状态变化时主动失效对应分组的条目；管理员改动等其他来源靠 2 秒过期，最多 2 秒后可见。
 
 ### 9.3 同 Key 快速失败
 
-- **触发：** 同一 API Key 在 `window_seconds`（30 秒）内收到 ≥ `threshold`（10）次**完全相同**的 503（状态、`error.type`、`message` 均相同）。
+- **触发：** 同一 API Key 在 `window_seconds`（30 秒）内收到 ≥ `threshold`（10）次**完全相同**的 503（状态、`error.type`、`message` 均相同）。只计对该 Key 与模型的所有请求都成立的 503：组级无号（与 §9.2 同一判据，含负缓存命中）和配置错误；只关乎一个会话的 503 不计，否则会连带拒绝同一 Key 的其他会话（审查 F5）。
 - **动作：** 之后窗口内同一模型的请求在选号与内容审计之前就直接返回**同一应答**（状态、正文、剩余的 `Retry-After` 均不变）；同一 Key 对其他模型的请求照常处理。只有已触发时才读取请求体中的 `model`（Gemini 取路径中的模型）。
 - **豁免：** 异步任务轮询、capabilities、DELETE、`/v1/usage`、`/v1/models`、幂等重放。
 - **存储：** 进程内滑动窗口，多实例时各自计数，属于尽力而为。
@@ -488,6 +491,7 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
   - `resilience.fast_fail`
   - `resilience.turn_cap`
   - `resilience.abuse_guard`
+- **ops 错误记录的状态码**是网关自己的应答状态：经 CDN 的 502/504 对客户端改写为 503（§7.6、X-XY-Upstream-Status），ops 记录仍记原值，否则会与无号 503 混在一起、让 §14 的前后对比失真（审查 F7）；读请求体时连接中断造成的 400 记为 499。
 - **分类结果**写入每次上游失败的 ops 记录（`upstream_errors[].resilience_category`）；只按状态码归类的上游 4xx（401、402 除外）以 info 级 `resilience.unclassified` 采样记录脱敏、截断后的文案（每进程每分钟约 10 条），用于补充关键字。
 - **统计接口**：`GET /api/v1/admin/resilience/stats?window=`，按分组与账号汇总以下指标：
   - 首包前心跳提交数；
