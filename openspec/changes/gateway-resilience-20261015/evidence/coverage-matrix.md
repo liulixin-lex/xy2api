@@ -25,6 +25,7 @@ Every scenario of the eight specs, mapped to the automated tests that cover it a
 | Hard state is never used | `TestGatewayLastResortNeverUsesHardStates`, `TestResultHard`, `TestExhaustedTierEndsWithTheExclusion` | — |
 | Relay asks for 60 seconds | `TestTransientCooldownHonoursRetryAfter` | RL-1 |
 | Claude relay runs out of credit | `TestStrongSignalExhausts`, `TestBalance403ExhaustsWithoutErrorState`, `TestExpiredOtherPauseIsNoAdminOverride` | BAL-1 |
+| A relay asks the user to top up (production wording) | `TestInsufficientUserBalanceIsABalanceFailure`, `TestBillingErrorTypeAloneIsNoBalanceFailure` | — |
 | Grok relay balance wording does not install a rate limit | `TestGrokAPIKeyBalance429GoesToBalanceStateNotRateLimit`, `TestGrokAPIKeyBalance429AfterRecentSuccessIsWeak`, `TestGrokRateLimitPathsUnchangedOutsideTheBalanceCase`, `TestGrokPoolModeBalance429KeepsGrokHandling` | PE-1 |
 | Automatic recovery after top-up | `TestProbePositiveEntersRecovering`, `TestProbePositiveRecovers`, `TestRecoveringSuccessesReturnToOK`, `TestVerdictFromUsageBody`, `TestBrokenStreamUsageIsNoRecoverySuccess` | BAL-1, soak (hourly) |
 | Administrator confirms a top-up | `TestRecheckBalanceForcesProbe` | BAL-2 |

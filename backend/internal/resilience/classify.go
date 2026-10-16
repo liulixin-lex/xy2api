@@ -163,6 +163,7 @@ var defaultBalanceCodes = map[string]struct{}{
 var defaultBalanceKeywords = []string{
 	"insufficient balance",
 	"insufficient account balance",
+	"insufficient user balance",
 	"insufficient_balance",
 	"insufficient credit",
 	"insufficient_credit",
