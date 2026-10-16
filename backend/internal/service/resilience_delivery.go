@@ -147,6 +147,32 @@ func noteDeliveryHeartbeat(c *gin.Context, sse *openAICompactSSEKeepalive, image
 	}
 }
 
+// NoteDeliveryHeartbeat registers bytes a handler wrote as heartbeats, such
+// as the pings of a slot or user message queue wait, so they do not count as
+// delivered output. It reports false when the request has no delivery
+// tracking.
+func NoteDeliveryHeartbeat(c *gin.Context, bytes int) bool {
+	w := deliveryWriterFrom(c)
+	if w == nil {
+		return false
+	}
+	if bytes > 0 {
+		w.heartbeat.Add(int64(bytes))
+	}
+	return true
+}
+
+// DeliveryOnlyHeartbeats reports whether everything written to the client
+// so far is heartbeats. tracked is false when the request has no delivery
+// tracking.
+func DeliveryOnlyHeartbeats(c *gin.Context) (only, tracked bool) {
+	w := deliveryWriterFrom(c)
+	if w == nil {
+		return false, false
+	}
+	return w.written.Load() > 0 && w.semanticBytes() == 0, true
+}
+
 // resilienceUpstreamContext applies the disconnect rules to a context that
 // was detached from the client.
 func resilienceUpstreamContext(client, detached context.Context) context.Context {
