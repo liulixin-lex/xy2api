@@ -472,12 +472,16 @@ def pe4():
 def pe2():
     checks = []
     key, sess = KEYS["G-post-output"], fresh_session()
-    rid = fault_last_id()
     turns = [stream_request(DIRECT, "/v1/responses", key, responses_body(session=sess)) for _ in range(3)]
-    served = [r["fault"] for r in fault_records_since(rid) if r["stream"] and r["path"].endswith("/responses")]
-    check(served[:2] == ["F26", "F26"], f"first two turns fail after output on the bound account ({served})", checks)
-    check(len(served) == 3 and served[2] == "F00" and "response.completed" in json.dumps(turns[2]["lines"]),
-          "third turn is rebound to the healthy account", checks)
+
+    def failed_after_output(res) -> bool:
+        text = json.dumps(res["lines"])
+        return res["status"] == 200 and "output_text.delta" in text and "response.failed" in text
+
+    served = ["failed" if failed_after_output(t) else "completed" if "response.completed" in json.dumps(t["lines"]) else "other"
+              for t in turns]
+    check(served[:2] == ["failed", "failed"], f"first two turns fail after output on the bound account ({served})", checks)
+    check(served[2] == "completed", "third turn is rebound to the healthy account", checks)
     # A new session still lands on the failing account and makes its third failure in 60 s.
     stream_request(DIRECT, "/v1/responses", key, responses_body(session=fresh_session()))
     reason = psql("select coalesce(temp_unschedulable_reason, '') from accounts where name='po-fail' and temp_unschedulable_until > now()")

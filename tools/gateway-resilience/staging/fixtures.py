@@ -78,8 +78,8 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     # R3: a Codex backend relay rejects web_search_call history without the declaration.
     "G-web-search": ("openai", [("ws-relay", "F29", 1)], {}),
     # R7: an Anthropic relay's in-stream rate_limit_error before any output.
-    "G-anthropic-rl": ("anthropic", [("anth-rl", "F03;after=2", 1), ("anth-rl-ok", "F00", 2)], {}),
-    "G-anthropic-rl-single": ("anthropic", [("anth-rl-1", "F03;after=2", 1)], {}),
+    "G-anthropic-rl": ("anthropic", [("anth-rl", "F28;after=2", 1), ("anth-rl-ok", "F00", 2)], {}),
+    "G-anthropic-rl-single": ("anthropic", [("anth-rl-1", "F28;after=2", 1)], {}),
     # 24-hour soak (soak.py): MIX injects each fault type at about 1% per attempt.
     "G-soak-openai": ("openai", [("soak-oa-a", "MIX;p=1", 1), ("soak-oa-b", "MIX;p=1", 1), ("soak-oa-ok", "F00", 2)], {}),
     "G-soak-anthropic": ("anthropic", [("soak-an-a", "MIX;p=1", 1), ("soak-an-ok", "F00", 2)], {}),
@@ -189,19 +189,23 @@ def main() -> int:
     existing = {a["name"]: a for a in items(api.call("GET", "/api/v1/admin/accounts?page=1&page_size=500"))}
     for gname, (platform, accounts, _) in GROUPS.items():
         for aname, spec, priority in accounts:
+            want_base = FAULT + spec + ("/v1" if platform == "grok" else "")
             if aname in existing:
                 # Accounts probed before fault-upstream answered the gateway's
                 # tool probe were routed through Chat Completions; re-probe.
+                # A changed scenario spec moves the account to its new URL.
                 extra = existing[aname].get("extra") or {}
-                if platform == "openai" and spec not in real and extra.get("openai_responses_supported") is False:
+                have_base = (existing[aname].get("credentials") or {}).get("base_url")
+                stale = spec not in real and have_base is not None and have_base != want_base
+                if spec not in real and (stale or (platform == "openai" and extra.get("openai_responses_supported") is False)):
                     api.call("PUT", f"/api/v1/admin/accounts/{existing[aname]['id']}",
-                             {"credentials": {"api_key": "sk-fault-" + aname, "base_url": FAULT + spec}})
+                             {"credentials": {"api_key": "sk-fault-" + aname, "base_url": want_base}})
                 continue
             if spec in real:
                 credentials = {"api_key": real[spec][1], "base_url": real[spec][0]}
             else:
                 # Grok API-key base URLs include the version (https://api.x.ai/v1).
-                credentials = {"api_key": "sk-fault-" + aname, "base_url": FAULT + spec + ("/v1" if platform == "grok" else "")}
+                credentials = {"api_key": "sk-fault-" + aname, "base_url": want_base}
             body = {"name": aname, "platform": platform, "type": "apikey",
                     "credentials": credentials,
                     "group_ids": [groups[gname]["id"]], "concurrency": 20, "priority": priority}

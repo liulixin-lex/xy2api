@@ -60,6 +60,7 @@ var scenarios = map[string]string{
 	"F25": "pooled relay: a Responses request carrying previous_response_id gets a vague 400 (Upstream request failed); others answer normally",
 	"F26": "200 SSE with some output, then an in-stream failure (code=busy|rate_limit_exceeded, default busy) after `after` seconds",
 	"F27": "403 content-safety refusal in Zhipu's shape (top-level code request_check_blocked)",
+	"F28": "Anthropic relay queue timeout: 200 SSE whose first event, after `after` seconds, is an error rate_limit_error (gateway_concurrency_limit)",
 	"F29": "Codex backend relay: a Responses request replaying web_search_call input without declaring web_search gets 200 SSE, then response.failed \"response protection is unavailable\"; others answer normally",
 	"BAL": "normal while the balance of state key=… is positive, F12 otherwise (reset=seconds adds a relay's exhausted ratelimit headers)",
 	"MIX": "random fault with probability p percent (default 5), otherwise normal",
@@ -662,6 +663,14 @@ func serve(ctx context.Context, w http.ResponseWriter, p protocol, path, model s
 		return normal(ctx, w, p, model, stream, f.secs("first", 0.2), 0, "", 0)
 	case "F26":
 		return outputThenFail(ctx, w, p, model, f.params["code"], f.secs("after", 1))
+	case "F28":
+		startSSE(w)
+		if !sleepCtx(ctx, f.secs("after", 2)) {
+			return "cancelled"
+		}
+		_ = sse(w, "error", map[string]any{"type": "error", "error": map[string]any{"type": "rate_limit_error",
+			"code": "gateway_concurrency_limit", "message": "Concurrency limit exceeded for account, please retry later"}})
+		return "failed_in_stream"
 	case "F29":
 		if f.params["undeclared"] != "1" {
 			return normal(ctx, w, p, model, stream, f.secs("first", 0.2), 0, "", 0)
