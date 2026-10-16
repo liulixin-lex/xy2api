@@ -588,3 +588,49 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
 - 客户端行为：openai/codex、anthropic-sdk-typescript 源码。
 
 每个来源的仓库、SHA、文件与行号，见 [`evidence/research-summary.md`](evidence/research-summary.md) 指向的完整调研报告（仓库外保存）。
+
+## 18. 生产报错复盘与修复（2026-10-16）
+
+生产 0.3.0 近 3 小时（04:53–07:53Z）推理请求 14,866 次、失败 1,649 次（11.1%）。根因、次数与证据见 [`evidence/production-errors-20261016.md`](evidence/production-errors-20261016.md)。以下修复都受总开关约束：关闭时恢复 0.3.0 行为。
+
+### 18.1 Grok 余额 429 进入余额状态机（R1，761 次）
+
+Grok 走专属错误处理 `handleGrokAccountUpstreamError`，不经过 `RateLimitService.HandleUpstreamError`，§2 分类与 §3.2 余额状态机都没有接入。一个中转在 429 正文里写“insufficient balance”，同时给出请求窗口耗尽的重置头；网关据此限流约 28.6 分钟，单号分组整组 429。
+
+- API Key 类、非池模式的 Grok 账号：正文按 §2 分类为 `BALANCE` 时，先进入余额状态机（30 秒内有成功为弱信号 `SUSPECT`，否则 `EXHAUSTED` 并从 60 秒起探测），不再按重置头装限流；
+- OAuth 账号（直连 xAI）、池模式账号与非余额错误保持 Grok 原有处理；
+- 钩子：`openai_gateway_grok.go`（required_literals）。
+- 遗留：Grok 进程内阻断（模型配额、团队限流）对 `resiliencePenaltyOf` 不可见，Explain 与 `Retry-After` 看不到它们（P2）。
+
+### 18.2 已输出后的失败计入会话与账号（R2，238 次）
+
+已输出后无法换号，但 0.3.0 的流内失败既不计入会话失败，也不罚账号：同一会话一直绑在高失败率账号上，失败五分之一流的账号仍承担全部新流量。处理见 §4.1、§7.6 与 `resilience_post_output.go`：
+
+- 每次尝试只上报一次：会话按 `TRANSIENT` 计数（连续 2 次改绑）；
+- 账号在进程内 60 秒窗口中计数，第 3 次施加软冷却 `transient:POST_OUTPUT`（时长同 `failure.transient_cooldown_seconds`）并清零；池模式不冷却；软冷却保留末位兜底；
+- 客户端错误、内容安全与 cyber 拒绝、上下文超长和客户端取消不计。
+
+### 18.3 API Key 中转的 web_search 历史回放（R3，65 次）
+
+Codex 压缩上下文时回放 `web_search_call` 却声明 `tools:[]`，ChatGPT 后端返回 “response protection is unavailable”。0.3.0 的补声明修复只对 OAuth 账号生效；对所有中转都补声明也不安全（有的中转不认识托管工具类型会返回 400）。因此按账号学习：
+
+- OpenAI API Key 账号在语义输出前因该文案失败，且输入含 `web_search_call`、未声明 web_search 时，用与 OAuth 相同的声明同号重放一次（计入请求预算）；
+- 重放成功后进程内记住该账号 6 小时（最多 4096 个），之后同类请求发送前直接补声明；
+- 重放仍失败（或预算不足、已补声明仍被拒）：不换号、不罚账号，会话计一次失败，客户端收到 502 与可读原因，并计入失败回合封顶（§9.7）；
+- 未覆盖 WebSocket 路径（各有重连与失败处理）。
+
+### 18.4 内容安全拒绝与 Anthropic 流内错误状态（R4 49 次、R7 14 次）
+
+- **内容安全拒绝是请求的错误。** 内容安全 code（`request_check_blocked`、`content_policy_violation`、`content_filter`、`data_inspection_failed`，含顶层 code）与 400/403/451 上的保守文案（preflight safety、safety check、content policy、安全策略、内容安全、敏感内容/词/话题等）归为 `CLIENT_ERROR`（原因 `content_policy`）。文案提到账号、封禁、停用时不算。账号不计 403 strike、不冷却；所有换号循环在第一次遇到时结束（含池模式同号重试）；客户端收到 400 `content_policy_violation` 与脱敏后的上游原文（只关 `errors` 开关时回到 0.3.0 的 502 文案）。未覆盖 Responses WebSocket 循环（会换号，但账号已免罚）。
+- **Anthropic 流内错误按类型给状态。** 0.3.0 对流内错误默认 403，handler 再映射为 502“访问被禁止”。现在 `rate_limit_error` → 429（未输出时按 `RATE_LIMIT` 换号并软冷却，耗尽返回 429 加 `Retry-After`），`overloaded_error` → 529（已输出也是），`api_error` → 502，其他保持 403。已输出后只改状态，不罚账号。
+
+### 18.5 小项（R5、R6、R10b 与粘性）
+
+- **Explain 指出模型被拒（R5，159 次）。** 给定模型时，Explain 返回 `model_restriction`：`not_allowed`（分组白名单）或 `channel_pricing`（渠道定价），管理界面在账号表上方提示。
+- **白名单 404 列出可用模型（R6，248 次）。** HTTP 入口的 404 文案附本分组白名单的前 10 项；WebSocket 关闭原因受 123 字节限制，不变。具名补丁 `xy-allowlist-404-hint`。
+- **上传中断按 499 记录（R10b，12 次）。** ops 中间件包装请求体，传输层读错误（非大小限制）造成的 400 记为 499，随 `IgnoreContextCanceled` 设置过滤。
+- **全 0 会话 ID 视为缺失。** 一个 Key 的 `metadata.session_id` 全为 0，所有请求共用一个粘性键；现在改用可缓存内容的摘要。具名补丁 `xy-placeholder-session-id`。
+
+### 18.6 需管理员处理
+
+渠道定价与白名单一致；单号分组补号或配置无号兜底分组；余额 403 累计置错的账号充值后复检；加大 Caddy 日志保留；轮换设置中含明文凭据的代理地址。
