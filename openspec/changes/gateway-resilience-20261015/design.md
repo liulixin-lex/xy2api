@@ -105,7 +105,7 @@
 3. **兜底：** 流式请求，`max_tokens=1`，模型取该账号可用的最便宜模型，以收到首字为准。每个账号每天不超过 `generation_probe_daily_budget`（48 次）。
 4. **不能作为恢复证据：** `/v1/models` 可达、凭据类探针成功。
 
-多实例下用 Redis 锁 `xy:resil:balance_probe:{account_id}`（TTL 60 秒）保证单飞。探测返回 401/invalid 时改走 `AUTH` 路径。状态迁移写 `ops_system_logs`（warn 级，消息为 `resilience.balance_transition`），并通过现有告警与邮件通道通知管理员。
+多实例下用 Redis 锁 `xy:resil:balance_probe:{account_id}`（TTL 90 秒，长于一次探测连同落库的最长耗时）保证单飞；落库与凭据失效处理不随请求取消而中断。探测返回 401/invalid 时改走 `AUTH` 路径。状态迁移写 `ops_system_logs`（warn 级，消息为 `resilience.balance_transition`），并通过现有告警与邮件通道通知管理员。
 
 需要改为可恢复路径的现有分支：
 
@@ -125,6 +125,7 @@
 
 - `cooldown` 默认 30 秒；上游正文或头部给出 `retry_after` 时，取 min(retry_after, `retry_after_cap_seconds`=120)。
 - 冷却只是软罚：单号组仍可通过末位兜底使用该账号（§4.3）。
+- OpenAI 系账号的 5xx 沿用现有的按模型瞬时屏蔽（`openai_account_model_transient.go`），不整号冷却；只有 API Key 中转明确给出 `retry_after`（说明整站不可用）时才整号冷却。
 
 ## 4. 选号与会话失败处理（D4、D5）
 
@@ -188,6 +189,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
   - 主组“稳定健康”判定：主组至少有一个硬、软两档都无罚则的可调度账号，且从首次满足起已持续 `return_stable_seconds`（120 秒）。
   - 稳定时间戳记在 Redis `xy:resil:group_stable:{group_id}`；任一时刻不满足即清除。
   - 满足后，会话的下一请求回到主组，不等缓存变冷，原因码 `fallback_return`。
+  - 主组健康、且本实例在 `binding_ttl_seconds` 内没有把该组任何 Key 转去兜底时，直接留在主组，不访问 Redis（稳态零往返）。代价：重启前转出的 Key 在重启后立即回到主组。
 - **界面：** 分组编辑增加“无号兜底分组”选择；保存时检查环与平台。
 
 ## 6. 请求预算与重试（D18）
@@ -557,7 +559,7 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
 | 余额探测被中转商限流，或误判 | `/v1/usage` 不消耗推理；生成探测有日预算；单飞锁；探测得到 401 时转凭据路径 |
 | 兜底分组价格差异引发投诉 | 用户侧可见；默认不为任何分组配置，由管理员显式设置 |
 | 未送达不计费被滥用 | 每 Key 每小时阈值后按上游成本计费；上游请求立即取消，限制成本 |
-| 多实例下状态不一致 | 会话计数、回避集、余额锁、稳定时间戳都放 Redis；负缓存与快速失败为进程内尽力而为 |
+| 多实例下状态不一致 | 会话计数、回避集、余额锁、稳定时间戳、兜底 Key 都放 Redis。进程内尽力而为的有：负缓存、快速失败、失败回合封顶、续链绑定，以及几个只用于省去 Redis 往返的本地索引（会话失败与回避标记、末位兜底使用记录、兜底转移记录）。多实例时，另一实例记下的回避不会被本实例读取，本实例的成功也不会清零另一实例的计数。生产为单实例；改为多实例前需把这些索引改为 Redis 读取或接受上述偏差 |
 | 上游同步冲突 | 逻辑集中在自有包；钩子都登记在 policy 与 scheduler-diff 中 |
 | 现有测试的期望值改变 | 逐条更新断言，并保留改动理由；新增针对每个 Scenario 的测试 |
 
