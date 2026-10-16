@@ -1313,7 +1313,7 @@ export default {
       },
       availabilityFallback: {
         title: 'No-Account Fallback Group',
-        hint: 'When every account in this group is cooling down, out of balance or otherwise unavailable, requests are served by this group and billed at its rate. They return automatically once this group has been healthy for 2 minutes. Same platform, non-subscription groups only; cycles are rejected.',
+        hint: 'When every account in this group is cooling down, out of balance or otherwise unavailable, requests are served by this group and billed at its rate. They return automatically once this group has been healthy for a while (default 2 minutes). Same platform, non-subscription groups only; cycles are rejected.',
         none: 'No fallback',
         option: '{name} (rate {rate})'
       },
