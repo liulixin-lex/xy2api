@@ -205,8 +205,6 @@ func (s *FailoverState) HandleFailoverError(
 		return FailoverCanceled
 	}
 	s.LastFailoverErr = failoverErr
-	// xy2api resilience: count the failure against the session (design §4).
-	resilienceReportAttemptFailure(ctx, accountID, failoverErr)
 	if failoverErr == nil || !failoverErr.ShouldRetryNextAccount() {
 		return FailoverExhausted
 	}

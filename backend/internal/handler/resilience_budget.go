@@ -33,9 +33,12 @@ func requestBudget(ctx context.Context) *resilience.Budget {
 	return resilience.StateFrom(ctx).Budget()
 }
 
-// resilienceAttemptFailed records a failed upstream attempt and reports
-// whether the request must end because its budget allows no further attempt.
+// resilienceAttemptFailed records a failed upstream attempt: it counts the
+// failure against the session (design §4.1) and the request budget, and
+// reports whether the request must end because the budget allows no further
+// attempt. Every failover loop calls it once per failed attempt.
 func resilienceAttemptFailed(ctx context.Context, accountID int64, failoverErr *service.UpstreamFailoverError) bool {
+	resilienceReportAttemptFailure(ctx, accountID, failoverErr)
 	b := requestBudget(ctx)
 	if b == nil {
 		return false

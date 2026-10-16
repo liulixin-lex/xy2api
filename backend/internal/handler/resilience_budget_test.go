@@ -168,3 +168,31 @@ func TestCapacityExhaustedBecomesNoAccount503(t *testing.T) {
 	status, _, _ = resilienceCapacityExhausted(c2, shed, http.StatusBadGateway, "upstream_error", "x")
 	require.Equal(t, http.StatusBadGateway, status)
 }
+
+// countingRecorder counts session failures per account.
+type countingRecorder struct{ failures map[int64]int }
+
+func (r *countingRecorder) Failure(_ context.Context, _ int64, _ string, accountID int64, c resilience.Category) {
+	if c.CountsForSession() {
+		r.failures[accountID]++
+	}
+}
+func (r *countingRecorder) Success(context.Context, int64, string, int64) {}
+
+func TestEveryFailoverLoopReportsSessionFailures(t *testing.T) {
+	// The OpenAI handlers run their own loops and only call
+	// resilienceAttemptFailed; the shared loop calls HandleFailoverError.
+	// Both must count each failed attempt once against the session.
+	gin.SetMode(gin.TestMode)
+	ctx := budgetCtx(t, resilience.KindText, 7)
+	rec := &countingRecorder{failures: map[int64]int{}}
+	resilience.StateFrom(ctx).SetSession(7, "sess", rec)
+	bad := &service.UpstreamFailoverError{StatusCode: http.StatusBadGateway}
+
+	resilienceAttemptFailed(ctx, 11, bad)
+	require.Equal(t, 1, rec.failures[11], "OpenAI loop")
+
+	fs := NewFailoverState(3, false)
+	fs.HandleFailoverError(ctx, &mockTempUnscheduler{}, 12, service.PlatformAnthropic, 0, bad)
+	require.Equal(t, 1, rec.failures[12], "shared loop, counted once")
+}
