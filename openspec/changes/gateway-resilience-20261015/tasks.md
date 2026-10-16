@@ -146,7 +146,7 @@
   - 写完立即关流。
   - 实现：已提交后的失败在消息中带 “Please try again in Ns.”（N 为组内最早恢复，2–30 秒）；Responses 码按设计映射；Chat 为 data+[DONE]；服务内的 stream_timeout 帧保持原样。
 - [x] 6.7 验证：
-  - 最终候选 `d80f35fdb`：KA-1（125 秒）、KA-3（90 秒）、KA-8（300 秒）均无切断；快速失败保持原状态码（ERR-4 与单测）；心跳后换号（FO-1）；预算耗尽给可重试终止帧（KA-4、KA-8、C-codex-busy-stream）；anthropic-python 把已提交流里的 `event: error` 抛为 `APIStatusError`（C-anthropic-py-committed-error）；Gemini 不注入心跳（GEM-1），官方 OAuth 例外由单测覆盖；经真实 Cloudflare 心跳与 SSE 不被缓冲（CF-1、CF-4）。
+  - 最终候选 `d0b7e7309`（与 `d80f35fdb` 只差进程内清扫）：KA-1（125 秒）、KA-3（90 秒）、KA-8（300 秒）均无切断；快速失败保持原状态码（ERR-4 与单测）；心跳后换号（FO-1）；预算耗尽给可重试终止帧（KA-4、KA-8、C-codex-busy-stream）；anthropic-python 把已提交流里的 `event: error` 抛为 `APIStatusError`（C-anthropic-py-committed-error）；Gemini 不注入心跳（GEM-1），官方 OAuth 例外由单测覆盖；经真实 Cloudflare 心跳与 SSE 不被缓冲（CF-1、CF-4）。
   - 用 CDN 模拟代理验证 90、125、300 秒三档都不再切断；
   - 快速失败仍返回原状态码；
   - 心跳后仍可换号；
@@ -236,9 +236,9 @@
   - 用户与 Key；
   - 用户提供的真实中转测试 Key（低价模型，总预算不超过 20 美元）。
 - [x] 12.3 故障注入矩阵：逐条覆盖 8 个 spec 的全部 Scenario，留存证据。
-  - 最终候选 `d80f35fdb` 场景 37/37（含新增 KA-8、CONT-1）。
+  - 最终候选 `d0b7e7309` 场景 37/37（含新增 KA-8、CONT-1）。
 - [x] 12.4 真实客户端端到端矩阵（design §15），统计每回合请求数、错误文案与耗时。
-  - 最终候选 16/16；Codex 全失败回合 5 次请求、92.5 秒。
+  - 最终候选 `d0b7e7309` 16/16；Codex 全失败回合 5 次请求、92.5 秒。
 - [x] 12.5 真实 CDN：经用户授权，在 Cloudflare 添加橙云测试子域，验证切断消失与心跳格式；ESA 视条件而定。
   - CF-1..5 通过；ESA 无测试站点，以 cdn-sim 90 秒档（KA-3）验证。
 - [x] 12.6 用真实 new-api 系中转实测余额接口；不支持的类型确认会降级到生成探测。
