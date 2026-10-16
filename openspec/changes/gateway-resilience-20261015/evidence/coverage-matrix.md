@@ -73,7 +73,7 @@ The Explain part of “Explainability and configuration” has no scenario of it
 | Keep-alive before response.created | `TestRelayKeepaliveFramesAreDropped` | KA-7, C-openai-py-fail-first |
 | Keep-alive does not disarm failover | `TestRelayKeepaliveFramesAreDropped` | KA-7 |
 | Stall detected within the threshold | `TestStallDetectedWithinFiveSecondsAfterOutput`, `TestStallCheckPeriodAndThreshold` | ST-1 |
-| Anthropic error after a ping | `TestPreOutputKeepaliveAnthropicPingsAndFailoverSize`, `TestTerminalFrameAnthropicHasEventLine` | ANT-1, C-anthropic-py-committed-error |
+| Anthropic error after a ping | `TestPreOutputKeepaliveAnthropicPingsAndFailoverSize`, `TestCommittedAnthropicErrorFrameFollowsTheErrorsSwitch` | ANT-1, C-anthropic-py-committed-error |
 | Codex sees the failure promptly | `TestPreOutputKeepaliveRewritesCommittedErrors`, `TestCommittedFailureCarriesRetryHint` | KA-4 |
 
 ## client-disconnect-and-billing

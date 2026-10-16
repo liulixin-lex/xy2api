@@ -1,10 +1,6 @@
 package resilience
 
-import (
-	"crypto/rand"
-	"encoding/hex"
-	"strings"
-)
+import "strings"
 
 // EdgeHeader is set by the reverse proxy, from the peer address only, on
 // requests that arrived through a CDN (design §7.1).
@@ -28,12 +24,4 @@ func EdgeOf(headerValue string, trustedPeer bool, allowed []string) string {
 		}
 	}
 	return ""
-}
-
-func randomHex(n int) string {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return strings.Repeat("0", 2*n)
-	}
-	return hex.EncodeToString(b)
 }

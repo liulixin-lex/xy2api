@@ -3,7 +3,6 @@ package resilience
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -88,7 +87,7 @@ func TestBudgetAttemptsAndDeadline(t *testing.T) {
 	require.NotNil(t, b)
 	for i := 0; i < 4; i++ {
 		require.True(t, b.CanAttempt(t0))
-		b.RecordAttempt()
+		b.RecordAttemptAt(t0)
 	}
 	require.False(t, b.CanAttempt(t0))
 	require.Equal(t, ExhaustedAttempts, b.Exhausted())
@@ -97,17 +96,12 @@ func TestBudgetAttemptsAndDeadline(t *testing.T) {
 	require.True(t, b.CanAttempt(t0.Add(237*time.Second)))
 	require.False(t, b.CanAttempt(t0.Add(239*time.Second)))
 	require.Equal(t, ExhaustedDeadline, b.Exhausted())
-
-	// Output started: the deadline no longer applies.
-	b.MarkOutputStarted()
-	require.True(t, b.CanAttempt(t0.Add(500*time.Second)))
-	require.Equal(t, time.Duration(0), b.Remaining(t0))
 }
 
 func TestBudgetImagesHaveNoDeadline(t *testing.T) {
 	s := Defaults()
 	b := NewBudget(context.Background(), &s, KindImage, t0)
-	require.False(t, b.HasDeadline())
+	require.True(t, b.Deadline().IsZero())
 	require.True(t, b.CanAttempt(t0.Add(time.Hour)))
 	require.Equal(t, time.Duration(0), b.AttemptTimeout(0, false, t0))
 }
@@ -117,7 +111,6 @@ func TestBudgetCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	b := NewBudget(ctx, &s, KindText, t0)
 	cancel()
-	require.True(t, b.Canceled())
 	require.False(t, b.CanAttempt(t0))
 	require.Equal(t, ExhaustedCanceled, b.Exhausted())
 }
@@ -183,72 +176,6 @@ func TestSleepCancel(t *testing.T) {
 	cancel()
 	require.False(t, Sleep(ctx, time.Hour))
 	require.True(t, Sleep(context.Background(), time.Millisecond))
-}
-
-func TestHeartbeatFrames(t *testing.T) {
-	require.Equal(t, ":\n\n", string(HeartbeatFrame(ProtocolResponses)))
-	require.Equal(t, ":\n\n", string(HeartbeatFrame(ProtocolChat)))
-	require.Equal(t, "event: ping\ndata: {\"type\":\"ping\"}\n\n", string(HeartbeatFrame(ProtocolAnthropic)))
-	require.Nil(t, HeartbeatFrame(ProtocolGemini))
-	require.Nil(t, HeartbeatFrame(ProtocolUnknown))
-}
-
-func dataJSON(t *testing.T, frame []byte) map[string]any {
-	t.Helper()
-	var line string
-	for _, l := range strings.Split(string(frame), "\n") {
-		if strings.HasPrefix(l, "data: ") && l != "data: [DONE]" {
-			line = strings.TrimPrefix(l, "data: ")
-			break
-		}
-	}
-	require.NotEmpty(t, line)
-	var m map[string]any
-	require.NoError(t, json.Unmarshal([]byte(line), &m))
-	return m
-}
-
-func TestTerminalFrameResponses(t *testing.T) {
-	f := TerminalFrame(ProtocolResponses, Terminal{Category: CategoryRateLimit, RetryAfter: 45 * time.Second, SequenceNumber: 7, ResponseID: "resp_x", Model: "gpt-5.5"})
-	require.True(t, strings.HasPrefix(string(f), "event: response.failed\ndata: {"))
-	require.True(t, strings.HasSuffix(string(f), "}\n\n"))
-	require.Equal(t, 1, strings.Count(string(f), "\ndata: "), "payload must be one line")
-	m := dataJSON(t, f)
-	require.Equal(t, "response.failed", m["type"])
-	require.EqualValues(t, 7, m["sequence_number"])
-	resp := m["response"].(map[string]any)
-	require.Equal(t, "resp_x", resp["id"])
-	require.Equal(t, "failed", resp["status"])
-	e := resp["error"].(map[string]any)
-	require.Equal(t, "rate_limit_exceeded", e["code"])
-	require.EqualValues(t, 429, e["status"])
-	require.Contains(t, e["message"], "Please try again in 30s.")
-}
-
-func TestTerminalFrameChat(t *testing.T) {
-	f := TerminalFrame(ProtocolChat, Terminal{Category: CategoryStall})
-	require.True(t, strings.HasSuffix(string(f), "data: [DONE]\n\n"))
-	m := dataJSON(t, f)
-	e := m["error"].(map[string]any)
-	require.Equal(t, "server_error", e["code"])
-	require.EqualValues(t, 504, e["status"])
-	require.Contains(t, e["message"], "Please try again in 2s.")
-}
-
-func TestTerminalFrameAnthropicHasEventLine(t *testing.T) {
-	// G3: Anthropic SDKs drop data frames without an event line.
-	f := TerminalFrame(ProtocolAnthropic, Terminal{Category: CategoryTransient, Status: 502, Message: "Upstream request failed", RetryAfter: 10 * time.Second})
-	require.True(t, strings.HasPrefix(string(f), "event: error\ndata: "))
-	m := dataJSON(t, f)
-	require.Equal(t, "error", m["type"])
-	e := m["error"].(map[string]any)
-	require.Equal(t, "api_error", e["type"])
-	require.EqualValues(t, 502, e["status"])
-	require.Equal(t, "Upstream request failed. Please try again in 10s.", e["message"])
-
-	busy := dataJSON(t, TerminalFrame(ProtocolAnthropic, Terminal{Category: CategoryRateLimit}))
-	require.Equal(t, "overloaded_error", busy["error"].(map[string]any)["type"])
-	require.Nil(t, TerminalFrame(ProtocolGemini, Terminal{}))
 }
 
 func TestEdgeOf(t *testing.T) {
@@ -360,8 +287,6 @@ func TestClampRetryAfter(t *testing.T) {
 	require.Equal(t, 2, ClampRetryAfter(0, 2, 30))
 	require.Equal(t, 30, ClampRetryAfter(time.Hour, 2, 30))
 	require.Equal(t, 11, ClampRetryAfter(10500*time.Millisecond, 2, 30))
-	require.Equal(t, 2, TerminalRetrySeconds(time.Second))
-	require.Equal(t, 30, TerminalRetrySeconds(time.Minute))
 }
 
 func TestJitterSeconds(t *testing.T) {

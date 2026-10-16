@@ -46,7 +46,6 @@ type Budget struct {
 	sameAccountMax int
 	sameAccount    map[int64]int
 	capacitySwitch int
-	outputStarted  bool
 	exhausted      string
 	retryAfterCap  time.Duration
 	ctx            context.Context
@@ -73,25 +72,6 @@ func NewBudget(ctx context.Context, s *Settings, kind RequestKind, now time.Time
 	return b
 }
 
-type budgetKey struct{}
-
-// WithBudget attaches b to ctx.
-func WithBudget(ctx context.Context, b *Budget) context.Context {
-	if b == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, budgetKey{}, b)
-}
-
-// BudgetFrom returns the budget attached to ctx, or nil.
-func BudgetFrom(ctx context.Context) *Budget {
-	if ctx == nil {
-		return nil
-	}
-	b, _ := ctx.Value(budgetKey{}).(*Budget)
-	return b
-}
-
 // Started returns when the request started.
 func (b *Budget) Started() time.Time {
 	if b == nil {
@@ -107,35 +87,6 @@ func (b *Budget) Kind() RequestKind {
 	}
 	return b.kind
 }
-
-// Canceled reports whether the client or forwarding context is gone.
-func (b *Budget) Canceled() bool {
-	return b != nil && b.ctx != nil && b.ctx.Err() != nil
-}
-
-// MarkOutputStarted records that semantic output reached the client; the
-// pre-output deadline no longer applies.
-func (b *Budget) MarkOutputStarted() {
-	if b == nil {
-		return
-	}
-	b.mu.Lock()
-	b.outputStarted = true
-	b.mu.Unlock()
-}
-
-// OutputStarted reports whether semantic output reached the client.
-func (b *Budget) OutputStarted() bool {
-	if b == nil {
-		return false
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.outputStarted
-}
-
-// RecordAttempt counts one finished upstream attempt.
-func (b *Budget) RecordAttempt() { b.RecordAttemptAt(time.Now()) }
 
 // RecordAttemptAt counts one finished upstream attempt and returns its
 // approximate duration: the time since the request started or since the
@@ -205,7 +156,7 @@ func (b *Budget) CanAttempt(now time.Time) bool {
 		b.exhausted = ExhaustedCanceled
 	case b.attempts >= b.maxAttempts:
 		b.exhausted = ExhaustedAttempts
-	case !b.outputStarted && !b.deadline.IsZero() && b.deadline.Sub(now) < minAttemptWindow:
+	case !b.deadline.IsZero() && b.deadline.Sub(now) < minAttemptWindow:
 		b.exhausted = ExhaustedDeadline
 	default:
 		return true
@@ -231,23 +182,13 @@ func (b *Budget) Remaining(now time.Time) time.Duration {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.deadline.IsZero() || b.outputStarted {
+	if b.deadline.IsZero() {
 		return 0
 	}
 	if d := b.deadline.Sub(now); d > 0 {
 		return d
 	}
 	return time.Nanosecond
-}
-
-// HasDeadline reports whether the request has a pre-output deadline.
-func (b *Budget) HasDeadline() bool {
-	if b == nil {
-		return false
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return !b.deadline.IsZero()
 }
 
 // Deadline returns the pre-output deadline (zero when none).
@@ -306,7 +247,7 @@ func (b *Budget) ConsumeInPlaceRetry(accountID int64, sameAccount bool, now time
 		return false
 	case b.attempts+1 >= b.maxAttempts:
 		return false
-	case !b.outputStarted && !b.deadline.IsZero() && b.deadline.Sub(now) < minAttemptWindow:
+	case !b.deadline.IsZero() && b.deadline.Sub(now) < minAttemptWindow:
 		return false
 	case sameAccount && b.sameAccount[accountID] >= b.sameAccountMax:
 		return false

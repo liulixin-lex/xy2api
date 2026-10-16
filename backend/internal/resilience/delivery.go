@@ -8,13 +8,6 @@ import (
 	"time"
 )
 
-// Delivery state of a request (design §8.1).
-const (
-	DeliveryUndelivered = "undelivered"
-	DeliveryPartial     = "partial"
-	DeliveryComplete    = "complete"
-)
-
 // Disconnect stages (design §8.2).
 const (
 	StageSelect     = "select"

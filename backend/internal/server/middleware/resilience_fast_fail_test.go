@@ -150,7 +150,7 @@ func TestResilienceRequestBudgetKinds(t *testing.T) {
 		}
 		require.NotNil(t, b, tc.path)
 		require.Equal(t, tc.kind, b.Kind(), tc.path)
-		require.Equal(t, tc.kind == resilience.KindText, b.HasDeadline(), tc.path)
+		require.Equal(t, tc.kind == resilience.KindText, !b.Deadline().IsZero(), tc.path)
 	}
 }
 
