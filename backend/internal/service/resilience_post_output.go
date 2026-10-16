@@ -71,6 +71,9 @@ func noteResiliencePostOutputFailure(ctx context.Context, rl *RateLimitService, 
 		return
 	}
 	st.SessionFailure(ctx, account.ID, resilience.CategoryTransient)
+	// The 200 that carried the failure must not end the conversation's
+	// failed-turn streak (design §9.7).
+	st.MarkTurnFailed()
 	groupID := st.GroupID()
 	resilience.Count(resilience.MetricPostOutputFailure, groupID, account.ID, kind)
 	failures, cooled := rl.notePostOutputFailure(ctx, account)

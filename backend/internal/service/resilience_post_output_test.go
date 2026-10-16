@@ -79,8 +79,10 @@ func TestPostOutputFailureCountsOncePerAttempt(t *testing.T) {
 	require.Equal(t, before+1, postOutputMetric(account.ID, postOutputEvent))
 	require.True(t, st.StreamFailureReported(account.ID))
 
-	// The broken request is no success of the account.
+	// The broken request is no success of the account, and its 200 does not
+	// end the conversation's failed-turn streak.
 	require.True(t, st.AccountFailed(account.ID))
+	require.True(t, st.TurnFailed())
 	r.NoteAccountSuccess(ctx, account)
 	require.False(t, r.recentSuccess(account.ID, time.Minute))
 
