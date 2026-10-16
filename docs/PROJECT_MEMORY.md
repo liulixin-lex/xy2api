@@ -4,7 +4,7 @@
 
 ## 当前交接状态
 
-### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-16T19:35Z；PR #97 已开，**暂停合并与打 RC**；审查与生产核查 0.4.0 范围全部提交，候选 `934bcf2bc` 测试服务器验证中，生产未改）
+### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-16T20:20Z；PR #97 已开，**暂停合并与打 RC**；审查与生产核查 0.4.0 范围全部提交，候选 `934bcf2bc` 测试服务器验证中，生产未改）
 
 **背景**
 
@@ -64,6 +64,7 @@
 - **进度（15:05Z）**：`31407833d` 场景 44/44（含 DC-5、LR-1）、真实客户端 16/16；14:58:42Z 浸泡启动（`soak-31407833d`，约 21:40Z 连同回落与检查结束）。复核第 2 点确认：ERR-3 前四次为经末位兜底到达上游的 502（均带 `Retry-After: 2`），之后两次封顶终止应答 503 + `x-should-retry: false`；ERR-4 共 14 次均带 `Retry-After`，因属上游失败而非组级无号，按 F2 不再触发快速失败；IMG-1 260 秒 200 不变；图片、compact、续链无号计入快速失败由单测覆盖（测试环境无此分组形态）。浸泡结束后按“下一步”执行。
 - **进度（19:35Z，生产只读核查转交）**：评审 agent 的生产核查（仓库外 `production/PROD_CONFLICT_REVIEW_20261016.md`）确认 240 秒预算与分档、冷却、余额状态机、F3/F4 保持。0.4.0 修复：①伪保活帧被丢弃后仍算上游存活（停滞检测取最后读到一行与最后丢帧中较晚者，覆盖 Responses 流、Chat Completions 与 Messages 转换的流式与非流式；按账号计 `relay_keepalive`；测试服务器 KA-9，fault F24 加 `output=1`）`9adce14cb`；②缺省余额关键字加 `insufficient user balance`，`billing_error` 单独不算余额（Sub2API 系中转的所有计费前置失败都用它）`8285e6926`；③本地首输出超时不冷却账号，按代码对齐 design 与两份 spec，加锁定用例 `fdb7cfdcb`；runbook 补部署前提、上线前核对、上线后观测与管理员配置项，tasks 登记 0.4.1 的 xhigh/max 静默上游不换号 `6af7870d0`；staging-validation 改为 6.5 小时与存活堆判据 `934bcf2bc`。本机全量验证全绿（CI 门禁 255）。`31407833d` 浸泡 4 小时 23 分后停止，补采回落样本后全部检查通过（存活堆斜率 0.5 MiB/h，匿名内存 90→95.3 MiB）。新候选 `934bcf2bc` 部署中，按用户此前要求重跑全部场景、客户端与 6.5 小时浸泡（改动在流读取热路径）。注意：本机 gocache 再次涨到 29G 写满磁盘，已清理。
 - **进度（20:05Z）**：`934bcf2bc` 场景 45/45（含新 KA-9；F23/F24/F26 与停滞类均过）、真实客户端 16/16；19:59Z 启动 6.5 小时浸泡（`soak-934bcf2bc`，约 02:40Z 连同回落与检查结束，等待脚本 `/tmp/xy2-soak-wait.sh 934bcf2bc`）。之后：`/tmp/xy2-postsoak-metrics.sh 934bcf2bc 7` → 私有 `STAGING_REPORT.md` 定稿 → 推送 PR #97、更新描述（`PR_BODY.md` 已含生产核查节）→ 等 CI → 合并、RC、晋级 0.4.0。升级演练与 XY-image 回放沿用（自 `eaa63fd30` 无迁移、schema 与应答形态改动）。
+- **进度（20:20Z，评审复核 `9adce14cb`…`934bcf2bc`）**：①②、runbook、tasks 通过，公开仓库无生产标识，`billing_error` 不算余额的取舍获同意。更正：`fdb7cfdcb` 写的“上游以 `first_output_timeout` 应答（级联网关）仍软冷却”代码中不存在——上游错误处理的 switch 只处理 BALANCE/TRANSIENT/CLIENT_ERROR，按 `SoftCooldown()` 写冷却的 `ApplyResilienceOutcome` 只由停滞调用；实际是本地与上游应答的首输出超时都不冷却账号，只有 OpenAI API Key 账号按上游 5xx 原有规则记入按模型瞬时屏蔽（本地超时不触发）。`7043f32cb` 按代码修正 design §2/§3、两份 spec 与 tasks，并加 `TestUpstreamFirstOutputTimeoutLeavesTheAccountSchedulable` 锁定（只改文档与测试，镜像不变，不重跑验证）；同时登记 0.4.1：原生 Chat Completions 路径传空存活记录，`relay_keepalive` 计数偏少。教训：文档里的行为描述须有代码与用例依据，写之前先追调用链。
 
 **卡点与风险**
 
