@@ -85,6 +85,14 @@
 | F20 | new-api 计费接口 |
 | F21 | Anthropic 流式，先 `message_start` 后停滞 |
 | F22 | Gemini 流式 |
+| F23 | 慢流：每隔 `every` 秒一个 delta，持续 `secs` 秒后正常结束 |
+| F24 | 中转伪保活：空 `SSE-Keep-Alive` delta（一个在 `response.created` 之前），随后 `response.failed` busy |
+| F25 | 号池中转：带 `previous_response_id` 的 Responses 请求得到笼统 400，其余正常 |
+| F26 | 先输出若干 delta，`after` 秒后流内失败（busy 或 rate_limit_exceeded）（生产 R2） |
+| F27 | 智谱形状的内容安全 403（顶层 `code: request_check_blocked`）（生产 R4） |
+| F29 | Codex 后端中转：输入回放 `web_search_call` 而未声明 web_search 时，200 SSE 后 `response.failed` “response protection is unavailable”，其余正常（生产 R3） |
+| BAL | 余额（`key=…`，经 `/_control` 设置）为正时正常，否则同 F12；`reset=秒` 时另带中转的请求窗口耗尽头（生产 R1） |
+| MIX | 每次按 `p`% 的概率随机注入一种故障（浸泡用） |
 
 - **真实测试 Key：** 由用户提供少量专用中转 Key，只配低价模型，总预算不超过 20 美元。每次真实测试前后记录余额，用于真实客户端与 new-api 余额接口实测；生产 Key 一律不复制。
 

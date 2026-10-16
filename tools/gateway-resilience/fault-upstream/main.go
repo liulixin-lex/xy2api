@@ -58,7 +58,9 @@ var scenarios = map[string]string{
 	"F23": "slow stream: a delta every `every` seconds for `secs` seconds, then completed with usage",
 	"F24": "relay keep-alive: empty SSE-Keep-Alive deltas (one before response.created) every `every` seconds for `secs` seconds, then response.failed busy",
 	"F25": "pooled relay: a Responses request carrying previous_response_id gets a vague 400 (Upstream request failed); others answer normally",
+	"F26": "200 SSE with some output, then an in-stream failure (code=busy|rate_limit_exceeded, default busy) after `after` seconds",
 	"F27": "403 content-safety refusal in Zhipu's shape (top-level code request_check_blocked)",
+	"F29": "Codex backend relay: a Responses request replaying web_search_call input without declaring web_search gets 200 SSE, then response.failed \"response protection is unavailable\"; others answer normally",
 	"BAL": "normal while the balance of state key=… is positive, F12 otherwise (reset=seconds adds a relay's exhausted ratelimit headers)",
 	"MIX": "random fault with probability p percent (default 5), otherwise normal",
 }
@@ -326,6 +328,35 @@ func normal(ctx context.Context, w http.ResponseWriter, p protocol, model string
 	return "completed"
 }
 
+// outputThenFail sends some output and then an in-stream failure, as relays
+// do when their upstream overloads mid-answer (production 2026-10-16, R2).
+func outputThenFail(ctx context.Context, w http.ResponseWriter, p protocol, model, code string, after time.Duration) string {
+	if code == "" {
+		code = "busy"
+	}
+	startSSE(w)
+	id := fmt.Sprintf("resp_fault_%d", time.Now().UnixNano())
+	switch p {
+	case protoAnthropic:
+		_ = sse(w, "message_start", map[string]any{"type": "message_start", "message": map[string]any{
+			"id": id, "type": "message", "role": "assistant", "model": model, "content": []any{},
+			"usage": map[string]any{"input_tokens": 10, "output_tokens": 1}}})
+		_ = sse(w, "content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}})
+	case protoResponses:
+		_ = sse(w, "response.created", map[string]any{"type": "response.created", "response": map[string]any{"id": id, "status": "in_progress", "model": model}})
+	}
+	for i := 0; i < 2; i++ {
+		if err := writeDelta(w, p, id, model); err != nil {
+			return "cancelled"
+		}
+	}
+	if !sleepCtx(ctx, after) {
+		return "cancelled"
+	}
+	writeFailFrame(w, p, code)
+	return "failed_in_stream"
+}
+
 // relayKeepalive imitates relays that send empty "SSE-Keep-Alive" deltas,
 // the first one before response.created, and then fails before any output.
 func relayKeepalive(ctx context.Context, w http.ResponseWriter, model string, total, every time.Duration) string {
@@ -440,7 +471,7 @@ func nonStreamBody(p protocol, model string, u usage) any {
 
 func answersNormally(f fault, key string) bool {
 	switch f.id {
-	case "F00", "F17", "F22", "F23", "F24", "F25":
+	case "F00", "F17", "F22", "F23", "F24", "F25", "F29":
 		return true
 	case "BAL":
 		return balances.get(key) > 0
@@ -503,6 +534,27 @@ func apiError(w http.ResponseWriter, p protocol, status int, errType, code, mess
 type requestBody struct {
 	Model  string `json:"model"`
 	Stream bool   `json:"stream"`
+	Input  any    `json:"input"`
+	Tools  []struct {
+		Type string `json:"type"`
+	} `json:"tools"`
+}
+
+// replaysUndeclaredWebSearch reports a Responses request whose input replays
+// web_search_call items while its tools do not declare web_search.
+func (b requestBody) replaysUndeclaredWebSearch() bool {
+	for _, t := range b.Tools {
+		if strings.HasPrefix(t.Type, "web_search") {
+			return false
+		}
+	}
+	items, _ := b.Input.([]any)
+	for _, it := range items {
+		if m, ok := it.(map[string]any); ok && m["type"] == "web_search_call" {
+			return true
+		}
+	}
+	return false
 }
 
 func pickMix(f fault) fault {
@@ -540,6 +592,9 @@ func handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.id == "F25" && p == protoResponses && bytes.Contains(raw, []byte(`"previous_response_id"`)) {
 		f.params["chained"] = "1"
+	}
+	if f.id == "F29" && p == protoResponses && body.replaysUndeclaredWebSearch() {
+		f.params["undeclared"] = "1"
 	}
 	model := body.Model
 	if model == "" {
@@ -605,6 +660,21 @@ func serve(ctx context.Context, w http.ResponseWriter, p protocol, path, model s
 			return "error_status"
 		}
 		return normal(ctx, w, p, model, stream, f.secs("first", 0.2), 0, "", 0)
+	case "F26":
+		return outputThenFail(ctx, w, p, model, f.params["code"], f.secs("after", 1))
+	case "F29":
+		if f.params["undeclared"] != "1" {
+			return normal(ctx, w, p, model, stream, f.secs("first", 0.2), 0, "", 0)
+		}
+		if !stream {
+			apiError(w, p, http.StatusBadGateway, "internal_error", "", "response protection is unavailable")
+			return "error_status"
+		}
+		startSSE(w)
+		_ = sse(w, "response.created", map[string]any{"type": "response.created", "response": map[string]any{"id": "resp_fault_ws", "status": "in_progress", "model": model}})
+		_ = sse(w, "response.failed", map[string]any{"type": "response.failed", "response": map[string]any{
+			"id": "resp_fault_ws", "status": "failed", "error": map[string]any{"type": "internal_error", "message": "response protection is unavailable"}}})
+		return "failed_in_stream"
 	case "F00", "F17", "F22":
 		return normal(ctx, w, p, model, stream, f.secs("first", 0.2), 0, "", 0)
 	case "F01":
