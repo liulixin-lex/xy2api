@@ -431,6 +431,10 @@
     {
       "path": "backend/internal/service/ops_upstream_context.go",
       "value": "resilience.StateFrom(c.Request.Context()).MarkAccountFailed(ev.AccountID)"
+    },
+    {
+      "path": "backend/internal/web/embed_on.go",
+      "value": "// nonce, so it is never answered with 304 and has no ETag"
     }
   ],
   "forbidden_module_paths": [
@@ -468,7 +472,8 @@
     "xy-resilience-keepalive-hook",
     "xy-resilience-disconnect-hook",
     "xy-resilience-errors-hook",
-    "xy-resilience-fallback-hook"
+    "xy-resilience-fallback-hook",
+    "xy-index-nonce-no-304"
   ],
   "custom_patch_tests": [
     {
@@ -590,6 +595,11 @@
       "id": "xy-resilience-fallback-hook",
       "path": "backend/internal/server/middleware/resilience_fallback_test.go",
       "literal": "func TestAvailabilityFallbackMiddlewareMovesKey"
+    },
+    {
+      "id": "xy-index-nonce-no-304",
+      "path": "backend/internal/web/embed_test.go",
+      "literal": "index_html_is_never_not_modified"
     }
   ]
 }
