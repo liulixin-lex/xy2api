@@ -6813,10 +6813,14 @@ watch(
   },
 );
 
-// 编辑表单：切回标准模式时清空高峰配置，避免残留随更新请求提交被后端拒绝
+// 编辑表单：切回标准模式时清空高峰配置，避免残留随更新请求提交被后端拒绝；
+// 切到订阅模式时清空无号兜底分组（订阅分组不能设置，字段也随之隐藏）
 watch(
   () => editForm.subscription_type,
   (newVal) => {
+    if (newVal === "subscription") {
+      editForm.availability_fallback_group_id = null;
+    }
     if (newVal !== "subscription") {
       editForm.peak_rate_enabled = false;
       editForm.peak_start = "";

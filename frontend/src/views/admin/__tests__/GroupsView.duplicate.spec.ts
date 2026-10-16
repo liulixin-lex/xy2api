@@ -366,6 +366,17 @@ describe('GroupsView duplicate action', () => {
     await wrapper.get('#edit-group-form').trigger('submit')
     await flushPromises()
     expect(updateGroup).toHaveBeenLastCalledWith(42, expect.objectContaining({ availability_fallback_group_id: 0 }))
+
+    // Switching to a subscription group hides the field and clears it, so the
+    // save is not rejected for a value the administrator can no longer see.
+    await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { editForm: { subscription_type: string; availability_fallback_group_id: number | null } }
+    expect(vm.editForm.availability_fallback_group_id).toBe(52)
+    vm.editForm.subscription_type = 'subscription'
+    await flushPromises()
+    expect(wrapper.find('[data-testid="availability-fallback-field"]').exists()).toBe(false)
+    expect(vm.editForm.availability_fallback_group_id).toBeNull()
     wrapper.unmount()
   })
 
