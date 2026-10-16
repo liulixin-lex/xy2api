@@ -37,7 +37,7 @@ Hard states MUST always exclude the account while they last; an `EXHAUSTED` bala
 
 ### Requirement: Transient failures apply a soft cooldown
 
-Account-scoped `TRANSIENT`, `FIRST_OUTPUT_TIMEOUT` and `STALL` outcomes MUST set a soft cooldown of `failure.transient_cooldown_seconds` (default 30 s). When the upstream supplies `retry_after`, the cooldown MUST be `min(retry_after, failure.retry_after_cap_seconds)` (default cap 120 s).
+Account-scoped `TRANSIENT` and `STALL` outcomes, and `FIRST_OUTPUT_TIMEOUT` answered by the upstream (a cascaded gateway), MUST set a soft cooldown of `failure.transient_cooldown_seconds` (default 30 s). A first-output timeout the gateway detects itself MUST NOT cool the account down: it counts for the session failure streak and switches accounts. When the upstream supplies `retry_after`, the cooldown MUST be `min(retry_after, failure.retry_after_cap_seconds)` (default cap 120 s).
 
 #### Scenario: Relay asks for 60 seconds
 - **WHEN** an attempt returns 502 with a Cloudflare error body containing `"retry_after":60`

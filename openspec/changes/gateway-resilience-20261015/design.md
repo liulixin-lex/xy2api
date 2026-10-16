@@ -64,7 +64,7 @@
 | `RATE_LIMIT` | 429 无重置时间；流内 `rate_limit_exceeded`；“The service is busy” 等 | 是 | 否 | 软，冷却时长取设置 `rate_limit_429_cooldown_settings`（当前 45 秒） | 计入失败计数 |
 | `CAPACITY_SHED` | 529、overloaded、`server_is_overloaded`、Codex at capacity（请求级降载） | 是，最多换 1 次，且换到不同 base_url 主机 | 是，每账号最多 1 次，0.5–2 秒带抖动 | 无（请求级） | 不计 |
 | `TRANSIENT` | 5xx、524、504、连接错误、HTML 错误页 | 是 | 否（504/524 及耗时 ≥60 秒的失败一律不同号重试） | 软：冷却 `transient_cooldown_seconds`（默认 30 秒）；上游给出 `retry_after` 时取 min(retry_after, 120 秒) | 计入失败计数 |
-| `FIRST_OUTPUT_TIMEOUT` | 本地首输出超时（§7.4），包括网关自身合成的首事件超时 504（`first_output_timeout`）；中转返回的 504 仍为 `TRANSIENT` | 是 | 否 | 软，冷却 30 秒 | 计入失败计数 |
+| `FIRST_OUTPUT_TIMEOUT` | 本地首输出超时（§7.4），包括网关自身合成的首事件超时 504（`first_output_timeout`）；中转返回的普通 504 仍为 `TRANSIENT` | 是 | 否 | 本地超时不冷却账号（见下方补充规则）；上游以 `first_output_timeout` 类型应答（级联的 xy2api）时软冷却 30 秒 | 计入失败计数 |
 | `STALL` | 已输出后超过停滞阈值无数据（§7.5） | 否（已输出） | 否 | 软，冷却 30 秒 | 计入失败计数 |
 | `CLIENT_CANCEL` | 客户端断开 | 否 | 否 | 无 | 不计 |
 | `CLIENT_ERROR` | 400/413/422 的确定性参数错误、上下文超长、内容策略、cyber policy；上游内容安全拒绝（内容安全 code，或 400/403/451 上的安全检查文案，§18.4） | 否（沿用现有“模型不存在可换号”等例外）；内容安全拒绝连池模式同号重试也不做 | 否 | 无 | 不计 |
@@ -74,6 +74,7 @@
 
 - **本站与上游余额分开。** `BALANCE` 只来自上游应答。本站计费产生的余额错误走 §9.5，不进入分类。
 - **Gemini 分钟级限额不是余额。** “You exceeded your current quota” 是 OpenAI 的余额文案，Gemini 的 `RESOURCE_EXHAUSTED` 限额也用同一句话；带 Gemini 限额标记时按 429 归入限流类，不进入余额状态机。
+- **本地首输出超时不冷却账号。** 首输出慢多因中转排队或长推理，与请求的推理档位相关，冷却账号会把其他档位的请求也挪走，收益不明；它只计会话连败（同会话同账号 2 次即改绑）并换号。管理员配置 `stream_timeout_settings` 后沿用其原有处置（生产未配置）。2026-10-16 生产核查时按代码对齐文档。
 - **池模式账号保留管理员配置的同号重试状态码**，但同样受预算与“每账号最多 1 次”约束。
 - 分类结果写入请求上下文，供换号循环、会话处理、ops 记录与 Explain 使用。
 
@@ -84,7 +85,7 @@
 | 档 | 状态 | 选号行为 |
 |---|---|---|
 | 硬 | 管理员停用（`schedulable=false`）、`status=error`、余额 `EXHAUSTED`（排除期内，§3.2）、凭据失效、重置时间超过 300 秒的限流、IQ 质量门、利润门、模型不支持、分组不匹配 | 永不选中 |
-| 软 | 余额 `SUSPECT`、`TRANSIENT`/`FIRST_OUTPUT_TIMEOUT`/`STALL` 冷却、无重置时间的 429 冷却、不超过 300 秒的有重置时间 429、过载冷却（`overload_cooldown_settings`，当前 2 分钟）、模型级瞬时阻断（`openai_model_transient_state`）、会话回避（§4） | 平时不选；没有任何健康候选时可以作为末位兜底（§4.3） |
+| 软 | 余额 `SUSPECT`、`TRANSIENT`/`STALL` 冷却（以及上游应答的 `FIRST_OUTPUT_TIMEOUT`，§2）、无重置时间的 429 冷却、不超过 300 秒的有重置时间 429、过载冷却（`overload_cooldown_settings`，当前 2 分钟）、模型级瞬时阻断（`openai_model_transient_state`）、会话回避（§4） | 平时不选；没有任何健康候选时可以作为末位兜底（§4.3） |
 
 实现：在 `internal/resilience` 中提供 `PenaltyOf(account, model, now) (tier, recoverAt, reason)`，由两个调度器的候选构造钩子调用。现有冷却仍写在原有字段里：`rate_limit_reset_at`、`overload_until`、`temp_unschedulable_until`（`reason` 前缀区分 `balance:`、`transient:`、`auth:`）。快照与数据库口径都不变。
 
@@ -122,7 +123,7 @@
 
 ### 3.4 瞬时失败冷却
 
-`TRANSIENT`、`FIRST_OUTPUT_TIMEOUT`、`STALL` 写入软冷却：`temp_unschedulable_until = now + cooldown`，`reason="transient:<类别>"`。
+`TRANSIENT`、`STALL` 与上游应答的 `FIRST_OUTPUT_TIMEOUT` 写入软冷却（本地首输出超时不写，§2）：`temp_unschedulable_until = now + cooldown`，`reason="transient:<类别>"`。
 
 - `cooldown` 默认 30 秒；上游正文或头部给出 `retry_after` 时，取 min(retry_after, `retry_after_cap_seconds`=120)。
 - 冷却只是软罚：单号组仍可通过末位兜底使用该账号（§4.3）。

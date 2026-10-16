@@ -34,7 +34,7 @@ Each category MUST map to a fixed policy:
 | RATE_LIMIT | yes | never | soft, configured 429 cooldown | +1 |
 | CAPACITY_SHED | at most one switch to a different base_url host | at most once per account | none | not counted |
 | TRANSIENT | yes | never for 504/524 or attempts ≥ 60 s | soft, transient cooldown or capped retry_after | +1 |
-| FIRST_OUTPUT_TIMEOUT | yes | never | soft, 30 s | +1 |
+| FIRST_OUTPUT_TIMEOUT | yes | never | none when detected locally; soft, 30 s when the upstream answers it | +1 |
 | STALL | no (output already delivered) | never | soft, 30 s | +1 |
 | CLIENT_CANCEL, CLIENT_ERROR | no | never | none | not counted |
 | MODEL_UNSUPPORTED | yes | never | existing account/model block | not counted |
