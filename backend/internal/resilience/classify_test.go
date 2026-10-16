@@ -311,3 +311,13 @@ func TestClassifyRelayWordings(t *testing.T) {
 		Message: "Upstream rate limit exceeded, please retry later"}, nil)
 	require.Equal(t, CategoryRateLimit, r.Category, "in-stream relay rate limit")
 }
+
+func TestGeminiQuotaWordingIsARateLimit(t *testing.T) {
+	gemini := []byte(`{"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.QuotaFailure"}]}}`)
+	r := Classify(Outcome{Source: SourceHTTP, StatusCode: 429, Message: "You exceeded your current quota, please check your plan and billing details.", Type: "RESOURCE_EXHAUSTED", Body: gemini}, nil)
+	require.Contains(t, []Category{CategoryRateLimit, CategoryRateLimitReset}, r.Category, r.Reason)
+
+	// The same sentence from an OpenAI-style relay without a code is a balance failure.
+	r = Classify(Outcome{Source: SourceHTTP, StatusCode: 429, Message: "You exceeded your current quota, please check your plan and billing details."}, nil)
+	require.Equal(t, CategoryBalance, r.Category)
+}

@@ -164,7 +164,6 @@ var defaultBalanceKeywords = []string{
 	"no enough balance",
 	"not enough balance",
 	"balance exhausted",
-	"exceeded your current quota",
 	// new-api / one-api relays (token or user quota used up, pre-charge
 	// refused); without these a 403 reads as an auth failure.
 	"quota is not enough",
@@ -230,6 +229,16 @@ var (
 // evaluated before the HTTP status (design §2.2), so balance signals wrapped
 // in 400/401/403/429 responses are recognised. extraBalanceKeywords comes
 // from failure.balance_keywords_extra.
+// geminiQuotaLimit recognises Gemini's RESOURCE_EXHAUSTED quota errors.
+func geminiQuotaLimit(text, lowerBody string) bool {
+	for _, s := range []string{"resource_exhausted", "quotafailure", "rate-limits", "generativelanguage.googleapis.com"} {
+		if strings.Contains(text, s) || strings.Contains(lowerBody, s) {
+			return true
+		}
+	}
+	return false
+}
+
 func Classify(o Outcome, extraBalanceKeywords []string) Result {
 	switch o.Source {
 	case SourceClientCancel:
@@ -278,6 +287,11 @@ func Classify(o Outcome, extraBalanceKeywords []string) Result {
 		return Result{Category: CategoryBalance, Reason: "balance_code"}
 	}
 	if containsAny(text, defaultBalanceKeywords) || containsAnyFold(text, extraBalanceKeywords) {
+		return Result{Category: CategoryBalance, Reason: "balance_keyword"}
+	}
+	// OpenAI's balance wording; Gemini uses the same sentence for per-minute
+	// RESOURCE_EXHAUSTED limits, which are rate limits.
+	if strings.Contains(text, "exceeded your current quota") && !geminiQuotaLimit(text, lowerBody) {
 		return Result{Category: CategoryBalance, Reason: "balance_keyword"}
 	}
 	if status == http.StatusPaymentRequired {
