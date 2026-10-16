@@ -852,12 +852,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			if errors.As(err, &sseErr) {
 				// 上游 HTTP 200 + SSE 流体内出现 event:error 帧。
 				body := []byte(sseErr.RawData)
-				semanticStatus := http.StatusForbidden
-				if c.Writer.Size() == writerSizeBeforeStream && gjson.GetBytes(body, "error.type").String() == "overloaded_error" {
-					semanticStatus = 529
+				// xy2api resilience: the event's error.type decides the status.
+				semanticStatus, sideEffectHeader := resilienceStreamErrorStatus(gjson.GetBytes(body, "error.type").String(), c.Writer.Size() != writerSizeBeforeStream, resp.Header)
+				if sideEffectHeader != nil {
 					syntheticResp := &http.Response{
 						StatusCode: semanticStatus,
-						Header:     resp.Header.Clone(),
+						Header:     sideEffectHeader,
 						Body:       io.NopCloser(bytes.NewReader(body)),
 					}
 					s.handleFailoverSideEffects(ctx, syntheticResp, account, reqModel)

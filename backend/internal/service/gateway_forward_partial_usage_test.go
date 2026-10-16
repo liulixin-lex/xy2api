@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
 
@@ -262,6 +263,13 @@ func TestGatewayService_Forward_PreOutputSSEOverloadedErrorUsesSemantic529(t *te
 }
 
 func TestGatewayService_Forward_PostOutputSSEOverloadedErrorKeepsExistingStatus(t *testing.T) {
+	// xy2api resilience maps the event type to its status
+	// (resilience_stream_error_test.go); switched off, 0.3.0's 403 holds.
+	orig := *resilience.Current()
+	off := resilience.Defaults()
+	off.Enabled = false
+	resilience.Publish(off)
+	t.Cleanup(func() { resilience.Publish(orig) })
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()

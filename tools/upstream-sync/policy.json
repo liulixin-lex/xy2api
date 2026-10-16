@@ -341,6 +341,10 @@
       "value": "resilienceInServiceRetryAllowed(ctx, account.ID, resp.StatusCode)"
     },
     {
+      "path": "backend/internal/service/gateway_forward.go",
+      "value": "semanticStatus, sideEffectHeader := resilienceStreamErrorStatus(gjson.GetBytes(body, \"error.type\").String(), c.Writer.Size() != writerSizeBeforeStream, resp.Header)"
+    },
+    {
       "path": "backend/internal/service/gateway_scheduling.go",
       "value": "result, err = s.resilienceGatewaySelectionEpilogue(ctx, group, groupID, sessionHash, requestedModel, origExcluded, avoided, result, err)"
     },

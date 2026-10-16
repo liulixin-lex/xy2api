@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"time"
@@ -69,6 +70,46 @@ func markResilienceConfigError(ctx context.Context, err error) {
 	if errors.Is(err, ErrClaudeCodeOnly) || (errors.Is(err, ErrNoAvailableAccounts) && strings.Contains(err.Error(), "channel pricing restriction")) {
 		resilience.StateFrom(ctx).MarkConfigError()
 	}
+}
+
+// resilienceStreamErrorStatus maps the error.type of an Anthropic in-stream
+// error event to the HTTP status it stands for: rate_limit_error is a 429 and
+// overloaded_error a 529 whether or not output was written, api_error a 502,
+// and any other type keeps the 0.3.0 403 (which clients saw as "Upstream
+// access forbidden"). The status drives classification and the client's
+// answer; a written stream still never switches accounts.
+//
+// The returned headers carry the account side effects of that status, nil
+// when none apply: only before any output, for overload (as in 0.3.0) and
+// rate limits. A rate limit is applied without the stream's headers, whose
+// Anthropic window values describe a successful answer and would read as an
+// exhausted window. With the switch off only a pre-output overloaded_error
+// is a 529, as in 0.3.0.
+func resilienceStreamErrorStatus(errType string, outputWritten bool, header http.Header) (int, http.Header) {
+	errType = strings.TrimSpace(errType)
+	status := http.StatusForbidden
+	if resilience.Current().FailureOn() {
+		switch errType {
+		case "overloaded_error":
+			status = 529
+		case "rate_limit_error":
+			status = http.StatusTooManyRequests
+		case "api_error":
+			status = http.StatusBadGateway
+		}
+	} else if !outputWritten && errType == "overloaded_error" {
+		status = 529
+	}
+	if outputWritten {
+		return status, nil
+	}
+	switch status {
+	case 529:
+		return status, header.Clone()
+	case http.StatusTooManyRequests:
+		return status, http.Header{}
+	}
+	return status, nil
 }
 
 // NoAccountRetryAfter estimates when an account of the group may serve the
