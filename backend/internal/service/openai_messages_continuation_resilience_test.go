@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
@@ -80,4 +81,18 @@ func TestForwardAsAnthropic_ContinuationRejectedReplaysAndStaysOff(t *testing.T)
 	require.Equal(t, "resp_next", forward().ResponseID)
 	require.Len(t, upstream.requests, 3)
 	require.False(t, gjson.GetBytes(upstream.bodies[2], "previous_response_id").Exists())
+}
+
+func TestOpenAICompatSessionBindingsAreSwept(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	now := time.Now()
+	svc.openaiCompatSessionResponses.Store("gone", openAICompatSessionResponseBinding{ResponseID: "r1", ExpiresAt: now.Add(-time.Second)})
+	svc.openaiCompatSessionResponses.Store("live", openAICompatSessionResponseBinding{ResponseID: "r2", ExpiresAt: now.Add(time.Hour)})
+	for i := 0; i < openAICompatSessionSweepEvery; i++ {
+		svc.sweepOpenAICompatSessionResponses(now)
+	}
+	_, gone := svc.openaiCompatSessionResponses.Load("gone")
+	_, live := svc.openaiCompatSessionResponses.Load("live")
+	require.False(t, gone, "a session that never returns does not stay in memory")
+	require.True(t, live)
 }

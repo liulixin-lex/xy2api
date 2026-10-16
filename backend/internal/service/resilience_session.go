@@ -492,6 +492,33 @@ func (r *ResilienceService) markSessionFailures(groupID int64, sessionHash strin
 	r.failingSessions.Store(sessionMarkKey(groupID, sessionHash), time.Now().Add(window))
 }
 
+func (r *ResilienceService) sessionMarkLoop(ctx context.Context) {
+	defer r.wg.Done()
+	t := time.NewTicker(resilienceSessionMarkSweep)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			r.sweepSessionMarks(now)
+		}
+	}
+}
+
+// sweepSessionMarks drops expired failure and avoid marks; without it every
+// session that failed once and never returned would stay in memory.
+func (r *ResilienceService) sweepSessionMarks(now time.Time) {
+	for _, m := range []*sync.Map{&r.failingSessions, &r.avoidingSessions} {
+		m.Range(func(k, v any) bool {
+			if until, ok := v.(time.Time); !ok || now.After(until) {
+				m.Delete(k)
+			}
+			return true
+		})
+	}
+}
+
 func (r *ResilienceService) sessionHadFailures(groupID int64, sessionHash string) bool {
 	if r == nil {
 		return false

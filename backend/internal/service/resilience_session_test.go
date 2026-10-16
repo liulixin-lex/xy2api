@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -273,5 +274,21 @@ func TestResiliencePenaltyOfTiers(t *testing.T) {
 			tier, _, _ := resiliencePenaltyOf(&tc.acc, "", now)
 			require.Equal(t, tc.want, tier)
 		})
+	}
+}
+
+func TestSessionMarksAreSwept(t *testing.T) {
+	r := NewResilienceService(nil, newMemResilienceStore())
+	now := time.Now()
+	r.markSessionFailures(7, "gone", -time.Second)
+	r.markSessionFailures(7, "live", time.Minute)
+	r.avoidingSessions.Store(sessionMarkKey(7, "gone"), now.Add(-time.Second))
+	r.avoidingSessions.Store(sessionMarkKey(7, "live"), now.Add(time.Minute))
+	r.sweepSessionMarks(now)
+	for _, m := range []*sync.Map{&r.failingSessions, &r.avoidingSessions} {
+		_, gone := m.Load(sessionMarkKey(7, "gone"))
+		_, live := m.Load(sessionMarkKey(7, "live"))
+		require.False(t, gone, "a session that never returns does not stay in memory")
+		require.True(t, live)
 	}
 }

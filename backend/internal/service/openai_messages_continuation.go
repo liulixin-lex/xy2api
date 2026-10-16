@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -221,10 +222,30 @@ func (s *OpenAIGatewayService) getOpenAICompatSessionResponseID(_ context.Contex
 	return strings.TrimSpace(binding.ResponseID)
 }
 
+// openAICompatSessionStores paces the sweep of expired continuation
+// bindings: lookups only drop the bindings they touch, so sessions that never
+// return would otherwise stay in memory (xy2api gateway resilience).
+var openAICompatSessionStores atomic.Uint64
+
+const openAICompatSessionSweepEvery = 1024
+
+func (s *OpenAIGatewayService) sweepOpenAICompatSessionResponses(now time.Time) {
+	if openAICompatSessionStores.Add(1)%openAICompatSessionSweepEvery != 0 {
+		return
+	}
+	s.openaiCompatSessionResponses.Range(func(k, v any) bool {
+		if b, ok := v.(openAICompatSessionResponseBinding); !ok || (!b.ExpiresAt.IsZero() && now.After(b.ExpiresAt)) {
+			s.openaiCompatSessionResponses.Delete(k)
+		}
+		return true
+	})
+}
+
 func (s *OpenAIGatewayService) bindOpenAICompatSessionResponseID(_ context.Context, c *gin.Context, account *Account, promptCacheKey, responseID string) {
 	if s == nil {
 		return
 	}
+	s.sweepOpenAICompatSessionResponses(time.Now())
 	key := openAICompatSessionResponseKey(c, account, promptCacheKey)
 	id := strings.TrimSpace(responseID)
 	if key == "" || id == "" {
@@ -278,6 +299,7 @@ func (s *OpenAIGatewayService) disableOpenAICompatSessionContinuation(_ context.
 	if s == nil {
 		return
 	}
+	s.sweepOpenAICompatSessionResponses(time.Now())
 	key := openAICompatSessionResponseKey(c, account, promptCacheKey)
 	if key == "" {
 		return

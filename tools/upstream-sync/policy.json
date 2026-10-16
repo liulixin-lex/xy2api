@@ -423,6 +423,10 @@
     {
       "path": "backend/internal/service/openai_messages_continuation.go",
       "value": "func isOpenAICompatContinuationRejected(statusCode int, upstreamBody []byte) bool"
+    },
+    {
+      "path": "backend/internal/service/openai_messages_continuation.go",
+      "value": "s.sweepOpenAICompatSessionResponses(time.Now())"
     }
   ],
   "forbidden_module_paths": [

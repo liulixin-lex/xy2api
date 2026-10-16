@@ -16,7 +16,10 @@ import (
 const (
 	resilienceSettingsRefreshInterval = 10 * time.Second
 	resilienceRecoveringRefresh       = 5 * time.Second
-	resilienceLoadTimeout             = 5 * time.Second
+	// resilienceSessionMarkSweep removes expired session marks of sessions
+	// that never came back (lookups only drop the marks they touch).
+	resilienceSessionMarkSweep = time.Minute
+	resilienceLoadTimeout      = 5 * time.Second
 )
 
 // ResilienceStore is the Redis side of the resilience layer. Every method may
@@ -183,9 +186,10 @@ func (s *ResilienceService) Start() {
 			slog.Warn("resilience.initial_settings_load_failed", "error", err)
 		}
 		loadCancel()
-		s.wg.Add(2)
+		s.wg.Add(3)
 		go s.settingsLoop(ctx)
 		go s.recoveringLoop(ctx)
+		go s.sessionMarkLoop(ctx)
 		for _, loop := range s.background {
 			s.wg.Add(1)
 			go func(loop func(context.Context)) {
