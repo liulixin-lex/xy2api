@@ -275,6 +275,11 @@ func (r *ResilienceService) NoteAccountSuccess(ctx context.Context, account *Acc
 	if r == nil || account == nil {
 		return
 	}
+	// Usage of a stream that broke (stall, in-stream failure) is recorded
+	// too; it must not lift cooldowns or count as a recovery success.
+	if resilience.StateFrom(ctx).AccountFailed(account.ID) {
+		return
+	}
 	now := time.Now()
 	r.successes.last.Store(account.ID, now)
 	resilience.StateFrom(ctx).SessionSuccess(ctx, account.ID)

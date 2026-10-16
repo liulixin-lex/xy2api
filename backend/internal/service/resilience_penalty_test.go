@@ -5,11 +5,13 @@ package service
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
@@ -248,6 +250,34 @@ func TestRecoveringSuccessesReturnToOK(t *testing.T) {
 	}
 	require.Equal(t, resilience.BalanceOK, resilience.BalanceRecordFrom(repo.account.Extra).State)
 	require.Equal(t, 0, r.RecoveringCap(account.ID, time.Now()))
+}
+
+func TestBrokenStreamUsageIsNoRecoverySuccess(t *testing.T) {
+	// The partial usage of a stream that broke on a RECOVERING account is
+	// recorded, but it is no success: the account must not return to OK.
+	svc, repo, account, r := newPenaltyFixture(t, PlatformAnthropic)
+	svc.HandleUpstreamError(context.Background(), account, http.StatusPaymentRequired, http.Header{}, []byte(`{"error":{"message":"insufficient balance"}}`))
+	before := resilience.BalanceRecordFrom(repo.account.Extra)
+	after := resilience.OnProbe(before, resilience.Current(), resilience.ProbePositive, "usage", "balance 10", time.Now())
+	fresh, _ := repo.GetByID(context.Background(), account.ID)
+	svc.persistBalanceRecord(context.Background(), fresh, before, after, "probe")
+
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	st := resilience.NewRequestState()
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil).WithContext(resilience.WithRequestState(context.Background(), st))
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{AccountID: account.ID, Kind: "stream_error", Message: "upstream stream broke"})
+	for i := 0; i < 3; i++ {
+		r.NoteAccountSuccess(c.Request.Context(), account)
+	}
+	require.Equal(t, resilience.BalanceRecovering, resilience.BalanceRecordFrom(repo.account.Extra).State)
+
+	// Another account of the same request that did not fail still counts.
+	require.False(t, st.AccountFailed(account.ID+1))
+	for i := 0; i < 3; i++ {
+		r.NoteAccountSuccess(context.Background(), account)
+	}
+	require.Equal(t, resilience.BalanceOK, resilience.BalanceRecordFrom(repo.account.Extra).State)
 }
 
 func TestClearBalanceExclusionKeepsOtherPauses(t *testing.T) {

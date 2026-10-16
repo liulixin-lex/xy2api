@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"strconv"
 	"strings"
 	"time"
@@ -465,6 +466,9 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	}
 	if ev.ResilienceCategory == "" {
 		ev.ResilienceCategory = opsResilienceCategory(&ev)
+	}
+	if c.Request != nil {
+		resilience.StateFrom(c.Request.Context()).MarkAccountFailed(ev.AccountID)
 	}
 
 	var existing []*OpsUpstreamErrorEvent

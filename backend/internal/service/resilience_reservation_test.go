@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
@@ -99,4 +100,30 @@ func TestOutputP99CapsReservationOutput(t *testing.T) {
 
 	withResilienceSettings(t, func(s *resilience.Settings) { s.Reservation.OutputP99Cap = false })
 	require.InDelta(t, 32000*p.OutputPricePerToken, estimate(32000), 1e-12, "switch off: max_tokens")
+}
+
+func TestForcedCacheBillingKeepsTheRealCacheShare(t *testing.T) {
+	// A sticky session that switched accounts is billed as if its input were
+	// cache reads; the next request's reservation must still see the real
+	// share (here: nothing came from cache).
+	withResilienceSettings(t, nil)
+	store := newMemResilienceStore()
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+	svc.resilience = NewResilienceService(nil, store)
+	res := &InflightReservation{userID: 601}
+	res.SetCacheSession("metadata.user_id=s1")
+	err := svc.RecordUsage(WithInflightReservation(context.Background(), res), &RecordUsageInput{
+		Result:            &ForwardResult{RequestID: "force-cache", Usage: ClaudeUsage{InputTokens: 1000, OutputTokens: 5}, Model: "claude-sonnet-4", Duration: time.Second},
+		APIKey:            &APIKey{ID: 501, Quota: 100},
+		User:              &User{ID: 601},
+		Account:           &Account{ID: 701},
+		ForceCacheBilling: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1000, usageRepo.lastLog.CacheReadTokens, "billed as cache reads")
+	ratio, ok, err := store.SessionCacheRatio(context.Background(), sessionCacheRatioKey(601, "metadata.user_id=s1"))
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Zero(t, ratio)
 }

@@ -57,6 +57,8 @@ type RequestState struct {
 
 	// avoided is the session's avoid set read at selection (design §4.2).
 	avoided map[int64]struct{}
+	// failedAccounts are accounts with a failed attempt in this request.
+	failedAccounts map[int64]struct{}
 }
 
 // SessionRecorder records attempt outcomes of a sticky session. The service
@@ -135,6 +137,33 @@ func (s *RequestState) MarkTurnFailed() {
 	s.mu.Lock()
 	s.turnFailed = true
 	s.mu.Unlock()
+}
+
+// MarkAccountFailed records that an upstream attempt on the account failed
+// during this request, including streams that broke after output.
+func (s *RequestState) MarkAccountFailed(accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	s.mu.Lock()
+	if s.failedAccounts == nil {
+		s.failedAccounts = map[int64]struct{}{}
+	}
+	s.failedAccounts[accountID] = struct{}{}
+	s.mu.Unlock()
+}
+
+// AccountFailed reports whether MarkAccountFailed was called for the account.
+// Usage recorded for such an account (partial usage of a broken stream) is
+// no evidence that the account works.
+func (s *RequestState) AccountFailed(accountID int64) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.failedAccounts[accountID]
+	return ok
 }
 
 // TurnFailed reports whether MarkTurnFailed was called.

@@ -59,7 +59,9 @@ func noteResilienceStall(ctx context.Context, rl *RateLimitService, account *Acc
 	if account == nil || !resilience.Current().StallOn() {
 		return
 	}
-	groupID := resilience.StateFrom(ctx).GroupID()
+	st := resilience.StateFrom(ctx)
+	st.MarkAccountFailed(account.ID)
+	groupID := st.GroupID()
 	resilience.Count(resilience.MetricStall, groupID, account.ID, account.Platform)
 	slog.Warn("resilience.stall", "group_id", groupID, "account_id", account.ID, "platform", account.Platform)
 	if rl == nil {
