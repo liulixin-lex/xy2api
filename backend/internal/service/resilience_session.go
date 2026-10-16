@@ -196,10 +196,13 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 		slog.Warn("resilience.last_resort_list_failed", "group_id", *groupID, "error", err)
 		return nil
 	}
-	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
-	isChannelRestricted := func(account *Account) bool {
-		return needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel)
-	}
+	// The candidates pass the same gates as in normal selection (window
+	// cost and RPM included); only soft penalties are relaxed.
+	ctx = s.withWindowCostPrefetch(ctx, accounts)
+	ctx = s.withRPMPrefetch(ctx, accounts)
+	gates := s.newGatewayCandidateGates(ctx, groupID, platform, useMixed, requestedModel)
+	gateCtx := withResilienceLastResortGate(ctx)
+	owner := resilience.StateFrom(ctx).StickyOwner()
 	now := time.Now()
 	var cands []lastResortCandidate
 	for i := range accounts {
@@ -212,10 +215,7 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 			continue
 		}
 		candidate := withoutSoftPenalties(acc, now)
-		if !s.isAccountAllowedForPlatform(candidate, platform, useMixed) ||
-			(requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, candidate, requestedModel)) ||
-			isChannelRestricted(candidate) || !s.isGatewayAccountProfitEligible(ctx, candidate) ||
-			!s.isAccountSchedulableForQuota(candidate) {
+		if reason, _ := gates.candidateReason(gateCtx, candidate, acc.ID == owner, now); reason != "" {
 			continue
 		}
 		cands = append(cands, lastResortCandidate{account: candidate, recoverAt: recoverAt})
@@ -382,6 +382,10 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 			continue
 		}
 		candidate := withoutSoftPenalties(acc, now)
+		if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(gateCtx, candidate, platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability); reason != "" &&
+			(reason != "model_rate_limited" || !lastResortModelLimitSoft(gateCtx, candidate, req.RequestedModel)) {
+			continue
+		}
 		if ok, _ := gate.isAccountRequestCompatibleReason(gateCtx, candidate, req); !ok {
 			continue
 		}
@@ -395,10 +399,11 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 		return nil
 	}
 	// Take the first candidate with a free slot; when all are busy, wait
-	// for the best one.
+	// for the best one. Codex accounts under upstream pressure take slots
+	// only up to their adaptive limit.
 	for _, c := range cands {
 		acc := c.account
-		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency)
+		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency))
 		if err == nil && result != nil && result.Acquired {
 			s.noteOpenAILastResort(ctx, req.GroupID, acc, c.recoverAt)
 			return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: acc, Acquired: true, ReleaseFunc: result.ReleaseFunc})
@@ -411,7 +416,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 		Account: acc,
 		WaitPlan: &AccountWaitPlan{
 			AccountID:      acc.ID,
-			MaxConcurrency: acc.Concurrency,
+			MaxConcurrency: s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency),
 			Timeout:        cfg.FallbackWaitTimeout,
 			MaxWaiting:     cfg.FallbackMaxWaiting,
 		},
@@ -444,6 +449,13 @@ func withResilienceLastResortGate(ctx context.Context) context.Context {
 func resilienceLastResortGate(ctx context.Context) bool {
 	v, _ := ctx.Value(resilienceLastResortGateKey{}).(bool)
 	return v
+}
+
+// lastResortModelLimitSoft reports whether a per-model rate limit lets the
+// account through as a last resort: only in a last-resort context and only
+// while the limit is within the soft threshold (design §3.1).
+func lastResortModelLimitSoft(ctx context.Context, acc *Account, model string) bool {
+	return resilienceLastResortGate(ctx) && acc.GetRateLimitRemainingTimeWithContext(ctx, model) <= resilience.HardRateLimitThreshold
 }
 
 // sessionFailureRecorder implements resilience.SessionRecorder for one

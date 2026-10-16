@@ -46,6 +46,57 @@ type shareGatewayInputs struct {
 	listed   int
 }
 
+// gatewayCandidateGates are the original Sub2API per-account gates of one
+// gateway selection. Share candidates and last-resort selection both run
+// accounts through them, so neither can miss a gate the other applies.
+type gatewayCandidateGates struct {
+	s            *GatewayService
+	groupID      *int64
+	platform     string
+	useMixed     bool
+	model        string
+	channelCheck bool
+}
+
+func (s *GatewayService) newGatewayCandidateGates(ctx context.Context, groupID *int64, platform string, useMixed bool, model string) gatewayCandidateGates {
+	return gatewayCandidateGates{s: s, groupID: groupID, platform: platform, useMixed: useMixed, model: model,
+		channelCheck: s.needsUpstreamChannelRestrictionCheck(ctx, groupID)}
+}
+
+// candidateReason returns the first gate that rejects acc, or "" when all
+// pass, with the expected recovery of a temporary state. sticky grants the
+// sticky allowance of the window cost and RPM limits. In a last-resort
+// context the caller has cleared the soft account states, and a per-model
+// rate limit within the soft threshold passes (design §4.3).
+func (g gatewayCandidateGates) candidateReason(ctx context.Context, acc *Account, sticky bool, now time.Time) (sharesched.Reason, time.Time) {
+	s := g.s
+	switch {
+	case !s.isAccountSchedulableForSelection(acc):
+		return shareAccountStateReason(acc, now)
+	case !s.isGatewayAccountProfitEligible(ctx, acc):
+		return sharesched.ReasonProfitGate, time.Time{}
+	case !s.isAccountAllowedForPlatform(acc, g.platform, g.useMixed):
+		return sharesched.ReasonPlatformMismatch, time.Time{}
+	case g.model != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, g.model):
+		return sharesched.ReasonModelUnsupported, time.Time{}
+	case g.channelCheck && s.isUpstreamModelRestrictedByChannel(ctx, *g.groupID, acc, g.model):
+		return sharesched.ReasonChannelRestricted, time.Time{}
+	case !s.isAccountSchedulableForModelSelection(ctx, acc, g.model) && !lastResortModelLimitSoft(ctx, acc, g.model):
+		var recoverAt time.Time
+		if remaining := acc.GetRateLimitRemainingTimeWithContext(ctx, g.model); remaining > 0 {
+			recoverAt = now.Add(remaining)
+		}
+		return sharesched.ReasonModelRateLimited, recoverAt
+	case !s.isAccountSchedulableForQuota(acc):
+		return sharesched.ReasonQuotaExceeded, time.Time{}
+	case !s.isAccountSchedulableForWindowCost(ctx, acc, sticky):
+		return sharesched.ReasonWindowCost, time.Time{}
+	case !s.isAccountSchedulableForRPM(ctx, acc, sticky):
+		return sharesched.ReasonRPMLimit, time.Time{}
+	}
+	return "", time.Time{}
+}
+
 // shareGatewayCandidates lists the group's accounts and runs the original
 // Sub2API gates on each, keeping the failing gate as the reason.
 func (s *GatewayService) shareGatewayCandidates(ctx context.Context, group *Group, groupID *int64, requestedModel string, excludedIDs map[int64]struct{}, boundID int64) (context.Context, *shareGatewayInputs, error) {
@@ -59,7 +110,7 @@ func (s *GatewayService) shareGatewayCandidates(ctx context.Context, group *Grou
 	}
 	ctx = s.withWindowCostPrefetch(ctx, accounts)
 	ctx = s.withRPMPrefetch(ctx, accounts)
-	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
+	gates := s.newGatewayCandidateGates(ctx, groupID, platform, useMixed, requestedModel)
 	now := time.Now()
 	in := &shareGatewayInputs{platform: platform, accounts: make(map[int64]*Account, len(accounts)),
 		cands: make([]sharesched.Candidate, 0, len(accounts)), listed: len(accounts)}
@@ -76,32 +127,10 @@ func (s *GatewayService) shareGatewayCandidates(ctx context.Context, group *Grou
 			in.cands = append(in.cands, c)
 			continue
 		}
-		sticky := acc.ID == boundID
-		switch {
-		case !s.isAccountSchedulableForSelection(acc):
-			c.Reason, c.RecoverAt = shareAccountStateReason(acc, now)
-		case !s.isGatewayAccountProfitEligible(ctx, acc):
-			c.Reason = sharesched.ReasonProfitGate
-		case !s.isAccountAllowedForPlatform(acc, platform, useMixed):
-			c.Reason = sharesched.ReasonPlatformMismatch
-		case requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel):
-			c.Reason = sharesched.ReasonModelUnsupported
-		case needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, acc, requestedModel):
-			c.Reason = sharesched.ReasonChannelRestricted
+		c.Reason, c.RecoverAt = gates.candidateReason(ctx, acc, acc.ID == boundID, now)
+		c.Eligible = c.Reason == ""
+		if c.Reason == sharesched.ReasonChannelRestricted {
 			in.restrict++
-		case !s.isAccountSchedulableForModelSelection(ctx, acc, requestedModel):
-			c.Reason = sharesched.ReasonModelRateLimited
-			if remaining := acc.GetRateLimitRemainingTimeWithContext(ctx, requestedModel); remaining > 0 {
-				c.RecoverAt = now.Add(remaining)
-			}
-		case !s.isAccountSchedulableForQuota(acc):
-			c.Reason = sharesched.ReasonQuotaExceeded
-		case !s.isAccountSchedulableForWindowCost(ctx, acc, sticky):
-			c.Reason = sharesched.ReasonWindowCost
-		case !s.isAccountSchedulableForRPM(ctx, acc, sticky):
-			c.Reason = sharesched.ReasonRPMLimit
-		default:
-			c.Eligible = true
 		}
 		c.StableSince = s.shareScheduling.observeEligibility(acc.ID, c.Eligible, c.Reason, now)
 		in.cands = append(in.cands, c)
