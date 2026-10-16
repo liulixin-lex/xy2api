@@ -441,6 +441,10 @@
       "value": "if only, tracked := service.DeliveryOnlyHeartbeats(c); tracked {"
     },
     {
+      "path": "backend/internal/handler/gateway_helper.go",
+      "value": "timeout = resilienceSlotWaitTimeout(c, timeout)"
+    },
+    {
       "path": "backend/internal/handler/openai_gateway_handler.go",
       "value": "h.handleStreamingAwareErrorWithCode(c, http.StatusBadRequest, \"invalid_request_error\", codeContentPolicyViolation, msg, streamStarted, false)"
     },

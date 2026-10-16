@@ -151,3 +151,17 @@ func resilienceCapacityExhausted(c *gin.Context, failoverErr *service.UpstreamFa
 	}
 	return http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable"
 }
+
+// resilienceSlotWaitTimeout bounds a slot wait by the remaining pre-output
+// budget (design §6.1): a wait that outlasts the budget would leave a
+// streaming client to its own idle timeout instead of a terminal answer.
+// Requests without a pre-output deadline keep the wait's own timeout.
+func resilienceSlotWaitTimeout(c *gin.Context, timeout time.Duration) time.Duration {
+	if c == nil || c.Request == nil {
+		return timeout
+	}
+	if rem := resilience.StateFrom(c.Request.Context()).Budget().Remaining(time.Now()); rem > 0 && rem < timeout {
+		return rem
+	}
+	return timeout
+}
