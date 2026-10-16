@@ -4,6 +4,15 @@
 
 ## 当前交接状态
 
+### Grok 渠道监控原生 Responses — PR #98（2026-10-16）
+
+- 用户授权依据只读审查新增功能并提交 PR；独立分支 `feat/grok-monitor-responses-20261016`，基线 main `f8fec15a23ab37a6efdbc02b0db0376ed6b60dbb`，工作树 `/lex/xy2api-grok-monitor-responses`。[PR #98](https://github.com/liulixin-lex/xy2api/pull/98) 已提交，未合并、发版或部署。
+- Grok 类型可原生选择 Responses，复用非流式 JSON 请求/文本解析与合并字段保护；部分编辑保留协议，历史 Chat 默认和供应商单独切换默认保持。前端覆盖监控、模板、协议筛选、快照清理与高级示例，新增前端回归纳入 critical CI。说明见 [GROK_MONITOR_RESPONSES.md](GROK_MONITOR_RESPONSES.md)。
+- 本功能无迁移、依赖、生成代码或业务调度变更；不包含流式 SSE 探测、阈值调整、上游模型路由和 Grok 换号修复。生产配置与数据保持。
+- 本地前端新增及相关18项、类型检查、生产构建、19项工具、来源审计与调度差异检查已通过；远端前端 critical/lint/typecheck 与安全检查已有通过记录。后端专项及最终远端完整门禁以 PR 最新 head 和 `/lex/grok-monitor-responses-20261016-evidence/VALIDATION.json` 为准，不将早期 head 的检查冒称后继检查。
+- 首次本地后端编译遇到空间不足时失败，改用本任务专用 GOTMPDIR；后续专项发现测试夹具漏填 endpoint，已仅补齐夹具，未放宽生产校验。前端可选 provider 类型也已修正并复验；所有失败记录保留。自身开发任务已提交，等待维护者评审；合并/发版/部署需另行授权。
+
+
 ### Sub2API 0.2.15 / XY2API 0.3.0 正式发布完成（2026-10-13）
 
 - 独立工作树 `/lex/xy2api-sync-20261013`；起始main `7b1d5d8c387c461a660befa3ac936b39715b4bf0`。固定官方annotated v0.2.15（object `86a80c13dcba86f52f9ca815b5a471cecc236227`，target `f2669c8cf62555cd92389b3f55920e9e6e7c6ff2`），真实base `0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d`。146个上游提交、27项冲突裁决见[同步说明](UPSTREAM_SYNC_V0215.md)。
@@ -2124,3 +2133,11 @@ pnpm --dir frontend run build
 - 清理仅本任务prefix+label容器/网络/卷和指定敏感fixture路径；保留hash/JSON/日志，4个既有部署完全不变。临时VCS复现clone已删；生产没有写入或部署。
 - 按AGENTS在正式发行后补齐记忆并清理本任务进行中条目，本收尾仅改PROJECT_MEMORY，使用独立PR和完整保护检查。不可变发行tag保持1e0fbdd704；收尾main的业务树与正式tag完全一致，此纯文档领先记录是对runbook收尾“main等于tag”的明确例外，避免为补记发行结果移动标签。
 - 没有未完成业务修复或发行验收；后续仅为用户实际部署时的public设置、生产恢复验证与可选share影子/灰度，未在此次只读生产授权外执行。证据及历史失败/中断均保留，未保证无法证明的零风险。
+
+### 2026-10-16 — 20261016-grok-monitor-responses — 原生协议功能与 PR 交付
+
+- 请求：根据只读审查中 Grok 监控固定 Chat、账号测试使用 Responses 的证据，在指定仓库增加原生协议选项并提交 PR；未授权生产变更或合并发布。
+- 开始状态：干净 main `f8fec15a23ab37a6efdbc02b0db0376ed6b60dbb`；原工作树不变，独立分支与工作树完成实现。没有把生产凭据、IP、用户信息或原始日志提交到仓库。
+- 修改：后端监控/模板校验、Responses adapter 选择、文本提取入口、合并字段保护、部分更新保留协议；前端监控及模板编辑/筛选/展示、请求示例和中英文说明。无迁移或依赖升级，Chat及OpenAI原有行为保持。
+- 验证：本地18项前端新增及相关回归、类型/lint/生产构建、19项工具、来源审计及调度差异检查通过；补充后端HTTP路径/字段/错误与创建/更新/模板回归。初轮编译空间问题、可选参数类型错误及缺endpoint测试夹具均保留记录，修正后的后端与最终完整CI明细保存在外部VALIDATION及PR。
+- 交付：[PR #98](https://github.com/liulixin-lex/xy2api/pull/98)；文档说明非流式JSON和既有6/30/45秒阈值边界。源码功能与使用说明完整提交，本Agent不合并、不发布、不部署。下一步由维护者评审并按目标供应商验证实际服务可用性。
