@@ -478,7 +478,8 @@
     "xy-resilience-errors-hook",
     "xy-resilience-fallback-hook",
     "xy-index-nonce-no-304",
-    "xy-placeholder-session-id"
+    "xy-placeholder-session-id",
+    "xy-allowlist-404-hint"
   ],
   "custom_patch_tests": [
     {
@@ -610,6 +611,11 @@
       "id": "xy-placeholder-session-id",
       "path": "backend/internal/service/generate_session_hash_test.go",
       "literal": "TestGenerateSessionHash_PlaceholderSessionIDIsIgnored"
+    },
+    {
+      "id": "xy-allowlist-404-hint",
+      "path": "backend/internal/server/middleware/group_model_allowlist_test.go",
+      "literal": "TestGroupModelAllowlistRejectionNamesAvailableModels"
     }
   ]
 }

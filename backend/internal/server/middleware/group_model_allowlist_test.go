@@ -499,3 +499,21 @@ func TestGroupModelAllowlistDuplicateIdenticalModelsAllowed(t *testing.T) {
 		t.Fatalf("expected handler to run once, got %v", *calls)
 	}
 }
+
+func TestGroupModelAllowlistRejectionNamesAvailableModels(t *testing.T) {
+	router, _ := newGroupModelAllowlistTestRouter(allowlistAPIKey(true, "gpt-6-sol", "gpt-6.1-*"), "/v1")
+
+	w := doJSON(t, router, http.MethodPost, "/v1/responses", `{"model":"gpt-5.5"}`)
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), `not available for this group. Available: gpt-6-sol, gpt-6.1-*`) {
+		t.Fatalf("expected available models in the 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	many := make([]string, 0, 12)
+	for i := 0; i < 12; i++ {
+		many = append(many, "m"+string(rune('a'+i)))
+	}
+	msg := groupModelAllowlistRejection("x", service.GroupModelAllowlist{Enabled: true, Models: many})
+	if !strings.HasSuffix(msg, "mi, mj and 2 more") {
+		t.Fatalf("expected a bounded list, got %q", msg)
+	}
+}

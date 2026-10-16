@@ -84,9 +84,29 @@ func GroupModelAllowlist() gin.HandlerFunc {
 
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 		MarkIngressRejected(c, IngressRejectModelNotAllowed)
-		groupModelAllowlistErrorWriter(c)(c, http.StatusNotFound, fmt.Sprintf("Model %q is not available for this group", blocked))
+		groupModelAllowlistErrorWriter(c)(c, http.StatusNotFound, groupModelAllowlistRejection(blocked, allowlist))
 		c.Abort()
 	}
+}
+
+// groupModelAllowlistHintMax bounds how many allowlist entries the 404 names.
+const groupModelAllowlistHintMax = 10
+
+// groupModelAllowlistRejection names the blocked model and the group's
+// allowlist entries, so a client with a wrong model setting can fix it
+// without asking the administrator.
+func groupModelAllowlistRejection(blocked string, allowlist service.GroupModelAllowlist) string {
+	msg := fmt.Sprintf("Model %q is not available for this group", blocked)
+	models := allowlist.Models
+	if len(models) == 0 {
+		return msg
+	}
+	more := ""
+	if len(models) > groupModelAllowlistHintMax {
+		more = fmt.Sprintf(" and %d more", len(models)-groupModelAllowlistHintMax)
+		models = models[:groupModelAllowlistHintMax]
+	}
+	return msg + ". Available: " + strings.Join(models, ", ") + more
 }
 
 // isResponsesWebSocketRoute 判断当前请求是否命中 OpenAI Responses WebSocket
