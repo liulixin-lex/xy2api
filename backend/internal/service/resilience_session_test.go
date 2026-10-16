@@ -100,6 +100,56 @@ func TestGatewayLastResortPrefersHighestTierThenSoonest(t *testing.T) {
 	require.Equal(t, int64(23), result.Account.ID, "priority 1 first, then the soonest end of the penalty")
 }
 
+func TestLastResortTakesAFreeSlotBeforeWaiting(t *testing.T) {
+	now := time.Now()
+	soon, late := now.Add(10*time.Second), now.Add(50*time.Second)
+	svc, _ := newLastResortGatewayFixture(t, []Account{
+		{ID: 41, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 1, OverloadUntil: &soon},
+		{ID: 42, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 1, OverloadUntil: &late},
+	})
+	busy := map[int64]bool{41: false}
+	svc.concurrencyService = NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: busy})
+	groupID := int64(7)
+	result, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", nil, "", 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(42), result.Account.ID, "the best candidate is busy, the next one is free")
+	require.True(t, result.Acquired)
+
+	busy[42] = false
+	result, err = svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", nil, "", 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(41), result.Account.ID, "all busy: wait for the best one")
+	require.False(t, result.Acquired)
+	require.NotNil(t, result.WaitPlan)
+
+	// The OpenAI scheduler does the same.
+	withResilienceSettings(t, nil)
+	accounts := []Account{
+		{ID: 81, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, RateLimitResetAt: &soon},
+		{ID: 82, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, RateLimitResetAt: &late},
+	}
+	cfg := &config.Config{}
+	cfg.Gateway.Scheduling.LoadBatchEnabled = false
+	openaiBusy := map[int64]bool{81: false}
+	oa := &OpenAIGatewayService{
+		accountRepo:        openAIGroupListingRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		cache:              &schedulerTestGatewayCache{},
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: openaiBusy}),
+		resilience:         NewResilienceService(nil, newMemResilienceStore()),
+	}
+	openaiGroup := int64(9)
+	sel, _, err := oa.SelectAccountWithScheduler(context.Background(), &openaiGroup, "", "", "gpt-5.5", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(82), sel.Account.ID)
+	require.True(t, sel.Acquired)
+	openaiBusy[82] = false
+	sel, _, err = oa.SelectAccountWithScheduler(context.Background(), &openaiGroup, "", "", "gpt-5.5", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(81), sel.Account.ID)
+	require.NotNil(t, sel.WaitPlan)
+}
+
 func TestGatewayLastResortSkipsAccountsFailedInThisRequest(t *testing.T) {
 	until := time.Now().Add(30 * time.Second)
 	svc, _ := newLastResortGatewayFixture(t, []Account{{

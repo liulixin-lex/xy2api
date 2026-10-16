@@ -220,23 +220,31 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 		}
 		cands = append(cands, lastResortCandidate{account: candidate, recoverAt: recoverAt})
 	}
-	cfg := s.schedulingConfig()
+	// Take the first candidate with a free slot; when all are busy, wait
+	// for the best one.
+	var busy []lastResortCandidate
 	for _, c := range pickLastResort(cands) {
 		acc := c.account
 		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency)
-		if err == nil && result != nil && result.Acquired {
-			if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
-				result.ReleaseFunc()
-				continue
-			}
-			s.noteLastResort(ctx, groupID, acc, c.recoverAt)
-			sel, err := s.newSelectionResult(ctx, acc, true, result.ReleaseFunc, nil)
-			if err != nil {
-				result.ReleaseFunc()
-				return nil
-			}
-			return sel
+		if err != nil || result == nil || !result.Acquired {
+			busy = append(busy, c)
+			continue
 		}
+		if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
+			result.ReleaseFunc()
+			continue
+		}
+		s.noteLastResort(ctx, groupID, acc, c.recoverAt)
+		sel, err := s.newSelectionResult(ctx, acc, true, result.ReleaseFunc, nil)
+		if err != nil {
+			result.ReleaseFunc()
+			return nil
+		}
+		return sel
+	}
+	cfg := s.schedulingConfig()
+	for _, c := range busy {
+		acc := c.account
 		if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
 			continue
 		}
@@ -382,25 +390,32 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 		}
 		cands = append(cands, lastResortCandidate{account: candidate, recoverAt: recoverAt})
 	}
-	cfg := s.schedulingConfig()
-	for _, c := range pickLastResort(cands) {
+	cands = pickLastResort(cands)
+	if len(cands) == 0 {
+		return nil
+	}
+	// Take the first candidate with a free slot; when all are busy, wait
+	// for the best one.
+	for _, c := range cands {
 		acc := c.account
 		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency)
-		s.noteOpenAILastResort(ctx, req.GroupID, acc, c.recoverAt)
 		if err == nil && result != nil && result.Acquired {
+			s.noteOpenAILastResort(ctx, req.GroupID, acc, c.recoverAt)
 			return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: acc, Acquired: true, ReleaseFunc: result.ReleaseFunc})
 		}
-		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
-			Account: acc,
-			WaitPlan: &AccountWaitPlan{
-				AccountID:      acc.ID,
-				MaxConcurrency: acc.Concurrency,
-				Timeout:        cfg.FallbackWaitTimeout,
-				MaxWaiting:     cfg.FallbackMaxWaiting,
-			},
-		})
 	}
-	return nil
+	cfg := s.schedulingConfig()
+	acc := cands[0].account
+	s.noteOpenAILastResort(ctx, req.GroupID, acc, cands[0].recoverAt)
+	return attachSelectionProfitGate(ctx, &AccountSelectionResult{
+		Account: acc,
+		WaitPlan: &AccountWaitPlan{
+			AccountID:      acc.ID,
+			MaxConcurrency: acc.Concurrency,
+			Timeout:        cfg.FallbackWaitTimeout,
+			MaxWaiting:     cfg.FallbackMaxWaiting,
+		},
+	})
 }
 
 func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time) {
