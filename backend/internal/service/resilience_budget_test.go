@@ -41,6 +41,13 @@ func TestGeminiInPlaceRetries(t *testing.T) {
 	require.False(t, geminiInPlaceRetryAllowed(ctx, &retries))
 	require.Equal(t, 1, resilience.StateFrom(ctx).Budget().Attempts())
 
+	// A request without a budget (WebSocket, internal calls) keeps the 0.3.0
+	// loop bound even with the budget switch on.
+	retries = 0
+	for i := 0; i < 4; i++ {
+		require.True(t, geminiInPlaceRetryAllowed(context.Background(), &retries))
+	}
+
 	// Switch off: the 0.3.0 loop bound (five attempts) applies.
 	withResilienceSettings(t, func(s *resilience.Settings) { s.Budget.Enabled = false })
 	retries = 0

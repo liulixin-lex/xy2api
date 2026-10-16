@@ -1850,14 +1850,15 @@ func sleepGeminiBackoffCtx(ctx context.Context, attempt int) bool {
 // the budget; otherwise the 0.3.0 limit applies.
 func geminiInPlaceRetryAllowed(ctx context.Context, retries *int) bool {
 	cfg := resilience.Current()
-	if !cfg.BudgetOn() {
+	budget := resilience.StateFrom(ctx).Budget()
+	if !cfg.BudgetOn() || budget == nil {
 		*retries++
 		return true
 	}
 	if *retries >= cfg.Budget.GeminiSameAccountRetries {
 		return false
 	}
-	if !resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(0, false, time.Now()) {
+	if !budget.ConsumeInPlaceRetry(0, false, time.Now()) {
 		return false
 	}
 	*retries++
