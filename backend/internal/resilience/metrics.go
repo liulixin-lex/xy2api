@@ -28,6 +28,9 @@ const (
 	// MetricPostOutputFailure counts upstream failures after output reached
 	// the client (design §7.6); the label is the failure kind.
 	MetricPostOutputFailure = "post_output_failure"
+	// MetricRelayKeepalive counts relay keep-alive frames dropped from
+	// upstream streams (design §7.8), per account.
+	MetricRelayKeepalive = "relay_keepalive"
 )
 
 // MetricsRetention bounds the history kept for the stats endpoint.

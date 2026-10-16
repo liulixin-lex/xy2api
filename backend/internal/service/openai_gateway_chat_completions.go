@@ -525,7 +525,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 ) (_ *OpenAIForwardResult, retErr error) {
 	requestID := resp.Header.Get("x-request-id")
 
-	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, "openai chat_completions buffered", requestID)
+	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, account, "openai chat_completions buffered", requestID)
 	if err != nil {
 		return nil, s.newOpenAICompatBufferedReadFailoverError(c, account, resp, requestID, err)
 	}
@@ -711,7 +711,8 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		observer = beginUpstreamResponseModelObservation(c)
 	}
 
-	scanner := s.newUpstreamSSEScanner(resp.Body)
+	relayLive := relayLivenessFor(c, account)
+	scanner := s.newUpstreamSSEScanner(resp.Body, relayLive)
 
 	streamInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
@@ -1127,7 +1128,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 
 		case <-intervalCh:
-			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
+			lastRead := relayLive.lastActivity(time.Unix(0, atomic.LoadInt64(&lastReadAt)))
 			if time.Since(lastRead) < streamInterval {
 				continue
 			}

@@ -612,7 +612,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 ) (_ *OpenAIForwardResult, retErr error) {
 	requestID := resp.Header.Get("x-request-id")
 
-	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, "openai messages buffered", requestID)
+	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, account, "openai messages buffered", requestID)
 	if err != nil {
 		var readErr *openAICompatBufferedReadError
 		if errors.As(err, &readErr) && readErr != nil {
@@ -783,6 +783,7 @@ func openAICompatTerminalResponse(event *apicompat.ResponsesStreamEvent, payload
 func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	logPrefix string,
 	requestID string,
 ) (*apicompat.ResponsesResponse, OpenAIUsage, *apicompat.BufferedResponseAccumulator, error) {
@@ -792,7 +793,8 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 		return nil, usage, acc, errors.New("upstream response body is nil")
 	}
 
-	scanner := s.newUpstreamSSEScanner(resp.Body)
+	relayLive := relayLivenessFor(c, account)
+	scanner := s.newUpstreamSSEScanner(resp.Body, relayLive)
 
 	streamInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
@@ -930,6 +932,11 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 			}
 
 		case <-timeoutCh:
+			// xy2api resilience: relay keep-alive frames keep the stream alive (design §7.8).
+			if rest := streamInterval - time.Since(relayLive.lastActivity(time.Time{})); rest > 0 {
+				timeoutTimer.Reset(rest)
+				continue
+			}
 			_ = resp.Body.Close()
 			logger.L().Warn(logPrefix+": data interval timeout",
 				zap.String("request_id", requestID),
@@ -972,7 +979,8 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	streamSearchSeen := make(map[string]struct{})
 	countSearch := account != nil && account.IsGrok()
 
-	scanner := s.newUpstreamSSEScanner(resp.Body)
+	relayLive := relayLivenessFor(c, account)
+	scanner := s.newUpstreamSSEScanner(resp.Body, relayLive)
 
 	streamInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
@@ -1325,7 +1333,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 
 		case <-intervalCh:
-			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
+			lastRead := relayLive.lastActivity(time.Unix(0, atomic.LoadInt64(&lastReadAt)))
 			if time.Since(lastRead) < streamInterval {
 				continue
 			}

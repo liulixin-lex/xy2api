@@ -82,7 +82,8 @@ export default {
         turn_cap: 'Failed turns ended',
         abuse_guard: 'Abuse guard charges',
         stall: 'Stalled streams',
-        post_output_failure: 'Upstream failures after output'
+        post_output_failure: 'Upstream failures after output',
+        relay_keepalive: 'Relay keep-alive frames'
       },
       states: {
         OK: 'OK',

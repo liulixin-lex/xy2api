@@ -167,7 +167,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	responseID := ""
 	var firstOutputScanGuard atomic.Bool
 	firstOutputScanGuard.Store(stageFirstOutput)
-	scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(resp.Body))
+	relayLive := newRelayLiveness(ctx, account)
+	scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(resp.Body, relayLive))
 	scanBuf := getSSEScannerBuf64K()
 	scanner.Buffer(scanBuf[:0], maxLineSize)
 	if stageFirstOutput {
@@ -931,7 +932,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if failureDelivered {
 				return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 			}
-			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
+			lastRead := relayLive.lastActivity(time.Unix(0, atomic.LoadInt64(&lastReadAt)))
 			stallThreshold := resilienceStallThreshold(streamInterval, openAIStreamClientOutputStarted(c, clientOutputStarted) && !imageGenerationSeen)
 			if stallThreshold <= 0 || time.Since(lastRead) < stallThreshold {
 				continue

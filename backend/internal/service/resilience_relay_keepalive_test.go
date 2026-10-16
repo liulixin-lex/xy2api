@@ -17,11 +17,11 @@ const relayKeepaliveFrame = "event: response.output_text.delta\n" +
 
 func filterAll(t *testing.T, in string) string {
 	t.Helper()
-	out, err := io.ReadAll(newOpenAIRelayKeepaliveFilter(iotest.OneByteReader(strings.NewReader(in))))
+	out, err := io.ReadAll(newOpenAIRelayKeepaliveFilter(iotest.OneByteReader(strings.NewReader(in)), nil))
 	require.NoError(t, err)
 	// Emitted lines alias the filter's read buffer: a caller that takes
 	// them a byte at a time must see the same stream.
-	small, err := io.ReadAll(iotest.OneByteReader(newOpenAIRelayKeepaliveFilter(strings.NewReader(in))))
+	small, err := io.ReadAll(iotest.OneByteReader(newOpenAIRelayKeepaliveFilter(strings.NewReader(in), nil)))
 	require.NoError(t, err)
 	require.Equal(t, string(out), string(small))
 	return string(out)
@@ -35,7 +35,7 @@ func BenchmarkRelayKeepaliveFilter(b *testing.B) {
 	b.SetBytes(int64(len(stream)))
 	b.ReportAllocs()
 	for b.Loop() {
-		_, _ = io.Copy(io.Discard, newOpenAIRelayKeepaliveFilter(strings.NewReader(stream)))
+		_, _ = io.Copy(io.Discard, newOpenAIRelayKeepaliveFilter(strings.NewReader(stream), nil))
 	}
 }
 

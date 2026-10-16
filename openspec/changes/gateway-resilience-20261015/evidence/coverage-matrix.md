@@ -83,6 +83,7 @@ The Explain part of “Explainability and configuration” has no scenario of it
 | Last candidate waits for the budget | `TestSoleCandidateIsLastCandidate`, `TestOpenAILastResortSingleAccount` | C-codex-slow-first-cdn, C-openai-py-slow-first-cdn, KA-8 (CDN 300 s) |
 | Keep-alive before response.created | `TestRelayKeepaliveFramesAreDropped` | KA-7, C-openai-py-fail-first |
 | Keep-alive does not disarm failover | `TestRelayKeepaliveFramesAreDropped` | KA-7 |
+| Keep-alive frames during a quiet period | `TestRelayKeepaliveFramesKeepAStreamAliveAfterOutput`, `TestRelayKeepaliveFramesKeepAStreamAliveBeforeOutput`, `TestRelayKeepaliveFramesKeepAChatCompletionsStreamAlive`, `TestRelayKeepaliveFramesKeepAMessagesConversionAlive`, `TestRelayKeepaliveFramesKeepABufferedConversionAlive` | KA-9 |
 | Stall detected within the threshold | `TestStallDetectedWithinFiveSecondsAfterOutput`, `TestStallCheckPeriodAndThreshold` | ST-1 |
 | Anthropic error after a ping | `TestPreOutputKeepaliveAnthropicPingsAndFailoverSize`, `TestCommittedAnthropicErrorFrameFollowsTheErrorsSwitch` | ANT-1, C-anthropic-py-committed-error |
 | Codex sees the failure promptly | `TestPreOutputKeepaliveRewritesCommittedErrors`, `TestCommittedFailureCarriesRetryHint` | KA-4 |

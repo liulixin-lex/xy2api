@@ -598,6 +598,20 @@ def ka7():
     return r, checks
 
 
+@scenario("KA-9", "Relay keeps a quiet period after output alive with keep-alive frames for 135 s: no stall, frames dropped, completes")
+def ka9():
+    checks = []
+    r = stream_request(DIRECT, "/v1/responses", KEYS["G-ka-quiet"], responses_body(session=fresh_session()))
+    lines = [l for _, l in r["lines"]]
+    deltas = [l for l in lines if l.startswith("data:") and '"response.output_text.delta"' in l]
+    check(r["status"] == 200, "status 200", checks)
+    check(not any("SSE-Keep-Alive" in l for l in lines), "no keep-alive frame reaches the client", checks)
+    check(not any("stream_timeout" in l for l in lines), "not ended as stalled", checks)
+    check(len(deltas) >= 2 and any("response.completed" in l for l in lines), f"both deltas and response.completed ({len(deltas)} deltas)", checks)
+    check((r["elapsed"] or 0) >= 130, f"ran through the quiet period ({r['elapsed']} s)", checks)
+    return r, checks
+
+
 @scenario("DC-1", "Client leaves before any output: upstream cancelled within 2 s, no usage row, undelivered record")
 def dc1():
     checks = []

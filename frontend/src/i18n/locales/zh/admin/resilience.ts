@@ -82,7 +82,8 @@ export default {
         turn_cap: '失败回合封顶',
         abuse_guard: '滥用保护计费',
         stall: '停滞断流',
-        post_output_failure: '已输出后上游失败'
+        post_output_failure: '已输出后上游失败',
+        relay_keepalive: '中转伪保活帧'
       },
       states: {
         OK: '正常',

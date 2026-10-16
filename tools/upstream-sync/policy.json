@@ -414,15 +414,39 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
-      "value": "scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(resp.Body))"
+      "value": "scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(resp.Body, relayLive))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "lastRead := relayLive.lastActivity(time.Unix(0, atomic.LoadInt64(&lastReadAt)))"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(resp.Body))"
+      "value": "scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(resp.Body, newRelayLiveness(ctx, account)))"
     },
     {
       "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
-      "value": "scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(r))"
+      "value": "scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(r, live))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "scanner := s.newUpstreamSSEScanner(resp.Body, relayLive)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "lastRead := relayLive.lastActivity(time.Unix(0, atomic.LoadInt64(&lastReadAt)))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "scanner := s.newUpstreamSSEScanner(resp.Body, relayLive)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "lastRead := relayLive.lastActivity(time.Unix(0, atomic.LoadInt64(&lastReadAt)))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "if rest := streamInterval - time.Since(relayLive.lastActivity(time.Time{})); rest > 0 {"
     },
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",

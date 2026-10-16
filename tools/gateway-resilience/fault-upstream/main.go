@@ -56,7 +56,7 @@ var scenarios = map[string]string{
 	"F21": "Anthropic stream: message_start, then stall (secs)",
 	"F22": "Gemini stream (first=seconds)",
 	"F23": "slow stream: a delta every `every` seconds for `secs` seconds, then completed with usage",
-	"F24": "relay keep-alive: empty SSE-Keep-Alive deltas (one before response.created) every `every` seconds for `secs` seconds, then response.failed busy",
+	"F24": "relay keep-alive: empty SSE-Keep-Alive deltas (one before response.created) every `every` seconds for `secs` seconds, then response.failed busy; with output=1 a real delta comes first and the stream then completes",
 	"F25": "pooled relay: a Responses request carrying previous_response_id gets a vague 400 (Upstream request failed); others answer normally",
 	"F26": "200 SSE with some output, then an in-stream failure (code=busy|rate_limit_exceeded, default busy) after `after` seconds",
 	"F27": "403 content-safety refusal in Zhipu's shape (top-level code request_check_blocked)",
@@ -360,14 +360,19 @@ func outputThenFail(ctx context.Context, w http.ResponseWriter, p protocol, mode
 }
 
 // relayKeepalive imitates relays that send empty "SSE-Keep-Alive" deltas,
-// the first one before response.created, and then fails before any output.
-func relayKeepalive(ctx context.Context, w http.ResponseWriter, model string, total, every time.Duration) string {
+// the first one before response.created, and then fail before any output.
+// With output, a real delta comes before the frames and the stream then
+// completes: a relay that keeps a quiet period alive only with the frames.
+func relayKeepalive(ctx context.Context, w http.ResponseWriter, model string, total, every time.Duration, output bool) string {
 	startSSE(w)
 	keepalive := map[string]any{"type": "response.output_text.delta", "item_id": "SSE-Keep-Alive", "output_index": 0,
 		"content_index": 0, "delta": "", "SSE-Keep-Alive": true}
 	_ = sse(w, "response.output_text.delta", keepalive)
 	id := fmt.Sprintf("resp_fault_%d", time.Now().UnixNano())
 	_ = sse(w, "response.created", map[string]any{"type": "response.created", "response": map[string]any{"id": id, "status": "in_progress", "model": model}})
+	if output {
+		_ = writeDelta(w, protoResponses, id, model)
+	}
 	deadline := time.Now().Add(total)
 	for time.Now().Before(deadline) {
 		if !sleepCtx(ctx, every) {
@@ -376,6 +381,11 @@ func relayKeepalive(ctx context.Context, w http.ResponseWriter, model string, to
 		if err := sse(w, "response.output_text.delta", keepalive); err != nil {
 			return "cancelled"
 		}
+	}
+	if output {
+		_ = writeDelta(w, protoResponses, id, model)
+		writeStreamEnd(w, protoResponses, id, model, defaultUsage())
+		return "completed"
 	}
 	writeFailFrame(w, protoResponses, "busy")
 	return "failed_in_stream"
@@ -656,7 +666,7 @@ func serve(ctx context.Context, w http.ResponseWriter, p protocol, path, model s
 		if p != protoResponses || !stream {
 			return normal(ctx, w, p, model, stream, 200*time.Millisecond, 0, "", 0)
 		}
-		return relayKeepalive(ctx, w, model, f.secs("secs", 3), f.secs("every", 1))
+		return relayKeepalive(ctx, w, model, f.secs("secs", 3), f.secs("every", 1), f.params["output"] == "1")
 	case "F25":
 		if f.params["chained"] == "1" {
 			apiError(w, p, http.StatusBadRequest, "invalid_request_error", "", "Upstream request failed")

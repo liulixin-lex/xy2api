@@ -3,9 +3,13 @@ package service
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"io"
+	"sync/atomic"
+	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
@@ -24,17 +28,69 @@ var relayKeepaliveMarker = []byte("SSE-Keep-Alive")
 var relayKeepaliveDeltaEvent = []byte("response.output_text.delta")
 
 // newOpenAIRelayKeepaliveFilter drops relay keep-alive frames from an
-// upstream SSE body (design §7.8). Everything else passes through byte for
-// byte; it is a no-op when resilience is switched off.
-func newOpenAIRelayKeepaliveFilter(src io.Reader) io.Reader {
+// upstream SSE body (design §7.8) and notes each one on live (may be nil).
+// Everything else passes through byte for byte; it is a no-op when
+// resilience is switched off.
+func newOpenAIRelayKeepaliveFilter(src io.Reader, live *relayLiveness) io.Reader {
 	if src == nil || !resilience.Current().Enabled {
 		return src
 	}
-	return &relayKeepaliveFilter{r: bufio.NewReaderSize(src, 4096)}
+	return &relayKeepaliveFilter{r: bufio.NewReaderSize(src, 4096), live: live}
+}
+
+// relayLiveness records when a relay keep-alive frame was last dropped from
+// an upstream stream: the relay is alive although it sent nothing. Stall
+// detectors take the later of it and their last read, so a relay that keeps
+// a quiet stream open only with these frames is not cut as stalled, as in
+// 0.3.0 where the frames passed through; the frames are still no output.
+// Each dropped frame is counted per account.
+type relayLiveness struct {
+	at        atomic.Int64
+	groupID   int64
+	accountID int64
+	platform  string
+}
+
+// newRelayLiveness returns the liveness of one upstream attempt.
+func newRelayLiveness(ctx context.Context, account *Account) *relayLiveness {
+	l := &relayLiveness{groupID: resilience.StateFrom(ctx).GroupID()}
+	if account != nil {
+		l.accountID, l.platform = account.ID, account.Platform
+	}
+	return l
+}
+
+// relayLivenessFor is newRelayLiveness for handlers that hold the gin context.
+func relayLivenessFor(c *gin.Context, account *Account) *relayLiveness {
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	return newRelayLiveness(ctx, account)
+}
+
+func (l *relayLiveness) frameDropped() {
+	if l == nil {
+		return
+	}
+	l.at.Store(time.Now().UnixNano())
+	resilience.Count(resilience.MetricRelayKeepalive, l.groupID, l.accountID, l.platform)
+}
+
+// lastActivity is the later of lastRead and the last dropped frame.
+func (l *relayLiveness) lastActivity(lastRead time.Time) time.Time {
+	if l == nil {
+		return lastRead
+	}
+	if at := l.at.Load(); at > 0 && time.Unix(0, at).After(lastRead) {
+		return time.Unix(0, at)
+	}
+	return lastRead
 }
 
 type relayKeepaliveFilter struct {
-	r *bufio.Reader
+	r    *bufio.Reader
+	live *relayLiveness
 	// out holds bytes ready for the caller.
 	out []byte
 	// held is an "event: response.output_text.delta" line waiting for its
@@ -94,6 +150,7 @@ func (f *relayKeepaliveFilter) next() {
 		if isRelayKeepaliveDataLine(trimmed) {
 			f.holding = false
 			f.skipBlank = true
+			f.live.frameDropped()
 			return
 		}
 		f.emit(line)
@@ -106,6 +163,7 @@ func (f *relayKeepaliveFilter) next() {
 	}
 	if isRelayKeepaliveDataLine(trimmed) {
 		f.skipBlank = true
+		f.live.frameDropped()
 		return
 	}
 	f.emit(line)
