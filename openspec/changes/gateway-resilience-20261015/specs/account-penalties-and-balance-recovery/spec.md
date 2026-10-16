@@ -19,7 +19,7 @@ Every account state that prevents normal scheduling MUST be either hard or soft.
 
 **Soft** states:
 - balance `SUSPECT`;
-- transient, first-output-timeout and stall cooldowns;
+- transient and stall cooldowns;
 - 429 cooldown without a reset time, or with a reset of at most 300 s;
 - overload cooldown;
 - model-level transient blocks;
@@ -37,7 +37,7 @@ Hard states MUST always exclude the account while they last; an `EXHAUSTED` bala
 
 ### Requirement: Transient failures apply a soft cooldown
 
-Account-scoped `TRANSIENT` and `STALL` outcomes, and `FIRST_OUTPUT_TIMEOUT` answered by the upstream (a cascaded gateway), MUST set a soft cooldown of `failure.transient_cooldown_seconds` (default 30 s). A first-output timeout the gateway detects itself MUST NOT cool the account down: it counts for the session failure streak and switches accounts. When the upstream supplies `retry_after`, the cooldown MUST be `min(retry_after, failure.retry_after_cap_seconds)` (default cap 120 s).
+Account-scoped `TRANSIENT` and `STALL` outcomes MUST set a soft cooldown of `failure.transient_cooldown_seconds` (default 30 s). A `FIRST_OUTPUT_TIMEOUT`, whether the gateway detects it or the upstream answers it, MUST NOT cool the account down: it counts for the session failure streak and switches accounts; OpenAI API-key accounts keep the per-model transient block of upstream 5xx. When the upstream supplies `retry_after`, the cooldown MUST be `min(retry_after, failure.retry_after_cap_seconds)` (default cap 120 s).
 
 #### Scenario: Relay asks for 60 seconds
 - **WHEN** an attempt returns 502 with a Cloudflare error body containing `"retry_after":60`
