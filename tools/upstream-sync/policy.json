@@ -475,6 +475,50 @@
     {
       "path": "backend/internal/web/embed_on.go",
       "value": "// nonce, so it is never answered with 304 and has no ETag"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "webSearchReplay, webSearchBody := armOpenAIWebSearchReplay(c, account, body, false)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "s.openAIWebSearchReplayAfterHTTPError(ctx, c, account, webSearchReplay, body, resp, respBody, upstreamMsg)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "s.openAIWebSearchReplayAfterSignal(ctx, c, account, webSearchReplay, body, resp, err)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "webSearchReplay.succeeded()"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "webSearchReplay, webSearchBody := armOpenAIWebSearchReplay(c, account, body, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.openAIWebSearchReplayAfterHTTPError(ctx, c, account, webSearchReplay, body, resp, probeBody, upstreamMsg)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.openAIWebSearchReplayAfterSignal(ctx, c, account, webSearchReplay, body, resp, handleErr)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "webSearchReplay.succeeded()"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage); replayErr != nil {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage); replayErr != nil {"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "if status, errType, message, ok := resilienceWebSearchHistoryRejected(c, h.gatewayService, failoverErr); ok {"
     }
   ],
   "forbidden_module_paths": [

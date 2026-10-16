@@ -354,6 +354,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		c.Set("openai_passthrough", true)
 	}
 
+	// xy2api resilience: web_search history on API-key relays.
+	webSearchReplay, webSearchBody := armOpenAIWebSearchReplay(c, account, body, true)
+	body = webSearchBody
 	agentTaskRecoveryTried := false
 	compactModelFallbackRetried := false
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
@@ -423,6 +426,13 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				continue
 			}
 
+			if next, replayErr := s.openAIWebSearchReplayAfterHTTPError(ctx, c, account, webSearchReplay, body, resp, probeBody, upstreamMsg); replayErr != nil {
+				return nil, replayErr
+			} else if next != nil {
+				body = next
+				continue
+			}
+
 			// 透传模式默认保持原样代理；容量错误以及 API-key 上游的瞬时
 			// 5xx 应先触发多账号 failover，且此时尚未写入下游响应。
 			// probeBody 已在上方任务探测时读取过一次，直接复用避免重复读取。
@@ -450,6 +460,12 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		if reqStream {
 			result, handleErr := s.handleStreamingResponsePassthrough(ctx, resp, c, account, startTime, reqModel, upstreamPassthroughModel)
 			if handleErr != nil {
+				if next, replayErr := s.openAIWebSearchReplayAfterSignal(ctx, c, account, webSearchReplay, body, resp, handleErr); replayErr != nil {
+					return nil, replayErr
+				} else if next != nil {
+					body = next
+					continue
+				}
 				if retryBody, fallbackModel, retry := s.applyOpenAIPassthroughCompactFallbackFromSignal(
 					c, account, requestedModel, body, handleErr, compactModelFallbackRetried, resp,
 				); retry {
@@ -504,6 +520,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		break
 	}
 	defer func() { _ = resp.Body.Close() }()
+	webSearchReplay.succeeded()
 	serviceTier := extractOpenAIServiceTierFromBody(body)
 	s.bindHTTPResponseAccount(ctx, c, account, responseID)
 
@@ -2102,6 +2119,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				if !outputStarted && !cyberHit {
 					if compactErr := newOpenAICompactFallbackSignal(c, dataBytes, failedMessage); compactErr != nil {
 						return resultWithUsage(), compactErr
+					}
+					if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage); replayErr != nil {
+						return resultWithUsage(), replayErr
 					}
 				}
 				if outputStarted && !cyberHit {

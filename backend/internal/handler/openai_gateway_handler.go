@@ -3571,6 +3571,10 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", message, streamStarted)
 		return
 	}
+	if status, errType, message, ok := resilienceWebSearchHistoryRejected(c, h.gatewayService, failoverErr); ok {
+		h.handleStreamingAwareError(c, status, errType, message, streamStarted)
+		return
+	}
 	// xy2api resilience: upstream balance problems (including image account
 	// 402) are only shown to administrators (design §9.4), unless an
 	// administrator's passthrough rule below claims the response, as on the

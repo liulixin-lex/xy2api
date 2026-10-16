@@ -564,6 +564,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						streamEarlyErr = compactErr
 						return
 					}
+					if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage); replayErr != nil {
+						sawFailedEvent = true
+						streamEarlyErr = replayErr
+						return
+					}
 				}
 				if outputStarted && !cyberHit {
 					if codexFailureTerminal && eventType == "error" {
