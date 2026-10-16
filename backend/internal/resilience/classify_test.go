@@ -321,3 +321,17 @@ func TestGeminiQuotaWordingIsARateLimit(t *testing.T) {
 	r = Classify(Outcome{Source: SourceHTTP, StatusCode: 429, Message: "You exceeded your current quota, please check your plan and billing details."}, nil)
 	require.Equal(t, CategoryBalance, r.Category)
 }
+
+func TestRetryAfterFromCompoundHints(t *testing.T) {
+	for in, want := range map[string]time.Duration{
+		`{"error":{"message":"Rate limit reached. Please try again in 1m30.5s."}}`: 90500 * time.Millisecond,
+		`Please try again in 1h2m`:  62 * time.Minute,
+		`Please try again in 250ms`: 250 * time.Millisecond,
+		`Please try again in 20s.`:  20 * time.Second,
+	} {
+		require.Equal(t, want, RetryAfterFrom(nil, []byte(in)), in)
+	}
+	r := Classify(Outcome{Source: SourceHTTP, StatusCode: 429, Message: "Rate limit reached. Please try again in 1m30s."}, nil)
+	require.Equal(t, CategoryRateLimitReset, r.Category)
+	require.Equal(t, 90*time.Second, r.RetryAfter)
+}

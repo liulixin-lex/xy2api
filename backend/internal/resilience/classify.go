@@ -220,9 +220,12 @@ var modelUnsupportedCodes = map[string]struct{}{
 }
 
 var (
-	reRetryAfterJSON  = regexp.MustCompile(`(?i)"?retry[_-]after"?\s*[:=]\s*"?(\d+(?:\.\d+)?)`)
-	reTryAgainIn      = regexp.MustCompile(`(?i)try again in\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hours?)\b`)
-	reResetsInSeconds = regexp.MustCompile(`(?i)"resets_in_seconds"\s*:\s*(\d+)`)
+	reRetryAfterJSON = regexp.MustCompile(`(?i)"?retry[_-]after"?\s*[:=]\s*"?(\d+(?:\.\d+)?)`)
+	reTryAgainIn     = regexp.MustCompile(`(?i)try again in\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hours?)\b`)
+	// reTryAgainInCompound matches Go-style compound hints such as
+	// "try again in 1m30.5s" or "1h2m" (OpenAI rate limits).
+	reTryAgainInCompound = regexp.MustCompile(`(?i)try again in\s+((?:\d+(?:\.\d+)?(?:ms|h|m|s)){2,})\b`)
+	reResetsInSeconds    = regexp.MustCompile(`(?i)"resets_in_seconds"\s*:\s*(\d+)`)
 )
 
 // Classify maps an outcome to one category. Text and structured codes are
@@ -447,6 +450,11 @@ func RetryAfterFrom(h http.Header, body []byte) time.Duration {
 	if m := reRetryAfterJSON.FindStringSubmatch(s); m != nil {
 		if v, err := strconv.ParseFloat(m[1], 64); err == nil && v > 0 {
 			return secondsDuration(v)
+		}
+	}
+	if m := reTryAgainInCompound.FindStringSubmatch(s); m != nil {
+		if d, err := time.ParseDuration(strings.ToLower(m[1])); err == nil && d > 0 {
+			return d
 		}
 	}
 	if m := reTryAgainIn.FindStringSubmatch(s); m != nil {

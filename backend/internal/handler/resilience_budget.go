@@ -61,12 +61,6 @@ func resilienceAttemptFailed(ctx context.Context, accountID int64, failoverErr *
 	return true
 }
 
-// resilienceBudgetAllowsAttempt reports whether another attempt may start
-// (used before back-off re-selection, which records no failure itself).
-func resilienceBudgetAllowsAttempt(ctx context.Context) bool {
-	return requestBudget(ctx).CanAttempt(time.Now())
-}
-
 // sameAccountRetryAllowedCtx is sameAccountRetryAllowed under the request
 // budget (design §6.2): account-level failures never retry the same account,
 // waits beyond the cap or the remaining budget switch instead, and each

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -486,7 +487,7 @@ func (rec *sessionFailureRecorder) Success(ctx context.Context, groupID int64, s
 }
 
 func sessionMarkKey(groupID int64, sessionHash string) string {
-	return sessionHash + "\x00" + time.Duration(groupID).String()
+	return sessionHash + "\x00" + strconv.FormatInt(groupID, 10)
 }
 
 func (r *ResilienceService) markSessionFailures(groupID int64, sessionHash string, window time.Duration) {
