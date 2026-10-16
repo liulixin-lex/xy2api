@@ -793,6 +793,37 @@ def dc4():
     return {"queued": queued, "upstream": recs, "usage": usage, "undelivered": und}, checks
 
 
+@scenario("LR-1", "Share group with every account soft-penalised: last resort follows the share tiers, not account priority")
+def lr1():
+    # Review F3: tier 0 holds lr-a (priority 5), tier 1 lr-b (priority 1).
+    checks = []
+    api = admin_api()
+    gid = int(psql("select id from groups where name='G-share-lr' and deleted_at is null"))
+    ids = dict(row.split("|") for row in psql("select name||'|'||id from accounts where name in ('lr-a','lr-b') and deleted_at is null").splitlines())
+    settings = api.call("GET", "/api/v1/admin/share-scheduling/settings")
+    if not settings.get("enabled"):
+        settings["enabled"] = True
+        api.call("PUT", "/api/v1/admin/share-scheduling/settings", settings)
+    current = api.call("GET", f"/api/v1/admin/share-scheduling/groups/{gid}/policy")
+    policy = {"schema": 1, "scheduler": "share", "accounts": [
+        {"account_id": int(ids["lr-a"]), "tier": 0, "weight": 1},
+        {"account_id": int(ids["lr-b"]), "tier": 1, "weight": 1}]}
+    api.call("PUT", f"/api/v1/admin/share-scheduling/groups/{gid}/policy", {"expected_version": current.get("version", 0), "policy": policy})
+    time.sleep(3)
+
+    key = KEYS["G-share-lr"]
+    # Both relays fail once with a Cloudflare 502 and Retry-After: both are
+    # soft-penalised for about a minute.
+    body = {"model": "gpt-6.1-sol", "messages": [{"role": "user", "content": "hello"}], "stream": False}
+    stream_request(DIRECT, "/v1/chat/completions", key, dict(body, user=fresh_session()))
+    mark = fault_last_id()
+    second = stream_request(DIRECT, "/v1/chat/completions", key, dict(body, user=fresh_session()))
+    tried = [r.get("spec", "") for r in fault_records_since(mark) if "tag=lr-" in r.get("spec", "")]
+    check(bool(tried), f"last resort tried an account ({tried})", checks)
+    check(bool(tried) and "lr-a" in tried[0], f"tier 0 first, not the higher-priority tier 1 ({tried[:1]})", checks)
+    return {"second": second, "tried": tried}, checks
+
+
 @scenario("DC-3", "Client leaves while the upstream headers are still awaited: stage header_wait")
 def dc3():
     checks = []

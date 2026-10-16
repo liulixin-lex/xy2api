@@ -73,6 +73,9 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-grok-balance": ("grok", [("grok-bal", "BAL;key=grok-bal;reset=1700", 1)], {}),
     # R4: an upstream content-safety 403 is the request's fault on every account.
     "G-content-safety": ("openai", [("cs-block", "F27", 1), ("cs-ok", "F00", 2)], {}),
+    # Review F3: a share group whose tiers run against account priority
+    # (LR-1 sets the policy); both relays answer a Cloudflare 502.
+    "G-share-lr": ("openai", [("lr-a", "F07;tag=lr-a", 5), ("lr-b", "F07;tag=lr-b", 1)], {}),
     # Review F1: one slot; a second stream queues, gets pings, then leaves.
     "G-queue": ("openai", [("q-busy", "F01;secs=20", 1)], {"concurrency": 1}),
     # R2: a relay failing streams after output; the healthy account is second.

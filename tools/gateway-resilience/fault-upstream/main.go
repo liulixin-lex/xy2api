@@ -105,6 +105,7 @@ func parseFault(spec string) fault {
 type record struct {
 	ID        int64     `json:"id"`
 	Fault     string    `json:"fault"`
+	Spec      string    `json:"spec,omitempty"` // the full scenario spec, to tell accounts apart
 	Method    string    `json:"method"`
 	Path      string    `json:"path"`
 	Model     string    `json:"model,omitempty"`
@@ -602,7 +603,7 @@ func handle(w http.ResponseWriter, r *http.Request) {
 	if model == "" {
 		model = "fault-model"
 	}
-	rec := &record{Fault: f.id, Method: r.Method, Path: path, Model: model, Stream: stream, Started: time.Now(),
+	rec := &record{Fault: f.id, Spec: spec, Method: r.Method, Path: path, Model: model, Stream: stream, Started: time.Now(),
 		RequestID: r.Header.Get("X-Request-Id")}
 	records.start(rec)
 	cw := &countingWriter{ResponseWriter: w, rec: rec}
