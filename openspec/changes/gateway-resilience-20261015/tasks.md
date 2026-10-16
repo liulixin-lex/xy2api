@@ -86,6 +86,7 @@
   - 完成（2026-10-16）：余额耗尽改为 `balance_exhausted` 且不带 `RecoverAt`（修正份额调度下余额耗尽仍软溢出保留绑定，违反“余额耗尽立即改绑”）；会话回避的排除与改绑记 `resil_failure_streak`；末位兜底记 `last_resort_soft`。其他临时不可调度原因保持原处理（Q8）。`fallback_return` 不是份额放置决策，由韧性指标记录（偏差记入 design §4）。
 - [x] 3.4 末位兜底（两种调度器都要实现）：先转投兜底组（任务 8），否则在最高的有软罚账号的那一层，取罚期最短者；不受单次首输出超时约束。
   - 进度（2026-10-15）：兜底组转投随任务 8 实现。
+  - 调整（2026-10-16，`0f85db7ab`）：按优先级、再按罚期结束排序后依次尝试并发槽位，全部占满才在第一个账号上等待（design §4.3）。
 - [x] 3.5 Explain：份额调度的 Explain 显示罚则、计数、回避与兜底；原版调度新增只读 Explain。
 - [x] 3.6 在 `tools/upstream-sync/scheduler-diff.json` 中登记新增块，`sync.py scheduler-diff` 通过。
 - [x] 3.7 验证：
@@ -112,6 +113,7 @@
 
 - [x] 5.1 `resilience.Budget`：上下文挂载，包含最多尝试数 4、首输出前截止 240 秒（文本）、每账号同号重试计数，以及 `Canceled()`。
   - 预算由中间件按路径挂到请求状态（图片、视频无首输出截止；WebSocket 不挂连接级预算）。尝试进行中到达截止时取消，随任务 6 的首输出超时一起实现。
+  - 调整（2026-10-16，`c4ad81e14`）：删除无调用的 `Canceled()` 与上下文访问器；客户端取消由 `CanAttempt` 判断（耗尽原因 `canceled`）。
 - [x] 5.2 接入 OpenAI 的 Responses、Chat、Messages、Images 循环；移除首输出超时只换 1 次的限制；有效换号上限取预算与 `max_account_switches` 的较小值。
   - 偏差：WebSocket 建连首回合的换号仍按 `max_account_switches`（连接级预算会误伤长连接）；Grok 媒体、alpha search、embeddings 循环同样接入预算。
 - [x] 5.3 接入 Anthropic 网关循环（Messages、Responses、Chat 兼容）。
@@ -256,10 +258,72 @@
   - 对照脚本：`tools/gateway-resilience/metrics_report.py`（`collect`、`report`），配合 `metrics.sql`、`caddy_cuts.py --json`、`session_streaks.py --json`；生产 0.3.0 基线已采集（私有目录）。待最终候选浸泡后出正式报告。
 - [ ] 12.11 退出条件（全部闭环）：所有 Scenario 通过、P0/P1 缺陷为零、指标达标、升级与回退通过、真实客户端与真实 CDN 通过、XY-image 实验室通过。全部满足后才能提 PR。
 
+## 上线前全面审查（2026-10-16）
+
+> 用户 2026-10-16 要求在发版前全方位审查算法、策略与调度的遗漏与臃肿。每项修复一个提交并带测试，行为变化已同步到 design、spec、runbook 与 `docs/GATEWAY_RESILIENCE.md`；份额调度的修复见 `replace-controlled-with-share-scheduling` 的 design §20。
+> 验证：`796e2820d` 时本机全量 unit、四种标签 vet、前端 lint/vue-tsc/vitest/构建与同步审计通过；此后的提交随最终候选复验（12.9–12.11、13.1）。
+
+失败分类与罚则：
+
+- [x] Gemini 的 `RESOURCE_EXHAUSTED` 分钟级限额（“You exceeded your current quota”）按限流处理，不再判为余额耗尽而排除约 11 分钟（`749060679`）。
+- [x] “try again in 1m30.5s”“1h2m”等复合时长识别为重置时间，不再落到缺省冷却（`c7ac2cfca`）。
+- [x] 网关自身合成的首事件超时 504 归为 `FIRST_OUTPUT_TIMEOUT`，不再按中转 504 记为 `TRANSIENT`（`0c43365f5`）。
+- [x] 余额 `EXHAUSTED` 的硬档随排除期（下次复检后 10 分钟）结束，与选号一致（`0c43365f5`）。
+- [x] `/v1/usage` 对不限额订阅返回的 `remaining=-1` 不再读成余额为零（`9a9573880`）。
+- [x] 被更长冷却（如 403）挡住而过期的余额暂停重新施加，不再被当作管理员手动恢复（`9a9573880`）。
+- [x] 断流（流内错误事件、停滞）后按部分用量计费的账号不再算成功：不解除冷却、不计入 `RECOVERING` 成功次数（`f620853d6`）。
+- [x] 探测锁 TTL 长于探测连同落库的耗时，落库使用独立时限（`744fa349c`）。
+
+会话与选号：
+
+- [x] OpenAI 路由自有的换号循环也上报会话失败，所有循环经 `resilienceAttemptFailed` 每次失败上报一次（`e0d37fbe5`）。
+- [x] 同一请求内触发连续失败改绑时，原绑定账号不再保留绑定，本请求服务的账号可写入新绑定（`32ba08d63`）。
+- [x] 末位兜底按顺序尝试每个候选的并发槽位，全部占满才在排序第一的账号上等待，两种调度器一致（`0f85db7ab`）。
+- [x] 负缓存的重放结果不再被重新写入（此前稳定流量下账号恢复后条目永不过期）；OpenAI 选号另按传输方式、端点能力与平台区分（`0747d8ab3`）。
+- [x] 会话标记键的分组段改为十进制 ID（此前被格式化为时长）（`c7ac2cfca`）。
+
+预算与重试：
+
+- [x] 服务内原地重试在确定执行后才扣减预算与同号次数，同一次失败不再被记两次（`b5ba44e89`）。
+- [x] 没有预算的 Gemini 请求（WebSocket、内部调用）保持 0.3.0 的原地重试上限（`2ba7f1288`）。
+- [x] 重试时上一尝试的首事件守卫立即释放，不再保留到整个流结束（`d49102d21`）。
+
+错误语义与计费：
+
+- [x] 同 Key 快速失败只重放触发它的模型，只在已触发时读取请求体中的模型（`3aafea9d1`）。
+- [x] 没有会话标识的请求不再共用一个失败回合计数（`d6c8f79a8`）。
+- [x] OpenAI 路由上，管理员的错误透传规则优先于“上游余额对用户隐藏”，与网关路由一致（`8c8d2c1e4`）。
+- [x] Anthropic 已提交流的 `event: error` 行随 `errors` 开关，关闭时恢复 0.3.0 格式（`186d8f2c4`）。
+- [x] 续链被拒后完整重放同样失败时，恢复该会话的续链（`eaa1d87d5`）。
+- [x] 会话缓存读占比在强制缓存计费改写用量之前记录，粘性切换后不再记成 1.0（`f620853d6`）。
+
+设置与界面：
+
+- [x] 设置读取与发布都深拷贝，PUT 不再写入运行中的快照；`budget.model_overrides` 整体替换，可删除键（`5984622e9`）。
+- [x] 分组改为订阅计费时清空无号兜底分组，保存不再被拒（`51f111c7b`）。
+- [x] 设置卡按能力分组（开关、说明与该能力的数值在同一张卡片）；运维面板的计数与未送达表显示分组名，分组列表只加载一次并交给选号解释，翻页用通用文案（`6dde48e55`）。
+- [x] 文案：可配置值的提示写“默认 …”，错误语义提示补充失败回合封顶，Explain 统一称“选号解释”（`7ef136d49`）。
+
+性能与清理：
+
+- [x] 主组健康且本实例在 `binding_ttl_seconds` 内未转出 Key 时，兜底判定不访问 Redis（`7c7560c53`）。
+- [x] 罚则判定直接读取余额状态字段，只有 `EXHAUSTED` 才解码完整记录（`36156e169`）。
+- [x] 中转伪保活过滤不再复制每一行，500 个 delta 的分配从 1504 次降到 7 次（`de5de226d`）。
+- [x] 删除无调用的 `resilience/frames.go`、预算的上下文访问器与 `Canceled()` 等（`c4ad81e14`），以及 `resilienceBudgetAllowsAttempt`（`c7ac2cfca`）。
+- [x] golangci-lint v2.14.0 清零（`56f486f6a`）。
+
+门禁、工具与上游：
+
+- [x] `scheduler-diff.json` 补登记 Gemini 兼容服务改写的预算守卫行（`d880cbd31`）。
+- [x] CI 必测门禁 `tools/gateway-resilience/ci_gate.py`（见 13.1，`826dc652e`）。
+- [x] 浸泡脚本按容器匿名内存及其趋势判断泄漏，不再用含页缓存的 `docker stats`（`de79861db`）。
+- [x] 上游缺陷：index.html 不再返回 304（CSP nonce 与缓存正文不一致），具名补丁 `xy-index-nonce-no-304`（`6ff042aeb`）。
+- [x] 文档按代码校正：单实例索引、探测锁 TTL、OpenAI 冷却范围、末位兜底顺序、负缓存失效口径（`3a756b7fe`、`796e2820d`、`76578e18d`）。
+
 ## 13 PR 与发版
 
 - [ ] 13.1 xy2api PR：CI 18 项全绿，并新增 “Gateway resilience” 必测作业（关键 Scenario 测试，`-race`，零跳过守卫）；XY-image PR 全绿。
-  - 必测作业已加入 `backend-ci.yml` 的 test 作业：`tools/gateway-resilience/ci_gate.py` 自动收集韧性测试文件中的全部测试（当前 177 个），`-race` 运行，任一失败、跳过或未运行即失败；本机通过。
+  - 必测作业已加入 `backend-ci.yml` 的 test 作业：`tools/gateway-resilience/ci_gate.py` 自动收集韧性测试文件中的全部测试（`826dc652e` 时 177 个，`7ef136d49` 时 178 个），`-race` 运行，任一失败、跳过或未运行即失败；本机通过。
 - [ ] 13.2 打 0.4.0-rc.1 标签并跑 Release 工作流；校验附件 SHA 与双架构 GHCR；在测试服务器用 RC 制品复跑 12.3、12.4 的关键子集与 12.7。
 - [ ] 13.3 正式版：xy2api 0.4.0 PR → 合并 → 标签 → Release；XY-image 0.0.17 发布；更新 provenance 与记忆。
 

@@ -6,10 +6,10 @@ Every scenario of the eight specs, mapped to the automated tests that cover it a
 
 | Scenario | Unit tests | Staging |
 |---|---|---|
-| Balance message wrapped in a 429 | `TestBalanceWrappedIn429`, `TestClassifySpecScenarios` | BAL-1 |
+| Balance message wrapped in a 429 | `TestBalanceWrappedIn429`, `TestClassifySpecScenarios`, `TestGeminiQuotaWordingIsARateLimit` (Gemini's per-minute quota stays a rate limit) | BAL-1 |
 | Balance failure inside a stream | `TestApplyResilienceOutcomeStreamBalanceAndStall`, `TestClassifySpecScenarios` | — |
 | Busy message inside a stream | `TestClassifySpecScenarios` | C-codex-busy-stream |
-| Relay timeout page | `TestClassifySpecScenarios`, `TestRetryAfterFrom` | SW-1, BUD-1 |
+| Relay timeout page | `TestClassifySpecScenarios`, `TestRetryAfterFrom`, `TestRetryAfterFromCompoundHints` | SW-1, BUD-1 |
 | Request-scoped overload does not punish the account | `TestInServiceRetryOnlyForCapacityShedding`, `TestCategoryPolicyTable` | — |
 | Client errors never switch accounts | `TestCategoryPolicyTable` | CTX-1 |
 | User out of funds | `TestUserBalanceErrorsCarryCodes` | — |
@@ -20,10 +20,10 @@ Every scenario of the eight specs, mapped to the automated tests that cover it a
 | Scenario | Unit tests | Staging |
 |---|---|---|
 | Soft cooldown in a multi-account group | `TestResiliencePenaltyOfTiers`, `TestTransientCooldownOpenAIOnlyWithRetryAfter` | SW-1, C-codex-fail-first |
-| Hard state is never used | `TestGatewayLastResortNeverUsesHardStates`, `TestResultHard` | — |
+| Hard state is never used | `TestGatewayLastResortNeverUsesHardStates`, `TestResultHard`, `TestExhaustedTierEndsWithTheExclusion` | — |
 | Relay asks for 60 seconds | `TestTransientCooldownHonoursRetryAfter` | RL-1 |
-| Claude relay runs out of credit | `TestStrongSignalExhausts`, `TestBalance403ExhaustsWithoutErrorState` | BAL-1 |
-| Automatic recovery after top-up | `TestProbePositiveEntersRecovering`, `TestProbePositiveRecovers`, `TestRecoveringSuccessesReturnToOK` | BAL-1, soak (hourly) |
+| Claude relay runs out of credit | `TestStrongSignalExhausts`, `TestBalance403ExhaustsWithoutErrorState`, `TestExpiredOtherPauseIsNoAdminOverride` | BAL-1 |
+| Automatic recovery after top-up | `TestProbePositiveEntersRecovering`, `TestProbePositiveRecovers`, `TestRecoveringSuccessesReturnToOK`, `TestVerdictFromUsageBody`, `TestBrokenStreamUsageIsNoRecoverySuccess` | BAL-1, soak (hourly) |
 | Administrator confirms a top-up | `TestRecheckBalanceForcesProbe` | BAL-2 |
 | Probe finds invalid credentials | `TestProbeAuthFailureFollowsAuthPath` | — |
 | Two instances schedule the same probe | `TestProbeSingleFlight` | — |
@@ -35,15 +35,16 @@ Every scenario of the eight specs, mapped to the automated tests that cover it a
 |---|---|---|
 | Replacement respects tiers | `TestGatewayLastResortPrefersHighestTierThenSoonest`, `TestAvoidedAccountExcludedButUsableAsLastResort` | — |
 | One busy failure keeps the session | `TestSessionFailureStreakRebindsAndAvoids` | — |
-| Second failure moves the session | `TestSessionFailureStreakRebindsAndAvoids` | — |
+| Second failure moves the session | `TestSessionFailureStreakRebindsAndAvoids`, `TestEveryFailoverLoopReportsSessionFailures`, `TestStreakOwnerLosesItsBinding` | — |
 | Balance exhaustion moves the session at once | `TestGatewayHardBoundAccountRebinds` | — |
 | Saturation does not rebind | Saturation never reaches the session failure recorder; existing spill behaviour: `TestShareSchedulingSpillsAndRebindsWhenBoundIsSaturated` | soak |
 | Original scheduler during a cooldown | `TestGatewaySoftBoundAccountKeepsBinding` | — |
+| Busy last-resort account | `TestLastResortTakesAFreeSlotBeforeWaiting` | — |
 | Single-account Grok group with a transient error | `TestGatewayLastResortSingleAccountTransient`, `TestOpenAILastResortSingleAccount` | — |
 | Hard state with no alternative | `TestGatewayLastResortNeverUsesHardStates` | — |
 | Emergency off | `TestMasterSwitchDisablesEverything`, `TestResilienceOffKeepsLegacyPenalties`, `TestRetryHintsOffRestoresLegacy`, `TestTurnCapOffKeepsRetryAfter` | — |
 
-The Explain part of “Explainability and configuration” has no scenario of its own: `TestResilienceExplainShowsPenaltiesSessionLastResortAndFallback` (service), `ResilienceExplainResult.spec.ts`, `OpsResilienceExplain.spec.ts` and the share Explain case of `ShareSchedulingView.spec.ts` (frontend); staging calls the endpoint and checks the ops page.
+The Explain part of “Explainability and configuration” has no scenario of its own: `TestResilienceExplainShowsPenaltiesSessionLastResortAndFallback` (service), `ResilienceExplainResult.spec.ts`, `OpsResilienceExplain.spec.ts`, `OpsResilienceCard.spec.ts` (group names handed to Explain) and the share Explain case of `ShareSchedulingView.spec.ts` (frontend); staging calls the endpoint and checks the ops page. Settings updates never touch the live snapshot: `TestUpdateResilienceSettingsLeavesTheLiveSnapshotAlone`, `TestCloneSharesNothing`.
 
 ## request-budget-and-retry
 
@@ -68,7 +69,7 @@ The Explain part of “Explainability and configuration” has no scenario of it
 | Official OAuth account | `TestPreOutputKeepaliveStopsUncommittedForOAuth` | — |
 | Gemini is excluded | `TestArmPreOutputKeepaliveConditions` | GEM-1 |
 | Failover after heartbeats | `TestHeartbeatThenFailoverKeepsSwitching` | — |
-| Slow relay is abandoned in time | `TestFirstOutputTimeoutTiers`, `TestFirstOutputTimeoutMeasuredFromAttemptStart` | FO-1 |
+| Slow relay is abandoned in time | `TestFirstOutputTimeoutTiers`, `TestFirstOutputTimeoutMeasuredFromAttemptStart`, `TestGatewayFirstEventTimeoutIsNoRelay504` | FO-1 |
 | Last candidate waits for the budget | `TestSoleCandidateIsLastCandidate`, `TestOpenAILastResortSingleAccount` | C-codex-slow-first-cdn, C-openai-py-slow-first-cdn, KA-8 (CDN 300 s) |
 | Keep-alive before response.created | `TestRelayKeepaliveFramesAreDropped` | KA-7, C-openai-py-fail-first |
 | Keep-alive does not disarm failover | `TestRelayKeepaliveFramesAreDropped` | KA-7 |
@@ -93,14 +94,14 @@ The Explain part of “Explainability and configuration” has no scenario of it
 |---|---|---|
 | Pricing restriction keeps 503 | `TestConfigErrorRetryHeaders` | ERR-2 |
 | Codex backs off instead of hammering | `TestNoAccountResponseCarriesRetryAfter`, `TestExhaustedBadGatewayCapsUpstreamRetryAfter`, `TestEdgeRequestsGet503InsteadOf502` | ERR-1, CF-3 |
-| Burst of retries | `TestNegativeCacheBurstOfRetries` | — |
-| Retry storm on a single-account group | `TestFastFailRetryStormOnSingleAccountGroup`, `TestFastFailIgnoresCappedTurns` | ERR-4 |
-| Codex stops after five requests | `TestTurnCapEndsCodexTurn`, `TestTurnCapCountsConsecutiveFailures` | ERR-3, C-codex-all-fail |
+| Burst of retries | `TestNegativeCacheBurstOfRetries`, `TestNegativeCacheHitIsRecognisedAndScopedByVariant` | — |
+| Retry storm on a single-account group | `TestFastFailRetryStormOnSingleAccountGroup`, `TestFastFailIgnoresCappedTurns`, `TestFastFailReplaysOnlyTheTrippingModel` | ERR-4 |
+| Codex stops after five requests | `TestTurnCapEndsCodexTurn`, `TestTurnCapCountsConsecutiveFailures`, `TestRequestStateTurnKey` (requests without a session are not counted) | ERR-3, C-codex-all-fail |
 | In-stream failures end the turn | `TestTurnCapNoAccountAndCommittedStream` | C-codex-busy-stream |
 | Recovery is not delayed | `TestTurnCapResetOnlyOnRealSuccess` | — |
-| Image account out of credit | `TestHideUpstreamBalanceOnExhaustedFailover` | — |
+| Image account out of credit | `TestHideUpstreamBalanceOnExhaustedFailover`, `TestPassthroughRuleBeatsHiddenBalanceOnOpenAIRoutes` (a matching passthrough rule takes precedence) | — |
 | Concurrent requests with a small balance | `TestUserBalanceErrorsCarryCodes`, `TestReservationErrorDistinguishesHeldBalance` | RES-1 |
-| Cached Codex conversation | `TestCacheAwareReservationEstimate`, `TestOutputP99CapsReservationOutput` | — |
+| Cached Codex conversation | `TestCacheAwareReservationEstimate`, `TestOutputP99CapsReservationOutput`, `TestForcedCacheBillingKeepsTheRealCacheShare` | — |
 | Re-submitted batch | `TestAsyncImageV2AdmissionLimit`, `TestPromptAuditGatePrecedesAccountBillingAndUpstreamSideEffects` (admission is the only call allowed before the audit) | — |
 
 ## availability-fallback-group
@@ -112,4 +113,4 @@ The Explain part of “Explainability and configuration” has no scenario of it
 | Failover exhaustion does not cross groups | The fallback is chosen once, before the handler | FB-2 |
 | User sees fallback pricing | `TestUsageRecordsOriginGroup`, `TestCollectUsageLogIDsIncludesOriginGroups` | FB-1, FB-2 |
 | Primary recovers | `TestAvailabilityFallbackReturnAndFlapping` | — |
-| Flapping primary | `TestAvailabilityFallbackReturnAndFlapping` | — |
+| Flapping primary | `TestAvailabilityFallbackReturnAndFlapping`, `TestHealthyGroupWithoutMovedKeysSkipsTheStore` | — |

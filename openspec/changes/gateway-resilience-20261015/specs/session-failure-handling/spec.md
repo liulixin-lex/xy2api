@@ -58,9 +58,13 @@ In groups using the original scheduler, a bound account in a soft penalty MUST N
 
 When no healthy candidate exists and at least one candidate is only soft-penalised, the gateway MUST NOT return "no available accounts". It MUST:
 1. route to the group's availability fallback group when one is configured;
-2. otherwise select, within the highest tier containing soft-penalised accounts, the account whose penalty ends soonest.
+2. otherwise order the soft-penalised accounts by priority or tier, then by the end of their penalty, and use the first one with a free concurrency slot; only when all of them are busy, wait for the first one.
 
 Last-resort attempts MUST NOT be subject to the per-attempt first-output timeout and MUST record the reason `last_resort_soft`.
+
+#### Scenario: Busy last-resort account
+- **WHEN** the soft-penalised account whose penalty ends first is at its concurrency limit and another soft-penalised account has a free slot
+- **THEN** the request is served by the account with the free slot instead of waiting.
 
 #### Scenario: Single-account Grok group with a transient error
 - **WHEN** the only account of a group receives a 30 s transient cooldown and no fallback group is configured

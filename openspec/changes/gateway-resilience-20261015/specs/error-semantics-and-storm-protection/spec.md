@@ -38,7 +38,7 @@ The gateway MUST cache a "no available account" result per (group, platform, mod
 
 ### Requirement: Per-key fast fail returns the identical response
 
-When one API key receives at least `errors.fast_fail.threshold` (default 10) identical 503 responses within `errors.fast_fail.window_seconds` (default 30 s), further matching requests in the window MUST receive the same status, body and remaining `Retry-After` before account selection and content moderation. Identical means the same status, `error.type` and message.
+When one API key receives at least `errors.fast_fail.threshold` (default 10) identical 503 responses within `errors.fast_fail.window_seconds` (default 30 s), further requests of that key for the same model in the window MUST receive the same status, body and remaining `Retry-After` before account selection and content moderation; requests for other models MUST be processed normally. Identical means the same status, `error.type` and message.
 
 The following MUST be exempt and MUST never trigger it:
 - asynchronous task polling;
@@ -77,7 +77,7 @@ A successful request of the conversation, or a gap longer than `errors.turn_cap.
 
 ### Requirement: Upstream balance problems are hidden from users
 
-Upstream `BALANCE` failures, including image-account 402 responses, MUST NOT be shown to end users. When they leave no available account, the user MUST receive the standard 503 `Service temporarily unavailable` with `Retry-After`. Administrators MUST see the original upstream message in operations views and alerts.
+Upstream `BALANCE` failures, including image-account 402 responses, MUST NOT be shown to end users. When they leave no available account, the user MUST receive the standard 503 `Service temporarily unavailable` with `Retry-After`. Administrators MUST see the original upstream message in operations views and alerts. An administrator's error passthrough rule that matches the upstream response MUST take precedence, on the gateway and OpenAI routes alike.
 
 #### Scenario: Image account out of credit
 - **WHEN** the only image account returns 402 `Upstream image account has insufficient balance`

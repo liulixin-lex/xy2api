@@ -50,7 +50,7 @@
 
 - 来源：HTTP 应答、流内 `response.failed`/`error`/`data:{error}` 事件、网络错误、本地首输出超时、停滞超时、客户端取消；
 - 平台、账号类型、HTTP 状态、上游错误 code/type/message（已脱敏）、流内事件语义状态；
-- 已送达的语义字节数、尝试耗时、上游给出的 `retry_after`（响应头或正文，例如中转商 Cloudflare 错误页里的 `retry_after: 60/120`）。
+- 已送达的语义字节数、尝试耗时、上游给出的 `retry_after`（响应头或正文，例如中转商 Cloudflare 错误页里的 `retry_after: 60/120`；正文中 `try again in 1m30.5s`、`1h2m` 这类复合时长同样识别）。
 
 ### 2.2 类别与动作
 
@@ -64,7 +64,7 @@
 | `RATE_LIMIT` | 429 无重置时间；流内 `rate_limit_exceeded`；“The service is busy” 等 | 是 | 否 | 软，冷却时长取设置 `rate_limit_429_cooldown_settings`（当前 45 秒） | 计入失败计数 |
 | `CAPACITY_SHED` | 529、overloaded、`server_is_overloaded`、Codex at capacity（请求级降载） | 是，最多换 1 次，且换到不同 base_url 主机 | 是，每账号最多 1 次，0.5–2 秒带抖动 | 无（请求级） | 不计 |
 | `TRANSIENT` | 5xx、524、504、连接错误、HTML 错误页 | 是 | 否（504/524 及耗时 ≥60 秒的失败一律不同号重试） | 软：冷却 `transient_cooldown_seconds`（默认 30 秒）；上游给出 `retry_after` 时取 min(retry_after, 120 秒) | 计入失败计数 |
-| `FIRST_OUTPUT_TIMEOUT` | 本地首输出超时（§7.4） | 是 | 否 | 软，冷却 30 秒 | 计入失败计数 |
+| `FIRST_OUTPUT_TIMEOUT` | 本地首输出超时（§7.4），包括网关自身合成的首事件超时 504（`first_output_timeout`）；中转返回的 504 仍为 `TRANSIENT` | 是 | 否 | 软，冷却 30 秒 | 计入失败计数 |
 | `STALL` | 已输出后超过停滞阈值无数据（§7.5） | 否（已输出） | 否 | 软，冷却 30 秒 | 计入失败计数 |
 | `CLIENT_CANCEL` | 客户端断开 | 否 | 否 | 无 | 不计 |
 | `CLIENT_ERROR` | 400/413/422 的确定性参数错误、上下文超长、内容策略、cyber policy | 否（沿用现有“模型不存在可换号”等例外） | 否 | 无 | 不计 |
@@ -73,6 +73,7 @@
 补充规则：
 
 - **本站与上游余额分开。** `BALANCE` 只来自上游应答。本站计费产生的余额错误走 §9.5，不进入分类。
+- **Gemini 分钟级限额不是余额。** “You exceeded your current quota” 是 OpenAI 的余额文案，Gemini 的 `RESOURCE_EXHAUSTED` 限额也用同一句话；带 Gemini 限额标记时按 429 归入限流类，不进入余额状态机。
 - **池模式账号保留管理员配置的同号重试状态码**，但同样受预算与“每账号最多 1 次”约束。
 - 分类结果写入请求上下文，供换号循环、会话处理、ops 记录与 Explain 使用。
 
@@ -82,7 +83,7 @@
 
 | 档 | 状态 | 选号行为 |
 |---|---|---|
-| 硬 | 管理员停用（`schedulable=false`）、`status=error`、余额 `EXHAUSTED`、凭据失效、重置时间超过 300 秒的限流、IQ 质量门、利润门、模型不支持、分组不匹配 | 永不选中 |
+| 硬 | 管理员停用（`schedulable=false`）、`status=error`、余额 `EXHAUSTED`（排除期内，§3.2）、凭据失效、重置时间超过 300 秒的限流、IQ 质量门、利润门、模型不支持、分组不匹配 | 永不选中 |
 | 软 | 余额 `SUSPECT`、`TRANSIENT`/`FIRST_OUTPUT_TIMEOUT`/`STALL` 冷却、无重置时间的 429 冷却、不超过 300 秒的有重置时间 429、过载冷却（`overload_cooldown_settings`，当前 2 分钟）、模型级瞬时阻断（`openai_model_transient_state`）、会话回避（§4） | 平时不选；没有任何健康候选时可以作为末位兜底（§4.3） |
 
 实现：在 `internal/resilience` 中提供 `PenaltyOf(account, model, now) (tier, recoverAt, reason)`，由两个调度器的候选构造钩子调用。现有冷却仍写在原有字段里：`rate_limit_reset_at`、`overload_until`、`temp_unschedulable_until`（`reason` 前缀区分 `balance:`、`transient:`、`auth:`）。快照与数据库口径都不变。
@@ -95,17 +96,17 @@
 |---|---|---|---|
 | `OK` | 默认 | 正常调度 | — |
 | `SUSPECT`（TTL 60–120 秒） | 弱信号：429 正文含余额字样，但同一账号 30 秒内有过成功 | 软罚，不接新会话；若全组只剩它，放行一个半开请求；触发一次单飞探测 | 探测显示有余额 → `OK`；探测确认无余额 → `EXHAUSTED`；TTL 到期 → `OK` |
-| `EXHAUSTED` | 真实请求出现强信号（`BALANCE`）；或探测得到余额 ≤ 阈值 | 硬排除，不做同号重试；复检间隔 1、2、5、10 分钟，之后每 15 分钟，±15% 抖动；管理员“已充值”立即复检；超过 `notify_after_hours`（72 小时）仍未恢复时通知 | 探测得到正向证据 → `RECOVERING` |
-| `RECOVERING` | 余额接口显示 > 阈值，或生成探测成功 | 并发上限临时压到 `recovering_concurrency`（1），持续 `recovering_window_seconds`（120 秒）或累计 `recovering_success_target`（3 次）成功 | 达标 → `OK`；再次出现余额错误 → `EXHAUSTED`，复检间隔升一级 |
+| `EXHAUSTED` | 真实请求出现强信号（`BALANCE`）；或探测得到余额 ≤ 阈值 | 硬排除，不做同号重试；复检间隔 1、2、5、10 分钟，之后每 15 分钟，±15% 抖动；管理员“已充值”立即复检；超过 `notify_after_hours`（72 小时）仍未恢复时通知。排除到下次复检时间后 10 分钟为止：探测停止时由真实流量重新验证，硬档随排除结束 | 探测得到正向证据 → `RECOVERING` |
+| `RECOVERING` | 余额接口显示 > 阈值，或生成探测成功 | 并发上限临时压到 `recovering_concurrency`（1），持续 `recovering_window_seconds`（120 秒）或累计 `recovering_success_target`（3 次）成功（本请求内在该账号上有过失败尝试的不算成功，§4.1） | 达标 → `OK`；再次出现余额错误 → `EXHAUSTED`，复检间隔升一级 |
 
 探测按成本从低到高，由 `BalanceProbeService` 泛化现有的 `CNProviderBalanceCheckService` 实现：
 
-1. **sub2api 系中转：** `GET {base_url}/v1/usage`，携带账号 Key，读取 `remaining`/`balance`，不消耗推理。实现参考 xy2api 自身的 `/v1/usage` 处理（`internal/handler/gateway_handler.go` 约 1590–1850）。
+1. **sub2api 系中转：** `GET {base_url}/v1/usage`，携带账号 Key，读取 `remaining`/`balance`，不消耗推理；不限额订阅（`mode=unrestricted`）的 `remaining=-1` 视为有余额。实现参考 xy2api 自身的 `/v1/usage` 处理（`internal/handler/gateway_handler.go` 约 1590–1850）。
 2. **new-api 系中转：** `/v1/dashboard/billing/subscription` 与 `/v1/dashboard/billing/usage`。**上线前必须用真实中转实测**（tasks 12.6），未通过时该类账号走第 3 步。
 3. **兜底：** 流式请求，`max_tokens=1`，模型取该账号可用的最便宜模型，以收到首字为准。每个账号每天不超过 `generation_probe_daily_budget`（48 次）。
 4. **不能作为恢复证据：** `/v1/models` 可达、凭据类探针成功。
 
-多实例下用 Redis 锁 `xy:resil:balance_probe:{account_id}`（TTL 90 秒，长于一次探测连同落库的最长耗时）保证单飞；落库与凭据失效处理不随请求取消而中断。探测返回 401/invalid 时改走 `AUTH` 路径。状态迁移写 `ops_system_logs`（warn 级，消息为 `resilience.balance_transition`），并通过现有告警与邮件通道通知管理员。
+多实例下用 Redis 锁 `xy:resil:balance_probe:{account_id}`（TTL 90 秒，长于一次探测连同落库的最长耗时）保证单飞；落库与凭据失效处理不随请求取消而中断。探测返回 401/invalid 时改走 `AUTH` 路径。管理员清除账号的暂停视为人工恢复，记为 `OK`；被更长的暂停（如 403 冷却）挡住未写入、随后自然过期的余额暂停不算人工恢复，下一轮探测重新施加。状态迁移写 `ops_system_logs`（warn 级，消息为 `resilience.balance_transition`），并通过现有告警与邮件通道通知管理员。
 
 需要改为可恢复路径的现有分支：
 
@@ -134,7 +135,8 @@
 Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_id`，值为失败次数，TTL `streak_window_seconds`（600 秒）。计数规则：
 
 - 只对计入失败的类别（`RATE_LIMIT`、`TRANSIENT`、`FIRST_OUTPUT_TIMEOUT`、`STALL`）递增；
-- 成功响应清零该会话对该账号的计数；
+- 所有换号循环（共用循环与 OpenAI 各路由自有的循环）每次失败尝试都经同一入口 `resilienceAttemptFailed` 上报一次，同时扣减预算；
+- 成功响应清零该会话对该账号的计数。本请求内在该账号上有过失败尝试（流内错误事件、停滞）时，即使按部分用量计费也不算成功：不清零计数、不解除冷却、不计入余额 `RECOVERING` 的成功次数；
 - 没有会话标识的请求不计数。
 
 ### 4.2 改绑规则
@@ -142,7 +144,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 | 情况 | 动作 | 份额调度原因码 |
 |---|---|---|
 | 单次计入失败，账号进入软冷却 | **保留绑定**。下一请求遇到绑定账号仍在软冷却时，临时溢出到同层按权重的次选，不写新绑定；冷却结束后回到原账号 | `soft_spill`（份额）／`resil_soft_skip`（原版） |
-| 同一会话在同一账号上，`streak_window` 内失败次数 ≥ `streak_threshold`（2） | 改绑：用 `deleteStickySessionAccountIDIfOwner` 做 CAS 删除（份额调度用 owner 校验删除），并把该账号写入会话回避集 `xy:resil:avoid:{group_id}:{session_hash}`（TTL `avoid_seconds`，600 秒）；下一请求在同层按权重重新放置 | `spill_rebind`，附 `resil_failure_streak` |
+| 同一会话在同一账号上，`streak_window` 内失败次数 ≥ `streak_threshold`（2） | 改绑：用 `deleteStickySessionAccountIDIfOwner` 做 CAS 删除（份额调度用 owner 校验删除），并把该账号写入会话回避集 `xy:resil:avoid:{group_id}:{session_hash}`（TTL `avoid_seconds`，600 秒）；下一请求在同层按权重重新放置。在本请求内触发时，被回避的原绑定账号不再为本请求保留绑定，本请求实际服务的账号可以写入新绑定 | `spill_rebind`，附 `resil_failure_streak` |
 | 绑定账号进入硬状态（`BALANCE`、`AUTH`、管理员停用、重置时间超过 300 秒的限流） | 立即改绑 | `rebind_unavailable` |
 | 并发满 | 沿用原有的等待与溢出，不改绑 | 原有 |
 | TTFT 抖动 | 沿用现有 sticky escape 阈值，不加严 | 原有 |
@@ -160,10 +162,10 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 当候选集合因为“只剩软罚账号”而为空时，按以下顺序选择：
 
 1. **分组配置了无号兜底组**（§5）：先转投兜底组。
-2. **没有兜底组，或兜底组也无健康候选：** 在原组（或兜底组）里，软罚账号按优先级、再按罚期结束时间排序，依次尝试取并发槽位，取到即用；全部占满时在排序第一的账号上排队等待（不会因为最优账号忙而放着空闲的次优账号不用）。
+2. **没有兜底组，或兜底组也无健康候选：** 在原组（或兜底组）里，软罚账号按优先级、再按罚期结束时间排序，依次尝试取并发槽位，取到即用；全部占满时在排序第一的账号上排队等待（不会因为最优账号忙而放着空闲的次优账号不用）。Gateway 调度器（OpenAI 以外的平台）另外跳过会话数已满的候选。
 3. 末位兜底请求不受单次首输出超时约束，只受总预算约束（§6）。
 
-硬状态账号永不参与兜底。末位兜底计入原因码 `last_resort_soft`，并写 ops 统计。若这一步仍然没有候选，才返回“无可用账号”。
+硬状态账号永不参与兜底。末位兜底计入原因码 `last_resort_soft`，并写 ops 统计；兜底账号成功服务后解除其瞬时冷却，回到正常选号。若这一步仍然没有候选，才返回“无可用账号”。
 
 ### 4.4 Explain 与可观测
 
@@ -203,7 +205,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 | `MaxAttempts` | 默认 4，包括首次尝试、换号与同号重试 |
 | `PreOutputDeadline` | 文本请求为开始时间 + 240 秒；图片端点与异步图片任务不设 |
 | `Attempts`、`SameAccountRetries[account]` | 已用次数 |
-| `Canceled()` | 客户端或转发上下文取消时为真 |
+| 请求上下文 | 客户端或转发上下文取消后不再允许新的尝试（耗尽原因 `canceled`） |
 
 接入点：
 
@@ -212,7 +214,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 - Gemini 兼容服务的原地重试（`gemini_*_compat_service.go`）；
 - 透传传输重试。
 
-每次尝试前调用 `Budget.Allow(kind)`，耗尽则结束：
+每次失败尝试后记一次（`RecordAttemptAt`），再由 `CanAttempt` 判断能否继续，耗尽则结束：
 
 - **未提交：** 返回现有的最后一次失败应答，按 §9 加 `Retry-After`；
 - **已提交：** 按 §7.6 写终止帧。
@@ -221,7 +223,8 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 
 - 只用于 `CAPACITY_SHED`，以及池模式账号上管理员配置的状态码；每个账号最多 `same_account_retry_max` 次（1 次）。
 - 账号级错误（`BALANCE`、`AUTH`、长时间的限流、504/524、耗时 ≥60 秒的失败）一律直接换号。
-- Gemini 原地重试从 5 次降为 `gemini_same_account_retries`（1 次）。退避等待改为可取消的 `select`，替换 `time.Sleep`。
+- Gemini 原地重试从 5 次降为 `gemini_same_account_retries`（1 次）；没有预算的请求（WebSocket、内部调用）保持 0.3.0 的循环上限。退避等待改为可取消的 `select`，替换 `time.Sleep`。
+- 服务内原地重试（Anthropic 转发、透传、Bedrock）在耗时与等待检查都通过、确定执行时才扣减预算与同号次数，避免同一次失败被记两次、提前一次耗尽。
 - 退避一律加 ±20% 抖动。尊重上游的 `Retry-After`，上限 `upstream_retry_after_cap_seconds`（60 秒），并且不超出剩余预算。
 
 ### 6.3 优先换号
@@ -288,7 +291,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 |---|---|
 | Responses | `event: response.failed`，`response.error.code` 为 `rate_limit_exceeded`（限流或忙）或 `server_error`（停滞、5xx、预算耗尽）；`message` 含 `Please try again in Ns.`（N = clamp(冷却剩余, 2, 30)）；保留 `sequence_number` |
 | Chat Completions | `data: {"error":{"type":...,"code":...,"message":...,"status":<原 HTTP 语义码>}}`，然后 `data: [DONE]` |
-| Anthropic Messages | `event: error\ndata: {"type":"error","error":{"type":"overloaded_error"或"api_error","message":...}}`（修复 G3：所有提交后的错误帧都补 `event: error`） |
+| Anthropic Messages | `event: error\ndata: {"type":"error","error":{"type":"overloaded_error"或"api_error","message":...}}`（修复 G3：所有提交后的错误帧都补 `event: error`；`errors` 开关关闭时恢复 0.3.0 的无 `event` 行格式） |
 
 写完终止帧后立即 `Flush` 并结束响应，因为 Codex 只在流结束时上报 `response.failed`。错误 JSON 只占一行，带稳定的 `code`，以及原 HTTP 语义状态 `error.status`（XY-image 与其他客户端可据此还原语义）。
 
@@ -349,7 +352,7 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 
 ### 9.2 无号负缓存
 
-在进程内缓存“(分组, 平台, 模型) 无可用账号”的结论 `negative_cache_seconds`（2 秒），期间直接返回相同的 503 和剩余的 `Retry-After`，不重复查库与快照。本网关施加或解除冷却、余额状态变化时主动失效对应分组的条目；管理员改动等其他来源靠 2 秒过期，最多 2 秒后可见。
+在进程内缓存“(分组, 平台, 模型) 无可用账号”的结论 `negative_cache_seconds`（2 秒），期间直接返回相同的 503 和剩余的 `Retry-After`，不重复查库与快照。键由分组与模型构成（分组决定平台，组合分组的目标平台由模型决定）；OpenAI 选号另按传输方式、端点能力与平台区分，一种请求的结论不回答另一种。带 `previous_response_id`、图片能力或 compact 的 OpenAI 选号以及利润控制分组不缓存；重放出的结论不会再次写入，条目按时过期。本网关施加或解除冷却、余额状态变化时主动失效对应分组的条目；管理员改动等其他来源靠 2 秒过期，最多 2 秒后可见。
 
 ### 9.3 同 Key 快速失败
 
@@ -361,7 +364,7 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 
 ### 9.4 上游余额对用户隐藏（D13-1）
 
-上游 `BALANCE` 类错误在换号耗尽或无号时，统一以 503 “Service temporarily unavailable”加 `Retry-After` 返回，包括图片余额 402（`Upstream image account has insufficient balance`）。管理员在运维页与告警中看到原文。
+上游 `BALANCE` 类错误在换号耗尽或无号时，统一以 503 “Service temporarily unavailable”加 `Retry-After` 返回，包括图片余额 402（`Upstream image account has insufficient balance`）。管理员在运维页与告警中看到原文。管理员配置的错误透传规则命中该上游应答时以规则为准，网关路由与 OpenAI 路由一致，此时不加隐藏余额的重试提示。
 
 ### 9.5 用户自身余额（D13-2、D13-3）
 
@@ -402,7 +405,7 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
 
 ## 10. 配置项（`gateway_resilience_settings`）
 
-存于 `settings` 表（JSON）。管理接口为 `GET/PUT /api/v1/admin/settings/gateway-resilience`，前端为“网关韧性”设置卡。缺省值即设计值：
+存于 `settings` 表（JSON）。管理接口为 `GET/PUT /api/v1/admin/settings/gateway-resilience`，前端为“网关韧性”设置卡（每项能力一张卡片，开关、说明与该能力的常用数值放在一起）。缺省值即设计值：
 
 ```json
 {
@@ -445,6 +448,8 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
 
 某个子开关为 false 时，对应能力回到 0.3.0 行为。读取失败时使用最后已知值；冷启动无值时用缺省值。
 
+设置在读取与发布时都深拷贝：PUT 请求体解码到副本上，不写入请求路径正在读取的快照，未通过校验的 PUT 不改变运行中的任何值。请求体中出现的 `budget.model_overrides` 整体替换原值（因此可以删除键）。
+
 ## 11. 数据库迁移（只追加）
 
 | 文件 | 内容 |
@@ -486,7 +491,7 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
   - 失败回合封顶；
   - 余额状态分布；
   - 推断的 CDN 切断（499 且阶段为首输出前，时长按 90、125、300 秒分桶）。
-- **运维页**新增“网关韧性”面板；账号列表显示余额状态与下次复检时间，提供“已充值”按钮（`POST /api/v1/admin/accounts/:id/balance/recheck`）；未送达记录可查询（`GET /api/v1/admin/resilience/undelivered`）；面板底部为韧性 Explain（§4.4）。
+- **运维页**新增“网关韧性”面板；账号列表显示余额状态与下次复检时间，提供“已充值”按钮（`POST /api/v1/admin/accounts/:id/balance/recheck`）；未送达记录可查询（`GET /api/v1/admin/resilience/undelivered`）；计数与未送达列表显示分组名；面板底部为“选号解释”（§4.4 的原版调度 Explain）。
 - **降低日志噪声**：
   - `upstream_billing_rate_sync_applied` 从 info 降为 debug；
   - 余额批量探测不写审计日志；
@@ -503,9 +508,12 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
   - `xy-resilience-disconnect-hook`：流处理与计费提交点；
   - `xy-resilience-errors-hook`：`no_account_error.go`、`api_key_auth.go`、`gateway_inflight_reservation.go`、`image_task_handler.go`；
   - `xy-resilience-fallback-hook`：`gateway_scheduling.go`。
+- 上游缺陷修复同样登记为具名补丁：
+  - `xy-index-nonce-no-304`：`internal/web/embed_on.go`。index.html 带本次请求的 CSP nonce；304 会让浏览器用新的 CSP 头配缓存正文里的旧 nonce，每次刷新都拦截内联配置脚本。改为始终返回完整页面、不带 ETag。sub2api main 有同样的问题。
 - `scheduler-diff.json` 为 `gateway_scheduling.go`、`openai_account_scheduler.go`、`openai_gateway_scheduling.go`、`gemini_messages_compat_service.go` 中新增的块登记白名单。
 - `UPSTREAM_BASE.json` 的 custom_patches 与 policy 保持一致；`VERSION` 升为 0.4.0；`SUB2API_COMPAT_VERSION` 保持 0.2.15。
 - 不向 Sub2API 官方提交。
+- **CI 门禁：** `backend-ci.yml` 的 test 作业运行 `tools/gateway-resilience/ci_gate.py`（步骤名 “Gateway resilience”）。脚本收集 `internal/resilience` 全部测试文件，以及 `internal/service`、`internal/handler`、`internal/handler/admin`、`internal/server/middleware` 中韧性测试文件的全部 `Test*`（`7ef136d49` 时 178 个），以 `-race -tags=unit` 运行；任一失败、跳过或未运行即失败，新增测试自动纳入。仓储层的真实 PostgreSQL/Redis 集成测试由 integration 作业运行。
 
 ## 14. 成功指标（D25）与度量方法
 

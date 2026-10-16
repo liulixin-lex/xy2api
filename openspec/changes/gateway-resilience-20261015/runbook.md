@@ -147,7 +147,7 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
 | `session.enabled` / `last_resort.enabled` | 粘性与选号回到 0.3.0 |
 | `balance.enabled` | 余额错误按 0.3.0 处理 |
 | `disconnect.enabled` | 断开后按 0.3.0 继续读完并计费 |
-| `errors.enabled` | 不加 `Retry-After`，不做负缓存与快速失败 |
+| `errors.enabled` | 不加 `Retry-After`，不做负缓存与快速失败；Anthropic 已提交流的错误帧不带 `event: error` 行（0.3.0 格式） |
 | `fallback_group.enabled` | 不再转投兜底组 |
 
 **整体回退：**
