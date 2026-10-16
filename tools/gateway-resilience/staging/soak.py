@@ -10,8 +10,9 @@ account of G-soak-bal runs out of balance for ten minutes.
 Every minute it samples memory, goroutines, database connections, Redis keys
 (concurrency slots, in-flight reservations, resilience state) and log volume.
 After the load it idles until the counters settle and checks: resources back
-to the baseline, no orphan slots or reservations, no panic, no credential in
-the logs, no duplicate usage or undelivered rows.
+to the baseline, anonymous memory without an upward trend, no orphan slots or
+reservations, no panic, no credential in the logs, no duplicate usage or
+undelivered rows.
 
 Usage (on the staging host, after fixtures.py):
     set -a; . ./.env; set +a
@@ -28,6 +29,7 @@ import json
 import os
 import random
 import re
+import statistics
 import subprocess
 import threading
 import time
@@ -172,6 +174,22 @@ def redis_scan(pattern: str, mode: str = "keys") -> int:
     return int(out) if out.lstrip("-").isdigit() else -1
 
 
+def app_anon_mib() -> float | None:
+    """Anonymous memory of the app container (heap and stacks). docker stats
+    also counts active page cache, which grows with log writes and is
+    reclaimable, so leaks are judged on this value."""
+    pid = sh(f"docker inspect -f '{{{{.State.Pid}}}}' {PROJECT}-app-1")
+    try:
+        cgroup = open(f"/proc/{pid}/cgroup").read().strip().split(":", 2)[2]
+        for line in open(f"/sys/fs/cgroup{cgroup}/memory.stat"):
+            key, value = line.split()
+            if key == "anon":
+                return round(int(value) / 2**20, 1)
+    except (OSError, IndexError, ValueError):
+        pass
+    return None
+
+
 def sample(stats: Stats | None) -> dict:
     mem = sh(f"docker stats --no-stream --format '{{{{.MemUsage}}}}' {PROJECT}-app-1").split("/")[0].strip()
     row = psql("SELECT goroutine_count, db_conn_active, db_conn_idle FROM ops_system_metrics ORDER BY created_at DESC LIMIT 1")
@@ -179,6 +197,7 @@ def sample(stats: Stats | None) -> dict:
     return {
         "at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "app_mem": mem,
+        "app_anon_mib": app_anon_mib(),
         "goroutines": int(gor) if gor.isdigit() else None,
         "db_conn_active": int(active) if active.isdigit() else None,
         "db_conn_idle": int(idle) if idle.isdigit() else None,
@@ -206,10 +225,21 @@ def mem_mib(text: str) -> float:
     return float(m.group(1)) * {"KiB": 1 / 1024, "MiB": 1, "GiB": 1024, "KB": 1 / 1024, "MB": 1, "GB": 1024}[m.group(2)]
 
 
+def anon_trend(samples: list[dict]) -> tuple[float | None, float | None]:
+    """Median anonymous memory early in the load (after warm-up, the second
+    sixth of the run) and over its final sixth; settle samples excluded."""
+    load = [s["app_anon_mib"] for s in samples if "target" in s and s.get("app_anon_mib") is not None]
+    n = len(load)
+    if n < 60:
+        return None, None
+    return statistics.median(load[n // 6:n // 3]), statistics.median(load[n - n // 6:])
+
+
 def checks(evidence: str, started_at: str) -> dict:
     samples = [json.loads(l) for l in open(os.path.join(evidence, "metrics.jsonl"))]
     base, last = samples[0], samples[-1]
     peak_mem = max(mem_mib(s["app_mem"]) for s in samples)
+    early_anon, late_anon = anon_trend(samples)
     logs = sh(f"docker logs --since {started_at} {PROJECT}-app-1 2>&1", timeout=600)
     secrets = list(KEYS.values())
     for n in (1, 2, 3):
@@ -227,6 +257,8 @@ def checks(evidence: str, started_at: str) -> dict:
         "baseline": {k: base[k] for k in base if k != "requests_1m"},
         "final": {k: last[k] for k in last if k != "requests_1m"},
         "peak_app_mem_mib": round(peak_mem, 1),
+        "anon_mib_early_median": early_anon,
+        "anon_mib_late_median": late_anon,
         "panics": len(re.findall(r"\bpanic\b|goroutine \d+ \[running\]", logs)),
         "credential_hits_in_logs": leaked,
         "masked_key_like_strings": len(SECRET.findall(logs)),
@@ -240,7 +272,10 @@ def checks(evidence: str, started_at: str) -> dict:
         "goroutines back to baseline (+50)": base["goroutines"] is None or last["goroutines"] is None
         or last["goroutines"] <= base["goroutines"] + 50,
         "pg backends back to baseline (+3)": last["pg_backends"] <= base["pg_backends"] + 3,
-        "app memory back within 1.5x baseline": mem_mib(last["app_mem"]) <= max(1.5 * mem_mib(base["app_mem"]), mem_mib(base["app_mem"]) + 64),
+        # Leaks show as anonymous memory that keeps rising under the same load.
+        "app anonymous memory does not trend up (late <= 1.2x early + 16 MiB)": late_anon <= 1.2 * early_anon + 16
+        if early_anon is not None and late_anon is not None
+        else mem_mib(last["app_mem"]) <= max(1.5 * mem_mib(base["app_mem"]), mem_mib(base["app_mem"]) + 64),
         "no panic": result["panics"] == 0,
         "no credential in logs": leaked == 0,
         "no duplicate usage rows": result["duplicate_usage_rows"] == 0,
@@ -289,7 +324,7 @@ def main() -> int:
             s["target"] = target[0]
             with open(metrics_path, "a") as fh:
                 fh.write(json.dumps(s) + "\n")
-            print(f"{s['at']} target={target[0]} mem={s['app_mem']} gor={s['goroutines']} slots={s['slots_account']} "
+            print(f"{s['at']} target={target[0]} mem={s['app_mem']} anon={s['app_anon_mib']}MiB gor={s['goroutines']} slots={s['slots_account']} "
                   f"inflight={s['inflight_keys']} req={sum(s['requests_1m'].values())}", flush=True)
         stop.set()
         set_balance(1000)
