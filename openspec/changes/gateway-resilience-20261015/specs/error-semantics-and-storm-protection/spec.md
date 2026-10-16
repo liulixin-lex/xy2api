@@ -56,7 +56,7 @@ Fast-failed requests MUST NOT count as account failures.
 
 ### Requirement: Failed turns end after a bounded number of attempts
 
-The gateway MUST count consecutive exhausted failures of one conversation (API key, group, model and sticky session hash): no-account responses, 429 or 5xx after failover is exhausted, and the same failures written into a committed stream. From the `errors.turn_cap.failures`-th (default 5) failure in a row, the failure MUST be final:
+The gateway MUST count consecutive exhausted failures of one conversation (API key, group, model and sticky session hash): no-account responses, 429 or 5xx after failover is exhausted, and the same failures written into a committed stream. Requests without a session hash are independent and MUST NOT be counted. From the `errors.turn_cap.failures`-th (default 5) failure in a row, the failure MUST be final:
 - no `Retry-After`, and `x-should-retry: false`;
 - `error.code` `server_is_overloaded`, in the HTTP body and in a committed stream's terminal frame;
 - a 5xx status becomes 503; 429 stays 429.

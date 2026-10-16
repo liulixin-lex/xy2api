@@ -127,8 +127,8 @@ func (s *RequestState) NoteTurn(groupID int64, model, sessionHash string) {
 	s.mu.Unlock()
 }
 
-// TurnKey returns the conversation key, or "" before selection or without
-// an API key.
+// TurnKey returns the conversation key, or "" before selection, without an
+// API key or without a session.
 func (s *RequestState) TurnKey() string {
 	if s == nil {
 		return ""
@@ -138,7 +138,9 @@ func (s *RequestState) TurnKey() string {
 	s.d.mu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.turnNoted || apiKeyID <= 0 {
+	// Requests without a session are independent of each other; counting
+	// them together would end unrelated requests as one failed turn.
+	if !s.turnNoted || apiKeyID <= 0 || s.turnSession == "" {
 		return ""
 	}
 	return TurnKey(apiKeyID, s.turnGroupID, s.turnModel, s.turnSession)

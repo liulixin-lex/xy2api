@@ -378,7 +378,7 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 
 Codex 对带 `Retry-After` 的 5xx 没有次数上限：传输层每轮 5 次请求，回合层再重试 5 轮。测试服务器上，一个全失败分组的回合产生了 30 次请求、历时 871 秒。流内失败（已提交后的 `response.failed`）也会被回合层重试 5 次。
 
-- **计数：** 按会话（API Key、分组、模型、粘性会话哈希）统计连续的“耗尽”失败，即无号 503、换号耗尽后的 429/5xx，以及已提交流里的同类失败。选号时记录会话；首次选号前的失败不计。
+- **计数：** 按会话（API Key、分组、模型、粘性会话哈希）统计连续的“耗尽”失败，即无号 503、换号耗尽后的 429/5xx，以及已提交流里的同类失败。选号时记录会话；首次选号前的失败不计。没有会话哈希的请求彼此独立，不计数（Codex、Claude Code 都带会话标识）。
 - **封顶：** 连续第 `errors.turn_cap.failures`（5）次失败改为终止应答：
   - 不带 `Retry-After`，加 `x-should-retry: false`（OpenAI、Anthropic SDK 与 Claude Code 据此停止重试）；
   - `error.code` 为 `server_is_overloaded`：Codex 只在服务端给出延迟时才重试它（HTTP 与流内都一样）；
