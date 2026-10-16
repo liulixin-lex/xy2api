@@ -103,6 +103,24 @@ func (s *RateLimitService) resilienceHandleUpstreamError(ctx context.Context, ac
 	return false, false
 }
 
+// resilienceHandleGrokUpstreamError routes balance-worded failures of API-key
+// Grok accounts to the recoverable balance state (design §3.2) before the Grok
+// handler installs a quota-window rate limit from the relay's headers. In
+// production one relay 429 "insufficient balance" locked a single-account
+// Grok group for about 28 minutes. OAuth and pool-mode accounts keep the
+// Grok handling. It reports whether the Grok handling must be skipped.
+func (s *RateLimitService) resilienceHandleGrokUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, body []byte) bool {
+	if s == nil || account == nil || account.IsGrokOAuth() || account.IsPoolMode() {
+		return false
+	}
+	upstreamMsg := sanitizeUpstreamErrorMessage(extractUpstreamErrorMessage(body))
+	if classifyUpstreamHTTP(statusCode, headers, body, upstreamMsg).Category != resilience.CategoryBalance {
+		return false
+	}
+	handled, _ := s.resilienceHandleUpstreamError(ctx, account, statusCode, headers, body, upstreamMsg)
+	return handled
+}
+
 // ApplyResilienceOutcome applies the account side of an outcome observed
 // outside an HTTP error response: in-stream failures, first-output timeouts
 // and stalls. It never changes failover or the client response.

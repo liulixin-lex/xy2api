@@ -313,6 +313,10 @@
       "value": "if handled, disable := s.resilienceHandleUpstreamError(ctx, account, statusCode, headers, responseBody, upstreamMsg); handled {"
     },
     {
+      "path": "backend/internal/service/openai_gateway_grok.go",
+      "value": "if s.rateLimitService.resilienceHandleGrokUpstreamError(ctx, account, statusCode, headers, responseBody) {"
+    },
+    {
       "path": "backend/internal/handler/failover_loop.go",
       "value": "if resilienceAttemptFailed(ctx, accountID, failoverErr) {"
     },
