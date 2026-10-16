@@ -7,11 +7,13 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"sync/atomic"
 	"syscall"
 
 	"github.com/gin-gonic/gin"
 	pkghttputil "github.com/liulixin-lex/xy2api/internal/pkg/httputil"
+	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
 // A client whose upload breaks off has gone away: the request is a client
@@ -57,6 +59,21 @@ func clientUploadStatus(c *gin.Context, status int) int {
 	}
 	if r, ok := c.Value(clientBodyReaderKey).(*clientBodyReader); ok && r.broken.Load() {
 		return statusClientClosedRequest
+	}
+	return status
+}
+
+// opsRecordedStatus is the status an ops record keeps: a 400 caused by a
+// broken upload is a client cancel (499), and a 502/504 answered as 503
+// behind a CDN edge keeps its own status, or it would count as a
+// no-account 503 in the success metrics (design §14).
+func opsRecordedStatus(c *gin.Context) int {
+	status := clientUploadStatus(c, c.Writer.Status())
+	if status == http.StatusServiceUnavailable {
+		if up, err := strconv.Atoi(c.Writer.Header().Get(service.EdgeUpstreamStatusHeader)); err == nil &&
+			(up == http.StatusBadGateway || up == http.StatusGatewayTimeout) {
+			return up
+		}
 	}
 	return status
 }

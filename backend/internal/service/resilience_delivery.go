@@ -18,6 +18,10 @@ import (
 
 const deliveryWriterKey = "xy_resilience_delivery_writer"
 
+// EdgeUpstreamStatusHeader carries the status a CDN-bound 502/504 had before
+// it was answered as 503.
+const EdgeUpstreamStatusHeader = "X-XY-Upstream-Status"
+
 // deliveryWriter counts every byte written to the client. It sits directly
 // on the server's writer, below any keepalive wrapper, so the count is safe
 // to read from the disconnect callback.
@@ -43,7 +47,7 @@ type deliveryWriter struct {
 func (w *deliveryWriter) WriteHeader(code int) {
 	if (code == http.StatusBadGateway || code == http.StatusGatewayTimeout) && !w.Written() &&
 		w.state != nil && w.state.Edge() != "" && resilience.Current().ErrorsOn() {
-		w.Header().Set("X-XY-Upstream-Status", strconv.Itoa(code))
+		w.Header().Set(EdgeUpstreamStatusHeader, strconv.Itoa(code))
 		code = http.StatusServiceUnavailable
 	}
 	w.ResponseWriter.WriteHeader(code)

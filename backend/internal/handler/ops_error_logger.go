@@ -1122,7 +1122,7 @@ func recordOpsErrorAfterRequest(c *gin.Context, ops *service.OpsService, w *opsC
 		return
 	}
 
-	status := clientUploadStatus(c, c.Writer.Status())
+	status := opsRecordedStatus(c)
 	body := w.capturedBytes()
 	parsed := parseOpsErrorResponse(body)
 	if !parsed.StreamFailure {

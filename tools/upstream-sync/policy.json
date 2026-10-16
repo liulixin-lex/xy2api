@@ -322,7 +322,7 @@
     },
     {
       "path": "backend/internal/handler/ops_error_logger.go",
-      "value": "status := clientUploadStatus(c, c.Writer.Status())"
+      "value": "status := opsRecordedStatus(c)"
     },
     {
       "path": "backend/internal/handler/failover_loop.go",
