@@ -472,7 +472,8 @@ func nonStreamBody(p protocol, model string, u usage) any {
 
 func answersNormally(f fault, key string) bool {
 	switch f.id {
-	case "F00", "F17", "F22", "F23", "F24", "F25", "F29":
+	case "F00", "F17", "F22", "F23", "F24", "F25", "F26", "F29":
+		// F26 fails streams only; the capability probe is not streamed.
 		return true
 	case "BAL":
 		return balances.get(key) > 0
