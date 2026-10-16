@@ -4,7 +4,7 @@
 
 ## 当前交接状态
 
-### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-16T13:35Z；PR #97 已开，**暂停合并与打 RC**；审查 0.4.0 范围代码全部提交，待新候选验证，生产未改）
+### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-16T14:45Z；PR #97 已开，**暂停合并与打 RC**；审查 0.4.0 范围全部提交，候选 `31407833d` 测试服务器验证中，生产未改）
 
 **背景**
 
@@ -60,6 +60,7 @@
 - **进度（13:20Z）**：已提交 F1 `685986a68`、F12 `f2b077c4e`、F7 `25bb15ca2`、F2+F5 `6cfd31e4a`（含端到端 `TestStickyOnlyAccountKeepsServingBoundSessions`）、F5 补充 `e18275960`（不写负缓存的续链/图片/compact 选号按同一判据标记，OpenAI 只对可缓存选号查缓存）、F14 `a53b90175` 及文档、DC-4（F1）、LR-1（F3）场景与 fault-upstream 记录完整 spec。审查会话复核：F1、F2+F5、F7、F12、F14 与子 Agent 的 F4（`d24a7d5b6`，尚在子 Agent 分支）正确；另提三点：①份额会话 `StickyOwner` 为 0，F4 的末位兜底 sticky 参数对份额会话失效（已转告子 Agent 在 F3 处理并补用例）；②F5 收窄了快速失败（已按方案 a 修复）；③F2 判据不看会话上限（已登记 0.4.1）。待：子 Agent 完成 F3 → 合入 → 全量验证 → 新候选部署测试服务器（停旧浸泡）→ 全部场景、客户端、6.5 小时浸泡 → 推送 PR #97。
 - **进度（13:35Z）**：子 Agent 的 F4 `60cc7d6fb`、F3 `1b3d8e4fe`（含复核第 1 点：门禁 sticky 取份额绑定账号，`TestResilienceLastResortGrantsStickyAllowanceToBoundAccount`）已 cherry-pick 合入，worktree 与分支已删除。子 Agent 另发现：不支持 compact 的软罚账号会被末位兜底派去处理 compact 请求（随 F4 修复）；OpenAI 旧调度路径（高级调度器关闭，缺省）软罚时仍清除绑定并把临时账号写成新绑定，主 Agent 已修（`d6c8fd1e6`，上游文件钩子已登记 required_literals 与 scheduler-diff）。design §4.2/§4.3、session spec 新场景、覆盖矩阵、tasks 与管理员说明已同步（`fed225d84`、`e44be85d0`）。下一步：本机全量验证 → 停旧浸泡 → `redeploy2.sh` 部署新候选 → `final-run.sh`（浸泡改 6.5 小时）→ 指标报告 → 推送 PR #97、更新 PR 描述、等 CI。
 - **进度（14:10Z）**：本机全量验证（HEAD `e44be85d0`）全绿：四种 vet、lint 0、unit/无 tag/embed、CI 门禁 245 个韧性测试（-race、0 跳过）、同步审计与 scheduler-diff、前端 389 文件/3047 项与构建。旧浸泡 `soak-968df0942` 运行 2 小时 23 分后于 13:35Z 停止（存活堆 58 MB、匿名内存 89 MiB 均平稳）。新候选 `c21883e9c` 已部署（`final-run.sh` 浸泡已改 6.5 小时），13:55Z 启动全量场景 → 客户端 → 浸泡。部署前单跑发现两处测试工具问题并修复：①F1 场景与已有 DC-4 同号被覆盖、从未执行，改为 DC-5 并让重复编号加载即报错（`c21883e9c`）；②`stream_request` 计划断开时读 `conn.sock`（`Connection: close` 下取得响应后为 None）崩溃且 `close()` 不真正断开，旧 DC-4 实为响应头后立即离开（`76dd9b3f5`）。LR-1 原用 chat completions 无会话，份额分组按 API Key 归为同一会话，第二个请求沿用第一个的绑定（F3 的软罚保留绑定语义，非缺陷），改为每请求独立会话后通过。DC-5 已在新候选上通过（F1 端到端确认）。迁移、schema、前端 API 自 `eaa63fd30` 无改动，升级演练与 XY-image 回放沿用。
+- **进度（14:45Z）**：候选 `c21883e9c` 场景 44/44、客户端 16/16 后，对比旧候选证据发现 ERR-4 的快速失败不再触发。根因：OpenAI 按模型瞬时屏蔽（上游连续 5xx 后 10/45 秒）只在进程内，`resiliencePenaltyOf` 看不到，末位兜底把只被它挡住的账号排除，单号 OpenAI 分组在屏蔽期间整组无号（旧候选同样如此，F2 后又不计快速失败）；design §2 本把它列为软罚。修复 `31407833d`（先写失败用例；原版与份额两条 OpenAI 末位兜底按屏蔽结束时间视为软罚；屏蔽期间粘性绑定仍被上游逻辑清除，登记 0.4.1）。测试服务器确认：ERR-1/3/4 改为经末位兜底到达上游（502 + Retry-After，19 次 `last_resort_soft`）。`c21883e9c` 浸泡已停；`31407833d` 本机全量验证全绿（CI 门禁 247），14:31Z 启动 `final-run.sh`（场景 → 客户端 → 6.5 小时浸泡，约 21:40Z 结束）。之后：指标报告（`/tmp/xy2-postsoak-metrics.sh 31407833d 7`）→ 私有 `STAGING_REPORT.md` → 推送 PR #97、更新描述（草稿 `PR_BODY.md`，旧版 `PR_BODY.v1.md`）→ 等 CI → 合并与 RC。
 
 **卡点与风险**
 
