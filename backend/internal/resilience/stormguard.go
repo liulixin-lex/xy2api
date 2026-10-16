@@ -15,6 +15,9 @@ type CachedResponse struct {
 	// RetryAt is when the client may retry; the replay recomputes
 	// Retry-After from it.
 	RetryAt time.Time
+	// Model is the requested model the answer belongs to ("" when unknown);
+	// a fast-fail replay only answers requests for the same model.
+	Model string
 }
 
 // RetryAfterSeconds returns the remaining Retry-After of a replay (at least 1).

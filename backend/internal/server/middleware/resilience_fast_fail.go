@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"bytes"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -13,6 +15,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
+	"github.com/tidwall/gjson"
 )
 
 // resilienceFastFailEligible reports whether a request takes part in the
@@ -47,6 +50,11 @@ func resilienceFastFailReplay(c *gin.Context, apiKeyID int64) bool {
 	if !tripped || resp.Status == 0 || len(resp.Body) == 0 {
 		return false
 	}
+	// The 503s were for one model; the key's requests for other models are
+	// served normally. The body is read only on this rare tripped path.
+	if resp.Model != "" && requestedModel(c) != resp.Model {
+		return false
+	}
 	for k, vs := range resp.Header {
 		for _, v := range vs {
 			c.Writer.Header().Add(k, v)
@@ -61,6 +69,36 @@ func resilienceFastFailReplay(c *gin.Context, apiKeyID int64) bool {
 	c.Abort()
 	return true
 }
+
+// requestedModel reads the model of a request before any handler parsed
+// it: from the Gemini path (/models/{model}:method) or the JSON body, which
+// is restored for the handler. It returns "" when neither names one.
+func requestedModel(c *gin.Context) string {
+	path := c.Request.URL.Path
+	if i := strings.Index(path, "/models/"); i >= 0 {
+		m := path[i+len("/models/"):]
+		if j := strings.IndexAny(m, ":/"); j >= 0 {
+			m = m[:j]
+		}
+		return m
+	}
+	if c.Request.Body == nil || !strings.Contains(strings.ToLower(c.ContentType()), "json") {
+		return ""
+	}
+	head, err := io.ReadAll(io.LimitReader(c.Request.Body, requestedModelPeekLimit))
+	c.Request.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(bytes.NewReader(head), c.Request.Body), c.Request.Body}
+	if err != nil {
+		return ""
+	}
+	return gjson.GetBytes(head, "model").String()
+}
+
+// requestedModelPeekLimit bounds the body read before the handler; a model
+// field after it is not found and the request is not replayed.
+const requestedModelPeekLimit = 4 << 20
 
 // resilienceFastFailObserve records the outcome of a request after the
 // handler ran: identical 503s count toward the trip, any success clears it.
@@ -100,7 +138,8 @@ func resilienceFastFailObserve(c *gin.Context, apiKeyID int64) {
 	}
 	tripped := resilience.ProcessFastFail().Observe(apiKeyID,
 		resilience.Signature(er.Status, er.ErrType, er.Message),
-		resilience.CachedResponse{Status: er.Status, Body: er.Body, Header: header, RetryAt: retryAt},
+		resilience.CachedResponse{Status: er.Status, Body: er.Body, Header: header, RetryAt: retryAt,
+			Model: resilience.StateFrom(c.Request.Context()).Model()},
 		time.Duration(cfg.Errors.FastFail.WindowSeconds)*time.Second, cfg.Errors.FastFail.Threshold, now)
 	if tripped {
 		slog.Warn("resilience.fast_fail", "api_key_id", apiKeyID, "status", er.Status, "error_type", er.ErrType, "retry_at", retryAt)

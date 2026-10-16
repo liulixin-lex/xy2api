@@ -352,7 +352,7 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 ### 9.3 同 Key 快速失败
 
 - **触发：** 同一 API Key 在 `window_seconds`（30 秒）内收到 ≥ `threshold`（10）次**完全相同**的 503（状态、`error.type`、`message` 均相同）。
-- **动作：** 之后窗口内的同类请求在选号与内容审计之前就直接返回**同一应答**（状态、正文、剩余的 `Retry-After` 均不变）。
+- **动作：** 之后窗口内同一模型的请求在选号与内容审计之前就直接返回**同一应答**（状态、正文、剩余的 `Retry-After` 均不变）；同一 Key 对其他模型的请求照常处理。只有已触发时才读取请求体中的 `model`（Gemini 取路径中的模型）。
 - **豁免：** 异步任务轮询、capabilities、DELETE、`/v1/usage`、`/v1/models`、幂等重放。
 - **存储：** 进程内滑动窗口，多实例时各自计数，属于尽力而为。
 - 快速失败不计入账号失败，单独计数。

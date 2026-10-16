@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -243,4 +244,52 @@ func TestFastFailIgnoresCappedTurns(t *testing.T) {
 		require.Empty(t, w.Header().Get("Retry-After"))
 	}
 	require.Equal(t, 15, calls)
+}
+
+func TestFastFailReplaysOnlyTheTrippingModel(t *testing.T) {
+	// A key whose requests for one model keep failing still reaches the
+	// handler for its other models.
+	orig := *resilience.Current()
+	resilience.Publish(resilience.Defaults())
+	t.Cleanup(func() { resilience.Publish(orig) })
+	calls := map[string]int{}
+	handler := func(c *gin.Context) {
+		var req struct {
+			Model string `json:"model"`
+		}
+		_ = c.ShouldBindJSON(&req)
+		calls[req.Model]++
+		resilience.StateFrom(c.Request.Context()).NoteTurn(1, req.Model, "")
+		if req.Model == "down" {
+			c.Header("Retry-After", "20")
+			c.Set(resilience.GinKeyErrorResponse, resilience.ErrorResponse{Status: 503, ErrType: "api_error", Message: "no account", Body: []byte(`{"error":{"message":"no account"}}`)})
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"message": "no account"}})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+	// As in production, the request state is attached before authentication.
+	inner, key := newFastFailRouter(t, 9105, handler)
+	router := gin.New()
+	router.Use(ClientRequestID())
+	router.POST("/v1/messages", func(c *gin.Context) { inner.HandleContext(c) })
+	post := func(model string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"`+model+`","messages":[]}`))
+		req.Header.Set("x-api-key", key)
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+		return w
+	}
+	for i := 0; i < 10; i++ {
+		require.Equal(t, http.StatusServiceUnavailable, post("down").Code)
+	}
+	w := post("down")
+	require.Equal(t, "1", w.Header().Get("X-XY-Fast-Fail"))
+	require.Equal(t, 10, calls["down"], "the failing model is replayed")
+
+	w = post("up")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Empty(t, w.Header().Get("X-XY-Fast-Fail"))
+	require.Equal(t, 1, calls["up"], "another model reaches the handler with its body intact")
 }

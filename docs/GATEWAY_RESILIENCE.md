@@ -148,7 +148,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | `fallback_group` / `fallback_return` | 转投兜底分组 / 切回主分组 |
 | `session_rebind` | 会话失败改绑 |
 | `undelivered` / `cdn_cut` | 未送达；按耗时推断的 CDN 切断（90 秒、125 秒、300 秒） |
-| `fast_fail` | 同一 Key 的重复 503 快速返回 |
+| `fast_fail` | 同一 Key、同一模型的重复 503 快速返回 |
 | `turn_cap` | 会话连续耗尽失败到达上限，改为终止应答 |
 | `abuse_guard` | 未送达滥用保护计费 |
 | `stall` | 停滞断流 |

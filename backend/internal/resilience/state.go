@@ -144,6 +144,17 @@ func (s *RequestState) TurnKey() string {
 	return TurnKey(apiKeyID, s.turnGroupID, s.turnModel, s.turnSession)
 }
 
+// Model returns the requested model the request selected for ("" before
+// the first selection).
+func (s *RequestState) Model() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.turnModel
+}
+
 // MarkTurnFailed records that the request counted as a failed turn attempt,
 // so a 200 that later carries an in-stream failure does not reset the streak.
 func (s *RequestState) MarkTurnFailed() {
