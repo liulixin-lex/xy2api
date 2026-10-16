@@ -128,7 +128,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	defer func() {
 		result, err = s.resilienceGatewaySelectionEpilogue(ctx, group, groupID, sessionHash, requestedModel, origExcluded, avoided, result, err)
 	}()
-	if cachedErr := resilienceNegativeCacheHit(ctx, groupID, requestedModel, origExcluded); cachedErr != nil {
+	if cachedErr := resilienceNegativeCacheHit(ctx, groupID, requestedModel, "", origExcluded); cachedErr != nil {
 		return nil, cachedErr
 	}
 

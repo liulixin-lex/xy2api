@@ -295,7 +295,7 @@ func (s *GatewayService) resilienceGatewaySelectionEpilogue(ctx context.Context,
 		if lr := s.resilienceGatewayLastResort(ctx, group, groupID, sessionHash, requestedModel, excludedIDs, avoided); lr != nil {
 			result, err = lr, nil
 		} else {
-			resilienceNegativeCachePut(ctx, groupID, requestedModel, excludedIDs, err)
+			resilienceNegativeCachePut(ctx, groupID, requestedModel, "", excludedIDs, err)
 			return result, err
 		}
 	}

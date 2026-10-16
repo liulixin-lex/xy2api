@@ -91,12 +91,35 @@ func TestNegativeCacheSkipsConfigAndProfitResults(t *testing.T) {
 		fmt.Errorf("%w supporting model: m (total=2 eligible=0 profit_threshold=2 profit_invalid_account_rate=0)", ErrNoAvailableAccounts),
 		ErrClaudeCodeOnly,
 	} {
-		resilienceNegativeCachePut(ctx, &groupID, "m", nil, err)
-		require.NoError(t, resilienceNegativeCacheHit(ctx, &groupID, "m", nil), err.Error())
+		resilienceNegativeCachePut(ctx, &groupID, "m", "", nil, err)
+		require.NoError(t, resilienceNegativeCacheHit(ctx, &groupID, "m", "", nil), err.Error())
 	}
-	resilienceNegativeCachePut(ctx, &groupID, "m", nil, fmt.Errorf("%w supporting model: m (total=1 profit_threshold=0 profit_invalid_account_rate=0)", ErrNoAvailableAccounts))
-	require.ErrorIs(t, resilienceNegativeCacheHit(ctx, &groupID, "m", nil), ErrNoAvailableAccounts)
-	require.NoError(t, resilienceNegativeCacheHit(ctx, &groupID, "other-model", nil))
+	resilienceNegativeCachePut(ctx, &groupID, "m", "", nil, fmt.Errorf("%w supporting model: m (total=1 profit_threshold=0 profit_invalid_account_rate=0)", ErrNoAvailableAccounts))
+	require.ErrorIs(t, resilienceNegativeCacheHit(ctx, &groupID, "m", "", nil), ErrNoAvailableAccounts)
+	require.NoError(t, resilienceNegativeCacheHit(ctx, &groupID, "other-model", "", nil))
+}
+
+func TestNegativeCacheHitIsRecognisedAndScopedByVariant(t *testing.T) {
+	withResilienceSettings(t, nil)
+	groupID := int64(19)
+	ctx := context.Background()
+	noAccount := fmt.Errorf("%w supporting model: m (total=1 profit_threshold=0 profit_invalid_account_rate=0)", ErrNoAvailableAccounts)
+
+	// A replayed result must be recognisable, or the selection epilogue
+	// stores it again and the entry never expires under steady traffic.
+	resilienceNegativeCachePut(ctx, &groupID, "m", "", nil, noAccount)
+	hit := resilienceNegativeCacheHit(ctx, &groupID, "m", "", nil)
+	require.ErrorIs(t, hit, ErrNoAvailableAccounts)
+	require.ErrorIs(t, hit, errNegativeCached)
+
+	// An OpenAI selection that needs another transport or capability is not
+	// answered by this result.
+	chat := "openai:" + string(OpenAIUpstreamTransportAny) + ":chat_completions:openai"
+	responses := "openai:" + string(OpenAIUpstreamTransportAny) + "::openai"
+	resilienceNegativeCachePut(ctx, &groupID, "m2", chat, nil, noAccount)
+	require.ErrorIs(t, resilienceNegativeCacheHit(ctx, &groupID, "m2", chat, nil), errNegativeCached)
+	require.NoError(t, resilienceNegativeCacheHit(ctx, &groupID, "m2", responses, nil))
+	require.NoError(t, resilienceNegativeCacheHit(ctx, &groupID, "m2", "", nil))
 }
 
 func TestReservationErrorDistinguishesHeldBalance(t *testing.T) {

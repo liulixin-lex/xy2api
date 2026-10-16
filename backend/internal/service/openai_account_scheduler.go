@@ -2222,11 +2222,12 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	origExcluded := excludedIDs
 	resilience.StateFrom(ctx).NoteTurn(derefGroupID(groupID), requestedModel, sessionHash)
 	negativeCacheable := strings.TrimSpace(previousResponseID) == "" && requiredImageCapability == "" && !requireCompact
+	negativeVariant := "openai:" + string(requiredTransport) + ":" + string(requiredCapability) + ":" + NormalizeOpenAICompatiblePlatform(platform)
 	negativeCtx := ctx
 	if negativeCacheable && groupID != nil && resilience.Current().ErrorsOn() {
 		negativeCtx = s.withOpenAIProfitControlGate(ctx, groupID)
 	}
-	if cachedErr := resilienceNegativeCacheHit(negativeCtx, groupID, requestedModel, origExcluded); cachedErr != nil && negativeCacheable {
+	if cachedErr := resilienceNegativeCacheHit(negativeCtx, groupID, requestedModel, negativeVariant, origExcluded); cachedErr != nil && negativeCacheable {
 		return nil, OpenAIAccountScheduleDecision{}, cachedErr
 	}
 	avoided := s.resilience.sessionAvoid(ctx, groupID, sessionHash)
@@ -2252,7 +2253,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			decision.SelectedAccountID = lr.Account.ID
 			decision.SelectedAccountType = lr.Account.Type
 		} else if negativeCacheable {
-			resilienceNegativeCachePut(negativeCtx, groupID, requestedModel, origExcluded, err)
+			resilienceNegativeCachePut(negativeCtx, groupID, requestedModel, negativeVariant, origExcluded, err)
 		}
 	}
 	if err == nil && selection != nil {

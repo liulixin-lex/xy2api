@@ -11,11 +11,17 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
-// selectionNegativeKey keys the selection-level negative cache by group and
-// model; the group fixes the platform except for composite groups, whose
-// target platform depends on the model that is part of the key.
-func selectionNegativeKey(groupID *int64, model string) string {
-	return resilience.NegativeKey(derefGroupID(groupID), "select", model)
+// selectionNegativeKey keys the selection-level negative cache by group,
+// model and selection variant. The group fixes the platform except for
+// composite groups, whose target platform depends on the model in the key;
+// the variant separates OpenAI selections that need a different transport,
+// endpoint capability or platform, so one result never answers another.
+func selectionNegativeKey(groupID *int64, model, variant string) string {
+	scope := "select"
+	if variant != "" {
+		scope += ":" + variant
+	}
+	return resilience.NegativeKey(derefGroupID(groupID), scope, model)
 }
 
 // errNegativeCached marks a no-account result replayed from the negative
@@ -27,13 +33,13 @@ var errNegativeCached = errors.New("no available account (cached)")
 //
 // Profit-controlled groups decide per request (the downstream rate is
 // frozen per user and request), so their results are never cached.
-func resilienceNegativeCacheHit(ctx context.Context, groupID *int64, model string, excludedIDs map[int64]struct{}) error {
+func resilienceNegativeCacheHit(ctx context.Context, groupID *int64, model, variant string, excludedIDs map[int64]struct{}) error {
 	cfg := resilience.Current()
 	if !cfg.ErrorsOn() || groupID == nil || len(excludedIDs) > 0 || gatewayProfitControlGateActive(ctx) {
 		return nil
 	}
-	if _, ok := resilience.ProcessNegativeCache().Get(selectionNegativeKey(groupID, model), time.Now()); ok {
-		return fmt.Errorf("%w supporting model: %s (%v)", ErrNoAvailableAccounts, model, errNegativeCached)
+	if _, ok := resilience.ProcessNegativeCache().Get(selectionNegativeKey(groupID, model, variant), time.Now()); ok {
+		return fmt.Errorf("%w supporting model: %s (%w)", ErrNoAvailableAccounts, model, errNegativeCached)
 	}
 	return nil
 }
@@ -44,14 +50,14 @@ var profitRejectedPattern = regexp.MustCompile(`profit_(?:threshold|invalid_acco
 
 // resilienceNegativeCachePut stores a final no-account result of a first
 // attempt.
-func resilienceNegativeCachePut(ctx context.Context, groupID *int64, model string, excludedIDs map[int64]struct{}, err error) {
+func resilienceNegativeCachePut(ctx context.Context, groupID *int64, model, variant string, excludedIDs map[int64]struct{}, err error) {
 	cfg := resilience.Current()
 	if !cfg.ErrorsOn() || groupID == nil || len(excludedIDs) > 0 || !isNoAccountSelectionError(err) || errors.Is(err, errNegativeCached) ||
 		gatewayProfitControlGateActive(ctx) || profitRejectedPattern.MatchString(err.Error()) {
 		return
 	}
 	ttl := time.Duration(cfg.Errors.NegativeCacheSeconds) * time.Second
-	resilience.ProcessNegativeCache().Put(selectionNegativeKey(groupID, model), derefGroupID(groupID), resilience.CachedResponse{}, ttl, time.Now())
+	resilience.ProcessNegativeCache().Put(selectionNegativeKey(groupID, model, variant), derefGroupID(groupID), resilience.CachedResponse{}, ttl, time.Now())
 }
 
 // markResilienceConfigError records configuration-caused selection
