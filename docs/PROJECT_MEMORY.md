@@ -4,9 +4,10 @@
 
 ## 当前交接状态
 
-### 智商检测“最终响应互相冲突”诊断（2026-10-16，只读诊断完成；修复待授权）
+### 智商检测“最终响应互相冲突”修复（2026-10-16，PR #99 已开、检查全绿；待维护者合并，未发版、未部署）
 
-- 账号 #307（aiportx 中转）会注入占位 assistant 消息（`msg_ft_*`，正文为单个空格，无 `phase`），`iqcheck` 的 `terminal()` 把它当作第二条最终回答，因此判为 `conflicting_final_response`。证据、结论与建议修法见操作日志 `20261016-iq-conflict-aiportx`。未改代码，未部署。
+- 账号 #307（aiportx 中转）会注入占位 assistant 消息（`msg_ft_*`，正文为单个空格，无 `phase`），`iqcheck` 的 `terminal()` 把它当作第二条最终回答，因此判为 `conflicting_final_response`。诊断见操作日志 `20261016-iq-conflict-aiportx`。
+- 修复在 [PR #99](https://github.com/liulixin-lex/xy2api/pull/99)：忽略仅含空白的消息，解析器升为 `iq-response-v6`，产品版本 0.3.1。按用户决定止于提交 PR。合并后需打 annotated `v0.3.1` tag 才会发版；生产仍为 0.3.0，部署需另行授权。详见操作日志 `20261016-iq-blank-placeholder-0.3.1`。
 
 ### Sub2API 0.2.15 / XY2API 0.3.0 正式发布完成（2026-10-13）
 
@@ -677,11 +678,11 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
-### 20261016-iq-blank-placeholder-0.3.1 — 智商检测忽略空白占位消息并发布部署 0.3.1（进行中）
+### 20261016-iq-blank-placeholder-0.3.1 — 智商检测忽略空白占位消息（PR #99 已开、检查全绿，待维护者合并；本 Agent 无进行中操作）
 
-- 用户于 2026-10-16 明确授权三步全部完成：本地修复与测试；提交、推送并开 PR（含合并）；发版 0.3.1 并部署生产。起点 `main` `f8fec15a2`，分支 `fix/iq-blank-placeholder-20261016`。诊断依据见操作日志 `20261016-iq-conflict-aiportx`。
+- 按用户决定止于提交 PR：未合并、未打 tag、未发版、未部署，生产仍为 0.3.0。用户改为只需提交 PR，合并、发版和部署不在本次授权范围内，后续 Agent 不得据此自行执行。
 - 范围：`iqcheck` 的 `terminal()` 不再把仅含空白的 assistant 消息计为最终回答，诊断中记为忽略类型 `blank`；解析器版本升为 `iq-response-v6`；产品版本 0.3.1（兼容版本仍为 0.2.15）。无迁移，无前端改动。
-- 生产按 2026-10-15 升级现场的方式进行：先备份 compose，只替换镜像行，预拉镜像后 `compose up -d`；回滚即恢复 0.3.0 镜像行。注意记忆第 650 行记录的历史部署事故。
+- 结果、验证与后续步骤见操作日志 `20261016-iq-blank-placeholder-0.3.1`。
 
 ### 20261012-pr90-slim — PR #90 复审、精简与上线验收（已完成，随 PR #90 推送；本 Agent 无进行中操作）
 
@@ -2144,3 +2145,13 @@ pnpm --dir frontend run build
 - 其他观察：占位注入不是每次都有。直连拿到完整响应的 6 次中有 2 次出现，都是短提示词；4 次检测原题都没有出现，而生产 9 次调用全部命中。差异可能与 IQ 探测携带的 `prompt_cache_key` 或客户端特征有关，未证实。带 `prompt_cache_key` 的 curl 请求在该中转上，HTTP/1.1 会超时，HTTP/2 会被整段缓冲约 66 秒，原因未查明，不影响上述结论。该账号业务流量正常，最近一小时有上百次成功请求。本机与生产均无 Go 1.27 工具链，未用真实解析器回放，结论依据代码逐行推导和既有用例 `parse_http_test.go:182`。
 - 修改文件：仅本文件（本条及顶部交接项）。未改业务代码，未部署，未改生产配置。
 - 下一步（待用户授权）：在 `terminal()` 中把纯空白的 assistant 消息视为非答案（与 design.md:92“只提取完整最终回答”及 `Grade` 先做 TrimSpace 一致），并补占位消息回归用例；或者请上游关闭占位注入。
+
+### 2026-10-16T20:21:37Z — `20261016-iq-blank-placeholder-0.3.1` — PR #99 已开，按用户决定止于提交 PR
+
+- 请求/目标：修复账号 #307 智商检测误判（见 `20261016-iq-conflict-aiportx`）。用户先授权修复测试、提交 PR、发版部署三步全部完成；`gh pr merge` 被 Claude Code 自动权限检查拦截后，用户改为“提交了 PR 就行”。合并、打 tag、发版和生产部署均未执行。
+- 开始状态：`main` `f8fec15a2`，工作树只有上一条诊断记录的未提交改动；分支 `fix/iq-blank-placeholder-20261016`。
+- 完成操作：`terminal()` 跳过仅含空白的 assistant 消息，并记为忽略类型 `blank`；解析器版本升为 `iq-response-v6`；产品版本 0.3.1（`VERSION` 与 `UPSTREAM_BASE.json`）；`docs/OPENAI_IQ_CHECK.md` 同步说明。先写回归用例，在未修复代码上确认失败后再修复。用真实解析器回放按抓包结构构造的流，1 条和 2 条占位的诊断计数与生产 9 次调用的两种形态逐字段一致。
+- 修改文件：`backend/internal/pkg/iqcheck/{parse.go,diagnostic.go,parse_http_test.go,reliability_test.go}`、`backend/cmd/server/VERSION`、`UPSTREAM_BASE.json`、`docs/OPENAI_IQ_CHECK.md`、本文件。
+- 验证：本机 Go 1.27.2（`/tmp/xy2-toolchain`，安装包 SHA256 与官方一致）下以下检查通过：`go test -race ./internal/pkg/iqcheck/`、`-tags=unit` 的 IQ 相关 service/repository/handler 单测、gofmt、go vet、golangci-lint v2.14.0（iqcheck 0 issues）。`sync.py audit`、`scheduler-diff` 和同步工具 19 项测试也通过。PR #99 head `67497e325` 的 8 项必需检查（push 与 PR 两份）全部成功；本条为纯文档提交，推送后新 head 需重新通过检查。
+- 卡点/风险：本机全局凭据助手是 Git Credential Manager，HTTPS 推送会挂起等待交互。本次改用单条命令 `git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push`。合并由维护者执行。
+- 下一步：维护者审阅 PR #99，并以 merge commit 合并；随后从合并提交创建 annotated `v0.3.1` tag 触发 Release，核验制品与 GHCR 镜像。生产部署需另行授权。届时按 2026-10-15 升级现场的方式只替换镜像行，用 `docker compose -p production` 原地重建。无迁移，回滚即恢复 0.3.0 镜像行；pgBackRest 与 WAL 归档可提供 PITR。
