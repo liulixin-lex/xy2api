@@ -38,8 +38,11 @@ type relayKeepaliveFilter struct {
 	// out holds bytes ready for the caller.
 	out []byte
 	// held is an "event: response.output_text.delta" line waiting for its
-	// data line.
-	held []byte
+	// data line while holding is set.
+	held    []byte
+	holding bool
+	// buf backs out when a held line is emitted; reused once out is drained.
+	buf []byte
 	// midLine is set while a line longer than the buffer passes through.
 	midLine bool
 	// skipBlank drops the blank line that ends a dropped frame.
@@ -50,8 +53,8 @@ type relayKeepaliveFilter struct {
 func (f *relayKeepaliveFilter) Read(p []byte) (int, error) {
 	for len(f.out) == 0 {
 		if f.err != nil {
-			if len(f.held) > 0 {
-				f.out, f.held = f.held, nil
+			if f.holding {
+				f.out, f.holding = f.held, false
 				break
 			}
 			return 0, f.err
@@ -87,9 +90,9 @@ func (f *relayKeepaliveFilter) next() {
 			return
 		}
 	}
-	if f.held != nil {
+	if f.holding {
 		if isRelayKeepaliveDataLine(trimmed) {
-			f.held = nil
+			f.holding = false
 			f.skipBlank = true
 			return
 		}
@@ -97,7 +100,8 @@ func (f *relayKeepaliveFilter) next() {
 		return
 	}
 	if isRelayKeepaliveEventLine(trimmed) {
-		f.held = append([]byte(nil), line...)
+		f.held = append(f.held[:0], line...)
+		f.holding = true
 		return
 	}
 	if isRelayKeepaliveDataLine(trimmed) {
@@ -107,14 +111,17 @@ func (f *relayKeepaliveFilter) next() {
 	f.emit(line)
 }
 
-// emit queues line after any held event line. line may alias the reader's
-// buffer, so it is copied.
+// emit queues line after any held event line. line aliases the reader's
+// buffer, which stays valid until the next read: Read hands out all of out
+// before next reads again, so line and buf can be handed out as they are.
 func (f *relayKeepaliveFilter) emit(line []byte) {
-	out := make([]byte, 0, len(f.held)+len(line))
-	out = append(out, f.held...)
-	out = append(out, line...)
-	f.held = nil
-	f.out = out
+	if !f.holding {
+		f.out = line
+		return
+	}
+	f.buf = append(append(f.buf[:0], f.held...), line...)
+	f.holding = false
+	f.out = f.buf
 }
 
 func isRelayKeepaliveEventLine(line []byte) bool {
