@@ -2227,8 +2227,10 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	if negativeCacheable && groupID != nil && resilience.Current().ErrorsOn() {
 		negativeCtx = s.withOpenAIProfitControlGate(ctx, groupID)
 	}
-	if cachedErr := resilienceNegativeCacheHit(negativeCtx, groupID, requestedModel, negativeVariant, origExcluded); cachedErr != nil && negativeCacheable {
-		return nil, OpenAIAccountScheduleDecision{}, cachedErr
+	if negativeCacheable {
+		if cachedErr := resilienceNegativeCacheHit(negativeCtx, groupID, requestedModel, negativeVariant, origExcluded); cachedErr != nil {
+			return nil, OpenAIAccountScheduleDecision{}, cachedErr
+		}
 	}
 	avoided := s.resilience.sessionAvoid(ctx, groupID, sessionHash)
 	excludedIDs = mergeExcluded(excludedIDs, avoided)
@@ -2255,6 +2257,11 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		} else if negativeCacheable {
 			resilienceNegativeCachePut(negativeCtx, groupID, requestedModel, negativeVariant, origExcluded, err)
 		}
+	}
+	// xy2api resilience: selections that are never cached still count for the
+	// per-key fast fail when no account of the group could serve them.
+	if !negativeCacheable && isNoAccountSelectionError(err) {
+		resilienceMarkGroupNoAccount(ctx, groupID, requestedModel, origExcluded)
 	}
 	if err == nil && selection != nil {
 		s.shareScheduling.recordSelection(ctx, selection.Account)

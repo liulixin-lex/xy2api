@@ -58,7 +58,7 @@ The following MUST be exempt and MUST never trigger it:
 - `/v1/models`;
 - idempotent replays.
 
-Only 503 responses that hold for every request of the key and model MUST count: group-level no-account results (as for the negative cache, including replays from it) and configuration errors. A 503 that concerned one session MUST NOT count.
+Only 503 responses that hold for every request of the key and model MUST count: group-level no-account results (as for the negative cache, including replays from it and selections that are never cached, such as continuations, image and compact selections) and configuration errors. A 503 that concerned one session MUST NOT count.
 
 Fast-failed requests MUST NOT count as account failures.
 

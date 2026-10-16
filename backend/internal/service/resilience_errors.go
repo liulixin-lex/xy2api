@@ -103,6 +103,19 @@ func resilienceNegativeCachePut(ctx context.Context, groupID *int64, model, vari
 	resilience.ProcessNegativeCache().Put(selectionNegativeKey(ctx, groupID, model, variant), derefGroupID(groupID), resilience.CachedResponse{}, ttl, time.Now())
 }
 
+// resilienceMarkGroupNoAccount marks a no-account result of a selection
+// that is never cached (continuations, image and compact selections) when it
+// holds for the whole group, so the per-key fast fail counts it as it counts
+// cached results (design §9.3).
+func resilienceMarkGroupNoAccount(ctx context.Context, groupID *int64, model string, excludedIDs map[int64]struct{}) {
+	if !resilience.Current().ErrorsOn() || groupID == nil || len(excludedIDs) > 0 || gatewayProfitControlGateActive(ctx) {
+		return
+	}
+	if resilienceNoAccountIsGroupLevel(ctx, derefGroupID(groupID), model) {
+		resilience.StateFrom(ctx).MarkGroupNoAccount()
+	}
+}
+
 // markResilienceConfigError records configuration-caused selection
 // failures on the request state.
 func markResilienceConfigError(ctx context.Context, err error) {

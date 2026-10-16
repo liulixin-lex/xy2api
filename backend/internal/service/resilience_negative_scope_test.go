@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
@@ -112,4 +113,50 @@ func TestStickyOnlyAccountKeepsServingBoundSessions(t *testing.T) {
 	res, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, "bound", "claude-sonnet-4", nil, "", 0)
 	require.NoError(t, err, "the bound session is not answered by the new session's result")
 	require.Equal(t, int64(91), res.Account.ID)
+}
+
+func newNegativeScopeOpenAIService(accounts []Account) *OpenAIGatewayService {
+	cfg := &config.Config{}
+	cfg.Gateway.Scheduling.LoadBatchEnabled = false
+	return &OpenAIGatewayService{
+		accountRepo:        openAIGroupListingRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		cache:              &schedulerTestGatewayCache{},
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		resilience:         NewResilienceService(nil, newMemResilienceStore()),
+	}
+}
+
+func TestUncachedOpenAISelectionStillMarksGroupNoAccount(t *testing.T) {
+	// Continuation, image and compact selections are never cached, but
+	// their group-level no-account results count for the fast fail.
+	until := time.Now().Add(time.Hour)
+	down := Account{ID: 72, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1,
+		TempUnschedulableUntil: &until, TempUnschedulableReason: "balance:exhausted: x"}
+	withNegativeScopeRuntime(t, map[int64][]Account{9: {down}})
+	svc := newNegativeScopeOpenAIService([]Account{down})
+	groupID := int64(9)
+	st := resilience.NewRequestState()
+	_, _, err := svc.SelectAccountWithScheduler(resilience.WithRequestState(context.Background(), st), &groupID, "resp_prev", "", "gpt-5.5", nil, OpenAIUpstreamTransportAny, false)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.True(t, st.GroupNoAccount())
+}
+
+func TestUncachedOpenAISelectionIgnoresTheCacheEntirely(t *testing.T) {
+	// A cached entry answers only selections that may be cached: a
+	// continuation that found its account is not marked by it.
+	healthy := Account{ID: 73, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1}
+	withNegativeScopeRuntime(t, map[int64][]Account{10: {}})
+	svc := newNegativeScopeOpenAIService([]Account{healthy})
+	groupID := int64(10)
+	variant := "openai:" + string(OpenAIUpstreamTransportAny) + "::" + NormalizeOpenAICompatiblePlatform(PlatformOpenAI)
+	resilienceNegativeCachePut(context.Background(), &groupID, "gpt-5.5", variant, nil,
+		fmt.Errorf("%w supporting model: gpt-5.5 (total=0)", ErrNoAvailableAccounts))
+	require.ErrorIs(t, resilienceNegativeCacheHit(context.Background(), &groupID, "gpt-5.5", variant, nil), errNegativeCached)
+
+	st := resilience.NewRequestState()
+	sel, _, err := svc.SelectAccountWithScheduler(resilience.WithRequestState(context.Background(), st), &groupID, "resp_prev", "", "gpt-5.5", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(73), sel.Account.ID)
+	require.False(t, st.GroupNoAccount())
 }

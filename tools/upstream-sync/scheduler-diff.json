@@ -185,7 +185,7 @@
       },
       {
         "block": "gateway-resilience",
-        "note": "Gateway resilience (0.4.0): soft-penalised sticky owners keep the binding, last-resort gate relaxes runtime blocks and proxy quarantine, and the scheduling wrapper adds the session avoid set, negative cache, config-error marking, last-resort selection, session recording and the conversation note for the failed-turn cap.",
+        "note": "Gateway resilience (0.4.0): soft-penalised sticky owners keep the binding, last-resort gate relaxes runtime blocks and proxy quarantine, and the scheduling wrapper adds the session avoid set, negative cache, config-error marking, last-resort selection, session recording and the conversation note for the failed-turn cap; selections that are never cached skip the cache and mark group-level no-account results for the per-key fast fail.",
         "removed": [
           "if s != nil && s.service != nil && s.service.isOpenAIProxyStreamQuarantined(ctx, account) {"
         ],
@@ -209,7 +209,7 @@
           "if !lastResort && s != nil && s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {",
           "if !lastResort && s != nil && s.service != nil && s.service.isOpenAIProxyStreamQuarantined(ctx, account) {",
           "if account.Platform == NormalizeOpenAICompatiblePlatform(req.Platform) && account.IsOpenAICompatible() && resilienceKeepsSoftStickyBinding(account, req.RequestedModel) {",
-          "if cachedErr := resilienceNegativeCacheHit(negativeCtx, groupID, requestedModel, negativeVariant, origExcluded); cachedErr != nil && negativeCacheable {",
+          "if cachedErr := resilienceNegativeCacheHit(negativeCtx, groupID, requestedModel, negativeVariant, origExcluded); cachedErr != nil {",
           "if isNoAccountSelectionError(err) && strings.TrimSpace(previousResponseID) == \"\" {",
           "if lr := s.resilienceOpenAILastResort(lrCtx, OpenAIAccountScheduleRequest{",
           "if negativeCacheable && groupID != nil && resilience.Current().ErrorsOn() {",
@@ -239,7 +239,14 @@
           "}",
           "}",
           "} else if negativeCacheable {",
-          "}, avoided); lr != nil {"
+          "}, avoided); lr != nil {",
+          "// xy2api resilience: selections that are never cached still count for the",
+          "// per-key fast fail when no account of the group could serve them.",
+          "if !negativeCacheable && isNoAccountSelectionError(err) {",
+          "if negativeCacheable {",
+          "resilienceMarkGroupNoAccount(ctx, groupID, requestedModel, origExcluded)",
+          "}",
+          "}"
         ]
       }
     ],
