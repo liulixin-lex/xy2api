@@ -673,6 +673,15 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
+### 20261016-grok-monitor-responses — Grok 渠道监控原生 Responses（进行中）
+
+- 用户授权依据只读审查证据增加 Grok 监控 Responses 支持并提交 PR；不包含合并、发版、部署或生产配置修改。
+- 独立工作树 `/lex/xy2api-grok-monitor-responses`，分支 `feat/grok-monitor-responses-20261016`，起点 main `f8fec15a23ab37a6efdbc02b0db0376ed6b60dbb`。审查确认 v1 Grok 探测固定 Chat，账号文本测试使用 Responses；现有 Grok + responses 校验与前端保存均不支持。
+- 已实现 Grok 原生 Responses JSON 探测选项、合并字段保护、部分更新保留协议，以及监控/模板/高级示例的完整表单链路；无数据库或依赖变化。保留默认 Chat 与既有超时/慢响应阈值、业务调度，不包含上游模型故障换号修复。
+- 当前验证：新增前端6项及相关12项通过，19项工具测试与调度差异门禁通过；首轮类型检查发现可选 provider 类型后已修正，复验待完成。后端首轮编译受本机磁盘限制失败，已改用专用 GOTMPDIR 重跑；准备草稿 PR 由远端完整门禁补充验证。
+- 证据目录 `/lex/grok-monitor-responses-20261016-evidence/`；提交文档不包含生产账户、IP、凭据或原始用户记录。
+
+
 ### 20261012-pr90-slim — PR #90 复审、精简与上线验收（已完成，随 PR #90 推送；本 Agent 无进行中操作）
 
 - 起点 `23f191fc`（CI test 作业因迁移 271 失败）。审查发现、取舍与验证见顶部当前状态、design §19 与 tasks.md。

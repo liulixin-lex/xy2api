@@ -68,7 +68,7 @@ func TestApplyMonitorUpdate_SameGrokProviderDoesNotResetExistingModel(t *testing
 	}
 }
 
-func TestApplyMonitorUpdate_SwitchToGrokRejectsResponsesMode(t *testing.T) {
+func TestApplyMonitorUpdate_SwitchToGrokAcceptsExplicitResponsesMode(t *testing.T) {
 	grok := MonitorProviderGrok
 	responses := MonitorAPIModeResponses
 	existing := &ChannelMonitor{
@@ -82,7 +82,10 @@ func TestApplyMonitorUpdate_SwitchToGrokRejectsResponsesMode(t *testing.T) {
 		Provider: &grok,
 		APIMode:  &responses,
 	})
-	if err == nil {
-		t.Fatal("Grok responses mode should remain unsupported")
+	if err != nil {
+		t.Fatalf("Grok responses mode should be accepted: %v", err)
+	}
+	if existing.Provider != grok || existing.APIMode != responses {
+		t.Fatalf("Grok responses selection was not preserved: %+v", existing)
 	}
 }
