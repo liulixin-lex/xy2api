@@ -54,11 +54,15 @@ In groups using share scheduling:
 - avoided accounts MUST be presented as `Excluded` for the session;
 - hard states MUST be presented without `RecoverAt`, so that `rebind_unavailable` applies.
 
-In groups using the original scheduler, a bound account in a soft penalty MUST NOT have its binding cleared; only hard states clear the binding.
+In groups using the original scheduler, a bound account in a soft penalty MUST NOT have its binding cleared; only hard states clear the binding. This holds for both OpenAI scheduler paths (the advanced scheduler and the legacy path used when it is off), and the account that serves the request in the meantime MUST NOT take over the binding.
 
 #### Scenario: Original scheduler during a cooldown
 - **WHEN** the bound account of a session in a `sub2api` group has a 45 s 429 cooldown
 - **THEN** the session's binding remains and the request is served by another account.
+
+#### Scenario: OpenAI legacy scheduler during a cooldown
+- **WHEN** the advanced OpenAI scheduler is off and the bound account of a session has a soft 429 cooldown
+- **THEN** another account serves the request and the session stays bound to the original account.
 
 ### Requirement: Last-resort use of soft-penalised accounts
 
@@ -67,6 +71,10 @@ When no healthy candidate exists and at least one candidate is only soft-penalis
 2. otherwise order the soft-penalised accounts by priority or tier, then by the end of their penalty, and use the first one with a free concurrency slot; only when all of them are busy, wait for the first one.
 
 Last-resort attempts MUST NOT be subject to the per-attempt first-output timeout and MUST record the reason `last_resort_soft`.
+
+Last-resort selection MUST apply every gate of normal selection (platform, model support, channel restrictions, quota, window cost, RPM, session limit, compact support, Grok quota auto-pause) and relax only soft penalties: soft cooldowns, soft rate limits, model rate limits within the soft threshold and OpenAI in-process runtime blocks. The bound account of a session MUST pass the window-cost and RPM gates as a sticky request. OpenAI last-resort slots MUST use the Codex adaptive concurrency.
+
+In groups using share scheduling, the last resort MUST be a relaxed round of the share plan: soft-penalised accounts and accounts avoided only by the session count as eligible, and tiers, draining, weights and the cache domain still apply. A session bound to an account that is only soft-penalised and not avoided MUST keep its binding; an avoided bound account MUST be rebound to the account that serves; a hard-penalised one is rebound by the plan.
 
 #### Scenario: Busy last-resort account
 - **WHEN** the soft-penalised account whose penalty ends first is at its concurrency limit and another soft-penalised account has a free slot
@@ -79,6 +87,14 @@ Last-resort attempts MUST NOT be subject to the per-attempt first-output timeout
 #### Scenario: Hard state with no alternative
 - **WHEN** the only account is balance `EXHAUSTED` and no fallback group is configured
 - **THEN** the request fails with 503 and a `Retry-After` header.
+
+#### Scenario: Last resort respects hard limits
+- **WHEN** every account of a group is soft-penalised and one of them is above its window-cost or RPM limit
+- **THEN** the last resort never selects that account.
+
+#### Scenario: Share-group last resort keeps tiers and the binding
+- **WHEN** every account of a share group is soft-penalised and a session is bound to one of them
+- **THEN** the last resort follows the share tiers, skips draining accounts and leaves the session bound to its account.
 
 ### Requirement: Explainability and configuration
 

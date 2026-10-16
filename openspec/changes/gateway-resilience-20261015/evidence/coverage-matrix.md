@@ -42,9 +42,12 @@ Every scenario of the eight specs, mapped to the automated tests that cover it a
 | Balance exhaustion moves the session at once | `TestGatewayHardBoundAccountRebinds` | — |
 | Saturation does not rebind | Saturation never reaches the session failure recorder; existing spill behaviour: `TestShareSchedulingSpillsAndRebindsWhenBoundIsSaturated` | soak |
 | Original scheduler during a cooldown | `TestGatewaySoftBoundAccountKeepsBinding` | — |
+| OpenAI legacy scheduler during a cooldown | `TestResilienceOpenAILegacySchedulerKeepsSoftBinding` | — |
 | Busy last-resort account | `TestLastResortTakesAFreeSlotBeforeWaiting` | — |
 | Single-account Grok group with a transient error | `TestGatewayLastResortSingleAccountTransient`, `TestOpenAILastResortSingleAccount` | — |
 | Hard state with no alternative | `TestGatewayLastResortNeverUsesHardStates` | — |
+| Last resort respects hard limits | `TestResilienceGateConsistency`, `TestResilienceOpenAIGateConsistency`, `TestResilienceLastResortRelaxesSoftPenaltiesOnly`, `TestResilienceOpenAILastResortUsesCodexAdaptiveConcurrency`, `TestResilienceLastResortGrantsStickyAllowanceToBoundAccount` | — |
+| Share-group last resort keeps tiers and the binding | `TestResilienceLastResortFollowsShareTiers`, `TestResilienceLastResortSkipsDrainedAccounts`, `TestResilienceLastResortKeepsSoftBinding`, `TestResilienceLastResortRebindsFromHardBoundAccount`, `TestResilienceLastResortRebindsFromAvoidedAccount`, `TestResilienceOpenAILastResortFollowsShareTiers`, `TestResilienceOpenAILastResortSkipsDrainedAccounts`, `TestResilienceOpenAILastResortKeepsSoftBinding` | LR-1 |
 | Failures after output move the session | `TestPostOutputFailureCountsOncePerAttempt`, `TestPostOutputFailureStreakRebindsSession`, `TestPostOutputThresholdSoftCooldown`, `TestPostOutputPoolModeAccountNotPenalized`, `TestOpenAIStreamsReportFailureAfterOutput`, `TestAnthropicStreamErrorAfterOutputIsReported`, `TestStallCountsForTheSessionOnce` | PE-2 |
 | Emergency off | `TestMasterSwitchDisablesEverything`, `TestResilienceOffKeepsLegacyPenalties`, `TestRetryHintsOffRestoresLegacy`, `TestTurnCapOffKeepsRetryAfter` | — |
 
