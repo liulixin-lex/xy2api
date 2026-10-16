@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/model"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -277,4 +278,41 @@ func TestTurnCapOffKeepsRetryAfter(t *testing.T) {
 		require.Equal(t, http.StatusBadGateway, w.Code)
 		require.Equal(t, "30", w.Header().Get("Retry-After"))
 	}
+}
+
+// passthroughRuleRepo serves a fixed set of error passthrough rules.
+type passthroughRuleRepo struct {
+	service.ErrorPassthroughRepository
+	rules []*model.ErrorPassthroughRule
+}
+
+func (r *passthroughRuleRepo) List(context.Context) ([]*model.ErrorPassthroughRule, error) {
+	return r.rules, nil
+}
+
+func TestPassthroughRuleBeatsHiddenBalanceOnOpenAIRoutes(t *testing.T) {
+	// As on the gateway routes, an administrator's passthrough rule for a
+	// balance error is honoured instead of the generic 503.
+	withHandlerResilience(t, nil)
+	code, msg := http.StatusPaymentRequired, "Top up the relay"
+	rules := &passthroughRuleRepo{rules: []*model.ErrorPassthroughRule{{
+		ID: 1, Name: "quota", Enabled: true, Priority: 1, ErrorCodes: []int{429}, Keywords: []string{"insufficient_quota"},
+		MatchMode: model.MatchModeAll, Platforms: []string{"openai"}, ResponseCode: &code, CustomMessage: &msg,
+	}}}
+	h := &OpenAIGatewayHandler{errorPassthroughService: service.NewErrorPassthroughService(rules, nil)}
+	failover := &service.UpstreamFailoverError{
+		StatusCode:   http.StatusTooManyRequests,
+		ResponseBody: []byte(`{"error":{"type":"insufficient_quota","code":"insufficient_quota","message":"You exceeded your current quota"}}`),
+	}
+	c, w := newResilienceTestContext(t)
+	h.handleFailoverExhausted(c, failover, false)
+	require.Equal(t, http.StatusPaymentRequired, w.Code)
+	require.Contains(t, w.Body.String(), "Top up the relay")
+	require.Empty(t, w.Header().Get("Retry-After"), "the hidden-balance hints were not applied")
+
+	// Without a rule the balance stays hidden.
+	c, w = newResilienceTestContext(t)
+	(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, failover, false)
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.NotContains(t, w.Body.String(), "quota")
 }

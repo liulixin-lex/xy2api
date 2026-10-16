@@ -3567,10 +3567,16 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		return
 	}
 	// xy2api resilience: upstream balance problems (including image account
-	// 402) are only shown to administrators (design §9.4).
-	if status, errType, errMsg, hidden := resilienceHideUpstreamBalance(c, h.gatewayService, failoverErr); hidden {
-		h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
-		return
+	// 402) are only shown to administrators (design §9.4), unless an
+	// administrator's passthrough rule below claims the response, as on the
+	// gateway routes.
+	passthroughRule := h.errorPassthroughService != nil && len(failoverErr.ResponseBody) > 0 &&
+		h.errorPassthroughService.MatchRule("openai", failoverErr.StatusCode, failoverErr.ResponseBody) != nil
+	if !passthroughRule {
+		if status, errType, errMsg, hidden := resilienceHideUpstreamBalance(c, h.gatewayService, failoverErr); hidden {
+			h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
+			return
+		}
 	}
 	if failoverErr.Reason == service.OpenAIImagesInsufficientBalanceReason {
 		status := failoverErr.ClientStatusCode
