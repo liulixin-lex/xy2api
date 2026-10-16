@@ -413,6 +413,11 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 	if lastErr != nil {
 		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
 	}
+	// xy2api resilience: a content-safety refusal is the client's 400.
+	if msg, rejected := resilienceContentRejection(c, lastErr); rejected {
+		writeOpenAIContentRejection(c, msg)
+		return
+	}
 	if lastErr != nil && lastErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(lastErr)
 		h.chatCompletionsErrorResponse(c, status, "server_error", message)

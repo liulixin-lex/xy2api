@@ -82,6 +82,15 @@ type Result struct {
 // sampled so that new relay wordings can be added).
 func (r Result) StatusOnly() bool { return strings.HasPrefix(r.Reason, "status_") }
 
+// ReasonContentPolicy is the reason of a CLIENT_ERROR that is an upstream
+// content-safety refusal of the request.
+const ReasonContentPolicy = "content_policy"
+
+// ContentPolicy reports an upstream content-safety refusal: the request
+// content is refused, so the same request fails on this and every other
+// account, and the account is not at fault.
+func (r Result) ContentPolicy() bool { return r.Reason == ReasonContentPolicy }
+
 // Hard reports whether the category puts the account in a hard state.
 func (r Result) Hard() bool {
 	switch r.Category {
@@ -199,6 +208,41 @@ var clientErrorCodes = map[string]struct{}{
 	"request_too_large":        {},
 }
 
+// contentPolicyCodes are the codes (or types) of an upstream content-safety
+// refusal; they are checked before clientErrorCodes. cyber_policy and
+// bio_policy keep their own handling.
+var contentPolicyCodes = map[string]struct{}{
+	"content_policy_violation": {},
+	"content_filter":           {},
+	"request_check_blocked":    {}, // Zhipu preflight safety check (403)
+	"data_inspection_failed":   {}, // Qwen
+}
+
+// contentPolicyKeywords recognise a content-safety refusal by its wording on
+// 400, 403 and 451 answers. They name a safety check or the content; words
+// such as a bare "violation" or "敏感" also describe account bans or
+// parameter errors ("大小写敏感") and are left out.
+var contentPolicyKeywords = []string{
+	"preflight safety",
+	"safety check",
+	"safety system",
+	"content policy",
+	"content_policy",
+	"content filtering",
+	"安全策略",
+	"内容安全",
+	"敏感内容",
+	"敏感词",
+	"敏感话题",
+}
+
+// contentPolicyAccountWords mark a refusal aimed at the account, such as a
+// ban for policy violations; that stays an account failure.
+var contentPolicyAccountWords = []string{
+	"account", "organization", "suspend", "banned", "deactivat", "disabled",
+	"账号", "账户", "帐号", "帐户", "封禁", "封号", "停用", "禁用",
+}
+
 var rateLimitCodes = map[string]struct{}{
 	"rate_limit_exceeded": {},
 	"rate_limit_error":    {},
@@ -311,6 +355,9 @@ func Classify(o Outcome, extraBalanceKeywords []string) Result {
 
 	// 2. Client errors and unsupported models carried by codes (also inside
 	// streams).
+	if contentPolicyCode(code, typ, lowerBody) {
+		return Result{Category: CategoryClientError, Reason: ReasonContentPolicy}
+	}
 	if _, ok := clientErrorCodes[code]; ok {
 		return Result{Category: CategoryClientError, Reason: "client_code"}
 	}
@@ -327,6 +374,9 @@ func Classify(o Outcome, extraBalanceKeywords []string) Result {
 	}
 	if status == http.StatusUnauthorized {
 		return Result{Category: CategoryAuth, Reason: "status_401"}
+	}
+	if !isEvent && contentPolicyText(status, text, lowerBody) {
+		return Result{Category: CategoryClientError, Reason: ReasonContentPolicy}
 	}
 
 	// 4. Capacity shedding is request scoped.
@@ -428,6 +478,31 @@ func containsAnyFold(text string, keywords []string) bool {
 		}
 	}
 	return false
+}
+
+// contentPolicyCode reports a content-safety refusal by its code or type.
+// Relays that put the code at the top level ({"code":...}) are matched on
+// the quoted value in the body.
+func contentPolicyCode(code, typ, lowerBody string) bool {
+	if _, ok := contentPolicyCodes[code]; ok {
+		return true
+	}
+	if _, ok := contentPolicyCodes[typ]; ok {
+		return true
+	}
+	return strings.Contains(lowerBody, `"request_check_blocked"`)
+}
+
+// contentPolicyText reports a content-safety refusal by its wording on a
+// 400, 403 or 451 answer, unless the text speaks about the account.
+func contentPolicyText(status int, text, lowerBody string) bool {
+	switch status {
+	case http.StatusBadRequest, http.StatusForbidden, http.StatusUnavailableForLegalReasons:
+	default:
+		return false
+	}
+	return containsAny(text, contentPolicyKeywords) && !containsAny(text, contentPolicyAccountWords) &&
+		!looksLikeHTMLBlock(lowerBody)
 }
 
 func looksLikeHTMLBlock(lowerBody string) bool {

@@ -69,7 +69,8 @@ func classifyUpstreamHTTP(statusCode int, headers http.Header, body []byte, upst
 // resilienceHandleUpstreamError applies the resilience penalties to an
 // upstream error response. It returns handled=true when the default status
 // handling must be skipped. Rate limits, capacity shedding, credentials and
-// client errors keep their existing handling.
+// client errors keep their existing handling, except content-safety refusals,
+// which leave the account untouched.
 func (s *RateLimitService) resilienceHandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, upstreamMsg string) (handled bool, shouldDisable bool) {
 	cfg := resilience.Current()
 	if !cfg.FailureOn() || account == nil || statusCode == 529 {
@@ -99,6 +100,18 @@ func (s *RateLimitService) resilienceHandleUpstreamError(ctx context.Context, ac
 		}
 		s.applyTransientCooldown(ctx, account, res, fmt.Sprintf("HTTP %d", statusCode))
 		return false, false
+	case resilience.CategoryClientError:
+		// A content-safety refusal judges the request, not the account: it
+		// takes no 403 strike, cooldown or error state.
+		if res.ContentPolicy() {
+			slog.Info("resilience.content_policy_refusal",
+				"account_id", account.ID,
+				"platform", account.Platform,
+				"status", statusCode,
+				"message", truncateString(upstreamMsg, 200),
+			)
+			return true, false
+		}
 	}
 	return false, false
 }

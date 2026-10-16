@@ -1964,6 +1964,11 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 		h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
 		return
 	}
+	// xy2api resilience: a content-safety refusal is the client's 400.
+	if msg, rejected := resilienceContentRejection(c, failoverErr); rejected {
+		h.handleStreamingAwareErrorWithCode(c, http.StatusBadRequest, "invalid_request_error", codeContentPolicyViolation, msg, streamStarted)
+		return
+	}
 
 	// 记录原始上游状态码，以便 ops 错误日志捕获真实的上游错误
 	upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)

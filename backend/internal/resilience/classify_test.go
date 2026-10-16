@@ -342,3 +342,71 @@ func TestGatewayFirstEventTimeoutIsNoRelay504(t *testing.T) {
 	require.Equal(t, CategoryFirstOutputTimeout, r.Category)
 	require.Equal(t, CategoryTransient, Classify(Outcome{Source: SourceHTTP, StatusCode: 504, Body: []byte("gateway timeout")}, nil).Category)
 }
+
+func TestClassifyContentPolicyRefusal(t *testing.T) {
+	// R4: an upstream content-safety refusal is a CLIENT_ERROR of the request,
+	// never an account failure; account bans, balance and auth answers keep
+	// their categories.
+	zhipu := []byte(`{"code":"request_check_blocked","message":"Request rejected by preflight safety checks"}`)
+	refusals := []Outcome{
+		// Zhipu preflight check, code at the top level of the body.
+		{StatusCode: 403, Message: "Request rejected by preflight safety checks", Body: zhipu},
+		{StatusCode: 403, Body: zhipu},
+		{StatusCode: 403, Code: "request_check_blocked", Message: "blocked"},
+		// The wording alone.
+		{StatusCode: 403, Message: "Request rejected by preflight safety checks"},
+		// A chained sub2api-style gateway's own moderation answer.
+		{StatusCode: 403, Code: "content_policy_violation", Message: "请求内容违反本分组安全策略（敏感话题）"},
+		{StatusCode: 403, Message: "请求内容违反本分组安全策略（敏感话题）"},
+		{StatusCode: 403, Message: "输入内容未通过内容安全审核"},
+		{StatusCode: 451, Message: "The request violates our content policy"},
+		{StatusCode: 400, Message: "系统检测到输入或生成内容可能包含不安全或敏感内容，请您避免输入易产生敏感内容的提示语"},
+		{StatusCode: 400, Code: "data_inspection_failed", Message: "Input data may contain inappropriate content."},
+		{StatusCode: 400, Type: "invalid_request_error", Message: "Your request was rejected as a result of our safety system."},
+		{Source: SourceStreamEvent, StatusCode: 200, Code: "content_filter", Message: "filtered"},
+		{Source: SourceStreamEvent, StatusCode: 200, Type: "content_policy_violation", Message: "blocked by our content policy"},
+	}
+	for _, o := range refusals {
+		r := Classify(o, nil)
+		require.Equal(t, CategoryClientError, r.Category, "%d %s %s", o.StatusCode, o.Code, o.Message)
+		require.True(t, r.ContentPolicy(), "%d %s %s reason=%s", o.StatusCode, o.Code, o.Message, r.Reason)
+		require.False(t, r.Category.SwitchAccount())
+		require.False(t, r.Category.AccountScoped())
+	}
+
+	others := []struct {
+		in   Outcome
+		want Category
+	}{
+		{Outcome{StatusCode: 403, Message: "forbidden"}, CategoryAuth},
+		{Outcome{StatusCode: 403, Message: "余额不足，请充值"}, CategoryBalance},
+		{Outcome{StatusCode: 403, Code: "insufficient_quota", Message: "content policy"}, CategoryBalance},
+		{Outcome{StatusCode: 401, Message: "invalid api key, safety check failed"}, CategoryAuth},
+		{Outcome{StatusCode: 403, Code: "invalid_api_key", Message: "safety check failed"}, CategoryAuth},
+		// Bans for policy violations name the account.
+		{Outcome{StatusCode: 403, Message: "Your account has been suspended for content policy violations"}, CategoryAuth},
+		{Outcome{StatusCode: 403, Message: "Organization disabled: repeated content policy violations"}, CategoryAuth},
+		{Outcome{StatusCode: 403, Message: "该账号因多次违反安全策略已被封禁"}, CategoryAuth},
+		// A bare "违反" or "敏感" is no content-safety signal.
+		{Outcome{StatusCode: 403, Message: "请求违反访问规则"}, CategoryAuth},
+		{Outcome{StatusCode: 403, Message: "IP 敏感，拒绝访问"}, CategoryAuth},
+		// An edge block page stays a transient edge failure.
+		{Outcome{StatusCode: 403, Body: []byte("<!DOCTYPE html><title>Attention Required! | Cloudflare</title> safety check")}, CategoryTransient},
+		// Wording inside a stream or on other statuses is not enough.
+		{Outcome{Source: SourceStreamEvent, StatusCode: 200, Message: "blocked by content policy"}, CategoryTransient},
+		{Outcome{StatusCode: 429, Message: "content policy check queue is full"}, CategoryRateLimit},
+	}
+	for _, tc := range others {
+		r := Classify(tc.in, nil)
+		require.Equal(t, tc.want, r.Category, "%d %s reason=%s", tc.in.StatusCode, tc.in.Message, r.Reason)
+		require.False(t, r.ContentPolicy(), tc.in.Message)
+	}
+
+	// Parameter errors stay plain client errors.
+	r := Classify(Outcome{StatusCode: 400, Message: "参数 model 大小写敏感"}, nil)
+	require.Equal(t, CategoryClientError, r.Category)
+	require.False(t, r.ContentPolicy())
+	r = Classify(Outcome{StatusCode: 400, Type: "invalid_request_error", Message: "messages: field required"}, nil)
+	require.Equal(t, CategoryClientError, r.Category)
+	require.False(t, r.ContentPolicy())
+}

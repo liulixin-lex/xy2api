@@ -412,6 +412,10 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 	} else if lastErr != nil && statusCode == http.StatusTooManyRequests {
 		status, code, message = http.StatusTooManyRequests, "rate_limit_error", "All available accounts are currently rate-limited. Please retry later."
 	}
+	// xy2api resilience: a content-safety refusal is the client's 400.
+	if msg, rejected := resilienceContentRejection(c, lastErr); rejected {
+		status, code, message = http.StatusBadRequest, codeContentPolicyViolation, msg
+	}
 	if streamStarted {
 		// A slot-wait heartbeat commits HTTP 200 before any upstream response.
 		// In that case a terminal frame is still required; once any semantic or

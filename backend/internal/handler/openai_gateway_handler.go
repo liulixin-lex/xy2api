@@ -1670,6 +1670,11 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 		h.anthropicStreamingAwareError(c, status, "api_error", failoverErr.ClientMessage, streamStarted)
 		return
 	}
+	// xy2api resilience: a content-safety refusal is the client's 400.
+	if msg, rejected := resilienceContentRejection(c, failoverErr); rejected {
+		h.anthropicStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", msg, streamStarted)
+		return
+	}
 	status, errType, errMsg := h.mapUpstreamError(failoverErr.StatusCode)
 	h.anthropicStreamingAwareError(c, status, errType, errMsg, streamStarted)
 }
@@ -3575,6 +3580,11 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	if !passthroughRule {
 		if status, errType, errMsg, hidden := resilienceHideUpstreamBalance(c, h.gatewayService, failoverErr); hidden {
 			h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
+			return
+		}
+		// xy2api resilience: a content-safety refusal is the client's 400.
+		if msg, rejected := resilienceContentRejection(c, failoverErr); rejected {
+			h.handleStreamingAwareErrorWithCode(c, http.StatusBadRequest, "invalid_request_error", codeContentPolicyViolation, msg, streamStarted, false)
 			return
 		}
 	}

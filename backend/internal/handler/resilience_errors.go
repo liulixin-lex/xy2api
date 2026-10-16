@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -40,7 +41,51 @@ const (
 	// codeServerIsOverloaded ends a Codex turn when no delay is given: it is
 	// only retried with a server-advised delay.
 	codeServerIsOverloaded = "server_is_overloaded"
+
+	// codeContentPolicyViolation is the client code of an upstream
+	// content-safety refusal, as for this gateway's own moderation.
+	codeContentPolicyViolation = "content_policy_violation"
+
+	// contentRejectionFallbackMessage answers a refusal without upstream text.
+	contentRejectionFallbackMessage = "Request blocked by upstream content policy"
+
+	// contentRejectionMessageMax bounds the upstream text shown to clients.
+	contentRejectionMessageMax = 500
 )
+
+// upstreamURLPattern finds URLs in upstream text, which may name the
+// upstream host.
+var upstreamURLPattern = regexp.MustCompile(`(?i)\b(?:https?|wss?)://[^\s"'<>]+`)
+
+// resilienceContentRejection turns a failover that ended on an upstream
+// content-safety refusal into the client's answer: HTTP 400
+// invalid_request_error with the scrubbed upstream text, instead of 0.3.0's
+// 502 "Upstream access forbidden" that sent users to the administrator.
+// Administrators keep the upstream status and text through the ops record.
+// It reports false for every other failure and with the errors switch off.
+func resilienceContentRejection(c *gin.Context, failoverErr *service.UpstreamFailoverError) (string, bool) {
+	if c == nil || !resilience.Current().ErrorsOn() || !resilienceContentRejected(failoverErr) {
+		return "", false
+	}
+	upstreamMsg := service.SanitizeUpstreamErrorMessage(strings.TrimSpace(service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody)))
+	service.SetOpsUpstreamError(c, failoverErr.StatusCode, upstreamMsg, "")
+	message := strings.TrimSpace(upstreamURLPattern.ReplaceAllString(upstreamMsg, "[url]"))
+	if message == "" {
+		return contentRejectionFallbackMessage, true
+	}
+	if runes := []rune(message); len(runes) > contentRejectionMessageMax {
+		message = string(runes[:contentRejectionMessageMax]) + "..."
+	}
+	return message, true
+}
+
+// writeOpenAIContentRejection writes a content-safety refusal in the OpenAI
+// error format.
+func writeOpenAIContentRejection(c *gin.Context, message string) {
+	c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+		"type": "invalid_request_error", "code": codeContentPolicyViolation, "message": message,
+	}})
+}
 
 // resilienceTranslateError maps internal error types to the client-facing
 // type and code, and appends the retry hint to no-account messages.

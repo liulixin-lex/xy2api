@@ -429,6 +429,30 @@
       "value": "status = applyExhaustedRetryHint(c, h.gatewayService, status)"
     },
     {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "h.handleStreamingAwareErrorWithCode(c, http.StatusBadRequest, \"invalid_request_error\", codeContentPolicyViolation, msg, streamStarted, false)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "h.anthropicStreamingAwareError(c, http.StatusBadRequest, \"invalid_request_error\", msg, streamStarted)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "if msg, rejected := resilienceContentRejection(c, failoverErr); rejected {"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
+      "value": "writeOpenAIContentRejection(c, msg)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "if msg, rejected := resilienceContentRejection(c, lastErr); rejected {"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "if msg, rejected := resilienceContentRejection(c, failoverErr); rejected {"
+    },
+    {
       "path": "backend/internal/service/openai_gateway_messages.go",
       "value": "rejected := !notFound && !unsupported && isOpenAICompatContinuationRejected(resp.StatusCode, respBody)"
     },
