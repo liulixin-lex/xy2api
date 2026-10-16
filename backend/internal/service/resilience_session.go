@@ -75,6 +75,44 @@ func resiliencePenaltyOf(a *Account, model string, now time.Time) (resilience.Pe
 	return tier, recoverAt, reason
 }
 
+// resilienceOpenAIPenaltyOf is resiliencePenaltyOf for the OpenAI scheduler.
+// Its per-model breaker (upstream 5xx in a row block the model for 10 s,
+// then 45 s) is a soft penalty (design §2) that the account row does not
+// show: an account held back only by it is soft until the block ends, so
+// last resort can use it. The in-process account block only holds while a
+// persisted cooldown does, which resiliencePenaltyOf already reads; Codex
+// ticket gates are no penalty and stay gates.
+func (s *OpenAIGatewayService) resilienceOpenAIPenaltyOf(acc *Account, model string, now time.Time) (resilience.PenaltyTier, time.Time, string) {
+	tier, recoverAt, why := resiliencePenaltyOf(acc, model, now)
+	if tier == resilience.TierHard {
+		return tier, recoverAt, why
+	}
+	if end := s.openAIModelBreakerEnd(acc, model, now); end.After(recoverAt) {
+		return resilience.TierSoft, end, "model_transient"
+	}
+	return tier, recoverAt, why
+}
+
+// openAIModelBreakerEnd is when the per-model breaker on the account ends
+// for the model; zero when it does not block.
+func (s *OpenAIGatewayService) openAIModelBreakerEnd(acc *Account, model string, now time.Time) time.Time {
+	state := s.getOpenAIAccountModelTransientState()
+	if state == nil || acc == nil {
+		return time.Time{}
+	}
+	key, ok := openAIAccountModelTransientKey(acc.ID, openAIAccountModelTransientModel(canonicalOpenAIAccountSchedulingModel(acc, model)))
+	if !ok {
+		return time.Time{}
+	}
+	state.mu.Lock()
+	entry := state.entries[key]
+	state.mu.Unlock()
+	if now.Before(entry.blockUntil) {
+		return entry.blockUntil
+	}
+	return time.Time{}
+}
+
 // resilienceKeepsSoftStickyBinding reports whether a bound account that
 // cannot serve now keeps its session binding because its restriction is only
 // soft (design §4.2). Hard states still clear the binding.
@@ -144,11 +182,16 @@ type shareLastResortRound struct {
 }
 
 // newShareLastResortRound evaluates the group's accounts for the round.
-// include filters the accounts the scheduler considers at all; gate applies
-// its original gates, in a last-resort context, to an account whose soft
-// restrictions are cleared.
+// include filters the accounts the scheduler considers at all; penalty is
+// the scheduler's view of soft and hard states (resiliencePenaltyOf when
+// nil); gate applies its original gates, in a last-resort context, to an
+// account whose soft restrictions are cleared.
 func (s *ShareSchedulingService) newShareLastResortRound(accounts []Account, model string, excluded, avoided map[int64]struct{}, boundID int64, now time.Time,
-	include func(*Account) bool, gate func(acc *Account, sticky bool) sharesched.Reason) *shareLastResortRound {
+	include func(*Account) bool, penalty func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string),
+	gate func(acc *Account, sticky bool) sharesched.Reason) *shareLastResortRound {
+	if penalty == nil {
+		penalty = resiliencePenaltyOf
+	}
 	r := &shareLastResortRound{accounts: map[int64]*Account{}, recoverAt: map[int64]time.Time{}}
 	for i := range accounts {
 		acc := accounts[i]
@@ -157,7 +200,7 @@ func (s *ShareSchedulingService) newShareLastResortRound(accounts []Account, mod
 		}
 		c := sharesched.Candidate{AccountID: acc.ID, Platform: acc.Platform, Class: shareAccountClass(&acc),
 			Priority: acc.Priority, Concurrency: acc.Concurrency}
-		tier, recoverAt, why := resiliencePenaltyOf(&acc, model, now)
+		tier, recoverAt, why := penalty(&acc, model, now)
 		_, isAvoided := avoided[acc.ID]
 		if acc.ID == boundID && !isAvoided && tier != resilience.TierHard {
 			r.keep = acc.ID
@@ -504,7 +547,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 		if acc.Platform != platform || !acc.IsOpenAICompatible() {
 			continue
 		}
-		tier, recoverAt, _ := resiliencePenaltyOf(&acc, req.RequestedModel, now)
+		tier, recoverAt, _ := s.resilienceOpenAIPenaltyOf(&acc, req.RequestedModel, now)
 		if !lastResortTierAllowed(tier, acc.ID, avoided) {
 			continue
 		}

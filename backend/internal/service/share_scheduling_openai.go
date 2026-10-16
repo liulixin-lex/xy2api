@@ -169,6 +169,7 @@ func (s *OpenAIGatewayService) shareOpenAILastResort(ctx context.Context, gp *sh
 	now := time.Now()
 	round := svc.newShareLastResortRound(accounts, req.RequestedModel, req.ExcludedIDs, avoided, binding.AccountID, now,
 		func(acc *Account) bool { return acc.Platform == platform && acc.IsOpenAICompatible() },
+		s.resilienceOpenAIPenaltyOf,
 		func(acc *Account, _ bool) sharesched.Reason {
 			reason, _ := gates.candidateReason(acc, now)
 			return reason

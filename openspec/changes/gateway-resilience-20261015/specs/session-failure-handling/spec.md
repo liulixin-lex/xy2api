@@ -84,6 +84,10 @@ In groups using share scheduling, the last resort MUST be a relaxed round of the
 - **WHEN** the only account of a group receives a 30 s transient cooldown and no fallback group is configured
 - **THEN** requests during the cooldown are still sent to that account instead of failing with 503.
 
+#### Scenario: Single-account OpenAI group after upstream 5xx
+- **WHEN** the only account of an OpenAI group has failed with 5xx three times in a row, so the scheduler's per-model breaker holds it back for 45 s, and no fallback group is configured
+- **THEN** requests during the block are still sent to that account as a last resort instead of failing with "no available accounts".
+
 #### Scenario: Hard state with no alternative
 - **WHEN** the only account is balance `EXHAUSTED` and no fallback group is configured
 - **THEN** the request fails with 503 and a `Retry-After` header.

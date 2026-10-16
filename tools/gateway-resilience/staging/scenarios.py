@@ -359,7 +359,7 @@ def ctx1():
     return r, checks
 
 
-@scenario("ERR-1", "Single-account group answering 503: no-account 503 with Retry-After 2-30 s")
+@scenario("ERR-1", "Single-account group answering 503: an error with Retry-After 2-30 s")
 def err1():
     checks = []
     r = stream_request(DIRECT, "/v1/responses", KEYS["G-503-single"], responses_body(stream=False, session=fresh_session()))

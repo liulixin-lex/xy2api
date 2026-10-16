@@ -152,7 +152,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 | 客户端取消、客户端错误、本站策略拒绝 | 不动绑定，也不计数 | — |
 | 带 `previous_response_id` 的续接请求 | 遵守现有所有权约束，不改绑 | 原有 |
 
-**原版调度的语义调整**（钩子位于 `openai_account_scheduler.go` 的 `selectBySessionHash`、`openai_gateway_scheduling.go` 的旧路径（高级调度器关闭时，即缺省情况）两处粘性读取，以及 `gateway_scheduling.go` 中对应的粘性路径）：绑定账号处于软罚时，**不再清除绑定**，只在本次请求跳过它（临时溢出），本请求实际服务的账号也不写入绑定（OpenAI 粘性写入处统一检查）；硬状态仍按原样清除。
+**原版调度的语义调整**（钩子位于 `openai_account_scheduler.go` 的 `selectBySessionHash`、`openai_gateway_scheduling.go` 的旧路径（高级调度器关闭时，即缺省情况）两处粘性读取，以及 `gateway_scheduling.go` 中对应的粘性路径）：绑定账号处于软罚时，**不再清除绑定**，只在本次请求跳过它（临时溢出），本请求实际服务的账号也不写入绑定（OpenAI 粘性写入处统一检查）；硬状态仍按原样清除。例外：OpenAI 的按模型瞬时屏蔽（`openai_model_transient_state`）只在进程内、不写账号行，两条 OpenAI 粘性路径在屏蔽期间仍按上游逻辑清除绑定（0.4.1 跟进）。
 
 **份额调度**通过 `shareMissingBoundCandidate` 与候选构造钩子，把软罚账号表示为 `Eligible=false` 并带 `RecoverAt`，由现有的 `softSpill` 逻辑（`soft_spill_max_seconds`，缺省 300 秒）决定保留绑定、临时溢出。会话回避集中的账号对该会话标为 `Excluded`，原因 `resil_failure_streak`，改绑决策也记为 `resil_failure_streak`。余额耗尽（`balance:exhausted`）的账号原因为 `balance_exhausted`、`RecoverAt` 为零，走改绑；其他已有的临时不可调度原因保持 0.3.0 的处理，避免绑定释放过严（Q8）。末位兜底选中软罚账号时，在该组份额统计中记 `last_resort_soft`。兜底分组的转投与切回不是份额放置决策，计入韧性指标 `fallback_group`、`fallback_return`。
 
@@ -167,6 +167,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 1. **分组配置了无号兜底组**（§5）：先转投兜底组。
 2. **没有兜底组，或兜底组也无健康候选：** 在原组（或兜底组）里，软罚账号按优先级、再按罚期结束时间排序，依次尝试取并发槽位，取到即用；全部占满时在排序第一的账号上排队等待（不会因为最优账号忙而放着空闲的次优账号不用）。Gateway 调度器（OpenAI 以外的平台）另外跳过会话数已满的候选。
    - **门禁与正常选号一致（审查 F4）：** Gateway 用与份额候选共用的 `gatewayCandidateGates`（平台、模型、渠道限制、利润门、额度、窗口费用、RPM、会话上限等），OpenAI 用调度器原有的资格检查（含 compact 支持、Grok 额度自动暂停）；只放宽软罚：软冷却、软限流、软阈值内的模型限流，以及 OpenAI 的进程内运行时阻断。超过窗口费用或 RPM 硬上限的账号不会被选中。OpenAI 取槽与等待计划用 Codex 自适应并发（`codexEffectiveConcurrency`）。表驱动测试 `TestResilienceGateConsistency` 让每个账号只违反一个门禁，断言原版选号、份额候选与末位兜底都拒绝它。
+   - **OpenAI 按模型瞬时屏蔽：** 上游连续 5xx 后按账号与模型屏蔽 10 秒、再 45 秒，只在进程内、账号行上看不到。末位兜底按屏蔽结束时间把只被它挡住的账号视为软罚（`resilienceOpenAIPenaltyOf`），否则单号 OpenAI 分组在屏蔽期间整组无号（测试服务器复现）。Codex 票据门禁不是罚则，仍是门禁。
    - **份额分组（审查 F3）：** 末位兜底是份额计划的“放宽一轮”：软罚账号与只被会话回避的健康账号视为可用（原因 `last_resort_soft`），交给 `sharesched.Plan`，遵守层级、排空、权重、HRW 与缓存域，由份额执行器取槽（含会话上限与 Codex 自适应并发）。不走模型路由优先；不写决策样本，只计 `last_resort_soft`。绑定账号软罚但正在饱和时，按份额等待预算先等它再溢出。
 3. 末位兜底请求不受单次首输出超时约束，只受总预算约束（§6）。
 

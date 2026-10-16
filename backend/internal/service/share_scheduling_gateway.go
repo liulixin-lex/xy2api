@@ -221,7 +221,7 @@ func (s *GatewayService) shareGatewayLastResort(ctx context.Context, gp *shareGr
 	gates := s.newGatewayCandidateGates(ctx, groupID, platform, useMixed, requestedModel)
 	gateCtx := withResilienceLastResortGate(ctx)
 	now := time.Now()
-	round := svc.newShareLastResortRound(accounts, requestedModel, excludedIDs, avoided, binding.AccountID, now, nil,
+	round := svc.newShareLastResortRound(accounts, requestedModel, excludedIDs, avoided, binding.AccountID, now, nil, nil,
 		func(acc *Account, sticky bool) sharesched.Reason {
 			reason, _ := gates.candidateReason(gateCtx, acc, sticky, now)
 			return reason

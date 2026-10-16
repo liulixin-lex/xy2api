@@ -351,6 +351,7 @@
 - [x] F3 份额分组末位兜底走份额内核“放宽一轮”：软罚与只被回避的账号视为可用（`last_resort_soft`），遵守层级、排空、权重与缓存域，由份额执行器取槽；绑定账号只是软罚且未被回避时不改绑，被回避的改绑到实际服务的账号；绑定账号按粘性请求过窗口费用与 RPM 门禁（审查会话复核第 1 点：份额会话的 `StickyOwner` 为 0）（`1b3d8e4fe`）。修复前失败：`TestResilienceLastResortFollowsShareTiers`、`TestResilienceLastResortSkipsDrainedAccounts`、`TestResilienceLastResortKeepsSoftBinding`、`TestResilienceLastResortGrantsStickyAllowanceToBoundAccount` 与 OpenAI 对应用例。测试服务器 LR-1。已知取舍：份额末位兜底不走模型路由优先；绑定账号饱和时按份额等待预算先等约 1 秒再溢出；冷会话绑定在较低层的软罚账号时，放宽一轮按 `return: cold` 规则可由较高层的软罚账号服务（绑定不变），因为只走末位兜底的请求不更新层级稳定性观测（测试服务器复现，两个账号都在软罚，结果可接受）。
 - [x] F4 末位兜底门禁补全：Gateway 末位兜底与份额候选共用 `gatewayCandidateGates`（窗口费用、RPM、会话上限等），只放宽软罚；OpenAI 末位兜底取槽与等待计划用 Codex 自适应并发（`60cc7d6fb`）。修复前失败：`TestResilienceGateConsistency` 的窗口费用与 RPM 行（每个账号只违反一个门禁，原版、份额候选、末位兜底三处一致拒绝）、`TestResilienceOpenAILastResortUsesCodexAdaptiveConcurrency`（取槽上限 5，应为 1）；扩展的 `TestResilienceOpenAIGateConsistency` 另发现不支持 compact 的软罚账号会被末位兜底派去处理 compact 请求，一并修复。已知取舍：非份额分组的 OpenAI 末位兜底在自适应并发收紧时更保守。遗留：Grok 进程内阻断（团队限流、模型额度）在末位兜底中仍放宽，Gateway 列表阶段的 Grok 免费额度过滤在末位兜底的分组列表中未覆盖，归入 0.4.1 复核。
 - [x] 复核中发现：OpenAI 旧调度路径（高级调度器关闭，缺省）在绑定账号软罚时仍清除绑定，并把临时服务的账号写成新绑定，与 design §4.2 不符。两处粘性读取在软罚时保留绑定，粘性写入处统一检查（`d6c8fd1e6`）。修复前失败：`TestResilienceOpenAILegacySchedulerKeepsSoftBinding`。生产 `openai_advanced_scheduler_enabled` 取值未核实，两条路径都已覆盖。
+- [x] 测试服务器复跑中发现：OpenAI 的按模型瞬时屏蔽（上游连续 5xx 后屏蔽 10/45 秒）只在进程内，`resiliencePenaltyOf` 看不到，末位兜底把只被它挡住的账号当作“健康但不可用”排除，单号 OpenAI 分组在屏蔽期间整组无号（ERR-3/ERR-4 的 503 均为此）；F2 之后这类无号也不再计入快速失败。design §2 本就把它列为软罚。修复：OpenAI 末位兜底（原版与份额两条）按屏蔽结束时间把它视为软罚。修复前失败：`TestResilienceOpenAILastResortUsesARuntimeBlockedAccount`（两种调度均“no available OpenAI accounts”）、`TestResilienceOpenAILastResortOrdersRuntimeBlocksByTheirEnd`。粘性绑定在屏蔽期间仍按上游逻辑清除，登记 0.4.1。
 - [x] F5 补充（审查会话复核时提出）：不写负缓存的续链、图片与 compact 选号按同一判据标记组级无号，快速失败照常计入；OpenAI 选号不再对这类请求查缓存（修复前缓存条目可能给后来选到账号的请求打上标记）（`e18275960`）。修复前失败：`TestUncachedOpenAISelectionStillMarksGroupNoAccount`、`TestUncachedOpenAISelectionIgnoresTheCacheEntirely`。
 - [x] F7 运维错误记录保留改写前的状态码（经 CDN 的 502/504 不再记成 503）（`25bb15ca2`）。修复前失败：`TestOpsRecordKeepsTheStatusBeforeTheEdgeRewrite`。
 - [x] F12 槽位等待截到剩余首输出前预算（`f2b077c4e`）。修复前失败：`TestSlotWaitEndsWithThePreOutputBudget`（预算剩 200 毫秒仍等满 3 秒）。
@@ -364,6 +365,7 @@
 
 - [ ] 份额策略配置精简（每组 22 项减到约 10 项，审查 5.1；`DecodePolicy` 对已删字段改为接受并忽略）；韧性设置精简（约 60 项减到约 35 项，审查 5.2 前四项）。
 - [ ] F6 余额耗尽两处“真相”（推断，先补用例证实）；F8 §9.8 续链重放只匹配已知的中转笼统文案；F9 影子模式统计对话锚点覆盖率并写明切换冷启动；F10 删除份额纠偏；F11 缓存归因只对影子与份额分组运行；F13 管理员复检改为显式时间戳；F15 Warn 级逐请求事件改 Info 加计数或按分组限速；F16 输出 P99 改增量直方图；F17 预览改用只读 `ScanBindings`；F18 软/硬档阈值统一；F19 删除死常量与单值字段。
+- [ ] OpenAI 按模型瞬时屏蔽期间保留会话绑定（design §4.2 例外）：两条 OpenAI 粘性路径的软罚判断接入 `resilienceOpenAIPenaltyOf`，需改上游文件两处已登记钩子；Explain 与无号 `Retry-After` 同样看不到该屏蔽。
 - [ ] F2 判据补全（审查会话复核时提出）：判据只看账号罚则。组内账号全部软罚、末位兜底只因新会话撞上账号会话数上限而失败时，结果仍写入负缓存，已绑定会话最多收到 2 秒的 503。范围很窄；修法是末位兜底失败原因为会话上限时不写负缓存。
 - [ ] CI 必测门禁合并为一个按清单驱动的脚本；项目记忆归档（主文件约 40KB，加大小上限）。
 

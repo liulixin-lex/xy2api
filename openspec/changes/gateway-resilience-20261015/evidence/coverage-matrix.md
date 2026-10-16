@@ -45,6 +45,7 @@ Every scenario of the eight specs, mapped to the automated tests that cover it a
 | OpenAI legacy scheduler during a cooldown | `TestResilienceOpenAILegacySchedulerKeepsSoftBinding` | — |
 | Busy last-resort account | `TestLastResortTakesAFreeSlotBeforeWaiting` | — |
 | Single-account Grok group with a transient error | `TestGatewayLastResortSingleAccountTransient`, `TestOpenAILastResortSingleAccount` | — |
+| Single-account OpenAI group after upstream 5xx | `TestResilienceOpenAILastResortUsesARuntimeBlockedAccount`, `TestResilienceOpenAILastResortOrdersRuntimeBlocksByTheirEnd` | ERR-1, ERR-3, ERR-4 |
 | Hard state with no alternative | `TestGatewayLastResortNeverUsesHardStates` | — |
 | Last resort respects hard limits | `TestResilienceGateConsistency`, `TestResilienceOpenAIGateConsistency`, `TestResilienceLastResortRelaxesSoftPenaltiesOnly`, `TestResilienceOpenAILastResortUsesCodexAdaptiveConcurrency`, `TestResilienceLastResortGrantsStickyAllowanceToBoundAccount` | — |
 | Share-group last resort keeps tiers and the binding | `TestResilienceLastResortFollowsShareTiers`, `TestResilienceLastResortSkipsDrainedAccounts`, `TestResilienceLastResortKeepsSoftBinding`, `TestResilienceLastResortRebindsFromHardBoundAccount`, `TestResilienceLastResortRebindsFromAvoidedAccount`, `TestResilienceOpenAILastResortFollowsShareTiers`, `TestResilienceOpenAILastResortSkipsDrainedAccounts`, `TestResilienceOpenAILastResortKeepsSoftBinding` | LR-1 |
