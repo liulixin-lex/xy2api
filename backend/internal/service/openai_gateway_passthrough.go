@@ -1997,6 +1997,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		if bareErrorAccountSideEffectsPending {
 			s.handleOpenAIStreamTerminalAccountSideEffects(c, account, bareErrorPayload, failedMessage, resp.Header, mappedModel)
 			bareErrorAccountSideEffectsPending = false
+			s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, bareErrorPayload, failedMessage, true)
 		}
 		if clientDisconnected || !writePendingLines() {
 			return
@@ -2132,6 +2133,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 					} else {
 						s.handleOpenAIStreamTerminalAccountSideEffects(c, account, dataBytes, failedMessage, resp.Header, mappedModel)
 						bareErrorAccountSideEffectsPending = false
+						s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, dataBytes, failedMessage, outputStarted)
 					}
 					if eventType == "response.failed" {
 						// The stream cannot be replayed after semantic output. Preserve the
@@ -2290,6 +2292,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete after disconnect: %w", err)
 		}
 		s.recordOpenAIProxyStreamDisconnect(account, err, upstreamRequestID)
+		resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, err, true)
 		logger.LegacyPrintf("service.openai_gateway",
 			"[OpenAI passthrough] 流读取异常中断: account=%d request_id=%s err=%v",
 			account.ID,
@@ -2312,6 +2315,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, "OpenAI stream ended before a terminal event")
 		}
 		s.recordOpenAIProxyStreamDisconnect(account, errors.New("stream ended before terminal event"), upstreamRequestID)
+		resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, nil, true)
 		return resultWithUsage(), errors.New("stream usage incomplete: missing terminal event")
 	}
 	if (sawDone || sawTerminalEvent) && !sawFailedEvent {

@@ -20,6 +20,7 @@ For a request with a session identifier whose bound account fails:
 
 - **Soft penalty from a single counted failure:** the binding MUST be kept. While the penalty lasts, requests MUST be placed temporarily on another account without writing a new binding, and MUST return to the bound account when the penalty ends. Counted failures are `RATE_LIMIT`, `TRANSIENT`, `FIRST_OUTPUT_TIMEOUT` and `STALL`.
 - **Repeated failures:** when the same session has at least `session.streak_threshold` (default 2) counted failures on the same account within `session.streak_window_seconds` (default 600 s), the gateway MUST delete the binding if it still points to that account, and MUST exclude that account for that session for `session.avoid_seconds` (default 600 s).
+- **Failures after output:** an upstream failure after semantic output reached the client (a failure event, a broken stream) cannot move to another account but MUST count once per attempt as `TRANSIENT`, unless it is a client error, a content-policy refusal or a client cancellation. Three such failures of one account within 60 s MUST put the account into the transient soft cooldown (pool-mode accounts excepted).
 - **Hard state:** when the bound account enters a hard state, the binding MUST be replaced immediately.
 - **No change:** concurrency saturation, first-token jitter, client cancellation, client errors and continuation requests owned by an account (`previous_response_id`) MUST NOT change the binding.
 
@@ -32,6 +33,11 @@ For a request with a session identifier whose bound account fails:
 - **WHEN** the same session fails on account A again within 10 minutes
 - **THEN** the binding is deleted with an owner check, account A is avoided for this session for 10 minutes
 - **AND** the next request is placed by weight in the same tier.
+
+#### Scenario: Failures after output move the session
+- **WHEN** a session's streams on account A fail with `Our servers are currently overloaded` after output twice within 10 minutes
+- **THEN** the second failure deletes the binding and account A is avoided for this session
+- **AND** a third such failure of account A within 60 s soft-penalises it for `failure.transient_cooldown_seconds`, while a single-account group can still use it as a last resort.
 
 #### Scenario: Balance exhaustion moves the session at once
 - **WHEN** the bound account enters balance `EXHAUSTED`

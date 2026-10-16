@@ -25,6 +25,9 @@ const (
 	MetricTurnCap            = "turn_cap"
 	MetricAbuseGuard         = "abuse_guard"
 	MetricStall              = "stall"
+	// MetricPostOutputFailure counts upstream failures after output reached
+	// the client (design §7.6); the label is the failure kind.
+	MetricPostOutputFailure = "post_output_failure"
 )
 
 // MetricsRetention bounds the history kept for the stats endpoint.

@@ -331,3 +331,19 @@ func TestBudgetInPlaceRetryAndAttemptDuration(t *testing.T) {
 	require.True(t, nb.ConsumeInPlaceRetry(1, true, t0))
 	require.Zero(t, nb.LastAttemptDuration())
 }
+
+func TestReportStreamFailureOncePerAttempt(t *testing.T) {
+	st := NewRequestState()
+	resp := &struct{ n int }{}
+	require.False(t, st.StreamFailureReported(7))
+	require.True(t, st.ReportStreamFailure(7, resp))
+	require.False(t, st.ReportStreamFailure(7, resp), "the same attempt counts once")
+	require.True(t, st.StreamFailureReported(7))
+	require.False(t, st.StreamFailureReported(8))
+	require.True(t, st.ReportStreamFailure(7, 2), "another attempt (a later WebSocket turn) counts")
+	require.True(t, st.ReportStreamFailure(8, resp), "another account counts")
+
+	var none *RequestState
+	require.True(t, none.ReportStreamFailure(7, resp), "without a state every report is new")
+	require.False(t, none.StreamFailureReported(7))
+}

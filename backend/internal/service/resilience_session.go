@@ -531,8 +531,10 @@ func (r *ResilienceService) sessionMarkLoop(ctx context.Context) {
 }
 
 // sweepSessionMarks drops expired failure and avoid marks; without it every
-// session that failed once and never returned would stay in memory.
+// session that failed once and never returned would stay in memory. The
+// per-account counts of failures after output expire on the same tick.
 func (r *ResilienceService) sweepSessionMarks(now time.Time) {
+	r.postOutput.sweep(now)
 	for _, m := range []*sync.Map{&r.failingSessions, &r.avoidingSessions} {
 		m.Range(func(k, v any) bool {
 			if until, ok := v.(time.Time); !ok || now.After(until) {

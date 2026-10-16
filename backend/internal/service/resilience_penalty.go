@@ -155,8 +155,14 @@ func (s *RateLimitService) ApplyResilienceOutcome(ctx context.Context, account *
 // applyTransientCooldown writes the soft transient cooldown: the configured
 // default, or the upstream retry_after bounded by the cap (design §3.4).
 func (s *RateLimitService) applyTransientCooldown(ctx context.Context, account *Account, res resilience.Result, evidence string) {
+	s.applyTransientCooldownAs(ctx, account, res, string(res.Category), evidence)
+}
+
+// applyTransientCooldownAs writes the transient soft cooldown with the
+// reason "transient:<label> <evidence>" and reports whether it was written.
+func (s *RateLimitService) applyTransientCooldownAs(ctx context.Context, account *Account, res resilience.Result, label, evidence string) bool {
 	if s == nil || s.accountRepo == nil || account == nil || account.IsPoolMode() {
-		return
+		return false
 	}
 	cfg := resilience.Current()
 	cooldown := time.Duration(cfg.Failure.TransientCooldownSeconds) * time.Second
@@ -167,15 +173,15 @@ func (s *RateLimitService) applyTransientCooldown(ctx context.Context, account *
 		}
 	}
 	if cooldown <= 0 {
-		return
+		return false
 	}
 	until := time.Now().Add(cooldown)
-	reason := resilience.ReasonPrefixTransient + string(res.Category) + " " + truncateString(evidence, 160)
+	reason := resilience.ReasonPrefixTransient + label + " " + truncateString(evidence, 160)
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
 	if err := s.accountRepo.SetTempUnschedulable(stateCtx, account.ID, until, reason); err != nil {
 		slog.Warn("resilience.transient_cooldown_failed", "account_id", account.ID, "error", err)
-		return
+		return false
 	}
 	// The next request's fallback decision and Retry-After must see the
 	// cooldown, not a group snapshot taken before it.
@@ -187,6 +193,7 @@ func (s *RateLimitService) applyTransientCooldown(ctx context.Context, account *
 		"reason", res.Reason,
 		"cooldown", cooldown.String(),
 	)
+	return true
 }
 
 // applyBalanceSignal moves an account through the balance state machine

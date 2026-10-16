@@ -473,6 +473,102 @@
       "value": "resilience.StateFrom(c.Request.Context()).MarkAccountFailed(ev.AccountID)"
     },
     {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, dataBytes, failedMessage, outputStarted)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, bareErrorPayload, failedMessage, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, scanErr, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, nil, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, dataBytes, failedMessage, outputStarted)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, bareErrorPayload, failedMessage, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, err, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, nil, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, payloadBytes, message, clientOutputStarted)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, err, clientOutputStarted && !clientDisconnected)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, nil, clientOutputStarted && !clientDisconnected)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, payloadBytes, message, clientOutputStarted)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, err, clientOutputStarted && !clientDisconnected)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, nil, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, scanErr, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_http_bridge.go",
+      "value": "s.resilienceOpenAIWSFailedAfterOutput(ctx, account, resp, eventType, upstreamMessage, wroteDownstream, officialOpenAIResponses)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_http_bridge.go",
+      "value": "s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, bareErrorPayload, bareErrorMessage, wroteDownstream)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_http_bridge.go",
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, err, wroteDownstream && !clientDisconnected)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_http_bridge.go",
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, nil, wroteDownstream && !clientDisconnected)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
+      "value": "s.resilienceOpenAIWSFailedAfterOutput(ctx, account, turn, eventType, upstreamMessage, wroteDownstream, account.IsOpenAIOAuthLike())"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_v2_passthrough_adapter.go",
+      "value": "s.resilienceOpenAIWSFailedAfterOutput(ctx, account, int(completedTurns.Load())+1, eventType, payload, wroteDownstream, true)"
+    },
+    {
+      "path": "backend/internal/service/gateway_upstream_response.go",
+      "value": "s.resilienceAnthropicFailedAfterOutput(ctx, c, account, resp, err)"
+    },
+    {
+      "path": "backend/internal/service/gateway_upstream_response.go",
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, ev.err, true)"
+    },
+    {
+      "path": "backend/internal/service/gateway_upstream_response.go",
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, nil, !clientDisconnected && openAIStreamClientOutputStarted(c, false))"
+    },
+    {
       "path": "backend/internal/web/embed_on.go",
       "value": "// nonce, so it is never answered with 304 and has no ETag"
     },

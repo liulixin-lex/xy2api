@@ -81,7 +81,8 @@ export default {
         fast_fail: 'Fast fails',
         turn_cap: 'Failed turns ended',
         abuse_guard: 'Abuse guard charges',
-        stall: 'Stalled streams'
+        stall: 'Stalled streams',
+        post_output_failure: 'Upstream failures after output'
       },
       states: {
         OK: 'OK',

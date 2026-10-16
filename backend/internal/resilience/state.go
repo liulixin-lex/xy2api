@@ -59,6 +59,9 @@ type RequestState struct {
 	avoided map[int64]struct{}
 	// failedAccounts are accounts with a failed attempt in this request.
 	failedAccounts map[int64]struct{}
+	// streamFailures maps an account to its latest failed attempt that the
+	// stream handler already reported (design §7.6).
+	streamFailures map[int64]any
 }
 
 // SessionRecorder records attempt outcomes of a sticky session. The service
@@ -192,6 +195,43 @@ func (s *RequestState) AccountFailed(accountID int64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, ok := s.failedAccounts[accountID]
+	return ok
+}
+
+// ReportStreamFailure records that the stream handler itself reports a
+// failed upstream attempt on the account (a failure after output, which no
+// failover loop sees) and reports whether this is the first report of that
+// attempt. attempt identifies the attempt and must be comparable (a pointer
+// such as its *http.Response, or a WebSocket turn number): one attempt can
+// show several failure signals (an error event, then response.failed, then
+// a missing terminal event) but counts once. Without a state every report
+// is new.
+func (s *RequestState) ReportStreamFailure(accountID int64, attempt any) bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if prev, ok := s.streamFailures[accountID]; ok && prev == attempt {
+		return false
+	}
+	if s.streamFailures == nil {
+		s.streamFailures = map[int64]any{}
+	}
+	s.streamFailures[accountID] = attempt
+	return true
+}
+
+// StreamFailureReported reports whether the stream handler reported a
+// failed attempt on the account in this request; a failover loop that later
+// sees the same attempt as its error must not count it again.
+func (s *RequestState) StreamFailureReported(accountID int64) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.streamFailures[accountID]
 	return ok
 }
 

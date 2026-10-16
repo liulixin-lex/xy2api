@@ -1093,6 +1093,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					streamFailoverErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payloadBytes, message, upstreamModel, resp.Header)
 					return true
 				}
+				s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, payloadBytes, message, clientOutputStarted)
 				message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
 				errStatus, errType, errMsg := http.StatusBadGateway, "api_error", message
 				// 统一走语义状态推断 + body 归一化（与 /v1/responses 路径一致），
@@ -1190,6 +1191,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				zap.Error(err),
 				zap.String("request_id", requestID),
 			)
+			resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, err, clientOutputStarted && !clientDisconnected)
 		}
 	}
 	missingTerminalErr := func() (*OpenAIForwardResult, error) {
@@ -1202,6 +1204,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			return result, s.newOpenAIStreamFailoverError(c, account, false, requestID, nil, message)
 		}
 		s.recordOpenAIMessagesStreamUpstreamError(c, account, requestID, "stream_missing_terminal", message)
+		resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, nil, true)
 		return result, fmt.Errorf("stream usage incomplete: missing terminal event")
 	}
 	processFrame := func(frame openAICompatSSEFrame) bool {

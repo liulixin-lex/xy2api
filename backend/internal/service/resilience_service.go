@@ -109,6 +109,9 @@ type ResilienceService struct {
 	failingSessions sync.Map
 	// avoidingSessions marks sessions with avoid entries (key -> expiry).
 	avoidingSessions sync.Map
+	// postOutput counts recent failures after output per account for the
+	// threshold cooldown (design §7.6).
+	postOutput postOutputTracker
 
 	// outputP99 is the per-model output-token P99 of recent usage
 	// (lower-cased model -> tokens) for reservation estimates.

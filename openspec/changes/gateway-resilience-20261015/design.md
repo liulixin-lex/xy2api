@@ -126,7 +126,7 @@
 
 - `cooldown` 默认 30 秒；上游正文或头部给出 `retry_after` 时，取 min(retry_after, `retry_after_cap_seconds`=120)。
 - 冷却只是软罚：单号组仍可通过末位兜底使用该账号（§4.3）。
-- OpenAI 系账号的 5xx 沿用现有的按模型瞬时屏蔽（`openai_account_model_transient.go`），不整号冷却；只有 API Key 中转明确给出 `retry_after`（说明整站不可用）时才整号冷却。
+- OpenAI 系账号的 5xx 沿用现有的按模型瞬时屏蔽（`openai_account_model_transient.go`），不整号冷却；只有 API Key 中转明确给出 `retry_after`（说明整站不可用）时才整号冷却。已输出后失败的阈值冷却（§7.6）例外，对所有非池模式账号整号软冷却。
 
 ## 4. 选号与会话失败处理（D4、D5）
 
@@ -136,6 +136,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 
 - 只对计入失败的类别（`RATE_LIMIT`、`TRANSIENT`、`FIRST_OUTPUT_TIMEOUT`、`STALL`）递增；
 - 所有换号循环（共用循环与 OpenAI 各路由自有的循环）每次失败尝试都经同一入口 `resilienceAttemptFailed` 上报一次，同时扣减预算；
+- 已输出后的上游失败不会进入换号循环，由流处理分支自行上报一次（§7.6）；同一尝试的错误若再到达换号循环，不重复计数；
 - 成功响应清零该会话对该账号的计数。本请求内在该账号上有过失败尝试（流内错误事件、停滞）时，即使按部分用量计费也不算成功：不清零计数、不解除冷却、不计入余额 `RECOVERING` 的成功次数；
 - 没有会话标识的请求不计数。
 
@@ -294,6 +295,14 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 | Anthropic Messages | `event: error\ndata: {"type":"error","error":{"type":"overloaded_error"或"api_error","message":...}}`（修复 G3：所有提交后的错误帧都补 `event: error`；`errors` 开关关闭时恢复 0.3.0 的无 `event` 行格式） |
 
 写完终止帧后立即 `Flush` 并结束响应，因为 Codex 只在流结束时上报 `response.failed`。错误 JSON 只占一行，带稳定的 `code`，以及原 HTTP 语义状态 `error.status`（XY-image 与其他客户端可据此还原语义）。
+
+**已输出后失败的计数（生产 R2）。** 已输出后不能换号，但失败仍属于该账号。识别出已输出后上游失败的流分支（流内失败事件、读错误、无终止事件即结束）对该尝试只上报一次（`resilience_post_output.go`）：
+
+- 会话按 `TRANSIENT` 计入失败计数（§4.1），达到 `streak_threshold` 即改绑并回避。降载类文案（`CAPACITY_SHED`）在输出前是请求级的，输出后说明该账号此刻不可靠，同样计入；
+- 账号进程内滑动计数，60 秒内 3 次即施加瞬时软冷却 `transient:POST_OUTPUT`（时长 `transient_cooldown_seconds`），施加后清零；软冷却不影响末位兜底，池模式账号不罚；
+- 本请求在该账号上不算成功（`MarkAccountFailed`）；
+- 输出前会换号的失败才计入：客户端错误、内容安全与 cyber 拒绝、上下文超长、客户端断开不计；
+- 总开关关闭时不计；`session` 关闭时只保留账号侧冷却。指标 `post_output_failure`（细分 `stream_failed`、`stream_read_error`、`missing_terminal`），日志 `resilience.post_output_failure`（warn）。
 
 ### 7.7 与现有流内 keepalive 的关系
 
@@ -474,6 +483,7 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
   - `resilience.budget_exhausted`
   - `resilience.keepalive_committed`
   - `resilience.stall`
+  - `resilience.post_output_failure`
   - `resilience.undelivered`
   - `resilience.fast_fail`
   - `resilience.turn_cap`

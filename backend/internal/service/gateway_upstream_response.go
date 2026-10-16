@@ -1034,6 +1034,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			if !ok {
 				// 上游完成，返回结果
 				if !sawTerminalEvent {
+					resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, nil, !clientDisconnected && openAIStreamClientOutputStarted(c, false))
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, fmt.Errorf("stream usage incomplete: missing terminal event")
 				}
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
@@ -1084,6 +1085,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 						RetryableOnSameAccount: true,
 					}
 				}
+				resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, ev.err, true)
 				sendErrorEvent("stream_read_error", disconnectMsg)
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream read error: %w", ev.err)
 			}
@@ -1101,6 +1103,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 					if clientDisconnected {
 						return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, nil
 					}
+					s.resilienceAnthropicFailedAfterOutput(ctx, c, account, resp, err)
 					return nil, err
 				}
 

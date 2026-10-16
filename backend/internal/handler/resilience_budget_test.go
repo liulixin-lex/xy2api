@@ -196,3 +196,25 @@ func TestEveryFailoverLoopReportsSessionFailures(t *testing.T) {
 	fs.HandleFailoverError(ctx, &mockTempUnscheduler{}, 12, service.PlatformAnthropic, 0, bad)
 	require.Equal(t, 1, rec.failures[12], "shared loop, counted once")
 }
+
+func TestFailoverLoopSkipsAttemptReportedByStream(t *testing.T) {
+	// A failure after output is counted by the stream handler (design
+	// §7.6); when its error also reaches a failover loop it counts once.
+	gin.SetMode(gin.TestMode)
+	ctx := budgetCtx(t, resilience.KindText, 7)
+	rec := &countingRecorder{failures: map[int64]int{}}
+	st := resilience.StateFrom(ctx)
+	st.SetSession(7, "sess", rec)
+	bad := &service.UpstreamFailoverError{StatusCode: http.StatusBadGateway}
+
+	require.True(t, st.ReportStreamFailure(13, bad))
+	st.SessionFailure(ctx, 13, resilience.CategoryTransient)
+	resilienceAttemptFailed(ctx, 13, bad)
+	fs := NewFailoverState(3, false)
+	fs.HandleFailoverError(ctx, &mockTempUnscheduler{}, 13, service.PlatformAnthropic, 0, bad)
+	require.Equal(t, 1, rec.failures[13])
+
+	// Other accounts of the request still count.
+	resilienceAttemptFailed(ctx, 14, bad)
+	require.Equal(t, 1, rec.failures[14])
+}
