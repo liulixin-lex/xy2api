@@ -15,13 +15,18 @@ import (
 // counts and avoid set, the last-resort pick when nothing is healthy and the
 // availability fallback decision.
 type ResilienceExplanation struct {
-	GroupID       int64                          `json:"group_id"`
-	Enabled       bool                           `json:"enabled"`
-	HealthyCount  int                            `json:"healthy_count"`
-	Accounts      []ResilienceAccountExplanation `json:"accounts"`
-	LastResort    *ResilienceLastResortChoice    `json:"last_resort,omitempty"`
-	FallbackGroup *ResilienceFallbackExplanation `json:"fallback_group,omitempty"`
-	Session       *ResilienceSessionExplanation  `json:"session,omitempty"`
+	GroupID int64 `json:"group_id"`
+	Enabled bool  `json:"enabled"`
+	// ModelRestriction is set when the group rejects the model before any
+	// account is chosen: "not_allowed" (model allowlist) or
+	// "channel_pricing" (channel pricing list). Every request then fails
+	// whatever the accounts' state.
+	ModelRestriction string                         `json:"model_restriction,omitempty"`
+	HealthyCount     int                            `json:"healthy_count"`
+	Accounts         []ResilienceAccountExplanation `json:"accounts"`
+	LastResort       *ResilienceLastResortChoice    `json:"last_resort,omitempty"`
+	FallbackGroup    *ResilienceFallbackExplanation `json:"fallback_group,omitempty"`
+	Session          *ResilienceSessionExplanation  `json:"session,omitempty"`
 }
 
 // ResilienceAccountExplanation is one account of the group.
@@ -79,6 +84,14 @@ func (r *ResilienceService) Explain(ctx context.Context, groupID int64, sessionH
 	}
 	now := time.Now()
 	out := &ResilienceExplanation{GroupID: groupID, Enabled: resilience.Current().Enabled, Accounts: []ResilienceAccountExplanation{}}
+	if model != "" {
+		switch {
+		case group != nil && !group.ModelAllowlist.Allows(model):
+			out.ModelRestriction = "not_allowed"
+		case r.pricingRestricted != nil && r.pricingRestricted(ctx, groupID, model):
+			out.ModelRestriction = "channel_pricing"
+		}
+	}
 
 	var failures map[int64]int64
 	var avoided map[int64]struct{}

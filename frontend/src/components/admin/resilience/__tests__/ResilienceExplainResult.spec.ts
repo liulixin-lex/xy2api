@@ -59,4 +59,11 @@ describe('resilience explain result', () => {
       expect(w.find('[data-testid="resilience-explain-sessionFailures"]').exists()).toBe(false)
     }
   })
+
+  it('names a model restriction above the accounts', () => {
+    const plain = mount(ResilienceExplainResult, { props: { explanation: base } })
+    expect(plain.find('[data-testid="resilience-explain-restriction"]').exists()).toBe(false)
+    const w = mount(ResilienceExplainResult, { props: { explanation: { ...base, model_restriction: 'channel_pricing' } } })
+    expect(text(w, 'restriction')).toBe('admin.resilience.explain.restriction.channel_pricing')
+  })
 })

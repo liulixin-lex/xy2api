@@ -127,6 +127,10 @@ export default {
       none: 'None',
       yes: 'Yes',
       no: 'No',
+      restriction: {
+        not_allowed: 'The model is not in this group\'s allowlist: requests are rejected before account selection (404), whatever the accounts\' state.',
+        channel_pricing: 'The group\'s channel pricing does not list this model: requests are rejected before account selection (503), whatever the accounts\' state. Add pricing or remove the model from the allowlist.'
+      },
       noAccounts: 'The group has no accounts.',
       recoverAt: 'recovers {time}',
       fallbackNone: 'Not configured',

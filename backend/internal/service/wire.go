@@ -1141,6 +1141,9 @@ func ProvideResilienceService(settingRepo SettingRepository, store ResilienceSto
 	concurrency.resilience = s
 	gateway.resilience = s
 	openai.resilience = s
+	s.pricingRestricted = func(ctx context.Context, groupID int64, model string) bool {
+		return gateway.checkChannelPricingRestriction(ctx, &groupID, model)
+	}
 	s.Start()
 	return s
 }

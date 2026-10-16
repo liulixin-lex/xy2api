@@ -124,6 +124,10 @@ type ResilienceService struct {
 	// fallbackMoves records when this instance last moved a key of a group
 	// to its fallback group (group id -> time).
 	fallbackMoves sync.Map
+
+	// pricingRestricted reports a model the group's channel pricing rejects
+	// before any account is chosen (Explain only).
+	pricingRestricted func(ctx context.Context, groupID int64, model string) bool
 }
 
 // NewResilienceService creates the service; Start loads the settings and

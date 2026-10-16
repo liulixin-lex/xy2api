@@ -127,6 +127,10 @@ export default {
       none: '无',
       yes: '是',
       no: '否',
+      restriction: {
+        not_allowed: '该模型不在本分组白名单内：请求在选号前被拒绝（404），与账号状态无关。',
+        channel_pricing: '本分组的渠道定价不含该模型：请求在选号前被拒绝（503），与账号状态无关。请补充定价或从白名单移除该模型。'
+      },
       noAccounts: '分组内没有账号。',
       recoverAt: '{time} 恢复',
       fallbackNone: '未配置',

@@ -59,3 +59,22 @@ func TestResilienceExplainShowsPenaltiesSessionLastResortAndFallback(t *testing.
 	_, err = nilSvc.Explain(ctx, 10, "", "")
 	require.ErrorIs(t, err, ErrResilienceExplainUnavailable)
 }
+
+func TestResilienceExplainShowsModelRestriction(t *testing.T) {
+	// Production: a group allowed a model its channel pricing did not list,
+	// so every request failed with 503 while all accounts were healthy.
+	// Explain names the restriction instead of the accounts.
+	r, _, _, key := newFallbackFixture(t)
+	ctx := context.Background()
+	key.Group.ModelAllowlist = GroupModelAllowlist{Enabled: true, Models: []string{"gpt-5.5", "gpt-6-sol"}}
+	r.pricingRestricted = func(_ context.Context, groupID int64, model string) bool {
+		return groupID == 10 && model == "gpt-5.5"
+	}
+
+	cases := map[string]string{"gpt-5.5": "channel_pricing", "gpt-5.4": "not_allowed", "gpt-6-sol": "", "": ""}
+	for model, want := range cases {
+		out, err := r.Explain(ctx, 10, "", model)
+		require.NoError(t, err)
+		require.Equal(t, want, out.ModelRestriction, model)
+	}
+}

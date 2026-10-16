@@ -132,6 +132,8 @@ export interface ResilienceAccountExplanation {
 export interface ResilienceExplanation {
   group_id: number
   enabled: boolean
+  /** Set when the group rejects the model before any account is chosen. */
+  model_restriction?: 'not_allowed' | 'channel_pricing'
   healthy_count: number
   accounts: ResilienceAccountExplanation[]
   last_resort?: { account_id: number; recover_at?: string }

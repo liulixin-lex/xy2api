@@ -1,5 +1,10 @@
 <template>
   <div class="space-y-4" data-testid="resilience-explain-result">
+    <p
+      v-if="explanation.model_restriction"
+      class="rounded-xl bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200"
+      data-testid="resilience-explain-restriction"
+    >{{ t('admin.resilience.explain.restriction.' + explanation.model_restriction) }}</p>
     <dl class="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
       <div v-for="item in summary" :key="item.key" class="rounded-xl bg-gray-50 p-3 dark:bg-dark-700/60">
         <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.resilience.explain.summary.' + item.key) }}</dt>
