@@ -1088,6 +1088,8 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			releaseOpsCaptureWriter(w)
 		}()
 		c.Writer = w
+		// xy2api resilience: a broken upload is a client cancel (design §8).
+		trackClientBodyRead(c)
 		c.Next()
 		w.finalizeCapture()
 
@@ -1120,7 +1122,7 @@ func recordOpsErrorAfterRequest(c *gin.Context, ops *service.OpsService, w *opsC
 		return
 	}
 
-	status := c.Writer.Status()
+	status := clientUploadStatus(c, c.Writer.Status())
 	body := w.capturedBytes()
 	parsed := parseOpsErrorResponse(body)
 	if !parsed.StreamFailure {

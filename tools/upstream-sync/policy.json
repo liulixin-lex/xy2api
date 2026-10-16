@@ -317,6 +317,14 @@
       "value": "if s.rateLimitService.resilienceHandleGrokUpstreamError(ctx, account, statusCode, headers, responseBody) {"
     },
     {
+      "path": "backend/internal/handler/ops_error_logger.go",
+      "value": "trackClientBodyRead(c)"
+    },
+    {
+      "path": "backend/internal/handler/ops_error_logger.go",
+      "value": "status := clientUploadStatus(c, c.Writer.Status())"
+    },
+    {
       "path": "backend/internal/handler/failover_loop.go",
       "value": "if resilienceAttemptFailed(ctx, accountID, failoverErr) {"
     },
