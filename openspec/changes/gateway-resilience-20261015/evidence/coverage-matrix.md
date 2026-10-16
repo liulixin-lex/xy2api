@@ -91,7 +91,7 @@ The Explain part of “Explainability and configuration” has no scenario of it
 | Scenario | Unit tests | Staging |
 |---|---|---|
 | Heartbeats only | `TestDeliveryWriterExcludesHeartbeats`, `TestUndeliveredRequestIsNotBilled` | DC-1 |
-| Queued and pinged, then abandoned | `TestAccountSlotPingsAreNotDelivery`, `TestUserMessageQueuePingsAreNotDelivery` | DC-4 |
+| Queued and pinged, then abandoned | `TestAccountSlotPingsAreNotDelivery`, `TestUserMessageQueuePingsAreNotDelivery` | DC-5 |
 | CDN cuts a slow request | `TestUndeliveredDisconnectCancelsUpstream` | DC-1 |
 | XY-image reconciliation stays correct | — | XY-image lab (tasks 12.8) |
 | Long generation abandoned midway | `TestPartialDisconnectDrainsUpstream` | DC-4 |

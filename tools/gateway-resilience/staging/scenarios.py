@@ -176,6 +176,8 @@ SCENARIOS = {}
 
 def scenario(sid: str, title: str):
     def wrap(fn):
+        if sid in SCENARIOS:
+            raise ValueError(f"duplicate scenario id {sid}")
         SCENARIOS[sid] = (title, fn)
         return fn
     return wrap
@@ -767,7 +769,7 @@ def dc2():
     return r, checks
 
 
-@scenario("DC-4", "Stream queued for a busy account gets pings, then leaves before output: undelivered, not billed")
+@scenario("DC-5", "Stream queued for a busy account gets pings, then leaves before output: undelivered, not billed")
 def dc4():
     # Review F1: the pings written while waiting for a slot are no output.
     checks = []
