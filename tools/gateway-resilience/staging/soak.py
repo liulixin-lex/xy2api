@@ -235,11 +235,58 @@ def anon_trend(samples: list[dict]) -> tuple[float | None, float | None]:
     return statistics.median(load[n // 6:n // 3]), statistics.median(load[n - n // 6:])
 
 
+def hourly_slope(points: list[tuple[datetime.datetime, float]], start: datetime.datetime,
+                 end: datetime.datetime) -> float | None:
+    """Slope in MiB per hour of the per-hour medians of points, hours counted
+    from the start of the load. The load moves on an hourly cycle, so medians
+    of complete hours cancel it; the first hour (warm-up) and a partial last
+    hour are dropped. Needs three complete hours after the first."""
+    complete = int((end - start).total_seconds() // 3600)
+    hours: dict[int, list[float]] = {}
+    for at, v in points:
+        h = int((at - start).total_seconds() // 3600)
+        if 1 <= h < complete:
+            hours.setdefault(h, []).append(v)
+    xs = sorted(h for h, vs in hours.items() if len(vs) >= 10)
+    if len(xs) < 3:
+        return None
+    ys = [statistics.median(hours[h]) for h in xs]
+    mx, my = statistics.fmean(xs), statistics.fmean(ys)
+    return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
+
+
+GCTRACE = re.compile(r"^(\S+) gc \d+ @[\d.]+s .*? (\d+)->(\d+)->(\d+) MB")
+
+
+def live_heap(started_at: str) -> list[tuple[datetime.datetime, float]]:
+    """Live heap after each GC (MB) from the app's gctrace lines."""
+    out = sh(f"docker logs --timestamps --since {started_at} {PROJECT}-app-1 2>&1 | grep -E ' gc [0-9]+ @'", timeout=600)
+    points = []
+    for line in out.splitlines():
+        m = GCTRACE.match(line)
+        if m:
+            at = datetime.datetime.fromisoformat(m.group(1)[:26].rstrip("Z") + "+00:00")
+            points.append((at, float(m.group(4))))
+    return points
+
+
+# The live heap after GC may grow at most this much per hour of load.
+MAX_LIVE_HEAP_SLOPE_MIB_PER_HOUR = 1.0
+
+
 def checks(evidence: str, started_at: str) -> dict:
     samples = [json.loads(l) for l in open(os.path.join(evidence, "metrics.jsonl"))]
     base, last = samples[0], samples[-1]
     peak_mem = max(mem_mib(s["app_mem"]) for s in samples)
     early_anon, late_anon = anon_trend(samples)
+    load = [s for s in samples if "target" in s]
+    load_start = datetime.datetime.fromisoformat(started_at) if load else None
+    load_end = datetime.datetime.fromisoformat(load[-1]["at"]) if load else None
+    anon_slope = None if load_start is None else hourly_slope(
+        [(datetime.datetime.fromisoformat(s["at"]), s["app_anon_mib"]) for s in load if s.get("app_anon_mib") is not None],
+        load_start, load_end)
+    heap = live_heap(started_at)
+    heap_slope = None if load_start is None else hourly_slope(heap, load_start, load_end)
     logs = sh(f"docker logs --since {started_at} {PROJECT}-app-1 2>&1", timeout=600)
     secrets = list(KEYS.values())
     for n in (1, 2, 3):
@@ -259,6 +306,10 @@ def checks(evidence: str, started_at: str) -> dict:
         "peak_app_mem_mib": round(peak_mem, 1),
         "anon_mib_early_median": early_anon,
         "anon_mib_late_median": late_anon,
+        "anon_slope_mib_per_hour": None if anon_slope is None else round(anon_slope, 2),
+        "gc_traces": len(heap),
+        "live_heap_mib_first_last": [heap[0][1], heap[-1][1]] if heap else None,
+        "live_heap_slope_mib_per_hour": None if heap_slope is None else round(heap_slope, 2),
         "panics": len(re.findall(r"\bpanic\b|goroutine \d+ \[running\]", logs)),
         "credential_hits_in_logs": leaked,
         "masked_key_like_strings": len(SECRET.findall(logs)),
@@ -282,6 +333,9 @@ def checks(evidence: str, started_at: str) -> dict:
         "no duplicate undelivered rows": result["duplicate_undelivered_rows"] == 0,
         "undelivered and unbilled requests have no usage row": result["unbilled_undelivered_with_usage"] == 0,
     }
+    if heap:
+        ok[f"live heap after GC does not trend up (hourly medians, <= {MAX_LIVE_HEAP_SLOPE_MIB_PER_HOUR} MiB/h)"] = (
+            heap_slope is not None and heap_slope <= MAX_LIVE_HEAP_SLOPE_MIB_PER_HOUR)
     result["checks"] = [{"check": k, "ok": v} for k, v in ok.items()]
     result["ok"] = all(ok.values())
     return result

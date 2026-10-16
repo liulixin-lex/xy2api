@@ -72,6 +72,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:?TOTP_ENCRYPTION_KEY is required}
       TZ: Asia/Shanghai
+      # Soaks set APP_GODEBUG=gctrace=1: the live heap after each GC is the
+      # leak signal; container memory also holds memory the runtime keeps.
+      GODEBUG: ${APP_GODEBUG:-}
       SECURITY_URL_ALLOWLIST_ENABLED: "false"
       SECURITY_URL_ALLOWLIST_ALLOW_INSECURE_HTTP: "true"
       SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS: "true"
