@@ -18,6 +18,7 @@ import datetime
 import http.client
 import json
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -39,6 +40,16 @@ def now() -> float:
 
 # ---- HTTP helpers -------------------------------------------------------------
 
+def leave(sock):
+    """Drops the connection now. close() alone keeps it open while the
+    response's file object still refers to the socket."""
+    try:
+        sock.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
+    sock.close()
+
+
 def stream_request(port, path: str, key: str, body: dict, *, headers=None, disconnect_after=None, timeout=330):
     """Sends a request and records every received line with its offset.
     port is a local port, or an https host name (real Cloudflare tests)."""
@@ -54,12 +65,15 @@ def stream_request(port, path: str, key: str, body: dict, *, headers=None, disco
     out = {"port": port, "path": path, "status": None, "headers": {}, "lines": [], "error": None, "elapsed": None}
     try:
         conn.request("POST", path, body=json.dumps(body), headers=hdrs)
+        # With Connection: close the response takes the socket over and
+        # conn.sock becomes None, so keep it to time reads and to leave.
+        sock = conn.sock
         try:
             resp = conn.getresponse()
         except TimeoutError:
             # Leave before the response headers arrived.
             out["disconnected_at"] = round(now() - start, 2)
-            conn.sock.close()
+            leave(sock)
             return out
         out["status"] = resp.status
         out["headers"] = {k.lower(): v for k, v in resp.getheaders()}
@@ -69,10 +83,9 @@ def stream_request(port, path: str, key: str, body: dict, *, headers=None, disco
                 remaining = disconnect_after - (now() - start)
                 if remaining <= 0:
                     out["disconnected_at"] = round(now() - start, 2)
-                    if conn.sock:
-                        conn.sock.close()
+                    leave(sock)
                     break
-                conn.sock.settimeout(remaining)
+                sock.settimeout(remaining)
             try:
                 line = resp.readline()
             except TimeoutError:
@@ -798,6 +811,11 @@ def dc4():
 @scenario("LR-1", "Share group with every account soft-penalised: last resort follows the share tiers, not account priority")
 def lr1():
     # Review F3: tier 0 holds lr-a (priority 5), tier 1 lr-b (priority 1).
+    # Each request carries its own conversation: without one, a share group
+    # keys the session on the API key, and the second request would follow
+    # the first one's binding. Keeping a soft-penalised binding is covered
+    # by unit tests: with relays that always fail, the session's failure
+    # streak moves it.
     checks = []
     api = admin_api()
     gid = int(psql("select id from groups where name='G-share-lr' and deleted_at is null"))
@@ -814,16 +832,20 @@ def lr1():
     time.sleep(3)
 
     key = KEYS["G-share-lr"]
-    # Both relays fail once with a Cloudflare 502 and Retry-After: both are
+
+    def tried_by(session):
+        mark = fault_last_id()
+        r = stream_request(DIRECT, "/v1/responses", key, responses_body(stream=False, session=session))
+        return r, [x.get("spec", "").split("tag=")[-1] for x in fault_records_since(mark) if "tag=lr-" in x.get("spec", "")]
+
+    # Both relays fail with a Cloudflare 502 and Retry-After: both are
     # soft-penalised for about a minute.
-    body = {"model": "gpt-6.1-sol", "messages": [{"role": "user", "content": "hello"}], "stream": False}
-    stream_request(DIRECT, "/v1/chat/completions", key, dict(body, user=fresh_session()))
-    mark = fault_last_id()
-    second = stream_request(DIRECT, "/v1/chat/completions", key, dict(body, user=fresh_session()))
-    tried = [r.get("spec", "") for r in fault_records_since(mark) if "tag=lr-" in r.get("spec", "")]
+    _, first = tried_by(fresh_session())
+    # A new conversation: the relaxed round places it in tier 0.
+    second, tried = tried_by(fresh_session())
     check(bool(tried), f"last resort tried an account ({tried})", checks)
-    check(bool(tried) and "lr-a" in tried[0], f"tier 0 first, not the higher-priority tier 1 ({tried[:1]})", checks)
-    return {"second": second, "tried": tried}, checks
+    check(bool(tried) and tried[0] == "lr-a", f"tier 0 first, not the higher-priority tier 1 ({tried})", checks)
+    return {"second": second, "first": first, "tried": tried}, checks
 
 
 @scenario("DC-3", "Client leaves while the upstream headers are still awaited: stage header_wait")
