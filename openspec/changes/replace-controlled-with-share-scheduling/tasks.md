@@ -285,12 +285,12 @@ PR #90 推送后，CI 的 Unit tests 首次失败：`TestShareSchedulingShadowMa
 
 随网关韧性 0.4.0 的上线前审查完成，详情见 design §20。验证随网关韧性最终候选统一执行（见 `gateway-resilience-20261015` 的 tasks 12.9–12.11、13.1）。
 
-- [x] 回升截止时间只从高层已知的恢复时间起算，恢复时间未知时不再立即强制迁移热会话（`53b73fd36`，`TestTierReturn`）。
-- [x] 余额耗尽与额度自动暂停计入健康原因，恢复后的高层账号等 `tiers.stable_seconds` 再接回会话（`024e564c4`，`TestRechargedAccountWaitsForStabilityBeforeTierReturn`）。
-- [x] 报表窗口执行文档写明的 1 分钟下限（`7afdfc077`，`TestShareSchedulingHandlerRejectsMalformedRequests`）。
+- [x] 回升截止时间只从高层已知的恢复时间起算，恢复时间未知时不再立即强制迁移热会话（`6e916fa1c`，`TestTierReturn`）。
+- [x] 余额耗尽与额度自动暂停计入健康原因，恢复后的高层账号等 `tiers.stable_seconds` 再接回会话（`c5ffd57ba`，`TestRechargedAccountWaitsForStabilityBeforeTierReturn`）。
+- [x] 报表窗口执行文档写明的 1 分钟下限（`26c882ef7`，`TestShareSchedulingHandlerRejectsMalformedRequests`）。
 - [x] 复核策略校验、CAS 保存、Redis 扫描与条件删除、统计上界、影子对比并发上限，未发现问题。
-- [x] 页头精简：去掉重复标题的卡片，只在总开关关闭时显示提示条与设置链接（`345b376fa`）。
-- [x] 分组列表只给已保存策略的分组显示调度器徽标（`345b376fa`）。
-- [x] 策略表在 1440 px 宽度不再横向溢出，排空、缓存域、份额与恢复默认按钮不再竖排换行（`11c12d882`、`7ef136d49`）。
-- [x] 报表：窗口改用通用下拉组件，空分布合并为一行提示，首字表只在有样本时显示，决策样本的空状态区分“窗口内没有”与“未开启保存”（`345b376fa`、`7ef136d49`）。
-- [x] 数字用等宽数位（`tabular-nums`）而非等宽字体（`345b376fa`）。
+- [x] 页头精简：去掉重复标题的卡片，只在总开关关闭时显示提示条与设置链接（`261795a74`）。
+- [x] 分组列表只给已保存策略的分组显示调度器徽标（`261795a74`）。
+- [x] 策略表在 1440 px 宽度不再横向溢出，排空、缓存域、份额与恢复默认按钮不再竖排换行（`995785b61`、`060f6f7ea`）。
+- [x] 报表：窗口改用通用下拉组件，空分布合并为一行提示，首字表只在有样本时显示，决策样本的空状态区分“窗口内没有”与“未开启保存”（`261795a74`、`060f6f7ea`）。
+- [x] 数字用等宽数位（`tabular-nums`）而非等宽字体（`261795a74`）。

@@ -23,7 +23,7 @@
 | 服务 | `app`（候选镜像，127.0.0.1:18210）、`postgres`（18，仅内部）、`redis`（8，仅内部）、`fault-upstream`（127.0.0.1:18211）、`cdn-sim-90`/`cdn-sim-125`/`cdn-sim-300`（127.0.0.1:18212–18214） |
 | 升级演练库 | 同一个 postgres 中的独立数据库 `xy2api_upgrade`，与功能测试库隔离 |
 | Caddy | 新增独立片段 `xy2api-staging.caddy`，在主配置末尾 import；改前备份、`caddy validate`，然后平滑 reload |
-| 域名 | `stg-direct.example.test`（灰云，直连）与 `stg-cf.example.test`（橙云，经 Cloudflare）；ESA 测试站点视条件而定。**DNS 修改需用户授权** |
+| 域名 | 两个测试子域：一个灰云直连、一个橙云经 Cloudflare（名称只记在仓库外私有目录，场景脚本从测试服务器 `.env` 的 `STG_DIRECT_HOST`、`STG_CF_HOST` 读取）；ESA 测试站点视条件而定。**DNS 修改需用户授权** |
 | XY-image 测试实例 | 独立目录，使用 XY-image 仓库的 `deploy/xy2api-lab` 或精简自托管栈，端口与已有两套错开；`XY2API_BASE_URL` 指向 `stg-api` |
 | 资源上限 | 每个容器设内存与 CPU 上限，并设 `oom_score_adj`，避免影响已有服务 |
 

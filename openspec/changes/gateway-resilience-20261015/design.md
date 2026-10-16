@@ -527,7 +527,7 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
 - `scheduler-diff.json` 为 `gateway_scheduling.go`、`openai_account_scheduler.go`、`openai_gateway_scheduling.go`、`gemini_messages_compat_service.go` 中新增的块登记白名单。
 - `UPSTREAM_BASE.json` 的 custom_patches 与 policy 保持一致；`VERSION` 升为 0.4.0；`SUB2API_COMPAT_VERSION` 保持 0.2.15。
 - 不向 Sub2API 官方提交。
-- **CI 门禁：** `backend-ci.yml` 的 test 作业运行 `tools/gateway-resilience/ci_gate.py`（步骤名 “Gateway resilience”）。脚本收集 `internal/resilience` 全部测试文件，以及 `internal/service`、`internal/handler`、`internal/handler/admin`、`internal/server/middleware` 中韧性测试文件的全部 `Test*`（`7ef136d49` 时 178 个），以 `-race -tags=unit` 运行；任一失败、跳过或未运行即失败，新增测试自动纳入。仓储层的真实 PostgreSQL/Redis 集成测试由 integration 作业运行。
+- **CI 门禁：** `backend-ci.yml` 的 test 作业运行 `tools/gateway-resilience/ci_gate.py`（步骤名 “Gateway resilience”）。脚本收集 `internal/resilience` 全部测试文件，以及 `internal/service`、`internal/handler`、`internal/handler/admin`、`internal/server/middleware` 中韧性测试文件的全部 `Test*`（`060f6f7ea` 时 178 个），以 `-race -tags=unit` 运行；任一失败、跳过或未运行即失败，新增测试自动纳入。仓储层的真实 PostgreSQL/Redis 集成测试由 integration 作业运行。
 
 ## 14. 成功指标（D25）与度量方法
 

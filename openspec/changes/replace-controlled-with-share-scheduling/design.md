@@ -575,13 +575,13 @@ budget > 0 且 排队人数 < max_waiting → 等待绑定账号（原版等待�
 
 | 问题 | 风险 | 处理 | 测试 |
 |---|---|---|---|
-| 设置 `return_deadline_seconds` 时，高层恢复时间未知（高层只是满载、从未不健康，或本实例没见过它失败）被当作“已稳定无限久” | 因高层满载而溢出到低层的热会话，在下一次请求就被强制迁回，重建提示缓存 | 截止时间只从高层已知的恢复时间（`StableSince`）起算；恢复时间未知时不按截止迁移，会话按 `tiers.return` 处理（默认 `cold`：缓存变冷后以 `return_cold` 迁回） | `TestTierReturn`（`53b73fd36`） |
-| 余额耗尽（`balance_exhausted`）与额度自动暂停（`quota_auto_pause`）不计入健康原因 | 充值或暂停解除后的高层账号立即接回会话，不等 `tiers.stable_seconds`，与回升防抖的本意不符 | 两者计入健康原因，与限流、过载、临时不可调度等一样推迟回升；模型不支持、渠道限制等按请求的闸门仍不计 | `TestRechargedAccountWaitsForStabilityBeforeTierReturn`（`024e564c4`） |
-| 报表窗口只校验大于 0 | 使用文档写明下限 1 分钟，接口却接受 `30s` 等更短窗口 | `window` 须在 1m–24h，否则返回 400 | `TestShareSchedulingHandlerRejectsMalformedRequests`（`7afdfc077`） |
+| 设置 `return_deadline_seconds` 时，高层恢复时间未知（高层只是满载、从未不健康，或本实例没见过它失败）被当作“已稳定无限久” | 因高层满载而溢出到低层的热会话，在下一次请求就被强制迁回，重建提示缓存 | 截止时间只从高层已知的恢复时间（`StableSince`）起算；恢复时间未知时不按截止迁移，会话按 `tiers.return` 处理（默认 `cold`：缓存变冷后以 `return_cold` 迁回） | `TestTierReturn`（`6e916fa1c`） |
+| 余额耗尽（`balance_exhausted`）与额度自动暂停（`quota_auto_pause`）不计入健康原因 | 充值或暂停解除后的高层账号立即接回会话，不等 `tiers.stable_seconds`，与回升防抖的本意不符 | 两者计入健康原因，与限流、过载、临时不可调度等一样推迟回升；模型不支持、渠道限制等按请求的闸门仍不计 | `TestRechargedAccountWaitsForStabilityBeforeTierReturn`（`c5ffd57ba`） |
+| 报表窗口只校验大于 0 | 使用文档写明下限 1 分钟，接口却接受 `30s` 等更短窗口 | `window` 须在 1m–24h，否则返回 400 | `TestShareSchedulingHandlerRejectsMalformedRequests`（`26c882ef7`） |
 
 复核未发现问题、未改动：策略校验、CAS 保存、Redis 扫描与条件删除、统计上界、影子对比并发上限。
 
-前端规范化（`11c12d882`、`345b376fa`、`7ef136d49`），只改布局、排版与文案，不改接口：
+前端规范化（`995785b61`、`261795a74`、`060f6f7ea`），只改布局、排版与文案，不改接口：
 
 - **页头：** 不再用卡片重复顶栏的标题与说明；只有总开关关闭时显示提示条与“前往系统设置”链接，读取设置失败时显示错误。
 - **分组列表：** 只给已保存策略（含导入草稿）的分组显示调度器徽标，使用份额调度的少数分组更醒目。
