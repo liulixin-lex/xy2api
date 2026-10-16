@@ -316,3 +316,20 @@ func TestPassthroughRuleBeatsHiddenBalanceOnOpenAIRoutes(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 	require.NotContains(t, w.Body.String(), "quota")
 }
+
+func TestCommittedAnthropicErrorFrameFollowsTheErrorsSwitch(t *testing.T) {
+	// The named error event is part of the resilience error semantics; with
+	// the switch off the 0.3.0 frame is written.
+	withHandlerResilience(t, nil)
+	c, w := newResilienceTestContext(t)
+	_, _ = c.Writer.WriteString("event: ping\ndata: {}\n\n")
+	(&GatewayHandler{}).handleStreamingAwareError(c, http.StatusBadGateway, "api_error", "upstream failed", true)
+	require.Contains(t, w.Body.String(), "event: error\ndata: {\"type\":\"error\"")
+
+	withHandlerResilience(t, func(s *resilience.Settings) { s.Errors.Enabled = false })
+	c, w = newResilienceTestContext(t)
+	_, _ = c.Writer.WriteString("event: ping\ndata: {}\n\n")
+	(&GatewayHandler{}).handleStreamingAwareError(c, http.StatusBadGateway, "api_error", "upstream failed", true)
+	require.NotContains(t, w.Body.String(), "event: error")
+	require.Contains(t, w.Body.String(), "data: {\"type\":\"error\"")
+}

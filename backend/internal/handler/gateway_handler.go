@@ -2038,8 +2038,12 @@ func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, statu
 				errorCode = `,"code":` + strconv.Quote(code)
 			}
 			// xy2api G3: Anthropic SDKs only surface named events, so the
-			// frame carries "event: error".
-			errorEvent := "event: error\n" + `data: {"type":"error","error":{"type":` + strconv.Quote(errType) + errorCode + `,"message":` + strconv.Quote(message) + `}}` + "\n\n"
+			// frame carries "event: error" (off with the errors switch: the
+			// 0.3.0 frame).
+			errorEvent := `data: {"type":"error","error":{"type":` + strconv.Quote(errType) + errorCode + `,"message":` + strconv.Quote(message) + `}}` + "\n\n"
+			if resilience.Current().ErrorsOn() {
+				errorEvent = "event: error\n" + errorEvent
+			}
 			if _, err := fmt.Fprint(c.Writer, errorEvent); err != nil {
 				_ = c.Error(err)
 			}
