@@ -21,40 +21,43 @@
         <Toggle v-model="draft.enabled" :disabled="saving" :aria-label="t('admin.resilience.settings.enabled')" data-testid="resilience-enabled" />
       </div>
 
-      <div v-for="section in sections" :key="section.key" class="flex items-start justify-between gap-4 border-t border-gray-100 pt-5 dark:border-dark-700">
-        <div>
-          <p class="font-medium text-gray-900 dark:text-white">{{ t(`admin.resilience.settings.sections.${section.key}`) }}</p>
-          <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t(`admin.resilience.settings.sections.${section.key}Hint`) }}</p>
-        </div>
-        <Toggle
-          :model-value="section.get(draft)"
-          :disabled="saving || !draft.enabled"
-          :aria-label="t(`admin.resilience.settings.sections.${section.key}`)"
-          :data-testid="`resilience-section-${section.key}`"
-          @update:model-value="(v: boolean) => draft && section.set(draft, v)"
-        />
-      </div>
-
-      <div class="grid gap-4 border-t border-gray-100 pt-5 sm:grid-cols-2 dark:border-dark-700">
-        <div v-for="field in numberFields" :key="field.key">
-          <label :for="`resilience-${field.key}`" class="input-label">{{ t(`admin.resilience.settings.fields.${field.key}`) }}</label>
-          <input
-            :id="`resilience-${field.key}`"
-            :value="field.get(draft)"
-            type="number"
-            :min="field.min"
-            :max="field.max"
-            step="1"
-            class="input"
-            :disabled="saving"
-            :data-testid="`resilience-field-${field.key}`"
-            @input="onNumber(field, ($event.target as HTMLInputElement).value)"
-          >
-        </div>
-        <div class="sm:col-span-2">
-          <label for="resilience-edges" class="input-label">{{ t('admin.resilience.settings.fields.edges') }}</label>
-          <input id="resilience-edges" v-model="edgesText" type="text" class="input" :disabled="saving" data-testid="resilience-field-edges">
-          <p class="input-hint">{{ t('admin.resilience.settings.fields.edgesHint') }}</p>
+      <div class="grid gap-3 border-t border-gray-100 pt-5 lg:grid-cols-2 dark:border-dark-700">
+        <div v-for="section in sections" :key="section.key" class="rounded-xl border border-gray-200 p-4 dark:border-dark-600" :data-testid="`resilience-card-${section.key}`">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="font-medium text-gray-900 dark:text-white">{{ t(`admin.resilience.settings.sections.${section.key}`) }}</p>
+              <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t(`admin.resilience.settings.sections.${section.key}Hint`) }}</p>
+            </div>
+            <Toggle
+              :model-value="section.get(draft)"
+              :disabled="saving || !draft.enabled"
+              :aria-label="t(`admin.resilience.settings.sections.${section.key}`)"
+              :data-testid="`resilience-section-${section.key}`"
+              @update:model-value="(v: boolean) => draft && section.set(draft, v)"
+            />
+          </div>
+          <div v-if="fieldsOf(section.key).length || section.key === 'keepalive'" class="mt-3 grid gap-3 sm:grid-cols-2">
+            <div v-for="field in fieldsOf(section.key)" :key="field.key">
+              <label :for="`resilience-${field.key}`" class="input-label">{{ t(`admin.resilience.settings.fields.${field.key}`) }}</label>
+              <input
+                :id="`resilience-${field.key}`"
+                :value="field.get(draft)"
+                type="number"
+                :min="field.min"
+                :max="field.max"
+                step="1"
+                class="input"
+                :disabled="saving"
+                :data-testid="`resilience-field-${field.key}`"
+                @input="onNumber(field, ($event.target as HTMLInputElement).value)"
+              >
+            </div>
+            <div v-if="section.key === 'keepalive'" class="sm:col-span-2">
+              <label for="resilience-edges" class="input-label">{{ t('admin.resilience.settings.fields.edges') }}</label>
+              <input id="resilience-edges" v-model="edgesText" type="text" class="input" :disabled="saving" data-testid="resilience-field-edges">
+              <p class="input-hint">{{ t('admin.resilience.settings.fields.edgesHint') }}</p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -97,6 +100,7 @@ interface SectionDef {
 
 interface NumberField {
   key: string
+  section: string
   min: number
   max: number
   get: (s: Settings) => number
@@ -128,16 +132,20 @@ const sections: SectionDef[] = [
 
 // Ranges mirror resilience.Settings.Validate; the server stays authoritative.
 const numberFields: NumberField[] = [
-  { key: 'maxAttempts', min: 1, max: 10, get: (s) => s.budget.max_attempts, set: (s, v) => { s.budget.max_attempts = v } },
-  { key: 'preOutputBudget', min: 60, max: 290, get: (s) => s.budget.pre_output_budget_seconds, set: (s, v) => { s.budget.pre_output_budget_seconds = v } },
-  { key: 'keepaliveDelay', min: 5, max: 60, get: (s) => s.keepalive.delay_seconds, set: (s, v) => { s.keepalive.delay_seconds = v } },
-  { key: 'keepaliveInterval', min: 5, max: 30, get: (s) => s.keepalive.interval_seconds, set: (s, v) => { s.keepalive.interval_seconds = v } },
-  { key: 'textStall', min: 30, max: 280, get: (s) => s.stall.text_stall_seconds, set: (s, v) => { s.stall.text_stall_seconds = v } },
-  { key: 'partialDrain', min: 1, max: 3600, get: (s) => s.disconnect.partial_drain_max_seconds, set: (s, v) => { s.disconnect.partial_drain_max_seconds = v } },
-  { key: 'abuseThreshold', min: 1, max: 100000, get: (s) => s.disconnect.abuse_guard.threshold_per_hour, set: (s, v) => { s.disconnect.abuse_guard.threshold_per_hour = v } },
-  { key: 'negativeCache', min: 1, max: 60, get: (s) => s.errors.negative_cache_seconds, set: (s, v) => { s.errors.negative_cache_seconds = v } },
-  { key: 'returnStable', min: 1, max: 86400, get: (s) => s.fallback_group.return_stable_seconds, set: (s, v) => { s.fallback_group.return_stable_seconds = v } }
+  { key: 'maxAttempts', section: 'budget', min: 1, max: 10, get: (s) => s.budget.max_attempts, set: (s, v) => { s.budget.max_attempts = v } },
+  { key: 'preOutputBudget', section: 'budget', min: 60, max: 290, get: (s) => s.budget.pre_output_budget_seconds, set: (s, v) => { s.budget.pre_output_budget_seconds = v } },
+  { key: 'keepaliveDelay', section: 'keepalive', min: 5, max: 60, get: (s) => s.keepalive.delay_seconds, set: (s, v) => { s.keepalive.delay_seconds = v } },
+  { key: 'keepaliveInterval', section: 'keepalive', min: 5, max: 30, get: (s) => s.keepalive.interval_seconds, set: (s, v) => { s.keepalive.interval_seconds = v } },
+  { key: 'textStall', section: 'stall', min: 30, max: 280, get: (s) => s.stall.text_stall_seconds, set: (s, v) => { s.stall.text_stall_seconds = v } },
+  { key: 'partialDrain', section: 'disconnect', min: 1, max: 3600, get: (s) => s.disconnect.partial_drain_max_seconds, set: (s, v) => { s.disconnect.partial_drain_max_seconds = v } },
+  { key: 'abuseThreshold', section: 'disconnect', min: 1, max: 100000, get: (s) => s.disconnect.abuse_guard.threshold_per_hour, set: (s, v) => { s.disconnect.abuse_guard.threshold_per_hour = v } },
+  { key: 'negativeCache', section: 'errors', min: 1, max: 60, get: (s) => s.errors.negative_cache_seconds, set: (s, v) => { s.errors.negative_cache_seconds = v } },
+  { key: 'returnStable', section: 'fallbackGroup', min: 1, max: 86400, get: (s) => s.fallback_group.return_stable_seconds, set: (s, v) => { s.fallback_group.return_stable_seconds = v } }
 ]
+
+function fieldsOf(section: string): NumberField[] {
+  return numberFields.filter((field) => field.section === section)
+}
 
 const dirty = computed(() => draft.value !== null && JSON.stringify(draft.value) !== baseline.value)
 

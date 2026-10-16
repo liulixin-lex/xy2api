@@ -2,10 +2,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import OpsResilienceCard from '../OpsResilienceCard.vue'
 
-const mocks = vi.hoisted(() => ({ stats: vi.fn(), list: vi.fn() }))
+const mocks = vi.hoisted(() => ({ stats: vi.fn(), list: vi.fn(), groups: vi.fn() }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, te: () => false }) }))
 vi.mock('@/utils/format', () => ({ formatNumber: (n: number) => String(n), formatDateTime: (d: string) => d, formatCostFixed: (n: number) => n.toFixed(6) }))
-vi.mock('@/api/admin', () => ({ adminAPI: { resilience: { stats: mocks.stats, listUndelivered: mocks.list } } }))
+vi.mock('@/api/admin', () => ({ adminAPI: { resilience: { stats: mocks.stats, listUndelivered: mocks.list }, groups: { getAll: mocks.groups } } }))
 
 function mountCard(refreshToken = 0) {
   return mount(OpsResilienceCard, { props: { refreshToken }, global: { stubs: { Select: true, OpsResilienceExplain: true } } })
@@ -14,6 +14,7 @@ function mountCard(refreshToken = 0) {
 describe('ops resilience card', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.groups.mockResolvedValue([{ id: 3, name: 'G-main' }])
     mocks.stats.mockResolvedValue({
       window_seconds: 3600,
       scope: 'instance',
@@ -62,5 +63,13 @@ describe('ops resilience card', () => {
     mocks.stats.mockRejectedValueOnce({ status: 500, message: 'stats down' })
     const w = mountCard(); await flushPromises()
     expect(w.text()).toContain('stats down')
+  })
+
+  it('names groups and hands the list to Explain', async () => {
+    const w = mountCard(); await flushPromises()
+    expect(mocks.groups).toHaveBeenCalledTimes(1)
+    expect(w.get('[data-testid="resilience-undelivered-table"]').text()).toContain('G-main')
+    expect(w.text()).toContain('#5')
+    expect(w.findComponent({ name: 'OpsResilienceExplain' }).props('groups')).toEqual([{ id: 3, name: 'G-main' }])
   })
 })

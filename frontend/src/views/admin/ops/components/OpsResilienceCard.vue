@@ -50,7 +50,7 @@
           <tbody>
             <tr v-for="row in counters" :key="rowKey(row)" class="border-b border-gray-100 text-gray-700 last:border-b-0 dark:border-dark-800 dark:text-gray-200">
               <td class="px-2 py-1.5">{{ metricLabel(row.name) }}</td>
-              <td class="px-2 py-1.5">{{ row.group_id ? `#${row.group_id}` : '-' }}</td>
+              <td class="px-2 py-1.5">{{ groupLabel(row.group_id) }}</td>
               <td class="px-2 py-1.5">{{ row.account_id ? `#${row.account_id}` : '-' }}</td>
               <td class="px-2 py-1.5">{{ row.label || '-' }}</td>
               <td class="px-2 py-1.5 text-right">{{ formatNumber(row.count) }}</td>
@@ -66,9 +66,9 @@
         <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.resilience.undelivered.hint') }}</p>
       </div>
       <div v-if="undeliveredPages > 1" class="flex items-center gap-2">
-        <button type="button" class="btn btn-secondary btn-sm" :disabled="loading || page <= 1" @click="goPage(page - 1)">{{ t('admin.ops.openaiTokenStats.prevPage') }}</button>
+        <button type="button" class="btn btn-secondary btn-sm" :disabled="loading || page <= 1" @click="goPage(page - 1)">{{ t('pagination.previous') }}</button>
         <span class="text-xs text-gray-500 dark:text-gray-400">{{ page }} / {{ undeliveredPages }}</span>
-        <button type="button" class="btn btn-secondary btn-sm" :disabled="loading || page >= undeliveredPages" @click="goPage(page + 1)">{{ t('admin.ops.openaiTokenStats.nextPage') }}</button>
+        <button type="button" class="btn btn-secondary btn-sm" :disabled="loading || page >= undeliveredPages" @click="goPage(page + 1)">{{ t('pagination.next') }}</button>
       </div>
     </div>
     <div v-if="undeliveredError" role="alert" class="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-900/20 dark:text-red-400">
@@ -100,7 +100,7 @@
             <td class="px-2 py-1.5">{{ formatSeconds(rec.duration_ms) }}</td>
             <td class="px-2 py-1.5">{{ rec.user_id ? `#${rec.user_id}` : '-' }}</td>
             <td class="px-2 py-1.5">{{ rec.api_key_id ? `#${rec.api_key_id}` : '-' }}</td>
-            <td class="px-2 py-1.5">{{ rec.group_id ? `#${rec.group_id}` : '-' }}</td>
+            <td class="px-2 py-1.5">{{ groupLabel(rec.group_id) }}</td>
             <td class="px-2 py-1.5">{{ rec.model || '-' }}</td>
             <td class="px-2 py-1.5">{{ rec.inbound_endpoint || '-' }}</td>
             <td class="px-2 py-1.5 text-right">{{ rec.estimated_upstream_cost > 0 ? formatCostFixed(rec.estimated_upstream_cost, 6) : '-' }}</td>
@@ -114,7 +114,7 @@
       </table>
     </div>
 
-    <OpsResilienceExplain class="mt-6" />
+    <OpsResilienceExplain v-if="groupsReady" class="mt-6" :groups="groups" />
   </section>
 </template>
 
@@ -151,6 +151,28 @@ const undeliveredError = ref('')
 const page = ref(1)
 
 const counters = computed<ResilienceMetricRow[]>(() => stats.value?.counters ?? [])
+
+// Group names for the tables and the Explain selector, loaded once. When
+// the list cannot be read, Explain loads it itself and reports the error.
+const groups = ref<{ id: number; name: string }[] | undefined>(undefined)
+const groupsReady = ref(false)
+const groupNames = computed(() => new Map((groups.value ?? []).map(g => [g.id, g.name])))
+
+function groupLabel(id: number | null | undefined): string {
+  if (!id) return '-'
+  return groupNames.value.get(id) ?? `#${id}`
+}
+
+async function loadGroups() {
+  try {
+    const list = await adminAPI.groups.getAll()
+    groups.value = list.map(g => ({ id: g.id, name: g.name }))
+  } catch {
+    groups.value = undefined
+  } finally {
+    groupsReady.value = true
+  }
+}
 
 const totals = computed(() => {
   const sum = new Map<string, number>()
@@ -227,5 +249,8 @@ async function goPage(next: number) {
 
 watch(windowValue, () => { void loadStats() })
 watch(() => props.refreshToken, () => { void loadAll() })
-onMounted(loadAll)
+onMounted(() => {
+  void loadGroups()
+  void loadAll()
+})
 </script>

@@ -32,9 +32,14 @@ import { adminAPI } from '@/api/admin'
 import type { ResilienceExplanation } from '@/api/admin/resilience'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
+// groups, when given, comes from the parent panel; otherwise it is loaded
+// here.
+const props = defineProps<{ groups?: { id: number; name: string }[] }>()
+
 const { t } = useI18n()
 
-const groups = ref<{ id: number; name: string }[]>([])
+const loadedGroups = ref<{ id: number; name: string }[]>([])
+const groups = computed(() => props.groups ?? loadedGroups.value)
 const groupId = ref<number | null>(null)
 const model = ref('')
 const session = ref('')
@@ -75,9 +80,10 @@ async function run() {
 }
 
 onMounted(async () => {
+  if (props.groups) return
   try {
     const list = await adminAPI.groups.getAll()
-    groups.value = list.map(g => ({ id: g.id, name: g.name }))
+    loadedGroups.value = list.map(g => ({ id: g.id, name: g.name }))
   } catch (cause) {
     error.value = extractApiErrorMessage(cause, t('admin.resilience.explain.groupsFailed'))
   }
