@@ -509,10 +509,15 @@ def pe3():
     rid = fault_last_id()
     second = stream_request(DIRECT, "/v1/responses", KEYS["G-web-search"], web_search_history_body())
     second_attempts = [r for r in fault_records_since(rid) if r["fault"] == "F29" and r["path"].endswith("/responses")]
-    check(first["status"] == 200 and "response.completed" in json.dumps(first["lines"]), "first request completes after the replay", checks)
-    check([r["outcome"] for r in first_attempts] == ["failed_in_stream", "completed"], f"rejected once, replayed once ({[r['outcome'] for r in first_attempts]})", checks)
+    first_outcomes = [r["outcome"] for r in first_attempts]
+    # The app remembers the account for six hours: an earlier run in the same
+    # process makes the first request declare the tool up front as well.
+    remembered = first_outcomes == ["completed"]
+    check(first["status"] == 200 and "response.completed" in json.dumps(first["lines"]), "first request completes", checks)
+    check(first_outcomes == ["failed_in_stream", "completed"] or remembered,
+          f"rejected once and replayed once, or already remembered ({first_outcomes})", checks)
     check(second["status"] == 200 and [r["outcome"] for r in second_attempts] == ["completed"], "next request declares web_search up front", checks)
-    return {"first": first, "second": second}, checks
+    return {"first": first, "second": second, "remembered_before": remembered}, checks
 
 
 @scenario("PE-7", "Anthropic in-stream rate_limit_error before output: switch and succeed; a single account answers 429 with Retry-After")
