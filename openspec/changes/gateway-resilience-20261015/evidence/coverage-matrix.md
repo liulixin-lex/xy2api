@@ -56,6 +56,7 @@ The Explain part of “Explainability and configuration” has no scenario of it
 |---|---|---|
 | Four attempts at most | `TestBudgetFourAttemptsAtMost` | BUD-1 |
 | Deadline reached before output | `TestBudgetDeadlineEndsBeforeNextAttempt` | FO-1 |
+| A slot wait ends with the budget | `TestSlotWaitEndsWithThePreOutputBudget` | — |
 | Images are exempt from the deadline | `TestBudgetImagesHaveNoDeadline` | IMG-1 |
 | Insufficient balance is not retried on the same account | `TestBudgetBalanceNotRetriedOnSameAccount` | — |
 | Web search history rejected by an API-key relay | `TestForwardWebSearchHistoryRejectionReplaysAndRemembersAccount`, `TestForwardWebSearchHistoryReplayFailsOnlyOnce`, `TestForwardWebSearchHistoryRejectionWithoutBudgetIsNotReplayed`, `TestForwardWebSearchReplayNeedsUndeclaredHistory`, `TestWebSearchHistoryRejectedKeepsReasonAndEndsTheTurn` | PE-3 |
@@ -87,6 +88,7 @@ The Explain part of “Explainability and configuration” has no scenario of it
 | Scenario | Unit tests | Staging |
 |---|---|---|
 | Heartbeats only | `TestDeliveryWriterExcludesHeartbeats`, `TestUndeliveredRequestIsNotBilled` | DC-1 |
+| Queued and pinged, then abandoned | `TestAccountSlotPingsAreNotDelivery`, `TestUserMessageQueuePingsAreNotDelivery` | DC-4 |
 | CDN cuts a slow request | `TestUndeliveredDisconnectCancelsUpstream` | DC-1 |
 | XY-image reconciliation stays correct | — | XY-image lab (tasks 12.8) |
 | Long generation abandoned midway | `TestPartialDisconnectDrainsUpstream` | DC-4 |
@@ -100,7 +102,10 @@ The Explain part of “Explainability and configuration” has no scenario of it
 | Pricing restriction keeps 503 | `TestConfigErrorRetryHeaders` | ERR-2 |
 | Codex backs off instead of hammering | `TestNoAccountResponseCarriesRetryAfter`, `TestExhaustedBadGatewayCapsUpstreamRetryAfter`, `TestEdgeRequestsGet503InsteadOf502` | ERR-1, CF-3 |
 | Burst of retries | `TestNegativeCacheBurstOfRetries`, `TestNegativeCacheHitIsRecognisedAndScopedByVariant` | — |
+| Sticky-only accounts keep serving bound sessions | `TestStickyOnlyAccountKeepsServingBoundSessions`, `TestNegativeCacheOnlyForGroupLevelNoAccount` | — (no OAuth RPM account on staging) |
+| A forced platform does not answer the group's other routes | `TestNegativeCacheKeepsAForcedPlatformApart` | — |
 | Retry storm on a single-account group | `TestFastFailRetryStormOnSingleAccountGroup`, `TestFastFailIgnoresCappedTurns`, `TestFastFailReplaysOnlyTheTrippingModel` | ERR-4 |
+| One session's 503s do not stop the key | `TestFastFailCountsOnlyGroupLevelNoAccount` | — |
 | Codex stops after five requests | `TestTurnCapEndsCodexTurn`, `TestTurnCapCountsConsecutiveFailures`, `TestRequestStateTurnKey` (requests without a session are not counted) | ERR-3, C-codex-all-fail |
 | In-stream failures end the turn | `TestTurnCapNoAccountAndCommittedStream` | C-codex-busy-stream |
 | Recovery is not delayed | `TestTurnCapResetOnlyOnRealSuccess` | — |
