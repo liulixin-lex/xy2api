@@ -68,6 +68,13 @@ func ParseMetadataUserID(raw string) *ParsedUserID {
 	}
 }
 
+// isPlaceholderSessionID reports whether a session id carries no session:
+// some clients send an all-zero UUID on every request, which would put every
+// request of a group on one sticky binding.
+func isPlaceholderSessionID(id string) bool {
+	return strings.Trim(id, "0-") == ""
+}
+
 // FormatMetadataUserID builds a metadata.user_id string in the format
 // appropriate for the given CLI version. Components are the rewritten values
 // (not necessarily the originals).

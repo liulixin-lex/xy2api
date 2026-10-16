@@ -477,7 +477,8 @@
     "xy-resilience-disconnect-hook",
     "xy-resilience-errors-hook",
     "xy-resilience-fallback-hook",
-    "xy-index-nonce-no-304"
+    "xy-index-nonce-no-304",
+    "xy-placeholder-session-id"
   ],
   "custom_patch_tests": [
     {
@@ -604,6 +605,11 @@
       "id": "xy-index-nonce-no-304",
       "path": "backend/internal/web/embed_test.go",
       "literal": "index_html_is_never_not_modified"
+    },
+    {
+      "id": "xy-placeholder-session-id",
+      "path": "backend/internal/service/generate_session_hash_test.go",
+      "literal": "TestGenerateSessionHash_PlaceholderSessionIDIsIgnored"
     }
   ]
 }

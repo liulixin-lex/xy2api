@@ -646,3 +646,22 @@ func TestGenerateSessionHash_GeminiEndToEnd(t *testing.T) {
 	h3 := svc.GenerateSessionHash(parsed3)
 	require.NotEqual(t, h, h3, "different user with same Gemini request should get different hash")
 }
+
+func TestGenerateSessionHash_PlaceholderSessionIDIsIgnored(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "claude-cli/2.1.80", APIKeyID: 7}
+	const device = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+	zero := `{"device_id":"` + device + `","account_uuid":"","session_id":"00000000-0000-0000-0000-000000000000"}`
+	real := `{"device_id":"` + device + `","account_uuid":"","session_id":"123e4567-e89b-12d3-a456-426614174000"}`
+	msgs := func(text string) []any { return []any{map[string]any{"role": "user", "content": text}} }
+
+	require.Equal(t, "123e4567-e89b-12d3-a456-426614174000",
+		svc.GenerateSessionHash(mustParseSessionHashRequest(t, anthropicSessionBody(nil, msgs("a"), real), ctx)))
+
+	first := svc.GenerateSessionHash(mustParseSessionHashRequest(t, anthropicSessionBody(nil, msgs("first chat"), zero), ctx))
+	second := svc.GenerateSessionHash(mustParseSessionHashRequest(t, anthropicSessionBody(nil, msgs("second chat"), zero), ctx))
+	require.NotEqual(t, "00000000-0000-0000-0000-000000000000", first)
+	require.NotEqual(t, first, second, "an all-zero session id falls back to the content hash")
+	require.True(t, isPlaceholderSessionID("00000000-0000-0000-0000-000000000000"))
+	require.False(t, isPlaceholderSessionID("00000000-0000-0000-0000-000000000001"))
+}

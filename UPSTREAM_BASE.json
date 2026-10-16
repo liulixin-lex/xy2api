@@ -178,7 +178,8 @@
     "xy-resilience-disconnect-hook",
     "xy-resilience-errors-hook",
     "xy-resilience-fallback-hook",
-    "xy-index-nonce-no-304"
+    "xy-index-nonce-no-304",
+    "xy-placeholder-session-id"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/92"
 }

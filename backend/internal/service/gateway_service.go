@@ -921,7 +921,7 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	// 1. 最高优先级：从 metadata.user_id 提取 session_xxx
 	if parsed.MetadataUserID != "" {
 		uid := ParseMetadataUserID(parsed.MetadataUserID)
-		if uid != nil && uid.SessionID != "" {
+		if uid != nil && uid.SessionID != "" && !isPlaceholderSessionID(uid.SessionID) {
 			slog.Info("sticky.hash_source",
 				"source", "metadata_user_id",
 				"session_id", uid.SessionID,
