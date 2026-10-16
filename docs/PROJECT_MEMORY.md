@@ -4,7 +4,7 @@
 
 ## 当前交接状态
 
-### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-16T08:35Z；本地分支未推送，生产未改）
+### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-16T08:55Z；本地分支未推送，生产未改）
 
 **背景**
 
@@ -41,13 +41,14 @@
 **未完成**
 
 1. 生产报错优化（进行中）：报告 `xy2api-artifacts/.../production/errors-3h-20261016T0753Z.md`（04:53–07:53Z，推理请求 14,866，失败 1,649 即 11.1%）。代码项：
-   - R1（P0，主 Agent）：Grok 单号分组一次 429（正文“余额不足”）被锁约 28.6 分钟、整组 429，761 次（窗口前约 2,660 次）。Grok 路径接入失败分类与余额状态机，Grok 进程内阻断对罚则可见，长限流的单号组允许半开探测。
+   - R1（P0，主 Agent，**已完成** `29f16587c`）：Grok 单号分组一次 429（正文“余额不足”）被锁约 28.6 分钟、整组 429，761 次（窗口前约 2,660 次）。API Key 类、非池模式 Grok 账号的余额字样错误先进余额状态机（30 秒内有成功为弱信号 SUSPECT、软档可末位兜底；否则 EXHAUSTED，60 秒起探测），不再按中转重置头装限流；OAuth、池模式与非余额错误不变。遗留（P2，未做）：Grok 进程内阻断（模型配额、团队限流）对 `resiliencePenaltyOf` 不可见。
+   - P2 已完成（主 Agent）：全 0 会话 ID 视为缺失（`1a3cf92f5`，具名补丁 `xy-placeholder-session-id`）；分组白名单 404 列出可用模型（`8d221e245`，`xy-allowlist-404-hint`，248 次）；上传中断的 400 按 499 记录（`fa5fe67f6`，R10b）；Explain 给出模型被白名单或渠道定价拒绝（`57908ec8c`，R5 代码侧）。
    - R4+R7（P1，子 Agent A，worktree）：内容安全 403（`request_check_blocked`）归客户端错误、不计 strike、不同号重试、对客户端返回 400 与原文；Anthropic 流内 `rate_limit_error` 等按类型映射状态，不再默认 403→502。
    - R2（P1，子 Agent B，worktree）：已输出后的流内失败计入会话失败，并对账号做 60 秒内 3 次的阈值软冷却（池模式不罚）。
    - R3（P1，子 Agent C，worktree）：API Key 中转遇 “response protection is unavailable” 且输入含 `web_search_call` 时同号补 web_search 声明重试一次，并记住该账号。
    - 需管理员做的配置（不改代码）：分组 53 的 gpt-5.5 补渠道定价或移出白名单（159 次）；单号分组补号或配无号兜底分组；因余额 403 置错的账号充值后复检；加大 Caddy 日志保留。安全：settings 表中 `openai_codex_ticket_harvest_proxy_url` 含明文代理凭据，建议轮换。
    - 文档同步本轮修复已合入（`446147d25`、`a736bf898`）。
-2. 内存诊断：旧浸泡显示匿名内存约 +5 MiB/小时；测试服务器正跑带 pprof 的诊断镜像（`diag-0efbafc53`，pprof 文件只在服务器源码副本），每 20 分钟一份堆 profile，待 2–4 小时后差分定位；若为泄漏须修复。
+2. 内存诊断（**结论：无泄漏**，08:50Z）：诊断镜像 `diag-0efbafc53` 负载 80 分钟内堆在用 53.4→59.0 MB（增量为连接 bufio、WS 状态绑定与日志池，均有界），goroutine 270–315 平稳，匿名内存预热后稳定在 92–94 MiB（前段中位 81、后段 93，低于判据 1.2×+16）。旧浸泡的增长是预热期。重建最终候选时停掉诊断负载并删除诊断镜像与 `diag-heap.sh`。
 3. 重建最终候选 → 测试服务器场景、客户端、24 小时浸泡（`final-run.sh` 证据目录按镜像 tag 命名）→ `metrics_report.py` 指标报告 → 定稿私有 `staging/STAGING_REPORT.md`。
 4. 推送、PR（CI 全绿，含新门禁）→ 0.4.0-rc.1 → RC 制品复跑关键子集 → 0.4.0；之后 XY-image 0.0.17（先交接留言并经用户确认）。
 5. 生产部署（单独授权，按 runbook）。
@@ -55,7 +56,7 @@
 
 **卡点与风险**
 
-- 内存增长原因未定；在定位前不启动最终浸泡。
+- 三个子 Agent（worktree，基于 `18a1c4198`）改动文件有重叠（`resilience_failover.go`、`openai_gateway_passthrough.go`、`openai_gateway_response_handling.go`、`openai_gateway_handler.go`），合并时逐个 cherry-pick 并解决冲突，之后全量验证。
 - 本机磁盘：`/tmp/xy2-toolchain/gocache` 两次涨到 30G 以上写满磁盘，长时间测试前后执行 `go clean -cache`。
 
 **关键位置**
