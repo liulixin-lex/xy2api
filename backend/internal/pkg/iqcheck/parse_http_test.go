@@ -181,6 +181,7 @@ func TestHTTPFinalMessageBoundaries(t *testing.T) {
 		{"one message split JSON", `[{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"{\"answer\":2"},{"type":"output_text","text":"1}"}]}]`, "smart", "correct_answer", `{"answer":21}`},
 		{"independent legacy messages", `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"2"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"1"}]}]`, "unknown", "conflicting_final_response", ""},
 		{"empty message before answer", `[{"type":"message","role":"assistant","phase":"final_answer","content":[]},{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"21"}]}]`, "smart", "correct_answer", "21"},
+		{"blank placeholder before answer", `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":" "}]},{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"21"}]}]`, "smart", "correct_answer", "21"},
 	} {
 		for _, media := range []string{"application/json", "text/event-stream"} {
 			t.Run(tc.name+"/"+media, func(t *testing.T) {

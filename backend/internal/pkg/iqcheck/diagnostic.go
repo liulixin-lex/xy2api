@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const ParserVersion = "iq-response-v5"
+const ParserVersion = "iq-response-v6"
 
 // Diagnostic never contains response text, reasoning, credentials or raw errors.
 // Fixed field lengths keep its JSON representation below the database's 4 KiB cap.
@@ -95,7 +95,7 @@ func (d *Diagnostic) Bounded() *Diagnostic {
 func (d *Diagnostic) ignoreItem(kind string) {
 	d.IgnoredItems++
 	switch kind {
-	case "reasoning", "commentary", "non_assistant", "function_call", "message":
+	case "reasoning", "commentary", "non_assistant", "function_call", "message", "blank":
 	default:
 		kind = "other"
 	}

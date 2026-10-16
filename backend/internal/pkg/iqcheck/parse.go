@@ -398,13 +398,20 @@ func (p *streamParser) terminal(raw []byte) error {
 				_, _ = message.WriteString(part.Text)
 			}
 		}
-		if message.Len() > 0 {
-			// Content parts share a message; independent final messages do not.
-			if answer != "" {
-				return failure("conflicting_final_response")
+		text := message.String()
+		if strings.TrimSpace(text) == "" {
+			// Relays may emit whitespace-only placeholders before the real answer;
+			// they carry no answer and never compete with the final message.
+			if text != "" {
+				p.d.ignoreItem("blank")
 			}
-			answer = message.String()
+			continue
 		}
+		// Content parts share a message; independent final messages do not.
+		if answer != "" {
+			return failure("conflicting_final_response")
+		}
+		answer = text
 	}
 	if len(answer) > MaxAnswerBytes {
 		p.d.LimitKind, p.d.LimitBytes = "answer_bytes", MaxAnswerBytes
