@@ -83,7 +83,7 @@ func TestRunCheckForModel_GrokResponsesReplaceAndErrors(t *testing.T) {
 func TestGrokResponsesMonitorUpdateRetainsMode(t *testing.T) {
 	for _, includeProvider := range []bool{false, true} {
 		t.Run(map[bool]string{false: "partial update", true: "same provider"}[includeProvider], func(t *testing.T) {
-			monitor := &ChannelMonitor{Provider: MonitorProviderGrok, APIMode: MonitorAPIModeResponses, PrimaryModel: "grok-4.6", IntervalSeconds: 60}
+			monitor := &ChannelMonitor{Provider: MonitorProviderGrok, APIMode: MonitorAPIModeResponses, Endpoint: "https://gateway.example", PrimaryModel: "grok-4.6", IntervalSeconds: 60}
 			name := "renamed"
 			params := ChannelMonitorUpdateParams{Name: &name}
 			if includeProvider {
