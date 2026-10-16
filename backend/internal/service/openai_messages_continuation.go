@@ -295,6 +295,32 @@ func (s *OpenAIGatewayService) deleteOpenAICompatSessionResponseID(_ context.Con
 	s.openaiCompatSessionResponses.Store(key, binding)
 }
 
+// enableOpenAICompatSessionContinuation undoes a continuation switch-off of
+// the session on the account.
+func (s *OpenAIGatewayService) enableOpenAICompatSessionContinuation(_ context.Context, c *gin.Context, account *Account, promptCacheKey string) {
+	if s == nil {
+		return
+	}
+	key := openAICompatSessionResponseKey(c, account, promptCacheKey)
+	if key == "" {
+		return
+	}
+	raw, ok := s.openaiCompatSessionResponses.Load(key)
+	if !ok {
+		return
+	}
+	binding, ok := raw.(openAICompatSessionResponseBinding)
+	if !ok || !binding.ContinuationDisabled {
+		return
+	}
+	binding.ContinuationDisabled = false
+	if strings.TrimSpace(binding.TurnState) == "" && strings.TrimSpace(binding.ResponseID) == "" {
+		s.openaiCompatSessionResponses.Delete(key)
+		return
+	}
+	s.openaiCompatSessionResponses.Store(key, binding)
+}
+
 func (s *OpenAIGatewayService) disableOpenAICompatSessionContinuation(_ context.Context, c *gin.Context, account *Account, promptCacheKey string) {
 	if s == nil {
 		return

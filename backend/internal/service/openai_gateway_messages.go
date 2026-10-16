@@ -465,10 +465,13 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			}
 			return s.ForwardAsAnthropic(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel)
 		}
-		if previousResponseID != "" && (isOpenAICompatPreviousResponseNotFound(resp.StatusCode, upstreamMsg, respBody) || isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody) ||
-			isOpenAICompatContinuationRejected(resp.StatusCode, respBody)) {
-			if isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody) ||
-				!isOpenAICompatPreviousResponseNotFound(resp.StatusCode, upstreamMsg, respBody) {
+		notFound := isOpenAICompatPreviousResponseNotFound(resp.StatusCode, upstreamMsg, respBody)
+		unsupported := isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody)
+		// xy2api resilience (design §9.8): a vague 4xx to a chained request may
+		// be a pooled relay that cannot find the stored response.
+		rejected := !notFound && !unsupported && isOpenAICompatContinuationRejected(resp.StatusCode, respBody)
+		if previousResponseID != "" && (notFound || unsupported || rejected) {
+			if unsupported || rejected {
 				s.disableOpenAICompatSessionContinuation(ctx, c, account, promptCacheKey)
 			} else {
 				s.deleteOpenAICompatSessionResponseID(ctx, c, account, promptCacheKey)
@@ -478,7 +481,13 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				zap.String("previous_response_id", truncateOpenAIWSLogValue(previousResponseID, openAIWSIDValueMaxLen)),
 				zap.String("upstream_model", upstreamModel),
 			)
-			return s.ForwardAsAnthropic(ctx, c, account, body, promptCacheKey, defaultMappedModel)
+			replayed, replayErr := s.ForwardAsAnthropic(ctx, c, account, body, promptCacheKey, defaultMappedModel)
+			if rejected && replayErr != nil {
+				// The full replay failed as well, so the request itself was at
+				// fault, not the continuation: later turns may chain again.
+				s.enableOpenAICompatSessionContinuation(ctx, c, account, promptCacheKey)
+			}
+			return replayed, replayErr
 		}
 		// Grok account-switched history often fails decrypt; strip encrypted
 		// reasoning once at the client-body level so failover accounts can accept

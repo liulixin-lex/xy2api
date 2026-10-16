@@ -418,7 +418,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_messages.go",
-      "value": "isOpenAICompatContinuationRejected(resp.StatusCode, respBody)"
+      "value": "rejected := !notFound && !unsupported && isOpenAICompatContinuationRejected(resp.StatusCode, respBody)"
     },
     {
       "path": "backend/internal/service/openai_messages_continuation.go",

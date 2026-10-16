@@ -96,3 +96,31 @@ func TestOpenAICompatSessionBindingsAreSwept(t *testing.T) {
 	require.False(t, gone, "a session that never returns does not stay in memory")
 	require.True(t, live)
 }
+
+func TestForwardAsAnthropic_ContinuationStaysOnWhenTheReplayFailsToo(t *testing.T) {
+	t.Parallel()
+	clientError := func() *http.Response {
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"Unsupported value: temperature","type":"invalid_request_error"}}`)),
+		}
+	}
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{clientError(), clientError()}}
+	svc := &OpenAIGatewayService{
+		httpUpstream: upstream,
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+	}
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://relay.example/v1"}}
+	svc.bindOpenAICompatSessionResponseID(context.Background(), nil, account, "stable-cache-key", "resp_prev")
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+
+	_, _ = svc.ForwardAsAnthropic(context.Background(), c, account, body, "stable-cache-key", "gpt-6-astra")
+	require.Len(t, upstream.requests, 2, "one replay, no loop")
+	require.False(t, svc.isOpenAICompatSessionContinuationDisabled(context.Background(), c, account, "stable-cache-key"),
+		"the replay failed the same way, so continuation was not the cause")
+}
