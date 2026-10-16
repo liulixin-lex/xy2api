@@ -206,7 +206,7 @@ func (h *ShareSchedulingHandler) Report(c *gin.Context) {
 	window := time.Hour
 	if raw := strings.TrimSpace(c.Query("window")); raw != "" {
 		parsed, err := time.ParseDuration(raw)
-		if err != nil || parsed <= 0 || parsed > 24*time.Hour {
+		if err != nil || parsed < time.Minute || parsed > 24*time.Hour {
 			response.BadRequest(c, "window must be a duration between 1m and 24h")
 			return
 		}
