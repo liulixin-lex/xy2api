@@ -4,7 +4,7 @@
 
 ## 当前交接状态
 
-### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-16T08:55Z；本地分支未推送，生产未改）
+### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-16T09:35Z；本地分支未推送，生产未改）
 
 **背景**
 
@@ -43,9 +43,11 @@
 1. 生产报错优化（进行中）：报告 `xy2api-artifacts/.../production/errors-3h-20261016T0753Z.md`（04:53–07:53Z，推理请求 14,866，失败 1,649 即 11.1%）。代码项：
    - R1（P0，主 Agent，**已完成** `29f16587c`）：Grok 单号分组一次 429（正文“余额不足”）被锁约 28.6 分钟、整组 429，761 次（窗口前约 2,660 次）。API Key 类、非池模式 Grok 账号的余额字样错误先进余额状态机（30 秒内有成功为弱信号 SUSPECT、软档可末位兜底；否则 EXHAUSTED，60 秒起探测），不再按中转重置头装限流；OAuth、池模式与非余额错误不变。遗留（P2，未做）：Grok 进程内阻断（模型配额、团队限流）对 `resiliencePenaltyOf` 不可见。
    - P2 已完成（主 Agent）：全 0 会话 ID 视为缺失（`1a3cf92f5`，具名补丁 `xy-placeholder-session-id`）；分组白名单 404 列出可用模型（`8d221e245`，`xy-allowlist-404-hint`，248 次）；上传中断的 400 按 499 记录（`fa5fe67f6`，R10b）；Explain 给出模型被白名单或渠道定价拒绝（`57908ec8c`，R5 代码侧）。
-   - R4+R7（P1，子 Agent A，worktree）：内容安全 403（`request_check_blocked`）归客户端错误、不计 strike、不同号重试、对客户端返回 400 与原文；Anthropic 流内 `rate_limit_error` 等按类型映射状态，不再默认 403→502。
-   - R2（P1，子 Agent B，worktree）：已输出后的流内失败计入会话失败，并对账号做 60 秒内 3 次的阈值软冷却（池模式不罚）。
-   - R3（P1，子 Agent C，worktree）：API Key 中转遇 “response protection is unavailable” 且输入含 `web_search_call` 时同号补 web_search 声明重试一次，并记住该账号。
+   - R4+R7（子 Agent A，**已合入** `4fb0883e9`、`44f0cd07c`）：内容安全拒绝归 `CLIENT_ERROR`（原因 `content_policy`）、不计 strike、不重试不换号、客户端 400 `content_policy_violation` 带脱敏原文；Anthropic 流内 `rate_limit_error` → 429（可换号、带 Retry-After），`overloaded_error` → 529，`api_error` → 502。
+   - R2（子 Agent B，**已合入** `7973c8674`、`98c3bf2ed`）：已输出后的失败（失败事件、读错误、无终止事件）每次尝试上报一次：会话按 TRANSIENT 计数，账号 60 秒内 3 次软冷却 `transient:POST_OUTPUT`（池模式除外）；停滞也计入会话失败。新指标 `post_output_failure`。
+   - R3（子 Agent C，**已合入** `34e5ddb2f`）：API Key 中转在输出前以 “response protection is unavailable” 拒绝含 `web_search_call` 且未声明的请求时，同号补声明重放一次（计预算），成功后账号记 6 小时；仍失败则 502 带原因、不换号、计会话失败与回合封顶。
+   - 三个 Agent 的提交均无冲突 cherry-pick；文档（design §2/§13/§18、tasks、specs、coverage-matrix、`GATEWAY_RESILIENCE.md`）已同步；测试服务器新场景 PE-1/2/3/4/7 与故障 F26/F27/F29、BAL `reset`。
+   - 遗留 P2 见 tasks“生产报错优化”末项（Grok 进程内阻断可见性、WebSocket 路径、Gemini 等流未接入已输出后失败）。
    - 需管理员做的配置（不改代码）：分组 53 的 gpt-5.5 补渠道定价或移出白名单（159 次）；单号分组补号或配无号兜底分组；因余额 403 置错的账号充值后复检；加大 Caddy 日志保留。安全：settings 表中 `openai_codex_ticket_harvest_proxy_url` 含明文代理凭据，建议轮换。
    - 文档同步本轮修复已合入（`446147d25`、`a736bf898`）。
 2. 内存诊断（**结论：无泄漏**，08:50Z）：诊断镜像 `diag-0efbafc53` 负载 80 分钟内堆在用 53.4→59.0 MB（增量为连接 bufio、WS 状态绑定与日志池，均有界），goroutine 270–315 平稳，匿名内存预热后稳定在 92–94 MiB（前段中位 81、后段 93，低于判据 1.2×+16）。旧浸泡的增长是预热期。重建最终候选时停掉诊断负载并删除诊断镜像与 `diag-heap.sh`。
@@ -56,7 +58,8 @@
 
 **卡点与风险**
 
-- 三个子 Agent（worktree，基于 `18a1c4198`）改动文件有重叠（`resilience_failover.go`、`openai_gateway_passthrough.go`、`openai_gateway_response_handling.go`、`openai_gateway_handler.go`），合并时逐个 cherry-pick 并解决冲突，之后全量验证。
+- 合并后全量验证进行中（`/tmp/xy2-verify2.sh`，输出 `/tmp/xy2-verify2.out`）。待做小修：已输出后失败的 200 应答不应重置失败回合计数（在 `noteResiliencePostOutputFailure` 标记 `MarkTurnFailed`）。
+- 分支全部提交的作者为本机缺省身份 `Managed via Tart <admin@browser-mac-01.local>`（未配置 git 身份）；推送前请用户决定是否改写为其 GitHub noreply 身份。
 - 本机磁盘：`/tmp/xy2-toolchain/gocache` 两次涨到 30G 以上写满磁盘，长时间测试前后执行 `go clean -cache`。
 
 **关键位置**
