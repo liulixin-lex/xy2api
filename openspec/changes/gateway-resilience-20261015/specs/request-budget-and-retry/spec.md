@@ -26,7 +26,7 @@ Every retry path MUST draw from this budget: OpenAI, Anthropic and Gemini handle
 
 ### Requirement: Same-account retries are rare and bounded
 
-Same-account retries MUST only occur for `CAPACITY_SHED` outcomes and for status codes configured on pool-mode accounts, and at most `budget.same_account_retry_max` (default 1) times per account per request. Account-level outcomes MUST switch accounts without a same-account retry. Account-level outcomes are:
+Same-account retries MUST only occur for `CAPACITY_SHED` outcomes, for status codes configured on pool-mode accounts and for the single web_search declaration replay below, and at most `budget.same_account_retry_max` (default 1) times per account per request. Account-level outcomes MUST switch accounts without a same-account retry. Account-level outcomes are:
 - `BALANCE`, `AUTH` and long rate limits;
 - 504 and 524;
 - any failure whose attempt took 60 s or longer.
@@ -34,6 +34,11 @@ Same-account retries MUST only occur for `CAPACITY_SHED` outcomes and for status
 #### Scenario: Insufficient balance is not retried on the same account
 - **WHEN** a pool-mode account returns 403 `insufficient balance`
 - **THEN** the gateway switches to another account without retrying the same account.
+
+#### Scenario: Web search history rejected by an API-key relay
+- **WHEN** an OpenAI API-key account rejects a request before any output with "response protection is unavailable" and the request input replays `web_search_call` items without declaring web_search
+- **THEN** the request is replayed once on the same account with the web_search declaration, if the budget allows another attempt
+- **AND** after a successful replay the account gets the declaration up front for six hours; when the replay fails too, the request ends on that account with 502 and the reason, the account is not penalised and the session counts one failure.
 
 ### Requirement: Gemini in-place retries
 

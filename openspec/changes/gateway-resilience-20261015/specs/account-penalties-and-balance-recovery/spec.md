@@ -58,6 +58,11 @@ Balance failures MUST NOT set `status=error`. Each API-key account MUST carry a 
 - **THEN** its balance state becomes `EXHAUSTED`, it is excluded from scheduling and its `status` stays `active`
 - **AND** an administrator notification is emitted.
 
+#### Scenario: Grok relay balance wording does not install a rate limit
+- **WHEN** an API-key Grok account outside pool mode answers 429 "insufficient balance" together with an exhausted request window in its rate-limit headers
+- **THEN** the account enters the balance state machine (`SUSPECT` after a success within 30 s, otherwise `EXHAUSTED`) and no rate limit is set from the headers
+- **AND** OAuth Grok accounts, pool-mode accounts and 429s without balance wording keep the Grok rate-limit handling.
+
 #### Scenario: Automatic recovery after top-up
 - **WHEN** the next scheduled probe of an `EXHAUSTED` account reports a positive balance
 - **THEN** the account enters `RECOVERING`, accepts at most one concurrent request and returns to `OK` after three successful requests.

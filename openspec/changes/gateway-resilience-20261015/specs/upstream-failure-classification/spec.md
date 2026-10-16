@@ -48,6 +48,16 @@ Each category MUST map to a fixed policy:
 - **WHEN** an attempt fails with a context-length error
 - **THEN** no other account is tried and the session binding is untouched.
 
+#### Scenario: An upstream content-safety refusal is the request's fault
+- **WHEN** an upstream answers 403 with code `request_check_blocked` ("Request rejected by preflight safety checks"), or another content-safety code, or a 400/403/451 whose text names a safety check and not the account
+- **THEN** the attempt is `CLIENT_ERROR` with reason `content_policy`, the account takes no 403 strike or cooldown, no same-account retry (pool mode included) and no switch happen
+- **AND** the client receives HTTP 400 `invalid_request_error` with code `content_policy_violation` and the redacted upstream text.
+
+#### Scenario: Anthropic in-stream errors keep the status of their type
+- **WHEN** an Anthropic relay sends an in-stream `rate_limit_error` before any output
+- **THEN** the attempt is `RATE_LIMIT`: the account gets the soft 429 cooldown and the request switches accounts
+- **AND** when no account is left the client receives 429 with `Retry-After` instead of 502; `overloaded_error` maps to 529 and `api_error` to 502.
+
 ### Requirement: Platform user balance is not an upstream failure
 
 Errors produced by the gateway's own billing checks (user balance, subscription quota, in-flight reservation) MUST NOT be classified as upstream failures and MUST NOT affect any account state.
