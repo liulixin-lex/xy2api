@@ -71,7 +71,6 @@ export default {
       search: '搜索账号名称或 ID',
       columns: {
         account: '账号',
-        health: '当前状态',
         tier: '层级',
         weight: '权重',
         drain: '排空',
@@ -81,7 +80,6 @@ export default {
       },
       healthy: '可调度',
       recoverAt: '预计 {time} 恢复',
-      configured: '已配置',
       usingDefault: '默认值',
       reset: '恢复默认',
       resetNamed: '将 {name} 恢复为默认值',

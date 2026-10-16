@@ -4,26 +4,58 @@
 
 ## 当前交接状态
 
-### 网关韧性 0.4.0（2026-10-16T02:30Z，最终候选 `d0b7e7309` 已在测试服务器复验通过，24 小时浸泡进行中；未推送、未改生产）
+### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-16T08:00Z；本地分支未推送，生产未改）
 
-- 方案：`openspec/changes/gateway-resilience-20261015/`，含 proposal、design、tasks、runbook、staging-validation、xy-image-appendix、8 个 spec（42 条需求、65 个场景）与 `evidence/` 两份证据。开发在本机分支 `feat/gateway-resilience-20261015`（基于 origin/main `f8fec15a2`，未推送），进度见“进行中的工作”与 tasks.md 勾选。
-- 目标：xy2api 0.4.0（先 RC）加 XY-image 0.0.17；访谈定稿的决策 D1–D33 见 proposal。不做灰度，开发后在测试服务器完整验证，全部闭环再提 PR、发版。
-- 生产分析：完整报告 `docs/PROD_UX_ANALYSIS_20261015.md`（被 `docs/*` 忽略，不入库）；去标识摘要见方案 `evidence/production-analysis.md`。
-- 仓库外产物（本机仓库同级目录 `xy2api-artifacts/gateway-resilience-20261015/`）：
-  - `research/`：三份完整调研报告，含第三方源码引用，部分来源无许可证，不入库；
-  - `production/`：完整分析报告副本；
-  - `private/HOSTS.md`：生产主机与测试服务器的地址、容器、路径与共存服务清单，不含凭据。
-- 本仓库公开：主机地址、宿主机路径与内网网段只写私有清单，入库文档只用代称；证据只放聚合数字。
-- 生产现状：0.3.0（00:46Z 切换流量，份额调度未启用）。用户已把 ESA 回源超时调为 300s（约 06:40Z）、429 冷却调为 45s（07:05Z）、过载冷却调为 2 分钟。
-- 下一步（用户已于 2026-10-15T11:30Z 授权执行到 PR 与发版；生产部署仍需单独授权）：
-  1. 等 24 小时浸泡（证据目录 `soak-d0b7e7309`，2026-10-16T02:22Z 启动，约 2026-10-17T02:33Z 结束并自动检查；测试服务器驱动脚本 `final-run.sh`）；用 `tools/gateway-resilience/metrics_report.py` 对照生产 0.3.0 基线出指标报告（基线文件在仓库外 `metrics/`）；最终候选的场景 37/37、客户端 16/16、实验室 181/181 已完成；
-  2. 定稿私有目录 `staging/STAGING_REPORT.md`（含真实中转余额下降的说明：主要来自测试环境之外的使用）；
-  3. 推送分支、开 PR（CI 全绿）、0.4.0-rc.1、用 RC 制品复跑关键子集，再发 0.4.0；之后 XY-image 0.0.17（录制 0.4.0 夹具、`XY2API_VERIFIED_VERSIONS`，先给 XY-image 交接留言并经用户确认）；
-  4. 生产部署按 runbook，每次单独授权。
-- 已完成的推送前准备：分支历史已改写，不含宿主机路径与端口（本地备份分支 `backup/gateway-resilience-pre-rewrite`，验证后删除）。
-- 安全提醒：
-  - 两台主机的 SSH 密码在对话中出现过，建议改用密钥登录并更换密码；
-  - 只读分析时，工具输出曾短暂显示 `openai_codex_ticket_proxy_pool_v1` 设置中的部分凭据片段和一个已退役的 Caddy 金丝雀 token。两者都没有写入任何文件，建议轮换。
+**背景**
+
+- 生产 0.3.0 只读分析发现：上游失败不分类、单号分组瞬时错误即整组不可用、慢首包被 CDN 切断仍计费、同会话在失败账号上反复重试、Codex 一个失败回合最多约 30 次请求。完整报告不入库，去标识摘要见方案 `evidence/production-analysis.md`。
+- 方案 `openspec/changes/gateway-resilience-20261015/`（proposal 含决策 D1–D33、design、8 个 spec、tasks、runbook、staging-validation）；管理员说明 `docs/GATEWAY_RESILIENCE.md`。
+- 份额调度（`openspec/changes/replace-controlled-with-share-scheduling/`）已随 0.3.0 发布、默认关闭。
+
+**目标**
+
+1. xy2api 0.4.0（先 RC）：网关韧性全部能力上线可用，之后 XY-image 0.0.17。
+2. 全方位审查算法、策略、调度的遗漏与臃肿，规范化代码，达到生产部署标准（用户 2026-10-16T06:10Z 要求）。
+3. 同标准规范化 0.3.0 的份额调度（后端与前端）（07:30Z 追加）。
+4. 交付前规范各功能的前端布局、排版、交互与文案，页面高效、不臃肿（07:40Z 追加）。
+5. 维护本文件，让后续 Agent 能实时了解背景、目标、要求、已完成和未完成项（08:00Z 追加）。
+
+**要求与约束**
+
+- 不做灰度：在测试服务器（隔离 Compose 项目，地址见仓库外 `private/HOSTS.md`）完整验证、全部闭环后再 PR 与发版；用户已授权推送、PR、0.4.0-rc.1 与 0.4.0，**生产部署每次单独授权**。
+- 生产只读；不提交到 Sub2API 上游；仓库公开：主机地址、宿主机路径、服务清单只写仓库外私有目录；不写入任何密钥、Token、口令。
+- 上游同步只走既有机制：上游文件的新钩子登记 `policy.json` 的 `required_literals`，调度文件改动登记 `scheduler-diff.json`，对上游行为的修正登记为具名补丁（`policy.json` 与 `UPSTREAM_BASE.json` 的 `custom_patches` 及 `custom_patch_tests`）。
+- 每个修复一个提交并带测试；提交前跑 golangci-lint v2.14.0（`/tmp/xy2-toolchain/bin`）、`sync.py audit` 与 `scheduler-diff`。
+- 不动 XY-image 的 agent01 工作区，只在其副本与 v0016 兼容工作树内工作；真实中转测试 Key 只在测试服务器 0600 文件中。
+
+**已完成**
+
+- 韧性能力开发与测试服务器验证（场景 37/37、真实客户端 16/16、真实 Cloudflare、升级回退演练、XY-image 回放 181/181，均在前一候选上）。
+- 2026-10-16 全面审查：约 35 项修复已提交（会话失败上报、末位兜底只试首个候选、余额耗尽档位、网关自身 504 分类、兜底分组 Redis 往返、余额状态 JSON 往返、中转保活过滤分配、死代码删除等），golangci-lint 清零，`scheduler-diff` 补登记，新增 CI 必测门禁 `tools/gateway-resilience/ci_gate.py`（177 个韧性测试，`-race`，零跳过）。
+- 份额调度后端审查：修复回升截止时间在恢复时间未知时立即强制迁移热会话、余额耗尽与配额暂停不推迟回升、报表窗口下限；其余（策略校验、CAS、Redis 扫描与条件删除、统计上界、影子并发上限）复核无问题。
+- 上游缺陷修复：index.html 不再返回 304（CSP nonce 与缓存正文不一致导致每次刷新拦截内联配置脚本），具名补丁 `xy-index-nonce-no-304`。
+- 本机验证（`796e2820d` 时）：全量 unit、无 tag 测试、四种标签 vet、前端 lint/vue-tsc/vitest 389 文件/构建、部署脚本检查、同步审计均通过；`-race` 仅上游测试桩 `TestAuthServiceBindEmailIdentity_AllowsOnlyOneConcurrentAliasVariant` 有数据竞争（测试代码，非本分支引入，CI 不对该包跑 race）。
+
+**未完成**
+
+1. 前端规范化（进行中）：份额调度策略表已改为不横向溢出；待做：份额调度页头与分组列表精简、报表空状态合并与统一下拉组件、网关韧性设置卡按能力分组（开关与其参数放在一起）、运维韧性面板显示分组名与通用翻页文案；之后在测试服务器做 1440/390 × 明暗截图检查。
+2. 内存诊断：旧浸泡显示匿名内存约 +5 MiB/小时；测试服务器正跑带 pprof 的诊断镜像（`diag-0efbafc53`，pprof 文件只在服务器源码副本），每 20 分钟一份堆 profile，待 2–4 小时后差分定位；若为泄漏须修复。
+3. 重建最终候选 → 测试服务器场景、客户端、24 小时浸泡（`final-run.sh` 证据目录按镜像 tag 命名）→ `metrics_report.py` 指标报告 → 定稿私有 `staging/STAGING_REPORT.md`。
+4. 推送、PR（CI 全绿，含新门禁）→ 0.4.0-rc.1 → RC 制品复跑关键子集 → 0.4.0；之后 XY-image 0.0.17（先交接留言并经用户确认）。
+5. 生产部署（单独授权，按 runbook）。
+6. 收尾清理：本地备份分支 `backup/gateway-resilience-pre-rewrite`、测试服务器 itest 目录与 `xy2-itest-*` 卷、诊断镜像与 `diag-heap.sh`、`/tmp/xy2-staging/live-keys.json` 与 `ui-session.json`。
+
+**卡点与风险**
+
+- 内存增长原因未定；在定位前不启动最终浸泡。
+- 本机磁盘：`/tmp/xy2-toolchain/gocache` 两次涨到 30G 以上写满磁盘，长时间测试前后执行 `go clean -cache`。
+
+**关键位置**
+
+- 分支 `feat/gateway-resilience-20261015`（基于 origin/main `f8fec15a2`）；工具链 `source /tmp/xy2-toolchain/env.sh`（Go 1.27.2），wire 只用 `/tmp/xy2-toolchain/wiregen.sh`。
+- 仓库外产物 `xy2api-artifacts/gateway-resilience-20261015/`：`research/`、`production/`、`metrics/`、`staging/`（含截图与报告草稿）、`private/HOSTS.md`、`PR_BODY.md`。
+- 测试服务器脚本：`redeploy2.sh`（本机 `/tmp/xy2-staging/`）、服务器上的 `final-run.sh`、`soak.py`（按匿名内存趋势判断泄漏）。
+- 安全提醒：两台主机的 SSH 密码在对话中出现过，建议改用密钥并更换；只读分析时曾短暂看到 `openai_codex_ticket_proxy_pool_v1` 的部分凭据片段与已退役的 Caddy 金丝雀 token，未写入文件，建议轮换。
 
 ### Sub2API 0.2.15 / XY2API 0.3.0 正式发布完成（2026-10-13）
 
@@ -1126,6 +1158,10 @@ pnpm --dir frontend run build
 - 冲突裁决、二开兼容补丁、生成产物、provenance、RC/正式版本应保持可追踪的分层提交。
 
 ## 记忆维护规范
+
+### 顶部状态的结构
+
+进行中的大任务在“当前交接状态”用固定小节：**背景**、**目标**（含用户追加要求及时间）、**要求与约束**、**已完成**、**未完成**（按执行顺序编号）、**卡点与风险**、**关键位置**。标题写明状态更新时间。每完成一项就把它从“未完成”移到“已完成”，让接手的 Agent 只读这一块就能知道现在做到哪、下一步做什么；细节与证据放在“进行中的工作”和操作日志。
 
 ### 更新时机
 

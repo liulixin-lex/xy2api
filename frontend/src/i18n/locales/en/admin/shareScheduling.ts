@@ -71,7 +71,6 @@ export default {
       search: 'Search account name or ID',
       columns: {
         account: 'Account',
-        health: 'State',
         tier: 'Tier',
         weight: 'Weight',
         drain: 'Drain',
@@ -81,7 +80,6 @@ export default {
       },
       healthy: 'Schedulable',
       recoverAt: 'Expected back {time}',
-      configured: 'Configured',
       usingDefault: 'Default',
       reset: 'Reset',
       resetNamed: 'Reset {name} to defaults',
