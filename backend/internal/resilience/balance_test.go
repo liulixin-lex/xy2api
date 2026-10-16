@@ -47,9 +47,8 @@ func TestRecheckScheduleAndBackoff(t *testing.T) {
 	s := noJitter()
 	r := OnStrongSignal(BalanceRecord{}, &s, "e", t0)
 	want := []time.Duration{120, 300, 600, 900, 900, 900}
-	now := t0
 	for _, w := range want {
-		now = r.NextCheckAt
+		now := r.NextCheckAt
 		require.True(t, r.Due(now))
 		require.False(t, r.Due(now.Add(-time.Second)))
 		r = OnProbe(r, &s, ProbeNegative, "usage", "balance 0", now)

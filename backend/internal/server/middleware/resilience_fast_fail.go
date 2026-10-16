@@ -130,11 +130,9 @@ func resilienceFastFailObserve(c *gin.Context, apiKeyID int64) {
 	if s := c.Writer.Header().Get("x-should-retry"); s != "" {
 		header.Set("x-should-retry", s)
 	}
-	retryAt := now
+	retryAt := now.Add(time.Duration(cfg.Errors.FastFail.WindowSeconds) * time.Second)
 	if secs, err := strconv.Atoi(c.Writer.Header().Get("Retry-After")); err == nil && secs > 0 {
 		retryAt = now.Add(time.Duration(secs) * time.Second)
-	} else {
-		retryAt = now.Add(time.Duration(cfg.Errors.FastFail.WindowSeconds) * time.Second)
 	}
 	tripped := resilience.ProcessFastFail().Observe(apiKeyID,
 		resilience.Signature(er.Status, er.ErrType, er.Message),

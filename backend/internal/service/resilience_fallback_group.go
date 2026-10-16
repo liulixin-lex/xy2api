@@ -139,7 +139,8 @@ func (r *ResilienceService) AvailabilityFallbackGroup(ctx context.Context, apiKe
 // to its fallback group within ttl.
 func (r *ResilienceService) fallbackMovedWithin(groupID int64, ttl time.Duration, now time.Time) bool {
 	v, ok := r.fallbackMoves.Load(groupID)
-	return ok && now.Sub(v.(time.Time)) < ttl
+	at, _ := v.(time.Time)
+	return ok && now.Sub(at) < ttl
 }
 
 // groupHasHealthyAccount reports whether a group has an active, schedulable

@@ -119,7 +119,12 @@ func (s *resilienceStore) AddSessionAvoid(ctx context.Context, groupID int64, se
 
 func (s *resilienceStore) SessionAvoid(ctx context.Context, groupID int64, sessionHash string) (map[int64]struct{}, error) {
 	key := sessionKey(resilienceSessionAvoidPrefix, groupID, sessionHash)
-	members, err := s.rdb.ZRangeByScore(ctx, key, &redis.ZRangeBy{Min: strconv.FormatInt(time.Now().UnixMilli(), 10), Max: "+inf"}).Result()
+	members, err := s.rdb.ZRangeArgs(ctx, redis.ZRangeArgs{
+		Key:     key,
+		Start:   strconv.FormatInt(time.Now().UnixMilli(), 10),
+		Stop:    "+inf",
+		ByScore: true,
+	}).Result()
 	if err != nil {
 		return nil, err
 	}
