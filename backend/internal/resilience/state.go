@@ -42,6 +42,10 @@ type RequestState struct {
 	// carries x-should-retry: false (design §9.1).
 	configError bool
 
+	// groupNoAccount is set when selection found no account for the whole
+	// group and model, not only for this request (negative cache, fast fail).
+	groupNoAccount bool
+
 	// session identifies the request's sticky session for failure streaks.
 	sessionGroupID int64
 	sessionHash    string
@@ -448,6 +452,28 @@ func (s *RequestState) MarkConfigError() {
 	s.mu.Lock()
 	s.configError = true
 	s.mu.Unlock()
+}
+
+// MarkGroupNoAccount records that selection found no account for the whole
+// group and model: the result does not depend on this request's session,
+// so it may answer other requests (design §9.2, §9.3).
+func (s *RequestState) MarkGroupNoAccount() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.groupNoAccount = true
+	s.mu.Unlock()
+}
+
+// GroupNoAccount reports a group-level no-account result.
+func (s *RequestState) GroupNoAccount() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.groupNoAccount
 }
 
 // ConfigError reports a configuration-caused selection failure.

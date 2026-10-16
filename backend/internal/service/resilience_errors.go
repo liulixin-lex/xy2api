@@ -9,20 +9,58 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 // selectionNegativeKey keys the selection-level negative cache by group,
 // model and selection variant. The group fixes the platform except for
-// composite groups, whose target platform depends on the model in the key;
+// composite groups, whose target platform depends on the model in the key,
+// and routes that force a platform (/antigravity), which are keyed apart;
 // the variant separates OpenAI selections that need a different transport,
 // endpoint capability or platform, so one result never answers another.
-func selectionNegativeKey(groupID *int64, model, variant string) string {
+func selectionNegativeKey(ctx context.Context, groupID *int64, model, variant string) string {
 	scope := "select"
 	if variant != "" {
 		scope += ":" + variant
 	}
+	if forced, _ := ctx.Value(ctxkey.ForcePlatform).(string); forced != "" {
+		scope += "|platform=" + forced
+	}
 	return resilience.NegativeKey(derefGroupID(groupID), scope, model)
+}
+
+// resilienceNoAccountIsGroupLevel reports whether a no-account result holds
+// for every request of the group and model: no account that could serve the
+// model on the request's platform is free of penalties. Otherwise the result
+// depended on the request (accounts that only serve their bound sessions past
+// an RPM or window-cost threshold, session limits) and must not answer other
+// requests (design §9.2). Without the resilience runtime (some unit tests)
+// the result counts as group level, as before.
+func resilienceNoAccountIsGroupLevel(ctx context.Context, groupID int64, model string) bool {
+	r := Resilience()
+	if r == nil || r.fallbackAccounts == nil {
+		return true
+	}
+	accounts, err := r.groupAccountsForLastResort(ctx, r.fallbackAccounts, groupID)
+	if err != nil {
+		return false
+	}
+	forced, _ := ctx.Value(ctxkey.ForcePlatform).(string)
+	now := time.Now()
+	for i := range accounts {
+		a := &accounts[i]
+		if forced != "" && a.Platform != forced {
+			continue
+		}
+		if model != "" && !a.IsModelSupported(model) {
+			continue
+		}
+		if tier, _, _ := resiliencePenaltyOf(a, model, now); tier == resilience.TierNone {
+			return false
+		}
+	}
+	return true
 }
 
 // errNegativeCached marks a no-account result replayed from the negative
@@ -39,7 +77,8 @@ func resilienceNegativeCacheHit(ctx context.Context, groupID *int64, model, vari
 	if !cfg.ErrorsOn() || groupID == nil || len(excludedIDs) > 0 || gatewayProfitControlGateActive(ctx) {
 		return nil
 	}
-	if _, ok := resilience.ProcessNegativeCache().Get(selectionNegativeKey(groupID, model, variant), time.Now()); ok {
+	if _, ok := resilience.ProcessNegativeCache().Get(selectionNegativeKey(ctx, groupID, model, variant), time.Now()); ok {
+		resilience.StateFrom(ctx).MarkGroupNoAccount()
 		return fmt.Errorf("%w supporting model: %s (%w)", ErrNoAvailableAccounts, model, errNegativeCached)
 	}
 	return nil
@@ -50,15 +89,18 @@ func resilienceNegativeCacheHit(ctx context.Context, groupID *int64, model, vari
 var profitRejectedPattern = regexp.MustCompile(`profit_(?:threshold|invalid_account_rate)=[1-9]`)
 
 // resilienceNegativeCachePut stores a final no-account result of a first
-// attempt.
+// attempt when it holds for the whole group, and marks the request so the
+// per-key fast fail may count it (design §9.3).
 func resilienceNegativeCachePut(ctx context.Context, groupID *int64, model, variant string, excludedIDs map[int64]struct{}, err error) {
 	cfg := resilience.Current()
 	if !cfg.ErrorsOn() || groupID == nil || len(excludedIDs) > 0 || !isNoAccountSelectionError(err) || errors.Is(err, errNegativeCached) ||
-		gatewayProfitControlGateActive(ctx) || profitRejectedPattern.MatchString(err.Error()) {
+		gatewayProfitControlGateActive(ctx) || profitRejectedPattern.MatchString(err.Error()) ||
+		!resilienceNoAccountIsGroupLevel(ctx, derefGroupID(groupID), model) {
 		return
 	}
+	resilience.StateFrom(ctx).MarkGroupNoAccount()
 	ttl := time.Duration(cfg.Errors.NegativeCacheSeconds) * time.Second
-	resilience.ProcessNegativeCache().Put(selectionNegativeKey(groupID, model, variant), derefGroupID(groupID), resilience.CachedResponse{}, ttl, time.Now())
+	resilience.ProcessNegativeCache().Put(selectionNegativeKey(ctx, groupID, model, variant), derefGroupID(groupID), resilience.CachedResponse{}, ttl, time.Now())
 }
 
 // markResilienceConfigError records configuration-caused selection

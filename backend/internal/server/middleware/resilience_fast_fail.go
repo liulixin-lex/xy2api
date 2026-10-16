@@ -117,6 +117,12 @@ func resilienceFastFailObserve(c *gin.Context, apiKeyID int64) {
 		// with one would restart the client's retries (design §9.7).
 		return
 	}
+	// Only answers that hold for every request of the key and model: a
+	// group-level no-account result or a configuration error. A 503 that
+	// concerned one session must not stop the key's other sessions.
+	if st := resilience.StateFrom(c.Request.Context()); !st.GroupNoAccount() && !st.ConfigError() {
+		return
+	}
 	v, ok := c.Get(resilience.GinKeyErrorResponse)
 	if !ok {
 		return

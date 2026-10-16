@@ -42,6 +42,8 @@ func newFastFailRouter(t *testing.T, keyID int64, handler gin.HandlerFunc) (*gin
 func serve(router *gin.Engine, method, path, key string, headers map[string]string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(method, path, nil)
+	// The request state is attached before authentication in production.
+	req = req.WithContext(resilience.WithRequestState(req.Context(), resilience.NewRequestState()))
 	req.Header.Set("x-api-key", key)
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -59,6 +61,7 @@ func TestFastFailRetryStormOnSingleAccountGroup(t *testing.T) {
 	calls := 0
 	router, key := newFastFailRouter(t, 9101, func(c *gin.Context) {
 		calls++
+		resilience.StateFrom(c.Request.Context()).MarkGroupNoAccount()
 		c.Header("Retry-After", "20")
 		body := gin.H{"type": "error", "error": gin.H{"type": "api_error", "message": "Service temporarily unavailable"}}
 		c.Set(resilience.GinKeyErrorResponse, resilience.ErrorResponse{Status: 503, ErrType: "api_error", Message: "Service temporarily unavailable", Body: []byte(`{"type":"error","error":{"type":"api_error","message":"Service temporarily unavailable"}}`)})
@@ -235,6 +238,7 @@ func TestFastFailIgnoresCappedTurns(t *testing.T) {
 	calls := 0
 	router, key := newFastFailRouter(t, 9103, func(c *gin.Context) {
 		calls++
+		resilience.StateFrom(c.Request.Context()).MarkGroupNoAccount()
 		c.Set(resilience.GinKeyTurnCapped, true)
 		c.Set(resilience.GinKeyErrorResponse, resilience.ErrorResponse{Status: 503, ErrType: "api_error", Message: "x", Body: []byte(`{}`)})
 		c.JSON(http.StatusServiceUnavailable, gin.H{})
@@ -261,6 +265,7 @@ func TestFastFailReplaysOnlyTheTrippingModel(t *testing.T) {
 		calls[req.Model]++
 		resilience.StateFrom(c.Request.Context()).NoteTurn(1, req.Model, "")
 		if req.Model == "down" {
+			resilience.StateFrom(c.Request.Context()).MarkGroupNoAccount()
 			c.Header("Retry-After", "20")
 			c.Set(resilience.GinKeyErrorResponse, resilience.ErrorResponse{Status: 503, ErrType: "api_error", Message: "no account", Body: []byte(`{"error":{"message":"no account"}}`)})
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"message": "no account"}})
@@ -292,4 +297,36 @@ func TestFastFailReplaysOnlyTheTrippingModel(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Empty(t, w.Header().Get("X-XY-Fast-Fail"))
 	require.Equal(t, 1, calls["up"], "another model reaches the handler with its body intact")
+}
+
+func TestFastFailCountsOnlyGroupLevelNoAccount(t *testing.T) {
+	// Review F5: a key with several sessions sees 503s that only concern one
+	// session (a new session in a sticky-only group); they must not stop the
+	// key's bound sessions.
+	orig := *resilience.Current()
+	resilience.Publish(resilience.Defaults())
+	t.Cleanup(func() { resilience.Publish(orig) })
+	calls := 0
+	router, key := newFastFailRouter(t, 9107, func(c *gin.Context) {
+		calls++
+		c.Set(resilience.GinKeyErrorResponse, resilience.ErrorResponse{Status: 503, ErrType: "api_error", Message: "Service temporarily unavailable", Body: []byte(`{"error":{"type":"api_error","message":"Service temporarily unavailable"}}`)})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"type": "api_error", "message": "Service temporarily unavailable"}})
+	})
+	for i := 0; i < 12; i++ {
+		require.Equal(t, 503, serve(router, http.MethodPost, "/v1/messages", key, nil).Code)
+	}
+	require.Equal(t, 12, calls, "request-dependent 503s never trip the key")
+
+	// A configuration error holds for every request of the key and model.
+	calls = 0
+	router, key = newFastFailRouter(t, 9108, func(c *gin.Context) {
+		calls++
+		resilience.StateFrom(c.Request.Context()).MarkConfigError()
+		c.Set(resilience.GinKeyErrorResponse, resilience.ErrorResponse{Status: 503, ErrType: "api_error", Message: "config", Body: []byte(`{"error":{"message":"config"}}`)})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"message": "config"}})
+	})
+	for i := 0; i < 12; i++ {
+		serve(router, http.MethodPost, "/v1/messages", key, nil)
+	}
+	require.Equal(t, 10, calls, "configuration 503s still trip the key")
 }
