@@ -773,6 +773,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
   - 文档：design 补单实例前提下的进程内索引清单、探测锁 90 秒、OpenAI 冷却口径、末位兜底取槽规则；`docs/GATEWAY_RESILIENCE.md` 已知限制同步。
   - 注意：`/tmp/xy2-toolchain/gocache` 再次涨到 34G 写满磁盘（vitest 报 ENOSPC），已清理；跑 `-race` 前后留意余量。
   - 下一步：本机全量验证 → 重建候选、测试服务器场景/客户端/浸泡重跑（`soak-d0b7e7309` 将停止）。
+- 2026-10-16T07:30Z 用户追加：同时规范化 0.3.0 已发布的“份额调度”（`internal/sharesched`、`service/share_scheduling_*`、仓储、管理接口与前端），达到同样的上线标准；改动并入本分支与 0.4.0。浸泡中内存每小时约 +5 MiB，已停 `soak-d0b7e7309`，测试服务器跑带 pprof 的诊断镜像（pprof 文件只在服务器源码副本，不入库）定位。
 
 ### 20261015-prod-ux-analysis — 生产请求日志只读分析与上线级优化方案（已完成，由 20261015-gateway-resilience 承接）
 
