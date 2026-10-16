@@ -202,7 +202,7 @@
             </tbody>
           </table>
         </div>
-        <p v-else class="mt-2 text-sm text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.report.noDecisions') }}</p>
+        <p v-else class="mt-2 text-sm text-gray-500 dark:text-dark-400">{{ decisionSamples === false ? t('admin.shareScheduling.report.samplesOff') : t('admin.shareScheduling.report.noDecisions') }}</p>
       </section>
     </template>
   </div>
@@ -223,6 +223,7 @@ import { formatShareMs, formatSharePercent } from '@/utils/shareScheduling'
 const props = defineProps<{
   groupId: number
   sampleRate?: number
+  decisionSamples?: boolean
 }>()
 
 const { t } = useI18n()

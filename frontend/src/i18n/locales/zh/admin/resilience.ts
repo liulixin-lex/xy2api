@@ -8,11 +8,11 @@ export default {
       enabledHint: '关闭后所有韧性能力停用，网关按原有逻辑运行。',
       sections: {
         session: '会话失败改绑',
-        sessionHint: '同一会话在同一账号上连续失败 2 次后改绑，并在 10 分钟内避开该账号。',
+        sessionHint: '同一会话在同一账号上连续失败达到阈值后改绑，并在回避期内避开该账号（默认 2 次、10 分钟）。',
         lastResort: '末位兜底',
         lastResortHint: '没有健康账号时，在冷却期最短的软罚账号上继续服务（单账号分组不再整组不可用）。',
         balance: '余额可恢复',
-        balanceHint: '上游余额不足时按 1/2/5/10/15 分钟复检，充值后自动恢复。',
+        balanceHint: '上游余额不足时按复检计划探测（默认 1/2/5/10/15 分钟），充值后自动恢复。',
         budget: '请求预算',
         budgetHint: '每个请求最多尝试的次数与首输出前的总时长；同号重试仅用于容量降载。',
         keepalive: '首包前保活',
@@ -22,7 +22,7 @@ export default {
         disconnect: '断开计费',
         disconnectHint: '客户端在任何输出前断开时立即取消上游且不计费；部分输出后最多再读取一段时间并按已得用量计费。',
         errors: '错误语义与防风暴',
-        errorsHint: '无号与限流应答带 Retry-After，短时负缓存，同一 Key 的重复 503 快速返回。',
+        errorsHint: '无号与限流应答带 Retry-After；短时负缓存；同一 Key 的重复 503 快速返回；同一会话连续失败的回合封顶，避免客户端反复重试。',
         fallbackGroup: '无号兜底分组',
         fallbackGroupHint: '分组无可用账号时由其配置的兜底分组承接，主分组稳定后切回。',
         cacheAware: '缓存感知预留',
@@ -113,7 +113,7 @@ export default {
       }
     },
     explain: {
-      title: '韧性 Explain',
+      title: '选号解释',
       hint: '网关韧性对该分组与会话的当前判断：罚则档位、会话失败与回避、末位兜底与兜底分组。',
       opsHint: '只读查看任一分组（含原版调度）的罚则档位、会话失败计数与回避集、末位兜底与兜底分组决策。',
       group: '分组',

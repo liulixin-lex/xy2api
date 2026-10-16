@@ -369,7 +369,8 @@ export default {
       original: 'Original chose #{id}',
       noData: 'No data in this window.',
       noDistributions: 'No decisions, cache attribution or hot migrations in this window yet.',
-      noDecisions: 'No decision samples. Turn on “Keep decision samples” in system settings.'
+      noDecisions: 'No decision samples in this window.',
+      samplesOff: 'Decision samples are off. Turn on “Keep decision samples” in system settings.'
     },
     explain: {
       hint: 'Simulates one selection with the saved policy and the accounts’ current state. It takes no slot and writes no binding, and also works while the group uses the original scheduler.',

@@ -53,7 +53,7 @@
             </div>
             <template v-else-if="store.current">
               <SharePolicyEditor v-show="tab === 'policy'" @reload="reloadPolicy" />
-              <ShareReportPanel v-if="tab === 'report'" :group-id="store.selected" :sample-rate="store.settings?.attribution_sample_rate" />
+              <ShareReportPanel v-if="tab === 'report'" :group-id="store.selected" :sample-rate="store.settings?.attribution_sample_rate" :decision-samples="store.settings?.decision_samples" />
               <ShareExplainPanel v-if="tab === 'explain'" :group-id="store.selected" :members="store.current.view.members" />
             </template>
           </template>

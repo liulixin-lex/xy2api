@@ -8,11 +8,11 @@ export default {
       enabledHint: 'When off, every resilience feature is disabled and the gateway behaves as before.',
       sections: {
         session: 'Session rebinding',
-        sessionHint: 'After 2 consecutive failures of a session on one account, the session is rebound and avoids that account for 10 minutes.',
+        sessionHint: 'After consecutive failures of a session on one account reach the threshold, the session is rebound and avoids that account for a while (default 2 failures, 10 minutes).',
         lastResort: 'Last-resort selection',
         lastResortHint: 'Without healthy accounts, serve on the soft-penalised account whose cooldown ends first, so single-account groups stay available.',
         balance: 'Recoverable balance',
-        balanceHint: 'Accounts out of upstream balance are re-checked after 1/2/5/10/15 minutes and recover automatically after a top-up.',
+        balanceHint: 'Accounts out of upstream balance are re-checked on a schedule (default 1/2/5/10/15 minutes) and recover automatically after a top-up.',
         budget: 'Request budget',
         budgetHint: 'Maximum attempts per request and total time before the first output; same-account retries only for capacity shedding.',
         keepalive: 'Pre-output keepalive',
@@ -22,7 +22,7 @@ export default {
         disconnect: 'Disconnect billing',
         disconnectHint: 'A client leaving before any output cancels the upstream and is not billed; after partial output the upstream is read for a bounded time and the usage obtained is billed.',
         errors: 'Error semantics and storm protection',
-        errorsHint: 'No-account and rate-limit responses carry Retry-After, a short negative cache, and fast replies to repeated identical 503s per key.',
+        errorsHint: 'No-account and rate-limit responses carry Retry-After; a short negative cache; fast replies to repeated identical 503s per key; a cap on consecutive failed turns of a conversation so clients stop retrying.',
         fallbackGroup: 'No-account fallback groups',
         fallbackGroupHint: 'A group without available accounts is served by its fallback group and returns once stable.',
         cacheAware: 'Cache-aware reservations',
@@ -113,7 +113,7 @@ export default {
       }
     },
     explain: {
-      title: 'Resilience explain',
+      title: 'Selection explain',
       hint: 'How gateway resilience sees this group and session now: penalty tiers, session failures and avoided accounts, last resort and fallback group.',
       opsHint: 'Read-only view of any group (original scheduler included): penalty tiers, session failure counts and avoid set, last-resort pick and fallback group decision.',
       group: 'Group',

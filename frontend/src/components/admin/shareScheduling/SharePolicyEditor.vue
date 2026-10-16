@@ -116,18 +116,18 @@
             <tr class="border-b border-gray-200 text-xs text-gray-500 dark:border-dark-600 dark:text-dark-400">
               <th class="w-8 p-2"><input type="checkbox" :checked="allVisiblePicked" :aria-label="t('admin.shareScheduling.policy.selectVisible')" @change="toggleVisible"></th>
               <th class="p-2">{{ t('admin.shareScheduling.policy.columns.account') }}</th>
-              <th class="w-20 p-2">{{ t('admin.shareScheduling.policy.columns.tier') }}</th>
-              <th class="w-28 p-2">{{ t('admin.shareScheduling.policy.columns.weight') }}</th>
-              <th class="w-16 p-2">
+              <th class="w-16 p-2">{{ t('admin.shareScheduling.policy.columns.tier') }}</th>
+              <th class="w-24 p-2">{{ t('admin.shareScheduling.policy.columns.weight') }}</th>
+              <th class="w-16 whitespace-nowrap p-2">
                 <span class="inline-flex items-center gap-1">{{ t('admin.shareScheduling.policy.columns.drain') }}<HelpTooltip :content="t('admin.shareScheduling.policy.drainHint')" /></span>
               </th>
-              <th class="w-36 p-2">
+              <th class="w-32 whitespace-nowrap p-2">
                 <span class="inline-flex items-center gap-1">{{ t('admin.shareScheduling.policy.columns.cacheDomain') }}<HelpTooltip :content="t('admin.shareScheduling.policy.cacheDomainHint')" /></span>
               </th>
-              <th class="w-32 p-2">
+              <th class="w-36 whitespace-nowrap p-2">
                 <span class="inline-flex items-center gap-1">{{ t('admin.shareScheduling.policy.columns.shares') }}<HelpTooltip :content="t('admin.shareScheduling.policy.sharesHint')" /></span>
               </th>
-              <th class="w-16 p-2"><span class="sr-only">{{ t('admin.shareScheduling.policy.columns.actions') }}</span></th>
+              <th class="w-24 p-2"><span class="sr-only">{{ t('admin.shareScheduling.policy.columns.actions') }}</span></th>
             </tr>
           </thead>
           <tbody>
@@ -175,7 +175,7 @@
                 <div class="text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.policy.shareTarget', { value: formatSharePercent(sharesOf(row).target) }) }} · {{ t('admin.shareScheduling.policy.shareCapacity', { value: formatSharePercent(sharesOf(row).capacity) }) }}</div>
               </td>
               <td class="p-2 text-right">
-                <button type="button" class="btn btn-ghost btn-sm" :disabled="busy || !row.configured" :aria-label="t('admin.shareScheduling.policy.resetNamed', { name: rowName(row) })" @click="resetShareRow(entry.draft, row)">{{ t('admin.shareScheduling.policy.reset') }}</button>
+                <button type="button" class="btn btn-ghost btn-sm whitespace-nowrap" :disabled="busy || !row.configured" :aria-label="t('admin.shareScheduling.policy.resetNamed', { name: rowName(row) })" @click="resetShareRow(entry.draft, row)">{{ t('admin.shareScheduling.policy.reset') }}</button>
               </td>
             </tr>
           </tbody>
