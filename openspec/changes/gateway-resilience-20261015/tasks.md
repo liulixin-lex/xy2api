@@ -342,6 +342,33 @@
 - [x] 测试服务器场景：PE-1（R1）、PE-3（R3）、PE-4（R4）、PE-7（R7）、PE-2（R2），新故障 F26、F27、F29 与 BAL 的 `reset`（`e4345e9e2`、`9fd60ec40`、`d138daa20`、`da75e0b92`）。
 - [ ] 遗留（P2，不在本次）：Grok 进程内阻断对罚则可见；内容安全拒绝接入 Responses WebSocket 循环；web_search 重放覆盖 WebSocket 路径；已输出后失败未接入 Gemini 流、CN Anthropic 直通与 raw Chat 流内 error。
 
+## 独立审查修复（2026-10-16，0.4.0 范围）
+
+> 用户安排的独立只读审查（原版调度、份额调度、网关韧性；文档在仓库外 `review/SCHEDULING_REVIEW_20261016.md`）。用户决定 0.4.0 在 PR #97 内修 F1、F2+F5、F3、F4、F7、F12 与 F14 文档，期间暂停合并与打 RC。每项先写失败用例证实再修；证实不成立的记“复核不成立”。
+
+- [x] F1 排队 ping 计为已送达：等待用户槽、账号槽、用户消息队列时的 ping 登记进送达统计，有送达统计时只用这一套心跳计数（`685986a68`）。修复前失败：`TestAccountSlotPingsAreNotDelivery`、`TestUserMessageQueuePingsAreNotDelivery`（`delivered=true`）。测试服务器 DC-4。
+- [x] F2+F5 负缓存与快速失败只针对组级无号：只有组内不存在平台匹配、支持该模型且无罚的账号时才写负缓存并标记请求；快速失败只计带标记的 503 与配置错误；强制平台写进缓存键（`6cfd31e4a`）。修复前失败：`TestNegativeCacheOnlyForGroupLevelNoAccount`、`TestNegativeCacheKeepsAForcedPlatformApart`、`TestFastFailCountsOnlyGroupLevelNoAccount`；端到端 `TestStickyOnlyAccountKeepsServingBoundSessions`（RPM 仅粘性账号：新会话无号后已绑定会话照常服务，修复前得到缓存的 503）。测试环境没有 Anthropic OAuth 的 RPM 账号，以单测为准。
+- [ ] F3 份额分组末位兜底走份额内核“放宽一轮”（子 Agent，待合入）；测试服务器 LR-1。
+- [ ] F4 末位兜底门禁补全（窗口费用、RPM）、OpenAI 末位兜底用 Codex 自适应并发、门禁一致性表测试（子 Agent，待合入）。
+- [x] F7 运维错误记录保留改写前的状态码（经 CDN 的 502/504 不再记成 503）（`25bb15ca2`）。修复前失败：`TestOpsRecordKeepsTheStatusBeforeTheEdgeRewrite`。
+- [x] F12 槽位等待截到剩余首输出前预算（`f2b077c4e`）。修复前失败：`TestSlotWaitEndsWithThePreOutputBudget`（预算剩 200 毫秒仍等满 3 秒）。
+- [x] F14 文档：不受总开关控制的 5 项改动、生效重试上限表（runbook §6）、回退前的余额账号检查（`a53b90175`）；F1、F2/F5、F7、F12 同步 design、spec 与管理员说明（`80cca7e2c`）。
+
+## 后续（只登记，不在 0.4.0 实施）
+
+> 份额调度在 0.4.1 合并前不在任何生产分组启用；0.4.0 已修 F3，若要提前启用需用户单独确认。
+
+0.4.1（0.4.0 正式发布后另开 PR）：
+
+- [ ] 份额策略配置精简（每组 22 项减到约 10 项，审查 5.1；`DecodePolicy` 对已删字段改为接受并忽略）；韧性设置精简（约 60 项减到约 35 项，审查 5.2 前四项）。
+- [ ] F6 余额耗尽两处“真相”（推断，先补用例证实）；F8 §9.8 续链重放只匹配已知的中转笼统文案；F9 影子模式统计对话锚点覆盖率并写明切换冷启动；F10 删除份额纠偏；F11 缓存归因只对影子与份额分组运行；F13 管理员复检改为显式时间戳；F15 Warn 级逐请求事件改 Info 加计数或按分组限速；F16 输出 P99 改增量直方图；F17 预览改用只读 `ScanBindings`；F18 软/硬档阈值统一；F19 删除死常量与单值字段。
+- [ ] CI 必测门禁合并为一个按清单驱动的脚本；项目记忆归档（主文件约 40KB，加大小上限）。
+
+0.5：
+
+- [ ] 统一可用性判定（F6、F13、F18）、会话回避存储、计数存储（韧性计数改用 Redis）。
+- [ ] 下线韧性分开关与 0.3.0 旧分支，只留总开关；余额处理插件化。
+
 ## 13 PR 与发版
 
 - [ ] 13.1 xy2api PR：CI 18 项全绿，并新增 “Gateway resilience” 必测作业（关键 Scenario 测试，`-race`，零跳过守卫）；XY-image PR 全绿。
