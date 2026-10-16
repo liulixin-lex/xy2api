@@ -421,11 +421,17 @@ func Plan(p *Policy, req Request, cands []Candidate) Decision {
 				stableFor = now.Sub(target.stableSince)
 			}
 			stable := stableFor >= time.Duration(p.Tiers.StableSeconds)*time.Second
+			// The deadline counts from the target's recovery. Without a known
+			// recovery (the higher tier was only saturated, or this instance
+			// never saw it fail) there is nothing to count from: a warm
+			// session must not be moved at once.
+			deadlinePassed := p.Tiers.ReturnDeadlineSeconds > 0 && !target.stableSince.IsZero() &&
+				stableFor >= time.Duration(p.Tiers.ReturnDeadlineSeconds)*time.Second+deadlineStagger(req.Key)
 			switch {
 			case p.Tiers.Return == ReturnSessionEnd:
 			case p.Tiers.Return == ReturnImmediate && stable:
 				return finish(ReasonReturnImmediate, placement, WriteReplace, WriteReplace)
-			case p.Tiers.ReturnDeadlineSeconds > 0 && stableFor >= time.Duration(p.Tiers.ReturnDeadlineSeconds)*time.Second+deadlineStagger(req.Key):
+			case deadlinePassed:
 				return finish(ReasonReturnDeadline, placement, WriteReplace, WriteReplace)
 			case p.Tiers.Return == ReturnCold && stable && !warm:
 				return finish(ReasonReturnCold, placement, WriteReplace, WriteReplace)

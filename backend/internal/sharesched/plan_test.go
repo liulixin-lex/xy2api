@@ -328,6 +328,9 @@ func TestTierReturn(t *testing.T) {
 	require.Equal(t, ReasonAffinityHit, Plan(p, bound(key, 2, time.Second), recent(cands, testNow.Add(-5*time.Minute))).Reason)
 	require.Equal(t, ReasonReturnDeadline, Plan(p, bound(key, 2, time.Second), recent(cands, testNow.Add(-21*time.Minute))).Reason,
 		"deadline (10m) plus the maximum stagger (10m) has passed")
+	require.Equal(t, ReasonAffinityHit, Plan(p, bound(key, 2, time.Second), cands).Reason,
+		"no known recovery of tier 1 (it was only saturated): a warm session is not forced back")
+	require.Equal(t, ReasonReturnCold, Plan(p, bound(key, 2, 10*time.Minute), cands).Reason, "it returns when its cache is cold")
 }
 
 func TestSpillOrderPrefersCacheDomainThenClass(t *testing.T) {
