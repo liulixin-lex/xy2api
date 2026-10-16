@@ -429,6 +429,45 @@ def bal1():
     return {"first": first, "after": after, "final_state": state}, checks
 
 
+@scenario("PE-1", "Grok relay 429 'insufficient balance' with an exhausted window: balance state, no 28-minute rate limit, recovery after top-up")
+def pe1():
+    checks = []
+    set_balance("grok-bal", 0)
+    first = stream_request(DIRECT, "/v1/responses", KEYS["G-grok-balance"], responses_body(model="grok-4.6", stream=False))
+    row = psql("select coalesce(extra->'resilience_balance'->>'state','OK') || '|' || "
+               "coalesce(extract(epoch from rate_limit_reset_at - now())::int::text, '') from accounts where name='grok-bal'")
+    state, _, left = row.partition("|")
+    check(first["status"] >= 400, f"the request fails ({first['status']})", checks)
+    check(state in ("EXHAUSTED", "SUSPECT"), f"account balance state {state}", checks)
+    check(left == "" or int(left) < 300, f"no rate limit from the relay's 1700 s window (left {left or 'none'})", checks)
+    set_balance("grok-bal", 100)
+    deadline = now() + 150
+    while now() < deadline:
+        state = psql("select coalesce(extra->'resilience_balance'->>'state','OK') from accounts where name='grok-bal'")
+        if state in ("RECOVERING", "OK"):
+            break
+        time.sleep(5)
+    check(state in ("RECOVERING", "OK"), f"recovered after top-up ({state})", checks)
+    after = stream_request(DIRECT, "/v1/responses", KEYS["G-grok-balance"], responses_body(model="grok-4.6", stream=False))
+    check(after["status"] == 200, "served again", checks)
+    return {"first": first, "after": after, "final_state": state}, checks
+
+
+@scenario("PE-4", "Upstream content-safety 403: client gets 400 with the upstream text, one attempt, the account keeps serving")
+def pe4():
+    checks = []
+    rid = fault_last_id()
+    res = stream_request(DIRECT, "/v1/responses", KEYS["G-content-safety"], responses_body(stream=False))
+    attempts = [r for r in fault_records_since(rid) if r["fault"] in ("F27", "F00")]
+    text = json.dumps(res["lines"])
+    row = psql("select status || '|' || coalesce((temp_unschedulable_until > now())::text, 'false') from accounts where name='cs-block'")
+    check(res["status"] == 400, f"client gets 400 ({res['status']})", checks)
+    check("content_policy_violation" in text and "preflight safety" in text, "code content_policy_violation and the upstream text", checks)
+    check(len(attempts) == 1, f"one upstream attempt, no retry or switch ({len(attempts)})", checks)
+    check(row == "active|false", f"account not penalised ({row})", checks)
+    return {"res": res, "attempts": len(attempts), "account": row}, checks
+
+
 @scenario("FB-1", "Primary group without a usable account: fallback group serves, usage keeps origin_group_id")
 def fb1():
     checks = []

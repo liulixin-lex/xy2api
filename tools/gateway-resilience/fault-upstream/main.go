@@ -58,7 +58,8 @@ var scenarios = map[string]string{
 	"F23": "slow stream: a delta every `every` seconds for `secs` seconds, then completed with usage",
 	"F24": "relay keep-alive: empty SSE-Keep-Alive deltas (one before response.created) every `every` seconds for `secs` seconds, then response.failed busy",
 	"F25": "pooled relay: a Responses request carrying previous_response_id gets a vague 400 (Upstream request failed); others answer normally",
-	"BAL": "normal while the balance of state key=… is positive, F12 otherwise",
+	"F27": "403 content-safety refusal in Zhipu's shape (top-level code request_check_blocked)",
+	"BAL": "normal while the balance of state key=… is positive, F12 otherwise (reset=seconds adds a relay's exhausted ratelimit headers)",
 	"MIX": "random fault with probability p percent (default 5), otherwise normal",
 }
 
@@ -630,6 +631,10 @@ func serve(ctx context.Context, w http.ResponseWriter, p protocol, path, model s
 	case "F09":
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return "error_status"
+	case "F27":
+		writeJSON(w, http.StatusForbidden, map[string]any{"code": "request_check_blocked",
+			"message": "Request rejected by preflight safety checks. Please modify the content and try again."})
+		return "error_status"
 	case "F10":
 		apiError(w, p, http.StatusPaymentRequired, "insufficient_quota", "insufficient_balance", "Insufficient balance. Please recharge.")
 		return "error_status"
@@ -674,6 +679,13 @@ func serve(ctx context.Context, w http.ResponseWriter, p protocol, path, model s
 		return "dropped"
 	case "BAL":
 		if balances.get(key) <= 0 {
+			if reset := f.num("reset", 0); reset > 0 {
+				// A relay that also reports an exhausted request window
+				// (production: a Grok relay locked a group for 28 minutes).
+				w.Header().Set("x-ratelimit-limit-requests", "100")
+				w.Header().Set("x-ratelimit-remaining-requests", "0")
+				w.Header().Set("x-ratelimit-reset-requests", strconv.FormatInt(time.Now().Add(time.Duration(reset)*time.Second).Unix(), 10))
+			}
 			apiError(w, p, http.StatusTooManyRequests, "insufficient_quota", "", "Insufficient account balance")
 			return "error_status"
 		}

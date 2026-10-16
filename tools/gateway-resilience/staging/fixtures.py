@@ -67,6 +67,12 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-anthropic-late-529": ("anthropic", [("anth-late-529", "F16;delay=20", 1)], {}),
     "G-claude-only": ("anthropic", [("cc-only", "F00", 1)], {"claude_code_only": True}),
     "G-gemini": ("gemini", [("gem-ok", "F22;first=1", 1)], {}),
+    # Production 2026-10-16 (R1): a Grok relay answered one 429 "insufficient
+    # balance" with an exhausted request window; the single-account group was
+    # locked for 28 minutes.
+    "G-grok-balance": ("grok", [("grok-bal", "BAL;key=grok-bal;reset=1700", 1)], {}),
+    # R4: an upstream content-safety 403 is the request's fault on every account.
+    "G-content-safety": ("openai", [("cs-block", "F27", 1), ("cs-ok", "F00", 2)], {}),
     # 24-hour soak (soak.py): MIX injects each fault type at about 1% per attempt.
     "G-soak-openai": ("openai", [("soak-oa-a", "MIX;p=1", 1), ("soak-oa-b", "MIX;p=1", 1), ("soak-oa-ok", "F00", 2)], {}),
     "G-soak-anthropic": ("anthropic", [("soak-an-a", "MIX;p=1", 1), ("soak-an-ok", "F00", 2)], {}),
@@ -187,7 +193,8 @@ def main() -> int:
             if spec in real:
                 credentials = {"api_key": real[spec][1], "base_url": real[spec][0]}
             else:
-                credentials = {"api_key": "sk-fault-" + aname, "base_url": FAULT + spec}
+                # Grok API-key base URLs include the version (https://api.x.ai/v1).
+                credentials = {"api_key": "sk-fault-" + aname, "base_url": FAULT + spec + ("/v1" if platform == "grok" else "")}
             body = {"name": aname, "platform": platform, "type": "apikey",
                     "credentials": credentials,
                     "group_ids": [groups[gname]["id"]], "concurrency": 20, "priority": priority}
