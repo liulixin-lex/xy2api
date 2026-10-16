@@ -67,6 +67,34 @@ func TestStallDetectedWithinFiveSecondsAfterOutput(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "stream_timeout")
 }
 
+func TestStallCountsForTheSessionOnce(t *testing.T) {
+	// Design §4.1 counts STALL; a stalled stream never reaches a failover
+	// loop, so the stall itself reports it.
+	withResilienceSettings(t, nil)
+	rec := newRecordingSessions()
+	ctx := postOutputRequest(rec)
+	account := &Account{ID: 61, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+	noteResilienceStall(ctx, nil, account)
+	noteResilienceStall(ctx, nil, account)
+	require.Equal(t, []resilience.Category{resilience.CategoryStall}, rec.of(account.ID))
+	st := resilience.StateFrom(ctx)
+	require.True(t, st.AccountFailed(account.ID))
+	require.True(t, st.StreamFailureReported(account.ID), "a failover loop that sees the stall does not count it again")
+
+	// An attempt already reported after output is not counted again.
+	rec2 := newRecordingSessions()
+	ctx2 := postOutputRequest(rec2)
+	noteResiliencePostOutputFailure(ctx2, nil, account, &http.Response{}, postOutputEvent)
+	noteResilienceStall(ctx2, nil, account)
+	require.Equal(t, []resilience.Category{resilience.CategoryTransient}, rec2.of(account.ID))
+
+	// Stall detection off: the 0.3.0 behaviour.
+	withResilienceSettings(t, func(s *resilience.Settings) { s.Stall.Enabled = false })
+	rec3 := newRecordingSessions()
+	noteResilienceStall(postOutputRequest(rec3), nil, account)
+	require.Empty(t, rec3.of(account.ID))
+}
+
 func TestFirstEventGuard(t *testing.T) {
 	ctx, g := newFirstEventGuard(context.Background(), 30*time.Millisecond)
 	select {

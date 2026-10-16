@@ -283,7 +283,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 ### 7.5 停滞判定（G2 修复）
 
 - 把间隔检测改为以 `min(T/4, 5s)` 为周期检查 `lastRead`，使误差不超过 5 秒。位置：`openai_gateway_response_handling.go` 约 190、915；`gateway_upstream_response.go` 约 782、1120。
-- 文本流已输出后的停滞阈值为 `text_stall_seconds`（120 秒），明显小于 Codex 的 300 秒。到点后按 §7.6 结束，并对账号施加 `STALL` 软冷却。
+- 文本流已输出后的停滞阈值为 `text_stall_seconds`（120 秒），明显小于 Codex 的 300 秒。到点后按 §7.6 结束，对账号施加 `STALL` 软冷却，并计入会话失败（§4.1，每个请求每个账号一次）。
 - 图片流维持 `image_stream_data_interval_timeout`（900 秒）；OAuth Responses 生图期间豁免文本阈值。
 
 ### 7.6 已提交后的失败（D17、G3）

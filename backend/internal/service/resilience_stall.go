@@ -54,13 +54,19 @@ func resilienceStallThreshold(legacy time.Duration, outputStarted bool) time.Dur
 	return resilienceStallCheckBase(legacy)
 }
 
-// noteResilienceStall puts a soft STALL cooldown on the account.
+// noteResilienceStall puts a soft STALL cooldown on the account and counts
+// the stall against the session (design §4.1). A stalled stream ends the
+// request without reaching a failover loop; the one path that fails over
+// on a stall before output (Grok) does not count the attempt again.
 func noteResilienceStall(ctx context.Context, rl *RateLimitService, account *Account) {
 	if account == nil || !resilience.Current().StallOn() {
 		return
 	}
 	st := resilience.StateFrom(ctx)
 	st.MarkAccountFailed(account.ID)
+	if !st.StreamFailureReported(account.ID) && st.ReportStreamFailure(account.ID, nil) {
+		st.SessionFailure(ctx, account.ID, resilience.CategoryStall)
+	}
 	groupID := st.GroupID()
 	resilience.Count(resilience.MetricStall, groupID, account.ID, account.Platform)
 	slog.Warn("resilience.stall", "group_id", groupID, "account_id", account.ID, "platform", account.Platform)
