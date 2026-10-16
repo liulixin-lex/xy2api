@@ -16,8 +16,12 @@ import (
 )
 
 const (
-	balanceProbeInterval     = 15 * time.Second
-	balanceProbeLockTTL      = 60 * time.Second
+	balanceProbeInterval = 15 * time.Second
+	// balanceProbeLockTTL must outlive the holder's work (the probe deadline
+	// plus persisting the result), so a lock is never released by an
+	// instance that no longer owns it.
+	balanceProbeLockTTL      = 90 * time.Second
+	balanceProbePersistLimit = 10 * time.Second
 	balanceProbeHTTPTimeout  = 15 * time.Second
 	balanceProbeGenTimeout   = 45 * time.Second
 	balanceProbeMaxBodyBytes = 256 << 10
@@ -181,14 +185,18 @@ func (r *ResilienceService) advanceBalanceAccount(ctx context.Context, accountID
 		defer func() { _ = r.store.UnlockBalanceProbe(context.WithoutCancel(stateCtx), account.ID) }()
 	}
 	verdict, source, evidence, authFailure := r.probe.probe(stateCtx, account)
+	// The probes may use the whole deadline; the result is written with its
+	// own short one.
+	persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(stateCtx), balanceProbePersistLimit)
+	defer cancelPersist()
 	if authFailure != nil {
 		// The credentials are invalid: follow the authentication path.
 		slog.Warn("resilience.balance_probe_auth_failure", "account_id", account.ID, "source", source)
-		r.rateLimit.HandleUpstreamError(stateCtx, account, authFailure.status, http.Header{}, authFailure.body)
+		r.rateLimit.HandleUpstreamError(persistCtx, account, authFailure.status, http.Header{}, authFailure.body)
 		return
 	}
 	after := resilience.OnProbe(rec, cfg, verdict, source, evidence, time.Now())
-	r.rateLimit.persistBalanceRecord(stateCtx, account, rec, after, "probe:"+source)
+	r.rateLimit.persistBalanceRecord(persistCtx, account, rec, after, "probe:"+source)
 }
 
 type balanceProbeAuthFailure struct {
