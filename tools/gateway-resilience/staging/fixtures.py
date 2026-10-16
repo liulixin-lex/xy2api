@@ -73,6 +73,8 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-grok-balance": ("grok", [("grok-bal", "BAL;key=grok-bal;reset=1700", 1)], {}),
     # R4: an upstream content-safety 403 is the request's fault on every account.
     "G-content-safety": ("openai", [("cs-block", "F27", 1), ("cs-ok", "F00", 2)], {}),
+    # Review F1: one slot; a second stream queues, gets pings, then leaves.
+    "G-queue": ("openai", [("q-busy", "F01;secs=20", 1)], {"concurrency": 1}),
     # R2: a relay failing streams after output; the healthy account is second.
     "G-post-output": ("openai", [("po-fail", "F26;after=1", 1), ("po-ok", "F00", 2)], {}),
     # R3: a Codex backend relay rejects web_search_call history without the declaration.
@@ -187,7 +189,7 @@ def main() -> int:
                                     {"availability_fallback_group_id": groups[target]["id"]})
 
     existing = {a["name"]: a for a in items(api.call("GET", "/api/v1/admin/accounts?page=1&page_size=500"))}
-    for gname, (platform, accounts, _) in GROUPS.items():
+    for gname, (platform, accounts, gopts) in GROUPS.items():
         for aname, spec, priority in accounts:
             want_base = FAULT + spec + ("/v1" if platform == "grok" else "")
             if aname in existing:
@@ -208,7 +210,7 @@ def main() -> int:
                 credentials = {"api_key": "sk-fault-" + aname, "base_url": want_base}
             body = {"name": aname, "platform": platform, "type": "apikey",
                     "credentials": credentials,
-                    "group_ids": [groups[gname]["id"]], "concurrency": 20, "priority": priority}
+                    "group_ids": [groups[gname]["id"]], "concurrency": gopts.get("concurrency", 20), "priority": priority}
             existing[aname] = api.call("POST", "/api/v1/admin/accounts", body)
 
     users = {u["email"]: u for u in items(api.call("GET", "/api/v1/admin/users?page=1&page_size=200"))}

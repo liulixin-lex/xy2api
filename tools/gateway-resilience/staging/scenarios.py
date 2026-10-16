@@ -767,6 +767,32 @@ def dc2():
     return r, checks
 
 
+@scenario("DC-4", "Stream queued for a busy account gets pings, then leaves before output: undelivered, not billed")
+def dc4():
+    # Review F1: the pings written while waiting for a slot are no output.
+    checks = []
+    key = KEYS["G-queue"]
+    key_filter = "api_key_id=(select id from api_keys where name='key-G-queue' and deleted_at is null)"
+    since = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    mark = fault_last_id()
+    holder = threading.Thread(target=stream_request, args=(DIRECT, "/v1/responses", key, responses_body(session=fresh_session())))
+    holder.start()
+    time.sleep(1)
+    queued = stream_request(DIRECT, "/v1/responses", key, responses_body(session=fresh_session()), disconnect_after=33)
+    holder.join(timeout=120)
+    time.sleep(3)
+    recs = [r for r in fault_records_since(mark) if r["fault"] == "F01" and r["stream"]]
+    pings = [l for l in queued["lines"] if l[1].startswith(":")]
+    usage = psql(f"select count(*) from usage_logs where {key_filter} and created_at > '{since}'")
+    und = psql(f"select disconnect_stage||'|'||billed from gateway_undelivered_requests where {key_filter} and created_at > '{since}' order by id desc limit 1")
+    check(len(pings) >= 1, f"pings while queued ({len(pings)})", checks)
+    check(not any(l[1].startswith("data:") for l in queued["lines"]), "no output before the client left", checks)
+    check(sorted(r["outcome"] for r in recs) == ["cancelled", "completed"], f"queued request's upstream cancelled ({[r['outcome'] for r in recs]})", checks)
+    check(usage == "1", f"only the holder is billed (usage rows {usage})", checks)
+    check(und.endswith(("|f", "|false")), f"undelivered record {und}", checks)
+    return {"queued": queued, "upstream": recs, "usage": usage, "undelivered": und}, checks
+
+
 @scenario("DC-3", "Client leaves while the upstream headers are still awaited: stage header_wait")
 def dc3():
     checks = []
