@@ -468,6 +468,25 @@ def pe4():
     return {"res": res, "attempts": len(attempts), "account": row}, checks
 
 
+@scenario("PE-2", "Failures after output: the second rebinds the session, the third cools the account down")
+def pe2():
+    checks = []
+    key, sess = KEYS["G-post-output"], fresh_session()
+    rid = fault_last_id()
+    turns = [stream_request(DIRECT, "/v1/responses", key, responses_body(session=sess)) for _ in range(3)]
+    served = [r["fault"] for r in fault_records_since(rid) if r["stream"] and r["path"].endswith("/responses")]
+    check(served[:2] == ["F26", "F26"], f"first two turns fail after output on the bound account ({served})", checks)
+    check(len(served) == 3 and served[2] == "F00" and "response.completed" in json.dumps(turns[2]["lines"]),
+          "third turn is rebound to the healthy account", checks)
+    # A new session still lands on the failing account and makes its third failure in 60 s.
+    stream_request(DIRECT, "/v1/responses", key, responses_body(session=fresh_session()))
+    reason = psql("select coalesce(temp_unschedulable_reason, '') from accounts where name='po-fail' and temp_unschedulable_until > now()")
+    check("POST_OUTPUT" in reason, f"account in the post-output soft cooldown ({reason or 'none'})", checks)
+    after = stream_request(DIRECT, "/v1/responses", key, responses_body(session=fresh_session()))
+    check("response.completed" in json.dumps(after["lines"]), "new sessions are served by the healthy account", checks)
+    return {"served": served, "reason": reason}, checks
+
+
 def web_search_history_body() -> dict:
     # A compacted Codex turn: replays a hosted web search, declares no tools.
     return {"model": "gpt-6.1-sol", "stream": True, "tools": [], "prompt_cache_key": fresh_session(), "input": [

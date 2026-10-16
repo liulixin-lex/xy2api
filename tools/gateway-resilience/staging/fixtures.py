@@ -73,6 +73,8 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-grok-balance": ("grok", [("grok-bal", "BAL;key=grok-bal;reset=1700", 1)], {}),
     # R4: an upstream content-safety 403 is the request's fault on every account.
     "G-content-safety": ("openai", [("cs-block", "F27", 1), ("cs-ok", "F00", 2)], {}),
+    # R2: a relay failing streams after output; the healthy account is second.
+    "G-post-output": ("openai", [("po-fail", "F26;after=1", 1), ("po-ok", "F00", 2)], {}),
     # R3: a Codex backend relay rejects web_search_call history without the declaration.
     "G-web-search": ("openai", [("ws-relay", "F29", 1)], {}),
     # R7: an Anthropic relay's in-stream rate_limit_error before any output.
