@@ -67,7 +67,7 @@
 | `FIRST_OUTPUT_TIMEOUT` | 本地首输出超时（§7.4），包括网关自身合成的首事件超时 504（`first_output_timeout`）；中转返回的 504 仍为 `TRANSIENT` | 是 | 否 | 软，冷却 30 秒 | 计入失败计数 |
 | `STALL` | 已输出后超过停滞阈值无数据（§7.5） | 否（已输出） | 否 | 软，冷却 30 秒 | 计入失败计数 |
 | `CLIENT_CANCEL` | 客户端断开 | 否 | 否 | 无 | 不计 |
-| `CLIENT_ERROR` | 400/413/422 的确定性参数错误、上下文超长、内容策略、cyber policy | 否（沿用现有“模型不存在可换号”等例外） | 否 | 无 | 不计 |
+| `CLIENT_ERROR` | 400/413/422 的确定性参数错误、上下文超长、内容策略、cyber policy；上游内容安全拒绝（内容安全 code，或 400/403/451 上的安全检查文案，§18.4） | 否（沿用现有“模型不存在可换号”等例外）；内容安全拒绝连池模式同号重试也不做 | 否 | 无 | 不计 |
 | `MODEL_UNSUPPORTED` | 账号级模型不存在（现有 `isOpenAICompatibleModelNotFound400`） | 是 | 否 | 账号加模型级瞬时阻断（沿用现有） | 不计 |
 
 补充规则：
@@ -518,9 +518,12 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
   - `xy-resilience-disconnect-hook`：`client_request_id.go`（送达跟踪）、`gateway_usage_billing.go`、`openai_gateway_usage.go`（未送达计费）；
   - `xy-resilience-errors-hook`：`api_key_auth.go`（同 Key 快速失败、失败回合封顶）、`image_task_handler.go`（异步图片准入前移）；
   - `xy-resilience-fallback-hook`：`routes/gateway.go`（兜底分组中间件）；
-  - 续链整轮重放（§9.8）：`openai_gateway_messages.go`、`openai_messages_continuation.go`。
+  - 续链整轮重放（§9.8）：`openai_gateway_messages.go`、`openai_messages_continuation.go`；
+  - 生产报错修复（§18）：`openai_gateway_grok.go`（Grok 余额）；`gateway_forward.go` 与各 handler 入口（内容安全拒绝、Anthropic 流内状态）；`openai_gateway_forward.go`、`openai_gateway_passthrough.go`、`openai_gateway_response_handling.go`、`openai_gateway_handler.go`（web_search 重放）；`gateway_upstream_response.go`、OpenAI 各流处理与 WebSocket 转发文件（已输出后失败）；`ops_error_logger.go`（上传中断）。
 - 上游缺陷修复同样登记为具名补丁：
   - `xy-index-nonce-no-304`：`internal/web/embed_on.go`。index.html 带本次请求的 CSP nonce；304 会让浏览器用新的 CSP 头配缓存正文里的旧 nonce，每次刷新都拦截内联配置脚本。改为始终返回完整页面、不带 ETag。sub2api main 有同样的问题。
+  - `xy-placeholder-session-id`：`gateway_service.go`、`metadata_userid.go`。全 0 的 `metadata.session_id` 视为缺失（§18.5）。
+  - `xy-allowlist-404-hint`：`server/middleware/group_model_allowlist.go`。白名单 404 列出本分组可用模型（§18.5）。
 - `scheduler-diff.json` 为 `gateway_scheduling.go`、`openai_account_scheduler.go`、`openai_gateway_scheduling.go`、`gemini_messages_compat_service.go` 中新增的块登记白名单。
 - `UPSTREAM_BASE.json` 的 custom_patches 与 policy 保持一致；`VERSION` 升为 0.4.0；`SUB2API_COMPAT_VERSION` 保持 0.2.15。
 - 不向 Sub2API 官方提交。
