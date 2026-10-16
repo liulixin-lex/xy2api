@@ -292,6 +292,20 @@ func TestAdminOverrideIsRespected(t *testing.T) {
 	require.Equal(t, resilience.BalanceOK, resilience.BalanceRecordFrom(f.repo.account.Extra).State)
 }
 
+func TestExpiredOtherPauseIsNoAdminOverride(t *testing.T) {
+	// A longer 403 cooldown kept the balance pause from being written; when
+	// it runs out the account is still empty and must stay excluded.
+	f := newProbeFixture(t)
+	f.exhaust(t)
+	f.repo.tempUntil = time.Now().Add(-time.Second)
+	f.repo.tempReason = "auth:403_cooldown"
+	f.r.runBalanceProbes(context.Background())
+	rec := resilience.BalanceRecordFrom(f.repo.account.Extra)
+	require.Equal(t, resilience.BalanceExhausted, rec.State)
+	require.True(t, strings.HasPrefix(f.repo.tempReason, resilience.ReasonPrefixBalanceExhausted), "balance pause re-applied")
+	require.True(t, f.repo.tempUntil.After(time.Now()))
+}
+
 func TestRecheckBalanceForcesProbe(t *testing.T) {
 	// Spec: administrator confirms a top-up.
 	f := newProbeFixture(t)
@@ -343,6 +357,12 @@ func TestVerdictFromUsageBody(t *testing.T) {
 	require.Equal(t, resilience.ProbeNegative, v)
 	_, _, ok = verdictFromUsageBody([]byte(`{"mode":"quota_limited","isValid":true}`))
 	require.False(t, ok, "no amount: inconclusive")
+	v, _, ok = verdictFromUsageBody([]byte(`{"mode":"unrestricted","isValid":true,"planName":"Pro","remaining":-1}`))
+	require.True(t, ok)
+	require.Equal(t, resilience.ProbePositive, v, "a subscription without limits reports -1")
+	v, _, ok = verdictFromUsageBody([]byte(`{"mode":"unrestricted","isValid":true,"remaining":-1.5,"balance":-1.5}`))
+	require.True(t, ok)
+	require.Equal(t, resilience.ProbeNegative, v, "an overdrawn balance stays negative")
 }
 
 func TestVerdictFromNewAPI(t *testing.T) {

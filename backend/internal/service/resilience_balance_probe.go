@@ -145,7 +145,11 @@ func (r *ResilienceService) advanceBalanceAccount(ctx context.Context, accountID
 	}
 
 	// EXHAUSTED or SUSPECT.
-	if !force && !pausedByBalance && !pausedByOther && now.Before(rec.ExclusionUntil(cfg)) && rec.State == resilience.BalanceExhausted {
+	// An administrator recovering the account clears the pause; a pause that
+	// merely ran out (for example a longer 403 cooldown that kept the balance
+	// pause from being written) keeps its timestamp and is re-applied below.
+	cleared := account.TempUnschedulableUntil == nil
+	if !force && cleared && now.Before(rec.ExclusionUntil(cfg)) && rec.State == resilience.BalanceExhausted {
 		// The pause was lifted while the exclusion should still hold: an
 		// administrator recovered the account. Respect it.
 		after := resilience.BalanceRecord{State: resilience.BalanceOK, Since: now, LastProbeAt: rec.LastProbeAt, ProbeSource: balanceProbeSourceAdmin}
@@ -276,6 +280,10 @@ func verdictFromUsageBody(body []byte) (resilience.ProbeVerdict, string, bool) {
 		v := parsed.Get(field)
 		if v.Exists() && (v.Type == gjson.Number || v.Type == gjson.String) {
 			amount := v.Float()
+			// A subscription without any limit reports remaining = -1.
+			if field == "remaining" && amount == -1 && strings.EqualFold(parsed.Get("mode").String(), "unrestricted") {
+				return resilience.ProbePositive, "usage unrestricted subscription without limits", true
+			}
 			evidence := fmt.Sprintf("usage %s=%.4f", field, amount)
 			if amount > balancePositiveThreshold {
 				return resilience.ProbePositive, evidence, true
