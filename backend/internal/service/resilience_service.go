@@ -292,7 +292,7 @@ func (s *ResilienceService) reloadSettings(ctx context.Context) error {
 
 // GetSettings returns the effective settings.
 func (s *ResilienceService) GetSettings() resilience.Settings {
-	return *resilience.Current()
+	return resilience.Current().Clone()
 }
 
 // UpdateSettings validates, stores and publishes a new document.
@@ -316,7 +316,7 @@ func (s *ResilienceService) UpdateSettings(ctx context.Context, next resilience.
 	resilience.Publish(next)
 	// Settings changes may change who is available.
 	s.negCache.InvalidateGroup(0)
-	return *resilience.Current(), nil
+	return resilience.Current().Clone(), nil
 }
 
 // RecoveringCap returns the temporary concurrency cap of a RECOVERING

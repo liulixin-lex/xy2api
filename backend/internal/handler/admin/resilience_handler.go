@@ -1,6 +1,9 @@
 package admin
 
 import (
+	"bytes"
+	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -10,6 +13,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/response"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
+	"github.com/tidwall/gjson"
 )
 
 // ResilienceHandler serves the gateway resilience administration endpoints.
@@ -32,7 +36,18 @@ func (h *ResilienceHandler) GetSettings(c *gin.Context) {
 // value; unknown fields are rejected.
 // PUT /api/v1/admin/settings/gateway-resilience
 func (h *ResilienceHandler) UpdateSettings(c *gin.Context) {
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, shareSchedulingMaxBody))
+	if err != nil {
+		response.BadRequest(c, "Request body too large or unreadable")
+		return
+	}
 	next := h.svc.GetSettings()
+	// A map in the body replaces the current one (decoding would merge into
+	// it, so keys could never be removed); slices are replaced anyway.
+	if gjson.GetBytes(body, "budget.model_overrides").Exists() {
+		next.Budget.ModelOverrides = nil
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
 	if !decodeStrictJSON(c, &next) {
 		return
 	}

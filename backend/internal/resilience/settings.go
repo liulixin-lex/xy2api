@@ -420,8 +420,25 @@ func init() {
 // the returned value must be treated as read-only.
 func Current() *Settings { return current.Load() }
 
-// Publish replaces the process-wide snapshot.
+// Publish replaces the process-wide snapshot. It stores a deep copy, so the
+// caller keeps no reference into the shared maps and slices.
 func Publish(s Settings) {
-	s.normalize()
+	s = s.Clone()
 	current.Store(&s)
+}
+
+// Clone returns a deep copy. The published snapshot is read by every request
+// without locks, so anything that changes a copy (decoding a PUT body into
+// it, for example) must not share its maps or slices.
+func (s Settings) Clone() Settings {
+	c := s
+	c.Failure.BalanceKeywordsExtra = append([]string(nil), s.Failure.BalanceKeywordsExtra...)
+	c.Balance.RecheckScheduleSeconds = append([]int(nil), s.Balance.RecheckScheduleSeconds...)
+	c.Keepalive.Edges = append([]string(nil), s.Keepalive.Edges...)
+	c.Budget.ModelOverrides = make(map[string]int, len(s.Budget.ModelOverrides))
+	for k, v := range s.Budget.ModelOverrides {
+		c.Budget.ModelOverrides[k] = v
+	}
+	c.normalize()
+	return c
 }
