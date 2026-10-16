@@ -433,6 +433,10 @@
       "value": "status = applyExhaustedRetryHint(c, h.gatewayService, status)"
     },
     {
+      "path": "backend/internal/service/openai_sticky_compat.go",
+      "value": "if !resilienceBindAllowed(ctx, accountID) {"
+    },
+    {
       "path": "backend/internal/handler/gateway_helper.go",
       "value": "if service.NoteDeliveryHeartbeat(c, written) {"
     },

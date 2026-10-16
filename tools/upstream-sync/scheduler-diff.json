@@ -393,10 +393,17 @@
       },
       {
         "block": "gateway-resilience",
-        "note": "Gateway resilience (0.4.0): sticky bindings are not written for accounts the request must not bind (soft penalty or session avoid).",
-        "removed": [],
+        "note": "Gateway resilience (0.4.0): sticky bindings are not written for accounts the request must not bind (soft penalty or session avoid); on the legacy path (advanced scheduler off) a soft-penalised sticky owner keeps its binding.",
+        "removed": [
+          "if err == nil {"
+        ],
         "added": [
           "if !resilienceBindAllowed(ctx, accountID) {",
+          "return nil",
+          "}",
+          "// xy2api resilience: a soft-penalised owner keeps the binding (design §4.2).",
+          "if err == nil && !resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {",
+          "if resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {",
           "return nil",
           "}"
         ]

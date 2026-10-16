@@ -161,6 +161,11 @@ func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, gr
 	if s.qualityOwnsSticky(ctx, groupID, sessionHash) {
 		return nil
 	}
+	// xy2api resilience: a binding kept for a soft-penalised owner is not
+	// replaced by a temporary placement (design §4.2).
+	if !resilienceBindAllowed(ctx, accountID) {
+		return nil
+	}
 	if s == nil || s.cache == nil || accountID <= 0 {
 		return nil
 	}
