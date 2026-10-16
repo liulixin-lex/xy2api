@@ -25,7 +25,7 @@ Every account state that prevents normal scheduling MUST be either hard or soft.
 - model-level transient blocks;
 - per-session avoidance.
 
-Hard states MUST always exclude the account. Soft states MUST exclude the account only while a healthy candidate exists.
+Hard states MUST always exclude the account while they last; an `EXHAUSTED` balance lasts until its next check plus a grace period (design §3.2), after which real traffic re-checks the account. Soft states MUST exclude the account only while a healthy candidate exists.
 
 #### Scenario: Soft cooldown in a multi-account group
 - **WHEN** account A is in a 30 s transient cooldown and account B in the same tier is healthy

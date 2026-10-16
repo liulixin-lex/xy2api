@@ -30,7 +30,7 @@ Only the response headers and body hints defined below are added. The single exc
 
 ### Requirement: Negative cache for no-account results
 
-The gateway MUST cache a "no available account" result per (group, platform, model) for `errors.negative_cache_seconds` (default 2 s). During that time it MUST return the same response with the remaining `Retry-After`, without querying the database or the scheduler snapshot. Account recovery events MUST invalidate the cached entry.
+The gateway MUST cache a "no available account" result per (group, model) — for OpenAI-compatible selection also per transport, endpoint capability and platform — for `errors.negative_cache_seconds` (default 2 s). During that time it MUST return the same response with the remaining `Retry-After`, without querying the database or the scheduler snapshot. Transient cooldowns that the resilience layer applies or lifts and balance state changes MUST invalidate the entries of the account's groups; other changes (429 cooldowns, error states, administrator edits, other instances) MAY take effect when the entry expires.
 
 #### Scenario: Burst of retries
 - **WHEN** 50 requests for the same group and model arrive within 2 s after a no-account result

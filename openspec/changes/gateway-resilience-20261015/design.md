@@ -500,14 +500,15 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
 ## 13. 上游同步与补丁登记（D10）
 
 - 新包 `internal/resilience` 以及新的 handler、管理接口文件，在 `tools/upstream-sync/policy.json` 中登记为 XY_OWNED（`backend/internal/**` 已覆盖，另在 custom_patches 中写明）。
-- 原上游文件中的钩子各登记为具名补丁，每个补丁带 required_literals 与绑定测试：
-  - `xy-resilience-classify-hook`：`ratelimit_service.go`、`openai_gateway_upstream_errors.go`；
-  - `xy-resilience-budget-hook`：各换号循环、`failover_loop.go`、Gemini 兼容服务；
-  - `xy-resilience-session-hook`：`openai_account_scheduler.go`、`gateway_scheduling.go`、`gateway_service.go`、`share_scheduling_exec.go`；
-  - `xy-resilience-keepalive-hook`：`openai_gateway_response_handling.go`、`gateway_upstream_response.go`、`gateway_handler.go`（G3）；
-  - `xy-resilience-disconnect-hook`：流处理与计费提交点；
-  - `xy-resilience-errors-hook`：`no_account_error.go`、`api_key_auth.go`、`gateway_inflight_reservation.go`、`image_task_handler.go`；
-  - `xy-resilience-fallback-hook`：`gateway_scheduling.go`。
+- 原上游文件中的钩子各登记为具名补丁，每个补丁带绑定测试；钩子行本身登记在 `policy.json` 的 required_literals（以下文件清单以其为准）：
+  - `xy-resilience-classify-hook`：`ratelimit_service.go`（失败分类与罚则入口）、`ops_upstream_context.go`（ops 记录与本请求失败账号标记）；
+  - `xy-resilience-budget-hook`：`failover_loop.go`（`resilienceAttemptFailed`）、`gateway_forward.go`（服务内原地重试）；
+  - `xy-resilience-session-hook`：`gateway_scheduling.go`（选号收尾：保留软罚绑定、末位兜底）、`gateway_service.go`、`openai_account_scheduler.go`、`openai_gateway_scheduling.go`；
+  - `xy-resilience-keepalive-hook`：`gateway_upstream_response.go`、`openai_gateway_response_handling.go`（停滞检测基线）；
+  - `xy-resilience-disconnect-hook`：`client_request_id.go`（送达跟踪）、`gateway_usage_billing.go`、`openai_gateway_usage.go`（未送达计费）；
+  - `xy-resilience-errors-hook`：`api_key_auth.go`（同 Key 快速失败、失败回合封顶）、`image_task_handler.go`（异步图片准入前移）；
+  - `xy-resilience-fallback-hook`：`routes/gateway.go`（兜底分组中间件）；
+  - 续链整轮重放（§9.8）：`openai_gateway_messages.go`、`openai_messages_continuation.go`。
 - 上游缺陷修复同样登记为具名补丁：
   - `xy-index-nonce-no-304`：`internal/web/embed_on.go`。index.html 带本次请求的 CSP nonce；304 会让浏览器用新的 CSP 头配缓存正文里的旧 nonce，每次刷新都拦截内联配置脚本。改为始终返回完整页面、不带 ETag。sub2api main 有同样的问题。
 - `scheduler-diff.json` 为 `gateway_scheduling.go`、`openai_account_scheduler.go`、`openai_gateway_scheduling.go`、`gemini_messages_compat_service.go` 中新增的块登记白名单。

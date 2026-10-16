@@ -323,7 +323,7 @@
 ## 13 PR 与发版
 
 - [ ] 13.1 xy2api PR：CI 18 项全绿，并新增 “Gateway resilience” 必测作业（关键 Scenario 测试，`-race`，零跳过守卫）；XY-image PR 全绿。
-  - 必测作业已加入 `backend-ci.yml` 的 test 作业：`tools/gateway-resilience/ci_gate.py` 自动收集韧性测试文件中的全部测试（`826dc652e` 时 177 个，`7ef136d49` 时 178 个），`-race` 运行，任一失败、跳过或未运行即失败；本机通过。
+  - 门禁已作为 `backend-ci.yml` test 作业中的必过步骤 “Gateway resilience” 加入：`tools/gateway-resilience/ci_gate.py` 自动收集韧性测试文件中的全部测试（`826dc652e` 时 177 个，`7ef136d49` 时 178 个），`-race` 运行，任一失败、跳过或未运行即失败；本机通过。
 - [ ] 13.2 打 0.4.0-rc.1 标签并跑 Release 工作流；校验附件 SHA 与双架构 GHCR；在测试服务器用 RC 制品复跑 12.3、12.4 的关键子集与 12.7。
 - [ ] 13.3 正式版：xy2api 0.4.0 PR → 合并 → 标签 → Release；XY-image 0.0.17 发布；更新 provenance 与记忆。
 

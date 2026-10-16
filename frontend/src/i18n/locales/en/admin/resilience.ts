@@ -10,7 +10,7 @@ export default {
         session: 'Session rebinding',
         sessionHint: 'After consecutive failures of a session on one account reach the threshold, the session is rebound and avoids that account for a while (default 2 failures, 10 minutes).',
         lastResort: 'Last-resort selection',
-        lastResortHint: 'Without healthy accounts, serve on the soft-penalised account whose cooldown ends first, so single-account groups stay available.',
+        lastResortHint: 'Without healthy accounts, serve on a free soft-penalised account, by priority and soonest cooldown end, queueing only when all are busy, so single-account groups stay available.',
         balance: 'Recoverable balance',
         balanceHint: 'Accounts out of upstream balance are re-checked on a schedule (default 1/2/5/10/15 minutes) and recover automatically after a top-up.',
         budget: 'Request budget',
