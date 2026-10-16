@@ -4,6 +4,10 @@
 
 ## 当前交接状态
 
+### 智商检测“最终响应互相冲突”诊断（2026-10-16，只读诊断完成；修复待授权）
+
+- 账号 #307（aiportx 中转）会注入占位 assistant 消息（`msg_ft_*`，正文为单个空格，无 `phase`），`iqcheck` 的 `terminal()` 把它当作第二条最终回答，因此判为 `conflicting_final_response`。证据、结论与建议修法见操作日志 `20261016-iq-conflict-aiportx`。未改代码，未部署。
+
 ### Sub2API 0.2.15 / XY2API 0.3.0 正式发布完成（2026-10-13）
 
 - 独立工作树 `/lex/xy2api-sync-20261013`；起始main `7b1d5d8c387c461a660befa3ac936b39715b4bf0`。固定官方annotated v0.2.15（object `86a80c13dcba86f52f9ca815b5a471cecc236227`，target `f2669c8cf62555cd92389b3f55920e9e6e7c6ff2`），真实base `0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d`。146个上游提交、27项冲突裁决见[同步说明](UPSTREAM_SYNC_V0215.md)。
@@ -672,6 +676,12 @@
 Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+### 20261016-iq-blank-placeholder-0.3.1 — 智商检测忽略空白占位消息并发布部署 0.3.1（进行中）
+
+- 用户于 2026-10-16 明确授权三步全部完成：本地修复与测试；提交、推送并开 PR（含合并）；发版 0.3.1 并部署生产。起点 `main` `f8fec15a2`，分支 `fix/iq-blank-placeholder-20261016`。诊断依据见操作日志 `20261016-iq-conflict-aiportx`。
+- 范围：`iqcheck` 的 `terminal()` 不再把仅含空白的 assistant 消息计为最终回答，诊断中记为忽略类型 `blank`；解析器版本升为 `iq-response-v6`；产品版本 0.3.1（兼容版本仍为 0.2.15）。无迁移，无前端改动。
+- 生产按 2026-10-15 升级现场的方式进行：先备份 compose，只替换镜像行，预拉镜像后 `compose up -d`；回滚即恢复 0.3.0 镜像行。注意记忆第 650 行记录的历史部署事故。
 
 ### 20261012-pr90-slim — PR #90 复审、精简与上线验收（已完成，随 PR #90 推送；本 Agent 无进行中操作）
 
@@ -2124,3 +2134,13 @@ pnpm --dir frontend run build
 - 清理仅本任务prefix+label容器/网络/卷和指定敏感fixture路径；保留hash/JSON/日志，4个既有部署完全不变。临时VCS复现clone已删；生产没有写入或部署。
 - 按AGENTS在正式发行后补齐记忆并清理本任务进行中条目，本收尾仅改PROJECT_MEMORY，使用独立PR和完整保护检查。不可变发行tag保持1e0fbdd704；收尾main的业务树与正式tag完全一致，此纯文档领先记录是对runbook收尾“main等于tag”的明确例外，避免为补记发行结果移动标签。
 - 没有未完成业务修复或发行验收；后续仅为用户实际部署时的public设置、生产恢复验证与可选share影子/灰度，未在此次只读生产授权外执行。证据及历史失败/中断均保留，未保证无法证明的零风险。
+
+### 2026-10-16T18:35:42Z — `20261016-iq-conflict-aiportx` — 只读诊断完成
+
+- 请求/目标：账号 #307 `port015`（OpenAI API Key，上游 aiportx 中转，检测模型 gpt-6-astra/low/compat）的智商检测持续返回 `conflicting_final_response`（“最终响应互相冲突”），查明原因。
+- 开始状态：`main` HEAD `f8fec15a2`，工作树干净；生产 `xy2api-prod-app` 运行 `xy2api:0.3.0`，与本地 `iqcheck` 源码一致。
+- 完成操作：只读查询生产库 `accounts.iq_check` 与 `account_iq_check_results/attempts` 的诊断；在生产宿主机用与 IQ 探测相同的请求体直连该账号上游，共发出 11 次测试请求。key 只在服务器内通过 curl 的 stdin 配置传递，未打印、未落盘、未回传；请求不经 XY2API，未写生产数据。
+- 结论：该中转会在真实输出前注入占位 assistant 消息（`msg_ft_*`，正文为单个空格，无 `phase`，响应 ID 变为 `resp_ft_*`），并把它写进 `response.completed.output`。`parse.go` 的 `terminal()` 把无 phase 且文本非空的 assistant 消息都当作最终回答，空格也算非空，因此与真实的 `final_answer` 冲突（`parse.go:401-404`）。生产 9 次调用的诊断（done_messages 2/3、terminal_items 3/4、ignored_items 2/1）与“1–2 条占位 + reasoning + 最终答案”的结构逐项吻合。
+- 其他观察：占位注入不是每次都有。直连拿到完整响应的 6 次中有 2 次出现，都是短提示词；4 次检测原题都没有出现，而生产 9 次调用全部命中。差异可能与 IQ 探测携带的 `prompt_cache_key` 或客户端特征有关，未证实。带 `prompt_cache_key` 的 curl 请求在该中转上，HTTP/1.1 会超时，HTTP/2 会被整段缓冲约 66 秒，原因未查明，不影响上述结论。该账号业务流量正常，最近一小时有上百次成功请求。本机与生产均无 Go 1.27 工具链，未用真实解析器回放，结论依据代码逐行推导和既有用例 `parse_http_test.go:182`。
+- 修改文件：仅本文件（本条及顶部交接项）。未改业务代码，未部署，未改生产配置。
+- 下一步（待用户授权）：在 `terminal()` 中把纯空白的 assistant 消息视为非答案（与 design.md:92“只提取完整最终回答”及 `Grade` 先做 TrimSpace 一致），并补占位消息回归用例；或者请上游关闭占位注入。
