@@ -142,3 +142,15 @@ func TestTruncateRuneSafe(t *testing.T) {
 	require.True(t, len(got) <= 7)
 	require.Equal(t, "余余", got)
 }
+
+func TestBalanceStateOfAgreesWithTheRecord(t *testing.T) {
+	require.Equal(t, BalanceOK, BalanceStateOf(nil))
+	require.Equal(t, BalanceOK, BalanceStateOf(map[string]any{"other": 1}))
+	for _, st := range []BalanceState{BalanceOK, BalanceExhausted, BalanceRecovering} {
+		extra := BalanceRecord{State: st, Since: t0}.Extra()
+		require.Equal(t, st, BalanceStateOf(extra))
+		require.Equal(t, BalanceRecordFrom(extra).State, BalanceStateOf(extra))
+	}
+	require.Equal(t, BalanceOK, BalanceStateOf(map[string]any{BalanceExtraKey: map[string]any{"level": 2}}))
+	require.Equal(t, BalanceOK, BalanceStateOf(map[string]any{BalanceExtraKey: "garbage"}))
+}

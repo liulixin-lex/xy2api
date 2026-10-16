@@ -67,6 +67,23 @@ func BalanceRecordFrom(extra map[string]any) BalanceRecord {
 	return r
 }
 
+// BalanceStateOf returns the state of the record in an account's extra map
+// without decoding the rest of it; selection reads it for every account.
+// Only EXHAUSTED needs the full record (BalanceRecordFrom).
+func BalanceStateOf(extra map[string]any) BalanceState {
+	raw, ok := extra[BalanceExtraKey]
+	if !ok || raw == nil {
+		return BalanceOK
+	}
+	if m, ok := raw.(map[string]any); ok {
+		if st, _ := m["state"].(string); st != "" {
+			return BalanceState(st)
+		}
+		return BalanceOK
+	}
+	return BalanceRecordFrom(extra).State
+}
+
 // Extra encodes the record for accounts.extra.
 func (r BalanceRecord) Extra() map[string]any {
 	data, _ := json.Marshal(r)
