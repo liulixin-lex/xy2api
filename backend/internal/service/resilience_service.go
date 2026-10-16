@@ -121,6 +121,9 @@ type ResilienceService struct {
 	fallbackAccounts   AccountRepository
 	fallbackGroups     GroupRepository
 	fallbackGroupCache fallbackGroupCache
+	// fallbackMoves records when this instance last moved a key of a group
+	// to its fallback group (group id -> time).
+	fallbackMoves sync.Map
 }
 
 // NewResilienceService creates the service; Start loads the settings and

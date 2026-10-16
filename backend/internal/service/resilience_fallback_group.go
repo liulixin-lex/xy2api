@@ -86,6 +86,10 @@ func (r *ResilienceService) ConfigureFallbackGroups(accounts AccountRepository, 
 //   - the group has been healthy for return_stable_seconds: the key returns;
 //   - the group recovered only recently: remembered keys stay in the
 //     fallback group, so a flapping group does not move them back and forth.
+//
+// A healthy group from which this instance moved no key within the binding
+// TTL has nothing to return and costs no store round trip; keys moved before
+// a restart then return at once.
 func (r *ResilienceService) AvailabilityFallbackGroup(ctx context.Context, apiKey *APIKey) *Group {
 	cfg := resilience.Current()
 	if r == nil || r.store == nil || r.fallbackAccounts == nil || r.fallbackGroups == nil || !cfg.FallbackGroupOn() ||
@@ -95,8 +99,13 @@ func (r *ResilienceService) AvailabilityFallbackGroup(ctx context.Context, apiKe
 	}
 	primary := apiKey.Group
 	now := time.Now()
+	ttl := time.Duration(cfg.FallbackGroup.BindingTTLSeconds) * time.Second
+	healthy := r.groupHasHealthyAccount(ctx, primary.ID, now)
+	if healthy && !r.fallbackMovedWithin(primary.ID, ttl, now) {
+		return nil
+	}
 	remembered, _ := r.store.FallbackKey(ctx, primary.ID, apiKey.ID)
-	if r.groupHasHealthyAccount(ctx, primary.ID, now) {
+	if healthy {
 		since, err := r.store.MarkGroupStable(ctx, primary.ID, now)
 		if !remembered {
 			return nil
@@ -115,7 +124,7 @@ func (r *ResilienceService) AvailabilityFallbackGroup(ctx context.Context, apiKe
 		fallback.SubscriptionType == SubscriptionTypeSubscription || !r.groupHasHealthyAccount(ctx, fallback.ID, now) {
 		return nil
 	}
-	ttl := time.Duration(cfg.FallbackGroup.BindingTTLSeconds) * time.Second
+	r.fallbackMoves.Store(primary.ID, now)
 	if err := r.store.MarkFallbackKey(ctx, primary.ID, apiKey.ID, ttl); err != nil {
 		slog.Warn("resilience.fallback_mark_failed", "group_id", primary.ID, "error", err)
 	}
@@ -124,6 +133,13 @@ func (r *ResilienceService) AvailabilityFallbackGroup(ctx context.Context, apiKe
 		slog.Warn("resilience.fallback_group", "group_id", primary.ID, "fallback_group_id", fallback.ID, "api_key_id", apiKey.ID)
 	}
 	return fallback
+}
+
+// fallbackMovedWithin reports whether this instance moved a key of the group
+// to its fallback group within ttl.
+func (r *ResilienceService) fallbackMovedWithin(groupID int64, ttl time.Duration, now time.Time) bool {
+	v, ok := r.fallbackMoves.Load(groupID)
+	return ok && now.Sub(v.(time.Time)) < ttl
 }
 
 // groupHasHealthyAccount reports whether a group has an active, schedulable

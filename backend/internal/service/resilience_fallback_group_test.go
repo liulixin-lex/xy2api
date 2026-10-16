@@ -117,6 +117,28 @@ func TestAvailabilityFallbackReturnAndFlapping(t *testing.T) {
 	require.Nil(t, r.AvailabilityFallbackGroup(ctx, &other))
 }
 
+func TestHealthyGroupWithoutMovedKeysSkipsTheStore(t *testing.T) {
+	r, store, accounts, key := newFallbackFixture(t)
+	accounts.byGroup[10] = []Account{healthyAccount(1)}
+	require.Nil(t, r.AvailabilityFallbackGroup(context.Background(), key))
+	store.mu.Lock()
+	_, marked := store.stable[10]
+	store.mu.Unlock()
+	require.False(t, marked, "no stability marker without moved keys")
+
+	// Moved within the binding TTL: the store decides again.
+	accounts.byGroup[10] = []Account{softAccount(1)}
+	r.lastResortGroups.entries = nil
+	require.NotNil(t, r.AvailabilityFallbackGroup(context.Background(), key))
+	accounts.byGroup[10] = []Account{healthyAccount(1)}
+	r.lastResortGroups.entries = nil
+	require.NotNil(t, r.AvailabilityFallbackGroup(context.Background(), key), "recovered 0 s ago: stay")
+	store.mu.Lock()
+	_, marked = store.stable[10]
+	store.mu.Unlock()
+	require.True(t, marked)
+}
+
 func TestAvailabilityFallbackSwitchOffAndSubscription(t *testing.T) {
 	r, _, _, key := newFallbackFixture(t)
 	withResilienceSettings(t, func(s *resilience.Settings) { s.FallbackGroup.Enabled = false })
