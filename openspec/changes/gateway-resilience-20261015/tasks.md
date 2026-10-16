@@ -350,6 +350,7 @@
 - [x] F2+F5 负缓存与快速失败只针对组级无号：只有组内不存在平台匹配、支持该模型且无罚的账号时才写负缓存并标记请求；快速失败只计带标记的 503 与配置错误；强制平台写进缓存键（`6cfd31e4a`）。修复前失败：`TestNegativeCacheOnlyForGroupLevelNoAccount`、`TestNegativeCacheKeepsAForcedPlatformApart`、`TestFastFailCountsOnlyGroupLevelNoAccount`；端到端 `TestStickyOnlyAccountKeepsServingBoundSessions`（RPM 仅粘性账号：新会话无号后已绑定会话照常服务，修复前得到缓存的 503）。测试环境没有 Anthropic OAuth 的 RPM 账号，以单测为准。
 - [ ] F3 份额分组末位兜底走份额内核“放宽一轮”（子 Agent，待合入）；测试服务器 LR-1。
 - [ ] F4 末位兜底门禁补全（窗口费用、RPM）、OpenAI 末位兜底用 Codex 自适应并发、门禁一致性表测试（子 Agent，待合入）。
+- [x] F5 补充（审查会话复核时提出）：不写负缓存的续链、图片与 compact 选号按同一判据标记组级无号，快速失败照常计入；OpenAI 选号不再对这类请求查缓存（修复前缓存条目可能给后来选到账号的请求打上标记）（`e18275960`）。修复前失败：`TestUncachedOpenAISelectionStillMarksGroupNoAccount`、`TestUncachedOpenAISelectionIgnoresTheCacheEntirely`。
 - [x] F7 运维错误记录保留改写前的状态码（经 CDN 的 502/504 不再记成 503）（`25bb15ca2`）。修复前失败：`TestOpsRecordKeepsTheStatusBeforeTheEdgeRewrite`。
 - [x] F12 槽位等待截到剩余首输出前预算（`f2b077c4e`）。修复前失败：`TestSlotWaitEndsWithThePreOutputBudget`（预算剩 200 毫秒仍等满 3 秒）。
 - [x] F14 文档：不受总开关控制的 5 项改动、生效重试上限表（runbook §6）、回退前的余额账号检查（`a53b90175`）；F1、F2/F5、F7、F12 同步 design、spec 与管理员说明（`80cca7e2c`）。
@@ -362,6 +363,7 @@
 
 - [ ] 份额策略配置精简（每组 22 项减到约 10 项，审查 5.1；`DecodePolicy` 对已删字段改为接受并忽略）；韧性设置精简（约 60 项减到约 35 项，审查 5.2 前四项）。
 - [ ] F6 余额耗尽两处“真相”（推断，先补用例证实）；F8 §9.8 续链重放只匹配已知的中转笼统文案；F9 影子模式统计对话锚点覆盖率并写明切换冷启动；F10 删除份额纠偏；F11 缓存归因只对影子与份额分组运行；F13 管理员复检改为显式时间戳；F15 Warn 级逐请求事件改 Info 加计数或按分组限速；F16 输出 P99 改增量直方图；F17 预览改用只读 `ScanBindings`；F18 软/硬档阈值统一；F19 删除死常量与单值字段。
+- [ ] F2 判据补全（审查会话复核时提出）：判据只看账号罚则。组内账号全部软罚、末位兜底只因新会话撞上账号会话数上限而失败时，结果仍写入负缓存，已绑定会话最多收到 2 秒的 503。范围很窄；修法是末位兜底失败原因为会话上限时不写负缓存。
 - [ ] CI 必测门禁合并为一个按清单驱动的脚本；项目记忆归档（主文件约 40KB，加大小上限）。
 
 0.5：
