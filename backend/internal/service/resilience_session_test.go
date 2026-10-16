@@ -292,3 +292,23 @@ func TestSessionMarksAreSwept(t *testing.T) {
 		require.True(t, live)
 	}
 }
+
+func TestStreakOwnerLosesItsBinding(t *testing.T) {
+	// The owner was soft-penalised at selection, so the binding was kept for
+	// it; the failure streak in this request moves the session, and the
+	// account that served the request may now take the binding.
+	withResilienceSettings(t, nil)
+	svc := &GatewayService{cache: &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"sess": 51}}, resilience: NewResilienceService(nil, newMemResilienceStore())}
+	st := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(context.Background(), st)
+	st.NoteStickyOwner(51)
+	st.KeepSticky(51)
+	require.False(t, resilienceBindAllowed(ctx, 52))
+
+	rec := svc.gatewaySessionRecorder()
+	rec.Failure(ctx, 7, "sess", 51, resilience.CategoryTransient)
+	rec.Failure(ctx, 7, "sess", 51, resilience.CategoryTransient)
+	require.True(t, st.Avoided(51))
+	require.True(t, resilienceBindAllowed(ctx, 52))
+	require.True(t, svc.resilienceGatewayBindAllowed(ctx, 52))
+}

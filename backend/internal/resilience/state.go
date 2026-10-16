@@ -89,6 +89,22 @@ func (s *RequestState) SetAvoided(ids map[int64]struct{}) {
 	s.mu.Unlock()
 }
 
+// AddAvoided adds an account the session started avoiding during this
+// request (a failure streak). The set is copied, never changed in place.
+func (s *RequestState) AddAvoided(accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := make(map[int64]struct{}, len(s.avoided)+1)
+	for id := range s.avoided {
+		next[id] = struct{}{}
+	}
+	next[accountID] = struct{}{}
+	s.avoided = next
+}
+
 // Avoided reports whether accountID is in the session's avoid set.
 func (s *RequestState) Avoided(accountID int64) bool {
 	if s == nil {

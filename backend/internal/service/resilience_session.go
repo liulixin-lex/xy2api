@@ -315,7 +315,8 @@ func (s *GatewayService) resilienceGatewayBindAllowed(ctx context.Context, accou
 		return false
 	}
 	owner := st.StickyOwner()
-	if owner <= 0 || owner == accountID || !resilience.Current().SessionOn() {
+	if owner <= 0 || owner == accountID || !resilience.Current().SessionOn() || st.Avoided(owner) {
+		// An owner the session now avoids lost its binding to the streak.
 		return true
 	}
 	bound, err := s.getSchedulableAccount(ctx, owner)
@@ -333,8 +334,9 @@ func (s *GatewayService) resilienceGatewayBindAllowed(ctx context.Context, accou
 // written for this request: a binding kept for a soft-penalised owner must
 // not be replaced by a temporary placement.
 func resilienceBindAllowed(ctx context.Context, accountID int64) bool {
-	kept := resilience.StateFrom(ctx).KeptSticky()
-	return kept == 0 || kept == accountID
+	st := resilience.StateFrom(ctx)
+	kept := st.KeptSticky()
+	return kept == 0 || kept == accountID || st.Avoided(kept)
 }
 
 // resilienceOpenAILastResort is the OpenAI-scheduler variant of last-resort
@@ -457,6 +459,8 @@ func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, s
 	avoid := time.Duration(cfg.Session.AvoidSeconds) * time.Second
 	_ = rec.r.store.AddSessionAvoid(stateCtx, groupID, sessionHash, accountID, avoid)
 	rec.r.avoidingSessions.Store(sessionMarkKey(groupID, sessionHash), time.Now().Add(avoid))
+	// The request that hit the streak must not keep or restore the binding.
+	resilience.StateFrom(ctx).AddAvoided(accountID)
 	_ = rec.r.store.ClearSessionFailure(stateCtx, groupID, sessionHash, accountID)
 	resilience.Count(resilience.MetricSessionRebind, groupID, accountID, "resil_failure_streak")
 	slog.Warn("resilience.session_rebind",
