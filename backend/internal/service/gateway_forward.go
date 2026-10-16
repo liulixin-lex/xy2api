@@ -395,14 +395,19 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	var resp *http.Response
 	lastWireBody := body
 	retryStart := time.Now()
+	// xy2api resilience: the first-event guard of the attempt in flight; an
+	// attempt that is retried releases its guard when the next one starts.
+	var activeFirstEvent *firstEventGuard
+	defer func() { activeFirstEvent.Release() }()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 		// xy2api resilience: first upstream event timeout (design §7.4).
 		var firstEvent *firstEventGuard
 		if reqStream {
+			activeFirstEvent.Release()
 			upstreamCtx, firstEvent = newFirstEventGuard(upstreamCtx, resilienceFirstEventTimeout(ctx, account.ID, account.Platform))
-			defer firstEvent.Release()
+			activeFirstEvent = firstEvent
 		}
 		upstreamReq, wireBody, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 		releaseUpstreamCtx()
