@@ -304,6 +304,11 @@ func Classify(o Outcome, extraBalanceKeywords []string) Result {
 		return Result{Category: CategoryBalance, Reason: "status_402"}
 	}
 
+	// The gateway's own first-event deadline (a 504 it synthesises).
+	if code == "first_output_timeout" || typ == "first_output_timeout" {
+		return Result{Category: CategoryFirstOutputTimeout, Reason: "first_output_timeout"}
+	}
+
 	// 2. Client errors and unsupported models carried by codes (also inside
 	// streams).
 	if _, ok := clientErrorCodes[code]; ok {

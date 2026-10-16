@@ -335,3 +335,10 @@ func TestRetryAfterFromCompoundHints(t *testing.T) {
 	require.Equal(t, CategoryRateLimitReset, r.Category)
 	require.Equal(t, 90*time.Second, r.RetryAfter)
 }
+
+func TestGatewayFirstEventTimeoutIsNoRelay504(t *testing.T) {
+	r := Classify(Outcome{Source: SourceHTTP, StatusCode: 504, Type: "first_output_timeout",
+		Body: []byte(`{"error":{"type":"first_output_timeout","message":"Upstream produced no output before the deadline"}}`)}, nil)
+	require.Equal(t, CategoryFirstOutputTimeout, r.Category)
+	require.Equal(t, CategoryTransient, Classify(Outcome{Source: SourceHTTP, StatusCode: 504, Body: []byte("gateway timeout")}, nil).Category)
+}
