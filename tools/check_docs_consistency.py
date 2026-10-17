@@ -12,6 +12,8 @@ Rules live in tools/docs_consistency.json. The checks:
 - contracts: names the code defines (metrics, log events, settings) appear in
   the document that is meant to list them;
 - retired: identifiers of removed features appear only where history is kept;
+- private: host details (non-public hosts and addresses, server and
+  workstation paths) stay out of the public repository;
 - memory: docs/PROJECT_MEMORY.md stays readable (size cap, log structure).
 
 Standard library only. Exit status 1 when a check finds a problem.
@@ -248,9 +250,12 @@ def check_contracts(repo: Repo, cfg: dict) -> list[str]:
     return problems
 
 
-def check_retired(repo: Repo, cfg: dict) -> list[str]:
+def forbidden_terms(repo: Repo, cfg: dict, key: str, what: str) -> list[str]:
+    """Report matches of the `key` rules outside their allowed paths.
+
+    A rule may limit the files it looks at with `paths` (globs)."""
     problems = []
-    rules = [(re.compile(r["pattern"]), r) for r in cfg.get("retired", [])]
+    rules = [(re.compile(r["pattern"]), r) for r in cfg.get(key, [])]
     if not rules:
         return problems
     for path in repo.files:
@@ -258,6 +263,8 @@ def check_retired(repo: Repo, cfg: dict) -> list[str]:
             continue
         text = None
         for regex, rule in rules:
+            if rule.get("paths") and not any(match(path, scope) for scope in rule["paths"]):
+                continue
             if any(match(path, allowed) for allowed in rule.get("allowed", [])):
                 continue
             if text is None:
@@ -267,8 +274,16 @@ def check_retired(repo: Repo, cfg: dict) -> list[str]:
                 text = raw.decode("utf-8", errors="replace")
             for m in regex.finditer(text):
                 line = text.count("\n", 0, m.start()) + 1
-                problems.append(f"{path}:{line}: `{m.group(0)}` is retired ({rule['reason']})")
+                problems.append(f"{path}:{line}: `{m.group(0)}` {what} ({rule['reason']})")
     return problems
+
+
+def check_retired(repo: Repo, cfg: dict) -> list[str]:
+    return forbidden_terms(repo, cfg, "retired", "is retired")
+
+
+def check_private(repo: Repo, cfg: dict) -> list[str]:
+    return forbidden_terms(repo, cfg, "private", "is a private host detail")
 
 
 def check_memory(repo: Repo, cfg: dict) -> list[str]:
@@ -304,6 +319,7 @@ CHECKS = {
     "pins": check_pins,
     "contracts": check_contracts,
     "retired": check_retired,
+    "private": check_private,
     "memory": check_memory,
 }
 

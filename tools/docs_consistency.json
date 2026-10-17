@@ -189,6 +189,34 @@
       ]
     }
   ],
+  "private": [
+    {
+      "pattern": "aiaimax\\.cyou|test-aiaimax|book-keeper|(?<![A-Za-z0-9_.:/~-])/(?:xy|xy2|lex)/|/Users/admin/|[A-Z]:\\\\jiance",
+      "reason": "public repository: hosts, server and workstation paths and coexisting services stay in the private host notes outside the repository; AGENTS.md"
+    },
+    {
+      "pattern": "(?<![\\d.])(?!(?:127|10|0)\\.|192\\.168\\.|172\\.(?:1[6-9]|2\\d|3[01])\\.|192\\.0\\.2\\.|198\\.51\\.100\\.|203\\.0\\.113\\.|169\\.254\\.|255\\.)(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)(?![\\d.])",
+      "paths": [
+        "*.md",
+        "docs/**",
+        "openspec/**",
+        "deploy/**",
+        "skills/**"
+      ],
+      "reason": "public repository: real host addresses stay in the private host notes; examples use 192.0.2.0/24, 198.51.100.0/24 or 203.0.113.0/24"
+    },
+    {
+      "pattern": "\\b(?:ubuntu|root)@(?!localhost\\b)[A-Za-z0-9.-]+",
+      "paths": [
+        "*.md",
+        "docs/**",
+        "openspec/**",
+        "deploy/**",
+        "skills/**"
+      ],
+      "reason": "public repository: hosts, server and workstation paths and coexisting services stay in the private host notes outside the repository; AGENTS.md"
+    }
+  ],
   "memory": {
     "path": "docs/PROJECT_MEMORY.md",
     "archive": "docs/PROJECT_MEMORY_ARCHIVE.md",

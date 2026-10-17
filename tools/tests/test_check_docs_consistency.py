@@ -163,6 +163,29 @@ class DocsConsistencyTest(unittest.TestCase):
             ["[retired] docs/design.md:2: `old_event` is retired (removed)"],
         )
 
+    def test_private_host_details_stay_out(self):
+        public_ip = (
+            "(?<![\\d.])(?!(?:127|10|0)\\.|192\\.168\\.|192\\.0\\.2\\.)"
+            "(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)(?![\\d.])"
+        )
+        self.config = {
+            "private": [
+                {"pattern": "(?<![A-Za-z0-9_.:/~-])/(?:wsa|wsb)/|test\\.example\\.cyou", "reason": "private"},
+                {"pattern": public_ip, "paths": ["docs/**"], "reason": "address"},
+            ]
+        }
+        self.write("docs/a.md", "证据在/wsb/artifacts/x，站点 test.example.cyou\nhttps://host/wsa/ok 与 `<工作机 A>/artifacts`\n")
+        self.write("docs/b.md", "examples 192.0.2.10, 127.0.0.1:8080, 10.1.2.3, version 1.27.2\nreal 8.8.4.4\n")
+        self.write("src/ip_test.go", "ip := \"8.8.4.4\"\n")
+        self.assertEqual(
+            self.problems("private"),
+            [
+                "[private] docs/a.md:1: `/wsb/` is a private host detail (private)",
+                "[private] docs/a.md:1: `test.example.cyou` is a private host detail (private)",
+                "[private] docs/b.md:2: `8.8.4.4` is a private host detail (address)",
+            ],
+        )
+
     def test_memory_size_and_log_structure(self):
         self.config = {"memory": {"path": "docs/M.md", "archive": "docs/ARCHIVE.md", "max_bytes": 200, "log_heading": "## 操作日志"}}
         self.write("docs/M.md", "# M\n\n## 操作日志\n\n### 2026-10-17 — a\n\n## stray heading\n\n```\n## in code\n```\n" + "x" * 200 + "\n")
