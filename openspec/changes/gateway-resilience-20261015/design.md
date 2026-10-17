@@ -326,7 +326,9 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 
 它不属于协议。原样转发会让严格 SDK 报错（openai-python：“Expected to have received response.created before response.output_text.delta”）。网关还会把它当成语义输出，从而提前放弃换号和首输出超时。因此读取上游 SSE 时直接丢弃这类帧：类型为 `response.output_text.delta`、`delta` 为空，且 `item_id` 为 `SSE-Keep-Alive` 或带 `SSE-Keep-Alive: true`。其他字节原样通过。总开关关闭时不过滤。
 
-丢弃的帧算“上游存活、不算输出”：停滞检测（§7.5，输出后 120 秒、输出前按 `stream_data_interval_timeout`）以最后读到一行与最后丢弃一帧中较晚者计时，与 0.3.0 帧原样通过时一致；否则只靠这种帧维持静默期的中转会被误判停滞、截断回答并冷却账号（生产核查发现，0.4.0 引入的回归）。覆盖 Responses 流、经 Responses 上游的 Chat Completions 与 Messages 转换（流式与非流式读终止事件）；passthrough 无停滞检测，只计数。每丢一帧按账号计 `relay_keepalive`，上线后据此判断这类中转是否真实存在；原生 Chat Completions 上游的路径（`streamRawChatCompletions` 与两条 chat fallback 的 `scanCCStream`）没有停滞检测，传入空的存活记录，丢弃的帧不计数，指标会偏少（0.4.1 补）。不解决 Codex 自身的 300 秒空闲上限（它只认带数据的事件，向客户端发数据事件有兼容风险，0.4.0 不做）。
+丢弃的帧算“上游存活、不算输出”：停滞检测（§7.5，输出后 120 秒、输出前按 `stream_data_interval_timeout`）以最后读到一行与最后丢弃一帧中较晚者计时，与 0.3.0 帧原样通过时一致；否则只靠这种帧维持静默期的中转会被误判停滞、截断回答并冷却账号（生产核查发现，0.4.0 引入的回归）。覆盖 Responses 流、经 Responses 上游的 Chat Completions 与 Messages 转换（流式与非流式读终止事件）；passthrough 与原生 Chat Completions 上游的路径（`streamRawChatCompletions` 与两条 chat fallback 的 `scanCCStream`）无停滞检测，只计数。每丢一帧按账号计 `relay_keepalive`，上线后据此判断这类中转是否真实存在。不解决 Codex 自身的 300 秒空闲上限（它只认带数据的事件，向客户端发数据事件有兼容风险，0.4.0 不做）。
+
+首字时间与 0.3.0 一致（用户要求）：0.3.0 中这类帧原样通过，被当作首个事件记进 `first_token_ms`。`openai_ttft_mode=semantic`（缺省）时，结果取本次尝试中首个被丢帧与首个真实事件中较早者，从本次尝试开始计时；`visible` 不变，不算这类帧。只在结束构造结果时取值：帧照样丢弃，首输出超时与换号、停滞检测、送达判定和首输出守卫仍只认真实输出，计时不变。覆盖 Responses 流、passthrough、经 Responses 上游的 Chat Completions 与 Messages 流式转换、原生 Chat Completions 直转。非流式转换在 0.3.0 与现在都不记录首字；两条 chat fallback 的首字一直取首个输出 chunk（帧没有 choices，0.3.0 在那里也不计）：二者均不变。代价同 0.3.0：对发这类帧的中转，依赖首字的统计（调度首字评分、渠道监控健康分、首输出分档校准）偏乐观，要看真实值改用 `visible`。
 
 ## 8. 客户端断开与计费（D2、D9、D20）
 

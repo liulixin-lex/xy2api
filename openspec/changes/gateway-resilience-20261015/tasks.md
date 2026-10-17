@@ -368,6 +368,13 @@
 - [x] 本地首输出超时不给账号挂冷却（P2，按代码对齐文档，`fdb7cfdcb`）：design §2/§3、两份 spec 改为只计会话连败并换号；`stream_timeout_settings` 配置后沿用其原有处置（生产未配置）。`TestLocalFirstOutputTimeoutLeavesTheAccountSchedulable` 锁定行为。更正（评审复核）：本条原写“上游以 `first_output_timeout` 应答（级联网关）仍软冷却”，代码并无此行为：上游应答的同样不写冷却，只有 OpenAI API Key 账号按上游 5xx 原有规则记入按模型瞬时屏蔽；文档已按代码修正，并加 `TestUpstreamFirstOutputTimeoutLeavesTheAccountSchedulable` 锁定。理由：首输出慢多因中转排队或长推理、与请求档位相关，冷却会把其他档位的请求也挪走，收益不明。
 - [x] runbook：部署前提（Caddy 按对端 IP 注入 `X-XY-Edge`，否则 125 秒切断照旧，上线后抽查一次）、上线前逐个确认 OpenAI 中转余额接口语义（12.6）、余额文案处理、上线后按组观测 `first_output_timeout`/`budget_exhausted`/`post_output_failure`/`undelivered`/`relay_keepalive` 与 Caddy 125 秒 0 字节切断率、管理员配置项（具体分组与账号见仓库外核查报告）。
 
+## 晋级前评审补充（2026-10-17，0.4.0 范围）
+
+> RC 验证后评审 agent 转交用户要求（A1–A5，完整清单在仓库外），并入晋级 0.4.0 正式版的 PR #100；A1、A2 构成新候选，按既有门禁验证。
+
+- [x] A1 用户余额不足的提示恢复为 0.3.0 原文 `Insufficient account balance`（`24cfc6511`，见 4.6 说明）。
+- [x] A2 首字时间与 0.3.0 一致（design §7.8）：`openai_ttft_mode=semantic` 时，被丢弃的伪保活帧计入 `first_token_ms`，取本次尝试中首个被丢帧与首个真实事件中较早者；`visible` 不变。只在构造结果时取值，计时与判定不变。覆盖 Responses 流、passthrough、Chat Completions 与 Messages 流式转换、原生 Chat Completions 直转；非流式转换（两版都不记首字）与两条 chat fallback（帧在那里一直不计）不变。原生 Chat Completions 直转与两条 chat fallback 同时传入存活记录，丢帧按账号计数（原登记 0.4.1）。修复前失败：`TestRelayKeepaliveFrameCountsAsTheSemanticFirstToken` 五条路径的 semantic 子用例（约 400 毫秒，应小于 150 毫秒）及原生直转的计数，`TestRelayKeepaliveFramesInTheChatFallbacks`（计数为 0）；`TestRelayKeepaliveFramesStillDoNotStopTheFirstOutputTimer` 锁定首输出超时照常触发。管理端 `openai_ttft_mode` 说明写明两种口径与偏乐观的代价。
+
 ## 后续（只登记，不在 0.4.0 实施）
 
 > 份额调度在 0.4.1 合并前不在任何生产分组启用；0.4.0 已修 F3，若要提前启用需用户单独确认。
@@ -376,7 +383,7 @@
 
 - [ ] 份额策略配置精简（每组 22 项减到约 10 项，审查 5.1；`DecodePolicy` 对已删字段改为接受并忽略）；韧性设置精简（约 60 项减到约 35 项，审查 5.2 前四项）。
 - [ ] F6 余额耗尽两处“真相”（推断，先补用例证实）；F8 §9.8 续链重放只匹配已知的中转笼统文案；F9 影子模式统计对话锚点覆盖率并写明切换冷启动；F10 删除份额纠偏；F11 缓存归因只对影子与份额分组运行；F13 管理员复检改为显式时间戳；F15 Warn 级逐请求事件改 Info 加计数或按分组限速；F16 输出 P99 改增量直方图；F17 预览改用只读 `ScanBindings`；F18 软/硬档阈值统一；F19 删除死常量与单值字段。
-- [ ] `relay_keepalive` 补齐原生 Chat Completions 路径（评审复核时提出）：`streamRawChatCompletions` 与两条 chat fallback 的 `scanCCStream` 传空存活记录，这些路径没有停滞检测、行为无误，只是丢弃的伪保活帧不计数。改为按账号传入存活记录。
+- [x] `relay_keepalive` 补齐原生 Chat Completions 路径（评审复核时提出；已提前在 0.4.0 完成，见 A2）：`streamRawChatCompletions` 与两条 chat fallback 的 `scanCCStream` 传空存活记录，这些路径没有停滞检测、行为无误，只是丢弃的伪保活帧不计数。改为按账号传入存活记录。
 - [ ] xhigh/max 档位遇完全静默的上游不换号（P2，非回归，生产核查第 5 节）：首输出前停滞从最后读到一行起算 180 秒，早于 200/220 秒档位；OpenAI 路径的停滞只报错、不换号（只有 Grok 换号），还冷却账号、计会话连败。修法二选一：首输出前停滞在 OpenAI 路径也返回可换号错误（与 Grok 一致），或档位不超过停滞阈值。用例：拿到响应头后完全静默，xhigh、max 各一例，断言换号。生产 0.3.0 首输出前停滞 48 小时 26 次。
 - [ ] OpenAI 按模型瞬时屏蔽期间保留会话绑定（design §4.2 例外）：两条 OpenAI 粘性路径的软罚判断接入 `resilienceOpenAIPenaltyOf`，需改上游文件两处已登记钩子；Explain 与无号 `Retry-After` 同样看不到该屏蔽。
 - [ ] F2 判据补全（审查会话复核时提出）：判据只看账号罚则。组内账号全部软罚、末位兜底只因新会话撞上账号会话数上限而失败时，结果仍写入负缓存，已绑定会话最多收到 2 秒的 503。范围很窄；修法是末位兜底失败原因为会话上限时不写负缓存。

@@ -1015,7 +1015,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
 			Stream:                        true,
 			Duration:                      time.Since(startTime),
-			FirstTokenMs:                  firstTokenMs,
+			FirstTokenMs:                  relayLive.firstTokenMs(firstTokenMs, startTime, s.openAITTFTMode(c.Request.Context())),
 			ClientDisconnect:              clientDisconnected,
 		}
 		if searchCount > 0 {

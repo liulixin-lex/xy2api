@@ -74,7 +74,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 经 CDN 的请求遇到 502/504 | 改为 503，正文不变，并带 `X-XY-Upstream-Status: 502/504`。Cloudflare 会把源站的 502/504 换成自己的纯文本页面，丢掉 JSON 错误、`Retry-After` 和请求 ID；503 原样透传。直连请求保持原状态码。运维错误记录仍记原始的 502/504 |
 | 换号耗尽的 429/5xx | 带 `Retry-After`：上游给出的值按 2–30 秒封顶，没有时取分组最早恢复时间 |
 | 同一会话连续第 5 次耗尽失败（无号、换号耗尽、流内失败） | 终止应答：不带 `Retry-After`，`x-should-retry: false`，`error.code` 为 `server_is_overloaded`，5xx 改为 503（429 保持）。Codex 对带 `Retry-After` 的 5xx 没有次数上限，一个回合最多约 30 次请求；封顶后不超过 5 次。会话真正成功一次或两次失败相隔超过 120 秒后重新计数 |
-| 中转站插入的 `SSE-Keep-Alive` 空 delta 帧 | 直接丢弃，不转发、不算首输出（openai-python 遇到会报错，网关也会因此提前放弃换号）；但算上游存活，不会因此被判停滞 |
+| 中转站插入的 `SSE-Keep-Alive` 空 delta 帧 | 直接丢弃，不转发、不算首输出（openai-python 遇到会报错，网关也会因此提前放弃换号）；但算上游存活，不会因此被判停滞。缺省首字口径（`openai_ttft_mode=semantic`）下，用量记录的首字时间仍从第一帧算起，与 0.3.0 一致；`visible` 口径不算这类帧 |
 | Claude 请求分发到 GPT 中转时，中转站拒绝续链（`previous_response_id`）并返回笼统的 4xx | 去掉续链按完整历史重放一次，并对该会话在该账号上关闭续链；上下文超长、内容审核、图片、模型不存在等错误照常返回 |
 | 上游内容安全拒绝（如智谱 `request_check_blocked`、`content_policy_violation`） | 400 `invalid_request_error`，`code: content_policy_violation`，附脱敏后的上游原文；不重试、不换号，账号不受罚。只关闭 `errors` 时回到 0.3.0 的 502 文案 |
 | Anthropic 中转在流内报 `rate_limit_error`（如并发上限） | 输出前可换号；耗尽时 429 带 `Retry-After`，不再是 502“访问被禁止”。`overloaded_error` 为 529，`api_error` 为 502 |

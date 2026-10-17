@@ -562,7 +562,7 @@ export default {
         openaiTTFTMode: 'OpenAI Responses first-token metric',
         openaiTTFTModeSemantic: 'Legacy-compatible (semantic event)',
         openaiTTFTModeVisible: 'Actual visible output',
-        openaiTTFTModeHint: 'The default records first_token_ms at the first non-preamble semantic event. Actual visible output records it only when non-empty text, tool arguments, or image content arrives.',
+        openaiTTFTModeHint: 'The default records first_token_ms at the first non-preamble semantic event, including relay SSE-Keep-Alive frames as in 0.3.0 (the frames themselves are not forwarded). Actual visible output records it only when non-empty text, tool arguments, or image content arrives. For relays that send such frames the default is optimistic (scheduler first-token score, channel monitor health, first-output tier calibration); choose actual visible output for real values.',
         fingerprintUnification: 'Fingerprint Unification',
         fingerprintUnificationHint: 'Unify X-Stainless-* headers across users sharing the same OAuth account. Disabling passes through each client\'s original headers.',
         metadataPassthrough: 'Metadata Passthrough',

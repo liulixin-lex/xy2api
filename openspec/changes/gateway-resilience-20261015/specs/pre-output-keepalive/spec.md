@@ -97,6 +97,12 @@ A dropped frame MUST still count as upstream activity for stall detection: the s
 - **WHEN** after output a relay sends only such frames for longer than the text stall threshold, then continues
 - **THEN** the stream is not ended as stalled, the frames do not reach the client, and the response completes.
 
+In semantic first-token mode (`openai_ttft_mode=semantic`, the default), the first-token time of the request log MUST be the earlier of the first dropped frame and the first real event of the attempt, measured from the start of the attempt, as in 0.3.0 where the frames passed through. In visible mode the frames MUST NOT count. The value MUST only be taken when the result is built: the frames MUST still be dropped, and the first-output timeout, failover, stall detection, delivery state and first-output guard MUST still see real output only. Paths that did not count the frames in 0.3.0 (non-streaming conversions, the chat fallbacks) MUST keep their first-token time.
+
+#### Scenario: Keep-alive frame before a slow first output
+- **WHEN** a relay sends such a frame 1 s into the attempt and the first real output at 30 s
+- **THEN** the request log records about 1 s in semantic mode and about 30 s in visible mode, the frame does not reach the client, and the first-output timer still waits for the output at 30 s.
+
 ### Requirement: Accurate stall detection
 
 Stream inactivity MUST be checked at a period of at most `min(threshold/4, 5 s)`, so detection happens no later than the threshold plus 5 s. After semantic output has started, a text stream with no upstream data for `stall.text_stall_seconds` (default 120 s) MUST be ended as `STALL`. Image streams MUST keep `image_stream_data_interval_timeout`.
