@@ -58,7 +58,7 @@
 
 | 类别 | 主要判据 | 换号 | 同号重试 | 账号罚则 | 会话（D4） |
 |---|---|---|---|---|---|
-| `BALANCE` | 402；code 为 `insufficient_quota`、`insufficient_user_quota`、`pre_consume_token_quota_failed`、`credit_balance_exhausted`；文本含 insufficient (account) balance、余额不足、额度不足、credit balance、usage balance exhausted，以及 new-api 的 quota is not enough、额度已用尽、预扣费额度失败等（关键字集合可配置） | 是 | 否 | 进入余额状态机（§3.2，硬） | 立即改绑 |
+| `BALANCE` | 402；code 为 `insufficient_quota`、`insufficient_user_quota`、`pre_consume_token_quota_failed`、`credit_balance_exhausted`；文本含 insufficient (account) balance、余额不足、额度不足、credit balance、usage balance exhausted，以及 new-api 的 quota is not enough、额度已用尽、预扣费额度失败等（关键字集合可配置） | 是 | 否 | 硬：暂停 `balance.pause_seconds`（§3.2） | 立即改绑 |
 | `AUTH` | 401、invalid/revoked key；结构化的账号停用 code（`deactivated_workspace` 等） | 是 | 否 | 硬：OpenAI 维持现有 3 次规则；其他平台改为计数加临时冷却（§3.3） | 立即改绑 |
 | `RATE_LIMIT_RESET` | 429，且带明确的重置时间（头部或正文） | 是 | 否 | 软，冷却到重置时间；重置时间超过 300 秒视为硬 | 不超过 300 秒时只临时溢出；超过则改绑 |
 | `RATE_LIMIT` | 429 无重置时间；流内 `rate_limit_exceeded`；“The service is busy” 等 | 是 | 否 | 软，冷却时长取设置 `rate_limit_429_cooldown_settings`（当前 45 秒） | 计入失败计数 |
@@ -340,7 +340,7 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 - **`undelivered` 时断开：**
   - 立即取消上游上下文（包括等待响应头与换号间隙），停止预算内的后续尝试，释放在途预留与并发槽位；
   - **不写 `usage_logs`，不计费**；
-  - 写一条 `gateway_undelivered_requests`（迁移 274）：`request_id`、`client_request_id`、`user_id`、`api_key_id`、`group_id`、`account_id`、`platform`、`model`、`inbound_endpoint`、`disconnect_stage`（选号、等待槽位、等待响应头、首输出前）、`duration_ms`、`upstream_usage_json`（上游已给出时）、`estimated_upstream_cost`、`billed`、`created_at`。
+  - 写一条 `gateway_undelivered_requests`（迁移 274）：`request_id`、`client_request_id`、`user_id`、`api_key_id`、`group_id`、`account_id`、`platform`、`model`、`inbound_endpoint`、`disconnect_stage`（`select` 选号，含等待槽位；`header_wait` 等待响应头；`pre_output` 首输出前）、`duration_ms`、`upstream_usage_json`（上游已给出时）、`estimated_upstream_cost`、`billed`、`created_at`。
 - **`partial` 时断开：**
   - 继续读取上游以获得用量，最长 `partial_drain_max_seconds`（180 秒）；
   - 到时取消，按已解析到的用量计费；
@@ -369,7 +369,7 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 
 在进程内缓存“(分组, 平台, 模型) 无可用账号”的结论 `negative_cache_seconds`（2 秒），期间直接返回相同的 503 和剩余的 `Retry-After`，不重复查库与快照。键由分组与模型构成（分组决定平台，组合分组的目标平台由模型决定）；OpenAI 选号另按传输方式、端点能力与平台区分，一种请求的结论不回答另一种。带 `previous_response_id`、图片能力或 compact 的 OpenAI 选号以及利润控制分组不缓存；重放出的结论不会再次写入，条目按时过期。
 
-- **只缓存组级结论（审查 F2）：** 选号在粘性查找之前查负缓存，而“无号”可能只对本请求成立：超过 RPM 或窗口费用阈值的 Anthropic OAuth 账号只服务已绑定会话，会话数上限只拦新会话。所以只有组内不存在“平台匹配、支持该模型且无罚”的账号时才写入（判定用 2 秒的分组账号列表）；否则一个新会话的结论会让已绑定会话持续 503。强制平台的路由（`/antigravity`）把平台写进键，不回答同组普通路由。本网关施加或解除冷却、余额状态变化时主动失效对应分组的条目；管理员改动等其他来源靠 2 秒过期，最多 2 秒后可见。
+- **只缓存组级结论（审查 F2）：** 选号在粘性查找之前查负缓存，而“无号”可能只对本请求成立：超过 RPM 或窗口费用阈值的 Anthropic OAuth 账号只服务已绑定会话，会话数上限只拦新会话。所以只有组内不存在“平台匹配、支持该模型且无罚”的账号时才写入（判定用 2 秒的分组账号列表）；否则一个新会话的结论会让已绑定会话持续 503。强制平台的路由（`/antigravity`）把平台写进键，不回答同组普通路由。本网关施加或解除冷却、施加余额暂停时主动失效对应分组的条目；管理员改动等其他来源靠 2 秒过期，最多 2 秒后可见。
 
 ### 9.3 同 Key 快速失败
 
@@ -482,32 +482,27 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
 
 ## 12. 可观测性与管理界面
 
-- **结构化日志**（管理员关注的为 warn 级，进入 `ops_system_logs`；量大的 `keepalive_committed`、`undelivered`、`transient_*` 为 info），消息模板固定，正文与上游原文放在 `extra`。失败分类不单独记日志，由 `resilience.transient_cooldown`、`resilience.balance_transition` 与 ops 记录的 `resilience_category` 承担：
-  - `resilience.balance_transition`
-  - `resilience.session_rebind`
-  - `resilience.last_resort`
-  - `resilience.fallback_group`
-  - `resilience.budget_exhausted`
-  - `resilience.keepalive_committed`
-  - `resilience.stall`
-  - `resilience.post_output_failure`
-  - `resilience.undelivered`
-  - `resilience.fast_fail`
-  - `resilience.turn_cap`
-  - `resilience.abuse_guard`
+- **结构化日志**：消息即事件名（前缀 `resilience.`），细节放在字段中。管理员关注的为 warn 级，进入 `ops_system_logs`；量大的为 info，只写标准输出。失败分类不单独记日志，由 `resilience.transient_cooldown`、`resilience.balance_paused` 与 ops 记录的 `resilience_category` 承担。各事件的字段见 `docs/GATEWAY_RESILIENCE.md` §5.3：
+  - warn：`balance_paused`、`session_rebind`、`last_resort`、`fallback_group`、`fallback_return`、`budget_exhausted`、`capacity_switch_exhausted`、`stall`、`post_output_failure`、`fast_fail`、`turn_cap`、`abuse_guard`、`web_search_history_rejected`；
+  - info：`keepalive_committed`、`undelivered`、`unclassified`、`transient_cooldown`、`transient_lifted`、`undelivered_cleanup`、`content_policy_refusal`、`content_policy_no_failover`、`web_search_replay`、`web_search_declaration_learned`；
+  - 以 `_failed` 结尾的事件表示存储或查询失败（warn），功能降级为原有行为。
 - **ops 错误记录的状态码**是网关自己的应答状态：经 CDN 的 502/504 对客户端改写为 503（§7.6、X-XY-Upstream-Status），ops 记录仍记原值，否则会与无号 503 混在一起、让 §14 的前后对比失真（审查 F7）；读请求体时连接中断造成的 400 记为 499。
 - **分类结果**写入每次上游失败的 ops 记录（`upstream_errors[].resilience_category`）；只按状态码归类的上游 4xx（401、402 除外）以 info 级 `resilience.unclassified` 采样记录脱敏、截断后的文案（每进程每分钟约 10 条），用于补充关键字。
-- **统计接口**：`GET /api/v1/admin/resilience/stats?window=`，按分组与账号汇总以下指标：
-  - 首包前心跳提交数；
-  - 首输出超时换号；
+- **统计接口**：`GET /api/v1/admin/resilience/stats?window=`，按分组与账号汇总以下指标（计数名与含义见 `docs/GATEWAY_RESILIENCE.md` §5.2）：
+  - 首包前心跳提交数（按协议）；
+  - 首输出超时换号（按阶段）；
   - 预算耗尽；
   - 末位兜底；
-  - 兜底分组；
-  - 改绑（按原因）；
+  - 兜底分组与切回；
+  - 会话改绑；
   - 未送达（按阶段）；
+  - 推断的 CDN 切断（未送达且阶段为等待响应头或首输出前，按耗时分入 90、125、300 秒桶）；
   - 快速失败；
   - 失败回合封顶；
-  - 推断的 CDN 切断（499 且阶段为首输出前，时长按 90、125、300 秒分桶）。
+  - 滥用保护计费；
+  - 停滞断流；
+  - 已输出后的上游失败（按失败类型，§7.6）；
+  - 丢弃的中转伪保活帧（按账号，§7.8）。
 - **运维页**新增“网关韧性”面板；余额不足暂停在账号列表中显示为临时不可调度（原因 `balance:`），“恢复状态”立即放回；未送达记录可查询（`GET /api/v1/admin/resilience/undelivered`）；计数与未送达列表显示分组名；面板底部为“选号解释”（§4.4 的原版调度 Explain）。
 - **降低日志噪声**：
   - `upstream_billing_rate_sync_applied` 从 info 降为 debug；

@@ -73,7 +73,8 @@ Anthropic and Gemini attempts MUST have a first-upstream-event timeout (default 
 
 #### Scenario: Slow relay is abandoned in time
 - **WHEN** a medium-effort request gets no output from account A within 180 s and account B is available
-- **THEN** the gateway cancels the attempt on A, soft-penalises A and tries B.
+- **THEN** the gateway cancels the attempt on A and tries B; when the request has a session, it counts one failure of that session on A
+- **AND** A gets no cooldown, so other sessions keep using it.
 
 #### Scenario: Last candidate waits for the budget
 - **WHEN** account A is the only candidate

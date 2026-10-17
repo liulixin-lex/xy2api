@@ -68,7 +68,7 @@ These charges MUST be written to `usage_logs` with `billing_mode='undelivered_ab
 
 For client disconnects, `ops_error_logs` MUST record:
 - `duration_ms`;
-- `disconnect_stage` (`select`, `slot_wait`, `header_wait`, `pre_output` or `streaming`);
+- `disconnect_stage` (`select`, which includes waiting for a slot, `header_wait`, `pre_output` or `streaming`);
 - `delivered_bytes`.
 
 #### Scenario: Disconnect during header wait

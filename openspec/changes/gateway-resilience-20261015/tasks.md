@@ -207,7 +207,7 @@
   - 实现：系统设置“网关”页的“网关韧性”卡（总开关、各能力开关、常用数值、完整 JSON，范围与服务端一致）；运维页“网关韧性”面板（计数汇总与明细、余额状态分布、未送达列表）；账号状态列的余额徽标与“已充值”复检（余额状态分布、徽标与复检随余额精简删除）；分组表单兜底选择器；用量表兜底标记；可用渠道页兜底分组标签。
 - [x] 9.3 结构化日志（design §12）与统计接口 `GET /api/v1/admin/resilience/stats`。
   - 实现：进程内按分钟分桶的计数（保留 1 小时，每桶最多 4096 个键，超出折叠为 overflow），统计接口按窗口汇总并附余额状态分布（余额状态分布随余额精简删除）。
-  - 偏差：计数为单实例口径；`keepalive_committed`、`undelivered`、`transient_*` 量大，保持 info（不进 `ops_system_logs`），其余管理员关注的事件为 warn；`resilience.classified` 由 `transient_cooldown` 与 `balance_transition` 分别承担。
+  - 偏差：计数为单实例口径；`keepalive_committed`、`undelivered`、`transient_*` 量大，保持 info（不进 `ops_system_logs`），其余管理员关注的事件为 warn；`resilience.classified` 由 `transient_cooldown` 与 `balance_transition` 分别承担（余额精简后后者为 `balance_paused`）。
 - [x] 9.4 降噪：`upstream_billing_rate_sync_applied` 降为 debug；余额批量探测不写审计（探测随余额精简删除）；`ops_system_logs.message` 只保留模板。
 - [x] 9.5 文档 `docs/GATEWAY_RESILIENCE.md`（管理员说明与配置），并加入 `.gitignore` 的 docs 白名单；更新本记忆。
   - 另：runbook 增加 `SERVER_TRUSTED_PROXIES` 前提与基于 `keepalive_committed` 的 `edge` 校验；方案文件中的主机路径与端口改为代称（真实值在仓库外私有清单）。
@@ -276,11 +276,11 @@
 - [x] Gemini 的 `RESOURCE_EXHAUSTED` 分钟级限额（“You exceeded your current quota”）按限流处理，不再判为余额耗尽而排除约 11 分钟（`749060679`）。
 - [x] “try again in 1m30.5s”“1h2m”等复合时长识别为重置时间，不再落到缺省冷却（`dafce54a5`）。
 - [x] 网关自身合成的首事件超时 504 归为 `FIRST_OUTPUT_TIMEOUT`，不再按中转 504 记为 `TRANSIENT`（`a23119859`）。
-- [x] 余额 `EXHAUSTED` 的硬档随排除期（下次复检后 10 分钟）结束，与选号一致（`a23119859`）。
-- [x] `/v1/usage` 对不限额订阅返回的 `remaining=-1` 不再读成余额为零（`d20f6738b`）。
-- [x] 被更长冷却（如 403）挡住而过期的余额暂停重新施加，不再被当作管理员手动恢复（`d20f6738b`）。
-- [x] 断流（流内错误事件、停滞）后按部分用量计费的账号不再算成功：不解除冷却、不计入 `RECOVERING` 成功次数（`79d2a8c7e`）。
-- [x] 探测锁 TTL 长于探测连同落库的耗时，落库使用独立时限（`51850f717`）。
+- [x] 余额 `EXHAUSTED` 的硬档随排除期（下次复检后 10 分钟）结束，与选号一致（`a23119859`；2026-10-17 随余额精简取消，暂停到期即回到选号）。
+- [x] `/v1/usage` 对不限额订阅返回的 `remaining=-1` 不再读成余额为零（`d20f6738b`；探测随余额精简删除）。
+- [x] 被更长冷却（如 403）挡住而过期的余额暂停重新施加，不再被当作管理员手动恢复（`d20f6738b`；余额记录随余额精简删除，现由 `SetTempUnschedulable` 只延长不缩短保证）。
+- [x] 断流（流内错误事件、停滞）后按部分用量计费的账号不再算成功：不解除冷却、不计入 `RECOVERING` 成功次数（`79d2a8c7e`；`RECOVERING` 随余额精简取消，不解除冷却仍有效）。
+- [x] 探测锁 TTL 长于探测连同落库的耗时，落库使用独立时限（`51850f717`；探测随余额精简删除）。
 
 会话与选号：
 
@@ -315,7 +315,7 @@
 性能与清理：
 
 - [x] 主组健康且本实例在 `binding_ttl_seconds` 内未转出 Key 时，兜底判定不访问 Redis（`edcf36037`）。
-- [x] 罚则判定直接读取余额状态字段，只有 `EXHAUSTED` 才解码完整记录（`0f8c6ba74`）。
+- [x] 罚则判定直接读取余额状态字段，只有 `EXHAUSTED` 才解码完整记录（`0f8c6ba74`；余额状态随余额精简删除，罚则改看 `balance:` 暂停原因）。
 - [x] 中转伪保活过滤不再复制每一行，500 个 delta 的分配从 1504 次降到 7 次（`50bfd36ec`）。
 - [x] 删除无调用的 `resilience/frames.go`、预算的上下文访问器与 `Canceled()` 等（`181e38602`），以及 `resilienceBudgetAllowsAttempt`（`dafce54a5`）。
 - [x] golangci-lint v2.14.0 清零（`5471e2112`）。
@@ -332,7 +332,7 @@
 
 > 用户 2026-10-16 要求分析生产近 3 小时的报错并纳入本次优化。窗口 04:53–07:53Z，失败 1,649 次（11.1%）；去标识摘要见 `evidence/production-errors-20261016.md`，设计见 design §18。R2、R3、R4/R7 由并行子 Agent 在独立 worktree 完成后 cherry-pick 合入。
 
-- [x] R1 Grok 余额 429 进入余额状态机，不再按中转重置头限流约 28 分钟（761 次，P0）（`6169e2128`）。
+- [x] R1 Grok 余额 429 进入余额状态机，不再按中转重置头限流约 28 分钟（761 次，P0）（`6169e2128`；2026-10-17 余额精简后改为暂停 `balance.pause_seconds`）。
 - [x] R2 已输出后的失败计入会话失败，账号 60 秒内 3 次软冷却（池模式除外）；停滞同样计入会话失败；已输出后失败的 200 不再清零失败回合计数（238 次）（`0bf650227`、`1f98afd89` 与本条后续提交）。
 - [x] R3 API Key 中转拒绝 web_search 历史：同号补声明重放一次并按账号记住（65 次）（`b678afc91`）。
 - [x] R4 内容安全拒绝归客户端错误：不罚账号、不重试不换号、客户端 400 带原文（49 次）（`a5fe6d324`）。
