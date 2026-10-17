@@ -6,8 +6,8 @@ Every scenario of the eight specs, mapped to the automated tests that cover it a
 
 | Scenario | Unit tests | Staging |
 |---|---|---|
-| Balance message wrapped in a 429 | `TestBalanceWrappedIn429`, `TestClassifySpecScenarios`, `TestGeminiQuotaWordingIsARateLimit` (Gemini's per-minute quota stays a rate limit) | BAL-1 |
-| Balance failure inside a stream | `TestApplyResilienceOutcomeStreamBalanceAndStall`, `TestClassifySpecScenarios` | — |
+| Balance message wrapped in a 429 | `TestBalanceFailuresPauseTheAccount` (429 right after a success), `TestClassifySpecScenarios`, `TestGeminiQuotaWordingIsARateLimit` (Gemini's per-minute quota stays a rate limit) | BAL-1 |
+| Balance failure inside a stream | `TestApplyResilienceOutcomeStreamBalanceAndStall`, `TestBalanceFailuresPauseTheAccount`, `TestClassifySpecScenarios` | — |
 | Busy message inside a stream | `TestClassifySpecScenarios` | C-codex-busy-stream |
 | Relay timeout page | `TestClassifySpecScenarios`, `TestRetryAfterFrom`, `TestRetryAfterFromCompoundHints` | SW-1, BUD-1 |
 | Request-scoped overload does not punish the account | `TestInServiceRetryOnlyForCapacityShedding`, `TestCategoryPolicyTable` | — |
@@ -15,22 +15,24 @@ Every scenario of the eight specs, mapped to the automated tests that cover it a
 | An upstream content-safety refusal is the request's fault | `TestClassifyContentPolicyRefusal`, `TestContentPolicy403TakesNoStrike`, `TestContentPolicyWordingOnAccountBanStillStrikes`, `TestContentRefusalEndsFailoverWithoutRetry`, `TestContentRefusalAnswersClientWith400`, `TestContentRefusalMessageIsScrubbed`, `TestOtherForbiddenAndSwitchOffKeepLegacyAnswer` | PE-4 |
 | Anthropic in-stream errors keep the status of their type | `TestStreamErrorStatusFollowsErrorType`, `TestForwardPreOutputStreamRateLimitIsA429`, `TestForwardPostOutputStreamErrorsMapStatusWithoutSideEffects`, `TestStreamRateLimitSwitchesAndAnswersRateLimited` | PE-7 |
 | User out of funds | `TestUserBalanceErrorsCarryCodes` | — |
-| New relay wording | `TestAdminOverrideIsRespected`, `TestClassifySpecScenarios` | — |
+| New relay wording | `TestClassifySpecScenarios`, `TestInsufficientUserBalanceIsABalanceFailure` | — |
 
-## account-penalties-and-balance-recovery
+## account-penalties-and-balance-recovery (balance pauses)
 
 | Scenario | Unit tests | Staging |
 |---|---|---|
 | Soft cooldown in a multi-account group | `TestResiliencePenaltyOfTiers`, `TestTransientCooldownOpenAIOnlyWithRetryAfter` | SW-1, C-codex-fail-first |
-| Hard state is never used | `TestGatewayLastResortNeverUsesHardStates`, `TestResultHard`, `TestExhaustedTierEndsWithTheExclusion` | — |
+| Hard state is never used | `TestGatewayLastResortNeverUsesHardStates`, `TestResultHard`, `TestBalancePauseIsHardUntilItEnds` | BAL-1 |
 | Relay asks for 60 seconds | `TestTransientCooldownHonoursRetryAfter` | RL-1 |
-| Claude relay runs out of credit | `TestStrongSignalExhausts`, `TestBalance403ExhaustsWithoutErrorState`, `TestExpiredOtherPauseIsNoAdminOverride` | BAL-1 |
+| Relay runs out of credit | `TestBalanceFailuresPauseTheAccount`, `TestBalancePauseLengthIsConfigurable`, `TestBalancePauseIsHardUntilItEnds` | BAL-1 |
+| 402 only pauses | `TestBalanceFailuresPauseTheAccount` (HTTP 402) | BAL-1 |
 | A relay asks the user to top up (production wording) | `TestInsufficientUserBalanceIsABalanceFailure`, `TestBillingErrorTypeAloneIsNoBalanceFailure` | — |
-| Grok relay balance wording does not install a rate limit | `TestGrokAPIKeyBalance429GoesToBalanceStateNotRateLimit`, `TestGrokAPIKeyBalance429AfterRecentSuccessIsWeak`, `TestGrokRateLimitPathsUnchangedOutsideTheBalanceCase`, `TestGrokPoolModeBalance429KeepsGrokHandling` | PE-1 |
-| Automatic recovery after top-up | `TestProbePositiveEntersRecovering`, `TestProbePositiveRecovers`, `TestRecoveringSuccessesReturnToOK`, `TestVerdictFromUsageBody`, `TestBrokenStreamUsageIsNoRecoverySuccess` | BAL-1, soak (hourly) |
-| Administrator confirms a top-up | `TestRecheckBalanceForcesProbe` | BAL-2 |
-| Probe finds invalid credentials | `TestProbeAuthFailureFollowsAuthPath` | — |
-| Two instances schedule the same probe | `TestProbeSingleFlight` | — |
+| Grok relay balance wording does not install a rate limit | `TestGrokAPIKeyBalance429PausesInsteadOfARateLimit`, `TestGrokAPIKeyBalance429AfterASuccessStillPauses`, `TestGrokRateLimitPathsUnchangedOutsideTheBalanceCase`, `TestGrokPoolModeBalance429KeepsGrokHandling` | PE-1 |
+| Balance failure inside a stream | `TestBalanceFailuresPauseTheAccount`, `TestApplyResilienceOutcomeStreamBalanceAndStall` | — |
+| Single-account group during a pause | `TestNoAccountRetryAfterFollowsTheBalancePause`, `TestNoAccountResponseCarriesRetryAfter` | BAL-1 |
+| Administrator restores the account | `TestRestoringTheAccountEndsTheBalancePause` | BAL-2 |
+| Switched off: 0.3.0 handling; settings keep the switch and the pause | `TestBalanceSwitchOffKeeps030Handling`, `TestBalanceSettingsKeepOnlyTheSwitchAndThePause`, `TestParseIgnoresRemovedBalanceFields` | — |
+| The seeded balance alert rules are removed | `TestBalanceAlertRulesRemovalDeletesOnlyTheSeededRules`, `TestMigration277RemovesOnlyTheSeededBalanceAlertRules` (integration) | upgrade drill |
 | One 403 on an Anthropic relay | `TestUniform403CountedCooldown` | — |
 
 ## session-failure-handling

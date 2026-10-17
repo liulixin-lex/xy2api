@@ -1,4 +1,4 @@
-# Account penalties and balance recovery
+# Account penalties and balance pauses
 
 ## ADDED Requirements
 
@@ -9,7 +9,7 @@ Every account state that prevents normal scheduling MUST be either hard or soft.
 **Hard** states:
 - administrator disabled;
 - `status=error`;
-- balance `EXHAUSTED`;
+- a balance pause (reason starting `balance:`);
 - invalid or revoked credentials;
 - rate limit with a reset more than 300 s away;
 - IQ quality gate;
@@ -18,21 +18,20 @@ Every account state that prevents normal scheduling MUST be either hard or soft.
 - group mismatch.
 
 **Soft** states:
-- balance `SUSPECT`;
 - transient and stall cooldowns;
 - 429 cooldown without a reset time, or with a reset of at most 300 s;
 - overload cooldown;
 - model-level transient blocks;
 - per-session avoidance.
 
-Hard states MUST always exclude the account while they last; an `EXHAUSTED` balance lasts until its next check plus a grace period (design §3.2), after which real traffic re-checks the account. Soft states MUST exclude the account only while a healthy candidate exists.
+Hard states MUST always exclude the account while they last; a balance pause lasts `balance.pause_seconds`. Soft states MUST exclude the account only while a healthy candidate exists.
 
 #### Scenario: Soft cooldown in a multi-account group
 - **WHEN** account A is in a 30 s transient cooldown and account B in the same tier is healthy
 - **THEN** new requests are placed on B.
 
 #### Scenario: Hard state is never used
-- **WHEN** the only account in a group is balance `EXHAUSTED`
+- **WHEN** the only account in a group is in a balance pause
 - **THEN** it is not selected, even as a last resort.
 
 ### Requirement: Transient failures apply a soft cooldown
@@ -43,51 +42,35 @@ Account-scoped `TRANSIENT` and `STALL` outcomes MUST set a soft cooldown of `fai
 - **WHEN** an attempt returns 502 with a Cloudflare error body containing `"retry_after":60`
 - **THEN** the account is soft-penalised for 60 s.
 
-### Requirement: Recoverable balance state machine
+### Requirement: Balance pause
 
-Balance failures MUST NOT set `status=error`. Each API-key account MUST carry a balance state `OK`, `SUSPECT`, `EXHAUSTED` or `RECOVERING`:
+Balance failures of eligible API-key accounts MUST NOT set `status=error`. A balance failure of a real request (an HTTP error answer, a failure inside a stream, a Grok API-key 429 with balance wording, a 402) MUST pause the account for `balance.pause_seconds` (default 300 s, 30–3600 s) through `temp_unschedulable` with a reason starting `balance:`; a longer pause of another kind stays. When the pause ends, real traffic retries the account, and a balance failure pauses it again for the same time. A recent success MUST NOT weaken a balance signal. The gateway MUST NOT keep any other balance state: no balance record, probe, recovery concurrency cap or balance alert. The administrator's "restore status" MUST end the pause at once. With `balance.enabled=false`, balance failures MUST take the 0.3.0 handling.
 
-- **A strong balance signal** from a real request moves the account to `EXHAUSTED`.
-- **A weak signal** (balance wording on a 429 while the same account succeeded within the last 30 s) moves it to `SUSPECT` for `balance.suspect_ttl_seconds`.
-- **`EXHAUSTED` accounts are re-checked** after 60, 120, 300 and 600 s, then every 900 s, each with ±15 % jitter.
-- **A positive probe** moves the account to `RECOVERING`. There its concurrency is capped at `balance.recovering_concurrency` until `recovering_success_target` successes or `recovering_window_seconds` elapse; it then returns to `OK`.
-- **A balance failure while `RECOVERING`** returns the account to `EXHAUSTED` at the next back-off level.
+#### Scenario: Relay runs out of credit
+- **WHEN** account A returns 403 "Insufficient account balance"
+- **THEN** it is paused for 300 s with a `balance:` reason and its `status` stays `active`
+- **AND** it is not selected, not even as a last resort, until the pause ends, after which it is selectable again.
 
-#### Scenario: Claude relay runs out of credit
-- **WHEN** account A returns 403 `insufficient balance`
-- **THEN** its balance state becomes `EXHAUSTED`, it is excluded from scheduling and its `status` stays `active`
-- **AND** an administrator notification is emitted.
+#### Scenario: 402 only pauses
+- **WHEN** an API-key account returns 402
+- **THEN** it is paused and not set to error.
 
 #### Scenario: Grok relay balance wording does not install a rate limit
 - **WHEN** an API-key Grok account outside pool mode answers 429 "insufficient balance" together with an exhausted request window in its rate-limit headers
-- **THEN** the account enters the balance state machine (`SUSPECT` after a success within 30 s, otherwise `EXHAUSTED`) and no rate limit is set from the headers
+- **THEN** the account is paused and no rate limit is set from the headers
 - **AND** OAuth Grok accounts, pool-mode accounts and 429s without balance wording keep the Grok rate-limit handling.
 
-#### Scenario: Automatic recovery after top-up
-- **WHEN** the next scheduled probe of an `EXHAUSTED` account reports a positive balance
-- **THEN** the account enters `RECOVERING`, accepts at most one concurrent request and returns to `OK` after three successful requests.
+#### Scenario: Balance failure inside a stream
+- **WHEN** a stream fails with `insufficient_quota`
+- **THEN** the account is paused.
 
-#### Scenario: Administrator confirms a top-up
-- **WHEN** an administrator calls `POST /api/v1/admin/accounts/:id/balance/recheck`
-- **THEN** a probe runs immediately instead of waiting for the next scheduled check.
+#### Scenario: Single-account group during a pause
+- **WHEN** the only account of a group is paused
+- **THEN** requests get 503 with a `Retry-After` no longer than the rest of the pause.
 
-### Requirement: Probe order and evidence
-
-Balance probes MUST be tried from cheapest to most expensive:
-
-1. `GET {base_url}/v1/usage` for sub2api-style relays;
-2. the new-api billing endpoints, only after they are verified for the relay type;
-3. a streaming generation with `max_tokens=1` on the cheapest available model, limited to `balance.generation_probe_daily_budget` per account per day.
-
-A reachable `/v1/models` or a credentials-only check MUST NOT count as recovery evidence. Probes for the same account MUST be single-flight across instances.
-
-#### Scenario: Probe finds invalid credentials
-- **WHEN** a balance probe returns 401 `invalid api key`
-- **THEN** the account follows the authentication-failure path instead of the balance path.
-
-#### Scenario: Two instances schedule the same probe
-- **WHEN** two gateway instances reach the same account's `next_check_at`
-- **THEN** only one probe request is sent upstream.
+#### Scenario: Administrator restores the account
+- **WHEN** an administrator calls `DELETE /api/v1/admin/accounts/:id/temp-unschedulable`
+- **THEN** the pause ends at once and the account is selectable.
 
 ### Requirement: Uniform 403 handling across platforms
 
