@@ -517,6 +517,18 @@ export default {
         success: 'Deleted {count} users',
         failed: 'Failed to delete {count} users. They remain selected for retry.'
       },
+      bulkStatus: {
+        disableAction: 'Disable selected ({count})',
+        enableAction: 'Enable selected ({count})',
+        disableTitle: 'Disable selected users',
+        enableTitle: 'Enable selected users',
+        disableConfirm: 'Disable the {count} selected users? They will be unable to sign in and their API keys stop working immediately. Accounts, balances and API keys are kept, and you can re-enable them at any time. Administrator accounts are never disabled.',
+        enableConfirm: 'Enable the {count} selected users? They can sign in again and their API keys resume working.',
+        disableSuccess: 'Disabled {count} users',
+        enableSuccess: 'Enabled {count} users',
+        skipped: '{count} users unchanged: already in that status, administrators, or deleted.',
+        failed: 'Failed to update user status. The users remain selected for retry.'
+      },
       bulkLimits: {
         action: 'Set limits ({count})',
         title: 'Set user limits',

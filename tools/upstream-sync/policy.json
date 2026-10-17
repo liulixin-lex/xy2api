@@ -655,6 +655,38 @@
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
       "value": "if status, errType, message, ok := resilienceWebSearchHistoryRejected(c, h.gatewayService, failoverErr); ok {"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "users.POST(\"/batch-status\", h.Admin.User.BatchUpdateStatus)"
+    },
+    {
+      "path": "backend/internal/service/admin_service.go",
+      "value": "BatchUpdateUserStatus(ctx context.Context, userIDs []int64, status string, actorAdminID int64) (BatchUserStatusResult, error)"
+    },
+    {
+      "path": "backend/internal/handler/admin/admin_service_stub_test.go",
+      "value": "func (s *stubAdminService) BatchUpdateUserStatus("
+    },
+    {
+      "path": "frontend/src/api/admin/users.ts",
+      "value": "'/admin/users/batch-status'"
+    },
+    {
+      "path": "frontend/src/views/admin/UsersView.vue",
+      "value": "data-test=\"bulk-disable-users\""
+    },
+    {
+      "path": "frontend/src/views/admin/UsersView.vue",
+      "value": "data-test=\"bulk-enable-users\""
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh/admin/overview.ts",
+      "value": "bulkStatus: {"
+    },
+    {
+      "path": "frontend/src/i18n/locales/en/admin/overview.ts",
+      "value": "bulkStatus: {"
     }
   ],
   "forbidden_module_paths": [
@@ -696,7 +728,8 @@
     "xy-index-nonce-no-304",
     "xy-placeholder-session-id",
     "xy-allowlist-404-hint",
-    "xy-registration-email-alias-hardening"
+    "xy-registration-email-alias-hardening",
+    "xy-admin-user-batch-status"
   ],
   "custom_patch_tests": [
     {
@@ -843,6 +876,26 @@
       "id": "xy-registration-email-alias-hardening",
       "path": "backend/internal/repository/user_repo_email_alias_test.go",
       "literal": "func TestUserRepositoryExistsByEmailAliasCountsDeletedAccounts"
+    },
+    {
+      "id": "xy-admin-user-batch-status",
+      "path": "backend/internal/service/admin_user_batch_status_test.go",
+      "literal": "func TestAdminService_BatchUpdateUserStatus"
+    },
+    {
+      "id": "xy-admin-user-batch-status",
+      "path": "backend/internal/handler/admin/user_handler_batch_status_test.go",
+      "literal": "func TestUserHandlerBatchUpdateStatusReportsAffectedAndSkipped"
+    },
+    {
+      "id": "xy-admin-user-batch-status",
+      "path": "backend/internal/repository/user_repo_batch_status_integration_test.go",
+      "literal": "func (s *UserRepoSuite) TestBatchUpdateStatusDisablesOnlyChangeableUsers"
+    },
+    {
+      "id": "xy-admin-user-batch-status",
+      "path": "frontend/src/views/admin/__tests__/UsersView.spec.ts",
+      "literal": "disables users selected across pages in one request"
     }
   ]
 }
