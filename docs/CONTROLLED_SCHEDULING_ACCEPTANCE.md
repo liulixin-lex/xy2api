@@ -6,7 +6,7 @@
 
 原始矩阵日期：2026-09-27；最新工程复审：2026-09-28，见末尾 final09 补充结果。本文对应隔离候选实现，不宣称已经上线或79项供应商业务端到端验收全部完成。
 
-原始矩阵：/xy2/artifacts/iq-candy-20260927/scheduling-research-20260927/ACCEPTANCE_MATRIX.json，79条当前用例。两条已废止TPS-only用例不计入。V3/V4/V5参考模型52/37/53条断言不是Go、PostgreSQL、Redis或协议验收证据。
+原始矩阵：<工作机 B>/artifacts/iq-candy-20260927/scheduling-research-20260927/ACCEPTANCE_MATRIX.json，79条当前用例。两条已废止TPS-only用例不计入。V3/V4/V5参考模型52/37/53条断言不是Go、PostgreSQL、Redis或协议验收证据。
 
 ## 状态与实现索引
 
@@ -59,7 +59,7 @@
 - 前端vue-tsc与ESLint通过；frontend-protocol-final.log最新6文件43项PASS，涵盖global策略/首字档继承、六种canonical协议单独提交、空transport与anthropic别名。既有账号页/路由/菜单/i18n21文件159项PASS。测试使用模拟后端，不能替代真实浏览器/API联调；继承修复后的生产构建exit0，1091模块、30.87s，见frontend-inheritance-review-final.log；已有大包/Browserslist提示保留。
 - explain-real-stores-complete.log整个命令exit0：真实PostgreSQL 18与Redis 8.4环境下，解释前后7张PG表完整行JSON和每个Redis键DUMP相等，下一次真实SWRR选择与解释预测相同；同次命令中的profile继承、unknown、pin、容量、凭据族暂停、恢复阶段和只读过期预留/忙探针测试通过。早期explain-final-race.log的中间符号编译失败保留；随后explain-final-verified.log已整链-race PASS（scheduling 1.270s、service 1.848s），包括真实Redis只读预测和真实PG/Redis解释纯度，不能再标记为未运行。
 
-上述日志目录：/xy2/artifacts/iq-candy-20260927/scheduling-implementation-20260927/。未生成独立日志的测试保留工具执行结果，由主执行器证据账本收口。
+上述日志目录：<工作机 B>/artifacts/iq-candy-20260927/scheduling-implementation-20260927/。未生成独立日志的测试保留工具执行结果，由主执行器证据账本收口。
 
 ## 79项逐条映射
 
@@ -195,7 +195,7 @@
 
 ## 2026-09-28 可靠性补充验收
 
-本节对应本次候选工作树，证据统一保存在 `/xy2/artifacts/scheduling-optimization-20260928`。上方历史矩阵不因新增实现而自动变为全项通过。默认调度仍为 legacy；controlled 未上线。
+本节对应本次候选工作树，证据统一保存在 `<工作机 B>/artifacts/scheduling-optimization-20260928`。上方历史矩阵不因新增实现而自动变为全项通过。默认调度仍为 legacy；controlled 未上线。
 
 | 风险与期望 | 已观察的本地证据 | 仍待上线前验证 |
 |---|---|---|

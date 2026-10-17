@@ -80,7 +80,7 @@
 
 ### Sub2API 0.2.15 / XY2API 0.3.0 正式发布完成（2026-10-13）
 
-- 独立工作树 `/lex/xy2api-sync-20261013`；起始main `7b1d5d8c387c461a660befa3ac936b39715b4bf0`。固定官方annotated v0.2.15（object `86a80c13dcba86f52f9ca815b5a471cecc236227`，target `f2669c8cf62555cd92389b3f55920e9e6e7c6ff2`），真实base `0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d`。146个上游提交、27项冲突裁决见[同步说明](UPSTREAM_SYNC_V0215.md)。
+- 独立工作树 `<工作机 C>/xy2api-sync-20261013`；起始main `7b1d5d8c387c461a660befa3ac936b39715b4bf0`。固定官方annotated v0.2.15（object `86a80c13dcba86f52f9ca815b5a471cecc236227`，target `f2669c8cf62555cd92389b3f55920e9e6e7c6ff2`），真实base `0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d`。146个上游提交、27项冲突裁决见[同步说明](UPSTREAM_SYNC_V0215.md)。
 - [同步PR #92](https://github.com/liulixin-lex/xy2api/pull/92)已按固定head `bcb62e5801996fb3b3a3411096cae22f5fa2651c`、18/18成功检查合入main `8f47f8fb2ee82d9cd85acd7d7d9353c64e41e614`。PR90、91已自动标记merged，原head分别`2c8507f8b8ff695f4a4f20689535aa9df1098455`、`5eec0830aad240e0b3d2171505fa7299e84225a6`；保留真实merge历史。
 - 备份现场经授权只读确认：应用角色无法读历史外部schema，客户端18.6/数据库18.4及TLS正常。用户选择public；新显式scope保留旧全库默认，升级后须在页面选择并保存public。native TOC保留public与管理员pg_trgm，真实PG覆盖函数/类型/序列/数据、其他schema不变及SQL错误事务回滚。恢复目标须先初始化本版本schema/扩展。见[备份说明](BACKUP_RELIABILITY.md)。生产未改权限/配置/服务，未执行导出或恢复。
 - controlled退役，share默认关闭，旧策略只导入未启用草稿；异步图片独立context与R1–R4心跳/对象清理/账本/存储关闭修复均已回归。tokens/s采用完整请求耗时，缓存改称基于互斥计费Token桶的读取占比；中英文与显示开关一致，见[统计口径](USAGE_METRICS.md)。
@@ -89,7 +89,7 @@
 - 真实发行RC镜像完成全新318迁移、0.2.6的316→318升级、成套PostgreSQL/Redis/app-data恢复再运行旧版，health/login/me/6静态资源均通过；恢复snapshot与baseline同为`50674a127239ee9e5ee307f8ecc0eb71ad2020a4ab27534a69145c9333e85378`。三个PG客户端均18.6。4个既有部署ID、状态、配置和挂载摘要全部不变。
 - [正式晋级PR #93](https://github.com/liulixin-lex/xy2api/pull/93)最终head `77d43e92b924ec22311487c4b5821521d56cdd41`两组18/18检查成功，常规merge为`1e0fbdd704b9080bb730d337e2003136c683ab78`；[正式v0.3.0](https://github.com/liulixin-lex/xy2api/releases/tag/v0.3.0) annotated object `db6f317ef6af57c74aef55112ccd8fe58d220c92`指向该提交。[Release run38353591650](https://github.com/liulixin-lex/xy2api/actions/runs/38353591650)成功，draft=false/prerelease=false。
 - 正式六资产196942614字节双SHA、五平台原生格式/源码revision/版本与vcs.modified=false全部通过；GHCR linux/amd64与linux/arm64、标签version/revision/source及latest/0.3/0全部一致，index `sha256:5560a67e10b463dbab3e20fca5e719b2933f93dd9f341e890bfe34a12f7f7281`。
-- 正式真实镜像全新318迁移、health/login/me与静态资源通过，pg_dump/pg_restore/psql均18.6。本任务容器/网络/卷及7处演练凭据、备份和应用数据路径已删除；4个既有部署ID/状态/配置/挂载均与起始完全相同。临时dirty复现clone已删除，诊断与校验报告保留在`/lex/xy2api-release-20261013/`。生产仅只读诊断，未部署或改变权限/设置。
+- 正式真实镜像全新318迁移、health/login/me与静态资源通过，pg_dump/pg_restore/psql均18.6。本任务容器/网络/卷及7处演练凭据、备份和应用数据路径已删除；4个既有部署ID/状态/配置/挂载均与起始完全相同。临时dirty复现clone已删除，诊断与校验报告保留在`<工作机 C>/xy2api-release-20261013/`。生产仅只读诊断，未部署或改变权限/设置。
 - 收尾按AGENTS要求在发行后补记本文件，单独走纯文档PR；不移动已发布标签。故收尾后main可比正式tag多纯记忆提交，非本记忆文件与正式tag必须零差异，发行源始终固定为1e0fbdd704。同步/晋级短期分支待该纯文档收尾合并后删除；保留原用户feature分支和全部不可变标签。
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
@@ -551,3 +551,12 @@ pnpm --dir frontend run build
 - 验证：`sync.py audit`、`sync.py scheduler-diff`、`tools/tests` 37 个、`check_docs_consistency.py`、Caddyfile 策略脚本与 `config.example.yaml` 解析均通过；`git diff 5fdd1e589..HEAD -- backend frontend` 为空。未改源码，未跑 Go 与前端测试。
 - 卡点/风险：无。留给 0.4.1 决定：测试环境 `fixtures.py` 有 10 个分组从未被场景使用（含 `G-balance-429`），fault-upstream 的 F19/F20 只服务已删除的余额探测；浸泡期间不动测试服务器脚本。
 - 下一步：主 agent 浸泡结束后复跑门禁并随 PR #100 推送这些提交，同时刷新它的顶部状态（仍为 04:45Z 的内容）。
+
+### 2026-10-17T09:00Z — 20261017-repo-consistency-sweep — 公开仓库主机信息清理（完成）
+
+- 请求/目标：主 agent 推送前扫描发现归档中有旧测试站域名与开发机路径；用户授权“可以处理，由你决定”。
+- 决定：只清理当前跟踪文件，不改写已公开的 Git 历史（main 与已发布标签不强推）。能定位真实主机的信息（测试站域名及与之绑定的 Compose 项目名、端口、凭据目录，同机共存服务名，生产 SSH 账号）与开发机、宿主机路径一律改为代称；对外公开的生产入口域名、产品默认安装路径 `/opt/xy2api`（部署文档与脚本）、测试工具里的测试环境项目名与端口、上游 Sub2API 带来的 openspec 文件和测试代码里的示例保持不变。
+- 完成：19 个文件改为代称（记忆主文件与归档、13 份早期功能与修复记录、4 份 openspec 文件；`<测试站点>`、`<工作机 A>` 等），归档开头写明；代称对照表追加到仓库外私有主机清单。检查脚本新增 `private` 检查（规则在 `tools/docs_consistency.json`）：这些标识、文档中的公网 IPv4、`ubuntu@`/`root@` 主机写法入库即失败；新增单测 1 个。AGENTS.md 工作原则写明公开仓库的主机信息规则。
+- 验证：`check_docs_consistency.py`、`tools/tests` 38 个、`sync.py audit` 与 `scheduler-diff` 通过；`BILLING_INTEGRITY_PROVENANCE.json` 仍为合法 JSON；全仓库复扫无残留。
+- 卡点/风险：Git 历史仍含原文，只能靠轮换或下线测试站消除（该测试站若仍在运行，建议下线或更换域名）。
+- 下一步：随 PR #100 由主 agent 推送。

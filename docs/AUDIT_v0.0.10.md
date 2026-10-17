@@ -3,8 +3,8 @@
 - 更新时间：`2026-09-15T07:36:11+08:00`（Asia/Shanghai）。
 - 执行者：Codex；当前会话未公开具体模型ID。
 - 基线：`v0.0.10` / `e695c0356c972f398045f87b28a9cccda8a66176`；Sub2API兼容基线`v0.2.4`。
-- 修复副本：`Y:\jiance\xy2api-audit-v0.0.10`；分支`audit/v0.0.10-fixes`，未提交。原项目`Y:\jiance\xy2api`保留。
-- 交付与完整原始日志：`Y:\jiance\xy2api-update-artifacts\20260915-050045`；旧v0.0.8更新交付保存在`pre-audit-v0.0.10/`，本轮基线仅为`AUDIT_BASELINE_v0.0.10.zip`。
+- 修复副本：`<工作机 W>\xy2api-audit-v0.0.10`；分支`audit/v0.0.10-fixes`，未提交。原项目`<工作机 W>\xy2api`保留。
+- 交付与完整原始日志：`<工作机 W>\xy2api-update-artifacts\20260915-050045`；旧v0.0.8更新交付保存在`pre-audit-v0.0.10/`，本轮基线仅为`AUDIT_BASELINE_v0.0.10.zip`。
 - 结论：已复现缺陷已作最小修复；验证结果区分通过、历史失败、跳过和部分验证，不将本地测试表述为全仓零bug。
 
 ## 修改及原因

@@ -38,7 +38,7 @@ Stripe 支持「站内」和「托管」两种收款模式，由管理员在支�
 
 ## 验证与上线门禁
 
-本地验收使用模拟 Stripe HTTP 服务、签名事件和独立 PostgreSQL，不会调用真实账户或产生真实扣款。记录在 `/xy/artifacts/stripe-hosted/VERIFICATION.txt`。
+本地验收使用模拟 Stripe HTTP 服务、签名事件和独立 PostgreSQL，不会调用真实账户或产生真实扣款。记录在 `<工作机 A>/artifacts/stripe-hosted/VERIFICATION.txt`。
 
 真实测试账户上线前仍须验收：官方托管页、付款失败、3DS、返回和取消、延迟付款、CLI/Dashboard Webhook、重复事件、全额及部分退款。实际支付方式可用性由账户地区、币种和 Dashboard 设置决定。本地模拟不能替代这些结果，也不构成绝对零漏洞保证。
 

@@ -1,6 +1,6 @@
 # XY2API 仓库记忆归档
 
-> 只读历史，供追溯。2026-10-17 从 [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md) 原样移入，正文未改写，只把操作日志中两处误用 `##` 的标题降为 `###`。当前状态以 `PROJECT_MEMORY.md` 为准。这里的“进行中”“待授权”“未发版”等措辞是当时的状态：移入时按 Git 标签核实，对应版本到 v0.3.0 均已发布，或方案已被后续版本取代。
+> 只读历史，供追溯。2026-10-17 从 [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md) 原样移入，正文未改写，只做了两处处理：操作日志中两处误用 `##` 的标题降为 `###`；按公开仓库约定，把测试站点域名与端口、开发机与宿主机路径、共存服务名和生产 SSH 账号替换为代称（如 `<测试站点>`、`<工作机 A>`），对照表在仓库外的私有主机清单。当前状态以 `PROJECT_MEMORY.md` 为准。这里的“进行中”“待授权”“未发版”等措辞是当时的状态：移入时按 Git 标签核实，对应版本到 v0.3.0 均已发布，或方案已被后续版本取代。
 >
 > 维护：任务结束后，由执行者把它的交接状态与登记原样追加到对应章节末尾；较早的操作日志按时间顺序追加到“操作日志”末尾。只追加，不改写；更正以追加说明的方式写在原条目之后。
 
@@ -42,11 +42,11 @@
 ### PR #90 审查修复交付（2026-10-12，本地实施与隔离验收完成）
 
 - 用户已授权执行独立审查方案、保留 PR #90 优秀逻辑，并允许释放磁盘空间。本轮完成本地修复与交付，没有推送、修改 PR、合并、标签/Release、部署、生产数据操作或付费模型调用。
-- 固定基线：PR #90 `a30fc223da2dbde25913a7b010b7c0d4db0d1f54`；远端 main `7b1d5d8c387c461a660befa3ac936b39715b4bf0`，收尾只读核对均未变化。候选分支 `fix/pr90-review-20261012` 位于 `/xy/worktrees/pr90-hardening`；业务最终提交 `e79f6bec893b25fde691e420b53275e8b8adc316`，此前实现/静态修正为 `85eae404a`、`2cbb5262d`。后续仅本记忆文档收尾，不改业务。
+- 固定基线：PR #90 `a30fc223da2dbde25913a7b010b7c0d4db0d1f54`；远端 main `7b1d5d8c387c461a660befa3ac936b39715b4bf0`，收尾只读核对均未变化。候选分支 `fix/pr90-review-20261012` 位于 `<工作机 A>/worktrees/pr90-hardening`；业务最终提交 `e79f6bec893b25fde691e420b53275e8b8adc316`，此前实现/静态修正为 `85eae404a`、`2cbb5262d`。后续仅本记忆文档收尾，不改业务。
 - 保留 PR 的层级、加权 HRW、会话/缓存亲和、有界等待、资格/利润/协议边界及不可变快照。修复 R1–R7 的权重口径、等待 attempt 所有权、字段合并、迟到结果、绑定竞争、统计完整性及人工停用/严格排空；R8 只追加 271、只读升级盘点与预检，270 原文及 317 个旧校验值保持。saved/applied 区分响应实例载入与是否参与调度，制品实测补修了总开关关闭时版本错误归零。
 - 验证：前端全量 359 文件/2,814 PASS，类型/lint 与串行生产打包；后端四改动包 unit 17,516 PASS/0 FAIL/17 条件性 SKIP、定向 111 PASS/0 SKIP、真实 PostgreSQL/Redis 13 PASS/0 SKIP、23 项工具；gateway/cache/kernel race 分别 159/69/61 PASS，均零失败/跳过。最终补修 25 PASS/0 SKIP；新 CI 必测 26/20 项全部已有 RUN/PASS。最后版本反馈仅两处只读表达式，运行时选择/所有权/统计/Redis/纯算法字节不变，按范围复用先前 race，不声称新 case 又跑了一轮 race。最终业务 HEAD 全后端 golangci-lint 2.14.0 为 0 issues，来源与调度差异门禁通过。
 - 固定嵌入制品 `0.2.6-pr90.review.1` 对应 `e79f6bec8`，vcs.modified=false，二进制 SHA-256 `b5a22662f924a2f9502c9ece819fbf6c02e06249fd85a8de9f463682e9a9dd52`。实际 fresh 318 迁移、官方 0.2.6 基线 316、升级到 318/导入 v2/默认关闭/410、保存 CAS、双实例应用、全员停用、0.2.6 应用回退及成套备份恢复全部通过。1440/390、明暗主题、键盘停用、无整页溢出/页面异常通过；截图已查看，不构成全站无障碍认证。
-- 交付：`/xy/artifacts/pr90-hardening-20261012/IMPLEMENTATION.md`、`VALIDATION.md`、`validation.json`、补丁和本地制品归档；失败/OOM/ENOSPC/lint/中断与升级发现均保留。原独立审查 36 项目/140 固定 SHA 来源保留；审查源码逐文件验证后位于持久 `/xy/worktrees/pr90-reviewed`。运行契约见候选 `docs/share-scheduling-hardening.md`。
+- 交付：`<工作机 A>/artifacts/pr90-hardening-20261012/IMPLEMENTATION.md`、`VALIDATION.md`、`validation.json`、补丁和本地制品归档；失败/OOM/ENOSPC/lint/中断与升级发现均保留。原独立审查 36 项目/140 固定 SHA 来源保留；审查源码逐文件验证后位于持久 `<工作机 A>/worktrees/pr90-reviewed`。运行契约见候选 `docs/share-scheduling-hardening.md`。
 - 空间：按用户授权清理可再生成缓存、未使用可再拉取镜像和归档日志，保存历史镜像 digest；没有删除运行应用或 `/var/backups`。本任务容器、临时工具/缓存均清理，收尾根盘约 3.1GB 可用、/dev/shm 为空，全部源码与证据保留。
 - 尚未完成的生产门槛：远端最终 HEAD 标准 CI、标准优化构建性能复测、生产基线、三天影子及逐组灰度/真实账单。共享主机关闭 service 内联的合成 P99 为原版 10.593ms/share 13.704ms，差约 3.111ms，尚不能认定 1ms 设计目标达成。本地回归与 RC 演练通过不能宣称生产全面上线；等待预算和实际缓存/首字收益需真实环境验证。
 
@@ -82,7 +82,7 @@
 
 ### 份额调度实施完成，PR #90 待审（2026-10-10，阶段 1–3 完成、阶段 4 本地验收完成；CI 全绿，未合并、未发版、未部署）
 
-- 本机 `/Users/admin/XIN-MAC-XN/xy2api`，分支 `feat/share-scheduling-20261010`，起点 main `3569d4f00`（产品 0.2.5），`58a355a7` 起的功能提交后合并 origin/main `7b1d5d8c`（0.2.6 GPT 缓存可靠性，合并提交 `3c0e4b6a`）；已推送 origin 并开 PR [#90](https://github.com/liulixin-lex/xy2api/pull/90)（base main），`eeab1b66` 上 CI 18 项检查全部通过（含 Integration tests、Gateway reliability、OpenAI cache reliability、Original scheduler diff allowlist），GitHub 显示可合并（CLEAN）。
+- 本机 `<本机仓库>`，分支 `feat/share-scheduling-20261010`，起点 main `3569d4f00`（产品 0.2.5），`58a355a7` 起的功能提交后合并 origin/main `7b1d5d8c`（0.2.6 GPT 缓存可靠性，合并提交 `3c0e4b6a`）；已推送 origin 并开 PR [#90](https://github.com/liulixin-lex/xy2api/pull/90)（base main），`eeab1b66` 上 CI 18 项检查全部通过（含 Integration tests、Gateway reliability、OpenAI cache reliability、Original scheduler diff allowlist），GitHub 显示可合并（CLEAN）。
 - 与 0.2.6 的关系：份额钩子在 `scheduler.Select` 之前返回，`applyDeferredShareBinding` 先于 0.2.6 原子粘性守卫处理准入绑定；0.2.6 对原版调度文件的改动已作为已审 hunk 加入 `scheduler-diff.json`。合并后在 Go 1.27.2、golangci-lint v2.14.0 下复验通过（tasks.md「合并 main … 后复验」）。
 - 范围：
   - 剔除智能可控调度，行为回到 Sub2API 原版（旧表与设置保留至 D7，旧管理接口统一 410）；
@@ -123,7 +123,7 @@
 
 ### 调度现状分析与“份额调度”规划（2026-10-09，规划完成；亲和/回升规则已被 2026-10-10 修订取代）
 
-- 用户要求分析账号调度、调研开源网关与 Sub2API 二开项目，规划“保留 Sub2API 原版、完全剔除智能可控调度、另行开发新调度”。本轮只分析与规划：本机克隆 `/Users/admin/XIN-MAC-XN/xy2api`，起点 main=`3569d4f00`，本地分支 `plan/share-scheduling-20261009`，未提交、未推送、未改业务代码。
+- 用户要求分析账号调度、调研开源网关与 Sub2API 二开项目，规划“保留 Sub2API 原版、完全剔除智能可控调度、另行开发新调度”。本轮只分析与规划：本机克隆 `<本机仓库>`，起点 main=`3569d4f00`，本地分支 `plan/share-scheduling-20261009`，未提交、未推送、未改业务代码。
 - 现状结论：模式表无记录时默认 controlled，且网关每请求读一次 PG 取模式、失败 503；原版无账号权重，OpenAI 实验调度器的优先级是软因子（仿真备用层空闲时拿 33.3%）；controlled 分配随候选集合分桶、叠加健康/溢出/爬坡且无会话亲和，侵入 65 个非测试文件。详见 `docs/SCHEDULING_ANALYSIS.md`。
 - 新方案“份额调度”（`share`，按分组开启）：分组层级+权重+排空为唯一意图；层级严格；新会话按加权会话一致性哈希（HRW）分配并保持亲和；自动机制只复用原版闸门排除或做有界纠偏；全程原因码、报表、Explain/Preview；热路径零新增 PG。规划见 `openspec/changes/replace-controlled-with-share-scheduling/`（proposal/design/tasks/两份 spec/可复现仿真）。
 - 仿真（标准库、固定种子，exit 0）：HRW 5:3:2 份额误差 ≤0.1pp、账号退出精确最小迁移、改权重迁移 13.27%（理论 13.33%）；会话亲和下请求份额偏差均值 1.5%（纠偏 1.0%），重尾成本 8.3%（纠偏 6.1%）为物理边界。
@@ -141,20 +141,20 @@
 
 ### GPT 缓存可靠性 0.2.6（2026-10-10，GitHub 正式发布完成）
 
-- 用户授权同步最新主线、新建分支、实施全站 GPT 缓存方案，完成验证后提交、推送、常规合并及 GitHub 发版。独立工作树 `/lex/xy2api-gpt-cache`；功能分支基于 `3569d4f00aae3eada079eb7ac058dc62256a66b8`，正式版本分支 `release/0.2.6` 基于功能合并提交 `3cf8406e5cfff94c488bfa58d0ba5b198e8ae1cf`；其他工作树未提交文件保持。
+- 用户授权同步最新主线、新建分支、实施全站 GPT 缓存方案，完成验证后提交、推送、常规合并及 GitHub 发版。独立工作树 `<工作机 C>/xy2api-gpt-cache`；功能分支基于 `3569d4f00aae3eada079eb7ac058dc62256a66b8`，正式版本分支 `release/0.2.6` 基于功能合并提交 `3cf8406e5cfff94c488bfa58d0ba5b198e8ae1cf`；其他工作树未提交文件保持。
 - 统一 Responses、Chat/SSE、Messages 转换和 WebSocket 的真实 usage 别名及显式零优先级，保留 API Key 缓存选项和终态诊断。租户/分组/模型隔离的 `v2:` 会话身份、Redis 原子首次绑定及所有者保护、HTTP/WS 溢出准入保护已实现；保留利润门、质量门、权重及 previous_response_id 优先约束。
 - 新增有界进程内隐私诊断与同优先级、同负载候选的缓存偏好，两项均默认关闭，灰度比例为零。诊断只记录 HMAC 和数值，偏好仅训练有明确真实 usage 的可比续请求，不推算计费用量或增加付费模型调用。使用说明：[OpenAI 缓存可靠性](openai-cache-reliability.md)。
 - 最终后端 unit 62 包/23,646 主子测试 PASS（543 既有条件性跳过），integration 56 包/15,164 PASS（102 条件性跳过）；六包真实 PostgreSQL/Redis race 483 PASS，工作流三段守卫的 29 调度、15 缓存、11 跨路径必需用例均实际执行、零失败零跳过。最后测试类型断言修改后 Redis race 再验通过。前端 lint/typecheck、327 项 critical、生产构建和严格依赖审计通过；全仓 golangci-lint 0 issues/exit 0，嵌入前端 RC 二进制构建和版本/提交自检通过。共享 Anthropic Chat 写入字段和渐进 usage 合并兼容回归已按既有契约修复，原失败证据保留。
 - RC 产品版本 `0.2.6-rc.1` 已在功能 [PR #86](https://github.com/liulixin-lex/xy2api/pull/86) 固定 head `251ac014533c546c38e7aebc1bb343e5791713f1` 的 18 项检查全绿后常规合并，merge `3cf8406e5cfff94c488bfa58d0ba5b198e8ae1cf` 与 head 的 tree 一致。RC 注释标签固定该 merge，Release 成功；五平台归档 SHA、Go 1.27.2/x/net 0.60.0 构建信息、双架构 GHCR 与提交标签均已核验。独立 fresh、0.2.5 升级、数据库与应用数据备份恢复回退均通过，迁移数 316 不变。
-- 正式 [PR #87](https://github.com/liulixin-lex/xy2api/pull/87) 仅晋级产品版本、来源清单版本和交接记录，固定 head `6a243849833c1d8b85b03da3fe249c6bdfcf8b5e` 的 18 项检查全绿后常规合并为 `1f0aa3255034786618c8ae6e14e8459369469ad6`，树与 head 一致。注释标签 `v0.2.6` 固定该提交；[Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.2.6)、主线/标签 CI 与 Security Scan 均成功。五平台归档 SHA、构建元数据、双架构 GHCR 和 `latest`/`0.2`/`0` 别名已独立核验。正式镜像的隔离 fresh 健康、登录、认证资料、六个静态资源和 316 条迁移通过。兼容版本仍为 `0.2.14`；证据 `/lex/gpt-cache-reliability-20261010/`。本轮不部署生产，实际命中收益需部署后灰度观察。
+- 正式 [PR #87](https://github.com/liulixin-lex/xy2api/pull/87) 仅晋级产品版本、来源清单版本和交接记录，固定 head `6a243849833c1d8b85b03da3fe249c6bdfcf8b5e` 的 18 项检查全绿后常规合并为 `1f0aa3255034786618c8ae6e14e8459369469ad6`，树与 head 一致。注释标签 `v0.2.6` 固定该提交；[Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.2.6)、主线/标签 CI 与 Security Scan 均成功。五平台归档 SHA、构建元数据、双架构 GHCR 和 `latest`/`0.2`/`0` 别名已独立核验。正式镜像的隔离 fresh 健康、登录、认证资料、六个静态资源和 316 条迁移通过。兼容版本仍为 `0.2.14`；证据 `<工作机 C>/gpt-cache-reliability-20261010/`。本轮不部署生产，实际命中收益需部署后灰度观察。
 - 首轮 Security Scan 检出 Go 1.27.0 标准库和 x/net 的 12 项可达漏洞；升级 Go 1.27.2、x/net 0.60.0 及必要关联依赖，不改变例外政策。新组合全量 unit 62 包/23,646 PASS、integration 56 包/15,164 PASS；HTTP/2 迁移后七包真实 PostgreSQL/Redis race 538 PASS、三段工作流守卫 29/15/11 必跑用例 PASS；最近 30 分钟样本窗口修复后五包缓存 race 40 PASS、16 项缓存守卫全部 RUN/PASS，均零失败。最终源码全仓 lint 0 issues，govulncheck 可达/导入包漏洞 0，7 项仅存在于未调用依赖模块。旧工具链证据和首轮失败记录保留。
 
 ### Claude 自动缓存分组迭代（2026-10-08，GitHub 发布进行中）
 
 - 用户要求参考 LiteLLM 与 Sub2API OAuth 缓存逻辑，把精确规则改为开关和分组选择，覆盖选中组的所有账号、Key 与模型，精简前端。开发阶段已完成；用户最新明确授权推送、合并与发版，范围仅 GitHub 与发行制品，不部署或访问真实供应商。
-- `/lex/xy2api-claude-cache` 的 `feat/claude-cache-groups-20261008` 基于 `origin/main=309afb6afd4240aceaecd2c0296a3b669309e795`。新配置 enabled/group_ids；旧规则只迁移分组选择且关闭，需明确启用保存。
+- `<工作机 C>/xy2api-claude-cache` 的 `feat/claude-cache-groups-20261008` 基于 `origin/main=309afb6afd4240aceaecd2c0296a3b669309e795`。新配置 enabled/group_ids；旧规则只迁移分组选择且关闭，需明确启用保存。
 - 新 helper 补内容块默认 5m，保护原始声明、现有 OAuth 断点、四点额度与长 TTL 在前约束；包含 Anthropic API Key/OAuth/SetupToken/透传/Vertex/Bedrock 和 Chat/Responses 转换。其他协议和 count_tokens 不接入。冷写预留考虑账号映射模型，真实结算与原有覆写保持，额外在覆写前采集数值诊断。
-- 前端 9 项新增交互、全量 lint/typecheck、327 项 critical 与生产构建通过；桌面/手机/暗色和键盘操作无溢出或脚本错误。后端 62 包 unit（先精确排除两个 DNS 依赖子用例）、构建、缓存/预留/TTL/API 合约三包 race 均通过；两个排除用例再于同一隔离容器设置固定公网地址的域名映射，所在矩阵 9 子用例全部通过，无真实供应商访问。最终全仓 golangci-lint 为 0 issues/exit 0，首轮失败、测试 lint 修正与中间超时记录保留。证据 `/lex/claude-cache-groups-20261008/`。
+- 前端 9 项新增交互、全量 lint/typecheck、327 项 critical 与生产构建通过；桌面/手机/暗色和键盘操作无溢出或脚本错误。后端 62 包 unit（先精确排除两个 DNS 依赖子用例）、构建、缓存/预留/TTL/API 合约三包 race 均通过；两个排除用例再于同一隔离容器设置固定公网地址的域名映射，所在矩阵 9 子用例全部通过，无真实供应商访问。最终全仓 golangci-lint 为 0 issues/exit 0，首轮失败、测试 lint 修正与中间超时记录保留。证据 `<工作机 C>/claude-cache-groups-20261008/`。
 - 2.65 MB 合成请求辅助路径基准 100 次：关闭 1.795µs/320B；开启 72.97ms/29.20MB（46 次分配）。只含准入/补齐，不含完整转发或网络；块级补齐会复制大请求正文，不把本结果表述为端到端吞吐或生产压测。
 - 当前使用说明及 OpenSpec 已替换为分组行为；0.2.4 历史记录保留，准备产品 0.2.5-rc.1 并通过正式版本 PR 晋级 0.2.5；兼容版本 0.2.14 与数据库迁移不变。
 - 本地实现提交 `55002ca83`，收尾提交 `53d6a12ca` 仅包含测试错误检查及验收/记忆记录。标准来源审计通过，结果与身份回读保存于外部证据目录。发布按受保护 PR、固定 head 检查、常规 merge、不可变 annotated 标签执行；真实上游支持、命中率和供应商/NewAPI 账单仍需后续验证。
@@ -168,23 +168,23 @@
 - 本地全量 unit、缓存/预留/设置 race、真实 PostgreSQL/Redis 27 项集成（零跳过）、前端 lint/typecheck/318 项原 critical + 4 项新增组件、生产构建均通过。2.65 MB 补齐辅助路径基准（不含完整 Forward/网络）OFF 1.4µs/264B，ON 命中 34ms/10.6MB；桌面/手机无溢出或脚本错误。初次并行编译 OOM、lint 文本大小写问题均已修复或成功重验；不删除失败记录。
 - RC 标签 `v0.2.4-rc.1` 固定于上述 merge，Release workflow `37664827099` 成功；GitHub 附件校验和、双架构 GHCR manifest 与版本/提交标签均核对通过。隔离旧版升级烟测返回健康、登录和静态资源正常；fresh/rollback 未执行。
 - 正式 PR [#82](https://github.com/liulixin-lex/xy2api/pull/82) 已在全部保护检查通过后普通合并，merge `1012973a7c828be5bf0cf8ae3570b45747d1a415`；正式标签 `v0.2.4` 为该提交上的不可移动 annotated tag。Release workflow [37670849179](https://github.com/liulixin-lex/xy2api/actions/runs/37670849179) 成功，GitHub Release 已发布五个跨平台归档及 `checksums.txt`，下载后五项校验均通过；主分支 push CI、标签 CI [37670849015](https://github.com/liulixin-lex/xy2api/actions/runs/37670849015) 与 Security Scan [37670848840](https://github.com/liulixin-lex/xy2api/actions/runs/37670848840) 均成功。GoReleaser 已通过 GHCR 发布步骤。
-- 正式准备分支 `release/0.2.4` 位于 `/lex/xy2api-claude-cache`，只晋级产品版本与交接/验收文档，业务代码保持 RC。兼容版本仍为 0.2.14，没有新增迁移。来源审计通过，Makefile 新增关键用例入口登记为精确 manual_merge；本次只完成 GitHub 合并、标签和制品发布，不部署线上服务。
-- 证据及当前阶段账本：`/lex/claude-cache-implementation-20261008/`。使用说明：[Claude 缓存补齐](CLAUDE_CACHE_FALLBACK.md)。未部署生产、未自动启用规则、未新增付费上游调用；历史低命中归因及 NewAPI/供应商账单仍不在已验证范围。
+- 正式准备分支 `release/0.2.4` 位于 `<工作机 C>/xy2api-claude-cache`，只晋级产品版本与交接/验收文档，业务代码保持 RC。兼容版本仍为 0.2.14，没有新增迁移。来源审计通过，Makefile 新增关键用例入口登记为精确 manual_merge；本次只完成 GitHub 合并、标签和制品发布，不部署线上服务。
+- 证据及当前阶段账本：`<工作机 C>/claude-cache-implementation-20261008/`。使用说明：[Claude 缓存补齐](CLAUDE_CACHE_FALLBACK.md)。未部署生产、未自动启用规则、未新增付费上游调用；历史低命中归因及 NewAPI/供应商账单仍不在已验证范围。
 
 ### Claude 缓存缺失补齐前期规划（2026-10-08，以下保留规划时边界，实施以顶部为准）
 
-- 用户要求同步最新仓库、新建分支并规划。已 fetch 并通过 ls-remote 核对 `origin/main=317b019134a09f1a5cb16f8c15b0a3365f9ee920`，产品 0.2.3 / 兼容 0.2.14；在 `/lex/xy2api-claude-cache` 建立 `plan/claude-cache-fallback-20261008`。原 `/lex/xy2api` 的 main 和未提交记忆文件保持，文件哈希已核验。
+- 用户要求同步最新仓库、新建分支并规划。已 fetch 并通过 ls-remote 核对 `origin/main=317b019134a09f1a5cb16f8c15b0a3365f9ee920`，产品 0.2.3 / 兼容 0.2.14；在 `<工作机 C>/xy2api-claude-cache` 建立 `plan/claude-cache-fallback-20261008`。原 `<工作机 C>/xy2api` 的 main 和未提交记忆文件保持，文件哈希已核验。
 - 方案入口：[proposal](../openspec/changes/add-claude-cache-fallback/proposal.md)，另有 design、行为规格与 tasks。首版默认关闭，只覆盖原生 Messages 到已验证 Anthropic API Key 上游；按组/可选 Key/账号/完整地址/最终模型精确限定，无声明时补顶层默认 5m，保护原始及最终已有声明。
 - 复用 settings 表，不新增迁移；不改变调度或强制计费策略，不增加自动付费探测/重放。计费要求真实 usage、TTL 分类及三端对账边界；额外识别冷写价高于普通输入时在途预留需要调整，纳入实施与并发验收。
-- 既有 15 条合成实验支持当前单个上游组合，不能替代新代码回归或证明历史低命中根因。详细证据仍在 `/lex/cache-diagnosis-20261007/`；本次规划没有新增付费调用或生产访问。
-- 文档链接、结构、敏感文本模式、原工作区保留及精确所有权范围检查通过；同步工具 10 项回归通过。OpenSpec CLI 未安装，未声称运行其严格校验；本轮仅规划，不运行业务构建/测试。提交后来源审计及最终分支身份记录于 `/lex/claude-cache-plan-20261008-evidence/`，以实际结果为准。
+- 既有 15 条合成实验支持当前单个上游组合，不能替代新代码回归或证明历史低命中根因。详细证据仍在 `<工作机 C>/cache-diagnosis-20261007/`；本次规划没有新增付费调用或生产访问。
+- 文档链接、结构、敏感文本模式、原工作区保留及精确所有权范围检查通过；同步工具 10 项回归通过。OpenSpec CLI 未安装，未声称运行其严格校验；本轮仅规划，不运行业务构建/测试。提交后来源审计及最终分支身份记录于 `<工作机 C>/claude-cache-plan-20261008-evidence/`，以实际结果为准。
 - 本轮仅本地提交规划与精确新文档目录的 XY_OWNED 登记，不推送/创建 PR/部署。下一步按 tasks 实施；历史根因仍缺真实请求体，不以增强方案替代归因。
 
 ### XY2API 0.2.3 正式发版（2026-10-07，正式晋级进行中）
 
 - PR #79 已合并到 `main`，合并提交 `3df9253f5ed9f466d098cc2c9097321a4d0fce80`；上游为 Sub2API `v0.2.14`，目标 `0363b8cd`，兼容版本 `0.2.14`。本分支从该固定 main 创建，正式版本只提升产品版本号。
 - RC 标签 `v0.2.3-rc.1` 的标签对象为 `ca01fd878a9aef79d061036302dd74fdedb7643a`，workflow [37602741563](https://github.com/liulixin-lex/xy2api/actions/runs/37602741563) 成功；5 个归档、checksums、GHCR 双架构清单均已复核。
-- 独立 RC fresh 启动与登录通过；`0.2.2 -> RC` 迁移 `266 -> 316`，恢复数据库快照与应用数据后回退到 `0.2.2`，健康检查、登录和迁移 `266` 均通过。证据位于 `/lex/release-v0.2.3-20261007/`，未触碰生产部署。
+- 独立 RC fresh 启动与登录通过；`0.2.2 -> RC` 迁移 `266 -> 316`，恢复数据库快照与应用数据后回退到 `0.2.2`，健康检查、登录和迁移 `266` 均通过。证据位于 `<工作机 C>/release-v0.2.3-20261007/`，未触碰生产部署。
 - 当前正式分支 `release/0.2.3` 将 `VERSION` 与 `UPSTREAM_BASE.json` 晋级到 `0.2.3`，并在本记录中保留门禁证据；正式 PR 通过完整检查后才创建不可变正式标签。
 
 ### 计费修复 PR #78 已合并（2026-10-07）
@@ -193,15 +193,15 @@
 - 精确head的8项必需检查、额外release-helpers均通过；push/PR两套共18个check run全部SUCCESS后才合并。严格状态检查与enforce_admins保持，不使用管理员绕过。[最终CI](https://github.com/liulixin-lex/xy2api/actions/runs/37583149972) 包含完整unit、integration与真实PG/Redis竞态回归；后者256主/子测试、29项必测全PASS、0SKIP。
 - 首轮CI发现9项已有前端依赖高危，已升级Axios1.20.0、Vue及SSR3.5.42、source-map-js1.2.2；远端audit artifact与本地复核均high/critical=0，moderate13/low4保留披露，未改变豁免政策。另修复计费fixture遗留数据污染统计测试，以及旧前端页面测试的i18n/API mock与组件卸载；生产计费源码保持原已验版本。
 - 补修后本地整个repository集成1680主/子测试事件PASS、0FAIL、4项既有条件性SKIP；此前失败的2项dashboard回归通过。前端frozen install、ESLint、类型检查、353文件/2724项完整Vitest与生产构建全部exit0，无未处理异步错误。原失败证据完整保留，不能以早期失败运行冒充通过。
-- 合并后的干净main已再次通过标准来源审计；最终身份、工作流、审计与合并回读见 `/lex/billing-fix-20261007/pr-merge/`。此次收尾仅在本地更新本交接文档，未提交该合并后记录；其余工作树与远端main一致。测试临时资源清理完成，现有应用保持。
+- 合并后的干净main已再次通过标准来源审计；最终身份、工作流、审计与合并回读见 `<工作机 C>/billing-fix-20261007/pr-merge/`。此次收尾仅在本地更新本交接文档，未提交该合并后记录；其余工作树与远端main一致。测试临时资源清理完成，现有应用保持。
 - 产品0.2.2、完整兼容基线0.2.8、旧313份迁移与保护政策保持；本轮已完成远端交付，没有部署、发版或历史补扣。后续上线仍遵守修复规范中的排空旧额度flusher、在途保护、升级演练及人工历史核验要求。
 
 ### 计费完整性修复（2026-10-07，本地验收阶段记录；后续合并见上）
 
-- 当前工作区 `/lex/xy2api` 从干净 main `9717116f198904442ebb400d7d06792a40dea15c` 完成计费修复。本段保留本地实施阶段的验收结果；后续远端交付以顶部PR #78记录为准。产品0.2.2、完整 Sub2API 兼容0.2.8及既有 provenance/policy保持。
+- 当前工作区 `<工作机 C>/xy2api` 从干净 main `9717116f198904442ebb400d7d06792a40dea15c` 完成计费修复。本段保留本地实施阶段的验收结果；后续远端交付以顶部PR #78记录为准。产品0.2.2、完整 Sub2API 兼容0.2.8及既有 provenance/policy保持。
 - 已读指定会话91条活动并核验0.2.9–0.2.14官方来源，移植17个相关提交。0.2.14标签对象1400a7b4与目标提交0363b8cd已分别固定；详细规范、来源及验收见 `docs/BILLING_INTEGRITY_REPAIR.md`、`docs/BILLING_INTEGRITY_PROVENANCE.json`。
 - 删除 Key/用户/套餐/账号不再撤销既有费用；267意图表保存原价并恢复失败结算，资金/额度/成功用量同事务，正常与恢复流程均处理缓存和调度确认。计费不再由可丢弃内存工作池承接。另补并发预留、Key创建限额、定价/流式修复及EasyPay伪造回调防护。
-- 最终Go1.27.0完整unit为62包通过；PG18.1/Redis8.4集成为20主/4子通过、0 skip；构建及golangci-lint2.13.2（0 issues）通过。旧313份SQL逐字节不变，追加267后314项校验和全匹配；Wire已生成，标准sync audit在隔离干净副本通过。原始失败与最终成功日志、来源哈希和审阅副本指针位于 `/lex/billing-fix-20261007/`。
+- 最终Go1.27.0完整unit为62包通过；PG18.1/Redis8.4集成为20主/4子通过、0 skip；构建及golangci-lint2.13.2（0 issues）通过。旧313份SQL逐字节不变，追加267后314项校验和全匹配；Wire已生成，标准sync audit在隔离干净副本通过。原始失败与最终成功日志、来源哈希和审阅副本指针位于 `<工作机 C>/billing-fix-20261007/`。
 - 上线须先排空旧实例及旧平台额度dirty队列，并确认 `database.user_platform_quota_flusher_enabled=false` 与三项在途保护开关开启。历史16,744条异常仅是待核候选，不能把审计估额当作确认损失或直接补扣；只读入口 `tools/billing-integrity/audit.sql`。生产演练、压测和历史逐笔核验属于后续上线范围，本轮未执行。
 
 ### 0.2.2 协议验收补修（2026-09-30，待后继最终门禁）
@@ -216,8 +216,8 @@
 - 用户明确授权合并 #73 并发布 0.2.2；#74/#75 已进入 main 8ef2327。本候选在 PR73 原 head 605091c 上标准合并 main，仅解决记忆文档冲突并保留双方历史；产品版本 0.2.2，完整 Sub2API 兼容基线仍 0.2.8。
 - 本轮修复 pnpm audit 错误/空报告误放行，增加13项CLI回归并留存实际退出码；删除无业务入口的 xlsx 及其8个独占传递依赖、死mock/分包规则，同时删除对应两项高危例外，服务端 xlsx 导出保留。新依赖审计 high/critical 均0，moderate13/low1按原门禁政策保留并在安全报告披露。
 - 发布前发现 GoReleaser 的 tidy hook 会改动模块元数据，已提前归整；实际 go list -m all 前后一致，tidy -diff 复验退出0，没有升级模块版本。backend业务与既有修复一致。
-- 当前仅冻结候选，最终精确 head CI、前端全套、IQ真实存储、构建、运行/升级/回滚以及正式制品结果由 /xy2/artifacts/release-0.2.2-20260930 外部账本记录；未完成结果不得称通过。正式发布仍需门禁成功，本轮不部署生产。
-- 原始 /xy2/scheduling-account-toggle-rate 与旧5702副本保持；沿用 /xy2/artifacts/scheduling-account-toggle-rate-20260929 的同一四角色，完成新制品验收后才发布累计事务。最终交接另用文档副本记录，不改不可变发行源码。
+- 当前仅冻结候选，最终精确 head CI、前端全套、IQ真实存储、构建、运行/升级/回滚以及正式制品结果由 <工作机 B>/artifacts/release-0.2.2-20260930 外部账本记录；未完成结果不得称通过。正式发布仍需门禁成功，本轮不部署生产。
+- 原始 <工作机 B>/scheduling-account-toggle-rate 与旧5702副本保持；沿用 <工作机 B>/artifacts/scheduling-account-toggle-rate-20260929 的同一四角色，完成新制品验收后才发布累计事务。最终交接另用文档副本记录，不改不可变发行源码。
 
 ### GPT-6.1 Sol 单功能适配源码冻结（2026-09-30）
 
@@ -231,14 +231,14 @@
 
 - 新增CI专用PG18/Redis8.4及15432/16379端口，只向新step注入fixture环境，保留原unit/integration；串行三包race的JSON守卫要求关键测试run+PASS、全范围0SKIP，拒绝空匹配。工作流本地校验和CI后继HEAD见pr74-final-evidence/CI_FINAL.json；真实GitHub门禁由根执行者推送后核对。
 - 联合候选6393e1812全后端unit/integration/lint均exit0；complete-05和独立审计PASS，48基础HTTP/56调度请求、30:10权重、升级及备份恢复通过。其含PR73，不能冒称PR74独立镜像已测；本CI后继不改业务或冻结制品。
-- 唯一候选 /xy2/artifacts/production-incident-20260930/pr74-final，起点85d5165788d0e4ee345a4c887e34704085e17392；仅冻结bffc16+cfa25三项补修、对应测试和本PR修复文档，无PR73前端/IQ、版本或迁移变化。原PR和两独立审查源码保持。
+- 唯一候选 <工作机 B>/artifacts/production-incident-20260930/pr74-final，起点85d5165788d0e4ee345a4c887e34704085e17392；仅冻结bffc16+cfa25三项补修、对应测试和本PR修复文档，无PR73前端/IQ、版本或迁移变化。原PR和两独立审查源码保持。
 - 已观察到原版三个递归崩溃、原PR普通JSON无PG冷却/内部正文超时不回退、simple显式组越界反例。补修后定向13/126、race9/88、13适配器同ledger继续选择和成员31/33相关回归通过；成员三态1/0/1保留。标准默认组边界为源码交叉核对，不额外声称该入口实测。
 - 本轮仅本地交付，Git身份沿用原仓local Codex。精确本地HEAD、文件范围、diff检查、干净树来源审计和可推送命令统一保存于pr74-final-evidence；不拿历史原PR全量结果代表这个后继。根执行者继续联合全量/制品/升级门禁并自行处理PR74远端，未授权本子任务push/合并/部署。
 - 真实供应商、历史pending修复和生产零风险均不由本地验证保证；完整新旧失败证据见pr74-review/review-evidence.json与scheduler-review。自身审查夹具已清理，原有服务与日志保留。
 
 ### v0.2.1 仅修复 PR #74 已提交，等待官方审核（2026-09-29）
 
-- 当前为独立修复副本 /opt/xy2api-v021-fix-20260929-anp5W2/work，分支 fix/v021-gateway-reliability-20260929，固定官方基线 e17664144。用户授权纯官方 D0～D4/G1、本地提交、推送 liulixin-lex/xy2api 和创建 PR，由维护者决定合并；不合并多组/活动二开，不自行合并 PR、发布或部署。
+- 当前为独立修复副本 <工作机 D>/xy2api-v021-fix-20260929-anp5W2/work，分支 fix/v021-gateway-reliability-20260929，固定官方基线 e17664144。用户授权纯官方 D0～D4/G1、本地提交、推送 liulixin-lex/xy2api 和创建 PR，由维护者决定合并；不合并多组/活动二开，不自行合并 PR、发布或部署。
 - 已修 XY-001/002/007/008/009：非递归终端发送、13 条同步非流式路径安全读取回退、可信协议失败的 PG 账号模型冷却、明确未发送的 pending 判定；保留预算、deadline、owner、语义输出后禁重放及普通 30 秒冷却。18 个生产 Go 文件、7 个测试文件和修复记录为本轮差异，原前端/迁移/版本/provenance 不变。
 - 验证：全后端首轮 61 包通过、service 两项测试断言修正后整包复验通过（8022 顶层/7950 子项，11 skip）；首轮失败保留。隔离 repository/migrations 701/1206、handler 三轮 race 54/60、scheduling race 160/113、service 三轮关键 race 21/237、广泛守卫 race 104/555 均通过且无数据竞争。两轮 lint 均 0 issues，构建和 14 项同步工具测试通过；修复提交 94ce2793177eadc595c2c6f6ef6207d222e4510f 后 clean-tree 来源审计 exit 0，D0～D4/G1 本地完成。
 - 文档包括 docs/V021_RELIABILITY_FIX.md 以及修复PR版 V021_ISSUE_SUMMARY.md、V021_REMEDIATION_PLAN.md、ISSUES_AND_CHANGES.md；后三份从原检查资料整理，仅覆盖本次修复，不提交此前功能升级的详细方案。外部父目录保留 VALIDATION.json、PR_BODY.md 与原始日志。真实供应商、跳过项、浏览器/功能整合/部署边界不变，三个临时容器已清理。
@@ -247,37 +247,37 @@
 
 ### 智能调度账号开关、倍率与 IQ 门控（2026-09-29，PR #73 开放）
 
-- 独立工作树 `/xy2/scheduling-account-toggle-rate` 基于最新 `origin/main` `e17664144`；功能提交 `85d93946c` 已推送，PR [#73](https://github.com/liulixin-lex/xy2api/pull/73) 开放。智能调度与账号管理共用 `accounts.schedulable` 开关及账号倍率，已启用账号置顶，组内按优先级升序、权重降序排列；回焦刷新合并并发开关结果。移动端主区过渡仅在桌面生效。
+- 独立工作树 `<工作机 B>/scheduling-account-toggle-rate` 基于最新 `origin/main` `e17664144`；功能提交 `85d93946c` 已推送，PR [#73](https://github.com/liulixin-lex/xy2api/pull/73) 开放。智能调度与账号管理共用 `accounts.schedulable` 开关及账号倍率，已启用账号置顶，组内按优先级升序、权重降序排列；回焦刷新合并并发开关结果。移动端主区过渡仅在桌面生效。
 - IQ 检测只控制自身质量门控：有效 `degraded` 拒绝该账号新准入，有效 `smart` 解除 IQ 暂停；任何探针错误只更新诊断，不改变最后有效 IQ 判定，也不通过探针凭据路径把账号标记为错误。管理员开关、故障与容量调度继续由各自模块控制，已有请求不被 IQ 判定断开。内存、SQL 与展示状态一致。
-- 本地前端 353 文件/2715 测试、typecheck、ESLint、构建通过；真实 Chromium 16 断言、桌面/390px 截图及两页开关同步通过。后端 IQ 定向单测、真实 PostgreSQL 集成及 race 通过。固定四角色 `/xy2/artifacts/scheduling-account-toggle-rate-20260929/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}` 保存同输入源码三态；最终以该目录的实际记录为准。未部署、未调用真实上游。
+- 本地前端 353 文件/2715 测试、typecheck、ESLint、构建通过；真实 Chromium 16 断言、桌面/390px 截图及两页开关同步通过。后端 IQ 定向单测、真实 PostgreSQL 集成及 race 通过。固定四角色 `<工作机 B>/artifacts/scheduling-account-toggle-rate-20260929/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}` 保存同输入源码三态；最终以该目录的实际记录为准。未部署、未调用真实上游。
 - 生产只读核查于 19:33 UTC 观察到 0.1.9 回滚镜像及 `sub2api` 模式、高级调度关闭；该运行版本不使用保存的分组权重。组 18 的策略优先级 1 账号 323 不属于该组，实际可用 244/281 的数据库优先级均为 2、317 为 500；策略内所有权重均为 1。启动后的 113 次组内 `gpt-6-astra` 用量分布为 244=94、281=19，不能据此归因具体负载或会话影响，也不能代表先前镜像行为。本轮未修改服务器。
 
 ### 0.2.1 远端推送与正式发布（2026-09-29，已完成）
 
 - 核实时间：2026-09-29T17:00:48.802710+00:00。用户授权的远端推送与 0.2.1 正式发布已完成；PR #71 常规合并提交和不可移动的 v0.2.1 均为 857495c876e3fa33df026d058d5600a099183776，Release 工作流 36598436071 成功。发布入口：https://github.com/liulixin-lex/xy2api/releases/tag/v0.2.1。
-- 冻结发布副本 /xy2/release-0.2.1 保持干净 56cf99e89caad9aa72bfa1476f42009807282aaf，与合并/tag 的树完全一致（acf04a2c269ebd098d63ae9153c6e76f7499678c）。本次交接仅在独立 /xy2/release-0.2.1-handoff 的 docs/release-0.2.1-closeout 更新本记忆，不修改冻结源码、历史标签、业务代码或版本元数据，不创建新 Release。
+- 冻结发布副本 <工作机 B>/release-0.2.1 保持干净 56cf99e89caad9aa72bfa1476f42009807282aaf，与合并/tag 的树完全一致（acf04a2c269ebd098d63ae9153c6e76f7499678c）。本次交接仅在独立 <工作机 B>/release-0.2.1-handoff 的 docs/release-0.2.1-closeout 更新本记忆，不修改冻结源码、历史标签、业务代码或版本元数据，不创建新 Release。
 - PR 最终 head 的保护检查通过；正式合并提交对应 main 与 v0.2.1 的 CI、Security Scan 全部成功，检查按各自 head 绑定。产品版本为 0.2.1，Sub2API 兼容版本保持 0.2.8；前端包元数据 1.0.0 不作为产品版本。
 - 五平台发布包（Linux/Darwin amd64、arm64 与 Windows amd64）的 checksum 全通过，Linux 二进制版本和提交匹配。GHCR 0.2.1 为 Linux amd64/arm64，清单 sha256:10f22fca7b87276000aa87a07585eccd16a3e09e0909b93758f2d97beb5fffb2，latest、0.2、0 别名一致。
 - 正式发布镜像实际执行 0.2.0 的 305 条迁移基线 → 0.2.1 的 313 条 → 恢复备份回退 305 条，以及全新 313 条；四阶段健康、登录与嵌入页面资源均 200。双模式、一键账号开关、六类错误输入 400、退役入口 410 和旧单账号暂停迁移均已验证；历史 305 条 SQL 字节不变。
 - 第一轮 release-021-final-01 的四个功能阶段均通过，但宿主容器状态严格比较失败，整轮仍保留 **FAIL**，变化起因未定，不作成功改写。不修改脚本的 release-021-smoke-retry-02 实际 **PASS**，existing_containers_unchanged=true，容器、卷、网络清理全部为 true；未进行真实上游推理或计费验证。
-- 固定四角色仍为 /xy2/artifacts/scheduling-optimization-20260928/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}。release-021-final-01 源码事务同输入 BASELINE/MODIFIED/ROLLBACK 实际退出 1/0/1，原行为复现、新功能、补丁重建、恢复原哈希和恢复后重新应用全部验证；旧四角色完整私有保存。ROLLBACK.sh 仅恢复离线源码副本，不代替在线数据库回退。
-- 最终汇总与所有命令证据见 /xy2/artifacts/scheduling-optimization-20260928/release-0.2.1/FINAL_DELIVERY.json；本记忆的纯文档 PR/检查/合并交接见同目录 handoff-closeout/RESULT.json。冻结源与原 one-click 4547 文件保持；本次发布未执行生产部署或测试站替换，测试站延续此前已验收的本地 b86d18e81e13 镜像，不能把正式 GHCR 发布当作该站已换镜像。
+- 固定四角色仍为 <工作机 B>/artifacts/scheduling-optimization-20260928/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}。release-021-final-01 源码事务同输入 BASELINE/MODIFIED/ROLLBACK 实际退出 1/0/1，原行为复现、新功能、补丁重建、恢复原哈希和恢复后重新应用全部验证；旧四角色完整私有保存。ROLLBACK.sh 仅恢复离线源码副本，不代替在线数据库回退。
+- 最终汇总与所有命令证据见 <工作机 B>/artifacts/scheduling-optimization-20260928/release-0.2.1/FINAL_DELIVERY.json；本记忆的纯文档 PR/检查/合并交接见同目录 handoff-closeout/RESULT.json。冻结源与原 one-click 4547 文件保持；本次发布未执行生产部署或测试站替换，测试站延续此前已验收的本地 b86d18e81e13 镜像，不能把正式 GHCR 发布当作该站已换镜像。
 
 ### 一键账号调度简化（2026-09-29，源码冻结与交付验收）
 
-- 唯一候选 /xy2/artifacts/scheduling-optimization-20260928/one-click-scheduling-20260929/work，分支 fix/scheduling-one-click-20260929；冻结的 dual-mode-20260929/work 共4549源文件已逐一核对，原字节保持。最终交付和门禁状态以本轮外部 STATE.json、BACKEND_GATES.json、BUILD.json、STARTUP_RESULT.json、FINAL_DELIVERY.json 为准，源码冻结后不为更新测试数字重写业务。
+- 唯一候选 <工作机 B>/artifacts/scheduling-optimization-20260928/one-click-scheduling-20260929/work，分支 fix/scheduling-one-click-20260929；冻结的 dual-mode-20260929/work 共4549源文件已逐一核对，原字节保持。最终交付和门禁状态以本轮外部 STATE.json、BACKEND_GATES.json、BUILD.json、STARTUP_RESULT.json、FINAL_DELIVERY.json 为准，源码冻结后不为更新测试数字重写业务。
 - accounts.schedulable 是唯一管理员开关：列表直接开启/关闭，只影响该账号。关闭停止新准入、已开始请求自行结束；批量只影响选中账号。旧暂停弹窗、作用范围、共用额度/服务域配置及故障诊断排查前端已删除，旧入口返回410。旧表只保留历史，不参与新准入。
 - 两模式保持：系统设置 sub2api / controlled。可控页面只保留策略分组、账号顺序与分配比例、等待与自动换号；每组账号优先级/权重共用于所有模型，同级合格账号用尽再降级，并始终受总次数与总等待约束，先取消再换号。强续接所有者和已输出内容不可透明跨账号重放。
 - migration265只把历史单账号暂停转为通用关闭，不因旧家族/共享控制联动其他账号，不猜测自动启用。HTTP开关严格拒绝缺失/null/错误类型/额外字段/尾随JSON；普通管理员编辑锁后保留当前开关，防止并发编辑覆盖。前端每账号提交锁、批量互斥及旧列表响应保护均已加入。
 - 独立反例发现两层缓存问题并闭环：开启后仅更新对象不能恢复候选成员；旧快照即使激活被fence仍可覆盖共享metadata。现仅开关变动使受影响组桶失效且保留退休状态；所有账号缓存写入以严格单调updated_at原子CAS，v2键隔离无版本旧缓存。migration266在数据库行锁下令updated_at=max(OLD+1微秒,clock_timestamp())，无新配置/Ent字段，不改变其他业务列。独立真实miniredis接入原始Anthropic选择路径已改选备用账号，所有旧反例保留。
 - 已观测：前端353文件/2692测试、ESLint/i18n/type/Vite构建通过；真实浏览器60断言/11截图、无未捕获异常或未匹配API；最终一键真实PG/Redis race门禁38PASS/0FAIL/0SKIP，涵盖SSE当前请求收尾、WS当前回合完成且下一回合无新增上游写入、迁移与24并发数据库修订。独立缓存8主测试/6子分支通过，44有效桶和22退休桶范围保持；最新全量lint退出0。
 - 首轮full03实际exit1（3类旧断言），已按账号局部429、PG本地故障门及真实WS终态修正；新全量unit与广泛race以BACKEND_GATES.json具体command/exit为准，不把旧失败进程说成通过。镜像新装与311→新清单→恢复311的真实启动/API/迁移/回滚以STARTUP_RESULT.json为准；源码累计事务oneclick-final-01与固定四角色通过后方可交付。
-- 固定四角色仍为 /xy2/artifacts/scheduling-optimization-20260928/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}；ROLLBACK.sh仅恢复离线源码副本，不代替运行站点数据库回滚。日常说明见docs/account-scheduling.md，前端规范见docs/ui-scheduling-one-click.md；new-api参考已固定commit 789c970199ea527e6a26e071915f4a4cd2c64178，保留本项目小优先级先用/同级耗尽/强owner规则。
+- 固定四角色仍为 <工作机 B>/artifacts/scheduling-optimization-20260928/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}；ROLLBACK.sh仅恢复离线源码副本，不代替运行站点数据库回滚。日常说明见docs/account-scheduling.md，前端规范见docs/ui-scheduling-one-click.md；new-api参考已固定commit 789c970199ea527e6a26e071915f4a4cd2c64178，保留本项目小优先级先用/同级耗尽/强owner规则。
 - 本轮未推送、合并或替换测试站；测试站仍是此前实际部署的dual-mode镜像27cf5dca5007、311迁移。没有真实供应商/计费调用，不以本地合成验证承诺生产首字或零潜在问题。
 
 ### 双模式调度重构（2026-09-29，源码冻结与交付验收）
 
-- 唯一候选为 /xy2/artifacts/scheduling-optimization-20260928/dual-mode-20260929/work，分支 refactor/dual-scheduling-20260929。原 rewrite-20260929/work 与 release-0.2.0 保持。最新源码、镜像、验证与四角色状态统一查 dual-mode-20260929/STATE.json、FINAL_DELIVERY.json；下方分组重写“未部署”为当时冻结记录，当前测试站实际仍运行前轮a59084镜像。
+- 唯一候选为 <工作机 B>/artifacts/scheduling-optimization-20260928/dual-mode-20260929/work，分支 refactor/dual-scheduling-20260929。原 rewrite-20260929/work 与 release-0.2.0 保持。最新源码、镜像、验证与四角色状态统一查 dual-mode-20260929/STATE.json、FINAL_DELIVERY.json；下方分组重写“未部署”为当时冻结记录，当前测试站实际仍运行前轮a59084镜像。
 - 系统设置仅 sub2api / controlled 两种模式，默认保留当前controlled。前者恢复本项目集成的 Wei-Shaw/sub2api v0.2.8 选择算法与原设置；后者按分组账号priority/traffic_weight选择。每请求固定模式，WebSocket下一轮重新读取，读取异常不静默切换。mode专表CAS与通用settings隔离。
 - 同级合格账号耗尽才降级，总次数/总等待仍约束；每账号每请求一次，先取消后换号，输出提交和强续接所有者边界保持。无逐模型权重、优先级或等待配置；group0标准/简易范围保持。
 - migration263保存模式；旧暂停未保留通用开关原值，不猜测自动启用，管理员须核对历史停用。新暂停不再修改通用启用。migration264把未知结果本地容量占用设为有界，保留账务及人工暂停不确定性；独立租约到期监护保证数据库轮询阻塞时仍取消本地HTTP。
@@ -286,35 +286,35 @@
 - 前端359文件/2715测试、类型、ESLint、生产构建均exit0；真实Chromium53断言、11截图、0pageerror、0未匹配API，仅故意409/503日志。后端模式真实PG/Redis19PASS；关键race716PASS/1SKIP；完整核心包最终race255PASS/4SKIP。全后端运行唯一剩余失败是probe新代次使旧测试使用过期版本；只强化该测试后整个核心包重跑0，其他全部包及生产源码未变，组合结果和41个跳过见BACKEND_GATES.json，不能把原full进程exit1说成exit0。
 - 静态CGO_ENABLED=0/embed构建已通过；binary113df4f653d71b6ba2eac442c0e4c700a83bbce609c8c08f0c1685aad19b8fd9，镜像sha256:27cf5dca50074156bf64dc2d37c6afba7b2dc749299a8257560a4ca3e2d6334d。构建后仅测试断言及此交接记录更新，交付须核对运行源码/前端/dist与BUILD.json快照一致。
 - 真镜像隔离fresh311、BASELINE309→MODIFIED311→ROLLBACK309通过；四阶段health/login200，模式API404→200→404，双模式CAS/400/401/409与重启持久化、分组API和资源哈希通过，数据库/Redis/应用目录标记保留。首次恢复辅助容器权限失败后仅修helper为root入口，完整重验通过，失败记录保留；12自有资源已清理。
-- 固定四角色沿用 /xy2/artifacts/scheduling-optimization-20260928/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}，新累计源码事务身份dual-final-01。最终是否封装完成以其PUBLISHED.json与外部FINAL_DELIVERY.json为准；源码冻结后不再改业务。离线ROLLBACK.sh不用于在线数据库降级。
+- 固定四角色沿用 <工作机 B>/artifacts/scheduling-optimization-20260928/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}，新累计源码事务身份dual-final-01。最终是否封装完成以其PUBLISHED.json与外部FINAL_DELIVERY.json为准；源码冻结后不再改业务。离线ROLLBACK.sh不用于在线数据库降级。
 - 本轮未替换真实测试站、未推送或合并；前一轮测试站替换是已完成历史任务。无真实供应商调用，不以合成请求或局部基准承诺生产首字/计费或零风险。日常操作见docs/account-scheduling.md，界面规范见docs/ui-scheduling-dual-mode.md。
 
 ### 分组账号调度全面重写（2026-09-29，本地实现完成，未部署）
 
-- 当前唯一候选为 `/xy2/artifacts/scheduling-optimization-20260928/rewrite-20260929/work`，分支 `refactor/group-account-scheduling-20260929`，起点 `89683d2e966c2d9621ddd4969962679aca01fd8e`。原发布源码、原工作树与旧测试站保持。本轮没有推送、合并或部署；下方 PR #71 与旧测试站是历史状态。
+- 当前唯一候选为 `<工作机 B>/artifacts/scheduling-optimization-20260928/rewrite-20260929/work`，分支 `refactor/group-account-scheduling-20260929`，起点 `89683d2e966c2d9621ddd4969962679aca01fd8e`。原发布源码、原工作树与旧测试站保持。本轮没有推送、合并或部署；下方 PR #71 与旧测试站是历史状态。
 - 新配置按 `group_id + account_id` 保存 `priority / traffic_weight`，所有模型共用；模型只参与能力筛选和必要故障范围。数字越小越优先，同级共享加权轮询。同级合格且尚未尝试的账号用尽后才降级，统一总次数、总等待和每账号一次仍有效，预算耗尽不能跳过剩余同级账号强行降级。
 - 新增迁移262与带版本比较的分组 GET/PUT API；旧逐模型策略不导入新运行配置，旧策略接口返回410。组0在普通模式限未分组账号，简易模式取全部账号；新成员默认继承已有账号优先级和权重1。新管理页支持行内、批量、跨组独立设置、冲突保留草稿与手机卡片；使用说明见 `docs/account-scheduling.md`。
 - 默认单次等待120秒、总等待240秒、最多3个实际账号，每组可调。先取消当前尝试再换号，不并发抢答；有效输出后或强制续接同账号时不透明迁移。非流式同样使用单次与剩余总预算较小值，不伪造首字样本；客户端取消和本地准备失败不污染上游健康。
 - 最新全后端命令 `root-backend-final-06` 的全部业务包通过，唯一失败为schema生成测试无法向只读挂载创建 `.entc`；同一源码可写副本 `root-schema-writable-07` 已实际通过该包。生产embed构建通过。前端全量357文件/2698项通过后，最终迁移提示增量43项、类型、lint、构建与真实Chromium24项检查通过；浏览器使用本地合成API。失败历史完整保留。
 - 独立只读复审未发现新增P0/P1；实际PG/Redis关键调度与服务race通过（core4.070s、service77.144s）。静态检查指出的测试类型断言和自定义interface{}→any格式要求已修正，相关定向回归通过；最终静态检查退出码见 `root-lint-final-13.command.json`，不把早期非零退出算作通过。业务源码在这些测试规范修正中没有变化。
 - 使用已构建候选实际验证新装309条迁移、旧版308→候选309→恢复数据库及应用目录快照回退308，四次health/login均200，数据库、Redis与应用目录标记保持。新装/升级的真实JWT分组API完成GET200、保存200、旧版本冲突409与回读保持；使用空账号组0及合成管理员，无真实上游。四个应用均正常退出，自有隔离资源已清理；证据位于 `rewrite-20260929/startup-ref-20260929t071818z-db3115`。
-- 固定四角色仍位于 `/xy2/artifacts/scheduling-optimization-20260928`，本轮源码事务使用 `rewrite-final-01` 身份；最终状态以 `FINAL_DELIVERY.json`、`FINAL_VERIFICATION.json` 和 `rewrite-20260929/transaction-runs/rewrite-final-01/PUBLISHED.json` 为准。事务验证同输入三态、累计补丁重建、恢复原字节和执行位，并保留旧工件备份；只有最终发布记录存在才算封装完成，旧final09或双源码预检不能替代新三态。
+- 固定四角色仍位于 `<工作机 B>/artifacts/scheduling-optimization-20260928`，本轮源码事务使用 `rewrite-final-01` 身份；最终状态以 `FINAL_DELIVERY.json`、`FINAL_VERIFICATION.json` 和 `rewrite-20260929/transaction-runs/rewrite-final-01/PUBLISHED.json` 为准。事务验证同输入三态、累计补丁重建、恢复原字节和执行位，并保留旧工件备份；只有最终发布记录存在才算封装完成，旧final09或双源码预检不能替代新三态。
 - 不宣称真实供应商、线上首字分布或计费取消已经验证，也不承诺零潜在问题。
 
 ### 调度优化 PR #71 与独立测试部署（2026-09-28，已部署）
 
 - 已按用户授权提交并推送 `feat/scheduling-reliability-20260928`，PR #71：https://github.com/liulixin-lex/xy2api/pull/71，目标main，保持开放未合并。功能提交 `da829ac73a9f992e85fb8c68c4de143c70667513` 的18项远端CI检查实际全部SUCCESS；后续交接文档提交的最新检查以PR对应head及artifact/ci记录为准。
-- 本机独立测试站 `https://test.aiaimax.cyou` 已上线，Compose项目 `xy2-test-aiaimax`，app仅监听127.0.0.1:8093。PostgreSQL、Redis、持久卷、网络、JWT及加密密钥均独立，使用fresh数据库，未复制开发账号/配置；现有15个开发容器身份、启动时间、镜像、挂载与网络保持一致。
+- 本机独立测试站 `<测试站点>` 已上线，Compose项目 `<测试站 Compose 项目>`，app仅监听127.0.0.1:<测试站端口>。PostgreSQL、Redis、持久卷、网络、JWT及加密密钥均独立，使用fresh数据库，未复制开发账号/配置；现有15个开发容器身份、启动时间、镜像、挂载与网络保持一致。
 - 部署镜像 `sha256:0aa94a726b874092521e0ce62d3cf9d47daad1696389155ce59a9fc1ec3a679d` 的revision标签绑定功能提交da829ac；实际运行binary为已验收的 `0bc78c3b43321d4b22c00283a2a4032415162966d81a6879a8555da488a5bdd3`。本轮提交和部署没有修改final09已验收后端或前端源码。
 - 公网health、首页、登录页和真实管理员登录均200；308条迁移，1管理员/0上游账号/0 API Key，注册403，6个JS/CSS资源哈希匹配。新项目三个容器重启后数据库设置、Redis/app持久标记、配置与登录保持。
 - Caddy仅追加test→8093并平滑reload，原开发域名路由及PID保持；域名A原已指向本机，无DNS变更。可信HTTPS和域名校验通过，HTTP308跳转HTTPS；Let’s Encrypt证书有效至2026-12-27，由既有Caddy自动续期机制管理。
 - 新管理员尚需本人首次登录确认平台声明；只读调度策略/统计接口实测返回423 ADMIN_COMPLIANCE_ACK_REQUIRED，未绕过或代用户确认。注册关闭及测试站点名称通过新库运维初始化设置；默认legacy，不自动添加上游、策略或模型阈值。
-- 凭据仅保存在本机 `/xy2/deployments/test-aiaimax/.env`（0600、父目录0700），不写入Git/PR/记忆。运维、停启及回退见该目录README.md、DEPLOYMENT.json、evidence和proxy证据。现场回退仅在显式执行时下线测试站，本轮只在副本验证代理回滚；原开发服务继续运行。
-- 当前四角色仍固定于 `/xy2/artifacts/scheduling-optimization-20260928`；部署前final09归档已保存到pr-test-deploy-20260928/pre-pr-final09。最终当前文档树的三态证明使用 `pr-test-final-01` 身份，原五门禁继续绑定final09不重复冒称新执行；当前汇总以FINAL_DELIVERY.json及PR_TEST_DEPLOY_RESULT.json为准。
+- 凭据仅保存在本机 `<工作机 B>/deployments/<测试站>/.env`（0600、父目录0700），不写入Git/PR/记忆。运维、停启及回退见该目录README.md、DEPLOYMENT.json、evidence和proxy证据。现场回退仅在显式执行时下线测试站，本轮只在副本验证代理回滚；原开发服务继续运行。
+- 当前四角色仍固定于 `<工作机 B>/artifacts/scheduling-optimization-20260928`；部署前final09归档已保存到pr-test-deploy-20260928/pre-pr-final09。最终当前文档树的三态证明使用 `pr-test-final-01` 身份，原五门禁继续绑定final09不重复冒称新执行；当前汇总以FINAL_DELIVERY.json及PR_TEST_DEPLOY_RESULT.json为准。
 
 ### 可控调度实现与本地验收基线（2026-09-28，final09部署前记录）
 
-- 原发布源码 `/xy2/release-0.2.0` 保持原字节，修改位于 `/xy2/artifacts/scheduling-optimization-20260928/work` 的 `feat/scheduling-reliability-20260928`。默认仍为 legacy；controlled 尚未上线，没有推送、合并或真实付费上游调用。
+- 原发布源码 `<工作机 B>/release-0.2.0` 保持原字节，修改位于 `<工作机 B>/artifacts/scheduling-optimization-20260928/work` 的 `feat/scheduling-reliability-20260928`。默认仍为 legacy；controlled 尚未上线，没有推送、合并或真实付费上游调用。
 - 完成终态与故障意图原子持久化、UNKNOWN 权威占位及补偿；可用性与首字延迟证据分离、渐进冷启动恢复；显式共享故障域、身份修订隔离、统一尝试预算及管理恢复入口。
 - 复审修复非流式验收前提前恢复健康、错误诊断正文卡住、故障反馈队列阻塞/历史扫描，以及强制 SSE 缓冲转换错误。真实本地 HTTP/SSE 回归覆盖 Responses/Chat/Messages、原生 Anthropic、Antigravity、Gemini Code Assist 与图片；缓冲完成不伪造首字样本。
 - Account 模型/头映射的共享延迟缓存存在已实证竞态，已改为无共享写解析。组合 getter 微基准从约0.30微秒/0alloc变为0.72–0.79微秒/1024B/7alloc；该取舍保证值复制与并行读取安全，不把微基准当生产吞吐结论。
@@ -334,42 +334,42 @@
 - annotated RC tag object a105bfc9040e9efa05713ec5307494586008e29f，正式 v0.2.0 tag object f581c9d9d83a8c168f665934edf1366fa1a408ea；Release runs 36346830402 / 36348544776 成功。正式非draft、非prerelease；两版五平台包实际下载复算SHA-256，Linux版本/兼容/完整提交正确。
 - GHCR 正式 digest sha256:98887a1cdaafc42fcdeb4b03b0bf911a2aa3b4ed13db2901014181a83e2509ef；linux/amd64、linux/arm64 的 version/revision 正确，0.2.0/latest/0.2/0 一致。RC双架构通过；DockerHub因缺少可选凭据跳过。
 - 隔离0.1.9→RC→恢复升级前数据库并回退0.1.9→0.2.0、RC及正式全新安装，共六次health/login均200；迁移302→305→302，用户、配置哈希与数据库/Redis/应用标记保持。原302条SQL字节/校验不变，新增256–258。临时容器/网络/卷已清理，原有容器启动时间和运行状态保持。
-- 源码三态：BASELINE 0.1.9/0.2.8/302，MODIFIED 0.2.0/0.2.8/305，ROLLBACK恢复基线；补丁重建与恢复归档SHA一致。发布四角色为/xy2/artifacts/release-0.2.0/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}；回滚依赖同目录BASELINE.tar，只恢复源码副本。原IQ/调度角色保持。
+- 源码三态：BASELINE 0.1.9/0.2.8/302，MODIFIED 0.2.0/0.2.8/305，ROLLBACK恢复基线；补丁重建与恢复归档SHA一致。发布四角色为<工作机 B>/artifacts/release-0.2.0/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}；回滚依赖同目录BASELINE.tar，只恢复源码副本。原IQ/调度角色保持。
 - 流程偏差：RC工作流成功后先晋级正式标签，独立制品校验、RC升级/回退和正式全新安装在标签之后完成，不能称其在打正式标签前已通过。PR #67首次被运行中的test拒绝，待全绿后才重试；归档权限口径和internal网络端口夹具错误修正后通过，原失败保留。后续必须恢复完整RC门禁在晋级前完成的顺序。
-- 本收尾只更新项目记忆，不移动标签。原/xy2/xy2api并行未提交研究保留；发布验收使用/xy2/release-0.2.0。生产部署、真实上游模型调用未执行。
+- 本收尾只更新项目记忆，不移动标签。原<工作机 B>/xy2api并行未提交研究保留；发布验收使用<工作机 B>/release-0.2.0。生产部署、真实上游模型调用未执行。
 
 ### PR #66 推送失败复核与 lint 闭环（2026-09-27）
 
 - 复核确认此前不是 Git 推送失败：`86a6b05b8` 已在远端，PR #66 的实际阻断是 `golangci-lint` 报告的 37 项问题。修复覆盖错误返回值检查、类型断言、Redis 依赖豁免说明、De Morgan 静态规范、未使用代码和所有受影响文件格式化；sqlmock 清理改为显式忽略其未声明的 Close 错误，避免测试清理断言制造假失败。
-- lint 修复提交 `b6d3b7f15397f44126f667368935e9657e936df0` 与最终交接提交 `50697c0c562ad0850b288aff5c8dca06cc249246` 已推送至 `feat/controlled-account-scheduling`，继续更新现有 PR #66，未创建重复 PR。候选工作树 `/xy2/artifacts/iq-candy-20260927/scheduling-implementation-20260927/work` 与受保护源 `/xy2/xy2api` 的边界保持不变。
+- lint 修复提交 `b6d3b7f15397f44126f667368935e9657e936df0` 与最终交接提交 `50697c0c562ad0850b288aff5c8dca06cc249246` 已推送至 `feat/controlled-account-scheduling`，继续更新现有 PR #66，未创建重复 PR。候选工作树 `<工作机 B>/artifacts/iq-candy-20260927/scheduling-implementation-20260927/work` 与受保护源 `<工作机 B>/xy2api` 的边界保持不变。
 - 最终验证：`golangci-lint v2.13.2` 为 0 issues；`go test ./internal/scheduling ./migrations -race -count=1` PASS；`go test ./internal/service -count=1` PASS（156.870s）；`git diff --check` PASS。没有生产部署、数据库写入或真实上游请求。
-- 四角色仍固定为 `/xy2/artifacts/iq-candy-20260927/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；本轮仅追加调度验证记录，未修改其字节内容。三态行为仍以角色账本原始观测为准：BASELINE 保留 smart 且不阻断，MODIFIED 转 unknown 并阻断，ROLLBACK 恢复基线哈希与行为。
+- 四角色仍固定为 `<工作机 B>/artifacts/iq-candy-20260927/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；本轮仅追加调度验证记录，未修改其字节内容。三态行为仍以角色账本原始观测为准：BASELINE 保留 smart 且不阻断，MODIFIED 转 unknown 并阻断，ROLLBACK 恢复基线哈希与行为。
 - PR #66 当前头与远端一致，正文已补齐完整调度契约、健康/重试/暂停连续性与验证证据；最新 CI 全部成功。若主分支前进导致合并状态变化，须先合并最新 `origin/main` 再重新跑门禁。
 
 ### 调度最终优化与复审（2026-09-27）
 
 - 在 `5c3e89364` 的探测容量、未知采样与恢复分母修复基础上，补齐本轮发现的闭环问题：Explain 与实时派发统一空 reasoning 为 `default`；拨号尚未建立连接的失败标记为 `not_sent/proven_not_sent`，不会误计真实调用；已观察终态先写入 PostgreSQL terminal intent，再结算，后台每轮最多补偿100条并报告首个失败；新增迁移258为未结算 terminal intent 建立部分索引，避免长期扫描放大。
-- 新增 PostgreSQL 结算意图单元覆盖、迁移 checksum 条目与服务/调度验证；不改变旧 `legacy` 默认，不操作 `/xy2/xy2api`、生产数据库或真实上游。
+- 新增 PostgreSQL 结算意图单元覆盖、迁移 checksum 条目与服务/调度验证；不改变旧 `legacy` 默认，不操作 `<工作机 B>/xy2api`、生产数据库或真实上游。
 - 已观察验证：`go test ./internal/scheduling ./migrations -count=1` PASS；`go test ./internal/service -count=1` PASS（157.082s）；`go test ./internal/scheduling -race -count=1` PASS；`git diff --check` PASS。首次迁移 checksum 错误为清单计算命令未按 `strings.TrimSpace` 复现，修正后校验通过，失败输出保留在本轮执行记录。
 - 本轮已在候选分支本地提交（`fix controlled scheduler settlement and explain consistency`）；提交后再次核对 diff、迁移清单与测试，工作树保持干净。没有把本轮代码结果写入旧四角色归档。
 
 ### 智能可控调度已提交及独立复审（2026-09-27，前置记录）
 
-- 已按用户要求先本地提交实现：分支 feat/controlled-account-scheduling，提交 2a9c62f0c7bf1d92cb677f0ea460be2c253a7b9b，149个文件；未推送/合并/部署，原 /xy2/xy2api 不变。提交源码与既有 scheduling_final_02 交付包一致。此前“没有Git提交”描述属于提交前状态。
+- 已按用户要求先本地提交实现：分支 feat/controlled-account-scheduling，提交 2a9c62f0c7bf1d92cb677f0ea460be2c253a7b9b，149个文件；未推送/合并/部署，原 <工作机 B>/xy2api 不变。提交源码与既有 scheduling_final_02 交付包一致。此前“没有Git提交”描述属于提交前状态。
 - 随后只读复审确认4项P1：确定未连接成功仍成为unknown并永久占容量；PG暂时结算失败丢失已知终态；probe满不即时跨层；全慢环境让UNKNOWN/HALF_OPEN长期拿不到采样。前两项在legacy也真实复现，因此当前提交不应直接生产部署，即使保持legacy。
 - 另确认2项P2：1:99的小权重账号恢复份额由0.1%膨胀到10%；默认Explain空effort与真实default不同，实际A2但预览A1。已有真实PG/Redis/local HTTP或现有Go核心/Lua最小复现；失败断言保留，不将“复现成功”说成“已修复”。
 - 改进方向合理，优先级/权重分离、总预算、无TPS、人工控制独立和语义提交边界应保留；当时的修复顺序先做发送确定性/可靠结算，再做 probe 容量/恢复采样，然后做恢复分母/Explain 一致性。256KiB 大请求元数据退化、上下文 token 没有生产赋值、恢复继承操作仍属于后续测量边界。
-- 完整前置报告 `/xy2/artifacts/iq-candy-20260927/scheduling-implementation-20260927/post-commit-review-20260927/REVIEW.md`；本记录提出的问题已由上方最终优化条目处理。四角色继续指向已提交实现，后续验证仍按前缀保留方式追加；不借用旧三态声称新缺陷已修复。
+- 完整前置报告 `<工作机 B>/artifacts/iq-candy-20260927/scheduling-implementation-20260927/post-commit-review-20260927/REVIEW.md`；本记录提出的问题已由上方最终优化条目处理。四角色继续指向已提交实现，后续验证仍按前缀保留方式追加；不借用旧三态声称新缺陷已修复。
 
 ### 智能可控账号调度实现与本地验证（2026-09-27，默认 legacy，未部署，前置记录）
 
-- 用户已批准最终方案并要求边推进边审查。本段记录的是最终优化前的实现阶段；后续提交和复审结果见上方，全部变更仍位于 `/xy2/artifacts/iq-candy-20260927/scheduling-implementation-20260927/work`，原 `/xy2/xy2api` 保持不变。没有推送、生产部署或真实上游付费请求。
+- 用户已批准最终方案并要求边推进边审查。本段记录的是最终优化前的实现阶段；后续提交和复审结果见上方，全部变更仍位于 `<工作机 B>/artifacts/iq-candy-20260927/scheduling-implementation-20260927/work`，原 `<工作机 B>/xy2api` 保持不变。没有推送、生产部署或真实上游付费请求。
 - 新增严格优先级、独立 traffic_weight 与共享 SWRR、pin/fill_first、跨层容量溢出、统一实际 attempt 总账、按模型首语义时间档位、健康与渐进恢复、全慢/UNKNOWN 兜底。TPS 不参与选路；未配置模型延迟阈值时仅观测，不凭空设置统一秒数。升级默认仍是 legacy，不自动改变现有分流。
 - PostgreSQL 控制 epoch 与 dispatch gate、活动票据和幂等结算约束暂停/排空/强停；Redis 共享容量、轮询与重试额度。HTTP/SSE、WS 逐轮、协议转换和 OAuth 重发进入同一预算。强 owner 不能经暂停、删绑定或切回 legacy 偷换账号。迁移 257、策略 CAS、只读 explain、尝试链/分流统计及中文英文管理页面已实现。
 - 独立审查实际复现并修复：响应头重算首字期限侵占后备预算、无参数工具终态漏记语义、派发准备失败误扣次数/重试额度、后备预览忽略本次即将用完的预算、部分 retry JSON 丢失默认值、Gemini/Anthropic 协议与思考档位误归类、暂停 owner 在 legacy 回退误发其他账号。失败原始日志与修复后匹配回归均保留。
 - 全量后端 unit：11,569 顶层 PASS、38 SKIP、62 包 PASS；关键五包 race 通过。最后 owner 窄修之后重新执行相关两包 race（54 顶层 PASS）及生产构建，3,280 个后端源码文件前后哈希一致；最终二进制 SHA256 baf6cf8beb877a60435e6929038f4cf98ac7f1ecd5ede2ef98c88730cbeb0172。前端新增 43 项、相关既有 159 项、类型/定向 lint/Vite 构建通过。不能将较早全量测试冒充最后窄修后的全量重跑。
 - 真实隔离 PostgreSQL/Redis/本地 HTTP 证据覆盖共享 7:3、严格优先级、三次实际调用、暂停竞争、跨节点控制票据、准备失败补偿、owner 保持与 explain 零副作用。79 项矩阵保留原 ID，逐项区分已有证据与完整供应商/多进程/生产灰度待验；没有宣称所有外部场景均验收完成。
-- 操作说明 docs/CONTROLLED_SCHEDULING.md；逐项验收 docs/CONTROLLED_SCHEDULING_ACCEPTANCE.md；字面执行记录与最终不可变源码校验在上述实现目录。四角色继续复用 /xy2/artifacts/iq-candy-20260927/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}，原 IQ 账本按字节保留为前缀；本次源码事务的实际三态、补丁重建与回滚哈希以实现目录 final-transaction-scheduling_final_02/VERIFIED.json 为准，不借用 IQ 事务结果。源码包冻结后不再修改；离线回滚脚本不是在线数据库/控制状态回退指令。
+- 操作说明 docs/CONTROLLED_SCHEDULING.md；逐项验收 docs/CONTROLLED_SCHEDULING_ACCEPTANCE.md；字面执行记录与最终不可变源码校验在上述实现目录。四角色继续复用 <工作机 B>/artifacts/iq-candy-20260927/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}，原 IQ 账本按字节保留为前缀；本次源码事务的实际三态、补丁重建与回滚哈希以实现目录 final-transaction-scheduling_final_02/VERIFIED.json 为准，不借用 IQ 事务结果。源码包冻结后不再修改；离线回滚脚本不是在线数据库/控制状态回退指令。
 
 ### 账号调度研究与改进设计（2026-09-27，历史设计阶段）
 
@@ -377,7 +377,7 @@
 
 - 历史V2（速度判据现已撤销）：用户确认混合使用、按模型分别设置：健康门槛+严格优先级+同级权重，加入双指标独立判定、迟滞恢复、跨层回切预算和全部低性能兜底；详见原研究目录SMART_CONTROLLED_V2.md。39项参考仿真断言通过，业务实现验收仍待完成，演示8秒/20TPS不可当作生产默认值。
 
-- 基于 `/xy2/xy2api`、`fix/iq-current-health`、`e9b546bf77326e5253728127e50a2af050f18679`，检索 CLIProxyAPI、New API、LiteLLM、APISIX、Kong、Envoy、Higress 官方资料；前两者固定源码提交。报告和诊断：`/xy2/artifacts/iq-candy-20260927/scheduling-research-20260927/REPORT.md`。
+- 基于 `<工作机 B>/xy2api`、`fix/iq-current-health`、`e9b546bf77326e5253728127e50a2af050f18679`，检索 CLIProxyAPI、New API、LiteLLM、APISIX、Kong、Envoy、Higress 官方资料；前两者固定源码提交。报告和诊断：`<工作机 B>/artifacts/iq-candy-20260927/scheduling-research-20260927/REPORT.md`。
 - 确认高级调度存在软优先级归一化、Top-K分数减最小值加1的随机权重、粘性提前返回/前置、固定会话种子、LoadFactor容量分母、展示与实时质量统计不同等机制。20,000会话中较低分账号仍占33.505%；同一固定会话100/100仍选低分。不能据此唯一归因某条生产请求。
 - 隔离无网络容器执行7个新诊断和15个既有定向回归，共22个顶层测试通过，exit0；日志、命令、输入和结果已保存。通过是复现当前行为，不是已修复。未改业务源码、未访问生产或调用真实上游。
 - 建议严格优先级分层+层内SWRR，单独提供pin/fallback拒绝、fill first和显式adaptive；拆分traffic_weight、硬并发、负载容量基准、软亲和和强协议owner；补explain、版本、多实例共享状态及17项后续验收。配置样例仅是设计提案，不可直接导入当前版本。
@@ -385,12 +385,12 @@
 
 ### 糖果检测当前健康与长响应兼容（2026-09-27，PR #65）
 
-- 原始副本 `/xy2/xy2api-original` 保持 `1cf9708e73c8c189968016852b07082e1c30e187`；实现提交 `e9b546bf77326e5253728127e50a2af050f18679` 已推送至 `fix/iq-current-health`，[PR #65](https://github.com/liulixin-lex/xy2api/pull/65) 面向 main 开放评审。发布候选位于 `/xy2/artifacts/iq-candy-20260927/pr-source`，保留主工作区并行研究记录；未合并、未发版、未部署。
+- 原始副本 `<工作机 B>/xy2api-original` 保持 `1cf9708e73c8c189968016852b07082e1c30e187`；实现提交 `e9b546bf77326e5253728127e50a2af050f18679` 已推送至 `fix/iq-current-health`，[PR #65](https://github.com/liulixin-lex/xy2api/pull/65) 面向 main 开放评审。发布候选位于 `<工作机 B>/artifacts/iq-candy-20260927/pr-source`，保留主工作区并行研究记录；未合并、未发版、未部署。
 - 按用户决定只用糖果题21；当前状态每次尝试更新，错误即未知并避让业务流量，历史有效状态单独保留。正常1次，可恢复异常最多共3次，答错不补试；余额不足至少15分钟自动复检。
 - 对指定生产请求的只读查询确认：旧解析器累计读取262145字节触及256 KiB限制。响应是HTTP200/SSE，不能据此断言实际答案错误或正确；原始回答未保存。新解析器 v5 总读取8 MiB、单事件2 MiB、答案64 KiB分开限制，保留完整终态和冲突校验；增加错误分类和限制诊断。
 - Go IQ/质量路由单元、隔离PostgreSQL/Redis集成、核心race、迁移校验及服务构建通过；前端27项回归、类型、定向ESLint及生产构建通过。首次集成旧断言失败已修复，失败证据保留。补充socket超时测试结果见账本最新事件。
 - 同输入基线错误后仍smart且可调度、长流21/29均unknown；修改后错误为unknown并阻断，长流分别smart/degraded。完整三态、补丁重建、回滚哈希以固定账本 `TRANSACTION_VERIFIED` 事件为准。
-- 四角色固定为 `/xy2/artifacts/iq-candy-20260927/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`，源码回滚依赖兄弟 `BASELINE.tar`；不操作生产或数据库。操作说明 `docs/IQ_CURRENT_HEALTH.md`、`docs/OPENAI_IQ_CHECK.md`。后续部署需统一旧工作者状态语义并备份数据库；本轮未执行生产上线。
+- 四角色固定为 `<工作机 B>/artifacts/iq-candy-20260927/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`，源码回滚依赖兄弟 `BASELINE.tar`；不操作生产或数据库。操作说明 `docs/IQ_CURRENT_HEALTH.md`、`docs/OPENAI_IQ_CHECK.md`。后续部署需统一旧工作者状态语义并备份数据库；本轮未执行生产上线。
 
 ### Sub2API v0.2.8 / XY2API 0.1.9 已发布（2026-09-23，生产未部署）
 
@@ -399,54 +399,54 @@
 - 保留 STATE/IQ/质量路由/后台导出/分组长上下文策略，接入上游模型、用量、推理倍率、网关与插件协议更新。工具测试、Compose、生成零差异、前端 348 文件/2629 用例、生产构建、远端完整 Unit/Integration 与安全扫描通过。修复同步后 adminSettings 的付款配置读取失败重试；早期失败及取消记录保留，取消不能视为产品失败。
 - annotated RC 标签 `0021a9afa23e7e8e6ce393bc96a003cab5266774` 指向同步合并提交；RC Release run `35889830544` 成功，五平台包 SHA-256、Linux 产品/兼容版本/提交、GHCR 两架构版本及 revision 通过。RC digest `sha256:8238393e465a7f0a8273a59f2e5e3ff9fc9bbcf38f814f74e554b683eb2e318b`；RC 后 latest/0.1/0 保持旧正式镜像。
 - RC 全新安装 health/login 200、302 migrations；隔离 0.1.8→RC 迁移 299→302，推理定价旧字段转换，数据库/Redis/应用标记保持；恢复预升级 PostgreSQL dump 后旧版 health/login 200、299 migrations、旧定价字段与全部标记恢复。首轮全新安装夹具缺少数据库就绪等待，补齐后通过。没有生产部署或真实模型调用。
-- 正式 annotated `v0.1.9` 标签对象 `7092ad4913b0eab17228677fb472ad3c49e1db38` 指向正式合并提交，Release run `35895236920` 成功；正式版本仅修改 VERSION 与 provenance 产品版本。四角色固定为 `/xy/artifacts/upstream-sync-v0.2.8/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；源码三态为 0.1.8/0.2.6/299 → 0.1.9/0.2.8/302 → 基线，补丁重建、回滚哈希、重新应用均通过。
+- 正式 annotated `v0.1.9` 标签对象 `7092ad4913b0eab17228677fb472ad3c49e1db38` 指向正式合并提交，Release run `35895236920` 成功；正式版本仅修改 VERSION 与 provenance 产品版本。四角色固定为 `<工作机 A>/artifacts/upstream-sync-v0.2.8/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；源码三态为 0.1.8/0.2.6/299 → 0.1.9/0.2.8/302 → 基线，补丁重建、回滚哈希、重新应用均通过。
 
 - 正式 [Release v0.1.9](https://github.com/liulixin-lex/xy2api/releases/tag/v0.1.9) 为非草稿、非预发布；五平台发布包 SHA-256、Linux 产品/兼容版本与完整提交通过。GHCR linux/amd64、linux/arm64 的 version/revision 均与源码一致，digest `sha256:4d58fdc7dd8a6b09b2b935cef9839e2201fa768d669b39603f40bc7a4076dfa5`；0.1.9/latest/0.1/0 一致。正式镜像独立全新安装 health/login 200、302 migrations。
 - 本次 sync/release 短期分支已删除，命名空间上游标签、RC 和正式标签保留。隔离演练资源已清理；源码副本与固定四角色保留。文档收尾前已验证 main=origin/main=正式标签；收尾后 main 仅新增本记忆文档，不移动正式标签。
 
 ### 用量导出与管理员指标 0.1.8 已发布（2026-09-22，生产未部署）
 
-- 用户授权合并 PR #58 后台导出与 #60 管理员指标并发版。#58 合并为 `b5dd95473`；组合候选 `1e0f6b2eb` 通过 16/16 检查后，#60 合并为 `5b475476e6fa552b9f5952c76491013aab867d7b`。保护规则保持，原 `/xy/xy2api` 工作文件未修改。
+- 用户授权合并 PR #58 后台导出与 #60 管理员指标并发版。#58 合并为 `b5dd95473`；组合候选 `1e0f6b2eb` 通过 16/16 检查后，#60 合并为 `5b475476e6fa552b9f5952c76491013aab867d7b`。保护规则保持，原 `<工作机 A>/xy2api` 工作文件未修改。
 - 正式 [Release v0.1.8](https://github.com/liulixin-lex/xy2api/releases/tag/v0.1.8) 为 latest、非草稿、非预发布；annotated tag 固定上述合并提交，Release run `35726558753` 成功。产品 0.1.8、兼容 0.2.6；主线和标签 CI、安全扫描全部通过。
 - 五平台发布包已下载并核对 SHA-256，Linux 二进制产品/兼容版本及完整提交一致；GHCR linux/amd64、linux/arm64 及 0.1.8/latest/0.1/0 一致，镜像 digest `sha256:f2bd333ebb4bf8d85fddc80899ea137636600d3272ebd765f75bb6eaff0be9a8`。
 - 组合前端 88 项回归、类型检查、生产构建、1280/390 深浅主题浏览器验证通过。自动合并导致用户页测试缺少 UsageTable 导入，已修复并重新通过；首轮契约测试遗漏也已修复，失败记录保留。
 - 隔离 0.1.7→0.1.8→0.1.7→0.1.8、正式版全新安装均健康/登录200；数据库、Redis、应用目录标记保持。迁移由298增至299，新增导出迁移252；旧版回切不删表。管理员显示开关默认true、公共设置无新增字段已实测；初次合成管理员被初始化门禁423拦截，补齐测试账号初始化后通过，未改产品门禁。测试容器、卷及网络已清理。
 - 后台导出默认关闭，按 docs/USAGE_EXPORTS.md 完成部署环境负载/容量验收后灰度；管理员两个显示开关默认开启。本轮仅仓库及开发机隔离验收，没有生产部署或真实上游调用。
-- 四角色继续位于 `/xy/artifacts/admin-usage-metrics/`；发布结果、字面命令、源码三态、补丁重建/回滚哈希及最终重开记录见 VERIFICATION.txt、ARTIFACTS.json 和 release-0.1.8/。指标三态无/75.0%与50.0T/s/无；6100条导出三态为61次分页失败/0次分页与1个任务/恢复基线。标签不移动，本收尾仅更新项目记忆。
+- 四角色继续位于 `<工作机 A>/artifacts/admin-usage-metrics/`；发布结果、字面命令、源码三态、补丁重建/回滚哈希及最终重开记录见 VERIFICATION.txt、ARTIFACTS.json 和 release-0.1.8/。指标三态无/75.0%与50.0T/s/无；6100条导出三态为61次分页失败/0次分页与1个任务/恢复基线。标签不移动，本收尾仅更新项目记忆。
 
 ### 管理员使用记录指标（2026-09-22）
 
-- 基于 `main / 021c0d885382ecfb956674e2f8b59a7674e8d912` 创建 `feat/admin-usage-metrics`，实现副本 `/xy/artifacts/admin-usage-metrics/work`；原 `/xy/xy2api` 的 main 源码保持干净。已提交并推送至远端 PR [#60](https://github.com/liulixin-lex/xy2api/pull/60)，功能提交 `017da5ac9`；已合入最新 main `f4cf08f5f`，仅项目记忆文档发生冲突并保留双方记录。最终分支头、合并状态和 CI 结果见固定验证账本。
+- 基于 `main / 021c0d885382ecfb956674e2f8b59a7674e8d912` 创建 `feat/admin-usage-metrics`，实现副本 `<工作机 A>/artifacts/admin-usage-metrics/work`；原 `<工作机 A>/xy2api` 的 main 源码保持干净。已提交并推送至远端 PR [#60](https://github.com/liulixin-lex/xy2api/pull/60)，功能提交 `017da5ac9`；已合入最新 main `f4cf08f5f`，仅项目记忆文档发生冲突并保留双方记录。最终分支头、合并状态和 CI 结果见固定验证账本。
 - Token 列仅显示单次请求百分比数字（一位小数），不显示“缓存命中率”标签；分母包含未缓存输入、缓存创建及缓存读取，请求独立，不跨用户或会话累计。延迟列显示 `速度 50.0 T/s` 等数值，不带“～”；无首字时按总耗时估算，无效数据为 `—`。不改变计费、采集或使用记录 API，不增加数据库迁移。
 - 算法复核：OpenAI/Gemini 已将缓存从普通输入扣除，分母无重复计算，速度将毫秒换算为秒。日志中的强制缓存计费会改写缓存读数，不能据此还原真实上游命中；输出可能含思考 Token，首字统计模式也影响速度，故仅为请求日志口径估算。中英文悬浮提示及计算代码注释已说明这些限制。
 - `admin_usage_cache_hit_rate_enabled`、`admin_usage_token_speed_enabled` 两个系统开关默认开启，位于功能开关页，通过管理员设置读取/保存，省略更新字段保留原值；公共设置与 SSR 注入不新增字段。共用表格两个显示属性默认关闭，普通用户页不启用；保存成功即时同步 store，迟到读取不能覆盖刚保存的结果。
 - 最终 7 个文件共 137 项前端回归、i18n 完整性、定向 ESLint、vue-tsc 通过；Go 管理员设置/DTO/服务层相关回归与默认 vet 通过。生产构建将 vue-tsc 与 Vite 打包串行执行，保留原 Vite 配置并仅移除重复并行 checker。最终构建与 1280/390 深浅主题浏览器复验以固定 VERIFICATION.txt 中 `FOLLOWUP_BUILD_SERIAL_FINAL`、`FOLLOWUP_BROWSER_FINAL` 事件为准。
 - 相同输入 BASELINE 无新增指标，MODIFIED `75.0% / 50.0 T/s` 且两个开关四种组合生效，ROLLBACK 无新增指标，均 exit0。4,152 个基线文件与恢复源码哈希一致；4,156 个修改版文件由补丁完整重建，并验证回滚后重新应用补丁。仅源码副本回滚，不操作数据库。
-- 四角色固定为 `/xy/artifacts/admin-usage-metrics/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；基线归档为同目录 `BASELINE.tar.gz`，回滚脚本依赖该兄弟归档，最终哈希见 `ARTIFACTS.json`。命令、stdout/stderr、退出状态和修复后结果保留；内存中断、模板插入错误、测试桩与模拟响应纠错未作为成功。临时 768 MiB swap 已关闭并清理。
+- 四角色固定为 `<工作机 A>/artifacts/admin-usage-metrics/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；基线归档为同目录 `BASELINE.tar.gz`，回滚脚本依赖该兄弟归档，最终哈希见 `ARTIFACTS.json`。命令、stdout/stderr、退出状态和修复后结果保留；内存中断、模板插入错误、测试桩与模拟响应纠错未作为成功。临时 768 MiB swap 已关闭并清理。
 - 浏览器使用本地合成请求和模拟 API，验证显示、保存、刷新保持及普通用户无管理员设置请求，不代表真实上游模型性能测量。PR #60 首轮完整 CI 的两个 API 契约测试因预期 JSON 漏掉新增管理员开关失败；现已补齐，保留严格响应比对，未改产品逻辑。修复后完整 CI 状态以固定账本和 GitHub 最新 head 为准。本轮不合并 PR、发版或部署。
 
 ### 用量记录后台导出（2026-09-22）
 
-- 以 `021c0d885382ecfb956674e2f8b59a7674e8d912` 为基线，修改在 `/xy/artifacts/usage-export/work`、本地分支 `feat/usage-export`；原 `/xy/xy2api` 的源文件保持不变。2026-09-22 用户追加授权提交、推送和创建 PR；不合并、不发版、不部署。
+- 以 `021c0d885382ecfb956674e2f8b59a7674e8d912` 为基线，修改在 `<工作机 A>/artifacts/usage-export/work`、本地分支 `feat/usage-export`；原 `<工作机 A>/xy2api` 的源文件保持不变。2026-09-22 用户追加授权提交、推送和创建 PR；不合并、不发版、不部署。
 - 用户 CSV 与管理员 XLSX 已替换为 PostgreSQL 持久任务，独立预算、快照游标、磁盘暂存、流式生成、本地/S3 存储、单次会话下载凭证、取消/过期/清理及可见页面轮询。新增迁移252及校验和，配置默认关闭，并支持用户名单灰度。维护说明 `docs/USAGE_EXPORTS.md`。
 - 真实隔离 PostgreSQL/MinIO、HTTP权限与单次下载、同快照并发修改、丢失数据库锁连接、取消及重试、迁移校验、任务引擎race均通过。前端31项定向测试、ESLint、完整类型检查和生产构建通过；后端最终构建及全范围变更静态检查通过（0 issues）；浏览器390/1280任务界面、刷新恢复、原生下载实测通过，导出期间历史分页请求0。
 - 合成0/1/100/6100/10万/100万CSV通过，100万零一条明确拒绝。百万CSV约27.8秒、RSS增量6.2MB；百万XLSX约137.7秒、RSS增量54.3MB。Excelize最初整包缓冲超内存门槛，改ZIP直接写文件后重测通过，原失败保留。
 - 百万条实际usage_logs结构的SQL负载测试，单/双任务各50万条导出通过；共享开发机缓存及其他编译影响基线，结果不能作为生产HTTP P95承诺。部署等效的完整HTTP负载、硬磁盘配额及生产灰度仍属上线门禁，默认不启用。
-- 四角色固定在 `/xy/artifacts/usage-export/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`。同6100条输入：BASELINE请求61页遇429；MODIFIED历史请求0、提交1任务；ROLLBACK恢复61页失败。补丁重建一致，回滚归档SHA-256与原基线一致。最终源码/构建/静态检查结果和角色哈希以交付目录 `FINAL_RESULT.json` 与字面账本为准。
+- 四角色固定在 `<工作机 A>/artifacts/usage-export/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`。同6100条输入：BASELINE请求61页遇429；MODIFIED历史请求0、提交1任务；ROLLBACK恢复61页失败。补丁重建一致，回滚归档SHA-256与原基线一致。最终源码/构建/静态检查结果和角色哈希以交付目录 `FINAL_RESULT.json` 与字面账本为准。
 
 ### IQ API 会话隔离 0.1.7 已发布（2026-09-22，生产未部署）
 
-- 基线 `be451c280`，继续在 `/xy/artifacts/gpt-quality-routing/work` 的 `fix/iq-probe-session-isolation` 实施，原 `/xy/xy2api` 的 `021c0d885` 工作文件保持。IQ 独立探测此前不经过业务会话质量路由；现在每个 API Key 实际检测及持久化补试在最终模型映射、请求头覆写之后生成新会话与 `prompt_cache_key`，清除旧亲和、续接和大小写变体幂等头，保留指定账号、题目、判分、次数和禁止 POST 重放约束。
+- 基线 `be451c280`，继续在 `<工作机 A>/artifacts/gpt-quality-routing/work` 的 `fix/iq-probe-session-isolation` 实施，原 `<工作机 A>/xy2api` 的 `021c0d885` 工作文件保持。IQ 独立探测此前不经过业务会话质量路由；现在每个 API Key 实际检测及持久化补试在最终模型映射、请求头覆写之后生成新会话与 `prompt_cache_key`，清除旧亲和、续接和大小写变体幂等头，保留指定账号、题目、判分、次数和禁止 POST 重放约束。
 - OAuth IQ 不执行 API 随机会话轮换；新调用已有指纹收敛函数，off/device/session/full 按配置工作，设备+会话及完全收敛保持账号稳定 session/thread，逐轮 turn ID 仍遵循原逻辑。正常业务缓存与粘性未改变；IQ 检测放弃跨尝试缓存亲和，第三方是否换隐藏账号由上游实现决定。
 - GPT-6 已在 0.1.6 覆盖，本轮补齐 `gpt-6` 别名、Astra effort/日期变体、正常模型与未知名称回归，文档明确 GPT-5.6、GPT-6 及更新 GPT 文本模型的已登记降档规则。0.1.6 Release 仅更正说明，标签、发布日期及六个附件 ID/大小/校验值回读一致。
 - [PR #56](https://github.com/liulixin-lex/xy2api/pull/56) 最终 head `35b67f4402f2e2988d2640ebea36cbb705dabd8b` 在 16/16 检查成功后普通合并为 `934272ed828b05b4c558ae67837e46d67a86c520`；分支保护保持。[Release v0.1.7](https://github.com/liulixin-lex/xy2api/releases/tag/v0.1.7) 为正式 latest，annotated tag 固定 `934272ed828b05b4c558ae67837e46d67a86c520`；Release run `35696263868` 成功。五平台包下载校验、Linux 产品 0.1.7/兼容 0.2.6/完整 commit、GHCR 双架构与稳定别名通过，digest `sha256:f7d19c1ad818e50019058560b4d16ce8bc95178ef00716f7b8559075b863902c`。
 - IQ、质量路由、指纹、STATE 定向回归与 race、七项静态规则通过；早期测试夹具误用头大小写/轮次字段、CI 静态写法、共享开发机内存不足导致的编译终止，以及工作树未提交时来源审计拒绝均保留原始失败记录，修正后门禁通过。没有真实模型请求。
 - 同一合成号池输入中 BASELINE 三次共用一个隐式会话，结果 degraded/degraded/degraded；MODIFIED 三次使用三个新会话与缓存键，结果 degraded/smart/degraded；ROLLBACK 恢复基线。三态各三次上游调用，均 exit 0。这是可控模拟号池验证，不是生产抽样保证。累计业务质量探针仍为 first/next/stable：1/1/1 → 1/2/2 → 1/1/1。
-- 开发机隔离 0.1.6→0.1.7→0.1.6→0.1.7 健康、管理员登录及 PostgreSQL/Redis/应用目录标记通过，全新安装通过，迁移数保持 298，专用测试容器已清理。未连接或操作生产。固定四角色仍在 `/xy/artifacts/gpt-quality-routing/`；累计补丁重建、源码回滚和恢复哈希由 `DELIVERY_RESULT.json` 与 `iq-session-isolation/FINAL_RESULT.json` 记录，源码回滚恢复原始 `021c0d885`，不操作数据库。
+- 开发机隔离 0.1.6→0.1.7→0.1.6→0.1.7 健康、管理员登录及 PostgreSQL/Redis/应用目录标记通过，全新安装通过，迁移数保持 298，专用测试容器已清理。未连接或操作生产。固定四角色仍在 `<工作机 A>/artifacts/gpt-quality-routing/`；累计补丁重建、源码回滚和恢复哈希由 `DELIVERY_RESULT.json` 与 `iq-session-isolation/FINAL_RESULT.json` 记录，源码回滚恢复原始 `021c0d885`，不操作数据库。
 
 ### GPT-5.6+ 会话质量路由 0.1.6 已发布（2026-09-22，生产未部署）
 
-- 已执行 `git pull --ff-only origin main`，基线为 `021c0d885382ecfb956674e2f8b59a7674e8d912`；实现位于 `/xy/artifacts/gpt-quality-routing/work` 的 `feat/gpt-quality-routing`，原 `/xy/xy2api` 保持干净。没有部署、生产写入或真实模型调用。
+- 已执行 `git pull --ff-only origin main`，基线为 `021c0d885382ecfb956674e2f8b59a7674e8d912`；实现位于 `<工作机 A>/artifacts/gpt-quality-routing/work` 的 `feat/gpt-quality-routing`，原 `<工作机 A>/xy2api` 保持干净。没有部署、生产写入或真实模型调用。
 - 新增 `gateway.openai_quality_routing`（默认 enforce，避让 300 秒），以 API Key、分组、稳定会话和模型为作用域；严格比较最终出站模型与原始响应声明。默认 Astra/Sol/Terra→Luna，账号映射 Sol→Terra 不触发。正常缓存标识不变；异常优先不同上游，必要时稳定轮换出站标识。
 - 默认/高级/加权调度、HTTP/SSE、Chat/Messages 转换、WS 原生/桥接/透传已接入；当前响应不重放，不新增模型调用，不写全账号质量降权。完整历史才允许迁移续接，缺少 response.output、工具上下文或存在不透明 compaction/reference 项时保留所有者。异常代次内标识稳定，状态过期后再次异常生成新标识。
 - 用户确认本次聚焦 API 上游号池：新增质量证据、出站标识轮换及 WS 连接代次只对 OpenAI API Key 类型凭据生效，OAuth 原有指纹逻辑不变；不承诺解黏能改善单个 OAuth 账号的质量。只有一个 API 上游时复用稳定的新出站会话标识，实际是否更换隐藏池账号由上游决定。
@@ -454,7 +454,7 @@
 - 正式 [Release v0.1.6](https://github.com/liulixin-lex/xy2api/releases/tag/v0.1.6) 为 latest、非草稿、非预发布；annotated tag object `a15aeb9995280994c238ee8863900bb7db285b11` 固定于上述合并提交。Release run `35682383562`、主线和标签 CI/安全扫描全部成功。五平台包实际下载并复算 SHA-256，Linux 二进制产品版本 0.1.6、兼容版本 0.2.6、完整提交正确；GHCR amd64/arm64 及 `0.1.6/latest/0.1/0` 别名均核对一致，digest `sha256:273feaa297e31ecd6247cdf36504a0a6f920c0e44d4c07619b02abb55f56baa8`。
 - 定向与扩展回归、service/repository race、七项 Go 静态检查通过；最终候选的质量路由与原调度组合回归/race 均通过，真实隔离 Redis 双客户端竞争、旧代次绑定拒绝、作用域和 TTL 再次验证通过。最终五轮健康请求 p95 增量为 295/1224/-176/1142/315 微秒，最大 1.224ms，低于 2ms 目标；3030 次请求对应 3030 次上游调用，正常正文/缓存标识逐字节不变。异常模拟缓存为 0/800/0/800，轮换后一次冷启动。仅隔离负载结果，不代表生产缓存率或首字保证。
 - 开发机专用隔离环境实际完成 0.1.5→0.1.6→0.1.5 回切及再次前滚，健康和管理员登录均 200，PostgreSQL/Redis/应用目录标记保留；0.1.6 全新安装也通过。迁移数始终 298，本版无新增数据库迁移。未连接或修改生产服务，没有真实模型调用。
-- 同输入基线探针为 first=1、next=1、stable=1，修改版为 first=1、next=2、stable=2。固定四角色位于 `/xy/artifacts/gpt-quality-routing/`，`VERIFICATION.txt` 保存命令、输入、字面输出和退出码；源码回滚、恢复哈希及补丁重建的最终执行结果由同目录 `DELIVERY_RESULT.json` 记录。源码回滚不操作生产数据库。
+- 同输入基线探针为 first=1、next=1、stable=1，修改版为 first=1、next=2、stable=2。固定四角色位于 `<工作机 A>/artifacts/gpt-quality-routing/`，`VERIFICATION.txt` 保存命令、输入、字面输出和退出码；源码回滚、恢复哈希及补丁重建的最终执行结果由同目录 `DELIVERY_RESULT.json` 记录。源码回滚不操作生产数据库。
 
 ### STATE 可靠性 0.1.5 已发布（2026-09-21）
 
@@ -463,48 +463,48 @@
 - 正式 [Release v0.1.5](https://github.com/liulixin-lex/xy2api/releases/tag/v0.1.5) 为 latest、非草稿、非预发布，Release run `35571354176` 成功；主线与标签 CI、安全检查全部成功。五个平台包实际下载并复算 SHA-256，Linux 二进制版本/兼容/完整提交正确。GHCR amd64/arm64 的 OCI 标签以及 `0.1.5/latest/0.1/0` 别名均核对一致，digest `sha256:616b68f955aece616d28593ba1211da8440bb2874915773c8dcd3df7e5c5867a`。
 - 发布前独立审查修复代理池临时密钥持久化缺陷：非空池的迁移、读取、保存及旧接口替换要求显式配置共享持久 TOTP_ENCRYPTION_KEY；拒绝操作不写密文、不创建权威池、不删除旧配置，空池仍可用。四组新增回归和已有代理/轮换兼容回归通过；测试的一处 staticcheck 写法已修正后通过最终门禁。
 - 开发机隔离 0.1.4 升级到正式 0.1.5，健康和管理员登录均 200，迁移 297→298，PostgreSQL/Redis/应用目录标记保留；两条代理密文、脱敏、409 冲突与同密钥重启解密通过；回切 0.1.4 在 298 条迁移上仍可启动、登录并保留标记。再次前滚后代理池及三类标记完整；正式版全新安装健康/登录200、298条迁移通过，专用新装环境已清理。完整执行结果见 `release-0.1.5/` 日志。该验证不代表旧程序可管理新代理池。
-- 原四角色继续位于 `/xy/artifacts/codex-state-upgrade/`，此前版本已备份；本次同输入版本为 BASELINE 0.1.4、MODIFIED 0.1.5、ROLLBACK 0.1.4，均兼容 0.2.6、exit0。回滚恢复 4,131 文件，补丁重建 4,152 文件一致；此前手动软等待/无效草稿关闭三态 false/false→true/true→false/false 证据保留。源码回滚不操作数据库。
-- `/xy/xy2api` 的 main 已快进到正式合并源码；本次收尾文档由独立受保护 PR 固化，发布标签不移动。最终本地源码/远端提交与四角色哈希见 `release-0.1.5/FINAL_RESULT.json`。成功率策略及质量隔离默认关闭，真实账号覆盖率与质量目标仍待灰度，不能将源码和发布验收当作生产效果证明。
+- 原四角色继续位于 `<工作机 A>/artifacts/codex-state-upgrade/`，此前版本已备份；本次同输入版本为 BASELINE 0.1.4、MODIFIED 0.1.5、ROLLBACK 0.1.4，均兼容 0.2.6、exit0。回滚恢复 4,131 文件，补丁重建 4,152 文件一致；此前手动软等待/无效草稿关闭三态 false/false→true/true→false/false 证据保留。源码回滚不操作数据库。
+- `<工作机 A>/xy2api` 的 main 已快进到正式合并源码；本次收尾文档由独立受保护 PR 固化，发布标签不移动。最终本地源码/远端提交与四角色哈希见 `release-0.1.5/FINAL_RESULT.json`。成功率策略及质量隔离默认关闭，真实账号覆盖率与质量目标仍待灰度，不能将源码和发布验收当作生产效果证明。
 
 ### STATE 可靠性升级与本地源码提交（2026-09-20）
 
-- 基线为 `1a4fd39c71eadc4d5d587a39373bcded692e4fa5` / 0.1.4；源码位于 `/xy/artifacts/codex-state-upgrade/reliability-work`，分支 `feat/state-reliability`。用户要求验证后提交源码，并由用户后续推送；本轮不推送、合并、发布、部署或调用真实账号。
+- 基线为 `1a4fd39c71eadc4d5d587a39373bcded692e4fa5` / 0.1.4；源码位于 `<工作机 A>/artifacts/codex-state-upgrade/reliability-work`，分支 `feat/state-reliability`。用户要求验证后提交源码，并由用户后续推送；本轮不推送、合并、发布、部署或调用真实账号。
 - 已实现 STATE 开关独立即时保存与修订冲突保护、持久手动获取任务、多代理加密配置和同出口检测、健康轮换、完整响应验证、候补与版本隔离、共享预算及独立质量观察。前端按钮和提示精简，预算/质量/诊断放入详情；管理员关闭不受打票中状态阻碍。
 - 所有新策略默认关闭，逐步启用；质量隔离默认关闭。生产成功率、覆盖率、质量保持和 265 限流目标尚未实测，须执行批准的真实账号观察窗口；本地通过不代表这些目标已达到。
 - 后端全量 unit、修复后 STATE 回归、service/parser race（-parallel=1 避免旧 Gin 测试全局变量竞争，保留用例内部并发）、真实 PostgreSQL/Redis STATE 集成与 repository race、全部 7 项 Go lint、Wire 生成、前端类型/i18n/生产构建、嵌入前端后端构建均已通过。前端全量初跑 2326/2327 通过，旧单代理 UI 断言更新后 64 项受影响回归通过，最后 113 项控制/设置/中英文回归通过。1280/390 深浅主题模拟 API 浏览器验证通过。macOS 专用脚本无法用 Linux 的 stat 参数完成，不计为通过。
 - 一个并行只读子智能体完成多轮并发、代理、流验证与回滚脚本审查。静态检查发现的错误处理和表达式问题全部修复；race 发现的完成信号早于回调问题已修复，并原子化有界收尾测试计数；资源中断、一次运行中误清缓存造成的导出文件缺失与后续成功复验均保留字面记录，没有抹掉失败。
-- 四角色继续使用 `/xy/artifacts/codex-state-upgrade/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`。本次同输入三态、源码哈希、补丁重建、Git 提交和主仓库本地分支导入的最终事实以 `reliability-20260920/FINAL_RESULT.json`、`COMMIT_RESULT.json`、`LOCAL_BRANCH.json` 为准；这些记录在事务执行后生成。旧四角色在 `reliability-20260920/previous/` 留存。
-- 原 `/xy/xy2api` 的 main 工作文件保持不变，完成的分支已以本地 Git fetch 导入供后续推送；提交树必须与已验证源码归档一致。源码回滚仅适用于独立副本，不操作生产数据库，不恢复过期或撤销票据。
+- 四角色继续使用 `<工作机 A>/artifacts/codex-state-upgrade/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`。本次同输入三态、源码哈希、补丁重建、Git 提交和主仓库本地分支导入的最终事实以 `reliability-20260920/FINAL_RESULT.json`、`COMMIT_RESULT.json`、`LOCAL_BRANCH.json` 为准；这些记录在事务执行后生成。旧四角色在 `reliability-20260920/previous/` 留存。
+- 原 `<工作机 A>/xy2api` 的 main 工作文件保持不变，完成的分支已以本地 Git fetch 导入供后续推送；提交树必须与已验证源码归档一致。源码回滚仅适用于独立副本，不操作生产数据库，不恢复过期或撤销票据。
 
 ### STATE / XY2API 0.1.4 已发布（2026-09-19）
 
 - 用户授权推送、合并及发版；功能与版本 PR [#50](https://github.com/liulixin-lex/xy2api/pull/50) 在 16/16 检查通过后正常合入 `f6161d15eb4d7ac5d51f0badc55d9c5d0e8bc931`。annotated `v0.1.4` 指向该提交，兼容版本保持 Sub2API 0.2.6；没有调整保护规则。
 - 正式 [v0.1.4 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.1.4) 非草稿、非预发布且为 latest；Release 工作流 `35458815394` 成功。五个平台包实际下载并复算 SHA-256；Linux 二进制产品、兼容版本和 commit 均符合；GHCR amd64/arm64 OCI 标签及 `0.1.4/latest/0.1/0` 别名一致，digest `sha256:c6906dcedc9597f87935b78b67b66d55ef163a78af770d0182c729f5a59d4596`。正式镜像隔离全新安装健康与管理员登录通过。
-- 四角色继续位于 `/xy/artifacts/codex-state-upgrade/`。发版时重新执行累计与二期 BASELINE/MODIFIED/ROLLBACK：新增账号受管数 2/0/2，未复验票据可用 true/false/true，私有配置导出 true/false/true；旧时间戳、重复头、旧代理 IQ 接受均为 true/false/true，限流请求 8/1/8，冷却 300/1200/300 秒。全部退出 0，源码回滚和补丁重建一致；产品版本 0.1.3/0.1.4/0.1.3。
+- 四角色继续位于 `<工作机 A>/artifacts/codex-state-upgrade/`。发版时重新执行累计与二期 BASELINE/MODIFIED/ROLLBACK：新增账号受管数 2/0/2，未复验票据可用 true/false/true，私有配置导出 true/false/true；旧时间戳、重复头、旧代理 IQ 接受均为 true/false/true，限流请求 8/1/8，冷却 300/1200/300 秒。全部退出 0，源码回滚和补丁重建一致；产品版本 0.1.3/0.1.4/0.1.3。
 - 未部署生产或调用真实上游账号；两个续期周期与 24 小时观察仍是实际启用前的独立验收。升级需停止旧采集工作者；回退先关闭 STATE 总开关，源码回滚不操作数据库，详见 `docs/CODEX_STATE.md`。
 - 本条文档由独立受保护 PR 固化，发布标签保持不可变；文档最终合并 SHA、主线/标签检查及交付哈希以原目录 `release-0.1.4/` 与 `ARTIFACTS.json` 为准。
 
 ### STATE 二次优化本地交接（2026-09-19）
 
-- 同一 `feat/codex-state-upgrade` 副本已提交一期 `2a743f0afcf205e1f440d3f15a8655b412b38af9`、二期后端 `322b61486`、前端 `49f0bd098`。原 `/xy/xy2api` 保持干净 `9c8abed`；未推送、发布、部署或调用真实账号。
+- 同一 `feat/codex-state-upgrade` 副本已提交一期 `2a743f0afcf205e1f440d3f15a8655b412b38af9`、二期后端 `322b61486`、前端 `49f0bd098`。原 `<工作机 A>/xy2api` 保持干净 `9c8abed`；未推送、发布、部署或调用真实账号。
 - 二期修复内嵌时间／同票不续命、重复 STATE 头、HTTP 200 内的 JSON/SSE 限流与配额错误、固定代理原地编辑后的 IQ 迟到结果。撤销保留不可用私有票据及原期限，重启后取得相同值仍不延长原截止时间。保留合法唯一 312 信号立即撤销策略。
 - 扫描改为每页 100 条元数据、批量领取；调度用不含 STATE 的摘要，注入仍查权威记录。诊断增加阶段、白名单原因、期限和业务核验，普通统计约每 30 秒合并写入。
 - 界面按用户要求精简：套餐与缺票策略并排；每模型直接显示票据、业务模型和 IQ，时间与统计收进详情。与账号模块分隔线、字号和表单协调；保护草稿、键盘焦点与最后数据，隐藏／关闭停止轮询。
 - 最终 7 个受影响后端包 unit、真实 PostgreSQL 18.1／Redis 8.4 集成、service 与 repository race、7 项 Go 静态检查通过。前端全量 308 文件／2321 项测试及后续文案／i18n 回归、ESLint、类型、生产构建、嵌入后端构建通过；1280／390 深浅主题和键盘、轮询、错误反馈通过。
 - 1,000／10,000 账号各两模型的隔离 SQL 模式对照：逐账号模式 4,000／40,000 查询、1,000／10,000 行锁；投影 11／101 分页查询、无领取行锁。最终健康账号扫描回归验证无逐账号领取事务或候选读取；代理编辑竞态实测锁等待后取消旧 IQ 结果。数值不是生产吞吐保证。
-- 固定四角色仍为 `/xy/artifacts/codex-state-upgrade/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`。一期快照在 `phase1/`；累计与仅二期的同输入 BASELINE／MODIFIED／ROLLBACK、补丁重建、源码哈希、最终提交与四角色重新打开结果，以同目录 `FINAL_RESULT.json` 和 `ARTIFACTS.json` 为完成依据。失败批次与资源处理没有删除或计为成功。
+- 固定四角色仍为 `<工作机 A>/artifacts/codex-state-upgrade/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`。一期快照在 `phase1/`；累计与仅二期的同输入 BASELINE／MODIFIED／ROLLBACK、补丁重建、源码哈希、最终提交与四角色重新打开结果，以同目录 `FINAL_RESULT.json` 和 `ARTIFACTS.json` 为完成依据。失败批次与资源处理没有删除或计为成功。
 - 维护与来源见 `docs/CODEX_STATE.md` 和 `docs/third-party/codex-state-second-pass-NOTICE.md`。源码回滚不操作数据库；部署前仍须测试账号两个续期周期及 24 小时观察。
 
 ### 292 / STATE 本地融合交接（2026-09-19）
 
-- 已批准基线 `6c12e3f`，社区 `ecf3b9a`；原 `/xy/xy2api` 仍为干净 `9c8abed`。代码在 `/xy/artifacts/codex-state-upgrade/work`，未推送、发布、部署或调用真实账号。
+- 已批准基线 `6c12e3f`，社区 `ecf3b9a`；原 `<工作机 A>/xy2api` 仍为干净 `9c8abed`。代码在 `<工作机 A>/artifacts/codex-state-upgrade/work`，未推送、发布、部署或调用真实账号。
 - 已融合账号独立 Pro/Team、多模型票据、固定业务代理复验、PostgreSQL 条件租约和私有运行状态、完整响应守护、IQ 等票／恢复复检／有限自愈。承接旧全局配置，新账号默认关闭，旧票复验不延长到期。现有 IQ 判分、分组提示词、compact、插件、计费与 Stripe 逻辑保留。
 - 最终后端 7 个受影响包完整 unit、STATE/IQ 定向回归及真实 PostgreSQL/Redis 隔离测试通过；启动前幂等迁移和迁移前后创建账号默认关闭已实测。pnpm 9.15.9 冻结原锁文件后，前端 308 个文件／2319 项回归、ESLint、i18n、类型、生产构建以及嵌入前端的后端构建通过；1280/390 深浅主题的保存、逐模型获取、冷却、轮询和键盘检查通过。全部 7 项 Go 静态检查和 service 的 STATE/IQ/WebSocket race 通过。仓储 race 与四角色三态事务的最终实际结果统一保存在交付目录 VERIFICATION.txt 和 FINAL_RESULT.json，完成标志以该记录为准。
-- 固定交付目录 `/xy/artifacts/codex-state-upgrade/`；维护说明 `docs/CODEX_STATE.md`，来源保存在 `docs/third-party/`。真实测试账号两个续期周期及 24 小时观察仍属上线前步骤。
+- 固定交付目录 `<工作机 A>/artifacts/codex-state-upgrade/`；维护说明 `docs/CODEX_STATE.md`，来源保存在 `docs/third-party/`。真实测试账号两个续期周期及 24 小时观察仍属上线前步骤。
 
 ### Sub2API v0.2.6 / XY2API 0.1.3 已发布（2026-09-18）
 
-- 用户授权按项目标准完成上游同步和发版。原 `/xy/xy2api` 保持原始工作树；实现与证据位于 `/xy/artifacts/upstream-sync-v0.2.6-xy2api-0.1.3/`。
+- 用户授权按项目标准完成上游同步和发版。原 `<工作机 A>/xy2api` 保持原始工作树；实现与证据位于 `<工作机 A>/artifacts/upstream-sync-v0.2.6-xy2api-0.1.3/`。
 - 固定上游正式 annotated v0.2.6，tag object `8f35716ba69976fc0ec950894114d2604bb5454c`，commit `49a39b6dc1abed30fd227611e8af1108bc427610`，unsigned；真实 merge base `86f93c28ee34cc74b629dafb748bd5ac5ca8c5ea`。预检 PR #46 合并 `35d620900`；标准 prepare、受控模块归一化及 10 项裁决后，同步 PR #47 在固定 head `77bd8641a` 的 16/16 检查通过后合入 `ef3493e13022e0a5a5b190d7c8734cea93729d5f`。
 - 纳入 60 个上游提交，接入兑换分页、分组用量索引查询、默认关闭的 Codex 票据管理及网关/界面修复。保留 IQ 行锁/配置、分组系统提示词、长上下文计费、Stripe 托管与模式单选；弹窗保留焦点/嵌套行为并支持跨挂载根唯一标题。297 条历史迁移及 checksum 不变，无新增 SQL。
 - 本地 2303 项前端测试、lint/类型/生产构建，后端受影响回归、真实 PostgreSQL/Redis 分组用量/兑换/IQ/缓存集成及 Wire 再生成零差异通过。远端完整 unit/integration、lint、跨平台与安全通过。首轮导入排序 lint 和工具/配置错误保留在证据，不计为成功。
@@ -517,13 +517,13 @@
 
 ### Stripe 模式单选与支付界面改进 0.1.2 已发布（2026-09-18）
 
-- 基线为原仓库 `main / 9c8abed87987b5f4a8f278cdd411fe3ee7273713`，原工作区保持干净。实现位于 `/xy/artifacts/stripe-hosted/experience-work`；功能提交 `25a983458782962bcb9c25041907de317d50d655` 已通过 [PR #44](https://github.com/liulixin-lex/xy2api/pull/44) 合入，发布提交为 `95a9576d5ff49ccb5c934fdad5c19e46e5d23f1b`。收尾文档分支为 `docs/v0.1.2-closeout`。
+- 基线为原仓库 `main / 9c8abed87987b5f4a8f278cdd411fe3ee7273713`，原工作区保持干净。实现位于 `<工作机 A>/artifacts/stripe-hosted/experience-work`；功能提交 `25a983458782962bcb9c25041907de317d50d655` 已通过 [PR #44](https://github.com/liulixin-lex/xy2api/pull/44) 合入，发布提交为 `95a9576d5ff49ccb5c934fdad5c19e46e5d23f1b`。收尾文档分支为 `docs/v0.1.2-closeout`。
 - `payment_enabled_types` 中 Stripe 改为关闭、站内、托管单选。后端拒绝同时启用两种模式；历史双模式配置读取时优先托管，未选模式不能创建新订单。历史实例、回调、补偿和退款仍按原绑定处理。
 - 用户端支付入口及订单记录统一显示 Stripe；管理员设置、订单筛选及统计保留 Stripe 站内／Stripe 托管区分。服务商说明拆分为地址、环境要求和历史配置保护；已完成订单引用的托管配置修改返回 `HOSTED_CONFIG_LOCKED`，不再误报未完成订单。
 - 支付方式、快捷金额及提交按钮改为细边框、平面色和明确选中态，保留键盘焦点、禁用和加载状态；金额前缀随币种变化。前端 133 项测试、i18n 完整性、定向 ESLint、类型检查，以及后端带 unit 标签的支付回归和隔离 PostgreSQL 并发／履约／退款测试通过。最终构建及 1280/390 深浅主题浏览器结果以固定验证账本为准。
-- 沿用 `/xy/artifacts/stripe-hosted/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`，旧角色保存在 `pre-experience/`。同输入 BASELINE 为 `stripe 托管 / pressed=null`，MODIFIED 为 `Stripe / pressed=true`，ROLLBACK 恢复 BASELINE；三者退出 0，回滚归档与新基线哈希一致，补丁重建逐文件一致。最终制品清单见 `experience/RESULT.json`。
+- 沿用 `<工作机 A>/artifacts/stripe-hosted/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`，旧角色保存在 `pre-experience/`。同输入 BASELINE 为 `stripe 托管 / pressed=null`，MODIFIED 为 `Stripe / pressed=true`，ROLLBACK 恢复 BASELINE；三者退出 0，回滚归档与新基线哈希一致，补丁重建逐文件一致。最终制品清单见 `experience/RESULT.json`。
 - 正式 [v0.1.2 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.1.2) 非草稿、非预发布且为 latest。PR 的 16 项检查、主线及标签 CI／安全扫描、Release 工作流 `35326891540` 全部成功；五个平台包已下载复算 SHA-256。Linux amd64 程序报告产品 0.1.2、兼容 0.2.5 和上述发布提交。
-- GHCR amd64／arm64 的 OCI 版本和提交正确；`0.1.2`、`latest`、`0.1`、`0` 均指向 `sha256:12e7fdc6749b806852b9c72272ee4ab1dbb09bd1cf51fea4f087e7de790f359f`。机器核验结果见 `/xy/artifacts/stripe-hosted/experience/release-0.1.2/RELEASE_RESULT.json`，源码四角色最终清单见 `experience/RESULT.json`。
+- GHCR amd64／arm64 的 OCI 版本和提交正确；`0.1.2`、`latest`、`0.1`、`0` 均指向 `sha256:12e7fdc6749b806852b9c72272ee4ab1dbb09bd1cf51fea4f087e7de790f359f`。机器核验结果见 `<工作机 A>/artifacts/stripe-hosted/experience/release-0.1.2/RELEASE_RESULT.json`，源码四角色最终清单见 `experience/RESULT.json`。
 - 本地预览 `http://127.0.0.1:4185/purchase` 使用模拟 API 和支付跳转，不代表真实 Stripe 收款验收。测试数据库容器已停止。本次完成提交、推送、合并和发版，没有生产部署；本版本无新增数据库迁移，历史订单配置保护保留。
 
 ### 分组与 Stripe 托管支付 0.1.1 已发布（2026-09-17）
@@ -532,26 +532,26 @@
 - 产品 `VERSION` 与 `UPSTREAM_BASE.json.xy2api_version` 为 `0.1.1`，Sub2API 兼容版本保持 `0.2.5`。分组迁移为249，支付未发布迁移顺延为250；295条历史迁移及checksum保持。Ent重新生成零差异。
 - PR的16项检查全部通过；本地165项前端回归、后端定向回归、PostgreSQL托管支付及分组/缓存集成、同输入源码回滚通过。首次CI的6项lint问题与2处旧契约断言已修复，公共API契约确认管理员提示词不会泄露。
 - 正式 [v0.1.1 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.1.1) 非草稿、非预发布且为latest；五个平台包实际下载并通过SHA-256复算，Linux amd64二进制报告0.1.1 / compat0.2.5 /上述发布提交。GHCR amd64/arm64 OCI版本与提交一致，`latest`、`0.1`、`0`均指向 `sha256:f176fcfb2b698f8a74fc513fae409c237e94a1fc8c443e50108d83864f0ef02d`。
-- 固定四角色继续使用 `/xy/artifacts/group-system-prompts/` 与 `/xy/artifacts/stripe-hosted/` 下的 `MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`；两套归档现在包含组合发布源码，原功能归档保留于各自 `pre-release-0.1.1/`。发布机器结果和最终哈希见 `/xy/artifacts/release-0.1.1/RELEASE_RESULT.json` 与 `ARTIFACTS.json`。
+- 固定四角色继续使用 `<工作机 A>/artifacts/group-system-prompts/` 与 `<工作机 A>/artifacts/stripe-hosted/` 下的 `MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`；两套归档现在包含组合发布源码，原功能归档保留于各自 `pre-release-0.1.1/`。发布机器结果和最终哈希见 `<工作机 A>/artifacts/release-0.1.1/RELEASE_RESULT.json` 与 `ARTIFACTS.json`。
 - BASELINE显示专属标识且不支持托管；MODIFIED隐藏标识但保留权限、重复两次签名事件只入账80并COMPLETED；ROLLBACK恢复BASELINE，三态命令全部exit0且恢复归档SHA-256一致。源码回滚不会撤销数据库迁移。
 - Stripe真实测试账户、3DS、真实异步支付和退款尚未联调，启用生产支付前仍按 `docs/STRIPE_HOSTED.md` 验收；有未结订单时保留新回调/补偿/退款处理。此次完成GitHub与GHCR发布，没有生产部署。
 
 ### 分组专属标识与系统提示词本地交付（2026-09-17）
 
-- 基线为 `main / 41fd8591c25b075e3f95df58d3b46283a3a70b68`；实现位于 `/xy/artifacts/group-system-prompts/work`，原仓库保持不变。新增 `show_exclusive_badge` 与管理员专用 `system_prompt_config`，专属授权不变，模型独立提示词优先于通用提示词，按映射前客户端模型名匹配。
+- 基线为 `main / 41fd8591c25b075e3f95df58d3b46283a3a70b68`；实现位于 `<工作机 A>/artifacts/group-system-prompts/work`，原仓库保持不变。新增 `show_exclusive_badge` 与管理员专用 `system_prompt_config`，专属授权不变，模型独立提示词优先于通用提示词，按映射前客户端模型名匹配。
 - 已接入标准/简易模式的新建与编辑表单、用户模型广场和渠道展示；HTTP 对话协议、token 计数及 Responses WebSocket 在最终出站阶段前置提示词并保留客户端内容。新增迁移 249、Ent 生成代码、认证投影与版本 26 缓存快照、数据库失效触发器。详见 `docs/GROUP_SYSTEM_PROMPTS.md`。
 - 功能验证已通过：后端 domain/service/handler/middleware/routes/repository 定向回归；真实 PostgreSQL 18.1 / Redis 8.4 持久化、认证投影、两个实例的更新/清空失效；59 项前端回归、i18n、类型、lint 和生产构建；1280/390 浏览器表单保存、校验和隐藏标识展示。测试使用本地模拟上游与隔离数据。
-- 固定四角色为 `/xy/artifacts/group-system-prompts/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；回滚依赖同目录 `BASELINE.tar.gz`，只恢复源码归档。最终静态检查、嵌入前端服务构建、BASELINE/MODIFIED/ROLLBACK 对照与补丁重建的字面输出、退出状态及哈希以 `VERIFICATION.txt`、`FINAL_RESULT.json` 为准。首次工具版本不匹配、内存限制中断及测试工厂/模拟接口修正均保留记录，不计为成功。
+- 固定四角色为 `<工作机 A>/artifacts/group-system-prompts/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；回滚依赖同目录 `BASELINE.tar.gz`，只恢复源码归档。最终静态检查、嵌入前端服务构建、BASELINE/MODIFIED/ROLLBACK 对照与补丁重建的字面输出、退出状态及哈希以 `VERIFICATION.txt`、`FINAL_RESULT.json` 为准。首次工具版本不匹配、内存限制中断及测试工厂/模拟接口修正均保留记录，不计为成功。
 - 用户后续授权本地提交；在同一源码副本提交已验收功能，提交结果与四角色重新核验记录见交付目录 `COMMIT_RESULT.json`。不推送、发版、部署生产或调用真实模型账号；本机预览使用模拟数据，不能视为生产网关。
 
 ### stripe 托管本地功能分支（2026-09-17）
 
-- 基线为 `/xy/xy2api` 的干净 `main` / `41fd8591c25b075e3f95df58d3b46283a3a70b68`。实现位于独立 worktree `/xy/artifacts/stripe-hosted/work`、分支 `feat/payment-stripe-hosted`；用户已追加授权本地提交，提交身份与实际执行结果记录在固定交付目录 `VERIFICATION.txt`。未授权推送、合并、发版或部署。
+- 基线为 `<工作机 A>/xy2api` 的干净 `main` / `41fd8591c25b075e3f95df58d3b46283a3a70b68`。实现位于独立 worktree `<工作机 A>/artifacts/stripe-hosted/work`、分支 `feat/payment-stripe-hosted`；用户已追加授权本地提交，提交身份与实际执行结果记录在固定交付目录 `VERIFICATION.txt`。未授权推送、合并、发版或部署。
 - 新增独立 `stripe_hosted` Provider 和官方 Checkout 托管跳转，使用已有 `stripe-go/v85 v85.0.0`，API `2026-03-25.dahlia`。覆盖余额充值与套餐单次购买，旧 `stripe` 保留为独立备用入口。
 - 新增用户范围幂等请求键、冻结订单报价、实例绑定签名回调、整数金额及账户/模式校验、`PROCESSING`、延迟到账补偿与支付/取消竞争处理。退款先持久化扣回与请求，再向 Stripe 发起；不确定结果保留冻结扣回，确认失败仅恢复一次。追加可空字段迁移 249，历史 SQL 不变。
 - 配置密钥加密脱敏，历史实例受订单引用保护；返回地址由可信前端地址生成，托管 URL 仅允许官方 Checkout。用户界面沿用原主题，托管流程不加载 Stripe.js，支付成功提示以本站履约完成为准。配置及回退说明见 `docs/STRIPE_HOSTED.md`。
-- 相关 Go 回归、真实 PostgreSQL 场景及托管支付 race 通过；前端 lint、130 项测试、类型检查、生产构建及嵌入前端的后端构建通过，独立迁移兼容检查通过。1280/390 深浅主题支付跳转、到账状态、配置弹窗和键盘焦点通过。最终同输入源码事务的实际命令、输出、退出码与哈希统一以 `/xy/artifacts/stripe-hosted/VERIFICATION.txt` 为准。
-- 固定四角色为 `/xy/artifacts/stripe-hosted/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`。源码回滚不撤销数据库迁移，已有托管订单需保留新版本回调及密钥处理历史付款。
+- 相关 Go 回归、真实 PostgreSQL 场景及托管支付 race 通过；前端 lint、130 项测试、类型检查、生产构建及嵌入前端的后端构建通过，独立迁移兼容检查通过。1280/390 深浅主题支付跳转、到账状态、配置弹窗和键盘焦点通过。最终同输入源码事务的实际命令、输出、退出码与哈希统一以 `<工作机 A>/artifacts/stripe-hosted/VERIFICATION.txt` 为准。
+- 固定四角色为 `<工作机 A>/artifacts/stripe-hosted/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`。源码回滚不撤销数据库迁移，已有托管订单需保留新版本回调及密钥处理历史付款。
 - 真实 Stripe 测试账户未配置，官方托管页、3DS、实际异步支付、CLI/Dashboard 回调和退款仍是上线前门禁。依赖审计记录了既有 xlsx 高危及 x/mod 公告；新支付路径不使用 xlsx，审计不声明全仓无漏洞。详情见交付目录 `SECURITY_REVIEW.txt`。
 
 ### Sub2API v0.2.5 / XY2API 0.1.0 同步发布（2026-09-16）
@@ -566,13 +566,13 @@
 - 官方 `weishaw/sub2api:0.2.4`（commit `5de5e2bed035d43591a2e10e51f420ef6a84eb98`）初始化的独立数据库也已完成 RC 升级：健康与登录成功，用户、设置、Redis、应用目录标记保留，247/248 与配额保留/清理行为通过。该来源保留额外历史迁移文件，记录数为 284 -> 298。
 - 正式版本 PR [#40](https://github.com/liulixin-lex/xy2api/pull/40) 在固定 head `f05d9292bdf5f5c4e572da21730fd8e13e482fc8` 的 16/16 检查成功后合并为 `380a9260ea514893ea412f673fcb21618fcab975`；annotated `v0.1.0` 指向该提交，正式 Release 工作流为 `35062247875`。
 - 正式 [Release v0.1.0](https://github.com/liulixin-lex/xy2api/releases/tag/v0.1.0) 已公开，非草稿、非预发布且为 latest；发布、main/标签 CI 与安全扫描全部成功。五个平台包实际下载 SHA-256 校验通过，Linux 二进制及 amd64/arm64 OCI 标签均为产品 `0.1.0`、兼容 `0.2.5`、提交 `380a9260ea514893ea412f673fcb21618fcab975`。正式镜像 digest 为 `sha256:f82a63c7d9a806adc714518b80d85cce14cf7094d345a94c02de2ee2807c9046`，`latest`、`0.1`、`0` 一致，`0.0` 保留旧 digest。正式镜像隔离安装健康、登录和 295 条迁移通过。DockerHub 因现有凭据缺失按条件跳过。
-- 同输入源码事务已验证：BASELINE `0.0.13 / 0.2.4`，MODIFIED `0.1.0 / 0.2.5`，ROLLBACK 恢复 BASELINE，恢复与补丁重建的文件字节/可执行位/符号链接树哈希一致；完整与简化发布配置的 RC 稳定别名均跳过。四角色及最终源码哈希位于 `/xy/artifacts/upstream-sync-v0.2.5-xy2api-0.1.0/`。宽泛 race 选择器曾包含内存分配上限基准而失败，普通完整单测及准确并发选择器均通过，原失败保留在证据中。
+- 同输入源码事务已验证：BASELINE `0.0.13 / 0.2.4`，MODIFIED `0.1.0 / 0.2.5`，ROLLBACK 恢复 BASELINE，恢复与补丁重建的文件字节/可执行位/符号链接树哈希一致；完整与简化发布配置的 RC 稳定别名均跳过。四角色及最终源码哈希位于 `<工作机 A>/artifacts/upstream-sync-v0.2.5-xy2api-0.1.0/`。宽泛 race 选择器曾包含内存分配上限基准而失败，普通完整单测及准确并发选择器均通过，原失败保留在证据中。
 
 ### v0.0.13 发布（2026-09-15）
 
 - 用户明确授权将智商检测简化与普通 HTTP 403 自动续检改动提交、推送远端并发布 0.0.13；授权包含按现有受保护分支流程创建 PR、等待必需检查、合并、创建 annotated `v0.0.13` 标签并核验 Release 制品，不包含生产部署或真实账号探测。
 - 功能提交 `1fd4d04a7` 已由受保护 [PR #35](https://github.com/liulixin-lex/xy2api/pull/35) 合入；两个触发来源的 16 个检查运行实例全部成功，合并提交为 `368bc735d3e5b069b96ef0f33032123c9cef7f6b`。产品 `VERSION` 和 `UPSTREAM_BASE.json.xy2api_version` 已晋级为 0.0.13，Sub2API 兼容版本保持 0.2.4。
-- `release/0.0.13` 交接文档已由受保护 [PR #36](https://github.com/liulixin-lex/xy2api/pull/36) 合入，最终 main 提交为 `11790409f602c4c48e68091e5d032af450f226a0`。annotated `v0.0.13` 标签的 tag object 为 `a92fc3f99e`，Release 工作流、主线 CI 与安全扫描均成功；Release 已公开、非草稿、非预发布且为 latest。迁移 246 删除共享配额表；回退旧程序须恢复升级前数据库，不能只替换二进制。五平台包、Linux 二进制、GHCR 双架构和稳定别名的实际结果见 `/xy/artifacts/openai-iq-check/v013-release-result.json` 与 `VERIFICATION.txt`。
+- `release/0.0.13` 交接文档已由受保护 [PR #36](https://github.com/liulixin-lex/xy2api/pull/36) 合入，最终 main 提交为 `11790409f602c4c48e68091e5d032af450f226a0`。annotated `v0.0.13` 标签的 tag object 为 `a92fc3f99e`，Release 工作流、主线 CI 与安全扫描均成功；Release 已公开、非草稿、非预发布且为 latest。迁移 246 删除共享配额表；回退旧程序须恢复升级前数据库，不能只替换二进制。五平台包、Linux 二进制、GHCR 双架构和稳定别名的实际结果见 `<工作机 A>/artifacts/openai-iq-check/v013-release-result.json` 与 `VERIFICATION.txt`。
 
 ### v0.0.12发布（2026-09-15）
 
@@ -583,15 +583,15 @@
 ### 稳定性改进提交合并（2026-09-15）
 
 - 用户本轮明确授权提交、推送远端并合并，暂不发版；不创建版本标签或Release，不操作生产。
-- 功能提交 `76f6c35a1` 已推送到 `fix/iq-reliability-v2`，正式PR为 [#33](https://github.com/liulixin-lex/xy2api/pull/33)，目标main。源码与已验收归档一致，干净提交上的兼容审计通过。后续提交用于交接或检查修正，最终head、检查与合并提交以PR实时状态及 `/xy/artifacts/openai-iq-check/reliability-merge-result.json` 为准。
+- 功能提交 `76f6c35a1` 已推送到 `fix/iq-reliability-v2`，正式PR为 [#33](https://github.com/liulixin-lex/xy2api/pull/33)，目标main。源码与已验收归档一致，干净提交上的兼容审计通过。后续提交用于交接或检查修正，最终head、检查与合并提交以PR实时状态及 `<工作机 A>/artifacts/openai-iq-check/reliability-merge-result.json` 为准。
 - 本轮交付不包含发版；产品版本保留0.0.11。八项必需检查成功后合并，不绕过分支保护。四角色继续使用原绝对路径，源码归档/补丁随最终提交更新，原BASELINE、MODIFIED、ROLLBACK行为及恢复哈希保留。
 
 ### 智商检测稳定性实施（2026-09-15）
 
-- 当前基线为远端main/b07824af9（v0.0.11），原仓库已快进拉取且保持干净。实现副本为 `/xy/artifacts/openai-iq-check/reliability-work`，分支 `fix/iq-reliability-v2`；此条覆盖下方历史工作树和发布中描述。
+- 当前基线为远端main/b07824af9（v0.0.11），原仓库已快进拉取且保持干净。实现副本为 `<工作机 A>/artifacts/openai-iq-check/reliability-work`，分支 `fix/iq-reliability-v2`；此条覆盖下方历史工作树和发布中描述。
 - 本轮按批准方案实现完成消息补全、最多两次持久化尝试、最后有效判定保留、协议故障30/60分钟冷却、三轮尝试明细、30天小时聚合、5秒扫描和新建5/120/576默认值。既有账号周期/预算、原题及标准答案21保持。
 - 只实施本地源码、临时数据库/Redis和合成浏览器验证；未执行生产操作、真实检测、提交、推送或发布。部署与24小时真实账号观察仍须后续授权。实施及兼容说明见 `docs/IQ_RELIABILITY_IMPLEMENTATION.md`。
-- 固定四角色位于 `/xy/artifacts/openai-iq-check/`，本轮基线及上一版角色备份在 `pre-reliability-v2/`。相关后端测试、真实数据库/Redis集成、31项前端测试、静态检查、类型/i18n、Vite与嵌入前端服务构建已通过。源码事务前后及回滚行为已实测，最终封存结果及全部字面退出记录以 `reliability-delivery.json`、`reliability-final-result.json` 和 `VERIFICATION.txt` 为准。
+- 固定四角色位于 `<工作机 A>/artifacts/openai-iq-check/`，本轮基线及上一版角色备份在 `pre-reliability-v2/`。相关后端测试、真实数据库/Redis集成、31项前端测试、静态检查、类型/i18n、Vite与嵌入前端服务构建已通过。源码事务前后及回滚行为已实测，最终封存结果及全部字面退出记录以 `reliability-delivery.json`、`reliability-final-result.json` 和 `VERIFICATION.txt` 为准。
 
 ### v0.0.11发布准备历史（2026-09-15，已由b078基线承接）
 
@@ -599,7 +599,7 @@
 - 产品VERSION与provenance已调整为0.0.11；Sub2API兼容0.2.4保持。包含PR31后的繁忙/延期、租约/额度、迁移244、记录页面与弹窗交互优化，功能源码与上一轮验收版本一致。
 - 发布门禁发现新增244漏登记checksums.json，已追加该条规范化SHA-256，全部旧迁移校验值保持；首次未提交状态的审计exit1保留，提交后复验。
 - 此段记录当时ce6082671上的发布准备；当前远端已为b07824af9，版本0.0.11。本轮实施未重新审核发布工作流或制品，不沿用历史“尚不存在”作为当前事实。
-- 固定四角色保持/xy/artifacts/openai-iq-check下原路径，发版前归档备份在pre-v011-release，最终事务与制品验证追加同一VERIFICATION.txt。
+- 固定四角色保持<工作机 A>/artifacts/openai-iq-check下原路径，发版前归档备份在pre-v011-release，最终事务与制品验证追加同一VERIFICATION.txt。
 
 ### 最终审查与减少延期（2026-09-15）
 
@@ -621,25 +621,25 @@
 ### 最新范围纠正与现场结果（2026-09-15T07:23Z）
 
 - 用户明确禁止触碰线上环境：仅允许只读分析，所有优化继续在本地。禁止部署、停止、重启、恢复、备份、清理或修改生产配置；历史脚本与旧授权解释不得触发后续线上执行。
-- 经指定跳板机，以ubuntu成功登录生产并sudo只读核查。实际程序0.0.10/e695c0356；容器基础镜像标记0.0.1且程序被覆盖。真实站点gguuai.com与api.aiaimax.com。
+- 经指定跳板机，以生产 SSH 账号成功登录生产并sudo只读核查。实际程序0.0.10/e695c0356；容器基础镜像标记0.0.1且程序被覆盖。真实站点gguuai.com与api.aiaimax.com。
 - 两次只读采样：217/244/247上限100，占用分别3/4/6与1/2/3，仍account_busy。225因403暂停；246健康冷却。现有本地容量、连续等待、错误分类与精简界面修复符合现场证据，尚未在生产验证。
 - 严重执行错误：误把完成优化升级解释为生产部署，创建备份与候选/回滚镜像，06:34 UTC停止原容器并改写Compose；创建新容器及自动回退均因名称冲突失败。用户叫停后不再线上写入。07:23 UTC只读确认原镜像容器running、站点health200，恢复原因未查明，不能声称由本轮恢复。
-- 残留变更：/opt/xy2api/backups/iq-20260915、/opt/xy2api/releases/iq-20260915、上传的/tmp程序及本地镜像；Compose曾被自动回退脚本改为回滚镜像，当前配置未再读取。不得擅自清理或恢复。public schema备份成功但不包括无权限访问的legacy_newapi与migration_meta。
+- 残留变更：<生产部署目录>/backups/iq-20260915、<生产部署目录>/releases/iq-20260915、上传的/tmp程序及本地镜像；Compose曾被自动回退脚本改为回滚镜像，当前配置未再读取。不得擅自清理或恢复。public schema备份成功但不包括无权限访问的legacy_newapi与migration_meta。
 - 本地业务源码保持已测试版本。后端综合静态检查最终exit0/0 issues，单测、PG/Redis集成、前端验证与源码回滚证据保留；现场结论和操作事件补入本地文档及四角色交付。
 
 ### 检测运行与展示优化（2026-09-15T05:55:00Z）
 
-- PR [#31](https://github.com/liulixin-lex/xy2api/pull/31) 已在八项必需检查通过后合并；PR head `b09351fc18d8c1f7262ea0f1836162f558edcf0f`，merge `ce60826714b06acef5ea24f3aa2bdddc44431390`。`/xy/xy2api` 的 main 已拉取该提交，保持干净。
-- 新改进位于独立 worktree `/xy/artifacts/openai-iq-check/site-review-work`，分支 `fix/iq-detection-operations`，尚未提交或部署。繁忙条件从任何占用改为容量判断，三次繁忙等待后允许竞争最后空闲名额，新增持久化 `busy_deferrals`，保留容量、预算和冷却约束。
+- PR [#31](https://github.com/liulixin-lex/xy2api/pull/31) 已在八项必需检查通过后合并；PR head `b09351fc18d8c1f7262ea0f1836162f558edcf0f`，merge `ce60826714b06acef5ea24f3aa2bdddc44431390`。`<工作机 A>/xy2api` 的 main 已拉取该提交，保持干净。
+- 新改进位于独立 worktree `<工作机 A>/artifacts/openai-iq-check/site-review-work`，分支 `fix/iq-detection-operations`，尚未提交或部署。繁忙条件从任何占用改为容量判断，三次繁忙等待后允许竞争最后空闲名额，新增持久化 `busy_deferrals`，保留容量、预算和冷却约束。
 - 列表简化为开关和评分；记录页独立获取状态、显示延期信息、轮询和排队，诊断下载已在本地 Chromium 实际落盘并解析。此结果补充旧审计 PARTIAL，不代表真实账号验收。
 - 最终相关后端单测、真实 PostgreSQL/Redis 集成、前端相关测试、类型/i18n/lint/生产构建、服务编译和独立 go vet 均成功；六输入 BASELINE/MODIFIED/ROLLBACK 通过，累计补丁可重建相同 SHA-256 的归档。综合静态检查首轮 SIGKILL、低内存重试 exit 4 超时，不能把其中 0 issues 当作成功；缓存复验最终结果见 VERIFICATION.txt。保留原有一项 Redis 批量负载集成测试跳过及构建体积提示。
-- 用户补正生产用户名为 ubuntu。首次密码认证成功，后台复用连接失效后，后续 SSH 返回 Connection refused，尚未成功读取任何远端命令输出；HTTP IP 仍返回 Caddy 308，缺真实域名/SNI。生产内部只读审计仍受阻。本轮未部署、发版或发出真实模型请求。方案见 `openspec/changes/iq-detection-operations/`。
+- 用户补正了生产 SSH 用户名（见私有清单）。首次密码认证成功，后台复用连接失效后，后续 SSH 返回 Connection refused，尚未成功读取任何远端命令输出；HTTP IP 仍返回 Caddy 308，缺真实域名/SNI。生产内部只读审计仍受阻。本轮未部署、发版或发出真实模型请求。方案见 `openspec/changes/iq-detection-operations/`。
 
 最后更新：`2026-09-28`（UTC）；下表记录v0.2.0发布来源，收尾文档独立于不可变标签。
 
 | 项目 | 当前事实 |
 | --- | --- |
-| 仓库路径 | `/xy2/xy2api`；发布验收工作树 `/xy2/release-0.2.0` |
+| 仓库路径 | `<工作机 B>/xy2api`；发布验收工作树 `<工作机 B>/release-0.2.0` |
 | 当前分支 | main；最终交接文档由受保护 PR 合并，发布标签保持不可变 |
 | 发布提交 | `v0.2.0` / `414ef5a7694c65dab289ae3bb9c96b0515cf2887`，版本 PR #68 |
 | 工作树 | 发布来源已核对干净；本表所在文档只补充验收记录 |
@@ -670,7 +670,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ### 20261010-share-scheduling-dev — 剔除智能可控调度并开发份额调度（PR #90 已开、CI 全绿，待人工审核；本 Agent 无进行中操作）
 
-- 用户授权按方案全权决策 D5/D8/D9/D10 并开始开发；D1–D10 均按 proposal 建议值定稿。本机 `/Users/admin/XIN-MAC-XN/xy2api`，起点 main `3569d4f00`，沿用未提交规划文件。
+- 用户授权按方案全权决策 D5/D8/D9/D10 并开始开发；D1–D10 均按 proposal 建议值定稿。本机 `<本机仓库>`，起点 main `3569d4f00`，沿用未提交规划文件。
 - 顺序：阶段 1 剔除 controlled、回到原版 → 阶段 2 缓存归因与份额调度内核/适配/迁移 → 阶段 3 管理接口与前端。只做本地开发与验证，不提交、不推送、不部署、不访问生产或真实上游。
 - Go 工具链按 go.mod 固定 1.27.0，隔离安装于 `/tmp/xy2-toolchain`（校验 SHA256）；本机无 Docker，真实 PG/Redis 集成测试本轮可能无法执行，届时如实记录。
 - 2026-10-10 进展：阶段 1（tasks 1.1–1.11）本地完成。`go build`、`go vet`（unit/integration/e2e）、`go test -tags=unit ./...`（60 包）、默认与 integration 套件全部退出 0；repository 集成测试因无 Docker 由 harness 跳过（新增的旧格式计费意图恢复测试只编译未执行）。前端 lint/typecheck/test（353 文件 2774 例）/build 通过。新 CI “Gateway reliability” 门禁本地 `-race` 模拟通过。
@@ -695,16 +695,16 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ### 20261008-claude-cache-groups-release — 推送、合并与 GitHub 发版
 
-- 用户最新授权远端交付；当前独立工作树 `/lex/xy2api-claude-cache`，分支 `feat/claude-cache-groups-20261008`，已验本地 head `53d6a12ca`；核对远端 main 仍为 `309afb6af`。
+- 用户最新授权远端交付；当前独立工作树 `<工作机 C>/xy2api-claude-cache`，分支 `feat/claude-cache-groups-20261008`，已验本地 head `53d6a12ca`；核对远端 main 仍为 `309afb6af`。
 - 准备产品 0.2.5-rc.1，经完整保护检查后合并并核验 RC 附件和 GHCR；随后独立正式版本 PR 晋级 0.2.5、合并、打标签并核验正式制品。不直推 main、不绕过门禁、不移动已有标签。
-- 证据目录 `/lex/claude-cache-groups-20261008/release/`。仅 GitHub 操作与本地制品核验，不连接或修改线上服务、不调用真实模型。完成后更新本条与顶部状态并追加日志。
+- 证据目录 `<工作机 C>/claude-cache-groups-20261008/release/`。仅 GitHub 操作与本地制品核验，不连接或修改线上服务、不调用真实模型。完成后更新本条与顶部状态并追加日志。
 - 进展：PR #84 合并、全部固定 head 检查及 tree 比较通过，RC 标签已推送；正式候选只晋级版本文件与记忆。RC/正式制品结果尚未完成，不预先声称发布成功。
 
 ### 20261008-claude-cache-fallback-implementation — 实施及发布
 
-- 用户明确授权按既有方案实现、推送、合并与发版；沿用 `/lex/xy2api-claude-cache`，起点 c9f9adf64，远端 main 317b01913。原工作树保持。
+- 用户明确授权按既有方案实现、推送、合并与发版；沿用 `<工作机 C>/xy2api-claude-cache`，起点 c9f9adf64，远端 main 317b01913。原工作树保持。
 - 默认关闭、精确规则、原始声明保护、真实 usage 计费与冷写预留一并实施；保留既有迁移、调度与兼容基线。通过本地验证和固定 head 的远端门禁后完成 RC 验收及正式发布；不部署生产或自动启用规则。
-- 证据目录 `/lex/claude-cache-implementation-20261008/`，待完成项以 OpenSpec tasks 和实际执行记录为准。
+- 证据目录 `<工作机 C>/claude-cache-implementation-20261008/`，待完成项以 OpenSpec tasks 和实际执行记录为准。
 - 进展：PR #81 已合并，固定 head 门禁、本地 unit/race/27 项真实存储集成及前端验证通过；RC GitHub 制品和镜像检查通过，隔离旧版升级烟测通过。fresh/rollback 未执行；正式 PR/标签/制品验收仍待完成。本轮不操作部署或容器清理。
 
 ### 20261007-release-0.2.3 — 正式 PR 与标签
@@ -715,16 +715,16 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 ### 20261007-sub2api-v0.2.14-sync — 已完成三方集成，验证/PR门禁进行中
 
 - 用户授权分析本项目和上游最近版本、新建分支、三方合并、推送 PR 并合并；范围止于集成，不创建产品 Release 或部署。起点 main `8907ac31d028c59bfbc32e5bfbf81982d005eb1b`，产品0.2.2、完整兼容0.2.8。
-- 保留工作区既有 PR #78 合并后交接文档；使用独立副本 `/lex/upstream-sync-v0.2.14-20261007/work` 准备，证据放在其父目录。按仓库 xy2api-upstream-sync Skill 冻结官方 annotated tag、目标提交和真实共同祖先，分析0.2.9–0.2.14累计更新与已移植内容。
+- 保留工作区既有 PR #78 合并后交接文档；使用独立副本 `<工作机 C>/upstream-sync-v0.2.14-20261007/work` 准备，证据放在其父目录。按仓库 xy2api-upstream-sync Skill 冻结官方 annotated tag、目标提交和真实共同祖先，分析0.2.9–0.2.14累计更新与已移植内容。
 - 优先保留耐久计费、双模式调度、IQ/STATE、质量路由、托管支付和导出；冲突逐项裁决，历史迁移仅追加，检查通过后用固定PR head常规merge。未执行生产操作。
 
 ### 20261007-billing-integrity — 本地修复与验证完成（未部署）
 
-- 用户要求读取会话 `07a85d02-a864-4dc9-9ea4-baed05bf0f23`，核对 Sub2API 官方最近版本计费修复，分析当前 xy2api 并完整修复已确认漏洞。起点 `/lex/xy2api`、`main`、`9717116f198904442ebb400d7d06792a40dea15c`，工作树干净，产品0.2.2、完整兼容基线0.2.8。
+- 用户要求读取会话 `07a85d02-a864-4dc9-9ea4-baed05bf0f23`，核对 Sub2API 官方最近版本计费修复，分析当前 xy2api 并完整修复已确认漏洞。起点 `<工作机 C>/xy2api`、`main`、`9717116f198904442ebb400d7d06792a40dea15c`，工作树干净，产品0.2.2、完整兼容基线0.2.8。
 - 已读取会话全部91条活动及本地审计证据入口：删除 Key/用户使在途结算失败，历史共16,744条异常；此前会话已完成60个账号禁用。本轮只做本地代码、规范、隔离验证及官方只读研究，不执行生产补扣、部署或远端发布。
 - 官方最新0.2.14固定标签对象1400a7b4、目标提交0363b8cd，完成0.2.9–0.2.14调研及17个相关提交的选择性移植；来源清单和详细规范见 docs/BILLING_INTEGRITY_{PROVENANCE.json,REPAIR.md}，兼容版本仍0.2.8。
 - 已实现生命周期分离、267耐久意图迁移、资金/用量/平台额度同事务、失败恢复与缓存/调度确认、同步财务交接、数据库Key创建上限及严格预留默认策略。历史候选仅提供只读audit.sql，不自动补扣。
-- 原始Key删除及EasyPay攻击在隔离旧副本复现失败。首轮全量unit发现cleanup测试缺新依赖参数及未知定价错误码预期，修正后最终62个测试包通过；真实PG18.1/Redis8.4的20主/4子回归通过且0 skip，构建通过。313份旧SQL字节不变，含267的新314项校验和全部匹配。标准sync audit在隔离干净副本通过，golangci-lint2.13.2实际exit0、0 issues；87份非文档交付文件的哈希与验证源码一致。工作区保持未提交，证据 /lex/billing-fix-20261007。后续仅有上线阶段的演练、容量验证和历史核验，不自动部署或补扣。
+- 原始Key删除及EasyPay攻击在隔离旧副本复现失败。首轮全量unit发现cleanup测试缺新依赖参数及未知定价错误码预期，修正后最终62个测试包通过；真实PG18.1/Redis8.4的20主/4子回归通过且0 skip，构建通过。313份旧SQL字节不变，含267的新314项校验和全部匹配。标准sync audit在隔离干净副本通过，golangci-lint2.13.2实际exit0、0 issues；87份非文档交付文件的哈希与验证源码一致。工作区保持未提交，证据 <工作机 C>/billing-fix-20261007。后续仅有上线阶段的演练、容量验证和历史核验，不自动部署或补扣。
 
 ### PR #73 合并与 XY2API 0.2.2 发版（2026-09-30，进行中）
 
@@ -742,7 +742,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ### 20260929-dual-scheduling — 实施中
 - 按用户最新要求，系统设置提供 Sub2API 原版调度与可控智能调度两种模式，运行路径和界面分别隔离；保留已有分组账号优先级/权重，不增加逐模型配置。
-- 候选 /xy2/artifacts/scheduling-optimization-20260928/dual-mode-20260929/work；冻结的当前 test 源码保持不动。模式切换只影响新请求，已有请求保持开始时模式；默认与迁移行为须显式验证。
+- 候选 <工作机 B>/artifacts/scheduling-optimization-20260928/dual-mode-20260929/work；冻结的当前 test 源码保持不动。模式切换只影响新请求，已有请求保持开始时模式；默认与迁移行为须显式验证。
 - 前端使用 design-taste-frontend、impeccable、GSAP；后端参考固定上游版本及用户列出的仓库，验证失败换号、预算、输出提交、取消、恢复和模式切换。
 - 本轮不操作生产或远端发布；本机 test 仍为已验证 a59084 镜像，是否更新以实际执行记录为准。
 
@@ -750,7 +750,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 当前实现与实测边界见顶部；冻结后的封装状态仅由本轮固定FINAL_DELIVERY/FINAL_VERIFICATION及rewrite-final-01事务记录更新，不再修改归档中的源码来回填封装结果。发布及真实上游灰度尚未执行。禁止重新运行旧final07控制器或据历史部署记录误认为本候选已上线。
 
 ### 20260928-scheduling-pr-test-deploy — PR创建与独立测试部署已完成
-- PR #71开放，test.aiaimax.cyou已完成隔离部署、公网HTTPS/真实登录/重启持久性/开发服务未变检查；首次管理员声明由用户本人确认。当前源码交付和对应head远端CI结果由pr-test-deploy-20260928保存，四角色沿用原路径。
+- PR #71开放，<测试站点>已完成隔离部署、公网HTTPS/真实登录/重启持久性/开发服务未变检查；首次管理员声明由用户本人确认。当前源码交付和对应head远端CI结果由pr-test-deploy-20260928保存，四角色沿用原路径。
 
 ### 20260928-scheduling-review-fixes — 已完成（final09）
 - 本轮确认的协议、补偿、并发及故障范围问题已修复；全量unit、六包race、lint/build/embed、29项关键回归及升级回滚全部通过。详细失败历史与后续闭环保留在操作日志及review-fixes-20260928，不再作为未完成任务重复运行。
@@ -760,7 +760,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 - `20260927-controlled-scheduling-postcommit-review`：先提交实现并完成独立复审，4项P1/2项P2有实证，业务修复尚未执行；完整报告见 post-commit-review-20260927/REVIEW.md。原源码保持，未推送或部署。
 
-- `20260927-controlled-scheduling-implementation`：代码实现、独立审查修复及本地验证完成，源码和文档冻结；最终四角色事务按实现目录 CHECKPOINT.json 连续执行，最终结果以 final-transaction-scheduling_final_02/{VERIFIED.json,PUBLISHED.json} 为准。TARGET=/xy2/xy2api；副本=/xy2/artifacts/iq-candy-20260927/scheduling-implementation-20260927/work。保留 legacy 默认；未进行生产灰度，不应跳过逐模型配置与上线验收。
+- `20260927-controlled-scheduling-implementation`：代码实现、独立审查修复及本地验证完成，源码和文档冻结；最终四角色事务按实现目录 CHECKPOINT.json 连续执行，最终结果以 final-transaction-scheduling_final_02/{VERIFIED.json,PUBLISHED.json} 为准。TARGET=<工作机 B>/xy2api；副本=<工作机 B>/artifacts/iq-candy-20260927/scheduling-implementation-20260927/work。保留 legacy 默认；未进行生产灰度，不应跳过逐模型配置与上线验收。
 
 
 
@@ -788,9 +788,9 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 
 - `20260917-group-prompts-commit`：本地提交交接已登记；实际提交 SHA、干净状态与归档一致性由 `COMMIT_RESULT.json` 记录，无后续远端操作。
-- `20260917-stripe-hosted`：本地实现与验收已完成，独立 worktree `/xy/artifacts/stripe-hosted/work`、分支 `feat/payment-stripe-hosted`，基线 `41fd8591c`，原 main 保留。BASELINE 不支持托管、MODIFIED 创建 Session 且重复两次事件只入账 80、ROLLBACK 恢复基线，三者 exit0；回滚字节及补丁重建均一致。最终四角色哈希见 `/xy/artifacts/stripe-hosted/VERIFICATION.txt`。真实测试账号联调另行完成，不推送或部署。
+- `20260917-stripe-hosted`：本地实现与验收已完成，独立 worktree `<工作机 A>/artifacts/stripe-hosted/work`、分支 `feat/payment-stripe-hosted`，基线 `41fd8591c`，原 main 保留。BASELINE 不支持托管、MODIFIED 创建 Session 且重复两次事件只入账 80、ROLLBACK 恢复基线，三者 exit0；回滚字节及补丁重建均一致。最终四角色哈希见 `<工作机 A>/artifacts/stripe-hosted/VERIFICATION.txt`。真实测试账号联调另行完成，不推送或部署。
 
-- `20260916-sub2api-v0.2.5-xy2api-v0.1.0`：同步、RC、正式发版与全部制品/隔离验收已完成；本条最终文档通过受保护 PR 固化后执行本地 main 同步、最终归档和专用测试资源清理。固定证据目录为 `/xy/artifacts/upstream-sync-v0.2.5-xy2api-0.1.0/`，以 `FINAL_RESULT.json` 记录收尾提交与四角色哈希。无生产部署或真实账号探测。
+- `20260916-sub2api-v0.2.5-xy2api-v0.1.0`：同步、RC、正式发版与全部制品/隔离验收已完成；本条最终文档通过受保护 PR 固化后执行本地 main 同步、最终归档和专用测试资源清理。固定证据目录为 `<工作机 A>/artifacts/upstream-sync-v0.2.5-xy2api-0.1.0/`，以 `FINAL_RESULT.json` 记录收尾提交与四角色哈希。无生产部署或真实账号探测。
 
 - `20260915-v0.0.13-release`：功能 PR #35 与交接 PR #36 均在 16/16 检查成功后合并；`v0.0.13` Release、五平台包、Linux 二进制和 GHCR 双架构已核验。仅剩本条最终状态文档通过受保护 PR 固化；生产部署不在范围内。
 
@@ -810,7 +810,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 - `20260915-iq-production-upgrade`：已停止且禁止继续。误执行部署失败及原容器停止事件见顶部记录；07:23只读确认原容器运行、health200。用户最终范围为只读生产、本地优化，不执行历史部署或恢复脚本。
 
-- `20260915-iq-site-review`：本地实现与应用验证、六输入源码事务已完成；生产用户名已补正为 ubuntu，当前 SSH 端口拒绝连接且缺站点域名，待连接恢复后继续只读核查。沿用 `/xy/artifacts/openai-iq-check/` 四角色与最初基线，旧角色备份到 pre-site-review。
+- `20260915-iq-site-review`：本地实现与应用验证、六输入源码事务已完成；生产 SSH 用户名已补正（见私有清单），当前 SSH 端口拒绝连接且缺站点域名，待连接恢复后继续只读核查。沿用 `<工作机 A>/artifacts/openai-iq-check/` 四角色与最初基线，旧角色备份到 pre-site-review。
 
 - `20260915-v0.0.10-audit-pr`：修复已提交正式PR #31，gguuai:fix/v0.0.10-audit → liulixin-lex:main；本地源码/测试哈希与提交审计通过。首次远端CI及Security Scan为action_required，等待维护者批准运行；未合并、发版或部署。
 
@@ -828,7 +828,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 - `20260914-iq-stability-plan` 已由本轮实施承接；完整规格与任务证据在 `openspec/changes/stabilize-openai-iq-check/`。
 
-- `v0.0.8` 功能、提交、发布和制品验收已完成；本次文档提交记录收尾状态。原始 v0.0.8 功能无遗留实施事项；新增改进需求见上一条。四项交付文件及发布日志继续保留于 `/xy/artifacts/openai-iq-check/`。
+- `v0.0.8` 功能、提交、发布和制品验收已完成；本次文档提交记录收尾状态。原始 v0.0.8 功能无遗留实施事项；新增改进需求见上一条。四项交付文件及发布日志继续保留于 `<工作机 A>/artifacts/openai-iq-check/`。
 
 ## 历史重要事项（原“当前重要事项”）
 
@@ -852,7 +852,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 隔离验证覆盖 RC 全新安装、正式 `v0.0.6` 原地升级、回切旧镜像和再前滚；健康、管理员登录、286 条迁移、四处 MiniMax CHECK 约束、两个主代理共享备用代理的新关系数据，以及 PostgreSQL、Redis、`/app/data` 标记均正常。升级前三类备份已生成且 checksum 稳定；镜像回滚可用，但生产仍必须保留完整备份。
 - 正式版 PR [#23](https://github.com/liulixin-lex/xy2api/pull/23) 的固定 head `0bc35438c9f1ffd92334482de25689a678ad4ab6` 在 16/16 检查通过后，以 merge commit `a3c0209184b65a6a9ae1383b725022f92cb9fb6e` 合入；合并后主线 CI run `34600004386` 与安全扫描 run `34600004385` 均成功。
 - 正式 [v0.0.7 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.7) 非 draft、非 prerelease 且为 latest；annotated tag object 为 `64f44b2fa10f7214be4852d3d72cafd1be5b3307`，目标为上述正式 merge commit，Release run [34600960509](https://github.com/liulixin-lex/xy2api/actions/runs/34600960509) 成功。五个制品 SHA-256 全部通过；GHCR `0.0.7`、`latest`、`0.0`、`0` 均指向双架构 digest `sha256:9874af4356e038ff7bd908cf6e26c9389953c6a6b83a712fcee83f557fdd1349`，OCI version/revision 为 `0.0.7` / `a3c0209184b65a6a9ae1383b725022f92cb9fb6e`。
-- 正式镜像已用全空 PostgreSQL、Redis 和 `/app/data` 卷完成首次安装及三服务重启验证；版本、健康、登录、迁移、约束与三类持久化数据均符合预期。任务专用容器、卷、网络、镜像、下载文件、构建产物及已合并短期分支已清理，原有 `book-keeper_default` 网络未改动。
+- 正式镜像已用全空 PostgreSQL、Redis 和 `/app/data` 卷完成首次安装及三服务重启验证；版本、健康、登录、迁移、约束与三类持久化数据均符合预期。任务专用容器、卷、网络、镜像、下载文件、构建产物及已合并短期分支已清理，原有 `<共存服务>_default` 网络未改动。
 
 ### Sub2API v0.2.3 与 XY2API v0.0.6 已完成
 
@@ -889,7 +889,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - RC [v0.0.4-rc.1](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.4-rc.1) 的 annotated tag object 为 `17bcf4009ee9241c8d35b0f5f6ecbcbb3519c20e`，目标为同步 merge commit；Release run `33964718089` 成功，5 个平台包 SHA256 全部通过，GHCR digest 为 `sha256:f8e357a3c08b88eda3e6c9c7ca0d8d9119809b8a57553ce7ce324b05112c953c`，包含 `linux/amd64` 与 `linux/arm64`。
 - 正式版 PR [#11](https://github.com/liulixin-lex/xy2api/pull/11) 的固定 head `6dd99debce540f07a70f9b45ae9f115b5123333e` 在 16/16 检查通过后，以 merge commit `ae4c010d0a8aed750936b59655bf7ab8f85a777b` 合入；该提交的主线 CI run `33966180480` 和安全扫描 run `33966180489` 均成功。
 - 正式 [v0.0.4 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.4) 非 draft、非 prerelease；annotated tag object 为 `7e38081004ce4dea4079a86eabe63624e76428ba`，目标为上述正式 merge commit，Release run `33966678769` 成功。5 个平台包 SHA256 全部通过；GHCR digest 为 `sha256:a4eddd09a4343fd9b2e276bcac7691db395d49697043262378c2db68cec5f9c1`，包含双架构，OCI version/revision 正确，`latest`、`0.0`、`0` 均指向同一 digest。
-- 隔离 Docker 验证覆盖 RC 全新安装、正式 `v0.0.3` 原地升级到 RC、回切 `v0.0.3` 旧镜像和正式 `v0.0.4` 全新安装；健康、初始化、281 条 migration、新 schema、管理员、Redis 与 `/app/data` 持久化均符合预期。任务专用容器、卷、网络、下载文件和镜像已清理，原有 `book-keeper` 资源未改动。
+- 隔离 Docker 验证覆盖 RC 全新安装、正式 `v0.0.3` 原地升级到 RC、回切 `v0.0.3` 旧镜像和正式 `v0.0.4` 全新安装；健康、初始化、281 条 migration、新 schema、管理员、Redis 与 `/app/data` 持久化均符合预期。任务专用容器、卷、网络、下载文件和镜像已清理，原有 `<共存服务>` 资源未改动。
 - 同步 merge 后的主线 CI run `33964691713` 曾因 Docker Hub 拉取 Testcontainers Ryuk 时连接被对端重置而失败，不是代码或测试断言失败；后续 PR 两套集成测试及正式 merge 主线集成测试均通过。
 
 ### Sub2API v0.2.0 已合入并完成 RC 验证
@@ -915,7 +915,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - annotated tag object 为 `bf25502f68bf0a49e6fa73048970ac257d7c0d16`，目标为上述 merge commit；正式 [v0.0.3 Release](https://github.com/liulixin-lex/xy2api/releases/tag/v0.0.3) 非 draft、非 prerelease，run `33905898627` 成功。
 - 5 个平台压缩包的 SHA256 已独立复算通过；GHCR manifest digest 为 `sha256:14d79a3cd5f6ef29e96e503f9f60b520f806c1f6f5b5050ff5607d7f43a89a1d`，包含 `linux/amd64` 与 `linux/arm64`，OCI version/revision 为 `0.0.3` / `a0e68c6e4f649fc58f95bed78aa1b883ab349cf8`。
 - 正式镜像已用全空 PostgreSQL、Redis 和 `/app/data` 卷完成首次安装：健康、setup completed、277 条 migration、1 个管理员、7 个 v0.2.0 新字段齐全。
-- RC/正式验证的临时容器、卷、网络和本次新拉取镜像已删除；原有 `book-keeper` 容器、网络、卷和镜像未改动。已合并的记忆、同步、发布短期分支已在本地与远端删除。
+- RC/正式验证的临时容器、卷、网络和本次新拉取镜像已删除；原有 `<共存服务>` 容器、网络、卷和镜像未改动。已合并的记忆、同步、发布短期分支已在本地与远端删除。
 
 ## 操作日志（2026-09-04 至 2026-10-12）
 
@@ -1024,11 +1024,11 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 ### 2026-09-13T19:41:31Z — `20260913-openai-iq-check` — 源码实施与功能验证完成
 
 - 请求/目标：按用户批准方案实现 OpenAI 周期糖果题检测；用户随后明确允许最终答案为21的解释文字，优先要求简洁JSON，并要求将实现写入真实仓库的标准路径。
-- 开始状态：`main` / `20c307a9b4a6ee1a8ef126d9aa0baa9aa5c500e6`，原工作树干净。最初在独立副本实施；随后按最新要求写入 `/xy/xy2api`，origin 已确认是 `github.com/liulixin-lex/xy2api`。原始源码归档保留于交付目录 `BASELINE.tar.gz`。
+- 开始状态：`main` / `20c307a9b4a6ee1a8ef126d9aa0baa9aa5c500e6`，原工作树干净。最初在独立副本实施；随后按最新要求写入 `<工作机 A>/xy2api`，origin 已确认是 `github.com/liulixin-lex/xy2api`。原始源码归档保留于交付目录 `BASELINE.tar.gz`。
 - 完成操作：新增 `Account.IQCheck` 独立调度限制、默认关闭/15分钟的配置、三态筛选、最多10个跨实例租约、120秒请求超时、两轮记录事务保留、失效旧任务保护；复用 OAuth/代理/TLS/插件传输。请求固定 `gpt-6-astra` / `low`、`store:false`，要求整数 `answer` JSON，不注入标准答案且不携带历史；兼容明确解释性结论。创建/更新/批量设置、管理员接口、蓝色开关、频率编辑、立即检测、历史弹窗与中英文文案已接入。
 - 变更位置：`backend/internal/pkg/iqcheck/`、`service/iq_check_service.go`、`repository/account_iq_check.go`、账号 DTO/路由与缓存、追加迁移240及校验清单、Ent/Wire生成文件；前端沿用账号页面及组件目录。使用说明为 `docs/OPENAI_IQ_CHECK.md`。
 - 验证：判分与服务定向测试通过，覆盖JSON/解释/歧义数字、完整与中断响应、OAuth/Setup Token/API key、固定参数、独立请求、异常状态、人工限制与旧缓存候选。真实 PostgreSQL 集成验证了状态过滤、两轮保留、关闭/重开/换凭据、正常刷新、软删除、跨实例10租约和过期恢复。前端269个测试文件、1977项测试通过，lint、类型/i18n检查与生产构建通过；Go服务端构建通过。原有迁移校验值全部不变。
-- 交付：固定四角色为 `/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、可执行 `ROLLBACK.sh`。事务脚本在隔离副本上对相同模拟账号状态输入运行原版、修改版、回滚版，验证原始源码哈希及可确定重建的归档哈希；实际状态与字面输出以 `checkpoint.json` 和 `VERIFICATION.txt` 为准。回滚脚本恢复源码，不是数据库降级脚本。
+- 交付：固定四角色为 `<工作机 A>/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、可执行 `ROLLBACK.sh`。事务脚本在隔离副本上对相同模拟账号状态输入运行原版、修改版、回滚版，验证原始源码哈希及可确定重建的归档哈希；实际状态与字面输出以 `checkpoint.json` 和 `VERIFICATION.txt` 为准。回滚脚本恢复源码，不是数据库降级脚本。
 - 限制：未调用真实账号。浏览器自动化返回 `browser_no_host`，未进行真实浏览器视觉验收；移动端沿用现有 DataTable 的同名单元格插槽。测试期间因4GB内存压力调整为串行构建；已保留失败及重跑日志，不将中断的编译记为通过。
 - 后续：代码可从本地工作区审阅；本任务未授权推送、发布或部署。需要继续交付核验时执行上述事务脚本，它会复用已确认阶段。
 
@@ -1057,13 +1057,13 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 ### 2026-09-14T09:14:35Z — `20260914-iq-stability-implementation` — 完成
 
 - 请求/目标：执行稳定检测改进方案，账号编辑间隔旁提供自定义模型与思考深度；接受明确最终答案21的解释文字，规范简洁输出并防止歧义误判。
-- 开始状态：`main` / `dff987fb16d206e354a21bd4055987c2b5d73549`，已有4份OpenSpec方案和记忆改动；在 `feat/iq-check-stability` 实施。前一轮四角色完整备份于 `/xy/artifacts/openai-iq-check/pre-stability-implementation/`；原始源码归档不变。
+- 开始状态：`main` / `dff987fb16d206e354a21bd4055987c2b5d73549`，已有4份OpenSpec方案和记忆改动；在 `feat/iq-check-stability` 实施。前一轮四角色完整备份于 `<工作机 A>/artifacts/openai-iq-check/pre-stability-implementation/`；原始源码归档不变。
 - 完成操作：`IQCheckSettings` 可选字段 `model/reasoning_effort/output_mode`，默认 Astra/low/compat；只读模型目录、5分钟缓存、来源标记、自定义值和上游默认省略参数；candy-v2 精确答案提取与拒答/冲突/重复JSON/精度边界；任务快照、配置失效、只改间隔保留状态、租约过期释放和周期抖动；双协议规范输出与严格Schema；记录规范化答案及原文折叠；复制/导入保留配置但关闭检测；批量仅修改勾选字段。
 - 文件位置：沿用 `backend/internal/domain/iq_check.go`、`pkg/iqcheck/`、`service/iq_check*.go`、`repository/account_iq_check.go`、原账号管理路由/处理器，前端原组件/types/api/i18n目录。追加迁移241，既有SQL及checksum不变；JSON域与SQL记录表不改变Ent/Wire结构或依赖，未制造生成代码变更。使用及待发布说明写入已跟踪的 `docs/OPENAI_IQ_CHECK.md`。
 - 验证：最终Go相关单测（含配置、三协议模拟、目录只读、精确数值、复制和导入导出）通过；完整repository PostgreSQL/Redis集成通过；前端原相关118项、补充59项（包含重叠复验）及记录弹窗2项通过；全仓lint、类型/i18n、前端生产构建及服务端构建通过。实际Chromium在1280px/390px验证三控件排列、无横向溢出、目录拉取、已知深度校验、上游默认和聚焦；Impeccable detector为[]。
 - 事务：相同模拟输入运行真实 `Account.IsSchedulable()`，BASELINE 的 degraded=true，MODIFIED 的 degraded=false，ROLLBACK 的 degraded=true；人工关闭始终false。补丁可重建同哈希归档；回滚源码manifest SHA-256=`eda4554229078281dcf48cfe8b891f18dfcbf3ef3a0e6d9eef9df91f0820eef7` 与原始一致。额外旧版/新版解析器同输入和回滚输出、追加schema旧列读取/事务回滚均通过。
 - 失败记录：首次构建退出137（4GB内存下并行Go/Vite），改为串行限制Node堆后通过；副本协议命名不一致已修复；测试桩缺字段、断言误读脱敏revision和批量API参数已修正。所有失败及重跑字面stdout/stderr/退出码保存在四角色验证账本，不将中止记为通过。任务专用6个测试容器已清理。
-- 交付：固定 `/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、可执行 `ROLLBACK.sh`，后者依赖同目录保留的 `BASELINE.tar.gz`。最终复验入口 `stability_finalize.py`，机器状态见 `checkpoint.json`。源码回滚不操作生产数据库。
+- 交付：固定 `<工作机 A>/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、可执行 `ROLLBACK.sh`，后者依赖同目录保留的 `BASELINE.tar.gz`。最终复验入口 `stability_finalize.py`，机器状态见 `checkpoint.json`。源码回滚不操作生产数据库。
 - 边界：未调用真实账号逐模型组合验收，不能保证第三方模型清单或返回格式始终遵循规范；未对任意自然语言作100%语义识别承诺。新行为是无法可靠提取答案归未知并解除检测自身限制。没有新版本发布，产品仍0.0.8；本轮按批准设计完成本地实现和验证，发布流程单独执行。
 
 
@@ -1072,7 +1072,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 请求/目标：提交、推送并发布 XY2API `v0.0.9`。
 - 完成操作：功能分支 `feat/iq-check-stability` 通过 PR #27 合入 `main`；补齐 CI errcheck 后全部必需检查通过；推送 annotated `v0.0.9` 标签并完成正式 Release。
 - 验证：主线 CI run `34829548235`、安全扫描 `34829548211` 与 Release run `34829581131` 成功；Release 为 latest、非 draft、非 prerelease。五个平台制品 SHA-256 通过；Linux amd64 二进制显示 `0.0.9`/Sub2API `0.2.4`；GHCR `0.0.9` 双架构 digest `sha256:b742241597192b6f62dc32898436f78cda6d3f20afe4cc4a1bb4356988b82ab6`，`latest`、`0.0`、`0` 别名一致。
-- 交付：`/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh` 已按最终提交重新打开；源码事务 BASELINE/MODIFIED/ROLLBACK 行为及恢复哈希通过。
+- 交付：`<工作机 A>/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh` 已按最终提交重新打开；源码事务 BASELINE/MODIFIED/ROLLBACK 行为及恢复哈希通过。
 - 卡点/风险：无。未调用真实账号或部署生产。
 - 下一步：无。
 
@@ -1089,12 +1089,12 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ### 2026-09-14T12:56:47Z — `20260914-iq-monitoring-plan` — 规划完成
 
-- 请求：结合AA26-251A与全网资料规划稳定检测。目标对象保持/xy/xy2api，分支fix/iq-response-protocol、HEAD cb5dc5ae0，保留已有未提交修复。
+- 请求：结合AA26-251A与全网资料规划稳定检测。目标对象保持<工作机 A>/xy2api，分支fix/iq-response-protocol、HEAD cb5dc5ae0，保留已有未提交修复。
 - 证据：CISA直连403，读取NSA发布页所链同题官方PDF；第13–14页含高置信度恶意蒸馏响应调整建议，不是OpenAI实际部署、阈值或本项目触发原因证明。核对Astra模型/推理/格式/限流/数据控制官方文档；论坛只作体验报告。
 - 方案：真实端点请求配置、共享业务名额、pending/start分离、去重与日预算、Retry-After及原因分类暂停；默认固定间隔，显式节约模式15→30→60；单题21与单次判分保留。排期/旧评分/新鲜度区分，正文仅最近两轮。明确不实施身份伪装、掩盖自动化或绕过反滥用机制；不能保证消除服务方误分类。
 - 文件：openspec/changes/stabilize-openai-iq-check/monitoring/的proposal、design、tasks、spec、sources共5份Markdown，以及本记忆；业务代码未改，生产未查询/修改/探测。模型仍默认gpt-6-astra/low，版本仍0.0.9。
 - 验证：文档结构/链接/26场景通过，逐文件核对业务源码与pre-monitoring-plan归档一致；理论96→24轮/天及75%计算通过，明确排期等待15→60分钟取舍。实际代码回放BASELINE与MODIFIED评分相同，只有方案存在性变化；执行ROLLBACK_CURRENT.sh后哈希及输出恢复，再应用补丁。首次回滚探针误把空目录当作方案，退出1，改检查proposal.md后通过；原失败日志保留。
-- 交付：沿用/xy/artifacts/openai-iq-check/四角色并扩展原验证账本；原四角色备份pre-monitoring-plan，原始BASELINE.tar.gz不变。累计源码补丁/回滚及最终角色哈希以monitoring-transaction-state.json、VERIFICATION.txt为准，不用文档验证冒充未来实现验证。
+- 交付：沿用<工作机 A>/artifacts/openai-iq-check/四角色并扩展原验证账本；原四角色备份pre-monitoring-plan，原始BASELINE.tar.gz不变。累计源码补丁/回滚及最终角色哈希以monitoring-transaction-state.json、VERIFICATION.txt为准，不用文档验证冒充未来实现验证。
 - 下一步：按monitoring/tasks.md另行实施并执行相关测试；真实账号验收/提交/发布/部署未在本轮执行。
 
 ### 2026-09-14T14:45:09Z — `20260914-iq-monitoring-implementation` — 本地实现与验证完成
@@ -1106,7 +1106,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 验证：monitor-impl-unit-coherent、完整PostgreSQL/Redis repository集成、CI同配置相关包golangci-lint（0 issues）、前端66项相关测试、全仓lint、类型/i18n、前后端构建均退出0。Chromium1280/390验证实际Vue控件无横向溢出，模型目录、深度、节约设置及键盘交互通过。测试使用模拟上游，不证明生产OAuth具体根因或服务方误分类率。
 - 失败留存：内存压力、测试时间精度及测试桩等失败和成功重跑均保留。额外unit标签静态分析报告52项问题，涉及29个未改文件；按仓库CI不附加标签的相关包检查通过，没有为消除历史诊断修改无关文件。
 - 同输入事务：当前源码基线为15分钟/无预算门禁，修改版为60分钟/日预算延期，降智限制仍有效；当前副本回滚后哈希和输出恢复。累计原始BASELINE为pre-IQ源码（无解析器和监测控制），MODIFIED解析合法辅助事件为聪明、损坏/不完整流为未知并执行预算门禁，ROLLBACK恢复BASELINE；三轮退出0。累计源码manifest恢复为eda4554229078281dcf48cfe8b891f18dfcbf3ef3a0e6d9eef9df91f0820eef7。
-- 交付：沿用/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh；基线归档和历次四角色备份保留。字面命令、输出、退出码和哈希见VERIFICATION.txt，最终归档与工作区一致性见monitor-impl-final-audit.json。ROLLBACK.sh只恢复独立源码副本，不操作生产数据库。
+- 交付：沿用<工作机 A>/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh；基线归档和历次四角色备份保留。字面命令、输出、退出码和哈希见VERIFICATION.txt，最终归档与工作区一致性见monitor-impl-final-audit.json。ROLLBACK.sh只恢复独立源码副本，不操作生产数据库。
 
 ### 2026-09-14T15:12:00Z — `20260914-iq-ui-refinement` — 本地完成
 
@@ -1116,7 +1116,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 保留：StartIQCheck原子删除和ListIQCheckRecords读取均改为LIMIT 3，诊断下载复用同一查询。第四轮开始删除最早轮，历史记录不补造，无需迁移。真实PostgreSQL/Redis IQ仓储集成通过，断言数据库实际计数为3、最新三条内容和正常状态转换。
 - 验证：前端70项相关测试、修改文件lint、类型/i18n与生产构建通过；实际Chromium1280/390检查设置、原生下拉弹层和三条记录，无横向溢出。同步/选择、深度验证、Escape及节约模式通过，机械检测为[]。测试桩缺te、旧input选择器和动画断言已修复重跑；浏览器脚本将最大间隔误算成基础间隔的断言已修复，失败日志保留。构建输出AccountsView包含最终蓝色Toggle样式。
 - 事务：相同四次输入在源码中的实际查询上回放（SQLite兼容语法fixture，PostgreSQL验证另见集成）：BASELINE保留[4,3]，MODIFIED保留[4,3,2]，ROLLBACK恢复[4,3]，其他账号记录保持。回滚源码哈希相同，再应用补丁恢复修改版。累计四角色继续使用最初pre-IQ基线，不能将其无IQ功能行为与本轮ea94b83d1基线混同。
-- 交付：固定/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh；最终审计ui-refinement-final-audit.json。预览http://localhost:5188/__iq-review（模拟目录和记录，不使用真实账号）；?view=records显示记录。未提交新UI改动、推送、发版或部署。
+- 交付：固定<工作机 A>/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh；最终审计ui-refinement-final-audit.json。预览http://localhost:5188/__iq-review（模拟目录和记录，不使用真实账号）；?view=records显示记录。未提交新UI改动、推送、发版或部署。
 
 ### 2026-09-14T16:35:00Z — `20260914-v0.0.10-release` — 发布完成
 
@@ -1164,7 +1164,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 - 六组同输入实际 execute 验证全部 exit 0：上限10/占用1及上限2/占用1/此前延期3次由 account_busy 变为一次开始与请求；满载保持延期；Redis 故障改为 concurrency_unavailable。回滚恢复基线输出与源码树哈希，再次应用补丁还原修改。
 - 累计 pre-IQ 基线的保留逻辑对照为 absent、保留[4,3,2]、absent；两套回滚脚本都实际执行。归档权限统一后，累计补丁重建归档与交付归档 SHA-256 相等；最初失败的权限元数据差异和 stderr 留存。
-- 用户补充正确 SSH 用户 ubuntu；首次密码认证命令 exit 0，复用连接失效后的读取命令未执行，随后端口22持续 Connection refused。没有读取生产容器、日志、配置、数据库或 Redis，也没有修改生产。实际 HTTP 入口仍返回308，不能据此认定站点故障或判断永久繁忙的生产根因。
+- 用户补充了正确的 SSH 用户（见私有清单）；首次密码认证命令 exit 0，复用连接失效后的读取命令未执行，随后端口22持续 Connection refused。没有读取生产容器、日志、配置、数据库或 Redis，也没有修改生产。实际 HTTP 入口仍返回308，不能据此认定站点故障或判断永久繁忙的生产根因。
 - go vet 已独立通过；综合静态检查曾 SIGKILL 和超时，最后缓存复验由交付目录日志记录。应用源码保持已验证字节；本次补记仅更新文档，归档重新构建与回滚校验由 site-review-closeout.mjs 记录。
 
 ### 2026-09-15T07:23:27Z — `20260915-iq-production-upgrade` — 误操作停止，返回本地范围
@@ -1190,7 +1190,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 验证：16项检测仓储集成主测试、domain/iqcheck/service相关测试、最新7项服务监测主测试、98项相关前端测试及后续14项重叠测试通过；仓储与最终服务层golangci均exit0/0 issues，前端lint、类型/i18n、最终Vite构建与嵌入前端服务编译通过。真实Chromium合成数据1280/390、浅/深主题验证列表、三轮记录、刷新失败保留、下载落盘、24步Tab、焦点与关闭停轮询通过。仍有原大包及Browserslist警告；不等于全仓或生产真实账号全量验收。
 - 对照：新增额度/冷却/批量/键盘回归及减少延期场景均实际复现BASELINE失败、MODIFIED通过、ROLLBACK再次失败；最新调度用例直接空位、约0.75秒争用恢复单次请求、5秒冷却保持分别通过。回滚执行前后3944文件与pre-final-audit归档逐字节相同，恢复树哈希a42283782305426a89791ae30cd78a04c512c3e8a0e15e10b131a8c393a8ac0c；随后已在一次性副本重新应用四个生产代码文件并核验哈希。
 - 失败留存：并行编译导致内存压力及前端exit137，首轮Go检查主动SIGTERM，首个繁忙回滚exit143没有完整runner结果，不计通过；初次浏览器读取异步弹窗过早，改为有界等待后通过。最终顺序验证全部通过，08:37:20服务静态检查结束、08:38:05服务编译结束，无因资源故障而回避测试。
-- 交付：沿用/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh；补充final-audit执行记录，final-audit-closeout.mjs重建累计归档和回滚，final-audit-finalize.mjs核对最终源码与四角色。最终结果与哈希以site-review-final-result.json为准。后续仅在新需求下继续本地工作，历史生产脚本禁止运行。
+- 交付：沿用<工作机 A>/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh；补充final-audit执行记录，final-audit-closeout.mjs重建累计归档和回滚，final-audit-finalize.mjs核对最终源码与四角色。最终结果与哈希以site-review-final-result.json为准。后续仅在新需求下继续本地工作，历史生产脚本禁止运行。
 
 ### 2026-09-15 — `20260915-v0.0.11-release` — 提交发布准备
 
@@ -1237,7 +1237,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - PR #36 合并提交 `11790409f602c4c48e68091e5d032af450f226a0` 已作为最终发布提交。annotated tag `v0.0.13` 的 tag object 为 `a92fc3f99ef849fcf8a7ff03640c3ca3f7d0a18b`，解引用提交一致；Release 工作流 `34996031291`、主线 CI `34995759507`、主线 Security Scan `34995759454`、标签 CI `34996031353` 和标签 Security Scan `34996031295` 全部成功。
 - Release 已在 GitHub 公开发布，`draft=false`、`prerelease=false`、latest=true。五个包的 checksums 已实际下载复算：darwin amd64 `1fa4fc1628884eef28bfcb9453b600683d4d6dbada6f2ffb6932c8dba3bda6fa`，darwin arm64 `2f0331551e26326db9340ff701f41fb7de9c50287caf3e548ff5050663395bcb`，linux amd64 `0fe14186577b142142165ddf2b363dc9720feb76225adcd2910c68297e9b7a8c`，linux arm64 `7fdf0480a70bc4200b203c18fc83a55aee63843d2cc5f25f199d3c63a097f5d3`，windows amd64 `9941d7dc9f629739071ebf623372a631d104c23bba3e28bd687d6994844a4425`。
 - Linux amd64 二进制以退出码 0 报告 `XY2API 0.0.13`、Sub2API compatibility `0.2.4` 及发布提交。GHCR `0.0.13` 的 amd64/arm64 镜像及 `latest`、`0.0`、`0` 别名均指向 `sha256:304b160d8223e7c6ec2a3b7b162390b0f40f89a8d87e782b356c82fac2a90445`。DockerHub 发布步骤因缺少工作流密钥按条件跳过，不影响 GitHub Release 与 GHCR 验收。
-- 源码事务继续保留 3951 文件基线与 3955 文件修改候选；403 BASELINE 为暂停且无下次时间，MODIFIED 为保留降智并按 1 分钟续检，ROLLBACK 恢复 BASELINE，补丁重建候选哈希精确一致。固定四角色绝对路径、哈希及字面输出见 `/xy/artifacts/openai-iq-check/v013-release-result.json` 与 `VERIFICATION.txt`。本轮未部署生产，未执行真实账号探测。
+- 源码事务继续保留 3951 文件基线与 3955 文件修改候选；403 BASELINE 为暂停且无下次时间，MODIFIED 为保留降智并按 1 分钟续检，ROLLBACK 恢复 BASELINE，补丁重建候选哈希精确一致。固定四角色绝对路径、哈希及字面输出见 `<工作机 A>/artifacts/openai-iq-check/v013-release-result.json` 与 `VERIFICATION.txt`。本轮未部署生产，未执行真实账号探测。
 
 ### 2026-09-16 — `20260916-sub2api-v0.2.5-xy2api-v0.1.0` — 标准同步与正式发布完成
 
@@ -1250,16 +1250,16 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ### 2026-09-17 — `20260917-group-prompts-commit` — 本地提交交接
 
-- 用户要求提交已验收的分组功能；对象仍为 `/xy/artifacts/group-system-prompts/work`，基线 `41fd8591c`，原 `/xy/xy2api` 保持不变。
+- 用户要求提交已验收的分组功能；对象仍为 `<工作机 A>/artifacts/group-system-prompts/work`，基线 `41fd8591c`，原 `<工作机 A>/xy2api` 保持不变。
 - 提交包含 `show_exclusive_badge`、`system_prompt_config`、迁移及生成代码、管理表单、协议注入、回归测试与交接文档。业务源码复用上一轮验收结果，本轮只补充本文件并核验提交内容。
 - 同输入 BASELINE 显示专属标识、MODIFIED 隐藏、ROLLBACK 恢复显示，三者保持专属权限与分组可见；补丁重建与恢复哈希记录继续追加原四角色。实际本地提交和检查退出结果以 `COMMIT_RESULT.json`、`VERIFICATION.txt` 为准。
 - 无远端推送、发布或生产操作；下一步无自动操作。
 ### 2026-09-17 — `20260917-stripe-hosted` — 本地实现与验收交接
 
-- 按批准方案从 `41fd8591c` 创建独立 `feat/payment-stripe-hosted` worktree；原 `/xy/xy2api` 不修改。本地候选加入官方托管 Checkout，原站内 Stripe、余额与套餐有效期规则保留。
+- 按批准方案从 `41fd8591c` 创建独立 `feat/payment-stripe-hosted` worktree；原 `<工作机 A>/xy2api` 不修改。本地候选加入官方托管 Checkout，原站内 Stripe、余额与套餐有效期规则保留。
 - 资金链路覆盖服务端计价、用户范围幂等键、冻结 Session 参数、重复/乱序回调、实例和模式校验、精确整数金额、延迟支付、取消竞争、历史实例保护及持久化退款扣回。数据库追加迁移 249 和 Ent 生成代码，旧订单字段可空。
 - 相关 Go 回归和 PostgreSQL 并发下单、到账及退款场景已通过，托管 Provider/服务层 race exit0；前端 130 项测试、lint、最终类型与生产构建、嵌入前端的后端构建通过。手机配置区换行和长支付名称已调整，1280/390 深浅主题浏览器验收通过；返回页保留 PAID/RECHARGING 请求键直到完成履约，网络检查未加载站内 Stripe SDK。浏览器初期模拟响应缺字段导致提示，补齐测试夹具后重新验收，不将模拟提示归为支付源码故障。
-- 同一外部 `acceptance.sh` 和 `acceptance-input.json` 已观察 BASELINE 不支持 `stripe_hosted`、MODIFIED 创建 `hosted_page` Session 且两次事件仅入账 80/COMPLETED、ROLLBACK 与 BASELINE 相同，三者 exit0。独立回滚归档与原始字节一致，补丁重建及回滚后重新应用均通过内容/可执行位/符号链接核验。首轮核验因 git archive 的组写权限差异失败，修正为 Git 保存的模式语义后通过，原失败日志保留。固定四角色路径保持 `/xy/artifacts/stripe-hosted/`，最终哈希及字面记录见 `VERIFICATION.txt`；回滚脚本不修改数据库。
+- 同一外部 `acceptance.sh` 和 `acceptance-input.json` 已观察 BASELINE 不支持 `stripe_hosted`、MODIFIED 创建 `hosted_page` Session 且两次事件仅入账 80/COMPLETED、ROLLBACK 与 BASELINE 相同，三者 exit0。独立回滚归档与原始字节一致，补丁重建及回滚后重新应用均通过内容/可执行位/符号链接核验。首轮核验因 git archive 的组写权限差异失败，修正为 Git 保存的模式语义后通过，原失败日志保留。固定四角色路径保持 `<工作机 A>/artifacts/stripe-hosted/`，最终哈希及字面记录见 `VERIFICATION.txt`；回滚脚本不修改数据库。
 - 配置指引见 `docs/STRIPE_HOSTED.md`。真实 Stripe 账户未使用，3DS、真实异步支付及退款仍需上线前测试；既有依赖公告及扫描范围记录于 `SECURITY_REVIEW.txt`。下一步只在新授权范围内提交或进行真实账户验收，本轮不推送、合并、发版或部署。
 
 ### 2026-09-17 — `20260917-stripe-hosted-commit` — 本地提交交接
@@ -1307,7 +1307,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 正式 Release latest=true，五平台包下载 SHA-256、Linux 产品0.1.3/兼容0.2.6/完整commit、amd64/arm64 OCI及稳定别名全部通过。镜像 digest `sha256:366408edf90f1cb08ecd2dfb7089c9484f4f8963ec7acd683c78681926fd1d58`。正式全新安装健康/登录200，297条迁移。
 - RC 已覆盖 XY2API0.1.2升级及旧镜像回滚、官方Sub2API0.2.5数据库升级，持久化标记均保持。本地2303项前端、lint/types/build、后端定向与真实PG/Redis集成、票据生命周期race、Wire零差异和服务构建通过。
 - 首轮5处导入排序、工具版本/包装器目录及新装端口冲突均已修复并保留失败记录。RC稳定别名保持旧版，正式版才更新。无新增SQL，297条历史checksum完全保持。
-- 固定四角色重新封存最终源码，BASELINE/ROLLBACK为0.1.2/0.2.5，MODIFIED为0.1.3/0.2.6；exit0、恢复hash和补丁重建一致。清理结果及最终路径哈希见 `/xy/artifacts/upstream-sync-v0.2.6-xy2api-0.1.3/FINAL_RESULT.json`。原主工作区未改写，无生产或真实账号操作。
+- 固定四角色重新封存最终源码，BASELINE/ROLLBACK为0.1.2/0.2.5，MODIFIED为0.1.3/0.2.6；exit0、恢复hash和补丁重建一致。清理结果及最终路径哈希见 `<工作机 A>/artifacts/upstream-sync-v0.2.6-xy2api-0.1.3/FINAL_RESULT.json`。原主工作区未改写，无生产或真实账号操作。
 
 
 ### 2026-09-19：292 / STATE 社区扩展本地融合
@@ -1316,7 +1316,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 实现：账号独立 Pro/Team 与多模型管理、双阶段完整响应复验、数据库条件租约和共享冷却、精确票据守护、WebSocket 逐轮桥接、IQ 等待／恢复复检／有限自愈、脱敏 API 和原账号弹窗集成。新增账号显式关闭，服务启动前完成旧全局范围幂等迁移，迁移失败不开放业务路由。
 - 保留：IQ 判分与题目配置、分组提示词、模型映射和 compact、插件传输、计费及支付；不修改历史 SQL 迁移、模块依赖或前端锁文件。来源、适配说明见 `docs/third-party/` 和 `docs/CODEX_STATE.md`。
 - 已实测：7 个受影响后端包完整 unit、STATE/IQ 定向回归、真实 PostgreSQL/Redis 集成、全部 7 个 Go 静态检查、service race；冻结原锁文件的前端 2319 项测试、lint、i18n、类型、生产构建和嵌入前端后端构建。1280/390 深浅主题表单、键盘、轮询及冷却通过；upstream sync audit 通过。
-- 交付：`/xy/artifacts/codex-state-upgrade/work`，四角色为同目录的 `MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`。源码哈希及同输入 BASELINE/MODIFIED/ROLLBACK、仓储 race、补丁重建和回滚复原结果以 `FINAL_RESULT.json` 和字面命令日志为准；早期失败与资源中断没有删除或计为成功。
+- 交付：`<工作机 A>/artifacts/codex-state-upgrade/work`，四角色为同目录的 `MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`。源码哈希及同输入 BASELINE/MODIFIED/ROLLBACK、仓储 race、补丁重建和回滚复原结果以 `FINAL_RESULT.json` 和字面命令日志为准；早期失败与资源中断没有删除或计为成功。
 - 上线前独立步骤：测试账号至少两个续期周期与 24 小时观察。源码回滚不回退数据库；先停止新工作者、关闭 STATE 总开关，按维护文档处理程序和配置回退。
 
 ### 2026-09-19T17:04:14.826570+00:00 — `20260919-state-second-pass` — 二期本地实现、提交与验收
@@ -1329,22 +1329,22 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 ### 2026-09-19T17:54:54.836886+00:00 — `20260919-state-release-0.1.4` — 发布验收完成
 
 - 已推送 STATE 功能分支，经 PR #50 全部门禁正常合并并发布 annotated v0.1.4；正式五平台包、版本、GHCR 双架构/别名及隔离新装已核验。
-- 发布版本仅晋级 VERSION 与 provenance 产品版本，兼容 0.2.6、业务源码及历史迁移保持。原 /xy/xy2api 未改写，无生产部署或真实账号调用。
+- 发布版本仅晋级 VERSION 与 provenance 产品版本，兼容 0.2.6、业务源码及历史迁移保持。原 <工作机 A>/xy2api 未改写，无生产部署或真实账号调用。
 - 四角色及同输入三态、失败纠错、源码恢复哈希继续追加原验证账本；本收尾仅补交接文档，标签不移动。真实账号观察尚未执行。
 
 ### 2026-09-20T18:06:35.930885+00:00 — `20260920-state-reliability` — 本地实现与源码交付
 
-- 基线为 `1a4fd39c71eadc4d5d587a39373bcded692e4fa5` / 0.1.4；源码位于 `/xy/artifacts/codex-state-upgrade/reliability-work`，分支 `feat/state-reliability`。用户要求验证后提交源码，并由用户后续推送；本轮不推送、合并、发布、部署或调用真实账号。
+- 基线为 `1a4fd39c71eadc4d5d587a39373bcded692e4fa5` / 0.1.4；源码位于 `<工作机 A>/artifacts/codex-state-upgrade/reliability-work`，分支 `feat/state-reliability`。用户要求验证后提交源码，并由用户后续推送；本轮不推送、合并、发布、部署或调用真实账号。
 - 已实现 STATE 开关独立即时保存与修订冲突保护、持久手动获取任务、多代理加密配置和同出口检测、健康轮换、完整响应验证、候补与版本隔离、共享预算及独立质量观察。前端按钮和提示精简，预算/质量/诊断放入详情；管理员关闭不受打票中状态阻碍。
 - 所有新策略默认关闭，逐步启用；质量隔离默认关闭。生产成功率、覆盖率、质量保持和 265 限流目标尚未实测，须执行批准的真实账号观察窗口；本地通过不代表这些目标已达到。
 - 后端全量 unit、修复后 STATE 回归、service/parser race（-parallel=1 避免旧 Gin 测试全局变量竞争，保留用例内部并发）、真实 PostgreSQL/Redis STATE 集成与 repository race、全部 7 项 Go lint、Wire 生成、前端类型/i18n/生产构建、嵌入前端后端构建均已通过。前端全量初跑 2326/2327 通过，旧单代理 UI 断言更新后 64 项受影响回归通过，最后 113 项控制/设置/中英文回归通过。1280/390 深浅主题模拟 API 浏览器验证通过。macOS 专用脚本无法用 Linux 的 stat 参数完成，不计为通过。
 - 一个并行只读子智能体完成多轮并发、代理、流验证与回滚脚本审查。静态检查发现的错误处理和表达式问题全部修复；race 发现的完成信号早于回调问题已修复，并原子化有界收尾测试计数；资源中断、一次运行中误清缓存造成的导出文件缺失与后续成功复验均保留字面记录，没有抹掉失败。
-- 四角色继续使用 `/xy/artifacts/codex-state-upgrade/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`。本次同输入三态、源码哈希、补丁重建、Git 提交和主仓库本地分支导入的最终事实以 `reliability-20260920/FINAL_RESULT.json`、`COMMIT_RESULT.json`、`LOCAL_BRANCH.json` 为准；这些记录在事务执行后生成。旧四角色在 `reliability-20260920/previous/` 留存。
-- 原 `/xy/xy2api` 的 main 工作文件保持不变，完成的分支将以本地 Git fetch 导入供后续推送；提交树必须与已验证源码归档一致。源码回滚仅适用于独立副本，不操作生产数据库，不恢复过期或撤销票据。
+- 四角色继续使用 `<工作机 A>/artifacts/codex-state-upgrade/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`。本次同输入三态、源码哈希、补丁重建、Git 提交和主仓库本地分支导入的最终事实以 `reliability-20260920/FINAL_RESULT.json`、`COMMIT_RESULT.json`、`LOCAL_BRANCH.json` 为准；这些记录在事务执行后生成。旧四角色在 `reliability-20260920/previous/` 留存。
+- 原 `<工作机 A>/xy2api` 的 main 工作文件保持不变，完成的分支将以本地 Git fetch 导入供后续推送；提交树必须与已验证源码归档一致。源码回滚仅适用于独立副本，不操作生产数据库，不恢复过期或撤销票据。
 
 ### 2026-09-20 — `20260920-state-reliability` — 源码提交与三态验收完成
 
-- 功能提交 `68d28d7aaa528977f167d815b46fd6381c6d05b0` 已创建，64 个文件；验证源码树与提交树一致。`/xy/xy2api` 已导入同名本地分支 `feat/state-reliability`，原 main / `9c8abed87987b5f4a8f278cdd411fe3ee7273713` 及工作文件保持不变。
+- 功能提交 `68d28d7aaa528977f167d815b46fd6381c6d05b0` 已创建，64 个文件；验证源码树与提交树一致。`<工作机 A>/xy2api` 已导入同名本地分支 `feat/state-reliability`，原 main / `9c8abed87987b5f4a8f278cdd411fe3ee7273713` 及工作文件保持不变。
 - 同输入的手动软等待跳过、无效草稿下关闭行为为 BASELINE false/false、MODIFIED true/true、ROLLBACK false/false；三者 exit 0。回滚恢复 4,131 个文件与原树哈希一致；严格补丁重建 4,151 个文件与交付树一致，上游审计通过。首次严格补丁因本条新增交接文档末尾空行失败，格式已修复并重建通过。
 - 本条交接只更新文档；最终分支头、四角色哈希及干净状态见交付目录的最终记录。未推送远端，未部署或执行真实账号成功率灰度。
 
@@ -1364,7 +1364,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 ### 2026-09-22 — `20260922-admin-usage-metrics` — 本地实现与验收
 
 - 完成管理员逐请求缓存命中率、生成阶段 Token 速度及默认开启的独立显示开关；权限沿用管理员设置路由，共用表格默认隐藏，公共接口不增加新字段。
-- 137 项相关前端测试、类型、lint、后端定向回归和源码三态通过。最终生产构建、四种浏览器场景、封存哈希与四角色重开由 `/xy/artifacts/admin-usage-metrics/VERIFICATION.txt` 和 `ARTIFACTS.json` 记录；早期资源失败与修正过程保留。
+- 137 项相关前端测试、类型、lint、后端定向回归和源码三态通过。最终生产构建、四种浏览器场景、封存哈希与四角色重开由 `<工作机 A>/artifacts/admin-usage-metrics/VERIFICATION.txt` 和 `ARTIFACTS.json` 记录；早期资源失败与修正过程保留。
 - 独立分支 `feat/admin-usage-metrics`，主工作区无源码改动；无提交、远端或生产操作。临时编译 swap 清理完成。
 
 ### 2026-09-22 — `20260922-admin-usage-metrics` — 显示精简与算法复核
@@ -1383,16 +1383,16 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 ### 2026-09-22 — `20260922-usage-export-pr` — 提交与 PR 交接
 
 - 用户授权将已验收实现推送并创建 PR，明确不合并、不发版。沿用 feat/usage-export 与四角色交付；业务代码不变，提交包含实现、测试和维护文档。
-- 本地验证结果沿用上一条，PR #58（https://github.com/liulixin-lex/xy2api/pull/58）与提交身份记录在 /xy/artifacts/usage-export/PR_RESULT.json；远端 CI 状态以 GitHub 为准。
+- 本地验证结果沿用上一条，PR #58（https://github.com/liulixin-lex/xy2api/pull/58）与提交身份记录在 <工作机 A>/artifacts/usage-export/PR_RESULT.json；远端 CI 状态以 GitHub 为准。
 
 ### 2026-09-21 — `20260921-gpt-quality-routing` — 会话降档防护本地实现与验证
 
-- 实施前执行 `git pull --ff-only origin main`，固定 `021c0d885382ecfb956674e2f8b59a7674e8d912`。业务变更仅在 `/xy/artifacts/gpt-quality-routing/work` 的 `feat/gpt-quality-routing`；原工作区保持干净，未部署、未修改生产或调用真实模型。
+- 实施前执行 `git pull --ff-only origin main`，固定 `021c0d885382ecfb956674e2f8b59a7674e8d912`。业务变更仅在 `<工作机 A>/artifacts/gpt-quality-routing/work` 的 `feat/gpt-quality-routing`；原工作区保持干净，未部署、未修改生产或调用真实模型。
 - 增加 `gateway.openai_quality_routing`（off/observe/enforce，默认 enforce，默认避让 300 秒），严格比较最终出站模型和改写前的原始声明，仅已知 GPT-5.6+ 明确降档对触发。API Key、分组、会话、模型隔离；正常缓存身份不变，异常先换上游、再换凭据，必要时稳定轮换标识。
 - 独立 Redis 状态与粘性键批量读取，Lua 代次和绑定 CAS 防止旧响应覆盖；本机先保护，远端更新预算 50ms。保留共享旧键，HTTP 成功不清除质量状态，不污染全账号质量统计。WS 在未发送下一轮时迁移，历史不足、压缩上下文和不完整工具续接继续绑定所有者。
 - 回归补齐别名/日期/未知后缀、冲突及损坏声明、默认/高级/加权/父会话选路、租户隔离、稳定轮换、状态过期的新身份、Redis 超时取消、WS 完整历史重建与原生透传边界。service/repository race 和七项静态规则通过；首次测试连接关闭未检查返回值的问题已修正。
 - 真实隔离 Redis 双客户端竞争和 TTL 通过。最后五轮健康请求 p95 增量最高 296 微秒，全部低于 2ms；3030 请求/3030 上游调用，正常正文与缓存标识一致。异常缓存模拟为 0/800/0/800，仅一次轮换冷启动；该结果不能外推为生产缓存率或真实首字保证。
-- 同一探针输入在基线持续命中账号 1，修改版后续稳定迁到账号 2。四角色、补丁重建、实际回滚和哈希结果见 `/xy/artifacts/gpt-quality-routing/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh,DELIVERY_RESULT.json}`；回滚依赖同目录校验过的 `BASELINE.tar.gz`，仅恢复独立源码副本。
+- 同一探针输入在基线持续命中账号 1，修改版后续稳定迁到账号 2。四角色、补丁重建、实际回滚和哈希结果见 `<工作机 A>/artifacts/gpt-quality-routing/{MODIFIED_FILE.tar.gz,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh,DELIVERY_RESULT.json}`；回滚依赖同目录校验过的 `BASELINE.tar.gz`，仅恢复独立源码副本。
 - 验证中的磁盘不足、编译资源中断及 lint 分批重跑均保留原始失败记录。缓存和临时构建迁到本机 `/www/gpt-quality-routing-validation/` 后串行完成检查。功能说明为 `docs/OPENAI_QUALITY_ROUTING.md`；生产启用和真实效果观察未在本轮执行。
 
 ### 2026-09-22 — `20260922-quality-release-0.1.6` — 正式发布与验收
@@ -1402,24 +1402,24 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - annotated v0.1.6、正式 Release、五平台下载校验、Linux 二进制完整版本/提交、GHCR 双架构及稳定别名均实际核验；产品 0.1.6、兼容 0.2.6。Release run 35682383562 和主线/标签 CI、安全扫描全部成功。
 - 最终候选五轮健康请求 p95 增量最高 1.224ms（此前本地实现轮次最高 0.296ms，历史记录保留），3030 请求/3030 调用且正常正文一致；异常缓存模拟只出现一次轮换冷启动。真实 Redis 的 32 个重复证据、双客户端代次及作用域隔离通过。
 - 隔离 0.1.5→0.1.6→0.1.5→0.1.6 的健康、登录及三类数据标记通过，全新安装也通过，迁移数保持 298。专用测试资源完成清理，生产未连接、未部署、未修改。
-- 原四角色继续位于 `/xy/artifacts/gpt-quality-routing/`，原版本已备份；发布源码同输入为 BASELINE first=1/next=1/stable=1、MODIFIED first=1/next=2/stable=2、ROLLBACK first=1/next=1/stable=1，全部 exit 0。补丁重建和恢复哈希相等已验证，跨磁盘移动失败及修复续跑、首轮 CI 失败等原始证据均保留。回滚脚本依赖同目录 BASELINE.tar.gz，仅恢复独立源码，不操作生产数据库。
+- 原四角色继续位于 `<工作机 A>/artifacts/gpt-quality-routing/`，原版本已备份；发布源码同输入为 BASELINE first=1/next=1/stable=1、MODIFIED first=1/next=2/stable=2、ROLLBACK first=1/next=1/stable=1，全部 exit 0。补丁重建和恢复哈希相等已验证，跨磁盘移动失败及修复续跑、首轮 CI 失败等原始证据均保留。回滚脚本依赖同目录 BASELINE.tar.gz，仅恢复独立源码，不操作生产数据库。
 - 发布标签不移动，收尾记忆通过独立受保护 PR 固化；最终源码/远端提交、交付哈希及清理结果见 `release-0.1.6/FINAL_RESULT.json`。真实生产缓存率和持续避让效果仍需后续部署观察。
 
 ### 2026-09-22 — `20260922-iq-session-isolation` — API 检测会话隔离与 0.1.7 发布
 
-- 基线 `be451c280`，继续在 `/xy/artifacts/gpt-quality-routing/work` 的 `fix/iq-probe-session-isolation` 实施，原 `/xy/xy2api` 的 `021c0d885` 工作文件保持。IQ 独立探测此前不经过业务会话质量路由；现在每个 API Key 实际检测及持久化补试在最终模型映射、请求头覆写之后生成新会话与 `prompt_cache_key`，清除旧亲和、续接和大小写变体幂等头，保留指定账号、题目、判分、次数和禁止 POST 重放约束。
+- 基线 `be451c280`，继续在 `<工作机 A>/artifacts/gpt-quality-routing/work` 的 `fix/iq-probe-session-isolation` 实施，原 `<工作机 A>/xy2api` 的 `021c0d885` 工作文件保持。IQ 独立探测此前不经过业务会话质量路由；现在每个 API Key 实际检测及持久化补试在最终模型映射、请求头覆写之后生成新会话与 `prompt_cache_key`，清除旧亲和、续接和大小写变体幂等头，保留指定账号、题目、判分、次数和禁止 POST 重放约束。
 - OAuth IQ 不执行 API 随机会话轮换；新调用已有指纹收敛函数，off/device/session/full 按配置工作，设备+会话及完全收敛保持账号稳定 session/thread，逐轮 turn ID 仍遵循原逻辑。正常业务缓存与粘性未改变；IQ 检测放弃跨尝试缓存亲和，第三方是否换隐藏账号由上游实现决定。
 - GPT-6 已在 0.1.6 覆盖，本轮补齐 `gpt-6` 别名、Astra effort/日期变体、正常模型与未知名称回归，文档明确 GPT-5.6、GPT-6 及更新 GPT 文本模型的已登记降档规则。0.1.6 Release 仅更正说明，标签、发布日期及六个附件 ID/大小/校验值回读一致。
 - [PR #56](https://github.com/liulixin-lex/xy2api/pull/56) 最终 head `35b67f4402f2e2988d2640ebea36cbb705dabd8b` 在 16/16 检查成功后普通合并为 `934272ed828b05b4c558ae67837e46d67a86c520`；分支保护保持。[Release v0.1.7](https://github.com/liulixin-lex/xy2api/releases/tag/v0.1.7) 为正式 latest，annotated tag 固定 `934272ed828b05b4c558ae67837e46d67a86c520`；Release run `35696263868` 成功。五平台包下载校验、Linux 产品 0.1.7/兼容 0.2.6/完整 commit、GHCR 双架构与稳定别名通过，digest `sha256:f7d19c1ad818e50019058560b4d16ce8bc95178ef00716f7b8559075b863902c`。
 - IQ、质量路由、指纹、STATE 定向回归与 race、七项静态规则通过；早期测试夹具误用头大小写/轮次字段、CI 静态写法、共享开发机内存不足导致的编译终止，以及工作树未提交时来源审计拒绝均保留原始失败记录，修正后门禁通过。没有真实模型请求。
 - 同一合成号池输入中 BASELINE 三次共用一个隐式会话，结果 degraded/degraded/degraded；MODIFIED 三次使用三个新会话与缓存键，结果 degraded/smart/degraded；ROLLBACK 恢复基线。三态各三次上游调用，均 exit 0。这是可控模拟号池验证，不是生产抽样保证。累计业务质量探针仍为 first/next/stable：1/1/1 → 1/2/2 → 1/1/1。
-- 开发机隔离 0.1.6→0.1.7→0.1.6→0.1.7 健康、管理员登录及 PostgreSQL/Redis/应用目录标记通过，全新安装通过，迁移数保持 298，专用测试容器已清理。未连接或操作生产。固定四角色仍在 `/xy/artifacts/gpt-quality-routing/`；累计补丁重建、源码回滚和恢复哈希由 `DELIVERY_RESULT.json` 与 `iq-session-isolation/FINAL_RESULT.json` 记录，源码回滚恢复原始 `021c0d885`，不操作数据库。
+- 开发机隔离 0.1.6→0.1.7→0.1.6→0.1.7 健康、管理员登录及 PostgreSQL/Redis/应用目录标记通过，全新安装通过，迁移数保持 298，专用测试容器已清理。未连接或操作生产。固定四角色仍在 `<工作机 A>/artifacts/gpt-quality-routing/`；累计补丁重建、源码回滚和恢复哈希由 `DELIVERY_RESULT.json` 与 `iq-session-isolation/FINAL_RESULT.json` 记录，源码回滚恢复原始 `021c0d885`，不操作数据库。
 
 ### 2026-09-22 — `20260922-admin-usage-metrics` — 推送及 PR 交付
 
 - 用户授权提交、推送并创建 PR；功能提交 `017da5ac9` 已推送至 `feat/admin-usage-metrics`，PR #60 面向 main 开放评审。
 - main 在开发期间新增质量路由和 IQ 会话隔离改动，合入 `f4cf08f5f`，唯一冲突为项目记忆文档，保留双方交接和历史日志；本功能业务源码与上一轮已验收归档一致。
-- 四角色继续沿用 `/xy/artifacts/admin-usage-metrics/`，累计源码补丁以原 `021c0d885` 为基线，涵盖本次同步的 main；PR 差异仅为管理员使用记录功能及项目记忆。重新执行同输入三态和源码恢复验证，最终提交、远端 head、PR 可合并状态及 CI 观测由固定账本记录。不合并 PR、不发版、不部署。
+- 四角色继续沿用 `<工作机 A>/artifacts/admin-usage-metrics/`，累计源码补丁以原 `021c0d885` 为基线，涵盖本次同步的 main；PR 差异仅为管理员使用记录功能及项目记忆。重新执行同输入三态和源码恢复验证，最终提交、远端 head、PR 可合并状态及 CI 观测由固定账本记录。不合并 PR、不发版、不部署。
 
 ### 2026-09-22 — `20260922-admin-usage-metrics` — PR #60 契约测试修复
 
@@ -1446,32 +1446,32 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 在原预检基础上逐项登记 37 个清单外裁决路径，完成 43 项冲突裁决及真实上游 merge。保持 299 个已发布迁移字节，新增迁移顺延 253–255；保留 STATE/IQ/质量路由/导出/长上下文策略与兼容标识。
 - 同步 PR #62 与晋级 PR #63 各在固定 head 的 18 项检查通过后正常合并；RC 与正式标签为 annotated，制品、镜像、版本与提交均已独立核验。最终发布指向 504f633ee5dfae6d21b541b276cb15da3dcbce3e。
 - 前端完整 2629 项用例和生产构建、完整 Unit/Integration、安全及来源审计通过；RC 全新安装、0.1.8 升级与 PostgreSQL dump 恢复、正式全新安装均通过。运行数据验证覆盖迁移数、定价 JSON 和数据库/Redis/应用标记。
-- 三态源码验收为 0.1.8/0.2.6/299 → 0.1.9/0.2.8/302 → 基线；补丁重建、回滚哈希和重新应用通过，四角色沿用 /xy/artifacts/upstream-sync-v0.2.8/。
+- 三态源码验收为 0.1.8/0.2.6/299 → 0.1.9/0.2.8/302 → 基线；补丁重建、回滚哈希和重新应用通过，四角色沿用 <工作机 A>/artifacts/upstream-sync-v0.2.8/。
 - 早期测试失败、夹具 readiness 修正与工作流取消均保留证据。纠正执行过程中的判断：缺少实时日志不等于卡住；RC 首轮与正式 PR 前两次 CI 被过早取消，最终成功来自同一源码的完整重跑，未放宽任何门禁。
 - 未部署生产、未调用真实模型账号；数据库回退使用升级前备份，不回写已发布 migration。正式标签保持不可变，项目记忆通过独立文档 PR 收尾。
 
 
 ### 2026-09-27：糖果检测当前健康与大响应兼容
 
-- 原始副本 `/xy2/xy2api-original` 保持 `1cf9708e73c8c189968016852b07082e1c30e187`；修改在 `/xy2/xy2api`、`fix/iq-current-health`，未推送、未发版、未部署。
+- 原始副本 `<工作机 B>/xy2api-original` 保持 `1cf9708e73c8c189968016852b07082e1c30e187`；修改在 `<工作机 B>/xy2api`、`fix/iq-current-health`，未推送、未发版、未部署。
 - 按用户决定只用糖果题21；当前状态每次尝试更新，错误即未知并避让业务流量，历史有效状态单独保留。正常1次，可恢复异常最多共3次，答错不补试；余额不足至少15分钟自动复检。
 - 对指定生产请求的只读查询确认：旧解析器累计读取262145字节触及256 KiB限制。响应是HTTP200/SSE，不能据此断言实际答案错误或正确；原始回答未保存。新解析器 v5 总读取8 MiB、单事件2 MiB、答案64 KiB分开限制，保留完整终态和冲突校验；增加错误分类和限制诊断。
 - Go IQ/质量路由单元、隔离PostgreSQL/Redis集成、核心race、迁移校验及服务构建通过；前端27项回归、类型、定向ESLint及生产构建通过。首次集成旧断言失败已修复，失败证据保留。补充socket超时测试结果见账本最新事件。
 - 同输入基线错误后仍smart且可调度、长流21/29均unknown；修改后错误为unknown并阻断，长流分别smart/degraded。完整三态、补丁重建、回滚哈希以固定账本 `TRANSACTION_VERIFIED` 事件为准。
-- 四角色固定为 `/xy2/artifacts/iq-candy-20260927/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`，源码回滚依赖兄弟 `BASELINE.tar`；不操作生产或数据库。操作说明 `docs/IQ_CURRENT_HEALTH.md`、`docs/OPENAI_IQ_CHECK.md`。后续部署需统一旧工作者状态语义并备份数据库；本轮未执行生产上线。
+- 四角色固定为 `<工作机 B>/artifacts/iq-candy-20260927/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`，源码回滚依赖兄弟 `BASELINE.tar`；不操作生产或数据库。操作说明 `docs/IQ_CURRENT_HEALTH.md`、`docs/OPENAI_IQ_CHECK.md`。后续部署需统一旧工作者状态语义并备份数据库；本轮未执行生产上线。
 
 ### 2026-09-27：糖果检测提交与 PR 交接
 
 - 用户授权提交、推送和创建 PR；实现提交 `e9b546bf77326e5253728127e50a2af050f18679`，PR #65（https://github.com/liulixin-lex/xy2api/pull/65）面向 main。GitHub 认证完成后通过正常分支推送，未强推或修改保护规则。
 - 发布前发现主工作区新增并行调度研究记录，保留其内容；从已验收提交建立隔离发布候选，PR 仅含本轮 IQ 实现、测试和交接。业务代码沿用已通过的验证结果。
-- 沿用 `/xy2/artifacts/iq-candy-20260927/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；同输入三态、补丁重建、回滚哈希与角色重开结果按最新 `TRANSACTION_VERIFIED` 事件核验。远端最终提交和 CI 查询结果见 `PR_RESULT.json` 与验证账本，不能把推送成功当作 CI 通过。
+- 沿用 `<工作机 B>/artifacts/iq-candy-20260927/{MODIFIED_FILE.tar,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；同输入三态、补丁重建、回滚哈希与角色重开结果按最新 `TRANSACTION_VERIFIED` 事件核验。远端最终提交和 CI 查询结果见 `PR_RESULT.json` 与验证账本，不能把推送成功当作 CI 通过。
 - 本轮没有合并 PR、发版、部署或生产数据写入。
 
 ### 2026-09-27 — `20260927-account-scheduling-research` — 研究与方案完成
 
 - 完成7个代表性网关官方策略对照及当前调度代码路径分析；明确最高动态评分不等于强制选择，LoadFactor不等于流量比例，粘性/owner/准入优先于普通排序。
 - 新增7个隔离诊断并执行15个既有定向回归，共22个顶层测试通过、exit0、stderr为空。实际观察到高分66.495%/低分33.505%、固定会话100次低分选择、100分被1分粘性前置、优先级差距归一化、显示排序反转和Top-K排除空闲候选。
-- 提交研究产物REPORT.md、POLICY_EXAMPLES.json、ACCEPTANCE_MATRIX.json、固定来源和完整执行记录至 `/xy2/artifacts/iq-candy-20260927/scheduling-research-20260927/`；没有提交Git变更或改业务源码。保留其他任务的PR交接内容，原账本仅追加本轮证据。
+- 提交研究产物REPORT.md、POLICY_EXAMPLES.json、ACCEPTANCE_MATRIX.json、固定来源和完整执行记录至 `<工作机 B>/artifacts/iq-candy-20260927/scheduling-research-20260927/`；没有提交Git变更或改业务源码。保留其他任务的PR交接内容，原账本仅追加本轮证据。
 - 下一步为按P0/P1实现可解释控制、pin、严格分层和SWRR；多实例、协议续接、迁移和17项验收均为后续工作，不能宣称已完成。
 
 ### 2026-09-27 — `20260927-smart-controlled-scheduling` — 第二版方案与参考仿真完成
@@ -1490,10 +1490,10 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ### 2026-09-27 — `20260927-scheduling-v5-ttft-retry` — 首字与重试预算方案完成
 
-- 目标仍为 `/xy2/xy2api`，分支 `fix/iq-current-health`、HEAD `e9b546bf77326e5253728127e50a2af050f18679`。继续用户的方案讨论，未实现新网关调度、未调用真实上游、未部署。
+- 目标仍为 `<工作机 B>/xy2api`，分支 `fix/iq-current-health`、HEAD `e9b546bf77326e5253728127e50a2af050f18679`。继续用户的方案讨论，未实现新网关调度、未调用真实上游、未部署。
 - 对照官方NVIDIA AIPerf、Envoy与AWS资料，区分首事件/首语义/首正文及用户整体等待；确认Anthropic部分路径首事件计时、现有首输出超时普通/高思考分档和30秒最小校验；同账号/OAuth deadline与换号循环不能各自增加重试额度。
 - 更新研究目录 `SMART_CONTROLLED_V5.md`、`SMART_POLICY_V5.json`、主报告、配置示例和未来验收。健康H、单次T、总预算D分离；按模型配置，TPS不参与；最多3次为可配置上限，首次首字超时后只再派发1次，第三次需剩余有效窗口、合法候选与共享重试额度。50项新参考断言PASS，exit0且stderr为空，非网关验收。
-- 验证命令：`python3 /xy2/artifacts/iq-candy-20260927/scheduling-research-20260927/ttft_retry_v5_simulation.py`；字面输出与命令见V5_COMMAND_EXECUTION.json。源码稳定性、固定四角色重开与历史三态由SMART_POLICY_V5_FINAL_CHECK.json记录。原归档/补丁/回滚脚本保持，账本仅追加；旧V3/V4仿真不重跑。
+- 验证命令：`python3 <工作机 B>/artifacts/iq-candy-20260927/scheduling-research-20260927/ttft_retry_v5_simulation.py`；字面输出与命令见V5_COMMAND_EXECUTION.json。源码稳定性、固定四角色重开与历史三态由SMART_POLICY_V5_FINAL_CHECK.json记录。原归档/补丁/回滚脚本保持，账本仅追加；旧V3/V4仿真不重跑。
 - 两次准备性读取错误（不存在的glob退出2、Python拼接换行语法错误退出1）均已修正读取命令；不涉及业务写入或测试失败，错误及修正记录保留。下一阶段按V5的P0/P1实施，生产阈值须真实样本校准；当前配置不能直接使用假想8秒/12秒示例。
 - 本轮补充边界：已知无重放资格/重试令牌，或当前会用掉最后一枚令牌时不预留不存在的后备。首轮50项记录保留于v5-reference-run1，新增3项后最终53项参考断言PASS；未增加生产/Go测试。
 
@@ -1503,7 +1503,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 承接已批准最终方案，在隔离副本实现控制内核、共享分流/重试额度、语义首字与健康恢复、最终派发门、暂停排空、协议 owner 保护和管理页面；新增迁移 257，已发布 SQL 不改写。默认 legacy，无生产开关、数据或远端 Git 操作。
 - 三个并行实现/审查角色与主执行者持续回看已写代码，先用真实回归保留失败，再修复期限延长、重复记账、补偿、无效后备预留、部分 JSON 默认、协议分档及 legacy 强 owner 绕过。最后一个缺陷在暂停 owner A 时曾真实误发本地备选 B 一次，修复后原六项输入及扩展回归通过；请求 body 与 owner 不被偷偷重写。
 - 后端全量 unit 11,569 顶层 PASS / 38 SKIP / 62 包；关键五包 race PASS。最后 owner 窄修后的两包 54 项 race 与生产构建 exit0，3280 个源码哈希前后相同。前端新增 43 项及相关既有 159 项、类型/定向 lint/生产构建通过。真实 PostgreSQL/Redis/本地 HTTP 及原生 WS 定向证据详见 CONTROLLED_SCHEDULING_ACCEPTANCE.md；无付费合成探测或真实供应商结论。
-- 实现目录为 /xy2/artifacts/iq-candy-20260927/scheduling-implementation-20260927；新源码三态使用已成功的本项目原生诊断命令，相同输入保留 legacy 行为，新受控模式另有 7:3/严格优先级与故障回归。最终补丁重建、独立副本回滚、原文件逐一哈希和四角色重开结果由该目录 final-transaction-scheduling_final_02 的 VERIFIED.json/PUBLISHED.json 记录，旧 IQ 三态不作为本次证明。
+- 实现目录为 <工作机 B>/artifacts/iq-candy-20260927/scheduling-implementation-20260927；新源码三态使用已成功的本项目原生诊断命令，相同输入保留 legacy 行为，新受控模式另有 7:3/严格优先级与故障回归。最终补丁重建、独立副本回滚、原文件逐一哈希和四角色重开结果由该目录 final-transaction-scheduling_final_02 的 VERIFIED.json/PUBLISHED.json 记录，旧 IQ 三态不作为本次证明。
 - 此文档在最终源码打包前冻结。所有外部环境待验项、逐模型阈值校准及生产灰度明确保留在验收矩阵；不能把本地通过表述为已上线或所有供应商全场景通过。完整原始日志保留在外部账本，不写入记忆。
 
 - 首轮源码事务 scheduling_final_01 的 stage/verify/publish 已实际 exit0 并完整保留。最终只读复核纠正一处说明：notification_warning 仅用于强制停止的 Redis 取消通知失败，普通暂停依赖 PostgreSQL gate/outbox，不同步返回该告警。仅修订运行说明与本记忆的交付身份，业务源码哈希不变；后继 scheduling_final_02 重新封装、执行匹配轻量三态并逐字节继承01账本，不重跑已成功的全量源码验证。
@@ -1523,7 +1523,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 上游稳定v0.2.8已包含，本轮main增量仅VERSION，生成来源报告并通过审计，未伪造功能合并。IQ #65、调度 #66、RC #67及正式 #68通过固定head检查后正常合并。
 - v0.2.0固定414ef5a7694c65dab289ae3bb9c96b0515cf2887，工作流36348544776成功；五平台SHA、Linux版本、GHCR双架构和稳定别名一致。正式提升只有VERSION与provenance产品版本变化。
 - 六次隔离启动/升级/备份恢复回退通过，302条历史迁移字节不变，新版305条；用户/配置/持久标记保持，临时资源已清理，原有部署未改写。
-- 四角色及逐命令stdout/stderr/退出码、源码三态、补丁重建、回滚哈希固定于/xy2/artifacts/release-0.2.0。原工作树未提交研究、原IQ/调度交付保持，收尾文档独立于发布标签。
+- 四角色及逐命令stdout/stderr/退出码、源码三态、补丁重建、回滚哈希固定于<工作机 B>/artifacts/release-0.2.0。原工作树未提交研究、原IQ/调度交付保持，收尾文档独立于发布标签。
 - 原始失败与流程顺序偏差如实保留：独立制品和RC隔离验收在正式标签之后补齐，不回写为发布前已通过。后续严格先完成RC全部门禁再晋级；生产灰度与真实供应商场景仍按既有上线门禁执行。
 
 ### 2026-09-28 — 20260928-scheduling-reliability — 可控调度故障闭环候选
@@ -1531,7 +1531,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 以发布源码 `4641d3ffabaca3e382ca8523bf9344f2f7ae348a` 为固定基线，在独立工作树完成可靠结算、恢复样本分离、显式故障域与保守错误分类、健康/凭据/模型栅栏、准备超时、profile 修订及管理核实。原发布目录逐文件受保护；未推送、合并或部署。
 - 五个指定 GitHub 仓库及官方资料的实时复核记录在本轮 artifact/references。隔离 PostgreSQL、Redis 和本地 HTTP 测试覆盖终态失败补偿、共享 UNKNOWN 单探测、OAuth 更新后冷却保留、独立与共享账号 429 分流、无实际发送的超时清理以及长流继续读取；原版同输入终态 intent 触发 PG `$2` 类型错误。
 - 构建、golangci-lint 为 0 issues；前端 type/lint/build 及全量 356 文件、2690 用例通过。完整服务/后台 race 未全绿；两项后台 Grok 竞态已在原版只读源码复现，其他跨模块失败保留在完整命令记录中，需独立定位后再作总验。真实供应商联调、生产灰度及在线数据库回滚均未执行。
-- 本次四角色、三态同输入行为、补丁重建、原始源码哈希及隔离资源收尾，见 `/xy2/artifacts/scheduling-optimization-20260928/FINAL_VERIFICATION.json` 和 `VERIFICATION.txt`；原有发布与调度交付角色不覆盖。
+- 本次四角色、三态同输入行为、补丁重建、原始源码哈希及隔离资源收尾，见 `<工作机 B>/artifacts/scheduling-optimization-20260928/FINAL_VERIFICATION.json` 和 `VERIFICATION.txt`；原有发布与调度交付角色不覆盖。
 
 
 ### 2026-09-28 — 20260928-independent-controlled-audit — 联合门禁后的独立全面审查
@@ -1544,9 +1544,9 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ### 2026-09-28 — 20260928-scheduling-pr-test-deploy — 提交PR与本机独立测试
 
-- 用户明确授权先提交/推送PR，再本机部署test.aiaimax.cyou。已实际提交da829ac、正常push并创建PR #71，随后才启动新compose项目和发布Caddy站点；没有merge或替换开发服务。功能head的18项CI实际SUCCESS，交接文档另行正常提交，不将旧head结果冒称新head检查。
+- 用户明确授权先提交/推送PR，再本机部署<测试站点>。已实际提交da829ac、正常push并创建PR #71，随后才启动新compose项目和发布Caddy站点；没有merge或替换开发服务。功能head的18项CI实际SUCCESS，交接文档另行正常提交，不将旧head结果冒称新head检查。
 - 复用验收binary，独立PG/Redis/网络/卷/随机密钥与fresh库；新站公网登录/健康/静态资源、308迁移、注册关闭、重启持久性和15个开发容器不变均有实际证据。新管理员声明423按真实结果保留，不代用户确认，也不把受声明门保护的调度GET称为200。
-- DNS原已正确；Caddy追加独立站点并reload，开发路由与PID保持。代理配置副本回滚恢复baseline原字节，现场测试站保持运行。配置、凭据和运维脚本位于/xy2/deployments/test-aiaimax；秘密未写入Git或PR。
+- DNS原已正确；Caddy追加独立站点并reload，开发路由与PID保持。代理配置副本回滚恢复baseline原字节，现场测试站保持运行。配置、凭据和运维脚本位于<工作机 B>/deployments/<测试站>；秘密未写入Git或PR。
 - 四角色继续沿用原路径；部署前归档保留。最新文档树通过新的pr-test-final-01同输入源码事务，当前归档与原final09被测后端逐文件核对，部署/PR/CI及四角色重开结果见PR_TEST_DEPLOY_RESULT.json。
 
 ### 2026-09-29 — group-account-scheduling-rewrite — 分组账号配置存储与接口进行中
@@ -1565,7 +1565,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ### 2026-09-29 分组账号调度重写：统一验证前交接摘要
 
-- 唯一修改候选为 /xy2/artifacts/scheduling-optimization-20260928/rewrite-20260929/work，分支 refactor/group-account-scheduling-20260929，起点89683d2e。原 /xy2/artifacts/scheduling-optimization-20260928/work 与原发布源码未由本轮子任务修改；不得把旧按模型方案重新当作当前配置来源。
+- 唯一修改候选为 <工作机 B>/artifacts/scheduling-optimization-20260928/rewrite-20260929/work，分支 refactor/group-account-scheduling-20260929，起点89683d2e。原 <工作机 B>/artifacts/scheduling-optimization-20260928/work 与原发布源码未由本轮子任务修改；不得把旧按模型方案重新当作当前配置来源。
 - 配置仅按分组保存账号priority/traffic_weight，数字越小优先；同一组全部模型共用，模型仅决定候选能力与必要故障范围。新成员以现有accounts.priority和weight1自动出现，旧逐模型表只留审计，冲突以结构化migration_warnings提示，不自动任取旧模型规则导入。
 - migration262新增scheduling_group_policies；管理员GET/PUT /admin/scheduling/groups/:id使用expected_version CAS，验证账号属于当前组；旧policies写读删除入口退役410。group0在standard严格限未分组账号、simple取全部账号，通过同一store不可变构造范围共享给管理/Explain/服务，不代表跨组全局继承。
 - 最终用户决定为同级尚未尝试的合格账号用尽后降级；统一实际尝试默认3、首有效输出默认120000ms、总等待默认240000ms，每组可调，同账号最多一次。撤销中途提出的同级最多2；不保留旧10:1重试令牌、超时后最多再1次或隐性预留窗口。取消当前尝试后再换号，已提交有效内容/强所有者状态不能透明换号拼接。
@@ -1615,11 +1615,11 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 验证：首轮四个功能 smoke 阶段成功但宿主容器状态比较失败，原始整轮 FAIL 和起因未定明确保留；原脚本严格重试02 PASS、宿主不变、清理全部成功。同输入源码三态 1/0/1、补丁重建、原字节恢复与重新应用、固定四角色重开以及源/tag同树检查完成。
 - 修改文件：本后继交接仅修改 docs/PROJECT_MEMORY.md 顶部本轮状态、移除本轮进行中条目并追加本日志；其他 Agent 条目与所有历史日志保持。纯文档分支正常推送、PR、保护检查和合并结果统一记录在 release-0.2.1/handoff-closeout/RESULT.json，不触发新 Release。
 - 卡点/风险：没有待执行发布动作；首轮宿主状态变化未确定起因，不能据后续 PASS 抹去；没有真实供应商、生产首字或计费取消保证。本次发布未替换测试站或生产服务；测试站仍使用此前本地验收镜像。
-- 下一步：最终交付见 /xy2/artifacts/scheduling-optimization-20260928/release-0.2.1/FINAL_DELIVERY.json。后续 Agent 先读该记录及本次纯文档 PR 结果，按对应 HEAD 重新核实远端状态，避免重复发版或误移动标签。
+- 下一步：最终交付见 <工作机 B>/artifacts/scheduling-optimization-20260928/release-0.2.1/FINAL_DELIVERY.json。后续 Agent 先读该记录及本次纯文档 PR 结果，按对应 HEAD 重新核实远端状态，避免重复发版或误移动标签。
 
 ### 2026-09-29 — 20260929-v021-reliability-fix — 纯官方修复与本地验证
 
-- 用户授权按修复开发文档 D0～D4/G1 实施，追加授权统一提交官方 PR；建立独立分支固定 e17664144，保留 /opt/xy2api 的 feat/dynamic-promotion/43437e224、既有二开/文档及两个旧准备/证据副本，不恢复被暂停的合并。
+- 用户授权按修复开发文档 D0～D4/G1 实施，追加授权统一提交官方 PR；建立独立分支固定 e17664144，保留 <工作机 D>/xy2api 的 feat/dynamic-promotion/43437e224、既有二开/文档及两个旧准备/证据副本，不恢复被暂停的合并。
 - 实际生产变更：终端发送函数切断 OpenAI 调度旁路递归；统一非流式可恢复读取分类，13 条同步适配路径在写响应前交给原 handler；验证的服务端协议错误写入既有失败域/身份 fence/PG 冷却；取消或超时重命名 outcome 前保留未发送证据，并统一 terminal intent/settle 的 pending。没有重写调度器、放宽预算/降级阈值或 owner/语义后禁重放，不扩展异步和 WS 重放，不修历史数据库。
 - 新增4个正式测试文件、更新3个既有测试：有界子进程、真实本机截断/拨号、独立 PG/Redis、协议正负例、取消/预算/owner/确认幂等和真实认证 Gin handler；handler 仓库为合成 stub、simple 模式隔离计费，不能称全数据库认证/付费上游端到端。
 - 原始诊断失败保留；相邻七条读取故障复现后修复，Codex direct images 已有外层转换，错误层级断言排除但不报为新增缺陷。新测试转义错误、Images 方法夹具错误、race 二进制错误 cwd 和 python 命令缺失均保留日志。首次完整 unit 的 buffered_sse 夹具层级及 compact 旧契约断言经定点修正，增强强 owner 对照后重跑整个 service，而非只删失败断言。
@@ -1671,7 +1671,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 从 `origin/main` `e17664144` 建立独立工作树并实现共用账号开关/倍率、启用置顶和组内优先级/权重排序；IQ 错误不改变最后有效质量门控，探针 OAuth 缺失刷新凭据不隔离账号。并行审查修复回焦刷新与开关并发时遗漏其他账号变化的问题。
 - 功能提交 `85d93946c` 已推送，PR #73 已在 `liulixin-lex/xy2api` 创建；首次未指定 `-R` 的 `gh pr create` 意外选中 `Wei-Shaw/sub2api` 并报无差异，核对远端引用后指定正确仓库成功。未合并、未发版或部署。
 - 前端完整 353 文件/2715 项测试、类型、ESLint、构建通过；真实 Chromium 16 断言通过。后端 IQ 定向单测、PostgreSQL SQL/内存门控一致性集成及 race 通过；旧版基线/修改版/回滚副本的同输入行为与原始哈希恢复由本轮四角色记录。测试使用隔离数据，已删除本轮临时 PostgreSQL/Redis 容器。
-- 服务器仅通过 `ubuntu` SSH 只读查询。核查时运行 0.1.9 回滚镜像且为 `sub2api` 模式，旧版不读取保存的组权重；组 18 的优先级 1 账号未加入该组，当前实际可用最高层为数据库优先级 2 的 244/281。策略权重全为 1；不能把当前 113 次请求的 94:19 分布误作按保存权重执行，也不能反推先前镜像的路由。未写入、重启或更改线上服务。
+- 服务器仅通过生产 SSH 账号只读查询。核查时运行 0.1.9 回滚镜像且为 `sub2api` 模式，旧版不读取保存的组权重；组 18 的优先级 1 账号未加入该组，当前实际可用最高层为数据库优先级 2 的 244/281。策略权重全为 1；不能把当前 113 次请求的 94:19 分布误作按保存权重执行，也不能反推先前镜像的路由。未写入、重启或更改线上服务。
 - 交接：PR 检查以 PR head 的远端实际结果为准；本轮不承诺真实上游性能或零潜在问题。离线 `ROLLBACK.sh` 只恢复源码副本，不用于线上数据或部署回退。
 
 
@@ -1692,7 +1692,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 完整读取用户指定会话与受限本机审计摘要，只读核验官方六个发布及17个修复提交；标准三方报告固定在0.2.8兼容基线与main起点。没有访问生产服务或披露凭据，没有重复执行前会话的60账号处置，也没有生产写操作。
 - 先登记任务，再选择性移植官方删除Key结算、EasyPay、在途预留、创建限流、模型/图片/缓存/搜索等修复；保留XY渠道、定价时刻、native转发及调度上下文。增加原价意图、事务用量、数据库补偿与缓存/调度确认、平台额度事务写入和数据库创建上限；历史歧义进入核验，不能自动补扣。
 - 只追加267及checksum；旧313份迁移、版本、go.mod、前端、UPSTREAM_BASE和policy均保持。Wire增加恢复服务生命周期，go.sum仅补Wire所需的既有工具校验项；没有升级模块版本。配置样例及规范明确旧额度flusher排空后关闭的切换要求。
-- 在隔离旧代码上复现删除Key及伪造回调失败；最初全量单测发现cleanup接参和旧错误码断言后修正，保留原失败。最终完整unit62包、真实存储20主/4子且0跳过、服务端构建、golangci-lint2.13.2零问题、格式/迁移检查和标准来源审计全部实际通过。审计使用本地干净审阅副本，原main工作区未提交；证据与最终副本指针见 `/lex/billing-fix-20261007/`，无远端写入。
+- 在隔离旧代码上复现删除Key及伪造回调失败；最初全量单测发现cleanup接参和旧错误码断言后修正，保留原失败。最终完整unit62包、真实存储20主/4子且0跳过、服务端构建、golangci-lint2.13.2零问题、格式/迁移检查和标准来源审计全部实际通过。审计使用本地干净审阅副本，原main工作区未提交；证据与最终副本指针见 `<工作机 C>/billing-fix-20261007/`，无远端写入。
 - 临时集成容器已清理，既有应用容器保持；保留工具缓存、审阅副本和测试证据供复核。交付详细修复规范、机器可读来源/验收清单及只读对账SQL；生产发布/升级回滚演练、压测、历史逐笔核验与补账未执行。已提交意图可恢复；进程在获得用量/首次持久化前故障的边界及估算预留无法保证零坏账，均在规范披露。
 
 
@@ -1715,10 +1715,10 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 ### 2026-10-08 — 20261008-claude-cache-fallback-plan — 最新主线规划交付
 
 - 请求/目标：在当前工作区同步 XY2API、新建分支，规划 Claude 缓存缺失补齐；没有业务实现或上线指令。
-- 开始状态：原 `/lex/xy2api` 为 main/8907ac31 且记忆文档有既有改动；fetch 与远端回读确认最新主线为317b019134a09f1a5cb16f8c15b0a3365f9ee920。新建独立 worktree 和 plan/claude-cache-fallback-20261008，原文件哈希保持。
+- 开始状态：原 `<工作机 C>/xy2api` 为 main/8907ac31 且记忆文档有既有改动；fetch 与远端回读确认最新主线为317b019134a09f1a5cb16f8c15b0a3365f9ee920。新建独立 worktree 和 plan/claude-cache-fallback-20261008，原文件哈希保持。
 - 完成操作：核对当前原生转发、设置与计费；形成默认关闭、精确范围、原始/最终声明保护、默认5m、上游能力验收、账务/预留边界、诊断与可回退灰度的完整方案。使用既有实验和官方来源，没有新增模型调用。
 - 修改文件：四份 `openspec/changes/add-claude-cache-fallback/` 规划文档；policy 仅增加该精确目录的 XY_OWNED 分类；本记忆新增交接并清理自己的进行中条目。无业务源码、SQL、版本或兼容基线变更。
-- 验证：链接/结构/敏感模式与原目录哈希检查通过，同步工具10项测试通过。标准来源审计在干净本地提交后执行，字面命令、退出码与最终SHA存外部 `/lex/claude-cache-plan-20261008-evidence/`；不预先声明成功。没有 OpenSpec CLI，未运行其校验；方案阶段未跑业务测试。
+- 验证：链接/结构/敏感模式与原目录哈希检查通过，同步工具10项测试通过。标准来源审计在干净本地提交后执行，字面命令、退出码与最终SHA存外部 `<工作机 C>/claude-cache-plan-20261008-evidence/`；不预先声明成功。没有 OpenSpec CLI，未运行其校验；方案阶段未跑业务测试。
 - 卡点/风险：规划无阻塞。缺失补齐只能解决声明缺失一类问题；真实用户历史根因和两端账本仍未验证。首次冷写可能增加实际费用和预留需求，多实例设置传播上界60秒。
 - 下一步：按 tasks 实现并完成真实 Forward/费用/低余额并发回归后再灰度。本地规划分支不推送，不创建PR或部署；其他工作树和历史日志保持。
 
@@ -1736,13 +1736,13 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 参考固定 LiteLLM/Sub2API 源码及 Anthropic 协议约束，实现开关与分组选择，去掉规则/Key/账号/地址/模型名单；旧格式读为关闭并保留分组。原始客户端声明优先，默认 5m 内容块断点兼容现有 OAuth 断点和 TTL 顺序，覆盖原生、转换与云端 Anthropic 出口。
 - 保留计费公式和商业覆写；补充按账号映射模型保守预留、覆写前原始数值诊断、重试共享正文保护。精简中英文设置组件、删除旧规则编辑器、更新 OpenSpec 和使用说明，无新迁移或版本变化。
 - 本地验证：前端全量 lint/typecheck/构建，22 文件/327 项 critical（含 9 项新组件交互），桌面/手机/暗色及键盘操作均通过；后端 62 包 unit 排除两个 DNS 依赖子用例后通过，随后对整个 9 子用例矩阵以隔离容器域名映射补验通过，未改变测试源码和断言。构建、三包重点 race、最后全仓 golangci-lint 0 issues/exit 0、10 项同步工具测试通过。
-- 2.65 MB 辅助路径基准 100 次：OFF 1.795µs/320B；ON 72.97ms/29.20MB/46 allocations。只报告本地 helper 开销，不宣称端到端性能或全体上游能力。首次 DNS 失败、前端 worker 超时、测试 fixture/错误检查修正、包级 lint 超时等证据保留，最终结果见 `/lex/claude-cache-groups-20261008/verification.md`。
+- 2.65 MB 辅助路径基准 100 次：OFF 1.795µs/320B；ON 72.97ms/29.20MB/46 allocations。只报告本地 helper 开销，不宣称端到端性能或全体上游能力。首次 DNS 失败、前端 worker 超时、测试 fixture/错误检查修正、包级 lint 超时等证据保留，最终结果见 `<工作机 C>/claude-cache-groups-20261008/verification.md`。
 - 清理自己的进行中事项。实现与收尾只做本地提交，最终干净树来源审计/身份保存在同一证据目录；测试容器运行后自动移除，临时前端预览已关闭。后续若交付 GitHub 需新的用户指令；真实上游命中与两端账单核验仍不属于本轮完成声明。
 
 ### 2026-10-09T17:10:17Z — `20261009-share-scheduling-plan` — 规划完成
 
 - 请求/目标：分析账号调度模块现状与算法，全网调研开源网关与 Sub2API 二开项目，规划“保留 Sub2API 原版调度、完全剔除智能可控调度、重新开发另一种调度”。仅分析与规划。
-- 开始状态：本机全新克隆 `/Users/admin/XIN-MAC-XN/xy2api`，main=`3569d4f00aae3eada079eb7ac058dc62256a66b8`（= origin/main，产品 0.2.5，兼容 0.2.14），工作树干净；新建本地分支 `plan/share-scheduling-20261009`。
+- 开始状态：本机全新克隆 `<本机仓库>`，main=`3569d4f00aae3eada079eb7ac058dc62256a66b8`（= origin/main，产品 0.2.5，兼容 0.2.14），工作树干净；新建本地分支 `plan/share-scheduling-20261009`。
 - 完成操作：逐文件阅读原版选号路径（Gateway/OpenAI 旧路径/实验调度器/Gemini 兼容）与 controlled 内核、适配、中间件、迁移、CI 与同步策略；与上游 v0.2.14/v0.2.15 只读克隆对比（调度三文件两版零差异）；只读调研 new-api、ranxi2001/sub2api、OmniRoute、claude-relay-service 源码及 LiteLLM、Portkey、APISIX、Kong、Envoy AI Gateway、Higress、Bifrost、AxonHub、uni-api、CLIProxyAPI、OpenRouter 文档，核对 Anthropic/OpenAI 官方提示缓存隔离与价格；编写标准库仿真验证 HRW 比例性、最小扰动与份额精度边界。
 - 修改文件：新增 `docs/SCHEDULING_ANALYSIS.md` 及其 `.gitignore` 精确白名单；新增 `openspec/changes/replace-controlled-with-share-scheduling/`（proposal、design、tasks、specs/share-scheduling、specs/controlled-scheduling-retirement、simulation/share_sim.py、simulation/RESULTS.md）；`tools/upstream-sync/policy.json` 仅追加该 OpenSpec 精确目录为 XY_OWNED；本记忆顶部状态与本日志。无业务源码、SQL、版本、兼容基线变更。
 - 验证：`python3 -I openspec/changes/replace-controlled-with-share-scheduling/simulation/share_sim.py` exit 0，两次运行输出逐字一致并写入 RESULTS.md；policy JSON 解析通过，`python3 -I -m unittest discover -s tools/tests -p 'test_*.py'` 14 项 OK；新文档相对链接 0 断链；`git diff --check` 通过；敏感模式扫描无命中。未运行 Go/前端测试（未改代码）；未安装 OpenSpec CLI，未运行其校验；未执行来源审计（工作树未提交）。
@@ -1788,9 +1788,9 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 ### 2026-10-10T05:13:27Z — `20261010-gpt-cache-reliability` — GitHub 发布完成
 
 - 请求/目标：只读分析目标用户及全站 GPT 缓存低命中，基于最新 XY2API 主线实施网关优化，验证、提交、推送、合并并发布。
-- 开始状态：原 `/lex/xy2api` 工作树包含其他任务未提交变更；独立 `/lex/xy2api-gpt-cache` 基于 `3569d4f00aae3eada079eb7ac058dc62256a66b8`，不改写原工作树。发布时功能 PR #86、正式 PR #87 均按受保护 main 的固定 head 检查完成常规合并。
+- 开始状态：原 `<工作机 C>/xy2api` 工作树包含其他任务未提交变更；独立 `<工作机 C>/xy2api-gpt-cache` 基于 `3569d4f00aae3eada079eb7ac058dc62256a66b8`，不改写原工作树。发布时功能 PR #86、正式 PR #87 均按受保护 main 的固定 head 检查完成常规合并。
 - 完成操作：统一真实缓存 usage 和参数透传，修复会话隔离、首次并发绑定及容量溢出粘性；增加默认关闭的隐私诊断与缓存感知排序，保持现有计费/利润/质量/权重及 previous_response_id 约束。升级 Go 1.27.2/x/net 0.60.0 清除可达漏洞；无新迁移。RC `v0.2.6-rc.1` 和正式 `v0.2.6` 均为固定合并提交的注释标签，正式 merge `1f0aa3255034786618c8ae6e14e8459369469ad6`，未移动标签或绕过保护。
-- 修改文件：功能范围详见 PR #86 和 [使用说明](openai-cache-reliability.md)；正式版 PR #87 只改产品版本、来源清单版本和本记忆。收尾记录仅改本文件；完整证据与动态验收结果在 `/lex/gpt-cache-reliability-20261010/verification.md`。
+- 修改文件：功能范围详见 PR #86 和 [使用说明](openai-cache-reliability.md)；正式版 PR #87 只改产品版本、来源清单版本和本记忆。收尾记录仅改本文件；完整证据与动态验收结果在 `<工作机 C>/gpt-cache-reliability-20261010/verification.md`。
 - 验证：最终 Go 1.27.2 组合 unit 62 包/23,646、integration 56 包/15,164 通过；七包真实 PostgreSQL/Redis race 538 通过，29/15/11 项关键守卫全 RUN/PASS，最近窗口修复的 40 项 race 与 16 项缓存守卫全通过。前端 lint/typecheck/327 项关键测试/生产构建、全仓 lint、源码 govulncheck 和来源审计通过。两 PR 固定 head 均 18/18 检查成功；正式主线/标签 CI、安全扫描及 Release 成功。RC 五平台制品、隔离 fresh/0.2.5 升级/备份恢复回退与正式五平台制品、隔离 fresh 均通过，正式 GHCR digest `sha256:77212b1dcfb1a8045bc6a1bbc61e1b304f29272f4ad1c0daba61f71a368711cc`，316 条迁移保持。
 - 卡点/风险：无发布卡点。未部署生产、未启用诊断/偏好、未新增付费模型调用；历史低命中的具体请求体和上游账单不足以证明单一根因，生产改善须部署后灰度观察。
 - 下一步：GitHub 发布已完成；后续部署时先启用诊断、按真实 usage 和账单分组核对，再小比例启用缓存偏好。收尾记录走独立受保护文档 PR，不改已发布标签或业务树。
@@ -1913,7 +1913,7 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 完成操作：修复 R1–R7 及 saved/applied，追加 271 与升级盘点/预检，保留层级/HRW/缓存亲和/资格/计费/协议所有权；不恢复旧 controlled 调度器。实现吸收 guardian、ranxi2001、cost-console、state-kit、sub2api-plus 的设计原则，固定 36 项目/140 来源沿用原审查。源码提交 `85eae404a`、`2cbb5262d`、`e79f6bec8` 只保留本地。
 - 验证与纠正：前端全量 2,814、后端四改动包 17,516（17 条件性跳过）、定向 111、真实 PG/Redis 13、工具 23；关键 race 159/69/61 全零失败/跳过；最后版本反馈与成本补修 25 全通过。静态门禁先检出测试错误检查/无用函数后修正，最终业务 HEAD 0 issues。实际二进制演练发现关闭总开关时 applied_version 错归零，补四组合回归后重新构建；不是只修改验收脚本或放宽断言。原始失败与重试完整保留。
 - 制品与回退：固定 `e79f6bec8` 的嵌入候选/哈希核验，fresh、0.2.6 升级、双实例、停用、应用回退和成套备份恢复 8 项通过；浏览器桌面/手机/明暗/键盘通过。候选是本地审查制品，Go service 内联为共享环境关闭，标准 pnpm build 的 OOM 改以独立类型检查加同配置 Vite 串行验证，均在报告披露。
-- 资源与交接：用户授权后只清理缓存/未使用镜像/归档日志，生产备份和运行容器保持；临时 PG/Redis、工具与任务缓存清理。原审查源码持久迁至 `/xy/worktrees/pr90-reviewed` 并核对 4,582 文件；候选与全部证据见顶部。自己的进行中条目已清理，后续文档收尾提交与干净树审计身份写入外部 validation.json，不预写未知提交。
+- 资源与交接：用户授权后只清理缓存/未使用镜像/归档日志，生产备份和运行容器保持；临时 PG/Redis、工具与任务缓存清理。原审查源码持久迁至 `<工作机 A>/worktrees/pr90-reviewed` 并核对 4,582 文件；候选与全部证据见顶部。自己的进行中条目已清理，后续文档收尾提交与干净树审计身份写入外部 validation.json，不预写未知提交。
 - 风险/下一步：不宣称生产全面上线；标准优化构建 P99 目标、远端固定 HEAD CI、真实基线/三天影子/灰度及缓存/费用账单仍待对应授权环境。本地合成差约 3.111ms 未证明 1ms 设计目标达到。当前无本轮未完成业务修复，没有推送/PR/合并/发版/部署/生产操作。
 
 ### 2026-10-12T16:00:00Z — `20261012-pr90-slim` — 复审精简、验证与提交
