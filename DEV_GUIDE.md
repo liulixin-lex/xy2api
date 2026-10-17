@@ -58,6 +58,8 @@ npm install -g pnpm@9
 | **release.yml** | tag `v*`、手动 | 校验版本文件与标签，构建五平台制品与 GHCR 镜像（PR 不触发） |
 | **upstream-sync.yml** | 每 3 天、手动 | 选择 Sub2API 正式版本，固定 annotated tag，准备同步分支并开 Draft PR（从不自动合并） |
 
+`.github/release-tools/` 是上游 Sub2API 的分平台发布矩阵。XY2API 的 `release.yml` 不使用它（v0.2.15 同步时的裁决，见 `UPSTREAM_BASE.json` 的 `manual_resolutions`），同步时原样保留，CI 的 `release-helpers` 作业只运行它的单测。
+
 ### CI 要求
 
 - Go 版本以 `backend/go.mod` 为准（当前 **1.27.2**）：各 workflow 用 `go-version-file: backend/go.mod` 取版本，随后硬断言 `go version | grep -q 'go1.27.2'`。升级 Go 时要同时改 `backend/go.mod`、`backend-ci.yml`（两处）、`release.yml`、`security-scan.yml` 里的这句断言，**以及三个 Dockerfile 里的 Go 构建镜像**（`Dockerfile` / `deploy/Dockerfile` 的 `ARG GOLANG_IMAGE`、`backend/Dockerfile` 的 `FROM golang:`）和 README 三语版本的 Go 版本。漏改 Dockerfile 与 README 由文档一致性检查（`tools/check_docs_consistency.py`）报出。
