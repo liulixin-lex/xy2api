@@ -788,6 +788,11 @@ def dc2():
     checks = []
     key = KEYS["G-abuse"]
     key_id = psql("select id from api_keys where name='key-G-abuse' and deleted_at is null")
+    # The counter is per hour: 31 requests that straddle the hour reach the
+    # threshold in neither (candidate fb0c2267c, 05:59:48-06:00:18Z).
+    to_hour = 3600 - int(time.time()) % 3600
+    if to_hour < 90:
+        time.sleep(to_hour + 2)
     # The hourly counter is shared with earlier runs in the same hour.
     redis_cli("EVAL", "for _, k in ipairs(redis.call('KEYS', ARGV[1])) do redis.call('DEL', k) end return 0", "0",
               f"xy:resil:undelivered:{key_id}:*")
