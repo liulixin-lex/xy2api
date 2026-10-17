@@ -4,13 +4,13 @@
 
 ## 当前交接状态
 
-### 注册邮箱别名加固与用户批量禁用（2026-10-17T13:50Z 更新：分支已推送并开 PR，待用户审阅；未合并、未发版、未部署）
+### 注册邮箱别名加固与用户批量禁用（2026-10-17T14:25Z 更新：PR #101 CI 全绿，待另一位作者审阅合并；代码未发版、未部署；生产注册拦截规则已生效）
 
 - 背景：2026-10-17 生产出现注册机批量注册（当天 86 个 Gmail 账号；脚本伪造浏览器 UA、缺少 `Sec-Fetch-Site`、轮换代理 IP、注册后约 1 秒批量建 Key）。只读分析发现上游别名查重（`existsByEmailOrAlias`）有两个缺口：带引号的本地部分（`"a.b"@gmail.com`）不归一；查重不计软删除账号，管理员删号后同一收件箱可以再次注册。管理后台也只有逐个调用接口的批量删除。
 - 用户决定（2026-10-17）：① 注册、发验证码、第三方邮箱自动注册与邮箱绑定拒绝非常规本地部分（只允许字母、数字与 `. _ + -`，首尾为字母、数字或下划线，无连续点号，最长 64），新错误码 `EMAIL_FORMAT_NOT_ALLOWED`；② 别名归一去掉引号，数据库探针兼容存量带引号的行（沿用迁移 190 的表达式索引，不加迁移）；③ 别名查重计入软删除账号（系统没有自助注销，只影响管理员删除的账号）；④ 后台新增批量禁用（附批量启用以便撤回），以后清理注册机用禁用代替删除。不按点号数量拒绝：生产老用户中有 22 人的 Gmail 地址有 4 个以上点号。
 - 影响面：生产全量用户中只有 27 个地址不符合新格式，全部是 10-17 的带引号注册机账号。
-- 已完成（分支 `fix/registration-alias-batch-disable-20261017`，基于 `ca2bdd111`）：① `58601c744` 别名加固，具名补丁 `xy-registration-email-alias-hardening`；② `a37bbc64f` 批量启用/禁用，具名补丁 `xy-admin-user-batch-status`：`POST /api/v1/admin/users/batch-status`（`{user_ids, status}`，1–500 个，不支持 `all`）用一条 `UPDATE ... RETURNING` 完成，跳过已删除和已是目标状态的用户，禁用时跳过管理员；返回 `affected`/`skipped`，逐个失效认证缓存并写审计日志。用户管理页多选后出现“批量禁用/批量启用”。本机验证全绿，见操作日志 `20261017-registration-alias-batch-disable`。
-- 未完成（均需用户另行授权）：① 审阅并合并 PR；② 发版与生产部署；③ 生产 Caddy 或 Cloudflare 规则：两个注册接口的 POST 缺少 `Sec-Fetch-Site` 时拦截（用户已选定只用这一条件；不需要改源码；未改生产）。
+- 已完成（分支 `fix/registration-alias-batch-disable-20261017`，基于 `ca2bdd111`）：① `58601c744` 别名加固，具名补丁 `xy-registration-email-alias-hardening`；② `a37bbc64f` 批量启用/禁用，具名补丁 `xy-admin-user-batch-status`：`POST /api/v1/admin/users/batch-status`（`{user_ids, status}`，1–500 个，不支持 `all`）用一条 `UPDATE ... RETURNING` 完成，跳过已删除和已是目标状态的用户，禁用时跳过管理员；返回 `affected`/`skipped`，逐个失效认证缓存并写审计日志。用户管理页多选后出现“批量禁用/批量启用”。本机验证全绿，见操作日志 `20261017-registration-alias-batch-disable`。③ 2026-10-17T14:20Z 用户授权后，在生产反向代理（Caddy）主站点加了规则：两个注册接口的 POST 缺少 `Sec-Fetch-Site` 时返回 403（用户选定只用这一条件，不改源码）。已校验并平滑重载；验证结果见操作日志 `20261017-signup-fetch-metadata-rule`。配置位置、备份与回滚命令只记在上述仓库外私有笔记。
+- 未完成：① PR #101 由另一位作者审阅合并（用户 2026-10-17 说明：合并由另一位作者操作，Agent 不执行合并）；② 代码发版与生产部署，需用户另行授权。
 - 卡点与风险：仓储集成测试（testcontainers）本机无 Docker，以 CI 为准；批量 SQL 已在本机临时 PostgreSQL 18（应用全部迁移）上验证。
 - 关键位置：`backend/internal/service/registration_email_policy.go`、`backend/internal/service/registration_email_alias.go`、`backend/internal/repository/user_repo.go`（`emailAliasOwnerIDWithClient`）；`backend/internal/service/admin_user_batch_status.go`、`backend/internal/repository/user_repo_batch_status.go`、`backend/internal/handler/admin/user_handler_batch_status.go`、`frontend/src/views/admin/UsersView.vue`。
 
@@ -2502,3 +2502,13 @@ pnpm --dir frontend run build
 - 验证：gofmt；`go vet`（默认、`unit`、`integration` 标签）；golangci-lint v2.14.0 0 issues；`go test -tags=unit` 覆盖 service、handler（含 admin）、server（含 middleware、routes）、repository，全部通过。批量 SQL 在本机临时 PostgreSQL 18（应用全部迁移）上验证通过，临时实例已删除。前端 `check:i18n`、`typecheck`、eslint 通过，vitest 全量 389 个文件、3051 个用例通过。`sync.py audit`、`scheduler-diff` 通过。仓储集成测试（testcontainers）因本机无 Docker 未运行，以 CI 为准。
 - 卡点/风险：无代码卡点；集成测试结果以 CI 为准。
 - 下一步：用户审阅 PR；合并、发版、生产部署以及 Caddy/Cloudflare 的 `Sec-Fetch-Site` 规则均待另行授权。
+
+### 2026-10-17T14:25Z — `20261017-signup-fetch-metadata-rule` — 完成（生产 Caddy 规则已生效）
+
+- 请求/目标：PR #101 的 18 项检查全绿后停在 PR，合并由另一位作者执行；用户授权在生产 Caddy 加规则拦截注册机，只用“缺少 `Sec-Fetch-Site`”这一个条件。
+- 开始状态：分支 `fix/registration-alias-batch-disable-20261017`，HEAD `3bd704f50`（PR #101）。
+- 完成操作：只读查看 Caddy 配置后，在主站点 `route` 块最前面加了 `@signupNoFetchMeta`（POST、两个注册路径、`not header Sec-Fetch-Site *`）与 `respond @signupNoFetchMeta 403`。该站点的所有处理都在 `route` 内按书写顺序执行；规则放在 `route` 外会排在反代之后，永远不生效。先备份，候选文件 `caddy validate` 通过后才覆盖，再校验正式文件并 `systemctl reload caddy`（平滑重载，未重启 XY2API）。另外两个域名无需改动：一个 308 跳转到主站点，一个只转发模型 API。
+- 修改文件：生产 Caddy 配置（位置与备份见仓库外私有笔记）；本文件。
+- 验证：从外网经 CDN 访问，两个注册接口不带 `Sec-Fetch-Site` 返回 403，源站访问日志确认由 Caddy 返回；带 `Sec-Fetch-Site: same-origin` 时请求到达应用（空请求体返回 400）；登录接口不带该头不受影响；首页与公开设置接口返回 200。
+- 卡点/风险：不发送 `Sec-Fetch-Site` 的旧浏览器（如 16.4 以前的 Safari）无法注册，此前按日志估计约占正常注册的 0.1%，用户已接受。回滚方式：恢复备份后重载。
+- 下一步：观察两个注册接口的 403 数量与正常注册是否继续成功；PR #101 等待另一位作者合并。
