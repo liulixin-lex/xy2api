@@ -340,6 +340,8 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 | `partial` | 已写出语义字节，但未完成 |
 | `complete` | 正常完成 |
 
+**口径的实际范围（0.4.0，评审 A3）。** 首包前保活心跳与排队 ping 在所有路径都不算语义字节。流内保活注释只在 OpenAI `/v1/responses` 流式路径（含透传）扣除，因此“首个语义输出前断开不计费”只在这条路径完整成立。其他流式路径在首个真实内容前就会写出开场事件或流内心跳，这些字节目前算已送达，此后断开按 `partial` 处理：Chat Completions 兼容转换（收到 `response.created` 时的角色块、`:` 心跳）、Messages 兼容转换（`message_start`；`ping` 会置 `clientOutputStarted`）、Anthropic 原生与直通（`gateway_upstream_response.go`、`gateway_anthropic_passthrough.go`、`openai_gateway_messages_anthropic_native.go`）、Grok `/v1/responses`（不暂存，`: ping`）、图片 SSE（`openai_images.go`、`openai_images_responses.go`）。非流式与图片 JSON 以响应体是否写出为准。0.4.1 用 `NoteDeliveryHeartbeat` 把这些字节登记为不算送达：只改计数，不压住、不推迟开场事件，不改计时，不增加上游成本（tasks“后续”）。
+
 ### 8.2 处理
 
 - **`undelivered` 时断开：**
