@@ -14,7 +14,7 @@
 - 工具链：Go 以 `backend/go.mod` 为准（当前 1.27.2）；golangci-lint v2.14.0（与 CI 同版）。
 - 文档一致性：`python3 tools/check_docs_consistency.py`（CI 的 upstream-sync-audit 作业执行），规则在 `tools/docs_consistency.json`，改动时按 [`AGENTS.md`](../AGENTS.md)“变更同步”同步文档。
 
-### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-17T08:55Z；`v0.4.0-rc.1` 已发布并验证；晋级 PR #100（`release/0.4.0`）的候选 `c6b837dca` 场景、客户端、升级演练与 CI 全过，6.5 小时浸泡进行中、约 14:05Z 结束，之后合并并打 `v0.4.0`；生产未改）
+### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-17T14:35Z；`v0.4.0-rc.1` 已发布并验证；晋级 PR #100（`release/0.4.0`）的候选 `c6b837dca` 整套验证通过（场景、客户端、升级演练、6.5 小时浸泡、CI），正在合并并打 `v0.4.0`；生产未改）
 
 **背景**
 
@@ -51,23 +51,23 @@
 - PR #97 常规 merge `ca2bdd111`；`v0.4.0-rc.1` 发布，制品与镜像校验全过；RC 镜像在测试服务器全新安装、场景 45/45、升级回退恢复通过。
 - 晋级前清单 A1–A5（评审转交）：A1 `24cfc6511`、A2 `dd5ae0c0f`、A5 `8798e40d2`、A3/A4 文档 `116be5d6d`。上游余额处理精简（用户 2026-10-17 决定）：代码 `cc5fc3208`（删 2296 行、增 764 行，含迁移 277）、文档 `f66c5562f`、测试工具 `e039c2b6f`、`c6b837dca`；自查措辞 `5fdd1e589`。
 - 候选 `c6b837dca`：本机全量验证全绿（CI 门禁 246 个韧性测试）；测试服务器场景 45/45、真实客户端 17/17、升级演练（含 277）通过；PR #100 CI 两组 18/18 全绿。
-- 评审 agent 的仓库规范化 `f568a3437`…`3705b7785`（文档、工具、文档一致性检查进 CI、记忆归档；不改 `backend/`、`frontend/`）：本机复核一致性检查、同步审计、scheduler-diff 与 `tools/tests` 37 个通过。
+- 评审 agent 的仓库规范化 `f568a3437`…`3705b7785`（文档、工具、文档一致性检查进 CI、记忆归档；不改 `backend/`、`frontend/`）：本机复核一致性检查、同步审计、scheduler-diff 与 `tools/tests` 37 个通过。其后的主机信息清理 `2b7b40f2f`、`95e6828f5`、`15ce5301b`（检查只存哈希）同样复核通过；PR #100 在 `15ce5301b` 上 CI 两组 18/18。
+- 浸泡 `soak-c6b837dca` 通过（11 项检查全过；159,849 个请求；GC 后存活堆 53→56 MB、0.4 MiB/h；匿名内存前段中位 89.9、后段 93.8 MiB；回落后槽位与预留归零）。design §14 15 项达标，未达标 4 项与 RC 相同、均为合成负载所致（无号 503 全部来自人为断余额的 `G-soak-bal`）。每小时断余额 10 分钟的停服为 10.1–10.4 分钟（第一次 15.3 分钟），RC 的复检方案约 18 分钟。私有 `staging/STAGING_REPORT.md` 已定稿（旧版另存 v3）。
 
 **未完成**
 
-1. 浸泡 `soak-c6b837dca`（07:24Z 起 6.5 小时，约 14:05Z 连同回落与检查结束；等待脚本 `/tmp/xy2-soak-wait.sh c6b837dca`）→ `/tmp/xy2-postsoak-metrics.sh c6b837dca 7` → 私有 `staging/STAGING_REPORT.md`。
-2. 推送 PR #100（`5fdd1e589`、评审规范化与本文件）→ 更新描述（仓库外 `PR_BODY_PROMOTION_0.4.0.md`）→ CI 全绿 → 转为可合并 → 常规 merge。
-3. 在合并提交打 annotated `v0.4.0`（消息取仓库外 `RELEASE_NOTES_v0.4.0.md`）→ Release 工作流 → `/tmp/xy2-verify-release.sh v0.4.0 <合并提交>`（稳定别名 latest/0/0.4 应移到 0.4.0）→ 正式镜像在测试服务器全新安装（`/tmp/xy2-staging/fresh_install.py`）。
-4. 发版后纯文档收尾 PR：tasks 13.x、按“记忆维护规范·归档”移走本节与进行中条目、操作日志。
-5. XY-image 0.0.17（先交接留言并经用户确认）。
-6. 生产部署（每次单独授权，按 runbook）。上线前的管理员配置建议见“进行中的工作”中原未完成第 1 项；其中 0.3.0 因余额 403 被置错的账号，0.4.0 下充值后在账号列表“恢复状态”（已无复检）。
-7. 收尾清理：本地备份分支 `backup/gateway-resilience-pre-rewrite`、`backup/pre-author-rewrite-2424b8b38`，测试服务器 itest 目录与 `xy2-itest-*` 卷，`/tmp/xy2-staging/live-keys.json` 与 `ui-session.json`。
-8. 0.4.1 事项见 tasks“后续”小节；Sub2API v0.2.17 同步另开任务（见“版本与环境速览”）。
+1. 推送 PR #100 的浸泡结果（本文件、tasks 与 staging-validation）→ 更新描述（仓库外 `PR_BODY_PROMOTION_0.4.0.md`）→ CI 全绿 → 转为可合并 → 常规 merge。
+2. 在合并提交打 annotated `v0.4.0`（消息取仓库外 `RELEASE_NOTES_v0.4.0.md`）→ Release 工作流 → `/tmp/xy2-verify-release.sh v0.4.0 <合并提交>`（稳定别名 latest/0/0.4 应移到 0.4.0）→ 正式镜像在测试服务器全新安装（`/tmp/xy2-staging/fresh_install.py`）。
+3. 发版后纯文档收尾 PR：tasks 13.x、按“记忆维护规范·归档”移走本节与进行中条目、操作日志。
+4. XY-image 0.0.17（先交接留言并经用户确认）。
+5. 生产部署（每次单独授权，按 runbook）。上线前的管理员配置建议见“进行中的工作”中原未完成第 1 项；其中 0.3.0 因余额 403 被置错的账号，0.4.0 下充值后在账号列表“恢复状态”（已无复检）。
+6. 收尾清理：本地备份分支 `backup/gateway-resilience-pre-rewrite`、`backup/pre-author-rewrite-2424b8b38`，测试服务器 itest 目录与 `xy2-itest-*` 卷，`/tmp/xy2-staging/live-keys.json` 与 `ui-session.json`。
+7. 0.4.1 事项见 tasks“后续”小节；Sub2API v0.2.17 同步另开任务（见“版本与环境速览”）。
 
 **卡点与风险**
 
 - 2026-10-16T11:10Z 推送前历史整理（分支从未推送）：经用户选择，134 个提交的作者与提交者由本机缺省身份改写为 `LIXIN LIU <180751112+liulixin-lex@users.noreply.github.com>`；另从全部历史中去掉测试子域名（灰云直连子域会暴露测试服务器地址），改为 `stg-direct.example.test`/`stg-cf.example.test` 占位。提交信息与本文件、方案文档中的分支内哈希均已按映射更新；映射表在仓库外私有目录。改写前备份分支 `backup/pre-author-rewrite-2424b8b38`（仍含子域名，只在本机，不推送，发版后删除）。测试服务器镜像 tag 与证据目录仍为改写前的 `968df0942`，对应最终候选 `eaa63fd30`（应用代码相同）。仓库已设本地 git 身份为同一 noreply。
-- 浸泡期间不要重启或重新部署测试服务器的 `xy2api-staging` 应用；需要改代码时先在本机提交，浸泡结束后再决定是否需要新候选（新候选须重跑场景、客户端与浸泡）。
+- 测试服务器应用仍运行候选 `c6b837dca`；正式版发布后用正式镜像做一次全新安装检查（不改现有部署）。新候选须重跑场景、客户端与浸泡。
 - 本机磁盘：`/tmp/xy2-toolchain/gocache` 两次涨到 30G 以上写满磁盘，长时间测试前后执行 `go clean -cache`。
 - 正式镜像与浸泡候选 `c6b837dca` 的差异只有 `5fdd1e589` 的一句英文设置提示（另有 Go 注释，不改编译结果）；评审规范化不进二进制。CI 新步骤“Documentation consistency”若失败，把输出转给评审 agent。
 
@@ -181,6 +181,7 @@
   - 2026-10-17T06:37Z 进展：余额精简 `cc5fc3208`（代码、前端、迁移 277、用例；删除 2296 行、新增 764 行）、文档 `f66c5562f`、DC-2 整点保护 `e039c2b6f`。先写的失败用例（暂停约 660 秒而非 300 秒、429 在成功后为 SUSPECT、Retry-After 为 0、恢复状态后记录仍按硬罚、Grok 同理、设置多余字段、迁移文件缺失）已全部转绿；后端 unit 全量、lint 0、四种 vet、前端相关 spec 与 vue-tsc 通过。`concurrency_service.go`、`ops_account_availability.go`、`ops_realtime_models.go`、`ops_alert_evaluator_service(_test).go`、`ops_alerts_handler.go`、前端 `ops.ts`/`OpsAlertRulesCard.vue` 回到上游原样（仅模块路径与导入顺序）。迁移 277 的数据库用例为 integration 标签，本机无 Docker 跳过，CI 的 `make test-integration` 会跑；测试服务器升级演练再实测。下一步：本机全量验证 → 新候选部署 → 场景 45、客户端 17、升级演练、6.5 小时浸泡（整套只跑一次）→ 推送 PR #100。
   - 2026-10-17T07:25Z 进展：本机全量验证（`526efd035`）全绿，CI 门禁 246 个韧性测试。测试服务器候选 `c6b837dca`：迁移 277 已执行、RC 形状设置文档照常加载；场景 45/45（BAL-1/BAL-2/PE-1 新行为、KA-4/KA-8 事件顺序、DC-2）；真实客户端 17/17（`C-openai-py-budget-cdn` 读到 response.failed，`C-openai-py-slow-first-cdn` 216.9 秒通过）；升级演练通过（277 只删种下的规则，管理员同名改指标规则保留；回退、前滚、备份恢复正常）。07:24Z 起 6.5 小时浸泡 `soak-c6b837dca`，约 14:05Z 结束（等待脚本 `/tmp/xy2-soak-wait.sh c6b837dca`）。已推送 `c6b837dca` 到 PR #100（草稿）并更新描述，CI 进行中。浸泡通过后：指标报告 → PR 转为可合并、CI 全绿后常规 merge → annotated `v0.4.0` → 制品核验与正式镜像全新安装。
   - 2026-10-17T08:55Z 进展：PR #100 在 `c6b837dca` 上两组 18/18 全绿。浸泡第一次断余额（每小时第 30–40 分钟）：07:53:01 暂停 5 分钟，07:58:08、08:03:13 到期后真实请求重试仍欠费再各暂停 5 分钟，08:08:13 起恢复出量（每分钟 15–24 次）；暂停期间该账号没有请求，原因 `balance:exhausted: HTTP 429: Insufficient account balance`。自查后本地提交 `5fdd1e589`：三处代码注释与一处测试注释不再写已删除的余额状态；英文设置提示与 spec 改用界面实际按钮名 “Recover State”；tasks 9.2/9.3 与 proposal 补“随余额精简删除”的标注。只有这句英文提示进前端包。评审 agent 在其上完成仓库规范化（`f568a3437`…`3705b7785`，14 个提交，不改 `backend/`、`frontend/`），随 PR #100 推送；本机复核通过。
+  - 2026-10-17T14:35Z 进展：浸泡 `soak-c6b837dca` 通过（11 项检查；159,849 个请求；GC 后存活堆 53→56 MB、0.4 MiB/h；匿名内存启动 46.3，前段中位 89.9、后段 93.8 MiB；回落后槽位、预留归零，协程 189→189，PG 连接 9→9）。容器内存（含页缓存）在约 106–191 MiB 间起落，是应用自身文件日志约 100 MB 轮转一次的页缓存，轮转时回落，匿名内存不变。余额组 6,186 次成功、1,749 次 503；每次断余额停服 10.1–10.4 分钟，第一次 15.3 分钟（充值落在一次到期重试之后）。design §14 报告（本机 `metrics/REPORT-stg-c6b837dca.md`）15 项达标，未达标 4 项同 RC：无号 503 共 834 次、全部来自 `G-soak-bal` 且都在断余额窗口，最长连续无号 16 分钟；anthropic/openai 缓存读取占比为故障上游固定用量。私有 `STAGING_REPORT.md` 定稿；tasks“余额处理精简”与 staging-validation §9 补记验证。评审的主机信息清理 `2b7b40f2f`、`95e6828f5`、`15ce5301b` 已复核并推送，PR #100 在 `15ce5301b` 上 CI 两组 18/18。
 - 2026-10-16T07:30Z 用户追加：同时规范化 0.3.0 已发布的“份额调度”（`internal/sharesched`、`service/share_scheduling_*`、仓储、管理接口与前端），达到同样的上线标准；改动并入本分支与 0.4.0。浸泡中内存每小时约 +5 MiB，已停 `soak-d0b7e7309`，测试服务器跑带 pprof 的诊断镜像（pprof 文件只在服务器源码副本，不入库）定位。
 - 2026-10-17T08:55Z 刷新顶部状态时，把原“未完成”下已过时的条目与进度记录原样移到这里（其后结论以顶部状态为准）：
 
