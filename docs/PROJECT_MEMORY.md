@@ -6,12 +6,13 @@
 
 ## 当前交接状态
 
-### 版本与环境速览（2026-10-17T08:40Z 核实）
+### 版本与环境速览（2026-10-17T08:30Z 核实）
 
 - 正式版：XY2API v0.3.0（2026-10-13，Sub2API 兼容基线 0.2.15）；生产自 2026-10-15 运行 0.3.0。
 - 进行中：XY2API 0.4.0，晋级分支 `release/0.4.0`（PR #100），`v0.4.0-rc.1` 已发布；进度见下一节。
 - 上游：Sub2API v0.2.17 已发布、尚未同步（2026-10-17 定时检测），需按 [`UPSTREAM_SYNC.md`](UPSTREAM_SYNC.md) 另开任务。
 - 工具链：Go 以 `backend/go.mod` 为准（当前 1.27.2）；golangci-lint v2.14.0（与 CI 同版）。
+- 文档一致性：`python3 tools/check_docs_consistency.py`（CI 的 upstream-sync-audit 作业执行），规则在 `tools/docs_consistency.json`，改动时按 [`AGENTS.md`](../AGENTS.md)“变更同步”同步文档。
 
 ### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-17T04:45Z；PR #97 已合并，`v0.4.0-rc.1` 已发布并验证；0.4.0 晋级 PR 准备中，等用户确认“未送达不计费的覆盖路径”一项后再合并与打正式标签；生产未改）
 
@@ -108,12 +109,6 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
-
-### 20261017-repo-consistency-sweep — 全仓库代码、结构与文档一致性审查与规范化（进行中）
-
-- 2026-10-17T08:15Z 用户要求：全量审查工作区的代码、结构与文档，按最新进度规范化，补齐漏改的代码与文档，并建立机制，让后续开发时刻保持最新、不漏模块或文档。评审 agent 执行，直接提交到 `release/0.4.0`（起点 `5fdd1e589`，工作树干净）；已告知主 agent（同一工作区，正在等 `soak-c6b837dca` 浸泡）。
-- 范围：管理员与部署文档、openspec 中与代码不符之处、DEV_GUIDE/README、`tools/gateway-resilience` 的 README 与 SQL、`.gitignore` 的 docs 白名单、docs 索引、AGENTS.md 变更同步规则、文档一致性检查脚本与 CI 步骤、项目记忆归档（历史原样移到归档文件）。
-- 约束：不改 `backend/`、`frontend/` 源码，浸泡过的候选与正式镜像不因此产生差异；不推送、不合并、不打标签（主 agent 按既有授权随 PR #100 推送）；不访问生产与测试服务器。
 
 ### 20261015-gateway-resilience — 网关韧性 0.4.0 开发与测试服务器验证（进行中）
 
@@ -525,3 +520,17 @@ pnpm --dir frontend run build
 - 验证：每轮本机全量验证（四种 vet、lint 0、unit/无 tag/embed、CI 门禁 256、同步审计与 scheduler-diff、前端 389 文件/3047 项与构建）全绿；PR 与 main CI 全绿；推送前扫描无主机、域名、凭据，作者均为 noreply。
 - 卡点/风险：“未送达不计费只覆盖 OpenAI Responses 路径”待用户确认；两项真实客户端用例未在 RC 上重跑；0.4.1 后续见 tasks“后续”小节（xhigh/max 静默上游不换号、屏蔽期间保留绑定、`relay_keepalive` 原生 CC 路径计数、F2 会话上限判据等）。
 - 下一步：用户确认待定项后，完成晋级 PR（`release/0.4.0`，已含版本号与文案改动）→ CI → 常规 merge → annotated `v0.4.0`（说明见仓库外 `RELEASE_NOTES_v0.4.0.md`）→ 用 `/tmp/xy2-verify-release.sh` 校验正式制品与稳定别名 → 正式镜像全新安装检查 → 发版后纯文档收尾；XY-image 0.0.17 先交接并经用户确认；生产部署单独授权。
+
+### 2026-10-17T08:35Z — 20261017-repo-consistency-sweep — 完成
+
+- 请求/目标：用户要求全量审查工作区代码、结构与文档，按最新进度规范化、补齐漏改的代码与文档，并建立机制，让后续开发时刻保持最新、不漏模块或文档。
+- 开始状态：`release/0.4.0`，HEAD `5fdd1e589`，工作树干净。主 agent 在同一工作区等 `soak-c6b837dca` 浸泡，已告知；约定由它在浸泡结束后复跑门禁并随 PR #100 推送，我不推送。
+- 审查结论：
+  - 代码：`backend/`、`frontend/` 没有需要改的残留。余额精简删掉的标识符只剩迁移测试与历史注记；韧性相关包没有未引用的函数；前端韧性 143 个文案键都有引用，API 没有死函数。本任务未改任何源码，浸泡候选与正式镜像不因此产生差异。
+  - 与代码不符的方案与文档（均已修正）：design §2.2 余额行、§8.2 与 disconnect spec 列了不存在的 `slot_wait` 阶段、§9.2 与 error spec 的“余额状态”、§12 的 `resilience.balance_transition` 与缺漏事件；keepalive spec 写首输出超时会软罚账号；proposal 的 D13、D16 缺修订；管理员文档 §5.3 漏 5 个日志事件；account-scheduling、SHARE_SCHEDULING 未写 0.4.0 规则；部署文档未写 CDN 部署所需的 `X-XY-Edge` 与受信代理；ASYNC_IMAGE_TASKS、USAGE_METRICS 未跟上 0.4.0；tools README 与首字校准 SQL 停在旧分档与 F24；三语 README 与 DEV_GUIDE 的 Go、lint 版本，DEV_GUIDE 直接 merge/rebase 上游的写法；两份 openspec 中已随 0.3.0 完成的任务未勾选；docs 白名单漏了 13 个已跟踪文件。
+  - 结构：项目记忆 454 KB，历史原样移入 `docs/PROJECT_MEMORY_ARCHIVE.md`，主文件 92 KB；主 agent 的 0.4.0 两节与 0.3.0 发布记录逐字保留，逐行对账无丢失。新增 `docs/README.md` 文档目录（现行、记录、历史与 OpenSpec 变更状态）。
+- 机制：`tools/check_docs_consistency.py`（规则 `tools/docs_consistency.json`，单测 9 个）检查相对链接、文档目录与白名单、Go 与 lint 版本、韧性计数/日志事件/设置是否写进文档、退役名字是否残留、记忆主文件大小与日志结构，接入 backend-ci 的 upstream-sync-audit 作业；AGENTS.md 加“变更同步”表与归档规则；DEV_GUIDE、同步规范与同步 Skill 的门禁列表同步。用修正前的管理员文档回放，检查器正好报出本次发现的 5 个漏记事件。
+- 修改文件：docs（GATEWAY_RESILIENCE、account-scheduling、SHARE_SCHEDULING、ASYNC_IMAGE_TASKS、USAGE_METRICS、STRIPE_HOSTED、UPSTREAM_SYNC，新增 README 与记忆归档）；openspec（gateway-resilience 的 design、proposal、3 份 spec、tasks、2 份 evidence，async-image-tasks-v2 与 share-scheduling 的 tasks）；deploy（EDGE_SECURITY、config.example.yaml 与 Caddyfile 的注释）；tools（gateway-resilience 的 README 与 SQL、检查脚本、规则、单测）；三语 README、DEV_GUIDE、AGENTS.md、.gitignore、backend-ci.yml、同步 Skill 的 runbook。提交自 `f568a3437` 至本条所在提交（`git log 5fdd1e589..` 可列出）。
+- 验证：`sync.py audit`、`sync.py scheduler-diff`、`tools/tests` 37 个、`check_docs_consistency.py`、Caddyfile 策略脚本与 `config.example.yaml` 解析均通过；`git diff 5fdd1e589..HEAD -- backend frontend` 为空。未改源码，未跑 Go 与前端测试。
+- 卡点/风险：无。留给 0.4.1 决定：测试环境 `fixtures.py` 有 10 个分组从未被场景使用（含 `G-balance-429`），fault-upstream 的 F19/F20 只服务已删除的余额探测；浸泡期间不动测试服务器脚本。
+- 下一步：主 agent 浸泡结束后复跑门禁并随 PR #100 推送这些提交，同时刷新它的顶部状态（仍为 04:45Z 的内容）。
