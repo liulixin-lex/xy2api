@@ -19,14 +19,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// recordingSessions records the session failures reported per account.
+// recordingSessions records the session failures and successes reported
+// per account.
 type recordingSessions struct {
-	mu       sync.Mutex
-	failures map[int64][]resilience.Category
+	mu        sync.Mutex
+	failures  map[int64][]resilience.Category
+	successes map[int64]int
 }
 
 func newRecordingSessions() *recordingSessions {
-	return &recordingSessions{failures: map[int64][]resilience.Category{}}
+	return &recordingSessions{failures: map[int64][]resilience.Category{}, successes: map[int64]int{}}
 }
 
 func (r *recordingSessions) Failure(_ context.Context, _ int64, _ string, accountID int64, c resilience.Category) {
@@ -35,7 +37,17 @@ func (r *recordingSessions) Failure(_ context.Context, _ int64, _ string, accoun
 	r.failures[accountID] = append(r.failures[accountID], c)
 }
 
-func (r *recordingSessions) Success(context.Context, int64, string, int64) {}
+func (r *recordingSessions) Success(_ context.Context, _ int64, _ string, accountID int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.successes[accountID]++
+}
+
+func (r *recordingSessions) successesOf(accountID int64) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.successes[accountID]
+}
 
 func (r *recordingSessions) of(accountID int64) []resilience.Category {
 	r.mu.Lock()
@@ -84,7 +96,7 @@ func TestPostOutputFailureCountsOncePerAttempt(t *testing.T) {
 	require.True(t, st.AccountFailed(account.ID))
 	require.True(t, st.TurnFailed())
 	r.NoteAccountSuccess(ctx, account)
-	require.False(t, r.recentSuccess(account.ID, time.Minute))
+	require.Zero(t, rec.successesOf(account.ID), "no session success")
 
 	// Another attempt of the same connection (a later WebSocket turn) counts.
 	noteResiliencePostOutputFailure(ctx, rl, account, 2, postOutputEvent)

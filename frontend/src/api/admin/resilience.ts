@@ -14,17 +14,7 @@ export interface GatewayResilienceSettings {
   failure: { transient_cooldown_seconds: number; retry_after_cap_seconds: number; balance_keywords_extra: string[] }
   session: { enabled: boolean; streak_threshold: number; streak_window_seconds: number; avoid_seconds: number }
   last_resort: { enabled: boolean }
-  balance: {
-    enabled: boolean
-    recheck_schedule_seconds: number[]
-    jitter_ratio: number
-    suspect_ttl_seconds: number
-    recovering_concurrency: number
-    recovering_window_seconds: number
-    recovering_success_target: number
-    generation_probe_daily_budget: number
-    notify_after_hours: number
-  }
+  balance: { enabled: boolean; pause_seconds: number }
   budget: {
     enabled: boolean
     max_attempts: number
@@ -75,7 +65,6 @@ export interface ResilienceStats {
   window_seconds: number
   scope: string
   counters: ResilienceMetricRow[]
-  balance_states: Record<string, number>
 }
 
 export interface UndeliveredRequest {
@@ -107,13 +96,6 @@ export interface UndeliveredQuery {
   until?: string
 }
 
-export interface BalanceRecord {
-  state: string
-  since?: string
-  next_check_at?: string
-  last_evidence?: string
-}
-
 /** One account as gateway resilience sees it (design §4.4). */
 export interface ResilienceAccountExplanation {
   account_id: number
@@ -123,7 +105,6 @@ export interface ResilienceAccountExplanation {
   tier: 'none' | 'soft' | 'hard'
   reason?: string
   recover_at?: string
-  balance_state?: string
   session_failures?: number
   avoided?: boolean
 }
@@ -168,11 +149,6 @@ export async function listUndelivered(query: UndeliveredQuery = {}): Promise<Pag
   return data
 }
 
-export async function recheckBalance(accountId: number): Promise<BalanceRecord> {
-  const { data } = await apiClient.post<BalanceRecord>(`${base}/accounts/${accountId}/balance/recheck`)
-  return data
-}
-
 export async function explain(groupId: number, query: ResilienceExplainQuery = {}): Promise<ResilienceExplanation> {
   const { data } = await apiClient.get<ResilienceExplanation>(`${base}/resilience/groups/${groupId}/explain`, { params: query })
   return data
@@ -183,7 +159,6 @@ export const resilienceAPI = {
   updateSettings,
   stats,
   listUndelivered,
-  recheckBalance,
   explain
 }
 

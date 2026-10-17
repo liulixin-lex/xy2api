@@ -2,7 +2,7 @@
 
 > 本文保留早期实施记录。2026-09-27 后的当前状态、最多3次请求、余额复检与解析限制以 [OPENAI_IQ_CHECK.md](OPENAI_IQ_CHECK.md) 及 [IQ_CURRENT_HEALTH.md](IQ_CURRENT_HEALTH.md) 为准。下文“两次”“最后有效判定保持当前状态”等描述不再代表现行实现。
 
-实施对象：v0.0.11 / `b07824af9f94dc5dfd40b5e4789e17a62daae592`，本地分支 `fix/iq-reliability-v2`。原仓库已快进到该远端版本；实现位于 `/xy/artifacts/openai-iq-check/reliability-work`。未改变糖果题、标准答案21、默认模型或评分口径。答错但取得有效答案也算链路成功。
+实施对象：v0.0.11 / `b07824af9f94dc5dfd40b5e4789e17a62daae592`，本地分支 `fix/iq-reliability-v2`。原仓库已快进到该远端版本；实现位于 `<工作机 A>/artifacts/openai-iq-check/reliability-work`。未改变糖果题、标准答案21、默认模型或评分口径。答错但取得有效答案也算链路成功。
 
 ## 运行行为
 
@@ -27,7 +27,7 @@
 
 ## 验证与证据
 
-字面命令、输入、stdout、stderr、退出码保存在 `/xy/artifacts/openai-iq-check/VERIFICATION.txt`，新记录以 `reliability-` 开头。失败和中止记录保留，不计为通过。
+字面命令、输入、stdout、stderr、退出码保存在 `<工作机 A>/artifacts/openai-iq-check/VERIFICATION.txt`，新记录以 `reliability-` 开头。失败和中止记录保留，不计为通过。
 
 协议测试覆盖完成项恢复、部分终态、重复及冲突、身份差异、缺少成功完成事件、仅delta、拒答、压缩、大小及事件数量限制、中断；仓储测试使用真实PostgreSQL/Redis临时容器，覆盖双实例竞争、两次预算、等待租约释放、共享冷却、重启、配置变更、降智保持和有效答对恢复。服务测试验证单次HTTP传输标识及不可重放请求体。前端组件、类型、国际化、静态检查和构建采用本地工具链；Chromium用实际Vue组件与合成数据验证1280/390视口、三轮历史、刷新失败保留、下载和关闭行为。
 
@@ -41,4 +41,4 @@
 
 回退前先停止新检测工作者，等待活动调用退出并关闭检测，再运行旧程序；数据库追加结构保留，不删表、不改历史checksum。`ROLLBACK.sh TARGET_COPY reliability-v2` 仅把一次性源码副本恢复到本轮b078基线；不带第二参数保留历史累计交付恢复到最初基线的行为。该脚本不操作生产或数据库。
 
-固定交付角色为 `/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`。`DIFF_FILE.patch` 从保留的最初基线重建最终源码；本轮b078差异额外保存在 `reliability-v2.patch`，补充记录不替换四角色。
+固定交付角色为 `<工作机 A>/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`。`DIFF_FILE.patch` 从保留的最初基线重建最终源码；本轮b078差异额外保存在 `reliability-v2.patch`，补充记录不替换四角色。

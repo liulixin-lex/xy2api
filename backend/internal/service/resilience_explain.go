@@ -38,7 +38,6 @@ type ResilienceAccountExplanation struct {
 	Tier            string     `json:"tier"`
 	Reason          string     `json:"reason,omitempty"`
 	RecoverAt       *time.Time `json:"recover_at,omitempty"`
-	BalanceState    string     `json:"balance_state,omitempty"`
 	SessionFailures int64      `json:"session_failures,omitempty"`
 	Avoided         bool       `json:"avoided,omitempty"`
 }
@@ -118,9 +117,6 @@ func (r *ResilienceService) Explain(ctx context.Context, groupID int64, sessionH
 		if !recoverAt.IsZero() {
 			at := recoverAt
 			e.RecoverAt = &at
-		}
-		if state, _ := opsBalanceState(&acc); state != "" {
-			e.BalanceState = state
 		}
 		if _, ok := avoided[acc.ID]; ok {
 			e.Avoided = true

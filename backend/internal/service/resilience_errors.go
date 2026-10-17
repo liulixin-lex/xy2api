@@ -169,8 +169,8 @@ func resilienceStreamErrorStatus(errType string, outputWritten bool, header http
 
 // NoAccountRetryAfter estimates when an account of the group may serve the
 // model again: the earliest end of a soft penalty, a rate-limit reset or a
-// balance re-check. It returns zero when nothing in the group will recover
-// on its own (design §9.1). The caller clamps the value.
+// balance pause. It returns zero when nothing in the group will recover on
+// its own (design §9.1). The caller clamps the value.
 func (s *GatewayService) NoAccountRetryAfter(ctx context.Context, groupID *int64, model string) time.Duration {
 	if s == nil || s.resilience == nil || groupID == nil || s.accountRepo == nil {
 		return 0
@@ -214,8 +214,8 @@ func (r *ResilienceService) noAccountRetryAfter(ctx context.Context, repo Accoun
 			if a.RateLimitResetAt != nil {
 				consider(*a.RateLimitResetAt)
 			}
-			if rec := resilience.BalanceRecordFrom(a.Extra); rec.State == resilience.BalanceExhausted {
-				consider(rec.NextCheckAt)
+			if a.TempUnschedulableUntil != nil && resilience.IsBalancePause(a.TempUnschedulableReason) {
+				consider(*a.TempUnschedulableUntil)
 			}
 		}
 	}

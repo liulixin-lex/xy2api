@@ -58,7 +58,7 @@
 
 | 类别 | 主要判据 | 换号 | 同号重试 | 账号罚则 | 会话（D4） |
 |---|---|---|---|---|---|
-| `BALANCE` | 402；code 为 `insufficient_quota`、`insufficient_user_quota`、`pre_consume_token_quota_failed`、`credit_balance_exhausted`；文本含 insufficient (account) balance、余额不足、额度不足、credit balance、usage balance exhausted，以及 new-api 的 quota is not enough、额度已用尽、预扣费额度失败等（关键字集合可配置） | 是 | 否 | 进入余额状态机（§3.2，硬） | 立即改绑 |
+| `BALANCE` | 402；code 为 `insufficient_quota`、`insufficient_user_quota`、`pre_consume_token_quota_failed`、`credit_balance_exhausted`；文本含 insufficient (account) balance、余额不足、额度不足、credit balance、usage balance exhausted，以及 new-api 的 quota is not enough、额度已用尽、预扣费额度失败等（关键字集合可配置） | 是 | 否 | 硬：暂停 `balance.pause_seconds`（§3.2） | 立即改绑 |
 | `AUTH` | 401、invalid/revoked key；结构化的账号停用 code（`deactivated_workspace` 等） | 是 | 否 | 硬：OpenAI 维持现有 3 次规则；其他平台改为计数加临时冷却（§3.3） | 立即改绑 |
 | `RATE_LIMIT_RESET` | 429，且带明确的重置时间（头部或正文） | 是 | 否 | 软，冷却到重置时间；重置时间超过 300 秒视为硬 | 不超过 300 秒时只临时溢出；超过则改绑 |
 | `RATE_LIMIT` | 429 无重置时间；流内 `rate_limit_exceeded`；“The service is busy” 等 | 是 | 否 | 软，冷却时长取设置 `rate_limit_429_cooldown_settings`（当前 45 秒） | 计入失败计数 |
@@ -73,43 +73,36 @@
 补充规则：
 
 - **本站与上游余额分开。** `BALANCE` 只来自上游应答。本站计费产生的余额错误走 §9.5，不进入分类。
-- **Gemini 分钟级限额不是余额。** “You exceeded your current quota” 是 OpenAI 的余额文案，Gemini 的 `RESOURCE_EXHAUSTED` 限额也用同一句话；带 Gemini 限额标记时按 429 归入限流类，不进入余额状态机。
+- **Gemini 分钟级限额不是余额。** “You exceeded your current quota” 是 OpenAI 的余额文案，Gemini 的 `RESOURCE_EXHAUSTED` 限额也用同一句话；带 Gemini 限额标记时按 429 归入限流类，不触发余额暂停。
 - **首输出超时不冷却账号。** 首输出慢多因中转排队或长推理，与请求的推理档位相关，冷却账号会把其他档位的请求也挪走，收益不明；它只计会话连败（同会话同账号 2 次即改绑）并换号。本地超时不写冷却，也不触发按模型瞬时屏蔽；上游以 `first_output_timeout` 应答（级联的 xy2api）同样不写冷却，只有 OpenAI API Key 账号按任何上游 5xx 的原有规则记入按模型瞬时屏蔽（进程内，第 2 次连败起 10 秒、第 3 次起 45 秒）。管理员配置 `stream_timeout_settings` 后，本地超时沿用其原有处置（生产未配置）。2026-10-16 生产核查时按代码对齐文档；用例 `TestLocalFirstOutputTimeoutLeavesTheAccountSchedulable`、`TestUpstreamFirstOutputTimeoutLeavesTheAccountSchedulable`。
 - **池模式账号保留管理员配置的同号重试状态码**，但同样受预算与“每账号最多 1 次”约束。
 - 分类结果写入请求上下文，供换号循环、会话处理、ops 记录与 Explain 使用。
 
-## 3. 账号罚则与余额恢复
+## 3. 账号罚则与余额暂停
 
 ### 3.1 硬、软分级（D5）
 
 | 档 | 状态 | 选号行为 |
 |---|---|---|
-| 硬 | 管理员停用（`schedulable=false`）、`status=error`、余额 `EXHAUSTED`（排除期内，§3.2）、凭据失效、重置时间超过 300 秒的限流、IQ 质量门、利润门、模型不支持、分组不匹配 | 永不选中 |
-| 软 | 余额 `SUSPECT`、`TRANSIENT`/`STALL` 冷却、无重置时间的 429 冷却、不超过 300 秒的有重置时间 429、过载冷却（`overload_cooldown_settings`，当前 2 分钟）、模型级瞬时阻断（`openai_model_transient_state`）、会话回避（§4） | 平时不选；没有任何健康候选时可以作为末位兜底（§4.3） |
+| 硬 | 管理员停用（`schedulable=false`）、`status=error`、余额不足暂停（原因 `balance:`，暂停期内，§3.2）、凭据失效、重置时间超过 300 秒的限流、IQ 质量门、利润门、模型不支持、分组不匹配 | 永不选中 |
+| 软 | `TRANSIENT`/`STALL` 冷却、无重置时间的 429 冷却、不超过 300 秒的有重置时间 429、过载冷却（`overload_cooldown_settings`，当前 2 分钟）、模型级瞬时阻断（`openai_model_transient_state`）、会话回避（§4） | 平时不选；没有任何健康候选时可以作为末位兜底（§4.3） |
 
 实现：在 `internal/resilience` 中提供 `PenaltyOf(account, model, now) (tier, recoverAt, reason)`，由两个调度器的候选构造钩子调用。现有冷却仍写在原有字段里：`rate_limit_reset_at`、`overload_until`、`temp_unschedulable_until`（`reason` 前缀区分 `balance:`、`transient:`、`auth:`）。快照与数据库口径都不变。
 
-### 3.2 余额状态机（D6）
+### 3.2 余额不足暂停（D6，0.4.0 精简）
 
-状态存在 `accounts.extra.resilience_balance`：`state`、`since`、`next_check_at`、`level`、`last_evidence`、`last_probe_at`、`probe_source`。排除通过 `temp_unschedulable_until` 加 `reason="balance:<state>"` 实现，不新增列，与 CN 供应商的做法一致。
+> 2026-10-17 用户决定：经常给上游充值，不需要余额的监控、告警与探测，只要求简单、可预期。RC 中的四态状态机（`OK`/`SUSPECT`/`EXHAUSTED`/`RECOVERING`）、复检探测、恢复期并发上限、余额告警与“长期未恢复”通知全部取消。复核时还发现 RC 实现的两处缺陷：余额告警永远不会触发（`ListOpsAccountsForStats` 不读 `extra`，指标恒为 0）；探测查不出结论时暂停只延不缩，中转不支持余额接口、生成探测又失败时欠费账号一直不放回。
 
-| 状态 | 进入 | 行为 | 退出 |
-|---|---|---|---|
-| `OK` | 默认 | 正常调度 | — |
-| `SUSPECT`（TTL 60–120 秒） | 弱信号：429 正文含余额字样，但同一账号 30 秒内有过成功 | 软罚，不接新会话；若全组只剩它，放行一个半开请求；触发一次单飞探测 | 探测显示有余额 → `OK`；探测确认无余额 → `EXHAUSTED`；TTL 到期 → `OK` |
-| `EXHAUSTED` | 真实请求出现强信号（`BALANCE`）；或探测得到余额 ≤ 阈值 | 硬排除，不做同号重试；复检间隔 1、2、5、10 分钟，之后每 15 分钟，±15% 抖动；管理员“已充值”立即复检；超过 `notify_after_hours`（72 小时）仍未恢复时通知。排除到下次复检时间后 10 分钟为止：探测停止时由真实流量重新验证，硬档随排除结束 | 探测得到正向证据 → `RECOVERING` |
-| `RECOVERING` | 余额接口显示 > 阈值，或生成探测成功 | 并发上限临时压到 `recovering_concurrency`（1），持续 `recovering_window_seconds`（120 秒）或累计 `recovering_success_target`（3 次）成功（本请求内在该账号上有过失败尝试的不算成功，§4.1） | 达标 → `OK`；再次出现余额错误 → `EXHAUSTED`，复检间隔升一级 |
+- **识别不变：** §2 的 `BALANCE`（错误码、缺省关键字含 `insufficient user balance`、`failure.balance_keywords_extra`）。适用范围不变：API Key 类账号；CN 供应商、OpenCode Zen/Go、Command Code、Cline 与 Antigravity 走各自原有的余额路径。余额类 403 不走“403 计数、第 3 次置错”。
+- **处置：** 识别到余额不足就把账号暂停 `balance.pause_seconds`（缺省 300 秒，30–3600）：`SetTempUnschedulable`，原因 `balance:exhausted: <证据>`。暂停期间按硬罚处理，不参与选号，也不作末位兜底，不做同号重试。到期后自动放回，由真实请求重试；仍然欠费就再暂停同样时长，不递增。`SetTempUnschedulable` 只延长不缩短，更长的其他暂停（403 冷却、管理员规则）保留。
+- **入口：** HTTP 错误应答、流内余额失败（`ApplyResilienceOutcome` 的 `BALANCE`）、Grok API Key 带余额字样的 429（§18.1）、402（只会是积分不足，不落到永久置错的默认分支）。不再区分弱信号：429 加近期成功也一样暂停。
+- **手动放回：** 账号列表的“恢复状态”（`DELETE /api/v1/admin/accounts/:id/temp-unschedulable`）立即结束暂停，不新增界面。
+- **无号应答：** 单号分组暂停期间返回 503，`Retry-After` 取暂停的剩余时间（§9.1，夹到 2–30 秒）。
+- **份额调度与 Explain：** 原因记为 `balance_exhausted`（份额调度 `ReasonBalanceExhausted`，绑定会话立即迁移）。
+- **不保留余额状态：** 不读写 `accounts.extra.resilience_balance`，RC 写下的存量键直接忽略、不清理；迁移 277 删除 276 预置的两条告警规则（名称与 `metric_type` 同时匹配才删）。
+- **开关：** `balance.enabled=false` 时余额失败回到 0.3.0 的处理（402 置错、403 按 403 规则等）。
 
-探测按成本从低到高，由 `BalanceProbeService` 泛化现有的 `CNProviderBalanceCheckService` 实现：
-
-1. **sub2api 系中转：** `GET {base_url}/v1/usage`，携带账号 Key，读取 `remaining`/`balance`，不消耗推理；不限额订阅（`mode=unrestricted`）的 `remaining=-1` 视为有余额。实现参考 xy2api 自身的 `/v1/usage` 处理（`internal/handler/gateway_handler.go` 约 1590–1850）。
-2. **new-api 系中转：** `/v1/dashboard/billing/subscription` 与 `/v1/dashboard/billing/usage`。**上线前必须用真实中转实测**（tasks 12.6），未通过时该类账号走第 3 步。
-3. **兜底：** 流式请求，`max_tokens=1`，模型取该账号可用的最便宜模型，以收到首字为准。每个账号每天不超过 `generation_probe_daily_budget`（48 次）。
-4. **不能作为恢复证据：** `/v1/models` 可达、凭据类探针成功。
-
-多实例下用 Redis 锁 `xy:resil:balance_probe:{account_id}`（TTL 90 秒，长于一次探测连同落库的最长耗时）保证单飞；落库与凭据失效处理不随请求取消而中断。探测返回 401/invalid 时改走 `AUTH` 路径。管理员清除账号的暂停视为人工恢复，记为 `OK`；被更长的暂停（如 403 冷却）挡住未写入、随后自然过期的余额暂停不算人工恢复，下一轮探测重新施加。状态迁移写 `ops_system_logs`（warn 级，消息为 `resilience.balance_transition`），并通过现有告警与邮件通道通知管理员。
-
-需要改为可恢复路径的现有分支：
+以下现有分支改走余额暂停：
 
 - Anthropic 400 “credit balance”；
 - 402 的默认分支；
@@ -119,7 +112,7 @@
 
 ### 3.3 非 OpenAI 平台的 403 与凭据失效
 
-把 `handleOpenAI403` 的“HTML/Cloudflare 拦截页豁免 + 180 分钟内累计 3 次 + 每次冷却 10 分钟”推广到所有 API Key 平台（Anthropic、Grok、Gemini、DeepSeek 等）。余额类 403 先走 §3.2。真正的凭据失效（401 invalid、revoked）维持现有置错逻辑。
+把 `handleOpenAI403` 的“HTML/Cloudflare 拦截页豁免 + 180 分钟内累计 3 次 + 每次冷却 10 分钟”推广到所有 API Key 平台（Anthropic、Grok、Gemini、DeepSeek 等）。余额类 403 先走 §3.2 的暂停。真正的凭据失效（401 invalid、revoked）维持现有置错逻辑。
 
 ### 3.4 瞬时失败冷却
 
@@ -138,7 +131,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 - 只对计入失败的类别（`RATE_LIMIT`、`TRANSIENT`、`FIRST_OUTPUT_TIMEOUT`、`STALL`）递增；
 - 所有换号循环（共用循环与 OpenAI 各路由自有的循环）每次失败尝试都经同一入口 `resilienceAttemptFailed` 上报一次，同时扣减预算；
 - 已输出后的上游失败不会进入换号循环，由流处理分支自行上报一次（§7.6）；同一尝试的错误若再到达换号循环，不重复计数；
-- 成功响应清零该会话对该账号的计数。本请求内在该账号上有过失败尝试（流内错误事件、停滞）时，即使按部分用量计费也不算成功：不清零计数、不解除冷却、不计入余额 `RECOVERING` 的成功次数；
+- 成功响应清零该会话对该账号的计数。本请求内在该账号上有过失败尝试（流内错误事件、停滞）时，即使按部分用量计费也不算成功：不清零计数、不解除冷却；
 - 没有会话标识的请求不计数。
 
 ### 4.2 改绑规则
@@ -297,7 +290,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 
 | 入站协议 | 终止帧 |
 |---|---|
-| Responses | `event: response.failed`，`response.error.code` 为 `rate_limit_exceeded`（限流或忙）或 `server_error`（停滞、5xx、预算耗尽）；`message` 含 `Please try again in Ns.`（N = clamp(冷却剩余, 2, 30)）；保留 `sequence_number` |
+| Responses | `event: response.failed`，`response.error.code` 为 `rate_limit_exceeded`（限流或忙）或 `server_error`（停滞、5xx、预算耗尽）；`message` 含 `Please try again in Ns.`（N = clamp(冷却剩余, 2, 30)）；保留 `sequence_number`。客户端此前只收到心跳（首包前保活、排队 ping）时，先发同一响应的 `response.created`（`status: in_progress`，`sequence_number` 0），`response.failed` 的序号为 1：openai-python、openai-node 要求流以 `response.created` 开始，否则抛协议错误，看不到网关的错误（RC 真实客户端发现）。已有上游事件送达时不补；总开关关闭时与 0.3.0 一致 |
 | Chat Completions | `data: {"error":{"type":...,"code":...,"message":...,"status":<原 HTTP 语义码>}}`，然后 `data: [DONE]` |
 | Anthropic Messages | `event: error\ndata: {"type":"error","error":{"type":"overloaded_error"或"api_error","message":...}}`（修复 G3：所有提交后的错误帧都补 `event: error`；`errors` 开关关闭时恢复 0.3.0 的无 `event` 行格式） |
 
@@ -326,7 +319,9 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 
 它不属于协议。原样转发会让严格 SDK 报错（openai-python：“Expected to have received response.created before response.output_text.delta”）。网关还会把它当成语义输出，从而提前放弃换号和首输出超时。因此读取上游 SSE 时直接丢弃这类帧：类型为 `response.output_text.delta`、`delta` 为空，且 `item_id` 为 `SSE-Keep-Alive` 或带 `SSE-Keep-Alive: true`。其他字节原样通过。总开关关闭时不过滤。
 
-丢弃的帧算“上游存活、不算输出”：停滞检测（§7.5，输出后 120 秒、输出前按 `stream_data_interval_timeout`）以最后读到一行与最后丢弃一帧中较晚者计时，与 0.3.0 帧原样通过时一致；否则只靠这种帧维持静默期的中转会被误判停滞、截断回答并冷却账号（生产核查发现，0.4.0 引入的回归）。覆盖 Responses 流、经 Responses 上游的 Chat Completions 与 Messages 转换（流式与非流式读终止事件）；passthrough 无停滞检测，只计数。每丢一帧按账号计 `relay_keepalive`，上线后据此判断这类中转是否真实存在；原生 Chat Completions 上游的路径（`streamRawChatCompletions` 与两条 chat fallback 的 `scanCCStream`）没有停滞检测，传入空的存活记录，丢弃的帧不计数，指标会偏少（0.4.1 补）。不解决 Codex 自身的 300 秒空闲上限（它只认带数据的事件，向客户端发数据事件有兼容风险，0.4.0 不做）。
+丢弃的帧算“上游存活、不算输出”：停滞检测（§7.5，输出后 120 秒、输出前按 `stream_data_interval_timeout`）以最后读到一行与最后丢弃一帧中较晚者计时，与 0.3.0 帧原样通过时一致；否则只靠这种帧维持静默期的中转会被误判停滞、截断回答并冷却账号（生产核查发现，0.4.0 引入的回归）。覆盖 Responses 流、经 Responses 上游的 Chat Completions 与 Messages 转换（流式与非流式读终止事件）；passthrough 与原生 Chat Completions 上游的路径（`streamRawChatCompletions` 与两条 chat fallback 的 `scanCCStream`）无停滞检测，只计数。每丢一帧按账号计 `relay_keepalive`，上线后据此判断这类中转是否真实存在。不解决 Codex 自身的 300 秒空闲上限（它只认带数据的事件，向客户端发数据事件有兼容风险，0.4.0 不做）。
+
+首字时间与 0.3.0 一致（用户要求）：0.3.0 中这类帧原样通过，被当作首个事件记进 `first_token_ms`。`openai_ttft_mode=semantic`（缺省）时，结果取本次尝试中首个被丢帧与首个真实事件中较早者，从本次尝试开始计时；`visible` 不变，不算这类帧。只在结束构造结果时取值：帧照样丢弃，首输出超时与换号、停滞检测、送达判定和首输出守卫仍只认真实输出，计时不变。覆盖 Responses 流、passthrough、经 Responses 上游的 Chat Completions 与 Messages 流式转换、原生 Chat Completions 直转。非流式转换在 0.3.0 与现在都不记录首字；两条 chat fallback 的首字一直取首个输出 chunk（帧没有 choices，0.3.0 在那里也不计）：二者均不变。代价同 0.3.0：对发这类帧的中转，依赖首字的统计（调度首字评分、渠道监控健康分、首输出分档校准）偏乐观，要看真实值改用 `visible`。
 
 ## 8. 客户端断开与计费（D2、D9、D20）
 
@@ -338,12 +333,14 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 | `partial` | 已写出语义字节，但未完成 |
 | `complete` | 正常完成 |
 
+**口径的实际范围（0.4.0，评审 A3）。** 首包前保活心跳与排队 ping 在所有路径都不算语义字节。流内保活注释只在 OpenAI `/v1/responses` 流式路径（含透传）扣除，因此“首个语义输出前断开不计费”只在这条路径完整成立。其他流式路径在首个真实内容前就会写出开场事件或流内心跳，这些字节目前算已送达，此后断开按 `partial` 处理：Chat Completions 兼容转换（收到 `response.created` 时的角色块、`:` 心跳）、Messages 兼容转换（`message_start`；`ping` 会置 `clientOutputStarted`）、Anthropic 原生与直通（`gateway_upstream_response.go`、`gateway_anthropic_passthrough.go`、`openai_gateway_messages_anthropic_native.go`）、Grok `/v1/responses`（不暂存，`: ping`）、图片 SSE（`openai_images.go`、`openai_images_responses.go`）。非流式与图片 JSON 以响应体是否写出为准。0.4.1 用 `NoteDeliveryHeartbeat` 把这些字节登记为不算送达：只改计数，不压住、不推迟开场事件，不改计时，不增加上游成本（tasks“后续”）。
+
 ### 8.2 处理
 
 - **`undelivered` 时断开：**
   - 立即取消上游上下文（包括等待响应头与换号间隙），停止预算内的后续尝试，释放在途预留与并发槽位；
   - **不写 `usage_logs`，不计费**；
-  - 写一条 `gateway_undelivered_requests`（迁移 274）：`request_id`、`client_request_id`、`user_id`、`api_key_id`、`group_id`、`account_id`、`platform`、`model`、`inbound_endpoint`、`disconnect_stage`（选号、等待槽位、等待响应头、首输出前）、`duration_ms`、`upstream_usage_json`（上游已给出时）、`estimated_upstream_cost`、`billed`、`created_at`。
+  - 写一条 `gateway_undelivered_requests`（迁移 274）：`request_id`、`client_request_id`、`user_id`、`api_key_id`、`group_id`、`account_id`、`platform`、`model`、`inbound_endpoint`、`disconnect_stage`（`select` 选号，含等待槽位；`header_wait` 等待响应头；`pre_output` 首输出前）、`duration_ms`、`upstream_usage_json`（上游已给出时）、`estimated_upstream_cost`、`billed`、`created_at`。
 - **`partial` 时断开：**
   - 继续读取上游以获得用量，最长 `partial_drain_max_seconds`（180 秒）；
   - 到时取消，按已解析到的用量计费；
@@ -372,7 +369,7 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 
 在进程内缓存“(分组, 平台, 模型) 无可用账号”的结论 `negative_cache_seconds`（2 秒），期间直接返回相同的 503 和剩余的 `Retry-After`，不重复查库与快照。键由分组与模型构成（分组决定平台，组合分组的目标平台由模型决定）；OpenAI 选号另按传输方式、端点能力与平台区分，一种请求的结论不回答另一种。带 `previous_response_id`、图片能力或 compact 的 OpenAI 选号以及利润控制分组不缓存；重放出的结论不会再次写入，条目按时过期。
 
-- **只缓存组级结论（审查 F2）：** 选号在粘性查找之前查负缓存，而“无号”可能只对本请求成立：超过 RPM 或窗口费用阈值的 Anthropic OAuth 账号只服务已绑定会话，会话数上限只拦新会话。所以只有组内不存在“平台匹配、支持该模型且无罚”的账号时才写入（判定用 2 秒的分组账号列表）；否则一个新会话的结论会让已绑定会话持续 503。强制平台的路由（`/antigravity`）把平台写进键，不回答同组普通路由。本网关施加或解除冷却、余额状态变化时主动失效对应分组的条目；管理员改动等其他来源靠 2 秒过期，最多 2 秒后可见。
+- **只缓存组级结论（审查 F2）：** 选号在粘性查找之前查负缓存，而“无号”可能只对本请求成立：超过 RPM 或窗口费用阈值的 Anthropic OAuth 账号只服务已绑定会话，会话数上限只拦新会话。所以只有组内不存在“平台匹配、支持该模型且无罚”的账号时才写入（判定用 2 秒的分组账号列表）；否则一个新会话的结论会让已绑定会话持续 503。强制平台的路由（`/antigravity`）把平台写进键，不回答同组普通路由。本网关施加或解除冷却、施加余额暂停时主动失效对应分组的条目；管理员改动等其他来源靠 2 秒过期，最多 2 秒后可见。
 
 ### 9.3 同 Key 快速失败
 
@@ -384,11 +381,11 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 
 ### 9.4 上游余额对用户隐藏（D13-1）
 
-上游 `BALANCE` 类错误在换号耗尽或无号时，统一以 503 “Service temporarily unavailable”加 `Retry-After` 返回，包括图片余额 402（`Upstream image account has insufficient balance`）。管理员在运维页与告警中看到原文。管理员配置的错误透传规则命中该上游应答时以规则为准，网关路由与 OpenAI 路由一致，此时不加隐藏余额的重试提示。
+上游 `BALANCE` 类错误在换号耗尽或无号时，统一以 503 “Service temporarily unavailable”加 `Retry-After` 返回，包括图片余额 402（`Upstream image account has insufficient balance`）。管理员在运维错误详情与账号的暂停原因中看到原文。管理员配置的错误透传规则命中该上游应答时以规则为准，网关路由与 OpenAI 路由一致，此时不加隐藏余额的重试提示。
 
 ### 9.5 用户自身余额（D13-2、D13-3）
 
-- **真实余额不足**（`api_key_auth.go` 的预检，以及 `billingErrorDetails` 中的余额分支）：统一为 403，`code: INSUFFICIENT_BALANCE`，文案为 `Insufficient balance on your xy2api account, please recharge`（保留 “insufficient balance” 字样，下游 sub2api 系站点仍能识别）。OpenAI 兼容端点使用 `{"error":{"type":"insufficient_balance","code":"INSUFFICIENT_BALANCE","message":...}}`，中间件路径保持原有的 `{code,message}` 形状。
+- **真实余额不足**（`api_key_auth.go` 的预检，以及 `billingErrorDetails` 中的余额分支）：统一为 403，`code: INSUFFICIENT_BALANCE`，文案沿用 0.3.0 原文 `Insufficient account balance`（用户 2026-10-17 要求不改提示文案；下游 sub2api 系站点按缺省余额关键字识别）。OpenAI 兼容端点使用 `{"error":{"type":"insufficient_balance","code":"INSUFFICIENT_BALANCE","message":...}}`，中间件路径保持原有的 `{code,message}` 形状。
 - **在途预留超额**（`reserveInflight` 拒绝时余额 > 0）：改为 429，`error.type="rate_limit_error"`，`code="concurrent_balance_reserved"`，文案为 `Available balance is reserved by in-flight requests (available $X, reserved $Y); please retry shortly`，并带 `Retry-After`。
 - **估算改进**（`billing_inflight_reservation.go` 的 `estimateOne`）：
   - 输入部分：对带会话标识的请求，按该会话最近一次的“缓存读 / 输入”比例折算，以缓存读价格计入（会话缓存比例存于 Redis，TTL 30 分钟）；无历史时维持原口径；
@@ -434,9 +431,7 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
                "balance_keywords_extra": [] },
   "session": { "enabled": true, "streak_threshold": 2, "streak_window_seconds": 600, "avoid_seconds": 600 },
   "last_resort": { "enabled": true },
-  "balance": { "enabled": true, "recheck_schedule_seconds": [60, 120, 300, 600, 900], "jitter_ratio": 0.15,
-               "suspect_ttl_seconds": 90, "recovering_concurrency": 1, "recovering_window_seconds": 120,
-               "recovering_success_target": 3, "generation_probe_daily_budget": 48, "notify_after_hours": 72 },
+  "balance": { "enabled": true, "pause_seconds": 300 },
   "budget": { "enabled": true, "max_attempts": 4, "pre_output_budget_seconds": 240,
               "first_output_timeout_seconds": { "default": 180, "high": 180, "xhigh": 200, "max": 220 },
               "anthropic_first_event_timeout_seconds": 90, "gemini_first_event_timeout_seconds": 90,
@@ -478,7 +473,8 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
 | `273_add_usage_logs_origin_group.sql` | `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS origin_group_id BIGINT NULL;`（不加外键与默认值，大表上只改元数据） |
 | `274_create_gateway_undelivered_requests.sql` | 新表 `gateway_undelivered_requests`（字段见 §8.2）；索引 `(created_at)`、`(api_key_id, created_at)`、`(user_id, created_at)`；按 `ops_advanced_settings.data_retention` 清理，默认 30 天 |
 | `275_add_ops_error_logs_disconnect_stage.sql` | `ALTER TABLE ops_error_logs ADD COLUMN IF NOT EXISTS disconnect_stage VARCHAR(32) NULL, ADD COLUMN IF NOT EXISTS delivered_bytes BIGINT NULL;` |
-| `276_seed_balance_alert_rules.sql` | 预置告警规则“上游余额不足”（`account_balance_exhausted_count > 0`，P2）与“上游余额长期未恢复”（`account_balance_unrecovered_count > 0`，P1），`ON CONFLICT (name) DO NOTHING`；0.3.0 不认识这两个指标，评估时跳过 |
+| `276_seed_balance_alert_rules.sql` | 预置告警规则“上游余额不足”（`account_balance_exhausted_count > 0`，P2）与“上游余额长期未恢复”（`account_balance_unrecovered_count > 0`，P1），`ON CONFLICT (name) DO NOTHING`；0.3.0 不认识这两个指标，评估时跳过。已在 RC 与测试环境执行，保持不变 |
+| `277_remove_balance_alert_rules.sql` | 删除 276 预置的两条规则（名称与 `metric_type` 同时匹配才删，管理员改过名或改指着其他指标的规则保留），§3.2 |
 
 - `migrations/checksums.json` 只追加；已发布的 318 条不变。
 - Ent schema（`groups`、`usage_logs`、`ops_error_logs` 与新表）同步更新，并重新生成 `ent/`。
@@ -486,37 +482,30 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
 
 ## 12. 可观测性与管理界面
 
-- **结构化日志**（管理员关注的为 warn 级，进入 `ops_system_logs`；量大的 `keepalive_committed`、`undelivered`、`transient_*` 为 info），消息模板固定，正文与上游原文放在 `extra`。失败分类不单独记日志，由 `resilience.transient_cooldown`、`resilience.balance_transition` 与 ops 记录的 `resilience_category` 承担：
-  - `resilience.balance_transition`
-  - `resilience.session_rebind`
-  - `resilience.last_resort`
-  - `resilience.fallback_group`
-  - `resilience.budget_exhausted`
-  - `resilience.keepalive_committed`
-  - `resilience.stall`
-  - `resilience.post_output_failure`
-  - `resilience.undelivered`
-  - `resilience.fast_fail`
-  - `resilience.turn_cap`
-  - `resilience.abuse_guard`
+- **结构化日志**：消息即事件名（前缀 `resilience.`），细节放在字段中。管理员关注的为 warn 级，进入 `ops_system_logs`；量大的为 info，只写标准输出。失败分类不单独记日志，由 `resilience.transient_cooldown`、`resilience.balance_paused` 与 ops 记录的 `resilience_category` 承担。各事件的字段见 `docs/GATEWAY_RESILIENCE.md` §5.3：
+  - warn：`balance_paused`、`session_rebind`、`last_resort`、`fallback_group`、`fallback_return`、`budget_exhausted`、`capacity_switch_exhausted`、`stall`、`post_output_failure`、`fast_fail`、`turn_cap`、`abuse_guard`、`web_search_history_rejected`；
+  - info：`keepalive_committed`、`undelivered`、`unclassified`、`transient_cooldown`、`transient_lifted`、`undelivered_cleanup`、`content_policy_refusal`、`content_policy_no_failover`、`web_search_replay`、`web_search_declaration_learned`；
+  - 以 `_failed` 结尾的事件表示存储或查询失败（warn），功能降级为原有行为。
 - **ops 错误记录的状态码**是网关自己的应答状态：经 CDN 的 502/504 对客户端改写为 503（§7.6、X-XY-Upstream-Status），ops 记录仍记原值，否则会与无号 503 混在一起、让 §14 的前后对比失真（审查 F7）；读请求体时连接中断造成的 400 记为 499。
 - **分类结果**写入每次上游失败的 ops 记录（`upstream_errors[].resilience_category`）；只按状态码归类的上游 4xx（401、402 除外）以 info 级 `resilience.unclassified` 采样记录脱敏、截断后的文案（每进程每分钟约 10 条），用于补充关键字。
-- **统计接口**：`GET /api/v1/admin/resilience/stats?window=`，按分组与账号汇总以下指标：
-  - 首包前心跳提交数；
-  - 首输出超时换号；
+- **统计接口**：`GET /api/v1/admin/resilience/stats?window=`，按分组与账号汇总以下指标（计数名与含义见 `docs/GATEWAY_RESILIENCE.md` §5.2）：
+  - 首包前心跳提交数（按协议）；
+  - 首输出超时换号（按阶段）；
   - 预算耗尽；
   - 末位兜底；
-  - 兜底分组；
-  - 改绑（按原因）；
+  - 兜底分组与切回；
+  - 会话改绑；
   - 未送达（按阶段）；
+  - 推断的 CDN 切断（未送达且阶段为等待响应头或首输出前，按耗时分入 90、125、300 秒桶）；
   - 快速失败；
   - 失败回合封顶；
-  - 余额状态分布；
-  - 推断的 CDN 切断（499 且阶段为首输出前，时长按 90、125、300 秒分桶）。
-- **运维页**新增“网关韧性”面板；账号列表显示余额状态与下次复检时间，提供“已充值”按钮（`POST /api/v1/admin/accounts/:id/balance/recheck`）；未送达记录可查询（`GET /api/v1/admin/resilience/undelivered`）；计数与未送达列表显示分组名；面板底部为“选号解释”（§4.4 的原版调度 Explain）。
+  - 滥用保护计费；
+  - 停滞断流；
+  - 已输出后的上游失败（按失败类型，§7.6）；
+  - 丢弃的中转伪保活帧（按账号，§7.8）。
+- **运维页**新增“网关韧性”面板；余额不足暂停在账号列表中显示为临时不可调度（原因 `balance:`），“恢复状态”立即放回；未送达记录可查询（`GET /api/v1/admin/resilience/undelivered`）；计数与未送达列表显示分组名；面板底部为“选号解释”（§4.4 的原版调度 Explain）。
 - **降低日志噪声**：
   - `upstream_billing_rate_sync_applied` 从 info 降为 debug；
-  - 余额批量探测不写审计日志；
   - `ops_system_logs.message` 只保留模板，原文进入 `extra`。
 
 ## 13. 上游同步与补丁登记（D10）
@@ -590,10 +579,10 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
 | 首输出阈值过紧，误杀慢但正常的长推理 | 按 effort 分档，并可按模型覆盖；最后一个候选不设单次超时；测试服务器用生产 TTFT 分布回放校准 |
 | 提前提交后，状态码语义变为流内错误 | 只对经 CDN 的流式请求，并延迟 15 秒；确定性检查都在提交前；流内错误带 code 与 status |
 | 软冷却过度（一次失败让所有会话都临时溢出） | 默认 30 秒；只有账号级的瞬时类别冷却，请求级降载不冷却；单号组由末位兜底保证可用 |
-| 余额探测被中转商限流，或误判 | `/v1/usage` 不消耗推理；生成探测有日预算；单飞锁；探测得到 401 时转凭据路径 |
+| 余额误判或中转已充值仍被暂停 | 识别规则见 §2；暂停固定 5 分钟，到期由真实请求重试；管理员可在账号列表立即恢复 |
 | 兜底分组价格差异引发投诉 | 用户侧可见；默认不为任何分组配置，由管理员显式设置 |
 | 未送达不计费被滥用 | 每 Key 每小时阈值后按上游成本计费；上游请求立即取消，限制成本 |
-| 多实例下状态不一致 | 会话计数、回避集、余额锁、稳定时间戳、兜底 Key 都放 Redis。进程内尽力而为的有：负缓存、快速失败、失败回合封顶、续链绑定，以及几个只用于省去 Redis 往返的本地索引（会话失败与回避标记、末位兜底使用记录、兜底转移记录）。多实例时，另一实例记下的回避不会被本实例读取，本实例的成功也不会清零另一实例的计数。生产为单实例；改为多实例前需把这些索引改为 Redis 读取或接受上述偏差 |
+| 多实例下状态不一致 | 会话计数、回避集、稳定时间戳、兜底 Key 都放 Redis。进程内尽力而为的有：负缓存、快速失败、失败回合封顶、续链绑定，以及几个只用于省去 Redis 往返的本地索引（会话失败与回避标记、末位兜底使用记录、兜底转移记录）。多实例时，另一实例记下的回避不会被本实例读取，本实例的成功也不会清零另一实例的计数。生产为单实例；改为多实例前需把这些索引改为 Redis 读取或接受上述偏差 |
 | 上游同步冲突 | 逻辑集中在自有包；钩子都登记在 policy 与 scheduler-diff 中 |
 | 现有测试的期望值改变 | 逐条更新断言，并保留改动理由；新增针对每个 Scenario 的测试 |
 
@@ -601,7 +590,7 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
 
 思路来源（只借鉴设计；LGPL、MIT 项目可以参考实现，但仍在 xy2api 内重写；无许可证或 AGPL 的项目只借鉴思路）：
 
-- 余额状态机与探测：S2AM-GO、relay-tower、transit-hub、guardian；
+- 余额状态机与探测：S2AM-GO、relay-tower、transit-hub、guardian（RC 实现，0.4.0 精简为固定暂停，§3.2）；
 - 会话失败改绑：kiss-kedaya、sub2api-plus；
 - 无号兜底分组：DeanZFC、sub2api_cloudflare；
 - 请求预算：DeanZFC、Portkey、LiteLLM；
@@ -618,11 +607,11 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
 
 生产 0.3.0 近 3 小时（04:53–07:53Z）推理请求 14,866 次、失败 1,649 次（11.1%）。根因、次数与证据见 [`evidence/production-errors-20261016.md`](evidence/production-errors-20261016.md)。18.1–18.4 受总开关约束，关闭时恢复 0.3.0 行为；18.5 中白名单 404 提示、上传中断记 499 与全 0 会话 ID 不受开关控制（缺陷修复），完整清单见 runbook §6。
 
-### 18.1 Grok 余额 429 进入余额状态机（R1，761 次）
+### 18.1 Grok 余额 429 改走余额暂停（R1，761 次）
 
-Grok 走专属错误处理 `handleGrokAccountUpstreamError`，不经过 `RateLimitService.HandleUpstreamError`，§2 分类与 §3.2 余额状态机都没有接入。一个中转在 429 正文里写“insufficient balance”，同时给出请求窗口耗尽的重置头；网关据此限流约 28.6 分钟，单号分组整组 429。
+Grok 走专属错误处理 `handleGrokAccountUpstreamError`，不经过 `RateLimitService.HandleUpstreamError`，§2 分类与 §3.2 余额处理都没有接入。一个中转在 429 正文里写“insufficient balance”，同时给出请求窗口耗尽的重置头；网关据此限流约 28.6 分钟，单号分组整组 429。
 
-- API Key 类、非池模式的 Grok 账号：正文按 §2 分类为 `BALANCE` 时，先进入余额状态机（30 秒内有成功为弱信号 `SUSPECT`，否则 `EXHAUSTED` 并从 60 秒起探测），不再按重置头装限流；
+- API Key 类、非池模式的 Grok 账号：正文按 §2 分类为 `BALANCE` 时按 §3.2 暂停 `balance.pause_seconds`，不再按重置头装限流；
 - OAuth 账号（直连 xAI）、池模式账号与非余额错误保持 Grok 原有处理；
 - 钩子：`openai_gateway_grok.go`（required_literals）。
 - 遗留：Grok 进程内阻断（模型配额、团队限流）对 `resiliencePenaltyOf` 不可见，Explain 与 `Retry-After` 看不到它们（P2）。
@@ -658,4 +647,4 @@ Codex 压缩上下文时回放 `web_search_call` 却声明 `tools:[]`，ChatGPT 
 
 ### 18.6 需管理员处理
 
-渠道定价与白名单一致；单号分组补号或配置无号兜底分组；余额 403 累计置错的账号充值后复检；加大 Caddy 日志保留；轮换设置中含明文凭据的代理地址。
+渠道定价与白名单一致；单号分组补号或配置无号兜底分组；余额 403 累计置错的账号充值后手动恢复；加大 Caddy 日志保留；轮换设置中含明文凭据的代理地址。

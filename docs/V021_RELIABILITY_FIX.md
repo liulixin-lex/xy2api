@@ -46,7 +46,7 @@ Codex direct images 已有独立的读取错误包装及外层转换协议；初
 - gateway_reliability_guards_test.go：读取错误/重放停止条件，流式与缓冲协议证据正负例，取消/超时与未发送确定性、重复 Finish 及并发用量确认。
 - gateway_buffered_reliability_test.go：真实 API Key 认证中间件和 Gin 路由、真实本机 HTTP；Responses、raw Chat、Images 的成功接管、耗尽一次最终错误、取消零后续派发、未认证零发送。仓库数据为合成 stub，非数据库认证端到端；简单模式隔离费用，受控预算另由真实存储测试验证。
 
-本地原始日志位置：/opt/xy2api-v021-fix-20260929-anp5W2/。只连接带本任务标签的临时 PG17/Redis8.4；测试会清理专用 Redis DB15，禁止连接运行站点。
+本地原始日志位置：<工作机 D>/xy2api-v021-fix-20260929-anp5W2/。只连接带本任务标签的临时 PG17/Redis8.4；测试会清理专用 Redis DB15，禁止连接运行站点。
 
 | 日志 | 结果 / 意义 |
 | --- | --- |
@@ -122,7 +122,7 @@ Codex direct images 已有独立的读取错误包装及外层转换协议；初
 
 上述新补修并未在这里宣称完整后端、完整race、最终制品或线上供应商全部通过。13适配器测试调用真实适配器、本机HTTP和隔离PG/Redis，在typed failover后由测试驱动同ledger的后续选择，不是全认证或真实计费端到端。成员新测试覆盖simple默认组和显式组；standard默认组保留性在本轮交叉审查中来自源码核对。历史pending没有迁移或自动修账，不将标记修复描述成已解决重复扣费。
 
-证据根目录为/xy2/artifacts/production-incident-20260930，pr74-review/review-evidence.json保存完整command/stdout/stderr/退出码/哈希；scheduler-review保存三态成员证据。源补丁SHA256为bffc16b376adb1456e9996d61e41b721f98448a97c01c1ce2f13edbc64ecf850和cfa25ef87336efa0fbf66bf28bd7e5c9064913f2a6f7e56e89473a12c68a4cbc。新本地HEAD、干净树来源审计与范围校验由pr74-final-evidence记录；组合全量、升级烟测及远端CI由根执行者独立收口，不以旧head通过替代。
+证据根目录为<工作机 B>/artifacts/production-incident-20260930，pr74-review/review-evidence.json保存完整command/stdout/stderr/退出码/哈希；scheduler-review保存三态成员证据。源补丁SHA256为bffc16b376adb1456e9996d61e41b721f98448a97c01c1ce2f13edbc64ecf850和cfa25ef87336efa0fbf66bf28bd7e5c9064913f2a6f7e56e89473a12c68a4cbc。新本地HEAD、干净树来源审计与范围校验由pr74-final-evidence记录；组合全量、升级烟测及远端CI由根执行者独立收口，不以旧head通过替代。
 
 复验使用新建专用PG/Redis和仓库固定Go版本，运行go test -race -tags unit ./internal/service，-run选取TestReviewPR74、TestAccountPoolEntry及相邻守卫；完整命令以证据中的数组为准。切勿把会清理Redis DB15的夹具连向运行站点。
 
@@ -134,4 +134,4 @@ Codex direct images 已有独立的读取错误包装及外层转换协议；初
 
 已重开根执行者联合候选6393e18128b2b710af5e0c1397de53bf9c9b1608的证据：全后端unit/integration/lint均exit0；complete-05及独立审计PASS。8阶段包含0.1.9升级、保留313库的旧二进制场景、两种备份恢复和新装；候选48项基础HTTP、56次调度请求通过，3:1实发30/10。原0.2.1及恢复原版均真实栈溢出exit2；常驻容器保持、测试资源清理通过。
 
-该镜像含PR73联合功能，不能称PR74独立镜像已验收；本CI后继不改业务源码或冻结镜像。完整结果见/xy2/artifacts/production-incident-20260930/startup-runs/complete-05/{RESULT.json,INDEPENDENT_AUDIT.json}及BUILD.json；RESULT SHA256为b75c2b6f717fc46fd250c38206bf52a9df700d594cc2d97e187bb934cb3283d1。真实供应商与生产部署不在此次隔离验收范围。
+该镜像含PR73联合功能，不能称PR74独立镜像已验收；本CI后继不改业务源码或冻结镜像。完整结果见<工作机 B>/artifacts/production-incident-20260930/startup-runs/complete-05/{RESULT.json,INDEPENDENT_AUDIT.json}及BUILD.json；RESULT SHA256为b75c2b6f717fc46fd250c38206bf52a9df700d594cc2d97e187bb934cb3283d1。真实供应商与生产部署不在此次隔离验收范围。

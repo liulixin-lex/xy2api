@@ -1,7 +1,7 @@
 # STATE reliability upgrade
 
 Source baseline: `1a4fd39c71eadc4d5d587a39373bcded692e4fa5` (0.1.4).
-Implementation copy: `/xy/artifacts/codex-state-upgrade/reliability-work`.
+Implementation copy: `<工作机 A>/artifacts/codex-state-upgrade/reliability-work`.
 
 ## Administrator controls
 
@@ -108,8 +108,8 @@ time for shared admission and mutations.
 ## Rollout acceptance and rollback
 
 Local verification records are in
-`/xy/artifacts/codex-state-upgrade/reliability-20260920/`; the four delivery roles
-remain in `/xy/artifacts/codex-state-upgrade/`. Their final ledger contains literal
+`<工作机 A>/artifacts/codex-state-upgrade/reliability-20260920/`; the four delivery roles
+remain in `<工作机 A>/artifacts/codex-state-upgrade/`. Their final ledger contains literal
 commands, stdout/stderr, exit codes, source hashes and transaction observations.
 Do not treat a local test pass as the production success-rate experiment.
 
@@ -141,7 +141,7 @@ tag points to `f0e60e852be01e02bac3917307ec888f6820c7d1`; product version is
 security checks, five-platform checksums and both GHCR architecture labels passed.
 The macOS deployment-script gate also passed on its required macOS runner.
 
-`/xy/xy2api` main contains the merged source. Release and source-transaction
+`<工作机 A>/xy2api` main contains the merged source. Release and source-transaction
 evidence extends the same four roles under `release-0.1.5/`. Local disposable
 containers verified upgrade and restart behavior; the production site was not
 accessed or changed. Actual account coverage and quality remain rollout goals.

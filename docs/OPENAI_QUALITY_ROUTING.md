@@ -126,5 +126,5 @@ their existing cache identity. No production deployment, schema migration,
 management page, or real-model probe is required by this implementation.
 
 The isolated test ledger and four delivery artifacts live at
-`/xy/artifacts/gpt-quality-routing/`. Their observed outputs, including environment
+`<工作机 A>/artifacts/gpt-quality-routing/`. Their observed outputs, including environment
 failures and later successful reruns, are recorded in `VERIFICATION.txt`.

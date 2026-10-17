@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -521,26 +520,6 @@ func (s *OpsAlertEvaluatorService) computeRuleMetric(
 		now := time.Now().UTC()
 		return float64(countAccountsByCondition(availability.Accounts, func(acc *AccountAvailability) bool {
 			return acc.TempUnschedulableUntil != nil && now.Before(*acc.TempUnschedulableUntil)
-		})), true
-	case "account_balance_exhausted_count", "account_balance_unrecovered_count":
-		// Upstream balance states (gateway resilience, tasks 2.6): a rule
-		// fires when an account runs out and resolves once it recovers;
-		// "unrecovered" counts only accounts out longer than
-		// balance.notify_after_hours.
-		if s == nil || s.opsService == nil {
-			return 0, false
-		}
-		availability, err := s.opsService.GetAccountAvailability(ctx, platform, groupID)
-		if err != nil || availability == nil {
-			return 0, false
-		}
-		var olderThan time.Time
-		if strings.TrimSpace(rule.MetricType) == "account_balance_unrecovered_count" {
-			olderThan = time.Now().Add(-time.Duration(resilience.Current().Balance.NotifyAfterHours) * time.Hour)
-		}
-		return float64(countAccountsByCondition(availability.Accounts, func(acc *AccountAvailability) bool {
-			return acc.BalanceState == string(resilience.BalanceExhausted) &&
-				(olderThan.IsZero() || (acc.BalanceSince != nil && acc.BalanceSince.Before(olderThan)))
 		})), true
 	case "group_rate_limit_ratio":
 		if groupID == nil || *groupID <= 0 {

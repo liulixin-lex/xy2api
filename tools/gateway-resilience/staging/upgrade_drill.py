@@ -196,6 +196,11 @@ def main() -> int:
     _, ul = api("POST", "/api/v1/auth/login", {"email": "drill@drill.local", "password": "drill-password-1"})
     _, k = api("POST", "/api/v1/keys", {"name": "drill-key", "group_id": gid}, ul["data"]["access_token"])
     key = k["data"]["key"]
+    # An administrator rule that shares a name 276 seeds but watches another
+    # metric: 276 skips that name and 277 must leave the rule alone.
+    psql("INSERT INTO ops_alert_rules (name, description, enabled, metric_type, operator, threshold, window_minutes, "
+         "sustained_minutes, severity, notify_email, cooldown_minutes, created_at, updated_at) VALUES "
+         "('上游余额长期未恢复', 'drill', false, 'account_error_count', '>', 0, 5, 1, 'P3', false, 60, NOW(), NOW())")
     step("0.3.0 on an empty database", start_s=took, gateway=gateway_request(key))
 
     started = time.time()
@@ -226,12 +231,17 @@ def main() -> int:
                    "WHERE (table_name, column_name) IN (('groups','availability_fallback_group_id'),('usage_logs','origin_group_id'),"
                    "('ops_error_logs','disconnect_stage'),('ops_error_logs','delivered_bytes'))")
     undelivered = psql("SELECT to_regclass('public.gateway_undelivered_requests') IS NOT NULL")
+    # 276 seeds two balance alert rules and 277 removes them again when name
+    # and metric both match: only the administrator's rule is left.
+    balance_rules = psql("SELECT coalesce(string_agg(name||':'||metric_type, ', ' ORDER BY name), '') FROM ops_alert_rules "
+                         "WHERE name IN ('上游余额不足', '上游余额长期未恢复')")
     status, settings = api("GET", "/api/v1/admin/settings/gateway-resilience", token=token)
     s = settings["data"]["settings"]
     s["keepalive"]["delay_seconds"] = 17
     put_status, _ = api("PUT", "/api/v1/admin/settings/gateway-resilience", s, token)
     step("upgrade to the candidate", start_s=took, longest_blocked_probe_s=round(worst[0], 2), migration_log=mig_lines,
          new_columns=columns, undelivered_table=undelivered, settings_get=status, settings_put=put_status,
+         balance_alert_rules=balance_rules, balance_alert_rules_ok=balance_rules == "上游余额长期未恢复:account_error_count",
          gateway=gateway_request(key), sizes=psql("SELECT pg_size_pretty(pg_total_relation_size('usage_logs'))"))
 
     sh("docker", "stop", "-t", "30", NAME)

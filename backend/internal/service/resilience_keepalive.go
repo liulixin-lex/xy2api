@@ -144,7 +144,9 @@ func (k *openAICompactSSEKeepalive) replaceCommittedErrorBody(w gin.ResponseWrit
 }
 
 // preOutputTerminalFrame converts an error response body into the terminal
-// frame of the inbound protocol.
+// frame of the inbound protocol. It replaces an error the gateway wrote
+// while the client had seen heartbeats only, so a Responses frame opens the
+// response with response.created first.
 func preOutputTerminalFrame(protocol string, status int, body []byte) []byte {
 	errType, code, message := committedErrorFields(status, body)
 	switch protocol {
@@ -168,19 +170,42 @@ func preOutputTerminalFrame(protocol string, status int, body []byte) []byte {
 				code = "rate_limit_exceeded"
 			}
 		}
+		// The client has seen heartbeats only: open the response first.
+		id, createdAt := "resp_"+randomKeepaliveHex(12), time.Now().Unix()
 		payload, _ := json.Marshal(map[string]any{
-			"type": "response.failed",
+			"type":            "response.failed",
+			"sequence_number": 1,
 			"response": map[string]any{
-				"id":         "resp_" + randomKeepaliveHex(12),
+				"id":         id,
 				"object":     "response",
-				"created_at": time.Now().Unix(),
+				"created_at": createdAt,
 				"status":     "failed",
 				"output":     []any{},
 				"error":      map[string]any{"code": code, "message": message},
 			},
 		})
-		return []byte("event: response.failed\ndata: " + string(payload) + "\n\n")
+		return append(ResponsesCreatedFrame(id, "", createdAt), "event: response.failed\ndata: "+string(payload)+"\n\n"...)
 	}
+}
+
+// ResponsesCreatedFrame is the response.created event (sequence number 0)
+// that opens a Responses stream the gateway ends itself before any event
+// reached the client. Strict SDKs (openai-python, openai-node) reject a
+// stream whose first event is not response.created and report that
+// instead of the gateway's error.
+func ResponsesCreatedFrame(id, model string, createdAt int64) []byte {
+	response := map[string]any{
+		"id":         id,
+		"object":     "response",
+		"created_at": createdAt,
+		"status":     "in_progress",
+		"output":     []any{},
+	}
+	if model != "" {
+		response["model"] = model
+	}
+	payload, _ := json.Marshal(map[string]any{"type": "response.created", "sequence_number": 0, "response": response})
+	return []byte("event: response.created\ndata: " + string(payload) + "\n\n")
 }
 
 // committedErrorFields extracts type, code and message from an OpenAI- or

@@ -99,7 +99,7 @@ func (c *resilience403Counter) ResetOpenAI403Count(context.Context, int64) error
 
 func newPenaltyFixture(t *testing.T, platform string) (*RateLimitService, *resilienceAccountRepo, *Account, *ResilienceService) {
 	t.Helper()
-	withResilienceSettings(t, func(s *resilience.Settings) { s.Balance.JitterRatio = 0 })
+	withResilienceSettings(t, nil)
 	account := &Account{ID: 254, Name: "relay", Platform: platform, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true}
 	repo := &resilienceAccountRepo{account: account}
 	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
@@ -108,48 +108,6 @@ func newPenaltyFixture(t *testing.T, platform string) (*RateLimitService, *resil
 	r.rateLimit = svc
 	svc.SetResilienceService(r)
 	return svc, repo, account, r
-}
-
-func TestBalance403ExhaustsWithoutErrorState(t *testing.T) {
-	// Spec: Claude relay runs out of credit.
-	svc, repo, account, _ := newPenaltyFixture(t, PlatformAnthropic)
-	disable := svc.HandleUpstreamError(context.Background(), account, http.StatusForbidden, http.Header{},
-		[]byte(`{"type":"error","error":{"type":"permission_error","message":"insufficient balance"}}`))
-	require.True(t, disable)
-	require.Equal(t, 0, repo.errorCalls, "status must stay active")
-	require.True(t, strings.HasPrefix(repo.tempReason, resilience.ReasonPrefixBalanceExhausted), repo.tempReason)
-	rec := resilience.BalanceRecordFrom(repo.account.Extra)
-	require.Equal(t, resilience.BalanceExhausted, rec.State)
-	require.WithinDuration(t, time.Now().Add(60*time.Second+10*time.Minute), repo.tempUntil, 5*time.Second)
-}
-
-func TestBalanceWrappedIn429(t *testing.T) {
-	svc, repo, account, r := newPenaltyFixture(t, PlatformAnthropic)
-	body := []byte(`{"error":{"type":"rate_limit_error","message":"Insufficient account balance"}}`)
-	svc.HandleUpstreamError(context.Background(), account, http.StatusTooManyRequests, http.Header{}, body)
-	require.Equal(t, resilience.BalanceExhausted, resilience.BalanceRecordFrom(repo.account.Extra).State)
-
-	// A recent success makes the same wording only a weak signal.
-	svc2, repo2, account2, r2 := newPenaltyFixture(t, PlatformAnthropic)
-	_ = r
-	r2.NoteAccountSuccess(context.Background(), account2)
-	svc2.HandleUpstreamError(context.Background(), account2, http.StatusTooManyRequests, http.Header{}, body)
-	rec := resilience.BalanceRecordFrom(repo2.account.Extra)
-	require.Equal(t, resilience.BalanceSuspect, rec.State)
-	require.Equal(t, resilience.TierSoft, resilience.TempUnschedTier(repo2.tempReason))
-}
-
-func TestBalance402NoLongerSetsError(t *testing.T) {
-	svc, repo, account, _ := newPenaltyFixture(t, PlatformGemini)
-	svc.HandleUpstreamError(context.Background(), account, http.StatusPaymentRequired, http.Header{}, []byte(`{"error":{"message":"payment required"}}`))
-	require.Equal(t, 0, repo.errorCalls)
-	require.Equal(t, resilience.BalanceExhausted, resilience.BalanceRecordFrom(repo.account.Extra).State)
-
-	// Balance switch off: 0.3.0 behaviour.
-	withResilienceSettings(t, func(s *resilience.Settings) { s.Balance.Enabled = false })
-	svc2, repo2, account2, _ := newPenaltyFixtureKeepSettings(t, PlatformGemini)
-	svc2.HandleUpstreamError(context.Background(), account2, http.StatusPaymentRequired, http.Header{}, []byte(`{"error":{"message":"payment required"}}`))
-	require.Equal(t, 1, repo2.errorCalls)
 }
 
 func newPenaltyFixtureKeepSettings(t *testing.T, platform string) (*RateLimitService, *resilienceAccountRepo, *Account, *ResilienceService) {
@@ -228,64 +186,31 @@ func TestApplyResilienceOutcomeStreamBalanceAndStall(t *testing.T) {
 	svc, repo, account, _ := newPenaltyFixture(t, PlatformOpenAI)
 	res := resilience.Classify(resilience.Outcome{Source: resilience.SourceStreamEvent, StatusCode: 200, Code: "insufficient_quota"}, nil)
 	svc.ApplyResilienceOutcome(context.Background(), account, res, "stream insufficient_quota")
-	require.Equal(t, resilience.BalanceExhausted, resilience.BalanceRecordFrom(repo.account.Extra).State)
+	requireBalancePause(t, repo, 300*time.Second)
 
 	svc2, repo2, account2, _ := newPenaltyFixture(t, PlatformAnthropic)
 	svc2.ApplyResilienceOutcome(context.Background(), account2, resilience.Result{Category: resilience.CategoryStall}, "stall")
 	require.WithinDuration(t, time.Now().Add(30*time.Second), repo2.tempUntil, 3*time.Second)
 }
 
-func TestRecoveringSuccessesReturnToOK(t *testing.T) {
+func TestBrokenStreamUsageLiftsNoCooldown(t *testing.T) {
+	// The partial usage of a stream that broke on a last-resort account is
+	// recorded, but it is no success: the transient cooldown stays.
 	svc, repo, account, r := newPenaltyFixture(t, PlatformAnthropic)
-	svc.HandleUpstreamError(context.Background(), account, http.StatusPaymentRequired, http.Header{}, []byte(`{"error":{"message":"insufficient balance"}}`))
-	before := resilience.BalanceRecordFrom(repo.account.Extra)
-	after := resilience.OnProbe(before, resilience.Current(), resilience.ProbePositive, "usage", "balance 10", time.Now())
-	fresh, _ := repo.GetByID(context.Background(), account.ID)
-	svc.persistBalanceRecord(context.Background(), fresh, before, after, "probe")
-	require.Equal(t, 1, repo.clearCalls, "the balance pause is lifted")
-	require.Equal(t, 1, r.RecoveringCap(account.ID, time.Now()))
-
-	for i := 0; i < 3; i++ {
-		r.NoteAccountSuccess(context.Background(), account)
-	}
-	require.Equal(t, resilience.BalanceOK, resilience.BalanceRecordFrom(repo.account.Extra).State)
-	require.Equal(t, 0, r.RecoveringCap(account.ID, time.Now()))
-}
-
-func TestBrokenStreamUsageIsNoRecoverySuccess(t *testing.T) {
-	// The partial usage of a stream that broke on a RECOVERING account is
-	// recorded, but it is no success: the account must not return to OK.
-	svc, repo, account, r := newPenaltyFixture(t, PlatformAnthropic)
-	svc.HandleUpstreamError(context.Background(), account, http.StatusPaymentRequired, http.Header{}, []byte(`{"error":{"message":"insufficient balance"}}`))
-	before := resilience.BalanceRecordFrom(repo.account.Extra)
-	after := resilience.OnProbe(before, resilience.Current(), resilience.ProbePositive, "usage", "balance 10", time.Now())
-	fresh, _ := repo.GetByID(context.Background(), account.ID)
-	svc.persistBalanceRecord(context.Background(), fresh, before, after, "probe")
+	svc.HandleUpstreamError(context.Background(), account, http.StatusBadGateway, http.Header{}, []byte(`{"error":{"message":"bad gateway"}}`))
+	require.True(t, strings.HasPrefix(repo.tempReason, resilience.ReasonPrefixTransient), repo.tempReason)
+	r.lastResortUsed.Store(account.ID, time.Now())
 
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	st := resilience.NewRequestState()
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil).WithContext(resilience.WithRequestState(context.Background(), st))
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{AccountID: account.ID, Kind: "stream_error", Message: "upstream stream broke"})
-	for i := 0; i < 3; i++ {
-		r.NoteAccountSuccess(c.Request.Context(), account)
-	}
-	require.Equal(t, resilience.BalanceRecovering, resilience.BalanceRecordFrom(repo.account.Extra).State)
+	r.NoteAccountSuccess(c.Request.Context(), account)
+	require.Zero(t, repo.clearCalls, "a broken stream keeps the cooldown")
 
-	// Another account of the same request that did not fail still counts.
-	require.False(t, st.AccountFailed(account.ID+1))
-	for i := 0; i < 3; i++ {
-		r.NoteAccountSuccess(context.Background(), account)
-	}
-	require.Equal(t, resilience.BalanceOK, resilience.BalanceRecordFrom(repo.account.Extra).State)
-}
-
-func TestClearBalanceExclusionKeepsOtherPauses(t *testing.T) {
-	svc, repo, account, _ := newPenaltyFixture(t, PlatformAnthropic)
-	repo.tempUntil = time.Now().Add(time.Hour)
-	repo.tempReason = "OAuth 401: expired"
-	svc.clearBalanceExclusion(context.Background(), account)
-	require.Equal(t, 0, repo.clearCalls)
+	r.NoteAccountSuccess(context.Background(), account)
+	require.Equal(t, 1, repo.clearCalls, "a real success of the last-resort account lifts it")
 }
 
 func TestResilienceOffKeepsLegacyPenalties(t *testing.T) {

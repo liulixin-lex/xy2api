@@ -33,8 +33,7 @@ func TestResilienceSchedulingMatrix(t *testing.T) {
 		},
 		"hard": func(a *Account) {
 			until := time.Now().Add(time.Hour)
-			a.TempUnschedulableUntil, a.TempUnschedulableReason = &until, "balance:exhausted"
-			a.Extra = resilience.BalanceRecord{State: resilience.BalanceExhausted, Since: time.Now()}.Extra()
+			a.TempUnschedulableUntil, a.TempUnschedulableReason = &until, resilience.BalancePauseReason("HTTP 403: Insufficient account balance")
 		},
 		"streak": func(*Account) {}, // failures are recorded for the session below
 	}

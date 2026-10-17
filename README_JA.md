@@ -4,7 +4,7 @@
 
 # XY2API
 
-[![Go](https://img.shields.io/badge/Go-1.27.0-00ADD8.svg)](https://golang.org/)
+[![Go](https://img.shields.io/badge/Go-1.27.2-00ADD8.svg)](https://golang.org/)
 [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
@@ -35,6 +35,8 @@ XY2API は、AI 製品のサブスクリプションから API クォータを�
 - **APIキー配布** - ユーザー向けの APIキーの生成と管理
 - **精密な課金** - トークンレベルの使用量追跡とコスト計算
 - **スマートスケジューリング** - スティッキーセッション付きのインテリジェントなアカウント選択
+- **シェアスケジューリング** - グループごとに選べるスケジューラー。新しいセッションを階層と重みで割り当て、紐付いたセッションは元のアカウントに留めてプロンプトキャッシュを維持（[ガイド](docs/SHARE_SCHEDULING.md)、中国語）
+- **ゲートウェイレジリエンス** - 上流障害の分類と短いクールダウン、セッションの再割り当て、ラストリゾートと代替グループ、リクエスト予算、CDN 経由の出力前キープアライブ、クライアント切断時の課金ルール（[ガイド](docs/GATEWAY_RESILIENCE.md)、中国語）
 - **同時実行制御** - ユーザーごと・アカウントごとの同時実行数制限
 - **レート制限** - 設定可能なリクエスト数およびトークンレート制限
 - **内蔵決済システム** - EasyPay、Alipay、WeChat Pay、Stripe に対応。ユーザーのセルフサービスチャージが可能で、別途決済サービスのデプロイは不要（[設定ガイド](docs/PAYMENT.md)）
@@ -45,7 +47,7 @@ XY2API は、AI 製品のサブスクリプションから API クォータを�
 
 | コンポーネント | 技術 |
 |-----------|------------|
-| バックエンド | Go 1.27.0, Gin, Ent |
+| バックエンド | Go 1.27.2, Gin, Ent |
 | フロントエンド | Vue 3.4+, Vite 5+, TailwindCSS |
 | データベース | PostgreSQL 15+ |
 | キャッシュ/キュー | Redis 7+ |
@@ -324,7 +326,7 @@ cd xy2api/deploy
 
 #### 前提条件
 
-- Go 1.21+
+- Go 1.27.2（`backend/go.mod` のバージョン）
 - Node.js 18+
 - PostgreSQL 15+
 - Redis 7+

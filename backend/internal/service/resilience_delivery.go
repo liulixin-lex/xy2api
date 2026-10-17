@@ -177,6 +177,18 @@ func DeliveryOnlyHeartbeats(c *gin.Context) (only, tracked bool) {
 	return w.written.Load() > 0 && w.semanticBytes() == 0, true
 }
 
+// ResponsesStreamUnopened reports whether a Responses terminal event the
+// gateway writes now needs response.created before it: resilience is on,
+// the request is tracked and nothing but heartbeats (if anything) reached
+// the client. Switched off, the terminal event goes out alone as in 0.3.0.
+func ResponsesStreamUnopened(c *gin.Context) bool {
+	if !resilience.Current().Enabled {
+		return false
+	}
+	w := deliveryWriterFrom(c)
+	return w != nil && w.semanticBytes() == 0
+}
+
 // resilienceUpstreamContext applies the disconnect rules to a context that
 // was detached from the client.
 func resilienceUpstreamContext(client, detached context.Context) context.Context {

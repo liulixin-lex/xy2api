@@ -107,6 +107,14 @@ func (r *ResilienceService) outputP99Cap(model string) int {
 	return max(p99, outputP99Floor)
 }
 
+// ResilienceRepository is the SQL side of the resilience layer.
+type ResilienceRepository interface {
+	// OutputTokenP99ByModel returns the P99 output tokens per requested
+	// model since the given time, for models with at least minSamples
+	// requests.
+	OutputTokenP99ByModel(ctx context.Context, since time.Time, minSamples int) (map[string]int, error)
+}
+
 // ConfigureOutputP99 registers the loop that recomputes the per-model
 // output caps from usage history.
 func (r *ResilienceService) ConfigureOutputP99(repo ResilienceRepository) {
@@ -160,29 +168,16 @@ type ResilienceStats struct {
 	WindowSeconds int64                  `json:"window_seconds"`
 	Scope         string                 `json:"scope"`
 	Counters      []resilience.MetricRow `json:"counters"`
-	BalanceStates map[string]int64       `json:"balance_states"`
 }
 
-// Stats sums this instance's resilience counters over window and reports
-// the account balance state distribution.
-func (r *ResilienceService) Stats(ctx context.Context, window time.Duration) ResilienceStats {
+// Stats sums this instance's resilience counters over window.
+func (r *ResilienceService) Stats(window time.Duration) ResilienceStats {
 	if window <= 0 || window > resilience.MetricsRetention {
 		window = resilience.MetricsRetention
 	}
-	out := ResilienceStats{
+	return ResilienceStats{
 		WindowSeconds: int64(window / time.Second),
 		Scope:         "instance",
 		Counters:      resilience.Snapshot(window),
-		BalanceStates: map[string]int64{},
 	}
-	if r != nil && r.probe != nil && r.probe.repo != nil {
-		qctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		if states, err := r.probe.repo.CountBalanceStates(qctx); err == nil {
-			out.BalanceStates = states
-		} else {
-			slog.Warn("resilience.balance_states_failed", "error", err)
-		}
-	}
-	return out
 }

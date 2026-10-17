@@ -6,12 +6,16 @@
 
 | 项目 | 说明 |
 |------|------|
-| **项目仓库** | liulixin-lex/xy2api |
-| **技术栈** | Go 后端 (Ent ORM + Gin) + Vue3 前端 (pnpm) |
-| **数据库** | PostgreSQL 16 + Redis |
+| **项目仓库** | liulixin-lex/xy2api（公开仓库：主机地址、宿主机路径、凭据不得入库） |
+| **技术栈** | Go 后端 (Ent ORM + Gin + Wire) + Vue3 前端 (pnpm) |
+| **Go 版本** | 以 `backend/go.mod` 为准（当前 1.27.2），CI 硬断言同一版本 |
+| **数据库** | PostgreSQL 15+（CI 与集成测试用 18）+ Redis 7+ |
 | **包管理** | 后端: go modules, 前端: **pnpm**（不是 npm） |
+| **协作约定** | 先读 [`AGENTS.md`](AGENTS.md) 与 [`docs/PROJECT_MEMORY.md`](docs/PROJECT_MEMORY.md)；文档目录见 [`docs/README.md`](docs/README.md) |
 
 ## 二、本地环境配置
+
+以下为 Windows 本机示例，其他系统按同样的端口与账号准备 PostgreSQL 与 Redis 即可。
 
 ### PostgreSQL 16 (Windows 服务)
 
@@ -33,11 +37,14 @@
 ### 开发工具
 
 ```bash
-# golangci-lint（CI 用 v2.13，本地建议装同一版以免版本差异带来的噪音）
-go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13
+# Go：版本与 backend/go.mod 一致（GOTOOLCHAIN=local 时版本不符会直接报错）
+go version
 
-# pnpm (前端包管理)
-npm install -g pnpm
+# golangci-lint（CI 用 v2.14.0，本地装同一版以免版本差异带来的噪音）
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+
+# pnpm (前端包管理，CI 用 pnpm 9)
+npm install -g pnpm@9
 ```
 
 ## 三、CI/CD 流水线
@@ -46,29 +53,44 @@ npm install -g pnpm
 
 | Workflow | 触发条件 | 检查内容 |
 |----------|----------|----------|
-| **backend-ci.yml** | push, pull_request | 单元测试 + 集成测试 + golangci-lint v2.13 |
-| **security-scan.yml** | push, pull_request, 每周一 | govulncheck + gosec + pnpm audit |
-| **release.yml** | tag `v*` | 构建发布（PR 不触发） |
+| **backend-ci.yml** | push, pull_request | `upstream-sync-audit`：`tools/tests` 工具单测、`sync.py audit`（来源与兼容审计）、`sync.py scheduler-diff`（原版调度差异白名单）、文档一致性检查；`test`：unit、integration、Gateway reliability、Gateway resilience（`tools/gateway-resilience/ci_gate.py`，`-race`、零跳过）、OpenAI cache reliability（真实 Redis）、Hosted recharge（真实 PostgreSQL）；`frontend`：lint、typecheck 与关键 vitest；`golangci-lint` v2.14.0；`shell`、`windows-plugin-archive`、`release-helpers` |
+| **security-scan.yml** | push, pull_request, 每周一 | govulncheck + pnpm audit（例外清单 `.github/audit-exceptions.yml`） |
+| **release.yml** | tag `v*`、手动 | 校验版本文件与标签，构建五平台制品与 GHCR 镜像（PR 不触发） |
+| **upstream-sync.yml** | 每 3 天、手动 | 选择 Sub2API 正式版本，固定 annotated tag，准备同步分支并开 Draft PR（从不自动合并） |
+
+`.github/release-tools/` 是上游 Sub2API 的分平台发布矩阵。XY2API 的 `release.yml` 不使用它（v0.2.15 同步时的裁决，见 `UPSTREAM_BASE.json` 的 `manual_resolutions`），同步时原样保留，CI 的 `release-helpers` 作业只运行它的单测。
 
 ### CI 要求
 
-- Go 版本必须是 **1.27.0**：三个 workflow 都用 `go-version-file: backend/go.mod` 取版本，随后硬断言 `go version | grep -q 'go1.27.0'`。升级 Go 时要同时改 `backend/go.mod`、`backend-ci.yml`（两处）、`release.yml`、`security-scan.yml` 里的这句断言，**以及三个 Dockerfile 里的 Go 构建镜像**（`Dockerfile` / `deploy/Dockerfile` 的 `ARG GOLANG_IMAGE`、`backend/Dockerfile` 的 `FROM golang:`）。前者漏了 CI 会在版本校验步骤直接失败；**后者漏了 CI 不会报，而是等到有人用这些 Dockerfile 构建时才失败**（`go.mod requires go >= X (running Y; GOTOOLCHAIN=local)`）。
+- Go 版本以 `backend/go.mod` 为准（当前 **1.27.2**）：各 workflow 用 `go-version-file: backend/go.mod` 取版本，随后硬断言 `go version | grep -q 'go1.27.2'`。升级 Go 时要同时改 `backend/go.mod`、`backend-ci.yml`（两处）、`release.yml`、`security-scan.yml` 里的这句断言，**以及三个 Dockerfile 里的 Go 构建镜像**（`Dockerfile` / `deploy/Dockerfile` 的 `ARG GOLANG_IMAGE`、`backend/Dockerfile` 的 `FROM golang:`）和 README 三语版本的 Go 版本。漏改 Dockerfile 与 README 由文档一致性检查（`tools/check_docs_consistency.py`）报出。
 - 前端使用 `pnpm install --frozen-lockfile`，必须提交 `pnpm-lock.yaml`
+- 改动上游调度文件（`gateway_scheduling.go`、`openai_account_scheduler.go` 等）要登记 `tools/upstream-sync/scheduler-diff.json`；在上游文件里加钩子要登记 `tools/upstream-sync/policy.json` 的 `required_literals`；对上游行为的修正登记为具名补丁。规则见 [`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md)。
 
 ### 本地测试命令
 
 ```bash
-# 后端单元测试
+# 后端单元测试与四种构建标签的 vet（无 tag、unit、integration、e2e 都要能编译）
 cd backend && go test -tags=unit ./...
+cd backend && go vet ./... && go vet -tags=unit ./... && go vet -tags=integration ./... && go vet -tags=e2e ./...
 
-# 后端集成测试
+# 后端集成测试（需要 Docker，testcontainers 起 PostgreSQL/Redis）
 cd backend && go test -tags=integration ./...
+
+# 网关韧性必测门禁（与 CI 同一脚本，-race、零跳过）
+cd backend && python3 ../tools/gateway-resilience/ci_gate.py
 
 # 代码质量检查
 cd backend && golangci-lint run ./...
 
-# 前端依赖安装（必须用 pnpm）
+# 仓库工具、上游同步审计（要求干净工作树）、原版调度差异与文档一致性
+python3 -m unittest discover -s tools/tests -p 'test_*.py'
+python3 tools/upstream-sync/sync.py audit
+python3 tools/upstream-sync/sync.py scheduler-diff
+python3 tools/check_docs_consistency.py
+
+# 前端（必须用 pnpm）
 cd frontend && pnpm install
+make test-frontend
 ```
 
 ## 四、常见坑点 & 解决方案
@@ -235,12 +257,15 @@ git add ent/       # 生成的文件也要提交
 
 提交 PR 前务必本地验证：
 
-- [ ] `go test -tags=unit ./...` 通过
-- [ ] `go test -tags=integration ./...` 通过
-- [ ] `golangci-lint run ./...` 无新增问题
+- [ ] `go test -tags=unit ./...` 通过，四种构建标签的 `go vet` 都能编译
+- [ ] `go test -tags=integration ./...` 通过（或说明本机无 Docker、由 CI 执行）
+- [ ] 改了韧性相关代码：`ci_gate.py` 通过
+- [ ] `golangci-lint run ./...`（v2.14.0）无问题
+- [ ] `sync.py audit`、`sync.py scheduler-diff`、`tools/tests` 通过
+- [ ] `python3 tools/check_docs_consistency.py` 通过，且按 [`AGENTS.md`](AGENTS.md)“变更同步”更新了相关文档
 - [ ] `pnpm-lock.yaml` 已同步（如果改了 package.json）
 - [ ] 所有 test stub 补全新接口方法（如果改了 interface）
-- [ ] Ent 生成的代码已提交（如果改了 schema）
+- [ ] Ent / Wire 生成的代码已提交（如果改了 schema 或 provider；Wire 生成后 `go.mod`/`go.sum` 不应变化）
 
 ## 五、常用命令速查
 
@@ -263,19 +288,12 @@ psql -U xy2api -h 127.0.0.1 -d xy2api -f migration.sql
 ### Git 操作
 
 ```bash
-# 同步上游
-git fetch upstream
-git checkout main
-git merge upstream/main
-git push origin main
-
-# 创建功能分支
-git checkout -b feature/xxx
-
-# Rebase 到最新 main
-git fetch upstream
-git rebase upstream/main
+# 从最新 main 创建功能分支
+git fetch origin
+git checkout -b feat/xxx origin/main
 ```
+
+同步 Sub2API 上游只走 [`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md)、`skills/xy2api-upstream-sync` 与 `tools/upstream-sync/sync.py` 的既有流程（固定正式版 annotated tag、三方合并、逐项裁决、`audit` 门禁）。**禁止**直接 merge/rebase 上游分支、全量覆盖源码或仓库级品牌替换。
 
 ### 前端操作
 
@@ -313,33 +331,42 @@ golangci-lint run ./...
 
 ```
 xy2api/
+├── AGENTS.md                # Agent 协作约定（记忆、事实优先级、变更同步）
+├── DEV_GUIDE.md             # 本文档
+├── UPSTREAM_BASE.json       # 已审计的上游基线与 provenance
 ├── backend/
-│   ├── cmd/server/          # 主程序入口
+│   ├── cmd/server/          # 主程序入口、VERSION、SUB2API_COMPAT_VERSION、wire_gen.go
 │   ├── ent/                 # Ent ORM 生成代码
 │   │   └── schema/          # 数据库 Schema 定义
 │   ├── internal/
 │   │   ├── handler/         # HTTP 处理器
-│   │   ├── service/         # 业务逻辑
+│   │   ├── service/         # 业务逻辑（含 resilience_*、share_scheduling_*）
 │   │   ├── repository/      # 数据访问层
-│   │   └── server/          # 服务器配置
-│   ├── migrations/          # 数据库迁移脚本
-│   └── config.yaml          # 配置文件
+│   │   ├── resilience/      # 网关韧性规则（无 I/O，可单测）
+│   │   ├── sharesched/      # 份额调度内核（无 I/O，可单测）
+│   │   └── server/          # 路由与中间件
+│   ├── migrations/          # 数据库迁移（只追加，checksums.json 不改旧值）
+│   └── config.yaml          # 本地配置文件（不入库）
 ├── frontend/
 │   ├── src/
 │   │   ├── api/             # API 调用
 │   │   ├── components/      # Vue 组件
 │   │   ├── views/           # 页面视图
 │   │   ├── types/           # TypeScript 类型
-│   │   └── i18n/            # 国际化
+│   │   └── i18n/            # 国际化（zh/en 键必须完全一致）
 │   ├── package.json         # 依赖配置
 │   └── pnpm-lock.yaml       # pnpm 锁文件（必须提交）
-└── .claude/
-    └── CLAUDE.md            # 本文档
+├── deploy/                  # Compose、Caddyfile、安装脚本与部署文档
+├── docs/                    # 功能与运维文档（目录见 docs/README.md）、项目记忆
+├── openspec/changes/        # 各项功能的方案、规格、任务与验证证据
+├── skills/                  # 面向 Agent 的项目技能（上游同步、管理端 API）
+└── tools/                   # 上游同步、网关韧性、份额调度等工具及其单测
 ```
 
 ## 七、参考资源
 
 - [项目仓库](https://github.com/liulixin-lex/xy2api)
+- [文档目录](docs/README.md)、[上游同步规范](docs/UPSTREAM_SYNC.md)
 - [Ent 文档](https://entgo.io/docs/getting-started)
 - [Vue3 文档](https://vuejs.org/)
 - [pnpm 文档](https://pnpm.io/)

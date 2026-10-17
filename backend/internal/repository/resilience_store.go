@@ -15,9 +15,6 @@ import (
 const (
 	resilienceSessionFailurePrefix = "xy:resil:sf:"
 	resilienceSessionAvoidPrefix   = "xy:resil:avoid:"
-	resilienceBalanceLockPrefix    = "xy:resil:balance_probe:"
-	resilienceGenProbePrefix       = "xy:resil:gen_probe:"
-	resilienceRecoveringKey        = "xy:resil:recovering"
 	resilienceGroupStablePrefix    = "xy:resil:group_stable:"
 	resilienceUndeliveredPrefix    = "xy:resil:undelivered:"
 	resilienceCacheRatioPrefix     = "xy:resil:cache_ratio:"
@@ -132,45 +129,6 @@ func (s *resilienceStore) SessionAvoid(ctx context.Context, groupID int64, sessi
 	for _, m := range members {
 		if id, err := strconv.ParseInt(m, 10, 64); err == nil {
 			out[id] = struct{}{}
-		}
-	}
-	return out, nil
-}
-
-func (s *resilienceStore) TryLockBalanceProbe(ctx context.Context, accountID int64, ttl time.Duration) (bool, error) {
-	return s.rdb.SetNX(ctx, resilienceBalanceLockPrefix+strconv.FormatInt(accountID, 10), "1", ttl).Result()
-}
-
-func (s *resilienceStore) UnlockBalanceProbe(ctx context.Context, accountID int64) error {
-	return s.rdb.Del(ctx, resilienceBalanceLockPrefix+strconv.FormatInt(accountID, 10)).Err()
-}
-
-func (s *resilienceStore) IncrGenerationProbe(ctx context.Context, accountID int64, day string) (int64, error) {
-	key := resilienceGenProbePrefix + day + ":" + strconv.FormatInt(accountID, 10)
-	return resilienceIncrExpireScript.Run(ctx, s.rdb, []string{key}, int64(48*time.Hour/time.Second)).Int64()
-}
-
-func (s *resilienceStore) SetRecovering(ctx context.Context, accountID int64, until time.Time) error {
-	return s.rdb.ZAdd(ctx, resilienceRecoveringKey, redis.Z{Score: float64(until.UnixMilli()), Member: strconv.FormatInt(accountID, 10)}).Err()
-}
-
-func (s *resilienceStore) ClearRecovering(ctx context.Context, accountID int64) error {
-	return s.rdb.ZRem(ctx, resilienceRecoveringKey, strconv.FormatInt(accountID, 10)).Err()
-}
-
-func (s *resilienceStore) Recovering(ctx context.Context, now time.Time) (map[int64]time.Time, error) {
-	nowMs := now.UnixMilli()
-	// Drop ended windows opportunistically.
-	_ = s.rdb.ZRemRangeByScore(ctx, resilienceRecoveringKey, "-inf", strconv.FormatInt(nowMs, 10)).Err()
-	items, err := s.rdb.ZRangeByScoreWithScores(ctx, resilienceRecoveringKey, &redis.ZRangeBy{Min: strconv.FormatInt(nowMs, 10), Max: "+inf"}).Result()
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[int64]time.Time, len(items))
-	for _, z := range items {
-		member, _ := z.Member.(string)
-		if id, err := strconv.ParseInt(member, 10, 64); err == nil {
-			out[id] = time.UnixMilli(int64(z.Score))
 		}
 	}
 	return out, nil

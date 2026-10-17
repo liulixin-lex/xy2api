@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"time"
-
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 // GetAccountAvailabilityStats returns current account availability stats.
@@ -134,7 +132,6 @@ func (s *OpsService) GetAccountAvailabilityStats(ctx context.Context, platformFi
 
 			ErrorMessage: acc.ErrorMessage,
 		}
-		item.BalanceState, item.BalanceSince = opsBalanceState(&acc)
 
 		if isRateLimited && acc.RateLimitResetAt != nil {
 			item.RateLimitResetAt = acc.RateLimitResetAt
@@ -194,18 +191,4 @@ func (s *OpsService) GetAccountAvailability(ctx context.Context, platformFilter 
 		Accounts:    accountStats,
 		CollectedAt: collectedAt,
 	}, nil
-}
-
-// opsBalanceState returns an account's upstream balance state when it is not
-// OK, and when it entered it (gateway resilience, tasks 2.6).
-func opsBalanceState(acc *Account) (string, *time.Time) {
-	if acc == nil {
-		return "", nil
-	}
-	rec := resilience.BalanceRecordFrom(acc.Extra)
-	if rec.State == "" || rec.State == resilience.BalanceOK {
-		return "", nil
-	}
-	since := rec.Since
-	return string(rec.State), &since
 }

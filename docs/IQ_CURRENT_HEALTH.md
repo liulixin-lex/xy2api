@@ -1,6 +1,6 @@
 # 糖果检测：当前健康、协议兼容与调度避让
 
-基线：`1cf9708e73c8c189968016852b07082e1c30e187`；实现副本 `/xy2/xy2api`；原始副本 `/xy2/xy2api-original` 保持不变。本轮只在本地修改和验证，生产只读。
+基线：`1cf9708e73c8c189968016852b07082e1c30e187`；实现副本 `<工作机 B>/xy2api`；原始副本 `<工作机 B>/xy2api-original` 保持不变。本轮只在本地修改和验证，生产只读。
 
 ## 已确认的问题
 
@@ -35,4 +35,4 @@
 
 回归覆盖长推理、终态加密内容、JSON/SSE变体、错误封装、大小限制、错误后未知、历史保留、三次上限、额度恢复、候选池避让、缓存复检、配置变更及前端诊断。数据库验证使用本地隔离PostgreSQL/Redis，不向生产发送检测请求。
 
-固定四角色位于 `/xy2/artifacts/iq-candy-20260927/`：`MODIFIED_FILE.tar`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`。验证账本保存命令、输入、字面stdout/stderr和退出码；失败记录保留。回滚脚本只恢复一次性源码目录，依赖同目录 `BASELINE.tar`，不修改数据库或服务。部署前须统一停止旧检测工作者并备份数据库，防止旧程序写回旧状态语义。
+固定四角色位于 `<工作机 B>/artifacts/iq-candy-20260927/`：`MODIFIED_FILE.tar`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`。验证账本保存命令、输入、字面stdout/stderr和退出码；失败记录保留。回滚脚本只恢复一次性源码目录，依赖同目录 `BASELINE.tar`，不修改数据库或服务。部署前须统一停止旧检测工作者并备份数据库，防止旧程序写回旧状态语义。

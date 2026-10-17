@@ -2,7 +2,7 @@
 
 ## 1. 现状与可复现问题
 
-以当前源文件的副本执行判分审计，没有调用上游。脚本与字面输出位于 `/xy/artifacts/openai-iq-check/planning_parser_audit.py` 和 `planning-parser-audit.stdout`。
+以当前源文件的副本执行判分审计，没有调用上游。脚本与字面输出位于 `<工作机 A>/artifacts/openai-iq-check/planning_parser_audit.py` 和 `planning-parser-audit.stdout`。
 
 | 输入/操作 | 当前观察或代码行为 | 目标行为 |
 | --- | --- | --- |

@@ -4,7 +4,7 @@
 
 # XY2API
 
-[![Go](https://img.shields.io/badge/Go-1.27.0-00ADD8.svg)](https://golang.org/)
+[![Go](https://img.shields.io/badge/Go-1.27.2-00ADD8.svg)](https://golang.org/)
 [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
@@ -36,6 +36,8 @@ XY2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的 
 - **API Key 分发** - 为用户生成和管理 API Key
 - **精确计费** - Token 级别的用量追踪和成本计算
 - **智能调度** - 智能账号选择，支持粘性会话
+- **份额调度** - 可按分组启用的调度器，按层级与权重分配新会话，已绑定会话留在原账号以保住提示缓存（[说明](docs/SHARE_SCHEDULING.md)）
+- **网关韧性** - 上游失败分类与短冷却、会话改绑、末位兜底与无号兜底分组、请求预算、经 CDN 的首包前保活、客户端断开的计费规则（[说明](docs/GATEWAY_RESILIENCE.md)）
 - **并发控制** - 用户级和账号级并发限制
 - **速率限制** - 可配置的请求和 Token 速率限制
 - **内置支付系统** - 支持 EasyPay 易支付、支付宝官方、微信官方、Stripe，用户自助充值，无需独立部署支付服务（[配置指南](docs/PAYMENT_CN.md)）
@@ -46,7 +48,7 @@ XY2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的 
 
 | 组件 | 技术 |
 |------|------|
-| 后端 | Go 1.27.0, Gin, Ent |
+| 后端 | Go 1.27.2, Gin, Ent |
 | 前端 | Vue 3.4+, Vite 5+, TailwindCSS |
 | 数据库 | PostgreSQL 15+ |
 | 缓存/队列 | Redis 7+ |
@@ -337,7 +339,7 @@ cd xy2api/deploy
 
 #### 前置条件
 
-- Go 1.21+
+- Go 1.27.2（以 `backend/go.mod` 为准）
 - Node.js 18+
 - PostgreSQL 15+
 - Redis 7+

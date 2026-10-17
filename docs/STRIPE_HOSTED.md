@@ -4,7 +4,7 @@ Stripe 支持「站内」和「托管」两种收款模式，由管理员在支�
 
 ## 配置
 
-1. 使用项目要求的 Go 1.27.0 构建后端，部署时执行新增迁移 `250_stripe_hosted_idempotency.sql`。保留迁移 checksum；不要改写历史 SQL。
+1. 使用项目要求的 Go 版本（以 `backend/go.mod` 为准）构建后端，部署时执行新增迁移 `250_stripe_hosted_idempotency.sql`。保留迁移 checksum；不要改写历史 SQL。
 2. 配置并备份持久化 `TOTP_ENCRYPTION_KEY`。托管实例的 Secret Key、Webhook Signing Secret 使用此密钥进行 AES-256-GCM 加密保存。丢失密钥将影响历史订单查单与退款。
 3. 在管理设置中配置可信的「前端地址」，例如 `https://app.example.com`，不带路径、查询参数或片段。仅测试密钥允许 `http://localhost:端口` 或 `http://127.0.0.1:端口`。客户端 Host、Referer 和 return_url 不参与托管返回地址生成。
 4. 在「Stripe 收款模式」选择「Stripe 托管」并保存，添加该类型的服务商配置，填写 Stripe Secret Key、Webhook Signing Secret、币种和限额。无需 Publishable Key；托管方式没有站内弹窗或组件模式。
@@ -38,7 +38,7 @@ Stripe 支持「站内」和「托管」两种收款模式，由管理员在支�
 
 ## 验证与上线门禁
 
-本地验收使用模拟 Stripe HTTP 服务、签名事件和独立 PostgreSQL，不会调用真实账户或产生真实扣款。记录在 `/xy/artifacts/stripe-hosted/VERIFICATION.txt`。
+本地验收使用模拟 Stripe HTTP 服务、签名事件和独立 PostgreSQL，不会调用真实账户或产生真实扣款。记录在 `<工作机 A>/artifacts/stripe-hosted/VERIFICATION.txt`。
 
 真实测试账户上线前仍须验收：官方托管页、付款失败、3DS、返回和取消、延迟付款、CLI/Dashboard Webhook、重复事件、全额及部分退款。实际支付方式可用性由账户地区、币种和 Dashboard 设置决定。本地模拟不能替代这些结果，也不构成绝对零漏洞保证。
 

@@ -56,7 +56,7 @@
 - [x] 1.5 验证：表驱动单测覆盖 spec 中的所有场景，以及生产采样到的文案（脱敏后）；`go test -race ./internal/resilience/...`。
   - 2026-10-16：补测生产与常见中转文案时发现 new-api 的“该令牌额度已用尽”“quota is not enough”“预扣费额度失败”被判为 AUTH（403）或限流（429），已加入内置余额关键字（`TestClassifyRelayWordings`）；`-race` 通过。
 
-## 2 账号罚则与余额恢复（spec: account-penalties-and-balance-recovery）
+## 2 账号罚则与余额恢复（spec: account-penalties-and-balance-recovery；余额部分 2026-10-17 精简为固定暂停）
 
 - [x] 2.1 `PenaltyOf`：区分硬、软，返回 `recoverAt` 与原因；`temp_unschedulable` 的 `reason` 前缀约定。
 - [x] 2.2 瞬时失败的软冷却（30 秒；有上游 `retry_after` 时取 min(retry_after, 120 秒)）。
@@ -64,17 +64,18 @@
   - 存储 `accounts.extra.resilience_balance`；
   - 实现状态迁移与复检时间表（1/2/5/10/15 分钟，±15% 抖动）；
   - 把以下现有分支改走可恢复路径：Anthropic credit、402、非 OpenAI 403、余额类 429、图片 402。
-- [x] 2.4 `BalanceProbeService`：
+  - 2026-10-17 余额精简：状态机与 `extra.resilience_balance` 取消，这些分支改为暂停 `balance.pause_seconds`，见“晋级前评审补充”。
+- [x] 2.4 `BalanceProbeService`（2026-10-17 随余额精简取消，见“晋级前评审补充”）：
   - 泛化 `CNProviderBalanceCheckService`；
   - 支持 sub2api 系 `/v1/usage`、new-api 计费接口、1 Token 生成探测（日预算 48）；
   - Redis 单飞锁；
   - 探测返回 401 时转凭据路径。
-- [x] 2.5 `RECOVERING` 半开：临时并发上限 1，满 3 次成功或 120 秒后回到 `OK`。
-- [x] 2.6 管理接口 `POST /api/v1/admin/accounts/:id/balance/recheck`；账号列表显示余额状态与下次复检时间；进入、恢复以及超过 72 小时未恢复时，通过现有告警与邮件通知管理员。
+- [x] 2.5 `RECOVERING` 半开：临时并发上限 1，满 3 次成功或 120 秒后回到 `OK`（2026-10-17 随余额精简取消，见“晋级前评审补充”）。
+- [x] 2.6 管理接口 `POST /api/v1/admin/accounts/:id/balance/recheck`；账号列表显示余额状态与下次复检时间；进入、恢复以及超过 72 小时未恢复时，通过现有告警与邮件通知管理员（2026-10-17 随余额精简取消，见“晋级前评审补充”）；迁移 277 删除 276 的两条规则。
   - 2026-10-16：复检接口与账号徽标随任务 9 完成；通知走现有告警：新增指标 `account_balance_exhausted_count`、`account_balance_unrecovered_count`（时长取 `balance.notify_after_hours`），迁移 276 预置同名规则并开启邮件；进入时触发、恢复时解除。
   - 进度（2026-10-15）：recheck 接口与 72 小时未恢复判定已完成；账号列表展示与通知接入待任务 9。
 - [x] 2.7 非 OpenAI 平台的 403 统一为“豁免、计数、冷却”。
-- [x] 2.8 验证：单测加真实 PostgreSQL/Redis 集成（状态迁移、单飞、半开、多实例）；`-race`；用故障注入上游演练“没钱 → 充值 → 自动恢复”。
+- [x] 2.8 验证（余额部分随精简改写，见“晋级前评审补充”）：单测加真实 PostgreSQL/Redis 集成（状态迁移、单飞、半开、多实例）；`-race`；用故障注入上游演练“没钱 → 充值 → 自动恢复”。
   - `resilience_integration_test.go`（真实 PostgreSQL 18、Redis 8.4，测试服务器上以 testcontainers 运行）：会话失败与回避、16 路并发争探测锁只一个成功、RECOVERING 窗口、分组稳定、余额状态统计；韧性相关包 `-race` 通过；BAL-1、BAL-2 与浸泡中每小时断余额再恢复。
 
 ## 3 会话失败处理与末位兜底（spec: session-failure-handling）
@@ -102,7 +103,7 @@
 - [x] 4.3 无号负缓存（2 秒），账号恢复事件触发失效。
 - [x] 4.4 同 Key 快速失败（30 秒内 ≥10 次相同 503 时原样返回），按 spec 豁免。
 - [x] 4.5 上游余额对用户隐藏，包括图片余额 402。
-- [x] 4.6 用户余额：两条路径统一为 403 `INSUFFICIENT_BALANCE` 并换用新文案；在途预留超额改为 429 `concurrent_balance_reserved` 加 `Retry-After: 5`；估算改为缓存感知并以 P99 输出为上限。验收：用生产 7 天数据只读回放，余额为正的用户被拒次数减少 ≥90%，余额为负的金额不增加。（实现完成；生产只读回放验收在 12 执行）
+- [x] 4.6 用户余额：两条路径统一为 403 `INSUFFICIENT_BALANCE` 并换用新文案（2026-10-17 用户要求提示文案不改，恢复 0.3.0 原文 `Insufficient account balance`，随 0.4.0 晋级 PR；状态码、code 与 OpenAI 兼容端点的 type 保持 0.4.0）；在途预留超额改为 429 `concurrent_balance_reserved` 加 `Retry-After: 5`；估算改为缓存感知并以 P99 输出为上限。验收：用生产 7 天数据只读回放，余额为正的用户被拒次数减少 ≥90%，余额为负的金额不增加。（实现完成；生产只读回放验收在 12 执行）
 - [x] 4.7 `image_task_handler.go`：准入检查放到内容审计之前；审计失败时释放准入。
 - [x] 4.9 失败回合封顶（design §9.7，测试服务器发现）：会话连续第 5 次耗尽失败改为终止应答（无 `Retry-After`、`x-should-retry: false`、`server_is_overloaded`、5xx 改 503）；真正成功或间隔超过 120 秒清零。原因：Codex 对带 `Retry-After` 的 5xx 一个回合重试 30 次、历时 871 秒；流内失败重试 6 次。
 - [x] 4.10 续链被拒时整轮重放（design §9.8，测试服务器用真实中转发现）：附带 `previous_response_id` 的 Messages 转 Responses 请求收到笼统 4xx 时去掉续链完整重放一次，并对该会话关闭续链。
@@ -160,7 +161,7 @@
 ## 7 客户端断开与计费（spec: client-disconnect-and-billing）
 
 - [x] 7.1 送达状态跟踪（未送达、部分送达、完成），所有协议与非流式路径都要覆盖。
-  - 实现：网关中间件在最内层包一层计数 writer，已送达语义字节 = 总写出 − 首包前/compact 心跳 − 流内 keepalive − 图片填充；断开在客户端连接 context 结束时判定一次（处理器自建的超时 context 不算断开），请求正常结束先标记 finished。
+  - 实现：网关中间件在最内层包一层计数 writer，已送达语义字节 = 总写出 − 首包前/compact 心跳 − 流内 keepalive − 图片填充（更正，评审 A3：流内 keepalive 只在 OpenAI `/v1/responses` 流式路径扣除；其他流式路径在真实内容前写出的开场事件与流内心跳算送达，0.4.1 补）；断开在客户端连接 context 结束时判定一次（处理器自建的超时 context 不算断开），请求正常结束先标记 finished。
 - [x] 7.2 未送达时立即取消上游，覆盖选号、等槽位、等响应头、换号间隙、首输出前；释放预留与并发槽位。
   - 实现：两个上游分离 context 函数统一接入；选号与等槽位本就随客户端 context 取消。偏差：阶段只区分 select（含等槽位）、header_wait、pre_output、streaming。
 - [x] 7.3 迁移 274，新建 `gateway_undelivered_requests` 表及其写入、按保留期清理；管理接口 `GET /api/v1/admin/resilience/undelivered`。
@@ -199,15 +200,15 @@
 - [x] 9.2 前端（中英文）：
   - “网关韧性”设置卡；
   - 运维页的韧性面板；
-  - 账号余额状态与“已充值”按钮；
+  - 账号余额状态与“已充值”按钮（随余额精简删除）；
   - 未送达记录列表；
   - 分组兜底字段；
   - 用量中的兜底标记。
-  - 实现：系统设置“网关”页的“网关韧性”卡（总开关、各能力开关、常用数值、完整 JSON，范围与服务端一致）；运维页“网关韧性”面板（计数汇总与明细、余额状态分布、未送达列表）；账号状态列的余额徽标与“已充值”复检；分组表单兜底选择器；用量表兜底标记；可用渠道页兜底分组标签。
+  - 实现：系统设置“网关”页的“网关韧性”卡（总开关、各能力开关、常用数值、完整 JSON，范围与服务端一致）；运维页“网关韧性”面板（计数汇总与明细、余额状态分布、未送达列表）；账号状态列的余额徽标与“已充值”复检（余额状态分布、徽标与复检随余额精简删除）；分组表单兜底选择器；用量表兜底标记；可用渠道页兜底分组标签。
 - [x] 9.3 结构化日志（design §12）与统计接口 `GET /api/v1/admin/resilience/stats`。
-  - 实现：进程内按分钟分桶的计数（保留 1 小时，每桶最多 4096 个键，超出折叠为 overflow），统计接口按窗口汇总并附余额状态分布。
-  - 偏差：计数为单实例口径；`keepalive_committed`、`undelivered`、`transient_*` 量大，保持 info（不进 `ops_system_logs`），其余管理员关注的事件为 warn；`resilience.classified` 由 `transient_cooldown` 与 `balance_transition` 分别承担。
-- [x] 9.4 降噪：`upstream_billing_rate_sync_applied` 降为 debug；余额批量探测不写审计；`ops_system_logs.message` 只保留模板。
+  - 实现：进程内按分钟分桶的计数（保留 1 小时，每桶最多 4096 个键，超出折叠为 overflow），统计接口按窗口汇总并附余额状态分布（余额状态分布随余额精简删除）。
+  - 偏差：计数为单实例口径；`keepalive_committed`、`undelivered`、`transient_*` 量大，保持 info（不进 `ops_system_logs`），其余管理员关注的事件为 warn；`resilience.classified` 由 `transient_cooldown` 与 `balance_transition` 分别承担（余额精简后后者为 `balance_paused`）。
+- [x] 9.4 降噪：`upstream_billing_rate_sync_applied` 降为 debug；余额批量探测不写审计（探测随余额精简删除）；`ops_system_logs.message` 只保留模板。
 - [x] 9.5 文档 `docs/GATEWAY_RESILIENCE.md`（管理员说明与配置），并加入 `.gitignore` 的 docs 白名单；更新本记忆。
   - 另：runbook 增加 `SERVER_TRUSTED_PROXIES` 前提与基于 `keepalive_committed` 的 `edge` 校验；方案文件中的主机路径与端口改为代称（真实值在仓库外私有清单）。
 - [x] 9.6 验证：前端 lint、typecheck、全量 vitest、构建；浏览器检查 1440/390 宽度、明暗主题、键盘操作；后端 handler 与 repository 测试。
@@ -245,7 +246,7 @@
   - 最终候选 `eaa63fd30` 16/16。
 - [x] 12.5 真实 CDN：经用户授权，在 Cloudflare 添加橙云测试子域，验证切断消失与心跳格式；ESA 视条件而定。
   - CF-1..5 通过；ESA 无测试站点，以 cdn-sim 90 秒档（KA-3）验证。
-- [x] 12.6 用真实 new-api 系中转实测余额接口；不支持的类型确认会降级到生成探测。
+- [x] 12.6 用真实 new-api 系中转实测余额接口；不支持的类型确认会降级到生成探测（2026-10-17 随余额精简取消，见“晋级前评审补充”）。
   - 三个中转为 sub2api 系（`/v1/usage`），强制复检 EXHAUSTED → RECOVERING；new-api 形态由 F20 与单测覆盖。
 - [x] 12.7 升级与回退演练：
   - 最终候选（迁移至 276）：升级启动 1.2 秒、usage_logs 最长阻塞 0.11 秒；回退 0.3.0、前滚、全库备份恢复行数一致。`eaa63fd30` 相对演练候选没有迁移与 ent schema 改动，结论沿用。
@@ -275,11 +276,11 @@
 - [x] Gemini 的 `RESOURCE_EXHAUSTED` 分钟级限额（“You exceeded your current quota”）按限流处理，不再判为余额耗尽而排除约 11 分钟（`749060679`）。
 - [x] “try again in 1m30.5s”“1h2m”等复合时长识别为重置时间，不再落到缺省冷却（`dafce54a5`）。
 - [x] 网关自身合成的首事件超时 504 归为 `FIRST_OUTPUT_TIMEOUT`，不再按中转 504 记为 `TRANSIENT`（`a23119859`）。
-- [x] 余额 `EXHAUSTED` 的硬档随排除期（下次复检后 10 分钟）结束，与选号一致（`a23119859`）。
-- [x] `/v1/usage` 对不限额订阅返回的 `remaining=-1` 不再读成余额为零（`d20f6738b`）。
-- [x] 被更长冷却（如 403）挡住而过期的余额暂停重新施加，不再被当作管理员手动恢复（`d20f6738b`）。
-- [x] 断流（流内错误事件、停滞）后按部分用量计费的账号不再算成功：不解除冷却、不计入 `RECOVERING` 成功次数（`79d2a8c7e`）。
-- [x] 探测锁 TTL 长于探测连同落库的耗时，落库使用独立时限（`51850f717`）。
+- [x] 余额 `EXHAUSTED` 的硬档随排除期（下次复检后 10 分钟）结束，与选号一致（`a23119859`；2026-10-17 随余额精简取消，暂停到期即回到选号）。
+- [x] `/v1/usage` 对不限额订阅返回的 `remaining=-1` 不再读成余额为零（`d20f6738b`；探测随余额精简删除）。
+- [x] 被更长冷却（如 403）挡住而过期的余额暂停重新施加，不再被当作管理员手动恢复（`d20f6738b`；余额记录随余额精简删除，现由 `SetTempUnschedulable` 只延长不缩短保证）。
+- [x] 断流（流内错误事件、停滞）后按部分用量计费的账号不再算成功：不解除冷却、不计入 `RECOVERING` 成功次数（`79d2a8c7e`；`RECOVERING` 随余额精简取消，不解除冷却仍有效）。
+- [x] 探测锁 TTL 长于探测连同落库的耗时，落库使用独立时限（`51850f717`；探测随余额精简删除）。
 
 会话与选号：
 
@@ -314,7 +315,7 @@
 性能与清理：
 
 - [x] 主组健康且本实例在 `binding_ttl_seconds` 内未转出 Key 时，兜底判定不访问 Redis（`edcf36037`）。
-- [x] 罚则判定直接读取余额状态字段，只有 `EXHAUSTED` 才解码完整记录（`0f8c6ba74`）。
+- [x] 罚则判定直接读取余额状态字段，只有 `EXHAUSTED` 才解码完整记录（`0f8c6ba74`；余额状态随余额精简删除，罚则改看 `balance:` 暂停原因）。
 - [x] 中转伪保活过滤不再复制每一行，500 个 delta 的分配从 1504 次降到 7 次（`50bfd36ec`）。
 - [x] 删除无调用的 `resilience/frames.go`、预算的上下文访问器与 `Canceled()` 等（`181e38602`），以及 `resilienceBudgetAllowsAttempt`（`dafce54a5`）。
 - [x] golangci-lint v2.14.0 清零（`5471e2112`）。
@@ -331,7 +332,7 @@
 
 > 用户 2026-10-16 要求分析生产近 3 小时的报错并纳入本次优化。窗口 04:53–07:53Z，失败 1,649 次（11.1%）；去标识摘要见 `evidence/production-errors-20261016.md`，设计见 design §18。R2、R3、R4/R7 由并行子 Agent 在独立 worktree 完成后 cherry-pick 合入。
 
-- [x] R1 Grok 余额 429 进入余额状态机，不再按中转重置头限流约 28 分钟（761 次，P0）（`6169e2128`）。
+- [x] R1 Grok 余额 429 进入余额状态机，不再按中转重置头限流约 28 分钟（761 次，P0）（`6169e2128`；2026-10-17 余额精简后改为暂停 `balance.pause_seconds`）。
 - [x] R2 已输出后的失败计入会话失败，账号 60 秒内 3 次软冷却（池模式除外）；停滞同样计入会话失败；已输出后失败的 200 不再清零失败回合计数（238 次）（`0bf650227`、`1f98afd89` 与本条后续提交）。
 - [x] R3 API Key 中转拒绝 web_search 历史：同号补声明重放一次并按账号记住（65 次）（`b678afc91`）。
 - [x] R4 内容安全拒绝归客户端错误：不罚账号、不重试不换号、客户端 400 带原文（49 次）（`a5fe6d324`）。
@@ -368,6 +369,18 @@
 - [x] 本地首输出超时不给账号挂冷却（P2，按代码对齐文档，`fdb7cfdcb`）：design §2/§3、两份 spec 改为只计会话连败并换号；`stream_timeout_settings` 配置后沿用其原有处置（生产未配置）。`TestLocalFirstOutputTimeoutLeavesTheAccountSchedulable` 锁定行为。更正（评审复核）：本条原写“上游以 `first_output_timeout` 应答（级联网关）仍软冷却”，代码并无此行为：上游应答的同样不写冷却，只有 OpenAI API Key 账号按上游 5xx 原有规则记入按模型瞬时屏蔽；文档已按代码修正，并加 `TestUpstreamFirstOutputTimeoutLeavesTheAccountSchedulable` 锁定。理由：首输出慢多因中转排队或长推理、与请求档位相关，冷却会把其他档位的请求也挪走，收益不明。
 - [x] runbook：部署前提（Caddy 按对端 IP 注入 `X-XY-Edge`，否则 125 秒切断照旧，上线后抽查一次）、上线前逐个确认 OpenAI 中转余额接口语义（12.6）、余额文案处理、上线后按组观测 `first_output_timeout`/`budget_exhausted`/`post_output_failure`/`undelivered`/`relay_keepalive` 与 Caddy 125 秒 0 字节切断率、管理员配置项（具体分组与账号见仓库外核查报告）。
 
+## 晋级前评审补充（2026-10-17，0.4.0 范围）
+
+> RC 验证后评审 agent 转交用户要求（A1–A5，完整清单在仓库外），并入晋级 0.4.0 正式版的 PR #100；A1、A2 构成新候选，按既有门禁验证。
+
+- [x] A1 用户余额不足的提示恢复为 0.3.0 原文 `Insufficient account balance`（`24cfc6511`，见 4.6 说明）。
+- [x] A2 首字时间与 0.3.0 一致（design §7.8）：`openai_ttft_mode=semantic` 时，被丢弃的伪保活帧计入 `first_token_ms`，取本次尝试中首个被丢帧与首个真实事件中较早者；`visible` 不变。只在构造结果时取值，计时与判定不变。覆盖 Responses 流、passthrough、Chat Completions 与 Messages 流式转换、原生 Chat Completions 直转；非流式转换（两版都不记首字）与两条 chat fallback（帧在那里一直不计）不变。原生 Chat Completions 直转与两条 chat fallback 同时传入存活记录，丢帧按账号计数（原登记 0.4.1）。修复前失败：`TestRelayKeepaliveFrameCountsAsTheSemanticFirstToken` 五条路径的 semantic 子用例（约 400 毫秒，应小于 150 毫秒）及原生直转的计数，`TestRelayKeepaliveFramesInTheChatFallbacks`（计数为 0）；`TestRelayKeepaliveFramesStillDoNotStopTheFirstOutputTimer` 锁定首输出超时照常触发。管理端 `openai_ttft_mode` 说明写明两种口径与偏乐观的代价（`dd5ae0c0f`）。
+- [x] A3 文档（0.4.0 只改文档）：“未送达不计费”按首个语义输出判定，只在 OpenAI `/v1/responses` 流式路径（含透传）完整成立；其他流式路径在真实内容前写出的开场事件与流内心跳算已送达；非流式与图片 JSON 以响应体是否写出为准。已改 `docs/GATEWAY_RESILIENCE.md` 能力一览“断开计费”与 §4.4、`client-disconnect-and-billing` spec、design §8.1、7.1 的实现说明（“扣除流内 keepalive”只在 Responses 路径）。实现登记 0.4.1（见“后续”）。
+- [x] A4 runbook 与发布说明：上线前检查加第 8 项（迁移 276 的两条余额告警默认发邮件，“上游余额不足”P2 对一直欠费的账号每 60 分钟一封，上线前先处理这些账号或调大冷却；随后随余额精简删除，迁移 277 删掉这两条规则）；上线后观测加未送达记录的 `estimated_upstream_cost` 合计，`relay_keepalive` 补首字口径说明（`first_output_timeout` 原已在列）；写明 `first_token_ms` 与 `duration_ms` 从最后一次（成功的）尝试开始计时。正式版发布说明草稿（仓库外）同步 A1–A5。
+- [x] A5 RC 真实客户端 C-openai-py-slow-first-cdn 失败的检查是“client got an answer”（另一项“client requests <= 1”通过）。请求经 cdn-sim 125，首包前心跳提交了 200：第一个账号（故障注入，响应头不来）180 秒首输出超时后换号，真实中转在剩余 59.98 秒内也没给响应头，240 秒预算截止生效（总 240.7 秒、客户端 1 次请求，运维记录两次 `first_output_timeout`），网关写出终止帧 `response.failed`（`server_error`，“Upstream service temporarily unavailable. Please try again in 2s.”）。但帧前没有 `response.created`，openai-python 抛 `RuntimeError: Expected to have received response.created before response.failed`，用户看不到这条错误。修复：客户端此前只收到心跳时，两处 Responses 终止帧（`writeResponsesFailedSSE` 与心跳提交后改写错误体的 `preOutputTerminalFrame`）先发同一响应的 `response.created`，`response.failed` 的序号为 1；已有上游事件送达时不补，总开关关闭时与 0.3.0 一致（design §7.6）。修复前失败：`TestHeartbeatCommittedResponsesStreamOpensBeforeItFails`、`TestQueuePingsThenResponsesFailure`、`TestPreOutputKeepaliveResponsesTerminalOpensTheResponse`；`TestResponsesFailureAfterUpstreamEventsAddsNoCreated` 锁定不重复补。测试服务器：KA-4、KA-8 加查事件顺序与同一 id；新增真实客户端用例 `C-openai-py-budget-cdn`（openai-python 经 cdn-sim 125 访问 280 秒才给响应头的分组，应读到网关的 `response.failed`）；openai-python 驱动遇 `response.failed` 打印错误并以非零退出，不再把空回答计为成功（`8798e40d2`）。
+- [x] 余额处理精简（用户 2026-10-17 决定并入 0.4.0，评审转交）：识别不变（错误码、缺省关键字含 `insufficient user balance`、`failure.balance_keywords_extra`、`resilienceBalanceEligible` 范围，余额类 403 不走计数置错）；处置改为暂停 `balance.pause_seconds`（缺省 300 秒，30–3600，原因 `balance:exhausted: <证据>`），暂停期间硬罚、不作末位兜底，到期由真实请求重试，仍欠费再暂停同样时长；HTTP 错误、流内 `BALANCE`、Grok 余额字样 429、402 走同一规则，取消 SUSPECT；“恢复状态”立即放回；无号 `Retry-After` 取暂停结束时间；`balance.enabled=false` 回到 0.3.0。删除：三态与 `extra.resilience_balance` 读写（存量键忽略）、复查循环与三种探测、探测锁与每日额度、`RecheckBalance` 与“已充值”按钮、`ListBalanceTrackedAccountIDs`/`CountBalanceStates`、RECOVERING 并发上限（`concurrency_service.go` 回到上游原样）、两个告警指标、`opsBalanceState` 与可用性统计的余额字段、“长期未恢复”通知、账号徽标、运维余额分布、Explain 余额列、设置里 8 个字段。迁移 277 删除 276 的两条规则（名称与 `metric_type` 同时匹配）。RC 实现的两处缺陷随之消失：余额告警恒为 0（`ListOpsAccountsForStats` 不读 `extra`）；探测无结论时暂停无限顺延。修复前失败：`TestBalanceFailuresPauseTheAccount`（403、402、流内暂停约 660 秒而非 300 秒；429 在成功后为 SUSPECT）、`TestBalancePauseLengthIsConfigurable`、`TestBalancePauseIsHardUntilItEnds`（原因为 `temp_unschedulable`）、`TestNoAccountRetryAfterFollowsTheBalancePause`（为 0）、`TestRestoringTheAccountEndsTheBalancePause`（记录仍按硬罚）、`TestGrokAPIKeyBalance429PausesInsteadOfARateLimit`、`TestGrokAPIKeyBalance429AfterASuccessStillPauses`、`TestBalanceSettingsKeepOnlyTheSwitchAndThePause`、`TestBalanceAlertRulesRemovalDeletesOnlyTheSeededRules`；`TestParseIgnoresRemovedBalanceFields`、`TestBalanceSwitchOffKeeps030Handling`、集成用例 `TestMigration277RemovesOnlyTheSeededBalanceAlertRules` 锁定兼容与迁移。前端：设置卡加暂停时长，运维面板与 Explain 去掉余额状态。测试服务器 BAL-1、BAL-2、PE-1 按新行为改写（`cc5fc3208`）。另：候选 `fb0c2267c` 上 DC-2 因 31 次请求跨整点、按小时的未送达计数在两个小时都没到阈值而失败，场景改为离整点不足 90 秒先等过整点（`e039c2b6f`）。
+  - 验证（候选 `c6b837dca`，整套只跑一次）：本机全量验证全绿（CI 门禁 246 个韧性测试）；PR #100 CI 两组 18/18；测试服务器场景 45/45、真实客户端 17/17（新增 `C-openai-py-budget-cdn`）、升级演练（迁移 277 只删 276 种下的规则）、6.5 小时浸泡 11 项检查全过（159,849 个请求，GC 后存活堆 53→56 MB、0.4 MiB/h）。浸泡中每小时人为断余额 10 分钟：停服 10.1–10.4 分钟，第一次 15.3 分钟（充值落在一次到期重试之后，多等一个暂停周期），RC 的复检方案约 18 分钟。design §14 15 项达标，未达标 4 项与 RC 相同、均为合成负载所致。
+
 ## 后续（只登记，不在 0.4.0 实施）
 
 > 份额调度在 0.4.1 合并前不在任何生产分组启用；0.4.0 已修 F3，若要提前启用需用户单独确认。
@@ -375,23 +388,31 @@
 0.4.1（0.4.0 正式发布后另开 PR）：
 
 - [ ] 份额策略配置精简（每组 22 项减到约 10 项，审查 5.1；`DecodePolicy` 对已删字段改为接受并忽略）；韧性设置精简（约 60 项减到约 35 项，审查 5.2 前四项）。
-- [ ] F6 余额耗尽两处“真相”（推断，先补用例证实）；F8 §9.8 续链重放只匹配已知的中转笼统文案；F9 影子模式统计对话锚点覆盖率并写明切换冷启动；F10 删除份额纠偏；F11 缓存归因只对影子与份额分组运行；F13 管理员复检改为显式时间戳；F15 Warn 级逐请求事件改 Info 加计数或按分组限速；F16 输出 P99 改增量直方图；F17 预览改用只读 `ScanBindings`；F18 软/硬档阈值统一；F19 删除死常量与单值字段。
-- [ ] `relay_keepalive` 补齐原生 Chat Completions 路径（评审复核时提出）：`streamRawChatCompletions` 与两条 chat fallback 的 `scanCCStream` 传空存活记录，这些路径没有停滞检测、行为无误，只是丢弃的伪保活帧不计数。改为按账号传入存活记录。
+- [x] F6 余额耗尽两处“真相”（随余额精简取消：不再有余额记录）。
+- [x] F13 管理员复检改为显式时间戳（随余额精简取消：没有复检）。
+- [ ] F8 §9.8 续链重放只匹配已知的中转笼统文案；F9 影子模式统计对话锚点覆盖率并写明切换冷启动；F10 删除份额纠偏；F11 缓存归因只对影子与份额分组运行；F15 Warn 级逐请求事件改 Info 加计数或按分组限速；F16 输出 P99 改增量直方图；F17 预览改用只读 `ScanBindings`；F18 软/硬档阈值统一；F19 删除死常量与单值字段。
+- [x] `relay_keepalive` 补齐原生 Chat Completions 路径（评审复核时提出；已提前在 0.4.0 完成，见 A2）：`streamRawChatCompletions` 与两条 chat fallback 的 `scanCCStream` 传空存活记录，这些路径没有停滞检测、行为无误，只是丢弃的伪保活帧不计数。改为按账号传入存活记录。
+- [ ] 未送达口径补齐其他流式路径（评审 A3，用户已确认前提：不改计时、不增加上游成本）：用 `NoteDeliveryHeartbeat` 把首个真实内容前的开场事件与心跳登记为不算送达，只改计数，不得压住或推迟开场事件；每条路径一个用例。路径：Chat Completions 兼容转换（收到 `response.created` 时的角色块、`:` 心跳）；Messages 兼容转换（`message_start`；`ping` 会置 `clientOutputStarted`）；Anthropic 原生与直通（`gateway_upstream_response.go`、`gateway_anthropic_passthrough.go`、`openai_gateway_messages_anthropic_native.go`）；Grok `/v1/responses`（不暂存，`: ping`）；图片 SSE（`openai_images.go`、`openai_images_responses.go`）。
 - [ ] xhigh/max 档位遇完全静默的上游不换号（P2，非回归，生产核查第 5 节）：首输出前停滞从最后读到一行起算 180 秒，早于 200/220 秒档位；OpenAI 路径的停滞只报错、不换号（只有 Grok 换号），还冷却账号、计会话连败。修法二选一：首输出前停滞在 OpenAI 路径也返回可换号错误（与 Grok 一致），或档位不超过停滞阈值。用例：拿到响应头后完全静默，xhigh、max 各一例，断言换号。生产 0.3.0 首输出前停滞 48 小时 26 次。
 - [ ] OpenAI 按模型瞬时屏蔽期间保留会话绑定（design §4.2 例外）：两条 OpenAI 粘性路径的软罚判断接入 `resilienceOpenAIPenaltyOf`，需改上游文件两处已登记钩子；Explain 与无号 `Retry-After` 同样看不到该屏蔽。
 - [ ] F2 判据补全（审查会话复核时提出）：判据只看账号罚则。组内账号全部软罚、末位兜底只因新会话撞上账号会话数上限而失败时，结果仍写入负缓存，已绑定会话最多收到 2 秒的 503。范围很窄；修法是末位兜底失败原因为会话上限时不写负缓存。
-- [ ] CI 必测门禁合并为一个按清单驱动的脚本；项目记忆归档（主文件约 40KB，加大小上限）。
+- [ ] CI 必测门禁合并为一个按清单驱动的脚本。
+- [x] 项目记忆归档并加大小上限（2026-10-17 提前完成：主文件实为 454 KB，已结束任务的历史原样移入 `docs/PROJECT_MEMORY_ARCHIVE.md`，主文件 192 KiB 上限与日志结构由 `tools/check_docs_consistency.py` 检查，规则见 AGENTS.md）。
 
 0.5：
 
-- [ ] 统一可用性判定（F6、F13、F18）、会话回避存储、计数存储（韧性计数改用 Redis）。
+- [ ] 统一可用性判定（F18；F6、F13 随余额精简取消）、会话回避存储、计数存储（韧性计数改用 Redis）。
 - [ ] 下线韧性分开关与 0.3.0 旧分支，只留总开关；余额处理插件化。
 
 ## 13 PR 与发版
 
 - [ ] 13.1 xy2api PR：CI 18 项全绿，并新增 “Gateway resilience” 必测作业（关键 Scenario 测试，`-race`，零跳过守卫）；XY-image PR 全绿。
   - 门禁已作为 `backend-ci.yml` test 作业中的必过步骤 “Gateway resilience” 加入：`tools/gateway-resilience/ci_gate.py` 自动收集韧性测试文件中的全部测试（`5d2854e53` 时 177 个，`060f6f7ea` 时 178 个），`-race` 运行，任一失败、跳过或未运行即失败；本机通过。
-- [ ] 13.2 打 0.4.0-rc.1 标签并跑 Release 工作流；校验附件 SHA 与双架构 GHCR；在测试服务器用 RC 制品复跑 12.3、12.4 的关键子集与 12.7。
+  - xy2api 部分完成（2026-10-17）：PR #97 头 `997861f1a` 两组 18/18 检查全绿，CI 日志中 “Gateway resilience” 为 256 个韧性测试 `-race` 全过、零跳过；常规 merge 为 `ca2bdd111`，main 上合并提交的 CI 与安全扫描全绿。XY-image PR 待 0.4.0 发布后交接（13.3）。
+- [x] 13.2 打 0.4.0-rc.1 标签并跑 Release 工作流；校验附件 SHA 与双架构 GHCR；在测试服务器用 RC 制品复跑 12.3、12.4 的关键子集与 12.7。
+  - annotated `v0.4.0-rc.1` → `ca2bdd111`；Release run 38997674298 成功。6 个附件共 198,283,776 字节，shasum 与 openssl 两种 SHA-256 均与 checksums.txt 一致；五个平台二进制 `vcs.revision=ca2bdd111`、`vcs.modified=false`、embed 构建，darwin_arm64 自报 `XY2API 0.4.0-rc.1 (Sub2API compatibility: 0.2.15)`；GHCR index `sha256:b6ea2ef1224952d2876494114b0e6fd1a2e339884f895ce3ed119dbb4d86d1a5`（linux/amd64、linux/arm64，version/revision/source 标签正确）；prerelease=true，稳定别名 latest、0、0.3 仍指向 0.3.0 未动。
+  - 测试服务器用 RC 镜像（拉取 digest 与 index 一致）：空库全新安装 323 条迁移，health、首页与静态资源、`/auth/me` 均 200；应用切到 RC 镜像后场景 45/45；升级演练（生产规模合成数据）升级启动 1.2 秒、usage_logs 最长阻塞 0.11 秒，回退 0.3.0 登录、网关、计费正常，前滚设置保留，成套备份恢复 103 秒行数一致。真实客户端 14/16：C-codex-ok（真实中转 502 后换号，第二个中转输出后流内失败，Codex 重发一次，两次均 200）与 C-openai-py-slow-first-cdn（换号后剩余 60 秒内真实中转未出首字，240 秒预算按设计以终止帧结束）均发生在中转高峰期，日志为证，同一用例在 `934bcf2bc` 上通过；未重跑。
+  - 更正（2026-10-17，评审 A5）：C-openai-py-slow-first-cdn 的终止帧缺少 `response.created`，openai-python 抛协议错误而没有显示网关的错误，不只是中转慢；已修复，见“晋级前评审补充” A5。
 - [ ] 13.3 正式版：xy2api 0.4.0 PR → 合并 → 标签 → Release；XY-image 0.0.17 发布；更新 provenance 与记忆。
 
 ## 14 生产部署（需用户单独授权，按 runbook.md）

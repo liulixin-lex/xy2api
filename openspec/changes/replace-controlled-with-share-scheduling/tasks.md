@@ -154,8 +154,9 @@
 - [x] 4.2 首字前失败换号次序确定（`TestShareSchedulingE2EFailoverOrderIsDeterministic`；已输出后不换号由既有 `TestStreamWrittenGuard_*_AbortFailoverOnSSEContentWritten` 覆盖）：同会话重复失败总是落到同一次选，同缓存域优先；已输出内容后不换号（沿用原版保护）。
 - [x] 4.3 满载场景（`TestShareSchedulingE2ESaturatedLongSessionWaitsThenRebinds`，往返预算见 2.14 与验证记录）：长上下文会话在预算内等待绑定账号，超时改绑；短会话不等待；等待上限与 Redis 往返次数符合 design §12。
 - [x] 4.4 全局开关与分组开关即时回退（`TestShareSchedulingE2ESwitchesFallBackWithoutMigrating`，含策略库不可用、冷启动与绑定读取失败），且回退不迁移绑定；策略库不可用时不返回 503。
-- [ ] 4.5 RC 制品、隔离升级/回退演练。
+- [x] 4.5 RC 制品、隔离升级/回退演练。
   - 进度（2026-10-10）：本地隔离演练已完成（见验证记录）；RC 制品需发版授权，合并后执行。
+  - 2026-10-13：随 `v0.3.0-rc.1` 完成：制品与双架构镜像校验、全新 318 条迁移、0.2.6 旧库升级、成套恢复后运行旧版（见 `docs/UPSTREAM_SYNC_V0215.md` 与项目记忆 0.3.0 发布记录）。4.6、4.7 待做：份额调度在 0.4.1 合并前不在任何生产分组启用（`gateway-resilience-20261015` tasks“后续”）。
 - [ ] 4.6 影子运行 1–2 个分组至少 3 天：一致率、预计热迁移为 0、开销达标。
 - [ ] 4.7 灰度一个分组 3–7 天，按 design §14.4 门禁与 0.4 基线比较；形成灰度报告后再推广。
 - [ ] 4.8 后续版本：controlled 历史表导出后用独立迁移删除（D7）；退役路由删除。

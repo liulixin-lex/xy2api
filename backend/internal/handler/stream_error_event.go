@@ -64,13 +64,16 @@ func writeResponsesFailedSSE(c *gin.Context, errType, code, message string) bool
 		return false
 	}
 
+	id, createdAt, model := synthesizeResponseID(c), time.Now().Unix(), requestModel(c)
+	opening, sequence := resilienceResponsesOpening(c, id, model, createdAt)
 	payload, err := json.Marshal(responsesFailedEvent{
-		Type: "response.failed",
+		Type:           "response.failed",
+		SequenceNumber: sequence,
 		Response: responsesFailedBody{
-			ID:        synthesizeResponseID(c),
+			ID:        id,
 			Object:    "response",
-			CreatedAt: time.Now().Unix(),
-			Model:     requestModel(c),
+			CreatedAt: createdAt,
+			Model:     model,
 			Status:    "failed",
 			Output:    []any{},
 			Error: responsesFailedError{
@@ -84,7 +87,7 @@ func writeResponsesFailedSSE(c *gin.Context, errType, code, message string) bool
 		return true
 	}
 
-	if _, err := fmt.Fprintf(c.Writer, "event: response.failed\ndata: %s\n\n", payload); err != nil {
+	if _, err := fmt.Fprintf(c.Writer, "%sevent: response.failed\ndata: %s\n\n", opening, payload); err != nil {
 		_ = c.Error(err)
 		return true
 	}

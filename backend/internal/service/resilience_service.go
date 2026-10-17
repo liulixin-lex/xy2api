@@ -15,7 +15,6 @@ import (
 
 const (
 	resilienceSettingsRefreshInterval = 10 * time.Second
-	resilienceRecoveringRefresh       = 5 * time.Second
 	// resilienceSessionMarkSweep removes expired session marks of sessions
 	// that never came back (lookups only drop the marks they touch).
 	resilienceSessionMarkSweep = time.Minute
@@ -36,17 +35,6 @@ type ResilienceStore interface {
 	AddSessionAvoid(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error
 	// SessionAvoid returns the accounts a session currently avoids.
 	SessionAvoid(ctx context.Context, groupID int64, sessionHash string) (map[int64]struct{}, error)
-
-	// TryLockBalanceProbe takes the single-flight probe lock of an account.
-	TryLockBalanceProbe(ctx context.Context, accountID int64, ttl time.Duration) (bool, error)
-	UnlockBalanceProbe(ctx context.Context, accountID int64) error
-	// IncrGenerationProbe counts generation probes of an account per UTC day.
-	IncrGenerationProbe(ctx context.Context, accountID int64, day string) (int64, error)
-	// SetRecovering publishes a RECOVERING account and its window end.
-	SetRecovering(ctx context.Context, accountID int64, until time.Time) error
-	ClearRecovering(ctx context.Context, accountID int64) error
-	// Recovering returns every RECOVERING account whose window has not ended.
-	Recovering(ctx context.Context, now time.Time) (map[int64]time.Time, error)
 
 	// MarkGroupStable records, if absent, the moment a group became healthy
 	// and returns the stored moment.
@@ -81,10 +69,6 @@ type ResilienceService struct {
 	negCache *resilience.NegativeCache
 	fastFail *resilience.FastFail
 
-	// recovering caches the RECOVERING accounts (id -> window end) for the
-	// concurrency cap; refreshed from the store.
-	recovering atomic.Pointer[map[int64]time.Time]
-
 	settingsWriteMu sync.Mutex
 	settingsEpoch   atomic.Uint64
 
@@ -96,9 +80,7 @@ type ResilienceService struct {
 	// background holds optional loops registered before Start.
 	background []func(ctx context.Context)
 
-	successes resilienceSuccessTracker
 	rateLimit *RateLimitService
-	probe     *balanceProbeDeps
 
 	lastResortGroups lastResortGroupCache
 	// lastResortUsed records accounts recently served as last resort
@@ -136,15 +118,12 @@ type ResilienceService struct {
 // NewResilienceService creates the service; Start loads the settings and
 // launches the refresh loops.
 func NewResilienceService(settingRepo SettingRepository, store ResilienceStore) *ResilienceService {
-	s := &ResilienceService{
+	return &ResilienceService{
 		settingRepo: settingRepo,
 		store:       store,
 		negCache:    resilience.ProcessNegativeCache(),
 		fastFail:    resilience.ProcessFastFail(),
 	}
-	empty := map[int64]time.Time{}
-	s.recovering.Store(&empty)
-	return s
 }
 
 // Settings returns the published snapshot.
@@ -196,9 +175,8 @@ func (s *ResilienceService) Start() {
 			slog.Warn("resilience.initial_settings_load_failed", "error", err)
 		}
 		loadCancel()
-		s.wg.Add(3)
+		s.wg.Add(2)
 		go s.settingsLoop(ctx)
-		go s.recoveringLoop(ctx)
 		go s.sessionMarkLoop(ctx)
 		for _, loop := range s.background {
 			s.wg.Add(1)
@@ -239,36 +217,6 @@ func (s *ResilienceService) settingsLoop(ctx context.Context) {
 			cancel()
 		}
 	}
-}
-
-func (s *ResilienceService) recoveringLoop(ctx context.Context) {
-	defer s.wg.Done()
-	t := time.NewTicker(resilienceRecoveringRefresh)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			s.refreshRecovering(ctx)
-		}
-	}
-}
-
-func (s *ResilienceService) refreshRecovering(ctx context.Context) {
-	if s.store == nil {
-		return
-	}
-	loadCtx, cancel := context.WithTimeout(ctx, resilienceLoadTimeout)
-	defer cancel()
-	m, err := s.store.Recovering(loadCtx, time.Now())
-	if err != nil {
-		return
-	}
-	if m == nil {
-		m = map[int64]time.Time{}
-	}
-	s.recovering.Store(&m)
 }
 
 // reloadSettings reads the stored document. Invalid or unreadable documents
@@ -327,45 +275,4 @@ func (s *ResilienceService) UpdateSettings(ctx context.Context, next resilience.
 	// Settings changes may change who is available.
 	s.negCache.InvalidateGroup(0)
 	return resilience.Current().Clone(), nil
-}
-
-// RecoveringCap returns the temporary concurrency cap of a RECOVERING
-// account, or 0 when none applies.
-func (s *ResilienceService) RecoveringCap(accountID int64, now time.Time) int {
-	if s == nil {
-		return 0
-	}
-	cfg := resilience.Current()
-	if !cfg.BalanceOn() {
-		return 0
-	}
-	m := s.recovering.Load()
-	if m == nil {
-		return 0
-	}
-	until, ok := (*m)[accountID]
-	if !ok || !now.Before(until) {
-		return 0
-	}
-	return cfg.Balance.RecoveringConcurrency
-}
-
-// markRecoveringLocal updates the local cache immediately after this
-// instance changed a state, without waiting for the next refresh.
-func (s *ResilienceService) markRecoveringLocal(accountID int64, until time.Time) {
-	for {
-		old := s.recovering.Load()
-		next := make(map[int64]time.Time, len(*old)+1)
-		for k, v := range *old {
-			next[k] = v
-		}
-		if until.IsZero() {
-			delete(next, accountID)
-		} else {
-			next[accountID] = until
-		}
-		if s.recovering.CompareAndSwap(old, &next) {
-			return
-		}
-	}
 }
