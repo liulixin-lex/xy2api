@@ -122,7 +122,7 @@ func TestNoAccountRetryAfterFollowsTheBalancePause(t *testing.T) {
 	}
 }
 
-// "Restore status" in the account list (DELETE .../temp-unschedulable)
+// "Recover State" in the account list (DELETE .../temp-unschedulable)
 // ends a balance pause at once.
 func TestRestoringTheAccountEndsTheBalancePause(t *testing.T) {
 	svc, repo, account, _ := newPenaltyFixture(t, PlatformOpenAI)

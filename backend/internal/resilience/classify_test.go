@@ -284,7 +284,7 @@ func TestChainedGatewayErrorShapes(t *testing.T) {
 func TestClassifyRelayWordings(t *testing.T) {
 	// tasks 1.5: wordings seen from production relays and the common
 	// new-api / one-api answers (scrubbed). Quota used up at a relay is a
-	// recoverable balance state, never an auth failure.
+	// balance failure (the account is paused), never an auth failure.
 	for _, tc := range []struct {
 		status int
 		msg    string

@@ -424,8 +424,8 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		}
 	}
 
-	// xy2api resilience: balance failures become a recoverable state and
-	// account-scoped 5xx failures a soft cooldown (design §3).
+	// xy2api resilience: a balance failure pauses the account and an
+	// account-scoped 5xx failure starts a soft cooldown (design §3).
 	if handled, disable := s.resilienceHandleUpstreamError(ctx, account, statusCode, headers, responseBody, upstreamMsg); handled {
 		return disable
 	}

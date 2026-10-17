@@ -12,7 +12,7 @@ export default {
         lastResort: 'Last-resort selection',
         lastResortHint: 'Without healthy accounts, serve on a free soft-penalised account, by priority and soonest cooldown end, queueing only when all are busy, so single-account groups stay available.',
         balance: 'Pause on low balance',
-        balanceHint: 'Accounts out of upstream balance stop being scheduled for the pause; real traffic retries them afterwards and pauses them again if still short. "Restore status" in the account list puts one back at once.',
+        balanceHint: 'Accounts out of upstream balance stop being scheduled for the pause; real traffic retries them afterwards and pauses them again if still short. "Recover State" in the account list puts one back at once.',
         budget: 'Request budget',
         budgetHint: 'Maximum attempts per request and total time before the first output; same-account retries only for capacity shedding.',
         keepalive: 'Pre-output keepalive',
