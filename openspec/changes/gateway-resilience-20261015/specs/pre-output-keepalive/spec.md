@@ -115,7 +115,7 @@ Stream inactivity MUST be checked at a period of at most `min(threshold/4, 5 s)`
 
 When a request fails after the response headers were committed, the gateway MUST write exactly one protocol terminal frame, flush it and close the response immediately:
 
-- **Responses:** `response.failed` with `response.error.code` `rate_limit_exceeded` (rate limited or busy) or `server_error` (other), and a message containing `Please try again in Ns.` with N between 2 and 30 s.
+- **Responses:** `response.failed` with `response.error.code` `rate_limit_exceeded` (rate limited or busy) or `server_error` (other), and a message containing `Please try again in Ns.` with N between 2 and 30 s. When nothing but heartbeats reached the client, it MUST be preceded by `response.created` of the same response (`sequence_number` 0), because strict SDKs reject a stream that does not start with it.
 - **Chat Completions:** `data: {"error":{"type","code","message","status"}}` followed by `data: [DONE]`.
 - **Anthropic Messages:** `event: error` with `{"type":"error","error":{"type":"overloaded_error"|"api_error","message"}}`.
 
@@ -128,3 +128,7 @@ Error JSON MUST be on a single line and MUST include a stable `code` and the ori
 #### Scenario: Codex sees the failure promptly
 - **WHEN** an upstream emits `The service is busy` after output started
 - **THEN** the gateway writes `response.failed` with `rate_limit_exceeded` and closes the stream, and Codex retries after the indicated delay.
+
+#### Scenario: openai-python reads a failure after heartbeats
+- **WHEN** the 240 s budget ends a Responses stream that heartbeats committed
+- **THEN** the client receives `response.created` and then `response.failed` of the same response, and openai-python reports the gateway's error instead of a protocol error.

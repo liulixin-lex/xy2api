@@ -100,6 +100,37 @@ func TestPreOutputKeepaliveRewritesCommittedErrors(t *testing.T) {
 	}
 }
 
+// The client of a committed Responses stream has seen heartbeats only, so
+// the terminal frame opens the response first: strict SDKs (openai-python,
+// openai-node) reject a response.failed that is not preceded by
+// response.created (RC client C-openai-py-slow-first-cdn).
+func TestPreOutputKeepaliveResponsesTerminalOpensTheResponse(t *testing.T) {
+	c, w := newKeepaliveTestContext(t)
+	stop := StartPreOutputKeepalive(c, PreOutputProtocolResponses, 0, time.Hour)
+	waitCommitted(t, c)
+	c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"type": "api_error", "message": "busy"}})
+	stop()
+
+	var events []string
+	for _, block := range strings.Split(w.Body.String(), "\n\n") {
+		for _, line := range strings.Split(block, "\n") {
+			if data, ok := strings.CutPrefix(line, "data: "); ok {
+				events = append(events, data)
+			}
+		}
+	}
+	require.Len(t, events, 2, w.Body.String())
+	created, failed := events[0], events[1]
+	require.Equal(t, "response.created", gjson.Get(created, "type").String())
+	require.Equal(t, "in_progress", gjson.Get(created, "response.status").String())
+	require.Equal(t, int64(0), gjson.Get(created, "sequence_number").Int())
+	require.Equal(t, "response.failed", gjson.Get(failed, "type").String())
+	require.Equal(t, int64(1), gjson.Get(failed, "sequence_number").Int())
+	require.Equal(t, gjson.Get(created, "response.id").String(), gjson.Get(failed, "response.id").String())
+	require.Equal(t, "busy", gjson.Get(failed, "response.error.message").String())
+	require.Contains(t, w.Body.String(), "event: response.created\ndata: ")
+}
+
 func TestPreOutputKeepaliveStopsUncommittedForOAuth(t *testing.T) {
 	c, w := newKeepaliveTestContext(t)
 	stop := StartPreOutputKeepalive(c, PreOutputProtocolResponses, 30*time.Millisecond, 10*time.Millisecond)

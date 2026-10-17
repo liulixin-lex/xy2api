@@ -481,6 +481,14 @@
       "value": "relayLive.firstTokenMs(firstTokenMs, startTime, s.openAITTFTMode(c.Request.Context())),"
     },
     {
+      "path": "backend/internal/handler/stream_error_event.go",
+      "value": "opening, sequence := resilienceResponsesOpening(c, id, model, createdAt)"
+    },
+    {
+      "path": "backend/internal/handler/stream_error_event.go",
+      "value": "fmt.Fprintf(c.Writer, \"%sevent: response.failed\\ndata: %s\\n\\n\", opening, payload)"
+    },
+    {
       "path": "backend/internal/handler/openai_gateway_handler.go",
       "value": "status = applyExhaustedRetryHint(c, h.gatewayService, status)"
     },

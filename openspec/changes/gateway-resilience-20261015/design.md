@@ -297,7 +297,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 
 | 入站协议 | 终止帧 |
 |---|---|
-| Responses | `event: response.failed`，`response.error.code` 为 `rate_limit_exceeded`（限流或忙）或 `server_error`（停滞、5xx、预算耗尽）；`message` 含 `Please try again in Ns.`（N = clamp(冷却剩余, 2, 30)）；保留 `sequence_number` |
+| Responses | `event: response.failed`，`response.error.code` 为 `rate_limit_exceeded`（限流或忙）或 `server_error`（停滞、5xx、预算耗尽）；`message` 含 `Please try again in Ns.`（N = clamp(冷却剩余, 2, 30)）；保留 `sequence_number`。客户端此前只收到心跳（首包前保活、排队 ping）时，先发同一响应的 `response.created`（`status: in_progress`，`sequence_number` 0），`response.failed` 的序号为 1：openai-python、openai-node 要求流以 `response.created` 开始，否则抛协议错误，看不到网关的错误（RC 真实客户端发现）。已有上游事件送达时不补；总开关关闭时与 0.3.0 一致 |
 | Chat Completions | `data: {"error":{"type":...,"code":...,"message":...,"status":<原 HTTP 语义码>}}`，然后 `data: [DONE]` |
 | Anthropic Messages | `event: error\ndata: {"type":"error","error":{"type":"overloaded_error"或"api_error","message":...}}`（修复 G3：所有提交后的错误帧都补 `event: error`；`errors` 开关关闭时恢复 0.3.0 的无 `event` 行格式） |
 

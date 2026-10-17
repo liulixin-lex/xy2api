@@ -138,6 +138,19 @@ func resilienceResponsesCode(errType, code string) string {
 	return ""
 }
 
+// resilienceResponsesOpening returns the response.created event that must
+// precede a Responses terminal event when nothing but heartbeats reached
+// the client (pre-output keepalive, queue pings), and the sequence number
+// of the terminal event. openai-python raised "Expected to have received
+// response.created before response.failed" instead of showing the error
+// (RC client C-openai-py-slow-first-cdn). Otherwise it returns "" and 0.
+func resilienceResponsesOpening(c *gin.Context, id, model string, createdAt int64) (string, int) {
+	if !service.ResponsesStreamUnopened(c) {
+		return "", 0
+	}
+	return string(service.ResponsesCreatedFrame(id, model, createdAt)), 1
+}
+
 // noAccountRetryAdvisor is implemented by the gateway services.
 type noAccountRetryAdvisor interface {
 	NoAccountRetryAfter(ctx context.Context, groupID *int64, model string) time.Duration

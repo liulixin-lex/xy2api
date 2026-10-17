@@ -115,6 +115,7 @@
 
 - Codex 一个失败回合的请求数 ≤5；
 - Claude Code 能显示 `event: error` 的真实原因；
+- OpenAI Python SDK 在网关自行结束的 Responses 流上读到 `response.failed`（先收到 `response.created`），不报协议错误（`C-openai-py-budget-cdn`，RC 后补）；
 - Gemini SDK 不受心跳影响；
 - 经 CDN 的长请求不再被切断。
 

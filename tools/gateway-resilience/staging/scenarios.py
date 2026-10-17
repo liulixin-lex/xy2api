@@ -134,6 +134,24 @@ def heartbeats(result) -> list[float]:
     return [t for t, line in result["lines"] if line.startswith(":") or line == "event: ping"]
 
 
+def opened_then_failed(lines: list[str]) -> bool:
+    """A Responses stream the gateway ends itself opens with response.created
+    and fails the same response: strict SDKs (openai-python) reject a
+    response.failed that is not preceded by response.created."""
+    events = []
+    for line in lines:
+        if line.startswith("data:"):
+            try:
+                events.append(json.loads(line[5:]))
+            except ValueError:
+                continue
+    types = [e.get("type") for e in events]
+    if not types or types[0] != "response.created" or "response.failed" not in types:
+        return False
+    failed = events[types.index("response.failed")]
+    return events[0].get("response", {}).get("id") == failed.get("response", {}).get("id")
+
+
 def first_data(result) -> float | None:
     for t, line in result["lines"]:
         if line.startswith("data:") and "ping" not in line:
@@ -271,6 +289,7 @@ def ka8():
     check(r["status"] == 200, "status 200 (committed by heartbeats)", checks)
     check(bool(hb) and max(gaps) <= 20, "no silence longer than 20 s before the end", checks)
     check(any("response.failed" in l for l in lines), "ends with a retryable response.failed", checks)
+    check(opened_then_failed(lines), "response.created first, then response.failed of the same response", checks)
     check(r["elapsed"] < 260, "ended by the 240 s budget, before the 280 s upstream and the 300 s edge", checks)
     check(not r["cuts"], "the edge cut nothing", checks)
     return r, checks
@@ -299,6 +318,7 @@ def ka4():
     lines = [l for _, l in r["lines"]]
     check(r["status"] in (200, 502, 503), "answered", checks)
     check(r["status"] != 200 or any("response.failed" in l for l in lines), "committed stream ends with response.failed", checks)
+    check(r["status"] != 200 or opened_then_failed(lines), "a committed stream opens with response.created", checks)
     return r, checks
 
 
