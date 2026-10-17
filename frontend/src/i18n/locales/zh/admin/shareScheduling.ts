@@ -1,11 +1,9 @@
 export default {
   shareScheduling: {
     title: '份额调度',
-    // 页头只放短句，完整说明在页面内。
+    // 页头副标题。
     subtitle: '按分组设置账号层级与权重，保住提示缓存与首字速度',
-    description: '按分组设置账号层级与权重：新会话按份额分配，已绑定会话优先留在原账号以保住提示缓存与首字速度。',
     globalOff: '总开关未开启：所有分组都使用原版调度，影子对比也不会运行。',
-    globalOn: '总开关已开启',
     openSettings: '前往系统设置',
     loadSettingsFailed: '无法读取份额调度总开关状态。',
     accountRules: {
@@ -71,7 +69,6 @@ export default {
       search: '搜索账号名称或 ID',
       columns: {
         account: '账号',
-        health: '当前状态',
         tier: '层级',
         weight: '权重',
         drain: '排空',
@@ -81,7 +78,6 @@ export default {
       },
       healthy: '可调度',
       recoverAt: '预计 {time} 恢复',
-      configured: '已配置',
       usingDefault: '默认值',
       reset: '恢复默认',
       resetNamed: '将 {name} 恢复为默认值',
@@ -372,7 +368,9 @@ export default {
       disagree: '分歧',
       original: '原版选择 #{id}',
       noData: '该时间窗口内暂无数据。',
-      noDecisions: '暂无决策样本。可在系统设置中开启“保存决策样本”。'
+      noDistributions: '该时间窗口内还没有决策、缓存归因或热迁移数据。',
+      noDecisions: '该时间窗口内暂无决策样本。',
+      samplesOff: '未保存决策样本：可在系统设置中开启“保存决策样本”。'
     },
     explain: {
       hint: '用已保存的策略和账号当前状态模拟一次选号：不占用并发，也不写入绑定。分组仍在原版调度时同样可以模拟。',
@@ -458,6 +456,8 @@ export default {
       admin_rebalance: '管理员重平衡',
       model_routing: '模型路由',
       model_routing_fallback: '模型路由回退',
+      resil_failure_streak: '会话连续失败改绑',
+      last_resort_soft: '末位兜底（软罚账号）',
       disabled: '已停用',
       inactive: '未激活',
       not_schedulable: '未开启调度',
@@ -465,6 +465,7 @@ export default {
       rate_limited: '限流中',
       overloaded: '过载冷却',
       temp_unschedulable: '临时不可调度',
+      balance_exhausted: '上游余额不足',
       quota_exceeded: '额度用尽',
       model_unsupported: '不支持该模型',
       model_rate_limited: '模型限流',

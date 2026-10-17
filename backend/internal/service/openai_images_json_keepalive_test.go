@@ -229,6 +229,7 @@ func TestOpenAIImagesJSONKeepalive_HeartbeatBeforeForwardStillFailsOver(t *testi
 	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
 	require.Contains(t, string(failoverErr.ResponseBody), "temporarily unavailable")
+	stop() // no heartbeat writes while the recorder is read
 	require.Empty(t, strings.TrimSpace(rec.Body.String()), "only heartbeat whitespace may reach the client")
 
 	rawEvents, ok := c.Get(OpsUpstreamErrorsKey)

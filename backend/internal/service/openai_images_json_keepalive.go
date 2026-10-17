@@ -42,6 +42,7 @@ func StartOpenAIImagesJSONKeepalive(c *gin.Context, interval time.Duration) func
 		stop:   make(chan struct{}),
 	}
 	c.Set(openAIImagesJSONKeepaliveKey, k)
+	noteDeliveryHeartbeat(c, nil, k, 0)
 	wrappedWriter := &openAIImagesJSONKeepaliveWriter{ResponseWriter: originalWriter, k: k}
 	c.Writer = wrappedWriter
 

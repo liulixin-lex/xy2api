@@ -136,6 +136,11 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 				if delay <= 0 {
 					break
 				}
+				// xy2api resilience: charge the request budget only for a retry
+				// that will run (design §6.2).
+				if !resilienceInServiceRetryAllowed(ctx, account.ID, resp.StatusCode) {
+					break
+				}
 
 				respBody, _ := s.readUpstreamErrorBody(resp)
 				_ = resp.Body.Close()

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "upstream_commit": "f2669c8cf62555cd92389b3f55920e9e6e7c6ff2",
-  "description": "Reviewed differences between the original Sub2API scheduler files and the recorded upstream commit. Any other change, or a changed upstream commit, fails `sync.py scheduler-diff` until reviewed. Reviewed for v0.2.15: all existing XY2API difference blocks are unchanged; the upstream NormalizeOpenAICompatiblePlatform change to domain.UsesOpenAIGateway is adopted verbatim after module-path normalization.",
+  "description": "Reviewed differences between the original Sub2API scheduler files and the recorded upstream commit. Any other change, or a changed upstream commit, fails `sync.py scheduler-diff` until reviewed. Reviewed for v0.2.15: all existing XY2API difference blocks are unchanged; the upstream NormalizeOpenAICompatiblePlatform change to domain.UsesOpenAIGateway is adopted verbatim after module-path normalization. Reviewed for 0.4.0: gateway resilience hooks are registered as `gateway-resilience` blocks; two earlier lines were rewritten by them (named results of SelectAccountWithLoadAwareness, the last-resort runtime-block gate).",
   "files": {
     "backend/internal/service/gateway_scheduling.go": [
       {
@@ -12,8 +12,7 @@
           "func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {"
         ],
         "added": [
-          "// xy2apiUserID: 系统用户 ID，用于二维亲和调度",
-          "func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, xy2apiUserID int64) (*AccountSelectionResult, error) {"
+          "// xy2apiUserID: 系统用户 ID，用于二维亲和调度"
         ]
       },
       {
@@ -26,6 +25,28 @@
           "if shareHandled {",
           "return shareResult, shareErr",
           "s.shareRecordSelection(ctx, hydrated)"
+        ]
+      },
+      {
+        "block": "gateway-resilience",
+        "note": "Gateway resilience (0.4.0): session avoid set, negative cache, config-error marking, sticky-owner note and the last-resort selection epilogue (named results so the deferred epilogue can replace a no-account result). Disabled settings restore the original behaviour.",
+        "removed": [],
+        "added": [
+          "\"github.com/liulixin-lex/xy2api/internal/resilience\"",
+          "// selection instead of \"no available account\" (design §4).",
+          "// xy2api resilience: keep soft-penalised bindings and use last-resort",
+          "avoided := s.resilience.sessionAvoid(ctx, groupID, sessionHash)",
+          "defer func() {",
+          "excludedIDs = mergeExcluded(excludedIDs, avoided)",
+          "func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, xy2apiUserID int64) (result *AccountSelectionResult, err error) {",
+          "if cachedErr := resilienceNegativeCacheHit(ctx, groupID, requestedModel, \"\", origExcluded); cachedErr != nil {",
+          "markResilienceConfigError(ctx, err)",
+          "origExcluded := excludedIDs",
+          "resilience.StateFrom(ctx).NoteStickyOwner(stickyAccountID)",
+          "result, err = s.resilienceGatewaySelectionEpilogue(ctx, group, groupID, sessionHash, requestedModel, origExcluded, avoided, result, err)",
+          "return nil, cachedErr",
+          "}",
+          "}()"
         ]
       }
     ],
@@ -53,8 +74,7 @@
           "if s != nil && s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel) {"
         ],
         "added": [
-          "if s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {",
-          "if s != nil && s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {"
+          "if s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {"
         ]
       },
       {
@@ -161,6 +181,72 @@
           "}",
           "_ = s.service.deleteStickySessionAccountIDIfOwner(ctx, req.GroupID, req.SessionHash, accountID)",
           "_ = s.service.deleteStickySessionAccountIDIfOwner(ctx, req.GroupID, req.SessionHash, accountID)"
+        ]
+      },
+      {
+        "block": "gateway-resilience",
+        "note": "Gateway resilience (0.4.0): soft-penalised sticky owners keep the binding, last-resort gate relaxes runtime blocks and proxy quarantine, and the scheduling wrapper adds the session avoid set, negative cache, config-error marking, last-resort selection, session recording and the conversation note for the failed-turn cap; selections that are never cached skip the cache and mark group-level no-account results for the per-key fast fail.",
+        "removed": [
+          "if s != nil && s.service != nil && s.service.isOpenAIProxyStreamQuarantined(ctx, account) {"
+        ],
+        "added": [
+          "\"github.com/liulixin-lex/xy2api/internal/resilience\"",
+          "// account\" (design §4.3). Continuations owned by an account keep failing",
+          "// as before.",
+          "// blocks and proxy quarantine as soft restrictions (design §4.3).",
+          "// request is served elsewhere (design §4.2).",
+          "// xy2api resilience: a soft-penalised owner keeps the binding while this",
+          "// xy2api resilience: last-resort selection treats in-memory runtime",
+          "// xy2api resilience: last-resort soft selection instead of \"no available",
+          "GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,",
+          "RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,",
+          "RequirePrivacySet: s.openAIGroupRequiresPrivacySet(lrCtx, groupID),",
+          "RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: origExcluded,",
+          "avoided := s.resilience.sessionAvoid(ctx, groupID, sessionHash)",
+          "decision.SelectedAccountID = lr.Account.ID",
+          "decision.SelectedAccountType = lr.Account.Type",
+          "excludedIDs = mergeExcluded(excludedIDs, avoided)",
+          "if !lastResort && s != nil && s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {",
+          "if !lastResort && s != nil && s.service != nil && s.service.isOpenAIProxyStreamQuarantined(ctx, account) {",
+          "if account.Platform == NormalizeOpenAICompatiblePlatform(req.Platform) && account.IsOpenAICompatible() && resilienceKeepsSoftStickyBinding(account, req.RequestedModel) {",
+          "if cachedErr := resilienceNegativeCacheHit(negativeCtx, groupID, requestedModel, negativeVariant, origExcluded); cachedErr != nil {",
+          "if isNoAccountSelectionError(err) && strings.TrimSpace(previousResponseID) == \"\" {",
+          "if lr := s.resilienceOpenAILastResort(lrCtx, OpenAIAccountScheduleRequest{",
+          "if negativeCacheable && groupID != nil && resilience.Current().ErrorsOn() {",
+          "if requiredImageCapability == \"\" {",
+          "if sessionHash != \"\" {",
+          "lastResort := resilienceLastResortGate(ctx)",
+          "lrCtx := s.withOpenAIQuotaAutoPauseContext(ctx)",
+          "lrCtx = s.withOpenAIProfitControlGate(lrCtx, groupID)",
+          "markResilienceConfigError(ctx, err)",
+          "negativeCacheable := strings.TrimSpace(previousResponseID) == \"\" && requiredImageCapability == \"\" && !requireCompact",
+          "negativeCtx := ctx",
+          "negativeVariant := \"openai:\" + string(requiredTransport) + \":\" + string(requiredCapability) + \":\" + NormalizeOpenAICompatiblePlatform(platform)",
+          "negativeCtx = s.withOpenAIProfitControlGate(ctx, groupID)",
+          "origExcluded := excludedIDs",
+          "resilience.StateFrom(ctx).KeepSticky(accountID)",
+          "resilience.StateFrom(ctx).NoteTurn(derefGroupID(groupID), requestedModel, sessionHash)",
+          "resilience.StateFrom(ctx).SetSession(derefGroupID(groupID), sessionHash, s.openAISessionRecorder())",
+          "resilienceNegativeCachePut(negativeCtx, groupID, requestedModel, negativeVariant, origExcluded, err)",
+          "return nil, OpenAIAccountScheduleDecision{}, cachedErr",
+          "return nil, false, nil",
+          "selection, err = lr, nil",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "} else if negativeCacheable {",
+          "}, avoided); lr != nil {",
+          "// xy2api resilience: selections that are never cached still count for the",
+          "// per-key fast fail when no account of the group could serve them.",
+          "if !negativeCacheable && isNoAccountSelectionError(err) {",
+          "if negativeCacheable {",
+          "resilienceMarkGroupNoAccount(ctx, groupID, requestedModel, origExcluded)",
+          "}",
+          "}"
         ]
       }
     ],
@@ -304,6 +390,23 @@
           "selection, err := s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{",
           "return markOpenAIStickySpillover(selection, stickySpillover && openAIAtomicStickySession(sessionHash)), err"
         ]
+      },
+      {
+        "block": "gateway-resilience",
+        "note": "Gateway resilience (0.4.0): sticky bindings are not written for accounts the request must not bind (soft penalty or session avoid); on the legacy path (advanced scheduler off) a soft-penalised sticky owner keeps its binding.",
+        "removed": [
+          "if err == nil {"
+        ],
+        "added": [
+          "if !resilienceBindAllowed(ctx, accountID) {",
+          "return nil",
+          "}",
+          "// xy2api resilience: a soft-penalised owner keeps the binding (design §4.2).",
+          "if err == nil && !resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {",
+          "if resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {",
+          "return nil",
+          "}"
+        ]
       }
     ],
     "backend/internal/service/gemini_messages_compat_service.go": [
@@ -372,6 +475,70 @@
           "return nil, classified",
           "}",
           "return nil, nonstreamReadError(c.Request.Context(), resp, err)"
+        ]
+      },
+      {
+        "block": "gateway-resilience",
+        "note": "Gateway resilience (0.4.0): in-place retries bounded by budget.gemini_same_account_retries and the request budget; cancellable jittered back-off replaces the uncancellable sleep.",
+        "removed": [
+          "// +/- 20% jitter",
+          "func sleepGeminiBackoff(attempt int) {",
+          "if attempt < geminiMaxRetries {",
+          "if attempt < geminiMaxRetries {",
+          "if sleepFor < 0 {",
+          "jitter := time.Duration(float64(delay) * 0.2 * (r.Float64()*2 - 1))",
+          "mathrand \"math/rand\"",
+          "r := mathrand.New(mathrand.NewSource(time.Now().UnixNano()))",
+          "sleepFor := delay + jitter",
+          "sleepFor = 0",
+          "sleepGeminiBackoff(1)",
+          "sleepGeminiBackoff(attempt)",
+          "sleepGeminiBackoff(attempt)",
+          "time.Sleep(sleepFor)"
+        ],
+        "added": [
+          "\"github.com/liulixin-lex/xy2api/internal/resilience\"",
+          "*retries++",
+          "*retries++",
+          "// as the client is gone (xy2api resilience §6.2: no uncancellable sleeps).",
+          "// be retried on the same account. Under the request budget only",
+          "// budget.gemini_same_account_retries retries are made and each draws from",
+          "// geminiInPlaceRetryAllowed reports whether a transient upstream failure may",
+          "// sleepGeminiBackoffCtx waits the exponential back-off of an in-place retry",
+          "// the budget; otherwise the 0.3.0 limit applies.",
+          "// with ±20 % jitter, bounded by the request budget. It returns false as soon",
+          "budget := resilience.StateFrom(ctx).Budget()",
+          "cfg := resilience.Current()",
+          "delay = b.ClampWait(delay, time.Now())",
+          "delay = resilience.Jitter(delay, 0.2)",
+          "func geminiInPlaceRetryAllowed(ctx context.Context, retries *int) bool {",
+          "func sleepGeminiBackoffCtx(ctx context.Context, attempt int) bool {",
+          "if !budget.ConsumeInPlaceRetry(0, false, time.Now()) {",
+          "if !cfg.BudgetOn() || budget == nil {",
+          "if !sleepGeminiBackoffCtx(ctx, 1) {",
+          "if !sleepGeminiBackoffCtx(ctx, attempt) {",
+          "if !sleepGeminiBackoffCtx(ctx, attempt) {",
+          "if *retries >= cfg.Budget.GeminiSameAccountRetries {",
+          "if attempt < geminiMaxRetries && geminiInPlaceRetryAllowed(ctx, &inPlaceRetries) {",
+          "if attempt < geminiMaxRetries && geminiInPlaceRetryAllowed(ctx, &inPlaceRetries) {",
+          "if b := resilience.StateFrom(ctx).Budget(); b != nil {",
+          "inPlaceRetries := 0",
+          "inPlaceRetries := 0",
+          "return false",
+          "return false",
+          "return nil, ctx.Err()",
+          "return nil, ctx.Err()",
+          "return nil, ctx.Err()",
+          "return resilience.Sleep(ctx, delay)",
+          "return true",
+          "return true",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}"
         ]
       }
     ]

@@ -305,7 +305,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
-	scanner := s.newUpstreamSSEScanner(resp.Body)
+	scanner := s.newUpstreamSSEScanner(resp.Body, nil)
 
 	var usage OpenAIUsage
 	var firstTokenMs *int
@@ -437,6 +437,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		// 已写出语义字节：无法再 failover，改为带类型的上游错误。handler 会据此
 		// 补发 SSE error 帧并把本次请求计入 SLA 失败。
 		recordOpenAIRawStreamTruncation(c, account, requestID, cause, "http_error")
+		resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, scanErr, true)
 		return resultWithUsage(), newOpenAIUpstreamStreamReadError(cause)
 	}
 

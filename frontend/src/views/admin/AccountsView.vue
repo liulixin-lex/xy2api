@@ -291,6 +291,13 @@
           <template #cell-status="{ row }">
             <div class="flex items-center gap-1.5">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
+              <AccountBalanceStateBadge
+                :account-id="row.id"
+                :record="row.extra?.resilience_balance"
+                @updated="(record: BalanceRecord) => applyBalanceRecord(row.id, record)"
+                @success="(message: string) => appStore.showSuccess(message)"
+                @error="(message: string) => appStore.showError(message)"
+              />
             </div>
           </template>
           <template #header-schedulable="{ column }"><div class="flex items-center gap-1"><span>{{ column.label }}</span><HelpTooltip :content="t('admin.accounts.schedulableHint')" width-class="w-72" /></div></template>
@@ -529,6 +536,8 @@ import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
 import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
+import AccountBalanceStateBadge from '@/components/account/AccountBalanceStateBadge.vue'
+import type { BalanceRecord } from '@/api/admin/resilience'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
@@ -1453,6 +1462,16 @@ const syncAccountRefs = (nextAccount: Account) => {
   if (tempUnschedAcc.value?.id === nextAccount.id) tempUnschedAcc.value = nextAccount
   if (deletingAcc.value?.id === nextAccount.id) deletingAcc.value = nextAccount
   if (menu.acc?.id === nextAccount.id) menu.acc = nextAccount
+}
+
+// Applies the result of a manual balance recheck (gateway resilience) to the row.
+const applyBalanceRecord = (accountID: number, record: BalanceRecord) => {
+  accounts.value = accounts.value.map((account) => {
+    if (account.id !== accountID) return account
+    const nextAccount = { ...account, extra: { ...(account.extra ?? {}), resilience_balance: record } }
+    syncAccountRefs(nextAccount)
+    return nextAccount
+  })
 }
 
 const mergeAccountsIncrementally = (nextRows: Account[]) => {

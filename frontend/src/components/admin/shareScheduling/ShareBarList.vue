@@ -5,7 +5,7 @@
       <li v-for="row in rows" :key="row.key" class="text-xs">
         <div class="flex items-center justify-between gap-2 text-gray-700 dark:text-dark-200">
           <span class="min-w-0 truncate" :title="row.key">{{ row.label }}</span>
-          <span class="shrink-0 font-mono">{{ row.display }} · {{ formatSharePercent(row.share) }}</span>
+          <span class="shrink-0 tabular-nums">{{ row.display }} · {{ formatSharePercent(row.share) }}</span>
         </div>
         <div class="mt-0.5 h-1.5 rounded-full bg-gray-100 dark:bg-dark-700">
           <div class="h-1.5 rounded-full" :class="barClass" :style="{ width: Math.max(row.share * 100, 1) + '%' }" />

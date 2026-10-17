@@ -137,6 +137,12 @@ jobs:
           PY
 
 
+      - name: Gateway resilience
+        working-directory: backend
+        timeout-minutes: 20
+        # Every test of the resilience test files, -race, no skips (tasks 13.1).
+        run: python3 ../tools/gateway-resilience/ci_gate.py
+
       - name: OpenAI cache reliability with real Redis
         working-directory: backend
         timeout-minutes: 15

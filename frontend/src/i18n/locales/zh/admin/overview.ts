@@ -1309,6 +1309,12 @@ export default {
         hint: '仅当上游明确返回 prompt too long 时才会触发，留空表示不兜底',
         noFallback: '不兜底'
       },
+      availabilityFallback: {
+        title: '无号兜底分组',
+        hint: '本分组所有账号都处于冷却、余额不足等状态时，请求改由该分组承接并按其倍率计费；本分组恢复并稳定一段时间（默认 2 分钟）后自动切回。仅支持同平台、非订阅分组，不能形成环。',
+        none: '不兜底',
+        option: '{name}（倍率 {rate}）'
+      },
       copyAccounts: {
         title: '从分组复制账号',
         tooltip: '选择一个或多个相同平台的分组，创建后会自动将这些分组的所有账号绑定到新分组（去重）。',

@@ -480,7 +480,8 @@ func shareHealthReason(reason sharesched.Reason) bool {
 	case sharesched.ReasonRateLimited, sharesched.ReasonOverloaded, sharesched.ReasonTempUnschedulable,
 		sharesched.ReasonNotSchedulable, sharesched.ReasonInactive, sharesched.ReasonDisabled,
 		sharesched.ReasonExpired, sharesched.ReasonQuotaExceeded, sharesched.ReasonIQDegraded,
-		sharesched.ReasonSchedulingThreshold, sharesched.ReasonRuntimeBlocked, sharesched.ReasonProxyQuarantined:
+		sharesched.ReasonSchedulingThreshold, sharesched.ReasonRuntimeBlocked, sharesched.ReasonProxyQuarantined,
+		sharesched.ReasonBalanceExhausted, sharesched.ReasonQuotaAutoPause:
 		return true
 	}
 	return false

@@ -1,11 +1,9 @@
 export default {
   shareScheduling: {
     title: 'Share Scheduling',
-    // Short line for the page header; the page itself shows the full description.
+    // Page header subtitle.
     subtitle: 'Per-group account tiers and weights that keep prompt caches warm',
-    description: 'Set account tiers and weights per group: new sessions are placed by share, and bound sessions stay on their account to keep prompt-cache hits and fast first tokens.',
     globalOff: 'The master switch is off: every group uses the original scheduler and shadow comparison does not run.',
-    globalOn: 'Master switch on',
     openSettings: 'Open system settings',
     loadSettingsFailed: 'Could not read the share scheduling master switch.',
     accountRules: {
@@ -71,7 +69,6 @@ export default {
       search: 'Search account name or ID',
       columns: {
         account: 'Account',
-        health: 'State',
         tier: 'Tier',
         weight: 'Weight',
         drain: 'Drain',
@@ -81,7 +78,6 @@ export default {
       },
       healthy: 'Schedulable',
       recoverAt: 'Expected back {time}',
-      configured: 'Configured',
       usingDefault: 'Default',
       reset: 'Reset',
       resetNamed: 'Reset {name} to defaults',
@@ -372,7 +368,9 @@ export default {
       disagree: 'Differ',
       original: 'Original chose #{id}',
       noData: 'No data in this window.',
-      noDecisions: 'No decision samples. Turn on “Keep decision samples” in system settings.'
+      noDistributions: 'No decisions, cache attribution or hot migrations in this window yet.',
+      noDecisions: 'No decision samples in this window.',
+      samplesOff: 'Decision samples are off. Turn on “Keep decision samples” in system settings.'
     },
     explain: {
       hint: 'Simulates one selection with the saved policy and the accounts’ current state. It takes no slot and writes no binding, and also works while the group uses the original scheduler.',
@@ -458,6 +456,8 @@ export default {
       admin_rebalance: 'Admin rebalance',
       model_routing: 'Model routing',
       model_routing_fallback: 'Model routing fallback',
+      resil_failure_streak: 'Session moved after repeated failures',
+      last_resort_soft: 'Last resort (soft-penalised account)',
       disabled: 'Disabled',
       inactive: 'Inactive',
       not_schedulable: 'Scheduling off',
@@ -465,6 +465,7 @@ export default {
       rate_limited: 'Rate limited',
       overloaded: 'Overload cooldown',
       temp_unschedulable: 'Temporarily unschedulable',
+      balance_exhausted: 'Out of upstream balance',
       quota_exceeded: 'Quota exhausted',
       model_unsupported: 'Model not supported',
       model_rate_limited: 'Model rate limited',

@@ -270,7 +270,9 @@ func TestInflightReservation_HeldUntilBillingTaskDone(t *testing.T) {
 	require.Equal(t, 1, cache.count(), "reservation must survive handler return while billing is pending")
 
 	_, err = svc.ReserveInflight(context.Background(), user, nil, nil, 0.9)
-	require.ErrorIs(t, err, ErrInsufficientBalance)
+	// xy2api resilience: the positive balance is only held by an in-flight
+	// request, so the rejection is the retryable reservation error.
+	require.ErrorIs(t, err, ErrInflightBalanceReserved)
 
 	taskDone()
 	taskDone() // idempotent
@@ -304,7 +306,9 @@ func TestInflightReservation_RenewedWhileHandlerActive(t *testing.T) {
 	require.Equal(t, 1, cache.count(), "renewal keeps the reservation alive past its TTL")
 	require.Greater(t, cache.renews.Load(), int32(3))
 	_, err = svc.ReserveInflight(context.Background(), user, nil, nil, 0.9)
-	require.ErrorIs(t, err, ErrInsufficientBalance)
+	// xy2api resilience: the positive balance is only held by an in-flight
+	// request, so the rejection is the retryable reservation error.
+	require.ErrorIs(t, err, ErrInflightBalanceReserved)
 
 	done := res.Acquire()
 	res.HandlerDone()

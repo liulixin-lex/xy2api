@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/resilience"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -141,9 +143,46 @@ func TestShouldClearStickySession(t *testing.T) {
 		},
 	}
 
+	// The table above is the 0.3.0 behaviour; xy2api resilience session
+	// handling restores it when switched off.
+	withResilienceSettings(t, func(s *resilience.Settings) { s.Session.Enabled = false })
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Equal(t, tt.want, shouldClearStickySession(tt.account, tt.requestedModel))
+		})
+	}
+}
+
+// TestShouldClearStickySessionKeepsSoftPenalties: with session handling on,
+// soft penalties (short model rate limits, overload) keep the binding while
+// hard states still clear it (design §4.2).
+func TestShouldClearStickySessionKeepsSoftPenalties(t *testing.T) {
+	withResilienceSettings(t, nil)
+	now := time.Now()
+	soonReset := now.Add(45 * time.Second)
+	overload := now.Add(2 * time.Minute)
+	hourReset := now.Add(time.Hour)
+	transient := now.Add(30 * time.Second)
+	cases := []struct {
+		name    string
+		account *Account
+		model   string
+		want    bool
+	}{
+		{"429 cooldown 45s keeps", &Account{Status: StatusActive, Schedulable: true, RateLimitResetAt: &soonReset}, "", false},
+		{"overload keeps", &Account{Status: StatusActive, Schedulable: true, OverloadUntil: &overload}, "", false},
+		{"transient cooldown keeps", &Account{Status: StatusActive, Schedulable: true, TempUnschedulableUntil: &transient, TempUnschedulableReason: "transient:TRANSIENT HTTP 502"}, "", false},
+		{"model rate limit 30s keeps", &Account{Status: StatusActive, Schedulable: true, Extra: map[string]any{
+			"model_rate_limits": map[string]any{"claude-sonnet-4": map[string]any{"rate_limit_reset_at": now.Add(30 * time.Second).Format(time.RFC3339)}},
+		}}, "claude-sonnet-4", false},
+		{"rate limit beyond 300s clears", &Account{Status: StatusActive, Schedulable: true, RateLimitResetAt: &hourReset}, "", true},
+		{"balance exhausted clears", &Account{Status: StatusActive, Schedulable: true, TempUnschedulableUntil: &hourReset, TempUnschedulableReason: "balance:exhausted: x"}, "", true},
+		{"error state clears", &Account{Status: StatusError, Schedulable: true}, "", true},
+		{"admin disabled clears", &Account{Status: StatusActive, Schedulable: false}, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, shouldClearStickySession(tc.account, tc.model))
 		})
 	}
 }

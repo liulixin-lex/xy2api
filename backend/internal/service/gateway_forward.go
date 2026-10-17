@@ -395,9 +395,20 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	var resp *http.Response
 	lastWireBody := body
 	retryStart := time.Now()
+	// xy2api resilience: the first-event guard of the attempt in flight; an
+	// attempt that is retried releases its guard when the next one starts.
+	var activeFirstEvent *firstEventGuard
+	defer func() { activeFirstEvent.Release() }()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
+		// xy2api resilience: first upstream event timeout (design §7.4).
+		var firstEvent *firstEventGuard
+		if reqStream {
+			activeFirstEvent.Release()
+			upstreamCtx, firstEvent = newFirstEventGuard(upstreamCtx, resilienceFirstEventTimeout(ctx, account.ID, account.Platform))
+			activeFirstEvent = firstEvent
+		}
 		upstreamReq, wireBody, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 		releaseUpstreamCtx()
 		if err != nil {
@@ -411,6 +422,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
+			}
+			if firstEvent.Fired() {
+				return nil, firstEvent.failoverError(c, account, "response_headers")
 			}
 			return nil, s.handleUpstreamTransportError(ctx, c, account, err, OpsUpstreamErrorEvent{
 				UpstreamURL: safeUpstreamURL(upstreamReq.URL.String()),
@@ -639,6 +653,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				if delay <= 0 {
 					break
 				}
+				// xy2api resilience: charge the request budget only for a retry
+				// that will run (design §6.2).
+				if !resilienceInServiceRetryAllowed(ctx, account.ID, resp.StatusCode) {
+					break
+				}
 
 				respBody, _ := s.readUpstreamErrorBody(resp)
 				_ = resp.Body.Close()
@@ -833,12 +852,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			if errors.As(err, &sseErr) {
 				// 上游 HTTP 200 + SSE 流体内出现 event:error 帧。
 				body := []byte(sseErr.RawData)
-				semanticStatus := http.StatusForbidden
-				if c.Writer.Size() == writerSizeBeforeStream && gjson.GetBytes(body, "error.type").String() == "overloaded_error" {
-					semanticStatus = 529
+				// xy2api resilience: the event's error.type decides the status.
+				semanticStatus, sideEffectHeader := resilienceStreamErrorStatus(gjson.GetBytes(body, "error.type").String(), c.Writer.Size() != writerSizeBeforeStream, resp.Header)
+				if sideEffectHeader != nil {
 					syntheticResp := &http.Response{
 						StatusCode: semanticStatus,
-						Header:     resp.Header.Clone(),
+						Header:     sideEffectHeader,
 						Body:       io.NopCloser(bytes.NewReader(body)),
 					}
 					s.handleFailoverSideEffects(ctx, syntheticResp, account, reqModel)

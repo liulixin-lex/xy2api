@@ -1,12 +1,11 @@
 <template>
   <div class="space-y-5" data-testid="share-report">
-    <div class="card flex flex-wrap items-end justify-between gap-3 p-4">
-      <label class="text-sm text-gray-700 dark:text-dark-200">{{ t('admin.shareScheduling.report.window') }}
-        <select v-model="reportWindow" class="input mt-1 w-40" data-testid="share-report-window">
-          <option v-for="option in windows" :key="option.value" :value="option.value">{{ t('admin.shareScheduling.report.windows.' + option.key) }}</option>
-        </select>
-      </label>
-      <button type="button" class="btn btn-secondary" :disabled="loading" data-testid="share-report-refresh" @click="load">{{ loading ? t('common.loading') : t('admin.shareScheduling.report.refresh') }}</button>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-2 text-sm text-gray-700 dark:text-dark-200">
+        <span>{{ t('admin.shareScheduling.report.window') }}</span>
+        <Select v-model="reportWindow" class="w-36" :options="windowOptions" :aria-label="t('admin.shareScheduling.report.window')" data-testid="share-report-window" />
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" :disabled="loading" data-testid="share-report-refresh" @click="load">{{ loading ? t('common.loading') : t('admin.shareScheduling.report.refresh') }}</button>
     </div>
 
     <p v-if="failed" role="alert" class="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">{{ failed }}</p>
@@ -56,10 +55,10 @@
                   <div class="h-2 rounded-full bg-gray-100 dark:bg-dark-700"><div class="h-2 rounded-full bg-gray-400 dark:bg-dark-400" :style="{ width: row.target * 100 + '%' }" /></div>
                   <div class="mt-1 h-2 rounded-full bg-gray-100 dark:bg-dark-700"><div class="h-2 rounded-full bg-primary-500" :style="{ width: row.actual * 100 + '%' }" /></div>
                 </td>
-                <td class="p-2 text-right font-mono">{{ formatSharePercent(row.target) }}</td>
-                <td class="p-2 text-right font-mono">{{ formatSharePercent(row.actual) }}</td>
-                <td class="p-2 text-right font-mono" :class="Math.abs(row.actual - row.target) > 0.05 ? 'text-amber-700 dark:text-amber-300' : 'text-gray-600 dark:text-dark-300'">{{ signedPercent(row.actual - row.target) }}</td>
-                <td v-if="report.corrections" class="p-2 text-right font-mono">{{ report.corrections[String(row.id)]?.toFixed(2) ?? '-' }}</td>
+                <td class="p-2 text-right tabular-nums">{{ formatSharePercent(row.target) }}</td>
+                <td class="p-2 text-right tabular-nums">{{ formatSharePercent(row.actual) }}</td>
+                <td class="p-2 text-right tabular-nums" :class="Math.abs(row.actual - row.target) > 0.05 ? 'text-amber-700 dark:text-amber-300' : 'text-gray-600 dark:text-dark-300'">{{ signedPercent(row.actual - row.target) }}</td>
+                <td v-if="report.corrections" class="p-2 text-right tabular-nums">{{ report.corrections[String(row.id)]?.toFixed(2) ?? '-' }}</td>
               </tr>
             </tbody>
           </table>
@@ -87,15 +86,15 @@
                   <div class="font-medium text-gray-900 dark:text-white">{{ row.name }}</div>
                   <div class="text-xs text-gray-500 dark:text-dark-400">#{{ row.id }}</div>
                 </td>
-                <td class="p-2 text-right font-mono">{{ formatNumber(row.placed) }}</td>
+                <td class="p-2 text-right tabular-nums">{{ formatNumber(row.placed) }}</td>
                 <td class="p-2 text-right">
-                  <span class="font-mono">{{ formatNumber(row.skipped) }}</span>
+                  <span class="tabular-nums">{{ formatNumber(row.skipped) }}</span>
                   <span v-if="row.skips.length" class="block text-xs text-gray-500 dark:text-dark-400">{{ row.skips.map(([reason, n]) => labels.reason(reason) + ' ' + formatNumber(n)).join(' · ') }}</span>
                 </td>
-                <td class="p-2 text-right font-mono" :class="row.busy ? 'text-amber-700 dark:text-amber-300' : 'text-gray-600 dark:text-dark-300'">{{ row.placed + row.skipped > 0 ? formatSharePercent(row.skipRate) : '-' }}</td>
-                <td class="p-2 text-right font-mono">{{ row.ttft ? formatNumber(row.ttft.count) : '-' }}</td>
-                <td class="p-2 text-right font-mono">{{ row.ttft ? percentile(row.ttft, 'p50') : '-' }}</td>
-                <td class="p-2 text-right font-mono">{{ row.ttft ? percentile(row.ttft, 'p95') : '-' }}</td>
+                <td class="p-2 text-right tabular-nums" :class="row.busy ? 'text-amber-700 dark:text-amber-300' : 'text-gray-600 dark:text-dark-300'">{{ row.placed + row.skipped > 0 ? formatSharePercent(row.skipRate) : '-' }}</td>
+                <td class="p-2 text-right tabular-nums">{{ row.ttft ? formatNumber(row.ttft.count) : '-' }}</td>
+                <td class="p-2 text-right tabular-nums">{{ row.ttft ? percentile(row.ttft, 'p50') : '-' }}</td>
+                <td class="p-2 text-right tabular-nums">{{ row.ttft ? percentile(row.ttft, 'p95') : '-' }}</td>
               </tr>
             </tbody>
           </table>
@@ -103,18 +102,16 @@
         <p v-if="accountRows.some(row => row.busy)" class="mt-2 text-xs text-amber-700 dark:text-amber-300" data-testid="share-account-busy">{{ t('admin.shareScheduling.report.accounts.busyHint') }}</p>
       </section>
 
-      <section class="card grid gap-6 p-5 md:grid-cols-2">
-        <ShareBarList :title="t('admin.shareScheduling.report.reasons')" :values="report.decisions.reasons" :label="labels.reason" :empty="t('admin.shareScheduling.report.noData')" />
-        <ShareBarList :title="t('admin.shareScheduling.report.cacheClasses')" :values="report.cache.class_tokens" :label="labels.cacheClass" :empty="t('admin.shareScheduling.report.noData')" bar-class="bg-emerald-500" />
-        <ShareBarList :title="t('admin.shareScheduling.report.keySources')" :values="report.decisions.key_sources" :label="labels.keySource" :empty="t('admin.shareScheduling.report.noData')" bar-class="bg-sky-500" />
-        <ShareBarList :title="t('admin.shareScheduling.report.idealSkips')" :values="report.decisions.ideal_skips" :label="labels.reason" :empty="t('admin.shareScheduling.report.noData')" bar-class="bg-amber-500" />
-        <ShareBarList :title="t('admin.shareScheduling.report.hotReasons')" :values="report.decisions.hot_reasons" :label="labels.reason" :empty="t('admin.shareScheduling.report.noData')" bar-class="bg-red-500" />
-        <ShareBarList v-if="report.decisions.shadow > 0" :title="t('admin.shareScheduling.report.shadowReasons')" :values="report.decisions.shadow_reasons" :label="labels.reason" :empty="t('admin.shareScheduling.report.noData')" bar-class="bg-violet-500" />
+      <section class="card p-5" data-testid="share-distributions">
+        <div v-if="distributions.length" class="grid gap-6 md:grid-cols-2">
+          <ShareBarList v-for="item in distributions" :key="item.key" :title="item.title" :values="item.values" :label="item.label" :empty="t('admin.shareScheduling.report.noData')" :bar-class="item.barClass" />
+        </div>
+        <p v-else class="text-sm text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.report.noDistributions') }}</p>
       </section>
 
-      <section class="card p-5">
+      <section v-if="ttftRows.length" class="card p-5">
         <h3 class="font-semibold text-gray-900 dark:text-white">{{ t('admin.shareScheduling.report.ttft') }}</h3>
-        <div v-if="ttftRows.length" class="mt-3 overflow-x-auto">
+        <div class="mt-3 overflow-x-auto">
           <table class="w-full text-left text-sm" data-testid="share-ttft">
             <thead>
               <tr class="border-b border-gray-200 text-xs text-gray-500 dark:border-dark-600 dark:text-dark-400">
@@ -128,16 +125,15 @@
             <tbody>
               <tr v-for="row in ttftRows" :key="row.reason" class="border-b border-gray-100 last:border-0 dark:border-dark-700">
                 <td class="p-2">{{ labels.reason(row.reason) }}</td>
-                <td class="p-2 text-right font-mono">{{ formatNumber(row.count) }}</td>
-                <td class="p-2 text-right font-mono">{{ percentile(row, 'p50') }}</td>
-                <td class="p-2 text-right font-mono">{{ percentile(row, 'p95') }}</td>
-                <td class="p-2 text-right font-mono">{{ percentile(row, 'p99') }}</td>
+                <td class="p-2 text-right tabular-nums">{{ formatNumber(row.count) }}</td>
+                <td class="p-2 text-right tabular-nums">{{ percentile(row, 'p50') }}</td>
+                <td class="p-2 text-right tabular-nums">{{ percentile(row, 'p95') }}</td>
+                <td class="p-2 text-right tabular-nums">{{ percentile(row, 'p99') }}</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <p v-if="ttftRows.length" class="mt-2 text-xs text-gray-500 dark:text-dark-400" data-testid="share-ttft-min-samples">{{ t('admin.shareScheduling.report.ttftMinSamples') }}</p>
-        <p v-else class="mt-2 text-sm text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.report.noData') }}</p>
+        <p class="mt-2 text-xs text-gray-500 dark:text-dark-400" data-testid="share-ttft-min-samples">{{ t('admin.shareScheduling.report.ttftMinSamples') }}</p>
       </section>
 
       <section v-if="selectionRows.length" class="card p-5">
@@ -159,11 +155,11 @@
             <tbody>
               <tr v-for="row in selectionRows" :key="row.mode" class="border-b border-gray-100 last:border-0 dark:border-dark-700" :data-testid="'share-selection-' + row.mode">
                 <td class="p-2">{{ labels.scheduler(row.mode === 'original' ? 'sub2api' : row.mode) }}</td>
-                <td class="p-2 text-right font-mono">{{ formatNumber(row.samples) }}</td>
-                <td class="p-2 text-right font-mono">{{ fineMs(row.avg_ms) }}</td>
-                <td class="p-2 text-right font-mono">{{ row.avg_redis_round_trips === null ? '—' : row.avg_redis_round_trips.toFixed(1) }}</td>
-                <td class="p-2 text-right font-mono">{{ row.avg_redis_ms === null ? '—' : fineMs(row.avg_redis_ms) }}</td>
-                <td class="p-2 text-right font-mono">{{ row.avg_db_queries === null ? '—' : row.avg_db_queries.toFixed(1) }}</td>
+                <td class="p-2 text-right tabular-nums">{{ formatNumber(row.samples) }}</td>
+                <td class="p-2 text-right tabular-nums">{{ fineMs(row.avg_ms) }}</td>
+                <td class="p-2 text-right tabular-nums">{{ row.avg_redis_round_trips === null ? '—' : row.avg_redis_round_trips.toFixed(1) }}</td>
+                <td class="p-2 text-right tabular-nums">{{ row.avg_redis_ms === null ? '—' : fineMs(row.avg_redis_ms) }}</td>
+                <td class="p-2 text-right tabular-nums">{{ row.avg_db_queries === null ? '—' : row.avg_db_queries.toFixed(1) }}</td>
               </tr>
             </tbody>
           </table>
@@ -193,9 +189,9 @@
                   <span v-if="sample.ideal_skip" class="block text-gray-500 dark:text-dark-400">{{ labels.reason(sample.ideal_skip) }}</span>
                 </td>
                 <td class="p-2">{{ sample.model || '-' }}<span class="block text-gray-500 dark:text-dark-400">{{ labels.keySource(sample.key_source) }}</span></td>
-                <td class="whitespace-nowrap p-2 font-mono">{{ sample.bound ? '#' + sample.bound : '-' }} → {{ sample.served ? '#' + sample.served : '-' }}<span v-if="sample.original" class="block font-sans text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.report.original', { id: sample.original }) }}</span></td>
-                <td class="p-2 text-right font-mono">{{ sample.wait_ms ? formatShareMs(sample.wait_ms) : '-' }}</td>
-                <td class="p-2 text-right font-mono">{{ sample.idle_ms ? formatShareMs(sample.idle_ms) : '-' }}</td>
+                <td class="whitespace-nowrap p-2 tabular-nums">{{ sample.bound ? '#' + sample.bound : '-' }} → {{ sample.served ? '#' + sample.served : '-' }}<span v-if="sample.original" class="block text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.report.original', { id: sample.original }) }}</span></td>
+                <td class="p-2 text-right tabular-nums">{{ sample.wait_ms ? formatShareMs(sample.wait_ms) : '-' }}</td>
+                <td class="p-2 text-right tabular-nums">{{ sample.idle_ms ? formatShareMs(sample.idle_ms) : '-' }}</td>
                 <td class="p-2">
                   <span v-if="sample.hot_migration" class="mr-1 rounded bg-red-50 px-1 text-red-700 dark:bg-red-900/20 dark:text-red-300">{{ t('admin.shareScheduling.report.hot') }}</span>
                   <span v-if="sample.queued" class="mr-1 rounded bg-amber-50 px-1 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">{{ t('admin.shareScheduling.report.queued') }}</span>
@@ -206,7 +202,7 @@
             </tbody>
           </table>
         </div>
-        <p v-else class="mt-2 text-sm text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.report.noDecisions') }}</p>
+        <p v-else class="mt-2 text-sm text-gray-500 dark:text-dark-400">{{ decisionSamples === false ? t('admin.shareScheduling.report.samplesOff') : t('admin.shareScheduling.report.noDecisions') }}</p>
       </section>
     </template>
   </div>
@@ -216,6 +212,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ShareBarList from './ShareBarList.vue'
+import Select from '@/components/common/Select.vue'
 import shareSchedulingAPI from '@/api/admin/shareScheduling'
 import type { ShareDecisionSample, ShareReport, ShareTTFT } from '@/api/admin/shareScheduling'
 import { useShareSchedulingLabels } from '@/composables/useShareSchedulingLabels'
@@ -226,6 +223,7 @@ import { formatShareMs, formatSharePercent } from '@/utils/shareScheduling'
 const props = defineProps<{
   groupId: number
   sampleRate?: number
+  decisionSamples?: boolean
 }>()
 
 const { t } = useI18n()
@@ -236,12 +234,37 @@ const windows = [
   { key: 'h6', value: '6h' },
   { key: 'h24', value: '24h' }
 ]
+const windowOptions = computed(() => windows.map(w => ({ value: w.value, label: t('admin.shareScheduling.report.windows.' + w.key) })))
 const reportWindow = ref('1h')
 const report = ref<ShareReport | null>(null)
 const decisions = ref<ShareDecisionSample[]>([])
 const loading = ref(false)
 const failed = ref('')
 let request = 0
+
+interface Distribution {
+  key: string
+  title: string
+  values: Record<string, number> | undefined
+  label: (key: string) => string
+  barClass?: string
+}
+
+// Only distributions with data are drawn; when none has any, one line says
+// so instead of a card of empty lists.
+const distributions = computed<Distribution[]>(() => {
+  const r = report.value
+  if (!r) return []
+  const all: Distribution[] = [
+    { key: 'reasons', title: t('admin.shareScheduling.report.reasons'), values: r.decisions.reasons, label: labels.reason },
+    { key: 'cache', title: t('admin.shareScheduling.report.cacheClasses'), values: r.cache.class_tokens, label: labels.cacheClass, barClass: 'bg-emerald-500' },
+    { key: 'keys', title: t('admin.shareScheduling.report.keySources'), values: r.decisions.key_sources, label: labels.keySource, barClass: 'bg-sky-500' },
+    { key: 'ideal', title: t('admin.shareScheduling.report.idealSkips'), values: r.decisions.ideal_skips, label: labels.reason, barClass: 'bg-amber-500' },
+    { key: 'hot', title: t('admin.shareScheduling.report.hotReasons'), values: r.decisions.hot_reasons, label: labels.reason, barClass: 'bg-red-500' },
+    { key: 'shadow', title: t('admin.shareScheduling.report.shadowReasons'), values: r.decisions.shadow_reasons, label: labels.reason, barClass: 'bg-violet-500' }
+  ]
+  return all.filter(d => Object.values(d.values ?? {}).some(v => v > 0))
+})
 
 const actualKey = computed(() => {
   switch (report.value?.unit) {

@@ -172,6 +172,11 @@ type UsageLog struct {
 	AccountRateMultiplier *float64
 	// AccountStatsCost 账号统计定价预计算费用（nil = 使用默认公式 total_cost × account_rate_multiplier）
 	AccountStatsCost *float64
+	// OriginGroupID is the group the request was made for when an
+	// availability fallback group served it (xy2api resilience).
+	OriginGroupID *int64
+	// OriginGroupName is loaded with the associations for display.
+	OriginGroupName string
 
 	BillingType        int8
 	RequestType        RequestType

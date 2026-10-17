@@ -32,6 +32,11 @@ const (
 	ReasonAdminRebalance          Reason = "admin_rebalance"
 	ReasonModelRouting            Reason = "model_routing"
 	ReasonModelRoutingFallback    Reason = "model_routing_fallback"
+	// Gateway resilience (design §4): the session left an account it kept
+	// failing on, and a last-resort pick of a soft-penalised account when
+	// nothing else was available.
+	ReasonResilFailureStreak Reason = "resil_failure_streak"
+	ReasonLastResortSoft     Reason = "last_resort_soft"
 )
 
 // Exclusion and skip reasons. Adapters map the original Sub2API gates onto
@@ -44,6 +49,7 @@ const (
 	ReasonRateLimited         Reason = "rate_limited"
 	ReasonOverloaded          Reason = "overloaded"
 	ReasonTempUnschedulable   Reason = "temp_unschedulable"
+	ReasonBalanceExhausted    Reason = "balance_exhausted"
 	ReasonQuotaExceeded       Reason = "quota_exceeded"
 	ReasonModelUnsupported    Reason = "model_unsupported"
 	ReasonModelRateLimited    Reason = "model_rate_limited"

@@ -256,6 +256,16 @@ func TestBindingLifecycle(t *testing.T) {
 		require.Equal(t, []Step{{AccountID: target, Tier: 1}}, d.Steps)
 		require.Equal(t, WriteReplace, d.Write)
 	})
+	t.Run("failure streak moves the session with its own reason", func(t *testing.T) {
+		// Gateway resilience: the session's avoid set excludes its account.
+		cands := eligible(1, 2)
+		cands[other-1].Excluded = true
+		cands[other-1].Reason = ReasonResilFailureStreak
+		d := Plan(twoAccounts, bound(key, other, 0), cands)
+		require.Equal(t, ReasonResilFailureStreak, d.Reason)
+		require.Equal(t, []Step{{AccountID: target, Tier: 1}}, d.Steps)
+		require.Equal(t, WriteReplace, d.Write)
+	})
 }
 
 func TestDrain(t *testing.T) {
@@ -318,6 +328,9 @@ func TestTierReturn(t *testing.T) {
 	require.Equal(t, ReasonAffinityHit, Plan(p, bound(key, 2, time.Second), recent(cands, testNow.Add(-5*time.Minute))).Reason)
 	require.Equal(t, ReasonReturnDeadline, Plan(p, bound(key, 2, time.Second), recent(cands, testNow.Add(-21*time.Minute))).Reason,
 		"deadline (10m) plus the maximum stagger (10m) has passed")
+	require.Equal(t, ReasonAffinityHit, Plan(p, bound(key, 2, time.Second), cands).Reason,
+		"no known recovery of tier 1 (it was only saturated): a warm session is not forced back")
+	require.Equal(t, ReasonReturnCold, Plan(p, bound(key, 2, 10*time.Minute), cands).Reason, "it returns when its cache is cold")
 }
 
 func TestSpillOrderPrefersCacheDomainThenClass(t *testing.T) {

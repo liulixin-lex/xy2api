@@ -142,6 +142,8 @@ type Group struct {
 	FallbackGroupID *int64 `json:"fallback_group_id"`
 	// 无效请求兜底分组
 	FallbackGroupIDOnInvalidRequest *int64 `json:"fallback_group_id_on_invalid_request"`
+	// 无号兜底分组（xy2api gateway resilience）
+	AvailabilityFallbackGroupID *int64 `json:"availability_fallback_group_id"`
 
 	// OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程）
 	AllowMessagesDispatch bool `json:"allow_messages_dispatch"`
@@ -636,6 +638,10 @@ type UsageLog struct {
 	RequestType  string `json:"request_type"`
 	Stream       bool   `json:"stream"`
 	OpenAIWSMode bool   `json:"openai_ws_mode"`
+	// OriginGroupID is the group the request was made for when an
+	// availability fallback group served it (xy2api resilience).
+	OriginGroupID   *int64 `json:"origin_group_id,omitempty"`
+	OriginGroupName string `json:"origin_group_name,omitempty"`
 	// NativeCompactionV2 is true only for requests positively identified at
 	// runtime as the native OpenAI remote compaction v2 wire.
 	NativeCompactionV2 bool `json:"native_compaction_v2"`

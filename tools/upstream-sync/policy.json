@@ -47,6 +47,7 @@
       "openspec/changes/stabilize-openai-iq-check/**",
       "openspec/changes/iq-detection-operations/**",
       "openspec/changes/replace-controlled-with-share-scheduling/**",
+      "openspec/changes/gateway-resilience-20261015/**",
       "skills/**",
       "tools/**"
     ],
@@ -306,6 +307,354 @@
     {
       "path": "backend/internal/service/openai_gateway_usage.go",
       "value": "s.shareScheduling.observeUsage(ctx, usageLog)"
+    },
+    {
+      "path": "backend/internal/service/ratelimit_service.go",
+      "value": "if handled, disable := s.resilienceHandleUpstreamError(ctx, account, statusCode, headers, responseBody, upstreamMsg); handled {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_grok.go",
+      "value": "if s.rateLimitService.resilienceHandleGrokUpstreamError(ctx, account, statusCode, headers, responseBody) {"
+    },
+    {
+      "path": "backend/internal/handler/ops_error_logger.go",
+      "value": "trackClientBodyRead(c)"
+    },
+    {
+      "path": "backend/internal/handler/ops_error_logger.go",
+      "value": "status := opsRecordedStatus(c)"
+    },
+    {
+      "path": "backend/internal/handler/failover_loop.go",
+      "value": "if resilienceAttemptFailed(ctx, accountID, failoverErr) {"
+    },
+    {
+      "path": "backend/internal/service/gemini_messages_compat_service.go",
+      "value": "geminiInPlaceRetryAllowed(ctx, &inPlaceRetries)"
+    },
+    {
+      "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
+      "value": "geminiInPlaceRetryAllowed(ctx, &inPlaceRetries)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward.go",
+      "value": "resilienceInServiceRetryAllowed(ctx, account.ID, resp.StatusCode)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward.go",
+      "value": "semanticStatus, sideEffectHeader := resilienceStreamErrorStatus(gjson.GetBytes(body, \"error.type\").String(), c.Writer.Size() != writerSizeBeforeStream, resp.Header)"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "result, err = s.resilienceGatewaySelectionEpilogue(ctx, group, groupID, sessionHash, requestedModel, origExcluded, avoided, result, err)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "if lr := s.resilienceOpenAILastResort(lrCtx, OpenAIAccountScheduleRequest{"
+    },
+    {
+      "path": "backend/internal/service/gateway_service.go",
+      "value": "if resilienceKeepsSoftStickyBinding(account, requestedModel) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if !resilienceBindAllowed(ctx, accountID) {"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "armPreOutputKeepalive(c, service.PreOutputProtocolAnthropic, reqStream, account)"
+    },
+    {
+      "path": "backend/internal/service/gateway_upstream_response.go",
+      "value": "stallCheckBase := resilienceStallCheckBase(streamInterval)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "stallCheckBase := resilienceStallCheckBase(streamInterval)"
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "value": "if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {"
+    },
+    {
+      "path": "backend/internal/server/middleware/client_request_id.go",
+      "value": "resilienceTrackDelivery(c)"
+    },
+    {
+      "path": "backend/internal/handler/no_account_error.go",
+      "value": "applyNoAccountRetryHints(c, diag, apiKey, routingModel, classification)"
+    },
+    {
+      "path": "backend/internal/server/middleware/api_key_auth.go",
+      "value": "if resilienceFastFailReplay(c, apiKey.ID) {"
+    },
+    {
+      "path": "backend/internal/handler/gateway_inflight_reservation.go",
+      "value": "SessionKey: requestCacheSessionKey(body),"
+    },
+    {
+      "path": "backend/internal/handler/image_task_handler.go",
+      "value": "xy2api resilience: admission runs before the"
+    },
+    {
+      "path": "backend/internal/server/routes/gateway.go",
+      "value": "availabilityFallback := middleware.ResilienceAvailabilityFallback()"
+    },
+    {
+      "path": "backend/internal/server/middleware/api_key_auth.go",
+      "value": "resilienceTurnCapObserve(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "resilience.StateFrom(ctx).NoteTurn(derefGroupID(groupID), requestedModel, sessionHash)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(resp.Body, relayLive))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "lastRead := relayLive.lastActivity(time.Unix(0, atomic.LoadInt64(&lastReadAt)))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(resp.Body, newRelayLiveness(ctx, account)))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(r, live))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "scanner := s.newUpstreamSSEScanner(resp.Body, relayLive)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "lastRead := relayLive.lastActivity(time.Unix(0, atomic.LoadInt64(&lastReadAt)))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "scanner := s.newUpstreamSSEScanner(resp.Body, relayLive)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "lastRead := relayLive.lastActivity(time.Unix(0, atomic.LoadInt64(&lastReadAt)))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "if rest := streamInterval - time.Since(relayLive.lastActivity(time.Time{})); rest > 0 {"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "status = applyExhaustedRetryHint(c, h.gatewayService, status)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "status = applyExhaustedRetryHint(c, h.gatewayService, status)"
+    },
+    {
+      "path": "backend/internal/service/openai_sticky_compat.go",
+      "value": "if !resilienceBindAllowed(ctx, accountID) {"
+    },
+    {
+      "path": "backend/internal/handler/gateway_helper.go",
+      "value": "if service.NoteDeliveryHeartbeat(c, written) {"
+    },
+    {
+      "path": "backend/internal/handler/gateway_helper.go",
+      "value": "if only, tracked := service.DeliveryOnlyHeartbeats(c); tracked {"
+    },
+    {
+      "path": "backend/internal/handler/gateway_helper.go",
+      "value": "timeout = resilienceSlotWaitTimeout(c, timeout)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "h.handleStreamingAwareErrorWithCode(c, http.StatusBadRequest, \"invalid_request_error\", codeContentPolicyViolation, msg, streamStarted, false)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "h.anthropicStreamingAwareError(c, http.StatusBadRequest, \"invalid_request_error\", msg, streamStarted)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "if msg, rejected := resilienceContentRejection(c, failoverErr); rejected {"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
+      "value": "writeOpenAIContentRejection(c, msg)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "if msg, rejected := resilienceContentRejection(c, lastErr); rejected {"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "if msg, rejected := resilienceContentRejection(c, failoverErr); rejected {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "rejected := !notFound && !unsupported && isOpenAICompatContinuationRejected(resp.StatusCode, respBody)"
+    },
+    {
+      "path": "backend/internal/service/openai_messages_continuation.go",
+      "value": "func isOpenAICompatContinuationRejected(statusCode int, upstreamBody []byte) bool"
+    },
+    {
+      "path": "backend/internal/service/openai_messages_continuation.go",
+      "value": "s.sweepOpenAICompatSessionResponses(time.Now())"
+    },
+    {
+      "path": "backend/internal/service/ops_upstream_context.go",
+      "value": "resilience.StateFrom(c.Request.Context()).MarkAccountFailed(ev.AccountID)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, dataBytes, failedMessage, outputStarted)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, bareErrorPayload, failedMessage, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, scanErr, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, nil, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, dataBytes, failedMessage, outputStarted)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, bareErrorPayload, failedMessage, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, err, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, nil, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, payloadBytes, message, clientOutputStarted)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, err, clientOutputStarted && !clientDisconnected)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, nil, clientOutputStarted && !clientDisconnected)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, payloadBytes, message, clientOutputStarted)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, err, clientOutputStarted && !clientDisconnected)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, nil, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, scanErr, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_http_bridge.go",
+      "value": "s.resilienceOpenAIWSFailedAfterOutput(ctx, account, resp, eventType, upstreamMessage, wroteDownstream, officialOpenAIResponses)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_http_bridge.go",
+      "value": "s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, bareErrorPayload, bareErrorMessage, wroteDownstream)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_http_bridge.go",
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, err, wroteDownstream && !clientDisconnected)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_http_bridge.go",
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, nil, wroteDownstream && !clientDisconnected)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
+      "value": "s.resilienceOpenAIWSFailedAfterOutput(ctx, account, turn, eventType, upstreamMessage, wroteDownstream, account.IsOpenAIOAuthLike())"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_v2_passthrough_adapter.go",
+      "value": "s.resilienceOpenAIWSFailedAfterOutput(ctx, account, int(completedTurns.Load())+1, eventType, payload, wroteDownstream, true)"
+    },
+    {
+      "path": "backend/internal/service/gateway_upstream_response.go",
+      "value": "s.resilienceAnthropicFailedAfterOutput(ctx, c, account, resp, err)"
+    },
+    {
+      "path": "backend/internal/service/gateway_upstream_response.go",
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, ev.err, true)"
+    },
+    {
+      "path": "backend/internal/service/gateway_upstream_response.go",
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, nil, !clientDisconnected && openAIStreamClientOutputStarted(c, false))"
+    },
+    {
+      "path": "backend/internal/web/embed_on.go",
+      "value": "// nonce, so it is never answered with 304 and has no ETag"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "webSearchReplay, webSearchBody := armOpenAIWebSearchReplay(c, account, body, false)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "s.openAIWebSearchReplayAfterHTTPError(ctx, c, account, webSearchReplay, body, resp, respBody, upstreamMsg)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "s.openAIWebSearchReplayAfterSignal(ctx, c, account, webSearchReplay, body, resp, err)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "webSearchReplay.succeeded()"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "webSearchReplay, webSearchBody := armOpenAIWebSearchReplay(c, account, body, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.openAIWebSearchReplayAfterHTTPError(ctx, c, account, webSearchReplay, body, resp, probeBody, upstreamMsg)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.openAIWebSearchReplayAfterSignal(ctx, c, account, webSearchReplay, body, resp, handleErr)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "webSearchReplay.succeeded()"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage); replayErr != nil {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage); replayErr != nil {"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "if status, errType, message, ok := resilienceWebSearchHistoryRejected(c, h.gatewayService, failoverErr); ok {"
     }
   ],
   "forbidden_module_paths": [
@@ -336,7 +685,17 @@
     "v0215-append-only-upgrade",
     "explicit-backup-scope-and-diagnostics",
     "async-image-storage-lifecycle",
-    "usage-metrics-consistent-units"
+    "usage-metrics-consistent-units",
+    "xy-resilience-classify-hook",
+    "xy-resilience-budget-hook",
+    "xy-resilience-session-hook",
+    "xy-resilience-keepalive-hook",
+    "xy-resilience-disconnect-hook",
+    "xy-resilience-errors-hook",
+    "xy-resilience-fallback-hook",
+    "xy-index-nonce-no-304",
+    "xy-placeholder-session-id",
+    "xy-allowlist-404-hint"
   ],
   "custom_patch_tests": [
     {
@@ -423,6 +782,56 @@
       "id": "usage-metrics-consistent-units",
       "path": "frontend/src/utils/__tests__/usageMetrics.spec.ts",
       "literal": "uses complete request duration even when first-token time is available"
+    },
+    {
+      "id": "xy-resilience-classify-hook",
+      "path": "backend/internal/service/resilience_penalty_test.go",
+      "literal": "func TestApplyResilienceOutcomeStreamBalanceAndStall"
+    },
+    {
+      "id": "xy-resilience-budget-hook",
+      "path": "backend/internal/handler/resilience_budget_test.go",
+      "literal": "func TestBudgetFourAttemptsAtMost"
+    },
+    {
+      "id": "xy-resilience-session-hook",
+      "path": "backend/internal/service/resilience_session_test.go",
+      "literal": "func TestSessionFailureStreakRebindsAndAvoids"
+    },
+    {
+      "id": "xy-resilience-keepalive-hook",
+      "path": "backend/internal/handler/resilience_keepalive_test.go",
+      "literal": "func TestHeartbeatThenFailoverKeepsSwitching"
+    },
+    {
+      "id": "xy-resilience-disconnect-hook",
+      "path": "backend/internal/server/middleware/resilience_delivery_test.go",
+      "literal": "func TestUndeliveredDisconnectCancelsUpstream"
+    },
+    {
+      "id": "xy-resilience-errors-hook",
+      "path": "backend/internal/handler/resilience_errors_test.go",
+      "literal": "func TestNoAccountResponseCarriesRetryAfter"
+    },
+    {
+      "id": "xy-resilience-fallback-hook",
+      "path": "backend/internal/server/middleware/resilience_fallback_test.go",
+      "literal": "func TestAvailabilityFallbackMiddlewareMovesKey"
+    },
+    {
+      "id": "xy-index-nonce-no-304",
+      "path": "backend/internal/web/embed_test.go",
+      "literal": "index_html_is_never_not_modified"
+    },
+    {
+      "id": "xy-placeholder-session-id",
+      "path": "backend/internal/service/generate_session_hash_test.go",
+      "literal": "TestGenerateSessionHash_PlaceholderSessionIDIsIgnored"
+    },
+    {
+      "id": "xy-allowlist-404-hint",
+      "path": "backend/internal/server/middleware/group_model_allowlist_test.go",
+      "literal": "TestGroupModelAllowlistRejectionNamesAvailableModels"
     }
   ]
 }

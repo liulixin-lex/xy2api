@@ -1272,6 +1272,33 @@ func (_u *GroupUpdate) AddProfitSafetyBuffer(v float64) *GroupUpdate {
 	return _u
 }
 
+// SetAvailabilityFallbackGroupID sets the "availability_fallback_group_id" field.
+func (_u *GroupUpdate) SetAvailabilityFallbackGroupID(v int64) *GroupUpdate {
+	_u.mutation.ResetAvailabilityFallbackGroupID()
+	_u.mutation.SetAvailabilityFallbackGroupID(v)
+	return _u
+}
+
+// SetNillableAvailabilityFallbackGroupID sets the "availability_fallback_group_id" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableAvailabilityFallbackGroupID(v *int64) *GroupUpdate {
+	if v != nil {
+		_u.SetAvailabilityFallbackGroupID(*v)
+	}
+	return _u
+}
+
+// AddAvailabilityFallbackGroupID adds value to the "availability_fallback_group_id" field.
+func (_u *GroupUpdate) AddAvailabilityFallbackGroupID(v int64) *GroupUpdate {
+	_u.mutation.AddAvailabilityFallbackGroupID(v)
+	return _u
+}
+
+// ClearAvailabilityFallbackGroupID clears the value of the "availability_fallback_group_id" field.
+func (_u *GroupUpdate) ClearAvailabilityFallbackGroupID() *GroupUpdate {
+	_u.mutation.ClearAvailabilityFallbackGroupID()
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdate) AddAPIKeyIDs(ids ...int64) *GroupUpdate {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -1987,6 +2014,15 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedProfitSafetyBuffer(); ok {
 		_spec.AddField(group.FieldProfitSafetyBuffer, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AvailabilityFallbackGroupID(); ok {
+		_spec.SetField(group.FieldAvailabilityFallbackGroupID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedAvailabilityFallbackGroupID(); ok {
+		_spec.AddField(group.FieldAvailabilityFallbackGroupID, field.TypeInt64, value)
+	}
+	if _u.mutation.AvailabilityFallbackGroupIDCleared() {
+		_spec.ClearField(group.FieldAvailabilityFallbackGroupID, field.TypeInt64)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -3537,6 +3573,33 @@ func (_u *GroupUpdateOne) AddProfitSafetyBuffer(v float64) *GroupUpdateOne {
 	return _u
 }
 
+// SetAvailabilityFallbackGroupID sets the "availability_fallback_group_id" field.
+func (_u *GroupUpdateOne) SetAvailabilityFallbackGroupID(v int64) *GroupUpdateOne {
+	_u.mutation.ResetAvailabilityFallbackGroupID()
+	_u.mutation.SetAvailabilityFallbackGroupID(v)
+	return _u
+}
+
+// SetNillableAvailabilityFallbackGroupID sets the "availability_fallback_group_id" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableAvailabilityFallbackGroupID(v *int64) *GroupUpdateOne {
+	if v != nil {
+		_u.SetAvailabilityFallbackGroupID(*v)
+	}
+	return _u
+}
+
+// AddAvailabilityFallbackGroupID adds value to the "availability_fallback_group_id" field.
+func (_u *GroupUpdateOne) AddAvailabilityFallbackGroupID(v int64) *GroupUpdateOne {
+	_u.mutation.AddAvailabilityFallbackGroupID(v)
+	return _u
+}
+
+// ClearAvailabilityFallbackGroupID clears the value of the "availability_fallback_group_id" field.
+func (_u *GroupUpdateOne) ClearAvailabilityFallbackGroupID() *GroupUpdateOne {
+	_u.mutation.ClearAvailabilityFallbackGroupID()
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdateOne) AddAPIKeyIDs(ids ...int64) *GroupUpdateOne {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -4282,6 +4345,15 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedProfitSafetyBuffer(); ok {
 		_spec.AddField(group.FieldProfitSafetyBuffer, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AvailabilityFallbackGroupID(); ok {
+		_spec.SetField(group.FieldAvailabilityFallbackGroupID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedAvailabilityFallbackGroupID(); ok {
+		_spec.AddField(group.FieldAvailabilityFallbackGroupID, field.TypeInt64, value)
+	}
+	if _u.mutation.AvailabilityFallbackGroupIDCleared() {
+		_spec.ClearField(group.FieldAvailabilityFallbackGroupID, field.TypeInt64)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{

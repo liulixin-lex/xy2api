@@ -26,7 +26,7 @@
         >
           <div class="flex items-center justify-between gap-2">
             <span class="min-w-0 truncate font-medium text-gray-900 dark:text-white">{{ group.name }}</span>
-            <span class="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium" :class="schedulerClass(group.scheduler, group.effective)">{{ labels.scheduler(group.scheduler) }}</span>
+            <span v-if="group.configured" class="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium" :class="schedulerClass(group.scheduler, group.effective)">{{ labels.scheduler(group.scheduler) }}</span>
           </div>
           <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-500 dark:text-dark-400">
             <span>{{ group.platform }}</span>

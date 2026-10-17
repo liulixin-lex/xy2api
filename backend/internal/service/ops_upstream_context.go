@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"strconv"
 	"strings"
 	"time"
@@ -422,6 +423,11 @@ type OpsUpstreamErrorEvent struct {
 	Message string `json:"message,omitempty"`
 	Detail  string `json:"detail,omitempty"`
 
+	// ResilienceCategory is the failure category of the attempt (gateway
+	// resilience design §2), e.g. BALANCE or TRANSIENT; empty when the
+	// resilience switch is off or the event is not an upstream answer.
+	ResilienceCategory string `json:"resilience_category,omitempty"`
+
 	// SkipMonitoring is request-local rule state. It is intentionally excluded
 	// from persisted attempt JSON. The logger consults it only when this event is
 	// the final client-visible failure; recovered attempts remain provider-health
@@ -457,6 +463,12 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	ev.Detail = strings.TrimSpace(ev.Detail)
 	if ev.Message != "" {
 		ev.Message = sanitizeUpstreamErrorMessage(ev.Message)
+	}
+	if ev.ResilienceCategory == "" {
+		ev.ResilienceCategory = opsResilienceCategory(&ev)
+	}
+	if c.Request != nil {
+		resilience.StateFrom(c.Request.Context()).MarkAccountFailed(ev.AccountID)
 	}
 
 	var existing []*OpsUpstreamErrorEvent

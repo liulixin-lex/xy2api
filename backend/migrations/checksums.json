@@ -320,6 +320,11 @@
     "268_add_payment_order_bonus_amount.sql": "18b6a524a9873d3e4a45e6f9bd03b6e69f4384b701825c659817e017f2e8244f",
     "269_add_typesafe_platform.sql": "b6559525bf8d0b5d7c617e7415944f0d1fae8c408e9131ace84139795f66dcd2",
     "270_share_scheduling.sql": "ef73663b93499ff745b34c0b7b859d24781e1ad41a1d971e5cdbab2e20d2ed89",
-    "271_drop_platform_check_constraints.sql": "a7725f31f637208d200e0f37d5270e9f263743d99fa9e4f1bb9a7387e8be5a61"
+    "271_drop_platform_check_constraints.sql": "a7725f31f637208d200e0f37d5270e9f263743d99fa9e4f1bb9a7387e8be5a61",
+    "272_add_group_availability_fallback.sql": "6412bb7d7f00b4feedc3e59b21cf0f72f1eaddb6e87bf8d1834282159d567079",
+    "273_add_usage_logs_origin_group.sql": "4462b8184e2e21683f040fcaa9d3522c9166b182a8342bee53aafa393c901eb5",
+    "274_create_gateway_undelivered_requests.sql": "0387e64692d4ae3679800684de74d2fba51273f8de68f164d8909a1bfe9c8545",
+    "275_add_ops_error_logs_disconnect_stage.sql": "5c1c4792506d472fac016952cde72adcf0e077e02fc0e824dbbc8937096b19f0",
+    "276_seed_balance_alert_rules.sql": "e2c72fadb5c4551d428ea470bf38a1780b6e14a1214ab1734347893e5cb260f0"
   }
 }

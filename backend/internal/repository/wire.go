@@ -162,6 +162,9 @@ var ProviderSet = wire.NewSet(
 	NewTLSFingerprintProfileCache,
 	NewChannelCache,
 	NewShareSchedulingStore,
+	NewResilienceStore,
+	NewResilienceRepository,
+	NewUndeliveredRepository,
 	NewContentModerationHashCache,
 
 	// Encryptors

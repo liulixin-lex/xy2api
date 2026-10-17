@@ -4,12 +4,14 @@ import (
 	"context"
 	"log/slog"
 	"maps"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/pkg/servertiming"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/sharesched"
 )
 
@@ -62,6 +64,15 @@ func (s *ShareSchedulingService) withSelectionTrace(ctx context.Context, groupID
 func shareSelectionTraceFrom(ctx context.Context) *shareSelectionTrace {
 	trace, _ := ctx.Value(shareSelectionTraceKey{}).(*shareSelectionTrace)
 	return trace
+}
+
+// noteResilienceReason counts a gateway-resilience placement (a last-resort
+// pick) with the group's share decisions, so the share report shows it.
+func (s *ShareSchedulingService) noteResilienceReason(groupID int64, reason sharesched.Reason) {
+	if s == nil || !s.shareSchedulingActive(groupID) {
+		return
+	}
+	s.stats.add(shareStatsKindShare, groupID, time.Now(), shareStatsReasonPrefix+string(reason), 1)
 }
 
 // recordSelection runs for every selection result of the hooked schedulers.
@@ -216,6 +227,11 @@ func shareAccountStateReason(a *Account, now time.Time) (sharesched.Reason, time
 	case a.RateLimitResetAt != nil && now.Before(*a.RateLimitResetAt):
 		return sharesched.ReasonRateLimited, *a.RateLimitResetAt
 	case a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil):
+		if resilience.Current().FailureOn() && strings.HasPrefix(a.TempUnschedulableReason, resilience.ReasonPrefixBalanceExhausted) {
+			// Out of balance at the relay is a hard state: the session moves
+			// at once instead of waiting for the next recheck (design §4.2).
+			return sharesched.ReasonBalanceExhausted, time.Time{}
+		}
 		return sharesched.ReasonTempUnschedulable, *a.TempUnschedulableUntil
 	case a.IsAPIKeyOrBedrock() && a.IsQuotaExceeded():
 		return sharesched.ReasonQuotaExceeded, time.Time{}
@@ -259,8 +275,11 @@ type shareExecutor struct {
 	// createOnRefresh marks a binding read from a legacy key: refreshing the
 	// primary key would not create it, so a hit creates it instead.
 	createOnRefresh bool
-	skipped         map[int64]sharesched.Reason
-	attempts        int
+	// reason, when set, replaces the plan's reason in the selection trace
+	// (a last-resort placement).
+	reason   sharesched.Reason
+	skipped  map[int64]sharesched.Reason
+	attempts int
 }
 
 func (e *shareExecutor) skip(id int64, reason sharesched.Reason) {
@@ -386,6 +405,9 @@ func (e *shareExecutor) finish(acc *Account, acquired bool, release func(), wait
 	if e.createOnRefresh && write == sharesched.WriteRefresh {
 		write = sharesched.WriteIfAbsent
 	}
+	if e.reason != "" {
+		reason = e.reason
+	}
 	var intent *shareBindingIntent
 	if e.key != "" {
 		intent = &shareBindingIntent{cache: e.cache, groupID: e.gp.groupID, key: e.key, write: write, ttl: e.ttl}
@@ -469,11 +491,16 @@ func (e *shareExecutor) run(rec *shareDecisionRecord, req sharesched.Request, ca
 		rec.routing = sharesched.ReasonModelRoutingFallback
 	}
 	decision := sharesched.Plan(&e.gp.policy, req, cands)
-	out := e.acquire(decision)
-	if out == nil {
-		out = e.fallbackWait(decision)
+	return e.serve(decision), decision
+}
+
+// serve tries a decision's steps and, when none has a free slot, queues on
+// the first one that admits the request.
+func (e *shareExecutor) serve(d sharesched.Decision) *shareOutcome {
+	if out := e.acquire(d); out != nil {
+		return out
 	}
-	return out, decision
+	return e.fallbackWait(d)
 }
 
 // readBinding reads the session binding of a share group. A failed read

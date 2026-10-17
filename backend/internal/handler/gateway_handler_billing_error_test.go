@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -49,10 +50,29 @@ func TestBillingErrorDetails_BillingServiceUnavailableMapsTo503(t *testing.T) {
 }
 
 func TestBillingErrorDetails_UnknownErrorFallsBackTo403(t *testing.T) {
+	// xy2api resilience off: the 0.3.0 mapping.
+	withHandlerResilience(t, func(s *resilience.Settings) { s.Errors.Enabled = false })
 	status, code, msg, _ := billingErrorDetails(service.ErrInsufficientBalance)
 	require.Equal(t, http.StatusForbidden, status)
 	require.Equal(t, "billing_error", code)
 	require.NotEmpty(t, msg)
+}
+
+// xy2api resilience (design §9.5): one 403 type and message for the user's
+// own balance; a positive balance held by in-flight requests is a 429.
+func TestBillingErrorDetails_ResilienceBalanceSemantics(t *testing.T) {
+	withHandlerResilience(t, nil)
+	status, code, msg, retryAfter := billingErrorDetails(service.ErrInsufficientBalance)
+	require.Equal(t, http.StatusForbidden, status)
+	require.Equal(t, errTypeInsufficientBalance, code)
+	require.Equal(t, userInsufficientBalanceMessage, msg)
+	require.Zero(t, retryAfter)
+
+	status, code, msg, retryAfter = billingErrorDetails(service.NewInflightBalanceReservedError(0.8, 0.74))
+	require.Equal(t, http.StatusTooManyRequests, status)
+	require.Equal(t, errTypeBalanceReserved, code)
+	require.Contains(t, msg, "available $0.8000, reserved $0.7400")
+	require.InDelta(t, 5, retryAfter, 1, "5 s ±1 s jitter")
 }
 
 func TestExtractQuotaResetSeconds_T19_HappyPath(t *testing.T) {

@@ -923,6 +923,7 @@ var ProviderSet = wire.NewSet(
 	ProvideGeminiTokenProvider,
 	NewGeminiMessagesCompatService,
 	ProvideShareSchedulingService,
+	ProvideResilienceService,
 	ProvideAntigravityTokenProvider,
 	ProvideGrokTokenProvider,
 	ProvideOpenAITokenProvider,
@@ -1121,6 +1122,28 @@ func ProvideShareSchedulingService(repo ShareSchedulingRepository, store ShareSc
 	gateway.shareScheduling = s
 	openai.shareScheduling = s
 	s.attachGateways(gateway, openai)
+	s.Start()
+	return s
+}
+
+// ProvideResilienceService creates the gateway resilience runtime, attaches
+// it to the gateway services and starts the settings refresh. With no stored
+// settings every capability uses its documented default.
+func ProvideResilienceService(settingRepo SettingRepository, store ResilienceStore, repo ResilienceRepository, undelivered UndeliveredRepository, accounts AccountRepository, groups GroupRepository, accountTest *AccountTestService, rateLimit *RateLimitService, concurrency *ConcurrencyService, gateway *GatewayService, openai *OpenAIGatewayService) *ResilienceService {
+	s := NewResilienceService(settingRepo, store)
+	s.ConfigureBalanceProbe(repo, accounts, accountTest)
+	s.ConfigureOutputP99(repo)
+	s.ConfigureUndelivered(undelivered)
+	s.ConfigureFallbackGroups(accounts, groups)
+	SetResilienceInstance(s)
+	s.rateLimit = rateLimit
+	rateLimit.SetResilienceService(s)
+	concurrency.resilience = s
+	gateway.resilience = s
+	openai.resilience = s
+	s.pricingRestricted = func(ctx context.Context, groupID int64, model string) bool {
+		return gateway.checkChannelPricingRestriction(ctx, &groupID, model)
+	}
 	s.Start()
 	return s
 }

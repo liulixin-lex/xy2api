@@ -1088,10 +1088,14 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			releaseOpsCaptureWriter(w)
 		}()
 		c.Writer = w
+		// xy2api resilience: a broken upload is a client cancel (design §8).
+		trackClientBodyRead(c)
 		c.Next()
 		w.finalizeCapture()
 
 		recordOpsErrorAfterRequest(c, ops, w)
+		// xy2api resilience: requests abandoned before any output (design §8.2).
+		recordResilienceUndelivered(c)
 	}
 }
 
@@ -1118,7 +1122,7 @@ func recordOpsErrorAfterRequest(c *gin.Context, ops *service.OpsService, w *opsC
 		return
 	}
 
-	status := c.Writer.Status()
+	status := opsRecordedStatus(c)
 	body := w.capturedBytes()
 	parsed := parseOpsErrorResponse(body)
 	if !parsed.StreamFailure {
@@ -1677,6 +1681,7 @@ func applyOpsLatencyFieldsFromContext(c *gin.Context, entry *service.OpsInsertEr
 	entry.UpstreamLatencyMs = getContextLatencyMs(c, service.OpsUpstreamLatencyMsKey)
 	entry.ResponseLatencyMs = getContextLatencyMs(c, service.OpsResponseLatencyMsKey)
 	entry.TimeToFirstTokenMs = getContextLatencyMs(c, service.OpsTimeToFirstTokenMsKey)
+	applyResilienceDisconnectFields(c, entry)
 }
 
 // applyOpsUpstreamFieldsFromContext captures attempt-level upstream context.

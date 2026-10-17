@@ -173,12 +173,10 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 		}
 	}()
 
-	if !h.checkSecurityAuditBeforeSubmit(c, apiKey, platform, body) {
-		return
-	}
-
 	// Admission: per-instance cap first (cheap, local), then the per-key cap
-	// shared by all instances.
+	// shared by all instances. xy2api resilience: admission runs before the
+	// content audit so a rejected re-submission costs no moderation call
+	// (design §9.6); a failed audit releases the admission below.
 	if h.running.Add(1) > int64(h.tasks.Limits().MaxInFlightPerInstance) {
 		h.running.Add(-1)
 		c.Header("Retry-After", "5")
@@ -207,6 +205,10 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 			h.tasks.ReleaseAdmission(context.WithoutCancel(c.Request.Context()), apiKey.ID, taskID)
 		}
 	}()
+
+	if !h.checkSecurityAuditBeforeSubmit(c, apiKey, platform, body) {
+		return
+	}
 
 	requestID := service.UsageBillingRequestIDFromContext(c.Request.Context())
 	job := newAsyncImageJob(c, body, h.tasks.ExecutionTimeout())

@@ -559,6 +559,11 @@ func shouldClearStickySession(account *Account, requestedModel string) bool {
 	if account == nil {
 		return false
 	}
+	// xy2api resilience: a soft penalty keeps the binding; the request is
+	// served elsewhere and the session returns afterwards (design §4.2).
+	if resilienceKeepsSoftStickyBinding(account, requestedModel) {
+		return false
+	}
 	if !account.IsSchedulable() {
 		return true
 	}
@@ -814,6 +819,8 @@ type GatewayService struct {
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 	// shareScheduling 由 ProvideShareSchedulingService 注入；nil 时保持原版调度。
 	shareScheduling *ShareSchedulingService
+	// resilience is the xy2api gateway resilience runtime (optional).
+	resilience *ResilienceService
 }
 
 // NewGatewayService creates a new GatewayService
@@ -914,7 +921,7 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	// 1. 最高优先级：从 metadata.user_id 提取 session_xxx
 	if parsed.MetadataUserID != "" {
 		uid := ParseMetadataUserID(parsed.MetadataUserID)
-		if uid != nil && uid.SessionID != "" {
+		if uid != nil && uid.SessionID != "" && !isPlaceholderSessionID(uid.SessionID) {
 			slog.Info("sticky.hash_source",
 				"source", "metadata_user_id",
 				"session_id", uid.SessionID,
@@ -975,6 +982,9 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 // BindStickySession sets session -> account binding with standard TTL.
 func (s *GatewayService) BindStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
 	if sessionHash == "" || accountID <= 0 || s.cache == nil {
+		return nil
+	}
+	if !s.resilienceGatewayBindAllowed(ctx, accountID) {
 		return nil
 	}
 	ttl := stickySessionTTL

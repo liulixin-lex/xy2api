@@ -111,79 +111,71 @@
       </div>
 
       <div class="mt-4 overflow-x-auto">
-        <table class="w-full min-w-[960px] text-left text-sm">
+        <table class="w-full min-w-[720px] text-left text-sm">
           <thead>
             <tr class="border-b border-gray-200 text-xs text-gray-500 dark:border-dark-600 dark:text-dark-400">
               <th class="w-8 p-2"><input type="checkbox" :checked="allVisiblePicked" :aria-label="t('admin.shareScheduling.policy.selectVisible')" @change="toggleVisible"></th>
               <th class="p-2">{{ t('admin.shareScheduling.policy.columns.account') }}</th>
-              <th class="p-2">{{ t('admin.shareScheduling.policy.columns.health') }}</th>
-              <th class="p-2">{{ t('admin.shareScheduling.policy.columns.tier') }}</th>
-              <th class="p-2">{{ t('admin.shareScheduling.policy.columns.weight') }}</th>
-              <th class="p-2">
+              <th class="w-16 p-2">{{ t('admin.shareScheduling.policy.columns.tier') }}</th>
+              <th class="w-24 p-2">{{ t('admin.shareScheduling.policy.columns.weight') }}</th>
+              <th class="w-16 whitespace-nowrap p-2">
                 <span class="inline-flex items-center gap-1">{{ t('admin.shareScheduling.policy.columns.drain') }}<HelpTooltip :content="t('admin.shareScheduling.policy.drainHint')" /></span>
               </th>
-              <th class="p-2">
+              <th class="w-32 whitespace-nowrap p-2">
                 <span class="inline-flex items-center gap-1">{{ t('admin.shareScheduling.policy.columns.cacheDomain') }}<HelpTooltip :content="t('admin.shareScheduling.policy.cacheDomainHint')" /></span>
               </th>
-              <th class="p-2">
+              <th class="w-36 whitespace-nowrap p-2">
                 <span class="inline-flex items-center gap-1">{{ t('admin.shareScheduling.policy.columns.shares') }}<HelpTooltip :content="t('admin.shareScheduling.policy.sharesHint')" /></span>
               </th>
-              <th class="p-2">{{ t('admin.shareScheduling.policy.columns.actions') }}</th>
+              <th class="w-24 p-2"><span class="sr-only">{{ t('admin.shareScheduling.policy.columns.actions') }}</span></th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in pageRows" :key="row.account_id" class="border-b border-gray-100 align-top last:border-0 dark:border-dark-700" :data-testid="'share-row-' + row.account_id">
+            <tr v-for="row in pageRows" :key="row.account_id" class="border-b border-gray-100 align-middle last:border-0 dark:border-dark-700" :data-testid="'share-row-' + row.account_id">
               <td class="p-2"><input v-model="picked" type="checkbox" :value="row.account_id" :aria-label="t('admin.shareScheduling.policy.selectNamed', { name: rowName(row) })"></td>
-              <td class="min-w-40 p-2">
-                <div class="flex items-center gap-1.5 font-medium text-gray-900 dark:text-white">
+              <td class="max-w-0 p-2">
+                <div class="flex min-w-0 items-center gap-1.5">
                   <span
                     :draggable="!busy"
-                    class="cursor-grab select-none text-gray-400 dark:text-dark-400"
+                    class="shrink-0 cursor-grab select-none text-gray-400 dark:text-dark-400"
                     :title="t('admin.shareScheduling.policy.tierCard.drag')"
                     aria-hidden="true"
                     :data-testid="'share-drag-' + row.account_id"
                     @dragstart="startDrag(row, $event)"
                     @dragend="endDrag"
                   >⠿</span>
-                  {{ rowName(row) }}
+                  <span class="truncate font-medium text-gray-900 dark:text-white" :title="rowName(row)">{{ rowName(row) }}</span>
+                  <span v-if="!row.configured" class="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500 dark:bg-dark-700 dark:text-dark-400">{{ t('admin.shareScheduling.policy.usingDefault') }}</span>
                 </div>
-                <div class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">#{{ row.account_id }} · {{ row.platform }}/{{ row.type }} · P{{ row.priority }} · C{{ row.concurrency }}</div>
-                <span class="mt-1 inline-block rounded px-1.5 py-0.5 text-[11px]" :class="row.configured ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300' : 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-dark-400'">
-                  {{ row.configured ? t('admin.shareScheduling.policy.configured') : t('admin.shareScheduling.policy.usingDefault') }}
-                </span>
-              </td>
-              <td class="min-w-32 p-2 text-xs">
-                <span v-if="member(row.account_id)?.healthy" class="text-emerald-700 dark:text-emerald-300">{{ t('admin.shareScheduling.policy.healthy') }}</span>
-                <template v-else>
-                  <span class="text-amber-700 dark:text-amber-300">{{ labels.reason(member(row.account_id)?.reason) }}</span>
-                  <span v-if="member(row.account_id)?.recover_at" class="block text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.policy.recoverAt', { time: formatDateTime(member(row.account_id)?.recover_at) }) }}</span>
-                </template>
+                <div class="mt-0.5 flex min-w-0 items-center gap-2 text-xs">
+                  <span class="truncate text-gray-500 dark:text-dark-400">#{{ row.account_id }} · {{ row.platform }}/{{ row.type }} · P{{ row.priority }} · C{{ row.concurrency }}</span>
+                  <span v-if="member(row.account_id)?.healthy" class="shrink-0 text-emerald-700 dark:text-emerald-300">{{ t('admin.shareScheduling.policy.healthy') }}</span>
+                  <span v-else class="shrink-0 text-amber-700 dark:text-amber-300">
+                    {{ labels.reason(member(row.account_id)?.reason) }}<template v-if="member(row.account_id)?.recover_at"> · {{ t('admin.shareScheduling.policy.recoverAt', { time: formatDateTime(member(row.account_id)?.recover_at) }) }}</template>
+                  </span>
+                </div>
               </td>
               <td class="p-2">
-                <input v-model.number="row.tier" type="number" step="1" class="input w-24" :aria-label="rowName(row) + ' ' + t('admin.shareScheduling.policy.columns.tier')" :data-testid="'share-tier-' + row.account_id" :disabled="busy" @input="row.configured = true">
+                <input v-model.number="row.tier" type="number" step="1" class="input w-full px-2" :aria-label="rowName(row) + ' ' + t('admin.shareScheduling.policy.columns.tier')" :data-testid="'share-tier-' + row.account_id" :disabled="busy" @input="row.configured = true">
               </td>
               <td class="p-2">
-                <input v-model.number="row.weight" type="number" :min="SHARE_MIN_WEIGHT" :max="SHARE_MAX_WEIGHT" step="1" class="input w-28" :aria-label="rowName(row) + ' ' + t('admin.shareScheduling.policy.columns.weight')" :data-testid="'share-weight-' + row.account_id" :disabled="busy" @input="row.configured = true">
+                <input v-model.number="row.weight" type="number" :min="SHARE_MIN_WEIGHT" :max="SHARE_MAX_WEIGHT" step="1" class="input w-full px-2" :aria-label="rowName(row) + ' ' + t('admin.shareScheduling.policy.columns.weight')" :data-testid="'share-weight-' + row.account_id" :disabled="busy" @input="row.configured = true">
               </td>
-              <td class="min-w-44 p-2">
-                <label class="inline-flex items-center gap-2 text-xs text-gray-700 dark:text-dark-200">
-                  <input v-model="row.drain" type="checkbox" :aria-label="t('admin.shareScheduling.policy.drainNamed', { name: rowName(row) })" :data-testid="'share-drain-' + row.account_id" :disabled="busy" @change="onDrainChange(row)">
-                  {{ t('admin.shareScheduling.policy.columns.drain') }}
-                </label>
-                <label v-if="row.drain" class="mt-1 block text-[11px] text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.policy.drainUntil') }}
-                  <input type="datetime-local" class="input mt-1 text-xs" :value="toLocalInput(row.drain_until)" :disabled="busy" @change="setDrainUntil(row, $event)">
+              <td class="p-2">
+                <input v-model="row.drain" type="checkbox" :aria-label="t('admin.shareScheduling.policy.drainNamed', { name: rowName(row) })" :data-testid="'share-drain-' + row.account_id" :disabled="busy" @change="onDrainChange(row)">
+                <label v-if="row.drain" class="mt-1 block w-44 text-[11px] text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.policy.drainUntil') }}
+                  <input type="datetime-local" class="input mt-1 px-2 text-xs" :value="toLocalInput(row.drain_until)" :disabled="busy" @change="setDrainUntil(row, $event)">
                 </label>
               </td>
               <td class="p-2">
-                <input v-model.trim="row.cache_domain" type="text" :maxlength="SHARE_MAX_CACHE_DOMAIN" class="input w-40" :placeholder="t('admin.shareScheduling.policy.cacheDomainPlaceholder')" :aria-label="rowName(row) + ' ' + t('admin.shareScheduling.policy.columns.cacheDomain')" :data-testid="'share-domain-' + row.account_id" :disabled="busy" @input="row.configured = true">
+                <input v-model.trim="row.cache_domain" type="text" :maxlength="SHARE_MAX_CACHE_DOMAIN" class="input w-full px-2" :placeholder="t('admin.shareScheduling.policy.cacheDomainPlaceholder')" :aria-label="rowName(row) + ' ' + t('admin.shareScheduling.policy.columns.cacheDomain')" :data-testid="'share-domain-' + row.account_id" :disabled="busy" @input="row.configured = true">
               </td>
-              <td class="min-w-36 p-2 text-xs text-gray-600 dark:text-dark-300" :data-testid="'share-shares-' + row.account_id">
-                <div>{{ t('admin.shareScheduling.policy.shareTarget', { value: formatSharePercent(sharesOf(row).target) }) }}</div>
+              <td class="p-2 text-xs tabular-nums" :data-testid="'share-shares-' + row.account_id">
                 <div class="font-medium text-gray-900 dark:text-white">{{ t('admin.shareScheduling.policy.shareEffective', { value: formatSharePercent(sharesOf(row).effective) }) }}</div>
-                <div>{{ t('admin.shareScheduling.policy.shareCapacity', { value: formatSharePercent(sharesOf(row).capacity) }) }}</div>
+                <div class="text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.policy.shareTarget', { value: formatSharePercent(sharesOf(row).target) }) }} · {{ t('admin.shareScheduling.policy.shareCapacity', { value: formatSharePercent(sharesOf(row).capacity) }) }}</div>
               </td>
-              <td class="p-2">
-                <button type="button" class="btn btn-ghost btn-sm" :disabled="busy || !row.configured" :aria-label="t('admin.shareScheduling.policy.resetNamed', { name: rowName(row) })" @click="resetShareRow(entry.draft, row)">{{ t('admin.shareScheduling.policy.reset') }}</button>
+              <td class="p-2 text-right">
+                <button type="button" class="btn btn-ghost btn-sm whitespace-nowrap" :disabled="busy || !row.configured" :aria-label="t('admin.shareScheduling.policy.resetNamed', { name: rowName(row) })" @click="resetShareRow(entry.draft, row)">{{ t('admin.shareScheduling.policy.reset') }}</button>
               </td>
             </tr>
           </tbody>

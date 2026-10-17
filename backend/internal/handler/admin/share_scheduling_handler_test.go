@@ -77,6 +77,7 @@ func TestShareSchedulingHandlerRejectsMalformedRequests(t *testing.T) {
 		{http.MethodPut, "/share-scheduling/groups/7/policy", `{"expected_version":0,"policy":{},"force":true}`},
 		{http.MethodPost, "/share-scheduling/groups/7/preview", `{}`},
 		{http.MethodGet, "/share-scheduling/groups/7/report?window=48h", ""},
+		{http.MethodGet, "/share-scheduling/groups/7/report?window=30s", ""},
 		{http.MethodGet, "/share-scheduling/groups/7/decisions?limit=0", ""},
 		{http.MethodPost, "/share-scheduling/groups/7/rebalance", `{"mode":"cold","dry_run":true}`},
 		{http.MethodGet, "/share-scheduling/accounts/0/rules", ""},

@@ -230,6 +230,8 @@ const (
 // ConcurrencyService 管理账号和用户的并发限制。
 type ConcurrencyService struct {
 	cache ConcurrencyCache
+	// resilience caps RECOVERING accounts (xy2api, optional).
+	resilience *ResilienceService
 
 	accountLoadCacheTTL atomic.Int64
 	accountLoadCacheMu  sync.RWMutex
@@ -340,6 +342,11 @@ type UserLoadInfo struct {
 // If the account is at max concurrency, it waits until a slot is available or timeout.
 // Returns a release function that MUST be called when the request completes.
 func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
+	// xy2api resilience: an account recovering from a balance outage takes a
+	// reduced concurrency until it proved healthy (design §3.2).
+	if limit := s.resilience.RecoveringCap(accountID, time.Now()); limit > 0 && (maxConcurrency <= 0 || limit < maxConcurrency) {
+		maxConcurrency = limit
+	}
 	// If maxConcurrency is 0 or negative, no limit
 	if maxConcurrency <= 0 {
 		return &AcquireResult{

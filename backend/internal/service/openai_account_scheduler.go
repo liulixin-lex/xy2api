@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -557,6 +558,12 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	account, err := s.service.getSchedulableAccount(ctx, accountID)
 	if err != nil || account == nil {
 		clearBinding()
+		return nil, false, nil
+	}
+	// xy2api resilience: a soft-penalised owner keeps the binding while this
+	// request is served elsewhere (design §4.2).
+	if account.Platform == NormalizeOpenAICompatiblePlatform(req.Platform) && account.IsOpenAICompatible() && resilienceKeepsSoftStickyBinding(account, req.RequestedModel) {
+		resilience.StateFrom(ctx).KeepSticky(accountID)
 		return nil, false, nil
 	}
 	if shouldClearStickySession(account, req.RequestedModel) || account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() || !account.IsSchedulable() {
@@ -1818,10 +1825,13 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if req.RequirePrivacySet && !account.IsPrivacySet() {
 		return false, "privacy_not_set"
 	}
-	if s != nil && s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {
+	// xy2api resilience: last-resort selection treats in-memory runtime
+	// blocks and proxy quarantine as soft restrictions (design §4.3).
+	lastResort := resilienceLastResortGate(ctx)
+	if !lastResort && s != nil && s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {
 		return false, "runtime_blocked"
 	}
-	if s != nil && s.service != nil && s.service.isOpenAIProxyStreamQuarantined(ctx, account) {
+	if !lastResort && s != nil && s.service != nil && s.service.isOpenAIProxyStreamQuarantined(ctx, account) {
 		return false, "proxy_stream_quarantined"
 	}
 	// Quota auto-pause must be evaluated during the initial filter too. Without it the
@@ -2209,10 +2219,55 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	origExcluded := excludedIDs
+	resilience.StateFrom(ctx).NoteTurn(derefGroupID(groupID), requestedModel, sessionHash)
+	negativeCacheable := strings.TrimSpace(previousResponseID) == "" && requiredImageCapability == "" && !requireCompact
+	negativeVariant := "openai:" + string(requiredTransport) + ":" + string(requiredCapability) + ":" + NormalizeOpenAICompatiblePlatform(platform)
+	negativeCtx := ctx
+	if negativeCacheable && groupID != nil && resilience.Current().ErrorsOn() {
+		negativeCtx = s.withOpenAIProfitControlGate(ctx, groupID)
+	}
+	if negativeCacheable {
+		if cachedErr := resilienceNegativeCacheHit(negativeCtx, groupID, requestedModel, negativeVariant, origExcluded); cachedErr != nil {
+			return nil, OpenAIAccountScheduleDecision{}, cachedErr
+		}
+	}
+	avoided := s.resilience.sessionAvoid(ctx, groupID, sessionHash)
+	excludedIDs = mergeExcluded(excludedIDs, avoided)
 	ctx = s.withOpenAIShareTrace(ctx, groupID, sessionHash, excludedIDs, requiredImageCapability)
 	selection, decision, err := s.selectAccountWithQualityRouting(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+	markResilienceConfigError(ctx, err)
+	// xy2api resilience: last-resort soft selection instead of "no available
+	// account" (design §4.3). Continuations owned by an account keep failing
+	// as before.
+	if isNoAccountSelectionError(err) && strings.TrimSpace(previousResponseID) == "" {
+		lrCtx := s.withOpenAIQuotaAutoPauseContext(ctx)
+		if requiredImageCapability == "" {
+			lrCtx = s.withOpenAIProfitControlGate(lrCtx, groupID)
+		}
+		if lr := s.resilienceOpenAILastResort(lrCtx, OpenAIAccountScheduleRequest{
+			GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
+			RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
+			RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: origExcluded,
+			RequirePrivacySet: s.openAIGroupRequiresPrivacySet(lrCtx, groupID),
+		}, avoided); lr != nil {
+			selection, err = lr, nil
+			decision.SelectedAccountID = lr.Account.ID
+			decision.SelectedAccountType = lr.Account.Type
+		} else if negativeCacheable {
+			resilienceNegativeCachePut(negativeCtx, groupID, requestedModel, negativeVariant, origExcluded, err)
+		}
+	}
+	// xy2api resilience: selections that are never cached still count for the
+	// per-key fast fail when no account of the group could serve them.
+	if !negativeCacheable && isNoAccountSelectionError(err) {
+		resilienceMarkGroupNoAccount(ctx, groupID, requestedModel, origExcluded)
+	}
 	if err == nil && selection != nil {
 		s.shareScheduling.recordSelection(ctx, selection.Account)
+		if sessionHash != "" {
+			resilience.StateFrom(ctx).SetSession(derefGroupID(groupID), sessionHash, s.openAISessionRecorder())
+		}
 	}
 	return selection, decision, err
 }

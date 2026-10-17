@@ -814,6 +814,11 @@ func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverE
 			return
 		}
 	}
+	// xy2api resilience: a content-safety refusal is the client's 400.
+	if msg, rejected := resilienceContentRejection(c, failoverErr); rejected {
+		googleError(c, http.StatusBadRequest, msg)
+		return
+	}
 
 	// 记录原始上游状态码，以便 ops 错误日志捕获真实的上游错误
 	upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)

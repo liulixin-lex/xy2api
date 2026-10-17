@@ -22,6 +22,11 @@ func recordGatewayStreamHeartbeat(c *gin.Context, written int) {
 	if c == nil || written <= 0 {
 		return
 	}
+	// xy2api resilience: a tracked request counts heartbeats once, in its
+	// delivery tracking, so queue pings are no delivered output (design §8).
+	if service.NoteDeliveryHeartbeat(c, written) {
+		return
+	}
 	total, _ := c.Get(gatewayStreamHeartbeatBytesKey)
 	bytes, _ := total.(int)
 	c.Set(gatewayStreamHeartbeatBytesKey, bytes+written)
@@ -30,6 +35,9 @@ func recordGatewayStreamHeartbeat(c *gin.Context, written int) {
 func gatewayStreamHasOnlyHeartbeats(c *gin.Context) bool {
 	if c == nil || c.Writer == nil {
 		return false
+	}
+	if only, tracked := service.DeliveryOnlyHeartbeats(c); tracked {
+		return only
 	}
 	value, ok := c.Get(gatewayStreamHeartbeatBytesKey)
 	if !ok {
@@ -359,6 +367,8 @@ func (h *ConcurrencyHelper) waitForSlotWithPing(c *gin.Context, slotType string,
 
 // waitForSlotWithPingTimeout waits for a concurrency slot with a custom timeout.
 func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType string, id int64, maxConcurrency int, timeout time.Duration, isStream bool, streamStarted *bool, tryImmediate bool) (func(), error) {
+	// xy2api resilience: the wait is part of the pre-output budget.
+	timeout = resilienceSlotWaitTimeout(c, timeout)
 	ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
 	defer cancel()
 

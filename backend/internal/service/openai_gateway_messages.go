@@ -465,8 +465,13 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			}
 			return s.ForwardAsAnthropic(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel)
 		}
-		if previousResponseID != "" && (isOpenAICompatPreviousResponseNotFound(resp.StatusCode, upstreamMsg, respBody) || isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody)) {
-			if isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody) {
+		notFound := isOpenAICompatPreviousResponseNotFound(resp.StatusCode, upstreamMsg, respBody)
+		unsupported := isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody)
+		// xy2api resilience (design §9.8): a vague 4xx to a chained request may
+		// be a pooled relay that cannot find the stored response.
+		rejected := !notFound && !unsupported && isOpenAICompatContinuationRejected(resp.StatusCode, respBody)
+		if previousResponseID != "" && (notFound || unsupported || rejected) {
+			if unsupported || rejected {
 				s.disableOpenAICompatSessionContinuation(ctx, c, account, promptCacheKey)
 			} else {
 				s.deleteOpenAICompatSessionResponseID(ctx, c, account, promptCacheKey)
@@ -476,7 +481,13 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				zap.String("previous_response_id", truncateOpenAIWSLogValue(previousResponseID, openAIWSIDValueMaxLen)),
 				zap.String("upstream_model", upstreamModel),
 			)
-			return s.ForwardAsAnthropic(ctx, c, account, body, promptCacheKey, defaultMappedModel)
+			replayed, replayErr := s.ForwardAsAnthropic(ctx, c, account, body, promptCacheKey, defaultMappedModel)
+			if rejected && replayErr != nil {
+				// The full replay failed as well, so the request itself was at
+				// fault, not the continuation: later turns may chain again.
+				s.enableOpenAICompatSessionContinuation(ctx, c, account, promptCacheKey)
+			}
+			return replayed, replayErr
 		}
 		// Grok account-switched history often fails decrypt; strip encrypted
 		// reasoning once at the client-body level so failover accounts can accept
@@ -601,7 +612,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 ) (_ *OpenAIForwardResult, retErr error) {
 	requestID := resp.Header.Get("x-request-id")
 
-	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, "openai messages buffered", requestID)
+	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, account, "openai messages buffered", requestID)
 	if err != nil {
 		var readErr *openAICompatBufferedReadError
 		if errors.As(err, &readErr) && readErr != nil {
@@ -772,6 +783,7 @@ func openAICompatTerminalResponse(event *apicompat.ResponsesStreamEvent, payload
 func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	logPrefix string,
 	requestID string,
 ) (*apicompat.ResponsesResponse, OpenAIUsage, *apicompat.BufferedResponseAccumulator, error) {
@@ -781,7 +793,8 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 		return nil, usage, acc, errors.New("upstream response body is nil")
 	}
 
-	scanner := s.newUpstreamSSEScanner(resp.Body)
+	relayLive := relayLivenessFor(c, account)
+	scanner := s.newUpstreamSSEScanner(resp.Body, relayLive)
 
 	streamInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
@@ -919,6 +932,11 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 			}
 
 		case <-timeoutCh:
+			// xy2api resilience: relay keep-alive frames keep the stream alive (design §7.8).
+			if rest := streamInterval - time.Since(relayLive.lastActivity(time.Time{})); rest > 0 {
+				timeoutTimer.Reset(rest)
+				continue
+			}
 			_ = resp.Body.Close()
 			logger.L().Warn(logPrefix+": data interval timeout",
 				zap.String("request_id", requestID),
@@ -961,7 +979,8 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	streamSearchSeen := make(map[string]struct{})
 	countSearch := account != nil && account.IsGrok()
 
-	scanner := s.newUpstreamSSEScanner(resp.Body)
+	relayLive := relayLivenessFor(c, account)
+	scanner := s.newUpstreamSSEScanner(resp.Body, relayLive)
 
 	streamInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
@@ -1082,6 +1101,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					streamFailoverErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payloadBytes, message, upstreamModel, resp.Header)
 					return true
 				}
+				s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, payloadBytes, message, clientOutputStarted)
 				message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
 				errStatus, errType, errMsg := http.StatusBadGateway, "api_error", message
 				// 统一走语义状态推断 + body 归一化（与 /v1/responses 路径一致），
@@ -1179,6 +1199,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				zap.Error(err),
 				zap.String("request_id", requestID),
 			)
+			resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, err, clientOutputStarted && !clientDisconnected)
 		}
 	}
 	missingTerminalErr := func() (*OpenAIForwardResult, error) {
@@ -1191,6 +1212,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			return result, s.newOpenAIStreamFailoverError(c, account, false, requestID, nil, message)
 		}
 		s.recordOpenAIMessagesStreamUpstreamError(c, account, requestID, "stream_missing_terminal", message)
+		resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, nil, true)
 		return result, fmt.Errorf("stream usage incomplete: missing terminal event")
 	}
 	processFrame := func(frame openAICompatSSEFrame) bool {
@@ -1311,7 +1333,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 
 		case <-intervalCh:
-			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
+			lastRead := relayLive.lastActivity(time.Unix(0, atomic.LoadInt64(&lastReadAt)))
 			if time.Since(lastRead) < streamInterval {
 				continue
 			}

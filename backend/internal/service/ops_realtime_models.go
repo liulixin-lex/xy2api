@@ -89,4 +89,10 @@ type AccountAvailability struct {
 	OverloadRemainingSec   *int64     `json:"overload_remaining_sec"`
 	ErrorMessage           string     `json:"error_message"`
 	TempUnschedulableUntil *time.Time `json:"temp_unschedulable_until,omitempty"`
+
+	// BalanceState is the gateway-resilience upstream balance state when it
+	// is not OK (SUSPECT, EXHAUSTED, RECOVERING), and BalanceSince when the
+	// account entered it (design §3.2, tasks 2.6).
+	BalanceState string     `json:"balance_state,omitempty"`
+	BalanceSince *time.Time `json:"balance_since,omitempty"`
 }

@@ -1311,6 +1311,12 @@ export default {
         hint: 'Triggered only when upstream explicitly returns prompt too long. Leave empty to disable fallback.',
         noFallback: 'No Fallback'
       },
+      availabilityFallback: {
+        title: 'No-Account Fallback Group',
+        hint: 'When every account in this group is cooling down, out of balance or otherwise unavailable, requests are served by this group and billed at its rate. They return automatically once this group has been healthy for a while (default 2 minutes). Same platform, non-subscription groups only; cycles are rejected.',
+        none: 'No fallback',
+        option: '{name} (rate {rate})'
+      },
       copyAccounts: {
         title: 'Copy Accounts from Groups',
         tooltip: 'Select one or more groups of the same platform. After creation, all accounts from these groups will be automatically bound to the new group (deduplicated).',

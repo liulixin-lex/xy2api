@@ -394,6 +394,7 @@ func TestAPIContracts(t *testing.T) {
 						"allow_live": false,
 						"fallback_group_id": null,
 						"fallback_group_id_on_invalid_request": null,
+						"availability_fallback_group_id": null,
 						"require_oauth_only": false,
 						"require_privacy_set": false,
 						"max_reasoning_effort": "",

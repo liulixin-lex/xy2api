@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -122,6 +123,36 @@ func isOpenAICompatPreviousResponseNotFound(statusCode int, upstreamMsg string, 
 		check(gjson.GetBytes(upstreamBody, "error.message").String())
 }
 
+// isOpenAICompatContinuationRejected reports a vague 4xx to a request that
+// carried previous_response_id. Pooled relays answer it with generic errors
+// ("Upstream request failed", "The request could not be processed") when the
+// stored response lives on another upstream account, so every later turn of
+// the session would fail the same way. The caller replays the turn in full
+// once and keeps continuation off for the session (xy2api gateway
+// resilience). Errors a full replay would hit as well are excluded.
+func isOpenAICompatContinuationRejected(statusCode int, upstreamBody []byte) bool {
+	switch statusCode {
+	case http.StatusBadRequest, http.StatusNotFound, http.StatusConflict, http.StatusUnprocessableEntity:
+	default:
+		return false
+	}
+	text := strings.ToLower(gjson.GetBytes(upstreamBody, "error.code").String() + " " +
+		gjson.GetBytes(upstreamBody, "error.type").String() + " " +
+		gjson.GetBytes(upstreamBody, "error.message").String())
+	if strings.TrimSpace(text) == "" {
+		text = strings.ToLower(string(upstreamBody))
+	}
+	for _, s := range []string{
+		"context_length", "context length", "maximum context", "too long", "too many tokens",
+		"content_policy", "moderation", "safety", "image", "model_not_found", "does not exist", "unsupported_model",
+	} {
+		if strings.Contains(text, s) {
+			return false
+		}
+	}
+	return true
+}
+
 func isOpenAICompatPreviousResponseUnsupported(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
 	if statusCode != http.StatusBadRequest {
 		return false
@@ -191,10 +222,30 @@ func (s *OpenAIGatewayService) getOpenAICompatSessionResponseID(_ context.Contex
 	return strings.TrimSpace(binding.ResponseID)
 }
 
+// openAICompatSessionStores paces the sweep of expired continuation
+// bindings: lookups only drop the bindings they touch, so sessions that never
+// return would otherwise stay in memory (xy2api gateway resilience).
+var openAICompatSessionStores atomic.Uint64
+
+const openAICompatSessionSweepEvery = 1024
+
+func (s *OpenAIGatewayService) sweepOpenAICompatSessionResponses(now time.Time) {
+	if openAICompatSessionStores.Add(1)%openAICompatSessionSweepEvery != 0 {
+		return
+	}
+	s.openaiCompatSessionResponses.Range(func(k, v any) bool {
+		if b, ok := v.(openAICompatSessionResponseBinding); !ok || (!b.ExpiresAt.IsZero() && now.After(b.ExpiresAt)) {
+			s.openaiCompatSessionResponses.Delete(k)
+		}
+		return true
+	})
+}
+
 func (s *OpenAIGatewayService) bindOpenAICompatSessionResponseID(_ context.Context, c *gin.Context, account *Account, promptCacheKey, responseID string) {
 	if s == nil {
 		return
 	}
+	s.sweepOpenAICompatSessionResponses(time.Now())
 	key := openAICompatSessionResponseKey(c, account, promptCacheKey)
 	id := strings.TrimSpace(responseID)
 	if key == "" || id == "" {
@@ -244,10 +295,37 @@ func (s *OpenAIGatewayService) deleteOpenAICompatSessionResponseID(_ context.Con
 	s.openaiCompatSessionResponses.Store(key, binding)
 }
 
+// enableOpenAICompatSessionContinuation undoes a continuation switch-off of
+// the session on the account.
+func (s *OpenAIGatewayService) enableOpenAICompatSessionContinuation(_ context.Context, c *gin.Context, account *Account, promptCacheKey string) {
+	if s == nil {
+		return
+	}
+	key := openAICompatSessionResponseKey(c, account, promptCacheKey)
+	if key == "" {
+		return
+	}
+	raw, ok := s.openaiCompatSessionResponses.Load(key)
+	if !ok {
+		return
+	}
+	binding, ok := raw.(openAICompatSessionResponseBinding)
+	if !ok || !binding.ContinuationDisabled {
+		return
+	}
+	binding.ContinuationDisabled = false
+	if strings.TrimSpace(binding.TurnState) == "" && strings.TrimSpace(binding.ResponseID) == "" {
+		s.openaiCompatSessionResponses.Delete(key)
+		return
+	}
+	s.openaiCompatSessionResponses.Store(key, binding)
+}
+
 func (s *OpenAIGatewayService) disableOpenAICompatSessionContinuation(_ context.Context, c *gin.Context, account *Account, promptCacheKey string) {
 	if s == nil {
 		return
 	}
+	s.sweepOpenAICompatSessionResponses(time.Now())
 	key := openAICompatSessionResponseKey(c, account, promptCacheKey)
 	if key == "" {
 		return

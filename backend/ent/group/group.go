@@ -156,6 +156,8 @@ const (
 	FieldProfitMinMargin = "profit_min_margin"
 	// FieldProfitSafetyBuffer holds the string denoting the profit_safety_buffer field in the database.
 	FieldProfitSafetyBuffer = "profit_safety_buffer"
+	// FieldAvailabilityFallbackGroupID holds the string denoting the availability_fallback_group_id field in the database.
+	FieldAvailabilityFallbackGroupID = "availability_fallback_group_id"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
@@ -301,6 +303,7 @@ var Columns = []string{
 	FieldProfitControlEnabled,
 	FieldProfitMinMargin,
 	FieldProfitSafetyBuffer,
+	FieldAvailabilityFallbackGroupID,
 }
 
 var (
@@ -762,6 +765,11 @@ func ByProfitMinMargin(opts ...sql.OrderTermOption) OrderOption {
 // ByProfitSafetyBuffer orders the results by the profit_safety_buffer field.
 func ByProfitSafetyBuffer(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldProfitSafetyBuffer, opts...).ToFunc()
+}
+
+// ByAvailabilityFallbackGroupID orders the results by the availability_fallback_group_id field.
+func ByAvailabilityFallbackGroupID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAvailabilityFallbackGroupID, opts...).ToFunc()
 }
 
 // ByAPIKeysCount orders the results by api_keys count.

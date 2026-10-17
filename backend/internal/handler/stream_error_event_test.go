@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -114,6 +115,7 @@ func TestOpenAIAdmissionError_ResponsesFailedIncludesGatewayCode(t *testing.T) {
 }
 
 func TestOpenAIAdmissionError_StreamingNonResponsesIncludesGatewayCode(t *testing.T) {
+	withHandlerResilience(t, func(s *resilience.Settings) { s.Keepalive.Enabled = false })
 	c, w := newGinContextForEndpoint(t, EndpointChatCompletions)
 	h := &OpenAIGatewayHandler{}
 	h.handleStreamingAwareErrorWithCode(c, http.StatusTooManyRequests, "rate_limit_error",
@@ -203,12 +205,36 @@ func TestOpenAIHandleStreamingAwareError_ResponsesStreamingJSONEscaping(t *testi
 // OpenAI handler: /v1/chat/completions streaming keeps the legacy event: error format
 // (out of scope for this fix; covered to prevent regression of unrelated paths).
 func TestOpenAIHandleStreamingAwareError_ChatCompletionsStreamingKeepsLegacy(t *testing.T) {
+	// xy2api resilience off: the 0.3.0 "event: error" frame.
+	withHandlerResilience(t, func(s *resilience.Settings) { s.Keepalive.Enabled = false })
 	c, w := newGinContextForEndpoint(t, EndpointChatCompletions)
 	h := &OpenAIGatewayHandler{}
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)
 
 	body := w.Body.String()
 	assert.True(t, strings.HasPrefix(body, "event: error\n"), "got: %q", body)
+}
+
+func TestChatCompletionsStreamingTerminalFrame(t *testing.T) {
+	// Design §7.6: data line with the original status, then [DONE].
+	withHandlerResilience(t, nil)
+	for _, write := range []func(c *gin.Context){
+		func(c *gin.Context) {
+			(&OpenAIGatewayHandler{}).handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)
+		},
+		func(c *gin.Context) {
+			(&GatewayHandler{}).handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)
+		},
+	} {
+		c, w := newGinContextForEndpoint(t, EndpointChatCompletions)
+		write(c)
+		body := w.Body.String()
+		require.True(t, strings.HasPrefix(body, "data: {"), "got: %q", body)
+		require.True(t, strings.HasSuffix(body, "\n\ndata: [DONE]\n\n"), "got: %q", body)
+		payload := strings.TrimPrefix(strings.SplitN(body, "\n", 2)[0], "data: ")
+		require.Equal(t, "upstream_error", gjson.Get(payload, "error.type").String())
+		require.Equal(t, int64(http.StatusBadGateway), gjson.Get(payload, "error.status").Int())
+	}
 }
 
 // Gateway (Anthropic-backed) handler: /v1/responses path also must emit response.failed.
@@ -218,7 +244,8 @@ func TestGatewayHandleStreamingAwareError_ResponsesStreamingEmitsResponseFailed(
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "upstream gone", true)
 
 	_, errObj := parseResponsesFailedSSE(t, w.Body.String())
-	assert.Equal(t, "upstream_error", errObj["code"])
+	// xy2api resilience (design §7.6): committed upstream failures use server_error.
+	assert.Equal(t, "server_error", errObj["code"])
 	assert.Equal(t, "upstream gone", errObj["message"])
 }
 
@@ -241,7 +268,8 @@ func TestGatewayAdmissionError_MessagesStreamingIncludesGatewayCode(t *testing.T
 		gatewayConcurrencyLimitCode, "Concurrency limit exceeded for account, please retry later", true)
 
 	body := w.Body.String()
-	assert.True(t, strings.HasPrefix(body, `data: {"type":"error"`))
+	// xy2api G3: Anthropic SDKs drop data frames without an event line.
+	assert.True(t, strings.HasPrefix(body, "event: error\ndata: {\"type\":\"error\""), "got: %q", body)
 	payload := body[strings.Index(body, "{"):]
 	assert.Equal(t, "rate_limit_error", gjson.Get(payload, "error.type").String())
 	assert.Equal(t, gatewayConcurrencyLimitCode, gjson.Get(payload, "error.code").String())
@@ -257,15 +285,16 @@ func TestGatewayAdmissionError_BareResponsesFailedIncludesGatewayCode(t *testing
 	assert.Equal(t, gatewayQueueFullCode, errObj["code"])
 }
 
-// Gateway handler: /v1/messages preserves the legacy data:{type:error,...} format
-// (Anthropic spec accepts a type:"error" stream event).
+// Gateway handler: /v1/messages keeps the {type:error,...} payload and, since
+// xy2api G3, names the event: Anthropic SDKs only surface named events and
+// silently drop a bare data frame.
 func TestGatewayHandleStreamingAwareError_MessagesStreamingKeepsLegacy(t *testing.T) {
 	c, w := newGinContextForEndpoint(t, EndpointMessages)
 	h := &GatewayHandler{}
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)
 
 	body := w.Body.String()
-	assert.True(t, strings.HasPrefix(body, `data: {"type":"error"`), "got: %q", body)
+	assert.True(t, strings.HasPrefix(body, "event: error\ndata: {\"type\":\"error\""), "got: %q", body)
 }
 
 // 项目里 /responses 注册在多组路由：/v1/responses（gateway）、裸 /responses（top-level）、
@@ -359,6 +388,8 @@ func TestSynthesizeResponseID_FallbackUUID(t *testing.T) {
 }
 
 func TestMapResponsesErrorCode(t *testing.T) {
+	// 0.3.0 mapping with the resilience switch off.
+	withHandlerResilience(t, func(s *resilience.Settings) { s.Keepalive.Enabled = false })
 	cases := []struct{ in, out string }{
 		{"rate_limit_error", "rate_limit_exceeded"},
 		{"invalid_request_error", "invalid_request"},
@@ -374,4 +405,34 @@ func TestMapResponsesErrorCode(t *testing.T) {
 		assert.Equal(t, tc.out, mapResponsesErrorCode(tc.in, ""), "in=%q", tc.in)
 	}
 	assert.Equal(t, gatewayQueueFullCode, mapResponsesErrorCode("rate_limit_error", gatewayQueueFullCode))
+}
+
+func TestMapResponsesErrorCodeResilience(t *testing.T) {
+	// Design §7.6: rate limits and overload retry as rate_limit_exceeded,
+	// other upstream failures as server_error; explicit codes win.
+	withHandlerResilience(t, nil)
+	for in, out := range map[string]string{
+		"rate_limit_error":      "rate_limit_exceeded",
+		"overloaded_error":      "rate_limit_exceeded",
+		"upstream_error":        "server_error",
+		"api_error":             "server_error",
+		"":                      "server_error",
+		"invalid_request_error": "invalid_request",
+	} {
+		assert.Equal(t, out, mapResponsesErrorCode(in, ""), "in=%q", in)
+	}
+	assert.Equal(t, gatewayQueueFullCode, mapResponsesErrorCode("rate_limit_error", gatewayQueueFullCode))
+}
+
+func TestCommittedFailureCarriesRetryHint(t *testing.T) {
+	// Design §7.6: once committed, the message is the only retry signal.
+	withHandlerResilience(t, nil)
+	c, w := newGinContextForEndpoint(t, EndpointResponses)
+	c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
+	_, _ = c.Writer.WriteString(":\n\n")
+	applyExhaustedRetryHint(c, nil, http.StatusBadGateway)
+	(&GatewayHandler{}).handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream service temporarily unavailable", true)
+	_, errObj := parseResponsesFailedSSE(t, strings.TrimPrefix(w.Body.String(), ":\n\n"))
+	assert.Equal(t, "server_error", errObj["code"])
+	assert.Equal(t, "Upstream service temporarily unavailable. Please try again in 30s.", errObj["message"])
 }

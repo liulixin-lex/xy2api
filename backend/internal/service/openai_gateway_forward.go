@@ -923,7 +923,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if wsErr == nil {
 				break
 			}
-			if c != nil && c.Writer != nil && c.Writer.Written() {
+			// xy2api resilience: pre-output heartbeats are not client output.
+			if c != nil && c.Writer != nil && openAIStreamClientOutputStarted(c, false) {
 				break
 			}
 			var taskRecoveredErr *agentIdentityTaskRecoveredError
@@ -1044,9 +1045,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	firstOutputTimeout := time.Duration(0)
 	if reqStream && account.Platform == PlatformOpenAI {
-		firstOutputTimeout = s.openAIFirstOutputTimeout(reasoningEffortValue)
+		firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, originalModel, reasoningEffortValue, time.Now())
 	}
 
+	// xy2api resilience: web_search history on API-key relays.
+	webSearchReplay, webSearchBody := armOpenAIWebSearchReplay(c, account, body, false)
+	if webSearchReplay.declaredUpFront() {
+		body, requestView, reqBody = webSearchBody, newOpenAIRequestView(webSearchBody), nil
+	}
 	httpInvalidEncryptedContentRetryTried := false
 	compactModelFallbackRetried := false
 	agentTaskRecoveryTried := false
@@ -1183,6 +1189,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				)
 				continue
 			}
+			if next, replayErr := s.openAIWebSearchReplayAfterHTTPError(ctx, c, account, webSearchReplay, body, resp, respBody, upstreamMsg); replayErr != nil {
+				return nil, replayErr
+			} else if next != nil {
+				body, requestView, reqBody = next, newOpenAIRequestView(next), nil
+				continue
+			}
 			if s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
 				upstreamDetail := ""
 				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
@@ -1242,6 +1254,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if reqStream {
 			streamResult, err := s.handleStreamingResponseWithReasoning(ctx, resp, c, account, startTime, originalModel, upstreamModel, reasoningEffortValue)
 			if err != nil {
+				if next, replayErr := s.openAIWebSearchReplayAfterSignal(ctx, c, account, webSearchReplay, body, resp, err); replayErr != nil {
+					return nil, replayErr
+				} else if next != nil {
+					body, requestView, reqBody = next, newOpenAIRequestView(next), nil
+					continue
+				}
 				if signal, ok := asOpenAICompactFallbackSignal(err); ok {
 					if retryBody, fallbackModel, retry := s.prepareOpenAICompactFallbackRetry(
 						c, account, requestedModel, body, http.StatusBadRequest, signal.message, signal.payload, compactModelFallbackRetried,
@@ -1310,6 +1328,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			imageOutputSizes = nonStreamResult.imageOutputSizes
 			searchCount = nonStreamResult.searchCount
 		}
+		webSearchReplay.succeeded()
 		s.bindHTTPResponseAccount(ctx, c, account, responseID)
 
 		// Extract and save Codex usage snapshot from response headers (for OAuth accounts).

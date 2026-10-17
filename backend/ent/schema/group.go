@@ -314,6 +314,11 @@ func (Group) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
 			Default(0).
 			Comment("安全缓冲，小数；与 margin 相加后从下游倍率中扣除，默认 0"),
+		// xy2api gateway resilience (migration 272)
+		field.Int64("availability_fallback_group_id").
+			Optional().
+			Nillable().
+			Comment("主分组无可用账号时兜底使用的分组 ID（与 fallback_group_id 无关）"),
 	}
 }
 

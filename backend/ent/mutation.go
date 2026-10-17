@@ -22236,6 +22236,8 @@ type GroupMutation struct {
 	addprofit_min_margin                    *float64
 	profit_safety_buffer                    *float64
 	addprofit_safety_buffer                 *float64
+	availability_fallback_group_id          *int64
+	addavailability_fallback_group_id       *int64
 	clearedFields                           map[string]struct{}
 	api_keys                                map[int64]struct{}
 	removedapi_keys                         map[int64]struct{}
@@ -25781,6 +25783,76 @@ func (m *GroupMutation) ResetProfitSafetyBuffer() {
 	m.addprofit_safety_buffer = nil
 }
 
+// SetAvailabilityFallbackGroupID sets the "availability_fallback_group_id" field.
+func (m *GroupMutation) SetAvailabilityFallbackGroupID(i int64) {
+	m.availability_fallback_group_id = &i
+	m.addavailability_fallback_group_id = nil
+}
+
+// AvailabilityFallbackGroupID returns the value of the "availability_fallback_group_id" field in the mutation.
+func (m *GroupMutation) AvailabilityFallbackGroupID() (r int64, exists bool) {
+	v := m.availability_fallback_group_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAvailabilityFallbackGroupID returns the old "availability_fallback_group_id" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldAvailabilityFallbackGroupID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAvailabilityFallbackGroupID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAvailabilityFallbackGroupID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAvailabilityFallbackGroupID: %w", err)
+	}
+	return oldValue.AvailabilityFallbackGroupID, nil
+}
+
+// AddAvailabilityFallbackGroupID adds i to the "availability_fallback_group_id" field.
+func (m *GroupMutation) AddAvailabilityFallbackGroupID(i int64) {
+	if m.addavailability_fallback_group_id != nil {
+		*m.addavailability_fallback_group_id += i
+	} else {
+		m.addavailability_fallback_group_id = &i
+	}
+}
+
+// AddedAvailabilityFallbackGroupID returns the value that was added to the "availability_fallback_group_id" field in this mutation.
+func (m *GroupMutation) AddedAvailabilityFallbackGroupID() (r int64, exists bool) {
+	v := m.addavailability_fallback_group_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearAvailabilityFallbackGroupID clears the value of the "availability_fallback_group_id" field.
+func (m *GroupMutation) ClearAvailabilityFallbackGroupID() {
+	m.availability_fallback_group_id = nil
+	m.addavailability_fallback_group_id = nil
+	m.clearedFields[group.FieldAvailabilityFallbackGroupID] = struct{}{}
+}
+
+// AvailabilityFallbackGroupIDCleared returns if the "availability_fallback_group_id" field was cleared in this mutation.
+func (m *GroupMutation) AvailabilityFallbackGroupIDCleared() bool {
+	_, ok := m.clearedFields[group.FieldAvailabilityFallbackGroupID]
+	return ok
+}
+
+// ResetAvailabilityFallbackGroupID resets all changes to the "availability_fallback_group_id" field.
+func (m *GroupMutation) ResetAvailabilityFallbackGroupID() {
+	m.availability_fallback_group_id = nil
+	m.addavailability_fallback_group_id = nil
+	delete(m.clearedFields, group.FieldAvailabilityFallbackGroupID)
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by ids.
 func (m *GroupMutation) AddAPIKeyIDs(ids ...int64) {
 	if m.api_keys == nil {
@@ -26139,7 +26211,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 70)
+	fields := make([]string, 0, 71)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26350,6 +26422,9 @@ func (m *GroupMutation) Fields() []string {
 	if m.profit_safety_buffer != nil {
 		fields = append(fields, group.FieldProfitSafetyBuffer)
 	}
+	if m.availability_fallback_group_id != nil {
+		fields = append(fields, group.FieldAvailabilityFallbackGroupID)
+	}
 	return fields
 }
 
@@ -26498,6 +26573,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.ProfitMinMargin()
 	case group.FieldProfitSafetyBuffer:
 		return m.ProfitSafetyBuffer()
+	case group.FieldAvailabilityFallbackGroupID:
+		return m.AvailabilityFallbackGroupID()
 	}
 	return nil, false
 }
@@ -26647,6 +26724,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldProfitMinMargin(ctx)
 	case group.FieldProfitSafetyBuffer:
 		return m.OldProfitSafetyBuffer(ctx)
+	case group.FieldAvailabilityFallbackGroupID:
+		return m.OldAvailabilityFallbackGroupID(ctx)
 	}
 	return nil, fmt.Errorf("unknown Group field %s", name)
 }
@@ -27146,6 +27225,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetProfitSafetyBuffer(v)
 		return nil
+	case group.FieldAvailabilityFallbackGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAvailabilityFallbackGroupID(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)
 }
@@ -27235,6 +27321,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addprofit_safety_buffer != nil {
 		fields = append(fields, group.FieldProfitSafetyBuffer)
 	}
+	if m.addavailability_fallback_group_id != nil {
+		fields = append(fields, group.FieldAvailabilityFallbackGroupID)
+	}
 	return fields
 }
 
@@ -27297,6 +27386,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedProfitMinMargin()
 	case group.FieldProfitSafetyBuffer:
 		return m.AddedProfitSafetyBuffer()
+	case group.FieldAvailabilityFallbackGroupID:
+		return m.AddedAvailabilityFallbackGroupID()
 	}
 	return nil, false
 }
@@ -27495,6 +27586,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddProfitSafetyBuffer(v)
 		return nil
+	case group.FieldAvailabilityFallbackGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddAvailabilityFallbackGroupID(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Group numeric field %s", name)
 }
@@ -27568,6 +27666,9 @@ func (m *GroupMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(group.FieldModelRouting) {
 		fields = append(fields, group.FieldModelRouting)
+	}
+	if m.FieldCleared(group.FieldAvailabilityFallbackGroupID) {
+		fields = append(fields, group.FieldAvailabilityFallbackGroupID)
 	}
 	return fields
 }
@@ -27648,6 +27749,9 @@ func (m *GroupMutation) ClearField(name string) error {
 		return nil
 	case group.FieldModelRouting:
 		m.ClearModelRouting()
+		return nil
+	case group.FieldAvailabilityFallbackGroupID:
+		m.ClearAvailabilityFallbackGroupID()
 		return nil
 	}
 	return fmt.Errorf("unknown Group nullable field %s", name)
@@ -27866,6 +27970,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldProfitSafetyBuffer:
 		m.ResetProfitSafetyBuffer()
+		return nil
+	case group.FieldAvailabilityFallbackGroupID:
+		m.ResetAvailabilityFallbackGroupID()
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)

@@ -618,7 +618,9 @@ func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Cont
 	}
 	// Retain the original cancellation signal for observation only. Billing and
 	// upstream work still use the detached context.
-	return context.WithValue(context.WithoutCancel(ctx), codexTicketClientContextKey{}, ctx), func() {}
+	// xy2api resilience: a client that leaves before any output cancels it
+	// (design §8.2).
+	return resilienceUpstreamContext(ctx, context.WithValue(context.WithoutCancel(ctx), codexTicketClientContextKey{}, ctx)), func() {}
 }
 
 func detachUpstreamContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -627,7 +629,9 @@ func detachUpstreamContext(ctx context.Context) (context.Context, context.Cancel
 	}
 	// Retain the original cancellation signal for observation only. Billing and
 	// upstream work still use the detached context.
-	return context.WithValue(context.WithoutCancel(ctx), codexTicketClientContextKey{}, ctx), func() {}
+	// xy2api resilience: a client that leaves before any output cancels it
+	// (design §8.2).
+	return resilienceUpstreamContext(ctx, context.WithValue(context.WithoutCancel(ctx), codexTicketClientContextKey{}, ctx)), func() {}
 }
 
 // billingDeps 扣费逻辑依赖的服务（由各 gateway service 提供）
@@ -814,6 +818,7 @@ func logResponseModelBillingApplied(component string, account *Account, requestI
 
 // recordUsageCore 是 RecordUsage 的核心实现。
 func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsageCoreInput) error {
+	s.resilience.NoteAccountSuccess(ctx, input.Account)
 	result := input.Result
 	apiKey := input.APIKey
 	user := input.User
@@ -822,6 +827,10 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	ApplyForwardImageBillingResolution(result)
 	logServiceTierBillingDowngrade("service.gateway", account, result.RequestID, ApplyForwardServiceTierBillingResolution(result))
 
+	// xy2api resilience: the session's real cache-read share, taken before
+	// the forced cache billing below rewrites the token split.
+	s.resilience.NoteSessionCacheUsage(ctx, result.Usage.CacheReadInputTokens,
+		result.Usage.InputTokens+result.Usage.CacheReadInputTokens+result.Usage.CacheCreationInputTokens)
 	// 强制缓存计费：将 input_tokens 转为 cache_read_input_tokens
 	// 用于粘性会话切换时的特殊计费处理
 	if input.ForceCacheBilling && result.Usage.InputTokens > 0 {
@@ -935,6 +944,13 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 			cost.TotalCost, pricingAt,
 			accountStatsLongContextPricingEnabled(nil),
 		)
+	}
+
+	// xy2api resilience: a client that left before any output is not billed,
+	// except at upstream cost under the abuse guard (design §8.2).
+	resilienceAnnotateUsage(ctx, usageLog)
+	if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {
+		return nil
 	}
 
 	cacheSettlementOutcome := "pending"

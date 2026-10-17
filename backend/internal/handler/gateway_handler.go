@@ -26,6 +26,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/timezone"
 	"github.com/liulixin-lex/xy2api/internal/pkg/typesafe"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/securityaudit"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -346,6 +347,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			c.Request = c.Request.WithContext(ctx)
 		}
 
+		// xy2api resilience: the pre-output heartbeat ends with the request (design §7.2).
+		defer stopPreOutputKeepalive(c)
 		for {
 			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
 			if err != nil {
@@ -496,7 +499,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
-			writerSizeBeforeForward := c.Writer.Size()
+			// xy2api resilience: delayed pre-output heartbeat for CDN-fronted streams (design §7.2).
+			armPreOutputKeepalive(c, service.PreOutputProtocolAnthropic, reqStream, account)
+			writerSizeBeforeForward := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)
 			if account.Platform == service.PlatformAntigravity {
 				result, err = h.antigravityGatewayService.ForwardGemini(
 					requestCtx,
@@ -519,7 +524,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
-					if c.Writer.Size() != writerSizeBeforeForward {
+					if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeForward {
 						h.handleFailoverExhausted(c, failoverErr, service.PlatformGemini, true)
 						return
 					}
@@ -663,6 +668,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		}
 	}()
 
+	// xy2api resilience: the pre-output heartbeat ends with the request (design §7.2).
+	defer stopPreOutputKeepalive(c)
 	for {
 		fs := NewFailoverState(h.maxAccountSwitches, hasBoundSession)
 		retryWithFallback := false
@@ -918,7 +925,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				requestCtx = service.WithForceCacheBilling(requestCtx)
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
-			writerSizeBeforeForward := c.Writer.Size()
+			// xy2api resilience: delayed pre-output heartbeat for CDN-fronted streams (design §7.2).
+			armPreOutputKeepalive(c, service.PreOutputProtocolAnthropic, reqStream, account)
+			writerSizeBeforeForward := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)
 			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, attemptBody, hasBoundSession)
 			} else {
@@ -1059,7 +1068,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
-					if c.Writer.Size() != writerSizeBeforeForward {
+					if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeForward {
 						h.handleFailoverExhausted(c, failoverErr, account.Platform, true)
 						return
 					}
@@ -1949,18 +1958,33 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 		}
 	}
 
+	// xy2api resilience: upstream balance problems are only shown to
+	// administrators (design §9.4).
+	if status, errType, errMsg, hidden := resilienceHideUpstreamBalance(c, h.gatewayService, failoverErr); hidden {
+		h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
+		return
+	}
+	// xy2api resilience: a content-safety refusal is the client's 400.
+	if msg, rejected := resilienceContentRejection(c, failoverErr); rejected {
+		h.handleStreamingAwareErrorWithCode(c, http.StatusBadRequest, "invalid_request_error", codeContentPolicyViolation, msg, streamStarted)
+		return
+	}
+
 	// 记录原始上游状态码，以便 ops 错误日志捕获真实的上游错误
 	upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)
 	service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
 
 	// 使用默认的错误映射
 	status, errType, errMsg := h.mapUpstreamError(statusCode)
+	status, errType, errMsg = resilienceCapacityExhausted(c, failoverErr, status, errType, errMsg)
+	status = applyExhaustedRetryHint(c, h.gatewayService, status)
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
 }
 
 // handleFailoverExhaustedSimple 简化版本，用于没有响应体的情况
 func (h *GatewayHandler) handleFailoverExhaustedSimple(c *gin.Context, statusCode int, streamStarted bool) {
 	status, errType, errMsg := h.mapUpstreamError(statusCode)
+	status = applyExhaustedRetryHint(c, h.gatewayService, status)
 	service.SetOpsUpstreamError(c, statusCode, errMsg, "")
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
 }
@@ -1988,6 +2012,11 @@ func (h *GatewayHandler) handleStreamingAwareError(c *gin.Context, status int, e
 }
 
 func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, status int, errType, code, message string, streamStarted bool) {
+	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
+	// xy2api resilience: a pre-output heartbeat may have committed 200.
+	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
+		streamStarted = true
+	}
 	if streamStarted {
 		// 响应状态码已固化为 200（ping/部分数据已 flush），错误只能就地以 SSE 帧回传。
 		// 标记本次流内错误，供 ops_error_logger 补记——否则该中间件按 status>=400 采集，
@@ -2002,6 +2031,9 @@ func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, statu
 				return
 			}
 		}
+		if resilienceChatTerminalFrame(c) && writeChatCompletionsErrorSSE(c, errType, code, message, status) {
+			return
+		}
 		// Stream already started, send error as SSE event then close
 		flusher, ok := c.Writer.(http.Flusher)
 		if ok {
@@ -2010,7 +2042,13 @@ func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, statu
 			if code != "" {
 				errorCode = `,"code":` + strconv.Quote(code)
 			}
+			// xy2api G3: Anthropic SDKs only surface named events, so the
+			// frame carries "event: error" (off with the errors switch: the
+			// 0.3.0 frame).
 			errorEvent := `data: {"type":"error","error":{"type":` + strconv.Quote(errType) + errorCode + `,"message":` + strconv.Quote(message) + `}}` + "\n\n"
+			if resilience.Current().ErrorsOn() {
+				errorEvent = "event: error\n" + errorEvent
+			}
 			if _, err := fmt.Fprint(c.Writer, errorEvent); err != nil {
 				_ = c.Error(err)
 			}
@@ -2060,7 +2098,7 @@ func gatewayForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForw
 	if err == nil || c == nil || c.Writer == nil {
 		return false
 	}
-	if c.Writer.Size() == writerSizeBeforeForward {
+	if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) == writerSizeBeforeForward {
 		return false
 	}
 
@@ -2121,14 +2159,17 @@ func (h *GatewayHandler) errorResponse(c *gin.Context, status int, errType, mess
 }
 
 func (h *GatewayHandler) errorResponseWithCode(c *gin.Context, status int, errType, code, message string) {
+	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
 	errorObject := gin.H{"type": errType, "message": message}
 	if code != "" {
 		errorObject["code"] = code
 	}
-	c.JSON(status, gin.H{
+	body := gin.H{
 		"type":  "error",
 		"error": errorObject,
-	})
+	}
+	stashResilienceErrorResponse(c, status, errType, message, body)
+	c.JSON(status, body)
 }
 
 // CountTokens handles token counting endpoint
@@ -2526,6 +2567,17 @@ func billingErrorDetails(err error) (status int, code, message string, retryAfte
 		// 错误码用 rate_limit_exceeded 与 OpenAI 兼容客户端一致；细分类型由 ErrCode + window_resets_at metadata 区分。
 		msg := pkgerrors.Message(err)
 		return http.StatusTooManyRequests, "rate_limit_exceeded", msg, extractQuotaResetSeconds(err)
+	}
+	// xy2api resilience (design §9.5): a positive balance held by in-flight
+	// requests is a short wait (429); the user's own empty balance is one
+	// 403 with a platform-specific message.
+	if resilience.Current().ErrorsOn() {
+		if errors.Is(err, service.ErrInflightBalanceReserved) {
+			return http.StatusTooManyRequests, errTypeBalanceReserved, pkgerrors.Message(err), resilience.JitterSeconds(resilience.Current().Errors.ReservationRetryAfterSeconds, 1)
+		}
+		if errors.Is(err, service.ErrInsufficientBalance) {
+			return http.StatusForbidden, errTypeInsufficientBalance, userInsufficientBalanceMessage, 0
+		}
 	}
 	msg := pkgerrors.Message(err)
 	if msg == "" {

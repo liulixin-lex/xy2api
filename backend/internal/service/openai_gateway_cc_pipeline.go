@@ -32,8 +32,9 @@ import (
 // 调用方，属于有意保留的行为差异，不在此强行统一。
 
 // newUpstreamSSEScanner 构造读取上游 SSE 流的行扫描器，按配置放大单行上限。
-func (s *OpenAIGatewayService) newUpstreamSSEScanner(r io.Reader) *bufio.Scanner {
-	scanner := bufio.NewScanner(r)
+// live 记录被丢弃的中转伪保活帧（可为 nil）。
+func (s *OpenAIGatewayService) newUpstreamSSEScanner(r io.Reader, live *relayLiveness) *bufio.Scanner {
+	scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(r, live))
 	maxLineSize := defaultMaxLineSize
 	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
 		maxLineSize = s.cfg.Gateway.MaxLineSize
@@ -276,7 +277,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 ) ccStreamScanState {
 	var st ccStreamScanState
 
-	scanner := s.newUpstreamSSEScanner(resp.Body)
+	scanner := s.newUpstreamSSEScanner(resp.Body, nil)
 	for scanner.Scan() {
 		line := scanner.Text()
 		payload, ok := extractOpenAISSEDataLine(line)

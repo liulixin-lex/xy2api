@@ -119,6 +119,16 @@ function mountTable(props = {}) {
 }
 
 describe('AvailableChannelsTable responsive surfaces', () => {
+  it('shows the availability fallback group next to a group on both surfaces', () => {
+    const fallbackRows = structuredClone(rows)
+    fallbackRows[0].platforms[0].groups[0].availability_fallback = { id: 9, name: 'Backup', rate_multiplier: 1.5 }
+    expect(mountTable().findAll('[data-testid="group-availability-fallback"]')).toHaveLength(0)
+    const chips = mountTable({ rows: fallbackRows }).findAll('[data-testid="group-availability-fallback"]')
+    expect(chips).toHaveLength(2)
+    expect(chips[0].text()).toBe('availableChannels.availabilityFallback')
+    expect(chips[0].attributes('title')).toBe('availableChannels.availabilityFallbackTooltip')
+  })
+
   it('keeps the five-column table as the desktop-only surface', () => {
     const wrapper = mountTable()
     const desktop = wrapper.get('[data-testid="desktop-channels"]')

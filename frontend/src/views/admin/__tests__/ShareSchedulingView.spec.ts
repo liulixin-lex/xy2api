@@ -216,7 +216,12 @@ describe('share scheduling page', () => {
       group_id: 5, platform: 'anthropic', scheduler: 'sub2api', version: 1, key_source: 'key_session', session: 'abc', idle_ms: 0,
       cache_ttl_seconds: 300, estimated_tokens: 2000, cacheable: true, warm: false, wait_budget_ms: 0, reason: 'new_session',
       steps: [2, 1], write: 'if_absent', spill_write: 'none', target: 2, ideal: 2, active_tier: 1,
-      entries: [{ account_id: 2, tier: 1, weight: 10, effective_weight: 10, configured: false, drain: false, cache_domain: 'account:2', eligible: true, excluded: false, rank: 1 }]
+      entries: [{ account_id: 2, tier: 1, weight: 10, effective_weight: 10, configured: false, drain: false, cache_domain: 'account:2', eligible: true, excluded: false, rank: 1 }],
+      resilience: {
+        group_id: 5, enabled: true, healthy_count: 1,
+        accounts: [{ account_id: 1, name: 'acct-1', platform: 'anthropic', priority: 1, tier: 'soft', reason: 'temp_unschedulable', recover_at: '2026-10-15T08:00:00Z', session_failures: 2, avoided: true }],
+        session: { failures: 2, avoided: [1] }
+      }
     })
     await w.get('[data-testid="share-tab-explain"]').trigger('click')
     await w.get('[data-testid="share-explain-body"]').setValue('{not json')
@@ -232,6 +237,9 @@ describe('share scheduling page', () => {
     await flushPromises()
     expect(api.explain).toHaveBeenCalledWith(5, { model: 'claude-x', session_hash: 'sess', cache_one_hour: false })
     expect(w.get('[data-testid="share-explain-steps"]').text()).toContain('1. acct-2 #2')
+    const resilience = w.get('[data-testid="share-explain-resilience"]')
+    expect(resilience.get('[data-testid="resilience-explain-accounts"]').text()).toContain('explain.tiers.soft')
+    expect(resilience.get('[data-testid="resilience-explain-sessionAvoided"]').text()).toBe('acct-1 #1')
   })
 
   it('notes hour-rounded counters on long report windows', async () => {
@@ -241,7 +249,7 @@ describe('share scheduling page', () => {
     await flushPromises()
     const report = await api.report.mock.results[0].value
     api.report.mockResolvedValue({ ...report, counter_precision: 'hour_rounded' })
-    await w.get('[data-testid="share-report-window"]').setValue('24h')
+    w.findAllComponents({ name: 'Select' }).find(c => c.attributes('data-testid') === 'share-report-window')!.vm.$emit('update:modelValue', '24h')
     await flushPromises()
     expect(api.report).toHaveBeenLastCalledWith(5, '24h')
     expect(w.find('[data-testid="share-hour-rounded"]').exists()).toBe(true)

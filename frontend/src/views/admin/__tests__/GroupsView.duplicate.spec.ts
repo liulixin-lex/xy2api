@@ -325,6 +325,61 @@ describe('GroupsView duplicate action', () => {
     wrapper.unmount()
   })
 
+  it('offers same-platform standard groups as availability fallback and saves the choice', async () => {
+    const SelectStub = defineComponent({
+      props: { modelValue: { type: null, default: null }, options: { type: Array, default: () => [] } },
+      emits: ['update:modelValue'],
+      template: '<div><button v-for="o in options" :key="String(o.value)" type="button" data-option :data-value="String(o.value)" @click="$emit(\'update:modelValue\', o.value)">{{ o.label }}</button></div>'
+    })
+    const groups = [
+      { ...sourceGroup, availability_fallback_group_id: 52 },
+      { ...sourceGroup, id: 50, name: 'Backup' },
+      { ...sourceGroup, id: 51, name: 'Claude', platform: 'anthropic' as const },
+      { ...sourceGroup, id: 52, name: 'Old backup' },
+      { ...sourceGroup, id: 53, name: 'Monthly', subscription_type: 'subscription' as const }
+    ]
+    listGroups.mockResolvedValue({ items: groups, total: groups.length, page: 1, page_size: 20, pages: 1 })
+    updateGroup.mockResolvedValue(groups[0])
+    const wrapper = mount(GroupsView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub, TablePageLayout: TablePageLayoutStub, DataTable: DataTableStub, Pagination: true,
+          BaseDialog: BaseDialogStub, ConfirmDialog: true, EmptyState: true, Select: SelectStub, PlatformIcon: true,
+          Icon: true, GroupCapacityBadge: true, GroupRateMultipliersModal: true, GroupRPMOverridesModal: true, VueDraggable: true
+        }
+      }
+    })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+    await flushPromises()
+
+    const field = wrapper.get('[data-testid="availability-fallback-field"]')
+    expect(field.findAll('[data-option]').map(o => o.attributes('data-value'))).toEqual(['null', '50', '52'])
+    await field.get('[data-value="50"]').trigger('click')
+    await wrapper.get('#edit-group-form').trigger('submit')
+    await flushPromises()
+    expect(updateGroup).toHaveBeenCalledWith(42, expect.objectContaining({ availability_fallback_group_id: 50 }))
+
+    await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+    await flushPromises()
+    wrapper.get('[data-testid="availability-fallback-field"]').findComponent(SelectStub).vm.$emit('update:modelValue', null)
+    await wrapper.get('#edit-group-form').trigger('submit')
+    await flushPromises()
+    expect(updateGroup).toHaveBeenLastCalledWith(42, expect.objectContaining({ availability_fallback_group_id: 0 }))
+
+    // Switching to a subscription group hides the field and clears it, so the
+    // save is not rejected for a value the administrator can no longer see.
+    await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { editForm: { subscription_type: string; availability_fallback_group_id: number | null } }
+    expect(vm.editForm.availability_fallback_group_id).toBe(52)
+    vm.editForm.subscription_type = 'subscription'
+    await flushPromises()
+    expect(wrapper.find('[data-testid="availability-fallback-field"]').exists()).toBe(false)
+    expect(vm.editForm.availability_fallback_group_id).toBeNull()
+    wrapper.unmount()
+  })
+
   it('loads, edits, and saves custom reasoning multipliers for group pricing', async () => {
     const group = {
       ...sourceGroup,

@@ -58,11 +58,11 @@
             </thead>
             <tbody>
               <tr v-for="entry in sortedEntries" :key="entry.account_id" class="border-b border-gray-100 last:border-0 dark:border-dark-700">
-                <td class="p-2 font-mono">{{ entry.rank > 0 ? entry.rank : '-' }}</td>
+                <td class="p-2 tabular-nums">{{ entry.rank > 0 ? entry.rank : '-' }}</td>
                 <td class="p-2">{{ accountName(entry.account_id) }}</td>
-                <td class="p-2 text-right font-mono">{{ entry.tier }}</td>
-                <td class="p-2 text-right font-mono">{{ entry.weight }}</td>
-                <td class="p-2 text-right font-mono">{{ entry.effective_weight.toFixed(2) }}</td>
+                <td class="p-2 text-right tabular-nums">{{ entry.tier }}</td>
+                <td class="p-2 text-right tabular-nums">{{ entry.weight }}</td>
+                <td class="p-2 text-right tabular-nums">{{ entry.effective_weight.toFixed(2) }}</td>
                 <td class="p-2 font-mono">{{ entry.cache_domain }}</td>
                 <td class="p-2">
                   <span v-if="entry.excluded" class="text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.explain.excluded') }}</span>
@@ -74,6 +74,11 @@
           </table>
         </div>
       </div>
+      <div v-if="result.resilience" data-testid="share-explain-resilience">
+        <h4 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.resilience.explain.title') }}</h4>
+        <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.resilience.explain.hint') }}</p>
+        <ResilienceExplainResult class="mt-3" :explanation="result.resilience" />
+      </div>
     </section>
   </div>
 </template>
@@ -81,6 +86,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ResilienceExplainResult from '@/components/admin/resilience/ResilienceExplainResult.vue'
 import shareSchedulingAPI from '@/api/admin/shareScheduling'
 import type { ShareExplainInput, ShareExplanation, ShareMember } from '@/api/admin/shareScheduling'
 import { useShareSchedulingLabels } from '@/composables/useShareSchedulingLabels'

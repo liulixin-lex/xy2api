@@ -1,0 +1,132 @@
+# Isolated staging stack for the 0.4.0 gateway resilience validation
+# (openspec/changes/gateway-resilience-20261015/staging-validation.md §2).
+# Every port binds to 127.0.0.1; secrets come from .env (mode 0600), created
+# by bootstrap.sh. Run from the staging directory:
+#   docker compose -p xy2api-staging up -d
+name: xy2api-staging
+
+x-limits: &small
+  deploy:
+    resources:
+      limits: { cpus: "0.50", memory: 128M }
+  oom_score_adj: 500
+  restart: unless-stopped
+  networks: [staging]
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: xy2api
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: xy2api
+    volumes: [pgdata:/var/lib/postgresql]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xy2api -d xy2api"]
+      interval: 5s
+      retries: 20
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 2G }
+    oom_score_adj: 300
+    networks: [staging]
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb"]
+    deploy:
+      resources:
+        limits: { cpus: "0.50", memory: 320M }
+    oom_score_adj: 300
+    networks: [staging]
+
+  app:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+    ports: ["127.0.0.1:18210:8080"]
+    volumes: [appdata:/app/data]
+    environment:
+      AUTO_SETUP: "true"
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: "8080"
+      SERVER_MODE: release
+      # Caddy reaches the app through the network gateway; cdn-sim from inside
+      # the network. Both must be trusted for X-XY-Edge to count.
+      SERVER_TRUSTED_PROXIES: 172.31.210.0/24
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_USER: xy2api
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_DBNAME: ${APP_DBNAME:-xy2api}
+      DATABASE_SSLMODE: disable
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_DB: ${APP_REDIS_DB:-0}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?ADMIN_EMAIL is required}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:?TOTP_ENCRYPTION_KEY is required}
+      TZ: Asia/Shanghai
+      # Soaks set APP_GODEBUG=gctrace=1: the live heap after each GC is the
+      # leak signal; container memory also holds memory the runtime keeps.
+      GODEBUG: ${APP_GODEBUG:-}
+      SECURITY_URL_ALLOWLIST_ENABLED: "false"
+      SECURITY_URL_ALLOWLIST_ALLOW_INSECURE_HTTP: "true"
+      SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS: "true"
+    ulimits:
+      nofile: { soft: 100000, hard: 100000 }
+    deploy:
+      resources:
+        limits: { cpus: "3.0", memory: 3G }
+    oom_score_adj: 200
+    networks: [staging]
+
+  fault-upstream:
+    <<: *small
+    build: ./fault-upstream
+    image: xy2api-staging-fault-upstream:local
+    ports: ["127.0.0.1:18211:8080"]
+
+  cdn-sim-90:
+    <<: *small
+    build: ./cdn-sim
+    image: xy2api-staging-cdn-sim:local
+    environment: { TARGET: "http://app:8080", FIRST_BYTE_TIMEOUT: 90s, IDLE_TIMEOUT: 90s, EDGE: esa }
+    ports: ["127.0.0.1:18212:8080"]
+
+  cdn-sim-125:
+    <<: *small
+    image: xy2api-staging-cdn-sim:local
+    environment: { TARGET: "http://app:8080", FIRST_BYTE_TIMEOUT: 125s, IDLE_TIMEOUT: 125s, EDGE: cf }
+    ports: ["127.0.0.1:18213:8080"]
+    depends_on: [cdn-sim-90]
+
+  cdn-sim-300:
+    <<: *small
+    image: xy2api-staging-cdn-sim:local
+    environment: { TARGET: "http://app:8080", FIRST_BYTE_TIMEOUT: 300s, IDLE_TIMEOUT: 300s, EDGE: esa }
+    ports: ["127.0.0.1:18214:8080"]
+    depends_on: [cdn-sim-90]
+
+  # Direct path request counter (no edge marker), for per-turn request counts.
+  direct-counter:
+    <<: *small
+    image: xy2api-staging-cdn-sim:local
+    environment: { TARGET: "http://app:8080", FIRST_BYTE_TIMEOUT: 600s, IDLE_TIMEOUT: 600s, EDGE: none }
+    ports: ["127.0.0.1:18215:8080"]
+    depends_on: [cdn-sim-90]
+
+volumes:
+  pgdata:
+  appdata:
+
+networks:
+  staging:
+    name: xy2api-staging-net
+    ipam:
+      config: [{ subnet: 172.31.210.0/24, gateway: 172.31.210.1 }]

@@ -519,6 +519,8 @@ export default {
           accountErrorCount: '错误账号数（不含临时不可调度）',
           accountErrorRatio: '错误账号比例 (%)',
           accountTempUnscheduledCount: '临时不可调度账号数',
+          accountBalanceExhaustedCount: '上游余额不足账号数',
+          accountBalanceUnrecoveredCount: '上游余额长期未恢复账号数',
           overloadAccountCount: '过载账号数'
         },
         metricDescriptions: {
@@ -537,6 +539,8 @@ export default {
           accountErrorCount: '统计窗口内产生错误的账号数量（不含临时不可调度）。',
           accountErrorRatio: '统计窗口内错误账号占比（0~100）。',
           accountTempUnscheduledCount: '当前处于临时不可调度状态的账号数量（如代理/凭据故障被自动摘除）。',
+          accountBalanceExhaustedCount: '在上游中转处余额不足（EXHAUSTED）的账号数量；充值并复检恢复后自动解除。',
+          accountBalanceUnrecoveredCount: '余额不足超过网关韧性设置中的通知时长（默认 72 小时）仍未恢复的账号数量。',
           overloadAccountCount: '统计窗口内过载账号数量。'
         },
         hints: {

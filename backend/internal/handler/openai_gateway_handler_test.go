@@ -21,6 +21,7 @@ import (
 	pkghttputil "github.com/liulixin-lex/xy2api/internal/pkg/httputil"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/assert"
@@ -100,6 +101,7 @@ func TestOpenAIHandleStreamingAwareError_JSONEscaping(t *testing.T) {
 }
 
 func TestOpenAIHandleStreamingAwareErrorWithCode_EmitsStableClassification(t *testing.T) {
+	withHandlerResilience(t, func(s *resilience.Settings) { s.Keepalive.Enabled = false })
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -341,7 +343,8 @@ func TestOpenAIEnsureForwardErrorResponse_ResponsesRouteAfterWrittenEmitsRespons
 	assert.Contains(t, body, ":\n\n", "earlier ping bytes preserved")
 	assert.Contains(t, body, "event: response.failed\n", "appended a Responses terminal event")
 	assert.Contains(t, body, `"type":"response.failed"`)
-	assert.Contains(t, body, `"code":"upstream_error"`)
+	// xy2api resilience (design §7.6): committed upstream failures use server_error.
+	assert.Contains(t, body, `"code":"server_error"`)
 	assert.Contains(t, body, "Upstream request failed")
 }
 
@@ -2466,7 +2469,8 @@ func TestOpenAIResponses_APIKeyPassthroughSSERateLimitUsesConfiguredPoolRetry(t 
 
 	require.Equal(t, []int64{9912, 9912}, upstream.calls())
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
-	require.Equal(t, "1", rec.Header().Get("Retry-After"))
+	// xy2api resilience: the upstream Retry-After (1 s) is clamped to 2-30 s.
+	require.Equal(t, "2", rec.Header().Get("Retry-After"))
 	require.Equal(t, "rate_limit_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 	require.Equal(t, "Upstream rate limit exceeded, please retry later", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
 }

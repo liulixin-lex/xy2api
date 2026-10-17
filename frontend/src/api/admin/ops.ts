@@ -696,6 +696,8 @@ export type MetricType =
   | 'account_error_count'
   | 'account_error_ratio'
   | 'account_temp_unscheduled_count'
+  | 'account_balance_exhausted_count'
+  | 'account_balance_unrecovered_count'
   | 'overload_account_count'
 export type Operator = '>' | '>=' | '<' | '<=' | '==' | '!='
 
