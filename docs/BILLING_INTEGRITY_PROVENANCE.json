@@ -45,7 +45,7 @@
     }
   ],
   "impact_report": {
-    "command": "python3 tools/upstream-sync/sync.py report --upstream sub2api/v0.2.14 --fork 9717116f198904442ebb400d7d06792a40dea15c --output /lex/billing-fix-20261007/upstream-impact.json",
+    "command": "python3 tools/upstream-sync/sync.py report --upstream sub2api/v0.2.14 --fork 9717116f198904442ebb400d7d06792a40dea15c --output <工作机 C>/billing-fix-20261007/upstream-impact.json",
     "sha256": "7a6b667dc467bf9b57f59d050d6e8c88a71119174306fd545075df22a8d59cf2"
   },
   "ported_commits": [
@@ -339,7 +339,7 @@
       "redis": "8.4"
     },
     "build": {
-      "command": "go build -o /lex/billing-fix-20261007/xy2api-billing-check ./cmd/server",
+      "command": "go build -o <工作机 C>/billing-fix-20261007/xy2api-billing-check ./cmd/server",
       "exit_code": 0
     },
     "lint": {
@@ -367,10 +367,10 @@
         "deleted API key rolls back settlement",
         "EasyPay signature-reuse forgery accepted"
       ],
-      "evidence": "/lex/billing-fix-20261007/baseline.log"
+      "evidence": "<工作机 C>/billing-fix-20261007/baseline.log"
     },
-    "evidence_directory": "/lex/billing-fix-20261007",
-    "source_hash_manifest": "/lex/billing-fix-20261007/verified-source-sha256.json",
+    "evidence_directory": "<工作机 C>/billing-fix-20261007",
+    "source_hash_manifest": "<工作机 C>/billing-fix-20261007/verified-source-sha256.json",
     "not_executed": [
       "remote CI",
       "production deployment",
@@ -406,7 +406,7 @@
       "repository_gate_exit_code": 0
     },
     "exceptions_changed": false,
-    "validation_evidence": "/lex/billing-fix-20261007/pr-merge/",
+    "validation_evidence": "<工作机 C>/billing-fix-20261007/pr-merge/",
     "status": "PR checks must pass on the final head before merge; full local rerun logs and remote readbacks are retained in validation_evidence.",
     "production_backend_source_changed": false,
     "test_fixes": [

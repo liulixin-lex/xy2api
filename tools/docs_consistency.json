@@ -1,0 +1,304 @@
+{
+  "_comment": "Rules for tools/check_docs_consistency.py. Update them in the same commit as the code or document they describe; AGENTS.md explains when.",
+  "links": {
+    "ignore_files": {
+      "frontend/src/views/auth/README.md": "upstream file whose links are relative to frontend/"
+    }
+  },
+  "docs_index": {
+    "path": "docs/README.md",
+    "docs_root": "docs",
+    "openspec_changes": "openspec/changes"
+  },
+  "docs_whitelist": {
+    "roots": [
+      "docs"
+    ]
+  },
+  "pins": [
+    {
+      "name": "Go",
+      "source": {
+        "path": "backend/go.mod",
+        "pattern": "^go (\\d+\\.\\d+\\.\\d+)$"
+      },
+      "copies": [
+        {
+          "path": ".github/workflows/backend-ci.yml",
+          "pattern": "grep -q 'go(\\d+\\.\\d+\\.\\d+)'",
+          "min_count": 2
+        },
+        {
+          "path": ".github/workflows/release.yml",
+          "pattern": "grep -q 'go(\\d+\\.\\d+\\.\\d+)'"
+        },
+        {
+          "path": ".github/workflows/security-scan.yml",
+          "pattern": "grep -q 'go(\\d+\\.\\d+\\.\\d+)'"
+        },
+        {
+          "path": "Dockerfile",
+          "pattern": "GOLANG_IMAGE=golang:(\\d+\\.\\d+\\.\\d+)"
+        },
+        {
+          "path": "deploy/Dockerfile",
+          "pattern": "GOLANG_IMAGE=golang:(\\d+\\.\\d+\\.\\d+)"
+        },
+        {
+          "path": "backend/Dockerfile",
+          "pattern": "^FROM golang:(\\d+\\.\\d+\\.\\d+)"
+        },
+        {
+          "path": "README.md",
+          "pattern": "badge/Go-(\\d+\\.\\d+\\.\\d+)"
+        },
+        {
+          "path": "README.md",
+          "pattern": "Go (\\d+\\.\\d+\\.\\d+), Gin"
+        },
+        {
+          "path": "README_CN.md",
+          "pattern": "badge/Go-(\\d+\\.\\d+\\.\\d+)"
+        },
+        {
+          "path": "README_CN.md",
+          "pattern": "Go (\\d+\\.\\d+\\.\\d+), Gin"
+        },
+        {
+          "path": "README_JA.md",
+          "pattern": "badge/Go-(\\d+\\.\\d+\\.\\d+)"
+        },
+        {
+          "path": "README_JA.md",
+          "pattern": "Go (\\d+\\.\\d+\\.\\d+), Gin"
+        },
+        {
+          "path": "DEV_GUIDE.md",
+          "pattern": "当前 \\*{0,2}(\\d+\\.\\d+\\.\\d+)",
+          "min_count": 2
+        },
+        {
+          "path": "DEV_GUIDE.md",
+          "pattern": "grep -q 'go(\\d+\\.\\d+\\.\\d+)'"
+        }
+      ]
+    },
+    {
+      "name": "golangci-lint",
+      "source": {
+        "path": ".github/workflows/backend-ci.yml",
+        "pattern": "golangci-lint-action@\\S+\\n\\s+with:\\n\\s+version: (v\\d+\\.\\d+\\.\\d+)"
+      },
+      "copies": [
+        {
+          "path": "DEV_GUIDE.md",
+          "pattern": "golangci-lint@(v\\d+\\.\\d+\\.\\d+)"
+        },
+        {
+          "path": "DEV_GUIDE.md",
+          "pattern": "CI 用 (v\\d+\\.\\d+\\.\\d+)"
+        }
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "item": "resilience counter",
+      "sources": [
+        "backend/internal/resilience/metrics.go"
+      ],
+      "pattern": "Metric[A-Za-z]+\\s*=\\s*\"([a-z_]+)\"",
+      "doc": "docs/GATEWAY_RESILIENCE.md"
+    },
+    {
+      "item": "resilience log event",
+      "sources": [
+        "backend/internal/**/*.go"
+      ],
+      "exclude": [
+        "*_test.go"
+      ],
+      "pattern": "\\.(?:Warn|Info|Error)\\(\"resilience\\.([a-z0-9_]+)\"",
+      "skip": "_failed$",
+      "doc": "docs/GATEWAY_RESILIENCE.md"
+    },
+    {
+      "item": "resilience setting",
+      "sources": [
+        "backend/internal/resilience/settings.go"
+      ],
+      "pattern": "json:\"([a-z0-9_]+)\"",
+      "match": "word",
+      "doc": "openspec/changes/gateway-resilience-20261015/design.md"
+    }
+  ],
+  "retired": [
+    {
+      "pattern": "balance_transition|RecheckBalance|balance/recheck",
+      "reason": "the 0.4.0 balance simplification removed the balance states, probes, recheck and alerts; design §3.2",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "openspec/changes/gateway-resilience-20261015/tasks.md"
+      ]
+    },
+    {
+      "pattern": "recovering_concurrency|notify_after_hours",
+      "reason": "the 0.4.0 balance simplification removed the balance states, probes, recheck and alerts; design §3.2; only the test that parses an RC settings document names the old fields",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "openspec/changes/gateway-resilience-20261015/tasks.md",
+        "backend/migrations/276_seed_balance_alert_rules.sql",
+        "backend/internal/resilience/balance_pause_test.go"
+      ]
+    },
+    {
+      "pattern": "resilience_balance(?![a-z_])",
+      "reason": "the 0.4.0 balance simplification removed the balance states, probes, recheck and alerts; design §3.2; the accounts.extra key is no longer read or written",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "openspec/changes/gateway-resilience-20261015/tasks.md",
+        "openspec/changes/gateway-resilience-20261015/design.md",
+        "backend/internal/service/resilience_balance_pause_test.go",
+        "backend/internal/service/resilience_grok_balance_test.go",
+        "backend/internal/service/resilience_session_test.go"
+      ]
+    },
+    {
+      "pattern": "account_balance_(?:exhausted|unrecovered)_count",
+      "reason": "the balance alert metrics were removed; only migrations 276/277, their tests and the change history name them",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "openspec/changes/gateway-resilience-20261015/tasks.md",
+        "openspec/changes/gateway-resilience-20261015/design.md",
+        "backend/migrations/276_seed_balance_alert_rules.sql",
+        "backend/migrations/277_remove_balance_alert_rules.sql",
+        "backend/migrations/balance_alert_rules_removal_test.go",
+        "backend/internal/repository/balance_alert_rules_removal_migration_integration_test.go"
+      ]
+    },
+    {
+      "pattern": "git (?:merge|rebase) upstream/main",
+      "reason": "upstream syncs only go through docs/UPSTREAM_SYNC.md and tools/upstream-sync; AGENTS.md",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
+    }
+  ],
+  "private": [
+    {
+      "tokens_sha256": [
+        "073b7e05335ad9906e76912ed64a397e85221e96f565acac167d39e1e9737bcf",
+        "2e2a44f0c8e3de87c54c9c63793a92eff6ee89ea37186e6031c44d9ab8acf559",
+        "46c7a169fe733a34fd95196458e31759a752824f455e640e810fcc42bf9df357",
+        "d5252633fff7ea01775887861c1450149df20f03819fd276b22029ba9e8c3e17"
+      ],
+      "paths": [
+        "*.md",
+        "*.json",
+        "*.yaml",
+        "*.yml",
+        "*.txt",
+        "*.sh",
+        "*.py",
+        "*.sql",
+        "*.toml",
+        "*.service",
+        "*Caddyfile*",
+        "*Dockerfile*",
+        ".env.example"
+      ],
+      "allowed": [
+        "backend/**",
+        "frontend/**"
+      ],
+      "reason": "public repository: hosts, server and workstation paths and coexisting services stay in the private host notes outside the repository; AGENTS.md (a test site, its project, a coexisting service and a workstation directory)"
+    },
+    {
+      "pattern": "(?<![A-Za-z0-9_.:/~-])/([A-Za-z0-9._-]+)/",
+      "group_sha256": [
+        "15e38a21669d3adcc72ba29565a688f5fe3d9e438361a844121578e13ec395d1",
+        "769a4e6d0003189c7e96c5d9b7e810a0d11c3a12832527ec94b0f86d277f51ca",
+        "c917779b548cdf1dac8c0a5477f153612cf7ff44df094d141f0a053083185eb7"
+      ],
+      "paths": [
+        "*.md",
+        "*.json",
+        "*.yaml",
+        "*.yml",
+        "*.txt",
+        "*.sh",
+        "*.py",
+        "*.sql",
+        "*.toml",
+        "*.service",
+        "*Caddyfile*",
+        "*Dockerfile*",
+        ".env.example"
+      ],
+      "allowed": [
+        "backend/**",
+        "frontend/**"
+      ],
+      "reason": "public repository: hosts, server and workstation paths and coexisting services stay in the private host notes outside the repository; AGENTS.md (a workstation path root)"
+    },
+    {
+      "pattern": "/Users/([A-Za-z0-9._-]+)/",
+      "group_sha256": [
+        "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918"
+      ],
+      "paths": [
+        "*.md",
+        "*.json",
+        "*.yaml",
+        "*.yml",
+        "*.txt",
+        "*.sh",
+        "*.py",
+        "*.sql",
+        "*.toml",
+        "*.service",
+        "*Caddyfile*",
+        "*Dockerfile*",
+        ".env.example"
+      ],
+      "allowed": [
+        "backend/**",
+        "frontend/**"
+      ],
+      "reason": "public repository: hosts, server and workstation paths and coexisting services stay in the private host notes outside the repository; AGENTS.md (a workstation home directory)"
+    },
+    {
+      "pattern": "(?<![\\d.])(?!(?:127|10|0)\\.|192\\.168\\.|172\\.(?:1[6-9]|2\\d|3[01])\\.|192\\.0\\.2\\.|198\\.51\\.100\\.|203\\.0\\.113\\.|169\\.254\\.|255\\.)(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)(?![\\d.])",
+      "paths": [
+        "*.md",
+        "docs/**",
+        "openspec/**",
+        "deploy/**",
+        "skills/**"
+      ],
+      "reason": "public repository: real host addresses stay in the private host notes; examples use 192.0.2.0/24, 198.51.100.0/24 or 203.0.113.0/24"
+    },
+    {
+      "pattern": "\\b(?:ubuntu|root)@(?!localhost\\b)[A-Za-z0-9.-]+",
+      "paths": [
+        "*.md",
+        "docs/**",
+        "openspec/**",
+        "deploy/**",
+        "skills/**"
+      ],
+      "reason": "public repository: hosts, server and workstation paths and coexisting services stay in the private host notes outside the repository; AGENTS.md"
+    }
+  ],
+  "memory": {
+    "path": "docs/PROJECT_MEMORY.md",
+    "archive": "docs/PROJECT_MEMORY_ARCHIVE.md",
+    "max_bytes": 196608,
+    "log_heading": "## 操作日志"
+  }
+}

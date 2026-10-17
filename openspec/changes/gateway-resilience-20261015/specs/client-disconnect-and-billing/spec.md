@@ -5,13 +5,19 @@
 ### Requirement: Delivery state
 
 Each request MUST track its delivery state:
-- `undelivered`: no semantic byte written. Committed headers and heartbeat bytes do not count, including the pings written while the request waits for a user or account slot or the user message queue; for non-streaming requests, the body has not been written.
+- `undelivered`: no semantic byte written. Committed headers and heartbeat bytes do not count, including the pre-output keepalive heartbeats and the pings written while the request waits for a user or account slot or the user message queue; for non-streaming requests and image JSON, the body has not been written.
 - `partial`: some semantic bytes written, but not complete.
 - `complete`.
 
+On the OpenAI `/v1/responses` stream path, including passthrough, in-stream keepalive comments MUST NOT count either, so the first semantic output decides. On the other streaming paths (Chat Completions and Messages conversions, Anthropic native and passthrough, Grok `/v1/responses`, image SSE), opening events and in-stream heartbeats written before the first real content count as delivered in 0.4.0; 0.4.1 registers them as heartbeats without holding back or delaying them.
+
 #### Scenario: Heartbeats only
-- **WHEN** a request has written SSE headers and heartbeats but no semantic event
+- **WHEN** a request has written SSE headers and pre-output keepalive heartbeats but no semantic event
 - **THEN** its delivery state is `undelivered`.
+
+#### Scenario: Responses keepalive comments only
+- **WHEN** an OpenAI `/v1/responses` stream has written only in-stream keepalive comments when the client leaves
+- **THEN** the request is `undelivered` and not billed.
 
 #### Scenario: Queued and pinged, then abandoned
 - **WHEN** a streaming request waits for an account slot long enough to receive pings, gets the slot and the client leaves before the upstream's first output
@@ -62,7 +68,7 @@ These charges MUST be written to `usage_logs` with `billing_mode='undelivered_ab
 
 For client disconnects, `ops_error_logs` MUST record:
 - `duration_ms`;
-- `disconnect_stage` (`select`, `slot_wait`, `header_wait`, `pre_output` or `streaming`);
+- `disconnect_stage` (`select`, which includes waiting for a slot, `header_wait`, `pre_output` or `streaming`);
 - `delivered_bytes`.
 
 #### Scenario: Disconnect during header wait

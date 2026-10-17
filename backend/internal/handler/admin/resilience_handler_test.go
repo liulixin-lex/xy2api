@@ -32,12 +32,12 @@ func TestUpdateResilienceSettingsLeavesTheLiveSnapshotAlone(t *testing.T) {
 	live := resilience.Current()
 	h := NewResilienceHandler(service.NewResilienceService(nil, nil))
 
-	// Rejected: the schedule is invalid. Decoding must not have written into
+	// Rejected: an edge name is invalid. Decoding must not have written into
 	// the live slices or maps on the way.
-	code := putResilienceSettings(t, h, `{"balance":{"recheck_schedule_seconds":[5]},"budget":{"model_overrides":{"gpt-c":190}}}`)
+	code := putResilienceSettings(t, h, `{"keepalive":{"edges":["Not An Edge"]},"budget":{"model_overrides":{"gpt-c":190}}}`)
 	require.NotEqual(t, http.StatusOK, code)
 	require.Same(t, live, resilience.Current())
-	require.Equal(t, []int{60, 120, 300, 600, 900}, live.Balance.RecheckScheduleSeconds)
+	require.Equal(t, []string{"cf", "esa"}, live.Keepalive.Edges)
 	require.Equal(t, map[string]int{"gpt-a": 200, "gpt-b": 210}, live.Budget.ModelOverrides)
 
 	// Accepted: a map in the body replaces the current one, so keys can be
@@ -52,4 +52,10 @@ func TestUpdateResilienceSettingsLeavesTheLiveSnapshotAlone(t *testing.T) {
 	require.Equal(t, http.StatusOK, code)
 	require.Equal(t, map[string]int{"gpt-b": 215}, resilience.Current().Budget.ModelOverrides)
 	require.Equal(t, 100, resilience.Current().Stall.TextStallSeconds)
+
+	// The balance section is the switch and the pause; fields of the
+	// removed balance states are unknown and rejected.
+	require.Equal(t, http.StatusOK, putResilienceSettings(t, h, `{"balance":{"pause_seconds":600}}`))
+	require.Equal(t, 600, resilience.Current().Balance.PauseSeconds)
+	require.Equal(t, http.StatusBadRequest, putResilienceSettings(t, h, `{"balance":{"recheck_schedule_seconds":[60]}}`))
 }

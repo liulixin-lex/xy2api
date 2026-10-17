@@ -317,7 +317,8 @@ func TestResiliencePenaltyOfTiers(t *testing.T) {
 		{"transient", Account{Status: StatusActive, Schedulable: true, TempUnschedulableUntil: in(30 * time.Second), TempUnschedulableReason: "transient:x"}, resilience.TierSoft},
 		{"403 cooldown", Account{Status: StatusActive, Schedulable: true, TempUnschedulableUntil: in(10 * time.Minute), TempUnschedulableReason: "auth:403_cooldown (1/3): x"}, resilience.TierSoft},
 		{"oauth 401", Account{Status: StatusActive, Schedulable: true, TempUnschedulableUntil: in(10 * time.Minute), TempUnschedulableReason: "OAuth 401: x"}, resilience.TierHard},
-		{"balance record", Account{Status: StatusActive, Schedulable: true, Extra: resilience.BalanceRecord{State: resilience.BalanceExhausted, Since: now}.Extra()}, resilience.TierHard},
+		{"balance pause", Account{Status: StatusActive, Schedulable: true, TempUnschedulableUntil: in(5 * time.Minute), TempUnschedulableReason: resilience.BalancePauseReason("HTTP 402: x")}, resilience.TierHard},
+		{"stale balance record", Account{Status: StatusActive, Schedulable: true, Extra: map[string]any{"resilience_balance": map[string]any{"state": "EXHAUSTED"}}}, resilience.TierNone},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -361,20 +362,4 @@ func TestStreakOwnerLosesItsBinding(t *testing.T) {
 	require.True(t, st.Avoided(51))
 	require.True(t, resilienceBindAllowed(ctx, 52))
 	require.True(t, svc.resilienceGatewayBindAllowed(ctx, 52))
-}
-
-func TestExhaustedTierEndsWithTheExclusion(t *testing.T) {
-	// After the next check plus the grace period the account returns to
-	// normal selection; its penalty tier must agree.
-	withResilienceSettings(t, nil)
-	now := time.Now()
-	fresh := Account{ID: 1, Status: StatusActive, Schedulable: true,
-		Extra: resilience.BalanceRecord{State: resilience.BalanceExhausted, Since: now, NextCheckAt: now.Add(time.Minute)}.Extra()}
-	tier, _, reason := resiliencePenaltyOf(&fresh, "", now)
-	require.Equal(t, resilience.TierHard, tier)
-	require.Equal(t, "balance_exhausted", reason)
-	stale := Account{ID: 2, Status: StatusActive, Schedulable: true,
-		Extra: resilience.BalanceRecord{State: resilience.BalanceExhausted, Since: now.Add(-time.Hour), NextCheckAt: now.Add(-30 * time.Minute)}.Extra()}
-	tier, _, _ = resiliencePenaltyOf(&stale, "", now)
-	require.Equal(t, resilience.TierNone, tier)
 }

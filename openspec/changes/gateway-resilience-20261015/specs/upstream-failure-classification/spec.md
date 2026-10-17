@@ -28,7 +28,7 @@ Each category MUST map to a fixed policy:
 
 | Category | Next account | Same-account retry | Account penalty | Session failure count |
 |---|---|---|---|---|
-| BALANCE | yes | never | balance state machine (hard) | immediate rebind |
+| BALANCE | yes | never | balance pause (hard, `balance.pause_seconds`) | immediate rebind |
 | AUTH | yes | never | hard (counted for 403) | immediate rebind |
 | RATE_LIMIT_RESET | yes | never | soft until reset; hard if reset > 300 s | no / rebind if hard |
 | RATE_LIMIT | yes | never | soft, configured 429 cooldown | +1 |

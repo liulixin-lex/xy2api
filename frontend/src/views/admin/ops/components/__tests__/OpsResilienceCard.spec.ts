@@ -22,8 +22,7 @@ describe('ops resilience card', () => {
         { name: 'keepalive_committed', group_id: 3, label: 'responses', count: 4 },
         { name: 'keepalive_committed', group_id: 5, label: 'chat', count: 2 },
         { name: 'undelivered', group_id: 3, label: 'pre_output', count: 1 }
-      ],
-      balance_states: { OK: 7, EXHAUSTED: 1 }
+      ]
     })
     mocks.list.mockResolvedValue({
       items: [{
@@ -42,7 +41,7 @@ describe('ops resilience card', () => {
     const totals = w.get('[data-testid="resilience-totals"]').text()
     expect(totals).toContain('keepalive_committed')
     expect(totals).toContain('6')
-    expect(w.get('[data-testid="resilience-balance-states"]').text()).toContain('1')
+    expect(w.find('[data-testid="resilience-balance-states"]').exists()).toBe(false)
     const table = w.get('[data-testid="resilience-undelivered-table"]').text()
     expect(table).toContain('/v1/responses')
     expect(table).toContain('125.4s')
@@ -51,7 +50,7 @@ describe('ops resilience card', () => {
 
   it('reloads when the dashboard refreshes and shows empty states', async () => {
     const w = mountCard(); await flushPromises()
-    mocks.stats.mockResolvedValueOnce({ window_seconds: 3600, scope: 'instance', counters: [], balance_states: {} })
+    mocks.stats.mockResolvedValueOnce({ window_seconds: 3600, scope: 'instance', counters: [] })
     mocks.list.mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
     await w.setProps({ refreshToken: 1 }); await flushPromises()
     expect(mocks.stats).toHaveBeenCalledTimes(2)

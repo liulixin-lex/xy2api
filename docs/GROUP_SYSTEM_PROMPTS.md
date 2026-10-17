@@ -2,7 +2,7 @@
 
 ## 本地实现范围
 
-基线：`main / 41fd8591c25b075e3f95df58d3b46283a3a70b68`。实现目录：`/xy/artifacts/group-system-prompts/work`。原仓库 `/xy/xy2api` 保持原样。本次不包含提交、推送、发版或生产部署。
+基线：`main / 41fd8591c25b075e3f95df58d3b46283a3a70b68`。实现目录：`<工作机 A>/artifacts/group-system-prompts/work`。原仓库 `<工作机 A>/xy2api` 保持原样。本次不包含提交、推送、发版或生产部署。
 
 管理员新建、编辑分组时，可分别设置真实专属权限和用户端专属标识展示。`show_exclusive_badge` 默认 `true`，隐藏标识不改变 `is_exclusive`、订阅要求或授权名单。用户端仍显示获授权分组的名称、倍率和模型，隐藏的专属分组不归入公开分类。管理员仍看到真实分组类型。
 
@@ -42,6 +42,6 @@ Responses WebSocket 在每个 `response.create` 注入一次，包括首帧、�
 
 追加迁移 `249_group_system_prompt_policy.sql` 和对应 checksum。已有行默认展示标识、空提示词；Ent schema 和生成代码同步新增 boolean、JSONB 字段。认证查询投影、L1/L2 快照同步新增字段，快照版本为 26；旧快照不再复用。数据库触发器将两项配置变更送入既有失效 outbox，经 Redis 广播刷新其他实例。
 
-本地验证的命令、字面 stdout/stderr、退出状态与失败后修正记录位于 `/xy/artifacts/group-system-prompts/VERIFICATION.txt`；机器记录为同目录 `events.jsonl`。浏览器使用隔离模拟数据，不连接真实账号。四角色交付为 `MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`。回滚脚本恢复源码归档，不执行数据库降级或生产操作。
+本地验证的命令、字面 stdout/stderr、退出状态与失败后修正记录位于 `<工作机 A>/artifacts/group-system-prompts/VERIFICATION.txt`；机器记录为同目录 `events.jsonl`。浏览器使用隔离模拟数据，不连接真实账号。四角色交付为 `MODIFIED_FILE.tar.gz`、`DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh`。回滚脚本恢复源码归档，不执行数据库降级或生产操作。
 
 复验环境使用 Go 1.27.0、项目固定的 pnpm 9.15.9；PostgreSQL 18.1 和 Redis 8.4 通过一次性容器运行。受本机内存限制，大型构建串行执行。最终通过与未通过范围以验证记录和交付结果为准，不将中断或跳过标记为通过。

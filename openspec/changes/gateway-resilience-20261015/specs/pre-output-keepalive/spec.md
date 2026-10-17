@@ -73,7 +73,8 @@ Anthropic and Gemini attempts MUST have a first-upstream-event timeout (default 
 
 #### Scenario: Slow relay is abandoned in time
 - **WHEN** a medium-effort request gets no output from account A within 180 s and account B is available
-- **THEN** the gateway cancels the attempt on A, soft-penalises A and tries B.
+- **THEN** the gateway cancels the attempt on A and tries B; when the request has a session, it counts one failure of that session on A
+- **AND** A gets no cooldown, so other sessions keep using it.
 
 #### Scenario: Last candidate waits for the budget
 - **WHEN** account A is the only candidate
@@ -97,6 +98,12 @@ A dropped frame MUST still count as upstream activity for stall detection: the s
 - **WHEN** after output a relay sends only such frames for longer than the text stall threshold, then continues
 - **THEN** the stream is not ended as stalled, the frames do not reach the client, and the response completes.
 
+In semantic first-token mode (`openai_ttft_mode=semantic`, the default), the first-token time of the request log MUST be the earlier of the first dropped frame and the first real event of the attempt, measured from the start of the attempt, as in 0.3.0 where the frames passed through. In visible mode the frames MUST NOT count. The value MUST only be taken when the result is built: the frames MUST still be dropped, and the first-output timeout, failover, stall detection, delivery state and first-output guard MUST still see real output only. Paths that did not count the frames in 0.3.0 (non-streaming conversions, the chat fallbacks) MUST keep their first-token time.
+
+#### Scenario: Keep-alive frame before a slow first output
+- **WHEN** a relay sends such a frame 1 s into the attempt and the first real output at 30 s
+- **THEN** the request log records about 1 s in semantic mode and about 30 s in visible mode, the frame does not reach the client, and the first-output timer still waits for the output at 30 s.
+
 ### Requirement: Accurate stall detection
 
 Stream inactivity MUST be checked at a period of at most `min(threshold/4, 5 s)`, so detection happens no later than the threshold plus 5 s. After semantic output has started, a text stream with no upstream data for `stall.text_stall_seconds` (default 120 s) MUST be ended as `STALL`. Image streams MUST keep `image_stream_data_interval_timeout`.
@@ -109,7 +116,7 @@ Stream inactivity MUST be checked at a period of at most `min(threshold/4, 5 s)`
 
 When a request fails after the response headers were committed, the gateway MUST write exactly one protocol terminal frame, flush it and close the response immediately:
 
-- **Responses:** `response.failed` with `response.error.code` `rate_limit_exceeded` (rate limited or busy) or `server_error` (other), and a message containing `Please try again in Ns.` with N between 2 and 30 s.
+- **Responses:** `response.failed` with `response.error.code` `rate_limit_exceeded` (rate limited or busy) or `server_error` (other), and a message containing `Please try again in Ns.` with N between 2 and 30 s. When nothing but heartbeats reached the client, it MUST be preceded by `response.created` of the same response (`sequence_number` 0), because strict SDKs reject a stream that does not start with it.
 - **Chat Completions:** `data: {"error":{"type","code","message","status"}}` followed by `data: [DONE]`.
 - **Anthropic Messages:** `event: error` with `{"type":"error","error":{"type":"overloaded_error"|"api_error","message"}}`.
 
@@ -122,3 +129,7 @@ Error JSON MUST be on a single line and MUST include a stable `code` and the ori
 #### Scenario: Codex sees the failure promptly
 - **WHEN** an upstream emits `The service is busy` after output started
 - **THEN** the gateway writes `response.failed` with `rate_limit_exceeded` and closes the stream, and Codex retries after the indicated delay.
+
+#### Scenario: openai-python reads a failure after heartbeats
+- **WHEN** the 240 s budget ends a Responses stream that heartbeats committed
+- **THEN** the client receives `response.created` and then `response.failed` of the same response, and openai-python reports the gateway's error instead of a protocol error.

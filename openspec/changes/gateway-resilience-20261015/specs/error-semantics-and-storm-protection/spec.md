@@ -30,7 +30,7 @@ Only the response headers and body hints defined below are added. The single exc
 
 ### Requirement: Negative cache for no-account results
 
-The gateway MUST cache a "no available account" result per (group, model) — for OpenAI-compatible selection also per transport, endpoint capability and platform — for `errors.negative_cache_seconds` (default 2 s). During that time it MUST return the same response with the remaining `Retry-After`, without querying the database or the scheduler snapshot. Transient cooldowns that the resilience layer applies or lifts and balance state changes MUST invalidate the entries of the account's groups; other changes (429 cooldowns, error states, administrator edits, other instances) MAY take effect when the entry expires.
+The gateway MUST cache a "no available account" result per (group, model) — for OpenAI-compatible selection also per transport, endpoint capability and platform — for `errors.negative_cache_seconds` (default 2 s). During that time it MUST return the same response with the remaining `Retry-After`, without querying the database or the scheduler snapshot. Transient cooldowns that the resilience layer applies or lifts and balance pauses MUST invalidate the entries of the account's groups; other changes (429 cooldowns, error states, administrator edits, other instances) MAY take effect when the entry expires.
 
 Only a result that holds for every request of the group and model MAY be cached: no account of the group that supports the model on the request's platform is free of penalties. A route that forces a platform MUST be cached apart from the group's other routes.
 
@@ -93,7 +93,7 @@ A successful request of the conversation, or a gap longer than `errors.turn_cap.
 
 ### Requirement: Upstream balance problems are hidden from users
 
-Upstream `BALANCE` failures, including image-account 402 responses, MUST NOT be shown to end users. When they leave no available account, the user MUST receive the standard 503 `Service temporarily unavailable` with `Retry-After`. Administrators MUST see the original upstream message in operations views and alerts. An administrator's error passthrough rule that matches the upstream response MUST take precedence, on the gateway and OpenAI routes alike.
+Upstream `BALANCE` failures, including image-account 402 responses, MUST NOT be shown to end users. When they leave no available account, the user MUST receive the standard 503 `Service temporarily unavailable` with `Retry-After`. Administrators MUST see the original upstream message in the operations error details and in the account's pause reason. An administrator's error passthrough rule that matches the upstream response MUST take precedence, on the gateway and OpenAI routes alike.
 
 #### Scenario: Image account out of credit
 - **WHEN** the only image account returns 402 `Upstream image account has insufficient balance`
@@ -103,7 +103,7 @@ Upstream `BALANCE` failures, including image-account 402 responses, MUST NOT be 
 
 When the user's own balance is insufficient, both the API-key pre-check and the post-wait billing check MUST return:
 - status 403 with code `INSUFFICIENT_BALANCE`;
-- message `Insufficient balance on your xy2api account, please recharge`.
+- message `Insufficient account balance` (the 0.3.0 wording).
 
 OpenAI-compatible endpoints MUST nest this as `{"error":{"type":"insufficient_balance","code":"INSUFFICIENT_BALANCE","message":…}}`. When the balance is positive but already reserved by in-flight requests, the gateway MUST return:
 - status 429;

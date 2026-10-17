@@ -22,6 +22,6 @@
 - [x] 用户最后要求减少延期：7项服务监测主测试通过，最后空位立即执行、短暂争用内部等待、5秒冷却保持；相同回归输入BASELINE/MODIFIED/ROLLBACK实际exit1/0/1。
 - [x] 最终顺序门禁完成：前端构建、服务层综合静态检查exit0/0 issues、嵌入前端的服务编译通过；保留先前内存压力与中断的失败记录。
 
-固定交付角色：/xy/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh。保留最初 pre-IQ BASELINE.tar.gz；本轮 PR31 基线和源码补丁作为补充，不替代原四角色。每条测试命令、字面 stdout/stderr、退出码和哈希均记录在 VERIFICATION.txt。
+固定交付角色：<工作机 A>/artifacts/openai-iq-check/MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh。保留最初 pre-IQ BASELINE.tar.gz；本轮 PR31 基线和源码补丁作为补充，不替代原四角色。每条测试命令、字面 stdout/stderr、退出码和哈希均记录在 VERIFICATION.txt。
 
 最终源码事务通过同目录 site-review-transaction.mjs 执行，checkpoint.json 为机器可读状态。验收事件必须包含六个相同输入的 BASELINE/MODIFIED/ROLLBACK、恢复文件树哈希相等、再次应用补丁相等、累计补丁可重建归档及四角色重读。后端静态检查结果追加在同一验证记录；不能把源文件中的计划描述当作执行成功。

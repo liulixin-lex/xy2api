@@ -134,6 +134,24 @@ def heartbeats(result) -> list[float]:
     return [t for t, line in result["lines"] if line.startswith(":") or line == "event: ping"]
 
 
+def opened_then_failed(lines: list[str]) -> bool:
+    """A Responses stream the gateway ends itself opens with response.created
+    and fails the same response: strict SDKs (openai-python) reject a
+    response.failed that is not preceded by response.created."""
+    events = []
+    for line in lines:
+        if line.startswith("data:"):
+            try:
+                events.append(json.loads(line[5:]))
+            except ValueError:
+                continue
+    types = [e.get("type") for e in events]
+    if not types or types[0] != "response.created" or "response.failed" not in types:
+        return False
+    failed = events[types.index("response.failed")]
+    return events[0].get("response", {}).get("id") == failed.get("response", {}).get("id")
+
+
 def first_data(result) -> float | None:
     for t, line in result["lines"]:
         if line.startswith("data:") and "ping" not in line:
@@ -271,6 +289,7 @@ def ka8():
     check(r["status"] == 200, "status 200 (committed by heartbeats)", checks)
     check(bool(hb) and max(gaps) <= 20, "no silence longer than 20 s before the end", checks)
     check(any("response.failed" in l for l in lines), "ends with a retryable response.failed", checks)
+    check(opened_then_failed(lines), "response.created first, then response.failed of the same response", checks)
     check(r["elapsed"] < 260, "ended by the 240 s budget, before the 280 s upstream and the 300 s edge", checks)
     check(not r["cuts"], "the edge cut nothing", checks)
     return r, checks
@@ -299,6 +318,7 @@ def ka4():
     lines = [l for _, l in r["lines"]]
     check(r["status"] in (200, 502, 503), "answered", checks)
     check(r["status"] != 200 or any("response.failed" in l for l in lines), "committed stream ends with response.failed", checks)
+    check(r["status"] != 200 or opened_then_failed(lines), "a committed stream opens with response.created", checks)
     return r, checks
 
 
@@ -422,50 +442,64 @@ def rl1():
     return r, checks
 
 
-@scenario("BAL-1", "Upstream balance exhausted on a single-account group: user sees 503, admin sees EXHAUSTED, recovery after top-up")
+@scenario("BAL-1", "Upstream balance exhausted on a single-account group: the account pauses, users get 503 with Retry-After, real traffic serves again when the pause ends; a 402 pauses too")
 def bal1():
     checks = []
-    set_balance("single", 0)
-    first = stream_request(DIRECT, "/v1/responses", KEYS["G-single"], responses_body(stream=False))
-    state = psql("select coalesce(extra->'resilience_balance'->>'state','OK') from accounts where name='single-ok'")
-    check(first["status"] == 503, "user sees 503, not the upstream 429/402", checks)
-    check("insufficient account balance" not in json.dumps(first["lines"]).lower(), "upstream balance text hidden", checks)
-    check(state in ("EXHAUSTED", "SUSPECT"), f"account balance state {state}", checks)
-    set_balance("single", 100)
-    deadline = now() + 150
-    while now() < deadline:
-        state = psql("select coalesce(extra->'resilience_balance'->>'state','OK') from accounts where name='single-ok'")
-        if state in ("RECOVERING", "OK"):
-            break
-        time.sleep(5)
-    check(state in ("RECOVERING", "OK"), f"recovered after top-up ({state})", checks)
-    after = stream_request(DIRECT, "/v1/responses", KEYS["G-single"], responses_body(stream=False))
-    check(after["status"] == 200, "served again", checks)
-    return {"first": first, "after": after, "final_state": state}, checks
+    balance_pause_seconds(30)
+    try:
+        set_balance("single", 0)
+        first = stream_request(DIRECT, "/v1/responses", KEYS["G-single"], responses_body(stream=False))
+        reason, left, status = account_pause("single-ok")
+        check(first["status"] == 503, "user sees 503, not the upstream 429", checks)
+        check("insufficient account balance" not in json.dumps(first["lines"]).lower(), "upstream balance text hidden", checks)
+        check(reason.startswith("balance:"), f"paused with a balance reason ({reason[:40]})", checks)
+        check(left is not None and 20 <= left <= 30, f"paused for balance.pause_seconds ({left} s left)", checks)
+        check(status == "active", f"status stays active ({status})", checks)
+        set_balance("single", 100)
+        mark = fault_last_id()
+        during = stream_request(DIRECT, "/v1/responses", KEYS["G-single"], responses_body(stream=False))
+        retry_after = during["headers"].get("retry-after", "")
+        _, left_now, _ = account_pause("single-ok")
+        upstream = [x for x in fault_records_since(mark) if "key=single" in x.get("spec", "")]
+        check(during["status"] == 503, "still 503 during the pause although topped up: nothing probes", checks)
+        check(retry_after.isdigit() and left_now is not None and int(retry_after) <= max(left_now, 2) + 1,
+              f"Retry-After {retry_after} within the pause ({left_now} s left)", checks)
+        check(not upstream, f"no upstream request while paused ({len(upstream)})", checks)
+        time.sleep(max(left_now or 0, 0) + 2)
+        after = stream_request(DIRECT, "/v1/responses", KEYS["G-single"], responses_body(stream=False))
+        check(after["status"] == 200, "served again once the pause ended", checks)
+        # A 402 only pauses; it never sets the error state.
+        r402 = stream_request(DIRECT, "/v1/responses", KEYS["G-balance-402"], responses_body(stream=False))
+        reason402, _, status402 = account_pause("bal402")
+        check(reason402.startswith("balance:") and status402 == "active", f"402 pauses without the error state ({status402}, {reason402[:30]})", checks)
+        return {"first": first, "during": during, "after": after, "status_402": r402["status"]}, checks
+    finally:
+        set_balance("single", 100)
+        balance_pause_seconds(300)
+        restore_account("single-ok")
+        restore_account("bal402")
 
 
-@scenario("PE-1", "Grok relay 429 'insufficient balance' with an exhausted window: balance state, no 28-minute rate limit, recovery after top-up")
+@scenario("PE-1", "Grok relay 429 'insufficient balance' with an exhausted window: the account pauses instead of a 28-minute rate limit")
 def pe1():
     checks = []
-    set_balance("grok-bal", 0)
-    first = stream_request(DIRECT, "/v1/responses", KEYS["G-grok-balance"], responses_body(model="grok-4.6", stream=False))
-    row = psql("select coalesce(extra->'resilience_balance'->>'state','OK') || '|' || "
-               "coalesce(extract(epoch from rate_limit_reset_at - now())::int::text, '') from accounts where name='grok-bal'")
-    state, _, left = row.partition("|")
-    check(first["status"] >= 400, f"the request fails ({first['status']})", checks)
-    check(state in ("EXHAUSTED", "SUSPECT"), f"account balance state {state}", checks)
-    check(left == "" or int(left) < 300, f"no rate limit from the relay's 1700 s window (left {left or 'none'})", checks)
-    set_balance("grok-bal", 100)
-    deadline = now() + 150
-    while now() < deadline:
-        state = psql("select coalesce(extra->'resilience_balance'->>'state','OK') from accounts where name='grok-bal'")
-        if state in ("RECOVERING", "OK"):
-            break
-        time.sleep(5)
-    check(state in ("RECOVERING", "OK"), f"recovered after top-up ({state})", checks)
-    after = stream_request(DIRECT, "/v1/responses", KEYS["G-grok-balance"], responses_body(model="grok-4.6", stream=False))
-    check(after["status"] == 200, "served again", checks)
-    return {"first": first, "after": after, "final_state": state}, checks
+    try:
+        set_balance("grok-bal", 0)
+        first = stream_request(DIRECT, "/v1/responses", KEYS["G-grok-balance"], responses_body(model="grok-4.6", stream=False))
+        reason, left, _ = account_pause("grok-bal")
+        rate_left = psql("select coalesce(extract(epoch from rate_limit_reset_at - now())::int::text, '') from accounts where name='grok-bal'")
+        check(first["status"] >= 400, f"the request fails ({first['status']})", checks)
+        check(reason.startswith("balance:"), f"paused with a balance reason ({reason[:40]})", checks)
+        check(left is not None and 250 <= left <= 300, f"paused for the default 300 s ({left} s left)", checks)
+        check(rate_left == "" or int(rate_left) < 300, f"no rate limit from the relay's 1700 s window (left {rate_left or 'none'})", checks)
+        set_balance("grok-bal", 100)
+        restore_account("grok-bal")
+        after = stream_request(DIRECT, "/v1/responses", KEYS["G-grok-balance"], responses_body(model="grok-4.6", stream=False))
+        check(after["status"] == 200, "served again after restore status", checks)
+        return {"first": first, "after": after, "pause_left": left}, checks
+    finally:
+        set_balance("grok-bal", 100)
+        restore_account("grok-bal")
 
 
 @scenario("PE-4", "Upstream content-safety 403: client gets 400 with the upstream text, one attempt, the account keeps serving")
@@ -753,6 +787,41 @@ def admin_token() -> str:
         return json.loads(resp.read())["data"]["access_token"]
 
 
+def admin_call(method: str, path: str, body=None) -> dict:
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(f"http://127.0.0.1:{APP}/api/v1/admin{path}", method=method, data=data)
+    req.add_header("Authorization", "Bearer " + admin_token())
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return json.loads(resp.read() or b"{}")
+
+
+def balance_pause_seconds(seconds: int):
+    admin_call("PUT", "/settings/gateway-resilience", {"balance": {"pause_seconds": seconds}})
+
+
+def account_pause(name: str) -> tuple[str, int | None, str]:
+    """The temp_unschedulable reason, seconds left (None when not paused) and
+    status of an account."""
+    row = psql("select coalesce(temp_unschedulable_reason, '') || '|' || "
+               "coalesce(extract(epoch from temp_unschedulable_until - now())::int::text, '') || '|' || status "
+               f"from accounts where name='{name}'")
+    reason, left, status = (row.split("|") + ["", "", ""])[:3]
+    seconds = int(left) if left.lstrip("-").isdigit() else None
+    return reason, (seconds if seconds is not None and seconds > 0 else None), status
+
+
+def restore_account(name: str) -> bool:
+    """The account list's "restore status" (clears a temp_unschedulable)."""
+    acct = psql(f"select id from accounts where name='{name}'")
+    try:
+        admin_call("DELETE", f"/accounts/{acct}/temp-unschedulable")
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 @scenario("CF-5", "A client-supplied X-XY-Edge is removed by the proxy: no early heartbeat")
 def cf5():
     checks = []
@@ -768,6 +837,11 @@ def dc2():
     checks = []
     key = KEYS["G-abuse"]
     key_id = psql("select id from api_keys where name='key-G-abuse' and deleted_at is null")
+    # The counter is per hour: 31 requests that straddle the hour reach the
+    # threshold in neither (candidate fb0c2267c, 05:59:48-06:00:18Z).
+    to_hour = 3600 - int(time.time()) % 3600
+    if to_hour < 90:
+        time.sleep(to_hour + 2)
     # The hourly counter is shared with earlier runs in the same hour.
     redis_cli("EVAL", "for _, k in ipairs(redis.call('KEYS', ARGV[1])) do redis.call('DEL', k) end return 0", "0",
               f"xy:resil:undelivered:{key_id}:*")
@@ -906,24 +980,24 @@ def img1():
     return r, checks
 
 
-@scenario("BAL-2", "Administrator confirms a top-up: recheck recovers the account at once")
+@scenario("BAL-2", "Administrator restores an account paused for its balance: served again at once")
 def bal2():
     checks = []
-    set_balance("single", 0)
-    stream_request(DIRECT, "/v1/responses", KEYS["G-single"], responses_body(stream=False))
-    before = psql("select coalesce(extra->'resilience_balance'->>'state','OK') from accounts where name='single-ok'")
-    set_balance("single", 100)
-    acct = psql("select id from accounts where name='single-ok'")
-    req = urllib.request.Request(f"http://127.0.0.1:{APP}/api/v1/admin/accounts/{acct}/balance/recheck", method="POST", data=b"{}")
-    req.add_header("Authorization", "Bearer " + admin_token())
-    req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        body = json.loads(resp.read())
-    after = psql("select coalesce(extra->'resilience_balance'->>'state','OK') from accounts where name='single-ok'")
-    r = {"before": before, "recheck": body.get("data"), "after": after}
-    check(before in ("EXHAUSTED", "SUSPECT"), f"exhausted first ({before})", checks)
-    check(after in ("RECOVERING", "OK"), f"recovered at once ({after})", checks)
-    return r, checks
+    try:
+        set_balance("single", 0)
+        stream_request(DIRECT, "/v1/responses", KEYS["G-single"], responses_body(stream=False))
+        before, left, _ = account_pause("single-ok")
+        set_balance("single", 100)
+        restored = restore_account("single-ok")
+        after, after_left, _ = account_pause("single-ok")
+        served = stream_request(DIRECT, "/v1/responses", KEYS["G-single"], responses_body(stream=False))
+        check(before.startswith("balance:") and left is not None and left > 250, f"paused for the default 300 s ({left} s left)", checks)
+        check(not after.startswith("balance:") and after_left is None, "restore status ended the pause", checks)
+        check(served["status"] == 200, "served at once", checks)
+        return {"before": before, "left": left, "restored": restored, "served": served["status"]}, checks
+    finally:
+        set_balance("single", 100)
+        restore_account("single-ok")
 
 
 def run(sid: str, outdir: str):

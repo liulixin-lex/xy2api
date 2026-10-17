@@ -151,11 +151,12 @@ chore: prepare xy2api 0.0.2-rc.1
 python -m unittest discover -s tools/tests -p 'test_*.py' -v
 python tools/upstream-sync/sync.py audit
 python tools/upstream-sync/sync.py scheduler-diff
+python tools/check_docs_consistency.py
 git diff --check
 docker compose --env-file deploy/.env.example -f deploy/docker-compose.yml config --quiet
 ```
 
-后端使用仓库固定的 Go 1.27 工具链执行 `make generate`、生成后零差异检查、unit、integration、race-sensitive 测试、`go build ./cmd/server` 和 golangci-lint。前端执行 frozen install、lint、typecheck、完整 Vitest 和生产构建。
+后端使用仓库固定的 Go 工具链（版本以 `backend/go.mod` 为准）执行 `make generate`、生成后零差异检查、unit、integration、race-sensitive 测试（含 `tools/gateway-resilience/ci_gate.py` 网关韧性门禁）、`go build ./cmd/server` 和 golangci-lint。上游改动 Go 版本、日志事件、设置或文档时，`check_docs_consistency.py` 会指出需要同步的位置。前端执行 frozen install、lint、typecheck、完整 Vitest 和生产构建。
 
 还必须完成定价、Codex、WebSocket、数据库重试、全新数据库、Sub2API 0.1.184 数据库副本、插件协议、旧部署升级和镜像回滚专项测试。
 

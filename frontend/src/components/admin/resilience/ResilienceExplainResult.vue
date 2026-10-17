@@ -20,7 +20,6 @@
             <th class="p-2">{{ t('admin.resilience.explain.columns.tier') }}</th>
             <th class="p-2">{{ t('admin.resilience.explain.columns.reason') }}</th>
             <th class="p-2">{{ t('admin.resilience.explain.columns.recoverAt') }}</th>
-            <th class="p-2">{{ t('admin.resilience.explain.columns.balance') }}</th>
             <th class="p-2 text-right">{{ t('admin.resilience.explain.columns.sessionFailures') }}</th>
             <th class="p-2">{{ t('admin.resilience.explain.columns.avoided') }}</th>
           </tr>
@@ -32,7 +31,6 @@
             <td class="p-2"><span :class="['rounded-full px-2 py-0.5 font-medium', tierClass(acc.tier)]">{{ t('admin.resilience.explain.tiers.' + acc.tier) }}</span></td>
             <td class="p-2">{{ acc.reason ? reasonLabel(acc.reason) : '-' }}</td>
             <td class="p-2">{{ acc.recover_at ? formatDateTime(acc.recover_at) : '-' }}</td>
-            <td class="p-2">{{ acc.balance_state ? balanceLabel(acc.balance_state) : '-' }}</td>
             <td class="p-2 text-right tabular-nums">{{ acc.session_failures || '-' }}</td>
             <td class="p-2">{{ acc.avoided ? t('admin.resilience.explain.yes') : '-' }}</td>
           </tr>
@@ -60,11 +58,6 @@ const accountLabel = (acc: ResilienceAccountExplanation) => `${acc.name} #${acc.
 function reasonLabel(reason: string): string {
   const key = `admin.resilience.explain.reasons.${reason}`
   return te(key) ? t(key) : reason
-}
-
-function balanceLabel(state: string): string {
-  const key = `admin.resilience.panel.states.${state}`
-  return te(key) ? t(key) : state
 }
 
 function tierClass(tier: string): string {

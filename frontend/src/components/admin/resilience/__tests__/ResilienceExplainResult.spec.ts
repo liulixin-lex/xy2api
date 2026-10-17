@@ -16,7 +16,7 @@ const base: ResilienceExplanation = {
   enabled: true,
   healthy_count: 0,
   accounts: [
-    { account_id: 4, name: 'dry', platform: 'openai', priority: 1, tier: 'hard', reason: 'balance_exhausted', balance_state: 'EXHAUSTED' },
+    { account_id: 4, name: 'dry', platform: 'openai', priority: 1, tier: 'hard', reason: 'balance_exhausted' },
     { account_id: 1, name: 'busy', platform: 'openai', priority: 2, tier: 'soft', reason: 'mystery', recover_at: '2026-10-15T08:00:00Z', session_failures: 2, avoided: true }
   ],
   last_resort: { account_id: 1, recover_at: '2026-10-15T08:00:00Z' },
@@ -33,7 +33,7 @@ describe('resilience explain result', () => {
     expect(rows[0].text()).toContain('dry #4')
     expect(rows[0].text()).toContain('admin.resilience.explain.tiers.hard')
     expect(rows[0].text()).toContain('admin.resilience.explain.reasons.balance_exhausted')
-    expect(rows[0].text()).toContain('admin.resilience.panel.states.EXHAUSTED')
+    expect(w.get('[data-testid="resilience-explain-accounts"]').text()).not.toContain('admin.resilience.explain.columns.balance')
     expect(rows[1].text()).toContain('mystery')
     expect(rows[1].text()).toContain('at 2026-10-15T08:00:00Z')
     expect(rows[1].text()).toContain('admin.resilience.explain.yes')

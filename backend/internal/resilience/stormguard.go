@@ -353,6 +353,6 @@ type ErrorResponse struct {
 }
 
 // UserInsufficientBalanceMessage is the client message for the user's own
-// empty balance (design §9.5). It keeps "insufficient balance" so that
-// downstream sub2api-style sites still recognise it.
-const UserInsufficientBalanceMessage = "Insufficient balance on your xy2api account, please recharge"
+// empty balance (design §9.5): the 0.3.0 wording, which downstream
+// sub2api-style sites recognise as a balance failure.
+const UserInsufficientBalanceMessage = "Insufficient account balance"

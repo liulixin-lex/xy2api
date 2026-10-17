@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
@@ -69,21 +68,4 @@ func TestResilienceSettingsLifecycle(t *testing.T) {
 	repo.data[resilience.SettingKey] = `{"budget":{"max_attempts":99}}`
 	require.Error(t, svc.reloadSettings(context.Background()))
 	require.Equal(t, 3, resilience.Current().Budget.MaxAttempts)
-}
-
-func TestResilienceRecoveringCap(t *testing.T) {
-	withResilienceSettings(t, nil)
-	svc := NewResilienceService(nil, nil)
-	now := time.Now()
-	require.Equal(t, 0, svc.RecoveringCap(7, now))
-	svc.markRecoveringLocal(7, now.Add(time.Minute))
-	require.Equal(t, 1, svc.RecoveringCap(7, now))
-	require.Equal(t, 0, svc.RecoveringCap(7, now.Add(2*time.Minute)))
-	svc.markRecoveringLocal(7, time.Time{})
-	require.Equal(t, 0, svc.RecoveringCap(7, now))
-
-	// Balance switch off: no cap.
-	svc.markRecoveringLocal(8, now.Add(time.Minute))
-	withResilienceSettings(t, func(s *resilience.Settings) { s.Balance.Enabled = false })
-	require.Equal(t, 0, svc.RecoveringCap(8, now))
 }

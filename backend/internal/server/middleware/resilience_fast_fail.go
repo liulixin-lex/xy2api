@@ -167,15 +167,6 @@ func resilienceTurnCapObserve(c *gin.Context) {
 	resilience.ProcessTurnCap().Reset(st.TurnKey())
 }
 
-// resilienceUserBalanceMessage is the middleware message for an empty user
-// balance.
-func resilienceUserBalanceMessage() string {
-	if resilience.Current().ErrorsOn() {
-		return resilience.UserInsufficientBalanceMessage
-	}
-	return "Insufficient account balance"
-}
-
 // resilienceNoteGroup records the API key's group on the request state so
 // failover can find accounts sharing a relay host (design §6.3).
 func resilienceNoteGroup(c *gin.Context, apiKey *service.APIKey) {

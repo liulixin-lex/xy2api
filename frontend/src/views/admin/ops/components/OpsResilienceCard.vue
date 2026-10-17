@@ -17,15 +17,6 @@
       {{ statsError }}
     </div>
 
-    <div class="mb-4">
-      <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">{{ t('admin.resilience.panel.balanceStates') }}</p>
-      <div class="flex flex-wrap gap-2" data-testid="resilience-balance-states">
-        <span v-for="state in balanceStates" :key="state" :class="['rounded-full px-2.5 py-1 text-xs font-medium', balanceStateClass(state)]">
-          {{ t(`admin.resilience.panel.states.${state}`) }} · {{ formatNumber(stats?.balance_states?.[state] ?? 0) }}
-        </span>
-      </div>
-    </div>
-
     <div v-if="totals.length === 0 && !loading" class="py-4 text-center text-xs text-gray-500 dark:text-gray-400" data-testid="resilience-empty">
       {{ t('admin.resilience.panel.empty') }}
     </div>
@@ -132,7 +123,6 @@ const props = defineProps<{ refreshToken: number }>()
 
 const { t, te } = useI18n()
 
-const balanceStates = ['OK', 'SUSPECT', 'EXHAUSTED', 'RECOVERING'] as const
 const pageSize = 20
 // The counters cover at most the last hour (in-process buckets).
 const windowValue = ref('1h')
@@ -192,15 +182,6 @@ function metricLabel(name: string): string {
 function stageLabel(stage: string): string {
   const key = `admin.resilience.undelivered.stages.${stage}`
   return stage && te(key) ? t(key) : stage || '-'
-}
-
-function balanceStateClass(state: string): string {
-  switch (state) {
-    case 'EXHAUSTED': return 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'
-    case 'SUSPECT': return 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'
-    case 'RECOVERING': return 'bg-sky-50 text-sky-700 dark:bg-sky-900/20 dark:text-sky-300'
-    default: return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'
-  }
 }
 
 function formatSeconds(ms: number): string {

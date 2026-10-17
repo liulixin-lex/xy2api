@@ -14,11 +14,7 @@ function settings(): Settings {
     failure: { transient_cooldown_seconds: 30, retry_after_cap_seconds: 30, balance_keywords_extra: [] },
     session: { enabled: true, streak_threshold: 2, streak_window_seconds: 300, avoid_seconds: 600 },
     last_resort: { enabled: true },
-    balance: {
-      enabled: true, recheck_schedule_seconds: [60, 120, 300, 600, 900], jitter_ratio: 0.2, suspect_ttl_seconds: 300,
-      recovering_concurrency: 1, recovering_window_seconds: 300, recovering_success_target: 3,
-      generation_probe_daily_budget: 24, notify_after_hours: 2
-    },
+    balance: { enabled: true, pause_seconds: 300 },
     budget: {
       enabled: true, max_attempts: 4, pre_output_budget_seconds: 240,
       first_output_timeout_seconds: { default: 180, high: 180, xhigh: 200, max: 220 },
@@ -69,6 +65,22 @@ describe('gateway resilience settings', () => {
     expected.budget.max_attempts = 3
     expect(mocks.save).toHaveBeenCalledWith(expected)
     expect(w.text()).toContain('admin.resilience.settings.saved')
+  })
+
+  it('edits the balance pause in the balance card', async () => {
+    const w = mountSettings(); await flushPromises()
+    const card = w.get('[data-testid="resilience-card-balance"]')
+    expect(card.find('[data-testid="resilience-field-balancePause"]').exists()).toBe(true)
+    await w.get('[data-testid="resilience-field-balancePause"]').setValue('600')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    const expected = settings()
+    expected.balance.pause_seconds = 600
+    expect(mocks.save).toHaveBeenCalledWith(expected)
+
+    await w.get('[data-testid="resilience-field-balancePause"]').setValue('20')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save).toHaveBeenCalledTimes(1)
+    expect(w.text()).toContain('admin.resilience.settings.invalidNumber')
   })
 
   it('disables the sections while the master switch is off', async () => {

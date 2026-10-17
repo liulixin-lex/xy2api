@@ -741,7 +741,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
 			Stream:                        true,
 			Duration:                      time.Since(startTime),
-			FirstTokenMs:                  firstTokenMs,
+			FirstTokenMs:                  relayLive.firstTokenMs(firstTokenMs, startTime, s.openAITTFTMode(c.Request.Context())),
 		}
 		if searchCount > 0 {
 			out.SearchCount = searchCount

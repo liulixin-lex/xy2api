@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"maps"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -227,9 +226,9 @@ func shareAccountStateReason(a *Account, now time.Time) (sharesched.Reason, time
 	case a.RateLimitResetAt != nil && now.Before(*a.RateLimitResetAt):
 		return sharesched.ReasonRateLimited, *a.RateLimitResetAt
 	case a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil):
-		if resilience.Current().FailureOn() && strings.HasPrefix(a.TempUnschedulableReason, resilience.ReasonPrefixBalanceExhausted) {
+		if resilience.Current().FailureOn() && resilience.IsBalancePause(a.TempUnschedulableReason) {
 			// Out of balance at the relay is a hard state: the session moves
-			// at once instead of waiting for the next recheck (design §4.2).
+			// at once instead of waiting out the pause (design §4.2).
 			return sharesched.ReasonBalanceExhausted, time.Time{}
 		}
 		return sharesched.ReasonTempUnschedulable, *a.TempUnschedulableUntil

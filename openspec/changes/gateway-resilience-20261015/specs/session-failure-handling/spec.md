@@ -40,7 +40,7 @@ For a request with a session identifier whose bound account fails:
 - **AND** a third such failure of account A within 60 s soft-penalises it for `failure.transient_cooldown_seconds`, while a single-account group can still use it as a last resort.
 
 #### Scenario: Balance exhaustion moves the session at once
-- **WHEN** the bound account enters balance `EXHAUSTED`
+- **WHEN** the bound account is paused for its balance
 - **THEN** the session is rebound on its next request.
 
 #### Scenario: Saturation does not rebind
@@ -89,7 +89,7 @@ In groups using share scheduling, the last resort MUST be a relaxed round of the
 - **THEN** requests during the block are still sent to that account as a last resort instead of failing with "no available accounts".
 
 #### Scenario: Hard state with no alternative
-- **WHEN** the only account is balance `EXHAUSTED` and no fallback group is configured
+- **WHEN** the only account is in a balance pause and no fallback group is configured
 - **THEN** the request fails with 503 and a `Retry-After` header.
 
 #### Scenario: Last resort respects hard limits

@@ -192,6 +192,38 @@ origin access is blocked and Caddy trusts only those TCP peers. Configure
 XY2API `server.trusted_proxies` with the Caddy address/private subnet so the
 application accepts only Caddy's rewritten headers.
 
+### Edge marker for streams behind a CDN (0.4.0)
+
+XY2API sends early heartbeats on a slow streaming request only when the
+reverse proxy marks it as coming through a CDN with `X-XY-Edge`. Without the
+marker, a stream whose first token takes longer than the CDN's idle timeout
+(about 100–125 seconds on Cloudflare) is cut before the client receives a
+byte. Set the marker from the TCP peer address only, and drop any
+client-supplied value first:
+
+```caddyfile
+(xy_edge_marker) {
+	request_header -X-XY-Edge
+	@xy_edge_cf remote_ip <Cloudflare egress ranges>
+	request_header @xy_edge_cf X-XY-Edge cf
+	@xy_edge_esa remote_ip <ESA egress ranges>
+	request_header @xy_edge_esa X-XY-Edge esa
+}
+```
+
+XY2API reads the marker only when the TCP peer is in an explicitly configured
+`server.trusted_proxies` list (`SERVER_TRUSTED_PROXIES`) and the value is
+listed in the gateway resilience setting `keepalive.edges` (default `cf` and
+`esa`).
+
+Cloudflare also replaces an origin 502 or 504 with its own plain-text page,
+dropping the JSON error, `Retry-After` and the request ID. XY2API answers
+marked requests with 503 instead and keeps the original status in
+`X-XY-Upstream-Status`; let the proxy's own error pages for API paths return a
+JSON 503 with `Retry-After` too. The complete configuration is in
+[`docs/GATEWAY_RESILIENCE.md`](../docs/GATEWAY_RESILIENCE.md) §2 and the
+[0.4.0 runbook](../openspec/changes/gateway-resilience-20261015/runbook.md) §3.
+
 Caddy core does not provide a general request-rate limiter; use a trusted
 CDN/WAF, a supported rate-limit module, or host firewall controls.
 

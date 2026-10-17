@@ -25,9 +25,8 @@ const (
 	// requests; it is written as rate_limit_error.
 	errTypeBalanceReserved = "concurrent_balance_reserved"
 
-	// userInsufficientBalanceMessage keeps the "insufficient balance" words so
-	// downstream sub2api-style sites still recognise it, while naming this
-	// platform so users know whose balance ran out.
+	// userInsufficientBalanceMessage is the 0.3.0 wording, which downstream
+	// sub2api-style sites recognise as a balance failure.
 	userInsufficientBalanceMessage = resilience.UserInsufficientBalanceMessage
 
 	// ginKeyResilienceRetryAfter carries the Retry-After seconds chosen for a
@@ -137,6 +136,19 @@ func resilienceResponsesCode(errType, code string) string {
 		return "server_error"
 	}
 	return ""
+}
+
+// resilienceResponsesOpening returns the response.created event that must
+// precede a Responses terminal event when nothing but heartbeats reached
+// the client (pre-output keepalive, queue pings), and the sequence number
+// of the terminal event. openai-python raised "Expected to have received
+// response.created before response.failed" instead of showing the error
+// (RC client C-openai-py-slow-first-cdn). Otherwise it returns "" and 0.
+func resilienceResponsesOpening(c *gin.Context, id, model string, createdAt int64) (string, int) {
+	if !service.ResponsesStreamUnopened(c) {
+		return "", 0
+	}
+	return string(service.ResponsesCreatedFrame(id, model, createdAt)), 1
 }
 
 // noAccountRetryAdvisor is implemented by the gateway services.

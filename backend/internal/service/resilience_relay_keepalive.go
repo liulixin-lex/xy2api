@@ -43,9 +43,11 @@ func newOpenAIRelayKeepaliveFilter(src io.Reader, live *relayLiveness) io.Reader
 // detectors take the later of it and their last read, so a relay that keeps
 // a quiet stream open only with these frames is not cut as stalled, as in
 // 0.3.0 where the frames passed through; the frames are still no output.
-// Each dropped frame is counted per account.
+// Each dropped frame is counted per account. The first one is kept for the
+// first-token time of the request log (firstTokenMs).
 type relayLiveness struct {
 	at        atomic.Int64
+	firstDrop atomic.Int64
 	groupID   int64
 	accountID int64
 	platform  string
@@ -73,8 +75,30 @@ func (l *relayLiveness) frameDropped() {
 	if l == nil {
 		return
 	}
-	l.at.Store(time.Now().UnixNano())
+	now := time.Now().UnixNano()
+	l.at.Store(now)
+	l.firstDrop.CompareAndSwap(0, now)
 	resilience.Count(resilience.MetricRelayKeepalive, l.groupID, l.accountID, l.platform)
+}
+
+// firstTokenMs is the first-token latency the request log records. In
+// semantic mode the first dropped frame counts, from the start of the
+// attempt, as 0.3.0 counted the frame it passed through; recorded is the
+// first real event. Visible mode, and every timing decision of the stream,
+// see real events only.
+func (l *relayLiveness) firstTokenMs(recorded *int, start time.Time, mode string) *int {
+	if l == nil || mode != OpenAITTFTModeSemantic {
+		return recorded
+	}
+	at := l.firstDrop.Load()
+	if at == 0 {
+		return recorded
+	}
+	ms := max(int(time.Unix(0, at).Sub(start).Milliseconds()), 0)
+	if recorded != nil && *recorded <= ms {
+		return recorded
+	}
+	return &ms
 }
 
 // lastActivity is the later of lastRead and the last dropped frame.

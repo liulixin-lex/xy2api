@@ -270,7 +270,7 @@ func TestChainedGatewayErrorShapes(t *testing.T) {
 		want   Category
 	}{
 		{429, `{"error":{"type":"rate_limit_error","code":"concurrent_balance_reserved","message":"Available balance is reserved by in-flight requests (available $0.0400, reserved $0.0800); please retry shortly"}}`, CategoryRateLimit},
-		{403, `{"error":{"type":"insufficient_balance","code":"INSUFFICIENT_BALANCE","message":"Insufficient balance on your xy2api account, please recharge"}}`, CategoryBalance},
+		{403, `{"error":{"type":"insufficient_balance","code":"INSUFFICIENT_BALANCE","message":"Insufficient account balance"}}`, CategoryBalance},
 		{503, `{"error":{"type":"api_error","code":"server_is_overloaded","message":"Upstream service temporarily unavailable"}}`, CategoryCapacityShed},
 		{503, `{"error":{"type":"api_error","code":"proxy_upstream_unavailable","message":"Service temporarily unavailable, please retry"}}`, CategoryTransient},
 	} {
@@ -284,7 +284,7 @@ func TestChainedGatewayErrorShapes(t *testing.T) {
 func TestClassifyRelayWordings(t *testing.T) {
 	// tasks 1.5: wordings seen from production relays and the common
 	// new-api / one-api answers (scrubbed). Quota used up at a relay is a
-	// recoverable balance state, never an auth failure.
+	// balance failure (the account is paused), never an auth failure.
 	for _, tc := range []struct {
 		status int
 		msg    string

@@ -270,6 +270,7 @@ type ccStreamScanState struct {
 func (s *OpenAIGatewayService) scanCCStream(
 	c *gin.Context,
 	resp *http.Response,
+	account *Account,
 	logPrefix string,
 	requestID string,
 	startTime time.Time,
@@ -277,7 +278,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 ) ccStreamScanState {
 	var st ccStreamScanState
 
-	scanner := s.newUpstreamSSEScanner(resp.Body, nil)
+	scanner := s.newUpstreamSSEScanner(resp.Body, relayLivenessFor(c, account))
 	for scanner.Scan() {
 		line := scanner.Text()
 		payload, ok := extractOpenAISSEDataLine(line)

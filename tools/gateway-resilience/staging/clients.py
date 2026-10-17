@@ -107,6 +107,13 @@ try:
         for e in s:
             if e.type == "response.output_text.delta":
                 text += e.delta
+            elif e.type == "response.failed":
+                err = e.response.error
+                print("FAILED:", err.code if err else "", (err.message if err else "")[:300])
+                sys.exit(1)
+            elif e.type == "error":
+                print("FAILED:", e.code, e.message[:300])
+                sys.exit(1)
     print("OUTPUT:", text.strip())
 except Exception as e:
     print("ERROR:", type(e).__name__, getattr(e, "status_code", ""), str(e)[:300])
@@ -196,6 +203,7 @@ CASES = {
     "C-openai-py-fail-first": ("openai-py", "R-fail-first", DIRECT, "success", 1),
     "C-openai-py-slow-first-cdn": ("openai-py", "R-slow-first", CDN125, "success", 1),
     "C-openai-py-all-fail": ("openai-py", "R-all-fail", DIRECT, "failure", 3),
+    "C-openai-py-budget-cdn": ("openai-py", "G-slow-280", CDN125, "stream_failed", 1),
     "C-openai-chat-py-cdn90": ("openai-chat-py", "R-ok", CDN90, "success", 1),
     "C-anthropic-py-ok": ("anthropic-py", "R-claude", DIRECT, "success", 1),
     "C-anthropic-py-committed-error": ("anthropic-py", "G-anthropic-late-529", CDN125, "api_error", 1),
@@ -235,6 +243,11 @@ def run_case(cid: str, outdir: str) -> dict:
         # 200) must surface as the SDK's API error, not a parse failure.
         checks.append({"check": "stream committed (status 200)", "ok": bool(model_reqs) and all(r["status"] == 200 for r in model_reqs)})
         checks.append({"check": "SDK raised its API error", "ok": code != 0 and "APIStatusError" in text})
+    elif expect == "stream_failed":
+        # The gateway ends a heartbeat-committed stream itself (240 s budget):
+        # the SDK must read its response.failed, not a protocol error.
+        checks.append({"check": "stream committed (status 200)", "ok": bool(model_reqs) and all(r["status"] == 200 for r in model_reqs)})
+        checks.append({"check": "SDK read the gateway's response.failed", "ok": code != 0 and "FAILED:" in text and "RuntimeError" not in text})
     else:
         checks.append({"check": "client failed cleanly", "ok": code != 0 or "error" in text.lower()})
     checks.append({"check": f"client requests <= {max_requests}", "ok": len(model_reqs) <= max_requests})

@@ -2015,8 +2015,8 @@ func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Contex
 	if isGrokContentPolicyRejection(statusCode, responseBody) {
 		return
 	}
-	// xy2api resilience: balance wording on an API-key account goes to the
-	// recoverable balance state instead of a quota-window rate limit.
+	// xy2api resilience: balance wording on an API-key account pauses the
+	// account instead of installing a quota-window rate limit.
 	if s.rateLimitService.resilienceHandleGrokUpstreamError(ctx, account, statusCode, headers, responseBody) {
 		return
 	}

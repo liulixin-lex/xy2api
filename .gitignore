@@ -145,7 +145,6 @@ deploy/docker-compose.override.yml
 vite.config.js
 docs/*
 !docs/CODEX_STATE_RELIABILITY.md
-!docs/ANTIGRAVITY_ATTRIBUTION_429.md
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
@@ -205,3 +204,20 @@ issues/
 !docs/USAGE_METRICS.md
 !docs/BACKUP_RELIABILITY.md
 !docs/UPSTREAM_SYNC_V0215.md
+
+# XY2API 文档白名单：docs/ 下新增文件要在这里登记，并加入 docs/README.md 目录
+# （tools/check_docs_consistency.py 检查已跟踪的 docs 文件都在白名单内、都已登记）。
+!docs/README.md
+!docs/PROJECT_MEMORY_ARCHIVE.md
+!docs/AUDIT_v0.0.10.md
+!docs/CLAUDE_CACHE_FALLBACK.md
+!docs/CODEX_STATE.md
+!docs/GROUP_SYSTEM_PROMPTS.md
+!docs/OPENAI_QUALITY_ROUTING.md
+!docs/STRIPE_HOSTED.md
+!docs/UPSTREAM_SYNC_V0214.md
+!docs/USAGE_EXPORTS.md
+!docs/seedance-api.md
+!docs/third-party/
+!docs/third-party/**
+!docs/screenshots/reasoning-effort-pricing.png

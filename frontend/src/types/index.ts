@@ -1258,8 +1258,6 @@ export interface Account {
     upstream_billing_probe_enabled?: boolean
     upstream_billing_rate_sync_enabled?: boolean
     upstream_billing_probe?: UpstreamBillingProbeSnapshot
-    // Upstream balance state of gateway resilience (design §4).
-    resilience_balance?: { state: string; since?: string; next_check_at?: string; last_evidence?: string }
     codex_reset_credit_snapshot?: {
       available_count?: number
       credits?: { expires_at?: string }[]

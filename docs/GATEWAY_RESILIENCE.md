@@ -13,11 +13,11 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 失败分类与冷却 | `failure` | 上游瞬时失败（502/503/超时等）进入短冷却（缺省 30 秒），不再与账号级失败混用；上游 `Retry-After` 封顶。已输出后的上游失败在同一账号 60 秒内达 3 次时，该账号进入同样的短冷却（池模式账号除外） |
 | 会话失败改绑 | `session` | 同一会话在同一账号上 10 分钟内连续失败 2 次后改绑，并在 10 分钟内避开该账号；已输出后的上游失败（流内失败事件、断流）也计入，客户端错误、内容安全拒绝与客户端断开不计 |
 | 末位兜底 | `last_resort` | 分组内没有无罚账号时，先转投兜底分组；否则软罚账号按优先级、再按罚期结束时间排序，取第一个有空闲并发的账号继续服务，全部占满时排队等待排在第一的账号，避免单号分组整组不可用。门禁与正常选号相同（只放宽软罚），超过窗口费用或 RPM 硬上限的账号不会被选中；份额分组按份额策略的层级、排空与权重选择，绑定账号只是软罚时不改绑 |
-| 余额可恢复 | `balance` | 上游余额不足的账号进入 `EXHAUSTED`，按 1/2/5/10/15 分钟复检（带抖动），充值后经 `RECOVERING` 小流量验证恢复为 `OK`。普通用户只看到 503，余额细节只对管理员可见。Gemini 的 `RESOURCE_EXHAUSTED` 分钟级限额按限流处理，不进入余额状态；Grok API Key 账号的余额字样 429 同样进入余额状态，不再按中转给出的重置时间限流 |
+| 余额不足暂停 | `balance` | 上游余额不足的账号暂停调度 `pause_seconds`（缺省 300 秒），期间按硬罚处理、不作末位兜底；到期后由真实请求重试，仍不足就再暂停同样时长；账号列表的“恢复状态”立即放回。不监控、不探测、不告警。普通用户只看到 503，余额细节只对管理员可见。Gemini 的 `RESOURCE_EXHAUSTED` 分钟级限额按限流处理，不触发暂停；Grok API Key 账号的余额字样 429 同样暂停，不再按中转给出的重置时间限流 |
 | 请求预算 | `budget` | 文本请求最多尝试 4 次、首输出前总时长 240 秒（等待并发槽位也计入）；图片与视频不设首输出截止；WebSocket 不挂连接级预算。同号重试每号至多一次，账号级失败不重试；容量降载只切换一次且只切到其他上游主机 |
 | 首包前保活 | `keepalive` | 仅对经 CDN（`X-XY-Edge` 标记）的流式请求：请求开始 15 秒后仍无输出时提交 SSE 头并每 10 秒发心跳，避免 CDN 空闲超时；官方 OAuth / setup-token 账号不启用 |
 | 停滞检测 | `stall` | 已输出后长时间无数据（缺省 120 秒）判定断流并结束请求；图片生成豁免 |
-| 断开计费 | `disconnect` | 客户端在任何语义输出前断开：立即取消上游、不写用量、不计费，记入未送达表（排队等待槽位或用户消息队列时发出的 ping 不算输出）；部分输出后断开：最多再读 180 秒并按已得用量计费 |
+| 断开计费 | `disconnect` | 客户端在任何语义输出前断开：立即取消上游、不写用量、不计费，记入未送达表（首包前心跳、排队等待槽位或用户消息队列时发出的 ping 不算输出）；部分输出后断开：最多再读 180 秒并按已得用量计费。0.4.0 中“首个语义输出”的口径只在 OpenAI `/v1/responses` 流式路径完整成立；其他流式路径在真实内容前写出的开场事件与流内心跳算已输出；非流式与图片 JSON 以响应体是否写出为准，见 §4.4 |
 | 错误语义与防风暴 | `errors` | 无号 503 带 `Retry-After`（2–30 秒）；配置错误 503 带 `Retry-After: 60` 与 `x-should-retry: false`；2 秒负缓存与同一 Key、同一模型的重复 503 快速返回，都只针对对整个分组成立的结论（组内没有平台匹配、支持该模型且无罚的账号，或配置错误），只对某个会话成立的“无号”不缓存、不计数；同一会话连续失败的回合封顶 |
 | 无号兜底分组 | `fallback_group` | 分组无可用账号时由其配置的兜底分组承接（按兜底组倍率计费），主分组稳定 120 秒后切回 |
 | 在途预留 | `reservation` | 余额预留按会话缓存读比例估算输入费用；输出 Token 取模型近 7 天 P99（下限 1024） |
@@ -40,7 +40,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 - 先删除客户端自带的同名头，再按 `remote_ip` 注入；不得根据任何请求头判断。
 - 应用只在对端属于 `SERVER_TRUSTED_PROXIES` 时读取该头，取值须在 `keepalive.edges` 白名单内（缺省 `cf`、`esa`）。
-- **`SERVER_TRUSTED_PROXIES` 必须包含反向代理到应用的对端地址**（同机部署时通常是容器网络网关或回环地址）。未配置或不包含时，所有请求都按直连处理，首包前保活不会生效。
+- **`SERVER_TRUSTED_PROXIES` 必须包含反向代理到应用的对端地址**（同机部署时通常是容器网络网关或回环地址）。未配置或不包含时，所有请求都按直连处理，首包前保活不会生效。该列表须显式配置（`server.trusted_proxies` 或环境变量 `SERVER_TRUSTED_PROXIES`）；仓库自带的 `deploy/docker-compose.yml` 不传这个环境变量，用 Docker Compose 部署时要自己加到应用容器的 `environment`。CDN 部署的整体信任边界见 [`deploy/EDGE_SECURITY.md`](../deploy/EDGE_SECURITY.md)。
 - 内网直连与本机脚本不在 CDN 网段，不会被标记。
 
 ### 2.2 反向代理
@@ -50,7 +50,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 ### 2.3 数据库迁移
 
-0.4.0 启动时执行以下迁移，全部只追加，0.3.0 实例可继续读写：
+0.4.0 启动时执行以下迁移，全部只追加（277 只删除 276 种下的两条告警规则），0.3.0 实例可继续读写：
 
 | 迁移 | 内容 |
 |---|---|
@@ -58,7 +58,8 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | `273_add_usage_logs_origin_group.sql` | `usage_logs.origin_group_id`（不加外键与默认值，只改元数据） |
 | `274_create_gateway_undelivered_requests.sql` | 未送达请求表（保留 30 天，每 6 小时清理） |
 | `275_add_ops_error_logs_disconnect_stage.sql` | 运维错误日志的断开阶段与已送达字节 |
-| `276_seed_balance_alert_rules.sql` | 两条默认告警规则：“上游余额不足”“上游余额长期未恢复”（按名称幂等插入，已存在则不改） |
+| `276_seed_balance_alert_rules.sql` | 两条默认告警规则：“上游余额不足”“上游余额长期未恢复”（按名称幂等插入，已存在则不改）；RC 已执行，保持不变 |
+| `277_remove_balance_alert_rules.sql` | 删除 276 种下的这两条规则（名称与 `metric_type` 同时匹配才删）；余额精简后不再有余额告警 |
 
 ## 3. 客户端可见的行为
 
@@ -68,13 +69,13 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 配置导致的无号（分组仅限 Claude Code、渠道定价限制） | 503，`Retry-After: 60`，`x-should-retry: false` |
 | 模型不存在 | 保持原响应，不加重试头 |
 | 余额被在途请求占用 | 429，`rate_limit_error` / `concurrent_balance_reserved`，`Retry-After` 约 5 秒 |
-| 上游余额不足 | 普通用户看到 503；管理员在账号列表看到余额状态。管理员配置的错误透传规则命中时按规则返回 |
-| 首包前心跳已提交后失败 | 不再改写状态码，改为协议终止帧：Responses 为 `response.failed`（`rate_limit_exceeded` 或 `server_error`）；Chat 为 `data: {"error":{…,"status":N}}` 后跟 `[DONE]`；Anthropic 为 `event: error` |
+| 上游余额不足 | 普通用户看到 503；账号暂停期间单号分组的 503 带 `Retry-After`（暂停剩余时间，2–30 秒）；管理员在账号列表看到临时不可调度（原因 `balance:`）。管理员配置的错误透传规则命中时按规则返回 |
+| 首包前心跳已提交后失败 | 不再改写状态码，改为协议终止帧：Responses 为 `response.failed`（`rate_limit_exceeded` 或 `server_error`），客户端此前只收到心跳时前面先补同一响应的 `response.created`（openai-python 等严格 SDK 要求流以它开始）；Chat 为 `data: {"error":{…,"status":N}}` 后跟 `[DONE]`；Anthropic 为 `event: error` |
 | 心跳帧 | Responses / Chat 为 SSE 注释行 `:`；Anthropic 为 `event: ping` |
 | 经 CDN 的请求遇到 502/504 | 改为 503，正文不变，并带 `X-XY-Upstream-Status: 502/504`。Cloudflare 会把源站的 502/504 换成自己的纯文本页面，丢掉 JSON 错误、`Retry-After` 和请求 ID；503 原样透传。直连请求保持原状态码。运维错误记录仍记原始的 502/504 |
 | 换号耗尽的 429/5xx | 带 `Retry-After`：上游给出的值按 2–30 秒封顶，没有时取分组最早恢复时间 |
 | 同一会话连续第 5 次耗尽失败（无号、换号耗尽、流内失败） | 终止应答：不带 `Retry-After`，`x-should-retry: false`，`error.code` 为 `server_is_overloaded`，5xx 改为 503（429 保持）。Codex 对带 `Retry-After` 的 5xx 没有次数上限，一个回合最多约 30 次请求；封顶后不超过 5 次。会话真正成功一次或两次失败相隔超过 120 秒后重新计数 |
-| 中转站插入的 `SSE-Keep-Alive` 空 delta 帧 | 直接丢弃，不转发、不算首输出（openai-python 遇到会报错，网关也会因此提前放弃换号）；但算上游存活，不会因此被判停滞 |
+| 中转站插入的 `SSE-Keep-Alive` 空 delta 帧 | 直接丢弃，不转发、不算首输出（openai-python 遇到会报错，网关也会因此提前放弃换号）；但算上游存活，不会因此被判停滞。缺省首字口径（`openai_ttft_mode=semantic`）下，用量记录的首字时间仍从第一帧算起，与 0.3.0 一致；`visible` 口径不算这类帧 |
 | Claude 请求分发到 GPT 中转时，中转站拒绝续链（`previous_response_id`）并返回笼统的 4xx | 去掉续链按完整历史重放一次，并对该会话在该账号上关闭续链；上下文超长、内容审核、图片、模型不存在等错误照常返回 |
 | 上游内容安全拒绝（如智谱 `request_check_blocked`、`content_policy_violation`） | 400 `invalid_request_error`，`code: content_policy_violation`，附脱敏后的上游原文；不重试、不换号，账号不受罚。只关闭 `errors` 时回到 0.3.0 的 502 文案 |
 | Anthropic 中转在流内报 `rate_limit_error`（如并发上限） | 输出前可换号；耗尽时 429 带 `Retry-After`，不再是 502“访问被禁止”。`overloaded_error` 为 529，`api_error` 为 502 |
@@ -109,7 +110,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | `errors.turn_cap` | 连续 5 次，间隔 120 秒内 | 次数 2–30，窗口 10–3600 |
 | `fallback_group.return_stable_seconds` | 120 | 1–86400 |
 | `fallback_group.binding_ttl_seconds` | 600 | 1–86400 |
-| `balance.recheck_schedule_seconds` | `[60,120,300,600,900]` | 1–16 项，每项 10–86400 |
+| `balance.pause_seconds` | 300 | 30–3600 |
 
 完整字段与校验见 `backend/internal/resilience/settings.go`。
 
@@ -124,21 +125,24 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 - 未送达（任何语义字节前断开）：上游立即取消，不写用量，记入未送达表。
 - 同一 Key 每小时未送达超过阈值（缺省 30）时视为滥用：不再取消上游，按上游成本计费，用量 `billing_mode` 为 `undelivered_abuse`。
-- “语义字节”扣除了心跳、流内保活与图片填充，因此仅收到心跳的断开仍算未送达。
+- 送达口径（0.4.0）：
+  - 所有路径：首包前保活心跳与排队等待槽位、用户消息队列时的 ping 不算送达。
+  - OpenAI `/v1/responses` 流式（含透传）：以首个语义输出为准，流内保活注释也扣除。只收到心跳就断开算未送达、不计费。
+  - 其他流式路径：在首个真实内容前写出的开场事件与流内心跳算已送达，此后断开按部分输出处理（最多再读 180 秒，按已得用量计费）。涉及 Chat Completions 兼容转换（收到 `response.created` 时的角色块、`:` 心跳）、Messages 兼容转换（`message_start`、`ping`）、Anthropic 原生与直通、Grok `/v1/responses`（不暂存，`: ping`）、图片 SSE。0.4.1 改为把这些字节登记为不算送达，只改计数，不压住、不推迟这些事件。
+  - 非流式与图片 JSON：以响应体是否已写出为准（图片 JSON 的保活填充不算）。
 
 ## 5. 观测
 
 ### 5.1 管理端
 
-- 运维页“网关韧性”面板：当前实例最近 5 分钟至 1 小时的计数、账号余额状态分布、未送达请求列表；计数与未送达列表按分组名显示。
-- 选号解释：运维页面板底部可选任一分组（含原版调度），可选填模型与会话哈希，只读查看每个账号的硬、软档与原因、恢复时间、余额状态、会话失败次数与是否回避，以及末位兜底账号与兜底分组决策；填了模型时，若该模型被分组白名单或渠道定价拒绝（所有请求在选号前即失败），在账号表上方提示。份额调度 Explain 的结果中附同样的韧性视图。末位兜底账号不计模型、渠道、额度等逐请求条件，实际选中的可能是后一个候选。
-- 账号列表：余额状态非 `OK` 时显示徽标，悬停可见下次复检时间与证据；“已充值”按钮立即复检。
+- 运维页“网关韧性”面板：当前实例最近 5 分钟至 1 小时的计数、未送达请求列表；计数与未送达列表按分组名显示。
+- 选号解释：运维页面板底部可选任一分组（含原版调度），可选填模型与会话哈希，只读查看每个账号的硬、软档与原因（余额暂停为 `balance_exhausted`）、恢复时间、会话失败次数与是否回避，以及末位兜底账号与兜底分组决策；填了模型时，若该模型被分组白名单或渠道定价拒绝（所有请求在选号前即失败），在账号表上方提示。份额调度 Explain 的结果中附同样的韧性视图。末位兜底账号不计模型、渠道、额度等逐请求条件，实际选中的可能是后一个候选。
+- 账号列表：余额不足暂停显示为临时不可调度，原因以 `balance:` 开头并附上游原文；“恢复状态”立即放回。欠费但暂时不用的账号，关掉调度即可。
 - 运维错误详情：每次上游失败带失败分类 `resilience_category`（如 `BALANCE`、`TRANSIENT`、`CAPACITY_SHED`）。
-- 告警：新增指标“上游余额不足账号数”（`account_balance_exhausted_count`）与“上游余额长期未恢复账号数”（`account_balance_unrecovered_count`，阈值时长为 `balance.notify_after_hours`），升级时预置同名规则并开启邮件通知；账号恢复后告警自动解除。
+- 告警：不新增余额类指标。RC 的迁移 276 预置过两条余额告警规则，由迁移 277 删除。
 - 接口：
   - `GET /api/v1/admin/resilience/stats?window=15m`（窗口最长 1 小时，计数为单实例内存口径）；
   - `GET /api/v1/admin/resilience/undelivered?page=&page_size=&user_id=&api_key_id=&group_id=&since=&until=`（时间为 RFC3339）；
-  - `POST /api/v1/admin/accounts/:id/balance/recheck`；
   - `GET /api/v1/admin/resilience/groups/:id/explain?session_hash=&model=`（只读）。
 
 ### 5.2 计数项
@@ -165,19 +169,22 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 
-- `balance_transition`、`balance_unrecovered`、`balance_probe_auth_failure`；
+- `balance_paused`（含账号、暂停时长与上游原文）；
 - `session_rebind`、`last_resort`；
 - `fallback_group`、`fallback_return`；
 - `budget_exhausted`、`capacity_switch_exhausted`；
 - `stall`、`fast_fail`、`turn_cap`、`abuse_guard`；
-- `post_output_failure`（含 `group_id`、`account_id`、`reason`、窗口内次数与是否施加冷却）。
+- `post_output_failure`（含 `group_id`、`account_id`、`reason`、窗口内次数与是否施加冷却）；
+- `web_search_history_rejected`：API Key 中转拒绝回放 web_search 历史，补声明重放后仍失败或无法重放（含 `account_id`、`upstream_status`、是否已重放、是否透传）。
 
 info 级，只写应用标准输出（量大，明细已有计数或未送达表）：
 
 - `keepalive_committed`（含 `group_id`、`protocol`、`edge`）；
 - `unclassified`：只按状态码归类的上游 4xx 文案采样（脱敏、截断，每分钟约 10 条），发现新的余额文案时加入 `failure.balance_keywords_extra`；
 - `undelivered`（含阶段、耗时、推断的 CDN 切断与 `edge`）；
-- `transient_cooldown`、`transient_lifted`、`undelivered_cleanup`。
+- `transient_cooldown`、`transient_lifted`、`undelivered_cleanup`；
+- `content_policy_refusal`（上游内容安全拒绝，含账号、平台、状态与截断的上游原文）、`content_policy_no_failover`（换号循环因内容安全拒绝结束）；
+- `web_search_replay`（补 web_search 声明后同号重放）、`web_search_declaration_learned`（重放成功，该账号 6 小时内同类请求直接补声明）。
 
 `*_failed` 结尾的事件表示存储或查询失败，功能会降级为原有行为。
 
@@ -185,7 +192,7 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 
 - 单项关闭：在“网关韧性”卡中关闭对应能力，即时生效。各能力关闭后的行为见 runbook §6。
 - 整体关闭：关闭总开关，韧性能力全部停用，调度与错误处理按 0.3.0 逻辑运行。
-- 版本回退：迁移只追加，0.3.0 可直接运行在 0.4.0 的库上，无需回退数据库。回退前先在余额面板确认处于 `EXHAUSTED` 的账号：0.3.0 不认余额状态，这些账号在停调到期后会回到流量里。
+- 版本回退：迁移只追加，0.3.0 可直接运行在 0.4.0 的库上，无需回退数据库。回退时余额暂停中的账号在暂停到期后回到流量里，0.3.0 下再遇余额失败按原有逻辑处理（402 置错、403 计数）；不希望欠费账号被试探的，回退前关掉其调度。
 - 实际生效的重试与尝试上限（多种机制取最小值）见 runbook §6“生效重试上限”。
 
 不受总开关控制的改动（多为缺陷修复，关闭总开关后仍然生效）：
@@ -205,7 +212,7 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 - 统计计数保存在进程内存，多实例部署时按实例分别统计，重启后清零。
 - WebSocket 不挂连接级预算，建连首回合的换号仍按 `max_account_switches`；Gemini compat 服务未接入首事件守卫，由停滞检测兜底。
 - 断开阶段粒度为选号、等待响应头、首输出前、输出中四段。
-- 兜底判断、末位兜底与无号 `Retry-After` 读取分组账号的进程内快照（2 秒）。本网关施加的冷却与余额状态变化会立即刷新快照；其他来源（上游 429 限流、错误状态、管理员改动、其他实例）最多 2 秒后可见。
+- 兜底判断、末位兜底与无号 `Retry-After` 读取分组账号的进程内快照（2 秒）。本网关施加的冷却与余额暂停会立即刷新快照；其他来源（上游 429 限流、错误状态、管理员改动、其他实例）最多 2 秒后可见。
 - 失败回合计数在进程内，多实例时各自计数；快速失败的原样返回发生在选号之前，不参与计数；封顶后的终止应答也不计入快速失败。
 - 未送达表固定保留 30 天。
 - 滥用保护只在上游返回用量时按成本计费。

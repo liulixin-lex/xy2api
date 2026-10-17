@@ -1,5 +1,5 @@
 // Package resilience holds the gateway resilience rules: upstream failure
-// classification, request budgets, penalty and balance-state transitions,
+// classification, request budgets, penalties and balance pauses,
 // pre-output keepalive frames and storm protection. It has no I/O and no
 // service types so every rule can be unit tested; the service and handler
 // layers call it through small hooks.
@@ -53,17 +53,12 @@ type SessionSettings struct {
 	AvoidSeconds        int  `json:"avoid_seconds"`
 }
 
-// BalanceSettings tunes the recoverable balance state machine.
+// BalanceSettings tunes the balance pause: an account whose relay reports an
+// exhausted balance is paused for PauseSeconds, then real traffic retries it.
+// Documents stored by 0.4.0-rc.1 carry more fields; Parse ignores them.
 type BalanceSettings struct {
-	Enabled                    bool    `json:"enabled"`
-	RecheckScheduleSeconds     []int   `json:"recheck_schedule_seconds"`
-	JitterRatio                float64 `json:"jitter_ratio"`
-	SuspectTTLSeconds          int     `json:"suspect_ttl_seconds"`
-	RecoveringConcurrency      int     `json:"recovering_concurrency"`
-	RecoveringWindowSeconds    int     `json:"recovering_window_seconds"`
-	RecoveringSuccessTarget    int     `json:"recovering_success_target"`
-	GenerationProbeDailyBudget int     `json:"generation_probe_daily_budget"`
-	NotifyAfterHours           int     `json:"notify_after_hours"`
+	Enabled      bool `json:"enabled"`
+	PauseSeconds int  `json:"pause_seconds"`
 }
 
 // FirstOutputTimeouts are per reasoning-effort first-output timeouts.
@@ -169,17 +164,7 @@ func Defaults() Settings {
 		Failure:    FailureSettings{TransientCooldownSeconds: 30, RetryAfterCapSeconds: 120, BalanceKeywordsExtra: []string{}},
 		Session:    SessionSettings{Enabled: true, StreakThreshold: 2, StreakWindowSeconds: 600, AvoidSeconds: 600},
 		LastResort: SwitchSettings{Enabled: true},
-		Balance: BalanceSettings{
-			Enabled:                    true,
-			RecheckScheduleSeconds:     []int{60, 120, 300, 600, 900},
-			JitterRatio:                0.15,
-			SuspectTTLSeconds:          90,
-			RecoveringConcurrency:      1,
-			RecoveringWindowSeconds:    120,
-			RecoveringSuccessTarget:    3,
-			GenerationProbeDailyBudget: 48,
-			NotifyAfterHours:           72,
-		},
+		Balance:    BalanceSettings{Enabled: true, PauseSeconds: 300},
 		// First-output tiers are calibrated on 7 days of production first-token
 		// latency (tasks 0.4): about 0.1-0.2% of successful streams exceed them.
 		Budget: BudgetSettings{
@@ -249,17 +234,7 @@ func (s Settings) Validate() error {
 	check(in(s.Session.StreakWindowSeconds, 1, 86400), "session.streak_window_seconds must be 1-86400")
 	check(in(s.Session.AvoidSeconds, 1, 86400), "session.avoid_seconds must be 1-86400")
 
-	check(len(s.Balance.RecheckScheduleSeconds) >= 1 && len(s.Balance.RecheckScheduleSeconds) <= 16, "balance.recheck_schedule_seconds needs 1-16 entries")
-	for _, v := range s.Balance.RecheckScheduleSeconds {
-		check(in(v, 10, 86400), "balance.recheck_schedule_seconds entries must be 10-86400")
-	}
-	check(s.Balance.JitterRatio >= 0 && s.Balance.JitterRatio <= 0.5, "balance.jitter_ratio must be 0-0.5")
-	check(in(s.Balance.SuspectTTLSeconds, 1, 3600), "balance.suspect_ttl_seconds must be 1-3600")
-	check(in(s.Balance.RecoveringConcurrency, 1, 1000), "balance.recovering_concurrency must be 1-1000")
-	check(in(s.Balance.RecoveringWindowSeconds, 1, 86400), "balance.recovering_window_seconds must be 1-86400")
-	check(in(s.Balance.RecoveringSuccessTarget, 1, 1000), "balance.recovering_success_target must be 1-1000")
-	check(in(s.Balance.GenerationProbeDailyBudget, 0, 1440), "balance.generation_probe_daily_budget must be 0-1440")
-	check(in(s.Balance.NotifyAfterHours, 1, 24*90), "balance.notify_after_hours must be 1-2160")
+	check(in(s.Balance.PauseSeconds, 30, 3600), "balance.pause_seconds must be 30-3600")
 
 	b := s.Budget
 	check(in(b.MaxAttempts, 1, 10), "budget.max_attempts must be 1-10")
@@ -354,9 +329,6 @@ func (s *Settings) normalize() {
 	if s.Keepalive.Edges == nil {
 		s.Keepalive.Edges = []string{}
 	}
-	if len(s.Balance.RecheckScheduleSeconds) == 0 {
-		s.Balance.RecheckScheduleSeconds = Defaults().Balance.RecheckScheduleSeconds
-	}
 }
 
 // Normalized returns a copy with nil collections filled; handlers use it
@@ -376,7 +348,7 @@ func (s *Settings) SessionOn() bool { return s.master() && s.Session.Enabled }
 // LastResortOn reports whether last-resort soft selection is active.
 func (s *Settings) LastResortOn() bool { return s.master() && s.LastResort.Enabled }
 
-// BalanceOn reports whether the recoverable balance state machine is active.
+// BalanceOn reports whether balance failures pause the account.
 func (s *Settings) BalanceOn() bool { return s.master() && s.Balance.Enabled }
 
 // BudgetOn reports whether request budgets are active.
@@ -433,7 +405,6 @@ func Publish(s Settings) {
 func (s Settings) Clone() Settings {
 	c := s
 	c.Failure.BalanceKeywordsExtra = append([]string(nil), s.Failure.BalanceKeywordsExtra...)
-	c.Balance.RecheckScheduleSeconds = append([]int(nil), s.Balance.RecheckScheduleSeconds...)
 	c.Keepalive.Edges = append([]string(nil), s.Keepalive.Edges...)
 	c.Budget.ModelOverrides = make(map[string]int, len(s.Budget.ModelOverrides))
 	for k, v := range s.Budget.ModelOverrides {

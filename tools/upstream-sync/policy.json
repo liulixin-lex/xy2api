@@ -421,12 +421,36 @@
       "value": "lastRead := relayLive.lastActivity(time.Unix(0, atomic.LoadInt64(&lastReadAt)))"
     },
     {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "relayLive.firstTokenMs(firstTokenMs, startTime, ttftMode),"
+    },
+    {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(resp.Body, newRelayLiveness(ctx, account)))"
+      "value": "relayLive := newRelayLiveness(ctx, account)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(resp.Body, relayLive))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "relayLive.firstTokenMs(firstTokenMs, startTime, ttftMode),"
     },
     {
       "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
       "value": "scanner := bufio.NewScanner(newOpenAIRelayKeepaliveFilter(r, live))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "scanner := s.newUpstreamSSEScanner(resp.Body, relayLivenessFor(c, account))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "scanner := s.newUpstreamSSEScanner(resp.Body, relayLive)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "relayLive.firstTokenMs(firstTokenMs, startTime, s.openAITTFTMode(c.Request.Context())),"
     },
     {
       "path": "backend/internal/service/openai_gateway_chat_completions.go",
@@ -435,6 +459,10 @@
     {
       "path": "backend/internal/service/openai_gateway_chat_completions.go",
       "value": "lastRead := relayLive.lastActivity(time.Unix(0, atomic.LoadInt64(&lastReadAt)))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "relayLive.firstTokenMs(firstTokenMs, startTime, s.openAITTFTMode(c.Request.Context())),"
     },
     {
       "path": "backend/internal/service/openai_gateway_messages.go",
@@ -447,6 +475,18 @@
     {
       "path": "backend/internal/service/openai_gateway_messages.go",
       "value": "if rest := streamInterval - time.Since(relayLive.lastActivity(time.Time{})); rest > 0 {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "relayLive.firstTokenMs(firstTokenMs, startTime, s.openAITTFTMode(c.Request.Context())),"
+    },
+    {
+      "path": "backend/internal/handler/stream_error_event.go",
+      "value": "opening, sequence := resilienceResponsesOpening(c, id, model, createdAt)"
+    },
+    {
+      "path": "backend/internal/handler/stream_error_event.go",
+      "value": "fmt.Fprintf(c.Writer, \"%sevent: response.failed\\ndata: %s\\n\\n\", opening, payload)"
     },
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
