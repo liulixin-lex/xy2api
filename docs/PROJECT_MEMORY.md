@@ -4,7 +4,7 @@
 
 ## 当前交接状态
 
-### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-17T00:15Z；PR #97 已开，**暂停合并与打 RC**；审查与生产核查 0.4.0 范围全部提交，候选 `934bcf2bc` 测试服务器验证中，生产未改）
+### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-17T02:55Z；测试服务器验证全部闭环，即将推送 PR #97、等 CI 后合并并打 RC；生产未改）
 
 **背景**
 
@@ -66,6 +66,7 @@
 - **进度（20:05Z）**：`934bcf2bc` 场景 45/45（含新 KA-9；F23/F24/F26 与停滞类均过）、真实客户端 16/16；19:59Z 启动 6.5 小时浸泡（`soak-934bcf2bc`，约 02:40Z 连同回落与检查结束，等待脚本 `/tmp/xy2-soak-wait.sh 934bcf2bc`）。之后：`/tmp/xy2-postsoak-metrics.sh 934bcf2bc 7` → 私有 `STAGING_REPORT.md` 定稿 → 推送 PR #97、更新描述（`PR_BODY.md` 已含生产核查节）→ 等 CI → 合并、RC、晋级 0.4.0。升级演练与 XY-image 回放沿用（自 `eaa63fd30` 无迁移、schema 与应答形态改动）。
 - **进度（20:20Z，评审复核 `9adce14cb`…`934bcf2bc`）**：①②、runbook、tasks 通过，公开仓库无生产标识，`billing_error` 不算余额的取舍获同意。更正：`fdb7cfdcb` 写的“上游以 `first_output_timeout` 应答（级联网关）仍软冷却”代码中不存在——上游错误处理的 switch 只处理 BALANCE/TRANSIENT/CLIENT_ERROR，按 `SoftCooldown()` 写冷却的 `ApplyResilienceOutcome` 只由停滞调用；实际是本地与上游应答的首输出超时都不冷却账号，只有 OpenAI API Key 账号按上游 5xx 原有规则记入按模型瞬时屏蔽（本地超时不触发）。`7043f32cb` 按代码修正 design §2/§3、两份 spec 与 tasks，并加 `TestUpstreamFirstOutputTimeoutLeavesTheAccountSchedulable` 锁定（只改文档与测试，镜像不变，不重跑验证）；同时登记 0.4.1：原生 Chat Completions 路径传空存活记录，`relay_keepalive` 计数偏少。教训：文档里的行为描述须有代码与用例依据，写之前先追调用链。
 - **进度（2026-10-17T00:15Z）**：最终 HEAD `a7e012c19` 本机全量验证全绿（CI 门禁 256）；推送前扫描 `688bd9d68..HEAD` 共 36 个提交无主机、域名、凭据，作者均为 noreply；origin/main 仍为分支点 `f8fec15a2`，合并无冲突。浸泡 `soak-934bcf2bc` 约 4 小时，存活堆整点小时中位数 56/58/58/59 MB（约 0.5 MiB/h）。仓库外已备：`PR_BODY.md`（浸泡结果处为 `SOAK_RESULT_PLACEHOLDER`）、`RELEASE_NOTES_v0.4.0-rc.1.md`（annotated tag 消息；git 会删掉以 `#` 开头的行，故不用标题）。发版流程参照 0.3.0：常规 merge → 合并提交打 annotated `v0.4.0-rc.1` → Release 制品双 SHA、GHCR 双架构与标签、prerelease 与稳定别名未动、`vcs.modified` → RC 镜像新装 323 迁移、0.3.0 升级与回退、成套恢复（测试服务器 `upgrade_drill.py`）与关键场景子集 → 晋级 PR（`backend/cmd/server/VERSION`、`UPSTREAM_BASE.json` 的 `xy2api_version` 改为 0.4.0）→ annotated `v0.4.0` → 正式制品校验 → 发版后纯文档收尾 PR。
+- **进度（02:55Z，测试服务器闭环）**：`soak-934bcf2bc` 通过（11 项检查全过；160,478 个请求；存活堆 53→55 MB、0.3 MiB/h；匿名内存 92→95 MiB；回落后槽位与预留归零）。design §14 报告 15 项达标，未达标 4 项（无号 503 次数、连续无号 20 分钟、anthropic/openai 缓存读取占比）均为合成负载所致：前两项全部来自每小时人为断余额的 `G-soak-bal`（1,365 次全在第 30–48 分钟，充值后等下一次复查），后者为故障上游固定用量，与演练报告一致，生产部署后 24/72 小时复核。候选镜像全新安装（`/tmp/xy2-staging/fresh_install.py`，323 条迁移）通过。tasks 12.9–12.11 与 staging-validation §9 已勾选。私有 `STAGING_REPORT.md` 与 `PR_BODY.md` 已定稿。RC 制品校验脚本 `/tmp/xy2-verify-release.sh <tag> <commit>` 已在 v0.3.0 上试跑全过。
 
 **卡点与风险**
 
