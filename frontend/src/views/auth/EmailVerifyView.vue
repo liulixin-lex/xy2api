@@ -783,8 +783,12 @@ function buildEmailSuffixNotAllowedMessage(): string {
 }
 
 function buildRegistrationErrorMessage(error: unknown, fallback: string): string {
-  if (extractApiErrorCode(error) === 'EMAIL_DOMAIN_REGISTRATION_LIMIT') {
+  const code = extractApiErrorCode(error)
+  if (code === 'EMAIL_DOMAIN_REGISTRATION_LIMIT') {
     return t('auth.emailDomainRegistrationLimit')
+  }
+  if (code === 'EMAIL_FORMAT_NOT_ALLOWED') {
+    return t('auth.emailFormatNotAllowed')
   }
   return buildAuthErrorMessage(error, { fallback })
 }

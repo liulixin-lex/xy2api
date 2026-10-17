@@ -67,6 +67,9 @@ vi.mock('vue-i18n', () => ({
       if (key === 'auth.emailDomainRegistrationLimit') {
         return '该邮箱域名无法注册新账户。请使用主流邮箱注册；如需使用企业邮箱，请联系客服添加域名白名单。'
       }
+      if (key === 'auth.emailFormatNotAllowed') {
+        return '不支持该邮箱写法。请使用常规邮箱地址，不要包含引号、空格或特殊符号。'
+      }
       return key
     },
     locale: { value: 'en' },
@@ -380,6 +383,43 @@ describe('EmailVerifyView', () => {
 
     expect(showErrorMock).toHaveBeenLastCalledWith(
       '该邮箱域名无法注册新账户。请使用主流邮箱注册；如需使用企业邮箱，请联系客服添加域名白名单。'
+    )
+  })
+
+  it('shows the localized format message when the email local part is rejected', async () => {
+    getPublicSettingsMock.mockResolvedValue({
+      turnstile_enabled: false,
+      turnstile_site_key: '',
+      site_name: 'XY2API',
+      registration_email_suffix_whitelist: [],
+    })
+    sendVerifyCodeMock.mockRejectedValueOnce({
+      reason: 'EMAIL_FORMAT_NOT_ALLOWED',
+      message: 'raw backend message',
+    })
+    sessionStorage.setItem(
+      'register_data',
+      JSON.stringify({
+        email: '"a.b.c"@gmail.com',
+        password: 'secret-123',
+      })
+    )
+
+    mount(EmailVerifyView, {
+      global: {
+        stubs: {
+          AuthLayout: { template: '<div><slot /><slot name="footer" /></div>' },
+          Icon: true,
+          TurnstileWidget: true,
+          transition: false,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(showErrorMock).toHaveBeenLastCalledWith(
+      '不支持该邮箱写法。请使用常规邮箱地址，不要包含引号、空格或特殊符号。'
     )
   })
 

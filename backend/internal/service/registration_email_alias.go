@@ -15,6 +15,10 @@ import (
 //   - Gmail dot trick: u.s.e.r@gmail.com is delivered to user@gmail.com.
 //   - FQDN root dot: user@gmail.com. is the absolute form of user@gmail.com,
 //     passes the registration validator, and reaches the same mailbox.
+//   - Quoted local part: "u.s.e.r"@gmail.com is a valid RFC 5321 address for
+//     the same mailbox. Registration now rejects quoted local parts
+//     (HasNonStandardEmailLocalPart), but rows stored before that rule
+//     are unquoted here so they keep blocking their inbox.
 //
 // This lets abusers bulk-register accounts (e.g. to farm signup grants) while
 // the domain whitelist and email verification see each variant as a distinct,
@@ -98,11 +102,33 @@ func splitEmailForAliasDedup(email string) (local string, domain string, ok bool
 	if !ok {
 		return "", "", false
 	}
+	local = unquoteEmailLocalPart(local)
 	domain = strings.TrimRight(domain, ".")
-	if domain == "" {
+	if local == "" || domain == "" {
 		return "", "", false
 	}
 	return local, domain, true
+}
+
+// unquoteEmailLocalPart folds a quoted local part ("a.b" or "a\"b") to the
+// characters it carries, so a quoted address resolves to the same inbox
+// identity as its dot-atom form. Unquoted input is returned unchanged.
+func unquoteEmailLocalPart(local string) string {
+	if len(local) < 2 || local[0] != '"' || local[len(local)-1] != '"' {
+		return local
+	}
+	inner := local[1 : len(local)-1]
+	out := make([]byte, 0, len(inner))
+	escaped := false
+	for i := 0; i < len(inner); i++ {
+		if !escaped && inner[i] == '\\' {
+			escaped = true
+			continue
+		}
+		escaped = false
+		out = append(out, inner[i])
+	}
+	return string(out)
 }
 
 func stripEmailPlusSuffix(local string) string {

@@ -254,6 +254,28 @@
 
             <button
               v-if="selectedCount > 0"
+              class="btn btn-secondary flex-1 md:flex-initial"
+              data-test="bulk-disable-users"
+              :disabled="bulkStatusUpdating"
+              @click="openBulkStatus('disabled')"
+            >
+              <Icon name="ban" size="md" class="mr-2" />
+              {{ t('admin.users.bulkStatus.disableAction', { count: selectedCount }) }}
+            </button>
+
+            <button
+              v-if="selectedCount > 0"
+              class="btn btn-secondary flex-1 md:flex-initial"
+              data-test="bulk-enable-users"
+              :disabled="bulkStatusUpdating"
+              @click="openBulkStatus('active')"
+            >
+              <Icon name="checkCircle" size="md" class="mr-2" />
+              {{ t('admin.users.bulkStatus.enableAction', { count: selectedCount }) }}
+            </button>
+
+            <button
+              v-if="selectedCount > 0"
               class="btn btn-danger flex-1 md:flex-initial"
               data-test="bulk-delete-users"
               :disabled="bulkDeleting"
@@ -768,6 +790,17 @@
       @confirm="confirmBulkDelete"
       @cancel="bulkDeleteIds = []"
     />
+    <ConfirmDialog
+      :show="bulkStatusTarget !== null"
+      :title="bulkStatusTarget === 'disabled' ? t('admin.users.bulkStatus.disableTitle') : t('admin.users.bulkStatus.enableTitle')"
+      :message="bulkStatusTarget === 'disabled'
+        ? t('admin.users.bulkStatus.disableConfirm', { count: bulkStatusIds.length })
+        : t('admin.users.bulkStatus.enableConfirm', { count: bulkStatusIds.length })"
+      :confirm-text="bulkStatusTarget === 'disabled' ? t('admin.users.disable') : t('admin.users.enable')"
+      :danger="bulkStatusTarget === 'disabled'"
+      @confirm="confirmBulkStatus"
+      @cancel="closeBulkStatus"
+    />
     <UserCreateModal :show="showCreateModal" @close="showCreateModal = false" @success="loadUsers" />
     <UserEditModal :show="showEditModal" :user="editingUser" @close="closeEditModal" @success="loadUsers" />
     <BulkEditUserModal
@@ -798,6 +831,7 @@ import { useAppStore } from '@/stores/app'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { formatDateTime } from '@/utils/format'
+import { extractApiErrorMessage } from '@/utils/apiError'
 import Icon from '@/components/icons/Icon.vue'
 
 const { t } = useI18n()
@@ -1345,6 +1379,9 @@ const showBulkEditModal = ref(false)
 const showDeleteDialog = ref(false)
 const bulkDeleteIds = ref<number[]>([])
 const bulkDeleting = ref(false)
+const bulkStatusTarget = ref<'active' | 'disabled' | null>(null)
+const bulkStatusIds = ref<number[]>([])
+const bulkStatusUpdating = ref(false)
 const showApiKeysModal = ref(false)
 const showAttributesModal = ref(false)
 const showPlatformQuotaModal = ref(false)
@@ -1840,6 +1877,48 @@ const confirmBulkDelete = async () => {
   if (failed > 0) appStore.showError(t('admin.users.bulkDelete.failed', { count: failed }))
   await loadUsers()
   bulkDeleting.value = false
+}
+
+// 与后端 batch-status 的单次上限一致。
+const MAX_BULK_STATUS_USER_IDS = 500
+
+const openBulkStatus = (status: 'active' | 'disabled') => {
+  if (selectedIds.value.length > MAX_BULK_STATUS_USER_IDS) {
+    appStore.showError(t('admin.users.bulkLimits.selectionLimit', { max: MAX_BULK_STATUS_USER_IDS }))
+    return
+  }
+  bulkStatusIds.value = [...selectedIds.value]
+  bulkStatusTarget.value = status
+}
+
+const closeBulkStatus = () => {
+  bulkStatusTarget.value = null
+  bulkStatusIds.value = []
+}
+
+const confirmBulkStatus = async () => {
+  const status = bulkStatusTarget.value
+  const ids = bulkStatusIds.value
+  closeBulkStatus()
+  if (!status || ids.length === 0) return
+  bulkStatusUpdating.value = true
+  try {
+    const { affected, skipped } = await adminAPI.users.batchUpdateStatus({ user_ids: ids, status })
+    appStore.showSuccess(
+      status === 'disabled'
+        ? t('admin.users.bulkStatus.disableSuccess', { count: affected })
+        : t('admin.users.bulkStatus.enableSuccess', { count: affected })
+    )
+    if (skipped > 0) appStore.showInfo(t('admin.users.bulkStatus.skipped', { count: skipped }))
+    clearSelection()
+    await loadUsers()
+  } catch (error) {
+    // 失败时保留选中，便于直接重试。
+    appStore.showError(extractApiErrorMessage(error, t('admin.users.bulkStatus.failed')))
+    console.error('Error updating user status in bulk:', error)
+  } finally {
+    bulkStatusUpdating.value = false
+  }
 }
 
 const handleDeposit = (user: AdminUser) => {

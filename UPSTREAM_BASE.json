@@ -180,7 +180,9 @@
     "xy-resilience-fallback-hook",
     "xy-index-nonce-no-304",
     "xy-placeholder-session-id",
-    "xy-allowlist-404-hint"
+    "xy-allowlist-404-hint",
+    "xy-registration-email-alias-hardening",
+    "xy-admin-user-batch-status"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/92"
 }
