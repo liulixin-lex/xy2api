@@ -241,7 +241,7 @@ JSON bodies are compared byte for byte; multipart bodies are compared by their p
 | Running tasks per instance | 256 (`max_in_flight_per_instance`) | `429 too_many_tasks`, `Retry-After: 5` |
 | Polls and deletes per API key | 10 per second (`poll_rate_per_second`) | `429 too_many_requests`, `Retry-After: 1` |
 
-Submission is still a normal gateway request: rate limits, balance checks and moderation apply before the 202, and every failure before the 202 means no task, no generation and no usage.
+Submission is still a normal gateway request: rate limits, balance checks and moderation apply before the 202, and every failure before the 202 means no task, no generation and no usage. Since 0.4.0 the two running-task limits are checked before moderation, so a re-submission refused with `429 too_many_tasks` costs no moderation call.
 
 ### Reliability
 
