@@ -191,8 +191,86 @@
   ],
   "private": [
     {
-      "pattern": "aiaimax\\.cyou|test-aiaimax|book-keeper|(?<![A-Za-z0-9_.:/~-])/(?:xy|xy2|lex)/|/Users/admin/|[A-Z]:\\\\jiance",
-      "reason": "public repository: hosts, server and workstation paths and coexisting services stay in the private host notes outside the repository; AGENTS.md"
+      "tokens_sha256": [
+        "073b7e05335ad9906e76912ed64a397e85221e96f565acac167d39e1e9737bcf",
+        "2e2a44f0c8e3de87c54c9c63793a92eff6ee89ea37186e6031c44d9ab8acf559",
+        "46c7a169fe733a34fd95196458e31759a752824f455e640e810fcc42bf9df357",
+        "d5252633fff7ea01775887861c1450149df20f03819fd276b22029ba9e8c3e17"
+      ],
+      "paths": [
+        "*.md",
+        "*.json",
+        "*.yaml",
+        "*.yml",
+        "*.txt",
+        "*.sh",
+        "*.py",
+        "*.sql",
+        "*.toml",
+        "*.service",
+        "*Caddyfile*",
+        "*Dockerfile*",
+        ".env.example"
+      ],
+      "allowed": [
+        "backend/**",
+        "frontend/**"
+      ],
+      "reason": "public repository: hosts, server and workstation paths and coexisting services stay in the private host notes outside the repository; AGENTS.md (a test site, its project, a coexisting service and a workstation directory)"
+    },
+    {
+      "pattern": "(?<![A-Za-z0-9_.:/~-])/([A-Za-z0-9._-]+)/",
+      "group_sha256": [
+        "15e38a21669d3adcc72ba29565a688f5fe3d9e438361a844121578e13ec395d1",
+        "769a4e6d0003189c7e96c5d9b7e810a0d11c3a12832527ec94b0f86d277f51ca",
+        "c917779b548cdf1dac8c0a5477f153612cf7ff44df094d141f0a053083185eb7"
+      ],
+      "paths": [
+        "*.md",
+        "*.json",
+        "*.yaml",
+        "*.yml",
+        "*.txt",
+        "*.sh",
+        "*.py",
+        "*.sql",
+        "*.toml",
+        "*.service",
+        "*Caddyfile*",
+        "*Dockerfile*",
+        ".env.example"
+      ],
+      "allowed": [
+        "backend/**",
+        "frontend/**"
+      ],
+      "reason": "public repository: hosts, server and workstation paths and coexisting services stay in the private host notes outside the repository; AGENTS.md (a workstation path root)"
+    },
+    {
+      "pattern": "/Users/([A-Za-z0-9._-]+)/",
+      "group_sha256": [
+        "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918"
+      ],
+      "paths": [
+        "*.md",
+        "*.json",
+        "*.yaml",
+        "*.yml",
+        "*.txt",
+        "*.sh",
+        "*.py",
+        "*.sql",
+        "*.toml",
+        "*.service",
+        "*Caddyfile*",
+        "*Dockerfile*",
+        ".env.example"
+      ],
+      "allowed": [
+        "backend/**",
+        "frontend/**"
+      ],
+      "reason": "public repository: hosts, server and workstation paths and coexisting services stay in the private host notes outside the repository; AGENTS.md (a workstation home directory)"
     },
     {
       "pattern": "(?<![\\d.])(?!(?:127|10|0)\\.|192\\.168\\.|172\\.(?:1[6-9]|2\\d|3[01])\\.|192\\.0\\.2\\.|198\\.51\\.100\\.|203\\.0\\.113\\.|169\\.254\\.|255\\.)(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)(?![\\d.])",

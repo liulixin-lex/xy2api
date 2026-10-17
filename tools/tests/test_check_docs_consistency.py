@@ -168,22 +168,35 @@ class DocsConsistencyTest(unittest.TestCase):
             "(?<![\\d.])(?!(?:127|10|0)\\.|192\\.168\\.|192\\.0\\.2\\.)"
             "(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)(?![\\d.])"
         )
+        site, service, root = (MODULE.digest(v) for v in ("secret-site.example", "old-svc", "wsb"))
         self.config = {
             "private": [
-                {"pattern": "(?<![A-Za-z0-9_.:/~-])/(?:wsa|wsb)/|test\\.example\\.cyou", "reason": "private"},
+                {"tokens_sha256": [site, service], "reason": "private"},
+                {"pattern": "(?<![A-Za-z0-9_.:/~-])/([A-Za-z0-9._-]+)/", "group_sha256": [root], "reason": "private"},
                 {"pattern": public_ip, "paths": ["docs/**"], "reason": "address"},
             ]
         }
-        self.write("docs/a.md", "证据在/wsb/artifacts/x，站点 test.example.cyou\nhttps://host/wsa/ok 与 `<工作机 A>/artifacts`\n")
+        self.write("docs/a.md", "证据在/wsb/artifacts/x，站点 https://test.secret-site.example/ 与 old-svc_default\n"
+                   "https://host/wsb/ok、`<工作机 A>/artifacts`、/v1/responses、OLD-SVC、old-svcs\n")
         self.write("docs/b.md", "examples 192.0.2.10, 127.0.0.1:8080, 10.1.2.3, version 1.27.2\nreal 8.8.4.4\n")
         self.write("src/ip_test.go", "ip := \"8.8.4.4\"\n")
+        hidden = "is a private host detail (private)"
         self.assertEqual(
             self.problems("private"),
             [
-                "[private] docs/a.md:1: `/wsb/` is a private host detail (private)",
-                "[private] docs/a.md:1: `test.example.cyou` is a private host detail (private)",
+                f"[private] docs/a.md:1: `sha256 {site[:12]}` {hidden}",
+                f"[private] docs/a.md:1: `sha256 {service[:12]}` {hidden}",
+                f"[private] docs/a.md:2: `sha256 {service[:12]}` {hidden}",
+                f"[private] docs/a.md:1: `sha256 {root[:12]}` {hidden}",
                 "[private] docs/b.md:2: `8.8.4.4` is a private host detail (address)",
             ],
+        )
+        self.assertNotIn("secret-site", "\n".join(self.problems("private")))
+
+    def test_token_pieces_are_whole_word_runs(self):
+        self.assertEqual(
+            list(MODULE.token_pieces("A.b-C_d", 1)),
+            ["a", "a.b", "a.b-c", "a.b-c_d", "b", "b-c", "b-c_d", "c", "c_d", "d"],
         )
 
     def test_memory_size_and_log_structure(self):

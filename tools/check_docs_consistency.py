@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -43,6 +44,8 @@ INLINE_LINK = re.compile(r"!?\[(?:[^\[\]]|\[[^\]]*\])*\]\(\s*(<[^>]*>|[^)\s]+)(?
 REFERENCE_LINK = re.compile(r"^\s{0,3}\[[^\]]+\]:\s*(<[^>]*>|\S+)", re.M)
 HTML_ATTR = re.compile(r"<(?:img|a)\b[^>]*?\s(?:src|href)=\"([^\"]+)\"", re.I)
 FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
+TOKEN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
+TOKEN_SEP = re.compile(r"([._-])")
 
 
 class Repo:
@@ -250,12 +253,58 @@ def check_contracts(repo: Repo, cfg: dict) -> list[str]:
     return problems
 
 
-def forbidden_terms(repo: Repo, cfg: dict, key: str, what: str) -> list[str]:
-    """Report matches of the `key` rules outside their allowed paths.
+def digest(value: str) -> str:
+    """SHA-256 of a normalised identifier. Rules list digests so that the
+    identifiers they keep out of the tree are not written into it; a digest
+    of a short word is easy to reverse, so this hides text, not secrets."""
+    return hashlib.sha256(value.strip().lower().encode("utf-8")).hexdigest()
 
-    A rule may limit the files it looks at with `paths` (globs)."""
+
+def token_pieces(token: str, min_length: int):
+    """Every run of whole words of a token, words joined by their original
+    `.`, `_` or `-`: `a.b-c` gives a, a.b, a.b-c, b, b-c and c."""
+    parts = TOKEN_SEP.split(token.lower())
+    words, seps = parts[0::2], parts[1::2]
+    for i in range(len(words)):
+        piece = words[i]
+        if len(piece) >= min_length:
+            yield piece
+        for j in range(i + 1, len(words)):
+            piece += seps[j - 1] + words[j]
+            if len(piece) >= min_length:
+                yield piece
+
+
+def rule_hits(rule: dict, regex, text: str):
+    """(offset, shown) for each hit of a rule in text."""
+    if "tokens_sha256" in rule:
+        wanted = set(rule["tokens_sha256"])
+        min_length = rule.get("min_length", 4)
+        for m in TOKEN.finditer(text):
+            for piece in token_pieces(m.group(0), min_length):
+                d = digest(piece)
+                if d in wanted:
+                    yield m.start(), f"sha256 {d[:12]}"
+        return
+    wanted = set(rule.get("group_sha256", []))
+    for m in regex.finditer(text):
+        if wanted:
+            d = digest(m.group(1))
+            if d in wanted:
+                yield m.start(), f"sha256 {d[:12]}"
+        else:
+            yield m.start(), m.group(0)
+
+
+def forbidden_terms(repo: Repo, cfg: dict, key: str, what: str) -> list[str]:
+    """Report hits of the `key` rules outside their allowed paths.
+
+    A rule matches `pattern`, or only the matches whose first group has one
+    of the `group_sha256` digests, or (`tokens_sha256`) any run of words of a
+    token with one of the digests. `paths` limits the files it reads; hits
+    of a digest rule are shown by digest, never as text."""
     problems = []
-    rules = [(re.compile(r["pattern"]), r) for r in cfg.get(key, [])]
+    rules = [(re.compile(r["pattern"]) if "pattern" in r else None, r) for r in cfg.get(key, [])]
     if not rules:
         return problems
     for path in repo.files:
@@ -272,9 +321,9 @@ def forbidden_terms(repo: Repo, cfg: dict, key: str, what: str) -> list[str]:
                 if b"\0" in raw[:8192]:
                     break
                 text = raw.decode("utf-8", errors="replace")
-            for m in regex.finditer(text):
-                line = text.count("\n", 0, m.start()) + 1
-                problems.append(f"{path}:{line}: `{m.group(0)}` {what} ({rule['reason']})")
+            for offset, shown in rule_hits(rule, regex, text):
+                line = text.count("\n", 0, offset) + 1
+                problems.append(f"{path}:{line}: `{shown}` {what} ({rule['reason']})")
     return problems
 
 

@@ -560,3 +560,10 @@ pnpm --dir frontend run build
 - 验证：`check_docs_consistency.py`、`tools/tests` 38 个、`sync.py audit` 与 `scheduler-diff` 通过；`BILLING_INTEGRITY_PROVENANCE.json` 仍为合法 JSON；全仓库复扫无残留。
 - 卡点/风险：Git 历史仍含原文，只能靠轮换或下线测试站消除（该测试站若仍在运行，建议下线或更换域名）。
 - 下一步：随 PR #100 由主 agent 推送。
+
+### 2026-10-17T09:25Z — 20261017-repo-consistency-sweep — 主机信息检查改为只存哈希（完成）
+
+- 起因：主 agent 复核 `95e6828f5` 时指出，`private` 规则为了拦截被清理的标识，把它们的原文又写进了规则文件。
+- 修改：主机类标识（测试站域名与项目名、共存服务名、Windows 工作机目录名）改为登记规范化后的 SHA-256，检查时对文本中每个词串的整词片段算哈希比对；工作机路径根与用户目录用通用正则取出目录名再比对哈希；报错只显示哈希前缀。公网 IPv4 与 `ubuntu@`/`root@` 两条通用规则不变。规则文件里不再有这些原文（哈希只是不写原文，短词仍可被字典反查）。AGENTS.md 写明登记方式。
+- 验证：用 `a12d33b82` 上清理前的归档回放，命中 189 处，与清理范围一致；检查器单测 11 个、`tools/tests` 39 个、一致性检查（约 2.6 秒）通过。
+- 下一步：随 PR #100 由主 agent 推送。
