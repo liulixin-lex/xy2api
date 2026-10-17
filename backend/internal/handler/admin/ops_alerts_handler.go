@@ -30,8 +30,6 @@ var validOpsAlertMetricTypes = []string{
 	"account_error_count",
 	"account_error_ratio",
 	"account_temp_unscheduled_count",
-	"account_balance_exhausted_count",
-	"account_balance_unrecovered_count",
 	"overload_account_count",
 	"proxy_expired_count",
 	"proxy_expiring_soon_count",

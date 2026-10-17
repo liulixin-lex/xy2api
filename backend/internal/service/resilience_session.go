@@ -32,13 +32,6 @@ func resiliencePenaltyOf(a *Account, model string, now time.Time) (resilience.Pe
 	if a.IsAPIKeyOrBedrock() && a.IsQuotaExceeded() {
 		return resilience.TierHard, time.Time{}, "quota_exceeded"
 	}
-	// The exclusion ends at the next check plus a grace period, after which
-	// real traffic may re-check a stopped probe; the tier follows it.
-	if resilience.BalanceStateOf(a.Extra) == resilience.BalanceExhausted {
-		if rec := resilience.BalanceRecordFrom(a.Extra); rec.State == resilience.BalanceExhausted && now.Before(rec.ExclusionUntil(resilience.Current())) {
-			return resilience.TierHard, time.Time{}, "balance_exhausted"
-		}
-	}
 	tier := resilience.TierNone
 	var recoverAt time.Time
 	reason := ""
@@ -51,6 +44,9 @@ func resiliencePenaltyOf(a *Account, model string, now time.Time) (resilience.Pe
 	}
 	if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) {
 		if resilience.TempUnschedTier(a.TempUnschedulableReason) == resilience.TierHard {
+			if resilience.IsBalancePause(a.TempUnschedulableReason) {
+				return resilience.TierHard, time.Time{}, "balance_exhausted"
+			}
 			return resilience.TierHard, time.Time{}, "temp_unschedulable"
 		}
 		soft(*a.TempUnschedulableUntil, "temp_unschedulable")

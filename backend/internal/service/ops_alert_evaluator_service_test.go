@@ -252,30 +252,3 @@ func TestComputeRuleMetricNewIndicators(t *testing.T) {
 		})
 	}
 }
-
-func TestComputeRuleMetricBalanceStates(t *testing.T) {
-	// Gateway resilience tasks 2.6: admins are alerted when an account runs
-	// out at its relay, and again when it stays out past notify_after_hours.
-	now := time.Now().UTC()
-	recent := now.Add(-time.Hour)
-	old := now.Add(-73 * time.Hour)
-	availability := &OpsAccountAvailability{Accounts: map[int64]*AccountAvailability{
-		1: {BalanceState: "EXHAUSTED", BalanceSince: &recent},
-		2: {BalanceState: "EXHAUSTED", BalanceSince: &old},
-		3: {BalanceState: "SUSPECT", BalanceSince: &old},
-		4: {BalanceState: "RECOVERING", BalanceSince: &recent},
-		5: {},
-	}}
-	svc := &OpsAlertEvaluatorService{
-		opsService: &OpsService{getAccountAvailability: func(context.Context, string, *int64) (*OpsAccountAvailability, error) {
-			return availability, nil
-		}},
-		opsRepo: &stubOpsRepo{},
-	}
-	val, ok := svc.computeRuleMetric(context.Background(), &OpsAlertRule{MetricType: "account_balance_exhausted_count"}, nil, now.Add(-5*time.Minute), now, "", nil)
-	require.True(t, ok)
-	require.InDelta(t, 2.0, val, 0.0001)
-	val, ok = svc.computeRuleMetric(context.Background(), &OpsAlertRule{MetricType: "account_balance_unrecovered_count"}, nil, now.Add(-5*time.Minute), now, "", nil)
-	require.True(t, ok)
-	require.InDelta(t, 1.0, val, 0.0001, "only the account out for more than 72 hours")
-}

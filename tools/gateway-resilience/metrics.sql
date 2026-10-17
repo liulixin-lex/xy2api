@@ -80,8 +80,7 @@ SELECT json_build_object(
   'undelivered', (SELECT count(*) FROM gateway_undelivered_requests WHERE created_at >= now() - make_interval(hours => :hours)),
   'undelivered_billed', (SELECT count(*) FROM gateway_undelivered_requests WHERE created_at >= now() - make_interval(hours => :hours) AND billed),
   'served_by_fallback_group', (SELECT count(*) FROM usage_logs WHERE created_at >= now() - make_interval(hours => :hours) AND origin_group_id IS NOT NULL),
-  'balance_states', COALESCE((SELECT json_object_agg(state, n) FROM (
-      SELECT COALESCE(extra->'resilience_balance'->>'state', 'OK') AS state, count(*) AS n
-      FROM accounts WHERE deleted_at IS NULL GROUP BY 1) s), '{}'::json)
+  'balance_paused', (SELECT count(*) FROM accounts WHERE deleted_at IS NULL
+      AND temp_unschedulable_reason LIKE 'balance:%' AND temp_unschedulable_until > now())
 );
 \endif

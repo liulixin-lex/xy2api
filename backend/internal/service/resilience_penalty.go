@@ -13,10 +13,6 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// weakBalanceSuccessWindow is how recent a success must be for balance
-// wording on a 429 to count only as a weak signal (design §3.2).
-const weakBalanceSuccessWindow = 30 * time.Second
-
 // SetResilienceService attaches the resilience runtime (optional).
 func (s *RateLimitService) SetResilienceService(r *ResilienceService) {
 	if s != nil {
@@ -24,8 +20,8 @@ func (s *RateLimitService) SetResilienceService(r *ResilienceService) {
 	}
 }
 
-// resilienceBalanceEligible reports whether an account uses the recoverable
-// balance state machine: API-key style accounts outside the providers that
+// resilienceBalanceEligible reports whether a balance failure pauses the
+// account (design §3.2): API-key style accounts outside the providers that
 // already have their own recoverable balance path.
 func resilienceBalanceEligible(account *Account) bool {
 	if account == nil {
@@ -83,9 +79,8 @@ func (s *RateLimitService) resilienceHandleUpstreamError(ctx context.Context, ac
 		if !cfg.BalanceOn() || !resilienceBalanceEligible(account) {
 			return false, false
 		}
-		weak := statusCode == http.StatusTooManyRequests && s.resilience.recentSuccess(account.ID, weakBalanceSuccessWindow)
 		evidence := fmt.Sprintf("HTTP %d: %s", statusCode, firstNonEmpty(upstreamMsg, truncateForLog(responseBody, 200)))
-		s.applyBalanceSignal(ctx, account, weak, evidence)
+		s.applyBalancePause(ctx, account, evidence)
 		return true, true
 	case resilience.CategoryTransient:
 		if statusCode < 500 && statusCode != http.StatusRequestTimeout {
@@ -117,11 +112,11 @@ func (s *RateLimitService) resilienceHandleUpstreamError(ctx context.Context, ac
 }
 
 // resilienceHandleGrokUpstreamError routes balance-worded failures of API-key
-// Grok accounts to the recoverable balance state (design §3.2) before the Grok
-// handler installs a quota-window rate limit from the relay's headers. In
-// production one relay 429 "insufficient balance" locked a single-account
-// Grok group for about 28 minutes. OAuth and pool-mode accounts keep the
-// Grok handling. It reports whether the Grok handling must be skipped.
+// Grok accounts to the balance pause (design §3.2) before the Grok handler
+// installs a quota-window rate limit from the relay's headers. In production
+// one relay 429 "insufficient balance" locked a single-account Grok group for
+// about 28 minutes. OAuth and pool-mode accounts keep the Grok handling. It
+// reports whether the Grok handling must be skipped.
 func (s *RateLimitService) resilienceHandleGrokUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, body []byte) bool {
 	if s == nil || account == nil || account.IsGrokOAuth() || account.IsPoolMode() {
 		return false
@@ -145,7 +140,7 @@ func (s *RateLimitService) ApplyResilienceOutcome(ctx context.Context, account *
 	switch {
 	case res.Category == resilience.CategoryBalance:
 		if cfg.BalanceOn() && resilienceBalanceEligible(account) {
-			s.applyBalanceSignal(ctx, account, false, evidence)
+			s.applyBalancePause(ctx, account, evidence)
 		}
 	case res.Category.SoftCooldown():
 		s.applyTransientCooldown(ctx, account, res, evidence)
@@ -196,94 +191,32 @@ func (s *RateLimitService) applyTransientCooldownAs(ctx context.Context, account
 	return true
 }
 
-// applyBalanceSignal moves an account through the balance state machine
-// after a balance failure of a real request.
-func (s *RateLimitService) applyBalanceSignal(ctx context.Context, account *Account, weak bool, evidence string) {
+// applyBalancePause pauses an account whose relay reported an exhausted
+// balance for balance.pause_seconds (design §3.2). It is a hard penalty while
+// it lasts; real traffic retries the account afterwards, and a balance
+// failure then pauses it again for the same time. A longer pause of another
+// kind stays: SetTempUnschedulable only extends.
+func (s *RateLimitService) applyBalancePause(ctx context.Context, account *Account, evidence string) {
 	if s == nil || s.accountRepo == nil || account == nil {
 		return
 	}
-	cfg := resilience.Current()
+	pause := time.Duration(resilience.Current().Balance.PauseSeconds) * time.Second
+	until := time.Now().Add(pause)
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
-	current := account
-	if fresh, err := s.accountRepo.GetByID(stateCtx, account.ID); err == nil && fresh != nil {
-		current = fresh
-	}
-	before := resilience.BalanceRecordFrom(current.Extra)
-	now := time.Now()
-	var after resilience.BalanceRecord
-	if weak {
-		after = resilience.OnWeakSignal(before, cfg, evidence, now)
-	} else {
-		after = resilience.OnStrongSignal(before, cfg, evidence, now)
-	}
-	s.persistBalanceRecord(stateCtx, current, before, after, "request")
-}
-
-// persistBalanceRecord stores a balance record and applies its scheduling
-// effect: exclusion through temp_unschedulable for SUSPECT and EXHAUSTED,
-// the concurrency cap for RECOVERING, and clearing only exclusions the
-// balance machine wrote itself.
-func (s *RateLimitService) persistBalanceRecord(ctx context.Context, account *Account, before, after resilience.BalanceRecord, source string) {
-	if err := s.accountRepo.UpdateExtra(ctx, account.ID, after.Extra()); err != nil {
-		slog.Warn("resilience.balance_persist_failed", "account_id", account.ID, "error", err)
+	s.notifyAccountSchedulingBlocked(account, until, "balance_exhausted")
+	if err := s.accountRepo.SetTempUnschedulable(stateCtx, account.ID, until, resilience.BalancePauseReason(evidence)); err != nil {
+		slog.Warn("resilience.balance_pause_failed", "account_id", account.ID, "error", err)
 		return
 	}
-	if account.Extra == nil {
-		account.Extra = map[string]any{}
-	}
-	for k, v := range after.Extra() {
-		account.Extra[k] = v
-	}
-	cfg := resilience.Current()
-	switch after.State {
-	case resilience.BalanceExhausted, resilience.BalanceSuspect:
-		until := after.ExclusionUntil(cfg)
-		if after.State == resilience.BalanceExhausted {
-			s.notifyAccountSchedulingBlocked(account, until, "balance_exhausted")
-		}
-		if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, after.TempUnschedReason()); err != nil {
-			slog.Warn("resilience.balance_exclusion_failed", "account_id", account.ID, "error", err)
-		}
-		s.resilience.setRecovering(ctx, account.ID, time.Time{})
-	case resilience.BalanceRecovering:
-		s.clearBalanceExclusion(ctx, account)
-		s.resilience.setRecovering(ctx, account.ID, after.RecoveringUntil)
-	case resilience.BalanceOK:
-		s.clearBalanceExclusion(ctx, account)
-		s.resilience.setRecovering(ctx, account.ID, time.Time{})
-	}
-	if before.State != after.State {
-		s.resilience.invalidateAccountGroups(account)
-		slog.Warn("resilience.balance_transition",
-			"account_id", account.ID,
-			"account_name", account.Name,
-			"platform", account.Platform,
-			"from", string(before.State),
-			"to", string(after.State),
-			"level", after.Level,
-			"next_check_at", after.NextCheckAt,
-			"source", source,
-			"evidence", truncateString(after.LastEvidence, 300),
-		)
-	}
-}
-
-// clearBalanceExclusion removes a temp_unschedulable written by the balance
-// machine and leaves any other pause in place.
-func (s *RateLimitService) clearBalanceExclusion(ctx context.Context, account *Account) {
-	fresh, err := s.accountRepo.GetByID(ctx, account.ID)
-	if err != nil || fresh == nil || fresh.TempUnschedulableUntil == nil {
-		return
-	}
-	if !strings.HasPrefix(fresh.TempUnschedulableReason, "balance:") {
-		return
-	}
-	if err := s.accountRepo.ClearTempUnschedulable(ctx, account.ID); err != nil {
-		slog.Warn("resilience.balance_clear_failed", "account_id", account.ID, "error", err)
-		return
-	}
-	s.notifyAccountSchedulingBlockCleared(account.ID)
+	s.resilience.invalidateAccountGroups(account)
+	slog.Warn("resilience.balance_paused",
+		"account_id", account.ID,
+		"account_name", account.Name,
+		"platform", account.Platform,
+		"pause", pause.String(),
+		"evidence", truncateString(evidence, 300),
+	)
 }
 
 // handleCounted403 applies the OpenAI 403 policy (HTML/Cloudflare pages
@@ -301,25 +234,19 @@ func resilienceStateContext(ctx context.Context) (context.Context, context.Cance
 	return context.WithTimeout(base, openAIAccountStateUpdateTimeout)
 }
 
-// resilienceSuccessTracker remembers the latest success per account for the
-// weak balance signal. It is process local and best effort.
-type resilienceSuccessTracker struct {
-	last sync.Map // int64 -> time.Time
-}
-
-// NoteAccountSuccess records a successful upstream request. It feeds the
-// weak balance signal and counts RECOVERING successes.
+// NoteAccountSuccess records a successful upstream request: it ends the
+// session's failure streak and lifts the transient cooldown of an account
+// that served as a last resort.
 func (r *ResilienceService) NoteAccountSuccess(ctx context.Context, account *Account) {
 	if r == nil || account == nil {
 		return
 	}
 	// Usage of a stream that broke (stall, in-stream failure) is recorded
-	// too; it must not lift cooldowns or count as a recovery success.
+	// too; it must not lift cooldowns.
 	if resilience.StateFrom(ctx).AccountFailed(account.ID) {
 		return
 	}
 	now := time.Now()
-	r.successes.last.Store(account.ID, now)
 	resilience.StateFrom(ctx).SessionSuccess(ctx, account.ID)
 	if r.rateLimit == nil {
 		return
@@ -331,10 +258,6 @@ func (r *ResilienceService) NoteAccountSuccess(ctx context.Context, account *Acc
 			r.rateLimit.liftTransientCooldown(ctx, account.ID)
 		}
 	}
-	if r.RecoveringCap(account.ID, now) == 0 {
-		return
-	}
-	r.rateLimit.noteRecoveringSuccess(ctx, account.ID, now)
 }
 
 // liftTransientCooldown clears a soft transient cooldown after the account
@@ -353,54 +276,6 @@ func (s *RateLimitService) liftTransientCooldown(ctx context.Context, accountID 
 	}
 	s.resilience.invalidateAccountGroups(fresh)
 	slog.Info("resilience.transient_lifted", "account_id", accountID)
-}
-
-func (r *ResilienceService) recentSuccess(accountID int64, within time.Duration) bool {
-	if r == nil {
-		return false
-	}
-	v, ok := r.successes.last.Load(accountID)
-	if !ok {
-		return false
-	}
-	t, _ := v.(time.Time)
-	return time.Since(t) <= within
-}
-
-// noteRecoveringSuccess advances a RECOVERING account toward OK.
-func (s *RateLimitService) noteRecoveringSuccess(ctx context.Context, accountID int64, now time.Time) {
-	stateCtx, cancel := resilienceStateContext(ctx)
-	defer cancel()
-	account, err := s.accountRepo.GetByID(stateCtx, accountID)
-	if err != nil || account == nil {
-		return
-	}
-	before := resilience.BalanceRecordFrom(account.Extra)
-	after, changed := resilience.OnSuccess(before, resilience.Current(), now)
-	if !changed {
-		return
-	}
-	s.persistBalanceRecord(stateCtx, account, before, after, "success")
-}
-
-// setRecovering publishes or clears the RECOVERING window of an account.
-func (r *ResilienceService) setRecovering(ctx context.Context, accountID int64, until time.Time) {
-	if r == nil {
-		return
-	}
-	r.markRecoveringLocal(accountID, until)
-	if r.store == nil {
-		return
-	}
-	var err error
-	if until.IsZero() {
-		err = r.store.ClearRecovering(ctx, accountID)
-	} else {
-		err = r.store.SetRecovering(ctx, accountID, until)
-	}
-	if err != nil {
-		slog.Warn("resilience.recovering_publish_failed", "account_id", accountID, "error", err)
-	}
 }
 
 // invalidateAccountGroups drops the negative-cache entries and the cached

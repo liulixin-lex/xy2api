@@ -2,7 +2,7 @@ export default {
   resilience: {
     settings: {
       title: '网关韧性',
-      hint: '控制上游失败分类、冷却与余额恢复、会话改绑、请求预算、首包前保活、断开计费与无号兜底。关闭总开关即恢复原有行为。',
+      hint: '控制上游失败分类、冷却与余额暂停、会话改绑、请求预算、首包前保活、断开计费与无号兜底。关闭总开关即恢复原有行为。',
       openPanel: '查看运维面板',
       enabled: '总开关',
       enabledHint: '关闭后所有韧性能力停用，网关按原有逻辑运行。',
@@ -11,8 +11,8 @@ export default {
         sessionHint: '同一会话在同一账号上连续失败达到阈值后改绑，并在回避期内避开该账号（默认 2 次、10 分钟）。',
         lastResort: '末位兜底',
         lastResortHint: '没有健康账号时，在软罚账号中按优先级与冷却结束时间依次找空闲的继续服务，全部占满才排队（单账号分组不再整组不可用）。',
-        balance: '余额可恢复',
-        balanceHint: '上游余额不足时按复检计划探测（默认 1/2/5/10/15 分钟），充值后自动恢复。',
+        balance: '余额不足暂停',
+        balanceHint: '上游余额不足的账号暂停调度，到期后由真实请求重试，仍不足就再暂停同样时长；账号列表的“恢复状态”可立即放回。',
         budget: '请求预算',
         budgetHint: '每个请求最多尝试的次数与首输出前的总时长；同号重试仅用于容量降载。',
         keepalive: '首包前保活',
@@ -31,6 +31,7 @@ export default {
         outputP99Hint: '在途预留的输出 Token 取模型近 7 天 P99（下限 1024）。'
       },
       fields: {
+        balancePause: '暂停时长（秒）',
         maxAttempts: '最多尝试次数',
         preOutputBudget: '首输出前总时长（秒）',
         keepaliveDelay: '首次心跳延迟（秒）',
@@ -67,7 +68,6 @@ export default {
       account: '账号',
       label: '细分',
       count: '次数',
-      balanceStates: '账号余额状态',
       metrics: {
         keepalive_committed: '首包前心跳提交',
         first_output_timeout: '首输出超时',
@@ -84,12 +84,6 @@ export default {
         stall: '停滞断流',
         post_output_failure: '已输出后上游失败',
         relay_keepalive: '中转伪保活帧'
-      },
-      states: {
-        OK: '正常',
-        SUSPECT: '疑似不足',
-        EXHAUSTED: '余额不足',
-        RECOVERING: '恢复中'
       }
     },
     undelivered: {
@@ -154,7 +148,6 @@ export default {
         tier: '档位',
         reason: '原因',
         recoverAt: '恢复时间',
-        balance: '余额状态',
         sessionFailures: '会话失败',
         avoided: '回避'
       },
@@ -169,15 +162,6 @@ export default {
         overloaded: '过载',
         model_rate_limited: '模型限流'
       }
-    },
-    account: {
-      balance: '上游余额',
-      nextCheck: '下次复检 {time}',
-      recheck: '已充值',
-      recheckHint: '立即复检该账号的上游余额',
-      rechecking: '复检中…',
-      recheckDone: '复检完成：{state}',
-      recheckFailed: '复检失败'
     },
     usage: {
       fallback: '兜底：{origin} → {group}',

@@ -519,8 +519,6 @@ export default {
           accountErrorCount: 'Error Accounts (excluding temporarily unschedulable)',
           accountErrorRatio: 'Error Account Ratio (%)',
           accountTempUnscheduledCount: 'Temporarily Unschedulable Accounts',
-          accountBalanceExhaustedCount: 'Accounts Out of Upstream Balance',
-          accountBalanceUnrecoveredCount: 'Accounts Out of Upstream Balance for Long',
           overloadAccountCount: 'Overloaded Accounts'
         },
         metricDescriptions: {
@@ -539,8 +537,6 @@ export default {
           accountErrorCount: 'Number of error accounts within the window (excluding temporarily unschedulable).',
           accountErrorRatio: 'Error account ratio within the window (0-100).',
           accountTempUnscheduledCount: 'Number of accounts currently temporarily unschedulable (e.g. proxy/credential failure auto-eviction).',
-          accountBalanceExhaustedCount: 'Accounts whose relay balance ran out (EXHAUSTED); resolves after a top-up and recheck.',
-          accountBalanceUnrecoveredCount: 'Accounts out of balance for longer than the gateway resilience notify time (72 hours by default).',
           overloadAccountCount: 'Number of overloaded accounts within the window.'
         },
         hints: {

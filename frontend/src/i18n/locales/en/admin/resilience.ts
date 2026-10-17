@@ -2,7 +2,7 @@ export default {
   resilience: {
     settings: {
       title: 'Gateway Resilience',
-      hint: 'Controls upstream failure classification, cooldowns and balance recovery, session rebinding, request budgets, pre-output keepalive, disconnect billing and no-account fallback. Turning the master switch off restores the previous behaviour.',
+      hint: 'Controls upstream failure classification, cooldowns and balance pauses, session rebinding, request budgets, pre-output keepalive, disconnect billing and no-account fallback. Turning the master switch off restores the previous behaviour.',
       openPanel: 'Open ops panel',
       enabled: 'Master switch',
       enabledHint: 'When off, every resilience feature is disabled and the gateway behaves as before.',
@@ -11,8 +11,8 @@ export default {
         sessionHint: 'After consecutive failures of a session on one account reach the threshold, the session is rebound and avoids that account for a while (default 2 failures, 10 minutes).',
         lastResort: 'Last-resort selection',
         lastResortHint: 'Without healthy accounts, serve on a free soft-penalised account, by priority and soonest cooldown end, queueing only when all are busy, so single-account groups stay available.',
-        balance: 'Recoverable balance',
-        balanceHint: 'Accounts out of upstream balance are re-checked on a schedule (default 1/2/5/10/15 minutes) and recover automatically after a top-up.',
+        balance: 'Pause on low balance',
+        balanceHint: 'Accounts out of upstream balance stop being scheduled for the pause; real traffic retries them afterwards and pauses them again if still short. "Restore status" in the account list puts one back at once.',
         budget: 'Request budget',
         budgetHint: 'Maximum attempts per request and total time before the first output; same-account retries only for capacity shedding.',
         keepalive: 'Pre-output keepalive',
@@ -31,6 +31,7 @@ export default {
         outputP99Hint: 'In-flight reservations cap output tokens at the model\'s 7-day P99 (at least 1024).'
       },
       fields: {
+        balancePause: 'Pause (s)',
         maxAttempts: 'Maximum attempts',
         preOutputBudget: 'Total time before first output (s)',
         keepaliveDelay: 'First heartbeat delay (s)',
@@ -67,7 +68,6 @@ export default {
       account: 'Account',
       label: 'Detail',
       count: 'Count',
-      balanceStates: 'Account balance states',
       metrics: {
         keepalive_committed: 'Pre-output heartbeats committed',
         first_output_timeout: 'First-output timeouts',
@@ -84,12 +84,6 @@ export default {
         stall: 'Stalled streams',
         post_output_failure: 'Upstream failures after output',
         relay_keepalive: 'Relay keep-alive frames'
-      },
-      states: {
-        OK: 'OK',
-        SUSPECT: 'Suspect',
-        EXHAUSTED: 'Exhausted',
-        RECOVERING: 'Recovering'
       }
     },
     undelivered: {
@@ -154,7 +148,6 @@ export default {
         tier: 'Tier',
         reason: 'Reason',
         recoverAt: 'Recovers at',
-        balance: 'Balance',
         sessionFailures: 'Session failures',
         avoided: 'Avoided'
       },
@@ -169,15 +162,6 @@ export default {
         overloaded: 'Overloaded',
         model_rate_limited: 'Model rate limited'
       }
-    },
-    account: {
-      balance: 'Upstream balance',
-      nextCheck: 'Next check {time}',
-      recheck: 'Topped up',
-      recheckHint: 'Re-check this account\'s upstream balance now',
-      rechecking: 'Checking…',
-      recheckDone: 'Re-checked: {state}',
-      recheckFailed: 'Re-check failed'
     },
     usage: {
       fallback: 'Fallback: {origin} → {group}',

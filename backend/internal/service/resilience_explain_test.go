@@ -16,8 +16,9 @@ func TestResilienceExplainShowsPenaltiesSessionLastResortAndFallback(t *testing.
 	// failures and avoid set, the last-resort pick and the fallback decision.
 	r, store, accounts, _ := newFallbackFixture(t)
 	ctx := context.Background()
+	pausedUntil := time.Now().Add(5 * time.Minute)
 	hard := Account{ID: 4, Name: "dry", Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Priority: 1,
-		Extra: resilience.BalanceRecord{State: resilience.BalanceExhausted, Since: time.Now()}.Extra()}
+		TempUnschedulableUntil: &pausedUntil, TempUnschedulableReason: resilience.BalancePauseReason("HTTP 403: Insufficient account balance")}
 	soft := softAccount(1)
 	soft.Name, soft.Priority = "busy", 2
 	accounts.byGroup[10] = []Account{soft, hard}
@@ -29,7 +30,7 @@ func TestResilienceExplainShowsPenaltiesSessionLastResortAndFallback(t *testing.
 	require.Equal(t, 0, out.HealthyCount)
 	require.Len(t, out.Accounts, 2)
 	require.Equal(t, ResilienceAccountExplanation{AccountID: 4, Name: "dry", Platform: PlatformOpenAI, Priority: 1,
-		Tier: "hard", Reason: "balance_exhausted", BalanceState: "EXHAUSTED"}, out.Accounts[0])
+		Tier: "hard", Reason: "balance_exhausted"}, out.Accounts[0])
 	busy := out.Accounts[1]
 	require.Equal(t, "soft", busy.Tier)
 	require.Equal(t, "temp_unschedulable", busy.Reason)

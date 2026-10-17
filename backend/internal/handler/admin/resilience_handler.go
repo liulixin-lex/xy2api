@@ -58,22 +58,6 @@ func (h *ResilienceHandler) UpdateSettings(c *gin.Context) {
 	response.Success(c, gin.H{"settings": updated, "defaults": resilience.Defaults()})
 }
 
-// RecheckBalance probes an account's upstream balance immediately, for
-// example after the administrator topped it up.
-// POST /api/v1/admin/accounts/:id/balance/recheck
-func (h *ResilienceHandler) RecheckBalance(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		response.BadRequest(c, "Invalid account id")
-		return
-	}
-	rec, err := h.svc.RecheckBalance(c.Request.Context(), id)
-	if response.ErrorFrom(c, err) {
-		return
-	}
-	response.Success(c, rec)
-}
-
 // ListUndelivered lists requests whose client left before any output.
 // GET /api/v1/admin/resilience/undelivered?page=&page_size=&user_id=&api_key_id=&group_id=&since=&until=
 func (h *ResilienceHandler) ListUndelivered(c *gin.Context) {
@@ -104,7 +88,7 @@ func (h *ResilienceHandler) ListUndelivered(c *gin.Context) {
 }
 
 // Stats returns this instance's resilience counters over a window (at most
-// one hour) and the balance state distribution.
+// one hour).
 // GET /api/v1/admin/resilience/stats?window=15m
 func (h *ResilienceHandler) Stats(c *gin.Context) {
 	window := time.Hour
@@ -116,7 +100,7 @@ func (h *ResilienceHandler) Stats(c *gin.Context) {
 		}
 		window = d
 	}
-	response.Success(c, h.svc.Stats(c.Request.Context(), window))
+	response.Success(c, h.svc.Stats(window))
 }
 
 // Explain shows how gateway resilience sees a group and optionally one

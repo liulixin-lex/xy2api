@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -37,7 +36,7 @@ func grokRelayResetHeaders(reset time.Time) http.Header {
 	}
 }
 
-func TestGrokAPIKeyBalance429GoesToBalanceStateNotRateLimit(t *testing.T) {
+func TestGrokAPIKeyBalance429PausesInsteadOfARateLimit(t *testing.T) {
 	withResilienceSettings(t, nil)
 	account := &Account{ID: 162, Platform: PlatformGrok, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true}
 	svc, repo := grokBalanceFixture(account)
@@ -48,27 +47,25 @@ func TestGrokAPIKeyBalance429GoesToBalanceStateNotRateLimit(t *testing.T) {
 
 	require.Zero(t, repo.rateLimitedCalls, "no quota-window rate limit from the relay headers")
 	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
-	require.Equal(t, resilience.BalanceExhausted, resilience.BalanceStateOf(account.Extra))
 	require.Equal(t, 1, repo.tempUnschedCalls)
-	require.True(t, strings.HasPrefix(repo.lastTempUnschedReason, resilience.ReasonPrefixBalanceExhausted))
-	// Probes recheck from 60 s on; the exclusion is bounded by the first
-	// recheck plus its grace, not by the relay's 28-minute reset.
-	require.True(t, repo.lastTempUnschedUntil.Before(time.Now().Add(15*time.Minute)))
+	require.True(t, resilience.IsBalancePause(repo.lastTempUnschedReason), repo.lastTempUnschedReason)
+	// The pause is balance.pause_seconds, not the relay's 28-minute reset.
+	require.WithinDuration(t, time.Now().Add(300*time.Second), repo.lastTempUnschedUntil, 3*time.Second)
+	require.NotContains(t, account.Extra, "resilience_balance")
 }
 
-func TestGrokAPIKeyBalance429AfterRecentSuccessIsWeak(t *testing.T) {
+func TestGrokAPIKeyBalance429AfterASuccessStillPauses(t *testing.T) {
 	withResilienceSettings(t, nil)
 	account := &Account{ID: 163, Platform: PlatformGrok, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true}
 	svc, repo := grokBalanceFixture(account)
-	svc.rateLimitService.resilience.successes.last.Store(account.ID, time.Now())
+	svc.rateLimitService.resilience.NoteAccountSuccess(context.Background(), account)
 
 	svc.handleGrokAccountUpstreamError(context.Background(), account, http.StatusTooManyRequests, grokRelayResetHeaders(time.Now().Add(28*time.Minute)), []byte(grokBalance429Body))
 
 	require.Zero(t, repo.rateLimitedCalls)
-	require.Equal(t, resilience.BalanceSuspect, resilience.BalanceStateOf(account.Extra))
-	require.True(t, strings.HasPrefix(repo.lastTempUnschedReason, resilience.ReasonPrefixBalanceSuspect))
-	require.Equal(t, resilience.TierSoft, resilience.TempUnschedTier(repo.lastTempUnschedReason),
-		"a suspect account stays available as a last resort")
+	require.True(t, resilience.IsBalancePause(repo.lastTempUnschedReason), repo.lastTempUnschedReason)
+	require.Equal(t, resilience.TierHard, resilience.TempUnschedTier(repo.lastTempUnschedReason),
+		"a recent success no longer makes it a weak, soft signal")
 }
 
 func TestGrokRateLimitPathsUnchangedOutsideTheBalanceCase(t *testing.T) {
@@ -90,7 +87,7 @@ func TestGrokRateLimitPathsUnchangedOutsideTheBalanceCase(t *testing.T) {
 			svc.handleGrokAccountUpstreamError(context.Background(), tc.account, http.StatusTooManyRequests, http.Header{"Retry-After": []string{"45"}}, []byte(tc.body))
 
 			require.Equal(t, 1, repo.rateLimitedCalls)
-			require.Equal(t, resilience.BalanceOK, resilience.BalanceStateOf(tc.account.Extra))
+			require.False(t, resilience.IsBalancePause(repo.lastTempUnschedReason))
 		})
 	}
 }
@@ -108,6 +105,5 @@ func TestGrokPoolModeBalance429KeepsGrokHandling(t *testing.T) {
 
 	svc.handleGrokAccountUpstreamError(context.Background(), account, http.StatusTooManyRequests, nil, []byte(grokBalance429Body))
 
-	require.Equal(t, resilience.BalanceOK, resilience.BalanceStateOf(account.Extra))
 	require.Zero(t, repo.tempUnschedCalls)
 }

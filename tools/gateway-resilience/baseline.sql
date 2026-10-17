@@ -110,6 +110,7 @@ SELECT count(*) FILTER (WHERE origin_group_id IS NOT NULL) AS served_by_fallback
        count(*) FILTER (WHERE billing_mode = 'undelivered_abuse') AS undelivered_abuse_billed
 FROM usage_logs
 WHERE created_at >= now() - make_interval(hours => :hours);
-SELECT COALESCE(extra->'resilience_balance'->>'state', 'OK') AS balance_state, count(*) AS accounts
-FROM accounts WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 2 DESC;
+SELECT count(*) AS balance_paused_accounts
+FROM accounts WHERE deleted_at IS NULL
+  AND temp_unschedulable_reason LIKE 'balance:%' AND temp_unschedulable_until > now();
 \endif

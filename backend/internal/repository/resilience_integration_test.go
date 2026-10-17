@@ -5,12 +5,10 @@ package repository
 import (
 	"context"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -60,63 +58,10 @@ func TestResilienceStoreSessionStateExpires(t *testing.T) {
 	require.Greater(t, ttl, time.Duration(0))
 }
 
-func TestResilienceStoreBalanceProbeIsSingleFlight(t *testing.T) {
-	ctx := context.Background()
-	store := NewResilienceStore(testRedis(t))
-
-	// Two instances racing for the probe of one account: exactly one wins.
-	var wins int
-	var errs []error
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	for i := 0; i < 16; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ok, err := store.TryLockBalanceProbe(ctx, 42, time.Minute)
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				errs = append(errs, err)
-			}
-			if ok {
-				wins++
-			}
-		}()
-	}
-	wg.Wait()
-	require.Empty(t, errs)
-	require.Equal(t, 1, wins)
-	require.NoError(t, store.UnlockBalanceProbe(ctx, 42))
-	ok, err := store.TryLockBalanceProbe(ctx, 42, time.Minute)
-	require.NoError(t, err)
-	require.True(t, ok)
-
-	for want := int64(1); want <= 3; want++ {
-		got, err := store.IncrGenerationProbe(ctx, 42, "2026-10-15")
-		require.NoError(t, err)
-		require.Equal(t, want, got)
-	}
-	got, err := store.IncrGenerationProbe(ctx, 42, "2026-10-16")
-	require.NoError(t, err)
-	require.Equal(t, int64(1), got, "the daily budget is per day")
-}
-
-func TestResilienceStoreRecoveringWindowAndGroupStability(t *testing.T) {
+func TestResilienceStoreGroupStabilityAndFallbackKeys(t *testing.T) {
 	ctx := context.Background()
 	store := NewResilienceStore(testRedis(t))
 	now := time.Now()
-
-	require.NoError(t, store.SetRecovering(ctx, 1, now.Add(time.Minute)))
-	require.NoError(t, store.SetRecovering(ctx, 2, now.Add(-time.Second)))
-	rec, err := store.Recovering(ctx, now)
-	require.NoError(t, err)
-	require.Len(t, rec, 1)
-	require.WithinDuration(t, now.Add(time.Minute), rec[1], time.Millisecond)
-	require.NoError(t, store.ClearRecovering(ctx, 1))
-	rec, err = store.Recovering(ctx, now)
-	require.NoError(t, err)
-	require.Empty(t, rec)
 
 	// The first healthy evaluation starts the stability clock; later ones keep it.
 	first, err := store.MarkGroupStable(ctx, 9, now)
@@ -213,10 +158,9 @@ func TestUndeliveredRepositoryRoundTripAndRetention(t *testing.T) {
 	require.Equal(t, tag+"-header_wait", list[0].RequestID)
 }
 
-func TestResilienceRepositoryBalanceStatesAndOutputP99(t *testing.T) {
+func TestResilienceRepositoryOutputP99(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
-	accounts := NewAccountRepository(client, integrationDB, nil)
 	repo := NewResilienceRepository(integrationDB)
 	tag := fmt.Sprintf("itest-resil-%d", time.Now().UnixNano())
 	// The database is shared by the package: remove every row of this test
@@ -233,27 +177,7 @@ func TestResilienceRepositoryBalanceStatesAndOutputP99(t *testing.T) {
 		}
 	})
 
-	before, err := repo.CountBalanceStates(ctx)
-	require.NoError(t, err)
-
-	exhausted := mustCreateAccount(t, client, &service.Account{Name: tag + "-exhausted", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey})
-	paused := mustCreateAccount(t, client, &service.Account{Name: tag + "-paused", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey})
 	healthy := mustCreateAccount(t, client, &service.Account{Name: tag + "-ok", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey})
-	require.NoError(t, accounts.UpdateExtra(ctx, exhausted.ID,
-		resilience.BalanceRecord{State: resilience.BalanceExhausted, Since: time.Now()}.Extra()))
-	require.NoError(t, accounts.SetTempUnschedulable(ctx, paused.ID, time.Now().Add(time.Hour), "balance:exhausted"))
-
-	ids, err := repo.ListBalanceTrackedAccountIDs(ctx)
-	require.NoError(t, err)
-	require.Contains(t, ids, exhausted.ID)
-	require.Contains(t, ids, paused.ID)
-	require.NotContains(t, ids, healthy.ID)
-
-	after, err := repo.CountBalanceStates(ctx)
-	require.NoError(t, err)
-	require.Equal(t, before["EXHAUSTED"]+1, after["EXHAUSTED"])
-	require.Equal(t, before["OK"]+2, after["OK"], "a paused account without a record counts as OK")
-
 	user := mustCreateUser(t, client, &service.User{Email: tag + "@example.com"})
 	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "sk-" + tag, Name: tag})
 	model := tag + "-model"
