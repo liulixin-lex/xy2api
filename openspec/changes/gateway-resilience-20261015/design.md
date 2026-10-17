@@ -388,7 +388,7 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 
 ### 9.5 用户自身余额（D13-2、D13-3）
 
-- **真实余额不足**（`api_key_auth.go` 的预检，以及 `billingErrorDetails` 中的余额分支）：统一为 403，`code: INSUFFICIENT_BALANCE`，文案为 `Insufficient balance on your xy2api account, please recharge`（保留 “insufficient balance” 字样，下游 sub2api 系站点仍能识别）。OpenAI 兼容端点使用 `{"error":{"type":"insufficient_balance","code":"INSUFFICIENT_BALANCE","message":...}}`，中间件路径保持原有的 `{code,message}` 形状。
+- **真实余额不足**（`api_key_auth.go` 的预检，以及 `billingErrorDetails` 中的余额分支）：统一为 403，`code: INSUFFICIENT_BALANCE`，文案沿用 0.3.0 原文 `Insufficient account balance`（用户 2026-10-17 要求不改提示文案；下游 sub2api 系站点按缺省余额关键字识别）。OpenAI 兼容端点使用 `{"error":{"type":"insufficient_balance","code":"INSUFFICIENT_BALANCE","message":...}}`，中间件路径保持原有的 `{code,message}` 形状。
 - **在途预留超额**（`reserveInflight` 拒绝时余额 > 0）：改为 429，`error.type="rate_limit_error"`，`code="concurrent_balance_reserved"`，文案为 `Available balance is reserved by in-flight requests (available $X, reserved $Y); please retry shortly`，并带 `Retry-After`。
 - **估算改进**（`billing_inflight_reservation.go` 的 `estimateOne`）：
   - 输入部分：对带会话标识的请求，按该会话最近一次的“缓存读 / 输入”比例折算，以缓存读价格计入（会话缓存比例存于 Redis，TTL 30 分钟）；无历史时维持原口径；

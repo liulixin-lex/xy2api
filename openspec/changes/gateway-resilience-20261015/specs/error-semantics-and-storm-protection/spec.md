@@ -103,7 +103,7 @@ Upstream `BALANCE` failures, including image-account 402 responses, MUST NOT be 
 
 When the user's own balance is insufficient, both the API-key pre-check and the post-wait billing check MUST return:
 - status 403 with code `INSUFFICIENT_BALANCE`;
-- message `Insufficient balance on your xy2api account, please recharge`.
+- message `Insufficient account balance` (the 0.3.0 wording).
 
 OpenAI-compatible endpoints MUST nest this as `{"error":{"type":"insufficient_balance","code":"INSUFFICIENT_BALANCE","message":…}}`. When the balance is positive but already reserved by in-flight requests, the gateway MUST return:
 - status 429;

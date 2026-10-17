@@ -270,7 +270,7 @@ func TestChainedGatewayErrorShapes(t *testing.T) {
 		want   Category
 	}{
 		{429, `{"error":{"type":"rate_limit_error","code":"concurrent_balance_reserved","message":"Available balance is reserved by in-flight requests (available $0.0400, reserved $0.0800); please retry shortly"}}`, CategoryRateLimit},
-		{403, `{"error":{"type":"insufficient_balance","code":"INSUFFICIENT_BALANCE","message":"Insufficient balance on your xy2api account, please recharge"}}`, CategoryBalance},
+		{403, `{"error":{"type":"insufficient_balance","code":"INSUFFICIENT_BALANCE","message":"Insufficient account balance"}}`, CategoryBalance},
 		{503, `{"error":{"type":"api_error","code":"server_is_overloaded","message":"Upstream service temporarily unavailable"}}`, CategoryCapacityShed},
 		{503, `{"error":{"type":"api_error","code":"proxy_upstream_unavailable","message":"Service temporarily unavailable, please retry"}}`, CategoryTransient},
 	} {
