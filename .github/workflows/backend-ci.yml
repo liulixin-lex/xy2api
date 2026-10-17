@@ -20,6 +20,8 @@ jobs:
         run: python tools/upstream-sync/sync.py audit
       - name: Original scheduler diff allowlist
         run: python tools/upstream-sync/sync.py scheduler-diff
+      - name: Documentation consistency
+        run: python tools/check_docs_consistency.py
 
   shell:
     runs-on: macos-15
