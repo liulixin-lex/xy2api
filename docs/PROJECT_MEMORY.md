@@ -4,7 +4,7 @@
 
 ## 当前交接状态
 
-### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-16T20:20Z；PR #97 已开，**暂停合并与打 RC**；审查与生产核查 0.4.0 范围全部提交，候选 `934bcf2bc` 测试服务器验证中，生产未改）
+### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-17T00:15Z；PR #97 已开，**暂停合并与打 RC**；审查与生产核查 0.4.0 范围全部提交，候选 `934bcf2bc` 测试服务器验证中，生产未改）
 
 **背景**
 
@@ -65,6 +65,7 @@
 - **进度（19:35Z，生产只读核查转交）**：评审 agent 的生产核查（仓库外 `production/PROD_CONFLICT_REVIEW_20261016.md`）确认 240 秒预算与分档、冷却、余额状态机、F3/F4 保持。0.4.0 修复：①伪保活帧被丢弃后仍算上游存活（停滞检测取最后读到一行与最后丢帧中较晚者，覆盖 Responses 流、Chat Completions 与 Messages 转换的流式与非流式；按账号计 `relay_keepalive`；测试服务器 KA-9，fault F24 加 `output=1`）`9adce14cb`；②缺省余额关键字加 `insufficient user balance`，`billing_error` 单独不算余额（Sub2API 系中转的所有计费前置失败都用它）`8285e6926`；③本地首输出超时不冷却账号，按代码对齐 design 与两份 spec，加锁定用例 `fdb7cfdcb`；runbook 补部署前提、上线前核对、上线后观测与管理员配置项，tasks 登记 0.4.1 的 xhigh/max 静默上游不换号 `6af7870d0`；staging-validation 改为 6.5 小时与存活堆判据 `934bcf2bc`。本机全量验证全绿（CI 门禁 255）。`31407833d` 浸泡 4 小时 23 分后停止，补采回落样本后全部检查通过（存活堆斜率 0.5 MiB/h，匿名内存 90→95.3 MiB）。新候选 `934bcf2bc` 部署中，按用户此前要求重跑全部场景、客户端与 6.5 小时浸泡（改动在流读取热路径）。注意：本机 gocache 再次涨到 29G 写满磁盘，已清理。
 - **进度（20:05Z）**：`934bcf2bc` 场景 45/45（含新 KA-9；F23/F24/F26 与停滞类均过）、真实客户端 16/16；19:59Z 启动 6.5 小时浸泡（`soak-934bcf2bc`，约 02:40Z 连同回落与检查结束，等待脚本 `/tmp/xy2-soak-wait.sh 934bcf2bc`）。之后：`/tmp/xy2-postsoak-metrics.sh 934bcf2bc 7` → 私有 `STAGING_REPORT.md` 定稿 → 推送 PR #97、更新描述（`PR_BODY.md` 已含生产核查节）→ 等 CI → 合并、RC、晋级 0.4.0。升级演练与 XY-image 回放沿用（自 `eaa63fd30` 无迁移、schema 与应答形态改动）。
 - **进度（20:20Z，评审复核 `9adce14cb`…`934bcf2bc`）**：①②、runbook、tasks 通过，公开仓库无生产标识，`billing_error` 不算余额的取舍获同意。更正：`fdb7cfdcb` 写的“上游以 `first_output_timeout` 应答（级联网关）仍软冷却”代码中不存在——上游错误处理的 switch 只处理 BALANCE/TRANSIENT/CLIENT_ERROR，按 `SoftCooldown()` 写冷却的 `ApplyResilienceOutcome` 只由停滞调用；实际是本地与上游应答的首输出超时都不冷却账号，只有 OpenAI API Key 账号按上游 5xx 原有规则记入按模型瞬时屏蔽（本地超时不触发）。`7043f32cb` 按代码修正 design §2/§3、两份 spec 与 tasks，并加 `TestUpstreamFirstOutputTimeoutLeavesTheAccountSchedulable` 锁定（只改文档与测试，镜像不变，不重跑验证）；同时登记 0.4.1：原生 Chat Completions 路径传空存活记录，`relay_keepalive` 计数偏少。教训：文档里的行为描述须有代码与用例依据，写之前先追调用链。
+- **进度（2026-10-17T00:15Z）**：最终 HEAD `a7e012c19` 本机全量验证全绿（CI 门禁 256）；推送前扫描 `688bd9d68..HEAD` 共 36 个提交无主机、域名、凭据，作者均为 noreply；origin/main 仍为分支点 `f8fec15a2`，合并无冲突。浸泡 `soak-934bcf2bc` 约 4 小时，存活堆整点小时中位数 56/58/58/59 MB（约 0.5 MiB/h）。仓库外已备：`PR_BODY.md`（浸泡结果处为 `SOAK_RESULT_PLACEHOLDER`）、`RELEASE_NOTES_v0.4.0-rc.1.md`（annotated tag 消息；git 会删掉以 `#` 开头的行，故不用标题）。发版流程参照 0.3.0：常规 merge → 合并提交打 annotated `v0.4.0-rc.1` → Release 制品双 SHA、GHCR 双架构与标签、prerelease 与稳定别名未动、`vcs.modified` → RC 镜像新装 323 迁移、0.3.0 升级与回退、成套恢复（测试服务器 `upgrade_drill.py`）与关键场景子集 → 晋级 PR（`backend/cmd/server/VERSION`、`UPSTREAM_BASE.json` 的 `xy2api_version` 改为 0.4.0）→ annotated `v0.4.0` → 正式制品校验 → 发版后纯文档收尾 PR。
 
 **卡点与风险**
 
