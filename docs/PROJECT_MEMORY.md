@@ -4,12 +4,15 @@
 
 ## 当前交接状态
 
-### 注册邮箱别名加固与用户批量禁用（2026-10-17，进行中：本地实施，分支 `fix/registration-alias-batch-disable-20261017`；未推送、未发版、未部署）
+### 注册邮箱别名加固与用户批量禁用（2026-10-17T13:50Z 更新：分支已推送并开 PR，待用户审阅；未合并、未发版、未部署）
 
 - 背景：2026-10-17 生产出现注册机批量注册（当天 86 个 Gmail 账号；脚本伪造浏览器 UA、缺少 `Sec-Fetch-Site`、轮换代理 IP、注册后约 1 秒批量建 Key）。只读分析发现上游别名查重（`existsByEmailOrAlias`）有两个缺口：带引号的本地部分（`"a.b"@gmail.com`）不归一；查重不计软删除账号，管理员删号后同一收件箱可以再次注册。管理后台也只有逐个调用接口的批量删除。
 - 用户决定（2026-10-17）：① 注册、发验证码、第三方邮箱自动注册与邮箱绑定拒绝非常规本地部分（只允许字母、数字与 `. _ + -`，首尾为字母、数字或下划线，无连续点号，最长 64），新错误码 `EMAIL_FORMAT_NOT_ALLOWED`；② 别名归一去掉引号，数据库探针兼容存量带引号的行（沿用迁移 190 的表达式索引，不加迁移）；③ 别名查重计入软删除账号（系统没有自助注销，只影响管理员删除的账号）；④ 后台新增批量禁用（附批量启用以便撤回），以后清理注册机用禁用代替删除。不按点号数量拒绝：生产老用户中有 22 人的 Gmail 地址有 4 个以上点号。
 - 影响面：生产全量用户中只有 27 个地址不符合新格式，全部是 10-17 的带引号注册机账号。
-- 生产侧（不在本分支）：建议由 Caddy 或 Cloudflare 拦截两个注册接口上缺少 `Sec-Fetch-Site` 的请求，待用户授权；本分支不改生产。
+- 已完成（分支 `fix/registration-alias-batch-disable-20261017`，基于 `ca2bdd111`）：① `58601c744` 别名加固，具名补丁 `xy-registration-email-alias-hardening`；② `a37bbc64f` 批量启用/禁用，具名补丁 `xy-admin-user-batch-status`：`POST /api/v1/admin/users/batch-status`（`{user_ids, status}`，1–500 个，不支持 `all`）用一条 `UPDATE ... RETURNING` 完成，跳过已删除和已是目标状态的用户，禁用时跳过管理员；返回 `affected`/`skipped`，逐个失效认证缓存并写审计日志。用户管理页多选后出现“批量禁用/批量启用”。本机验证全绿，见操作日志 `20261017-registration-alias-batch-disable`。
+- 未完成（均需用户另行授权）：① 审阅并合并 PR；② 发版与生产部署；③ 生产 Caddy 或 Cloudflare 规则：两个注册接口的 POST 缺少 `Sec-Fetch-Site` 时拦截（用户已选定只用这一条件；不需要改源码；未改生产）。
+- 卡点与风险：仓储集成测试（testcontainers）本机无 Docker，以 CI 为准；批量 SQL 已在本机临时 PostgreSQL 18（应用全部迁移）上验证。
+- 关键位置：`backend/internal/service/registration_email_policy.go`、`backend/internal/service/registration_email_alias.go`、`backend/internal/repository/user_repo.go`（`emailAliasOwnerIDWithClient`）；`backend/internal/service/admin_user_batch_status.go`、`backend/internal/repository/user_repo_batch_status.go`、`backend/internal/handler/admin/user_handler_batch_status.go`、`frontend/src/views/admin/UsersView.vue`。
 
 ### 误删 93 个用户后的恢复（2026-10-17，已完成：18 个充值用户及其 25 个 API Key 已恢复）
 
@@ -774,12 +777,6 @@
 Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
-
-### 20261017-registration-alias-batch-disable — 注册别名加固与用户批量禁用（进行中）
-
-- 分支 `fix/registration-alias-batch-disable-20261017`，起点 `origin/main` `ca2bdd111`。范围与用户决定见顶部同名条目。
-- 计划：每项一个提交并带测试。别名修复登记具名补丁 `xy-registration-email-alias-hardening`（`policy.json` 与 `UPSTREAM_BASE.json` 的 `custom_patches`，以及 `custom_patch_tests`）；批量状态接口在上游文件中的新钩子登记 `required_literals`。用户仓储新增能力走独立的可选接口，不改 `UserRepository`，避免改动 11 个测试桩。
-- 授权边界：做到提 PR 为止；合并、打 tag、发版、生产部署和 Caddy/Cloudflare 规则均需另行授权。
 
 ### 20261015-gateway-resilience — 网关韧性 0.4.0 开发与测试服务器验证（进行中）
 
@@ -2492,3 +2489,16 @@ pnpm --dir frontend run build
 - 验证：18 人 active，余额合计与累计充值合计均与删除前一致；25 个 Key 全部可用，md5 汇总与快照一致；恢复后数分钟内已有 3 个 Key 成功调用 27 次。临时目录已删除，磁盘空间已释放。
 - 卡点/风险：3 个 GitHub 用户的登录绑定未恢复，依赖按邮箱自动重新绑定，未在生产验证。
 - 下一步：可考虑为“删除用户”增加可恢复能力（例如保留 Key 原值或真正写入 `deleted_api_key_audits`），并明确 `deleted_api_key_audits` 的用途。
+
+### 2026-10-17T13:50Z — `20261017-registration-alias-batch-disable` — 本地完成，已推送并开 PR（待审阅）
+
+- 请求/目标：用户同意别名加固方案（拒绝非常规本地部分、别名归一去引号、探针兼容存量带引号的行、查重计入软删除账号），并要求在用户管理多选中增加批量禁用，以后清理注册机不再删号；同时提供批量启用，便于撤回。做到提 PR 为止。
+- 开始状态：自 `origin/main` `ca2bdd111` 新建分支 `fix/registration-alias-batch-disable-20261017`，工作树干净。
+- 完成操作：
+  - `58601c744` 别名加固：新错误码 `EMAIL_FORMAT_NOT_ALLOWED`，覆盖注册、发验证码（同步与异步）和共享的注册邮箱策略（第三方邮箱自动注册/登录、邮箱绑定）；缺少本地部分或域名的输入仍交给原有校验。仓储探针增加带引号的形式，仍走迁移 190 的表达式索引；别名查重用 `SkipSoftDelete` 计入软删除账号。注册页与验证页显示本地化提示。
+  - `a37bbc64f` 批量状态：服务、仓储、处理函数各一个新文件。仓储能力是可选接口 `UserStatusBatchRepository`，不改 `UserRepository` 及其测试桩；缺少该能力时返回 501 `USER_STATUS_BATCH_UNAVAILABLE`。上游文件只加路由、`AdminService` 方法和处理函数测试桩方法，连同前端 API、视图与中英文案处的钩子一起登记到 `required_literals`。
+  - 推送前改写了尚未推送的文档提交：主机路径、供应商域名、用户与 Key 标识、金额明细移到仓库外私有笔记（位置见顶部“误删 93 个用户后的恢复”）。
+- 修改文件：见上述两个提交；本文件。
+- 验证：gofmt；`go vet`（默认、`unit`、`integration` 标签）；golangci-lint v2.14.0 0 issues；`go test -tags=unit` 覆盖 service、handler（含 admin）、server（含 middleware、routes）、repository，全部通过。批量 SQL 在本机临时 PostgreSQL 18（应用全部迁移）上验证通过，临时实例已删除。前端 `check:i18n`、`typecheck`、eslint 通过，vitest 全量 389 个文件、3051 个用例通过。`sync.py audit`、`scheduler-diff` 通过。仓储集成测试（testcontainers）因本机无 Docker 未运行，以 CI 为准。
+- 卡点/风险：无代码卡点；集成测试结果以 CI 为准。
+- 下一步：用户审阅 PR；合并、发版、生产部署以及 Caddy/Cloudflare 的 `Sec-Fetch-Site` 规则均待另行授权。
