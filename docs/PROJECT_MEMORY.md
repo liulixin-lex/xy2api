@@ -752,6 +752,12 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 ## 进行中的工作
 
+### 20261017-repo-consistency-sweep — 全仓库代码、结构与文档一致性审查与规范化（进行中）
+
+- 2026-10-17T08:15Z 用户要求：全量审查工作区的代码、结构与文档，按最新进度规范化，补齐漏改的代码与文档，并建立机制，让后续开发时刻保持最新、不漏模块或文档。评审 agent 执行，直接提交到 `release/0.4.0`（起点 `5fdd1e589`，工作树干净）；已告知主 agent（同一工作区，正在等 `soak-c6b837dca` 浸泡）。
+- 范围：管理员与部署文档、openspec 中与代码不符之处、DEV_GUIDE/README、`tools/gateway-resilience` 的 README 与 SQL、`.gitignore` 的 docs 白名单、docs 索引、AGENTS.md 变更同步规则、文档一致性检查脚本与 CI 步骤、项目记忆归档（历史原样移到归档文件）。
+- 约束：不改 `backend/`、`frontend/` 源码，浸泡过的候选与正式镜像不因此产生差异；不推送、不合并、不打标签（主 agent 按既有授权随 PR #100 推送）；不访问生产与测试服务器。
+
 ### 20261015-gateway-resilience — 网关韧性 0.4.0 开发与测试服务器验证（进行中）
 
 - 2026-10-15T11:30Z 用户授权“开始执行”：按 `openspec/changes/gateway-resilience-20261015/tasks.md` 开发，在测试服务器部署隔离环境验证；Cloudflare 测试 DNS 已由用户配置；真实测试 Key 由用户在需要时提供。PR、发版、生产部署仍按方案在全部闭环后进行。
