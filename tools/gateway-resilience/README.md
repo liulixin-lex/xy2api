@@ -4,13 +4,13 @@ Tools for the 0.4.0 gateway resilience work (`openspec/changes/gateway-resilienc
 
 | Tool | Purpose |
 |---|---|
-| `baseline.sql` | Read-only design §14 metrics from PostgreSQL: errors by phase, no-account 503 and the longest no-account streak per group, balance-disabled accounts, "insufficient balance" shown to users with a positive balance, consecutive failures of one key on one account, cache read share and TTFT; on 0.4.0 also undelivered requests, fallback usage and balance states. |
-| `first_token_calibration.sql` | First token latency per model and reasoning effort over N days (P50–P99.9) and the share above 60/120/180 seconds, to calibrate `budget.first_output_timeout_seconds`. |
+| `baseline.sql` | Read-only design §14 metrics from PostgreSQL: errors by phase, no-account 503 and the longest no-account streak per group, balance-disabled accounts, "insufficient balance" shown to users with a positive balance, consecutive failures of one key on one account, cache read share and TTFT; on 0.4.0 also undelivered requests, fallback usage and accounts in a balance pause. |
+| `first_token_calibration.sql` | First token latency per model and reasoning effort over N days (P50–P99.9) and the share above the current tiers (180/200/220 seconds) and the 240-second budget, to calibrate `budget.first_output_timeout_seconds`. |
 | `metrics.sql` | The `baseline.sql` numbers as JSON lines, for `metrics_report.py`. Sets the session read-only itself. |
 | `caddy_cuts.py` | CDN cut rate per entry (Cloudflare, ESA, direct) from Caddy JSON access logs; with `--app`, matches each cut to the application log to find requests completed (and billed) after the client was cut; share of 503 responses with `Retry-After`. `--json` prints one object. |
 | `session_streaks.py` | From application logs (JSON or console format): consecutive failures of one session on one account (requests without a session hash are counted per API key, separately), and the latency of requests that switched accounts and still succeeded. `--json` prints one object. |
 | `metrics_report.py` | design §14 report: `collect` measures one environment into a JSON file, `report` compares a baseline with a candidate against the §14 targets (Markdown; exit 1 when a measured metric misses). |
-| `fault-upstream/` | Fault-injecting upstream (Go, standard library only) with OpenAI Responses/Chat, Anthropic, Gemini, image, `/v1/usage` and new-api billing shapes. Scenarios F00–F24, `BAL` and `MIX`. |
+| `fault-upstream/` | Fault-injecting upstream (Go, standard library only) with OpenAI Responses/Chat, Anthropic, Gemini, image, `/v1/usage` and new-api billing shapes. Scenarios F00–F29, `BAL` and `MIX`. |
 | `cdn-sim/` | CDN edge simulator (Go, standard library only): first-byte and idle read timeouts, `X-XY-Edge` injection, cut and request logs. |
 
 ## Database scripts
@@ -76,12 +76,16 @@ http://fault-upstream:8080/f/F06;secs=200      (account base_url)
 | F15 | 401 invalid key | |
 | F16 | 529 overloaded (`server_is_overloaded`) | `status` |
 | F18 | Image generation | `secs` |
-| F19 / F20 | `/v1/usage` and new-api billing endpoints | `key` |
+| F19 / F20 | `/v1/usage` and new-api billing endpoints (served the RC balance probes, which 0.4.0 removed; no scenario uses them now) | `key` |
 | F21 | Anthropic `message_start`, then stall | `secs` |
 | F23 | Slow stream: a delta every `every` seconds for `secs` seconds, then completion with usage | `secs`, `every` |
-| F24 | Relay keep-alive: empty `SSE-Keep-Alive` deltas (the first before `response.created`), then `response.failed` busy (Responses streams) | `secs`, `every` |
+| F24 | Relay keep-alive: empty `SSE-Keep-Alive` deltas (the first before `response.created`), then `response.failed` busy (Responses streams); with `output=1` a real delta comes first and the stream then completes | `secs`, `every`, `output` |
 | F25 | Pooled relay: a Responses request with `previous_response_id` gets a vague 400 (`Upstream request failed`), others answer normally | |
-| BAL | Normal while the balance of `key` is positive, F12 otherwise | `key`, `first` |
+| F26 | 200 SSE with some output, then an in-stream failure after `after` seconds | `after`, `code` (`busy` or `rate_limit_exceeded`) |
+| F27 | 403 content-safety refusal in Zhipu's shape (top-level code `request_check_blocked`) | |
+| F28 | Anthropic relay queue timeout: 200 SSE whose first event, after `after` seconds, is an `error` of type `rate_limit_error` | `after` |
+| F29 | Codex backend relay: a Responses request replaying `web_search_call` input without declaring web_search gets 200 SSE, then `response.failed` "response protection is unavailable"; others answer normally | |
+| BAL | Normal while the balance of `key` is positive, F12 otherwise | `key`, `first`, `reset` (adds a relay's exhausted rate-limit headers) |
 | MIX | A random fault with probability `p` percent per fault type, otherwise normal | `p` |
 
 Any scenario accepts `delay` (seconds) to hold the answer back, for example `F16;delay=20` to return 529 after the gateway's pre-output heartbeats.
