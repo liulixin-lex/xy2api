@@ -253,6 +253,8 @@ export default {
     registrationFailed: 'Registration failed. Please try again.',
     emailDomainRegistrationLimit:
       'This email domain cannot register another account. Please use a mainstream email, or contact support to add your enterprise domain to the allowlist.',
+    emailFormatNotAllowed:
+      'This email address format is not supported. Use a plain address without quotes, spaces or special characters.',
     emailSuffixNotAllowed: 'This email domain is not allowed for registration.',
     emailSuffixNotAllowedWithAllowed:
       'This email domain is not allowed. Allowed domains: {suffixes}',

@@ -1143,7 +1143,8 @@ func (r *userRepository) ExistsByEmail(ctx context.Context, email string) (bool,
 // 上限只是兜底，避免公开未鉴权的注册/发码端点把大表整张读进内存。
 const emailAliasCandidateLimit = 50
 
-// ExistsByEmailAlias 见 service.UserRepository。软删除过滤沿用 ExistsByEmail 的默认行为。
+// ExistsByEmailAlias 见 service.UserRepository。与 ExistsByEmail 不同，它把软删除账号也
+// 计入：管理员删掉的账号继续占用其收件箱，否则删号会让同一收件箱换个写法重新注册并再领注册赠送。
 func (r *userRepository) ExistsByEmailAlias(ctx context.Context, email string) (bool, error) {
 	return existsByEmailAliasWithClient(ctx, clientFromContext(ctx, r.client), email)
 }
@@ -1162,19 +1163,24 @@ func emailAliasOwnerIDWithClient(ctx context.Context, client *dbent.Client, emai
 		return 0, false, nil
 	}
 
-	preds := make([]predicate.User, 0, 2*len(probes))
+	preds := make([]predicate.User, 0, 4*len(probes))
 	for _, probe := range probes {
+		local, domain := escapeLikeWildcards(probe.Local), escapeLikeWildcards(probe.Domain)
 		preds = append(preds,
 			dotStrippedEmailEQ(probe.Local+"@"+probe.Domain),
 			// "+后缀"的内容未知，只能按前缀匹配。
-			dotStrippedEmailLike(escapeLikeWildcards(probe.Local)+"+%@"+escapeLikeWildcards(probe.Domain)),
+			dotStrippedEmailLike(local+"+%@"+domain),
+			// 带引号本地部分（"a.b"@gmail.com）的存量行：注册已不再接受这种写法，
+			// 但历史行仍须占用其收件箱。表达式与上面相同，继续命中迁移 190 的索引。
+			dotStrippedEmailEQ(`"`+probe.Local+`"@`+probe.Domain),
+			dotStrippedEmailLike(`"`+local+`+%"@`+domain),
 		)
 	}
 	candidates, err := client.User.Query().
 		Where(dbuser.Or(preds...)).
 		Limit(emailAliasCandidateLimit).
 		Select(dbuser.FieldID, dbuser.FieldEmail).
-		All(ctx)
+		All(mixins.SkipSoftDelete(ctx))
 	if err != nil {
 		return 0, false, err
 	}

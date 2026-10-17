@@ -695,7 +695,8 @@
     "xy-resilience-fallback-hook",
     "xy-index-nonce-no-304",
     "xy-placeholder-session-id",
-    "xy-allowlist-404-hint"
+    "xy-allowlist-404-hint",
+    "xy-registration-email-alias-hardening"
   ],
   "custom_patch_tests": [
     {
@@ -832,6 +833,16 @@
       "id": "xy-allowlist-404-hint",
       "path": "backend/internal/server/middleware/group_model_allowlist_test.go",
       "literal": "TestGroupModelAllowlistRejectionNamesAvailableModels"
+    },
+    {
+      "id": "xy-registration-email-alias-hardening",
+      "path": "backend/internal/service/registration_email_policy_test.go",
+      "literal": "func TestAuthService_RejectsNonStandardEmailLocalPart"
+    },
+    {
+      "id": "xy-registration-email-alias-hardening",
+      "path": "backend/internal/repository/user_repo_email_alias_test.go",
+      "literal": "func TestUserRepositoryExistsByEmailAliasCountsDeletedAccounts"
     }
   ]
 }

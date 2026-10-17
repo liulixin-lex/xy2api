@@ -4,8 +4,10 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,6 +45,72 @@ func TestIsRegistrationEmailSuffixAllowed(t *testing.T) {
 	require.True(t, IsRegistrationEmailSuffixAllowed("user@b.cn", []string{"@a.com", "*.b.cn"}))
 	require.False(t, IsRegistrationEmailSuffixAllowed("user@c.cn", []string{"@a.com", "*.b.cn"}))
 	require.True(t, IsRegistrationEmailSuffixAllowed("user@any.com", []string{}))
+}
+
+func TestHasNonStandardEmailLocalPart(t *testing.T) {
+	standard := []string{
+		"user@example.com",
+		"First.Last@Gmail.com",
+		"a.b.c.d.e@gmail.com",
+		"user+tag@gmail.com",
+		"user_name@qq.com",
+		"user-name@163.com",
+		"_user@qq.com",
+		"1234567890@qq.com",
+		"a@qq.com",
+		strings.Repeat("a", 64) + "@qq.com",
+		// 缺少本地部分或域名的输入交给既有格式校验，不由本规则判定。
+		"not-an-email",
+		"@gmail.com",
+		"user@",
+	}
+	for _, email := range standard {
+		require.Falsef(t, HasNonStandardEmailLocalPart(email), "want standard: %s", email)
+	}
+
+	nonStandard := []string{
+		`"a.b.c"@gmail.com`,
+		`"ab"@gmail.com`,
+		`"a@b"@gmail.com`,
+		"a b@gmail.com",
+		"a..b@gmail.com",
+		".ab@gmail.com",
+		"ab.@gmail.com",
+		"+alice@gmail.com",
+		"-ab@gmail.com",
+		"ab-@gmail.com",
+		"a!b@gmail.com",
+		"a#b@gmail.com",
+		"o'brien@gmail.com",
+		`a\b@gmail.com`,
+		"用户@qq.com",
+		strings.Repeat("a", 65) + "@qq.com",
+	}
+	for _, email := range nonStandard {
+		require.Truef(t, HasNonStandardEmailLocalPart(email), "want non-standard: %s", email)
+	}
+}
+
+// 引号写法在发码前就被拒绝，不查库也不发信；注册与第三方邮箱策略同样拒绝。
+func TestAuthService_RejectsNonStandardEmailLocalPart(t *testing.T) {
+	settings := map[string]string{
+		SettingKeyRegistrationEnabled:              "true",
+		SettingKeyRegistrationEmailSuffixWhitelist: `["@gmail.com"]`,
+	}
+	ctx := context.Background()
+	const quoted = `"a.b.c"@gmail.com`
+
+	svc := newAuthService(&userRepoStub{}, settings, nil, nil)
+	require.ErrorIs(t, svc.SendVerifyCode(ctx, quoted), ErrEmailFormatNotAllowed)
+	_, err := svc.SendVerifyCodeAsync(ctx, quoted)
+	require.ErrorIs(t, err, ErrEmailFormatNotAllowed)
+	_, _, err = svc.Register(ctx, quoted, "password")
+	require.ErrorIs(t, err, ErrEmailFormatNotAllowed)
+	require.ErrorIs(t, svc.validateRegistrationEmailPolicy(ctx, quoted), ErrEmailFormatNotAllowed)
+	require.Equal(t, "EMAIL_FORMAT_NOT_ALLOWED", infraerrors.FromError(ErrEmailFormatNotAllowed).Reason)
+
+	// 正常写法不受影响。
+	require.NoError(t, svc.validateRegistrationEmailPolicy(ctx, "a.b.c@gmail.com"))
 }
 
 func TestRegistrationEmailQuotaRejectsMalformedDomainWhenWhitelistConfigured(t *testing.T) {

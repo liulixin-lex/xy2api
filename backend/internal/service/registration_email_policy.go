@@ -13,6 +13,30 @@ var registrationEmailDomainPattern = regexp.MustCompile(
 	`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`,
 )
 
+// registrationEmailLocalPartPattern accepts the dot-atom local parts real
+// mailboxes use: letters, digits and . _ + -, starting and ending with a
+// letter, digit or underscore, at most 64 characters. RFC 5321 also allows
+// quoted strings and characters such as ! # $ % & ' * / = ? ^ ` { | } ~. No
+// production user has registered with them, while bulk sign-ups used
+// "a.b"@gmail.com to get past alias deduplication. Input is lowercased first.
+var registrationEmailLocalPartPattern = regexp.MustCompile(`^[a-z0-9_](?:[a-z0-9._+-]{0,62}[a-z0-9_])?$`)
+
+// HasNonStandardEmailLocalPart reports whether email has a local part outside
+// the conventional form above, or with consecutive dots. The local part ends
+// at the last "@", so a quoted "a@b"@host is caught too. Input without both a
+// local part and a domain is left to the existing format checks. It guards
+// addresses that must satisfy the registration policy; stored addresses keep
+// working for password login.
+func HasNonStandardEmailLocalPart(email string) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	at := strings.LastIndexByte(email, '@')
+	if at <= 0 || at == len(email)-1 {
+		return false
+	}
+	local := email[:at]
+	return !registrationEmailLocalPartPattern.MatchString(local) || strings.Contains(local, "..")
+}
+
 // RegistrationEmailSuffix extracts normalized suffix in "@domain" form.
 func RegistrationEmailSuffix(email string) string {
 	_, domain, ok := splitEmailForPolicy(email)
