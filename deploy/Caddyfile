@@ -13,6 +13,8 @@ api.xy2api.com {
 	# This baseline assumes clients connect directly to Caddy. When Caddy is
 	# behind a CDN, configure explicit trusted proxy CIDRs and {client_ip} as
 	# documented in EDGE_SECURITY.md; {remote_host} would otherwise be the CDN.
+	# Behind a CDN also add the X-XY-Edge marker and JSON error pages for API
+	# paths (EDGE_SECURITY.md, "Edge marker for streams behind a CDN").
 	# =========================================================================
 	# TLS 安全配置
 	# =========================================================================
