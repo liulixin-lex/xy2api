@@ -4,6 +4,31 @@
 
 ## 当前交接状态
 
+### 注册邮箱别名加固与用户批量禁用（2026-10-17，进行中：本地实施，分支 `fix/registration-alias-batch-disable-20261017`；未推送、未发版、未部署）
+
+- 背景：2026-10-17 生产出现注册机批量注册（当天 86 个 Gmail 账号；脚本伪造浏览器 UA、缺少 `Sec-Fetch-Site`、轮换代理 IP、注册后约 1 秒批量建 Key）。只读分析发现上游别名查重（`existsByEmailOrAlias`）有两个缺口：带引号的本地部分（`"a.b"@gmail.com`）不归一；查重不计软删除账号，管理员删号后同一收件箱可以再次注册。管理后台也只有逐个调用接口的批量删除。
+- 用户决定（2026-10-17）：① 注册、发验证码、第三方邮箱自动注册与邮箱绑定拒绝非常规本地部分（只允许字母、数字与 `. _ + -`，首尾为字母、数字或下划线，无连续点号，最长 64），新错误码 `EMAIL_FORMAT_NOT_ALLOWED`；② 别名归一去掉引号，数据库探针兼容存量带引号的行（沿用迁移 190 的表达式索引，不加迁移）；③ 别名查重计入软删除账号（系统没有自助注销，只影响管理员删除的账号）；④ 后台新增批量禁用（附批量启用以便撤回），以后清理注册机用禁用代替删除。不按点号数量拒绝：生产老用户中有 22 人的 Gmail 地址有 4 个以上点号。
+- 影响面：生产全量用户中只有 27 个地址不符合新格式，全部是 10-17 的带引号注册机账号。
+- 生产侧（不在本分支）：建议由 Caddy 或 Cloudflare 拦截两个注册接口上缺少 `Sec-Fetch-Site` 的请求，待用户授权；本分支不改生产。
+
+### 误删 93 个用户后的恢复（2026-10-17，已完成：18 个充值用户及其 25 个 API Key 已恢复）
+
+- 事件：管理员清理注册机账号时，北京时间 17:54:50–17:55:09 逐个删除了 93 个用户（软删除）。其中 18 人有余额来源：17 人有充值（在线支付订单或兑换码），1 人为管理员赠送余额。其余 75 个为注册机账号，保持删除。
+- 恢复（用户授权）：18 个用户的 `deleted_at` 已置空，余额与累计充值与删除前一致。他们名下 25 个 API Key 的原值通过 pgBackRest PITR 取回：在隔离临时实例中恢复到 UTC 09:54:50，确认停在第一笔删除事务提交前；核对后单事务写回，与快照一致，恢复后已有成功调用。临时容器与数据已删除。其后 1 名用户自行删除了 1 个刚恢复的 Key（此前他已新建 Key 并在使用），其余 24 个仍可用（核实于北京时间 18:4x）。
+- 未恢复：3 个 GitHub 注册用户的第三方登录绑定被物理删除。按 `backend/internal/service/auth_email_oauth_auto.go`，用 GitHub 重新登录时会按邮箱匹配并自动重新绑定，未在生产验证。
+- 回滚备份：恢复前的 `users`、`api_keys` 相关行已导出，保存在生产服务器上。位置、用户与 Key 标识、金额明细只记在仓库外 `xy2api-artifacts/registration-alias-batch-disable-20261017/private/INCIDENTS_20261017.md`。
+- 代码层面发现：管理员删除用户时，`DeleteWithAudit` 会把 API Key 原值改写为墓碑（`backend/internal/repository/api_key_repo.go:430`）；`deleted_api_key_audits` 表（迁移 145）没有任何代码或触发器写入；第三方登录绑定为物理删除。因此误删后 Key 只能靠 PITR 找回。详见操作日志 `20261017-restore-deleted-paying-users`。
+
+### Codex 历史联网搜索导致 502、gpt-5.6-terra 被移出分组 18（2026-10-17，只读诊断完成；待修复，未改代码、未改生产）
+
+- 现象：一名用户（Codex Desktop 0.130.0-cometix；用户 ID 见上述仓库外私有笔记）在分组 18「GPT-不降智」用 gpt-5.6-terra 调 `/v1/responses`，北京时间 17:00:21 起持续失败。17:00:21–17:42:02 为 502（471 次，账号 378/365 的上游 SSE 返回 `response protection is unavailable`），17:42:03 起为 404 `model_not_found`（261 次）。客户端持续重试，峰值约 27 次/分钟。
+- 502 根因（推断）：ChatGPT 内部 Codex 接口会拒绝“输入回放了 `web_search_call`、但请求未声明 `web_search` 工具”的请求，而 Codex 本地压缩会以 `tools:[]` 发送完整历史。xy2api 的修补 `ensureOpenAIOAuthWebSearchToolForHistory*`（`backend/internal/service/openai_oauth_web_search_history.go`）只在 `IsOpenAIOAuthLike()`（OAuth/SetupToken，`backend/internal/service/account.go:1273`）时生效。378/365 是 apikey 账号，上游为第三方 ChatGPT 系 Codex 中转（域名见私有笔记），请求未经修补。请求体不落库，这一点依据报错文本与代码注释推断。
+- 佐证：同时段 378/365 为另外 11 个用户正常服务 1000 多次；24 小时内该报错 477 次，其中 471 次来自该用户。
+- 404 原因：管理员在 17:38:45、17:42:03 移除了 378、365 模型映射中的 gpt-5.6-terra，而分组 18 的模型白名单仍包含它，组内已无可调度账号支持该模型（379 含该模型，但不在分组 18 且不可调度）。17:50:05 该用户被禁用，此后请求返回 401。
+- 生产现状（核实于北京时间 2026-10-17 17:53）：分组 18 无账号支持 gpt-5.6-terra；该用户为 disabled。
+- 待用户决定：① 恢复 378/365 的 terra 映射，或把 terra 从分组 18 白名单移除；② 代码改进：让 Codex 中转类 apikey 账号也能应用该修补（建议账号级开关，或遇此报错时带修补重试一次；不宜对全部 apikey 账号默认注入，官方 API 可能拒绝 `external_web_access`）。诊断过程见操作日志 `20261017-codex-websearch-502-terra`。
+- 待核实（2026-10-17T13:00Z 补记）：main 上的 0.4.0（PR #97）新增了 `resilience_web_search_replay`（`backend/internal/service/resilience_web_search_replay.go`、`backend/internal/handler/resilience_web_search_replay.go`），上游在输出前以 web_search 历史拒绝时会按设计重放或换号，并把上游原因返回给客户端。它是否覆盖上述 apikey 中转账号，需在 0.4.0 上核实后再决定第 ② 项。
+
 ### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-17T02:55Z；测试服务器验证全部闭环，即将推送 PR #97、等 CI 后合并并打 RC；生产未改）
 
 **背景**
@@ -749,6 +774,12 @@
 Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本轮没有升级生产实例。
 
 ## 进行中的工作
+
+### 20261017-registration-alias-batch-disable — 注册别名加固与用户批量禁用（进行中）
+
+- 分支 `fix/registration-alias-batch-disable-20261017`，起点 `origin/main` `ca2bdd111`。范围与用户决定见顶部同名条目。
+- 计划：每项一个提交并带测试。别名修复登记具名补丁 `xy-registration-email-alias-hardening`（`policy.json` 与 `UPSTREAM_BASE.json` 的 `custom_patches`，以及 `custom_patch_tests`）；批量状态接口在上游文件中的新钩子登记 `required_literals`。用户仓储新增能力走独立的可选接口，不改 `UserRepository`，避免改动 11 个测试桩。
+- 授权边界：做到提 PR 为止；合并、打 tag、发版、生产部署和 Caddy/Cloudflare 规则均需另行授权。
 
 ### 20261015-gateway-resilience — 网关韧性 0.4.0 开发与测试服务器验证（进行中）
 
@@ -2441,3 +2472,23 @@ pnpm --dir frontend run build
 - 验证：静态审查，结论按“已读码确认/推断”标注；未运行测试。
 - 卡点/风险：F2 严重度取决于生产是否使用仅粘性阈值或 /antigravity 路由，待用户确认。
 - 下一步：主 agent 与用户确认第 9 节后排期。（12:20Z 用户已按“决策”一节定稿：0.4.0 修 F1、F2+F5、F3、F4、F7、F12、F14。）
+
+### 2026-10-17T10:05:55Z — `20261017-codex-websearch-502-terra` — 只读诊断完成，待修复
+
+- 请求/目标：用户反馈某账号持续报错（gpt-5.6-terra，404），要求只读排查生产；随后要求先把问题记录下来，暂不修复。
+- 开始状态：分支 `fix/iq-blank-placeholder-20261016`，HEAD `07b9dcfcc`，工作树干净；生产为 `ghcr.io/liulixin-lex/xy2api:0.3.0`。
+- 完成操作：只读查询生产库（会话设 `default_transaction_read_only=on`）的 `ops_error_logs`、`usage_logs`、`accounts`、`account_groups`、`groups`、`audit_logs`，并读取 Caddy 访问日志；对照源码定位 404 文案（`backend/internal/handler/no_account_error.go:129`）和 web_search 修补的生效条件。结论见顶部同名条目。
+- 修改文件：本文件（仅本条记录与顶部条目）。生产无任何改动。
+- 验证：审计日志中两次账号映射修改的时间，与 378、365 的 502 停止时间及 404 起始时间逐秒吻合。未改代码，未运行测试。
+- 卡点/风险：请求体不落库，“历史含 `web_search_call`”无法直接证实。本条记录最初写在 PR #99 分支的工作树中（未提交），后移到 `fix/registration-alias-batch-disable-20261017` 随该分支提交。
+- 下一步：等待用户决定 terra 的处理方式，以及是否实施代码改进。
+
+### 2026-10-17T10:35:29Z — `20261017-restore-deleted-paying-users` — 完成
+
+- 请求/目标：用户批量清理注册机账号时可能误删 90 多个用户，要求核查其中有无充值用户；随后授权恢复充值用户及其 API Key。
+- 开始状态：分支 `fix/iq-blank-placeholder-20261016`，HEAD `07b9dcfcc`（未改代码）；生产 0.3.0。
+- 完成操作：审计日志与 `users.deleted_at` 核对出同一批 93 个软删除用户。按累计充值、订单（状态为大写，`COMPLETED`）和兑换码判定 18 人有充值，并单事务恢复这 18 个用户（行数守卫）。API Key 原值已被墓碑覆盖，审计表也无记录，因此用同一镜像起隔离临时容器（无端口映射、`--archive-mode=off`、`--target-action=pause`，限制 CPU 与内存），从 R2 仓库 PITR 到 UTC 09:54:50，日志确认停在第一笔删除事务提交前。核对 25 个 Key 的 id、用户、名称与生产一致后，经管道单事务写回（数量、墓碑、冲突守卫），随后删除临时容器与数据。
+- 修改文件：本文件。生产数据：`users` 18 行、`api_keys` 25 行（仅 `deleted_at`、`key`、`updated_at`）。
+- 验证：18 人 active，余额合计与累计充值合计均与删除前一致；25 个 Key 全部可用，md5 汇总与快照一致；恢复后数分钟内已有 3 个 Key 成功调用 27 次。临时目录已删除，磁盘空间已释放。
+- 卡点/风险：3 个 GitHub 用户的登录绑定未恢复，依赖按邮箱自动重新绑定，未在生产验证。
+- 下一步：可考虑为“删除用户”增加可恢复能力（例如保留 Key 原值或真正写入 `deleted_api_key_audits`），并明确 `deleted_api_key_audits` 的用途。
