@@ -106,6 +106,8 @@ python tools/upstream-sync/sync.py report \
 ```text
 python -m unittest discover -s tools/tests -p test_*.py -v
 python tools/upstream-sync/sync.py audit
+python tools/upstream-sync/sync.py scheduler-diff
+python tools/check_docs_consistency.py
 git diff --check
 扫描冲突标记
 解析 deploy/docker-compose.yml
