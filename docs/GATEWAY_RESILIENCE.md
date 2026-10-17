@@ -40,7 +40,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 - 先删除客户端自带的同名头，再按 `remote_ip` 注入；不得根据任何请求头判断。
 - 应用只在对端属于 `SERVER_TRUSTED_PROXIES` 时读取该头，取值须在 `keepalive.edges` 白名单内（缺省 `cf`、`esa`）。
-- **`SERVER_TRUSTED_PROXIES` 必须包含反向代理到应用的对端地址**（同机部署时通常是容器网络网关或回环地址）。未配置或不包含时，所有请求都按直连处理，首包前保活不会生效。
+- **`SERVER_TRUSTED_PROXIES` 必须包含反向代理到应用的对端地址**（同机部署时通常是容器网络网关或回环地址）。未配置或不包含时，所有请求都按直连处理，首包前保活不会生效。该列表须显式配置（`server.trusted_proxies` 或环境变量 `SERVER_TRUSTED_PROXIES`）；仓库自带的 `deploy/docker-compose.yml` 不传这个环境变量，用 Docker Compose 部署时要自己加到应用容器的 `environment`。CDN 部署的整体信任边界见 [`deploy/EDGE_SECURITY.md`](../deploy/EDGE_SECURITY.md)。
 - 内网直连与本机脚本不在 CDN 网段，不会被标记。
 
 ### 2.2 反向代理
@@ -174,14 +174,17 @@ warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 - `fallback_group`、`fallback_return`；
 - `budget_exhausted`、`capacity_switch_exhausted`；
 - `stall`、`fast_fail`、`turn_cap`、`abuse_guard`；
-- `post_output_failure`（含 `group_id`、`account_id`、`reason`、窗口内次数与是否施加冷却）。
+- `post_output_failure`（含 `group_id`、`account_id`、`reason`、窗口内次数与是否施加冷却）；
+- `web_search_history_rejected`：API Key 中转拒绝回放 web_search 历史，补声明重放后仍失败或无法重放（含 `account_id`、`upstream_status`、是否已重放、是否透传）。
 
 info 级，只写应用标准输出（量大，明细已有计数或未送达表）：
 
 - `keepalive_committed`（含 `group_id`、`protocol`、`edge`）；
 - `unclassified`：只按状态码归类的上游 4xx 文案采样（脱敏、截断，每分钟约 10 条），发现新的余额文案时加入 `failure.balance_keywords_extra`；
 - `undelivered`（含阶段、耗时、推断的 CDN 切断与 `edge`）；
-- `transient_cooldown`、`transient_lifted`、`undelivered_cleanup`。
+- `transient_cooldown`、`transient_lifted`、`undelivered_cleanup`；
+- `content_policy_refusal`（上游内容安全拒绝，含账号、平台、状态与截断的上游原文）、`content_policy_no_failover`（换号循环因内容安全拒绝结束）；
+- `web_search_replay`（补 web_search 声明后同号重放）、`web_search_declaration_learned`（重放成功，该账号 6 小时内同类请求直接补声明）。
 
 `*_failed` 结尾的事件表示存储或查询失败，功能会降级为原有行为。
 
