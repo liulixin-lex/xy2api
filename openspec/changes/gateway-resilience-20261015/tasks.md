@@ -391,7 +391,10 @@
 
 - [ ] 13.1 xy2api PR：CI 18 项全绿，并新增 “Gateway resilience” 必测作业（关键 Scenario 测试，`-race`，零跳过守卫）；XY-image PR 全绿。
   - 门禁已作为 `backend-ci.yml` test 作业中的必过步骤 “Gateway resilience” 加入：`tools/gateway-resilience/ci_gate.py` 自动收集韧性测试文件中的全部测试（`5d2854e53` 时 177 个，`060f6f7ea` 时 178 个），`-race` 运行，任一失败、跳过或未运行即失败；本机通过。
-- [ ] 13.2 打 0.4.0-rc.1 标签并跑 Release 工作流；校验附件 SHA 与双架构 GHCR；在测试服务器用 RC 制品复跑 12.3、12.4 的关键子集与 12.7。
+  - xy2api 部分完成（2026-10-17）：PR #97 头 `997861f1a` 两组 18/18 检查全绿，CI 日志中 “Gateway resilience” 为 256 个韧性测试 `-race` 全过、零跳过；常规 merge 为 `ca2bdd111`，main 上合并提交的 CI 与安全扫描全绿。XY-image PR 待 0.4.0 发布后交接（13.3）。
+- [x] 13.2 打 0.4.0-rc.1 标签并跑 Release 工作流；校验附件 SHA 与双架构 GHCR；在测试服务器用 RC 制品复跑 12.3、12.4 的关键子集与 12.7。
+  - annotated `v0.4.0-rc.1` → `ca2bdd111`；Release run 38997674298 成功。6 个附件共 198,283,776 字节，shasum 与 openssl 两种 SHA-256 均与 checksums.txt 一致；五个平台二进制 `vcs.revision=ca2bdd111`、`vcs.modified=false`、embed 构建，darwin_arm64 自报 `XY2API 0.4.0-rc.1 (Sub2API compatibility: 0.2.15)`；GHCR index `sha256:b6ea2ef1224952d2876494114b0e6fd1a2e339884f895ce3ed119dbb4d86d1a5`（linux/amd64、linux/arm64，version/revision/source 标签正确）；prerelease=true，稳定别名 latest、0、0.3 仍指向 0.3.0 未动。
+  - 测试服务器用 RC 镜像（拉取 digest 与 index 一致）：空库全新安装 323 条迁移，health、首页与静态资源、`/auth/me` 均 200；应用切到 RC 镜像后场景 45/45；升级演练（生产规模合成数据）升级启动 1.2 秒、usage_logs 最长阻塞 0.11 秒，回退 0.3.0 登录、网关、计费正常，前滚设置保留，成套备份恢复 103 秒行数一致。真实客户端 14/16：C-codex-ok（真实中转 502 后换号，第二个中转输出后流内失败，Codex 重发一次，两次均 200）与 C-openai-py-slow-first-cdn（换号后剩余 60 秒内真实中转未出首字，240 秒预算按设计以终止帧结束）均发生在中转高峰期，日志为证，同一用例在 `934bcf2bc` 上通过；未重跑。
 - [ ] 13.3 正式版：xy2api 0.4.0 PR → 合并 → 标签 → Release；XY-image 0.0.17 发布；更新 provenance 与记忆。
 
 ## 14 生产部署（需用户单独授权，按 runbook.md）

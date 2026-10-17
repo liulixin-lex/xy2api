@@ -4,7 +4,7 @@
 
 ## 当前交接状态
 
-### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-17T02:55Z；测试服务器验证全部闭环，即将推送 PR #97、等 CI 后合并并打 RC；生产未改）
+### 网关韧性 0.4.0、份额调度与前端规范化（状态更新：2026-10-17T04:45Z；PR #97 已合并，`v0.4.0-rc.1` 已发布并验证；0.4.0 晋级 PR 准备中，等用户确认“未送达不计费的覆盖路径”一项后再合并与打正式标签；生产未改）
 
 **背景**
 
@@ -67,6 +67,8 @@
 - **进度（20:20Z，评审复核 `9adce14cb`…`934bcf2bc`）**：①②、runbook、tasks 通过，公开仓库无生产标识，`billing_error` 不算余额的取舍获同意。更正：`fdb7cfdcb` 写的“上游以 `first_output_timeout` 应答（级联网关）仍软冷却”代码中不存在——上游错误处理的 switch 只处理 BALANCE/TRANSIENT/CLIENT_ERROR，按 `SoftCooldown()` 写冷却的 `ApplyResilienceOutcome` 只由停滞调用；实际是本地与上游应答的首输出超时都不冷却账号，只有 OpenAI API Key 账号按上游 5xx 原有规则记入按模型瞬时屏蔽（本地超时不触发）。`7043f32cb` 按代码修正 design §2/§3、两份 spec 与 tasks，并加 `TestUpstreamFirstOutputTimeoutLeavesTheAccountSchedulable` 锁定（只改文档与测试，镜像不变，不重跑验证）；同时登记 0.4.1：原生 Chat Completions 路径传空存活记录，`relay_keepalive` 计数偏少。教训：文档里的行为描述须有代码与用例依据，写之前先追调用链。
 - **进度（2026-10-17T00:15Z）**：最终 HEAD `a7e012c19` 本机全量验证全绿（CI 门禁 256）；推送前扫描 `688bd9d68..HEAD` 共 36 个提交无主机、域名、凭据，作者均为 noreply；origin/main 仍为分支点 `f8fec15a2`，合并无冲突。浸泡 `soak-934bcf2bc` 约 4 小时，存活堆整点小时中位数 56/58/58/59 MB（约 0.5 MiB/h）。仓库外已备：`PR_BODY.md`（浸泡结果处为 `SOAK_RESULT_PLACEHOLDER`）、`RELEASE_NOTES_v0.4.0-rc.1.md`（annotated tag 消息；git 会删掉以 `#` 开头的行，故不用标题）。发版流程参照 0.3.0：常规 merge → 合并提交打 annotated `v0.4.0-rc.1` → Release 制品双 SHA、GHCR 双架构与标签、prerelease 与稳定别名未动、`vcs.modified` → RC 镜像新装 323 迁移、0.3.0 升级与回退、成套恢复（测试服务器 `upgrade_drill.py`）与关键场景子集 → 晋级 PR（`backend/cmd/server/VERSION`、`UPSTREAM_BASE.json` 的 `xy2api_version` 改为 0.4.0）→ annotated `v0.4.0` → 正式制品校验 → 发版后纯文档收尾 PR。
 - **进度（02:55Z，测试服务器闭环）**：`soak-934bcf2bc` 通过（11 项检查全过；160,478 个请求；存活堆 53→55 MB、0.3 MiB/h；匿名内存 92→95 MiB；回落后槽位与预留归零）。design §14 报告 15 项达标，未达标 4 项（无号 503 次数、连续无号 20 分钟、anthropic/openai 缓存读取占比）均为合成负载所致：前两项全部来自每小时人为断余额的 `G-soak-bal`（1,365 次全在第 30–48 分钟，充值后等下一次复查），后者为故障上游固定用量，与演练报告一致，生产部署后 24/72 小时复核。候选镜像全新安装（`/tmp/xy2-staging/fresh_install.py`，323 条迁移）通过。tasks 12.9–12.11 与 staging-validation §9 已勾选。私有 `STAGING_REPORT.md` 与 `PR_BODY.md` 已定稿。RC 制品校验脚本 `/tmp/xy2-verify-release.sh <tag> <commit>` 已在 v0.3.0 上试跑全过。
+- **进度（2026-10-17T04:45Z，RC）**：PR #97 头 `997861f1a` 两组 18/18 全绿（“Gateway resilience” 256 个测试）后常规 merge 为 `ca2bdd111`（03:08:38Z），main CI 与安全扫描全绿。annotated `v0.4.0-rc.1`（对象 `3042fb5b4`）→ `ca2bdd111`，Release run 38997674298 成功；制品校验全过（6 附件 198,283,776 字节双 SHA；五平台 `vcs.modified=false`、embed；GHCR index `sha256:b6ea2ef1…` 双架构与标签正确；prerelease=true；latest/0/0.3 仍为 0.3.0 的 `sha256:5560a6…`）。测试服务器 RC 镜像：全新安装 323 迁移通过；场景 45/45；升级、回退、前滚、成套恢复通过；真实客户端 14/16（C-codex-ok、C-openai-py-slow-first-cdn 失败于真实中转高峰期 502、输出后流内失败与首字过慢，日志为证，未重跑——重跑命令被用户中止）。测试服务器应用现运行 RC 镜像（`.env` 的 `APP_IMAGE` 已改）。工具教训：脚本先 `set -a; . ./.env` 再 `sed` 改 `.env` 时，docker compose 优先用已导出的旧 `APP_IMAGE`，须显式导出新值并核对运行镜像；远程命令里 `a && b &` 会把整条链放进后台，长任务用 `setsid nohup … < /dev/null &` 单独启动。
+- **进度（04:45Z，晋级分支）**：本地 `release/0.4.0`（自 main `ca2bdd111`，已取消上游跟踪）：`24cfc6511` 按用户 2026-10-17 指示把用户余额提示恢复为 0.3.0 原文 `Insufficient account balance`（常量覆盖鉴权预检与计费预检，403、`INSUFFICIENT_BALANCE`、OpenAI 兼容端点 type `insufficient_balance` 不变；中间件该行与测试恢复上游原样）；随后晋级提交把 VERSION 与 `UPSTREAM_BASE.json` 改为 0.4.0 并记录 RC。待定：评审提出的“未送达不计费只覆盖 OpenAI Responses 路径”用户仍在确认，确认后再定是否进 0.4.0（若改动较大，可能需要 rc.2）；合并晋级 PR、打 `v0.4.0` 前等此项。正式版发版说明草稿在仓库外 `RELEASE_NOTES_v0.4.0.md`，全新安装检查脚本 `/tmp/xy2-staging/fresh_install.py`、RC 复跑脚本 `/tmp/xy2-staging/rc-run.sh`（测试服务器同名文件）。另：定时上游同步检测到 Sub2API v0.2.17 已发布（exit 2），需按既有同步机制另开任务。
 
 **卡点与风险**
 
@@ -2441,3 +2443,17 @@ pnpm --dir frontend run build
 - 验证：静态审查，结论按“已读码确认/推断”标注；未运行测试。
 - 卡点/风险：F2 严重度取决于生产是否使用仅粘性阈值或 /antigravity 路由，待用户确认。
 - 下一步：主 agent 与用户确认第 9 节后排期。（12:20Z 用户已按“决策”一节定稿：0.4.0 修 F1、F2+F5、F3、F4、F7、F12、F14。）
+
+### 2026-10-17T04:45Z — 20261015-gateway-resilience 审查与生产核查修复、测试服务器闭环、PR #97 合并与 v0.4.0-rc.1
+
+- 请求/目标：按独立审查（F1–F14）与生产只读核查修复 0.4.0，测试服务器全部闭环后推送 PR #97、合并、打 RC，再晋级 0.4.0；生产部署单独授权。
+- 完成操作：
+  - 审查修复与复核后续：F1 `685986a68`、F2+F5 `6cfd31e4a`/`e18275960`、F3 `1b3d8e4fe`、F4 `60cc7d6fb`、F7 `25bb15ca2`、F12 `f2b077c4e`、F14 `a53b90175`；OpenAI 旧调度路径软罚保留绑定 `d6c8fd1e6`；OpenAI 按模型瞬时屏蔽按软罚参与末位兜底 `31407833d`（测试服务器复跑时发现）。
+  - 生产核查修复：伪保活帧丢弃后仍算上游存活 `9adce14cb`；余额关键字补 `insufficient user balance` `8285e6926`；首输出超时不冷却账号按代码对齐文档 `fdb7cfdcb`，评审复核后更正“级联网关仍冷却”的错误说法 `7043f32cb`。
+  - 测试工具：DC-5 改号与重复编号报错、`stream_request` 真正断开、LR-1 独立会话、KA-9 与 F24 `output=1`。
+  - 候选 `934bcf2bc`：场景 45/45、客户端 16/16、6.5 小时浸泡 11 项全过（存活堆 0.3 MiB/h）；§14 报告 15 项达标，4 项为合成负载所致。
+  - PR #97 18/18 全绿后常规 merge `ca2bdd111`；`v0.4.0-rc.1` 发布与制品、镜像校验全过；RC 镜像在测试服务器全新安装、场景 45/45、升级回退恢复通过，真实客户端 14/16（两项失败于真实中转高峰期）。
+  - 用户 2026-10-17 要求余额提示恢复 0.3.0 原文：`24cfc6511`（晋级分支）。
+- 验证：每轮本机全量验证（四种 vet、lint 0、unit/无 tag/embed、CI 门禁 256、同步审计与 scheduler-diff、前端 389 文件/3047 项与构建）全绿；PR 与 main CI 全绿；推送前扫描无主机、域名、凭据，作者均为 noreply。
+- 卡点/风险：“未送达不计费只覆盖 OpenAI Responses 路径”待用户确认；两项真实客户端用例未在 RC 上重跑；0.4.1 后续见 tasks“后续”小节（xhigh/max 静默上游不换号、屏蔽期间保留绑定、`relay_keepalive` 原生 CC 路径计数、F2 会话上限判据等）。
+- 下一步：用户确认待定项后，完成晋级 PR（`release/0.4.0`，已含版本号与文案改动）→ CI → 常规 merge → annotated `v0.4.0`（说明见仓库外 `RELEASE_NOTES_v0.4.0.md`）→ 用 `/tmp/xy2-verify-release.sh` 校验正式制品与稳定别名 → 正式镜像全新安装检查 → 发版后纯文档收尾；XY-image 0.0.17 先交接并经用户确认；生产部署单独授权。
