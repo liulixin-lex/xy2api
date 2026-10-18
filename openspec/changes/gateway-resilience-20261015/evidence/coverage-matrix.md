@@ -75,8 +75,11 @@ The Explain part of “Explainability and configuration” has no scenario of it
 
 | Scenario | Unit tests | Staging |
 |---|---|---|
-| Internal client is never marked | `TestResilienceEdgeMarkerTrustsOnlyProxies` | KA-2, CF-2 |
-| Spoofed marker is ignored | `TestResilienceEdgeMarkerTrustsOnlyProxies` | CF-5 |
+| Internal client is never marked | `TestResilienceEdgeMarkerTrustsOnlyProxies`, `TestResilienceEdgeFromCDNHeaders`, `TestResilienceEdgeDetectedWithoutProxyConfiguration`, `TestEdgeFromCDNHeaders` | KA-2, CF-2, CF-6 |
+| Spoofed marker is ignored | `TestResilienceEdgeMarkerTrustsOnlyProxies`, `TestResilienceEdgeFromCDNHeaders` | CF-5 |
+| CDN recognised without proxy configuration | `TestEdgeFromCDNHeaders`, `TestResilienceEdgeFromCDNHeaders`, `TestResilienceEdgeDetectedWithoutProxyConfiguration` | CF-1, CF-4（0.4.1：`stg-cf` 去掉 Caddy 标记后） |
+| Edge removed from the allow list | `TestEdgeFromCDNHeaders`, `TestResilienceEdgeDetectedWithoutProxyConfiguration` | — |
+| Untrusted marker next to CDN headers | `TestResilienceEdgeFromCDNHeaders` | — |
 | Fast failure keeps its status code | `TestPreOutputKeepaliveUncommittedKeepsStatusCode` | ERR-1, BUD-1 |
 | Slow upstream through Cloudflare | `TestArmPreOutputKeepaliveConditions` | KA-1, KA-3, KA-6, CF-1, CF-4, C-codex-slow-first-cdn |
 | Official OAuth account | `TestPreOutputKeepaliveStopsUncommittedForOAuth` | — |

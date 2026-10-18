@@ -43,7 +43,7 @@
 | [`PLUGIN_DEVELOPMENT.md`](PLUGIN_DEVELOPMENT.md) | 插件开发 |
 | [`legal/`](legal/) | 部署与运营合规承诺（中英文） |
 
-部署文档在 `deploy/`：[`README.md`](../deploy/README.md)、[`DOCKER.md`](../deploy/DOCKER.md)、[`EDGE_SECURITY.md`](../deploy/EDGE_SECURITY.md)（含 CDN 部署的边缘标记）、[`APPLE_CONTAINER.md`](../deploy/APPLE_CONTAINER.md)、[`DATAMANAGEMENTD_CN.md`](../deploy/DATAMANAGEMENTD_CN.md)。工具说明见 [`tools/gateway-resilience/README.md`](../tools/gateway-resilience/README.md)、[`skills/`](../skills/)。
+部署文档在 `deploy/`：[`README.md`](../deploy/README.md)、[`DOCKER.md`](../deploy/DOCKER.md)、[`EDGE_SECURITY.md`](../deploy/EDGE_SECURITY.md)（含 CDN 识别与可选的边缘标记）、[`APPLE_CONTAINER.md`](../deploy/APPLE_CONTAINER.md)、[`DATAMANAGEMENTD_CN.md`](../deploy/DATAMANAGEMENTD_CN.md)。工具说明见 [`tools/gateway-resilience/README.md`](../tools/gateway-resilience/README.md)、[`skills/`](../skills/)。
 
 ## 设计、修复与同步记录
 

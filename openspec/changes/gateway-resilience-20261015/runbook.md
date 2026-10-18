@@ -28,15 +28,17 @@
    - 确认 PITR 备份最近一次全量与 WAL 正常；
    - 额外导出 `settings` 表与应用数据目录（只读打包到宿主机备份目录）；
    - 备份 Caddy 主配置与全部片段。
-3. 核对应用环境：`SERVER_TRUSTED_PROXIES` 已配置并包含 Caddy 到应用的对端地址（见 §3.1）。
+3. 核对应用环境：`SERVER_TRUSTED_PROXIES` 已配置并包含 Caddy 到应用的对端地址（见 §3.1）。0.4.1 起这不再是首包前保活的前提（应用按 CDN 回源头自动识别边缘）；生产已配置的值保持不变，它同时决定来源 IP 的解析。
 4. 记录基线：用 `tools/gateway-resilience/baseline.sql` 与 `caddy_cuts.py` 采集最近 24 小时的指标，作为上线对照。
-5. **边缘标记是首包前保活的前提**：Caddy 必须按对端 IP 为 Cloudflare 与 ESA 注入 `X-XY-Edge`（§3.1）。缺了它首包前保活不启用，经 Cloudflare 入口的慢首包请求仍会在约 125 秒处被切断（0 字节送达）。
+5. **边缘识别**：0.4.0 要求 Caddy 按对端 IP 为 Cloudflare 与 ESA 注入 `X-XY-Edge`（§3.1），否则首包前保活不启用，经 Cloudflare 入口的慢首包请求仍会在约 125 秒处被切断（0 字节送达）。0.4.1 起应用按 Cloudflare 的 `CF-Ray`/`CDN-Loop: cloudflare` 与 ESA 的 `CDN-Loop: esa` 自动识别，Caddy 标记改为可选；上线后仍按 §5 抽查一次经 Cloudflare 的慢首包请求。
 6. **余额文案**：缺省关键字已含 `insufficient user balance`。单独的 `billing_error` 类型不算余额（Sub2API 系中转把订阅失效、订阅额度、用户额度等计费前置失败都映射成它）；核查中发现新的余额文案时加入 `failure.balance_keywords_extra`，无需发版。
 7. 选择低峰时段：从生产数据看，北京时间凌晨（UTC 18:00–22:00）的请求量最低。
 
 ## 3. Caddy 配置
 
-### 3.1 边缘标记（D12）
+### 3.1 边缘标记（D12；0.4.1 起可选）
+
+0.4.1 起应用按 CDN 自带的回源头自动识别 Cloudflare 与 ESA（design §7.1），本节只在接入其他 CDN 或自定义部署时需要；已配置的标记照常生效，并优先于自动识别。
 
 新增两个片段，CF 与 ESA 回源网段分别成组，取值与全局 `trusted_proxies` 中的同类网段相同：
 
@@ -54,7 +56,7 @@
 - `remote_ip` 匹配的是直连对端，不受客户端头影响。XY-image 的内网请求与本机脚本不会被标记。
 - 校验：`caddy validate`。
 - 用测试请求确认：经 CF 的慢首包流式请求，在第 15 秒左右出现 `resilience.keepalive_committed` 日志且带 `edge=cf`；直连请求不出现该日志。
-- 应用只在对端属于 `SERVER_TRUSTED_PROXIES` 时读取该头。该列表必须包含 Caddy 到应用的对端地址（同机部署时为容器网络网关或回环地址），否则所有请求都按直连处理，首包前保活不会生效。
+- 应用只在对端属于 `SERVER_TRUSTED_PROXIES` 时读取该头。该列表须包含 Caddy 到应用的对端地址（同机部署时为容器网络网关或回环地址），否则该头被忽略（0.4.0 下所有请求按直连处理；0.4.1 起改按 CDN 回源头识别）。
 
 ### 3.2 错误页（避免纯文本 5xx）
 
@@ -148,7 +150,7 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
 | `undelivered` | 未送达取消次数；应明显少于 0.3.0 下“断开后仍读完并计费”的次数 |
 | `relay_keepalive` | 按账号；非零说明该中转用伪保活帧维持静默期，确认没有被判停滞。缺省首字口径（`semantic`）下这类中转的首字时间按第一帧记录（与 0.3.0 一致），首字统计偏乐观 |
 | 未送达记录的 `estimated_upstream_cost` 合计 | 按日、按组汇总（运维页未送达列表或 `gateway_undelivered_requests`）；是未送达取消后由平台承担的上游成本，集中在少数 Key 时对照滥用阈值 |
-| Caddy“状态 0、0 字节、约 125 秒”的切断率 | 用 `caddy_cuts.py`；应接近 0，否则先查 `X-XY-Edge` |
+| Caddy“状态 0、0 字节、约 125 秒”的切断率 | 用 `caddy_cuts.py`；应接近 0，否则先查 `resilience.keepalive_committed` 是否出现且带 `edge`（0.4.1 起自动识别；使用 Caddy 标记时查 `X-XY-Edge`） |
 
 口径：用量记录的 `first_token_ms` 与 `duration_ms` 从最后一次（成功的）尝试开始计时，不含此前失败的尝试与换号等待（与 0.3.0 相同）。换过号的请求，客户端实际等待更长；评估首字与切断时结合运维错误记录中各次尝试的时间（`upstream_errors`）。
 

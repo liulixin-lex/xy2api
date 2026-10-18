@@ -234,10 +234,17 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 
 ## 7. 首包前保活、首输出超时、停滞与提交后的失败
 
-### 7.1 边缘标记（D12）
+### 7.1 边缘识别（D12；0.4.1 修订：自动识别 CDN 回源）
 
-- **Caddy：** 在 `gguuai.com`、`api.aiaimax.com` 站点中，先删除客户端自带的 `X-XY-Edge`；再按**对端 IP**（`remote_ip` 匹配器，不信任任何请求头）是否属于 Cloudflare 或 ESA 回源网段，注入 `X-XY-Edge: cf` 或 `esa`。XY-image 经内网直连、本机脚本等对端不在这些网段，因此不会被标记。配置见 runbook §3。
-- **应用：** 只有对端是受信代理（`SERVER_TRUSTED_PROXIES`）时才读取该头；值不在 `edges` 白名单内的视为直连。
+应用按以下顺序判断请求是否经 CDN（`resilienceNoteEdge`）：
+
+1. **反向代理的标记（可选）：** 对端是受信代理（`SERVER_TRUSTED_PROXIES`）时读取 `X-XY-Edge`，值在 `keepalive.edges` 白名单内即采用；非受信对端发来的忽略（spec 场景 “Spoofed marker is ignored”）。
+2. **CDN 自带的回源头（0.4.1 起）：** 没有有效标记时，`CF-Ray` 或 `CDN-Loop` 含 `cloudflare` 判为 `cf`，`CDN-Loop` 含 `esa` 判为 `esa`（阿里云 ESA）。`CDN-Loop`（RFC 8586）按经过顺序列出 CDN，取离源站最近且在白名单内的一个；只有 `CF-Ray` 时取 `cf`。推断出的名字同样须在 `keepalive.edges` 内，管理员去掉 `cf` 或 `esa` 即关闭对应识别；不新增设置字段。
+
+- **生产依据（2026-10-18，只读核对访问日志）：** Cloudflare 站点的回源请求全部带 `CF-Ray` 与 `CDN-Loop: cloudflare; loops=N`；ESA 站点全部带 `CDN-Loop: esa;loop=N`（另有 `Eagleeye-Traceid`），没有 `CF-Ray`；XY-image 经内网直连的请求两者都不带。ESA 用 `CDN-Loop` 识别：它是标准头，与 Cloudflare 同一机制。
+- **推断为什么不要求受信对端：** 伪造这些头只改变伪造者自己那个请求的返回形式，即提前提交 SSE、15 秒后发心跳、失败改为流内终止帧、502/504 改为 503；不涉及鉴权、计费或其他用户。XY-image 与内部脚本直连时不带这些头，不受影响。
+- **为什么不自动配置 `SERVER_TRUSTED_PROXIES`：** Docker 下对端是网桥网关，端口对外发布时直连客户端也来自同一地址；自动信任会放开来源 IP 伪造，绕过 IP 白名单与限流。改成自动识别后，首包前保活不再依赖它。
+- **Caddy（可选）：** 接入其他 CDN 或自定义部署时，仍可在站点中先删除客户端自带的 `X-XY-Edge`，再按**对端 IP**（`remote_ip` 匹配器，不信任任何请求头）是否属于 CDN 回源网段注入 `X-XY-Edge`；此时须把反向代理到应用的对端地址配进 `SERVER_TRUSTED_PROXIES`。配置见 runbook §3.1。0.4.0 的这两项部署前提在 0.4.1 不再必需。
 
 ### 7.2 提交条件（D3、D12、D15、D21）
 
@@ -245,7 +252,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 
 1. 请求为流式（`stream=true`；Responses 和 Chat 以请求体为准，Anthropic Messages 以 `stream` 为准）；
 2. 入站协议为 OpenAI Responses、OpenAI Chat Completions 或 Anthropic Messages；Gemini 原生入口与 genai UA **不做**；
-3. 带有边缘标记（D12）；
+3. 经 CDN（§7.1 的边缘识别，D12）；
 4. 鉴权、余额与订阅检查、在途预留、参数与模型映射、内容审计、选号都已完成（失败仍按原状态码返回）；
 5. 选中的账号不是官方 OAuth 账号（`AccountTypeOAuth` 等 Codex 原生类型，D21）；
 6. 不是图片或异步任务端点。

@@ -4,15 +4,27 @@
 
 ### Requirement: Edge marker from the reverse proxy
 
-The gateway MUST treat a request as arriving through a CDN only when all of the following hold:
-- its immediate peer is a configured trusted proxy;
-- it carries `X-XY-Edge` with a value listed in `keepalive.edges` (default `cf`, `esa`).
+The gateway MUST treat a request as arriving through a CDN (an edge request) when either holds:
+- its immediate peer is a configured trusted proxy and it carries `X-XY-Edge` with a value listed in `keepalive.edges` (default `cf`, `esa`); or
+- it carries no such valid marker but carries the headers the CDN adds to origin requests: `CF-Ray` or a `CDN-Loop` entry `cloudflare` (edge `cf`), or a `CDN-Loop` entry `esa` (edge `esa`), and that edge is listed in `keepalive.edges`. When `CDN-Loop` lists several CDNs, the listed one nearest the origin counts.
 
-The reverse proxy MUST remove any client-supplied `X-XY-Edge`, and MUST set it only from the immediate peer address matching Cloudflare or ESA origin ranges.
+A valid marker MUST take precedence. The gateway MUST NOT trust any proxy automatically. When the reverse proxy sets `X-XY-Edge`, it MUST remove any client-supplied value and set it only from the immediate peer address matching CDN origin ranges.
 
 #### Scenario: Internal client is never marked
 - **WHEN** XY-image calls the gateway through the host-local reverse proxy
-- **THEN** the request carries no `X-XY-Edge` marker and pre-output keepalive is not armed.
+- **THEN** the request carries neither an `X-XY-Edge` marker nor a CDN header, and pre-output keepalive is not armed.
+
+#### Scenario: CDN recognised without proxy configuration
+- **WHEN** no trusted proxy is configured and a streaming request arrives through Cloudflare with `CF-Ray` and `CDN-Loop: cloudflare; loops=1`, or through ESA with `CDN-Loop: esa;loop=1`
+- **THEN** the request is an edge request (`cf` or `esa`) and pre-output keepalive is armed as for a marked request.
+
+#### Scenario: Edge removed from the allow list
+- **WHEN** an administrator removes `cf` from `keepalive.edges` and a request arrives with `CF-Ray`
+- **THEN** the request is treated as direct.
+
+#### Scenario: Untrusted marker next to CDN headers
+- **WHEN** a request from a peer that is not a trusted proxy carries `X-XY-Edge: esa` and `CF-Ray`
+- **THEN** the marker is ignored and the request is a `cf` edge request.
 
 #### Scenario: Spoofed marker is ignored
 - **WHEN** a client sends `X-XY-Edge: cf` directly to the origin
