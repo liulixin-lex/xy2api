@@ -6,13 +6,21 @@
 
 ## 当前交接状态
 
-### 版本与环境速览（2026-10-17T15:40Z 核实）
+### 版本与环境速览（2026-10-18T12:30Z 核实）
 
-- 正式版：XY2API v0.4.0（2026-10-17，Sub2API 兼容基线 0.2.15）；生产自 2026-10-15 运行 0.3.0，0.4.0 部署需用户单独授权。
-- 待定：XY-image 0.0.17（先交接并经用户确认）、0.4.0 生产部署（单独授权）；见下一节。
+- 正式版：XY2API v0.4.1（2026-10-18，Sub2API 兼容基线 0.2.15）；生产自 2026-10-15 运行 0.3.0，部署需用户单独授权。
+- 待定：XY-image 0.0.17（先交接并经用户确认）、0.4.1 生产部署（单独授权）；见下两节。
 - 上游：Sub2API v0.2.17 已发布、尚未同步（2026-10-17 定时检测），需按 [`UPSTREAM_SYNC.md`](UPSTREAM_SYNC.md) 另开任务。
 - 工具链：Go 以 `backend/go.mod` 为准（当前 1.27.2）；golangci-lint v2.14.0（与 CI 同版）。
 - 文档一致性：`python3 tools/check_docs_consistency.py`（CI 的 upstream-sync-audit 作业执行），规则在 `tools/docs_consistency.json`，改动时按 [`AGENTS.md`](../AGENTS.md)“变更同步”同步文档。
+
+### XY2API 0.4.1 正式发布完成（2026-10-18；生产未部署）
+
+- 发布：`v0.4.1`（annotated 对象 `7dbdbccd9`）→ main 合并提交 `edea0d493`（[PR #103](https://github.com/liulixin-lex/xy2api/pull/103)，头 `7f112a981`），PR #101、#99、#98 随之标为已合并。Release run 39126008209；6 个附件双 SHA、五平台 `vcs.modified=false`、GHCR `sha256:baa0e446…` 双架构；latest/0/0.4 指向 0.4.1，0.3 仍为 0.3.0；正式镜像全新安装 324 条迁移通过。
+- 内容：CDN 回源自动识别（`CF-Ray` 或 `CDN-Loop: cloudflare` 为 `cf`，`CDN-Loop: esa` 为 `esa`，design §7.1；ESA 的头经生产 Caddy 访问日志只读核对）；PR #101、#99、#98（见下一节）。无迁移。按用户决定不出 RC、不跑浸泡。
+- 验证：本机全量验证全绿（CI 门禁 249、前端 3055 项）；测试服务器去掉测试 CF 站点的 Caddy 标记后 KA/CF/ERR 19/19，经真实 Cloudflare 的慢首包 15.1 秒开始心跳、150.7 秒完成，直连与内部请求没有心跳。
+- 部署说明（生产部署仍需单独授权，按 runbook）：0.4.1 上线时 Caddy 标记与 `SERVER_TRUSTED_PROXIES` 不再是首包前保活的前提（生产已配置的保持不变）；#101 新增错误码 `EMAIL_FORMAT_NOT_ALLOWED`；智商检测解析器升为 `iq-response-v6`；Grok 渠道监控可选原生 Responses。从 0.3.0 升级执行 0.4.0 的迁移 272–277，备份、蓝绿切换、观察与回退照 runbook。
+- 本任务的登记已原样移入 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)。
 
 ### 网关韧性 0.4.0 正式发布完成（2026-10-17；生产未部署）
 
@@ -62,13 +70,7 @@
 
 ## 进行中的工作
 
-### 20261018-release-0.4.1 — XY2API 0.4.1：CDN 回源自动识别，合并 PR #98、#99、#101（进行中）
-
-- 2026-10-18T11:00Z 用户经评审转达授权：开发、测试服务器验证（不跑浸泡、不出 RC）、推送、PR、合并 #98/#99/#101、打 `v0.4.1` 并发布；只读查看一次生产 Caddy 访问日志确认 ESA 回源头（sudo 只读日志）。生产部署、改生产 Caddy 或配置、改 Cloudflare/ESA 控制台未授权。
-- 设计（用户批准）：`resilienceNoteEdge` 在没有有效 `X-XY-Edge` 时按 CDN 自带的回源头推断边缘：`CF-Ray` 或 `CDN-Loop` 含 `cloudflare` 为 `cf`，ESA 的头经生产日志确认；推断出的名字仍须在 `keepalive.edges` 内；受信对端的 `X-XY-Edge` 照旧优先，非受信对端的照旧忽略；不自动配置 `SERVER_TRUSTED_PROXIES`。
-- 生产只读核查（10:55Z，去标识证据在仓库外 `production/ESA_HEADER_CHECK_20261018.md`）：ESA 站点 1,237 个请求全部带 `CDN-Loop: esa;loop=N`（另有 `Eagleeye-Traceid`），无 `CF-Ray`；Cloudflare 站点 8,942 个请求全部带 `CF-Ray` 与 `CDN-Loop: cloudflare; loops=N`；无 CDN 头的只有 5 个 XY-image 内网直连请求。ESA 按 `CDN-Loop` 的 `esa` 识别。
-- 分支 `release/0.4.1`（自 main `b9a2a11aa`）：依次合入 #101、#99、#98（#99 只取修复，版本号改动丢弃），再加 CDN 识别、升版本 0.4.1、开一个 PR。
-- 2026-10-18T11:25Z 进展：合并 #101 `b9067e0ab`、#99 `0ef405e22`（0.3.1 版本号丢弃）、#98 `2e0d5be24`（新文档登记 `docs/README.md`），三处只在本文件冲突，保留 main 版本，各 PR 记录原样归档（`db78baf80`，#98 的工作机路径改为 `<工作机 C>`）；CDN 识别 `c7da44849`（先写失败用例，文档与测试服务器 CF-6 同提交）；版本 0.4.1 `d488d2b5d`。本机全量验证全绿（CI 门禁 249、前端 389 文件/3055 项）；测试服务器 `stg-cf` 去掉 Caddy 标记后 KA/CF/ERR 19/19，经真实 Cloudflare 的慢首包 15.1 秒开始心跳、150.7 秒完成，直连与内部请求无心跳；Caddy 片段已恢复。下一步：推送、开 PR、CI 全绿后常规 merge、`v0.4.1`、核验与全新安装。
+- 暂无（0.4.1 已发布，遗留事项见“当前交接状态”）。
 
 ## 操作陷阱
 
@@ -518,3 +520,16 @@ pnpm --dir frontend run build
 - 验证：各步骤的本机门禁、CI 与测试服务器结果见上；本收尾为纯文档，跑文档一致性检查、`sync.py audit`、`tools/tests`。
 - 卡点/风险：GitHub 网页合并的提交作者为账号默认邮箱（此前的合并提交相同），需要时在账号设置中改为 noreply。正式镜像与浸泡候选只差一句英文设置提示。
 - 下一步：XY-image 0.0.17（先交接并经用户确认）；生产部署（单独授权，按 runbook）；0.4.1 见 tasks“后续”；收尾清理见“当前交接状态”。
+
+### 2026-10-18T12:30Z — 20261018-release-0.4.1 — 0.4.1 正式发布完成
+
+- 请求/目标：用户经评审转达，发布 0.4.1：应用自动识别 CDN 回源，并合并 PR #98、#99、#101；不跑浸泡、不出 RC；只读查看一次生产 Caddy 访问日志确认 ESA 回源头。生产部署与生产配置改动未授权。
+- 开始状态：main `b9a2a11aa`（0.4.0 收尾后），工作树干净。
+- 完成操作：
+  - 生产只读核查（10:55Z，sudo 只读日志，未改任何东西，未落盘口令，去标识证据在仓库外 `production/ESA_HEADER_CHECK_20261018.md`）：ESA 回源全部带 `CDN-Loop: esa;loop=N`，Cloudflare 回源全部带 `CF-Ray` 与 `CDN-Loop: cloudflare`，XY-image 内网直连两者都不带。
+  - `release/0.4.1`：合并 #101 `b9067e0ab`、#99 `0ef405e22`（0.3.1 版本号丢弃）、#98 `2e0d5be24`（新文档登记）；三处只在记忆冲突，记录原样归档 `db78baf80`；CDN 识别 `c7da44849`（先写失败用例，文档同提交，测试服务器新增 CF-6）；版本 `d488d2b5d`；验证记录 `7f112a981`。
+  - PR #103 18/18 → 常规 merge `edea0d493`；main CI 与安全扫描全绿；annotated `v0.4.1` → `edea0d493`，Release run 39126008209 成功；制品、二进制、镜像与稳定别名核验全过；正式镜像全新安装通过。
+- 修改文件：见上述提交；测试服务器 Caddy 片段验证时临时去掉标记，验证后恢复原样。
+- 验证：本机全量与 CI 门禁（249）、前端全绿；测试服务器 KA/CF/ERR 19/19；PR、main 与 Release 工作流全绿。
+- 卡点/风险：无。生产 0.3.0 未改；部署需单独授权。
+- 下一步：生产部署 0.4.1（单独授权）；XY-image 0.0.17（先交接并经用户确认）；0.4.1 之后的后续事项见 tasks“后续”。
