@@ -42,6 +42,10 @@ func TestUserRepositoryExistsByEmailAlias(t *testing.T) {
 		{"distinct plus-prefixed locals", "+alice@gmail.com", "+bob@gmail.com", false},
 		{"underscore is not a wildcard", "user_x@qq.com", "userax@qq.com", false},
 		{"percent is not a wildcard", "a%b@qq.com", "axxb@qq.com", false},
+		{"quoted stored row", `"some.one"@gmail.com`, "someone@gmail.com", true},
+		{"quoted stored row with plus", `"some.one+bulk"@gmail.com`, "s.o.m.e.o.n.e@gmail.com", true},
+		{"quoted probe", "some.one@gmail.com", `"s.omeone"@gmail.com`, true},
+		{"quoted non-gmail keeps dots significant", `"first.last"@qq.com`, "firstlast@qq.com", false},
 	}
 
 	for _, tc := range cases {
@@ -54,6 +58,36 @@ func TestUserRepositoryExistsByEmailAlias(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		})
 	}
+}
+
+// 管理员删除的账号继续占用其收件箱：同一收件箱换写法（含原样写法）都不能再注册。
+// 精确查重 ExistsByEmail 仍只看未删除账号，行为不变。
+func TestUserRepositoryExistsByEmailAliasCountsDeletedAccounts(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newUserEntRepo(t)
+	deleted := &service.User{
+		Email:        "some.one@gmail.com",
+		Username:     "some.one",
+		PasswordHash: "hash",
+		Role:         service.RoleUser,
+		Status:       service.StatusActive,
+	}
+	require.NoError(t, repo.Create(ctx, deleted))
+	require.NoError(t, repo.Delete(ctx, deleted.ID))
+
+	for _, probe := range []string{"some.one@gmail.com", "someone@gmail.com", "s.o.m.e.one+x@gmail.com", `"someone"@gmail.com`} {
+		got, err := repo.ExistsByEmailAlias(ctx, probe)
+		require.NoError(t, err)
+		require.Truef(t, got, "deleted account must still occupy the inbox for %s", probe)
+	}
+
+	exact, err := repo.ExistsByEmail(ctx, "some.one@gmail.com")
+	require.NoError(t, err)
+	require.False(t, exact)
+
+	other, err := repo.ExistsByEmailAlias(ctx, "someoneelse@gmail.com")
+	require.NoError(t, err)
+	require.False(t, other)
 }
 
 func TestUserRepositoryExistsByEmailAliasIgnoresMalformedInput(t *testing.T) {

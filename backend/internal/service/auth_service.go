@@ -38,6 +38,7 @@ var (
 	ErrRefreshTokenReused           = infraerrors.Unauthorized("REFRESH_TOKEN_REUSED", "refresh token has been reused")
 	ErrEmailVerifyRequired          = infraerrors.BadRequest("EMAIL_VERIFY_REQUIRED", "email verification is required")
 	ErrEmailSuffixNotAllowed        = infraerrors.BadRequest("EMAIL_SUFFIX_NOT_ALLOWED", "email suffix is not allowed")
+	ErrEmailFormatNotAllowed        = infraerrors.BadRequest("EMAIL_FORMAT_NOT_ALLOWED", "email address format is not supported; use a plain address without quotes, spaces or special characters")
 	ErrEmailDomainRegistrationLimit = infraerrors.BadRequest(
 		"EMAIL_DOMAIN_REGISTRATION_LIMIT",
 		"this email domain cannot register another account; use a mainstream email or contact support to add the enterprise domain",
@@ -169,6 +170,9 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 	// 防止用户注册 LinuxDo OAuth 合成邮箱，避免第三方登录与本地账号发生碰撞。
 	if isReservedEmail(email) {
 		return "", nil, ErrEmailReserved
+	}
+	if HasNonStandardEmailLocalPart(email) {
+		return "", nil, ErrEmailFormatNotAllowed
 	}
 	// 检查是否需要邀请码
 	var invitationRedeemCode *RedeemCode
@@ -314,6 +318,9 @@ func (s *AuthService) SendVerifyCode(ctx context.Context, email string, locale .
 	if isReservedEmail(email) {
 		return ErrEmailReserved
 	}
+	if HasNonStandardEmailLocalPart(email) {
+		return ErrEmailFormatNotAllowed
+	}
 	// 检查邮箱是否已存在（含 +别名 / Gmail 点号变体归一化，防止单个收件箱批量派生注册）
 	existsEmail, err := s.existsByEmailOrAlias(ctx, email)
 	if err != nil {
@@ -353,6 +360,9 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string, loc
 
 	if isReservedEmail(email) {
 		return nil, ErrEmailReserved
+	}
+	if HasNonStandardEmailLocalPart(email) {
+		return nil, ErrEmailFormatNotAllowed
 	}
 	// 检查邮箱是否已存在（含 +别名 / Gmail 点号变体归一化；在发信前拦截，避免批量脚本消耗发信配额）
 	existsEmail, err := s.existsByEmailOrAlias(ctx, email)
@@ -1193,6 +1203,9 @@ func inferLegacySignupSource(email string) string {
 }
 
 func (s *AuthService) validateRegistrationEmailPolicy(ctx context.Context, email string) error {
+	if HasNonStandardEmailLocalPart(email) {
+		return ErrEmailFormatNotAllowed
+	}
 	if s.settingService == nil {
 		return nil
 	}
