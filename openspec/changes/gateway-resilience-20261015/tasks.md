@@ -390,7 +390,7 @@
 - [x] 版本 0.4.1（`backend/cmd/server/VERSION`、`UPSTREAM_BASE.json` 的 `xy2api_version`）。
 - [x] 本机全量验证（`d488d2b5d`）：四种标签 vet、全量 unit、无 tag 与 embed、golangci-lint 0 问题；`ci_gate.py` 249 个韧性测试 `-race` 全过、零跳过；`tools/tests` 39 个、同步审计与 scheduler-diff、文档一致性通过；前端 eslint、vue-tsc、vitest（389 个文件、3055 个用例）与构建通过。
 - [x] 测试服务器（候选 `d488d2b5d`，应用自报 `XY2API 0.4.1`）：`stg-cf` 站点去掉 Caddy 标记（只保留删除客户端自带的 `X-XY-Edge`）后，KA-1..9、CF-1..6、ERR-1..4 共 19/19 通过。经真实 Cloudflare 的 CF-1、CF-4 第一次心跳在 15.1 秒、共 14 次，150.7 秒完成（穿过 125 秒切断）；直连与内部请求（CF-2、CF-5、CF-6、KA-2）没有心跳。验证后 Caddy 片段已恢复原样。
-- [ ] PR → CI 全绿 → 常规 merge → annotated `v0.4.1` → 制品与 GHCR 核验 → 正式镜像全新安装。
+- [x] PR #103 头 `7f112a981` 两组 18/18 全绿后常规 merge 为 `edea0d493`（#101、#99、#98 随之标为已合并），main CI 与安全扫描全绿。annotated `v0.4.1`（对象 `7dbdbccd9`）→ `edea0d493`；Release run 39126008209 成功。6 个附件共 198,163,198 字节，shasum 与 openssl 两种 SHA-256 均与 checksums.txt 一致；五个平台二进制 `vcs.revision=edea0d493`、`vcs.modified=false`、embed 构建，darwin_arm64 自报 `XY2API 0.4.1 (Sub2API compatibility: 0.2.15)`；GHCR index `sha256:baa0e4461e00…` 含 linux/amd64 与 linux/arm64，标签正确；prerelease=false，latest、0、0.4 指向 0.4.1，0.3 仍为 0.3.0。正式镜像在测试服务器空库全新安装：启动 2.3 秒、324 条迁移，health、首页与 6 个静态资源、`/auth/me` 均 200。
 
 ## 后续（只登记，不在 0.4.0 实施）
 
