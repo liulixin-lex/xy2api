@@ -716,6 +716,42 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 安全提醒：两台主机的 SSH 密码在对话中出现过，建议改用密钥并更换；只读分析时曾短暂看到 `openai_codex_ticket_proxy_pool_v1` 的部分凭据片段与已退役的 Caddy 金丝雀 token，未写入文件，建议轮换。
 - 2026-10-17T15:40Z 归档说明：其后 PR #100 常规 merge 为 `4c142e1aa`，`v0.4.0` 发布并核验，结果摘要见主文件“当前交接状态”与操作日志。
 
+### 注册邮箱别名加固与用户批量禁用（2026-10-17T15:00Z 更新：PR #101 已合入最新 main（`4c142e1aa`，含 PR #100 的 0.4.0）并解决冲突，CI 复跑全绿后由另一位作者审阅合并；代码未发版、未部署；生产注册拦截规则已生效）
+
+- 背景：2026-10-17 生产出现注册机批量注册（当天 86 个 Gmail 账号；脚本伪造浏览器 UA、缺少 `Sec-Fetch-Site`、轮换代理 IP、注册后约 1 秒批量建 Key）。只读分析发现上游别名查重（`existsByEmailOrAlias`）有两个缺口：带引号的本地部分（`"a.b"@gmail.com`）不归一；查重不计软删除账号，管理员删号后同一收件箱可以再次注册。管理后台也只有逐个调用接口的批量删除。
+- 用户决定（2026-10-17）：① 注册、发验证码、第三方邮箱自动注册与邮箱绑定拒绝非常规本地部分（只允许字母、数字与 `. _ + -`，首尾为字母、数字或下划线，无连续点号，最长 64），新错误码 `EMAIL_FORMAT_NOT_ALLOWED`；② 别名归一去掉引号，数据库探针兼容存量带引号的行（沿用迁移 190 的表达式索引，不加迁移）；③ 别名查重计入软删除账号（系统没有自助注销，只影响管理员删除的账号）；④ 后台新增批量禁用（附批量启用以便撤回），以后清理注册机用禁用代替删除。不按点号数量拒绝：生产老用户中有 22 人的 Gmail 地址有 4 个以上点号。
+- 影响面：生产全量用户中只有 27 个地址不符合新格式，全部是 10-17 的带引号注册机账号。
+- 已完成（分支 `fix/registration-alias-batch-disable-20261017`，基于 `ca2bdd111`）：① `58601c744` 别名加固，具名补丁 `xy-registration-email-alias-hardening`；② `a37bbc64f` 批量启用/禁用，具名补丁 `xy-admin-user-batch-status`：`POST /api/v1/admin/users/batch-status`（`{user_ids, status}`，1–500 个，不支持 `all`）用一条 `UPDATE ... RETURNING` 完成，跳过已删除和已是目标状态的用户，禁用时跳过管理员；返回 `affected`/`skipped`，逐个失效认证缓存并写审计日志。用户管理页多选后出现“批量禁用/批量启用”。本机验证全绿，见操作日志 `20261017-registration-alias-batch-disable`。③ 2026-10-17T14:20Z 用户授权后，在生产反向代理（Caddy）主站点加了规则：两个注册接口的 POST 缺少 `Sec-Fetch-Site` 时返回 403（用户选定只用这一条件，不改源码）。已校验并平滑重载；验证结果见操作日志 `20261017-signup-fetch-metadata-rule`。配置位置、备份与回滚命令只记在上述仓库外私有笔记。
+- 未完成：① PR #101 由另一位作者审阅合并（用户 2026-10-17 说明：合并由另一位作者操作，Agent 不执行合并）；② 代码发版与生产部署，需用户另行授权。
+- 卡点与风险：仓储集成测试（testcontainers）本机无 Docker，以 CI 为准；批量 SQL 已在本机临时 PostgreSQL 18（应用全部迁移）上验证。
+- 关键位置：`backend/internal/service/registration_email_policy.go`、`backend/internal/service/registration_email_alias.go`、`backend/internal/repository/user_repo.go`（`emailAliasOwnerIDWithClient`）；`backend/internal/service/admin_user_batch_status.go`、`backend/internal/repository/user_repo_batch_status.go`、`backend/internal/handler/admin/user_handler_batch_status.go`、`frontend/src/views/admin/UsersView.vue`。
+- 2026-10-18 归档说明：本 PR 随 XY2API 0.4.1 合并（`release/0.4.1`），任务结束，摘要见主文件“当前交接状态”。
+
+### 误删 93 个用户后的恢复（2026-10-17，已完成：18 个充值用户及其 25 个 API Key 已恢复）
+
+- 事件：管理员清理注册机账号时，北京时间 17:54:50–17:55:09 逐个删除了 93 个用户（软删除）。其中 18 人有余额来源：17 人有充值（在线支付订单或兑换码），1 人为管理员赠送余额。其余 75 个为注册机账号，保持删除。
+- 恢复（用户授权）：18 个用户的 `deleted_at` 已置空，余额与累计充值与删除前一致。他们名下 25 个 API Key 的原值通过 pgBackRest PITR 取回：在隔离临时实例中恢复到 UTC 09:54:50，确认停在第一笔删除事务提交前；核对后单事务写回，与快照一致，恢复后已有成功调用。临时容器与数据已删除。其后 1 名用户自行删除了 1 个刚恢复的 Key（此前他已新建 Key 并在使用），其余 24 个仍可用（核实于北京时间 18:4x）。
+- 未恢复：3 个 GitHub 注册用户的第三方登录绑定被物理删除。按 `backend/internal/service/auth_email_oauth_auto.go`，用 GitHub 重新登录时会按邮箱匹配并自动重新绑定，未在生产验证。
+- 回滚备份：恢复前的 `users`、`api_keys` 相关行已导出，保存在生产服务器上。位置、用户与 Key 标识、金额明细只记在仓库外 `xy2api-artifacts/registration-alias-batch-disable-20261017/private/INCIDENTS_20261017.md`。
+- 代码层面发现：管理员删除用户时，`DeleteWithAudit` 会把 API Key 原值改写为墓碑（`backend/internal/repository/api_key_repo.go:430`）；`deleted_api_key_audits` 表（迁移 145）没有任何代码或触发器写入；第三方登录绑定为物理删除。因此误删后 Key 只能靠 PITR 找回。详见操作日志 `20261017-restore-deleted-paying-users`。
+- 2026-10-18 归档说明：本 PR 随 XY2API 0.4.1 合并（`release/0.4.1`），任务结束，摘要见主文件“当前交接状态”。
+
+### 智商检测“最终响应互相冲突”修复（2026-10-16，PR #99 已开、检查全绿；待维护者合并，未发版、未部署）
+
+- 账号 #307（aiportx 中转）会注入占位 assistant 消息（`msg_ft_*`，正文为单个空格，无 `phase`），`iqcheck` 的 `terminal()` 把它当作第二条最终回答，因此判为 `conflicting_final_response`。诊断见操作日志 `20261016-iq-conflict-aiportx`。
+- 修复在 [PR #99](https://github.com/liulixin-lex/xy2api/pull/99)：忽略仅含空白的消息，解析器升为 `iq-response-v6`，产品版本 0.3.1。按用户决定止于提交 PR。合并后需打 annotated `v0.3.1` tag 才会发版；生产仍为 0.3.0，部署需另行授权。详见操作日志 `20261016-iq-blank-placeholder-0.3.1`。
+- 2026-10-18 归档说明：本 PR 随 XY2API 0.4.1 合并（`release/0.4.1`），任务结束，摘要见主文件“当前交接状态”。
+- 2026-10-18 补记：0.3.1 未单独发布，并入 0.4.1。
+
+### Grok 渠道监控原生 Responses — PR #98（2026-10-16）
+
+- 用户授权依据只读审查新增功能并提交 PR；独立分支 `feat/grok-monitor-responses-20261016`，基线 main `f8fec15a23ab37a6efdbc02b0db0376ed6b60dbb`，工作树 `<工作机 C>/xy2api-grok-monitor-responses`。[PR #98](https://github.com/liulixin-lex/xy2api/pull/98) 已提交，未合并、发版或部署。
+- Grok 类型可原生选择 Responses，复用非流式 JSON 请求/文本解析与合并字段保护；部分编辑保留协议，历史 Chat 默认和供应商单独切换默认保持。前端覆盖监控、模板、协议筛选、快照清理与高级示例，新增前端回归纳入 critical CI。说明见 [GROK_MONITOR_RESPONSES.md](GROK_MONITOR_RESPONSES.md)。
+- 本功能无迁移、依赖、生成代码或业务调度变更；不包含流式 SSE 探测、阈值调整、上游模型路由和 Grok 换号修复。生产配置与数据保持。
+- 本地前端新增及相关18项、类型检查、生产构建、19项工具、来源审计与调度差异检查已通过；远端前端 critical/lint/typecheck 与安全检查已有通过记录。后端专项及最终远端完整门禁以 PR 最新 head 和 `<工作机 C>/grok-monitor-responses-20261016-evidence/VALIDATION.json` 为准，不将早期 head 的检查冒称后继检查。
+- 首次本地后端编译遇到空间不足时失败，改用本任务专用 GOTMPDIR；后续专项发现测试夹具漏填 endpoint，已仅补齐夹具，未放宽生产校验。前端可选 provider 类型也已修正并复验；所有失败记录保留。自身开发任务已提交，等待维护者评审；合并/发版/部署需另行授权。
+- 2026-10-18 归档说明：本 PR 随 XY2API 0.4.1 合并（`release/0.4.1`），任务结束，摘要见主文件“当前交接状态”。
+
 ## 已结束任务的登记（原“进行中的工作”）
 
 ### 20261015-prod-ux-analysis — 生产请求日志只读分析与上线级优化方案（已完成，由 20261015-gateway-resilience 承接）
@@ -1015,6 +1051,14 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - **进度（2026-10-17T04:45Z，RC）**：PR #97 头 `997861f1a` 两组 18/18 全绿（“Gateway resilience” 256 个测试）后常规 merge 为 `ca2bdd111`（03:08:38Z），main CI 与安全扫描全绿。annotated `v0.4.0-rc.1`（对象 `3042fb5b4`）→ `ca2bdd111`，Release run 38997674298 成功；制品校验全过（6 附件 198,283,776 字节双 SHA；五平台 `vcs.modified=false`、embed；GHCR index `sha256:b6ea2ef1…` 双架构与标签正确；prerelease=true；latest/0/0.3 仍为 0.3.0 的 `sha256:5560a6…`）。测试服务器 RC 镜像：全新安装 323 迁移通过；场景 45/45；升级、回退、前滚、成套恢复通过；真实客户端 14/16（C-codex-ok、C-openai-py-slow-first-cdn 失败于真实中转高峰期 502、输出后流内失败与首字过慢，日志为证，未重跑——重跑命令被用户中止）。测试服务器应用现运行 RC 镜像（`.env` 的 `APP_IMAGE` 已改）。工具教训：脚本先 `set -a; . ./.env` 再 `sed` 改 `.env` 时，docker compose 优先用已导出的旧 `APP_IMAGE`，须显式导出新值并核对运行镜像；远程命令里 `a && b &` 会把整条链放进后台，长任务用 `setsid nohup … < /dev/null &` 单独启动。
 - **进度（04:45Z，晋级分支）**：本地 `release/0.4.0`（自 main `ca2bdd111`，已取消上游跟踪）：`24cfc6511` 按用户 2026-10-17 指示把用户余额提示恢复为 0.3.0 原文 `Insufficient account balance`（常量覆盖鉴权预检与计费预检，403、`INSUFFICIENT_BALANCE`、OpenAI 兼容端点 type `insufficient_balance` 不变；中间件该行与测试恢复上游原样）；随后晋级提交把 VERSION 与 `UPSTREAM_BASE.json` 改为 0.4.0 并记录 RC。待定：评审提出的“未送达不计费只覆盖 OpenAI Responses 路径”用户仍在确认，确认后再定是否进 0.4.0（若改动较大，可能需要 rc.2）；合并晋级 PR、打 `v0.4.0` 前等此项。正式版发版说明草稿在仓库外 `RELEASE_NOTES_v0.4.0.md`，全新安装检查脚本 `/tmp/xy2-staging/fresh_install.py`、RC 复跑脚本 `/tmp/xy2-staging/rc-run.sh`（测试服务器同名文件）。另：定时上游同步检测到 Sub2API v0.2.17 已发布（exit 2），需按既有同步机制另开任务。
 - 2026-10-17T15:40Z 归档说明：其后 PR #100 常规 merge 为 `4c142e1aa`，`v0.4.0` 发布并核验，结果摘要见主文件“当前交接状态”与操作日志。
+
+### 20261016-iq-blank-placeholder-0.3.1 — 智商检测忽略空白占位消息（PR #99 已开、检查全绿，待维护者合并；本 Agent 无进行中操作）
+
+- 按用户决定止于提交 PR：未合并、未打 tag、未发版、未部署，生产仍为 0.3.0。用户改为只需提交 PR，合并、发版和部署不在本次授权范围内，后续 Agent 不得据此自行执行。
+- 范围：`iqcheck` 的 `terminal()` 不再把仅含空白的 assistant 消息计为最终回答，诊断中记为忽略类型 `blank`；解析器版本升为 `iq-response-v6`；产品版本 0.3.1（兼容版本仍为 0.2.15）。无迁移，无前端改动。
+- 结果、验证与后续步骤见操作日志 `20261016-iq-blank-placeholder-0.3.1`。
+- 2026-10-18 归档说明：本 PR 随 XY2API 0.4.1 合并（`release/0.4.1`），任务结束，摘要见主文件“当前交接状态”。
+- 2026-10-18 补记：0.3.1 未单独发布，并入 0.4.1。
 
 ## 历史重要事项（原“当前重要事项”）
 

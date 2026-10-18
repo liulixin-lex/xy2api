@@ -27,6 +27,24 @@
 - 安全提醒：两台主机的 SSH 密码在对话中出现过，建议改用密钥并更换；生产 settings 中的明文代理凭据（`openai_codex_ticket_harvest_proxy_url`）建议轮换。
 - 本任务的详细交接状态与“进行中的工作”登记已原样移入 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)。
 
+### 并入 0.4.1 的 PR #101、#99、#98 与 2026-10-17 的生产事项（摘要；详细交接已原样归档）
+
+- PR #101 注册邮箱别名加固与用户批量启停：注册、发验证码、第三方邮箱自动注册与邮箱绑定拒绝非常规本地部分，新错误码 `EMAIL_FORMAT_NOT_ALLOWED`；别名归一去掉引号，查重计入软删除账号；管理后台多选批量启用/禁用（`POST /api/v1/admin/users/batch-status`）。具名补丁 `xy-registration-email-alias-hardening`、`xy-admin-user-batch-status`。生产 Caddy 的注册接口 `Sec-Fetch-Site` 拦截规则 2026-10-17 已单独生效，不在代码中。
+- 2026-10-17 误删 93 个用户：18 个充值用户及其 25 个 API Key 已经 PITR 恢复；3 个 GitHub 登录绑定依赖按邮箱自动重新绑定，未在生产验证。明细在仓库外私有笔记。
+- PR #99 智商检测忽略仅含空白的占位消息，解析器 `iq-response-v6`。0.3.1 未单独发布，并入 0.4.1。
+- PR #98 Grok 渠道监控可选原生 Responses，说明见 [`GROK_MONITOR_RESPONSES.md`](GROK_MONITOR_RESPONSES.md)。
+- 这些任务的交接状态与登记已原样移入 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)，操作日志按时间留在本文件。仍未结束的 Codex 联网搜索 502 诊断见下一节。
+
+### Codex 历史联网搜索导致 502、gpt-5.6-terra 被移出分组 18（2026-10-17，只读诊断完成；待修复，未改代码、未改生产）
+
+- 现象：一名用户（Codex Desktop 0.130.0-cometix；用户 ID 见上述仓库外私有笔记）在分组 18「GPT-不降智」用 gpt-5.6-terra 调 `/v1/responses`，北京时间 17:00:21 起持续失败。17:00:21–17:42:02 为 502（471 次，账号 378/365 的上游 SSE 返回 `response protection is unavailable`），17:42:03 起为 404 `model_not_found`（261 次）。客户端持续重试，峰值约 27 次/分钟。
+- 502 根因（推断）：ChatGPT 内部 Codex 接口会拒绝“输入回放了 `web_search_call`、但请求未声明 `web_search` 工具”的请求，而 Codex 本地压缩会以 `tools:[]` 发送完整历史。xy2api 的修补 `ensureOpenAIOAuthWebSearchToolForHistory*`（`backend/internal/service/openai_oauth_web_search_history.go`）只在 `IsOpenAIOAuthLike()`（OAuth/SetupToken，`backend/internal/service/account.go:1273`）时生效。378/365 是 apikey 账号，上游为第三方 ChatGPT 系 Codex 中转（域名见私有笔记），请求未经修补。请求体不落库，这一点依据报错文本与代码注释推断。
+- 佐证：同时段 378/365 为另外 11 个用户正常服务 1000 多次；24 小时内该报错 477 次，其中 471 次来自该用户。
+- 404 原因：管理员在 17:38:45、17:42:03 移除了 378、365 模型映射中的 gpt-5.6-terra，而分组 18 的模型白名单仍包含它，组内已无可调度账号支持该模型（379 含该模型，但不在分组 18 且不可调度）。17:50:05 该用户被禁用，此后请求返回 401。
+- 生产现状（核实于北京时间 2026-10-17 17:53）：分组 18 无账号支持 gpt-5.6-terra；该用户为 disabled。
+- 待用户决定：① 恢复 378/365 的 terra 映射，或把 terra 从分组 18 白名单移除；② 代码改进：让 Codex 中转类 apikey 账号也能应用该修补（建议账号级开关，或遇此报错时带修补重试一次；不宜对全部 apikey 账号默认注入，官方 API 可能拒绝 `external_web_access`）。诊断过程见操作日志 `20261017-codex-websearch-502-terra`。
+- 待核实（2026-10-17T13:00Z 补记）：main 上的 0.4.0（PR #97）新增了 `resilience_web_search_replay`（`backend/internal/service/resilience_web_search_replay.go`、`backend/internal/handler/resilience_web_search_replay.go`），上游在输出前以 web_search 历史拒绝时会按设计重放或换号，并把上游原因返回给客户端。它是否覆盖上述 apikey 中转账号，需在 0.4.0 上核实后再决定第 ② 项。
+
 ### Sub2API 0.2.15 / XY2API 0.3.0 正式发布完成（2026-10-13）
 
 - 独立工作树 `<工作机 C>/xy2api-sync-20261013`；起始main `7b1d5d8c387c461a660befa3ac936b39715b4bf0`。固定官方annotated v0.2.15（object `86a80c13dcba86f52f9ca815b5a471cecc236227`，target `f2669c8cf62555cd92389b3f55920e9e6e7c6ff2`），真实base `0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d`。146个上游提交、27项冲突裁决见[同步说明](UPSTREAM_SYNC_V0215.md)。
@@ -361,6 +379,34 @@ pnpm --dir frontend run build
 - 卡点/风险：F2 严重度取决于生产是否使用仅粘性阈值或 /antigravity 路由，待用户确认。
 - 下一步：主 agent 与用户确认第 9 节后排期。（12:20Z 用户已按“决策”一节定稿：0.4.0 修 F1、F2+F5、F3、F4、F7、F12、F14。）
 
+### 2026-10-16 — 20261016-grok-monitor-responses — 原生协议功能与 PR 交付
+
+- 请求：根据只读审查中 Grok 监控固定 Chat、账号测试使用 Responses 的证据，在指定仓库增加原生协议选项并提交 PR；未授权生产变更或合并发布。
+- 开始状态：干净 main `f8fec15a23ab37a6efdbc02b0db0376ed6b60dbb`；原工作树不变，独立分支与工作树完成实现。没有把生产凭据、IP、用户信息或原始日志提交到仓库。
+- 修改：后端监控/模板校验、Responses adapter 选择、文本提取入口、合并字段保护、部分更新保留协议；前端监控及模板编辑/筛选/展示、请求示例和中英文说明。无迁移或依赖升级，Chat及OpenAI原有行为保持。
+- 验证：本地18项前端新增及相关回归、类型/lint/生产构建、19项工具、来源审计及调度差异检查通过；补充后端HTTP路径/字段/错误与创建/更新/模板回归。初轮编译空间问题、可选参数类型错误及缺endpoint测试夹具均保留记录，修正后的后端与最终完整CI明细保存在外部VALIDATION及PR。
+- 交付：[PR #98](https://github.com/liulixin-lex/xy2api/pull/98)；文档说明非流式JSON和既有6/30/45秒阈值边界。源码功能与使用说明完整提交，本Agent不合并、不发布、不部署。下一步由维护者评审并按目标供应商验证实际服务可用性。
+
+### 2026-10-16T18:35:42Z — `20261016-iq-conflict-aiportx` — 只读诊断完成
+
+- 请求/目标：账号 #307 `port015`（OpenAI API Key，上游 aiportx 中转，检测模型 gpt-6-astra/low/compat）的智商检测持续返回 `conflicting_final_response`（“最终响应互相冲突”），查明原因。
+- 开始状态：`main` HEAD `f8fec15a2`，工作树干净；生产 `xy2api-prod-app` 运行 `xy2api:0.3.0`，与本地 `iqcheck` 源码一致。
+- 完成操作：只读查询生产库 `accounts.iq_check` 与 `account_iq_check_results/attempts` 的诊断；在生产宿主机用与 IQ 探测相同的请求体直连该账号上游，共发出 11 次测试请求。key 只在服务器内通过 curl 的 stdin 配置传递，未打印、未落盘、未回传；请求不经 XY2API，未写生产数据。
+- 结论：该中转会在真实输出前注入占位 assistant 消息（`msg_ft_*`，正文为单个空格，无 `phase`，响应 ID 变为 `resp_ft_*`），并把它写进 `response.completed.output`。`parse.go` 的 `terminal()` 把无 phase 且文本非空的 assistant 消息都当作最终回答，空格也算非空，因此与真实的 `final_answer` 冲突（`parse.go:401-404`）。生产 9 次调用的诊断（done_messages 2/3、terminal_items 3/4、ignored_items 2/1）与“1–2 条占位 + reasoning + 最终答案”的结构逐项吻合。
+- 其他观察：占位注入不是每次都有。直连拿到完整响应的 6 次中有 2 次出现，都是短提示词；4 次检测原题都没有出现，而生产 9 次调用全部命中。差异可能与 IQ 探测携带的 `prompt_cache_key` 或客户端特征有关，未证实。带 `prompt_cache_key` 的 curl 请求在该中转上，HTTP/1.1 会超时，HTTP/2 会被整段缓冲约 66 秒，原因未查明，不影响上述结论。该账号业务流量正常，最近一小时有上百次成功请求。本机与生产均无 Go 1.27 工具链，未用真实解析器回放，结论依据代码逐行推导和既有用例 `parse_http_test.go:182`。
+- 修改文件：仅本文件（本条及顶部交接项）。未改业务代码，未部署，未改生产配置。
+- 下一步（待用户授权）：在 `terminal()` 中把纯空白的 assistant 消息视为非答案（与 design.md:92“只提取完整最终回答”及 `Grade` 先做 TrimSpace 一致），并补占位消息回归用例；或者请上游关闭占位注入。
+
+### 2026-10-16T20:21:37Z — `20261016-iq-blank-placeholder-0.3.1` — PR #99 已开，按用户决定止于提交 PR
+
+- 请求/目标：修复账号 #307 智商检测误判（见 `20261016-iq-conflict-aiportx`）。用户先授权修复测试、提交 PR、发版部署三步全部完成；`gh pr merge` 被 Claude Code 自动权限检查拦截后，用户改为“提交了 PR 就行”。合并、打 tag、发版和生产部署均未执行。
+- 开始状态：`main` `f8fec15a2`，工作树只有上一条诊断记录的未提交改动；分支 `fix/iq-blank-placeholder-20261016`。
+- 完成操作：`terminal()` 跳过仅含空白的 assistant 消息，并记为忽略类型 `blank`；解析器版本升为 `iq-response-v6`；产品版本 0.3.1（`VERSION` 与 `UPSTREAM_BASE.json`）；`docs/OPENAI_IQ_CHECK.md` 同步说明。先写回归用例，在未修复代码上确认失败后再修复。用真实解析器回放按抓包结构构造的流，1 条和 2 条占位的诊断计数与生产 9 次调用的两种形态逐字段一致。
+- 修改文件：`backend/internal/pkg/iqcheck/{parse.go,diagnostic.go,parse_http_test.go,reliability_test.go}`、`backend/cmd/server/VERSION`、`UPSTREAM_BASE.json`、`docs/OPENAI_IQ_CHECK.md`、本文件。
+- 验证：本机 Go 1.27.2（`/tmp/xy2-toolchain`，安装包 SHA256 与官方一致）下以下检查通过：`go test -race ./internal/pkg/iqcheck/`、`-tags=unit` 的 IQ 相关 service/repository/handler 单测、gofmt、go vet、golangci-lint v2.14.0（iqcheck 0 issues）。`sync.py audit`、`scheduler-diff` 和同步工具 19 项测试也通过。PR #99 head `67497e325` 的 8 项必需检查（push 与 PR 两份）全部成功；本条为纯文档提交，推送后新 head 需重新通过检查。
+- 卡点/风险：本机全局凭据助手是 Git Credential Manager，HTTPS 推送会挂起等待交互。本次改用单条命令 `git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push`。合并由维护者执行。
+- 下一步：维护者审阅 PR #99，并以 merge commit 合并；随后从合并提交创建 annotated `v0.3.1` tag 触发 Release，核验制品与 GHCR 镜像。生产部署需另行授权。届时按 2026-10-15 升级现场的方式只替换镜像行，用 `docker compose -p production` 原地重建。无迁移，回滚即恢复 0.3.0 镜像行；pgBackRest 与 WAL 归档可提供 PITR。
+
 ### 2026-10-17T04:45Z — 20261015-gateway-resilience 审查与生产核查修复、测试服务器闭环、PR #97 合并与 v0.4.0-rc.1
 
 - 请求/目标：按独立审查（F1–F14）与生产只读核查修复 0.4.0，测试服务器全部闭环后推送 PR #97、合并、打 RC，再晋级 0.4.0；生产部署单独授权。
@@ -404,6 +450,60 @@ pnpm --dir frontend run build
 - 修改：主机类标识（测试站域名与项目名、共存服务名、Windows 工作机目录名）改为登记规范化后的 SHA-256，检查时对文本中每个词串的整词片段算哈希比对；工作机路径根与用户目录用通用正则取出目录名再比对哈希；报错只显示哈希前缀。公网 IPv4 与 `ubuntu@`/`root@` 两条通用规则不变。规则文件里不再有这些原文（哈希只是不写原文，短词仍可被字典反查）。AGENTS.md 写明登记方式。
 - 验证：用 `a12d33b82` 上清理前的归档回放，命中 189 处，与清理范围一致；检查器单测 11 个、`tools/tests` 39 个、一致性检查（约 2.6 秒）通过。
 - 下一步：随 PR #100 由主 agent 推送。
+
+### 2026-10-17T10:05:55Z — `20261017-codex-websearch-502-terra` — 只读诊断完成，待修复
+
+- 请求/目标：用户反馈某账号持续报错（gpt-5.6-terra，404），要求只读排查生产；随后要求先把问题记录下来，暂不修复。
+- 开始状态：分支 `fix/iq-blank-placeholder-20261016`，HEAD `07b9dcfcc`，工作树干净；生产为 `ghcr.io/liulixin-lex/xy2api:0.3.0`。
+- 完成操作：只读查询生产库（会话设 `default_transaction_read_only=on`）的 `ops_error_logs`、`usage_logs`、`accounts`、`account_groups`、`groups`、`audit_logs`，并读取 Caddy 访问日志；对照源码定位 404 文案（`backend/internal/handler/no_account_error.go:129`）和 web_search 修补的生效条件。结论见顶部同名条目。
+- 修改文件：本文件（仅本条记录与顶部条目）。生产无任何改动。
+- 验证：审计日志中两次账号映射修改的时间，与 378、365 的 502 停止时间及 404 起始时间逐秒吻合。未改代码，未运行测试。
+- 卡点/风险：请求体不落库，“历史含 `web_search_call`”无法直接证实。本条记录最初写在 PR #99 分支的工作树中（未提交），后移到 `fix/registration-alias-batch-disable-20261017` 随该分支提交。
+- 下一步：等待用户决定 terra 的处理方式，以及是否实施代码改进。
+
+### 2026-10-17T10:35:29Z — `20261017-restore-deleted-paying-users` — 完成
+
+- 请求/目标：用户批量清理注册机账号时可能误删 90 多个用户，要求核查其中有无充值用户；随后授权恢复充值用户及其 API Key。
+- 开始状态：分支 `fix/iq-blank-placeholder-20261016`，HEAD `07b9dcfcc`（未改代码）；生产 0.3.0。
+- 完成操作：审计日志与 `users.deleted_at` 核对出同一批 93 个软删除用户。按累计充值、订单（状态为大写，`COMPLETED`）和兑换码判定 18 人有充值，并单事务恢复这 18 个用户（行数守卫）。API Key 原值已被墓碑覆盖，审计表也无记录，因此用同一镜像起隔离临时容器（无端口映射、`--archive-mode=off`、`--target-action=pause`，限制 CPU 与内存），从 R2 仓库 PITR 到 UTC 09:54:50，日志确认停在第一笔删除事务提交前。核对 25 个 Key 的 id、用户、名称与生产一致后，经管道单事务写回（数量、墓碑、冲突守卫），随后删除临时容器与数据。
+- 修改文件：本文件。生产数据：`users` 18 行、`api_keys` 25 行（仅 `deleted_at`、`key`、`updated_at`）。
+- 验证：18 人 active，余额合计与累计充值合计均与删除前一致；25 个 Key 全部可用，md5 汇总与快照一致；恢复后数分钟内已有 3 个 Key 成功调用 27 次。临时目录已删除，磁盘空间已释放。
+- 卡点/风险：3 个 GitHub 用户的登录绑定未恢复，依赖按邮箱自动重新绑定，未在生产验证。
+- 下一步：可考虑为“删除用户”增加可恢复能力（例如保留 Key 原值或真正写入 `deleted_api_key_audits`），并明确 `deleted_api_key_audits` 的用途。
+
+### 2026-10-17T13:50Z — `20261017-registration-alias-batch-disable` — 本地完成，已推送并开 PR（待审阅）
+
+- 请求/目标：用户同意别名加固方案（拒绝非常规本地部分、别名归一去引号、探针兼容存量带引号的行、查重计入软删除账号），并要求在用户管理多选中增加批量禁用，以后清理注册机不再删号；同时提供批量启用，便于撤回。做到提 PR 为止。
+- 开始状态：自 `origin/main` `ca2bdd111` 新建分支 `fix/registration-alias-batch-disable-20261017`，工作树干净。
+- 完成操作：
+  - `58601c744` 别名加固：新错误码 `EMAIL_FORMAT_NOT_ALLOWED`，覆盖注册、发验证码（同步与异步）和共享的注册邮箱策略（第三方邮箱自动注册/登录、邮箱绑定）；缺少本地部分或域名的输入仍交给原有校验。仓储探针增加带引号的形式，仍走迁移 190 的表达式索引；别名查重用 `SkipSoftDelete` 计入软删除账号。注册页与验证页显示本地化提示。
+  - `a37bbc64f` 批量状态：服务、仓储、处理函数各一个新文件。仓储能力是可选接口 `UserStatusBatchRepository`，不改 `UserRepository` 及其测试桩；缺少该能力时返回 501 `USER_STATUS_BATCH_UNAVAILABLE`。上游文件只加路由、`AdminService` 方法和处理函数测试桩方法，连同前端 API、视图与中英文案处的钩子一起登记到 `required_literals`。
+  - 推送前改写了尚未推送的文档提交：主机路径、供应商域名、用户与 Key 标识、金额明细移到仓库外私有笔记（位置见顶部“误删 93 个用户后的恢复”）。
+- 修改文件：见上述两个提交；本文件。
+- 验证：gofmt；`go vet`（默认、`unit`、`integration` 标签）；golangci-lint v2.14.0 0 issues；`go test -tags=unit` 覆盖 service、handler（含 admin）、server（含 middleware、routes）、repository，全部通过。批量 SQL 在本机临时 PostgreSQL 18（应用全部迁移）上验证通过，临时实例已删除。前端 `check:i18n`、`typecheck`、eslint 通过，vitest 全量 389 个文件、3051 个用例通过。`sync.py audit`、`scheduler-diff` 通过。仓储集成测试（testcontainers）因本机无 Docker 未运行，以 CI 为准。
+- 卡点/风险：无代码卡点；集成测试结果以 CI 为准。
+- 下一步：用户审阅 PR；合并、发版、生产部署以及 Caddy/Cloudflare 的 `Sec-Fetch-Site` 规则均待另行授权。
+
+### 2026-10-17T14:25Z — `20261017-signup-fetch-metadata-rule` — 完成（生产 Caddy 规则已生效）
+
+- 请求/目标：PR #101 的 18 项检查全绿后停在 PR，合并由另一位作者执行；用户授权在生产 Caddy 加规则拦截注册机，只用“缺少 `Sec-Fetch-Site`”这一个条件。
+- 开始状态：分支 `fix/registration-alias-batch-disable-20261017`，HEAD `3bd704f50`（PR #101）。
+- 完成操作：只读查看 Caddy 配置后，在主站点 `route` 块最前面加了 `@signupNoFetchMeta`（POST、两个注册路径、`not header Sec-Fetch-Site *`）与 `respond @signupNoFetchMeta 403`。该站点的所有处理都在 `route` 内按书写顺序执行；规则放在 `route` 外会排在反代之后，永远不生效。先备份，候选文件 `caddy validate` 通过后才覆盖，再校验正式文件并 `systemctl reload caddy`（平滑重载，未重启 XY2API）。另外两个域名无需改动：一个 308 跳转到主站点，一个只转发模型 API。
+- 修改文件：生产 Caddy 配置（位置与备份见仓库外私有笔记）；本文件。
+- 验证：从外网经 CDN 访问，两个注册接口不带 `Sec-Fetch-Site` 返回 403，源站访问日志确认由 Caddy 返回；带 `Sec-Fetch-Site: same-origin` 时请求到达应用（空请求体返回 400）；登录接口不带该头不受影响；首页与公开设置接口返回 200。
+- 卡点/风险：不发送 `Sec-Fetch-Site` 的旧浏览器（如 16.4 以前的 Safari）无法注册，此前按日志估计约占正常注册的 0.1%，用户已接受。回滚方式：恢复备份后重载。
+- 下一步：观察两个注册接口的 403 数量与正常注册是否继续成功；PR #101 等待另一位作者合并。
+
+### 2026-10-17T15:00Z — `20261017-registration-alias-batch-disable` — 合入最新 main、解决记忆冲突
+
+- 请求/目标：PR #100（0.4.0 晋级）合入 main 后，PR #101 显示冲突。按用户要求（验证没问题后交另一位作者合并），在 PR 分支上合入 main 并复验。
+- 开始状态：PR 分支 HEAD `c940704e0`（18 项检查全绿）；origin/main 由 `ca2bdd111` 前进到 `4c142e1aa`。
+- 完成操作：普通 merge，不改写历史、不强推。只有本文件冲突：main 把历史移到 `PROJECT_MEMORY_ARCHIVE.md` 并调整了结构。以 main 版本为准，本分支三节交接状态放在“版本与环境速览”之后，四条日志按时间接在末尾；与 main 版本相比只增不删（+71/−0）。`policy.json` 与 `UPSTREAM_BASE.json` 自动合并，两侧内容都在：`xy2api_version` 为 0.4.0，本分支两个具名补丁及其测试绑定与 `required_literals` 均保留。
+- 观察（生产只读）：注册拦截规则生效后约 27 分钟内，两个注册接口除本人 4 个验证请求外没有任何 POST，生效前 16 分钟也没有。注册机暂未再来，实际拦截效果待下一波确认。
+- 修改文件：本文件（合并结果与本条）。
+- 验证（合并后的工作树）：`check_docs_consistency.py` 通过，`tools/tests` 39 个通过，`scheduler-diff` 通过；后端 build、`go vet`（默认、`unit`、`integration`）、golangci-lint 0 issues，`go test -tags=unit` 覆盖 service、handler、server、repository，全部通过；前端 `check:i18n`、`typecheck`、eslint 通过，vitest 全量 388 个文件、3049 个用例通过。`sync.py audit` 在提交后的干净树上运行。
+- 卡点/风险：无。
+- 下一步：CI 复跑全绿后交另一位作者合并。
 
 ### 2026-10-17T15:40Z — 20261015-gateway-resilience — 0.4.0 正式发布完成
 
