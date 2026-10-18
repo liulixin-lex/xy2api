@@ -581,7 +581,7 @@ export default {
         apiModeChatCompletions: 'OpenAI Compatible',
         apiModeChatCompletionsHint: '使用 /v1/chat/completions，发送 messages；适合大多数兼容站。',
         apiModeResponses: 'Responses API',
-        apiModeResponsesHint: '使用 /v1/responses，默认带 instructions + input；适合本站自检/Codex。',
+        apiModeResponsesHint: '使用 /v1/responses 和 instructions + input，以非流式 JSON 检测 OpenAI 或 Grok。',
         endpoint: '上游地址',
         endpointPlaceholder: 'https://api.example.com',
         useCurrentDomain: '使用当前服务',

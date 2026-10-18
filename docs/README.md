@@ -30,6 +30,7 @@
 | [`GPT61_SOL_SUPPORT.md`](GPT61_SOL_SUPPORT.md) | GPT-6.1 Sol 适配（来源清单 [`GPT61_SOL_PROVENANCE.json`](GPT61_SOL_PROVENANCE.json)） |
 | [`COMPOSITE_GROUPS.md`](COMPOSITE_GROUPS.md) | 组合分组 |
 | [`GROUP_SYSTEM_PROMPTS.md`](GROUP_SYSTEM_PROMPTS.md) | 分组标识与系统提示词 |
+| [`GROK_MONITOR_RESPONSES.md`](GROK_MONITOR_RESPONSES.md) | Grok 渠道监控的 Responses 模式（0.4.1 起，可选） |
 | [`ASYNC_IMAGE_TASKS.md`](ASYNC_IMAGE_TASKS.md) | 异步生图任务 |
 | [`BATCH_IMAGE_MVP.md`](BATCH_IMAGE_MVP.md) | Gemini 批量生图 |
 | [`seedance-api.md`](seedance-api.md) | Seedance 原生视频 API |

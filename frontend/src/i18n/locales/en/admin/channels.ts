@@ -581,7 +581,7 @@ export default {
         apiModeChatCompletions: 'OpenAI Compatible',
         apiModeChatCompletionsHint: 'Use /v1/chat/completions with messages; works for most compatible providers.',
         apiModeResponses: 'Responses API',
-        apiModeResponsesHint: 'Use /v1/responses with default instructions + input; best for self-check/Codex paths.',
+        apiModeResponsesHint: 'Check OpenAI or Grok through /v1/responses using instructions + input and a non-streaming JSON response.',
         endpoint: 'Endpoint',
         endpointPlaceholder: 'https://api.example.com',
         useCurrentDomain: 'Use current service',

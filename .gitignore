@@ -173,6 +173,7 @@ docs/*
 !docs/GATEWAY_RESILIENCE.md
 !docs/IQ_RELIABILITY_IMPLEMENTATION.md
 !docs/channel-monitor-v2-safe-defaults.md
+!docs/GROK_MONITOR_RESPONSES.md
 !docs/upstream-sync/
 !docs/upstream-sync/**
 !docs/codex-credits.md
