@@ -388,8 +388,8 @@
 - [x] CDN 回源自动识别（design §7.1，proposal D12 修订）：没有有效 `X-XY-Edge` 时，`CF-Ray` 或 `CDN-Loop: cloudflare` 判为 `cf`，`CDN-Loop: esa` 判为 `esa`；名字须在 `keepalive.edges` 内；受信代理的标记优先，非受信对端的标记照旧忽略；不自动配置 `SERVER_TRUSTED_PROXIES`。ESA 的头经生产 Caddy 访问日志只读核对（2026-10-18：ESA 回源全部带 `CDN-Loop: esa;loop=N`，Cloudflare 回源全部带 `CF-Ray` 与 `CDN-Loop: cloudflare`，XY-image 内网直连两者都不带）。先写失败用例：`TestEdgeFromCDNHeaders`、`TestResilienceEdgeFromCDNHeaders`、`TestResilienceEdgeDetectedWithoutProxyConfiguration`；测试服务器新增 CF-6（`c7da44849`）。
 - [x] 合并 PR #101（注册邮箱别名加固与用户批量启停，`b9067e0ab`）、#99（智商检测忽略空白占位消息，解析器 `iq-response-v6`，`0ef405e22`；其 0.3.1 版本号改动丢弃）、#98（Grok 渠道监控原生 Responses，`2e0d5be24`；新文档登记到 `docs/README.md`）。三次合并只在项目记忆冲突，保留 main 版本，各 PR 的记录随后原样归档（`db78baf80`）。
 - [x] 版本 0.4.1（`backend/cmd/server/VERSION`、`UPSTREAM_BASE.json` 的 `xy2api_version`）。
-- [ ] 本机全量验证（四种标签 vet、全量 unit、无 tag 与 embed、`ci_gate.py`、golangci-lint、`tools/tests`、同步审计与 scheduler-diff、文档一致性、前端 lint/typecheck/vitest/构建）。
-- [ ] 测试服务器：部署候选；`stg-cf` 站点去掉 Caddy 标记后跑 KA-*、CF-1..6、ERR-*。
+- [x] 本机全量验证（`d488d2b5d`）：四种标签 vet、全量 unit、无 tag 与 embed、golangci-lint 0 问题；`ci_gate.py` 249 个韧性测试 `-race` 全过、零跳过；`tools/tests` 39 个、同步审计与 scheduler-diff、文档一致性通过；前端 eslint、vue-tsc、vitest（389 个文件、3055 个用例）与构建通过。
+- [x] 测试服务器（候选 `d488d2b5d`，应用自报 `XY2API 0.4.1`）：`stg-cf` 站点去掉 Caddy 标记（只保留删除客户端自带的 `X-XY-Edge`）后，KA-1..9、CF-1..6、ERR-1..4 共 19/19 通过。经真实 Cloudflare 的 CF-1、CF-4 第一次心跳在 15.1 秒、共 14 次，150.7 秒完成（穿过 125 秒切断）；直连与内部请求（CF-2、CF-5、CF-6、KA-2）没有心跳。验证后 Caddy 片段已恢复原样。
 - [ ] PR → CI 全绿 → 常规 merge → annotated `v0.4.1` → 制品与 GHCR 核验 → 正式镜像全新安装。
 
 ## 后续（只登记，不在 0.4.0 实施）

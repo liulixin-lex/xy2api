@@ -68,6 +68,7 @@
 - 设计（用户批准）：`resilienceNoteEdge` 在没有有效 `X-XY-Edge` 时按 CDN 自带的回源头推断边缘：`CF-Ray` 或 `CDN-Loop` 含 `cloudflare` 为 `cf`，ESA 的头经生产日志确认；推断出的名字仍须在 `keepalive.edges` 内；受信对端的 `X-XY-Edge` 照旧优先，非受信对端的照旧忽略；不自动配置 `SERVER_TRUSTED_PROXIES`。
 - 生产只读核查（10:55Z，去标识证据在仓库外 `production/ESA_HEADER_CHECK_20261018.md`）：ESA 站点 1,237 个请求全部带 `CDN-Loop: esa;loop=N`（另有 `Eagleeye-Traceid`），无 `CF-Ray`；Cloudflare 站点 8,942 个请求全部带 `CF-Ray` 与 `CDN-Loop: cloudflare; loops=N`；无 CDN 头的只有 5 个 XY-image 内网直连请求。ESA 按 `CDN-Loop` 的 `esa` 识别。
 - 分支 `release/0.4.1`（自 main `b9a2a11aa`）：依次合入 #101、#99、#98（#99 只取修复，版本号改动丢弃），再加 CDN 识别、升版本 0.4.1、开一个 PR。
+- 2026-10-18T11:25Z 进展：合并 #101 `b9067e0ab`、#99 `0ef405e22`（0.3.1 版本号丢弃）、#98 `2e0d5be24`（新文档登记 `docs/README.md`），三处只在本文件冲突，保留 main 版本，各 PR 记录原样归档（`db78baf80`，#98 的工作机路径改为 `<工作机 C>`）；CDN 识别 `c7da44849`（先写失败用例，文档与测试服务器 CF-6 同提交）；版本 0.4.1 `d488d2b5d`。本机全量验证全绿（CI 门禁 249、前端 389 文件/3055 项）；测试服务器 `stg-cf` 去掉 Caddy 标记后 KA/CF/ERR 19/19，经真实 Cloudflare 的慢首包 15.1 秒开始心跳、150.7 秒完成，直连与内部请求无心跳；Caddy 片段已恢复。下一步：推送、开 PR、CI 全绿后常规 merge、`v0.4.1`、核验与全新安装。
 
 ## 操作陷阱
 
