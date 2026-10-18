@@ -517,6 +517,18 @@ export default {
         success: '已删除 {count} 个用户',
         failed: '{count} 个用户删除失败，已保留选中，可重试。'
       },
+      bulkStatus: {
+        disableAction: '批量禁用（{count}）',
+        enableAction: '批量启用（{count}）',
+        disableTitle: '禁用已选用户',
+        enableTitle: '启用已选用户',
+        disableConfirm: '确定禁用已选的 {count} 个用户吗？禁用后这些用户无法登录，名下 API Key 立即停止服务；账号、余额和 API Key 都会保留，可随时批量启用恢复。管理员账号不会被禁用。',
+        enableConfirm: '确定启用已选的 {count} 个用户吗？启用后这些用户恢复登录，名下 API Key 恢复服务。',
+        disableSuccess: '已禁用 {count} 个用户',
+        enableSuccess: '已启用 {count} 个用户',
+        skipped: '{count} 个用户未变更：已是目标状态、是管理员或已删除。',
+        failed: '批量修改用户状态失败，已保留选中，可重试。'
+      },
       bulkLimits: {
         action: '批量设置限制（{count}）',
         title: '批量设置用户限制',

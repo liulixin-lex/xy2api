@@ -832,6 +832,19 @@ def cf5():
     return r, checks
 
 
+@scenario("CF-6", "Internal request straight to the app (XY-image style, no CDN headers): no early heartbeat")
+def cf6():
+    # 0.4.1 recognises Cloudflare and ESA by CF-Ray / CDN-Loop; requests
+    # from XY-image and local scripts carry neither and stay direct.
+    checks = []
+    r = stream_request(APP, "/v1/responses", KEYS["G-slow-150"], responses_body(),
+                       headers={"User-Agent": "GGUU-AI-Image/0.0.16"})
+    check(r["status"] == 200, "status 200", checks)
+    check(not heartbeats(r), "no heartbeat without a CDN", checks)
+    check(any("response.completed" in l for _, l in r["lines"]), "stream completed", checks)
+    return r, checks
+
+
 @scenario("DC-2", "A key that keeps leaving before output: the 31st request in an hour runs on and is billed at upstream cost")
 def dc2():
     checks = []

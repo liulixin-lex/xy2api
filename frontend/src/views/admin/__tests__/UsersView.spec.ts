@@ -8,8 +8,10 @@ const {
   listUsers,
   toggleStatus,
   deleteUser,
+  batchUpdateStatus,
   showError,
   showSuccess,
+  showInfo,
   getAllGroups,
   getBatchUsersUsage,
   listEnabledDefinitions,
@@ -18,8 +20,10 @@ const {
   listUsers: vi.fn(),
   toggleStatus: vi.fn(),
   deleteUser: vi.fn(),
+  batchUpdateStatus: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
+  showInfo: vi.fn(),
   getAllGroups: vi.fn(),
   getBatchUsersUsage: vi.fn(),
   listEnabledDefinitions: vi.fn(),
@@ -31,7 +35,8 @@ vi.mock('@/api/admin', () => ({
     users: {
       list: listUsers,
       toggleStatus,
-      delete: deleteUser
+      delete: deleteUser,
+      batchUpdateStatus
     },
     groups: {
       getAll: getAllGroups
@@ -49,7 +54,8 @@ vi.mock('@/api/admin', () => ({
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
     showError,
-    showSuccess
+    showSuccess,
+    showInfo
   })
 }))
 
@@ -185,8 +191,10 @@ describe('admin UsersView', () => {
     listUsers.mockReset()
     toggleStatus.mockReset()
     deleteUser.mockReset()
+    batchUpdateStatus.mockReset()
     showError.mockReset()
     showSuccess.mockReset()
+    showInfo.mockReset()
     getAllGroups.mockReset()
     getBatchUsersUsage.mockReset()
     listEnabledDefinitions.mockReset()
@@ -283,6 +291,62 @@ describe('admin UsersView', () => {
 
     expect(deleteUser.mock.calls).toEqual([[42]])
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('43')
+    wrapper.unmount()
+  })
+
+  it('disables users selected across pages in one request, then clears the selection and reloads', async () => {
+    listUsers.mockImplementation(async (page: number) => ({
+      items: [createAdminUser({ id: page === 2 ? 43 : 42 })],
+      total: 2, page, page_size: 20, pages: 2
+    }))
+    batchUpdateStatus.mockResolvedValue({ affected: 1, skipped: 1 })
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="bulk-disable-users"]').exists()).toBe(false)
+    await wrapper.get('[data-test="select-42"]').trigger('click')
+    await wrapper.get('[data-test="next-page"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="select-43"]').trigger('click')
+    await wrapper.get('[data-test="bulk-disable-users"]').trigger('click')
+    expect(wrapper.get('[data-test="delete-dialog"]').text()).toContain('admin.users.bulkStatus.disableConfirm:2')
+    expect(batchUpdateStatus).not.toHaveBeenCalled()
+
+    const listCallsBeforeConfirm = listUsers.mock.calls.length
+    await wrapper.get('[data-test="confirm-delete"]').trigger('click')
+    await flushPromises()
+
+    expect(batchUpdateStatus.mock.calls).toEqual([[{ user_ids: [42, 43], status: 'disabled' }]])
+    expect(showSuccess).toHaveBeenCalledWith('admin.users.bulkStatus.disableSuccess:1')
+    expect(showInfo).toHaveBeenCalledWith('admin.users.bulkStatus.skipped:1')
+    expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('')
+    expect(listUsers.mock.calls.length).toBe(listCallsBeforeConfirm + 1)
+    expect(deleteUser).not.toHaveBeenCalled()
+    expect(toggleStatus).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('keeps the selection when bulk enabling is cancelled or fails', async () => {
+    batchUpdateStatus.mockRejectedValue({ status: 500, message: 'database unavailable' })
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    await wrapper.get('[data-test="select-42"]').trigger('click')
+
+    await wrapper.get('[data-test="bulk-enable-users"]').trigger('click')
+    expect(wrapper.get('[data-test="delete-dialog"]').text()).toContain('admin.users.bulkStatus.enableConfirm:1')
+    await wrapper.get('[data-test="cancel-delete"]').trigger('click')
+    expect(wrapper.find('[data-test="delete-dialog"]').exists()).toBe(false)
+    expect(batchUpdateStatus).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-test="bulk-enable-users"]').trigger('click')
+    await wrapper.get('[data-test="confirm-delete"]').trigger('click')
+    await flushPromises()
+
+    expect(batchUpdateStatus.mock.calls).toEqual([[{ user_ids: [42], status: 'active' }]])
+    expect(showError).toHaveBeenCalledWith('database unavailable')
+    expect(showSuccess).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('42')
+    expect(wrapper.get('[data-test="bulk-enable-users"]').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 

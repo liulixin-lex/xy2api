@@ -180,19 +180,25 @@ func resilienceNoteGroup(c *gin.Context, apiKey *service.APIKey) {
 	}
 }
 
-// resilienceNoteEdge records the CDN edge marker set by the reverse proxy
-// (design §7.1). The header is only trusted when the TCP peer is one of the
-// configured trusted proxies; anything else could be forged by the client.
+// resilienceNoteEdge records the CDN edge of the request (design §7.1). An
+// X-XY-Edge marker set by the reverse proxy counts only when the TCP peer is
+// one of the configured trusted proxies; anything else could be forged by
+// the client. Without a valid marker the edge comes from the headers the
+// CDN adds to origin requests, so CDN deployments need no proxy setup.
 func resilienceNoteEdge(c *gin.Context, cfg *config.Config) {
 	if c == nil || c.Request == nil {
 		return
 	}
-	raw := c.GetHeader(resilience.EdgeHeader)
-	if raw == "" {
-		return
+	allowed := resilience.Current().Keepalive.Edges
+	edge := ""
+	if raw := c.GetHeader(resilience.EdgeHeader); raw != "" {
+		trusted := cfg != nil && cfg.Server.TrustedProxiesConfigured && peerIsTrustedProxy(c.RemoteIP(), cfg.Server.TrustedProxies)
+		edge = resilience.EdgeOf(raw, trusted, allowed)
 	}
-	trusted := cfg != nil && cfg.Server.TrustedProxiesConfigured && peerIsTrustedProxy(c.RemoteIP(), cfg.Server.TrustedProxies)
-	if edge := resilience.EdgeOf(raw, trusted, resilience.Current().Keepalive.Edges); edge != "" {
+	if edge == "" {
+		edge = resilience.EdgeFromCDNHeaders(c.Request.Header, allowed)
+	}
+	if edge != "" {
 		resilience.StateFrom(c.Request.Context()).SetEdge(edge)
 	}
 }

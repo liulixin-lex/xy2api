@@ -29,6 +29,11 @@ func TestNormalizeEmailForAliasDedup(t *testing.T) {
 		{"leading plus keeps local part", "+alice@gmail.com", "+alice@gmail.com"},
 		{"dot-only local part kept", "...@gmail.com", "...@gmail.com"},
 		{"invalid keeps lowered raw", "not-an-email", "not-an-email"},
+		{"quoted gmail local part", `"s.o.m.e.o.n.e"@gmail.com`, "someone@gmail.com"},
+		{"quoted gmail local part with plus", `"Some.One+bulk"@Gmail.com`, "someone@gmail.com"},
+		{"quoted non-gmail keeps dots", `"first.last"@qq.com`, "first.last@qq.com"},
+		{"escaped character inside quotes", `"some\"one"@qq.com`, `some"one@qq.com`},
+		{"empty quoted local part kept raw", `""@gmail.com`, `""@gmail.com`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -64,6 +69,12 @@ func TestEmailAliasDedupProbes(t *testing.T) {
 	)
 	require.Nil(t, EmailAliasDedupProbes("not-an-email"))
 	require.Nil(t, EmailAliasDedupProbes("...@gmail.com"))
+	// 带引号的写法与普通写法生成同一组探针（不含引号）。
+	require.ElementsMatch(t,
+		[]EmailAliasProbe{{Local: "someone", Domain: "gmailcom"}, {Local: "someone", Domain: "googlemailcom"}},
+		EmailAliasDedupProbes(`"some.one+x"@gmail.com`),
+	)
+	require.Nil(t, EmailAliasDedupProbes(`""@gmail.com`))
 }
 
 // aliasDedupRepoStub implements only the methods alias dedup uses; other
@@ -120,6 +131,20 @@ func TestExistsByEmailOrAlias(t *testing.T) {
 		repo := &aliasDedupRepoStub{stored: []string{"some.one@gmail.com"}}
 		svc := &AuthService{userRepo: repo}
 		got, err := svc.existsByEmailOrAlias(ctx, "someone@gmail.com")
+		require.NoError(t, err)
+		require.True(t, got)
+	})
+
+	t.Run("quoted variant detected both ways", func(t *testing.T) {
+		repo := &aliasDedupRepoStub{stored: []string{`"some.one"@gmail.com`}}
+		svc := &AuthService{userRepo: repo}
+		got, err := svc.existsByEmailOrAlias(ctx, "someone@gmail.com")
+		require.NoError(t, err)
+		require.True(t, got)
+
+		repo = &aliasDedupRepoStub{stored: []string{"some.one@gmail.com"}}
+		svc = &AuthService{userRepo: repo}
+		got, err = svc.existsByEmailOrAlias(ctx, `"s.o.m.e.one"@gmail.com`)
 		require.NoError(t, err)
 		require.True(t, got)
 	})

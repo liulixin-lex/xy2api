@@ -192,14 +192,27 @@ origin access is blocked and Caddy trusts only those TCP peers. Configure
 XY2API `server.trusted_proxies` with the Caddy address/private subnet so the
 application accepts only Caddy's rewritten headers.
 
-### Edge marker for streams behind a CDN (0.4.0)
+### Edge marker for streams behind a CDN (optional since 0.4.1)
 
-XY2API sends early heartbeats on a slow streaming request only when the
-reverse proxy marks it as coming through a CDN with `X-XY-Edge`. Without the
-marker, a stream whose first token takes longer than the CDN's idle timeout
-(about 100–125 seconds on Cloudflare) is cut before the client receives a
-byte. Set the marker from the TCP peer address only, and drop any
-client-supplied value first:
+XY2API sends early heartbeats on a slow streaming request only when it knows
+the request came through a CDN; otherwise a stream whose first token takes
+longer than the CDN's idle timeout (about 100–125 seconds on Cloudflare) is
+cut before the client receives a byte.
+
+Since 0.4.1 XY2API recognises Cloudflare and Alibaba Cloud ESA by the headers
+they add to every origin request: `CF-Ray` or `CDN-Loop: cloudflare` is `cf`,
+`CDN-Loop: esa` is `esa`. No reverse proxy marker and no
+`server.trusted_proxies` entry is needed for this. Forged headers only change
+how the forger's own request is answered (early SSE headers and heartbeats,
+in-stream terminal frames, 503 instead of 502/504); authentication, billing
+and other users are not affected. Removing `cf` or `esa` from the gateway
+resilience setting `keepalive.edges` turns the matching detection off.
+XY2API never trusts a proxy automatically: behind Docker the peer is the
+bridge gateway, which a published port shares with direct clients.
+
+For another CDN, or a CDN that does not send these headers, the reverse proxy
+can still mark the request with `X-XY-Edge`. Set the marker from the TCP peer
+address only, and drop any client-supplied value first:
 
 ```caddyfile
 (xy_edge_marker) {
@@ -214,11 +227,12 @@ client-supplied value first:
 XY2API reads the marker only when the TCP peer is in an explicitly configured
 `server.trusted_proxies` list (`SERVER_TRUSTED_PROXIES`) and the value is
 listed in the gateway resilience setting `keepalive.edges` (default `cf` and
-`esa`).
+`esa`); a valid marker takes precedence over the CDN headers. Add any new
+edge name to `keepalive.edges`.
 
 Cloudflare also replaces an origin 502 or 504 with its own plain-text page,
 dropping the JSON error, `Retry-After` and the request ID. XY2API answers
-marked requests with 503 instead and keeps the original status in
+requests that came through a CDN with 503 instead and keeps the original status in
 `X-XY-Upstream-Status`; let the proxy's own error pages for API paths return a
 JSON 503 with `Retry-After` too. The complete configuration is in
 [`docs/GATEWAY_RESILIENCE.md`](../docs/GATEWAY_RESILIENCE.md) §2 and the

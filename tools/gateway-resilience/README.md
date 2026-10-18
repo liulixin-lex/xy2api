@@ -104,4 +104,4 @@ cd cdn-sim && go build -o cdn-sim . && \
 - `EDGE=none` forwards without a marker (useful as a request counter on the direct path).
 - `GET /_cuts` lists cuts; `GET /_requests?since=N` lists every proxied request.
 
-The application only honours `X-XY-Edge` from peers in `SERVER_TRUSTED_PROXIES`, so the simulator's network must be listed there.
+The application only honours `X-XY-Edge` from peers in `SERVER_TRUSTED_PROXIES`, so the simulator's network must be listed there. The simulator sends no CDN headers (`CF-Ray`, `CDN-Loop`), so since 0.4.1 a request through it is an edge request only through this marker, while requests through real Cloudflare or ESA are recognised by their own headers.

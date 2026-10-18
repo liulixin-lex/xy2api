@@ -39,12 +39,15 @@ server:
   # Trusted proxies used when security.trust_forwarded_ip_for_api_key_acl is false.
   # List only the exact proxy addresses that connect directly to XY2API.
   # Set [] explicitly to disable forwarded-IP trust in high-security mode.
-  # The CDN edge marker X-XY-Edge (gateway resilience pre-output keepalive)
-  # is also honoured only from these peers; see docs/GATEWAY_RESILIENCE.md.
+  # The optional CDN edge marker X-XY-Edge (gateway resilience pre-output
+  # keepalive) is also honoured only from these peers. Since 0.4.1
+  # Cloudflare and ESA are recognised by their own origin headers without
+  # it; see docs/GATEWAY_RESILIENCE.md §2.1.
   # security.trust_forwarded_ip_for_api_key_acl=false 时使用的可信代理。
   # 只填写直接连接 XY2API 的精确代理地址；显式设置 [] 可在高安全模式下
-  # 禁用转发 IP 信任。网关韧性的 CDN 边缘标记 X-XY-Edge 也只接受来自这些
-  # 对端的值，见 docs/GATEWAY_RESILIENCE.md。
+  # 禁用转发 IP 信任。网关韧性可选的 CDN 边缘标记 X-XY-Edge 也只接受来自
+  # 这些对端的值；0.4.1 起 Cloudflare 与 ESA 按其自带的回源头自动识别，
+  # 无需该标记，见 docs/GATEWAY_RESILIENCE.md §2.1。
   trusted_proxies:
     - 127.0.0.1/32
     - ::1/128

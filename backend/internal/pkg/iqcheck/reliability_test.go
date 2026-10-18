@@ -1,8 +1,10 @@
 package iqcheck
 
 import (
+	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -78,4 +80,53 @@ func TestIQCompletedItemIdentityAndPartialTerminal(t *testing.T) {
 		r := Parse(strings.NewReader(body+`data: {"type":"response.completed","response":{"status":"completed","output":[]}}`+"\n\n"), true, false)
 		require.Equal(t, "unknown", r.Status)
 	}
+}
+
+// relayPlaceholderStream mirrors a captured relay stream: whitespace-only
+// assistant messages without phase precede the upstream reasoning and final
+// answer, both while streaming and again in response.completed.
+func relayPlaceholderStream(placeholders int, answer string) string {
+	var b strings.Builder
+	var output []string
+	emit := func(kind, fields string) {
+		_, _ = fmt.Fprintf(&b, "event: %s\ndata: {\"type\":%q,%s}\n\n", kind, kind, fields)
+	}
+	done := func(index int, item string) {
+		emit("response.output_item.done", fmt.Sprintf(`"output_index":%d,"item":%s`, index, item))
+		output = append(output, item)
+	}
+	emit("response.created", `"response":{"id":"resp_ft_1","status":"in_progress","output":[]}`)
+	for i := 0; i < placeholders; i++ {
+		emit("response.output_text.delta", fmt.Sprintf(`"output_index":%d,"delta":" "`, i))
+		done(i, fmt.Sprintf(`{"id":"msg_ft_%d","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","annotations":[],"text":" "}]}`, i))
+	}
+	done(placeholders, `{"id":"rs_1","type":"reasoning","summary":[]}`)
+	emit("response.metadata", `"metadata":{"openai_chatgpt_moderation_metadata":{}}`)
+	done(placeholders+1, `{"id":"msg_1","type":"message","role":"assistant","phase":"final_answer","status":"completed","content":[{"type":"output_text","annotations":[],"text":`+strconv.Quote(answer)+`}]}`)
+	emit("response.completed", `"response":{"id":"resp_ft_1","status":"completed","model":"gpt-6-astra","output":[`+strings.Join(output, ",")+`]}`)
+	return b.String()
+}
+
+func TestIQRelayBlankPlaceholderMessages(t *testing.T) {
+	for _, tc := range []struct {
+		name                       string
+		placeholders, done, output int
+	}{
+		{"one placeholder", 1, 2, 3},
+		{"two placeholders", 2, 3, 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := relayPlaceholderStream(tc.placeholders, `{"answer":21}`)
+			r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}, false, "http")
+			require.Equal(t, "smart", r.Status, r.Reason)
+			require.Equal(t, `{"answer":21}`, r.Answer)
+			require.Equal(t, tc.done, r.Diagnostic.DoneMessages)
+			require.Equal(t, tc.output, r.Diagnostic.TerminalItems)
+			require.Equal(t, "reasoning/blank", r.Diagnostic.IgnoredTypes)
+		})
+	}
+	// Only whitespace is exempt; a phase-less message with text still competes.
+	textual := strings.ReplaceAll(relayPlaceholderStream(1, `{"answer":21}`), `"text":" "`, `"text":"29"`)
+	require.Equal(t, "conflicting_final_response", Parse(strings.NewReader(textual), true, false).Reason)
+	require.Equal(t, "empty_final_text", Parse(strings.NewReader(relayPlaceholderStream(1, " ")), true, false).Reason)
 }

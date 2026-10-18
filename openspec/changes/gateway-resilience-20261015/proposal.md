@@ -60,7 +60,7 @@
    - 同号重试只用于请求级容量降载和池模式配置码，每账号最多 1 次；Gemini 原地重试从 5 次降为 1 次。
    - 客户端断开时立即停止所有等待。
 6. **首包前保活、首输出超时与停滞判定**（`pre-output-keepalive`）
-   - 只对经 CDN 进入的流式请求生效（Caddy 按回源 IP 注入 `X-XY-Edge`）。
+   - 只对经 CDN 进入的流式请求生效（Caddy 按回源 IP 注入 `X-XY-Edge`；0.4.1 起应用按 CDN 自带的回源头自动识别，标记可选）。
    - 通过鉴权、计费、参数校验与选号后，15 秒内仍无上游响应头，才提交 SSE 头并每 10 秒发一次心跳。
    - 心跳格式：OpenAI 用注释行；Anthropic 用 `event: ping`；Gemini 不发，也不提前提交；选中官方 OAuth 账号时不提前提交。
    - 首输出超时分档：默认 60 秒，high/xhigh 120 秒，max 180 秒；最后一个候选不设单次超时。（2026-10-15 按生产 7 天首字分布校准为 default/high 180 秒、xhigh 200 秒、max 220 秒，见 design §7.4。）
@@ -92,7 +92,7 @@
 | API | 新增管理接口：网关韧性设置、未送达记录查询、分组兜底配置（RC 中的余额“已充值”复检随余额精简删除）。网关错误状态码不变，新增 `Retry-After`、`x-should-retry`，在途预留超额由 403 改为 429 |
 | 前端 | 设置页增加“网关韧性”卡；运维页增加韧性面板；分组编辑增加兜底分组；账号列表显示余额状态（随余额精简删除，余额暂停按临时不可调度显示）；用户用量对兜底请求显示原分组与实际分组 |
 | 计费 | 未送达请求不计费；部分送达后断开按已得用量计费；兜底按兜底组计费；滥用保护按上游成本计费；在途预留估算改进 |
-| 运维 | Caddy 在 CF/ESA 回源路由注入 `X-XY-Edge`；切换采用 `lb_policy first` 零停机；`handle_errors` 改为返回带标记的 JSON 503 与 `Retry-After` |
+| 运维 | Caddy 在 CF/ESA 回源路由注入 `X-XY-Edge`（0.4.1 起可选）；切换采用 `lb_policy first` 零停机；`handle_errors` 改为返回带标记的 JSON 503 与 `Retry-After` |
 | 上游同步 | 所有补丁在 `tools/upstream-sync/policy.json` 与 `UPSTREAM_BASE.json` 中登记（custom_patches、required_literals、绑定测试），不向 Sub2API 官方提交 |
 | XY-image | 0.0.17：流内错误还原状态语义、每 Key 在途节流、读取 `Retry-After`、同步生图超时对齐、Caddy 纯文本 5xx 处理、结果下载重试、心跳用例 |
 
@@ -122,7 +122,7 @@
 | D9 | 未送达的展示 | 不写 `usage_logs`；单独存一份仅运营与管理员可见的记录 |
 | D10 | 实现方式 | 自有模块加最少钩子，登记为具名补丁；不向 Sub2API 提交 |
 | D11 | XY-image | 允许修改：配套改动加自身高危问题，版本 0.0.17 |
-| D12 | 提前提交的范围 | 只对经 CDN 的请求；由 Caddy 按回源 IP 注入标记；直连与内部流量（含 XY-image）不受影响 |
+| D12 | 提前提交的范围 | 只对经 CDN 的请求；由 Caddy 按回源 IP 注入标记；直连与内部流量（含 XY-image）不受影响。**修订（2026-10-18，0.4.1，用户批准）：** 没有有效标记时，应用按 CDN 自带的回源头识别（`CF-Ray` 或 `CDN-Loop: cloudflare` 为 Cloudflare，`CDN-Loop: esa` 为 ESA），部署镜像即生效；Caddy 标记与 `SERVER_TRUSTED_PROXIES` 改为可选，受信代理的标记仍优先；不自动信任任何代理。理由见 design §7.1 |
 | D13 | 余额相关提示 | 上游余额问题只给管理员；用户自身余额统一为 403 `INSUFFICIENT_BALANCE`，用本站专用文案；在途预留超额改为 429 加 `Retry-After`，并改进估算。**修订（2026-10-17，用户决定）：** 用户余额不足的文案保持 0.3.0 原文 `Insufficient account balance`，状态码与 code 不变（design §9.5） |
 | D14 | 配置类错误的状态码 | 不修改（维持 503），只加 `Retry-After: 60` 与 `x-should-retry: false` |
 | D15 | 心跳格式 | OpenAI 注释行；Anthropic `event: ping`，同时修复 `event: error`；Gemini 不发心跳、不提前提交 |

@@ -194,6 +194,76 @@ func TestResilienceEdgeMarkerTrustsOnlyProxies(t *testing.T) {
 	require.Empty(t, resilience.StateFrom(c.Request.Context()).Edge())
 }
 
+// Without a valid marker the edge comes from the headers the CDN adds to
+// origin requests (design §7.1), whatever the peer: forging them only
+// changes how the forger's own request is answered.
+func TestResilienceEdgeFromCDNHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	trusted := &config.Config{}
+	trusted.Server.TrustedProxiesConfigured = true
+	trusted.Server.TrustedProxies = []string{"127.0.0.1"}
+	for _, tc := range []struct {
+		name    string
+		cfg     *config.Config
+		peer    string
+		headers map[string]string
+		want    string
+	}{
+		{"trusted proxies not configured", &config.Config{}, "172.29.0.1:5000", map[string]string{"CF-Ray": "9a1b-LAX"}, "cf"},
+		{"esa through the docker gateway", &config.Config{}, "172.29.0.1:5000", map[string]string{"CDN-Loop": "esa;loop=1"}, "esa"},
+		{"untrusted marker ignored, CF-Ray counts", trusted, "203.0.113.9:5000", map[string]string{resilience.EdgeHeader: "esa", "CF-Ray": "9a1b-LAX"}, "cf"},
+		{"untrusted marker alone ignored", trusted, "203.0.113.9:5000", map[string]string{resilience.EdgeHeader: "cf"}, ""},
+		{"trusted marker first", trusted, "127.0.0.1:5000", map[string]string{resilience.EdgeHeader: "esa", "CF-Ray": "9a1b-LAX"}, "esa"},
+		{"invalid trusted marker falls back", trusted, "127.0.0.1:5000", map[string]string{resilience.EdgeHeader: "akamai", "CDN-Loop": "cloudflare; loops=1"}, "cf"},
+		{"internal request", &config.Config{}, "172.31.250.10:5000", map[string]string{"User-Agent": "GGUU-AI-Image/0.0.16"}, ""},
+	} {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		r := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		r.RemoteAddr = tc.peer
+		for k, v := range tc.headers {
+			r.Header.Set(k, v)
+		}
+		c.Request = r.WithContext(resilience.WithRequestState(r.Context(), resilience.NewRequestState()))
+		resilienceNoteEdge(c, tc.cfg)
+		require.Equal(t, tc.want, resilience.StateFrom(c.Request.Context()).Edge(), tc.name)
+	}
+}
+
+// Through the API-key middleware with no trusted proxies configured (the
+// default deployment): a Cloudflare or ESA origin request is an edge
+// request, an internal one (XY-image, scripts) is not, and removing a name
+// from keepalive.edges turns its detection off.
+func TestResilienceEdgeDetectedWithoutProxyConfiguration(t *testing.T) {
+	orig := *resilience.Current()
+	resilience.Publish(resilience.Defaults())
+	t.Cleanup(func() { resilience.Publish(orig) })
+	var edge string
+	router, key := newFastFailRouter(t, 9180, func(c *gin.Context) {
+		edge = resilience.StateFrom(c.Request.Context()).Edge()
+		c.Status(http.StatusNoContent)
+	})
+	for _, tc := range []struct {
+		name    string
+		headers map[string]string
+		want    string
+	}{
+		{"cloudflare", map[string]string{"CF-Ray": "9a1b-HKG", "CDN-Loop": "cloudflare; loops=1"}, "cf"},
+		{"esa", map[string]string{"CDN-Loop": "esa;loop=1", "Eagleeye-Traceid": "0b51a2"}, "esa"},
+		{"internal", map[string]string{"User-Agent": "GGUU-AI-Image/0.0.16"}, ""},
+	} {
+		edge = "unset"
+		require.Equal(t, http.StatusNoContent, serve(router, http.MethodPost, "/v1/messages", key, tc.headers).Code, tc.name)
+		require.Equal(t, tc.want, edge, tc.name)
+	}
+
+	s := resilience.Defaults()
+	s.Keepalive.Edges = []string{"esa"}
+	resilience.Publish(s)
+	edge = "unset"
+	serve(router, http.MethodPost, "/v1/messages", key, map[string]string{"CF-Ray": "9a1b-HKG"})
+	require.Empty(t, edge, "cf removed from keepalive.edges")
+}
+
 func TestTurnCapResetOnlyOnRealSuccess(t *testing.T) {
 	// Spec: a successful request ends the conversation's failed-turn streak;
 	// a 200 that carried an in-stream failure does not.

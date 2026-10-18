@@ -30,6 +30,7 @@
 | [`GPT61_SOL_SUPPORT.md`](GPT61_SOL_SUPPORT.md) | GPT-6.1 Sol 适配（来源清单 [`GPT61_SOL_PROVENANCE.json`](GPT61_SOL_PROVENANCE.json)） |
 | [`COMPOSITE_GROUPS.md`](COMPOSITE_GROUPS.md) | 组合分组 |
 | [`GROUP_SYSTEM_PROMPTS.md`](GROUP_SYSTEM_PROMPTS.md) | 分组标识与系统提示词 |
+| [`GROK_MONITOR_RESPONSES.md`](GROK_MONITOR_RESPONSES.md) | Grok 渠道监控的 Responses 模式（0.4.1 起，可选） |
 | [`ASYNC_IMAGE_TASKS.md`](ASYNC_IMAGE_TASKS.md) | 异步生图任务 |
 | [`BATCH_IMAGE_MVP.md`](BATCH_IMAGE_MVP.md) | Gemini 批量生图 |
 | [`seedance-api.md`](seedance-api.md) | Seedance 原生视频 API |
@@ -42,7 +43,7 @@
 | [`PLUGIN_DEVELOPMENT.md`](PLUGIN_DEVELOPMENT.md) | 插件开发 |
 | [`legal/`](legal/) | 部署与运营合规承诺（中英文） |
 
-部署文档在 `deploy/`：[`README.md`](../deploy/README.md)、[`DOCKER.md`](../deploy/DOCKER.md)、[`EDGE_SECURITY.md`](../deploy/EDGE_SECURITY.md)（含 CDN 部署的边缘标记）、[`APPLE_CONTAINER.md`](../deploy/APPLE_CONTAINER.md)、[`DATAMANAGEMENTD_CN.md`](../deploy/DATAMANAGEMENTD_CN.md)。工具说明见 [`tools/gateway-resilience/README.md`](../tools/gateway-resilience/README.md)、[`skills/`](../skills/)。
+部署文档在 `deploy/`：[`README.md`](../deploy/README.md)、[`DOCKER.md`](../deploy/DOCKER.md)、[`EDGE_SECURITY.md`](../deploy/EDGE_SECURITY.md)（含 CDN 识别与可选的边缘标记）、[`APPLE_CONTAINER.md`](../deploy/APPLE_CONTAINER.md)、[`DATAMANAGEMENTD_CN.md`](../deploy/DATAMANAGEMENTD_CN.md)。工具说明见 [`tools/gateway-resilience/README.md`](../tools/gateway-resilience/README.md)、[`skills/`](../skills/)。
 
 ## 设计、修复与同步记录
 

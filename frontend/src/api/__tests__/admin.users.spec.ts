@@ -12,11 +12,14 @@ vi.mock('@/api/client', () => ({
 
 import {
   batchUpdateLimits,
+  batchUpdateStatus,
   bindUserAuthIdentity,
   type AdminBindAuthIdentityRequest,
   type AdminBoundAuthIdentity,
   type BatchUpdateUserLimitsRequest,
   type BatchUpdateUserLimitsResponse,
+  type BatchUpdateUserStatusRequest,
+  type BatchUpdateUserStatusResponse,
 } from '@/api/admin/users'
 
 type Assert<T extends true> = T
@@ -79,6 +82,12 @@ const batchRequestContractExact: Assert<
 > = true
 const batchResponseContractExact: Assert<
   IsExact<BatchUpdateUserLimitsResponse, { affected: number }>
+> = true
+const batchStatusRequestContractExact: Assert<
+  IsExact<BatchUpdateUserStatusRequest, { user_ids: number[]; status: 'active' | 'disabled' }>
+> = true
+const batchStatusResponseContractExact: Assert<
+  IsExact<BatchUpdateUserStatusResponse, { affected: number; skipped: number }>
 > = true
 
 describe('admin users api auth identity binding', () => {
@@ -146,5 +155,20 @@ describe('admin users api auth identity binding', () => {
     expect(result).toEqual({ affected: 2 })
     expect(batchRequestContractExact).toBe(true)
     expect(batchResponseContractExact).toBe(true)
+  })
+
+  it('posts batch status changes once and returns affected and skipped counts', async () => {
+    const request: BatchUpdateUserStatusRequest = { user_ids: [4, 7, 9], status: 'disabled' }
+    post.mockResolvedValue({
+      data: { affected: 2, skipped: 1 } satisfies BatchUpdateUserStatusResponse,
+    })
+
+    const result = await batchUpdateStatus(request)
+
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(post).toHaveBeenCalledWith('/admin/users/batch-status', request)
+    expect(result).toEqual({ affected: 2, skipped: 1 })
+    expect(batchStatusRequestContractExact).toBe(true)
+    expect(batchStatusResponseContractExact).toBe(true)
   })
 })
