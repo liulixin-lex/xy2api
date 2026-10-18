@@ -381,6 +381,17 @@
 - [x] 余额处理精简（用户 2026-10-17 决定并入 0.4.0，评审转交）：识别不变（错误码、缺省关键字含 `insufficient user balance`、`failure.balance_keywords_extra`、`resilienceBalanceEligible` 范围，余额类 403 不走计数置错）；处置改为暂停 `balance.pause_seconds`（缺省 300 秒，30–3600，原因 `balance:exhausted: <证据>`），暂停期间硬罚、不作末位兜底，到期由真实请求重试，仍欠费再暂停同样时长；HTTP 错误、流内 `BALANCE`、Grok 余额字样 429、402 走同一规则，取消 SUSPECT；“恢复状态”立即放回；无号 `Retry-After` 取暂停结束时间；`balance.enabled=false` 回到 0.3.0。删除：三态与 `extra.resilience_balance` 读写（存量键忽略）、复查循环与三种探测、探测锁与每日额度、`RecheckBalance` 与“已充值”按钮、`ListBalanceTrackedAccountIDs`/`CountBalanceStates`、RECOVERING 并发上限（`concurrency_service.go` 回到上游原样）、两个告警指标、`opsBalanceState` 与可用性统计的余额字段、“长期未恢复”通知、账号徽标、运维余额分布、Explain 余额列、设置里 8 个字段。迁移 277 删除 276 的两条规则（名称与 `metric_type` 同时匹配）。RC 实现的两处缺陷随之消失：余额告警恒为 0（`ListOpsAccountsForStats` 不读 `extra`）；探测无结论时暂停无限顺延。修复前失败：`TestBalanceFailuresPauseTheAccount`（403、402、流内暂停约 660 秒而非 300 秒；429 在成功后为 SUSPECT）、`TestBalancePauseLengthIsConfigurable`、`TestBalancePauseIsHardUntilItEnds`（原因为 `temp_unschedulable`）、`TestNoAccountRetryAfterFollowsTheBalancePause`（为 0）、`TestRestoringTheAccountEndsTheBalancePause`（记录仍按硬罚）、`TestGrokAPIKeyBalance429PausesInsteadOfARateLimit`、`TestGrokAPIKeyBalance429AfterASuccessStillPauses`、`TestBalanceSettingsKeepOnlyTheSwitchAndThePause`、`TestBalanceAlertRulesRemovalDeletesOnlyTheSeededRules`；`TestParseIgnoresRemovedBalanceFields`、`TestBalanceSwitchOffKeeps030Handling`、集成用例 `TestMigration277RemovesOnlyTheSeededBalanceAlertRules` 锁定兼容与迁移。前端：设置卡加暂停时长，运维面板与 Explain 去掉余额状态。测试服务器 BAL-1、BAL-2、PE-1 按新行为改写（`cc5fc3208`）。另：候选 `fb0c2267c` 上 DC-2 因 31 次请求跨整点、按小时的未送达计数在两个小时都没到阈值而失败，场景改为离整点不足 90 秒先等过整点（`e039c2b6f`）。
   - 验证（候选 `c6b837dca`，整套只跑一次）：本机全量验证全绿（CI 门禁 246 个韧性测试）；PR #100 CI 两组 18/18；测试服务器场景 45/45、真实客户端 17/17（新增 `C-openai-py-budget-cdn`）、升级演练（迁移 277 只删 276 种下的规则）、6.5 小时浸泡 11 项检查全过（159,849 个请求，GC 后存活堆 53→56 MB、0.4 MiB/h）。浸泡中每小时人为断余额 10 分钟：停服 10.1–10.4 分钟，第一次 15.3 分钟（充值落在一次到期重试之后，多等一个暂停周期），RC 的复检方案约 18 分钟。design §14 15 项达标，未达标 4 项与 RC 相同、均为合成负载所致。
 
+## 0.4.1（2026-10-18）
+
+> 用户 2026-10-18 经评审转达：发布 0.4.1，内容是“应用自动识别 CDN 回源”，并合并 PR #98、#99、#101；不跑浸泡、不出 RC；生产部署、改生产 Caddy 或配置另行授权。
+
+- [x] CDN 回源自动识别（design §7.1，proposal D12 修订）：没有有效 `X-XY-Edge` 时，`CF-Ray` 或 `CDN-Loop: cloudflare` 判为 `cf`，`CDN-Loop: esa` 判为 `esa`；名字须在 `keepalive.edges` 内；受信代理的标记优先，非受信对端的标记照旧忽略；不自动配置 `SERVER_TRUSTED_PROXIES`。ESA 的头经生产 Caddy 访问日志只读核对（2026-10-18：ESA 回源全部带 `CDN-Loop: esa;loop=N`，Cloudflare 回源全部带 `CF-Ray` 与 `CDN-Loop: cloudflare`，XY-image 内网直连两者都不带）。先写失败用例：`TestEdgeFromCDNHeaders`、`TestResilienceEdgeFromCDNHeaders`、`TestResilienceEdgeDetectedWithoutProxyConfiguration`；测试服务器新增 CF-6（`c7da44849`）。
+- [x] 合并 PR #101（注册邮箱别名加固与用户批量启停，`b9067e0ab`）、#99（智商检测忽略空白占位消息，解析器 `iq-response-v6`，`0ef405e22`；其 0.3.1 版本号改动丢弃）、#98（Grok 渠道监控原生 Responses，`2e0d5be24`；新文档登记到 `docs/README.md`）。三次合并只在项目记忆冲突，保留 main 版本，各 PR 的记录随后原样归档（`db78baf80`）。
+- [x] 版本 0.4.1（`backend/cmd/server/VERSION`、`UPSTREAM_BASE.json` 的 `xy2api_version`）。
+- [ ] 本机全量验证（四种标签 vet、全量 unit、无 tag 与 embed、`ci_gate.py`、golangci-lint、`tools/tests`、同步审计与 scheduler-diff、文档一致性、前端 lint/typecheck/vitest/构建）。
+- [ ] 测试服务器：部署候选；`stg-cf` 站点去掉 Caddy 标记后跑 KA-*、CF-1..6、ERR-*。
+- [ ] PR → CI 全绿 → 常规 merge → annotated `v0.4.1` → 制品与 GHCR 核验 → 正式镜像全新安装。
+
 ## 后续（只登记，不在 0.4.0 实施）
 
 > 份额调度在 0.4.1 合并前不在任何生产分组启用；0.4.0 已修 F3，若要提前启用需用户单独确认。
