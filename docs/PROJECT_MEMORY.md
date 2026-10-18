@@ -44,7 +44,12 @@
 
 ## 进行中的工作
 
-- 暂无（网关韧性 0.4.0 已发布，遗留事项见“当前交接状态”）。
+### 20261018-release-0.4.1 — XY2API 0.4.1：CDN 回源自动识别，合并 PR #98、#99、#101（进行中）
+
+- 2026-10-18T11:00Z 用户经评审转达授权：开发、测试服务器验证（不跑浸泡、不出 RC）、推送、PR、合并 #98/#99/#101、打 `v0.4.1` 并发布；只读查看一次生产 Caddy 访问日志确认 ESA 回源头（sudo 只读日志）。生产部署、改生产 Caddy 或配置、改 Cloudflare/ESA 控制台未授权。
+- 设计（用户批准）：`resilienceNoteEdge` 在没有有效 `X-XY-Edge` 时按 CDN 自带的回源头推断边缘：`CF-Ray` 或 `CDN-Loop` 含 `cloudflare` 为 `cf`，ESA 的头经生产日志确认；推断出的名字仍须在 `keepalive.edges` 内；受信对端的 `X-XY-Edge` 照旧优先，非受信对端的照旧忽略；不自动配置 `SERVER_TRUSTED_PROXIES`。
+- 生产只读核查（10:55Z，去标识证据在仓库外 `production/ESA_HEADER_CHECK_20261018.md`）：ESA 站点 1,237 个请求全部带 `CDN-Loop: esa;loop=N`（另有 `Eagleeye-Traceid`），无 `CF-Ray`；Cloudflare 站点 8,942 个请求全部带 `CF-Ray` 与 `CDN-Loop: cloudflare; loops=N`；无 CDN 头的只有 5 个 XY-image 内网直连请求。ESA 按 `CDN-Loop` 的 `esa` 识别。
+- 分支 `release/0.4.1`（自 main `b9a2a11aa`）：依次合入 #101、#99、#98（#99 只取修复，版本号改动丢弃），再加 CDN 识别、升版本 0.4.1、开一个 PR。
 
 ## 操作陷阱
 
