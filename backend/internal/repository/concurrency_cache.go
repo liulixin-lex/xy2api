@@ -1168,12 +1168,13 @@ func (c *concurrencyCache) CleanupStaleProcessSlots(ctx context.Context, activeR
 		return err
 	}
 	c.keepPendingProcesses(live, activeRequestPrefix)
-	return c.cleanupDeadProcessSlots(ctx, live)
+	// Wait counts are shared: drop them only when no other process lives.
+	return c.cleanupDeadProcessSlots(ctx, live, len(live) <= 1)
 }
 
-// cleanupDeadProcessSlots drops the slots of processes outside live; wait
-// counts are dropped only when no other process is alive (they are shared).
-func (c *concurrencyCache) cleanupDeadProcessSlots(ctx context.Context, live []string) error {
+// cleanupDeadProcessSlots drops the slots of processes outside live, and the
+// wait counts when dropWaits.
+func (c *concurrencyCache) cleanupDeadProcessSlots(ctx context.Context, live []string, dropWaits bool) error {
 	now, err := c.redisUnixSeconds(ctx)
 	if err != nil {
 		return err
@@ -1182,7 +1183,7 @@ func (c *concurrencyCache) cleanupDeadProcessSlots(ctx context.Context, live []s
 	if err != nil {
 		return err
 	}
-	if err := c.cleanupStaleProcessSlotsForIndex(ctx, accountSlotIndex, accountMembers, live, now); err != nil {
+	if err := c.cleanupStaleProcessSlotsForIndex(ctx, accountSlotIndex, accountMembers, live, dropWaits, now); err != nil {
 		return err
 	}
 
@@ -1190,7 +1191,7 @@ func (c *concurrencyCache) cleanupDeadProcessSlots(ctx context.Context, live []s
 	if err != nil {
 		return err
 	}
-	return c.cleanupStaleProcessSlotsForIndex(ctx, userSlotIndex, userMembers, live, now)
+	return c.cleanupStaleProcessSlotsForIndex(ctx, userSlotIndex, userMembers, live, dropWaits, now)
 }
 
 // sweepLegacyWaitKeysOnce 一次性清扫活跃索引机制上线前遗留的等待计数键。
@@ -1247,6 +1248,7 @@ func (c *concurrencyCache) cleanupStaleProcessSlotsForIndex(
 	spec slotIndexSpec,
 	members []string,
 	live []string,
+	dropWaits bool,
 	now int64,
 ) error {
 	staleMembers := make([]string, 0)
@@ -1263,8 +1265,8 @@ func (c *concurrencyCache) cleanupStaleProcessSlotsForIndex(
 		if err != nil {
 			return fmt.Errorf("cleanup stale process slots %s: %w", spec.slotKey(id), err)
 		}
-		// 等待计数属于已死进程，直接删除（另有存活进程时它也在用，保留）；剩余槽位（存活进程前缀）决定索引 member 去留。
-		if len(live) <= 1 {
+		// 等待计数属于已死进程，直接删除（另有存活进程或运行期清扫时它仍在用，保留）；剩余槽位（存活进程前缀）决定索引 member 去留。
+		if dropWaits {
 			if err := c.rdb.Del(ctx, spec.waitKey(id)).Err(); err != nil {
 				return fmt.Errorf("delete stale wait key %s: %w", spec.waitKey(id), err)
 			}

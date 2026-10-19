@@ -17,14 +17,24 @@ import (
 // so accounts and users could exceed their concurrency until those requests
 // ended. Each process now keeps a short lease; startup cleanup keeps the
 // slots of every process holding one, and the periodic slot worker sweeps a
-// skipped process once its lease lapsed (a crashed process within about
-// processLeaseTTL plus one worker interval).
+// skipped process once its lease was missing on two sweeps in a row (a
+// crashed process within about processLeaseTTL plus two worker intervals;
+// one missed refresh during a Redis hiccup does not clear a live process).
+// The sweep leaves the shared wait counts alone: this process's waiters are
+// in them, and a stale count expires with its TTL.
+//
+// Processes without a lease (0.4.1 and earlier) cannot be told from dead
+// ones: the first blue-green cutover from such a version, and a rollback to
+// one, still clear the other process's slots (runbook §3.3).
 
 const (
 	processLeasePrefix   = "concurrency:process_lease:"
 	processLeaseTTL      = 15 * time.Second
 	processLeaseInterval = 5 * time.Second
 	processLeaseOpTO     = 2 * time.Second
+	// processLeaseMissesBeforeSweep is how many sweeps in a row must miss a
+	// process's lease before its kept slots are cleared.
+	processLeaseMissesBeforeSweep = 2
 )
 
 type processLease struct {
@@ -32,7 +42,7 @@ type processLease struct {
 	prefix string
 
 	mu      sync.Mutex
-	pending map[string]struct{} // other processes whose slots were kept
+	pending map[string]int // other processes whose slots were kept -> sweeps that missed their lease
 }
 
 func processLeaseKey(prefix string) string { return processLeasePrefix + prefix }
@@ -96,14 +106,14 @@ func (c *concurrencyCache) keepPendingProcesses(live []string, own string) {
 			continue
 		}
 		if c.lease.pending == nil {
-			c.lease.pending = map[string]struct{}{}
+			c.lease.pending = map[string]int{}
 		}
-		c.lease.pending[p] = struct{}{}
+		c.lease.pending[p] = 0
 	}
 }
 
 // sweepEndedProcesses repeats the stale-slot cleanup once a process whose
-// slots startup kept has lost its lease.
+// slots startup kept has missed its lease on two sweeps in a row.
 func (c *concurrencyCache) sweepEndedProcesses(ctx context.Context) error {
 	c.lease.mu.Lock()
 	if len(c.lease.pending) == 0 || c.lease.prefix == "" {
@@ -125,23 +135,28 @@ func (c *concurrencyCache) sweepEndedProcesses(ctx context.Context) error {
 	for _, p := range live {
 		alive[p] = struct{}{}
 	}
-	ended := false
+	var ended []string
+	c.lease.mu.Lock()
 	for _, p := range pending {
-		if _, ok := alive[p]; !ok {
-			ended = true
+		if _, ok := alive[p]; ok {
+			c.lease.pending[p] = 0
+			continue
+		}
+		c.lease.pending[p]++
+		if c.lease.pending[p] >= processLeaseMissesBeforeSweep {
+			ended = append(ended, p)
 		}
 	}
-	if !ended {
+	c.lease.mu.Unlock()
+	if len(ended) == 0 {
 		return nil
 	}
-	if err := c.cleanupDeadProcessSlots(ctx, live); err != nil {
+	if err := c.cleanupDeadProcessSlots(ctx, live, false); err != nil {
 		return err
 	}
 	c.lease.mu.Lock()
-	for _, p := range pending {
-		if _, ok := alive[p]; !ok {
-			delete(c.lease.pending, p)
-		}
+	for _, p := range ended {
+		delete(c.lease.pending, p)
 	}
 	c.lease.mu.Unlock()
 	return nil

@@ -52,13 +52,44 @@ func TestStartupCleanupKeepsSlotsOfLiveProcesses(t *testing.T) {
 	members, _ = rdb.ZRange(ctx, slots, 0, -1).Result()
 	require.Equal(t, []string{"rold-7"}, members)
 
-	// It exits; once its lease lapsed, the next sweep removes the leftover.
+	// Its lease is missing once (a Redis hiccup, or it just exited): the
+	// slot stays until a second sweep misses it too.
 	require.NoError(t, rdb.Del(ctx, processLeaseKey("rold")).Err())
 	require.NoError(t, cache.CleanupExpiredAccountSlotKeys(ctx))
 	members, _ = rdb.ZRange(ctx, slots, 0, -1).Result()
-	require.Empty(t, members)
-	_, err = rdb.Get(ctx, accountWaitKey(accountID)).Result()
-	require.ErrorIs(t, err, redis.Nil, "alone again, the stale wait count goes")
+	require.Equal(t, []string{"rold-7"}, members, "one missed lease does not clear a process")
+	require.NoError(t, cache.CleanupExpiredAccountSlotKeys(ctx))
+	members, _ = rdb.ZRange(ctx, slots, 0, -1).Result()
+	require.Empty(t, members, "two missed leases in a row clear the leftover")
+	wait, err = rdb.Get(ctx, accountWaitKey(accountID)).Int()
+	require.NoError(t, err)
+	require.Equal(t, 2, wait, "the running sweep leaves the shared wait count to its TTL")
+}
+
+func TestLeaseSweepForgetsAProcessThatCameBack(t *testing.T) {
+	server := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	ctx := context.Background()
+	cache := NewConcurrencyCache(rdb, 15, 60).(*concurrencyCache)
+	require.NoError(t, rdb.Set(ctx, legacyWaitSweepMarkerKey, "1", 0).Err())
+	const accountID = int64(43)
+	now := time.Now().Unix()
+	require.NoError(t, rdb.ZAdd(ctx, accountSlotKey(accountID), redis.Z{Score: float64(now + 900), Member: "rpeer-1"}).Err())
+	require.NoError(t, rdb.ZAdd(ctx, accountActiveIndexKey, redis.Z{Score: float64(now + 60), Member: strconv.FormatInt(accountID, 10)}).Err())
+	require.NoError(t, rdb.Set(ctx, processLeaseKey("rpeer"), now, processLeaseTTL).Err())
+	require.NoError(t, cache.CleanupStaleProcessSlots(ctx, "rself"))
+
+	// Missed once, then refreshed again: the count of misses restarts.
+	require.NoError(t, rdb.Del(ctx, processLeaseKey("rpeer")).Err())
+	require.NoError(t, cache.CleanupExpiredAccountSlotKeys(ctx))
+	require.NoError(t, rdb.Set(ctx, processLeaseKey("rpeer"), now, processLeaseTTL).Err())
+	require.NoError(t, cache.CleanupExpiredAccountSlotKeys(ctx))
+	require.NoError(t, rdb.Del(ctx, processLeaseKey("rpeer")).Err())
+	require.NoError(t, cache.CleanupExpiredAccountSlotKeys(ctx))
+	members, err := rdb.ZRange(ctx, accountSlotKey(accountID), 0, -1).Result()
+	require.NoError(t, err)
+	require.Equal(t, []string{"rpeer-1"}, members, "the misses are counted in a row")
 }
 
 func TestStartupCleanupAloneDropsOtherPrefixesAndWaits(t *testing.T) {

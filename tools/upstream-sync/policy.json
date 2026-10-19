@@ -771,6 +771,14 @@
     {
       "path": "backend/internal/repository/account_repo.go",
       "value": "if resilience.Current().FailureOn() {"
+    },
+    {
+      "path": "backend/internal/repository/concurrency_cache.go",
+      "value": "return c.cleanupDeadProcessSlots(ctx, live, len(live) <= 1)"
+    },
+    {
+      "path": "backend/internal/repository/concurrency_cache.go",
+      "value": "if dropWaits {"
     }
   ],
   "forbidden_module_paths": [

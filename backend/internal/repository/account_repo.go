@@ -29,8 +29,8 @@ import (
 	dbproxy "github.com/liulixin-lex/xy2api/ent/proxy"
 	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 
 	entsql "entgo.io/ent/dialect/sql"
