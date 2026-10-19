@@ -229,6 +229,14 @@
   },
   "required_literals": [
     {
+      "path": "backend/internal/service/openai_gateway_request_body.go",
+      "value": "if openAIGroupForcesFast(ctx, account) {\n\t\treturn OpenAIFastPolicyActionForcePriority, \"\""
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "ApplyOpenAIServiceTierBillingResolution(billingAccount, apiKey.Group, result)"
+    },
+    {
       "path": "backend/go.mod",
       "value": "module github.com/liulixin-lex/xy2api"
     },
@@ -769,9 +777,20 @@
     "xy-placeholder-session-id",
     "xy-allowlist-404-hint",
     "xy-registration-email-alias-hardening",
-    "xy-admin-user-batch-status"
+    "xy-admin-user-batch-status",
+    "xy-group-openai-fast-priority"
   ],
   "custom_patch_tests": [
+    {
+      "id": "xy-group-openai-fast-priority",
+      "path": "backend/internal/service/openai_group_fast_priority_test.go",
+      "literal": "func TestGroupFastPriorityOverridesPolicy"
+    },
+    {
+      "id": "xy-group-openai-fast-priority",
+      "path": "backend/internal/service/openai_group_fast_priority_test.go",
+      "literal": "func TestGroupFastPriorityBilling"
+    },
     {
       "id": "legacy-config-path",
       "path": "backend/internal/config/config_test.go",
