@@ -96,14 +96,18 @@ func TestDeliveryWriterExcludesHeartbeats(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	require.Zero(t, st.DeliveredBytes(), "heartbeats are not delivery")
 	recordOpenAIStreamKeepaliveBytes(c, 0)
-	_, _ = c.Writer.WriteString("event: response.created\ndata: {}\n\n")
+	created := "event: response.created\ndata: {\"type\":\"response.created\"}\n\n"
+	_, _ = c.Writer.WriteString(created)
 	stop()
-	require.Equal(t, int64(len("event: response.created\ndata: {}\n\n")), st.DeliveredBytes())
+	require.Zero(t, st.DeliveredBytes(), "an opening event alone is no delivery (review R03)")
+	delta := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n"
+	_, _ = c.Writer.WriteString(delta)
+	require.Equal(t, int64(len(created)+len(delta)), st.DeliveredBytes())
 
 	// In-stream keepalive bytes are excluded too.
 	_, _ = c.Writer.WriteString(": ping\n\n")
 	recordOpenAIStreamKeepaliveBytes(c, len(": ping\n\n"))
-	require.Equal(t, int64(len("event: response.created\ndata: {}\n\n")), st.DeliveredBytes())
+	require.Equal(t, int64(len(created)+len(delta)), st.DeliveredBytes())
 }
 
 type memUndeliveredRepo struct {
