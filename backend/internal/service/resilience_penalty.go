@@ -210,11 +210,16 @@ func (s *RateLimitService) applyBalancePause(ctx context.Context, account *Accou
 	until := time.Now().Add(pause)
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
-	s.notifyAccountSchedulingBlocked(account, until, "balance_exhausted")
-	if _, err := s.writeTempPenalty(stateCtx, account.ID, until, resilience.BalancePauseReason(evidence)); err != nil {
+	written, err := s.writeTempPenalty(stateCtx, account.ID, until, resilience.BalancePauseReason(evidence))
+	if err != nil {
 		slog.Warn("resilience.balance_pause_failed", "account_id", account.ID, "error", err)
 		return
 	}
+	if !written {
+		// A longer hard pause of another kind stays; nothing changed.
+		return
+	}
+	s.notifyAccountSchedulingBlocked(account, until, "balance_exhausted")
 	s.resilience.invalidateAccountGroups(account)
 	slog.Warn("resilience.balance_paused",
 		"account_id", account.ID,
@@ -233,34 +238,26 @@ func (s *RateLimitService) handleCounted403(ctx context.Context, account *Accoun
 }
 
 // ResiliencePenaltyStore is the tiered temp_unschedulable storage of the
-// account repository (review R01/R02). Repositories without it (test stubs)
-// keep the legacy writes: SetTempUnschedulable only extends, and the lift
-// clears unconditionally.
+// account repository (review R01/R02); its SetTempUnschedulable writes by
+// tier too while failure handling is on, which covers every other caller.
+// Repositories without it (test stubs) keep the legacy writes:
+// SetTempUnschedulable only extends, and the lift clears unconditionally.
 type ResiliencePenaltyStore interface {
-	SetTempUnschedulableTiered(ctx context.Context, id int64, until time.Time, reason string, hard bool, softPrefixes []string) (bool, error)
+	SetTempUnschedulableTiered(ctx context.Context, id int64, until time.Time, reason string, hard, keepLaterEnd bool, softPrefixes []string) (bool, error)
 	ClearTempUnschedulableIf(ctx context.Context, id int64, reason string, until time.Time) (bool, error)
 }
 
 // writeTempPenalty writes a temp_unschedulable penalty by tier: a hard
 // reason replaces an active soft cooldown of any length, a soft reason never
-// replaces an active hard pause. It reports whether the pause was written.
+// replaces an active hard pause. A balance pause keeps the later end of the
+// soft cooldown it replaces (review R01: the account must stay out of last
+// resort while either applies). It reports whether the pause was written.
 func (s *RateLimitService) writeTempPenalty(ctx context.Context, accountID int64, until time.Time, reason string) (bool, error) {
 	if store, ok := s.accountRepo.(ResiliencePenaltyStore); ok {
 		hard := resilience.TempUnschedTier(reason) == resilience.TierHard
-		return store.SetTempUnschedulableTiered(ctx, accountID, until, reason, hard, resilience.SoftReasonPrefixes())
+		return store.SetTempUnschedulableTiered(ctx, accountID, until, reason, hard, resilience.IsBalancePause(reason), resilience.SoftReasonPrefixes())
 	}
 	return true, s.accountRepo.SetTempUnschedulable(ctx, accountID, until, reason)
-}
-
-// writeCounted403Cooldown writes the counted 403 cooldown (a soft penalty).
-// Under the resilience layer it must not replace an active balance or other
-// hard pause (review R01); with failure handling off it is the 0.3.0 write.
-func (s *RateLimitService) writeCounted403Cooldown(ctx context.Context, accountID int64, until time.Time, reason string) error {
-	if !resilience.Current().FailureOn() {
-		return s.accountRepo.SetTempUnschedulable(ctx, accountID, until, reason)
-	}
-	_, err := s.writeTempPenalty(ctx, accountID, until, reason)
-	return err
 }
 
 func resilienceStateContext(ctx context.Context) (context.Context, context.CancelFunc) {

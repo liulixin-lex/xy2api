@@ -20,17 +20,20 @@ var _ service.ResiliencePenaltyStore = (*accountRepository)(nil)
 // SetTempUnschedulableTiered writes a temp_unschedulable penalty. hard tells
 // the tier of the new reason; softPrefixes are the reason prefixes of soft
 // penalties. Against an active pause:
-//   - hard replaces a soft pause of any length and keeps the later end;
+//   - hard replaces a soft pause of any length; with keepLaterEnd (balance
+//     pauses) it keeps the later of the two ends, otherwise its own end, so a
+//     short hard pause does not hold a single-account group for the rest of
+//     a long soft cooldown;
 //   - hard extends a shorter hard pause; a longer hard pause stays;
 //   - soft extends a shorter soft pause; a longer soft pause stays;
 //   - soft never replaces a hard pause.
 //
 // It reports whether the row changed.
-func (r *accountRepository) SetTempUnschedulableTiered(ctx context.Context, id int64, until time.Time, reason string, hard bool, softPrefixes []string) (bool, error) {
+func (r *accountRepository) SetTempUnschedulableTiered(ctx context.Context, id int64, until time.Time, reason string, hard, keepLaterEnd bool, softPrefixes []string) (bool, error) {
 	result, err := r.sql.ExecContext(ctx, `
 		UPDATE accounts
 		SET temp_unschedulable_until = CASE
-				WHEN temp_unschedulable_until IS NOT NULL AND temp_unschedulable_until > NOW()
+				WHEN temp_unschedulable_until IS NOT NULL AND temp_unschedulable_until > NOW() AND $6::boolean
 					THEN GREATEST(temp_unschedulable_until, $1)
 				ELSE $1
 			END,
@@ -48,7 +51,7 @@ func (r *accountRepository) SetTempUnschedulableTiered(ctx context.Context, id i
 					SELECT 1 FROM unnest($5::text[]) AS p(prefix)
 					WHERE starts_with(btrim(COALESCE(temp_unschedulable_reason, '')), p.prefix)))
 			)
-	`, until, reason, id, hard, pq.Array(softPrefixes))
+	`, until, reason, id, hard, pq.Array(softPrefixes), keepLaterEnd)
 	if err != nil {
 		return false, err
 	}

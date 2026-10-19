@@ -30,7 +30,7 @@ func TestAccountRepositoryTieredTempUnschedulable(t *testing.T) {
 	}
 	write := func(until time.Time, reason string) bool {
 		t.Helper()
-		changed, err := repo.SetTempUnschedulableTiered(ctx, acc.ID, until, reason, resilience.TempUnschedTier(reason) == resilience.TierHard, soft)
+		changed, err := repo.SetTempUnschedulableTiered(ctx, acc.ID, until, reason, resilience.TempUnschedTier(reason) == resilience.TierHard, resilience.IsBalancePause(reason), soft)
 		require.NoError(t, err)
 		return changed
 	}
@@ -63,6 +63,17 @@ func TestAccountRepositoryTieredTempUnschedulable(t *testing.T) {
 	got, err := repo.GetByID(ctx, acc.ID)
 	require.NoError(t, err)
 	require.Nil(t, got.TempUnschedulableUntil)
+
+	// A short hard pause of another kind replaces a long soft cooldown with
+	// its own end, so a single-account group is not held for the rest of it.
+	require.True(t, write(now.Add(10*time.Minute), resilience.Reason403Cooldown+" (1/3): forbidden"))
+	require.True(t, write(now.Add(30*time.Second), "upstream transport error"))
+	reason, until = read()
+	require.Equal(t, "upstream transport error", reason)
+	require.WithinDuration(t, now.Add(30*time.Second), until, time.Second)
+	cleared, err = repo.ClearTempUnschedulableIf(ctx, acc.ID, reason, until)
+	require.NoError(t, err)
+	require.True(t, cleared)
 
 	// After expiry any penalty writes again.
 	require.True(t, write(now.Add(30*time.Second), resilience.ReasonPrefixTransient+"TRANSIENT 524"))

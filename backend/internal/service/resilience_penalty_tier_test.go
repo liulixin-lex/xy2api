@@ -81,3 +81,29 @@ func TestLiftTransientCooldownKeepsPauseWrittenAfterRead(t *testing.T) {
 	require.True(t, repo.tempUntil.Equal(balanceUntil))
 	require.Zero(t, repo.clearCalls)
 }
+
+func TestShortHardPauseKeepsItsOwnEndOverASoftCooldown(t *testing.T) {
+	// Every SetTempUnschedulable caller writes by tier while failure
+	// handling is on. A short hard pause (a transport error, a health
+	// breaker) replacing a 10 minute soft cooldown keeps its own end: a
+	// single-account group gets its last resort back after 30 s instead of
+	// waiting out the soft cooldown as a hard pause.
+	svc, repo, account, _ := newPenaltyFixture(t, PlatformAnthropic)
+	forbidden := []byte(`{"error":{"type":"permission_error","message":"forbidden"}}`)
+	svc.HandleUpstreamError(context.Background(), account, http.StatusForbidden, http.Header{}, forbidden)
+	require.True(t, strings.HasPrefix(repo.tempReason, resilience.Reason403Cooldown), repo.tempReason)
+
+	until := time.Now().Add(30 * time.Second)
+	require.NoError(t, repo.SetTempUnschedulable(context.Background(), account.ID, until, "upstream transport error"))
+	require.Equal(t, "upstream transport error", repo.tempReason)
+	require.True(t, repo.tempUntil.Equal(until), "the hard pause keeps its own end")
+
+	// A soft cooldown written meanwhile does not replace it.
+	require.NoError(t, repo.SetTempUnschedulable(context.Background(), account.ID, time.Now().Add(time.Hour), resilience.ReasonPrefixTransient+"TRANSIENT 503"))
+	require.Equal(t, "upstream transport error", repo.tempReason)
+
+	// With failure handling off the write is the 0.3.0 one (only extends).
+	withResilienceSettings(t, func(s *resilience.Settings) { s.Enabled = false })
+	require.NoError(t, repo.SetTempUnschedulable(context.Background(), account.ID, time.Now().Add(time.Hour), resilience.ReasonPrefixTransient+"TRANSIENT 503"))
+	require.True(t, strings.HasPrefix(repo.tempReason, resilience.ReasonPrefixTransient))
+}

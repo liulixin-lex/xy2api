@@ -64,7 +64,13 @@ func (r *resilienceAccountRepo) UpdateExtra(_ context.Context, _ int64, updates 
 	return nil
 }
 
-func (r *resilienceAccountRepo) SetTempUnschedulable(_ context.Context, _ int64, until time.Time, reason string) error {
+// SetTempUnschedulable mirrors the repository: by tier while failure
+// handling is on, only extending otherwise.
+func (r *resilienceAccountRepo) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
+	if resilience.Current().FailureOn() {
+		_, err := r.SetTempUnschedulableTiered(ctx, id, until, reason, resilience.TempUnschedTier(reason) == resilience.TierHard, false, resilience.SoftReasonPrefixes())
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.tempCalls++
@@ -76,7 +82,7 @@ func (r *resilienceAccountRepo) SetTempUnschedulable(_ context.Context, _ int64,
 }
 
 // SetTempUnschedulableTiered mirrors the repository statement (review R01).
-func (r *resilienceAccountRepo) SetTempUnschedulableTiered(_ context.Context, _ int64, until time.Time, reason string, hard bool, softPrefixes []string) (bool, error) {
+func (r *resilienceAccountRepo) SetTempUnschedulableTiered(_ context.Context, _ int64, until time.Time, reason string, hard, keepLaterEnd bool, softPrefixes []string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.tempCalls++
@@ -91,7 +97,7 @@ func (r *resilienceAccountRepo) SetTempUnschedulableTiered(_ context.Context, _ 
 	if active && !(r.tempUntil.Before(until) && (hard || curSoft)) && !(hard && curSoft) {
 		return false, nil
 	}
-	if !active || r.tempUntil.Before(until) {
+	if !active || !keepLaterEnd || r.tempUntil.Before(until) {
 		r.tempUntil = until
 	}
 	r.tempReason = reason

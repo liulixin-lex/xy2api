@@ -729,10 +729,6 @@
       "value": "bulkStatus: {"
     },
     {
-      "path": "backend/internal/service/ratelimit_service.go",
-      "value": "if err := s.writeCounted403Cooldown(ctx, account.ID, until, reason); err != nil {"
-    },
-    {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
       "value": "if resilienceFirstOutputGuardOwnsStall(firstOutputTimer != nil, openAIStreamClientOutputStarted(c, clientOutputStarted)) {"
     },
@@ -771,6 +767,10 @@
     {
       "path": "backend/internal/server/routes/common.go",
       "value": "r.GET(\"/ready\", readiness.Handler)"
+    },
+    {
+      "path": "backend/internal/repository/account_repo.go",
+      "value": "if resilience.Current().FailureOn() {"
     }
   ],
   "forbidden_module_paths": [
