@@ -421,7 +421,10 @@
 - [x] CI 门禁（含 integration，随授权 ①）：PR #106，候选 `b7c68e059` 全绿；其后只改文档与测试工具。
 - [x] 测试服务器：候选 `b7c68e059`（image `sha256:50037e0d…`）场景 51/51，DC-6 补断言后用同一候选重跑通过，0.4.1→0.4.2 升级演练通过；浸泡 6.5 小时进行中（14:06Z 起）。
 - [x] 预上线主机切换到同一个镜像，真实 IP 生效（runbook §3.5 第 7 条）。
-- [ ] 浸泡结论；业务验收（等用户在预上线站点添加测试 Key）；生产侧核对：不经 Cloudflare 的入口是否清掉客户端自带的 `CF-Connecting-IP`（只报告，由用户决定，生产主机未动）。
+- [x] 全局复审（用户 2026-10-19 要求，旁路审查会话提出）G2：启动清理在清扫遗留等待键出错时直接返回，进程租约没有启动，一次 Redis 抖动就让该进程整个生命周期没有租约。现在租约先启动（`84e364448`）。用例 `TestStartupCleanupFailureStillStartsTheLease`。
+- [x] 全局复审 G1：Chat Completions 与 Messages 经 OpenAI 兼容转换的流没有首输出守卫，停滞时也不记账（R10、P1-C 只修了 Responses 路径）。现在首输出档位约束等待响应头和第一行上游数据，到点时换号；输出后按文本停滞阈值判定；守卫生效时停滞检测让给它；停滞时记账；下游 keepalive 记为心跳字节；缓冲读取停滞时也记账（design §7.4、§7.5）。同类出口中，Anthropic API Key 透传、Bedrock、CN Anthropic 原生 Messages 停滞时补上记账。用例见 `resilience_compat_stream_test.go`（修复前失败）；测试服务器场景 CV-1 到 CV-4。
+- [x] 全局复审 G3（只改文档）：design §3.4 写明“软罚不覆盖硬罚”的另一面。
+- [ ] 浸泡结论：`b7c68e059` 的 6.5 小时浸泡因 G1、G2 改代码而作废，数据只作参考。0.4.2 最终浸泡按用户 2026-10-19 决定为 3 小时，判据见 staging-validation §8。业务验收（等用户在预上线站点添加测试 Key）；生产侧核对：不经 Cloudflare 的入口是否清掉客户端自带的 `CF-Connecting-IP`（只报告，由用户决定，生产主机未动）。
 - [ ] 用户 2026-10-19 已授权（不含生产主机、告警、异机备份、更换密码、合并与发版）：① 推送分支并开 Draft PR（CI 跑 integration 与真实 PG/Redis，含新增的 `TestAccountRepositoryTieredTempUnschedulable`）；② 代码定稿后在测试服务器完整跑一次候选验证，新增场景见下；③ CI 与测试服务器场景通过后，预上线主机去掉插件（用户在后台卸载）、部署测试服务器验证过的同一个镜像、调整连接池与降级超时、真实 IP（runbook §3.4、§3.5）。业务验收等用户在预上线站点添加测试 Key 后再做。正式发版另行授权。
 - [ ] 测试服务器新增场景（staging-validation）：Messages、Chat、Anthropic 只发开场事件就断开（不计费、上游取消）；静默上游在 xhigh、max 下按档位换号；两个进程重叠时槽位保留（LEASE-1）；候选镜像的 `/ready` 由后端应答（RDY-1）。更正：此前写的“旧进程退出后约 75 秒清走”LEASE-1 并不检查，清扫只由单元测试 `TestLeaseSweep…` 覆盖。
 
@@ -469,6 +472,7 @@
 - [x] 项目记忆归档并加大小上限（2026-10-17 提前完成：主文件实为 454 KB，已结束任务的历史原样移入 `docs/PROJECT_MEMORY_ARCHIVE.md`，主文件 192 KiB 上限与日志结构由 `tools/check_docs_consistency.py` 检查，规则见 AGENTS.md）。
 
 - [ ] 韧性设置的保存加版本校验（与份额策略一样的 CAS）：两位管理员基于旧页面先后保存时后者覆盖前者。0.4.2 审查提出，单管理员时不影响上线，管理员文档写明“保存前先刷新”。
+- [ ] 停滞检测与记账的剩余路径（全局复审 G1 登记）：CN Anthropic 原生上的 Responses 与 Chat 转换（流处理要先拿到账号）；原生 Chat Completions 透传（没有停滞检测）；Anthropic API Key 透传、Bedrock、CN Anthropic 原生 Messages 的输出后文本阈值与检查周期。
 - [ ] 兼容转换路径（Chat Completions、Messages 转 OpenAI Responses）在上游响应头到达后把阶段推进到 `pre_output`：现在只写出开场分块就断开时记为 `header_wait`，只影响按阶段的统计（测试服务器 DC-6 发现，见管理员文档已知限制）。
 - [ ] CI 不跑 `-tags embed` 的测试（`internal/web/embed_test.go`，既有缺口）：它们需要完整的前端构建产物（`dist` 未入库，占位文件不够），要在后端作业里先构建前端。0.4.2 由测试服务器场景 RDY-1 把关嵌入构建的 `/ready`。
 - [ ] “网关韧性”高级 JSON 的前端深层校验（如 `disconnect.abuse_guard`、`keepalive.edges` 的形状）：0.4.2 审查提出，后端严格校验仍在，异常只影响页面显示。

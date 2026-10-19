@@ -120,7 +120,7 @@
 
 - `cooldown` 默认 30 秒；上游正文或头部给出 `retry_after` 时，取 min(retry_after, `retry_after_cap_seconds`=120)。
 - 冷却只是软罚：单号组仍可通过末位兜底使用该账号（§4.3）。
-- 软冷却不覆盖仍在生效的硬暂停（余额、凭据、管理员规则），只延长更短的软冷却；计数 403 冷却同样按罚档写入（总开关或 `failure` 关闭时回到 0.3.0 的写法）。成功服务后解除冷却时，只清除读取到的那一次冷却（原因与结束时间都相同，`ClearTempUnschedulableIf`），期间新写入的暂停保留（0.4.2，审查 R02）。
+- 软冷却不覆盖仍在生效的硬暂停（余额、凭据、管理员规则），只延长更短的软冷却；计数 403 冷却同样按罚档写入（总开关或 `failure` 关闭时回到 0.3.0 的写法）。成功服务后解除冷却时，只清除读取到的那一次冷却（原因与结束时间都相同，`ClearTempUnschedulableIf`），期间新写入的暂停保留（0.4.2，审查 R02）。另一面（0.4.2 全局复审 G3）：硬罚生效期间到来的更长软冷却会被整体丢弃，不会留到硬罚结束后再生效。例如 30 秒的传输错误期间来了一次 10 分钟的 403 冷却，硬罚一结束账号就恢复正常，那次 403 冷却不再生效，下一次 403 会更快推进计数。这是“软罚不覆盖硬罚”的代价。
 - **全部调用方按罚档写入（0.4.2，审查 R01 的推广）：** 除韧性层自己的暂停外，还有约 20 处调用方（临时不可调度规则、令牌刷新、传输错误、健康熔断、CN 供应商余额、Command Code 消费上限、Antigravity 等）直接写临时不可调度。`failure` 开启时，仓储的 `SetTempUnschedulable` 对它们一律按罚档写入；关闭时为 0.3.0 的只延长写法。硬罚替换仍在生效的软冷却时用**它自己的结束时间**，只有余额暂停保留两者中较晚的结束时间。取舍：短硬罚（如 30 秒的传输错误）替换 10 分钟的 403 计数冷却后，硬罚一结束，软冷却的回避也随之结束。这是偏宽松的处理，换来单号组不会以硬罚身份被停满 10 分钟；403 若仍在，下一次 403 会重新计数冷却。用例 `TestShortHardPauseKeepsItsOwnEndOverASoftCooldown`、集成 `TestAccountRepositoryTieredTempUnschedulable`。
 - OpenAI 系账号的 5xx 沿用现有的按模型瞬时屏蔽（`openai_account_model_transient.go`），不整号冷却；只有 API Key 中转明确给出 `retry_after`（说明整站不可用）时才整号冷却。已输出后失败的阈值冷却（§7.6）例外，对所有非池模式账号整号软冷却。
 
@@ -286,6 +286,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
   - max：220 秒；
   - 可按模型覆盖（`model_overrides`）。
   - 分档按生产 7 天首字分布校准（tasks 0.4）：原 60/120/180 秒会误切约 1.3% 的成功请求，现各档超出比例约 0.10%–0.26%。
+- **兼容转换（0.4.2，全局复审 G1）：** Chat Completions 与 Messages 由 OpenAI Responses 上游应答时（`ForwardAsChatCompletions`、`ForwardAsAnthropic`），各自构建上游请求与流循环，0.4.0 的首输出守卫没有覆盖它们：等待响应头没有上限（`openai_response_header_timeout` 缺省 0）。现在流式客户端的这两条路径用同一档位（按映射后的上游模型与最终请求体里的 `reasoning.effort`）约束等待响应头和第一行上游数据（`resilience_compat_stream.go`）：到点前客户端最多只收到心跳，按首输出超时换号；第一行之后转换会立即写出开场事件（`message_start`、只带 role 的分块），此后不再换号，静默由 §7.5 的停滞检测结束并记账。下游 keepalive（`stream_keepalive_interval`）写出的 ping 与注释记为心跳字节，不妨碍换号。非流式客户端维持审查 R04 的决定。
 - **Anthropic、Gemini：** 新增“首个上游事件或首块”超时，默认 90 秒。
 - 取消“首输出超时只换 1 次”的限制（`openAIFirstOutputFailoverExhausted`），改由预算约束。
 - **最后一个可用候选**（没有其他健康候选、分组内只有这一个可用账号，或已是末位兜底）不设单次超时，只受 `PreOutputDeadline` 约束。“可用”按本请求判断（0.4.2，审查 R07）：其他账号不支持请求的模型、该模型被硬限流，或已在本请求中失败的，不算备选。
@@ -296,6 +297,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 - 把间隔检测改为以 `min(T/4, 5s)` 为周期检查 `lastRead`，使误差不超过 5 秒。位置：`openai_gateway_response_handling.go` 约 190、915；`gateway_upstream_response.go` 约 782、1120。
 - 文本流已输出后的停滞阈值为 `text_stall_seconds`（120 秒），明显小于 Codex 的 300 秒。到点后按 §7.6 结束，对账号施加 `STALL` 软冷却，并计入会话失败（§4.1，每个请求每个账号一次）；同时标记失败回合，停滞的 200 不清零回合计数（0.4.2，审查 R10）。
 - **输出前（0.4.2，审查 P1-C）：** OpenAI 路径输出前的停滞阈值沿用 0.3.0 的 `stream_data_interval_timeout`（180 秒），早于 xhigh/max 的 200/220 秒档位，上游给出响应头后完全静默时请求以终止帧结束、不换号（只有 Grok 换号）。首输出守卫已启用且客户端尚无输出时，停滞检测让给守卫：到档位时按首输出超时换号（不冷却账号，与 §2 一致）。守卫未启用（关闭预算且未配置 0.3.0 首输出超时）时保持原行为。
+- **兼容转换（0.4.2，全局复审 G1）：** Chat Completions 与 Messages 的转换流（`openai_gateway_chat_completions.go`、`openai_gateway_messages.go`）同样按 `min(T/4, 5s)` 检查，已写出内容后用 `text_stall_seconds`，首行之前让给 §7.4 的守卫；停滞时与 Responses 路径一样调用 0.3.0 的流超时处理并施加 `STALL` 冷却、计入会话失败、标记失败回合。这两条路径的缓冲读取（非流式客户端）停滞时同样记账。Anthropic API Key 透传、Bedrock、CN Anthropic 原生 Messages 停滞时也记账，阈值仍是 `stream_data_interval_timeout`。未覆盖：CN Anthropic 原生上的 Responses 与 Chat 转换停滞时只结束请求（流处理不持有账号）；原生 Chat Completions 透传（账号不支持 `/responses` 时）没有停滞检测；Antigravity 与图片按各自的规则。
 - 图片流维持 `image_stream_data_interval_timeout`（900 秒）；OAuth Responses 生图期间豁免文本阈值。
 
 ### 7.6 已提交后的失败（D17、G3）
