@@ -140,6 +140,7 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
    - 核对：二进制自报 `0.4.2 … commit: b7c68e059`；迁移记录仍是 325 条；`/health`、`/ready` 在主机内部和经域名访问都返回 JSON；后台页面 200；网关不带 Key 返回 401；0 条 ERROR，没有插件日志。
    - 真实 IP：443 入口把本站的 SNI 直接送到一个带 `proxy_protocol` 的七层监听（与同机另一站点的做法相同），站点用 realip 取地址，覆盖 `X-Real-IP`、`X-Forwarded-For`，清掉 `CF-Connecting-IP`；旧监听保留用于回退。`nginx -t` 之后 reload，全部站点的状态码与基线一致。经域名的外部请求在日志里记为外部地址；带伪造的 `X-Forwarded-For`、`CF-Connecting-IP`、`X-Real-IP` 时，记录的地址不变。
    - 回退：恢复备份中的 compose 与 `.env`，用原镜像重建容器；nginx 恢复两个文件后 reload。数据库无需改动（插件记录在备份里）。
+   - **最终候选（全局复审后）：** G1、G2 改了代码，`b7c68e059` 作废。最终候选 `0ad63fab7`（image `sha256:445a27f7…`）在 CI 全绿、测试服务器场景 55/55 与升级演练通过后切换（16:19Z）。切换前先做了一份新的本机备份；卸载插件后 dump 小了约 20 MB，是插件安装行里的插件包被删除，逐表比对确认没有其他差异。compose 只改镜像那一行，`.env` 不变。先停旧容器再启动新容器。核对项与上次相同，全部通过；nginx 没有再改动，外部请求的 `client_ip` 仍是外部地址，伪造的转发头依然无效。回退：用上一份 compose 文件和 `b7c68e059` 镜像重建容器。
 
 ## 4. 部署顺序
 

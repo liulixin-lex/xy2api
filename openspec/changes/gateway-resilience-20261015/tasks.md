@@ -424,6 +424,7 @@
 - [x] 全局复审（用户 2026-10-19 要求，旁路审查会话提出）G2：启动清理在清扫遗留等待键出错时直接返回，进程租约没有启动，一次 Redis 抖动就让该进程整个生命周期没有租约。现在租约先启动（`84e364448`）。用例 `TestStartupCleanupFailureStillStartsTheLease`。
 - [x] 全局复审 G1：Chat Completions 与 Messages 经 OpenAI 兼容转换的流没有首输出守卫，停滞时也不记账（R10、P1-C 只修了 Responses 路径）。现在首输出档位约束等待响应头和第一行上游数据，到点时换号；输出后按文本停滞阈值判定；守卫生效时停滞检测让给它；停滞时记账；下游 keepalive 记为心跳字节；缓冲读取停滞时也记账（design §7.4、§7.5）。同类出口中，Anthropic API Key 透传、Bedrock、CN Anthropic 原生 Messages 停滞时补上记账。用例见 `resilience_compat_stream_test.go`（修复前失败）；测试服务器场景 CV-1 到 CV-4。
 - [x] 全局复审 G3（只改文档）：design §3.4 写明“软罚不覆盖硬罚”的另一面。
+- [x] 最终候选 `0ad63fab7`（image `sha256:445a27f7…`）：CI 18/18 全绿（integration 通过，`ci_gate` 279 个零跳过）；测试服务器场景 55/55（含 CV-1 到 CV-4）；0.4.1→0.4.2 升级演练通过；预上线主机 16:19Z 切换完成，核对全部通过（runbook §3.5 第 7 条）。CV-3/4 在测试服务器上只核对了冷却，失败回合与会话失败由单元测试覆盖。
 - [ ] 浸泡结论：`b7c68e059` 的 6.5 小时浸泡因 G1、G2 改代码而作废，数据只作参考。0.4.2 最终浸泡按用户 2026-10-19 决定为 3 小时，判据见 staging-validation §8。业务验收（等用户在预上线站点添加测试 Key）；生产侧核对：不经 Cloudflare 的入口是否清掉客户端自带的 `CF-Connecting-IP`（只报告，由用户决定，生产主机未动）。
 - [ ] 用户 2026-10-19 已授权（不含生产主机、告警、异机备份、更换密码、合并与发版）：① 推送分支并开 Draft PR（CI 跑 integration 与真实 PG/Redis，含新增的 `TestAccountRepositoryTieredTempUnschedulable`）；② 代码定稿后在测试服务器完整跑一次候选验证，新增场景见下；③ CI 与测试服务器场景通过后，预上线主机去掉插件（用户在后台卸载）、部署测试服务器验证过的同一个镜像、调整连接池与降级超时、真实 IP（runbook §3.4、§3.5）。业务验收等用户在预上线站点添加测试 Key 后再做。正式发版另行授权。
 - [ ] 测试服务器新增场景（staging-validation）：Messages、Chat、Anthropic 只发开场事件就断开（不计费、上游取消）；静默上游在 xhigh、max 下按档位换号；两个进程重叠时槽位保留（LEASE-1）；候选镜像的 `/ready` 由后端应答（RDY-1）。更正：此前写的“旧进程退出后约 75 秒清走”LEASE-1 并不检查，清扫只由单元测试 `TestLeaseSweep…` 覆盖。
