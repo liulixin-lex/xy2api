@@ -99,7 +99,7 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
 
 | 项 | 核查所见 | 上线前要求 |
 |---|---|---|
-| 客户端真实 IP | 443 端口由 nginx `stream` 按 SNI 分流，四层转发到七层站点时没有带 PROXY 协议，应用记录的客户端 IP 全是 `127.0.0.1` | 让该站点在四层直接分流到一个 `listen ... ssl http2 proxy_protocol` 的七层监听，并设 `set_real_ip_from 127.0.0.1; real_ip_header proxy_protocol;`，`X-Real-IP`/`X-Forwarded-For` 用 `$proxy_protocol_addr`。改后用外部请求核对访问日志里的 `client_ip`。按 IP 的限流、IP 白名单、注册风控与审计都依赖它 |
+| 客户端真实 IP | 443 端口由 nginx `stream` 按 SNI 分流，四层转发到七层站点时没有带 PROXY 协议，应用记录的客户端 IP 全是 `127.0.0.1` | 让该站点在四层直接分流到一个 `listen ... ssl http2 proxy_protocol` 的七层监听，并设 `set_real_ip_from 127.0.0.1; real_ip_header proxy_protocol;`，`X-Real-IP`/`X-Forwarded-For` 用 `$proxy_protocol_addr`。改后用外部请求核对访问日志里的 `client_ip`。按 IP 的限流、IP 白名单、注册风控与审计都依赖它。实例的 `api_key_acl_trust_forwarded_ip` 为缺省的开启，安全路径按 `CF-Connecting-IP` > `X-Real-IP` > `X-Forwarded-For` 读原始头：七层要覆盖（不是追加）`X-Real-IP`、`X-Forwarded-For`，并清掉客户端自带的 `CF-Connecting-IP`，否则客户端可以伪造地址 |
 | 数据库连接池 | 应用 `DATABASE_MAX_OPEN_CONNS=256`、`MAX_IDLE=128`，PostgreSQL `max_connections=100` | 每个进程的上限 ≤（可用连接 − 后台与维护预留）÷ 2，可用连接 = `max_connections` − `superuser_reserved_connections` −（16 起）`reserved_connections` − 其他数据库用户的连接；除以 2 是因为蓝绿重叠时两个进程的连接池同时在用。`max_connections=100`、预留 3 时可用 97，留 15 给后台与维护，取 `MAX_OPEN=40`、`MAX_IDLE=10`。0.4.2 起应用启动时按同一口径检查，超出只记一条 warn（`database connection pool exceeds the server limit`），不阻止启动，查询失败时跳过 |
 | 调度快照回源数据库 | `GATEWAY_SCHEDULING_DB_FALLBACK_ENABLED=true`，`MAX_QPS=0`（不限）、`TIMEOUT_SECONDS=0`（不额外收紧） | 给回源一个独立超时 `TIMEOUT_SECONDS=3`（起点，按演练调整）。`MAX_QPS` 按“Redis 不可用”演练的结果确定：建议起点为实例峰值 RPS 的 1.5 倍，演练中观察数据库连接与延迟后再调；不改代码缺省值。预上线主机目前没有流量，先不设，Redis 故障演练后再定 |
 | 健康检查 | 容器与反代只用 `/health`（恒 200） | 0.4.2 起反代主动健康检查与外部监控用 `/ready`；容器健康检查保持 `/health` |
@@ -132,6 +132,14 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
 4. **切换方式：** 先停旧容器再启动新容器，不做蓝绿。站点没有流量，这样也避开了从没有进程租约的版本第一次切换时槽位被清的问题（§3.3）。
 5. **回退：** 恢复 compose 与配置的备份，用原镜像重建容器，数据库无需改动；nginx 恢复备份后 reload。
 6. 切换后按 §3.4 逐项复核（真实 IP、连接池、降级参数、`/ready`、容量），再做业务验收；备份与告警按用户决定暂缓。
+7. **执行记录（2026-10-19，用户授权）：**
+   - 只读基线：容器、镜像、配置文件哈希，以及主机上按 SNI 分流的全部站点各请求一次的状态码。
+   - 卸载插件前先在主机上做了一份带时间戳的本机备份：`pg_dump -Fc`（校验含表数据）、Redis `SAVE` 后的数据目录、compose、`.env`、配置、nginx 两个文件、应用数据目录、旧镜像 ID，`SHA256SUMS` 校验通过。然后用户在后台停用并卸载插件，安装与绑定记录随之删除。
+   - 镜像：测试服务器验证过的候选 `b7c68e059`，`docker save`/`load` 传到主机，image ID（`sha256:50037e0d…`）与二进制 SHA-256 都和测试服务器一致；compose 只改镜像那一行，项目、目录与环境文件取自原容器的 compose 标签。
+   - 先停旧容器再启动新容器。`.env` 改为 `DATABASE_MAX_OPEN_CONNS=40`、`MAX_IDLE=10`、`GATEWAY_SCHEDULING_DB_FALLBACK_TIMEOUT_SECONDS=3`，`MAX_QPS` 保持 0（Redis 故障演练后再定）。启动日志里实际生效的连接池是 40/10，没有连接池告警。
+   - 核对：二进制自报 `0.4.2 … commit: b7c68e059`；迁移记录仍是 325 条；`/health`、`/ready` 在主机内部和经域名访问都返回 JSON；后台页面 200；网关不带 Key 返回 401；0 条 ERROR，没有插件日志。
+   - 真实 IP：443 入口把本站的 SNI 直接送到一个带 `proxy_protocol` 的七层监听（与同机另一站点的做法相同），站点用 realip 取地址，覆盖 `X-Real-IP`、`X-Forwarded-For`，清掉 `CF-Connecting-IP`；旧监听保留用于回退。`nginx -t` 之后 reload，全部站点的状态码与基线一致。经域名的外部请求在日志里记为外部地址；带伪造的 `X-Forwarded-For`、`CF-Connecting-IP`、`X-Real-IP` 时，记录的地址不变。
+   - 回退：恢复备份中的 compose 与 `.env`，用原镜像重建容器；nginx 恢复两个文件后 reload。数据库无需改动（插件记录在备份里）。
 
 ## 4. 部署顺序
 

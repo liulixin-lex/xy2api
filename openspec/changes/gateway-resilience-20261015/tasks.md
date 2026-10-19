@@ -418,7 +418,10 @@
 - [x] 槽位租约的补充（旁路审查）：运行期清扫不删共享等待计数；同一进程连续两次看不到租约才清它的槽位，且只清漏够两次的进程（`7f588f82a`、`6d23077c4`）；runbook 写明从 0.4.1 及以前首次蓝绿切换与回退时的影响与规避。用例 `TestLeaseSweepForgetsAProcessThatCameBack`、`TestLeaseSweepKeepsProcessesThatMissedOnlyOnce`。
 - [x] R04 前端文案（`be44416a1`）；`/ready` 的部署文档（`e5c5437fd`）。
 - [x] 本机全量验证（`9ab5b1830` 起代码未变）：四种 vet、golangci-lint、全量 unit 与无 tag 测试、`ci_gate.py` 274 个 `-race` 零跳过、前端 3055 项、`tools/tests`、scheduler-diff、`sync.py audit`、文档一致性；官方 0.4.2 在预上线主机表结构上的切换演练（runbook §3.5）。版本 0.4.2 单独提交（`9ab5b1830`）。
-- [ ] CI 门禁（含 integration，随授权 ①）。
+- [x] CI 门禁（含 integration，随授权 ①）：PR #106，候选 `b7c68e059` 全绿；其后只改文档与测试工具。
+- [x] 测试服务器：候选 `b7c68e059`（image `sha256:50037e0d…`）场景 51/51，DC-6 补断言后用同一候选重跑通过，0.4.1→0.4.2 升级演练通过；浸泡 6.5 小时进行中（14:06Z 起）。
+- [x] 预上线主机切换到同一个镜像，真实 IP 生效（runbook §3.5 第 7 条）。
+- [ ] 浸泡结论；业务验收（等用户在预上线站点添加测试 Key）；生产侧核对：不经 Cloudflare 的入口是否清掉客户端自带的 `CF-Connecting-IP`（只报告，由用户决定，生产主机未动）。
 - [ ] 用户 2026-10-19 已授权（不含生产主机、告警、异机备份、更换密码、合并与发版）：① 推送分支并开 Draft PR（CI 跑 integration 与真实 PG/Redis，含新增的 `TestAccountRepositoryTieredTempUnschedulable`）；② 代码定稿后在测试服务器完整跑一次候选验证，新增场景见下；③ CI 与测试服务器场景通过后，预上线主机去掉插件（用户在后台卸载）、部署测试服务器验证过的同一个镜像、调整连接池与降级超时、真实 IP（runbook §3.4、§3.5）。业务验收等用户在预上线站点添加测试 Key 后再做。正式发版另行授权。
 - [ ] 测试服务器新增场景（staging-validation）：Messages、Chat、Anthropic 只发开场事件就断开（不计费、上游取消）；静默上游在 xhigh、max 下按档位换号；两个进程重叠时槽位保留（LEASE-1）；候选镜像的 `/ready` 由后端应答（RDY-1）。更正：此前写的“旧进程退出后约 75 秒清走”LEASE-1 并不检查，清扫只由单元测试 `TestLeaseSweep…` 覆盖。
 
