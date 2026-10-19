@@ -418,7 +418,7 @@
 - [x] R04 前端文案（`be44416a1`）；`/ready` 的部署文档（`e5c5437fd`）。
 - [x] 本机全量验证（`9ab5b1830` 起代码未变）：四种 vet、golangci-lint、全量 unit 与无 tag 测试、`ci_gate.py` 274 个 `-race` 零跳过、前端 3055 项、`tools/tests`、scheduler-diff、`sync.py audit`、文档一致性；官方 0.4.2 在预上线主机表结构上的切换演练（runbook §3.5）。版本 0.4.2 单独提交（`9ab5b1830`）。
 - [ ] CI 门禁（含 integration，随授权 ①）。
-- [ ] 待用户授权：① 推送分支并开 Draft PR（CI 跑 integration 与真实 PG/Redis，含新增的 `TestAccountRepositoryTieredTempUnschedulable`）；② 代码定稿后在测试服务器完整跑一次候选验证，新增场景见下；③ 预上线主机去掉插件、部署官方 0.4.2、调整连接池与降级参数、配置备份与告警（runbook §3.4、§3.5）。正式发版另行授权。
+- [ ] 用户 2026-10-19 已授权（不含生产主机、告警、异机备份、更换密码、合并与发版）：① 推送分支并开 Draft PR（CI 跑 integration 与真实 PG/Redis，含新增的 `TestAccountRepositoryTieredTempUnschedulable`）；② 代码定稿后在测试服务器完整跑一次候选验证，新增场景见下；③ CI 与测试服务器场景通过后，预上线主机去掉插件（用户在后台卸载）、部署测试服务器验证过的同一个镜像、调整连接池与降级超时、真实 IP（runbook §3.4、§3.5）。业务验收等用户在预上线站点添加测试 Key 后再做。正式发版另行授权。
 - [ ] 测试服务器新增场景（staging-validation）：Messages、Chat、Anthropic 只发开场事件就断开（不计费、上游取消）；静默上游在 xhigh、max 下按档位换号；两个进程重叠时槽位保留、旧进程退出后约 75 秒清走。
 
 两份审查报告各项的处置：
