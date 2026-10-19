@@ -19,7 +19,7 @@ A lower tier MUST only be used when the whole higher tier is unavailable.
 For a request with a session identifier whose bound account fails:
 
 - **Soft penalty from a single counted failure:** the binding MUST be kept. While the penalty lasts, requests MUST be placed temporarily on another account without writing a new binding, and MUST return to the bound account when the penalty ends. Counted failures are `RATE_LIMIT`, `TRANSIENT`, `FIRST_OUTPUT_TIMEOUT` and `STALL`.
-- **Repeated failures:** when the same session has at least `session.streak_threshold` (default 2) counted failures on the same account within `session.streak_window_seconds` (default 600 s), the gateway MUST delete the binding if it still points to that account, and MUST exclude that account for that session for `session.avoid_seconds` (default 600 s).
+- **Repeated failures:** when the same session has at least `session.streak_threshold` (default 2) counted failures on the same account within `session.streak_window_seconds` (default 600 s), the gateway MUST delete the binding if it still points to that account, and MUST exclude that account for that session for `session.avoid_seconds` (default 600 s). The window MUST be kept per account: failures of another account of the same session MUST NOT keep an old count alive (0.4.2).
 - **Failures after output:** an upstream failure after semantic output reached the client (a failure event, a broken stream) cannot move to another account but MUST count once per attempt as `TRANSIENT`, unless it is a client error, a content-policy refusal or a client cancellation. Three such failures of one account within 60 s MUST put the account into the transient soft cooldown (pool-mode accounts excepted).
 - **Hard state:** when the bound account enters a hard state, the binding MUST be replaced immediately.
 - **No change:** concurrency saturation, first-token jitter, client cancellation, client errors and continuation requests owned by an account (`previous_response_id`) MUST NOT change the binding.
@@ -64,6 +64,14 @@ In groups using the original scheduler, a bound account in a soft penalty MUST N
 - **WHEN** the advanced OpenAI scheduler is off and the bound account of a session has a soft 429 cooldown
 - **THEN** another account serves the request and the session stays bound to the original account.
 
+#### Scenario: OpenAI per-model transient block keeps the binding
+- **WHEN** the bound OpenAI account of a session is held back only by the scheduler's per-model transient block after upstream 5xx (legacy or advanced scheduler)
+- **THEN** another account serves the request and the session stays bound to the original account.
+
+#### Scenario: Another account's failure does not extend the window
+- **WHEN** a session fails once on account A, then once on account B, and fails on A again after A's window ended
+- **THEN** A's count restarts at one and the session is not rebound away from A.
+
 ### Requirement: Last-resort use of soft-penalised accounts
 
 When no healthy candidate exists and at least one candidate is only soft-penalised, the gateway MUST NOT return "no available accounts". It MUST:
@@ -91,6 +99,14 @@ In groups using share scheduling, the last resort MUST be a relaxed round of the
 #### Scenario: Hard state with no alternative
 - **WHEN** the only account is in a balance pause and no fallback group is configured
 - **THEN** the request fails with 503 and a `Retry-After` header.
+
+#### Scenario: Account disabled after the group list was read
+- **WHEN** last resort plans with the cached group list and the administrator disabled the chosen account after that list was read
+- **THEN** that account is not dispatched; another eligible account serves, or the request gets "no available accounts", on both schedulers.
+
+#### Scenario: Only the session limit stops last resort
+- **WHEN** every account of a group is soft-penalised and last resort fails only because the new session hits an account's session limit
+- **THEN** the "no available accounts" answer is not cached for the group, and the group's bound sessions are still served.
 
 #### Scenario: Last resort respects hard limits
 - **WHEN** every account of a group is soft-penalised and one of them is above its window-cost or RPM limit

@@ -18,6 +18,9 @@ type CachedResponse struct {
 	// Model is the requested model the answer belongs to ("" when unknown);
 	// a fast-fail replay only answers requests for the same model.
 	Model string
+	// Scope is the route and group the answer belongs to ("" when unknown);
+	// a replay only answers requests of the same scope (review R05).
+	Scope string
 }
 
 // RetryAfterSeconds returns the remaining Retry-After of a replay (at least 1).

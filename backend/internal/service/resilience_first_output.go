@@ -30,11 +30,13 @@ func resilienceLastCandidate(ctx context.Context, accountID int64) bool {
 
 // soleCandidate reports whether the request's group has no other account
 // that could take it after this one: every other account is inactive,
-// unschedulable, of another platform or under a hard penalty (soft-penalised
-// accounts still count, last-resort selection may use them). Cutting the
-// only account short only turns a slow answer into an error (staging KA-6:
-// a single-account Anthropic group lost a 150 s answer at the 90 s guard).
-// Unknown (no group, lookup failed) counts as "not sole".
+// unschedulable, of another platform, under a hard penalty (for the
+// request's model too), does not serve the request's model or already
+// failed in this request (review R07). Soft-penalised accounts still count,
+// last-resort selection may use them. Cutting the only account short only
+// turns a slow answer into an error (staging KA-6: a single-account
+// Anthropic group lost a 150 s answer at the 90 s guard). Unknown (no
+// group, lookup failed) counts as "not sole".
 func (r *ResilienceService) soleCandidate(ctx context.Context, groupID, accountID int64) bool {
 	if r == nil || r.fallbackAccounts == nil || groupID <= 0 || accountID <= 0 {
 		return false
@@ -52,13 +54,18 @@ func (r *ResilienceService) soleCandidate(ctx context.Context, groupID, accountI
 	if platform == "" {
 		return false
 	}
+	st := resilience.StateFrom(ctx)
+	model := st.Model()
 	now := time.Now()
 	for i := range accounts {
 		a := &accounts[i]
-		if a.ID == accountID || a.Platform != platform {
+		if a.ID == accountID || a.Platform != platform || st.AccountFailed(a.ID) {
 			continue
 		}
-		if tier, _, _ := resiliencePenaltyOf(a, "", now); tier != resilience.TierHard {
+		if model != "" && !a.IsModelSupported(model) {
+			continue
+		}
+		if tier, _, _ := resiliencePenaltyOf(a, model, now); tier != resilience.TierHard {
 			return false
 		}
 	}

@@ -37,6 +37,9 @@ type deliveryWriter struct {
 
 	// state of the request, for the edge marker (WriteHeader).
 	state *resilience.RequestState
+
+	// stream tells the opening events of an SSE response from its content.
+	stream sseDeliveryState
 }
 
 // WriteHeader answers 503 instead of 502/504 to a request that came through
@@ -92,13 +95,38 @@ func (w *deliveryWriter) semanticBytes() int64 {
 func (w *deliveryWriter) Write(data []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(data)
 	w.written.Add(int64(n))
+	if n > 0 {
+		w.observeStream(data[:n])
+	}
 	return n, err
 }
 
 func (w *deliveryWriter) WriteString(s string) (int, error) {
 	n, err := w.ResponseWriter.WriteString(s)
 	w.written.Add(int64(n))
+	if n > 0 && w.stream.observing() {
+		w.observeStream([]byte(s[:n]))
+	}
 	return n, err
+}
+
+// deliveredBytes is the delivery probe: the semantic bytes, except that an
+// SSE response delivered nothing until a content event was written (review
+// R03). Converting and native streams write opening events (message_start,
+// a Chat role chunk, response.created) and pings as soon as the upstream
+// answers; a client that leaves before any content got nothing.
+func (w *deliveryWriter) deliveredBytes() int64 {
+	n := w.semanticBytes()
+	if w.stream.kind.Load() != sseKindEventStream {
+		return n
+	}
+	if !w.stream.content.Load() {
+		return 0
+	}
+	if n > 0 {
+		return n
+	}
+	return 1
 }
 
 func (w *deliveryWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
@@ -131,7 +159,7 @@ func InstallDeliveryTracking(c *gin.Context, started time.Time) {
 	w := &deliveryWriter{ResponseWriter: c.Writer, state: st}
 	c.Writer = w
 	c.Set(deliveryWriterKey, w)
-	st.InitDelivery(c.Request.Context(), started, w.semanticBytes)
+	st.InitDelivery(c.Request.Context(), started, w.deliveredBytes)
 }
 
 // noteDeliveryHeartbeat registers heartbeat sources of the request.

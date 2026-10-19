@@ -30,6 +30,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 
 	entsql "entgo.io/ent/dialect/sql"
@@ -2557,6 +2558,14 @@ func (r *accountRepository) SetOverloaded(ctx context.Context, id int64, until t
 }
 
 func (r *accountRepository) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
+	// xy2api resilience (review R01): with failure handling on, every caller
+	// writes by penalty tier, so a hard pause is not lost behind a longer soft
+	// cooldown and a soft cooldown never replaces an active hard pause.
+	if resilience.Current().FailureOn() {
+		_, err := r.SetTempUnschedulableTiered(ctx, id, until, reason,
+			resilience.TempUnschedTier(reason) == resilience.TierHard, false, resilience.SoftReasonPrefixes())
+		return err
+	}
 	result, err := r.sql.ExecContext(ctx, `
 		UPDATE accounts
 		SET temp_unschedulable_until = $1,

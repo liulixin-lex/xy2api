@@ -42,7 +42,7 @@ services:
     oom_score_adj: 300
     networks: [staging]
 
-  app:
+  app: &app
     image: ${APP_IMAGE:?APP_IMAGE is required}
     restart: unless-stopped
     depends_on:
@@ -86,6 +86,17 @@ services:
     oom_score_adj: 200
     networks: [staging]
 
+  # Second process on the same database and Redis, started only by
+  # scenario LEASE-1 (profile "overlap") to stand in for a blue-green pair.
+  app2:
+    <<: *app
+    profiles: [overlap]
+    ports: ["127.0.0.1:18216:8080"]
+    volumes: [appdata2:/app/data]
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1G }
+
   fault-upstream:
     <<: *small
     build: ./fault-upstream
@@ -124,6 +135,7 @@ services:
 volumes:
   pgdata:
   appdata:
+  appdata2:
 
 networks:
   staging:

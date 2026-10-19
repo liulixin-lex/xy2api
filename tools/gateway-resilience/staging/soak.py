@@ -18,6 +18,11 @@ Usage (on the staging host, after fixtures.py):
     set -a; . ./.env; set +a
     python3 soak.py --hours 24 --evidence evidence/soak
     python3 soak.py --check-only --evidence evidence/soak   # re-run the checks
+
+--cycle-minutes shortens the load cycle (default 60): the concurrency ramp
+and the balance outage then repeat every cycle, and the heap and memory
+slopes use per-cycle medians with the first cycle as warm-up. The 0.4.2
+final soak runs 3 hours with 30-minute cycles (user decision 2026-10-19).
 """
 
 from __future__ import annotations
@@ -235,22 +240,25 @@ def anon_trend(samples: list[dict]) -> tuple[float | None, float | None]:
     return statistics.median(load[n // 6:n // 3]), statistics.median(load[n - n // 6:])
 
 
-def hourly_slope(points: list[tuple[datetime.datetime, float]], start: datetime.datetime,
-                 end: datetime.datetime) -> float | None:
-    """Slope in MiB per hour of the per-hour medians of points, hours counted
-    from the start of the load. The load moves on an hourly cycle, so medians
-    of complete hours cancel it; the first hour (warm-up) and a partial last
-    hour are dropped. Needs three complete hours after the first."""
-    complete = int((end - start).total_seconds() // 3600)
-    hours: dict[int, list[float]] = {}
+def cycle_slope(points: list[tuple[datetime.datetime, float]], start: datetime.datetime,
+                end: datetime.datetime, cycle_minutes: int = 60) -> float | None:
+    """Slope in MiB per hour of the per-cycle medians of points, cycles
+    counted from the start of the load. The load repeats every cycle, so
+    medians of complete cycles cancel it; the first cycle (warm-up) and a
+    partial last cycle are dropped. Needs three complete cycles after the
+    first."""
+    cycle = cycle_minutes * 60
+    complete = int((end - start).total_seconds() // cycle)
+    buckets: dict[int, list[float]] = {}
     for at, v in points:
-        h = int((at - start).total_seconds() // 3600)
-        if 1 <= h < complete:
-            hours.setdefault(h, []).append(v)
-    xs = sorted(h for h, vs in hours.items() if len(vs) >= 10)
+        b = int((at - start).total_seconds() // cycle)
+        if 1 <= b < complete:
+            buckets.setdefault(b, []).append(v)
+    xs = sorted(b for b, vs in buckets.items() if len(vs) >= 10)
     if len(xs) < 3:
         return None
-    ys = [statistics.median(hours[h]) for h in xs]
+    ys = [statistics.median(buckets[b]) for b in xs]
+    xs = [b * cycle / 3600 for b in xs]
     mx, my = statistics.fmean(xs), statistics.fmean(ys)
     return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
 
@@ -274,7 +282,7 @@ def live_heap(started_at: str) -> list[tuple[datetime.datetime, float]]:
 MAX_LIVE_HEAP_SLOPE_MIB_PER_HOUR = 1.0
 
 
-def checks(evidence: str, started_at: str) -> dict:
+def checks(evidence: str, started_at: str, cycle_minutes: int = 60) -> dict:
     samples = [json.loads(l) for l in open(os.path.join(evidence, "metrics.jsonl"))]
     base, last = samples[0], samples[-1]
     peak_mem = max(mem_mib(s["app_mem"]) for s in samples)
@@ -282,11 +290,11 @@ def checks(evidence: str, started_at: str) -> dict:
     load = [s for s in samples if "target" in s]
     load_start = datetime.datetime.fromisoformat(started_at) if load else None
     load_end = datetime.datetime.fromisoformat(load[-1]["at"]) if load else None
-    anon_slope = None if load_start is None else hourly_slope(
+    anon_slope = None if load_start is None else cycle_slope(
         [(datetime.datetime.fromisoformat(s["at"]), s["app_anon_mib"]) for s in load if s.get("app_anon_mib") is not None],
-        load_start, load_end)
+        load_start, load_end, cycle_minutes)
     heap = live_heap(started_at)
-    heap_slope = None if load_start is None else hourly_slope(heap, load_start, load_end)
+    heap_slope = None if load_start is None else cycle_slope(heap, load_start, load_end, cycle_minutes)
     logs = sh(f"docker logs --since {started_at} {PROJECT}-app-1 2>&1", timeout=600)
     secrets = list(KEYS.values())
     for n in (1, 2, 3):
@@ -347,6 +355,7 @@ def main() -> int:
     parser.add_argument("--min", type=int, default=20)
     parser.add_argument("--max", type=int, default=50)
     parser.add_argument("--settle-minutes", type=int, default=10)
+    parser.add_argument("--cycle-minutes", type=int, default=60)
     parser.add_argument("--evidence", default=os.path.join(HERE, "evidence", "soak"))
     parser.add_argument("--check-only", action="store_true")
     args = parser.parse_args()
@@ -356,7 +365,8 @@ def main() -> int:
 
     if not args.check_only:
         started_at = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-        json.dump({"started_at": started_at, "hours": args.hours, "min": args.min, "max": args.max}, open(meta_path, "w"))
+        json.dump({"started_at": started_at, "hours": args.hours, "min": args.min, "max": args.max,
+                   "cycle_minutes": args.cycle_minutes}, open(meta_path, "w"))
         set_balance(1000)
         with open(metrics_path, "w") as fh:
             fh.write(json.dumps(sample(None)) + "\n")
@@ -368,11 +378,13 @@ def main() -> int:
         start = now()
         while now() < end:
             elapsed_min = (now() - start) / 60
-            hour_phase = (elapsed_min % 60) / 60
-            # Up to max over the first half of each hour, back to min after.
-            target[0] = args.min + round((args.max - args.min) * (1 - abs(2 * hour_phase - 1)))
-            # Minutes 30-40 of every hour: the single balance account runs dry.
-            set_balance(0 if 30 <= elapsed_min % 60 < 40 else 1000)
+            cycle = args.cycle_minutes
+            phase = (elapsed_min % cycle) / cycle
+            # Up to max over the first half of each cycle, back to min after.
+            target[0] = args.min + round((args.max - args.min) * (1 - abs(2 * phase - 1)))
+            # From the middle of every cycle, for a sixth of it (minutes 30-40
+            # of an hour): the single balance account runs dry.
+            set_balance(0 if 0.5 <= phase < 0.5 + 1 / 6 else 1000)
             time.sleep(60)
             s = sample(stats)
             s["target"] = target[0]
@@ -391,7 +403,7 @@ def main() -> int:
                 fh.write(json.dumps(sample(None)) + "\n")
 
     meta = json.load(open(meta_path))
-    result = checks(args.evidence, meta["started_at"])
+    result = checks(args.evidence, meta["started_at"], meta.get("cycle_minutes", 60))
     json.dump(result, open(os.path.join(args.evidence, "RESULT.json"), "w"), indent=1)
     for c in result["checks"]:
         print(f"{'PASS' if c['ok'] else 'FAIL'} {c['check']}", flush=True)

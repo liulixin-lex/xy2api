@@ -506,6 +506,7 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 			if s.rateLimitService != nil {
 				s.rateLimitService.HandleStreamTimeout(ctx, account, upstreamModel)
 			}
+			noteResilienceStall(ctx, s.rateLimitService, account)
 			return s.nativeAnthropicStreamResult(c, resp, usage, firstTokenMs, clientDisconnected, originalModel, billingModel, upstreamModel, reasoningEffort, startTime),
 				fmt.Errorf("stream data interval timeout")
 

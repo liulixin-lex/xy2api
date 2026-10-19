@@ -193,3 +193,71 @@ func TestFirstOutputTimeoutMeasuredFromAttemptStart(t *testing.T) {
 	st.SetBudget(resilience.NewBudget(ctx, resilience.Current(), resilience.KindText, start))
 	require.Equal(t, 180*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "", start))
 }
+
+func TestStallMarksTheTurnFailed(t *testing.T) {
+	// Review R10: a stalled stream answered 200 must not end the
+	// conversation's failed-turn streak (the outer observer resets it on a
+	// 2xx unless the turn was marked failed), like a failure after output.
+	withResilienceSettings(t, nil)
+	ctx := postOutputRequest(newRecordingSessions())
+	noteResilienceStall(ctx, nil, &Account{ID: 62, Platform: PlatformOpenAI, Type: AccountTypeAPIKey})
+	require.True(t, resilience.StateFrom(ctx).TurnFailed())
+}
+
+func TestSilentOpenAIUpstreamFailsOverAtTheFirstOutputTier(t *testing.T) {
+	// Review P1-C (tasks 0.4.1 follow-up): headers, then nothing. Before
+	// output the 180 s stall check fired ahead of the 200/220 s xhigh/max
+	// tiers and ended the request with a stream_timeout instead of switching
+	// accounts. The first-output guard owns the phase before output.
+	withResilienceSettings(t, nil)
+	gin.SetMode(gin.TestMode)
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
+		StreamDataIntervalTimeout:       1,
+		OpenAIFirstOutputTimeoutSeconds: 3,
+		MaxLineSize:                     defaultMaxLineSize,
+	}}}
+	pr, pw := io.Pipe()
+	defer func() { _ = pw.Close() }()
+	go func() {
+		_, _ = pw.Write([]byte("data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_silent\"}}\n\n"))
+	}()
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: pr}
+
+	start := time.Now()
+	_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 63, Platform: PlatformOpenAI}, start, "gpt-5.5", "gpt-5.5")
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr, "a silent upstream before output is switched: %v", err)
+	require.Contains(t, string(failoverErr.ResponseBody), "first_output_timeout")
+	require.GreaterOrEqual(t, time.Since(start), 2500*time.Millisecond, "the tier, not the stall check, ends the attempt")
+	require.NotContains(t, rec.Body.String(), "stream_timeout")
+}
+
+func TestStallAfterOutputStillEndsOpenAIStream(t *testing.T) {
+	// After output the stall check stays in charge (no failover possible).
+	withResilienceSettings(t, func(s *resilience.Settings) { s.Stall.TextStallSeconds = 1 })
+	gin.SetMode(gin.TestMode)
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
+		StreamDataIntervalTimeout:       30,
+		OpenAIFirstOutputTimeoutSeconds: 20,
+		MaxLineSize:                     defaultMaxLineSize,
+	}}}
+	pr, pw := io.Pipe()
+	defer func() { _ = pw.Close() }()
+	go func() {
+		_, _ = pw.Write([]byte("data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_out\"}}\n\n"))
+		_, _ = pw.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n"))
+	}()
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: pr}
+
+	start := time.Now()
+	_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 64, Platform: PlatformOpenAI}, start, "gpt-5.5", "gpt-5.5")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "stream data interval timeout")
+	require.Less(t, time.Since(start), 5*time.Second)
+}

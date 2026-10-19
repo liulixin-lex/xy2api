@@ -168,15 +168,43 @@ func RecordUndeliveredRequest(rec *UndeliveredRequest) {
 	undeliveredRecorder.Load().RecordUndelivered(rec)
 }
 
+// Undelivered record writes run in the background, at most
+// undeliveredWriters at a time (a disconnect storm must not open unbounded
+// goroutines and database connections), with one retry after a short pause.
+// A record that finds every writer busy is dropped and logged: the table is
+// an operations record, billing does not depend on it.
+const (
+	undeliveredWriters     = 16
+	undeliveredRetryPause  = time.Second
+	undeliveredWriteBudget = 10 * time.Second
+)
+
+var undeliveredSlots = make(chan struct{}, undeliveredWriters)
+
 // RecordUndelivered stores an undelivered record in the background.
 func (r *ResilienceService) RecordUndelivered(rec *UndeliveredRequest) {
 	if r == nil || r.undelivered == nil || rec == nil {
 		return
 	}
+	select {
+	case undeliveredSlots <- struct{}{}:
+	default:
+		slog.Warn("resilience.undelivered_record_dropped", "request_id", rec.RequestID, "reason", "writers_busy")
+		return
+	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer func() { <-undeliveredSlots }()
+		ctx, cancel := context.WithTimeout(context.Background(), undeliveredWriteBudget)
 		defer cancel()
-		if err := r.undelivered.InsertUndelivered(ctx, rec); err != nil {
+		err := r.undelivered.InsertUndelivered(ctx, rec)
+		if err != nil && ctx.Err() == nil {
+			select {
+			case <-time.After(undeliveredRetryPause):
+				err = r.undelivered.InsertUndelivered(ctx, rec)
+			case <-ctx.Done():
+			}
+		}
+		if err != nil {
 			slog.Warn("resilience.undelivered_record_failed", "request_id", rec.RequestID, "error", err)
 		}
 	}()

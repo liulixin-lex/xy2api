@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
 
@@ -129,16 +130,21 @@ func isOpenAICompatPreviousResponseNotFound(statusCode int, upstreamMsg string, 
 // stored response lives on another upstream account, so every later turn of
 // the session would fail the same way. The caller replays the turn in full
 // once and keeps continuation off for the session (xy2api gateway
-// resilience). Errors a full replay would hit as well are excluded.
+// resilience). Only answers that point at the chain qualify (review R08):
+// a 404 or 409, a message about the previous response, or one of the vague
+// relay answers on a 400/422. Errors a full replay would hit as well
+// (context length, moderation, unknown model) and errors naming another
+// parameter (temperature out of range, ...) do not.
 func isOpenAICompatContinuationRejected(statusCode int, upstreamBody []byte) bool {
 	switch statusCode {
 	case http.StatusBadRequest, http.StatusNotFound, http.StatusConflict, http.StatusUnprocessableEntity:
 	default:
 		return false
 	}
+	message := strings.ToLower(strings.TrimSpace(gjson.GetBytes(upstreamBody, "error.message").String()))
+	param := strings.ToLower(strings.TrimSpace(gjson.GetBytes(upstreamBody, "error.param").String()))
 	text := strings.ToLower(gjson.GetBytes(upstreamBody, "error.code").String() + " " +
-		gjson.GetBytes(upstreamBody, "error.type").String() + " " +
-		gjson.GetBytes(upstreamBody, "error.message").String())
+		gjson.GetBytes(upstreamBody, "error.type").String() + " " + message)
 	if strings.TrimSpace(text) == "" {
 		text = strings.ToLower(string(upstreamBody))
 	}
@@ -150,7 +156,34 @@ func isOpenAICompatContinuationRejected(statusCode int, upstreamBody []byte) boo
 			return false
 		}
 	}
-	return true
+	if param != "" && !strings.Contains(param, "previous_response") {
+		return false
+	}
+	for _, s := range []string{"previous_response", "previous response", "response_id", "response id"} {
+		if strings.Contains(text, s) {
+			return true
+		}
+	}
+	if statusCode == http.StatusNotFound || statusCode == http.StatusConflict {
+		return true
+	}
+	return isVagueRelayRejection(message, upstreamBody)
+}
+
+// isVagueRelayRejection reports the generic answers pooled relays give to a
+// chained request they cannot serve. "Upstream request failed" counts only
+// on its own: relays also prefix real parameter errors with it. Without a
+// JSON message the plain body is judged the same way; an empty one names no
+// other cause.
+func isVagueRelayRejection(message string, upstreamBody []byte) bool {
+	if message == "" && !gjson.ValidBytes(upstreamBody) {
+		message = strings.ToLower(strings.TrimSpace(string(upstreamBody)))
+	}
+	switch strings.TrimRight(message, " .!") {
+	case "", "upstream request failed", "request failed", "bad request", "invalid request", "internal error", "unknown error":
+		return true
+	}
+	return strings.Contains(message, "could not be processed")
 }
 
 func isOpenAICompatPreviousResponseUnsupported(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
@@ -409,4 +442,17 @@ func (s *OpenAIGatewayService) bindOpenAICompatSessionTurnState(_ context.Contex
 		}
 	}
 	s.openaiCompatSessionResponses.Store(key, binding)
+}
+
+// resilienceContinuationReplayAllowed counts the full replay of a chained
+// turn as an attempt of the request budget (review R08). A replay after a
+// recognised "previous response not found / unsupported" only undoes the
+// chain the gateway added and goes ahead even when the budget is spent; a
+// replay on the vague-answer guess needs room in the budget.
+func resilienceContinuationReplayAllowed(ctx context.Context, account *Account, guessed bool) bool {
+	var accountID int64
+	if account != nil {
+		accountID = account.ID
+	}
+	return resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(accountID, false, time.Now()) || !guessed
 }
