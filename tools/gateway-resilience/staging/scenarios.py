@@ -742,16 +742,31 @@ def fo3():
 
 
 def wait_ready(port: int, seconds: float) -> bool:
+    # The readiness answer itself, not any 200: a build whose embedded
+    # frontend takes /ready answers index.html.
     end = now() + seconds
     while now() < end:
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/ready", timeout=3) as resp:
-                if resp.status == 200:
+                if resp.status == 200 and json.loads(resp.read() or b"{}").get("status") == "ready":
                     return True
         except Exception:
             pass
         time.sleep(1)
     return False
+
+
+@scenario("RDY-1", "The candidate image answers /ready and /health itself, not with the embedded frontend")
+def rdy1():
+    checks = []
+    result = {}
+    for path in ("/ready", "/health"):
+        with urllib.request.urlopen(f"http://127.0.0.1:{APP}{path}", timeout=5) as resp:
+            body = resp.read()
+            result[path] = {"status": resp.status, "type": resp.headers.get("Content-Type", ""), "body": body[:80].decode(errors="replace")}
+        check(result[path]["status"] == 200 and "application/json" in result[path]["type"], f"{path} answers JSON", checks)
+    check(json.loads(result["/ready"]["body"] or "{}").get("status") == "ready", "/ready reports ready", checks)
+    return result, checks
 
 
 @scenario("LEASE-1", "Two app processes on one Redis (blue-green overlap): the starting process keeps the running one's slots")
