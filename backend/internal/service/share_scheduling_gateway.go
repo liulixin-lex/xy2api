@@ -231,7 +231,14 @@ func (s *GatewayService) shareGatewayLastResort(ctx context.Context, gp *shareGr
 		key: key, ttl: time.Duration(gp.policy.Affinity.TTLSeconds) * time.Second, accounts: round.accounts,
 		reason: sharesched.ReasonLastResortSoft,
 		limit:  func(acc *Account) int { return acc.Concurrency },
-		admit:  func(acc *Account) bool { return s.checkAndRegisterSession(ctx, acc, sessionHash) },
+		verify: func(acc *Account) (*Account, sharesched.Reason) {
+			// The plan used a 2 s group list (review R09).
+			if fresh, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *groupID, acc, requestedModel, resiliencePenaltyOf); ok {
+				return fresh, ""
+			}
+			return nil, sharesched.ReasonIneligible
+		},
+		admit: func(acc *Account) bool { return s.checkAndRegisterSession(ctx, acc, sessionHash) },
 		newResult: func(acc *Account, acquired bool, release func(), wait *AccountWaitPlan) (*AccountSelectionResult, error) {
 			return s.newSelectionResult(ctx, acc, acquired, release, wait)
 		}}
