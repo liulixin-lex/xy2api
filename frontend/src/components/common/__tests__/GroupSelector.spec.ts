@@ -41,3 +41,26 @@ describe('GroupSelector simple-mode binding policy', () => {
     expect(wrapper.emitted('update:modelValue')).toEqual([[[1]]])
   })
 })
+
+describe('GroupSelector exclusive tag', () => {
+  beforeEach(() => { authState.isSimpleMode = false })
+
+  it('tags exclusive groups in purple even when their user-facing badge is hidden', () => {
+    const wrapper = mount(GroupSelector, {
+      props: {
+        modelValue: [],
+        groups: [
+          { id: 1, name: 'Public', platform: 'openai', status: 'active', is_exclusive: false },
+          { id: 2, name: 'VIP', platform: 'openai', status: 'active', is_exclusive: true, show_exclusive_badge: false }
+        ] as any
+      },
+      global: { stubs: { GroupBadge: { props: ['name'], template: '<span>{{ name }}</span>' }, Icon: true } }
+    })
+
+    const tags = wrapper.findAll('[data-test="group-exclusive-tag"]')
+    expect(tags).toHaveLength(1)
+    expect(tags[0].text()).toBe('admin.groups.exclusive')
+    expect(tags[0].classes()).toContain('text-purple-600')
+    expect(tags[0].element.closest('label')?.textContent).toContain('VIP')
+  })
+})

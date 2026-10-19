@@ -22,6 +22,12 @@
 - 工具链：Go 以 `backend/go.mod` 为准（当前 1.27.2）；golangci-lint v2.14.0（与 CI 同版）。
 - 文档一致性：`python3 tools/check_docs_consistency.py`（CI 的 upstream-sync-audit 作业执行），规则在 `tools/docs_consistency.json`，改动时按 [`AGENTS.md`](../AGENTS.md)“变更同步”同步文档。
 
+### 账号分组选择显示专属标签（2026-10-19T14:10Z；PR 待另一位作者合并；未发版、未部署）
+
+- 用户要求（2026-10-19）：账号管理“编辑账号”选择分组时，专属分组在选项处显示紫色文字标签。
+- 已完成（分支 `feat/exclusive-group-label-20261019`，基于 `0320d4e68`）：共享组件 `frontend/src/components/common/GroupSelector.vue` 在专属分组选项的徽标与账号数之间显示紫色“专属”（复用 `admin.groups.exclusive`，悬停说明复用 `admin.groups.exclusiveHint`）。新建、编辑、批量编辑账号与公告定向的分组选择同样生效（均为管理端）；只看 `is_exclusive`，不受 `show_exclusive_badge`（只管用户端展示）影响。`docs/GROUP_SYSTEM_PROMPTS.md` 补充说明；该文件来自上游，钩子 `data-test="group-exclusive-tag"` 登记 `required_literals`。验证见操作日志 `20261019-exclusive-group-label`。
+- 未完成：PR 由另一位作者审阅合并；发版、部署需用户另行授权。
+
 ### XY2API 0.4.1 正式发布完成（2026-10-18；生产未部署）
 
 - 发布：`v0.4.1`（annotated 对象 `7dbdbccd9`）→ main 合并提交 `edea0d493`（[PR #103](https://github.com/liulixin-lex/xy2api/pull/103)，头 `7f112a981`），PR #101、#99、#98 随之标为已合并。Release run 39126008209；6 个附件双 SHA、五平台 `vcs.modified=false`、GHCR `sha256:baa0e446…` 双架构；latest/0/0.4 指向 0.4.1，0.3 仍为 0.3.0；正式镜像全新安装 324 条迁移通过。
@@ -77,6 +83,8 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
+
+- 暂无（0.4.1 已发布，遗留事项见“当前交接状态”；账号分组选择专属标签的 PR 待合并，见同名小节）。
 
 ### 20261019-group-fast-priority — PR #105 已交付，待审阅
 
@@ -597,3 +605,13 @@ pnpm --dir frontend run build
 - 验证：四种 vet、golangci-lint 0 问题、全量 unit 与无 tag 测试、`ci_gate.py`（274 个 `-race`、零跳过）、`tools/tests`、scheduler-diff、文档一致性通过；`sync.py audit` 在干净树上通过（见顶部条目）；本机切换演练通过，发现切换前必须卸载插件（runbook §3.5）。集成测试需要 Docker（本机没有），待 CI；测试服务器场景未跑。
 - 卡点/风险：推送、PR、测试服务器验证、预上线主机部署与配置均未授权；SMTP、异机备份存储、测试 Key 需用户提供。
 - 下一步：向用户申请三项授权（Draft PR、测试服务器整套验证、预上线主机部署与配置）。
+
+### 2026-10-19T14:10Z — `20261019-exclusive-group-label` — 本地完成，已推送并开 PR（待审阅）
+
+- 请求/目标：账号编辑的分组选择中，专属分组显示紫色文字标签。做到 PR 检查全绿为止，合并由另一位作者执行。
+- 开始状态：自 origin/main `0320d4e68` 新建分支 `feat/exclusive-group-label-20261019`，工作树干净；PR #101 已于 2026-10-18 随 0.4.1 合入。
+- 完成操作：`GroupSelector.vue` 在 `is_exclusive` 为真时显示标签，配色沿用模型广场的专属标识（浅紫底、紫色字，暗色模式有对应变体），字号 10px 以适配两列选项。新用例在旧组件上确认会失败。文档与 `required_literals` 同步。
+- 修改文件：`frontend/src/components/common/GroupSelector.vue`、`frontend/src/components/common/__tests__/GroupSelector.spec.ts`、`docs/GROUP_SYSTEM_PROMPTS.md`、`tools/upstream-sync/policy.json`、本文件。
+- 验证：前端 typecheck、`lint:check` 通过，vitest 全量 389 个文件、3056 个用例通过。另用 Vite 临时预览页（真实组件、样式与中文文案，暗色模式）加无头 Chrome 截图核对：专属分组显示紫色“专属”，公开分组不显示，隐藏用户端标识的专属分组仍显示；临时文件已删除。`check_docs_consistency.py`、`tools/tests`、`scheduler-diff` 通过，`sync.py audit` 在提交后的干净树上运行。
+- 卡点/风险：无。
+- 下一步：PR 检查全绿后交另一位作者合并。

@@ -859,6 +859,10 @@
     {
       "path": "backend/internal/service/openai_gateway_messages_anthropic_native.go",
       "value": "noteResilienceStall(ctx, s.rateLimitService, account)"
+    },
+    {
+      "path": "frontend/src/components/common/GroupSelector.vue",
+      "value": "data-test=\"group-exclusive-tag\""
     }
   ],
   "forbidden_module_paths": [
