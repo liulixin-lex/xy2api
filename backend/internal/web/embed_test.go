@@ -727,6 +727,27 @@ func TestEmbeddedFrontendBypassesBareAPIAliases(t *testing.T) {
 	}
 }
 
+func TestEmbeddedFrontendBypassesReadiness(t *testing.T) {
+	require.True(t, shouldBypassEmbeddedFrontend("/ready"))
+	require.False(t, shouldBypassEmbeddedFrontend("/ready-page"))
+}
+
+func TestFrontendServer_MiddlewareLeavesReadinessToTheBackend(t *testing.T) {
+	server, err := NewFrontendServer(&mockSettingsProvider{settings: map[string]string{}})
+	require.NoError(t, err)
+	router := gin.New()
+	router.Use(server.Middleware())
+	router.GET("/ready", func(c *gin.Context) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready"})
+	})
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/ready", nil))
+
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Contains(t, w.Header().Get("Content-Type"), "application/json")
+}
+
 func TestNewFrontendServer(t *testing.T) {
 	t.Run("creates_server_successfully", func(t *testing.T) {
 		provider := &mockSettingsProvider{

@@ -653,6 +653,10 @@
       "value": "// nonce, so it is never answered with 304 and has no ETag"
     },
     {
+      "path": "backend/internal/web/embed_on.go",
+      "value": "trimmed == \"/ready\" ||"
+    },
+    {
       "path": "backend/internal/service/openai_gateway_forward.go",
       "value": "webSearchReplay, webSearchBody := armOpenAIWebSearchReplay(c, account, body, false)"
     },
