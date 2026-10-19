@@ -1891,6 +1891,7 @@ func (e *OpenAIFastBlockedError) Error() string { return e.Message }
 
 // evaluateOpenAIFastPolicy returns the action and error message that should be
 // applied for a request with the given account/model/service_tier. When the
+// group forces Fast, it returns force_priority before reading any rules. When the
 // policy service is unavailable or no rule matches, it returns
 // (BetaPolicyActionPass, "") so callers can short-circuit safely.
 //
@@ -1912,6 +1913,9 @@ func (e *OpenAIFastBlockedError) Error() string { return e.Message }
 //     发生重叠，admin 可通过规则顺序明确意图。因此采用 first-match 而
 //     非 BetaPolicy 那样的"block 覆盖 filter 覆盖 pass"语义。
 func (s *OpenAIGatewayService) evaluateOpenAIFastPolicy(ctx context.Context, account *Account, model, serviceTier string) (action, errMsg string) {
+	if openAIGroupForcesFast(ctx, account) {
+		return OpenAIFastPolicyActionForcePriority, ""
+	}
 	if s == nil || s.settingService == nil {
 		return BetaPolicyActionPass, ""
 	}
@@ -2038,22 +2042,25 @@ func openAIFastPolicySettingsFromContext(ctx context.Context) *OpenAIFastPolicyS
 }
 
 func openAIGroupForcesFast(ctx context.Context, account *Account) bool {
-	if ctx == nil || account == nil || account.Platform != PlatformOpenAI {
+	if ctx == nil {
 		return false
 	}
 	group, _ := ctx.Value(ctxkey.Group).(*Group)
-	return IsGroupContextValid(group) && groupSupportsOpenAIFast(group.Platform) && group.ForceOpenAIFast
+	return groupForcesOpenAIFast(group, account)
+}
+
+func groupForcesOpenAIFast(group *Group, account *Account) bool {
+	return account != nil && account.Platform == PlatformOpenAI && IsGroupContextValid(group) &&
+		groupSupportsOpenAIFast(group.Platform) && group.ForceOpenAIFast
 }
 
 // applyOpenAIFastPolicyToBody applies the OpenAI fast policy to a raw request
 // body. When action=filter it removes the service_tier field; when
 // action=block it returns (body, *OpenAIFastBlockedError). On pass it
 // normalizes the service_tier value (e.g. client alias "fast" → "priority").
-// action=force_priority rewrites any matched known tier to "priority". Before
-// the global policy is evaluated, a trusted request Group with
-// ForceOpenAIFast enabled unconditionally sets service_tier to "priority".
-// The global policy remains authoritative and may still pass, filter, or block
-// that final value.
+// action=force_priority rewrites any matched known tier to "priority". A trusted
+// request Group with ForceOpenAIFast enabled unconditionally sets priority and
+// takes precedence over user-scoped and global Fast/Flex rules.
 //
 // Rationale for normalize-on-pass: chat-completions / messages 入口在调用本
 // 函数之前已经通过 normalizeResponsesBodyServiceTier 把 service_tier 归一化
@@ -2151,7 +2158,7 @@ func writeOpenAIFastPolicyBlockedResponse(c *gin.Context, err *OpenAIFastBlocked
 //   - filter: returns a copy with top-level service_tier removed
 //   - force_priority: keeps service_tier and rewrites it to "priority"
 //   - block: returns (frame, *OpenAIFastBlockedError)
-//   - Group ForceOpenAIFast: sets priority first, then applies the global rule
+//   - Group ForceOpenAIFast: sets priority and overrides user/global rules
 //
 // Only frames whose "type" field strictly equals "response.create" are
 // inspected/mutated. Any other frame type — including the empty string —

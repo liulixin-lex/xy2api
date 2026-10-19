@@ -1215,7 +1215,7 @@ export default {
       },
       openaiFastPolicy: {
         title: 'OpenAI Fast/Flex 策略',
-        description: '基于请求体 service_tier 字段拦截/过滤/透传 OpenAI fast(priority)、ultrafast 与 flex 请求；仅作用于 OpenAI 网关。“全部 tier 值”仅包含显式传入的 tier。',
+        description: '基于请求体 service_tier 字段拦截/过滤/透传 OpenAI fast(priority)、ultrafast 与 flex 请求；分组“强制使用 Fast”优先于此策略。仅作用于 OpenAI 网关，“全部 tier 值”仅包含显式传入的 tier。',
         empty: '尚未配置任何规则。点击下方按钮新增。',
         ruleHeader: '规则 #{index}',
         removeRule: '删除规则',
