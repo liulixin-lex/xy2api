@@ -862,7 +862,25 @@
     },
     {
       "path": "frontend/src/components/common/GroupSelector.vue",
-      "value": "data-test=\"group-exclusive-tag\""
+      "value": "data-test=\"group-exclusive-tag\"",
+      "path": "backend/internal/repository/account_repo.go",
+      "value": "entsql.OrderByField(dbaccount.FieldLastUsedAt, direction, entsql.OrderNullsLast()).ToFunc(),"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "const fallback: AccountSortState = { sort_by: 'last_used_at', sort_order: 'desc' }"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "default-sort-key=\"last_used_at\""
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "} = useColumnOrder(ACCOUNT_COLUMN_ORDER_KEY, toggleableColumnKeys)"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "<AccountColumnSettings"
     }
   ],
   "forbidden_module_paths": [
@@ -906,7 +924,8 @@
     "xy-allowlist-404-hint",
     "xy-registration-email-alias-hardening",
     "xy-admin-user-batch-status",
-    "xy-group-openai-fast-priority"
+    "xy-group-openai-fast-priority",
+    "xy-account-list-usability"
   ],
   "custom_patch_tests": [
     {
@@ -1083,6 +1102,26 @@
       "id": "xy-admin-user-batch-status",
       "path": "frontend/src/views/admin/__tests__/UsersView.spec.ts",
       "literal": "disables users selected across pages in one request"
+    },
+    {
+      "id": "xy-account-list-usability",
+      "path": "frontend/src/components/admin/account/__tests__/AccountTableFilters.spec.ts",
+      "literal": "shows every filter at once without a more-filters toggle"
+    },
+    {
+      "id": "xy-account-list-usability",
+      "path": "frontend/src/views/admin/__tests__/AccountsView.listDefaults.spec.ts",
+      "literal": "lists accounts by last use, newest first"
+    },
+    {
+      "id": "xy-account-list-usability",
+      "path": "frontend/src/views/admin/__tests__/AccountsView.listDefaults.spec.ts",
+      "literal": "reorders the table and saves the order when a column is dragged in the column settings"
+    },
+    {
+      "id": "xy-account-list-usability",
+      "path": "backend/internal/repository/account_repo_list_order_test.go",
+      "literal": "func TestAccountListOrderPutsNeverUsedAccountsLast"
     }
   ]
 }

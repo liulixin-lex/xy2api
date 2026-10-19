@@ -1261,6 +1261,18 @@ func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selecto
 			s.OrderBy(tieOrder(s.C(dbaccount.FieldID)))
 		}}
 	}
+	if sortBy == "last_used_at" {
+		// 从未使用的账号 last_used_at 为 NULL。PostgreSQL 降序默认 NULLS FIRST，会把它们排到
+		// “最近使用”的最前面；两个方向都放到最后，最上面始终是真正用过的账号。
+		direction, tieOrder := entsql.OrderAsc(), dbent.Asc(dbaccount.FieldID)
+		if sortOrder == pagination.SortOrderDesc {
+			direction, tieOrder = entsql.OrderDesc(), dbent.Desc(dbaccount.FieldID)
+		}
+		return []func(*entsql.Selector){
+			entsql.OrderByField(dbaccount.FieldLastUsedAt, direction, entsql.OrderNullsLast()).ToFunc(),
+			tieOrder,
+		}
+	}
 
 	field := dbaccount.FieldName
 	defaultOrder := true
@@ -1281,9 +1293,6 @@ func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selecto
 		defaultOrder = false
 	case "rate_multiplier":
 		field = dbaccount.FieldRateMultiplier
-		defaultOrder = false
-	case "last_used_at":
-		field = dbaccount.FieldLastUsedAt
 		defaultOrder = false
 	case "expires_at":
 		field = dbaccount.FieldExpiresAt

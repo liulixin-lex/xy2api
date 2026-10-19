@@ -183,7 +183,8 @@
     "xy-allowlist-404-hint",
     "xy-registration-email-alias-hardening",
     "xy-admin-user-batch-status",
-    "xy-group-openai-fast-priority"
+    "xy-group-openai-fast-priority",
+    "xy-account-list-usability"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/92"
 }
