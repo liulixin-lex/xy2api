@@ -4,7 +4,9 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -143,4 +145,44 @@ func TestLeaseSweepKeepsProcessesThatMissedOnlyOnce(t *testing.T) {
 	require.NoError(t, cache.CleanupExpiredAccountSlotKeys(ctx)) // p2 twice
 	members, _ = rdb.ZRange(ctx, slots, 0, -1).Result()
 	require.Empty(t, members)
+}
+
+// failFirstCommand fails the first Redis command with the given name, as a
+// hiccup at startup would.
+type failFirstCommand struct {
+	name   string
+	failed atomic.Bool
+}
+
+func (h *failFirstCommand) DialHook(next redis.DialHook) redis.DialHook { return next }
+
+func (h *failFirstCommand) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		if cmd.Name() == h.name && h.failed.CompareAndSwap(false, true) {
+			cmd.SetErr(errors.New("redis hiccup"))
+			return cmd.Err()
+		}
+		return next(ctx, cmd)
+	}
+}
+
+func (h *failFirstCommand) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+
+// A failed startup cleanup (one Redis hiccup) must not leave the process
+// without a lease for its whole life: any later process would then clear
+// its slots (review G2).
+func TestStartupCleanupFailureStillStartsTheLease(t *testing.T) {
+	server := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	rdb.AddHook(&failFirstCommand{name: "exists"})
+	ctx := context.Background()
+	cache := NewConcurrencyCache(rdb, 15, 60).(*concurrencyCache)
+
+	require.Error(t, cache.CleanupStaleProcessSlots(ctx, "rflaky"))
+	own, err := rdb.Exists(ctx, processLeaseKey("rflaky")).Result()
+	require.NoError(t, err)
+	require.Equal(t, int64(1), own, "the process holds a lease although the cleanup failed")
 }

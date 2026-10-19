@@ -1158,11 +1158,13 @@ func (c *concurrencyCache) CleanupStaleProcessSlots(ctx context.Context, activeR
 	if activeRequestPrefix == "" {
 		return nil
 	}
+	// xy2api: keep the slots of other processes that still hold a lease.
+	// The lease comes first: a failed cleanup must not leave this process
+	// without one (its refresh retries every few seconds).
+	c.startProcessLease(ctx, activeRequestPrefix)
 	if err := c.sweepLegacyWaitKeysOnce(ctx); err != nil {
 		return err
 	}
-	// xy2api: keep the slots of other processes that still hold a lease.
-	c.startProcessLease(ctx, activeRequestPrefix)
 	live, err := c.liveProcessPrefixes(ctx, activeRequestPrefix)
 	if err != nil {
 		return err
