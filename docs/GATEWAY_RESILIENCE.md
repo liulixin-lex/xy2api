@@ -226,7 +226,7 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 
 - 统计计数保存在进程内存，多实例部署时按实例分别统计，重启后清零。
 - WebSocket 不挂连接级预算，建连首回合的换号仍按 `max_account_switches`；Gemini compat 服务未接入首事件守卫，由停滞检测兜底。
-- Chat Completions 与 Messages 经 OpenAI 兼容转换时（0.4.2），首输出档位约束等待响应头和第一行上游数据；第一行之后转换已写出开场事件，此后的静默由停滞检测结束并记账，不再换号。停滞检测未覆盖或不记账的路径：原生 Chat Completions 透传（账号不支持 `/responses` 时）没有停滞检测；CN Anthropic 原生上的 Responses 与 Chat 转换停滞时只结束请求、不冷却账号；Anthropic API Key 透传、Bedrock、CN Anthropic 原生 Messages 记账但不分输出前后，统一按 `stream_data_interval_timeout`；Antigravity 与图片按各自的规则。
+- Chat Completions 与 Messages 经 OpenAI 兼容转换时（0.4.2），首输出档位约束等待响应头和第一行上游数据；第一行之后转换已写出开场事件，此后的静默由停滞检测结束并记账，不再换号；如果此后上游只发中转站伪保活帧、不出内容，按 §7.8 算存活，停滞检测不会结束它。停滞检测未覆盖或不记账的路径：原生 Chat Completions 透传（账号不支持 `/responses` 时）没有停滞检测；CN Anthropic 原生上的 Responses 与 Chat 转换停滞时只结束请求、不冷却账号；Anthropic API Key 透传、Bedrock、CN Anthropic 原生 Messages 记账但不分输出前后，统一按 `stream_data_interval_timeout`；Antigravity 与图片按各自的规则。
 - 断开阶段粒度为选号、等待响应头、首输出前、输出中四段。Chat Completions 与 Messages 经 OpenAI 兼容转换的路径，上游响应头到达后阶段不推进到“首输出前”：只写出开场分块（`message_start`、只带 role 的 chat 分块）就断开时，未送达记录与计数的阶段记为“等待响应头”。这只影响按阶段的统计，不影响是否计费、是否取消上游（两者只看是否写出过内容）。
 - 兜底判断、末位兜底与无号 `Retry-After` 读取分组账号的进程内快照（2 秒）。本网关施加的冷却与余额暂停会立即刷新快照；其他来源（上游 429 限流、错误状态、管理员改动、其他实例）最多 2 秒后可见。末位兜底在派发前按账号当前状态复核所选账号，快照的滞后只影响兜底判断与 `Retry-After` 的估算。
 - 失败回合计数在进程内，多实例时各自计数；快速失败的原样返回发生在选号之前，不参与计数；封顶后的终止应答也不计入快速失败。
