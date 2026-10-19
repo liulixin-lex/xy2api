@@ -28,9 +28,14 @@ type resilienceAccountRepo struct {
 	tempCalls   int
 	clearCalls  int
 	extraWrites int
+	// afterGet runs after GetByID returned, to interleave a concurrent write.
+	afterGet func()
 }
 
 func (r *resilienceAccountRepo) GetByID(context.Context, int64) (*Account, error) {
+	if r.afterGet != nil {
+		defer r.afterGet()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	cp := *r.account
@@ -68,6 +73,42 @@ func (r *resilienceAccountRepo) SetTempUnschedulable(_ context.Context, _ int64,
 		r.tempReason = reason
 	}
 	return nil
+}
+
+// SetTempUnschedulableTiered mirrors the repository statement (review R01).
+func (r *resilienceAccountRepo) SetTempUnschedulableTiered(_ context.Context, _ int64, until time.Time, reason string, hard bool, softPrefixes []string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.tempCalls++
+	now := time.Now()
+	active := !r.tempUntil.IsZero() && r.tempUntil.After(now)
+	curSoft := false
+	for _, p := range softPrefixes {
+		if strings.HasPrefix(strings.TrimSpace(r.tempReason), p) {
+			curSoft = true
+		}
+	}
+	if active && !(r.tempUntil.Before(until) && (hard || curSoft)) && !(hard && curSoft) {
+		return false, nil
+	}
+	if !active || r.tempUntil.Before(until) {
+		r.tempUntil = until
+	}
+	r.tempReason = reason
+	return true, nil
+}
+
+// ClearTempUnschedulableIf mirrors the repository statement (review R02).
+func (r *resilienceAccountRepo) ClearTempUnschedulableIf(_ context.Context, _ int64, reason string, until time.Time) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.tempReason != reason || !r.tempUntil.Equal(until) {
+		return false, nil
+	}
+	r.clearCalls++
+	r.tempUntil = time.Time{}
+	r.tempReason = ""
+	return true, nil
 }
 
 func (r *resilienceAccountRepo) ClearTempUnschedulable(context.Context, int64) error {
