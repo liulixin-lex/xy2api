@@ -74,7 +74,7 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
 (sub2api_upstream) {
 	reverse_proxy 127.0.0.1:<BLUE_PORT> 127.0.0.1:<GREEN_PORT> {
 		lb_policy first
-		health_uri /health
+		health_uri /ready
 		health_interval 5s
 		health_timeout 3s
 		health_fails 2
@@ -86,9 +86,27 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
 ```
 
 - 上游的书写顺序决定谁接流量：第一个健康的上游接全部流量，第二个只作热备。
+- 健康检查用 `/ready`（0.4.2 起，检查数据库与 Redis）；0.4.1 及以前只有 `/health`，它不访问依赖、恒为 200。
+- 两个实例重叠运行是安全的（0.4.2 起）：新实例启动时保留仍有进程租约的旧实例的并发槽位，旧实例退出后约 45 秒内清走残留；0.4.1 及以前新实例会清掉旧实例的槽位，重叠期内账号并发可能超限。
 - 切换只调整顺序后执行 `systemctl reload caddy`（平滑重载）。
 - 先让新实例通过本机健康检查，再调整顺序。
 - `encode` 不匹配 `text/event-stream`（现有配置如此），不得新增，避免 SSE 被缓冲或压缩。
+
+### 3.4 预上线主机核查与上线前配置（2026-10-19）
+
+两份生产就绪审查与对预上线主机的只读核查（地址与路径见仓库外私有清单）发现以下实例层面的问题。它们不在代码里，承接付费流量前按本节逐项处理并复核；生产主机按同样的清单核对一遍。
+
+| 项 | 核查所见 | 上线前要求 |
+|---|---|---|
+| 客户端真实 IP | 443 端口由 nginx `stream` 按 SNI 分流，四层转发到七层站点时没有带 PROXY 协议，应用记录的客户端 IP 全是 `127.0.0.1` | 让该站点在四层直接分流到一个 `listen ... ssl http2 proxy_protocol` 的七层监听，并设 `set_real_ip_from 127.0.0.1; real_ip_header proxy_protocol;`，`X-Real-IP`/`X-Forwarded-For` 用 `$proxy_protocol_addr`。改后用外部请求核对访问日志里的 `client_ip`。按 IP 的限流、IP 白名单、注册风控与审计都依赖它 |
+| 数据库连接池 | 应用 `DATABASE_MAX_OPEN_CONNS=256`、`MAX_IDLE=128`，PostgreSQL `max_connections=100` | 每实例上限 ×（蓝绿时的实例数 2）+ 其他客户端 ≤ `max_connections` 的约 80%。单库 100 时取 `MAX_OPEN=30`–`40`、`MAX_IDLE=10`（仓库 compose 的缺省是 50/10，按两实例重叠算仍偏大） |
+| 调度快照回源数据库 | `GATEWAY_SCHEDULING_DB_FALLBACK_ENABLED=true`，`MAX_QPS=0`（不限）、`TIMEOUT_SECONDS=0`（不额外收紧） | `TIMEOUT_SECONDS=5`；`MAX_QPS` 按实例流量设上限（例如峰值 RPS 的 1.5 倍），避免 Redis 快照失效时把全部选号压到数据库 |
+| 健康检查 | 容器与反代只用 `/health`（恒 200） | 0.4.2 起反代主动健康检查与外部监控用 `/ready`；容器健康检查保持 `/health` |
+| 备份与恢复 | 没有该网关的定时备份，只有升级时的本机快照；`archive_mode=off` | 先定 RPO/RTO；至少每日异机备份数据库（或与生产一样用 pgBackRest 加对象存储做 PITR），Redis 与应用数据目录随同；做一次恢复演练并记录 |
+| 告警 | 告警规则开启，但 SMTP 未配置 | 配置邮件（或其他通知渠道）并实际触发一次告警确认送达 |
+| 主机容量 | 4 核、3.8 GiB 内存，与多套其他服务共用，swap 已在使用 | 承接付费流量前给应用与数据库留足内存（或迁到独立主机），并为容器设内存上限，避免与其他服务互相挤占 |
+| 业务验收 | 1 个用户、0 个 API Key、0 条用量，份额策略 0 行 | 用拟上线制品建测试 Key，按 staging-validation 跑正常请求、失败换号、断开计费、并发满载、数据库与 Redis 故障恢复；份额调度先在代表性分组跑影子模式对照，再逐组启用 |
+| 部署专用插件宿主补丁 | 实例运行的是 0.4.1 加部署专用的插件宿主补丁（不在本仓库，带部署专用迁移） | 上线版本须把该补丁重新应用到 0.4.2 源码，跑补丁自带的测试与插件就绪检查，固定并记录镜像 digest；部署专用迁移与官方迁移文件名不同、可共存，升级前核对 `schema_migrations` |
 
 ## 4. 部署顺序
 
@@ -106,15 +124,15 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
    - 待核对任务能正常收敛。
 3. 0.0.17 与 xy2api 0.3.0 兼容，可以独立运行观察。
 
-### 4.2 xy2api 0.4.0（蓝绿）
+### 4.2 xy2api 0.4.x（蓝绿）
 
 1. 在生产部署目录下新建 `compose.green.yaml`：
-   - 镜像固定为 `ghcr.io/liulixin-lex/xy2api:0.4.0@sha256:<正式 digest>`；
+   - 镜像固定为 `ghcr.io/liulixin-lex/xy2api:<版本>@sha256:<正式 digest>`（0.4.2 起建议的上线版本；0.4.2 没有新增迁移）；
    - 容器名取 blue 容器名加 `-green` 后缀，端口 `127.0.0.1:<GREEN_PORT>:8080`（与 blue 错开）；
    - 环境文件、挂载、网络与当前实例相同。
 2. 启动 green。0.4.0 启动时执行迁移 272–277，全部只追加（277 只删除 276 种下的两条余额告警规则），0.3.0 实例可以继续服务。
    - 观察迁移日志与耗时；
-   - `curl -fsS 127.0.0.1:<GREEN_PORT>/health` 返回 200。
+   - `curl -fsS 127.0.0.1:<GREEN_PORT>/ready` 返回 200（0.4.1 及以前用 `/health`）。
 3. 冒烟（直连 `<GREEN_PORT>`，不经 Caddy）：
    - 管理员登录；
    - `GET /api/v1/admin/settings/gateway-resilience` 返回缺省值；

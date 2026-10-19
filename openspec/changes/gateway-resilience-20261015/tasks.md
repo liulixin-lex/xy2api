@@ -392,6 +392,30 @@
 - [x] 测试服务器（候选 `d488d2b5d`，应用自报 `XY2API 0.4.1`）：`stg-cf` 站点去掉 Caddy 标记（只保留删除客户端自带的 `X-XY-Edge`）后，KA-1..9、CF-1..6、ERR-1..4 共 19/19 通过。经真实 Cloudflare 的 CF-1、CF-4 第一次心跳在 15.1 秒、共 14 次，150.7 秒完成（穿过 125 秒切断）；直连与内部请求（CF-2、CF-5、CF-6、KA-2）没有心跳。验证后 Caddy 片段已恢复原样。
 - [x] PR #103 头 `7f112a981` 两组 18/18 全绿后常规 merge 为 `edea0d493`（#101、#99、#98 随之标为已合并），main CI 与安全扫描全绿。annotated `v0.4.1`（对象 `7dbdbccd9`）→ `edea0d493`；Release run 39126008209 成功。6 个附件共 198,163,198 字节，shasum 与 openssl 两种 SHA-256 均与 checksums.txt 一致；五个平台二进制 `vcs.revision=edea0d493`、`vcs.modified=false`、embed 构建，darwin_arm64 自报 `XY2API 0.4.1 (Sub2API compatibility: 0.2.15)`；GHCR index `sha256:baa0e4461e00…` 含 linux/amd64 与 linux/arm64，标签正确；prerelease=false，latest、0、0.4 指向 0.4.1，0.3 仍为 0.3.0。正式镜像在测试服务器空库全新安装：启动 2.3 秒、324 条迁移，health、首页与 6 个静态资源、`/auth/me` 均 200。
 
+## 0.4.2（2026-10-19，生产就绪审查修复）
+
+> 用户 2026-10-19 要求：读前序开发与评审会话、两份审查报告（仓库外），核实预上线主机的真实情况，规划并解决问题，使其具备上线条件。逐条对照代码核实的结论见 design §19；预上线主机的核查与上线前配置见 runbook §3.4。每项先写失败用例、确认在修复前失败，再修复。推送、PR、发版与预上线主机的部署、配置改动等待用户授权。
+
+- [x] R01 余额暂停写不进更长的软冷却：按罚档写入（仓储 `SetTempUnschedulableTiered`，计数 403 冷却同样按罚档写），硬罚替换任意长度的软冷却并保留较晚的结束时间，软冷却不覆盖仍在生效的硬暂停（`3dca0fa4e`）。用例 `TestBalancePauseReplacesLongerSoftCooldown`、`TestSoftCooldownKeepsActiveBalancePause`、`TestSoftCooldownStillExtendsSoftCooldown`；集成 `TestAccountRepositoryTieredTempUnschedulable`；SQL 在本机 PostgreSQL 18 实测。推广到全部调用方（`ba4f5586c`，旁路审查）：`failure` 开启时仓储 `SetTempUnschedulable` 对约 20 处调用方按罚档写入；硬罚替换软冷却时用自己的结束时间，只有余额暂停保留较晚的结束时间（取舍见 design §3.4：短硬罚结束时软冷却的回避也结束，下一次 403 重新计数）；余额暂停被更长的硬暂停挡住时不再记日志、不发通知。用例 `TestShortHardPauseKeepsItsOwnEndOverASoftCooldown`。
+- [x] R02 解除冷却的读后写竞态：`ClearTempUnschedulableIf` 只清读到的那一次冷却（`3dca0fa4e`）。用例 `TestLiftTransientCooldownKeepsPauseWrittenAfterRead`。
+- [x] P1-C 静默 OpenAI 上游不换号：首输出守卫启用且客户端尚无输出时，停滞检测让给守卫（`8db87397c`）。用例 `TestSilentOpenAIUpstreamFailsOverAtTheFirstOutputTier`、`TestStallAfterOutputStillEndsOpenAIStream`。
+- [x] R10 停滞标记失败回合（`8db87397c`）。用例 `TestStallMarksTheTurnFailed`。
+- [x] R09 末位兜底派发前复核所选账号（四条路径，份额经执行器 `verify`，`262c937bf`）。用例 `TestGatewayLastResortSkipsAccountsDisabledAfterTheGroupListWasCached`、`TestGatewayLastResortServesTheStillSchedulableAccount`、`TestOpenAILastResortSkipsAccountsDisabledAfterTheGroupListWasCached`（两种调度）。
+- [x] R07 唯一候选按本请求判断（模型支持、模型限流、本请求已失败，`7cd97a3c4`）。用例 `TestSoleCandidateCountsOnlyAccountsThatCanServeTheRequest`。
+- [x] R06 会话失败窗口按账号（`d6a1af51b`）。用例 `TestSessionFailureWindowIsPerAccount`（miniredis）；Lua 在本机 Redis 8.10 实测（旧脚本 2、新脚本 1）。
+- [x] R05 快速失败按路由与分组区分（`48e4152f9`）。用例 `TestFastFailReplaysOnlyTheTrippingRoute`。
+- [x] R08（F8）续链重放只认指向续链的应答并计入预算（`4f1e6ac98`）。用例 `TestOpenAICompatContinuationRejected`（补充参数错误）、`TestForwardAsAnthropic_ParameterErrorIsNotReplayedWithoutContinuation`、`TestForwardAsAnthropic_GuessedReplayNeedsRoomInTheBudget`；`TestForwardAsAnthropic_ContinuationStaysOnWhenTheReplayFailsToo` 改用笼统文案。
+- [x] R03 所有流式路径的开场事件不算送达（送达写入器判读，`f8bda6ff8`、`64bd87ee1`）。用例 `TestSSEOpeningEventsAreNoDelivery`、`TestSSEDeliveryCountsUnknownAndErrorBlocksAsContent`、`TestSSEDeliveryHandlesSplitWritesAndCRLF`、`TestNonSSEResponsesKeepTheByteCount`、`TestMessagesConversionClientLeavingAfterOpeningEventsIsNotCharged`（审查的复现）、`TestOpeningEventsOnlyDisconnectCancelsUpstream`（真实连接）；`TestDeliveryWriterExcludesHeartbeats` 与部分输出夹具按新口径更新。
+- [x] 跨进程槽位误清理（继承问题，蓝绿切换时出现）：进程租约（`ba80a1e40`）。用例 `TestStartupCleanupKeepsSlotsOfLiveProcesses`、`TestStartupCleanupAloneDropsOtherPrefixesAndWaits`；新清理 Lua 在本机 Redis 8.10 实测。
+- [x] `/ready` 就绪检查（`a94d56bef`）。用例 `internal/pkg/readiness`。
+- [x] 未送达记录有界写入并重试一次（`2530aa07e`）。用例 `TestUndeliveredRecordRetriesOnce`、`TestUndeliveredRecordWritersAreBounded`。
+- [x] F2 跟进：末位兜底只因会话上限失败时不写负缓存（`cb70abedf`）。用例 `TestLastResortSessionLimitIsNotCachedForTheGroup`（两种调度）。
+- [x] OpenAI 按模型瞬时屏蔽期间保留会话绑定（`7ce66dd57`）。用例 `TestOpenAIRuntimeBlockedOwnerKeepsTheSessionBinding`（旧路径与高级调度器）。
+- [x] R04 非流式预算的范围：按设计不截断进行中的单次非流式请求，design §6.1 与管理员文档写明。
+- [x] 文档：design §3–§9 就地修订与 §19、管理员文档、runbook §3.4、上游同步登记（`required_literals`）。
+- [ ] 本机全量验证与 CI 门禁；版本 0.4.2；推送、PR、发版（待授权）；预上线主机按 runbook §3.4 部署与配置（待授权）。
+- 不做（理由见 design §19）：韧性设置的版本校验、高级 JSON 的前端深层校验、输出 P99 与缓存比估算的改造、长期多活。
+
 ## 后续（只登记，不在 0.4.0 实施）
 
 > 份额调度在 0.4.1 合并前不在任何生产分组启用；0.4.0 已修 F3，若要提前启用需用户单独确认。
@@ -401,12 +425,12 @@
 - [ ] 份额策略配置精简（每组 22 项减到约 10 项，审查 5.1；`DecodePolicy` 对已删字段改为接受并忽略）；韧性设置精简（约 60 项减到约 35 项，审查 5.2 前四项）。
 - [x] F6 余额耗尽两处“真相”（随余额精简取消：不再有余额记录）。
 - [x] F13 管理员复检改为显式时间戳（随余额精简取消：没有复检）。
-- [ ] F8 §9.8 续链重放只匹配已知的中转笼统文案；F9 影子模式统计对话锚点覆盖率并写明切换冷启动；F10 删除份额纠偏；F11 缓存归因只对影子与份额分组运行；F15 Warn 级逐请求事件改 Info 加计数或按分组限速；F16 输出 P99 改增量直方图；F17 预览改用只读 `ScanBindings`；F18 软/硬档阈值统一；F19 删除死常量与单值字段。
+- [ ] F8 §9.8 续链重放只匹配已知的中转笼统文案（0.4.2 已完成，见“0.4.2” R08）；F9 影子模式统计对话锚点覆盖率并写明切换冷启动；F10 删除份额纠偏；F11 缓存归因只对影子与份额分组运行；F15 Warn 级逐请求事件改 Info 加计数或按分组限速；F16 输出 P99 改增量直方图；F17 预览改用只读 `ScanBindings`；F18 软/硬档阈值统一；F19 删除死常量与单值字段。
 - [x] `relay_keepalive` 补齐原生 Chat Completions 路径（评审复核时提出；已提前在 0.4.0 完成，见 A2）：`streamRawChatCompletions` 与两条 chat fallback 的 `scanCCStream` 传空存活记录，这些路径没有停滞检测、行为无误，只是丢弃的伪保活帧不计数。改为按账号传入存活记录。
-- [ ] 未送达口径补齐其他流式路径（评审 A3，用户已确认前提：不改计时、不增加上游成本）：用 `NoteDeliveryHeartbeat` 把首个真实内容前的开场事件与心跳登记为不算送达，只改计数，不得压住或推迟开场事件；每条路径一个用例。路径：Chat Completions 兼容转换（收到 `response.created` 时的角色块、`:` 心跳）；Messages 兼容转换（`message_start`；`ping` 会置 `clientOutputStarted`）；Anthropic 原生与直通（`gateway_upstream_response.go`、`gateway_anthropic_passthrough.go`、`openai_gateway_messages_anthropic_native.go`）；Grok `/v1/responses`（不暂存，`: ping`）；图片 SSE（`openai_images.go`、`openai_images_responses.go`）。
-- [ ] xhigh/max 档位遇完全静默的上游不换号（P2，非回归，生产核查第 5 节）：首输出前停滞从最后读到一行起算 180 秒，早于 200/220 秒档位；OpenAI 路径的停滞只报错、不换号（只有 Grok 换号），还冷却账号、计会话连败。修法二选一：首输出前停滞在 OpenAI 路径也返回可换号错误（与 Grok 一致），或档位不超过停滞阈值。用例：拿到响应头后完全静默，xhigh、max 各一例，断言换号。生产 0.3.0 首输出前停滞 48 小时 26 次。
-- [ ] OpenAI 按模型瞬时屏蔽期间保留会话绑定（design §4.2 例外）：两条 OpenAI 粘性路径的软罚判断接入 `resilienceOpenAIPenaltyOf`，需改上游文件两处已登记钩子；Explain 与无号 `Retry-After` 同样看不到该屏蔽。
-- [ ] F2 判据补全（审查会话复核时提出）：判据只看账号罚则。组内账号全部软罚、末位兜底只因新会话撞上账号会话数上限而失败时，结果仍写入负缓存，已绑定会话最多收到 2 秒的 503。范围很窄；修法是末位兜底失败原因为会话上限时不写负缓存。
+- [x] 未送达口径补齐其他流式路径（评审 A3，用户已确认前提：不改计时、不增加上游成本；0.4.2 完成，改由送达写入器统一判读，见“0.4.2” R03）：用 `NoteDeliveryHeartbeat` 把首个真实内容前的开场事件与心跳登记为不算送达，只改计数，不得压住或推迟开场事件；每条路径一个用例。路径：Chat Completions 兼容转换（收到 `response.created` 时的角色块、`:` 心跳）；Messages 兼容转换（`message_start`；`ping` 会置 `clientOutputStarted`）；Anthropic 原生与直通（`gateway_upstream_response.go`、`gateway_anthropic_passthrough.go`、`openai_gateway_messages_anthropic_native.go`）；Grok `/v1/responses`（不暂存，`: ping`）；图片 SSE（`openai_images.go`、`openai_images_responses.go`）。
+- [x] xhigh/max 档位遇完全静默的上游不换号（P2，非回归，生产核查第 5 节；0.4.2 完成，采用第一种修法的等价形式：输出前停滞让给首输出守卫，见“0.4.2” P1-C）：首输出前停滞从最后读到一行起算 180 秒，早于 200/220 秒档位；OpenAI 路径的停滞只报错、不换号（只有 Grok 换号），还冷却账号、计会话连败。修法二选一：首输出前停滞在 OpenAI 路径也返回可换号错误（与 Grok 一致），或档位不超过停滞阈值。用例：拿到响应头后完全静默，xhigh、max 各一例，断言换号。生产 0.3.0 首输出前停滞 48 小时 26 次。
+- [x] OpenAI 按模型瞬时屏蔽期间保留会话绑定（design §4.2 例外；0.4.2 完成粘性保留，Explain 与无号 `Retry-After` 仍看不到该屏蔽，已写入管理员文档已知限制）：两条 OpenAI 粘性路径的软罚判断接入 `resilienceOpenAIPenaltyOf`，需改上游文件两处已登记钩子；Explain 与无号 `Retry-After` 同样看不到该屏蔽。
+- [x] F2 判据补全（审查会话复核时提出；0.4.2 完成）：判据只看账号罚则。组内账号全部软罚、末位兜底只因新会话撞上账号会话数上限而失败时，结果仍写入负缓存，已绑定会话最多收到 2 秒的 503。范围很窄；修法是末位兜底失败原因为会话上限时不写负缓存。
 - [ ] CI 必测门禁合并为一个按清单驱动的脚本。
 - [x] 项目记忆归档并加大小上限（2026-10-17 提前完成：主文件实为 454 KB，已结束任务的历史原样移入 `docs/PROJECT_MEMORY_ARCHIVE.md`，主文件 192 KiB 上限与日志结构由 `tools/check_docs_consistency.py` 检查，规则见 AGENTS.md）。
 

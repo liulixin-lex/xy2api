@@ -94,7 +94,7 @@
 > 2026-10-17 用户决定：经常给上游充值，不需要余额的监控、告警与探测，只要求简单、可预期。RC 中的四态状态机（`OK`/`SUSPECT`/`EXHAUSTED`/`RECOVERING`）、复检探测、恢复期并发上限、余额告警与“长期未恢复”通知全部取消。复核时还发现 RC 实现的两处缺陷：余额告警永远不会触发（`ListOpsAccountsForStats` 不读 `extra`，指标恒为 0）；探测查不出结论时暂停只延不缩，中转不支持余额接口、生成探测又失败时欠费账号一直不放回。
 
 - **识别不变：** §2 的 `BALANCE`（错误码、缺省关键字含 `insufficient user balance`、`failure.balance_keywords_extra`）。适用范围不变：API Key 类账号；CN 供应商、OpenCode Zen/Go、Command Code、Cline 与 Antigravity 走各自原有的余额路径。余额类 403 不走“403 计数、第 3 次置错”。
-- **处置：** 识别到余额不足就把账号暂停 `balance.pause_seconds`（缺省 300 秒，30–3600）：`SetTempUnschedulable`，原因 `balance:exhausted: <证据>`。暂停期间按硬罚处理，不参与选号，也不作末位兜底，不做同号重试。到期后自动放回，由真实请求重试；仍然欠费就再暂停同样时长，不递增。`SetTempUnschedulable` 只延长不缩短，更长的其他暂停（403 冷却、管理员规则）保留。
+- **处置：** 识别到余额不足就把账号暂停 `balance.pause_seconds`（缺省 300 秒，30–3600）：`SetTempUnschedulable`，原因 `balance:exhausted: <证据>`。暂停期间按硬罚处理，不参与选号，也不作末位兜底，不做同号重试。到期后自动放回，由真实请求重试；仍然欠费就再暂停同样时长，不递增。写入按罚档进行（0.4.2，审查 R01，仓储 `SetTempUnschedulableTiered`）：仍在生效的软冷却（`transient:`、403 计数冷却）无论多长都改记为余额暂停，结束时间取两者较晚者；更长的硬暂停（凭据、管理员规则）保留，更短的被延长。0.4.0 用的 `SetTempUnschedulable` 只延长不缩短，更长的 403 冷却会让余额暂停写不进去，账号仍按软罚参与末位兜底。
 - **入口：** HTTP 错误应答、流内余额失败（`ApplyResilienceOutcome` 的 `BALANCE`）、Grok API Key 带余额字样的 429（§18.1）、402（只会是积分不足，不落到永久置错的默认分支）。不再区分弱信号：429 加近期成功也一样暂停。
 - **手动放回：** 账号列表的“恢复状态”（`DELETE /api/v1/admin/accounts/:id/temp-unschedulable`）立即结束暂停，不新增界面。
 - **无号应答：** 单号分组暂停期间返回 503，`Retry-After` 取暂停的剩余时间（§9.1，夹到 2–30 秒）。
@@ -120,13 +120,15 @@
 
 - `cooldown` 默认 30 秒；上游正文或头部给出 `retry_after` 时，取 min(retry_after, `retry_after_cap_seconds`=120)。
 - 冷却只是软罚：单号组仍可通过末位兜底使用该账号（§4.3）。
+- 软冷却不覆盖仍在生效的硬暂停（余额、凭据、管理员规则），只延长更短的软冷却；计数 403 冷却同样按罚档写入（总开关或 `failure` 关闭时回到 0.3.0 的写法）。成功服务后解除冷却时，只清除读取到的那一次冷却（原因与结束时间都相同，`ClearTempUnschedulableIf`），期间新写入的暂停保留（0.4.2，审查 R02）。
+- **全部调用方按罚档写入（0.4.2，审查 R01 的推广）：** 除韧性层自己的暂停外，还有约 20 处调用方（临时不可调度规则、令牌刷新、传输错误、健康熔断、CN 供应商余额、Command Code 消费上限、Antigravity 等）直接写临时不可调度。`failure` 开启时，仓储的 `SetTempUnschedulable` 对它们一律按罚档写入；关闭时为 0.3.0 的只延长写法。硬罚替换仍在生效的软冷却时用**它自己的结束时间**，只有余额暂停保留两者中较晚的结束时间。取舍：短硬罚（如 30 秒的传输错误）替换 10 分钟的 403 计数冷却后，硬罚一结束，软冷却的回避也随之结束。这是偏宽松的处理，换来单号组不会以硬罚身份被停满 10 分钟；403 若仍在，下一次 403 会重新计数冷却。用例 `TestShortHardPauseKeepsItsOwnEndOverASoftCooldown`、集成 `TestAccountRepositoryTieredTempUnschedulable`。
 - OpenAI 系账号的 5xx 沿用现有的按模型瞬时屏蔽（`openai_account_model_transient.go`），不整号冷却；只有 API Key 中转明确给出 `retry_after`（说明整站不可用）时才整号冷却。已输出后失败的阈值冷却（§7.6）例外，对所有非池模式账号整号软冷却。
 
 ## 4. 选号与会话失败处理（D4、D5）
 
 ### 4.1 会话失败计数
 
-Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_id`，值为失败次数，TTL `streak_window_seconds`（600 秒）。计数规则：
+Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_id`，值为失败次数；每个账号另有字段 `e:<account_id>` 记录自己的窗口结束时间（`streak_window_seconds`，600 秒），窗口结束后计数从 1 重新开始，账号自己的失败把窗口顺延，同一会话其他账号的失败不影响它（0.4.2，审查 R06：0.4.0 每次失败都刷新整个 Hash 的 TTL，B 的失败会让 A 已过期的计数继续有效）。键的 TTL 取最新的窗口。计数规则：
 
 - 只对计入失败的类别（`RATE_LIMIT`、`TRANSIENT`、`FIRST_OUTPUT_TIMEOUT`、`STALL`）递增；
 - 所有换号循环（共用循环与 OpenAI 各路由自有的循环）每次失败尝试都经同一入口 `resilienceAttemptFailed` 上报一次，同时扣减预算；
@@ -146,7 +148,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 | 客户端取消、客户端错误、本站策略拒绝 | 不动绑定，也不计数 | — |
 | 带 `previous_response_id` 的续接请求 | 遵守现有所有权约束，不改绑 | 原有 |
 
-**原版调度的语义调整**（钩子位于 `openai_account_scheduler.go` 的 `selectBySessionHash`、`openai_gateway_scheduling.go` 的旧路径（高级调度器关闭时，即缺省情况）两处粘性读取，以及 `gateway_scheduling.go` 中对应的粘性路径）：绑定账号处于软罚时，**不再清除绑定**，只在本次请求跳过它（临时溢出），本请求实际服务的账号也不写入绑定（OpenAI 粘性写入处统一检查）；硬状态仍按原样清除。例外：OpenAI 的按模型瞬时屏蔽（`openai_model_transient_state`）只在进程内、不写账号行，两条 OpenAI 粘性路径在屏蔽期间仍按上游逻辑清除绑定（0.4.1 跟进）。
+**原版调度的语义调整**（钩子位于 `openai_account_scheduler.go` 的 `selectBySessionHash`、`openai_gateway_scheduling.go` 的旧路径（高级调度器关闭时，即缺省情况）两处粘性读取，以及 `gateway_scheduling.go` 中对应的粘性路径）：绑定账号处于软罚时，**不再清除绑定**，只在本次请求跳过它（临时溢出），本请求实际服务的账号也不写入绑定（OpenAI 粘性写入处统一检查）；硬状态仍按原样清除。OpenAI 的按模型瞬时屏蔽（`openai_model_transient_state`）只在进程内、不写账号行；0.4.2 起两条 OpenAI 粘性路径用 `resilienceOpenAIPenaltyOf` 判断绑定账号，屏蔽期间同样保留绑定（0.4.0 时会改绑）。
 
 **份额调度**通过 `shareMissingBoundCandidate` 与候选构造钩子，把软罚账号表示为 `Eligible=false` 并带 `RecoverAt`，由现有的 `softSpill` 逻辑（`soft_spill_max_seconds`，缺省 300 秒）决定保留绑定、临时溢出。会话回避集中的账号对该会话标为 `Excluded`，原因 `resil_failure_streak`，改绑决策也记为 `resil_failure_streak`。余额耗尽（`balance:exhausted`）的账号原因为 `balance_exhausted`、`RecoverAt` 为零，走改绑；其他已有的临时不可调度原因保持 0.3.0 的处理，避免绑定释放过严（Q8）。末位兜底选中软罚账号时，在该组份额统计中记 `last_resort_soft`。兜底分组的转投与切回不是份额放置决策，计入韧性指标 `fallback_group`、`fallback_return`。
 
@@ -164,6 +166,8 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
    - **OpenAI 按模型瞬时屏蔽：** 上游连续 5xx 后按账号与模型屏蔽 10 秒、再 45 秒，只在进程内、账号行上看不到。末位兜底按屏蔽结束时间把只被它挡住的账号视为软罚（`resilienceOpenAIPenaltyOf`），否则单号 OpenAI 分组在屏蔽期间整组无号（测试服务器复现）。Codex 票据门禁不是罚则，仍是门禁。
    - **份额分组（审查 F3）：** 末位兜底是份额计划的“放宽一轮”：软罚账号与只被会话回避的健康账号视为可用（原因 `last_resort_soft`），交给 `sharesched.Plan`，遵守层级、排空、权重、HRW 与缓存域，由份额执行器取槽（含会话上限与 Codex 自适应并发）。不走模型路由优先；不写决策样本，只计 `last_resort_soft`。绑定账号软罚但正在饱和时，按份额等待预算先等它再溢出。
 3. 末位兜底请求不受单次首输出超时约束，只受总预算约束（§6）。
+4. **派发前复核（0.4.2，审查 R09）：** 候选来自 2 秒的分组账号列表，管理员的停用、删除、移组并不使它失效。选中的账号在取槽与派发前按 id 重读一次（只在末位兜底这条少见路径上多一次查询），已停用、删除、移出分组或进入硬罚的跳过并丢弃该组的列表缓存；份额分组经执行器的 `verify` 钩子做同样的复核。重读失败时按列表中的账号继续。
+5. **会话上限（F2 跟进）：** 候选只因新会话撞上账号会话数上限而全部失败时，请求记 `LastResortSessionLimited`，这个“无号”只对新会话成立，不写负缓存（§9.2），已绑定会话照常服务。
 
 硬状态账号永不参与兜底。末位兜底计入原因码 `last_resort_soft`，并写 ops 统计；兜底账号成功服务后解除其瞬时冷却，回到正常选号。若这一步仍然没有候选，才返回“无可用账号”。
 
@@ -203,7 +207,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 | 字段 | 含义 |
 |---|---|
 | `MaxAttempts` | 默认 4，包括首次尝试、换号与同号重试 |
-| `PreOutputDeadline` | 文本请求为开始时间 + 240 秒；图片端点与异步图片任务不设 |
+| `PreOutputDeadline` | 文本请求为开始时间 + 240 秒；图片端点与异步图片任务不设。非流式请求的“首输出”就是整个响应：截止时间只决定能否再发起新的尝试，进行中的单次非流式请求不按它截断（审查 R04 的取舍：截断仍在生成的长回答只会多一次失败、多一份上游成本；单次请求仍受上游与客户端各自的超时约束） |
 | `Attempts`、`SameAccountRetries[account]` | 已用次数 |
 | 请求上下文 | 客户端或转发上下文取消后不再允许新的尝试（耗尽原因 `canceled`） |
 
@@ -284,13 +288,14 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
   - 分档按生产 7 天首字分布校准（tasks 0.4）：原 60/120/180 秒会误切约 1.3% 的成功请求，现各档超出比例约 0.10%–0.26%。
 - **Anthropic、Gemini：** 新增“首个上游事件或首块”超时，默认 90 秒。
 - 取消“首输出超时只换 1 次”的限制（`openAIFirstOutputFailoverExhausted`），改由预算约束。
-- **最后一个可用候选**（没有其他健康候选、分组内只有这一个可用账号，或已是末位兜底）不设单次超时，只受 `PreOutputDeadline` 约束。
+- **最后一个可用候选**（没有其他健康候选、分组内只有这一个可用账号，或已是末位兜底）不设单次超时，只受 `PreOutputDeadline` 约束。“可用”按本请求判断（0.4.2，审查 R07）：其他账号不支持请求的模型、该模型被硬限流，或已在本请求中失败的，不算备选。
 - 图片端点与异步图片任务不适用。
 
 ### 7.5 停滞判定（G2 修复）
 
 - 把间隔检测改为以 `min(T/4, 5s)` 为周期检查 `lastRead`，使误差不超过 5 秒。位置：`openai_gateway_response_handling.go` 约 190、915；`gateway_upstream_response.go` 约 782、1120。
-- 文本流已输出后的停滞阈值为 `text_stall_seconds`（120 秒），明显小于 Codex 的 300 秒。到点后按 §7.6 结束，对账号施加 `STALL` 软冷却，并计入会话失败（§4.1，每个请求每个账号一次）。
+- 文本流已输出后的停滞阈值为 `text_stall_seconds`（120 秒），明显小于 Codex 的 300 秒。到点后按 §7.6 结束，对账号施加 `STALL` 软冷却，并计入会话失败（§4.1，每个请求每个账号一次）；同时标记失败回合，停滞的 200 不清零回合计数（0.4.2，审查 R10）。
+- **输出前（0.4.2，审查 P1-C）：** OpenAI 路径输出前的停滞阈值沿用 0.3.0 的 `stream_data_interval_timeout`（180 秒），早于 xhigh/max 的 200/220 秒档位，上游给出响应头后完全静默时请求以终止帧结束、不换号（只有 Grok 换号）。首输出守卫已启用且客户端尚无输出时，停滞检测让给守卫：到档位时按首输出超时换号（不冷却账号，与 §2 一致）。守卫未启用（关闭预算且未配置 0.3.0 首输出超时）时保持原行为。
 - 图片流维持 `image_stream_data_interval_timeout`（900 秒）；OAuth Responses 生图期间豁免文本阈值。
 
 ### 7.6 已提交后的失败（D17、G3）
@@ -340,7 +345,9 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 | `partial` | 已写出语义字节，但未完成 |
 | `complete` | 正常完成 |
 
-**口径的实际范围（0.4.0，评审 A3）。** 首包前保活心跳与排队 ping 在所有路径都不算语义字节。流内保活注释只在 OpenAI `/v1/responses` 流式路径（含透传）扣除，因此“首个语义输出前断开不计费”只在这条路径完整成立。其他流式路径在首个真实内容前就会写出开场事件或流内心跳，这些字节目前算已送达，此后断开按 `partial` 处理：Chat Completions 兼容转换（收到 `response.created` 时的角色块、`:` 心跳）、Messages 兼容转换（`message_start`；`ping` 会置 `clientOutputStarted`）、Anthropic 原生与直通（`gateway_upstream_response.go`、`gateway_anthropic_passthrough.go`、`openai_gateway_messages_anthropic_native.go`）、Grok `/v1/responses`（不暂存，`: ping`）、图片 SSE（`openai_images.go`、`openai_images_responses.go`）。非流式与图片 JSON 以响应体是否写出为准。0.4.1 用 `NoteDeliveryHeartbeat` 把这些字节登记为不算送达：只改计数，不压住、不推迟开场事件，不改计时，不增加上游成本（tasks“后续”）。
+**口径（0.4.2，审查 R03；取代下段 0.4.0 的说明）。** 送达写入器（`deliveryWriter`）对 `text/event-stream` 响应逐块判读，直到第一个内容块：只有 SSE 注释行、`ping`、`keepalive`、Anthropic `message_start` 与空的 text/thinking `content_block_start`、Responses `response.created`/`in_progress`/`queued`、只带角色的 Chat 分块算开场事件；其余（含错误事件、`[DONE]`、`tool_use` 块、未知事件、超过 64 KiB 仍未结束的块）一律算内容，所以判读不了的形式只会回到字节计数。之后不再判读。送达探针在流式响应写出内容前返回 0，写出后返回字节数（至少为 1）；非流式响应仍按字节计数。只改计数：事件照常、按时写出，换号判断仍用原有的写出字节扣除保活后的计数。覆盖全部流式路径，不需要在各路径登记字节（原计划的 `NoteDeliveryHeartbeat` 逐点登记不再需要）。
+
+**0.4.0 的口径（评审 A3，已由上段取代）。** 首包前保活心跳与排队 ping 在所有路径都不算语义字节。流内保活注释只在 OpenAI `/v1/responses` 流式路径（含透传）扣除，因此“首个语义输出前断开不计费”只在这条路径完整成立。其他流式路径在首个真实内容前就会写出开场事件或流内心跳，这些字节目前算已送达，此后断开按 `partial` 处理：Chat Completions 兼容转换（收到 `response.created` 时的角色块、`:` 心跳）、Messages 兼容转换（`message_start`；`ping` 会置 `clientOutputStarted`）、Anthropic 原生与直通（`gateway_upstream_response.go`、`gateway_anthropic_passthrough.go`、`openai_gateway_messages_anthropic_native.go`）、Grok `/v1/responses`（不暂存，`: ping`）、图片 SSE（`openai_images.go`、`openai_images_responses.go`）。非流式与图片 JSON 以响应体是否写出为准。原计划在 0.4.1 用 `NoteDeliveryHeartbeat` 逐点登记这些字节，0.4.2 改为由送达写入器统一判读实现（上段），约束不变：只改计数，不压住、不推迟开场事件，不改计时，不增加上游成本。
 
 ### 8.2 处理
 
@@ -384,6 +391,7 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 - **动作：** 之后窗口内同一模型的请求在选号与内容审计之前就直接返回**同一应答**（状态、正文、剩余的 `Retry-After` 均不变）；同一 Key 对其他模型的请求照常处理。只有已触发时才读取请求体中的 `model`（Gemini 取路径中的模型）。
 - **豁免：** 异步任务轮询、capabilities、DELETE、`/v1/usage`、`/v1/models`、幂等重放。
 - **存储：** 进程内滑动窗口，多实例时各自计数，属于尽力而为。
+- **作用域（0.4.2，审查 R05）：** 计数与重放都按请求路径与 Key 的分组区分（`scope = path|group`，在可用性兜底改动分组之前取值）。强制平台的路由（`/antigravity/...`）、另一端点或 Key 改组前的 503 不回答其他路由。
 - 快速失败不计入账号失败，单独计数。
 
 ### 9.4 上游余额对用户隐藏（D13-1）
@@ -421,7 +429,8 @@ Codex 对带 `Retry-After` 的 5xx 没有次数上限：传输层每轮 5 次请
 
 Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网关按会话附带上一轮的 `previous_response_id`，只发送最后一轮输入。真实多账号中转站会把上一轮响应存在另一个上游账号上，再次请求时返回笼统的 400（如 “Upstream request failed”“The request could not be processed”），而不是可识别的“previous response not found”。0.3.0 只在可识别时才去掉续链重试，于是该会话从第二轮起每轮都是 400；按 §2 这类 400 属于客户端错误，不换号。
 
-- 附带续链的请求收到 400/404/409/422，且不是完整重放同样会失败的错误（上下文超长、内容审核、图片、模型不存在）时，去掉续链按完整历史重放一次；
+- 附带续链的请求收到 400/404/409/422，且不是完整重放同样会失败的错误（上下文超长、内容审核、图片、模型不存在）时，去掉续链按完整历史重放一次。0.4.2 起（审查 R08、F8）只认指向续链的应答：404/409；文案提到 previous response 或 response id；400/422 上的笼统中转文案（单独的 “Upstream request failed”、“request failed”、“bad request”、含 “could not be processed”，或没有文案）。`error.param` 指名其他参数、或文案是具体的参数错误时不重放；
+- 按笼统文案猜测的重放计入请求预算的一次尝试（`ConsumeInPlaceRetry`），预算不允许时不重放、原样返回；可识别的“续链不存在/不支持”的重放只是撤销网关自己加的续链，预算用尽也照常重放；
 - 同时对该会话在该账号上关闭续链（与“上游不支持续链”相同，时长为原有粘性 TTL），后续轮次直接完整重放，不再先失败一次；若完整重放同样失败，说明是请求本身的错误，续链随即恢复；
 - 可识别的“续链不存在”仍按原逻辑只删除绑定。
 - 续链绑定表（进程内）原先只在查询时删除过期项，不再回来的会话会一直留在内存里；现在每写入 1024 次清扫一遍过期项。会话失败与回避标记同样每分钟清扫（浸泡中发现内存缓慢上升）。
@@ -655,3 +664,36 @@ Codex 压缩上下文时回放 `web_search_call` 却声明 `tools:[]`，ChatGPT 
 ### 18.6 需管理员处理
 
 渠道定价与白名单一致；单号分组补号或配置无号兜底分组；余额 403 累计置错的账号充值后手动恢复；加大 Caddy 日志保留；轮换设置中含明文凭据的代理地址。
+
+## 19. 生产就绪审查修复（2026-10-19，0.4.2）
+
+两份审查（“0.3.0→0.4.1 更新代码与生产就绪审查”与“份额调度与网关韧性生产就绪审查”，原文在仓库外）逐条对照代码核实后的处理。正文各节已按 0.4.2 修订，此处汇总：
+
+| 审查项 | 结论 | 处理（节） |
+|---|---|---|
+| R01 软罚的“更长”压过余额硬罚 | 属实 | 按罚档写入（§3.2、§3.4） |
+| R02 解除冷却与并发硬罚的竞态 | 属实 | 条件清除（§3.4） |
+| R03 开场事件算已送达 | 属实（tasks 已登记） | 送达写入器判读开场事件（§8.1） |
+| R04 非流式不受预算截断 | 属实，按设计 | 文档写明范围（§6.1） |
+| R05 快速失败跨路由重放 | 属实 | 按路由与分组区分（§9.3） |
+| R06 失败窗口整体续期 | 属实 | 按账号的窗口（§4.1） |
+| R07 唯一候选判断不看模型 | 属实 | 按本请求判断（§7.4） |
+| R08 续链重放过宽、不计预算 | 属实（F8 已登记） | 收窄并计入预算（§9.8） |
+| R09 末位兜底用旧快照派发 | 属实 | 派发前复核（§4.3） |
+| R10 停滞未标记失败回合 | 属实 | 停滞标记失败回合（§7.5） |
+| P1-C 静默上游不换号 | 属实（tasks 已登记） | 输出前停滞让给首输出守卫（§7.5） |
+| 跨进程槽位误清理（继承） | 属实 | 进程租约（下文） |
+| `/health` 恒 200 | 属实 | 新增 `/ready`（下文） |
+| 未送达记录尽力而为 | 属实 | 有界写入并重试一次（§8.2，管理员文档 §4.4） |
+| 负缓存窄范围污染（F2 跟进） | 属实 | 会话上限不写负缓存（§4.3） |
+| OpenAI 按模型屏蔽期间改绑 | 属实（tasks 已登记） | 保留绑定（§4.2） |
+| 韧性设置无版本校验 | 属实 | 暂不做：单管理员维护；管理员文档写明限制 |
+| 高级 JSON 前端校验浅 | 属实 | 暂不做：后端严格校验仍在，异常只影响页面显示 |
+| 输出 P99、缓存比估算 | 设计取舍 | 不改（F16 仍在后续） |
+| 进程内状态不跨实例 | 设计范围 | 文档写明：支持蓝绿重叠，长期多活另行评估 |
+| CDN 推断可由客户端触发 | 设计取舍（§7.1） | 不改；不得作为安全边界 |
+| 部署实例：连接池、降级限流、备份、告警、真实 IP | 实例配置 | runbook §3.4（预上线核查与上线前配置） |
+
+**并发槽位的进程租约。** 新进程启动时原先清掉所有不带本进程请求 ID 前缀的账号与用户槽位，以及全部等待计数（上游 Sub2API 的行为）。蓝绿切换时旧进程仍在服务，它的槽位被清掉后，账号与用户的并发可以超出上限，直到这些请求结束。0.4.2 起每个进程持有 Redis 租约 `concurrency:process_lease:<前缀>`（15 秒，每 5 秒续期）；启动清理保留仍有租约的进程的槽位，另有存活进程时不删共享的等待计数；周期清理（`slot_cleanup_interval`）在被保留的进程租约过期后再清一次它的残留，崩溃的进程约在租约加一个周期内（约 45 秒）被清理；单进程启动时与原来一样立即清理。
+
+**`/ready`。** `/health` 不访问任何依赖，只表示进程存活，仍用作容器健康检查；`/ready` 检查数据库（`PingContext`）与 Redis（`PING`），各 2 秒、并行，结果复用 1 秒，失败时 503 只列出失败项名称。供反向代理主动健康检查与外部监控使用。

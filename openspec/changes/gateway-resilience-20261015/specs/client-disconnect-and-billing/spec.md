@@ -9,7 +9,7 @@ Each request MUST track its delivery state:
 - `partial`: some semantic bytes written, but not complete.
 - `complete`.
 
-On the OpenAI `/v1/responses` stream path, including passthrough, in-stream keepalive comments MUST NOT count either, so the first semantic output decides. On the other streaming paths (Chat Completions and Messages conversions, Anthropic native and passthrough, Grok `/v1/responses`, image SSE), opening events and in-stream heartbeats written before the first real content count as delivered in 0.4.0; 0.4.1 registers them as heartbeats without holding back or delaying them.
+On every `text/event-stream` response the opening events and heartbeats written before the first content block MUST NOT count (0.4.2): SSE comment lines, `ping` and `keepalive` events, the Anthropic `message_start` and an empty text or thinking `content_block_start`, the Responses `response.created`, `response.in_progress` and `response.queued`, and Chat chunks that only announce the role. Every other block, including error events, `[DONE]`, `tool_use` blocks and unknown events, MUST count as content. The events MUST still be written unchanged and on time, and the failover checks MUST NOT use this classification. In 0.4.0 this held only on the OpenAI `/v1/responses` stream path.
 
 #### Scenario: Heartbeats only
 - **WHEN** a request has written SSE headers and pre-output keepalive heartbeats but no semantic event
@@ -22,6 +22,18 @@ On the OpenAI `/v1/responses` stream path, including passthrough, in-stream keep
 #### Scenario: Queued and pinged, then abandoned
 - **WHEN** a streaming request waits for an account slot long enough to receive pings, gets the slot and the client leaves before the upstream's first output
 - **THEN** the request is `undelivered`: the upstream is cancelled, it is not billed and an undelivered record is written.
+
+#### Scenario: Messages conversion wrote only opening events
+- **WHEN** the upstream of a Messages-to-Responses conversion sent only `response.created`, the gateway wrote `message_start` and pings, and the client leaves
+- **THEN** the request is `undelivered`: the upstream is cancelled and the request is not billed.
+
+#### Scenario: Content after the opening events
+- **WHEN** a stream wrote `message_start` and then a `content_block_delta` with text before the client leaves
+- **THEN** the request is `partial` and the bounded drain applies.
+
+#### Scenario: Unknown block
+- **WHEN** the first block after the opening events is an event type the gateway does not know
+- **THEN** it counts as content.
 
 ### Requirement: Undelivered requests are cancelled and not billed
 
@@ -65,6 +77,9 @@ These charges MUST be written to `usage_logs` with `billing_mode='undelivered_ab
 - **THEN** that request is billed at upstream cost and the user can see the charge.
 
 ### Requirement: Disconnect diagnostics
+
+Undelivered records MUST be written in the background by a bounded number of writers (16), each retried once after a short pause; a record that finds every writer busy is dropped and logged (`resilience.undelivered_record_dropped`). Billing MUST NOT depend on these records.
+
 
 For client disconnects, `ops_error_logs` MUST record:
 - `duration_ms`;

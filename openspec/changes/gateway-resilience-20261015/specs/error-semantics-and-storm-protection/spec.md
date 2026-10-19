@@ -48,7 +48,7 @@ Only a result that holds for every request of the group and model MAY be cached:
 
 ### Requirement: Per-key fast fail returns the identical response
 
-When one API key receives at least `errors.fast_fail.threshold` (default 10) identical 503 responses within `errors.fast_fail.window_seconds` (default 30 s), further requests of that key for the same model in the window MUST receive the same status, body and remaining `Retry-After` before account selection and content moderation; requests for other models MUST be processed normally. Identical means the same status, `error.type` and message.
+When one API key receives at least `errors.fast_fail.threshold` (default 10) identical 503 responses within `errors.fast_fail.window_seconds` (default 30 s), further requests of that key for the same model, path and group in the window MUST receive the same status, body and remaining `Retry-After` before account selection and content moderation; requests for other models, another path (a forced-platform route such as `/antigravity/...`, another endpoint) or after the key moved to another group MUST be processed normally (0.4.2). Identical means the same status, `error.type` and message.
 
 The following MUST be exempt and MUST never trigger it:
 - asynchronous task polling;
@@ -69,6 +69,10 @@ Fast-failed requests MUST NOT count as account failures.
 #### Scenario: One session's 503s do not stop the key
 - **WHEN** a key with several sessions gets twelve identical 503s that concerned only new sessions of a sticky-only group
 - **THEN** every request still reaches account selection.
+
+#### Scenario: Forced-platform 503s do not stop the normal route
+- **WHEN** a key trips the fast fail with group-level 503s on `/antigravity/v1/messages`
+- **THEN** its requests to `/v1/messages` still reach account selection.
 
 ### Requirement: Failed turns end after a bounded number of attempts
 

@@ -145,6 +145,55 @@ available for the web UI and static assets.
 Do not use an incoming `$http_x_forwarded_for` value unless Nginx real-IP
 processing is restricted to explicit trusted proxy CIDRs.
 
+### Behind a layer-4 SNI router
+
+When port 443 is first handled by an Nginx `stream` block that routes by SNI
+(`ssl_preread`) and forwards TCP to the HTTP server, `$remote_addr` in the
+HTTP server is the loopback address of that hop. XY2API then records every
+client as `127.0.0.1`, and IP rate limits, IP allow lists, registration
+abuse checks and audit logs stop working. Carry the client address with the
+PROXY protocol on the hop that reaches the XY2API site:
+
+```nginx
+stream {
+    map $ssl_preread_server_name $sni_backend {
+        api.example.com 127.0.0.1:9446;   # the XY2API site below
+        default         127.0.0.1:8443;
+    }
+    server {
+        listen 443;
+        ssl_preread on;
+        proxy_protocol on;                # only if every backend accepts it
+        proxy_pass $sni_backend;
+    }
+}
+
+http {
+    server {
+        listen 127.0.0.1:9446 ssl http2 proxy_protocol;
+        server_name api.example.com;
+        set_real_ip_from 127.0.0.1;
+        real_ip_header proxy_protocol;
+        # ... location / as above, with
+        # proxy_set_header X-Real-IP $proxy_protocol_addr;
+        # proxy_set_header X-Forwarded-For $proxy_protocol_addr;
+    }
+}
+```
+
+`proxy_protocol on` applies to every backend of that `stream` server. When
+other backends cannot read the PROXY header, give the XY2API site its own
+listener that receives the header from the first hop, instead of a second
+relay that drops it. Check the result with an external request and the
+`client_ip` field of the XY2API access log.
+
+### Health checks
+
+`/health` answers 200 without touching any dependency; keep it for container
+health checks. `/ready` (0.4.2) checks the database and Redis (2 s each) and
+answers 503 with the names of the failed checks; use it for proxy health
+checks (for example Caddy `health_uri /ready`) and external monitoring.
+
 ## Caddy and CDN
 
 The bundled `deploy/Caddyfile` sets a 64 KiB header limit, a 10-second header
