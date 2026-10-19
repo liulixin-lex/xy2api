@@ -727,6 +727,50 @@
     {
       "path": "frontend/src/i18n/locales/en/admin/overview.ts",
       "value": "bulkStatus: {"
+    },
+    {
+      "path": "backend/internal/service/ratelimit_service.go",
+      "value": "if err := s.writeCounted403Cooldown(ctx, account.ID, until, reason); err != nil {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "if resilienceFirstOutputGuardOwnsStall(firstOutputTimer != nil, openAIStreamClientOutputStarted(c, clientOutputStarted)) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "if previousResponseID != \"\" && (notFound || unsupported || rejected) && resilienceContinuationReplayAllowed(ctx, account, rejected) {"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "if s.service.resilienceKeepOpenAISoftOwner(ctx, account, req.Platform, req.RequestedModel) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if err == nil && !s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {"
+    },
+    {
+      "path": "backend/internal/repository/concurrency_cache.go",
+      "value": "c.startProcessLease(ctx, activeRequestPrefix)"
+    },
+    {
+      "path": "backend/internal/repository/concurrency_cache.go",
+      "value": "return c.sweepEndedProcesses(ctx)"
+    },
+    {
+      "path": "backend/internal/repository/wire.go",
+      "value": "readiness.Register(\"database\", db.PingContext)"
+    },
+    {
+      "path": "backend/internal/repository/wire.go",
+      "value": "readiness.Register(\"redis\", func(ctx context.Context) error { return rdb.Ping(ctx).Err() })"
+    },
+    {
+      "path": "backend/internal/server/routes/common.go",
+      "value": "r.GET(\"/ready\", readiness.Handler)"
     }
   ],
   "forbidden_module_paths": [
