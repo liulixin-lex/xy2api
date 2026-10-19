@@ -727,6 +727,10 @@
     {
       "path": "frontend/src/i18n/locales/en/admin/overview.ts",
       "value": "bulkStatus: {"
+    },
+    {
+      "path": "frontend/src/components/common/GroupSelector.vue",
+      "value": "data-test=\"group-exclusive-tag\""
     }
   ],
   "forbidden_module_paths": [
