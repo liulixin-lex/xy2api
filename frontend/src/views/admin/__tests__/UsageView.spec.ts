@@ -12,7 +12,7 @@ import UsageView from '../UsageView.vue'
 const metricSettings = vi.hoisted(() => ({ usageCacheHitRateEnabled: true, usageTokenSpeedEnabled: true, fetch: vi.fn() }))
 vi.mock('@/stores/adminSettings', () => ({ useAdminSettingsStore: () => metricSettings }))
 
-const { list, exportList, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, routeQuery, saveAs } = vi.hoisted(() => {
+const { list, exportList, getStats, getSnapshotV2, getById, getAccountById, getModelStats, listErrorLogs, routeQuery, saveAs } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -25,6 +25,7 @@ const { list, exportList, getStats, getSnapshotV2, getById, getModelStats, listE
     getStats: vi.fn(),
     getSnapshotV2: vi.fn(),
     getById: vi.fn(),
+    getAccountById: vi.fn(),
     getModelStats: vi.fn(),
     listErrorLogs: vi.fn(),
     routeQuery: {} as Record<string, string>,
@@ -66,6 +67,9 @@ vi.mock('@/api/admin', () => ({
     },
     users: {
       getById,
+    },
+    accounts: {
+      getById: getAccountById,
     },
   },
 }))
@@ -120,14 +124,16 @@ const UsageFiltersStub = defineComponent({
       userSearchRevision += 1
       userKeyword.value = email
     }
+    const accountKeyword = ref('')
     expose({
       getUserSearchRevision: () => userSearchRevision,
       setUserKeyword,
       simulateUserInput: setUserKeyword,
+      setAccountKeyword: (name: string) => { accountKeyword.value = name },
     })
-    return { userKeyword }
+    return { userKeyword, accountKeyword }
   },
-  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><slot name="after-reset" /></div>',
+  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><span data-test="account-filter-label">{{ accountKeyword }}</span><slot name="after-reset" /></div>',
 })
 const UsageTableStub = {
   props: ['columns'],
@@ -217,6 +223,22 @@ describe('admin UsageView route filters', () => {
     expect(getById).toHaveBeenCalledWith(42, true)
     expect(list).toHaveBeenCalledWith(expect.objectContaining({ user_id: 42 }), expect.anything())
     expect(wrapper.find('[data-test="user-filter-label"]').text()).toBe('route-user@test.com')
+  })
+
+  it('opens the error requests tab filtered to the account linked from the accounts list', async () => {
+    routeQuery.tab = 'errors'
+    routeQuery.account_id = '7'
+    getAccountById.mockReset().mockResolvedValue({ id: 7, name: 'busy-account' })
+    listErrorLogs.mockReset().mockResolvedValue({ items: [], total: 0 })
+
+    const wrapper = mountRouteFilteredUsageView()
+    await flushPromises()
+
+    expect((wrapper.vm as any).activeTab).toBe('errors')
+    expect(listErrorLogs).toHaveBeenCalledWith(expect.objectContaining({ view: 'all', account_id: 7 }))
+    expect(list).toHaveBeenCalledWith(expect.objectContaining({ account_id: 7 }), expect.anything())
+    expect(getAccountById).toHaveBeenCalledWith(7)
+    expect(wrapper.find('[data-test="account-filter-label"]').text()).toBe('busy-account')
   })
 
   it('does not apply a stale routed user label after user_id changes', async () => {

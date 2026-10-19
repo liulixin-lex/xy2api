@@ -183,7 +183,8 @@
     "xy-allowlist-404-hint",
     "xy-registration-email-alias-hardening",
     "xy-admin-user-batch-status",
-    "xy-account-list-usability"
+    "xy-account-list-usability",
+    "xy-account-recent-health"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/92"
 }

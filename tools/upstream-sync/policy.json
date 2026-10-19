@@ -747,6 +747,34 @@
     {
       "path": "frontend/src/views/admin/AccountsView.vue",
       "value": "<AccountColumnSettings"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "accounts.POST(\"/recent-health/batch\", h.Admin.Account.GetBatchRecentHealth)"
+    },
+    {
+      "path": "frontend/src/api/admin/accounts.ts",
+      "value": "'/admin/accounts/recent-health/batch'"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "<AccountRecentHealth :account-id=\"row.id\""
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "const result = await adminAPI.accounts.getBatchRecentHealth(accountIDs)"
+    },
+    {
+      "path": "frontend/src/views/admin/UsageView.vue",
+      "value": "const queryAccountId = getNumericQueryValue(route.query.account_id)"
+    },
+    {
+      "path": "frontend/src/views/admin/UsageView.vue",
+      "value": "if (getSingleQueryValue(route.query.tab) === 'errors') switchTab('errors')"
+    },
+    {
+      "path": "frontend/src/components/admin/usage/UsageFilters.vue",
+      "value": "defineExpose({ getUserSearchRevision, setUserKeyword, setAccountKeyword })"
     }
   ],
   "forbidden_module_paths": [
@@ -790,7 +818,8 @@
     "xy-allowlist-404-hint",
     "xy-registration-email-alias-hardening",
     "xy-admin-user-batch-status",
-    "xy-account-list-usability"
+    "xy-account-list-usability",
+    "xy-account-recent-health"
   ],
   "custom_patch_tests": [
     {
@@ -977,6 +1006,26 @@
       "id": "xy-account-list-usability",
       "path": "backend/internal/repository/account_repo_list_order_test.go",
       "literal": "func TestAccountListOrderPutsNeverUsedAccountsLast"
+    },
+    {
+      "id": "xy-account-recent-health",
+      "path": "backend/internal/repository/account_recent_health_repo_integration_test.go",
+      "literal": "func (s *UsageLogRepoSuite) TestGetAccountRecentHealthBatchMatchesTheErrorRequestsPage"
+    },
+    {
+      "id": "xy-account-recent-health",
+      "path": "backend/internal/handler/admin/account_handler_recent_health_test.go",
+      "literal": "func TestGetBatchRecentHealthReturnsStatsKeyedByAccountAndCachesThem"
+    },
+    {
+      "id": "xy-account-recent-health",
+      "path": "frontend/src/views/admin/__tests__/AccountsView.recentHealth.spec.ts",
+      "literal": "asks for the visible accounts and shows errors beside and first token under the status"
+    },
+    {
+      "id": "xy-account-recent-health",
+      "path": "frontend/src/views/admin/__tests__/UsageView.spec.ts",
+      "literal": "opens the error requests tab filtered to the account linked from the accounts list"
     }
   ]
 }

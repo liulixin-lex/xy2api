@@ -29,6 +29,7 @@ vi.mock('@/api/admin', () => ({
       list: listAccounts,
       listWithEtag,
       getBatchTodayStats,
+      getBatchRecentHealth: vi.fn(async () => ({ stats: {} })),
       getUpstreamBillingProbeSettings,
       batchDelete: vi.fn(),
       batchClearError: vi.fn(),
