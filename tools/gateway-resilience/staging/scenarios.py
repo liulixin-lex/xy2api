@@ -28,6 +28,8 @@ import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP, FAULT, CDN90, CDN125, CDN300, DIRECT = 18210, 18211, 18212, 18213, 18214, 18215
+# Second app process of scenario LEASE-1 (compose profile "overlap").
+APP2 = 18216
 # Real Cloudflare (orange cloud) and the DNS-only host of the same Caddy site,
 # from the staging .env (STG_CF_HOST, STG_DIRECT_HOST).
 REAL_CF, REAL_DIRECT = os.environ.get("STG_CF_HOST", ""), os.environ.get("STG_DIRECT_HOST", "")
@@ -669,6 +671,113 @@ def dc1():
           "cancelled within 2 s of the disconnect", checks)
     check(usage_before == usage_after, "no usage row", checks)
     check(und.endswith(("|f", "|false")), f"undelivered record {und}", checks)
+    return r, checks
+
+
+def undelivered_after_opening(group: str, path: str, body: dict, opening: str) -> tuple[dict, list]:
+    """A client leaves after the gateway wrote only opening events (0.4.2,
+    review R03): the upstream is cancelled, nothing is billed and an
+    undelivered record is written."""
+    checks = []
+    mark = fault_last_id()
+    since = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    key_filter = f"api_key_id=(select id from api_keys where name='key-{group}' and deleted_at is null)"
+    r = stream_request(DIRECT, path, KEYS[group], body, disconnect_after=5)
+    time.sleep(4)
+    recs = fault_records_since(mark)
+    r["upstream"] = [{k: x.get(k) for k in ("fault", "outcome", "started", "ended")} for x in recs]
+    received = "\n".join(l for _, l in r["lines"])
+    usage = psql(f"select count(*) from usage_logs where {key_filter} and created_at > '{since}'")
+    und = psql(f"select disconnect_stage||'|'||billed from gateway_undelivered_requests where {key_filter} order by id desc limit 1")
+    if opening:
+        check(opening in received, f"the client got {opening} before leaving", checks)
+    check(not any('"text_delta"' in l or '"content":"' in l.replace(" ", "") or "output_text.delta" in l for _, l in r["lines"]),
+          "no content reached the client", checks)
+    check(any(x["outcome"] == "cancelled" for x in recs), "upstream request cancelled", checks)
+    check(usage == "0", f"no usage row ({usage})", checks)
+    check(und.endswith(("|f", "|false")), f"undelivered record {und}", checks)
+    return r, checks
+
+
+@scenario("DC-6", "Opening events only, then the client leaves (Messages conversion, Chat, Anthropic native): undelivered, not billed, upstream cancelled")
+def dc6():
+    results, checks = {}, []
+    for name, (group, path, body, opening) in {
+        "messages": ("G-msg-long", "/v1/messages", anthropic_body(), "message_start"),
+        "chat": ("G-long-first", "/v1/chat/completions", chat_body(), ""),
+        "anthropic": ("G-anthropic-stall", "/v1/messages", anthropic_body(), "message_start"),
+    }.items():
+        r, c = undelivered_after_opening(group, path, body, opening)
+        results[name] = {k: r.get(k) for k in ("status", "elapsed", "upstream")}
+        checks += [{"check": f"{name}: {x['check']}", "ok": x["ok"]} for x in c]
+    return results, checks
+
+
+def silent_upstream(effort: str, low: float, high: float) -> tuple[dict, list]:
+    """Headers and response.created, then silence (0.4.2, review P1-C): the
+    first-output tier of the effort switches accounts; the 180 s stall check
+    no longer ends the request first."""
+    checks = []
+    mark = fault_last_id()
+    r = stream_request(DIRECT, "/v1/responses", KEYS["G-silent"], responses_body(effort=effort, session=str(uuid.uuid4())))
+    recs = fault_records_since(mark)
+    r["upstream"] = [{k: x.get(k) for k in ("fault", "outcome", "path")} for x in recs]
+    lines = [l for _, l in r["lines"]]
+    check(r["status"] == 200, "status 200", checks)
+    check(any("response.completed" in l for l in lines), "completed on the second account", checks)
+    check(not any("stream_timeout" in l for l in lines), "not ended as stalled", checks)
+    check(any(x["fault"] == "F17" and x["outcome"] == "cancelled" for x in recs), "silent attempt cancelled", checks)
+    check(low <= (r["elapsed"] or 0) <= high, f"switched at the {effort} tier ({r['elapsed']} s, expected {low}-{high})", checks)
+    return r, checks
+
+
+@scenario("FO-2", "Silent upstream at xhigh: switched at the 200 s tier, not ended at 180 s")
+def fo2():
+    return silent_upstream("xhigh", 195, 235)
+
+
+@scenario("FO-3", "Silent upstream at max: switched at the 220 s tier, not ended at 180 s")
+def fo3():
+    return silent_upstream("max", 215, 239)
+
+
+def wait_ready(port: int, seconds: float) -> bool:
+    end = now() + seconds
+    while now() < end:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/ready", timeout=3) as resp:
+                if resp.status == 200:
+                    return True
+        except Exception:
+            pass
+        time.sleep(1)
+    return False
+
+
+@scenario("LEASE-1", "Two app processes on one Redis (blue-green overlap): the starting process keeps the running one's slots")
+def lease1():
+    checks = []
+    compose = ["docker", "compose", "-p", "xy2api-staging", "--profile", "overlap"]
+    subprocess.run(compose + ["rm", "-sf", "app2"], cwd=HERE, capture_output=True, timeout=180)
+    mark = fault_last_id()
+    first: dict = {}
+    t = threading.Thread(target=lambda: first.update(
+        stream_request(APP, "/v1/responses", KEYS["G-lease"], responses_body(session=str(uuid.uuid4())))))
+    t.start()
+    time.sleep(3)  # the first request now holds the account's only slot
+    up = subprocess.run(compose + ["up", "-d", "app2"], cwd=HERE, capture_output=True, text=True, timeout=300)
+    check(up.returncode == 0, "second process started", checks)
+    check(wait_ready(APP2, 120), "second process answers /ready", checks)
+    second = stream_request(APP2, "/v1/responses", KEYS["G-lease"], responses_body(session=str(uuid.uuid4())))
+    t.join(timeout=240)
+    subprocess.run(compose + ["rm", "-sf", "app2"], cwd=HERE, capture_output=True, timeout=180)
+    recs = sorted((x for x in fault_records_since(mark) if x["fault"] == "F17"), key=lambda x: x["started"])
+    r = {"first": {k: first.get(k) for k in ("status", "elapsed")}, "second": {k: second.get(k) for k in ("status", "elapsed")},
+         "upstream": [{k: x.get(k) for k in ("outcome", "started", "ended")} for x in recs]}
+    check(first.get("status") == 200 and second.get("status") == 200, "both requests served", checks)
+    overlap = len(recs) >= 2 and recs[1]["started"] < recs[0]["ended"]
+    check(len(recs) == 2 and not overlap, "the single-slot account never served two requests at once", checks)
+    check(wait_ready(APP, 5), "the first process keeps serving", checks)
     return r, checks
 
 

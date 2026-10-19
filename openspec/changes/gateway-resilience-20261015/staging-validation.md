@@ -105,6 +105,12 @@
 - 能在 Go 集成测试中覆盖的，用真实 PostgreSQL/Redis 加 `fault-upstream`，纳入 CI 的“Gateway resilience”作业；
 - 依赖时间或 CDN 的，在测试服务器上用脚本执行，输出 JSON 证据。
 
+0.4.2 新增（`tools/gateway-resilience/staging/scenarios.py`，夹具 `G-msg-long`、`G-silent`、`G-lease`）：
+
+- **DC-6**：只写出开场事件就断开。Messages 兼容转换（`message_start`）、Chat Completions、Anthropic 原生（`message_start` 后静默）各一次，5 秒后客户端断开：上游被取消、没有用量行、写一条未送达记录（审查 R03）。
+- **FO-2、FO-3**：上游给出响应头与 `response.created` 后完全静默，xhigh 在 200 秒档位、max 在 220 秒档位换号并由第二个账号完成，不在 180 秒处以 `stream_timeout` 结束（审查 P1-C）。
+- **LEASE-1**：第一个进程在并发 1 的账号上处理请求时，同库同 Redis 启动第二个进程（compose profile `overlap` 的 `app2`，端口 18216）并经它请求同一账号：第二个请求等第一个结束后才到上游，两个进程都正常服务（进程租约）。场景结束时删除 `app2`。
+
 ### 6.2 真实客户端端到端
 
 | 客户端 | 路径 | 场景 |
