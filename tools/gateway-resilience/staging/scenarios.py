@@ -743,6 +743,63 @@ def fo3():
     return silent_upstream("max", 215, 239)
 
 
+def compat_header_silence(path: str, body: dict, done: str) -> tuple[dict, list]:
+    """0.4.2, review G1: a converted stream (Chat or Messages on an OpenAI
+    Responses upstream) whose upstream never sends its headers is switched
+    at the 180 s first-output tier; the conversion had no bound before."""
+    checks = []
+    mark = fault_last_id()
+    r = stream_request(DIRECT, path, KEYS["G-cv-headers"], body)
+    recs = fault_records_since(mark)
+    r["upstream"] = [{k: x.get(k) for k in ("fault", "outcome")} for x in recs]
+    lines = [l for _, l in r["lines"]]
+    check(r["status"] == 200, "status 200", checks)
+    check(any(done in l for l in lines), "completed on the second account", checks)
+    check(any(x["fault"] == "F01" and x["outcome"] == "cancelled" for x in recs), "the silent attempt was cancelled", checks)
+    check(any(x["fault"] == "F00" for x in recs), "the second account answered", checks)
+    check(170 <= (r["elapsed"] or 0) <= 215, f"switched at the 180 s tier ({r['elapsed']} s)", checks)
+    return r, checks
+
+
+@scenario("CV-1", "Chat conversion, upstream headers never come: switched at the 180 s tier")
+def cv1():
+    return compat_header_silence("/v1/chat/completions", chat_body(), "[DONE]")
+
+
+@scenario("CV-2", "Messages conversion, upstream headers never come: switched at the 180 s tier")
+def cv2():
+    return compat_header_silence("/v1/messages", anthropic_body(), "message_stop")
+
+
+def compat_stall(path: str, body: dict, group: str, account: str, delta: str) -> tuple[dict, list]:
+    """0.4.2, review G1: a converted stream that stalls after output ends at
+    the 120 s text stall threshold (not the 180 s interval) and the account
+    gets the STALL cooldown, as on the Responses path."""
+    checks = []
+    restore_account(account)
+    r = stream_request(DIRECT, path, KEYS[group], body)
+    last = max((t for t, l in r["lines"] if delta in l.replace(" ", "")), default=0)
+    r["stall_detected_after"] = round(r["elapsed"] - last, 1)
+    reason, left, _ = account_pause(account)
+    r["pause"] = {"reason": reason[:60], "seconds_left": left}
+    check(r["status"] == 200, "status 200", checks)
+    check(last > 0, "some output delivered", checks)
+    check(r["elapsed"] - last <= 130, "ended within 130 s of the last delta", checks)
+    check("STALL" in reason and left is not None, f"the account got the STALL cooldown ({reason[:40]})", checks)
+    restore_account(account)
+    return r, checks
+
+
+@scenario("CV-3", "Chat conversion, stall after output: ended within 120 s + 5 s, STALL cooldown")
+def cv3():
+    return compat_stall("/v1/chat/completions", chat_body(), "G-cv-stall-chat", "cvs-chat", '"content":"')
+
+
+@scenario("CV-4", "Messages conversion, stall after output: ended within 120 s + 5 s, STALL cooldown")
+def cv4():
+    return compat_stall("/v1/messages", anthropic_body(), "G-cv-stall-msg", "cvs-msg", "text_delta")
+
+
 def wait_ready(port: int, seconds: float) -> bool:
     # The readiness answer itself, not any 200: a build whose embedded
     # frontend takes /ready answers index.html.

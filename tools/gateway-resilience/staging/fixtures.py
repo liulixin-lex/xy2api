@@ -87,6 +87,13 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
                    {"allow_messages_dispatch": True, "default_mapped_model": "gpt-6.1-sol"}),
     "G-silent": ("openai", [("silent-a", "F17;first=400", 1), ("silent-ok", "F00", 2)], {}),
     "G-lease": ("openai", [("lease-one", "F17;first=25", 1)], {"concurrency": 1}),
+    # 0.4.2 review G1: the Chat and Messages conversions on an OpenAI
+    # Responses upstream get the header guard and the stall bookkeeping.
+    "G-cv-headers": ("openai", [("cvh-silent", "F01;secs=400", 1), ("cvh-ok", "F00", 2)],
+                     {"allow_messages_dispatch": True, "default_mapped_model": "gpt-6.1-sol"}),
+    "G-cv-stall-chat": ("openai", [("cvs-chat", "F06;secs=290", 1)], {}),
+    "G-cv-stall-msg": ("openai", [("cvs-msg", "F06;secs=290", 1)],
+                       {"allow_messages_dispatch": True, "default_mapped_model": "gpt-6.1-sol"}),
     # R2: a relay failing streams after output; the healthy account is second.
     "G-post-output": ("openai", [("po-fail", "F26;after=1", 1), ("po-ok", "F00", 2)], {}),
     # R3: a Codex backend relay rejects web_search_call history without the declaration.

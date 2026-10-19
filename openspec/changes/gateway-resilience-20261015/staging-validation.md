@@ -110,6 +110,8 @@
 - **DC-6**：只写出开场事件就断开。Messages 兼容转换（`message_start`）、Chat Completions、Anthropic 原生（`message_start` 后静默）各一次，5 秒后客户端断开：上游被取消、没有用量行、写一条未送达记录（审查 R03）。Chat 的上游走 `/v1/responses`、立即发出 `response.created`，场景断言客户端收到了只带 role 的分块；Messages 与 Chat 兼容转换的未送达阶段记为 `header_wait`（已知限制），Anthropic 原生为 `pre_output`。
 - **FO-2、FO-3**：上游给出响应头与 `response.created` 后完全静默，xhigh 在 200 秒档位、max 在 220 秒档位换号并由第二个账号完成，不在 180 秒处以 `stream_timeout` 结束（审查 P1-C）。
 - **LEASE-1**：第一个进程在并发 1 的账号上处理请求时，同库同 Redis 启动第二个进程（compose profile `overlap` 的 `app2`，端口 18216）并经它请求同一账号：第二个请求等第一个结束后才到上游，两个进程都正常服务（进程租约）。场景结束时删除 `app2`。`wait_ready` 只认 `{"status":"ready"}`，不认任意 200。
+- **CV-1、CV-2**（全局复审 G1）：Chat Completions 与 Messages 经 OpenAI 兼容转换，上游一直不发响应头（F01）：在 180 秒档位换号，由第二个账号完成（夹具 `G-cv-headers`）。
+- **CV-3、CV-4**（全局复审 G1）：两种转换输出一段后停滞（F06）：在最后一段内容后 130 秒内结束，账号得到 `STALL` 冷却（夹具 `G-cv-stall-chat`、`G-cv-stall-msg`）。
 - **RDY-1**：候选镜像的 `/ready`、`/health` 由后端自己应答（JSON），不被嵌入的前端接管。0.4.2 第一个候选在测试服务器上 `/ready` 返回了 `index.html`，因此补了这个场景。
 
 ### 6.2 真实客户端端到端
@@ -162,6 +164,8 @@ XY-image 0.0.17 测试实例接入测试 xy2api，覆盖：
 ## 8. 浸泡（6.5 小时）
 
 > 原定 24 小时；用户 2026-10-16 决定缩短为 6.5 小时，同时以 GC 后存活堆判定泄漏（见验收）。
+>
+> **0.4.2 最终浸泡按用户 2026-10-19 决定为 3 小时：** `soak.py --hours 3 --cycle-minutes 30`。负载的并发爬坡与余额断供改为每 30 分钟一个周期；第一个 30 分钟算热身、不计入判定；用其余 2.5 小时的每 30 分钟 GC 后存活堆中位数计算斜率，要求 ≤1 MiB/h。另外要求协程数平稳、不持续增长，没有 panic，没有 ERROR 刷屏。重点看进程租约协程、SSE 判读缓冲，以及 G1 新增的守卫与计时器。下文 6.5 小时的判据保留为缺省值（`--cycle-minutes 60`）。
 
 - **负载：**
   - 并发 20–50，混合 Responses、Chat、Messages、Gemini、图片，流式与非流式按 7:3；
