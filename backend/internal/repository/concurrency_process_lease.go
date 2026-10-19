@@ -136,6 +136,9 @@ func (c *concurrencyCache) sweepEndedProcesses(ctx context.Context) error {
 		alive[p] = struct{}{}
 	}
 	var ended []string
+	// keep: processes with a lease, and pending ones that missed it fewer
+	// than processLeaseMissesBeforeSweep times so far.
+	keep := append([]string(nil), live...)
 	c.lease.mu.Lock()
 	for _, p := range pending {
 		if _, ok := alive[p]; ok {
@@ -145,13 +148,15 @@ func (c *concurrencyCache) sweepEndedProcesses(ctx context.Context) error {
 		c.lease.pending[p]++
 		if c.lease.pending[p] >= processLeaseMissesBeforeSweep {
 			ended = append(ended, p)
+		} else {
+			keep = append(keep, p)
 		}
 	}
 	c.lease.mu.Unlock()
 	if len(ended) == 0 {
 		return nil
 	}
-	if err := c.cleanupDeadProcessSlots(ctx, live, false); err != nil {
+	if err := c.cleanupDeadProcessSlots(ctx, keep, false); err != nil {
 		return err
 	}
 	c.lease.mu.Lock()

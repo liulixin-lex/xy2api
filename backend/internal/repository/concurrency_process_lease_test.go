@@ -110,3 +110,37 @@ func TestStartupCleanupAloneDropsOtherPrefixesAndWaits(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, n, "a crashed process without a lease is cleaned at once, as before")
 }
+
+func TestLeaseSweepKeepsProcessesThatMissedOnlyOnce(t *testing.T) {
+	// Two kept processes: p1 has missed its lease twice, p2 only once. The
+	// sweep clears p1's slots and keeps p2's.
+	server := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	ctx := context.Background()
+	cache := NewConcurrencyCache(rdb, 15, 60).(*concurrencyCache)
+	require.NoError(t, rdb.Set(ctx, legacyWaitSweepMarkerKey, "1", 0).Err())
+	const accountID = int64(44)
+	now := time.Now().Unix()
+	slots := accountSlotKey(accountID)
+	require.NoError(t, rdb.ZAdd(ctx, slots,
+		redis.Z{Score: float64(now + 900), Member: "rp1-1"},
+		redis.Z{Score: float64(now + 900), Member: "rp2-1"},
+	).Err())
+	require.NoError(t, rdb.ZAdd(ctx, accountActiveIndexKey, redis.Z{Score: float64(now + 60), Member: strconv.FormatInt(accountID, 10)}).Err())
+	require.NoError(t, rdb.Set(ctx, processLeaseKey("rp1"), now, processLeaseTTL).Err())
+	require.NoError(t, rdb.Set(ctx, processLeaseKey("rp2"), now, processLeaseTTL).Err())
+	require.NoError(t, cache.CleanupStaleProcessSlots(ctx, "rself"))
+
+	require.NoError(t, rdb.Del(ctx, processLeaseKey("rp1")).Err())
+	require.NoError(t, cache.CleanupExpiredAccountSlotKeys(ctx)) // p1 missed once
+	require.NoError(t, rdb.Del(ctx, processLeaseKey("rp2")).Err())
+	require.NoError(t, cache.CleanupExpiredAccountSlotKeys(ctx)) // p1 twice, p2 once
+	members, err := rdb.ZRange(ctx, slots, 0, -1).Result()
+	require.NoError(t, err)
+	require.Equal(t, []string{"rp2-1"}, members, "p2 missed only once and keeps its slot")
+
+	require.NoError(t, cache.CleanupExpiredAccountSlotKeys(ctx)) // p2 twice
+	members, _ = rdb.ZRange(ctx, slots, 0, -1).Result()
+	require.Empty(t, members)
+}
