@@ -235,6 +235,13 @@ api.example.com {
 }
 ```
 
+An entry that is not behind Cloudflare must not pass a client-supplied
+`CF-Connecting-IP` through: with the default legacy trust the application reads
+it before `X-Real-IP` and `X-Forwarded-For`, so a client could pick its own
+address and get past an API key IP allowlist. Remove it at the edge (Caddy
+`header_up -CF-Connecting-IP`, nginx `proxy_set_header CF-Connecting-IP "";`)
+and overwrite, rather than append to, `X-Forwarded-For`.
+
 Replace the documentation ranges with the CDN's published, automatically
 maintained egress ranges. `CF-Connecting-IP` is safe here only because direct
 origin access is blocked and Caddy trusts only those TCP peers. Configure

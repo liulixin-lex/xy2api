@@ -47,6 +47,9 @@ api.xy2api.com {
 		header_up X-Real-IP {remote_host}
 		header_up X-Forwarded-For {remote_host}
 		header_up X-Forwarded-Proto {scheme}
+		# 不经 Cloudflare 的入口删除客户端自带的 CF-Connecting-IP：应用在
+		# security.trust_forwarded_ip_for_api_key_acl（缺省开启）下优先读它。
+		header_up -CF-Connecting-IP
 		header_up X-Forwarded-Host {host}
 		# 连接池优化
 		transport http {
