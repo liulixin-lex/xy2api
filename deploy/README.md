@@ -161,6 +161,16 @@ controls dependency ordering for a fresh Compose start, but it is not a
 replacement for application-level retries when Docker restores existing
 containers after a host restart.
 
+XY2API has two health endpoints (0.4.2). `/health` answers 200 without
+touching any dependency: keep it for the container health check and for
+liveness probes, so a database recovery period does not restart the process.
+`/ready` checks PostgreSQL and Redis (2 s each, in parallel, result reused for
+one second) and answers `200 {"status":"ready"}` or
+`503 {"status":"not_ready","failed":["database","redis"]}` with the names of
+the failed checks only. Use it for reverse-proxy health checks that take an
+instance out of rotation (for example Caddy `health_uri /ready` in a
+blue-green pair), Kubernetes readiness probes and external monitoring.
+
 For systemd deployments, keep `Restart=always` and `RestartSec` configured in
 `sub2api.service`; the application retry covers transient database startup,
 while systemd remains the supervisor for permanent process exits. For

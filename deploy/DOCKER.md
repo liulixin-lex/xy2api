@@ -63,6 +63,11 @@ and a simple SQL query. `depends_on: condition: service_healthy` helps order a
 fresh Compose start, but application-level retries are still required when
 Docker restores existing containers after a host restart.
 
+Health endpoints (0.4.2): the Compose health check uses `/health`, which
+never touches a dependency. `/ready` checks PostgreSQL and Redis and answers
+503 with `{"status":"not_ready","failed":[...]}` when one of them is
+unusable; point reverse-proxy health checks and monitoring at it.
+
 ## Environment Variables
 
 | Variable | Description | Required | Default |
