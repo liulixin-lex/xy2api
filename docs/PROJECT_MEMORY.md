@@ -9,7 +9,7 @@
 ### 版本与环境速览（2026-10-18T12:30Z 核实）
 
 - 正式版：XY2API v0.4.1（2026-10-18，Sub2API 兼容基线 0.2.15）；生产自 2026-10-15 运行 0.3.0，部署需用户单独授权。
-- 待定：XY-image 0.0.17（先交接并经用户确认）、0.4.1 生产部署（单独授权）；见下两节。
+- 待定：XY-image 0.0.17（先交接并经用户确认）、0.4.1 生产部署（单独授权）；见下两节。0.4.2 候选在分支 `fix/readiness-0.4.2-20261019`（未推送），待授权，见“进行中的工作”。
 - 上游：Sub2API v0.2.17 已发布、尚未同步（2026-10-17 定时检测），需按 [`UPSTREAM_SYNC.md`](UPSTREAM_SYNC.md) 另开任务。
 - 工具链：Go 以 `backend/go.mod` 为准（当前 1.27.2）；golangci-lint v2.14.0（与 CI 同版）。
 - 文档一致性：`python3 tools/check_docs_consistency.py`（CI 的 upstream-sync-audit 作业执行），规则在 `tools/docs_consistency.json`，改动时按 [`AGENTS.md`](../AGENTS.md)“变更同步”同步文档。
@@ -76,9 +76,9 @@
 - 开始状态：`main` `0320d4e68`（= origin/main，工作树干净，无开放 PR）；分支 `fix/readiness-0.4.2-20261019`。
 - 预上线主机只读核查（10:30Z）：运行 0.4.1 加部署专用的插件宿主补丁（29 个文件、迁移 `253_plugin_lifecycle.sql`）；1 个用户、0 个 API Key、0 条用量、份额策略 0 行；DNS 直连无 CDN；nginx 经 stream 分流后应用看到的客户端 IP 全是 127.0.0.1；连接池 256 对 PostgreSQL 上限 100；DB 降级不限速、无独立超时；无定时备份，SMTP 未配置；4 核 3.8 GiB 与多套服务共用、swap 在用。
 - 已完成（分支上，未推送）：审查项全部核实，处置表见 tasks“0.4.2”；修复提交 `3dca0fa4e`…`9ab5b1830`（R01 及推广到全部调用方、R02、R03、R05–R10、P1-C、F2 跟进、OpenAI 按模型屏蔽保留绑定、槽位进程租约及两处补充、`/ready`、未送达记录有界写入、连接池启动告警、R04 文案、文档与 runbook §3.4/§3.5、同步登记、版本 0.4.2 单独提交）。每项先写失败用例并确认修复前失败；SQL 与 Lua 在本机 PostgreSQL 18、Redis 8.10 实测。
-- 本机验证（候选 `9ab5b1830` 起代码未再变）：四种 vet、golangci-lint 0 问题、全量 unit 与无 tag 测试通过；`ci_gate.py` 274 个韧性测试 `-race` 全过、零跳过（0.4.1 为 249）；前端 vue-tsc、相关 eslint 与 spec 通过；`tools/tests` 39 个、scheduler-diff、文档一致性通过；`sync.py audit` 在提交后的干净树上跑。切换演练：预上线主机表结构（只读导出，不含配置、凭据与插件包内容）在本机 PostgreSQL 18 上恢复，0.4.2 启动接受 325 条迁移记录、无新迁移；`/health`、`/ready` 正常，停 Redis 后 `/ready` 503；连接池告警按预期打出；插件安装记录留在库里时对账每秒失败并记 warn，因此 runbook §3.5 改为切换前必须卸载插件。演练数据已删除。
+- 本机验证（候选 `9ab5b1830` 起代码未再变）：四种 vet、golangci-lint 0 问题、全量 unit 与无 tag 测试通过；`ci_gate.py` 274 个韧性测试 `-race` 全过、零跳过（0.4.1 为 249）；前端 vue-tsc、相关 eslint 与 spec、vitest 全量（3055 项）通过；`tools/tests` 39 个、scheduler-diff、文档一致性通过；`sync.py audit` 在 `aebcf67e0` 的干净树上通过。切换演练：预上线主机表结构（只读导出，不含配置、凭据与插件包内容）在本机 PostgreSQL 18 上恢复，0.4.2 启动接受 325 条迁移记录、无新迁移；`/health`、`/ready` 正常，停 Redis 后 `/ready` 503；连接池告警按预期打出；插件安装记录留在库里时对账每秒失败并记 warn，因此 runbook §3.5 改为切换前必须卸载插件。演练数据已删除。
 - 未验证：集成测试（含 `TestAccountRepositoryTieredTempUnschedulable`，本机无 Docker）；测试服务器场景（含新增 DC-6、FO-2、FO-3、LEASE-1）。
-- 待用户授权：① 推送分支并开 Draft PR（CI 跑 integration，含新增的仓储集成用例）；② 测试服务器完整跑一次候选验证（新增三个场景，见 tasks）；③ 预上线主机去掉插件、部署官方 0.4.2、调整连接池与降级参数、配置备份与告警。正式发版另行授权。需要用户提供：SMTP、异机备份存储、测试 Key（或同意用实例现有账号）。
+- 待用户授权：① 推送分支并开 Draft PR（CI 跑 integration，含新增的仓储集成用例）；② 测试服务器完整跑一次候选验证（含新增 DC-6、FO-2、FO-3、LEASE-1，见 staging-validation.md）；③ 预上线主机去掉插件、部署官方 0.4.2、调整连接池与降级参数、配置备份与告警。正式发版另行授权。需要用户提供：SMTP、异机备份存储、测试 Key（或同意用实例现有账号）。
 
 ## 操作陷阱
 
