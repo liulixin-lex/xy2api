@@ -533,13 +533,17 @@ func (s *GatewayService) resilienceGatewayBindAllowed(ctx context.Context, accou
 }
 
 // resilienceKeepOpenAISoftOwner keeps the binding of a soft-penalised owner
-// on the original OpenAI scheduler's legacy path (advanced scheduler off),
-// as the advanced scheduler and the Gateway do (design §4.2): the request is
-// served elsewhere and the session returns afterwards. It reports whether
-// the owner was kept.
-func resilienceKeepOpenAISoftOwner(ctx context.Context, account *Account, platform, requestedModel string) bool {
+// on the original OpenAI scheduler (legacy and advanced paths), as the
+// Gateway does (design §4.2): the request is served elsewhere and the
+// session returns afterwards. The scheduler's per-model transient block
+// counts as soft here, as it does for last resort. It reports whether the
+// owner was kept.
+func (s *OpenAIGatewayService) resilienceKeepOpenAISoftOwner(ctx context.Context, account *Account, platform, requestedModel string) bool {
 	if account == nil || account.Platform != NormalizeOpenAICompatiblePlatform(platform) || !account.IsOpenAICompatible() ||
-		!resilienceKeepsSoftStickyBinding(account, requestedModel) {
+		!resilience.Current().SessionOn() {
+		return false
+	}
+	if tier, _, _ := s.resilienceOpenAIPenaltyOf(account, requestedModel, time.Now()); tier != resilience.TierSoft {
 		return false
 	}
 	resilience.StateFrom(ctx).KeepSticky(account.ID)
