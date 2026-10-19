@@ -238,7 +238,13 @@ func (s *GatewayService) shareGatewayLastResort(ctx context.Context, gp *shareGr
 			}
 			return nil, sharesched.ReasonIneligible
 		},
-		admit: func(acc *Account) bool { return s.checkAndRegisterSession(ctx, acc, sessionHash) },
+		admit: func(acc *Account) bool {
+			if s.checkAndRegisterSession(ctx, acc, sessionHash) {
+				return true
+			}
+			resilience.StateFrom(ctx).MarkLastResortSessionLimited()
+			return false
+		},
 		newResult: func(acc *Account, acquired bool, release func(), wait *AccountWaitPlan) (*AccountSelectionResult, error) {
 			return s.newSelectionResult(ctx, acc, acquired, release, wait)
 		}}

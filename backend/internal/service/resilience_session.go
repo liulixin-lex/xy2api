@@ -419,6 +419,7 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 		}
 		if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
 			result.ReleaseFunc()
+			resilience.StateFrom(ctx).MarkLastResortSessionLimited()
 			continue
 		}
 		s.noteLastResort(ctx, groupID, acc, c.recoverAt)
@@ -433,6 +434,7 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 	for _, c := range busy {
 		acc := c.account
 		if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
+			resilience.StateFrom(ctx).MarkLastResortSessionLimited()
 			continue
 		}
 		s.noteLastResort(ctx, groupID, acc, c.recoverAt)
