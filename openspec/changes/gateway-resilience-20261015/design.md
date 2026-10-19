@@ -206,7 +206,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 
 | 字段 | 含义 |
 |---|---|
-| `MaxAttempts` | 默认 4，包括首次尝试、换号与同号重试 |
+| `MaxAttempts` | 默认 4，包括首次尝试、换号与同号重试。例外：Antigravity 平台的智能重试（`antigravity_gateway_retry.go`，按上游给出的短等待在同一账号上重发）不计入尝试次数，只受剩余首输出前时间与 `Retry-After` 封顶约束（等待放不进剩余预算就不再重试） |
 | `PreOutputDeadline` | 文本请求为开始时间 + 240 秒；图片端点与异步图片任务不设。非流式请求的“首输出”就是整个响应：截止时间只决定能否再发起新的尝试，进行中的单次非流式请求不按它截断（审查 R04 的取舍：截断仍在生成的长回答只会多一次失败、多一份上游成本；单次请求仍受上游与客户端各自的超时约束） |
 | `Attempts`、`SameAccountRetries[account]` | 已用次数 |
 | 请求上下文 | 客户端或转发上下文取消后不再允许新的尝试（耗尽原因 `canceled`） |
