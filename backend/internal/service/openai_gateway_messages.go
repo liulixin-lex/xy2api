@@ -470,7 +470,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		// xy2api resilience (design §9.8): a vague 4xx to a chained request may
 		// be a pooled relay that cannot find the stored response.
 		rejected := !notFound && !unsupported && isOpenAICompatContinuationRejected(resp.StatusCode, respBody)
-		if previousResponseID != "" && (notFound || unsupported || rejected) {
+		if previousResponseID != "" && (notFound || unsupported || rejected) && resilienceContinuationReplayAllowed(ctx, account, rejected) {
 			if unsupported || rejected {
 				s.disableOpenAICompatSessionContinuation(ctx, c, account, promptCacheKey)
 			} else {
