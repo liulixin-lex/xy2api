@@ -420,7 +420,7 @@
 - [x] 本机全量验证（`9ab5b1830` 起代码未变）：四种 vet、golangci-lint、全量 unit 与无 tag 测试、`ci_gate.py` 274 个 `-race` 零跳过、前端 3055 项、`tools/tests`、scheduler-diff、`sync.py audit`、文档一致性；官方 0.4.2 在预上线主机表结构上的切换演练（runbook §3.5）。版本 0.4.2 单独提交（`9ab5b1830`）。
 - [ ] CI 门禁（含 integration，随授权 ①）。
 - [ ] 用户 2026-10-19 已授权（不含生产主机、告警、异机备份、更换密码、合并与发版）：① 推送分支并开 Draft PR（CI 跑 integration 与真实 PG/Redis，含新增的 `TestAccountRepositoryTieredTempUnschedulable`）；② 代码定稿后在测试服务器完整跑一次候选验证，新增场景见下；③ CI 与测试服务器场景通过后，预上线主机去掉插件（用户在后台卸载）、部署测试服务器验证过的同一个镜像、调整连接池与降级超时、真实 IP（runbook §3.4、§3.5）。业务验收等用户在预上线站点添加测试 Key 后再做。正式发版另行授权。
-- [ ] 测试服务器新增场景（staging-validation）：Messages、Chat、Anthropic 只发开场事件就断开（不计费、上游取消）；静默上游在 xhigh、max 下按档位换号；两个进程重叠时槽位保留、旧进程退出后约 75 秒清走；候选镜像的 `/ready` 由后端应答（RDY-1）。
+- [ ] 测试服务器新增场景（staging-validation）：Messages、Chat、Anthropic 只发开场事件就断开（不计费、上游取消）；静默上游在 xhigh、max 下按档位换号；两个进程重叠时槽位保留（LEASE-1）；候选镜像的 `/ready` 由后端应答（RDY-1）。更正：此前写的“旧进程退出后约 75 秒清走”LEASE-1 并不检查，清扫只由单元测试 `TestLeaseSweep…` 覆盖。
 
 两份审查报告各项的处置：
 
@@ -466,6 +466,7 @@
 - [x] 项目记忆归档并加大小上限（2026-10-17 提前完成：主文件实为 454 KB，已结束任务的历史原样移入 `docs/PROJECT_MEMORY_ARCHIVE.md`，主文件 192 KiB 上限与日志结构由 `tools/check_docs_consistency.py` 检查，规则见 AGENTS.md）。
 
 - [ ] 韧性设置的保存加版本校验（与份额策略一样的 CAS）：两位管理员基于旧页面先后保存时后者覆盖前者。0.4.2 审查提出，单管理员时不影响上线，管理员文档写明“保存前先刷新”。
+- [ ] 兼容转换路径（Chat Completions、Messages 转 OpenAI Responses）在上游响应头到达后把阶段推进到 `pre_output`：现在只写出开场分块就断开时记为 `header_wait`，只影响按阶段的统计（测试服务器 DC-6 发现，见管理员文档已知限制）。
 - [ ] CI 不跑 `-tags embed` 的测试（`internal/web/embed_test.go`，既有缺口）：它们需要完整的前端构建产物（`dist` 未入库，占位文件不够），要在后端作业里先构建前端。0.4.2 由测试服务器场景 RDY-1 把关嵌入构建的 `/ready`。
 - [ ] “网关韧性”高级 JSON 的前端深层校验（如 `disconnect.abuse_guard`、`keepalive.edges` 的形状）：0.4.2 审查提出，后端严格校验仍在，异常只影响页面显示。
 

@@ -704,7 +704,9 @@ def dc6():
     results, checks = {}, []
     for name, (group, path, body, opening) in {
         "messages": ("G-msg-long", "/v1/messages", anthropic_body(), "message_start"),
-        "chat": ("G-long-first", "/v1/chat/completions", chat_body(), ""),
+        # The upstream answers on /v1/responses with response.created at once;
+        # the client gets only the role chunk the conversion makes of it.
+        "chat": ("G-long-first", "/v1/chat/completions", chat_body(), '"role":"assistant"'),
         "anthropic": ("G-anthropic-stall", "/v1/messages", anthropic_body(), "message_start"),
     }.items():
         r, c = undelivered_after_opening(group, path, body, opening)
