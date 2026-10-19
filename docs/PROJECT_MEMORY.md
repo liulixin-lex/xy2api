@@ -22,6 +22,16 @@
 - 部署说明（生产部署仍需单独授权，按 runbook）：0.4.1 上线时 Caddy 标记与 `SERVER_TRUSTED_PROXIES` 不再是首包前保活的前提（生产已配置的保持不变）；#101 新增错误码 `EMAIL_FORMAT_NOT_ALLOWED`；智商检测解析器升为 `iq-response-v6`；Grok 渠道监控可选原生 Responses。从 0.3.0 升级执行 0.4.0 的迁移 272–277，备份、蓝绿切换、观察与回退照 runbook。
 - 本任务的登记已原样移入 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)。
 
+### 账号管理筛选平铺、默认按最近使用排序、列可拖动（2026-10-19T16:45Z；PR 待另一位作者合并；未发版、未部署）
+
+- 用户要求（2026-10-19）：① 筛选项不再折叠在“更多筛选”里，按用户样图改为操作按钮一行、筛选项全部平铺一行；② 账号列表默认按最近使用倒序；③ “更多操作”的列显示可上下拖动调整列顺序。
+- 已完成（分支 `feat/account-list-usability-20261019`，基于 `0320d4e68`，与 PR #107 互相独立）：
+  - 筛选：`AccountTableFilters.vue` 恢复同步前的平铺排列（搜索、平台、类型、状态、Privacy、智商、分组），保留无障碍标签与手机两列；`AccountsView` 去掉让筛选与按钮挤在同一行的 `lg:flex-1`，操作按钮因此排在上一行。“更多筛选”文案键删除，`moreFilters` 登记为 `tools/docs_consistency.json` 的退役名。
+  - 排序：默认 `last_used_at` 倒序；排序记忆的 localStorage 键升为 `account-table-sort-v2`，旧键保存的排序作废一次。后端 `accountListOrder` 对 `last_used_at` 两个方向都用 NULLS LAST（PostgreSQL 降序默认 NULLS FIRST，会把从未使用的账号顶到最前）。
+  - 列顺序：新增 `useColumnOrder`（localStorage 键 `account-column-order`，后来新增的列插到它默认的前一列之后）与 `AccountColumnSettings.vue`（`vue-draggable-plus` 拖动手柄、显示开关、恢复默认列顺序）；选择、名称列固定在左，操作列固定在右。
+  - 登记：具名补丁 `xy-account-list-usability`（4 条测试绑定）与上游文件钩子的 `required_literals`。验证见操作日志 `20261019-account-list-usability`。
+- 未完成：PR 由另一位作者审阅合并；发版、部署需用户另行授权。本文件末尾的操作日志与 PR #107 都有追加，后合并的一个按时间保留两条即可。
+
 ### 网关韧性 0.4.0 正式发布完成（2026-10-17；生产未部署）
 
 - 发布：`v0.4.0`（annotated 对象 `451f3f240`）→ main 合并提交 `4c142e1aa`（[PR #100](https://github.com/liulixin-lex/xy2api/pull/100)，头 `49f14df9a`）；RC `v0.4.0-rc.1` → `ca2bdd111`（[PR #97](https://github.com/liulixin-lex/xy2api/pull/97)）。Release run 39043056373；6 个附件双 SHA、五平台 `vcs.modified=false`、GHCR `sha256:4da9162a…` 双架构；latest/0/0.4 指向 0.4.0，0.3 仍为 0.3.0；正式镜像全新安装 324 条迁移通过。
@@ -533,3 +543,13 @@ pnpm --dir frontend run build
 - 验证：本机全量与 CI 门禁（249）、前端全绿；测试服务器 KA/CF/ERR 19/19；PR、main 与 Release 工作流全绿。
 - 卡点/风险：无。生产 0.3.0 未改；部署需单独授权。
 - 下一步：生产部署 0.4.1（单独授权）；XY-image 0.0.17（先交接并经用户确认）；0.4.1 之后的后续事项见 tasks“后续”。
+
+### 2026-10-19T16:45Z — `20261019-account-list-usability` — 本地完成，已推送并开 PR（待审阅）
+
+- 请求/目标：见顶部同名小节的用户要求①②③。做到 PR 检查全绿为止，合并由另一位作者执行。
+- 开始状态：自 origin/main `0320d4e68` 新建分支 `feat/account-list-usability-20261019`，工作树干净；PR #105、#106、#107 均未合并，本分支与它们互相独立（#106 改的 `account_repo.go` 区段与本次不重叠）。
+- 完成操作：样图的排列就是同步前（`0c80e8296`）的平铺筛选，0.2.15 同步引入了“主筛选 + 折叠更多筛选”；本次恢复平铺并保留同步带来的无障碍标签与手机两列。默认排序若不处理 NULL 会把从未使用的账号排到最前，因此后端同改。列拖动沿用仓库已在用的 `vue-draggable-plus`（支付服务商列表、分组排序）。
+- 修改文件：后端 `account_repo.go`、新增 `account_repo_list_order_test.go`；前端 `AccountTableFilters.vue` 及其 spec、`AccountsView.vue`、新增 `AccountColumnSettings.vue`、`useColumnOrder.ts` 及三个 spec、中英文案；`tools/upstream-sync/policy.json`、`UPSTREAM_BASE.json`、`tools/docs_consistency.json`、本文件。
+- 验证：新用例（筛选平铺、默认排序与旧排序作废、列顺序保存与恢复、后端 NULLS LAST 的 SQL）均在旧代码上确认会失败。前端 typecheck、`lint:check`、`check:i18n` 通过，vitest 全量 392 个文件、3067 个用例通过；后端 gofmt、`go vet`（默认、`unit`、`integration`）、golangci-lint 0 issues，repository 包 unit 测试通过。另用 Vite 临时预览页（真实组件、样式与中文文案，1600 像素宽、暗色模式）加无头 Chrome 截图核对：第一行操作按钮，第二行七个筛选项平铺；列显示每行带拖动手柄。临时文件已删除。`check_docs_consistency.py`、`tools/tests`、`scheduler-diff` 通过，`sync.py audit` 在提交后的干净树上运行。
+- 卡点/风险：拖动本身由 `vue-draggable-plus` 实现，单测用替身模拟拖动结果，未在真实浏览器里实际拖动；手机上筛选项两列排布。
+- 下一步：PR 检查全绿后交另一位作者合并。
