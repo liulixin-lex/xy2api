@@ -937,6 +937,12 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if stallThreshold <= 0 || time.Since(lastRead) < stallThreshold {
 				continue
 			}
+			// xy2api resilience (review P1-C): before output an armed
+			// first-output guard owns the attempt, so a silent upstream is
+			// switched at its tier instead of ending the request here.
+			if resilienceFirstOutputGuardOwnsStall(firstOutputTimer != nil, openAIStreamClientOutputStarted(c, clientOutputStarted)) {
+				continue
+			}
 			if codexFailureTerminal && sawBareError && !sawResponseFailed {
 				_ = resp.Body.Close()
 				return finalizeStream()
