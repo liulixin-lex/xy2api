@@ -779,6 +779,10 @@
     {
       "path": "backend/internal/repository/concurrency_cache.go",
       "value": "if dropWaits {"
+    },
+    {
+      "path": "backend/internal/repository/ent.go",
+      "value": "warnDBPoolAboveServerLimit(migrationCtx, drv.DB(), cfg.Database.MaxOpenConns)"
     }
   ],
   "forbidden_module_paths": [

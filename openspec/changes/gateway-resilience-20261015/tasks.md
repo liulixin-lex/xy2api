@@ -411,6 +411,7 @@
 - [x] 未送达记录有界写入并重试一次（`2530aa07e`）。用例 `TestUndeliveredRecordRetriesOnce`、`TestUndeliveredRecordWritersAreBounded`。
 - [x] F2 跟进：末位兜底只因会话上限失败时不写负缓存（`cb70abedf`）。用例 `TestLastResortSessionLimitIsNotCachedForTheGroup`（两种调度）。
 - [x] OpenAI 按模型瞬时屏蔽期间保留会话绑定（`7ce66dd57`）。用例 `TestOpenAIRuntimeBlockedOwnerKeepsTheSessionBinding`（旧路径与高级调度器）。
+- [x] P1-D 连接池启动告警：按 `max_connections` 减保留连接与其他数据库用户的连接计算可用连接，连接池上限的两倍超出时 warn，只告警、查询失败跳过。用例 `TestDBConnectionBudget`、`TestWarnDBPoolAboveServerLimitSkipsOnQueryFailure`；查询在本机 PostgreSQL 18 实测。推荐值与降级参数见 runbook §3.4（主机上的修改待授权）。
 - [x] R04 非流式预算的范围：按设计不截断进行中的单次非流式请求，design §6.1 与管理员文档写明。
 - [x] 文档：design §3–§9 就地修订与 §19、管理员文档、runbook §3.4、上游同步登记（`required_literals`）。
 - [ ] 本机全量验证与 CI 门禁；版本 0.4.2；推送、PR、发版（待授权）；预上线主机按 runbook §3.4 部署与配置（待授权）。

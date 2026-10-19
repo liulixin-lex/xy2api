@@ -100,8 +100,8 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
 | 项 | 核查所见 | 上线前要求 |
 |---|---|---|
 | 客户端真实 IP | 443 端口由 nginx `stream` 按 SNI 分流，四层转发到七层站点时没有带 PROXY 协议，应用记录的客户端 IP 全是 `127.0.0.1` | 让该站点在四层直接分流到一个 `listen ... ssl http2 proxy_protocol` 的七层监听，并设 `set_real_ip_from 127.0.0.1; real_ip_header proxy_protocol;`，`X-Real-IP`/`X-Forwarded-For` 用 `$proxy_protocol_addr`。改后用外部请求核对访问日志里的 `client_ip`。按 IP 的限流、IP 白名单、注册风控与审计都依赖它 |
-| 数据库连接池 | 应用 `DATABASE_MAX_OPEN_CONNS=256`、`MAX_IDLE=128`，PostgreSQL `max_connections=100` | 每实例上限 ×（蓝绿时的实例数 2）+ 其他客户端 ≤ `max_connections` 的约 80%。单库 100 时取 `MAX_OPEN=30`–`40`、`MAX_IDLE=10`（仓库 compose 的缺省是 50/10，按两实例重叠算仍偏大） |
-| 调度快照回源数据库 | `GATEWAY_SCHEDULING_DB_FALLBACK_ENABLED=true`，`MAX_QPS=0`（不限）、`TIMEOUT_SECONDS=0`（不额外收紧） | `TIMEOUT_SECONDS=5`；`MAX_QPS` 按实例流量设上限（例如峰值 RPS 的 1.5 倍），避免 Redis 快照失效时把全部选号压到数据库 |
+| 数据库连接池 | 应用 `DATABASE_MAX_OPEN_CONNS=256`、`MAX_IDLE=128`，PostgreSQL `max_connections=100` | 每个进程的上限 ≤（可用连接 − 后台与维护预留）÷ 2，可用连接 = `max_connections` − `superuser_reserved_connections` −（16 起）`reserved_connections` − 其他数据库用户的连接；除以 2 是因为蓝绿重叠时两个进程的连接池同时在用。`max_connections=100`、预留 3 时可用 97，留 15 给后台与维护，取 `MAX_OPEN=40`、`MAX_IDLE=10`。0.4.2 起应用启动时按同一口径检查，超出只记一条 warn（`database connection pool exceeds the server limit`），不阻止启动，查询失败时跳过 |
+| 调度快照回源数据库 | `GATEWAY_SCHEDULING_DB_FALLBACK_ENABLED=true`，`MAX_QPS=0`（不限）、`TIMEOUT_SECONDS=0`（不额外收紧） | 给回源一个独立超时 `TIMEOUT_SECONDS=3`（起点，按演练调整）。`MAX_QPS` 按“Redis 不可用”演练的结果确定：建议起点为实例峰值 RPS 的 1.5 倍（预上线主机目前没有流量，可先取 20），演练中观察数据库连接与延迟后再调；不改代码缺省值 |
 | 健康检查 | 容器与反代只用 `/health`（恒 200） | 0.4.2 起反代主动健康检查与外部监控用 `/ready`；容器健康检查保持 `/health` |
 | 备份与恢复 | 没有该网关的定时备份，只有升级时的本机快照；`archive_mode=off` | 先定 RPO/RTO；至少每日异机备份数据库（或与生产一样用 pgBackRest 加对象存储做 PITR），Redis 与应用数据目录随同；做一次恢复演练并记录 |
 | 告警 | 告警规则开启，但 SMTP 未配置 | 配置邮件（或其他通知渠道）并实际触发一次告警确认送达 |
