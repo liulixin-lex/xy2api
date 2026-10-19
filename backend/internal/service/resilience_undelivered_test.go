@@ -187,3 +187,58 @@ func TestEdgeRequestsGet503InsteadOf502(t *testing.T) {
 		}
 	}
 }
+
+type flakyUndeliveredRepo struct {
+	memUndeliveredRepo
+	fails   int
+	block   chan struct{}
+	entered chan struct{}
+}
+
+func (r *flakyUndeliveredRepo) InsertUndelivered(ctx context.Context, rec *UndeliveredRequest) error {
+	if r.entered != nil {
+		r.entered <- struct{}{}
+	}
+	if r.block != nil {
+		<-r.block
+	}
+	r.mu.Lock()
+	if r.fails > 0 {
+		r.fails--
+		r.mu.Unlock()
+		return context.DeadlineExceeded
+	}
+	r.mu.Unlock()
+	return r.memUndeliveredRepo.InsertUndelivered(ctx, rec)
+}
+
+func TestUndeliveredRecordRetriesOnce(t *testing.T) {
+	repo := &flakyUndeliveredRepo{fails: 1}
+	r := NewResilienceService(nil, nil)
+	r.undelivered = repo
+	r.RecordUndelivered(&UndeliveredRequest{RequestID: "req-retry"})
+	require.Eventually(t, func() bool {
+		repo.mu.Lock()
+		defer repo.mu.Unlock()
+		return len(repo.rows) == 1
+	}, 3*time.Second, 20*time.Millisecond, "a short database failure is retried")
+}
+
+func TestUndeliveredRecordWritersAreBounded(t *testing.T) {
+	repo := &flakyUndeliveredRepo{block: make(chan struct{}), entered: make(chan struct{}, undeliveredWriters)}
+	r := NewResilienceService(nil, nil)
+	r.undelivered = repo
+	for i := 0; i < undeliveredWriters; i++ {
+		r.RecordUndelivered(&UndeliveredRequest{RequestID: "req-busy"})
+	}
+	for i := 0; i < undeliveredWriters; i++ {
+		<-repo.entered
+	}
+	r.RecordUndelivered(&UndeliveredRequest{RequestID: "req-dropped"})
+	require.Len(t, undeliveredSlots, undeliveredWriters, "no writer beyond the bound")
+	close(repo.block)
+	require.Eventually(t, func() bool { return len(undeliveredSlots) == 0 }, 3*time.Second, 10*time.Millisecond)
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	require.Len(t, repo.rows, undeliveredWriters, "the record that found every writer busy was dropped")
+}
