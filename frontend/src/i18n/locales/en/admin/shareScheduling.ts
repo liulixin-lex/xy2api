@@ -63,6 +63,7 @@ export default {
       updated: 'Version {version} · updated {time}',
       neverSaved: 'Not set yet; the group uses the original scheduler.',
       notEffective: 'Main switch off: this group runs the original scheduler for now.',
+      globalFailed: 'The group is now set to Share, but the main switch did not turn on, so it runs the original scheduler for now. Turn the main switch on at the top of the page.',
       legacyShadow: 'This group used the shadow mode, which was removed; it now runs the original scheduler.',
       invalid: 'The stored settings cannot be read ({reason}); the group runs the original scheduler. Choosing a scheduler again overwrites them.',
       conflict: 'Another administrator changed this group.',

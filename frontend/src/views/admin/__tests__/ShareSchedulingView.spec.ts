@@ -166,6 +166,26 @@ describe('share scheduling page', () => {
     expect(w.find('[data-testid="share-conflict"]').exists()).toBe(false)
   })
 
+  it('explains a switch to share that saved the group but not the main switch', async () => {
+    api.getSettings.mockResolvedValue({ enabled: false })
+    api.getPolicy.mockImplementation(async (id: number) => shareView(id, { scheduler: 'sub2api', enabled: false, effective: false, version: 3 }))
+    api.updatePolicy.mockImplementation(async (id: number) => shareView(id, { scheduler: 'share', enabled: false, effective: false, version: 4 }))
+    api.preview.mockResolvedValue(sharePreview({ enabled: false, effective_after: false }))
+    router.query = { group: '5' }
+    const w = mountView()
+    await flushPromises()
+    api.updateSettings.mockRejectedValueOnce({ status: 500, message: 'settings down' })
+    await w.get('[data-testid="share-switch"]').trigger('click')
+    await flushPromises()
+    await w.get('[data-testid="share-change-confirm"]').trigger('click')
+    await flushPromises()
+    const alert = w.get('[data-testid="share-global-failed"]')
+    expect(alert.attributes('role')).toBe('alert')
+    expect(alert.text()).toContain('admin.shareScheduling.mode.globalFailed')
+    expect(alert.text()).toContain('settings down')
+    expect(w.find('[data-testid="share-not-effective"]').exists()).toBe(false)
+  })
+
   it('judges health against the baseline and lists what needs attention', async () => {
     const w = mountView()
     await flushPromises()

@@ -105,10 +105,43 @@ describe('share scheduling store', () => {
     store.setGlobalEnabled(false)
     await store.requestChange({ scheduler: 'share' })
     expect(store.pending?.enableGlobal).toBe(true)
-    await store.confirmChange()
+    expect(await store.confirmChange()).toBe(true)
     expect(api.updateSettings).toHaveBeenCalledWith({ enabled: true })
-    expect(api.updateSettings.mock.invocationCallOrder[0]).toBeLessThan(api.updatePolicy.mock.invocationCallOrder[0])
+    // The group is saved first: while the switch is off that changes nothing that runs.
+    expect(api.updatePolicy.mock.invocationCallOrder[0]).toBeLessThan(api.updateSettings.mock.invocationCallOrder[0])
     expect(store.settings?.enabled).toBe(true)
+    expect(store.view).toMatchObject({ scheduler: 'share', effective: true })
+    expect(store.globalError).toBeNull()
+  })
+
+  it('leaves the main switch off when the group cannot be saved', async () => {
+    api.preview.mockResolvedValue(sharePreview({ enabled: false, effective_after: false }))
+    const store = await loadedStore()
+    store.setGlobalEnabled(false)
+    api.updatePolicy.mockRejectedValueOnce({ status: 409, reason: 'SHARE_SCHEDULING_VERSION_CONFLICT' })
+    await store.requestChange({ scheduler: 'share' })
+    expect(await store.confirmChange()).toBe(false)
+    expect(api.updateSettings).not.toHaveBeenCalled()
+    expect(store.settings?.enabled).toBe(false)
+    expect(store.conflict).toBe(true)
+  })
+
+  it('says so when the group was saved but the main switch did not turn on', async () => {
+    api.preview.mockResolvedValue(sharePreview({ enabled: false, effective_after: false }))
+    api.updatePolicy.mockImplementation(async (id: number, update: { scheduler: 'sub2api' | 'share'; session_keep: boolean; expected_version: number }) =>
+      shareView(id, { scheduler: update.scheduler, session_keep: update.session_keep, version: update.expected_version + 1, enabled: false, effective: false }))
+    const store = await loadedStore()
+    store.setGlobalEnabled(false)
+    api.updateSettings.mockRejectedValueOnce({ status: 500, message: 'settings down' })
+    await store.requestChange({ scheduler: 'share' })
+    expect(await store.confirmChange()).toBe(true)
+    expect(store.pending).toBeNull()
+    expect(store.view).toMatchObject({ scheduler: 'share', version: 2, effective: false })
+    expect(store.settings?.enabled).toBe(false)
+    expect(store.globalError).toBe('settings down')
+    // Turning the switch on from the page clears it.
+    store.setGlobalEnabled(true)
+    expect(store.globalError).toBeNull()
   })
 
   it('stops on a version conflict and asks for a reload', async () => {

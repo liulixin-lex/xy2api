@@ -44,6 +44,12 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
   const saving = ref(false)
   const actionError = ref('')
   const conflict = ref(false)
+  /**
+   * Set when a switch to share saved the group but could not turn the main
+   * switch on: the message, possibly empty. The group runs the original
+   * scheduler until the switch is on.
+   */
+  const globalError = ref<string | null>(null)
   const report = ref<ShareReport | null>(null)
   const reportWindow = ref('1h')
   const reportState = ref<ShareLoadState>('idle')
@@ -62,6 +68,7 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
     previewing.value = false
     saving.value = false
     actionError.value = ''
+    globalError.value = null
   }
 
   async function loadSettings() {
@@ -186,7 +193,11 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
     resetAction()
   }
 
-  /** Saves the confirmed change. Returns false on a conflict or an error. */
+  /**
+   * Saves the confirmed change, then turns the main switch on when the
+   * change asked for it. Returns false on a conflict or an error saving the
+   * group; a switch that fails after the group saved leaves globalError set.
+   */
   async function confirmChange(): Promise<boolean> {
     const change = pending.value
     if (!change || saving.value || selected.value !== change.groupId) return false
@@ -194,15 +205,25 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
     saving.value = true
     actionError.value = ''
     try {
-      if (change.enableGlobal) {
-        const saved = await shareSchedulingAPI.updateSettings({ enabled: true })
-        setGlobalEnabled(saved?.enabled ?? true)
-      }
+      // The group first: while the main switch is off, saving it changes
+      // nothing that runs, so a conflict here leaves every group as it was.
       const next = await shareSchedulingAPI.updatePolicy(change.groupId, change.update)
+      let enabled: boolean | null = null
+      let switchFailure: string | null = null
+      if (change.enableGlobal) {
+        try {
+          const saved = await shareSchedulingAPI.updateSettings({ enabled: true })
+          enabled = saved?.enabled ?? true
+        } catch (err) {
+          switchFailure = extractApiErrorMessage(err, '')
+        }
+      }
+      if (enabled !== null) setGlobalEnabled(enabled)
       if (epoch !== actionEpoch || selected.value !== change.groupId) return false
-      view.value = next
-      syncSummary(next)
+      view.value = enabled === null ? next : { ...next, enabled, effective: enabled && next.scheduler === 'share' }
+      syncSummary(view.value)
       pending.value = null
+      globalError.value = switchFailure
       void loadReport()
       return true
     } catch (err) {
@@ -221,6 +242,7 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
 
   function setGlobalEnabled(enabled: boolean) {
     settings.value = { ...(settings.value ?? { enabled }), enabled }
+    if (enabled) globalError.value = null
     for (const group of groups.value) group.effective = enabled && group.scheduler === 'share'
     if (view.value) view.value = { ...view.value, enabled, effective: enabled && view.value.scheduler === 'share' }
   }
@@ -252,6 +274,7 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
     saving,
     actionError,
     conflict,
+    globalError,
     report,
     reportWindow,
     reportState,

@@ -63,6 +63,7 @@ export default {
       updated: '版本 {version} · {time} 更新',
       neverSaved: '尚未设置，当前为原版调度。',
       notEffective: '总开关关闭：本组暂按原版运行。',
+      globalFailed: '本组已改为份额调度，但总开关没有打开，本组暂按原版运行。请在页面顶部打开总开关。',
       legacyShadow: '此分组原为“影子对比”，该模式已移除，现按原版运行。',
       invalid: '已存的设置无法读取（{reason}），本组按原版运行；重新选择调度方式即可覆盖。',
       conflict: '此分组的设置已被其他管理员修改。',
