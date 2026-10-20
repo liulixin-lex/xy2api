@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -34,6 +35,10 @@ func shareAdaptiveEnv(t *testing.T) *shareAdminEnv {
 			{ShareSchedulingUpstreamAttempt: ShareSchedulingUpstreamAttempt{AccountID: 13, Kind: "failover", StatusCode: 402,
 				Category: string(resilience.CategoryBalance)}, Count: 500}},
 	}
+	// Start from an instance that has not read any health yet (the save
+	// above read the empty table).
+	env.policies.attemptCalls = 0
+	env.share.health.Store(nil)
 	return env
 }
 
@@ -354,4 +359,92 @@ func TestShareHealthOfOriginalGroupsOnDemand(t *testing.T) {
 		require.NoError(t, err)
 		require.Zero(t, env.policies.attemptCalls, "a share group is never read on demand")
 	})
+}
+
+// TestShareHealthAppliesRightAfterSwitch: the instance that saves the
+// switch to share scheduling weighs by health at once, as the
+// confirmation showed, reusing the health the confirmation read.
+func TestShareHealthAppliesRightAfterSwitch(t *testing.T) {
+	env := shareAdaptiveEnv(t)
+	_, err := env.save(t, 1, sub2apiUpdate)
+	require.NoError(t, err)
+	_, err = env.share.Preview(context.Background(), shareTestGroupID, shareUpdate)
+	require.NoError(t, err)
+	calls := env.policies.attemptCalls
+
+	view, err := env.save(t, 2, shareUpdate)
+	require.NoError(t, err)
+	require.InDelta(t, 0.2, *env.member(t, view.Members, 13).HealthFactor, 1e-9, "the saved view shows the health")
+	require.Equal(t, calls, env.policies.attemptCalls, "the confirmation's health is reused")
+	require.InDelta(t, 20, env.weight(t, 13, time.Now()).Effective, 1e-9, "placement is down-weighted at once")
+	gid := shareTestGroupID
+	_, in, err := env.gateway.shareGatewayCandidates(context.Background(), nil, &gid, "", nil, 0)
+	require.NoError(t, err)
+	for _, c := range in.cands {
+		if c.AccountID == 13 {
+			require.InDelta(t, 20, c.Weight, 1e-9)
+		}
+	}
+}
+
+// TestShareHealthRefreshesWhenAnotherInstanceSwitches: an instance that
+// learns of a switch from the broadcast refreshes the health at once
+// instead of waiting for the next minute.
+func TestShareHealthRefreshesWhenAnotherInstanceSwitches(t *testing.T) {
+	env := shareAdaptiveEnv(t)
+	_, err := env.save(t, 1, sub2apiUpdate)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	env.share.wg.Add(1)
+	go env.share.healthLoop(ctx)
+	t.Cleanup(func() { cancel(); env.share.wg.Wait() })
+	require.Eventually(t, func() bool { return env.share.health.Load() == nil }, time.Second, 5*time.Millisecond)
+
+	// Another instance saved the switch; this one gets the broadcast.
+	env.policies.mu.Lock()
+	row := env.policies.rows[shareTestGroupID]
+	row.Version, row.Scheduler = 3, "share"
+	row.Policy = sharesched.NewPolicyDocument(sharesched.SchedulerShare, true)
+	env.policies.rows[shareTestGroupID] = row
+	env.policies.mu.Unlock()
+	env.share.onChange(ctx, shareTestGroupID)
+	require.NotNil(t, env.share.groupPolicy(shareTestGroupID))
+	require.Eventually(t, func() bool {
+		return env.weight(t, 13, time.Now()).Effective == 20
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+// TestShareFactorsSerializeCleanly: quantized factors and weights are
+// plain decimals in the API.
+func TestShareFactorsSerializeCleanly(t *testing.T) {
+	for _, tc := range []struct {
+		value float64
+		want  string
+	}{
+		{shareHealthFactorOf(0.01+0.03+0.01, 0.01), "0.85"},
+		{shareHealthFactorOf(0.01+0.03+0.025, 0.01), "0.7"},
+		{shareRampOf(&Account{}, time.Unix(0, 0).Add(-3*time.Minute), time.Unix(0, 0)).Factor, "0.35"},
+	} {
+		raw, err := json.Marshal(tc.value)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, string(raw))
+	}
+
+	env := shareAdaptiveEnv(t)
+	now := time.Now()
+	ended := now.Add(-3 * time.Minute)
+	acc := accountIn(env.repo.accounts, 11)
+	acc.TempUnschedulableUntil, acc.TempUnschedulableReason = &ended, resilience.ReasonPrefixBalanceExhausted+": HTTP 402"
+	lf := 7
+	accountIn(env.repo.accounts, 12).LoadFactor = &lf
+	env.share.refreshHealth(context.Background(), now)
+	view, err := env.share.GetPolicy(context.Background(), shareTestGroupID)
+	require.NoError(t, err)
+	raw, err := json.Marshal(env.member(t, view.Members, 11))
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"ramp_factor":0.35,`)
+	require.Contains(t, string(raw), `"effective_weight":35,`)
+	raw, err = json.Marshal(env.member(t, view.Members, 12))
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"effective_weight":3.5,`, "7 × 0.5 with two decimals")
 }

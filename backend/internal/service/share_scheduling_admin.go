@@ -110,6 +110,7 @@ func (s *ShareSchedulingService) UpdateSettings(ctx context.Context, enabled boo
 	current := s.state.Load()
 	s.state.Store(&shareSchedulingState{settings: settings, groups: current.groups})
 	s.mu.Unlock()
+	s.kickHealthIfNeeded(time.Now())
 	s.publishChange(ctx, shareSchedulingSettingsChange)
 	return s.Settings(), nil
 }
@@ -725,6 +726,10 @@ func (s *ShareSchedulingService) SavePolicy(ctx context.Context, groupID, expect
 	// The committed row is authoritative: publish it without reading it back,
 	// so a failing read cannot report a committed save as failed.
 	s.installGroup(row)
+	if s.groupPolicy(groupID) != nil {
+		// Placement weighs by health from the first request (design §11.1).
+		s.refreshGroupHealth(ctx, groupID, time.Now())
+	}
 	s.publishChange(ctx, groupID)
 	return s.policyView(ctx, group, shareStoredPolicy{row: row, policy: policy})
 }

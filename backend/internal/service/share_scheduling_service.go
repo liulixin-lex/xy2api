@@ -199,6 +199,7 @@ type ShareSchedulingService struct {
 	// health is the latest adaptive-weight refresh (design §11); outages
 	// and healthMu belong to the refresh.
 	health     atomic.Pointer[shareHealthSnapshot]
+	healthKick chan struct{}
 	outages    map[int64]shareOutageObservation
 	healthMu   sync.Mutex
 	opsEnabled bool
@@ -224,7 +225,7 @@ func NewShareSchedulingService(repo ShareSchedulingRepository, store ShareSchedu
 	node, _ := os.Hostname()
 	s := &ShareSchedulingService{repo: repo, store: store, settings: settings, node: node,
 		stats: newShareStatsRecorder(), traces: newShareTraceTable(), attribution: make(chan struct{}, shareAttributionConcurrency),
-		attributionRate: shareAttributionSampleRate, opsEnabled: true}
+		attributionRate: shareAttributionSampleRate, opsEnabled: true, healthKick: make(chan struct{}, 1)}
 	s.state.Store(&shareSchedulingState{settings: DefaultShareSchedulingSettings(), groups: map[int64]*shareGroupPolicy{}})
 	return s
 }
@@ -244,25 +245,33 @@ func (s *ShareSchedulingService) Start() {
 		}
 		loadCancel()
 		if s.store != nil {
-			s.store.SubscribeChanges(ctx, func(groupID int64) {
-				reloadCtx, reloadCancel := context.WithTimeout(ctx, shareSchedulingLoadTimeout)
-				defer reloadCancel()
-				var err error
-				if groupID == shareSchedulingSettingsChange {
-					err = s.reloadSettings(reloadCtx)
-				} else {
-					err = s.reloadGroup(reloadCtx, groupID)
-				}
-				if err != nil {
-					slog.Warn("share_scheduling.broadcast_reload_failed", "group_id", groupID, "error", err)
-				}
-			})
+			s.store.SubscribeChanges(ctx, func(groupID int64) { s.onChange(ctx, groupID) })
 		}
 		s.wg.Add(3)
 		go s.refreshLoop(ctx)
 		go s.flushLoop(ctx)
 		go s.healthLoop(ctx)
 	})
+}
+
+// onChange applies a broadcast change of a group policy or of the
+// settings.
+func (s *ShareSchedulingService) onChange(ctx context.Context, groupID int64) {
+	reloadCtx, reloadCancel := context.WithTimeout(ctx, shareSchedulingLoadTimeout)
+	defer reloadCancel()
+	var err error
+	if groupID == shareSchedulingSettingsChange {
+		err = s.reloadSettings(reloadCtx)
+	} else {
+		err = s.reloadGroup(reloadCtx, groupID)
+	}
+	if err != nil {
+		slog.Warn("share_scheduling.broadcast_reload_failed", "group_id", groupID, "error", err)
+		return
+	}
+	// A group that just started running share scheduling gets its health
+	// now, not at the next refresh.
+	s.kickHealthIfNeeded(time.Now())
 }
 
 // Stop ends the background loops and flushes pending statistics.

@@ -35,9 +35,6 @@ const (
 	shareHealthHalving  = 0.05
 	// shareHealthFloor keeps observation traffic on a down-weighted account.
 	shareHealthFloor = 0.2
-	// shareFactorStep quantizes both factors, so instances that read the
-	// same minute agree.
-	shareFactorStep = 0.05
 
 	// shareRampStart and shareRampDuration: after a long outage the weight
 	// climbs linearly from 10% to full over ten minutes.
@@ -186,8 +183,11 @@ func shareHealthFactorOf(estimate, baseline float64) float64 {
 	return math.Max(shareHealthFloor, shareQuantize(math.Pow(2, -excess/shareHealthHalving)))
 }
 
+// shareQuantize rounds a factor to a multiple of 0.05 as a clean decimal
+// (a count of twentieths divided once), so instances that read the same
+// minute agree and the API shows plain values.
 func shareQuantize(f float64) float64 {
-	return math.Round(f/shareFactorStep) * shareFactorStep
+	return math.Round(f*20) / 20
 }
 
 // shareRamp is the R2 slow start of one account.
@@ -268,7 +268,9 @@ func shareCombineWeight(acc *Account, health *float64, ramp shareRamp) shareWeig
 		h = *health
 	}
 	effective := math.Max(float64(lf)*h*ramp.Factor, float64(lf)*shareWeightFloor)
-	return shareWeightBreakdown{LoadFactor: lf, Ramp: ramp, Effective: effective}
+	// Two decimals: the API shows the weight, and every instance places
+	// with the same value.
+	return shareWeightBreakdown{LoadFactor: lf, Ramp: ramp, Effective: math.Round(effective*100) / 100}
 }
 
 // shareWeight is an account's share weight in a group: its effective load
@@ -283,8 +285,8 @@ func (s *ShareSchedulingService) shareWeight(groupID int64, acc *Account, now ti
 	var observed time.Time
 	if snap != nil {
 		observed = snap.recovered[acc.ID]
-		if snap.fresh(now) {
-			if h, ok := snap.groups[groupID][acc.ID]; ok {
+		if table, ok := snap.groups[groupID]; ok && now.Sub(table.at) <= shareHealthStale {
+			if h, ok := table.health[acc.ID]; ok {
 				health = &h
 			}
 		}
@@ -355,20 +357,19 @@ func (s *ShareSchedulingService) ensureGroupHealth(ctx context.Context, groupID 
 	s.admin.mu.Unlock()
 }
 
-// shareHealthSnapshot is the result of one refresh. It is immutable once
-// published.
+// shareHealthSnapshot is the health table of the share groups. It is
+// immutable once published.
 type shareHealthSnapshot struct {
-	at time.Time
-	// healthOK reports that R1 statistics were read; groups is empty
-	// otherwise.
-	healthOK bool
-	groups   map[int64]map[int64]shareHealth
+	// groups holds the health of each share group read at its own time; a
+	// group is absent while its statistics could not be read.
+	groups map[int64]shareGroupHealthTable
 	// recovered is when an observed outage of an account ended.
 	recovered map[int64]time.Time
 }
 
-func (s *shareHealthSnapshot) fresh(now time.Time) bool {
-	return s.healthOK && now.Sub(s.at) <= shareHealthStale
+type shareGroupHealthTable struct {
+	at     time.Time
+	health map[int64]shareHealth
 }
 
 // shareOutageObservation tracks one account across refreshes.
@@ -378,6 +379,8 @@ type shareOutageObservation struct {
 }
 
 // healthLoop refreshes the adaptive weights.
+// It refreshes at once when started, then every shareHealthRefresh, and
+// whenever kicked because a group started running share scheduling.
 func (s *ShareSchedulingService) healthLoop(ctx context.Context) {
 	defer s.wg.Done()
 	ticker := time.NewTicker(shareHealthRefresh)
@@ -390,8 +393,72 @@ func (s *ShareSchedulingService) healthLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		case <-s.healthKick:
 		}
 	}
+}
+
+// kickHealthIfNeeded asks the refresh to run now when a share group has no
+// health yet, as after a broadcast switch. Kicks while one is pending are
+// merged.
+func (s *ShareSchedulingService) kickHealthIfNeeded(now time.Time) {
+	snap := s.health.Load()
+	for _, gid := range s.effectiveShareGroups() {
+		if snap != nil {
+			if table, ok := snap.groups[gid]; ok && now.Sub(table.at) <= shareHealthStale {
+				continue
+			}
+		}
+		select {
+		case s.healthKick <- struct{}{}:
+		default:
+		}
+		return
+	}
+}
+
+// refreshGroupHealth puts the health of one share group in the table at
+// once, for the instance that saves its switch to share scheduling: the
+// confirmation showed shares with health, and placement follows them from
+// the first request. The health the confirmation read is reused while it is
+// fresh.
+func (s *ShareSchedulingService) refreshGroupHealth(ctx context.Context, groupID int64, now time.Time) {
+	s.healthMu.Lock()
+	defer s.healthMu.Unlock()
+	if s.repo == nil || !resilience.Current().FailureOn() || !s.opsMonitoringOn(ctx) {
+		return
+	}
+	s.admin.mu.Lock()
+	cached, ok := s.admin.health[groupID]
+	s.admin.mu.Unlock()
+	table := shareGroupHealthTable{at: cached.at, health: cached.value}
+	if !ok || now.Sub(cached.at) >= shareHealthOnDemandTTL {
+		members, err := s.shareMembers(ctx, groupID)
+		if err != nil {
+			slog.Warn("share_scheduling.health_members_failed", "group_id", groupID, "error", err)
+			return
+		}
+		accounts := make(map[int64]*Account, len(members))
+		for i := range members {
+			accounts[members[i].ID] = &members[i]
+		}
+		stats, err := s.readHealthStats(ctx, accounts, now)
+		if err != nil {
+			slog.Warn("share_scheduling.health_read_failed", "group_id", groupID, "error", err)
+			return
+		}
+		table = shareGroupHealthTable{at: now, health: shareGroupHealth(members, stats)}
+	}
+	next := &shareHealthSnapshot{groups: map[int64]shareGroupHealthTable{groupID: table}}
+	if old := s.health.Load(); old != nil {
+		for gid, t := range old.groups {
+			if gid != groupID {
+				next.groups[gid] = t
+			}
+		}
+		next.recovered = old.recovered
+	}
+	s.health.Store(next)
 }
 
 // effectiveShareGroups lists the groups that run share scheduling now.
@@ -451,14 +518,13 @@ func (s *ShareSchedulingService) refreshHealth(ctx context.Context, now time.Tim
 			accounts[list[i].ID] = &list[i]
 		}
 	}
-	snap := &shareHealthSnapshot{at: now, groups: map[int64]map[int64]shareHealth{}, recovered: s.observeOutages(accounts, now)}
+	snap := &shareHealthSnapshot{groups: map[int64]shareGroupHealthTable{}, recovered: s.observeOutages(accounts, now)}
 	if s.repo != nil && s.opsMonitoringOn(ctx) {
 		if stats, err := s.readHealthStats(ctx, accounts, now); err != nil {
 			slog.Warn("share_scheduling.health_read_failed", "error", err)
 		} else {
-			snap.healthOK = true
 			for gid, list := range members {
-				snap.groups[gid] = shareGroupHealth(list, stats)
+				snap.groups[gid] = shareGroupHealthTable{at: now, health: shareGroupHealth(list, stats)}
 			}
 		}
 	}
