@@ -41,7 +41,7 @@ interface Band {
 
 /**
  * Initial thresholds, to be calibrated against production (待生产校准).
- * Sources: the UX audit §6.3 and the group 18 readiness review §0.3.
+ * Sources: the UX audit §6.3 and the share readiness review §0.3.
  * Ratios are fractions: 0.01 is one percentage point. A band without a
  * rollback level only ever asks for attention.
  *
@@ -137,9 +137,9 @@ export function judgeShareHealth(current: ShareMetrics, baseline: ShareMetrics |
 }
 
 /**
- * Share of selections that moved a warm session on share scheduling's own
- * account (not a failover) above which the readiness review §0.3 advises
- * going back to the original scheduler.
+ * Share of selections in which share scheduling itself moved a warm session
+ * (not an outage or a failover) above which the share readiness review
+ * §0.3 advises going back to the original scheduler.
  */
 export const SHARE_HOT_MIGRATION_LIMIT = 0.001
 

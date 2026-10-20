@@ -278,8 +278,13 @@ export interface ShareReportDetails {
   waits?: { count: number; hit: number; avg_ms: number } | null
   attempts?: number | null
   share_requests?: number | null
-  /** Warm sessions share scheduling moved on its own (not failover), by reason; share mode only. */
-  hot_migrations?: { total: number; by_reason: Record<string, number> } | null
+  /**
+   * Sessions moved to another account while their cache was still warm;
+   * share mode only. `total` counts every such move, most of them forced by
+   * an unavailable account or a failure; `active` counts the moves share
+   * scheduling chose itself, which by design should stay at 0.
+   */
+  hot_migrations?: { total: number; active: number; by_reason: Record<string, number> } | null
 }
 
 /** Where the switch time comes from: the switch record, or the policy's updated_at when the record is missing. */
