@@ -11,16 +11,20 @@
           <ShareBarList :title="t('admin.shareScheduling.details.reasons')" :values="report.details.reasons ?? undefined" :label="labels.reason" :empty="t('admin.shareScheduling.details.noData')" />
           <ShareBarList :title="t('admin.shareScheduling.details.skipped')" :values="skipped" :label="labels.reason" :empty="t('admin.shareScheduling.details.noData')" bar-class="bg-amber-500" />
         </div>
-        <div v-if="hot" data-testid="share-hot-migrations">
+        <div v-if="hot" class="space-y-2" data-testid="share-hot-migrations">
           <p
+            v-if="hot.active > 0"
             class="rounded-lg px-3 py-2 text-sm"
             :class="hot.over ? 'bg-amber-50 text-amber-800 dark:bg-amber-900/20 dark:text-amber-200' : 'text-gray-700 dark:text-dark-200'"
-            :data-testid="hot.over ? 'share-hot-migrations-over' : 'share-hot-migrations-line'"
+            :data-testid="hot.over ? 'share-hot-migrations-over' : 'share-hot-migrations-active'"
           >
-            {{ t('admin.shareScheduling.details.hotMigrations', { count: formatNumber(hot.total), ratio: hot.ratio === null ? '—' : formatSharePercent(hot.ratio, 2) }) }}
+            {{ t('admin.shareScheduling.details.hotMigrationsActive', { count: formatNumber(hot.active), ratio: hot.ratio === null ? '—' : formatSharePercent(hot.ratio, 2) }) }}
             <template v-if="hot.over"> · {{ t('admin.shareScheduling.details.hotMigrationsOver', { limit: formatSharePercent(SHARE_HOT_MIGRATION_LIMIT, 1) }) }}</template>
           </p>
-          <ShareBarList v-if="hot.total > 0" class="mt-3" :title="t('admin.shareScheduling.details.hotMigrationReasons')" :values="hot.byReason" :label="labels.reason" :empty="t('admin.shareScheduling.details.noData')" bar-class="bg-red-500" />
+          <p class="text-sm text-gray-700 dark:text-dark-200" data-testid="share-hot-migrations-total">
+            {{ t('admin.shareScheduling.details.hotMigrationsTotal', { count: formatNumber(hot.total) }) }}
+          </p>
+          <ShareBarList v-if="hot.total > 0" :title="t('admin.shareScheduling.details.hotMigrationReasons')" :values="hot.byReason" :label="labels.reason" :empty="t('admin.shareScheduling.details.noData')" bar-class="bg-red-500" />
         </div>
         <p v-if="report.details.waits && report.details.waits.count > 0" class="text-sm text-gray-700 dark:text-dark-200">
           {{ t('admin.shareScheduling.details.waits', { count: formatNumber(report.details.waits.count), hit: formatNumber(report.details.waits.hit), avg: formatShareMs(report.details.waits.avg_ms) }) }}
@@ -51,12 +55,17 @@ const labels = useShareSchedulingLabels()
 /** Cache attribution weighed by input tokens. */
 const cacheTokens = computed(() => Object.fromEntries(Object.entries(props.report?.details.cache_classes ?? {}).map(([key, value]) => [key, value.tokens])))
 
-/** Warm sessions share scheduling moved on its own, against its selections. */
+/**
+ * Warm sessions moved to another account. Only the moves share scheduling
+ * chose itself count against the rollback line; the rest, forced by outages
+ * and failures, are shown for information.
+ */
 const hot = computed(() => {
   const migrations = props.report?.details.hot_migrations
   if (!migrations) return null
-  const ratio = shareHotMigrationRatio(migrations.total, props.report?.details.share_requests ?? props.report?.current.requests)
-  return { total: migrations.total, byReason: migrations.by_reason ?? {}, ratio, over: ratio !== null && ratio > SHARE_HOT_MIGRATION_LIMIT }
+  const active = migrations.active ?? 0
+  const ratio = shareHotMigrationRatio(active, props.report?.details.share_requests ?? props.report?.current.requests)
+  return { total: migrations.total, active, byReason: migrations.by_reason ?? {}, ratio, over: ratio !== null && ratio > SHARE_HOT_MIGRATION_LIMIT }
 })
 
 /** Why accounts were passed over, summed across accounts. */

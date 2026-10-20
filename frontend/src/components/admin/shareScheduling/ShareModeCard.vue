@@ -61,7 +61,11 @@
     <p v-if="view.legacy_shadow" class="mt-3 rounded-xl bg-sky-50 px-3 py-2 text-sm text-sky-800 dark:bg-sky-900/20 dark:text-sky-200" data-testid="share-legacy-shadow">
       {{ t('admin.shareScheduling.mode.legacyShadow') }}
     </p>
-    <p v-if="view.scheduler === 'share' && !view.effective" class="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200" data-testid="share-not-effective">
+    <p v-if="store.globalError !== null" class="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200" role="alert" data-testid="share-global-failed">
+      {{ t('admin.shareScheduling.mode.globalFailed') }}
+      <span v-if="store.globalError" class="block text-xs">{{ store.globalError }}</span>
+    </p>
+    <p v-else-if="view.scheduler === 'share' && !view.effective" class="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200" data-testid="share-not-effective">
       {{ t('admin.shareScheduling.mode.notEffective') }}
     </p>
     <div v-if="store.conflict" class="mt-3 flex flex-wrap items-center gap-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200" role="alert" data-testid="share-conflict">

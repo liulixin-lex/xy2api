@@ -166,6 +166,26 @@ describe('share scheduling page', () => {
     expect(w.find('[data-testid="share-conflict"]').exists()).toBe(false)
   })
 
+  it('explains a switch to share that saved the group but not the main switch', async () => {
+    api.getSettings.mockResolvedValue({ enabled: false })
+    api.getPolicy.mockImplementation(async (id: number) => shareView(id, { scheduler: 'sub2api', enabled: false, effective: false, version: 3 }))
+    api.updatePolicy.mockImplementation(async (id: number) => shareView(id, { scheduler: 'share', enabled: false, effective: false, version: 4 }))
+    api.preview.mockResolvedValue(sharePreview({ enabled: false, effective_after: false }))
+    router.query = { group: '5' }
+    const w = mountView()
+    await flushPromises()
+    api.updateSettings.mockRejectedValueOnce({ status: 500, message: 'settings down' })
+    await w.get('[data-testid="share-switch"]').trigger('click')
+    await flushPromises()
+    await w.get('[data-testid="share-change-confirm"]').trigger('click')
+    await flushPromises()
+    const alert = w.get('[data-testid="share-global-failed"]')
+    expect(alert.attributes('role')).toBe('alert')
+    expect(alert.text()).toContain('admin.shareScheduling.mode.globalFailed')
+    expect(alert.text()).toContain('settings down')
+    expect(w.find('[data-testid="share-not-effective"]').exists()).toBe(false)
+  })
+
   it('judges health against the baseline and lists what needs attention', async () => {
     const w = mountView()
     await flushPromises()
@@ -213,6 +233,14 @@ describe('share scheduling page', () => {
     // Short headers; the hover hints say the window and which failures count.
     expect(w.get('[data-testid="share-traffic-actual-header"]').attributes('title')).toBe('admin.shareScheduling.traffic.actualHint')
     expect(w.get('[data-testid="share-traffic-failure-header"]').attributes('title')).toBe('admin.shareScheduling.traffic.failureHint')
+    // Keyboards reach the headers, and screen readers read the hints as their description.
+    for (const [id, hint] of [['actual', 'actualHint'], ['failure', 'failureHint']]) {
+      const header = w.get(`[data-testid="share-traffic-${id}-header"]`)
+      expect(header.attributes('tabindex')).toBe('0')
+      const describedBy = header.attributes('aria-describedby')
+      expect(describedBy).toBeTruthy()
+      expect(w.get(`[id="${describedBy}"]`).text()).toBe(`admin.shareScheduling.traffic.${hint}`)
+    }
   })
 
   it('marks automatic factors next to the expected share with the breakdown', async () => {
@@ -250,6 +278,17 @@ describe('share scheduling page', () => {
     expect(w.get('[data-testid="share-failure-2"]').classes()).toContain('text-red-700')
     // Ramping accounts are marked in the table only.
     expect(w.get('[data-testid="share-attention"]').text()).not.toContain('gamma')
+  })
+
+  it('shows a zero actual share as 0% and only a missing one as a dash', async () => {
+    api.getPolicy.mockImplementation(async (id: number) => shareView(id, {
+      scheduler: 'share',
+      members: [shareMember(1, { actual_share_1h: 0 }), shareMember(2, { actual_share_1h: null })]
+    }))
+    const w = mountView()
+    await flushPromises()
+    expect(w.get('[data-testid="share-actual-1"]').text()).toBe('0.0%')
+    expect(w.get('[data-testid="share-actual-2"]').text()).toBe('—')
   })
 
   it('explains an unset load factor on hover and in the empty editor', async () => {
