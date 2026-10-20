@@ -320,13 +320,10 @@ func TestTierOverflowUnavailableAndIdealAttribution(t *testing.T) {
 	cands[0].Reason = ReasonQuotaExceeded
 	d := Plan(newSession("s"), cands)
 	require.Equal(t, ReasonTierOverflowUnavailable, d.Reason)
-	require.Equal(t, int64(1), d.Ideal)
-	require.Equal(t, ReasonQuotaExceeded, d.IdealSkipReason(2, nil))
+	require.Equal(t, int64(1), d.Ideal, "the ideal ignores health")
 
 	d = Plan(newSession("s"), members(member(1, 1, 1), member(2, 2, 1)))
 	require.Equal(t, int64(1), d.Ideal)
-	require.Empty(t, d.IdealSkipReason(1, nil))
-	require.Equal(t, ReasonSaturated, d.IdealSkipReason(2, map[int64]Reason{1: ReasonSaturated}))
 }
 
 func TestWaitBudget(t *testing.T) {

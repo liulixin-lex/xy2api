@@ -681,6 +681,7 @@ func TestShareAdminReportOnOriginalScheduler(t *testing.T) {
 	require.Equal(t, ShareSchedulingCacheClass{Requests: 6, Tokens: 750}, report.Details.CacheClasses[shareCacheHit])
 	require.Nil(t, report.Details.Reasons, "decision details are share mode only")
 	require.Nil(t, report.Details.Waits)
+	require.Nil(t, report.Details.HotMigrations)
 	require.Len(t, report.Accounts, 2)
 	require.InDelta(t, 0.75, report.Accounts[0].RequestShare, 1e-9)
 	require.Nil(t, report.Accounts[0].Skipped)
@@ -731,6 +732,15 @@ func TestShareAdminReportComparesWithTheWindowBeforeTheSwitch(t *testing.T) {
 	require.Equal(t, int64(6), report.Details.Reasons[string(sharesched.ReasonSessionless)])
 	require.Positive(t, report.Accounts[0].Skipped[string(sharesched.ReasonSaturated)], "the busy account is reported as saturated")
 	require.Nil(t, report.CountersError)
+	require.Equal(t, &ShareSchedulingHotMigrations{Total: 0, ByReason: map[string]int64{}}, report.Details.HotMigrations)
+
+	env.store.add(shareStatsKindShare, shareTestGroupID, time.Now(), map[string]int64{
+		shareStatsHotMigrationField: 3, shareStatsHotPrefix + string(sharesched.ReasonSpillRebind): 2,
+		shareStatsHotPrefix + string(sharesched.ReasonRebindUnavailable): 1})
+	report, err = env.share.Report(context.Background(), shareTestGroupID, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, &ShareSchedulingHotMigrations{Total: 3, ByReason: map[string]int64{"spill_rebind": 2, "rebind_unavailable": 1}},
+		report.Details.HotMigrations, "warm sessions moved by share scheduling, a readiness rollback criterion")
 }
 
 func TestShareAdminReportBaselineFallbacks(t *testing.T) {

@@ -19,11 +19,7 @@ const (
 	shareStatsDroppedField      = "dropped"
 	shareStatsRequestsField     = "requests"
 	shareStatsReasonPrefix      = "reason:"
-	shareStatsServedPrefix      = "served:"
-	shareStatsIdealPrefix       = "ideal:"
-	shareStatsIdealSkipPrefix   = "ideal_skip:"
 	shareStatsSkipPrefix        = "skip:" // + account + ":" + reason: tried but passed over
-	shareStatsKeySourcePrefix   = "key:"
 	shareStatsHotMigrationField = "hot_migration"
 	shareStatsHotPrefix         = "hot:"
 	shareStatsWaitCountField    = "wait_count"

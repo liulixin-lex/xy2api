@@ -276,7 +276,6 @@ func TestShareSchedulingE2EWeightsOutagesAndPolicyChanges(t *testing.T) {
 	require.InDelta(t, 0.6, float64(moved[b])/float64(len(onA)), 0.05, "B takes three fifths of A's sessions")
 	require.Equal(t, int64(len(onA)), e.counter(shareStatsReasonPrefix+string(sharesched.ReasonRebindUnavailable)))
 	require.Equal(t, int64(len(onA)), e.cacheCounter(shareStatsClassPrefix+shareCacheMissSwitchDown)-switchMisses)
-	require.GreaterOrEqual(t, e.counter(shareStatsIdealSkipPrefix+string(sharesched.ReasonRateLimited)), int64(len(onA)))
 	require.Equal(t, int64(len(onA)), e.counter(shareStatsHotMigrationField), "only the outage moved warm sessions")
 	e.rateLimit(a, nil)
 

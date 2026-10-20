@@ -139,37 +139,6 @@ func (d Decision) Outcome(index int) (Reason, Write) {
 	return d.Reason, d.Spill
 }
 
-// IdealSkipReason explains why the ideal account did not serve. skipped
-// holds accounts the adapter passed over (saturated, session limit).
-func (d Decision) IdealSkipReason(served int64, skipped map[int64]Reason) Reason {
-	if d.Ideal == 0 || served == d.Ideal {
-		return ""
-	}
-	for i := range d.Entries {
-		e := &d.Entries[i]
-		if e.AccountID != d.Ideal {
-			continue
-		}
-		switch {
-		case !e.Eligible:
-			if e.Reason != "" {
-				return e.Reason
-			}
-			return ReasonIneligible
-		case e.Excluded:
-			if e.Reason == ReasonResilFailureStreak {
-				return e.Reason
-			}
-			return ReasonExcludedInRequest
-		}
-		if reason, ok := skipped[d.Ideal]; ok {
-			return reason
-		}
-		return d.Reason
-	}
-	return ReasonNotSchedulable
-}
-
 // Plan computes the placement for one request. It is a pure function of its
 // inputs: identical inputs give identical decisions on every instance. The
 // tier of a candidate is its priority and its weight its load factor.

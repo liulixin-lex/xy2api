@@ -1035,6 +1035,13 @@ type ShareSchedulingWaits struct {
 	AvgMs *float64 `json:"avg_ms"`
 }
 
+// ShareSchedulingHotMigrations counts sessions that share scheduling moved
+// off an account whose cache was still warm, by decision reason.
+type ShareSchedulingHotMigrations struct {
+	Total    int64            `json:"total"`
+	ByReason map[string]int64 `json:"by_reason"`
+}
+
 // ShareSchedulingReportDetails are the counters of the current window.
 // CacheClasses exist in both modes; the rest only in share mode.
 type ShareSchedulingReportDetails struct {
@@ -1043,6 +1050,7 @@ type ShareSchedulingReportDetails struct {
 	Waits         *ShareSchedulingWaits                `json:"waits,omitempty"`
 	Attempts      *int64                               `json:"attempts,omitempty"`
 	ShareRequests *int64                               `json:"share_requests,omitempty"`
+	HotMigrations *ShareSchedulingHotMigrations        `json:"hot_migrations,omitempty"`
 }
 
 // ShareSchedulingReport compares a window with the window before the
@@ -1257,6 +1265,8 @@ func shareReportDetails(cache, counters map[string]int64, share bool) ShareSched
 	}
 	attempts, requests := counters[shareStatsAttemptsField], counters[shareStatsRequestsField]
 	details.Reasons, details.Waits, details.Attempts, details.ShareRequests = collectPrefixed(counters, shareStatsReasonPrefix), waits, &attempts, &requests
+	details.HotMigrations = &ShareSchedulingHotMigrations{Total: counters[shareStatsHotMigrationField],
+		ByReason: collectPrefixed(counters, shareStatsHotPrefix)}
 	return details
 }
 

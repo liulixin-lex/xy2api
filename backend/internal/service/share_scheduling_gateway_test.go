@@ -336,7 +336,7 @@ func TestShareSchedulingSpillsAndRebindsWhenBoundIsSaturated(t *testing.T) {
 	require.True(t, result.Acquired)
 	require.Equal(t, other, env.cache.sessionBindings["busy"], "a spill rebinds: the cache moves with the session")
 	require.Equal(t, int64(1), env.counter(shareStatsReasonPrefix+string(sharesched.ReasonSpillRebind)))
-	require.Equal(t, int64(1), env.counter(shareStatsIdealSkipPrefix+string(sharesched.ReasonSaturated)))
+	require.Equal(t, int64(1), env.counter(fmt.Sprintf("%s%d:%s", shareStatsSkipPrefix, target, sharesched.ReasonSaturated)))
 }
 
 func TestShareSchedulingWaitsBoundedlyForWarmBoundAccount(t *testing.T) {

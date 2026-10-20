@@ -76,7 +76,7 @@ func (s *OpenAIGatewayService) selectAccountWithShareScheduling(ctx context.Cont
 		if trace := shareSelectionTraceFrom(ctx); trace != nil {
 			trace.reason = sharesched.ReasonOwnerContinuation
 		}
-		svc.recordDecision(shareDecisionRecord{gp: gp, source: sharesched.KeyContinuation},
+		svc.recordDecision(shareDecisionRecord{gp: gp},
 			sharesched.Decision{Reason: sharesched.ReasonOwnerContinuation, Target: selection.Account.ID, Ideal: selection.Account.ID},
 			&shareOutcome{served: selection.Account.ID, reason: sharesched.ReasonOwnerContinuation, attempts: 1})
 		return selection, decision, nil
@@ -102,8 +102,8 @@ func (s *OpenAIGatewayService) selectAccountWithShareScheduling(ctx context.Cont
 	if len(accounts) == 0 {
 		return nil, decision, noAvailableOpenAISelectionError(in.model, false, stats.summary(""))
 	}
-	req, source := svc.newRequest(ctx, gp, in.platform, in.model, sessionHash, binding)
-	rec := shareDecisionRecord{gp: gp, source: source, idle: req.Binding.Idle, cache: req.Cache}
+	req, _ := svc.newRequest(ctx, gp, in.platform, in.model, sessionHash, binding)
+	rec := shareDecisionRecord{gp: gp, idle: req.Binding.Idle, cache: req.Cache}
 	exec := &shareExecutor{ctx: ctx, gp: gp, cache: s.cache, concurrency: s.concurrencyService, cfg: s.schedulingConfig(),
 		key: cacheKey, accounts: accounts, createOnRefresh: legacy, loadGate: true, loadOrder: shareLoadOrder(cands),
 		limit: func(acc *Account) int { return s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency) },
