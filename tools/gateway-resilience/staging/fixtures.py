@@ -81,6 +81,19 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-share-lr": ("openai", [("lr-a", "F07;tag=lr-a", 5), ("lr-b", "F07;tag=lr-b", 1)], {}),
     # Review F1: one slot; a second stream queues, gets pings, then leaves.
     "G-queue": ("openai", [("q-busy", "F01;secs=20", 1)], {"concurrency": 1}),
+    # 0.4.2: opening events only (DC-6), silent upstream at xhigh/max
+    # (FO-2/FO-3), two processes on one Redis (LEASE-1).
+    "G-msg-long": ("openai", [("msg-long", "F17;first=150", 1)],
+                   {"allow_messages_dispatch": True, "default_mapped_model": "gpt-6.1-sol"}),
+    "G-silent": ("openai", [("silent-a", "F17;first=400", 1), ("silent-ok", "F00", 2)], {}),
+    "G-lease": ("openai", [("lease-one", "F17;first=25", 1)], {"concurrency": 1}),
+    # 0.4.2 review G1: the Chat and Messages conversions on an OpenAI
+    # Responses upstream get the header guard and the stall bookkeeping.
+    "G-cv-headers": ("openai", [("cvh-silent", "F01;secs=400", 1), ("cvh-ok", "F00", 2)],
+                     {"allow_messages_dispatch": True, "default_mapped_model": "gpt-6.1-sol"}),
+    "G-cv-stall-chat": ("openai", [("cvs-chat", "F06;secs=290", 1)], {}),
+    "G-cv-stall-msg": ("openai", [("cvs-msg", "F06;secs=290", 1)],
+                       {"allow_messages_dispatch": True, "default_mapped_model": "gpt-6.1-sol"}),
     # R2: a relay failing streams after output; the healthy account is second.
     "G-post-output": ("openai", [("po-fail", "F26;after=1", 1), ("po-ok", "F00", 2)], {}),
     # R3: a Codex backend relay rejects web_search_call history without the declaration.

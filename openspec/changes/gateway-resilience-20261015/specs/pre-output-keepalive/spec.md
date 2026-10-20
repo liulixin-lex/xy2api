@@ -81,7 +81,7 @@ For OpenAI text requests, each attempt MUST have a first-output timeout, measure
 - 220 s for max;
 - any per-model override.
 
-Anthropic and Gemini attempts MUST have a first-upstream-event timeout (default 90 s). On timeout the attempt MUST be classified `FIRST_OUTPUT_TIMEOUT` and the gateway MUST switch accounts within the budget. The attempt on the last available candidate, including the only usable account of a group, MUST NOT have a per-attempt timeout, only the pre-output deadline. The previous limit of one first-output switch MUST be removed.
+Anthropic and Gemini attempts MUST have a first-upstream-event timeout (default 90 s). On timeout the attempt MUST be classified `FIRST_OUTPUT_TIMEOUT` and the gateway MUST switch accounts within the budget. The attempt on the last available candidate, including the only account of a group that can serve the request (other accounts that do not serve the requested model, are hard-limited for it or already failed in this request do not count, 0.4.2), MUST NOT have a per-attempt timeout, only the pre-output deadline. The previous limit of one first-output switch MUST be removed.
 
 #### Scenario: Slow relay is abandoned in time
 - **WHEN** a medium-effort request gets no output from account A within 180 s and account B is available
@@ -91,6 +91,14 @@ Anthropic and Gemini attempts MUST have a first-upstream-event timeout (default 
 #### Scenario: Last candidate waits for the budget
 - **WHEN** account A is the only candidate
 - **THEN** the attempt continues past 180 s until output arrives or the 240 s pre-output deadline ends it.
+
+#### Scenario: Another account serves only other models
+- **WHEN** account A is the only account of the group that serves the requested model and account B serves other models only
+- **THEN** A's attempt has no per-attempt timeout.
+
+#### Scenario: Silent upstream at xhigh
+- **WHEN** an xhigh request on account A gets response headers and then no data, and account B is available
+- **THEN** the gateway switches to B at 200 s instead of ending the request at 180 s.
 
 ### Requirement: Relay keep-alive frames are not output
 
@@ -118,7 +126,7 @@ In semantic first-token mode (`openai_ttft_mode=semantic`, the default), the fir
 
 ### Requirement: Accurate stall detection
 
-Stream inactivity MUST be checked at a period of at most `min(threshold/4, 5 s)`, so detection happens no later than the threshold plus 5 s. After semantic output has started, a text stream with no upstream data for `stall.text_stall_seconds` (default 120 s) MUST be ended as `STALL`. Image streams MUST keep `image_stream_data_interval_timeout`.
+Stream inactivity MUST be checked at a period of at most `min(threshold/4, 5 s)`, so detection happens no later than the threshold plus 5 s. After semantic output has started, a text stream with no upstream data for `stall.text_stall_seconds` (default 120 s) MUST be ended as `STALL`, and the turn MUST count as failed for the turn cap. Image streams MUST keep `image_stream_data_interval_timeout`. Before any output reached the client, an OpenAI attempt whose first-output timeout is armed MUST be left to that timeout, which switches accounts (0.4.2); the stall check MUST NOT end it first.
 
 #### Scenario: Stall detected within the threshold
 - **WHEN** the upstream stops sending after partial output

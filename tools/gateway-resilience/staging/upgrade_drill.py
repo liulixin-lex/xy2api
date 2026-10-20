@@ -2,19 +2,21 @@
 """Upgrade, rollback, roll-forward and backup/restore drill
 (staging-validation §7) on the isolated database xy2api_upgrade.
 
-  1. 0.3.0 on an empty database; admin, compliance, one group, account, key;
+  1. the old release (0.3.0, or UPGRADE_FROM) on an empty database; admin,
+     compliance, one group, account, key;
   2. production-sized synthetic rows (usage_logs 3.3 M, ops_system_logs
      5.8 M, ops_error_logs 370 k, usage_billing_dedup 3.3 M, accounts 400,
      users 1 900, api_keys 25 k) — no real data;
   3. the candidate: migration time, the longest blocked probe on usage_logs
      while migrating, table sizes; a gateway request and a settings change;
-  4. back to 0.3.0: health, login, gateway request, billing row;
+  4. back to the old release: health, login, gateway request, billing row;
   5. forward to the candidate again: settings kept;
   6. pg_dump / pg_restore of the whole database, row counts compared.
 
 Every app container is temporary (port 127.0.0.1:18216, Redis db 3) and is
 removed at the end. Run on the staging host from the staging directory:
     ACCEPT_ADMIN_COMPLIANCE=1 python3 upgrade_drill.py
+    UPGRADE_FROM=ghcr.io/liulixin-lex/xy2api:0.4.1 ACCEPT_ADMIN_COMPLIANCE=1 python3 upgrade_drill.py
 """
 
 from __future__ import annotations
@@ -29,7 +31,8 @@ import urllib.error
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OLD = "ghcr.io/liulixin-lex/xy2api:0.3.0"
+OLD = os.environ.get("UPGRADE_FROM") or "ghcr.io/liulixin-lex/xy2api:0.3.0"
+OLD_TAG = OLD.rsplit(":", 1)[-1]
 DB = "xy2api_upgrade"
 NAME = "xy2api-staging-upgrade"
 PORT = 18216
@@ -201,7 +204,7 @@ def main() -> int:
     psql("INSERT INTO ops_alert_rules (name, description, enabled, metric_type, operator, threshold, window_minutes, "
          "sustained_minutes, severity, notify_email, cooldown_minutes, created_at, updated_at) VALUES "
          "('上游余额长期未恢复', 'drill', false, 'account_error_count', '>', 0, 5, 1, 'P3', false, 60, NOW(), NOW())")
-    step("0.3.0 on an empty database", start_s=took, gateway=gateway_request(key))
+    step(f"{OLD_TAG} on an empty database", start_s=took, gateway=gateway_request(key))
 
     started = time.time()
     psql(SYNTH.format(group_id=gid))
@@ -251,7 +254,7 @@ def main() -> int:
     gw = gateway_request(key)
     time.sleep(3)
     after = int(psql("SELECT count(*) FROM usage_logs WHERE api_key_id=(SELECT id FROM api_keys WHERE name='drill-key')"))
-    step("roll back to 0.3.0", start_s=took, login="ok", gateway=gw, billed_rows=after - before)
+    step(f"roll back to {OLD_TAG}", start_s=took, login="ok", gateway=gw, billed_rows=after - before)
 
     sh("docker", "stop", "-t", "30", NAME)
     took = start(NEW)

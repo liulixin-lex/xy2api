@@ -49,7 +49,7 @@ func TestApplyServiceTierBillingResolutionOnlyRewritesDowngrades(t *testing.T) {
 	t.Run("openai downgrade rewrites tier", func(t *testing.T) {
 		requested := "priority"
 		result := &OpenAIForwardResult{ServiceTier: &requested, UpstreamResponseServiceTier: "default"}
-		resolution := ApplyOpenAIServiceTierBillingResolution(&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, result)
+		resolution := ApplyOpenAIServiceTierBillingResolution(&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, nil, result)
 		require.True(t, resolution.Downgraded)
 		require.NotNil(t, result.ServiceTier)
 		require.Equal(t, "default", *result.ServiceTier)
@@ -58,13 +58,13 @@ func TestApplyServiceTierBillingResolutionOnlyRewritesDowngrades(t *testing.T) {
 	t.Run("openai honoured tier keeps pointer", func(t *testing.T) {
 		requested := "priority"
 		result := &OpenAIForwardResult{ServiceTier: &requested, UpstreamResponseServiceTier: "priority"}
-		require.False(t, ApplyOpenAIServiceTierBillingResolution(&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, result).Downgraded)
+		require.False(t, ApplyOpenAIServiceTierBillingResolution(&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, nil, result).Downgraded)
 		require.Same(t, &requested, result.ServiceTier)
 	})
 
 	t.Run("openai untiered request stays nil", func(t *testing.T) {
 		result := &OpenAIForwardResult{UpstreamResponseServiceTier: "priority"}
-		require.False(t, ApplyOpenAIServiceTierBillingResolution(&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, result).Downgraded)
+		require.False(t, ApplyOpenAIServiceTierBillingResolution(&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, nil, result).Downgraded)
 		require.Nil(t, result.ServiceTier)
 	})
 
@@ -74,6 +74,7 @@ func TestApplyServiceTierBillingResolutionOnlyRewritesDowngrades(t *testing.T) {
 			result := &OpenAIForwardResult{ServiceTier: &requested, UpstreamResponseServiceTier: "default"}
 			resolution := ApplyOpenAIServiceTierBillingResolution(
 				&Account{Platform: PlatformOpenAI, Type: accountType},
+				nil,
 				result,
 			)
 			require.False(t, resolution.Downgraded)
@@ -88,6 +89,7 @@ func TestApplyServiceTierBillingResolutionOnlyRewritesDowngrades(t *testing.T) {
 			result := &OpenAIForwardResult{ServiceTier: &requested, UpstreamResponseServiceTier: "flex"}
 			resolution := ApplyOpenAIServiceTierBillingResolution(
 				&Account{Platform: PlatformOpenAI, Type: accountType},
+				nil,
 				result,
 			)
 			require.True(t, resolution.Downgraded)
@@ -99,6 +101,7 @@ func TestApplyServiceTierBillingResolutionOnlyRewritesDowngrades(t *testing.T) {
 			result := &OpenAIForwardResult{UpstreamResponseServiceTier: "priority"}
 			resolution := ApplyOpenAIServiceTierBillingResolution(
 				&Account{Platform: PlatformOpenAI, Type: accountType},
+				nil,
 				result,
 			)
 			require.False(t, resolution.Downgraded)
@@ -112,6 +115,7 @@ func TestApplyServiceTierBillingResolutionOnlyRewritesDowngrades(t *testing.T) {
 		result := &OpenAIForwardResult{ServiceTier: &requested, UpstreamResponseServiceTier: "default"}
 		resolution := ApplyOpenAIServiceTierBillingResolution(
 			&Account{Platform: PlatformGrok, Type: AccountTypeOAuth},
+			nil,
 			result,
 		)
 		require.True(t, resolution.Downgraded)
@@ -127,7 +131,7 @@ func TestApplyServiceTierBillingResolutionOnlyRewritesDowngrades(t *testing.T) {
 	})
 
 	t.Run("nil results are ignored", func(t *testing.T) {
-		require.False(t, ApplyOpenAIServiceTierBillingResolution(nil, nil).Downgraded)
+		require.False(t, ApplyOpenAIServiceTierBillingResolution(nil, nil, nil).Downgraded)
 		require.False(t, ApplyForwardServiceTierBillingResolution(nil).Downgraded)
 	})
 }

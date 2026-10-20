@@ -179,6 +179,13 @@ func (s *OpenAIGatewayService) shareOpenAILastResort(ctx context.Context, gp *sh
 		key: cacheKey, ttl: time.Duration(gp.policy.Affinity.TTLSeconds) * time.Second, accounts: round.accounts,
 		createOnRefresh: legacy, reason: sharesched.ReasonLastResortSoft,
 		limit: func(acc *Account) int { return s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency) },
+		verify: func(acc *Account) (*Account, sharesched.Reason) {
+			// The plan used a 2 s group list (review R09).
+			if fresh, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, acc, req.RequestedModel, s.resilienceOpenAIPenaltyOf); ok {
+				return fresh, ""
+			}
+			return nil, sharesched.ReasonIneligible
+		},
 		admit: func(*Account) bool { return true },
 		newResult: func(acc *Account, acquired bool, release func(), wait *AccountWaitPlan) (*AccountSelectionResult, error) {
 			return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: acc, Acquired: acquired, ReleaseFunc: release, WaitPlan: wait}), nil

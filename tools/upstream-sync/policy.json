@@ -229,6 +229,14 @@
   },
   "required_literals": [
     {
+      "path": "backend/internal/service/openai_gateway_request_body.go",
+      "value": "if openAIGroupForcesFast(ctx, account) {\n\t\treturn OpenAIFastPolicyActionForcePriority, \"\""
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "ApplyOpenAIServiceTierBillingResolution(billingAccount, apiKey.Group, result)"
+    },
+    {
       "path": "backend/go.mod",
       "value": "module github.com/liulixin-lex/xy2api"
     },
@@ -653,6 +661,10 @@
       "value": "// nonce, so it is never answered with 304 and has no ETag"
     },
     {
+      "path": "backend/internal/web/embed_on.go",
+      "value": "trimmed == \"/ready\" ||"
+    },
+    {
       "path": "backend/internal/service/openai_gateway_forward.go",
       "value": "webSearchReplay, webSearchBody := armOpenAIWebSearchReplay(c, account, body, false)"
     },
@@ -729,6 +741,128 @@
       "value": "bulkStatus: {"
     },
     {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "if resilienceFirstOutputGuardOwnsStall(firstOutputTimer != nil, openAIStreamClientOutputStarted(c, clientOutputStarted)) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "if previousResponseID != \"\" && (notFound || unsupported || rejected) && resilienceContinuationReplayAllowed(ctx, account, rejected) {"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "if s.service.resilienceKeepOpenAISoftOwner(ctx, account, req.Platform, req.RequestedModel) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if err == nil && !s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {"
+    },
+    {
+      "path": "backend/internal/repository/concurrency_cache.go",
+      "value": "c.startProcessLease(ctx, activeRequestPrefix)"
+    },
+    {
+      "path": "backend/internal/repository/concurrency_cache.go",
+      "value": "return c.sweepEndedProcesses(ctx)"
+    },
+    {
+      "path": "backend/internal/repository/wire.go",
+      "value": "readiness.Register(\"database\", db.PingContext)"
+    },
+    {
+      "path": "backend/internal/repository/wire.go",
+      "value": "readiness.Register(\"redis\", func(ctx context.Context) error { return rdb.Ping(ctx).Err() })"
+    },
+    {
+      "path": "backend/internal/server/routes/common.go",
+      "value": "r.GET(\"/ready\", readiness.Handler)"
+    },
+    {
+      "path": "backend/internal/repository/account_repo.go",
+      "value": "if resilience.Current().FailureOn() {"
+    },
+    {
+      "path": "backend/internal/repository/concurrency_cache.go",
+      "value": "return c.cleanupDeadProcessSlots(ctx, live, len(live) <= 1)"
+    },
+    {
+      "path": "backend/internal/repository/concurrency_cache.go",
+      "value": "if dropWaits {"
+    },
+    {
+      "path": "backend/internal/repository/ent.go",
+      "value": "warnDBPoolAboveServerLimit(migrationCtx, drv.DB(), cfg.Database.MaxOpenConns)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "upstreamCtx, firstEvent := s.armOpenAICompatFirstEvent(ctx, upstreamCtx, account, clientStream, upstreamModel,"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "return nil, s.openAICompatFirstEventTimeout(ctx, c, account, firstEvent, \"response_headers\", nil)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "firstEvent := openAICompatFirstEventOf(resp)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "if firstEvent.ownsStall() {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "s.noteOpenAICompatStall(c, account, originalModel)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "s.noteOpenAICompatStall(c, account, model)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "recordOpenAIStreamKeepaliveBytes(c, n)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "upstreamCtx, firstEvent := s.armOpenAICompatFirstEvent(ctx, upstreamCtx, account, clientStream, upstreamModel,"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "return nil, s.openAICompatFirstEventTimeout(ctx, c, account, firstEvent, \"response_headers\", nil)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "firstEvent := openAICompatFirstEventOf(resp)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "if firstEvent.ownsStall() {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "s.noteOpenAICompatStall(c, account, originalModel)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "recordOpenAIStreamKeepaliveBytes(c, n)"
+    },
+    {
+      "path": "backend/internal/service/gateway_anthropic_passthrough.go",
+      "value": "noteResilienceStall(ctx, s.rateLimitService, account)"
+    },
+    {
+      "path": "backend/internal/service/bedrock_stream.go",
+      "value": "noteResilienceStall(ctx, s.rateLimitService, account)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages_anthropic_native.go",
+      "value": "noteResilienceStall(ctx, s.rateLimitService, account)"
+    },
+    {
+      "path": "frontend/src/components/common/GroupSelector.vue",
+      "value": "data-test=\"group-exclusive-tag\"",
       "path": "backend/internal/repository/account_repo.go",
       "value": "entsql.OrderByField(dbaccount.FieldLastUsedAt, direction, entsql.OrderNullsLast()).ToFunc(),"
     },
@@ -818,10 +952,21 @@
     "xy-allowlist-404-hint",
     "xy-registration-email-alias-hardening",
     "xy-admin-user-batch-status",
+    "xy-group-openai-fast-priority",
     "xy-account-list-usability",
     "xy-account-recent-health"
   ],
   "custom_patch_tests": [
+    {
+      "id": "xy-group-openai-fast-priority",
+      "path": "backend/internal/service/openai_group_fast_priority_test.go",
+      "literal": "func TestGroupFastPriorityOverridesPolicy"
+    },
+    {
+      "id": "xy-group-openai-fast-priority",
+      "path": "backend/internal/service/openai_group_fast_priority_test.go",
+      "literal": "func TestGroupFastPriorityBilling"
+    },
     {
       "id": "legacy-config-path",
       "path": "backend/internal/config/config_test.go",

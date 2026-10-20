@@ -64,6 +64,9 @@ func noteResilienceStall(ctx context.Context, rl *RateLimitService, account *Acc
 	}
 	st := resilience.StateFrom(ctx)
 	st.MarkAccountFailed(account.ID)
+	// The 200 of a stalled stream must not end the conversation's failed-turn
+	// streak (design §9.7, review R10).
+	st.MarkTurnFailed()
 	if !st.StreamFailureReported(account.ID) && st.ReportStreamFailure(account.ID, nil) {
 		st.SessionFailure(ctx, account.ID, resilience.CategoryStall)
 	}
@@ -74,4 +77,13 @@ func noteResilienceStall(ctx context.Context, rl *RateLimitService, account *Acc
 		return
 	}
 	rl.ApplyResilienceOutcome(ctx, account, resilience.Classify(resilience.Outcome{Source: resilience.SourceStall}, nil), "stream stalled")
+}
+
+// resilienceFirstOutputGuardOwnsStall reports whether a stalled OpenAI
+// stream is left to its first-output guard: before output the guard fails
+// the attempt over at its tier (xhigh 200 s, max 220 s), which the 180 s
+// stall check used to beat with a final stream_timeout (review P1-C). With
+// stall handling off the 0.3.0 order stays.
+func resilienceFirstOutputGuardOwnsStall(guardArmed, outputStarted bool) bool {
+	return guardArmed && !outputStarted && resilience.Current().StallOn()
 }

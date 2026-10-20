@@ -1314,7 +1314,7 @@ export default {
       openaiFast: {
         title: 'OpenAI Fast mode',
         force: 'Force Fast (priority)',
-        hint: 'Forces service_tier=priority on OpenAI requests in this group. The global Fast/Flex policy can still filter or block it. New requests update immediately after saving; existing WebSocket sessions must reconnect.',
+        hint: 'Forces service_tier=priority on OpenAI requests in this group, overriding the global Fast/Flex policy. Fast unit prices apply; the group rate multiplier stays unchanged. Applies to new requests after saving; existing WebSocket sessions must reconnect.',
         free: 'Free Fast',
         freeHint: 'Fast requests in this group still use the priority tier, but customers are charged the equivalent Standard price.'
       },

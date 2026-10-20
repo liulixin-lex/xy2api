@@ -28,6 +28,10 @@ type RequestState struct {
 
 	// lastResort is the account chosen by last-resort soft selection.
 	lastResort int64
+	// lastResortSessionLimited is set when last resort found candidates but
+	// each refused the request's new session (session limit); the result
+	// then depends on the request.
+	lastResortSessionLimited bool
 
 	// edge is the CDN edge marker of the request ("" when direct).
 	edge string
@@ -484,4 +488,25 @@ func (s *RequestState) ConfigError() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.configError
+}
+
+// MarkLastResortSessionLimited records that last resort had candidates that
+// only refused the request's new session (session limit).
+func (s *RequestState) MarkLastResortSessionLimited() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.lastResortSessionLimited = true
+	s.mu.Unlock()
+}
+
+// LastResortSessionLimited reports MarkLastResortSessionLimited.
+func (s *RequestState) LastResortSessionLimited() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastResortSessionLimited
 }

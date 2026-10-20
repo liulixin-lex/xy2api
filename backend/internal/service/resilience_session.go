@@ -311,6 +311,42 @@ func (r *ResilienceService) groupAccountsForLastResort(ctx context.Context, repo
 	return accounts, nil
 }
 
+// verifyLastResortAccount re-reads a planned last-resort account just before
+// it is dispatched (review R09). Planning uses a group list cached for 2 s,
+// which may predate an administrator's change (disabled, unschedulable,
+// deleted, moved to another group) or a new hard pause. The account is
+// served only when its current row still allows last resort; the returned
+// copy is that row with soft penalties relaxed. A failed read keeps the
+// planned copy (the list itself was read moments ago).
+func (r *ResilienceService) verifyLastResortAccount(ctx context.Context, repo AccountRepository, groupID int64, planned *Account, model string,
+	penaltyOf func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string)) (*Account, bool) {
+	if planned == nil {
+		return nil, false
+	}
+	if repo == nil {
+		return planned, true
+	}
+	fresh, err := repo.GetByID(ctx, planned.ID)
+	if err != nil {
+		if errors.Is(err, ErrAccountNotFound) {
+			r.lastResortGroups.drop(groupID)
+			return nil, false
+		}
+		slog.Warn("resilience.last_resort_verify_failed", "group_id", groupID, "account_id", planned.ID, "error", err)
+		return planned, true
+	}
+	now := time.Now()
+	if fresh == nil || (groupID > 0 && len(fresh.GroupIDs) > 0 && !containsInt64(fresh.GroupIDs, groupID)) {
+		r.lastResortGroups.drop(groupID)
+		return nil, false
+	}
+	if tier, _, _ := penaltyOf(fresh, model, now); tier == resilience.TierHard {
+		r.lastResortGroups.drop(groupID)
+		return nil, false
+	}
+	return withoutSoftPenalties(*fresh, now), true
+}
+
 // isNoAccountSelectionError reports whether selection failed only because
 // no account was available (not a configuration restriction).
 func isNoAccountSelectionError(err error) bool {
@@ -371,7 +407,11 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 	// for the best one.
 	var busy []lastResortCandidate
 	for _, c := range pickLastResort(cands) {
-		acc := c.account
+		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *groupID, c.account, requestedModel, resiliencePenaltyOf)
+		if !ok {
+			continue
+		}
+		c.account = acc
 		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency)
 		if err != nil || result == nil || !result.Acquired {
 			busy = append(busy, c)
@@ -379,6 +419,7 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 		}
 		if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
 			result.ReleaseFunc()
+			resilience.StateFrom(ctx).MarkLastResortSessionLimited()
 			continue
 		}
 		s.noteLastResort(ctx, groupID, acc, c.recoverAt)
@@ -393,6 +434,7 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 	for _, c := range busy {
 		acc := c.account
 		if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
+			resilience.StateFrom(ctx).MarkLastResortSessionLimited()
 			continue
 		}
 		s.noteLastResort(ctx, groupID, acc, c.recoverAt)
@@ -491,13 +533,17 @@ func (s *GatewayService) resilienceGatewayBindAllowed(ctx context.Context, accou
 }
 
 // resilienceKeepOpenAISoftOwner keeps the binding of a soft-penalised owner
-// on the original OpenAI scheduler's legacy path (advanced scheduler off),
-// as the advanced scheduler and the Gateway do (design §4.2): the request is
-// served elsewhere and the session returns afterwards. It reports whether
-// the owner was kept.
-func resilienceKeepOpenAISoftOwner(ctx context.Context, account *Account, platform, requestedModel string) bool {
+// on the original OpenAI scheduler (legacy and advanced paths), as the
+// Gateway does (design §4.2): the request is served elsewhere and the
+// session returns afterwards. The scheduler's per-model transient block
+// counts as soft here, as it does for last resort. It reports whether the
+// owner was kept.
+func (s *OpenAIGatewayService) resilienceKeepOpenAISoftOwner(ctx context.Context, account *Account, platform, requestedModel string) bool {
 	if account == nil || account.Platform != NormalizeOpenAICompatiblePlatform(platform) || !account.IsOpenAICompatible() ||
-		!resilienceKeepsSoftStickyBinding(account, requestedModel) {
+		!resilience.Current().SessionOn() {
+		return false
+	}
+	if tier, _, _ := s.resilienceOpenAIPenaltyOf(account, requestedModel, time.Now()); tier != resilience.TierSoft {
 		return false
 	}
 	resilience.StateFrom(ctx).KeepSticky(account.ID)
@@ -567,17 +613,26 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	// Take the first candidate with a free slot; when all are busy, wait
 	// for the best one. Codex accounts under upstream pressure take slots
 	// only up to their adaptive limit.
+	verified := cands[:0]
 	for _, c := range cands {
-		acc := c.account
+		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, c.account, req.RequestedModel, s.resilienceOpenAIPenaltyOf)
+		if !ok {
+			continue
+		}
+		c.account = acc
+		verified = append(verified, c)
 		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency))
 		if err == nil && result != nil && result.Acquired {
 			s.noteOpenAILastResort(ctx, req.GroupID, acc, c.recoverAt)
 			return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: acc, Acquired: true, ReleaseFunc: result.ReleaseFunc})
 		}
 	}
+	if len(verified) == 0 {
+		return nil
+	}
 	cfg := s.schedulingConfig()
-	acc := cands[0].account
-	s.noteOpenAILastResort(ctx, req.GroupID, acc, cands[0].recoverAt)
+	acc := verified[0].account
+	s.noteOpenAILastResort(ctx, req.GroupID, acc, verified[0].recoverAt)
 	return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 		Account: acc,
 		WaitPlan: &AccountWaitPlan{
