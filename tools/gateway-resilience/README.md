@@ -10,7 +10,7 @@ Tools for the 0.4.0 gateway resilience work (`openspec/changes/gateway-resilienc
 | `caddy_cuts.py` | CDN cut rate per entry (Cloudflare, ESA, direct) from Caddy JSON access logs; with `--app`, matches each cut to the application log to find requests completed (and billed) after the client was cut; share of 503 responses with `Retry-After`. `--json` prints one object. |
 | `session_streaks.py` | From application logs (JSON or console format): consecutive failures of one session on one account (requests without a session hash are counted per API key, separately), and the latency of requests that switched accounts and still succeeded. `--json` prints one object. |
 | `metrics_report.py` | design §14 report: `collect` measures one environment into a JSON file, `report` compares a baseline with a candidate against the §14 targets (Markdown; exit 1 when a measured metric misses). |
-| `fault-upstream/` | Fault-injecting upstream (Go, standard library only) with OpenAI Responses/Chat, Anthropic, Gemini, image, `/v1/usage` and new-api billing shapes. Scenarios F00–F29, `BAL` and `MIX`. |
+| `fault-upstream/` | Fault-injecting upstream (Go, standard library only) with OpenAI Responses/Chat, Anthropic, Gemini, image, `/v1/usage` and new-api billing shapes. Scenarios F00–F30, `BAL` and `MIX`. |
 | `cdn-sim/` | CDN edge simulator (Go, standard library only): first-byte and idle read timeouts, `X-XY-Edge` injection, cut and request logs. |
 
 ## Database scripts
@@ -85,6 +85,7 @@ http://fault-upstream:8080/f/F06;secs=200      (account base_url)
 | F27 | 403 content-safety refusal in Zhipu's shape (top-level code `request_check_blocked`) | |
 | F28 | Anthropic relay queue timeout: 200 SSE whose first event, after `after` seconds, is an `error` of type `rate_limit_error` | `after` |
 | F29 | Codex backend relay: a Responses request replaying `web_search_call` input without declaring web_search gets 200 SSE, then `response.failed` "response protection is unavailable"; others answer normally | |
+| F30 | 502 Cloudflare JSON error answer (`origin_bad_gateway`, the detail says the origin "is overloaded or misconfigured", `retry_after` 60 in the body) | |
 | BAL | Normal while the balance of `key` is positive, F12 otherwise | `key`, `first`, `reset` (adds a relay's exhausted rate-limit headers) |
 | MIX | A random fault with probability `p` percent per fault type, otherwise normal | `p` |
 

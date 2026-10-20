@@ -101,6 +101,9 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     # R7: an Anthropic relay's in-stream rate_limit_error before any output.
     "G-anthropic-rl": ("anthropic", [("anth-rl", "F28;after=2", 1), ("anth-rl-ok", "F00", 2)], {}),
     "G-anthropic-rl-single": ("anthropic", [("anth-rl-1", "F28;after=2", 1)], {}),
+    # 0.4.3 P1-2: a relay behind Cloudflare answers Cloudflare's JSON 502 that
+    # says "overloaded"; both accounts share the upstream host, as in production.
+    "G-cf-json": ("anthropic", [("cfj-bad", "F30", 1), ("cfj-ok", "F00", 2)], {}),
     # 24-hour soak (soak.py): MIX injects each fault type at about 1% per attempt.
     "G-soak-openai": ("openai", [("soak-oa-a", "MIX;p=1", 1), ("soak-oa-b", "MIX;p=1", 1), ("soak-oa-ok", "F00", 2)], {}),
     "G-soak-anthropic": ("anthropic", [("soak-an-a", "MIX;p=1", 1), ("soak-an-ok", "F00", 2)], {}),
