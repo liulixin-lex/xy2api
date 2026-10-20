@@ -14,6 +14,32 @@
 - 工具链：Go 以 `backend/go.mod` 为准（当前 1.27.2）；golangci-lint v2.14.0（与 CI 同版）。
 - 文档一致性：`python3 tools/check_docs_consistency.py`（CI 的 upstream-sync-audit 作业执行），规则在 `tools/docs_consistency.json`，改动时按 [`AGENTS.md`](../AGENTS.md)“变更同步”同步文档。
 
+### 前端交互流畅度与动效优化（2026-10-20T02:46Z；本地完成，未提交）
+
+- 分支：`feat/frontend-ux-20261019`（自 main `0320d4e68`）。改动全部在工作树里，未提交、未推送；提交和 PR 需要用户授权。
+- 范围：只改了 `frontend/` 和文档，没有改后端，也没有改迁移。
+  - 新文档 [`FRONTEND_UX.md`](FRONTEND_UX.md) 记录了以下约定：性能约定、动效变量与“减少动画”、命令面板、标签键盘操作、手机端排序、乐观开关，以及上游同步时要保留的改动（`BaseDialog.vue` 的 `appear`）。
+- 验证：lint、typecheck、全量 vitest（395 个文件、3080 个用例）、`pnpm run build`（含 `check:i18n`）全部通过。在提交后的临时克隆里，`check_docs_consistency.py` 和 `sync.py audit` 也都通过。
+- 实测：CPU 降速 4 倍，模拟接口；对比对象是 main 构建。
+
+  | 指标 | 改动前 | 改动后 |
+  |---|---|---|
+  | 冷启动 JS | 859KB | 580KB |
+  | 9 条路由就绪合计 | 6517ms | 5798ms |
+  | 账号页首开 | 936ms | 588ms |
+  | 账号页滚动 | 9.8 FPS | 27 FPS |
+  | 弹窗内滚动 | 34.7 FPS | 60 FPS |
+
+  冷启动 LCP 持平，为 1252ms → 1220ms。
+- 未达标与代价：
+  - 账号页滚动没达到 50 FPS 的目标。剩余开销主要在新行挂载时单元格里的 `t()` 和格式化。
+  - 首次进分组页慢约 70ms，因为拖拽库改为按需加载。
+  - 新建账号弹窗首次打开慢约 20ms，因为弹窗改为按需挂载。
+- 有意没做：
+  - 列表页 KeepAlive：各页注册了监听和轮询，缓存后的停启需要逐页改。
+  - 背景氛围层。
+  - 合规确认弹窗的按需加载：它是合规关口，保持静态引入。
+
 ### XY2API 0.4.1 正式发布完成（2026-10-18；生产未部署）
 
 - 发布：`v0.4.1`（annotated 对象 `7dbdbccd9`）→ main 合并提交 `edea0d493`（[PR #103](https://github.com/liulixin-lex/xy2api/pull/103)，头 `7f112a981`），PR #101、#99、#98 随之标为已合并。Release run 39126008209；6 个附件双 SHA、五平台 `vcs.modified=false`、GHCR `sha256:baa0e446…` 双架构；latest/0/0.4 指向 0.4.1，0.3 仍为 0.3.0；正式镜像全新安装 324 条迁移通过。
@@ -70,7 +96,8 @@
 
 ## 进行中的工作
 
-- 暂无（0.4.1 已发布，遗留事项见“当前交接状态”）。
+- `20261019-frontend-ux`（2026-10-19 登记）：前端交互流畅度与动效优化。分支 `feat/frontend-ux-20261019`（自 main `0320d4e68`，独立 clone）。用户要求在本次对话内一次执行完整方案：先修性能（弹窗毛玻璃、表格行高测量、弹窗按需加载与预取、输入与 `:key`、请求去重、轮询暂停、拆包、chunk 失败恢复、列表页缓存），再做动效系统（时长与缓动变量、减少动画双通道与用户开关、区块入场、弹窗进出场、选中滑块、数字滚动、悬停反馈、加载过渡），最后做交互增强（Ctrl/⌘K 命令面板、Tabs 键盘、移动端筛选折叠与排序、开关乐观更新）。参考与实测依据来自 31 个 Sub2API 二开仓库的基准测试（仓库外报告）。范围只限 `frontend/` 与相关文档；不改后端、不推送、不开 PR，提交需用户授权。
+  - 2026-10-20T02:46Z 状态：全部完成，等待用户授权提交。结果见“当前交接状态”和操作日志；提交合并后，按“归档”规则移走本条和对应小节。
 
 ## 操作陷阱
 
@@ -533,3 +560,53 @@ pnpm --dir frontend run build
 - 验证：本机全量与 CI 门禁（249）、前端全绿；测试服务器 KA/CF/ERR 19/19；PR、main 与 Release 工作流全绿。
 - 卡点/风险：无。生产 0.3.0 未改；部署需单独授权。
 - 下一步：生产部署 0.4.1（单独授权）；XY-image 0.0.17（先交接并经用户确认）；0.4.1 之后的后续事项见 tasks“后续”。
+
+### 2026-10-20T02:46Z — 20261019-frontend-ux — 本地完成，待授权提交
+
+- 请求/目标：拉取最新 xy2api，在本次对话内一次执行完整的前端优化方案，分三步：
+  1. 先修性能；
+  2. 再做动效系统；
+  3. 最后做交互增强。
+- 开始状态：分支 `feat/frontend-ux-20261019`，自 main `0320d4e68`（VERSION 0.4.1）；独立 clone，工作树干净。
+- 完成操作：
+  - **性能**
+    - 表格：去掉 `<table>`/`<tbody>` 上的 `divide-y`。这类兄弟选择器让虚拟滚动每插入一行都要重算整个 tbody 的样式，Performance trace 定位到了这个问题。
+    - 桌面表格改为逐行渲染的 `DataTableRow.ts`。行高测量只读 ResizeObserver 的结果。
+    - 账号页 13 个弹窗改为按需加载加按需挂载，新建和编辑弹窗在页面空闲时预取。
+    - 新增 chunk 加载失败自动恢复（`router.onError`、`vite:preloadError`、异步组件），10 秒内不重复刷新。
+    - 去掉大面积毛玻璃，`transition-all` 都换成只过渡实际会变的属性。
+    - `Intl` 实例改为缓存复用；`adminSettings.fetch` 的并发调用合并为一个请求。
+    - 页面在后台时，5 处轮询跳过本轮。
+    - 拆出 7 个按需加载的依赖分块。
+  - **动效**
+    - `styles/motion.css` 统一定义时长与缓动变量。
+    - 减少动画有两条途径：系统设置，或右上角头像菜单里的开关（`useMotionPreference`）。
+    - 页面区块入场（`usePageEntrance`）；弹窗进出场，`BaseDialog` 加了 `appear`。
+    - 侧栏指示条在切换页面时滑到新位置。
+    - 卡片悬停的阴影改由伪元素承担，只过渡透明度。
+    - 仪表盘数字首次显示时滚动到目标值（`AnimatedNumber`），数据插入后区块入场一次。用户仪表盘刷新时不再整页显示加载转圈。
+    - 最终复测发现，入场从透明度 0 开始时，Chromium 要等动画结束才记 LCP，冷启动因此晚了约 500ms。改为从 0.4 起步后恢复。
+  - **交互**
+    - Ctrl/⌘K 命令面板：页面清单取自侧栏，用 combobox/listbox 的 ARIA；其他弹窗打开时不响应快捷键。
+    - `v-roving-tabs` 指令为 7 处标签栏补上方向键、Home/End 操作。
+    - 手机端 DataTable 加了排序栏。
+    - 账号“可调度”开关改为乐观更新：失败时回滚，请求期间返回的列表沿用提交中的值。手机端筛选折叠上游已有，没有重做。
+- 修改文件：
+  - `frontend/src` 下 42 个已跟踪文件被修改，另新增 17 个文件，主要有：
+    - 组件与 composable：`DataTableRow.ts`、`AnimatedNumber.vue`、`CommandPalette.vue`；`useLazyMount`、`useMotionPreference`、`usePageEntrance`、`useSidebarActiveIndicator`、`useCommandPalette`
+    - 工具与样式：`chunkLoadError.ts`、`rovingTabs.ts`、`styles/motion.css`
+    - 以上相应的测试
+  - 配置：`tailwind.config.js`、`vite.config.ts`。
+  - 文档：新增 `docs/FRONTEND_UX.md`，并登记到 `docs/README.md` 和 `.gitignore` 白名单；更新本文件。
+- 验证：
+  - `pnpm run lint:check`、`typecheck` 通过。
+  - `test:run` 395 个文件、3080 个用例通过。
+  - `pnpm run build`（含 `check:i18n` 与 `vue-tsc -b`）通过，构建产物目录已删除。
+  - 在提交后的临时克隆里，`check_docs_consistency.py` 和 `sync.py audit` 通过。
+  - 仓库外基准：CPU 降速 4 倍、模拟接口、每组 3 轮，结果见“当前交接状态”。
+  - 截图检查了以下内容：亮色和暗色表格的分隔线与固定列、弹窗、命令面板、手机端排序栏、仪表盘；控制台无报错。
+- 卡点/风险：
+  - 账号页滚动 27 FPS，没达到 50 FPS。
+  - 分组页首次进入和新建账号弹窗首开略慢，原因见交接状态。
+  - `BaseDialog.vue` 属于 `manual_merge`，下次同步上游时要保留 `appear`。
+- 下一步：用户授权后提交并开 PR；合并后按“归档”规则移走本任务的交接小节和进行中条目。若要继续提升账号页滚动，可考虑行内文案预先计算或单元格懒渲染。
