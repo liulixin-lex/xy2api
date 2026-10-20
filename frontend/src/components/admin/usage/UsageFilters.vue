@@ -547,5 +547,13 @@ const setUserKeyword = (email: string) => {
 
 const getUserSearchRevision = () => userSearchSequence
 
-defineExpose({ getUserSearchRevision, setUserKeyword })
+// 供外部（如账号列表的错误请求数跳转）在程序化设置 account_id 后回显账号名
+const setAccountKeyword = (name: string) => {
+  if (accountSearchTimeout) clearTimeout(accountSearchTimeout)
+  accountKeyword.value = name
+  accountResults.value = []
+  showAccountDropdown.value = false
+}
+
+defineExpose({ getUserSearchRevision, setUserKeyword, setAccountKeyword })
 </script>

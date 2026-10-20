@@ -46,6 +46,15 @@
   - 登记：具名补丁 `xy-account-list-usability`（4 条测试绑定）与上游文件钩子的 `required_literals`。验证见操作日志 `20261019-account-list-usability`。
 - 未完成：PR 由另一位作者审阅合并；发版、部署需用户另行授权。本文件末尾的操作日志与 PR #107 都有追加，后合并的一个按时间保留两条即可。
 
+### 账号状态列显示近 3 分钟首字平均与近 10 分钟错误请求数（2026-10-19T19:00Z；PR 待另一位作者合并，基于 PR #108；未发版、未部署）
+
+- 用户要求（2026-10-19，口径经用户确认）：状态徽标下方显示近 3 分钟首字平均，有请求才显示；右边红色小数字为近 10 分钟错误请求数，等于“使用记录 → 错误请求”页筛选该账号后 10 分钟内的条数，点击在新标签页打开该页并自动筛选该账号（不另做页面）。
+- 已完成（分支 `feat/account-recent-health-20261019`，基于 #108 的分支）：
+  - 后端：`POST /api/v1/admin/accounts/recent-health/batch`（最多 1000 个 ID，10 秒快照缓存 + ETag）→ `AccountUsageService.GetRecentHealthBatch` → 可选能力 `AccountRecentHealthBatchReader`（`usageLogRepository` 实现，不改 Wire）。首字取 `usage_logs.first_token_ms` 平均；错误数复用 `buildOpsErrorLogsWhere`（View=all），与错误请求页同一 WHERE（只计 status≥400 的客户可见错误，cyber_policy 例外，不计已恢复的上游记录）。
+  - 前端：`AccountRecentHealth.vue` 包住状态徽标，红色数字链接到 `/admin/usage?tab=errors&account_id=…`（新标签页），首字按 `latencyHealth` 分档着色；`AccountsView` 按当前页批量拉取，与今日统计同时刷新，状态列隐藏时不请求。`UsageView` 读取 `tab`、`account_id` 并回显账号名（`UsageFilters` 新增 `setAccountKeyword`）。
+  - 文档与登记：`docs/USAGE_METRICS.md` 新增一节；具名补丁 `xy-account-recent-health`（4 条测试绑定）与上游文件钩子的 `required_literals`。验证见操作日志 `20261019-account-recent-health`。
+- 未完成：PR 由另一位作者审阅合并（应在 #108 之后合并；#108 合并后本 PR 的 base 改回 main）；发版、部署需用户另行授权。
+
 ### 网关韧性 0.4.0 正式发布完成（2026-10-17；生产未部署）
 
 - 发布：`v0.4.0`（annotated 对象 `451f3f240`）→ main 合并提交 `4c142e1aa`（[PR #100](https://github.com/liulixin-lex/xy2api/pull/100)，头 `49f14df9a`）；RC `v0.4.0-rc.1` → `ca2bdd111`（[PR #97](https://github.com/liulixin-lex/xy2api/pull/97)）。Release run 39043056373；6 个附件双 SHA、五平台 `vcs.modified=false`、GHCR `sha256:4da9162a…` 双架构；latest/0/0.4 指向 0.4.0，0.3 仍为 0.3.0；正式镜像全新安装 324 条迁移通过。
@@ -634,3 +643,13 @@ pnpm --dir frontend run build
 - 验证：新用例（筛选平铺、默认排序与旧排序作废、列顺序保存与恢复、后端 NULLS LAST 的 SQL）均在旧代码上确认会失败。前端 typecheck、`lint:check`、`check:i18n` 通过，vitest 全量 392 个文件、3067 个用例通过；后端 gofmt、`go vet`（默认、`unit`、`integration`）、golangci-lint 0 issues，repository 包 unit 测试通过。另用 Vite 临时预览页（真实组件、样式与中文文案，1600 像素宽、暗色模式）加无头 Chrome 截图核对：第一行操作按钮，第二行七个筛选项平铺；列显示每行带拖动手柄。临时文件已删除。`check_docs_consistency.py`、`tools/tests`、`scheduler-diff` 通过，`sync.py audit` 在提交后的干净树上运行。
 - 卡点/风险：拖动本身由 `vue-draggable-plus` 实现，单测用替身模拟拖动结果，未在真实浏览器里实际拖动；手机上筛选项两列排布。
 - 下一步：PR 检查全绿后交另一位作者合并。
+
+### 2026-10-19T19:00Z — `20261019-account-recent-health` — 本地完成，已推送并开 PR（待审阅）
+
+- 请求/目标：见顶部同名小节；口径经用户确认后按计划实施。做到 PR 检查全绿为止，合并由另一位作者执行。
+- 开始状态：基于 PR #108 的分支（头 `1b76c280d`）新建 `feat/account-recent-health-20261019`；#107、#108 均未合并，origin/main `0320d4e68`。
+- 完成操作：错误请求页的列表 WHERE 有隐含条件（只算 status≥400 的客户可见错误、cyber_policy 例外），直接 COUNT 会多算已恢复的上游记录，因此批量计数复用 `buildOpsErrorLogsWhere`。账号处理器只持有 `AccountUsageService`，新查询作为用量日志仓储的可选能力实现，避免改动 Wire 与生成代码。前端链接按 `BASE_URL` 生成，与 `createWebHistory(BASE_URL)` 一致，组件不依赖注入的 router。
+- 修改文件：后端新增 `account_recent_health.go`（service）、`account_recent_health_repo.go`、`account_handler_recent_health.go` 及各自测试（含仓储集成测试），`routes/admin.go` 加一行路由；前端新增 `AccountRecentHealth.vue` 及其 spec、`AccountsView.recentHealth.spec.ts`，改 `AccountsView.vue`、`UsageView.vue`、`UsageFilters.vue`、`api/admin/accounts.ts`、中英文案，8 个已有 AccountsView spec 补新接口的 mock（用 `vi.fn(impl)`，经得起 `vi.restoreAllMocks()`），`UsageView.spec.ts` 新增用例；`docs/USAGE_METRICS.md`、`policy.json`、`UPSTREAM_BASE.json`、本文件。
+- 验证：后端 gofmt、`go vet`（默认、`unit`、`integration`）、golangci-lint 0 issues；service 与 handler 新单测通过；仓储查询在本机临时 PostgreSQL 18（应用全部迁移）上验证，并与错误请求页 `ListErrorLogs` 同条件的总数对照一致（3 条，含 cyber_policy、不含已恢复记录），临时实例已删除；`go test -tags=unit` 覆盖 service、handler、server、repository 通过（service 包的一次偶发失败见下条）。前端 typecheck、`lint:check`、`check:i18n` 通过，vitest 全量 394 个文件、3073 个用例通过；新页面用例在旧代码上确认会失败。Vite 临时预览页加无头 Chrome 截图核对状态单元格（正常、无数据、慢首字橙色、限流中带倒计时等），临时文件已删除。`check_docs_consistency.py`、`tools/tests`、`scheduler-diff` 通过，`sync.py audit` 在提交后的干净树上运行。
+- 卡点/风险：service 包第一次整包运行时，与前端全量测试、Vite 同时进行，`TestInflightEstimate_AccountMappingNoDBAndBoundedMemory`（计费在途估算的堆增长上限 8 MiB）测得 9.9 MiB 失败；该用例与本次改动无关，单独连跑 5 次均通过，service 包单独整包重跑也全部通过。仓储集成测试以 CI 为准。
+- 下一步：PR 检查全绿后交另一位作者合并（#108 之后）。

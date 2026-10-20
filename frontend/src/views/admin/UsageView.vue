@@ -322,6 +322,7 @@ const applyRouteQueryFilters = () => {
   const queryStartDate = getSingleQueryValue(route.query.start_date)
   const queryEndDate = getSingleQueryValue(route.query.end_date)
   const queryUserId = getNumericQueryValue(route.query.user_id)
+  const queryAccountId = getNumericQueryValue(route.query.account_id)
 
   if (queryStartDate) {
     startDate.value = queryStartDate
@@ -333,10 +334,25 @@ const applyRouteQueryFilters = () => {
   filters.value = {
     ...filters.value,
     user_id: queryUserId,
+    account_id: queryAccountId,
     start_date: startDate.value,
     end_date: endDate.value
   }
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
+}
+
+// 账号列表“错误请求数”跳转（?tab=errors&account_id=）带来的账号筛选：回显账号名。
+const loadRouteAccountFilterLabel = async () => {
+  const requestedAccountId = filters.value.account_id
+  if (!requestedAccountId) return
+  try {
+    const account = await adminAPI.accounts.getById(requestedAccountId)
+    if (filters.value.account_id !== requestedAccountId) return
+    usageFiltersRef.value?.setAccountKeyword?.(account.name || String(requestedAccountId))
+  } catch {
+    if (filters.value.account_id !== requestedAccountId) return
+    usageFiltersRef.value?.setAccountKeyword?.(String(requestedAccountId))
+  }
 }
 
 const loadRouteUserFilterLabel = async () => {
@@ -808,6 +824,8 @@ onMounted(() => {
   void adminSettingsStore.fetch(true)
   applyRouteQueryFilters()
   void loadRouteUserFilterLabel()
+  void loadRouteAccountFilterLabel()
+  if (getSingleQueryValue(route.query.tab) === 'errors') switchTab('errors')
   loadLogs()
   loadStats()
   loadModelStats(modelDistributionSource.value, true)

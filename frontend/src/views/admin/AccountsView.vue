@@ -285,9 +285,9 @@
             <AccountCapacityCell :account="row" />
           </template>
           <template #cell-status="{ row }">
-            <div class="flex items-center gap-1.5">
+            <AccountRecentHealth :account-id="row.id" :health="recentHealthByAccountId[String(row.id)] ?? null">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
-            </div>
+            </AccountRecentHealth>
           </template>
           <template #header-schedulable="{ column }"><div class="flex items-center gap-1"><span>{{ column.label }}</span><HelpTooltip :content="t('admin.accounts.schedulableHint')" width-class="w-72" /></div></template>
           <template #cell-schedulable="{ row }">
@@ -517,6 +517,8 @@ import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrs
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountColumnSettings from '@/components/admin/account/AccountColumnSettings.vue'
+import AccountRecentHealth from '@/components/admin/account/AccountRecentHealth.vue'
+import type { AccountRecentHealth as AccountRecentHealthStats } from '@/api/admin/accounts'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import IQCheckCell from '@/components/account/IQCheckCell.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
@@ -728,6 +730,9 @@ const autoRefreshFetching = ref(false)
 const AUTO_REFRESH_SILENT_WINDOW_MS = 15000
 const autoRefreshSilentUntil = ref(0)
 const hasPendingListSync = ref(false)
+// 状态列的近期健康度（近 3 分钟首字平均、近 10 分钟错误请求数），与今日统计一样按当前页批量拉取。
+const recentHealthByAccountId = ref<Record<string, AccountRecentHealthStats>>({})
+let recentHealthReqSeq = 0
 const todayStatsByAccountId = ref<Record<string, WindowStats>>({})
 const todayStatsLoading = ref(false)
 const todayStatsError = ref<string | null>(null)
@@ -937,6 +942,24 @@ const refreshTodayStatsBatch = async () => {
   }
 }
 
+const refreshRecentHealthBatch = async () => {
+  if (hiddenColumns.has('status')) return
+  const accountIDs = accounts.value.map(account => account.id)
+  const reqSeq = ++recentHealthReqSeq
+  if (accountIDs.length === 0) {
+    recentHealthByAccountId.value = {}
+    return
+  }
+  try {
+    const result = await adminAPI.accounts.getBatchRecentHealth(accountIDs)
+    if (reqSeq !== recentHealthReqSeq) return
+    recentHealthByAccountId.value = result.stats ?? {}
+  } catch (error) {
+    if (reqSeq !== recentHealthReqSeq) return
+    console.error('Failed to load account recent health:', error)
+  }
+}
+
 const autoRefreshIntervalLabel = (sec: number) => {
   if (sec === 5) return t('admin.accounts.refreshInterval5s')
   if (sec === 10) return t('admin.accounts.refreshInterval10s')
@@ -1079,6 +1102,7 @@ const toggleColumn = (key: string) => {
       console.error('Failed to load account today stats after showing column:', error)
     })
   }
+  if (key === 'status' && wasHidden) void refreshRecentHealthBatch()
   if (key === 'scheduler_score') {
     // The server only returns scheduler scores when this column is visible, so reload the current page immediately.
     syncAccountListDerivedParams()
@@ -1199,6 +1223,7 @@ const load = async (options: AccountLoadOptions = {}) => {
   pendingTodayStatsRefresh.value = false
   requestParams.lite = '1'
   await baseLoad()
+  void refreshRecentHealthBatch()
   if (options.refreshTodayStats !== false) await refreshTodayStatsBatch()
 }
 
@@ -1208,6 +1233,7 @@ const reload = async () => {
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = false
   await baseReload()
+  void refreshRecentHealthBatch()
   await refreshTodayStatsBatch()
 }
 
@@ -1520,6 +1546,7 @@ const refreshAccountsIncrementally = async () => {
     }
     upstreamBillingNow.value = Date.now()
 
+    void refreshRecentHealthBatch()
     await refreshTodayStatsBatch()
   } catch (error) {
     console.error('Auto refresh failed:', error)
