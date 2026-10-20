@@ -51,6 +51,10 @@ const (
 	shareWeightFloor = 0.05
 	// shareHealthQueryTimeout bounds one refresh.
 	shareHealthQueryTimeout = 10 * time.Second
+	// shareHealthOnDemandTTL: the health of a group that does not run share
+	// scheduling is read when an administrator looks at it, and reused this
+	// long.
+	shareHealthOnDemandTTL = time.Minute
 )
 
 // Ramp causes (design §7.3).
@@ -285,6 +289,9 @@ func (s *ShareSchedulingService) shareWeight(groupID int64, acc *Account, now ti
 			}
 		}
 	}
+	if health == nil && s.groupPolicy(groupID) == nil {
+		health = s.onDemandHealth(groupID, acc.ID, now)
+	}
 	var factor *float64
 	if health != nil {
 		factor = health.Factor
@@ -292,6 +299,60 @@ func (s *ShareSchedulingService) shareWeight(groupID int64, acc *Account, now ti
 	w := shareCombineWeight(acc, factor, shareRampOf(acc, observed, now))
 	w.Health = health
 	return w
+}
+
+// onDemandHealth is the cached on-demand health of an account in a group
+// that does not run share scheduling; nil when none is cached.
+func (s *ShareSchedulingService) onDemandHealth(groupID, accountID int64, now time.Time) *shareHealth {
+	s.admin.mu.Lock()
+	cached, ok := s.admin.health[groupID]
+	s.admin.mu.Unlock()
+	if !ok || now.Sub(cached.at) >= shareHealthOnDemandTTL {
+		return nil
+	}
+	if h, ok := cached.value[accountID]; ok {
+		return &h
+	}
+	return nil
+}
+
+// ensureGroupHealth reads, for a group that does not run share scheduling,
+// the health its members would have, so that the switch confirmation shows
+// the shares switching gives (design §11.1). It uses the same window, rule
+// and functions as the refresh, for the group's members only, and keeps the
+// result for shareHealthOnDemandTTL. Share groups use the refresh; with
+// gateway resilience or the ops monitor off there is no health.
+func (s *ShareSchedulingService) ensureGroupHealth(ctx context.Context, groupID int64, members []Account, now time.Time) {
+	if s.repo == nil || s.groupPolicy(groupID) != nil {
+		return
+	}
+	if !resilience.Current().FailureOn() || !s.opsMonitoringOn(ctx) {
+		s.admin.mu.Lock()
+		delete(s.admin.health, groupID)
+		s.admin.mu.Unlock()
+		return
+	}
+	s.admin.mu.Lock()
+	cached, ok := s.admin.health[groupID]
+	s.admin.mu.Unlock()
+	if ok && now.Sub(cached.at) < shareHealthOnDemandTTL {
+		return
+	}
+	accounts := make(map[int64]*Account, len(members))
+	for i := range members {
+		accounts[members[i].ID] = &members[i]
+	}
+	stats, err := s.readHealthStats(ctx, accounts, now)
+	if err != nil {
+		slog.Warn("share_scheduling.health_read_failed", "group_id", groupID, "error", err)
+		return
+	}
+	s.admin.mu.Lock()
+	if s.admin.health == nil {
+		s.admin.health = map[int64]shareCached[map[int64]shareHealth]{}
+	}
+	s.admin.health[groupID] = shareCached[map[int64]shareHealth]{at: now, value: shareGroupHealth(members, stats)}
+	s.admin.mu.Unlock()
 }
 
 // shareHealthSnapshot is the result of one refresh. It is immutable once

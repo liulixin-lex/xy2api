@@ -287,3 +287,71 @@ func TestShareRampAfterBalancePause(t *testing.T) {
 	t.Cleanup(func() { resilience.Publish(orig) })
 	require.InDelta(t, 100, env.weight(t, 11, now).Effective, 1e-9)
 }
+
+// TestShareHealthOfOriginalGroupsOnDemand: the switch confirmation of a
+// group still on the original scheduler shows the shares it would get,
+// health included. The health of that group is read on demand, for its
+// members only, and reused for 60 seconds.
+func TestShareHealthOfOriginalGroupsOnDemand(t *testing.T) {
+	env := shareAdaptiveEnv(t)
+	_, err := env.save(t, 1, sub2apiUpdate)
+	require.NoError(t, err)
+	require.Nil(t, env.share.groupPolicy(shareTestGroupID))
+	ctx := context.Background()
+
+	require.Equal(t, 1, env.policies.attemptCalls, "the view returned by the save reads the health once")
+	preview, err := env.share.Preview(ctx, shareTestGroupID, shareUpdate)
+	require.NoError(t, err)
+	m := env.member(t, preview.Members, 13)
+	require.InDelta(t, 0.2, *m.HealthFactor, 1e-9)
+	require.InDelta(t, 20.0/170, m.ExpectedShare, 1e-9, "the confirmation shows what switching gives")
+	require.InDelta(t, 1.0/3, m.BaseShare, 1e-9)
+	require.Equal(t, 1, env.policies.attemptCalls)
+
+	view, err := env.share.GetPolicy(ctx, shareTestGroupID)
+	require.NoError(t, err)
+	require.InDelta(t, 0.5, *env.member(t, view.Members, 12).HealthFactor, 1e-9)
+	require.Equal(t, 1, env.policies.attemptCalls, "reused for 60 seconds")
+
+	env.share.admin.mu.Lock()
+	entry := env.share.admin.health[shareTestGroupID]
+	entry.at = entry.at.Add(-shareHealthOnDemandTTL)
+	env.share.admin.health[shareTestGroupID] = entry
+	env.share.admin.mu.Unlock()
+	_, err = env.share.GetPolicy(ctx, shareTestGroupID)
+	require.NoError(t, err)
+	require.Equal(t, 2, env.policies.attemptCalls)
+
+	t.Run("ops monitoring off", func(t *testing.T) {
+		env := shareAdaptiveEnv(t)
+		_, err := env.save(t, 1, sub2apiUpdate)
+		require.NoError(t, err)
+		require.Equal(t, 1, env.policies.attemptCalls, "the saved view already shows the health")
+		env.settings.values[SettingKeyOpsMonitoringEnabled] = "false"
+		preview, err := env.share.Preview(ctx, shareTestGroupID, shareUpdate)
+		require.NoError(t, err)
+		require.Nil(t, env.member(t, preview.Members, 13).HealthFactor, "a cached health is dropped once the monitor is off")
+		require.Nil(t, env.member(t, preview.Members, 13).Health)
+		require.Equal(t, 1, env.policies.attemptCalls)
+	})
+	t.Run("resilience off", func(t *testing.T) {
+		env := shareAdaptiveEnv(t)
+		orig := *resilience.Current()
+		off := resilience.Defaults()
+		off.Enabled = false
+		resilience.Publish(off)
+		t.Cleanup(func() { resilience.Publish(orig) })
+		_, err := env.save(t, 1, sub2apiUpdate)
+		require.NoError(t, err)
+		preview, err := env.share.Preview(ctx, shareTestGroupID, shareUpdate)
+		require.NoError(t, err)
+		require.Nil(t, env.member(t, preview.Members, 13).HealthFactor)
+		require.Zero(t, env.policies.attemptCalls)
+	})
+	t.Run("share groups use the refresh", func(t *testing.T) {
+		env := shareAdaptiveEnv(t)
+		_, err := env.share.Preview(ctx, shareTestGroupID, shareUpdate)
+		require.NoError(t, err)
+		require.Zero(t, env.policies.attemptCalls, "a share group is never read on demand")
+	})
+}

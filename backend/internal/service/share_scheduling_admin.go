@@ -151,6 +151,9 @@ type shareAdminCache struct {
 	summaries shareCached[map[int64]ShareSchedulingGroupSummary]
 	switches  map[int64]shareCached[*float64]
 	requests  map[int64]shareCached[map[int64]int64]
+	// health is the on-demand health of groups that do not run share
+	// scheduling (design §11.1), reused for shareHealthOnDemandTTL.
+	health map[int64]shareCached[map[int64]shareHealth]
 }
 
 // groupSummaries returns the one-hour usage of every group.
@@ -421,6 +424,7 @@ func (s *ShareSchedulingService) groupMemberViews(ctx context.Context, groupID i
 		return nil, nil, err
 	}
 	now := time.Now()
+	s.ensureGroupHealth(ctx, groupID, accounts, now)
 	requests, err := s.groupAccountRequests(ctx, groupID, now)
 	if err != nil {
 		slog.Warn("share_scheduling.member_requests_failed", "group_id", groupID, "error", err)
@@ -776,6 +780,7 @@ func (s *ShareSchedulingService) AccountRules(ctx context.Context, accountID int
 		if err != nil {
 			return nil, err
 		}
+		s.ensureGroupHealth(ctx, groupID, accounts, now)
 		views, _ := s.shareMemberViews(groupID, accounts, nil, now)
 		for _, v := range views {
 			if v.AccountID != accountID {
@@ -979,6 +984,11 @@ func (s *ShareSchedulingService) Explain(ctx context.Context, groupID int64, in 
 	case in.EstimatedTokens > 0:
 		ctx = context.WithValue(ctx, shareRequestProfileKey{}, shareRequestProfile{
 			bodyBytes: in.EstimatedTokens * inflightInputBytesPerTokenEstimate, cacheOneHour: in.CacheOneHour})
+	}
+	if s.groupPolicy(groupID) == nil {
+		if members, err := s.shareMembers(ctx, groupID); err == nil {
+			s.ensureGroupHealth(ctx, groupID, members, time.Now())
+		}
 	}
 	sessionHash, simulated := in.SessionHash, false
 	if sessionHash == "" {
