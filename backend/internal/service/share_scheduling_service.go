@@ -20,7 +20,20 @@ const (
 	shareSchedulingRefreshInterval = 30 * time.Second
 	shareSchedulingFlushInterval   = time.Second
 	shareSchedulingLoadTimeout     = 5 * time.Second
-	maxShareAttributionSampleRate  = 64
+	// shareAttributionSampleRate samples one session in four for cache
+	// attribution (the 0.3.0–0.4.3 default, now fixed).
+	shareAttributionSampleRate = 4
+)
+
+// Retention of the hourly counter buckets. Cache attribution runs for every
+// group and is the baseline of the report, so it is kept for eight days plus
+// two hours (design §8); share decision counters only exist for share groups.
+const (
+	ShareCacheCounterRetention = 194 * time.Hour
+	ShareShareCounterRetention = 26 * time.Hour
+	// ShareSwitchAnchorTTL keeps the time of the last scheduler switch as
+	// long as the cache counters it is compared with.
+	ShareSwitchAnchorTTL = ShareCacheCounterRetention
 )
 
 // shareSchedulingSettingsChange is the broadcast id of a settings change;
@@ -31,32 +44,19 @@ const shareSchedulingSettingsChange int64 = -1
 // group policy: another administrator saved first.
 var ErrShareSchedulingVersionConflict = infraerrors.Conflict("SHARE_SCHEDULING_VERSION_CONFLICT", "share scheduling policy was changed by someone else; reload and retry")
 
-// ShareSchedulingSettings are the global share-scheduling switches.
+// ShareSchedulingSettings are the global share-scheduling settings. The
+// stored document may still hold the switches of 0.3.0–0.4.3
+// (cache_attribution, attribution_sample_rate, decision_samples); they are
+// ignored and kept on save, so a rollback reads them unchanged.
 type ShareSchedulingSettings struct {
 	// Enabled is the master switch. While off every group uses the original
 	// Sub2API scheduler whatever its policy says.
 	Enabled bool `json:"enabled"`
-	// CacheAttribution classifies prompt-cache outcomes for every group,
-	// including groups on the original scheduler, so both have a baseline.
-	CacheAttribution bool `json:"cache_attribution"`
-	// AttributionSampleRate samples one session in N for switch attribution.
-	AttributionSampleRate int `json:"attribution_sample_rate"`
-	// DecisionSamples keeps the most recent decisions of each share group.
-	DecisionSamples bool `json:"decision_samples"`
 }
 
-// DefaultShareSchedulingSettings keeps routing on Sub2API and starts building
-// the cache baseline.
+// DefaultShareSchedulingSettings keeps routing on Sub2API.
 func DefaultShareSchedulingSettings() ShareSchedulingSettings {
-	return ShareSchedulingSettings{CacheAttribution: true, AttributionSampleRate: 4, DecisionSamples: true}
-}
-
-// Validate checks the settings ranges.
-func (s ShareSchedulingSettings) Validate() error {
-	if s.AttributionSampleRate < 1 || s.AttributionSampleRate > maxShareAttributionSampleRate {
-		return infraerrors.BadRequest("SHARE_SCHEDULING_SETTINGS_INVALID", fmt.Sprintf("attribution_sample_rate must be between 1 and %d", maxShareAttributionSampleRate))
-	}
-	return nil
+	return ShareSchedulingSettings{}
 }
 
 // ShareSchedulingPolicyRow is the stored form of one group's policy.
@@ -78,6 +78,29 @@ type ShareSchedulingUsage struct {
 	StandardCost float64
 }
 
+// ShareSchedulingGroupSummary is one group's successful traffic over a
+// window, from usage_logs.
+type ShareSchedulingGroupSummary struct {
+	Requests int64
+	// CacheReadTokens over PromptTokens (input + cache read + cache
+	// creation) is the cache hit ratio.
+	CacheReadTokens int64
+	PromptTokens    int64
+}
+
+// ShareSchedulingGroupMetrics are the database metrics of one group over a
+// window: its successful requests (usage_logs) and its client-visible
+// errors (ops_error_logs, the condition of the account recent health).
+type ShareSchedulingGroupMetrics struct {
+	ShareSchedulingGroupSummary
+	// TTFTP50Ms and TTFTP95Ms are first-token percentiles of the requests
+	// that have one (streaming); nil without samples.
+	TTFTP50Ms   *int
+	TTFTP95Ms   *int
+	TTFTSamples int64
+	Errors      int64
+}
+
 // ShareSchedulingRepository persists group policies.
 type ShareSchedulingRepository interface {
 	ListPolicies(ctx context.Context) ([]ShareSchedulingPolicyRow, error)
@@ -87,8 +110,14 @@ type ShareSchedulingRepository interface {
 	// expectedVersion (0 creates). It returns ErrShareSchedulingVersionConflict
 	// otherwise.
 	SavePolicy(ctx context.Context, groupID, expectedVersion int64, scheduler string, policy []byte, updatedBy int64) (*ShareSchedulingPolicyRow, error)
-	// AccountUsage aggregates usage_logs of a group per account since a time.
-	AccountUsage(ctx context.Context, groupID int64, since time.Time) (map[int64]ShareSchedulingUsage, error)
+	// AccountUsage aggregates usage_logs of a group per account over
+	// [from, to).
+	AccountUsage(ctx context.Context, groupID int64, from, to time.Time) (map[int64]ShareSchedulingUsage, error)
+	// GroupSummaries aggregates usage_logs per group since a time, for every
+	// group in one query.
+	GroupSummaries(ctx context.Context, since time.Time) (map[int64]ShareSchedulingGroupSummary, error)
+	// GroupMetrics reads the database metrics of a group over [from, to).
+	GroupMetrics(ctx context.Context, groupID int64, from, to time.Time) (ShareSchedulingGroupMetrics, error)
 }
 
 // ShareSchedulingCounter addresses one counter field in one minute bucket.
@@ -102,30 +131,28 @@ type ShareSchedulingCounter struct {
 // ShareSchedulingStatsBatch is one asynchronous flush.
 type ShareSchedulingStatsBatch struct {
 	Counters map[ShareSchedulingCounter]int64
-	// Decisions holds JSON samples per group, oldest first.
-	Decisions map[int64][][]byte
 }
 
-// ShareSchedulingBinding is one session binding seen by a rebalance scan.
-type ShareSchedulingBinding struct {
-	AccountID int64
-	Remaining time.Duration
-}
-
-// ShareSchedulingStore is the Redis side: change broadcast, statistics and
-// session memory. Every method may fail; callers drop statistics on error.
+// ShareSchedulingStore is the Redis side: change broadcast, statistics,
+// session memory and the switch anchor. Every method may fail; callers drop
+// statistics on error.
 type ShareSchedulingStore interface {
 	PublishChange(ctx context.Context, groupID int64) error
 	SubscribeChanges(ctx context.Context, handler func(groupID int64))
 	WriteStats(ctx context.Context, batch ShareSchedulingStatsBatch) error
+	// ReadCounters sums a window that ends now: minute buckets up to two
+	// hours, whole hours from the nearest one beyond.
 	ReadCounters(ctx context.Context, kind string, groupID int64, from, to time.Time) (map[string]int64, error)
-	RecentDecisions(ctx context.Context, groupID int64, limit int) ([][]byte, error)
+	// ReadHourCounters sums the hourly buckets [fromHour, toHour), in Unix
+	// hours, of a window in the past.
+	ReadHourCounters(ctx context.Context, kind string, groupID int64, fromHour, toHour int64) (map[string]int64, error)
 	// SwapCacheSession stores the latest request of a sampled session and
 	// returns the previous one (nil when none).
 	SwapCacheSession(ctx context.Context, groupID int64, fingerprint string, value []byte, ttl time.Duration) ([]byte, error)
-	// ClearBindings deletes session bindings of a group for which clear
-	// returns true and reports how many were deleted.
-	ClearBindings(ctx context.Context, groupID int64, clear func(ShareSchedulingBinding) bool) (int, error)
+	// RecordSwitch stores when the group last changed its scheduler.
+	RecordSwitch(ctx context.Context, groupID int64, at time.Time) error
+	// SwitchedAt returns the stored switch time; zero when none is stored.
+	SwitchedAt(ctx context.Context, groupID int64) (time.Time, error)
 }
 
 // shareGroupPolicy is the immutable runtime form of one group's policy.
@@ -160,10 +187,11 @@ type ShareSchedulingService struct {
 	// attribution bounds the concurrent session-history lookups of cache
 	// attribution; observations beyond it are dropped, never queued.
 	attribution chan struct{}
-	// shadows bounds the concurrent shadow comparisons the same way: under
-	// load the agreement rate is computed from fewer requests instead of
-	// piling up goroutines.
-	shadows chan struct{}
+	// admin caches the one-hour summaries of the admin views (design §7).
+	admin shareAdminCache
+	// attributionRate samples one session in attributionRate for cache
+	// attribution (shareAttributionSampleRate; tests sample every one).
+	attributionRate int
 	// gateway and openai give the admin operations the live candidate gates.
 	gateway *GatewayService
 	openai  *OpenAIGatewayService
@@ -186,7 +214,7 @@ func NewShareSchedulingService(repo ShareSchedulingRepository, store ShareSchedu
 	node, _ := os.Hostname()
 	s := &ShareSchedulingService{repo: repo, store: store, settings: settings, node: node,
 		stats: newShareStatsRecorder(), traces: newShareTraceTable(), attribution: make(chan struct{}, shareAttributionConcurrency),
-		shadows: make(chan struct{}, shareShadowConcurrency)}
+		attributionRate: shareAttributionSampleRate}
 	s.state.Store(&shareSchedulingState{settings: DefaultShareSchedulingSettings(), groups: map[int64]*shareGroupPolicy{}})
 	return s
 }
@@ -285,7 +313,7 @@ func (s *ShareSchedulingService) flushLoop(ctx context.Context) {
 // failed write is dropped and counted, so the report shows the gap.
 func (s *ShareSchedulingService) flushStats(ctx context.Context) {
 	batch := s.stats.drain()
-	if len(batch.Counters) == 0 && len(batch.Decisions) == 0 {
+	if len(batch.Counters) == 0 {
 		return
 	}
 	if s.store == nil {
@@ -409,11 +437,9 @@ func (s *ShareSchedulingService) loadSettings(ctx context.Context) (ShareSchedul
 	if raw == "" {
 		return settings, nil
 	}
+	// Fields of earlier versions are ignored.
 	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
 		return DefaultShareSchedulingSettings(), fmt.Errorf("decode %s: %w", shareSchedulingSettingsKey, err)
-	}
-	if settings.Validate() != nil {
-		settings.AttributionSampleRate = DefaultShareSchedulingSettings().AttributionSampleRate
 	}
 	return settings, nil
 }

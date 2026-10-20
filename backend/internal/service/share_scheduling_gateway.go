@@ -12,8 +12,8 @@ import (
 
 // shareSchedulingHook runs at the top of the original gateway selection,
 // after the group, profit gate and channel restriction are resolved. For
-// share groups it places the request and returns handled; for shadow groups
-// it installs the comparison; original groups only get a trace.
+// share groups it places the request and returns handled; other groups only
+// get a trace.
 func (s *GatewayService) shareSchedulingHook(ctx context.Context, group *Group, groupID *int64, sessionHash, requestedModel string, excludedIDs map[int64]struct{}) (context.Context, *AccountSelectionResult, bool, error) {
 	svc := s.shareScheduling
 	if svc == nil {
@@ -22,10 +22,6 @@ func (s *GatewayService) shareSchedulingHook(ctx context.Context, group *Group, 
 	ctx, trace := svc.withSelectionTrace(ctx, derefGroupID(groupID), sessionHash, len(excludedIDs) > 0)
 	gp := svc.groupPolicy(trace.groupID)
 	if gp == nil {
-		return ctx, nil, false, nil
-	}
-	if gp.policy.Scheduler == sharesched.SchedulerShadow {
-		trace.shadow = s.newShareShadow(ctx, gp, group, groupID, sessionHash, requestedModel, excludedIDs)
 		return ctx, nil, false, nil
 	}
 	result, err := s.selectAccountWithShareScheduling(ctx, gp, group, groupID, sessionHash, requestedModel, excludedIDs)
@@ -163,7 +159,6 @@ func (s *GatewayService) lookupShareBoundAccount(ctx context.Context, accountID 
 
 // selectAccountWithShareScheduling places one request of a share group.
 func (s *GatewayService) selectAccountWithShareScheduling(ctx context.Context, gp *shareGroupPolicy, group *Group, groupID *int64, sessionHash, requestedModel string, excludedIDs map[int64]struct{}) (*AccountSelectionResult, error) {
-	start := time.Now()
 	svc := s.shareScheduling
 	key, _ := shareAffinityKey(&gp.policy, sessionHash)
 	binding := svc.readBinding(ctx, s.cache, gp, key)
@@ -175,8 +170,7 @@ func (s *GatewayService) selectAccountWithShareScheduling(ctx context.Context, g
 		return nil, ErrNoAvailableAccounts
 	}
 	req, source := svc.newRequest(ctx, gp, in.platform, requestedModel, sessionHash, binding)
-	rec := shareDecisionRecord{gp: gp, source: source, platform: in.platform, model: requestedModel,
-		session: key, idle: req.Binding.Idle, cache: req.Cache, start: start}
+	rec := shareDecisionRecord{gp: gp, source: source, idle: req.Binding.Idle, cache: req.Cache}
 	exec := &shareExecutor{ctx: ctx, gp: gp, cache: s.cache, concurrency: s.concurrencyService, cfg: s.schedulingConfig(),
 		key: key, accounts: in.accounts, loadGate: true, loadOrder: shareLoadOrder(in.cands),
 		limit: func(acc *Account) int { return acc.Concurrency },
@@ -251,30 +245,4 @@ func (s *GatewayService) shareGatewayLastResort(ctx context.Context, gp *shareGr
 	}
 	s.noteLastResort(ctx, groupID, out.result.Account, round.recoverAt[out.served])
 	return out.result
-}
-
-// newShareShadow reads the binding before the original scheduler refreshes
-// or replaces it and returns the comparison to run once it has chosen.
-func (s *GatewayService) newShareShadow(ctx context.Context, gp *shareGroupPolicy, group *Group, groupID *int64, sessionHash, model string, excludedIDs map[int64]struct{}) func(original int64) {
-	svc := s.shareScheduling
-	key, _ := shareAffinityKey(&gp.policy, sessionHash)
-	binding := svc.readBinding(ctx, s.cache, gp, key)
-	excluded := make(map[int64]struct{}, len(excludedIDs))
-	for id := range excludedIDs {
-		excluded[id] = struct{}{}
-	}
-	base := context.WithoutCancel(ctx)
-	return func(original int64) {
-		start := time.Now()
-		ctx, cancel := context.WithTimeout(base, shareShadowTimeout)
-		defer cancel()
-		ctx, in, err := s.shareGatewayCandidates(ctx, group, groupID, model, excluded, binding.AccountID)
-		if err != nil {
-			return
-		}
-		req, source := svc.newRequest(ctx, gp, in.platform, model, sessionHash, binding)
-		decision := sharesched.Plan(req, in.cands)
-		svc.recordShadow(shareDecisionRecord{gp: gp, source: source, platform: in.platform, model: model,
-			session: key, idle: req.Binding.Idle, cache: req.Cache, start: start}, decision, original)
-	}
 }

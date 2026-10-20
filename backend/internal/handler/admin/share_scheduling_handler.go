@@ -16,8 +16,8 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
-// shareSchedulingMaxBody bounds policy documents: 5000 account rules fit
-// comfortably.
+// shareSchedulingMaxBody bounds request bodies; a policy document of an
+// older admin page with 5000 account rules fits comfortably.
 const shareSchedulingMaxBody = 2 << 20
 
 // ShareSchedulingHandler serves /api/v1/admin/share-scheduling.
@@ -60,7 +60,7 @@ func shareGroupID(c *gin.Context) (int64, bool) {
 	return id, true
 }
 
-// AccountRules returns an account's rules in its share scheduling groups.
+// AccountRules returns an account's expected shares in its share groups.
 // GET /api/v1/admin/share-scheduling/accounts/:id/rules
 func (h *ShareSchedulingHandler) AccountRules(c *gin.Context) {
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -81,14 +81,27 @@ func (h *ShareSchedulingHandler) GetSettings(c *gin.Context) {
 	response.Success(c, h.svc.Settings())
 }
 
-// UpdateSettings merges the given fields into the current settings.
+// shareSettingsRequest is the settings update. The switches of 0.3.0–0.4.3
+// are accepted from older admin pages and ignored.
+type shareSettingsRequest struct {
+	Enabled               *bool           `json:"enabled"`
+	CacheAttribution      json.RawMessage `json:"cache_attribution"`
+	AttributionSampleRate json.RawMessage `json:"attribution_sample_rate"`
+	DecisionSamples       json.RawMessage `json:"decision_samples"`
+}
+
+// UpdateSettings sets the master switch; an omitted switch keeps its value.
 // PUT /api/v1/admin/share-scheduling/settings
 func (h *ShareSchedulingHandler) UpdateSettings(c *gin.Context) {
-	settings := h.svc.Settings()
-	if !decodeStrictJSON(c, &settings) {
+	var req shareSettingsRequest
+	if !decodeStrictJSON(c, &req) {
 		return
 	}
-	updated, err := h.svc.UpdateSettings(c.Request.Context(), settings)
+	enabled := h.svc.Settings().Enabled
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	updated, err := h.svc.UpdateSettings(c.Request.Context(), enabled)
 	if response.ErrorFrom(c, err) {
 		return
 	}
@@ -119,57 +132,64 @@ func (h *ShareSchedulingHandler) GetPolicy(c *gin.Context) {
 	response.Success(c, view)
 }
 
-type sharePolicyUpdateRequest struct {
+// sharePolicyRequest is a save or preview request: the scheduler and
+// session keeping, or the whole policy document an admin page of
+// 0.3.0–0.4.3 submits (design §7.4).
+type sharePolicyRequest struct {
+	Scheduler       *string         `json:"scheduler"`
+	SessionKeep     *bool           `json:"session_keep"`
 	ExpectedVersion *int64          `json:"expected_version"`
 	Policy          json.RawMessage `json:"policy"`
 }
 
-// UpdatePolicy stores a policy when expected_version still matches.
+// UpdatePolicy stores the scheduler and session keeping when
+// expected_version still matches.
 // PUT /api/v1/admin/share-scheduling/groups/:id/policy
 func (h *ShareSchedulingHandler) UpdatePolicy(c *gin.Context) {
 	groupID, ok := shareGroupID(c)
 	if !ok {
 		return
 	}
-	var req sharePolicyUpdateRequest
+	var req sharePolicyRequest
 	if !decodeStrictJSON(c, &req) {
 		return
 	}
-	if req.ExpectedVersion == nil || *req.ExpectedVersion < 0 || len(req.Policy) == 0 {
-		response.BadRequest(c, "expected_version and policy are required")
+	if req.ExpectedVersion == nil || *req.ExpectedVersion < 0 {
+		response.BadRequest(c, "expected_version is required")
+		return
+	}
+	update, err := service.ParseSharePolicyUpdate(req.Scheduler, req.SessionKeep, req.Policy)
+	if response.ErrorFrom(c, err) {
 		return
 	}
 	var updatedBy int64
 	if subject, ok := middleware.GetAuthSubjectFromContext(c); ok {
 		updatedBy = subject.UserID
 	}
-	view, err := h.svc.SavePolicy(c.Request.Context(), groupID, *req.ExpectedVersion, req.Policy, updatedBy)
+	view, err := h.svc.SavePolicy(c.Request.Context(), groupID, *req.ExpectedVersion, update, updatedBy)
 	if response.ErrorFrom(c, err) {
 		return
 	}
 	response.Success(c, view)
 }
 
-type sharePolicyPreviewRequest struct {
-	Policy json.RawMessage `json:"policy"`
-}
-
-// Preview evaluates a proposed policy without saving it.
+// Preview evaluates a proposed scheduler and session keeping without saving
+// them; expected_version is accepted and ignored.
 // POST /api/v1/admin/share-scheduling/groups/:id/preview
 func (h *ShareSchedulingHandler) Preview(c *gin.Context) {
 	groupID, ok := shareGroupID(c)
 	if !ok {
 		return
 	}
-	var req sharePolicyPreviewRequest
+	var req sharePolicyRequest
 	if !decodeStrictJSON(c, &req) {
 		return
 	}
-	if len(req.Policy) == 0 {
-		response.BadRequest(c, "policy is required")
+	update, err := service.ParseSharePolicyUpdate(req.Scheduler, req.SessionKeep, req.Policy)
+	if response.ErrorFrom(c, err) {
 		return
 	}
-	preview, err := h.svc.Preview(c.Request.Context(), groupID, req.Policy)
+	preview, err := h.svc.Preview(c.Request.Context(), groupID, update)
 	if response.ErrorFrom(c, err) {
 		return
 	}
@@ -195,8 +215,9 @@ func (h *ShareSchedulingHandler) Explain(c *gin.Context) {
 	response.Success(c, explanation)
 }
 
-// Report returns target and actual shares with decision, cache and latency
-// statistics. window is a Go duration such as 1h, at most 24h.
+// Report returns the health figures of the window and of the same window
+// before the switch to share scheduling. window is a Go duration such as 1h,
+// between 1m and 24h.
 // GET /api/v1/admin/share-scheduling/groups/:id/report?window=1h
 func (h *ShareSchedulingHandler) Report(c *gin.Context) {
 	groupID, ok := shareGroupID(c)
@@ -219,47 +240,11 @@ func (h *ShareSchedulingHandler) Report(c *gin.Context) {
 	response.Success(c, report)
 }
 
-// Decisions returns the latest decision samples.
-// GET /api/v1/admin/share-scheduling/groups/:id/decisions?limit=100
-func (h *ShareSchedulingHandler) Decisions(c *gin.Context) {
-	groupID, ok := shareGroupID(c)
-	if !ok {
-		return
-	}
-	limit := 100
-	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed <= 0 || parsed > 500 {
-			response.BadRequest(c, "limit must be between 1 and 500")
-			return
-		}
-		limit = parsed
-	}
-	decisions, err := h.svc.RecentDecisions(c.Request.Context(), groupID, limit)
-	if response.ErrorFrom(c, err) {
-		return
-	}
-	response.Success(c, decisions)
-}
-
-type shareRebalanceRequest struct {
-	Mode string `json:"mode"`
-}
-
-// Rebalance clears session bindings (cold ones by default).
-// POST /api/v1/admin/share-scheduling/groups/:id/rebalance
-func (h *ShareSchedulingHandler) Rebalance(c *gin.Context) {
-	groupID, ok := shareGroupID(c)
-	if !ok {
-		return
-	}
-	var req shareRebalanceRequest
-	if c.Request.ContentLength != 0 && !decodeStrictJSON(c, &req) {
-		return
-	}
-	result, err := h.svc.Rebalance(c.Request.Context(), groupID, strings.TrimSpace(req.Mode))
-	if response.ErrorFrom(c, err) {
-		return
-	}
-	response.Success(c, result)
+// RetiredShareSchedulingEndpoint answers the removed rebalance and decision
+// sample routes with 410, so admin pages of 0.3.0–0.4.3 get an explicit
+// answer instead of a 404 (design §7.9).
+func RetiredShareSchedulingEndpoint(c *gin.Context) {
+	response.ErrorWithDetails(c, http.StatusGone,
+		"This share scheduling endpoint has been retired; sessions follow account priorities and load factors",
+		"SHARE_SCHEDULING_ENDPOINT_RETIRED", nil)
 }

@@ -25,26 +25,19 @@ const (
 	shareStatsPromptTokensField  = "prompt_tokens"
 	shareStatsCacheReadField     = "cache_read_tokens"
 	shareStatsCacheCreationField = "cache_creation_tokens"
-	// shareStatsTTFTPrefix + reason + ":" + bucket upper bound in ms counts
-	// first-token latencies; "inf" is the overflow bucket.
-	shareStatsTTFTPrefix = "ttft:"
-	// shareStatsAccountTTFTPrefix + account + ":" + bucket is the same
-	// histogram per serving account.
-	shareStatsAccountTTFTPrefix = "acct_ttft:"
-	shareTTFTOriginal           = "original"
 )
-
-// shareTTFTBucketsMs are the first-token histogram bounds.
-var shareTTFTBucketsMs = []int{100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 8000, 13000, 20000, 30000}
 
 // Cache attribution classes. A miss is attributed to the first cause that
 // explains it: an expired cache before a switch, a switch before drift.
 const (
-	shareCacheHit                = "cache_hit"
-	shareCacheBelowMin           = "below_min_cacheable"
-	shareCacheMissSessionless    = "miss_sessionless"
-	shareCacheMissNewSession     = "miss_new_session"
-	shareCacheMissTTLExpired     = "miss_ttl_expired"
+	shareCacheHit             = "cache_hit"
+	shareCacheBelowMin        = "below_min_cacheable"
+	shareCacheMissSessionless = "miss_sessionless"
+	shareCacheMissNewSession  = "miss_new_session"
+	shareCacheMissTTLExpired  = "miss_ttl_expired"
+	// shareCacheMissSwitchPrefix starts every class of a miss caused by an
+	// account switch while the cache was warm.
+	shareCacheMissSwitchPrefix   = "miss_switch_"
 	shareCacheMissSwitchPolicy   = "miss_switch_policy"
 	shareCacheMissSwitchSaturate = "miss_switch_saturated"
 	shareCacheMissSwitchDown     = "miss_switch_unavailable"
@@ -103,7 +96,6 @@ type shareCacheObservation struct {
 	cacheRead     int
 	cacheCreation int
 	oneHour       bool
-	firstTokenMs  *int
 	at            time.Time
 }
 
@@ -116,14 +108,13 @@ func (s *ShareSchedulingService) observeUsage(ctx context.Context, log *UsageLog
 	}
 	requestID, _ := ctx.Value(ctxkey.RequestID).(string)
 	trace, ok := s.traces.take(requestID)
-	if !ok || trace.accountID != log.AccountID || !s.Settings().CacheAttribution {
+	if !ok || trace.accountID != log.AccountID {
 		return
 	}
 	obs := shareCacheObservation{trace: trace, accountID: log.AccountID, model: log.Model,
 		prompt:    log.InputTokens + log.CacheReadTokens + log.CacheCreationTokens,
 		cacheRead: log.CacheReadTokens, cacheCreation: log.CacheCreationTokens,
-		oneHour: log.CacheCreation1hTokens > 0, firstTokenMs: log.FirstTokenMs, at: time.Now()}
-	s.recordTTFT(obs)
+		oneHour: log.CacheCreation1hTokens > 0, at: time.Now()}
 	if obs.trace.sessionKey == "" || s.store == nil {
 		s.recordCacheClass(obs, s.classifyCache(obs, nil))
 		return
@@ -213,29 +204,4 @@ func (s *ShareSchedulingService) recordCacheClass(obs shareCacheObservation, cla
 	s.stats.add(shareStatsKindCache, gid, at, shareStatsPromptTokensField, int64(obs.prompt))
 	s.stats.add(shareStatsKindCache, gid, at, shareStatsCacheReadField, int64(obs.cacheRead))
 	s.stats.add(shareStatsKindCache, gid, at, shareStatsCacheCreationField, int64(obs.cacheCreation))
-}
-
-// recordTTFT adds the first-token latency to the histogram of the decision
-// that placed the request (original groups share one histogram) and to the
-// serving account's histogram.
-func (s *ShareSchedulingService) recordTTFT(obs shareCacheObservation) {
-	if obs.firstTokenMs == nil || *obs.firstTokenMs < 0 {
-		return
-	}
-	reason := string(obs.trace.reason)
-	if reason == "" {
-		reason = shareTTFTOriginal
-	}
-	bucket := shareTTFTBucket(*obs.firstTokenMs)
-	s.stats.add(shareStatsKindCache, obs.trace.groupID, obs.at, shareStatsTTFTPrefix+reason+":"+bucket, 1)
-	s.stats.add(shareStatsKindCache, obs.trace.groupID, obs.at, shareStatsAccountTTFTPrefix+strconv.FormatInt(obs.accountID, 10)+":"+bucket, 1)
-}
-
-func shareTTFTBucket(ms int) string {
-	for _, bound := range shareTTFTBucketsMs {
-		if ms <= bound {
-			return strconv.Itoa(bound)
-		}
-	}
-	return "inf"
 }

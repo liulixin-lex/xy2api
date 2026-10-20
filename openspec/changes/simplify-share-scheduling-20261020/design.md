@@ -183,20 +183,15 @@
 | `share_if_healthy` | float | 只有该账号恢复健康、其余成员保持现状时的预计份额。健康账号等于 `expected_share` |
 | `actual_requests_1h` | int64 | 近 1 小时本组内由该账号完成的成功请求数（`usage_logs`，按本组） |
 | `actual_share_1h` | float \| null | 占本组近 1 小时成功请求的比例 |
-| `recent_requests_1h` | int64 | 近 1 小时该账号在**全部分组**的成功请求数 |
-| `recent_errors_1h` | int64 | 近 1 小时该账号在全部分组的客户可见错误数，口径见下文 |
-| `recent_error_rate_1h` | float \| null | `errors ÷ (requests + errors)`，两者都为 0 时 null。**后端直接给出** |
+
+账号的失败率不在本节：PM 2026-10-20 决定成员视图只保留一个失败率口径，即第 4 层自适应权重的 `health.rate`（tasks §4），原先计划的 `recent_requests_1h`、`recent_errors_1h`、`recent_error_rate_1h` 不提供。
 
 **份额口径**：份额计算只取决于成员的优先级、负载因子与健康状态，不取决于分组当前的调度方式。所以“当前状态（份额模式）”与“切到份额后”是同一个数，`expected_share` 对原版分组同样有效，供切换确认用。原版分组的现状由 `actual_share_1h` 表达。
 
 - 计算：活动优先级段内的健康成员按 `effective_load_factor` 占比分配，其余成员为 0。
 - 不含满载溢出（§5）与按请求的门禁，是新会话份额的期望值，不是请求份额的承诺。
 
-**失败率口径与开销**：
-- 错误数沿用 0.4.2 账号近期健康的条件（`buildOpsErrorLogsWhere`，View=all）：只算客户可见错误（status ≥400），`cyber_policy` 例外，不含已恢复的上游记录。走 `ops_error_logs (account_id, created_at)` 索引。
-- 成功请求数走 `usage_logs (account_id, created_at)` 索引；本组请求数走 `usage_logs (group_id, created_at)` 索引。
-- 窗口固定为近 1 小时。按成员批量查询，每个视图共 3 条 SQL。
-- 缓存：结果在进程内缓存 30 秒，键为分组 ID，**只缓存请求数与错误数**。成员列表、优先级、负载因子、健康状态与份额每次现读、现场计算，所以修改负载因子后视图立即反映。
+**开销**：本组按账号的近 1 小时成功请求数走 `usage_logs (group_id, created_at)` 索引，每个视图 1 条 SQL；结果在进程内缓存 30 秒，键为分组 ID，**只缓存请求数**。成员列表、优先级、负载因子、健康状态与份额每次现读、现场计算，所以修改负载因子后视图立即反映。
 
 ### 7.4 `PUT /groups/:id/policy`
 
@@ -284,7 +279,7 @@
 | `baseline` | Metrics \| null |
 | `baseline_unavailable` | `"not_share"`、`"never_switched"`、`"out_of_retention"` 或 null。`out_of_retention` 只影响归因三项：数据库各项照常给出，`baseline` 仍返回 |
 | `accounts[]` | `{account_id, requests, request_share, tokens, token_share, standard_cost, cost_share, skipped}`，统计当前窗口。前六项来自 `usage_logs`；`skipped` 是 `{原因: 次数}`，**仅份额模式** |
-| `details` | `{cache_classes: {类别: {requests, tokens}}, reasons: {原因: 次数}, waits: {count, hit, avg_ms}, attempts, share_requests}`，统计当前窗口。`cache_classes` 两种模式都有；其余**仅份额模式** |
+| `details` | `{cache_classes: {类别: {requests, tokens}}, reasons: {原因: 次数}, waits: {count, hit, avg_ms}, attempts, share_requests}`，统计当前窗口。`cache_classes` 两种模式都有；其余**仅份额模式**，原版模式下不返回这些键；`avg_ms` 没有等待时为 null |
 | `counters_error` | string \| null，Redis 读取失败时的说明 |
 | `counter_precision` | `"minute"` 或 `"hour_rounded"`：基线、以及超过 2 小时的窗口按整点小时汇总 |
 
@@ -335,6 +330,18 @@
   - `share` 类计数（决策原因、按账号的选中与跳过）只在份额分组产生，保留期仍为 26 小时。
   - 分钟桶仍为 2 小时 10 分。
 - **基线读取**：基线窗口整体在过去，只读小时桶，所以 `counter_precision` 为 `hour_rounded`；超出 194 小时时，归因三项为 null，`baseline_unavailable=out_of_retention`，数据库三项照常给出。
+  - 小时桶取锚点所在整点之前的整点小时，个数为窗口四舍五入到小时（至少 1 个），不含锚点所在小时，所以切换之后的数据不会混入基线。
+- **语句超时**：管理端对 `usage_logs`、`ops_error_logs` 的读取都在只读事务里执行，事务内 `SET LOCAL statement_timeout = '5s'`，大表异常时由数据库中止查询，不拖住连接。
+- **执行计划**（本地 PostgreSQL 18，合成数据 `usage_logs` 300 万行 / 7 天 / 40 组 / 600 账号，`ops_error_logs` 30 万行；只读验证，未连任何服务器）：
+
+  | 查询 | 用到的索引 | 耗时（冷缓存） |
+  |---|---|---|
+  | 列表摘要：全部分组近 1 小时 `GROUP BY group_id` | `created_at` 前缀的索引（PG 18 选 `idx_usage_logs_request_type_created_at` 的跳跃扫描；无跳跃扫描的版本走 `idx_usage_logs_created_at`），窗口只有 1 小时 | 61 ms |
+  | 成员请求数、报表账号表：一组 24 小时 `GROUP BY account_id` | `idx_usage_logs_group_created_at_not_null` | 117 ms |
+  | 报表数据库指标：一组 24 小时，含首字分位 | `idx_usage_logs_group_created_at_not_null` | 6 ms（热） |
+  | 报表错误数：一组 24 小时 | `idx_ops_error_logs_group_time` | 18 ms |
+
+  原始输出在仓库外 `xy2api-artifacts/share-simplify-20261020/pg/explain-3x.txt`。
 
 ## 9. 同步登记
 

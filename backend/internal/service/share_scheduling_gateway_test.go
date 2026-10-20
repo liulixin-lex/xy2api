@@ -203,8 +203,9 @@ func newShareTestEnv(t testing.TB, setup shareTestSetup, accounts ...Account) *s
 	cache := newShareTestCache()
 	conc := newShareTestConcurrency()
 	share := NewShareSchedulingService(nil, nil, nil)
+	share.attributionRate = 1
 	share.state.Store(&shareSchedulingState{
-		settings: ShareSchedulingSettings{Enabled: true, CacheAttribution: true, AttributionSampleRate: 1, DecisionSamples: true},
+		settings: ShareSchedulingSettings{Enabled: true},
 		groups:   map[int64]*shareGroupPolicy{shareTestGroupID: {groupID: shareTestGroupID, version: 3, policy: policy}},
 	})
 	gateway := &GatewayService{
@@ -556,7 +557,7 @@ func TestShareSchedulingModelRoutingRestrictsThenFallsBack(t *testing.T) {
 func TestShareSchedulingDisabledKeepsOriginalScheduler(t *testing.T) {
 	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
 	state := env.share.state.Load()
-	env.share.state.Store(&shareSchedulingState{settings: ShareSchedulingSettings{Enabled: false, AttributionSampleRate: 1}, groups: state.groups})
+	env.share.state.Store(&shareSchedulingState{settings: ShareSchedulingSettings{Enabled: false}, groups: state.groups})
 
 	result := env.selectAccount(t, context.Background(), "original", nil)
 	require.NotNil(t, result.Account)
@@ -574,9 +575,7 @@ func TestShareSchedulingStoredShadowRunsOriginal(t *testing.T) {
 	result := env.selectAccount(t, context.Background(), "shadow", nil)
 	require.NotNil(t, result.Account)
 	require.Empty(t, env.cache.created, "the original scheduler binds with a plain SET")
-	time.Sleep(50 * time.Millisecond)
-	require.Zero(t, env.counter(shareStatsShadowField), "no shadow comparison runs")
-	require.Zero(t, env.counter(shareStatsRequestsField))
+	require.Zero(t, env.counter(shareStatsRequestsField), "no share decision is made or compared")
 }
 
 func TestShareSchedulingBindStickySessionUsesBindingTTL(t *testing.T) {
@@ -590,15 +589,14 @@ func TestShareSchedulingBindStickySessionUsesBindingTTL(t *testing.T) {
 	require.Equal(t, stickySessionTTL, env.cache.ttls["ttl-other"])
 }
 
-func TestShareSchedulingDecisionSamplesNeverCarryRawSessionKeys(t *testing.T) {
+func TestShareSchedulingStatisticsNeverCarryRawSessionKeys(t *testing.T) {
 	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
 	env.selectAccount(t, context.Background(), "secret-session-id", nil)
 	batch := env.share.stats.drain()
-	require.Len(t, batch.Decisions[shareTestGroupID], 1)
-	sample := string(batch.Decisions[shareTestGroupID][0])
-	require.NotContains(t, sample, "secret-session-id")
-	require.Contains(t, sample, `"reason":"new_session"`)
-	require.Contains(t, sample, `"version":3`)
+	require.NotEmpty(t, batch.Counters)
+	for counter := range batch.Counters {
+		require.NotContains(t, counter.Field, "secret-session-id")
+	}
 }
 
 func TestShareSessionHashAnchorsConversations(t *testing.T) {
@@ -635,7 +633,7 @@ func TestShareSessionHashAnchorsConversations(t *testing.T) {
 	require.Equal(t, h1, p1)
 	require.NotEqual(t, p1, env.gateway.GenerateSessionHash(parse(t, other, 11)), "requests sharing a system prompt are separate conversations")
 
-	env.share.state.Store(&shareSchedulingState{settings: ShareSchedulingSettings{AttributionSampleRate: 1}, groups: state.groups})
+	env.share.state.Store(&shareSchedulingState{settings: ShareSchedulingSettings{}, groups: state.groups})
 	original := env.gateway.GenerateSessionHash(parse(t, turn1, 11))
 	require.False(t, strings.HasPrefix(original, shareAnchorPrefix), "original groups keep the original hash")
 }
@@ -690,12 +688,4 @@ func TestShareRequestProfileDetectsOneHourCache(t *testing.T) {
 	plain := withShareRequestProfile(context.Background(), []byte(`{"messages":[]}`))
 	require.Equal(t, 5*time.Minute, shareCacheProfile(plain, PlatformAnthropic, "claude-sonnet-4-5").TTL)
 	require.Equal(t, 30*time.Minute, shareCacheProfile(plain, PlatformOpenAI, "gpt-5.6").TTL)
-}
-
-func TestShareProtectedBindingsSurviveRebalance(t *testing.T) {
-	require.True(t, IsShareRebalanceableBinding("anchor:abc"))
-	require.True(t, IsShareRebalanceableBinding("openai:session"))
-	require.False(t, IsShareRebalanceableBinding(openAIWSResponseAccountCacheKey("resp_1")))
-	require.False(t, IsShareRebalanceableBinding(openAIHTTPResponseOwnerUserPrefix+"x"))
-	require.False(t, IsShareRebalanceableBinding("openai:grok-video:abc"))
 }

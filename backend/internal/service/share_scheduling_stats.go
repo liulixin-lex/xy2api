@@ -14,7 +14,6 @@ const (
 	// Bounds keep memory flat when Redis is unreachable: excess statistics
 	// are dropped, requests are never slowed down.
 	maxShareStatsCounters       = 20000
-	maxShareDecisionsPerFlush   = 100
 	maxShareTraces              = 100000
 	shareTraceLifetime          = 15 * time.Minute
 	shareStatsDroppedField      = "dropped"
@@ -31,24 +30,17 @@ const (
 	shareStatsWaitHitField      = "wait_hit"
 	shareStatsWaitMsField       = "wait_ms"
 	shareStatsAttemptsField     = "attempts"
-	shareStatsShadowField       = "shadow"
-	shareStatsShadowAgreeField  = "shadow_agree"
-	shareStatsShadowPrefix      = "shadow_reason:"
-	// shareStatsShadowSkippedField counts shadow comparisons skipped at the
-	// concurrency bound; the agreement rate covers the rest.
-	shareStatsShadowSkippedField = "shadow_skipped"
 )
 
 // shareStatsRecorder aggregates counters in memory until the next flush.
 type shareStatsRecorder struct {
-	mu        sync.Mutex
-	counters  map[ShareSchedulingCounter]int64
-	decisions map[int64][][]byte
-	dropped   int64
+	mu       sync.Mutex
+	counters map[ShareSchedulingCounter]int64
+	dropped  int64
 }
 
 func newShareStatsRecorder() *shareStatsRecorder {
-	return &shareStatsRecorder{counters: map[ShareSchedulingCounter]int64{}, decisions: map[int64][][]byte{}}
+	return &shareStatsRecorder{counters: map[ShareSchedulingCounter]int64{}}
 }
 
 func (r *shareStatsRecorder) add(kind string, groupID int64, at time.Time, field string, n int64) {
@@ -98,39 +90,16 @@ func (r *shareStatsRecorder) addDropped(n int64) {
 	r.dropped += n
 }
 
-// decisionRoom reports whether a decision sample of the group would be kept,
-// so callers skip encoding samples the flush would drop.
-func (r *shareStatsRecorder) decisionRoom(groupID int64) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if len(r.decisions[groupID]) >= maxShareDecisionsPerFlush {
-		r.dropped++
-		return false
-	}
-	return true
-}
-
-func (r *shareStatsRecorder) addDecision(groupID int64, sample []byte) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if len(r.decisions[groupID]) >= maxShareDecisionsPerFlush {
-		r.dropped++
-		return
-	}
-	r.decisions[groupID] = append(r.decisions[groupID], sample)
-}
-
 func (r *shareStatsRecorder) drain() ShareSchedulingStatsBatch {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	batch := ShareSchedulingStatsBatch{Counters: r.counters, Decisions: r.decisions}
+	batch := ShareSchedulingStatsBatch{Counters: r.counters}
 	if r.dropped > 0 {
 		key := ShareSchedulingCounter{Kind: shareStatsKindShare, Minute: time.Now().Unix() / 60, Field: shareStatsDroppedField}
 		batch.Counters[key] += r.dropped
 		r.dropped = 0
 	}
 	r.counters = map[ShareSchedulingCounter]int64{}
-	r.decisions = map[int64][][]byte{}
 	return batch
 }
 

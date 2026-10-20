@@ -2,6 +2,7 @@ package routes
 
 import (
 	"github.com/liulixin-lex/xy2api/internal/handler"
+	adminhandler "github.com/liulixin-lex/xy2api/internal/handler/admin"
 
 	"github.com/gin-gonic/gin"
 )
@@ -21,8 +22,9 @@ func registerShareSchedulingRoutes(admin *gin.RouterGroup, h *handler.Handlers) 
 		share.POST("/groups/:id/preview", h.Admin.ShareScheduling.Preview)
 		share.POST("/groups/:id/explain", h.Admin.ShareScheduling.Explain)
 		share.GET("/groups/:id/report", h.Admin.ShareScheduling.Report)
-		share.GET("/groups/:id/decisions", h.Admin.ShareScheduling.Decisions)
-		share.POST("/groups/:id/rebalance", h.Admin.ShareScheduling.Rebalance)
+		// Retired in the share scheduling simplification: 410 for old pages.
+		share.GET("/groups/:id/decisions", adminhandler.RetiredShareSchedulingEndpoint)
+		share.POST("/groups/:id/rebalance", adminhandler.RetiredShareSchedulingEndpoint)
 		share.GET("/accounts/:id/rules", h.Admin.ShareScheduling.AccountRules)
 	}
 }

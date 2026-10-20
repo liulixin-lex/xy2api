@@ -44,7 +44,7 @@ func shareIntegrationRedis(t *testing.T, groupID int64) *redisclient.Client {
 		ctx := context.Background()
 		for _, pattern := range []string{
 			fmt.Sprintf("xy2:*:%d:*", groupID),
-			fmt.Sprintf("xy2:share:dec:%d", groupID),
+			shareSwitchKey(groupID),
 			buildSessionKey(groupID, "*"),
 		} {
 			keys, err := integrationRedis.Keys(ctx, pattern).Result()
@@ -136,27 +136,65 @@ func TestShareSchedulingAccountUsage(t *testing.T) {
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM api_keys WHERE id = $1`, keyID)
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, userID)
 	})
-	insert := func(group, account int64, input, output, cacheCreate, cacheRead int, cost float64, at time.Time) {
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM ops_error_logs WHERE group_id = ANY($1)`, fmt.Sprintf("{%d,%d}", groupID, otherGroup))
+	})
+	insert := func(group, account int64, input, output, cacheCreate, cacheRead int, cost float64, firstToken *int, at time.Time) {
 		_, err := integrationDB.ExecContext(ctx, `INSERT INTO usage_logs(user_id,api_key_id,account_id,group_id,model,input_tokens,output_tokens,
-			cache_creation_tokens,cache_read_tokens,total_cost,actual_cost,created_at) VALUES($1,$2,$3,$4,'claude-x',$5,$6,$7,$8,$9,$9,$10)`,
-			userID, keyID, account, group, input, output, cacheCreate, cacheRead, cost, at)
+			cache_creation_tokens,cache_read_tokens,total_cost,actual_cost,first_token_ms,created_at) VALUES($1,$2,$3,$4,'claude-x',$5,$6,$7,$8,$9,$9,$10,$11)`,
+			userID, keyID, account, group, input, output, cacheCreate, cacheRead, cost, firstToken, at)
 		require.NoError(t, err)
 	}
+	ms := func(n int) *int { return &n }
 	now := time.Now()
-	insert(groupID, accounts[0], 100, 10, 5, 1000, 0.5, now.Add(-10*time.Minute))
-	insert(groupID, accounts[0], 200, 20, 0, 0, 0.25, now.Add(-5*time.Minute))
-	insert(groupID, accounts[1], 50, 5, 0, 0, 0.1, now.Add(-time.Minute))
-	insert(groupID, accounts[1], 999, 999, 0, 0, 9, now.Add(-2*time.Hour))    // outside the window
-	insert(otherGroup, accounts[1], 999, 999, 0, 0, 9, now.Add(-time.Minute)) // another group
+	insert(groupID, accounts[0], 100, 10, 5, 1000, 0.5, ms(400), now.Add(-10*time.Minute))
+	insert(groupID, accounts[0], 200, 20, 0, 0, 0.25, ms(1000), now.Add(-5*time.Minute))
+	insert(groupID, accounts[1], 50, 5, 0, 0, 0.1, nil, now.Add(-time.Minute))
+	insert(groupID, accounts[1], 999, 999, 0, 0, 9, ms(9), now.Add(-2*time.Hour))    // outside the window
+	insert(otherGroup, accounts[1], 999, 999, 0, 0, 9, ms(9), now.Add(-time.Minute)) // another group
+	insertError := func(group int64, status int, errorType string, at time.Time) {
+		_, err := integrationDB.ExecContext(ctx, `INSERT INTO ops_error_logs(error_phase,error_type,status_code,group_id,created_at)
+			VALUES('upstream',$1,$2,$3,$4)`, errorType, status, group, at)
+		require.NoError(t, err)
+	}
+	insertError(groupID, 502, "upstream_error", now.Add(-3*time.Minute))
+	insertError(groupID, 200, "cyber_policy", now.Add(-3*time.Minute))    // a visible block on an open stream
+	insertError(groupID, 200, "upstream_error", now.Add(-3*time.Minute))  // a recovered attempt, no error
+	insertError(groupID, 503, "upstream_error", now.Add(-2*time.Hour))    // outside the window
+	insertError(otherGroup, 502, "upstream_error", now.Add(-time.Minute)) // another group
 
-	usage, err := repo.AccountUsage(ctx, groupID, now.Add(-time.Hour))
+	usage, err := repo.AccountUsage(ctx, groupID, now.Add(-time.Hour), now)
 	require.NoError(t, err)
 	require.Len(t, usage, 2)
 	require.Equal(t, service.ShareSchedulingUsage{Requests: 2, Tokens: 1335, StandardCost: 0.75}, usage[accounts[0]])
 	require.Equal(t, service.ShareSchedulingUsage{Requests: 1, Tokens: 55, StandardCost: 0.1}, usage[accounts[1]])
+	usage, err = repo.AccountUsage(ctx, groupID, now.Add(-time.Hour), now.Add(-4*time.Minute))
+	require.NoError(t, err)
+	require.Equal(t, int64(2), usage[accounts[0]].Requests, "the window end is exclusive of later rows")
+	require.NotContains(t, usage, accounts[1])
+
+	summaries, err := repo.GroupSummaries(ctx, now.Add(-time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, service.ShareSchedulingGroupSummary{Requests: 3, CacheReadTokens: 1000, PromptTokens: 1355}, summaries[groupID])
+	require.Equal(t, int64(1), summaries[otherGroup].Requests)
+
+	metrics, err := repo.GroupMetrics(ctx, groupID, now.Add(-time.Hour), now)
+	require.NoError(t, err)
+	require.Equal(t, int64(3), metrics.Requests)
+	require.Equal(t, int64(1000), metrics.CacheReadTokens)
+	require.Equal(t, int64(1355), metrics.PromptTokens)
+	require.Equal(t, int64(2), metrics.TTFTSamples)
+	require.Equal(t, 700, *metrics.TTFTP50Ms)
+	require.Equal(t, 970, *metrics.TTFTP95Ms)
+	require.Equal(t, int64(2), metrics.Errors, "client-visible errors and cyber blocks, not recovered attempts")
+
+	empty, err := repo.GroupMetrics(ctx, groupID, now.Add(-30*time.Second), now)
+	require.NoError(t, err)
+	require.Zero(t, empty.Requests)
+	require.Nil(t, empty.TTFTP50Ms)
 }
 
-func TestShareSchedulingStoreCountersAndDecisions(t *testing.T) {
+func TestShareSchedulingStoreCounters(t *testing.T) {
 	ctx := context.Background()
 	groupID := shareIntegrationGroup(t, "share-counters")
 	rdb := shareIntegrationRedis(t, groupID)
@@ -164,21 +202,17 @@ func TestShareSchedulingStoreCountersAndDecisions(t *testing.T) {
 
 	now := time.Now()
 	minute := now.Unix() / 60
-	batch := func(n int64, decisions ...string) service.ShareSchedulingStatsBatch {
-		b := service.ShareSchedulingStatsBatch{Counters: map[service.ShareSchedulingCounter]int64{
-			{Kind: "share", GroupID: groupID, Minute: minute, Field: "requests"}:         n,
-			{Kind: "share", GroupID: groupID, Minute: minute - 30, Field: "requests"}:    n,
-			{Kind: "share", GroupID: groupID, Minute: minute - 200, Field: "requests"}:   n,
-			{Kind: "share", GroupID: groupID, Minute: minute - 3000, Field: "requests"}:  n,
-			{Kind: "cache", GroupID: groupID, Minute: minute, Field: "acct_ttft:7:1000"}: n,
-		}, Decisions: map[int64][][]byte{}}
-		for _, d := range decisions {
-			b.Decisions[groupID] = append(b.Decisions[groupID], []byte(d))
-		}
-		return b
+	batch := func(n int64) service.ShareSchedulingStatsBatch {
+		return service.ShareSchedulingStatsBatch{Counters: map[service.ShareSchedulingCounter]int64{
+			{Kind: "share", GroupID: groupID, Minute: minute, Field: "requests"}:        n,
+			{Kind: "share", GroupID: groupID, Minute: minute - 30, Field: "requests"}:   n,
+			{Kind: "share", GroupID: groupID, Minute: minute - 200, Field: "requests"}:  n,
+			{Kind: "share", GroupID: groupID, Minute: minute - 3000, Field: "requests"}: n,
+			{Kind: "cache", GroupID: groupID, Minute: minute, Field: "class:cache_hit"}: n,
+		}}
 	}
-	require.NoError(t, store.WriteStats(ctx, batch(2, `{"n":1}`, `{"n":2}`)))
-	require.NoError(t, store.WriteStats(ctx, batch(3, `{"n":3}`)))
+	require.NoError(t, store.WriteStats(ctx, batch(2)))
+	require.NoError(t, store.WriteStats(ctx, batch(3)))
 
 	hour, err := store.ReadCounters(ctx, "share", groupID, now.Add(-time.Hour), now)
 	require.NoError(t, err)
@@ -191,24 +225,48 @@ func TestShareSchedulingStoreCountersAndDecisions(t *testing.T) {
 	require.Equal(t, int64(15), day["requests"], "a read covers at most one day")
 	cache, err := store.ReadCounters(ctx, "cache", groupID, now.Add(-time.Minute), now)
 	require.NoError(t, err)
-	require.Equal(t, int64(5), cache["acct_ttft:7:1000"])
+	require.Equal(t, int64(5), cache["class:cache_hit"])
+
+	// A past window reads whole hourly buckets only.
+	hours, err := store.ReadHourCounters(ctx, "share", groupID, (minute-200)/60, (minute-200)/60+1)
+	require.NoError(t, err)
+	require.Equal(t, int64(5), hours["requests"], "one hour holds both flushes of minute-200")
+	hours, err = store.ReadHourCounters(ctx, "share", groupID, (minute-3000)/60, minute/60+1)
+	require.NoError(t, err)
+	require.Equal(t, int64(15), hours["requests"], "a read covers at most one day of hours")
+	hours, err = store.ReadHourCounters(ctx, "share", groupID, minute/60, minute/60)
+	require.NoError(t, err)
+	require.Empty(t, hours)
 
 	ttl, err := rdb.TTL(ctx, shareCounterKey("share", groupID, minute)).Result()
 	require.NoError(t, err)
 	assertTTLWithin(t, ttl, 2*time.Hour, shareSchedulingMinuteTTL)
 	ttl, err = rdb.TTL(ctx, shareHourCounterKey("share", groupID, minute/60)).Result()
 	require.NoError(t, err)
-	assertTTLWithin(t, ttl, 25*time.Hour, 26*time.Hour)
+	assertTTLWithin(t, ttl, 25*time.Hour, service.ShareShareCounterRetention)
+	ttl, err = rdb.TTL(ctx, shareHourCounterKey("cache", groupID, minute/60)).Result()
+	require.NoError(t, err)
+	assertTTLWithin(t, ttl, 193*time.Hour, service.ShareCacheCounterRetention)
+}
 
-	recent, err := store.RecentDecisions(ctx, groupID, 2)
+func TestShareSchedulingStoreSwitchAnchor(t *testing.T) {
+	ctx := context.Background()
+	groupID := shareIntegrationGroup(t, "share-switch")
+	rdb := shareIntegrationRedis(t, groupID)
+	store := NewShareSchedulingStore(rdb)
+
+	at, err := store.SwitchedAt(ctx, groupID)
 	require.NoError(t, err)
-	require.Equal(t, [][]byte{[]byte(`{"n":3}`), []byte(`{"n":2}`)}, recent, "newest first")
-	for i := range 600 {
-		require.NoError(t, store.WriteStats(ctx, service.ShareSchedulingStatsBatch{Decisions: map[int64][][]byte{groupID: {[]byte(fmt.Sprintf(`{"i":%d}`, i))}}}))
-	}
-	all, err := store.RecentDecisions(ctx, groupID, 0)
+	require.True(t, at.IsZero(), "no switch recorded")
+
+	switched := time.UnixMilli(time.Now().Add(-time.Hour).UnixMilli())
+	require.NoError(t, store.RecordSwitch(ctx, groupID, switched))
+	at, err = store.SwitchedAt(ctx, groupID)
 	require.NoError(t, err)
-	require.Len(t, all, 500, "the decision ring is capped")
+	require.True(t, switched.Equal(at))
+	ttl, err := rdb.TTL(ctx, shareSwitchKey(groupID)).Result()
+	require.NoError(t, err)
+	assertTTLWithin(t, ttl, 193*time.Hour, service.ShareSwitchAnchorTTL)
 }
 
 func TestShareSchedulingStoreBroadcast(t *testing.T) {
@@ -239,7 +297,6 @@ func TestShareSchedulingBindingsOnRedis(t *testing.T) {
 	groupID := shareIntegrationGroup(t, "share-bindings")
 	rdb := shareIntegrationRedis(t, groupID)
 	cache := &gatewayCache{rdb: rdb}
-	store := NewShareSchedulingStore(rdb)
 
 	_, _, err := cache.GetSessionAccountIDWithTTL(ctx, groupID, "absent")
 	require.ErrorIs(t, err, service.ErrStickySessionNotFound)
@@ -271,40 +328,6 @@ func TestShareSchedulingBindingsOnRedis(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(5), id)
 	assertTTLWithin(t, remaining, 85*time.Second, 90*time.Second)
-
-	// Rebalance clears cold placements only and never continuation keys.
-	require.NoError(t, cache.SetSessionAccountID(ctx, groupID, "cold", 6, time.Minute))
-	require.NoError(t, cache.SetSessionAccountID(ctx, groupID, "openai:response:resp_1", 6, time.Minute))
-	var seen []int64
-	cleared, err := store.ClearBindings(ctx, groupID, func(b service.ShareSchedulingBinding) bool {
-		seen = append(seen, b.AccountID)
-		return b.Remaining < 2*time.Minute
-	})
-	require.NoError(t, err)
-	require.Equal(t, 2, cleared, "idle and cold go, the warm race binding stays")
-	require.ElementsMatch(t, []int64{winner, 5, 6}, seen, "protected keys are never offered")
-	_, _, err = cache.GetSessionAccountIDWithTTL(ctx, groupID, "cold")
-	require.ErrorIs(t, err, service.ErrStickySessionNotFound)
-	_, _, err = cache.GetSessionAccountIDWithTTL(ctx, groupID, "race")
-	require.NoError(t, err)
-	exists, err := rdb.Exists(ctx, buildSessionKey(groupID, "openai:response:resp_1")).Result()
-	require.NoError(t, err)
-	require.Equal(t, int64(1), exists)
-
-	// A session rebound between the scan's read and its delete keeps the
-	// new binding: only the account that was read is cleared.
-	require.NoError(t, cache.SetSessionAccountID(ctx, groupID, "moved", 7, time.Minute))
-	cleared, err = store.ClearBindings(ctx, groupID, func(b service.ShareSchedulingBinding) bool {
-		if b.AccountID == 7 {
-			require.NoError(t, cache.SetSessionAccountID(ctx, groupID, "moved", 8, time.Minute))
-		}
-		return b.AccountID == 7
-	})
-	require.NoError(t, err)
-	require.Zero(t, cleared)
-	id, _, err = cache.GetSessionAccountIDWithTTL(ctx, groupID, "moved")
-	require.NoError(t, err)
-	require.Equal(t, int64(8), id)
 }
 
 func TestShareSchedulingCacheSessionSwap(t *testing.T) {

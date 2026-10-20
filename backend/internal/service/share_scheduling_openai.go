@@ -52,12 +52,6 @@ func (s *OpenAIGatewayService) shareSchedulingHook(ctx context.Context, in openA
 	if gp == nil || s.qualityOwnsSticky(ctx, in.groupID, in.sessionHash) {
 		return nil, OpenAIAccountScheduleDecision{}, false, nil
 	}
-	if gp.policy.Scheduler == sharesched.SchedulerShadow {
-		if trace := shareSelectionTraceFrom(ctx); trace != nil && trace.shadow == nil {
-			trace.shadow = s.newOpenAIShareShadow(ctx, gp, in)
-		}
-		return nil, OpenAIAccountScheduleDecision{}, false, nil
-	}
 	selection, decision, err := s.selectAccountWithShareScheduling(ctx, gp, in)
 	return selection, decision, true, err
 }
@@ -82,7 +76,7 @@ func (s *OpenAIGatewayService) selectAccountWithShareScheduling(ctx context.Cont
 		if trace := shareSelectionTraceFrom(ctx); trace != nil {
 			trace.reason = sharesched.ReasonOwnerContinuation
 		}
-		svc.recordDecision(shareDecisionRecord{gp: gp, source: sharesched.KeyContinuation, platform: in.platform, model: in.model, start: start},
+		svc.recordDecision(shareDecisionRecord{gp: gp, source: sharesched.KeyContinuation},
 			sharesched.Decision{Reason: sharesched.ReasonOwnerContinuation, Target: selection.Account.ID, Ideal: selection.Account.ID},
 			&shareOutcome{served: selection.Account.ID, reason: sharesched.ReasonOwnerContinuation, attempts: 1})
 		return selection, decision, nil
@@ -109,8 +103,7 @@ func (s *OpenAIGatewayService) selectAccountWithShareScheduling(ctx context.Cont
 		return nil, decision, noAvailableOpenAISelectionError(in.model, false, stats.summary(""))
 	}
 	req, source := svc.newRequest(ctx, gp, in.platform, in.model, sessionHash, binding)
-	rec := shareDecisionRecord{gp: gp, source: source, platform: in.platform, model: in.model,
-		session: key, idle: req.Binding.Idle, cache: req.Cache, start: start}
+	rec := shareDecisionRecord{gp: gp, source: source, idle: req.Binding.Idle, cache: req.Cache}
 	exec := &shareExecutor{ctx: ctx, gp: gp, cache: s.cache, concurrency: s.concurrencyService, cfg: s.schedulingConfig(),
 		key: cacheKey, accounts: accounts, createOnRefresh: legacy, loadGate: true, loadOrder: shareLoadOrder(cands),
 		limit: func(acc *Account) int { return s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency) },
@@ -417,40 +410,4 @@ func (g *openAIShareGates) requestReason(acc *Account, now time.Time) sharesched
 		}
 	}
 	return ""
-}
-
-// newOpenAIShareShadow reads the binding before the original scheduler
-// refreshes or replaces it and returns the comparison to run once it has
-// chosen.
-func (s *OpenAIGatewayService) newOpenAIShareShadow(ctx context.Context, gp *shareGroupPolicy, in openAIShareSelection) func(original int64) {
-	if strings.TrimSpace(in.previousResponse) != "" || in.guardianParentID > 0 {
-		// Ownership is served identically by both schedulers.
-		return nil
-	}
-	svc := s.shareScheduling
-	sessionHash := in.sessionHash
-	if in.preserveBinding {
-		sessionHash = ""
-	}
-	key, _ := shareAffinityKey(&gp.policy, sessionHash)
-	cacheKey := ""
-	if key != "" {
-		cacheKey = s.openAISessionCacheKey(sessionHash)
-	}
-	binding, _ := s.readOpenAIShareBinding(ctx, gp, cacheKey, sessionHash)
-	in.excluded = cloneExcludedAccountIDs(in.excluded)
-	base := context.WithoutCancel(ctx)
-	return func(original int64) {
-		start := time.Now()
-		ctx, cancel := context.WithTimeout(base, shareShadowTimeout)
-		defer cancel()
-		cands, _, _, err := s.shareOpenAICandidates(ctx, in, binding.AccountID)
-		if err != nil {
-			return
-		}
-		req, source := svc.newRequest(ctx, gp, in.platform, in.model, sessionHash, binding)
-		decision := sharesched.Plan(req, cands)
-		svc.recordShadow(shareDecisionRecord{gp: gp, source: source, platform: in.platform, model: in.model,
-			session: key, idle: req.Binding.Idle, cache: req.Cache, start: start}, decision, original)
-	}
 }

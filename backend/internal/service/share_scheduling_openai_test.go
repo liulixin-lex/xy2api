@@ -38,8 +38,9 @@ func newOpenAIShareTestEnv(t *testing.T, setup shareTestSetup, ids ...int64) *op
 	cache := newShareTestCache()
 	conc := newShareTestConcurrency()
 	share := NewShareSchedulingService(nil, nil, nil)
+	share.attributionRate = 1
 	share.state.Store(&shareSchedulingState{
-		settings: ShareSchedulingSettings{Enabled: true, CacheAttribution: true, AttributionSampleRate: 1, DecisionSamples: true},
+		settings: ShareSchedulingSettings{Enabled: true},
 		groups:   map[int64]*shareGroupPolicy{shareTestGroupID: {groupID: shareTestGroupID, version: 1, policy: policy}},
 	})
 	cfg := &config.Config{}
@@ -221,8 +222,7 @@ func TestOpenAIShareSchedulingShadowAndBypasses(t *testing.T) {
 	_, decision := env.selectAccount(t, context.Background(), "", "shadow", nil)
 	require.NotEqual(t, openAIAccountScheduleLayerShare, decision.Layer)
 	require.Empty(t, env.cache.created)
-	time.Sleep(50 * time.Millisecond)
-	require.Zero(t, env.counter(shareStatsShadowField))
+	require.Zero(t, env.counter(shareStatsRequestsField), "no share decision is made or compared")
 
 	share := newOpenAIShareTestEnv(t, twoAccountPolicy(), 1, 2)
 	gid := shareTestGroupID

@@ -16,22 +16,16 @@ import (
 const (
 	shareWaitInitialBackoff = 20 * time.Millisecond
 	shareWaitMaxBackoff     = 250 * time.Millisecond
-	shareShadowTimeout      = 3 * time.Second
-	shareShadowConcurrency  = 32
 )
 
 // shareSelectionTrace follows one selection call. The share executor fills
 // in its decision; the selection result records the served account for
-// cache attribution and starts the shadow comparison.
+// cache attribution.
 type shareSelectionTrace struct {
 	groupID    int64
 	sessionKey string
 	switched   bool
 	reason     sharesched.Reason
-	// shadow runs the share plan off the request path once the original
-	// scheduler has chosen; nil outside shadow groups.
-	shadow     func(original int64)
-	shadowDone bool
 	// sampled selections feed cache attribution.
 	sampled bool
 }
@@ -43,10 +37,8 @@ func (s *ShareSchedulingService) withSelectionTrace(ctx context.Context, groupID
 	if s == nil {
 		return ctx, nil
 	}
-	trace := &shareSelectionTrace{groupID: groupID, sessionKey: sessionKey, switched: switched}
-	if settings := s.Settings(); settings.CacheAttribution && shareAttributionSampled(sessionKey, settings.AttributionSampleRate) {
-		trace.sampled = true
-	}
+	trace := &shareSelectionTrace{groupID: groupID, sessionKey: sessionKey, switched: switched,
+		sampled: shareAttributionSampled(sessionKey, s.attributionRate)}
 	return context.WithValue(ctx, shareSelectionTraceKey{}, trace), trace
 }
 
@@ -78,30 +70,6 @@ func (s *ShareSchedulingService) recordSelection(ctx context.Context, account *A
 		s.traces.put(requestID, shareTrace{groupID: trace.groupID, sessionKey: trace.sessionKey, accountID: account.ID,
 			platform: account.Platform, reason: trace.reason, switched: trace.switched, at: time.Now()})
 	}
-	if trace.shadow != nil && !trace.shadowDone {
-		trace.shadowDone = true
-		s.startShadow(trace.groupID, trace.shadow, account.ID)
-	}
-}
-
-// startShadow runs a shadow comparison off the request path, or counts it as
-// skipped when shareShadowConcurrency comparisons are already running.
-func (s *ShareSchedulingService) startShadow(groupID int64, run func(original int64), original int64) {
-	select {
-	case s.shadows <- struct{}{}:
-	default:
-		s.stats.add(shareStatsKindShare, groupID, time.Now(), shareStatsShadowSkippedField, 1)
-		return
-	}
-	go func() {
-		defer func() { <-s.shadows }()
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Warn("share_scheduling.shadow_panic", "group_id", groupID, "panic", r)
-			}
-		}()
-		run(original)
-	}()
 }
 
 // newRequest builds the kernel request of one selection.

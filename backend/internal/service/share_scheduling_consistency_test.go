@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,9 +30,9 @@ func TestShareSchedulingWeightsAreLoadFactorsEverywhere(t *testing.T) {
 			gid := shareTestGroupID
 			_, inputs, err := env.gateway.shareGatewayCandidates(context.Background(), nil, &gid, "", nil, 0)
 			require.NoError(t, err)
-			views, _ := shareMemberViews(env.repo.accounts, time.Now())
+			views, _ := shareMemberViews(gid, env.repo.accounts, nil, time.Now())
 			for _, v := range views {
-				require.Equal(t, want[v.AccountID], v.Weight)
+				require.Equal(t, want[v.AccountID], v.EffectiveLoadFactor)
 			}
 			d := sharesched.Plan(sharesched.Request{GroupID: gid, Key: "weight"}, inputs.cands)
 			for _, entry := range d.Entries {
@@ -98,7 +99,7 @@ func (r *shareReadFailureRepo) SavePolicy(ctx context.Context, groupID, expected
 func TestShareSchedulingCommittedSaveNeedsNoReadBack(t *testing.T) {
 	env := newShareAdminEnv(t, Account{ID: 1}, Account{ID: 2}, Account{ID: 3})
 	env.share.repo = &shareReadFailureRepo{}
-	view, err := env.save(t, 0, shareAdminPolicy)
+	view, err := env.save(t, 0, shareUpdate)
 	require.NoError(t, err, "a committed save is reported as saved")
 	require.Equal(t, int64(1), view.Version)
 	require.Equal(t, view.Version, env.share.groupPolicy(shareTestGroupID).version, "this node runs the saved policy at once")
@@ -108,16 +109,20 @@ func TestShareSchedulingCommittedSaveNeedsNoReadBack(t *testing.T) {
 	require.Equal(t, int64(1), env.share.groupPolicy(shareTestGroupID).version, "a late older row never replaces a newer one")
 }
 
-// shareHeldSettings returns its value, then holds the read until released.
+// shareHeldSettings returns its value, then holds the first read until
+// released.
 type shareHeldSettings struct {
 	shareMemorySettings
 	read, release chan struct{}
+	held          atomic.Bool
 }
 
 func (s *shareHeldSettings) GetValue(ctx context.Context, key string) (string, error) {
 	v, err := s.shareMemorySettings.GetValue(ctx, key)
-	s.read <- struct{}{}
-	<-s.release
+	if s.held.CompareAndSwap(false, true) {
+		s.read <- struct{}{}
+		<-s.release
+	}
 	return v, err
 }
 
@@ -129,9 +134,7 @@ func TestShareSchedulingSettingsReloadNeverRevertsAWrite(t *testing.T) {
 	go func() { done <- share.reloadSettings(context.Background()) }()
 	<-settings.read
 
-	want := DefaultShareSchedulingSettings()
-	want.Enabled = true
-	_, err := share.UpdateSettings(context.Background(), want)
+	_, err := share.UpdateSettings(context.Background(), true)
 	require.NoError(t, err)
 	close(settings.release)
 	require.NoError(t, <-done)

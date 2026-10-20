@@ -489,10 +489,9 @@ func TestShareSchedulingE2ESwitchesFallBackWithoutMigrating(t *testing.T) {
 	repo := &shareFlakyRepo{shareMemoryRepo: env.policies}
 	env.share.repo = repo
 	ctx := context.Background()
-	_, err := env.share.UpdateSettings(ctx, ShareSchedulingSettings{Enabled: true, CacheAttribution: true, AttributionSampleRate: 1})
+	_, err := env.share.UpdateSettings(ctx, true)
 	require.NoError(t, err)
-	_, err = env.save(t, 0, `{"scheduler":"share","accounts":[
-		{"account_id":1,"tier":1,"weight":5},{"account_id":2,"tier":1,"weight":3},{"account_id":3,"tier":1,"weight":2}]}`)
+	_, err = env.save(t, 0, shareUpdate)
 	require.NoError(t, err)
 
 	sessions := shareE2ESessions("switch", 60)
@@ -520,23 +519,22 @@ func TestShareSchedulingE2ESwitchesFallBackWithoutMigrating(t *testing.T) {
 
 	// Global switch off: the original scheduler serves every session from
 	// its existing binding.
-	_, err = env.share.UpdateSettings(ctx, ShareSchedulingSettings{Enabled: false, CacheAttribution: true, AttributionSampleRate: 1})
+	_, err = env.share.UpdateSettings(ctx, false)
 	require.NoError(t, err)
 	require.Nil(t, env.share.groupPolicy(shareTestGroupID))
 	served("global switch off")
 
 	// Group switch back to the original scheduler.
-	_, err = env.share.UpdateSettings(ctx, ShareSchedulingSettings{Enabled: true, CacheAttribution: true, AttributionSampleRate: 1})
+	_, err = env.share.UpdateSettings(ctx, true)
 	require.NoError(t, err)
-	_, err = env.save(t, 1, `{"scheduler":"sub2api","accounts":[{"account_id":1,"tier":1,"weight":5}]}`)
+	_, err = env.save(t, 1, sub2apiUpdate)
 	require.NoError(t, err)
 	require.Nil(t, env.share.groupPolicy(shareTestGroupID))
 	served("group switch off")
 
 	// Back on share scheduling, the policy store goes down: the last known
 	// policy keeps serving and nothing fails.
-	_, err = env.save(t, 2, `{"scheduler":"share","accounts":[
-		{"account_id":1,"tier":1,"weight":5},{"account_id":2,"tier":1,"weight":3},{"account_id":3,"tier":1,"weight":2}]}`)
+	_, err = env.save(t, 2, shareUpdate)
 	require.NoError(t, err)
 	repo.down.Store(true)
 	require.Error(t, env.share.reloadAll(ctx))
