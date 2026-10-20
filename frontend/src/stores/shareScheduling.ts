@@ -147,9 +147,9 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
   }
 
   /**
-   * Asks the server what a change would do and holds it for confirmation.
-   * Switching to share while the main switch is off turns the switch on in
-   * the same confirmation.
+   * Holds a change for confirmation. A switch to share first asks the server
+   * for the expected shares, and turns the main switch on in the same
+   * confirmation when it is off.
    */
   async function requestChange(change: { scheduler?: ShareScheduler; session_keep?: boolean }) {
     const current = view.value
@@ -162,9 +162,12 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
       session_keep: change.session_keep ?? current.session_keep,
       expected_version: current.version
     }
+    // Only a switch to share needs the expected shares, and only it turns the
+    // main switch on; a session keeping change saves as it is.
+    const switchingToShare = update.scheduler === 'share' && current.scheduler !== 'share'
     const globalOn = settings.value?.enabled ?? current.enabled
-    pending.value = { groupId, update, preview: null, previewError: '', enableGlobal: update.scheduler === 'share' && !globalOn }
-    if (update.scheduler !== 'share') return
+    pending.value = { groupId, update, preview: null, previewError: '', enableGlobal: switchingToShare && !globalOn }
+    if (!switchingToShare) return
     previewing.value = true
     try {
       const preview = await shareSchedulingAPI.preview(groupId, update)

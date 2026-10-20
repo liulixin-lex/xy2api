@@ -48,7 +48,7 @@
             <td class="p-2">
               <ShareShareBar :value="member.expected_share" />
               <span v-if="!member.healthy && member.share_if_healthy > 0" class="mt-0.5 block text-right text-[11px] text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.traffic.ifHealthy', { value: formatSharePercent(member.share_if_healthy) }) }}</span>
-              <ShareFactorMarks v-if="member.healthy" :member="member" />
+              <ShareFactorMarks v-if="member.healthy" :member="member" :standby="!section.active" />
             </td>
             <td class="p-2 text-right tabular-nums text-gray-700 dark:text-dark-200">{{ member.actual_share_1h ? formatSharePercent(member.actual_share_1h) : '—' }}</td>
             <td class="p-2 text-right tabular-nums" :class="downweighted(member) ? 'font-medium text-red-700 dark:text-red-300' : member.health?.insufficient ? 'text-gray-400 dark:text-dark-500' : 'text-gray-700 dark:text-dark-200'" :data-testid="'share-failure-' + member.account_id">{{ member.health?.rate === null || member.health?.rate === undefined ? '—' : formatSharePercent(member.health.rate) }}</td>

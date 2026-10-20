@@ -133,7 +133,7 @@ export default {
         out_of_retention: 'Cache attribution before the switch is past retention (about 8 days); cache lost to switching cannot be compared.'
       },
       sub2api: 'Running the original scheduler; these are the current figures. After switching to share, they are compared with a window of the same length before the switch.',
-      baseline: 'Compared with {from} – {to} before the switch',
+      baseline: 'Compared with {from} – {to} before the switch.',
       metrics: {
         cacheHit: 'Cache hit ratio',
         switchLoss: 'Cache lost to switching',

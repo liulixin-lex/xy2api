@@ -85,6 +85,20 @@ describe('share scheduling store', () => {
     expect(api.updatePolicy).toHaveBeenCalledWith(5, { scheduler: 'sub2api', session_keep: false, expected_version: 1 })
   })
 
+  it('saves a session keeping change of a share group without a preview or the main switch', async () => {
+    api.getPolicy.mockImplementation(async (id: number) => shareView(id, { scheduler: 'share', effective: false, version: 4 }))
+    const store = await loadedStore(6)
+    store.setGlobalEnabled(false)
+    await store.requestChange({ session_keep: false })
+    // Nothing to wait for: the confirmation is ready at once.
+    expect(store.previewing).toBe(false)
+    expect(api.preview).not.toHaveBeenCalled()
+    expect(store.pending?.enableGlobal).toBe(false)
+    expect(await store.confirmChange()).toBe(true)
+    expect(api.updateSettings).not.toHaveBeenCalled()
+    expect(api.updatePolicy).toHaveBeenCalledWith(6, { scheduler: 'share', session_keep: false, expected_version: 4 })
+  })
+
   it('turns the main switch on in the same confirmation when it is off', async () => {
     api.preview.mockResolvedValue(sharePreview({ enabled: false, effective_after: false }))
     const store = await loadedStore()
