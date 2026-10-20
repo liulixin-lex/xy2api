@@ -203,6 +203,19 @@ func TestTransientCooldownHonoursRetryAfter(t *testing.T) {
 	require.WithinDuration(t, time.Now().Add(120*time.Second), repo3.tempUntil, 3*time.Second)
 }
 
+func TestCloudflareErrorPageCoolsTheAccountDown(t *testing.T) {
+	// Production 2026-10-20: a relay behind Cloudflare answered 502 with
+	// Cloudflare's JSON error page ("...the origin is overloaded or
+	// misconfigured", retry_after 60). It read as capacity shedding, so the
+	// account was never cooled down and kept failing.
+	body := []byte(`{"title":"Error 502: Bad gateway","status":502,"detail":"The web server reported a bad gateway error. This typically indicates the origin is overloaded or misconfigured.","error_name":"origin_bad_gateway","error_category":"origin","cloudflare_error":true,"retryable":true,"retry_after":60}`)
+	svc, repo, account, _ := newPenaltyFixture(t, PlatformAnthropic)
+	svc.HandleUpstreamError(context.Background(), account, http.StatusBadGateway, http.Header{}, body)
+	require.Equal(t, 1, repo.tempCalls)
+	require.True(t, strings.HasPrefix(repo.tempReason, resilience.ReasonPrefixTransient), repo.tempReason)
+	require.WithinDuration(t, time.Now().Add(60*time.Second), repo.tempUntil, 3*time.Second)
+}
+
 func TestTransientCooldownRefreshesGroupSnapshot(t *testing.T) {
 	// Staging FB-2: the fallback decision and Retry-After of the next request
 	// read a 2 s group snapshot taken before the cooldown, so the request
