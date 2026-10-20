@@ -6,6 +6,23 @@
 
 ## 当前交接状态
 
+### 账号页弹窗第一次打开不加载数据（2026-10-20T14:29Z；已修复，PR 待合并）
+
+- 现象（0.4.2、0.4.3）：以下弹窗第一次打开时没有数据，关掉再开才正常。
+  - 测试连接：模型列表为空。
+  - 临时不可调度：显示“当前账号未处于临时不可调度状态”。
+  - 账号统计：没有数据。
+- 根因：#112 把账号页 12 个弹窗改成第一次打开才挂载，组件挂载时 `show` 已经是 true。这些弹窗原本在页面加载时以关闭状态挂载，只在 `show` 从 false 变为 true 时加载数据（watch 不带 `immediate`），所以第一次打开时监听不触发。
+- 修复：`defineLazyComponent`（`frontend/src/composables/useLazyMount.ts`）改为自己加载组件。内层组件第一次渲染时 `show` 一律为 false，挂载完成后再传真实值，12 个弹窗一并修好，不改上游组件。
+- 排查：全仓库其他用 `v-if` 挂载、挂载时可能已经打开的组件，都已用 `immediate` 或挂载时为关闭状态，不受影响。
+- 验证：
+  - 新增 `defineLazyComponent.spec.ts` 3 个用例（含真实的临时不可调度弹窗）。旧实现下 3 个全失败，修复后全通过。
+  - 前端 lint、typecheck、全量 vitest（402 个文件、3104 个用例）、文档一致性检查通过。
+  - 浏览器端到端（模拟后台）修复前后对比：
+    - 修复前：第一次打开测试连接、临时不可调度、账号统计，都没有发请求。
+    - 修复后：第一次打开就发请求并显示。
+- 待办：PR 审阅合并；生产要等换上含修复的版本后才生效（发版、部署另行授权）。
+
 ### XY2API 0.4.3 正式发布完成（2026-10-20；生产未部署）
 
 - 发布：`v0.4.3`（annotated 对象 `f30434efb`）→ main 合并提交 `888f49db8`（[PR #114](https://github.com/liulixin-lex/xy2api/pull/114)，头 `972a2211c`，两者源码树相同）。Release run 39392556340；6 个附件（198,544,619 字节）双 SHA 校验通过；五平台 `vcs.revision=888f49db8`、`vcs.modified=false`、embed 构建；GHCR index `sha256:1a2b9127…` 双架构，version、revision、source 标签正确；latest/0/0.4 指向 0.4.3，0.3 仍为 0.3.0；tag 触发的 CI 与安全扫描全绿。
@@ -100,7 +117,8 @@
 
 ## 进行中的工作
 
-- 无。
+- `20261020-lazy-modal-first-open`（2026-10-20 登记）：账号页弹窗第一次打开时不加载数据，例如测试连接的模型列表为空、临时不可调度原因为空，第二次打开才正常。分支 `fix/lazy-modal-first-open-20261020`，自 main `3092629d7`（0.4.3）。用户要求：拉取最新代码，分析所有同类问题的根因并修复。根因已确认，是 #112 的弹窗按需挂载。范围只限 `frontend/` 与相关文档；推送和开 PR 需要用户授权。
+  - 2026-10-20T14:29Z 状态：已修复并验证；用户授权提交、推送并开 PR（合并、发版、部署另行授权）。
 
 ## 操作陷阱
 
@@ -725,3 +743,32 @@ pnpm --dir frontend run build
 - 验证：见上。本收尾为纯文档，跑了文档一致性检查、`sync.py audit` 和 `tools/tests`。
 - 卡点/风险：等待 CI 的脚本在 zsh 下不拆分 `$ids`，空转到时限被停，改用 bash 脚本。macOS 自带的 bash 3.2 没有 `mapfile`。
 - 下一步：见“当前交接状态”中 0.4.3 的遗留与去向。
+
+### 2026-10-20T14:29Z — 20261020-lazy-modal-first-open — 已修复，待授权提交
+
+- 请求/目标：账号页“测试连接”的模型、“临时不可调度”的原因等，第一次点开刷不出来，第二次才行。用户要求拉取最新代码，分析所有同类问题的根因并修复。
+- 开始状态：main `3092629d7`（0.4.3，#112 已合并），新分支 `fix/lazy-modal-first-open-20261020`，工作树干净。
+- 完成操作：
+  - 定位：AccountsView 用 `useLazyMount` 加 `defineLazyComponent` 按需挂载 12 个弹窗。这些弹窗都用不带 `immediate` 的 `watch(() => props.show)` 加载数据：
+    - TempUnschedStatusModal 监听 `[show, account.id]`；
+    - AccountTestModal、AccountStatsModal、ScheduledTestsPanel 等监听 `show`。
+    - IQCheckResultsModal 已带 `immediate`，不受影响。
+  - 排查其他用 `v-if` 挂载、带打开状态属性的组件：ClaudeResetCreditsCell、OpenAIReferralCell、CodexAccountTicketSettings、BulkSubscriptionActionDialog、AffiliateOfflineWithdrawDialog、LoginAgreementPrompt 及 BaseDialog 自身，都已用 `immediate` 或挂载时为关闭状态，不需要改。
+  - 修复：`defineLazyComponent` 不再直接用 `defineAsyncComponent`，改为自行加载并缓存组件。内层组件第一次渲染时把打开状态属性（默认 `show`，可用第二个参数指定）传为 false，`onVnodeMounted` 之后再传真实值。chunk 加载失败时仍会自动刷新页面。
+  - 现有弹窗测试都是先以关闭状态挂载再打开，没覆盖到这种情况。`FRONTEND_UX.md` 已补写这条约定和测试要求。
+- 修改文件：
+  - `frontend/src/composables/useLazyMount.ts`
+  - 新增 `frontend/src/composables/__tests__/defineLazyComponent.spec.ts`
+  - `docs/FRONTEND_UX.md`
+  - 本文件
+- 验证：
+  - 新用例在旧实现下 3 个全失败，修复后 3 个全通过。
+  - `lint:check`、`typecheck`、`test:run`（402 个文件、3104 个用例）、`check_docs_consistency.py` 通过。
+  - 仓库外浏览器脚本对比修复前后，修复前第一次打开时：
+    - 测试连接：0 次模型请求，下拉框为空。
+    - 临时不可调度：0 次状态请求，不显示原因。
+    - 账号统计：0 次请求。
+  - 修复后第一次打开就都有请求和数据。
+  - `sync.py audit` 需要干净的工作树，提交后再跑。
+- 卡点/风险：无。
+- 下一步：用户授权后提交、推送、开 PR；随下一个版本发布后生产才生效。
