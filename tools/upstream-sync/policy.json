@@ -900,6 +900,14 @@
       "value": "const result = await adminAPI.accounts.getBatchRecentHealth(accountIDs)"
     },
     {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "useAccountShareColumn(() => params.group)"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "if (!nextSchedulable) void notifyShareImpact(a)"
+    },
+    {
       "path": "frontend/src/views/admin/UsageView.vue",
       "value": "const queryAccountId = getNumericQueryValue(route.query.account_id)"
     },

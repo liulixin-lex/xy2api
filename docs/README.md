@@ -18,7 +18,7 @@
 | 文档 | 说明 |
 |---|---|
 | [`GATEWAY_RESILIENCE.md`](GATEWAY_RESILIENCE.md) | 网关韧性（0.4.0）：失败分类、余额暂停、会话改绑、末位兜底、请求预算、首包前保活、断开计费、错误语义 |
-| [`SHARE_SCHEDULING.md`](SHARE_SCHEDULING.md) | 份额调度（0.3.0 起，默认关闭） |
+| [`SHARE_SCHEDULING.md`](SHARE_SCHEDULING.md) | 份额调度（0.3.0 起，默认关闭）：层级取账号优先级、权重取负载因子与自适应系数 |
 | [`account-scheduling.md`](account-scheduling.md) | 账号调度：日常开关、原版调度规则与 0.4.0 韧性规则 |
 | [`openai-cache-reliability.md`](openai-cache-reliability.md) | OpenAI 缓存计量与可靠性 |
 | [`CLAUDE_CACHE_FALLBACK.md`](CLAUDE_CACHE_FALLBACK.md) | Claude 自动缓存（按分组） |
@@ -75,9 +75,9 @@
 
 | 变更 | 内容 | 状态 |
 |---|---|---|
-| [`simplify-share-scheduling-20261020`](../openspec/changes/simplify-share-scheduling-20261020/) | 精简份额调度：层级取账号优先级、权重取负载因子，每组只剩调度方式与会话保持 | 进行中（`feat/share-simplify-20261020`） |
+| [`simplify-share-scheduling-20261020`](../openspec/changes/simplify-share-scheduling-20261020/) | 精简份额调度：层级取账号优先级、权重取负载因子与自适应系数，每组只剩调度方式与会话保持 | 进行中（`feat/share-simplify-20261020`） |
 | [`gateway-resilience-20261015`](../openspec/changes/gateway-resilience-20261015/) | 网关韧性 | 随 0.4.0 交付，0.4.1、0.4.2 跟进；部署与后续见其 tasks |
-| [`replace-controlled-with-share-scheduling`](../openspec/changes/replace-controlled-with-share-scheduling/) | 剔除可控调度、引入份额调度 | 0.3.0 已发布，默认关闭；影子运行与灰度待做 |
+| [`replace-controlled-with-share-scheduling`](../openspec/changes/replace-controlled-with-share-scheduling/) | 剔除可控调度、引入份额调度 | 0.3.0 已发布，默认关闭；份额规则由 `simplify-share-scheduling-20261020` 精简，影子运行不再执行 |
 | [`async-image-tasks-v2`](../openspec/changes/async-image-tasks-v2/) | 异步生图任务 v2 | 0.3.0 已发布 |
 | [`add-claude-cache-fallback`](../openspec/changes/add-claude-cache-fallback/) | Claude 自动缓存 | 0.2.4 起发布；真实上游账单核验未做 |
 | [`stabilize-openai-iq-check`](../openspec/changes/stabilize-openai-iq-check/) | 智商检测稳定性 | 已完成 |

@@ -355,7 +355,8 @@
 
 ## 9. 同步登记
 
-- 上游钩子不变：`policy.json` 的 required_literals 第 15–21 条、3 个具名补丁与其绑定用例名、`scheduler-diff.json` 的 4 个块，均不受影响。执行中如有变化，按 AGENTS.md“变更同步”登记。
+- 上游钩子不变：`policy.json` 的 required_literals 第 15–21 条、3 个具名补丁与其绑定用例名、`scheduler-diff.json` 的 4 个块，均不受影响。
+- `policy.json` 的 required_literals 新增 `AccountsView.vue` 的两处份额钩子：`useAccountShareColumn(() => params.group)` 与 `if (!nextSchedulable) void notifyShareImpact(a)`。
 - `policy.json` 的 `xy_owned` 新增本变更目录。
 - `backend-ci.yml` 点名的 7 个份额用例保留原名，夹具改为账号负载因子。
 - `tools/docs_consistency.json` 的 `retired` 登记删除的字段名、路由名与前端文案键，只在历史记录、兼容测试与“已移除”说明中放行。

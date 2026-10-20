@@ -37,12 +37,12 @@
 
 ## 5. 前端（另一分支，PM 安排并入）
 
-- [ ] 5.1 按 PM 说明 §5 重做份额页、账号管理与系统设置区块；退役文案键名转给后端登记。
+- [x] 5.1 按 PM 说明 §5 重做份额页、账号管理与系统设置区块；退役文案键名转给后端登记。
 
 ## 6. 文档与登记
 
-- [ ] 6.1 重写 `docs/SHARE_SCHEDULING.md`（升级说明、已移除项、精度边界）；更新 `GATEWAY_RESILIENCE.md`“与份额的关系”、`account-scheduling.md`、旧变更的状态说明、`docs/README.md`。
-- [ ] 6.2 `tools/docs_consistency.json` 的 `retired` 登记字段名、路由名与文案键（含前端清单）；`policy.json` 登记 `AccountsView.vue` 的两处份额钩子。
+- [x] 6.1 重写 `docs/SHARE_SCHEDULING.md`（升级说明、已移除项、精度边界）；更新 `GATEWAY_RESILIENCE.md`“与份额的关系”、`account-scheduling.md`、旧变更的状态说明、`docs/README.md`。
+- [x] 6.2 `tools/docs_consistency.json` 的 `retired` 登记字段名、路由名与文案键（含前端清单）；`policy.json` 登记 `AccountsView.vue` 的两处份额钩子。
 - [ ] 6.3 项目记忆收尾。
 
 ## 7. 验证

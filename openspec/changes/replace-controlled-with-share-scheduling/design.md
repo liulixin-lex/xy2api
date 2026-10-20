@@ -1,5 +1,7 @@
 # 设计：剔除智能可控调度，新增份额调度，保留 Sub2API 原版
 
+> 2026-10-20 状态：本变更的份额调度已由 [`simplify-share-scheduling-20261020`](../simplify-share-scheduling-20261020/design.md) 精简。层级与权重改取账号优先级与负载因子；账号规则、缓存域、排空、影子对比、纠偏、重平衡、决策样本与可调参数已移除或常量化。现行行为以 [`docs/SHARE_SCHEDULING.md`](../../../docs/SHARE_SCHEDULING.md) 为准，本文保留为历史设计。
+
 > 现状与调研见 [`docs/SCHEDULING_ANALYSIS.md`](../../../docs/SCHEDULING_ANALYSIS.md)。仿真见 [`simulation/RESULTS.md`](simulation/RESULTS.md)：第一部分验证份额与最小扰动，第二部分验证缓存命中与首字延迟。本文中的文件路径均相对仓库根目录。
 >
 > 2026-10-10 修订：围绕“不降低缓存命中率与首字延迟（TTFT）”重写了亲和、溢出、回升与排空规则（§6.2–§6.8），新增首字预算（§12）、缓存与首字观测、影子运行与门禁（§14）。修订依据是离散事件仿真：初版规则相对原版缓存命中率低 3.3–6.5 个百分点，修订后与原版持平，TTFT P95/P99 更低。
