@@ -59,11 +59,11 @@
         </div>
       </div>
 
-      <p class="mt-3 text-xs text-gray-500 dark:text-dark-400">
-        <template v-if="scheduler === 'share' && report.baseline && report.baseline_from && report.baseline_to">{{ t('admin.shareScheduling.health.baseline', { from: formatDateTimeToMinute(report.baseline_from), to: formatDateTimeToMinute(report.baseline_to) }) }} · </template>
-        <template v-if="scheduler === 'share' && report.anchor_source === 'policy_updated_at'"><span data-testid="share-health-anchor-estimated">{{ t('admin.shareScheduling.health.anchorEstimated') }}</span> · </template>
-        <template v-if="report.counter_precision === 'hour_rounded'">{{ t('admin.shareScheduling.health.hourRounded') }} · </template>
-        {{ t('admin.shareScheduling.health.calibrating') }}
+      <p class="mt-3 space-x-1 text-xs text-gray-500 dark:text-dark-400">
+        <span v-if="scheduler === 'share' && report.baseline && report.baseline_from && report.baseline_to">{{ t('admin.shareScheduling.health.baseline', { from: formatDateTimeToMinute(report.baseline_from), to: formatDateTimeToMinute(report.baseline_to) }) }}</span>
+        <span v-if="scheduler === 'share' && report.anchor_source === 'policy_updated_at'" data-testid="share-health-anchor-estimated">{{ t('admin.shareScheduling.health.anchorEstimated') }}</span>
+        <span v-if="report.counter_precision === 'hour_rounded'">{{ t('admin.shareScheduling.health.hourRounded') }}</span>
+        <span>{{ t('admin.shareScheduling.health.calibrating') }}</span>
       </p>
     </template>
   </section>

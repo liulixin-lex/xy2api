@@ -225,7 +225,8 @@ describe('share scheduling page', () => {
           health: { window_minutes: 30, attempts: 900, soft_failures: 152, rate: 0.169, tier_baseline_rate: 0.011, insufficient: false }
         }),
         shareMember(3, { name: 'gamma', expected_share: 0.3, base_share: 0.27, ramp_factor: 0.4, ramp: { cause: 'balance_pause', since: new Date(Date.now() - 3.5 * 60_000).toISOString(), full_at: new Date(Date.now() + 6.5 * 60_000).toISOString() } }),
-        shareMember(4, { name: 'delta', health_factor: null, health: { window_minutes: 30, attempts: 3, soft_failures: 1, rate: 0.33, tier_baseline_rate: 0.011, insufficient: true } })
+        shareMember(4, { name: 'delta', health_factor: null, health: { window_minutes: 30, attempts: 3, soft_failures: 1, rate: 0.33, tier_baseline_rate: 0.011, insufficient: true } }),
+        shareMember(9, { name: 'standby', priority: 2, expected_share: 0, share_if_healthy: 0, health_factor: null, health: { window_minutes: 30, attempts: 0, soft_failures: 0, rate: null, tier_baseline_rate: null, insufficient: true } })
       ]
     }))
     const w = mountView()
@@ -241,6 +242,8 @@ describe('share scheduling page', () => {
     expect(detail).toContain('"baseline":"1.1%"')
     expect(w.get('[data-testid="share-factor-ramp-3"]').text()).toContain('"minutes":7')
     expect(w.get('[data-testid="share-factor-insufficient-4"]').exists()).toBe(true)
+    // A standby account takes no new sessions, so "not enough data" is left out there.
+    expect(w.find('[data-testid="share-factor-insufficient-9"]').exists()).toBe(false)
     // A rate from too few samples is shown but greyed out.
     expect(w.get('[data-testid="share-failure-4"]').classes()).toContain('text-gray-400')
     expect(w.get('[data-testid="share-failure-2"]').text()).toBe('16.9%')

@@ -133,7 +133,7 @@ export default {
         out_of_retention: '切换前的缓存归因数据已超出保留期（约 8 天），“因换号损失的缓存”无法对比。'
       },
       sub2api: '原版运行中，下列为当前数值。切换到份额后，这里会与切换前同长度的窗口对比。',
-      baseline: '对比切换前 {from} 至 {to}',
+      baseline: '对比切换前 {from} 至 {to}。',
       metrics: {
         cacheHit: '缓存命中率',
         switchLoss: '因换号损失的缓存',

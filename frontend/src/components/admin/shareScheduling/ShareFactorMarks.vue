@@ -1,5 +1,5 @@
 <template>
-  <div v-if="view.adjusted || view.insufficient" class="mt-1 flex flex-wrap justify-end gap-1" :data-testid="'share-factors-' + member.account_id">
+  <div v-if="view.adjusted || showInsufficient" class="mt-1 flex flex-wrap justify-end gap-1" :data-testid="'share-factors-' + member.account_id">
     <HelpTooltip v-if="view.health" width-class="w-80">
       <template #trigger>
         <span class="cursor-help rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300" :data-testid="'share-factor-health-' + member.account_id">
@@ -26,7 +26,7 @@
         <p>{{ rampReason }}</p>
       </div>
     </HelpTooltip>
-    <HelpTooltip v-if="view.insufficient && !view.health" width-class="w-72">
+    <HelpTooltip v-if="showInsufficient" width-class="w-72">
       <template #trigger>
         <span class="cursor-help rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500 dark:bg-dark-700 dark:text-dark-300" :data-testid="'share-factor-insufficient-' + member.account_id">
           {{ t('admin.shareScheduling.traffic.factors.insufficient') }}
@@ -49,10 +49,16 @@ import { formatSharePercent } from '@/utils/shareScheduling'
  * Marks next to an account's expected share when an automatic factor
  * changes it, with the breakdown and the reason on hover.
  */
-const props = defineProps<{ member: ShareMember; now?: number }>()
+const props = withDefaults(defineProps<{
+  member: ShareMember
+  now?: number
+  /** Standby accounts take no new sessions, so "not enough data" says nothing there. */
+  standby?: boolean
+}>(), { now: undefined, standby: false })
 
 const { t, te } = useI18n()
 const view = computed(() => shareFactors(props.member, props.now))
+const showInsufficient = computed(() => view.value.insufficient && !view.value.health && !props.standby)
 
 const breakdown = computed(() => t('admin.shareScheduling.traffic.factors.breakdown', {
   loadFactor: props.member.effective_load_factor,
