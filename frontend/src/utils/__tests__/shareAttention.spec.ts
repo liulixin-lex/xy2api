@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { namedWarnings, shareAttention, shareFailsOften } from '../shareAttention'
+import { namedWarnings, shareAttention, shareDeeplyDownweighted } from '../shareAttention'
 import { shareMember, shareView } from '@/stores/__tests__/shareSchedulingFixtures'
 
 const codes = (items: ReturnType<typeof shareAttention>) => items.map(item => item.code)
@@ -38,14 +38,18 @@ describe('shareAttention', () => {
     expect(shareAttention(alone, true)).toEqual([])
   })
 
-  it('suggests action for accounts that fail often, after enough tries', () => {
-    const member = { recent_requests_1h: 80, recent_errors_1h: 20, recent_error_rate_1h: 0.2 }
-    expect(shareFailsOften(member)).toBe(true)
-    expect(shareFailsOften({ recent_requests_1h: 5, recent_errors_1h: 5, recent_error_rate_1h: 0.5 })).toBe(false)
-    expect(shareFailsOften({ ...member, recent_error_rate_1h: 0.05 })).toBe(false)
-    expect(shareFailsOften({ ...member, recent_error_rate_1h: null })).toBe(false)
-    const view = shareView(5, { members: [shareMember(1, member), shareMember(2)] })
-    expect(shareAttention(view, true)).toEqual([expect.objectContaining({ code: 'high_failure', account_id: 1, value: 0.2 })])
+  it('asks for a look once an account is deeply down-weighted, but not while it ramps up', () => {
+    expect(shareDeeplyDownweighted({ health_factor: 0.5 })).toBe(true)
+    expect(shareDeeplyDownweighted({ health_factor: 0.55 })).toBe(false)
+    expect(shareDeeplyDownweighted({ health_factor: null })).toBe(false)
+    const view = shareView(5, {
+      members: [
+        shareMember(1, { health_factor: 0.2, expected_share: 0.2 }),
+        shareMember(2, { health_factor: 0.8, expected_share: 0.4 }),
+        shareMember(3, { ramp_factor: 0.1, ramp: { cause: 'balance_pause', since: null, full_at: null }, expected_share: 0.4 })
+      ]
+    })
+    expect(shareAttention(view, true)).toEqual([expect.objectContaining({ code: 'health_downweighted', severity: 'warn', account_id: 1, name: 'acct-1', value: 0.2 })])
   })
 
   it('lists very high load factors as information after the warnings', () => {
@@ -63,11 +67,15 @@ describe('namedWarnings', () => {
   it('attaches account names and severities to server warnings', () => {
     const items = namedWarnings([
       { code: 'high_load_factor', account_id: 3, priority: null, value: 9999 },
-      { code: 'top_priority_unhealthy', account_id: null, priority: 1, value: 2 }
+      { code: 'top_priority_unhealthy', account_id: null, priority: 1, value: 2 },
+      { code: 'health_downweighted', account_id: 3, priority: null, value: 0.2 },
+      { code: 'ramping', account_id: 4, priority: null, value: 0.4 }
     ], new Map([[3, 'acct-3']]))
     expect(items).toEqual([
       expect.objectContaining({ code: 'high_load_factor', severity: 'info', name: 'acct-3', value: 9999 }),
-      expect.objectContaining({ code: 'top_priority_unhealthy', severity: 'warn', priority: 1, value: 2 })
+      expect.objectContaining({ code: 'top_priority_unhealthy', severity: 'warn', priority: 1, value: 2 }),
+      expect.objectContaining({ code: 'health_downweighted', severity: 'warn', name: 'acct-3', value: 0.2 }),
+      expect.objectContaining({ code: 'ramping', severity: 'info', name: undefined, value: 0.4 })
     ])
   })
 })

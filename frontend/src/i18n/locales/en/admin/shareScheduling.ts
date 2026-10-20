@@ -92,6 +92,7 @@ export default {
         share: 'Expected share'
       },
       others: '{count} more accounts expect no new sessions (standby or unavailable).',
+      base: 'unadjusted {value}',
       confirm: 'Confirm',
       cancel: 'Cancel',
       saving: 'Saving…',
@@ -103,7 +104,8 @@ export default {
       top_priority_unhealthy: 'Priority {priority} has no available account; new sessions go to priority {value}.',
       single_account_dominant: '{name} is expected to take {value} of new sessions; traffic is too concentrated.',
       high_load_factor: '{name} has load factor {value} and takes most new sessions of its priority whenever available.',
-      high_failure: '{name} failed {value} of requests in the last hour (all groups); lower its load factor or disable it.'
+      health_downweighted: '{name} is down-weighted automatically (×{value}); if it lasts, check the upstream or disable the account.',
+      ramping: '{name} just came back and is ramping up (×{value}); its new sessions return to full weight within about 10 minutes.'
     },
     health: {
       title: 'Health',
@@ -170,7 +172,23 @@ export default {
         actual: 'Actual share',
         failure: 'Failure rate'
       },
-      recentHint: 'Last hour; the failure rate counts the account’s requests in every group',
+      actualHint: 'Share of the group’s successful requests the account served in the last hour.',
+      failureHint: 'Last 30 minutes, counting only upstream failures that trigger down-weighting (transient errors, first output timeouts, stalls), over the account’s requests in every group.',
+      factors: {
+        health: 'Health ×{value}',
+        ramp: 'Ramping ×{value}, full weight in about {minutes} min',
+        rampNoTime: 'Ramping ×{value}',
+        insufficient: 'Not enough data (not down-weighted)',
+        breakdown: 'Load factor {loadFactor} → health ×{health} → ramp ×{ramp} → weight {weight} → expected {share} (unadjusted {base})',
+        healthReason: 'Upstream failures {rate} over the last {minutes} minutes, lowest in the priority {baseline}; recovers within about {minutes} minutes as failures fall.',
+        insufficientReason: 'Too few samples over the last {minutes} minutes; not down-weighted.',
+        rampReasons: {
+          balance_pause: 'Balance pause ended {since} min ago; ',
+          hard_penalty: 'Rate limit or pause ended {since} min ago; ',
+          reenabled: 'Available again {since} min ago; '
+        },
+        rampRemaining: 'full weight in about {minutes} min.'
+      },
       ifHealthy: '{value} when back',
       healthy: 'Schedulable',
       recoverAt: 'Back at {time}',
@@ -247,6 +265,9 @@ export default {
         account: 'Account',
         priority: 'Priority',
         weight: 'Load factor',
+        healthFactor: 'Health',
+        rampFactor: 'Ramp',
+        effective: 'Weight',
         loadRate: 'Load rate',
         state: 'Eligibility'
       },

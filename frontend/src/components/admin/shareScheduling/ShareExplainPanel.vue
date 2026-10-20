@@ -56,13 +56,16 @@
           <div>
             <h4 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.shareScheduling.explain.result.entries') }}</h4>
             <div class="mt-2 overflow-x-auto">
-              <table class="w-full min-w-[640px] text-left text-xs">
+              <table class="w-full min-w-[760px] text-left text-xs">
                 <thead>
                   <tr class="border-b border-gray-200 text-gray-500 dark:border-dark-600 dark:text-dark-400">
                     <th class="p-2">{{ t('admin.shareScheduling.explain.entryColumns.rank') }}</th>
                     <th class="p-2">{{ t('admin.shareScheduling.explain.entryColumns.account') }}</th>
                     <th class="p-2 text-right">{{ t('admin.shareScheduling.explain.entryColumns.priority') }}</th>
                     <th class="p-2 text-right">{{ t('admin.shareScheduling.explain.entryColumns.weight') }}</th>
+                    <th class="p-2 text-right">{{ t('admin.shareScheduling.explain.entryColumns.healthFactor') }}</th>
+                    <th class="p-2 text-right">{{ t('admin.shareScheduling.explain.entryColumns.rampFactor') }}</th>
+                    <th class="p-2 text-right">{{ t('admin.shareScheduling.explain.entryColumns.effective') }}</th>
                     <th class="p-2 text-right">{{ t('admin.shareScheduling.explain.entryColumns.loadRate') }}</th>
                     <th class="p-2">{{ t('admin.shareScheduling.explain.entryColumns.state') }}</th>
                   </tr>
@@ -73,6 +76,9 @@
                     <td class="p-2">{{ accountName(entry.account_id) }}</td>
                     <td class="p-2 text-right tabular-nums">{{ entry.priority }}</td>
                     <td class="p-2 text-right tabular-nums">{{ entry.load_factor }}</td>
+                    <td class="p-2 text-right tabular-nums" :class="entry.health_factor !== null && entry.health_factor < 1 ? 'text-amber-700 dark:text-amber-300' : ''">×{{ formatShareFactor(entry.health_factor) }}</td>
+                    <td class="p-2 text-right tabular-nums" :class="entry.ramp_factor < 1 ? 'text-sky-700 dark:text-sky-300' : ''">×{{ formatShareFactor(entry.ramp_factor) }}</td>
+                    <td class="p-2 text-right font-medium tabular-nums">{{ formatShareWeight(entry.effective_weight) }}</td>
                     <td class="p-2 text-right tabular-nums">{{ entry.load_rate === null ? '—' : entry.load_rate + '%' }}</td>
                     <td class="p-2">
                       <span v-if="entry.excluded" class="text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.explain.excluded') }}</span>
@@ -104,6 +110,7 @@ import shareSchedulingAPI from '@/api/admin/shareScheduling'
 import type { ShareExplainInput, ShareExplanation, ShareMember } from '@/api/admin/shareScheduling'
 import { useShareSchedulingLabels } from '@/composables/useShareSchedulingLabels'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { formatShareFactor, formatShareWeight } from '@/utils/shareFactors'
 import { formatShareMs } from '@/utils/shareScheduling'
 
 const props = defineProps<{

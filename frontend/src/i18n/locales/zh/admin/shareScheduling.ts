@@ -92,6 +92,7 @@ export default {
         share: '预计份额'
       },
       others: '其余 {count} 个账号预计份额为 0（备用或暂不可用）。',
+      base: '不调整时 {value}',
       confirm: '确认',
       cancel: '取消',
       saving: '正在保存…',
@@ -103,7 +104,8 @@ export default {
       top_priority_unhealthy: '优先级 {priority} 没有可用账号，新会话会进入优先级 {value}。',
       single_account_dominant: '{name} 预计分到 {value} 的新会话，流量过于集中。',
       high_load_factor: '{name} 的负载因子为 {value}，可用时会拿到同一优先级的绝大多数新会话。',
-      high_failure: '{name} 近 1 小时失败率 {value}（全部分组），建议调低负载因子或停用。'
+      health_downweighted: '{name} 已自动降权 ×{value}；若持续，建议检查上游或停用。',
+      ramping: '{name} 刚恢复，正在爬升（×{value}），新会话约 10 分钟内逐步回到满权重。'
     },
     health: {
       title: '运行状况',
@@ -170,7 +172,23 @@ export default {
         actual: '实际份额',
         failure: '失败率'
       },
-      recentHint: '近 1 小时，失败率按该账号在全部分组的请求计算',
+      actualHint: '近 1 小时本组成功请求中该账号的占比。',
+      failureHint: '近 30 分钟，只计会触发自动降权的上游失败（瞬时错误、首字超时、输出中途停滞），按该账号在全部分组的请求计算。',
+      factors: {
+        health: '健康 ×{value}',
+        ramp: '恢复中 ×{value}，约 {minutes} 分钟后满权重',
+        rampNoTime: '恢复中 ×{value}',
+        insufficient: '数据不足（未降权）',
+        breakdown: '负载因子 {loadFactor} → 健康 ×{health} → 爬升 ×{ramp} → 有效 {weight} → 预计 {share}（不调整时 {base}）',
+        healthReason: '近 {minutes} 分钟上游失败 {rate}，同层最低 {baseline}；随失败率回落，约 {minutes} 分钟内自动恢复。',
+        insufficientReason: '近 {minutes} 分钟样本不足，未降权。',
+        rampReasons: {
+          balance_pause: '余额暂停 {since} 分钟前结束，',
+          hard_penalty: '限流或停调 {since} 分钟前结束，',
+          reenabled: '{since} 分钟前重新可用，'
+        },
+        rampRemaining: '约 {minutes} 分钟后恢复满权重。'
+      },
       ifHealthy: '恢复后 {value}',
       healthy: '可调度',
       recoverAt: '预计 {time} 恢复',
@@ -247,6 +265,9 @@ export default {
         account: '账号',
         priority: '优先级',
         weight: '负载因子',
+        healthFactor: '健康系数',
+        rampFactor: '爬升系数',
+        effective: '有效权重',
         loadRate: '负载率',
         state: '资格'
       },

@@ -54,6 +54,30 @@ export type ShareMemberReason =
   | 'iq_degraded'
   | 'quota_exceeded'
 
+/** Health of an account over the last minutes, counting only failures that trigger down-weighting. */
+export interface ShareMemberHealth {
+  window_minutes: number
+  attempts: number
+  soft_failures: number
+  /** Soft failure rate of the account (all groups); null without attempts. */
+  rate: number | null
+  /** Lowest raw soft failure rate among healthy accounts of the same priority. */
+  tier_baseline_rate: number | null
+  /** Too few samples to judge: the account is not down-weighted. */
+  insufficient: boolean
+}
+
+/** Why an account is ramping up after coming back. */
+export type ShareRampCause = 'balance_pause' | 'hard_penalty' | 'reenabled'
+
+export interface ShareMemberRamp {
+  cause: ShareRampCause | string | null
+  /** When the account became eligible again. */
+  since: string | null
+  /** When the ramp reaches full weight. */
+  full_at: string | null
+}
+
 export interface ShareMember {
   account_id: number
   name: string
@@ -70,14 +94,24 @@ export interface ShareMember {
   concurrency: number
   /** The account's own load factor; null when unset. */
   load_factor: number | null
-  /** The share weight: load factor, else concurrency, else 1. */
+  /** The load factor share scheduling starts from: load factor, else concurrency, else 1. */
   effective_load_factor: number
+  /** Automatic health factor (0.2–1); null when not measured or not in effect. */
+  health_factor: number | null
+  health: ShareMemberHealth | null
+  /** Slow start factor after coming back (0.1–1); 1 when not ramping. */
+  ramp_factor: number
+  ramp: ShareMemberRamp | null
+  /** load factor × health factor × ramp factor. */
+  effective_weight: number
   /** Other groups the account serves; a load factor change reaches them too. */
   other_group_ids: number[]
+  /** Expected share of new sessions by load factor alone. */
+  base_share: number
   /**
-   * Expected share of new sessions under share scheduling. It depends only
-   * on priorities, load factors and health, so it also tells an original
-   * group what switching would do.
+   * Expected share of new sessions with the automatic factors applied. It
+   * depends only on priorities, weights and health, so it also tells an
+   * original group what switching would do.
    */
   expected_share: number
   /** The expected share if only this account turned healthy. */
@@ -85,11 +119,6 @@ export interface ShareMember {
   actual_requests_1h: number
   /** Share of the group's successful requests in the last hour. */
   actual_share_1h: number | null
-  /** Successful requests of the account in every group, last hour. */
-  recent_requests_1h: number
-  /** Client-visible errors of the account in every group, last hour. */
-  recent_errors_1h: number
-  recent_error_rate_1h: number | null
 }
 
 export interface SharePolicyView {
@@ -124,11 +153,14 @@ export type ShareWarningCode =
   | 'top_priority_unhealthy'
   | 'single_account_dominant'
   | 'high_load_factor'
+  | 'health_downweighted'
+  | 'ramping'
 
 /**
  * A preview warning. top_priority_unhealthy: priority is the top priority,
  * value the active one; single_account_dominant: value is the share;
- * high_load_factor: value is the load factor.
+ * high_load_factor: value is the load factor; health_downweighted and
+ * ramping: value is the factor.
  */
 export interface ShareWarning {
   code: ShareWarningCode | string
@@ -161,8 +193,12 @@ export interface ShareExplainInput {
 export interface ShareExplainEntry {
   account_id: number
   priority: number
-  /** The effective load factor. */
+  /** The load factor share scheduling starts from. */
   load_factor: number
+  health_factor: number | null
+  ramp_factor: number
+  /** load factor × health factor × ramp factor. */
+  effective_weight: number
   eligible: boolean
   excluded: boolean
   reason?: string | null

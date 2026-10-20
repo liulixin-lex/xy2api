@@ -32,6 +32,8 @@
                     <td class="p-2 text-right tabular-nums">{{ member.effective_load_factor }}</td>
                     <td class="p-2">
                       <ShareShareBar :value="member.expected_share" />
+                      <span v-if="Math.abs(member.base_share - member.expected_share) >= 0.0005" class="mt-0.5 block text-right text-[11px] text-gray-500 dark:text-dark-400">{{ t('admin.shareScheduling.change.base', { value: formatSharePercent(member.base_share) }) }}</span>
+                      <ShareFactorMarks :member="member" />
                     </td>
                   </tr>
                 </tbody>
@@ -77,10 +79,12 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ShareFactorMarks from './ShareFactorMarks.vue'
 import ShareShareBar from './ShareShareBar.vue'
 import { useShareSchedulingLabels } from '@/composables/useShareSchedulingLabels'
 import { useShareSchedulingStore } from '@/stores/shareScheduling'
 import { namedWarnings } from '@/utils/shareAttention'
+import { formatSharePercent } from '@/utils/shareScheduling'
 
 const { t } = useI18n()
 const labels = useShareSchedulingLabels()

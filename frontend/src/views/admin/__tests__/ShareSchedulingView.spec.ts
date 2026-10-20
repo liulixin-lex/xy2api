@@ -46,7 +46,10 @@ function shareGroupView(id = 6) {
     version: 3,
     members: [
       shareMember(1, { name: 'alpha', expected_share: 0.75, effective_load_factor: 30, load_factor: 30, other_group_ids: [5, 7] }),
-      shareMember(2, { name: 'beta', expected_share: 0.25, recent_requests_1h: 60, recent_errors_1h: 40, recent_error_rate_1h: 0.4 }),
+      shareMember(2, {
+        name: 'beta', expected_share: 0.25, base_share: 0.5, health_factor: 0.2, effective_weight: 2,
+        health: { window_minutes: 30, attempts: 100, soft_failures: 40, rate: 0.4, tier_baseline_rate: 0.011, insufficient: false }
+      }),
       shareMember(3, { name: 'gamma', priority: 2, expected_share: 0, share_if_healthy: 0 }),
       shareMember(4, { name: 'delta', healthy: false, reason: 'rate_limited', recover_at: '2026-10-20T10:00:00Z', expected_share: 0, share_if_healthy: 0.2 })
     ]
@@ -60,6 +63,8 @@ function mountView() {
         AppLayout: { template: '<div><slot /></div>' },
         BaseDialog: { props: ['show', 'title'], template: '<div v-if="show" data-dialog><h2>{{ title }}</h2><slot /><slot name="footer" /></div>' },
         Select: { props: ['modelValue', 'options'], template: '<select />' },
+        // Render tooltip content in place so the breakdown can be read.
+        HelpTooltip: { template: '<span><slot name="trigger" /><span data-tooltip><slot /></span></span>' },
         ResilienceExplainResult: true
       }
     }
@@ -75,7 +80,13 @@ beforeEach(() => {
   api.listGroups.mockResolvedValue(groups.map(g => ({ ...g })))
   api.getPolicy.mockImplementation(async (id: number) => (id === 6 ? shareGroupView() : shareView(id, { group_name: id === 5 ? 'Claude' : 'Images' })))
   api.report.mockImplementation(async (id: number) => shareReport(id, { scheduler: id === 6 ? 'share' : 'sub2api', baseline: id === 6 ? shareMetrics() : null }))
-  api.preview.mockResolvedValue(sharePreview({ warnings: [{ code: 'high_load_factor', account_id: 1, priority: null, value: 999 }] }))
+  api.preview.mockResolvedValue(sharePreview({
+    warnings: [
+      { code: 'high_load_factor', account_id: 1, priority: null, value: 999 },
+      { code: 'health_downweighted', account_id: 2, priority: null, value: 0.2 },
+      { code: 'ramping', account_id: 1, priority: null, value: 0.4 }
+    ]
+  }))
   api.updatePolicy.mockImplementation(async (id: number, update: { scheduler: 'sub2api' | 'share'; session_keep: boolean; expected_version: number }) =>
     shareView(id, { scheduler: update.scheduler, session_keep: update.session_keep, version: update.expected_version + 1, effective: update.scheduler === 'share' }))
 })
@@ -112,6 +123,10 @@ describe('share scheduling page', () => {
     expect(dialog.text()).toContain('75.0%')
     expect(dialog.text()).toContain('admin.shareScheduling.change.others:{"count":1}')
     expect(w.get('[data-testid="share-change-risk-high_load_factor"]').text()).toContain('"value":"999"')
+    expect(w.get('[data-testid="share-change-risk-health_downweighted"]').text()).toContain('"value":"0.2"')
+    expect(w.get('[data-testid="share-change-risk-health_downweighted"]').classes()).toContain('bg-amber-50')
+    expect(w.get('[data-testid="share-change-risk-ramping"]').text()).toContain('"value":"0.4"')
+    expect(w.get('[data-testid="share-change-risk-ramping"]').classes()).toContain('bg-gray-50')
     expect(api.updatePolicy).not.toHaveBeenCalled()
 
     await w.get('[data-testid="share-change-confirm"]').trigger('click')
@@ -158,8 +173,9 @@ describe('share scheduling page', () => {
     expect(w.get('[data-testid="share-health-metric-cacheHit"]').text()).toContain('80.0%')
     expect(w.get('[data-testid="share-health-metric-cacheHit"]').text()).toContain('admin.shareScheduling.health.referenceOnly')
     const attention = w.get('[data-testid="share-attention"]').text()
-    expect(attention).toContain('admin.shareScheduling.risks.high_failure')
+    expect(attention).toContain('admin.shareScheduling.risks.health_downweighted')
     expect(attention).toContain('"name":"beta"')
+    expect(attention).toContain('"value":"0.2"')
   })
 
   it('withholds a verdict while the switch is too recent and says how the switch time was found', async () => {
@@ -194,9 +210,43 @@ describe('share scheduling page', () => {
     expect(w.get('[data-testid="share-member-4"]').text()).toContain('admin.shareScheduling.reasons.rate_limited')
     expect(w.get('[data-testid="share-member-4"]').text()).toContain('admin.shareScheduling.traffic.ifHealthy')
     expect(w.get('[data-testid="share-member-2"]').text()).toContain('40.0%')
-    // Short headers; the hover hint says the window and where the failure rate comes from.
-    expect(w.get('[data-testid="share-traffic-actual-header"]').attributes('title')).toBe('admin.shareScheduling.traffic.recentHint')
-    expect(w.get('[data-testid="share-traffic-failure-header"]').attributes('title')).toBe('admin.shareScheduling.traffic.recentHint')
+    // Short headers; the hover hints say the window and which failures count.
+    expect(w.get('[data-testid="share-traffic-actual-header"]').attributes('title')).toBe('admin.shareScheduling.traffic.actualHint')
+    expect(w.get('[data-testid="share-traffic-failure-header"]').attributes('title')).toBe('admin.shareScheduling.traffic.failureHint')
+  })
+
+  it('marks automatic factors next to the expected share with the breakdown', async () => {
+    api.getPolicy.mockImplementation(async (id: number) => shareView(id, {
+      scheduler: 'share',
+      members: [
+        shareMember(1, { name: 'alpha', expected_share: 0.6, base_share: 0.4 }),
+        shareMember(2, {
+          name: 'beta', expected_share: 0.1, base_share: 0.33, health_factor: 0.2, effective_weight: 20, effective_load_factor: 100,
+          health: { window_minutes: 30, attempts: 900, soft_failures: 152, rate: 0.169, tier_baseline_rate: 0.011, insufficient: false }
+        }),
+        shareMember(3, { name: 'gamma', expected_share: 0.3, base_share: 0.27, ramp_factor: 0.4, ramp: { cause: 'balance_pause', since: new Date(Date.now() - 3.5 * 60_000).toISOString(), full_at: new Date(Date.now() + 6.5 * 60_000).toISOString() } }),
+        shareMember(4, { name: 'delta', health_factor: null, health: { window_minutes: 30, attempts: 3, soft_failures: 1, rate: 0.33, tier_baseline_rate: 0.011, insufficient: true } })
+      ]
+    }))
+    const w = mountView()
+    await flushPromises()
+    expect(w.find('[data-testid="share-factors-1"]').exists()).toBe(false)
+    expect(w.get('[data-testid="share-factor-health-2"]').text()).toContain('"value":"0.2"')
+    const detail = w.get('[data-testid="share-factor-detail-2"]').text()
+    expect(detail).toContain('"loadFactor":100')
+    expect(detail).toContain('"weight":"20"')
+    expect(detail).toContain('"share":"10.0%"')
+    expect(detail).toContain('"base":"33.0%"')
+    expect(detail).toContain('"rate":"16.9%"')
+    expect(detail).toContain('"baseline":"1.1%"')
+    expect(w.get('[data-testid="share-factor-ramp-3"]').text()).toContain('"minutes":7')
+    expect(w.get('[data-testid="share-factor-insufficient-4"]').exists()).toBe(true)
+    // A rate from too few samples is shown but greyed out.
+    expect(w.get('[data-testid="share-failure-4"]').classes()).toContain('text-gray-400')
+    expect(w.get('[data-testid="share-failure-2"]').text()).toBe('16.9%')
+    expect(w.get('[data-testid="share-failure-2"]').classes()).toContain('text-red-700')
+    // Ramping accounts are marked in the table only.
+    expect(w.get('[data-testid="share-attention"]').text()).not.toContain('gamma')
   })
 
   it('explains an unset load factor on hover and in the empty editor', async () => {
@@ -263,8 +313,8 @@ describe('share scheduling page', () => {
       idle_ms: 0, cache_ttl_seconds: 1800, estimated_tokens: 0, cacheable: false, warm: false, wait_budget_ms: 0,
       reason: 'new_session', steps: [1, 2], write: 'if_absent', spill_write: 'replace', active_priority: 1,
       entries: [
-        { account_id: 1, priority: 1, load_factor: 30, eligible: true, excluded: false, rank: 1, load_rate: 20, saturated: false },
-        { account_id: 2, priority: 1, load_factor: 10, eligible: true, excluded: false, rank: 2, load_rate: 100, saturated: true }
+        { account_id: 1, priority: 1, load_factor: 30, health_factor: 1, ramp_factor: 1, effective_weight: 30, eligible: true, excluded: false, rank: 1, load_rate: 20, saturated: false },
+        { account_id: 2, priority: 1, load_factor: 10, health_factor: 0.2, ramp_factor: 0.4, effective_weight: 0.8, eligible: true, excluded: false, rank: 2, load_rate: 100, saturated: true }
       ]
     })
     const w = mountView()
@@ -277,5 +327,10 @@ describe('share scheduling page', () => {
     expect(summary).toContain('"account":"alpha #1"')
     expect(summary).toContain('"list":"beta #2"')
     expect(w.get('[data-testid="share-explain-result"]').text()).toContain('admin.shareScheduling.explain.saturated')
+    // Each candidate shows its load factor, both automatic factors and the resulting weight.
+    const row = w.get('[data-testid="share-explain-result"] tbody tr:nth-child(2)').text()
+    expect(row).toContain('×0.2')
+    expect(row).toContain('×0.4')
+    expect(row).toContain('0.8')
   })
 })

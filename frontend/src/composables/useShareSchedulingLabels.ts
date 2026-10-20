@@ -1,4 +1,5 @@
 import { useI18n } from 'vue-i18n'
+import { formatShareFactor } from '@/utils/shareFactors'
 import { formatSharePercent } from '@/utils/shareScheduling'
 
 /** A warning or attention item as the server or the member view reports it. */
@@ -10,8 +11,9 @@ export interface ShareRiskLike {
   value?: number | null
 }
 
-// Codes whose value is a share or a ratio rather than a plain number.
-const PERCENT_VALUE = new Set(['single_account_dominant', 'high_failure'])
+// Codes whose value is a share or a ratio, or an automatic factor, rather than a plain number.
+const PERCENT_VALUE = new Set(['single_account_dominant'])
+const FACTOR_VALUE = new Set(['health_downweighted', 'ramping'])
 
 /** Localised labels for share scheduling codes; unknown codes show as-is. */
 export function useShareSchedulingLabels() {
@@ -26,7 +28,9 @@ export function useShareSchedulingLabels() {
     const key = `admin.shareScheduling.risks.${item.code}`
     if (typeof te === 'function' && !te(key)) return item.code
     const name = item.name || (item.account_id !== undefined && item.account_id !== null ? `#${item.account_id}` : '')
-    const value = item.value === undefined || item.value === null ? '' : PERCENT_VALUE.has(item.code) ? formatSharePercent(item.value) : String(item.value)
+    const value = item.value === undefined || item.value === null
+      ? ''
+      : PERCENT_VALUE.has(item.code) ? formatSharePercent(item.value) : FACTOR_VALUE.has(item.code) ? formatShareFactor(item.value) : String(item.value)
     return t(key, { name, value, priority: item.priority ?? '' })
   }
   return {

@@ -14,6 +14,7 @@ import { formatSharePercent } from '@/utils/shareScheduling'
 /** A share (0..1) as a bar with its percentage; zero shows a dash. */
 const props = withDefaults(defineProps<{ value: number; barClass?: string }>(), { barClass: 'bg-primary-500' })
 
-const text = computed(() => (props.value > 0 ? formatSharePercent(props.value) : '—'))
+// Tiny shares keep two decimals so they never read as 0.0%.
+const text = computed(() => (props.value > 0 ? formatSharePercent(props.value, props.value < 0.01 ? 2 : 1) : '—'))
 const width = computed(() => `${Math.min(Math.max(props.value, 0), 1) * 100}%`)
 </script>

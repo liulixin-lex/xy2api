@@ -22,14 +22,17 @@ export function shareMember(id: number, overrides: Partial<ShareMember> = {}): S
     concurrency: 10,
     load_factor: null,
     effective_load_factor: 10,
+    health_factor: 1,
+    health: { window_minutes: 30, attempts: 100, soft_failures: 1, rate: 0.01, tier_baseline_rate: 0.01, insufficient: false },
+    ramp_factor: 1,
+    ramp: null,
+    effective_weight: 10,
     other_group_ids: [],
+    base_share: 0.5,
     expected_share: 0.5,
     share_if_healthy: 0.5,
     actual_requests_1h: 100,
     actual_share_1h: 0.5,
-    recent_requests_1h: 100,
-    recent_errors_1h: 0,
-    recent_error_rate_1h: 0,
     ...overrides
   }
 }
