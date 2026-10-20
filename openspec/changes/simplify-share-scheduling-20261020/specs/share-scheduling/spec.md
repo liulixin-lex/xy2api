@@ -35,11 +35,16 @@ New sessions MUST be placed among eligible accounts of the active priority by we
 
 A group MUST have one session-keeping setting. When it is on, affinity keys and bindings behave as with `affinity.key=auto`. When it is off, every request is placed by weight without binding. The binding lifetime, bounded wait, spill rebinding, cold realignment and tier return MUST use the fixed values of design §1.
 
-A bound account that cannot serve MUST keep the binding (soft spill) only when the gateway-resilience penalty of the account is soft and its expected recovery plus the session's idle time is below 0.8 of the cache lifetime. A hard penalty, including a temporary unschedulable state whose reason is empty or not a soft prefix, MUST rebind at once.
+A bound account that cannot serve MUST keep the binding (soft spill) only when the gateway-resilience penalty of the account is soft and its expected recovery plus the session's idle time is below 0.8 of the cache lifetime. A hard penalty, including a temporary unschedulable state whose reason is empty or not a soft prefix, MUST rebind at once. While the gateway-resilience master switch is off, the 0.3.0 rule MUST apply instead: any state that ends within 300 seconds counts as soft, a balance pause included.
 
 #### Scenario: Hard temporary state rebinds
 - **WHEN** the bound account is temporarily unschedulable with a reason that gateway resilience classifies as hard, for 60 seconds
 - **THEN** the session is served elsewhere and its binding moves to the serving account.
+
+#### Scenario: Resilience off keeps the 0.3.0 rule
+- **WHEN** the gateway-resilience master switch is off
+- **AND** the bound account is temporarily unschedulable for 60 seconds, with any reason
+- **THEN** the request is served elsewhere and the binding still points at the bound account.
 
 #### Scenario: Short rate limit keeps the binding
 - **WHEN** the bound account is rate limited for 60 seconds and the session's cache is warm

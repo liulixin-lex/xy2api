@@ -73,8 +73,8 @@ func (g gatewayCandidateGates) candidateReason(ctx context.Context, acc *Account
 	s := g.s
 	switch {
 	case !s.isAccountSchedulableForSelection(acc):
-		reason, _ := shareAccountStateReason(acc, now)
-		return reason, shareSoftRecovery(acc, g.model, now, resiliencePenaltyOf)
+		reason, end := shareAccountStateReason(acc, now)
+		return reason, shareSoftRecovery(acc, g.model, now, resiliencePenaltyOf, end)
 	case !s.isGatewayAccountProfitEligible(ctx, acc):
 		return sharesched.ReasonProfitGate, time.Time{}
 	case !s.isAccountAllowedForPlatform(acc, g.platform, g.useMixed):
@@ -84,7 +84,7 @@ func (g gatewayCandidateGates) candidateReason(ctx context.Context, acc *Account
 	case g.channelCheck && s.isUpstreamModelRestrictedByChannel(ctx, *g.groupID, acc, g.model):
 		return sharesched.ReasonChannelRestricted, time.Time{}
 	case !s.isAccountSchedulableForModelSelection(ctx, acc, g.model) && !lastResortModelLimitSoft(ctx, acc, g.model):
-		return sharesched.ReasonModelRateLimited, shareSoftRecovery(acc, g.model, now, resiliencePenaltyOf)
+		return sharesched.ReasonModelRateLimited, shareSoftRecovery(acc, g.model, now, resiliencePenaltyOf, shareModelLimitEnd(ctx, acc, g.model, now))
 	case !s.isAccountSchedulableForQuota(acc):
 		return sharesched.ReasonQuotaExceeded, time.Time{}
 	case !s.isAccountSchedulableForWindowCost(ctx, acc, sticky):

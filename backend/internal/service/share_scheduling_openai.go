@@ -357,18 +357,18 @@ func (g *openAIShareGates) lookup(id int64) *Account {
 // per-model rate limits and in-memory runtime blocks.
 func (g *openAIShareGates) candidateReason(acc *Account, now time.Time) (sharesched.Reason, time.Time) {
 	if !acc.IsSchedulable() {
-		reason, _ := shareAccountStateReason(acc, now)
-		return reason, shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf)
+		reason, end := shareAccountStateReason(acc, now)
+		return reason, shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf, end)
 	}
 	lastResort := resilienceLastResortGate(g.ctx)
 	switch reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(g.ctx, acc, g.in.platform, g.in.model, false, g.in.capability); {
 	case reason == "":
 	case reason == "model_rate_limited" && lastResortModelLimitSoft(g.ctx, acc, g.in.model):
 	case reason == "model_rate_limited":
-		return sharesched.ReasonModelRateLimited, shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf)
+		return sharesched.ReasonModelRateLimited, shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf, shareModelLimitEnd(g.ctx, acc, g.in.model, now))
 	case reason == "not_schedulable":
-		reason, _ := shareAccountStateReason(acc, now)
-		return reason, shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf)
+		reason, end := shareAccountStateReason(acc, now)
+		return reason, shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf, end)
 	case strings.HasPrefix(reason, "quota_auto_pause"):
 		return sharesched.ReasonQuotaAutoPause, time.Time{}
 	case reason == "platform_mismatch":

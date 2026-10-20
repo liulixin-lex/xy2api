@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
@@ -429,16 +430,31 @@ func TestShareSchedulingSoftSpillKeepsBindingThroughShortOutage(t *testing.T) {
 // TestShareSchedulingHardTemporaryStateRebinds: soft and hard states follow
 // gateway resilience (design §4). A temporary state whose reason is empty or
 // not a soft prefix is hard, however short, and the session moves at once.
+//
+// With the resilience master switch off the 0.3.0 rule applies: any state
+// that ends within 300 seconds keeps the binding, a balance pause included.
 func TestShareSchedulingHardTemporaryStateRebinds(t *testing.T) {
 	for _, tc := range []struct {
 		reason string
+		off    bool
 		soft   bool
 	}{
-		{"", false},
-		{"administrator rule: keyword matched", false},
-		{"transient: HTTP 502", true},
+		{"", false, false},
+		{"administrator rule: keyword matched", false, false},
+		{"balance:exhausted: HTTP 402", false, false},
+		{"transient: HTTP 502", false, true},
+		{"", true, true},
+		{"administrator rule: keyword matched", true, true},
+		{"balance:exhausted: HTTP 402", true, true},
 	} {
-		t.Run(tc.reason, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s/off=%v", tc.reason, tc.off), func(t *testing.T) {
+			if tc.off {
+				orig := *resilience.Current()
+				off := resilience.Defaults()
+				off.Enabled = false
+				resilience.Publish(off)
+				t.Cleanup(func() { resilience.Publish(orig) })
+			}
 			env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
 			target, other := env.targetFor(t, "temp")
 			until := time.Now().Add(time.Minute)

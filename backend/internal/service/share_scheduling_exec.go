@@ -124,11 +124,11 @@ func (s *ShareSchedulingService) shareMissingBoundCandidate(acc *Account, model 
 	if acc == nil {
 		return sharesched.Candidate{}, false
 	}
-	recoverAt := shareSoftRecovery(acc, model, now, penalty)
+	reason, end := shareAccountStateReason(acc, now)
+	recoverAt := shareSoftRecovery(acc, model, now, penalty, end)
 	if recoverAt.IsZero() {
 		return sharesched.Candidate{}, false
 	}
-	reason, _ := shareAccountStateReason(acc, now)
 	s.observeEligibility(acc.ID, false, reason, now)
 	return sharesched.Candidate{AccountID: acc.ID, Platform: acc.Platform, Class: shareAccountClass(acc),
 		Priority: acc.Priority, Weight: shareWeight(acc), Reason: reason, RecoverAt: recoverAt}, true
@@ -138,6 +138,10 @@ func (s *ShareSchedulingService) shareMissingBoundCandidate(acc *Account, model 
 // resilience does (resiliencePenaltyOf, or the OpenAI variant).
 type resiliencePenaltyFunc func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string)
 
+// shareLegacySoftSpillMax is the 0.3.0 default of soft_spill_max_seconds,
+// the soft-spill bound while gateway resilience is off.
+const shareLegacySoftSpillMax = 300 * time.Second
+
 // shareSoftRecovery is when a soft-penalised account is expected back, or
 // zero when its state is hard or the recovery is unknown. Share scheduling
 // keeps a session's binding through a short outage only on the strength of
@@ -145,7 +149,17 @@ type resiliencePenaltyFunc func(*Account, string, time.Time) (resilience.Penalty
 // (design §4): a temporary state whose reason is empty or not a soft prefix
 // is hard, and so is anything that lasts beyond the hard rate-limit
 // threshold.
-func shareSoftRecovery(acc *Account, model string, now time.Time, penalty resiliencePenaltyFunc) time.Time {
+//
+// stateEnd is when the state that rejected the account ends, as the
+// adapter read it. With the resilience master switch off the 0.3.0 rule
+// applies: any state that ends within shareLegacySoftSpillMax.
+func shareSoftRecovery(acc *Account, model string, now time.Time, penalty resiliencePenaltyFunc, stateEnd time.Time) time.Time {
+	if !resilience.Current().FailureOn() {
+		if stateEnd.IsZero() || stateEnd.Sub(now) > shareLegacySoftSpillMax {
+			return time.Time{}
+		}
+		return stateEnd
+	}
 	if penalty == nil {
 		penalty = resiliencePenaltyOf
 	}
@@ -195,6 +209,15 @@ func shareAccountClass(acc *Account) string {
 	return name
 }
 
+// shareModelLimitEnd is when the account's rate limit for the model ends;
+// zero when it is not limited.
+func shareModelLimitEnd(ctx context.Context, acc *Account, model string, now time.Time) time.Time {
+	if remaining := acc.GetRateLimitRemainingTimeWithContext(ctx, model); remaining > 0 {
+		return now.Add(remaining)
+	}
+	return time.Time{}
+}
+
 // shareAccountStateReason maps Account.IsSchedulable onto reason codes and
 // the expected recovery time of temporary states.
 func shareAccountStateReason(a *Account, now time.Time) (sharesched.Reason, time.Time) {
@@ -214,9 +237,10 @@ func shareAccountStateReason(a *Account, now time.Time) (sharesched.Reason, time
 	case a.RateLimitResetAt != nil && now.Before(*a.RateLimitResetAt):
 		return sharesched.ReasonRateLimited, *a.RateLimitResetAt
 	case a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil):
-		if resilience.IsBalancePause(a.TempUnschedulableReason) {
+		if resilience.Current().FailureOn() && resilience.IsBalancePause(a.TempUnschedulableReason) {
 			// Out of balance at the relay is a hard state: the session moves
-			// at once instead of waiting out the pause.
+			// at once instead of waiting out the pause. With resilience off
+			// it is an ordinary pause, as in 0.3.0.
 			return sharesched.ReasonBalanceExhausted, time.Time{}
 		}
 		return sharesched.ReasonTempUnschedulable, *a.TempUnschedulableUntil

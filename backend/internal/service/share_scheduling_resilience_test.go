@@ -37,28 +37,36 @@ func TestShareStateReasonSeparatesBalanceExhaustion(t *testing.T) {
 	off.Enabled = false
 	resilience.Publish(off)
 	reason, recoverAt = shareAccountStateReason(acc(resilience.ReasonPrefixBalanceExhausted+": HTTP 402"), now)
-	require.Equal(t, sharesched.ReasonBalanceExhausted, reason, "a balance pause is hard whatever the resilience switches")
-	require.True(t, recoverAt.IsZero())
+	require.Equal(t, sharesched.ReasonTempUnschedulable, reason, "switch off: 0.3.0 handling")
+	require.True(t, recoverAt.Equal(until))
 }
 
 // TestShareSoftRecoveryFollowsResiliencePenalties: only soft penalties that
 // end within the hard rate-limit threshold give a recovery time (design §4).
+// With the resilience master switch off the 0.3.0 rule applies: any state
+// that ends within 300 seconds.
 func TestShareSoftRecoveryFollowsResiliencePenalties(t *testing.T) {
+	orig := *resilience.Current()
+	t.Cleanup(func() { resilience.Publish(orig) })
+	off := resilience.Defaults()
+	off.Enabled = false
 	now := time.Now()
 	soon, late := now.Add(time.Minute), now.Add(10*time.Minute)
 	for _, tc := range []struct {
-		name string
-		acc  Account
-		want time.Time
+		name    string
+		acc     Account
+		on, off time.Time
 	}{
-		{"transient cooldown", Account{TempUnschedulableUntil: &soon, TempUnschedulableReason: resilience.ReasonPrefixTransient + "HTTP 502"}, soon},
-		{"empty reason", Account{TempUnschedulableUntil: &soon}, time.Time{}},
-		{"administrator rule", Account{TempUnschedulableUntil: &soon, TempUnschedulableReason: "keyword matched"}, time.Time{}},
-		{"balance pause", Account{TempUnschedulableUntil: &soon, TempUnschedulableReason: resilience.ReasonPrefixBalanceExhausted + ": HTTP 402"}, time.Time{}},
-		{"short rate limit", Account{RateLimitResetAt: &soon}, soon},
-		{"long rate limit", Account{RateLimitResetAt: &late}, time.Time{}},
-		{"long overload", Account{OverloadUntil: &late}, time.Time{}},
-		{"disabled", Account{Status: StatusDisabled}, time.Time{}},
+		{"transient cooldown", Account{TempUnschedulableUntil: &soon, TempUnschedulableReason: resilience.ReasonPrefixTransient + "HTTP 502"}, soon, soon},
+		{"empty reason", Account{TempUnschedulableUntil: &soon}, time.Time{}, soon},
+		{"administrator rule", Account{TempUnschedulableUntil: &soon, TempUnschedulableReason: "keyword matched"}, time.Time{}, soon},
+		{"balance pause", Account{TempUnschedulableUntil: &soon, TempUnschedulableReason: resilience.ReasonPrefixBalanceExhausted + ": HTTP 402"}, time.Time{}, soon},
+		{"long administrator rule", Account{TempUnschedulableUntil: &late, TempUnschedulableReason: "keyword matched"}, time.Time{}, time.Time{}},
+		{"short rate limit", Account{RateLimitResetAt: &soon}, soon, soon},
+		{"long rate limit", Account{RateLimitResetAt: &late}, time.Time{}, time.Time{}},
+		{"short overload", Account{OverloadUntil: &soon}, soon, soon},
+		{"long overload", Account{OverloadUntil: &late}, time.Time{}, time.Time{}},
+		{"disabled", Account{Status: StatusDisabled}, time.Time{}, time.Time{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			acc := tc.acc
@@ -66,7 +74,12 @@ func TestShareSoftRecoveryFollowsResiliencePenalties(t *testing.T) {
 				acc.Status = StatusActive
 			}
 			acc.Schedulable = true
-			require.True(t, tc.want.Equal(shareSoftRecovery(&acc, "", now, nil)))
+			resilience.Publish(resilience.Defaults())
+			_, end := shareAccountStateReason(&acc, now)
+			require.True(t, tc.on.Equal(shareSoftRecovery(&acc, "", now, nil, end)), "resilience on")
+			resilience.Publish(off)
+			_, end = shareAccountStateReason(&acc, now)
+			require.True(t, tc.off.Equal(shareSoftRecovery(&acc, "", now, nil, end)), "resilience off")
 		})
 	}
 }
