@@ -278,6 +278,8 @@ export interface ShareReportDetails {
   waits?: { count: number; hit: number; avg_ms: number } | null
   attempts?: number | null
   share_requests?: number | null
+  /** Warm sessions share scheduling moved on its own (not failover), by reason; share mode only. */
+  hot_migrations?: { total: number; by_reason: Record<string, number> } | null
 }
 
 /** Where the switch time comes from: the switch record, or the policy's updated_at when the record is missing. */

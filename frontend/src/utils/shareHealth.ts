@@ -135,3 +135,15 @@ export function judgeShareHealth(current: ShareMetrics, baseline: ShareMetrics |
   if (!requestsEnough) return { level: 'insufficient', insufficient: 'requests', metrics }
   return { level: worst(metrics.map(m => m.level)), metrics }
 }
+
+/**
+ * Share of selections that moved a warm session on share scheduling's own
+ * account (not a failover) above which the readiness review §0.3 advises
+ * going back to the original scheduler.
+ */
+export const SHARE_HOT_MIGRATION_LIMIT = 0.001
+
+/** Hot migrations against the selections they come from; null without selections. */
+export function shareHotMigrationRatio(total: number, selections: number | null | undefined): number | null {
+  return selections && selections > 0 ? total / selections : null
+}
