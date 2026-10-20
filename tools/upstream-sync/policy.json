@@ -863,7 +863,9 @@
     },
     {
       "path": "frontend/src/components/common/GroupSelector.vue",
-      "value": "data-test=\"group-exclusive-tag\"",
+      "value": "data-test=\"group-exclusive-tag\""
+    },
+    {
       "path": "backend/internal/repository/account_repo.go",
       "value": "entsql.OrderByField(dbaccount.FieldLastUsedAt, direction, entsql.OrderNullsLast()).ToFunc(),"
     },

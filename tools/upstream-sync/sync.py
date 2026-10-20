@@ -8,6 +8,7 @@ import difflib
 import fnmatch
 import hashlib
 import json
+import json.scanner
 import re
 import subprocess
 import sys
@@ -65,11 +66,54 @@ def git_output(*args: str) -> str:
     return run_git(*args).stdout.strip()
 
 
+class _DuplicateKey(Exception):
+    def __init__(self, key: str):
+        super().__init__(key)
+        self.key = key
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
+    out: dict = {}
+    for key, value in pairs:
+        if key in out:
+            raise _DuplicateKey(key)
+        out[key] = value
+    return out
+
+
+class _StrictJSONDecoder(json.JSONDecoder):
+    """A decoder that rejects duplicate object keys.
+
+    The standard decoder keeps the last of duplicated keys, so a policy
+    entry written twice in one object silently loses the first one. The
+    error names the key and the line where its object starts."""
+
+    def __init__(self) -> None:
+        super().__init__(object_pairs_hook=_reject_duplicate_keys)
+        parse_object = self.parse_object
+
+        def parse_object_at(s_and_end, *args, **kwargs):
+            try:
+                return parse_object(s_and_end, *args, **kwargs)
+            except _DuplicateKey as exc:
+                text, start = s_and_end
+                line = text.count("\n", 0, start) + 1
+                raise ValueError(f'duplicate key "{exc.key}" in the object starting at line {line}') from None
+
+        self.parse_object = parse_object_at
+        # The C scanner does not call parse_object.
+        self.scan_once = json.scanner.py_make_scanner(self)
+
+
 def load_json(path: Path) -> dict:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise SyncError(f"cannot read {path.relative_to(ROOT)}: {exc}") from exc
+        return _StrictJSONDecoder().decode(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        try:
+            shown = path.relative_to(ROOT)
+        except ValueError:
+            shown = path
+        raise SyncError(f"cannot read {shown}: {exc}") from exc
 
 
 def write_json(path: Path, value: dict) -> None:
