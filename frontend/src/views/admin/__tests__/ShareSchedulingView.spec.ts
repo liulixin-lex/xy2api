@@ -1,22 +1,24 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ShareSchedulingView from '../ShareSchedulingView.vue'
-import { shareMember, shareView } from '@/stores/__tests__/shareSchedulingFixtures'
+import { shareGroup, shareMember, shareMetrics, sharePreview, shareReport, shareView } from '@/stores/__tests__/shareSchedulingFixtures'
 
 const api = vi.hoisted(() => ({
   getSettings: vi.fn(),
+  updateSettings: vi.fn(),
   listGroups: vi.fn(),
   getPolicy: vi.fn(),
   updatePolicy: vi.fn(),
   preview: vi.fn(),
   explain: vi.fn(),
-  report: vi.fn(),
-  decisions: vi.fn(),
-  rebalance: vi.fn()
+  report: vi.fn()
 }))
-const router = vi.hoisted(() => ({ replace: vi.fn(), leave: [] as Array<(to: { path: string }) => unknown>, query: {} as Record<string, string> }))
+const accounts = vi.hoisted(() => ({ update: vi.fn() }))
+const router = vi.hoisted(() => ({ replace: vi.fn(), query: {} as Record<string, string> }))
 
 vi.mock('@/api/admin/shareScheduling', () => ({ default: api }))
+vi.mock('@/api/admin/accounts', async importOriginal => ({ ...(await importOriginal<typeof import('@/api/admin/accounts')>()), update: accounts.update }))
 vi.mock('vue-i18n', async importOriginal => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
@@ -27,231 +29,308 @@ vi.mock('vue-i18n', async importOriginal => ({
 vi.mock('vue-router', () => ({
   useRoute: () => ({ path: '/admin/share-scheduling', query: router.query }),
   useRouter: () => ({ replace: router.replace }),
-  onBeforeRouteLeave: (guard: (to: { path: string }) => unknown) => { router.leave.push(guard) },
   RouterLink: { props: ['to'], template: '<a :href="String(to)"><slot /></a>' }
 }))
 
 const groups = [
-  { group_id: 5, name: 'Claude', platform: 'anthropic', scheduler: 'sub2api', version: 1, configured: true, effective: false, requests_1h: 12, cache_read_ratio_1h: 0.8, scheduling_miss_ratio_1h: 0.01 },
-  { group_id: 6, name: 'Codex', platform: 'openai', scheduler: 'shadow', version: 2, configured: true, effective: true, requests_1h: 0, cache_read_ratio_1h: 0, scheduling_miss_ratio_1h: 0, shadow_agree_rate_1h: 0.9 }
+  shareGroup(5, { name: 'Claude', configured: true, version: 1, member_count: 3, cache_hit_ratio_1h: 0.8 }),
+  shareGroup(6, { name: 'Codex', scheduler: 'share', configured: true, version: 3, effective: true }),
+  shareGroup(7, { name: 'Images' })
 ]
+
+function shareGroupView(id = 6) {
+  return shareView(id, {
+    group_name: 'Codex',
+    scheduler: 'share',
+    effective: true,
+    version: 3,
+    members: [
+      shareMember(1, { name: 'alpha', expected_share: 0.75, effective_load_factor: 30, load_factor: 30, other_group_ids: [5, 7] }),
+      shareMember(2, {
+        name: 'beta', expected_share: 0.25, base_share: 0.5, health_factor: 0.2, effective_weight: 2,
+        health: { window_minutes: 30, attempts: 100, soft_failures: 40, rate: 0.4, tier_baseline_rate: 0.011, insufficient: false }
+      }),
+      shareMember(3, { name: 'gamma', priority: 2, expected_share: 0, share_if_healthy: 0 }),
+      shareMember(4, { name: 'delta', healthy: false, reason: 'rate_limited', recover_at: '2026-10-20T10:00:00Z', expected_share: 0, share_if_healthy: 0.2 })
+    ]
+  })
+}
 
 function mountView() {
   return mount(ShareSchedulingView, {
     global: {
       stubs: {
         AppLayout: { template: '<div><slot /></div>' },
-        BaseDialog: { props: ['show', 'title'], template: '<div v-if="show" data-dialog><slot /><slot name="footer" /></div>' },
-        HelpTooltip: true,
-        Pagination: true
+        BaseDialog: { props: ['show', 'title'], template: '<div v-if="show" data-dialog><h2>{{ title }}</h2><slot /><slot name="footer" /></div>' },
+        Select: { props: ['modelValue', 'options'], template: '<select />' },
+        // Render tooltip content in place so the breakdown can be read.
+        HelpTooltip: { template: '<span><slot name="trigger" /><span data-tooltip><slot /></span></span>' },
+        ResilienceExplainResult: true
       }
     }
   })
 }
 
-async function openGroup(w: ReturnType<typeof mountView>, id = 5) {
-  await flushPromises()
-  await w.get(`[data-testid="share-group-${id}"]`).trigger('click')
-  await flushPromises()
-}
-
 beforeEach(() => {
+  setActivePinia(createPinia())
   vi.clearAllMocks()
-  router.leave = []
   router.query = {}
-  api.getSettings.mockResolvedValue({ enabled: false, cache_attribution: true, attribution_sample_rate: 4, decision_samples: true })
-  api.listGroups.mockResolvedValue(groups)
-  api.getPolicy.mockImplementation(async (id: number) => shareView(id, {
-    members: [shareMember(1, { tier: 1, weight: 10 }), shareMember(2, { tier: 1, weight: 10, healthy: false, reason: 'rate_limited', recover_at: '2026-10-10T10:00:00Z' })]
+  api.getSettings.mockResolvedValue({ enabled: true })
+  api.updateSettings.mockImplementation(async (s: { enabled: boolean }) => s)
+  api.listGroups.mockResolvedValue(groups.map(g => ({ ...g })))
+  api.getPolicy.mockImplementation(async (id: number) => (id === 6 ? shareGroupView() : shareView(id, { group_name: id === 5 ? 'Claude' : 'Images' })))
+  api.report.mockImplementation(async (id: number) => shareReport(id, { scheduler: id === 6 ? 'share' : 'sub2api', baseline: id === 6 ? shareMetrics() : null }))
+  api.preview.mockResolvedValue(sharePreview({
+    warnings: [
+      { code: 'high_load_factor', account_id: 1, priority: null, value: 999 },
+      { code: 'health_downweighted', account_id: 2, priority: null, value: 0.2 },
+      { code: 'ramping', account_id: 1, priority: null, value: 0.4 }
+    ]
   }))
-  api.preview.mockResolvedValue({ active_tier: 1, members: [shareMember(1, { effective_share: 0.75 })], placement_change: 0.25, sampled_keys: 400, estimated_migrations: 0, warnings: [{ code: 'global_switch_off' }] })
-  api.report.mockResolvedValue({
-    group_id: 5, scheduler: 'share', version: 1, unit: 'sessions', from: '', to: '', active_tier: 1, counter_precision: 'minute',
-    members: [shareMember(1, { effective_share: 0.5 }), shareMember(2, { effective_share: 0.5 })],
-    actual: [{ account_id: 1, placed: 6, placed_share: 0.6, requests: 0, request_share: 0, tokens: 0, token_share: 0, standard_cost: 0, cost_share: 0, skipped: { saturated: 3, session_limit: 1 }, ttft: { count: 5, p50_ms: 500, p95_ms: 2000, p99_ms: 3000 } }],
-    decisions: { requests: 10, reasons: { affinity_hit: 7, new_session: 3 }, key_sources: {}, ideal_skips: {}, hot_migrations: 0, hot_reasons: {}, wait_count: 0, wait_hit: 0, avg_wait_ms: 0, attempts: 10, shadow: 0, shadow_agree: 0, shadow_agree_rate: 0, shadow_reasons: {}, shadow_skipped: 3, rebalance_cleared: 0, dropped: 0 },
-    cache: { requests: 4, classes: {}, class_tokens: { cache_hit: 900, miss_new_session: 100 }, prompt_tokens: 1000, cache_read_tokens: 900, cache_creation_tokens: 0, read_ratio: 0.9, scheduling_miss_ratio: 0, ttft: { affinity_hit: { count: 120, p50_ms: 500, p95_ms: 1000, p99_ms: null }, spill_rebind: { count: 8, p50_ms: 300, p95_ms: 750, p99_ms: 1000 } },
-      selection: {
-        original: { samples: 3, avg_ms: 0.4, io_samples: 0, avg_redis_round_trips: null, avg_redis_ms: null, avg_db_queries: null },
-        share: { samples: 5, avg_ms: 0.62, io_samples: 5, avg_redis_round_trips: 3, avg_redis_ms: 0.25, avg_db_queries: 1 },
-        shadow: { samples: 0, avg_ms: 0, io_samples: 0, avg_redis_round_trips: null, avg_redis_ms: null, avg_db_queries: null }
-      },
-      dropped: 0 }
-  })
-  api.decisions.mockResolvedValue([{ at: '2026-10-10T08:00:00Z', version: 1, scheduler: 'share', key_source: 'key_session', reason: 'affinity_hit', bound: 1, served: 1, attempts: 1, elapsed_us: 30 }])
+  api.updatePolicy.mockImplementation(async (id: number, update: { scheduler: 'sub2api' | 'share'; session_keep: boolean; expected_version: number }) =>
+    shareView(id, { scheduler: update.scheduler, session_keep: update.session_keep, version: update.expected_version + 1, effective: update.scheduler === 'share' }))
 })
 
 describe('share scheduling page', () => {
-  it('lists groups, warns about the master switch and shows the live member state', async () => {
+  it('opens the first group running share scheduling and splits the list', async () => {
     const w = mountView()
-    await openGroup(w)
-    expect(w.get('[data-testid="share-global-off"]').exists()).toBe(true)
-    expect(w.get('[data-testid="share-group-title"]').text()).toBe('group-5')
-    expect(router.replace).toHaveBeenCalledWith({ query: { group: '5' } })
-    expect(w.get('[data-testid="share-row-2"]').text()).toContain('admin.shareScheduling.reasons.rate_limited')
-    expect(w.get('[data-testid="share-active-tier"]').text()).toContain('"tier":1')
-    expect(w.get('[data-testid="share-shares-1"]').text()).toContain('100.0%')
+    await flushPromises()
+    expect(api.getPolicy).toHaveBeenCalledWith(6)
+    expect(w.get('[data-testid="share-group-title"]').text()).toBe('Codex')
+    expect(w.get('[data-testid="share-group-section-active"]').text()).toContain('Codex')
+    expect(w.get('[data-testid="share-group-section-idle"]').text()).toContain('Claude')
+    expect(w.get('[data-testid="share-group-section-idle"]').text()).toContain('Images')
   })
 
-  it('previews before saving and keeps the draft on a version conflict', async () => {
+  it('opens the group named in the link', async () => {
+    router.query = { group: '5' }
     const w = mountView()
-    await openGroup(w)
-    await w.get('[data-testid="share-weight-1"]').setValue('30')
-    await w.get('[data-testid="share-scheduler-share"]').setValue(true)
-    expect(w.get('[data-testid="share-draft-status"]').text()).toBe('admin.shareScheduling.policy.dirty')
-    expect(w.text()).toContain('admin.shareScheduling.groups.draft')
-
-    await w.get('[data-testid="share-preview-save"]').trigger('click')
     await flushPromises()
-    expect(api.preview).toHaveBeenCalledWith(5, expect.objectContaining({ scheduler: 'share', accounts: [{ account_id: 1, tier: 1, weight: 30 }] }))
-    expect(w.get('[data-testid="share-preview-placement"]').text()).toBe('25.0%')
-    expect(w.get('[data-testid="share-preview-warnings"]').text()).toContain('warnings.global_switch_off')
-
-    api.updatePolicy.mockRejectedValue({ status: 409, reason: 'SHARE_SCHEDULING_VERSION_CONFLICT' })
-    api.getPolicy.mockResolvedValueOnce(shareView(5, { version: 4 }))
-    await w.get('[data-testid="share-preview-confirm"]').trigger('click')
-    await flushPromises()
-    expect(api.updatePolicy).toHaveBeenCalledWith(5, 1, expect.anything())
-    expect(w.get('[data-testid="share-conflict"]').text()).toContain('"version":4')
-    expect((w.get('[data-testid="share-weight-1"]').element as HTMLInputElement).value).toBe('30')
-    expect(w.get('[data-testid="share-preview-save"]').attributes('disabled')).toBeDefined()
-
-    api.getPolicy.mockResolvedValueOnce(shareView(5, { version: 4 }))
-    await w.get('[data-testid="share-rebase"]').trigger('click')
-    await flushPromises()
-    expect(w.find('[data-testid="share-conflict"]').exists()).toBe(false)
-    expect((w.get('[data-testid="share-weight-1"]').element as HTMLInputElement).value).toBe('30')
-
-    await w.get('[data-testid="share-preview-save"]').trigger('click')
-    await flushPromises()
-    api.updatePolicy.mockImplementation(async (id: number, _v: number, policy) => shareView(id, { version: 5, scheduler: 'share', policy }))
-    await w.get('[data-testid="share-preview-confirm"]').trigger('click')
-    await flushPromises()
-    expect(api.updatePolicy).toHaveBeenLastCalledWith(5, 4, expect.anything())
-    expect(w.get('[data-testid="share-saved"]').text()).toContain('"version":5')
-    expect(w.get('[data-testid="share-draft-status"]').text()).toBe('admin.shareScheduling.policy.clean')
+    expect(api.getPolicy).toHaveBeenCalledWith(5)
+    expect(w.get('[data-testid="share-group-title"]').text()).toBe('Claude')
   })
 
-  it('blocks invalid drafts locally and edits rows in batches', async () => {
+  it('switches a group to share after confirming the expected shares', async () => {
+    router.query = { group: '5' }
     const w = mountView()
-    await openGroup(w)
-    const boxes = w.findAll('tbody input[type="checkbox"][value]')
-    for (const box of boxes) await box.setValue(true)
-    await w.get('[data-testid="share-batch-weight"]').setValue('0')
-    await w.get('[data-testid="share-batch-apply"]').trigger('click')
-    await w.get('[data-testid="share-preview-save"]').trigger('click')
+    await flushPromises()
+    expect(w.get('[data-testid="share-health-sub2api"]').exists()).toBe(true)
+    await w.get('[data-testid="share-switch"]').trigger('click')
+    await flushPromises()
+    expect(api.preview).toHaveBeenCalledWith(5, { scheduler: 'share', session_keep: true, expected_version: 1 })
+    const dialog = w.get('[data-testid="share-change"]')
+    expect(dialog.text()).toContain('acct-1')
+    expect(dialog.text()).toContain('75.0%')
+    expect(dialog.text()).toContain('admin.shareScheduling.change.others:{"count":1}')
+    expect(w.get('[data-testid="share-change-risk-high_load_factor"]').text()).toContain('"value":"999"')
+    expect(w.get('[data-testid="share-change-risk-health_downweighted"]').text()).toContain('"value":"0.2"')
+    expect(w.get('[data-testid="share-change-risk-health_downweighted"]').classes()).toContain('bg-amber-50')
+    expect(w.get('[data-testid="share-change-risk-ramping"]').text()).toContain('"value":"0.4"')
+    expect(w.get('[data-testid="share-change-risk-ramping"]').classes()).toContain('bg-gray-50')
+    expect(api.updatePolicy).not.toHaveBeenCalled()
+
+    await w.get('[data-testid="share-change-confirm"]').trigger('click')
+    await flushPromises()
+    expect(api.updatePolicy).toHaveBeenCalledWith(5, { scheduler: 'share', session_keep: true, expected_version: 1 })
+    expect(w.find('[data-testid="share-change"]').exists()).toBe(false)
+    expect(w.get('[data-testid="share-mode-current"]').text()).toBe('admin.shareScheduling.schedulers.share')
+  })
+
+  it('goes back to the original scheduler in one confirmation', async () => {
+    const w = mountView()
+    await flushPromises()
+    await w.get('[data-testid="share-rollback"]').trigger('click')
     await flushPromises()
     expect(api.preview).not.toHaveBeenCalled()
-    expect(w.get('[data-testid="share-problems"]').text()).toContain('problems.weightRange')
-  })
-
-  it('moves accounts between tiers by dragging and by tier selection', async () => {
-    const w = mountView()
-    await openGroup(w)
-    expect(w.get('[data-testid="share-tier-card-1"]').text()).toContain('"count":2')
-    expect(w.find('[data-testid="share-tier-card-2"]').exists()).toBe(false)
-
-    // Drag account 2 onto the new-tier card.
-    await w.get('[data-testid="share-drag-2"]').trigger('dragstart')
-    await w.get('[data-testid="share-tier-card-new"]').trigger('drop')
-    expect((w.get('[data-testid="share-tier-2"]').element as HTMLInputElement).value).toBe('2')
-    expect(w.get('[data-testid="share-tier-card-2"]').text()).toContain('"count":1')
-    expect(w.get('[data-testid="share-draft-status"]').text()).toBe('admin.shareScheduling.policy.dirty')
-
-    // Only this tier filters the table; selecting a tier feeds the batch editor.
-    await w.get('[data-testid="share-tier-only-2"]').trigger('click')
-    expect(w.find('[data-testid="share-row-1"]').exists()).toBe(false)
-    await w.get('[data-testid="share-tier-pick-2"]').trigger('click')
-    expect(w.get('[data-testid="share-batch"]').text()).toContain('"count":1')
-
-    // Dragging a selected row moves the whole selection back to tier 1.
-    await w.get('[data-testid="share-tier-only-2"]').trigger('click')
-    await w.get('[data-testid="share-drag-2"]').trigger('dragstart')
-    await w.get('[data-testid="share-tier-card-1"]').trigger('drop')
-    expect((w.get('[data-testid="share-tier-2"]').element as HTMLInputElement).value).toBe('1')
-    expect(w.find('[data-testid="share-tier-card-2"]').exists()).toBe(false)
-  })
-
-  it('asks before leaving with unsaved drafts', async () => {
-    const w = mountView()
-    await openGroup(w)
-    expect(await router.leave[0]({ path: '/admin/accounts' })).toBe(true)
-    await w.get('[data-testid="share-weight-1"]').setValue('30')
-    const leaving = router.leave[0]({ path: '/admin/accounts' }) as Promise<boolean>
+    expect(w.get('[data-testid="share-change"]').text()).toContain('admin.shareScheduling.change.sub2apiBody')
+    await w.get('[data-testid="share-change-confirm"]').trigger('click')
     await flushPromises()
-    await w.get('[data-testid="share-stay"]').trigger('click')
-    expect(await leaving).toBe(false)
+    expect(api.updatePolicy).toHaveBeenCalledWith(6, { scheduler: 'sub2api', session_keep: true, expected_version: 3 })
   })
 
-  it('renders the report and the explanation of a group', async () => {
+  it('asks to reload after another administrator changed the group', async () => {
     const w = mountView()
-    await openGroup(w)
-    await w.get('[data-testid="share-tab-report"]').trigger('click')
     await flushPromises()
-    expect(api.report).toHaveBeenCalledWith(5, '1h')
-    expect(w.get('[data-testid="share-card-cacheRead"]').text()).toBe('90.0%')
-    expect(w.get('[data-testid="share-card-shadowSkipped"]').text()).toBe('3')
-    expect(w.get('[data-testid="share-report-row-1"]').text()).toContain('60.0%')
-    const ttft = w.get('[data-testid="share-ttft"]').findAll('tbody tr').map(row => row.findAll('td').map(cell => cell.text()))
-    expect(ttft[0].slice(2)).toEqual(['≤ 500 ms', '≤ 1.0 s', '> 30 s'])
-    expect(ttft[1].slice(2)).toEqual(['≤ 300 ms', '—', '—'])
-    expect(w.find('[data-testid="share-ttft-min-samples"]').exists()).toBe(true)
-    expect(w.find('[data-testid="share-hour-rounded"]').exists()).toBe(false)
-    const busy = w.get('[data-testid="share-account-1"]').text()
-    expect(busy).toContain('40.0%')
-    expect(busy).toContain('admin.shareScheduling.reasons.saturated 3 · admin.shareScheduling.reasons.session_limit 1')
-    expect(busy).toContain('≤ 500 ms')
-    expect(busy).not.toContain('≤ 2.0 s')
-    expect(w.get('[data-testid="share-account-2"]').text()).toContain('-')
-    expect(w.find('[data-testid="share-account-busy"]').exists()).toBe(true)
-    const selection = w.get('[data-testid="share-selection-cost"]')
-    expect(selection.findAll('tbody tr').map(row => row.attributes('data-testid'))).toEqual(['share-selection-share', 'share-selection-original'])
-    expect(w.get('[data-testid="share-selection-share"]').text()).toContain('0.62 ms')
-    expect(w.get('[data-testid="share-selection-share"]').text()).toContain('3.0')
-    expect(w.get('[data-testid="share-selection-original"]').text()).toContain('—')
-    expect(w.find('[data-testid="share-selection-unmetered"]').exists()).toBe(true)
-    expect(w.get('[data-testid="share-decisions"]').text()).toContain('reasons.affinity_hit')
+    api.updatePolicy.mockRejectedValueOnce({ status: 409, reason: 'SHARE_SCHEDULING_VERSION_CONFLICT' })
+    await w.get('[data-testid="share-session-keep"]').trigger('click')
+    await flushPromises()
+    expect(w.get('[data-testid="share-change"]').text()).toContain('admin.shareScheduling.change.keepOffBody')
+    await w.get('[data-testid="share-change-confirm"]').trigger('click')
+    await flushPromises()
+    expect(api.updatePolicy).toHaveBeenCalledWith(6, { scheduler: 'share', session_keep: false, expected_version: 3 })
+    expect(w.get('[data-testid="share-conflict"]').exists()).toBe(true)
+    api.getPolicy.mockClear()
+    await w.get('[data-testid="share-conflict-reload"]').trigger('click')
+    await flushPromises()
+    expect(api.getPolicy).toHaveBeenCalledWith(6)
+    expect(w.find('[data-testid="share-conflict"]').exists()).toBe(false)
+  })
 
+  it('judges health against the baseline and lists what needs attention', async () => {
+    const w = mountView()
+    await flushPromises()
+    expect(w.find('[data-testid="share-health-level-ok"]').exists()).toBe(true)
+    expect(w.get('[data-testid="share-health-metric-cacheHit"]').text()).toContain('80.0%')
+    expect(w.get('[data-testid="share-health-metric-cacheHit"]').text()).toContain('admin.shareScheduling.health.referenceOnly')
+    const attention = w.get('[data-testid="share-attention"]').text()
+    expect(attention).toContain('admin.shareScheduling.risks.health_downweighted')
+    expect(attention).toContain('"name":"beta"')
+    expect(attention).toContain('"value":"0.2"')
+  })
+
+  it('withholds a verdict while the switch is too recent and says how the switch time was found', async () => {
+    api.report.mockImplementation(async (id: number) => shareReport(id, {
+      current_from: '2026-10-20T08:40:00Z', current_to: '2026-10-20T09:00:00Z', switched_at: '2026-10-20T08:40:00Z', anchor_source: 'policy_updated_at'
+    }))
+    const w = mountView()
+    await flushPromises()
+    expect(w.find('[data-testid="share-health-level-insufficient"]').exists()).toBe(true)
+    expect(w.get('[data-testid="share-health-short"]').text()).toContain('"minutes":20')
+    expect(w.find('[data-testid="share-health-anchor-estimated"]').exists()).toBe(true)
+  })
+
+  it('judges a shortened window once it is long enough and notes how short it is', async () => {
+    api.report.mockImplementation(async (id: number) => shareReport(id, {
+      current_from: '2026-10-20T08:15:00Z', current_to: '2026-10-20T09:00:00Z', switched_at: '2026-10-20T08:15:00Z'
+    }))
+    const w = mountView()
+    await flushPromises()
+    expect(w.find('[data-testid="share-health-level-ok"]').exists()).toBe(true)
+    expect(w.get('[data-testid="share-health-truncated"]').text()).toContain('"minutes":45')
+    expect(w.find('[data-testid="share-health-anchor-estimated"]').exists()).toBe(false)
+  })
+
+  it('shows the traffic split by priority with load factors and other groups', async () => {
+    const w = mountView()
+    await flushPromises()
+    expect(w.get('[data-testid="share-priority-1"]').text()).toContain('admin.shareScheduling.traffic.active')
+    expect(w.get('[data-testid="share-priority-2"]').text()).toContain('admin.shareScheduling.traffic.standby')
+    expect(w.get('[data-testid="share-member-1"]').text()).toContain('75.0%')
+    expect(w.get('[data-testid="share-load-factor-1"]').text()).toContain('"count":2')
+    expect(w.get('[data-testid="share-member-4"]').text()).toContain('admin.shareScheduling.reasons.rate_limited')
+    expect(w.get('[data-testid="share-member-4"]').text()).toContain('admin.shareScheduling.traffic.ifHealthy')
+    expect(w.get('[data-testid="share-member-2"]').text()).toContain('40.0%')
+    // Short headers; the hover hints say the window and which failures count.
+    expect(w.get('[data-testid="share-traffic-actual-header"]').attributes('title')).toBe('admin.shareScheduling.traffic.actualHint')
+    expect(w.get('[data-testid="share-traffic-failure-header"]').attributes('title')).toBe('admin.shareScheduling.traffic.failureHint')
+  })
+
+  it('marks automatic factors next to the expected share with the breakdown', async () => {
+    api.getPolicy.mockImplementation(async (id: number) => shareView(id, {
+      scheduler: 'share',
+      members: [
+        shareMember(1, { name: 'alpha', expected_share: 0.6, base_share: 0.4 }),
+        shareMember(2, {
+          name: 'beta', expected_share: 0.1, base_share: 0.33, health_factor: 0.2, effective_weight: 20, effective_load_factor: 100,
+          health: { window_minutes: 30, attempts: 900, soft_failures: 152, rate: 0.169, tier_baseline_rate: 0.011, insufficient: false }
+        }),
+        shareMember(3, { name: 'gamma', expected_share: 0.3, base_share: 0.27, ramp_factor: 0.4, ramp: { cause: 'balance_pause', since: new Date(Date.now() - 3.5 * 60_000).toISOString(), full_at: new Date(Date.now() + 6.5 * 60_000).toISOString() } }),
+        shareMember(4, { name: 'delta', health_factor: null, health: { window_minutes: 30, attempts: 3, soft_failures: 1, rate: 0.33, tier_baseline_rate: 0.011, insufficient: true } })
+      ]
+    }))
+    const w = mountView()
+    await flushPromises()
+    expect(w.find('[data-testid="share-factors-1"]').exists()).toBe(false)
+    expect(w.get('[data-testid="share-factor-health-2"]').text()).toContain('"value":"0.2"')
+    const detail = w.get('[data-testid="share-factor-detail-2"]').text()
+    expect(detail).toContain('"loadFactor":100')
+    expect(detail).toContain('"weight":"20"')
+    expect(detail).toContain('"share":"10.0%"')
+    expect(detail).toContain('"base":"33.0%"')
+    expect(detail).toContain('"rate":"16.9%"')
+    expect(detail).toContain('"baseline":"1.1%"')
+    expect(w.get('[data-testid="share-factor-ramp-3"]').text()).toContain('"minutes":7')
+    expect(w.get('[data-testid="share-factor-insufficient-4"]').exists()).toBe(true)
+    // A rate from too few samples is shown but greyed out.
+    expect(w.get('[data-testid="share-failure-4"]').classes()).toContain('text-gray-400')
+    expect(w.get('[data-testid="share-failure-2"]').text()).toBe('16.9%')
+    expect(w.get('[data-testid="share-failure-2"]').classes()).toContain('text-red-700')
+    // Ramping accounts are marked in the table only.
+    expect(w.get('[data-testid="share-attention"]').text()).not.toContain('gamma')
+  })
+
+  it('explains an unset load factor on hover and in the empty editor', async () => {
+    const w = mountView()
+    await flushPromises()
+    const hint = 'admin.shareScheduling.loadFactor.fromConcurrency:{"value":10}'
+    expect(w.get('[data-testid="share-load-factor-value-2"]').attributes('title')).toBe(hint)
+    await w.get('[data-testid="share-load-factor-value-2"]').trigger('click')
+    const input = w.get('[data-testid="share-load-factor-input-2"]')
+    expect((input.element as HTMLInputElement).value).toBe('')
+    expect(input.attributes('placeholder')).toBe(hint)
+    // A set load factor keeps the plain edit label.
+    expect(w.get('[data-testid="share-load-factor-value-1"]').attributes('title')).toContain('admin.shareScheduling.loadFactor.edit')
+  })
+
+  it('edits a load factor through the account API and reloads the group', async () => {
+    const w = mountView()
+    await flushPromises()
+    accounts.update.mockResolvedValue({})
+    await w.get('[data-testid="share-load-factor-value-1"]').trigger('click')
+    expect(w.get('[data-testid="share-load-factor-affects-1"]').text()).toContain('Claude、Images')
+    await w.get('[data-testid="share-load-factor-input-1"]').setValue('50')
+    api.getPolicy.mockClear()
+    await w.get('[data-testid="share-load-factor-input-1"]').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(accounts.update).toHaveBeenCalledWith(1, { load_factor: 50 })
+    expect(api.getPolicy).toHaveBeenCalledWith(6)
+  })
+
+  it('clears a load factor with an empty value and rejects out-of-range input', async () => {
+    const w = mountView()
+    await flushPromises()
+    accounts.update.mockResolvedValue({})
+    await w.get('[data-testid="share-load-factor-value-1"]').trigger('click')
+    await w.get('[data-testid="share-load-factor-input-1"]').setValue('')
+    await w.get('[data-testid="share-load-factor-input-1"]').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(accounts.update).toHaveBeenCalledWith(1, { load_factor: 0 })
+
+    accounts.update.mockClear()
+    await w.get('[data-testid="share-load-factor-value-1"]').trigger('click')
+    await w.get('[data-testid="share-load-factor-input-1"]').setValue('20000')
+    await w.get('[data-testid="share-load-factor-input-1"]').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(accounts.update).not.toHaveBeenCalled()
+  })
+
+  it('confirms the main switch before saving it', async () => {
+    const w = mountView()
+    await flushPromises()
+    await w.get('[data-testid="share-global-toggle"]').trigger('click')
+    expect(w.text()).toContain('admin.shareScheduling.global.offTitle')
+    expect(api.updateSettings).not.toHaveBeenCalled()
+    await w.get('[data-testid="share-global-confirm"]').trigger('click')
+    await flushPromises()
+    expect(api.updateSettings).toHaveBeenCalledWith({ enabled: false })
+    expect(w.get('[data-testid="share-not-effective"]').exists()).toBe(true)
+    expect(w.get('[data-testid="share-attention"]').text()).toContain('admin.shareScheduling.risks.global_switch_off')
+  })
+
+  it('simulates a new session from the troubleshooting tools', async () => {
     api.explain.mockResolvedValue({
-      group_id: 5, platform: 'anthropic', scheduler: 'sub2api', version: 1, key_source: 'key_session', session: 'abc', idle_ms: 0,
-      cache_ttl_seconds: 300, estimated_tokens: 2000, cacheable: true, warm: false, wait_budget_ms: 0, reason: 'new_session',
-      steps: [2, 1], write: 'if_absent', spill_write: 'none', target: 2, ideal: 2, active_tier: 1,
-      entries: [{ account_id: 2, tier: 1, weight: 10, effective_weight: 10, configured: false, drain: false, cache_domain: 'account:2', eligible: true, excluded: false, rank: 1 }],
-      resilience: {
-        group_id: 5, enabled: true, healthy_count: 1,
-        accounts: [{ account_id: 1, name: 'acct-1', platform: 'anthropic', priority: 1, tier: 'soft', reason: 'temp_unschedulable', recover_at: '2026-10-15T08:00:00Z', session_failures: 2, avoided: true }],
-        session: { failures: 2, avoided: [1] }
-      }
+      group_id: 6, platform: 'openai', scheduler: 'share', version: 3, simulated_new_session: true, key_source: 'key_none',
+      idle_ms: 0, cache_ttl_seconds: 1800, estimated_tokens: 0, cacheable: false, warm: false, wait_budget_ms: 0,
+      reason: 'new_session', steps: [1, 2], write: 'if_absent', spill_write: 'replace', active_priority: 1,
+      entries: [
+        { account_id: 1, priority: 1, load_factor: 30, health_factor: 1, ramp_factor: 1, effective_weight: 30, eligible: true, excluded: false, rank: 1, load_rate: 20, saturated: false },
+        { account_id: 2, priority: 1, load_factor: 10, health_factor: 0.2, ramp_factor: 0.4, effective_weight: 0.8, eligible: true, excluded: false, rank: 2, load_rate: 100, saturated: true }
+      ]
     })
-    await w.get('[data-testid="share-tab-explain"]').trigger('click')
-    await w.get('[data-testid="share-explain-body"]').setValue('{not json')
-    await w.get('[data-testid="share-explain-run"]').trigger('submit')
-    await flushPromises()
-    expect(api.explain).not.toHaveBeenCalled()
-    expect(w.text()).toContain('explain.bodyInvalid')
-
-    await w.get('[data-testid="share-explain-body"]').setValue('')
-    await w.get('[data-testid="share-explain-model"]').setValue('claude-x')
-    await w.get('[data-testid="share-explain-session"]').setValue('sess')
-    await w.get('form').trigger('submit')
-    await flushPromises()
-    expect(api.explain).toHaveBeenCalledWith(5, { model: 'claude-x', session_hash: 'sess', cache_one_hour: false })
-    expect(w.get('[data-testid="share-explain-steps"]').text()).toContain('1. acct-2 #2')
-    const resilience = w.get('[data-testid="share-explain-resilience"]')
-    expect(resilience.get('[data-testid="resilience-explain-accounts"]').text()).toContain('explain.tiers.soft')
-    expect(resilience.get('[data-testid="resilience-explain-sessionAvoided"]').text()).toBe('acct-1 #1')
-  })
-
-  it('notes hour-rounded counters on long report windows', async () => {
     const w = mountView()
-    await openGroup(w)
-    await w.get('[data-testid="share-tab-report"]').trigger('click')
     await flushPromises()
-    const report = await api.report.mock.results[0].value
-    api.report.mockResolvedValue({ ...report, counter_precision: 'hour_rounded' })
-    w.findAllComponents({ name: 'Select' }).find(c => c.attributes('data-testid') === 'share-report-window')!.vm.$emit('update:modelValue', '24h')
+    await w.get('[data-testid="share-explain-simulate"]').trigger('click')
     await flushPromises()
-    expect(api.report).toHaveBeenLastCalledWith(5, '24h')
-    expect(w.find('[data-testid="share-hour-rounded"]').exists()).toBe(true)
+    expect(api.explain).toHaveBeenCalledWith(6, { model: '' })
+    const summary = w.get('[data-testid="share-explain-summary"]').text()
+    expect(summary).toContain('admin.shareScheduling.explain.summary.random')
+    expect(summary).toContain('"account":"alpha #1"')
+    expect(summary).toContain('"list":"beta #2"')
+    expect(w.get('[data-testid="share-explain-result"]').text()).toContain('admin.shareScheduling.explain.saturated')
+    // Each candidate shows its load factor, both automatic factors and the resulting weight.
+    const row = w.get('[data-testid="share-explain-result"] tbody tr:nth-child(2)').text()
+    expect(row).toContain('×0.2')
+    expect(row).toContain('×0.4')
+    expect(row).toContain('0.8')
   })
 })

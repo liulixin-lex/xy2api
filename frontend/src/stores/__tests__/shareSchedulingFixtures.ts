@@ -1,45 +1,38 @@
-import type { ShareMember, SharePolicy, SharePolicyView } from '@/api/admin/shareScheduling'
-
-export function sharePolicy(overrides: Partial<SharePolicy> = {}): SharePolicy {
-  return {
-    schema: 1,
-    scheduler: 'sub2api',
-    accounts: [],
-    defaults: { tier: 'account_priority', weight: 'concurrency' },
-    affinity: {
-      enabled: true,
-      key: 'auto',
-      ttl_seconds: 3600,
-      wait: { mode: 'auto', ms_per_1k_tokens: 100, max_ms: 15000, max_waiting: 3 },
-      on_spill: 'rebind',
-      soft_spill_max_seconds: 300
-    },
-    cache: { ttl_seconds: 0, realign: 'cold' },
-    tiers: { on_saturated: 'spill', on_failed: 'next_tier', return: 'cold', stable_seconds: 120, return_deadline_seconds: 0 },
-    balance: { unit: 'sessions', correction: 'off', window_minutes: 60, min_volume: 50 },
-    ...overrides
-  }
-}
+import type {
+  ShareGroupSummary,
+  ShareMember,
+  ShareMetrics,
+  SharePolicyView,
+  SharePreview,
+  ShareReport
+} from '@/api/admin/shareScheduling'
 
 export function shareMember(id: number, overrides: Partial<ShareMember> = {}): ShareMember {
   return {
     account_id: id,
     name: `acct-${id}`,
-    platform: 'anthropic',
+    platform: 'openai',
     type: 'oauth',
-    priority: 1,
-    concurrency: 10,
     status: 'active',
     schedulable: true,
     healthy: true,
-    tier: 1,
-    weight: 10,
-    configured: false,
-    drain: false,
-    cache_domain: `account:${id}`,
-    target_share: 0,
-    effective_share: 0,
-    capacity_share: 0,
+    reason: null,
+    recover_at: null,
+    priority: 1,
+    concurrency: 10,
+    load_factor: null,
+    effective_load_factor: 10,
+    health_factor: 1,
+    health: { window_minutes: 30, attempts: 100, soft_failures: 1, rate: 0.01, tier_baseline_rate: 0.01, insufficient: false },
+    ramp_factor: 1,
+    ramp: null,
+    effective_weight: 10,
+    other_group_ids: [],
+    base_share: 0.5,
+    expected_share: 0.5,
+    share_if_healthy: 0.5,
+    actual_requests_1h: 100,
+    actual_share_1h: 0.5,
     ...overrides
   }
 }
@@ -49,13 +42,93 @@ export function shareView(groupId: number, overrides: Partial<SharePolicyView> =
   return {
     group_id: groupId,
     group_name: `group-${groupId}`,
-    platform: 'anthropic',
-    version: 1,
+    platform: 'openai',
     scheduler: 'sub2api',
+    session_keep: true,
+    legacy_shadow: false,
     effective: false,
-    policy: sharePolicy(),
-    active_tier: 1,
+    version: 1,
+    updated_by: null,
+    updated_at: '2026-10-20T08:00:00Z',
+    enabled: true,
+    invalid: null,
+    active_priority: 1,
     ...overrides,
     members
+  }
+}
+
+export function shareGroup(groupId: number, overrides: Partial<ShareGroupSummary> = {}): ShareGroupSummary {
+  return {
+    group_id: groupId,
+    name: `group-${groupId}`,
+    platform: 'openai',
+    scheduler: 'sub2api',
+    session_keep: true,
+    legacy_shadow: false,
+    configured: false,
+    invalid: false,
+    effective: false,
+    version: 0,
+    updated_at: null,
+    member_count: 2,
+    available_count: 2,
+    requests_1h: 0,
+    cache_hit_ratio_1h: null,
+    switch_loss_ratio_1h: null,
+    ...overrides
+  }
+}
+
+export function shareMetrics(overrides: Partial<ShareMetrics> = {}): ShareMetrics {
+  return {
+    requests: 1000,
+    cache_hit_ratio: 0.8,
+    ttft_p50_ms: 4000,
+    ttft_p95_ms: 20000,
+    ttft_samples: 800,
+    errors: 20,
+    error_rate: 0.02,
+    attribution_samples: 250,
+    switch_rate: 0.01,
+    switch_loss_ratio: 0.002,
+    ...overrides
+  }
+}
+
+export function shareReport(groupId: number, overrides: Partial<ShareReport> = {}): ShareReport {
+  return {
+    group_id: groupId,
+    scheduler: 'share',
+    session_keep: true,
+    version: 2,
+    window_seconds: 3600,
+    current_from: '2026-10-20T08:00:00Z',
+    current_to: '2026-10-20T09:00:00Z',
+    current: shareMetrics(),
+    switched_at: '2026-10-20T07:00:00Z',
+    anchor_source: 'switch_record',
+    baseline_from: '2026-10-20T06:00:00Z',
+    baseline_to: '2026-10-20T07:00:00Z',
+    baseline: shareMetrics(),
+    baseline_unavailable: null,
+    accounts: [],
+    details: { cache_classes: { cache_hit: { requests: 200, tokens: 800000 }, miss_new_session: { requests: 50, tokens: 200000 } } },
+    counters_error: null,
+    counter_precision: 'minute',
+    ...overrides
+  }
+}
+
+export function sharePreview(overrides: Partial<SharePreview> = {}): SharePreview {
+  return {
+    scheduler: 'share',
+    session_keep: true,
+    enabled: true,
+    effective_after: true,
+    active_priority: 1,
+    members: [shareMember(1, { expected_share: 0.75 }), shareMember(2, { expected_share: 0.25 }), shareMember(3, { priority: 2, expected_share: 0, share_if_healthy: 0 })],
+    warnings: [],
+    ...overrides
   }
 }

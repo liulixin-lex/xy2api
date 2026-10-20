@@ -3,144 +3,65 @@ import { computed, ref } from 'vue'
 import shareSchedulingAPI from '@/api/admin/shareScheduling'
 import type {
   ShareGroupSummary,
+  ShareGroupUpdate,
   SharePolicyView,
   SharePreview,
-  ShareRebalanceMode,
+  ShareReport,
+  ShareScheduler,
   ShareSchedulingSettings
 } from '@/api/admin/shareScheduling'
-import {
-  cloneShareJSON,
-  draftFingerprint,
-  draftFromView,
-  isShareConflict,
-  isShareUnavailable,
-  policyFromDraft,
-  refreshShareDefaults,
-  sharePolicyProblems,
-  validateShareDraft,
-  type ShareDraft,
-  type ShareDraftRow,
-  type ShareProblem
-} from '@/utils/shareScheduling'
+import { isShareConflict, isShareUnavailable } from '@/utils/shareScheduling'
 import { extractApiErrorMessage } from '@/utils/apiError'
-
-/** One group's loaded policy and the administrator's draft of it. */
-export interface ShareGroupEntry {
-  view: SharePolicyView
-  draft: ShareDraft
-  /** Fingerprint of the loaded policy; the draft is dirty when it differs. */
-  baseline: string
-  /** Version the next save expects (CAS). */
-  version: number
-  /** Set after a 409: the latest version, or 0 when it could not be read. */
-  conflict: number | null
-}
 
 export type ShareLoadState = 'idle' | 'loading' | 'failed' | 'unavailable'
 
-type ShareRowRule = Pick<ShareDraftRow, 'configured' | 'tier' | 'weight' | 'drain' | 'drain_until' | 'cache_domain'>
-
-const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
-const copy = (value: unknown): unknown => (value === undefined ? undefined : cloneShareJSON(value))
-const isRecord = (value: unknown) => value !== null && typeof value === 'object' && !Array.isArray(value)
-
-function rowRule(row: ShareDraftRow): ShareRowRule {
-  return { configured: row.configured, tier: row.tier, weight: row.weight, drain: row.drain, drain_until: row.drain_until, cache_domain: row.cache_domain }
-}
-
-/** Three-way merge: unchanged fields take theirs; a field both changed keeps mine. */
-function mergeField(before: unknown, mine: unknown, theirs: unknown): unknown {
-  if (equal(mine, before)) return copy(theirs)
-  if ([before, mine, theirs].every(isRecord)) {
-    const b = before as Record<string, unknown>, m = mine as Record<string, unknown>, t = theirs as Record<string, unknown>
-    return Object.fromEntries([...new Set([...Object.keys(b), ...Object.keys(m), ...Object.keys(t)])]
-      .map(key => [key, mergeField(b[key], m[key], t[key])]))
-  }
-  return copy(mine)
+/** A pending change of the selected group, waiting for the administrator to confirm it. */
+export interface SharePendingChange {
+  groupId: number
+  update: ShareGroupUpdate
+  preview: SharePreview | null
+  previewError: string
+  /** The main switch is off and turning the group to share turns it on too. */
+  enableGlobal: boolean
 }
 
 /**
- * Reapplies the administrator's own edits (draft versus the version it was
- * based on) onto a freshly loaded policy, field by field. Fields the draft
- * did not change take the latest values, so another administrator's edits
- * survive; a field both changed keeps the draft's value, and the preview
- * shows the result before it is saved.
+ * Share scheduling page state. A group has two settings, the scheduler and
+ * session keeping; each change is confirmed and saved at once, so there is
+ * no draft. Saves carry the loaded version and stop on a conflict.
  */
-export function rebaseShareDraft(latest: SharePolicyView, edited: ShareDraft, base: ShareDraft): ShareDraft {
-  const draft = draftFromView(latest)
-  const { accounts: _base, ...basePolicy } = base.policy
-  const { accounts: _mine, ...minePolicy } = edited.policy
-  const { accounts: _latest, ...latestPolicy } = draft.policy
-  Object.assign(draft.policy, mergeField(basePolicy, minePolicy, latestPolicy))
-  const baseRows = new Map(base.rows.map(row => [row.account_id, row]))
-  const editedRows = new Map(edited.rows.map(row => [row.account_id, row]))
-  for (const row of draft.rows) {
-    const own = editedRows.get(row.account_id), before = baseRows.get(row.account_id)
-    if (!own || !before || equal(rowRule(own), rowRule(before))) continue
-    // An edited row keeps its explicit or default choice, so a concurrent
-    // reset cannot silently drop the edit.
-    Object.assign(row, mergeField(rowRule(before), rowRule(own), rowRule(row)), { configured: own.configured })
-  }
-  refreshShareDefaults(draft)
-  return draft
-}
-
 export const useShareSchedulingStore = defineStore('shareScheduling', () => {
   const settings = ref<ShareSchedulingSettings | null>(null)
   const settingsFailed = ref(false)
   const groups = ref<ShareGroupSummary[]>([])
   const groupsState = ref<ShareLoadState>('idle')
   const selected = ref<number | null>(null)
-  const entries = ref<Record<number, ShareGroupEntry>>({})
+  const view = ref<SharePolicyView | null>(null)
   const policyState = ref<ShareLoadState>('idle')
   const policyError = ref('')
+  const pending = ref<SharePendingChange | null>(null)
   const previewing = ref(false)
   const saving = ref(false)
-  const preview = ref<SharePreview | null>(null)
-  const previewFingerprint = ref('')
-  const problems = ref<ShareProblem[]>([])
-  const serverProblems = ref<string[]>([])
   const actionError = ref('')
-  const savedVersion = ref<number | null>(null)
-  const rebasedVersion = ref<number | null>(null)
+  const conflict = ref(false)
+  const report = ref<ShareReport | null>(null)
+  const reportWindow = ref('1h')
+  const reportState = ref<ShareLoadState>('idle')
+  const reportError = ref('')
   let policyRequest = 0
+  let reportRequest = 0
   let actionEpoch = 0
-  let previewContext: { groupId: number; version: number; fingerprint: string; epoch: number } | null = null
-  function invalidateActions() {
+
+  const groupNames = computed(() => new Map(groups.value.map(g => [g.group_id, g.name])))
+  const activeGroups = computed(() => groups.value.filter(g => g.scheduler === 'share'))
+  const idleGroups = computed(() => groups.value.filter(g => g.scheduler !== 'share'))
+
+  function resetAction() {
     actionEpoch++
-    preview.value = null
-    previewContext = null
-    previewFingerprint.value = ''
+    pending.value = null
     previewing.value = false
     saving.value = false
-  }
-  function owns(epoch: number, groupId: number, entry: ShareGroupEntry) {
-    return epoch === actionEpoch && selected.value === groupId && current.value === entry
-  }
-
-  const current = computed(() => (selected.value === null ? null : entries.value[selected.value] ?? null))
-  const isDirty = (entry: ShareGroupEntry | null | undefined) => Boolean(entry && draftFingerprint(entry.draft) !== entry.baseline)
-  const dirty = computed(() => isDirty(current.value))
-  const draftGroups = computed(() => new Set(Object.entries(entries.value).filter(([, entry]) => isDirty(entry)).map(([id]) => Number(id))))
-  const anyDirty = computed(() => draftGroups.value.size > 0)
-
-  function clearFeedback() {
-    problems.value = []
-    serverProblems.value = []
     actionError.value = ''
-    savedVersion.value = null
-    rebasedVersion.value = null
-  }
-
-  function accept(view: SharePolicyView): ShareGroupEntry {
-    const draft = draftFromView(view)
-    const entry: ShareGroupEntry = { view, draft, baseline: draftFingerprint(draft), version: view.version, conflict: null }
-    entries.value[view.group_id] = entry
-    const summary = groups.value.find(group => group.group_id === view.group_id)
-    if (summary) {
-      Object.assign(summary, { scheduler: view.scheduler, version: view.version, configured: view.version > 0, effective: view.effective, invalid: Boolean(view.invalid) })
-    }
-    return entry
   }
 
   async function loadSettings() {
@@ -162,14 +83,21 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
     }
   }
 
+  function syncSummary(next: SharePolicyView) {
+    const summary = groups.value.find(group => group.group_id === next.group_id)
+    if (summary) Object.assign(summary, { scheduler: next.scheduler, session_keep: next.session_keep, version: next.version, configured: next.version > 0, effective: next.effective })
+  }
+
   async function loadPolicy(groupId: number) {
     const request = ++policyRequest
     policyState.value = 'loading'
     policyError.value = ''
     try {
-      const view = await shareSchedulingAPI.getPolicy(groupId)
+      const next = await shareSchedulingAPI.getPolicy(groupId)
       if (request !== policyRequest || selected.value !== groupId) return
-      accept(view)
+      view.value = next
+      conflict.value = false
+      syncSummary(next)
       policyState.value = 'idle'
     } catch (err) {
       if (request !== policyRequest || selected.value !== groupId) return
@@ -178,118 +106,109 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
     }
   }
 
-  /** Selects a group; a kept draft is shown as is instead of reloading. */
-  async function select(groupId: number) {
-    policyRequest++
-    invalidateActions()
-    selected.value = groupId
-    clearFeedback()
-    if (entries.value[groupId]) {
-      policyState.value = 'idle'
-      return
+  async function loadReport() {
+    const groupId = selected.value
+    if (groupId === null) return
+    const request = ++reportRequest
+    reportState.value = 'loading'
+    reportError.value = ''
+    try {
+      const next = await shareSchedulingAPI.report(groupId, reportWindow.value)
+      if (request !== reportRequest || selected.value !== groupId) return
+      report.value = next
+      reportState.value = 'idle'
+    } catch (err) {
+      if (request !== reportRequest || selected.value !== groupId) return
+      reportState.value = isShareUnavailable(err) ? 'unavailable' : 'failed'
+      reportError.value = extractApiErrorMessage(err, '')
     }
-    await loadPolicy(groupId)
   }
 
-  /** Reloads the selected group, discarding its draft. */
+  async function select(groupId: number) {
+    if (selected.value === groupId && view.value?.group_id === groupId) return
+    resetAction()
+    selected.value = groupId
+    view.value = null
+    report.value = null
+    conflict.value = false
+    await Promise.all([loadPolicy(groupId), loadReport()])
+  }
+
+  /** Reloads the selected group after a conflict or an account change. */
   async function reload() {
     if (selected.value === null) return
-    invalidateActions()
-    clearFeedback()
-    await loadPolicy(selected.value)
+    resetAction()
+    await Promise.all([loadPolicy(selected.value), loadReport()])
   }
 
-  function discard() {
-    const entry = current.value
-    if (!entry) return
-    entry.draft = draftFromView(entry.view)
-    entry.conflict = null
-    invalidateActions()
-    clearFeedback()
+  async function setReportWindow(window: string) {
+    reportWindow.value = window
+    await loadReport()
   }
 
-  /** After a conflict, loads the latest version and reapplies the draft. */
-  async function rebase() {
-    const entry = current.value
-    if (!entry || selected.value === null) return
-    invalidateActions()
-    const groupId = selected.value, epoch = actionEpoch
-    const edited = cloneShareJSON(entry.draft), fingerprint = draftFingerprint(entry.draft)
-    actionError.value = ''
-    try {
-      const latest = await shareSchedulingAPI.getPolicy(groupId)
-      if (!owns(epoch, groupId, entry) || draftFingerprint(entry.draft) !== fingerprint) return
-      const draft = rebaseShareDraft(latest, edited, draftFromView(entry.view))
-      accept(latest).draft = draft
-      clearFeedback()
-      rebasedVersion.value = latest.version
-    } catch (err) {
-      if (owns(epoch, groupId, entry)) actionError.value = extractApiErrorMessage(err, '')
+  /**
+   * Asks the server what a change would do and holds it for confirmation.
+   * Switching to share while the main switch is off turns the switch on in
+   * the same confirmation.
+   */
+  async function requestChange(change: { scheduler?: ShareScheduler; session_keep?: boolean }) {
+    const current = view.value
+    if (!current || selected.value === null || saving.value) return
+    resetAction()
+    const epoch = actionEpoch
+    const groupId = selected.value
+    const update: ShareGroupUpdate = {
+      scheduler: change.scheduler ?? current.scheduler,
+      session_keep: change.session_keep ?? current.session_keep,
+      expected_version: current.version
     }
-  }
-
-  /** Validates the draft and asks the server for its preview. */
-  async function requestPreview(): Promise<boolean> {
-    const entry = current.value
-    if (!entry || selected.value === null || previewing.value || saving.value) return false
-    clearFeedback()
-    problems.value = validateShareDraft(entry.draft)
-    if (problems.value.length) return false
-    invalidateActions()
+    const globalOn = settings.value?.enabled ?? current.enabled
+    pending.value = { groupId, update, preview: null, previewError: '', enableGlobal: update.scheduler === 'share' && !globalOn }
+    if (update.scheduler !== 'share') return
     previewing.value = true
-    const groupId = selected.value, epoch = actionEpoch, version = entry.version
-    const fingerprint = draftFingerprint(entry.draft)
     try {
-      const result = await shareSchedulingAPI.preview(groupId, policyFromDraft(entry.draft))
-      if (!owns(epoch, groupId, entry) || entry.version !== version || draftFingerprint(entry.draft) !== fingerprint) return false
-      preview.value = result
-      previewFingerprint.value = fingerprint
-      previewContext = { groupId, version, fingerprint, epoch }
-      return true
+      const preview = await shareSchedulingAPI.preview(groupId, update)
+      if (epoch === actionEpoch && pending.value) {
+        pending.value.preview = preview
+        pending.value.enableGlobal = !preview.enabled
+      }
     } catch (err) {
-      if (!owns(epoch, groupId, entry)) return false
-      serverProblems.value = sharePolicyProblems(err)
-      if (!serverProblems.value.length) actionError.value = extractApiErrorMessage(err, '')
-      return false
+      if (epoch === actionEpoch && pending.value) pending.value.previewError = extractApiErrorMessage(err, '')
     } finally {
       if (epoch === actionEpoch) previewing.value = false
     }
   }
 
-  /** Saves the previewed draft with the expected version. */
-  async function save(): Promise<boolean> {
-    const entry = current.value
-    if (!entry || selected.value === null || saving.value) return false
-    const groupId = selected.value, epoch = actionEpoch
-    const fingerprint = draftFingerprint(entry.draft)
-    if (!preview.value || !previewContext || previewContext.groupId !== groupId ||
-        previewContext.version !== entry.version || previewContext.epoch !== epoch || previewFingerprint.value !== fingerprint) return false
-    const submitted = cloneShareJSON(entry.draft)
+  function cancelChange() {
+    resetAction()
+  }
+
+  /** Saves the confirmed change. Returns false on a conflict or an error. */
+  async function confirmChange(): Promise<boolean> {
+    const change = pending.value
+    if (!change || saving.value || selected.value !== change.groupId) return false
+    const epoch = actionEpoch
     saving.value = true
     actionError.value = ''
     try {
-      const view = await shareSchedulingAPI.updatePolicy(groupId, entry.version, policyFromDraft(submitted))
-      if (!owns(epoch, groupId, entry)) return false
-      const edited = cloneShareJSON(entry.draft)
-      const next = accept(view)
-      // Edits made while the save was in flight stay as a draft on top of it.
-      if (draftFingerprint(edited) !== fingerprint) next.draft = rebaseShareDraft(view, edited, submitted)
-      invalidateActions()
-      savedVersion.value = view.version
+      if (change.enableGlobal) {
+        const saved = await shareSchedulingAPI.updateSettings({ enabled: true })
+        setGlobalEnabled(saved?.enabled ?? true)
+      }
+      const next = await shareSchedulingAPI.updatePolicy(change.groupId, change.update)
+      if (epoch !== actionEpoch || selected.value !== change.groupId) return false
+      view.value = next
+      syncSummary(next)
+      pending.value = null
+      void loadReport()
       return true
     } catch (err) {
-      if (!owns(epoch, groupId, entry)) return false
-      preview.value = null
-      previewContext = null
+      if (epoch !== actionEpoch) return false
       if (isShareConflict(err)) {
-        entry.conflict = 0
-        try {
-          const latest = await shareSchedulingAPI.getPolicy(groupId)
-          if (owns(epoch, groupId, entry)) entry.conflict = latest.version
-        } catch { /* Draft and unknown conflict version are retained. */ }
+        conflict.value = true
+        pending.value = null
       } else {
-        serverProblems.value = sharePolicyProblems(err)
-        if (!serverProblems.value.length) actionError.value = extractApiErrorMessage(err, '')
+        actionError.value = extractApiErrorMessage(err, '')
       }
       return false
     } finally {
@@ -297,25 +216,23 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
     }
   }
 
-  function closePreview() {
-    invalidateActions()
+  function setGlobalEnabled(enabled: boolean) {
+    settings.value = { ...(settings.value ?? { enabled }), enabled }
+    for (const group of groups.value) group.effective = enabled && group.scheduler === 'share'
+    if (view.value) view.value = { ...view.value, enabled, effective: enabled && view.value.scheduler === 'share' }
   }
 
-  /** Forgets every loaded policy and draft (the page was left). */
+  /** Forgets everything loaded for the page (the page was left). */
   function clear() {
     policyRequest++
-    invalidateActions()
+    reportRequest++
+    resetAction()
     selected.value = null
-    entries.value = {}
+    view.value = null
+    report.value = null
     policyState.value = 'idle'
-    preview.value = null
-    clearFeedback()
-  }
-
-  async function rebalance(mode: ShareRebalanceMode): Promise<number> {
-    if (selected.value === null) throw new Error('no group selected')
-    const result = await shareSchedulingAPI.rebalance(selected.value, mode)
-    return result.cleared
+    reportState.value = 'idle'
+    conflict.value = false
   }
 
   return {
@@ -324,31 +241,31 @@ export const useShareSchedulingStore = defineStore('shareScheduling', () => {
     groups,
     groupsState,
     selected,
-    entries,
+    view,
     policyState,
     policyError,
+    pending,
     previewing,
     saving,
-    preview,
-    problems,
-    serverProblems,
     actionError,
-    savedVersion,
-    rebasedVersion,
-    current,
-    dirty,
-    draftGroups,
-    anyDirty,
+    conflict,
+    report,
+    reportWindow,
+    reportState,
+    reportError,
+    groupNames,
+    activeGroups,
+    idleGroups,
     loadSettings,
     loadGroups,
     select,
     reload,
-    discard,
-    rebase,
-    requestPreview,
-    save,
-    closePreview,
-    clear,
-    rebalance
+    loadReport,
+    setReportWindow,
+    requestChange,
+    cancelChange,
+    confirmChange,
+    setGlobalEnabled,
+    clear
   }
 })
