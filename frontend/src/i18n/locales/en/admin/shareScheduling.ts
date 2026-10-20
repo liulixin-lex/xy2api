@@ -103,8 +103,7 @@ export default {
       top_priority_unhealthy: 'Priority {priority} has no available account; new sessions go to priority {value}.',
       single_account_dominant: '{name} is expected to take {value} of new sessions; traffic is too concentrated.',
       high_load_factor: '{name} has load factor {value} and takes most new sessions of its priority whenever available.',
-      high_failure: '{name} failed {value} of requests in the last hour (all groups); lower its load factor or disable it.',
-      unknown: '{code}'
+      high_failure: '{name} failed {value} of requests in the last hour (all groups); lower its load factor or disable it.'
     },
     health: {
       title: 'Health',
@@ -148,6 +147,7 @@ export default {
       noBaseline: 'no baseline',
       calibrating: 'Thresholds are initial values, pending calibration on production data.',
       loadFailed: 'Failed to load the health data.',
+      anchorEstimated: 'The switch time is estimated from the policy update time.',
       hourRounded: 'The baseline and windows over 2 hours are summed by whole hours and may differ from the exact window by up to 30 minutes.',
       countersError: 'Some counters failed to load: {error}'
     },
@@ -167,10 +167,10 @@ export default {
         status: 'Status',
         loadFactor: 'Load factor',
         expected: 'Expected new sessions',
-        actual: 'Last hour actual',
-        failure: 'Last hour failures'
+        actual: 'Actual share',
+        failure: 'Failure rate'
       },
-      failureHint: 'Failure rate of the account in every group over the last hour.',
+      recentHint: 'Last hour; the failure rate counts the account’s requests in every group',
       ifHealthy: '{value} when back',
       healthy: 'Schedulable',
       recoverAt: 'Back at {time}',
@@ -179,7 +179,7 @@ export default {
     },
     loadFactor: {
       edit: 'Edit the load factor of {name}',
-      fromConcurrency: 'Unset, uses concurrency {value}',
+      fromConcurrency: 'Unset; counts as the concurrency limit {value}',
       alsoAffects: 'Also affects: {groups}',
       otherGroups: '+{count} groups',
       clearHint: 'Leave empty to clear and use concurrency',
@@ -264,11 +264,9 @@ export default {
       key_continuation: 'Protocol continuation',
       key_session: 'Session ID',
       key_anchor: 'Conversation anchor',
-      key_prefix: 'Prompt prefix',
       key_none: 'No session'
     },
     reasons: {
-      original: 'Original scheduler',
       owner_continuation: 'Protocol continuation',
       affinity_hit: 'Session kept',
       affinity_wait: 'Kept after waiting',

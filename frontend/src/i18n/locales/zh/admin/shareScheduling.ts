@@ -103,8 +103,7 @@ export default {
       top_priority_unhealthy: '优先级 {priority} 没有可用账号，新会话会进入优先级 {value}。',
       single_account_dominant: '{name} 预计分到 {value} 的新会话，流量过于集中。',
       high_load_factor: '{name} 的负载因子为 {value}，可用时会拿到同一优先级的绝大多数新会话。',
-      high_failure: '{name} 近 1 小时失败率 {value}（全部分组），建议调低负载因子或停用。',
-      unknown: '{code}'
+      high_failure: '{name} 近 1 小时失败率 {value}（全部分组），建议调低负载因子或停用。'
     },
     health: {
       title: '运行状况',
@@ -148,6 +147,7 @@ export default {
       noBaseline: '无基线',
       calibrating: '判定阈值为初始值，待生产数据校准。',
       loadFailed: '运行数据读取失败。',
+      anchorEstimated: '切换时间按策略更新时间估算。',
       hourRounded: '基线与超过 2 小时的窗口按整点小时汇总，与精确时间窗口最多相差 30 分钟。',
       countersError: '部分计数读取失败：{error}'
     },
@@ -167,10 +167,10 @@ export default {
         status: '状态',
         loadFactor: '负载因子',
         expected: '预计新会话份额',
-        actual: '近 1 小时实际',
-        failure: '近 1 小时失败率'
+        actual: '实际份额',
+        failure: '失败率'
       },
-      failureHint: '该账号近 1 小时在全部分组的失败率。',
+      recentHint: '近 1 小时，失败率按该账号在全部分组的请求计算',
       ifHealthy: '恢复后 {value}',
       healthy: '可调度',
       recoverAt: '预计 {time} 恢复',
@@ -179,7 +179,7 @@ export default {
     },
     loadFactor: {
       edit: '修改 {name} 的负载因子',
-      fromConcurrency: '未设置，按并发 {value}',
+      fromConcurrency: '未设置，按并发上限 {value} 计',
       alsoAffects: '同时影响：{groups}',
       otherGroups: '+{count} 组',
       clearHint: '留空表示清除，改按并发',
@@ -264,11 +264,9 @@ export default {
       key_continuation: '协议续接',
       key_session: '会话标识',
       key_anchor: '对话锚点',
-      key_prefix: '提示前缀',
       key_none: '无会话'
     },
     reasons: {
-      original: '原版调度',
       owner_continuation: '协议续接',
       affinity_hit: '会话保持命中',
       affinity_wait: '等待后命中',

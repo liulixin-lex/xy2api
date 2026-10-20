@@ -7,8 +7,9 @@
         v-model="input"
         type="text"
         inputmode="numeric"
-        class="input h-8 w-20 px-2 py-0 text-sm tabular-nums"
-        :placeholder="String(member.concurrency || 1)"
+        class="input h-8 px-2 py-0 text-sm tabular-nums"
+        :class="member.load_factor === null ? 'w-48' : 'w-20'"
+        :placeholder="member.load_factor === null ? unsetHint : ''"
         :aria-label="t('admin.shareScheduling.loadFactor.edit', { name: member.name })"
         :data-testid="'share-load-factor-input-' + member.account_id"
         @keydown.enter.prevent="commit"
@@ -20,7 +21,7 @@
         type="button"
         class="inline-flex h-8 min-w-[3rem] items-center justify-center rounded-lg border border-transparent px-2 text-sm tabular-nums transition-colors hover:border-gray-200 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:border-dark-600 dark:hover:bg-dark-700/60"
         :class="member.load_factor === null ? 'text-gray-400 dark:text-dark-400' : 'font-medium text-gray-900 dark:text-white'"
-        :title="member.load_factor === null ? t('admin.shareScheduling.loadFactor.fromConcurrency', { value: member.effective_load_factor }) : t('admin.shareScheduling.loadFactor.edit', { name: member.name })"
+        :title="member.load_factor === null ? unsetHint : t('admin.shareScheduling.loadFactor.edit', { name: member.name })"
         :aria-label="t('admin.shareScheduling.loadFactor.edit', { name: member.name })"
         :disabled="saving"
         :data-testid="'share-load-factor-value-' + member.account_id"
@@ -42,7 +43,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { update as updateAccount } from '@/api/admin/accounts'
 import type { ShareMember } from '@/api/admin/shareScheduling'
@@ -64,6 +65,8 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+/** An unset load factor counts as the concurrency limit (the effective value). */
+const unsetHint = computed(() => t('admin.shareScheduling.loadFactor.fromConcurrency', { value: props.member.effective_load_factor }))
 const editing = ref(false)
 const saving = ref(false)
 const input = ref('')

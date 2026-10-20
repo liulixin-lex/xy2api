@@ -244,19 +244,26 @@ export interface ShareReportDetails {
   share_requests?: number | null
 }
 
+/** Where the switch time comes from: the switch record, or the policy's updated_at when the record is missing. */
+export type ShareAnchorSource = 'switch_record' | 'policy_updated_at'
+
 export interface ShareReport {
   group_id: number
   scheduler: ShareScheduler
   session_keep: boolean
   version: number
-  from: string
-  to: string
   window_seconds: number
+  /** The current window; it starts at the switch when the switch falls inside the asked-for window. */
+  current_from: string
+  current_to: string
   current: ShareMetrics
-  /** The same length window before the latest scheduler change; share mode only. */
-  baseline: ShareMetrics | null
+  /** The latest scheduler change (sub2api ↔ share). */
+  switched_at: string | null
+  anchor_source: ShareAnchorSource | null
+  /** The same length window before the switch; share mode only. */
   baseline_from: string | null
   baseline_to: string | null
+  baseline: ShareMetrics | null
   baseline_unavailable: ShareBaselineUnavailable | null
   accounts: ShareReportAccount[]
   details: ShareReportDetails

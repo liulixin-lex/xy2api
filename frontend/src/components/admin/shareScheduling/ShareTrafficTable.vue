@@ -17,8 +17,8 @@
             <th class="p-2">{{ t('admin.shareScheduling.traffic.columns.status') }}</th>
             <th class="p-2">{{ t('admin.shareScheduling.traffic.columns.loadFactor') }}</th>
             <th class="w-[28%] p-2">{{ t('admin.shareScheduling.traffic.columns.expected') }}</th>
-            <th class="p-2 text-right">{{ t('admin.shareScheduling.traffic.columns.actual') }}</th>
-            <th class="p-2 text-right" :title="t('admin.shareScheduling.traffic.failureHint')">{{ t('admin.shareScheduling.traffic.columns.failure') }}</th>
+            <th class="whitespace-nowrap p-2 text-right"><span class="cursor-help underline decoration-dotted underline-offset-2" :title="t('admin.shareScheduling.traffic.recentHint')" data-testid="share-traffic-actual-header">{{ t('admin.shareScheduling.traffic.columns.actual') }}</span></th>
+            <th class="whitespace-nowrap p-2 text-right"><span class="cursor-help underline decoration-dotted underline-offset-2" :title="t('admin.shareScheduling.traffic.recentHint')" data-testid="share-traffic-failure-header">{{ t('admin.shareScheduling.traffic.columns.failure') }}</span></th>
           </tr>
         </thead>
         <tbody v-for="section in sections" :key="section.priority" :data-testid="'share-priority-' + section.priority">

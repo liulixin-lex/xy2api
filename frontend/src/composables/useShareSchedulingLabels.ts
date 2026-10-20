@@ -24,7 +24,7 @@ export function useShareSchedulingLabels() {
   }
   const risk = (item: ShareRiskLike): string => {
     const key = `admin.shareScheduling.risks.${item.code}`
-    if (typeof te === 'function' && !te(key)) return t('admin.shareScheduling.risks.unknown', { code: item.code })
+    if (typeof te === 'function' && !te(key)) return item.code
     const name = item.name || (item.account_id !== undefined && item.account_id !== null ? `#${item.account_id}` : '')
     const value = item.value === undefined || item.value === null ? '' : PERCENT_VALUE.has(item.code) ? formatSharePercent(item.value) : String(item.value)
     return t(key, { name, value, priority: item.priority ?? '' })

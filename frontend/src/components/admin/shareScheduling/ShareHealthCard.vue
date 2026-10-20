@@ -61,6 +61,7 @@
 
       <p class="mt-3 text-xs text-gray-500 dark:text-dark-400">
         <template v-if="scheduler === 'share' && report.baseline && report.baseline_from && report.baseline_to">{{ t('admin.shareScheduling.health.baseline', { from: formatDateTimeToMinute(report.baseline_from), to: formatDateTimeToMinute(report.baseline_to) }) }} · </template>
+        <template v-if="scheduler === 'share' && report.anchor_source === 'policy_updated_at'"><span data-testid="share-health-anchor-estimated">{{ t('admin.shareScheduling.health.anchorEstimated') }}</span> · </template>
         <template v-if="report.counter_precision === 'hour_rounded'">{{ t('admin.shareScheduling.health.hourRounded') }} · </template>
         {{ t('admin.shareScheduling.health.calibrating') }}
       </p>
@@ -93,7 +94,7 @@ const scheduler = computed(() => store.view?.scheduler ?? report.value?.schedule
 const currentMinutes = computed(() => {
   const r = report.value
   if (!r) return 0
-  const ms = Date.parse(r.to) - Date.parse(r.from)
+  const ms = Date.parse(r.current_to) - Date.parse(r.current_from)
   return Number.isFinite(ms) ? Math.max(Math.floor(ms / 60_000), 0) : 0
 })
 /** The window is shorter than asked for because the group switched within it. */

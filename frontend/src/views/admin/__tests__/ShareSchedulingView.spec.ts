@@ -162,6 +162,28 @@ describe('share scheduling page', () => {
     expect(attention).toContain('"name":"beta"')
   })
 
+  it('withholds a verdict while the switch is too recent and says how the switch time was found', async () => {
+    api.report.mockImplementation(async (id: number) => shareReport(id, {
+      current_from: '2026-10-20T08:40:00Z', current_to: '2026-10-20T09:00:00Z', switched_at: '2026-10-20T08:40:00Z', anchor_source: 'policy_updated_at'
+    }))
+    const w = mountView()
+    await flushPromises()
+    expect(w.find('[data-testid="share-health-level-insufficient"]').exists()).toBe(true)
+    expect(w.get('[data-testid="share-health-short"]').text()).toContain('"minutes":20')
+    expect(w.find('[data-testid="share-health-anchor-estimated"]').exists()).toBe(true)
+  })
+
+  it('judges a shortened window once it is long enough and notes how short it is', async () => {
+    api.report.mockImplementation(async (id: number) => shareReport(id, {
+      current_from: '2026-10-20T08:15:00Z', current_to: '2026-10-20T09:00:00Z', switched_at: '2026-10-20T08:15:00Z'
+    }))
+    const w = mountView()
+    await flushPromises()
+    expect(w.find('[data-testid="share-health-level-ok"]').exists()).toBe(true)
+    expect(w.get('[data-testid="share-health-truncated"]').text()).toContain('"minutes":45')
+    expect(w.find('[data-testid="share-health-anchor-estimated"]').exists()).toBe(false)
+  })
+
   it('shows the traffic split by priority with load factors and other groups', async () => {
     const w = mountView()
     await flushPromises()
@@ -172,6 +194,22 @@ describe('share scheduling page', () => {
     expect(w.get('[data-testid="share-member-4"]').text()).toContain('admin.shareScheduling.reasons.rate_limited')
     expect(w.get('[data-testid="share-member-4"]').text()).toContain('admin.shareScheduling.traffic.ifHealthy')
     expect(w.get('[data-testid="share-member-2"]').text()).toContain('40.0%')
+    // Short headers; the hover hint says the window and where the failure rate comes from.
+    expect(w.get('[data-testid="share-traffic-actual-header"]').attributes('title')).toBe('admin.shareScheduling.traffic.recentHint')
+    expect(w.get('[data-testid="share-traffic-failure-header"]').attributes('title')).toBe('admin.shareScheduling.traffic.recentHint')
+  })
+
+  it('explains an unset load factor on hover and in the empty editor', async () => {
+    const w = mountView()
+    await flushPromises()
+    const hint = 'admin.shareScheduling.loadFactor.fromConcurrency:{"value":10}'
+    expect(w.get('[data-testid="share-load-factor-value-2"]').attributes('title')).toBe(hint)
+    await w.get('[data-testid="share-load-factor-value-2"]').trigger('click')
+    const input = w.get('[data-testid="share-load-factor-input-2"]')
+    expect((input.element as HTMLInputElement).value).toBe('')
+    expect(input.attributes('placeholder')).toBe(hint)
+    // A set load factor keeps the plain edit label.
+    expect(w.get('[data-testid="share-load-factor-value-1"]').attributes('title')).toContain('admin.shareScheduling.loadFactor.edit')
   })
 
   it('edits a load factor through the account API and reloads the group', async () => {
