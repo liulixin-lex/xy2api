@@ -108,6 +108,8 @@ type shareAdminStore struct {
 	counters  map[ShareSchedulingCounter]int64
 	published []int64
 	switched  map[int64]time.Time
+	// exactReads records the exact flag of every counter read.
+	exactReads []bool
 }
 
 func (m *shareAdminStore) PublishChange(_ context.Context, groupID int64) error {
@@ -129,7 +131,10 @@ func (m *shareAdminStore) WriteStats(_ context.Context, batch ShareSchedulingSta
 	return nil
 }
 
-func (m *shareAdminStore) ReadCounters(_ context.Context, kind string, groupID int64, from, to time.Time) (map[string]int64, error) {
+func (m *shareAdminStore) ReadCounters(_ context.Context, kind string, groupID int64, from, to time.Time, exact bool) (map[string]int64, error) {
+	m.mu.Lock()
+	m.exactReads = append(m.exactReads, exact)
+	m.mu.Unlock()
 	return m.sum(kind, groupID, from.Unix()/60, to.Unix()/60+1), nil
 }
 
@@ -726,8 +731,10 @@ func TestShareAdminReportComparesWithTheWindowBeforeTheSwitch(t *testing.T) {
 		return metrics(from, to)
 	}
 
+	env.store.exactReads = nil
 	report, err := env.share.Report(context.Background(), shareTestGroupID, time.Hour)
 	require.NoError(t, err)
+	require.Equal(t, []bool{true, true}, env.store.exactReads, "both counter kinds are read from the switch on, nothing before it")
 	require.Equal(t, "share", report.Scheduler)
 	require.Equal(t, ShareAnchorSwitchRecord, *report.AnchorSource)
 	require.True(t, report.SwitchedAt.Equal(anchor))
@@ -744,15 +751,27 @@ func TestShareAdminReportComparesWithTheWindowBeforeTheSwitch(t *testing.T) {
 	require.Equal(t, int64(6), report.Details.Reasons[string(sharesched.ReasonSessionless)])
 	require.Positive(t, report.Accounts[0].Skipped[string(sharesched.ReasonSaturated)], "the busy account is reported as saturated")
 	require.Nil(t, report.CountersError)
-	require.Equal(t, &ShareSchedulingHotMigrations{Total: 0, ByReason: map[string]int64{}}, report.Details.HotMigrations)
+	require.Equal(t, &ShareSchedulingHotMigrations{Total: 0, Active: 0, ByReason: map[string]int64{}}, report.Details.HotMigrations)
 
+	// The production shape of the readiness review: every warm migration
+	// was forced by the bound account, none is active.
 	env.store.add(shareStatsKindShare, shareTestGroupID, time.Now(), map[string]int64{
-		shareStatsHotMigrationField: 3, shareStatsHotPrefix + string(sharesched.ReasonSpillRebind): 2,
-		shareStatsHotPrefix + string(sharesched.ReasonRebindUnavailable): 1})
+		shareStatsHotMigrationField: 488, shareStatsHotPrefix + string(sharesched.ReasonRebindUnavailable): 306,
+		shareStatsHotPrefix + string(sharesched.ReasonFailoverNext): 150, shareStatsHotPrefix + string(sharesched.ReasonResilFailureStreak): 32})
 	report, err = env.share.Report(context.Background(), shareTestGroupID, time.Hour)
 	require.NoError(t, err)
-	require.Equal(t, &ShareSchedulingHotMigrations{Total: 3, ByReason: map[string]int64{"spill_rebind": 2, "rebind_unavailable": 1}},
-		report.Details.HotMigrations, "warm sessions moved by share scheduling, a readiness rollback criterion")
+	require.Equal(t, &ShareSchedulingHotMigrations{Total: 488, Active: 0,
+		ByReason: map[string]int64{"rebind_unavailable": 306, "failover_next": 150, "resil_failure_streak": 32}},
+		report.Details.HotMigrations, "passive migrations count in the total only")
+
+	env.store.add(shareStatsKindShare, shareTestGroupID, time.Now(), map[string]int64{
+		shareStatsHotMigrationField: 3, shareStatsHotPrefix + string(sharesched.ReasonRealignCold): 1,
+		shareStatsHotPrefix + string(sharesched.ReasonSpillRebind): 1, shareStatsHotPrefix + "return_deadline": 1})
+	report, err = env.share.Report(context.Background(), shareTestGroupID, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, int64(491), report.Details.HotMigrations.Total)
+	require.Equal(t, int64(1), report.Details.HotMigrations.Active,
+		"an active warm migration is the rollback signal; spill_rebind and codes retired before the upgrade are not active")
 }
 
 func TestShareAdminReportBaselineFallbacks(t *testing.T) {
@@ -768,8 +787,10 @@ func TestShareAdminReportBaselineFallbacks(t *testing.T) {
 	require.NotNil(t, report.Baseline)
 
 	env.store.switched[shareTestGroupID] = time.Now().Add(-ShareCacheCounterRetention)
+	env.store.exactReads = nil
 	report, err = env.share.Report(context.Background(), shareTestGroupID, 2*time.Hour)
 	require.NoError(t, err)
+	require.Equal(t, []bool{false, false}, env.store.exactReads, "a window the switch does not cut is read as usual")
 	require.Equal(t, ShareBaselineOutOfRetention, *report.BaselineUnavailable)
 	require.NotNil(t, report.Baseline, "database metrics are still given")
 	require.Equal(t, int64(90), report.Baseline.Requests)

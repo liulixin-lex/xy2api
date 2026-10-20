@@ -145,8 +145,11 @@ type ShareSchedulingStore interface {
 	SubscribeChanges(ctx context.Context, handler func(groupID int64))
 	WriteStats(ctx context.Context, batch ShareSchedulingStatsBatch) error
 	// ReadCounters sums a window that ends now: minute buckets up to two
-	// hours, whole hours from the nearest one beyond.
-	ReadCounters(ctx context.Context, kind string, groupID int64, from, to time.Time) (map[string]int64, error)
+	// hours, whole hours from the nearest one beyond. An exact read counts
+	// nothing before from: beyond two hours, the partial hour at from is
+	// read minute by minute while those buckets are kept, and left out
+	// otherwise.
+	ReadCounters(ctx context.Context, kind string, groupID int64, from, to time.Time, exact bool) (map[string]int64, error)
 	// ReadHourCounters sums the hourly buckets [fromHour, toHour), in Unix
 	// hours, of a window in the past.
 	ReadHourCounters(ctx context.Context, kind string, groupID int64, fromHour, toHour int64) (map[string]int64, error)

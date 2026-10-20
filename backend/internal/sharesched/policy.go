@@ -176,6 +176,10 @@ func PatchPolicyDocument(stored []byte, scheduler Scheduler, sessionKeep bool) (
 				return nil, fmt.Errorf("decode affinity: %w", err)
 			}
 		}
+		if affinity == nil {
+			// "affinity": null decodes to the defaults.
+			affinity = map[string]json.RawMessage{}
+		}
 		if sessionKeep {
 			affinity["enabled"] = json.RawMessage(`true`)
 			affinity["key"] = json.RawMessage(`"` + AffinityKeyAuto + `"`)

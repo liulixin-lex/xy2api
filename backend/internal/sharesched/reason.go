@@ -36,6 +36,19 @@ const (
 	ReasonLastResortSoft     Reason = "last_resort_soft"
 )
 
+// ActiveMigration reports whether moving a bound session for this reason is
+// share scheduling's own choice: realigning it to the current weights or
+// returning it to a higher priority. Every other move is forced by the bound
+// account: it is gone or hard-penalised (rebind_unavailable), failing
+// (failover_next, resil_failure_streak), saturated past the bounded wait
+// (spill_rebind), or the last resort (last_resort_soft). The kernel takes
+// active moves only once the cache is cold, so an active warm migration is
+// a defect. Retired codes are not active: this version never produces them,
+// and they only remain in counters written before an upgrade.
+func (r Reason) ActiveMigration() bool {
+	return r == ReasonRealignCold || r == ReasonReturnCold
+}
+
 // Exclusion and skip reasons. Adapters map the original Sub2API gates onto
 // these codes; the kernel itself only produces the share-specific ones.
 const (

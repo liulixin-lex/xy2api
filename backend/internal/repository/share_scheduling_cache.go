@@ -22,7 +22,8 @@ const (
 	shareSchedulingMinuteTTL = 2*time.Hour + 10*time.Minute
 	// shareSchedulingMinuteSpan is the longest window read minute by minute.
 	// Longer windows read whole hours from the one nearest the window start,
-	// plus the minutes of the current hour.
+	// or from the next one for an exact read, plus the minutes of the
+	// current hour.
 	shareSchedulingMinuteSpan = 2 * time.Hour
 	// shareSchedulingMaxWindow bounds one report read to a day.
 	shareSchedulingMaxWindow = 24 * time.Hour
@@ -116,7 +117,7 @@ func (s *shareSchedulingStore) WriteStats(ctx context.Context, batch service.Sha
 	return err
 }
 
-func (s *shareSchedulingStore) ReadCounters(ctx context.Context, kind string, groupID int64, from, to time.Time) (map[string]int64, error) {
+func (s *shareSchedulingStore) ReadCounters(ctx context.Context, kind string, groupID int64, from, to time.Time, exact bool) (map[string]int64, error) {
 	if to.Before(from) {
 		return map[string]int64{}, nil
 	}
@@ -126,16 +127,29 @@ func (s *shareSchedulingStore) ReadCounters(ctx context.Context, kind string, gr
 	first, last := from.Unix()/60, to.Unix()/60
 	pipe := s.rdb.Pipeline()
 	var cmds []*redis.MapStringStringCmd
+	minutes := func(from, to int64) {
+		for minute := from; minute < to; minute++ {
+			cmds = append(cmds, pipe.HGetAll(ctx, shareCounterKey(kind, groupID, minute)))
+		}
+	}
 	if to.Sub(from) > shareSchedulingMinuteSpan {
 		current := to.Unix() / 3600
-		for hour := (from.Unix() + 1800) / 3600; hour < current; hour++ {
+		start := (from.Unix() + 1800) / 3600
+		if exact {
+			// The hour bucket at from holds earlier data: read that
+			// partial hour minute by minute while all its buckets are
+			// kept, or leave it out.
+			start = (from.Unix() + 3599) / 3600
+			if to.Before(from.Truncate(time.Minute).Add(shareSchedulingMinuteTTL)) {
+				minutes(first, start*60)
+			}
+		}
+		for hour := start; hour < current; hour++ {
 			cmds = append(cmds, pipe.HGetAll(ctx, shareHourCounterKey(kind, groupID, hour)))
 		}
 		first = current * 60
 	}
-	for minute := first; minute <= last; minute++ {
-		cmds = append(cmds, pipe.HGetAll(ctx, shareCounterKey(kind, groupID, minute)))
-	}
+	minutes(first, last+1)
 	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 		return nil, err
 	}

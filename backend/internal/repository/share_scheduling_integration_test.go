@@ -264,6 +264,20 @@ func TestShareSchedulingAccountAttempts(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, only.Successes)
 	require.Len(t, only.Failures, 1, "attempts of other accounts are left out")
+
+	// Over the row limit the largest groups are kept, ties in column order,
+	// so a truncated read drops the fewest attempts and is repeatable.
+	limit := shareSchedulingMaxAttemptGroups
+	shareSchedulingMaxAttemptGroups = 2
+	t.Cleanup(func() { shareSchedulingMaxAttemptGroups = limit })
+	capped, err := repo.AccountAttempts(ctx, accounts, now.Add(-30*time.Minute), now)
+	require.NoError(t, err)
+	require.Equal(t, []service.ShareSchedulingAttemptCount{
+		{ShareSchedulingUpstreamAttempt: service.ShareSchedulingUpstreamAttempt{AccountID: accounts[0], Kind: "failover", StatusCode: 502,
+			Category: "TRANSIENT", Message: "upstream failed"}, Count: 2},
+		{ShareSchedulingUpstreamAttempt: service.ShareSchedulingUpstreamAttempt{AccountID: accounts[1], Kind: "request_error",
+			Message: "upstream failed"}, Count: 1},
+	}, capped.Failures)
 }
 
 func TestShareSchedulingStoreCounters(t *testing.T) {
@@ -286,16 +300,16 @@ func TestShareSchedulingStoreCounters(t *testing.T) {
 	require.NoError(t, store.WriteStats(ctx, batch(2)))
 	require.NoError(t, store.WriteStats(ctx, batch(3)))
 
-	hour, err := store.ReadCounters(ctx, "share", groupID, now.Add(-time.Hour), now)
+	hour, err := store.ReadCounters(ctx, "share", groupID, now.Add(-time.Hour), now, false)
 	require.NoError(t, err)
 	require.Equal(t, map[string]int64{"requests": 10}, hour, "both flushes add up; older minutes stay outside")
-	six, err := store.ReadCounters(ctx, "share", groupID, now.Add(-6*time.Hour), now)
+	six, err := store.ReadCounters(ctx, "share", groupID, now.Add(-6*time.Hour), now, false)
 	require.NoError(t, err)
 	require.Equal(t, int64(15), six["requests"], "long windows read hour buckets plus the minutes of the current hour, without double counting")
-	day, err := store.ReadCounters(ctx, "share", groupID, now.Add(-72*time.Hour), now)
+	day, err := store.ReadCounters(ctx, "share", groupID, now.Add(-72*time.Hour), now, false)
 	require.NoError(t, err)
 	require.Equal(t, int64(15), day["requests"], "a read covers at most one day")
-	cache, err := store.ReadCounters(ctx, "cache", groupID, now.Add(-time.Minute), now)
+	cache, err := store.ReadCounters(ctx, "cache", groupID, now.Add(-time.Minute), now, false)
 	require.NoError(t, err)
 	require.Equal(t, int64(5), cache["class:cache_hit"])
 

@@ -184,7 +184,7 @@ func (s *ShareSchedulingService) groupSwitchLoss(ctx context.Context, groupID in
 	if ok && cached.fresh(now) {
 		return cached.value, nil
 	}
-	counters, err := s.store.ReadCounters(ctx, shareStatsKindCache, groupID, now.Add(-shareAdminSummaryWindow), now)
+	counters, err := s.store.ReadCounters(ctx, shareStatsKindCache, groupID, now.Add(-shareAdminSummaryWindow), now, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1131,10 +1131,14 @@ type ShareSchedulingWaits struct {
 	AvgMs *float64 `json:"avg_ms"`
 }
 
-// ShareSchedulingHotMigrations counts sessions that share scheduling moved
-// off an account whose cache was still warm, by decision reason.
+// ShareSchedulingHotMigrations counts sessions moved off an account whose
+// cache was still warm, by decision reason. Total includes the moves forced
+// by the bound account (unavailable, failing, saturated); Active counts only
+// share scheduling's own moves (sharesched.Reason.ActiveMigration), the
+// rollback signal, and is zero by construction.
 type ShareSchedulingHotMigrations struct {
 	Total    int64            `json:"total"`
+	Active   int64            `json:"active"`
 	ByReason map[string]int64 `json:"by_reason"`
 }
 
@@ -1209,11 +1213,13 @@ func (s *ShareSchedulingService) Report(ctx context.Context, groupID int64, wind
 		CurrentFrom: now.Add(-window), CounterPrecision: shareCounterPrecisionMinute}
 
 	anchor, source := s.shareAnchor(ctx, groupID, stored)
+	fromSwitch := false
 	if !anchor.IsZero() && (share || source == ShareAnchorSwitchRecord) {
 		out.SwitchedAt, out.AnchorSource = &anchor, &source
-		// Data from before the switch never mixes into the current window.
+		// Data from before the switch never mixes into the current window,
+		// so its counters are read exactly from the switch on.
 		if anchor.After(out.CurrentFrom) && anchor.Before(now) {
-			out.CurrentFrom = anchor
+			out.CurrentFrom, fromSwitch = anchor, true
 		}
 	}
 	if out.CurrentTo.Sub(out.CurrentFrom) > shareCounterMinuteSpan {
@@ -1221,7 +1227,7 @@ func (s *ShareSchedulingService) Report(ctx context.Context, groupID int64, wind
 	}
 
 	var counterErrs []error
-	cacheCounters, err := s.readCounters(ctx, shareStatsKindCache, groupID, out.CurrentFrom, now)
+	cacheCounters, err := s.readCounters(ctx, shareStatsKindCache, groupID, out.CurrentFrom, now, fromSwitch)
 	counterErrs = append(counterErrs, err)
 	if out.Current, err = s.reportMetrics(ctx, groupID, out.CurrentFrom, now, cacheCounters); err != nil {
 		return nil, err
@@ -1232,7 +1238,7 @@ func (s *ShareSchedulingService) Report(ctx context.Context, groupID int64, wind
 	}
 	var shareCounters map[string]int64
 	if share {
-		shareCounters, err = s.readCounters(ctx, shareStatsKindShare, groupID, out.CurrentFrom, now)
+		shareCounters, err = s.readCounters(ctx, shareStatsKindShare, groupID, out.CurrentFrom, now, fromSwitch)
 		counterErrs = append(counterErrs, err)
 	}
 	out.Accounts = shareReportAccounts(usage, shareCounters, share)
@@ -1260,11 +1266,11 @@ func (s *ShareSchedulingService) Report(ctx context.Context, groupID int64, wind
 
 func shareStringPtr(s string) *string { return &s }
 
-func (s *ShareSchedulingService) readCounters(ctx context.Context, kind string, groupID int64, from, to time.Time) (map[string]int64, error) {
+func (s *ShareSchedulingService) readCounters(ctx context.Context, kind string, groupID int64, from, to time.Time, exact bool) (map[string]int64, error) {
 	if s.store == nil {
 		return nil, nil
 	}
-	return s.store.ReadCounters(ctx, kind, groupID, from, to)
+	return s.store.ReadCounters(ctx, kind, groupID, from, to, exact)
 }
 
 // reportMetrics combines the database metrics of a window with its cache
@@ -1361,8 +1367,13 @@ func shareReportDetails(cache, counters map[string]int64, share bool) ShareSched
 	}
 	attempts, requests := counters[shareStatsAttemptsField], counters[shareStatsRequestsField]
 	details.Reasons, details.Waits, details.Attempts, details.ShareRequests = collectPrefixed(counters, shareStatsReasonPrefix), waits, &attempts, &requests
-	details.HotMigrations = &ShareSchedulingHotMigrations{Total: counters[shareStatsHotMigrationField],
-		ByReason: collectPrefixed(counters, shareStatsHotPrefix)}
+	hot := &ShareSchedulingHotMigrations{Total: counters[shareStatsHotMigrationField], ByReason: collectPrefixed(counters, shareStatsHotPrefix)}
+	for reason, n := range hot.ByReason {
+		if sharesched.Reason(reason).ActiveMigration() {
+			hot.Active += n
+		}
+	}
+	details.HotMigrations = hot
 	return details
 }
 

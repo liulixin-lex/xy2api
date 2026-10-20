@@ -144,6 +144,29 @@ func TestPatchPolicyDocumentKeepsEverythingElse(t *testing.T) {
 	require.False(t, p.SessionKeep())
 }
 
+// TestPatchPolicyDocumentWithNullAffinity: the decoders of 0.3.0–0.4.3 and
+// this version accept "affinity": null (the defaults apply), so session
+// keeping can be switched off on such a row.
+func TestPatchPolicyDocumentWithNullAffinity(t *testing.T) {
+	stored := []byte(`{"schema":1,"scheduler":"share","affinity":null}`)
+	p, err := DecodePolicy(stored)
+	require.NoError(t, err)
+	require.True(t, p.SessionKeep())
+
+	var off []byte
+	require.NotPanics(t, func() { off, err = PatchPolicyDocument(stored, SchedulerShare, false) })
+	require.NoError(t, err)
+	p, err = DecodePolicy(off)
+	require.NoError(t, err)
+	require.False(t, p.SessionKeep())
+
+	on, err := PatchPolicyDocument(off, SchedulerShare, true)
+	require.NoError(t, err)
+	p, err = DecodePolicy(on)
+	require.NoError(t, err)
+	require.True(t, p.SessionKeep())
+}
+
 func TestPatchPolicyDocumentReplacesUndecodableDocuments(t *testing.T) {
 	for _, stored := range [][]byte{nil, []byte(`not json`), []byte(`{"schema":7}`), []byte(`[]`)} {
 		patched, err := PatchPolicyDocument(stored, SchedulerShare, true)

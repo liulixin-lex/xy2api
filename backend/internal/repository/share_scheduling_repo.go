@@ -221,8 +221,11 @@ func shareRoundedMs(v sql.NullFloat64) *int {
 }
 
 // shareSchedulingMaxAttemptGroups bounds the failed-attempt rows one health
-// read returns.
-const shareSchedulingMaxAttemptGroups = 50000
+// read returns. Over the bound the largest groups are kept: the read drops
+// the fewest attempts, so it can only under-weight failures, and ties are
+// broken by the grouping columns so the same data gives the same result.
+// A variable so tests can lower it.
+var shareSchedulingMaxAttemptGroups = 50000
 
 // AccountAttempts reads the successful requests of the accounts from
 // usage_logs and their failed upstream attempts from
@@ -271,6 +274,7 @@ func (r *shareSchedulingRepository) AccountAttempts(ctx context.Context, account
 			  AND jsonb_typeof(ev->'account_id') = 'number'
 			  AND (ev->>'account_id')::bigint = ANY($1)
 			GROUP BY 1, 2, 3, 4, 5
+			ORDER BY 6 DESC, 1, 2, 3, 4, 5
 			LIMIT `+strconv.Itoa(shareSchedulingMaxAttemptGroups), ids, from, to)
 		if err != nil {
 			return err

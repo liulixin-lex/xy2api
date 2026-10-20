@@ -85,4 +85,16 @@ func TestSavedPoliciesDecodeInV043(t *testing.T) {
 			require.Equal(t, DefaultWeightConcurrency, old.Defaults.Weight, "a rollback weighs a new policy by concurrency")
 		}
 	}
+
+	// A row edited by hand to "affinity": null: switching session keeping
+	// off still writes a document 0.4.3 reads.
+	nullAffinity := []byte(`{"schema":1,"scheduler":"share","affinity":null}`)
+	_, err = DecodePolicy(nullAffinity)
+	require.NoError(t, err, "0.4.3 accepts the stored row")
+	var off []byte
+	require.NotPanics(t, func() { off, err = sharesched.PatchPolicyDocument(nullAffinity, sharesched.SchedulerShare, false) })
+	require.NoError(t, err)
+	old, err := DecodePolicy(off)
+	require.NoError(t, err, string(off))
+	require.Equal(t, AffinityKeyNone, old.Affinity.Key)
 }

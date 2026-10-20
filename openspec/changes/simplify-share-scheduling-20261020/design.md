@@ -271,7 +271,7 @@
   - 响应用 `anchor_source` 标明锚点来源：`switch_record` 或 `policy_updated_at`。
 - **窗口**：
   - 只在 `scheduler=share` 时给出基线。基线 = 锚点前的等长窗口 `[锚点 − window, 锚点)`。
-  - 锚点落在当前窗口内时，`current` 从锚点开始算 `[锚点, now)`，不混入切换前的数据；前端据此提示“切换后数据只有 N 分钟”。
+  - 锚点落在当前窗口内时，`current` 从锚点开始算 `[锚点, now)`，不混入切换前的数据；前端据此提示“切换后数据只有 N 分钟”。超过 2 小时的此类窗口，归因计数的小时桶从锚点之后的第一个整点读起，锚点所在的不完整小时在分钟桶保留期（2 小时 10 分）内按分钟读，否则不计（§8）。
   - 锚点早于当前窗口时，`current = [now − window, now)`。
   - 理由：健康卡要回答“切到份额后是否变差”。“上一个等长窗口”在切换一天后比较的是份额对份额，发现不了回归。
 - 响应：
@@ -287,9 +287,9 @@
 | `baseline` | Metrics \| null |
 | `baseline_unavailable` | `"not_share"`、`"never_switched"`、`"out_of_retention"` 或 null。`out_of_retention` 只影响归因三项：数据库各项照常给出，`baseline` 仍返回 |
 | `accounts[]` | `{account_id, requests, request_share, tokens, token_share, standard_cost, cost_share, skipped}`，统计当前窗口。前六项来自 `usage_logs`；`skipped` 是 `{原因: 次数}`，**仅份额模式** |
-| `details` | `{cache_classes: {类别: {requests, tokens}}, reasons: {原因: 次数}, waits: {count, hit, avg_ms}, attempts, share_requests, hot_migrations: {total, by_reason: {原因: 次数}}}`，统计当前窗口。`cache_classes` 两种模式都有；其余**仅份额模式**，原版模式下不返回这些键；`avg_ms` 没有等待时为 null。`hot_migrations` 是份额把会话从缓存仍热的账号移走的次数，是就绪评估的回退判据之一（超过请求数的 0.1%） |
+| `details` | `{cache_classes: {类别: {requests, tokens}}, reasons: {原因: 次数}, waits: {count, hit, avg_ms}, attempts, share_requests, hot_migrations: {total, active, by_reason: {原因: 次数}}}`，统计当前窗口。`cache_classes` 两种模式都有；其余**仅份额模式**，原版模式下不返回这些键；`avg_ms` 没有等待时为 null。`hot_migrations` 是会话从缓存仍热的账号移走的次数：`total` 包含绑定账号不可用、失败换号、会话连败改绑、满载溢出改绑、末位兜底等被动迁移，只作信息展示；`active` 是其中份额主动迁移（`realign_cold`、`return_cold`，判定为内核的 `Reason.ActiveMigration`）之和，内核只在缓存变冷后主动迁移，所以按构造为 0，非 0 即是缺陷信号。就绪评估的回退线（超过请求数的 0.1%）只看 `active`。升级前写下的已退役原因只计入 `total` |
 | `counters_error` | string \| null，Redis 读取失败时的说明 |
-| `counter_precision` | `"minute"` 或 `"hour_rounded"`：基线、以及超过 2 小时的窗口按整点小时汇总 |
+| `counter_precision` | `"minute"` 或 `"hour_rounded"`：基线、以及超过 2 小时的窗口按整点小时汇总。从锚点截断的窗口宁可少算锚点所在的不完整小时（最多 59 分钟），也不混入切换前的计数 |
 
 **Metrics**（健康卡的 4 个指标都在这里，各附样本数）：
 
@@ -335,10 +335,13 @@
 - **Redis 归因计数**（缓存归因，按会话 1/4 抽样，所有分组常开）：只保留类别与 Token 合计字段，即 `requests`、`prompt_tokens`、`cache_read_tokens`、`cache_creation_tokens`、`class:*`、`class_tokens:*`，共 26 个以内。
   - 删除首字直方图后，单个哈希在 Redis 的 listpack 编码下约 1–2 KB。
   - `cache` 类计数的小时桶保留期从 26 小时延长到 194 小时（8 天加 2 小时），每个有流量的分组约增加 0.2–0.4 MB。删除首字直方图（原来每账号最多 15 个字段）省下的内存，在多数分组上大于延长保留期增加的量。
-  - `share` 类计数只在份额分组产生，保留期仍为 26 小时，只写报表读取的字段：`requests`、`attempts`、`reason:*`、`skip:<账号>:<原因>`、`wait_count`、`wait_hit`、`wait_ms`、`hot_migration`、`hot:<原因>`。0.4.3 写的 `served:*`、`ideal:*`、`ideal_skip:*`、`key:*` 不再写入，旧键随保留期过期。
+  - `share` 类计数只在份额分组产生，保留期仍为 26 小时，只写报表读取的字段：`requests`、`attempts`、`reason:*`、`skip:<账号>:<原因>`、`wait_count`、`wait_hit`、`wait_ms`、`hot_migration`、`hot:<原因>`（`active` 读时由 `hot:<原因>` 求和，不单独存）。0.4.3 写的 `served:*`、`ideal:*`、`ideal_skip:*`、`key:*` 不再写入，旧键随保留期过期。
   - 分钟桶仍为 2 小时 10 分。
 - **基线读取**：基线窗口整体在过去，只读小时桶，所以 `counter_precision` 为 `hour_rounded`；超出 194 小时时，归因三项为 null，`baseline_unavailable=out_of_retention`，数据库三项照常给出。
   - 小时桶取锚点所在整点之前的整点小时，个数为窗口四舍五入到小时（至少 1 个），不含锚点所在小时，所以切换之后的数据不会混入基线。
+- **当前窗口读取**：不超过 2 小时的窗口读分钟桶；更长的窗口读整点小时桶，加上当前小时的分钟桶。
+  - 窗口未被锚点截断时，小时桶从离窗口起点最近的整点读起，与精确时间最多相差 30 分钟。
+  - 窗口从锚点开始时，小时桶从锚点之后的第一个整点读起；锚点所在的不完整小时，分钟桶都还在保留期内时按分钟读，否则不计。所以切换前的计数不会混入，代价是最多少算 59 分钟。数据库各项按精确时间查询，不受影响。
 - **语句超时**：管理端对 `usage_logs`、`ops_error_logs` 的读取都在只读事务里执行，事务内 `SET LOCAL statement_timeout = '5s'`，大表异常时由数据库中止查询，不拖住连接。
 - **执行计划**（本地 PostgreSQL 18，合成数据 `usage_logs` 300 万行 / 7 天 / 40 组 / 600 账号，`ops_error_logs` 30 万行；只读验证，未连任何服务器）：
 

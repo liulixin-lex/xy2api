@@ -26,7 +26,9 @@ func shareSessionFingerprint(key string) string {
 }
 
 // shareHotMigration reports a binding moved off an account whose cache was
-// still warm: the migrations share scheduling promises to avoid.
+// still warm. Most are forced by the bound account (unavailable, failing,
+// saturated); share scheduling's own moves (Reason.ActiveMigration) only
+// happen once the cache is cold, so the report flags any active one.
 func shareHotMigration(d sharesched.Decision, served int64, write sharesched.Write, cache sharesched.CacheProfile, idle time.Duration) bool {
 	return d.Bound > 0 && served > 0 && served != d.Bound && write == sharesched.WriteReplace && cache.Warm(idle)
 }
