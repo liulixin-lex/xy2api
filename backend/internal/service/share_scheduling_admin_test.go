@@ -26,8 +26,12 @@ type shareMemoryRepo struct {
 	summaries map[int64]ShareSchedulingGroupSummary
 	// metrics returns the database metrics of a window; zero when nil.
 	metrics func(from, to time.Time) ShareSchedulingGroupMetrics
+	// attempts and attemptsErr answer AccountAttempts.
+	attempts    ShareSchedulingAccountAttempts
+	attemptsErr error
 
-	usageCalls, summaryCalls int
+	usageCalls, summaryCalls, attemptCalls int
+	attemptWindow                          [2]time.Time
 }
 
 func (r *shareMemoryRepo) ListPolicies(context.Context) ([]ShareSchedulingPolicyRow, error) {
@@ -79,6 +83,14 @@ func (r *shareMemoryRepo) GroupSummaries(context.Context, time.Time) (map[int64]
 	defer r.mu.Unlock()
 	r.summaryCalls++
 	return r.summaries, nil
+}
+
+func (r *shareMemoryRepo) AccountAttempts(_ context.Context, _ []int64, from, to time.Time) (ShareSchedulingAccountAttempts, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.attemptCalls++
+	r.attemptWindow = [2]time.Time{from, to}
+	return r.attempts, r.attemptsErr
 }
 
 func (r *shareMemoryRepo) GroupMetrics(_ context.Context, _ int64, from, to time.Time) (ShareSchedulingGroupMetrics, error) {

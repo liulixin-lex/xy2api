@@ -83,12 +83,20 @@ func (s *ShareSchedulingService) newRequest(ctx context.Context, gp *shareGroupP
 	return req, source
 }
 
+// shareCandidate is the candidate of an account with its share weight in
+// the group; the adapters fill in eligibility.
+func (s *ShareSchedulingService) shareCandidate(groupID int64, acc *Account, now time.Time) sharesched.Candidate {
+	w := s.shareWeight(groupID, acc, now)
+	return sharesched.Candidate{AccountID: acc.ID, Platform: acc.Platform, Class: shareAccountClass(acc),
+		Priority: acc.Priority, LoadFactor: w.LoadFactor, Weight: w.Effective}
+}
+
 // shareMissingBoundCandidate turns a bound account that the schedulable
 // listing left out into an ineligible candidate. Listings drop rate-limited,
 // overloaded and temporarily unschedulable accounts; when gateway resilience
 // rates the state a soft penalty, the account can keep its binding through
 // the short outage (soft spill). Anything else is treated as gone.
-func (s *ShareSchedulingService) shareMissingBoundCandidate(acc *Account, model string, now time.Time, penalty resiliencePenaltyFunc) (sharesched.Candidate, bool) {
+func (s *ShareSchedulingService) shareMissingBoundCandidate(groupID int64, acc *Account, model string, now time.Time, penalty resiliencePenaltyFunc) (sharesched.Candidate, bool) {
 	if acc == nil {
 		return sharesched.Candidate{}, false
 	}
@@ -98,8 +106,9 @@ func (s *ShareSchedulingService) shareMissingBoundCandidate(acc *Account, model 
 		return sharesched.Candidate{}, false
 	}
 	s.observeEligibility(acc.ID, false, reason, now)
-	return sharesched.Candidate{AccountID: acc.ID, Platform: acc.Platform, Class: shareAccountClass(acc),
-		Priority: acc.Priority, Weight: shareWeight(acc), Reason: reason, RecoverAt: recoverAt}, true
+	c := s.shareCandidate(groupID, acc, now)
+	c.Reason, c.RecoverAt = reason, recoverAt
+	return c, true
 }
 
 // resiliencePenaltyFunc rates an account's restrictions as gateway
@@ -136,14 +145,6 @@ func shareSoftRecovery(acc *Account, model string, now time.Time, penalty resili
 		return time.Time{}
 	}
 	return recoverAt
-}
-
-// shareWeight is an account's share weight: its effective load factor (the
-// load factor, else the concurrency, else 1). Candidates, the member view
-// and the preview all take weights from here, so a later adjustment applies
-// everywhere at once.
-func shareWeight(acc *Account) int {
-	return acc.EffectiveLoadFactor()
 }
 
 // shareClassNames interns account class names; building one per candidate

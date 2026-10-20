@@ -118,6 +118,10 @@ type ShareSchedulingRepository interface {
 	GroupSummaries(ctx context.Context, since time.Time) (map[int64]ShareSchedulingGroupSummary, error)
 	// GroupMetrics reads the database metrics of a group over [from, to).
 	GroupMetrics(ctx context.Context, groupID int64, from, to time.Time) (ShareSchedulingGroupMetrics, error)
+	// AccountAttempts reads the successful requests (usage_logs) and the
+	// failed upstream attempts (ops_error_logs.upstream_errors) of the
+	// accounts over [from, to), for the health factor (design §11.1).
+	AccountAttempts(ctx context.Context, accountIDs []int64, from, to time.Time) (ShareSchedulingAccountAttempts, error)
 }
 
 // ShareSchedulingCounter addresses one counter field in one minute bucket.
@@ -192,6 +196,12 @@ type ShareSchedulingService struct {
 	// attributionRate samples one session in attributionRate for cache
 	// attribution (shareAttributionSampleRate; tests sample every one).
 	attributionRate int
+	// health is the latest adaptive-weight refresh (design §11); outages
+	// and healthMu belong to the refresh.
+	health     atomic.Pointer[shareHealthSnapshot]
+	outages    map[int64]shareOutageObservation
+	healthMu   sync.Mutex
+	opsEnabled bool
 	// gateway and openai give the admin operations the live candidate gates.
 	gateway *GatewayService
 	openai  *OpenAIGatewayService
@@ -214,7 +224,7 @@ func NewShareSchedulingService(repo ShareSchedulingRepository, store ShareSchedu
 	node, _ := os.Hostname()
 	s := &ShareSchedulingService{repo: repo, store: store, settings: settings, node: node,
 		stats: newShareStatsRecorder(), traces: newShareTraceTable(), attribution: make(chan struct{}, shareAttributionConcurrency),
-		attributionRate: shareAttributionSampleRate}
+		attributionRate: shareAttributionSampleRate, opsEnabled: true}
 	s.state.Store(&shareSchedulingState{settings: DefaultShareSchedulingSettings(), groups: map[int64]*shareGroupPolicy{}})
 	return s
 }
@@ -248,9 +258,10 @@ func (s *ShareSchedulingService) Start() {
 				}
 			})
 		}
-		s.wg.Add(2)
+		s.wg.Add(3)
 		go s.refreshLoop(ctx)
 		go s.flushLoop(ctx)
+		go s.healthLoop(ctx)
 	})
 }
 

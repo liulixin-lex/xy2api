@@ -11,7 +11,7 @@
 | 概念 | 取值 | 代码位置 |
 |---|---|---|
 | 层级 | `Account.Priority`，数字越小越优先，严格分层 | 内核 `sharesched.Plan` 的条目层级取 `Candidate.Priority` |
-| 权重 | `Account.EffectiveLoadFactor()`：负载因子 1–10000；未设时取并发，并发 ≤0 时取 1 | 新增 `Candidate.Weight`，由 5 个构造点填写：Gateway 与 OpenAI 两个适配器、绑定账号不在列表时的补位候选、末位兜底放宽一轮、管理端成员视图。所有构造点与账号份额接口都经 `shareWeight(account)` 一个函数取值；之后若叠加健康系数（降权、慢启动），只改这个函数。本版不叠加任何系数 |
+| 权重 | `Account.EffectiveLoadFactor()`：负载因子 1–10000；未设时取并发，并发 ≤0 时取 1 | 新增 `Candidate.Weight`，由 5 个构造点填写：Gateway 与 OpenAI 两个适配器、绑定账号不在列表时的补位候选、末位兜底放宽一轮、管理端成员视图。所有构造点、成员视图、预览、解释与账号份额接口都经 `shareWeight` 一个函数取值；它在负载因子上叠加 §11 的健康系数与爬升系数 |
 | 账号规则 | 策略 JSON 里的 `accounts`（tier、weight、drain、drain_until、cache_domain）**读时忽略**，保存时原样保留（§3） | — |
 | 满载 | 与原版对齐，见 §5 | 份额执行器 |
 | 每组设置 | 调度方式 `sub2api` / `share`；会话保持 开（`affinity.key=auto`）/ 关（`none`） | §3、§7 |
@@ -177,18 +177,24 @@
 | `priority` | int | 层级 |
 | `concurrency` | int | 并发上限 |
 | `load_factor` | int \| null | 账号原值，未设为 null |
-| `effective_load_factor` | int | 份额权重，即 `shareWeight(account)`；本版等于 `EffectiveLoadFactor()` |
+| `effective_load_factor` | int | 生效负载因子，即 `EffectiveLoadFactor()` |
+| `health_factor` | float \| null | 健康系数 0.2–1（§11.1）。健康降权未生效（运维监控关、韧性总开关关、统计过期、查询失败、分组不在份额模式）或样本不足时为 null |
+| `health` | object \| null | `{window_minutes, attempts, soft_failures, rate, tier_baseline_rate, insufficient}`：近 30 分钟的尝试数、软罚类失败数、原始失败率与同层基线（0–1）。未生效时为 null；生效但窗口内没有尝试时为对象，`insufficient=true`、`rate=null` |
+| `ramp_factor` | float | 恢复爬升系数 0.1–1（§11.2）；不在爬升时为 1 |
+| `ramp` | object \| null | 爬升中为 `{cause, since, full_at}`，`cause` 只取 `balance_pause`、`hard_penalty`、`reenabled`；不在爬升时为 null |
+| `effective_weight` | float | 有效权重 = `effective_load_factor` × 健康系数 × 爬升系数，至少为负载因子的 5%；由 `shareWeight` 一处给出 |
+| `base_share` | float | 只按负载因子计算的份额，用来对照自动调整了多少 |
 | `other_group_ids` | int64[] | 该账号所在的其他分组（不含本组） |
-| `expected_share` | float | 预计新会话份额，见下文“份额口径” |
-| `share_if_healthy` | float | 只有该账号恢复健康、其余成员保持现状时的预计份额。健康账号等于 `expected_share` |
+| `expected_share` | float | 预计新会话份额，见下文“份额口径”，按有效权重 |
+| `share_if_healthy` | float | 只有该账号恢复健康、其余成员保持现状时的预计份额，按有效权重。健康账号等于 `expected_share` |
 | `actual_requests_1h` | int64 | 近 1 小时本组内由该账号完成的成功请求数（`usage_logs`，按本组） |
 | `actual_share_1h` | float \| null | 占本组近 1 小时成功请求的比例 |
 
-账号的失败率不在本节：PM 2026-10-20 决定成员视图只保留一个失败率口径，即第 4 层自适应权重的 `health.rate`（tasks §4），原先计划的 `recent_requests_1h`、`recent_errors_1h`、`recent_error_rate_1h` 不提供。
+账号的失败率不在本节：PM 2026-10-20 决定成员视图只保留一个失败率口径，即自适应权重的 `health.rate`（§11），原先计划的 `recent_requests_1h`、`recent_errors_1h`、`recent_error_rate_1h` 不提供。
 
 **份额口径**：份额计算只取决于成员的优先级、负载因子与健康状态，不取决于分组当前的调度方式。所以“当前状态（份额模式）”与“切到份额后”是同一个数，`expected_share` 对原版分组同样有效，供切换确认用。原版分组的现状由 `actual_share_1h` 表达。
 
-- 计算：活动优先级段内的健康成员按 `effective_load_factor` 占比分配，其余成员为 0。
+- 计算：活动优先级段内的健康成员按 `effective_weight` 占比分配，其余成员为 0；`base_share` 用 `effective_load_factor` 按同样规则计算。
 - 不含满载溢出（§5）与按请求的门禁，是新会话份额的期望值，不是请求份额的承诺。
 
 **开销**：本组按账号的近 1 小时成功请求数走 `usage_logs (group_id, created_at)` 索引，每个视图 1 条 SQL；结果在进程内缓存 30 秒，键为分组 ID，**只缓存请求数**。成员列表、优先级、负载因子、健康状态与份额每次现读、现场计算，所以修改负载因子后视图立即反映。
@@ -230,6 +236,8 @@
 | `top_priority_unhealthy` | 数值最小的优先级段没有健康成员，新会话会落到更低的段 | `priority`=最高段，`value`=当前活动段 |
 | `single_account_dominant` | 某账号 `expected_share` >0.8，且活动段至少有 2 个健康成员 | `account_id`，`value`=份额 |
 | `high_load_factor` | 成员的 `effective_load_factor` ≥999（健康与否都报，恢复后会拿到大部分新会话） | `account_id`，`value`=负载因子 |
+| `ramping` | 成员正在恢复爬升（提示级） | `account_id`，`value`=爬升系数 |
+| `health_downweighted` | 成员的健康系数 ≤0.5 | `account_id`，`value`=健康系数 |
 
 ### 7.6 `POST /groups/:id/explain`
 
@@ -247,10 +255,10 @@
 | `cache_ttl_seconds`、`estimated_tokens`、`cacheable`、`warm` | |
 | `wait_budget_ms`、`max_waiting` | |
 | `reason`、`steps`（账号 ID 顺序）、`write`、`spill_write`、`spill_reason`、`target`、`ideal`、`active_priority` | |
-| `entries[]` | `{account_id, priority, load_factor, eligible, excluded, reason, rank, class, load_rate, saturated}`：`load_factor` 是生效值；`load_rate` 是 §5 的负载率，读不到时为 null；`saturated` 表示 §5 意义上的满载 |
+| `entries[]` | `{account_id, priority, load_factor, health_factor, ramp_factor, effective_weight, eligible, excluded, reason, rank, class, load_rate, saturated}`：`load_factor` 是生效负载因子；`health_factor`、`ramp_factor`、`effective_weight` 同 §7.3；`load_rate` 是 §5 的负载率（按负载因子），读不到时为 null；`saturated` 表示 §5 意义上的满载 |
 | `resilience` | 网关韧性解释（不变） |
 
-与 0.4.3 相比：`active_tier` 改名为 `active_priority`；`entries.tier`、`entries.weight` 改名为 `priority`、`load_factor`；删除 `effective_weight`、`configured`、`drain`、`cache_domain`。
+与 0.4.3 相比：`active_tier` 改名为 `active_priority`；`entries.tier`、`entries.weight` 改名为 `priority`、`load_factor`；`effective_weight` 改为负载因子乘两个系数（§11）；删除 `configured`、`drain`、`cache_domain`。
 
 ### 7.7 `GET /groups/:id/report?window=1h`
 
@@ -301,7 +309,7 @@
 
 路径不变，含义改为“该账号在各份额分组里的预计份额”。只列已存调度器为 `share` 的分组，按分组 ID 排序：
 
-`[{ "group_id", "group_name", "scheduler": "share", "effective": bool, "priority", "load_factor", "effective_load_factor", "healthy", "expected_share", "share_if_healthy" }]`
+`[{ "group_id", "group_name", "scheduler": "share", "effective": bool, "priority", "load_factor", "effective_load_factor", "healthy", "expected_share", "share_if_healthy" }]`，两种份额按有效权重（§11）。
 
 ### 7.9 退役接口
 
@@ -340,8 +348,10 @@
   | 成员请求数、报表账号表：一组 24 小时 `GROUP BY account_id` | `idx_usage_logs_group_created_at_not_null` | 117 ms |
   | 报表数据库指标：一组 24 小时，含首字分位 | `idx_usage_logs_group_created_at_not_null` | 6 ms（热） |
   | 报表错误数：一组 24 小时 | `idx_ops_error_logs_group_time` | 18 ms |
+  | 健康降权成功数：100 个账号近 30 分钟 | `idx_usage_logs_account_created_at`（仅索引扫描） | 29 ms |
+  | 健康降权失败尝试：100 个账号近 30 分钟，展开 `upstream_errors` | `created_at` 前缀的索引（PG 18 选 `idx_ops_error_logs_resolved_time` 的跳跃扫描；无跳跃扫描的版本走 `idx_ops_error_logs_created_at`），再逐行展开 | 106 ms |
 
-  原始输出在仓库外 `xy2api-artifacts/share-simplify-20261020/pg/explain-3x.txt`。
+  原始输出在仓库外 `xy2api-artifacts/share-simplify-20261020/pg/explain-3x.txt`、`explain-r1.txt`。健康降权的两条查询每 60 秒各执行一次，只在至少一个份额分组生效时执行。
 
 ## 9. 同步登记
 
@@ -358,3 +368,34 @@
 | 改负载因子同时影响该账号所在的原版分组 | 视图给出 `other_group_ids`，界面提示；方向与原版一致 |
 | 回退后规则恢复为升级前的内容，不包含升级期间对负载因子的调整 | 升级说明写明；规则只在旧版生效 |
 | 满载对齐多一次批量负载读取 | 只在需要尝试非绑定账号时读，并复用原版缓存；交付时给出基准对比 |
+
+## 11. 自适应权重（PM 2026-10-20 追加，0 个设置项）
+
+依据仓库外 `G_ECOSYSTEM_RESEARCH.md` §1 的 R1–R3 与 `D_PM_SYNTHESIS.md` §10。有效权重 = 负载因子 × 健康系数 × 爬升系数，至少为负载因子的 5%，在 `shareWeight` 一处计算，返回分解结构供成员视图、预览与解释使用。系数只作用于新会话、冷会话重对齐与溢出顺序的 HRW 权重；亲和命中、满载判定（负载率仍按负载因子）与层级不受影响。韧性总开关关闭时两个系数都为 1。
+
+### 11.1 健康降权（R1）
+
+- **口径**：账号级，近 30 分钟，窗口按整分钟对齐。失败只计韧性给软罚的尝试：`resilience_category` 为 `TRANSIENT`、`FIRST_OUTPUT_TIMEOUT`、`STALL`，以及类别为空、`kind=request_error`、状态 0 的传输错误（运维记录不给传输错误分类，韧性把它判为 `TRANSIENT`；消息含 `context canceled` 的客户端取消不计）。余额、鉴权、限流、降载、请求错误、模型不支持都不计。判定是一个纯函数 `shareSoftFailureAttempt`，输入一条 `upstream_errors` 元素。
+- **分母**：尝试 = 成功数（`usage_logs` 行数）+ 软罚类失败尝试数。非软罚失败分子分母都不计。
+- **数据来源**：失败取 `ops_error_logs.upstream_errors` 每次尝试的 `account_id` 与 `resilience_category`（请求最终成功时之前失败的尝试也会落一条恢复行，行本身不计，其中的尝试计入）；成功取 `usage_logs`。
+- **基线**：同一分组、同一优先级的健康成员中，尝试数 ≥20 的最低原始失败率；没有成员满足时取尝试数 >0 的最低值。同层少于 2 个健康成员时系数为 1。
+- **系数**：`p̂ = (失败 + 20 × 基线) ÷ (尝试 + 20)`；`超出 = max(0, p̂ − 基线 − 3 个百分点)`；`系数 = max(0.2, 2^(−超出 ÷ 5 个百分点))`，量化到 0.05。窗口内没有尝试时为样本不足，系数为空（×1）。
+- **刷新**：后台每 60 秒一次，读各生效份额分组的成员，按窗口一次读取全部成员账号的成功数与失败尝试（两条 SQL，5 秒语句超时），按（分组, 账号）算出系数表。请求路径与管理视图查同一张表。
+- **失效保护**：统计超过 5 分钟未更新、查询失败、运维监控关闭（配置 `ops.enabled=false` 或设置 `ops_monitoring_enabled`）、韧性总开关关闭时，系数一律为空（×1），视图 `health=null`。
+- **生产回放**（就绪评估 B4，失败率 1.1% / 9.0% / 20.8%）：系数 1 / 0.5 / 0.2，新会话份额 58.8% / 29.4% / 11.8%（原版实际 52.2% / 27.0% / 13.0%）。调研报告按近似公式算出 292 为 0.56，按本节公式精确计算为 0.50。
+- **精度边界**：卡流不写入 `upstream_errors`，`upstream_errors` 被截断时（`dropped_earlier_attempts`）早期尝试缺失，运维监控关闭时没有数据。这些都只会少降权，不会误降权。后续若生产出现“卡流为主、未被降权”的账号，改由韧性在施加软罚处写 Redis 分钟计数（tasks §8）。
+
+### 11.2 恢复后慢启动（R2）
+
+- **触发**：账号重新合格时，以下三种之一发生在 10 分钟内：
+  - 余额暂停到期：`temp_unschedulable_until` 已过、原因以 `balance:` 开头（`cause=balance_pause`）；
+  - 硬罚到期：`temp_unschedulable_until` 已过且原因是硬档，或 `rate_limit_reset_at` 已过且限流时长超过 300 秒（`cause=hard_penalty`）；
+  - 本实例观察到连续不合格至少 5 分钟后转为合格（停用、错误、关闭可调度、管理员清除暂停等账号行看不出的情况，`cause=reenabled`）。观察由 §11.1 的刷新完成，最多晚 60 秒；新进程没有记忆时不爬升。
+
+  多个原因同时成立时取最近的一次恢复。30 秒级软冷却不触发。
+- **系数**：`0.1 + 0.9 × min(1, 已恢复时长 ÷ 10 分钟)`，量化到 0.05。
+- 前两种来自账号行，各实例一致；第三种依赖进程内观察，生产为单实例加蓝绿，可接受。
+
+### 11.3 可解释
+
+成员视图给出 `health_factor`、`health`、`ramp_factor`、`ramp`、`effective_weight`、`base_share` 与 `expected_share`（§7.3）；解释的条目给出 `load_factor`、`health_factor`、`ramp_factor`、`effective_weight`（§7.6）；预览增加 `ramping` 与 `health_downweighted`（§7.5）。界面的失败率列用 `health.rate`，与降权同一口径。

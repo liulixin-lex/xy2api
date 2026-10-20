@@ -45,7 +45,14 @@ const (
 	ShareWarningTopPriorityUnhealthy  = "top_priority_unhealthy"
 	ShareWarningSingleAccountDominant = "single_account_dominant"
 	ShareWarningHighLoadFactor        = "high_load_factor"
+	// Adaptive weights (design §11): an account still climbing after an
+	// outage, and one whose health factor is 0.5 or less.
+	ShareWarningRamping            = "ramping"
+	ShareWarningHealthDownweighted = "health_downweighted"
 )
+
+// shareDownweightedFactor is the health factor at which preview warns.
+const shareDownweightedFactor = 0.5
 
 // Report anchor sources and baseline gaps (design §7.7).
 const (
@@ -216,26 +223,71 @@ func (s *ShareSchedulingService) groupAccountRequests(ctx context.Context, group
 // ---- members and shares ----
 
 // ShareSchedulingMemberView is one group member with its settings, current
-// health and shares (design §7.3).
+// health, weight and shares (design §7.3, §11.3).
 type ShareSchedulingMemberView struct {
-	AccountID           int64      `json:"account_id"`
-	Name                string     `json:"name"`
-	Platform            string     `json:"platform"`
-	Type                string     `json:"type"`
-	Status              string     `json:"status"`
-	Schedulable         bool       `json:"schedulable"`
-	Healthy             bool       `json:"healthy"`
-	Reason              *string    `json:"reason"`
-	RecoverAt           *time.Time `json:"recover_at"`
-	Priority            int        `json:"priority"`
-	Concurrency         int        `json:"concurrency"`
-	LoadFactor          *int       `json:"load_factor"`
-	EffectiveLoadFactor int        `json:"effective_load_factor"`
-	OtherGroupIDs       []int64    `json:"other_group_ids"`
-	ExpectedShare       float64    `json:"expected_share"`
-	ShareIfHealthy      float64    `json:"share_if_healthy"`
-	ActualRequests1h    int64      `json:"actual_requests_1h"`
-	ActualShare1h       *float64   `json:"actual_share_1h"`
+	AccountID           int64                      `json:"account_id"`
+	Name                string                     `json:"name"`
+	Platform            string                     `json:"platform"`
+	Type                string                     `json:"type"`
+	Status              string                     `json:"status"`
+	Schedulable         bool                       `json:"schedulable"`
+	Healthy             bool                       `json:"healthy"`
+	Reason              *string                    `json:"reason"`
+	RecoverAt           *time.Time                 `json:"recover_at"`
+	Priority            int                        `json:"priority"`
+	Concurrency         int                        `json:"concurrency"`
+	LoadFactor          *int                       `json:"load_factor"`
+	EffectiveLoadFactor int                        `json:"effective_load_factor"`
+	HealthFactor        *float64                   `json:"health_factor"`
+	Health              *ShareSchedulingHealthView `json:"health"`
+	RampFactor          float64                    `json:"ramp_factor"`
+	Ramp                *ShareSchedulingRampView   `json:"ramp"`
+	EffectiveWeight     float64                    `json:"effective_weight"`
+	OtherGroupIDs       []int64                    `json:"other_group_ids"`
+	BaseShare           float64                    `json:"base_share"`
+	ExpectedShare       float64                    `json:"expected_share"`
+	ShareIfHealthy      float64                    `json:"share_if_healthy"`
+	ActualRequests1h    int64                      `json:"actual_requests_1h"`
+	ActualShare1h       *float64                   `json:"actual_share_1h"`
+}
+
+// ShareSchedulingHealthView is the R1 window of an account (design §11.1);
+// rates are 0–1.
+type ShareSchedulingHealthView struct {
+	WindowMinutes    int      `json:"window_minutes"`
+	Attempts         int64    `json:"attempts"`
+	SoftFailures     int64    `json:"soft_failures"`
+	Rate             *float64 `json:"rate"`
+	TierBaselineRate float64  `json:"tier_baseline_rate"`
+	Insufficient     bool     `json:"insufficient"`
+}
+
+// ShareSchedulingRampView is the R2 slow start of an account (design
+// §11.2).
+type ShareSchedulingRampView struct {
+	Cause  string    `json:"cause"`
+	Since  time.Time `json:"since"`
+	FullAt time.Time `json:"full_at"`
+}
+
+func newShareHealthView(h *shareHealth) *ShareSchedulingHealthView {
+	if h == nil {
+		return nil
+	}
+	v := &ShareSchedulingHealthView{WindowMinutes: int(shareHealthWindow / time.Minute), Attempts: h.Stats.Attempts,
+		SoftFailures: h.Stats.SoftFailures, TierBaselineRate: h.Baseline, Insufficient: h.Insufficient}
+	if !h.Insufficient {
+		rate := h.Rate
+		v.Rate = &rate
+	}
+	return v
+}
+
+func newShareRampView(r shareRamp) *ShareSchedulingRampView {
+	if r.Cause == "" {
+		return nil
+	}
+	return &ShareSchedulingRampView{Cause: r.Cause, Since: r.Since, FullAt: r.FullAt}
 }
 
 // shareMembers lists every member of the group that is not deleted,
@@ -292,8 +344,9 @@ func shareShares(members []shareMember) (expected, ifHealthy []float64, active *
 
 // shareMemberViews builds the member views of a group, sorted by priority
 // and account id. requests are the members' successful requests in the
-// group over the last hour (nil when unknown).
-func shareMemberViews(groupID int64, accounts []Account, requests map[int64]int64, now time.Time) ([]ShareSchedulingMemberView, *int) {
+// group over the last hour (nil when unknown). base_share weighs by load
+// factor only; the other shares by the effective weight.
+func (s *ShareSchedulingService) shareMemberViews(groupID int64, accounts []Account, requests map[int64]int64, now time.Time) ([]ShareSchedulingMemberView, *int) {
 	sorted := slices.Clone(accounts)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		if sorted[i].Priority != sorted[j].Priority {
@@ -302,14 +355,17 @@ func shareMemberViews(groupID int64, accounts []Account, requests map[int64]int6
 		return sorted[i].ID < sorted[j].ID
 	})
 	members := make([]shareMember, len(sorted))
+	base := make([]shareMember, len(sorted))
 	views := make([]ShareSchedulingMemberView, len(sorted))
 	var total int64
 	for i := range sorted {
 		acc := &sorted[i]
+		w := s.shareWeight(groupID, acc, now)
 		v := ShareSchedulingMemberView{AccountID: acc.ID, Name: acc.Name, Platform: acc.Platform, Type: acc.Type,
 			Status: acc.Status, Schedulable: acc.Schedulable, Healthy: acc.IsSchedulable(), Priority: acc.Priority,
-			Concurrency: acc.Concurrency, EffectiveLoadFactor: shareWeight(acc), OtherGroupIDs: shareOtherGroups(acc, groupID),
-			ActualRequests1h: requests[acc.ID]}
+			Concurrency: acc.Concurrency, EffectiveLoadFactor: w.LoadFactor, HealthFactor: w.HealthFactor(),
+			Health: newShareHealthView(w.Health), RampFactor: w.Ramp.Factor, Ramp: newShareRampView(w.Ramp),
+			EffectiveWeight: w.Effective, OtherGroupIDs: shareOtherGroups(acc, groupID), ActualRequests1h: requests[acc.ID]}
 		if acc.LoadFactor != nil {
 			lf := *acc.LoadFactor
 			v.LoadFactor = &lf
@@ -324,11 +380,13 @@ func shareMemberViews(groupID int64, accounts []Account, requests map[int64]int6
 		}
 		total += v.ActualRequests1h
 		views[i] = v
-		members[i] = shareMember{priority: acc.Priority, weight: float64(v.EffectiveLoadFactor), healthy: v.Healthy}
+		members[i] = shareMember{priority: acc.Priority, weight: w.Effective, healthy: v.Healthy}
+		base[i] = shareMember{priority: acc.Priority, weight: float64(w.LoadFactor), healthy: v.Healthy}
 	}
 	expected, ifHealthy, active := shareShares(members)
+	baseShares, _, _ := shareShares(base)
 	for i := range views {
-		views[i].ExpectedShare, views[i].ShareIfHealthy = expected[i], ifHealthy[i]
+		views[i].ExpectedShare, views[i].ShareIfHealthy, views[i].BaseShare = expected[i], ifHealthy[i], baseShares[i]
 		if total > 0 {
 			share := float64(views[i].ActualRequests1h) / float64(total)
 			views[i].ActualShare1h = &share
@@ -367,7 +425,7 @@ func (s *ShareSchedulingService) groupMemberViews(ctx context.Context, groupID i
 	if err != nil {
 		slog.Warn("share_scheduling.member_requests_failed", "group_id", groupID, "error", err)
 	}
-	views, active := shareMemberViews(groupID, accounts, requests, now)
+	views, active := s.shareMemberViews(groupID, accounts, requests, now)
 	return views, active, nil
 }
 
@@ -718,7 +776,7 @@ func (s *ShareSchedulingService) AccountRules(ctx context.Context, accountID int
 		if err != nil {
 			return nil, err
 		}
-		views, _ := shareMemberViews(groupID, accounts, nil, now)
+		views, _ := s.shareMemberViews(groupID, accounts, nil, now)
 		for _, v := range views {
 			if v.AccountID != accountID {
 				continue
@@ -808,6 +866,18 @@ func sharePreviewWarnings(members []ShareSchedulingMemberView, active *int, enab
 			warnings = append(warnings, ShareSchedulingWarning{Code: ShareWarningHighLoadFactor, AccountID: &id, Value: &lf})
 		}
 	}
+	for _, m := range members {
+		if m.Ramp != nil {
+			id, factor := m.AccountID, m.RampFactor
+			warnings = append(warnings, ShareSchedulingWarning{Code: ShareWarningRamping, AccountID: &id, Value: &factor})
+		}
+	}
+	for _, m := range members {
+		if m.HealthFactor != nil && *m.HealthFactor <= shareDownweightedFactor {
+			id, factor := m.AccountID, *m.HealthFactor
+			warnings = append(warnings, ShareSchedulingWarning{Code: ShareWarningHealthDownweighted, AccountID: &id, Value: &factor})
+		}
+	}
 	return warnings
 }
 
@@ -825,9 +895,12 @@ type ShareSchedulingExplainInput struct {
 	Body            json.RawMessage `json:"body,omitempty"`
 }
 
-// ShareSchedulingExplainEntry is one member's evaluation with its load.
+// ShareSchedulingExplainEntry is one member's evaluation with its weight
+// factors and load.
 type ShareSchedulingExplainEntry struct {
 	sharesched.Entry
+	HealthFactor *float64 `json:"health_factor"`
+	RampFactor   float64  `json:"ramp_factor"`
 	// LoadRate is (in flight + waiting) × 100 ÷ load factor; nil when it
 	// could not be read.
 	LoadRate  *int `json:"load_rate"`
@@ -951,6 +1024,14 @@ func (s *ShareSchedulingService) Explain(ctx context.Context, groupID int64, in 
 		WaitBudgetMs: d.Wait.Milliseconds(), Reason: string(d.Reason), Steps: make([]int64, len(d.Steps)),
 		Write: shareWriteName(d.Write), SpillWrite: shareWriteName(d.Spill), SpillReason: string(d.SpillReason),
 		MaxWaiting: d.MaxWaiting, Target: d.Target, Ideal: d.Ideal, Entries: shareExplainEntries(ctx, concurrency, d.Entries, accounts)}
+	for i := range out.Entries {
+		e := &out.Entries[i]
+		e.RampFactor = 1
+		if acc := accounts[e.AccountID]; acc != nil {
+			w := s.shareWeight(groupID, acc, req.Now)
+			e.HealthFactor, e.RampFactor = w.HealthFactor(), w.Ramp.Factor
+		}
+	}
 	if d.Target > 0 {
 		active := d.ActivePriority
 		out.ActivePriority = &active

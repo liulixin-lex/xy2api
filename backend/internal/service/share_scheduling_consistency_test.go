@@ -30,7 +30,7 @@ func TestShareSchedulingWeightsAreLoadFactorsEverywhere(t *testing.T) {
 			gid := shareTestGroupID
 			_, inputs, err := env.gateway.shareGatewayCandidates(context.Background(), nil, &gid, "", nil, 0)
 			require.NoError(t, err)
-			views, _ := shareMemberViews(gid, env.repo.accounts, nil, time.Now())
+			views, _ := env.share.shareMemberViews(gid, env.repo.accounts, nil, time.Now())
 			for _, v := range views {
 				require.Equal(t, want[v.AccountID], v.EffectiveLoadFactor)
 			}

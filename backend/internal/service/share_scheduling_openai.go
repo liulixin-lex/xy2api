@@ -160,7 +160,7 @@ func (s *OpenAIGatewayService) shareOpenAILastResort(ctx context.Context, gp *sh
 	gates := s.newOpenAIShareGates(withResilienceLastResortGate(ctx), openAIShareSelection{groupID: req.GroupID,
 		model: req.RequestedModel, transport: req.RequiredTransport, capability: req.RequiredCapability, platform: platform})
 	now := time.Now()
-	round := svc.newShareLastResortRound(accounts, req.RequestedModel, req.ExcludedIDs, avoided, binding.AccountID, now,
+	round := svc.newShareLastResortRound(gp.groupID, accounts, req.RequestedModel, req.ExcludedIDs, avoided, binding.AccountID, now,
 		func(acc *Account) bool { return acc.Platform == platform && acc.IsOpenAICompatible() },
 		s.resilienceOpenAIPenaltyOf,
 		func(acc *Account, _ bool) sharesched.Reason {
@@ -261,8 +261,7 @@ func (s *OpenAIGatewayService) shareOpenAICandidates(ctx context.Context, in ope
 	for i := range listed {
 		acc := &listed[i]
 		accounts[acc.ID] = acc
-		c := sharesched.Candidate{AccountID: acc.ID, Platform: acc.Platform, Class: shareAccountClass(acc),
-			Priority: acc.Priority, Weight: shareWeight(acc)}
+		c := s.shareScheduling.shareCandidate(derefGroupID(in.groupID), acc, now)
 		if _, excluded := in.excluded[acc.ID]; excluded {
 			c.Excluded, c.Eligible = true, true
 			if resilience.StateFrom(ctx).Avoided(acc.ID) {
@@ -283,7 +282,7 @@ func (s *OpenAIGatewayService) shareOpenAICandidates(ctx context.Context, in ope
 	if boundID > 0 && accounts[boundID] == nil {
 		if _, excluded := in.excluded[boundID]; !excluded {
 			if acc := gates.lookup(boundID); acc != nil && acc.Platform == in.platform && s.openAIAccountMatchesSchedulingGroup(acc, in.groupID) {
-				if c, ok := s.shareScheduling.shareMissingBoundCandidate(acc, in.model, now, s.resilienceOpenAIPenaltyOf); ok {
+				if c, ok := s.shareScheduling.shareMissingBoundCandidate(derefGroupID(in.groupID), acc, in.model, now, s.resilienceOpenAIPenaltyOf); ok {
 					cands = append(cands, c)
 				}
 			}

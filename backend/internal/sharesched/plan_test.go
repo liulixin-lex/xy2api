@@ -14,7 +14,8 @@ var testNow = time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 
 // member is an eligible candidate of a priority and weight (load factor).
 func member(id int64, priority, weight int) Candidate {
-	return Candidate{AccountID: id, Platform: "anthropic", Class: "anthropic/oauth", Priority: priority, Weight: weight, Eligible: true}
+	return Candidate{AccountID: id, Platform: "anthropic", Class: "anthropic/oauth", Priority: priority,
+		LoadFactor: weight, Weight: float64(weight), Eligible: true}
 }
 
 func members(list ...Candidate) []Candidate { return list }
@@ -83,6 +84,31 @@ func TestExtremeWeightRatio(t *testing.T) {
 	}
 	require.InDelta(t, 9999.0/10099, float64(counts[1])/sessions, 0.002)
 	require.Positive(t, counts[2])
+}
+
+// TestAdaptiveWeightsArePlacedInProportion: the adaptive factors make
+// weights fractional; placement follows them, and explain keeps the load
+// factor apart from the effective weight.
+func TestAdaptiveWeightsArePlacedInProportion(t *testing.T) {
+	cands := members(member(1, 1, 100), member(2, 1, 100), member(3, 1, 1))
+	cands[1].Weight = 20
+	cands[2].Weight = 0.05
+	counts := map[int64]int{}
+	const sessions = 40000
+	var d Decision
+	for i := 0; i < sessions; i++ {
+		d = Plan(newSession(fmt.Sprintf("f-%d", i)), cands)
+		counts[firstStep(t, d)]++
+	}
+	total := 100 + 20 + 0.05
+	require.InDelta(t, 100/total, float64(counts[1])/sessions, 0.01)
+	require.InDelta(t, 20/total, float64(counts[2])/sessions, 0.01)
+	for _, e := range d.Entries {
+		if e.AccountID == 2 {
+			require.Equal(t, 100, e.LoadFactor)
+			require.InDelta(t, 20, e.EffectiveWeight, 1e-9)
+		}
+	}
 }
 
 func TestNonPositiveWeightCountsAsOne(t *testing.T) {

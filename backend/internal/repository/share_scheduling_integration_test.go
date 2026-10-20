@@ -194,6 +194,78 @@ func TestShareSchedulingAccountUsage(t *testing.T) {
 	require.Nil(t, empty.TTFTP50Ms)
 }
 
+// TestShareSchedulingAccountAttempts: the health factor reads successes per
+// account and every failed upstream attempt of the window, grouped.
+func TestShareSchedulingAccountAttempts(t *testing.T) {
+	ctx := context.Background()
+	repo := NewShareSchedulingRepository(integrationDB)
+	groupID := shareIntegrationGroup(t, "share-attempts")
+	suffix := time.Now().UnixNano()
+	var userID, keyID int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx,
+		`INSERT INTO users(email,password_hash) VALUES($1,'x') RETURNING id`, fmt.Sprintf("share-attempts-%d@example.test", suffix)).Scan(&userID))
+	require.NoError(t, integrationDB.QueryRowContext(ctx,
+		`INSERT INTO api_keys(user_id,key,name) VALUES($1,$2,'share') RETURNING id`, userID, fmt.Sprintf("sk-attempts-%d", suffix)).Scan(&keyID))
+	accounts := make([]int64, 3)
+	for i := range accounts {
+		require.NoError(t, integrationDB.QueryRowContext(ctx,
+			`INSERT INTO accounts(name,platform,type,credentials,extra) VALUES($1,'anthropic','oauth','{}'::jsonb,'{}'::jsonb) RETURNING id`,
+			fmt.Sprintf("share-attempts-%d-%d", suffix, i)).Scan(&accounts[i]))
+	}
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM ops_error_logs WHERE group_id = $1`, groupID)
+		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM usage_logs WHERE user_id = $1`, userID)
+		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM accounts WHERE id = ANY($1)`, fmt.Sprintf("{%d,%d,%d}", accounts[0], accounts[1], accounts[2]))
+		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM api_keys WHERE id = $1`, keyID)
+		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, userID)
+	})
+	now := time.Now()
+	for i, at := range []time.Time{now.Add(-time.Minute), now.Add(-10 * time.Minute), now.Add(-2 * time.Hour)} {
+		_, err := integrationDB.ExecContext(ctx, `INSERT INTO usage_logs(user_id,api_key_id,account_id,group_id,model,total_cost,actual_cost,created_at)
+			VALUES($1,$2,$3,$4,'claude-x',0,0,$5)`, userID, keyID, accounts[i%2], groupID, at)
+		require.NoError(t, err)
+	}
+	event := func(account int64, kind string, status int, category string) map[string]any {
+		ev := map[string]any{"account_id": account, "kind": kind, "upstream_status_code": status, "message": "upstream failed"}
+		if category != "" {
+			ev["resilience_category"] = category
+		}
+		return ev
+	}
+	insertRow := func(status int, at time.Time, events ...map[string]any) {
+		raw, err := json.Marshal(events)
+		require.NoError(t, err)
+		_, err = integrationDB.ExecContext(ctx, `INSERT INTO ops_error_logs(error_phase,error_type,status_code,group_id,created_at,upstream_errors)
+			VALUES('upstream','upstream_error',$1,$2,$3,$4::jsonb)`, status, groupID, at, string(raw))
+		require.NoError(t, err)
+	}
+	// A recovered request: two failed attempts, then success elsewhere.
+	insertRow(200, now.Add(-2*time.Minute), event(accounts[0], "failover", 502, "TRANSIENT"), event(accounts[1], "request_error", 0, ""))
+	insertRow(502, now.Add(-3*time.Minute), event(accounts[0], "failover", 502, "TRANSIENT"), event(accounts[2], "failover", 402, "BALANCE"))
+	insertRow(502, now.Add(-2*time.Hour), event(accounts[0], "failover", 502, "TRANSIENT")) // outside the window
+	_, err := integrationDB.ExecContext(ctx, `INSERT INTO ops_error_logs(error_phase,error_type,status_code,group_id,created_at,upstream_errors)
+		VALUES('upstream','upstream_error',502,$1,$2,'null'::jsonb)`, groupID, now.Add(-time.Minute))
+	require.NoError(t, err)
+
+	got, err := repo.AccountAttempts(ctx, accounts, now.Add(-30*time.Minute), now)
+	require.NoError(t, err)
+	require.Equal(t, map[int64]int64{accounts[0]: 1, accounts[1]: 1}, got.Successes)
+	counts := map[service.ShareSchedulingUpstreamAttempt]int64{}
+	for _, f := range got.Failures {
+		counts[f.ShareSchedulingUpstreamAttempt] += f.Count
+	}
+	require.Equal(t, map[service.ShareSchedulingUpstreamAttempt]int64{
+		{AccountID: accounts[0], Kind: "failover", StatusCode: 502, Category: "TRANSIENT", Message: "upstream failed"}: 2,
+		{AccountID: accounts[1], Kind: "request_error", StatusCode: 0, Message: "upstream failed"}:                     1,
+		{AccountID: accounts[2], Kind: "failover", StatusCode: 402, Category: "BALANCE", Message: "upstream failed"}:   1,
+	}, counts)
+
+	only, err := repo.AccountAttempts(ctx, accounts[2:], now.Add(-30*time.Minute), now)
+	require.NoError(t, err)
+	require.Empty(t, only.Successes)
+	require.Len(t, only.Failures, 1, "attempts of other accounts are left out")
+}
+
 func TestShareSchedulingStoreCounters(t *testing.T) {
 	ctx := context.Background()
 	groupID := shareIntegrationGroup(t, "share-counters")

@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
+
+	"github.com/lib/pq"
 
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
@@ -215,4 +218,75 @@ func shareRoundedMs(v sql.NullFloat64) *int {
 	}
 	ms := int(v.Float64 + 0.5)
 	return &ms
+}
+
+// shareSchedulingMaxAttemptGroups bounds the failed-attempt rows one health
+// read returns.
+const shareSchedulingMaxAttemptGroups = 50000
+
+// AccountAttempts reads the successful requests of the accounts from
+// usage_logs and their failed upstream attempts from
+// ops_error_logs.upstream_errors, grouped by what the health factor tells
+// apart (design §11.1).
+func (r *shareSchedulingRepository) AccountAttempts(ctx context.Context, accountIDs []int64, from, to time.Time) (service.ShareSchedulingAccountAttempts, error) {
+	out := service.ShareSchedulingAccountAttempts{Successes: map[int64]int64{}}
+	if len(accountIDs) == 0 {
+		return out, nil
+	}
+	ids := pq.Array(accountIDs)
+	err := r.readLogs(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `
+			SELECT account_id, COUNT(*)
+			FROM usage_logs
+			WHERE account_id = ANY($1) AND created_at >= $2 AND created_at < $3
+			GROUP BY account_id`, ids, from, to)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id, n int64
+			if err := rows.Scan(&id, &n); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			out.Successes[id] = n
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows, err = tx.QueryContext(ctx, `
+			SELECT (ev->>'account_id')::bigint,
+			       COALESCE(ev->>'kind', ''),
+			       CASE WHEN jsonb_typeof(ev->'upstream_status_code') = 'number' THEN (ev->>'upstream_status_code')::int ELSE 0 END,
+			       COALESCE(ev->>'resilience_category', ''),
+			       LEFT(COALESCE(ev->>'message', ''), 200),
+			       COUNT(*)
+			FROM ops_error_logs e
+			CROSS JOIN LATERAL jsonb_array_elements(
+				CASE WHEN jsonb_typeof(e.upstream_errors) = 'array' THEN e.upstream_errors ELSE '[]'::jsonb END) AS ev
+			WHERE e.created_at >= $2 AND e.created_at < $3 AND e.upstream_errors IS NOT NULL
+			  AND jsonb_typeof(ev->'account_id') = 'number'
+			  AND (ev->>'account_id')::bigint = ANY($1)
+			GROUP BY 1, 2, 3, 4, 5
+			LIMIT `+strconv.Itoa(shareSchedulingMaxAttemptGroups), ids, from, to)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var a service.ShareSchedulingAttemptCount
+			if err := rows.Scan(&a.AccountID, &a.Kind, &a.StatusCode, &a.Category, &a.Message, &a.Count); err != nil {
+				return err
+			}
+			out.Failures = append(out.Failures, a)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return service.ShareSchedulingAccountAttempts{}, fmt.Errorf("read share scheduling account attempts: %w", err)
+	}
+	return out, nil
 }

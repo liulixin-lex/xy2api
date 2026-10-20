@@ -21,7 +21,7 @@ Within a share-scheduled group, the tier of an account MUST be its account prior
 
 ### Requirement: Proportional new-session placement
 
-New sessions MUST be placed among eligible accounts of the active priority by weighted rendezvous hashing over the affinity key. The weight of an account MUST be its effective load factor: the load factor when set, otherwise its concurrency, otherwise 1. Weights stored in the policy MUST be ignored.
+New sessions MUST be placed among eligible accounts of the active priority by weighted rendezvous hashing over the affinity key. The weight of an account MUST be its effective load factor (the load factor when set, otherwise its concurrency, otherwise 1) times the adaptive factors of the requirement "Adaptive weights". Weights stored in the policy MUST be ignored.
 
 #### Scenario: Load factor ratio
 - **WHEN** three eligible accounts of one priority have load factors 500, 300 and 200 and 10,000 distinct session keys are placed
@@ -94,9 +94,28 @@ For new placements and spills, an account whose load rate, `(in flight + waiting
 - **THEN** new sessions are placed on another account of the same priority
 - **AND** sessions already bound to it continue while it has a free slot.
 
+### Requirement: Adaptive weights
+
+The weight of an account MUST be multiplied by a health factor and a ramp factor and MUST NOT fall below 5% of its effective load factor. Neither factor MUST have a setting, and both MUST be 1 while the gateway-resilience master switch is off. The factors MUST NOT change the account of a session that hits its binding, the saturation check or the tiers.
+
+- Health factor: over the last 30 minutes, the account's soft failures (attempts that gateway resilience answers with a soft cooldown) over its attempts (successful requests plus soft failures), shrunk towards the tier baseline with 20 pseudo-attempts, MUST give `max(0.2, 2^(−excess ÷ 5 points))` where the excess is the shrunk rate above the baseline plus 3 points, quantized to 0.05. The baseline MUST be the lowest raw rate of the tier's healthy members with at least 20 attempts, or with any attempt when none has 20. A tier with fewer than two healthy members, an account without attempts, stale or unreadable statistics, and a disabled ops monitor MUST give no factor (×1).
+- Ramp factor: after a balance pause, a hard penalty, or an outage of at least 5 minutes observed by the instance, the factor MUST climb from 0.1 to 1 over 10 minutes, quantized to 0.05. A short soft cooldown MUST NOT ramp.
+
+#### Scenario: Unstable account in a tier
+- **WHEN** three accounts of one priority with load factor 100 had 1.1%, 9.0% and 20.8% soft failures in the last 30 minutes
+- **THEN** their health factors are 1, 0.5 and 0.2 and new sessions split about 59%, 29% and 12%.
+
+#### Scenario: Low-sample peer
+- **WHEN** a healthy peer had 2 attempts without failure and the others more than 20 attempts
+- **THEN** the baseline is taken from the members with at least 20 attempts.
+
+#### Scenario: Recovery from a balance pause
+- **WHEN** an account's balance pause ended 3 minutes ago
+- **THEN** its weight is 35% of its load factor and reaches 100% 10 minutes after the pause ended.
+
 ### Requirement: Placement preview
 
-Before saving, the admin API MUST return the expected new-session share of every member and structured warnings: global switch off, no healthy account, highest priority without a healthy account, one account above 80% of new sessions, and accounts with a load factor of 999 or more.
+Before saving, the admin API MUST return the expected new-session share of every member and structured warnings: global switch off, no healthy account, highest priority without a healthy account, one account above 80% of new sessions, accounts with a load factor of 999 or more, accounts that are ramping, and accounts with a health factor of 0.5 or less.
 
 #### Scenario: Dominant account
 - **WHEN** a healthy account's load factor gives it more than 80% of the active priority's weight

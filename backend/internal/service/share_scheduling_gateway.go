@@ -111,8 +111,7 @@ func (s *GatewayService) shareGatewayCandidates(ctx context.Context, group *Grou
 	for i := range accounts {
 		acc := &accounts[i]
 		in.accounts[acc.ID] = acc
-		c := sharesched.Candidate{AccountID: acc.ID, Platform: acc.Platform, Class: shareAccountClass(acc),
-			Priority: acc.Priority, Weight: shareWeight(acc)}
+		c := s.shareScheduling.shareCandidate(derefGroupID(groupID), acc, now)
 		if _, excluded := excludedIDs[acc.ID]; excluded {
 			c.Excluded, c.Eligible = true, true
 			if resilience.StateFrom(ctx).Avoided(acc.ID) {
@@ -131,7 +130,7 @@ func (s *GatewayService) shareGatewayCandidates(ctx context.Context, group *Grou
 	}
 	if boundID > 0 && in.accounts[boundID] == nil {
 		if _, excluded := excludedIDs[boundID]; !excluded {
-			if c, ok := s.shareScheduling.shareMissingBoundCandidate(s.lookupShareBoundAccount(ctx, boundID), requestedModel, now, resiliencePenaltyOf); ok {
+			if c, ok := s.shareScheduling.shareMissingBoundCandidate(derefGroupID(groupID), s.lookupShareBoundAccount(ctx, boundID), requestedModel, now, resiliencePenaltyOf); ok {
 				in.cands = append(in.cands, c)
 			}
 		}
@@ -212,7 +211,7 @@ func (s *GatewayService) shareGatewayLastResort(ctx context.Context, gp *shareGr
 	gates := s.newGatewayCandidateGates(ctx, groupID, platform, useMixed, requestedModel)
 	gateCtx := withResilienceLastResortGate(ctx)
 	now := time.Now()
-	round := svc.newShareLastResortRound(accounts, requestedModel, excludedIDs, avoided, binding.AccountID, now, nil, nil,
+	round := svc.newShareLastResortRound(gp.groupID, accounts, requestedModel, excludedIDs, avoided, binding.AccountID, now, nil, nil,
 		func(acc *Account, sticky bool) sharesched.Reason {
 			reason, _ := gates.candidateReason(gateCtx, acc, sticky, now)
 			return reason

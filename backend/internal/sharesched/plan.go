@@ -34,9 +34,12 @@ type Candidate struct {
 	Class string
 	// Priority is the account priority: the tier, lower first.
 	Priority int
-	// Weight is the account's effective load factor; values below 1 count
-	// as 1.
-	Weight   int
+	// LoadFactor is the account's effective load factor; values below 1
+	// count as 1.
+	LoadFactor int
+	// Weight is the account's share weight: the load factor times the
+	// adaptive factors. A non-positive weight counts as the load factor.
+	Weight   float64
 	Eligible bool
 	Reason   Reason
 	// RecoverAt is when an ineligible account is expected back from a soft
@@ -88,14 +91,15 @@ type Step struct {
 
 // Entry is the per-member evaluation, kept for explain.
 type Entry struct {
-	AccountID  int64  `json:"account_id"`
-	Priority   int    `json:"priority"`
-	LoadFactor int    `json:"load_factor"`
-	Class      string `json:"class,omitempty"`
-	Eligible   bool   `json:"eligible"`
-	Excluded   bool   `json:"excluded"`
-	Reason     Reason `json:"reason,omitempty"`
-	Rank       int    `json:"rank"`
+	AccountID       int64   `json:"account_id"`
+	Priority        int     `json:"priority"`
+	LoadFactor      int     `json:"load_factor"`
+	EffectiveWeight float64 `json:"effective_weight"`
+	Class           string  `json:"class,omitempty"`
+	Eligible        bool    `json:"eligible"`
+	Excluded        bool    `json:"excluded"`
+	Reason          Reason  `json:"reason,omitempty"`
+	Rank            int     `json:"rank"`
 
 	score       float64
 	recoverAt   time.Time
@@ -141,7 +145,8 @@ func (d Decision) Outcome(index int) (Reason, Write) {
 
 // Plan computes the placement for one request. It is a pure function of its
 // inputs: identical inputs give identical decisions on every instance. The
-// tier of a candidate is its priority and its weight its load factor.
+// tier of a candidate is its priority and its weight its load factor times
+// the adaptive factors.
 func Plan(req Request, cands []Candidate) Decision {
 	entries := make([]Entry, 0, len(cands))
 	present := make(map[int64]struct{}, len(cands))
@@ -151,7 +156,7 @@ func Plan(req Request, cands []Candidate) Decision {
 		}
 		present[c.AccountID] = struct{}{}
 		e := Entry{
-			AccountID: c.AccountID, Priority: c.Priority, LoadFactor: max(c.Weight, 1), Class: c.Class,
+			AccountID: c.AccountID, Priority: c.Priority, LoadFactor: max(c.LoadFactor, 1), EffectiveWeight: c.Weight, Class: c.Class,
 			Eligible: c.Eligible, Excluded: c.Excluded, Reason: c.Reason,
 			recoverAt: c.RecoverAt, stableSince: c.StableSince,
 		}
@@ -163,7 +168,10 @@ func Plan(req Request, cands []Candidate) Decision {
 		case e.Reason == "":
 			e.Reason = ReasonIneligible
 		}
-		e.score = hrwWeighted(hrwDraw(req.GroupID, req.Key, e.AccountID), float64(e.LoadFactor))
+		if e.EffectiveWeight <= 0 {
+			e.EffectiveWeight = float64(e.LoadFactor)
+		}
+		e.score = hrwWeighted(hrwDraw(req.GroupID, req.Key, e.AccountID), e.EffectiveWeight)
 		entries = append(entries, e)
 	}
 
