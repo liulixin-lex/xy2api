@@ -6,7 +6,7 @@
 
 ## 当前交接状态
 
-### 份额调度精简 `20261020-share-simplify`（进行中；2026-10-20T16:32Z 更新）
+### 份额调度精简 `20261020-share-simplify`（进行中；2026-10-20T16:42Z 更新）
 
 - **背景**：仓库外的只读分析（`xy2api-artifacts/share-simplify-20261020/`：A 后端审计、B 前端交互审计、C 生产只读分析、D PM 综合、E 实施说明）结论：份额调度难用的根因是它是第二套、按分组维护、与账号池脱节的配置。管理员日常用的是账号级的优先级、启停与负载因子；策略配置一次后就与账号池偏离；编辑器改权重会冻结层级；缺省权重“等权”= 1 与手填权重不在同一刻度；大多数账号跨多个分组；高级参数与观测模块在生产中从未使用。
 - **目标**：用户 2026-10-20 决定“按你的最佳方案进行。授权到 PR，暂不到服务器测试和发版”。按 E 实施说明执行：
@@ -35,6 +35,7 @@
     - 前端：切换时先保存分组再开总开关、空值与类型、系数分解可键盘访问、份额列节流。
 
     全部门禁在 `92d7c13c6` 的干净树上重跑通过。`reenabled` 采样粒度登记 tasks §8。
+  - 修复经 PM 审核通过（`7dd363a66`）。之后补审查 P2-9 第二点：`docs_consistency.json` 的 `retired` 登记解码器接受并忽略的旧策略字段名（`592f67c2b`）；并入前端的精度说明修复（`400ab364e`）。
 - **未完成**（按顺序）：
   1. 审查 agent 复核修复（分支未推送）；
   2. 复核通过、PM 通知后推送并开 PR（§7）。
@@ -142,7 +143,7 @@
 ### 20261020-share-simplify — 份额调度精简（2026-10-20T12:20Z 登记）
 
 - 请求：用户 2026-10-20 授权到 PR，范围见顶部同名小节与 E 实施说明（仓库外）。本会话是后端 agent，持有 PR 分支 `feat/share-simplify-20261020`；前端 agent 持有 `wip/share-simplify-frontend`；PM 会话协调。
-- 状态：独立审查的修复已完成并并入前端修复（`92d7c13c6`），全部门禁重跑通过（2026-10-20T16:32Z）。分支未推送，等待审查 agent 复核；复核通过并经 PM 通知后再推送开 PR。
+- 状态：独立审查的修复已完成，PM 审核通过；旧策略字段名登记与前端精度说明已并入（`400ab364e`），前端门禁、仓库工具与 audit 重跑通过（2026-10-20T16:42Z）。分支未推送，等待审查 agent 复核；复核通过并经 PM 通知后再推送开 PR。
 - 本机联调的管理员合规承诺：由用户 2026-10-20 授权（协调会话转达），仅在本机临时库 `xy2e2e` 中为本地临时管理员接受；联调结束已随库删除。
 
 ## 操作陷阱
@@ -815,3 +816,18 @@ pnpm --dir frontend run build
   - 本机没有 Docker，集成测试在本机跳过。失败查询的排序在临时的本机 PG 18 上验证，用完即删。
 - 卡点/风险：见顶部同名小节。
 - 下一步：等审查 agent 复核；复核通过并经 PM 通知后推送开 PR，不合并、不打 tag。
+
+### 2026-10-20T16:42Z — `20261020-share-simplify` — 旧策略字段名登记为退役，并入前端精度说明
+
+- 请求/目标：PM 审核通过 `7dd363a66`，同意两处口径（`spill_rebind` 算被动、已退役原因只计 `total`）与夹具号码的改动；要求补审查 P2-9 第二点，并入前端 `061f8fea7` 后重跑。
+- 完成操作：
+  - `592f67c2b`：`retired` 新增一条，登记 `soft_spill_max_seconds`、`ms_per_1k_tokens`、`return_deadline_seconds`、`stable_seconds`、`on_spill`、`on_saturated`、`on_failed`、`min_volume`、`cache_domain`、`drain_until` 与 `"realign"`。只在 `sharesched/policy.go`、`policy_test.go`、`compat043/`、两个份额变更、网关韧性 design 与记忆中放行。
+  - `correction`、`window_minutes`、`ttl_seconds`、`max_ms`、`max_waiting`、`drain` 在别处仍在用，不登记。
+  - 仍点名旧字段的 5 处注释改写（`resilience_session.go`、`share_scheduling_exec.go`、`share_scheduling_service.go`、`share_scheduling_resilience_test.go`、`tools/share-scheduling/baseline.sql`）。
+  - 前端 `061f8fea7` 以 `--no-ff` 并入（`400ab364e`）。
+- 修改文件：见上述提交。
+- 验证：
+  - 规则在基线 `3092629d7` 上命中放行范围外 20 个文件、103 处（旧编辑器、接口类型、内核与服务），在当前树上为 0。
+  - 本轮后端只改了注释，`internal/service` 的 vet、lint 与份额用例通过；完整的后端门禁沿用 `92d7c13c6` 的结果。
+  - 在 `400ab364e` 上重跑前端四项（408 个文件、3148 个用例），以及 `tools/tests`、scheduler-diff、文档一致性检查，全部通过；`sync.py audit` 在记忆提交后的干净树上运行。
+- 下一步：等审查 agent 复核；复核通过并经 PM 通知后推送开 PR。
