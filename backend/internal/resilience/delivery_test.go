@@ -140,3 +140,44 @@ func TestUpstreamContextOnDisconnect(t *testing.T) {
 	require.Equal(t, detached, UpstreamContextOnDisconnect(ctx, detached))
 	cancel()
 }
+
+func TestUploadStageIsNoAbuseStrike(t *testing.T) {
+	withPublished(t, nil)
+	var strikes atomic.Int64
+	SetUndeliveredAbuseCheck(func(int64) bool { strikes.Add(1); return true })
+	t.Cleanup(func() { SetUndeliveredAbuseCheck(nil) })
+	var delivered atomic.Int64
+
+	// The body never fully arrived: recorded, never billed as abuse.
+	st, _, cancel := newDeliveryState(t, &delivered)
+	st.BeginUpload()
+	cancel()
+	disconnected, deliveredOut, abuse := st.ResolveDisconnect()
+	require.True(t, disconnected)
+	require.False(t, deliveredOut)
+	require.False(t, abuse)
+	stage, _ := st.DisconnectInfo()
+	require.Equal(t, StageUpload, stage)
+	require.Zero(t, strikes.Load())
+	require.True(t, st.ClaimUndeliveredRecord(), "the record is still written")
+
+	// After the body arrived the request is selecting again and counts.
+	st, _, cancel = newDeliveryState(t, &delivered)
+	st.BeginUpload()
+	st.EndUpload()
+	cancel()
+	_, _, abuse = st.ResolveDisconnect()
+	require.True(t, abuse)
+	stage, _ = st.DisconnectInfo()
+	require.Equal(t, StageSelect, stage)
+
+	// Neither call moves a later stage.
+	st, _, cancel = newDeliveryState(t, &delivered)
+	st.SetStage(StageHeaderWait)
+	st.BeginUpload()
+	st.EndUpload()
+	cancel()
+	st.ResolveDisconnect()
+	stage, _ = st.DisconnectInfo()
+	require.Equal(t, StageHeaderWait, stage)
+}

@@ -13,27 +13,32 @@ import (
 
 	"github.com/gin-gonic/gin"
 	pkghttputil "github.com/liulixin-lex/xy2api/internal/pkg/httputil"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
 // A client whose upload breaks off has gone away: the request is a client
 // cancel (499), not a malformed request (400). In production 12 requests in
 // three hours were recorded as 400 invalid_request_error after uploads that
-// stopped after about 35 seconds (design §8).
+// stopped after about 35 seconds (design §8). Until the body has arrived the
+// request is in the upload stage, so such a client is no abuse strike.
 
 const clientBodyReaderKey = "xy_resilience_client_body_reader"
 
 // clientBodyReader records whether reading the request body failed in the
-// transport.
+// transport, and ends the upload stage when the body was read to its end.
 type clientBodyReader struct {
 	io.ReadCloser
 	broken atomic.Bool
+	state  *resilience.RequestState
 }
 
 func (r *clientBodyReader) Read(p []byte) (int, error) {
 	n, err := r.ReadCloser.Read(p)
 	if isClientUploadBreak(err) {
 		r.broken.Store(true)
+	} else if errors.Is(err, io.EOF) {
+		r.state.EndUpload()
 	}
 	return n, err
 }
@@ -47,7 +52,8 @@ func trackClientBodyRead(c *gin.Context) {
 	if _, preread := c.Request.Body.(*pkghttputil.PrereadBody); preread {
 		return
 	}
-	r := &clientBodyReader{ReadCloser: c.Request.Body}
+	r := &clientBodyReader{ReadCloser: c.Request.Body, state: resilience.StateFrom(c.Request.Context())}
+	r.state.BeginUpload()
 	c.Request.Body = r
 	c.Set(clientBodyReaderKey, r)
 }

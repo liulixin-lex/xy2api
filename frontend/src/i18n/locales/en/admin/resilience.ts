@@ -102,6 +102,7 @@ export default {
       billed: 'Billed',
       notBilled: 'Not billed',
       stages: {
+        upload: 'Uploading the request',
         select: 'Selecting or waiting for a slot',
         header_wait: 'Waiting for upstream headers',
         pre_output: 'Before first output',

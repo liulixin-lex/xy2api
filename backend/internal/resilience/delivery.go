@@ -8,8 +8,10 @@ import (
 	"time"
 )
 
-// Disconnect stages (design §8.2).
+// Disconnect stages (design §8.2). StageUpload is the time before the
+// request body has fully arrived.
 const (
+	StageUpload     = "upload"
 	StageSelect     = "select"
 	StageHeaderWait = "header_wait"
 	StagePreOutput  = "pre_output"
@@ -87,6 +89,25 @@ func (s *RequestState) SetStage(stage string) {
 	}
 	s.d.mu.Lock()
 	s.d.stage = stage
+	s.d.mu.Unlock()
+}
+
+// BeginUpload marks a request whose body is still arriving; EndUpload, once
+// the body was read to its end, returns it to the select stage. Later stages
+// are left alone.
+func (s *RequestState) BeginUpload() { s.swapStage(StageSelect, StageUpload) }
+
+// EndUpload ends the upload stage begun by BeginUpload.
+func (s *RequestState) EndUpload() { s.swapStage(StageUpload, StageSelect) }
+
+func (s *RequestState) swapStage(from, to string) {
+	if s == nil {
+		return
+	}
+	s.d.mu.Lock()
+	if s.d.stage == from {
+		s.d.stage = to
+	}
 	s.d.mu.Unlock()
 }
 
@@ -174,7 +195,9 @@ func (s *RequestState) ResolveDisconnect() (disconnected, delivered, abuse bool)
 		// Info: frequent, and every record is kept in the undelivered table.
 		slog.Info("resilience.undelivered", "group_id", groupID, "api_key_id", apiKeyID, "stage", stage,
 			"elapsed_ms", elapsed.Milliseconds(), "cdn_cut", cut, "edge", s.Edge())
-		if apiKeyID <= 0 {
+		// A client whose upload broke off sent no complete request: nothing
+		// went upstream, so it is no abuse strike.
+		if apiKeyID <= 0 || stage == StageUpload {
 			return
 		}
 		if fn := undeliveredAbuseCheck.Load(); fn != nil && (*fn)(apiKeyID) {

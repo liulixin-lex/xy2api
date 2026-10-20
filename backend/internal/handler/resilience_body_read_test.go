@@ -3,15 +3,19 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	pkghttputil "github.com/liulixin-lex/xy2api/internal/pkg/httputil"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
 
@@ -73,4 +77,42 @@ func TestBrokenUploadIsRecordedAsClientCancel(t *testing.T) {
 
 	require.False(t, isClientUploadBreak(io.EOF))
 	require.False(t, isClientUploadBreak(&http.MaxBytesError{Limit: 1}))
+}
+
+func TestBrokenUploadIsNoAbuseStrike(t *testing.T) {
+	// Production 2026-10-20: requests whose body upload broke off were
+	// recorded as undelivered at the select stage and counted toward the
+	// key's hourly abuse allowance, though nothing went upstream and the
+	// client received nothing.
+	orig := *resilience.Current()
+	resilience.Publish(resilience.Defaults())
+	t.Cleanup(func() { resilience.Publish(orig) })
+	var strikes atomic.Int64
+	resilience.SetUndeliveredAbuseCheck(func(int64) bool { strikes.Add(1); return false })
+	t.Cleanup(func() { resilience.SetUndeliveredAbuseCheck(nil) })
+
+	stageOf := func(body io.Reader) string {
+		gin.SetMode(gin.TestMode)
+		client, leave := context.WithCancel(context.Background())
+		defer leave()
+		st := resilience.NewRequestState()
+		st.InitDelivery(client, time.Now(), func() int64 { return 0 })
+		st.SetAPIKey(7)
+		router := gin.New()
+		router.Use(func(c *gin.Context) { trackClientBodyRead(c); c.Next() })
+		router.POST("/v1/responses", func(c *gin.Context) {
+			_, _ = pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+			leave() // the client is gone
+			st.ResolveDisconnect()
+			c.Status(http.StatusBadRequest)
+		})
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", body).WithContext(resilience.WithRequestState(client, st))
+		router.ServeHTTP(httptest.NewRecorder(), req)
+		stage, _ := st.DisconnectInfo()
+		return stage
+	}
+	require.Equal(t, "upload", stageOf(&brokenUpload{}))
+	require.Zero(t, strikes.Load(), "a broken upload is no abuse strike")
+	require.Equal(t, "select", stageOf(strings.NewReader(`{"model":"gpt-6-sol"}`)))
+	require.Equal(t, int64(1), strikes.Load(), "leaving after the body arrived still counts")
 }

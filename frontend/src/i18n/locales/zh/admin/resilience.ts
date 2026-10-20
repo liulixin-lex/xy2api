@@ -102,6 +102,7 @@ export default {
       billed: '已计费',
       notBilled: '未计费',
       stages: {
+        upload: '上传请求中',
         select: '选号或等待槽位',
         header_wait: '等待上游响应头',
         pre_output: '首输出前',
