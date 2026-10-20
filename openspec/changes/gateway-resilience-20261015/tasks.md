@@ -471,7 +471,11 @@
   - 代价：等待期间新请求会被拒绝（反向代理设了 `lb_try_duration` 时会暂存重试），WebSocket 连接会断开。说明见 `deploy/README.md`“Online Update in a Container”。
   - 登记：具名补丁 `xy-graceful-online-update-restart`（4 条测试绑定）与 `required_literals`。
   - 用例：`TestRestartUsesTheServerHook`、`TestRestartDrainsRequestsInFlight`、`TestRestartDrainIsBounded`、`TestInContainer`、`TestSystemHandlerUpdateInContainerCarriesTheNotice`、`TestLoadRestartDrainSeconds`，以及前端 `VersionBadge.containerNotice.spec.ts`。这些是新增的接口，修复前的代码没有它们，用例无法编译。
-- [ ] 本机全量门禁、CI 与安全扫描；测试服务器只构建一个候选，跑全套场景（含 SW-2），再做 0.4.1→0.4.3 与 0.4.2→0.4.3 的升级演练。
+- [x] 门禁与测试服务器：
+  - 本机全量门禁：四种 vet；golangci-lint 0 问题；全量 unit 与无 tag 测试；`ci_gate` 283 个 `-race` 零跳过；前端 401 个文件 3101 个用例，构建通过；`tools/tests`、scheduler-diff、文档一致性；提交后干净树上的 `sync.py audit`。
+  - PR #114 头 `972a2211c` 两组 18/18。
+  - 测试服务器唯一候选 `972a2211c`：场景 56/56，含 SW-2，冷却剩 59 秒，对应上游 `retry_after` 60；0.4.1→0.4.3、0.4.2→0.4.3 升级演练全过，最长阻塞探测 0.13、0.12 秒，备份恢复一致。
+- [x] 合并与发版（用户 2026-10-20 在会话中直接确认）：PR #114 常规 merge 为 `888f49db8`，与候选源码树相同；main 的 CI 与安全扫描全绿；annotated `v0.4.3`（对象 `f30434efb`）→ `888f49db8`；Release run 39392556340；6 个附件（198,544,619 字节）双 SHA 校验通过；五平台 `vcs.revision=888f49db8`、`vcs.modified=false`、embed 构建；GHCR index `sha256:1a2b9127…` 双架构，version、revision、source 标签正确；latest/0/0.4 指向 0.4.3，0.3 仍为 0.3.0；tag 触发的 CI 与安全扫描全绿。正式镜像在测试服务器空库全新安装（单进程）：启动 3.3 秒，324 条迁移；`/ready` 返回 JSON；`/health`、首页与 6 个静态资源、`/auth/me` 均 200；公开设置的版本为 0.4.3；计费请求 200；XLSX 导出 5,001 行，下载成功；头像压缩为 JPEG 存储；日志 0 条 ERROR。
 - 不做浸泡。本版只改了分类规则、读请求体时的阶段标记和重启路径，没有新增常驻的协程、缓存或计时器。重启路径只在管理员触发时运行，由单元测试与本节用例覆盖。
 - 不在本版：P1-1 部署形态（用户决定暂不考虑；生产换版本前，P1-2 的修复在生产上不生效）；P1-3 与 P2-1、P2-2、P2-3、P2-5、P2-7、P2-8、P2-9，属于主机配置或管理员操作；P2-4 缓存读占比，留待 24 小时报告复核。
 
