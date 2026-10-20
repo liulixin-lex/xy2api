@@ -6,6 +6,35 @@
 
 ## 当前交接状态
 
+### 份额调度精简 `20261020-share-simplify`（进行中；2026-10-20T12:20Z 更新）
+
+- **背景**：仓库外的只读分析（`xy2api-artifacts/share-simplify-20261020/`：A 后端审计、B 前端交互审计、C 生产只读分析、D PM 综合、E 实施说明）结论：份额调度难用的根因是它是第二套、按分组维护、与账号池脱节的配置。管理员日常用的是账号级的优先级、启停与负载因子；策略配置一次后就与账号池偏离；编辑器改权重会冻结层级；缺省权重“等权”= 1 与手填权重不在同一刻度；大多数账号跨多个分组；高级参数与观测模块在生产中从未使用。
+- **目标**：用户 2026-10-20 决定“按你的最佳方案进行。授权到 PR，暂不到服务器测试和发版”。按 E 实施说明执行：
+  - 份额分组的层级 = 账号优先级，权重 = 负载因子（`EffectiveLoadFactor()`），满载与原版对齐；
+  - 每组只剩调度方式（`shadow` 读成原版）与会话保持，全局只剩总开关，其余参数常量化；
+  - 软溢出改用韧性判定；
+  - 删除影子、重平衡、纠偏、选号开销、决策样本、缓存域、排空；
+  - 管理接口按新模型重写。
+- **要求与约束**：
+  - 一个 PR，提交分层（契约 → 后端语义 → 后端删除 → 前端 → 文档与登记）；不改 `VERSION`；不新增迁移；
+  - 保存只改两个字段，保证可回退到 0.4.3 / 0.3.0；
+  - 推送与开 PR 等 PM 通知；不合并、不打 tag、不发版、不连任何服务器；
+  - 前端由另一位 agent 在 `wip/share-simplify-frontend` 分支开发，最后并入本分支。
+- **已完成**：契约提交，即 OpenSpec 变更 [`simplify-share-scheduling-20261020`](../openspec/changes/simplify-share-scheduling-20261020/design.md)（design §7 为管理接口契约）。
+- **未完成**（按顺序）：
+  1. PM 确认契约；
+  2. 后端语义（tasks §2）；
+  3. 接口重写与模块删除（§3）；
+  4. 并入前端；
+  5. 文档与登记（§5）；
+  6. 门禁、推送、开 PR（§6）。
+- **卡点与风险**：
+  - 升级瞬间份额分组的新会话分布改由负载因子决定，负载因子很大的账号会拿到绝大多数新会话；
+  - 改负载因子同时影响该账号所在的原版分组。
+
+  见 design §10。
+- **关键位置**：分支 `feat/share-simplify-20261020`（自 origin/main `3092629d7`）；`openspec/changes/simplify-share-scheduling-20261020/`；份额代码在 `backend/internal/sharesched` 与 `backend/internal/service/share_scheduling_*.go`。
+
 ### XY2API 0.4.3 正式发布完成（2026-10-20；生产未部署）
 
 - 发布：`v0.4.3`（annotated 对象 `f30434efb`）→ main 合并提交 `888f49db8`（[PR #114](https://github.com/liulixin-lex/xy2api/pull/114)，头 `972a2211c`，两者源码树相同）。Release run 39392556340；6 个附件（198,544,619 字节）双 SHA 校验通过；五平台 `vcs.revision=888f49db8`、`vcs.modified=false`、embed 构建；GHCR index `sha256:1a2b9127…` 双架构，version、revision、source 标签正确；latest/0/0.4 指向 0.4.3，0.3 仍为 0.3.0；tag 触发的 CI 与安全扫描全绿。
@@ -100,7 +129,10 @@
 
 ## 进行中的工作
 
-- 无。
+### 20261020-share-simplify — 份额调度精简（2026-10-20T12:20Z 登记）
+
+- 请求：用户 2026-10-20 授权到 PR，范围见顶部同名小节与 E 实施说明（仓库外）。本会话是后端 agent，持有 PR 分支 `feat/share-simplify-20261020`；前端 agent 持有 `wip/share-simplify-frontend`；PM 会话协调。
+- 状态：契约提交完成，等 PM 确认契约后改接口形状。
 
 ## 操作陷阱
 
@@ -725,3 +757,21 @@ pnpm --dir frontend run build
 - 验证：见上。本收尾为纯文档，跑了文档一致性检查、`sync.py audit` 和 `tools/tests`。
 - 卡点/风险：等待 CI 的脚本在 zsh 下不拆分 `$ids`，空转到时限被停，改用 bash 脚本。macOS 自带的 bash 3.2 没有 `mapfile`。
 - 下一步：见“当前交接状态”中 0.4.3 的遗留与去向。
+
+### 2026-10-20T12:20Z — `20261020-share-simplify` — 只读分析完成，开始实施
+
+- 请求/目标：用户要求在保留必要功能的前提下精简份额调度（设置、界面与模块），允许打破现有框架。先由多个 agent 做只读分析，再由用户决定方案。
+- 开始状态：origin/main `3092629d7`（0.4.3 加文档）；分析期间未改仓库。
+- 完成操作：
+  - 只读分析，报告在仓库外 `xy2api-artifacts/share-simplify-20261020/`：
+    - A 后端审计：设置与模块清单、数据模型替代方案、原版调度对比，以及对 PM 方案的复核；
+    - B 前端交互审计（含截图）；
+    - C 生产只读分析：管理员的真实用法、账号池结构、影子数据；
+    - D PM 综合；
+    - E 实施说明。
+  - 用户决定按 D 的推荐执行（核心方向、删除排空、删除影子、不浸泡），授权到 PR。
+  - 建立分支 `feat/share-simplify-20261020`，提交 OpenSpec 变更与本登记。
+- 修改文件：`openspec/changes/simplify-share-scheduling-20261020/`（新增）、`docs/README.md`、`tools/upstream-sync/policy.json`（`xy_owned`）、本文件。
+- 验证：`check_docs_consistency.py`。
+- 卡点/风险：见顶部同名小节。
+- 下一步：等 PM 确认契约；其间先做不影响契约的后端语义改动。

@@ -75,6 +75,7 @@
 
 | 变更 | 内容 | 状态 |
 |---|---|---|
+| [`simplify-share-scheduling-20261020`](../openspec/changes/simplify-share-scheduling-20261020/) | 精简份额调度：层级取账号优先级、权重取负载因子，每组只剩调度方式与会话保持 | 进行中（`feat/share-simplify-20261020`） |
 | [`gateway-resilience-20261015`](../openspec/changes/gateway-resilience-20261015/) | 网关韧性 | 随 0.4.0 交付，0.4.1、0.4.2 跟进；部署与后续见其 tasks |
 | [`replace-controlled-with-share-scheduling`](../openspec/changes/replace-controlled-with-share-scheduling/) | 剔除可控调度、引入份额调度 | 0.3.0 已发布，默认关闭；影子运行与灰度待做 |
 | [`async-image-tasks-v2`](../openspec/changes/async-image-tasks-v2/) | 异步生图任务 v2 | 0.3.0 已发布 |

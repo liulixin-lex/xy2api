@@ -48,6 +48,7 @@
       "openspec/changes/iq-detection-operations/**",
       "openspec/changes/replace-controlled-with-share-scheduling/**",
       "openspec/changes/gateway-resilience-20261015/**",
+      "openspec/changes/simplify-share-scheduling-20261020/**",
       "skills/**",
       "tools/**"
     ],
