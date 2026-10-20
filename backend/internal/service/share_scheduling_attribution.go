@@ -32,16 +32,6 @@ const (
 	// histogram per serving account.
 	shareStatsAccountTTFTPrefix = "acct_ttft:"
 	shareTTFTOriginal           = "original"
-
-	// shareStatsSelectionPrefix + scheduler + ":" + field sums the cost of
-	// sampled selections.
-	shareStatsSelectionPrefix = "sel:"
-	shareSelectionSamples     = "samples"
-	shareSelectionMicros      = "us"
-	shareSelectionIOSamples   = "io_samples"
-	shareSelectionRedisTrips  = "redis_rtt"
-	shareSelectionRedisMicros = "redis_us"
-	shareSelectionDBQueries   = "db_queries"
 )
 
 // shareTTFTBucketsMs are the first-token histogram bounds.
@@ -166,11 +156,7 @@ func (s *ShareSchedulingService) observeUsage(ctx context.Context, log *UsageLog
 
 // cacheTTLFor is the cache lifetime the request established upstream.
 func (s *ShareSchedulingService) cacheTTLFor(obs shareCacheObservation) time.Duration {
-	override := 0
-	if gp := s.groupPolicy(obs.trace.groupID); gp != nil {
-		override = gp.policy.Cache.TTLSeconds
-	}
-	return sharesched.CacheTTL(sharesched.CacheFamily(shareCacheFamily(obs.trace.platform)), obs.oneHour, override)
+	return sharesched.CacheTTL(shareCacheFamily(obs.trace.platform), obs.oneHour)
 }
 
 // classifyCache names why a request did or did not read the cache. On the
@@ -205,14 +191,12 @@ func shareCacheSwitchClass(trace shareTrace) string {
 	switch trace.reason {
 	case sharesched.ReasonFailoverNext:
 		return shareCacheMissSwitchFailover
-	case sharesched.ReasonSpillRebind, sharesched.ReasonSpillKeep, sharesched.ReasonTierOverflowSaturated:
+	case sharesched.ReasonSpillRebind, sharesched.ReasonTierOverflowSaturated:
 		return shareCacheMissSwitchSaturate
 	case sharesched.ReasonRebindUnavailable, sharesched.ReasonSoftSpill, sharesched.ReasonTierOverflowUnavailable:
 		return shareCacheMissSwitchDown
-	case sharesched.ReasonRealignCold, sharesched.ReasonReturnCold, sharesched.ReasonReturnImmediate,
-		sharesched.ReasonReturnDeadline, sharesched.ReasonDrainCold, sharesched.ReasonDrainDeadline,
-		sharesched.ReasonAdminRebalance, sharesched.ReasonModelRouting, sharesched.ReasonModelRoutingFallback,
-		sharesched.ReasonNewSession:
+	case sharesched.ReasonRealignCold, sharesched.ReasonReturnCold, sharesched.ReasonModelRouting,
+		sharesched.ReasonModelRoutingFallback, sharesched.ReasonNewSession:
 		return shareCacheMissSwitchPolicy
 	}
 	if trace.switched {

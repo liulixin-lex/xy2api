@@ -60,6 +60,15 @@ func newShareInstancePair(t *testing.T, accounts ...Account) (a, b *shareAdminEn
 func TestShareSchedulingInstancesStayConsistent(t *testing.T) {
 	a, b := newShareInstancePair(t, Account{ID: 1}, Account{ID: 2}, Account{ID: 3})
 	require.Nil(t, b.share.groupPolicy(shareTestGroupID), "nothing is stored yet")
+	// Load factors 5:3:2 in one priority, on both instances' account views.
+	for _, env := range []*shareAdminEnv{a, b} {
+		for id, load := range map[int64]int{1: 5, 2: 3, 3: 2} {
+			for _, acc := range []*Account{env.repo.accountsByID[id], accountIn(env.repo.accounts, id)} {
+				lf := load
+				acc.Priority, acc.LoadFactor = 1, &lf
+			}
+		}
+	}
 
 	_, err := a.share.UpdateSettings(context.Background(), ShareSchedulingSettings{Enabled: true, CacheAttribution: true, AttributionSampleRate: 1})
 	require.NoError(t, err)

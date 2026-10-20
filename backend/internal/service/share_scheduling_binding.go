@@ -114,11 +114,10 @@ func (s *ShareSchedulingService) shareBindingTTL(groupID int64) (time.Duration, 
 	if s == nil {
 		return 0, false
 	}
-	gp := s.groupPolicy(groupID)
-	if gp == nil || gp.policy.Scheduler != sharesched.SchedulerShare {
+	if !s.shareSchedulingActive(groupID) {
 		return 0, false
 	}
-	return time.Duration(gp.policy.Affinity.TTLSeconds) * time.Second, true
+	return sharesched.BindingTTL, true
 }
 
 // shareProtectedBindingPrefixes are keys stored next to session bindings

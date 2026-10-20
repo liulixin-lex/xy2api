@@ -147,7 +147,7 @@ func resilienceGateRows() []resilienceGateRow {
 func newResilienceGateEnv(t *testing.T, scheduler sharesched.Scheduler, mutate func(*Account, time.Time), setup func(*GatewayService, *resilienceGateLimits)) *shareTestEnv {
 	t.Helper()
 	withResilienceSettings(t, nil)
-	env := newShareTestEnv(t, shareTestPolicy(scheduler, sharesched.AccountRule{AccountID: gateTestAccount, Tier: 1, Weight: 1}),
+	env := newShareTestEnv(t, shareTestPolicy(scheduler, shareRule{AccountID: gateTestAccount, Tier: 1, Weight: 1}),
 		Account{ID: gateTestAccount, Priority: 1})
 	if mutate != nil {
 		mutate(env.repo.accountsByID[gateTestAccount], time.Now())
@@ -367,7 +367,7 @@ func TestResilienceOpenAIGateConsistency(t *testing.T) {
 			for _, soft := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/%s/soft=%v", row.name, scheduler, soft), func(t *testing.T) {
 					withResilienceSettings(t, nil)
-					env := newOpenAIShareTestEnv(t, shareTestPolicy(scheduler, sharesched.AccountRule{AccountID: gateTestAccount, Tier: 1, Weight: 1}), gateTestAccount)
+					env := newOpenAIShareTestEnv(t, shareTestPolicy(scheduler, shareRule{AccountID: gateTestAccount, Tier: 1, Weight: 1}), gateTestAccount)
 					acc := env.account(gateTestAccount)
 					row.account(acc)
 					if soft {

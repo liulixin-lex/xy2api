@@ -1,7 +1,6 @@
 package sharesched
 
 import (
-	"math"
 	"strings"
 	"time"
 )
@@ -23,10 +22,7 @@ const (
 //   - Anthropic family: 1h when the outgoing request asks for it, else 5m.
 //   - OpenAI family: 30m (fixed for GPT-5.6+, "about 30 minutes" earlier).
 //   - Gemini implicit cache and unknown platforms: 5m.
-func CacheTTL(family CacheFamily, requestsOneHour bool, overrideSeconds int) time.Duration {
-	if overrideSeconds > 0 {
-		return time.Duration(overrideSeconds) * time.Second
-	}
+func CacheTTL(family CacheFamily, requestsOneHour bool) time.Duration {
 	switch family {
 	case CacheFamilyAnthropic:
 		if requestsOneHour {
@@ -70,9 +66,9 @@ type CacheProfile struct {
 }
 
 // NewCacheProfile builds a profile from the family, model and estimate.
-func NewCacheProfile(family CacheFamily, model string, requestsOneHour bool, overrideSeconds, estimatedTokens int) CacheProfile {
+func NewCacheProfile(family CacheFamily, model string, requestsOneHour bool, estimatedTokens int) CacheProfile {
 	return CacheProfile{
-		TTL:             CacheTTL(family, requestsOneHour, overrideSeconds),
+		TTL:             CacheTTL(family, requestsOneHour),
 		EstimatedTokens: estimatedTokens,
 		Cacheable:       estimatedTokens >= MinCacheableTokens(family, model),
 	}
@@ -85,40 +81,12 @@ func (c CacheProfile) Warm(idle time.Duration) bool {
 
 // WaitBudget is how long a request may wait for its saturated bound account.
 // Waiting pays off only while the cache is warm and roughly in proportion to
-// the prefix that would otherwise be recomputed.
-func WaitBudget(w Wait, profile CacheProfile, idle time.Duration) time.Duration {
+// the prefix that would otherwise be recomputed: 100 ms per 1k estimated
+// tokens, at most MaxWait.
+func WaitBudget(profile CacheProfile, idle time.Duration) time.Duration {
 	if !profile.Warm(idle) {
 		return 0
 	}
-	maxWait := time.Duration(w.MaxMs) * time.Millisecond
-	switch w.Mode {
-	case WaitFixed:
-		return maxWait
-	case WaitAuto:
-		budget := time.Duration(float64(profile.EstimatedTokens) / 1000 * float64(w.MsPer1kTokens) * float64(time.Millisecond))
-		return min(budget, maxWait)
-	default:
-		return 0
-	}
-}
-
-// CorrectionFactor scales one account's new-session weight toward its target
-// share, bounded by the configured strength. It returns 1 when correction is
-// off or the inputs are unusable.
-func CorrectionFactor(strength string, target, actual float64) float64 {
-	var gamma, lo, hi float64
-	switch strength {
-	case CorrectionGentle:
-		gamma, lo, hi = 0.5, 0.5, 2
-	case CorrectionStrong:
-		gamma, lo, hi = 1, 0.25, 4
-	default:
-		return 1
-	}
-	if target <= 0 || math.IsNaN(target) || math.IsNaN(actual) {
-		return 1
-	}
-	const epsilon = 1e-3
-	factor := math.Pow(target/math.Max(actual, epsilon), gamma)
-	return math.Min(hi, math.Max(lo, factor))
+	budget := time.Duration(int64(profile.EstimatedTokens) * int64(waitPer1kTokens) / 1000)
+	return min(budget, MaxWait)
 }

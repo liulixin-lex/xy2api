@@ -112,7 +112,7 @@ func (s *OpenAIGatewayService) selectAccountWithShareScheduling(ctx context.Cont
 	rec := shareDecisionRecord{gp: gp, source: source, platform: in.platform, model: in.model,
 		session: key, idle: req.Binding.Idle, cache: req.Cache, start: start}
 	exec := &shareExecutor{ctx: ctx, gp: gp, cache: s.cache, concurrency: s.concurrencyService, cfg: s.schedulingConfig(),
-		key: cacheKey, ttl: time.Duration(gp.policy.Affinity.TTLSeconds) * time.Second, accounts: accounts, createOnRefresh: legacy,
+		key: cacheKey, accounts: accounts, createOnRefresh: legacy, loadGate: true, loadOrder: shareLoadOrder(cands),
 		limit: func(acc *Account) int { return s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency) },
 		verify: func(acc *Account) (*Account, sharesched.Reason) {
 			return s.verifyOpenAIShareAccount(ctx, in, acc)
@@ -176,7 +176,7 @@ func (s *OpenAIGatewayService) shareOpenAILastResort(ctx context.Context, gp *sh
 		})
 	shareReq, _ := svc.newRequest(ctx, gp, platform, req.RequestedModel, sessionHash, binding)
 	exec := &shareExecutor{ctx: ctx, gp: gp, cache: s.cache, concurrency: s.concurrencyService, cfg: s.schedulingConfig(),
-		key: cacheKey, ttl: time.Duration(gp.policy.Affinity.TTLSeconds) * time.Second, accounts: round.accounts,
+		key: cacheKey, accounts: round.accounts,
 		createOnRefresh: legacy, reason: sharesched.ReasonLastResortSoft,
 		limit: func(acc *Account) int { return s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency) },
 		verify: func(acc *Account) (*Account, sharesched.Reason) {
@@ -190,7 +190,7 @@ func (s *OpenAIGatewayService) shareOpenAILastResort(ctx context.Context, gp *sh
 		newResult: func(acc *Account, acquired bool, release func(), wait *AccountWaitPlan) (*AccountSelectionResult, error) {
 			return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: acc, Acquired: acquired, ReleaseFunc: release, WaitPlan: wait}), nil
 		}}
-	out := exec.serve(round.plan(&gp.policy, shareReq))
+	out := exec.serve(round.plan(shareReq))
 	if out == nil || out.err != nil || out.result == nil {
 		return nil
 	}
@@ -269,7 +269,7 @@ func (s *OpenAIGatewayService) shareOpenAICandidates(ctx context.Context, in ope
 		acc := &listed[i]
 		accounts[acc.ID] = acc
 		c := sharesched.Candidate{AccountID: acc.ID, Platform: acc.Platform, Class: shareAccountClass(acc),
-			Priority: acc.Priority, Concurrency: acc.Concurrency}
+			Priority: acc.Priority, Weight: shareWeight(acc)}
 		if _, excluded := in.excluded[acc.ID]; excluded {
 			c.Excluded, c.Eligible = true, true
 			if resilience.StateFrom(ctx).Avoided(acc.ID) {
@@ -290,7 +290,7 @@ func (s *OpenAIGatewayService) shareOpenAICandidates(ctx context.Context, in ope
 	if boundID > 0 && accounts[boundID] == nil {
 		if _, excluded := in.excluded[boundID]; !excluded {
 			if acc := gates.lookup(boundID); acc != nil && acc.Platform == in.platform && s.openAIAccountMatchesSchedulingGroup(acc, in.groupID) {
-				if c, ok := s.shareScheduling.shareMissingBoundCandidate(acc, now); ok {
+				if c, ok := s.shareScheduling.shareMissingBoundCandidate(acc, in.model, now, s.resilienceOpenAIPenaltyOf); ok {
 					cands = append(cands, c)
 				}
 			}
@@ -350,26 +350,25 @@ func (g *openAIShareGates) lookup(id int64) *Account {
 	return acc
 }
 
-// candidateReason mirrors the advanced scheduler's candidate filter. In a
-// last-resort context the caller has cleared the soft account states, and
-// the scheduler's soft restrictions pass as in the original last resort:
-// short per-model rate limits and in-memory runtime blocks (design §4.3).
+// candidateReason mirrors the advanced scheduler's candidate filter, with the
+// expected recovery of a soft penalty (shareSoftRecovery). In a last-resort
+// context the caller has cleared the soft account states, and the
+// scheduler's soft restrictions pass as in the original last resort: short
+// per-model rate limits and in-memory runtime blocks.
 func (g *openAIShareGates) candidateReason(acc *Account, now time.Time) (sharesched.Reason, time.Time) {
 	if !acc.IsSchedulable() {
-		return shareAccountStateReason(acc, now)
+		reason, _ := shareAccountStateReason(acc, now)
+		return reason, shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf)
 	}
 	lastResort := resilienceLastResortGate(g.ctx)
 	switch reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(g.ctx, acc, g.in.platform, g.in.model, false, g.in.capability); {
 	case reason == "":
 	case reason == "model_rate_limited" && lastResortModelLimitSoft(g.ctx, acc, g.in.model):
 	case reason == "model_rate_limited":
-		var recoverAt time.Time
-		if remaining := acc.GetRateLimitRemainingTimeWithContext(g.ctx, g.in.model); remaining > 0 {
-			recoverAt = now.Add(remaining)
-		}
-		return sharesched.ReasonModelRateLimited, recoverAt
+		return sharesched.ReasonModelRateLimited, shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf)
 	case reason == "not_schedulable":
-		return shareAccountStateReason(acc, now)
+		reason, _ := shareAccountStateReason(acc, now)
+		return reason, shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf)
 	case strings.HasPrefix(reason, "quota_auto_pause"):
 		return sharesched.ReasonQuotaAutoPause, time.Time{}
 	case reason == "platform_mismatch":
@@ -450,7 +449,7 @@ func (s *OpenAIGatewayService) newOpenAIShareShadow(ctx context.Context, gp *sha
 			return
 		}
 		req, source := svc.newRequest(ctx, gp, in.platform, in.model, sessionHash, binding)
-		decision := sharesched.Plan(&gp.policy, req, cands)
+		decision := sharesched.Plan(req, cands)
 		svc.recordShadow(shareDecisionRecord{gp: gp, source: source, platform: in.platform, model: in.model,
 			session: key, idle: req.Binding.Idle, cache: req.Cache, start: start}, decision, original)
 	}

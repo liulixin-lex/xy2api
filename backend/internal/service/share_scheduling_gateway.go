@@ -65,15 +65,16 @@ func (s *GatewayService) newGatewayCandidateGates(ctx context.Context, groupID *
 }
 
 // candidateReason returns the first gate that rejects acc, or "" when all
-// pass, with the expected recovery of a temporary state. sticky grants the
-// sticky allowance of the window cost and RPM limits. In a last-resort
-// context the caller has cleared the soft account states, and a per-model
-// rate limit within the soft threshold passes (design §4.3).
+// pass, with the expected recovery of a soft penalty (shareSoftRecovery).
+// sticky grants the sticky allowance of the window cost and RPM limits. In a
+// last-resort context the caller has cleared the soft account states, and a
+// per-model rate limit within the soft threshold passes.
 func (g gatewayCandidateGates) candidateReason(ctx context.Context, acc *Account, sticky bool, now time.Time) (sharesched.Reason, time.Time) {
 	s := g.s
 	switch {
 	case !s.isAccountSchedulableForSelection(acc):
-		return shareAccountStateReason(acc, now)
+		reason, _ := shareAccountStateReason(acc, now)
+		return reason, shareSoftRecovery(acc, g.model, now, resiliencePenaltyOf)
 	case !s.isGatewayAccountProfitEligible(ctx, acc):
 		return sharesched.ReasonProfitGate, time.Time{}
 	case !s.isAccountAllowedForPlatform(acc, g.platform, g.useMixed):
@@ -83,11 +84,7 @@ func (g gatewayCandidateGates) candidateReason(ctx context.Context, acc *Account
 	case g.channelCheck && s.isUpstreamModelRestrictedByChannel(ctx, *g.groupID, acc, g.model):
 		return sharesched.ReasonChannelRestricted, time.Time{}
 	case !s.isAccountSchedulableForModelSelection(ctx, acc, g.model) && !lastResortModelLimitSoft(ctx, acc, g.model):
-		var recoverAt time.Time
-		if remaining := acc.GetRateLimitRemainingTimeWithContext(ctx, g.model); remaining > 0 {
-			recoverAt = now.Add(remaining)
-		}
-		return sharesched.ReasonModelRateLimited, recoverAt
+		return sharesched.ReasonModelRateLimited, shareSoftRecovery(acc, g.model, now, resiliencePenaltyOf)
 	case !s.isAccountSchedulableForQuota(acc):
 		return sharesched.ReasonQuotaExceeded, time.Time{}
 	case !s.isAccountSchedulableForWindowCost(ctx, acc, sticky):
@@ -119,7 +116,7 @@ func (s *GatewayService) shareGatewayCandidates(ctx context.Context, group *Grou
 		acc := &accounts[i]
 		in.accounts[acc.ID] = acc
 		c := sharesched.Candidate{AccountID: acc.ID, Platform: acc.Platform, Class: shareAccountClass(acc),
-			Priority: acc.Priority, Concurrency: acc.Concurrency}
+			Priority: acc.Priority, Weight: shareWeight(acc)}
 		if _, excluded := excludedIDs[acc.ID]; excluded {
 			c.Excluded, c.Eligible = true, true
 			if resilience.StateFrom(ctx).Avoided(acc.ID) {
@@ -138,7 +135,7 @@ func (s *GatewayService) shareGatewayCandidates(ctx context.Context, group *Grou
 	}
 	if boundID > 0 && in.accounts[boundID] == nil {
 		if _, excluded := excludedIDs[boundID]; !excluded {
-			if c, ok := s.shareScheduling.shareMissingBoundCandidate(s.lookupShareBoundAccount(ctx, boundID), now); ok {
+			if c, ok := s.shareScheduling.shareMissingBoundCandidate(s.lookupShareBoundAccount(ctx, boundID), requestedModel, now, resiliencePenaltyOf); ok {
 				in.cands = append(in.cands, c)
 			}
 		}
@@ -181,7 +178,7 @@ func (s *GatewayService) selectAccountWithShareScheduling(ctx context.Context, g
 	rec := shareDecisionRecord{gp: gp, source: source, platform: in.platform, model: requestedModel,
 		session: key, idle: req.Binding.Idle, cache: req.Cache, start: start}
 	exec := &shareExecutor{ctx: ctx, gp: gp, cache: s.cache, concurrency: s.concurrencyService, cfg: s.schedulingConfig(),
-		key: key, ttl: time.Duration(gp.policy.Affinity.TTLSeconds) * time.Second, accounts: in.accounts,
+		key: key, accounts: in.accounts, loadGate: true, loadOrder: shareLoadOrder(in.cands),
 		limit: func(acc *Account) int { return acc.Concurrency },
 		admit: func(acc *Account) bool { return s.checkAndRegisterSession(ctx, acc, sessionHash) },
 		newResult: func(acc *Account, acquired bool, release func(), wait *AccountWaitPlan) (*AccountSelectionResult, error) {
@@ -228,7 +225,7 @@ func (s *GatewayService) shareGatewayLastResort(ctx context.Context, gp *shareGr
 		})
 	req, _ := svc.newRequest(ctx, gp, platform, requestedModel, sessionHash, binding)
 	exec := &shareExecutor{ctx: ctx, gp: gp, cache: s.cache, concurrency: s.concurrencyService, cfg: s.schedulingConfig(),
-		key: key, ttl: time.Duration(gp.policy.Affinity.TTLSeconds) * time.Second, accounts: round.accounts,
+		key: key, accounts: round.accounts,
 		reason: sharesched.ReasonLastResortSoft,
 		limit:  func(acc *Account) int { return acc.Concurrency },
 		verify: func(acc *Account) (*Account, sharesched.Reason) {
@@ -248,7 +245,7 @@ func (s *GatewayService) shareGatewayLastResort(ctx context.Context, gp *shareGr
 		newResult: func(acc *Account, acquired bool, release func(), wait *AccountWaitPlan) (*AccountSelectionResult, error) {
 			return s.newSelectionResult(ctx, acc, acquired, release, wait)
 		}}
-	out := exec.serve(round.plan(&gp.policy, req))
+	out := exec.serve(round.plan(req))
 	if out == nil || out.err != nil || out.result == nil {
 		return nil
 	}
@@ -276,7 +273,7 @@ func (s *GatewayService) newShareShadow(ctx context.Context, gp *shareGroupPolic
 			return
 		}
 		req, source := svc.newRequest(ctx, gp, in.platform, model, sessionHash, binding)
-		decision := sharesched.Plan(&gp.policy, req, in.cands)
+		decision := sharesched.Plan(req, in.cands)
 		svc.recordShadow(shareDecisionRecord{gp: gp, source: source, platform: in.platform, model: model,
 			session: key, idle: req.Binding.Idle, cache: req.Cache, start: start}, decision, original)
 	}

@@ -100,10 +100,6 @@ type ShareSchedulingMemberView struct {
 	RecoverAt      *time.Time `json:"recover_at,omitempty"`
 	Tier           int        `json:"tier"`
 	Weight         int        `json:"weight"`
-	Configured     bool       `json:"configured"`
-	Drain          bool       `json:"drain"`
-	DrainUntil     *time.Time `json:"drain_until,omitempty"`
-	CacheDomain    string     `json:"cache_domain"`
 	TargetShare    float64    `json:"target_share"`
 	EffectiveShare float64    `json:"effective_share"`
 	CapacityShare  float64    `json:"capacity_share"`
@@ -117,31 +113,20 @@ func (s *ShareSchedulingService) shareMembers(ctx context.Context, groupID int64
 	return s.gateway.accountRepo.ListByGroup(ctx, groupID)
 }
 
-func shareMemberMap(accounts []Account) map[int64]sharesched.Member {
-	members := make(map[int64]sharesched.Member, len(accounts))
-	for i := range accounts {
-		members[accounts[i].ID] = sharesched.Member{Platform: accounts[i].Platform, Priority: accounts[i].Priority, Concurrency: accounts[i].Concurrency}
-	}
-	return members
-}
-
-// shareMemberViews resolves every member's rule and computes its shares.
-// Target share is the weight share among the open members of its tier;
-// effective share applies current health, so only the lowest tier with a
-// healthy open member receives new sessions; capacity share is the
-// concurrency share inside the tier.
-func shareMemberViews(p *sharesched.Policy, accounts []Account, now time.Time) ([]ShareSchedulingMemberView, *int) {
+// shareMemberViews computes every member's shares. The tier is the account
+// priority and the weight its effective load factor. Target share is the
+// weight share among the members of its tier; effective share applies
+// current health, so only the lowest tier with a healthy member receives new
+// sessions; capacity share is the concurrency share inside the tier.
+func shareMemberViews(accounts []Account, now time.Time) ([]ShareSchedulingMemberView, *int) {
 	views := make([]ShareSchedulingMemberView, 0, len(accounts))
 	type totals struct{ weight, healthyWeight, concurrency float64 }
 	tiers := map[int]*totals{}
-	resolve := p.Resolver()
 	for i := range accounts {
 		acc := &accounts[i]
-		rule, configured := resolve(acc.ID, acc.Priority, acc.Concurrency)
 		v := ShareSchedulingMemberView{AccountID: acc.ID, Name: acc.Name, Platform: acc.Platform, Type: acc.Type,
 			Priority: acc.Priority, Concurrency: acc.Concurrency, Status: acc.Status, Schedulable: acc.Schedulable,
-			Healthy: acc.IsSchedulable(), Tier: rule.Tier, Weight: rule.Weight, Configured: configured,
-			Drain: rule.Drain, DrainUntil: rule.DrainUntil, CacheDomain: rule.CacheDomain}
+			Healthy: acc.IsSchedulable(), Tier: acc.Priority, Weight: shareWeight(acc)}
 		if !v.Healthy {
 			reason, recoverAt := shareAccountStateReason(acc, now)
 			v.Reason = string(reason)
@@ -150,9 +135,6 @@ func shareMemberViews(p *sharesched.Policy, accounts []Account, now time.Time) (
 			}
 		}
 		views = append(views, v)
-		if v.Drain {
-			continue
-		}
 		t := tiers[v.Tier]
 		if t == nil {
 			t = &totals{}
@@ -175,7 +157,7 @@ func shareMemberViews(p *sharesched.Policy, accounts []Account, now time.Time) (
 	for i := range views {
 		v := &views[i]
 		t := tiers[v.Tier]
-		if v.Drain || t == nil {
+		if t == nil {
 			continue
 		}
 		if t.weight > 0 {
@@ -246,11 +228,12 @@ func (s *ShareSchedulingService) ListGroups(ctx context.Context) ([]ShareSchedul
 			v.Configured, v.Version, v.ImportedFrom = true, row.Version, row.ImportedFrom
 			updated := row.UpdatedAt
 			v.UpdatedAt = &updated
-			// The request path skips an undecodable row, so it runs sub2api.
-			if _, err := sharesched.DecodePolicy(row.Policy); err != nil {
+			// The request path skips an undecodable row, so it runs sub2api;
+			// a stored shadow policy runs sub2api too.
+			if policy, err := sharesched.DecodePolicy(row.Policy); err != nil {
 				v.Invalid = true
 			} else {
-				v.Scheduler = row.Scheduler
+				v.Scheduler = string(policy.Effective())
 			}
 		}
 		v.Effective = s.groupPolicy(g.ID) != nil
@@ -375,14 +358,11 @@ func (s *ShareSchedulingService) GetPolicy(ctx context.Context, groupID int64) (
 func (s *ShareSchedulingService) policyView(group *Group, stored shareStoredPolicy, accounts []Account) (*ShareSchedulingPolicyView, error) {
 	row, policy := stored.row, stored.policy
 	view := &ShareSchedulingPolicyView{GroupID: group.ID, GroupName: group.Name, Platform: group.Platform,
-		Scheduler: string(policy.Scheduler), Effective: s.groupPolicy(group.ID) != nil}
+		Scheduler: string(policy.Effective()), Effective: s.groupPolicy(group.ID) != nil}
 	if row != nil {
 		view.Version, view.ImportedFrom, view.UpdatedBy = row.Version, row.ImportedFrom, row.UpdatedBy
 		updated := row.UpdatedAt
 		view.UpdatedAt = &updated
-		if stored.invalid == nil {
-			view.Scheduler = row.Scheduler
-		}
 	}
 	// An undecodable row is skipped by the request path, so the editor starts
 	// from the defaults that actually run; saving replaces the row.
@@ -393,23 +373,19 @@ func (s *ShareSchedulingService) policyView(group *Group, stored shareStoredPoli
 	if view.Policy, err = json.Marshal(policy); err != nil {
 		return nil, err
 	}
-	view.Members, view.ActiveTier = shareMemberViews(&policy, accounts, time.Now())
+	view.Members, view.ActiveTier = shareMemberViews(accounts, time.Now())
 	return view, nil
 }
 
 // ShareSchedulingAccountRule is an account's resolved rule in one group that
 // stores a share scheduling policy.
 type ShareSchedulingAccountRule struct {
-	GroupID     int64      `json:"group_id"`
-	GroupName   string     `json:"group_name"`
-	Scheduler   string     `json:"scheduler"`
-	Effective   bool       `json:"effective"`
-	Configured  bool       `json:"configured"`
-	Tier        int        `json:"tier"`
-	Weight      int        `json:"weight"`
-	Drain       bool       `json:"drain"`
-	DrainUntil  *time.Time `json:"drain_until,omitempty"`
-	CacheDomain string     `json:"cache_domain"`
+	GroupID   int64  `json:"group_id"`
+	GroupName string `json:"group_name"`
+	Scheduler string `json:"scheduler"`
+	Effective bool   `json:"effective"`
+	Tier      int    `json:"tier"`
+	Weight    int    `json:"weight"`
 }
 
 // AccountRules lists the account's rules in its groups that store a share
@@ -451,10 +427,8 @@ func (s *ShareSchedulingService) AccountRules(ctx context.Context, accountID int
 		if err != nil {
 			continue
 		}
-		rule, configured := policy.ResolveRule(account.ID, account.Priority, account.Concurrency)
-		v := ShareSchedulingAccountRule{GroupID: groupID, Scheduler: row.Scheduler, Effective: s.groupPolicy(groupID) != nil,
-			Configured: configured, Tier: rule.Tier, Weight: rule.Weight, Drain: rule.Drain, DrainUntil: rule.DrainUntil,
-			CacheDomain: rule.CacheDomain}
+		v := ShareSchedulingAccountRule{GroupID: groupID, Scheduler: string(policy.Effective()), Effective: s.groupPolicy(groupID) != nil,
+			Tier: account.Priority, Weight: shareWeight(account)}
 		if group, err := s.gateway.groupRepo.GetByIDLite(ctx, groupID); err == nil && group != nil {
 			v.GroupName = group.Name
 		}
@@ -464,14 +438,15 @@ func (s *ShareSchedulingService) AccountRules(ctx context.Context, accountID int
 	return out, nil
 }
 
-// SavePolicy strictly validates and stores a policy when the stored version
-// still equals expectedVersion, then broadcasts the change.
+// SavePolicy stores the scheduler and session keeping of a submitted policy
+// when the stored version still equals expectedVersion, then broadcasts the
+// change. Every other stored field is kept as it is (design §3.2).
 func (s *ShareSchedulingService) SavePolicy(ctx context.Context, groupID, expectedVersion int64, raw []byte, updatedBy int64) (*ShareSchedulingPolicyView, error) {
 	group, err := s.shareGroup(ctx, groupID)
 	if err != nil {
 		return nil, err
 	}
-	policy, err := sharesched.DecodePolicy(raw)
+	submitted, err := sharesched.DecodePolicy(raw)
 	if err != nil {
 		return nil, shareSchedulingPolicyInvalid(err)
 	}
@@ -479,14 +454,23 @@ func (s *ShareSchedulingService) SavePolicy(ctx context.Context, groupID, expect
 	if err != nil {
 		return nil, err
 	}
-	if err := policy.ValidateMembers(shareMemberMap(accounts)); err != nil {
-		return nil, shareSchedulingPolicyInvalid(err)
-	}
-	normalized, err := json.Marshal(policy)
+	stored, err := s.repo.GetPolicy(ctx, groupID)
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.repo.SavePolicy(ctx, groupID, expectedVersion, string(policy.Scheduler), normalized, updatedBy)
+	var current []byte
+	if stored != nil {
+		current = stored.Policy
+	}
+	document, err := sharesched.PatchPolicyDocument(current, submitted.Effective(), submitted.SessionKeep())
+	if err != nil {
+		return nil, shareSchedulingPolicyInvalid(err)
+	}
+	policy, err := sharesched.DecodePolicy(document)
+	if err != nil {
+		return nil, err
+	}
+	row, err := s.repo.SavePolicy(ctx, groupID, expectedVersion, string(policy.Effective()), document, updatedBy)
 	if err != nil {
 		return nil, err
 	}
@@ -534,88 +518,23 @@ func (s *ShareSchedulingService) Preview(ctx context.Context, groupID int64, raw
 	if err != nil {
 		return nil, err
 	}
-	if err := proposed.ValidateMembers(shareMemberMap(accounts)); err != nil {
-		return nil, shareSchedulingPolicyInvalid(err)
-	}
-	stored, err := s.storedPolicy(ctx, groupID)
-	if err != nil {
-		return nil, err
-	}
-	current := stored.policy
-	now := time.Now()
 	out := &ShareSchedulingPreview{Warnings: []ShareSchedulingWarning{}}
-	out.Members, out.ActiveTier = shareMemberViews(&proposed, accounts, now)
-	out.PlacementChange, out.SampledKeys = sharePlacementChange(groupID, &current, &proposed, accounts, now)
+	out.Members, out.ActiveTier = shareMemberViews(accounts, time.Now())
 	out.Warnings = sharePreviewWarnings(&proposed, out.Members, out.ActiveTier, s.Settings())
-	for _, rule := range proposed.Accounts {
-		if rule.DrainUntil != nil {
-			out.DeadlineAccounts = append(out.DeadlineAccounts, rule.AccountID)
-		}
-	}
-	if len(out.DeadlineAccounts) > 0 && s.store != nil {
-		deadline := make(map[int64]bool, len(out.DeadlineAccounts))
-		for _, id := range out.DeadlineAccounts {
-			deadline[id] = true
-		}
-		// Counting walks the bindings without deleting any.
-		if _, err := s.store.ClearBindings(ctx, groupID, func(b ShareSchedulingBinding) bool {
-			if deadline[b.AccountID] {
-				out.EstimatedMigrations++
-			}
-			return false
-		}); err != nil {
-			return nil, err
-		}
-	}
 	return out, nil
-}
-
-// sharePlacementChange compares the first choice of sampled new sessions
-// under two policies with the members' current health.
-func sharePlacementChange(groupID int64, current, proposed *sharesched.Policy, accounts []Account, now time.Time) (float64, int) {
-	if len(accounts) == 0 {
-		return 0, 0
-	}
-	cands := make([]sharesched.Candidate, len(accounts))
-	for i := range accounts {
-		acc := &accounts[i]
-		cands[i] = sharesched.Candidate{AccountID: acc.ID, Platform: acc.Platform, Class: shareAccountClass(acc),
-			Priority: acc.Priority, Concurrency: acc.Concurrency, Eligible: acc.IsSchedulable()}
-	}
-	keys := min(shareAdminPreviewMaxKeys, max(shareAdminPreviewMinKeys, shareAdminPreviewBudget/len(accounts)))
-	changed := 0
-	for i := range keys {
-		req := sharesched.Request{GroupID: groupID, Key: "preview:" + strconv.Itoa(i), Now: now}
-		before := sharesched.Plan(current, req, cands)
-		after := sharesched.Plan(proposed, req, cands)
-		if firstStep(before) != firstStep(after) {
-			changed++
-		}
-	}
-	return float64(changed) / float64(keys), keys
-}
-
-func firstStep(d sharesched.Decision) int64 {
-	if len(d.Steps) == 0 {
-		return 0
-	}
-	return d.Steps[0].AccountID
 }
 
 func sharePreviewWarnings(p *sharesched.Policy, members []ShareSchedulingMemberView, active *int, settings ShareSchedulingSettings) []ShareSchedulingWarning {
 	warnings := []ShareSchedulingWarning{}
-	if p.Scheduler != sharesched.SchedulerSub2API && !settings.Enabled {
+	if p.Effective() == sharesched.SchedulerShare && !settings.Enabled {
 		warnings = append(warnings, ShareSchedulingWarning{Code: "global_switch_off"})
 	}
-	if p.Scheduler != sharesched.SchedulerSub2API && active == nil {
+	if p.Effective() == sharesched.SchedulerShare && active == nil {
 		warnings = append(warnings, ShareSchedulingWarning{Code: "no_healthy_open_account"})
 	}
 	tierMembers := map[int]int{}
 	tierHealthy := map[int]int{}
 	for _, m := range members {
-		if m.Drain {
-			continue
-		}
 		tierMembers[m.Tier]++
 		if m.Healthy {
 			tierHealthy[m.Tier]++
@@ -633,7 +552,7 @@ func sharePreviewWarnings(p *sharesched.Policy, members []ShareSchedulingMemberV
 		}
 	}
 	for _, m := range members {
-		if m.Drain || tierMembers[m.Tier] < 2 || m.CapacityShare <= 0 {
+		if tierMembers[m.Tier] < 2 || m.CapacityShare <= 0 {
 			continue
 		}
 		if m.TargetShare > shareAdminCapacityWarning*m.CapacityShare {
@@ -753,14 +672,14 @@ func (s *ShareSchedulingService) Explain(ctx context.Context, groupID int64, in 
 		return nil, ErrShareSchedulingUnavailable
 	}
 	req, source := s.newRequest(ctx, gp, platform, in.Model, in.SessionHash, binding)
-	d := sharesched.Plan(&policy, req, cands)
+	d := sharesched.Plan(req, cands)
 	out := &ShareSchedulingExplanation{GroupID: groupID, Platform: platform, Scheduler: string(policy.Scheduler), Version: gp.version,
 		KeySource: string(source), Session: shareSessionFingerprint(key), BoundAccountID: req.Binding.AccountID,
 		IdleMs: req.Binding.Idle.Milliseconds(), CacheTTLSeconds: int(req.Cache.TTL / time.Second),
 		EstimatedTokens: req.Cache.EstimatedTokens, Cacheable: req.Cache.Cacheable, Warm: req.Cache.Warm(req.Binding.Idle),
 		WaitBudgetMs: d.Wait.Milliseconds(), Reason: string(d.Reason), Steps: make([]int64, len(d.Steps)),
 		Write: shareWriteName(d.Write), SpillWrite: shareWriteName(d.Spill), SpillReason: string(d.SpillReason),
-		MaxWaiting: d.MaxWaiting, Target: d.Target, Ideal: d.Ideal, ActiveTier: d.ActiveTier, Entries: d.ExplainedEntries()}
+		MaxWaiting: d.MaxWaiting, Target: d.Target, Ideal: d.Ideal, ActiveTier: d.ActivePriority, Entries: d.Entries}
 	for i, step := range d.Steps {
 		out.Steps[i] = step.AccountID
 	}
@@ -833,23 +752,7 @@ type ShareSchedulingCacheStats struct {
 	ReadRatio           float64                        `json:"read_ratio"`
 	SchedulingMissRatio float64                        `json:"scheduling_miss_ratio"`
 	TTFT                map[string]ShareSchedulingTTFT `json:"ttft"`
-	// Selection is the sampled selection cost by scheduler (share, shadow,
-	// original).
-	Selection map[string]ShareSchedulingSelectionCost `json:"selection"`
-	Dropped   int64                                   `json:"dropped"`
-}
-
-// ShareSchedulingSelectionCost averages the sampled selections of one
-// scheduler, from the start of selection to its result. Redis and database
-// figures average the IOSamples taken on nodes with server timing enabled
-// and are nil without any.
-type ShareSchedulingSelectionCost struct {
-	Samples       int64    `json:"samples"`
-	AvgMs         float64  `json:"avg_ms"`
-	IOSamples     int64    `json:"io_samples"`
-	AvgRedisTrips *float64 `json:"avg_redis_round_trips"`
-	AvgRedisMs    *float64 `json:"avg_redis_ms"`
-	AvgDBQueries  *float64 `json:"avg_db_queries"`
+	Dropped             int64                          `json:"dropped"`
 }
 
 // ShareSchedulingReport is target against actual shares plus the decision,
@@ -894,15 +797,15 @@ func (s *ShareSchedulingService) Report(ctx context.Context, groupID int64, wind
 	}
 	to := time.Now()
 	from := to.Add(-window)
-	out := &ShareSchedulingReport{GroupID: groupID, Scheduler: string(policy.Scheduler), Unit: policy.Balance.Unit,
-		From: from, To: to, Corrections: s.correctionsFor(groupID), CounterPrecision: "minute"}
+	out := &ShareSchedulingReport{GroupID: groupID, Scheduler: string(policy.Effective()),
+		From: from, To: to, CounterPrecision: "minute"}
 	if window > shareCounterMinuteSpan {
 		out.CounterPrecision = "hour_rounded"
 	}
 	if row != nil {
 		out.Version, out.Scheduler = row.Version, row.Scheduler
 	}
-	out.Members, out.ActiveTier = shareMemberViews(&policy, accounts, to)
+	out.Members, out.ActiveTier = shareMemberViews(accounts, to)
 	usage, err := s.repo.AccountUsage(ctx, groupID, from)
 	if err != nil {
 		return nil, err
@@ -1030,7 +933,7 @@ func newShareCacheStats(c map[string]int64) ShareSchedulingCacheStats {
 		Requests: c[shareStatsRequestsField], Classes: collectPrefixed(c, shareStatsClassPrefix),
 		ClassTokens: collectPrefixed(c, shareStatsClassTokensPrefix), PromptTokens: c[shareStatsPromptTokensField],
 		CacheReadTokens: c[shareStatsCacheReadField], CacheCreationTokens: c[shareStatsCacheCreationField],
-		TTFT: map[string]ShareSchedulingTTFT{}, Selection: shareSelectionCosts(c), Dropped: c[shareStatsDroppedField],
+		TTFT: map[string]ShareSchedulingTTFT{}, Dropped: c[shareStatsDroppedField],
 	}
 	if stats.PromptTokens > 0 {
 		stats.ReadRatio = float64(stats.CacheReadTokens) / float64(stats.PromptTokens)
@@ -1057,38 +960,6 @@ func newShareCacheStats(c map[string]int64) ShareSchedulingCacheStats {
 		stats.TTFT[reason] = shareTTFTSummary(buckets)
 	}
 	return stats
-}
-
-func shareSelectionCosts(c map[string]int64) map[string]ShareSchedulingSelectionCost {
-	sums := map[string]map[string]int64{}
-	for field, n := range collectPrefixed(c, shareStatsSelectionPrefix) {
-		mode, name, ok := strings.Cut(field, ":")
-		if !ok {
-			continue
-		}
-		if sums[mode] == nil {
-			sums[mode] = map[string]int64{}
-		}
-		sums[mode][name] += n
-	}
-	out := map[string]ShareSchedulingSelectionCost{}
-	for mode, sum := range sums {
-		samples := sum[shareSelectionSamples]
-		if samples <= 0 {
-			continue
-		}
-		cost := ShareSchedulingSelectionCost{Samples: samples, AvgMs: float64(sum[shareSelectionMicros]) / 1000 / float64(samples)}
-		if io := sum[shareSelectionIOSamples]; io > 0 {
-			cost.IOSamples = io
-			avg := func(name string, scale float64) *float64 {
-				v := float64(sum[name]) / scale / float64(io)
-				return &v
-			}
-			cost.AvgRedisTrips, cost.AvgRedisMs, cost.AvgDBQueries = avg(shareSelectionRedisTrips, 1), avg(shareSelectionRedisMicros, 1000), avg(shareSelectionDBQueries, 1)
-		}
-		out[mode] = cost
-	}
-	return out
 }
 
 // shareTTFTSummary reads percentiles off a bucketed histogram.
@@ -1160,15 +1031,10 @@ func (s *ShareSchedulingService) Rebalance(ctx context.Context, groupID int64, m
 	if s.store == nil {
 		return nil, ErrShareSchedulingUnavailable
 	}
-	stored, err := s.storedPolicy(ctx, groupID)
-	if err != nil {
-		return nil, err
-	}
-	policy := stored.policy
-	bindingTTL := time.Duration(policy.Affinity.TTLSeconds) * time.Second
+	bindingTTL := sharesched.BindingTTL
 	// The longest cache the group's protocol can hold: clearing late never
 	// rebuilds a warm cache.
-	cacheTTL := sharesched.CacheTTL(shareCacheFamily(NormalizeGroupCachePlatform(group.Platform)), true, policy.Cache.TTLSeconds)
+	cacheTTL := sharesched.CacheTTL(shareCacheFamily(NormalizeGroupCachePlatform(group.Platform)), true)
 	cleared, err := s.store.ClearBindings(ctx, groupID, func(b ShareSchedulingBinding) bool {
 		if mode == ShareRebalanceAll {
 			return true

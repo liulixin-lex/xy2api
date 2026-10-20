@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -13,32 +14,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestShareSchedulingDefaultWeightsMatchAdaptersAndViews(t *testing.T) {
-	for _, mode := range []string{sharesched.DefaultWeightConcurrency, sharesched.DefaultWeightEqual} {
-		for _, load := range []int{0, 1, 50} {
-			t.Run(mode, func(t *testing.T) {
-				p := shareTestPolicy(sharesched.SchedulerShare)
-				p.Defaults.Weight = mode
-				env := newShareTestEnv(t, p, Account{ID: 1, Concurrency: 10, LoadFactor: &load}, Account{ID: 2, Concurrency: 10})
-				gid := shareTestGroupID
-				_, inputs, err := env.gateway.shareGatewayCandidates(context.Background(), nil, &gid, "", nil, 0)
-				require.NoError(t, err)
-				views, _ := shareMemberViews(&p, env.repo.accounts, time.Now())
-				d := sharesched.Plan(&p, sharesched.Request{GroupID: gid, Key: "weight"}, inputs.cands)
-				for i := range views {
-					require.Equal(t, views[i].Weight, d.Entries[i].Weight, "the load factor does not change the default share")
-				}
-				openai := newOpenAIShareTestEnv(t, p, 1, 2)
-				openai.account(1).Concurrency, openai.account(2).Concurrency = 10, 10
-				openai.account(1).LoadFactor = &load
-				cands, _, _, err := openai.svc.shareOpenAICandidates(context.Background(), openAIShareSelection{groupID: &gid, platform: PlatformOpenAI}, 0)
-				require.NoError(t, err)
-				d = sharesched.Plan(&p, sharesched.Request{GroupID: gid, Key: "weight"}, cands)
-				for _, entry := range d.Entries {
-					require.Equal(t, views[0].Weight, entry.Weight)
-				}
-			})
-		}
+// TestShareSchedulingWeightsAreLoadFactorsEverywhere: both adapters and the
+// admin view weigh an account by its effective load factor (the load factor,
+// else the concurrency) and tier it by its priority.
+func TestShareSchedulingWeightsAreLoadFactorsEverywhere(t *testing.T) {
+	for _, load := range []int{0, 1, 50} {
+		t.Run(fmt.Sprint(load), func(t *testing.T) {
+			want := map[int64]int{1: load, 2: 10}
+			if load == 0 {
+				want[1] = 10
+			}
+			p := shareTestPolicy(sharesched.SchedulerShare)
+			env := newShareTestEnv(t, p, Account{ID: 1, Priority: 2, Concurrency: 10, LoadFactor: &load}, Account{ID: 2, Priority: 3, Concurrency: 10})
+			gid := shareTestGroupID
+			_, inputs, err := env.gateway.shareGatewayCandidates(context.Background(), nil, &gid, "", nil, 0)
+			require.NoError(t, err)
+			views, _ := shareMemberViews(env.repo.accounts, time.Now())
+			for _, v := range views {
+				require.Equal(t, want[v.AccountID], v.Weight)
+			}
+			d := sharesched.Plan(sharesched.Request{GroupID: gid, Key: "weight"}, inputs.cands)
+			for _, entry := range d.Entries {
+				require.Equal(t, want[entry.AccountID], entry.LoadFactor)
+				require.Equal(t, int(entry.AccountID)+1, entry.Priority)
+			}
+			openai := newOpenAIShareTestEnv(t, p, 1, 2)
+			openai.account(1).Concurrency, openai.account(2).Concurrency = 10, 10
+			openai.account(1).LoadFactor = &load
+			cands, _, _, err := openai.svc.shareOpenAICandidates(context.Background(), openAIShareSelection{groupID: &gid, platform: PlatformOpenAI}, 0)
+			require.NoError(t, err)
+			d = sharesched.Plan(sharesched.Request{GroupID: gid, Key: "weight"}, cands)
+			for _, entry := range d.Entries {
+				require.Equal(t, want[entry.AccountID], entry.LoadFactor)
+			}
+		})
 	}
 }
 
@@ -67,11 +76,23 @@ func TestShareSchedulingWaitBudgetBoundsSlowSlotCalls(t *testing.T) {
 	require.Zero(t, cache.waiting[1], "the wait count is released")
 }
 
-// shareReadFailureRepo commits saves but cannot read policies back.
-type shareReadFailureRepo struct{ shareMemoryRepo }
+// shareReadFailureRepo commits saves but cannot read policies after one.
+type shareReadFailureRepo struct {
+	shareMemoryRepo
+	saved bool
+}
 
-func (*shareReadFailureRepo) GetPolicy(context.Context, int64) (*ShareSchedulingPolicyRow, error) {
-	return nil, errors.New("post-commit read unavailable")
+func (r *shareReadFailureRepo) GetPolicy(ctx context.Context, groupID int64) (*ShareSchedulingPolicyRow, error) {
+	if r.saved {
+		return nil, errors.New("post-commit read unavailable")
+	}
+	return r.shareMemoryRepo.GetPolicy(ctx, groupID)
+}
+
+func (r *shareReadFailureRepo) SavePolicy(ctx context.Context, groupID, expectedVersion int64, scheduler string, policy []byte, updatedBy int64) (*ShareSchedulingPolicyRow, error) {
+	row, err := r.shareMemoryRepo.SavePolicy(ctx, groupID, expectedVersion, scheduler, policy, updatedBy)
+	r.saved = r.saved || err == nil
+	return row, err
 }
 
 func TestShareSchedulingCommittedSaveNeedsNoReadBack(t *testing.T) {
@@ -82,7 +103,7 @@ func TestShareSchedulingCommittedSaveNeedsNoReadBack(t *testing.T) {
 	require.Equal(t, int64(1), view.Version)
 	require.Equal(t, view.Version, env.share.groupPolicy(shareTestGroupID).version, "this node runs the saved policy at once")
 
-	raw, _ := json.Marshal(twoAccountPolicy())
+	raw, _ := json.Marshal(twoAccountPolicy().policy)
 	env.share.installGroup(&ShareSchedulingPolicyRow{GroupID: shareTestGroupID, Version: 0, Policy: raw})
 	require.Equal(t, int64(1), env.share.groupPolicy(shareTestGroupID).version, "a late older row never replaces a newer one")
 }
@@ -131,7 +152,7 @@ func (r *shareHeldListRepo) ListPolicies(context.Context) ([]ShareSchedulingPoli
 }
 
 func TestShareSchedulingFullReloadKeepsConcurrentSaves(t *testing.T) {
-	raw, _ := json.Marshal(twoAccountPolicy())
+	raw, _ := json.Marshal(twoAccountPolicy().policy)
 	repo := &shareHeldListRepo{rows: []ShareSchedulingPolicyRow{{GroupID: 9, Version: 1, Policy: raw}},
 		listed: make(chan struct{}), release: make(chan struct{})}
 	share := NewShareSchedulingService(repo, nil, nil)

@@ -195,7 +195,7 @@ func (s *ShareSchedulingService) newShareLastResortRound(accounts []Account, mod
 			continue
 		}
 		c := sharesched.Candidate{AccountID: acc.ID, Platform: acc.Platform, Class: shareAccountClass(&acc),
-			Priority: acc.Priority, Concurrency: acc.Concurrency}
+			Priority: acc.Priority, Weight: shareWeight(&acc)}
 		tier, recoverAt, why := penalty(&acc, model, now)
 		_, isAvoided := avoided[acc.ID]
 		if acc.ID == boundID && !isAvoided && tier != resilience.TierHard {
@@ -247,11 +247,11 @@ func shareLastResortHardReason(a *Account, why string, now time.Time) sharesched
 // plan runs the share plan over the round with the binding writes of last
 // resort: a soft-penalised owner keeps the binding, a binding to an avoided
 // account moves, and anything else follows the plan.
-func (r *shareLastResortRound) plan(p *sharesched.Policy, req sharesched.Request) sharesched.Decision {
+func (r *shareLastResortRound) plan(req sharesched.Request) sharesched.Decision {
 	if r.rebind {
 		req.Binding = sharesched.Binding{}
 	}
-	d := sharesched.Plan(p, req, r.cands)
+	d := sharesched.Plan(req, r.cands)
 	switch {
 	case r.rebind:
 		d.Write, d.Spill = sharesched.WriteReplace, sharesched.WriteReplace

@@ -207,11 +207,11 @@ func TestShareAdminSavePolicyValidatesCASAndBroadcasts(t *testing.T) {
 	_, err := env.save(t, 0, `{"scheduler":"share","unknown":1}`)
 	require.True(t, infraerrors.IsBadRequest(err), "unknown fields are rejected: %v", err)
 
-	_, err = env.save(t, 0, `{"scheduler":"share","accounts":[{"account_id":99,"tier":1,"weight":1}]}`)
+	_, err = env.save(t, 0, `{"scheduler":"share","affinity":{"key":"sticky"}}`)
 	require.True(t, infraerrors.IsBadRequest(err))
 	var appErr *infraerrors.ApplicationError
 	require.True(t, errors.As(err, &appErr))
-	require.Contains(t, appErr.Metadata["problems"], "account 99 is not a member")
+	require.Contains(t, appErr.Metadata["problems"], "affinity.key")
 
 	view, err := env.save(t, 0, shareAdminPolicy)
 	require.NoError(t, err)
@@ -228,10 +228,49 @@ func TestShareAdminSavePolicyValidatesCASAndBroadcasts(t *testing.T) {
 	require.Equal(t, int64(2), view.Version)
 }
 
+// TestShareAdminSaveKeepsStoredRules: a save changes the scheduler and
+// session keeping only; the stored rules and parameters stay for a rollback
+// (design §3.2).
+func TestShareAdminSaveKeepsStoredRules(t *testing.T) {
+	env := newShareAdminEnv(t, Account{ID: 1}, Account{ID: 2})
+	stored := `{"schema":1,"scheduler":"shadow","accounts":[{"account_id":1,"tier":2,"weight":33}],` +
+		`"defaults":{"tier":"account_priority","weight":"equal"},"affinity":{"enabled":true,"key":"auto","ttl_seconds":3600}}`
+	env.policies.rows = map[int64]ShareSchedulingPolicyRow{shareTestGroupID: {GroupID: shareTestGroupID, Version: 4,
+		Scheduler: "shadow", Policy: []byte(stored), UpdatedAt: time.Now()}}
+
+	view, err := env.save(t, 4, `{"schema":1,"scheduler":"share","accounts":[{"account_id":2,"tier":1,"weight":1}],"affinity":{"key":"none"}}`)
+	require.NoError(t, err)
+	require.Equal(t, "share", view.Scheduler)
+	saved := env.policies.rows[shareTestGroupID]
+	require.Equal(t, "share", saved.Scheduler)
+	var doc map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(saved.Policy, &doc))
+	require.JSONEq(t, `[{"account_id":1,"tier":2,"weight":33}]`, string(doc["accounts"]), "submitted rules are ignored, stored ones kept")
+	require.JSONEq(t, `{"tier":"account_priority","weight":"equal"}`, string(doc["defaults"]))
+	require.JSONEq(t, `{"enabled":true,"key":"none","ttl_seconds":3600}`, string(doc["affinity"]))
+
+	env.policies.rows[shareTestGroupID] = ShareSchedulingPolicyRow{GroupID: shareTestGroupID, Version: 5, Scheduler: "shadow",
+		Policy: []byte(stored), UpdatedAt: time.Now()}
+	view, err = env.share.GetPolicy(context.Background(), shareTestGroupID)
+	require.NoError(t, err)
+	require.Equal(t, "sub2api", view.Scheduler, "a stored shadow policy is shown as the original scheduler")
+	groups, err := env.share.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "sub2api", groups[0].Scheduler)
+
+	view, err = env.save(t, 5, `{"schema":1,"scheduler":"shadow"}`)
+	require.NoError(t, err)
+	require.Equal(t, "sub2api", env.policies.rows[shareTestGroupID].Scheduler, "a submitted shadow is written as the original scheduler")
+	require.Equal(t, "sub2api", view.Scheduler)
+}
+
 func TestShareAdminMemberSharesFollowTiersAndHealth(t *testing.T) {
 	env := newShareAdminEnv(t, Account{ID: 1}, Account{ID: 2}, Account{ID: 3})
 	_, err := env.save(t, 0, shareAdminPolicy)
 	require.NoError(t, err)
+
+	// Priority 2 for account 3: tiers are priorities, weights load factors.
+	accountIn(env.repo.accounts, 3).Priority = 2
 
 	view, err := env.share.GetPolicy(context.Background(), shareTestGroupID)
 	require.NoError(t, err)
@@ -288,22 +327,20 @@ func TestShareAdminInvalidStoredPolicyShowsRunningDefaults(t *testing.T) {
 		}
 	}
 
-	_, err = env.save(t, 4, shareAdminPolicy)
-	require.Error(t, err, "members 3 is not in this group")
-	_, err = env.save(t, 4, `{"scheduler":"shadow"}`)
+	_, err = env.save(t, 4, `{"scheduler":"share"}`)
+	require.NoError(t, err, "saving replaces an undecodable row")
+	_, err = sharesched.DecodePolicy(env.policies.rows[shareTestGroupID].Policy)
 	require.NoError(t, err)
 }
 
 func TestShareAdminActiveTierHandlesNegativeTiers(t *testing.T) {
-	p := sharesched.DefaultPolicy()
-	p.Accounts = []sharesched.AccountRule{{AccountID: 1, Tier: -5, Weight: 1}, {AccountID: 2, Tier: -9, Weight: 1}, {AccountID: 3, Tier: 0, Weight: 1}}
 	resetAt := time.Now().Add(time.Hour)
 	accounts := []Account{
-		{ID: 1, Status: StatusActive, Schedulable: true, Concurrency: 1},
-		{ID: 2, Status: StatusActive, Schedulable: true, Concurrency: 1, RateLimitResetAt: &resetAt},
-		{ID: 3, Status: StatusActive, Schedulable: true, Concurrency: 1},
+		{ID: 1, Priority: -5, Status: StatusActive, Schedulable: true, Concurrency: 1},
+		{ID: 2, Priority: -9, Status: StatusActive, Schedulable: true, Concurrency: 1, RateLimitResetAt: &resetAt},
+		{ID: 3, Priority: 0, Status: StatusActive, Schedulable: true, Concurrency: 1},
 	}
-	views, active := shareMemberViews(&p, accounts, time.Now())
+	views, active := shareMemberViews(accounts, time.Now())
 	require.NotNil(t, active)
 	require.Equal(t, -5, *active, "the lowest tier with a healthy open member wins, even below zero")
 	for _, v := range views {
@@ -313,39 +350,25 @@ func TestShareAdminActiveTierHandlesNegativeTiers(t *testing.T) {
 	}
 
 	accounts[0].RateLimitResetAt, accounts[2].RateLimitResetAt = &resetAt, &resetAt
-	_, active = shareMemberViews(&p, accounts, time.Now())
+	_, active = shareMemberViews(accounts, time.Now())
 	require.Nil(t, active, "no healthy open member means no active tier")
 }
 
-func TestShareAdminPreviewReportsChangesAndRisks(t *testing.T) {
+func TestShareAdminPreviewReportsRisks(t *testing.T) {
+	lf := func(n int) *int { return &n }
 	env := newShareAdminEnv(t, Account{ID: 1, Concurrency: 1}, Account{ID: 2, Concurrency: 9})
-	_, err := env.save(t, 0, `{"scheduler":"share","accounts":[{"account_id":1,"tier":1,"weight":1},{"account_id":2,"tier":1,"weight":1}]}`)
-	require.NoError(t, err)
+	accountIn(env.repo.accounts, 1).LoadFactor = lf(9)
+	accountIn(env.repo.accounts, 2).LoadFactor = lf(1)
 	env.cache.bind("s-a", 1, time.Hour)
-	env.cache.bind("s-b", 1, time.Hour)
-	env.cache.bind("s-c", 2, time.Hour)
 
-	deadline := time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
-	preview, err := env.share.Preview(context.Background(), shareTestGroupID, []byte(`{"scheduler":"share","accounts":[
-		{"account_id":1,"tier":1,"weight":3,"drain":true,"drain_until":"`+deadline+`"},{"account_id":2,"tier":1,"weight":1}]}`))
-	require.NoError(t, err)
-	require.Greater(t, preview.PlacementChange, 0.3, "draining account 1 moves its new sessions")
-	require.Equal(t, []int64{1}, preview.DeadlineAccounts)
-	require.Equal(t, 2, preview.EstimatedMigrations)
-	require.Len(t, env.cache.sessionBindings, 3, "preview never deletes bindings")
-
-	preview, err = env.share.Preview(context.Background(), shareTestGroupID,
-		[]byte(`{"scheduler":"share","accounts":[{"account_id":1,"tier":1,"weight":9},{"account_id":2,"tier":1,"weight":1}]}`))
+	preview, err := env.share.Preview(context.Background(), shareTestGroupID, []byte(`{"scheduler":"share"}`))
 	require.NoError(t, err)
 	codes := map[string]int64{}
 	for _, w := range preview.Warnings {
 		codes[w.Code] = w.AccountID
 	}
 	require.Equal(t, int64(1), codes["capacity_mismatch"], "90%% of sessions on 10%% of the capacity")
-
-	_, err = env.share.Preview(context.Background(), shareTestGroupID,
-		[]byte(`{"scheduler":"share","accounts":[{"account_id":1,"tier":1,"weight":1,"drain":true},{"account_id":2,"tier":1,"weight":1,"drain":true}]}`))
-	require.True(t, infraerrors.IsBadRequest(err), "a policy draining every member is rejected")
+	require.Len(t, env.cache.sessionBindings, 1, "preview never deletes bindings")
 }
 
 func TestShareAdminExplainHasNoSideEffects(t *testing.T) {
@@ -369,22 +392,14 @@ func TestShareAdminExplainHasNoSideEffects(t *testing.T) {
 	require.Empty(t, env.conc.attempts, "explain never takes a slot")
 }
 
-func TestShareAdminRebalanceClearsOnlyColdPlacements(t *testing.T) {
+func TestShareAdminRebalanceClearsPlacements(t *testing.T) {
 	env := newShareAdminEnv(t, Account{ID: 1}, Account{ID: 2})
-	_, err := env.save(t, 0, `{"scheduler":"share","cache":{"ttl_seconds":300},"accounts":[{"account_id":1,"tier":1,"weight":1},{"account_id":2,"tier":1,"weight":1}]}`)
+	_, err := env.save(t, 0, `{"scheduler":"share"}`)
 	require.NoError(t, err)
 	env.cache.bind("warm", 1, time.Hour-time.Minute)
-	env.cache.bind("cold", 2, 30*time.Minute)
 	env.cache.bind("openai:response:resp_1", 1, 30*time.Minute)
 
-	result, err := env.share.Rebalance(context.Background(), shareTestGroupID, "")
-	require.NoError(t, err)
-	require.Equal(t, ShareRebalanceCold, result.Mode)
-	require.Equal(t, 1, result.Cleared)
-	require.Contains(t, env.cache.sessionBindings, "warm")
-	require.NotContains(t, env.cache.sessionBindings, "cold")
-
-	result, err = env.share.Rebalance(context.Background(), shareTestGroupID, ShareRebalanceAll)
+	result, err := env.share.Rebalance(context.Background(), shareTestGroupID, ShareRebalanceAll)
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Cleared)
 	require.Contains(t, env.cache.sessionBindings, "openai:response:resp_1", "continuation ownership is never cleared")
@@ -470,30 +485,30 @@ func TestShareAdminReportShowsAccountSkipsAndLatency(t *testing.T) {
 	require.Equal(t, 3000, *actual[2].TTFT.P95Ms)
 }
 
-func TestShareAdminAccountRulesShowResolvedRules(t *testing.T) {
-	env := newShareAdminEnv(t, Account{ID: 1}, Account{ID: 2, Priority: 4, Concurrency: 7}, Account{ID: 3})
+func TestShareAdminAccountRulesShowPriorityAndLoadFactor(t *testing.T) {
+	// Accounts 1 and 2 have load factors 3 and 1 in priority 1
+	// (twoAccountPolicy); account 3 has neither.
+	env := newShareAdminEnv(t, Account{ID: 1}, Account{ID: 2}, Account{ID: 3, Priority: 4, Concurrency: 7}, Account{ID: 4})
 	ctx := context.Background()
 	rules, err := env.share.AccountRules(ctx, 1)
 	require.NoError(t, err)
 	require.Empty(t, rules, "no group stores a policy yet")
 
-	_, err = env.save(t, 0, `{"scheduler":"shadow","accounts":[{"account_id":1,"tier":2,"weight":9,"cache_domain":"ws-a"}]}`)
+	_, err = env.save(t, 0, `{"scheduler":"share","accounts":[{"account_id":1,"tier":2,"weight":33}]}`)
 	require.NoError(t, err)
 	rules, err = env.share.AccountRules(ctx, 1)
 	require.NoError(t, err)
-	require.Equal(t, []ShareSchedulingAccountRule{{GroupID: shareTestGroupID, GroupName: "share-group", Scheduler: "shadow",
-		Effective: true, Configured: true, Tier: 2, Weight: 9, CacheDomain: "ws-a"}}, rules)
+	require.Equal(t, []ShareSchedulingAccountRule{{GroupID: shareTestGroupID, GroupName: "share-group", Scheduler: "share",
+		Effective: true, Tier: 1, Weight: 3}}, rules, "the stored rule is ignored")
 
-	rules, err = env.share.AccountRules(ctx, 2)
+	rules, err = env.share.AccountRules(ctx, 3)
 	require.NoError(t, err)
 	require.Len(t, rules, 1)
-	require.False(t, rules[0].Configured)
-	require.Equal(t, 4, rules[0].Tier, "an unconfigured member's tier follows its priority")
-	require.Equal(t, 7, rules[0].Weight, "and its weight its concurrency")
-	require.Equal(t, "account:2", rules[0].CacheDomain)
+	require.Equal(t, 4, rules[0].Tier, "the tier is the priority")
+	require.Equal(t, 7, rules[0].Weight, "without a load factor the weight is the concurrency")
 
-	env.repo.accountsByID[3].AccountGroups = nil
-	rules, err = env.share.AccountRules(ctx, 3)
+	env.repo.accountsByID[4].AccountGroups = nil
+	rules, err = env.share.AccountRules(ctx, 4)
 	require.NoError(t, err)
 	require.Empty(t, rules)
 

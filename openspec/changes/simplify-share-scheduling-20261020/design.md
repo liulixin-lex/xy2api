@@ -11,7 +11,7 @@
 | 概念 | 取值 | 代码位置 |
 |---|---|---|
 | 层级 | `Account.Priority`，数字越小越优先，严格分层 | 内核 `sharesched.Plan` 的条目层级取 `Candidate.Priority` |
-| 权重 | `Account.EffectiveLoadFactor()`：负载因子 1–10000；未设时取并发，并发 ≤0 时取 1 | 新增 `Candidate.Weight`，由 5 个构造点填写：Gateway 与 OpenAI 两个适配器、绑定账号不在列表时的补位候选、末位兜底放宽一轮、管理端成员视图 |
+| 权重 | `Account.EffectiveLoadFactor()`：负载因子 1–10000；未设时取并发，并发 ≤0 时取 1 | 新增 `Candidate.Weight`，由 5 个构造点填写：Gateway 与 OpenAI 两个适配器、绑定账号不在列表时的补位候选、末位兜底放宽一轮、管理端成员视图。所有构造点与账号份额接口都经 `shareWeight(account)` 一个函数取值；之后若叠加健康系数（降权、慢启动），只改这个函数。本版不叠加任何系数 |
 | 账号规则 | 策略 JSON 里的 `accounts`（tier、weight、drain、drain_until、cache_domain）**读时忽略**，保存时原样保留（§3） | — |
 | 满载 | 与原版对齐，见 §5 | 份额执行器 |
 | 每组设置 | 调度方式 `sub2api` / `share`；会话保持 开（`affinity.key=auto`）/ 关（`none`） | §3、§7 |
@@ -150,6 +150,8 @@
 | `cache_hit_ratio_1h` | float \| null | 同一查询：Σ缓存读 ÷ Σ（输入 + 缓存读 + 缓存写） |
 | `switch_loss_ratio_1h` | float \| null | 近 1 小时“因换号损失的缓存”，来自缓存归因抽样计数（§8） |
 
+三个 1 小时摘要在进程内缓存 30 秒：数据库分组查询一份，归因计数按分组各一份。账号页与份额页频繁刷新时不重复查大表。策略字段与成员计数每次现读。
+
 ### 7.3 `GET /groups/:id/policy`
 
 | 字段 | 类型 | 说明 |
@@ -174,7 +176,7 @@
 | `priority` | int | 层级 |
 | `concurrency` | int | 并发上限 |
 | `load_factor` | int \| null | 账号原值，未设为 null |
-| `effective_load_factor` | int | 份额权重，即 `EffectiveLoadFactor()` |
+| `effective_load_factor` | int | 份额权重，即 `shareWeight(account)`；本版等于 `EffectiveLoadFactor()` |
 | `other_group_ids` | int64[] | 该账号所在的其他分组（不含本组） |
 | `expected_share` | float | 预计新会话份额，见下文“份额口径” |
 | `share_if_healthy` | float | 只有该账号恢复健康、其余成员保持现状时的预计份额。健康账号等于 `expected_share` |
@@ -192,12 +194,14 @@
 **失败率口径与开销**：
 - 错误数沿用 0.4.2 账号近期健康的条件（`buildOpsErrorLogsWhere`，View=all）：只算客户可见错误（status ≥400），`cyber_policy` 例外，不含已恢复的上游记录。走 `ops_error_logs (account_id, created_at)` 索引。
 - 成功请求数走 `usage_logs (account_id, created_at)` 索引；本组请求数走 `usage_logs (group_id, created_at)` 索引。
-- 窗口固定为近 1 小时。按成员批量查询，每个视图共 3 条 SQL，结果在进程内按分组缓存 30 秒。
+- 窗口固定为近 1 小时。按成员批量查询，每个视图共 3 条 SQL。
+- 缓存：结果在进程内缓存 30 秒，键为分组 ID，**只缓存请求数与错误数**。成员列表、优先级、负载因子、健康状态与份额每次现读、现场计算，所以修改负载因子后视图立即反映。
 
 ### 7.4 `PUT /groups/:id/policy`
 
 - 请求：`{ "scheduler": "sub2api"|"share", "session_keep": bool, "expected_version": int64 }`，三项必填；`expected_version=0` 表示新建。
-- 兼容旧页面：请求体为旧形状 `{ "expected_version", "policy": {…} }` 时，只取 `policy.scheduler`（`shadow` 视为 `sub2api`）与 `policy.affinity`（按 §1 的读法），其余忽略。
+- 兼容旧页面：请求体为旧形状 `{ "expected_version", "policy": {…} }` 时，只取 `policy.scheduler` 与 `policy.affinity`（按 §1 的读法），其余忽略。蓝绿期间旧页面可能提交 `scheduler:"shadow"`，**按 `sub2api` 写入**（新形状提交 `shadow` 返回 400）。
+- 调度方式发生变化时，同时写切换锚点（§7.7）。
 - 写入规则见 §3.2。
 - 响应：同 `GET /groups/:id/policy`。
 - 错误：
@@ -235,6 +239,7 @@
 
 - 请求：`{ "model": string, "session_hash": string?, "estimated_tokens": int?, "cache_one_hour": bool?, "body": object? }`。
 - `session_hash` 缺省或为空时，后端生成一个随机会话键，结果等同一个新会话，`simulated_new_session=true`。每次调用的落点按权重随机，可能不同。
+- `model` 可以为空字符串，表示不按模型过滤：按分组内任一可服务账号的视角模拟（模型支持与模型级限流的门禁不参与）。
 - 不占槽位、不写绑定；分组在原版模式下同样可用。
 - 响应：
 
@@ -254,21 +259,31 @@
 ### 7.7 `GET /groups/:id/report?window=1h`
 
 - `window` 为 Go 时长，1m–24h，缺省 1h。
-- 对比基线：取**最近一次调度方式变更前的等长窗口**。
-  - 变更时间取策略行的 `updated_at`：本变更后，保存只会改调度方式或会话保持。
-  - 只在 `scheduler=share` 时给出基线。
+- **切换锚点**：只在调度方式变化（`sub2api` ↔ `share`）时记录切换时间，写入 Redis 键 `xy2:share:switched:<group_id>`。
+  - 值为毫秒时间戳，TTL 194 小时，与 `cache` 类小时桶保留期一致。
+  - 只改会话保持的保存不写这个键。
+  - 不改表结构，也不加 JSON 字段。
+  - 键不存在（例如升级前切换、键已过期、Redis 写失败）时，回退到策略行的 `updated_at`。
+  - 响应用 `anchor_source` 标明锚点来源：`switch_record` 或 `policy_updated_at`。
+- **窗口**：
+  - 只在 `scheduler=share` 时给出基线。基线 = 锚点前的等长窗口 `[锚点 − window, 锚点)`。
+  - 锚点落在当前窗口内时，`current` 从锚点开始算 `[锚点, now)`，不混入切换前的数据；前端据此提示“切换后数据只有 N 分钟”。
+  - 锚点早于当前窗口时，`current = [now − window, now)`。
   - 理由：健康卡要回答“切到份额后是否变差”。“上一个等长窗口”在切换一天后比较的是份额对份额，发现不了回归。
 - 响应：
 
 | 字段 | 说明 |
 |---|---|
-| `group_id`、`scheduler`、`session_keep`、`version`、`from`、`to`、`window_seconds` | |
+| `group_id`、`scheduler`、`session_keep`、`version`、`window_seconds` | |
+| `current_from`、`current_to` | 当前窗口的实际起止（可能因切换而短于 `window`） |
 | `current` | Metrics |
+| `switched_at` | time \| null：锚点时间 |
+| `anchor_source` | `"switch_record"`、`"policy_updated_at"` 或 null |
+| `baseline_from`、`baseline_to` | time \| null：基线窗口的实际起止 |
 | `baseline` | Metrics \| null |
-| `baseline_from`、`baseline_to` | time \| null |
-| `baseline_unavailable` | `"not_share"`、`"never_switched"`、`"out_of_retention"` 或 null |
-| `accounts[]` | `{account_id, requests, request_share, tokens, token_share, standard_cost, cost_share, skipped}`。前六项来自 `usage_logs`；`skipped` 是 `{原因: 次数}`，**仅份额模式** |
-| `details` | `{cache_classes: {类别: {requests, tokens}}, reasons: {原因: 次数}, waits: {count, hit, avg_ms}, attempts, share_requests}`。`cache_classes` 两种模式都有；其余**仅份额模式** |
+| `baseline_unavailable` | `"not_share"`、`"never_switched"`、`"out_of_retention"` 或 null。`out_of_retention` 只影响归因三项：数据库各项照常给出，`baseline` 仍返回 |
+| `accounts[]` | `{account_id, requests, request_share, tokens, token_share, standard_cost, cost_share, skipped}`，统计当前窗口。前六项来自 `usage_logs`；`skipped` 是 `{原因: 次数}`，**仅份额模式** |
+| `details` | `{cache_classes: {类别: {requests, tokens}}, reasons: {原因: 次数}, waits: {count, hit, avg_ms}, attempts, share_requests}`，统计当前窗口。`cache_classes` 两种模式都有；其余**仅份额模式** |
 | `counters_error` | string \| null，Redis 读取失败时的说明 |
 | `counter_precision` | `"minute"` 或 `"hour_rounded"`：基线、以及超过 2 小时的窗口按整点小时汇总 |
 

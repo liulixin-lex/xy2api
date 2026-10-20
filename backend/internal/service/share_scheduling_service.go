@@ -150,11 +150,7 @@ type ShareSchedulingService struct {
 	settings SettingRepository
 	node     string
 
-	state       atomic.Pointer[shareSchedulingState]
-	corrections atomic.Pointer[map[int64]map[int64]float64]
-	// correctionRuns records, per group, the last successful correction
-	// query; only the refresh loop touches it.
-	correctionRuns map[int64]shareCorrectionRun
+	state atomic.Pointer[shareSchedulingState]
 	// ineligible holds, per account, when it was last seen failing a health
 	// gate. Tier return waits until an account has been healthy for
 	// tiers.stable_seconds.
@@ -171,10 +167,6 @@ type ShareSchedulingService struct {
 	// gateway and openai give the admin operations the live candidate gates.
 	gateway *GatewayService
 	openai  *OpenAIGatewayService
-	// meterIO is set when the repository timing hooks are installed
-	// (server.enable_server_timing). Without them a selection's Redis and
-	// database calls are invisible, so only its duration is recorded.
-	meterIO bool
 
 	mu sync.Mutex
 	// settingsEpoch counts settings writes; a reload that read settings
@@ -196,13 +188,11 @@ func NewShareSchedulingService(repo ShareSchedulingRepository, store ShareSchedu
 		stats: newShareStatsRecorder(), traces: newShareTraceTable(), attribution: make(chan struct{}, shareAttributionConcurrency),
 		shadows: make(chan struct{}, shareShadowConcurrency)}
 	s.state.Store(&shareSchedulingState{settings: DefaultShareSchedulingSettings(), groups: map[int64]*shareGroupPolicy{}})
-	empty := map[int64]map[int64]float64{}
-	s.corrections.Store(&empty)
 	return s
 }
 
-// Start loads policies and settings and launches refresh, broadcast,
-// correction and statistics loops.
+// Start loads policies and settings and launches the refresh, broadcast and
+// statistics loops.
 func (s *ShareSchedulingService) Start() {
 	if s == nil {
 		return
@@ -266,7 +256,6 @@ func (s *ShareSchedulingService) refreshLoop(ctx context.Context) {
 				slog.Warn("share_scheduling.refresh_failed", "error", err)
 			}
 			cancel()
-			s.refreshCorrections(ctx, time.Now())
 		}
 	}
 }
@@ -437,7 +426,6 @@ func decodeShareGroupPolicy(row *ShareSchedulingPolicyRow) *shareGroupPolicy {
 		slog.Warn("share_scheduling.policy_decode_failed", "group_id", row.GroupID, "version", row.Version, "error", err)
 		return nil
 	}
-	policy.Freeze()
 	return &shareGroupPolicy{groupID: row.GroupID, version: row.Version, policy: policy}
 }
 
@@ -449,8 +437,9 @@ func (s *ShareSchedulingService) Settings() ShareSchedulingSettings {
 	return s.state.Load().settings
 }
 
-// groupPolicy returns the group's policy when share or shadow scheduling is
-// in effect, nil when the group uses the original scheduler.
+// groupPolicy returns the group's policy when share scheduling is in effect,
+// nil when the group uses the original scheduler. A stored shadow policy runs
+// the original scheduler (design §3.3).
 func (s *ShareSchedulingService) groupPolicy(groupID int64) *shareGroupPolicy {
 	if s == nil {
 		return nil
@@ -460,7 +449,7 @@ func (s *ShareSchedulingService) groupPolicy(groupID int64) *shareGroupPolicy {
 		return nil
 	}
 	gp := state.groups[groupID]
-	if gp == nil || gp.policy.Scheduler == sharesched.SchedulerSub2API {
+	if gp == nil || gp.policy.Effective() != sharesched.SchedulerShare {
 		return nil
 	}
 	return gp
@@ -468,8 +457,7 @@ func (s *ShareSchedulingService) groupPolicy(groupID int64) *shareGroupPolicy {
 
 // shareSchedulingActive reports whether the group routes by share scheduling.
 func (s *ShareSchedulingService) shareSchedulingActive(groupID int64) bool {
-	gp := s.groupPolicy(groupID)
-	return gp != nil && gp.policy.Scheduler == sharesched.SchedulerShare
+	return s.groupPolicy(groupID) != nil
 }
 
 // shareHealthReason reports whether an exclusion reflects the account's own
@@ -502,148 +490,6 @@ func (s *ShareSchedulingService) observeEligibility(accountID int64, eligible bo
 		}
 	}
 	return time.Time{}
-}
-
-// correctionsFor returns the bounded correction factors of a group.
-func (s *ShareSchedulingService) correctionsFor(groupID int64) map[int64]float64 {
-	if s == nil {
-		return nil
-	}
-	return (*s.corrections.Load())[groupID]
-}
-
-// shareCorrectionRun is the last successful correction query of a group.
-type shareCorrectionRun struct {
-	at      time.Time
-	version int64
-}
-
-const (
-	shareCorrectionMinInterval  = 30 * time.Second
-	shareCorrectionMaxInterval  = 15 * time.Minute
-	shareCorrectionQueryTimeout = 3 * time.Second
-	shareCorrectionBudget       = 10 * time.Second
-	shareCorrectionMinStale     = 10 * time.Minute
-)
-
-// shareCorrectionInterval spaces the usage aggregation of one group: the
-// factors follow a window-long average, so re-reading the whole window every
-// 30 seconds would only add database load.
-func shareCorrectionInterval(windowMinutes int) time.Duration {
-	interval := time.Duration(windowMinutes) * time.Minute / 12
-	switch {
-	case interval < shareCorrectionMinInterval:
-		return shareCorrectionMinInterval
-	case interval > shareCorrectionMaxInterval:
-		return shareCorrectionMaxInterval
-	}
-	return interval
-}
-
-// refreshCorrections recomputes the optional share correction of active
-// groups whose interval has passed or whose policy changed, each query with
-// its own timeout and the whole pass within shareCorrectionBudget so a slow
-// database cannot hold up the policy refresh. A failed or unreached query
-// keeps the previous factors until they are a window (at least ten minutes)
-// old; after that the group runs uncorrected.
-func (s *ShareSchedulingService) refreshCorrections(ctx context.Context, now time.Time) {
-	if s.repo == nil {
-		return
-	}
-	ctx, cancelAll := context.WithTimeout(ctx, shareCorrectionBudget)
-	defer cancelAll()
-	state := s.state.Load()
-	next := make(map[int64]map[int64]float64)
-	previous := *s.corrections.Load()
-	runs := make(map[int64]shareCorrectionRun, len(s.correctionRuns))
-	keep := func(groupID int64, run shareCorrectionRun) {
-		runs[groupID] = run
-		if factors, ok := previous[groupID]; ok {
-			next[groupID] = factors
-		}
-	}
-	for groupID, gp := range state.groups {
-		balance := gp.policy.Balance
-		if !state.settings.Enabled || gp.policy.Scheduler == sharesched.SchedulerSub2API || balance.Correction == sharesched.CorrectionOff {
-			continue
-		}
-		window := time.Duration(balance.WindowMinutes) * time.Minute
-		stale := window
-		if stale < shareCorrectionMinStale {
-			stale = shareCorrectionMinStale
-		}
-		run, ran := s.correctionRuns[groupID]
-		ran = ran && run.version == gp.version
-		if ran && now.Sub(run.at) < shareCorrectionInterval(balance.WindowMinutes) {
-			keep(groupID, run)
-			continue
-		}
-		queryCtx, cancel := context.WithTimeout(ctx, shareCorrectionQueryTimeout)
-		usage, err := s.repo.AccountUsage(queryCtx, groupID, now.Add(-window))
-		cancel()
-		if err != nil {
-			slog.Debug("share_scheduling.correction_usage_failed", "group_id", groupID, "error", err)
-			if ran && now.Sub(run.at) <= stale {
-				keep(groupID, run)
-			}
-			continue
-		}
-		runs[groupID] = shareCorrectionRun{at: now, version: gp.version}
-		if factors := shareCorrectionFactors(&gp.policy, usage); len(factors) > 0 {
-			next[groupID] = factors
-		}
-	}
-	s.correctionRuns = runs
-	s.corrections.Store(&next)
-}
-
-// shareCorrectionFactors compares each configured account's share of the
-// window volume with its target share inside its tier. Accounts without
-// configured rules and windows below min_volume are left uncorrected.
-func shareCorrectionFactors(p *sharesched.Policy, usage map[int64]ShareSchedulingUsage) map[int64]float64 {
-	volume := func(u ShareSchedulingUsage) float64 {
-		switch p.Balance.Unit {
-		case sharesched.UnitTokens:
-			return float64(u.Tokens)
-		case sharesched.UnitStandardCost:
-			return u.StandardCost
-		default:
-			return float64(u.Requests)
-		}
-	}
-	type tierTotals struct{ weight, volume float64 }
-	tiers := map[int]*tierTotals{}
-	var total float64
-	for _, rule := range p.Accounts {
-		if rule.Drain {
-			continue
-		}
-		t := tiers[rule.Tier]
-		if t == nil {
-			t = &tierTotals{}
-			tiers[rule.Tier] = t
-		}
-		v := volume(usage[rule.AccountID])
-		t.weight += float64(rule.Weight)
-		t.volume += v
-		total += v
-	}
-	if total < float64(p.Balance.MinVolume) || total <= 0 {
-		return nil
-	}
-	factors := make(map[int64]float64, len(p.Accounts))
-	for _, rule := range p.Accounts {
-		t := tiers[rule.Tier]
-		if rule.Drain || t == nil || t.weight <= 0 || t.volume <= 0 {
-			continue
-		}
-		target := float64(rule.Weight) / t.weight
-		actual := volume(usage[rule.AccountID]) / t.volume
-		if f := sharesched.CorrectionFactor(p.Balance.Correction, target, actual); f != 1 {
-			factors[rule.AccountID] = f
-		}
-	}
-	return factors
 }
 
 // publishChange broadcasts a change; other instances also converge through

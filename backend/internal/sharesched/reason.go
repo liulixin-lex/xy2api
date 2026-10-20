@@ -5,8 +5,11 @@
 package sharesched
 
 // Reason is a stable code explaining a placement decision or an exclusion.
-// Codes are persisted in decision samples and translated by the admin UI, so
-// existing values must never change meaning.
+// Codes are kept in report counters and translated by the admin UI, so
+// existing values must never change meaning. Retired codes (spill_keep,
+// return_immediate, return_deadline, drain_cold, drain_deadline,
+// admin_rebalance) are no longer produced and may still appear in counters
+// written before an upgrade.
 type Reason string
 
 // Selection reasons.
@@ -15,21 +18,15 @@ const (
 	ReasonAffinityHit             Reason = "affinity_hit"
 	ReasonAffinityWait            Reason = "affinity_wait"
 	ReasonSpillRebind             Reason = "spill_rebind"
-	ReasonSpillKeep               Reason = "spill_keep"
 	ReasonSoftSpill               Reason = "soft_spill"
 	ReasonNewSession              Reason = "new_session"
 	ReasonSessionless             Reason = "sessionless"
 	ReasonRealignCold             Reason = "realign_cold"
 	ReasonReturnCold              Reason = "return_cold"
-	ReasonReturnImmediate         Reason = "return_immediate"
-	ReasonReturnDeadline          Reason = "return_deadline"
-	ReasonDrainCold               Reason = "drain_cold"
-	ReasonDrainDeadline           Reason = "drain_deadline"
 	ReasonRebindUnavailable       Reason = "rebind_unavailable"
 	ReasonTierOverflowSaturated   Reason = "tier_overflow_saturated"
 	ReasonTierOverflowUnavailable Reason = "tier_overflow_unavailable"
 	ReasonFailoverNext            Reason = "failover_next"
-	ReasonAdminRebalance          Reason = "admin_rebalance"
 	ReasonModelRouting            Reason = "model_routing"
 	ReasonModelRoutingFallback    Reason = "model_routing_fallback"
 	// Gateway resilience (design §4): the session left an account it kept
@@ -66,12 +63,10 @@ const (
 	ReasonPlatformMismatch    Reason = "platform_mismatch"
 	ReasonTransportMismatch   Reason = "transport_mismatch"
 	ReasonCapabilityMismatch  Reason = "capability_mismatch"
-	ReasonCompactUnsupported  Reason = "compact_unsupported"
 	ReasonRuntimeBlocked      Reason = "runtime_blocked"
 	ReasonProxyQuarantined    Reason = "proxy_quarantined"
 	ReasonSchedulingThreshold Reason = "scheduling_threshold"
 	ReasonExcludedInRequest   Reason = "excluded_in_request"
-	ReasonDrained             Reason = "drained"
 	ReasonSaturated           Reason = "saturated"
 	ReasonCodexPressure       Reason = "codex_pressure"
 	ReasonIneligible          Reason = "ineligible"
@@ -83,8 +78,6 @@ type KeySource string
 const (
 	KeyContinuation KeySource = "key_continuation"
 	KeySession      KeySource = "key_session"
-	KeyPromptCache  KeySource = "key_prompt_cache_key"
 	KeyAnchor       KeySource = "key_anchor"
-	KeyPrefix       KeySource = "key_prefix"
 	KeyNone         KeySource = "key_none"
 )
