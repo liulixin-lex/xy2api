@@ -21,7 +21,7 @@ func TestDefaultPolicyIsValidAndInert(t *testing.T) {
 func TestDecodePolicyAcceptsRetiredFields(t *testing.T) {
 	p, err := DecodePolicy([]byte(`{"schema":1,"scheduler":"share","accounts":[
 		{"account_id":244,"tier":1,"weight":50,"cache_domain":"anthropic-ws-a"},
-		{"account_id":317,"tier":2,"weight":100,"drain":true,"drain_until":"2026-10-11T00:00:00Z"},
+		{"account_id":202,"tier":2,"weight":100,"drain":true,"drain_until":"2026-10-11T00:00:00Z"},
 		{"account_id":9,"weight":0,"x":1}],
 		"defaults":{"tier":"account_priority","weight":"equal"},
 		"affinity":{"enabled":true,"key":"auto","ttl_seconds":60,"wait":{"mode":"fixed","max_ms":99999},
