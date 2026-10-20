@@ -272,3 +272,29 @@ func TestAvailabilityFallbackIndependentOfClaudeCodeFallback(t *testing.T) {
 	key2.Group.ClaudeCodeOnly, key2.Group.FallbackGroupID = true, &cc
 	require.Nil(t, r2.AvailabilityFallbackGroup(ctx, key2))
 }
+
+func TestSoleCandidateCountsOnlyAccountsThatCanServeTheRequest(t *testing.T) {
+	// Review R07: the check used the group's account count, so an account
+	// that serves only another model, or already failed in this request,
+	// still counted as an alternative and the only real candidate was cut
+	// at the per-attempt tier instead of using the whole budget.
+	r, _, accounts, _ := newFallbackFixture(t)
+	SetResilienceInstance(r)
+	t.Cleanup(func() { SetResilienceInstance(nil) })
+	st := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(context.Background(), st)
+	st.SetGroup(20)
+	st.NoteTurn(20, "model-a", "")
+
+	onlyB := healthyAccount(6)
+	onlyB.Credentials = map[string]any{"model_mapping": map[string]any{"model-b": "model-b"}}
+	accounts.byGroup[20] = []Account{healthyAccount(2), onlyB}
+	r.lastResortGroups.entries = nil
+	require.True(t, resilienceLastCandidate(ctx, 2), "the other account does not serve model-a")
+
+	accounts.byGroup[20] = []Account{healthyAccount(2), healthyAccount(7)}
+	r.lastResortGroups.entries = nil
+	require.False(t, resilienceLastCandidate(ctx, 2), "an account serving model-a is an alternative")
+	st.MarkAccountFailed(7)
+	require.True(t, resilienceLastCandidate(ctx, 2), "an account that already failed in this request is not")
+}

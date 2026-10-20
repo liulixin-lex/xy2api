@@ -28,6 +28,7 @@
 | [`CODEX_STATE.md`](CODEX_STATE.md) | Codex STATE 与智商检测 |
 | [`CODEX_STATE_RELIABILITY.md`](CODEX_STATE_RELIABILITY.md) | STATE 可靠性控制与策略 |
 | [`GPT61_SOL_SUPPORT.md`](GPT61_SOL_SUPPORT.md) | GPT-6.1 Sol 适配（来源清单 [`GPT61_SOL_PROVENANCE.json`](GPT61_SOL_PROVENANCE.json)） |
+| [`OPENAI_FAST.md`](OPENAI_FAST.md) | OpenAI 分组 Fast 优先级、全局过滤与档位计费 |
 | [`COMPOSITE_GROUPS.md`](COMPOSITE_GROUPS.md) | 组合分组 |
 | [`GROUP_SYSTEM_PROMPTS.md`](GROUP_SYSTEM_PROMPTS.md) | 分组标识与系统提示词 |
 | [`GROK_MONITOR_RESPONSES.md`](GROK_MONITOR_RESPONSES.md) | Grok 渠道监控的 Responses 模式（0.4.1 起，可选） |

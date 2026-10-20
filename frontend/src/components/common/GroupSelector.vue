@@ -44,6 +44,15 @@
           :rate-multiplier="group.rate_multiplier == null ? undefined : group.rate_multiplier"
           class="min-w-0 flex-1"
         />
+        <!-- 管理端始终标出专属分组；show_exclusive_badge 只控制用户端是否展示 -->
+        <span
+          v-if="group.is_exclusive"
+          data-test="group-exclusive-tag"
+          class="shrink-0 rounded-md bg-purple-50 px-1.5 py-0.5 text-[10px] font-medium text-purple-600 dark:bg-purple-900/20 dark:text-purple-400"
+          :title="t('admin.groups.exclusiveHint')"
+        >
+          {{ t('admin.groups.exclusive') }}
+        </span>
         <span class="shrink-0 text-xs text-gray-400">{{ group.account_count || 0 }}</span>
       </label>
       <div

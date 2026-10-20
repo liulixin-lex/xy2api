@@ -562,8 +562,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	}
 	// xy2api resilience: a soft-penalised owner keeps the binding while this
 	// request is served elsewhere (design §4.2).
-	if account.Platform == NormalizeOpenAICompatiblePlatform(req.Platform) && account.IsOpenAICompatible() && resilienceKeepsSoftStickyBinding(account, req.RequestedModel) {
-		resilience.StateFrom(ctx).KeepSticky(accountID)
+	if s.service.resilienceKeepOpenAISoftOwner(ctx, account, req.Platform, req.RequestedModel) {
 		return nil, false, nil
 	}
 	if shouldClearStickySession(account, req.RequestedModel) || account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() || !account.IsSchedulable() {

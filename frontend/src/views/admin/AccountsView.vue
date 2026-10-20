@@ -4,7 +4,6 @@
       <template #filters>
         <div class="flex flex-wrap-reverse items-start justify-between gap-3">
           <AccountTableFilters
-            class="lg:w-auto lg:flex-1"
             v-model:searchQuery="params.search"
             :filters="params"
             :groups="groups"
@@ -144,17 +143,14 @@
                           <Icon name="grid" size="sm" class="text-gray-400" />
                         </div>
                       </div>
-                      <div class="grid grid-cols-1 gap-1">
-                        <button
-                          v-for="col in toggleableColumns"
-                          :key="col.key"
-                          @click="toggleColumn(col.key)"
-                          class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
-                        >
-                          <span class="truncate">{{ col.label }}</span>
-                          <Icon v-if="isColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" />
-                        </button>
-                      </div>
+                      <AccountColumnSettings
+                        :columns="orderedToggleableColumns"
+                        :is-visible="isColumnVisible"
+                        :customized="columnOrderCustomized"
+                        @toggle="toggleColumn"
+                        @reorder="setColumnOrder"
+                        @reset="resetColumnOrder"
+                      />
                     </div>
                   </div>
                 </Teleport>
@@ -202,8 +198,8 @@
           row-key="id"
           :server-side-sort="true"
           @sort="handleSort"
-          default-sort-key="name"
-          default-sort-order="asc"
+          default-sort-key="last_used_at"
+          default-sort-order="desc"
           :sort-storage-key="ACCOUNT_SORT_STORAGE_KEY"
           :estimate-row-height="156"
           :overscan="5"
@@ -510,6 +506,7 @@ import { useTableLoader } from '@/composables/useTableLoader'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { useLazyMount, prefetchWhenIdle, defineLazyComponent } from '@/composables/useLazyMount'
+import { useColumnOrder } from '@/composables/useColumnOrder'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -520,6 +517,7 @@ import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
+import AccountColumnSettings from '@/components/admin/account/AccountColumnSettings.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import IQCheckCell from '@/components/account/IQCheckCell.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
@@ -698,12 +696,14 @@ const accountToolsDropdownStyle = computed(() => ({
 const hiddenColumns = reactive<Set<string>>(new Set())
 const DEFAULT_HIDDEN_COLUMNS = ['today_stats', 'proxy', 'notes', 'scheduler_score', 'rate_multiplier']
 const HIDDEN_COLUMNS_KEY = 'account-hidden-columns'
+const ACCOUNT_COLUMN_ORDER_KEY = 'account-column-order'
 // One-time migration: hide scheduler score for existing admins too, because showing it opt-ins to heavy backend scoring.
 const HIDDEN_COLUMNS_VERSION_KEY = 'account-hidden-columns-version'
 const HIDDEN_COLUMNS_CURRENT_VERSION = 'scheduler-score-hidden-by-default'
 
 // Sorting settings
-const ACCOUNT_SORT_STORAGE_KEY = 'account-table-sort'
+// v2：默认改为最近使用倒序（2026-10-19），旧键里保存的排序一律从新默认重新开始。
+const ACCOUNT_SORT_STORAGE_KEY = 'account-table-sort-v2'
 type AccountSortOrder = 'asc' | 'desc'
 type AccountSortState = {
   sort_by: string
@@ -722,7 +722,7 @@ const ACCOUNT_SORTABLE_KEYS = new Set([
   'expires_at'
 ])
 const loadInitialAccountSortState = (): AccountSortState => {
-  const fallback: AccountSortState = { sort_by: 'name', sort_order: 'asc' }
+  const fallback: AccountSortState = { sort_by: 'last_used_at', sort_order: 'desc' }
   try {
     const raw = localStorage.getItem(ACCOUNT_SORT_STORAGE_KEY)
     if (!raw) return fallback
@@ -1892,12 +1892,29 @@ const toggleableColumns = computed(() =>
   allColumns.value.filter(col => col.key !== 'select' && col.key !== 'name' && col.key !== 'actions')
 )
 
-// Filtered columns based on visibility
-const cols = computed(() =>
-  allColumns.value.filter(col =>
-    col.key === 'select' || col.key === 'name' || col.key === 'actions' || !hiddenColumns.has(col.key)
-  )
-)
+// 列显示里可拖动调整顺序；选择、名称列固定在左，操作列固定在右（表格里是吸附列）。
+const toggleableColumnKeys = computed(() => toggleableColumns.value.map(col => col.key))
+const {
+  orderedKeys: columnOrder,
+  isCustomized: columnOrderCustomized,
+  setOrder: setColumnOrder,
+  resetOrder: resetColumnOrder
+} = useColumnOrder(ACCOUNT_COLUMN_ORDER_KEY, toggleableColumnKeys)
+const orderedToggleableColumns = computed(() => {
+  const byKey = new Map(toggleableColumns.value.map(col => [col.key, col]))
+  return columnOrder.value.flatMap(key => byKey.get(key) ?? [])
+})
+
+// Filtered columns based on visibility, in the user's column order
+const cols = computed(() => {
+  const pinned = (key: string) => allColumns.value.filter(col => col.key === key)
+  return [
+    ...pinned('select'),
+    ...pinned('name'),
+    ...orderedToggleableColumns.value.filter(col => !hiddenColumns.has(col.key)),
+    ...pinned('actions')
+  ]
+})
 
 const accountDetailLoading = new Set<number>()
 const loadAccountDetails = async (account: Pick<AccountListItem, 'id'>): Promise<Account | null> => {

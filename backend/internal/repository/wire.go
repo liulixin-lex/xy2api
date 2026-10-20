@@ -11,6 +11,7 @@ import (
 	"github.com/google/wire"
 	"github.com/liulixin-lex/xy2api/ent"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/readiness"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/redis/go-redis/v9"
 )
@@ -242,7 +243,10 @@ func ProvideSQLDB(client *ent.Client) (*sql.DB, error) {
 		return nil, errors.New("ent driver does not expose *sql.DB")
 	}
 	// 返回驱动持有的 sql.DB 实例
-	return drv.DB(), nil
+	db := drv.DB()
+	// xy2api: /ready checks the database (readiness review P1-E).
+	readiness.Register("database", db.PingContext)
+	return db, nil
 }
 
 // ProvideRedis 为依赖注入提供 Redis 客户端。
@@ -256,5 +260,8 @@ func ProvideSQLDB(client *ent.Client) (*sql.DB, error) {
 // 依赖：config.Config
 // 提供：*redis.Client
 func ProvideRedis(cfg *config.Config) *redis.Client {
-	return InitRedis(cfg)
+	rdb := InitRedis(cfg)
+	// xy2api: /ready checks Redis (readiness review P1-E).
+	readiness.Register("redis", func(ctx context.Context) error { return rdb.Ping(ctx).Err() })
+	return rdb
 }

@@ -38,15 +38,24 @@ const (
 // balance of CN providers, administrator rules) stays hard.
 func TempUnschedTier(reason string) PenaltyTier {
 	r := strings.TrimSpace(reason)
-	switch {
-	case r == "":
+	if r == "" {
 		return TierHard
-	case strings.HasPrefix(r, ReasonPrefixTransient):
-		return TierSoft
-	case strings.HasPrefix(r, Reason403Cooldown), strings.HasPrefix(r, legacyOpenAI403CooldownPrefix):
-		return TierSoft
+	}
+	for _, prefix := range softReasonPrefixes {
+		if strings.HasPrefix(r, prefix) {
+			return TierSoft
+		}
 	}
 	return TierHard
+}
+
+// softReasonPrefixes are the temp_unschedulable reasons of soft penalties.
+var softReasonPrefixes = []string{ReasonPrefixTransient, Reason403Cooldown, legacyOpenAI403CooldownPrefix}
+
+// SoftReasonPrefixes returns the reason prefixes TempUnschedTier treats as
+// soft, for storage that has to tell the tiers apart (review R01).
+func SoftReasonPrefixes() []string {
+	return append([]string(nil), softReasonPrefixes...)
 }
 
 // Reason403Cooldown prefixes the counted non-balance 403 cooldown of

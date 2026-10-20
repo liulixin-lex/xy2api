@@ -62,3 +62,35 @@ func TestResilienceOpenAILastResortOrdersRuntimeBlocksByTheirEnd(t *testing.T) {
 	require.Equal(t, resilience.TierSoft, tier)
 	require.WithinDuration(t, now.Add(openAIModelTransientLongCooldown), until, time.Millisecond)
 }
+
+// Tasks 0.4.1 follow-up (design §4.2 exception): a session bound to an
+// account whose model is only held back by the in-process transient
+// breaker keeps its binding while another account serves; the block ends
+// within 10 to 45 s and the session returns to its warm cache.
+func TestOpenAIRuntimeBlockedOwnerKeepsTheSessionBinding(t *testing.T) {
+	const key = "openai:" + lrSession
+	for name, advanced := range map[string]bool{"legacy": false, "advanced": true} {
+		t.Run(name, func(t *testing.T) {
+			env := newOpenAIRuntimeBlockEnv(t, sharesched.SchedulerSub2API, lrAccountA, lrAccountB)
+			if advanced {
+				env.svc.rateLimitService = newOpenAIAdvancedSchedulerRateLimitService("true")
+				t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+			}
+			env.cache.bind(key, lrAccountA, time.Hour-time.Minute)
+			breakOpenAIModel(t, env, lrAccountA, 3, time.Now())
+
+			st := resilience.NewRequestState()
+			ctx := resilience.WithRequestState(cacheableContext(), st)
+			gid := shareTestGroupID
+			sel, _, err := env.svc.SelectAccountWithScheduler(ctx, &gid, "", lrSession, "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+			require.NoError(t, err)
+			require.Equal(t, lrAccountB, sel.Account.ID, "the healthy account serves meanwhile")
+			admission := ContextWithSelectionProfitGate(ctx, sel)
+			require.NoError(t, env.svc.BindStickySessionAfterProfitAdmission(admission, &gid, lrSession, sel.Account.ID))
+			if sel.ReleaseFunc != nil {
+				sel.ReleaseFunc()
+			}
+			require.Equal(t, lrAccountA, env.cache.sessionBindings[key], "the briefly blocked owner keeps the binding")
+		})
+	}
+}

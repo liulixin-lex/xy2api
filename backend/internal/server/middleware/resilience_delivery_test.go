@@ -26,9 +26,9 @@ func withMiddlewareResilience(t *testing.T, mutate func(*resilience.Settings)) {
 }
 
 // disconnectFixture runs a gateway-like route over real connections: the
-// handler optionally writes output, then waits on a slow upstream through a
-// context detached from the client like the forwarders do.
-func disconnectFixture(t *testing.T, writeBeforeWait bool) (states chan *resilience.RequestState, upstreamCancelled chan time.Duration, url string) {
+// handler optionally writes SSE blocks, then waits on a slow upstream
+// through a context detached from the client like the forwarders do.
+func disconnectFixture(t *testing.T, written string) (states chan *resilience.RequestState, upstreamCancelled chan time.Duration, url string) {
 	t.Helper()
 	upstreamCancelled = make(chan time.Duration, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,9 +47,9 @@ func disconnectFixture(t *testing.T, writeBeforeWait bool) (states chan *resilie
 	engine.POST("/v1/responses", ClientRequestID(), func(c *gin.Context) {
 		st := resilience.StateFrom(c.Request.Context())
 		states <- st
-		if writeBeforeWait {
+		if written != "" {
 			c.Header("Content-Type", "text/event-stream")
-			_, _ = c.Writer.WriteString("event: response.created\ndata: {}\n\n")
+			_, _ = c.Writer.WriteString(written)
 			c.Writer.Flush()
 		}
 		ctx := resilience.UpstreamContextOnDisconnect(c.Request.Context(), context.WithoutCancel(c.Request.Context()))
@@ -84,7 +84,7 @@ func clientLeavesAfter(t *testing.T, url string, d time.Duration) {
 func TestUndeliveredDisconnectCancelsUpstream(t *testing.T) {
 	// Spec: a CDN cut before any output cancels the upstream at once.
 	withMiddlewareResilience(t, nil)
-	states, cancelled, url := disconnectFixture(t, false)
+	states, cancelled, url := disconnectFixture(t, "")
 	clientLeavesAfter(t, url, 300*time.Millisecond)
 	select {
 	case waited := <-cancelled:
@@ -99,7 +99,8 @@ func TestUndeliveredDisconnectCancelsUpstream(t *testing.T) {
 func TestPartialDisconnectDrainsUpstream(t *testing.T) {
 	// Spec: after partial delivery the upstream is read for at most the drain.
 	withMiddlewareResilience(t, func(s *resilience.Settings) { s.Disconnect.PartialDrainMaxSeconds = 1 })
-	states, cancelled, url := disconnectFixture(t, true)
+	states, cancelled, url := disconnectFixture(t, "event: response.created\ndata: {}\n\n"+
+		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n")
 	clientLeavesAfter(t, url, 300*time.Millisecond)
 	select {
 	case waited := <-cancelled:
@@ -112,4 +113,20 @@ func TestPartialDisconnectDrainsUpstream(t *testing.T) {
 	disconnected, delivered, _ := st.Disconnect()
 	require.True(t, disconnected)
 	require.True(t, delivered)
+}
+
+func TestOpeningEventsOnlyDisconnectCancelsUpstream(t *testing.T) {
+	// Review R03: opening events are no output; a client that leaves after
+	// them gets the undelivered handling (upstream cancelled at once).
+	withMiddlewareResilience(t, nil)
+	states, cancelled, url := disconnectFixture(t, "event: message_start\ndata: {\"type\":\"message_start\"}\n\nevent: ping\ndata: {\"type\": \"ping\"}\n\n")
+	clientLeavesAfter(t, url, 300*time.Millisecond)
+	select {
+	case waited := <-cancelled:
+		require.Less(t, waited, 2*time.Second)
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream was not cancelled")
+	}
+	st := <-states
+	require.Eventually(t, st.Undelivered, time.Second, 10*time.Millisecond)
 }

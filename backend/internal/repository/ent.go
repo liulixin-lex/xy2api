@@ -141,6 +141,8 @@ func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
 		_ = drv.Close() // 迁移失败时关闭驱动，避免资源泄露
 		return nil, nil, err
 	}
+	// xy2api: warn when the pool can exceed what PostgreSQL has (review P1-D).
+	warnDBPoolAboveServerLimit(migrationCtx, drv.DB(), cfg.Database.MaxOpenConns)
 
 	// 创建 Ent 客户端，绑定到已配置的数据库驱动。
 	client := ent.NewClient(ent.Driver(drv))

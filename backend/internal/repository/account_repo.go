@@ -30,6 +30,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 
 	entsql "entgo.io/ent/dialect/sql"
@@ -1260,6 +1261,18 @@ func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selecto
 			s.OrderBy(tieOrder(s.C(dbaccount.FieldID)))
 		}}
 	}
+	if sortBy == "last_used_at" {
+		// 从未使用的账号 last_used_at 为 NULL。PostgreSQL 降序默认 NULLS FIRST，会把它们排到
+		// “最近使用”的最前面；两个方向都放到最后，最上面始终是真正用过的账号。
+		direction, tieOrder := entsql.OrderAsc(), dbent.Asc(dbaccount.FieldID)
+		if sortOrder == pagination.SortOrderDesc {
+			direction, tieOrder = entsql.OrderDesc(), dbent.Desc(dbaccount.FieldID)
+		}
+		return []func(*entsql.Selector){
+			entsql.OrderByField(dbaccount.FieldLastUsedAt, direction, entsql.OrderNullsLast()).ToFunc(),
+			tieOrder,
+		}
+	}
 
 	field := dbaccount.FieldName
 	defaultOrder := true
@@ -1280,9 +1293,6 @@ func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selecto
 		defaultOrder = false
 	case "rate_multiplier":
 		field = dbaccount.FieldRateMultiplier
-		defaultOrder = false
-	case "last_used_at":
-		field = dbaccount.FieldLastUsedAt
 		defaultOrder = false
 	case "expires_at":
 		field = dbaccount.FieldExpiresAt
@@ -2557,6 +2567,14 @@ func (r *accountRepository) SetOverloaded(ctx context.Context, id int64, until t
 }
 
 func (r *accountRepository) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
+	// xy2api resilience (review R01): with failure handling on, every caller
+	// writes by penalty tier, so a hard pause is not lost behind a longer soft
+	// cooldown and a soft cooldown never replaces an active hard pause.
+	if resilience.Current().FailureOn() {
+		_, err := r.SetTempUnschedulableTiered(ctx, id, until, reason,
+			resilience.TempUnschedTier(reason) == resilience.TierHard, false, resilience.SoftReasonPrefixes())
+		return err
+	}
 	result, err := r.sql.ExecContext(ctx, `
 		UPDATE accounts
 		SET temp_unschedulable_until = $1,

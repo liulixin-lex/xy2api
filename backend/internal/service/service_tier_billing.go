@@ -85,13 +85,22 @@ func codexOAuthResponseTierIsNonAuthoritative(observed string) bool {
 	}
 }
 
-// ApplyOpenAIServiceTierBillingResolution lowers result.ServiceTier only when
-// the selected credential's upstream response tier is authoritative.
-func ApplyOpenAIServiceTierBillingResolution(account *Account, result *OpenAIForwardResult) ServiceTierBillingResolution {
+// ApplyOpenAIServiceTierBillingResolution retains outbound priority for groups
+// whose administrator explicitly forces Fast; other groups use the credential's
+// response-tier contract. The observed upstream tier is preserved in either case.
+func ApplyOpenAIServiceTierBillingResolution(account *Account, group *Group, result *OpenAIForwardResult) ServiceTierBillingResolution {
 	if result == nil {
 		return ServiceTierBillingResolution{}
 	}
-	resolution := ResolveOpenAIServiceTierBilling(account, optionalStringValue(result.ServiceTier), result.UpstreamResponseServiceTier)
+	requested := optionalStringValue(result.ServiceTier)
+	if groupForcesOpenAIFast(group, account) && normalizeBillingServiceTier(requested) == OpenAIFastTierPriority {
+		return ServiceTierBillingResolution{
+			Requested: OpenAIFastTierPriority,
+			Observed:  normalizeBillingServiceTier(result.UpstreamResponseServiceTier),
+			Billing:   OpenAIFastTierPriority,
+		}
+	}
+	resolution := ResolveOpenAIServiceTierBilling(account, requested, result.UpstreamResponseServiceTier)
 	if resolution.Downgraded {
 		billing := resolution.Billing
 		result.ServiceTier = &billing

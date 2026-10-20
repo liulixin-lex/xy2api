@@ -95,6 +95,9 @@ func resilienceNegativeCachePut(ctx context.Context, groupID *int64, model, vari
 	cfg := resilience.Current()
 	if !cfg.ErrorsOn() || groupID == nil || len(excludedIDs) > 0 || !isNoAccountSelectionError(err) || errors.Is(err, errNegativeCached) ||
 		gatewayProfitControlGateActive(ctx) || profitRejectedPattern.MatchString(err.Error()) ||
+		// Last resort failed only on the session limit of a new session: the
+		// group's bound sessions are still served (tasks F2 follow-up).
+		resilience.StateFrom(ctx).LastResortSessionLimited() ||
 		!resilienceNoAccountIsGroupLevel(ctx, derefGroupID(groupID), model) {
 		return
 	}

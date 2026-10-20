@@ -42,14 +42,26 @@ Account-scoped `TRANSIENT` and `STALL` outcomes MUST set a soft cooldown of `fai
 - **WHEN** an attempt returns 502 with a Cloudflare error body containing `"retry_after":60`
 - **THEN** the account is soft-penalised for 60 s.
 
+#### Scenario: Soft cooldown never replaces a hard pause
+- **WHEN** account A is in a balance pause and an in-flight request on A reports a transient failure or a counted 403 asking for a longer wait
+- **THEN** A keeps the balance pause and stays excluded from last resort until it ends.
+
+#### Scenario: Lifting only the cooldown that was read
+- **WHEN** a last-resort success on A is about to lift A's transient cooldown and a balance pause is written on A in between
+- **THEN** the balance pause stays.
+
 ### Requirement: Balance pause
 
-Balance failures of eligible API-key accounts MUST NOT set `status=error`. A balance failure of a real request (an HTTP error answer, a failure inside a stream, a Grok API-key 429 with balance wording, a 402) MUST pause the account for `balance.pause_seconds` (default 300 s, 30–3600 s) through `temp_unschedulable` with a reason starting `balance:`; a longer pause of another kind stays. When the pause ends, real traffic retries the account, and a balance failure pauses it again for the same time. A recent success MUST NOT weaken a balance signal. The gateway MUST NOT keep any other balance state: no balance record, probe, recovery concurrency cap or balance alert. The administrator's "Recover State" (恢复状态) in the account list MUST end the pause at once. With `balance.enabled=false`, balance failures MUST take the 0.3.0 handling.
+Balance failures of eligible API-key accounts MUST NOT set `status=error`. A balance failure of a real request (an HTTP error answer, a failure inside a stream, a Grok API-key 429 with balance wording, a 402) MUST pause the account for `balance.pause_seconds` (default 300 s, 30–3600 s) through `temp_unschedulable` with a reason starting `balance:`. The pause MUST replace an active soft cooldown of any length, keeping the later end; a longer hard pause of another kind stays (0.4.2). No soft cooldown may replace an active balance pause or other hard pause. When the pause ends, real traffic retries the account, and a balance failure pauses it again for the same time. A recent success MUST NOT weaken a balance signal. The gateway MUST NOT keep any other balance state: no balance record, probe, recovery concurrency cap or balance alert. The administrator's "Recover State" (恢复状态) in the account list MUST end the pause at once. With `balance.enabled=false`, balance failures MUST take the 0.3.0 handling.
 
 #### Scenario: Relay runs out of credit
 - **WHEN** account A returns 403 "Insufficient account balance"
 - **THEN** it is paused for 300 s with a `balance:` reason and its `status` stays `active`
 - **AND** it is not selected, not even as a last resort, until the pause ends, after which it is selectable again.
+
+#### Scenario: Balance failure during a longer soft cooldown
+- **WHEN** account A has a 10 minute counted 403 cooldown and another request on A then reports an exhausted balance
+- **THEN** A's reason becomes `balance:` with the 10 minute end, and last resort does not use A.
 
 #### Scenario: 402 only pauses
 - **WHEN** an API-key account returns 402
