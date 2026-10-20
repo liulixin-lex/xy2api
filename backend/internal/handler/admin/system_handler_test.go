@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/sysutil"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -321,4 +323,32 @@ func TestSystemHandlerGetRollbackVersionsError(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+func TestSystemHandlerUpdateInContainerCarriesTheNotice(t *testing.T) {
+	// Production 2026-10-20: an online update inside the 0.3.0 container left
+	// the image at 0.3.0; recreating the container would silently roll back.
+	for _, inContainer := range []bool{true, false} {
+		systemInContainer = func() bool { return inContainer }
+		t.Cleanup(func() { systemInContainer = sysutil.InContainer })
+		router := newSystemHandlerTestRouter(t, &systemHandlerUpdateServiceStub{}, newMemoryIdempotencyRepoStub())
+		for _, path := range []string{"/api/v1/admin/system/update", "/api/v1/admin/system/rollback"} {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			req.Header.Set("Idempotency-Key", fmt.Sprintf("container-%v-%s", inContainer, path))
+			router.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			var body struct {
+				Data map[string]any `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			require.Equal(t, true, body.Data["need_restart"], path)
+			if inContainer {
+				require.Equal(t, true, body.Data["container"], path)
+				require.Equal(t, sysutil.ContainerNotice, body.Data["container_notice"], path)
+			} else {
+				require.NotContains(t, body.Data, "container", path)
+			}
+		}
+	}
 }

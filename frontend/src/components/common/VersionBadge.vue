@@ -178,6 +178,13 @@
                     <p class="text-xs text-green-600/70 dark:text-green-400/70">
                       {{ t('version.restartRequired') }}
                     </p>
+                    <p
+                      v-if="containerNotice"
+                      data-test="container-update-notice"
+                      class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+                    >
+                      {{ t('version.containerNotice') }}
+                    </p>
                   </div>
                 </div>
 
@@ -681,6 +688,8 @@ const buildType = computed(() => appStore.buildType)
 const updating = ref(false)
 const restarting = ref(false)
 const needRestart = ref(false)
+// The server runs in a container: an online update is lost when it is recreated
+const containerNotice = ref(false)
 const updateError = ref('')
 const updateSuccess = ref(false)
 const restartCountdown = ref(0)
@@ -763,6 +772,7 @@ async function handleUpdate() {
     successKind.value = 'update'
     updateSuccess.value = true
     needRestart.value = result.need_restart
+    containerNotice.value = result.container === true
     // Clear version cache to reflect update completed
     appStore.clearVersionCache()
   } catch (error: unknown) {
@@ -837,6 +847,7 @@ async function handleRollback() {
     successKind.value = 'rollback'
     updateSuccess.value = true
     needRestart.value = result.need_restart
+    containerNotice.value = result.container === true
     rollbackPanelOpen.value = false
     // Clear version cache so the next check reflects the rolled-back version
     appStore.clearVersionCache()

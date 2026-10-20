@@ -909,6 +909,42 @@
     {
       "path": "frontend/src/components/admin/usage/UsageFilters.vue",
       "value": "defineExpose({ getUserSearchRevision, setUserKeyword, setAccountKeyword })"
+    },
+    {
+      "path": "backend/cmd/server/main.go",
+      "value": "sysutil.SetRestartHook(func() {"
+    },
+    {
+      "path": "backend/cmd/server/main.go",
+      "value": "waitAndShutdown(app.Server, quit, restart, time.Duration(cfg.Server.RestartDrainSeconds)*time.Second)"
+    },
+    {
+      "path": "backend/internal/pkg/sysutil/restart.go",
+      "value": "if fn := restartHook.Load(); fn != nil {"
+    },
+    {
+      "path": "backend/internal/handler/admin/system_handler.go",
+      "value": "return withContainerNotice(\"update\", gin.H{"
+    },
+    {
+      "path": "backend/internal/handler/admin/system_handler.go",
+      "value": "return withContainerNotice(\"rollback\", gin.H{"
+    },
+    {
+      "path": "backend/internal/config/config.go",
+      "value": "viper.SetDefault(\"server.restart_drain_seconds\", 30)"
+    },
+    {
+      "path": "deploy/config.example.yaml",
+      "value": "restart_drain_seconds: 30"
+    },
+    {
+      "path": "frontend/src/components/common/VersionBadge.vue",
+      "value": "data-test=\"container-update-notice\""
+    },
+    {
+      "path": "frontend/src/components/common/VersionBadge.vue",
+      "value": "containerNotice.value = result.container === true"
     }
   ],
   "forbidden_module_paths": [
@@ -954,7 +990,8 @@
     "xy-admin-user-batch-status",
     "xy-group-openai-fast-priority",
     "xy-account-list-usability",
-    "xy-account-recent-health"
+    "xy-account-recent-health",
+    "xy-graceful-online-update-restart"
   ],
   "custom_patch_tests": [
     {
@@ -1171,6 +1208,26 @@
       "id": "xy-account-recent-health",
       "path": "frontend/src/views/admin/__tests__/UsageView.spec.ts",
       "literal": "opens the error requests tab filtered to the account linked from the accounts list"
+    },
+    {
+      "id": "xy-graceful-online-update-restart",
+      "path": "backend/internal/pkg/sysutil/restart_test.go",
+      "literal": "func TestRestartUsesTheServerHook"
+    },
+    {
+      "id": "xy-graceful-online-update-restart",
+      "path": "backend/cmd/server/shutdown_test.go",
+      "literal": "func TestRestartDrainsRequestsInFlight"
+    },
+    {
+      "id": "xy-graceful-online-update-restart",
+      "path": "backend/internal/handler/admin/system_handler_test.go",
+      "literal": "func TestSystemHandlerUpdateInContainerCarriesTheNotice"
+    },
+    {
+      "id": "xy-graceful-online-update-restart",
+      "path": "frontend/src/components/common/__tests__/VersionBadge.containerNotice.spec.ts",
+      "literal": "tells a container deployment to update the image"
     }
   ]
 }

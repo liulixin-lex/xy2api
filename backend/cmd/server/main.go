@@ -19,6 +19,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/handler"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/pkg/sysutil"
 	"github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/setup"
 	"github.com/liulixin-lex/xy2api/internal/web"
@@ -186,17 +187,41 @@ func runMainServer() {
 
 	log.Printf("Server started on %s", app.Server.Addr)
 
-	// 等待中断信号
+	// 等待中断信号；在线更新的重启也走这里，先排空在途请求再退出（xy2api）
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	restart := make(chan struct{}, 1)
+	sysutil.SetRestartHook(func() {
+		select {
+		case restart <- struct{}{}:
+		default:
+		}
+	})
+	waitAndShutdown(app.Server, quit, restart, time.Duration(cfg.Server.RestartDrainSeconds)*time.Second)
+}
 
-	log.Println("Shutting down server...")
+// signalShutdownTimeout bounds the shutdown on SIGINT/SIGTERM; it stays below
+// the 10-second stop grace period of Docker.
+const signalShutdownTimeout = 5 * time.Second
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// waitAndShutdown blocks until a stop signal or a restart request, then stops
+// accepting requests and waits for those in flight: signalShutdownTimeout
+// after a signal, restartDrain after a restart (xy2api: the online-update
+// restart used to exit at once and cut streams in flight).
+func waitAndShutdown(srv *http.Server, quit <-chan os.Signal, restart <-chan struct{}, restartDrain time.Duration) {
+	timeout := signalShutdownTimeout
+	select {
+	case <-quit:
+		log.Println("Shutting down server...")
+	case <-restart:
+		timeout = restartDrain
+		log.Printf("Restarting: draining in-flight requests for up to %s...", restartDrain)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	if err := app.Server.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("Server forced to shutdown: %v", err)
 	}
 

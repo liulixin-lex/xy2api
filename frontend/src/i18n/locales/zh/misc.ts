@@ -36,6 +36,7 @@ export default {
     updateComplete: '更新完成',
     updateFailed: '更新失败',
     restartRequired: '请重启服务以应用更新',
+    containerNotice: '当前运行在容器中：请改为更新镜像。在线更新只替换容器里的程序，容器重建后会丢失。',
     restartNow: '立即重启',
     restarting: '正在重启...',
     retry: '重试',

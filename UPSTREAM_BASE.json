@@ -185,7 +185,8 @@
     "xy-admin-user-batch-status",
     "xy-group-openai-fast-priority",
     "xy-account-list-usability",
-    "xy-account-recent-health"
+    "xy-account-recent-health",
+    "xy-graceful-online-update-restart"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/92"
 }
