@@ -209,6 +209,37 @@ describe('share scheduling page', () => {
     expect(w.find('[data-testid="share-health-anchor-estimated"]').exists()).toBe(true)
   })
 
+  it('explains hour rounding the way the server counted the window', async () => {
+    // A 24 hour window the switch did not cut: summed to the nearest whole hour,
+    // so its start may sit up to 30 minutes off and it is still the full window.
+    api.report.mockImplementation(async (id: number) => shareReport(id, {
+      window_seconds: 86400, current_from: '2026-10-19T09:00:00Z', current_to: '2026-10-20T08:47:00Z',
+      switched_at: '2026-10-17T09:00:00Z', baseline_from: '2026-10-16T09:00:00Z', baseline_to: '2026-10-17T09:00:00Z', counter_precision: 'hour_rounded'
+    }))
+    const w = mountView()
+    await flushPromises()
+    expect(w.get('[data-testid="share-health-hour-rounded"]').text()).toBe('admin.shareScheduling.health.hourRounded')
+    expect(w.find('[data-testid="share-health-truncated"]').exists()).toBe(false)
+    w.unmount()
+
+    // Cut at the switch: counted from the first whole hour after it.
+    api.report.mockImplementation(async (id: number) => shareReport(id, {
+      window_seconds: 86400, current_from: '2026-10-20T03:20:00.000Z', current_to: '2026-10-20T09:00:00Z',
+      switched_at: '2026-10-20T03:20:00Z', baseline_from: '2026-10-19T21:40:00Z', baseline_to: '2026-10-20T03:20:00Z', counter_precision: 'hour_rounded'
+    }))
+    const cut = mountView()
+    await flushPromises()
+    expect(cut.get('[data-testid="share-health-hour-rounded"]').text()).toBe('admin.shareScheduling.health.hourRoundedTruncated')
+    expect(cut.get('[data-testid="share-health-truncated"]').text()).toContain('"minutes":340')
+    cut.unmount()
+
+    // Minute counters need no note.
+    api.report.mockImplementation(async (id: number) => shareReport(id))
+    const exact = mountView()
+    await flushPromises()
+    expect(exact.find('[data-testid="share-health-hour-rounded"]').exists()).toBe(false)
+  })
+
   it('judges a shortened window once it is long enough and notes how short it is', async () => {
     api.report.mockImplementation(async (id: number) => shareReport(id, {
       current_from: '2026-10-20T08:15:00Z', current_to: '2026-10-20T09:00:00Z', switched_at: '2026-10-20T08:15:00Z'

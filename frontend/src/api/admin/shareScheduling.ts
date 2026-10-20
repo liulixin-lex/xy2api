@@ -311,7 +311,13 @@ export interface ShareReport {
   accounts: ShareReportAccount[]
   details: ShareReportDetails
   counters_error: string | null
-  /** 'hour_rounded' for the baseline and windows over 2 hours. */
+  /**
+   * 'hour_rounded' for the baseline and windows over 2 hours. A window the
+   * switch did not cut is summed to the nearest whole hour (up to 30 minutes
+   * off); one cut at the switch (current_from equals switched_at) counts
+   * from the first whole hour after it, plus the partial hour by the minute
+   * when the switch was within 2 hours (up to 59 minutes short otherwise).
+   */
   counter_precision: 'minute' | 'hour_rounded'
 }
 
