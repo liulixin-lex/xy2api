@@ -1,105 +1,52 @@
 import { describe, expect, it } from 'vitest'
-import {
-  draftFingerprint,
-  draftFromView,
-  draftShares,
-  fromLocalInput,
-  isShareConflict,
-  policyFromDraft,
-  refreshShareDefaults,
-  resetShareRow,
-  sharePolicyProblems,
-  toLocalInput,
-  validateShareDraft
-} from '../shareScheduling'
-import { shareMember, sharePolicy, shareView } from '@/stores/__tests__/shareSchedulingFixtures'
+import { formatShareMs, formatSharePercent, isShareConflict, isShareUnavailable, sharePrioritySections } from '../shareScheduling'
+import { shareMember } from '@/stores/__tests__/shareSchedulingFixtures'
 
-describe('share scheduling drafts', () => {
-  it('keeps explicit rules, defaults the rest and collects stale rules', () => {
-    const view = shareView(5, {
-      policy: sharePolicy({ accounts: [{ account_id: 1, tier: 3, weight: 7, cache_domain: 'ws-a' }, { account_id: 99, tier: 1, weight: 1 }] }),
-      members: [shareMember(1), shareMember(2, { priority: 4, concurrency: 25 })]
-    })
-    const draft = draftFromView(view)
-    expect(draft.rows.map(r => [r.account_id, r.configured, r.tier, r.weight, r.cache_domain])).toEqual([
-      [1, true, 3, 7, 'ws-a'],
-      [2, false, 4, 25, '']
-    ])
-    expect(draft.stale.map(r => r.account_id)).toEqual([99])
-    expect(policyFromDraft(draft).accounts).toEqual([{ account_id: 1, tier: 3, weight: 7, cache_domain: 'ws-a' }])
-    expect(view.policy.accounts).toHaveLength(2)
-  })
-
-  it('saves only configured rows and drops a deadline without drain', () => {
-    const draft = draftFromView(shareView(5, { members: [shareMember(3), shareMember(1), shareMember(2)] }))
-    Object.assign(draft.rows[0], { configured: true, weight: 4, drain: true, drain_until: '2026-10-11T00:00:00.000Z', cache_domain: '  ' })
-    Object.assign(draft.rows[1], { configured: true, drain: false, drain_until: '2026-10-11T00:00:00.000Z' })
-    expect(policyFromDraft(draft).accounts).toEqual([
-      { account_id: 1, tier: 1, weight: 10 },
-      { account_id: 3, tier: 1, weight: 4, drain: true, drain_until: '2026-10-11T00:00:00.000Z' }
+describe('sharePrioritySections', () => {
+  it('groups members by priority, lowest first, and marks the active one', () => {
+    const sections = sharePrioritySections([
+      shareMember(4, { priority: 5, expected_share: 0 }),
+      shareMember(1, { priority: 1, expected_share: 0.2 }),
+      shareMember(2, { priority: 1, expected_share: 0.8 }),
+      shareMember(3, { priority: 2, expected_share: 0 })
+    ], 1)
+    expect(sections.map(s => [s.priority, s.active, s.members.map(m => m.account_id)])).toEqual([
+      [1, true, [2, 1]],
+      [2, false, [3]],
+      [5, false, [4]]
     ])
   })
 
-  it('resets rows to the defaults and follows the default weight mode', () => {
-    const draft = draftFromView(shareView(5, { members: [shareMember(1, { concurrency: 0 }), shareMember(2, { concurrency: 3 })] }))
-    expect(draft.rows.map(r => r.weight)).toEqual([1, 3])
-    const before = draftFingerprint(draft)
-    Object.assign(draft.rows[1], { configured: true, weight: 9, drain: true, cache_domain: 'x' })
-    expect(draftFingerprint(draft)).not.toBe(before)
-    resetShareRow(draft, draft.rows[1])
-    expect(draftFingerprint(draft)).toBe(before)
-
-    draft.policy.defaults.weight = 'equal'
-    refreshShareDefaults(draft)
-    expect(draft.rows.map(r => r.weight)).toEqual([1, 1])
+  it('orders standby members by their share once healthy', () => {
+    const [section] = sharePrioritySections([
+      shareMember(1, { healthy: false, expected_share: 0, share_if_healthy: 0.1 }),
+      shareMember(2, { healthy: false, expected_share: 0, share_if_healthy: 0.6 })
+    ], null)
+    expect(section.active).toBe(false)
+    expect(section.members.map(m => m.account_id)).toEqual([2, 1])
   })
+})
 
-  it('reports the same problems as the backend', () => {
-    const draft = draftFromView(shareView(5, { members: [shareMember(1), shareMember(2, { platform: 'openai' })] }))
-    Object.assign(draft.rows[0], { configured: true, weight: 0, cache_domain: 'shared' })
-    Object.assign(draft.rows[1], { configured: true, cache_domain: 'shared' })
-    draft.policy.balance.correction = 'gentle'
-    draft.policy.cache.ttl_seconds = 30
-    expect(validateShareDraft(draft).map(p => p.key)).toEqual(['weightRange', 'cacheDomainPlatform', 'cacheTTL', 'correctionSessions'])
-
-    const drained = draftFromView(shareView(5))
-    for (const row of drained.rows) Object.assign(row, { configured: true, drain: true })
-    expect(validateShareDraft(drained)).toEqual([])
-    drained.policy.scheduler = 'share'
-    expect(validateShareDraft(drained).map(p => p.key)).toEqual(['allDrained'])
-
-    const bad = draftFromView(shareView(5))
-    Object.assign(bad.rows[0], { configured: true, cache_domain: 'has space', tier: 1.5 })
-    expect(validateShareDraft(bad).map(p => p.key)).toEqual(['tierRange', 'cacheDomain'])
-    Object.assign(bad.rows[0], { cache_domain: 'account:2', tier: 1 })
-    expect(validateShareDraft(bad).map(p => p.key)).toEqual(['cacheDomainReserved'])
-  })
-
-  it('computes shares like the backend, including negative tiers', () => {
-    const draft = draftFromView(shareView(5, { members: [shareMember(1), shareMember(2), shareMember(3), shareMember(4)] }))
-    const set = (i: number, tier: number, weight: number, drain = false) => Object.assign(draft.rows[i], { configured: true, tier, weight, drain })
-    set(0, -5, 3); set(1, -5, 1); set(2, -9, 1); set(3, -5, 5, true)
-    const healthy = new Set([1, 2])
-    const shares = draftShares(draft, id => healthy.has(id))
-    expect(shares.activeTier).toBe(-5)
-    expect(shares.byAccount.get(1)).toEqual({ target: 0.75, effective: 0.75, capacity: 0.5 })
-    expect(shares.byAccount.get(3)).toEqual({ target: 1, effective: 0, capacity: 1 })
-    expect(shares.byAccount.get(4)).toEqual({ target: 0, effective: 0, capacity: 0 })
-    expect(draftShares(draft, () => false).activeTier).toBeNull()
-  })
-
-  it('reads conflicts and server problems from API errors', () => {
+describe('share scheduling helpers', () => {
+  it('recognises conflicts and unavailable storage', () => {
     expect(isShareConflict({ status: 409 })).toBe(true)
     expect(isShareConflict({ reason: 'SHARE_SCHEDULING_VERSION_CONFLICT' })).toBe(true)
-    expect(isShareConflict(new Error('x'))).toBe(false)
-    expect(sharePolicyProblems({ reason: 'SHARE_SCHEDULING_POLICY_INVALID', metadata: { problems: 'a\nb' } })).toEqual(['a', 'b'])
-    expect(sharePolicyProblems({ reason: 'OTHER', metadata: { problems: 'a' } })).toEqual([])
+    expect(isShareConflict({ status: 400 })).toBe(false)
+    expect(isShareConflict(null)).toBe(false)
+    expect(isShareUnavailable({ status: 503 })).toBe(true)
+    expect(isShareUnavailable({ reason: 'SHARE_SCHEDULING_UNAVAILABLE' })).toBe(true)
+    expect(isShareUnavailable(undefined)).toBe(false)
   })
 
-  it('round-trips datetime-local values', () => {
-    const iso = '2026-10-11T08:30:00.000Z'
-    expect(fromLocalInput(toLocalInput(iso))).toBe(iso)
-    expect(toLocalInput('')).toBe('')
-    expect(fromLocalInput('nonsense')).toBe('')
+  it('formats percentages and durations', () => {
+    expect(formatSharePercent(0.1234)).toBe('12.3%')
+    expect(formatSharePercent(0.0021, 2)).toBe('0.21%')
+    expect(formatSharePercent(null)).toBe('-')
+    expect(formatSharePercent(Number.NaN)).toBe('-')
+    expect(formatShareMs(350)).toBe('350 ms')
+    expect(formatShareMs(1500)).toBe('1.5 s')
+    expect(formatShareMs(90_000)).toBe('1.5 min')
+    expect(formatShareMs(7_200_000)).toBe('2.0 h')
+    expect(formatShareMs(undefined)).toBe('-')
   })
 })

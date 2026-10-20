@@ -389,6 +389,12 @@
               @error="(message: string) => appStore.showError(message)"
             />
           </template>
+          <template #header-share="{ column }"><div class="flex items-center gap-1"><span>{{ column.label }}</span><HelpTooltip :content="t('admin.shareScheduling.accountColumn.hint')" width-class="w-64" /></div></template>
+          <template #cell-share="{ row }">
+            <span v-if="shareColumnShares?.get(row.id)?.expected_share" class="text-sm tabular-nums text-gray-900 dark:text-white" data-testid="account-share">{{ formatSharePercent(shareColumnShares.get(row.id)?.expected_share) }}</span>
+            <span v-else-if="shareColumnShares?.get(row.id)?.share_if_healthy" class="text-xs text-gray-500 dark:text-dark-400" data-testid="account-share">{{ t('admin.shareScheduling.traffic.ifHealthy', { value: formatSharePercent(shareColumnShares.get(row.id)?.share_if_healthy) }) }}</span>
+            <span v-else class="text-sm text-gray-400 dark:text-dark-500" data-testid="account-share">—</span>
+          </template>
           <template #header-scheduler_score="{ column }">
             <div class="flex items-center">
               <span>{{ column.label }}</span>
@@ -507,6 +513,8 @@ import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/us
 import { useTableSelection } from '@/composables/useTableSelection'
 import { useLazyMount, prefetchWhenIdle, defineLazyComponent } from '@/composables/useLazyMount'
 import { useColumnOrder } from '@/composables/useColumnOrder'
+import { useAccountShareColumn } from '@/composables/useAccountShareColumn'
+import { formatSharePercent } from '@/utils/shareScheduling'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -1180,6 +1188,9 @@ const {
   }
 })
 
+// Share column: only while the list is filtered to a share scheduling group.
+const { shares: shareColumnShares, refresh: refreshShareColumn } = useAccountShareColumn(() => params.group)
+
 const {
   selectedSet,
   selectedIds: selIds,
@@ -1260,6 +1271,7 @@ const reload = async () => {
   pendingTodayStatsRefresh.value = false
   await baseReload()
   void refreshRecentHealthBatch()
+  void refreshShareColumn()
   await refreshTodayStatsBatch()
 }
 
@@ -1902,6 +1914,7 @@ const allColumns = computed(() => {
   c.push(
     { key: 'proxy', label: t('admin.accounts.columns.proxy'), sortable: false },
     { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: true },
+    ...(shareColumnShares.value ? [{ key: 'share', label: t('admin.shareScheduling.accountColumn.header'), sortable: false }] : []),
     { key: 'scheduler_score', label: t('admin.accounts.columns.schedulerScore'), sortable: false },
     { key: 'rate_multiplier', label: t('admin.accounts.columns.billingRateMultiplier'), sortable: true },
     { key: 'upstream_billing_rate', label: t('admin.accounts.columns.upstreamBillingRate'), sortable: true },
@@ -2587,6 +2600,20 @@ const confirmDelete = async () => { if(!deletingAcc.value) return; try { await a
 const setSchedulableLocally = (accountId: number, schedulable: boolean) => {
   accounts.value = accounts.value.map((account) => (account.id === accountId ? { ...account, schedulable } : account))
 }
+// After an account stops taking requests, name the share groups whose new
+// sessions now go to the other accounts of the same priority. The hint is
+// optional: any failure leaves it out.
+const notifyShareImpact = async (account: Pick<Account, 'id' | 'name'>) => {
+  try {
+    const rules = await adminAPI.shareScheduling.accountRules(account.id)
+    const affected = rules.filter(rule => rule.effective && rule.share_if_healthy > 0)
+    if (!affected.length) return
+    const groups = affected.map(rule => `${rule.group_name} ${formatSharePercent(rule.share_if_healthy)}`).join('、')
+    appStore.showInfo(t('admin.shareScheduling.accountDisabled', { name: account.name, groups }), 6000)
+  } catch {
+    // The account list works without this hint.
+  }
+}
 const handleToggleSchedulable = async (a: Account) => {
   if (togglingSchedulable.value.has(a.id)) return
   const previousSchedulable = a.schedulable
@@ -2601,6 +2628,7 @@ const handleToggleSchedulable = async (a: Account) => {
     pendingSchedulable.delete(a.id)
     updateSchedulableInList([a.id], updated?.schedulable ?? nextSchedulable)
     enterAutoRefreshSilentWindow()
+    if (!nextSchedulable) void notifyShareImpact(a)
   } catch (error) {
     pendingSchedulable.delete(a.id)
     setSchedulableLocally(a.id, previousSchedulable)
