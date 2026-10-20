@@ -1,44 +1,37 @@
 <template>
-  <div v-if="view.adjusted || showInsufficient" class="mt-1 flex flex-wrap justify-end gap-1" :data-testid="'share-factors-' + member.account_id">
-    <HelpTooltip v-if="view.health" width-class="w-80">
+  <div v-if="marks.length" class="mt-1 flex flex-wrap justify-end gap-1" :data-testid="'share-factors-' + member.account_id">
+    <HelpTooltip v-for="mark in marks" :key="mark.kind" :width-class="mark.kind === 'insufficient' ? 'w-72' : 'w-80'">
       <template #trigger>
-        <span class="cursor-help rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300" :data-testid="'share-factor-health-' + member.account_id">
-          {{ t('admin.shareScheduling.traffic.factors.health', { value: formatShareFactor(view.health.factor) }) }}
-        </span>
+        <!-- A button so keyboards reach it: activating it expands the breakdown below; screen readers get it as the description. -->
+        <button
+          type="button"
+          class="cursor-help rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+          :class="mark.className"
+          :aria-describedby="uid + '-' + mark.kind"
+          :aria-expanded="expanded === mark.kind"
+          :aria-controls="expanded === mark.kind ? uid + '-expanded' : undefined"
+          :data-testid="'share-factor-' + mark.kind + '-' + member.account_id"
+          @click="expanded = expanded === mark.kind ? null : mark.kind"
+        >{{ mark.label }}</button>
       </template>
-      <div class="space-y-1" :data-testid="'share-factor-detail-' + member.account_id">
-        <p class="font-medium">{{ breakdown }}</p>
-        <p>{{ healthReason }}</p>
-        <p v-if="rampReason">{{ rampReason }}</p>
+      <div class="space-y-1" :data-testid="mark.kind === 'health' ? 'share-factor-detail-' + member.account_id : undefined">
+        <p v-for="(line, index) in mark.lines" :key="index" :class="index === 0 && mark.kind !== 'insufficient' ? 'font-medium' : ''">{{ line }}</p>
       </div>
     </HelpTooltip>
-    <HelpTooltip v-if="view.ramp" width-class="w-80">
-      <template #trigger>
-        <span class="cursor-help rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 dark:bg-sky-900/20 dark:text-sky-300" :data-testid="'share-factor-ramp-' + member.account_id">
-          {{ view.ramp.remainingMinutes === null
-            ? t('admin.shareScheduling.traffic.factors.rampNoTime', { value: formatShareFactor(view.ramp.factor) })
-            : t('admin.shareScheduling.traffic.factors.ramp', { value: formatShareFactor(view.ramp.factor), minutes: view.ramp.remainingMinutes }) }}
-        </span>
-      </template>
-      <div class="space-y-1">
-        <p class="font-medium">{{ breakdown }}</p>
-        <p v-if="healthReason && view.health">{{ healthReason }}</p>
-        <p>{{ rampReason }}</p>
-      </div>
-    </HelpTooltip>
-    <HelpTooltip v-if="showInsufficient" width-class="w-72">
-      <template #trigger>
-        <span class="cursor-help rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500 dark:bg-dark-700 dark:text-dark-300" :data-testid="'share-factor-insufficient-' + member.account_id">
-          {{ t('admin.shareScheduling.traffic.factors.insufficient') }}
-        </span>
-      </template>
-      <p>{{ t('admin.shareScheduling.traffic.factors.insufficientReason', { minutes: member.health?.window_minutes ?? 30 }) }}</p>
-    </HelpTooltip>
+    <span v-for="mark in marks" :id="uid + '-' + mark.kind" :key="'sr-' + mark.kind" class="sr-only">{{ mark.lines.join(' ') }}</span>
+    <div
+      v-if="expandedMark"
+      :id="uid + '-expanded'"
+      class="w-full space-y-0.5 rounded-lg bg-gray-50 px-2 py-1.5 text-left text-[11px] leading-snug text-gray-700 dark:bg-dark-700/60 dark:text-dark-200"
+      :data-testid="'share-factor-expanded-' + member.account_id"
+    >
+      <p v-for="(line, index) in expandedMark.lines" :key="index">{{ line }}</p>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import type { ShareMember } from '@/api/admin/shareScheduling'
@@ -47,7 +40,9 @@ import { formatSharePercent } from '@/utils/shareScheduling'
 
 /**
  * Marks next to an account's expected share when an automatic factor
- * changes it, with the breakdown and the reason on hover.
+ * changes it. The breakdown shows on hover, expands in place when a mark is
+ * activated from the keyboard, and is the mark's description for screen
+ * readers.
  */
 const props = withDefaults(defineProps<{
   member: ShareMember
@@ -56,9 +51,20 @@ const props = withDefaults(defineProps<{
   standby?: boolean
 }>(), { now: undefined, standby: false })
 
+type MarkKind = 'health' | 'ramp' | 'insufficient'
+
+interface Mark {
+  kind: MarkKind
+  label: string
+  className: string
+  lines: string[]
+}
+
+const uid = `share-factor-${useId()}`
+
 const { t, te } = useI18n()
 const view = computed(() => shareFactors(props.member, props.now))
-const showInsufficient = computed(() => view.value.insufficient && !view.value.health && !props.standby)
+const expanded = ref<MarkKind | null>(null)
 
 const breakdown = computed(() => t('admin.shareScheduling.traffic.factors.breakdown', {
   loadFactor: props.member.effective_load_factor,
@@ -89,4 +95,38 @@ const rampReason = computed(() => {
   const remaining = ramp.remainingMinutes === null ? '' : t('admin.shareScheduling.traffic.factors.rampRemaining', { minutes: ramp.remainingMinutes })
   return `${cause}${remaining}`
 })
+
+const marks = computed<Mark[]>(() => {
+  const out: Mark[] = []
+  const v = view.value
+  if (v.health) {
+    out.push({
+      kind: 'health',
+      label: t('admin.shareScheduling.traffic.factors.health', { value: formatShareFactor(v.health.factor) }),
+      className: 'bg-amber-50 font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300',
+      lines: [breakdown.value, healthReason.value, rampReason.value].filter(Boolean)
+    })
+  }
+  if (v.ramp) {
+    out.push({
+      kind: 'ramp',
+      label: v.ramp.remainingMinutes === null
+        ? t('admin.shareScheduling.traffic.factors.rampNoTime', { value: formatShareFactor(v.ramp.factor) })
+        : t('admin.shareScheduling.traffic.factors.ramp', { value: formatShareFactor(v.ramp.factor), minutes: v.ramp.remainingMinutes }),
+      className: 'bg-sky-50 font-medium text-sky-700 dark:bg-sky-900/20 dark:text-sky-300',
+      lines: [breakdown.value, healthReason.value, rampReason.value].filter(Boolean)
+    })
+  }
+  if (v.insufficient && !v.health && !props.standby) {
+    out.push({
+      kind: 'insufficient',
+      label: t('admin.shareScheduling.traffic.factors.insufficient'),
+      className: 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-dark-300',
+      lines: [t('admin.shareScheduling.traffic.factors.insufficientReason', { minutes: props.member.health?.window_minutes ?? 30 })]
+    })
+  }
+  return out
+})
+
+const expandedMark = computed(() => marks.value.find(mark => mark.kind === expanded.value) ?? null)
 </script>

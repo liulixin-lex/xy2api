@@ -17,8 +17,26 @@
             <th class="p-2">{{ t('admin.shareScheduling.traffic.columns.status') }}</th>
             <th class="p-2">{{ t('admin.shareScheduling.traffic.columns.loadFactor') }}</th>
             <th class="w-[28%] p-2">{{ t('admin.shareScheduling.traffic.columns.expected') }}</th>
-            <th class="whitespace-nowrap p-2 text-right"><span class="cursor-help underline decoration-dotted underline-offset-2" :title="t('admin.shareScheduling.traffic.actualHint')" data-testid="share-traffic-actual-header">{{ t('admin.shareScheduling.traffic.columns.actual') }}</span></th>
-            <th class="whitespace-nowrap p-2 text-right"><span class="cursor-help underline decoration-dotted underline-offset-2" :title="t('admin.shareScheduling.traffic.failureHint')" data-testid="share-traffic-failure-header">{{ t('admin.shareScheduling.traffic.columns.failure') }}</span></th>
+            <th class="whitespace-nowrap p-2 text-right">
+              <span
+                tabindex="0"
+                class="cursor-help rounded underline decoration-dotted underline-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+                :title="t('admin.shareScheduling.traffic.actualHint')"
+                :aria-describedby="uid + '-actual'"
+                data-testid="share-traffic-actual-header"
+              >{{ t('admin.shareScheduling.traffic.columns.actual') }}</span>
+              <span :id="uid + '-actual'" class="sr-only">{{ t('admin.shareScheduling.traffic.actualHint') }}</span>
+            </th>
+            <th class="whitespace-nowrap p-2 text-right">
+              <span
+                tabindex="0"
+                class="cursor-help rounded underline decoration-dotted underline-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+                :title="t('admin.shareScheduling.traffic.failureHint')"
+                :aria-describedby="uid + '-failure'"
+                data-testid="share-traffic-failure-header"
+              >{{ t('admin.shareScheduling.traffic.columns.failure') }}</span>
+              <span :id="uid + '-failure'" class="sr-only">{{ t('admin.shareScheduling.traffic.failureHint') }}</span>
+            </th>
           </tr>
         </thead>
         <tbody v-for="section in sections" :key="section.priority" :data-testid="'share-priority-' + section.priority">
@@ -60,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import ShareFactorMarks from './ShareFactorMarks.vue'
@@ -79,6 +97,8 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'changed'): void }>()
 
 const { t } = useI18n()
+/** Ids for the header hints that screen readers read as descriptions. */
+const uid = `share-traffic-${useId()}`
 const labels = useShareSchedulingLabels()
 const appStore = useAppStore()
 

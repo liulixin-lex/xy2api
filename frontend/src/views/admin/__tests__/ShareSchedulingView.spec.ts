@@ -213,6 +213,14 @@ describe('share scheduling page', () => {
     // Short headers; the hover hints say the window and which failures count.
     expect(w.get('[data-testid="share-traffic-actual-header"]').attributes('title')).toBe('admin.shareScheduling.traffic.actualHint')
     expect(w.get('[data-testid="share-traffic-failure-header"]').attributes('title')).toBe('admin.shareScheduling.traffic.failureHint')
+    // Keyboards reach the headers, and screen readers read the hints as their description.
+    for (const [id, hint] of [['actual', 'actualHint'], ['failure', 'failureHint']]) {
+      const header = w.get(`[data-testid="share-traffic-${id}-header"]`)
+      expect(header.attributes('tabindex')).toBe('0')
+      const describedBy = header.attributes('aria-describedby')
+      expect(describedBy).toBeTruthy()
+      expect(w.get(`[id="${describedBy}"]`).text()).toBe(`admin.shareScheduling.traffic.${hint}`)
+    }
   })
 
   it('marks automatic factors next to the expected share with the breakdown', async () => {
