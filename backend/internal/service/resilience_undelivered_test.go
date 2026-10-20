@@ -96,14 +96,18 @@ func TestDeliveryWriterExcludesHeartbeats(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	require.Zero(t, st.DeliveredBytes(), "heartbeats are not delivery")
 	recordOpenAIStreamKeepaliveBytes(c, 0)
-	_, _ = c.Writer.WriteString("event: response.created\ndata: {}\n\n")
+	created := "event: response.created\ndata: {\"type\":\"response.created\"}\n\n"
+	_, _ = c.Writer.WriteString(created)
 	stop()
-	require.Equal(t, int64(len("event: response.created\ndata: {}\n\n")), st.DeliveredBytes())
+	require.Zero(t, st.DeliveredBytes(), "an opening event alone is no delivery (review R03)")
+	delta := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n"
+	_, _ = c.Writer.WriteString(delta)
+	require.Equal(t, int64(len(created)+len(delta)), st.DeliveredBytes())
 
 	// In-stream keepalive bytes are excluded too.
 	_, _ = c.Writer.WriteString(": ping\n\n")
 	recordOpenAIStreamKeepaliveBytes(c, len(": ping\n\n"))
-	require.Equal(t, int64(len("event: response.created\ndata: {}\n\n")), st.DeliveredBytes())
+	require.Equal(t, int64(len(created)+len(delta)), st.DeliveredBytes())
 }
 
 type memUndeliveredRepo struct {
@@ -182,4 +186,59 @@ func TestEdgeRequestsGet503InsteadOf502(t *testing.T) {
 			require.Contains(t, rec.Body.String(), "upstream_error")
 		}
 	}
+}
+
+type flakyUndeliveredRepo struct {
+	memUndeliveredRepo
+	fails   int
+	block   chan struct{}
+	entered chan struct{}
+}
+
+func (r *flakyUndeliveredRepo) InsertUndelivered(ctx context.Context, rec *UndeliveredRequest) error {
+	if r.entered != nil {
+		r.entered <- struct{}{}
+	}
+	if r.block != nil {
+		<-r.block
+	}
+	r.mu.Lock()
+	if r.fails > 0 {
+		r.fails--
+		r.mu.Unlock()
+		return context.DeadlineExceeded
+	}
+	r.mu.Unlock()
+	return r.memUndeliveredRepo.InsertUndelivered(ctx, rec)
+}
+
+func TestUndeliveredRecordRetriesOnce(t *testing.T) {
+	repo := &flakyUndeliveredRepo{fails: 1}
+	r := NewResilienceService(nil, nil)
+	r.undelivered = repo
+	r.RecordUndelivered(&UndeliveredRequest{RequestID: "req-retry"})
+	require.Eventually(t, func() bool {
+		repo.mu.Lock()
+		defer repo.mu.Unlock()
+		return len(repo.rows) == 1
+	}, 3*time.Second, 20*time.Millisecond, "a short database failure is retried")
+}
+
+func TestUndeliveredRecordWritersAreBounded(t *testing.T) {
+	repo := &flakyUndeliveredRepo{block: make(chan struct{}), entered: make(chan struct{}, undeliveredWriters)}
+	r := NewResilienceService(nil, nil)
+	r.undelivered = repo
+	for i := 0; i < undeliveredWriters; i++ {
+		r.RecordUndelivered(&UndeliveredRequest{RequestID: "req-busy"})
+	}
+	for i := 0; i < undeliveredWriters; i++ {
+		<-repo.entered
+	}
+	r.RecordUndelivered(&UndeliveredRequest{RequestID: "req-dropped"})
+	require.Len(t, undeliveredSlots, undeliveredWriters, "no writer beyond the bound")
+	close(repo.block)
+	require.Eventually(t, func() bool { return len(undeliveredSlots) == 0 }, 3*time.Second, 10*time.Millisecond)
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	require.Len(t, repo.rows, undeliveredWriters, "the record that found every writer busy was dropped")
 }

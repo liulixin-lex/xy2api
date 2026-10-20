@@ -352,6 +352,11 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		upstreamCtx, cancelUpstream = context.WithCancel(upstreamCtx)
 	}
 	defer cancelUpstream()
+	// xy2api resilience (review G1): the first-output deadline bounds the
+	// header wait and the first upstream line of a streaming conversion.
+	upstreamCtx, firstEvent := s.armOpenAICompatFirstEvent(ctx, upstreamCtx, account, clientStream, upstreamModel,
+		gjson.GetBytes(responsesBody, "reasoning.effort").String(), startTime)
+	defer firstEvent.close()
 	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
 	releaseUpstreamCtx()
 	if err != nil {
@@ -373,6 +378,12 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		proxyURL = account.Proxy.URL()
 	}
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+	if firstEvent.expired() {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		return nil, s.openAICompatFirstEventTimeout(ctx, c, account, firstEvent, "response_headers", nil)
+	}
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
@@ -387,6 +398,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 
 	// 8. Handle error response with failover
 	if resp.StatusCode >= 400 {
+		_ = firstEvent.disarm()
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
 		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 			expectedTaskID := account.GetCredential("task_id")
@@ -525,7 +537,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 ) (_ *OpenAIForwardResult, retErr error) {
 	requestID := resp.Header.Get("x-request-id")
 
-	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, account, "openai chat_completions buffered", requestID)
+	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, account, originalModel, "openai chat_completions buffered", requestID)
 	if err != nil {
 		return nil, s.newOpenAICompatBufferedReadFailoverError(c, account, resp, requestID, err)
 	}
@@ -713,14 +725,18 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 
 	relayLive := relayLivenessFor(c, account)
 	scanner := s.newUpstreamSSEScanner(resp.Body, relayLive)
+	firstEvent := openAICompatFirstEventOf(resp)
 
 	streamInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
 		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
 	}
+	// xy2api resilience (review G1): check often enough to notice a stall
+	// within 5 s, and apply the text stall threshold after output (§7.5).
+	stallCheckBase := resilienceStallCheckBase(streamInterval)
 	var intervalTicker *time.Ticker
-	if streamInterval > 0 {
-		intervalTicker = time.NewTicker(streamInterval)
+	if stallCheckBase > 0 {
+		intervalTicker = time.NewTicker(resilienceStallCheckPeriod(stallCheckBase))
 		defer intervalTicker.Stop()
 	}
 	var intervalCh <-chan time.Time
@@ -1020,6 +1036,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	if streamInterval <= 0 && keepaliveInterval <= 0 {
 		var parser openAICompatSSEFrameParser
 		for scanner.Scan() {
+			if !firstEvent.disarm() {
+				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
+			}
 			line := scanner.Text()
 			frame, ok := parser.AddLine(line)
 			if !ok {
@@ -1033,6 +1052,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 		}
 		if err := scanner.Err(); err != nil {
+			if firstEvent.expired() {
+				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
+			}
 			handleScanErr(err)
 			if clientDisconnected || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", err)
@@ -1108,11 +1130,17 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				return missingTerminalErr()
 			}
 			if ev.err != nil {
+				if firstEvent.expired() {
+					return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
+				}
 				handleScanErr(ev.err)
 				if clientDisconnected || errors.Is(ev.err, context.Canceled) || errors.Is(ev.err, context.DeadlineExceeded) {
 					return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", ev.err)
 				}
 				return resultWithUsage(), newOpenAIUpstreamStreamReadError(ev.err)
+			}
+			if !firstEvent.disarm() {
+				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 			}
 			lastDataAt = time.Now()
 			line := ev.line
@@ -1129,7 +1157,13 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 
 		case <-intervalCh:
 			lastRead := relayLive.lastActivity(time.Unix(0, atomic.LoadInt64(&lastReadAt)))
-			if time.Since(lastRead) < streamInterval {
+			stallThreshold := resilienceStallThreshold(streamInterval, openAIStreamClientOutputStarted(c, false))
+			if stallThreshold <= 0 || time.Since(lastRead) < stallThreshold {
+				continue
+			}
+			// Before the first upstream line the first-output guard owns
+			// the attempt and switches it at its tier.
+			if firstEvent.ownsStall() {
 				continue
 			}
 			if clientDisconnected {
@@ -1138,8 +1172,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			logger.L().Warn("openai chat_completions stream: data interval timeout",
 				zap.String("request_id", requestID),
 				zap.String("model", originalModel),
-				zap.Duration("interval", streamInterval),
+				zap.Duration("interval", stallThreshold),
 			)
+			s.noteOpenAICompatStall(c, account, originalModel)
 			return resultWithUsage(), fmt.Errorf("stream data interval timeout")
 
 		case <-keepaliveCh:
@@ -1154,13 +1189,17 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 			// Send SSE comment as keepalive
 			writeStreamHeaders()
-			if _, err := fmt.Fprint(c.Writer, ":\n\n"); err != nil {
+			n, err := fmt.Fprint(c.Writer, ":\n\n")
+			if err != nil {
 				logger.L().Info("openai chat_completions stream: client disconnected during keepalive",
 					zap.String("request_id", requestID),
 				)
 				clientDisconnected = true
 				continue
 			}
+			// xy2api resilience (review G1): a heartbeat, not output; before
+			// the first upstream line the attempt may still fail over.
+			recordOpenAIStreamKeepaliveBytes(c, n)
 			c.Writer.Flush()
 		}
 	}

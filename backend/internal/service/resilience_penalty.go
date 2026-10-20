@@ -174,8 +174,13 @@ func (s *RateLimitService) applyTransientCooldownAs(ctx context.Context, account
 	reason := resilience.ReasonPrefixTransient + label + " " + truncateString(evidence, 160)
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
-	if err := s.accountRepo.SetTempUnschedulable(stateCtx, account.ID, until, reason); err != nil {
+	written, err := s.writeTempPenalty(stateCtx, account.ID, until, reason)
+	if err != nil {
 		slog.Warn("resilience.transient_cooldown_failed", "account_id", account.ID, "error", err)
+		return false
+	}
+	if !written {
+		// An active hard pause or a longer soft cooldown stays.
 		return false
 	}
 	// The next request's fallback decision and Retry-After must see the
@@ -194,8 +199,9 @@ func (s *RateLimitService) applyTransientCooldownAs(ctx context.Context, account
 // applyBalancePause pauses an account whose relay reported an exhausted
 // balance for balance.pause_seconds (design §3.2). It is a hard penalty while
 // it lasts; real traffic retries the account afterwards, and a balance
-// failure then pauses it again for the same time. A longer pause of another
-// kind stays: SetTempUnschedulable only extends.
+// failure then pauses it again for the same time. It replaces an active soft
+// cooldown even when that one lasts longer (keeping the later end, review
+// R01); a longer hard pause of another kind stays.
 func (s *RateLimitService) applyBalancePause(ctx context.Context, account *Account, evidence string) {
 	if s == nil || s.accountRepo == nil || account == nil {
 		return
@@ -204,11 +210,16 @@ func (s *RateLimitService) applyBalancePause(ctx context.Context, account *Accou
 	until := time.Now().Add(pause)
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
-	s.notifyAccountSchedulingBlocked(account, until, "balance_exhausted")
-	if err := s.accountRepo.SetTempUnschedulable(stateCtx, account.ID, until, resilience.BalancePauseReason(evidence)); err != nil {
+	written, err := s.writeTempPenalty(stateCtx, account.ID, until, resilience.BalancePauseReason(evidence))
+	if err != nil {
 		slog.Warn("resilience.balance_pause_failed", "account_id", account.ID, "error", err)
 		return
 	}
+	if !written {
+		// A longer hard pause of another kind stays; nothing changed.
+		return
+	}
+	s.notifyAccountSchedulingBlocked(account, until, "balance_exhausted")
 	s.resilience.invalidateAccountGroups(account)
 	slog.Warn("resilience.balance_paused",
 		"account_id", account.ID,
@@ -224,6 +235,29 @@ func (s *RateLimitService) applyBalancePause(ctx context.Context, account *Accou
 // platform-neutral reason.
 func (s *RateLimitService) handleCounted403(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte) bool {
 	return s.handleCounted403WithReason(ctx, account, upstreamMsg, responseBody, resilience.Reason403Cooldown)
+}
+
+// ResiliencePenaltyStore is the tiered temp_unschedulable storage of the
+// account repository (review R01/R02); its SetTempUnschedulable writes by
+// tier too while failure handling is on, which covers every other caller.
+// Repositories without it (test stubs) keep the legacy writes:
+// SetTempUnschedulable only extends, and the lift clears unconditionally.
+type ResiliencePenaltyStore interface {
+	SetTempUnschedulableTiered(ctx context.Context, id int64, until time.Time, reason string, hard, keepLaterEnd bool, softPrefixes []string) (bool, error)
+	ClearTempUnschedulableIf(ctx context.Context, id int64, reason string, until time.Time) (bool, error)
+}
+
+// writeTempPenalty writes a temp_unschedulable penalty by tier: a hard
+// reason replaces an active soft cooldown of any length, a soft reason never
+// replaces an active hard pause. A balance pause keeps the later end of the
+// soft cooldown it replaces (review R01: the account must stay out of last
+// resort while either applies). It reports whether the pause was written.
+func (s *RateLimitService) writeTempPenalty(ctx context.Context, accountID int64, until time.Time, reason string) (bool, error) {
+	if store, ok := s.accountRepo.(ResiliencePenaltyStore); ok {
+		hard := resilience.TempUnschedTier(reason) == resilience.TierHard
+		return store.SetTempUnschedulableTiered(ctx, accountID, until, reason, hard, resilience.IsBalancePause(reason), resilience.SoftReasonPrefixes())
+	}
+	return true, s.accountRepo.SetTempUnschedulable(ctx, accountID, until, reason)
 }
 
 func resilienceStateContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -261,7 +295,9 @@ func (r *ResilienceService) NoteAccountSuccess(ctx context.Context, account *Acc
 }
 
 // liftTransientCooldown clears a soft transient cooldown after the account
-// served a request successfully; other pauses stay.
+// served a request successfully; other pauses stay. Only the cooldown that
+// was read is cleared: a pause written in between (balance, credentials, an
+// administrator) stays (review R02).
 func (s *RateLimitService) liftTransientCooldown(ctx context.Context, accountID int64) {
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
@@ -270,7 +306,16 @@ func (s *RateLimitService) liftTransientCooldown(ctx context.Context, accountID 
 		!strings.HasPrefix(fresh.TempUnschedulableReason, resilience.ReasonPrefixTransient) {
 		return
 	}
-	if err := s.accountRepo.ClearTempUnschedulable(stateCtx, accountID); err != nil {
+	if store, ok := s.accountRepo.(ResiliencePenaltyStore); ok {
+		cleared, err := store.ClearTempUnschedulableIf(stateCtx, accountID, fresh.TempUnschedulableReason, *fresh.TempUnschedulableUntil)
+		if err != nil {
+			slog.Warn("resilience.transient_lift_failed", "account_id", accountID, "error", err)
+			return
+		}
+		if !cleared {
+			return
+		}
+	} else if err := s.accountRepo.ClearTempUnschedulable(stateCtx, accountID); err != nil {
 		slog.Warn("resilience.transient_lift_failed", "account_id", accountID, "error", err)
 		return
 	}

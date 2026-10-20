@@ -6,13 +6,27 @@
 
 ## 当前交接状态
 
+### 分组 OpenAI Fast 优先级（2026-10-19，PR #105 已创建，待审阅）
+
+- 分支 `fix/group-fast-priority-20261019`，基于 main `0320d4e68`。分组强制 Fast 优先于用户专属与全局 Fast/Flex 规则；HTTP、透传、WebSocket 共用判定。
+- 强制组按最终发出的 priority 结算，保留上游原始回报；未强制组继续原有降档规则。0.2 分组倍率、Fast 单价、免费 Fast、长上下文分别验证。说明见 [OPENAI_FAST.md](OPENAI_FAST.md)。
+- 验证：Go 1.27.2 定向 service/middleware 回归 305 项测试及子测试通过、零失败/跳过；后端构建、前端 6 项测试、类型检查、改动文件 lint、调度差异检查通过。隔离副本完成修改/回滚行为对照及补丁重建哈希核对。
+- 限制：原文档检查器使用系统路径分隔符，Windows 原生运行产生误报；仓库外仅按 POSIX Git 路径适配后全部检查通过。工具测试原生 Windows 为 39 项中 2 失败/1 错误，保留原始日志，未改工具或放宽仓库规则。未运行 Linux CI、数据库集成、真实模型请求或生产验收。
+- [PR #105](https://github.com/liulixin-lex/xy2api/pull/105) 已创建，功能提交 `ee777e42c`，远端与本地提交和源码树完全一致；来源审计通过。CI 状态读取工具暂时无法连接 GitHub，远端检查结果待核实。合并、发布及生产部署不在本轮范围。上线时应恢复此前用于补偿 Fast 的分组倍率。
+
 ### 版本与环境速览（2026-10-18T12:30Z 核实）
 
 - 正式版：XY2API v0.4.1（2026-10-18，Sub2API 兼容基线 0.2.15）；生产自 2026-10-15 运行 0.3.0，部署需用户单独授权。
-- 待定：XY-image 0.0.17（先交接并经用户确认）、0.4.1 生产部署（单独授权）；见下两节。
+- 待定：XY-image 0.0.17（先交接并经用户确认）、0.4.1 生产部署（单独授权）；见下两节。0.4.2 在 Draft [PR #106](https://github.com/liulixin-lex/xy2api/pull/106)（候选 `b7c68e059`），预上线主机已切换，测试服务器浸泡进行中，合并与发版待授权，见“进行中的工作”。
 - 上游：Sub2API v0.2.17 已发布、尚未同步（2026-10-17 定时检测），需按 [`UPSTREAM_SYNC.md`](UPSTREAM_SYNC.md) 另开任务。
 - 工具链：Go 以 `backend/go.mod` 为准（当前 1.27.2）；golangci-lint v2.14.0（与 CI 同版）。
 - 文档一致性：`python3 tools/check_docs_consistency.py`（CI 的 upstream-sync-audit 作业执行），规则在 `tools/docs_consistency.json`，改动时按 [`AGENTS.md`](../AGENTS.md)“变更同步”同步文档。
+
+### 账号分组选择显示专属标签（2026-10-19T14:10Z；PR 待另一位作者合并；未发版、未部署）
+
+- 用户要求（2026-10-19）：账号管理“编辑账号”选择分组时，专属分组在选项处显示紫色文字标签。
+- 已完成（分支 `feat/exclusive-group-label-20261019`，基于 `0320d4e68`）：共享组件 `frontend/src/components/common/GroupSelector.vue` 在专属分组选项的徽标与账号数之间显示紫色“专属”（复用 `admin.groups.exclusive`，悬停说明复用 `admin.groups.exclusiveHint`）。新建、编辑、批量编辑账号与公告定向的分组选择同样生效（均为管理端）；只看 `is_exclusive`，不受 `show_exclusive_badge`（只管用户端展示）影响。`docs/GROUP_SYSTEM_PROMPTS.md` 补充说明；该文件来自上游，钩子 `data-test="group-exclusive-tag"` 登记 `required_literals`。验证见操作日志 `20261019-exclusive-group-label`。
+- 未完成：PR 由另一位作者审阅合并；发版、部署需用户另行授权。
 
 ### XY2API 0.4.1 正式发布完成（2026-10-18；生产未部署）
 
@@ -21,6 +35,16 @@
 - 验证：本机全量验证全绿（CI 门禁 249、前端 3055 项）；测试服务器去掉测试 CF 站点的 Caddy 标记后 KA/CF/ERR 19/19，经真实 Cloudflare 的慢首包 15.1 秒开始心跳、150.7 秒完成，直连与内部请求没有心跳。
 - 部署说明（生产部署仍需单独授权，按 runbook）：0.4.1 上线时 Caddy 标记与 `SERVER_TRUSTED_PROXIES` 不再是首包前保活的前提（生产已配置的保持不变）；#101 新增错误码 `EMAIL_FORMAT_NOT_ALLOWED`；智商检测解析器升为 `iq-response-v6`；Grok 渠道监控可选原生 Responses。从 0.3.0 升级执行 0.4.0 的迁移 272–277，备份、蓝绿切换、观察与回退照 runbook。
 - 本任务的登记已原样移入 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)。
+
+### 账号管理筛选平铺、默认按最近使用排序、列可拖动（2026-10-19T16:45Z；PR 待另一位作者合并；未发版、未部署）
+
+- 用户要求（2026-10-19）：① 筛选项不再折叠在“更多筛选”里，按用户样图改为操作按钮一行、筛选项全部平铺一行；② 账号列表默认按最近使用倒序；③ “更多操作”的列显示可上下拖动调整列顺序。
+- 已完成（分支 `feat/account-list-usability-20261019`，基于 `0320d4e68`，与 PR #107 互相独立）：
+  - 筛选：`AccountTableFilters.vue` 恢复同步前的平铺排列（搜索、平台、类型、状态、Privacy、智商、分组），保留无障碍标签与手机两列；`AccountsView` 去掉让筛选与按钮挤在同一行的 `lg:flex-1`，操作按钮因此排在上一行。“更多筛选”文案键删除，`moreFilters` 登记为 `tools/docs_consistency.json` 的退役名。
+  - 排序：默认 `last_used_at` 倒序；排序记忆的 localStorage 键升为 `account-table-sort-v2`，旧键保存的排序作废一次。后端 `accountListOrder` 对 `last_used_at` 两个方向都用 NULLS LAST（PostgreSQL 降序默认 NULLS FIRST，会把从未使用的账号顶到最前）。
+  - 列顺序：新增 `useColumnOrder`（localStorage 键 `account-column-order`，后来新增的列插到它默认的前一列之后）与 `AccountColumnSettings.vue`（`vue-draggable-plus` 拖动手柄、显示开关、恢复默认列顺序）；选择、名称列固定在左，操作列固定在右。
+  - 登记：具名补丁 `xy-account-list-usability`（4 条测试绑定）与上游文件钩子的 `required_literals`。验证见操作日志 `20261019-account-list-usability`。
+- 未完成：PR 由另一位作者审阅合并；发版、部署需用户另行授权。本文件末尾的操作日志与 PR #107 都有追加，后合并的一个按时间保留两条即可。
 
 ### 网关韧性 0.4.0 正式发布完成（2026-10-17；生产未部署）
 
@@ -70,7 +94,32 @@
 
 ## 进行中的工作
 
-- 暂无（0.4.1 已发布，遗留事项见“当前交接状态”）。
+- 暂无（0.4.1 已发布，遗留事项见“当前交接状态”；账号分组选择专属标签的 PR 待合并，见同名小节）。
+
+### 20261019-group-fast-priority — PR #105 已交付，待审阅
+
+- 用户要求先规划、再拉取项目，实施“分组强制 Fast 优先于全局 Fast/Flex 策略”；此前明确分组倍率保持 0.2、按 Fast 单价计费。
+- 起点 main `0320d4e6807cc3fff04a5c55959a70e49ec5a61c`，分支 `fix/group-fast-priority-20261019`，初始工作树干净。
+- 计划：共用策略入口优先处理有效分组的 ForceOpenAIFast；未开启的组保留现有全局规则；强制组按最终发出的 priority 结算，免费 Fast 仍按原逻辑减免；同步中英文提示、管理员说明及回归测试。
+- 用户追加授权提交、推送和创建 PR；不连接或修改生产、不合并、不发布或部署。
+- 已完成上述实现、305 项回归、构建、前端及适配文档检查和副本回滚验证；功能提交与 PR #105 已交付。当前无执行中的业务开发；远端 CI 待核实，生产验收未执行。
+
+### 20261019-readiness-0.4.2 — 两份审查报告核实、预上线主机只读核查与 0.4.2 修复（2026-10-19T12:10Z 更新）
+
+- 请求：读两个前序会话（开发与评审）与开发文档；全量分析两份审查报告（“0.3.0→0.4.1 更新代码与生产就绪审查”R01–R10 与第 4、5 节，“份额调度与网关韧性生产就绪审查”P1-A–F）的合理性与可行性；SSH 核实预上线站点（另一台主机，地址见仓库外 `xy2api-artifacts/readiness-0.4.2-20261019/private/HOSTS.md`）；规划并解决问题，使其具备上线条件。同机另一会话（旁路审查，产品经理角色）逐项验收，并转达用户决定：部署专用的插件宿主补丁不再需要，0.4.2 交付官方镜像。
+- 开始状态：`main` `0320d4e68`（= origin/main，工作树干净，无开放 PR）；分支 `fix/readiness-0.4.2-20261019`。
+- 预上线主机只读核查（10:30Z）：运行 0.4.1 加部署专用的插件宿主补丁（29 个文件、迁移 `253_plugin_lifecycle.sql`）；1 个用户、0 个 API Key、0 条用量、份额策略 0 行；DNS 直连无 CDN；nginx 经 stream 分流后应用看到的客户端 IP 全是 127.0.0.1；连接池 256 对 PostgreSQL 上限 100；DB 降级不限速、无独立超时；无定时备份，SMTP 未配置；4 核 3.8 GiB 与多套服务共用、swap 在用。
+- 已完成（分支上，未推送）：审查项全部核实，处置表见 tasks“0.4.2”；修复提交 `3dca0fa4e`…`9ab5b1830`（R01 及推广到全部调用方、R02、R03、R05–R10、P1-C、F2 跟进、OpenAI 按模型屏蔽保留绑定、槽位进程租约及两处补充、`/ready`、未送达记录有界写入、连接池启动告警、R04 文案、文档与 runbook §3.4/§3.5、同步登记、版本 0.4.2 单独提交）。每项先写失败用例并确认修复前失败；SQL 与 Lua 在本机 PostgreSQL 18、Redis 8.10 实测。
+- 本机验证（候选 `9ab5b1830` 起代码未再变）：四种 vet、golangci-lint 0 问题、全量 unit 与无 tag 测试通过；`ci_gate.py` 274 个韧性测试 `-race` 全过、零跳过（0.4.1 为 249）；前端 vue-tsc、相关 eslint 与 spec、vitest 全量（3055 项）通过；`tools/tests` 39 个、scheduler-diff、文档一致性通过；`sync.py audit` 在 `aebcf67e0` 的干净树上通过。切换演练：预上线主机表结构（只读导出，不含配置、凭据与插件包内容）在本机 PostgreSQL 18 上恢复，0.4.2 启动接受 325 条迁移记录、无新迁移；`/health`、`/ready` 正常，停 Redis 后 `/ready` 503；连接池告警按预期打出；插件安装记录留在库里时对账每秒失败并记 warn，因此 runbook §3.5 改为切换前必须卸载插件。演练数据已删除。（更正：演练用的是不嵌入前端的构建，“`/ready` 正常、停 Redis 后 503”对正式镜像不成立，以测试服务器 RDY-1 与预上线切换后的实测为准；见下方测试服务器发现。）
+- CI（12:57Z）：分支已推送，[PR #106](https://github.com/liulixin-lex/xy2api/pull/106)（Draft）头 `d42291aef`。push 与 pull_request 两次运行全绿，integration 中 `internal/repository` ok（CI 下 Docker 不可用会直接失败，不会跳过，所以 `TestAccountRepositoryTieredTempUnschedulable` 确实跑了），`ci_gate` 274 个测试零跳过。`902fab347` 之后的唯一提交给升级演练加了 `UPGRADE_FROM`。
+- 未验证：测试服务器场景（含新增 DC-6、FO-2、FO-3、LEASE-1）、0.4.1→0.4.2 升级演练、浸泡。候选镜像由 `d42291aef` 在测试服务器构建（进行中）。
+- 测试服务器发现（13:20Z，构建后、场景前）：嵌入前端的正式构建里，`/ready` 被前端 SPA 接管，永远返回 200 加 `index.html`（`internal/web/embed_on.go` 的 `shouldBypassEmbeddedFrontend` 只放行 `/health`）。本机演练用的是不嵌入前端的构建，CI 只测了处理函数，所以都没发现。场景里的 `wait_ready` 只看状态码，也会误判为通过。修复后候选 `d42291aef` 作废，重新走 CI、构建和整套验证。
+- 候选（13:40Z）：PR 头 `b7c68e059` CI 全绿（integration `internal/repository` ok，`ci_gate` 274 个零跳过）。测试服务器构建 `xy2api-staging:b7c68e059`，image ID `sha256:50037e0d59b6…`，`/app/xy2api` 的 SHA-256 为 `bbeda2aef722…`（完整值在仓库外私有清单），二进制自报 `XY2API 0.4.2 … commit: b7c68e059`，`/ready` 返回 JSON。顺序是全套场景（含 RDY-1）→ 从 0.4.1 升级演练 → 6.5 小时浸泡，不跑真实客户端子集。预上线主机切换用这同一个镜像，load 后核对 image ID 和二进制 SHA-256。嵌入前端放行清单已经和引擎层路由逐一对照，没有其他遗漏。
+- 测试服务器结果（14:06Z）：场景 51/51。DC-6 的 chat 组补了“收到只带 role 的分块”的断言，用同一候选重跑通过。兼容转换路径的未送达阶段记为 `header_wait`，只是标签不准，已写进已知限制并登记到“后续”。0.4.1→0.4.2 升级演练全部通过。6.5 小时浸泡 14:06:43Z 开始，约 20:37Z 结束，结论待补。真实客户端子集等用户的测试 Key。
+- 预上线主机切换（14:12Z–14:14Z，详见 runbook §3.5 第 7 条）：先做本机备份（路径见私有清单），用户在后台卸载插件，然后用同一镜像先停旧容器、再起新容器。连接池 40/10 生效、降级超时 3 秒、没有连接池告警；迁移 325 条，`/ready` JSON，ERROR 0 条。nginx 真实 IP 生效，伪造的转发头无效，其他站点状态码不变。
+- 全局复审（用户 2026-10-19 经旁路审查会话转达：全面审查、修完再做最终浸泡；最终浸泡缩短为 3 小时）：候选 `b7c68e059` 不再是最终版，它的浸泡数据只作参考。G2（`84e364448`）：启动清理出错时进程租约没有启动，已改为租约先启动。G1（`80963348d`）：Chat 与 Messages 经 OpenAI 兼容转换的流补上首输出守卫（等响应头和第一行上游数据，到点换号），输出后按文本停滞阈值判定，停滞时记账；下游 keepalive 记作心跳字节；Anthropic 透传、Bedrock、CN 原生 Messages 停滞时也记账；剩余路径登记到“后续”和已知限制。场景 CV-1 到 CV-4；`soak.py --cycle-minutes`（最终浸泡用 `--hours 3 --cycle-minutes 30`）。G3：design §3.4 只改文档。执行（用户要求并行）：本机全量门禁全部通过（`ci_gate` 279 个），CI `0ad63fab7` 18/18 全绿；最终候选 `0ad63fab7`（image `sha256:445a27f7…`，二进制 SHA-256 记在私有清单）场景 55/55，升级演练通过；预上线主机 16:19Z 切换到这个镜像，核对全部通过；3 小时最终浸泡 16:06:39Z 开始（`--hours 3 --cycle-minutes 30`），约 19:17Z 结束，结论待补。业务验收与真实客户端子集等用户提供测试 Key；合并与发版待授权。
+- 生产侧风险（只报告，生产主机未动）：`api_key_acl_trust_forwarded_ip` 缺省为开启，安全路径优先读 `CF-Connecting-IP`。不经 Cloudflare 的入口如果没清掉这个头，客户端可以伪造地址、绕过 Key 的 IP 白名单。仓库的 `deploy/Caddyfile` 与 `EDGE_SECURITY.md` 已补上清掉这个头的写法。
+- 授权（用户 2026-10-19，经旁路审查会话转达，并在本会话直接确认）：① 推送分支、开 Draft PR；② 测试服务器用同一个候选镜像跑全套场景（含 DC-6、FO-2、FO-3、LEASE-1）、升级演练与浸泡；③ CI 与场景通过后，用该镜像切换预上线主机（只做本机备份，连接池 40、降级超时 3 秒、不设 QPS，停旧再起新，只改本站 nginx 路由取真实 IP），插件由用户在后台卸载。不做：生产主机、告警、异机备份、更换密码、合并、标签与发版。业务验收等用户在预上线站点添加测试 Key。旁路审查在 CI、测试服务器、预上线切换三个节点验收。
 
 ## 操作陷阱
 
@@ -533,3 +582,55 @@ pnpm --dir frontend run build
 - 验证：本机全量与 CI 门禁（249）、前端全绿；测试服务器 KA/CF/ERR 19/19；PR、main 与 Release 工作流全绿。
 - 卡点/风险：无。生产 0.3.0 未改；部署需单独授权。
 - 下一步：生产部署 0.4.1（单独授权）；XY-image 0.0.17（先交接并经用户确认）；0.4.1 之后的后续事项见 tasks“后续”。
+
+### 2026-10-19 — 20261019-group-fast-priority — 本地实施与隔离验证完成
+
+- 请求/目标：先规划并克隆项目到当前工作区，实现分组强制 Fast 高于全局策略，保持分组倍率与 Fast 单价独立。
+- 开始状态：main `0320d4e6807cc3fff04a5c55959a70e49ec5a61c`，初始工作树干净；新分支 `fix/group-fast-priority-20261019`。
+- 完成操作：在共用策略入口优先返回 force_priority；结算复用同一有效分组判定且只保留实际出站 priority，不凭上游响应升档。同步全局/分组中英文说明、管理员文档与部署说明，登记具名补丁和必需钩子，无新增数据库字段或迁移。
+- 修改文件：service 的请求策略、结算及其测试；四份中英文设置文案；OPENAI_FAST、文档目录、部署说明、白名单、来源登记与本记忆。
+- 验证：旧源码实际复现过滤/阻止及 default 降档失败；最终回归 305 项全通过，后端 build、前端 6 项与 typecheck/lint、scheduler-diff 通过。独立副本使用同一测试输入和 Go overlay 保留验证夹具，修改版通过、回滚版重新失败，恢复与补丁重建哈希匹配。中途下载连接、pnpm 版本、Windows 路径/换行问题已处理并保留失败日志。
+- 卡点/风险：仓库文档检查与工具测试存在 Windows 路径兼容问题，未扩展本次业务修改范围；仓库外 POSIX 路径适配的全部文档检查为零问题。未声称原生全量工具测试或 Linux CI 通过。
+- 下一步：用户审阅源码后决定提交与远端交付；生产配置、历史账单与运行服务本轮未修改。
+
+### 2026-10-19 — 20261019-group-fast-priority — 提交与 PR 交付
+
+- 请求/目标：用户授权提交、推送并创建 PR。
+- 开始状态：`fix/group-fast-priority-20261019`，起点 main `0320d4e68`；远端 main 未变化，无同名 PR。
+- 完成操作：功能提交 `ee777e42c`；Git HTTPS 多次连接失败，改用 GitHub 官方 Git API 上传同一源码树并创建原 SHA 的提交与分支，创建 [PR #105](https://github.com/liulixin-lex/xy2api/pull/105)。没有改写提交内容、强推、合并、发布或部署。
+- 修改文件：本轮仅更新本记忆的授权与交付状态；业务代码和已验证源码保持不变。
+- 验证：提交前文档检查通过；补齐固定上游标签后 `sync.py audit` 通过；远端分支 SHA 与本地 `ee777e42ce92fa3e29e2b45772e604015cad1297` 一致。
+- 卡点/风险：CI 诊断连接器暂时无法连接 GitHub，不声明远端检查通过。PR 已创建，不影响审阅。
+- 下一步：核实远端 CI 并审阅 PR；生产操作另行授权。
+
+### 2026-10-19T12:40Z — 20261019-readiness-0.4.2 — 审查核实、预上线主机只读核查、0.4.2 修复（本机完成，待授权）
+
+- 请求/目标：读前序开发与评审会话、开发文档与两份审查报告，核实合理性与可行性；SSH 只读核查预上线站点；规划并解决问题，使其具备上线条件。同机旁路审查会话逐项验收，并转达用户决定：部署专用的插件宿主补丁不再需要，交付官方镜像。
+- 开始状态：`main` `0320d4e68`，工作树干净；分支 `fix/readiness-0.4.2-20261019`。
+- 完成操作：
+  - 核实：报告 R01、R02、R05–R10、P1-C、跨进程槽位误清理均与代码一致；R03、R08 为 tasks 已登记项；R04 按设计只约束新尝试；实例层面的问题（真实 IP、连接池、降级限流、健康检查、备份、告警、容量、业务验收）写入 runbook §3.4。处置表在 tasks“0.4.2”。
+  - 修复：`3dca0fa4e`…`78f24a907`，每项先写失败用例、确认修复前失败；SQL 与 Lua 在本机 PostgreSQL 18、Redis 8.10 实测。
+  - 预上线主机：只读查看容器、nginx、数据库与 Redis 状态；只读导出表结构与迁移、插件行（不含配置与凭据列）用于本机演练。主机上未做任何修改。
+- 修改文件：见上述提交；本文件。
+- 验证：四种 vet、golangci-lint 0 问题、全量 unit 与无 tag 测试、`ci_gate.py`（274 个 `-race`、零跳过）、`tools/tests`、scheduler-diff、文档一致性通过；`sync.py audit` 在干净树上通过（见顶部条目）；本机切换演练通过，发现切换前必须卸载插件（runbook §3.5）。集成测试需要 Docker（本机没有），待 CI；测试服务器场景未跑。
+- 卡点/风险：推送、PR、测试服务器验证、预上线主机部署与配置均未授权；SMTP、异机备份存储、测试 Key 需用户提供。
+- 下一步：向用户申请三项授权（Draft PR、测试服务器整套验证、预上线主机部署与配置）。
+
+### 2026-10-19T14:10Z — `20261019-exclusive-group-label` — 本地完成，已推送并开 PR（待审阅）
+
+- 请求/目标：账号编辑的分组选择中，专属分组显示紫色文字标签。做到 PR 检查全绿为止，合并由另一位作者执行。
+- 开始状态：自 origin/main `0320d4e68` 新建分支 `feat/exclusive-group-label-20261019`，工作树干净；PR #101 已于 2026-10-18 随 0.4.1 合入。
+- 完成操作：`GroupSelector.vue` 在 `is_exclusive` 为真时显示标签，配色沿用模型广场的专属标识（浅紫底、紫色字，暗色模式有对应变体），字号 10px 以适配两列选项。新用例在旧组件上确认会失败。文档与 `required_literals` 同步。
+- 修改文件：`frontend/src/components/common/GroupSelector.vue`、`frontend/src/components/common/__tests__/GroupSelector.spec.ts`、`docs/GROUP_SYSTEM_PROMPTS.md`、`tools/upstream-sync/policy.json`、本文件。
+- 验证：前端 typecheck、`lint:check` 通过，vitest 全量 389 个文件、3056 个用例通过。另用 Vite 临时预览页（真实组件、样式与中文文案，暗色模式）加无头 Chrome 截图核对：专属分组显示紫色“专属”，公开分组不显示，隐藏用户端标识的专属分组仍显示；临时文件已删除。`check_docs_consistency.py`、`tools/tests`、`scheduler-diff` 通过，`sync.py audit` 在提交后的干净树上运行。
+- 卡点/风险：无。
+
+### 2026-10-19T16:45Z — `20261019-account-list-usability` — 本地完成，已推送并开 PR（待审阅）
+
+- 请求/目标：见顶部同名小节的用户要求①②③。做到 PR 检查全绿为止，合并由另一位作者执行。
+- 开始状态：自 origin/main `0320d4e68` 新建分支 `feat/account-list-usability-20261019`，工作树干净；PR #105、#106、#107 均未合并，本分支与它们互相独立（#106 改的 `account_repo.go` 区段与本次不重叠）。
+- 完成操作：样图的排列就是同步前（`0c80e8296`）的平铺筛选，0.2.15 同步引入了“主筛选 + 折叠更多筛选”；本次恢复平铺并保留同步带来的无障碍标签与手机两列。默认排序若不处理 NULL 会把从未使用的账号排到最前，因此后端同改。列拖动沿用仓库已在用的 `vue-draggable-plus`（支付服务商列表、分组排序）。
+- 修改文件：后端 `account_repo.go`、新增 `account_repo_list_order_test.go`；前端 `AccountTableFilters.vue` 及其 spec、`AccountsView.vue`、新增 `AccountColumnSettings.vue`、`useColumnOrder.ts` 及三个 spec、中英文案；`tools/upstream-sync/policy.json`、`UPSTREAM_BASE.json`、`tools/docs_consistency.json`、本文件。
+- 验证：新用例（筛选平铺、默认排序与旧排序作废、列顺序保存与恢复、后端 NULLS LAST 的 SQL）均在旧代码上确认会失败。前端 typecheck、`lint:check`、`check:i18n` 通过，vitest 全量 392 个文件、3067 个用例通过；后端 gofmt、`go vet`（默认、`unit`、`integration`）、golangci-lint 0 issues，repository 包 unit 测试通过。另用 Vite 临时预览页（真实组件、样式与中文文案，1600 像素宽、暗色模式）加无头 Chrome 截图核对：第一行操作按钮，第二行七个筛选项平铺；列显示每行带拖动手柄。临时文件已删除。`check_docs_consistency.py`、`tools/tests`、`scheduler-diff` 通过，`sync.py audit` 在提交后的干净树上运行。
+- 卡点/风险：拖动本身由 `vue-draggable-plus` 实现，单测用替身模拟拖动结果，未在真实浏览器里实际拖动；手机上筛选项两列排布。
+- 下一步：PR 检查全绿后交另一位作者合并。

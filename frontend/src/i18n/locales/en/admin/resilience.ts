@@ -14,7 +14,7 @@ export default {
         balance: 'Pause on low balance',
         balanceHint: 'Accounts out of upstream balance stop being scheduled for the pause; real traffic retries them afterwards and pauses them again if still short. "Recover State" in the account list puts one back at once.',
         budget: 'Request budget',
-        budgetHint: 'Maximum attempts per request and total time before the first output; same-account retries only for capacity shedding.',
+        budgetHint: 'Maximum attempts per request and total time before the first output. Streaming requests are held to the total time until their first output; for non-streaming requests it only decides whether another attempt may start, and the attempt in flight is not cut. Same-account retries only for capacity shedding.',
         keepalive: 'Pre-output keepalive',
         keepaliveHint: 'Streaming requests through a CDN get periodic heartbeats before the first output, so CDN idle timeouts do not cut them.',
         stall: 'Stall detection',

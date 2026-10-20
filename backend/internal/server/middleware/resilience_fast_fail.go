@@ -45,9 +45,16 @@ func resilienceFastFailReplay(c *gin.Context, apiKeyID int64) bool {
 	if !cfg.ErrorsOn() || !cfg.Errors.FastFail.Enabled || !resilienceFastFailEligible(c) {
 		return false
 	}
+	scope := resilienceFastFailScope(c)
+	c.Set(ginKeyFastFailScope, scope)
 	now := time.Now()
 	resp, tripped := resilience.ProcessFastFail().Check(apiKeyID, now)
 	if !tripped || resp.Status == 0 || len(resp.Body) == 0 {
+		return false
+	}
+	// The 503s concerned one route and group: a forced-platform route, an
+	// endpoint or the key's former group must not answer for another.
+	if resp.Scope != "" && resp.Scope != scope {
 		return false
 	}
 	// The 503s were for one model; the key's requests for other models are
@@ -68,6 +75,17 @@ func resilienceFastFailReplay(c *gin.Context, apiKeyID int64) bool {
 	c.Data(resp.Status, "application/json", resp.Body)
 	c.Abort()
 	return true
+}
+
+// ginKeyFastFailScope keeps the scope computed before the handler ran: the
+// availability fallback may move the request to another group meanwhile.
+const ginKeyFastFailScope = "xy_resilience_fast_fail_scope"
+
+// resilienceFastFailScope names the route and the key's group of a request.
+// The path tells forced-platform routes (/antigravity/...) and endpoints
+// apart; the group covers a key moved to another group.
+func resilienceFastFailScope(c *gin.Context) string {
+	return c.Request.URL.Path + "|" + strconv.FormatInt(resilience.StateFrom(c.Request.Context()).GroupID(), 10)
 }
 
 // requestedModel reads the model of a request before any handler parsed
@@ -131,6 +149,10 @@ func resilienceFastFailObserve(c *gin.Context, apiKeyID int64) {
 	if !ok || er.Status != http.StatusServiceUnavailable {
 		return
 	}
+	scope := c.GetString(ginKeyFastFailScope)
+	if scope == "" {
+		scope = resilienceFastFailScope(c)
+	}
 	now := time.Now()
 	header := http.Header{}
 	if s := c.Writer.Header().Get("x-should-retry"); s != "" {
@@ -141,9 +163,9 @@ func resilienceFastFailObserve(c *gin.Context, apiKeyID int64) {
 		retryAt = now.Add(time.Duration(secs) * time.Second)
 	}
 	tripped := resilience.ProcessFastFail().Observe(apiKeyID,
-		resilience.Signature(er.Status, er.ErrType, er.Message),
+		resilience.Signature(er.Status, er.ErrType, er.Message)+"\x00"+scope,
 		resilience.CachedResponse{Status: er.Status, Body: er.Body, Header: header, RetryAt: retryAt,
-			Model: resilience.StateFrom(c.Request.Context()).Model()},
+			Model: resilience.StateFrom(c.Request.Context()).Model(), Scope: scope},
 		time.Duration(cfg.Errors.FastFail.WindowSeconds)*time.Second, cfg.Errors.FastFail.Threshold, now)
 	if tripped {
 		slog.Warn("resilience.fast_fail", "api_key_id", apiKeyID, "status", er.Status, "error_type", er.ErrType, "retry_at", retryAt)

@@ -8,7 +8,7 @@ Every gateway request MUST carry a single budget with:
 - a maximum number of upstream attempts, `budget.max_attempts` (default 4), counting the first attempt, account switches and same-account retries;
 - for text endpoints, a pre-output deadline of `budget.pre_output_budget_seconds` (default 240 s) after the request starts.
 
-Every retry path MUST draw from this budget: OpenAI, Anthropic and Gemini handler failover loops, same-account retries, Gemini in-service retries, and passthrough transport retries. The effective switch limit MUST be the smaller of the budget and the existing `max_account_switches`. Image endpoints and asynchronous image tasks MUST NOT be subject to the pre-output deadline.
+Every retry path MUST draw from this budget: OpenAI, Anthropic and Gemini handler failover loops, same-account retries, Gemini in-service retries, passthrough transport retries, and the full replay of a chained turn that a pooled relay rejected with a vague answer (0.4.2; that replay MUST NOT run when the budget allows no further attempt). The effective switch limit MUST be the smaller of the budget and the existing `max_account_switches`. Image endpoints and asynchronous image tasks MUST NOT be subject to the pre-output deadline. For a non-streaming request the whole response is its first output: the deadline MUST decide whether another attempt may start, and the attempt in flight MUST NOT be cut by it.
 
 #### Scenario: Four attempts at most
 - **WHEN** four consecutive attempts fail with `TRANSIENT`
@@ -23,6 +23,10 @@ Every retry path MUST draw from this budget: OpenAI, Anthropic and Gemini handle
 #### Scenario: A slot wait ends with the budget
 - **WHEN** a text request waits for an account slot whose wait plan allows 120 s while 30 s of the pre-output budget remain
 - **THEN** the wait ends after at most 30 s and the request ends as for an exhausted budget.
+
+#### Scenario: Non-streaming request past the deadline
+- **WHEN** a non-streaming text request's only attempt is still generating at 240 s
+- **THEN** it is not cancelled by the deadline; a failure after the deadline ends the request without another attempt.
 
 #### Scenario: Images are exempt from the deadline
 - **WHEN** a 4K image generation takes 200 s

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/readiness"
 )
 
 // RegisterCommonRoutes 注册通用路由（健康检查、状态等）
@@ -12,6 +13,8 @@ func RegisterCommonRoutes(r *gin.Engine) {
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+	// xy2api: readiness (database and Redis), for proxies and monitors.
+	r.GET("/ready", readiness.Handler)
 
 	// Claude Code 遥测日志（忽略，直接返回200）
 	r.POST("/api/event_logging/batch", func(c *gin.Context) {

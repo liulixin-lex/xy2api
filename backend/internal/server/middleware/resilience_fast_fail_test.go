@@ -400,3 +400,50 @@ func TestFastFailCountsOnlyGroupLevelNoAccount(t *testing.T) {
 	}
 	require.Equal(t, 10, calls, "configuration 503s still trip the key")
 }
+
+func TestFastFailReplaysOnlyTheTrippingRoute(t *testing.T) {
+	// Review R05: a key tripped by group-level 503s on a forced-platform
+	// route (/antigravity/v1/messages) must not have the same answer replayed
+	// on its normal route, which runs its own selection.
+	orig := *resilience.Current()
+	resilience.Publish(resilience.Defaults())
+	t.Cleanup(func() { resilience.Publish(orig) })
+	calls := map[string]int{}
+	handler := func(c *gin.Context) {
+		path := c.Request.URL.Path
+		calls[path]++
+		resilience.StateFrom(c.Request.Context()).NoteTurn(1, "claude-sonnet-4-5", "")
+		if strings.HasPrefix(path, "/antigravity/") {
+			resilience.StateFrom(c.Request.Context()).MarkGroupNoAccount()
+			c.Header("Retry-After", "20")
+			c.Set(resilience.GinKeyErrorResponse, resilience.ErrorResponse{Status: 503, ErrType: "api_error", Message: "no account", Body: []byte(`{"error":{"message":"no account"}}`)})
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"message": "no account"}})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+	inner, key := newFastFailRouter(t, 9107, handler)
+	inner.POST("/antigravity/v1/messages", handler)
+	router := gin.New()
+	router.Use(ClientRequestID())
+	router.POST("/v1/messages", func(c *gin.Context) { inner.HandleContext(c) })
+	router.POST("/antigravity/v1/messages", func(c *gin.Context) { inner.HandleContext(c) })
+	post := func(path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"claude-sonnet-4-5","messages":[]}`))
+		req.Header.Set("x-api-key", key)
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+		return w
+	}
+	for i := 0; i < 10; i++ {
+		require.Equal(t, http.StatusServiceUnavailable, post("/antigravity/v1/messages").Code)
+	}
+	w := post("/antigravity/v1/messages")
+	require.Equal(t, "1", w.Header().Get("X-XY-Fast-Fail"), "the tripping route is replayed")
+
+	w = post("/v1/messages")
+	require.Equal(t, http.StatusOK, w.Code, "the normal route runs its own selection")
+	require.Empty(t, w.Header().Get("X-XY-Fast-Fail"))
+	require.Equal(t, 1, calls["/v1/messages"])
+}

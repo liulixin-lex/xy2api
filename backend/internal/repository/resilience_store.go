@@ -25,11 +25,31 @@ const (
 	resilienceGroupStableTTL = time.Hour
 )
 
-var resilienceIncrHashScript = redis.NewScript(`
-	local v = redis.call('HINCRBY', KEYS[1], ARGV[1], 1)
-	redis.call('PEXPIRE', KEYS[1], ARGV[2])
+// resilienceSessionFailureScript counts a failure of one account of a
+// session. Each account keeps its own window end in field "e:<account>"
+// (review R06): a failure of another account must not keep an old count
+// alive. The window of an account restarts once it ended and is extended by
+// each of its failures; the key lives as long as the newest window.
+// KEYS[1] session hash, ARGV[1] account, ARGV[2] window ms, ARGV[3] now ms.
+var resilienceSessionFailureScript = redis.NewScript(`
+	local now = tonumber(ARGV[3])
+	local win = tonumber(ARGV[2])
+	local ek = 'e:' .. ARGV[1]
+	local e = tonumber(redis.call('HGET', KEYS[1], ek) or '0')
+	local v
+	if e <= now then
+		redis.call('HSET', KEYS[1], ARGV[1], 1)
+		v = 1
+	else
+		v = redis.call('HINCRBY', KEYS[1], ARGV[1], 1)
+	end
+	redis.call('HSET', KEYS[1], ek, now + win)
+	redis.call('PEXPIRE', KEYS[1], win)
 	return v
 `)
+
+// sessionFailureEndField names the window end of an account's count.
+const sessionFailureEndField = "e:"
 
 var resilienceAvoidAddScript = redis.NewScript(`
 	redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
@@ -58,6 +78,7 @@ var resilienceMarkStableScript = redis.NewScript(`
 
 type resilienceStore struct {
 	rdb *redis.Client
+	now func() time.Time
 }
 
 // NewResilienceStore creates the Redis store of the resilience layer.
@@ -65,7 +86,7 @@ func NewResilienceStore(rdb *redis.Client) service.ResilienceStore {
 	if rdb == nil {
 		return nil
 	}
-	return &resilienceStore{rdb: rdb}
+	return &resilienceStore{rdb: rdb, now: time.Now}
 }
 
 func sessionKey(prefix string, groupID int64, sessionHash string) string {
@@ -74,7 +95,8 @@ func sessionKey(prefix string, groupID int64, sessionHash string) string {
 
 func (s *resilienceStore) IncrSessionFailure(ctx context.Context, groupID int64, sessionHash string, accountID int64, window time.Duration) (int64, error) {
 	key := sessionKey(resilienceSessionFailurePrefix, groupID, sessionHash)
-	v, err := resilienceIncrHashScript.Run(ctx, s.rdb, []string{key}, strconv.FormatInt(accountID, 10), window.Milliseconds()).Int64()
+	v, err := resilienceSessionFailureScript.Run(ctx, s.rdb, []string{key}, strconv.FormatInt(accountID, 10),
+		window.Milliseconds(), s.now().UnixMilli()).Int64()
 	if err != nil {
 		return 0, fmt.Errorf("incr session failure: %w", err)
 	}
@@ -83,22 +105,32 @@ func (s *resilienceStore) IncrSessionFailure(ctx context.Context, groupID int64,
 
 func (s *resilienceStore) ClearSessionFailure(ctx context.Context, groupID int64, sessionHash string, accountID int64) error {
 	key := sessionKey(resilienceSessionFailurePrefix, groupID, sessionHash)
-	return s.rdb.HDel(ctx, key, strconv.FormatInt(accountID, 10)).Err()
+	id := strconv.FormatInt(accountID, 10)
+	return s.rdb.HDel(ctx, key, id, sessionFailureEndField+id).Err()
 }
 
+// SessionFailures returns the counts whose window has not ended; a count
+// written before window ends were stored has no end and lives with the key.
 func (s *resilienceStore) SessionFailures(ctx context.Context, groupID int64, sessionHash string) (map[int64]int64, error) {
 	key := sessionKey(resilienceSessionFailurePrefix, groupID, sessionHash)
 	raw, err := s.rdb.HGetAll(ctx, key).Result()
 	if err != nil {
 		return nil, err
 	}
+	now := s.now().UnixMilli()
 	out := make(map[int64]int64, len(raw))
 	for k, v := range raw {
 		id, err1 := strconv.ParseInt(k, 10, 64)
 		n, err2 := strconv.ParseInt(v, 10, 64)
-		if err1 == nil && err2 == nil {
-			out[id] = n
+		if err1 != nil || err2 != nil {
+			continue
 		}
+		if end, ok := raw[sessionFailureEndField+k]; ok {
+			if e, err := strconv.ParseInt(end, 10, 64); err == nil && e <= now {
+				continue
+			}
+		}
+		out[id] = n
 	}
 	return out, nil
 }
