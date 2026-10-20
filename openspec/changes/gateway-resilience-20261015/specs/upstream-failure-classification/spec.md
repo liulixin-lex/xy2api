@@ -22,6 +22,11 @@ The gateway MUST classify the outcome of every upstream attempt into exactly one
 - **WHEN** an upstream returns HTTP 524 with a body containing `"retry_after":120`
 - **THEN** the attempt is classified as `TRANSIENT` with `retry_after=120s`.
 
+#### Scenario: A CDN error page that mentions overload is the relay failing
+- **WHEN** a relay behind Cloudflare answers HTTP 502 with Cloudflare's JSON error page (`"cloudflare_error":true`, `"retry_after":60`) whose detail says the origin "is overloaded or misconfigured", or with an HTML 5xx page
+- **THEN** the attempt is classified as `TRANSIENT` with `retry_after=60s`: the account gets the soft cooldown, the session failure count increases and any account may be tried next
+- **AND** "overloaded" or "at capacity" wording yields `CAPACITY_SHED` only on 503, 529, statuses below 500 and in-stream events, or with an overloaded code or type.
+
 ### Requirement: Category determines failover, same-account retry, penalty and session handling
 
 Each category MUST map to a fixed policy:

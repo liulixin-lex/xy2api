@@ -76,6 +76,10 @@ These charges MUST be written to `usage_logs` with `billing_mode='undelivered_ab
 - **WHEN** an API key has its 31st undelivered disconnect within one hour
 - **THEN** that request is billed at upstream cost and the user can see the charge.
 
+#### Scenario: A broken upload is no abuse strike
+- **WHEN** a client disconnects before the request body has fully arrived
+- **THEN** the undelivered record has stage `upload` and the disconnect does not count toward the key's hourly allowance.
+
 ### Requirement: Disconnect diagnostics
 
 Undelivered records MUST be written in the background by a bounded number of writers (16), each retried once after a short pause; a record that finds every writer busy is dropped and logged (`resilience.undelivered_record_dropped`). Billing MUST NOT depend on these records.
@@ -83,7 +87,7 @@ Undelivered records MUST be written in the background by a bounded number of wri
 
 For client disconnects, `ops_error_logs` MUST record:
 - `duration_ms`;
-- `disconnect_stage` (`select`, which includes waiting for a slot, `header_wait`, `pre_output` or `streaming`);
+- `disconnect_stage` (`upload` while the request body is still arriving, `select`, which includes waiting for a slot, `header_wait`, `pre_output` or `streaming`);
 - `delivered_bytes`.
 
 #### Scenario: Disconnect during header wait
