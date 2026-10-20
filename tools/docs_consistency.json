@@ -230,6 +230,20 @@
         "openspec/changes/replace-controlled-with-share-scheduling/**",
         "openspec/changes/simplify-share-scheduling-20261020/**"
       ]
+    },
+    {
+      "pattern": "\\b(?:soft_spill_max_seconds|ms_per_1k_tokens|return_deadline_seconds|stable_seconds|on_spill|on_saturated|on_failed|min_volume|cache_domain|drain_until)\\b|\"realign\"",
+      "reason": "2026-10-20 share scheduling simplification: the policy fields of 0.3.0-0.4.3 have no effect; the decoder accepts and ignores them and saves keep them for a rollback (design §3), so only the decoder, the 0.4.3 golden and their tests name them. Generic names of the same documents (correction, window_minutes, ttl_seconds, max_ms, max_waiting, drain) are used elsewhere and are not listed",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "openspec/changes/replace-controlled-with-share-scheduling/**",
+        "openspec/changes/simplify-share-scheduling-20261020/**",
+        "openspec/changes/gateway-resilience-20261015/design.md",
+        "backend/internal/sharesched/policy.go",
+        "backend/internal/sharesched/policy_test.go",
+        "backend/internal/sharesched/compat043/**"
+      ]
     }
   ],
   "private": [

@@ -187,7 +187,7 @@ type ShareSchedulingService struct {
 	state atomic.Pointer[shareSchedulingState]
 	// ineligible holds, per account, when it was last seen failing a health
 	// gate. Tier return waits until an account has been healthy for
-	// tiers.stable_seconds.
+	// sharesched.StableFor.
 	ineligible sync.Map
 	stats      *shareStatsRecorder
 	traces     *shareTraceTable

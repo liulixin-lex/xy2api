@@ -205,8 +205,8 @@ func (s *ShareSchedulingService) newShareLastResortRound(groupID int64, accounts
 		}
 		switch _, failed := excluded[acc.ID]; {
 		case failed:
-			// Failed in this request: as in normal placement it only anchors
-			// on_failed=stop.
+			// Failed in this request: as in normal placement it is
+			// excluded and only anchors the spill order.
 			c.Excluded, c.Eligible = true, true
 		case tier == resilience.TierHard:
 			c.Reason = shareLastResortHardReason(&acc, why, now)

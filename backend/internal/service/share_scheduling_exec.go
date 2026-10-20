@@ -115,8 +115,8 @@ func (s *ShareSchedulingService) shareMissingBoundCandidate(groupID int64, acc *
 // resilience does (resiliencePenaltyOf, or the OpenAI variant).
 type resiliencePenaltyFunc func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string)
 
-// shareLegacySoftSpillMax is the 0.3.0 default of soft_spill_max_seconds,
-// the soft-spill bound while gateway resilience is off.
+// shareLegacySoftSpillMax is the soft-spill bound of 0.3.0 (its default
+// policy value), kept while gateway resilience is off.
 const shareLegacySoftSpillMax = 300 * time.Second
 
 // shareSoftRecovery is when a soft-penalised account is expected back, or

@@ -53,6 +53,7 @@
   - proposal 补上自适应权重，删去与之矛盾的“不做”（P1-2）；
   - design 中的生产账号号码改为代号，测试夹具里的生产账号号码换成无关号码（P1-3）；
   - `GATEWAY_RESILIENCE.md` 补上 `reenabled` 爬升触发（P2-9）；
+  - `tools/docs_consistency.json` 的 `retired` 登记解码器接受并忽略的旧策略字段名，只在解码器、0.4.3 golden、它们的用例与变更历史中放行；通用词（`correction`、`window_minutes` 等）在别处仍在用，不登记（P2-9）；
   - design §7.7、§8 与 `SHARE_SCHEDULING.md` 写明回退线只看 `active`、切换点所在小时的读法。
 - [ ] 6.3 项目记忆收尾。
 

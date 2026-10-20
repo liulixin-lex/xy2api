@@ -94,7 +94,7 @@ func TestRequestStateAvoided(t *testing.T) {
 
 func TestRechargedAccountWaitsForStabilityBeforeTierReturn(t *testing.T) {
 	// A higher-tier account that ran out of balance is an account-level
-	// failure: once recharged, tier return waits tiers.stable_seconds like
+	// failure: once recharged, tier return waits sharesched.StableFor like
 	// after any other health problem.
 	s := NewShareSchedulingService(nil, nil, nil)
 	now := time.Now()
