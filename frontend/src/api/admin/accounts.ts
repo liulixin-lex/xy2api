@@ -615,6 +615,30 @@ export async function getBatchTodayStats(accountIds: number[]): Promise<BatchTod
   return data
 }
 
+/** 账号列表“状态”列的近期健康度；首字无样本时 first_token_avg_ms 为 null。 */
+export interface AccountRecentHealth {
+  first_token_avg_ms: number | null
+  first_token_samples: number
+  recent_errors: number
+}
+
+export interface BatchRecentHealthResponse {
+  stats: Record<string, AccountRecentHealth>
+  first_token_window_seconds: number
+  errors_window_seconds: number
+}
+
+/**
+ * 批量获取账号近 3 分钟首字平均与近 10 分钟错误请求数（口径同“使用记录 → 错误请求”页）
+ * @param accountIds - 账号 ID 列表（最多 1000 个）
+ */
+export async function getBatchRecentHealth(accountIds: number[]): Promise<BatchRecentHealthResponse> {
+  const { data } = await apiClient.post<BatchRecentHealthResponse>('/admin/accounts/recent-health/batch', {
+    account_ids: accountIds
+  })
+  return data
+}
+
 /**
  * Set account schedulable status
  * @param id - Account ID
@@ -1184,6 +1208,7 @@ export const accountsAPI = {
   getBatchUsage,
   getTodayStats,
   getBatchTodayStats,
+  getBatchRecentHealth,
   clearRateLimit,
   recoverState,
   resetAccountQuota,
