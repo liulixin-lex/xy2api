@@ -410,3 +410,49 @@ func TestClassifyContentPolicyRefusal(t *testing.T) {
 	require.Equal(t, CategoryClientError, r.Category)
 	require.False(t, r.ContentPolicy())
 }
+
+// cloudflare502JSON is the shape of the error answer production saw from a
+// relay behind Cloudflare (scrubbed): the origin behind the relay's edge
+// failed, and the explanation happens to say "overloaded".
+const cloudflare502JSON = `{"type":"https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-502/","title":"Error 502: Bad gateway","status":502,"detail":"The web server reported a bad gateway error. This typically indicates the origin is overloaded or misconfigured.","error_code":502,"error_name":"origin_bad_gateway","error_category":"origin","ray_id":"9a1b2c3d4e5f6789","cloudflare_error":true,"retryable":true,"retry_after":60,"owner_action_required":true}`
+
+func TestEdgeErrorPagesAreTransientNotCapacity(t *testing.T) {
+	// Production 2026-10-20: one account received this 502 21 times in four
+	// turns. As CAPACITY_SHED it was never cooled down, never counted for the
+	// session and never switched within its host; it is the relay failing.
+	for _, tc := range []struct {
+		name   string
+		status int
+		msg    string
+		body   string
+	}{
+		{"cloudflare 502 JSON", 502, "The web server reported a bad gateway error. This typically indicates the origin is overloaded or misconfigured.", cloudflare502JSON},
+		{"cloudflare 503 JSON", 503, "", `{"title":"Error 503: Service temporarily unavailable","detail":"The origin is overloaded.","cloudflare_error":true,"retry_after":60}`},
+		{"origin error category", 502, "", `{"title":"Error 502: Bad gateway","detail":"The origin is overloaded.","error_category":"origin","retry_after":60}`},
+		{"cloudflare 502 HTML", 502, "", `<!DOCTYPE html><html><head><title>relay.example | 502: Bad gateway</title></head><body><div id="cf-error-details">The origin is overloaded or misconfigured. "retry_after":60 Cloudflare Ray ID: 9a1b2c3d4e5f6789</div></body></html>`},
+		{"cloudflare 521 HTML", 521, "", `<html><head><title>521: Web server is down</title></head><body>The origin web server is overloaded or down. retry_after: 60</body></html>`},
+		{"relay 502 JSON", 502, "upstream overloaded, please retry", `{"error":{"message":"upstream overloaded, please retry"},"retry_after":60}`},
+	} {
+		r := Classify(Outcome{Source: SourceHTTP, StatusCode: tc.status, Message: tc.msg, Body: []byte(tc.body)}, nil)
+		require.Equal(t, CategoryTransient, r.Category, "%s: %s", tc.name, r.Reason)
+		require.Equal(t, 60*time.Second, r.RetryAfter, tc.name)
+		require.True(t, r.Category.AccountScoped() && r.Category.CountsForSession() && r.Category.SoftCooldown(), tc.name)
+	}
+
+	// Capacity shedding by the upstream itself stays request scoped.
+	for _, tc := range []struct {
+		name string
+		in   Outcome
+	}{
+		{"anthropic 529", Outcome{StatusCode: 529, Type: "overloaded_error", Message: "Overloaded",
+			Body: []byte(`{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`)}},
+		{"503 server overloaded", Outcome{StatusCode: 503, Message: "server overloaded, please retry",
+			Body: []byte(`{"error":{"message":"server overloaded, please retry"}}`)}},
+		{"500 overloaded type", Outcome{StatusCode: 500, Type: "overloaded_error", Message: "Overloaded"}},
+		{"429 model overloaded", Outcome{StatusCode: 429, Message: "That model is currently overloaded with other requests."}},
+		{"400 model at capacity", Outcome{StatusCode: 400, Message: "Selected model is at capacity. Please try a different model."}},
+		{"stream overloaded", Outcome{Source: SourceStreamEvent, StatusCode: 200, Message: "The server is overloaded"}},
+	} {
+		require.Equal(t, CategoryCapacityShed, Classify(tc.in, nil).Category, tc.name)
+	}
+}

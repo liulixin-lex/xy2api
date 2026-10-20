@@ -456,6 +456,25 @@
 | 第 5 节：业务验收、资源与运维缺口、真实 IP | runbook §3.4 的清单，主机上的修改待授权 |
 | 插件宿主补丁 | 用户决定不再需要，切到官方镜像（runbook §3.5） |
 
+## 0.4.3（2026-10-20，生产观测修复）
+
+> 0.4.2 上线后，生产只读观测报告（仓库外）在问题清单里列出 P1、P2 项。用户 2026-10-20 经旁路审查会话转达：“执行，p1 和 p2，其中 p1-1 暂时不考虑”。需要改代码的项在本节；主机上的 Caddy 与部署配置由另一位执行者处理，不在仓库里。每项先写失败用例，确认在修复前失败，再修复。
+
+- [x] P1-2 Cloudflare 错误页被判为容量降载。生产上，Cloudflare 后面的中转返回 502 JSON 错误页（`origin_bad_gateway`，说明文字含 overloaded，`retry_after: 60`），被判为 `CAPACITY_SHED`：账号不冷却，会话不计失败，同主机的另一个账号也不换。同一账号 17 分钟内失败 21 次，4 个回合都靠回合封顶才停下。
+  - 修复：5xx 的 Cloudflare JSON 错误页（`cloudflare_error: true` 或 `error_category: "origin"`）与 HTML 页面（含 520–526）一律为 `TRANSIENT`，采用正文的 `retry_after`。“overloaded”“at capacity”文案只在 503、529、4xx 与流内事件上算降载；带 overloaded code 或 type 的应答不变（design §2.2）。
+  - 用例：`TestEdgeErrorPagesAreTransientNotCapacity`；`TestCloudflareErrorPageCoolsTheAccountDown`（修复前没有冷却）；测试服务器场景 SW-2。
+- [x] P2-6 请求体上传中断。生产上，经 Cloudflare 约 125 秒的上传中断被记为未送达的 `select` 阶段，并计入该 Key 每小时的滥用次数。
+  - 修复：请求体读完之前，阶段为 `upload`。这个阶段断开照常写未送达记录，但不计入滥用次数，因为上游没有被调用。管理端的阶段名补了“上传请求中”。
+  - 用例：`TestBrokenUploadIsNoAbuseStrike`（修复前阶段为 `select`，并计了一次）；`TestUploadStageIsNoAbuseStrike`。
+- [x] P2-10 在线更新的重启。生产上，后台在线更新后重启时 `os.Exit(0)`，没有排空在途请求：9 个请求拿到 502，约 4 条流被截断。在线更新在容器里只替换了可写层的程序，容器镜像仍是 0.3.0。
+  - 修复：重启改走服务器自己的停机流程，先停止接收连接，最多等 `server.restart_drain_seconds`（缺省 30 秒，0 为立即退出）让在途请求完成，再退出，由 Docker 或 systemd 拉起。SIGTERM 的停机超时仍是 5 秒，低于 Docker 缺省 10 秒的停止宽限，避免被 SIGKILL 而跳过清理。在容器里执行更新或回退时，返回里带 `container: true` 和提示，日志记 `system.online_update_in_container`，管理端显示“请改为更新镜像”。按用户要求，没有禁止在线更新。
+  - 代价：等待期间新请求会被拒绝（反向代理设了 `lb_try_duration` 时会暂存重试），WebSocket 连接会断开。说明见 `deploy/README.md`“Online Update in a Container”。
+  - 登记：具名补丁 `xy-graceful-online-update-restart`（4 条测试绑定）与 `required_literals`。
+  - 用例：`TestRestartUsesTheServerHook`、`TestRestartDrainsRequestsInFlight`、`TestRestartDrainIsBounded`、`TestInContainer`、`TestSystemHandlerUpdateInContainerCarriesTheNotice`、`TestLoadRestartDrainSeconds`，以及前端 `VersionBadge.containerNotice.spec.ts`。这些是新增的接口，修复前的代码没有它们，用例无法编译。
+- [ ] 本机全量门禁、CI 与安全扫描；测试服务器只构建一个候选，跑全套场景（含 SW-2），再做 0.4.1→0.4.3 与 0.4.2→0.4.3 的升级演练。
+- 不做浸泡。本版只改了分类规则、读请求体时的阶段标记和重启路径，没有新增常驻的协程、缓存或计时器。重启路径只在管理员触发时运行，由单元测试与本节用例覆盖。
+- 不在本版：P1-1 部署形态（用户决定暂不考虑；生产换版本前，P1-2 的修复在生产上不生效）；P1-3 与 P2-1、P2-2、P2-3、P2-5、P2-7、P2-8、P2-9，属于主机配置或管理员操作；P2-4 缓存读占比，留待 24 小时报告复核。
+
 ## 后续（只登记，不在 0.4.0 实施）
 
 > 份额调度在 0.4.1 合并前不在任何生产分组启用；0.4.0 已修 F3，若要提前启用需用户单独确认。

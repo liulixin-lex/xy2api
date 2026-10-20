@@ -62,6 +62,7 @@ var scenarios = map[string]string{
 	"F27": "403 content-safety refusal in Zhipu's shape (top-level code request_check_blocked)",
 	"F28": "Anthropic relay queue timeout: 200 SSE whose first event, after `after` seconds, is an error rate_limit_error (gateway_concurrency_limit)",
 	"F29": "Codex backend relay: a Responses request replaying web_search_call input without declaring web_search gets 200 SSE, then response.failed \"response protection is unavailable\"; others answer normally",
+	"F30": "502 Cloudflare JSON error answer (origin_bad_gateway, detail: the origin is overloaded or misconfigured, retry_after 60 in the body)",
 	"BAL": "normal while the balance of state key=… is positive, F12 otherwise (reset=seconds adds a relay's exhausted ratelimit headers)",
 	"MIX": "random fault with probability p percent (default 5), otherwise normal",
 }
@@ -530,6 +531,25 @@ func cloudflarePage(w http.ResponseWriter, status int, title string, retryAfter 
 	_, _ = fmt.Fprintf(w, "<!DOCTYPE html><html><head><title>%d: %s</title></head><body><h1>%s</h1><p>Error code %d</p><p>Cloudflare Ray ID: fault</p><p>retry_after: %d</p></body></html>", status, title, title, status, retryAfter)
 }
 
+// cloudflareJSONError writes Cloudflare's JSON 502 answer in the shape a relay
+// behind Cloudflare returned in production on 2026-10-20 (scrubbed).
+func cloudflareJSONError(w http.ResponseWriter) {
+	w.Header().Set("Server", "cloudflare")
+	writeJSON(w, http.StatusBadGateway, map[string]any{
+		"type":             "https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-502/",
+		"title":            "Error 502: Bad gateway",
+		"status":           502,
+		"detail":           "The web server reported a bad gateway error. This typically indicates the origin is overloaded or misconfigured.",
+		"error_code":       502,
+		"error_name":       "origin_bad_gateway",
+		"error_category":   "origin",
+		"ray_id":           "fault",
+		"cloudflare_error": true,
+		"retryable":        true,
+		"retry_after":      60,
+	})
+}
+
 func apiError(w http.ResponseWriter, p protocol, status int, errType, code, message string) {
 	if p == protoAnthropic {
 		writeJSON(w, status, map[string]any{"type": "error", "error": map[string]any{"type": errType, "message": message}})
@@ -718,6 +738,9 @@ func serve(ctx context.Context, w http.ResponseWriter, p protocol, path, model s
 		return "error_status"
 	case "F08":
 		cloudflarePage(w, 524, "A timeout occurred", 120)
+		return "error_status"
+	case "F30":
+		cloudflareJSONError(w)
 		return "error_status"
 	case "F09":
 		w.WriteHeader(http.StatusServiceUnavailable)

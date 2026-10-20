@@ -119,6 +119,19 @@ func TestLoadRedisUsernameFromEnvironment(t *testing.T) {
 	require.Equal(t, "app-user", cfg.Redis.Username)
 }
 
+func TestLoadRestartDrainSeconds(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 30, cfg.Server.RestartDrainSeconds)
+
+	resetViperWithJWTSecret(t)
+	t.Setenv("SERVER_RESTART_DRAIN_SECONDS", "0")
+	cfg, err = Load()
+	require.NoError(t, err)
+	require.Zero(t, cfg.Server.RestartDrainSeconds)
+}
+
 func TestLoadHTTPIngressSafetyDefaults(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	cfg, err := Load()
@@ -1634,6 +1647,16 @@ func TestValidateConfigErrors(t *testing.T) {
 			name:    "server max header bytes too small",
 			mutate:  func(c *Config) { c.Server.MaxHeaderBytes = 4096 },
 			wantErr: "server.max_header_bytes",
+		},
+		{
+			name:    "server restart drain negative",
+			mutate:  func(c *Config) { c.Server.RestartDrainSeconds = -1 },
+			wantErr: "server.restart_drain_seconds",
+		},
+		{
+			name:    "server restart drain too long",
+			mutate:  func(c *Config) { c.Server.RestartDrainSeconds = 601 },
+			wantErr: "server.restart_drain_seconds",
 		},
 		{
 			name:    "server max request body size",

@@ -62,8 +62,8 @@
 | `AUTH` | 401、invalid/revoked key；结构化的账号停用 code（`deactivated_workspace` 等） | 是 | 否 | 硬：OpenAI 维持现有 3 次规则；其他平台改为计数加临时冷却（§3.3） | 立即改绑 |
 | `RATE_LIMIT_RESET` | 429，且带明确的重置时间（头部或正文） | 是 | 否 | 软，冷却到重置时间；重置时间超过 300 秒视为硬 | 不超过 300 秒时只临时溢出；超过则改绑 |
 | `RATE_LIMIT` | 429 无重置时间；流内 `rate_limit_exceeded`；“The service is busy” 等 | 是 | 否 | 软，冷却时长取设置 `rate_limit_429_cooldown_settings`（当前 45 秒） | 计入失败计数 |
-| `CAPACITY_SHED` | 529、overloaded、`server_is_overloaded`、Codex at capacity（请求级降载） | 是，最多换 1 次，且换到不同 base_url 主机 | 是，每账号最多 1 次，0.5–2 秒带抖动 | 无（请求级） | 不计 |
-| `TRANSIENT` | 5xx、524、504、连接错误、HTML 错误页 | 是 | 否（504/524 及耗时 ≥60 秒的失败一律不同号重试） | 软：冷却 `transient_cooldown_seconds`（默认 30 秒）；上游给出 `retry_after` 时取 min(retry_after, 120 秒) | 计入失败计数 |
+| `CAPACITY_SHED` | 529；code 或 type 为 `overloaded_error`、`server_is_overloaded`；“overloaded”“at capacity”文案只在 503、529、4xx（如 Codex 的 400 at capacity）与流内事件上算（请求级降载，0.4.3） | 是，最多换 1 次，且换到不同 base_url 主机 | 是，每账号最多 1 次，0.5–2 秒带抖动 | 无（请求级） | 不计 |
+| `TRANSIENT` | 5xx、524、504、连接错误、HTML 错误页；CDN 或代理写出的 5xx 错误页（Cloudflare 的 JSON 错误页，以及 HTML 页面），不论文案是否提到 overloaded（0.4.3） | 是 | 否（504/524 及耗时 ≥60 秒的失败一律不同号重试） | 软：冷却 `transient_cooldown_seconds`（默认 30 秒）；上游给出 `retry_after` 时取 min(retry_after, 120 秒) | 计入失败计数 |
 | `FIRST_OUTPUT_TIMEOUT` | 本地首输出超时（§7.4），包括网关自身合成的首事件超时 504（`first_output_timeout`）；中转返回的普通 504 仍为 `TRANSIENT` | 是 | 否 | 不冷却账号（本地超时与上游应答的 `first_output_timeout` 都一样，见下方补充规则）；OpenAI API Key 账号的上游 5xx（含这种 504）沿用按模型瞬时屏蔽 | 计入失败计数 |
 | `STALL` | 已输出后超过停滞阈值无数据（§7.5） | 否（已输出） | 否 | 软，冷却 30 秒 | 计入失败计数 |
 | `CLIENT_CANCEL` | 客户端断开 | 否 | 否 | 无 | 不计 |
@@ -75,6 +75,7 @@
 - **本站与上游余额分开。** `BALANCE` 只来自上游应答。本站计费产生的余额错误走 §9.5，不进入分类。
 - **Gemini 分钟级限额不是余额。** “You exceeded your current quota” 是 OpenAI 的余额文案，Gemini 的 `RESOURCE_EXHAUSTED` 限额也用同一句话；带 Gemini 限额标记时按 429 归入限流类，不触发余额暂停。
 - **首输出超时不冷却账号。** 首输出慢多因中转排队或长推理，与请求的推理档位相关，冷却账号会把其他档位的请求也挪走，收益不明；它只计会话连败（同会话同账号 2 次即改绑）并换号。本地超时不写冷却，也不触发按模型瞬时屏蔽；上游以 `first_output_timeout` 应答（级联的 xy2api）同样不写冷却，只有 OpenAI API Key 账号按任何上游 5xx 的原有规则记入按模型瞬时屏蔽（进程内，第 2 次连败起 10 秒、第 3 次起 45 秒）。管理员配置 `stream_timeout_settings` 后，本地超时沿用其原有处置（生产未配置）。2026-10-16 生产核查时按代码对齐文档；用例 `TestLocalFirstOutputTimeoutLeavesTheAccountSchedulable`、`TestUpstreamFirstOutputTimeoutLeavesTheAccountSchedulable`。
+- **CDN 与代理写出的错误页不是容量降载（0.4.3）。** 2026-10-20 生产观测：Cloudflare 后面的中转返回 502 JSON 错误页（`cloudflare_error: true`、`error_name: origin_bad_gateway`、`retry_after: 60`），说明文字是“the origin is overloaded or misconfigured”。旧规则见到 overloaded 就判为 `CAPACITY_SHED`：账号不冷却、不计会话失败、只换到其他主机，同一账号 17 分钟内失败 21 次，4 个回合都靠回合封顶才停。现在 5xx 的 Cloudflare JSON 错误页（`cloudflare_error: true` 或 `error_category: "origin"`）与 HTML 页面（含 520–526）一律是 `TRANSIENT`：软冷却（采用正文的 `retry_after`，按 `retry_after_cap` 封顶）、计会话失败、可换任意账号。“overloaded”“at capacity”文案只在 503、529、4xx 与流内事件上算降载，其他 5xx 上它是中转对自身故障的说明；带 `overloaded_error` 等 code 或 type 的应答不受影响。用例 `TestEdgeErrorPagesAreTransientNotCapacity`、`TestCloudflareErrorPageCoolsTheAccountDown`。
 - **池模式账号保留管理员配置的同号重试状态码**，但同样受预算与“每账号最多 1 次”约束。
 - 分类结果写入请求上下文，供换号循环、会话处理、ops 记录与 Explain 使用。
 
@@ -356,7 +357,7 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 - **`undelivered` 时断开：**
   - 立即取消上游上下文（包括等待响应头与换号间隙），停止预算内的后续尝试，释放在途预留与并发槽位；
   - **不写 `usage_logs`，不计费**；
-  - 写一条 `gateway_undelivered_requests`（迁移 274）：`request_id`、`client_request_id`、`user_id`、`api_key_id`、`group_id`、`account_id`、`platform`、`model`、`inbound_endpoint`、`disconnect_stage`（`select` 选号，含等待槽位；`header_wait` 等待响应头；`pre_output` 首输出前）、`duration_ms`、`upstream_usage_json`（上游已给出时）、`estimated_upstream_cost`、`billed`、`created_at`。
+  - 写一条 `gateway_undelivered_requests`（迁移 274）：`request_id`、`client_request_id`、`user_id`、`api_key_id`、`group_id`、`account_id`、`platform`、`model`、`inbound_endpoint`、`disconnect_stage`（`upload` 请求体尚未收完，0.4.3；`select` 选号，含等待槽位；`header_wait` 等待响应头；`pre_output` 首输出前）、`duration_ms`、`upstream_usage_json`（上游已给出时）、`estimated_upstream_cost`、`billed`、`created_at`。
 - **`partial` 时断开：**
   - 继续读取上游以获得用量，最长 `partial_drain_max_seconds`（180 秒）；
   - 到时取消，按已解析到的用量计费；
@@ -364,6 +365,7 @@ data: {"type":"response.output_text.delta","item_id":"SSE-Keep-Alive","delta":""
 - **滥用保护：**
   - Redis 计数 `xy:resil:undelivered:{api_key_id}:{hour}`；
   - 同一 Key 每小时超过 `threshold_per_hour`（30）次后，后续 `undelivered` 按上游成本计费：上游给出用量时按用量；否则按输入 Token 估算 × 账号上游成本倍率；
+  - 请求体没收完就断开（阶段 `upload`，0.4.3）不计入：客户端没发出完整请求，上游没有被调用。2026-10-20 生产观测到经 Cloudflare 约 125 秒的上传中断被记为 `select` 并计入该 Key 的次数。用例 `TestBrokenUploadIsNoAbuseStrike`、`TestUploadStageIsNoAbuseStrike`；
   - 这些计费写入 `usage_logs`（`billing_mode='undelivered_abuse'`），同时在未送达记录中把 `billed` 置为 true，用户侧可见。
 - **`ops_error_logs` 补充：** 499 记录补全 `duration_ms`，并新增 `disconnect_stage` 与 `delivered_bytes` 两列（迁移 275）。生产开启了 `ignore_context_canceled`，普通取消不入 `ops_error_logs`，以未送达记录与新增统计为准。
 

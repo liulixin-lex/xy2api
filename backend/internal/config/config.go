@@ -716,6 +716,10 @@ type ServerConfig struct {
 	TrustedProxiesConfigured bool      `mapstructure:"-" json:"-" yaml:"-"`   // 是否显式配置了可信代理列表
 	MaxRequestBodySize       int64     `mapstructure:"max_request_body_size"` // 全局最大请求体限制
 	H2C                      H2CConfig `mapstructure:"h2c"`                   // HTTP/2 Cleartext 配置
+	// RestartDrainSeconds bounds how long the online-update restart waits for
+	// requests in flight after it stopped accepting new ones (xy2api); 0 exits
+	// at once.
+	RestartDrainSeconds int `mapstructure:"restart_drain_seconds"`
 }
 
 // H2CConfig HTTP/2 Cleartext 配置
@@ -2103,6 +2107,7 @@ func setDefaults() {
 	viper.SetDefault("server.max_header_bytes", 64*1024)
 	viper.SetDefault("server.idle_timeout", 120) // 120秒空闲超时
 	viper.SetDefault("server.max_request_body_size", int64(256*1024*1024))
+	viper.SetDefault("server.restart_drain_seconds", 30)
 	// H2C 默认配置
 	viper.SetDefault("server.h2c.enabled", false)
 	viper.SetDefault("server.h2c.max_concurrent_streams", uint32(50))      // 50 个并发流
@@ -2853,6 +2858,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Server.MaxRequestBodySize < 0 {
 		return fmt.Errorf("server.max_request_body_size must be non-negative")
+	}
+	if c.Server.RestartDrainSeconds < 0 || c.Server.RestartDrainSeconds > 600 {
+		return fmt.Errorf("server.restart_drain_seconds must be between 0 and 600")
 	}
 	if c.Server.H2C.Enabled {
 		if c.Server.H2C.MaxConcurrentStreams == 0 {

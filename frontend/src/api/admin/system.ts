@@ -46,6 +46,9 @@ export async function checkUpdates(force = false): Promise<VersionInfo> {
 export interface UpdateResult {
   message: string
   need_restart: boolean
+  /** The server runs in a container: update the image, an online update is lost when it is recreated. */
+  container?: boolean
+  container_notice?: string
 }
 
 export interface RollbackVersionInfo {

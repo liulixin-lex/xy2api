@@ -380,14 +380,22 @@ func Classify(o Outcome, extraBalanceKeywords []string) Result {
 		return Result{Category: CategoryClientError, Reason: ReasonContentPolicy}
 	}
 
-	// 4. Capacity shedding is request scoped.
+	// 4. Capacity shedding is request scoped. A 5xx page written by a CDN or
+	// proxy in front of the upstream is the relay failing, whatever its
+	// explanation says (Cloudflare's 502 reads "the origin is overloaded or
+	// misconfigured"). The capacity wording counts on 503, 529, below 500 and
+	// in streams; on other 5xx it is a relay's explanation of its failure.
+	if status >= 500 && status != 529 && edgeErrorPage(lowerBody) {
+		return Result{Category: CategoryTransient, RetryAfter: retryAfter, Reason: "edge_error_page"}
+	}
 	if _, ok := capacityCodes[code]; ok {
 		return Result{Category: CategoryCapacityShed, RetryAfter: retryAfter, Reason: "capacity_code"}
 	}
 	if _, ok := capacityCodes[typ]; ok {
 		return Result{Category: CategoryCapacityShed, RetryAfter: retryAfter, Reason: "capacity_type"}
 	}
-	if status == 529 || strings.Contains(text, "overloaded") || strings.Contains(text, "at capacity") {
+	if status == 529 || ((status < 500 || status == http.StatusServiceUnavailable) &&
+		(strings.Contains(text, "overloaded") || strings.Contains(text, "at capacity"))) {
 		return Result{Category: CategoryCapacityShed, RetryAfter: retryAfter, Reason: "capacity"}
 	}
 
@@ -504,6 +512,18 @@ func contentPolicyText(status int, text, lowerBody string) bool {
 	}
 	return containsAny(text, contentPolicyKeywords) && !containsAny(text, contentPolicyAccountWords) &&
 		!looksLikeHTMLBlock(lowerBody)
+}
+
+// reCloudflareJSONError matches Cloudflare's JSON error answers, which carry
+// "cloudflare_error": true and "error_category": "origin" next to error_name
+// and retry_after.
+var reCloudflareJSONError = regexp.MustCompile(`"cloudflare_error"\s*:\s*true|"error_category"\s*:\s*"origin"`)
+
+// edgeErrorPage reports an error page written by a CDN or proxy rather than
+// by an upstream API: Cloudflare's JSON error answers and HTML pages.
+func edgeErrorPage(lowerBody string) bool {
+	return reCloudflareJSONError.MatchString(lowerBody) || looksLikeHTMLBlock(lowerBody) ||
+		strings.HasPrefix(strings.TrimSpace(lowerBody), "<")
 }
 
 func looksLikeHTMLBlock(lowerBody string) bool {

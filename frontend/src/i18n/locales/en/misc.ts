@@ -36,6 +36,8 @@ export default {
     updateComplete: 'Update Complete',
     updateFailed: 'Update Failed',
     restartRequired: 'Please restart the service to apply the update',
+    containerNotice:
+      'Running in a container: update the image instead. An online update only replaces the program inside the container and is lost when the container is recreated.',
     restartNow: 'Restart Now',
     restarting: 'Restarting...',
     retry: 'Retry',

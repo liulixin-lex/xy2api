@@ -346,6 +346,24 @@ def sw1():
     return r, checks
 
 
+@scenario("SW-2", "A relay behind Cloudflare answers Cloudflare's JSON 502 saying 'overloaded': the account cools down for its retry_after and the request switches to the account on the same host (0.4.3)")
+def sw2():
+    checks = []
+    mark = fault_last_id()
+    try:
+        r = stream_request(DIRECT, "/v1/messages", KEYS["G-cf-json"], anthropic_body())
+        recs = [x["fault"] for x in fault_records_since(mark)]
+        reason, left, _ = account_pause("cfj-bad")
+        check(r["status"] == 200, f"status 200 ({r['status']})", checks)
+        check(any("message_stop" in l for _, l in r["lines"]), "completed", checks)
+        check("F30" in recs and "F00" in recs, f"switched from the failing relay ({recs})", checks)
+        check(reason.startswith("transient:"), f"transient cooldown ({reason[:40]})", checks)
+        check(left is not None and 45 <= left <= 60, f"cooled down for the upstream's retry_after ({left} s left)", checks)
+        return r, checks
+    finally:
+        restore_account("cfj-bad")
+
+
 @scenario("FO-1", "No response headers for 200 s: first-output timeout switches before the deadline")
 def fo1():
     checks = []

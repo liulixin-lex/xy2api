@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -41,6 +42,22 @@ func systemUpdateContext(ctx context.Context) (context.Context, context.CancelFu
 		base = context.WithoutCancel(ctx)
 	}
 	return context.WithTimeout(base, systemUpdateTimeout)
+}
+
+// systemInContainer reports a container deployment (xy2api); tests replace it.
+var systemInContainer = sysutil.InContainer
+
+// withContainerNotice adds the container notice to the answer of an online
+// update or rollback and logs it (xy2api): the replaced binary lives in the
+// container's writable layer and is lost when the container is recreated.
+func withContainerNotice(operation string, answer gin.H) gin.H {
+	if !systemInContainer() {
+		return answer
+	}
+	slog.Warn("system.online_update_in_container", "operation", operation, "notice", sysutil.ContainerNotice)
+	answer["container"] = true
+	answer["container_notice"] = sysutil.ContainerNotice
+	return answer
 }
 
 type systemUpdateService interface {
@@ -121,11 +138,11 @@ func (h *SystemHandler) PerformUpdate(c *gin.Context) {
 		}
 		succeeded = true
 
-		return gin.H{
+		return withContainerNotice("update", gin.H{
 			"message":      "Update completed. Please restart the service.",
 			"need_restart": true,
 			"operation_id": lock.OperationID(),
-		}, nil
+		}), nil
 	})
 }
 
@@ -190,12 +207,12 @@ func (h *SystemHandler) Rollback(c *gin.Context) {
 		}
 		succeeded = true
 
-		return gin.H{
+		return withContainerNotice("rollback", gin.H{
 			"message":      "Rollback completed. Please restart the service.",
 			"need_restart": true,
 			"version":      targetVersion,
 			"operation_id": lock.OperationID(),
-		}, nil
+		}), nil
 	})
 }
 

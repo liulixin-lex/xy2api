@@ -56,6 +56,12 @@ server:
   # Applies to all requests, especially important for h2c first request memory protection
   # 适用于所有请求，对 h2c 第一请求的内存保护尤为重要
   max_request_body_size: 268435456
+  # After an online update or rollback, how long the restart waits for requests
+  # in flight once it stopped accepting connections (0-600 seconds, 0 exits at
+  # once). Docker deployments should update the image instead; see deploy/README.md.
+  # 在线更新或回退后的重启：停止接收连接后等待在途请求完成的最长秒数（0-600，0 为立即退出）。
+  # Docker 部署请改为更新镜像，见 deploy/README.md。
+  restart_drain_seconds: 30
   # HTTP/2 Cleartext (h2c) configuration
   # HTTP/2 Cleartext (h2c) 配置
   h2c:

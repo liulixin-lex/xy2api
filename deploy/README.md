@@ -261,6 +261,14 @@ docker compose up -d
 docker compose down -v
 ```
 
+### Online Update in a Container
+
+Update a Docker deployment by changing the image, as above. The admin panel's online update only replaces the program inside the running container; the image and the compose file still name the old version, so recreating the container (`docker compose up` after a configuration change, `docker rm`, a host move) silently returns to it. Inside a container the update answer and the log (`system.online_update_in_container`) say so.
+
+The restart after an online update or rollback stops accepting connections, waits up to `server.restart_drain_seconds` (default 30, `SERVER_RESTART_DRAIN_SECONDS`, 0 exits at once) for requests in flight and then exits; Docker or systemd starts the new program. New requests are refused during the wait (a reverse proxy with `lb_try_duration` holds them), and WebSocket connections are closed.
+
+在线更新（容器）：Docker 部署请按上面的方法更新镜像。后台的在线更新只替换运行中容器里的程序，镜像和 compose 文件仍是旧版本，容器重建（改配置后 `docker compose up`、`docker rm`、迁移主机）会悄悄回到旧版本；在容器内执行时，更新接口的返回和日志（`system.online_update_in_container`）会给出提示。在线更新或回退后的重启先停止接收连接，最多等待 `server.restart_drain_seconds`（缺省 30 秒，环境变量 `SERVER_RESTART_DRAIN_SECONDS`，0 为立即退出）让在途请求完成，再退出，由 Docker 或 systemd 拉起新程序。等待期间新请求被拒绝（反向代理设了 `lb_try_duration` 时会暂存重试），WebSocket 连接会断开。
+
 ### Environment Variables
 
 | Variable | Required | Default | Description |

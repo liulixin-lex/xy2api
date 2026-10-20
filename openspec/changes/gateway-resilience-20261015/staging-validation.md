@@ -114,6 +114,10 @@
 - **CV-3、CV-4**（全局复审 G1）：两种转换输出一段后停滞（F06）：在最后一段内容后 130 秒内结束，账号得到 `STALL` 冷却（夹具 `G-cv-stall-chat`、`G-cv-stall-msg`）。
 - **RDY-1**：候选镜像的 `/ready`、`/health` 由后端自己应答（JSON），不被嵌入的前端接管。0.4.2 第一个候选在测试服务器上 `/ready` 返回了 `index.html`，因此补了这个场景。
 
+0.4.3 新增（夹具 `G-cf-json`，故障 F30）：
+
+- **SW-2**：Cloudflare 后面的中转返回 Cloudflare 的 JSON 502（`origin_bad_gateway`，说明文字含 overloaded，正文 `retry_after: 60`），两个账号在同一上游主机上，与 2026-10-20 生产观测一致：请求换到第二个账号完成，第一个账号得到 `transient:` 冷却，剩余 45–60 秒。旧规则判为 `CAPACITY_SHED`，同主机不换号、账号不冷却。
+
 ### 6.2 真实客户端端到端
 
 | 客户端 | 路径 | 场景 |
