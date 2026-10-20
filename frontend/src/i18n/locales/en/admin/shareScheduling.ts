@@ -151,7 +151,9 @@ export default {
       calibrating: 'Thresholds are initial values, pending calibration on production data.',
       loadFailed: 'Failed to load the health data.',
       anchorEstimated: 'The switch time is estimated from the policy update time.',
-      hourRounded: 'The baseline and windows over 2 hours are summed by whole hours and may differ from the exact window by up to 30 minutes.',
+      hourRounded: 'The baseline and windows over 2 hours are summed by whole hours to the nearest hour and may differ from the exact window by up to 30 minutes.',
+      // The note when the switch cut the current window (current_from equals switched_at).
+      hourRoundedTruncated: 'The current window starts at the switch and is summed by whole hours after it. The partial hour of the switch counts by the minute if the switch was within the last 2 hours and is left out if it was earlier, so up to 59 minutes may be missing. The baseline is summed to the nearest whole hour and may differ by up to 30 minutes.',
       countersError: 'Some counters failed to load: {error}'
     },
     attention: {

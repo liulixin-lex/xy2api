@@ -62,7 +62,7 @@
       <p class="mt-3 space-x-1 text-xs text-gray-500 dark:text-dark-400">
         <span v-if="scheduler === 'share' && report.baseline && report.baseline_from && report.baseline_to">{{ t('admin.shareScheduling.health.baseline', { from: formatDateTimeToMinute(report.baseline_from), to: formatDateTimeToMinute(report.baseline_to) }) }}</span>
         <span v-if="scheduler === 'share' && report.anchor_source === 'policy_updated_at'" data-testid="share-health-anchor-estimated">{{ t('admin.shareScheduling.health.anchorEstimated') }}</span>
-        <span v-if="report.counter_precision === 'hour_rounded'">{{ t('admin.shareScheduling.health.hourRounded') }}</span>
+        <span v-if="report.counter_precision === 'hour_rounded'" data-testid="share-health-hour-rounded">{{ truncated ? t('admin.shareScheduling.health.hourRoundedTruncated') : t('admin.shareScheduling.health.hourRounded') }}</span>
         <span>{{ t('admin.shareScheduling.health.calibrating') }}</span>
       </p>
     </template>
@@ -97,10 +97,17 @@ const currentMinutes = computed(() => {
   const ms = Date.parse(r.current_to) - Date.parse(r.current_from)
   return Number.isFinite(ms) ? Math.max(Math.floor(ms / 60_000), 0) : 0
 })
-/** The window is shorter than asked for because the group switched within it. */
+/**
+ * The group switched within the window, so the server cut it at the switch:
+ * it says so by starting the window at the switch time. (Comparing lengths
+ * would not do: a long window summed to the nearest hour is up to 30 minutes
+ * short without being cut.)
+ */
 const truncated = computed(() => {
   const r = report.value
-  return r !== null && r.window_seconds > 0 && currentMinutes.value * 60 < r.window_seconds - 60
+  if (!r?.switched_at) return false
+  const from = Date.parse(r.current_from)
+  return Number.isFinite(from) && from === Date.parse(r.switched_at)
 })
 const judged = computed(() => (report.value ? judgeShareHealth(report.value.current, report.value.baseline, truncated.value ? currentMinutes.value : undefined) : null))
 const baselineMissing = computed(() => (report.value?.baseline_unavailable === 'never_switched'

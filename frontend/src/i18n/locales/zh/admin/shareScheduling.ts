@@ -151,7 +151,9 @@ export default {
       calibrating: '判定阈值为初始值，待生产数据校准。',
       loadFailed: '运行数据读取失败。',
       anchorEstimated: '切换时间按策略更新时间估算。',
-      hourRounded: '基线与超过 2 小时的窗口按整点小时汇总，与精确时间窗口最多相差 30 分钟。',
+      hourRounded: '基线与超过 2 小时的窗口按最近的整点小时汇总，与精确时间窗口最多相差 30 分钟。',
+      // 当前窗口被切换时间截断时的说明（current_from 等于 switched_at）。
+      hourRoundedTruncated: '当前窗口从切换时间开始，之后按整点小时汇总；切换所在的不完整小时，切换在 2 小时内时按分钟计入，更早则不计入，最多少算 59 分钟。基线按最近的整点小时汇总，最多相差 30 分钟。',
       countersError: '部分计数读取失败：{error}'
     },
     attention: {
