@@ -1,6 +1,7 @@
 <template>
   <Teleport to="body">
-    <Transition name="modal">
+    <!-- appear：按需挂载（首次打开才渲染）的弹窗也播放进场动画 -->
+    <Transition name="modal" appear>
       <div
         v-if="show"
         class="modal-overlay"

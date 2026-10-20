@@ -6,7 +6,10 @@ import i18n, { initI18n } from './i18n'
 import { useAppStore } from '@/stores/app'
 import { updateFavicon } from '@/utils/branding'
 import { isIOSDevice } from '@/utils/device'
+import { recoverFromChunkLoadError } from '@/utils/chunkLoadError'
+import { initMotionPreference } from '@/composables/useMotionPreference'
 import './style.css'
+import './styles/motion.css'
 
 function initIOSViewportZoomFix() {
   // iOS Safari 在输入框字号小于 16px 时聚焦会自动放大页面，且失焦后不会恢复。
@@ -30,10 +33,20 @@ function initThemeClass() {
   document.documentElement.classList.toggle('dark', shouldUseDark)
 }
 
+function initChunkPreloadRecovery() {
+  // 动态 import 的依赖预加载失败（多为新版本部署后旧 chunk 已删除）：整页刷新拿到新版本。
+  // 冷却期内不再刷新，交给原有错误处理，避免资源确实缺失时循环刷新。
+  window.addEventListener('vite:preloadError', (event) => {
+    if (recoverFromChunkLoadError()) event.preventDefault()
+  })
+}
+
 async function bootstrap() {
   // Apply theme class globally before app mount to keep all routes consistent.
   initThemeClass()
+  initMotionPreference()
   initIOSViewportZoomFix()
+  initChunkPreloadRecovery()
 
   const app = createApp(App)
   const pinia = createPinia()

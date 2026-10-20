@@ -411,6 +411,8 @@ const { pause: pauseCountdown, resume: resumeCountdown } = useIntervalFn(
     if (!autoRefreshEnabled.value) return
     if (!opsEnabled.value) return
     if (loading.value) return
+    // 后台标签页冻结倒计时，不发起刷新
+    if (document.hidden) return
 
     if (autoRefreshCountdown.value <= 0) {
       // Fetch immediately when the countdown reaches 0.

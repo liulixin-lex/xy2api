@@ -1,0 +1,107 @@
+/*
+ * 动效系统
+ * - 只对 transform / opacity 做动画，不动布局属性（width/height/top/margin/padding）。
+ * - 进场 140–420ms，退场一律不超过 200ms；同组错峰总时长不超过 270ms。
+ * - 表格行、轮询刷新的数值不做动画。
+ * - 两条通道关闭动画：系统的 prefers-reduced-motion，或用户在菜单里打开“减少动画”
+ *   （<html data-motion="reduced">，见 composables/useMotionPreference.ts）。
+ */
+:root {
+  --motion-fast: 140ms; /* 悬停、按压、开关等小控件 */
+  --motion-base: 220ms; /* 遮罩、下拉、选中指示 */
+  --motion-slow: 420ms; /* 弹窗面板、页面区块入场 */
+  --motion-exit: 160ms; /* 退场 */
+  --motion-stagger: 45ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-emphasized: cubic-bezier(0.22, 1.06, 0.36, 1); /* 弹窗面板：几乎察觉不到的回弹 */
+}
+
+/* 用户主动选择“减少动画”：与系统设置同等处理（加载转圈属于必要反馈，保留） */
+:root[data-motion='reduced'] *:not(.animate-spin),
+:root[data-motion='reduced'] *::before,
+:root[data-motion='reduced'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  animation-delay: 0ms !important;
+  transition-duration: 0.01ms !important;
+  transition-delay: 0ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* 加载转圈属于必要反馈，保留 */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.animate-spin),
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 侧栏当前项指示条：只用 transform 移动，高度在移动前一次性设置 */
+.sidebar-active-indicator {
+  position: absolute;
+  top: 0;
+  left: 0.25rem;
+  width: 3px;
+  border-radius: 9999px;
+  background-color: theme('colors.primary.500');
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform;
+  transition:
+    transform var(--motion-base) var(--ease-out),
+    opacity var(--motion-fast) var(--ease-out-soft);
+}
+
+.sidebar-active-indicator[data-visible='true'] {
+  opacity: 1;
+}
+
+.sidebar-active-indicator[data-instant='true'] {
+  transition: none;
+}
+
+/* 卡片悬停：阴影画在伪元素上，只过渡它的 opacity，避免逐帧重绘 box-shadow */
+@media (hover: hover) and (pointer: fine) {
+  /* :where 不增加优先级，元素自带 absolute/sticky 等定位时以其为准 */
+  :where(.card-hover) {
+    position: relative;
+  }
+
+  .card-hover::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: theme('boxShadow.card-hover');
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--motion-base) var(--ease-out-soft);
+  }
+
+  .card-hover:hover::after {
+    opacity: 1;
+  }
+}
+
+/* 只在插入时播放一次的区块入场。仅用于插入一次后不再反复挂载的内容（如仪表盘首次加载完成后的卡片行）；
+   用 --enter-index 控制错峰，超过 6 个的不再延迟。 */
+/* 起始透明度不设为 0：内容一插入就能看清；从 0 淡入时 Chromium 要等动画结束才记录 LCP（见 usePageEntrance.ts） */
+@keyframes motion-enter {
+  from {
+    opacity: 0.4;
+    transform: translate3d(0, 8px, 0);
+  }
+}
+
+.motion-enter {
+  animation: motion-enter var(--motion-slow) var(--ease-out-soft) backwards;
+  animation-delay: calc(min(var(--enter-index, 0), 6) * var(--motion-stagger));
+}

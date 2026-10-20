@@ -32,8 +32,35 @@
     </template>
 
     <template v-else>
-      <div v-if="selectable" class="flex items-center justify-end gap-2 px-1">
-        <label class="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300">
+      <div v-if="selectable || mobileSortColumns.length" class="flex flex-wrap items-center justify-end gap-2 px-1">
+        <!-- 手机端没有表头，排序放到卡片上方 -->
+        <div v-if="mobileSortColumns.length" class="mr-auto flex min-w-0 items-center gap-2" data-test="mobile-sort">
+          <label :for="mobileSortSelectId" class="flex-shrink-0 text-sm font-medium text-gray-600 dark:text-gray-300">
+            {{ t('common.sortBy') }}
+          </label>
+          <select
+            :id="mobileSortSelectId"
+            class="input h-9 min-w-0 max-w-[11rem] py-1 text-sm"
+            :value="sortKey"
+            data-test="mobile-sort-key"
+            @change="onMobileSortChange(($event.target as HTMLSelectElement).value)"
+          >
+            <option v-if="!sortKey" value="" disabled>{{ t('common.sortPlaceholder') }}</option>
+            <option v-for="column in mobileSortColumns" :key="column.key" :value="column.key">{{ column.label }}</option>
+          </select>
+          <button
+            v-if="sortKey"
+            type="button"
+            class="btn btn-secondary btn-icon h-9 w-9 flex-shrink-0"
+            :aria-label="sortOrder === 'asc' ? t('common.sortAscending') : t('common.sortDescending')"
+            :title="sortOrder === 'asc' ? t('common.sortAscending') : t('common.sortDescending')"
+            data-test="mobile-sort-order"
+            @click="handleSort(sortKey)"
+          >
+            <Icon :name="sortOrder === 'asc' ? 'arrowUp' : 'arrowDown'" size="sm" />
+          </button>
+        </div>
+        <label v-if="selectable" class="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300">
           <input
             type="checkbox"
             class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800"
@@ -99,7 +126,7 @@
       'is-scrollable': isScrollable
     }"
   >
-    <table class="w-full min-w-max divide-y divide-gray-200 dark:divide-dark-700">
+    <table class="w-full min-w-max">
       <thead class="table-header bg-gray-50 dark:bg-dark-800">
         <tr>
           <th
@@ -166,9 +193,9 @@
           </th>
         </tr>
       </thead>
-      <tbody class="table-body divide-y divide-gray-200 bg-white dark:divide-dark-700 dark:bg-dark-900">
+      <tbody class="table-body bg-white dark:bg-dark-900">
         <!-- Loading skeleton -->
-        <tr v-if="loading" v-for="i in 5" :key="i">
+        <tr v-if="loading" v-for="i in 5" :key="i" class="table-row-border">
           <td v-if="selectable" class="w-11 min-w-11 px-3 py-4">
             <div class="mx-auto h-4 w-4 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
           </td>
@@ -180,7 +207,7 @@
         </tr>
 
         <!-- Empty state -->
-        <tr v-else-if="!data || data.length === 0">
+        <tr v-else-if="!data || data.length === 0" class="table-row-border">
           <td
             :colspan="tableColumnCount"
             :class="['py-12 text-center text-gray-500 dark:text-dark-400', getAdaptivePaddingClass()]"
@@ -207,50 +234,26 @@
                 :style="{ height: virtualPaddingTop + 'px', padding: 0, border: 'none' }">
             </td>
           </tr>
-          <tr
+          <DataTableRow
             v-for="item in renderRows"
             :key="resolveRowKey(item.row, item.index)"
+            :ref="item.measure ? measureRowComponent : undefined"
             :data-row-id="resolveRowKey(item.row, item.index)"
             :data-index="item.index"
-            :ref="item.measure ? measureElement : undefined"
-            class="hover:bg-gray-50 dark:hover:bg-dark-800"
-            :class="{
-              'cursor-pointer': clickableRows,
-              'bg-primary-50/40 dark:bg-primary-900/10': selectable && isRowSelected(item.row, item.index)
-            }"
-            @click="clickableRows && emit('rowClick', item.row)"
-          >
-            <td v-if="selectable" class="w-11 min-w-11 px-3 py-4 text-center">
-              <input
-                type="checkbox"
-                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800"
-                :checked="isRowSelected(item.row, item.index)"
-                :aria-label="getRowSelectionLabel(item.row, item.index)"
-                data-test="select-row"
-                @click.stop
-                @change="toggleRowSelection(item.row, item.index, ($event.target as HTMLInputElement).checked)"
-              />
-            </td>
-            <td
-              v-for="(column, colIndex) in columns"
-              :key="column.key"
-              :class="[
-                'whitespace-nowrap py-4 text-sm text-gray-900 dark:text-gray-100',
-                getAdaptivePaddingClass(),
-                getStickyColumnClass(column, colIndex),
-                column.class
-              ]"
-            >
-              <slot :name="`cell-${column.key}`"
-                    :row="item.row"
-                    :value="item.row[column.key]"
-                    :expanded="actionsExpanded">
-                {{ column.formatter
-                   ? column.formatter(item.row[column.key], item.row)
-                   : item.row[column.key] }}
-              </slot>
-            </td>
-          </tr>
+            :row="item.row"
+            :index="item.index"
+            :columns="columns"
+            :sticky-classes="stickyColumnClasses"
+            :padding-class="adaptivePaddingClass"
+            :selectable="selectable"
+            :selected="selectable && isRowSelected(item.row, item.index)"
+            :selection-label="selectable ? getRowSelectionLabel(item.row, item.index) : ''"
+            :clickable="clickableRows"
+            :expanded="actionsExpanded"
+            :cell-slots="$slots"
+            @toggle="toggleRowSelection"
+            @row-click="onRowClick"
+          />
           <tr v-if="virtualPaddingBottom > 0" aria-hidden="true">
             <td :colspan="tableColumnCount"
                 :style="{ height: virtualPaddingBottom + 'px', padding: 0, border: 'none' }">
@@ -263,11 +266,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useVirtualizer, observeElementRect as observeElementRectDefault } from '@tanstack/vue-virtual'
+import { computed, ref, onMounted, onUnmounted, watch, nextTick, useId, type ComponentPublicInstance } from 'vue'
+import { useVirtualizer, observeElementRect as observeElementRectDefault, type Virtualizer } from '@tanstack/vue-virtual'
 import { useI18n } from 'vue-i18n'
 import type { Column } from './types'
 import Icon from '@/components/icons/Icon.vue'
+import DataTableRow from './DataTableRow'
 
 const { t } = useI18n()
 
@@ -635,6 +639,11 @@ const resolveStableRowKey = (row: any): string | number | undefined => {
 const resolveRowKey = (row: any, index: number) => resolveStableRowKey(row) ?? index
 
 const dataColumns = computed(() => props.columns.filter((column) => column.key !== 'actions'))
+const mobileSortColumns = computed(() => dataColumns.value.filter((column) => column.sortable && column.label))
+const mobileSortSelectId = `data-table-sort-${useId()}`
+const onMobileSortChange = (key: string) => {
+  if (key && key !== sortKey.value) handleSort(key)
+}
 const columnsSignature = computed(() =>
   props.columns.map((column) => `${column.key}:${column.sortable ? '1' : '0'}`).join('|')
 )
@@ -757,6 +766,22 @@ const shouldVirtualize = computed(() =>
   isDesktopViewport.value && (sortedData.value?.length ?? 0) > (props.virtualizeThreshold ?? 100)
 )
 
+// 行高只取 ResizeObserver 给出的 borderBoxSize。默认实现在 ref 回调里同步读 offsetHeight,
+// 会在 Vue 打补丁途中强制布局；这里同步路径直接沿用当前已知高度(已测或估算),
+// 真实高度由随后的 ResizeObserver 回调补上。
+const measureRowFromObserver = (
+  element: Element,
+  entry: ResizeObserverEntry | undefined,
+  instance: Virtualizer<HTMLElement, Element>
+) => {
+  if (entry) {
+    const box = entry.borderBoxSize?.[0]
+    return Math.round(box ? box.blockSize : entry.contentRect.height)
+  }
+  const index = instance.indexFromElement(element)
+  return instance.measurementsCache[index]?.size ?? (props.estimateRowHeight ?? 56)
+}
+
 const rowVirtualizer = useVirtualizer(computed(() => ({
   count: shouldVirtualize.value ? (sortedData.value?.length ?? 0) : 0,
   getScrollElement: () => tableWrapperRef.value,
@@ -774,6 +799,7 @@ const rowVirtualizer = useVirtualizer(computed(() => ({
   observeElementRect: observeElementRectNonZero,
   // 把测量类 ResizeObserver 回调批到 rAF,避免滚动中同步 reflow 风暴导致的校正抖动/空白
   useAnimationFrameWithResizeObserver: true,
+  measureElement: measureRowFromObserver,
 })))
 
 const virtualItems = computed(() => rowVirtualizer.value.getVirtualItems())
@@ -794,6 +820,12 @@ const measureElement = (el: any) => {
     rowVirtualizer.value.measureElement(el as Element)
   }
 }
+
+const measureRowComponent = (instance: any) => {
+  measureElement((instance as ComponentPublicInstance | null)?.$el)
+}
+
+const onRowClick = (row: any) => emit('rowClick', row)
 
 type RowIdentityToken = string | number | object | symbol
 
@@ -896,6 +928,10 @@ const getAdaptivePaddingClass = () => {
   }
 }
 
+// 传给行组件的派生值保持引用稳定，避免滚动时整窗口的行因 props 变化而重渲染
+const adaptivePaddingClass = computed(() => getAdaptivePaddingClass())
+const stickyColumnClasses = computed(() => props.columns.map((column, index) => getStickyColumnClass(column, index)))
+
 // Init + keep persisted sort state consistent with current columns
 const didInitSort = ref(false)
 
@@ -980,6 +1016,18 @@ defineExpose({
   z-index: 0;
 }
 
+/* 行分隔线挂在每一行自身上，table/tbody 祖先上不放 divide-y / space-y：
+   Tailwind v3 的这两类工具编译为 `X > :not([hidden]) ~ :not([hidden])`，祖先命中后
+   Chromium 会在每次插入/移除行时重算整个 tbody 子树（数千节点），虚拟滚动每帧都触发。
+   首行上边框同时充当表头分隔线，视觉与原 divide-y 一致。 */
+.table-wrapper :deep(.table-row-border) {
+  border-top: 1px solid theme('colors.gray.200');
+}
+
+.dark .table-wrapper :deep(.table-row-border) {
+  border-top-color: theme('colors.dark.700');
+}
+
 /* 所有表头单元格固定在顶部 */
 .sticky-header-cell {
   position: sticky;
@@ -992,58 +1040,58 @@ defineExpose({
   background-color: rgb(31 41 55);
 }
 
-/* Sticky 列基础样式 */
-.sticky-col {
+/* Sticky 列基础样式（表体单元格由 DataTableRow 渲染，需 :deep 才能命中） */
+.table-wrapper :deep(.sticky-col) {
   position: sticky;
   z-index: 20; /* 表体固定列 */
 }
 
 /* 单列固定（无勾选列时） */
-.sticky-col-left {
+.table-wrapper :deep(.sticky-col-left) {
   left: 0;
 }
 
 /* 双列固定（有勾选列时）：第一列（勾选） */
-.sticky-col-left-first {
+.table-wrapper :deep(.sticky-col-left-first) {
   left: 0;
 }
 
 /* 双列固定（有勾选列时）：第二列（名称） */
-.sticky-col-left-second {
+.table-wrapper :deep(.sticky-col-left-second) {
   left: var(--select-col-width);
 }
 
 /* 操作列固定 */
-.sticky-col-right {
+.table-wrapper :deep(.sticky-col-right) {
   right: 0;
 }
 
 /* 表头 sticky 列 - 需要比普通表头单元格更高的 z-index */
-.sticky-header-cell.sticky-col {
+.table-wrapper .sticky-header-cell.sticky-col {
   z-index: 220; /* 高于普通表头单元格和表体固定列 */
 }
 
 /* 表体 sticky 列背景 */
-tbody .sticky-col {
+.table-wrapper :deep(tbody .sticky-col) {
   background-color: white;
 }
 
-.dark tbody .sticky-col {
+.dark .table-wrapper :deep(tbody .sticky-col) {
   background-color: rgb(17 24 39);
 }
 
 /* hover 状态保持 */
-tbody tr:hover .sticky-col {
+.table-wrapper :deep(tbody tr:hover .sticky-col) {
   background-color: rgb(249 250 251);
 }
 
-.dark tbody tr:hover .sticky-col {
+.dark .table-wrapper :deep(tbody tr:hover .sticky-col) {
   background-color: rgb(31 41 55);
 }
 
 /* 阴影只在可滚动时显示 */
 /* 单列固定右侧阴影 */
-.is-scrollable .sticky-col-left::after {
+.is-scrollable :deep(.sticky-col-left::after) {
   content: '';
   position: absolute;
   top: 0;
@@ -1056,7 +1104,7 @@ tbody tr:hover .sticky-col {
 }
 
 /* 双列固定：只在第二列显示阴影 */
-.is-scrollable .sticky-col-left-second::after {
+.is-scrollable :deep(.sticky-col-left-second::after) {
   content: '';
   position: absolute;
   top: 0;
@@ -1069,7 +1117,7 @@ tbody tr:hover .sticky-col {
 }
 
 /* 操作列左侧阴影 */
-.is-scrollable .sticky-col-right::before {
+.is-scrollable :deep(.sticky-col-right::before) {
   content: '';
   position: absolute;
   top: 0;
@@ -1082,12 +1130,12 @@ tbody tr:hover .sticky-col {
 }
 
 /* 暗色模式阴影 */
-.dark .is-scrollable .sticky-col-left::after,
-.dark .is-scrollable .sticky-col-left-second::after {
+.dark .is-scrollable :deep(.sticky-col-left::after),
+.dark .is-scrollable :deep(.sticky-col-left-second::after) {
   background: linear-gradient(to right, rgba(0, 0, 0, 0.2), transparent);
 }
 
-.dark .is-scrollable .sticky-col-right::before {
+.dark .is-scrollable :deep(.sticky-col-right::before) {
   background: linear-gradient(to left, rgba(0, 0, 0, 0.2), transparent);
 }
 </style>

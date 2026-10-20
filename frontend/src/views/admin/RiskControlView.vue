@@ -2459,6 +2459,7 @@ function formatNumber(value: number): string {
 onMounted(() => {
   void loadAll()
   statusTimer = window.setInterval(() => {
+    if (document.hidden) return
     void loadStatus(true)
   }, 15000)
 })

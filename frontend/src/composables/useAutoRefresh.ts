@@ -48,6 +48,8 @@ export function useAutoRefresh(options: UseAutoRefreshOptions) {
 
   async function tick() {
     if (!enabled.value) return
+    // 页面在后台时冻结倒计时，不发请求；回到前台后按剩余倒计时继续
+    if (typeof document !== 'undefined' && document.hidden) return
     if (shouldPause?.()) return
     if (fetching.value) return
 

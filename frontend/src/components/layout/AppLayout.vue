@@ -15,26 +15,32 @@
       <AppHeader />
 
       <!-- Main Content -->
-      <main class="p-4 md:p-6 lg:p-8">
+      <main ref="mainRef" class="p-4 md:p-6 lg:p-8">
         <slot />
       </main>
     </div>
+
+    <CommandPalette />
   </div>
 </template>
 
 <script setup lang="ts">
 import '@/styles/onboarding.css'
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores'
 import { useAuthStore } from '@/stores/auth'
 import { useOnboardingTour } from '@/composables/useOnboardingTour'
 import { useOnboardingStore } from '@/stores/onboarding'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
+import CommandPalette from './CommandPalette.vue'
+import { usePageEntrance } from '@/composables/usePageEntrance'
 
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
+const mainRef = ref<HTMLElement | null>(null)
+usePageEntrance(mainRef)
 const isAdmin = computed(() => authStore.user?.role === 'admin')
 
 const { replayTour } = useOnboardingTour({

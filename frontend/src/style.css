@@ -73,7 +73,7 @@
   .btn {
     @apply inline-flex items-center justify-center gap-2;
     @apply rounded-xl px-4 py-2.5 text-sm font-medium;
-    @apply transition-all duration-200 ease-out;
+    @apply transition-[color,background-color,border-color,box-shadow,transform,opacity] duration-150 ease-out;
     @apply focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:ring-offset-2;
     @apply disabled:transform-none disabled:cursor-not-allowed disabled:opacity-50;
     @apply active:scale-[0.98];
@@ -170,7 +170,7 @@
     @apply border border-gray-200 dark:border-dark-600;
     @apply text-gray-900 dark:text-gray-100;
     @apply placeholder:text-gray-400 dark:placeholder:text-dark-400;
-    @apply transition-all duration-200;
+    @apply transition-[border-color,box-shadow,background-color] duration-150;
     @apply focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30;
     @apply disabled:cursor-not-allowed disabled:bg-gray-100 dark:disabled:bg-dark-900;
   }
@@ -211,8 +211,10 @@
   }
 
   /* ============ 玻璃效果 ============ */
+  /* 吸顶栏等大面积半透明层不用 backdrop-filter：内容在其下滚动时每帧都要重新模糊，
+     改为更高不透明度，视觉分层基本一致 */
   .glass {
-    @apply bg-white/80 backdrop-blur-xl dark:bg-dark-800/80;
+    @apply bg-white/95 dark:bg-dark-800/95;
   }
 
   .glass-card {
@@ -221,7 +223,7 @@
     @apply rounded-2xl;
     @apply border border-white/20 dark:border-dark-700/50;
     @apply shadow-glass;
-    @apply transition-all duration-300;
+    @apply transition-[transform,border-color] duration-200;
   }
 
   /* ============ 卡片样式 ============ */
@@ -230,11 +232,12 @@
     @apply rounded-2xl;
     @apply border border-gray-100 dark:border-dark-700/50;
     @apply shadow-card;
-    @apply transition-all duration-300;
+    @apply transition-[transform,border-color] duration-200 ease-out;
   }
 
+  /* 悬停阴影由 styles/motion.css 的 ::after 绘制，只过渡其 opacity */
   .card-hover {
-    @apply hover:-translate-y-0.5 hover:shadow-card-hover;
+    @apply hover:-translate-y-0.5;
     @apply hover:border-gray-200 dark:hover:border-dark-600;
   }
 
@@ -390,7 +393,8 @@
   /* ============ 模态框 ============ */
   .modal-overlay {
     @apply fixed inset-0 z-50;
-    @apply bg-black/50 backdrop-blur-sm;
+    /* 遮罩不做毛玻璃：模糊整页背景会让弹窗内滚动掉到 30 多帧 */
+    @apply bg-black/55;
     @apply flex items-center justify-center p-2 sm:p-4;
   }
 
@@ -432,12 +436,15 @@
     overflow: hidden;
   }
 
+  /* 弹窗进出场（时长与缓动见 styles/motion.css）。
+     遮罩的进场时长不短于面板：Vue 以根元素（遮罩）的过渡时长判断结束，
+     遮罩更短会提前移除 enter-active，面板动画被截断。 */
   .modal-enter-active {
-    transition: opacity 250ms ease-out;
+    transition: opacity 320ms var(--ease-out-soft);
   }
 
   .modal-leave-active {
-    transition: opacity 200ms ease-in;
+    transition: opacity var(--motion-exit) var(--ease-in);
   }
 
   .modal-enter-from,
@@ -446,38 +453,31 @@
   }
 
   .modal-enter-active .modal-content {
-    transition: transform 250ms ease-out, opacity 250ms ease-out;
+    transition:
+      transform 320ms var(--ease-emphasized),
+      opacity var(--motion-base) var(--ease-out-soft);
   }
 
   .modal-leave-active .modal-content {
-    transition: transform 200ms ease-in, opacity 200ms ease-in;
+    transition:
+      transform var(--motion-exit) var(--ease-in),
+      opacity var(--motion-exit) var(--ease-in);
   }
 
-  .modal-enter-from .modal-content,
+  .modal-enter-from .modal-content {
+    transform: translate3d(0, 12px, 0) scale(0.97);
+    opacity: 0;
+  }
+
   .modal-leave-to .modal-content {
-    transform: scale(0.95);
+    transform: translate3d(0, 6px, 0) scale(0.985);
     opacity: 0;
   }
 
   .modal-enter-to .modal-content,
   .modal-leave-from .modal-content {
-    transform: scale(1);
+    transform: none;
     opacity: 1;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .modal-enter-active,
-    .modal-leave-active,
-    .modal-enter-active .modal-content,
-    .modal-leave-active .modal-content {
-      transition-duration: 1ms;
-      transition-delay: 0ms;
-    }
-
-    .modal-enter-from .modal-content,
-    .modal-leave-to .modal-content {
-      transform: none;
-    }
   }
 
   /* ============ Dialog ============ */
@@ -564,9 +564,12 @@
     @apply overflow-hidden;
     @apply text-sm font-medium;
     @apply text-gray-600 dark:text-dark-300;
-    @apply transition-all duration-200;
     @apply hover:bg-gray-100 dark:hover:bg-dark-800;
     @apply hover:text-gray-900 dark:hover:text-white;
+    /* 列出具体属性，不用 transition-all：保留收起侧栏时的内边距过渡，其余属性不做动画 */
+    transition-property: color, background-color, padding, gap;
+    transition-duration: 200ms;
+    transition-timing-function: var(--ease-out-soft);
     padding-left: 1.0625rem;
     padding-right: 0.875rem;
   }
@@ -643,7 +646,7 @@
   .tab {
     @apply rounded-lg px-4 py-2 text-sm font-medium;
     @apply text-gray-600 dark:text-dark-400;
-    @apply transition-all duration-200;
+    @apply transition-[color,background-color,box-shadow] duration-150;
     @apply hover:text-gray-900 dark:hover:text-white;
   }
 
@@ -660,7 +663,7 @@
 
   .progress-bar {
     @apply h-full bg-gradient-to-r from-primary-500 to-primary-400;
-    @apply transition-all duration-300;
+    @apply transition-[width] duration-300;
   }
 
   /* ============ 开关 ============ */
@@ -753,9 +756,9 @@
     @apply bg-gradient-to-r from-primary-500 to-accent-500 bg-clip-text text-transparent;
   }
 
-  /* 玻璃效果 */
+  /* 玻璃效果（不使用 backdrop-filter，见 components 层同名说明） */
   .glass {
-    @apply bg-white/80 backdrop-blur-xl dark:bg-dark-800/80;
+    @apply bg-white/95 dark:bg-dark-800/95;
   }
 
   /* 隐藏滚动条 */

@@ -30,7 +30,8 @@
     </div>
 
     <!-- Navigation -->
-    <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide">
+    <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide relative">
+      <span ref="activeIndicatorRef" class="sidebar-active-indicator" aria-hidden="true"></span>
       <!-- Admin View: Admin menu first, then personal menu -->
       <template v-if="isAdmin">
         <!-- Admin Section -->
@@ -189,6 +190,8 @@
 
 <script setup lang="ts">
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useSidebarActiveIndicator } from '@/composables/useSidebarActiveIndicator'
+import { flattenNav, registerCommandEntries } from '@/composables/useCommandPalette'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
@@ -250,6 +253,7 @@ const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const mobileOpen = computed(() => appStore.mobileOpen)
 const isAdmin = computed(() => authStore.isAdmin)
 const sidebarNavRef = ref<HTMLElement | null>(null)
+const activeIndicatorRef = ref<HTMLElement | null>(null)
 const isDark = ref(document.documentElement.classList.contains('dark'))
 
 const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
@@ -259,6 +263,11 @@ const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboar
 // a chevron click records the user's choice, which wins over the automatic
 // state so an active group can still be collapsed manually.
 const groupExpandOverrides = ref<Map<string, boolean>>(new Map())
+useSidebarActiveIndicator(sidebarNavRef, activeIndicatorRef, [
+  () => route.path,
+  () => sidebarCollapsed.value,
+  () => [...groupExpandOverrides.value.entries()].join('|')
+])
 
 // Site settings from appStore (cached, no flicker)
 const siteName = computed(() => appStore.siteName)
@@ -874,6 +883,19 @@ const adminNavItems = computed((): NavItem[] => {
     visible.push({ path: `/custom/${cm.id}`, label: cm.label, icon: null, iconSvg: cm.icon_svg })
   }
   return visible
+})
+
+// 命令面板（Ctrl/⌘K）的页面清单直接取侧栏当前可见的菜单，权限与功能开关只维护一处
+registerCommandEntries(() => {
+  if (isAdmin.value) {
+    const list = flattenNav(adminNavItems.value)
+    if (!authStore.isSimpleMode) {
+      const seen = new Set(list.map((entry) => entry.path))
+      list.push(...flattenNav(personalNavItems.value, t('nav.myAccount')).filter((entry) => !seen.has(entry.path)))
+    }
+    return list
+  }
+  return appStore.backendModeEnabled ? [] : flattenNav(userNavItems.value)
 })
 
 function toggleSidebar() {

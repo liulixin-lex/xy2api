@@ -2,6 +2,10 @@
 export default {
   content: ['./index.html', './src/**/*.{vue,js,ts,jsx,tsx}'],
   darkMode: 'class',
+  // hover: 变体只在支持悬停的设备上生效，触屏点按后不会残留悬停样式
+  future: {
+    hoverOnlyWhenSupported: true
+  },
   theme: {
     extend: {
       colors: {

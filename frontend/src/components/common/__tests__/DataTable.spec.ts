@@ -357,4 +357,34 @@ describe('DataTable', () => {
 
     expect(wrapper.emitted('update:selectedKeys')?.at(-1)?.[0]).toEqual([99, 1, 2])
   })
+
+  it('lets mobile users pick a sort field and flip the order', async () => {
+    stubMobileMatchMedia()
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [
+          { key: 'name', label: 'Name', sortable: true },
+          { key: 'count', label: 'Count', sortable: true },
+          { key: 'note', label: 'Note' }
+        ],
+        data: [
+          { id: 1, name: 'B', count: 2 },
+          { id: 2, name: 'A', count: 3 },
+          { id: 3, name: 'C', count: 1 }
+        ],
+        rowKey: 'id',
+        serverSideSort: true
+      }
+    })
+
+    const select = wrapper.get('[data-test="mobile-sort-key"]')
+    expect(select.findAll('option:not([disabled])').map((option) => option.text())).toEqual(['Name', 'Count'])
+    expect(wrapper.find('[data-test="mobile-sort-order"]').exists()).toBe(false)
+
+    await select.setValue('count')
+    expect(wrapper.emitted('sort')?.at(-1)).toEqual(['count', 'asc'])
+
+    await wrapper.get('[data-test="mobile-sort-order"]').trigger('click')
+    expect(wrapper.emitted('sort')?.at(-1)).toEqual(['count', 'desc'])
+  })
 })

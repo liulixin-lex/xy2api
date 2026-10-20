@@ -48,4 +48,25 @@ describe('admin settings fetch retry', () => {
     expect(mocks.getSettings).toHaveBeenCalledTimes(1)
     expect(mocks.getConfig).toHaveBeenCalledTimes(1)
   })
+
+  it('lets concurrent callers share one in-flight request and wait for its data', async () => {
+    const store = useAdminSettingsStore()
+    const first = store.fetch()
+    const second = store.fetch()
+    await second
+    expect(store.loaded).toBe(true)
+    expect(store.customMenuItems).toEqual([{ id: 'custom', title: 'Custom' }])
+    await first
+    expect(mocks.getSettings).toHaveBeenCalledTimes(1)
+  })
+
+  it('refetches after the in-flight request when a forced refresh arrives mid-request', async () => {
+    const store = useAdminSettingsStore()
+    const first = store.fetch()
+    mocks.getSettings.mockResolvedValueOnce({ custom_menu_items: [{ id: 'saved', title: 'Saved' }] })
+    await store.fetch(true)
+    await first
+    expect(mocks.getSettings).toHaveBeenCalledTimes(2)
+    expect(store.customMenuItems).toEqual([{ id: 'saved', title: 'Saved' }])
+  })
 })

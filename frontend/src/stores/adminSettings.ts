@@ -62,10 +62,23 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
   const paymentEnabled = ref(readCachedBool('payment_enabled_cached', false))
   const customMenuItems = ref<CustomMenuItem[]>([])
 
-  async function fetch(force = false): Promise<void> {
-    if (loaded.value && !force) return
-    if (loading.value) return
+  // 侧栏、运维页、用量页会在同一时刻各自调用 fetch：共享进行中的请求，
+  // 让后到的调用方也能等到数据，而不是立即返回默认值或重复请求。
+  let inflight: Promise<void> | null = null
 
+  function fetch(force = false): Promise<void> {
+    if (loaded.value && !force) return Promise.resolve()
+    if (inflight) {
+      // 强制刷新（例如保存设置后）不能复用保存前发出的请求
+      return force ? inflight.then(() => fetch(true)) : inflight
+    }
+    inflight = load().finally(() => {
+      inflight = null
+    })
+    return inflight
+  }
+
+  async function load(): Promise<void> {
     loading.value = true
     const usageMetricsReadRevision = usageMetricsRevision
     try {
