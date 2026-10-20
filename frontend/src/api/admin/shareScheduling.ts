@@ -21,7 +21,7 @@ export interface ShareGroupSummary {
   platform: string
   /** A stored `shadow` reads as `sub2api`. */
   scheduler: ShareScheduler
-  /** True when the group has no policy yet. */
+  /** Session keeping; true for a group without a policy. */
   session_keep: boolean
   /** The stored scheduler was the retired shadow mode. */
   legacy_shadow: boolean
@@ -275,7 +275,7 @@ export interface ShareReportDetails {
   cache_classes: Record<string, { requests: number; tokens: number }>
   /** The rest is share mode only. */
   reasons?: Record<string, number> | null
-  waits?: { count: number; hit: number; avg_ms: number } | null
+  waits?: { count: number; hit: number; avg_ms: number | null } | null
   attempts?: number | null
   share_requests?: number | null
   /**

@@ -252,6 +252,17 @@ describe('share scheduling page', () => {
     expect(w.get('[data-testid="share-attention"]').text()).not.toContain('gamma')
   })
 
+  it('shows a zero actual share as 0% and only a missing one as a dash', async () => {
+    api.getPolicy.mockImplementation(async (id: number) => shareView(id, {
+      scheduler: 'share',
+      members: [shareMember(1, { actual_share_1h: 0 }), shareMember(2, { actual_share_1h: null })]
+    }))
+    const w = mountView()
+    await flushPromises()
+    expect(w.get('[data-testid="share-actual-1"]').text()).toBe('0.0%')
+    expect(w.get('[data-testid="share-actual-2"]').text()).toBe('—')
+  })
+
   it('explains an unset load factor on hover and in the empty editor', async () => {
     const w = mountView()
     await flushPromises()
