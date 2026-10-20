@@ -7,8 +7,8 @@
       </div>
 
       <template v-else-if="stats">
-        <!-- Row 1: Core Stats -->
-        <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <!-- Row 1: Core Stats（首次加载完成时才插入，入场只播放一次） -->
+        <div class="motion-enter grid grid-cols-2 gap-4 lg:grid-cols-4">
           <!-- Total API Keys -->
           <div class="card p-4">
             <div class="flex items-center gap-3">
@@ -20,7 +20,7 @@
                   {{ t('admin.dashboard.apiKeys') }}
                 </p>
                 <p class="text-xl font-bold text-gray-900 dark:text-white">
-                  {{ stats.total_api_keys }}
+                  <AnimatedNumber :value="stats.total_api_keys" />
                 </p>
                 <p class="text-xs text-green-600 dark:text-green-400">
                   {{ stats.active_api_keys }} {{ t('common.active') }}
@@ -40,7 +40,7 @@
                   {{ t('admin.dashboard.accounts') }}
                 </p>
                 <p class="text-xl font-bold text-gray-900 dark:text-white">
-                  {{ stats.total_accounts }}
+                  <AnimatedNumber :value="stats.total_accounts" />
                 </p>
                 <p class="text-xs">
                   <span class="text-green-600 dark:text-green-400"
@@ -65,7 +65,7 @@
                   {{ t('admin.dashboard.todayRequests') }}
                 </p>
                 <p class="text-xl font-bold text-gray-900 dark:text-white">
-                  {{ stats.today_requests }}
+                  <AnimatedNumber :value="stats.today_requests" />
                 </p>
                 <p class="text-xs text-gray-500 dark:text-gray-400">
                   {{ t('common.total') }}: {{ formatNumber(stats.total_requests) }}
@@ -85,7 +85,7 @@
                   {{ t('admin.dashboard.users') }}
                 </p>
                 <p class="text-xl font-bold text-emerald-600 dark:text-emerald-400">
-                  +{{ stats.today_new_users }}
+                  +<AnimatedNumber :value="stats.today_new_users" />
                 </p>
                 <p class="text-xs text-gray-500 dark:text-gray-400">
                   {{ t('common.total') }}: {{ formatNumber(stats.total_users) }}
@@ -96,7 +96,7 @@
         </div>
 
         <!-- Row 2: Token Stats -->
-        <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div class="motion-enter grid grid-cols-2 gap-4 lg:grid-cols-4" style="--enter-index: 1">
           <!-- Today Tokens -->
           <div class="card p-4">
             <div class="flex items-center gap-3">
@@ -108,7 +108,7 @@
                   {{ t('admin.dashboard.todayTokens') }}
                 </p>
                 <p class="text-xl font-bold text-gray-900 dark:text-white">
-                  {{ formatTokens(stats.today_tokens) }}
+                  <AnimatedNumber :value="stats.today_tokens ?? 0" :format="formatTokens" />
                 </p>
                 <p class="text-xs">
                   <span
@@ -144,7 +144,7 @@
                   {{ t('admin.dashboard.totalTokens') }}
                 </p>
                 <p class="text-xl font-bold text-gray-900 dark:text-white">
-                  {{ formatTokens(stats.total_tokens) }}
+                  <AnimatedNumber :value="stats.total_tokens ?? 0" :format="formatTokens" />
                 </p>
                 <p class="text-xs">
                   <span
@@ -217,7 +217,7 @@
         </div>
 
         <!-- Quick Actions -->
-        <div class="card p-4">
+        <div class="motion-enter card p-4" style="--enter-index: 2">
           <div class="mb-3 flex items-center justify-between">
             <h2 class="text-sm font-semibold text-gray-900 dark:text-white">
               {{ t('admin.dashboard.quickActions') }}
@@ -265,7 +265,7 @@
         </div>
 
         <!-- Charts Section -->
-        <div class="space-y-6">
+        <div class="motion-enter space-y-6" style="--enter-index: 3">
           <!-- Date Range Filter -->
           <div class="card p-4">
             <div class="flex flex-wrap items-center gap-4">
@@ -364,6 +364,7 @@ import type {
 } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import AnimatedNumber from '@/components/common/AnimatedNumber.vue'
 import Icon from '@/components/icons/Icon.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Select from '@/components/common/Select.vue'

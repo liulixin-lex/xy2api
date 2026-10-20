@@ -23,6 +23,20 @@
 
       <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
       <div class="flex min-w-0 items-center gap-1 sm:gap-3">
+        <!-- Page search (Ctrl/⌘K) -->
+        <button
+          type="button"
+          class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          :title="`${t('commandPalette.open')} (${commandShortcut})`"
+          :aria-label="t('commandPalette.open')"
+          aria-haspopup="dialog"
+          data-test="open-command-palette"
+          @click="openPalette"
+        >
+          <Icon name="search" size="sm" />
+          <kbd class="hidden rounded border border-gray-200 px-1.5 text-[11px] font-medium leading-5 dark:border-dark-600 xl:inline">{{ commandShortcut }}</kbd>
+        </button>
+
         <!-- Announcement Bell -->
         <AnnouncementBell v-if="user" />
 
@@ -165,6 +179,34 @@
                   {{ t('nav.apiKeys') }}
                 </router-link>
 
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  class="dropdown-item w-full justify-between disabled:cursor-default disabled:opacity-70"
+                  :aria-checked="reducedMotion ? 'true' : 'false'"
+                  :disabled="systemReducedMotion"
+                  :title="systemReducedMotion ? t('nav.reduceMotionSystem') : undefined"
+                  data-test="toggle-reduce-motion"
+                  @click="toggleReducedMotion"
+                >
+                  <span class="flex items-center gap-2">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h4.5m3 0h9M3.75 6.75h9m3 0h4.5M3.75 17.25h1.5m3 0h12" />
+                    </svg>
+                    {{ t('nav.reduceMotion') }}
+                  </span>
+                  <span
+                    class="relative inline-flex h-4 w-7 flex-shrink-0 items-center rounded-full transition-colors duration-150"
+                    :class="reducedMotion ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600'"
+                    aria-hidden="true"
+                  >
+                    <span
+                      class="absolute left-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-150"
+                      :class="reducedMotion ? 'translate-x-3' : 'translate-x-0'"
+                    ></span>
+                  </span>
+                </button>
+
                 <a
                   v-if="authStore.isAdmin"
                   href="https://github.com/liulixin-lex/xy2api"
@@ -262,6 +304,8 @@ import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMi
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'
+import { useMotionPreference } from '@/composables/useMotionPreference'
+import { useCommandPalette } from '@/composables/useCommandPalette'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
 import { resolveRouteMetaKeys } from '@/router/title'
 import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
@@ -269,6 +313,14 @@ import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
+const {
+  reducedMotion,
+  systemReduced: systemReducedMotion,
+  toggleReduced: toggleReducedMotion
+} = useMotionPreference()
+const { openPalette } = useCommandPalette()
+const commandShortcut =
+  typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent) ? '⌘K' : 'Ctrl K'
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const adminSettingsStore = useAdminSettingsStore()

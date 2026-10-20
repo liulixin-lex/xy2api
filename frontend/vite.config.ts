@@ -144,6 +144,29 @@ export default defineConfig(({ mode }) => {
               return 'vendor-stripe'
             }
 
+            // 以下库只在部分页面使用，单独成包，避免被并入首屏必载的 vendor-misc。
+            if (id.includes('/@airwallex/')) {
+              return 'vendor-airwallex'
+            }
+            if (id.includes('/qrcode/') || id.includes('/dijkstrajs/')) {
+              return 'vendor-qrcode'
+            }
+            if (id.includes('/vue-draggable-plus/') || id.includes('/sortablejs/')) {
+              return 'vendor-draggable'
+            }
+            if (id.includes('/driver.js/')) {
+              return 'vendor-driver'
+            }
+            if (id.includes('/marked/') || id.includes('/dompurify/')) {
+              return 'vendor-markdown'
+            }
+            if (id.includes('/@tanstack/')) {
+              return 'vendor-virtual'
+            }
+            if (id.includes('/@kurkle/color/')) {
+              return 'vendor-chart'
+            }
+
             // 其他小型第三方库合并
             return 'vendor-misc'
           }

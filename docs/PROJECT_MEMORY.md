@@ -22,6 +22,32 @@
 - 工具链：Go 以 `backend/go.mod` 为准（当前 1.27.2）；golangci-lint v2.14.0（与 CI 同版）。
 - 文档一致性：`python3 tools/check_docs_consistency.py`（CI 的 upstream-sync-audit 作业执行），规则在 `tools/docs_consistency.json`，改动时按 [`AGENTS.md`](../AGENTS.md)“变更同步”同步文档。
 
+### 前端交互流畅度与动效优化（2026-10-20T03:10Z；PR #112 待合并；未发版、未部署）
+
+- 分支：`feat/frontend-ux-20261019`（自 main `0320d4e68`，已合入 main `50055270f`，即 0.4.2 与 #105、#107、#108）。用户授权后已推送并开 [PR #112](https://github.com/liulixin-lex/xy2api/pull/112)；合并、发版、部署需另行授权。
+- 范围：只改了 `frontend/` 和文档，没有改后端，也没有改迁移。
+  - 新文档 [`FRONTEND_UX.md`](FRONTEND_UX.md) 记录了以下约定：性能约定、动效变量与“减少动画”、命令面板、标签键盘操作、手机端排序、乐观开关，以及上游同步时要保留的改动（`BaseDialog.vue` 的 `appear`）。
+- 验证：lint、typecheck、全量 vitest（395 个文件、3080 个用例）、`pnpm run build`（含 `check:i18n`）全部通过。在提交后的临时克隆里，`check_docs_consistency.py` 和 `sync.py audit` 也都通过。
+- 实测：CPU 降速 4 倍，模拟接口；对比对象是 main 构建。
+
+  | 指标 | 改动前 | 改动后 |
+  |---|---|---|
+  | 冷启动 JS | 859KB | 580KB |
+  | 9 条路由就绪合计 | 6517ms | 5798ms |
+  | 账号页首开 | 936ms | 588ms |
+  | 账号页滚动 | 9.8 FPS | 27 FPS |
+  | 弹窗内滚动 | 34.7 FPS | 60 FPS |
+
+  冷启动 LCP 持平，为 1252ms → 1220ms。
+- 未达标与代价：
+  - 账号页滚动没达到 50 FPS 的目标。剩余开销主要在新行挂载时单元格里的 `t()` 和格式化。
+  - 首次进分组页慢约 70ms，因为拖拽库改为按需加载。
+  - 新建账号弹窗首次打开慢约 20ms，因为弹窗改为按需挂载。
+- 有意没做：
+  - 列表页 KeepAlive：各页注册了监听和轮询，缓存后的停启需要逐页改。
+  - 背景氛围层。
+  - 合规确认弹窗的按需加载：它是合规关口，保持静态引入。
+
 ### 账号分组选择显示专属标签（2026-10-19T14:10Z；PR 待另一位作者合并；未发版、未部署）
 
 - 用户要求（2026-10-19）：账号管理“编辑账号”选择分组时，专属分组在选项处显示紫色文字标签。
@@ -103,7 +129,9 @@
 
 ## 进行中的工作
 
-- 暂无（0.4.1 已发布，遗留事项见“当前交接状态”；账号分组选择专属标签的 PR 待合并，见同名小节）。
+- `20261019-frontend-ux`（2026-10-19 登记）：前端交互流畅度与动效优化。分支 `feat/frontend-ux-20261019`（自 main `0320d4e68`，独立 clone）。用户要求在本次对话内一次执行完整方案：先修性能（弹窗毛玻璃、表格行高测量、弹窗按需加载与预取、输入与 `:key`、请求去重、轮询暂停、拆包、chunk 失败恢复、列表页缓存），再做动效系统（时长与缓动变量、减少动画双通道与用户开关、区块入场、弹窗进出场、选中滑块、数字滚动、悬停反馈、加载过渡），最后做交互增强（Ctrl/⌘K 命令面板、Tabs 键盘、移动端筛选折叠与排序、开关乐观更新）。参考与实测依据来自 31 个 Sub2API 二开仓库的基准测试（仓库外报告）。范围只限 `frontend/` 与相关文档；不改后端、不推送、不开 PR，提交需用户授权。
+  - 2026-10-20T03:10Z 状态：已推送，PR #112 待合并（用户授权提交、推送与开 PR）。结果见“当前交接状态”和操作日志；合并后按“归档”规则移走本条和对应小节。
+
 
 ### 20261019-group-fast-priority — PR #105 已交付，待审阅
 
@@ -653,3 +681,70 @@ pnpm --dir frontend run build
 - 验证：后端 gofmt、`go vet`（默认、`unit`、`integration`）、golangci-lint 0 issues；service 与 handler 新单测通过；仓储查询在本机临时 PostgreSQL 18（应用全部迁移）上验证，并与错误请求页 `ListErrorLogs` 同条件的总数对照一致（3 条，含 cyber_policy、不含已恢复记录），临时实例已删除；`go test -tags=unit` 覆盖 service、handler、server、repository 通过（service 包的一次偶发失败见下条）。前端 typecheck、`lint:check`、`check:i18n` 通过，vitest 全量 394 个文件、3073 个用例通过；新页面用例在旧代码上确认会失败。Vite 临时预览页加无头 Chrome 截图核对状态单元格（正常、无数据、慢首字橙色、限流中带倒计时等），临时文件已删除。`check_docs_consistency.py`、`tools/tests`、`scheduler-diff` 通过，`sync.py audit` 在提交后的干净树上运行。
 - 卡点/风险：service 包第一次整包运行时，与前端全量测试、Vite 同时进行，`TestInflightEstimate_AccountMappingNoDBAndBoundedMemory`（计费在途估算的堆增长上限 8 MiB）测得 9.9 MiB 失败；该用例与本次改动无关，单独连跑 5 次均通过，service 包单独整包重跑也全部通过。仓储集成测试以 CI 为准。
 - 下一步：PR 检查全绿后交另一位作者合并（#108 之后）。
+
+### 2026-10-20T02:46Z — 20261019-frontend-ux — 本地完成，待授权提交
+
+- 请求/目标：拉取最新 xy2api，在本次对话内一次执行完整的前端优化方案，分三步：
+  1. 先修性能；
+  2. 再做动效系统；
+  3. 最后做交互增强。
+- 开始状态：分支 `feat/frontend-ux-20261019`，自 main `0320d4e68`（VERSION 0.4.1）；独立 clone，工作树干净。
+- 完成操作：
+  - **性能**
+    - 表格：去掉 `<table>`/`<tbody>` 上的 `divide-y`。这类兄弟选择器让虚拟滚动每插入一行都要重算整个 tbody 的样式，Performance trace 定位到了这个问题。
+    - 桌面表格改为逐行渲染的 `DataTableRow.ts`。行高测量只读 ResizeObserver 的结果。
+    - 账号页 13 个弹窗改为按需加载加按需挂载，新建和编辑弹窗在页面空闲时预取。
+    - 新增 chunk 加载失败自动恢复（`router.onError`、`vite:preloadError`、异步组件），10 秒内不重复刷新。
+    - 去掉大面积毛玻璃，`transition-all` 都换成只过渡实际会变的属性。
+    - `Intl` 实例改为缓存复用；`adminSettings.fetch` 的并发调用合并为一个请求。
+    - 页面在后台时，5 处轮询跳过本轮。
+    - 拆出 7 个按需加载的依赖分块。
+  - **动效**
+    - `styles/motion.css` 统一定义时长与缓动变量。
+    - 减少动画有两条途径：系统设置，或右上角头像菜单里的开关（`useMotionPreference`）。
+    - 页面区块入场（`usePageEntrance`）；弹窗进出场，`BaseDialog` 加了 `appear`。
+    - 侧栏指示条在切换页面时滑到新位置。
+    - 卡片悬停的阴影改由伪元素承担，只过渡透明度。
+    - 仪表盘数字首次显示时滚动到目标值（`AnimatedNumber`），数据插入后区块入场一次。用户仪表盘刷新时不再整页显示加载转圈。
+    - 最终复测发现，入场从透明度 0 开始时，Chromium 要等动画结束才记 LCP，冷启动因此晚了约 500ms。改为从 0.4 起步后恢复。
+  - **交互**
+    - Ctrl/⌘K 命令面板：页面清单取自侧栏，用 combobox/listbox 的 ARIA；其他弹窗打开时不响应快捷键。
+    - `v-roving-tabs` 指令为 7 处标签栏补上方向键、Home/End 操作。
+    - 手机端 DataTable 加了排序栏。
+    - 账号“可调度”开关改为乐观更新：失败时回滚，请求期间返回的列表沿用提交中的值。手机端筛选折叠上游已有，没有重做。
+- 修改文件：
+  - `frontend/src` 下 42 个已跟踪文件被修改，另新增 17 个文件，主要有：
+    - 组件与 composable：`DataTableRow.ts`、`AnimatedNumber.vue`、`CommandPalette.vue`；`useLazyMount`、`useMotionPreference`、`usePageEntrance`、`useSidebarActiveIndicator`、`useCommandPalette`
+    - 工具与样式：`chunkLoadError.ts`、`rovingTabs.ts`、`styles/motion.css`
+    - 以上相应的测试
+  - 配置：`tailwind.config.js`、`vite.config.ts`。
+  - 文档：新增 `docs/FRONTEND_UX.md`，并登记到 `docs/README.md` 和 `.gitignore` 白名单；更新本文件。
+- 验证：
+  - `pnpm run lint:check`、`typecheck` 通过。
+  - `test:run` 395 个文件、3080 个用例通过。
+  - `pnpm run build`（含 `check:i18n` 与 `vue-tsc -b`）通过，构建产物目录已删除。
+  - 在提交后的临时克隆里，`check_docs_consistency.py` 和 `sync.py audit` 通过。
+  - 仓库外基准：CPU 降速 4 倍、模拟接口、每组 3 轮，结果见“当前交接状态”。
+  - 截图检查了以下内容：亮色和暗色表格的分隔线与固定列、弹窗、命令面板、手机端排序栏、仪表盘；控制台无报错。
+- 卡点/风险：
+  - 账号页滚动 27 FPS，没达到 50 FPS。
+  - 分组页首次进入和新建账号弹窗首开略慢，原因见交接状态。
+  - `BaseDialog.vue` 属于 `manual_merge`，下次同步上游时要保留 `appear`。
+- 下一步：用户授权后提交并开 PR；合并后按“归档”规则移走本任务的交接小节和进行中条目。若要继续提升账号页滚动，可考虑行内文案预先计算或单元格懒渲染。
+
+### 2026-10-20T03:10Z — 20261019-frontend-ux — 推送并开 PR #112
+
+- 请求/目标：用户授权推送并开 PR。
+- 开始状态：分支 `feat/frontend-ux-20261019` 有本地提交 `3a1aa3831`（前端）和 `059a19766`（文档）；此时 main 已前进到 `50055270f`（0.4.2，含 #105、#107、#108）。
+- 完成操作：
+  - 推送后开 [PR #112](https://github.com/liulixin-lex/xy2api/pull/112)。
+  - 把 main 合并进分支，解决两处冲突：
+    - `AccountsView.vue`：同时保留 `useLazyMount` 和 #108 的 `useColumnOrder` 引入。
+    - 本文件：两边条目都保留，操作日志按时间排序。
+- 修改文件：合并结果与本条。
+- 验证：
+  - 合并后 `lint:check`、`typecheck` 通过。
+  - `test:run` 398 个文件、3093 个用例通过。
+  - `check_docs_consistency.py`、`sync.py audit` 通过。
+- 卡点/风险：CI 的 `backend-security` 失败，与本 PR 无关。原因是 govulncheck 新收录了 excelize v2.11.0 的公告 GO-2026-6688，main 上的 `50055270f` 同样失败，需要另开任务升级依赖。
+- 下一步：等待审阅与合并；合并、发版、部署需用户另行授权。

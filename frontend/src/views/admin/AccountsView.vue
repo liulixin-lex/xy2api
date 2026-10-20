@@ -458,17 +458,18 @@
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
-    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
-    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
-    <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
-    <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
-    <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
-    <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
+    <CreateAccountModal v-if="createModalMounted" :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
+    <EditAccountModal v-if="editModalMounted" :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
+    <ReAuthAccountModal v-if="reAuthModalMounted" :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
+    <AccountTestModal v-if="testModalMounted" :show="showTest" :account="testingAcc" @close="closeTestModal" />
+    <AccountStatsModal v-if="statsModalMounted" :show="showStats" :account="statsAcc" @close="closeStatsModal" />
+    <ScheduledTestsPanel v-if="schedulePanelMounted" :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
     <IQCheckResultsModal v-if="iqRecordsAccount" :show="true" :account="iqRecordsAccount" @close="iqRecordsAccount = null" @updated="handleIQSummaryUpdated" />
     <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
-    <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
-    <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
+    <SyncFromCrsModal v-if="syncModalMounted" :show="showSync" @close="showSync = false" @synced="reload" />
+    <ImportDataModal v-if="importModalMounted" :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
+      v-if="bulkEditModalMounted"
       :show="showBulkEdit"
       :account-ids="selIds"
       :selected-platforms="selPlatforms"
@@ -479,7 +480,7 @@
       @close="showBulkEdit = false"
       @updated="handleBulkUpdated"
     />
-    <TempUnschedStatusModal :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @reset="handleTempUnschedReset" />
+    <TempUnschedStatusModal v-if="tempUnschedModalMounted" :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @reset="handleTempUnschedReset" />
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" :message="t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" :confirm-text="t('common.delete')" :cancel-text="t('common.cancel')" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
     <ConfirmDialog :show="showCreateShadowDialog" :title="t('admin.accounts.createSparkShadow')" :message="t('admin.accounts.createSparkShadowConfirm', { name: creatingShadowAcc?.name })" @confirm="confirmCreateSparkShadow" @cancel="showCreateShadowDialog = false" />
     <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="t('admin.accounts.dataExportConfirmMessage')" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
@@ -488,14 +489,14 @@
         <span>{{ t('admin.accounts.dataExportIncludeProxies') }}</span>
       </label>
     </ConfirmDialog>
-    <ErrorPassthroughRulesModal :show="showErrorPassthrough" @close="showErrorPassthrough = false" />
-    <TLSFingerprintProfilesModal :show="showTLSFingerprintProfiles" @close="showTLSFingerprintProfiles = false" />
+    <ErrorPassthroughRulesModal v-if="errorPassthroughModalMounted" :show="showErrorPassthrough" @close="showErrorPassthrough = false" />
+    <TLSFingerprintProfilesModal v-if="tlsProfilesModalMounted" :show="showTLSFingerprintProfiles" @close="showTLSFingerprintProfiles = false" />
     <TotpStepUpDialog :controller="accountExportStepUp" />
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch, defineAsyncComponent } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -504,6 +505,7 @@ import { adminAPI } from '@/api/admin'
 import { useTableLoader } from '@/composables/useTableLoader'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
+import { useLazyMount, prefetchWhenIdle, defineLazyComponent } from '@/composables/useLazyMount'
 import { useColumnOrder } from '@/composables/useColumnOrder'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
@@ -513,7 +515,6 @@ import DataTable from '@/components/common/DataTable.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrsModal, TempUnschedStatusModal } from '@/components/account'
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountColumnSettings from '@/components/admin/account/AccountColumnSettings.vue'
@@ -522,11 +523,6 @@ import type { AccountRecentHealth as AccountRecentHealthStats } from '@/api/admi
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import IQCheckCell from '@/components/account/IQCheckCell.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
-import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
-import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
-import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
-import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
-import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
@@ -537,8 +533,6 @@ import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCel
 import AccountPriorityCell from '@/components/account/AccountPriorityCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
-import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
-import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
 import { fetchAllAccountIds } from '@/utils/accountSelection'
 import { buildGrokUsageRefreshKey, buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
@@ -549,7 +543,23 @@ import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
 import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 
-const IQCheckResultsModal = defineAsyncComponent(() => import('@/components/admin/account/IQCheckResultsModal.vue'))
+const IQCheckResultsModal = defineLazyComponent(() => import('@/components/admin/account/IQCheckResultsModal.vue'))
+// 弹窗按需加载：新建/编辑账号等弹窗体量远大于列表本身，打包进页面 chunk 会拖慢账号页首开。
+// 首次打开才挂载（useLazyMount），页面空闲时预取最常用的新建/编辑弹窗。
+const loadCreateAccountModal = () => import('@/components/account/CreateAccountModal.vue')
+const loadEditAccountModal = () => import('@/components/account/EditAccountModal.vue')
+const CreateAccountModal = defineLazyComponent(loadCreateAccountModal)
+const EditAccountModal = defineLazyComponent(loadEditAccountModal)
+const BulkEditAccountModal = defineLazyComponent(() => import('@/components/account/BulkEditAccountModal.vue'))
+const SyncFromCrsModal = defineLazyComponent(() => import('@/components/account/SyncFromCrsModal.vue'))
+const TempUnschedStatusModal = defineLazyComponent(() => import('@/components/account/TempUnschedStatusModal.vue'))
+const ImportDataModal = defineLazyComponent(() => import('@/components/admin/account/ImportDataModal.vue'))
+const ReAuthAccountModal = defineLazyComponent(() => import('@/components/admin/account/ReAuthAccountModal.vue'))
+const AccountTestModal = defineLazyComponent(() => import('@/components/admin/account/AccountTestModal.vue'))
+const AccountStatsModal = defineLazyComponent(() => import('@/components/admin/account/AccountStatsModal.vue'))
+const ScheduledTestsPanel = defineLazyComponent(() => import('@/components/admin/account/ScheduledTestsPanel.vue'))
+const ErrorPassthroughRulesModal = defineLazyComponent(() => import('@/components/admin/ErrorPassthroughRulesModal.vue'))
+const TLSFingerprintProfilesModal = defineLazyComponent(() => import('@/components/admin/TLSFingerprintProfilesModal.vue'))
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
@@ -626,11 +636,25 @@ const reAuthAcc = ref<Account | null>(null)
 const testingAcc = ref<Account | null>(null)
 const statsAcc = ref<Account | null>(null)
 const showSchedulePanel = ref(false)
+const createModalMounted = useLazyMount(showCreate)
+const editModalMounted = useLazyMount(showEdit)
+const reAuthModalMounted = useLazyMount(showReAuth)
+const testModalMounted = useLazyMount(showTest)
+const statsModalMounted = useLazyMount(showStats)
+const schedulePanelMounted = useLazyMount(showSchedulePanel)
+const syncModalMounted = useLazyMount(showSync)
+const importModalMounted = useLazyMount(showImportData)
+const bulkEditModalMounted = useLazyMount(showBulkEdit)
+const tempUnschedModalMounted = useLazyMount(showTempUnsched)
+const errorPassthroughModalMounted = useLazyMount(showErrorPassthrough)
+const tlsProfilesModalMounted = useLazyMount(showTLSFingerprintProfiles)
 const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
 const togglingSchedulable = ref(new Set<number>())
 let schedulingMutationVersion = 0
 const confirmedSchedulingUpdates = new Map<number, { version: number; schedulable: boolean }>()
+// 单个开关乐观更新：点下去立即翻转，失败再恢复；请求期间返回的列表沿用正在提交的值，避免开关来回跳
+const pendingSchedulable = new Map<number, boolean>()
 const togglingIQCheck = ref(new Set<number>())
 const iqRecordsAccount = ref<Account | null>(null)
 const handleIQSummaryUpdated = (state: NonNullable<Account['iq_check']>) => {
@@ -1135,6 +1159,8 @@ const {
     const version = schedulingMutationVersion
     const result = await adminAPI.accounts.list(...args)
     return { ...result, items: result.items.map(account => {
+      const pending = pendingSchedulable.get(account.id)
+      if (pending !== undefined) return { ...account, schedulable: pending }
       const update = confirmedSchedulingUpdates.get(account.id)
       return update && update.version > version ? { ...account, schedulable: update.schedulable } : account
     }) }
@@ -2558,17 +2584,26 @@ const confirmCreateSparkShadow = async () => {
 }
 const handleDelete = (a: Account) => { deletingAcc.value = a; showDeleteDialog.value = true }
 const confirmDelete = async () => { if(!deletingAcc.value) return; try { await adminAPI.accounts.delete(deletingAcc.value.id); showDeleteDialog.value = false; deletingAcc.value = null; reload() } catch (error) { console.error('Failed to delete account:', error) } }
+const setSchedulableLocally = (accountId: number, schedulable: boolean) => {
+  accounts.value = accounts.value.map((account) => (account.id === accountId ? { ...account, schedulable } : account))
+}
 const handleToggleSchedulable = async (a: Account) => {
   if (togglingSchedulable.value.has(a.id)) return
-  const nextSchedulable = !a.schedulable
+  const previousSchedulable = a.schedulable
+  const nextSchedulable = !previousSchedulable
   togglingSchedulable.value.add(a.id)
   schedulingMutationVersion++
   enterAutoRefreshSilentWindow()
+  pendingSchedulable.set(a.id, nextSchedulable)
+  setSchedulableLocally(a.id, nextSchedulable)
   try {
     const updated = await adminAPI.accounts.setSchedulable(a.id, nextSchedulable)
+    pendingSchedulable.delete(a.id)
     updateSchedulableInList([a.id], updated?.schedulable ?? nextSchedulable)
     enterAutoRefreshSilentWindow()
   } catch (error) {
+    pendingSchedulable.delete(a.id)
+    setSchedulableLocally(a.id, previousSchedulable)
     console.error('Failed to toggle schedulable:', error)
     appStore.showError(t('admin.accounts.failedToToggleSchedulable'))
   } finally {
@@ -2686,9 +2721,13 @@ onMounted(async () => {
   } else {
     pauseAutoRefresh()
   }
+  cancelModalPrefetch = prefetchWhenIdle([loadCreateAccountModal, loadEditAccountModal], 3000)
 })
 
+let cancelModalPrefetch: (() => void) | null = null
+
 onUnmounted(() => {
+  cancelModalPrefetch?.()
   upstreamBillingRateAbortController?.abort()
   if (usageBatchFlushTimer !== null) {
     clearTimeout(usageBatchFlushTimer)

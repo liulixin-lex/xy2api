@@ -219,6 +219,7 @@ issues/
 !docs/STRIPE_HOSTED.md
 !docs/UPSTREAM_SYNC_V0214.md
 !docs/USAGE_EXPORTS.md
+!docs/FRONTEND_UX.md
 !docs/seedance-api.md
 !docs/third-party/
 !docs/third-party/**

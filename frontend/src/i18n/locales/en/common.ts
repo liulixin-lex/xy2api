@@ -38,6 +38,10 @@ export default {
     all: 'All',
     none: 'None',
     selectAll: 'Select all',
+    sortBy: 'Sort by',
+    sortPlaceholder: 'Choose a field',
+    sortAscending: 'Ascending, tap for descending',
+    sortDescending: 'Descending, tap for ascending',
     noData: 'No data',
     expand: 'Expand',
     collapse: 'Collapse',
@@ -116,6 +120,18 @@ export default {
     }
   },
 
+  commandPalette: {
+    open: 'Search pages',
+    title: 'Go to page',
+    placeholder: 'Type a page name, e.g. "accounts"',
+    results: 'Matching pages',
+    empty: 'No matching pages',
+    current: 'Current page',
+    hintMove: 'select',
+    hintOpen: 'open',
+    hintClose: 'close'
+  },
+
   adminCompliance: {
     title: 'Deployment and Operation Compliance Acknowledgment',
     blockingNotice: 'Deployment and operation compliance acknowledgment is required before continuing to use the console.',
@@ -192,6 +208,8 @@ export default {
     myAccount: 'My Account',
     lightMode: 'Light Mode',
     darkMode: 'Dark Mode',
+    reduceMotion: 'Reduce motion',
+    reduceMotionSystem: 'Reduce motion is on in your system settings, so it stays on here',
     collapse: 'Collapse',
     expand: 'Expand',
     logout: 'Logout',

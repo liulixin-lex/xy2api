@@ -28,7 +28,7 @@
                 <h2 class="truncate text-lg font-semibold text-gray-900 dark:text-white" data-testid="share-group-title">{{ selectedName }}</h2>
                 <p v-if="store.current" class="text-xs text-gray-500 dark:text-dark-400">{{ store.current.view.platform }} · {{ labels.scheduler(store.current.view.scheduler) }}</p>
               </div>
-              <div class="tabs inline-flex" role="tablist" :aria-label="t('admin.shareScheduling.title')">
+              <div class="tabs inline-flex" v-roving-tabs role="tablist" :aria-label="t('admin.shareScheduling.title')">
                 <button
                   v-for="item in tabs"
                   :key="item"
@@ -75,6 +75,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { vRovingTabs } from '@/utils/rovingTabs'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'

@@ -7,7 +7,7 @@
   >
     <!-- provider tabs -->
     <div class="mb-4 border-b border-gray-200 dark:border-dark-700">
-      <div role="tablist" class="flex flex-wrap gap-1">
+      <div v-roving-tabs role="tablist" class="flex flex-wrap gap-1">
         <button
           v-for="tab in providerTabs"
           :key="tab.value"
@@ -228,6 +228,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { vRovingTabs } from '@/utils/rovingTabs'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'

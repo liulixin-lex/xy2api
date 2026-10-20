@@ -38,6 +38,10 @@ export default {
     all: '全部',
     none: '无',
     selectAll: '全选',
+    sortBy: '排序',
+    sortPlaceholder: '选择排序字段',
+    sortAscending: '当前升序，点按改为降序',
+    sortDescending: '当前降序，点按改为升序',
     noData: '暂无数据',
     expand: '展开',
     collapse: '收起',
@@ -116,6 +120,18 @@ export default {
     }
   },
 
+  commandPalette: {
+    open: '搜索页面',
+    title: '跳转到页面',
+    placeholder: '输入页面名称，例如“账号”',
+    results: '匹配的页面',
+    empty: '没有找到匹配的页面',
+    current: '当前页面',
+    hintMove: '选择',
+    hintOpen: '打开',
+    hintClose: '关闭'
+  },
+
   adminCompliance: {
     title: '部署与运营合规确认',
     blockingNotice: '继续使用控制台前，须完成部署与运营合规确认。',
@@ -192,6 +208,8 @@ export default {
     myAccount: '我的账户',
     lightMode: '浅色模式',
     darkMode: '深色模式',
+    reduceMotion: '减少动画',
+    reduceMotionSystem: '系统已开启“减少动画”，这里跟随系统设置',
     collapse: '收起',
     expand: '展开',
     logout: '退出登录',

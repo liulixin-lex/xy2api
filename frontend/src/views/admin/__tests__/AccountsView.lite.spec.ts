@@ -242,6 +242,36 @@ describe('admin AccountsView lite account list', () => {
     wrapper.unmount()
   })
 
+  it('flips the switch before the request finishes and keeps it through a refresh that lands meanwhile', async () => {
+    let resolveToggle!: (value: unknown) => void
+    setSchedulable.mockImplementationOnce(() => new Promise(resolve => { resolveToggle = resolve }))
+    const wrapper = mountView(); await flushPromises()
+    const toggle = wrapper.get('button[role="switch"]')
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    expect(toggle.attributes('aria-busy')).toBe('true')
+    listAccounts.mockResolvedValueOnce({ items: [listRow], total: 1, page: 1, page_size: 20, pages: 1 })
+    await wrapper.get('[data-test="refresh-accounts"]').trigger('click'); await flushPromises()
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    resolveToggle({ id: 42, schedulable: false }); await flushPromises()
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    expect(toggle.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('rolls the optimistic switch back when the update fails', async () => {
+    let rejectToggle!: (reason: unknown) => void
+    setSchedulable.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectToggle = reject }))
+    const wrapper = mountView(); await flushPromises()
+    const toggle = wrapper.get('button[role="switch"]')
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    rejectToggle(new Error('temporary failure')); await flushPromises()
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    expect(showError).toHaveBeenCalledWith('admin.accounts.failedToToggleSchedulable')
+    wrapper.unmount()
+  })
+
   it('ignores an automatic list response that started before a completed account toggle', async () => {
     vi.useFakeTimers()
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
@@ -482,7 +512,9 @@ describe('admin AccountsView lite account list', () => {
     await flushPromises()
 
     expect(showError).toHaveBeenCalledWith('detail failed')
-    expect(wrapper.get('[data-test="edit-account"]').text()).toBe('')
+    // 编辑弹窗按需挂载：从未打开时不渲染，打开过则内容为空
+    const editModal = wrapper.find('[data-test="edit-account"]')
+    expect(editModal.exists() ? editModal.text() : '').toBe('')
     consoleError.mockRestore()
     wrapper.unmount()
   })

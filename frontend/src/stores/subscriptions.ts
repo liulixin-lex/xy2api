@@ -89,6 +89,8 @@ export const useSubscriptionStore = defineStore('subscriptions', () => {
     if (pollerInterval) return
 
     pollerInterval = setInterval(() => {
+      // 后台标签页不轮询，回到前台后下一个周期照常刷新
+      if (typeof document !== 'undefined' && document.hidden) return
       fetchActiveSubscriptions(true).catch((error) => {
         console.error('Subscription polling failed:', error)
       })

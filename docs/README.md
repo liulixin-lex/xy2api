@@ -42,6 +42,7 @@
 | [`USAGE_EXPORTS.md`](USAGE_EXPORTS.md) | 用量记录后台导出 |
 | [`BACKUP_RELIABILITY.md`](BACKUP_RELIABILITY.md) | 数据库备份与恢复排障 |
 | [`PLUGIN_DEVELOPMENT.md`](PLUGIN_DEVELOPMENT.md) | 插件开发 |
+| [`FRONTEND_UX.md`](FRONTEND_UX.md) | 前端性能约定、动效系统与“减少动画”、命令面板等通用交互 |
 | [`legal/`](legal/) | 部署与运营合规承诺（中英文） |
 
 部署文档在 `deploy/`：[`README.md`](../deploy/README.md)、[`DOCKER.md`](../deploy/DOCKER.md)、[`EDGE_SECURITY.md`](../deploy/EDGE_SECURITY.md)（含 CDN 识别与可选的边缘标记）、[`APPLE_CONTAINER.md`](../deploy/APPLE_CONTAINER.md)、[`DATAMANAGEMENTD_CN.md`](../deploy/DATAMANAGEMENTD_CN.md)。工具说明见 [`tools/gateway-resilience/README.md`](../tools/gateway-resilience/README.md)、[`skills/`](../skills/)。
