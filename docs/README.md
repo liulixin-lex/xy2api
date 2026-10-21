@@ -75,6 +75,7 @@
 
 | 变更 | 内容 | 状态 |
 |---|---|---|
+| [`gateway-resilience-v2-20261021`](../openspec/changes/gateway-resilience-v2-20261021/) | 网关韧性第二期：可重放前缀与推迟开场、分类修正、失败帧重试提示、仅流式能力学习、事件字段 | 进行中（0.4.4，`feat/resilience-v2-20261021`） |
 | [`simplify-share-scheduling-20261020`](../openspec/changes/simplify-share-scheduling-20261020/) | 精简份额调度：层级取账号优先级、权重取负载因子与自适应系数，每组只剩调度方式与会话保持 | 进行中（`feat/share-simplify-20261020`） |
 | [`gateway-resilience-20261015`](../openspec/changes/gateway-resilience-20261015/) | 网关韧性 | 随 0.4.0 交付，0.4.1、0.4.2 跟进；部署与后续见其 tasks |
 | [`replace-controlled-with-share-scheduling`](../openspec/changes/replace-controlled-with-share-scheduling/) | 剔除可控调度、引入份额调度 | 0.3.0 已发布，默认关闭；份额规则由 `simplify-share-scheduling-20261020` 精简，影子运行不再执行 |

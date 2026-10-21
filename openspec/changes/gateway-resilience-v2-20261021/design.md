@@ -1,0 +1,208 @@
+# 网关韧性第二期设计（0.4.4）
+
+> 基线：`release/0.4.4` `027a434ad`（origin/main `3092629d7` 即 0.4.3 加文档，合入 PR #117 与 #116）。
+> 范围与用户决定见 [`proposal.md`](proposal.md)；0.4.0 的设计见 [`gateway-resilience-20261015/design.md`](../gateway-resilience-20261015/design.md)，下文“旧 design §x”指它。
+> 文件路径相对 `backend/`。
+> 标【待契约】的地方等各实现方的最终变更登记后定稿。
+
+## 0. 原则
+
+1. **能藏就藏。** 写出第一个不可重放的输出之前，保留完整的换号能力；所有流式路径用同一个判据判断“已写出的是不是可重放前缀”（§3）。
+2. **先判语义，再决定重放。** 合法空回答、`response.incomplete`、内容拒绝、客户端取消、已收到终态之后的 EOF，都不能因为“还没输出文本”就重放。
+3. **不改变新会话放置与粘性规则。** 本期只改失败后的处理与信号；健康偏好、冷却加长、换号目标偏好都不在本期。会改变少量流量的只有：分类修正（§5）、能力过滤（§6）、更多失败在请求内换号成功（§3）。
+4. **开关与回退。** 总开关保持原义：关闭后按 0.3.0 运行。本期每个子开关关闭后回到 0.4.3 / #117 的行为。新开关与总开关、所在段的旧开关是 AND 关系（§1）。协议正确性修复默认不受开关控制，登记在 §9。
+5. **自有模块，最少钩子。** 判据与类型放在 `internal/resilience`；上游文件只加钩子，登记到 `tools/upstream-sync/policy.json`。
+
+## 1. 开关矩阵
+
+开关名与范围以 §2 为准，缺省全部开启。
+
+| 行为 | 开关（缺省） | 依赖 | 关闭后 |
+|---|---|---|---|
+| W1.1 兼容转换推迟开场 | `stream.prelude_staging`（开） | 总开关 | 收到上游 `response.created` 就写开场（0.4.3） |
+| W1.1 原生 Responses 白名单扩展 | `stream.native_prelude_whitelist`（开） | 总开关 | 白名单回到 `response.created`、`response.in_progress`、`keepalive` |
+| W1.2-lite raw Chat 识别 `error` 后跟 `[DONE]` | `stream.strict_terminal`（开） | 总开关 | 当成功处理（0.4.3） |
+| W2.1-lite 分类修正 | `failure.decision_v2`（开） | 总开关与 `failure` | 旧分类，含 `RequestScopedTransient` → `CAPACITY_SHED` |
+| W5.1 三个专用耗尽出口接入重试提示与回合封顶 | 现有 `errors` | 总开关 | 0.4.3 |
+| W5.2 排队 ping 后写协议终止帧 | 无 | — | 不受开关控制（§9） |
+| W5.3 `response.failed` 有条件带 retry-after | `errors.failed_frame_retry_after`（开） | `errors` | 不带 `error.headers`，正文沿用旧 design §7.6 |
+| W5.4 Anthropic 自身失败用 `api_error` | 现有 `errors` | 总开关 | 0.4.3 |
+| W5.5 Codex 无号 503 的 Retry-After 上限 | `errors.codex_retry_after_cap_seconds`（10；0 表示关闭；0–30） | `errors` | 2–30 秒 |
+| W6-lite 仅流式学习与过滤 | `capability.stream_only_learning`（开）；有效期 `capability.learn_ttl_seconds`（21600；600–86400） | 总开关；本请求内换号还需要 `failure.decision_v2` | 不学习、不过滤 |
+| W8-lite 事件字段 | 无 | — | 只加日志字段，不改行为 |
+
+关闭开关时的存量状态：已学到的仅流式能力在有效期内保留，但不再参与过滤；重新打开后，未到期的学习结果继续生效。【待契约：以 γ 的实现为准】
+
+## 2. 设置（C0）
+
+【待契约：`contract/C0_SETTINGS.md`】
+
+- 字段：JSON 路径、Go 访问方法、缺省值、范围、依赖。
+- 存放位置：现有 `gateway-resilience` 文档，或单独的设置键。
+- 回退结论：0.4.3 读到含新字段的设置文档时是否仍判为合法（证据 `文件:行号`）；回退到 0.4.3 后旧文档与行为是否不变。
+- 管理接口 `GET/PUT /api/v1/admin/settings/gateway-resilience` 的返回与保存方式。
+
+## 3. W1.1 可重放前缀
+
+### 3.1 事件分类
+
+纯函数 `resilience.ClassifyStreamEvent(protocol, eventType, payload)`（`internal/resilience/prelude.go`）对一个完整的 SSE 事件返回：
+
+| 取值 | 含义 |
+|---|---|
+| `Prelude` | 开场事件，可以丢弃后由新尝试重放 |
+| `Content` | 不可重放的输出 |
+| `TerminalSuccess` | 正常终态 |
+| `TerminalFailure` | 失败终态；`Retryable` 表示可以换号（错误分类复用 `Classify`） |
+| `Unknown` | 按 `Content` 处理，保守 |
+
+开场事件：
+
+| 协议 | `Prelude` |
+|---|---|
+| Responses | `response.created`、`response.in_progress`、`response.queued`、`keepalive`；Codex 可忽略的元数据事件【待契约：生产探测后 β 定稿的白名单，不用 `codex.*` 或 rate_limits 通配】；不带内容的 `response.output_item.added`（reasoning 项无 `encrypted_content` 且摘要为空，message 项的文本为空）、`content_part.added`、`reasoning_summary_part.added` |
+| Chat | 只带 role 的 chunk；空 content 增量 |
+| Messages | `message_start`、`ping`；空 text/thinking 的 `content_block_start` |
+
+终态：Responses 的 `response.completed`/`response.done` 为成功，`response.failed`/`error` 为失败，`response.incomplete` 为不可重试的失败终态；Chat 的 `[DONE]` 为成功，带 `error` 的 chunk 为失败；Messages 的 `message_stop` 为成功。
+
+### 3.2 判断顺序
+
+暂存期内收到失败或连接结束时，依次判断：
+
+1. 客户端已取消或请求已被拒绝：结束，不重放。
+2. 终态语义：合法空回答（只有 usage）、`response.incomplete`、内容拒绝，照常结束，不重放。
+3. 是否已有不可回滚的写出：已写出 `Content` 的，按已输出后失败处理（旧 design §7.6）。
+4. 失败分类（§5）。
+5. 是否可重试：可重试的转为 `UpstreamFailoverError`，进入现有换号循环，受请求预算约束。
+
+### 3.3 原生 Responses 白名单（`stream.native_prelude_whitelist`）
+
+- 改动位置：`openai_gateway_passthrough.go` 的 `openAIStreamEventIsMetadata` 一带，普通路径的暂存与 pendingLines 共用 §3.1 的判据。
+- 送达追踪 `resilience_delivery_sse.go` 的开场名单也改用 §3.1；送达计费口径不变：开场不算送达。
+- **严格 SDK 约束**：换号后只转发新账号的 `response.created`，旧尝试的开场全部丢弃、不拼接；response id 与序号沿用新尝试的值。客户端看到的第一个事件始终是 `response.created`，id 不变。
+- 元数据事件在释放时的处理（按序转发或丢弃）【待契约：CHANGES_B】。
+
+### 3.4 兼容转换推迟开场（`stream.prelude_staging`）
+
+- 适用：Chat → Responses 上游（`openai_gateway_chat_completions.go` 的 `handleChatStreamingResponse`）、Messages → Responses 上游（`openai_gateway_messages.go` 的 `handleAnthropicStreamingResponse`）。
+- 开场事件是网关合成的，所以在转换器状态里推迟生成 role chunk 或 `message_start`，等首个 `Content` 或终态到来时一并按序写出。不做字节暂存。
+- 暂存期内上游的可重试 `response.failed`、`error`、EOF、读错，按 §3.2 转为换号；客户端只看到最终成功那次尝试的一个开场。
+- 首事件守卫（`resilience_compat_stream.go` 的 `armOpenAICompatFirstEvent`）延长到首个内容；中转伪保活帧仍按“存活”处理（旧 design §7.8）。
+- `clientOutputStarted` 只在真正写出时置位。
+- **直连请求保持不提交**：暂存期内直连请求拿不到任何字节，与原生 Responses 自 0.4.0 以来一致；经 CDN 的请求照旧由首包前保活提交并发心跳。下游中转的读超时短于上游推理时间时可能超时，见 §10。
+- 64 KiB 以上请求的静默拒绝缓冲（`openai_silent_refusal.go`）与推迟开场的叠加规则【待契约：CHANGES_B】。
+- 兼容路径 `first_token_ms` 的取点不变（上游第一行），避免口径跳变。
+
+## 4. W1.2-lite raw Chat 明确终止（`stream.strict_terminal`）
+
+- 位置：`openai_gateway_chat_completions_raw.go`、`openai_raw_stream_truncation.go`（账号不支持 `/responses` 时的原生 Chat 透传）。
+- 上游 `data: {"error":...}` 后跟 `[DONE]`：提交前转为换号；提交后按失败记账（计入已输出后失败与会话失败），不当成功。
+- 有 usage 或 finish_reason 且没有 error 的流仍算成功。
+- OpenAI Responses 透传的首输出守卫【待契约：CHANGES_B 是否完成，未完成则列入 §10】。
+
+## 5. W2.1-lite 分类修正（`failure.decision_v2`）
+
+根因：`service/resilience_penalty.go` 的 `ClassifyFailoverError` 把所有 `RequestScopedTransient=true` 的失败都当成 `CAPACITY_SHED`，使 Grok 空闲、raw 429、“服务忙”类文案也受“容量只换一次、必须跨主机、整主机排除”的约束。
+
+| 信号 | 0.4.3 | 0.4.4 |
+|---|---|---|
+| `server_is_overloaded`、`slow_down`、529、结构化 overloaded、503 加 overloaded 文案（保留 0.4.3 的 CDN 错误页例外） | `CAPACITY_SHED` | 不变 |
+| Grok 流空闲（`grok_stream_idle.go`） | `CAPACITY_SHED` | `TRANSIENT` 或 `STALL`【待契约】：允许换号，不消耗容量的跨主机额度，不触发整主机排除 |
+| raw Chat 与 Grok 的可重试 429 | `CAPACITY_SHED` | `RATE_LIMIT`；余额、reset、内容拒绝等更强的结构化证据优先 |
+| “The service is busy”、“Too many pending requests”、“Concurrency limit exceeded for account” | `CAPACITY_SHED` | 429 → `RATE_LIMIT`，5xx → `TRANSIENT`；可以换到任何主机 |
+| typed 首输出超时 | `TRANSIENT` | 运维记录仍为 `TRANSIENT`（兼容），另记 kind/reason 与实际生效的截止秒数【待契约：字段名】 |
+
+- 运维记录的 `resilience_category` 与 handler 的换号规则用同一个分类结果，不再分叉。
+- D18 不变：容量降载仍是同号先试一次、只跨主机换一次。
+- `RATE_LIMIT` 计入会话失败，改绑可能增多；开关关闭即回到旧分类。
+
+## 6. W6-lite 仅流式能力（`capability.stream_only_learning`）
+
+- **触发**：客户端 `stream=false`，上游 400 且结构码或文案确定表示“只接受流式”（表驱动，如 “only accepts streaming requests”、“stream must be true”）。
+- **学习**：账号 × 协议（responses 或 chat）× 非流式 → 不可用，有效期 `capability.learn_ttl_seconds`。存放位置与理由【待契约：CHANGES_G】。手工设置本期不做，只留字段位。
+- **本请求**：立即换号（需要 `failure.decision_v2` 开），不计账号失败、不冷却、不计会话失败，计入请求预算。`decision_v2` 关闭时只学习、过滤后续请求，本请求照旧返回 400。
+- **选号**：OpenAI 选号（`openai_gateway_scheduling.go`、`openai_account_scheduler.go`）对非流式请求跳过被标记的账号，流式请求不受影响。跳过后组内无号时按现有无号处理，带原因码 `capability_stream_only`，不再把 400 归咎于用户。
+- **Explain**：被跳过的账号显示原因 `capability_stream_only` 与剩余有效期。
+- **管理接口**【待契约：CHANGES_G】：账号详情或列表返回 `capability_learned`；清除接口。
+
+## 7. W5 信号与终止出口
+
+### 7.1 RetryAdvice（W5.3）
+
+`internal/resilience/retry_advice.go` 定义无 import 环的 `RetryAdvice`，经 request context 传递【待契约：字段与存取函数，α 冻结在 `contract/RETRY_ADVICE.md`】。
+
+| 情况 | `response.failed` 的 retry-after |
+|---|---|
+| 本请求此刻还有健康备选（未尝试、无硬罚） | 不带，或 1 秒 |
+| 组内没有健康候选，且能算出最早恢复时间 | 2–10 秒；正文 “try again in Ns” 的 N 与之一致 |
+| 回合封顶、余额终态、内容拒绝 | 不带 |
+| 无法判断 | 保持 0.4.3 |
+
+- 写入位置：`error.headers.retry-after`（Codex 从这里读重试等待）。
+- 合成点：handler 侧 `handler/stream_error_event.go`（α）；service 侧 `resilience_keepalive.go`、`openai_compact_stream_bridge.go`、`openai_gateway_response_handling.go`（β）。
+- `errors.failed_frame_retry_after` 关闭：不带 `error.headers`，正文沿用旧 design §7.6。
+
+### 7.2 W5.1 耗尽出口统一
+
+- Gateway Responses、Gateway Chat、OpenAI→Messages 的专用耗尽出口（`handleAnthropicFailoverExhausted` 等）接入公共的 `applyExhaustedRetryHint` 与回合封顶。
+- 封顶时 HTTP 头与正文内嵌的 Retry-After 都删除。
+- 一次性 finalize 标记，防止同一请求写两次终止帧。
+- 现有限制：快速失败与配置拒绝不计入回合封顶；回合按进程内 TurnKey 的连续失败与间隔计数，不严格等于客户端的一轮生成。
+
+### 7.3 W5.2 排队 ping 之后的终止帧
+
+`gateway_handler_responses.go`、`gateway_handler_chat_completions.go`：排队等待时已发出 ping 的请求，之后遇到计费或其他终态错误，按入站协议写终止帧：Responses 写 `response.created` 后跟 `response.failed`，Chat 写 `error` 后跟 `[DONE]`，不再写裸 JSON。不受开关控制。
+
+### 7.4 W5.4 Anthropic 的错误类型
+
+网关自身的无号与瞬时失败（含只有 code 的错误体）统一用 `api_error`；`resilience_keepalive.go` 不再给 503 补 `overloaded_error`。只有上游原样的 `overloaded_error` 才保留该类型。HTTP 状态码不变（Q16）。
+
+### 7.5 W5.5 Codex 的 Retry-After 上限
+
+识别 Codex：UA 含 `codex_cli_rs`、`codex_exec` 或 Codex Desktop，或带 `originator` 头【待契约：CHANGES_A 的最终规则】。无号 503 的 `Retry-After` 上限取 `errors.codex_retry_after_cap_seconds`；其他客户端不变。原因：Codex 0.158.0 起按 `Retry-After` 等待且不封顶，静默等满。
+
+## 8. W8-lite 事件字段
+
+不加表、不加迁移，不记录正文、Key 或完整会话值。
+
+| 事件 | 新增字段 |
+|---|---|
+| `resilience.post_output_failure`、`resilience.session_rebind`、`resilience.last_resort`、`resilience.keepalive_committed`、`resilience.turn_cap` | `request_id`（网关本地请求 ID）、`model`、`delivered_bytes`、`ms_since_first_output`、`prelude_release_event`、`prelude_release_ms` |
+
+字段名与取值来源【待契约：CHANGES_A、CHANGES_B】。释放暂存的事件类型与距 `response.created` 的毫秒数由 β 的 `prelude_trace` 采集。
+
+## 9. 不受开关控制的修复
+
+| 修复 | 说明 |
+|---|---|
+| 排队 ping 之后按协议写终止帧（W5.2） | §7.3 |
+| 【待契约】 | 各实现方登记的其他协议正确性修复 |
+
+## 10. 回退语义
+
+- **总开关关闭**：按 0.3.0 运行，本期新开关一并失效；§9 的修复仍生效。
+- **子开关关闭**：回到 0.4.3 / #117 的行为（§1“关闭后”一列），即时生效，无需重启。
+- **版本回退到 0.4.3**：无迁移；设置文档的兼容性见 §2；已学到的仅流式能力【待契约：存放位置决定 0.4.3 是否看得到】。
+
+## 11. 已知限制与延后
+
+- 仍未覆盖的路径：Gemini、Bedrock、CN、Antigravity T2、Gateway 入站经 Anthropic 上游的两个反向转换器（Responses、Chat）；它们的开场事件与终止行为保持 0.4.3。
+- 推迟开场期间直连请求收不到任何字节；下游中转的读超时（如 nginx 60 秒）短于上游推理时间时可能超时。经 CDN 的请求不受影响（首包前保活）。
+- 观测只有日志字段，没有请求与尝试表；“伪已输出”比例要从 `prelude_release_event` 日志统计。
+
+## 12. 验证
+
+| 测试服务器场景 | 故障 | 覆盖 |
+|---|---|---|
+| CV-5 | F31 | §3.3 原生 created → failed(overloaded) 换号 |
+| CV-6 | F32 | §3.4 Chat 兼容 created → failed(“The service is busy”) 换号 |
+| CV-7 | F33 | §3.3 created → queued → failed 换号 |
+| CV-8 | F34 | §3.3 created → 元数据事件 → failed 换号 |
+| RAW-1 | F35 | §4 raw Chat `error` + `[DONE]` |
+| SO-1 | F36 | §6 仅流式学习、过滤与清除 |
+| RA-1 | F37 | §7.1 有条件带 retry-after |
+| ANT-1 | — | §7.4 Anthropic 无号为 `api_error` |
+| Q-1 | — | §7.3 排队 ping 后的终止帧 |
+
+候选验证：现有 56 个场景加上表、升级演练（0.4.3 → 候选，含回退与再前滚）、3 小时浸泡（存活堆斜率 ≤1 MiB/h）。结果见 tasks。
