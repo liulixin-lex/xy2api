@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -314,10 +315,19 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	clientOutputStarted := false
 	pendingLines := make([]string, 0, 8)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
-	var terminal openAIRawStreamTerminalState
+	terminal := openAIRawStreamTerminalState{strict: resilience.Current().StrictTerminalOn()}
+	prefixBytes := 0
 
 	writeLine := func(line string) {
 		if clientDisconnected {
+			return
+		}
+		// Wait for the first data payload before committing its SSE framing.
+		// This bounded prefix lets event:error + data:error fail over too.
+		if terminal.strict && !terminal.sawDataLine && !clientOutputStarted && prefixBytes+len(line)+1 <= ssePendingLimit &&
+			(line == "" || strings.HasPrefix(line, ":") || strings.HasPrefix(line, "event:") || strings.HasPrefix(line, "id:") || strings.HasPrefix(line, "retry:")) {
+			pendingLines = append(pendingLines, line)
+			prefixBytes += len(line) + 1
 			return
 		}
 		if !clientOutputStarted && !refusalDetector.ShouldReleaseClientOutput() {
@@ -354,6 +364,12 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		if payload, ok := extractOpenAISSEDataLine(line); ok {
 			trimmedPayload := strings.TrimSpace(payload)
 			terminal.ObserveDataLine(trimmedPayload)
+			if terminal.failurePayload != "" && !clientDisconnected && !openAIStreamClientOutputStarted(c, clientOutputStarted) && c.Request.Context().Err() == nil {
+				failure := []byte(terminal.failurePayload)
+				if resilience.ClassifyStreamEvent("chat", "", failure).Retryable {
+					return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, true, requestID, failure, extractOpenAISSEErrorMessage(failure), upstreamModel, resp.Header)
+				}
+			}
 			if trimmedPayload != "[DONE]" {
 				observer.ObserveOpenAI([]byte(payload), strings.TrimSpace(gjson.Get(payload, "type").String()))
 				usageOnlyChunk := isOpenAIChatUsageOnlyStreamChunk(payload)
@@ -411,9 +427,22 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 
 	// 客户端取消/断开后上游读失败与上游截断不可区分（取消会连带取消上游请求），
 	// 沿用既有语义：按已收到的用量正常收尾计费，不判为上游故障。
-	clientAborted := clientDisconnected ||
+	clientAborted := clientDisconnected || c.Request.Context().Err() != nil ||
 		errors.Is(scanErr, context.Canceled) ||
 		errors.Is(scanErr, context.DeadlineExceeded)
+
+	if terminal.failurePayload != "" && !clientAborted {
+		failure := []byte(terminal.failurePayload)
+		message := extractOpenAISSEErrorMessage(failure)
+		message = s.recordOpenAIStreamUpstreamError(c, account, true, requestID, "stream_failed", failure, message)
+		s.handleOpenAIStreamTerminalAccountSideEffects(c, account, failure, message, resp.Header, upstreamModel)
+		s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, failure, message, clientOutputStarted)
+		MarkOpsStreamFailure(c, "upstream_error", openAIStreamFailedEventErrorCode(failure), message, openAIStreamFailureStatus(failure, message))
+		// The upstream error and DONE have already been forwarded. A plain
+		// error plus the committed marker prevents duplicate handler frames.
+		MarkResponseCommitted(c)
+		return resultWithUsage(), fmt.Errorf("upstream Chat Completions stream failed: %s", message)
+	}
 
 	// 上游在任何终止信号之前结束：连接被 reset（scanErr != nil）或干净 EOF。
 	// 两者都不能再记成功——此前统一返回 nil error，把上游截断伪装成
@@ -442,7 +471,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		return resultWithUsage(), newOpenAIUpstreamStreamReadError(cause)
 	}
 
-	if scanErr == nil && !clientDisconnected && !clientOutputStarted {
+	if scanErr == nil && !clientAborted && !clientOutputStarted {
 		if refusalDetector.IsSilentRefusal() {
 			return nil, newOpenAISilentRefusalFailoverError(c, account, requestID)
 		}
