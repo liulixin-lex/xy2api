@@ -142,19 +142,16 @@ func answerFromOpenAIRequest(body map[string]any) string {
 	return answerFromChallengePrompt(prompt)
 }
 
-var challengeQuestionRegex = regexp.MustCompile(`Q: (\d+) ([+-]) (\d+) = \?\nA:$`)
+var challengeQuestionRegex = regexp.MustCompile(`(\d+) \+ (\d+) = \?$`)
 
 func answerFromChallengePrompt(prompt string) string {
 	m := challengeQuestionRegex.FindStringSubmatch(prompt)
-	if len(m) != 4 {
+	if len(m) != 3 {
 		return "0"
 	}
 	left, _ := strconv.Atoi(m[1])
-	right, _ := strconv.Atoi(m[3])
-	if m[2] == "+" {
-		return strconv.Itoa(left + right)
-	}
-	return strconv.Itoa(left - right)
+	right, _ := strconv.Atoi(m[2])
+	return strconv.Itoa(left + right)
 }
 
 func TestRunCheckForModel_OffMode_PreservesDefaultBody(t *testing.T) {

@@ -41,9 +41,9 @@ const (
 	// 留 300 字节足够覆盖典型结构化错误（如 `{"error":{"message":"..."}}`），
 	// 又给 "upstream HTTP <status>: " 前缀留出余量，避免最终被 monitorMessageMaxBytes (500) 截得太狠。
 	monitorErrorBodySnippetMaxBytes = 300
-	// monitorChallengeMin / monitorChallengeMax challenge 操作数范围。
+	// monitorChallengeMin / monitorChallengeMax challenge 操作数范围（只做加法）。
 	monitorChallengeMin = 1
-	monitorChallengeMax = 50
+	monitorChallengeMax = 20
 
 	// providerOpenAIPath OpenAI Chat Completions 路径（Kimi / DeepSeek 同为 OpenAI 兼容）。
 	providerOpenAIPath = "/v1/chat/completions"
