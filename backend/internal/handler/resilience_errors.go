@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -181,7 +182,7 @@ func applyNoAccountRetryHints(c *gin.Context, diag any, apiKey *service.APIKey, 
 	}
 	ctx := c.Request.Context()
 	if resilience.StateFrom(ctx).ConfigError() {
-		c.Header("Retry-After", strconv.Itoa(cfg.Errors.ConfigRetryAfterSeconds))
+		c.Header("Retry-After", strconv.Itoa(codexNoAccountRetryAfter(c, cfg, cfg.Errors.ConfigRetryAfterSeconds)))
 		c.Header("x-should-retry", "false")
 		return
 	}
@@ -189,6 +190,25 @@ func applyNoAccountRetryHints(c *gin.Context, diag any, apiKey *service.APIKey, 
 		return
 	}
 	setNoAccountRetryAfter(c, diag, apiKey, routingModel)
+	secs := codexNoAccountRetryAfter(c, cfg, c.GetInt(ginKeyResilienceRetryAfter))
+	c.Header("Retry-After", strconv.Itoa(secs))
+	c.Set(ginKeyResilienceRetryAfter, secs)
+}
+
+// codexNoAccountRetryAfter bounds only no-account hints. Codex waits out
+// Retry-After without its own ceiling; other exhausted errors keep their
+// existing bounds. This client hint is independent of access restrictions.
+func codexNoAccountRetryAfter(c *gin.Context, cfg *resilience.Settings, seconds int) int {
+	if c == nil || c.Request == nil || !cfg.CodexRetryAfterCapOn() {
+		return seconds
+	}
+	ua := strings.ToLower(c.Request.UserAgent())
+	isCodex := openai.IsCodexOfficialClientByHeaders(ua, c.GetHeader("originator")) ||
+		strings.Contains(ua, "codex_cli_rs") || strings.Contains(ua, "codex_exec") || strings.Contains(ua, "codex desktop")
+	if isCodex {
+		return min(seconds, cfg.Errors.CodexRetryAfterCapSeconds)
+	}
+	return seconds
 }
 
 // setNoAccountRetryAfter sets Retry-After to the clamped time until the
