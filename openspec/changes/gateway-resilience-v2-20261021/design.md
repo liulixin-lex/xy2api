@@ -262,7 +262,7 @@
   - Responses、Chat、Messages 的六个 HTTP 入口在解析模型后、选号前安装 provider（上游文件钩子 `installResilienceRetryAdvice`，位于 `gateway_handler.go`、`gateway_handler_responses.go`、`gateway_handler_chat_completions.go`、`openai_gateway_handler.go`、`openai_chat_completions.go`）。闭包只保留 service 与分组、模型的初值，调用时读 RequestState 里当前的分组与选号模型（兼容兜底分组），不保留 Gin context 或可变的 API Key 对象。
   - 无号与耗尽出口按当前模型求一次 advice 并写入请求状态，覆盖“已复制上游 `Retry-After`”的分支；旧的 HTTP advisor 不再传空模型。
   - `response.failed` 的错误体增加可省略的 `headers`，开关开启时只放 `retry-after`；正文经 `RetryAdvice.Message` 保持同样的秒数；HTTP 头还没提交时一并改写，已经提交的头无法回写，以流内帧为准。
-  - 回合封顶、用户余额终态、内容拒绝清掉旧的 HTTP `Retry-After`、延迟标记、内嵌的重试头和本地的固定尾句。配置拒绝与鉴权类错误不给候选重试建议；在途预留超额保持原有的可重试语义。
+  - 回合封顶、用户余额终态、内容拒绝清掉旧的 HTTP `Retry-After`、延迟标记、内嵌的重试头和本地的固定尾句。配置拒绝与鉴权类错误不给候选重试建议；不可重试的原因同样不给：失败帧按写帧前登记的预期状态码判断，只有 429 与 5xx 才带建议，`model_not_found`、`not_found_error`、`billing_service_error`（含 503 的）与输入、鉴权类原因显式抑制，无号出口也先清掉已有的提示再计回合（审查 P2-11，α `1e380d238`）；在途预留超额保持原有的可重试语义。
   - 恢复时间未知时不再提示，不再像 0.4.3 那样缺省写 30 秒。
 - `errors.failed_frame_retry_after` 关闭：不带 `error.headers`，正文与提示沿用旧 design §7.6。
 
