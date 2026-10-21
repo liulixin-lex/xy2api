@@ -77,14 +77,14 @@ func noteResiliencePostOutputFailure(ctx context.Context, rl *RateLimitService, 
 	groupID := st.GroupID()
 	resilience.Count(resilience.MetricPostOutputFailure, groupID, account.ID, kind)
 	failures, cooled := rl.notePostOutputFailure(ctx, account)
-	slog.Warn("resilience.post_output_failure",
+	slog.Warn("resilience.post_output_failure", append(resilience.EventFields(ctx),
 		"group_id", groupID,
 		"account_id", account.ID,
 		"platform", account.Platform,
 		"reason", kind,
 		"failures", failures,
 		"cooldown", cooled,
-	)
+	)...)
 }
 
 // notePostOutputFailure counts a failure after output of the account and

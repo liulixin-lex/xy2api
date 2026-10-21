@@ -260,7 +260,7 @@ func resilienceCapTurn(c *gin.Context) bool {
 	c.Header("x-should-retry", "false")
 	c.Set(ginKeyResilienceTurnCapped, true)
 	resilience.Count(resilience.MetricTurnCap, st.GroupID(), 0, "")
-	slog.Warn("resilience.turn_cap", "group_id", st.GroupID(), "failures", n)
+	slog.Warn("resilience.turn_cap", append(resilience.EventFields(c.Request.Context()), "group_id", st.GroupID(), "failures", n)...)
 	return true
 }
 
