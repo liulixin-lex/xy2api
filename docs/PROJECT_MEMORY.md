@@ -117,6 +117,13 @@
 
 ## 进行中的工作
 
+### 20261021-integ-0.4.5-prep — 0.4.5 本地集成（2026-10-21T12:51Z 授权）
+
+- 请求：PM 放行从 main `a1cf8f104` 建本地分支 `integ/0.4.5-prep`，按 RA-1 → ε → DOCS → δ 合入；仅本地提交，不推送、不开 PR、不发布或部署。
+- 组成：RA-1 `4ef7be248`；ε `10f2edd6b`；DOCS `docs/045-prep` 最新 `eb95a4a10`；δ `74133b338`（owner 已确认该 HEAD 定向 `-race` 通过）。记忆以 main 为准，网关说明与 policy 保留双方增补。
+- 待完成：复现并只在测试中修复 `contentModerationHandlerSettingRepo` 竞争，修前修后均 `-race -count=3`；产品版本 0.4.5；policy 与 scheduler-diff；全量本地门禁（含安全检查）及干净树 audit；交 PM 安排集成审查。
+- 证据：仓库外冲刺目录 `evidence/integ-045/` 与 `briefs/PROGRESS_A.md`；不合入监控或诊断分支。
+
 ### 20261021-soak-6h5-0.4.4 — 生产部署前的 6.5 小时浸泡（2026-10-21T10:50Z 登记）
 
 - 请求：用户 2026-10-21 决定按时发布 0.4.4（3 小时浸泡 11/12，存活堆 1.4 MiB/h 未达标），同时要求生产部署前另跑一次 6.5 小时浸泡确认。
