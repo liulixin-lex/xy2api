@@ -1409,7 +1409,11 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "writeOpenAIPassthroughRuleTerminal(ctx, c, status, errType, errMsg)"
+      "value": "writeOpenAIStreamRuleError(ctx, c, status, errType, errMsg)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "writeOpenAIStreamRuleError(ctx, c, status, errType, errMsg)"
     }
   ],
   "forbidden_module_paths": [
@@ -1902,6 +1906,16 @@
       "id": "xy-resilience-v2-streams",
       "path": "backend/internal/service/openai_passthrough_first_output_test.go",
       "literal": "func TestOpenAIPassthroughRuleWithoutHeartbeatKeepsJSON"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_responses_rule_terminal_test.go",
+      "literal": "func TestNativeResponsesRuleAfterHeartbeatEndsWithResponsesTerminal"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_responses_rule_terminal_test.go",
+      "literal": "func TestNativeResponsesRuleWithoutHeartbeatKeepsJSON"
     }
   ]
 }

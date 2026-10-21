@@ -614,13 +614,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 							// antigravity 先例），否则透传命中的 failed 在监控中不可见。
 							s.recordOpenAIStreamUpstreamError(c, account, false, upstreamRequestID, "http_error", dataBytes, failedMessage)
 							MarkResponseCommitted(c)
-							c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-							c.JSON(status, gin.H{
-								"error": gin.H{
-									"type":    errType,
-									"message": errMsg,
-								},
-							})
+							// xy2api resilience (PM instruction 5, as DELTA-P1-2): after
+							// heartbeats committed 200 the rule's error ends the stream
+							// as the Responses terminal event instead of a bare JSON body.
+							writeOpenAIStreamRuleError(ctx, c, status, errType, errMsg)
 							streamEarlyErr = fmt.Errorf("upstream response failed: passthrough rule matched message=%s", errMsg)
 							return
 						}

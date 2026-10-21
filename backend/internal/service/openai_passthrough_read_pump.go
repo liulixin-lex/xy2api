@@ -1,13 +1,9 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
 	"net/http"
 	"sync/atomic"
 	"time"
-
-	"github.com/gin-gonic/gin"
 )
 
 // Read pump of the OpenAI Responses passthrough (W1.2). With
@@ -135,17 +131,5 @@ func runOpenAIPassthroughReadPump(resp *http.Response, scanner *openAISSEJSONDoc
 		case <-keepaliveCh:
 			pump.onKeepalive()
 		}
-	}
-}
-
-// writeOpenAIPassthroughRuleTerminal ends a passthrough stream that only
-// carried heartbeats with response.created and response.failed (one id,
-// sequence 0 and 1) holding the error passthrough rule's type and message.
-// The rule's status decides a retry hint (RetryAdviceEligible).
-func writeOpenAIPassthroughRuleTerminal(ctx context.Context, c *gin.Context, status int, errType, message string) {
-	MarkOpsStreamError(c, errType, message, status)
-	body, _ := json.Marshal(map[string]any{"error": map[string]any{"type": errType, "code": errType, "message": message}})
-	if _, err := c.Writer.Write(preOutputTerminalFrame(ctx, PreOutputProtocolResponses, status, body)); err == nil {
-		c.Writer.Flush()
 	}
 }
