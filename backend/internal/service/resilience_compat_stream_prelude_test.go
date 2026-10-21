@@ -188,6 +188,67 @@ func TestCompatPreludeCanceledClientClosesUpstream(t *testing.T) {
 	}
 }
 
+type cancelAfterContentWriter struct {
+	gin.ResponseWriter
+	onFlush func()
+}
+
+func (w *cancelAfterContentWriter) Flush() {
+	w.ResponseWriter.Flush()
+	w.onFlush()
+}
+
+func TestCompatPreludeDrainsUsageAfterClientCancellation(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, messages := range []bool{false, true} {
+		for _, interval := range []int{0, 30} {
+			t.Run(fmtBool(messages)+"/"+fmtBool(interval > 0), func(t *testing.T) {
+				c, rec := compatStreamContext("/v1/chat/completions", "")
+				requestState := resilience.NewRequestState()
+				ctx, cancel := context.WithCancel(resilience.WithRequestState(c.Request.Context(), requestState))
+				defer cancel()
+				c.Request = c.Request.WithContext(ctx)
+				c.Writer = &cancelAfterContentWriter{ResponseWriter: c.Writer, onFlush: func() {
+					if strings.Contains(rec.Body.String(), "hello") {
+						cancel()
+					}
+				}}
+				pr, pw := io.Pipe()
+				defer pr.Close()
+				defer pw.Close()
+				wroteTerminal := make(chan error, 1)
+				go func() {
+					_, err := io.WriteString(pw, keepaliveStallCreated+"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n")
+					if err == nil {
+						<-ctx.Done()
+						_, err = io.WriteString(pw, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":13,\"output_tokens\":21}}}\n\n")
+					}
+					_ = pw.Close()
+					wroteTerminal <- err
+				}()
+				resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: pr}
+				svc := compatStreamService(nil, 0, interval, 0)
+				account := rawChatCompletionsTestAccount()
+				var result *OpenAIForwardResult
+				var err error
+				if messages {
+					result, err = svc.handleAnthropicStreamingResponse(resp, c, account, "model", "model", "model", time.Now())
+				} else {
+					result, err = svc.handleChatStreamingResponse(resp, c, account, "model", "model", "model", time.Now(), 0)
+				}
+				require.NoError(t, err)
+				require.NoError(t, <-wroteTerminal, "must drain through completed after client cancellation")
+				require.Equal(t, 13, result.Usage.InputTokens)
+				require.Equal(t, 21, result.Usage.OutputTokens)
+				require.False(t, requestState.AccountFailed(account.ID))
+				require.False(t, requestState.TurnFailed())
+				_, marked := c.Get(OpsStreamErrorKey)
+				require.False(t, marked)
+			})
+		}
+	}
+}
+
 func TestCompatPreludeTerminalSemanticsWithLargeRequest(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, messages := range []bool{false, true} {

@@ -1088,7 +1088,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 		observeOpenAIPreludeCreated(preludeTrace, event.Type)
 		holdPrelude := stagePrelude && openAICompatPreludeEvent(&event, []byte(payload))
-		if stagePrelude {
+		if stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 			if err := c.Request.Context().Err(); err != nil {
 				streamNonFailoverErr = err
 				return true
