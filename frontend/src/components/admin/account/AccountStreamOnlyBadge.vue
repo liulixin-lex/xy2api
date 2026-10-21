@@ -18,7 +18,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { activeStreamOnly, clearCapabilityLearning, type AccountWithCapability } from '@/api/admin/accountCapability'
+import { clearCapabilityLearning } from '@/api/admin/accountCapability'
+import { activeStreamOnly, streamOnlyProtocols, streamOnlyRemaining, type AccountWithCapability } from '@/utils/accountCapability'
 import { useAppStore } from '@/stores/app'
 
 const props = defineProps<{ account: AccountWithCapability }>()
@@ -29,17 +30,14 @@ const appStore = useAppStore()
 const clearing = ref(false)
 
 // The list refreshes itself, so the time left is read when the row renders.
-const entries = computed(() => activeStreamOnly(props.account))
+const entries = computed(() => activeStreamOnly(props.account.capability_learned))
 
 const remaining = computed(() => {
-  const ms = entries.value.length ? Date.parse(entries.value[0].expires_at) - Date.now() : 0
-  if (ms < 3_600_000) return t('admin.resilience.capability.minutes', { n: Math.max(1, Math.ceil(ms / 60_000)) })
-  return t('admin.resilience.capability.hours', { n: Math.round(ms / 3_600_000) })
+  const { unit, n } = streamOnlyRemaining(entries.value)
+  return t(`admin.resilience.capability.${unit}`, { n })
 })
 
-const title = computed(() => t('admin.resilience.capability.title', {
-  protocols: [...new Set(entries.value.map((entry) => entry.protocol))].join(', ')
-}))
+const title = computed(() => t('admin.resilience.capability.title', { protocols: streamOnlyProtocols(entries.value) }))
 
 async function clear() {
   if (clearing.value) return
