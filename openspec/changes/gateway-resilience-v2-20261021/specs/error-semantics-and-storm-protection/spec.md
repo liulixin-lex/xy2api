@@ -7,7 +7,7 @@
 With `errors.failed_frame_retry_after` on, every `response.failed` the gateway synthesizes MUST set `error.headers.retry-after` from the request's retry advice:
 - the request still has a healthy alternative (untried, no hard penalty): no value, or 1 second;
 - the group has no healthy candidate and the earliest recovery time is known: 2–10 seconds, and the message text "try again in Ns" MUST use the same N;
-- turn cap, terminal balance failure or content refusal: no value;
+- turn cap, the user's own insufficient balance, or content refusal: no value (an upstream account's insufficient balance switches accounts and is not terminal);
 - no advice: the 0.4.3 frame.
 
 With the switch off, synthesized frames MUST NOT carry `error.headers`.

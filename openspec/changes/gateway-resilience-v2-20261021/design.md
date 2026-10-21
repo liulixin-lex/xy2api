@@ -226,6 +226,7 @@
   - 惰性结果不缓存，下一次读取能看到候选变化；provider 只读当前请求与进程内快照，无副作用，不访问数据库或 Redis，不持有池化的 Gin context。
 
   这样 service 层在 handler 耗尽出口之前合成的 `response.failed` 也能拿到当时的候选情况。
+- `Suppress` 由识别出终态的一方显式写入：handler 的回合封顶、内容拒绝、用户余额终态（α）；service 在自己合成这类终态帧时，先写 `Suppress` 再 `ResolveRetryAdvice`（β）。provider 本身看不到这些终态。
 - 正文：`RetryAdvice.Message(message)` 统一处理重试尾句：去掉本地固定格式的旧尾句 “Please try again in Ns.”；秒数为正时追加与 `Headers()` 同样夹到 10 秒的尾句；`unknown` 与 `Suppress` 只去掉旧尾句。只改网关自己的固定后缀，不改写上游的自然语言。
 - 分组 advisor（γ）只读末位兜底的分组快照（`lastResortGroups` 中未过期的条目，沿用既有的 2 秒缓存 `lastResortCandidateTTL`，锁内取引用、锁外计算），不做冷读取，不访问 Redis 或数据库。快照只在单一候选判断、末位兜底或原无号提示用过时才有；缺失或过期时返回 `unknown`。候选只算未尝试（排除 `RequestState` 里本请求已失败的账号）、模型与平台兼容、能力允许、无硬罚的账号；OpenAI 另看进程内的按模型屏蔽。原 `NoAccountRetryAfter` 保留给 HTTP 无号提示【待契约：γ 的 advisor 方法名】。
 
@@ -234,7 +235,7 @@
 | 本请求此刻还有健康备选 | `healthy_candidate` | 1 秒 |
 | 组内没有健康候选，且能算出最早恢复时间 | `recovery` | 向上取整并夹到 2–10 秒；正文 “try again in Ns” 的 N 与之一致 |
 | 恢复时间未知 | `unknown` | 不带 |
-| 回合封顶、余额终态、内容拒绝 | `turn_cap`、`balance_terminal`、`content_rejection`（`Suppress`） | 不带，并删除原有的重试尾句 |
+| 回合封顶、用户自身余额不足的终态、内容拒绝 | `turn_cap`、`balance_terminal`、`content_rejection`（`Suppress`） | 不带，并删除原有的重试尾句。上游账号余额不足（可换号）与在途预留超额不算终态 |
 | 请求上没有 advice | — | 保持 0.4.3 |
 
 - 写入位置：`error.headers.retry-after`（Codex 从这里读重试等待）。
