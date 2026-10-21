@@ -1905,6 +1905,16 @@
       "literal": "type passthroughCancelBody struct"
     },
     {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_turn_state_test.go",
+      "literal": "func TestOpenAIPassthroughHeartbeatCommitsAttemptHeaders"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_turn_state_test.go",
+      "literal": "func TestOpenAIPassthroughSwitchAfterHeartbeatKeepsFirstHeadersAndGuardStripsEcho"
+    },
+    {
       "id": "xy-resilience-v2-handler-exits",
       "path": "backend/internal/handler/gateway_convert_usage_test.go",
       "literal": "func TestGatewayConvertBreakAfterOutputBillsPartialUsageOnce"
