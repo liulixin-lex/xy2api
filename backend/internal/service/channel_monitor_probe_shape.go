@@ -1,12 +1,15 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 // 探测请求形状：每种协议一个“最小安全请求”（不带 temperature、top_p、stream_options），
@@ -23,6 +26,9 @@ const (
 	probeReasoningResponsesEffort
 	// probeReasoningGeminiNoThinking Gemini flash：generationConfig.thinkingConfig.thinkingBudget: 0。
 	probeReasoningGeminiNoThinking
+	// probeReasoningGeminiMinThinking Gemini pro（不能关闭思考）：thinkingBudget 取最低允许值 128，
+	// 避免思考用光输出上限、正文为空。
+	probeReasoningGeminiMinThinking
 )
 
 //nolint:gochecknoglobals // 只读的模型族匹配规则。
@@ -33,6 +39,8 @@ var (
 	probeGrokReasoningRegex = regexp.MustCompile(`^grok-(?:3-mini|[4-9]|\d{2,}|code)`)
 	// probeGeminiFlashThinkingRegex Gemini 2.5/3 及以后的 flash 系（可以关闭思考）。
 	probeGeminiFlashThinkingRegex = regexp.MustCompile(`^gemini-(?:2\.5|[3-9](?:\.\d+)?|\d{2,})-flash`)
+	// probeGeminiProThinkingRegex Gemini 2.5/3 及以后的 pro 系（思考不能关闭，只能压低）。
+	probeGeminiProThinkingRegex = regexp.MustCompile(`^gemini-(?:2\.5|[3-9](?:\.\d+)?|\d{2,})-pro`)
 	// probeGeminiLegacyRegex 不思考的旧 Gemini（1.x、2.0）。
 	probeGeminiLegacyRegex = regexp.MustCompile(`^gemini-(?:1\.|2\.0)`)
 	// probeReasoningNameRegex 按名字识别的推理模型（与 provider 无关，例如经中转的其他家模型）。
@@ -95,6 +103,9 @@ func probeReasoningParam(protocol probeProtocol, provider, model string) probeRe
 		if probeGeminiFlashThinkingRegex.MatchString(name) {
 			return probeReasoningGeminiNoThinking
 		}
+		if probeGeminiProThinkingRegex.MatchString(name) {
+			return probeReasoningGeminiMinThinking
+		}
 		return probeReasoningNone
 	default:
 		return probeReasoningNone
@@ -138,7 +149,7 @@ func probeReasoningContainerKey(kind probeReasoningKind) string {
 		return "reasoning_effort"
 	case probeReasoningResponsesEffort:
 		return "reasoning"
-	case probeReasoningGeminiNoThinking:
+	case probeReasoningGeminiNoThinking, probeReasoningGeminiMinThinking:
 		return "generationConfig"
 	default:
 		return ""
@@ -164,13 +175,29 @@ func (f probeShapeFix) merge(o probeShapeFix) probeShapeFix {
 }
 
 // probeShapeFixCache 并发安全的修正表。条目极少（监控数 × 模型数）；超过上限整表清空、重新学习。
+// 修正 monitorProbeShapeFixTTL 后过期：一次偶发的误判不会永久去掉推理参数、拖慢探测。
 type probeShapeFixCache struct {
-	mu    sync.Mutex
-	fixes map[string]probeShapeFix
+	mu        sync.Mutex
+	fixes     map[string]probeShapeFix
+	learnedAt map[string]time.Time
+	now       func() time.Time
 }
 
 //nolint:gochecknoglobals // 进程内的参数修正表，重启后最多再学一次。
 var monitorProbeShapeFixes = &probeShapeFixCache{fixes: map[string]probeShapeFix{}}
+
+// probeKeyDigest 修正表按 Key 区分：同一 endpoint 与模型、不同 Key（分组）的上游可能接受的参数不同。
+func probeKeyDigest(apiKey string) string {
+	sum := sha256.Sum256([]byte(apiKey))
+	return hex.EncodeToString(sum[:8])
+}
+
+func (c *probeShapeFixCache) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
+}
 
 func probeShapeKey(provider, endpoint, apiMode, model string) string {
 	return provider + "|" + endpoint + "|" + apiMode + "|" + model
@@ -179,6 +206,10 @@ func probeShapeKey(provider, endpoint, apiMode, model string) string {
 func (c *probeShapeFixCache) get(key string) probeShapeFix {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if at, ok := c.learnedAt[key]; ok && c.clock().Sub(at) > monitorProbeShapeFixTTL {
+		delete(c.fixes, key)
+		delete(c.learnedAt, key)
+	}
 	return c.fixes[key]
 }
 
@@ -187,8 +218,13 @@ func (c *probeShapeFixCache) learn(key string, fix probeShapeFix) {
 	defer c.mu.Unlock()
 	if _, exists := c.fixes[key]; !exists && len(c.fixes) >= monitorProbeShapeFixMaxEntries {
 		c.fixes = map[string]probeShapeFix{}
+		c.learnedAt = nil
+	}
+	if c.learnedAt == nil {
+		c.learnedAt = map[string]time.Time{}
 	}
 	c.fixes[key] = c.fixes[key].merge(fix)
+	c.learnedAt[key] = c.clock()
 }
 
 // probeBodyInfo 构造出的请求体的几个关键事实，供读法与参数修正使用。
@@ -296,8 +332,11 @@ func probeDefaultBody(protocol probeProtocol, model, prompt string, stream bool,
 		}
 	case probeProtocolGemini:
 		generation := map[string]any{"maxOutputTokens": limit}
-		if reasoning == probeReasoningGeminiNoThinking {
+		switch reasoning {
+		case probeReasoningGeminiNoThinking:
 			generation["thinkingConfig"] = map[string]any{"thinkingBudget": 0}
+		case probeReasoningGeminiMinThinking:
+			generation["thinkingConfig"] = map[string]any{"thinkingBudget": monitorProbeGeminiMinThinkingBudget}
 		}
 		return map[string]any{
 			"contents": []map[string]any{
@@ -371,7 +410,7 @@ func (p *probePlan) expected() string {
 }
 
 func (p *probePlan) fixKey() string {
-	return probeShapeKey(p.provider, p.endpoint, p.apiMode, p.model)
+	return probeShapeKey(p.provider, p.endpoint, p.apiMode, p.model) + "|" + probeKeyDigest(p.apiKey)
 }
 
 // build 按修正 fix 构造请求。

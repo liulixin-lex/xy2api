@@ -4,8 +4,10 @@ package service
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -37,8 +39,8 @@ func TestProbeModelFamilies(t *testing.T) {
 		{MonitorProviderGemini, probeProtocolGemini, "gemini-2.5-flash", probeReasoningGeminiNoThinking, true},
 		{MonitorProviderGemini, probeProtocolGemini, "gemini-2.5-flash-lite", probeReasoningGeminiNoThinking, true},
 		{MonitorProviderGemini, probeProtocolGemini, "gemini-3.6-flash", probeReasoningGeminiNoThinking, true},
-		{MonitorProviderGemini, probeProtocolGemini, "gemini-2.5-pro", probeReasoningNone, true},
-		{MonitorProviderGemini, probeProtocolGemini, "gemini-3-pro-preview", probeReasoningNone, true},
+		{MonitorProviderGemini, probeProtocolGemini, "gemini-2.5-pro", probeReasoningGeminiMinThinking, true},
+		{MonitorProviderGemini, probeProtocolGemini, "gemini-3-pro-preview", probeReasoningGeminiMinThinking, true},
 		{MonitorProviderGemini, probeProtocolGemini, "gemini-2.0-flash", probeReasoningNone, false},
 		{MonitorProviderAnthropic, probeProtocolAnthropic, "claude-opus-5-5", probeReasoningNone, false},
 		{MonitorProviderAnthropic, probeProtocolAnthropic, "claude-sonnet-4-5-thinking", probeReasoningNone, true},
@@ -98,7 +100,8 @@ func TestBuildProbeBody_MinimalSafeShapes(t *testing.T) {
 			map[string]any{"generationConfig": map[string]any{"maxOutputTokens": float64(1024), "thinkingConfig": map[string]any{"thinkingBudget": float64(0)}}}},
 		{"gemini pro", MonitorProviderGemini, "gemini-2.5-pro", nil,
 			"https://relay.example/base/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse",
-			map[string]any{"generationConfig": map[string]any{"maxOutputTokens": float64(1024)}}},
+			map[string]any{"generationConfig": map[string]any{"maxOutputTokens": float64(1024),
+				"thinkingConfig": map[string]any{"thinkingBudget": float64(128)}}}},
 		{"kimi", MonitorProviderKimi, "kimi-k2.5", nil, "https://relay.example/base/v1/chat/completions",
 			map[string]any{"model": "kimi-k2.5", "max_tokens": float64(1024), "stream": true}},
 		{"zhipu", MonitorProviderZhipu, "glm-5.3-flash", nil, "https://relay.example/base/v1/chat/completions",
@@ -303,4 +306,41 @@ func TestProbeShapeFixCache(t *testing.T) {
 		cache.learn(probeShapeKey("p", "e", "m", strings.Repeat("x", i+1)), probeShapeFix{NoStream: true})
 	}
 	require.LessOrEqual(t, len(cache.fixes), monitorProbeShapeFixMaxEntries)
+}
+
+func TestProbeGeminiProGetsMinimumThinkingBudget(t *testing.T) {
+	require.Equal(t, probeReasoningGeminiMinThinking, probeReasoningParam(probeProtocolGemini, MonitorProviderGemini, "gemini-2.5-pro"))
+	require.Equal(t, probeReasoningGeminiMinThinking, probeReasoningParam(probeProtocolGemini, MonitorProviderGemini, "gemini-3-pro-preview"))
+	require.Equal(t, probeReasoningNone, probeReasoningParam(probeProtocolGemini, MonitorProviderGemini, "gemini-1.5-pro"))
+
+	body := probeDefaultBody(probeProtocolGemini, "gemini-2.5-pro", "q", true, monitorChallengeReasoningMaxTokens, probeReasoningGeminiMinThinking)
+	generation, _ := body["generationConfig"].(map[string]any)
+	thinking, _ := generation["thinkingConfig"].(map[string]any)
+	require.Equal(t, monitorProbeGeminiMinThinkingBudget, thinking["thinkingBudget"])
+}
+
+func TestProbeShapeFixCacheExpiresAndIsPerKey(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	cache := &probeShapeFixCache{fixes: map[string]probeShapeFix{}, now: func() time.Time { return now }}
+	key := probeShapeKey(MonitorProviderOpenAI, "https://e", MonitorAPIModeChatCompletions, "gpt-5.5") + "|" + probeKeyDigest("sk-a")
+	cache.learn(key, probeShapeFix{DropReasoning: true})
+	require.True(t, cache.get(key).DropReasoning)
+
+	now = now.Add(monitorProbeShapeFixTTL + time.Second)
+	require.Equal(t, probeShapeFix{}, cache.get(key), "a learned fix expires so a one-off rejection does not stick")
+
+	require.NotEqual(t, probeKeyDigest("sk-a"), probeKeyDigest("sk-b"))
+	planA, err := newProbePlan(MonitorProviderOpenAI, "https://e", "sk-a", "gpt-5.5", nil)
+	require.NoError(t, err)
+	planB, err := newProbePlan(MonitorProviderOpenAI, "https://e", "sk-b", "gpt-5.5", nil)
+	require.NoError(t, err)
+	require.NotEqual(t, planA.fixKey(), planB.fixKey(), "fixes learned for one key must not change another key's probes")
+}
+
+func TestProbeSameHostRedirect(t *testing.T) {
+	from, _ := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", nil)
+	same, _ := http.NewRequest(http.MethodPost, "https://gateway.example/v1/other", nil)
+	other, _ := http.NewRequest(http.MethodPost, "https://elsewhere.example/v1/chat/completions", nil)
+	require.NoError(t, probeSameHostRedirect(same, []*http.Request{from}))
+	require.ErrorIs(t, probeSameHostRedirect(other, []*http.Request{from}), http.ErrUseLastResponse)
 }

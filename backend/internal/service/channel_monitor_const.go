@@ -145,6 +145,10 @@ const (
 	monitorChallengeReasoningMaxTokens = 1024
 	// monitorProbeReasoningEffort 已知支持的模型族注入的推理强度（各家最普遍接受的最低档）。
 	monitorProbeReasoningEffort = "low"
+	// monitorProbeGeminiMinThinkingBudget Gemini pro 系允许的最低思考预算。
+	monitorProbeGeminiMinThinkingBudget = 128
+	// monitorProbeShapeFixTTL 学到的参数修正的有效期，过期后重新尝试原始请求形状。
+	monitorProbeShapeFixTTL = 6 * time.Hour
 	// monitorProbeShapeFixMaxEntries 进程内参数修正表的条目上限。
 	monitorProbeShapeFixMaxEntries = 1024
 
