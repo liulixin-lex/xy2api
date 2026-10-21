@@ -13,6 +13,7 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/domain"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 )
 
 // ChannelMonitorRepository 渠道监控数据访问接口。
@@ -82,6 +83,9 @@ type ChannelMonitorService struct {
 	// 之后构造，构造参数注入会破坏既有依赖顺序）。nil 时 fail-closed：
 	// 配额模式的检测产出「未配置」错误快照，Create/Update 关联账号直接报错。
 	quotaFetcher *ChannelMonitorQuotaFetcher
+	// checkFlight 合并同一监控的并发检测（定时与手动“立即检测”），
+	// 后到的调用复用正在进行的那一轮结果。
+	checkFlight singleflight.Group
 }
 
 const maxChannelMonitorNameRunes = 100
@@ -603,6 +607,29 @@ func (s *ChannelMonitorService) ListHistory(ctx context.Context, id int64, model
 // 按 check_mode 分派：probe（默认，现状探活）/ quota（仅查关联账号配额，
 // 零 LLM 成本）/ quota_probe（探活 + 配额快照挂主模型行）。
 func (s *ChannelMonitorService) RunCheck(ctx context.Context, id int64) ([]*CheckResult, error) {
+	v, err, _ := s.checkFlight.Do(strconv.FormatInt(id, 10), func() (any, error) {
+		return s.runCheckOnce(ctx, id)
+	})
+	results, _ := v.([]*CheckResult)
+	return results, err
+}
+
+// ClaimScheduledCheck 认领一轮定时检测（跨实例去重）。仓储不支持认领时总是返回 true。
+func (s *ChannelMonitorService) ClaimScheduledCheck(ctx context.Context, id int64, minGap time.Duration) (bool, error) {
+	claimer, ok := s.repo.(channelMonitorCheckClaimer)
+	if !ok {
+		return true, nil
+	}
+	return claimer.ClaimCheck(ctx, id, minGap)
+}
+
+// channelMonitorCheckClaimer 是仓储的可选能力：按 last_checked_at 原子认领一轮检测。
+type channelMonitorCheckClaimer interface {
+	ClaimCheck(ctx context.Context, id int64, minGap time.Duration) (bool, error)
+}
+
+func (s *ChannelMonitorService) runCheckOnce(ctx context.Context, id int64) ([]*CheckResult, error) {
+	startedAt := time.Now()
 	rt := s.probeRuntime(ctx)
 	if !rt.Enabled {
 		return nil, ErrChannelMonitorDisabled
@@ -629,7 +656,11 @@ func (s *ChannelMonitorService) RunCheck(ctx context.Context, id int64) ([]*Chec
 	default:
 		results = s.runChecksConcurrent(ctx, m)
 	}
-	s.persistCheckResults(ctx, m, results)
+	if err := ctx.Err(); err != nil {
+		// 监控被停用、删除或进程停机时取消的检测不写历史，避免留下半截结果。
+		return nil, err
+	}
+	s.persistCheckResults(ctx, m, results, startedAt)
 	return results, nil
 }
 
@@ -669,7 +700,7 @@ func attachQuotaSnapshot(results []*CheckResult, snapshot *domain.MonitorQuotaSn
 
 // persistCheckResults 写入本次检测的历史记录并更新 last_checked_at。
 // 任一写库失败都只记日志，不影响调用方拿到 results（与 MVP 期望一致：宁可漏记历史也要先返回结果）。
-func (s *ChannelMonitorService) persistCheckResults(ctx context.Context, m *ChannelMonitor, results []*CheckResult) {
+func (s *ChannelMonitorService) persistCheckResults(ctx context.Context, m *ChannelMonitor, results []*CheckResult, startedAt time.Time) {
 	rows := make([]*ChannelMonitorHistoryRow, 0, len(results))
 	for _, r := range results {
 		rows = append(rows, &ChannelMonitorHistoryRow{
@@ -687,7 +718,8 @@ func (s *ChannelMonitorService) persistCheckResults(ctx context.Context, m *Chan
 		slog.Error("channel_monitor: insert history failed",
 			"monitor_id", m.ID, "name", m.Name, "error", err)
 	}
-	if err := s.repo.MarkChecked(ctx, m.ID, time.Now()); err != nil {
+	// 记本轮开始时间：定时认领按“开始到开始”的间隔判断，检测耗时不会挤掉下一轮。
+	if err := s.repo.MarkChecked(ctx, m.ID, startedAt); err != nil {
 		slog.Error("channel_monitor: mark checked failed",
 			"monitor_id", m.ID, "error", err)
 	}
