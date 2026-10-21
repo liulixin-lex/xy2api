@@ -943,6 +943,7 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		Message:              upstreamMsg,
 		Detail:               upstreamDetail,
 		UpstreamResponseBody: upstreamDetail,
+		ResilienceCategory:   opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
 	})
 	return s.newOpenAIAccountFailoverError(
 		account,
@@ -1011,6 +1012,7 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 		Message:              upstreamMsg,
 		Detail:               upstreamDetail,
 		UpstreamResponseBody: upstreamDetail,
+		ResilienceCategory:   opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
 	})
 	// context-window 超限是确定性请求失败（shouldFailoverOpenAIPassthroughResponse
 	// 已保证不切号），其文案对客户端可操作（如触发自动压缩）；在净化信封内保留

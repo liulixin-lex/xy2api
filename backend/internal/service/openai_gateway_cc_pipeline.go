@@ -119,6 +119,7 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 		AccountID:          account.ID,
 		AccountName:        account.Name,
 		UpstreamStatusCode: resp.StatusCode,
+		ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, respBody, upstreamMsg),
 		UpstreamRequestID:  resp.Header.Get("x-request-id"),
 		Kind:               "failover",
 		Message:            upstreamMsg,
