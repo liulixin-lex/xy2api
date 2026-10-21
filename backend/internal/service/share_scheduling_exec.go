@@ -9,7 +9,6 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
-	"github.com/liulixin-lex/xy2api/internal/pkg/servertiming"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/sharesched"
 )
@@ -17,29 +16,18 @@ import (
 const (
 	shareWaitInitialBackoff = 20 * time.Millisecond
 	shareWaitMaxBackoff     = 250 * time.Millisecond
-	shareShadowTimeout      = 3 * time.Second
-	shareShadowConcurrency  = 32
 )
 
 // shareSelectionTrace follows one selection call. The share executor fills
 // in its decision; the selection result records the served account for
-// cache attribution and starts the shadow comparison.
+// cache attribution.
 type shareSelectionTrace struct {
 	groupID    int64
 	sessionKey string
 	switched   bool
 	reason     sharesched.Reason
-	// shadow runs the share plan off the request path once the original
-	// scheduler has chosen; nil outside shadow groups.
-	shadow     func(original int64)
-	shadowDone bool
-	// sampled selections feed cache attribution and the selection cost;
-	// meter, when the timing hooks are installed, counts their Redis and
-	// database calls up to the selection result.
-	sampled  bool
-	costDone bool
-	meter    *servertiming.Collector
-	start    time.Time
+	// sampled selections feed cache attribution.
+	sampled bool
 }
 
 type shareSelectionTraceKey struct{}
@@ -49,14 +37,8 @@ func (s *ShareSchedulingService) withSelectionTrace(ctx context.Context, groupID
 	if s == nil {
 		return ctx, nil
 	}
-	trace := &shareSelectionTrace{groupID: groupID, sessionKey: sessionKey, switched: switched, start: time.Now()}
-	if settings := s.Settings(); settings.CacheAttribution && shareAttributionSampled(sessionKey, settings.AttributionSampleRate) {
-		trace.sampled = true
-		if s.meterIO && !servertiming.Active(ctx) {
-			trace.meter = servertiming.New(trace.start)
-			ctx = servertiming.WithCollector(ctx, trace.meter)
-		}
-	}
+	trace := &shareSelectionTrace{groupID: groupID, sessionKey: sessionKey, switched: switched,
+		sampled: shareAttributionSampled(sessionKey, s.attributionRate)}
 	return context.WithValue(ctx, shareSelectionTraceKey{}, trace), trace
 }
 
@@ -88,92 +70,81 @@ func (s *ShareSchedulingService) recordSelection(ctx context.Context, account *A
 		s.traces.put(requestID, shareTrace{groupID: trace.groupID, sessionKey: trace.sessionKey, accountID: account.ID,
 			platform: account.Platform, reason: trace.reason, switched: trace.switched, at: time.Now()})
 	}
-	if trace.sampled && !trace.costDone {
-		trace.costDone = true
-		s.recordSelectionCost(trace)
-	}
-	if trace.shadow != nil && !trace.shadowDone {
-		trace.shadowDone = true
-		s.startShadow(trace.groupID, trace.shadow, account.ID)
-	}
-}
-
-// startShadow runs a shadow comparison off the request path, or counts it as
-// skipped when shareShadowConcurrency comparisons are already running.
-func (s *ShareSchedulingService) startShadow(groupID int64, run func(original int64), original int64) {
-	select {
-	case s.shadows <- struct{}{}:
-	default:
-		s.stats.add(shareStatsKindShare, groupID, time.Now(), shareStatsShadowSkippedField, 1)
-		return
-	}
-	go func() {
-		defer func() { <-s.shadows }()
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Warn("share_scheduling.shadow_panic", "group_id", groupID, "panic", r)
-			}
-		}()
-		run(original)
-	}()
-}
-
-// recordSelectionCost adds a sampled selection's time, and when metered its
-// Redis round trips and database queries, to the counters of its scheduler:
-// share, shadow (the original choice plus the shadow binding read) or
-// original.
-func (s *ShareSchedulingService) recordSelectionCost(trace *shareSelectionTrace) {
-	mode := shareTTFTOriginal
-	switch {
-	case trace.reason != "":
-		mode = string(sharesched.SchedulerShare)
-	case trace.shadow != nil:
-		mode = string(sharesched.SchedulerShadow)
-	}
-	now := time.Now()
-	prefix := shareStatsSelectionPrefix + mode + ":"
-	gid := trace.groupID
-	s.stats.add(shareStatsKindCache, gid, now, prefix+shareSelectionSamples, 1)
-	s.stats.add(shareStatsKindCache, gid, now, prefix+shareSelectionMicros, now.Sub(trace.start).Microseconds()+1)
-	if trace.meter == nil {
-		return
-	}
-	redis := trace.meter.Summary(servertiming.MetricRedis)
-	db := trace.meter.Summary(servertiming.MetricDatabase)
-	s.stats.add(shareStatsKindCache, gid, now, prefix+shareSelectionIOSamples, 1)
-	s.stats.add(shareStatsKindCache, gid, now, prefix+shareSelectionRedisTrips, int64(redis.RoundTrips))
-	s.stats.add(shareStatsKindCache, gid, now, prefix+shareSelectionRedisMicros, redis.Busy.Microseconds())
-	s.stats.add(shareStatsKindCache, gid, now, prefix+shareSelectionDBQueries, db.Count)
-	trace.meter = nil
 }
 
 // newRequest builds the kernel request of one selection.
 func (s *ShareSchedulingService) newRequest(ctx context.Context, gp *shareGroupPolicy, platform, model, sessionHash string, binding sharesched.Binding) (sharesched.Request, sharesched.KeySource) {
 	key, source := shareAffinityKey(&gp.policy, sessionHash)
 	req := sharesched.Request{GroupID: gp.groupID, Key: key, Now: time.Now(), Binding: binding,
-		Cache: shareCacheProfile(ctx, &gp.policy, platform, model), Correction: s.correctionsFor(gp.groupID)}
+		Cache: shareCacheProfile(ctx, platform, model)}
 	if key == "" {
 		req.Key, req.Sessionless, req.Binding = shareSessionlessKey(), true, sharesched.Binding{}
 	}
 	return req, source
 }
 
+// shareCandidate is the candidate of an account with its share weight in
+// the group; the adapters fill in eligibility.
+func (s *ShareSchedulingService) shareCandidate(groupID int64, acc *Account, now time.Time) sharesched.Candidate {
+	w := s.shareWeight(groupID, acc, now)
+	return sharesched.Candidate{AccountID: acc.ID, Platform: acc.Platform, Class: shareAccountClass(acc),
+		Priority: acc.Priority, LoadFactor: w.LoadFactor, Weight: w.Effective}
+}
+
 // shareMissingBoundCandidate turns a bound account that the schedulable
 // listing left out into an ineligible candidate. Listings drop rate-limited,
-// overloaded and temporarily unschedulable accounts; with its recovery time
-// such an account can keep its binding through a short outage (soft spill).
-// Anything else is treated as gone.
-func (s *ShareSchedulingService) shareMissingBoundCandidate(acc *Account, now time.Time) (sharesched.Candidate, bool) {
+// overloaded and temporarily unschedulable accounts; when gateway resilience
+// rates the state a soft penalty, the account can keep its binding through
+// the short outage (soft spill). Anything else is treated as gone.
+func (s *ShareSchedulingService) shareMissingBoundCandidate(groupID int64, acc *Account, model string, now time.Time, penalty resiliencePenaltyFunc) (sharesched.Candidate, bool) {
 	if acc == nil {
 		return sharesched.Candidate{}, false
 	}
-	reason, recoverAt := shareAccountStateReason(acc, now)
+	reason, end := shareAccountStateReason(acc, now)
+	recoverAt := shareSoftRecovery(acc, model, now, penalty, end)
 	if recoverAt.IsZero() {
 		return sharesched.Candidate{}, false
 	}
 	s.observeEligibility(acc.ID, false, reason, now)
-	return sharesched.Candidate{AccountID: acc.ID, Platform: acc.Platform, Class: shareAccountClass(acc),
-		Priority: acc.Priority, Concurrency: acc.Concurrency, Reason: reason, RecoverAt: recoverAt}, true
+	c := s.shareCandidate(groupID, acc, now)
+	c.Reason, c.RecoverAt = reason, recoverAt
+	return c, true
+}
+
+// resiliencePenaltyFunc rates an account's restrictions as gateway
+// resilience does (resiliencePenaltyOf, or the OpenAI variant).
+type resiliencePenaltyFunc func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string)
+
+// shareLegacySoftSpillMax is the soft-spill bound of 0.3.0 (its default
+// policy value), kept while gateway resilience is off.
+const shareLegacySoftSpillMax = 300 * time.Second
+
+// shareSoftRecovery is when a soft-penalised account is expected back, or
+// zero when its state is hard or the recovery is unknown. Share scheduling
+// keeps a session's binding through a short outage only on the strength of
+// this time, so it agrees with gateway resilience on soft and hard states
+// (design §4): a temporary state whose reason is empty or not a soft prefix
+// is hard, and so is anything that lasts beyond the hard rate-limit
+// threshold.
+//
+// stateEnd is when the state that rejected the account ends, as the
+// adapter read it. With the resilience master switch off the 0.3.0 rule
+// applies: any state that ends within shareLegacySoftSpillMax.
+func shareSoftRecovery(acc *Account, model string, now time.Time, penalty resiliencePenaltyFunc, stateEnd time.Time) time.Time {
+	if !resilience.Current().FailureOn() {
+		if stateEnd.IsZero() || stateEnd.Sub(now) > shareLegacySoftSpillMax {
+			return time.Time{}
+		}
+		return stateEnd
+	}
+	if penalty == nil {
+		penalty = resiliencePenaltyOf
+	}
+	tier, recoverAt, _ := penalty(acc, model, now)
+	if tier != resilience.TierSoft || recoverAt.IsZero() || recoverAt.Sub(now) > resilience.HardRateLimitThreshold {
+		return time.Time{}
+	}
+	return recoverAt
 }
 
 // shareClassNames interns account class names; building one per candidate
@@ -207,6 +178,15 @@ func shareAccountClass(acc *Account) string {
 	return name
 }
 
+// shareModelLimitEnd is when the account's rate limit for the model ends;
+// zero when it is not limited.
+func shareModelLimitEnd(ctx context.Context, acc *Account, model string, now time.Time) time.Time {
+	if remaining := acc.GetRateLimitRemainingTimeWithContext(ctx, model); remaining > 0 {
+		return now.Add(remaining)
+	}
+	return time.Time{}
+}
+
 // shareAccountStateReason maps Account.IsSchedulable onto reason codes and
 // the expected recovery time of temporary states.
 func shareAccountStateReason(a *Account, now time.Time) (sharesched.Reason, time.Time) {
@@ -228,7 +208,8 @@ func shareAccountStateReason(a *Account, now time.Time) (sharesched.Reason, time
 	case a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil):
 		if resilience.Current().FailureOn() && resilience.IsBalancePause(a.TempUnschedulableReason) {
 			// Out of balance at the relay is a hard state: the session moves
-			// at once instead of waiting out the pause (design §4.2).
+			// at once instead of waiting out the pause. With resilience off
+			// it is an ordinary pause, as in 0.3.0.
 			return sharesched.ReasonBalanceExhausted, time.Time{}
 		}
 		return sharesched.ReasonTempUnschedulable, *a.TempUnschedulableUntil
@@ -261,7 +242,6 @@ type shareExecutor struct {
 	cfg         config.GatewaySchedulingConfig
 	// key is the binding cache key; empty for sessionless requests.
 	key      string
-	ttl      time.Duration
 	accounts map[int64]*Account
 	// limit is the account's slot limit.
 	limit func(acc *Account) int
@@ -279,6 +259,28 @@ type shareExecutor struct {
 	reason   sharesched.Reason
 	skipped  map[int64]sharesched.Reason
 	attempts int
+	// loadGate skips new placements and spills on accounts whose load rate
+	// is 100 or more, as the original load-aware selection does (design §5).
+	// The bound account of an affinity hit is judged by its slots only.
+	loadGate bool
+	// loadOrder lists the accounts whose load is read, in listing order: a
+	// stable list lets the load cache of the concurrency service serve
+	// repeated reads, as it does for the original selection.
+	loadOrder []int64
+	loads     map[int64]*AccountLoadInfo
+	loadsRead bool
+}
+
+// shareLoadOrder is the load read list of a selection: its usable
+// candidates in listing order.
+func shareLoadOrder(cands []sharesched.Candidate) []int64 {
+	out := make([]int64, 0, len(cands))
+	for _, c := range cands {
+		if c.Eligible && !c.Excluded {
+			out = append(out, c.AccountID)
+		}
+	}
+	return out
 }
 
 func (e *shareExecutor) skip(id int64, reason sharesched.Reason) {
@@ -305,6 +307,37 @@ func (e *shareExecutor) tryAcquireWithin(ctx context.Context, acc *Account, limi
 	return res
 }
 
+// saturated reports whether acc's load rate, (in flight + waiting) × 100 ÷
+// effective load factor, is 100 or more. Loads are read once per selection;
+// a failed read counts as not saturated, as the original selection falls
+// back to its plain order.
+func (e *shareExecutor) saturated(d sharesched.Decision, acc *Account) bool {
+	if !e.loadGate || e.concurrency == nil {
+		return false
+	}
+	if !e.loadsRead {
+		e.loadsRead = true
+		order := e.loadOrder
+		if order == nil {
+			order = make([]int64, 0, len(d.Steps))
+			for _, step := range d.Steps {
+				order = append(order, step.AccountID)
+			}
+		}
+		accounts := make([]AccountWithConcurrency, 0, len(order))
+		for _, id := range order {
+			if a := e.accounts[id]; a != nil {
+				accounts = append(accounts, AccountWithConcurrency{ID: a.ID, MaxConcurrency: a.EffectiveLoadFactor()})
+			}
+		}
+		if loads, err := e.concurrency.GetAccountsLoadBatch(e.ctx, accounts); err == nil {
+			e.loads = loads
+		}
+	}
+	info := e.loads[acc.ID]
+	return info != nil && info.LoadRate >= 100
+}
+
 // acquire walks the steps in order. Only the bound account of an affinity
 // hit is waited for, within the plan's budget; everything else spills.
 func (e *shareExecutor) acquire(d sharesched.Decision) *shareOutcome {
@@ -313,11 +346,16 @@ func (e *shareExecutor) acquire(d sharesched.Decision) *shareOutcome {
 		if acc == nil {
 			continue
 		}
+		boundHit := i == 0 && d.Reason == sharesched.ReasonAffinityHit
+		if !boundHit && e.saturated(d, acc) {
+			e.skip(acc.ID, sharesched.ReasonSaturated)
+			continue
+		}
 		e.attempts++
 		limit := e.limit(acc)
 		res := e.tryAcquire(acc, limit)
 		var waited time.Duration
-		if res == nil && i == 0 && d.Wait > 0 && d.Reason == sharesched.ReasonAffinityHit {
+		if res == nil && boundHit && d.Wait > 0 {
 			res, waited = e.waitForSlot(acc, limit, d.Wait, d.MaxWaiting)
 		}
 		if res == nil {
@@ -409,10 +447,10 @@ func (e *shareExecutor) finish(acc *Account, acquired bool, release func(), wait
 	}
 	var intent *shareBindingIntent
 	if e.key != "" {
-		intent = &shareBindingIntent{cache: e.cache, groupID: e.gp.groupID, key: e.key, write: write, ttl: e.ttl}
+		intent = &shareBindingIntent{cache: e.cache, groupID: e.gp.groupID, key: e.key, write: write, ttl: sharesched.BindingTTL}
 		if acquired && !gatewayProfitControlGateActive(e.ctx) {
 			intent.done = true
-			if err := applyShareBindingWrite(e.ctx, e.cache, e.gp.groupID, e.key, acc.ID, write, e.ttl); err != nil {
+			if err := applyShareBindingWrite(e.ctx, e.cache, e.gp.groupID, e.key, acc.ID, write, sharesched.BindingTTL); err != nil {
 				slog.Debug("share_scheduling.binding_write_failed", "group_id", e.gp.groupID, "account_id", acc.ID, "error", err)
 			}
 		}
@@ -482,14 +520,14 @@ func (e *shareExecutor) run(rec *shareDecisionRecord, req sharesched.Request, ca
 				routed = append(routed, c)
 			}
 		}
-		decision := sharesched.Plan(&e.gp.policy, req, routed)
+		decision := sharesched.Plan(req, routed)
 		if out := e.acquire(decision); out != nil {
 			rec.routing = sharesched.ReasonModelRouting
 			return out, decision
 		}
 		rec.routing = sharesched.ReasonModelRoutingFallback
 	}
-	decision := sharesched.Plan(&e.gp.policy, req, cands)
+	decision := sharesched.Plan(req, cands)
 	return e.serve(decision), decision
 }
 
@@ -508,8 +546,7 @@ func (s *ShareSchedulingService) readBinding(ctx context.Context, cache GatewayC
 	if key == "" {
 		return sharesched.Binding{}
 	}
-	ttl := time.Duration(gp.policy.Affinity.TTLSeconds) * time.Second
-	binding, err := readShareBinding(ctx, cache, gp.groupID, key, ttl)
+	binding, err := readShareBinding(ctx, cache, gp.groupID, key, sharesched.BindingTTL)
 	if err != nil {
 		slog.Debug("share_scheduling.binding_read_failed", "group_id", gp.groupID, "error", err)
 		return sharesched.Binding{}

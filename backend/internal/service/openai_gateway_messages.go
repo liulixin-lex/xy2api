@@ -16,6 +16,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
@@ -988,6 +989,39 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	firstChunk := true
 	clientDisconnected := false
 	clientOutputStarted := false
+	stopPreludeCancel := func() bool { return false }
+	writeClient := func(data string) error {
+		n, err := fmt.Fprint(c.Writer, data)
+		if n > 0 {
+			clientOutputStarted = true
+			stopPreludeCancel()
+		}
+		if err == nil && n != len(data) {
+			return io.ErrShortWrite
+		}
+		return err
+	}
+	stagePrelude := resilience.Current().PreludeStagingOn()
+	preludeTrace := beginOpenAIPreludeTrace(c.Request.Context(), stagePrelude)
+	if stagePrelude {
+		stopPreludeCancel = context.AfterFunc(c.Request.Context(), func() { _ = resp.Body.Close() })
+		defer func() {
+			// Cancellation can become visible before its AfterFunc starts.
+			// If cleanup wins that race, it must still close the upstream.
+			if stopPreludeCancel() && c.Request.Context().Err() != nil {
+				_ = resp.Body.Close()
+			}
+		}()
+	}
+	canReplayPrelude := func() bool {
+		return stagePrelude && c.Request.Context().Err() == nil && !clientDisconnected && !openAIStreamClientOutputStarted(c, clientOutputStarted)
+	}
+	canceledPrelude := func() error {
+		if stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+			return c.Request.Context().Err()
+		}
+		return nil
+	}
 	var streamFailoverErr error
 	var streamNonFailoverErr error
 	terminalEventType := ""
@@ -1064,6 +1098,20 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			)
 			return false
 		}
+		observeOpenAIPreludeCreated(preludeTrace, event.Type)
+		holdPrelude := stagePrelude && openAICompatPreludeEvent(&event, []byte(payload))
+		if stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+			if err := c.Request.Context().Err(); err != nil {
+				streamNonFailoverErr = err
+				return true
+			}
+			// Stop the guard on content even after a downstream write failure,
+			// so the first-output deadline cannot truncate usage draining.
+			if !holdPrelude && !firstEvent.disarm() && !clientDisconnected {
+				streamFailoverErr = s.newOpenAIFirstOutputTimeoutError(c.Request.Context(), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account), firstEvent.started, firstEvent.model, firstEvent.effort, firstEvent.timeout, "first_event", resp.Header)
+				return true
+			}
+		}
 		observer.ObserveOpenAI([]byte(payload), event.Type)
 		s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
 
@@ -1117,9 +1165,12 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				if isBareErrorEvent {
 					shouldFailover = openAIStreamErrorEventShouldFailover(payloadBytes, message)
 				}
-				if !clientOutputStarted && shouldFailover {
+				if !clientDisconnected && !openAIStreamClientOutputStarted(c, clientOutputStarted) && c.Request.Context().Err() == nil && shouldFailover {
 					streamFailoverErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payloadBytes, message, upstreamModel, resp.Header)
 					return true
+				}
+				if !clientOutputStarted {
+					releaseOpenAIPrelude(preludeTrace, event.Type)
 				}
 				s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, payloadBytes, message, clientOutputStarted)
 				message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
@@ -1152,7 +1203,15 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 
 		// Convert to Anthropic events
-		events := apicompat.ResponsesEventToAnthropicEvents(&event, state)
+		if !holdPrelude && !clientOutputStarted && event.Type != "response.created" {
+			releaseOpenAIPrelude(preludeTrace, event.Type)
+		}
+		var events []apicompat.AnthropicStreamEvent
+		if stagePrelude {
+			events = deferredOpenAIAnthropicEvents(&event, state, holdPrelude)
+		} else {
+			events = apicompat.ResponsesEventToAnthropicEvents(&event, state)
+		}
 		if !clientDisconnected {
 			for _, evt := range events {
 				sse, err := apicompat.ResponsesAnthropicEventToSSE(evt)
@@ -1164,7 +1223,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					continue
 				}
 				writeStreamHeaders()
-				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
+				if err := writeClient(sse); err != nil {
 					clientDisconnected = true
 					logger.L().Info("openai messages stream: client disconnected, continuing to drain upstream for billing",
 						zap.String("request_id", requestID),
@@ -1182,7 +1241,13 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 
 	// finalizeStream sends any remaining Anthropic events and returns the result.
 	finalizeStream := func() (*OpenAIForwardResult, error) {
+		if err := canceledPrelude(); err != nil {
+			return nil, err
+		}
 		if streamFailoverErr != nil {
+			if canReplayPrelude() {
+				return nil, streamFailoverErr
+			}
 			return resultWithUsage(), streamFailoverErr
 		}
 		if streamNonFailoverErr != nil {
@@ -1195,7 +1260,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					continue
 				}
 				writeStreamHeaders()
-				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
+				if err := writeClient(sse); err != nil {
 					clientDisconnected = true
 					logger.L().Info("openai messages stream: client disconnected during final flush",
 						zap.String("request_id", requestID),
@@ -1223,11 +1288,17 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 	}
 	missingTerminalErr := func() (*OpenAIForwardResult, error) {
+		if err := canceledPrelude(); err != nil {
+			return nil, err
+		}
+		message := "OpenAI messages stream ended before a terminal event"
+		if canReplayPrelude() {
+			return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, nil, message, upstreamModel, resp.Header)
+		}
 		result := resultWithUsage()
 		if clientDisconnected {
 			return result, fmt.Errorf("stream usage incomplete: missing terminal event")
 		}
-		message := "OpenAI messages stream ended before a terminal event"
 		if !clientOutputStarted {
 			return result, s.newOpenAIStreamFailoverError(c, account, false, requestID, nil, message)
 		}
@@ -1250,7 +1321,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	if streamInterval <= 0 && keepaliveInterval <= 0 {
 		var parser openAICompatSSEFrameParser
 		for scanner.Scan() {
-			if !firstEvent.disarm() {
+			if !stagePrelude && !firstEvent.disarm() && !clientDisconnected {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 			}
 			line := scanner.Text()
@@ -1266,8 +1337,14 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			if firstEvent.expired() {
+			if cancelErr := canceledPrelude(); cancelErr != nil {
+				return nil, cancelErr
+			}
+			if !clientDisconnected && firstEvent.expired() && c.Request.Context().Err() == nil {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
+			}
+			if canReplayPrelude() && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, nil, "OpenAI stream read failed before content", upstreamModel, resp.Header)
 			}
 			handleScanErr(err)
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", err)
@@ -1342,13 +1419,19 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				return missingTerminalErr()
 			}
 			if ev.err != nil {
-				if firstEvent.expired() {
+				if cancelErr := canceledPrelude(); cancelErr != nil {
+					return nil, cancelErr
+				}
+				if !clientDisconnected && firstEvent.expired() && c.Request.Context().Err() == nil {
 					return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
+				}
+				if canReplayPrelude() && !errors.Is(ev.err, context.Canceled) && !errors.Is(ev.err, context.DeadlineExceeded) {
+					return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, nil, "OpenAI stream read failed before content", upstreamModel, resp.Header)
 				}
 				handleScanErr(ev.err)
 				return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", ev.err)
 			}
-			if !firstEvent.disarm() {
+			if !stagePrelude && !firstEvent.disarm() && !clientDisconnected {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 			}
 			lastDataAt = time.Now()
@@ -1384,6 +1467,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				zap.Duration("interval", stallThreshold),
 			)
 			s.noteOpenAICompatStall(c, account, originalModel)
+			if canReplayPrelude() {
+				return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, nil, "OpenAI stream stalled before content", upstreamModel, resp.Header)
+			}
 			return resultWithUsage(), fmt.Errorf("stream data interval timeout")
 
 		case <-keepaliveCh:
@@ -1393,9 +1479,14 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			if time.Since(lastDataAt) < keepaliveInterval {
 				continue
 			}
-			// Send Anthropic-format ping event
+			// Before message_start, comments keep the connection alive without
+			// opening a protocol stream that could belong to a failed attempt.
 			writeStreamHeaders()
-			n, err := fmt.Fprint(c.Writer, "event: ping\ndata: {\"type\":\"ping\"}\n\n")
+			frame := "event: ping\ndata: {\"type\":\"ping\"}\n\n"
+			if stagePrelude && !clientOutputStarted {
+				frame = ":\n\n"
+			}
+			n, err := fmt.Fprint(c.Writer, frame)
 			if err != nil {
 				// Client disconnected
 				logger.L().Info("openai messages stream: client disconnected during keepalive",
@@ -1407,7 +1498,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			// xy2api resilience (review G1): a heartbeat, not output; before
 			// the first upstream line the attempt may still fail over.
 			recordOpenAIStreamKeepaliveBytes(c, n)
-			clientOutputStarted = true
+			if !stagePrelude {
+				clientOutputStarted = true
+			}
 			c.Writer.Flush()
 		}
 	}

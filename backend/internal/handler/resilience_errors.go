@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -31,7 +32,9 @@ const (
 
 	// ginKeyResilienceRetryAfter carries the Retry-After seconds chosen for a
 	// no-account response to the writers, which add the message hint.
-	ginKeyResilienceRetryAfter = "xy_resilience_retry_after"
+	ginKeyResilienceRetryAfter  = "xy_resilience_retry_after"
+	ginKeyResilienceTurnCounted = "xy_resilience_turn_counted"
+	ginKeyResilienceFinalized   = "xy_resilience_terminal_finalized"
 
 	// ginKeyResilienceTurnCapped marks a failure that ends the client's turn
 	// (design §9.7); the writers give it the code server_is_overloaded.
@@ -52,6 +55,18 @@ const (
 	contentRejectionMessageMax = 500
 )
 
+// beginResilienceTerminal claims a handler's terminal write. It is claimed
+// before writing so a failed/short write cannot trigger a second response.
+// Handler writes run on the request goroutine; heartbeat writers are stopped
+// before this marker is used.
+func beginResilienceTerminal(c *gin.Context) bool {
+	if c == nil || c.GetBool(ginKeyResilienceFinalized) {
+		return false
+	}
+	c.Set(ginKeyResilienceFinalized, true)
+	return true
+}
+
 // upstreamURLPattern finds URLs in upstream text, which may name the
 // upstream host.
 var upstreamURLPattern = regexp.MustCompile(`(?i)\b(?:https?|wss?)://[^\s"'<>]+`)
@@ -66,6 +81,7 @@ func resilienceContentRejection(c *gin.Context, failoverErr *service.UpstreamFai
 	if c == nil || !resilience.Current().ErrorsOn() || !resilienceContentRejected(failoverErr) {
 		return "", false
 	}
+	suppressResilienceRetryAdvice(c, "content_rejection")
 	upstreamMsg := service.SanitizeUpstreamErrorMessage(strings.TrimSpace(service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody)))
 	service.SetOpsUpstreamError(c, failoverErr.StatusCode, upstreamMsg, "")
 	message := strings.TrimSpace(upstreamURLPattern.ReplaceAllString(upstreamMsg, "[url]"))
@@ -78,17 +94,12 @@ func resilienceContentRejection(c *gin.Context, failoverErr *service.UpstreamFai
 	return message, true
 }
 
-// writeOpenAIContentRejection writes a content-safety refusal in the OpenAI
-// error format.
-func writeOpenAIContentRejection(c *gin.Context, message string) {
-	c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
-		"type": "invalid_request_error", "code": codeContentPolicyViolation, "message": message,
-	}})
-}
-
 // resilienceTranslateError maps internal error types to the client-facing
 // type and code, and appends the retry hint to no-account messages.
 func resilienceTranslateError(c *gin.Context, status int, errType, code, message string) (string, string, string) {
+	if suppressResilienceTerminalReason(c, errType, code) || (c != nil && c.GetBool(ginKeyResilienceTurnCapped)) {
+		message = (resilience.RetryAdvice{Suppress: true}).Message(message)
+	}
 	switch errType {
 	case errTypeInsufficientBalance:
 		if code == "" {
@@ -102,6 +113,11 @@ func resilienceTranslateError(c *gin.Context, status int, errType, code, message
 	}
 	if c != nil && c.GetBool(ginKeyResilienceTurnCapped) {
 		code = codeServerIsOverloaded
+	}
+	// A committed Responses frame owns its retry message. Appending the
+	// legacy HTTP suffix first would invent punctuation when advice removes it.
+	if c != nil && c.Writer != nil && c.Writer.Written() && inboundIsResponses(c) && resilience.Current().FailedFrameRetryAfterOn() {
+		return errType, code, message
 	}
 	if c != nil && (status == http.StatusServiceUnavailable || resilienceTerminalHint(c, status)) {
 		if secs := c.GetInt(ginKeyResilienceRetryAfter); secs > 0 && !strings.Contains(strings.ToLower(message), "try again in") {
@@ -162,12 +178,22 @@ type noAccountRetryAdvisor interface {
 // earliest recovery. Status codes and messages stay as they are.
 func applyNoAccountRetryHints(c *gin.Context, diag any, apiKey *service.APIKey, routingModel string, cls noAccountErrorClassification) {
 	cfg := resilience.Current()
-	if c == nil || c.Request == nil || !cfg.ErrorsOn() || cls.ModelNotFound {
+	if c == nil || c.Request == nil || !cfg.ErrorsOn() {
+		return
+	}
+	if cls.ModelNotFound || !resilience.RetryAdviceEligible(cls.Status, cls.ErrType, "") {
+		suppressResilienceRetryAdvice(c, "non_retryable")
+		return
+	}
+	if cls.CapabilityOnly {
+		suppressResilienceRetryAdvice(c, resilience.ReasonCapabilityStreamOnly)
+		c.Header("x-should-retry", "false")
 		return
 	}
 	ctx := c.Request.Context()
 	if resilience.StateFrom(ctx).ConfigError() {
-		c.Header("Retry-After", strconv.Itoa(cfg.Errors.ConfigRetryAfterSeconds))
+		resilience.SetRetryAdvice(ctx, resilience.RetryAdvice{Suppress: true, Source: "config_rejection"})
+		c.Header("Retry-After", strconv.Itoa(codexNoAccountRetryAfter(c, cfg, cfg.Errors.ConfigRetryAfterSeconds)))
 		c.Header("x-should-retry", "false")
 		return
 	}
@@ -175,6 +201,26 @@ func applyNoAccountRetryHints(c *gin.Context, diag any, apiKey *service.APIKey, 
 		return
 	}
 	setNoAccountRetryAfter(c, diag, apiKey, routingModel)
+	prepareResilienceRetryAdvice(c, diag, apiKey, routingModel)
+	secs := codexNoAccountRetryAfter(c, cfg, c.GetInt(ginKeyResilienceRetryAfter))
+	c.Header("Retry-After", strconv.Itoa(secs))
+	c.Set(ginKeyResilienceRetryAfter, secs)
+}
+
+// codexNoAccountRetryAfter bounds only no-account hints. Codex waits out
+// Retry-After without its own ceiling; other exhausted errors keep their
+// existing bounds. This client hint is independent of access restrictions.
+func codexNoAccountRetryAfter(c *gin.Context, cfg *resilience.Settings, seconds int) int {
+	if c == nil || c.Request == nil || !cfg.CodexRetryAfterCapOn() {
+		return seconds
+	}
+	ua := strings.ToLower(c.Request.UserAgent())
+	isCodex := openai.IsCodexOfficialClientByHeaders(ua, c.GetHeader("originator")) ||
+		strings.Contains(ua, "codex_cli_rs") || strings.Contains(ua, "codex_exec") || strings.Contains(ua, "codex desktop")
+	if isCodex {
+		return min(seconds, cfg.Errors.CodexRetryAfterCapSeconds)
+	}
+	return seconds
 }
 
 // setNoAccountRetryAfter sets Retry-After to the clamped time until the
@@ -208,6 +254,11 @@ func applyExhaustedRetryHint(c *gin.Context, diag any, status int) int {
 		(status != http.StatusTooManyRequests && status < http.StatusInternalServerError && !resilienceTerminalHint(c, status)) {
 		return status
 	}
+	if advice := resilience.RetryAdviceFrom(c.Request.Context()); advice.Suppress && advice.Source == resilience.ReasonCapabilityStreamOnly {
+		suppressResilienceRetryAdvice(c, resilience.ReasonCapabilityStreamOnly)
+		c.Header("x-should-retry", "false")
+		return status
+	}
 	if resilienceCapTurn(c) {
 		if status >= http.StatusInternalServerError {
 			return http.StatusServiceUnavailable
@@ -216,6 +267,7 @@ func applyExhaustedRetryHint(c *gin.Context, diag any, status int) int {
 	}
 	lo, hi := cfg.Errors.NoAccountRetryAfter.Min, cfg.Errors.NoAccountRetryAfter.Max
 	if v := strings.TrimSpace(c.Writer.Header().Get("Retry-After")); v != "" {
+		prepareExhaustedRetryAdvice(c, diag)
 		secs := 0
 		if n, err := strconv.Atoi(v); err == nil {
 			secs = resilience.ClampRetryAfter(time.Duration(n)*time.Second, lo, hi)
@@ -230,7 +282,8 @@ func applyExhaustedRetryHint(c *gin.Context, diag any, status int) int {
 		return status
 	}
 	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
-	setNoAccountRetryAfter(c, diag, apiKey, "")
+	setNoAccountRetryAfter(c, diag, apiKey, exhaustedRetryModel(c))
+	prepareExhaustedRetryAdvice(c, diag)
 	return status
 }
 
@@ -251,16 +304,22 @@ func resilienceCapTurn(c *gin.Context) bool {
 	if key == "" {
 		return false
 	}
+	if c.GetBool(ginKeyResilienceTurnCounted) {
+		return c.GetBool(ginKeyResilienceTurnCapped)
+	}
+	c.Set(ginKeyResilienceTurnCounted, true)
 	st.MarkTurnFailed()
 	n := resilience.ProcessTurnCap().Fail(key, time.Duration(tc.WindowSeconds)*time.Second, time.Now())
 	if n < tc.Failures {
 		return false
 	}
 	c.Writer.Header().Del("Retry-After")
+	c.Set(ginKeyResilienceRetryAfter, 0)
+	resilience.SetRetryAdvice(c.Request.Context(), resilience.RetryAdvice{Suppress: true, Source: "turn_cap"})
 	c.Header("x-should-retry", "false")
 	c.Set(ginKeyResilienceTurnCapped, true)
 	resilience.Count(resilience.MetricTurnCap, st.GroupID(), 0, "")
-	slog.Warn("resilience.turn_cap", "group_id", st.GroupID(), "failures", n)
+	slog.Warn("resilience.turn_cap", append(resilience.EventFields(c.Request.Context()), "group_id", st.GroupID(), "failures", n)...)
 	return true
 }
 

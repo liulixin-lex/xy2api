@@ -21,9 +21,9 @@ import (
 func newOpenAIRuntimeBlockEnv(t *testing.T, scheduler sharesched.Scheduler, ids ...int64) *openAIShareTestEnv {
 	t.Helper()
 	withResilienceSettings(t, nil)
-	rules := make([]sharesched.AccountRule, 0, len(ids))
+	rules := make([]shareRule, 0, len(ids))
 	for _, id := range ids {
-		rules = append(rules, sharesched.AccountRule{AccountID: id, Tier: 0, Weight: 1})
+		rules = append(rules, shareRule{AccountID: id, Tier: 0, Weight: 1})
 	}
 	env := newOpenAIShareTestEnv(t, shareTestPolicy(scheduler, rules...), ids...)
 	env.svc.accountRepo = openAIGroupListingRepo{env.repo}

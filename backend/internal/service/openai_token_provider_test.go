@@ -975,7 +975,7 @@ func TestOpenAITokenProvider_IQProbeMissingRefreshDoesNotDisableAccount(t *testi
 		ID: 2882, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
 		Credentials: map[string]any{
 			"access_token": "expired-access-token",
-			"expires_at": time.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
+			"expires_at":   time.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
 		},
 	}
 	provider := NewOpenAITokenProvider(repo, cache, nil)

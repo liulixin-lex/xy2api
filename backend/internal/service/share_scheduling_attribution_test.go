@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -97,8 +98,6 @@ func TestShareCachePlacementRoundTrip(t *testing.T) {
 	require.True(t, at.Equal(p.at))
 	require.Equal(t, time.Hour, p.ttl)
 	require.Equal(t, 9000, p.prompt)
-	require.Equal(t, "750", shareTTFTBucket(600))
-	require.Equal(t, "inf", shareTTFTBucket(45_000))
 	_, ok = decodeShareCachePlacement(nil)
 	require.False(t, ok)
 }
@@ -133,8 +132,12 @@ func TestShareAttributionFollowsServedPlacements(t *testing.T) {
 	serve("r3", 0)
 	require.Eventually(t, func() bool { return cacheCounter(shareStatsClassPrefix+shareCacheMissPrefixDrift) == 1 }, time.Second, 5*time.Millisecond)
 	require.Eventually(t, func() bool { return cacheCounter(shareStatsCacheReadField) == 11_000 }, time.Second, 5*time.Millisecond)
-	require.Equal(t, int64(1), cacheCounter(shareStatsTTFTPrefix+string(sharesched.ReasonNewSession)+":500"))
-	require.Equal(t, int64(2), cacheCounter(shareStatsTTFTPrefix+string(sharesched.ReasonAffinityHit)+":500"))
+	// First-token latency is read from usage_logs; no histogram is counted.
+	env.share.stats.mu.Lock()
+	for key := range env.share.stats.counters {
+		require.False(t, strings.HasPrefix(key.Field, "ttft:") || strings.HasPrefix(key.Field, "acct_ttft:"), key.Field)
+	}
+	env.share.stats.mu.Unlock()
 
 	// A usage record for another account than the traced one is ignored.
 	ctx := context.WithValue(context.Background(), ctxkey.RequestID, "r4")
@@ -147,7 +150,7 @@ func TestShareAttributionFollowsServedPlacements(t *testing.T) {
 func TestShareAttributionCoversOriginalGroups(t *testing.T) {
 	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
 	state := env.share.state.Load()
-	env.share.state.Store(&shareSchedulingState{settings: ShareSchedulingSettings{Enabled: false, CacheAttribution: true, AttributionSampleRate: 1}, groups: state.groups})
+	env.share.state.Store(&shareSchedulingState{settings: ShareSchedulingSettings{Enabled: false}, groups: state.groups})
 	ctx := context.WithValue(context.Background(), ctxkey.RequestID, "orig-1")
 	result := env.selectAccount(t, ctx, "original-session", nil)
 	env.share.observeUsage(ctx, &UsageLog{AccountID: result.Account.ID, Model: "claude-sonnet-4-5", InputTokens: 100})

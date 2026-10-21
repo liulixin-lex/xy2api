@@ -41,8 +41,12 @@ import time
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-APP, FAULT, CDN125 = 18210, 18211, 18213
-PROJECT = "xy2api-staging"
+APP = int(os.environ.get("STAGING_APP_PORT", "18210"))
+FAULT = int(os.environ.get("STAGING_FAULT_PORT", "18211"))
+CDN125 = int(os.environ.get("STAGING_CDN_PORT", "18213"))
+PROJECT = os.environ.get("STAGING_PROJECT", "xy2api-staging")
+if PROJECT not in ("xy2api-staging", "xy2api-staging-soak"):
+    raise ValueError("unsupported staging project")
 KEYS = json.load(open(os.path.join(HERE, "fixtures", "keys.json")))["keys"]
 MODEL = "gpt-6.1-sol"
 
@@ -151,7 +155,9 @@ def sh(cmd: str, timeout=60) -> str:
 
 
 def psql(sql: str) -> str:
-    return sh(f"docker compose -p {PROJECT} exec -T postgres psql -U xy2api -d xy2api -At -c {json.dumps(sql)}")
+    return subprocess.run(["docker", "compose", "-p", PROJECT, "exec", "-T", "postgres", "psql", "-U", "xy2api",
+                           "-d", "xy2api", "-v", "ON_ERROR_STOP=1", "-At", "-c", sql],
+                          cwd=HERE, capture_output=True, text=True, timeout=60, check=True).stdout.strip()
 
 
 # Counts keys matching ARGV[1]; with ARGV[2] == "members", sums ZCARD of the
@@ -266,9 +272,29 @@ def cycle_slope(points: list[tuple[datetime.datetime, float]], start: datetime.d
 GCTRACE = re.compile(r"^(\S+) gc \d+ @[\d.]+s .*? (\d+)->(\d+)->(\d+) MB")
 
 
+def app_logs(started_at: str, timestamps: bool = False) -> str:
+    """The independent stack captures logs continuously, beyond rotation."""
+    path = os.environ.get("STAGING_LOG_FILE")
+    if path:
+        start = datetime.datetime.fromisoformat(started_at)
+        lines = []
+        with open(path) as source:
+            for line in source:
+                stamp, _, body = line.partition(" ")
+                try:
+                    at = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if at >= start:
+                    lines.append(line if timestamps else body)
+        return "".join(lines)
+    flag = "--timestamps " if timestamps else ""
+    return sh(f"docker logs {flag}--since {started_at} {PROJECT}-app-1 2>&1", timeout=600)
+
+
 def live_heap(started_at: str) -> list[tuple[datetime.datetime, float]]:
     """Live heap after each GC (MB) from the app's gctrace lines."""
-    out = sh(f"docker logs --timestamps --since {started_at} {PROJECT}-app-1 2>&1 | grep -E ' gc [0-9]+ @'", timeout=600)
+    out = app_logs(started_at, timestamps=True)
     points = []
     for line in out.splitlines():
         m = GCTRACE.match(line)
@@ -295,7 +321,21 @@ def checks(evidence: str, started_at: str, cycle_minutes: int = 60) -> dict:
         load_start, load_end, cycle_minutes)
     heap = live_heap(started_at)
     heap_slope = None if load_start is None else cycle_slope(heap, load_start, load_end, cycle_minutes)
-    logs = sh(f"docker logs --since {started_at} {PROJECT}-app-1 2>&1", timeout=600)
+    logs = app_logs(started_at)
+    timed_logs = app_logs(started_at, timestamps=True)
+    error_minutes = {}
+    for line in timed_logs.splitlines():
+        if re.search(r'"level"\s*:\s*"error"|\bERROR\b', line):
+            minute = line[:16]
+            error_minutes[minute] = error_minutes.get(minute, 0) + 1
+    # Surface every error count; a sustained minute-rate is the flood gate.
+    flood_run, error_flood = 0, False
+    minute = datetime.datetime.fromisoformat(started_at).replace(second=0, microsecond=0)
+    end = datetime.datetime.fromisoformat(samples[-1]["at"])
+    while minute <= end:
+        flood_run = flood_run + 1 if error_minutes.get(minute.isoformat()[:16], 0) >= 60 else 0
+        error_flood = error_flood or flood_run >= 3
+        minute += datetime.timedelta(minutes=1)
     secrets = list(KEYS.values())
     for n in (1, 2, 3):
         if os.environ.get(f"REAL{n}_API_KEY"):
@@ -319,31 +359,47 @@ def checks(evidence: str, started_at: str, cycle_minutes: int = 60) -> dict:
         "live_heap_mib_first_last": [heap[0][1], heap[-1][1]] if heap else None,
         "live_heap_slope_mib_per_hour": None if heap_slope is None else round(heap_slope, 2),
         "panics": len(re.findall(r"\bpanic\b|goroutine \d+ \[running\]", logs)),
+        "error_lines": sum(error_minutes.values()),
+        "error_lines_per_minute": error_minutes,
+        "error_flood_threshold": "at least 60 ERROR lines/min for 3 consecutive minutes",
         "credential_hits_in_logs": leaked,
         "masked_key_like_strings": len(SECRET.findall(logs)),
         "duplicate_usage_rows": int(dup_usage or 0),
         "duplicate_undelivered_rows": int(dup_undelivered or 0),
         "unbilled_undelivered_with_usage": int(both or 0),
+        "project": PROJECT,
     }
+    overlap_file = os.environ.get("STAGING_OVERLAP_FILE")
+    if overlap_file and os.path.exists(overlap_file):
+        with open(overlap_file) as source:
+            result["other_stack_activity"] = [json.loads(line) for line in source if line.strip()]
+        io_steps = []
+        for activity in result["other_stack_activity"]:
+            report = os.path.join(activity["evidence"], "REPORT.json")
+            if activity["event"] == "upgrade_end" and os.path.exists(report):
+                with open(report) as source:
+                    io_steps.extend(s for s in json.load(source)["steps"] if s["step"] in (
+                        "synthetic data fill begins", "synthetic production-sized data", "backup and restore begins", "backup and restore"))
+        result["other_stack_io_steps"] = io_steps
     ok = {
         "no orphan account/user/key slots": all(last[k] == 0 for k in ("slots_account", "slots_user", "slots_key", "slots_live")),
         "no orphan in-flight reservations": last["inflight_keys"] == 0,
-        "goroutines back to baseline (+50)": base["goroutines"] is None or last["goroutines"] is None
-        or last["goroutines"] <= base["goroutines"] + 50,
+        "goroutines measured and back to baseline (+50)": base["goroutines"] is not None and last["goroutines"] is not None
+        and last["goroutines"] <= base["goroutines"] + 50,
         "pg backends back to baseline (+3)": last["pg_backends"] <= base["pg_backends"] + 3,
         # Leaks show as anonymous memory that keeps rising under the same load.
         "app anonymous memory does not trend up (late <= 1.2x early + 16 MiB)": late_anon <= 1.2 * early_anon + 16
         if early_anon is not None and late_anon is not None
         else mem_mib(last["app_mem"]) <= max(1.5 * mem_mib(base["app_mem"]), mem_mib(base["app_mem"]) + 64),
         "no panic": result["panics"] == 0,
+        "no sustained ERROR flood": not error_flood,
         "no credential in logs": leaked == 0,
         "no duplicate usage rows": result["duplicate_usage_rows"] == 0,
         "no duplicate undelivered rows": result["duplicate_undelivered_rows"] == 0,
         "undelivered and unbilled requests have no usage row": result["unbilled_undelivered_with_usage"] == 0,
     }
-    if heap:
-        ok[f"live heap after GC does not trend up (hourly medians, <= {MAX_LIVE_HEAP_SLOPE_MIB_PER_HOUR} MiB/h)"] = (
-            heap_slope is not None and heap_slope <= MAX_LIVE_HEAP_SLOPE_MIB_PER_HOUR)
+    ok[f"live heap after GC measured over >=3 post-warmup cycles (<= {MAX_LIVE_HEAP_SLOPE_MIB_PER_HOUR} MiB/h)"] = (
+        heap_slope is not None and heap_slope <= MAX_LIVE_HEAP_SLOPE_MIB_PER_HOUR)
     result["checks"] = [{"check": k, "ok": v} for k, v in ok.items()]
     result["ok"] = all(ok.values())
     return result

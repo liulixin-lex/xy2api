@@ -48,11 +48,14 @@
       "openspec/changes/iq-detection-operations/**",
       "openspec/changes/replace-controlled-with-share-scheduling/**",
       "openspec/changes/gateway-resilience-20261015/**",
+      "openspec/changes/simplify-share-scheduling-20261020/**",
       "skills/**",
-      "tools/**"
+      "tools/**",
+      "openspec/changes/gateway-resilience-v2-20261021/**"
     ],
     "manual_merge": [
       "Makefile",
+      "backend/Dockerfile",
       "backend/go.sum",
       "backend/internal/handler/redeem_handler.go",
       "backend/internal/repository/account_repo_upstream_billing_probe_update_test.go",
@@ -228,6 +231,10 @@
     ]
   },
   "required_literals": [
+    {
+      "path": "backend/Dockerfile",
+      "value": "FROM golang:1.27.3-alpine"
+    },
     {
       "path": "backend/internal/service/openai_gateway_request_body.go",
       "value": "if openAIGroupForcesFast(ctx, account) {\n\t\treturn OpenAIFastPolicyActionForcePriority, \"\""
@@ -526,7 +533,7 @@
     },
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
-      "value": "h.anthropicStreamingAwareError(c, http.StatusBadRequest, \"invalid_request_error\", msg, streamStarted)"
+      "value": "write(http.StatusBadRequest, \"invalid_request_error\", msg)"
     },
     {
       "path": "backend/internal/handler/gateway_handler.go",
@@ -534,7 +541,7 @@
     },
     {
       "path": "backend/internal/handler/gateway_handler_chat_completions.go",
-      "value": "writeOpenAIContentRejection(c, msg)"
+      "value": "write(http.StatusBadRequest, \"invalid_request_error\", codeContentPolicyViolation, msg)"
     },
     {
       "path": "backend/internal/handler/gateway_handler_responses.go",
@@ -862,7 +869,9 @@
     },
     {
       "path": "frontend/src/components/common/GroupSelector.vue",
-      "value": "data-test=\"group-exclusive-tag\"",
+      "value": "data-test=\"group-exclusive-tag\""
+    },
+    {
       "path": "backend/internal/repository/account_repo.go",
       "value": "entsql.OrderByField(dbaccount.FieldLastUsedAt, direction, entsql.OrderNullsLast()).ToFunc(),"
     },
@@ -897,6 +906,14 @@
     {
       "path": "frontend/src/views/admin/AccountsView.vue",
       "value": "const result = await adminAPI.accounts.getBatchRecentHealth(accountIDs)"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "useAccountShareColumn(() => params.group)"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "if (!nextSchedulable) void notifyShareImpact(a)"
     },
     {
       "path": "frontend/src/views/admin/UsageView.vue",
@@ -945,6 +962,370 @@
     {
       "path": "frontend/src/components/common/VersionBadge.vue",
       "value": "containerNotice.value = result.container === true"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "installResilienceRetryAdvice(c, h.gatewayService, apiKey, reqModel)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "anthropicFailoverErrorType(status, errType, responseBody)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "anthropicLocalErrorType(status, errType)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "installResilienceRetryAdvice(c, h.gatewayService, apiKey, reqModel)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "writeResponsesFailedSSEWithOpening(c, errType, explicitCode, message, gatewayStreamHasOnlyHeartbeats(c))"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "applyExhaustedRetryHint(c, h.gatewayService, status)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "beginResilienceTerminal(c)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
+      "value": "installResilienceRetryAdvice(c, h.gatewayService, apiKey, reqModel)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
+      "value": "writeChatCompletionsErrorSSE(c, errType, code, message, status)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
+      "value": "applyExhaustedRetryHint(c, h.gatewayService, status)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
+      "value": "beginResilienceTerminal(c)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "installResilienceRetryAdvice(c, h.gatewayService, apiKey, reqModel)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "beginResilienceTerminal(c)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "anthropicFailoverErrorType(status, errType, upstreamBody)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "anthropicLocalErrorType(status, errType)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "resilience.WithCapabilityRequest"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "result == nil && errors.Is(err, context.Canceled) && failoverClientGone(c)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "cls.CapabilityOnly"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "failoverErr.IsCapabilityStreamOnly()"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "installResilienceRetryAdvice(c, h.gatewayService, apiKey, reqModel)"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "resilience.WithCapabilityRequest"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "result == nil && errors.Is(err, context.Canceled) && failoverClientGone(c)"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "cls.CapabilityOnly"
+    },
+    {
+      "path": "backend/internal/handler/gateway_helper.go",
+      "value": "requestQueuePingFormat(c, h.pingFormat)"
+    },
+    {
+      "path": "backend/internal/handler/user_msg_queue_helper.go",
+      "value": "requestQueuePingFormat(c, h.pingFormat)"
+    },
+    {
+      "path": "backend/internal/handler/dto/mappers.go",
+      "value": "a.CapabilityLearned(time.Now())"
+    },
+    {
+      "path": "backend/internal/handler/dto/mappers.go",
+      "value": "CapabilityLearned: a.CapabilityLearned"
+    },
+    {
+      "path": "backend/internal/handler/dto/mappers.go",
+      "value": "key == \"capability_learned_responses\""
+    },
+    {
+      "path": "backend/internal/handler/dto/mappers.go",
+      "value": "key == \"capability_learned_chat\""
+    },
+    {
+      "path": "backend/internal/handler/dto/types.go",
+      "value": "`json:\"capability_learned\"`"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_data.go",
+      "value": "delete(extra, \"capability_learned_responses\")"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_data.go",
+      "value": "delete(extra, \"capability_learned_chat\")"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_handler.go",
+      "value": "func (h *AccountHandler) ClearCapabilityLearning(c *gin.Context)"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_handler.go",
+      "value": "clearer.ClearAccountCapabilityLearning(c.Request.Context(), accountID)"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "accounts.DELETE(\"/:id/capability-learning\", h.Admin.Account.ClearCapabilityLearning)"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "capabilityLearnedResponsesKey: {}"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "capabilityLearnedChatKey:"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "accountExtra = MergeCapabilityLearningExtra(accountExtra, nil)"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "normalizedExtra = MergeCapabilityLearningExtra(normalizedExtra, account.Extra)"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "updates = MergeCapabilityLearningExtra(updates, nil)"
+    },
+    {
+      "path": "backend/internal/repository/account_repo.go",
+      "value": "extra = service.MergeCapabilityLearningExtra(extra, currentExtra)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "capabilityEligibilityReason(ctx, account, req.RequestedModel, time.Now())"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "filterStats.capabilityOnly()"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "capabilitySelectionError(ctx, err)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "capabilityEligibilityReason(ctx, account, requestedModel, time.Now())"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "filterStats.capabilityOnly()"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "capabilitySelectionError(ctx, selectionErr)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if reason != resilience.ReasonCapabilityStreamOnly {"
+    },
+    {
+      "path": "backend/internal/service/share_scheduling_openai.go",
+      "value": "stats.capabilityOnly()"
+    },
+    {
+      "path": "backend/internal/service/share_scheduling_openai.go",
+      "value": "reason == resilience.ReasonCapabilityStreamOnly"
+    },
+    {
+      "path": "backend/internal/service/share_scheduling_openai.go",
+      "value": "resilience.CapabilityExcluded(ctx, acc.ID)"
+    },
+    {
+      "path": "backend/internal/service/gateway_service.go",
+      "value": "if e == nil || e.IsCapabilityStreamOnly() {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_grok.go",
+      "value": "s.LearnStreamOnlyFailure(ctx, account, resilience.CapabilityProtocolResponses"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_grok.go",
+      "value": "opsHTTPResilienceCategory"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "learnOpenAIStreamOnlyHTTPFailure"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "LearnStreamOnlyFailure"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "opsHTTPResilienceCategory"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "resilience.ClassifyStreamEvent(\"responses\", eventType, []byte(trimmed))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "beginOpenAIPreludeTrace"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "releaseOpenAIPrelude"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "learnOpenAIStreamOnlyHTTPFailure"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "opsHTTPResilienceCategory"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "buildOpenAIResponseFailedSSE(ctx"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "beginOpenAIPreludeTrace"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "releaseOpenAIPrelude"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "openAIResponseFailureError"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "deferredOpenAIChatChunks"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "canReplayPrelude"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "beginOpenAIPreludeTrace"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "releaseOpenAIPrelude"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "deferredOpenAIAnthropicEvents"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "canReplayPrelude"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "beginOpenAIPreludeTrace"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "releaseOpenAIPrelude"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "resilience.Current().StrictTerminalOn()"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "terminal.failurePayload"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "learnOpenAIStreamOnlyHTTPFailure"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "opsHTTPResilienceCategory"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "opsHTTPResilienceCategory"
+    },
+    {
+      "path": "backend/internal/service/openai_compact_stream_bridge.go",
+      "value": "openAIResponseFailureError"
+    },
+    {
+      "path": "backend/internal/service/resilience_keepalive.go",
+      "value": "resilience.PreOutputEventFields"
+    },
+    {
+      "path": "backend/internal/service/resilience_keepalive.go",
+      "value": "resilience.ResolveRetryAdvice"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "<AccountStreamOnlyBadge :account=\"row\" @cleared=\"patchAccountInList($event as Account)\" />"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "import AccountStreamOnlyBadge from '@/components/admin/account/AccountStreamOnlyBadge.vue'"
+    },
+    {
+      "path": "backend/internal/handler/resilience_errors.go",
+      "value": "resilience.RetryAdviceEligible(cls.Status, cls.ErrType, \"\")"
+    },
+    {
+      "path": "backend/internal/handler/resilience_retry_advice.go",
+      "value": "resilience.RetryAdviceEligible(streamErr.IntendedStatus, errType, mapResponsesErrorCode(errType, code))"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "// Staged heartbeats commit SSE without delivering semantic output."
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "// Staged heartbeats commit SSE without delivering semantic output."
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "recordOpenAIStreamKeepaliveBytes"
+    },
+    {
+      "path": "backend/internal/service/resilience_keepalive.go",
+      "value": "resilience.RetryAdviceEligible"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "if result != nil && result.ClientDisconnect {"
     }
   ],
   "forbidden_module_paths": [
@@ -991,7 +1372,11 @@
     "xy-group-openai-fast-priority",
     "xy-account-list-usability",
     "xy-account-recent-health",
-    "xy-graceful-online-update-restart"
+    "xy-graceful-online-update-restart",
+    "xy-resilience-v2-handler-exits",
+    "xy-resilience-v2-streams",
+    "xy-account-stream-only-learning",
+    "xy-resilience-v2-classification"
   ],
   "custom_patch_tests": [
     {
@@ -1228,6 +1613,146 @@
       "id": "xy-graceful-online-update-restart",
       "path": "frontend/src/components/common/__tests__/VersionBadge.containerNotice.spec.ts",
       "literal": "tells a container deployment to update the image"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_compat_queue_error_test.go",
+      "literal": "func TestCompatibleQueueErrorsEndInInboundProtocol"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_failed_retry_test.go",
+      "literal": "func TestResponsesFailedRetryAdvice"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/openai_compat_client_cancel_test.go",
+      "literal": "func TestOpenAICompatibleClientCancelDoesNotReportAccountFailure"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_exhausted_delivery_test.go",
+      "literal": "func TestCompatibleExhaustionAfterOutputDoesNotCountTurn"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_nonretryable_test.go",
+      "literal": "func TestNonRetryableFailuresRemoveCandidateAdvice"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_compat_stream_native_prelude_test.go",
+      "literal": "func TestNativePreludeAttemptBoundary"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_compat_stream_prelude_test.go",
+      "literal": "func TestCompatPreludeDrainsUsageAfterClientCancellation"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_compat_stream_prelude_test.go",
+      "literal": "func TestCompatPreludeCommentHeartbeatStillAllowsFailover"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_keepalive_retry_advice_test.go",
+      "literal": "func TestSyntheticFailedFramesResolveRetryAdvice"
+    },
+    {
+      "id": "xy-account-stream-only-learning",
+      "path": "backend/internal/service/capability_test.go",
+      "literal": "func TestCapabilityForwardFailureSelectsAnotherAccountAndSucceeds"
+    },
+    {
+      "id": "xy-account-stream-only-learning",
+      "path": "backend/internal/repository/capability_test.go",
+      "literal": "func TestCapabilityAccountSaveKeepsLockedLearningState"
+    },
+    {
+      "id": "xy-account-stream-only-learning",
+      "path": "backend/internal/handler/resilience_capability_terminal_test.go",
+      "literal": "func TestCapabilityOnlyHandlerExhaustion"
+    },
+    {
+      "id": "xy-account-stream-only-learning",
+      "path": "backend/internal/service/share_scheduling_capability_test.go",
+      "literal": "func TestOpenAIShareCapabilityReasonAndOnlySelection"
+    },
+    {
+      "id": "xy-account-stream-only-learning",
+      "path": "backend/internal/handler/dto/account_capability_test.go",
+      "literal": "func TestAccountCapabilitySummaryAndPrivateExtra"
+    },
+    {
+      "id": "xy-account-stream-only-learning",
+      "path": "backend/internal/handler/admin/account_data_handler_test.go",
+      "literal": "func TestExportDataExcludesLearnedCapabilities"
+    },
+    {
+      "id": "xy-account-stream-only-learning",
+      "path": "frontend/src/views/admin/__tests__/AccountsView.streamOnly.spec.ts",
+      "literal": "shows the learned stream-only state under the status and clears it in place"
+    },
+    {
+      "id": "xy-resilience-v2-classification",
+      "path": "backend/internal/service/resilience_penalty_test.go",
+      "literal": "func TestDecisionV2ClassifiesEvidenceBeforeLegacyRetryFlag"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/openai_compat_heartbeat_exhausted_test.go",
+      "literal": "func TestOpenAICompatibleHeartbeatExhaustionWritesProtocolTerminal"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/resilience/retry_advice_provider_test.go",
+      "literal": "func TestRetryAdviceMessagePreservesOriginalPunctuation"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/resilience/retry_advice_test.go",
+      "literal": "func TestRetryAdviceEligible"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_gateway_chat_completions_terminal_test.go",
+      "literal": "func TestRawChatStrictCommentHeartbeatAllowsFailover"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_keepalive_retry_advice_test.go",
+      "literal": "func TestSyntheticFailedFramesShareRetryEligibility"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/stream_error_event_test.go",
+      "literal": "func TestCommittedFailurePreservesOriginalPunctuation"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/openai_compat_client_cancel_test.go",
+      "literal": "func TestOpenAICompatibleWriteDisconnectDoesNotReportAccountFailure"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_compat_stream_prelude_test.go",
+      "literal": "func TestCompatPreludeHeartbeatDisconnectSkipsOpsAndFailover"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_compat_model_test.go",
+      "literal": "func TestForwardAsAnthropic_MissingTerminalAfterClientDisconnectSkipsOpsAndFailover"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_compat_model_test.go",
+      "literal": "func TestForwardAsAnthropic_MissingTerminalBeforeOutputReturnsFailoverAndOps"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_compat_stream_prelude_test.go",
+      "literal": "func TestCompatPreludeHeartbeatDisconnectDrainsUsageAfterContent"
     }
   ]
 }

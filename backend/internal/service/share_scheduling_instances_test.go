@@ -60,11 +60,19 @@ func newShareInstancePair(t *testing.T, accounts ...Account) (a, b *shareAdminEn
 func TestShareSchedulingInstancesStayConsistent(t *testing.T) {
 	a, b := newShareInstancePair(t, Account{ID: 1}, Account{ID: 2}, Account{ID: 3})
 	require.Nil(t, b.share.groupPolicy(shareTestGroupID), "nothing is stored yet")
+	// Load factors 5:3:2 in one priority, on both instances' account views.
+	for _, env := range []*shareAdminEnv{a, b} {
+		for id, load := range map[int64]int{1: 5, 2: 3, 3: 2} {
+			for _, acc := range []*Account{env.repo.accountsByID[id], accountIn(env.repo.accounts, id)} {
+				lf := load
+				acc.Priority, acc.LoadFactor = 1, &lf
+			}
+		}
+	}
 
-	_, err := a.share.UpdateSettings(context.Background(), ShareSchedulingSettings{Enabled: true, CacheAttribution: true, AttributionSampleRate: 1})
+	_, err := a.share.UpdateSettings(context.Background(), true)
 	require.NoError(t, err)
-	_, err = a.save(t, 0, `{"scheduler":"share","accounts":[
-		{"account_id":1,"tier":1,"weight":5},{"account_id":2,"tier":1,"weight":3},{"account_id":3,"tier":1,"weight":2}]}`)
+	_, err = a.save(t, 0, shareUpdate)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		gp := b.share.groupPolicy(shareTestGroupID)
@@ -99,7 +107,7 @@ func TestShareSchedulingInstancesStayConsistent(t *testing.T) {
 	a.cache.mu.Lock()
 	bindings := len(a.cache.sessionBindings)
 	a.cache.mu.Unlock()
-	_, err = b.save(t, 1, `{"scheduler":"sub2api","accounts":[{"account_id":1,"tier":1,"weight":5}]}`)
+	_, err = b.save(t, 1, sub2apiUpdate)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		gp := a.share.state.Load().groups[shareTestGroupID]

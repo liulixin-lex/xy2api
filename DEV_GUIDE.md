@@ -8,7 +8,7 @@
 |------|------|
 | **项目仓库** | liulixin-lex/xy2api（公开仓库：主机地址、宿主机路径、凭据不得入库） |
 | **技术栈** | Go 后端 (Ent ORM + Gin + Wire) + Vue3 前端 (pnpm) |
-| **Go 版本** | 以 `backend/go.mod` 为准（当前 1.27.2），CI 硬断言同一版本 |
+| **Go 版本** | 以 `backend/go.mod` 为准（当前 1.27.3），CI 硬断言同一版本 |
 | **数据库** | PostgreSQL 15+（CI 与集成测试用 18）+ Redis 7+ |
 | **包管理** | 后端: go modules, 前端: **pnpm**（不是 npm） |
 | **协作约定** | 先读 [`AGENTS.md`](AGENTS.md) 与 [`docs/PROJECT_MEMORY.md`](docs/PROJECT_MEMORY.md)；文档目录见 [`docs/README.md`](docs/README.md) |
@@ -62,7 +62,7 @@ npm install -g pnpm@9
 
 ### CI 要求
 
-- Go 版本以 `backend/go.mod` 为准（当前 **1.27.2**）：各 workflow 用 `go-version-file: backend/go.mod` 取版本，随后硬断言 `go version | grep -q 'go1.27.2'`。升级 Go 时要同时改 `backend/go.mod`、`backend-ci.yml`（两处）、`release.yml`、`security-scan.yml` 里的这句断言，**以及三个 Dockerfile 里的 Go 构建镜像**（`Dockerfile` / `deploy/Dockerfile` 的 `ARG GOLANG_IMAGE`、`backend/Dockerfile` 的 `FROM golang:`）和 README 三语版本的 Go 版本。漏改 Dockerfile 与 README 由文档一致性检查（`tools/check_docs_consistency.py`）报出。
+- Go 版本以 `backend/go.mod` 为准（当前 **1.27.3**）：各 workflow 用 `go-version-file: backend/go.mod` 取版本，随后硬断言 `go version | grep -q 'go1.27.3'`。升级 Go 时要同时改 `backend/go.mod`、`backend-ci.yml`（两处）、`release.yml`、`security-scan.yml` 里的这句断言，**以及三个 Dockerfile 里的 Go 构建镜像**（`Dockerfile` / `deploy/Dockerfile` 的 `ARG GOLANG_IMAGE`、`backend/Dockerfile` 的 `FROM golang:`）和 README 三语版本的 Go 版本。漏改 Dockerfile 与 README 由文档一致性检查（`tools/check_docs_consistency.py`）报出。
 - 前端使用 `pnpm install --frozen-lockfile`，必须提交 `pnpm-lock.yaml`
 - 改动上游调度文件（`gateway_scheduling.go`、`openai_account_scheduler.go` 等）要登记 `tools/upstream-sync/scheduler-diff.json`；在上游文件里加钩子要登记 `tools/upstream-sync/policy.json` 的 `required_literals`；对上游行为的修正登记为具名补丁。规则见 [`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md)。
 

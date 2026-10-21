@@ -352,3 +352,23 @@ func TestExportDataExcludesCodexTicketMaterial(t *testing.T) {
 	require.Contains(t, extra, "codex_turn_ticket:gpt-6-astra")
 	require.Contains(t, extra, "codex_harvest_proxy_url")
 }
+
+func TestExportDataExcludesLearnedCapabilities(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	extra := map[string]any{
+		"capability_learned_responses": map[string]any{"fingerprint": "private-identity", "expires_at": "2099-01-01T00:00:00Z"},
+		"capability_learned_chat":      nil,
+		"ordinary":                     "retained",
+	}
+	adminSvc.accounts = []service.Account{{ID: 21, Name: "account", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Extra: extra}}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/data?include_proxies=false", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp dataResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp.Data.Accounts, 1)
+	require.Equal(t, map[string]any{"ordinary": "retained"}, resp.Data.Accounts[0].Extra)
+	require.NotContains(t, rec.Body.String(), "private-identity")
+	require.Contains(t, extra, "capability_learned_responses")
+	require.Contains(t, extra, "capability_learned_chat")
+}

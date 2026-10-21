@@ -89,17 +89,16 @@ func TestShareSchedulingMigrationImportsDrafts(t *testing.T) {
 	require.Equal(t, sharesched.SchedulerSub2API, policy.Scheduler)
 	require.Equal(t, "scheduling_group_policies:v4", importedFrom)
 	require.Equal(t, int64(1), version)
-	require.Equal(t, []sharesched.AccountRule{
-		{AccountID: explicit, Tier: 1, Weight: 30},
-		{AccountID: inherited, Tier: 7, Weight: 1_000_000},
-		{AccountID: zero, Tier: 2, Weight: 1, Drain: true},
-	}, policy.Accounts, "members only, first rule wins, weight 0 drains, missing priority inherits")
+	// The imported rules are kept as stored; current versions ignore them
+	// and a rollback to 0.3.0 reads them.
+	require.JSONEq(t, fmt.Sprintf(`[{"account_id":%d,"tier":1,"weight":30},{"account_id":%d,"tier":7,"weight":1000000},{"account_id":%d,"tier":2,"weight":1,"drain":true}]`,
+		explicit, inherited, zero), string(policy.Accounts), "members only, first rule wins, weight 0 drains, missing priority inherits")
 
 	policy, _, _, _ = read(emptyGroupID)
-	require.Empty(t, policy.Accounts, "a malformed rule list imports as an empty draft")
+	require.JSONEq(t, `[]`, string(policy.Accounts), "a malformed rule list imports as an empty draft")
 
 	policy, _, _, _ = read(0)
-	require.Equal(t, []sharesched.AccountRule{{AccountID: outsider, Tier: 3, Weight: 2}}, policy.Accounts, "group 0 keeps any live account")
+	require.JSONEq(t, fmt.Sprintf(`[{"account_id":%d,"tier":3,"weight":2}]`, outsider), string(policy.Accounts), "group 0 keeps any live account")
 }
 
 func TestShareSchedulingMigrationWithoutLegacyTable(t *testing.T) {

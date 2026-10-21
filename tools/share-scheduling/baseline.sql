@@ -61,7 +61,7 @@ ORDER BY 1 NULLS FIRST, 2, 3;
 SELECT (SELECT value FROM settings WHERE key = 'scheduling_system_mode') AS scheduling_system_mode,
        (SELECT count(*) FROM scheduling_group_policies) AS controlled_group_policies;
 
-\echo '== 0.5 first-token slope per 1k uncached input tokens (affinity.wait.ms_per_1k_tokens)'
+\echo '== 0.5 first-token slope per 1k uncached input tokens (the wait budget per 1k tokens)'
 -- Least squares over streamed requests; the per-bucket medians show whether
 -- the relation is close to linear before trusting the slope.
 WITH samples AS (

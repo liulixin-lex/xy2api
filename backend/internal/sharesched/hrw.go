@@ -3,7 +3,6 @@ package sharesched
 import (
 	"encoding/binary"
 	"math"
-	"time"
 
 	"github.com/cespare/xxhash/v2"
 )
@@ -37,13 +36,4 @@ func hrwWeighted(draw, weight float64) float64 {
 		return math.Inf(1)
 	}
 	return draw / weight
-}
-
-// deadlineStagger spreads forced migrations of one deadline over ten minutes
-// so sessions do not rebuild their caches all at once.
-func deadlineStagger(key string) time.Duration {
-	if key == "" {
-		return 0
-	}
-	return time.Duration(xxhash.Sum64String("stagger:"+key)%uint64(DeadlineStaggerSeconds)) * time.Second
 }

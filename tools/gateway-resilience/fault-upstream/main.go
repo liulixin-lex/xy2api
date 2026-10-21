@@ -32,39 +32,47 @@ import (
 )
 
 var scenarios = map[string]string{
-	"F00": "normal response (first=seconds before the first token)",
-	"F01": "slow response headers (secs)",
-	"F02": "200 SSE, then response.failed busy after `after` seconds",
-	"F03": "200 SSE, then response.failed rate_limit_exceeded",
-	"F04": "200 SSE, then response.failed insufficient_quota",
-	"F05": "200 SSE, then response.failed context_length_exceeded",
-	"F06": "stall after some output (secs, then the connection is dropped)",
-	"F07": "502 Cloudflare error page, Retry-After 60",
-	"F08": "524 Cloudflare timeout page, Retry-After 120",
-	"F09": "503 without body",
-	"F10": "402 insufficient balance",
-	"F11": "403 insufficient balance",
-	"F12": "429 Insufficient account balance",
-	"F13": "429 rate limit with reset time (reset=seconds)",
-	"F14": "429 rate limit without reset time",
-	"F15": "401 invalid API key",
-	"F16": "529 overloaded / server_is_overloaded (status=503 for the OpenAI form)",
-	"F17": "normal long reasoning (first=seconds before the first token)",
-	"F18": "image generation taking secs",
-	"F19": "GET /v1/usage balance (state key=…, see /_control)",
-	"F20": "new-api billing endpoints (state key=…)",
-	"F21": "Anthropic stream: message_start, then stall (secs)",
-	"F22": "Gemini stream (first=seconds)",
-	"F23": "slow stream: a delta every `every` seconds for `secs` seconds, then completed with usage",
-	"F24": "relay keep-alive: empty SSE-Keep-Alive deltas (one before response.created) every `every` seconds for `secs` seconds, then response.failed busy; with output=1 a real delta comes first and the stream then completes",
-	"F25": "pooled relay: a Responses request carrying previous_response_id gets a vague 400 (Upstream request failed); others answer normally",
-	"F26": "200 SSE with some output, then an in-stream failure (code=busy|rate_limit_exceeded, default busy) after `after` seconds",
-	"F27": "403 content-safety refusal in Zhipu's shape (top-level code request_check_blocked)",
-	"F28": "Anthropic relay queue timeout: 200 SSE whose first event, after `after` seconds, is an error rate_limit_error (gateway_concurrency_limit)",
-	"F29": "Codex backend relay: a Responses request replaying web_search_call input without declaring web_search gets 200 SSE, then response.failed \"response protection is unavailable\"; others answer normally",
-	"F30": "502 Cloudflare JSON error answer (origin_bad_gateway, detail: the origin is overloaded or misconfigured, retry_after 60 in the body)",
-	"BAL": "normal while the balance of state key=… is positive, F12 otherwise (reset=seconds adds a relay's exhausted ratelimit headers)",
-	"MIX": "random fault with probability p percent (default 5), otherwise normal",
+	"F00":  "normal response (first=seconds before the first token)",
+	"F01":  "slow response headers (secs)",
+	"F02":  "200 SSE, then response.failed busy after `after` seconds",
+	"F03":  "200 SSE, then response.failed rate_limit_exceeded",
+	"F04":  "200 SSE, then response.failed insufficient_quota",
+	"F05":  "200 SSE, then response.failed context_length_exceeded",
+	"F06":  "stall after some output (secs, then the connection is dropped)",
+	"F07":  "502 Cloudflare error page, Retry-After 60",
+	"F08":  "524 Cloudflare timeout page, Retry-After 120",
+	"F09":  "503 without body",
+	"F10":  "402 insufficient balance",
+	"F11":  "403 insufficient balance",
+	"F12":  "429 Insufficient account balance",
+	"F13":  "429 rate limit with reset time (reset=seconds)",
+	"F14":  "429 rate limit without reset time",
+	"F15":  "401 invalid API key",
+	"F16":  "529 overloaded / server_is_overloaded (status=503 for the OpenAI form)",
+	"F17":  "normal long reasoning (first=seconds before the first token)",
+	"F18":  "image generation taking secs",
+	"F19":  "GET /v1/usage balance (state key=…, see /_control)",
+	"F20":  "new-api billing endpoints (state key=…)",
+	"F21":  "Anthropic stream: message_start, then stall (secs)",
+	"F22":  "Gemini stream (first=seconds)",
+	"F23":  "slow stream: a delta every `every` seconds for `secs` seconds, then completed with usage",
+	"F24":  "relay keep-alive: empty SSE-Keep-Alive deltas (one before response.created) every `every` seconds for `secs` seconds, then response.failed busy; with output=1 a real delta comes first and the stream then completes",
+	"F25":  "pooled relay: a Responses request carrying previous_response_id gets a vague 400 (Upstream request failed); others answer normally",
+	"F26":  "200 SSE with some output, then an in-stream failure (code=busy|rate_limit_exceeded, default busy) after `after` seconds",
+	"F27":  "403 content-safety refusal in Zhipu's shape (top-level code request_check_blocked)",
+	"F28":  "Anthropic relay queue timeout: 200 SSE whose first event, after `after` seconds, is an error rate_limit_error (gateway_concurrency_limit)",
+	"F29":  "Codex backend relay: a Responses request replaying web_search_call input without declaring web_search gets 200 SSE, then response.failed \"response protection is unavailable\"; others answer normally",
+	"F30":  "502 Cloudflare JSON error answer (origin_bad_gateway, detail: the origin is overloaded or misconfigured, retry_after 60 in the body)",
+	"F31":  "Responses: response.created, then response.failed server_is_overloaded after 50 ms (after)",
+	"F32":  "Responses: response.created, then response.failed server_error / The service is busy (after)",
+	"F33":  "Responses: response.created, response.in_progress, then response.failed server_is_overloaded (after)",
+	"F34":  "Responses: response.created, unknown codex.response.metadata, then response.failed (conservative no-retry case; not observed in production)",
+	"F34B": "Responses: empty output_text delta before created, known prefix events, then response.failed (before, after)",
+	"F35":  "raw Chat only: error data frame followed by [DONE]; Responses endpoint returns 404",
+	"F36":  "nonstream requests get 400 This group only accepts streaming requests with OpenAI error.param=null; streams succeed",
+	"F37":  "503 server_is_overloaded with a known Retry-After (reset=8, delay for CDN commitment)",
+	"BAL":  "normal while the balance of state key=… is positive, F12 otherwise (reset=seconds adds a relay's exhausted ratelimit headers)",
+	"MIX":  "random fault with probability p percent (default 5), otherwise normal",
 }
 
 type fault struct {
@@ -360,6 +368,61 @@ func outputThenFail(ctx context.Context, w http.ResponseWriter, p protocol, mode
 	return "failed_in_stream"
 }
 
+// preludeFailure carries no text output. Its stable attempt prefix lets the
+// client assertions prove the failed upstream's opening event was discarded.
+func preludeFailure(ctx context.Context, w http.ResponseWriter, model string, f fault) string {
+	startSSE(w)
+	id := fmt.Sprintf("resp_fault_%s_%d", strings.ToLower(f.id), time.Now().UnixNano())
+	response := map[string]any{"id": id, "status": "in_progress", "model": model}
+	if f.id == "F34B" {
+		// Probes observed a delta before created without inspecting its content.
+		// This synthetic empty case has no SSE-Keep-Alive marker, so its handling
+		// is covered independently from the old relay keep-alive fixture.
+		if err := sse(w, "response.output_text.delta", map[string]any{"type": "response.output_text.delta", "delta": ""}); err != nil {
+			return "cancelled"
+		}
+		if !sleepCtx(ctx, f.secs("before", 0.1)) {
+			return "cancelled"
+		}
+	}
+	if err := sse(w, "response.created", map[string]any{"type": "response.created", "response": response}); err != nil {
+		return "cancelled"
+	}
+	if f.id == "F33" || f.id == "F34B" {
+		if err := sse(w, "response.in_progress", map[string]any{"type": "response.in_progress", "response": response}); err != nil {
+			return "cancelled"
+		}
+	}
+	if f.id == "F34" {
+		if err := sse(w, "codex.response.metadata", map[string]any{"type": "codex.response.metadata", "response_id": id}); err != nil {
+			return "cancelled"
+		}
+	}
+	if f.id == "F34B" {
+		itemID := "msg_" + strings.TrimPrefix(id, "resp_fault_")
+		item := map[string]any{"id": itemID, "type": "message", "status": "in_progress", "role": "assistant", "content": []any{}}
+		if err := sse(w, "response.output_item.added", map[string]any{"type": "response.output_item.added", "response_id": id, "output_index": 0, "item": item}); err != nil {
+			return "cancelled"
+		}
+		part := map[string]any{"type": "output_text", "text": "", "annotations": []any{}}
+		if err := sse(w, "response.content_part.added", map[string]any{"type": "response.content_part.added", "response_id": id, "item_id": itemID, "output_index": 0, "content_index": 0, "part": part}); err != nil {
+			return "cancelled"
+		}
+	}
+	if !sleepCtx(ctx, f.secs("after", 0.05)) {
+		return "cancelled"
+	}
+	code, message := "server_is_overloaded", "Overloaded"
+	if f.id == "F32" {
+		code, message = "server_error", "The service is busy"
+	}
+	if err := sse(w, "response.failed", map[string]any{"type": "response.failed", "response": map[string]any{
+		"id": id, "status": "failed", "error": map[string]any{"type": "server_error", "code": code, "message": message}}}); err != nil {
+		return "cancelled"
+	}
+	return "failed_in_stream"
+}
+
 // relayKeepalive imitates relays that send empty "SSE-Keep-Alive" deltas,
 // the first one before response.created, and then fail before any output.
 // With output, a real delta comes before the frames and the stream then
@@ -484,7 +547,7 @@ func nonStreamBody(p protocol, model string, u usage) any {
 
 func answersNormally(f fault, key string) bool {
 	switch f.id {
-	case "F00", "F17", "F22", "F23", "F24", "F25", "F26", "F29":
+	case "F00", "F17", "F22", "F23", "F24", "F25", "F26", "F29", "F31", "F32", "F33", "F34", "F34B", "F36", "F37":
 		// F26 fails streams only; the capability probe is not streamed.
 		return true
 	case "BAL":
@@ -565,10 +628,11 @@ func apiError(w http.ResponseWriter, p protocol, status int, errType, code, mess
 // ---- handler -----------------------------------------------------------------
 
 type requestBody struct {
-	Model  string `json:"model"`
-	Stream bool   `json:"stream"`
-	Input  any    `json:"input"`
-	Tools  []struct {
+	Model      string `json:"model"`
+	Stream     bool   `json:"stream"`
+	Input      any    `json:"input"`
+	ToolChoice any    `json:"tool_choice"`
+	Tools      []struct {
 		Type string `json:"type"`
 	} `json:"tools"`
 }
@@ -620,7 +684,7 @@ func handle(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(raw, &body)
 	p := protocolOf(path)
 	stream := body.Stream || strings.Contains(path, ":streamGenerateContent")
-	if p == protoResponses && !stream && bytes.Contains(raw, []byte(`"tool_choice":"required"`)) {
+	if choice, ok := body.ToolChoice.(string); p == protoResponses && !stream && ok && choice == "required" {
 		f.params["tool"] = "1"
 	}
 	if f.id == "F25" && p == protoResponses && bytes.Contains(raw, []byte(`"previous_response_id"`)) {
@@ -680,6 +744,42 @@ func serve(ctx context.Context, w http.ResponseWriter, p protocol, path, model s
 	}
 
 	switch f.id {
+	case "F31", "F32", "F33", "F34", "F34B":
+		if p != protoResponses || !stream {
+			return normal(ctx, w, p, model, stream, 0, 0, "", 0)
+		}
+		return preludeFailure(ctx, w, model, f)
+	case "F35":
+		if p == protoResponses {
+			apiError(w, p, http.StatusNotFound, "invalid_request_error", "unsupported_endpoint", "Responses endpoint is not supported")
+			return "error_status"
+		}
+		if !stream {
+			apiError(w, p, http.StatusTooManyRequests, "rate_limit_error", "rate_limit_exceeded", "Rate limit reached.")
+			return "error_status"
+		}
+		startSSE(w)
+		writeFailFrame(w, protoChat, "rate_limit_exceeded")
+		return "failed_in_stream"
+	case "F36":
+		if !stream {
+			if p == protoAnthropic {
+				apiError(w, p, http.StatusBadRequest, "invalid_request_error", "streaming_required", "This group only accepts streaming requests")
+			} else {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{
+					"type":    "invalid_request_error",
+					"code":    "streaming_required",
+					"message": "This group only accepts streaming requests",
+					"param":   nil,
+				}})
+			}
+			return "error_status"
+		}
+		return normal(ctx, w, p, model, true, f.secs("first", 0.2), 0, "", 0)
+	case "F37":
+		w.Header().Set("Retry-After", strconv.Itoa(f.num("reset", 8)))
+		apiError(w, p, http.StatusServiceUnavailable, "overloaded_error", "server_is_overloaded", "Overloaded")
+		return "error_status"
 	case "F23":
 		return slowStream(ctx, w, p, model, f.secs("secs", 60), f.secs("every", 5))
 	case "F24":

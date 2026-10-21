@@ -65,10 +65,10 @@ func TestResilienceSchedulingMatrix(t *testing.T) {
 						ctx := context.Background()
 
 						accounts := []Account{{ID: penalised, Priority: 1, Concurrency: 5}}
-						rules := []sharesched.AccountRule{{AccountID: penalised, Tier: 1, Weight: 1}}
+						rules := []shareRule{{AccountID: penalised, Tier: 1, Weight: 1}}
 						if size == 2 {
 							accounts = append(accounts, Account{ID: healthy, Priority: 1, Concurrency: 5})
-							rules = append(rules, sharesched.AccountRule{AccountID: healthy, Tier: 1, Weight: 1})
+							rules = append(rules, shareRule{AccountID: healthy, Tier: 1, Weight: 1})
 						}
 						env := newShareTestEnv(t, shareTestPolicy(scheduler, rules...), accounts...)
 						penalise[penalty](env.repo.accountsByID[penalised])

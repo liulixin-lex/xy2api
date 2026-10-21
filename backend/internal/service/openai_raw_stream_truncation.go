@@ -32,6 +32,8 @@ const openAIRawStreamTruncatedUpstreamMessage = "Upstream Chat Completions strea
 type openAIRawStreamTerminalState struct {
 	// sawDataLine 表示上游至少发过一行 `data:`，即响应确实是 SSE 语义流。
 	// 非 SSE 响应体（上游对 stream 请求返回裸 JSON）不参与截断判定，保持既有透传行为。
+	strict          bool
+	failurePayload  string
 	sawDataLine     bool
 	sawDone         bool
 	sawUsage        bool
@@ -44,6 +46,15 @@ func (t *openAIRawStreamTerminalState) ObserveDataLine(payload string) {
 		return
 	}
 	t.sawDataLine = true
+	if t.strict && gjson.Valid(payload) {
+		err := gjson.Get(payload, "error")
+		if (err.Exists() && err.Type != gjson.Null) || gjson.Get(payload, "type").String() == "error" {
+			if t.failurePayload == "" {
+				t.failurePayload = payload
+			}
+			return
+		}
+	}
 	if payload == "[DONE]" {
 		t.sawDone = true
 		return
@@ -65,7 +76,7 @@ func (t *openAIRawStreamTerminalState) ObserveDataLine(payload string) {
 
 // Terminated 表示上游给出过终止信号。
 func (t *openAIRawStreamTerminalState) Terminated() bool {
-	return t != nil && (t.sawDone || t.sawUsage || t.sawFinishReason)
+	return t != nil && t.failurePayload == "" && (t.sawDone || t.sawUsage || t.sawFinishReason)
 }
 
 // IsTruncated 判定上游是否在任何终止信号之前结束。clientOutputStarted 用于放行

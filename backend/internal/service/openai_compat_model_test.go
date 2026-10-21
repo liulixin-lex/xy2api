@@ -20,18 +20,27 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
 
 type openAICompatFailingWriter struct {
 	gin.ResponseWriter
-	failAfter int
-	writes    int
+	failAfter    int
+	writes       int
+	failedWrites int
+	failedData   string
+	onFailure    func()
 }
 
 func (w *openAICompatFailingWriter) Write(p []byte) (int, error) {
 	if w.writes >= w.failAfter {
+		w.failedWrites++
+		w.failedData = string(p)
+		if w.onFailure != nil {
+			w.onFailure()
+		}
 		return 0, errors.New("write failed: client disconnected")
 	}
 	w.writes++
@@ -2022,53 +2031,67 @@ func TestForwardAsAnthropic_BufferedEventNamedTerminalWithoutUpstreamCloseReturn
 }
 
 func TestForwardAsAnthropic_MissingTerminalBeforeOutputReturnsFailoverAndOps(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	original := *resilience.Current()
+	t.Cleanup(func() { resilience.Publish(original) })
+	for _, staging := range []bool{false, true} {
+		t.Run(fmt.Sprintf("staging=%t", staging), func(t *testing.T) {
+			settings := resilience.Defaults()
+			settings.Stream.PreludeStaging = staging
+			resilience.Publish(settings)
 
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
+			gin.SetMode(gin.TestMode)
 
-	upstreamBody := "data: [DONE]\n\n"
-	upstream := &httpUpstreamRecorder{resp: &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "X-Request-Id": []string{"rid_missing_terminal"}},
-		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
-	}}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
 
-	svc := &OpenAIGatewayService{httpUpstream: upstream}
-	account := &Account{
-		ID:          1,
-		Name:        "openai-oauth",
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token":       "oauth-token",
-			"chatgpt_account_id": "chatgpt-acc",
-		},
+			upstreamBody := "data: [DONE]\n\n"
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "X-Request-Id": []string{"rid_missing_terminal"}},
+				Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+			}}
+
+			svc := &OpenAIGatewayService{httpUpstream: upstream}
+			account := &Account{
+				ID:          1,
+				Name:        "openai-oauth",
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeOAuth,
+				Concurrency: 1,
+				Credentials: map[string]any{
+					"access_token":       "oauth-token",
+					"chatgpt_account_id": "chatgpt-acc",
+				},
+			}
+
+			result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.1")
+			require.Error(t, err)
+			var failoverErr *UpstreamFailoverError
+			require.True(t, errors.As(err, &failoverErr), "missing terminal before output must use failover path")
+			require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+			require.Contains(t, string(failoverErr.ResponseBody), "OpenAI messages stream ended before a terminal event")
+			if staging {
+				require.Nil(t, result, "a replayed prelude must not contribute usage or response identity")
+			} else {
+				require.NotNil(t, result)
+				require.Zero(t, result.Usage.InputTokens)
+				require.Zero(t, result.Usage.OutputTokens)
+			}
+			require.False(t, c.Writer.Written(), "no client body/header should be committed before safe failover")
+			require.Empty(t, rec.Body.String())
+
+			events := openAICompatOpsEvents(t, c)
+			require.Len(t, events, 1)
+			require.Equal(t, "failover", events[0].Kind)
+			require.Equal(t, http.StatusBadGateway, events[0].UpstreamStatusCode)
+			require.Equal(t, int64(1), events[0].AccountID)
+			require.Equal(t, "rid_missing_terminal", events[0].UpstreamRequestID)
+			require.Equal(t, "OpenAI messages stream ended before a terminal event", events[0].Message)
+		})
 	}
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.1")
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.True(t, errors.As(err, &failoverErr), "missing terminal before output must use failover path")
-	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
-	require.Contains(t, string(failoverErr.ResponseBody), "OpenAI messages stream ended before a terminal event")
-	require.NotNil(t, result)
-	require.Zero(t, result.Usage.InputTokens)
-	require.Zero(t, result.Usage.OutputTokens)
-	require.False(t, c.Writer.Written(), "no client body/header should be committed before safe failover")
-	require.Empty(t, rec.Body.String())
-
-	events := openAICompatOpsEvents(t, c)
-	require.Len(t, events, 1)
-	require.Equal(t, "failover", events[0].Kind)
-	require.Equal(t, http.StatusBadGateway, events[0].UpstreamStatusCode)
-	require.Equal(t, int64(1), events[0].AccountID)
-	require.Equal(t, "rid_missing_terminal", events[0].UpstreamRequestID)
-	require.Contains(t, events[0].Message, "terminal event")
 }
 
 func TestForwardAsAnthropic_MissingTerminalAfterOutputRecordsOpsWithoutFailover(t *testing.T) {
@@ -2126,48 +2149,65 @@ func TestForwardAsAnthropic_MissingTerminalAfterOutputRecordsOpsWithoutFailover(
 }
 
 func TestForwardAsAnthropic_MissingTerminalAfterClientDisconnectSkipsOpsAndFailover(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	original := *resilience.Current()
+	t.Cleanup(func() { resilience.Publish(original) })
+	for _, staging := range []bool{false, true} {
+		t.Run(fmt.Sprintf("staging=%t", staging), func(t *testing.T) {
+			settings := resilience.Defaults()
+			settings.Stream.PreludeStaging = staging
+			resilience.Publish(settings)
 
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Writer = &openAICompatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
+			gin.SetMode(gin.TestMode)
 
-	upstreamBody := strings.Join([]string{
-		`data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.4","status":"in_progress","output":[]}}`,
-		"",
-	}, "\n")
-	upstream := &httpUpstreamRecorder{resp: &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "X-Request-Id": []string{"rid_client_disconnect_missing_terminal"}},
-		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
-	}}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			writer := &openAICompatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
+			c.Writer = writer
+			body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
 
-	svc := &OpenAIGatewayService{httpUpstream: upstream}
-	account := &Account{
-		ID:          1,
-		Name:        "openai-oauth",
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token":       "oauth-token",
-			"chatgpt_account_id": "chatgpt-acc",
-		},
+			upstreamBody := strings.Join([]string{
+				`data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.4","status":"in_progress","output":[]}}`,
+				"",
+			}, "\n")
+			if staging {
+				// created is staged; content must arrive before a downstream write can fail.
+				upstreamBody += "\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"
+			}
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "X-Request-Id": []string{"rid_client_disconnect_missing_terminal"}},
+				Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+			}}
+
+			svc := &OpenAIGatewayService{httpUpstream: upstream}
+			account := &Account{
+				ID:          1,
+				Name:        "openai-oauth",
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeOAuth,
+				Concurrency: 1,
+				Credentials: map[string]any{
+					"access_token":       "oauth-token",
+					"chatgpt_account_id": "chatgpt-acc",
+				},
+			}
+
+			result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.1")
+			require.Equal(t, 1, writer.failedWrites, "the fixture must actually observe a failed client write")
+			require.NoError(t, c.Request.Context().Err(), "write failure alone must prevent failover")
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "missing terminal event")
+			var failoverErr *UpstreamFailoverError
+			require.False(t, errors.As(err, &failoverErr))
+			require.NotNil(t, result)
+			require.True(t, result.ClientDisconnect)
+			require.Empty(t, rec.Body.String())
+			_, ok := c.Get(OpsUpstreamErrorsKey)
+			require.False(t, ok, "client disconnect must not be attributed as an upstream error")
+		})
 	}
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.1")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "missing terminal event")
-	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr))
-	require.NotNil(t, result)
-	require.True(t, result.ClientDisconnect)
-	require.Empty(t, rec.Body.String())
-	_, ok := c.Get(OpsUpstreamErrorsKey)
-	require.False(t, ok, "client disconnect must not be attributed as an upstream error")
 }
 
 func TestForwardAsAnthropic_CompleteStreamDoesNotRecordMissingTerminalOps(t *testing.T) {

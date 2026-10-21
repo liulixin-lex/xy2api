@@ -6,12 +6,19 @@
 
 import { apiClient } from '../client'
 import type { PaginatedResponse } from '@/types'
+import type { AccountCapabilityLearned } from '@/utils/accountCapability'
 
 export interface ResilienceRange { min: number; max: number }
 
 export interface GatewayResilienceSettings {
   enabled: boolean
-  failure: { transient_cooldown_seconds: number; retry_after_cap_seconds: number; balance_keywords_extra: string[] }
+  failure: {
+    transient_cooldown_seconds: number
+    retry_after_cap_seconds: number
+    balance_keywords_extra: string[]
+    /** 0.4.4: only real capacity signals count as capacity (W2.1). */
+    decision_v2: boolean
+  }
   session: { enabled: boolean; streak_threshold: number; streak_window_seconds: number; avoid_seconds: number }
   last_resort: { enabled: boolean }
   balance: { enabled: boolean; pause_seconds: number }
@@ -43,9 +50,17 @@ export interface GatewayResilienceSettings {
     negative_cache_seconds: number
     fast_fail: { enabled: boolean; window_seconds: number; threshold: number }
     turn_cap: { enabled: boolean; failures: number; window_seconds: number }
+    /** 0.4.4: a synthesized response.failed may carry error.headers.retry-after (W5.3). */
+    failed_frame_retry_after: boolean
+    /** 0.4.4: Retry-After cap for Codex requests, 0 turns it off (W5.5). */
+    codex_retry_after_cap_seconds: number
   }
   fallback_group: { enabled: boolean; return_stable_seconds: number; binding_ttl_seconds: number }
   reservation: { cache_aware_estimate: boolean; output_p99_cap: boolean }
+  /** 0.4.4: what may be held back before the first content and how a stream must end (W1.1, W1.2). */
+  stream: { prelude_staging: boolean; native_prelude_whitelist: boolean; strict_terminal: boolean }
+  /** 0.4.4: learn accounts that only accept streaming requests (W6). */
+  capability: { stream_only_learning: boolean; learn_ttl_seconds: number }
 }
 
 export interface GatewayResilienceSettingsResponse {
@@ -107,6 +122,8 @@ export interface ResilienceAccountExplanation {
   recover_at?: string
   session_failures?: number
   avoided?: boolean
+  /** 0.4.4: what was learned about the account, shown whatever the query. */
+  capability_learned?: AccountCapabilityLearned[]
 }
 
 /** Read-only resilience view of a group and, when given, one session. */
@@ -125,6 +142,9 @@ export interface ResilienceExplanation {
 export interface ResilienceExplainQuery {
   session_hash?: string
   model?: string
+  /** 0.4.4: with stream=false, explain a non-streaming request of this protocol (learned stream-only accounts are skipped). */
+  protocol?: 'responses' | 'chat'
+  stream?: boolean
 }
 
 const base = '/admin'

@@ -195,6 +195,63 @@
         "docs/PROJECT_MEMORY.md",
         "docs/PROJECT_MEMORY_ARCHIVE.md"
       ]
+    },
+    {
+      "pattern": "\\bAttributionSampleRate\\b|attribution_sample_rate|\\bDecisionSamples\\b|decision_samples|\\bCacheAttribution\\b|\\bcache_attribution\\b",
+      "reason": "2026-10-20 share scheduling simplification: the settings carry the master switch only; the retired switches are accepted and ignored by the settings handler and kept in the stored document for a rollback (design §7.1)",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "openspec/changes/replace-controlled-with-share-scheduling/**",
+        "openspec/changes/simplify-share-scheduling-20261020/**",
+        "backend/internal/handler/admin/share_scheduling_handler.go",
+        "backend/internal/handler/admin/share_scheduling_handler_test.go",
+        "backend/internal/service/share_scheduling_service.go",
+        "backend/internal/service/share_scheduling_admin_test.go"
+      ]
+    },
+    {
+      "pattern": "RecentDecisions|shareDecisionSample|xy2:share:dec:|ClearBindings|IsShareRebalanceableBinding|ShareRebalance(?:All|Cold)|shareDeleteBindingIfOwner|rebalance_cleared|recordShadow|newShareShadow|newOpenAIShareShadow|shareShadowConcurrency|shadow_agree|ShadowAgreeRate|CorrectionFactor|shareCorrection|refreshCorrections|shareTTFT|acct_ttft:|shareStatsTTFTPrefix|recordSelectionCost|meterIO|shareSelectionCost|shareStatsServedPrefix|shareStatsIdealPrefix|shareStatsIdealSkipPrefix|shareStatsKeySourcePrefix|IdealSkipReason|capacity_mismatch|ReasonCompactUnsupported|ReasonDrained\\b|KeyPromptCache|ReasonAdminRebalance|ReasonSpillKeep|ReasonReturnImmediate|ReasonReturnDeadline|ReasonDrainCold|ReasonDrainDeadline",
+      "reason": "2026-10-20 share scheduling simplification removed shadow comparison, rebalance, corrections, decision samples, first-token histograms, the selection-cost meter, the counters no report reads and the reason codes no longer produced (design §6); an upstream sync must not bring them back",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "openspec/changes/replace-controlled-with-share-scheduling/**",
+        "openspec/changes/simplify-share-scheduling-20261020/**",
+        "backend/internal/service/share_scheduling_attribution_test.go"
+      ]
+    },
+    {
+      "pattern": "admin\\.shareScheduling\\.(?:(?:policy|preview|rebalance|report|tabs)\\.|(?:accountRules\\.defaults|accountRules\\.domain|accountRules\\.drain|accountRules\\.manage|accountRules\\.ownDomain|accountRules\\.tier|accountRules\\.weight|explain\\.entryColumns\\.domain|explain\\.entryColumns\\.effectiveWeight|explain\\.entryColumns\\.tier|explain\\.result\\.activeTier|explain\\.result\\.noSteps|explain\\.result\\.steps|globalOff|groups\\.cacheRead|groups\\.draft|groups\\.notConfigured|groups\\.requests|groups\\.schedulingMiss|groups\\.shadowAgree|groups\\.version|keySources\\.key_prefix|keySources\\.key_prompt_cache_key|loadSettingsFailed|openSettings|reasons\\.admin_rebalance|reasons\\.compact_unsupported|reasons\\.drain_cold|reasons\\.drain_deadline|reasons\\.drained|reasons\\.original|reasons\\.return_deadline|reasons\\.return_immediate|reasons\\.spill_keep|schedulerHints\\.shadow|schedulers\\.shadow|settings\\.cacheAttribution|settings\\.cacheAttributionHint|settings\\.decisionSamples|settings\\.decisionSamplesHint|settings\\.enabled|settings\\.enabledHint|settings\\.loadFailed|settings\\.reload|settings\\.sampleRate|settings\\.sampleRateHint|settings\\.sampleRateInvalid|settings\\.save|settings\\.saveFailed|settings\\.saved)(?![A-Za-z0-9_]))|SharePolicyEditor|SharePreviewDialog|ShareRebalanceDialog|ShareReportPanel|\\bSharePolicy\\b|\\bShareAccountRule\\b|ShareDecisionSample|ShareRebalanceMode|\\bShareTTFT\\b|\\bShareAccountActual\\b|ShareHealthFigures|draftFromView|policyFromDraft|validateShareDraft|draftShares|resetShareRow|refreshShareDefaults|shareDefaultRule|cloneShareJSON|sharePolicyProblems|SHARE_MIN_WEIGHT|SHARE_MAX_WEIGHT|SHARE_MAX_CACHE_DOMAIN|rebaseShareDraft",
+      "reason": "2026-10-20 share scheduling simplification: the policy editor, preview and rebalance dialogs, report panel, their texts, API types and draft helpers were removed from the share console (frontend retired list of the change)",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "openspec/changes/replace-controlled-with-share-scheduling/**",
+        "openspec/changes/simplify-share-scheduling-20261020/**"
+      ]
+    },
+    {
+      "pattern": "\\b(?:soft_spill_max_seconds|ms_per_1k_tokens|return_deadline_seconds|stable_seconds|on_spill|on_saturated|on_failed|min_volume|cache_domain|drain_until)\\b|\"realign\"",
+      "reason": "2026-10-20 share scheduling simplification: the policy fields of 0.3.0-0.4.3 have no effect; the decoder accepts and ignores them and saves keep them for a rollback (design §3), so only the decoder, the 0.4.3 golden and their tests name them. Generic names of the same documents (correction, window_minutes, ttl_seconds, max_ms, max_waiting, drain) are used elsewhere and are not listed",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "openspec/changes/replace-controlled-with-share-scheduling/**",
+        "openspec/changes/simplify-share-scheduling-20261020/**",
+        "openspec/changes/gateway-resilience-20261015/design.md",
+        "backend/internal/sharesched/policy.go",
+        "backend/internal/sharesched/policy_test.go",
+        "backend/internal/sharesched/compat043/**"
+      ]
+    },
+    {
+      "pattern": "\\bwriteOpenAIContentRejection\\b",
+      "reason": "0.4.4 integration lint: the content-refusal writer was replaced by the unified W5 terminal exit and had no callers, so it was deleted (no behaviour or API change); only the change history names it",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
     }
   ],
   "private": [

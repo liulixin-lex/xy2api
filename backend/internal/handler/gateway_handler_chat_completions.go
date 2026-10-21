@@ -99,6 +99,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	c.Request = c.Request.WithContext(h.gatewayService.WithClaudeCacheFallbackRequest(c.Request.Context(), apiKey, body))
 	c.Request = c.Request.WithContext(service.WithRequestReplaySafety(c.Request.Context(), body, false))
 	setOpsRequestContext(c, reqModel, reqStream)
+	installResilienceRetryAdvice(c, h.gatewayService, apiKey, reqModel)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 	pricingCtx, pricingAt := service.WithGatewayTokenRequestPricing(c.Request.Context())
 	c.Request = c.Request.WithContext(pricingCtx)
@@ -397,30 +398,58 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 
 // chatCompletionsErrorResponse writes an error in OpenAI Chat Completions format.
 func (h *GatewayHandler) chatCompletionsErrorResponse(c *gin.Context, status int, errType, message string) {
-	c.JSON(status, gin.H{
-		"error": gin.H{
-			"type":    errType,
-			"message": message,
-		},
-	})
+	h.chatCompletionsErrorResponseWithCode(c, status, errType, "", message)
+}
+
+func (h *GatewayHandler) chatCompletionsErrorResponseWithCode(c *gin.Context, status int, errType, code, message string) {
+	_, code, message = resilienceTranslateError(c, status, errType, code, message)
+	// Queue pings can commit the stream before billing or model checks fail.
+	// A committed Chat stream always needs its error followed by [DONE].
+	if c.Writer.Written() {
+		service.MarkOpsStreamError(c, errType, message, status)
+		writeChatCompletionsErrorSSE(c, errType, code, message, status)
+		return
+	}
+	if !beginResilienceTerminal(c) {
+		return
+	}
+	errObj := gin.H{"type": errType, "message": message}
+	if code != "" {
+		errObj["code"] = code
+	}
+	c.JSON(status, gin.H{"error": errObj})
 }
 
 // handleCCFailoverExhausted writes a failover-exhausted error in CC format.
 func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
-	if streamStarted {
+	if c.GetBool(ginKeyResilienceFinalized) {
 		return
 	}
-	if lastErr != nil {
-		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
+	write := func(status int, errType, code, message string) {
+		if streamStarted && c.Writer.Size() > 0 && !gatewayStreamHasOnlyHeartbeats(c) {
+			service.MarkOpsStreamError(c, errType, message, status)
+			return
+		}
+		if lastErr != nil {
+			copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
+		}
+		status = applyExhaustedRetryHint(c, h.gatewayService, status)
+		if streamStarted {
+			errType, code, message = resilienceTranslateError(c, status, errType, code, message)
+			service.MarkOpsStreamError(c, errType, message, status)
+			writeChatCompletionsErrorSSE(c, errType, code, message, status)
+			return
+		}
+		h.chatCompletionsErrorResponseWithCode(c, status, errType, code, message)
 	}
 	// xy2api resilience: a content-safety refusal is the client's 400.
 	if msg, rejected := resilienceContentRejection(c, lastErr); rejected {
-		writeOpenAIContentRejection(c, msg)
+		write(http.StatusBadRequest, "invalid_request_error", codeContentPolicyViolation, msg)
 		return
 	}
 	if lastErr != nil && lastErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(lastErr)
-		h.chatCompletionsErrorResponse(c, status, "server_error", message)
+		write(status, "server_error", "", message)
 		return
 	}
 	if lastErr != nil && lastErr.IsOpenAICapacityShed() && strings.TrimSpace(lastErr.ClientMessage) != "" {
@@ -428,7 +457,7 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 		if status <= 0 {
 			status = http.StatusServiceUnavailable
 		}
-		h.chatCompletionsErrorResponse(c, status, "server_error", lastErr.ClientMessage)
+		write(status, "server_error", "", lastErr.ClientMessage)
 		return
 	}
 	statusCode := http.StatusBadGateway
@@ -437,8 +466,8 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 	}
 	if lastErr != nil && service.IsOpenAISilentRefusalErrorBody(lastErr.ResponseBody) {
 		service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
-		h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage())
+		write(http.StatusBadGateway, "upstream_error", "", service.OpenAISilentRefusalClientMessage())
 		return
 	}
-	h.chatCompletionsErrorResponse(c, statusCode, "server_error", "All available accounts exhausted")
+	write(statusCode, "server_error", "", "All available accounts exhausted")
 }

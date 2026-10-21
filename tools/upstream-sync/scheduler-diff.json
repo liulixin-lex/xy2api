@@ -87,7 +87,6 @@
           "if err == nil && selection != nil {",
           "s.shareScheduling.recordSelection(ctx, selection.Account)",
           "}",
-          "return selection, decision, err",
           "}",
           "func (s *OpenAIGatewayService) selectAccountWithoutQualityRouting(",
           "ctx context.Context, groupID *int64, previousResponseID, sessionHash, requestedModel string,",
@@ -247,6 +246,31 @@
           "}",
           "}"
         ]
+      },
+      {
+        "block": "resilience-v2-stream-only-capability",
+        "note": "Reviewed for 0.4.4: scoped non-streaming capability eligibility, typed capability-only exhaustion, and request-local exclusions. Legacy mixed exclusions retain ineligible; compact uses the same eligibility input. No health penalties are added.",
+        "removed": [
+          "return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false, filterStats.summary(\"\"))",
+          "return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, attempt.compactBlocked, filterStats.summary(\"selection_order_empty\"))",
+          "return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, compactBlocked, filterStats.summary(\"selection_order_exhausted\"))",
+          "return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, compactBlocked, filterStats.summary(\"selection_order_exhausted\"))"
+        ],
+        "added": [
+          "}",
+          "}",
+          "}",
+          "func (s openAISelectionFilterStats) capabilityOnly() bool {",
+          "return s.pool > 0 && len(s.reasons) == 1 && s.reasons[resilience.ReasonCapabilityStreamOnly] == s.pool",
+          "return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false, filterStats.summary(\"\"), filterStats.capabilityOnly())",
+          "return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, attempt.compactBlocked, filterStats.summary(\"selection_order_empty\"), filterStats.capabilityOnly())",
+          "return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, compactBlocked, filterStats.summary(\"selection_order_exhausted\"), filterStats.capabilityOnly())",
+          "return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, compactBlocked, filterStats.summary(\"selection_order_exhausted\"), filterStats.capabilityOnly())",
+          "if !req.RequireCompact && req.RequiredImageCapability == \"\" {",
+          "if reason := capabilityEligibilityReason(ctx, account, req.RequestedModel, time.Now()); reason != \"\" {",
+          "return false, reason",
+          "return selection, decision, capabilitySelectionError(ctx, err)"
+        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [
@@ -405,6 +429,39 @@
           "if s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {",
           "return nil",
           "}"
+        ]
+      },
+      {
+        "block": "resilience-v2-stream-only-capability",
+        "note": "Reviewed for 0.4.4: scoped non-streaming capability eligibility, typed capability-only exhaustion, and request-local exclusions. Legacy mixed exclusions retain ineligible; compact uses the same eligibility input. No health penalties are added.",
+        "removed": [
+          "func noAvailableOpenAISelectionError(requestedModel string, compactBlocked bool, details string) error {",
+          "return openAINoAvailableSelectionError{message: message}",
+          "message string",
+          "return nil, false, noAvailableOpenAISelectionError(requestedModel, compactBlocked, filterStats.summary(\"\"))",
+          "filterStats.exclude(\"ineligible\")",
+          "return nil, noAvailableOpenAISelectionError(requestedModel, false, filterStats.summary(\"\"))"
+        ],
+        "added": [
+          "\"github.com/liulixin-lex/xy2api/internal/resilience\"",
+          "}",
+          "}",
+          "}",
+          "func noAvailableOpenAISelectionError(requestedModel string, compactBlocked bool, details string, capabilityOnly ...bool) error {",
+          "return openAINoAvailableSelectionError{message: message, capabilityOnly: len(capabilityOnly) > 0 && capabilityOnly[0]}",
+          "message        string",
+          "capabilityOnly bool",
+          "func (e openAINoAvailableSelectionError) CapabilityOnly() bool { return e.capabilityOnly }",
+          "if !requireCompact {",
+          "if reason := capabilityEligibilityReason(ctx, account, requestedModel, time.Now()); reason != \"\" {",
+          "return reason",
+          "return nil, false, capabilitySelectionError(ctx, noAvailableOpenAISelectionError(requestedModel, compactBlocked, filterStats.summary(\"\"), filterStats.capabilityOnly()))",
+          "reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, acc, platform, requestedModel, false, requiredCapability)",
+          "if reason != resilience.ReasonCapabilityStreamOnly {",
+          "reason = \"ineligible\"",
+          "filterStats.exclude(reason)",
+          "defer func() { selectionErr = capabilitySelectionError(ctx, selectionErr) }()",
+          "return nil, noAvailableOpenAISelectionError(requestedModel, false, filterStats.summary(\"\"), filterStats.capabilityOnly())"
         ]
       }
     ],

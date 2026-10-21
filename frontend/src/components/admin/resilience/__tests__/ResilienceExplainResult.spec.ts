@@ -66,4 +66,35 @@ describe('resilience explain result', () => {
     const w = mount(ResilienceExplainResult, { props: { explanation: { ...base, model_restriction: 'channel_pricing' } } })
     expect(text(w, 'restriction')).toBe('admin.resilience.explain.restriction.channel_pricing')
   })
+
+  it('names an account skipped as stream-only and when the learned state expires', () => {
+    const skipped: ResilienceExplanation = {
+      ...base,
+      accounts: [{ account_id: 9, name: 'relay', platform: 'openai', priority: 1, tier: 'hard', reason: 'capability_stream_only', recover_at: '2026-10-21T08:00:00Z' }]
+    }
+    const row = mount(ResilienceExplainResult, { props: { explanation: skipped } }).get('[data-testid="resilience-explain-accounts"] tbody tr')
+    expect(row.text()).toContain('admin.resilience.explain.reasons.capability_stream_only')
+    expect(row.text()).toContain('at 2026-10-21T08:00:00Z')
+  })
+
+  it('lists what each account learned, whatever the query', () => {
+    const later = new Date(Date.now() + 2 * 3_600_000 + 60_000).toISOString()
+    const learned: ResilienceExplanation = {
+      ...base,
+      accounts: [
+        { account_id: 9, name: 'relay', platform: 'openai', priority: 1, tier: 'none', capability_learned: [
+          { protocol: 'responses', mode: 'stream_only', expires_at: later },
+          { protocol: 'chat', mode: 'stream_only', expires_at: new Date(Date.now() - 1000).toISOString() }
+        ] },
+        { account_id: 4, name: 'plain', platform: 'openai', priority: 2, tier: 'none', capability_learned: [] }
+      ]
+    }
+    const rows = mount(ResilienceExplainResult, { props: { explanation: learned } }).findAll('[data-testid="resilience-explain-accounts"] tbody tr')
+    const cell = rows[0].get('[data-testid="resilience-explain-learned"]').text()
+    expect(cell).toContain('admin.resilience.explain.learned')
+    expect(cell).toContain('"protocols":"responses"')
+    expect(cell).toContain('admin.resilience.capability.hours')
+    expect(rows[1].get('[data-testid="resilience-explain-learned"]').text()).toBe('-')
+  })
 })
+

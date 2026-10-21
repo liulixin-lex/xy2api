@@ -118,6 +118,28 @@
 
 - **SW-2**：Cloudflare 后面的中转返回 Cloudflare 的 JSON 502（`origin_bad_gateway`，说明文字含 overloaded，正文 `retry_after: 60`），两个账号在同一上游主机上，与 2026-10-20 生产观测一致：请求换到第二个账号完成，第一个账号得到 `transient:` 冷却，剩余 45–60 秒。旧规则判为 `CAPACITY_SHED`，同主机不换号、账号不冷却。
 
+0.4.4 新增 15 个（故障 F31–F37 与 F34B，合计 71 个场景；设计见 [`gateway-resilience-v2-20261021/design.md`](../gateway-resilience-v2-20261021/design.md) §12，规格场景按同名编号标注）：
+
+- **CV-5**：Codex 风格的 Responses 请求，A 发 `response.created` 后 `response.failed`（`server_is_overloaded`，F31）：按 D18，A 最多试 2 次，每次记一条 `CAPACITY_SHED`；最终由 B 完成，客户端只收到 B 的 `response.created`。
+- **CV-6**：Chat Completions 经兼容转换，上游 created 后 failed（“The service is busy”，F32）：换号完成，客户端只收到一个 role 分块，不按容量误判。
+- **CV-7**：created、`response.in_progress` 之后 overloaded（F33）：换号完成。
+- **CV-8**：`response.created` 之前先到一个无标记的空 delta，随后空的 added 结构与 overloaded（F34B，空内容是合成条件，生产探测没有采集 delta 正文）：空 delta 被丢弃，换号完成，A 的事件不泄露给客户端。
+- **CV-9**：created 之后到达未知的 `codex.response.metadata` 再失败（F34）：元数据算输出，不换号。
+- **RAW-1、RAW-2**：账号不支持 `/responses`，raw Chat 发 `error` 后跟 `[DONE]`（F35）：有备选时在输出前换号完成；单号组记为失败，不当成功、不写用量。
+- **SO-1**：非流式 Responses 请求遇到 400 “only accepts streaming requests”（F36，错误体带 `"param": null`，与常见的 OpenAI 兼容错误一致）：本请求换号完成；A 被学为仅流式（`capability_learned`），下一个非流式请求不选 A，流式请求照常可选；清除接口生效后可以重新学习；A 不计账号失败。
+- **RA-1、RA-2**：经 CDN、心跳已提交后：全组过载且能算出恢复时间（F37，延迟的 HTTP 503 带 `Retry-After`）时，`response.failed` 带 2–10 秒的 `error.headers.retry-after`，正文秒数一致；B 健康时请求正常完成，不带延迟提示。
+- **ANT-3**：Messages 入口无号时错误 `type` 为 `api_error`（ANT-1 是已有的正常原生流场景，不占这个编号）。
+- **Q-1**：用户并发 1，第二个流式请求在用户队列中收到 ping 后余额归零：Gateway 入站的 Responses 收到 `response.created` 后跟 `response.failed`，Chat 收到 `error` 后跟 `[DONE]`，不是裸 JSON；Messages 本来就是带名字的 `event: error`。另断言 Responses 与 Chat 在开场之前没有任何 data 帧（不能有 typed ping 或 `[DONE]`，排队心跳只能是注释行），Messages 仍允许 typed `ping`。
+- **CX-1**：识别为 Codex 的请求（`originator` 头与 UA 两种）在无号时 `Retry-After` 不超过 10 秒；普通客户端的对照前后都保持原值。
+- **SH-1、SH-2**（PR #117）：分组切到份额后按账号优先级与负载因子选号，切回原版正常服务；真实的 502 尝试（每次由 B 恢复）降低 A 的健康权重与新会话份额，结束时恢复账号与调度设置。
+
+随 0.4.4 修改的已有场景：
+
+- **DC-6**：兼容转换推迟开场后（`stream.prelude_staging`），只写出开场事件就断开的断言改为“开场延迟”：Chat 与 Messages 兼容转换在第一个内容前不写出 role 分块或 `message_start`；Anthropic 原生仍转发 `message_start`，不算送达。
+- **LR-1**：份额分组的层级改取账号优先级，场景用新的两字段策略接口，结束时恢复设置。
+
+基线（`027a434ad`）实测（17 项定向，8 通过、9 预期红灯）：CV-6、CV-8、RAW-1、RAW-2、SO-1、RA-1、DC-6、Q-1、CX-1 是功能红灯（Q-1 在基线写裸 JSON；CX-1 在基线两种 Codex 标记都是 30 秒）；CV-5、CV-7、CV-9、RA-2、ANT-3 在基线已经通过，只防退化。修改全局设置的场景串行执行；容量换主机所需的第二个上游用同一故障服务的另一个 Docker DNS 名称，不访问真实上游。
+
 ### 6.2 真实客户端端到端
 
 | 客户端 | 路径 | 场景 |
@@ -172,6 +194,8 @@ XY-image 0.0.17 测试实例接入测试 xy2api，覆盖：
 > **0.4.2 最终浸泡按用户 2026-10-19 决定为 3 小时：** `soak.py --hours 3 --cycle-minutes 30`。负载的并发爬坡与余额断供改为每 30 分钟一个周期；第一个 30 分钟算热身、不计入判定；用其余 2.5 小时的每 30 分钟 GC 后存活堆中位数计算斜率，要求 ≤1 MiB/h。另外要求协程数平稳、不持续增长，没有 panic，没有 ERROR 刷屏。重点看进程租约协程、SSE 判读缓冲，以及 G1 新增的守卫与计时器。下文 6.5 小时的判据保留为缺省值（`--cycle-minutes 60`）。
 >
 > 结果（0.4.2，`0ad63fab7`）：11 项中 10 项通过；GC 后存活堆斜率为 1.2 MiB/h，超过上限。分析与用户的决定见 tasks“0.4.2”。
+>
+> **0.4.4 候选沿用 3 小时判据**（`--hours 3 --cycle-minutes 30`），工具补强（QA `a542b3cb7`）：缺 GC 或协程数据、SQL 失败直接判为不通过，不再误通过；“ERROR 刷屏”定为连续 3 分钟每分钟 ≥60 条，全部 ERROR 仍逐条输出供归因。候选只构建一个，记录源码树、镜像 ID、二进制与工具的 SHA-256；71 个场景一条命令串行执行（估计 85–105 分钟），之后在同一套环境做升级演练 0.4.3 → 候选（含回退与再前滚，约 15–30 分钟）。按 PM 指令 6，浸泡在另一套独立的 Compose 项目上与场景并行运行（QA `9ca7c3347`）：两套用同一个镜像与二进制（前后都校验 image ID 与二进制 SHA-256），数据挂载、端口与网络分开，两套合计设内存与 CPU 上限，启动前再查主机余量、不足则拒绝启动；升级演练的磁盘 IO 与浸泡重叠的 UTC 时段自动写进浸泡报告；结束时只清理独立的那一套。
 
 - **负载：**
   - 并发 20–50，混合 Responses、Chat、Messages、Gemini、图片，流式与非流式按 7:3；

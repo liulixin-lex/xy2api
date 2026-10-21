@@ -95,6 +95,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	c.Request = c.Request.WithContext(h.gatewayService.WithClaudeCacheFallbackRequest(c.Request.Context(), apiKey, body))
 	c.Request = c.Request.WithContext(service.WithRequestReplaySafety(c.Request.Context(), body, false))
 	setOpsRequestContext(c, reqModel, reqStream)
+	installResilienceRetryAdvice(c, h.gatewayService, apiKey, reqModel)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 	requestCtx := c.Request.Context()
 	// 定价上下文无条件装配：/v1/responses 是 token 计费端点，声明生图工具的
@@ -380,6 +381,21 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 
 // responsesErrorResponse writes an error in OpenAI Responses API format.
 func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code, message string) {
+	errType, explicitCode, message := resilienceTranslateError(c, status, code, "", message)
+	// Preserve the existing JSON code; only a capped turn changes its outcome.
+	if c.GetBool(ginKeyResilienceTurnCapped) {
+		code = explicitCode
+	}
+	// A queue ping commits HTTP 200 before billing is rechecked. Finish the
+	// inbound protocol even when resilience switches are off.
+	if c.Writer.Written() {
+		service.MarkOpsStreamError(c, code, message, status)
+		writeResponsesFailedSSEWithOpening(c, errType, explicitCode, message, gatewayStreamHasOnlyHeartbeats(c))
+		return
+	}
+	if !beginResilienceTerminal(c) {
+		return
+	}
 	c.JSON(status, gin.H{
 		"error": gin.H{
 			"code":    code,
@@ -390,8 +406,8 @@ func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code
 
 // handleResponsesFailoverExhausted writes a failover-exhausted error in Responses format.
 func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
-	if lastErr != nil {
-		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
+	if c.GetBool(ginKeyResilienceFinalized) {
+		return
 	}
 	statusCode := http.StatusBadGateway
 	if lastErr != nil && lastErr.StatusCode > 0 {
@@ -416,6 +432,14 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 	if msg, rejected := resilienceContentRejection(c, lastErr); rejected {
 		status, code, message = http.StatusBadRequest, codeContentPolicyViolation, msg
 	}
+	if streamStarted && c.Writer.Size() > 0 && !gatewayStreamHasOnlyHeartbeats(c) {
+		service.MarkOpsStreamError(c, code, message, status)
+		return
+	}
+	if lastErr != nil {
+		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
+	}
+	status = applyExhaustedRetryHint(c, h.gatewayService, status)
 	if streamStarted {
 		// A slot-wait heartbeat commits HTTP 200 before any upstream response.
 		// In that case a terminal frame is still required; once any semantic or
@@ -423,7 +447,8 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 		// generic response.failed.
 		service.MarkOpsStreamError(c, code, message, status)
 		if c != nil && c.Writer != nil && (c.Writer.Size() <= 0 || gatewayStreamHasOnlyHeartbeats(c)) {
-			writeResponsesFailedSSE(c, code, "", message)
+			errType, explicitCode, translatedMessage := resilienceTranslateError(c, status, code, "", message)
+			writeResponsesFailedSSEWithOpening(c, errType, explicitCode, translatedMessage, gatewayStreamHasOnlyHeartbeats(c))
 		}
 		return
 	}

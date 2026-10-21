@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
@@ -20,11 +21,10 @@ import (
 // cooling the account or counting the session failure.
 //
 // The first-output deadline of a converted stream now bounds the wait for
-// the upstream headers and for the first upstream line. Up to that line the
-// client has seen heartbeats at most, so an expired attempt fails over at
-// its tier like a Responses attempt. From the first line on the conversion
-// writes opening events (message_start, the role chunk) and a switch would
-// repeat them; a stall from then on ends the stream with the bookkeeping.
+// the upstream headers and, with prelude staging enabled, the first content
+// or terminal. Only identity is retained before that point, so an expired
+// attempt can fail over without repeating message_start or the role chunk.
+// With staging disabled the original first-line deadline is preserved.
 
 type openAICompatFirstEventKey struct{}
 
@@ -120,4 +120,96 @@ func (s *OpenAIGatewayService) noteOpenAICompatStall(c *gin.Context, account *Ac
 		s.rateLimitService.HandleStreamTimeout(ctx, account, model)
 	}
 	noteResilienceStall(ctx, s.rateLimitService, account)
+}
+
+// openAICompatPreludeEvent projects the upstream boundary onto compatibility
+// output. A tool identity already generates a tool_call/tool_use, even when its
+// arguments are still empty; unlike native Responses it cannot be replayed.
+func openAICompatPreludeEvent(event *apicompat.ResponsesStreamEvent, payload []byte) bool {
+	if event.Type == "response.output_item.added" && event.Item != nil &&
+		(event.Item.Type == "function_call" || event.Item.Type == "custom_tool_call") {
+		return false
+	}
+	return resilience.ClassifyStreamEvent("responses", event.Type, payload).Kind == resilience.Prelude
+}
+
+// Only identity is retained during the prelude. No role chunks or encoded SSE
+// bytes are produced until the first content or terminal. Late created events
+// cannot change an identity already sent to the client.
+func deferredOpenAIChatChunks(event *apicompat.ResponsesStreamEvent, state *apicompat.ResponsesEventToChatState, hold bool) []apicompat.ChatCompletionsChunk {
+	if !state.SentRole && event.Response != nil {
+		if event.Response.ID != "" {
+			state.ID = event.Response.ID
+		}
+		if state.Model == "" {
+			state.Model = event.Response.Model
+		}
+		if event.Response.ServiceTier != "" {
+			state.ServiceTier = event.Response.ServiceTier
+		}
+	}
+	if hold || event.Type == "response.created" {
+		return nil
+	}
+	var chunks []apicompat.ChatCompletionsChunk
+	if !state.SentRole {
+		chunks = apicompat.ResponsesEventToChatChunks(&apicompat.ResponsesStreamEvent{Type: "response.created"}, state)
+	}
+	return append(chunks, apicompat.ResponsesEventToChatChunks(event, state)...)
+}
+
+func deferredOpenAIAnthropicEvents(event *apicompat.ResponsesStreamEvent, state *apicompat.ResponsesEventToAnthropicState, hold bool) []apicompat.AnthropicStreamEvent {
+	if !state.MessageStartSent && event.Response != nil {
+		if event.Response.ID != "" {
+			state.ResponseID = event.Response.ID
+		}
+		if state.Model == "" {
+			state.Model = event.Response.Model
+		}
+	}
+	if hold || event.Type == "response.created" {
+		return nil
+	}
+	var events []apicompat.AnthropicStreamEvent
+	if !state.MessageStartSent {
+		if state.ResponseID == "" {
+			state.ResponseID = "msg_" + randomKeepaliveHex(12)
+		}
+		events = apicompat.ResponsesEventToAnthropicEvents(&apicompat.ResponsesStreamEvent{Type: "response.created"}, state)
+	}
+	// An empty reasoning added was deliberately not converted. Reconstruct its
+	// structure only when reasoning content/signature arrives, so block indices
+	// remain valid without retaining a list of upstream prelude events.
+	_, hasReasoningBlock := state.OutputIndexToBlockIdx[event.OutputIndex]
+	if !hasReasoningBlock && (event.Type == "response.reasoning_summary_text.delta" || event.Type == "response.reasoning_text.delta" ||
+		(event.Type == "response.output_item.done" && event.Item != nil && event.Item.Type == "reasoning")) {
+		opening := apicompat.ResponsesStreamEvent{Type: "response.output_item.added", OutputIndex: event.OutputIndex,
+			Item: &apicompat.ResponsesOutput{Type: "reasoning"}}
+		events = append(events, apicompat.ResponsesEventToAnthropicEvents(&opening, state)...)
+	}
+	return append(events, apicompat.ResponsesEventToAnthropicEvents(event, state)...)
+}
+
+// A trace is scoped to an attempt; failed preludes must not leak into the next
+// account, including when its first event is content instead of created.
+func beginOpenAIPreludeTrace(ctx context.Context, enabled bool) *resilience.RequestState {
+	state := resilience.StateFrom(ctx)
+	state.NotePreludeCreated(time.Time{})
+	if !enabled {
+		return nil
+	}
+	return state
+}
+
+func observeOpenAIPreludeCreated(state *resilience.RequestState, eventType string) {
+	if eventType == "response.created" && state.PreludeTrace().ReleaseEvent == "" {
+		state.NotePreludeCreated(time.Now())
+	}
+}
+
+func releaseOpenAIPrelude(state *resilience.RequestState, eventType string) {
+	if eventType == "" {
+		eventType = "unknown"
+	}
+	state.NotePreludeReleased(eventType, time.Now())
 }
