@@ -3,6 +3,7 @@ package resilience
 import (
 	"context"
 	"sync"
+	"time"
 )
 
 // RequestState is the mutable per-request resilience state. Gateway routes
@@ -16,6 +17,9 @@ type RequestState struct {
 
 	// retryAdvice is shared by the handler and service terminal writers.
 	retryAdvice RetryAdvice
+
+	// prelude is collected by the stream state machine under mu.
+	prelude preludeTrace
 
 	// groupID is the API key's group (0 when ungrouped or unknown).
 	groupID int64
@@ -73,6 +77,14 @@ type RequestState struct {
 	// streamFailures maps an account to its latest failed attempt that the
 	// stream handler already reported (design §7.6).
 	streamFailures map[int64]any
+}
+
+// preludeTrace is storage shared with prelude_trace.go. Its accessors live
+// with the stream state machine so attempt resets follow stream staging.
+type preludeTrace struct {
+	createdAt             time.Time
+	releaseEvent          string
+	releaseAfterCreatedMS int64
 }
 
 // SessionRecorder records attempt outcomes of a sticky session. The service
