@@ -47,7 +47,7 @@ func TestRunMonitorProbeRound_PingRunsInParallel(t *testing.T) {
 	for _, seen := range up.requests() {
 		if seen.Path == "/v1/chat/completions" {
 			posts++
-			id, ok := monitorprobe.Verify(seen.Header.Get(monitorprobe.HeaderName), time.Now())
+			id, ok := monitorprobe.Verify(seen.Header.Get(monitorprobe.HeaderName), "key", time.Now())
 			require.True(t, ok)
 			require.Equal(t, int64(7), id)
 		}

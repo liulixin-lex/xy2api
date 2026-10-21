@@ -1,10 +1,13 @@
 // Package monitorprobe marks requests sent by the in-process channel monitor.
 //
 // The monitor signs a header with a key that exists only in this process. The
-// gateway verifies it and lets the scheduler treat the request as a probe: no
-// sticky binding, and a free account is preferred over queueing on a full one.
-// A probe that reaches another instance (blue/green overlap) fails
-// verification and is scheduled like any other request.
+// signature also covers the API key the probe is sent with, so a signature
+// seen by a third-party endpoint is useless with any other key. The gateway
+// verifies it against the request's own API key and lets the scheduler treat
+// the request as a probe: no sticky binding, and a free account is preferred
+// over queueing on a full one. A probe that reaches another instance
+// (blue/green overlap) fails verification and is scheduled like any other
+// request.
 package monitorprobe
 
 import (
@@ -38,20 +41,24 @@ func newKey() []byte {
 	return b
 }
 
-// Sign returns the header value for a probe of monitorID sent at now.
-func Sign(monitorID int64, now time.Time) string {
+// Sign returns the header value for a probe of monitorID sent with apiKey at now.
+func Sign(monitorID int64, apiKey string, now time.Time) string {
 	payload := version + "." + strconv.FormatInt(monitorID, 10) + "." + strconv.FormatInt(now.Unix(), 10)
-	return payload + "." + mac(payload)
+	return payload + "." + mac(payload, apiKey)
 }
 
-// Verify checks a header value and returns the monitor ID it was signed for.
-func Verify(value string, now time.Time) (int64, bool) {
+// Verify checks a header value against the API key of the request carrying it
+// and returns the monitor ID it was signed for.
+func Verify(value, apiKey string, now time.Time) (int64, bool) {
+	if strings.TrimSpace(apiKey) == "" {
+		return 0, false
+	}
 	parts := strings.Split(strings.TrimSpace(value), ".")
 	if len(parts) != 4 || parts[0] != version {
 		return 0, false
 	}
 	payload := parts[0] + "." + parts[1] + "." + parts[2]
-	if !hmac.Equal([]byte(parts[3]), []byte(mac(payload))) {
+	if !hmac.Equal([]byte(parts[3]), []byte(mac(payload, apiKey))) {
 		return 0, false
 	}
 	monitorID, err := strconv.ParseInt(parts[1], 10, 64)
@@ -69,9 +76,12 @@ func Verify(value string, now time.Time) (int64, bool) {
 	return monitorID, true
 }
 
-func mac(payload string) string {
+func mac(payload, apiKey string) string {
+	keyDigest := sha256.Sum256([]byte(strings.TrimSpace(apiKey)))
 	h := hmac.New(sha256.New, key)
 	_, _ = h.Write([]byte(payload))
+	_, _ = h.Write([]byte{'|'})
+	_, _ = h.Write(keyDigest[:])
 	return hex.EncodeToString(h.Sum(nil))
 }
 

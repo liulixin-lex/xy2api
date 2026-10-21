@@ -65,7 +65,19 @@ func newMonitorProbeHTTPClient() *http.Client {
 		TLSHandshakeTimeout: monitorTLSHandshakeTimeout,
 		HTTP2:               &http.HTTP2Config{SendPingTimeout: monitorProbeHTTP2PingInterval},
 	}
-	return &http.Client{Transport: servertiming.WrapRoundTripper(tr)}
+	return &http.Client{Transport: servertiming.WrapRoundTripper(tr), CheckRedirect: probeSameHostRedirect}
+}
+
+// probeSameHostRedirect 只跟随同一主机内的重定向：跨主机重定向会把 Key 与签名头带到别处，
+// 这种响应按非 2xx 处理。
+func probeSameHostRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 5 {
+		return http.ErrUseLastResponse
+	}
+	if len(via) > 0 && !strings.EqualFold(req.URL.Host, via[0].URL.Host) {
+		return http.ErrUseLastResponse
+	}
+	return nil
 }
 
 // probeAttempt 一次请求的结果。
@@ -139,7 +151,7 @@ func sendProbeAttempt(ctx context.Context, plan *probePlan, req *probeRequest) p
 		httpReq.Header.Set(k, v)
 	}
 	if plan.monitorID > 0 {
-		httpReq.Header.Set(monitorprobe.HeaderName, monitorprobe.Sign(plan.monitorID, time.Now()))
+		httpReq.Header.Set(monitorprobe.HeaderName, monitorprobe.Sign(plan.monitorID, plan.apiKey, time.Now()))
 	}
 
 	resp, err := monitorProbeHTTPClient.Do(httpReq)

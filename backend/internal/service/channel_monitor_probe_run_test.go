@@ -154,7 +154,7 @@ func TestRunProbe_StreamsEveryProtocol(t *testing.T) {
 			require.Len(t, reqs, 1)
 			require.Equal(t, tc.path, reqs[0].Path)
 			require.Equal(t, "text/event-stream", reqs[0].Header.Get("Accept"))
-			id, ok := monitorprobe.Verify(reqs[0].Header.Get(monitorprobe.HeaderName), time.Now())
+			id, ok := monitorprobe.Verify(reqs[0].Header.Get(monitorprobe.HeaderName), "key", time.Now())
 			require.True(t, ok, "probe header must verify")
 			require.Equal(t, int64(42), id)
 		})
