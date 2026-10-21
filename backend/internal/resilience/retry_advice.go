@@ -27,7 +27,7 @@ type RetryAdviceProvider func(ctx context.Context) RetryAdvice
 
 const retryAdviceProviderTimeout = 100 * time.Millisecond
 
-var retryAdviceMessageSuffix = regexp.MustCompile(`(?:^|\.\s*|\s+)Please try again in [0-9]+s\.\s*$`)
+var retryAdviceMessageSuffix = regexp.MustCompile(`(^|\.\s+)Please try again in [0-9]+s\.\s*$`)
 
 func (a RetryAdvice) normalized() RetryAdvice {
 	if a.Suppress {
@@ -50,9 +50,15 @@ func (a RetryAdvice) Headers() map[string]string {
 // Message replaces only the gateway-generated delay suffix. Unknown or
 // suppressed advice removes it; positive advice uses the same cap as Headers.
 func (a RetryAdvice) Message(message string) string {
-	message = retryAdviceMessageSuffix.ReplaceAllString(message, "")
+	original := message
+	if retryAdviceMessageSuffix.MatchString(message) {
+		message = strings.TrimRight(retryAdviceMessageSuffix.ReplaceAllString(message, "$1"), " \t\r\n")
+	}
 	a = a.normalized()
 	if a.Seconds == 0 {
+		if strings.TrimSpace(message) == "" {
+			return original
+		}
 		return message
 	}
 	base := strings.TrimRight(strings.TrimSpace(message), ". ")

@@ -51,7 +51,7 @@ func TestResponsesFailedRetryAdvice(t *testing.T) {
 				if tc.legacy {
 					require.Equal(t, "Busy. Please try again in 30s.", body["message"])
 				} else {
-					require.Equal(t, "Busy", body["message"])
+					require.Equal(t, "Busy.", body["message"])
 					require.Empty(t, c.Writer.Header().Get("Retry-After"))
 				}
 			}
@@ -126,7 +126,7 @@ func TestTerminalReasonsRemoveStaleHTTPHints(t *testing.T) {
 		resilience.SetRetryAdvice(c.Request.Context(), resilience.RetryAdvice{Seconds: 7})
 		(&OpenAIGatewayHandler{}).handleStreamingAwareError(c, http.StatusForbidden, typ, "Rejected. Please try again in 30s.", false)
 		require.Empty(t, rec.Header().Get("Retry-After"))
-		require.Equal(t, "Rejected", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
+		require.Equal(t, "Rejected.", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
 		require.True(t, resilience.RetryAdviceFrom(c.Request.Context()).Suppress)
 	}
 }

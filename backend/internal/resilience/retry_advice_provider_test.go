@@ -42,8 +42,8 @@ func TestRetryAdviceMessageMatchesHeaders(t *testing.T) {
 	}{
 		{RetryAdvice{Seconds: 7}, "Busy. Please try again in 7s."},
 		{RetryAdvice{Seconds: 60}, "Busy. Please try again in 10s."},
-		{RetryAdvice{Suppress: true, Seconds: 7}, "Busy"},
-		{RetryAdvice{}, "Busy"},
+		{RetryAdvice{Suppress: true, Seconds: 7}, "Busy."},
+		{RetryAdvice{}, "Busy."},
 	} {
 		require.Equal(t, tc.want, tc.advice.Message("Busy. Please try again in 30s."))
 	}
@@ -86,4 +86,18 @@ func TestRetryAdviceProviderTimeoutAndCancellation(t *testing.T) {
 	require.Equal(t, RetryAdvice{}, ResolveRetryAdvice(nil))
 	require.Equal(t, RetryAdvice{}, ResolveRetryAdvice(context.Background()))
 	require.Equal(t, RetryAdvice{}, ResolveRetryAdvice(WithRetryAdviceProvider(nil, nil)))
+}
+
+func TestRetryAdviceMessagePreservesSentenceAndNonemptyFallback(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"Busy. Please try again in 30s.", "Busy."},
+		{"Busy! Please try again in 30s.", "Busy! Please try again in 30s."},
+		{"Please try again in 30s.", "Please try again in 30s."},
+		{"Busy. Please try again in 30s. More detail.", "Busy. Please try again in 30s. More detail."},
+		{"Busy.Please try again in 30s.", "Busy.Please try again in 30s."},
+		{"Busy. Please try again in 30s", "Busy. Please try again in 30s"},
+	} {
+		require.Equal(t, tc.want, (RetryAdvice{Suppress: true}).Message(tc.input))
+	}
+	require.Equal(t, "Please try again in 7s.", (RetryAdvice{Seconds: 7}).Message("Please try again in 30s."))
 }
