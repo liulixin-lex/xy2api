@@ -7,13 +7,21 @@
 The gateway MUST classify each complete upstream SSE event as prelude, content, terminal success, terminal failure (retryable or not) or unknown with one shared function, and every covered stream path (native Responses staging and pending lines, Chat and Messages compatibility conversion, delivery tracking) MUST use it. Unknown events MUST be treated as content.
 
 Prelude events are:
-- Responses: `response.created`, `response.in_progress`, `response.queued`, `keepalive`, the metadata events listed in design §3.1, and `response.output_item.added`, `response.content_part.added` or `response.reasoning_summary_part.added` that carry no text, no encrypted reasoning and no tool arguments;
+- Responses: `response.created`, `response.in_progress`, `response.queued`, `keepalive`, and `response.output_item.added`, `response.content_part.added` or `response.reasoning_summary_part.added` whose known fields are all empty (no text, no encrypted reasoning, no tool arguments, no unknown non-empty field);
 - Chat: a chunk that carries only the role, or an empty content delta;
 - Messages: `message_start`, `ping`, and `content_block_start` of an empty text or thinking block.
 
 #### Scenario: Unknown event is content
 - **WHEN** an upstream Responses stream sends an event type the gateway does not know before any content
 - **THEN** the event is treated as content and the request is no longer switched to another account.
+
+#### Scenario: Metadata events are not prelude
+- **WHEN** an upstream sends `codex.response.metadata` or `response.metadata` before any text
+- **THEN** the event is treated as content.
+
+#### Scenario: Empty delta before created
+- **WHEN** a relay sends an empty `response.output_text.delta` before `response.created`
+- **THEN** the frame is dropped, counts as upstream liveness, and does not count as output; a non-empty delta before `response.created` counts as output.
 
 #### Scenario: Encrypted reasoning is content
 - **WHEN** `response.output_item.added` carries a reasoning item with `encrypted_content`
@@ -47,8 +55,8 @@ With `stream.native_prelude_whitelist` on, native Responses streaming MUST keep 
 - **WHEN** account A sends `response.created`, `response.queued`, then a retryable `response.failed`
 - **THEN** the request switches to another account and succeeds.
 
-#### Scenario: Metadata then failed (CV-8)
-- **WHEN** account A sends `response.created`, a whitelisted metadata event without content, then a retryable `response.failed`
+#### Scenario: Empty added structures then failed (CV-8)
+- **WHEN** account A sends `response.created`, `response.in_progress`, an empty message `response.output_item.added` and an empty output_text `response.content_part.added`, then a retryable `response.failed`
 - **THEN** the request switches to another account and succeeds.
 
 #### Scenario: Whitelist off

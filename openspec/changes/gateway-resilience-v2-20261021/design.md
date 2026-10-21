@@ -60,9 +60,16 @@
 
 | 协议 | `Prelude` |
 |---|---|
-| Responses | `response.created`、`response.in_progress`、`response.queued`、`keepalive`；Codex 可忽略的元数据事件【待契约：生产探测后 β 定稿的白名单，不用 `codex.*` 或 rate_limits 通配】；不带内容的 `response.output_item.added`（reasoning 项无 `encrypted_content` 且摘要为空，message 项的文本为空）、`content_part.added`、`reasoning_summary_part.added` |
+| Responses | `response.created`、`response.in_progress`、`response.queued`、`keepalive`；不带内容的 `response.output_item.added`（reasoning 项无 `encrypted_content` 且摘要为空，message 项的文本为空）、`content_part.added`、`reasoning_summary_part.added` |
 | Chat | 只带 role 的 chunk；空 content 增量 |
 | Messages | `message_start`、`ping`；空 text/thinking 的 `content_block_start` |
+
+依据生产探测（2026-10-21，去标识）：
+
+- 多数中转在第一个 `response.output_text.delta` 之前依次发 `response.created`、`response.in_progress`、空的 message `output_item.added`、空的 output_text `content_part.added`，都在上表内。
+- `codex.response.metadata` 没有观察到，`response.metadata` 出现在正文之后，二者都**不**加入开场；`codex.*`、rate_limits 一类不按名字通配放行，仍按 `Unknown` 即内容处理。
+- added 结构只在严格确认已知字段为空时算开场；带正文、工具参数、加密载荷或未知非空字段的，一律算内容。
+- 部分中转在 `response.created` **之前**先发一个 delta。中转伪保活帧的判据（旧 design §7.8）泛化为“`response.created` 之前出现的空 delta”：丢弃、算上游存活、不算输出；`response.created` 之前的非空 delta 仍按输出处理，并计数【待契约：CHANGES_B 的计数名】。
 
 终态：Responses 的 `response.completed`/`response.done` 为成功，`response.failed`/`error` 为失败，`response.incomplete` 为不可重试的失败终态；Chat 的 `[DONE]` 为成功，带 `error` 的 chunk 为失败；Messages 的 `message_stop` 为成功。
 
@@ -81,7 +88,6 @@
 - 改动位置：`openai_gateway_passthrough.go` 的 `openAIStreamEventIsMetadata` 一带，普通路径的暂存与 pendingLines 共用 §3.1 的判据。
 - 送达追踪 `resilience_delivery_sse.go` 的开场名单也改用 §3.1；送达计费口径不变：开场不算送达。
 - **严格 SDK 约束**：换号后只转发新账号的 `response.created`，旧尝试的开场全部丢弃、不拼接；response id 与序号沿用新尝试的值。客户端看到的第一个事件始终是 `response.created`，id 不变。
-- 元数据事件在释放时的处理（按序转发或丢弃）【待契约：CHANGES_B】。
 
 ### 3.4 兼容转换推迟开场（`stream.prelude_staging`）
 
@@ -204,7 +210,7 @@
 | CV-5 | F31 | §3.3 原生 created → failed(overloaded) 换号 |
 | CV-6 | F32 | §3.4 Chat 兼容 created → failed(“The service is busy”) 换号 |
 | CV-7 | F33 | §3.3 created → queued → failed 换号 |
-| CV-8 | F34 | §3.3 created → 元数据事件 → failed 换号 |
+| CV-8 | F34 | §3.3 created → 空的 added 结构 → failed 换号（故障内容以 CHANGES_B 的最终白名单为准） |
 | RAW-1 | F35 | §4 raw Chat `error` + `[DONE]` |
 | SO-1 | F36 | §6 仅流式学习、过滤与清除 |
 | RA-1 | F37 | §7.1 有条件带 retry-after |

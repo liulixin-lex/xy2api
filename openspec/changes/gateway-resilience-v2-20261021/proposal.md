@@ -6,13 +6,15 @@
 
 | 失败模式 | 规模 | 网关侧原因 |
 |---|---|---|
-| 原生 Responses 带内终止（主要是 Codex） | 150 个请求，27 名用户；容量 81、瞬时 58、限流 11、断流 2；全部发生在网关释放暂存之后 | 网关只把 `response.created`、`response.in_progress`、`keepalive` 当作开场事件；`response.queued`、`codex.response.metadata` 等事件一到就算“已开始输出”，之后不能再换号。其中有多少是客户端还没看到正文的“伪已输出”，要靠本期的观测字段与生产探测确认 |
+| 原生 Responses 带内终止（主要是 Codex） | 150 个请求，27 名用户；容量 81、瞬时 58、限流 11、断流 2；全部发生在网关释放暂存之后 | 网关只把 `response.created`、`response.in_progress`、`keepalive` 当作开场事件；`response.queued`、`codex.response.metadata` 等事件一到就算“已开始输出”，之后不能再换号。其中有多少是客户端还没看到正文的“伪已输出”，要靠本期的观测字段统计 |
 | 兼容 Chat 开场后终止 | 114 个请求，4 名用户；容量 61、限流 39、瞬时 14 | Chat 与 Messages 经兼容转换时，一收到上游 `response.created` 就写出 role chunk 或 `message_start`，之后不再换号。限流部分主要来自一个中转账号的 “The service is busy” |
 | 供给不足的分组 | 一个分组的两个主力账号同时失败，容量失败全部未恢复 | 代码救不回，属于运维 |
 | 仅流式上游 | 32 个请求，1 名用户，持续 2 小时 22 分 | 非流式请求被派给只接受流式的账号，上游回 400，网关当作客户端错误返回 |
 | Claude 首事件截止过长 | typed 首输出超时 36 次，其中 31 次是 Claude 模型撞上 90 秒截止；超时换号后首字只要 1–11 秒 | `budget.anthropic_first_event_timeout_seconds=90`，Claude 成功请求的首字 P99 只有 3.9–17.2 秒。属于配置，按用户决定作为第 0 批在生产调整，不在本仓库 |
 | 协议与信号缺陷 | 无法从库里量化 | 排队 ping 之后写裸 JSON；三个专用耗尽出口没走公共重试提示与回合封顶；合成的 `response.failed` 不带重试时间；Grok 空闲与 raw 429 被当成容量降载；raw Chat 的 `error` 后跟 `[DONE]` 被当成成功；Anthropic 协议下网关自身的 503 被标成 `overloaded_error` |
 | 观测缺口 | 284 个已输出后失败事件没有请求 ID，也没有释放暂存的事件类型、首个输出时间和字节数 | 无法判定“伪已输出”，也无法给后续优化定参数 |
+
+2026-10-21 的生产探测（几个主力中转各 2 个最小 Codex 形态请求，只记事件类型）：多数中转在第一个 `response.output_text.delta` 之前依次发 `response.created`、`response.in_progress`、空的 `response.output_item.added`（message）与空的 `response.content_part.added`（output_text）；部分中转在 `response.created` 之前先发一个 delta；`response.metadata` 出现在正文之后；没有观察到 `codex.response.metadata`。白名单据此确定，不按事件名整体放行元数据类事件（design §3.1）。
 
 完整方案（v2.1）与两份审查在仓库外 `xy2api-artifacts/resilience-ux-20261020/`；本变更是它按用户决定裁剪出的 0.4.4 部分。
 
@@ -29,7 +31,7 @@
 | 代号 | 内容 |
 |---|---|
 | C0 | 新设置开关的契约与实现：命名、存放、回退兼容 |
-| W1.1 | 统一“可重放前缀”判据：原生 Responses 的开场白名单扩展；Chat、Messages 兼容转换推迟生成开场事件（role chunk、`message_start`），直到首个内容或终态；暂存期内可重试的失败转为换号 |
+| W1.1 | 统一“可重放前缀”判据：原生 Responses 的开场白名单扩展（`response.queued` 与空的 added 结构；中转伪保活泛化为 `response.created` 之前的空 delta）；Chat、Messages 兼容转换推迟生成开场事件（role chunk、`message_start`），直到首个内容或终态；暂存期内可重试的失败转为换号 |
 | W1.2-lite | raw Chat 透传识别 `error` 后跟 `[DONE]`：提交前换号，提交后按失败记账 |
 | W2.1-lite | 分类修正：只有真正的容量信号（`server_is_overloaded`、`slow_down`、529、结构化 overloaded）算 `CAPACITY_SHED`；Grok 空闲改为瞬时或停滞；raw 429 改为限流（不覆盖余额、reset 等更强证据）；“The service is busy”、“Too many pending requests”、“Concurrency limit exceeded” 改为限流或瞬时；typed 首输出超时单独可辨 |
 | W5.1 | 三个专用耗尽出口（Gateway Responses、Gateway Chat、OpenAI→Messages）接入公共重试提示与回合封顶 |
