@@ -21,7 +21,7 @@
 - [x] 2.2 原生 Responses 白名单扩展（`stream.native_prelude_whitelist`）；送达追踪改用同一判据；伪保活泛化与 `pre_created_delta`（β `bdbca7197`）。
 - [x] 2.3 Chat、Messages 兼容转换推迟开场（`stream.prelude_staging`）；首事件守卫延长到首个内容（β `1a97eebd1`）。
 - [x] 2.4 释放事件采集（`prelude_trace`，β `04aa6f1a6`）。
-- [ ] 2.5 用例：created→failed、created→queued→failed、created→元数据→failed、Chat busy、Messages EOF、内容拒绝与 incomplete 不重放、合法空回答、工具调用首事件、CDN 心跳后换号、客户端取消、失败尝试 usage 不混入、开关关闭回到 0.4.3、严格 SDK 事件顺序。
+- [ ] 2.5 用例：created→failed、created→queued→failed、created→元数据→failed、Chat busy、Messages EOF、内容拒绝与 incomplete 不重放、合法空回答、工具调用首事件、CDN 心跳后换号、客户端取消、失败尝试 usage 不混入、开关关闭回到 0.4.3、严格 SDK 事件顺序。除客户端取消外都已由 β 的用例覆盖；暂存期客户端断开的用例与修复由 β 在集成门禁期间补（PM7）。
 
 ## 3. W1.2-lite（β）
 
@@ -40,13 +40,13 @@
 - [x] 5.2 W5.2 排队 ping 之后按协议写终止帧（α，`190f6515a`）。
 - [x] 5.3 W5.1 三个专用耗尽出口接入重试提示与回合封顶；一次性 finalize（α，`a72a29e00`）。
 - [x] 5.4 W5.4 Anthropic 自身失败用 `api_error`（α handler `fe5dbf503`；β `resilience_keepalive.go` `e30e6c384`）。
-- [ ] 5.5 W5.5 Codex 无号 503 的 Retry-After 上限（α）。
+- [x] 5.5 W5.5 Codex 无号 503 的 Retry-After 上限（α `0c2a67ca5`）。
 - [x] 5.6 W5.3 合成 `response.failed` 有条件带 retry-after：handler 侧（α `9b951b4de`）、分组 advisor（γ `d4db8d426`）、service 侧三个点（β `e30e6c384`）。
 
 ## 6. W6-lite 仅流式能力（γ、FE）
 
 - [x] 6.1 学习、有效期、存放（账号 `extra` 两键加指纹）；本请求换号不计账号失败（γ `2cb3343de`、`126fead6f`；β 的 OpenAI 三处检测钩子 `09ef67f11`）。
-- [ ] 6.2 选号过滤（非流式请求）；无号原因码 `capability_stream_only` 与只因能力而无号的专用应答（γ `2cb3343de`、`a03ad9c79`、`f61b7d497`，α `6322aa374`）；`scheduler-diff.json` 与 `capabilityEligibilityReason` 钩子登记（α 集成时）。
+- [x] 6.2 选号过滤（非流式请求）；无号原因码 `capability_stream_only` 与只因能力而无号的专用应答（γ `2cb3343de`、`a03ad9c79`、`f61b7d497`，α `6322aa374`）；`scheduler-diff.json` 与 `capabilityEligibilityReason` 钩子登记（α `5f8935d62`）。
 - [x] 6.3 Explain 原因；管理接口（查看、清除）：DTO 与清除路由 α `bf38c06c5`，Explain 与入口标记 α `affef416f`。
 - [x] 6.4 前端：账号的仅流式标识与清除；Explain 文案与请求类型选择（FE `e042880ad`、`ade0f689d`、`74e392ffd`，HEAD `bd215aa0c`；后端 DTO、路由与 Explain 已由 α 提交，联调随集成）。
 
@@ -62,7 +62,7 @@
 
 - [x] 9.1 `docs/GATEWAY_RESILIENCE.md`：能力表、客户端可见行为、新字段、事件字段、不受开关控制的修复、已知限制；Codex 重试说法更正（另同步旧变更的 design §10 衔接、staging-validation §6.1 与 §8、runbook §6）。
 - [x] 9.2 `tools/docs_consistency.json`：新设置与事件名能在文档中找到（规则不变，旧 design §10 列出新字段名并指向新变更）；本期没有发布过又改名的标识，不需要登记退役名。
-- [ ] 9.3 `policy.json` required_literals 与具名补丁、`scheduler-diff.json`（α 集成时汇总各 CHANGES）。
+- [x] 9.3 `policy.json` required_literals 与具名补丁、`scheduler-diff.json`（α 集成时汇总各 CHANGES：`5f8935d62`、`af3695b89`、`685408f8f`；具名补丁的 provenance `093241b50`）。
 - [x] 9.4 `python3 tools/check_docs_consistency.py` 在集成树通过（集成分支 `4f099f8e1` 合入 rv2/docs 最终 HEAD 的预演通过）。
 
 ## 10. 集成与门禁（α）
