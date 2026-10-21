@@ -15,7 +15,7 @@ const H = 3_600_000
 
 describe('account stream-only badge', () => {
   beforeEach(() => {
-    vi.useFakeTimers({ now: NOW, toFake: ['Date'] })
+    vi.useFakeTimers({ now: NOW, toFake: ['Date', 'setInterval', 'clearInterval'] })
     vi.clearAllMocks()
   })
   afterEach(() => { vi.useRealTimers() })
@@ -61,4 +61,24 @@ describe('account stream-only badge', () => {
     expect(mocks.showError).toHaveBeenCalledWith('boom')
     expect(w.get('[data-test="stream-only-clear"]').attributes('disabled')).toBeUndefined()
   })
+
+  it('counts down while shown and disappears when the state expires', async () => {
+    const w = mount(AccountStreamOnlyBadge, { props: { account: { id: 7, capability_learned: [
+      { protocol: 'responses', mode: 'stream_only', expires_at: at(25 * 60_000) }
+    ] } } })
+    expect(w.text()).toContain('admin.resilience.capability.minutes:{\\"n\\":25}')
+    vi.advanceTimersByTime(5 * 60_000); await flushPromises()
+    expect(w.text()).toContain('admin.resilience.capability.minutes:{\\"n\\":20}')
+    vi.advanceTimersByTime(20 * 60_000); await flushPromises()
+    expect(w.find('[data-test="stream-only-badge"]').exists()).toBe(false)
+    expect(vi.getTimerCount()).toBe(0)
+    w.unmount()
+  })
+
+  it('runs no timer for an account without learned state', () => {
+    const w = mount(AccountStreamOnlyBadge, { props: { account: { id: 7, capability_learned: [] } } })
+    expect(vi.getTimerCount()).toBe(0)
+    w.unmount()
+  })
 })
+

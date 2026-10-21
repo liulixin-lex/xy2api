@@ -16,7 +16,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { clearCapabilityLearning } from '@/api/admin/accountCapability'
 import { activeStreamOnly, streamOnlyProtocols, streamOnlyRemaining, type AccountWithCapability } from '@/utils/accountCapability'
@@ -29,11 +29,24 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const clearing = ref(false)
 
-// The list refreshes itself, so the time left is read when the row renders.
-const entries = computed(() => activeStreamOnly(props.account.capability_learned))
+// Expiry does not touch the account row, so the list's auto refresh keeps the
+// row; a minute tick, only while something is learned, counts down and hides it.
+const now = ref(Date.now())
+const entries = computed(() => activeStreamOnly(props.account.capability_learned, now.value))
+let timer: ReturnType<typeof setInterval> | undefined
+
+watch(() => entries.value.length > 0, (shown) => {
+  if (shown && !timer) {
+    timer = setInterval(() => { now.value = Date.now() }, 60_000)
+  } else if (!shown && timer) {
+    clearInterval(timer)
+    timer = undefined
+  }
+}, { immediate: true })
+onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 
 const remaining = computed(() => {
-  const { unit, n } = streamOnlyRemaining(entries.value)
+  const { unit, n } = streamOnlyRemaining(entries.value, now.value)
   return t(`admin.resilience.capability.${unit}`, { n })
 })
 
