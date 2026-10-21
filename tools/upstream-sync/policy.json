@@ -1895,6 +1895,11 @@
       "literal": "func TestGatewayConvertSwitchesOffKeepBaseline"
     },
     {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/gateway_convert_stream_test.go",
+      "literal": "func TestGatewayConvertCancelDuringFirstWriteIsClientCancel"
+    },
+    {
       "id": "xy-resilience-v2-handler-exits",
       "path": "backend/internal/handler/gateway_convert_usage_test.go",
       "literal": "func TestGatewayConvertBreakAfterOutputBillsPartialUsageOnce"

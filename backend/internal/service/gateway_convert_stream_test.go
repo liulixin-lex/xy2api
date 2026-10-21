@@ -863,3 +863,66 @@ func TestGatewayConvertReadPumpEndsWithTheBody(t *testing.T) {
 		})
 	}
 }
+
+// INTEG-P2-2 (ε R2-P2-4 on the Gateway conversions): the client cancels while
+// the first write is in flight, so that write stops the cancel AfterFunc too
+// late and the body is already closed. The read error that follows is the
+// cancellation: a client disconnect with the usage so far, no terminal frame
+// and no stream-error mark. The AfterFunc belongs to staging, so this holds
+// with stream.strict_terminal off too. A real upstream break after a later
+// cancel keeps the handling of a break after output.
+func TestGatewayConvertCancelDuringFirstWriteIsClientCancel(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, path := range gwConvertPaths() {
+		for _, strict := range []bool{true, false} {
+			for _, interval := range []int{0, 30} {
+				t.Run(path.name+"/strict="+fmtBool(strict)+"/stall_check="+fmtBool(interval > 0), func(t *testing.T) {
+					withResilienceSettings(t, func(s *resilience.Settings) { s.Stream.StrictTerminal = strict })
+					w := newGWWriter()
+					c := gwContext(gwPathURL(path.name), w)
+					state := resilience.NewRequestState()
+					ctx, cancel := context.WithCancel(resilience.WithRequestState(c.Request.Context(), state))
+					defer cancel()
+					c.Request = c.Request.WithContext(ctx)
+					pr, pw := io.Pipe()
+					defer func() { _ = pw.Close() }()
+					body := &preludeRaceBody{PipeReader: pr, closed: make(chan struct{})}
+					c.Writer = &cancelDuringFirstWriteWriter{ResponseWriter: c.Writer, cancel: cancel, closed: body.closed}
+					go func() { _, _ = io.WriteString(pw, gwMsgStart+gwTextStart+gwTextDelta) }()
+					resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: body}
+
+					result, err := path.run(gwConvertService(0, interval), c, gwTestAccount(), resp)
+					require.ErrorIs(t, err, context.Canceled)
+					require.NotNil(t, result, "output reached the client; usage so far is billed")
+					require.True(t, result.ClientDisconnect)
+					require.Equal(t, 100, result.Usage.InputTokens)
+					require.Contains(t, w.Body(), "hello")
+					require.NotContains(t, w.Body(), "stream_read_error", "no terminal frame for the cancellation")
+					require.NotContains(t, w.Body(), "response.failed")
+					_, marked := c.Get(OpsStreamErrorKey)
+					require.False(t, marked)
+					require.False(t, state.AccountFailed(gwTestAccount().ID))
+					require.False(t, state.TurnFailed())
+				})
+			}
+		}
+		t.Run(path.name+"/break_after_later_cancel", func(t *testing.T) {
+			w := newGWWriter()
+			c := gwContext(gwPathURL(path.name), w)
+			ctx, cancel := context.WithCancel(c.Request.Context())
+			defer cancel()
+			c.Request = c.Request.WithContext(ctx)
+			up := newGWUpstream(nil)
+			done := gwRun(path, gwConvertService(0, 0), c, up.response(nil))
+			up.send(t, gwMsgStart, gwTextStart, gwTextDelta)
+			require.Eventually(t, func() bool { return strings.Contains(w.Body(), "hello") }, 2*time.Second, 10*time.Millisecond)
+			cancel()
+			_ = up.pw.CloseWithError(io.ErrUnexpectedEOF)
+			got := gwAwait(t, done, 3*time.Second)
+			require.ErrorIs(t, got.err, io.ErrUnexpectedEOF)
+			require.False(t, got.result.ClientDisconnect)
+			require.False(t, up.closed.Load(), "the cancel came after output; the upstream was not cut")
+			requireProtocolTerminal(t, path.name, w.Body())
+		})
+	}
+}
