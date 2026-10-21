@@ -8,11 +8,9 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain"
-	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -725,38 +723,10 @@ func (s *ChannelMonitorService) persistCheckResults(ctx context.Context, m *Chan
 	}
 }
 
-// runChecksConcurrent 对 primary + extra 模型并发执行检测。
-// errgroup 仅用于等待，不传播错误（每个 model 失败都已打包进 CheckResult）。
+// runChecksConcurrent 对 primary + extra 模型并发执行一轮探测，HEAD ping 与模型请求并行，
+// 都在 30 秒预算内（见 channel_monitor_probe_round.go）。
 func (s *ChannelMonitorService) runChecksConcurrent(ctx context.Context, m *ChannelMonitor) []*CheckResult {
-	models := append([]string{m.PrimaryModel}, m.ExtraModels...)
-	results := make([]*CheckResult, len(models))
-
-	// ping 共享一次，所有模型记录同一个 ping 延迟。
-	pingMs := pingEndpointOrigin(ctx, m.Endpoint)
-
-	// 所有模型共用同一份 CheckOptions（来自监控的快照字段）。
-	opts := &CheckOptions{
-		APIMode:          m.APIMode,
-		ExtraHeaders:     m.ExtraHeaders,
-		BodyOverrideMode: m.BodyOverrideMode,
-		BodyOverride:     m.BodyOverride,
-	}
-
-	var eg errgroup.Group
-	var mu sync.Mutex
-	for i, model := range models {
-		i, model := i, model
-		eg.Go(func() error {
-			r := runCheckForModel(ctx, m.Provider, m.Endpoint, m.APIKey, model, opts)
-			r.PingLatencyMs = pingMs
-			mu.Lock()
-			results[i] = r
-			mu.Unlock()
-			return nil
-		})
-	}
-	_ = eg.Wait()
-	return results
+	return runMonitorProbeRound(ctx, m, defaultProbeLimits())
 }
 
 // ---------- 调度器协作 ----------

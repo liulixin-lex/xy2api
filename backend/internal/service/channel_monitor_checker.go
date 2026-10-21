@@ -1,9 +1,7 @@
 package service
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,10 +14,6 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/servertiming"
 	"github.com/tidwall/gjson"
 )
-
-// monitorHTTPClient 共享一个 http.Client，避免每次检测重建 transport。
-// 自定义 Transport 在 dial 时强制再次校验 IP，防止 DNS rebinding 绕过 validateEndpoint。
-var monitorHTTPClient = newSSRFSafeHTTPClient(monitorRequestTimeout)
 
 // monitorPingHTTPClient 用于 endpoint origin 的 HEAD ping，超时更短。
 var monitorPingHTTPClient = newSSRFSafeHTTPClient(monitorPingTimeout)
@@ -41,6 +35,8 @@ func newSSRFSafeHTTPClient(timeout time.Duration) *http.Client {
 // CheckOptions 承载一次检测的自定义入参。
 // 所有字段都是可选（零值即等价于"用默认行为"）。
 type CheckOptions struct {
+	// MonitorID 用于给探测请求签名（monitorprobe.HeaderName）；0 表示不签名。
+	MonitorID int64
 	// APIMode 对 OpenAI 与 Grok 生效；空串等同 chat_completions。
 	APIMode string
 	// ExtraHeaders 用户自定义 HTTP 头（merge 到 adapter 默认 headers，用户优先）。
@@ -52,71 +48,13 @@ type CheckOptions struct {
 	BodyOverride map[string]any
 }
 
-// runCheckForModel 对单个 (provider, model) 做一次完整检测。
+// runCheckForModel 对单个 (provider, model) 做一轮探测：流式请求、读到答案即停，
+// 30 秒总预算、响应时间超过 10 秒为 degraded（见 channel_monitor_probe_run.go）。
 // 不返回 error：所有失败都包装进 CheckResult.Status=error/failed。
 //
 // opts 承载模板 / 监控快照带来的自定义配置。nil 等同于 "off + 无 extra headers"。
 func runCheckForModel(ctx context.Context, provider, endpoint, apiKey, model string, opts *CheckOptions) *CheckResult {
-	res := &CheckResult{
-		Model:     model,
-		Status:    MonitorStatusError,
-		CheckedAt: time.Now(),
-	}
-
-	challenge := generateChallenge()
-	mode := bodyOverrideMode(opts)
-
-	start := time.Now()
-	respText, rawBody, statusCode, err := callProvider(ctx, provider, endpoint, apiKey, model, challenge.Prompt, opts)
-	latency := time.Since(start)
-	latencyMs := int(latency / time.Millisecond)
-	res.LatencyMs = &latencyMs
-
-	if err != nil {
-		res.Status = MonitorStatusError
-		res.Message = truncateMessage(sanitizeErrorMessage(err.Error()))
-		return res
-	}
-	if statusCode < 200 || statusCode >= 300 {
-		// 错误路径：用 rawBody 而非 respText（gjson textPath 抽取在错误响应里通常为空，
-		// 会丢掉真正的上游错误信息，例如 `{"error":{"message":"No available accounts ..."}}`）。
-		res.Status = MonitorStatusError
-		bodySnippet := truncateForErrorBody(rawBody)
-		res.Message = truncateMessage(sanitizeErrorMessage(fmt.Sprintf("upstream HTTP %d: %s", statusCode, bodySnippet)))
-		return res
-	}
-
-	// Replace 模式：跳过 challenge 校验（用户 body 是静态的，challenge 没法嵌入）。
-	// 改用「HTTP 2xx + 响应文本（adapter.textPath 抽取）非空」作为 operational 判定。
-	// 响应文本为空则降级为 failed（视为上游回了 200 但没实际内容）。
-	if mode == MonitorBodyOverrideModeReplace {
-		if strings.TrimSpace(respText) == "" {
-			res.Status = MonitorStatusFailed
-			res.Message = truncateMessage("replace-mode: upstream returned 2xx with empty text")
-			return res
-		}
-		return finalizeOperationalOrDegraded(res, latency, latencyMs)
-	}
-
-	if !validateChallenge(respText, challenge.Expected) {
-		res.Status = MonitorStatusFailed
-		res.Message = truncateMessage(sanitizeErrorMessage(fmt.Sprintf("challenge mismatch (expected %s, got %q)", challenge.Expected, respText)))
-		return res
-	}
-
-	return finalizeOperationalOrDegraded(res, latency, latencyMs)
-}
-
-// finalizeOperationalOrDegraded 负责走到最后一步的 operational/degraded 判定。
-// 拆出来是为了让 runCheckForModel 不超过 30 行。
-func finalizeOperationalOrDegraded(res *CheckResult, latency time.Duration, latencyMs int) *CheckResult {
-	if latency >= monitorDegradedThreshold {
-		res.Status = MonitorStatusDegraded
-		res.Message = truncateMessage(fmt.Sprintf("slow response: %dms", latencyMs))
-		return res
-	}
-	res.Status = MonitorStatusOperational
-	return res
+	return runProbe(ctx, provider, endpoint, apiKey, model, opts, defaultProbeLimits())
 }
 
 // bodyOverrideMode 归一取 opts.BodyOverrideMode，nil opts / 空串都视为 off。
@@ -150,18 +88,17 @@ func pingEndpointOrigin(ctx context.Context, endpoint string) *int {
 }
 
 // providerAdapter 描述某个 provider 在 challenge 检测中需要的几件事：
-//   - 拼出请求路径（含 model 占位）
-//   - 序列化请求体
+//   - 协议族（决定请求体形状与回答读法，见 channel_monitor_probe_shape.go / _stream.go）
+//   - 拼出请求路径（含 model 占位；流式路径不同时另给）
 //   - 构造鉴权头
-//   - 从响应 JSON 中提取文本（默认按 gjson path；需要时可自定义）
 //
-// 加新 provider 只需要在 providerAdapters 里增加一个条目，无需触碰 callProvider / validateProvider。
+// 加新 provider 只需要在 providerAdapters 里增加一个条目。
 type providerAdapter struct {
-	buildPath    func(model string) string
-	buildBody    func(model, prompt string) ([]byte, error)
-	buildHeaders func(apiKey string) map[string]string
-	textPath     string // gjson 提取响应文本的 path
-	extractText  func([]byte) string
+	protocol  probeProtocol
+	buildPath func(model string) string
+	// buildStreamPath 流式请求路径；nil 表示与 buildPath 相同。
+	buildStreamPath func(model string) string
+	buildHeaders    func(apiKey string) map[string]string
 }
 
 // providerAdapters 全部已支持的 provider。键值即 MonitorProvider* 字符串。
@@ -177,38 +114,24 @@ var providerAdapters = map[string]providerAdapter{
 	MonitorProviderDeepseek: providerDeepseekChatAdapter,
 	MonitorProviderMiniMax:  providerMiniMaxChatAdapter,
 	MonitorProviderAnthropic: {
+		protocol:  probeProtocolAnthropic,
 		buildPath: func(string) string { return providerAnthropicPath },
-		buildBody: func(model, prompt string) ([]byte, error) {
-			return json.Marshal(map[string]any{
-				"model":      model,
-				"messages":   []map[string]string{{"role": "user", "content": prompt}},
-				"max_tokens": monitorChallengeMaxTokens,
-			})
-		},
 		buildHeaders: func(apiKey string) map[string]string {
 			return map[string]string{
 				"x-api-key":         apiKey,
 				"anthropic-version": monitorAnthropicAPIVersion,
 			}
 		},
-		extractText: extractAnthropicMonitorText,
 	},
 	MonitorProviderGemini: {
 		// Gemini 把 model 名写在 URL path 上：/v1beta/models/{model}:generateContent
-		buildPath: func(model string) string { return fmt.Sprintf(providerGeminiPathTemplate, model) },
-		buildBody: func(_, prompt string) ([]byte, error) {
-			return json.Marshal(map[string]any{
-				"contents": []map[string]any{
-					{"role": "user", "parts": []map[string]any{{"text": prompt}}},
-				},
-				"generationConfig": map[string]any{"maxOutputTokens": monitorChallengeMaxTokens},
-			})
-		},
+		protocol:        probeProtocolGemini,
+		buildPath:       func(model string) string { return fmt.Sprintf(providerGeminiPathTemplate, model) },
+		buildStreamPath: func(model string) string { return fmt.Sprintf(providerGeminiStreamPathTemplate, model) },
 		// 使用 x-goog-api-key header 而不是 ?key= query，避免 *url.Error 把 key 回填到错误日志。
 		buildHeaders: func(apiKey string) map[string]string {
 			return map[string]string{"x-goog-api-key": apiKey}
 		},
-		textPath: "candidates.0.content.parts.0.text",
 	},
 }
 
@@ -232,38 +155,21 @@ var providerMiniMaxChatAdapter = newOpenAICompatibleChatAdapter(providerOpenAIPa
 
 func newOpenAICompatibleChatAdapter(path string) providerAdapter {
 	return providerAdapter{
+		protocol:  probeProtocolChat,
 		buildPath: func(string) string { return path },
-		buildBody: func(model, prompt string) ([]byte, error) {
-			return json.Marshal(map[string]any{
-				"model":      model,
-				"messages":   []map[string]string{{"role": "user", "content": prompt}},
-				"max_tokens": monitorChallengeMaxTokens,
-				"stream":     false,
-			})
-		},
 		buildHeaders: func(apiKey string) map[string]string {
 			return map[string]string{"Authorization": "Bearer " + apiKey}
 		},
-		textPath: "choices.0.message.content",
 	}
 }
 
 //nolint:gochecknoglobals // 适配器表是只读静态数据，初始化后不变更。
 var providerOpenAIResponsesAdapter = providerAdapter{
+	protocol:  probeProtocolResponses,
 	buildPath: func(string) string { return providerOpenAIResponsesPath },
-	buildBody: func(model, prompt string) ([]byte, error) {
-		return json.Marshal(map[string]any{
-			"model":             model,
-			"instructions":      "You are a channel health-check endpoint. Answer the arithmetic challenge exactly and briefly.",
-			"input":             prompt,
-			"max_output_tokens": monitorChallengeMaxTokens,
-			"stream":            false,
-		})
-	},
 	buildHeaders: func(apiKey string) map[string]string {
 		return map[string]string{"Authorization": "Bearer " + apiKey}
 	},
-	textPath: "output.0.content.0.text",
 }
 
 // providerAdapterFor 按 provider + api_mode 选择具体 adapter。
@@ -273,46 +179,6 @@ func providerAdapterFor(provider, apiMode string) (providerAdapter, string, bool
 	}
 	adapter, ok := providerAdapters[provider]
 	return adapter, MonitorAPIModeChatCompletions, ok
-}
-
-// callProvider 通过 providerAdapters 分发到具体实现。
-// opts 承载用户的自定义 headers / body 覆盖（可为 nil）。
-//
-// 返回值：
-//   - extractedText: 按 textPath 抽出的成功文本，仅在 status 2xx 时有意义；非 2xx 时通常为空串
-//   - rawBody: 完整响应体的字符串形式（已被 monitorResponseMaxBytes 截断），用于错误路径保留上游真实回包
-//   - status: HTTP 状态码
-//   - err: 网络 / 序列化错误
-func callProvider(ctx context.Context, provider, endpoint, apiKey, model, prompt string, opts *CheckOptions) (extractedText, rawBody string, status int, err error) {
-	requestedAPIMode := checkAPIMode(opts)
-	if err := validateAPIMode(provider, requestedAPIMode); err != nil {
-		return "", "", 0, err
-	}
-	adapter, apiMode, ok := providerAdapterFor(provider, requestedAPIMode)
-	if !ok {
-		return "", "", 0, fmt.Errorf("unsupported provider %q", provider)
-	}
-	body, err := buildRequestBody(adapter, provider, apiMode, model, prompt, opts)
-	if err != nil {
-		return "", "", 0, err
-	}
-	headers := mergeHeaders(adapter.buildHeaders(apiKey), opts)
-	full := joinURL(endpoint, monitorRequestPath(provider, endpoint, adapter, model))
-	respBytes, status, err := postRawJSON(ctx, full, body, headers)
-	if err != nil {
-		return "", "", status, err
-	}
-	if monitorProviderSupportsResponses(provider) && apiMode == MonitorAPIModeResponses {
-		return extractOpenAIResponsesText(respBytes), string(respBytes), status, nil
-	}
-	return extractMonitorResponseText(adapter, respBytes), string(respBytes), status, nil
-}
-
-func extractMonitorResponseText(adapter providerAdapter, respBytes []byte) string {
-	if adapter.extractText != nil {
-		return adapter.extractText(respBytes)
-	}
-	return gjson.GetBytes(respBytes, adapter.textPath).String()
 }
 
 func extractAnthropicMonitorText(respBytes []byte) string {
@@ -374,7 +240,7 @@ func extractOpenAIResponsesText(respBytes []byte) string {
 	if len(texts) > 0 {
 		return strings.Join(texts, "")
 	}
-	return gjson.GetBytes(respBytes, providerOpenAIResponsesAdapter.textPath).String()
+	return gjson.GetBytes(respBytes, "output.0.content.0.text").String()
 }
 
 // mergeHeaders 把用户自定义 headers 合并到 adapter 默认 headers 上。
@@ -396,57 +262,6 @@ func mergeHeaders(base map[string]string, opts *CheckOptions) map[string]string 
 	return out
 }
 
-// buildRequestBody 根据 body_override_mode 构造请求 body。
-//
-//   - off:     adapter 默认 body
-//   - merge:   adapter 默认 body 与 BodyOverride 浅合并；BodyOverride 中命中
-//     bodyMergeKeyDenyList[provider] 的 key 会被静默丢弃，避免破坏 challenge / model 路由
-//   - replace: 直接 marshal BodyOverride 作为完整 body
-//
-// 任何 mode 返回的 []byte 都已经是合法 JSON，可直接送入 postRawJSON。
-func buildRequestBody(adapter providerAdapter, provider, apiMode, model, prompt string, opts *CheckOptions) ([]byte, error) {
-	mode := bodyOverrideMode(opts)
-
-	if mode == MonitorBodyOverrideModeReplace {
-		if opts == nil || len(opts.BodyOverride) == 0 {
-			return nil, fmt.Errorf("replace mode: body_override is empty")
-		}
-		if err := validateReplaceRequestBody(provider, apiMode, opts.BodyOverride); err != nil {
-			return nil, err
-		}
-		body, err := json.Marshal(opts.BodyOverride)
-		if err != nil {
-			return nil, fmt.Errorf("marshal body_override (replace): %w", err)
-		}
-		return body, nil
-	}
-
-	defaultBody, err := adapter.buildBody(model, prompt)
-	if err != nil {
-		return nil, fmt.Errorf("marshal default body: %w", err)
-	}
-	if mode != MonitorBodyOverrideModeMerge || opts == nil || len(opts.BodyOverride) == 0 {
-		return defaultBody, nil
-	}
-
-	var defaultMap map[string]any
-	if err := json.Unmarshal(defaultBody, &defaultMap); err != nil {
-		return nil, fmt.Errorf("unmarshal default body for merge: %w", err)
-	}
-	deny := bodyMergeKeyDenyList[bodyMergeDenyKey(provider, apiMode)]
-	for k, v := range opts.BodyOverride {
-		if deny[k] {
-			continue
-		}
-		defaultMap[k] = v
-	}
-	merged, err := json.Marshal(defaultMap)
-	if err != nil {
-		return nil, fmt.Errorf("marshal merged body: %w", err)
-	}
-	return merged, nil
-}
-
 // bodyMergeKeyDenyList 在 merge 模式下，禁止用户覆盖这些 provider-specific 的关键字段。
 // 思路抄 check-cx 的 EXCLUDED_METADATA_KEYS：保护 challenge / model 路由不被用户误伤。
 // 用户想动这些字段就用 replace 模式（已知会跳 challenge 校验）。
@@ -455,8 +270,8 @@ func buildRequestBody(adapter providerAdapter, provider, apiMode, model, prompt 
 var bodyMergeKeyDenyList = map[string]map[string]bool{
 	MonitorProviderOpenAI + ":" + MonitorAPIModeChatCompletions: {"model": true, "messages": true, "stream": true},
 	MonitorProviderOpenAI + ":" + MonitorAPIModeResponses:       {"model": true, "instructions": true, "input": true, "stream": true},
-	MonitorProviderAnthropic:                                    {"model": true, "messages": true},
-	MonitorProviderGemini:                                       {"contents": true},
+	MonitorProviderAnthropic:                                    {"model": true, "messages": true, "stream": true},
+	MonitorProviderGemini:                                       {"contents": true, "stream": true},
 	// 国产 3 家与 OpenAI Chat Completions 同构。
 	MonitorProviderKimi:     {"model": true, "messages": true, "stream": true},
 	MonitorProviderZhipu:    {"model": true, "messages": true, "stream": true},
@@ -527,32 +342,6 @@ func hasNonEmptyBodyValue(v any) bool {
 	default:
 		return true
 	}
-}
-
-// postRawJSON 发送 POST + 已序列化好的 JSON 字节，限制响应体大小，返回响应字节、HTTP status、错误。
-// adapter 自行 marshal 是为了精确控制字段顺序与类型，所以这里直接收 []byte 而不是 any。
-func postRawJSON(ctx context.Context, fullURL string, payload []byte, headers map[string]string) ([]byte, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
-	if err != nil {
-		return nil, 0, fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := monitorHTTPClient.Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("do request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, monitorResponseMaxBytes))
-	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("read body: %w", err)
-	}
-	return respBody, resp.StatusCode, nil
 }
 
 // monitorRequestPath 返回探测请求路径。智谱按 endpoint 区分：
