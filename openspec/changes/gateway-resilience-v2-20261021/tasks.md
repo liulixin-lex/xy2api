@@ -41,7 +41,7 @@
 - [x] 5.3 W5.1 三个专用耗尽出口接入重试提示与回合封顶；一次性 finalize（α，`a72a29e00`）。
 - [x] 5.4 W5.4 Anthropic 自身失败用 `api_error`（α handler `fe5dbf503`；β `resilience_keepalive.go` `e30e6c384`）。
 - [x] 5.5 W5.5 Codex 无号 503 的 Retry-After 上限（α `0c2a67ca5`）。
-- [x] 5.6 W5.3 合成 `response.failed` 有条件带 retry-after：handler 侧（α `9b951b4de`）、分组 advisor（γ `d4db8d426`）、service 侧三个点（β `e30e6c384`）。已知缺陷：上游带 `Retry-After` 的容量失败造成耗尽时不带该头、正文也没有重试秒数（测试服务器 RA-1 失败；PM 裁定随 0.4.4 发布，0.4.5 修复，design §11）。
+- [x] 5.6 W5.3 合成 `response.failed` 有条件带 retry-after：handler 侧（α `9b951b4de`）、分组 advisor（γ `d4db8d426`）、service 侧三个点（β `e30e6c384`）。已知缺陷：上游带 `Retry-After` 的容量失败造成耗尽时不带该头、正文也没有重试秒数（测试服务器 RA-1 失败；PM 裁定随 0.4.4 发布，0.4.5 修复，design §11；修复见 `gateway-resilience-045-20261021`）。
 
 ## 6. W6-lite 仅流式能力（γ、FE）
 

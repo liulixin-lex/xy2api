@@ -149,6 +149,9 @@
 - **ε** `fix/review-p2-045`（自 RA-1 修复分支 `4ef7be248`）：修审查遗留的 P2——R2-P2-1（暂存期心跳提交时只写标准 SSE 头）、R2-P2-2（raw Chat 的 `error` 判据收紧）、R2-P2-4（首次写出与取消同时发生）、泄漏排查的 `lastResortGroups` 过期条目清理、R1 P2-14、P2-10（RA-1 的用例须保持通过）、A-P2-4。R2-P2-3 只需文档登记，0.4.4 已写进 `GATEWAY_RESILIENCE.md` §6 与 design §9，不用重复。
   - 下一步：逐项先写红测、单独提交；用户决定发 0.4.5 后合成候选、做全套验证。
   - 卡点：用户决定；建在 RA-1 修复之上，RA-1 分支变动时要同步。
+- **DOCS** `docs/045-prep`（自 main `a1cf8f104`，2026-10-21T12:25Z PM 指令）：0.4.5 的 OpenSpec 变更 [`gateway-resilience-045-20261021`](../openspec/changes/gateway-resilience-045-20261021/proposal.md) 汇总 RA-1、ε、δ 三条分支；`GATEWAY_RESILIENCE.md` 只补 ε 与 δ 没改过的部分（开头一段、§3 中 RA-1 的上游等待、§7 的 RA-1 条目），旧变更 runbook §6 同步开关说明；发版说明与 PR 正文草稿在仓库外。
+  - 下一步：交 α 在 0.4.5 集成时合入；δ 补审结论、候选验证结果出来后更新 tasks 与发版说明。
+  - 卡点：用户决定是否发 0.4.5；ε 与 δ 都改了 `GATEWAY_RESILIENCE.md` 第 18 行（可重放前缀）与第 133 行（`stream.strict_terminal`），集成时要手工合并。
 
 ## 操作陷阱
 
