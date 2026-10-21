@@ -189,7 +189,7 @@
 
 - **请求范围**：OpenAI 入站的 Responses 与 Chat 普通文本请求。入口在解析出客户端的 `stream` 后、首次选号前用 `resilience.WithCapabilityRequest(ctx, protocol, stream)` 标记请求（α；`protocol` 为 `responses` 或 `chat`）。未标记、协议未知或 `stream=true` 的请求不过滤；compact、图片、WebSocket 不标记；Messages→OpenAI、Gemini、CN、Bedrock 不在本期。
 - **账号范围**：只学习 OpenAI 与 Grok 平台的账号；OpenAI 强制流式的 OAuth 账号本来就以流式请求上游，不过滤。
-- **触发**：检测钩子 `OpenAIGatewayService.LearnStreamOnlyFailure(ctx, account, protocol, upstreamStream, status, body)`，在处理 400 的副作用与写应答之前调用（β 的 Forward、透传、raw Chat 调用点）。只在实际发给上游的请求为非流式、状态为 400、错误字段确定表示“只接受流式”（表驱动，如 “only accepts streaming requests”、“stream must be true”）时学习；只看错误字段，忽略上游回显的请求内容；截断的 JSON、余额与内容拒绝不算。上游请求本来就是流式时不动作。不会自动改发流式。
+- **触发**：检测钩子 `OpenAIGatewayService.LearnStreamOnlyFailure(ctx, account, protocol, upstreamStream, status, body)`，在处理 400 的副作用与写应答之前调用（β 的 Forward、透传、raw Chat 调用点）。只在实际发给上游的请求为非流式、状态为 400、错误字段确定表示“只接受流式”（表驱动，如 “only accepts streaming requests”、“stream must be true”）时学习；只看错误字段，忽略上游回显的请求内容；截断的 JSON、余额与内容拒绝不算。上游请求本来就是流式时不动作。钩子还要求请求带合法的 `WithCapabilityRequest` 标记且 `stream=false`：没有标记的 compact、图片、WebSocket 完全没有学习副作用。不会自动改发流式。
 
 ### 6.2 学习与存放
 
@@ -237,7 +237,7 @@
   这样 service 层在 handler 耗尽出口之前合成的 `response.failed` 也能拿到当时的候选情况。
 - `Suppress` 由识别出终态的一方显式写入：handler 的回合封顶、内容拒绝、用户余额终态（α）；service 在自己合成这类终态帧时，先写 `Suppress` 再 `ResolveRetryAdvice`（β）。provider 本身看不到这些终态。
 - 正文：`RetryAdvice.Message(message)` 统一处理重试尾句：去掉本地固定格式的旧尾句 “Please try again in Ns.”；秒数为正时追加与 `Headers()` 同样夹到 10 秒的尾句；`unknown` 与 `Suppress` 只去掉旧尾句。只改网关自己的固定后缀，不改写上游的自然语言。
-- 分组 advisor（γ）只读末位兜底的分组快照（`lastResortGroups` 中未过期的条目，沿用既有的 2 秒缓存 `lastResortCandidateTTL`，锁内取引用、锁外计算），不做冷读取，不访问 Redis 或数据库。快照只在单一候选判断、末位兜底或原无号提示用过时才有；缺失或过期时返回 `unknown`。候选只算未尝试（排除 `RequestState` 里本请求已失败的账号）、模型与平台兼容、能力允许、无硬罚的账号；OpenAI 另看进程内的按模型屏蔽。原 `NoAccountRetryAfter` 保留给 HTTP 无号提示【待契约：γ 的 advisor 方法名】。
+- 分组 advisor（γ）只读末位兜底的分组快照（`lastResortGroups` 中未过期的条目，沿用既有的 2 秒缓存 `lastResortCandidateTTL`，锁内取引用、锁外计算），不做冷读取，不访问 Redis 或数据库。快照只在单一候选判断、末位兜底或原无号提示用过时才有；缺失或过期时返回 `unknown`。候选只算未尝试（排除 `RequestState` 里本请求已失败的账号）、模型与平台兼容、能力允许、无硬罚的账号；OpenAI 另看进程内的按模型屏蔽。入口是 `GatewayService` 与 `OpenAIGatewayService` 的同名方法 `RetryAdvice(ctx, groupID, model)`（γ `d4db8d426`），α 的 provider 自动识别；原 `NoAccountRetryAfter` 保留给 HTTP 无号提示。
 
 | 情况 | `Source` | `response.failed` 的 retry-after |
 |---|---|---|
