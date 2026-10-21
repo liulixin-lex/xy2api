@@ -358,6 +358,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 						h.handleFailoverExhausted(c, failoverErr, true)
 						return
 					}
+					// Staged heartbeats commit SSE without delivering semantic output.
+					if c.Writer.Written() {
+						streamStarted = true
+					}
 					if failoverErr.ShouldReportAccountScheduleFailure() {
 						h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, reqModel, false, nil), false, nil, err)
 					}

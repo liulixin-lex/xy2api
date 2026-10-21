@@ -94,7 +94,7 @@ func TestRetryAdviceProviderTimeoutAndCancellation(t *testing.T) {
 func TestRetryAdviceMessagePreservesSentenceAndNonemptyFallback(t *testing.T) {
 	for _, tc := range []struct{ input, want string }{
 		{"Busy. Please try again in 30s.", "Busy."},
-		{"Busy! Please try again in 30s.", "Busy! Please try again in 30s."},
+		{"Busy! Please try again in 30s.", "Busy!"},
 		{"Please try again in 30s.", "Please try again in 30s."},
 		{"Busy. Please try again in 30s. More detail.", "Busy. Please try again in 30s. More detail."},
 		{"Busy.Please try again in 30s.", "Busy.Please try again in 30s."},
@@ -103,4 +103,15 @@ func TestRetryAdviceMessagePreservesSentenceAndNonemptyFallback(t *testing.T) {
 		require.Equal(t, tc.want, (RetryAdvice{Suppress: true}).Message(tc.input))
 	}
 	require.Equal(t, "Please try again in 7s.", (RetryAdvice{Seconds: 7}).Message("Please try again in 30s."))
+}
+
+func TestRetryAdviceMessagePreservesOriginalPunctuation(t *testing.T) {
+	for _, original := range []string{"Busy!", "Unavailable?", "Upstream failed.", "上游暂不可用。"} {
+		t.Run(original, func(t *testing.T) {
+			withHint := (RetryAdvice{Seconds: 7}).Message(original)
+			require.Equal(t, original+" Please try again in 7s.", withHint)
+			require.Equal(t, original, (RetryAdvice{Suppress: true}).Message(withHint))
+			require.Equal(t, original, (RetryAdvice{}).Message(withHint))
+		})
+	}
 }
