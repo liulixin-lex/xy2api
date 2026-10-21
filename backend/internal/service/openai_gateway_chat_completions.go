@@ -732,6 +732,12 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	canReplayPrelude := func() bool {
 		return stagePrelude && c.Request.Context().Err() == nil && !clientDisconnected && !openAIStreamClientOutputStarted(c, clientOutputStarted)
 	}
+	canceledPrelude := func() error {
+		if stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+			return c.Request.Context().Err()
+		}
+		return nil
+	}
 	pendingSSE := make([]string, 0, 4)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var streamFailoverErr *UpstreamFailoverError
@@ -966,6 +972,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	}
 
 	finalizeStream := func() (*OpenAIForwardResult, error) {
+		if err := canceledPrelude(); err != nil {
+			return nil, err
+		}
 		if streamFailoverErr != nil {
 			// xy2api resilience: pre-output heartbeats are not client output.
 			if c == nil || c.Writer == nil || !openAIStreamClientOutputStarted(c, false) {
@@ -1057,8 +1066,8 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 	}
 	missingTerminalErr := func() (*OpenAIForwardResult, error) {
-		if stagePrelude && c.Request.Context().Err() != nil {
-			return resultWithUsage(), c.Request.Context().Err()
+		if err := canceledPrelude(); err != nil {
+			return nil, err
 		}
 		if canReplayPrelude() {
 			return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, nil, "OpenAI stream ended before content or terminal", upstreamModel, resp.Header)
@@ -1100,6 +1109,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 		}
 		if err := scanner.Err(); err != nil {
+			if cancelErr := canceledPrelude(); cancelErr != nil {
+				return nil, cancelErr
+			}
 			if firstEvent.expired() && c.Request.Context().Err() == nil {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 			}
@@ -1181,6 +1193,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				return missingTerminalErr()
 			}
 			if ev.err != nil {
+				if cancelErr := canceledPrelude(); cancelErr != nil {
+					return nil, cancelErr
+				}
 				if firstEvent.expired() && c.Request.Context().Err() == nil {
 					return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 				}

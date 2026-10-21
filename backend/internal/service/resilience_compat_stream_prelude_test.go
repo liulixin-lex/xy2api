@@ -12,9 +12,60 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+type preludeCancelBody struct {
+	started, closed chan struct{}
+	once            sync.Once
+}
+
+func (b *preludeCancelBody) Read([]byte) (int, error) {
+	close(b.started)
+	<-b.closed
+	return 0, io.ErrClosedPipe
+}
+
+func (b *preludeCancelBody) Close() error {
+	b.once.Do(func() { close(b.closed) })
+	return nil
+}
+
+func TestCompatPreludeCancelReadFailureIsNeutral(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, messages := range []bool{false, true} {
+		for _, interval := range []int{0, 30} {
+			t.Run(fmtBool(messages)+"/"+fmtBool(interval > 0), func(t *testing.T) {
+				c, rec := compatStreamContext("/v1/chat/completions", "")
+				state := resilience.NewRequestState()
+				ctx, cancel := context.WithCancel(resilience.WithRequestState(c.Request.Context(), state))
+				defer cancel()
+				c.Request = c.Request.WithContext(ctx)
+				body := &preludeCancelBody{started: make(chan struct{}), closed: make(chan struct{})}
+				go func() { <-body.started; cancel() }()
+				resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: body}
+				svc := compatStreamService(nil, 0, interval, 0)
+				account := rawChatCompletionsTestAccount()
+				var result *OpenAIForwardResult
+				var err error
+				if messages {
+					result, err = svc.handleAnthropicStreamingResponse(resp, c, account, "model", "model", "model", time.Now())
+				} else {
+					result, err = svc.handleChatStreamingResponse(resp, c, account, "model", "model", "model", time.Now(), 0)
+				}
+				require.ErrorIs(t, err, context.Canceled)
+				require.Nil(t, result, "canceled prelude must not be billed")
+				require.Empty(t, rec.Body.String())
+				require.False(t, state.AccountFailed(account.ID))
+				require.False(t, state.TurnFailed())
+				_, marked := c.Get(OpsUpstreamErrorsKey)
+				require.False(t, marked)
+			})
+		}
+	}
+}
 
 func runPreludeCompat(t *testing.T, c *gin.Context, messages bool, body io.Reader, requestBytes int, interval int) (*OpenAIForwardResult, error) {
 	t.Helper()
