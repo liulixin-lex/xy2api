@@ -114,7 +114,7 @@ func TestCompatConversionsSwitchWhenTheFirstEventDoesNotCome(t *testing.T) {
 	// Headers, then nothing. The 1 s stall check leaves the attempt to the
 	// 3 s first-output tier; the 1 s downstream pings in between are
 	// heartbeats, so the handler may still switch accounts.
-	withResilienceSettings(t, nil)
+	withResilienceSettings(t, func(s *resilience.Settings) { s.Stream.PreludeStaging = false })
 	for _, tc := range []struct{ path, body string }{
 		{"/v1/messages", compatMessagesStreamBody},
 		{"/v1/chat/completions", compatChatStreamBody},

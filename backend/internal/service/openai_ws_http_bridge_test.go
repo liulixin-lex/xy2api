@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -1304,6 +1305,39 @@ func TestProxyOpenAIWSHTTPBridgeTurnDoesNotReplayCapacityAfterSemanticOutput(t *
 	require.NotContains(t, string(writes[4]), "server_is_overloaded")
 	require.True(t, logSink.ContainsMessage("gateway.failover_suppressed_after_semantic_output"))
 	require.True(t, logSink.ContainsFieldValue("path", "ws_http_bridge"))
+}
+
+func TestProxyOpenAIWSHTTPBridgeSharedPreludeBoundary(t *testing.T) {
+	before := resilience.Current().Clone()
+	t.Cleanup(func() { resilience.Publish(before) })
+	resilience.Publish(resilience.Defaults())
+	gin.SetMode(gin.TestMode)
+	for _, event := range []string{"response.queued", "codex.response.metadata"} {
+		t.Run(event, func(t *testing.T) {
+			body := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_boundary\"}}\n\n" + "data: {\"type\":\"" + event + "\"}\n\n" +
+				"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"busy\"}}}\n\n"
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{ID: 12, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			payload := []byte(`{"type":"response.create","model":"gpt-5.4","input":"hi"}`)
+			var writes [][]byte
+			_, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "sk-test", payload, len(payload), "gpt-5.4", "", "", "", "", 1, func(data []byte) error {
+				writes = append(writes, append([]byte(nil), data...))
+				return nil
+			})
+			var failover *UpstreamFailoverError
+			if event == "response.queued" {
+				require.ErrorAs(t, err, &failover)
+				require.Empty(t, writes)
+			} else {
+				require.False(t, errors.As(err, &failover))
+				require.NotEmpty(t, writes)
+				require.Equal(t, "response.created", gjson.GetBytes(writes[0], "type").String())
+			}
+		})
+	}
 }
 
 func TestProxyOpenAIWSHTTPBridgeTurnKeepaliveWriteFailure(t *testing.T) {

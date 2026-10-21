@@ -50,6 +50,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string) (*openaiStreamingResult, error) {
+	preludeTrace := beginOpenAIPreludeTrace(ctx, resilience.Current().NativePreludeWhitelistOn())
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
@@ -392,7 +393,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		if codexFailureTerminal && sawBareError && !sawResponseFailed && !clientDisconnected {
 			applyAttemptResponseHeaders()
-			if _, err := writePendingString(buildOpenAIResponseFailedSSE(responseID, originalModel, bareErrorPayload, failedMessage)); err != nil {
+			if _, err := writePendingString(buildOpenAIResponseFailedSSE(ctx, responseID, originalModel, bareErrorPayload, failedMessage)); err != nil {
 				handlePendingWriteError(err)
 			} else {
 				failureDelivered = true
@@ -498,6 +499,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
 			eventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
+			observeOpenAIPreludeCreated(preludeTrace, eventType)
 			if codexFailureTerminal && sawBareError && !sawResponseFailed &&
 				(eventType == "response.completed" || eventType == "response.done") {
 				// A later successful terminal is authoritative over a pending bare
@@ -693,6 +695,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
 			}
 			startsClientOutput := forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
+			if startsClientOutput && !clientOutputStarted {
+				releaseOpenAIPrelude(preludeTrace, eventType)
+			}
 			startsVisibleOutput := openAIStreamDataStartsVisibleOutput(data, eventType)
 			startsTTFTOutput := openAIStreamDataStartsTTFT(data, eventType, forceFlushFailedEvent, ttftMode)
 			if stageFirstOutput {
@@ -1827,7 +1832,7 @@ func extractOpenAISSEErrorMessage(payload []byte) string {
 	return sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(payload)))
 }
 
-func buildOpenAIResponseFailedSSE(responseID, model string, source []byte, fallbackMessage string) string {
+func buildOpenAIResponseFailedSSE(ctx context.Context, responseID, model string, source []byte, fallbackMessage string) string {
 	responseID = strings.TrimSpace(responseID)
 	if responseID == "" {
 		responseID = "resp_" + strings.ReplaceAll(uuid.NewString(), "-", "")
@@ -1850,7 +1855,7 @@ func buildOpenAIResponseFailedSSE(responseID, model string, source []byte, fallb
 	if message == "" {
 		message = "Upstream response failed"
 	}
-	errorBody := gin.H{"code": code, "message": message}
+	errorBody := openAIResponseFailureError(ctx, errorType, code, message)
 	if errorType != "" {
 		errorBody["type"] = errorType
 	}

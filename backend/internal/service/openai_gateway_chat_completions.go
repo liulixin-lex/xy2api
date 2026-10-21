@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai_compat"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -709,6 +711,33 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	firstChunk := true
 	clientDisconnected := false
 	clientOutputStarted := false
+	stopPreludeCancel := func() bool { return false }
+	writeClient := func(data string) error {
+		n, err := fmt.Fprint(c.Writer, data)
+		if n > 0 {
+			clientOutputStarted = true
+			stopPreludeCancel()
+		}
+		if err == nil && n != len(data) {
+			return io.ErrShortWrite
+		}
+		return err
+	}
+	stagePrelude := resilience.Current().PreludeStagingOn()
+	preludeTrace := beginOpenAIPreludeTrace(c.Request.Context(), stagePrelude)
+	if stagePrelude {
+		stopPreludeCancel = context.AfterFunc(c.Request.Context(), func() { _ = resp.Body.Close() })
+		defer func() { stopPreludeCancel() }()
+	}
+	canReplayPrelude := func() bool {
+		return stagePrelude && c.Request.Context().Err() == nil && !clientDisconnected && !openAIStreamClientOutputStarted(c, clientOutputStarted)
+	}
+	canceledPrelude := func() error {
+		if stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+			return c.Request.Context().Err()
+		}
+		return nil
+	}
 	pendingSSE := make([]string, 0, 4)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var streamFailoverErr *UpstreamFailoverError
@@ -784,6 +813,18 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			)
 			return false
 		}
+		observeOpenAIPreludeCreated(preludeTrace, event.Type)
+		holdPrelude := stagePrelude && openAICompatPreludeEvent(&event, []byte(payload))
+		if stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+			if err := c.Request.Context().Err(); err != nil {
+				streamNonFailoverErr = err
+				return true
+			}
+			if !holdPrelude && !firstEvent.disarm() {
+				streamFailoverErr = s.newOpenAIFirstOutputTimeoutError(c.Request.Context(), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account), firstEvent.started, firstEvent.model, firstEvent.effort, firstEvent.timeout, "first_event", resp.Header)
+				return true
+			}
+		}
 		observer.ObserveOpenAI([]byte(payload), event.Type)
 		refusalDetector.ObservePayload([]byte(payload))
 		s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
@@ -830,9 +871,12 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			if strings.TrimSpace(event.Type) == "error" {
 				shouldFailover = openAIStreamErrorEventShouldFailover(payloadBytes, message)
 			}
-			if !clientOutputStarted && shouldFailover {
+			if !clientDisconnected && !openAIStreamClientOutputStarted(c, clientOutputStarted) && c.Request.Context().Err() == nil && shouldFailover {
 				streamFailoverErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payloadBytes, message, upstreamModel, resp.Header)
 				return true
+			}
+			if !clientOutputStarted {
+				releaseOpenAIPrelude(preludeTrace, event.Type)
 			}
 			s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, payloadBytes, message, clientOutputStarted)
 			message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
@@ -872,7 +916,15 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			return true
 		}
 
-		chunks := apicompat.ResponsesEventToChatChunks(&event, state)
+		if !holdPrelude && !clientOutputStarted && event.Type != "response.created" {
+			releaseOpenAIPrelude(preludeTrace, event.Type)
+		}
+		var chunks []apicompat.ChatCompletionsChunk
+		if stagePrelude {
+			chunks = deferredOpenAIChatChunks(&event, state, holdPrelude)
+		} else {
+			chunks = apicompat.ResponsesEventToChatChunks(&event, state)
+		}
 		if !clientDisconnected {
 			for _, chunk := range chunks {
 				refusalDetector.ObserveChatChunk(chunk)
@@ -891,7 +943,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				if !clientOutputStarted {
 					writeStreamHeaders()
 					for _, pending := range pendingSSE {
-						if _, err := fmt.Fprint(c.Writer, pending); err != nil {
+						if err := writeClient(pending); err != nil {
 							clientDisconnected = true
 							logger.L().Info("openai chat_completions stream: client disconnected while flushing pending chunks",
 								zap.String("request_id", requestID),
@@ -900,12 +952,11 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 						}
 					}
 					pendingSSE = pendingSSE[:0]
-					clientOutputStarted = !clientDisconnected
 					if clientDisconnected {
 						break
 					}
 				}
-				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
+				if err := writeClient(sse); err != nil {
 					clientDisconnected = true
 					logger.L().Info("openai chat_completions stream: client disconnected, continuing to drain upstream for billing",
 						zap.String("request_id", requestID),
@@ -921,6 +972,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	}
 
 	finalizeStream := func() (*OpenAIForwardResult, error) {
+		if err := canceledPrelude(); err != nil {
+			return nil, err
+		}
 		if streamFailoverErr != nil {
 			// xy2api resilience: pre-output heartbeats are not client output.
 			if c == nil || c.Writer == nil || !openAIStreamClientOutputStarted(c, false) {
@@ -945,7 +999,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				if !clientOutputStarted {
 					writeStreamHeaders()
 					for _, pending := range pendingSSE {
-						if _, err := fmt.Fprint(c.Writer, pending); err != nil {
+						if err := writeClient(pending); err != nil {
 							clientDisconnected = true
 							logger.L().Info("openai chat_completions stream: client disconnected during pending final flush",
 								zap.String("request_id", requestID),
@@ -954,12 +1008,11 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 						}
 					}
 					pendingSSE = pendingSSE[:0]
-					clientOutputStarted = !clientDisconnected
 					if clientDisconnected {
 						break
 					}
 				}
-				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
+				if err := writeClient(sse); err != nil {
 					clientDisconnected = true
 					logger.L().Info("openai chat_completions stream: client disconnected during final flush",
 						zap.String("request_id", requestID),
@@ -969,13 +1022,13 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 		}
 		if !clientDisconnected && !clientOutputStarted {
-			if refusalDetector.IsSilentRefusal() {
+			if refusalDetector.IsSilentRefusal() && (!stagePrelude || terminalEventType != "response.incomplete") {
 				return nil, newOpenAISilentRefusalFailoverError(c, account, requestID)
 			}
 			if len(pendingSSE) > 0 {
 				writeStreamHeaders()
 				for _, pending := range pendingSSE {
-					if _, err := fmt.Fprint(c.Writer, pending); err != nil {
+					if err := writeClient(pending); err != nil {
 						clientDisconnected = true
 						logger.L().Info("openai chat_completions stream: client disconnected during final pending flush",
 							zap.String("request_id", requestID),
@@ -984,19 +1037,17 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					}
 				}
 				pendingSSE = pendingSSE[:0]
-				clientOutputStarted = !clientDisconnected
 			}
 		}
 		// Send [DONE] sentinel
 		if !clientDisconnected {
 			writeStreamHeaders()
-			if _, err := fmt.Fprint(c.Writer, "data: [DONE]\n\n"); err != nil {
+			if err := writeClient("data: [DONE]\n\n"); err != nil {
 				clientDisconnected = true
 				logger.L().Info("openai chat_completions stream: client disconnected during done flush",
 					zap.String("request_id", requestID),
 				)
 			}
-			clientOutputStarted = !clientDisconnected
 		}
 		if !clientDisconnected {
 			c.Writer.Flush()
@@ -1015,6 +1066,12 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 	}
 	missingTerminalErr := func() (*OpenAIForwardResult, error) {
+		if err := canceledPrelude(); err != nil {
+			return nil, err
+		}
+		if canReplayPrelude() {
+			return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, nil, "OpenAI stream ended before content or terminal", upstreamModel, resp.Header)
+		}
 		resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, nil, clientOutputStarted && !clientDisconnected)
 		return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
 	}
@@ -1036,7 +1093,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	if streamInterval <= 0 && keepaliveInterval <= 0 {
 		var parser openAICompatSSEFrameParser
 		for scanner.Scan() {
-			if !firstEvent.disarm() {
+			if !stagePrelude && !firstEvent.disarm() {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 			}
 			line := scanner.Text()
@@ -1052,8 +1109,14 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			if firstEvent.expired() {
+			if cancelErr := canceledPrelude(); cancelErr != nil {
+				return nil, cancelErr
+			}
+			if firstEvent.expired() && c.Request.Context().Err() == nil {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
+			}
+			if canReplayPrelude() && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, nil, "OpenAI stream read failed before content", upstreamModel, resp.Header)
 			}
 			handleScanErr(err)
 			if clientDisconnected || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -1130,8 +1193,14 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				return missingTerminalErr()
 			}
 			if ev.err != nil {
-				if firstEvent.expired() {
+				if cancelErr := canceledPrelude(); cancelErr != nil {
+					return nil, cancelErr
+				}
+				if firstEvent.expired() && c.Request.Context().Err() == nil {
 					return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
+				}
+				if canReplayPrelude() && !errors.Is(ev.err, context.Canceled) && !errors.Is(ev.err, context.DeadlineExceeded) {
+					return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, nil, "OpenAI stream read failed before content", upstreamModel, resp.Header)
 				}
 				handleScanErr(ev.err)
 				if clientDisconnected || errors.Is(ev.err, context.Canceled) || errors.Is(ev.err, context.DeadlineExceeded) {
@@ -1139,7 +1208,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				}
 				return resultWithUsage(), newOpenAIUpstreamStreamReadError(ev.err)
 			}
-			if !firstEvent.disarm() {
+			if !stagePrelude && !firstEvent.disarm() {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 			}
 			lastDataAt = time.Now()
@@ -1175,13 +1244,16 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				zap.Duration("interval", stallThreshold),
 			)
 			s.noteOpenAICompatStall(c, account, originalModel)
+			if canReplayPrelude() {
+				return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, nil, "OpenAI stream stalled before content", upstreamModel, resp.Header)
+			}
 			return resultWithUsage(), fmt.Errorf("stream data interval timeout")
 
 		case <-keepaliveCh:
 			if clientDisconnected {
 				continue
 			}
-			if refusalDetector.Enabled() && !clientOutputStarted {
+			if !stagePrelude && refusalDetector.Enabled() && !clientOutputStarted {
 				continue
 			}
 			if time.Since(lastDataAt) < keepaliveInterval {

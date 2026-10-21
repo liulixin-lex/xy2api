@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 // openAICompactSSEKeepaliveKey 存放 body-signal compact 请求的下游 SSE 心跳器。
@@ -44,6 +46,7 @@ type openAICompactSSEKeepalive struct {
 	errReplaced bool
 	metricGroup int64
 	edge        string
+	ctx         context.Context
 }
 
 // StartOpenAICompactSSEKeepalive 为已标记 body-signal 客户端流式的 compact
@@ -86,6 +89,11 @@ func startSSEKeepalive(c *gin.Context, firstDelay, interval time.Duration, frame
 		stop:     make(chan struct{}),
 		frame:    frame,
 		protocol: protocol,
+	}
+	if c.Request != nil {
+		k.ctx = c.Request.Context()
+		state := resilience.StateFrom(k.ctx)
+		k.metricGroup, k.edge = state.GroupID(), state.Edge()
 	}
 	c.Set(openAICompactSSEKeepaliveKey, k)
 	noteDeliveryHeartbeat(c, k, nil, 0)

@@ -14,6 +14,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai_compat"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
 
@@ -1119,6 +1120,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			respBody := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			if failure := s.learnOpenAIStreamOnlyHTTPFailure(ctx, c, account, upstreamReq, resp, respBody, resilience.CapabilityProtocolResponses); failure != nil {
+				return nil, failure
+			}
 
 			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
@@ -1211,6 +1215,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					AccountID:          account.ID,
 					AccountName:        account.Name,
 					UpstreamStatusCode: resp.StatusCode,
+					ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, respBody, upstreamMsg),
 					UpstreamRequestID:  resp.Header.Get("x-request-id"),
 					Kind:               "failover",
 					Message:            upstreamMsg,
@@ -1284,6 +1289,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 							AccountID:          account.ID,
 							AccountName:        account.Name,
 							UpstreamStatusCode: compactResp.StatusCode,
+							ResilienceCategory: opsHTTPResilienceCategory(compactResp.StatusCode, compactResp.Header, compactBody, signal.message),
 							UpstreamRequestID:  compactResp.Header.Get("x-request-id"),
 							Kind:               "failover",
 							Message:            signal.message,
@@ -1404,6 +1410,29 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 		}
 	}
 	return !openai_compat.ShouldUseResponsesAPI(account.Extra)
+}
+
+// Inspect only the final outbound HTTP body: request builders can inject a
+// group prompt or normalize stream after the caller's original body was read.
+// Missing replayable request bytes make learning unsafe, so skip it then.
+func (s *OpenAIGatewayService) learnOpenAIStreamOnlyHTTPFailure(ctx context.Context, c *gin.Context, account *Account, request *http.Request, response *http.Response, errorBody []byte, protocol string) *UpstreamFailoverError {
+	if !resilience.Current().StreamOnlyLearningOn() || account == nil || response == nil || response.StatusCode != http.StatusBadRequest ||
+		request == nil || request.URL == nil || request.GetBody == nil || isExplicitOpenAICompactContext(c) || GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
+		return nil
+	}
+	if _, stream, known := resilience.CapabilityRequestFrom(ctx); !known || stream {
+		return nil
+	}
+	reader, err := request.GetBody()
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = reader.Close() }()
+	body, err := io.ReadAll(reader)
+	if err != nil || IsImageGenerationIntentForPlatform(request.URL.Path, gjson.GetBytes(body, "model").String(), body, account.Platform) {
+		return nil
+	}
+	return s.LearnStreamOnlyFailure(ctx, account, protocol, gjson.GetBytes(body, "stream").Bool(), response.StatusCode, errorBody, body)
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
