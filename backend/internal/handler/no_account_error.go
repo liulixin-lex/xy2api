@@ -9,9 +9,37 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"github.com/tidwall/gjson"
 
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
+
+// anthropicFailoverErrorType preserves an explicit upstream overload type.
+// A numeric 529 or generic proxy failure alone does not establish that type.
+func anthropicFailoverErrorType(status int, errType string, upstreamBody []byte) string {
+	if !resilience.Current().ErrorsOn() {
+		return errType
+	}
+	if gjson.GetBytes(upstreamBody, "error.type").String() == "overloaded_error" ||
+		gjson.GetBytes(upstreamBody, "type").String() == "overloaded_error" {
+		return "overloaded_error"
+	}
+	if status >= http.StatusInternalServerError {
+		return "api_error"
+	}
+	return errType
+}
+
+func anthropicLocalErrorType(status int, errType string) string {
+	if resilience.Current().ErrorsOn() && status >= http.StatusInternalServerError {
+		switch errType {
+		case "", "upstream_error", "server_error":
+			return "api_error"
+		}
+	}
+	return errType
+}
 
 // noAccountErrorClassification describes the HTTP response to emit when
 // account selection failed with ErrNoAvailableAccounts. Handlers obtain it

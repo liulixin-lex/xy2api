@@ -1977,6 +1977,7 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 	// 使用默认的错误映射
 	status, errType, errMsg := h.mapUpstreamError(statusCode)
 	status, errType, errMsg = resilienceCapacityExhausted(c, failoverErr, status, errType, errMsg)
+	errType = anthropicFailoverErrorType(status, errType, responseBody)
 	status = applyExhaustedRetryHint(c, h.gatewayService, status)
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
 }
@@ -1990,6 +1991,10 @@ func (h *GatewayHandler) handleFailoverExhaustedSimple(c *gin.Context, statusCod
 }
 
 func (h *GatewayHandler) mapUpstreamError(statusCode int) (int, string, string) {
+	transientType, overloadType := "upstream_error", "overloaded_error"
+	if resilience.Current().ErrorsOn() {
+		transientType, overloadType = "api_error", "api_error"
+	}
 	switch statusCode {
 	case 401:
 		return http.StatusBadGateway, "upstream_error", "Upstream authentication failed, please contact administrator"
@@ -1998,9 +2003,9 @@ func (h *GatewayHandler) mapUpstreamError(statusCode int) (int, string, string) 
 	case 429:
 		return http.StatusTooManyRequests, "rate_limit_error", "Upstream rate limit exceeded, please retry later"
 	case 529:
-		return http.StatusServiceUnavailable, "overloaded_error", "Upstream service overloaded, please retry later"
+		return http.StatusServiceUnavailable, overloadType, "Upstream service overloaded, please retry later"
 	case 500, 502, 503, 504:
-		return http.StatusBadGateway, "upstream_error", "Upstream service temporarily unavailable"
+		return http.StatusBadGateway, transientType, "Upstream service temporarily unavailable"
 	default:
 		return http.StatusBadGateway, "upstream_error", "Upstream request failed"
 	}
@@ -2012,6 +2017,9 @@ func (h *GatewayHandler) handleStreamingAwareError(c *gin.Context, status int, e
 }
 
 func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, status int, errType, code, message string, streamStarted bool) {
+	if !inboundIsResponses(c) && !inboundIsChatCompletions(c) {
+		errType = anthropicLocalErrorType(status, errType)
+	}
 	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
 	// xy2api resilience: a pre-output heartbeat may have committed 200.
 	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
@@ -2159,6 +2167,7 @@ func (h *GatewayHandler) errorResponse(c *gin.Context, status int, errType, mess
 }
 
 func (h *GatewayHandler) errorResponseWithCode(c *gin.Context, status int, errType, code, message string) {
+	errType = anthropicLocalErrorType(status, errType)
 	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
 	errorObject := gin.H{"type": errType, "message": message}
 	if code != "" {

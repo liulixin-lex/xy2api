@@ -1618,6 +1618,7 @@ func resolveOpenAIMessagesMetadataSession(c *gin.Context, sessionHash, promptCac
 
 // anthropicErrorResponse writes an error in Anthropic Messages API format.
 func (h *OpenAIGatewayHandler) anthropicErrorResponse(c *gin.Context, status int, errType, message string) {
+	errType = anthropicLocalErrorType(status, errType)
 	errType, code, message := resilienceTranslateError(c, status, errType, "", message)
 	if !beginResilienceTerminal(c) {
 		return
@@ -1635,6 +1636,7 @@ func (h *OpenAIGatewayHandler) anthropicErrorResponse(c *gin.Context, status int
 // anthropicStreamingAwareError handles errors that may occur during streaming,
 // using Anthropic SSE error format.
 func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, status int, errType, message string, streamStarted bool) {
+	errType = anthropicLocalErrorType(status, errType)
 	// xy2api resilience: a pre-output heartbeat may have committed 200.
 	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
 		streamStarted = true
@@ -1670,6 +1672,11 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 		return
 	}
 	write := func(status int, errType, message string) {
+		var upstreamBody []byte
+		if failoverErr != nil {
+			upstreamBody = failoverErr.ResponseBody
+		}
+		errType = anthropicFailoverErrorType(status, errType, upstreamBody)
 		status = applyExhaustedRetryHint(c, h.gatewayService, status)
 		h.anthropicStreamingAwareError(c, status, errType, message, streamStarted)
 	}
