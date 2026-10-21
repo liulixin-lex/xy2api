@@ -1289,7 +1289,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				continue
 			}
 			// Send SSE comment as keepalive
-			writeStreamHeaders()
+			writeStableStreamHeaders(c)
 			n, err := fmt.Fprint(c.Writer, ":\n\n")
 			if err != nil {
 				logger.L().Info("openai chat_completions stream: client disconnected during keepalive",
