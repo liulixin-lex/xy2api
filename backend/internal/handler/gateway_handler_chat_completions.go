@@ -426,11 +426,14 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 		return
 	}
 	write := func(status int, errType, code, message string) {
-		status = applyExhaustedRetryHint(c, h.gatewayService, status)
 		if streamStarted && c.Writer.Size() > 0 && !gatewayStreamHasOnlyHeartbeats(c) {
 			service.MarkOpsStreamError(c, errType, message, status)
 			return
 		}
+		if lastErr != nil {
+			copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
+		}
+		status = applyExhaustedRetryHint(c, h.gatewayService, status)
 		if streamStarted {
 			errType, code, message = resilienceTranslateError(c, status, errType, code, message)
 			service.MarkOpsStreamError(c, errType, message, status)
@@ -438,9 +441,6 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 			return
 		}
 		h.chatCompletionsErrorResponseWithCode(c, status, errType, code, message)
-	}
-	if lastErr != nil {
-		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
 	}
 	// xy2api resilience: a content-safety refusal is the client's 400.
 	if msg, rejected := resilienceContentRejection(c, lastErr); rejected {

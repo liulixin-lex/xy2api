@@ -409,9 +409,6 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 	if c.GetBool(ginKeyResilienceFinalized) {
 		return
 	}
-	if lastErr != nil {
-		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
-	}
 	statusCode := http.StatusBadGateway
 	if lastErr != nil && lastErr.StatusCode > 0 {
 		statusCode = lastErr.StatusCode
@@ -434,6 +431,13 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 	// xy2api resilience: a content-safety refusal is the client's 400.
 	if msg, rejected := resilienceContentRejection(c, lastErr); rejected {
 		status, code, message = http.StatusBadRequest, codeContentPolicyViolation, msg
+	}
+	if streamStarted && c.Writer.Size() > 0 && !gatewayStreamHasOnlyHeartbeats(c) {
+		service.MarkOpsStreamError(c, code, message, status)
+		return
+	}
+	if lastErr != nil {
+		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
 	}
 	status = applyExhaustedRetryHint(c, h.gatewayService, status)
 	if streamStarted {
