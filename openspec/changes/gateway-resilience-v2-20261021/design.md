@@ -254,7 +254,8 @@
 | 请求上没有 advice | — | 保持 0.4.3 |
 
 - 写入位置：`error.headers.retry-after`（Codex 从这里读重试等待）。
-- 合成点：handler 侧 `handler/stream_error_event.go`（α，`9b951b4de`）；service 侧 `resilience_keepalive.go`、`openai_compact_stream_bridge.go`、`openai_gateway_response_handling.go`（β）。
+- 合成点：handler 侧 `handler/stream_error_event.go`（α，`9b951b4de`）；service 侧 `resilience_keepalive.go`、`openai_compact_stream_bridge.go`、`openai_gateway_response_handling.go`（β，`e30e6c384`）。
+- service 侧（β）：三个本地合成点统一用当前请求 context 的 `ResolveRetryAdvice` 加 `Message`/`Headers`，只写本地的 `retry-after`，不复制上游的任意头；开关关闭时保留旧正文、不调用 provider。内容拒绝按统一分类（error 的 code、type 与 message）识别，在求值前写 `Suppress`（`content_rejection`），覆盖已有的正值建议；用户余额终态沿用 handler 写入的 `balance_terminal`。心跳替换为终态帧时，先停心跳，在锁外求值。上游文件钩子：`openai_compact_stream_bridge.go` 与 `openai_gateway_response_handling.go` 的 `openAIResponseFailureError`、透传的 `buildOpenAIResponseFailedSSE(ctx`。
 - handler 接入（α）：
   - Responses、Chat、Messages 的六个 HTTP 入口在解析模型后、选号前安装 provider（上游文件钩子 `installResilienceRetryAdvice`，位于 `gateway_handler.go`、`gateway_handler_responses.go`、`gateway_handler_chat_completions.go`、`openai_gateway_handler.go`、`openai_chat_completions.go`）。闭包只保留 service 与分组、模型的初值，调用时读 RequestState 里当前的分组与选号模型（兼容兜底分组），不保留 Gin context 或可变的 API Key 对象。
   - 无号与耗尽出口按当前模型求一次 advice 并写入请求状态，覆盖“已复制上游 `Retry-After`”的分支；旧的 HTTP advisor 不再传空模型。
@@ -286,7 +287,7 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 受现有 `errors` 开关控制，关闭时回到 0.4.3 的类型。
 
 - 网关生成的瞬时 5xx（含只有 code、没有 type 的错误体）统一用 `api_error`；状态码 529 本身不再足以生成 `overloaded_error`。
-- 只有上游真实返回 `error.type`（或顶层 `type`）为 `overloaded_error` 的换号失败，才保留该类型。两个 Anthropic handler 分别覆盖 HTTP 应答与 SSE 终止帧（`anthropicFailoverErrorType`、本地 writer 的 `anthropicLocalErrorType`）；首包保活的转换点 `resilience_keepalive.go` 不再给 503 补 `overloaded_error`（β）。
+- 只有上游真实返回 `error.type`（或顶层 `type`）为 `overloaded_error` 的换号失败，才保留该类型。两个 Anthropic handler 分别覆盖 HTTP 应答与 SSE 终止帧（`anthropicFailoverErrorType`、本地 writer 的 `anthropicLocalErrorType`）；首包保活的转换点 `resilience_keepalive.go` 对没有明确 type 的本地 503、529 用 `api_error`，上游明确的 `overloaded_error` 保留（β，`e30e6c384`）。
 - 无号原本就用 `api_error`，不变；管理员配置的错误透传规则仍然优先。
 - HTTP 状态码、正文与用户余额提示不变（Q16）。
 
@@ -312,15 +313,16 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
   - `ms_since_first_output` 从第一次成功写出内容起算（开场事件与心跳不启动时钟，之后的输出不重置），没有输出时为 0；
   - `prelude_release_event`、`prelude_release_ms` 由 β 的 `prelude_trace.go` 采集（`NotePreludeCreated`、`NotePreludeReleased`、`PreludeTrace()`，`04aa6f1a6`）：每次尝试先重置，`response.created` 记下时刻，第一次释放时冻结事件与非负的毫秒差；迟到的 created 不覆盖已有的释放，没有 created 时毫秒为 0。覆盖普通 Responses、透传、Chat 与 Messages 转换。它们表示“决定释放暂存”的那一刻，不保证写出成功。上游文件钩子 `beginOpenAIPreludeTrace`、`releaseOpenAIPrelude`（四个网关文件，登记到 required_literals）。
 - 首输出前的事件（`keepalive_committed`）在持有心跳锁时记录，改用 `resilience.PreOutputEventFields(ctx)`：不读送达探针，`delivered_bytes` 与 `ms_since_first_output` 固定为 0，避免锁重入。
-- 日志点：`resilience_session.go` 的 `session_rebind`、两处 `last_resort`、`post_output_failure`、`turn_cap`（α）；`resilience_keepalive.go` 的 `keepalive_committed`（β）。【待契约：最终提交】
+- 日志点：`resilience_session.go` 的 `session_rebind`、两处 `last_resort`、`post_output_failure`、`turn_cap`（α，`0a5bd1c49`）；`resilience_keepalive.go` 的 `keepalive_committed`（β，`e30e6c384`，心跳启动前保存 context、分组与 edge）。
 
 ## 9. 不受开关控制的修复
 
 | 修复 | 说明 |
 |---|---|
 | 排队 ping 之后按协议写终止帧（W5.2） | §7.3；总开关关闭时同样生效 |
+| 换号与写出的协议正确性（审查 R1-P1-9，β） | 只有尚未实际写出、客户端未断开且请求未取消时才换号；`clientOutputStarted` 按实际写出字节（n>0）置位，短写视为 `io.ErrShortWrite`；首事件超时只在请求未取消时生成上游超时。子开关回退的是暂存、白名单与终态策略，不撤销这些防止拼接、重放与错误归因的修正 |
 | 排队心跳按入站协议的格式（审查 R1-P1-4，α `f4a60916e`） | 等待并发槽位与用户消息队列（锁等待、RPM 等待）时的心跳：Responses、compact、Chat 写 SSE 注释 `:`，Messages 保留 Claude 的 `ping`，不发心跳的配置保持不发。按请求选择，不改共享的 helper 配置。上游钩子 `requestQueuePingFormat` |
-| 【待契约】 | 各实现方登记的其他协议正确性修复 |
+| 【待契约】 | CHANGES_G 的 P2-2 等其他登记 |
 
 ## 10. 回退语义
 

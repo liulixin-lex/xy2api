@@ -39,9 +39,9 @@
 - [x] 5.1 RetryAdvice 类型与 context 存取（α，`fc9b62751`）；惰性 provider 与 `Message()`（`be736ba0c`）。
 - [x] 5.2 W5.2 排队 ping 之后按协议写终止帧（α，`190f6515a`）。
 - [x] 5.3 W5.1 三个专用耗尽出口接入重试提示与回合封顶；一次性 finalize（α，`a72a29e00`）。
-- [ ] 5.4 W5.4 Anthropic 自身失败用 `api_error`（α handler `fe5dbf503` 已完成；β `resilience_keepalive.go` 待做）。
+- [x] 5.4 W5.4 Anthropic 自身失败用 `api_error`（α handler `fe5dbf503`；β `resilience_keepalive.go` `e30e6c384`）。
 - [ ] 5.5 W5.5 Codex 无号 503 的 Retry-After 上限（α）。
-- [ ] 5.6 W5.3 合成 `response.failed` 有条件带 retry-after：handler 侧（α，`9b951b4de` 已完成）、分组 advisor（γ，`d4db8d426` 已完成）、service 侧三个点（β）。
+- [x] 5.6 W5.3 合成 `response.failed` 有条件带 retry-after：handler 侧（α `9b951b4de`）、分组 advisor（γ `d4db8d426`）、service 侧三个点（β `e30e6c384`）。
 
 ## 6. W6-lite 仅流式能力（γ、FE）
 
@@ -52,7 +52,7 @@
 
 ## 7. W8-lite 事件字段（α、β）
 
-- [ ] 7.1 （α `0a5bd1c49`、β 采集 `04aa6f1a6` 已完成；β 的 `keepalive_committed` 随 W5 context 接入待做）五类事件补 `request_id`、`model`、已送达字节、距首个输出的毫秒数、释放暂存的事件与毫秒数。
+- [x] 7.1 （α `0a5bd1c49`、β 采集 `04aa6f1a6` 与 `keepalive_committed` `e30e6c384`；PM 决定的 `request_id`/`gateway_request_id` 口径待 α 提交）五类事件补 `request_id`、`model`、已送达字节、距首个输出的毫秒数、释放暂存的事件与毫秒数。
 
 ## 8. 前端设置（FE）
 
