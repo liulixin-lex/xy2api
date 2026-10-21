@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -220,6 +221,28 @@ func (r *channelMonitorRepository) ListEnabled(ctx context.Context) ([]*service.
 	return out, nil
 }
 
+// ClaimCheck 原子地认领一轮定时检测：只有距上次检测已超过 minGap 时才把
+// last_checked_at 改为当前时间并返回 true。多个实例（蓝绿重叠）的定时器不对齐，
+// 同一轮只会有一个实例认领成功。
+func (r *channelMonitorRepository) ClaimCheck(ctx context.Context, id int64, minGap time.Duration) (bool, error) {
+	const q = `
+		UPDATE channel_monitors
+		SET last_checked_at = NOW()
+		WHERE id = $1
+		  AND (last_checked_at IS NULL OR last_checked_at <= NOW() - ($2::bigint * INTERVAL '1 millisecond'))
+		RETURNING id
+	`
+	var claimed int64
+	err := r.db.QueryRowContext(ctx, q, id, minGap.Milliseconds()).Scan(&claimed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("claim channel monitor check: %w", err)
+	}
+	return true, nil
+}
+
 func (r *channelMonitorRepository) MarkChecked(ctx context.Context, id int64, checkedAt time.Time) error {
 	client := clientFromContext(ctx, r.client)
 	if err := client.ChannelMonitor.UpdateOneID(id).
@@ -300,15 +323,27 @@ func (r *channelMonitorRepository) ListHistory(ctx context.Context, monitorID in
 
 // ---------- 用户视图聚合（原生 SQL） ----------
 
-// ListLatestPerModel 用 DISTINCT ON 取每个 (monitor_id, model) 的最近一条记录。
-// 借助 (monitor_id, model, checked_at DESC) 索引可走 Index Scan。
+// ListLatestPerModel 取监控当前配置的每个模型（主模型 + 额外模型）的最近一条记录。
+// xy2api: 每个模型用 LATERAL + LIMIT 1 走 (monitor_id, model, checked_at DESC) 索引，
+// 不再用 DISTINCT ON 读遍该监控的全部历史；已从配置里移除的模型不再返回。
 func (r *channelMonitorRepository) ListLatestPerModel(ctx context.Context, monitorID int64) ([]*service.ChannelMonitorLatest, error) {
 	const q = `
-		SELECT DISTINCT ON (model)
-		    model, status, latency_ms, ping_latency_ms, checked_at
-		FROM channel_monitor_histories
-		WHERE monitor_id = $1
-		ORDER BY model, checked_at DESC
+		SELECT h.model, h.status, h.latency_ms, h.ping_latency_ms, h.checked_at
+		FROM channel_monitors m
+		CROSS JOIN LATERAL (
+		    SELECT m.primary_model AS model
+		    UNION
+		    SELECT jsonb_array_elements_text(m.extra_models)
+		) t
+		CROSS JOIN LATERAL (
+		    SELECT model, status, latency_ms, ping_latency_ms, checked_at
+		    FROM channel_monitor_histories
+		    WHERE monitor_id = m.id AND model = t.model
+		    ORDER BY checked_at DESC
+		    LIMIT 1
+		) h
+		WHERE m.id = $1
+		ORDER BY h.model
 	`
 	rows, err := r.db.QueryContext(ctx, q, monitorID)
 	if err != nil {
@@ -417,19 +452,32 @@ func finalizeAvailabilityRow(row *service.ChannelMonitorAvailability, avgLatency
 	}
 }
 
-// ListLatestForMonitorIDs 一次性查询多个监控的"每个 (monitor_id, model) 最近一条"记录。
-// 利用 PG 的 DISTINCT ON 特性，借助 (monitor_id, model, checked_at DESC) 索引可走 Index Scan。
+// ListLatestForMonitorIDs 一次性查询多个监控当前配置的每个模型的最近一条记录。
+// xy2api: 每个 (monitor_id, model) 用 LATERAL + LIMIT 1 走 (monitor_id, model, checked_at DESC) 索引，
+// 不再用 DISTINCT ON 读遍全部历史（生产 4 个监控、23.8 万行时约 178 ms → 0.1 ms）。
+// 已从配置里移除的模型不再返回；调用方只按当前配置的模型取值。
 func (r *channelMonitorRepository) ListLatestForMonitorIDs(ctx context.Context, ids []int64) (map[int64][]*service.ChannelMonitorLatest, error) {
 	out := make(map[int64][]*service.ChannelMonitorLatest, len(ids))
 	if len(ids) == 0 {
 		return out, nil
 	}
 	const q = `
-		SELECT DISTINCT ON (monitor_id, model)
-		    monitor_id, model, status, latency_ms, ping_latency_ms, checked_at, quota
-		FROM channel_monitor_histories
-		WHERE monitor_id = ANY($1)
-		ORDER BY monitor_id, model, checked_at DESC
+		SELECT m.id, h.model, h.status, h.latency_ms, h.ping_latency_ms, h.checked_at, h.quota
+		FROM channel_monitors m
+		CROSS JOIN LATERAL (
+		    SELECT m.primary_model AS model
+		    UNION
+		    SELECT jsonb_array_elements_text(m.extra_models)
+		) t
+		CROSS JOIN LATERAL (
+		    SELECT model, status, latency_ms, ping_latency_ms, checked_at, quota
+		    FROM channel_monitor_histories
+		    WHERE monitor_id = m.id AND model = t.model
+		    ORDER BY checked_at DESC
+		    LIMIT 1
+		) h
+		WHERE m.id = ANY($1)
+		ORDER BY m.id, h.model
 	`
 	rows, err := r.db.QueryContext(ctx, q, pq.Array(ids))
 	if err != nil {
@@ -458,8 +506,9 @@ func (r *channelMonitorRepository) ListLatestForMonitorIDs(ctx context.Context, 
 
 // ListRecentHistoryForMonitors 为多个 monitor 批量取各自"指定模型"最近 N 条历史（按 checked_at DESC，最新在前）。
 // primaryModels[monitorID] 指定该监控要过滤的模型名；monitor 不在 primaryModels 中的记录不返回。
-// 通过 CTE + unnest(两个 int8/text 数组) 构造 (monitor_id, model) 白名单，
-// 再用 ROW_NUMBER() OVER (PARTITION BY monitor_id) 取各自前 N 条。
+// 通过 unnest(两个 int8/text 数组) 构造 (monitor_id, model) 白名单，
+// xy2api: 再对每一对用 LATERAL + LIMIT N 走 (monitor_id, model, checked_at DESC) 索引，
+// 不再全表扫描后排序（生产约 180 ms → 1 ms）。
 //
 // 返回值：map[monitorID] -> []*ChannelMonitorHistoryEntry（不含 message，减少网络开销）。
 // 空 ids / 空 primaryModels 返回空 map，不报错。
@@ -477,25 +526,16 @@ func (r *channelMonitorRepository) ListRecentHistoryForMonitors(
 	perMonitorLimit = clampTimelineLimit(perMonitorLimit)
 
 	const q = `
-		WITH targets AS (
-		    SELECT unnest($1::bigint[]) AS monitor_id,
-		           unnest($2::text[])   AS model
-		),
-		ranked AS (
-		    SELECT h.monitor_id,
-		           h.status,
-		           h.latency_ms,
-		           h.ping_latency_ms,
-		           h.checked_at,
-		           ROW_NUMBER() OVER (PARTITION BY h.monitor_id ORDER BY h.checked_at DESC) AS rn
-		    FROM channel_monitor_histories h
-		    JOIN targets t
-		      ON t.monitor_id = h.monitor_id AND t.model = h.model
-		)
-		SELECT monitor_id, status, latency_ms, ping_latency_ms, checked_at
-		FROM ranked
-		WHERE rn <= $3
-		ORDER BY monitor_id, checked_at DESC
+		SELECT t.monitor_id, h.status, h.latency_ms, h.ping_latency_ms, h.checked_at
+		FROM unnest($1::bigint[], $2::text[]) AS t(monitor_id, model)
+		CROSS JOIN LATERAL (
+		    SELECT status, latency_ms, ping_latency_ms, checked_at
+		    FROM channel_monitor_histories
+		    WHERE monitor_id = t.monitor_id AND model = t.model
+		    ORDER BY checked_at DESC
+		    LIMIT $3
+		) h
+		ORDER BY t.monitor_id, h.checked_at DESC
 	`
 	rows, err := r.db.QueryContext(ctx, q, pq.Array(pairIDs), pq.Array(pairModels), perMonitorLimit)
 	if err != nil {
