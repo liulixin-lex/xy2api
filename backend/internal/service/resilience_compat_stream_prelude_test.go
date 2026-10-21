@@ -98,6 +98,60 @@ func TestCompatPreludeCommentHeartbeatStillAllowsFailover(t *testing.T) {
 	}
 }
 
+// A downstream write can fail without canceling the request context. Both EOF
+// and the first-output deadline must preserve that disconnect attribution.
+func TestCompatPreludeHeartbeatDisconnectSkipsOpsAndFailover(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, messages := range []bool{false, true} {
+		for _, timedOut := range []bool{false, true} {
+			t.Run(fmtBool(messages)+"/timeout="+fmtBool(timedOut), func(t *testing.T) {
+				path, requestBody := "/v1/chat/completions", compatChatStreamBody
+				if messages {
+					path, requestBody = "/v1/messages", compatMessagesStreamBody
+				}
+				c, rec := compatStreamContext(path, requestBody)
+				state := resilience.NewRequestState()
+				c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+				writer := &openAICompatFailingWriter{ResponseWriter: c.Writer}
+				c.Writer = writer
+				var upstream HTTPUpstream = &silentUpstream{headers: true, before: keepaliveStallCreated}
+				if !timedOut {
+					body := newOpenAICompatBlockingReadCloser([]byte(keepaliveStallCreated))
+					t.Cleanup(func() { _ = body.Close() })
+					writer.onFailure = func() { _ = body.Close() }
+					upstream = &httpUpstreamRecorder{resp: &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+						Body:       body,
+					}}
+				}
+				svc := compatStreamService(upstream, 2, 30, 1)
+				account := rawChatCompletionsTestAccount()
+				var result *OpenAIForwardResult
+				var err error
+				if messages {
+					result, err = svc.ForwardAsAnthropic(c.Request.Context(), c, account, []byte(requestBody), "", "")
+				} else {
+					result, err = svc.ForwardAsChatCompletions(c.Request.Context(), c, account, []byte(requestBody), "", "")
+				}
+				require.Equal(t, 1, writer.failedWrites, "the comment heartbeat must attempt a client write")
+				require.Equal(t, ":\n\n", writer.failedData)
+				require.NoError(t, c.Request.Context().Err(), "the downstream context remains live")
+				require.Error(t, err)
+				var failoverErr *UpstreamFailoverError
+				require.False(t, errors.As(err, &failoverErr), "a disconnected client must never trigger another account: %v", err)
+				require.NotNil(t, result)
+				require.True(t, result.ClientDisconnect)
+				require.Empty(t, rec.Body.String())
+				require.False(t, state.AccountFailed(account.ID))
+				require.False(t, state.TurnFailed())
+				_, marked := c.Get(OpsUpstreamErrorsKey)
+				require.False(t, marked, "client disconnect must not be recorded as an upstream error")
+			})
+		}
+	}
+}
+
 func runPreludeCompat(t *testing.T, c *gin.Context, messages bool, body io.Reader, requestBytes int, interval int) (*OpenAIForwardResult, error) {
 	t.Helper()
 	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(body)}
