@@ -288,6 +288,20 @@ func geminiQuotaLimit(text, lowerBody string) bool {
 }
 
 func Classify(o Outcome, extraBalanceKeywords []string) Result {
+	return classify(o, extraBalanceKeywords, false)
+}
+
+// ClassifyWithSettings applies the selected failure policy. Classify remains
+// the legacy pure rule set so disabling decision_v2 restores its exact order.
+func ClassifyWithSettings(o Outcome, settings *Settings) Result {
+	var extra []string
+	if settings != nil {
+		extra = settings.Failure.BalanceKeywordsExtra
+	}
+	return classify(o, extra, settings.DecisionV2On())
+}
+
+func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result {
 	switch o.Source {
 	case SourceClientCancel:
 		return Result{Category: CategoryClientCancel, Reason: "client_cancel"}
@@ -394,8 +408,15 @@ func Classify(o Outcome, extraBalanceKeywords []string) Result {
 	if _, ok := capacityCodes[typ]; ok {
 		return Result{Category: CategoryCapacityShed, RetryAfter: retryAfter, Reason: "capacity_type"}
 	}
-	if status == 529 || ((status < 500 || status == http.StatusServiceUnavailable) &&
-		(strings.Contains(text, "overloaded") || strings.Contains(text, "at capacity"))) {
+	if decisionV2 && (code == "slow_down" || typ == "slow_down") {
+		return Result{Category: CategoryCapacityShed, RetryAfter: retryAfter, Reason: "capacity_code"}
+	}
+	capacityText := (status < 500 || status == http.StatusServiceUnavailable) &&
+		(strings.Contains(text, "overloaded") || strings.Contains(text, "at capacity"))
+	if decisionV2 {
+		capacityText = status == http.StatusServiceUnavailable && strings.Contains(text, "overloaded")
+	}
+	if status == 529 || capacityText {
 		return Result{Category: CategoryCapacityShed, RetryAfter: retryAfter, Reason: "capacity"}
 	}
 
@@ -407,8 +428,15 @@ func Classify(o Outcome, extraBalanceKeywords []string) Result {
 	if _, ok := rateLimitCodes[typ]; ok {
 		rateLimited = true
 	}
-	if !rateLimited && (strings.Contains(text, "rate limit") || strings.Contains(text, "too many requests") ||
-		strings.Contains(text, "service is busy") || strings.Contains(text, "server is busy") || strings.Contains(text, "系统繁忙")) {
+	rateText := strings.Contains(text, "rate limit") || strings.Contains(text, "too many requests") ||
+		strings.Contains(text, "service is busy") || strings.Contains(text, "server is busy") || strings.Contains(text, "系统繁忙")
+	if decisionV2 {
+		// Busy/concurrency wording on 5xx describes a transient service failure.
+		// A structured rate-limit code above remains stronger evidence.
+		rateText = status < 500 && (rateText || strings.Contains(text, "too many pending requests") ||
+			strings.Contains(text, "concurrency limit exceeded"))
+	}
+	if !rateLimited && rateText {
 		rateLimited = true
 	}
 	if rateLimited {

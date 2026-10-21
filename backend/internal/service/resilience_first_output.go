@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -182,8 +183,9 @@ func (g *firstEventGuard) failoverError(c *gin.Context, account *Account, phase 
 			Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
 			UpstreamStatusCode: http.StatusGatewayTimeout,
 			Kind:               "first_output_timeout",
+			Reason:             "first_output_timeout",
 			Message:            "upstream produced no first event before the deadline",
-			Detail:             "phase=" + phase + " timeout=" + g.timeout.String(),
+			Detail:             fmt.Sprintf("phase=%s timeout=%s timeout_seconds=%g", phase, g.timeout, g.timeout.Seconds()),
 		})
 	}
 	return &UpstreamFailoverError{
