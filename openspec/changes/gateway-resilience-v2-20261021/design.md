@@ -144,7 +144,7 @@
 - 取消优先：暂存期内客户端取消就关闭上游，同步读取、异步读取的读错、终态与 EOF 收尾都先返回空结果加取消错误：不把关闭响应体的错误当成上游读错，不记 Warn、不写失败事件、不交部分用量，不计费（审查 R1-P1-1，β `bb2c22122`）。handler 与调度上报对客户端取消的跳过由 α、γ 落实【待契约：α、γ 的提交】。第一次实际写出正文之后取消，回到原有的 drain 机制，继续读完并按已得用量计费（审查 P0，β `63718031d`）。
 - 首事件守卫（`resilience_compat_stream.go` 的 `armOpenAICompatFirstEvent`）延长到首个内容或终态；中转伪保活帧仍按“存活”处理（旧 design §7.8）。
 - `clientOutputStarted` 按实际写出的字节置位：短写或部分写出之后不再重放。
-- **暂存期写注释心跳**（PM 2026-10-21T02:42Z 改判方案 U4）：按 `stream_keepalive_interval` 写 `:\n\n`，与原生 Responses 的 `stageFirstOutput` 期间（基线 `openai_gateway_response_handling.go` 约 1000–1012 行）和基线一致。方案原推荐“不提交”，依据是“原生不提交”，这个前提不成立。心跳记为心跳字节（`recordOpenAIStreamKeepaliveBytes`），不置 `clientOutputStarted`，不影响换号；心跳会提交 200，之后若耗尽，以带内终止帧收尾（旧 design §7.6）。经 CDN 的请求照旧另有 handler 的首包前保活。【待契约：β 的提交】
+- **暂存期写注释心跳**（PM 2026-10-21T02:42Z 改判方案 U4）：按 `stream_keepalive_interval` 写 `:\n\n`，与原生 Responses 的 `stageFirstOutput` 期间（基线 `openai_gateway_response_handling.go` 约 1000–1012 行）和基线一致。方案原推荐“不提交”，依据是“原生不提交”，这个前提不成立。心跳记为心跳字节（`recordOpenAIStreamKeepaliveBytes`），不置 `clientOutputStarted`，不影响换号；心跳会提交 200，之后若耗尽，以带内终止帧收尾（旧 design §7.6）。Messages 在写出 `message_start` 之后恢复 Anthropic 的 `ping`。64 KiB 以上请求的静默拒绝缓冲不会挡住注释心跳，它对内容的暂存规则不变。失败尝试的开场不会泄漏。经 CDN 的请求照旧另有 handler 的首包前保活。实现 β `4c3256477`。
 - 开关关闭时保留旧的“首行”守卫与流内心跳。
 - 与 64 KiB 以上请求的静默拒绝缓冲（`openai_silent_refusal.go`）叠加：先推迟生成开场，释放后再交给旧的探测器，原有的 pendingSSE 缓冲仍由它维护。只有 usage 的合法空回答正常结束；`response.incomplete` 不会因结果为空误触发静默拒绝的重放；原有“无 usage 的静默拒绝”规则不变。
 - 兼容路径 `first_token_ms` 的取点不变（上游第一条数据），避免口径跳变。
