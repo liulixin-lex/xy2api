@@ -88,8 +88,8 @@ func (a *Account) CapabilityLearned(now time.Time) []resilience.LearnedCapabilit
 	return result
 }
 
-// CapabilityExclusion returns the active observation for the actual upstream
-// protocol the candidate would use. Forced-stream OpenAI OAuth is excluded.
+// CapabilityExclusion only filters direct protocol paths whose upstream stream
+// mode follows the client. Conversion and ambiguous bridge paths stay eligible.
 func (a *Account) CapabilityExclusion(ctx context.Context, model string, now time.Time) *resilience.LearnedCapability {
 	if !resilience.Current().StreamOnlyLearningOn() || !capabilityAccountEligible(a) {
 		return nil
@@ -103,7 +103,15 @@ func (a *Account) CapabilityExclusion(ctx context.Context, model string, now tim
 		if protocol == resilience.CapabilityProtocolChat {
 			inbound = APIProtocolChatCompletions
 		}
-		protocol = normalizeCapabilityProtocol(resolveUpstreamProtocol(a, inbound, a.GetMappedModel(model), nil))
+		if normalizeCapabilityProtocol(resolveUpstreamProtocol(a, inbound, a.GetMappedModel(model), nil)) != protocol {
+			return nil
+		}
+	}
+	// Grok OAuth Chat may use its forced-stream Responses bridge depending on
+	// the request body. Selection has no body, so never exclude it by a raw
+	// Chat observation. Native Responses and API-key raw Chat follow the client.
+	if a.IsGrokOAuth() && protocol == resilience.CapabilityProtocolChat {
+		return nil
 	}
 	for _, record := range a.CapabilityLearned(now) {
 		if record.Protocol == protocol {
