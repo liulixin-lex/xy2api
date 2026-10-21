@@ -212,8 +212,14 @@
 | 请求上没有 advice | — | 保持 0.4.3 |
 
 - 写入位置：`error.headers.retry-after`（Codex 从这里读重试等待）。
-- 合成点：handler 侧 `handler/stream_error_event.go`（α）；service 侧 `resilience_keepalive.go`、`openai_compact_stream_bridge.go`、`openai_gateway_response_handling.go`（β）。
-- `errors.failed_frame_retry_after` 关闭：不带 `error.headers`，正文沿用旧 design §7.6。
+- 合成点：handler 侧 `handler/stream_error_event.go`（α，`9b951b4de`）；service 侧 `resilience_keepalive.go`、`openai_compact_stream_bridge.go`、`openai_gateway_response_handling.go`（β）。
+- handler 接入（α）：
+  - Responses、Chat、Messages 的六个 HTTP 入口在解析模型后、选号前安装 provider（上游文件钩子 `installResilienceRetryAdvice`，位于 `gateway_handler.go`、`gateway_handler_responses.go`、`gateway_handler_chat_completions.go`、`openai_gateway_handler.go`、`openai_chat_completions.go`）。闭包只保留 service 与分组、模型的初值，调用时读 RequestState 里当前的分组与选号模型（兼容兜底分组），不保留 Gin context 或可变的 API Key 对象。
+  - 无号与耗尽出口按当前模型求一次 advice 并写入请求状态，覆盖“已复制上游 `Retry-After`”的分支；旧的 HTTP advisor 不再传空模型。
+  - `response.failed` 的错误体增加可省略的 `headers`，开关开启时只放 `retry-after`；正文经 `RetryAdvice.Message` 保持同样的秒数；HTTP 头还没提交时一并改写，已经提交的头无法回写，以流内帧为准。
+  - 回合封顶、用户余额终态、内容拒绝清掉旧的 HTTP `Retry-After`、延迟标记、内嵌的重试头和本地的固定尾句。配置拒绝与鉴权类错误不给候选重试建议；在途预留超额保持原有的可重试语义。
+  - 恢复时间未知时不再提示，不再像 0.4.3 那样缺省写 30 秒。
+- `errors.failed_frame_retry_after` 关闭：不带 `error.headers`，正文与提示沿用旧 design §7.6。
 
 ### 7.2 W5.1 耗尽出口统一
 

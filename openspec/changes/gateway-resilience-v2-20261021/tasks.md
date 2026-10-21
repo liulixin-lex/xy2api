@@ -41,7 +41,7 @@
 - [x] 5.3 W5.1 三个专用耗尽出口接入重试提示与回合封顶；一次性 finalize（α，`a72a29e00`）。
 - [ ] 5.4 W5.4 Anthropic 自身失败用 `api_error`（α handler `fe5dbf503` 已完成；β `resilience_keepalive.go` 待做）。
 - [ ] 5.5 W5.5 Codex 无号 503 的 Retry-After 上限（α）。
-- [ ] 5.6 W5.3 合成 `response.failed` 有条件带 retry-after：handler 侧（α）、service 侧三个点（β）。
+- [ ] 5.6 W5.3 合成 `response.failed` 有条件带 retry-after：handler 侧（α，`9b951b4de` 已完成）、service 侧三个点（β）、分组 advisor（γ）。
 
 ## 6. W6-lite 仅流式能力（γ、FE）
 
