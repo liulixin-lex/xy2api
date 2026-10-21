@@ -235,3 +235,99 @@ func (r *ResilienceService) noAccountRetryAfter(ctx context.Context, repo Accoun
 	}
 	return earliest.Sub(now)
 }
+
+// RetryAdvice uses only the current process's fresh account snapshot. A miss
+// is unknown: resolving a terminal frame must never wait for repository I/O.
+func (s *GatewayService) RetryAdvice(ctx context.Context, groupID *int64, model string) resilience.RetryAdvice {
+	if s == nil {
+		return resilience.RetryAdvice{Source: "unknown"}
+	}
+	return s.resilience.retryAdviceFromSnapshot(ctx, groupID, model, nil, resiliencePenaltyOf)
+}
+
+// RetryAdvice is the OpenAI-family variant, including its local model breaker.
+func (s *OpenAIGatewayService) RetryAdvice(ctx context.Context, groupID *int64, model string) resilience.RetryAdvice {
+	if s == nil {
+		return resilience.RetryAdvice{Source: "unknown"}
+	}
+	return s.resilience.retryAdviceFromSnapshot(ctx, groupID, model, func(a *Account) bool { return a.IsOpenAICompatible() }, s.resilienceOpenAIPenaltyOf)
+}
+
+func (r *ResilienceService) retryAdviceFromSnapshot(ctx context.Context, groupID *int64, model string, include func(*Account) bool, penalty func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string)) resilience.RetryAdvice {
+	unknown := resilience.RetryAdvice{Source: "unknown"}
+	if r == nil || groupID == nil || !resilience.Current().ErrorsOn() {
+		return unknown
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if ctx.Err() != nil {
+		return unknown
+	}
+	now := time.Now()
+	r.lastResortGroups.mu.Lock()
+	snapshot, ok := r.lastResortGroups.entries[*groupID]
+	r.lastResortGroups.mu.Unlock()
+	if !ok || !now.Before(snapshot.expires) {
+		return unknown
+	}
+	forced, _ := ctx.Value(ctxkey.ForcePlatform).(string)
+	state := resilience.StateFrom(ctx)
+	var earliest time.Time
+	for i := range snapshot.accounts {
+		if ctx.Err() != nil {
+			return unknown
+		}
+		account := &snapshot.accounts[i]
+		if include != nil && !include(account) {
+			continue
+		}
+		if forced != "" && account.Platform != forced {
+			continue
+		}
+		if model != "" && !account.IsModelSupported(model) {
+			continue
+		}
+		if account.CapabilityExclusion(ctx, model, now) != nil || resilience.CapabilityExcluded(ctx, account.ID) {
+			continue
+		}
+		tier, recoverAt, reason := penalty(account, model, now)
+		switch tier {
+		case resilience.TierNone:
+			if !state.AccountFailed(account.ID) && !state.Avoided(account.ID) {
+				return resilience.RetryAdvice{Seconds: 1, Source: "healthy_candidate"}
+			}
+			continue
+		case resilience.TierHard:
+			// Only timed restrictions recover without operator action. A revoked,
+			// expired, disabled or quota-exhausted account stays unknown even if it
+			// also happens to carry an old cooldown timestamp.
+			switch reason {
+			case "balance_exhausted", "rate_limited", "model_rate_limited", "temp_unschedulable":
+			default:
+				continue
+			}
+		}
+		// Recovery of one account is the latest of its known restrictions; the
+		// group's recovery is the earliest such account. Tried penalised accounts
+		// can recover for a later request, but tried healthy accounts are no hint.
+		for _, end := range []*time.Time{account.TempUnschedulableUntil, account.RateLimitResetAt, account.OverloadUntil} {
+			if end != nil && end.After(recoverAt) {
+				recoverAt = *end
+			}
+		}
+		if remaining := account.GetRateLimitRemainingTimeWithContext(ctx, model); remaining > 0 {
+			if end := now.Add(remaining); end.After(recoverAt) {
+				recoverAt = end
+			}
+		}
+		if recoverAt.After(now) && (earliest.IsZero() || recoverAt.Before(earliest)) {
+			earliest = recoverAt
+		}
+	}
+	if earliest.IsZero() {
+		return unknown
+	}
+	seconds := int((earliest.Sub(now) + time.Second - 1) / time.Second)
+	return resilience.RetryAdvice{Seconds: max(2, min(seconds, 10)), Source: "recovery"}
+}

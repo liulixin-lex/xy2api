@@ -148,3 +148,74 @@ func TestReservationErrorDistinguishesHeldBalance(t *testing.T) {
 	require.NotErrorIs(t, err, ErrInflightBalanceReserved)
 	first.HandlerDone()
 }
+
+func TestRetryAdviceReadsOnlyFreshLocalCandidates(t *testing.T) {
+	withResilienceSettings(t, nil)
+	group := int64(7)
+	r := &ResilienceService{}
+	// A repository with no implemented methods panics if the advisor performs I/O.
+	svc := &OpenAIGatewayService{resilience: r, accountRepo: &capabilityRepo{}}
+	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+	require.Equal(t, resilience.RetryAdvice{Source: "unknown"}, svc.RetryAdvice(ctx, &group, "model"))
+	r.lastResortGroups.entries = map[int64]lastResortGroupEntry{group: {accounts: []Account{*capabilityTestAccount(1), *capabilityTestAccount(2)}, expires: time.Now().Add(time.Minute)}}
+	resilience.StateFrom(ctx).MarkAccountFailed(1)
+	require.Equal(t, resilience.RetryAdvice{Seconds: 1, Source: "healthy_candidate"}, svc.RetryAdvice(ctx, &group, "model"))
+	resilience.StateFrom(ctx).MarkAccountFailed(2)
+	require.Equal(t, resilience.RetryAdvice{Source: "unknown"}, svc.RetryAdvice(ctx, &group, "model"), "tried healthy accounts are not alternatives")
+	fresh := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+	r.lastResortGroups.entries[group] = lastResortGroupEntry{accounts: []Account{*capabilityTestAccount(1)}, expires: time.Now().Add(-time.Second)}
+	require.Equal(t, resilience.RetryAdvice{Source: "unknown"}, svc.RetryAdvice(fresh, &group, "model"), "expired snapshots do not trigger I/O")
+	canceled, cancel := context.WithCancel(fresh)
+	cancel()
+	require.Equal(t, resilience.RetryAdvice{Source: "unknown"}, svc.RetryAdvice(canceled, &group, "model"))
+}
+
+func TestRetryAdviceUsesKnownRecoveryAndStrongerHardStates(t *testing.T) {
+	withResilienceSettings(t, nil)
+	group := int64(7)
+	for _, tc := range []struct {
+		name     string
+		delay    time.Duration
+		reason   string
+		status   string
+		expected int
+	}{
+		{"short cooldown rounds up", 1250 * time.Millisecond, "transient: timeout", StatusActive, 2},
+		{"cooldown eight seconds", 7500 * time.Millisecond, "transient: timeout", StatusActive, 8},
+		{"cooldown cap", time.Minute, "transient: timeout", StatusActive, 10},
+		{"scheduled pause has known end", time.Minute, "manual", StatusActive, 10},
+		{"auth error cannot recover on cooldown", time.Minute, "transient: timeout", StatusError, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := capabilityTestAccount(1)
+			end := time.Now().Add(tc.delay)
+			a.TempUnschedulableUntil = &end
+			a.TempUnschedulableReason = tc.reason
+			a.Status = tc.status
+			r := &ResilienceService{lastResortGroups: lastResortGroupCache{entries: map[int64]lastResortGroupEntry{group: {accounts: []Account{*a}, expires: time.Now().Add(time.Minute)}}}}
+			svc := &GatewayService{resilience: r}
+			advice := svc.RetryAdvice(context.Background(), &group, "model")
+			require.Equal(t, tc.expected, advice.Seconds)
+			if tc.expected > 0 {
+				require.Equal(t, "recovery", advice.Source)
+			} else {
+				require.Equal(t, "unknown", advice.Source)
+			}
+		})
+	}
+}
+
+func TestRetryAdviceFiltersModelPlatformAndCapability(t *testing.T) {
+	withResilienceSettings(t, nil)
+	group := int64(7)
+	a := capabilityTestAccount(1)
+	b := capabilityTestAccount(2)
+	b.Credentials = map[string]any{"model_mapping": map[string]any{"other": "other"}}
+	c := capabilityTestAccount(3)
+	c.Platform = PlatformAnthropic
+	r := &ResilienceService{lastResortGroups: lastResortGroupCache{entries: map[int64]lastResortGroupEntry{group: {accounts: []Account{*a, *b, *c}, expires: time.Now().Add(time.Minute)}}}}
+	svc := &OpenAIGatewayService{resilience: r}
+	ctx := resilience.WithCapabilityRequest(context.Background(), "responses", false)
+	resilience.NoteCapabilityExcluded(ctx, 1)
+	require.Zero(t, svc.RetryAdvice(ctx, &group, "model").Seconds)
+}
