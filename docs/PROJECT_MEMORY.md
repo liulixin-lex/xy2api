@@ -242,7 +242,7 @@
 - `20261021-resilience-v2-gamma`（γ 2026-10-21T01:27Z 经 DOCS 代登记）：分支 `rv2/be-c`，基线 `027a434ad`；负责 C0、W2.1-lite、W6-lite；只在本地提交，不推送、不碰生产。C0 沿用现有设置键 `gateway_resilience_settings`：0.4.3 读存储时用 `json.Unmarshal`，忽略未知字段；管理端 PUT 的严格校验不影响存储回退。
   - 2026-10-21T04:05Z：**分支冻结**，最终 HEAD `ae783b370`，工作树干净，无推送、无生产操作。C0 `95e8a6416`、W2.1-lite `0d3e72508`、W6 `2cb3343de`、RetryAdvice advisor `d4db8d426`，以及审查修复 `126fead6f`（防误学）、`a03ad9c79`（同协议过滤）、`fae3d89d8`（混合排除保持 503）、`f61b7d497`（只因能力而无号）、`4ac81dc94`（明确限流文案）、`29f26652d`（轻量守卫与 P2-2 登记）、`ae783b370`（纯能力耗尽清理旧重试秒数）。集成须带上后四个，不止 `f61b7d497`。按 PM 裁剪未做：A-P2-4、A-P2-7（物理删除 extra 键）、A-P2-8（按模型学习）；A-P2-3 指纹算法不改，OAuth 刷新后重新学习列为已知限制。
   - 2026-10-21T04:17Z：**冻结后 lint 修复中**（PM 指令 3 的例外）：只修 α 报出的 7 项 lint，不改行为与边界测试，修完单独提交并给出新的最终 HEAD。
-  - 2026-10-21T04:20Z：γ 自有文件的增量 lint 已清零（剩 α 名下 `retry_advice_test.go` 两处 SA1012，按所有权未改），纯 lint 单独提交。另按 PM 指令 4（第二轮审查 P1，用户确认授权）修 `param` 为 null 或空值时被误判为“指向其他参数”而拒学的问题，先写红测，另作 fix 提交。
+  - 2026-10-21T04:20Z：γ 自有文件的增量 lint 已清零（剩 α 名下 `retry_advice_test.go` 两处 SA1012，按所有权未改），纯 lint 提交 `d61d106aa`（不改行为，相关 `-race` 通过）。另按 PM 指令 4（第二轮审查 P1，用户确认授权）修 `param` 为 null 或空值时被误判为“指向其他参数”而拒学的问题，先写红测，另作 fix 提交。
 - 各 agent 的进度与变更登记在仓库外的 `briefs/PROGRESS_*.md` 与 `contract/CHANGES_*.md`。
 - 第 0 批（Claude 首事件截止，2026-10-21T01:09Z）：生产只读评估 7 天分布后**保持 90 秒，生产未写入**。流式 Messages 首字超过 45 秒约 0.45%，首字只是首事件时延的上界；生产 settings 表里没有韧性设置行（运行态为缺省值），用户限定的单条 CAS UPDATE 无法成立。报告在仓库外 `prod/O4_REPORT.md`。
 - 生产探测（2026-10-21）：多数中转在首个正文 delta 前发 created、in_progress 与空的 added 结构；部分中转在 created 之前先发一个 delta；未观察到 `codex.response.metadata`。PM 据此决定白名单不含元数据事件（OpenSpec design §3.1）。
@@ -1077,3 +1077,13 @@ pnpm --dir frontend run build
 - 验证：645 项 `-tags=unit -race` 0 失败 0 跳过；WS 与 Chat 空流的无 tag `-race`、`go vet`、gofmt、`diff --check` 通过。DOCS 把 `7c8ad6ec2` 的全部后端文件叠加到 rv2/docs 上，文档一致性检查通过。
 - 卡点/风险：OpenAI Responses 透传的首输出守卫延后；上游在 `response.created` 之前发出的非空 delta 照常转发，严格 SDK 仍可能报错（已知限制）。
 - 下一步：α 集成时保留 α 的 `5924b2b5a` 与 γ 最新的分类、能力提交，不用 β 树里提取的旧依赖覆盖。
+
+### 2026-10-21T04:22Z — `20261021-resilience-v2-gamma` — 冻结后 lint 修复（DOCS 代记）
+
+- 请求/目标：PM 指令 3，修 α 集成前报出的 7 项 lint，不改行为。
+- 开始状态：`rv2/be-c` 在 `ae783b370`，工作树干净。
+- 完成操作：提交 `d61d106aa`，7 项 lint 全部修复；冻结的 0.4.3 旧解码器测试未改，`legacy043SettingKey` 由既有回退测试断言与现行键一致后使用。
+- 修改文件：γ 名下的 `internal/resilience` 与 `service` 测试及 `capability` 实现文件（只为 lint）。
+- 验证：指定的增量 lint，γ 自有文件 0 项；resilience 与 service 的能力、C0 定向 `-race` 通过。γ 树上的文档检查仍报 10 项，由 rv2/docs 补齐。
+- 卡点/风险：剩 α 名下 `retry_advice_test.go` 两处 SA1012。
+- 下一步：按 PM 指令 4 另作 fix 提交（`param` 为 null 或空值时照常学习）；α 集成须带上 `d61d106aa` 与该补丁。
