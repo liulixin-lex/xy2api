@@ -20,7 +20,8 @@ func TestRetryAdviceProviderResolvesCurrentSnapshot(t *testing.T) {
 		return RetryAdvice{Seconds: int(seconds.Load()), Source: "recovery"}
 	})
 	require.Zero(t, calls.Load(), "installation must not query candidates")
-	child := context.WithValue(ctx, struct{}{}, true)
+	type childKey struct{}
+	child := context.WithValue(ctx, childKey{}, true)
 	require.Equal(t, 1, ResolveRetryAdvice(child).Seconds)
 	require.True(t, hasState.Load())
 	seconds.Store(7)
@@ -51,9 +52,10 @@ func TestRetryAdviceMessageMatchesHeaders(t *testing.T) {
 }
 
 func TestRetryAdviceProviderBoundedAndDirectAdviceWins(t *testing.T) {
+	var nilContext context.Context
 	started, release := make(chan struct{}), make(chan struct{})
 	defer close(release)
-	ctx := WithRetryAdviceProvider(nil, func(context.Context) RetryAdvice {
+	ctx := WithRetryAdviceProvider(nilContext, func(context.Context) RetryAdvice {
 		close(started)
 		<-release // A broken provider must not hold up a terminal frame.
 		return RetryAdvice{Seconds: 9}
@@ -71,6 +73,7 @@ func TestRetryAdviceProviderBoundedAndDirectAdviceWins(t *testing.T) {
 }
 
 func TestRetryAdviceProviderTimeoutAndCancellation(t *testing.T) {
+	var nilContext context.Context
 	for _, canceled := range []bool{false, true} {
 		parent, cancel := context.WithCancel(context.Background())
 		if canceled {
@@ -83,9 +86,9 @@ func TestRetryAdviceProviderTimeoutAndCancellation(t *testing.T) {
 		require.Equal(t, RetryAdvice{}, ResolveRetryAdvice(ctx), "expired results must be discarded")
 		cancel()
 	}
-	require.Equal(t, RetryAdvice{}, ResolveRetryAdvice(nil))
+	require.Equal(t, RetryAdvice{}, ResolveRetryAdvice(nilContext))
 	require.Equal(t, RetryAdvice{}, ResolveRetryAdvice(context.Background()))
-	require.Equal(t, RetryAdvice{}, ResolveRetryAdvice(WithRetryAdviceProvider(nil, nil)))
+	require.Equal(t, RetryAdvice{}, ResolveRetryAdvice(WithRetryAdviceProvider(nilContext, nil)))
 }
 
 func TestRetryAdviceMessagePreservesSentenceAndNonemptyFallback(t *testing.T) {
