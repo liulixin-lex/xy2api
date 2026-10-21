@@ -16,7 +16,7 @@
 |---|---|---|---|---|
 | `fix/retry-advice-upstream-wait-20261021`（RA-1） | `a38ae5995`（源码树与 main `4b0b6d94b` 相同） | `4ef7be248` | 最终耗尽时，把最后一个可重试上游给出的有效 `Retry-After` 当作已知恢复时间 | 可作为 0.4.5 候选的组成部分 |
 | `fix/review-p2-045`（ε） | `4ef7be248` | `10f2edd6b` | 审查遗留的 P2：raw Chat `error` 判据、心跳只提交网关自身的 SSE 头、首写与取消的竞态、`lastResortGroups` 过期清理、首个内容后免锁、重试建议按需解析、能力原因只在主因时追加 | 可以并入 |
-| `feat/w12-gateway-guards-045`（δ） | `4b0b6d94b` | `74133b338` | W1.2 其余三条路径：OpenAI Responses 透传的首输出截止、停滞检测、有界暂存、输出后断流的计费；OpenAI Responses（透传与普通路径）心跳后命中错误透传规则时的终止帧；Gateway 入站经 Anthropic 上游的 Responses 与 Chat 推迟开场、明确终止 | 可以并入（`74133b338`，DELTA-P1-1、P1-2 已关闭） |
+| `feat/w12-gateway-guards-045`（δ） | `4b0b6d94b` | `9bd6c119e` | W1.2 其余三条路径：OpenAI Responses 透传的首输出截止、停滞检测、有界暂存、输出后断流的计费；OpenAI Responses（透传与普通路径）心跳后命中错误透传规则时的终止帧；Gateway 入站经 Anthropic 上游的 Responses 与 Chat 推迟开场、明确终止；集成时补的两项（INTEG-P2-1、INTEG-P2-2，含从 ε cherry-pick 的两个依赖提交） | `74133b338` 可以并入（DELTA-P1-1、P1-2 已关闭）；之后的 5 个提交待补审 |
 | `docs/045-prep`（DOCS） | `a1cf8f104` | 本变更 | OpenSpec、现行文档中 ε 与 δ 没覆盖的部分 | — |
 
 行为细节见 [design](design.md)，规格增量见 `specs/`。
@@ -35,4 +35,4 @@
 - **日志**：新增 Info 级 `gateway.responses.client_disconnected`、`gateway.cc.client_disconnected`（δ）。
 - **上游文件钩子**：各分支已在 `tools/upstream-sync/policy.json` 登记 required_literals 与具名补丁测试，集成时合并。
 - **计费**：Responses 透传与 Gateway 入站经 Anthropic 上游的流在输出后异常结束时，按已读到的用量计费一次（以前透传不记）。
-- **客户端可见**：RA-1 场景的失败帧重新带重试时间与秒数；Gateway 入站经 Anthropic 上游的 Responses 与 Chat 在正文前失败可以换号，输出后失败以协议终止帧收尾；Responses 透传在首输出截止前只有开场时换号；心跳提交 200 时不再带失败账号的上游头；raw Chat 分块里的占位 `error`（空串、`{}` 等）不再判为失败。
+- **客户端可见**：RA-1 场景的失败帧重新带重试时间与秒数；Gateway 入站经 Anthropic 上游的 Responses 与 Chat 在正文前失败可以换号，输出后失败以协议终止帧收尾；Responses 透传在首输出截止前只有开场时换号；心跳提交 200 时不再带失败账号的上游头（兼容转换、raw Chat 与 Responses 透传）；raw Chat 分块里的占位 `error`（空串、`{}` 等）不再判为失败。

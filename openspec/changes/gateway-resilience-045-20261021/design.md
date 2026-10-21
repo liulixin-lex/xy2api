@@ -70,7 +70,7 @@
 
 ## 3. W1.2 其余三条路径（δ）
 
-分支 `feat/w12-gateway-guards-045`（基于 `4b0b6d94b`），HEAD `74133b338`，10 个提交。
+分支 `feat/w12-gateway-guards-045`（基于 `4b0b6d94b`），HEAD `9bd6c119e`，15 个提交。`74133b338` 之后的 5 个提交来自 0.4.5 首次集成（`43be712aa`）发现的问题（PM 指令 6、7）：从 ε cherry-pick 两个依赖提交（`2a67cbf88` → `1c56a8b2d`、`db86d3377` → `37b998fa5`），再加 INTEG-P2-2（`104a92e99`）、INTEG-P2-1（`67c57d5e9`）与一个测试拆分（`9bd6c119e`）。这 5 个提交还没有经过审查。
 
 ### 3.1 Gateway 入站经 Anthropic 上游的 Responses 与 Chat（`bd960dc5a`、`c95aa4e7c`、`8a7fa67ea`、`9f8f5ba6c`）
 
@@ -88,6 +88,7 @@
   - 合成的 `response.failed` 按 `RetryAdviceEligible` 决定是否带重试时间；
   - 启用该路径的停滞检测（输出前由首事件截止接管）。
 - 不重放：不可重试的流内错误（请求过长、内容拒绝、余额等）、`max_tokens` 的 incomplete、refusal、合法空回答与只有 usage 的回答。strict 关、staging 开时，输出前被丢弃的非重试错误之后的 EOF 也不重放（DELTA-P2-1）。
+- 首次写出与取消同时发生（INTEG-P2-2，`104a92e99`，对应 ε 的 §2.3）：暂存期为取消而关闭上游的回调，关闭前先置位“已由网关关闭”。客户端恰在第一次写出时取消、回调已关闭上游时，随后的读错或 EOF 按客户端断开处理：带回已读用量，不写终止帧，不记运维流错误，不计账号失败。回调属于暂存，所以 `stream.strict_terminal` 关闭时同样适用；输出之后才取消、随后上游真实断流的情形不受影响。
 - 两个开关都关：与 0.4.4 逐行等价。
 
 ### 3.2 OpenAI Responses 透传（`e3f902390`、`5f5386f4a`、`87f9b9356`、`6420bc73c`、`74133b338`）
@@ -97,7 +98,8 @@
   - 读取循环驱动截止、停滞检测与暂存期心跳。停滞：输出前由截止接管，没有截止时换号；输出后以 `response.failed`（`stream_timeout`）收尾；
   - 暂存期心跳由读取循环写 `:`，计为心跳字节；写失败按客户端离开处理（不换号，截止到期也不换号，内容随后到来时停表并读完用量）；
   - 上游注释行在暂存期立即透传，不再随开场扣留；
-  - 第一个输出前请求取消：关闭上游，返回非换号错误；输出后断开：读完上游。
+  - 第一个输出前请求取消：关闭上游，返回非换号错误；输出后断开：读完上游。这组检查只受 `stream.strict_terminal` 控制，与 `stream.prelude_staging` 无关；开关关闭时忽略客户端取消、读完上游、请求成功（0.4.4 的行为）。上游请求本身始终用分离的 context，客户端取消从不中断请求的发出。旧用例 `TestOpenAIGatewayService_OAuthPassthrough_UpstreamRequestIgnoresClientCancel` 因此按开关拆成两种情况（`9bd6c119e`）；
+  - 响应头（INTEG-P2-1，`67c57d5e9`）：暂存期心跳（网关心跳、上游注释透传、读取循环保活）提交 200 时只写网关自身的流式头；这次尝试的头（过滤后的上游头、`x-request-id`、放行的 `x-codex-*` 与 `x-codex-turn-state`）推迟到首个语义输出，心跳已提交就不再写，与原生 Responses 一致。turn-state 的溯源改在这些头真正写出时记录，换号或没有下发的尝试不再记录。命中错误透传规则且尚未提交时，JSON 仍带这次尝试的头。开关关闭时在流开始时设置这些头（0.4.4）；
 - 不受开关控制：
   - 第一个输出前的暂存改用原生路径的有界暂存（8 MiB 上限，超过 64 KiB 写入已解除链接的临时文件），首个输出时整体写出；超出上限时换号。以前是不设上限的内存切片。
   - 输出后断流（`response.failed`、缺终态、读错、停滞）按已读到的用量计费一次，与 Responses handler 处理普通路径部分结果的做法相同（#5148）；以前透传在任何流式错误时都丢掉结果、不记用量。第一个输出前取消与换号不带结果，不会重复计费（审查 DELTA-P2-5，`87f9b9356`）。
@@ -115,8 +117,8 @@
 
 | 开关 | 0.4.5 新增覆盖 | 关闭后 |
 |---|---|---|
-| `stream.prelude_staging` | Gateway 入站经 Anthropic 上游的两个反向转换器推迟开场；ε 的首写与取消竞态只存在于暂存开启时 | 反向转换器收到 `message_start` 就写开场（0.4.4） |
-| `stream.strict_terminal` | 反向转换器的明确终止与停滞检测；Responses 透传的首输出截止、停滞检测、读取循环心跳；raw Chat `error` 新判据 | 反向转换器 EOF 合成为成功；透传不设截止，注释随开场暂存；raw Chat 的 `error` 后跟 `[DONE]` 当成功（0.4.4 及以前） |
+| `stream.prelude_staging` | Gateway 入站经 Anthropic 上游的两个反向转换器推迟开场；首写与取消竞态的处理（兼容转换 ε §2.3、反向转换器 INTEG-P2-2）只存在于暂存开启时 | 反向转换器收到 `message_start` 就写开场（0.4.4） |
+| `stream.strict_terminal` | 反向转换器的明确终止与停滞检测；Responses 透传的首输出截止、停滞检测、读取循环心跳、输出前取消检查与心跳时只写网关自身的头；raw Chat `error` 新判据 | 反向转换器 EOF 合成为成功；透传不设截止，注释随开场暂存；raw Chat 的 `error` 后跟 `[DONE]` 当成功（0.4.4 及以前） |
 | `errors.failed_frame_retry_after` | RA-1 的上游等待回退；重试建议只在写帧时解析 | 合成的 `response.failed` 不带 `error.headers`，正文与 0.4.3 相同 |
 
 不受开关控制（协议正确性、计费、内存与性能）：心跳只提交网关自身的 SSE 头（§2.2）；`lastResortGroups` 过期清理（§2.4）；首个内容之后免锁（§2.5）；能力原因后缀（§2.7）；Responses 透传的有界暂存与输出后断流计费，以及 OpenAI Responses（透传与普通路径）心跳后命中错误透传规则时的终止帧（§3.2）。
@@ -133,7 +135,7 @@
 
 ## 6. 集成说明
 
-- 顺序：ε 已包含 RA-1，合入 ε 即带上 RA-1；δ 基于 main，独立合入；最后合入本文档分支。
+- 顺序：ε 已包含 RA-1，合入 ε 即带上 RA-1；δ 基于 main，独立合入；最后合入本文档分支。δ 上有 ε 两个提交的 cherry-pick（内容相同、提交号不同），合并时按同一改动处理；`policy.json` 的 `custom_patch_tests` 取并集；ε 的 EOF 防护 `930213caa` 保留。
 - 已知冲突点（审查已在临时文件上逐个文件三方合并核实）：
   - 两个 Gateway handler（`gateway_handler_responses.go`、`gateway_handler_chat_completions.go`）RA-1 与 δ 都改过，但改动不相交，能自动合并；
   - `docs/GATEWAY_RESILIENCE.md` 第 18 行（§1“可重放前缀”）与第 133 行（§4.2 `stream.strict_terminal`）ε 与 δ 都改过，需要手工合成一行，两边的增补都保留；
@@ -143,6 +145,7 @@
 
 ## 7. 验证计划
 
+- 首次集成 `43be712aa` 的 25 项门禁 22 项通过：unit 与无 tag 测试都卡在一条预期过时的旧用例（已由 `9bd6c119e` 按开关拆分），干净树 audit 报本变更的 OpenSpec 文件未登记（集成时在 `policy.json` 登记为 xy_owned）。这一轮结果不计入候选，合入 δ 新 HEAD 后从头重跑。
 - 集成后在唯一候选上跑全量门禁：gofmt、四种 vet、golangci-lint、unit 与无 tag 测试、`ci_gate.py`（`-race`，零跳过）、`govulncheck`、前端四项与依赖审计、`tools/tests`、文档一致性、scheduler-diff、干净树 `sync.py audit`。
 - 测试服务器：0.4.4 的 71 个场景全部复跑（RA-1 必须通过），加上 δ、ε 建议的新场景（仓库外变更登记的建议清单，由 QA 定编号）：
   - Gateway 入站经 Anthropic 上游：`message_start` 后流内 `overloaded_error` 换号；输出后断流以终止帧收尾并按用量计费一次；`message_start` 后静默超过首事件截止换号；`invalid_request_error` 不重放；`message_delta(end_turn)` 后直接 EOF 正常完成；两个开关关闭与 0.4.4 一致；
@@ -155,4 +158,6 @@
 
 - 心跳先提交 200 时，成功尝试的上游过滤头不再写出，客户端拿到的头会因首字快慢而不同（DELTA-P2-4，与 §2.2 同向，记为已知差异）。
 - raw Chat 的顶层 `"error": true` 与非 0 数字目前不算失败。
+- 透传在 `stream.strict_terminal` 开启时，只要首个输出前写过心跳，客户端就拿不到这次尝试的 `x-request-id`、`x-codex-*` 用量头与 `x-codex-turn-state`，即使这次尝试最终成功；长推理请求通常会先发心跳，所以这会是常见情形（INTEG-P2-1 的代价，与原生 Responses 相同）。turn-state 没有下发时溯源也不记录，客户端回带的仍是上一次拿到的值，由出站守卫按原有规则处理。是否接受由 PM 决定；要保留成功尝试的 turn-state，只能不在首个输出前发心跳，或另行设计。
+- 兼容路径用例 `TestCompatPreludeHeartbeatDisconnectDrainsUsageAfterContent/disabled` 在一次高负载的大集合扫描中失败过一次，单独重复 5 次都通过，判断为时序偶发（δ 未改兼容路径）。
 - 基线既有的 handler 测试夹具竞态见 proposal“不做”。
