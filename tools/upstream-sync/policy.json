@@ -1714,6 +1714,11 @@
       "id": "xy-resilience-v2-streams",
       "path": "backend/internal/service/resilience_keepalive_retry_advice_test.go",
       "literal": "func TestSyntheticFailedFramesShareRetryEligibility"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/stream_error_event_test.go",
+      "literal": "func TestCommittedFailurePreservesOriginalPunctuation"
     }
   ]
 }
