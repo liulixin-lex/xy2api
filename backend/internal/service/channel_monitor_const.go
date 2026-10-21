@@ -35,8 +35,6 @@ const (
 	// monitorMaintenanceMaxDaysPerRun 单次维护任务最多聚合的天数。
 	// 用于限制首次上线回填（30 天）+ 少量余量，避免长事务。
 	monitorMaintenanceMaxDaysPerRun = 35
-	// monitorWorkerConcurrency 调度器并发执行的监控数（pond 池容量）。
-	monitorWorkerConcurrency = 5
 	// monitorStartupLoadTimeout Start 时一次性加载所有 enabled monitor 的总超时。
 	monitorStartupLoadTimeout = 10 * time.Second
 	// monitorMinIntervalSeconds / monitorMaxIntervalSeconds 用户配置的检测间隔上下限。
