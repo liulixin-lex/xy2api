@@ -6,7 +6,7 @@
 
 ## 当前交接状态
 
-### 网关韧性第二期与 0.4.4 发版 `20261021-resilience-v2-0.4.4`（进行中；2026-10-21T05:55Z 更新）
+### 网关韧性第二期与 0.4.4 发版 `20261021-resilience-v2-0.4.4`（进行中；2026-10-21T06:04Z 更新）
 
 - **背景**：0.4.3 生产只读取证（约 9 小时）中，用户可见失败约 1.42%，主要是原生 Responses 开场后、正文前的带内终止，兼容 Chat 开场后终止，仅流式上游，以及分类与信号缺陷。方案在仓库外 `xy2api-artifacts/resilience-ux-20261020/plan/PLAN_v2.md`；本期规格是 OpenSpec 变更 [`gateway-resilience-v2-20261021`](../openspec/changes/gateway-resilience-v2-20261021/proposal.md)。
 - **目标**（用户 2026-10-21）：实现后合并 #116、#117 与本期 PR，发布 0.4.4；第 0 批只做 Claude 首事件截止；授权一次生产探测；工期 12 小时（00:47Z–12:47Z）。生产部署 0.4.4 未授权。
@@ -18,8 +18,8 @@
   - QA 阶段 1：71 个场景，基线 17 项定向 8 通过、9 预期红灯；阶段 2 工具已就绪（`a542b3cb7`）。
   - 文档：OpenSpec（proposal、design、tasks、6 份规格）按最终契约定稿（04:46Z），`GATEWAY_RESILIENCE.md`、旧变更的 design 衔接、staging-validation 与 runbook 同步；文档一致性检查在集成分支上通过；发版说明草稿在仓库外，只差验证结果。
 - **未完成**（按顺序）：
-  1. 代码门禁已在集成 `7c021b6a4` 全部通过（2026-10-21T05:50Z）：gofmt、四种 vet、golangci-lint 0 项、全量 unit、无 tag 全量测试、`ci_gate.py`（375 项 `-race`，0 跳过）；前端四项（3182 个用例）与 `tools/tests`（41 例）此前通过且源码未再改。第二轮审查在 `7c021b6a4` 上放行（仓库外 `review/CODE_REVIEW_R2.md`），剩余 P2 留 0.4.5。待 α 合入 rv2/docs 最终 HEAD，复跑文档检查、scheduler-diff 与干净树 audit 后报告可推送。之后到 QA 验证结束，DOCS 不再改动 rv2/docs；验证结果与记忆收尾在合并前另起纯文档提交，作为浸泡后的差异向用户披露。
-  2. 推送、开 PR、CI。
+  1. 原集成 `c086f4cc6` 的全部本地门禁已通过（375 项 `-race` 零跳过、前端 3182 例、工具 41 例）；第二轮审查放行。现因安全扫描的新公告升级 Go 1.27.3 与前端依赖，必须在新工具链下重跑全量门禁、`govulncheck` 与前端生产依赖审计；新候选尚未确定。
+  2. PM 05:52Z 已授权推送并创建 [PR #118](https://github.com/liulixin-lex/xy2api/pull/118)，#117 已转 ready，尚未合并。候选 `c086f4cc6` 的本地门禁全绿，但安全扫描发现 Go 标准库 `GO-2026-6809` 与 `follow-redirects` 两条高危公告；候选作废，QA 尚未开始场景或浸泡。PM 06:07Z 授权 α 跨所有权原子升级 Go 1.27.3 及全部版本固定位置，FE 升级依赖；合入后在新工具链下重跑全量门禁与安全扫描，再确定候选。
   3. QA 阶段 2：唯一候选的 71 个场景、0.4.3 升级演练、3 小时浸泡。
   4. 合并 #116、#117 与本期 PR，打 `v0.4.4`，Release 核验与全新安装。
   5. 发版后纯文档收尾：本节与进行中条目按规则归档，tasks 打勾，发版说明填验证结果。
@@ -122,7 +122,7 @@
 - 正式版：XY2API v0.4.3（2026-10-20，Sub2API 兼容基线 0.2.15）。生产主机 2026-10-20 起经在线更新运行 0.4.2 程序，容器镜像仍是 0.3.0；部署需要用户单独授权。
 - 待定：XY-image 0.0.17（先交接，并经用户确认）；0.4.3 生产部署（单独授权）。预上线主机运行 0.4.2 的浸泡候选 `0ad63fab7`，换成正式镜像需要授权。见上两节。
 - 上游：Sub2API v0.2.17 已发布、尚未同步（2026-10-17 定时检测；2026-10-19 定时同步的 prepare 失败），需按 [`UPSTREAM_SYNC.md`](UPSTREAM_SYNC.md) 另开任务。
-- 工具链：Go 以 `backend/go.mod` 为准（当前 1.27.2）；golangci-lint v2.14.0（与 CI 同版）。
+- 工具链：Go 以 `backend/go.mod` 为准（当前 1.27.3）；golangci-lint v2.14.0（与 CI 同版）。
 - 文档一致性：`python3 tools/check_docs_consistency.py`（CI 的 upstream-sync-audit 作业执行），规则在 `tools/docs_consistency.json`，改动时按 [`AGENTS.md`](../AGENTS.md)“变更同步”同步文档。
 
 ### XY2API 0.4.1 正式发布完成（2026-10-18；生产未部署）
@@ -242,6 +242,7 @@
   - 2026-10-21T05:14Z：集成 `093241b50`。门禁期间另有：handler 旧测试按 `errors.enabled` 开、关两路断言（`e0d3d799e`）；四个新具名补丁补进 `UPSTREAM_BASE.json` 的 provenance 清单（`093241b50`）。policy 与 scheduler-diff 登记在 `5f8935d62`、`af3695b89`、`685408f8f`（84 条 required_literals、4 个具名补丁、测试钩子；scheduler-diff 新增 W6 能力与 typed 块）。gofmt、四种 vet、lint、前端四项、`tools/tests`、文档、scheduler-diff、audit 通过；等 β 的 PM7 提交后串行跑 unit、无 tag 测试与 `ci_gate.py`。
   - 2026-10-21T05:22Z：PM7 handler 边界 `32f2a6ca7`（α 最终开发 HEAD）：Chat 普通错误出口收到非空结果且标记客户端断开时，与 Messages 一致，只提交已有用量后返回，不上报账号失败、不计回合、不补终止帧，新日志 `openai_chat_completions.client_disconnected`；真实写失败的 handler 回归先红后绿。集成合入 β 的三个 PM7 提交与此提交，policy 登记 `3e84c6ce8`、`f73ec90a9`、`7c021b6a4`；需重跑后端静态与全量门禁。
   - 2026-10-21T05:50Z：**代码门禁全绿**，α 开发最终 HEAD `32f2a6ca7`，集成代码 HEAD `7c021b6a4`：gofmt、四种 vet、golangci-lint 0 项、全量 unit（335 秒）、无 tag 全量（211 秒）、`ci_gate.py` 375 项 `-race` 0 跳过（resilience 78、service 212、handler 68、admin 2、middleware 15）。逐项结果在仓库外 `evidence/integration-gates.json`，此前的失败记录保留。合入 DOCS 最终 HEAD 后复跑文档检查、scheduler-diff 与干净树 audit，结论见仓库外 `PROGRESS_A.md`。
+  - PM 06:07Z 冻结例外：在集成分支从 `c086f4cc6` 升级 Go 1.27.3，含工作流、Dockerfile、README 三语、开发指南及当前工具链记录；官方安装包 SHA256 与 Docker 标签先核验。安全扫描已在旧候选复现 `GO-2026-6809`；新工具链完整门禁与 `govulncheck` 待执行。FE 的 `follow-redirects` 修复随后合入，完成后更新 PR #118；不合并、不部署。此次跨所有权修改由 PM 明确授权 α 单独完成，DOCS 保持冻结。
 - `20261021-rv2-fe`（FE 2026-10-21T00:55Z 经 DOCS 代登记）：负责新开关的设置界面与 i18n、账号仅流式学习状态的显示与清除、Explain 新原因文案；分支 `rv2/fe`，基线 `027a434ad`，初始工作树干净；只在本地提交。
   - 2026-10-21T04:05Z：交付完成，HEAD `bd215aa0c`（15 个提交，只改 `frontend/**`，17 个文件），工作树干净。HEAD 上 lint:check、typecheck、test:run（413 个文件、3182 个用例）、build（含 i18n 检查）全部通过。`AccountsView.vue` 的两处钩子建议登记为具名补丁 `xy-account-stream-only-learning`（α 集成时）。
   - 2026-10-21T05:11Z：**完成**。`bd215aa0c` 已并入集成（`27cef7db0`），集成上的前端四项门禁通过；钩子已由 α 登记为具名补丁 `xy-account-stream-only-learning`。无遗留卡点。
@@ -281,7 +282,7 @@
 ### 产品与架构
 
 - XY2API 是 Sub2API 的二开 AI API 网关，负责多上游账号调度、API Key、配额/计费、协议转发、管理后台等。
-- 后端位于 `backend/`：Go（版本以 `backend/go.mod` 为准，当前 1.27.2）、Gin、Ent、Wire，依赖 PostgreSQL 与 Redis；入口为 `backend/cmd/server/main.go`，前端构建产物嵌入 `backend/internal/web/dist/`。XY2API 自有的规则内核在 `backend/internal/resilience`（网关韧性）与 `backend/internal/sharesched`（份额调度）。
+- 后端位于 `backend/`：Go（版本以 `backend/go.mod` 为准，当前 1.27.3）、Gin、Ent、Wire，依赖 PostgreSQL 与 Redis；入口为 `backend/cmd/server/main.go`，前端构建产物嵌入 `backend/internal/web/dist/`。XY2API 自有的规则内核在 `backend/internal/resilience`（网关韧性）与 `backend/internal/sharesched`（份额调度）。
 - 前端位于 `frontend/`：Vue 3 + TypeScript + Vite + Pinia + Vue Router，包管理器固定为 pnpm。
 - `deploy/` 保存 Compose、镜像与部署脚本；`openspec/` 保存重要功能规格和验证证据；`skills/` 保存面向 Agent 的项目技能；`tools/` 保存同步、韧性、份额调度与文档一致性工具。全部文档及状态见 [`README.md`](README.md)。
 - 修改 Ent schema 后需重新生成 `backend/ent/`；修改 Wire provider 后需重新生成 `backend/cmd/server/wire_gen.go`。生成产物必须和源定义一起审查、提交。
@@ -1164,3 +1165,13 @@ pnpm --dir frontend run build
 - 验证：`ci_gate` 375 项 `-race` 0 跳过，lint 0 项；明细见“进行中的工作”的 α 条目。
 - 卡点/风险：文档检查、scheduler-diff 与干净树 audit 要在合入 DOCS 最终 HEAD 后复跑，本条不记为已通过。
 - 下一步：α 报告可推送后等 PM 安排推送、PR 与 QA 候选验证；DOCS 到 QA 验证结束前不再改动 rv2/docs。
+
+### 2026-10-21T06:04Z — `20261021-resilience-v2-alpha` — Go 1.27.3 安全升级（PM 冻结例外）
+
+- 请求/目标：修复 PR #118 安全扫描发现的 `GO-2026-6809`；PM 06:07Z 授权 α 单独跨所有权原子更新全部版本固定位置，不增加审计例外。
+- 开始状态：集成 `c086f4cc6`，本地门禁通过、push 与 PR 安全扫描失败；旧候选作废，尚未进行场景、升级演练或浸泡。
+- 完成操作：官方 darwin/arm64 安装包 SHA256 校验通过，切换本机 Go 1.27.3 并保留旧工具链；确认 Docker Hub 的 `golang:1.27.3` 与 `golang:1.27.3-alpine` 标签存在；统一 go.mod、三个工作流、三个 Dockerfile、README 三语、开发指南与两处当前工具链记录。历史同步记录和测试中的固定版本夹具保留。
+- 修改范围：只改工具链版本及相关文档；无业务代码、模块依赖图、迁移或配置字段变化。FE 的 `follow-redirects` 1.16.1 修复另由其分支提供。
+- 验证：官方安装包与镜像标签已核验，`go version` 为 1.27.3，文档一致性检查通过；全量门禁与 `govulncheck` 将在合入 FE 修复后的干净集成树串行执行。
+- 卡点/风险：旧候选的测试结果不替代新工具链验证；新候选必须等安全扫描与完整门禁通过，之后更新 PR #118 并由 PM 安排复审及 QA。
+- 下一步：合入 FE 安全修复，重跑完整门禁、构建与两端安全扫描，记录新候选 SHA；不合并、不部署。
