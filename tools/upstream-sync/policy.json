@@ -1260,6 +1260,22 @@
       "value": "releaseOpenAIPrelude"
     },
     {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "preludeBodyClosed.Store(true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "if canceledAfterOutput() {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "preludeBodyClosed.Store(true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "if canceledAfterOutput() {"
+    },
+    {
       "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
       "value": "resilience.Current().StrictTerminalOn()"
     },
@@ -1801,6 +1817,11 @@
       "id": "xy-resilience-v2-streams",
       "path": "backend/internal/service/resilience_compat_stream_prelude_test.go",
       "literal": "func TestCompatPreludeHeartbeatDisconnectDrainsUsageAfterContent"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_compat_stream_prelude_test.go",
+      "literal": "func TestCompatPreludeCancelDuringFirstWriteIsClientCancel"
     }
   ]
 }
