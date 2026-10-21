@@ -6,6 +6,11 @@
 
 ## 当前交接状态
 
+### XY2API 0.4.5 本地集成候选（2026-10-21；未推送）
+
+- 产品代码候选 `46239531d` 的完整 25 项门禁通过；unit 采用 PM 指定的 attempt3b 完整重跑，基线偶发失败及复核记录完整保留。δ 与 DOCS 最终交付已合入，ε EOF 取消防护未变，独立缓存已删除。
+- 本次收尾只更新仓库记忆和归档；产品代码与全量验证候选一致。待 PM 安排集成增量补审，再决定推送、候选验证与发版。详细状态见“进行中的工作” `20261021-integ-0.4.5-prep`。
+
 ### XY2API 0.4.4 正式发布完成（2026-10-21；生产未部署）
 
 - 发布：`v0.4.4`（annotated 对象 `333f54ad5`）→ main 合并提交 `4b0b6d94b`（[PR #118](https://github.com/liulixin-lex/xy2api/pull/118)，头 `a38ae5995`，两者源码树相同；#116、#117 随之标为已合并）。Release run 39582933562 成功。产物核验通过：6 个附件（198,881,025 字节）双 SHA 一致；五个平台 `vcs.revision=4b0b6d94b`、`vcs.modified=false`，含前端产物；GHCR 双架构，version、revision、source 标签正确；`latest`、`0`、`0.4` 指向 0.4.4，`0.3` 不变。第一次核验因校验脚本用了旧的远端入口而失败（环境问题），换现行入口重跑通过。
@@ -117,16 +122,11 @@
 
 ## 进行中的工作
 
-### 20261021-integ-0.4.5-prep — 0.4.5 本地集成（2026-10-21T12:51Z 授权）
+### 20261021-integ-0.4.5-prep — 本地集成完成，待 PM 安排补审
 
-- 请求：PM 放行从 main `a1cf8f104` 建本地分支 `integ/0.4.5-prep`，按 RA-1 → ε → DOCS → δ 合入；仅本地提交，不推送、不开 PR、不发布或部署。
-- 已合入：RA-1 `4ef7be248` → ε `10f2edd6b` → DOCS `eb95a4a10` → δ `74133b338`（owner 已确认该 HEAD 定向 `-race` 通过），随后补合 DOCS 最终审查记录 `a52387c0b`。记忆以 main 为准；网关说明冲突与 policy 测试列表冲突保留双方增补，已逐项核对 required_literals 与 custom_patch_tests 无丢失。
-- 夹具修复：独立提交 `c906ba5ca` 仅改测试，给 `contentModerationHandlerSettingRepo` 全部读写方法加 RWMutex，新增直接并发回归。在 main `a1cf8f104` 的未修夹具上，原取消/断连用例与新回归分别 `-race -count=3` 复现；修后三条用例同参数通过（21 项、零失败/跳过/竞争）。临时基线工作树已恢复自己的改动并正常移除。
-- 当前：产品版本改为 0.4.5；四个原版调度文件相对 main 无变化，保留既有 scheduler-diff 差异块并注明复核。首候选 `43be712aa` 全部 25 项门禁已收集：22 项通过，unit/无 tag 各仅旧 OAuth 预取消断言失败，干净树 audit 另报 6 个新 OpenSpec 文件未分类；已在 `7930a65af` 精确补登变更目录 `xy_owned`，干净树 audit 复验通过。
-- 验证：四种 vet、lint、`ci_gate`（390 个顶层 `-race`、零跳过）、额外 service 126/368 与 handler 94/224 项竞态检查、govulncheck（调用路径 0 漏洞）、前端四项（413 文件、3182 用例）、依赖审计检查（高危/严重 0）、tools 41 项、文档与构建通过。共享缓存首轮失败为环境故障，单独留证。
-- 增量：按 PM 15:18Z 与 REVIEW 放行，合入 δ 最终 `50053a8ea`（撤回透传稳定头、恢复 0.4.4 时机并限制 turn-state 溯源）和 DOCS 最终 `2ebb17d1e`；保留 ε `930213caa` 的 EOF 取消防护与测试，三文件相对合并前逐字不变。网关说明同时保留双方增补；policy 有效登记取并集去重，已删除撤回钩子及测试登记，保留精确 OpenSpec 所有权登记。
-- 待完成：在新 attempt 目录、独立 GOCACHE 从头跑全部 25 项门禁，向 PM 交付固定本地候选 SHA 后安排集成增量补审；全部结束后删除本轮独立 GOCACHE。推送、PR、候选构建和发版均待后续授权。
-- 证据：仓库外冲刺目录 `evidence/integ-045/` 与 `briefs/PROGRESS_A.md`；不合入监控或诊断分支。
+- 本地候选 `46239531dc019597a91e6f01349ea53a9aebd998` 已含 RA-1、ε（保留 `930213caa`）、δ 最终 `50053a8ea` 与 DOCS 最终 `2ebb17d1e`；版本 0.4.5，policy 有效登记取并集去重，撤回登记已清除。详细集成登记原样移入归档。
+- 完整 25 项门禁通过；unit 首次因基线已有的全局堆阈值偶发失败，按 PM 15:40Z 单例 `-count=5` 及 attempt3b 完整 unit 复跑均通过，原失败证据保留。测试文件和阈值未改，未跳过该用例。独立 GOCACHE 已删除，回收约 6.86 GiB。
+- 下一步：PM 安排 REVIEW 补审集成增量；DOCS 据证据登记 tasks 4.2 与 0.4.6 的堆阈值用例稳定化待办。推送、PR、测试服务器候选与发布等待后续授权；当前只在本地提交。证据见仓库外冲刺目录 `evidence/integ-045/attempt3-46239531d/` 与 `attempt3b-46239531d/`。
 
 ### 20261021-soak-6h5-0.4.4 — 生产部署前的 6.5 小时浸泡（2026-10-21T10:50Z 登记）
 
@@ -1102,3 +1102,13 @@ pnpm --dir frontend run build
 - 验证：`check_docs_consistency.py`、干净树 `sync.py audit`、`tools/tests`。
 - 卡点/风险：无新增；生产部署 0.4.4 仍需单独授权并先通过 6.5 小时浸泡。
 - 下一步：α 推送并在 CI 全绿后合并 PR #119。
+
+### 2026-10-21T15:50+00:00 — `20261021-integ-0.4.5-prep` — 本地候选门禁完成
+
+- 请求/目标：PM 12:51Z 授权本地集成，15:18Z 要求合入 δ 与 DOCS 最终交付后从头跑 25 项门禁，15:40Z 指定全局堆阈值偶发失败的复核流程；不推送、不开 PR、不发布、不部署。
+- 开始状态：main 基线 `a1cf8f104`；最终增量开始于干净的 `7297410a4`。δ `50053a8ea` 合为 `95662d477`，DOCS `2ebb17d1e` 合为 `46239531d`。只在网关说明与 tasks 有文档冲突，保留双方有效增补；ε 三个相关文件逐字不变。
+- 完成操作：已有测试夹具修复 `c906ba5ca` 只改测试并完成修前/修后 `-race -count=3`；版本 0.4.5；policy 308 条 required_literals、106 条 custom_patch_tests、37 个 custom_patches，有效登记并集与零重复核对通过，已撤回透传稳定头的钩子和测试登记清除；四个原版调度文件相对 main 未变。
+- 验证：候选 `46239531d` 的 attempt3 从头跑全部 25 项。首次 unit 25355 pass、39 条件 skip、1 fail，唯一失败为未改动的 `TestInflightEstimate_AccountMappingNoDBAndBoundedMemory`（8664864 > 8388608 字节）。按 PM 指令单例五次全过，HeapAlloc 差值为 4369472、2948840、2902976、2864184、3378360 字节；只用仓库外 overlay 在测量后打印值，断言和工作量未变。attempt3b 不用 overlay 的完整 unit 重跑 25356 pass、39 条件 skip、零 fail；原失败不改写，未降低阈值或跳过该用例。
+- 其余门禁：无 tag 14519 pass、28 条件 skip；`ci_gate` 390 顶层 `-race`、额外 service 178 顶层/476 项、handler 94/224 项全部实际执行，零失败/跳过/竞争；gofmt、四 vet、lint（0 issues）通过。前端 413 文件/3182 项、lint/typecheck/build、tools 41 项、audit 校验器 13 项、docs、scheduler-diff、embed 构建和干净树 audit 均通过。govulncheck 调用路径 0 漏洞（另有未调用的包/模块提示）；前端审计 high/critical 为 0，13 moderate/4 low。
+- 证据/清理：完整原始记录与明确引用 attempt3b 的最终 25/25 汇总保存在仓库外 `evidence/integ-045/`；旧候选和环境失败也保留。本轮独立 GOCACHE 已按授权删除，目录占用 7361564672 字节（约 6.86 GiB），未动共享缓存或其他工作树。
+- 卡点/下一步：本地集成与门禁完成；REVIEW 尚需补审最终增量，测试服务器全套候选验证尚未进行。DOCS 跟进 tasks 4.2 与 0.4.6 的测试稳定化待办；后续远端操作等待 PM 指令。
