@@ -134,10 +134,10 @@ describe('gateway resilience settings', () => {
     for (const key of ['preludeStaging', 'nativePreludeWhitelist', 'strictTerminal', 'failedFrameRetryAfter']) {
       await w.get(`[data-testid="resilience-switch-${key}"]`).trigger('click')
     }
-    await w.get('[data-testid="resilience-section-failure"]').trigger('click')
-    await w.get('[data-testid="resilience-section-capability"]').trigger('click')
     await w.get('[data-testid="resilience-field-codexRetryAfterCap"]').setValue('0')
     await w.get('[data-testid="resilience-field-learnTtl"]').setValue('3600')
+    await w.get('[data-testid="resilience-section-failure"]').trigger('click')
+    await w.get('[data-testid="resilience-section-capability"]').trigger('click')
     await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
     const expected = settings()
     expected.stream = { prelude_staging: false, native_prelude_whitelist: false, strict_terminal: false }
@@ -190,6 +190,19 @@ describe('gateway resilience settings', () => {
     expect(w.get('[data-testid="resilience-switch-failedFrameRetryAfter"]').attributes('disabled')).toBeDefined()
     // The stream switches only follow the master switch.
     expect(w.get('[data-testid="resilience-switch-strictTerminal"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('enables the learning TTL and the Codex cap only with the switch they depend on', async () => {
+    const w = mountSettings(); await flushPromises()
+    const disabled = (key: string) => w.get(`[data-testid="resilience-field-${key}"]`).attributes('disabled') !== undefined
+    expect(disabled('learnTtl')).toBe(false)
+    expect(disabled('codexRetryAfterCap')).toBe(false)
+    await w.get('[data-testid="resilience-section-capability"]').trigger('click')
+    await w.get('[data-testid="resilience-section-errors"]').trigger('click')
+    expect(disabled('learnTtl')).toBe(true)
+    expect(disabled('codexRetryAfterCap')).toBe(true)
+    // Existing fields keep their behaviour.
+    expect(disabled('negativeCache')).toBe(false)
   })
 })
 

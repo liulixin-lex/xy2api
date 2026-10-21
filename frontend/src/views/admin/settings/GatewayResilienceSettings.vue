@@ -48,7 +48,7 @@
                 :max="field.max"
                 step="1"
                 class="input"
-                :disabled="saving"
+                :disabled="saving || (field.followsSwitch && section.get ? !section.get(draft) : false)"
                 :data-testid="`resilience-field-${field.key}`"
                 @input="onNumber(field, ($event.target as HTMLInputElement).value)"
               >
@@ -129,6 +129,8 @@ interface NumberField {
   min: number
   max: number
   hint?: boolean
+  /** Only takes effect while the card switch is on, so it is greyed out with it. */
+  followsSwitch?: boolean
   get: (s: Settings) => number
   set: (s: Settings, v: number) => void
 }
@@ -170,8 +172,8 @@ const numberFields: NumberField[] = [
   { key: 'partialDrain', section: 'disconnect', min: 1, max: 3600, get: (s) => s.disconnect.partial_drain_max_seconds, set: (s, v) => { s.disconnect.partial_drain_max_seconds = v } },
   { key: 'abuseThreshold', section: 'disconnect', min: 1, max: 100000, get: (s) => s.disconnect.abuse_guard.threshold_per_hour, set: (s, v) => { s.disconnect.abuse_guard.threshold_per_hour = v } },
   { key: 'negativeCache', section: 'errors', min: 1, max: 60, get: (s) => s.errors.negative_cache_seconds, set: (s, v) => { s.errors.negative_cache_seconds = v } },
-  { key: 'codexRetryAfterCap', section: 'errors', min: 0, max: 30, hint: true, get: (s) => s.errors.codex_retry_after_cap_seconds, set: (s, v) => { s.errors.codex_retry_after_cap_seconds = v } },
-  { key: 'learnTtl', section: 'capability', min: 600, max: 86400, hint: true, get: (s) => s.capability.learn_ttl_seconds, set: (s, v) => { s.capability.learn_ttl_seconds = v } },
+  { key: 'codexRetryAfterCap', section: 'errors', min: 0, max: 30, hint: true, followsSwitch: true, get: (s) => s.errors.codex_retry_after_cap_seconds, set: (s, v) => { s.errors.codex_retry_after_cap_seconds = v } },
+  { key: 'learnTtl', section: 'capability', min: 600, max: 86400, hint: true, followsSwitch: true, get: (s) => s.capability.learn_ttl_seconds, set: (s, v) => { s.capability.learn_ttl_seconds = v } },
   { key: 'returnStable', section: 'fallbackGroup', min: 1, max: 86400, get: (s) => s.fallback_group.return_stable_seconds, set: (s, v) => { s.fallback_group.return_stable_seconds = v } }
 ]
 
