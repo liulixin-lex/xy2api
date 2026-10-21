@@ -37,7 +37,7 @@ With `stream.strict_terminal` on, the Gateway inbound Responses and Chat convers
 
 ### Requirement: First-output guard on the OpenAI Responses passthrough
 
-With `stream.strict_terminal` on, the OpenAI Responses passthrough MUST apply the same first-output deadline as the native path, including the wait for response headers, and MUST switch accounts when only opening events and heartbeats arrived before it. A read loop MUST drive the deadline, stall detection and staging heartbeats; upstream comment lines MUST be forwarded immediately during staging. After output, a stall MUST end with `response.failed` (`stream_timeout`). Independently of the switch, the passthrough MUST stage the opening in the bounded native stage (8 MiB, spilling to an unlinked temporary file above 64 KiB) and MUST switch accounts when the bound is exceeded. Also independently of the switch, a passthrough stream that broke after output (`response.failed`, missing terminal, read error, stall) MUST bill the usage read so far exactly once, and a cancel before output MUST bill nothing. With the switch off, the passthrough MUST behave as on 0.4.4 apart from the bounded stage and this billing.
+With `stream.strict_terminal` on, the OpenAI Responses passthrough MUST apply the same first-output deadline as the native path, including the wait for response headers, and MUST switch accounts when only opening events and heartbeats arrived before it. A read loop MUST drive the deadline, stall detection and staging heartbeats; upstream comment lines MUST be forwarded immediately during staging. After output, a stall MUST end with `response.failed` (`stream_timeout`). Independently of the switch, the passthrough MUST stage the opening in the bounded native stage (8 MiB, spilling to an unlinked temporary file above 64 KiB) and MUST switch accounts when the bound is exceeded. Also independently of the switch, a passthrough stream that broke after output (`response.failed`, missing terminal, read error, stall) MUST bill the usage read so far exactly once, and a cancel before output MUST bill nothing. On both the passthrough and the native OpenAI Responses path, independently of the switch, when heartbeats have committed HTTP 200 and an in-stream `response.failed` before any output matches an admin error passthrough rule, the gateway MUST end with `response.created` and `response.failed` carrying the rule's type and message instead of writing a JSON body; before any commit the rule's status code and JSON body still apply. With the switch off, the passthrough MUST behave as on 0.4.4 apart from the bounded stage, this billing and this terminal.
 
 #### Scenario: Silent after created
 - **WHEN** a relay sends `response.created` and nothing else until the first-output deadline
@@ -48,7 +48,7 @@ With `stream.strict_terminal` on, the OpenAI Responses passthrough MUST apply th
 - **THEN** the request switches accounts at stage `response_headers`.
 
 #### Scenario: Error passthrough rule after heartbeats
-- **WHEN** heartbeats have committed HTTP 200 and an in-stream `response.failed` before any output matches an admin error passthrough rule
+- **WHEN** heartbeats have committed HTTP 200 on the passthrough or the native OpenAI Responses path, and an in-stream `response.failed` before any output matches an admin error passthrough rule
 - **THEN** the client receives `response.created` followed by `response.failed` with the rule's type and message, and no JSON body after the comment lines.
 
 #### Scenario: Break after output is billed
