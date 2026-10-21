@@ -24,6 +24,11 @@
 - **不常用的大弹窗用 `defineLazyComponent` 加 `useLazyMount`**（见 `composables/useLazyMount.ts`）。
   - 弹窗第一次打开时才下载、才挂载，之后一直保留。
   - 账号页的新建、编辑弹窗会在页面空闲时用 `prefetchWhenIdle` 预取。
+  - **弹窗总是先以关闭状态挂载，下一帧再打开。** `defineLazyComponent` 在内层组件第一次渲染时把 `show` 传成 false，挂载完成后再传真实值。
+    - 原因：这些弹窗大多只在 `show` 从 false 变为 true 时加载数据（watch 不带 `immediate`）。如果一挂载就是打开状态，第一次打开就是空的，关掉再开才正常。
+    - 0.4.2、0.4.3 有这个问题：测试连接没有模型、临时不可调度原因为空、账号统计没有数据。
+    - 打开状态的属性名不是 `show` 时，用 `defineLazyComponent(loader, 'visible')` 这样的第二个参数指定。
+    - 给弹窗写测试时，要覆盖“挂载时就是打开状态”的情况，不能只测先关后开。
 - **合规确认弹窗（AdminComplianceDialog）保持静态引入，不做按需加载。**
 - **部署新版本后，旧页面可能加载不到已被删除的分块文件。**
   - 这时 `utils/chunkLoadError.ts` 会自动刷新一次，路由跳转失败时直接打开目标页。
