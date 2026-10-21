@@ -16,7 +16,7 @@ export default {
         budget: 'Request budget',
         budgetHint: 'Maximum attempts per request and total time before the first output. Streaming requests are held to the total time until their first output; for non-streaming requests it only decides whether another attempt may start, and the attempt in flight is not cut. Same-account retries only for capacity shedding.',
         failure: 'Failure classification fixes',
-        failureHint: 'Only real capacity signals (server_is_overloaded, slow_down, 529, an explicit overloaded) count as capacity; a plain 429 is a rate limit, and "service busy", "too many pending requests" or "concurrency limit" may move to any host. Off restores the 0.4.3 classification.',
+        failureHint: 'Only real capacity signals (server_is_overloaded, slow_down, 529, an explicit overloaded) count as capacity; a plain 429 is a rate limit, and "service busy", "too many pending requests" or "concurrency limit" may move to any host. Off restores the 0.4.3 classification rules; error details are still read more completely, so a few ops records may be classified differently from 0.4.3.',
         stream: 'Stream prelude and termination',
         streamHint: 'Which events are held back from the client before the first content, and what counts as a proper end of an upstream stream. A failure while events are held back can move to another account unseen by the client.',
         keepalive: 'Pre-output keepalive',

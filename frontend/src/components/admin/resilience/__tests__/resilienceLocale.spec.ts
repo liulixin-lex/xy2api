@@ -68,5 +68,16 @@ describe('gateway resilience 0.4.4 locale keys', () => {
       }
     }
   )
+
+  // γ 29f26652d: turning decision_v2 off restores the old rules, but the
+  // richer evidence extraction stays, so some ops categories may differ.
+  it.each([['zh', zh, '0.4.3 的分类规则', '运维记录'], ['en', en, '0.4.3 classification rules', 'ops records']])(
+    '%s does not promise a byte-identical 0.4.3 classification',
+    (_, messages, rules, caveat) => {
+      const text = lookup(messages, 'admin.resilience.settings.sections.failureHint') as string
+      expect(text).toContain(rules)
+      expect(text).toContain(caveat)
+    }
+  )
 })
 
