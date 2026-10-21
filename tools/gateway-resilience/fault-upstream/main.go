@@ -69,7 +69,7 @@ var scenarios = map[string]string{
 	"F34":  "Responses: response.created, unknown codex.response.metadata, then response.failed (conservative no-retry case; not observed in production)",
 	"F34B": "Responses: empty output_text delta before created, known prefix events, then response.failed (before, after)",
 	"F35":  "raw Chat only: error data frame followed by [DONE]; Responses endpoint returns 404",
-	"F36":  "nonstream requests get 400 This group only accepts streaming requests; streams succeed",
+	"F36":  "nonstream requests get 400 This group only accepts streaming requests with OpenAI error.param=null; streams succeed",
 	"F37":  "503 server_is_overloaded with a known Retry-After (reset=8, delay for CDN commitment)",
 	"BAL":  "normal while the balance of state key=… is positive, F12 otherwise (reset=seconds adds a relay's exhausted ratelimit headers)",
 	"MIX":  "random fault with probability p percent (default 5), otherwise normal",
@@ -763,7 +763,16 @@ func serve(ctx context.Context, w http.ResponseWriter, p protocol, path, model s
 		return "failed_in_stream"
 	case "F36":
 		if !stream {
-			apiError(w, p, http.StatusBadRequest, "invalid_request_error", "streaming_required", "This group only accepts streaming requests")
+			if p == protoAnthropic {
+				apiError(w, p, http.StatusBadRequest, "invalid_request_error", "streaming_required", "This group only accepts streaming requests")
+			} else {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{
+					"type":    "invalid_request_error",
+					"code":    "streaming_required",
+					"message": "This group only accepts streaming requests",
+					"param":   nil,
+				}})
+			}
 			return "error_status"
 		}
 		return normal(ctx, w, p, model, true, f.secs("first", 0.2), 0, "", 0)
