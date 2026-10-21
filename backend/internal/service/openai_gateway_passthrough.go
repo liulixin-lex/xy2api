@@ -493,7 +493,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		// x-codex-turn-state 溯源：下游回传由 writeOpenAIPassthroughResponseHeaders
 		// 在各 handler 的写头点强制放行，铸造账号在此统一记录，供出站守卫剥离
 		// failover 换号后的跨账号回带（openai_codex_turn_state.go）。
-		if extractOpenAICodexTurnState(resp.Header) != "" {
+		// xy2api resilience (INTEG-P2-1): a stream records it where its
+		// headers are committed.
+		if !reqStream && extractOpenAICodexTurnState(resp.Header) != "" {
 			s.noteOpenAICodexTurnStateProvenance(c, account)
 		}
 
@@ -1967,15 +1969,37 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
 	}
-	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	// xy2api resilience (W1.2): stream.strict_terminal adds the first-output
+	// deadline and the stall check of the native path. The read loop then
+	// writes the pre-output heartbeats itself, so a failed heartbeat is seen
+	// as a departed client (PM7).
+	guarded := resilience.Current().StrictTerminalOn()
+	// applyAttemptHeaders sets this attempt's headers unless a heartbeat has
+	// already committed the response. With guarded it waits for the first
+	// semantic output (INTEG-P2-1): a heartbeat commits only the stable
+	// stream headers, so a switched attempt's headers never reach the
+	// client, and the turn-state provenance is recorded only for headers
+	// that do, as on the native path.
+	applyAttemptHeaders := func() {
+		if c.Writer.Written() {
+			return
+		}
+		writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
-	// SSE headers
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
-	if v := resp.Header.Get("x-request-id"); v != "" {
-		c.Header("x-request-id", v)
+		// SSE headers
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("X-Accel-Buffering", "no")
+		if v := resp.Header.Get("x-request-id"); v != "" {
+			c.Header("x-request-id", v)
+		}
+		if extractOpenAICodexTurnState(resp.Header) != "" {
+			s.noteOpenAICodexTurnStateProvenance(c, account)
+		}
+	}
+	if !guarded {
+		applyAttemptHeaders()
 	}
 
 	w := c.Writer
@@ -2017,11 +2041,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] first-output staging cleanup failed: account=%d error=%v", account.ID, err)
 		}
 	}()
-	// xy2api resilience (W1.2): stream.strict_terminal adds the first-output
-	// deadline and the stall check of the native path. The read loop then
-	// writes the pre-output heartbeats itself, so a failed heartbeat is seen
-	// as a departed client (PM7).
-	guarded := resilience.Current().StrictTerminalOn()
 	firstOutputTimeout := time.Duration(0)
 	if guarded && account != nil && account.Platform == PlatformOpenAI {
 		firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, originalModel, reasoningEffort, startTime)
@@ -2082,6 +2101,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		if pendingStage.closed {
 			return true
 		}
+		applyAttemptHeaders()
 		if err := pendingStage.CommitTo(w); err != nil {
 			clientDisconnected = true
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
@@ -2171,6 +2191,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		if clientDisconnected {
 			return
 		}
+		writeStableStreamHeaders(c)
 		n, err := w.Write([]byte(frame))
 		recordOpenAIStreamKeepaliveBytes(c, n)
 		if err != nil {
@@ -2340,6 +2361,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 							// committed 200 the rule's error ends the stream as the
 							// Responses terminal event instead of a bare JSON body.
 							stopKeepalive()
+							applyAttemptHeaders()
 							writeOpenAIStreamRuleError(ctx, c, status, errType, errMsg)
 							return passthroughReturn(resultWithUsage(), fmt.Errorf("upstream response failed: passthrough rule matched message=%s", errMsg))
 						}
@@ -2423,6 +2445,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			// 建立 happens-before —— 之后 ResponseWriter 由本循环独占。
 			if !clientOutputStarted {
 				stopKeepalive()
+				applyAttemptHeaders()
 			}
 			if !clientOutputStarted && pendingStage.Buffered() > 0 {
 				if !writePendingLines() {

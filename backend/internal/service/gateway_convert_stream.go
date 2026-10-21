@@ -84,6 +84,7 @@ type gatewayConvertStream struct {
 	guardFired  bool
 	guardDone   bool
 	stopCancel  func() bool
+	bodyClosed  atomic.Bool
 	preludeLog  *resilience.RequestState
 	upstreamHdr bool
 	held        []string
@@ -136,8 +137,13 @@ func (st *gatewayConvertStream) run() gatewayConvertOutcome {
 	st.preludeLog = beginOpenAIPreludeTrace(st.ctx(), st.staging)
 	if st.staging && st.c != nil && st.c.Request != nil {
 		// Before the first output a departed client ends the attempt; the
-		// upstream context is detached, so close the body ourselves.
-		st.stopCancel = context.AfterFunc(st.ctx(), func() { _ = st.resp.Body.Close() })
+		// upstream context is detached, so close the body ourselves. The flag
+		// is set first: a cancel racing the first write runs this although
+		// output started, and the read error that follows is that cancel.
+		st.stopCancel = context.AfterFunc(st.ctx(), func() {
+			st.bodyClosed.Store(true)
+			_ = st.resp.Body.Close()
+		})
 		defer func() {
 			if st.stopCancel() && st.ctx().Err() != nil {
 				_ = st.resp.Body.Close()
@@ -364,6 +370,13 @@ func (st *gatewayConvertStream) onEnd(cause error) gatewayConvertOutcome {
 			message = "Anthropic stream read failed before content"
 		}
 		return st.failover(http.StatusBadGateway, "upstream_disconnected", message)
+	}
+	if st.bodyClosed.Load() {
+		// The client's cancel closed the body after output started
+		// (INTEG-P2-2): a client disconnect with the usage so far.
+		st.gone = true
+		MarkResponseCommitted(st.c)
+		return gatewayConvertOutcome{err: fmt.Errorf("stream usage incomplete: %w", st.ctx().Err())}
 	}
 	if !st.strict {
 		return st.finish()
