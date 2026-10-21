@@ -30,4 +30,20 @@ describe('gateway resilience 0.4.4 locale keys', () => {
     expect(text('fields.codexRetryAfterCapHint')).toContain(text('sections.errors'))
     expect(text('sections.capabilityHint')).toContain(text('sections.failure'))
   })
+
+  // DOCS/PM 2026-10-21: the whitelist adds response.queued and content-free
+  // added events, not metadata events; the Codex cap also covers
+  // configuration rejections.
+  it.each([
+    ['zh', zh, { queued: 'response.queued', added: 'added', notMetadata: '元数据', configReject: '配置拒绝' }],
+    ['en', en, { queued: 'response.queued', added: 'added', notMetadata: 'metadata', configReject: 'configuration rejection' }]
+  ])('%s describes what the whitelist and the Codex cap actually cover', (_, messages, words) => {
+    const text = (key: string) => lookup(messages, `admin.resilience.settings.${key}`) as string
+    const whitelist = text('switches.nativePreludeWhitelistHint')
+    expect(whitelist).toContain(words.queued)
+    expect(whitelist).toContain(words.added)
+    expect(whitelist).not.toContain(words.notMetadata)
+    expect(text('fields.codexRetryAfterCapHint')).toContain(words.configReject)
+  })
 })
+
