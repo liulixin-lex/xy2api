@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -47,13 +48,7 @@ func StartPreOutputKeepalive(c *gin.Context, protocol string, firstDelay, interv
 		frame = preOutputPingFrame
 	}
 	stop := startSSEKeepalive(c, firstDelay, interval, frame, protocol)
-	if k := keepaliveFrom(c); k != nil && c.Request != nil {
-		state := resilience.StateFrom(c.Request.Context())
-		k.mu.Lock()
-		k.metricGroup = state.GroupID()
-		k.edge = state.Edge()
-		k.mu.Unlock()
-	}
+
 	return stop
 }
 
@@ -64,7 +59,7 @@ func (k *openAICompactSSEKeepalive) noteCommitted() {
 		return
 	}
 	resilience.Count(resilience.MetricKeepaliveCommitted, k.metricGroup, 0, k.protocol)
-	slog.Info("resilience.keepalive_committed", "group_id", k.metricGroup, "protocol", k.protocol, "edge", k.edge)
+	slog.Info("resilience.keepalive_committed", append(resilience.PreOutputEventFields(k.ctx), "group_id", k.metricGroup, "protocol", k.protocol, "edge", k.edge)...)
 }
 
 // PreOutputKeepaliveCommitted reports, without stopping it, whether the
@@ -130,15 +125,21 @@ func (k *openAICompactSSEKeepalive) replaceCommittedErrorBody(w gin.ResponseWrit
 		return 0, false
 	}
 	k.mu.Lock()
-	defer k.mu.Unlock()
 	if k.protocol == "" || k.errStatus == 0 {
+		k.mu.Unlock()
 		return 0, false
 	}
-	if !k.errReplaced {
-		k.errReplaced = true
-		if _, err := w.Write(preOutputTerminalFrame(k.protocol, k.errStatus, data)); err == nil {
-			w.Flush()
-		}
+	if k.errReplaced {
+		k.mu.Unlock()
+		return len(data), true
+	}
+	k.errReplaced = true
+	ctx, protocol, status := k.ctx, k.protocol, k.errStatus
+	k.mu.Unlock()
+	// The writer stopped the heartbeat before entering here. Resolve outside
+	// k.mu so an advisor may safely inspect a request delivery snapshot.
+	if _, err := w.Write(preOutputTerminalFrame(ctx, protocol, status, data)); err == nil {
+		w.Flush()
 	}
 	return len(data), true
 }
@@ -147,7 +148,7 @@ func (k *openAICompactSSEKeepalive) replaceCommittedErrorBody(w gin.ResponseWrit
 // frame of the inbound protocol. It replaces an error the gateway wrote
 // while the client had seen heartbeats only, so a Responses frame opens the
 // response with response.created first.
-func preOutputTerminalFrame(protocol string, status int, body []byte) []byte {
+func preOutputTerminalFrame(ctx context.Context, protocol string, status int, body []byte) []byte {
 	errType, code, message := committedErrorFields(status, body)
 	switch protocol {
 	case PreOutputProtocolAnthropic:
@@ -181,7 +182,7 @@ func preOutputTerminalFrame(protocol string, status int, body []byte) []byte {
 				"created_at": createdAt,
 				"status":     "failed",
 				"output":     []any{},
-				"error":      map[string]any{"code": code, "message": message},
+				"error":      openAIResponseFailureError(ctx, errType, code, message),
 			},
 		})
 		return append(ResponsesCreatedFrame(id, "", createdAt), "event: response.failed\ndata: "+string(payload)+"\n\n"...)
@@ -224,7 +225,7 @@ func committedErrorFields(status int, body []byte) (string, string, string) {
 		switch {
 		case status == http.StatusTooManyRequests:
 			errType = "rate_limit_error"
-		case status == 529 || status == http.StatusServiceUnavailable:
+		case (status == 529 || status == http.StatusServiceUnavailable) && !resilience.Current().ErrorsOn():
 			errType = "overloaded_error"
 		case status >= http.StatusInternalServerError:
 			errType = "api_error"
@@ -241,4 +242,21 @@ func randomKeepaliveHex(n int) string {
 		return strings.Repeat("0", 2*n)
 	}
 	return hex.EncodeToString(b)
+}
+
+// openAIResponseFailureError is shared by the three local failed-frame writers.
+// It never forwards upstream headers or computes a candidate recommendation.
+func openAIResponseFailureError(ctx context.Context, errType, code, message string) map[string]any {
+	errBody := map[string]any{"code": code, "message": message}
+	if resilience.Current().FailedFrameRetryAfterOn() {
+		if resilience.ClassifyWithSettings(resilience.Outcome{Source: resilience.SourceStreamEvent, Type: errType, Code: code, Message: message}, resilience.Current()).ContentPolicy() {
+			resilience.SetRetryAdvice(ctx, resilience.RetryAdvice{Suppress: true, Source: "content_rejection"})
+		}
+		advice := resilience.ResolveRetryAdvice(ctx)
+		errBody["message"] = advice.Message(message)
+		if headers := advice.Headers(); len(headers) > 0 {
+			errBody["headers"] = headers
+		}
+	}
+	return errBody
 }

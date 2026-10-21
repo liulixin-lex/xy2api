@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -112,7 +113,12 @@ func writeOpenAICompactSSEFailureMessage(c *gin.Context, statusCode int, errType
 	if c == nil {
 		return
 	}
-	MarkOpsStreamError(c, errType, message, statusCode)
+	var ctx context.Context
+	if c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	errorBody := openAIResponseFailureError(ctx, errType, errType, message)
+	MarkOpsStreamError(c, errType, errorBody["message"].(string), statusCode)
 	payload, err := json.Marshal(map[string]any{
 		"type":            "response.failed",
 		"sequence_number": 0,
@@ -124,10 +130,7 @@ func writeOpenAICompactSSEFailureMessage(c *gin.Context, statusCode int, errType
 			"created_at": time.Now().Unix(),
 			"status":     "failed",
 			"output":     []any{},
-			"error": map[string]any{
-				"code":    errType,
-				"message": message,
-			},
+			"error":      errorBody,
 		},
 	})
 	if err != nil {
