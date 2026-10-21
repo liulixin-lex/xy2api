@@ -61,7 +61,11 @@ With `stream.strict_terminal` on, the OpenAI Responses passthrough MUST apply th
 
 ### Requirement: Heartbeats commit only the gateway's own stream headers
 
-When a heartbeat commits HTTP 200 before the first output on the Chat and Messages conversions (staged, or before the first upstream line with staging off), on the raw Chat passthrough in strict mode, or on the OpenAI Responses passthrough with `stream.strict_terminal` on, the response MUST carry only the gateway's stream headers (`Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`, `X-Accel-Buffering: no`) and MUST NOT carry the filtered headers of that attempt's upstream. Without a heartbeat, the first output MUST still carry the upstream headers as before.
+When a heartbeat commits HTTP 200 before the first output on the Chat and Messages conversions (staged, or before the first upstream line with staging off), or on the raw Chat passthrough in strict mode, the response MUST carry only the gateway's stream headers (`Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`, `X-Accel-Buffering: no`) and MUST NOT carry the filtered headers of that attempt's upstream. Without a heartbeat, the first output MUST still carry the upstream headers as before. The OpenAI Responses passthrough is excluded: its heartbeats MUST keep carrying the current attempt's upstream headers, including `x-codex-turn-state`, as on 0.4.4, so that a request that heartbeats and then succeeds still delivers the turn state.
+
+#### Scenario: Passthrough keeps the attempt headers on heartbeats
+- **WHEN** a passthrough attempt commits a heartbeat and then succeeds
+- **THEN** the client receives that attempt's `x-codex-turn-state` and `x-request-id`.
 
 #### Scenario: Switch after heartbeat
 - **WHEN** account A's attempt commits a heartbeat, fails before content, and account B serves
