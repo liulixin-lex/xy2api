@@ -175,7 +175,12 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 
 ### 7.4 W5.4 Anthropic 的错误类型
 
-网关自身的无号与瞬时失败（含只有 code 的错误体）统一用 `api_error`；`resilience_keepalive.go` 不再给 503 补 `overloaded_error`。只有上游原样的 `overloaded_error` 才保留该类型。HTTP 状态码不变（Q16）。
+受现有 `errors` 开关控制，关闭时回到 0.4.3 的类型。
+
+- 网关生成的瞬时 5xx（含只有 code、没有 type 的错误体）统一用 `api_error`；状态码 529 本身不再足以生成 `overloaded_error`。
+- 只有上游真实返回 `error.type`（或顶层 `type`）为 `overloaded_error` 的换号失败，才保留该类型。两个 Anthropic handler 分别覆盖 HTTP 应答与 SSE 终止帧（`anthropicFailoverErrorType`、本地 writer 的 `anthropicLocalErrorType`）；首包保活的转换点 `resilience_keepalive.go` 不再给 503 补 `overloaded_error`（β）。
+- 无号原本就用 `api_error`，不变；管理员配置的错误透传规则仍然优先。
+- HTTP 状态码、正文与用户余额提示不变（Q16）。
 
 ### 7.5 W5.5 Codex 的 Retry-After 上限
 
