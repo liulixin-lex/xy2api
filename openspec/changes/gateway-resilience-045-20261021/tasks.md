@@ -39,8 +39,11 @@
 
 ## 4. 集成（α，用户决定发 0.4.5 之后）
 
-- [ ] 4.1 合入 ε（含 RA-1）、δ 与本文档分支（首次集成 `43be712aa` 的门禁 22/25，不计入候选，见 design §7）；手工合并 `GATEWAY_RESILIENCE.md` 第 18、133 行与 `policy.json` 的具名补丁测试；`VERSION` 与 `UPSTREAM_BASE.json` 改为 0.4.5。
-- [ ] 4.2 全量门禁：gofmt、四种 vet、golangci-lint、unit 与无 tag 测试、`ci_gate.py`（`-race`，零跳过）、`govulncheck`、前端四项与依赖审计、`tools/tests`、文档一致性、scheduler-diff、干净树 `sync.py audit`。
+- [x] 4.1 合入 ε（含 RA-1）、δ 与本文档分支（首次集成 `43be712aa` 的门禁 22/25，不计入候选，见 design §7）；手工合并 `GATEWAY_RESILIENCE.md` 第 18、133 行与 `policy.json` 的具名补丁测试；`VERSION` 与 `UPSTREAM_BASE.json` 改为 0.4.5。
+- [x] 4.2 全量门禁：gofmt、四种 vet、golangci-lint、unit 与无 tag 测试、`ci_gate.py`（`-race`，零跳过）、`govulncheck`、前端四项与依赖审计、`tools/tests`、文档一致性、scheduler-diff、干净树 `sync.py audit`。
+  - 2026-10-21T15:51Z，α 在本地集成分支 `integ/0.4.5-prep`：门禁对象是产品代码 `46239531d`，25/25 通过。最终本地候选 `b966306de` 只追加了记忆与归档提交，代码与 `46239531d` 逐字一致，并在最终 HEAD 上复验文档检查与干净树 audit；`VERSION` 与 `UPSTREAM_BASE.json` 为 0.4.5。
+  - unit：第三轮原始结果 24 项通过、1 项失败，失败的是 `TestInflightEstimate_AccountMappingNoDBAndBoundedMemory` 的全局堆阈值（基线既有的偶发，见 7.4）。单独重跑 5 次全过；按 PM 指示用原命令完整重跑 unit（attempt3b）通过，以它替代该项结果，原失败保留。没有跳过用例，也没有放宽阈值。
+  - 其余：无 tag 测试；`ci_gate.py` 390 个顶层用例 `-race` 0 跳过；service 与 handler 的额外定向 `-race` 全部执行、0 失败；前端 413 个文件、3182 个用例；四种 vet 与 lint；`govulncheck` 无可达漏洞；依赖审计无高危、严重；`tools/tests` 41 例；文档检查、scheduler-diff、带前端产物的构建、干净树 audit。
 - [ ] 4.3 对集成结果的独立审查。
 
 ## 5. 测试服务器验证（QA）
@@ -56,10 +59,11 @@
 
 ## 7. 后续（0.4.6 待办，不阻断 0.4.5）
 
-审查在 δ 复核与集成审查中提出（design §8）。
+7.1–7.3 由审查在 δ 复核与集成审查中提出（design §8），7.4 来自 0.4.5 第三轮门禁。
 
 - [ ] 7.1 原生 Responses 路径心跳之后拿不到 turn-state（0.4.4 起）：与透传上撤回的 INTEG-P2-1 是同一个取舍。评估原生路径要不要像透传一样，在心跳提交时带出上游头；要先弄清哪些账号类型走原生路径、它们是否铸造 turn-state。
 - [ ] 7.2 turn-state 溯源改为在响应头真正发出时才记录，消除“响应到达后、提交前失败并最终耗尽”与 CDN 首包保活微秒级窗口两处不准的记录；同时收窄 `GATEWAY_RESILIENCE.md` 里“溯源只记客户端实际拿到的那次尝试”的措辞（该行归 δ；本变更的 design 与规格已改为“响应尚未提交时到达的尝试”）。
 - [ ] 7.3 LEAK-P2-1：WS 状态绑定表的清理吞吐固定为每表每分钟 512 条。评估按上次清理以来的写入量调整扫描量，或表满时优先淘汰已过期的条目；是否做具名补丁按上游同步机制决定（`review/LEAK_AUDIT_0.4.4.md` 第 5 节）。
+- [ ] 7.4 `TestInflightEstimate_AccountMappingNoDBAndBoundedMemory` 测的是全局 `HeapAlloc` 差值，阈值 8 MiB，本机负载高时偶发超限：0.4.5 第三轮门禁实测 8.26 MiB，单独重跑 5 次为 2.8–4.4 MiB，全部通过。测试文件相对 main 没有改动，属于基线既有的偶发。改为测本次操作的分配量（`testing.AllocsPerRun`，或 `runtime.ReadMemStats` 的 `TotalAlloc` 差值），或在 GC 稳定后再取基线。
 
 生产部署未授权。
