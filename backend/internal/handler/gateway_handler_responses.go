@@ -380,6 +380,13 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 
 // responsesErrorResponse writes an error in OpenAI Responses API format.
 func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code, message string) {
+	// A queue ping commits HTTP 200 before billing is rechecked. Finish the
+	// inbound protocol even when resilience switches are off.
+	if c.Writer.Written() {
+		service.MarkOpsStreamError(c, code, message, status)
+		writeResponsesFailedSSEWithOpening(c, code, "", message, gatewayStreamHasOnlyHeartbeats(c))
+		return
+	}
 	c.JSON(status, gin.H{
 		"error": gin.H{
 			"code":    code,

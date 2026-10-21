@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
 // responsesFailedError 对齐 OpenAI Responses 协议 error 子对象。
@@ -59,6 +60,12 @@ type responsesFailedEvent struct {
 // 此时 caller 也无法回退到 JSON（HTTP 200 已固化），通常意味着连接已经损坏，
 // 应当让请求处理函数 return，由上层关闭连接。
 func writeResponsesFailedSSE(c *gin.Context, errType, code, message string) bool {
+	return writeResponsesFailedSSEWithOpening(c, errType, code, message, false)
+}
+
+// forceOpening covers queue pings on compatible ingress, including when
+// resilience is disabled or delivery tracking was not installed.
+func writeResponsesFailedSSEWithOpening(c *gin.Context, errType, code, message string, forceOpening bool) bool {
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
 		return false
@@ -66,6 +73,9 @@ func writeResponsesFailedSSE(c *gin.Context, errType, code, message string) bool
 
 	id, createdAt, model := synthesizeResponseID(c), time.Now().Unix(), requestModel(c)
 	opening, sequence := resilienceResponsesOpening(c, id, model, createdAt)
+	if forceOpening && opening == "" {
+		opening, sequence = string(service.ResponsesCreatedFrame(id, model, createdAt)), 1
+	}
 	payload, err := json.Marshal(responsesFailedEvent{
 		Type:           "response.failed",
 		SequenceNumber: sequence,

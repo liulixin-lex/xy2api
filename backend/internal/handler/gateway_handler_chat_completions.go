@@ -397,6 +397,13 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 
 // chatCompletionsErrorResponse writes an error in OpenAI Chat Completions format.
 func (h *GatewayHandler) chatCompletionsErrorResponse(c *gin.Context, status int, errType, message string) {
+	// Queue pings can commit the stream before billing or model checks fail.
+	// A committed Chat stream always needs its error followed by [DONE].
+	if c.Writer.Written() {
+		service.MarkOpsStreamError(c, errType, message, status)
+		writeChatCompletionsErrorSSE(c, errType, "", message, status)
+		return
+	}
 	c.JSON(status, gin.H{
 		"error": gin.H{
 			"type":    errType,
