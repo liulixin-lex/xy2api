@@ -36,7 +36,7 @@
 
 ## 5. W5 信号与终止出口（α、β）
 
-- [x] 5.1 RetryAdvice 类型与 context 存取（α，`fc9b62751`）。
+- [x] 5.1 RetryAdvice 类型与 context 存取（α，`fc9b62751`）；惰性 provider 与 `Message()`（`be736ba0c`）。
 - [x] 5.2 W5.2 排队 ping 之后按协议写终止帧（α，`190f6515a`）。
 - [x] 5.3 W5.1 三个专用耗尽出口接入重试提示与回合封顶；一次性 finalize（α，`a72a29e00`）。
 - [ ] 5.4 W5.4 Anthropic 自身失败用 `api_error`（α handler `fe5dbf503` 已完成；β `resilience_keepalive.go` 待做）。
