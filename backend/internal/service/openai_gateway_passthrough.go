@@ -377,6 +377,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	if reqStream && account.Platform == PlatformOpenAI && resilience.Current().StrictTerminalOn() {
 		firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, reqModel, reasoningEffortValue, startTime)
 	}
+	// partialErr ends a stream that broke after output: its usage so far is
+	// returned with the error (review DELTA-P2-5).
+	var partialErr error
 	for {
 		actualModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 		if actualModel == "" {
@@ -520,6 +523,18 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
 				}
 				_ = resp.Body.Close()
+				// xy2api resilience (review DELTA-P2-5): after output the stream
+				// cannot be switched; return the usage read so far with the
+				// error so the handler bills it once (#5148). Failovers and a
+				// client that left before output keep a nil result.
+				var failoverErr *UpstreamFailoverError
+				if result != nil && result.clientSawOutput && !errors.As(handleErr, &failoverErr) {
+					usage, firstTokenMs = result.usage, result.firstTokenMs
+					responseID = strings.TrimSpace(result.responseID)
+					imageCount, imageOutputSizes = result.imageCount, result.imageOutputSizes
+					partialErr = handleErr
+					break
+				}
 				return nil, handleErr
 			}
 			usage = result.usage
@@ -557,9 +572,13 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		break
 	}
 	defer func() { _ = resp.Body.Close() }()
-	webSearchReplay.succeeded()
+	if partialErr == nil {
+		webSearchReplay.succeeded()
+	}
 	serviceTier := extractOpenAIServiceTierFromBody(body)
-	s.bindHTTPResponseAccount(ctx, c, account, responseID)
+	if partialErr == nil {
+		s.bindHTTPResponseAccount(ctx, c, account, responseID)
+	}
 
 	// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
 	if !account.IsShadow() {
@@ -598,7 +617,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		forwardResult.ImageOutputSizes = imageOutputSizes
 		forwardResult.BillingModel = imageBillingModel
 	}
-	return forwardResult, nil
+	return forwardResult, partialErr
 }
 
 func logOpenAIPassthroughInstructionsRejected(
@@ -1107,6 +1126,9 @@ type openaiStreamingResultPassthrough struct {
 	responseID       string
 	imageCount       int
 	imageOutputSizes []string
+	// clientSawOutput: semantic output was written, or a write failed; a
+	// stream that broke afterwards is billed for its usage so far.
+	clientSawOutput bool
 }
 
 type openaiNonStreamingResultPassthrough struct {
@@ -2114,6 +2136,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			responseID:       responseID,
 			imageCount:       imageCounter.Count(),
 			imageOutputSizes: imageCounter.Sizes(),
+			clientSawOutput:  clientOutputStarted || clientDisconnected,
 		}
 	}
 
