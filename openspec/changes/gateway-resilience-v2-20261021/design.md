@@ -92,7 +92,7 @@
 | `Prelude` | 开场事件，可以丢弃后由新尝试重放 |
 | `Content` | 不可重放的输出 |
 | `TerminalSuccess` | 正常终态 |
-| `TerminalFailure` | 失败终态；`Retryable` 表示可以换号（错误分类复用 `Classify`） |
+| `TerminalFailure` | 失败终态；`Retryable` 表示可以换号。可重试判据用 `ClassifyWithSettings(..., Current())`，随 `failure.decision_v2` 与 `failure.balance_keywords_extra` 变化（审查 P2-4）；函数本身仍不做 I/O |
 | `Unknown` | 按 `Content` 处理，保守 |
 
 开场事件：
@@ -116,7 +116,7 @@
   - 过滤器按行有界解析：超过 4 KiB 的行原样透传，并保守地停止识别之后的空帧（这一行可能就是 created），不冒险丢真实数据。
 - 带标记的伪保活帧仍只受总开关控制（旧行为）；泛化部分受 `stream.native_prelude_whitelist`（`NativePreludeWhitelistOn()`）控制，关闭时只识别带标记的帧。实现提交 `bdbca7197`。
 
-终态：Responses 的 `response.completed`/`response.done` 为成功，`response.failed`/`error` 为失败，`response.incomplete` 为不可重试的失败终态；Chat 的 `[DONE]` 为成功，带 `error` 的 chunk 为失败；Messages 的 `message_stop` 为成功。
+终态：Responses 的 `response.completed`/`response.done` 为成功，`response.failed`/`error` 为失败，`response.incomplete` 为不可重试的失败终态；Chat 的 `[DONE]` 为成功，带非空 `error` 的 chunk 为失败（`"error": null` 不算，审查 P2-5）；Messages 的 `message_stop` 为成功。
 
 ### 3.2 判断顺序
 
