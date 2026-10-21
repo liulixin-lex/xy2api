@@ -51,12 +51,6 @@ func randIntInRange(minVal, maxVal int) int {
 	return minVal + rand.IntN(maxVal-minVal+1) //nolint:gosec
 }
 
-// validateChallenge 在完整的响应正文中查找 expected 整数答案，返回是否通过校验。
-// <think> 标签内的内容不参与校验。
-func validateChallenge(responseText, expected string) bool {
-	return probeAnswerFound(stripThinkBlocks(responseText), expected, true)
-}
-
 // probeAnswerFound 在正文 visible 中查找独立出现的整数 expected。
 // 末尾的数字可能还没收完（"4" 之后还会来 "0"），所以只有后面紧跟非数字字符，
 // 或 final（正文已经完整）时才算找到。

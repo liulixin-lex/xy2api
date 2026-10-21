@@ -18,12 +18,16 @@ func TestSignVerifyRoundTrip(t *testing.T) {
 func TestVerifyRejectsTamperingSkewAndOtherKeys(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	value := Sign(7, "sk-site", now)
+	last := "0"
+	if strings.HasSuffix(value, "0") {
+		last = "1"
+	}
 	cases := map[string]struct {
 		value, apiKey string
 		at            time.Time
 	}{
 		"other monitor": {strings.Replace(value, "v1.7.", "v1.8.", 1), "sk-site", now},
-		"bad mac":       {value[:len(value)-1] + "0", "sk-site", now},
+		"bad mac":       {value[:len(value)-1] + last, "sk-site", now},
 		"too old":       {value, "sk-site", now.Add(61 * time.Second)},
 		"from future":   {value, "sk-site", now.Add(-61 * time.Second)},
 		"empty":         {"", "sk-site", now},

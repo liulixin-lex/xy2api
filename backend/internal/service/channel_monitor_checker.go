@@ -48,15 +48,6 @@ type CheckOptions struct {
 	BodyOverride map[string]any
 }
 
-// runCheckForModel 对单个 (provider, model) 做一轮探测：流式请求、读到答案即停，
-// 30 秒总预算、响应时间超过 10 秒为 degraded（见 channel_monitor_probe_run.go）。
-// 不返回 error：所有失败都包装进 CheckResult.Status=error/failed。
-//
-// opts 承载模板 / 监控快照带来的自定义配置。nil 等同于 "off + 无 extra headers"。
-func runCheckForModel(ctx context.Context, provider, endpoint, apiKey, model string, opts *CheckOptions) *CheckResult {
-	return runProbe(ctx, provider, endpoint, apiKey, model, opts, defaultProbeLimits())
-}
-
 // bodyOverrideMode 归一取 opts.BodyOverrideMode，nil opts / 空串都视为 off。
 func bodyOverrideMode(opts *CheckOptions) string {
 	if opts == nil || opts.BodyOverrideMode == "" {
