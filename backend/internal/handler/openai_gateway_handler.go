@@ -714,9 +714,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "compact_not_supported", "No available accounts support /responses/compact", streamStarted)
 					return
 				}
-				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, requestPlatform)
+				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, requestPlatform, err)
 				cls = classifySelectionFailureError(err, cls)
-				if !cls.ModelNotFound {
+				if !cls.ModelNotFound && !cls.CapabilityOnly {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
 				h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
@@ -731,7 +731,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 		if selection == nil || selection.Account == nil {
 			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, requestPlatform)
-			if !cls.ModelNotFound {
+			if !cls.ModelNotFound && !cls.CapabilityOnly {
 				markOpsRoutingCapacityLimited(c)
 			}
 			h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
@@ -1362,7 +1362,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			if len(failedAccountIDs) == 0 {
 				if err != nil {
 					cls := classifyOpenAICompatibleNoAccountErrorFromGin(c, h.gatewayService, apiKey, currentRoutingModel, reqModel)
-					if !cls.ModelNotFound {
+					if !cls.ModelNotFound && !cls.CapabilityOnly {
 						markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 					}
 					h.anthropicStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
@@ -1379,7 +1379,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		}
 		if selection == nil || selection.Account == nil {
 			cls := classifyOpenAICompatibleNoAccountErrorFromGin(c, h.gatewayService, apiKey, currentRoutingModel, reqModel)
-			if !cls.ModelNotFound {
+			if !cls.ModelNotFound && !cls.CapabilityOnly {
 				markOpsRoutingCapacityLimited(c)
 			}
 			h.anthropicStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
@@ -1692,6 +1692,11 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 	}
 	if failoverErr != nil {
 		copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
+	}
+	if failoverErr.IsCapabilityStreamOnly() {
+		status, errType, message := resilienceCapacityExhausted(c, failoverErr, http.StatusServiceUnavailable, "api_error", "")
+		write(status, errType, message)
+		return
 	}
 	if failoverErr != nil && failoverErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(failoverErr)

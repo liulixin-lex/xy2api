@@ -184,6 +184,11 @@ func applyNoAccountRetryHints(c *gin.Context, diag any, apiKey *service.APIKey, 
 	if c == nil || c.Request == nil || !cfg.ErrorsOn() || cls.ModelNotFound {
 		return
 	}
+	if cls.CapabilityOnly {
+		suppressResilienceRetryAdvice(c, resilience.ReasonCapabilityStreamOnly)
+		c.Header("x-should-retry", "false")
+		return
+	}
 	ctx := c.Request.Context()
 	if resilience.StateFrom(ctx).ConfigError() {
 		resilience.SetRetryAdvice(ctx, resilience.RetryAdvice{Suppress: true, Source: "config_rejection"})
@@ -246,6 +251,11 @@ func applyExhaustedRetryHint(c *gin.Context, diag any, status int) int {
 	cfg := resilience.Current()
 	if c == nil || c.Request == nil || !cfg.ErrorsOn() ||
 		(status != http.StatusTooManyRequests && status < http.StatusInternalServerError && !resilienceTerminalHint(c, status)) {
+		return status
+	}
+	if advice := resilience.RetryAdviceFrom(c.Request.Context()); advice.Suppress && advice.Source == resilience.ReasonCapabilityStreamOnly {
+		suppressResilienceRetryAdvice(c, resilience.ReasonCapabilityStreamOnly)
+		c.Header("x-should-retry", "false")
 		return status
 	}
 	if resilienceCapTurn(c) {

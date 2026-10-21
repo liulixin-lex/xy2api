@@ -100,7 +100,7 @@ func (s *OpenAIGatewayService) selectAccountWithShareScheduling(ctx context.Cont
 		return nil, decision, err
 	}
 	if len(accounts) == 0 {
-		return nil, decision, noAvailableOpenAISelectionError(in.model, false, stats.summary(""))
+		return nil, decision, noAvailableOpenAISelectionError(in.model, false, stats.summary(""), stats.capabilityOnly())
 	}
 	req, _ := svc.newRequest(ctx, gp, in.platform, in.model, sessionHash, binding)
 	rec := shareDecisionRecord{gp: gp, idle: req.Binding.Idle, cache: req.Cache}
@@ -126,7 +126,7 @@ func (s *OpenAIGatewayService) selectAccountWithShareScheduling(ctx context.Cont
 		for _, reason := range exec.skipped {
 			stats.exclude(string(reason))
 		}
-		return nil, decision, noAvailableOpenAISelectionError(in.model, false, stats.summary("share_plan_exhausted"))
+		return nil, decision, noAvailableOpenAISelectionError(in.model, false, stats.summary("share_plan_exhausted"), stats.capabilityOnly())
 	}
 	svc.recordDecision(rec, d, out)
 	if out.result != nil && out.result.Account != nil {
@@ -274,7 +274,11 @@ func (s *OpenAIGatewayService) shareOpenAICandidates(ctx context.Context, in ope
 		c.Reason, c.RecoverAt = gates.candidateReason(acc, now)
 		c.Eligible = c.Reason == ""
 		if !c.Eligible {
-			stats.exclude(string(c.Reason))
+			reason := string(c.Reason)
+			if c.Reason == sharesched.ReasonCapabilityMismatch && resilience.CapabilityExcluded(ctx, acc.ID) {
+				reason = resilience.ReasonCapabilityStreamOnly
+			}
+			stats.exclude(reason)
 		}
 		c.StableSince = s.shareScheduling.observeEligibility(acc.ID, c.Eligible, c.Reason, now)
 		cands = append(cands, c)
@@ -365,7 +369,7 @@ func (g *openAIShareGates) candidateReason(acc *Account, now time.Time) (sharesc
 		return sharesched.ReasonQuotaAutoPause, time.Time{}
 	case reason == "platform_mismatch":
 		return sharesched.ReasonPlatformMismatch, time.Time{}
-	case reason == "capability_mismatch":
+	case reason == "capability_mismatch" || reason == resilience.ReasonCapabilityStreamOnly:
 		return sharesched.ReasonCapabilityMismatch, time.Time{}
 	default:
 		return sharesched.ReasonModelUnsupported, time.Time{}

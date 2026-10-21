@@ -56,10 +56,11 @@ func anthropicLocalErrorType(status int, errType string) string {
 //     after a backoff can plausibly succeed (or, in the empty-pool case, the
 //     operator may be in the middle of adding accounts).
 type noAccountErrorClassification struct {
-	Status        int
-	ErrType       string
-	Message       string
-	ModelNotFound bool // true when this is a 404 model_not_found classification
+	Status         int
+	ErrType        string
+	Message        string
+	ModelNotFound  bool // true when this is a 404 model_not_found classification
+	CapabilityOnly bool // every candidate was excluded for non-streaming capability
 }
 
 var selectionModelRateLimitedPattern = regexp.MustCompile(`(?:model_rate_limited|rate_limited)=(\d+)`)
@@ -69,6 +70,9 @@ var selectionModelRateLimitedPattern = regexp.MustCompile(`(?:model_rate_limited
 func classifySelectionFailureError(err error, fallback noAccountErrorClassification) noAccountErrorClassification {
 	if err == nil {
 		return fallback
+	}
+	if service.IsCapabilityOnlySelectionError(err) {
+		return noAccountErrorClassification{Status: http.StatusServiceUnavailable, ErrType: "api_error", Message: service.CapabilityOnlyMessage, CapabilityOnly: true}
 	}
 	// A 404 model_not_found fallback is authoritative and must not be downgraded
 	// to a rate-limit verdict. classifyNoAccountError only reaches it through
@@ -171,12 +175,18 @@ func classifyNoAccountErrorFromGin(
 	routingModel string,
 	displayModel string,
 	platform string,
+	selectionErrors ...error,
 ) noAccountErrorClassification {
 	ctx := context.Background()
 	if c != nil && c.Request != nil {
 		ctx = c.Request.Context()
 	}
-	classification := classifyNoAccountError(ctx, diag, apiKey, routingModel, displayModel, platform)
+	var classification noAccountErrorClassification
+	if len(selectionErrors) > 0 && service.IsCapabilityOnlySelectionError(selectionErrors[0]) {
+		classification = classifySelectionFailureError(selectionErrors[0], classification)
+	} else {
+		classification = classifyNoAccountError(ctx, diag, apiKey, routingModel, displayModel, platform)
+	}
 	if classification.ModelNotFound {
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 	}
@@ -191,6 +201,7 @@ func classifyOpenAICompatibleNoAccountErrorFromGin(
 	apiKey *service.APIKey,
 	routingModel string,
 	displayModel string,
+	selectionErrors ...error,
 ) noAccountErrorClassification {
 	ctx := context.Background()
 	if c != nil && c.Request != nil {
@@ -203,6 +214,7 @@ func classifyOpenAICompatibleNoAccountErrorFromGin(
 		routingModel,
 		displayModel,
 		openAICompatibleRequestPlatform(ctx, apiKey),
+		selectionErrors...,
 	)
 }
 
