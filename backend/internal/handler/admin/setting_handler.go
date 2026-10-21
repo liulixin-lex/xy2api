@@ -384,6 +384,8 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		ClaudeCacheFallbackPolicy:            settings.ClaudeCacheFallbackPolicy,
 		AdminUsageCacheHitRateEnabled:        settings.AdminUsageCacheHitRateEnabled,
 		AdminUsageTokenSpeedEnabled:          settings.AdminUsageTokenSpeedEnabled,
+		UsageCacheHitRatePublic:              settings.UsageCacheHitRatePublic,
+		UsageTokenSpeedPublic:                settings.UsageTokenSpeedPublic,
 		ChannelMonitorEnabled:                settings.ChannelMonitorEnabled,
 		ChannelMonitorMode:                   settings.ChannelMonitorMode,
 		ChannelMonitorDefaultIntervalSeconds: settings.ChannelMonitorDefaultIntervalSeconds,

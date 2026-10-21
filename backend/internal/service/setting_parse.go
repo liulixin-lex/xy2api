@@ -187,6 +187,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 
 		SettingKeyAdminUsageCacheHitRateEnabled: "true",
 		SettingKeyAdminUsageTokenSpeedEnabled:   "true",
+		SettingKeyUsageCacheHitRatePublic:       "false",
+		SettingKeyUsageTokenSpeedPublic:         "false",
 
 		// Channel monitor defaults (enabled, 60s)
 		SettingKeyChannelMonitorEnabled:                "true",
@@ -807,6 +809,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.ClaudeCacheFallbackPolicy = readClaudeCacheFallbackPolicy([]byte(settings[SettingKeyClaudeCacheFallbackPolicy]))
 	result.AdminUsageCacheHitRateEnabled = !isFalseSettingValue(settings[SettingKeyAdminUsageCacheHitRateEnabled])
 	result.AdminUsageTokenSpeedEnabled = !isFalseSettingValue(settings[SettingKeyAdminUsageTokenSpeedEnabled])
+	result.UsageCacheHitRatePublic = settings[SettingKeyUsageCacheHitRatePublic] == "true"
+	result.UsageTokenSpeedPublic = settings[SettingKeyUsageTokenSpeedPublic] == "true"
 
 	// Channel monitor feature (default: enabled, 60s)
 	result.ChannelMonitorEnabled = !isFalseSettingValue(settings[SettingKeyChannelMonitorEnabled])

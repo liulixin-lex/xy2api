@@ -7194,14 +7194,42 @@
                 <label id="usage-cache-hit-rate-label" class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.settings.features.usageMetrics.cacheHitRate') }}</label>
                 <p id="usage-cache-hit-rate-hint" class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.usageMetrics.cacheHitRateHint') }}</p>
               </div>
-              <Toggle v-model="form.admin_usage_cache_hit_rate_enabled" aria-labelledby="usage-cache-hit-rate-label" aria-describedby="usage-cache-hit-rate-hint" />
+              <div class="flex shrink-0 items-center gap-3">
+                <button
+                  type="button"
+                  data-testid="usage-cache-hit-rate-public"
+                  class="inline-flex min-w-[6.5rem] items-center justify-center whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition"
+                  :class="form.usage_cache_hit_rate_public
+                    ? 'bg-primary-50 text-primary-700 ring-primary-200 hover:bg-primary-100 dark:bg-primary-500/15 dark:text-primary-300 dark:ring-primary-500/30'
+                    : 'bg-gray-50 text-gray-600 ring-gray-200 hover:bg-gray-100 dark:bg-dark-800 dark:text-dark-300 dark:ring-dark-600 dark:hover:bg-dark-700'"
+                  :title="t(form.usage_cache_hit_rate_public ? 'admin.settings.features.usageMetrics.visibilityPublicHint' : 'admin.settings.features.usageMetrics.visibilityAdminOnlyHint')"
+                  @click="form.usage_cache_hit_rate_public = !form.usage_cache_hit_rate_public"
+                >
+                  {{ t(form.usage_cache_hit_rate_public ? 'admin.settings.features.usageMetrics.visibilityPublic' : 'admin.settings.features.usageMetrics.visibilityAdminOnly') }}
+                </button>
+                <Toggle v-model="form.admin_usage_cache_hit_rate_enabled" aria-labelledby="usage-cache-hit-rate-label" aria-describedby="usage-cache-hit-rate-hint" />
+              </div>
             </div>
             <div class="flex items-center justify-between gap-4">
               <div>
                 <label id="usage-token-speed-label" class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.settings.features.usageMetrics.tokenSpeed') }}</label>
                 <p id="usage-token-speed-hint" class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.usageMetrics.tokenSpeedHint') }}</p>
               </div>
-              <Toggle v-model="form.admin_usage_token_speed_enabled" aria-labelledby="usage-token-speed-label" aria-describedby="usage-token-speed-hint" />
+              <div class="flex shrink-0 items-center gap-3">
+                <button
+                  type="button"
+                  data-testid="usage-token-speed-public"
+                  class="inline-flex min-w-[6.5rem] items-center justify-center whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition"
+                  :class="form.usage_token_speed_public
+                    ? 'bg-primary-50 text-primary-700 ring-primary-200 hover:bg-primary-100 dark:bg-primary-500/15 dark:text-primary-300 dark:ring-primary-500/30'
+                    : 'bg-gray-50 text-gray-600 ring-gray-200 hover:bg-gray-100 dark:bg-dark-800 dark:text-dark-300 dark:ring-dark-600 dark:hover:bg-dark-700'"
+                  :title="t(form.usage_token_speed_public ? 'admin.settings.features.usageMetrics.visibilityPublicHint' : 'admin.settings.features.usageMetrics.visibilityAdminOnlyHint')"
+                  @click="form.usage_token_speed_public = !form.usage_token_speed_public"
+                >
+                  {{ t(form.usage_token_speed_public ? 'admin.settings.features.usageMetrics.visibilityPublic' : 'admin.settings.features.usageMetrics.visibilityAdminOnly') }}
+                </button>
+                <Toggle v-model="form.admin_usage_token_speed_enabled" aria-labelledby="usage-token-speed-label" aria-describedby="usage-token-speed-hint" />
+              </div>
             </div>
           </div>
         </div>
@@ -10104,6 +10132,8 @@ const form = reactive<SettingsForm>({
   // Channel Monitor feature switch
   admin_usage_cache_hit_rate_enabled: true,
   admin_usage_token_speed_enabled: true,
+  usage_cache_hit_rate_public: false,
+  usage_token_speed_public: false,
   channel_monitor_enabled: true,
   channel_monitor_mode: 'v1' as 'v1' | 'v2',
   channel_monitor_default_interval_seconds: 60,
@@ -11141,6 +11171,8 @@ async function loadSettings() {
       settings.login_agreement_mode === "checkbox" ? "checkbox" : "modal";
     form.admin_usage_cache_hit_rate_enabled = settings.admin_usage_cache_hit_rate_enabled ?? true;
     form.admin_usage_token_speed_enabled = settings.admin_usage_token_speed_enabled ?? true;
+    form.usage_cache_hit_rate_public = settings.usage_cache_hit_rate_public ?? false;
+    form.usage_token_speed_public = settings.usage_token_speed_public ?? false;
     form.channel_monitor_mode =
       settings.channel_monitor_mode === "v2" ? "v2" : "v1";
     form.channel_monitor_hide_throughput = Boolean(
@@ -11848,6 +11880,8 @@ async function saveSettings() {
       // Channel Monitor feature switch
       admin_usage_cache_hit_rate_enabled: form.admin_usage_cache_hit_rate_enabled,
       admin_usage_token_speed_enabled: form.admin_usage_token_speed_enabled,
+      usage_cache_hit_rate_public: form.usage_cache_hit_rate_public,
+      usage_token_speed_public: form.usage_token_speed_public,
       channel_monitor_enabled: form.channel_monitor_enabled,
       channel_monitor_mode: form.channel_monitor_mode === 'v1' ? 'v1' : 'v2',
       channel_monitor_default_interval_seconds:
