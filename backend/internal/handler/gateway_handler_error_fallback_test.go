@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,24 +18,36 @@ import (
 
 func TestGatewayEnsureForwardErrorResponse_WritesFallbackWhenNotWritten(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+	for _, tc := range []struct {
+		name     string
+		enabled  bool
+		wantType string
+	}{
+		{"enabled", true, "api_error"},
+		{"legacy", false, "upstream_error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withHandlerResilience(t, func(s *resilience.Settings) { s.Errors.Enabled = tc.enabled })
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
 
-	h := &GatewayHandler{}
-	wrote := h.ensureForwardErrorResponse(c, false)
+			h := &GatewayHandler{}
+			wrote := h.ensureForwardErrorResponse(c, false)
 
-	require.True(t, wrote)
-	require.Equal(t, http.StatusBadGateway, w.Code)
+			require.True(t, wrote)
+			require.Equal(t, http.StatusBadGateway, w.Code)
 
-	var parsed map[string]any
-	err := json.Unmarshal(w.Body.Bytes(), &parsed)
-	require.NoError(t, err)
-	assert.Equal(t, "error", parsed["type"])
-	errorObj, ok := parsed["error"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "upstream_error", errorObj["type"])
-	assert.Equal(t, "Upstream request failed", errorObj["message"])
+			var parsed map[string]any
+			err := json.Unmarshal(w.Body.Bytes(), &parsed)
+			require.NoError(t, err)
+			assert.Equal(t, "error", parsed["type"])
+			errorObj, ok := parsed["error"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, tc.wantType, errorObj["type"])
+			assert.Equal(t, "Upstream request failed", errorObj["message"])
+		})
+	}
 }
 
 // Writer 已写后 ensureForwardErrorResponse 必须把错误以 SSE 形式追加，
