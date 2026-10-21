@@ -241,6 +241,7 @@
 - `20261021-resilience-v2-gamma`（γ 2026-10-21T01:27Z 经 DOCS 代登记）：分支 `rv2/be-c`，基线 `027a434ad`；负责 C0、W2.1-lite、W6-lite；只在本地提交，不推送、不碰生产。C0 沿用现有设置键 `gateway_resilience_settings`：0.4.3 读存储时用 `json.Unmarshal`，忽略未知字段；管理端 PUT 的严格校验不影响存储回退。
   - 2026-10-21T04:05Z：**分支冻结**，最终 HEAD `ae783b370`，工作树干净，无推送、无生产操作。C0 `95e8a6416`、W2.1-lite `0d3e72508`、W6 `2cb3343de`、RetryAdvice advisor `d4db8d426`，以及审查修复 `126fead6f`（防误学）、`a03ad9c79`（同协议过滤）、`fae3d89d8`（混合排除保持 503）、`f61b7d497`（只因能力而无号）、`4ac81dc94`（明确限流文案）、`29f26652d`（轻量守卫与 P2-2 登记）、`ae783b370`（纯能力耗尽清理旧重试秒数）。集成须带上后四个，不止 `f61b7d497`。按 PM 裁剪未做：A-P2-4、A-P2-7（物理删除 extra 键）、A-P2-8（按模型学习）；A-P2-3 指纹算法不改，OAuth 刷新后重新学习列为已知限制。
   - 2026-10-21T04:17Z：**冻结后 lint 修复中**（PM 指令 3 的例外）：只修 α 报出的 7 项 lint，不改行为与边界测试，修完单独提交并给出新的最终 HEAD。
+  - 2026-10-21T04:20Z：γ 自有文件的增量 lint 已清零（剩 α 名下 `retry_advice_test.go` 两处 SA1012，按所有权未改），纯 lint 单独提交。另按 PM 指令 4（第二轮审查 P1，用户确认授权）修 `param` 为 null 或空值时被误判为“指向其他参数”而拒学的问题，先写红测，另作 fix 提交。
 - 各 agent 的进度与变更登记在仓库外的 `briefs/PROGRESS_*.md` 与 `contract/CHANGES_*.md`。
 - 第 0 批（Claude 首事件截止，2026-10-21T01:09Z）：生产只读评估 7 天分布后**保持 90 秒，生产未写入**。流式 Messages 首字超过 45 秒约 0.45%，首字只是首事件时延的上界；生产 settings 表里没有韧性设置行（运行态为缺省值），用户限定的单条 CAS UPDATE 无法成立。报告在仓库外 `prod/O4_REPORT.md`。
 - 生产探测（2026-10-21）：多数中转在首个正文 delta 前发 created、in_progress 与空的 added 结构；部分中转在 created 之前先发一个 delta；未观察到 `codex.response.metadata`。PM 据此决定白名单不含元数据事件（OpenSpec design §3.1）。

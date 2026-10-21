@@ -10,6 +10,14 @@ With `capability.stream_only_learning` on, when a non-streaming OpenAI Responses
 - **WHEN** a non-streaming Responses request is sent to account A, A returns 400 "This group only accepts streaming requests", and account B can serve
 - **THEN** the request succeeds on B, A is marked stream-only for Responses, and A is not cooled down.
 
+#### Scenario: Null or empty param
+- **WHEN** the rejection body is `{"error":{"message":"This group only accepts streaming requests","param":null}}`, or `param` is `""` or `"stream"`
+- **THEN** the account is learned as stream-only.
+
+#### Scenario: Another parameter is named
+- **WHEN** the rejection carries `"param":"reasoning.effort"`
+- **THEN** nothing is learned.
+
 #### Scenario: Switch off
 - **WHEN** `capability.stream_only_learning` is off and the same rejection happens
 - **THEN** nothing is learned and the 400 is returned as in 0.4.3.
