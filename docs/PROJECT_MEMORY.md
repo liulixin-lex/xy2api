@@ -120,8 +120,10 @@
 ### 20261021-integ-0.4.5-prep — 0.4.5 本地集成（2026-10-21T12:51Z 授权）
 
 - 请求：PM 放行从 main `a1cf8f104` 建本地分支 `integ/0.4.5-prep`，按 RA-1 → ε → DOCS → δ 合入；仅本地提交，不推送、不开 PR、不发布或部署。
-- 组成：RA-1 `4ef7be248`；ε `10f2edd6b`；DOCS `docs/045-prep` 最新 `eb95a4a10`；δ `74133b338`（owner 已确认该 HEAD 定向 `-race` 通过）。记忆以 main 为准，网关说明与 policy 保留双方增补。
-- 待完成：复现并只在测试中修复 `contentModerationHandlerSettingRepo` 竞争，修前修后均 `-race -count=3`；产品版本 0.4.5；policy 与 scheduler-diff；全量本地门禁（含安全检查）及干净树 audit；交 PM 安排集成审查。
+- 已合入：RA-1 `4ef7be248` → ε `10f2edd6b` → DOCS `eb95a4a10` → δ `74133b338`（owner 已确认该 HEAD 定向 `-race` 通过），随后补合 DOCS 最终审查记录 `a52387c0b`。记忆以 main 为准；网关说明冲突与 policy 测试列表冲突保留双方增补，已逐项核对 required_literals 与 custom_patch_tests 无丢失。
+- 夹具修复：独立提交 `c906ba5ca` 仅改测试，给 `contentModerationHandlerSettingRepo` 全部读写方法加 RWMutex，新增直接并发回归。在 main `a1cf8f104` 的未修夹具上，原取消/断连用例与新回归分别 `-race -count=3` 复现；修后三条用例同参数通过（21 项、零失败/跳过/竞争）。临时基线工作树已恢复自己的改动并正常移除。
+- 当前：产品版本改为 0.4.5，policy 合并登记完成；四个原版调度文件相对 main 无变化，保留既有 scheduler-diff 差异块并注明复核。
+- 待完成：全量本地门禁（含安全检查）及干净树 audit；交 PM 安排集成审查。推送、PR、候选构建和发版均待后续授权。
 - 证据：仓库外冲刺目录 `evidence/integ-045/` 与 `briefs/PROGRESS_A.md`；不合入监控或诊断分支。
 
 ### 20261021-soak-6h5-0.4.4 — 生产部署前的 6.5 小时浸泡（2026-10-21T10:50Z 登记）

@@ -34,9 +34,9 @@
 - [x] 3.5 透传在心跳已提交 200 后命中错误透传规则时，写 `response.created` 与 `response.failed`，不再接裸 JSON（审查 DELTA-P1-2，`6420bc73c`；普通 OpenAI Responses 路径同样修复，两条路径共用一个写出函数，`74133b338`）；反向转换器停滞出口的计费用例（DELTA-P2-6，`ab227b00f`，只改测试）。
 - [x] 3.6 审查：`74133b338` 可以并入 0.4.5 候选，没有剩余的 P0、P1（DELTA-P1-1、P1-2 已关闭；DELTA-P2-4 记为已知差异，`review/CODE_REVIEW_045_DELTA.md`）。前提是 δ 在该 HEAD 上的定向 `-race` 通过；之后再有代码提交需要重新复核。
 
-## 4. 集成（α，用户决定发 0.4.5 之后）
+## 4. 集成（α，PM 2026-10-21T12:51Z 授权本地集成）
 
-- [ ] 4.1 合入 ε（含 RA-1）、δ 与本文档分支；手工合并 `GATEWAY_RESILIENCE.md` 第 18、133 行与 `policy.json` 的具名补丁测试；`VERSION` 与 `UPSTREAM_BASE.json` 改为 0.4.5。
+- [x] 4.1 按 RA-1 → ε → DOCS → δ 合入；手工合并 `GATEWAY_RESILIENCE.md` 的可重放前缀与严格终止说明、`policy.json` 的具名补丁测试，两边增补全部保留；`VERSION` 与 `UPSTREAM_BASE.json` 改为 0.4.5。基线既有的 `contentModerationHandlerSettingRepo` 竞争以只改测试的独立提交 `c906ba5ca` 修复，修前复现、修后 `-race -count=3` 通过。四个原版调度文件相对 main 无变化，scheduler-diff 保留既有差异登记。
 - [ ] 4.2 全量门禁：gofmt、四种 vet、golangci-lint、unit 与无 tag 测试、`ci_gate.py`（`-race`，零跳过）、`govulncheck`、前端四项与依赖审计、`tools/tests`、文档一致性、scheduler-diff、干净树 `sync.py audit`。
 - [ ] 4.3 对集成结果的独立审查。
 
