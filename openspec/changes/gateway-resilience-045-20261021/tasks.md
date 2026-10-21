@@ -44,7 +44,7 @@
   - 2026-10-21T15:51Z，α 在本地集成分支 `integ/0.4.5-prep`：门禁对象是产品代码 `46239531d`，25/25 通过。最终本地候选 `b966306de` 只追加了记忆与归档提交，代码与 `46239531d` 逐字一致，并在最终 HEAD 上复验文档检查与干净树 audit；`VERSION` 与 `UPSTREAM_BASE.json` 为 0.4.5。
   - unit：第三轮原始结果 24 项通过、1 项失败，失败的是 `TestInflightEstimate_AccountMappingNoDBAndBoundedMemory` 的全局堆阈值（基线既有的偶发，见 7.4）。单独重跑 5 次全过；按 PM 指示用原命令完整重跑 unit（attempt3b）通过，以它替代该项结果，原失败保留。没有跳过用例，也没有放宽阈值。
   - 其余：无 tag 测试；`ci_gate.py` 390 个顶层用例 `-race` 0 跳过；service 与 handler 的额外定向 `-race` 全部执行、0 失败；前端 413 个文件、3182 个用例；四种 vet 与 lint；`govulncheck` 无可达漏洞；依赖审计无高危、严重；`tools/tests` 41 例；文档检查、scheduler-diff、带前端产物的构建、干净树 audit。
-- [ ] 4.3 对集成结果的独立审查。
+- [x] 4.3 对集成结果的独立审查：`46239531d` 可以作为 0.4.5 本地候选，没有 P0、P1，也没有新的 P2（REVIEW 增量补审 2026-10-21T15:35Z）；`b966306de` 只追加记忆与归档、无代码改动，确认为最终本地候选（`review/CODE_REVIEW_045_INTEG.md`）。
 
 ## 5. 测试服务器验证（QA）
 
