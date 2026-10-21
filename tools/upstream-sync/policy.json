@@ -55,6 +55,7 @@
     ],
     "manual_merge": [
       "Makefile",
+      "backend/Dockerfile",
       "backend/go.sum",
       "backend/internal/handler/redeem_handler.go",
       "backend/internal/repository/account_repo_upstream_billing_probe_update_test.go",
@@ -230,6 +231,10 @@
     ]
   },
   "required_literals": [
+    {
+      "path": "backend/Dockerfile",
+      "value": "FROM golang:1.27.3-alpine"
+    },
     {
       "path": "backend/internal/service/openai_gateway_request_body.go",
       "value": "if openAIGroupForcesFast(ctx, account) {\n\t\treturn OpenAIFastPolicyActionForcePriority, \"\""
