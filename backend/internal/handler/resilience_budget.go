@@ -152,6 +152,7 @@ func resilienceCapacityExhausted(c *gin.Context, failoverErr *service.UpstreamFa
 	if failoverErr.IsCapabilityStreamOnly() {
 		if c != nil && c.Request != nil && service.IsCapabilityOnlyExhaustion(c.Request.Context(), failoverErr) {
 			c.Writer.Header().Del("Retry-After")
+			c.Set(ginKeyResilienceRetryAfter, 0)
 			c.Header("x-should-retry", "false")
 			resilience.SetRetryAdvice(c.Request.Context(), resilience.RetryAdvice{Suppress: true, Source: resilience.ReasonCapabilityStreamOnly})
 			return http.StatusServiceUnavailable, "api_error", service.CapabilityOnlyMessage

@@ -298,6 +298,7 @@ func TestCapabilityOnlyExhaustionStopsBlindRetries(t *testing.T) {
 			c.Request = c.Request.WithContext(ctx)
 			resilience.SetRetryAdvice(ctx, resilience.RetryAdvice{Seconds: 5, Source: "recovery"})
 			c.Header("Retry-After", "5")
+			c.Set(ginKeyResilienceRetryAfter, 5)
 			if mixed {
 				resilienceAttemptFailed(ctx, 1, newTestFailoverErr(502, false, false))
 			}
@@ -306,13 +307,16 @@ func TestCapabilityOnlyExhaustionStopsBlindRetries(t *testing.T) {
 			status, typ, message := resilienceCapacityExhausted(c, failure, 400, "invalid_request_error", "stream must be true")
 			require.Equal(t, 503, status)
 			require.Equal(t, "api_error", typ)
+			_, _, translated := resilienceTranslateError(c, status, typ, "", message)
 			require.Equal(t, !mixed, service.IsCapabilityOnlyExhaustion(ctx, failure))
 			if mixed {
 				require.NotEqual(t, service.CapabilityOnlyMessage, message)
 				require.Equal(t, "5", recorder.Header().Get("Retry-After"))
 				require.False(t, resilience.RetryAdviceFrom(ctx).Suppress)
+				require.Contains(t, translated, "Please try again in 5s")
 			} else {
 				require.Equal(t, service.CapabilityOnlyMessage, message)
+				require.Equal(t, service.CapabilityOnlyMessage, translated)
 				require.Empty(t, recorder.Header().Get("Retry-After"))
 				require.Equal(t, "false", recorder.Header().Get("x-should-retry"))
 				require.True(t, resilience.RetryAdviceFrom(ctx).Suppress)
