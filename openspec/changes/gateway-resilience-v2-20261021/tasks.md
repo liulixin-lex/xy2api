@@ -6,7 +6,7 @@
 
 - [x] 0.1 项目记忆登记 `20261021-resilience-v2-0.4.4` 与各 agent 的代登记。
 - [ ] 0.2 OpenSpec 变更：proposal、design、tasks、规格增量；`docs/README.md` 目录。
-- [x] 0.3 C0 设置契约（γ，`contract/C0_SETTINGS.md`，2026-10-21T01:32Z 冻结）：字段、缺省、范围、存放、回退结论；已写入 design §1–§2。
+- [x] 0.3 C0 设置契约（γ，`contract/C0_SETTINGS.md`，2026-10-21T01:30Z 冻结）：字段、缺省、范围、存放、回退结论；已写入 design §1–§2。
 - [x] 0.4 RetryAdvice 契约（α，`contract/RETRY_ADVICE.md`）。
 - [x] 0.5 生产探测：Responses 首个 delta 之前的事件类型清单（2026-10-21，PM 指令据此定白名单，design §3.1）。
 
