@@ -1458,11 +1458,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "applyAttemptHeaders := func() {"
-    },
-    {
-      "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "if !reqStream && extractOpenAICodexTurnState(resp.Header) != \"\" {"
+      "value": "if extractOpenAICodexTurnState(resp.Header) != \"\" && !c.Writer.Written() {"
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
@@ -1982,18 +1978,18 @@
     },
     {
       "id": "xy-resilience-v2-streams",
-      "path": "backend/internal/service/openai_passthrough_attempt_headers_test.go",
-      "literal": "func TestOpenAIPassthroughHeartbeatCommitsOnlyStableStreamHeaders"
-    },
-    {
-      "id": "xy-resilience-v2-streams",
-      "path": "backend/internal/service/openai_passthrough_attempt_headers_test.go",
-      "literal": "func TestOpenAIPassthroughAttemptHeadersSwitchOff"
-    },
-    {
-      "id": "xy-resilience-v2-streams",
       "path": "backend/internal/service/openai_oauth_passthrough_test.go",
       "literal": "type passthroughCancelBody struct"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_turn_state_test.go",
+      "literal": "func TestOpenAIPassthroughHeartbeatCommitsAttemptHeaders"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_turn_state_test.go",
+      "literal": "func TestOpenAIPassthroughSwitchAfterHeartbeatKeepsFirstHeadersAndGuardStripsEcho"
     },
     {
       "id": "xy-resilience-v2-handler-exits",
