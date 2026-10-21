@@ -49,4 +49,21 @@ describe('ops resilience explain', () => {
     await w.get('form').trigger('submit'); await flushPromises()
     expect(w.get('[role="alert"]').text()).toContain('explain down')
   })
+
+  it('explains a non-streaming request of the chosen protocol', async () => {
+    const w = mountExplain(); await flushPromises()
+    await w.get('[data-testid="resilience-explain-group"]').setValue('3')
+    await w.get('[data-testid="resilience-explain-mode"]').setValue('responses')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.explain).toHaveBeenLastCalledWith(3, { protocol: 'responses', stream: false })
+
+    await w.get('[data-testid="resilience-explain-mode"]').setValue('chat')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.explain).toHaveBeenLastCalledWith(3, { protocol: 'chat', stream: false })
+
+    await w.get('[data-testid="resilience-explain-mode"]').setValue('')
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.explain).toHaveBeenLastCalledWith(3, {})
+  })
 })
+

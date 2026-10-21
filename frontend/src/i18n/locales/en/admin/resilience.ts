@@ -138,6 +138,10 @@ export default {
       groupPlaceholder: 'Select a group',
       model: 'Model (optional)',
       sessionHash: 'Session hash (optional)',
+      mode: 'Request type (optional)',
+      modeHint: 'With a protocol, explain a non-streaming request of it: accounts learned as stream-only are skipped. Leave empty for overall health.',
+      modes: { any: 'Any (overall health)', responses: 'Responses, non-streaming', chat: 'Chat, non-streaming' },
+      learned: 'Stream only: {protocols} ({time} left)',
       run: 'Explain',
       running: 'Loading…',
       failed: 'Failed to load the resilience explanation.',
@@ -171,7 +175,8 @@ export default {
         reason: 'Reason',
         recoverAt: 'Recovers at',
         sessionFailures: 'Session failures',
-        avoided: 'Avoided'
+        avoided: 'Avoided',
+        learned: 'Learned'
       },
       tiers: { none: 'Healthy', soft: 'Soft', hard: 'Hard' },
       reasons: {

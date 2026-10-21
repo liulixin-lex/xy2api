@@ -138,6 +138,10 @@ export default {
       groupPlaceholder: '选择分组',
       model: '模型（可选）',
       sessionHash: '会话哈希（可选）',
+      mode: '请求类型（可选）',
+      modeHint: '选择协议后，按该协议的非流式请求解释：学到“仅流式”的账号会被跳过；不选则看整体健康。',
+      modes: { any: '不限（整体健康）', responses: 'Responses 非流式', chat: 'Chat 非流式' },
+      learned: '仅流式：{protocols}（剩余 {time}）',
       run: '查看',
       running: '查询中…',
       failed: '无法读取韧性 Explain。',
@@ -171,7 +175,8 @@ export default {
         reason: '原因',
         recoverAt: '恢复时间',
         sessionFailures: '会话失败',
-        avoided: '回避'
+        avoided: '回避',
+        learned: '已学能力'
       },
       tiers: { none: '健康', soft: '软罚', hard: '硬罚' },
       reasons: {

@@ -6,6 +6,7 @@
 
 import { apiClient } from '../client'
 import type { PaginatedResponse } from '@/types'
+import type { AccountCapabilityLearned } from '@/utils/accountCapability'
 
 export interface ResilienceRange { min: number; max: number }
 
@@ -121,6 +122,8 @@ export interface ResilienceAccountExplanation {
   recover_at?: string
   session_failures?: number
   avoided?: boolean
+  /** 0.4.4: what was learned about the account, shown whatever the query. */
+  capability_learned?: AccountCapabilityLearned[]
 }
 
 /** Read-only resilience view of a group and, when given, one session. */
@@ -139,6 +142,9 @@ export interface ResilienceExplanation {
 export interface ResilienceExplainQuery {
   session_hash?: string
   model?: string
+  /** 0.4.4: with stream=false, explain a non-streaming request of this protocol (learned stream-only accounts are skipped). */
+  protocol?: 'responses' | 'chat'
+  stream?: boolean
 }
 
 const base = '/admin'
