@@ -231,7 +231,7 @@
   - 2026-10-21T03:46Z：只因能力而无号的专用应答与份额接线 `6322aa374`（提取 γ 的 `f61b7d497` 及其前置）；审查 P2-12 `8657fca89`、P2-13 `0d35b2919`、A-P2-3/A-P2-7（导出删除学习键、null 返回空数组）`9cf8a1f2d`。剩 P2-9、P2-11、P2-15；P2-16 按 PM 决定只登记（design §1）。
   - 2026-10-21T04:05Z：P2-11 `1e380d238`、P2-9 `db1dad57e`、P2-15 `abd7f67a2` 提交，α 的功能与审查项全部完成（P2-10、P2-14 本期不做，P2-16 只登记）。正在做增量 lint 收尾，之后按 PM 03:46Z 的安排提前集成。**全量门禁尚未执行。**
   - 2026-10-21T04:14Z：开发冻结，HEAD `54afdd784`（最后一个提交只修测试的 lint）；α 自有增量 lint 清零，resilience 相关 `-race` 通过。跨 owner 的 7 项 lint 已交 γ；`state.go` 的 `createdAt` 由 β 的方法引用，集成后自然消失。
-  - 2026-10-21T04:31Z：**冻结后 R2 修复中**（PM 04:31Z）：R2-P1①（暂存期心跳提交 200 后耗尽，Chat 与 Messages 在 `:` 之后追加了裸 JSON）、R2-P1②（导出 `RetryAdviceEligible` 单独提交给 β 用）与两项 P2（OpenAI→Messages 输出后耗尽不计回合；删尾句时保持原文标点）。修完再合入集成分支，与 γ PM4、QA `0ad64390c`、DOCS 最新与 β 的 R2 修复一起只跑一次全量门禁。
+  - 2026-10-21T04:31Z：**冻结后 R2 修复中**（PM 04:31Z）：R2-P1①（暂存期心跳提交 200 后耗尽，Chat 与 Messages 在 `:` 之后追加了裸 JSON）、R2-P1②（导出 `RetryAdviceEligible` 单独提交给 β 用）与两项 P2（OpenAI→Messages 输出后耗尽不计回合；删尾句时保持原文标点）。修完再合入集成分支，与 γ PM4、QA `0ad64390c`、DOCS 最新与 β 的 R2 修复一起只跑一次全量门禁。R2-P1② 的公共判定 `RetryAdviceEligible` 已单独提交 `cd46593f9`（供 β 提取）。
 - `20261021-rv2-fe`（FE 2026-10-21T00:55Z 经 DOCS 代登记）：负责新开关的设置界面与 i18n、账号仅流式学习状态的显示与清除、Explain 新原因文案；分支 `rv2/fe`，基线 `027a434ad`，初始工作树干净；只在本地提交。
   - 2026-10-21T04:05Z：交付完成，HEAD `bd215aa0c`（15 个提交，只改 `frontend/**`，17 个文件），工作树干净。HEAD 上 lint:check、typecheck、test:run（413 个文件、3182 个用例）、build（含 i18n 检查）全部通过。`AccountsView.vue` 的两处钩子建议登记为具名补丁 `xy-account-stream-only-learning`（α 集成时）。
 - `20261021-resilience-v2-qa`（QA 2026-10-21T00:55Z 经 DOCS 代登记）：分支 `rv2/qa`，基线 `027a434ad`；阶段 1 为新故障与场景，阶段 2（候选验证）在 PM 指定提交放行后才开始。QA 结束时由 DOCS 代为同步交接与操作日志。
