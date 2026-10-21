@@ -114,9 +114,11 @@ func TestOpenAIPassthroughHeartbeatCommitsAttemptHeaders(t *testing.T) {
 
 // After a heartbeat, attempt A misses its first-output deadline and B
 // succeeds: the client keeps A's headers (known difference). Its next
-// request echoes A's blob; routed to B, the guard strips it.
+// request echoes A's blob; routed to B, the guard strips it. B's own
+// turn-state never reaches the client, so it must not take over the
+// provenance either.
 func TestOpenAIPassthroughSwitchAfterHeartbeatKeepsFirstHeadersAndGuardStripsEcho(t *testing.T) {
-	for _, bMints := range []bool{false} {
+	for _, bMints := range []bool{false, true} {
 		t.Run("b_mints_turn_state="+fmtBool(bMints), func(t *testing.T) {
 			withResilienceSettings(t, nil)
 			c, rec := ptTurnStateContext()

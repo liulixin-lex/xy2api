@@ -1444,6 +1444,10 @@
       "value": "writeOpenAIStreamRuleError(ctx, c, status, errType, errMsg)"
     },
     {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "if extractOpenAICodexTurnState(resp.Header) != \"\" && !c.Writer.Written() {"
+    },
+    {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
       "value": "writeOpenAIStreamRuleError(ctx, c, status, errType, errMsg)"
     }
