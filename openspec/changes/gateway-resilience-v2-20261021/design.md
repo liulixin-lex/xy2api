@@ -212,7 +212,7 @@
 - 账号列表与详情返回 `capability_learned: [{protocol: "responses"|"chat", mode: "stream_only", expires_at: <RFC3339 UTC>}]`（`Account.CapabilityLearned(now)`，导出类型 `resilience.LearnedCapability{Protocol, Mode, ExpiresAt}`），没有记录时为空数组；功能关闭时仍可查看与清除未到期的记录。
 - 清除：`DELETE /api/v1/admin/accounts/:id/capability-learning`，成功时 `data` 为 `{capability_learned: []}`，只更新这两个键（`AccountHandler.ClearCapabilityLearning`，服务方法 `ClearAccountCapabilityLearning` 经可选窄接口调用，不改 `AdminService`）。
 - Explain：每个账号记录都带 `capability_learned`。查询带 `?protocol=responses|chat&stream=false` 时按该请求形态判断：被阻断的账号原因为 `capability_stream_only`，`recover_at` 为到期时间，另给 `capability_ttl_seconds`，并从本次的健康候选与末位兜底中排除（不变成全局硬罚，也不覆盖已有更强的硬罚原因）。不带这两个参数时保持原来的整体健康视图。
-- 前端（FE）：账号列表状态列下方的“仅流式（自动学习，剩余 X）”标识与清除按钮（`AccountStreamOnlyBadge`；`AccountsView.vue` 的两处钩子登记为具名补丁 `xy-account-stream-only-learning`）；设置卡片“失败分类修正”“流式开场与终止”“仅流式账号学习”。
+- 前端（FE）：账号列表状态列下方的“仅流式（自动学习，剩余 X）”标识与清除按钮（`AccountStreamOnlyBadge`；`AccountsView.vue` 的两处钩子登记为具名补丁 `xy-account-stream-only-learning`）；设置卡片“失败分类修正”“流式开场与终止”“仅流式账号学习”；运维页与份额页的 Explain 多一列“已学能力”和可选的“请求类型”（`ade0f689d`）；运维面板的 `pre_created_delta` 计数文案（`74e392ffd`）。
 
 ## 7. W5 信号与终止出口
 
