@@ -9,7 +9,8 @@ const dynamicKeys = [
   ...['preludeStaging', 'nativePreludeWhitelist', 'strictTerminal', 'failedFrameRetryAfter']
     .flatMap((k) => [`admin.resilience.settings.switches.${k}`, `admin.resilience.settings.switches.${k}Hint`]),
   ...['codexRetryAfterCap', 'learnTtl'].flatMap((k) => [`admin.resilience.settings.fields.${k}`, `admin.resilience.settings.fields.${k}Hint`]),
-  'admin.resilience.explain.reasons.capability_stream_only'
+  'admin.resilience.explain.reasons.capability_stream_only',
+  'admin.resilience.panel.metrics.pre_created_delta'
 ]
 
 function lookup(messages: unknown, key: string): unknown {

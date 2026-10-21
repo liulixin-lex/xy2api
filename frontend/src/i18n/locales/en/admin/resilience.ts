@@ -103,6 +103,7 @@ export default {
         abuse_guard: 'Abuse guard charges',
         stall: 'Stalled streams',
         post_output_failure: 'Upstream failures after output',
+        pre_created_delta: 'Content before created',
         relay_keepalive: 'Relay keep-alive frames'
       }
     },

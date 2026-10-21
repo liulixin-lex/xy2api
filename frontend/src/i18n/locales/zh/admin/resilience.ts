@@ -103,6 +103,7 @@ export default {
         abuse_guard: '滥用保护计费',
         stall: '停滞断流',
         post_output_failure: '已输出后上游失败',
+        pre_created_delta: 'created 之前的正文',
         relay_keepalive: '中转伪保活帧'
       }
     },
