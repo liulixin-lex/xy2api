@@ -25,7 +25,7 @@
 - [x] 2.9 审查：可以并入（`review/CODE_REVIEW_045_EPS.md`）。最终 HEAD 的定向 `-race` 通过。
 - [x] 2.10 测试：唯一调用 `gin.SetMode` 的并行用例改为顺序执行，修掉基线既有的偶发竞态（`10f2edd6b`，只改测试）。
 
-## 3. W1.2 其余路径（δ，`feat/w12-gateway-guards-045` @ `9bd6c119e`）
+## 3. W1.2 其余路径（δ，`feat/w12-gateway-guards-045` @ `50053a8ea`）
 
 - [x] 3.1 Gateway 入站经 Anthropic 上游的 Responses 与 Chat：推迟开场、首事件截止延长、读取循环、停滞、明确终止帧（`bd960dc5a`）。
 - [x] 3.2 审查 DELTA-P1-1（输出后异常结束按已读用量计费一次）与 DELTA-P2-3（输出前客户端离开改为 Info 日志）（`c95aa4e7c`）；DELTA-P2-1（`8a7fa67ea`）；DELTA-P2-2 对照用例（`9f8f5ba6c`）。
@@ -33,8 +33,9 @@
 - [x] 3.4 Responses 透传输出后断流按已读用量计费一次，第一个输出前取消不计费（审查 DELTA-P2-5，`87f9b9356`）。
 - [x] 3.5 透传在心跳已提交 200 后命中错误透传规则时，写 `response.created` 与 `response.failed`，不再接裸 JSON（审查 DELTA-P1-2，`6420bc73c`；普通 OpenAI Responses 路径同样修复，两条路径共用一个写出函数，`74133b338`）；反向转换器停滞出口的计费用例（DELTA-P2-6，`ab227b00f`，只改测试）。
 - [x] 3.6 审查：`74133b338` 可以并入 0.4.5 候选，没有剩余的 P0、P1（DELTA-P1-1、P1-2 已关闭；DELTA-P2-4 记为已知差异，`review/CODE_REVIEW_045_DELTA.md`）。前提是 δ 在该 HEAD 上的定向 `-race` 通过；之后再有代码提交需要重新复核。
-- [x] 3.7 首次集成发现的问题（PM 指令 6、7）：cherry-pick ε 的两个依赖提交（`1c56a8b2d`、`37b998fa5`）；Gateway 反向转换首写与取消同时发生按客户端断开（INTEG-P2-2，`104a92e99`）；透传心跳只提交网关自身的头（INTEG-P2-1，`67c57d5e9`）；旧 OAuth 透传预取消用例按 `stream.strict_terminal` 拆分（`9bd6c119e`）。定向 `-race -count=3`、增量 lint 0 项、干净临时 worktree 的 audit 通过。
-- [ ] 3.8 审查 `74133b338..9bd6c119e`；PM 决定是否接受 INTEG-P2-1 的代价（design §8）。
+- [x] 3.7 首次集成发现的问题（PM 指令 6、7）：cherry-pick ε 的两个依赖提交（`1c56a8b2d`、`37b998fa5`）；Gateway 反向转换首写与取消同时发生按客户端断开（INTEG-P2-2，`104a92e99`）；透传心跳只提交网关自身的头（INTEG-P2-1，`67c57d5e9`，后经 PM 裁定撤回，见 3.8）；旧 OAuth 透传预取消用例按 `stream.strict_terminal` 拆分（`9bd6c119e`）。
+- [x] 3.8 PM 2026-10-21T15:00Z 裁定撤回 INTEG-P2-1，透传心跳的响应头保持 0.4.4（`c5ccb7e14` 回退，`0c01bf2a5` 固定写头时机）；turn-state 溯源只在响应提交前记录（`50053a8ea`，可单独撤回）。最终 HEAD 上定向 `-race -count=3`（service 585 项、handler 93 项）0 失败、0 跳过、0 竞争，增量 lint 0 项，文档检查、scheduler-diff 与干净临时 worktree 的 audit 通过。
+- [ ] 3.9 审查 `74133b338..50053a8ea`（8 个提交）；`43be712aa` 上的审查不能代替。
 
 ## 4. 集成（α，用户决定发 0.4.5 之后）
 

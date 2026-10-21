@@ -61,11 +61,15 @@ With `stream.strict_terminal` on, the OpenAI Responses passthrough MUST apply th
 
 ### Requirement: Heartbeats commit only the gateway's own stream headers
 
-When a heartbeat commits HTTP 200 before the first output on the Chat and Messages conversions (staged, or before the first upstream line with staging off), or on the raw Chat passthrough in strict mode, the response MUST carry only the gateway's stream headers (`Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`, `X-Accel-Buffering: no`) and MUST NOT carry the filtered headers of that attempt's upstream. Without a heartbeat, the first output MUST still carry the upstream headers as before. The OpenAI Responses passthrough is excluded: its heartbeats MUST keep carrying the current attempt's upstream headers, including `x-codex-turn-state`, as on 0.4.4, so that a request that heartbeats and then succeeds still delivers the turn state.
+When a heartbeat commits HTTP 200 before the first output on the Chat and Messages conversions (staged, or before the first upstream line with staging off), or on the raw Chat passthrough in strict mode, the response MUST carry only the gateway's stream headers (`Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`, `X-Accel-Buffering: no`) and MUST NOT carry the filtered headers of that attempt's upstream. Without a heartbeat, the first output MUST still carry the upstream headers as before. The OpenAI Responses passthrough is excluded: its heartbeats MUST keep carrying the current attempt's upstream headers, including `x-codex-turn-state`, as on 0.4.4, so that a request that heartbeats and then succeeds still delivers the turn state. The passthrough MUST record turn-state provenance for an attempt only while the response is still uncommitted, so that the record names the account whose turn state the client last received.
 
 #### Scenario: Passthrough keeps the attempt headers on heartbeats
 - **WHEN** a passthrough attempt commits a heartbeat and then succeeds
 - **THEN** the client receives that attempt's `x-codex-turn-state` and `x-request-id`.
+
+#### Scenario: No turn-state provenance after the response is committed
+- **WHEN** a passthrough attempt on account A commits a heartbeat with A's turn state, fails, and account B serves and mints its own turn state
+- **THEN** the turn-state provenance stays with A, and when the client sends A's turn state to B on the next request, the outbound guard strips it.
 
 #### Scenario: Switch after heartbeat
 - **WHEN** account A's attempt commits a heartbeat, fails before content, and account B serves
