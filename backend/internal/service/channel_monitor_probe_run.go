@@ -72,7 +72,6 @@ func newMonitorProbeHTTPClient() *http.Client {
 type probeAttempt struct {
 	err     error // 拿到响应头之前的错误
 	status  int
-	header  http.Header
 	errBody string // 非 2xx 的响应体（截断）
 	reading probeReading
 	elapsed time.Duration
@@ -99,8 +98,8 @@ func runProbe(ctx context.Context, provider, endpoint, apiKey, model string, opt
 	key := plan.fixKey()
 	var last probeAttempt
 	attempts := 0
-	for attempt := 1; ; attempt++ {
-		attempts = attempt
+	for {
+		attempts++
 		req, err := plan.build(monitorProbeShapeFixes.get(key))
 		if err != nil {
 			return probeFinish(res, start, MonitorStatusError, err.Error())
@@ -113,7 +112,7 @@ func runProbe(ctx context.Context, provider, endpoint, apiKey, model string, opt
 		if corrected {
 			monitorProbeShapeFixes.learn(key, fix)
 		}
-		if attempt >= monitorProbeMaxAttempts {
+		if attempts >= monitorProbeMaxAttempts {
 			break
 		}
 		if !corrected && !probeShouldRetry(&last, probeRemaining(ctx), limits) {
@@ -149,7 +148,7 @@ func sendProbeAttempt(ctx context.Context, plan *probePlan, req *probeRequest) p
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	out := probeAttempt{status: resp.StatusCode, header: resp.Header}
+	out := probeAttempt{status: resp.StatusCode}
 	body, err := probeDecodedBody(resp)
 	if err != nil {
 		out.reading = probeReading{ReadErr: err}

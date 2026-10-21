@@ -90,10 +90,10 @@ func stripThinkBlocks(text string) string {
 	for {
 		open = monitorThinkOpenRegex.FindStringIndex(rest)
 		if open == nil {
-			b.WriteString(rest)
+			_, _ = b.WriteString(rest)
 			return b.String()
 		}
-		b.WriteString(rest[:open[0]])
+		_, _ = b.WriteString(rest[:open[0]])
 		rest = rest[open[1]:]
 		closing := monitorThinkCloseRegex.FindStringIndex(rest)
 		if closing == nil {

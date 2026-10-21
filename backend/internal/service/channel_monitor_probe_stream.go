@@ -95,9 +95,9 @@ func readProbeStream(r io.Reader, protocol probeProtocol, expected string) probe
 			event = strings.TrimSpace(value)
 		case "data":
 			if hasData {
-				data.WriteByte('\n')
+				_ = data.WriteByte('\n')
 			}
-			data.WriteString(value)
+			_, _ = data.WriteString(value)
 			hasData = true
 			// 多数实现一行一个完整 JSON：能单独解析就立即处理，不等空行。
 			if p := data.String(); p == "[DONE]" || gjson.Valid(p) {
@@ -143,7 +143,7 @@ func (t *probeAnswerTracker) addText(s string) {
 	if s == "" || t.raw.Len() >= monitorResponseMaxBytes {
 		return
 	}
-	t.raw.WriteString(s)
+	_, _ = t.raw.WriteString(s)
 }
 
 // boundary 在两段正文之间补一个分隔，避免 "40" 与下一段的数字拼成一个数。
@@ -153,7 +153,7 @@ func (t *probeAnswerTracker) boundary() {
 		return
 	}
 	if last := s[len(s)-1]; last != '\n' && last != ' ' {
-		t.raw.WriteByte('\n')
+		_ = t.raw.WriteByte('\n')
 	}
 }
 
@@ -422,7 +422,7 @@ func probeContentText(v gjson.Result) string {
 	v.ForEach(func(_, part gjson.Result) bool {
 		switch part.Get("type").String() {
 		case "", "text", "output_text":
-			b.WriteString(part.Get("text").String())
+			_, _ = b.WriteString(part.Get("text").String())
 		}
 		return true
 	})

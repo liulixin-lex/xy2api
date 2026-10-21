@@ -78,3 +78,18 @@ func TestRunMonitorProbeRound_SharedBudget(t *testing.T) {
 		require.Contains(t, r.Message, "timeout after 300ms")
 	}
 }
+
+// TestProbeDefaults 判定口径：30 秒预算、10 秒黄色阈值、剩余不足 10 秒不重试、5 秒内的 502/503 算秒回；
+// 探测客户端不设总超时（由预算控制，不截断流）。
+func TestProbeDefaults(t *testing.T) {
+	require.Equal(t, probeLimits{
+		Budget:            30 * time.Second,
+		DegradedAfter:     10 * time.Second,
+		RetryMinRemaining: 10 * time.Second,
+		FastFailWindow:    5 * time.Second,
+	}, defaultProbeLimits())
+	require.Equal(t, 2, monitorProbeMaxAttempts)
+	require.Equal(t, 10*time.Minute, monitorIdleConnTimeout)
+	require.Zero(t, newMonitorProbeHTTPClient().Timeout)
+	require.Less(t, monitorPingTimeout, monitorRequestTimeout, "the ping runs inside the round")
+}
