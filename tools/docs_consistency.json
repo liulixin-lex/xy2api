@@ -244,6 +244,14 @@
         "backend/internal/sharesched/policy_test.go",
         "backend/internal/sharesched/compat043/**"
       ]
+    },
+    {
+      "pattern": "\\bwriteOpenAIContentRejection\\b",
+      "reason": "0.4.4 integration lint: the content-refusal writer was replaced by the unified W5 terminal exit and had no callers, so it was deleted (no behaviour or API change); only the change history names it",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
     }
   ],
   "private": [

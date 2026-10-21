@@ -235,6 +235,7 @@
   - 2026-10-21T04:14Z：开发冻结，HEAD `54afdd784`（最后一个提交只修测试的 lint）；α 自有增量 lint 清零，resilience 相关 `-race` 通过。跨 owner 的 7 项 lint 已交 γ；`state.go` 的 `createdAt` 由 β 的方法引用，集成后自然消失。
   - 2026-10-21T04:31Z：**冻结后 R2 修复中**（PM 04:31Z）：R2-P1①（暂存期心跳提交 200 后耗尽，Chat 与 Messages 在 `:` 之后追加了裸 JSON）、R2-P1②（导出 `RetryAdviceEligible` 单独提交给 β 用）与两项 P2（OpenAI→Messages 输出后耗尽不计回合；删尾句时保持原文标点）。修完再合入集成分支，与 γ PM4、QA `0ad64390c`、DOCS 最新与 β 的 R2 修复一起只跑一次全量门禁。R2-P1② 的公共判定 `RetryAdviceEligible` 已单独提交 `cd46593f9`（供 β 提取）；R2-P1① 与 Messages 输出后耗尽 `25c0f0e36`；尾句标点 `fc244028a`。
   - 2026-10-21T04:44Z：**R2 修复完成，最终开发交接**，`rv2/be-a` HEAD `fc244028a`，工作树干净；三项 R2 提交定向 `-race` 通过。γ 的 `fe7d6cbbc` 已合入集成分支；β 的 R2-P1② 完成后增量合入，再与 DOCS 最终 HEAD 一起跑一次全量门禁。
+  - 2026-10-21T05:00Z：全量门禁进行中，期间发现并修复三处（各自单独提交、合回集成后从中断处继续，不减少门禁项）：基线测试文件的单行 gofmt（`759671ae6`，α 接手该未分配文件）；已提交 Responses 流对无标点原文多补句点（`c3757f8bb`）；无调用点的旧内容拒绝 writer `writeOpenAIContentRejection` 删除（lint 死代码，DOCS 已登记为退役名）。
 - `20261021-rv2-fe`（FE 2026-10-21T00:55Z 经 DOCS 代登记）：负责新开关的设置界面与 i18n、账号仅流式学习状态的显示与清除、Explain 新原因文案；分支 `rv2/fe`，基线 `027a434ad`，初始工作树干净；只在本地提交。
   - 2026-10-21T04:05Z：交付完成，HEAD `bd215aa0c`（15 个提交，只改 `frontend/**`，17 个文件），工作树干净。HEAD 上 lint:check、typecheck、test:run（413 个文件、3182 个用例）、build（含 i18n 检查）全部通过。`AccountsView.vue` 的两处钩子建议登记为具名补丁 `xy-account-stream-only-learning`（α 集成时）。
 - `20261021-resilience-v2-qa`（QA 2026-10-21T00:55Z 经 DOCS 代登记）：分支 `rv2/qa`，基线 `027a434ad`；阶段 1 为新故障与场景，阶段 2（候选验证）在 PM 指定提交放行后才开始。QA 结束时由 DOCS 代为同步交接与操作日志。
