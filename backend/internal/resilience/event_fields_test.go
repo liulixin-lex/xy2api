@@ -30,9 +30,11 @@ func TestEventFieldsUseGatewayRequestIDAndDelivery(t *testing.T) {
 	require.Equal(t, int64(1500), st.MSSinceFirstOutput(at.Add(1500*time.Millisecond)))
 	require.Zero(t, st.MSSinceFirstOutput(at.Add(-time.Second)))
 	fields := eventFieldMap(EventFields(ctx))
-	require.Len(t, fields, 6)
+	require.Len(t, fields, 7)
 	require.NotEmpty(t, fields["request_id"])
-	require.NotEqual(t, "client-chosen", fields["request_id"])
+	require.Equal(t, "client-chosen", fields["request_id"])
+	require.Equal(t, st.GatewayRequestID(), fields["gateway_request_id"])
+	require.NotEqual(t, "client-chosen", fields["gateway_request_id"])
 	require.NotEqual(t, st.GatewayRequestID(), NewRequestState().GatewayRequestID())
 	require.Equal(t, "public-model", fields["model"])
 	require.Equal(t, int64(42), fields["delivered_bytes"])
@@ -54,7 +56,11 @@ func TestPreOutputEventFieldsNeverReenterDeliveryProbe(t *testing.T) {
 	f := eventFieldMap(PreOutputEventFields(ctx))
 	require.Zero(t, f["delivered_bytes"])
 	require.Zero(t, f["ms_since_first_output"])
-	require.Len(t, eventFieldMap(EventFields(nil)), 6)
+	require.Len(t, eventFieldMap(EventFields(nil)), 7)
+	require.Equal(t, st.GatewayRequestID(), f["request_id"], "missing HTTP ID falls back to the local ID")
+	require.Equal(t, st.GatewayRequestID(), f["gateway_request_id"])
+	ctx = context.WithValue(ctx, ctxkey.RequestID, "http-id")
+	require.Equal(t, "http-id", eventFieldMap(PreOutputEventFields(ctx))["request_id"])
 }
 
 func TestFirstOutputObservationConcurrent(t *testing.T) {

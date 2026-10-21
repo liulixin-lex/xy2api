@@ -9,8 +9,9 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 )
 
-// EventFields correlates resilience events without recording payloads, API
-// keys or client-provided IDs. Missing observations are explicit zero values.
+// EventFields correlates resilience events with access and operations logs.
+// A separate gateway_request_id always retains the locally generated UUID.
+// Missing observations are explicit zero values; no payloads or keys are logged.
 func EventFields(ctx context.Context) []any {
 	return resilienceEventFields(ctx, false)
 }
@@ -24,8 +25,13 @@ func PreOutputEventFields(ctx context.Context) []any {
 func resilienceEventFields(ctx context.Context, preOutput bool) []any {
 	st := StateFrom(ctx)
 	model := ""
+	requestID := ""
 	if ctx != nil {
 		model, _ = ctx.Value(ctxkey.Model).(string)
+		requestID, _ = ctx.Value(ctxkey.RequestID).(string)
+	}
+	if requestID == "" {
+		requestID = st.GatewayRequestID()
 	}
 	if model == "" {
 		model = st.Model()
@@ -41,7 +47,7 @@ func resilienceEventFields(ctx context.Context, preOutput bool) []any {
 		delivered, elapsed = st.DeliveredBytes(), st.MSSinceFirstOutput(time.Now())
 	}
 	return []any{
-		"request_id", st.GatewayRequestID(), "model", model,
+		"request_id", requestID, "gateway_request_id", st.GatewayRequestID(), "model", model,
 		"delivered_bytes", delivered, "ms_since_first_output", elapsed,
 		"prelude_release_event", releaseEvent, "prelude_release_ms", releaseMS,
 	}
