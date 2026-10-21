@@ -37,7 +37,7 @@ With `stream.strict_terminal` on, the Gateway inbound Responses and Chat convers
 
 ### Requirement: First-output guard on the OpenAI Responses passthrough
 
-With `stream.strict_terminal` on, the OpenAI Responses passthrough MUST apply the same first-output deadline as the native path, including the wait for response headers, and MUST switch accounts when only opening events and heartbeats arrived before it. A read loop MUST drive the deadline, stall detection and staging heartbeats; upstream comment lines MUST be forwarded immediately during staging. After output, a stall MUST end with `response.failed` (`stream_timeout`). Independently of the switch, the passthrough MUST stage the opening in the bounded native stage (8 MiB, spilling to an unlinked temporary file above 64 KiB) and MUST switch accounts when the bound is exceeded. With the switch off, the passthrough MUST behave as on 0.4.4 apart from the bounded stage.
+With `stream.strict_terminal` on, the OpenAI Responses passthrough MUST apply the same first-output deadline as the native path, including the wait for response headers, and MUST switch accounts when only opening events and heartbeats arrived before it. A read loop MUST drive the deadline, stall detection and staging heartbeats; upstream comment lines MUST be forwarded immediately during staging. After output, a stall MUST end with `response.failed` (`stream_timeout`). Independently of the switch, the passthrough MUST stage the opening in the bounded native stage (8 MiB, spilling to an unlinked temporary file above 64 KiB) and MUST switch accounts when the bound is exceeded. Also independently of the switch, a passthrough stream that broke after output (`response.failed`, missing terminal, read error, stall) MUST bill the usage read so far exactly once, and a cancel before output MUST bill nothing. With the switch off, the passthrough MUST behave as on 0.4.4 apart from the bounded stage and this billing.
 
 #### Scenario: Silent after created
 - **WHEN** a relay sends `response.created` and nothing else until the first-output deadline
@@ -46,6 +46,10 @@ With `stream.strict_terminal` on, the OpenAI Responses passthrough MUST apply th
 #### Scenario: Headers never arrive
 - **WHEN** a relay accepts the request but sends no response headers before the deadline
 - **THEN** the request switches accounts at stage `response_headers`.
+
+#### Scenario: Break after output is billed
+- **WHEN** a passthrough account streams content and then the connection breaks
+- **THEN** the request is billed once with the usage read so far.
 
 #### Scenario: Comment from a relay
 - **WHEN** a relay sends `: keepalive` after `response.created`
