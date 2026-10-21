@@ -92,7 +92,7 @@
 | `Prelude` | 开场事件，可以丢弃后由新尝试重放 |
 | `Content` | 不可重放的输出 |
 | `TerminalSuccess` | 正常终态 |
-| `TerminalFailure` | 失败终态；`Retryable` 表示可以换号。可重试判据用 `ClassifyWithSettings(..., Current())`，随 `failure.decision_v2` 与 `failure.balance_keywords_extra` 变化（审查 P2-4）；函数本身仍不做 I/O |
+| `TerminalFailure` | 失败终态；`Retryable` 表示可以换号。可重试判据用 `ClassifyWithSettings(..., Current())`，随 `failure.decision_v2` 与 `failure.balance_keywords_extra` 变化（审查 P2-4，β `07ef27d78`）；函数本身仍不做 I/O |
 | `Unknown` | 按 `Content` 处理，保守 |
 
 开场事件：
@@ -161,7 +161,7 @@
 - 没有 error 的流仍算成功，包括只有 usage 的、或有 finish 但没有 `[DONE]` 的。
 - 开关关闭时回到旧判定：`error` 后跟 `[DONE]` 算成功。
 - 上游文件钩子：`openai_gateway_chat_completions_raw.go` 的 `resilience.Current().StrictTerminalOn()`、`terminal.failurePayload`（登记到 required_literals）。
-- OpenAI Responses 透传的首输出守卫【待契约：CHANGES_B 是否完成，未完成则列入 §10】。
+- OpenAI Responses 透传的首输出计时守卫（方案里的可选项）本期**延后**，原有的首输出暂存与重放边界不变，见 §11。
 
 ## 5. W2.1-lite 分类修正（`failure.decision_v2`）
 
@@ -176,9 +176,9 @@
 | raw Chat 与 Grok 的可重试 429 | `CAPACITY_SHED` | `RATE_LIMIT`；余额、reset、内容拒绝等更强的结构化证据优先 |
 | “The service is busy”、“Too many pending requests”、“Concurrency limit exceeded for account” 及中文“系统繁忙”一类 | `CAPACITY_SHED` | 状态码 <500 → `RATE_LIMIT`，5xx → `TRANSIENT`；可以换到任何主机，含同一主机 |
 | 明确的 “rate limit”、“too many requests” 文案（任意状态码） | `RATE_LIMIT` 或带 reset 的限流 | 不变：保留 `RATE_LIMIT` 与 reset（含长 reset），不因收紧容量判据而改判（审查 P2-1，γ `4ac81dc94`） |
-| typed 首输出超时 | `TRANSIENT` | 运维记录仍为 `TRANSIENT`（兼容）；Kind 已是 `first_output_timeout`，Detail 在 `timeout_ms` 旁加 `timeout_seconds`（实际生效的截止，不是配置值），Reason 为 `first_output_timeout`；OpenAI（β）与 Anthropic 首事件守卫（γ）都这样记录。handler 的 `FIRST_OUTPUT_TIMEOUT` 不变；不加列、不加迁移 |
+| typed 首输出超时 | `TRANSIENT` | 运维记录仍为 `TRANSIENT`（兼容）；Kind 已是 `first_output_timeout`，Detail 在 `timeout_ms` 旁加 `timeout_seconds`（实际生效的截止，即受剩余预算约束后的值，不是配置值），Reason 为 `first_output_timeout`；OpenAI（β `4eed85c1a`）与 Anthropic 首事件守卫（γ `0d3e72508`）都这样记录。handler 的 `FIRST_OUTPUT_TIMEOUT` 不变；不加列、不加迁移 |
 
-- 运维记录的 `resilience_category` 与 handler 的换号规则用同一个分类结果，不再分叉。HTTP 错误的运维记录在构造时用 `opsHTTPResilienceCategory(status, headers, body, message)` 直接填分类（总开关关闭时为空），保留只靠响应头 reset 判定的证据；流内事件仍从结构化正文推导。
+- 运维记录的 `resilience_category` 与 handler 的换号规则用同一个分类结果，不再分叉。HTTP 错误的运维记录在构造时用 `opsHTTPResilienceCategory(status, headers, body, message)` 直接填分类（总开关关闭时为空），保留只靠响应头 reset 判定的证据，也保证关闭原始错误正文日志时，结构化的 `error.type`（如 503 加 `overloaded_error`）仍判为 `CAPACITY_SHED`；不记录原始正文。覆盖 Grok（γ）与 Forward（含 compact 回退）、透传、raw Chat 与共用的 CC pipeline（β `4eed85c1a`，上游钩子 `opsHTTPResilienceCategory`）。流内事件仍从结构化正文推导。
 - `RequestScopedTransient` 只在 `decision_v2` 开启时不再单独推出 `CAPACITY_SHED`；关闭时与 0.4.3 相同。实现提交 `0d3e72508`。
 - D18 不变：容量降载仍是同号先试一次、只跨主机换一次。
 - `RATE_LIMIT` 计入会话失败，改绑可能增多；开关关闭即回到旧分类。
@@ -342,6 +342,7 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 - 原生路径上，上游在 `response.created` 之前发出的非空 delta 照常先转发，网关不重排；这类上游下“Responses 第一个事件总是 created”不成立，严格 SDK 仍可能报错（审查 P2-7）。
 - 仅流式学习记录按凭据指纹失效：OAuth 类账号刷新令牌后指纹改变，需要重新学习一次（审查 A-P2-3）。
 - 学习粒度是“账号 + 协议”，不分模型：中转只对某个模型要求流式时，该账号所有模型的非流式请求都会被跳过（审查 A-P2-8）。
+- OpenAI Responses 透传没有新增首输出计时守卫（方案的可选项，延后）；它的开场判定与暂存照常使用 §3.1 的判据。
 - 观测只有日志字段，没有请求与尝试表；“伪已输出”比例要从 `prelude_release_event` 日志统计。
 
 ## 12. 验证

@@ -201,6 +201,7 @@
 
   发版分支 `release/0.4.4`（`rel-044`）。各 agent 只改自己拥有的文件，只在本地提交；推送、PR、合并与打 tag 由 PM 安排 α 统一执行。
 - `20261021-rv2-beta`（β 2026-10-21T00:53Z 经 DOCS 代登记）：β 负责 W1.1、W1.2-lite、W5.3/W5.4 的 service 部分与释放事件采集，分支 `rv2/be-b`，基线 `027a434ad`，初始工作树干净；只在本地提交，不推送、不碰生产。
+  - 2026-10-21T03:39Z：功能与审查修复已全部提交，HEAD `4eed85c1a`：原生白名单与伪保活泛化 `bdbca7197`、兼容推迟开场 `1a97eebd1`、释放事件采集 `04aa6f1a6`、raw Chat 明确终止 `f9edc3a4d`、审查 P0 `63718031d`、R1-P1-1 `bb2c22122`、暂存期注释心跳 `4c3256477`、空 delta 窗口 `97bdc3478`、W5.3/W5.4 与 `keepalive_committed` `e30e6c384`、W6 检测钩子 `09ef67f11`、P2-4/P2-5 `07ef27d78`、W2 运维分类证据与实际超时秒数 `4eed85c1a`。P2-8 核对后无重复记账。**延后**：OpenAI Responses 透传的首输出守卫（可选项）。最终的包级 `-race`、lint 与 vet 在跑。
 - `20261021-resilience-v2-alpha`（α 2026-10-21T01:01Z 经 DOCS 代登记）：分支 `rv2/be-a`，基线 `027a434ad`，初始工作树干净。范围为 RetryAdvice、W5.2、W5.1、W5.4、W5.5、W8-lite；04:45Z 起按约定合入六个分支并串行跑全量门禁。未授权 α 推送、开 PR、发布或碰生产。
   - 2026-10-21T03:21Z：功能项（RetryAdvice、W5.1–W5.5、W8 事件字段与请求 ID 口径、W6 的 DTO/路由/Explain/入口标记）与审查 R1-P1-1（handler 取消归因 `5924b2b5a`）、R1-P1-4（排队心跳格式 `f4a60916e`）、R1-P1-5（`d842a23e0`）都已在 `rv2/be-a` 提交；只因能力而无号的专用应答与份额接线等 γ 的接口。
 - `20261021-rv2-fe`（FE 2026-10-21T00:55Z 经 DOCS 代登记）：负责新开关的设置界面与 i18n、账号仅流式学习状态的显示与清除、Explain 新原因文案；分支 `rv2/fe`，基线 `027a434ad`，初始工作树干净；只在本地提交。
@@ -994,3 +995,13 @@ pnpm --dir frontend run build
 - 验证：本机离线反例、语法与文档检查通过。没有构建候选、没有跑阶段 2。
 - 卡点/风险：按估计，06:15Z 才构建的话，浸泡可能晚于 07:30Z 开始，已在仓库外 `REPORT_PREPARATION.md` 提示 PM。
 - 下一步：等 PM 放行与候选 SHA。
+
+### 2026-10-21T03:39Z — `20261021-rv2-beta` — 功能与审查修复提交完毕（DOCS 代记）
+
+- 请求/目标：W1.1、W1.2-lite、W5.3/W5.4 的 service 部分、释放事件采集，以及第一轮代码审查（R1）分给 β 的修复。
+- 开始状态：`rv2/be-b` 自 `027a434ad`，工作树干净。
+- 完成操作：提交清单见“进行中的工作”的 β 条目（HEAD `4eed85c1a`）。PM 改判 U4 后，兼容转换的暂存期改为写注释心跳；created 之前的空 delta 窗口在第一个非空 delta 时关闭；service 侧三个失败帧合成点接入 `ResolveRetryAdvice`；仅流式检测在 HTTP 400 的任何副作用之前调用。
+- 修改文件：`backend/internal/` 下 β 名下的文件，以及声明接手的 `openai_compact_sse_keepalive.go`、`openai_gateway_cc_pipeline.go` 与一个 WS bridge 测试文件；上游文件钩子列在仓库外 `contract/CHANGES_B.md`，由 α 集成时登记。
+- 验证：每项先写失败用例、确认在旧代码上失败；相关包 `-race` 通过。最终的 35 个测试文件、270 个顶层用例 `-race` 与 lint、vet 在跑，结论另记。
+- 卡点/风险：OpenAI Responses 透传的首输出守卫延后，已写进 design §11 与网关韧性说明 §7。
+- 下一步：α 集成时须包含 α 的 `5924b2b5a`（handler 取消归因）与 γ 的 `4ac81dc94`（限流分类更正）。
