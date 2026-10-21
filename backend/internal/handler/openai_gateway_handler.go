@@ -1629,7 +1629,7 @@ func resolveOpenAIMessagesMetadataSession(c *gin.Context, sessionHash, promptCac
 // anthropicErrorResponse writes an error in Anthropic Messages API format.
 func (h *OpenAIGatewayHandler) anthropicErrorResponse(c *gin.Context, status int, errType, message string) {
 	errType = anthropicLocalErrorType(status, errType)
-	errType, code, message := resilienceTranslateError(c, status, errType, "", message)
+	_, code, message := resilienceTranslateError(c, status, errType, "", message)
 	if !beginResilienceTerminal(c) {
 		return
 	}
@@ -1652,7 +1652,7 @@ func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, stat
 		streamStarted = true
 	}
 	if streamStarted {
-		errType, code, translatedMessage := resilienceTranslateError(c, status, errType, "", message)
+		_, code, translatedMessage := resilienceTranslateError(c, status, errType, "", message)
 		message = translatedMessage
 		service.MarkOpsStreamError(c, errType, message, status)
 		flusher, ok := c.Writer.(http.Flusher)

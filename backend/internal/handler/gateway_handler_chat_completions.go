@@ -402,7 +402,7 @@ func (h *GatewayHandler) chatCompletionsErrorResponse(c *gin.Context, status int
 }
 
 func (h *GatewayHandler) chatCompletionsErrorResponseWithCode(c *gin.Context, status int, errType, code, message string) {
-	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
+	_, code, message = resilienceTranslateError(c, status, errType, code, message)
 	// Queue pings can commit the stream before billing or model checks fail.
 	// A committed Chat stream always needs its error followed by [DONE].
 	if c.Writer.Written() {

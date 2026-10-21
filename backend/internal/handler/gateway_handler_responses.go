@@ -382,7 +382,8 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 // responsesErrorResponse writes an error in OpenAI Responses API format.
 func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code, message string) {
 	errType, explicitCode, message := resilienceTranslateError(c, status, code, "", message)
-	if explicitCode != "" {
+	// Preserve the existing JSON code; only a capped turn changes its outcome.
+	if c.GetBool(ginKeyResilienceTurnCapped) {
 		code = explicitCode
 	}
 	// A queue ping commits HTTP 200 before billing is rechecked. Finish the
