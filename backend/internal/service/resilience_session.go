@@ -274,6 +274,22 @@ type lastResortGroupEntry struct {
 	expires  time.Time
 }
 
+// sweep forgets expired snapshots so an idle group does not keep its account
+// copies (credentials and extra included) until the table is reset.
+func (c *lastResortGroupCache) sweep(now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.sweepLocked(now)
+}
+
+func (c *lastResortGroupCache) sweepLocked(now time.Time) {
+	for id, e := range c.entries {
+		if !now.Before(e.expires) {
+			delete(c.entries, id)
+		}
+	}
+}
+
 // drop forgets the cached accounts of a group; groupID <= 0 forgets all.
 func (c *lastResortGroupCache) drop(groupID int64) {
 	c.mu.Lock()
@@ -301,6 +317,7 @@ func (r *ResilienceService) groupAccountsForLastResort(ctx context.Context, repo
 	}
 	if r != nil {
 		r.lastResortGroups.mu.Lock()
+		r.lastResortGroups.sweepLocked(now)
 		if r.lastResortGroups.entries == nil || len(r.lastResortGroups.entries) > 1024 {
 			r.lastResortGroups.entries = map[int64]lastResortGroupEntry{}
 		}
@@ -764,9 +781,11 @@ func (r *ResilienceService) sessionMarkLoop(ctx context.Context) {
 
 // sweepSessionMarks drops expired failure and avoid marks; without it every
 // session that failed once and never returned would stay in memory. The
-// per-account counts of failures after output expire on the same tick.
+// per-account counts of failures after output and the expired last-resort
+// group snapshots go on the same tick.
 func (r *ResilienceService) sweepSessionMarks(now time.Time) {
 	r.postOutput.sweep(now)
+	r.lastResortGroups.sweep(now)
 	for _, m := range []*sync.Map{&r.failingSessions, &r.avoidingSessions} {
 		m.Range(func(k, v any) bool {
 			if until, ok := v.(time.Time); !ok || now.After(until) {
