@@ -150,10 +150,10 @@
   - 下一步：逐项先写红测、单独提交；用户决定发 0.4.5 后合成候选、做全套验证。
   - 卡点：用户决定；建在 RA-1 修复之上，RA-1 分支变动时要同步。
 
-### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（本地实现完成，待授权推送；2026-10-21T15:00Z 更新）
+### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（PR #120 已开、本机端到端通过，待真实上游验证；2026-10-21T17:00Z 更新）
 
 - 请求（用户 2026-10-21）：优化渠道监控 v1——“正常可调用但监控卡很久、黄绿与实际不符；分组部分满载时探测也排队导致超时”。用户对方案的要求：只动探测本身；30 秒内拿到正确回答且 ≤10 秒为绿、>10 秒为黄、30 秒内拿不到正确回答为红；不新增繁忙、过期等分类；探测协议兼容各种模型；让模型更快回答。随后“按你认为的最佳方案执行”。
-- 分支：`feat/channel-monitor-v1-20261021`（工作树 `xy2api-wt/monitor-v1`，自 origin/main `a1cf8f104`），只在本地，**未推送、未开 PR**。方案与调研在仓库外 `xy2api-artifacts/monitor-v1-20261021/`（`plan/PLAN.md` v3、`research/`、门禁日志 `gates/`）。
+- 分支：`feat/channel-monitor-v1-20261021`（工作树 `xy2api-wt/monitor-v1`，自 origin/main `a1cf8f104`），已推送，[PR #120](https://github.com/liulixin-lex/xy2api/pull/120)（未合并）。方案与调研在仓库外 `xy2api-artifacts/monitor-v1-20261021/`（`plan/PLAN.md` v3、`research/`、门禁日志 `gates/`）。
 - 已完成（现行说明见 [`CHANNEL_MONITOR_V1.md`](CHANNEL_MONITOR_V1.md)）：
   - 探针：所有 provider 流式探测、读到答案即停；一句话加法题；按模型族带 `low` 推理强度与输出上限（推理模型 1024，Gemini flash 关思考、pro 取最低预算 128）；参数被拒时同轮修正重发（6 小时过期、按 Key 区分）；快速连接失败在预算内重试一次；10 秒、30 秒口径；HEAD ping 并行；连接复用；只跟随同主机重定向。
   - 探测通道：监控请求带与 API Key 绑定的签名头 `X-XY2API-Probe`，全局中间件校验后打标记并删除该头；调度对探测不用粘性会话，排队前先按真实并发找空闲槽（OpenAI/Grok 缺省调度、Anthropic 兜底与模型路由、份额调度）；具名补丁 `xy-channel-monitor-probe-lane`，登记 `policy.json`、`scheduler-diff.json`、`UPSTREAM_BASE.json`。
@@ -161,8 +161,14 @@
   - 读路径 LATERAL 改写；前端：`error` 徽章改红、“响应时间”文案、立即检测超时 60 秒。
   - 独立代码审查（只读）4 项 P1 与选定 P2 已修，每项先写失败用例。
 - 验证（本机）：gofmt、四种 vet、golangci-lint 增量 0 项；service 全量 unit 与无 tag 测试、repository/server/middleware/monitorprobe 通过；`ci_gate.py` 375 项 `-race` 0 跳过；scheduler-diff、`sync.py audit`、文档一致性、tools 41 项通过；前端 lint、typecheck 与监控相关 21 个测试文件通过。新 SQL 在本机临时 PostgreSQL 18 上与旧查询结果对照一致，执行计划在生产只读核对。
+- 本机端到端（2026-10-21，临时 PostgreSQL、Redis、假上游，只监听 127.0.0.1，测完已清理；报告在 artifacts `e2e/REPORT.md`）：E1–E9 全部通过。
+  - 12 秒判黄；35 秒在 30.0 秒判红。
+  - 分组部分满载时，探测 5 ms 在空闲账号判绿，对照的普通请求排队 30 秒后返回 429。
+  - 签名头 0 次到达上游；参数修正同一轮生效并被缓存；手动检测不推进 `last_checked_at`；重启后 28 秒内恢复。
+  - 遗留一次未复现的 21.5 秒等待（详见报告，建议在测试服务器验证时加选号 debug 日志）。
+- CI：首轮发现 lint 报只被 unit 测试使用的函数未使用、`monitorprobe` 的坏 MAC 用例有 1/16 概率偶发失败，`3737a6f5c` 已修；另一次 `TestCompatPreludeHeartbeatDisconnectDrainsUsageAfterContent` 偶发失败，与本 PR 无关，本机 -race 10 次通过。
 - 未做与卡点：
-  1. 推送、开 PR、合并、发版、部署都需要用户授权。
+  1. 合并、发版、部署都需要用户授权。
   2. 测试服务器验证（真实上游的兼容矩阵、Grok 等推理模型的响应时间）需要 PM 协调测试服务器。
   3. 未做：本站探测走本机直连（保留经 CDN 的端到端覆盖）；OpenAI 高级调度器（缺省关闭）只覆盖“无粘性”。
   4. 审查 P2-7（Anthropic 补选失败时可能泄漏槽位）是原有写法，未改；只有闭合 `</think>` 的上游可能被提前判答，写在文档已知局限。
@@ -1142,3 +1148,11 @@ pnpm --dir frontend run build
 - 验证：见“进行中的工作”同名条目；第一次门禁的 vet 因共享 Go 编译缓存被并发清理而报错（环境问题），重跑通过；`sync.py audit` 第一次因改名的绑定测试失败，修正后通过。
 - 卡点/风险：未在真实上游验证；本机磁盘余量紧张（约 9 GiB）。
 - 下一步：用户授权后推送并开 PR；测试服务器跑兼容矩阵与响应时间实测；生产部署单独授权。
+
+### 2026-10-21T17:00Z — `20261021-channel-monitor-v1` — 推送 PR #120，CI 修复，本机端到端测试
+
+- 请求/目标：用户“推送PR，并测试”。
+- 完成操作：推送分支并开 PR #120；修复 CI 的 lint（测试专用函数移到带 unit tag 的测试文件）与偶发失败用例（`3737a6f5c`）；在本机隔离环境完成 E1–E9 端到端测试（测试专用的回环放行补丁只在临时工作树，未提交，临时工作树与分支已删除）。
+- 验证：E1–E9 通过，结果见“进行中的工作”同名条目与 artifacts `e2e/REPORT.md`；本机 golangci-lint 0 项、`sync.py audit` 与文档一致性通过。
+- 卡点/风险：真实上游兼容矩阵与 Grok 延迟未测（需要测试服务器或真实 Key）；一次 21.5 秒等待未能复现。
+- 下一步：CI 全绿后等待用户决定合并；协调测试服务器做真实上游验证。
