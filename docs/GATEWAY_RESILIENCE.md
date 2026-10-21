@@ -95,7 +95,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | Claude 请求分发到 GPT 中转时，中转站拒绝续链（`previous_response_id`）并返回笼统的 4xx | 去掉续链按完整历史重放一次，并对该会话在该账号上关闭续链。0.4.2 起只认指向续链的应答：404/409、提到上一响应的文案，或 400/422 上的笼统中转文案（单独的 “Upstream request failed”、“could not be processed”、没有文案）；指名其他参数的错误（如 `temperature` 越界）、上下文超长、内容审核、图片、模型不存在等照常返回，不重放。按笼统文案猜测的重放计入请求预算的尝试次数，预算用尽时不重放 |
 | 上游内容安全拒绝（如智谱 `request_check_blocked`、`content_policy_violation`） | 400 `invalid_request_error`，`code: content_policy_violation`，附脱敏后的上游原文；不重试、不换号，账号不受罚。只关闭 `errors` 时回到 0.3.0 的 502 文案 |
 | Anthropic 中转在流内报 `rate_limit_error`（如并发上限） | 输出前可换号；耗尽时 429 带 `Retry-After`，不再是 502“访问被禁止”。`overloaded_error` 为 529，`api_error` 为 502 |
-| Anthropic 协议下网关自身的无号与瞬时失败（0.4.4） | 错误 `type` 统一为 `api_error`（含只有 code 的错误体），状态码不变；只有上游原样的 `overloaded_error` 才保留该类型。以前网关给自身的 503 补 `overloaded_error` |
+| Anthropic 协议下网关自身的无号与瞬时失败（0.4.4） | 错误 `type` 统一为 `api_error`（含只有 code 的错误体），状态码与正文不变；只有上游真实返回 `overloaded_error` 时才保留该类型，状态码 529 本身不再足以生成它。以前首包心跳后的 503 终止帧与按状态码推断的失败会被标成 `overloaded_error`。关闭 `errors` 时回到 0.4.3 |
 | API Key 中转拒绝回放 `web_search_call` 历史（“response protection is unavailable”） | 同号补 web_search 声明重放一次，成功后该账号 6 小时内同类请求直接补声明；仍失败时 502 带原因，不换号，计入会话失败与回合封顶 |
 | 请求的模型不在分组白名单 | 404，消息附本分组白名单的前 10 项 |
 
