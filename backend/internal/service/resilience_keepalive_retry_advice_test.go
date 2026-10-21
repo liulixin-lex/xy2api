@@ -4,9 +4,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +17,72 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func TestSyntheticFailedFramesShareRetryEligibility(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, kind := range []string{"keepalive", "compact", "native"} {
+		for _, tc := range []struct {
+			name, errType, code string
+			status              int
+			eligible            bool
+		}{
+			{"invalid_request", "invalid_request_error", "invalid_request", 400, false},
+			{"context_length", "upstream_error", "context_length_exceeded", 400, false},
+			{"model_not_found", "upstream_error", "model_not_found", 404, false},
+			{"unknown_400", "upstream_error", "vendor_request_error", 400, false},
+			{"model_without_status", "model_not_found", "model_not_found", 0, false},
+			{"server_failure", "api_error", "upstream_error", 503, true},
+			{"overloaded", "overloaded_error", "server_is_overloaded", 529, true},
+			{"overloaded_without_status", "overloaded_error", "server_is_overloaded", 0, true},
+			{"rate_limit", "rate_limit_error", "rate_limit_exceeded", 429, true},
+		} {
+			for _, adviceSource := range []string{"provider", "explicit"} {
+				t.Run(kind+"/"+tc.name+"/"+adviceSource, func(t *testing.T) {
+					c, rec := newKeepaliveTestContext(t)
+					var providerCalls atomic.Int32
+					ctx := resilience.WithRetryAdviceProvider(c.Request.Context(), func(context.Context) resilience.RetryAdvice {
+						providerCalls.Add(1)
+						return resilience.RetryAdvice{Seconds: 1, Source: "healthy_candidate"}
+					})
+					if adviceSource == "explicit" {
+						resilience.SetRetryAdvice(ctx, resilience.RetryAdvice{Seconds: 1, Source: "healthy_candidate"})
+					}
+					c.Request = c.Request.WithContext(ctx)
+					const message = "Upstream rejected the request. Please try again in 1s."
+					errorBody, err := json.Marshal(gin.H{"error": gin.H{"type": tc.errType, "code": tc.code, "status_code": tc.status, "message": message}})
+					require.NoError(t, err)
+					var frame string
+					switch kind {
+					case "keepalive":
+						frame = string(preOutputTerminalFrame(ctx, PreOutputProtocolResponses, tc.status, errorBody))
+					case "compact":
+						writeOpenAICompactSSEFailureMessage(c, tc.status, tc.code, message)
+						frame = rec.Body.String()
+					default:
+						frame = buildOpenAIResponseFailedSSE(ctx, "resp_eligibility", "model", errorBody, "")
+					}
+					var failed gjson.Result
+					for _, line := range strings.Split(frame, "\n") {
+						if data, ok := strings.CutPrefix(line, "data: "); ok && gjson.Get(data, "type").String() == "response.failed" {
+							failed = gjson.Parse(data)
+						}
+					}
+					require.True(t, failed.Exists(), frame)
+					if tc.eligible {
+						require.Equal(t, "1", failed.Get("response.error.headers.retry-after").String())
+						require.Contains(t, failed.Get("response.error.message").String(), "Please try again in 1s.")
+					} else {
+						require.False(t, failed.Get("response.error.headers").Exists(), frame)
+						require.NotContains(t, failed.Get("response.error.message").String(), "try again")
+						require.True(t, resilience.RetryAdviceFrom(ctx).Suppress)
+						require.Equal(t, "non_retryable", resilience.RetryAdviceFrom(ctx).Source)
+						require.Zero(t, providerCalls.Load(), "terminal rejection must precede candidate lookup")
+					}
+				})
+			}
+		}
+	}
+}
 
 func TestSyntheticFailedFramesResolveRetryAdvice(t *testing.T) {
 	withResilienceSettings(t, nil)
