@@ -1293,6 +1293,30 @@
     {
       "path": "frontend/src/views/admin/AccountsView.vue",
       "value": "import AccountStreamOnlyBadge from '@/components/admin/account/AccountStreamOnlyBadge.vue'"
+    },
+    {
+      "path": "backend/internal/handler/resilience_errors.go",
+      "value": "resilience.RetryAdviceEligible(cls.Status, cls.ErrType, \"\")"
+    },
+    {
+      "path": "backend/internal/handler/resilience_retry_advice.go",
+      "value": "resilience.RetryAdviceEligible(streamErr.IntendedStatus, errType, mapResponsesErrorCode(errType, code))"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "// Staged heartbeats commit SSE without delivering semantic output."
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "// Staged heartbeats commit SSE without delivering semantic output."
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "recordOpenAIStreamKeepaliveBytes"
+    },
+    {
+      "path": "backend/internal/service/resilience_keepalive.go",
+      "value": "resilience.RetryAdviceEligible"
     }
   ],
   "forbidden_module_paths": [
@@ -1665,6 +1689,31 @@
       "id": "xy-resilience-v2-classification",
       "path": "backend/internal/service/resilience_penalty_test.go",
       "literal": "func TestDecisionV2ClassifiesEvidenceBeforeLegacyRetryFlag"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/openai_compat_heartbeat_exhausted_test.go",
+      "literal": "func TestOpenAICompatibleHeartbeatExhaustionWritesProtocolTerminal"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/resilience/retry_advice_provider_test.go",
+      "literal": "func TestRetryAdviceMessagePreservesOriginalPunctuation"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/resilience/retry_advice_test.go",
+      "literal": "func TestRetryAdviceEligible"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_gateway_chat_completions_terminal_test.go",
+      "literal": "func TestRawChatStrictCommentHeartbeatAllowsFailover"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_keepalive_retry_advice_test.go",
+      "literal": "func TestSyntheticFailedFramesShareRetryEligibility"
     }
   ]
 }
