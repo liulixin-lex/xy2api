@@ -195,9 +195,10 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 | `resilience.post_output_failure`、`resilience.session_rebind`、`resilience.last_resort`、`resilience.keepalive_committed`、`resilience.turn_cap` | `request_id`（网关本地请求 ID）、`model`、`delivered_bytes`、`ms_since_first_output`、`prelude_release_event`、`prelude_release_ms` |
 
 - 字段统一由 `resilience.EventFields(ctx)` 生成，挂在请求的 `RequestState` 上：
-  - `request_id` 是网关在 RequestState 新建时生成的本地 ID，与客户端可以自带的请求 ID 分开；
+  - `request_id` 是 RequestState 新建时生成的本地 UUID；客户端可以自带 `X-Request-ID`，所以不复用它，也不改变计费与幂等键、HTTP 关联 ID 或 ClientRequestID；
+  - `model` 优先取入站模型，没有时取选号用的模型；
   - `delivered_bytes` 读 `RequestState.DeliveredBytes()`（送达口径，开场与心跳不算）；
-  - `ms_since_first_output` 从首个输出起算，没有输出时为 0；
+  - `ms_since_first_output` 从第一次成功写出内容起算（开场事件与心跳不启动时钟，之后的输出不重置），没有输出时为 0；
   - `prelude_release_event`、`prelude_release_ms` 由 β 的 `prelude_trace` 采集：每次新的 `response.created` 重置，首次释放时冻结。
 - 首输出前的事件（`keepalive_committed`）在持有心跳锁时记录，改用 `resilience.PreOutputEventFields(ctx)`：不读送达探针，`delivered_bytes` 与 `ms_since_first_output` 固定为 0，避免锁重入。
 - 日志点：`resilience_session.go` 的 `session_rebind`、两处 `last_resort`、`post_output_failure`、`turn_cap`（α）；`resilience_keepalive.go` 的 `keepalive_committed`（β）。【待契约：最终提交】

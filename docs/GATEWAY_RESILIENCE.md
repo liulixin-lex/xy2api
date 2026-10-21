@@ -206,6 +206,19 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 - `content_policy_refusal`（上游内容安全拒绝，含账号、平台、状态与截断的上游原文）、`content_policy_no_failover`（换号循环因内容安全拒绝结束）；
 - `web_search_replay`（补 web_search 声明后同号重放）、`web_search_declaration_learned`（重放成功，该账号 6 小时内同类请求直接补声明）。
 
+0.4.4 起，`post_output_failure`、`session_rebind`、`last_resort`、`turn_cap`、`keepalive_committed` 另带以下字段，用于把事件与请求关联、判断失败发生在输出的哪个阶段（只是日志字段，不新增表）：
+
+| 字段 | 含义 |
+|---|---|
+| `request_id` | 网关为每个请求生成的本地 ID（UUID）；不是客户端可自带的 `X-Request-ID` |
+| `model` | 入站请求的模型，没有时为选号用的模型 |
+| `delivered_bytes` | 已送达客户端的内容字节（开场事件与心跳不算，口径同 §4.4） |
+| `ms_since_first_output` | 距第一次写出内容的毫秒数；还没有输出时为 0 |
+| `prelude_release_event` | 结束开场暂存、开始向客户端输出的那个上游事件类型；没有暂存过时为空 |
+| `prelude_release_ms` | 上一项距 `response.created` 的毫秒数 |
+
+`keepalive_committed` 发生在输出之前，`delivered_bytes` 与 `ms_since_first_output` 总是 0。日志不含正文、Key 或完整会话值。
+
 `*_failed` 结尾的事件表示存储或查询失败，功能会降级为原有行为。
 
 ## 6. 回退
