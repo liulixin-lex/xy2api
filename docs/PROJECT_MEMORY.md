@@ -150,6 +150,15 @@
   - 下一步：逐项先写红测、单独提交；用户决定发 0.4.5 后合成候选、做全套验证。
   - 卡点：用户决定；建在 RA-1 修复之上，RA-1 分支变动时要同步。
 
+### 20261021-usage-tps-public — 使用记录“平均TPS”与指标公开按钮（2026-10-21 登记）
+
+- 请求（用户 2026-10-21）：后台使用记录“延迟”列的“平均输出速率 N tokens/s”改为“平均TPS N t/s”；系统设置“功能开关 → 管理员使用记录”卡片里，两项指标的开关左边各加一个公开按钮：打开 = 公开（普通用户的使用记录也显示），关闭 = 仅管理员可见（默认）。不加第三个开关。
+- 范围：新设置键 `usage_cache_hit_rate_public`、`usage_token_speed_public`（默认 false）；公开设置只给出生效值 `user_usage_cache_hit_rate_enabled`、`user_usage_token_speed_enabled`（显示开关与公开按钮都打开才为 true），用户使用记录页据此显示。无迁移，用量数据与接口字段不变。
+- 分支：`feat/usage-tps-public-metrics-20261021`（自 main `a1cf8f104`），功能提交 `9a4e2bef7`；文档 [`USAGE_METRICS.md`](USAGE_METRICS.md)“平均TPS”“显示与公开”已同步。
+- 授权：用户要求改代码；按惯例止于开 PR、CI 全绿，不合并、不发版、不部署。
+- 本地验证：新测试先红（25 项）后绿；前端全量 413 个文件 3190 项、typecheck、lint、build 通过；后端 Go 1.27.3 `-tags=unit` 的 service、handler、server、web 共 10 个包通过，go vet、gofmt、golangci-lint v2.14.0（0 项）通过；文档一致性、`scheduler-diff`、`tools/tests` 41 项通过。
+- 下一步：推送、开 PR、等 CI 全绿，交由另一位作者审阅合并；发版与生产部署另行授权。
+
 ## 操作陷阱
 
 - 处理 Sub2API 同步只以 `docs/UPSTREAM_SYNC.md`、同步 Skill、policy 和脚本为准。`DEV_GUIDE.md` 的“Git 操作”曾写着直接 merge/rebase 上游 main，2026-10-17 已改为指向同步规范，这两条命令也登记为 `tools/docs_consistency.json` 的退役写法。
@@ -1088,3 +1097,16 @@ pnpm --dir frontend run build
 - 验证：`check_docs_consistency.py`、干净树 `sync.py audit`、`tools/tests`。
 - 卡点/风险：无新增；生产部署 0.4.4 仍需单独授权并先通过 6.5 小时浸泡。
 - 下一步：α 推送并在 CI 全绿后合并 PR #119。
+
+### 2026-10-21T18:07Z — `20261021-usage-tps-public` — 本地完成，推送并开 PR
+
+- 请求/目标：用户 2026-10-21（附截图）：使用记录“延迟”列改为“平均TPS N t/s”；“功能开关 → 管理员使用记录”两项指标的开关左边各加一个公开按钮，打开 = 公开，关闭 = 仅管理员可见（用户明确不要第三个开关）。
+- 开始状态：本地检出原在 `feat/account-recent-health-20261019` 且落后远端；`git fetch` 后自 main `a1cf8f104`（0.4.4 发布后）建 `feat/usage-tps-public-metrics-20261021`，工作树干净。
+- 完成操作：
+  - 文案：`formatTokenSpeed` 后缀改为 `t/s`；`usage.outputTps` 改为“平均TPS”/“Avg TPS”；设置卡片改为“显示平均TPS”，单位 t/s。运维页与渠道监控的 tokens/s 不变。
+  - 公开按钮：新键 `usage_cache_hit_rate_public`、`usage_token_speed_public`（缺省 false，管理接口部分更新保留旧值）；公开设置与页面注入只给生效值 `user_usage_cache_hit_rate_enabled`、`user_usage_token_speed_enabled`（显示开关与公开按钮都打开）；用户使用记录页按它传 `UsageTable` 的两个 prop。按钮只有两种状态、不置灰，样式沿用同页模式按钮。
+  - 无迁移；用户接口字段不变（本来就返回 Token 与耗时），只改页面是否展示。
+- 修改文件：后端设置常量、解析、写入、视图、DTO、管理与公开处理器及其测试、API 契约夹具；前端 `usageMetrics.ts`、`SettingsView.vue`、用户 `UsageView.vue`、类型与 app store 兜底、中英文案及对应测试；`docs/USAGE_METRICS.md`。
+- 验证：见“进行中的工作”本条；`sync.py audit` 在提交后的干净树执行。
+- 卡点/风险：无。生产仍为旧版本，本改动随下次发版才上线。
+- 下一步：推送、开 PR、等 CI 全绿；不合并、不发版、不部署。
