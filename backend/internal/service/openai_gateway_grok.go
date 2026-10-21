@@ -163,7 +163,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		respBody := s.readUpstreamErrorBody(resp)
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		if !isOpenAIResponsesCompactPath(c) {
-			if failure := s.LearnStreamOnlyFailure(ctx, account, resilience.CapabilityProtocolResponses, gjson.GetBytes(patchedBody, "stream").Bool(), resp.StatusCode, respBody); failure != nil {
+			if failure := s.LearnStreamOnlyFailure(ctx, account, resilience.CapabilityProtocolResponses, gjson.GetBytes(patchedBody, "stream").Bool(), resp.StatusCode, respBody, patchedBody); failure != nil {
 				return nil, failure
 			}
 		}

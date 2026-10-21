@@ -56,3 +56,24 @@ func TestCapabilityExclusionsAreRequestLocal(t *testing.T) {
 	require.False(t, CapabilityExcluded(second, 7))
 	require.False(t, CapabilityExcluded(context.Background(), 7))
 }
+
+func TestStreamOnlyFailureRejectsOtherParameterAndRequestEcho(t *testing.T) {
+	for _, tc := range []struct {
+		name, response, outbound string
+		want                     bool
+	}{
+		{"different parameter", `{"error":{"message":"Invalid value: 'only accepts streaming requests'","param":"reasoning.effort"}}`, "", false},
+		{"stream options", `{"error":{"message":"stream must be true","param":"stream_options"}}`, "", false},
+		{"stream parameter", `{"error":{"message":"stream must be true","param":"stream"}}`, "", true},
+		{"null parameter", `{"error":{"code":"streaming_required","param":null}}`, "", false},
+		{"response envelope parameter", `{"response":{"error":{"code":"streaming_required","param":"input"}}}`, "", false},
+		{"case insensitive echo", `{"error":{"message":"only accepts streaming requests"}}`, `{"input":"ONLY ACCEPTS STREAMING REQUESTS","stream":false}`, false},
+		{"escaped echo", `{"error":{"message":"only accepts streaming requests"}}`, `{"input":"only accepts \u0073treaming requests","stream":false}`, false},
+		{"quoted stream echo", `{"error":{"message":"only accepts streaming requests"}}`, `{"input":"\"stream\" must be true","stream":false}`, false},
+		{"ordinary request", `{"error":{"message":"only accepts streaming requests"}}`, `{"input":"hello","stream":false}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, IsStreamOnlyFailure(400, []byte(tc.response), []byte(tc.outbound)))
+		})
+	}
+}
