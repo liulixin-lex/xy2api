@@ -787,6 +787,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			Stream:                        true,
 			Duration:                      time.Since(startTime),
 			FirstTokenMs:                  relayLive.firstTokenMs(firstTokenMs, startTime, s.openAITTFTMode(c.Request.Context())),
+			ClientDisconnect:              clientDisconnected,
 		}
 		if searchCount > 0 {
 			out.SearchCount = searchCount
@@ -820,7 +821,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				streamNonFailoverErr = err
 				return true
 			}
-			if !holdPrelude && !firstEvent.disarm() {
+			if !clientDisconnected && !holdPrelude && !firstEvent.disarm() {
 				streamFailoverErr = s.newOpenAIFirstOutputTimeoutError(c.Request.Context(), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account), firstEvent.started, firstEvent.model, firstEvent.effort, firstEvent.timeout, "first_event", resp.Header)
 				return true
 			}
@@ -1093,7 +1094,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	if streamInterval <= 0 && keepaliveInterval <= 0 {
 		var parser openAICompatSSEFrameParser
 		for scanner.Scan() {
-			if !stagePrelude && !firstEvent.disarm() {
+			if !clientDisconnected && !stagePrelude && !firstEvent.disarm() {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 			}
 			line := scanner.Text()
@@ -1112,7 +1113,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			if cancelErr := canceledPrelude(); cancelErr != nil {
 				return nil, cancelErr
 			}
-			if firstEvent.expired() && c.Request.Context().Err() == nil {
+			if !clientDisconnected && firstEvent.expired() && c.Request.Context().Err() == nil {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 			}
 			if canReplayPrelude() && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
@@ -1196,7 +1197,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				if cancelErr := canceledPrelude(); cancelErr != nil {
 					return nil, cancelErr
 				}
-				if firstEvent.expired() && c.Request.Context().Err() == nil {
+				if !clientDisconnected && firstEvent.expired() && c.Request.Context().Err() == nil {
 					return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 				}
 				if canReplayPrelude() && !errors.Is(ev.err, context.Canceled) && !errors.Is(ev.err, context.DeadlineExceeded) {
@@ -1208,7 +1209,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				}
 				return resultWithUsage(), newOpenAIUpstreamStreamReadError(ev.err)
 			}
-			if !stagePrelude && !firstEvent.disarm() {
+			if !clientDisconnected && !stagePrelude && !firstEvent.disarm() {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 			}
 			lastDataAt = time.Now()
