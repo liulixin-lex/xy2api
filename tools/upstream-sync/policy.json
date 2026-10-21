@@ -51,7 +51,8 @@
       "openspec/changes/simplify-share-scheduling-20261020/**",
       "skills/**",
       "tools/**",
-      "openspec/changes/gateway-resilience-v2-20261021/**"
+      "openspec/changes/gateway-resilience-v2-20261021/**",
+      "openspec/changes/gateway-resilience-045-20261021/**"
     ],
     "manual_merge": [
       "Makefile",
