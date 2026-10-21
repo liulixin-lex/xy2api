@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
 
@@ -139,6 +140,17 @@ func sseBlockIsOpening(block []byte) bool {
 	typ := gjson.GetBytes(data, "type").String()
 	if typ == "" {
 		typ = event
+	}
+	if resilience.Current().NativePreludeWhitelistOn() && (strings.HasPrefix(typ, "response.") || typ == "keepalive") {
+		return resilience.ClassifyStreamEvent("responses", event, data).Kind == resilience.Prelude
+	}
+	if resilience.Current().PreludeStagingOn() {
+		if gjson.GetBytes(data, "object").String() == "chat.completion.chunk" {
+			return resilience.ClassifyStreamEvent("chat", event, data).Kind == resilience.Prelude
+		}
+		if typ == "message_start" || typ == "ping" || strings.HasPrefix(typ, "content_block_") {
+			return resilience.ClassifyStreamEvent("messages", event, data).Kind == resilience.Prelude
+		}
 	}
 	switch typ {
 	case "ping", "keepalive", "message_start",

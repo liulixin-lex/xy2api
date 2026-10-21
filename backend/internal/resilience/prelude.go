@@ -121,6 +121,9 @@ func classifyResponsesAdded(root gjson.Result, typ string) EventKind {
 		if !item.IsObject() {
 			return Unknown
 		}
+		if !emptyPreludeFields(item, true) {
+			return Content
+		}
 		switch strings.TrimSpace(item.Get("type").String()) {
 		case "reasoning":
 			if item.Get("encrypted_content").String() != "" {
@@ -161,6 +164,9 @@ func classifyResponsesAdded(root gjson.Result, typ string) EventKind {
 	part := root.Get("part")
 	if !part.IsObject() {
 		return Unknown
+	}
+	if !emptyPreludeFields(part, true) {
+		return Content
 	}
 	partType := strings.TrimSpace(part.Get("type").String())
 	if typ == "response.reasoning_summary_part.added" {
@@ -216,4 +222,45 @@ func classifyChatChunk(root gjson.Result) EventKind {
 		return TerminalSuccess
 	}
 	return Prelude
+}
+
+// emptyPreludeFields only ignores known structural fields. Unknown nonempty
+// payloads, including nested annotations, must commit the attempt.
+func emptyPreludeFields(value gjson.Result, structural bool) bool {
+	switch {
+	case value.Type == gjson.Null:
+		return true
+	case value.Type == gjson.String:
+		return value.String() == ""
+	case value.IsArray():
+		for _, entry := range value.Array() {
+			if !emptyPreludeFields(entry, structural) {
+				return false
+			}
+		}
+		return true
+	case value.IsObject():
+		empty := true
+		value.ForEach(func(key, child gjson.Result) bool {
+			if structural {
+				switch key.String() {
+				case "id", "type", "status", "role", "index", "phase":
+					return true
+				case "call_id", "name":
+					if typ := value.Get("type").String(); typ == "function_call" || typ == "custom_tool_call" {
+						return true
+					}
+				}
+			}
+			nestedStructure := structural && (key.String() == "content" || key.String() == "summary")
+			if !emptyPreludeFields(child, nestedStructure) {
+				empty = false
+				return false
+			}
+			return true
+		})
+		return empty
+	default:
+		return false
+	}
 }

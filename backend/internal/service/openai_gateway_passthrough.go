@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -1198,6 +1199,10 @@ func openAIStreamDataStartsClientOutput(data, eventType string) bool {
 	trimmed := strings.TrimSpace(data)
 	if trimmed == "" {
 		return false
+	}
+	if resilience.Current().NativePreludeWhitelistOn() {
+		class := resilience.ClassifyStreamEvent("responses", eventType, []byte(trimmed))
+		return class.Kind != resilience.Prelude && !(class.Kind == resilience.TerminalFailure && class.Retryable)
 	}
 	switch strings.TrimSpace(eventType) {
 	case "response.failed":

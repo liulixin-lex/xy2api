@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -35,7 +37,7 @@ func newOpenAIRelayKeepaliveFilter(src io.Reader, live *relayLiveness) io.Reader
 	if src == nil || !resilience.Current().Enabled {
 		return src
 	}
-	return &relayKeepaliveFilter{r: bufio.NewReaderSize(src, 4096), live: live}
+	return &relayKeepaliveFilter{r: bufio.NewReaderSize(src, 4096), live: live, nativePrelude: resilience.Current().NativePreludeWhitelistOn()}
 }
 
 // relayLiveness records when a relay keep-alive frame was last dropped from
@@ -51,6 +53,16 @@ type relayLiveness struct {
 	groupID   int64
 	accountID int64
 	platform  string
+}
+
+// preCreatedDelta counts real text sent before created. Never log the text: it
+// must pass through as content, preserving the upstream order and replay boundary.
+func (l *relayLiveness) preCreatedDelta(byteCount int) {
+	if l == nil {
+		return
+	}
+	resilience.Count("pre_created_delta", l.groupID, l.accountID, l.platform)
+	slog.Info("resilience.pre_created_delta", "group_id", l.groupID, "account_id", l.accountID, "bytes", byteCount)
 }
 
 // newRelayLiveness returns the liveness of one upstream attempt.
@@ -127,7 +139,10 @@ type relayKeepaliveFilter struct {
 	midLine bool
 	// skipBlank drops the blank line that ends a dropped frame.
 	skipBlank bool
-	err       error
+	// createdSeen gates the unmarked empty-delta compatibility rule.
+	createdSeen   bool
+	nativePrelude bool
+	err           error
 }
 
 func (f *relayKeepaliveFilter) Read(p []byte) (int, error) {
@@ -157,7 +172,10 @@ func (f *relayKeepaliveFilter) next() {
 		return
 	}
 	if f.midLine || errors.Is(err, bufio.ErrBufferFull) {
-		// Keep-alive frames are short: an over-long line is never one.
+		// Keep-alive frames are short: an over-long line is never one. Its
+		// contents may include created; disable the new rule conservatively
+		// rather than dropping an ordinary empty delta after a large created.
+		f.createdSeen = true
 		f.midLine = errors.Is(err, bufio.ErrBufferFull)
 		f.skipBlank = false
 		f.emit(line)
@@ -170,8 +188,19 @@ func (f *relayKeepaliveFilter) next() {
 			return
 		}
 	}
+	if bytes.HasPrefix(trimmed, []byte("event:")) && bytes.Equal(bytes.TrimSpace(bytes.TrimPrefix(trimmed, []byte("event:"))), []byte("response.created")) {
+		f.createdSeen = true
+	}
+	if isResponsesCreatedDataLine(trimmed) {
+		f.createdSeen = true
+	}
+	if f.nativePrelude && !f.createdSeen {
+		if deltaBytes, ok := nonEmptyResponsesDeltaBytes(trimmed); ok {
+			f.live.preCreatedDelta(deltaBytes)
+		}
+	}
 	if f.holding {
-		if isRelayKeepaliveDataLine(trimmed) {
+		if isRelayKeepaliveDataLine(trimmed) || (f.nativePrelude && !f.createdSeen && isEmptyResponsesDeltaLine(trimmed)) {
 			f.holding = false
 			f.skipBlank = true
 			f.live.frameDropped()
@@ -185,7 +214,7 @@ func (f *relayKeepaliveFilter) next() {
 		f.holding = true
 		return
 	}
-	if isRelayKeepaliveDataLine(trimmed) {
+	if isRelayKeepaliveDataLine(trimmed) || (f.nativePrelude && !f.createdSeen && isEmptyResponsesDeltaLine(trimmed)) {
 		f.skipBlank = true
 		f.live.frameDropped()
 		return
@@ -227,4 +256,44 @@ func isRelayKeepaliveDataLine(line []byte) bool {
 	return doc.Get("type").String() == string(relayKeepaliveDeltaEvent) &&
 		doc.Get("delta").String() == "" &&
 		(doc.Get("item_id").String() == string(relayKeepaliveMarker) || doc.Get(string(relayKeepaliveMarker)).Bool())
+}
+
+func isResponsesCreatedDataLine(line []byte) bool {
+	payload, ok := bytes.CutPrefix(bytes.TrimSpace(line), []byte("data:"))
+	if !ok || !gjson.ValidBytes(bytes.TrimSpace(payload)) {
+		return false
+	}
+	return gjson.GetBytes(bytes.TrimSpace(payload), "type").String() == "response.created"
+}
+
+// isEmptyResponsesDeltaLine deliberately ignores relay markers. It only
+// describes the protocol delta shape; the caller decides whether it is still
+// before response.created.
+func isEmptyResponsesDeltaLine(line []byte) bool {
+	delta, ok := responsesDeltaValue(line)
+	return ok && strings.TrimSpace(delta) == ""
+}
+
+func nonEmptyResponsesDeltaBytes(line []byte) (int, bool) {
+	delta, ok := responsesDeltaValue(line)
+	if !ok || strings.TrimSpace(delta) == "" {
+		return 0, false
+	}
+	return len([]byte(delta)), true
+}
+
+func responsesDeltaValue(line []byte) (string, bool) {
+	payload, ok := bytes.CutPrefix(bytes.TrimSpace(line), []byte("data:"))
+	if !ok || !gjson.ValidBytes(bytes.TrimSpace(payload)) {
+		return "", false
+	}
+	doc := gjson.ParseBytes(bytes.TrimSpace(payload))
+	if doc.Get("type").String() != string(relayKeepaliveDeltaEvent) {
+		return "", false
+	}
+	delta := doc.Get("delta")
+	if !delta.Exists() || delta.Type != gjson.String {
+		return "", false
+	}
+	return delta.String(), true
 }
