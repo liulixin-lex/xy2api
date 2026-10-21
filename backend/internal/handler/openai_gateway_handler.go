@@ -1510,6 +1510,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 						h.handleAnthropicFailoverExhausted(c, failoverErr, true)
 						return
 					}
+					// Staged heartbeats commit SSE without delivering semantic output.
+					if c.Writer.Written() {
+						streamStarted = true
+					}
 					if failoverErr.ShouldReportAccountScheduleFailure() {
 						h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, nil), false, nil, err)
 					}
@@ -1686,12 +1690,16 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 		if failoverErr != nil {
 			upstreamBody = failoverErr.ResponseBody
 		}
+		if streamStarted && c.Writer.Size() > 0 && !gatewayStreamHasOnlyHeartbeats(c) {
+			service.MarkOpsStreamError(c, errType, message, status)
+			return
+		}
+		if failoverErr != nil {
+			copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
+		}
 		errType = anthropicFailoverErrorType(status, errType, upstreamBody)
 		status = applyExhaustedRetryHint(c, h.gatewayService, status)
 		h.anthropicStreamingAwareError(c, status, errType, message, streamStarted)
-	}
-	if failoverErr != nil {
-		copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
 	}
 	if failoverErr.IsCapabilityStreamOnly() {
 		status, errType, message := resilienceCapacityExhausted(c, failoverErr, http.StatusServiceUnavailable, "api_error", "")

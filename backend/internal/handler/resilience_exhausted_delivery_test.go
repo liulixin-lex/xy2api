@@ -12,7 +12,7 @@ import (
 )
 
 func TestCompatibleExhaustionAfterOutputDoesNotCountTurn(t *testing.T) {
-	for _, endpoint := range []string{EndpointResponses, EndpointChatCompletions} {
+	for _, endpoint := range []string{EndpointResponses, EndpointChatCompletions, "/v1/messages"} {
 		t.Run(endpoint, func(t *testing.T) {
 			withHandlerResilience(t, func(s *resilience.Settings) { s.Errors.TurnCap.Failures = 1 })
 			resetTurnCap(t)
@@ -24,8 +24,10 @@ func TestCompatibleExhaustionAfterOutputDoesNotCountTurn(t *testing.T) {
 			failure := &service.UpstreamFailoverError{StatusCode: http.StatusBadGateway, ResponseHeaders: http.Header{"Retry-After": {"60"}}}
 			if endpoint == EndpointResponses {
 				(&GatewayHandler{}).handleResponsesFailoverExhausted(c, failure, true)
-			} else {
+			} else if endpoint == EndpointChatCompletions {
 				(&GatewayHandler{}).handleCCFailoverExhausted(c, failure, true)
+			} else {
+				(&OpenAIGatewayHandler{}).handleAnthropicFailoverExhausted(c, failure, true)
 			}
 			require.Equal(t, before, w.Body.String())
 			require.False(t, c.GetBool(ginKeyResilienceTurnCounted))
