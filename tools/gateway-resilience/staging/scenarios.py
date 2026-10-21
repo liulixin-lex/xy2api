@@ -1693,6 +1693,18 @@ def q1():
             check(not any("tag=qt-unused" in x["spec"] for x in rows), prefix + "billing failure occurs before queued upstream attempt", checks)
             check(not any(l.lstrip().startswith(("{", "[")) for l in lines), prefix + "no bare JSON after queue ping", checks)
             check(bool(failures) and "balance" in json.dumps(failures).lower(), prefix + "terminal identifies balance failure", checks)
+            if protocol in ("responses", "chat"):
+                # Inspect the raw first data frame so filtering DONE cannot
+                # hide an invalid queue prefix.
+                first_frame = next((l[5:] for l in lines if l.startswith("data:")), "")
+                try:
+                    opening = json.loads(first_frame)
+                except ValueError:
+                    opening = None
+                valid_opening = isinstance(opening, dict) and (
+                    (protocol == "responses" and opening.get("type") == "response.created") or
+                    (protocol == "chat" and (opening.get("object") == "chat.completion.chunk" or opening.get("error"))))
+                check(valid_opening, prefix + "queue heartbeat uses comments; no data frame before opening or error", checks)
             if protocol == "responses":
                 terminal = [e for e in events if e.get("type") != "ping"]
                 paired = (len(terminal) == 2 and [e.get("type") for e in terminal] == ["response.created", "response.failed"] and
