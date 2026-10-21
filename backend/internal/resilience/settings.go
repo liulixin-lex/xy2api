@@ -15,9 +15,9 @@ import (
 // SettingKey is the settings-table key of the stored JSON.
 const SettingKey = "gateway_resilience_settings"
 
-// Settings is the full gateway_resilience_settings document. Every capability
-// has its own switch; turning one off restores the 0.3.0 behaviour of that
-// capability only.
+// Settings is the full gateway_resilience_settings document. The master
+// switch restores the pre-resilience behavior; newer child switches restore
+// the behavior preceding their own introduction.
 type Settings struct {
 	Enabled       bool                `json:"enabled"`
 	Failure       FailureSettings     `json:"failure"`
@@ -31,6 +31,21 @@ type Settings struct {
 	Errors        ErrorSettings       `json:"errors"`
 	FallbackGroup FallbackSettings    `json:"fallback_group"`
 	Reservation   ReservationSettings `json:"reservation"`
+	Stream        StreamSettings      `json:"stream"`
+	Capability    CapabilitySettings  `json:"capability"`
+}
+
+// StreamSettings controls stream protocol staging and terminal recognition.
+type StreamSettings struct {
+	PreludeStaging         bool `json:"prelude_staging"`
+	NativePreludeWhitelist bool `json:"native_prelude_whitelist"`
+	StrictTerminal         bool `json:"strict_terminal"`
+}
+
+// CapabilitySettings controls learned upstream capability state.
+type CapabilitySettings struct {
+	StreamOnlyLearning bool `json:"stream_only_learning"`
+	LearnTTLSeconds    int  `json:"learn_ttl_seconds"`
 }
 
 // SwitchSettings is a capability with only an on/off switch.
@@ -43,6 +58,7 @@ type FailureSettings struct {
 	TransientCooldownSeconds int      `json:"transient_cooldown_seconds"`
 	RetryAfterCapSeconds     int      `json:"retry_after_cap_seconds"`
 	BalanceKeywordsExtra     []string `json:"balance_keywords_extra"`
+	DecisionV2               bool     `json:"decision_v2"`
 }
 
 // SessionSettings tunes session failure handling.
@@ -142,6 +158,8 @@ type ErrorSettings struct {
 	NegativeCacheSeconds         int              `json:"negative_cache_seconds"`
 	FastFail                     FastFailSettings `json:"fast_fail"`
 	TurnCap                      TurnCapSettings  `json:"turn_cap"`
+	FailedFrameRetryAfter        bool             `json:"failed_frame_retry_after"`
+	CodexRetryAfterCapSeconds    int              `json:"codex_retry_after_cap_seconds"`
 }
 
 // FallbackSettings tunes the availability fallback group.
@@ -161,7 +179,7 @@ type ReservationSettings struct {
 func Defaults() Settings {
 	return Settings{
 		Enabled:    true,
-		Failure:    FailureSettings{TransientCooldownSeconds: 30, RetryAfterCapSeconds: 120, BalanceKeywordsExtra: []string{}},
+		Failure:    FailureSettings{TransientCooldownSeconds: 30, RetryAfterCapSeconds: 120, BalanceKeywordsExtra: []string{}, DecisionV2: true},
 		Session:    SessionSettings{Enabled: true, StreakThreshold: 2, StreakWindowSeconds: 600, AvoidSeconds: 600},
 		LastResort: SwitchSettings{Enabled: true},
 		Balance:    BalanceSettings{Enabled: true, PauseSeconds: 300},
@@ -195,9 +213,13 @@ func Defaults() Settings {
 			NegativeCacheSeconds:         2,
 			FastFail:                     FastFailSettings{Enabled: true, WindowSeconds: 30, Threshold: 10},
 			TurnCap:                      TurnCapSettings{Enabled: true, Failures: 5, WindowSeconds: 120},
+			FailedFrameRetryAfter:        true,
+			CodexRetryAfterCapSeconds:    10,
 		},
 		FallbackGroup: FallbackSettings{Enabled: true, ReturnStableSeconds: 120, BindingTTLSeconds: 600},
 		Reservation:   ReservationSettings{CacheAwareEstimate: true, OutputP99Cap: true},
+		Stream:        StreamSettings{PreludeStaging: true, NativePreludeWhitelist: true, StrictTerminal: true},
+		Capability:    CapabilitySettings{StreamOnlyLearning: true, LearnTTLSeconds: 21600},
 	}
 }
 
@@ -277,10 +299,13 @@ func (s Settings) Validate() error {
 	check(in(e.FastFail.Threshold, 2, 10000), "errors.fast_fail.threshold must be 2-10000")
 	check(in(e.TurnCap.Failures, 2, 30), "errors.turn_cap.failures must be 2-30")
 	check(in(e.TurnCap.WindowSeconds, 10, 3600), "errors.turn_cap.window_seconds must be 10-3600")
+	check(in(e.CodexRetryAfterCapSeconds, 0, 30), "errors.codex_retry_after_cap_seconds must be 0-30")
 
 	f := s.FallbackGroup
 	check(in(f.ReturnStableSeconds, 1, 86400), "fallback_group.return_stable_seconds must be 1-86400")
 	check(in(f.BindingTTLSeconds, 1, 86400), "fallback_group.binding_ttl_seconds must be 1-86400")
+
+	check(in(s.Capability.LearnTTLSeconds, 600, 86400), "capability.learn_ttl_seconds must be 600-86400")
 
 	if len(p) > 0 {
 		return &ValidationError{Problems: p}
@@ -365,6 +390,46 @@ func (s *Settings) DisconnectOn() bool { return s.master() && s.Disconnect.Enabl
 
 // ErrorsOn reports whether error semantics and storm protection are active.
 func (s *Settings) ErrorsOn() bool { return s.master() && s.Errors.Enabled }
+
+// PreludeStagingOn reports whether compatibility prelude staging is active.
+func (s *Settings) PreludeStagingOn() bool { return s.master() && s.Stream.PreludeStaging }
+
+// NativePreludeWhitelistOn reports whether the native Responses prelude
+// whitelist is active.
+func (s *Settings) NativePreludeWhitelistOn() bool {
+	return s.master() && s.Stream.NativePreludeWhitelist
+}
+
+// StrictTerminalOn reports whether strict stream terminal recognition is
+// active.
+func (s *Settings) StrictTerminalOn() bool { return s.master() && s.Stream.StrictTerminal }
+
+// DecisionV2On reports whether the corrected failure decision is active.
+func (s *Settings) DecisionV2On() bool { return s.master() && s.Failure.DecisionV2 }
+
+// FailedFrameRetryAfterOn reports whether synthesized failed frames can carry
+// conditional retry advice.
+func (s *Settings) FailedFrameRetryAfterOn() bool {
+	return s.master() && s.Errors.Enabled && s.Errors.FailedFrameRetryAfter
+}
+
+// CodexRetryAfterCapOn reports whether the Codex-specific cap is active.
+func (s *Settings) CodexRetryAfterCapOn() bool {
+	return s.master() && s.Errors.Enabled && s.Errors.CodexRetryAfterCapSeconds > 0
+}
+
+// StreamOnlyLearningOn reports whether deterministic stream-only capability
+// results are learned and retained.
+func (s *Settings) StreamOnlyLearningOn() bool {
+	return s.master() && s.Capability.StreamOnlyLearning
+}
+
+// StreamOnlyFailoverOn reports whether a learned stream-only result can cause
+// an immediate retry with another account. The decision_v2 gate keeps the
+// compatibility behavior when the corrected failure policy is disabled.
+func (s *Settings) StreamOnlyFailoverOn() bool {
+	return s.StreamOnlyLearningOn() && s.DecisionV2On()
+}
 
 // FallbackGroupOn reports whether availability fallback groups are active.
 func (s *Settings) FallbackGroupOn() bool { return s.master() && s.FallbackGroup.Enabled }
