@@ -181,7 +181,7 @@
 - 运维记录的 `resilience_category` 与 handler 的换号规则用同一个分类结果，不再分叉。HTTP 错误的运维记录在构造时用 `opsHTTPResilienceCategory(status, headers, body, message)` 直接填分类（总开关关闭时为空），保留只靠响应头 reset 判定的证据，也保证关闭原始错误正文日志时，结构化的 `error.type`（如 503 加 `overloaded_error`）仍判为 `CAPACITY_SHED`；不记录原始正文。覆盖 Grok（γ）与 Forward（含 compact 回退）、透传、raw Chat 与共用的 CC pipeline（β `4eed85c1a`，上游钩子 `opsHTTPResilienceCategory`）。流内事件仍从结构化正文推导。
 - `RequestScopedTransient` 只在 `decision_v2` 开启时不再单独推出 `CAPACITY_SHED`；关闭时与 0.4.3 相同。实现提交 `0d3e72508`。
 - D18 不变：容量降载仍是同号先试一次、只跨主机换一次。
-- `RATE_LIMIT` 计入会话失败，改绑可能增多；开关关闭即回到旧分类。
+- `RATE_LIMIT` 计入会话失败，改绑可能增多；开关关闭即回到旧的分类规则（分类输入的证据补全除外，见 §9）。
 
 ## 6. W6-lite 仅流式能力（`capability.stream_only_learning`）
 
@@ -207,7 +207,8 @@
 
 - **本请求**：`failure.decision_v2` 开启时，钩子返回可换号的哨兵错误（`IsCapabilityStreamOnly()`；不上报账号调度失败、不同号重试），handler 只计请求预算的尝试次数，不记会话失败、不冷却。这次拒绝不写运维的上游错误记录（写入会把账号记为本请求失败），只记中性事件 `resilience.capability_learned`。`decision_v2` 关闭时只学习，钩子返回空，本请求照旧返回 400。
 - **选号**：`Account.CapabilityExclusion(ctx, model, now)` 只在确定的路径上过滤：上游协议与入站相同，且上游的流模式跟随客户端（PM 指令，2026-10-21）。跨协议的转换（如 Chat 转 Responses 上游，这类转换本来就以 `stream=true` 请求上游）、按模型路由（`routesByModel`）的账号（选号与转发的模型目录路由可能不同；γ `29f26652d`），以及路由无法确定的 Grok OAuth Chat（可能按请求内容走强制流式的 Responses 桥接，选号时没有请求体）都不过滤；Grok 原生 Responses 与 API Key 账号的 raw Chat 照常过滤；Grok 的两种协议各自独立。不新增路由提示的 helper（γ `a03ad9c79`）。
-- Responses 入站转 raw Chat 上游的路径，上游流模式确实跟随客户端，但它是跨协议路径，本期不做持久过滤；这条路径上的确定性 400 仍按实际的 Chat 协议学习，并在本请求预算内换号。OpenAI 选号的共同资格检查（`openai_gateway_scheduling.go`）与 `openai_account_scheduler.go` 的 `isAccountRequestCompatibleReason` 都经钩子 `capabilityEligibilityReason` 过滤，覆盖粘性会话与末位兜底的最后检查；钩子登记到 `scheduler-diff.json` 与 `policy.json`（α）。
+- Responses 入站转 raw Chat 上游的路径，上游流模式确实跟随客户端，但它是跨协议路径，本期不做持久过滤；这条路径上的确定性 400 仍按实际的 Chat 协议学习，并在本请求预算内换号。
+- 选号钩子：OpenAI 选号的共同资格检查（`openai_gateway_scheduling.go`）与 `openai_account_scheduler.go` 的 `isAccountRequestCompatibleReason` 都经钩子 `capabilityEligibilityReason` 过滤，覆盖粘性会话与末位兜底的最后检查；钩子登记到 `scheduler-diff.json` 与 `policy.json`（α）。
 - **只因能力而无号的应答**（PM 2026-10-21T02:42Z）：两种情形用同一个应答——
   - 选号时全部候选都因能力被过滤（`service.IsCapabilityOnlySelectionError`）；
   - 本请求的失败尝试全部是“只接受流式”的哨兵、没有其他原因（`service.IsCapabilityOnlyExhaustion`；能力尝试由 `resilience.NoteCapabilityAttempt` 记录、`CapabilityOnlyAttempts` 读取，handler 共用的 `resilienceAttemptFailed` 记录其他失败原因，不碰健康与会话状态，也不借用“本请求已失败账号”）。
@@ -359,14 +360,13 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 | CV-9 | F34 | §3.1 `codex.response.metadata` 算输出，不再换号 | 回归 |
 | RAW-1 | F35 | §4 raw Chat `error` + `[DONE]` 在输出前换到 B | 红灯 |
 | RAW-2 | F35 | §4 单号组：记为失败，不当成功、不计费 | 红灯 |
-| SO-1 | F36 | §6 仅流式：学习、本请求换号、跳过下一个非流式请求、流式照常、清除后重新学习 | 红灯 |
+| SO-1 | F36 | §6 仅流式：学习、本请求换号、跳过下一个非流式请求、流式照常、清除后重新学习；F36 错误体带 `"param": null`（§6.1） | 红灯 |
 | RA-1 | F37 | §7.1 心跳已提交后全组过载：`response.failed` 带 2–10 秒 retry-after，正文一致 | 红灯（正文 8 秒但帧不带 headers） |
 | RA-2 | — | §7.1 心跳已提交后 B 健康：请求完成，没有延迟提示 | 回归 |
 | ANT-3 | — | §7.4 Messages 无号为 `api_error` | 回归（无号本来就是 `api_error`；本期改的是心跳后的终止帧与按状态码推断的类型，由单测覆盖） |
 | SH-1、SH-2 | — | PR #117 份额：切换到份额按优先级与负载因子选号、真实瞬时失败降低健康权重、回到原版 | 通过（基线已含 #117） |
 | DC-6（修改） | — | §3.4 兼容转换只写开场就断开：改为断言开场延迟 | 红灯 |
-
-| Q-1 | — | §7.3 用户队列 ping 之后余额归零：Responses 为 created→failed，Chat 为 error→`[DONE]`，不写裸 JSON | 红灯 |
+| Q-1 | — | §7.3 用户队列 ping 之后余额归零：Responses 为 created→failed，Chat 为 error→`[DONE]`，不写裸 JSON；Responses 与 Chat 在开场前没有任何 data 帧（§9 排队心跳格式） | 红灯 |
 | CX-1 | — | §7.5 Codex 请求（`originator` 与 UA）无号时 `Retry-After` ≤10 秒，普通客户端不变 | 红灯（基线 30 秒） |
 
 排队 ping 之后的终止帧另由单测 `TestCompatibleQueueErrorsEndInInboundProtocol` 覆盖。

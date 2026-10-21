@@ -48,7 +48,7 @@
 
 - 容量多主机换号（方案 W2.2；D18 维持原状）、健康感知调度（W3）、已输出后失败与缓存友好换号（W4）、OpenAI 侧响应头截止与自适应首输出截止（W7）。
 - W8 的两张新表与迁移、观测面板。
-- W1.2 的其余路径：OpenAI Responses 透传的首输出守卫（如未完成）、Gateway 入站经 Anthropic 上游的两个反向转换器、Gemini、Bedrock、CN、Antigravity T2。
+- W1.2 的其余路径：OpenAI Responses 透传的首输出计时守卫（本期延后）、Gateway 入站经 Anthropic 上游的两个反向转换器、Gemini、Bedrock、CN、Antigravity T2。
 - 自动把非流式请求改发流式再聚合（force_stream）；手工能力设置（只留字段位）。
 - Sub2API v0.2.17 同步。
 
