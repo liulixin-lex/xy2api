@@ -18,6 +18,10 @@ With `failure.decision_v2` on, a failure MUST be classified `CAPACITY_SHED` only
 - **WHEN** an upstream returns a 5xx with "The service is busy", "Too many pending requests" or "Concurrency limit exceeded for account"
 - **THEN** the failure is `TRANSIENT` (or `RATE_LIMIT` for 429) and the request may switch to an account on the same host.
 
+#### Scenario: Explicit rate-limit wording
+- **WHEN** an upstream returns a 5xx whose message says "rate limit exceeded" or "too many requests", with a reset time
+- **THEN** the failure stays `RATE_LIMIT` with that reset, as in 0.4.3.
+
 #### Scenario: Stronger evidence wins
 - **WHEN** a 429 body says the upstream balance is insufficient
 - **THEN** the failure is `BALANCE`.
