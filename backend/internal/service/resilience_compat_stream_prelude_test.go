@@ -67,6 +67,37 @@ func TestCompatPreludeCancelReadFailureIsNeutral(t *testing.T) {
 	}
 }
 
+func TestCompatPreludeCommentHeartbeatStillAllowsFailover(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, messages := range []bool{false, true} {
+		t.Run(fmtBool(messages), func(t *testing.T) {
+			svc := compatStreamService(&silentUpstream{headers: true, before: keepaliveStallCreated}, 2, 30, 1)
+			c, rec := compatStreamContext("/v1/chat/completions", compatChatStreamBody)
+			var err error
+			if messages {
+				_, err = svc.ForwardAsAnthropic(c.Request.Context(), c, rawChatCompletionsTestAccount(), []byte(compatMessagesStreamBody), "", "")
+			} else {
+				_, err = svc.ForwardAsChatCompletions(c.Request.Context(), c, rawChatCompletionsTestAccount(), []byte(compatChatStreamBody), "", "")
+			}
+			requireFirstOutputFailover(t, err)
+			require.Contains(t, rec.Body.String(), ":\n\n")
+			require.NotContains(t, rec.Body.String(), "data:")
+			require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c))
+			body := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_b\"}}\n\n" +
+				"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1}}}\n\n"
+			_, err = runPreludeCompat(t, c, messages, strings.NewReader(body), 0, 0)
+			require.NoError(t, err)
+			require.Contains(t, rec.Body.String(), "resp_b")
+			if messages {
+				require.Equal(t, 1, strings.Count(rec.Body.String(), "event: message_start"))
+			} else {
+				require.Equal(t, 1, strings.Count(rec.Body.String(), `"role":"assistant"`))
+			}
+		})
+	}
+}
+
 func runPreludeCompat(t *testing.T, c *gin.Context, messages bool, body io.Reader, requestBytes int, interval int) (*OpenAIForwardResult, error) {
 	t.Helper()
 	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(body)}
@@ -174,7 +205,7 @@ func TestCompatPreludeGuardWaitsForContent(t *testing.T) {
 	for _, messages := range []bool{false, true} {
 		t.Run(fmtBool(messages), func(t *testing.T) {
 			before := keepaliveStallCreated + "data: {\"type\":\"response.queued\"}\n\n"
-			svc := compatStreamService(&silentUpstream{headers: true, before: before}, 1, 30, 1)
+			svc := compatStreamService(&silentUpstream{headers: true, before: before}, 1, 30, 0)
 			c, rec := compatStreamContext("/v1/chat/completions", compatChatStreamBody)
 			var err error
 			if messages {
@@ -183,7 +214,7 @@ func TestCompatPreludeGuardWaitsForContent(t *testing.T) {
 				_, err = svc.ForwardAsChatCompletions(c.Request.Context(), c, rawChatCompletionsTestAccount(), []byte(compatChatStreamBody), "", "")
 			}
 			requireFirstOutputFailover(t, err)
-			require.Empty(t, rec.Body.String(), "direct requests stay uncommitted while staging")
+			require.Empty(t, rec.Body.String(), "staging stays uncommitted when service heartbeats are disabled")
 		})
 	}
 }

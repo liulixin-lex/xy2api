@@ -1465,15 +1465,20 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			return resultWithUsage(), fmt.Errorf("stream data interval timeout")
 
 		case <-keepaliveCh:
-			if clientDisconnected || (stagePrelude && !clientOutputStarted) {
+			if clientDisconnected {
 				continue
 			}
 			if time.Since(lastDataAt) < keepaliveInterval {
 				continue
 			}
-			// Send Anthropic-format ping event
+			// Before message_start, comments keep the connection alive without
+			// opening a protocol stream that could belong to a failed attempt.
 			writeStreamHeaders()
-			n, err := fmt.Fprint(c.Writer, "event: ping\ndata: {\"type\":\"ping\"}\n\n")
+			frame := "event: ping\ndata: {\"type\":\"ping\"}\n\n"
+			if stagePrelude && !clientOutputStarted {
+				frame = ":\n\n"
+			}
+			n, err := fmt.Fprint(c.Writer, frame)
 			if err != nil {
 				// Client disconnected
 				logger.L().Info("openai messages stream: client disconnected during keepalive",

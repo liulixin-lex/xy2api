@@ -1250,10 +1250,10 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			return resultWithUsage(), fmt.Errorf("stream data interval timeout")
 
 		case <-keepaliveCh:
-			if clientDisconnected || (stagePrelude && !clientOutputStarted) {
+			if clientDisconnected {
 				continue
 			}
-			if refusalDetector.Enabled() && !clientOutputStarted {
+			if !stagePrelude && refusalDetector.Enabled() && !clientOutputStarted {
 				continue
 			}
 			if time.Since(lastDataAt) < keepaliveInterval {
