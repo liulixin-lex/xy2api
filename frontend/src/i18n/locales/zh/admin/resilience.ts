@@ -181,8 +181,19 @@ export default {
         temp_unschedulable: '临时不可调度',
         rate_limited: '限流',
         overloaded: '过载',
-        model_rate_limited: '模型限流'
+        model_rate_limited: '模型限流',
+        capability_stream_only: '仅流式（非流式请求跳过）'
       }
+    },
+    capability: {
+      badge: '仅流式（自动学习，剩余 {time}）',
+      hours: '{n} 小时',
+      minutes: '{n} 分钟',
+      title: '上游只接受流式请求（{protocols}）：这些协议的非流式请求暂不选该账号，流式请求不受影响，到期自动恢复。',
+      clear: '清除',
+      clearTitle: '清除学到的仅流式状态，非流式请求可以重新选该账号',
+      cleared: '已清除仅流式状态',
+      clearFailed: '清除仅流式状态失败'
     },
     usage: {
       fallback: '兜底：{origin} → {group}',

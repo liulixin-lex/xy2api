@@ -181,8 +181,19 @@ export default {
         temp_unschedulable: 'Temporarily unschedulable',
         rate_limited: 'Rate limited',
         overloaded: 'Overloaded',
-        model_rate_limited: 'Model rate limited'
+        model_rate_limited: 'Model rate limited',
+        capability_stream_only: 'Stream only (skipped for non-streaming requests)'
       }
+    },
+    capability: {
+      badge: 'Stream only (learned, {time} left)',
+      hours: '{n} h',
+      minutes: '{n} min',
+      title: 'The upstream only accepts streaming requests ({protocols}): non-streaming requests on these protocols skip this account; streaming requests are unaffected. It clears itself when it expires.',
+      clear: 'Clear',
+      clearTitle: 'Clear the learned stream-only state so non-streaming requests may use this account again',
+      cleared: 'Stream-only state cleared',
+      clearFailed: 'Could not clear the stream-only state'
     },
     usage: {
       fallback: 'Fallback: {origin} → {group}',
