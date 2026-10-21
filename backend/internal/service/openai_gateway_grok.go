@@ -177,6 +177,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 			AccountName:        account.Name,
 			UpstreamStatusCode: resp.StatusCode,
 			UpstreamRequestID:  firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
+			ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, respBody, upstreamMsg),
 			Kind:               kind,
 			Message:            upstreamMsg,
 		})
@@ -1430,6 +1431,7 @@ func (s *OpenAIGatewayService) describeGrokComposerImage(
 			AccountName:        account.Name,
 			UpstreamStatusCode: resp.StatusCode,
 			UpstreamRequestID:  firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
+			ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, respBody, upstreamMsg),
 			Kind:               kind,
 			Message:            upstreamMsg,
 		})
