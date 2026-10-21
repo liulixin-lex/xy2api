@@ -20,8 +20,12 @@ Prelude events are:
 - **THEN** the metadata event counts as output, the failure is forwarded and the request does not switch accounts.
 
 #### Scenario: Empty delta before created
-- **WHEN** a relay sends an empty `response.output_text.delta` before `response.created`
-- **THEN** the frame is dropped, counts as upstream liveness, and does not count as output; a non-empty delta before `response.created` counts as output.
+- **WHEN** a relay sends a Responses delta whose `delta` is an empty or whitespace-only string before `response.created`
+- **THEN** the frame is dropped, counts as upstream liveness and as `relay_keepalive`, and does not count as output.
+
+#### Scenario: Non-empty delta before created
+- **WHEN** a relay sends a non-empty delta before `response.created`
+- **THEN** the delta is written to the client at once as output, `pre_created_delta` is counted, and the event `resilience.pre_created_delta` records its byte count without content.
 
 #### Scenario: Encrypted reasoning is content
 - **WHEN** `response.output_item.added` carries a reasoning item with `encrypted_content`

@@ -108,7 +108,12 @@
 - 多数中转在第一个 `response.output_text.delta` 之前依次发 `response.created`、`response.in_progress`、空的 message `output_item.added`、空的 output_text `content_part.added`，都在上表内。
 - `codex.response.metadata` 没有观察到，`response.metadata` 出现在正文之后，二者都**不**加入开场；`codex.*`、rate_limits 一类不按名字通配放行，仍按 `Unknown` 即内容处理。
 - added 结构只在严格确认已知字段为空时算开场；带正文、工具参数、加密载荷或未知非空字段的，一律算内容。
-- 部分中转在 `response.created` **之前**先发一个 delta。中转伪保活帧的判据（旧 design §7.8）泛化为“`response.created` 之前出现的空 delta”：丢弃、算上游存活、不算输出；`response.created` 之前的非空 delta 仍按输出处理，并计数【待契约：CHANGES_B 的计数名】。
+- 部分中转在 `response.created` **之前**先发一个 delta。中转伪保活帧的判据（旧 design §7.8，`resilience_relay_keepalive.go`）泛化：
+  - `response.created` 之前、`delta` 明确为空字符串或只有空白的 Responses delta：丢弃，算上游存活、不算输出，计入既有的 `relay_keepalive`；
+  - `delta` 缺失、为 null 或不是字符串的不丢；`response.created` 之后的普通空 delta 照常转发；带 `SSE-Keep-Alive` 标记的帧行为不变；
+  - `response.created` 之前的非空 delta 是真实内容，立即输出（网关不重排上游的真实内容），计数 `pre_created_delta`（按分组、账号、平台），并记 info 事件 `resilience.pre_created_delta`（`group_id`、`account_id`、`bytes`，只记 UTF-8 字节数，不记内容）；
+  - 过滤器按行有界解析：超过 4 KiB 的行原样透传，并保守地停止识别之后的空帧（这一行可能就是 created），不冒险丢真实数据。
+- 伪保活过滤受总开关控制（旧行为）；泛化部分随 `stream.native_prelude_whitelist`：关闭时只识别带标记的帧。【待契约：以 CHANGES_B 最终提交为准】
 
 终态：Responses 的 `response.completed`/`response.done` 为成功，`response.failed`/`error` 为失败，`response.incomplete` 为不可重试的失败终态；Chat 的 `[DONE]` 为成功，带 `error` 的 chunk 为失败；Messages 的 `message_stop` 为成功。
 
@@ -124,7 +129,8 @@
 
 ### 3.3 原生 Responses 白名单（`stream.native_prelude_whitelist`）
 
-- 改动位置：`openai_gateway_passthrough.go` 的 `openAIStreamEventIsMetadata` 一带，普通路径的暂存与 pendingLines 共用 §3.1 的判据。
+- 改动位置：`openai_gateway_passthrough.go` 的 `openAIStreamEventIsMetadata` 一带，普通路径的暂存与透传的 pendingLines 共用 §3.1 的判据（上游钩子 `resilience.ClassifyStreamEvent("responses", eventType, []byte(trimmed))`，登记到 `policy.json` 的 required_literals）。
+- 开关关闭时回到旧的首输出边界。`response.queued` 可以暂存；`codex.response.metadata`、`response.metadata` 与未知事件不在白名单，到达即释放暂存，并按原顺序转发。
 - 送达追踪 `resilience_delivery_sse.go` 的开场名单也改用 §3.1；送达计费口径不变：开场不算送达。
 - **严格 SDK 约束**：换号后只转发新账号的 `response.created`，旧尝试的开场全部丢弃、不拼接；response id 与序号沿用新尝试的值。客户端看到的第一个事件始终是 `response.created`，id 不变。
 
