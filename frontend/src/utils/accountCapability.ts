@@ -16,10 +16,14 @@ export interface AccountWithCapability {
   capability_learned?: AccountCapabilityLearned[] | null
 }
 
-/** Unexpired stream-only entries, latest expiry first. */
+/**
+ * Unexpired stream-only entries, latest expiry first. A cleared state is
+ * stored as JSON null, so null or missing (the list or an entry) means no record.
+ */
 export function activeStreamOnly(learned: AccountCapabilityLearned[] | null | undefined, now = Date.now()): AccountCapabilityLearned[] {
   return (learned ?? [])
-    .filter((entry) => entry.mode === 'stream_only' && Date.parse(entry.expires_at) > now)
+    .filter((entry): entry is AccountCapabilityLearned =>
+      entry != null && entry.mode === 'stream_only' && typeof entry.expires_at === 'string' && Date.parse(entry.expires_at) > now)
     .sort((a, b) => Date.parse(b.expires_at) - Date.parse(a.expires_at))
 }
 
