@@ -1283,14 +1283,14 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		if err := canceledPrelude(); err != nil {
 			return nil, err
 		}
+		message := "OpenAI messages stream ended before a terminal event"
 		if canReplayPrelude() {
-			return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, nil, "OpenAI stream ended before content or terminal", upstreamModel, resp.Header)
+			return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, nil, message, upstreamModel, resp.Header)
 		}
 		result := resultWithUsage()
 		if clientDisconnected {
 			return result, fmt.Errorf("stream usage incomplete: missing terminal event")
 		}
-		message := "OpenAI messages stream ended before a terminal event"
 		if !clientOutputStarted {
 			return result, s.newOpenAIStreamFailoverError(c, account, false, requestID, nil, message)
 		}
