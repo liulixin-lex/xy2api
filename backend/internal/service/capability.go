@@ -68,7 +68,7 @@ func capabilityFingerprint(account *Account) string {
 // so administrators can inspect and clear them while learning is disabled.
 func (a *Account) CapabilityLearned(now time.Time) []resilience.LearnedCapability {
 	result := []resilience.LearnedCapability{}
-	if !capabilityAccountEligible(a) {
+	if !capabilityAccountEligible(a) || (a.Extra[capabilityLearnedResponsesKey] == nil && a.Extra[capabilityLearnedChatKey] == nil) {
 		return result
 	}
 	fingerprint := capabilityFingerprint(a)
@@ -93,7 +93,9 @@ func (a *Account) CapabilityLearned(now time.Time) []resilience.LearnedCapabilit
 // CapabilityExclusion only filters direct protocol paths whose upstream stream
 // mode follows the client. Conversion and ambiguous bridge paths stay eligible.
 func (a *Account) CapabilityExclusion(ctx context.Context, model string, now time.Time) *resilience.LearnedCapability {
-	if !resilience.Current().StreamOnlyLearningOn() || !capabilityAccountEligible(a) {
+	// Model-routed accounts may consult a live protocol catalog during actual
+	// forwarding. Selection cannot reproduce that route without I/O.
+	if !resilience.Current().StreamOnlyLearningOn() || !capabilityAccountEligible(a) || a.routesByModel() {
 		return nil
 	}
 	protocol, stream, ok := resilience.CapabilityRequestFrom(ctx)
