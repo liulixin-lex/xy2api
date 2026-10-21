@@ -2,7 +2,11 @@ package resilience
 
 import (
 	"context"
+	"fmt"
+	"regexp"
 	"strconv"
+	"strings"
+	"time"
 )
 
 // RetryAdvice is a request's client retry hint, not an account's cooldown.
@@ -16,6 +20,24 @@ type RetryAdvice struct {
 	Suppress bool
 }
 
+// RetryAdviceProvider reads the latest local candidate and request snapshots
+// at terminal-frame time. Providers must not perform database or Redis I/O,
+// retain a pooled HTTP context, or ignore the supplied cancellation signal.
+type RetryAdviceProvider func(ctx context.Context) RetryAdvice
+
+const retryAdviceProviderTimeout = 100 * time.Millisecond
+
+var retryAdviceMessageSuffix = regexp.MustCompile(`(?:^|\.\s*|\s+)Please try again in [0-9]+s\.\s*$`)
+
+func (a RetryAdvice) normalized() RetryAdvice {
+	if a.Suppress {
+		a.Seconds = 0
+	} else {
+		a.Seconds = max(0, min(a.Seconds, 10))
+	}
+	return a
+}
+
 // Headers returns only the allowlisted Responses error header. Callers
 // must check the failed-frame setting before attaching it to a frame.
 func (a RetryAdvice) Headers() map[string]string {
@@ -23,6 +45,77 @@ func (a RetryAdvice) Headers() map[string]string {
 		return nil
 	}
 	return map[string]string{"retry-after": strconv.Itoa(min(a.Seconds, 10))}
+}
+
+// Message replaces only the gateway-generated delay suffix. Unknown or
+// suppressed advice removes it; positive advice uses the same cap as Headers.
+func (a RetryAdvice) Message(message string) string {
+	message = retryAdviceMessageSuffix.ReplaceAllString(message, "")
+	a = a.normalized()
+	if a.Seconds == 0 {
+		return message
+	}
+	base := strings.TrimRight(strings.TrimSpace(message), ". ")
+	if base != "" {
+		base += ". "
+	}
+	return base + fmt.Sprintf("Please try again in %ds.", a.Seconds)
+}
+
+// WithRetryAdviceProvider installs lazy advice before selection starts.
+// Existing child contexts share the request state, including any explicit
+// advice set later by the terminal handler.
+func WithRetryAdviceProvider(ctx context.Context, provider RetryAdviceProvider) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s := StateFrom(ctx)
+	if s == nil {
+		s = NewRequestState()
+		ctx = WithRequestState(ctx, s)
+	}
+	s.mu.Lock()
+	s.retryAdviceProvider = provider
+	s.mu.Unlock()
+	return ctx
+}
+
+// ResolveRetryAdvice prefers explicit handler advice, even explicit unknown,
+// over the provider. Lazy results are not cached: a later terminal writer
+// must see current candidates and suppression. The caller waits at most
+// 100 ms; a canceled or expired result is discarded.
+func ResolveRetryAdvice(ctx context.Context) RetryAdvice {
+	s := StateFrom(ctx)
+	if s == nil {
+		return RetryAdvice{}
+	}
+	s.mu.Lock()
+	advice, explicit, provider := s.retryAdvice, s.retryAdviceSet, s.retryAdviceProvider
+	s.mu.Unlock()
+	if explicit || provider == nil {
+		return advice
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, retryAdviceProviderTimeout)
+	defer cancel()
+	var result RetryAdvice
+	if queryCtx.Err() == nil {
+		ready := make(chan RetryAdvice, 1)
+		go func() { ready <- provider(queryCtx) }()
+		select {
+		case result = <-ready:
+		case <-queryCtx.Done():
+		}
+	}
+	if queryCtx.Err() != nil {
+		result = RetryAdvice{}
+	}
+	// A terminal cause discovered while querying always takes precedence.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.retryAdviceSet {
+		return s.retryAdvice
+	}
+	return result.normalized()
 }
 
 // WithRetryAdvice attaches a request state if needed and updates its advice.
@@ -53,12 +146,8 @@ func SetRetryAdvice(ctx context.Context, advice RetryAdvice) bool {
 	if s.retryAdvice.Suppress {
 		return true
 	}
-	if advice.Suppress {
-		advice.Seconds = 0
-	} else {
-		advice.Seconds = max(0, min(advice.Seconds, 10))
-	}
-	s.retryAdvice = advice
+	s.retryAdvice = advice.normalized()
+	s.retryAdviceSet = true
 	return true
 }
 
