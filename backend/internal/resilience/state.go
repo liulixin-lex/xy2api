@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // RequestState is the mutable per-request resilience state. Gateway routes
@@ -20,6 +22,10 @@ type RequestState struct {
 
 	// prelude is collected by the stream state machine under mu.
 	prelude preludeTrace
+
+	// requestID is generated locally, independent of client correlation IDs.
+	requestID   string
+	firstOutput time.Time
 
 	// groupID is the API key's group (0 when ungrouped or unknown).
 	groupID int64
@@ -298,7 +304,43 @@ func (s *RequestState) SessionSuccess(ctx context.Context, accountID int64) {
 type stateKey struct{}
 
 // NewRequestState creates an empty state.
-func NewRequestState() *RequestState { return &RequestState{} }
+func NewRequestState() *RequestState { return &RequestState{requestID: uuid.NewString()} }
+
+// GatewayRequestID identifies this gateway request, even if a client reuses
+// its X-Request-ID. It does not replace any billing or correlation key.
+func (s *RequestState) GatewayRequestID() string {
+	if s == nil {
+		return ""
+	}
+	return s.requestID
+}
+
+// NoteFirstOutput records the first successful content write, once. Opening
+// metadata and heartbeats must not call it.
+func (s *RequestState) NoteFirstOutput(at time.Time) {
+	if s == nil || at.IsZero() {
+		return
+	}
+	s.mu.Lock()
+	if s.firstOutput.IsZero() {
+		s.firstOutput = at
+	}
+	s.mu.Unlock()
+}
+
+// MSSinceFirstOutput is zero before output or for a clock before that write.
+func (s *RequestState) MSSinceFirstOutput(now time.Time) int64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	at := s.firstOutput
+	s.mu.Unlock()
+	if at.IsZero() {
+		return 0
+	}
+	return max(0, now.Sub(at).Milliseconds())
+}
 
 // WithRequestState attaches st to ctx.
 func WithRequestState(ctx context.Context, st *RequestState) context.Context {

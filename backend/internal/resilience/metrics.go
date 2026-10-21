@@ -1,10 +1,51 @@
 package resilience
 
 import (
+	"context"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 )
+
+// EventFields correlates resilience events without recording payloads, API
+// keys or client-provided IDs. Missing observations are explicit zero values.
+func EventFields(ctx context.Context) []any {
+	return resilienceEventFields(ctx, false)
+}
+
+// PreOutputEventFields is safe while a heartbeat writer's mutex is held:
+// no delivery probe is called, because it can acquire that same mutex.
+func PreOutputEventFields(ctx context.Context) []any {
+	return resilienceEventFields(ctx, true)
+}
+
+func resilienceEventFields(ctx context.Context, preOutput bool) []any {
+	st := StateFrom(ctx)
+	model := ""
+	if ctx != nil {
+		model, _ = ctx.Value(ctxkey.Model).(string)
+	}
+	if model == "" {
+		model = st.Model()
+	}
+	var releaseEvent string
+	var releaseMS, delivered, elapsed int64
+	if st != nil {
+		st.mu.Lock()
+		releaseEvent, releaseMS = st.prelude.releaseEvent, st.prelude.releaseAfterCreatedMS
+		st.mu.Unlock()
+	}
+	if !preOutput {
+		delivered, elapsed = st.DeliveredBytes(), st.MSSinceFirstOutput(time.Now())
+	}
+	return []any{
+		"request_id", st.GatewayRequestID(), "model", model,
+		"delivered_bytes", delivered, "ms_since_first_output", elapsed,
+		"prelude_release_event", releaseEvent, "prelude_release_ms", releaseMS,
+	}
+}
 
 // Resilience metrics (design §12). Counters live in this process, in
 // one-minute buckets for the last MetricsRetention; the stats endpoint sums
