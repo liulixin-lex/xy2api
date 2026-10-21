@@ -6,6 +6,12 @@
 
 ## 当前交接状态
 
+### 使用记录“平均TPS”与指标公开按钮（2026-10-21；PR #121 已开，未发版、未部署）
+
+- 内容：使用记录“延迟”列改为“平均TPS N t/s”；“功能开关 → 管理员使用记录”两项指标的开关左边各加一个公开按钮（打开 = 公开，关闭 = 仅管理员可见，缺省关闭）。无迁移。
+- 状态：[PR #121](https://github.com/liulixin-lex/xy2api/pull/121)（2026-10-21T18:08Z 开），本地验证全绿；CI 结果以 GitHub 为准。按用户惯例由另一位作者审阅合并；发版与生产部署需另行授权。
+- 详情：“进行中的工作”的 `20261021-usage-tps-public`。
+
 ### XY2API 0.4.4 正式发布完成（2026-10-21；生产未部署）
 
 - 发布：`v0.4.4`（annotated 对象 `333f54ad5`）→ main 合并提交 `4b0b6d94b`（[PR #118](https://github.com/liulixin-lex/xy2api/pull/118)，头 `a38ae5995`，两者源码树相同；#116、#117 随之标为已合并）。Release run 39582933562 成功。产物核验通过：6 个附件（198,881,025 字节）双 SHA 一致；五个平台 `vcs.revision=4b0b6d94b`、`vcs.modified=false`，含前端产物；GHCR 双架构，version、revision、source 标签正确；`latest`、`0`、`0.4` 指向 0.4.4，`0.3` 不变。第一次核验因校验脚本用了旧的远端入口而失败（环境问题），换现行入口重跑通过。
@@ -157,7 +163,8 @@
 - 分支：`feat/usage-tps-public-metrics-20261021`（自 main `a1cf8f104`），功能提交 `9a4e2bef7`；文档 [`USAGE_METRICS.md`](USAGE_METRICS.md)“平均TPS”“显示与公开”已同步。
 - 授权：用户要求改代码；按惯例止于开 PR、CI 全绿，不合并、不发版、不部署。
 - 本地验证：新测试先红（25 项）后绿；前端全量 413 个文件 3190 项、typecheck、lint、build 通过；后端 Go 1.27.3 `-tags=unit` 的 service、handler、server、web 共 10 个包通过，go vet、gofmt、golangci-lint v2.14.0（0 项）通过；文档一致性、`scheduler-diff`、`tools/tests` 41 项通过。
-- 下一步：推送、开 PR、等 CI 全绿，交由另一位作者审阅合并；发版与生产部署另行授权。
+- PR：[#121](https://github.com/liulixin-lex/xy2api/pull/121)（2026-10-21T18:08Z 开）。
+- 下一步：等 CI 全绿，交由另一位作者审阅合并；发版与生产部署另行授权。
 
 ## 操作陷阱
 
