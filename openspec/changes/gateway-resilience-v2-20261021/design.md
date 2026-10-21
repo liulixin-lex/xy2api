@@ -164,7 +164,12 @@
 
 ### 7.3 W5.2 排队 ping 之后的终止帧
 
-`gateway_handler_responses.go`、`gateway_handler_chat_completions.go`：排队等待时已发出 ping 的请求，之后遇到计费或其他终态错误，按入站协议写终止帧：Responses 写 `response.created` 后跟 `response.failed`，Chat 写 `error` 后跟 `[DONE]`，不再写裸 JSON。不受开关控制。
+Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_responses.go` 的 `responsesErrorResponse`、`gateway_handler_chat_completions.go` 的 `chatCompletionsErrorResponse`）在 HTTP 已提交（例如排队等待时已发出 ping）时改写 SSE 终止帧：
+
+- Responses：`response.created` 后跟 `response.failed`，同一 id 与 `created_at`，序号 0 → 1（`writeResponsesFailedSSEWithOpening`）；
+- Chat：`error` 分块后跟 `[DONE]`（`writeChatCompletionsErrorSSE`）。
+
+覆盖计费复查、在途预留、之后的模型与终态错误。未提交时保留原有的 JSON 结构与状态码。不受任何韧性开关控制：关闭总开关、没有送达追踪时也不再追加裸 JSON。
 
 ### 7.4 W5.4 Anthropic 的错误类型
 
@@ -188,7 +193,7 @@
 
 | 修复 | 说明 |
 |---|---|
-| 排队 ping 之后按协议写终止帧（W5.2） | §7.3 |
+| 排队 ping 之后按协议写终止帧（W5.2） | §7.3；总开关关闭时同样生效 |
 | 【待契约】 | 各实现方登记的其他协议正确性修复 |
 
 ## 10. 回退语义

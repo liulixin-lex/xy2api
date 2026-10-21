@@ -222,6 +222,7 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 | 全 0 会话 ID 视为缺失 | `metadata.session_id` 全为 0 时改用可缓存内容摘要做粘性键（具名补丁 `xy-placeholder-session-id`） |
 | index.html 不返回 304 | 始终返回带本次 CSP nonce 的完整页面（`xy-index-nonce-no-304`） |
 | 白名单 404 列出可用模型 | HTTP 入口的 404 文案附本分组白名单前 10 项（`xy-allowlist-404-hint`） |
+| 排队 ping 之后按协议写终止帧（0.4.4） | Gateway 入站的 Responses 与 Chat 在 HTTP 已提交后（如排队等待时已发出 ping）遇到计费、在途预留、模型等错误，写 `response.created` 后跟 `response.failed`，或 `error` 后跟 `[DONE]`，不再写裸 JSON；未提交时状态码与正文不变 |
 | 上传中断记 499 | 读请求体时连接中断造成的 400 在运维记录里记为 499 |
 | §9.8 续链被拒整轮重放 | Claude 请求分发到 GPT 中转、续链以笼统 4xx 被拒时去掉续链重放一次并关闭该会话续链（0.4.2 收窄判定，见 §3） |
 | `/ready` 就绪检查 | 检查数据库与 Redis，见 §2.2（0.4.2） |
