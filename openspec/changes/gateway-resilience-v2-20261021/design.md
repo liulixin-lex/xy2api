@@ -307,7 +307,7 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 | `resilience.post_output_failure`、`resilience.session_rebind`、`resilience.last_resort`、`resilience.keepalive_committed`、`resilience.turn_cap` | `request_id`、`gateway_request_id`、`model`、`delivered_bytes`、`ms_since_first_output`、`prelude_release_event`、`prelude_release_ms` |
 
 - 字段统一由 `resilience.EventFields(ctx)` 生成，挂在请求的 `RequestState` 上：
-  - `request_id` 取 `ctxkey.RequestID`，与运维记录和访问日志一致（PM 2026-10-21T02:42Z）；`gateway_request_id` 是 RequestState 新建时生成的本地 UUID，客户端无法指定。两者都不改变计费与幂等键或 ClientRequestID。【待契约：α 的提交】
+  - `request_id` 取 `ctxkey.RequestID`，与运维记录和访问日志一致（PM 2026-10-21T02:42Z），缺失时回退为本地 UUID；`gateway_request_id` 始终是 RequestState 新建时生成的本地 UUID，客户端无法指定。两者都不改变计费与幂等键或 ClientRequestID。共七个字段，`EventFields` 与 `PreOutputEventFields` 都适用（α `d842a23e0`）。
   - `model` 优先取入站模型，没有时取选号用的模型；
   - `delivered_bytes` 读 `RequestState.DeliveredBytes()`（送达口径，开场与心跳不算）；
   - `ms_since_first_output` 从第一次成功写出内容起算（开场事件与心跳不启动时钟，之后的输出不重置），没有输出时为 0；

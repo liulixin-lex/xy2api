@@ -52,7 +52,7 @@
 
 ## 7. W8-lite 事件字段（α、β）
 
-- [x] 7.1 （α `0a5bd1c49`、β 采集 `04aa6f1a6` 与 `keepalive_committed` `e30e6c384`；PM 决定的 `request_id`/`gateway_request_id` 口径待 α 提交）五类事件补 `request_id`、`model`、已送达字节、距首个输出的毫秒数、释放暂存的事件与毫秒数。
+- [x] 7.1 （α `0a5bd1c49`、β 采集 `04aa6f1a6` 与 `keepalive_committed` `e30e6c384`；PM 决定的 `request_id`/`gateway_request_id` 口径 α `d842a23e0`）五类事件补 `request_id`、`model`、已送达字节、距首个输出的毫秒数、释放暂存的事件与毫秒数。
 
 ## 8. 前端设置（FE）
 
