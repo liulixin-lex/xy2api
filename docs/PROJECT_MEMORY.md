@@ -6,24 +6,26 @@
 
 ## 当前交接状态
 
-### 网关韧性第二期与 0.4.4 发版 `20261021-resilience-v2-0.4.4`（进行中；2026-10-21T04:05Z 更新）
+### 网关韧性第二期与 0.4.4 发版 `20261021-resilience-v2-0.4.4`（进行中；2026-10-21T05:55Z 更新）
 
 - **背景**：0.4.3 生产只读取证（约 9 小时）中，用户可见失败约 1.42%，主要是原生 Responses 开场后、正文前的带内终止，兼容 Chat 开场后终止，仅流式上游，以及分类与信号缺陷。方案在仓库外 `xy2api-artifacts/resilience-ux-20261020/plan/PLAN_v2.md`；本期规格是 OpenSpec 变更 [`gateway-resilience-v2-20261021`](../openspec/changes/gateway-resilience-v2-20261021/proposal.md)。
 - **目标**（用户 2026-10-21）：实现后合并 #116、#117 与本期 PR，发布 0.4.4；第 0 批只做 Claude 首事件截止；授权一次生产探测；工期 12 小时（00:47Z–12:47Z）。生产部署 0.4.4 未授权。
 - **要求与约束**：各 agent 只改自己拥有的文件、只在本地提交；推送、PR、合并、打 tag 由 PM 安排 α 执行；每项行为改动先写失败用例；公开仓库不写主机与生产编号。
 - **已完成**：
   - 第 0 批：评估后保持 90 秒，生产未写入；生产探测完成，白名单据此确定。
-  - C0 设置（γ `95e8a6416`）、W1.1 与 W1.2-lite（β）、W2.1-lite（γ）、W5.1–W5.5（α、β）、W6-lite（γ、β、α）、W8-lite（α、β）、前端（FE）全部提交；第一轮代码审查（R1）的 P0、P1 与选定的 P2 已修，P2-16 只登记。提交清单见各 agent 的进行中条目与 OpenSpec tasks。
+  - C0 设置（γ `95e8a6416`）、W1.1 与 W1.2-lite（β）、W2.1-lite（γ）、W5.1–W5.5（α、β）、W6-lite（γ、β、α）、W8-lite（α、β）、前端（FE）全部提交；第一轮代码审查（R1）的 P0、P1 与选定的 P2 已修，P2-16 只登记；第二轮审查（R2）的三项 P1 与两项 P2 已修。提交清单见各 agent 的进行中条目与 OpenSpec tasks。
+  - 功能冻结（04:45Z）：各 agent 最终 HEAD 为 α `fc244028a`、β `2323768d9`、γ `fe7d6cbbc`、FE `bd215aa0c`、QA `0ad64390c`；集成分支 `feat/resilience-v2-20261021` 已合入全部业务提交，`VERSION` 为 0.4.4。
   - QA 阶段 1：71 个场景，基线 17 项定向 8 通过、9 预期红灯；阶段 2 工具已就绪（`a542b3cb7`）。
-  - 文档：OpenSpec（proposal、design、tasks、6 份规格）、`GATEWAY_RESILIENCE.md`、旧变更的 design 衔接、staging-validation 与 runbook；发版说明草稿在仓库外。
+  - 文档：OpenSpec（proposal、design、tasks、6 份规格）按最终契约定稿（04:46Z），`GATEWAY_RESILIENCE.md`、旧变更的 design 衔接、staging-validation 与 runbook 同步；文档一致性检查在集成分支上通过；发版说明草稿在仓库外，只差验证结果。
 - **未完成**（按顺序）：
-  1. α 集成到 `feat/resilience-v2-20261021` 并跑全量门禁（尚未执行）；独立审查。
+  1. 代码门禁已在集成 `7c021b6a4` 全部通过（2026-10-21T05:50Z）：gofmt、四种 vet、golangci-lint 0 项、全量 unit、无 tag 全量测试、`ci_gate.py`（375 项 `-race`，0 跳过）；前端四项（3182 个用例）与 `tools/tests`（41 例）此前通过且源码未再改。第二轮审查在 `7c021b6a4` 上放行（仓库外 `review/CODE_REVIEW_R2.md`），剩余 P2 留 0.4.5。待 α 合入 rv2/docs 最终 HEAD，复跑文档检查、scheduler-diff 与干净树 audit 后报告可推送。之后到 QA 验证结束，DOCS 不再改动 rv2/docs；验证结果与记忆收尾在合并前另起纯文档提交，作为浸泡后的差异向用户披露。
   2. 推送、开 PR、CI。
   3. QA 阶段 2：唯一候选的 71 个场景、0.4.3 升级演练、3 小时浸泡。
   4. 合并 #116、#117 与本期 PR，打 `v0.4.4`，Release 核验与全新安装。
   5. 发版后纯文档收尾：本节与进行中条目按规则归档，tasks 打勾，发版说明填验证结果。
 - **卡点与风险**：
   - 后端分支间有互相 cherry-pick 后再修改造成的冲突（预演时 be-a、be-b 与 be-c 冲突），集成时按文件 owner 的最新版本解决。
+  - 集成门禁期间的 PM7 修复改了产品代码（design §3.4）：暂存期写注释心跳失败（客户端已断开、请求未取消）后不再换号或记账号失败，Chat 结果与 handler 出口按客户端断开处理（β `766a54fc8`、α `32f2a6ca7`）；首输出守卫照常停表，断开后正文及时到来仍读完用量；暂存期取消时关闭上游的回调与返回清理之间的竞态（β `c7290e396`）；Messages 暂存期缺终态的文案恢复旧值（β `dbcc1c80a`）。门禁结论以 α 重跑为准。
   - QA 估计 06:15Z 才构建的话，浸泡可能晚于 07:30Z 开始。
   - 已知限制与行为变化见 design §11 与 `GATEWAY_RESILIENCE.md` §7。
 - **关键位置**：工作树都在 `xy2api-wt/`（`rv2-be-a`、`rv2-be-b`、`rv2-be-c`、`rv2-fe`、`rv2-qa`、`rv2-docs`、集成 `rv2-int`、发版 `rel-044`）；任务书、契约与进度在仓库外 `xy2api-artifacts/resilience-v2-20261021/`。
@@ -227,6 +229,8 @@
   - 2026-10-21T04:12Z：**分支冻结**，最终 HEAD `7c8ad6ec2`（收尾提交只补两条显式验证开关回退的旧测试、自有 lint 修正与 WS 测试夹具），工作树干净。验证：35 个测试文件、270 个顶层用例加原生流与 prelude 用例，共 645 项（含子用例）`-tags=unit -race` 0 失败 0 跳过；WS 与 Chat 空流的无 tag `-race`、两包无 tag `go vet`、gofmt 与 `diff --check` 通过。β 自有文件增量 lint 0 项；从 α、γ 提取的旧依赖里 13 项已交 owner。全量门禁由 α 集成时执行。此后不再提交，除非 PM 或第二轮审查要求。
   - 2026-10-21T04:31Z：**冻结后 R2 修复中**（PM 指令 6，第二轮审查）：先修 R2-P1③（raw Chat 严格模式把上游注释心跳也暂存了，改为注释直接透传、计为心跳字节），再接 α 导出的 `RetryAdviceEligible`，让 service 的三个失败帧合成点对不可重试的 4xx 不带重试提示（R2-P1②）。两项分别提交、分别 `-race`，完成后更新最终 HEAD。
   - 2026-10-21T04:46Z：**R2 完成，恢复冻结**，最终 HEAD `2323768d9`，工作树干净。集成在已合入的 `7c8ad6ec2` 之后加两个业务提交：`a1a2ff211`（R2-P1③ raw 注释心跳立即写出）与 `2323768d9`（R2-P1② service 三个合成点共用 `RetryAdviceEligible`）；本地的 `07ec793fc` 只是提取 α `cd46593f9` 的公共 API，集成已有原提交时跳过。两项红绿与定向 `-race` 通过（service 54 例，其中 30 例在旧代码上失败），相对 `7c8ad6ec2` 增量 lint 0 项，两包无 tag vet、gofmt 通过。
+  - 2026-10-21T05:15Z：**PM7 集成回归修复中**（冻结例外）：全量 unit 的两条 service 用例 `TestForwardAsAnthropic_MissingTerminalBeforeOutputReturnsFailoverAndOps`、`..._MissingTerminalAfterClientDisconnectSkipsOpsAndFailover` 失败。β 声明接手未分配的 `openai_compat_model_test.go`，保留开关关闭时的旧语义断言，补默认暂存下写失败的用例；新用例确认真实缺陷（暂存期注释心跳写失败后首输出截止到期仍返回 504 换号，Chat EOF 结果缺客户端断开标记），修 timeout 分支与 Chat 结果标记，正文输出后的 drain 计费不变。逐项单独提交后通知 α。
+  - 2026-10-21T05:35Z：**PM7 完成，恢复冻结**，最终 HEAD `c7290e396`，工作树干净。三个提交：`766a54fc8`（断开后不换号、Chat 结果带断开标记）、`dbcc1c80a`（Messages 暂存期缺终态的文案恢复旧值）、`c7290e396`（首输出守卫照常停表，断开只抑制换号；取消回调尚未执行时由返回清理同步关闭上游）。无新设置、计数、事件或管理接口。验证：5 个文件 66 个顶层、183 项含子用例 `-race` 0 失败 0 跳过；取消关闭用例另 100 轮 `-race` 通过；service 无 tag vet、相对 `2323768d9` 增量 lint 0 项、gofmt 通过。中途的红测与一次真实挂起的调用栈保留为证据；该挂起在限时版旧代码上 100 轮未复现，不算稳定红灯。
 - `20261021-resilience-v2-alpha`（α 2026-10-21T01:01Z 经 DOCS 代登记）：分支 `rv2/be-a`，基线 `027a434ad`，初始工作树干净。范围为 RetryAdvice、W5.2、W5.1、W5.4、W5.5、W8-lite；04:45Z 起按约定合入六个分支并串行跑全量门禁。未授权 α 推送、开 PR、发布或碰生产。
   - 2026-10-21T03:21Z：功能项（RetryAdvice、W5.1–W5.5、W8 事件字段与请求 ID 口径、W6 的 DTO/路由/Explain/入口标记）与审查 R1-P1-1（handler 取消归因 `5924b2b5a`）、R1-P1-4（排队心跳格式 `f4a60916e`）、R1-P1-5（`d842a23e0`）都已在 `rv2/be-a` 提交；只因能力而无号的专用应答与份额接线等 γ 的接口。
   - 2026-10-21T03:46Z：只因能力而无号的专用应答与份额接线 `6322aa374`（提取 γ 的 `f61b7d497` 及其前置）；审查 P2-12 `8657fca89`、P2-13 `0d35b2919`、A-P2-3/A-P2-7（导出删除学习键、null 返回空数组）`9cf8a1f2d`。剩 P2-9、P2-11、P2-15；P2-16 按 PM 决定只登记（design §1）。
@@ -234,8 +238,13 @@
   - 2026-10-21T04:14Z：开发冻结，HEAD `54afdd784`（最后一个提交只修测试的 lint）；α 自有增量 lint 清零，resilience 相关 `-race` 通过。跨 owner 的 7 项 lint 已交 γ；`state.go` 的 `createdAt` 由 β 的方法引用，集成后自然消失。
   - 2026-10-21T04:31Z：**冻结后 R2 修复中**（PM 04:31Z）：R2-P1①（暂存期心跳提交 200 后耗尽，Chat 与 Messages 在 `:` 之后追加了裸 JSON）、R2-P1②（导出 `RetryAdviceEligible` 单独提交给 β 用）与两项 P2（OpenAI→Messages 输出后耗尽不计回合；删尾句时保持原文标点）。修完再合入集成分支，与 γ PM4、QA `0ad64390c`、DOCS 最新与 β 的 R2 修复一起只跑一次全量门禁。R2-P1② 的公共判定 `RetryAdviceEligible` 已单独提交 `cd46593f9`（供 β 提取）；R2-P1① 与 Messages 输出后耗尽 `25c0f0e36`；尾句标点 `fc244028a`。
   - 2026-10-21T04:44Z：**R2 修复完成，最终开发交接**，`rv2/be-a` HEAD `fc244028a`，工作树干净；三项 R2 提交定向 `-race` 通过。γ 的 `fe7d6cbbc` 已合入集成分支；β 的 R2-P1② 完成后增量合入，再与 DOCS 最终 HEAD 一起跑一次全量门禁。
+  - 2026-10-21T05:00Z：全量门禁进行中，期间发现并修复三处（各自单独提交、合回集成后从中断处继续，不减少门禁项）：基线测试文件的单行 gofmt（`759671ae6`，α 接手该未分配文件）；已提交 Responses 流对无标点原文多补句点（`c3757f8bb`）；无调用点的旧内容拒绝 writer `writeOpenAIContentRejection` 删除（lint 死代码，DOCS 已登记为退役名）。
+  - 2026-10-21T05:14Z：集成 `093241b50`。门禁期间另有：handler 旧测试按 `errors.enabled` 开、关两路断言（`e0d3d799e`）；四个新具名补丁补进 `UPSTREAM_BASE.json` 的 provenance 清单（`093241b50`）。policy 与 scheduler-diff 登记在 `5f8935d62`、`af3695b89`、`685408f8f`（84 条 required_literals、4 个具名补丁、测试钩子；scheduler-diff 新增 W6 能力与 typed 块）。gofmt、四种 vet、lint、前端四项、`tools/tests`、文档、scheduler-diff、audit 通过；等 β 的 PM7 提交后串行跑 unit、无 tag 测试与 `ci_gate.py`。
+  - 2026-10-21T05:22Z：PM7 handler 边界 `32f2a6ca7`（α 最终开发 HEAD）：Chat 普通错误出口收到非空结果且标记客户端断开时，与 Messages 一致，只提交已有用量后返回，不上报账号失败、不计回合、不补终止帧，新日志 `openai_chat_completions.client_disconnected`；真实写失败的 handler 回归先红后绿。集成合入 β 的三个 PM7 提交与此提交，policy 登记 `3e84c6ce8`、`f73ec90a9`、`7c021b6a4`；需重跑后端静态与全量门禁。
+  - 2026-10-21T05:50Z：**代码门禁全绿**，α 开发最终 HEAD `32f2a6ca7`，集成代码 HEAD `7c021b6a4`：gofmt、四种 vet、golangci-lint 0 项、全量 unit（335 秒）、无 tag 全量（211 秒）、`ci_gate.py` 375 项 `-race` 0 跳过（resilience 78、service 212、handler 68、admin 2、middleware 15）。逐项结果在仓库外 `evidence/integration-gates.json`，此前的失败记录保留。合入 DOCS 最终 HEAD 后复跑文档检查、scheduler-diff 与干净树 audit，结论见仓库外 `PROGRESS_A.md`。
 - `20261021-rv2-fe`（FE 2026-10-21T00:55Z 经 DOCS 代登记）：负责新开关的设置界面与 i18n、账号仅流式学习状态的显示与清除、Explain 新原因文案；分支 `rv2/fe`，基线 `027a434ad`，初始工作树干净；只在本地提交。
   - 2026-10-21T04:05Z：交付完成，HEAD `bd215aa0c`（15 个提交，只改 `frontend/**`，17 个文件），工作树干净。HEAD 上 lint:check、typecheck、test:run（413 个文件、3182 个用例）、build（含 i18n 检查）全部通过。`AccountsView.vue` 的两处钩子建议登记为具名补丁 `xy-account-stream-only-learning`（α 集成时）。
+  - 2026-10-21T05:11Z：**完成**。`bd215aa0c` 已并入集成（`27cef7db0`），集成上的前端四项门禁通过；钩子已由 α 登记为具名补丁 `xy-account-stream-only-learning`。无遗留卡点。
 - `20261021-resilience-v2-qa`（QA 2026-10-21T00:55Z 经 DOCS 代登记）：分支 `rv2/qa`，基线 `027a434ad`；阶段 1 为新故障与场景，阶段 2（候选验证）在 PM 指定提交放行后才开始。QA 结束时由 DOCS 代为同步交接与操作日志。
   - 2026-10-21T02:26Z：阶段 1 完成，提交 `ce8c3c01d`（只改 `tools/gateway-resilience/` 下 5 个文件），工作树干净。新增 13 个场景，合计 69 个。基线 `027a434ad` 上 15 项定向场景 8 项通过、7 项是预期的红灯（CV-6、CV-8、RAW-1、RAW-2、SO-1、RA-1、DC-6）；SH-1、SH-2、LR-1 通过。报告在仓库外 `staging/REPORT_PHASE1.md`。阶段 2 等 PM 指定提交放行，**没有构建或验收任何集成候选**。
   - 2026-10-21T02:56Z：按 PM 指令补 Q-1（用户队列 ping 后余额归零）与 CX-1（Codex 无号 `Retry-After` 上限），提交 `3320a508a`，合计 71 个场景；基线 17 项定向 8 项通过、9 项预期红灯（新增两项都是红灯）。工作树干净，阶段 2 仍未放行，候选应跑全部 71 项。
@@ -265,6 +274,7 @@
 - macOS 会定期删掉 `/tmp` 下 3 天没访问的文件。0.4.2 期间放在 `/tmp` 的 Go 工具链和测试服务器辅助脚本被删过一次。跨天的任务把工具链和脚本放到用户目录下，`/tmp` 只放当次的临时文件。
 - 提交与打 tag 前先看一眼 `git config user.email`：仓库本地配置可能被别的会话改过（0.4.2 的 `release/0.4.2` 因此留下 4 个占位身份的合并提交）。`gh pr merge --match-head-commit` 要用完整的 40 位 SHA。
 - `sync.py audit` 把工作树里的 `node_modules` 软链接也算作未跟踪文件。借用别处的依赖时放在工作树外面，或者 audit 前删掉软链接。
+- 本机默认的 pnpm（12）不认这份 lockfile 的 `pnpm.overrides`，CI 用 pnpm 9。前端命令用 `npx -y pnpm@9 …`；`corepack pnpm@9 run build` 不够，`build` 脚本里嵌套的 `pnpm run` 仍会从 PATH 取到 12，报 `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN`（2026-10-21 集成门禁遇到）。
 
 ## 项目速览
 
@@ -1124,3 +1134,33 @@ pnpm --dir frontend run build
 - 验证：两项先红后绿；raw 普通与大请求两例、service 54 例（30 例在旧代码失败）与相关回归 `-race` 通过；增量 lint 0 项。DOCS 叠加 `2323768d9` 的全部后端文件到 rv2/docs，文档一致性检查通过。
 - 卡点/风险：无。
 - 下一步：α 增量合入后，与 DOCS 最终 HEAD 一起跑一次全量门禁。
+
+### 2026-10-21T05:11Z — `20261021-rv2-fe` — 前端完成（DOCS 代记）
+
+- 请求/目标：0.4.4 新开关的设置界面与 i18n、账号仅流式学习状态的显示与清除、Explain 的“已学能力”列与“请求类型”、运维面板的 `pre_created_delta` 文案。
+- 开始状态：`rv2/fe` 自 `027a434ad`，工作树干净。
+- 完成操作：15 个提交，只改 `frontend/**`（17 个文件）；文案随 C0 与各 CHANGES 多次对齐（原生白名单不含元数据事件、Codex 上限覆盖配置拒绝、仅流式只影响会因此失败的非流式请求、`decision_v2` 关闭后的说明）。
+- 修改文件：`api/admin/resilience.ts`、新增的 `api/admin/accountCapability.ts`、`utils/accountCapability.ts`、`AccountStreamOnlyBadge.vue`，以及 `ResilienceExplainResult.vue`、`OpsResilienceExplain.vue`、`GatewayResilienceSettings.vue`、中英文 i18n 与测试；上游文件 `AccountsView.vue` 两处钩子登记为具名补丁 `xy-account-stream-only-learning`。
+- 验证：HEAD `bd215aa0c` 上 lint:check、typecheck、test:run（413 个文件、3182 个用例）、build（含 i18n 检查）通过；集成 `27cef7db0` 上的前端四项门禁通过。
+- 卡点/风险：无。本机 pnpm 版本的坑已记入“操作陷阱”。
+- 下一步：无；推送、PR 与发版由 α 与 PM 安排。
+
+### 2026-10-21T05:35Z — `20261021-rv2-beta`、`20261021-resilience-v2-alpha` — 集成门禁期间的 PM7 修复（DOCS 代记）
+
+- 请求/目标：全量 unit 中 service 的两条 MissingTerminal 用例失败；PM7 允许 β 在冻结后修复，并要求保留开关关闭时的旧语义断言。
+- 开始状态：β `2323768d9`、α `fc244028a` 之后的集成 `093241b50`。
+- 完成操作：旧的“客户端断开”用例只发 `response.created`，在默认暂存下根本没有写出，所以没有真正断开；按默认暂存补真实写失败后，新用例确认产品缺陷（暂存期心跳写失败后首输出截止到期仍换号 504，Chat EOF 结果缺断开标记）。β `766a54fc8`、`dbcc1c80a`、`c7290e396`，α `32f2a6ca7`（handler 出口）。收尾时又发现并修正两处：先查断开会跳过首输出守卫的停表；取消回调与返回清理的竞态会让上游不被关闭。
+- 修改文件：β 的 Chat、Messages 转换器与 `openai_compat_model_test.go`（β 按 PM7 声明接手）、暂存测试；α 的 `openai_chat_completions.go` 与 `openai_compat_client_cancel_test.go`；文档同步 design §3.4 与 §9、`GATEWAY_RESILIENCE.md` §6、tasks 2.5。
+- 验证：见“进行中的工作”的 β、α 条目；集成的全量门禁需在 `7c021b6a4` 之后重跑。
+- 卡点/风险：这是冻结后的产品代码改动，不能沿用此前“只改测试”的门禁结论。
+- 下一步：α 重跑后端静态检查与全量门禁，再合入 rv2/docs 最终 HEAD。
+
+### 2026-10-21T05:55Z — `20261021-resilience-v2-alpha` — 代码门禁全绿；第二轮审查放行（DOCS 代记）
+
+- 请求/目标：在 PM7 产品代码改动之后，对集成代码重跑全部后端门禁。
+- 开始状态：集成 `7c021b6a4`，已含 β `c7290e396` 及前置、α `32f2a6ca7`。
+- 完成操作：按序重跑 gofmt、四种 vet、golangci-lint、全量 unit、无 tag 全量测试与 `ci_gate.py`；前端与 `tools/tests` 的源码未再改，沿用此前通过的结果。第二轮独立审查对最终代码放行。
+- 修改文件：无（α 只跑门禁）；DOCS 同步 tasks 10.2、10.3，design §9 与 `GATEWAY_RESILIENCE.md` §6 补 R2-P2-3（raw Chat 取消后的截断，β `f9edc3a4d`，不受开关控制）。
+- 验证：`ci_gate` 375 项 `-race` 0 跳过，lint 0 项；明细见“进行中的工作”的 α 条目。
+- 卡点/风险：文档检查、scheduler-diff 与干净树 audit 要在合入 DOCS 最终 HEAD 后复跑，本条不记为已通过。
+- 下一步：α 报告可推送后等 PM 安排推送、PR 与 QA 候选验证；DOCS 到 QA 验证结束前不再改动 rv2/docs。
