@@ -258,6 +258,7 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 | raw Chat 取消后的截断（0.4.4） | 账号不支持 `/responses` 时的 raw Chat 透传，判断客户端是否中止时也看请求是否已取消：取消之后的截断按成功处理、按已得用量部分计费，不记上游失败。不受 `stream.strict_terminal` 控制 |
 | 排队心跳按入站协议的格式（0.4.4） | 等待并发槽位或用户消息队列时，Responses、compact、Chat 收到 SSE 注释 `:`，Messages 收到 `ping` |
 | 排队 ping 之后按协议写终止帧（0.4.4） | Gateway 入站的 Responses 与 Chat 在 HTTP 已提交后（如排队等待时已发出 ping）遇到计费、在途预留、模型等错误，写 `response.created` 后跟 `response.failed`，或 `error` 后跟 `[DONE]`，不再写裸 JSON；未提交时状态码与正文不变 |
+| 透传在心跳后命中错误透传规则（0.4.5） | OpenAI Responses 透传只写过心跳（上游注释、网关心跳或保活协程）、200 已提交时，流内 `response.failed` 命中管理员配置的错误透传规则，改为写 `response.created` 后跟 `response.failed`（同一 id，序号 0、1），带规则的类型与消息，是否带重试时间按规则状态码与 `RetryAdviceEligible`；以前在心跳后追加裸 JSON。未提交时仍按规则的状态码返回 JSON |
 | OpenAI Responses 透传的有界暂存（0.4.5） | 第一个输出前的开场事件改用原生路径的暂存（8 MiB 上限，超过 64 KiB 写入已解除链接的临时文件），超出上限时换号；以前在内存中不设上限 |
 | 上传中断记 499 | 读请求体时连接中断造成的 400 在运维记录里记为 499 |
 | §9.8 续链被拒整轮重放 | Claude 请求分发到 GPT 中转、续链以笼统 4xx 被拒时去掉续链重放一次并关闭该会话续链（0.4.2 收窄判定，见 §3） |

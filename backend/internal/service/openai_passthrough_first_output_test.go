@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 // W1.2 for the OpenAI Responses passthrough: the first-output deadline and
@@ -277,4 +278,72 @@ func TestOpenAIPassthroughCommentInsideEventKeepsItsFraming(t *testing.T) {
 	body := w.Body()
 	require.True(t, strings.HasPrefix(body, ": inside\n\n"), body)
 	require.Contains(t, body, "\"id\":\"resp_pt\",\"status\":\"in_progress\"}}\n\nevent: response.output_text.delta\n", "the created event keeps its blank line")
+}
+
+// Review DELTA-P1-2: a response.failed that matches an error passthrough
+// rule after heartbeats committed 200 must end the Responses stream with
+// created then failed carrying the rule's message, not a bare JSON body.
+func TestOpenAIPassthroughRuleAfterHeartbeatEndsWithResponsesTerminal(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		strict bool
+	}{{"upstream_comment", true}, {"keepalive_goroutine_switch_off", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			withResilienceSettings(t, func(s *resilience.Settings) { s.Stream.StrictTerminal = tc.strict })
+			w := newGWWriter()
+			c := ptContext(w)
+			bindPassthroughRule(c, "openai", []string{"context_length_exceeded"}, 400)
+			up := newGWUpstream(nil)
+			keepalive := 0
+			if !tc.strict {
+				keepalive = 1
+			}
+			done := ptRun(compatStreamService(nil, 0, 0, keepalive), c, up.response(nil))
+			if tc.strict {
+				up.send(t, ": keep-alive\n\n")
+			}
+			require.Eventually(t, func() bool { return strings.HasPrefix(w.Body(), ":") }, 3*time.Second, 10*time.Millisecond)
+			up.send(t, buildContextLengthFailedSSE())
+			_ = up.pw.Close()
+			got := ptAwait(t, done, 3*time.Second)
+			require.Error(t, got.err)
+			var failover *UpstreamFailoverError
+			require.False(t, errors.As(got.err, &failover))
+
+			body := w.Body()
+			require.Equal(t, http.StatusOK, w.rec.Code)
+			require.NotContains(t, body, "\n{", "no bare JSON after the heartbeat")
+			var events []string
+			for _, block := range strings.Split(strings.TrimSuffix(body, "\n\n"), "\n\n") {
+				if !strings.HasPrefix(block, ":") {
+					events = append(events, block)
+				}
+			}
+			require.Len(t, events, 2, body)
+			require.True(t, strings.HasPrefix(events[0], "event: response.created\ndata: "), body)
+			require.True(t, strings.HasPrefix(events[1], "event: response.failed\ndata: "), body)
+			created := gjson.Parse(strings.TrimPrefix(events[0], "event: response.created\ndata: "))
+			failed := gjson.Parse(strings.TrimPrefix(events[1], "event: response.failed\ndata: "))
+			require.Equal(t, int64(0), created.Get("sequence_number").Int())
+			require.Equal(t, int64(1), failed.Get("sequence_number").Int())
+			require.Equal(t, created.Get("response.id").String(), failed.Get("response.id").String())
+			require.Contains(t, failed.Get("response.error.message").String(), "context window", "the rule's message")
+			require.False(t, failed.Get("response.error.headers").Exists(), "a 400 rule carries no retry hint")
+			require.True(t, IsResponseCommitted(c))
+		})
+	}
+}
+
+// Counter-example: without a heartbeat the rule still answers with its
+// status code and JSON body.
+func TestOpenAIPassthroughRuleWithoutHeartbeatKeepsJSON(t *testing.T) {
+	withResilienceSettings(t, nil)
+	w := newGWWriter()
+	c := ptContext(w)
+	bindPassthroughRule(c, "openai", []string{"context_length_exceeded"}, 400)
+	_, err := compatStreamService(nil, 0, 0, 0).handleStreamingResponsePassthrough(c.Request.Context(), gwStatic(buildContextLengthFailedSSE()), c, rawChatCompletionsTestAccount(), time.Now(), "gpt-5.4", "gpt-5.4")
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, w.rec.Code)
+	require.Contains(t, gjson.Get(w.Body(), "error.message").String(), "context window")
+	require.NotContains(t, w.Body(), "event:")
 }

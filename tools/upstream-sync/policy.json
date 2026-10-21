@@ -1406,6 +1406,10 @@
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
       "value": "return forwardResult, partialErr"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "writeOpenAIPassthroughRuleTerminal(ctx, c, status, errType, errMsg)"
     }
   ],
   "forbidden_module_paths": [
@@ -1888,6 +1892,16 @@
       "id": "xy-resilience-v2-handler-exits",
       "path": "backend/internal/handler/openai_passthrough_usage_test.go",
       "literal": "func TestOpenAIPassthroughCancelBeforeOutputBillsNothing"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_first_output_test.go",
+      "literal": "func TestOpenAIPassthroughRuleAfterHeartbeatEndsWithResponsesTerminal"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_first_output_test.go",
+      "literal": "func TestOpenAIPassthroughRuleWithoutHeartbeatKeepsJSON"
     }
   ]
 }
