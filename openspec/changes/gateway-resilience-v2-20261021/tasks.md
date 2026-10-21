@@ -68,8 +68,8 @@
 ## 10. 集成与门禁（α）
 
 - [x] 10.1 按序 `--no-ff` 合入六个分支；`VERSION` 与 `UPSTREAM_BASE.json` 改为 0.4.4（α，集成分支 `feat/resilience-v2-20261021`；第二轮审查的修复随后增量合入）。
-- [ ] 10.2 全量门禁：gofmt、四种 vet、golangci-lint、unit 与无 tag 测试、`ci_gate.py`（`-race`，零跳过）、前端四项、`tools/tests`、文档一致性、干净树 `sync.py audit`。
-- [ ] 10.3 独立审查与修复。
+- [ ] 10.2 全量门禁：gofmt、四种 vet、golangci-lint、unit 与无 tag 测试、`ci_gate.py`（`-race`，零跳过）、前端四项、`tools/tests`、文档一致性、干净树 `sync.py audit`。（2026-10-21T05:50Z：代码门禁在集成 `7c021b6a4` 全部通过，`ci_gate` 375 项 `-race` 0 跳过；合入本文档后的文档检查、scheduler-diff 与干净树 audit 由 α 复跑，结论在发版收尾时补记。）
+- [x] 10.3 独立审查与修复：第一轮 1 个 P0、13 个 P1 全部关闭；第二轮在最终代码 `7c021b6a4` 上放行，新增 4 个 P1 已修复复核，剩余 P2 留 0.4.5（仓库外 `review/CODE_REVIEW_R1.md`、`CODE_REVIEW_R2.md`）。
 
 ## 11. 测试服务器验证（QA）
 

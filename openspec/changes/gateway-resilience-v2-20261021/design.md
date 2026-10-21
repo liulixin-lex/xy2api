@@ -329,6 +329,7 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 |---|---|
 | 排队 ping 之后按协议写终止帧（W5.2） | §7.3；总开关关闭时同样生效 |
 | 换号与写出的协议正确性（审查 R1-P1-9，β） | 只有尚未实际写出、客户端未断开且请求未取消时才换号；`clientOutputStarted` 按实际写出字节（n>0）置位，短写视为 `io.ErrShortWrite`；首事件超时只在请求未取消、客户端未断开时生成上游超时（客户端断开部分为 PM7 β `766a54fc8`、α `32f2a6ca7`）。子开关回退的是暂存、白名单与终态策略，不撤销这些防止拼接、重放与错误归因的修正 |
+| raw Chat 取消后的截断（第二轮审查 R2-P2-3，β `f9edc3a4d`） | raw Chat 透传的 `clientAborted` 除了写出失败与读取错误，也看请求 context 是否已取消（`ctx.Err()`），不受 `stream.strict_terminal` 控制：取消之后的截断按成功、部分计费，不记上游失败 |
 | 排队心跳按入站协议的格式（审查 R1-P1-4，α `f4a60916e`） | 等待并发槽位与用户消息队列（锁等待、RPM 等待）时的心跳：Responses、compact、Chat 写 SSE 注释 `:`，Messages 保留 Claude 的 `ping`，不发心跳的配置保持不发。按请求选择，不改共享的 helper 配置。上游钩子 `requestQueuePingFormat` |
 | 分类输入的证据补全（审查 P2-2，γ `29f26652d`） | 关闭 `failure.decision_v2` 会恢复旧的分类规则与 `RequestScopedTransient` 分支，但 service 构造分类输入的补全保留：code、type、message 先取调用方给的值，再取 `error` 字段，最后回落到 `response.error.*`；流内事件多带 type，HTTP 缺 message 时从正文补齐。证据更完整，所以旧模式下个别运维分类可能与 0.4.3 不同，不承诺逐字节回到基线 |
 
