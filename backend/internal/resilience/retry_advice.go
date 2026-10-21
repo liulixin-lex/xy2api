@@ -3,6 +3,7 @@ package resilience
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -60,6 +61,32 @@ func (a RetryAdvice) Message(message string) string {
 		base += ". "
 	}
 	return base + fmt.Sprintf("Please try again in %ds.", a.Seconds)
+}
+
+// RetryAdviceEligible separates candidate availability from terminal client or
+// business failures. A zero status denotes a synthetic stream error; it needs
+// an explicit transient type or code because the wire status is already 200.
+func RetryAdviceEligible(status int, errType, code string) bool {
+	for _, value := range []string{errType, code} {
+		switch strings.ToLower(value) {
+		case "invalid_request_error", "invalid_request", "authentication_error", "authentication_failed",
+			"permission_error", "permission_denied", "model_not_found", "not_found_error",
+			"billing_service_error", "context_length_exceeded", "insufficient_balance", "insufficient_quota",
+			"content_policy_violation", "content_filter":
+			return false
+		}
+	}
+	if status != 0 {
+		return status == http.StatusTooManyRequests || (status >= 500 && status < 600)
+	}
+	for _, value := range []string{errType, code} {
+		switch strings.ToLower(value) {
+		case "api_error", "server_error", "upstream_error", "overloaded_error", "server_is_overloaded",
+			"rate_limit_error", "rate_limit_exceeded", "no_available_accounts", "account_unavailable":
+			return true
+		}
+	}
+	return false
 }
 
 // WithRetryAdviceProvider installs lazy advice before selection starts.

@@ -81,3 +81,32 @@ func TestRetryAdviceHeaders(t *testing.T) {
 		})
 	}
 }
+
+func TestRetryAdviceEligible(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    int
+		typ, code string
+		want      bool
+	}{
+		{"rate limit", 429, "rate_limit_error", "", true},
+		{"upstream failure", 502, "api_error", "", true},
+		{"capacity", 0, "overloaded_error", "server_is_overloaded", true},
+		{"synthetic upstream", 0, "api_error", "upstream_error", true},
+		{"missing model", 503, "api_error", "model_not_found", false},
+		{"not found", 0, "not_found_error", "", false},
+		{"billing service", 503, "billing_service_error", "", false},
+		{"invalid request", 0, "invalid_request_error", "", false},
+		{"context length", 0, "api_error", "context_length_exceeded", false},
+		{"balance", 429, "insufficient_quota", "", false},
+		{"content", 503, "api_error", "content_policy_violation", false},
+		{"other client error", 422, "api_error", "", false},
+		{"unknown", 0, "unknown_error", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := RetryAdviceEligible(tc.status, tc.typ, tc.code); got != tc.want {
+				t.Fatalf("RetryAdviceEligible(%d, %q, %q) = %v, want %v", tc.status, tc.typ, tc.code, got, tc.want)
+			}
+		})
+	}
+}
