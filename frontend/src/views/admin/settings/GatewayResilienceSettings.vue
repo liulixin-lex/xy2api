@@ -29,11 +29,12 @@
               <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t(`admin.resilience.settings.sections.${section.key}Hint`) }}</p>
             </div>
             <Toggle
+              v-if="section.get"
               :model-value="section.get(draft)"
               :disabled="saving || !draft.enabled"
               :aria-label="t(`admin.resilience.settings.sections.${section.key}`)"
               :data-testid="`resilience-section-${section.key}`"
-              @update:model-value="(v: boolean) => draft && section.set(draft, v)"
+              @update:model-value="(v: boolean) => draft && section.set?.(draft, v)"
             />
           </div>
           <div v-if="fieldsOf(section.key).length || section.key === 'keepalive'" class="mt-3 grid gap-3 sm:grid-cols-2">
@@ -51,6 +52,7 @@
                 :data-testid="`resilience-field-${field.key}`"
                 @input="onNumber(field, ($event.target as HTMLInputElement).value)"
               >
+              <p v-if="field.hint" class="input-hint">{{ t(`admin.resilience.settings.fields.${field.key}Hint`) }}</p>
             </div>
             <div v-if="section.key === 'keepalive'" class="sm:col-span-2">
               <label for="resilience-edges" class="input-label">{{ t('admin.resilience.settings.fields.edges') }}</label>
@@ -58,6 +60,21 @@
               <p class="input-hint">{{ t('admin.resilience.settings.fields.edgesHint') }}</p>
             </div>
           </div>
+          <ul v-if="switchesOf(section.key).length" class="mt-3 space-y-3">
+            <li v-for="sw in switchesOf(section.key)" :key="sw.key" class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-sm text-gray-900 dark:text-white">{{ t(`admin.resilience.settings.switches.${sw.key}`) }}</p>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">{{ t(`admin.resilience.settings.switches.${sw.key}Hint`) }}</p>
+              </div>
+              <Toggle
+                :model-value="sw.get(draft)"
+                :disabled="saving || !draft.enabled || (section.get ? !section.get(draft) : false)"
+                :aria-label="t(`admin.resilience.settings.switches.${sw.key}`)"
+                :data-testid="`resilience-switch-${sw.key}`"
+                @update:model-value="(v: boolean) => draft && sw.set(draft, v)"
+              />
+            </li>
+          </ul>
         </div>
       </div>
 
@@ -92,8 +109,16 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 
 type Settings = GatewayResilienceSettings
 
+// A card without get/set has no switch of its own (its switches still follow the master switch).
 interface SectionDef {
   key: string
+  get?: (s: Settings) => boolean
+  set?: (s: Settings, v: boolean) => void
+}
+
+interface SwitchField {
+  key: string
+  section: string
   get: (s: Settings) => boolean
   set: (s: Settings, v: boolean) => void
 }
@@ -103,6 +128,7 @@ interface NumberField {
   section: string
   min: number
   max: number
+  hint?: boolean
   get: (s: Settings) => number
   set: (s: Settings, v: number) => void
 }
@@ -121,10 +147,13 @@ const sections: SectionDef[] = [
   { key: 'lastResort', get: (s) => s.last_resort.enabled, set: (s, v) => { s.last_resort.enabled = v } },
   { key: 'balance', get: (s) => s.balance.enabled, set: (s, v) => { s.balance.enabled = v } },
   { key: 'budget', get: (s) => s.budget.enabled, set: (s, v) => { s.budget.enabled = v } },
+  { key: 'failure', get: (s) => s.failure.decision_v2, set: (s, v) => { s.failure.decision_v2 = v } },
+  { key: 'stream' },
   { key: 'keepalive', get: (s) => s.keepalive.enabled, set: (s, v) => { s.keepalive.enabled = v } },
   { key: 'stall', get: (s) => s.stall.enabled, set: (s, v) => { s.stall.enabled = v } },
   { key: 'disconnect', get: (s) => s.disconnect.enabled, set: (s, v) => { s.disconnect.enabled = v } },
   { key: 'errors', get: (s) => s.errors.enabled, set: (s, v) => { s.errors.enabled = v } },
+  { key: 'capability', get: (s) => s.capability.stream_only_learning, set: (s, v) => { s.capability.stream_only_learning = v } },
   { key: 'fallbackGroup', get: (s) => s.fallback_group.enabled, set: (s, v) => { s.fallback_group.enabled = v } },
   { key: 'cacheAware', get: (s) => s.reservation.cache_aware_estimate, set: (s, v) => { s.reservation.cache_aware_estimate = v } },
   { key: 'outputP99', get: (s) => s.reservation.output_p99_cap, set: (s, v) => { s.reservation.output_p99_cap = v } }
@@ -141,11 +170,24 @@ const numberFields: NumberField[] = [
   { key: 'partialDrain', section: 'disconnect', min: 1, max: 3600, get: (s) => s.disconnect.partial_drain_max_seconds, set: (s, v) => { s.disconnect.partial_drain_max_seconds = v } },
   { key: 'abuseThreshold', section: 'disconnect', min: 1, max: 100000, get: (s) => s.disconnect.abuse_guard.threshold_per_hour, set: (s, v) => { s.disconnect.abuse_guard.threshold_per_hour = v } },
   { key: 'negativeCache', section: 'errors', min: 1, max: 60, get: (s) => s.errors.negative_cache_seconds, set: (s, v) => { s.errors.negative_cache_seconds = v } },
+  { key: 'codexRetryAfterCap', section: 'errors', min: 0, max: 30, hint: true, get: (s) => s.errors.codex_retry_after_cap_seconds, set: (s, v) => { s.errors.codex_retry_after_cap_seconds = v } },
+  { key: 'learnTtl', section: 'capability', min: 600, max: 86400, hint: true, get: (s) => s.capability.learn_ttl_seconds, set: (s, v) => { s.capability.learn_ttl_seconds = v } },
   { key: 'returnStable', section: 'fallbackGroup', min: 1, max: 86400, get: (s) => s.fallback_group.return_stable_seconds, set: (s, v) => { s.fallback_group.return_stable_seconds = v } }
+]
+
+const switchFields: SwitchField[] = [
+  { key: 'preludeStaging', section: 'stream', get: (s) => s.stream.prelude_staging, set: (s, v) => { s.stream.prelude_staging = v } },
+  { key: 'nativePreludeWhitelist', section: 'stream', get: (s) => s.stream.native_prelude_whitelist, set: (s, v) => { s.stream.native_prelude_whitelist = v } },
+  { key: 'strictTerminal', section: 'stream', get: (s) => s.stream.strict_terminal, set: (s, v) => { s.stream.strict_terminal = v } },
+  { key: 'failedFrameRetryAfter', section: 'errors', get: (s) => s.errors.failed_frame_retry_after, set: (s, v) => { s.errors.failed_frame_retry_after = v } }
 ]
 
 function fieldsOf(section: string): NumberField[] {
   return numberFields.filter((field) => field.section === section)
+}
+
+function switchesOf(section: string): SwitchField[] {
+  return switchFields.filter((field) => field.section === section)
 }
 
 const dirty = computed(() => draft.value !== null && JSON.stringify(draft.value) !== baseline.value)
@@ -166,7 +208,8 @@ function isSettings(value: unknown): value is Settings {
   if (!value || typeof value !== 'object') return false
   const s = value as Partial<Settings>
   return typeof s.enabled === 'boolean' && !!s.budget && !!s.keepalive && !!s.errors && !!s.disconnect &&
-    !!s.fallback_group && !!s.reservation && !!s.session && !!s.last_resort && !!s.balance && !!s.stall
+    !!s.fallback_group && !!s.reservation && !!s.session && !!s.last_resort && !!s.balance && !!s.stall &&
+    !!s.failure && !!s.stream && !!s.capability
 }
 
 function accept(settings: Settings, defaultSettings?: Settings) {

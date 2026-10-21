@@ -11,7 +11,7 @@ vi.mock('@/api/admin', () => ({ adminAPI: { resilience: { getSettings: mocks.get
 function settings(): Settings {
   return {
     enabled: true,
-    failure: { transient_cooldown_seconds: 30, retry_after_cap_seconds: 30, balance_keywords_extra: [] },
+    failure: { transient_cooldown_seconds: 30, retry_after_cap_seconds: 30, balance_keywords_extra: [], decision_v2: true },
     session: { enabled: true, streak_threshold: 2, streak_window_seconds: 300, avoid_seconds: 600 },
     last_resort: { enabled: true },
     balance: { enabled: true, pause_seconds: 300 },
@@ -31,10 +31,13 @@ function settings(): Settings {
       enabled: true, no_account_retry_after: { min: 2, max: 30 }, config_retry_after_seconds: 60,
       reservation_retry_after_seconds: 5, negative_cache_seconds: 2,
       fast_fail: { enabled: true, window_seconds: 10, threshold: 3 },
-      turn_cap: { enabled: true, failures: 5, window_seconds: 120 }
+      turn_cap: { enabled: true, failures: 5, window_seconds: 120 },
+      failed_frame_retry_after: true, codex_retry_after_cap_seconds: 10
     },
     fallback_group: { enabled: true, return_stable_seconds: 120, binding_ttl_seconds: 600 },
-    reservation: { cache_aware_estimate: true, output_p99_cap: true }
+    reservation: { cache_aware_estimate: true, output_p99_cap: true },
+    stream: { prelude_staging: true, native_prelude_whitelist: true, strict_terminal: true },
+    capability: { stream_only_learning: true, learn_ttl_seconds: 21600 }
   }
 }
 
@@ -124,5 +127,59 @@ describe('gateway resilience settings', () => {
     expect(w.find('[data-testid="resilience-save"]').exists()).toBe(false)
     await w.findAll('button').find(b => b.text() === 'admin.resilience.settings.reload')!.trigger('click'); await flushPromises()
     expect(w.find('[data-testid="resilience-save"]').exists()).toBe(true)
+  })
+
+  it('saves the 0.4.4 switches with the rest of the document', async () => {
+    const w = mountSettings(); await flushPromises()
+    for (const key of ['preludeStaging', 'nativePreludeWhitelist', 'strictTerminal', 'failedFrameRetryAfter']) {
+      await w.get(`[data-testid="resilience-switch-${key}"]`).trigger('click')
+    }
+    await w.get('[data-testid="resilience-section-failure"]').trigger('click')
+    await w.get('[data-testid="resilience-section-capability"]').trigger('click')
+    await w.get('[data-testid="resilience-field-codexRetryAfterCap"]').setValue('0')
+    await w.get('[data-testid="resilience-field-learnTtl"]').setValue('3600')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    const expected = settings()
+    expected.stream = { prelude_staging: false, native_prelude_whitelist: false, strict_terminal: false }
+    expected.failure.decision_v2 = false
+    expected.errors.failed_frame_retry_after = false
+    expected.errors.codex_retry_after_cap_seconds = 0
+    expected.capability = { stream_only_learning: false, learn_ttl_seconds: 3600 }
+    expect(mocks.save).toHaveBeenCalledWith(expected)
+  })
+
+  it('places every 0.4.4 switch in its card with a one-line hint', async () => {
+    const w = mountSettings(); await flushPromises()
+    const placement: Record<string, string[]> = {
+      stream: ['preludeStaging', 'nativePreludeWhitelist', 'strictTerminal'],
+      errors: ['failedFrameRetryAfter']
+    }
+    for (const [card, keys] of Object.entries(placement)) {
+      const el = w.get(`[data-testid="resilience-card-${card}"]`)
+      for (const key of keys) {
+        expect(el.find(`[data-testid="resilience-switch-${key}"]`).exists()).toBe(true)
+        expect(el.text()).toContain(`admin.resilience.settings.switches.${key}Hint`)
+      }
+    }
+    expect(w.get('[data-testid="resilience-card-errors"]').find('[data-testid="resilience-field-codexRetryAfterCap"]').exists()).toBe(true)
+    expect(w.get('[data-testid="resilience-card-capability"]').find('[data-testid="resilience-field-learnTtl"]').exists()).toBe(true)
+    expect(w.get('[data-testid="resilience-card-errors"]').text()).toContain('admin.resilience.settings.fields.codexRetryAfterCapHint')
+    expect(w.get('[data-testid="resilience-card-capability"]').text()).toContain('admin.resilience.settings.fields.learnTtlHint')
+    expect(w.get('[data-testid="resilience-card-failure"]').text()).toContain('admin.resilience.settings.sections.failureHint')
+    // The stream card has no switch of its own; the master switch still disables its switches.
+    expect(w.find('[data-testid="resilience-section-stream"]').exists()).toBe(false)
+    await w.get('[data-testid="resilience-enabled"]').trigger('click')
+    expect(w.get('[data-testid="resilience-switch-preludeStaging"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('rejects a Codex Retry-After cap or a learning TTL out of range', async () => {
+    for (const [field, value] of [['codexRetryAfterCap', '31'], ['learnTtl', '599'], ['learnTtl', '86401']]) {
+      mocks.save.mockClear()
+      const w = mountSettings(); await flushPromises()
+      await w.get(`[data-testid="resilience-field-${field}"]`).setValue(value)
+      await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+      expect(mocks.save).not.toHaveBeenCalled()
+      expect(w.text()).toContain('admin.resilience.settings.invalidNumber')
+    }
   })
 })

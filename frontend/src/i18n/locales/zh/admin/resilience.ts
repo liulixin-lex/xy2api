@@ -2,7 +2,7 @@ export default {
   resilience: {
     settings: {
       title: '网关韧性',
-      hint: '控制上游失败分类、冷却与余额暂停、会话改绑、请求预算、首包前保活、断开计费与无号兜底。关闭总开关即恢复原有行为。',
+      hint: '控制上游失败分类、冷却与余额暂停、会话改绑、请求预算、流式开场暂存、首包前保活、断开计费、仅流式账号学习与无号兜底。关闭总开关即恢复原有行为。',
       openPanel: '查看运维面板',
       enabled: '总开关',
       enabledHint: '关闭后所有韧性能力停用，网关按原有逻辑运行。',
@@ -15,6 +15,10 @@ export default {
         balanceHint: '上游余额不足的账号暂停调度，到期后由真实请求重试，仍不足就再暂停同样时长；账号列表的“恢复状态”可立即放回。',
         budget: '请求预算',
         budgetHint: '每个请求最多尝试的次数与首输出前的总时长。流式请求在首个输出前受总时长约束；非流式请求只用它决定能否再发起新的尝试，进行中的单次请求不按它截断。同号重试仅用于容量降载。',
+        failure: '失败分类修正',
+        failureHint: '只有真正的容量信号（server_is_overloaded、slow_down、529、明确的 overloaded）才按容量处理；普通 429 记为限流，“服务繁忙”“排队过多”“并发超限”一类可以换到任意主机。关闭后回到 0.4.3 的分类。',
+        stream: '流式开场与终止',
+        streamHint: '首个正文前哪些事件先暂存不发给客户端，以及上游流怎样才算正常结束。暂存期间失败可以换号，客户端看不到中断。',
         keepalive: '首包前保活',
         keepaliveHint: '经 CDN 的流式请求在首个输出前定时发送心跳，避免被 CDN 空闲超时切断。',
         stall: '停滞检测',
@@ -23,6 +27,8 @@ export default {
         disconnectHint: '客户端在任何输出前断开时立即取消上游且不计费；部分输出后最多再读取一段时间并按已得用量计费。',
         errors: '错误语义与防风暴',
         errorsHint: '无号与限流应答带 Retry-After；短时负缓存；同一 Key 的重复 503 快速返回；同一会话连续失败的回合封顶，避免客户端反复重试。',
+        capability: '仅流式账号学习',
+        capabilityHint: '非流式请求遇到上游明确的“只接受流式请求”400 时，记住该账号在当前协议下不收非流式请求，本请求立即换号（不计账号失败、不冷却），有效期内非流式请求不再选它，流式请求不受影响。本请求换号需要“失败分类修正”开启。关闭后不再学习，已学到的状态保留到期满但不参与选号。',
         fallbackGroup: '无号兜底分组',
         fallbackGroupHint: '分组无可用账号时由其配置的兜底分组承接，主分组稳定后切回。',
         cacheAware: '缓存感知预留',
@@ -42,7 +48,21 @@ export default {
         partialDrain: '部分输出后最长读取（秒）',
         abuseThreshold: '未送达滥用阈值（次/小时/Key）',
         negativeCache: '无号负缓存（秒）',
-        returnStable: '主分组稳定多久后切回（秒）'
+        returnStable: '主分组稳定多久后切回（秒）',
+        codexRetryAfterCap: 'Codex 无号 Retry-After 上限（秒）',
+        codexRetryAfterCapHint: '识别为 Codex 的请求（UA 或 originator）无号返回 503 时，Retry-After 不超过该值；0 表示不单独限制，沿用 2–30 秒。',
+        learnTtl: '学习结果有效期（秒）',
+        learnTtlHint: '默认 21600（6 小时），到期自动恢复；也可在账号列表的状态列手动清除。'
+      },
+      switches: {
+        preludeStaging: '兼容转换推迟开场',
+        preludeStagingHint: 'Chat 与 Messages 的兼容转换等到首个正文或终态再写开场事件（role 块、message_start）；上游开场后、正文前失败时可以换号。关闭后回到 0.4.3 行为。',
+        nativePreludeWhitelist: '原生 Responses 扩展暂存',
+        nativePreludeWhitelistHint: '原生 Responses 在首个 delta 前的更多元数据事件也先暂存，期间失败仍可换号。关闭后只暂存 created、in_progress 与心跳（0.4.3 行为）。',
+        strictTerminal: '明确终止',
+        strictTerminalHint: 'Chat 透传中上游发出 error 后紧跟 [DONE] 时按失败处理，不再当作正常结束。关闭后回到 0.4.3 行为。',
+        failedFrameRetryAfter: 'response.failed 附带重试时间',
+        failedFrameRetryAfterHint: '网关合成的 response.failed 按情况附带 retry-after：有健康备选时不带或只带 1 秒；没有健康账号且能算出恢复时间时带 2–10 秒；回合封顶、余额不足、内容拒绝不带。关闭后不带。'
       },
       advanced: '高级（完整 JSON）',
       advancedHint: '包含全部配置项；保存时由服务端校验，未通过不会生效。',
