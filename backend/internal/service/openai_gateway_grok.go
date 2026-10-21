@@ -15,6 +15,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -161,6 +162,11 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+		if !isOpenAIResponsesCompactPath(c) {
+			if failure := s.LearnStreamOnlyFailure(ctx, account, resilience.CapabilityProtocolResponses, gjson.GetBytes(patchedBody, "stream").Bool(), resp.StatusCode, respBody); failure != nil {
+				return nil, failure
+			}
+		}
 		upstreamMsg := sanitizeUpstreamErrorMessage(extractUpstreamErrorMessage(respBody))
 		if upstreamMsg == "" {
 			upstreamMsg = fmt.Sprintf("xAI upstream returned status %d", resp.StatusCode)

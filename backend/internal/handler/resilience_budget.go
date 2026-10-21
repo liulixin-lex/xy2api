@@ -39,7 +39,9 @@ func requestBudget(ctx context.Context) *resilience.Budget {
 // attempt or the upstream refused the request content. Every failover loop
 // calls it once per failed attempt, before any same-account retry or switch.
 func resilienceAttemptFailed(ctx context.Context, accountID int64, failoverErr *service.UpstreamFailoverError) bool {
-	resilienceReportAttemptFailure(ctx, accountID, failoverErr)
+	if !failoverErr.IsCapabilityStreamOnly() {
+		resilienceReportAttemptFailure(ctx, accountID, failoverErr)
+	}
 	if resilienceContentRejected(failoverErr) {
 		logger.FromContext(ctx).Info("resilience.content_policy_no_failover",
 			zap.Int64("account_id", accountID),
@@ -144,6 +146,9 @@ func resilienceBeforeSwitch(ctx context.Context, hosts any, accountID int64, fai
 // into the no-available-account 503 (design §6.3): no other upstream host
 // could serve the request.
 func resilienceCapacityExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, status int, errType, message string) (int, string, string) {
+	if failoverErr.IsCapabilityStreamOnly() {
+		return http.StatusServiceUnavailable, "api_error", "No available account supports this non-streaming request"
+	}
 	if c == nil || c.Request == nil || failoverErr == nil || status == http.StatusServiceUnavailable ||
 		requestBudget(c.Request.Context()) == nil ||
 		service.ClassifyFailoverError(failoverErr).Category != resilience.CategoryCapacityShed {

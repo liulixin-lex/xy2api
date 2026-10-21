@@ -30,6 +30,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/timezone"
 	"github.com/liulixin-lex/xy2api/internal/pkg/typesafe"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -1472,6 +1473,28 @@ func (h *AccountHandler) RecoverState(c *gin.Context) {
 	}
 
 	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+}
+
+// ClearCapabilityLearning removes only learned stream-mode restrictions.
+// DELETE /api/v1/admin/accounts/:id/capability-learning
+func (h *AccountHandler) ClearCapabilityLearning(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || accountID <= 0 {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	clearer, ok := h.adminService.(interface {
+		ClearAccountCapabilityLearning(context.Context, int64) error
+	})
+	if !ok {
+		response.Error(c, http.StatusServiceUnavailable, "Capability learning service unavailable")
+		return
+	}
+	if err := clearer.ClearAccountCapabilityLearning(c.Request.Context(), accountID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"capability_learned": []resilience.LearnedCapability{}})
 }
 
 // SyncFromCRS handles syncing accounts from claude-relay-service (CRS)
