@@ -367,6 +367,9 @@ func ClassifyFailoverError(e *UpstreamFailoverError) resilience.Result {
 	if e == nil {
 		return resilience.Result{Category: resilience.CategorySuccess}
 	}
+	if e.IsCapabilityStreamOnly() {
+		return resilience.Result{Category: resilience.CategoryClientError, Reason: resilience.ReasonCapabilityStreamOnly}
+	}
 	if e.RequestScopedTransient && !resilience.Current().DecisionV2On() {
 		return resilience.Result{Category: resilience.CategoryCapacityShed, Reason: "request_scoped"}
 	}

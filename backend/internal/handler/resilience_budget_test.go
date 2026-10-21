@@ -244,3 +244,38 @@ func TestDecisionV2TransientAndRateLimitKeepSameHostCandidates(t *testing.T) {
 		})
 	}
 }
+
+type capabilityAttemptRecorder struct{ calls int }
+
+func (r *capabilityAttemptRecorder) Failure(context.Context, int64, string, int64, resilience.Category) {
+	r.calls++
+}
+func (r *capabilityAttemptRecorder) Success(context.Context, int64, string, int64) {}
+
+func TestCapabilityFailureOnlyConsumesRequestBudget(t *testing.T) {
+	withHandlerResilience(t, nil)
+	ctx := budgetCtx(t, resilience.KindText, 7)
+	recorder := &capabilityAttemptRecorder{}
+	resilience.StateFrom(ctx).SetSession(7, "session", recorder)
+	e := &service.UpstreamFailoverError{StatusCode: 400, Reason: service.GatewayFailureReason(resilience.ReasonCapabilityStreamOnly), NextAccountAction: service.NextAccountRetry}
+	sched := &mockTempUnscheduler{}
+	fs := NewFailoverState(3, false)
+	require.Equal(t, FailoverContinue, fs.HandleFailoverError(ctx, sched, 1, service.PlatformOpenAI, 0, e))
+	require.Equal(t, 1, requestBudget(ctx).Attempts())
+	require.Zero(t, recorder.calls)
+	require.Empty(t, sched.calls)
+	require.False(t, resilience.StateFrom(ctx).AccountFailed(1))
+	require.Contains(t, fs.FailedAccountIDs, int64(1), "only this request excludes the incompatible candidate")
+	require.Equal(t, 1, fs.SwitchCount)
+	require.False(t, requestBudget(ctx).CapacitySwitchUsed())
+}
+
+func TestCapabilityExhaustionIsServiceUnavailable(t *testing.T) {
+	withHandlerResilience(t, nil)
+	c, _ := newResilienceTestContext(t)
+	e := &service.UpstreamFailoverError{StatusCode: 400, Reason: service.GatewayFailureReason(resilience.ReasonCapabilityStreamOnly)}
+	status, typ, message := resilienceCapacityExhausted(c, e, 400, "invalid_request_error", "stream must be true")
+	require.Equal(t, 503, status)
+	require.Equal(t, "api_error", typ)
+	require.NotContains(t, message, "stream must be true")
+}

@@ -24,6 +24,9 @@ func selectionNegativeKey(ctx context.Context, groupID *int64, model, variant st
 	if variant != "" {
 		scope += ":" + variant
 	}
+	if protocol, stream, ok := resilience.CapabilityRequestFrom(ctx); ok && resilience.Current().StreamOnlyLearningOn() {
+		scope += fmt.Sprintf("|capability=%s|stream=%t", protocol, stream)
+	}
 	if forced, _ := ctx.Value(ctxkey.ForcePlatform).(string); forced != "" {
 		scope += "|platform=" + forced
 	}
@@ -55,6 +58,11 @@ func resilienceNoAccountIsGroupLevel(ctx context.Context, groupID int64, model s
 		}
 		if model != "" && !a.IsModelSupported(model) {
 			continue
+		}
+		if a.CapabilityExclusion(ctx, model, now) != nil {
+			// Capability exclusions apply to this protocol/mode, not to every
+			// request that shares the key/group/model fast-fail counters.
+			return false
 		}
 		if tier, _, _ := resiliencePenaltyOf(a, model, now); tier == resilience.TierNone {
 			return false
