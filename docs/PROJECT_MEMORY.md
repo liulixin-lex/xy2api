@@ -226,6 +226,7 @@
   - 2026-10-21T03:39Z：功能与审查修复已全部提交，HEAD `4eed85c1a`：原生白名单与伪保活泛化 `bdbca7197`、兼容推迟开场 `1a97eebd1`、释放事件采集 `04aa6f1a6`、raw Chat 明确终止 `f9edc3a4d`、审查 P0 `63718031d`、R1-P1-1 `bb2c22122`、暂存期注释心跳 `4c3256477`、空 delta 窗口 `97bdc3478`、W5.3/W5.4 与 `keepalive_committed` `e30e6c384`、W6 检测钩子 `09ef67f11`、P2-4/P2-5 `07ef27d78`、W2 运维分类证据与实际超时秒数 `4eed85c1a`。P2-8 核对后无重复记账。**延后**：OpenAI Responses 透传的首输出守卫（可选项）。
   - 2026-10-21T04:12Z：**分支冻结**，最终 HEAD `7c8ad6ec2`（收尾提交只补两条显式验证开关回退的旧测试、自有 lint 修正与 WS 测试夹具），工作树干净。验证：35 个测试文件、270 个顶层用例加原生流与 prelude 用例，共 645 项（含子用例）`-tags=unit -race` 0 失败 0 跳过；WS 与 Chat 空流的无 tag `-race`、两包无 tag `go vet`、gofmt 与 `diff --check` 通过。β 自有文件增量 lint 0 项；从 α、γ 提取的旧依赖里 13 项已交 owner。全量门禁由 α 集成时执行。此后不再提交，除非 PM 或第二轮审查要求。
   - 2026-10-21T04:31Z：**冻结后 R2 修复中**（PM 指令 6，第二轮审查）：先修 R2-P1③（raw Chat 严格模式把上游注释心跳也暂存了，改为注释直接透传、计为心跳字节），再接 α 导出的 `RetryAdviceEligible`，让 service 的三个失败帧合成点对不可重试的 4xx 不带重试提示（R2-P1②）。两项分别提交、分别 `-race`，完成后更新最终 HEAD。
+  - 2026-10-21T04:46Z：**R2 完成，恢复冻结**，最终 HEAD `2323768d9`，工作树干净。集成在已合入的 `7c8ad6ec2` 之后加两个业务提交：`a1a2ff211`（R2-P1③ raw 注释心跳立即写出）与 `2323768d9`（R2-P1② service 三个合成点共用 `RetryAdviceEligible`）；本地的 `07ec793fc` 只是提取 α `cd46593f9` 的公共 API，集成已有原提交时跳过。两项红绿与定向 `-race` 通过（service 54 例，其中 30 例在旧代码上失败），相对 `7c8ad6ec2` 增量 lint 0 项，两包无 tag vet、gofmt 通过。
 - `20261021-resilience-v2-alpha`（α 2026-10-21T01:01Z 经 DOCS 代登记）：分支 `rv2/be-a`，基线 `027a434ad`，初始工作树干净。范围为 RetryAdvice、W5.2、W5.1、W5.4、W5.5、W8-lite；04:45Z 起按约定合入六个分支并串行跑全量门禁。未授权 α 推送、开 PR、发布或碰生产。
   - 2026-10-21T03:21Z：功能项（RetryAdvice、W5.1–W5.5、W8 事件字段与请求 ID 口径、W6 的 DTO/路由/Explain/入口标记）与审查 R1-P1-1（handler 取消归因 `5924b2b5a`）、R1-P1-4（排队心跳格式 `f4a60916e`）、R1-P1-5（`d842a23e0`）都已在 `rv2/be-a` 提交；只因能力而无号的专用应答与份额接线等 γ 的接口。
   - 2026-10-21T03:46Z：只因能力而无号的专用应答与份额接线 `6322aa374`（提取 γ 的 `f61b7d497` 及其前置）；审查 P2-12 `8657fca89`、P2-13 `0d35b2919`、A-P2-3/A-P2-7（导出删除学习键、null 返回空数组）`9cf8a1f2d`。剩 P2-9、P2-11、P2-15；P2-16 按 PM 决定只登记（design §1）。
@@ -1111,3 +1112,15 @@ pnpm --dir frontend run build
 - 验证：先写红测，旧实现对 null、空串、空白三例拒学（失败），`reasoning.effort` 与非字符串拒学的反例通过；修复后定向 `-race` 23 个顶层用例（含子用例 79 项）0 失败 0 跳过；γ 自有文件增量 lint 0 项。DOCS 已把新规则写进 design §6.1、网关韧性说明 §7 与规格。
 - 卡点/风险：无。
 - 下一步：α 集成时依次带上 `d61d106aa`、`fe7d6cbbc`；阶段 2 的 SO-1（F36 已带 `"param": null`）验证这项修复。
+
+### 2026-10-21T04:46Z — `20261021-rv2-beta` — 第二轮审查修复，恢复冻结（DOCS 代记）
+
+- 请求/目标：PM 指令 6，第二轮审查（R2）分给 β 的两项 P1，冻结后的例外。
+- 开始状态：`rv2/be-b` 在 `7c8ad6ec2`，工作树干净。
+- 完成操作：
+  - R2-P1③（`a1a2ff211`）：raw Chat 严格模式在第一条 data 之前只暂存 event、id、retry 行，上游注释心跳立即写出并计为心跳字节，不关闭换号窗口。
+  - R2-P1②（`2323768d9`）：service 的三个失败帧合成点共用 α 导出的 `RetryAdviceEligible`；不可重试的原因先写 `Suppress`（`non_retryable`）再求值，invalid_request、model_not_found 等不再带重试头与尾句。
+- 修改文件：`openai_gateway_chat_completions_raw.go`、`resilience_keepalive.go` 与共用的失败帧构造及测试；上游钩子 `recordOpenAIStreamKeepaliveBytes`（raw）、`RetryAdviceEligible`（keepalive）由 α 集成时登记。
+- 验证：两项先红后绿；raw 普通与大请求两例、service 54 例（30 例在旧代码失败）与相关回归 `-race` 通过；增量 lint 0 项。DOCS 叠加 `2323768d9` 的全部后端文件到 rv2/docs，文档一致性检查通过。
+- 卡点/风险：无。
+- 下一步：α 增量合入后，与 DOCS 最终 HEAD 一起跑一次全量门禁。
