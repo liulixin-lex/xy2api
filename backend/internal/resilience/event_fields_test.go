@@ -76,3 +76,33 @@ func TestFirstOutputObservationConcurrent(t *testing.T) {
 	wg.Wait()
 	require.Positive(t, st.MSSinceFirstOutput(time.Now().Add(time.Second)))
 }
+
+func TestNoteFirstOutputAfterRecordedSkipsStateLock(t *testing.T) {
+	st := NewRequestState()
+	at := time.Now()
+	require.False(t, st.FirstOutputNoted())
+	st.NoteFirstOutput(at)
+	require.True(t, st.FirstOutputNoted())
+
+	// Every client write after the first content reaches NoteFirstOutput; it
+	// must not contend with the request's other state users.
+	st.mu.Lock()
+	done := make(chan struct{})
+	go func() {
+		st.NoteFirstOutput(at.Add(time.Second))
+		_ = st.FirstOutputNoted()
+		close(done)
+	}()
+	select {
+	case <-done:
+		st.mu.Unlock()
+	case <-time.After(time.Second):
+		st.mu.Unlock()
+		<-done
+		t.Fatal("a recorded first output must return without taking the state lock")
+	}
+	require.Equal(t, int64(1500), st.MSSinceFirstOutput(at.Add(1500*time.Millisecond)))
+
+	var nilState *RequestState
+	require.False(t, nilState.FirstOutputNoted())
+}

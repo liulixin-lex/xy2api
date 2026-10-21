@@ -53,15 +53,36 @@ func (s *OpenAIGatewayService) newStreamHeaderWriter(c *gin.Context, upstream ht
 			return
 		}
 		headersWritten = true
+		// A heartbeat may already have committed the response with only the
+		// stable headers; the attempt's headers then stay private, as in
+		// native first-output staging.
+		if c.Writer.Written() {
+			return
+		}
 		if s.responseHeaderFilter != nil {
 			responseheaders.WriteFilteredHeaders(c.Writer.Header(), upstream, s.responseHeaderFilter)
 		}
-		c.Writer.Header().Set("Content-Type", "text/event-stream")
-		c.Writer.Header().Set("Cache-Control", "no-cache")
-		c.Writer.Header().Set("Connection", "keep-alive")
-		c.Writer.Header().Set("X-Accel-Buffering", "no")
+		setStableStreamHeaders(c.Writer.Header())
 		c.Writer.WriteHeader(http.StatusOK)
 	}
+}
+
+// writeStableStreamHeaders commits an SSE response with only this gateway's
+// stream headers. Heartbeats before the first output use it: the attempt can
+// still fail over, so its upstream headers must not reach the client.
+func writeStableStreamHeaders(c *gin.Context) {
+	if c.Writer.Written() {
+		return
+	}
+	setStableStreamHeaders(c.Writer.Header())
+	c.Writer.WriteHeader(http.StatusOK)
+}
+
+func setStableStreamHeaders(h http.Header) {
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("Connection", "keep-alive")
+	h.Set("X-Accel-Buffering", "no")
 }
 
 // readOpenAIUpstreamError 读取上游错误体并把 resp.Body 回卷为可重读的副本

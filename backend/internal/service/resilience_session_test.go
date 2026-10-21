@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -362,4 +363,36 @@ func TestStreakOwnerLosesItsBinding(t *testing.T) {
 	require.True(t, st.Avoided(51))
 	require.True(t, resilienceBindAllowed(ctx, 52))
 	require.True(t, svc.resilienceGatewayBindAllowed(ctx, 52))
+}
+
+func TestLastResortGroupSnapshotsDropExpiredEntries(t *testing.T) {
+	expiredEntry := lastResortGroupEntry{accounts: []Account{healthyAccount(1)}, expires: time.Now().Add(-time.Second)}
+	freshEntry := lastResortGroupEntry{accounts: []Account{healthyAccount(2)}, expires: time.Now().Add(time.Minute)}
+
+	t.Run("write", func(t *testing.T) {
+		r := NewResilienceService(nil, newMemResilienceStore())
+		r.lastResortGroups.entries = map[int64]lastResortGroupEntry{1: expiredEntry, 2: freshEntry}
+		repo := &groupAccountsRepo{byGroup: map[int64][]Account{3: {healthyAccount(3)}}}
+		_, err := r.groupAccountsForLastResort(context.Background(), repo, 3)
+		require.NoError(t, err)
+		require.Equal(t, []int64{2, 3}, lastResortGroupIDs(r), "an expired snapshot must not stay resident")
+	})
+
+	t.Run("sweep", func(t *testing.T) {
+		r := NewResilienceService(nil, newMemResilienceStore())
+		r.lastResortGroups.entries = map[int64]lastResortGroupEntry{1: expiredEntry, 2: freshEntry}
+		r.sweepSessionMarks(time.Now())
+		require.Equal(t, []int64{2}, lastResortGroupIDs(r), "the periodic sweep must drop groups that are never read again")
+	})
+}
+
+func lastResortGroupIDs(r *ResilienceService) []int64 {
+	r.lastResortGroups.mu.Lock()
+	defer r.lastResortGroups.mu.Unlock()
+	ids := make([]int64, 0, len(r.lastResortGroups.entries))
+	for id := range r.lastResortGroups.entries {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids
 }

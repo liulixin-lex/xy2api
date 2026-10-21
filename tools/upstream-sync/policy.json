@@ -1260,6 +1260,42 @@
       "value": "releaseOpenAIPrelude"
     },
     {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "preludeBodyClosed.Store(true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "if canceledAfterOutput() {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "preludeBodyClosed.Store(true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "if canceledAfterOutput() {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "func writeStableStreamHeaders(c *gin.Context) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "writeStableStreamHeaders(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "writeStableStreamHeaders(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "writeStableStreamHeaders(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_raw_stream_truncation.go",
+      "value": "resilience.ChatErrorField(root)"
+    },
+    {
       "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
       "value": "resilience.Current().StrictTerminalOn()"
     },
@@ -1313,7 +1349,7 @@
     },
     {
       "path": "backend/internal/handler/resilience_retry_advice.go",
-      "value": "if seconds := upstreamRecoverySeconds(c); seconds > 0 {"
+      "value": "installRetryAdviceProvider(c, diag, apiKey, model, upstreamRecoverySeconds(c))"
     },
     {
       "path": "backend/internal/handler/openai_chat_completions.go",
@@ -1801,6 +1837,26 @@
       "id": "xy-resilience-v2-streams",
       "path": "backend/internal/service/resilience_compat_stream_prelude_test.go",
       "literal": "func TestCompatPreludeHeartbeatDisconnectDrainsUsageAfterContent"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_compat_stream_prelude_test.go",
+      "literal": "func TestCompatPreludeCancelDuringFirstWriteIsClientCancel"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_heartbeat_headers_test.go",
+      "literal": "func TestCompatHeartbeatCommitsOnlyStableStreamHeaders"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_heartbeat_headers_test.go",
+      "literal": "func TestRawChatCommentHeartbeatCommitsOnlyStableStreamHeaders"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_retry_advice_lazy_test.go",
+      "literal": "func TestRetryAdviceResolvesOnlyForFailedFrames"
     }
   ]
 }

@@ -725,8 +725,15 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	}
 	stagePrelude := resilience.Current().PreludeStagingOn()
 	preludeTrace := beginOpenAIPreludeTrace(c.Request.Context(), stagePrelude)
+	// preludeBodyClosed is set before the cancel AfterFunc closes the body.
+	// A cancel racing the first write runs it although output started; the
+	// read error that follows is that cancel, not an upstream break.
+	var preludeBodyClosed atomic.Bool
 	if stagePrelude {
-		stopPreludeCancel = context.AfterFunc(c.Request.Context(), func() { _ = resp.Body.Close() })
+		stopPreludeCancel = context.AfterFunc(c.Request.Context(), func() {
+			preludeBodyClosed.Store(true)
+			_ = resp.Body.Close()
+		})
 		defer func() {
 			// Cancellation can become visible before its AfterFunc starts.
 			// If cleanup wins that race, it must still close the upstream.
@@ -743,6 +750,13 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			return c.Request.Context().Err()
 		}
 		return nil
+	}
+	canceledAfterOutput := func() bool {
+		if !preludeBodyClosed.Load() {
+			return false
+		}
+		clientDisconnected = true
+		return true
 	}
 	pendingSSE := make([]string, 0, 4)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
@@ -1078,6 +1092,10 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		if err := canceledPrelude(); err != nil {
 			return nil, err
 		}
+		// Closing the body under the reader may also end the scan cleanly.
+		if canceledAfterOutput() {
+			return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", c.Request.Context().Err())
+		}
 		if canReplayPrelude() {
 			return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, nil, "OpenAI stream ended before content or terminal", upstreamModel, resp.Header)
 		}
@@ -1120,6 +1138,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		if err := scanner.Err(); err != nil {
 			if cancelErr := canceledPrelude(); cancelErr != nil {
 				return nil, cancelErr
+			}
+			if canceledAfterOutput() {
+				return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", c.Request.Context().Err())
 			}
 			if !clientDisconnected && firstEvent.expired() && c.Request.Context().Err() == nil {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
@@ -1205,6 +1226,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				if cancelErr := canceledPrelude(); cancelErr != nil {
 					return nil, cancelErr
 				}
+				if canceledAfterOutput() {
+					return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", c.Request.Context().Err())
+				}
 				if !clientDisconnected && firstEvent.expired() && c.Request.Context().Err() == nil {
 					return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 				}
@@ -1269,7 +1293,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				continue
 			}
 			// Send SSE comment as keepalive
-			writeStreamHeaders()
+			writeStableStreamHeaders(c)
 			n, err := fmt.Fprint(c.Writer, ":\n\n")
 			if err != nil {
 				logger.L().Info("openai chat_completions stream: client disconnected during keepalive",

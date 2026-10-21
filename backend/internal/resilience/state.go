@@ -3,6 +3,7 @@ package resilience
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,6 +29,8 @@ type RequestState struct {
 	// requestID is generated locally, independent of client correlation IDs.
 	requestID   string
 	firstOutput time.Time
+	// firstOutputNoted is set once firstOutput is; later writes skip mu.
+	firstOutputNoted atomic.Bool
 
 	// groupID is the API key's group (0 when ungrouped or unknown).
 	groupID int64
@@ -320,14 +323,21 @@ func (s *RequestState) GatewayRequestID() string {
 // NoteFirstOutput records the first successful content write, once. Opening
 // metadata and heartbeats must not call it.
 func (s *RequestState) NoteFirstOutput(at time.Time) {
-	if s == nil || at.IsZero() {
+	if s == nil || at.IsZero() || s.firstOutputNoted.Load() {
 		return
 	}
 	s.mu.Lock()
 	if s.firstOutput.IsZero() {
 		s.firstOutput = at
+		s.firstOutputNoted.Store(true)
 	}
 	s.mu.Unlock()
+}
+
+// FirstOutputNoted reports, without the state lock, whether the first
+// content write was recorded.
+func (s *RequestState) FirstOutputNoted() bool {
+	return s != nil && s.firstOutputNoted.Load()
 }
 
 // MSSinceFirstOutput is zero before output or for a clock before that write.
