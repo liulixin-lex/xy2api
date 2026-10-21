@@ -287,23 +287,24 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 
 ## 12. 验证
 
-测试服务器场景（QA，`tools/gateway-resilience/staging`）。“基线”一列是 QA 在 `027a434ad` 上的实测：红灯表示本期要修的行为，回归表示基线已经满足、本期防止退化。
+测试服务器场景（QA，`tools/gateway-resilience/staging`；清单与已有场景的修改登记在旧变更 [`staging-validation.md`](../gateway-resilience-20261015/staging-validation.md) §6.1）。“基线”一列是 QA 在 `027a434ad` 上的实测：红灯表示本期要修的行为，回归表示基线已经满足、本期防止退化。
 
 | 场景 | 故障 | 覆盖 | 基线 |
 |---|---|---|---|
 | CV-5 | F31 | §3.3 created → failed(overloaded)：A 按 D18 最多试 2 次（各记一条 `CAPACITY_SHED`），在 B 成功，客户端只有 B 的 `response.created` | 回归 |
 | CV-6 | F32 | §3.4 Chat 兼容 created → failed(“The service is busy”) 换号，只有一个 role 分块；不按容量误判（§5） | 红灯 |
 | CV-7 | F33 | §3.3 created、in_progress → failed 换号 | 回归 |
-| CV-8 | F34 | §3.1 created 之前的空 delta 与空的 added 结构在换号时丢弃 | 红灯 |
-| CV-9 | — | §3.1 `codex.response.metadata` 算输出，不再换号 | — |
+| CV-8 | F34B | §3.1 created 之前的空 delta 与空的 added 结构在换号时丢弃 | 红灯 |
+| CV-9 | F34 | §3.1 `codex.response.metadata` 算输出，不再换号 | 回归 |
 | RAW-1 | F35 | §4 raw Chat `error` + `[DONE]` 在输出前换到 B | 红灯 |
 | RAW-2 | F35 | §4 单号组：记为失败，不当成功、不计费 | 红灯 |
-| SO-1 | F36 | §6 仅流式：学习、本请求换号、跳过下一个非流式请求、流式照常、清除后重新学习 | — |
+| SO-1 | F36 | §6 仅流式：学习、本请求换号、跳过下一个非流式请求、流式照常、清除后重新学习 | 红灯 |
 | RA-1 | F37 | §7.1 心跳已提交后全组过载：`response.failed` 带 2–10 秒 retry-after，正文一致 | 红灯（正文 8 秒但帧不带 headers） |
-| RA-2 | — | §7.1 心跳已提交后 B 健康：请求完成，没有延迟提示 | — |
+| RA-2 | — | §7.1 心跳已提交后 B 健康：请求完成，没有延迟提示 | 回归 |
 | ANT-3 | — | §7.4 Messages 无号为 `api_error` | 回归（无号本来就是 `api_error`；本期改的是心跳后的终止帧与按状态码推断的类型，由单测覆盖） |
 | SH-1、SH-2 | — | PR #117 份额：切换到份额按优先级与负载因子选号、真实瞬时失败降低健康权重、回到原版 | — |
+| DC-6（修改） | — | §3.4 兼容转换只写开场就断开：改为断言开场延迟 | 红灯 |
 
 排队 ping 之后的终止帧（§7.3）由单测 `TestCompatibleQueueErrorsEndInInboundProtocol` 覆盖，测试服务器场景 Q-1 为可选。
 
-候选验证：现有 56 个场景加上表、升级演练（0.4.3 → 候选，含回退与再前滚）、3 小时浸泡（存活堆斜率 ≤1 MiB/h）。结果见 tasks。
+候选验证：全部 69 个场景（原 56 个加上表 13 个）、升级演练（0.4.3 → 候选，含回退与再前滚）、3 小时浸泡（存活堆斜率 ≤1 MiB/h）。结果见 tasks。
