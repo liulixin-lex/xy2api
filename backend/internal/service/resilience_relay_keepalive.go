@@ -139,7 +139,8 @@ type relayKeepaliveFilter struct {
 	midLine bool
 	// skipBlank drops the blank line that ends a dropped frame.
 	skipBlank bool
-	// createdSeen gates the unmarked empty-delta compatibility rule.
+	// createdSeen closes the unmarked empty-delta window at created or the
+	// first real delta; later whitespace is part of the answer.
 	createdSeen   bool
 	nativePrelude bool
 	err           error
@@ -191,11 +192,12 @@ func (f *relayKeepaliveFilter) next() {
 	if bytes.HasPrefix(trimmed, []byte("event:")) && bytes.Equal(bytes.TrimSpace(bytes.TrimPrefix(trimmed, []byte("event:"))), []byte("response.created")) {
 		f.createdSeen = true
 	}
-	if isResponsesCreatedDataLine(trimmed) {
+	if f.nativePrelude && !f.createdSeen && isResponsesCreatedDataLine(trimmed) {
 		f.createdSeen = true
 	}
 	if f.nativePrelude && !f.createdSeen {
 		if deltaBytes, ok := nonEmptyResponsesDeltaBytes(trimmed); ok {
+			f.createdSeen = true
 			f.live.preCreatedDelta(deltaBytes)
 		}
 	}

@@ -125,3 +125,18 @@ func relayPreludeMetric(name string, accountID int64) int64 {
 	}
 	return count
 }
+
+func TestRelayPreCreatedDeltaStopsAtFirstContent(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, eventLine := range []string{"", "event: response.output_text.delta\n"} {
+		live := &relayLiveness{accountID: 89103}
+		before := relayPreludeMetric(resilience.MetricPreCreatedDelta, live.accountID)
+		text := eventLine + "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+		space := eventLine + "data: {\"type\":\"response.output_text.delta\",\"delta\":\" \\n\"}\n\n"
+		body := text + space + text + space
+		out, err := io.ReadAll(newOpenAIRelayKeepaliveFilter(strings.NewReader(body), live))
+		require.NoError(t, err)
+		require.Equal(t, body, string(out), "whitespace following real content must survive a missing created")
+		require.Equal(t, before+1, relayPreludeMetric(resilience.MetricPreCreatedDelta, live.accountID))
+	}
+}
