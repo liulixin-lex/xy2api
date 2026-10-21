@@ -46,7 +46,7 @@
 ## 6. W6-lite 仅流式能力（γ、FE）
 
 - [x] 6.1 学习、有效期、存放（账号 `extra` 两键加指纹）；本请求换号不计账号失败（γ `2cb3343de`、`126fead6f`；β 的 OpenAI 三处检测钩子 `09ef67f11`）。
-- [ ] 6.2 选号过滤（非流式请求）；无号原因码 `capability_stream_only`（γ `2cb3343de` 已完成）；`scheduler-diff.json` 与 `capabilityEligibilityReason` 钩子登记（α 集成时）。
+- [ ] 6.2 选号过滤（非流式请求）；无号原因码 `capability_stream_only` 与只因能力而无号的专用应答（γ `2cb3343de`、`a03ad9c79`、`f61b7d497`，α `6322aa374`）；`scheduler-diff.json` 与 `capabilityEligibilityReason` 钩子登记（α 集成时）。
 - [x] 6.3 Explain 原因；管理接口（查看、清除）：DTO 与清除路由 α `bf38c06c5`，Explain 与入口标记 α `affef416f`。
 - [ ] 6.4 前端：账号的仅流式标识与清除；Explain 文案与请求类型选择（FE `e042880ad`、`ade0f689d`、`74e392ffd`；等 α 的 DTO、路由与 Explain 联调）。
 
