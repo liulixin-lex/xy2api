@@ -39,7 +39,7 @@
 
 ## 3A. 原生 Responses 第一次心跳时带上 turn-state（O3；PM 2026-10-21T16:30Z 纳入 0.4.5）
 
-- [x] 3A.1 实现（β `feat/native-heartbeat-turn-state-045` @ `93fd9bdf2`，基于 `b966306de`）：原生暂存期第一次心跳提交时，如有这次尝试的 `x-codex-turn-state`，只多写这一个头并同时记录溯源；不加开关；登记 required_literal 与具名补丁测试；`GATEWAY_RESILIENCE.md` §6 与“心跳只写网关自身的头”一行注明例外（β）。用例按 `review/PROPOSAL_046.md` §1.6：单次成功拿到 turn-state；心跳后换号时守卫剥离；无心跳、无 turn-state、提交早于响应时行为不变；门票账号、R2-P2-1、原生规则终止帧的既有用例不受影响。新增 6 个顶层用例，其中首心跳带 turn-state、心跳后换号守卫剥离、心跳后错误规则终止帧 3 个在修复前失败；49 个相关顶层用例各三轮 `-race` 全部通过（147 顶层、243 项含子用例，0 失败、0 跳过、0 竞态），增量 lint 0 项，两种 vet 通过；`policy.json` 新增 1 条 required_literal，6 个用例绑定既有具名补丁 `xy-resilience-v2-streams`（仓库外 `evidence/o3-045/REPORT.md`）。
+- [x] 3A.1 实现（β `feat/native-heartbeat-turn-state-045` @ `93fd9bdf2`，基于 `b966306de`）：原生暂存期第一次心跳提交时，如有这次尝试的 `x-codex-turn-state`，只多写这一个头并同时记录溯源；不加开关；登记 required_literal 与具名补丁测试；`GATEWAY_RESILIENCE.md` §6 与“心跳只写网关自身的头”一行注明例外（β）。用例按 `review/PROPOSAL_046.md` §1.6：单次成功拿到 turn-state；心跳后换号时守卫剥离；无心跳、无 turn-state、提交早于响应时行为不变；门票账号、R2-P2-1、原生规则终止帧的既有用例不受影响。新增 6 个顶层用例，其中首心跳带 turn-state、心跳后换号守卫剥离、心跳后错误规则终止帧 3 个在修复前失败；49 个相关顶层用例各三轮 `-race` 全部通过（147 顶层、243 项含子用例，0 失败、0 跳过、0 竞态），增量 lint 0 项，两种 vet 通过；`policy.json` 新增 1 条 required_literal，6 个用例绑定既有具名补丁 `xy-resilience-v2-streams`（仓库外 `evidence/o3-045/REPORT.md`）。分支最终 HEAD `58ad8af6f` 只在产品提交之后追加了记忆里的审查归属，产品代码、测试、`policy.json` 与说明和 `93fd9bdf2` 逐字相同；两者的干净树 audit 都通过。
 - [x] 3A.2 代码审查（REVIEW，`review/CODE_REVIEW_045_O3.md`）：`93fd9bdf2` 可以并入 0.4.5，没有 P0、P1、P2；`PROPOSAL_046` §1.5 的实现要点逐条满足，§1.6 的用例除不适用的开关一项外都有；turn-state 只写一次，不泄漏失败账号的 `x-request-id` 与用量头；门票账号、CDN 首包保活、排队心跳、无心跳与 R2-P2-1 不回归。前提是合入后在新 SHA 上重跑全量门禁（4.5）。
 
 ## 4. 集成（α，PM 2026-10-21T12:51Z 授权本地集成）
@@ -57,7 +57,7 @@
 
 ## 5. 测试服务器验证（QA）
 
-- [ ] 5.1 新故障与场景（QA 工具 `b6805ec73`：F38、F39 与 8 项串行补测已备好）：Gateway 入站经 Anthropic 上游、Responses 透传、心跳响应头、raw Chat 占位 `error`（建议清单见 design §7），先在 0.4.4 上确认。
+- [x] 5.1 新故障与场景（QA 工具 `b6805ec73`、夹具修正 `64e28dba5`：F38、F39 与 8 项串行补测；在正式 0.4.4 上 6 项复现旧行为，F39-5R、F39-5C 旧版也通过，F38-12 旧版返回裸 422 JSON）：Gateway 入站经 Anthropic 上游、Responses 透传、心跳响应头、raw Chat 占位 `error`（建议清单见 design §7），先在 0.4.4 上确认。
 - [ ] 5.2 唯一候选：等 O3 并入后的新 SHA。只构建一次；71 个场景（含 RA-1 复跑与 O3 场景）；0.4.3 → 0.4.5、0.4.4 → 0.4.5 两条升级演练；6.5 小时浸泡。
 - [x] 5.3 预跑 `b966306de`（QA 2026-10-21T15:53Z 起）：71 个场景 71 个通过，RA-1、RA-2 通过（2026-10-21T17:11Z），作为预跑证据保留，报告在仓库外 `staging/REPORT_045_b966306de.md`。这个 SHA 不做升级演练与浸泡（PM 2026-10-21T16:30Z），不是最终候选。
 
