@@ -419,6 +419,12 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					)
 					continue
 				}
+				if result != nil && result.ClientDisconnect {
+					reqLog.Info("openai_chat_completions.client_disconnected", zap.Int64("account_id", account.ID), zap.Error(err))
+					// Retain upstream usage drained after the downstream write failed.
+					submitChatUsage(result)
+					return
+				}
 				h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, reqModel, false, nil), false, nil, err)
 				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
