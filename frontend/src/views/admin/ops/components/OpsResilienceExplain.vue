@@ -4,7 +4,7 @@
       <h4 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.resilience.explain.title') }}</h4>
       <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.resilience.explain.opsHint') }}</p>
     </div>
-    <form class="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="run">
+    <form class="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5" @submit.prevent="run">
       <label class="text-xs text-gray-700 dark:text-gray-300">{{ t('admin.resilience.explain.group') }}
         <Select :model-value="groupId" class="mt-1" :options="groupOptions" :placeholder="t('admin.resilience.explain.groupPlaceholder')" :aria-label="t('admin.resilience.explain.group')" data-testid="resilience-explain-group" @update:model-value="selectGroup" />
       </label>
@@ -13,6 +13,13 @@
       </label>
       <label class="text-xs text-gray-700 dark:text-gray-300">{{ t('admin.resilience.explain.sessionHash') }}
         <input v-model.trim="session" type="text" class="input mt-1 font-mono" autocomplete="off" data-testid="resilience-explain-session">
+      </label>
+      <label class="text-xs text-gray-700 dark:text-gray-300" :title="t('admin.resilience.explain.modeHint')">{{ t('admin.resilience.explain.mode') }}
+        <select v-model="mode" class="input mt-1" data-testid="resilience-explain-mode">
+          <option value="">{{ t('admin.resilience.explain.modes.any') }}</option>
+          <option value="responses">{{ t('admin.resilience.explain.modes.responses') }}</option>
+          <option value="chat">{{ t('admin.resilience.explain.modes.chat') }}</option>
+        </select>
       </label>
       <div class="flex items-end">
         <button type="submit" class="btn btn-secondary" :disabled="running || !groupId" data-testid="resilience-explain-run">{{ running ? t('admin.resilience.explain.running') : t('admin.resilience.explain.run') }}</button>
@@ -29,7 +36,7 @@ import { useI18n } from 'vue-i18n'
 import Select from '@/components/common/Select.vue'
 import ResilienceExplainResult from '@/components/admin/resilience/ResilienceExplainResult.vue'
 import { adminAPI } from '@/api/admin'
-import type { ResilienceExplanation } from '@/api/admin/resilience'
+import type { ResilienceExplainQuery, ResilienceExplanation } from '@/api/admin/resilience'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
 // groups, when given, comes from the parent panel; otherwise it is loaded
@@ -43,6 +50,8 @@ const groups = computed(() => props.groups ?? loadedGroups.value)
 const groupId = ref<number | null>(null)
 const model = ref('')
 const session = ref('')
+// '' explains overall health; a protocol explains a non-streaming request of it.
+const mode = ref<'' | 'responses' | 'chat'>('')
 const result = ref<ResilienceExplanation | null>(null)
 const running = ref(false)
 const error = ref('')
@@ -67,9 +76,13 @@ async function run() {
   const current = ++request
   running.value = true
   try {
-    const query: { model?: string; session_hash?: string } = {}
+    const query: ResilienceExplainQuery = {}
     if (model.value) query.model = model.value
     if (session.value) query.session_hash = session.value
+    if (mode.value) {
+      query.protocol = mode.value
+      query.stream = false
+    }
     const explanation = await adminAPI.resilience.explain(groupId.value, query)
     if (current === request) result.value = explanation
   } catch (cause) {

@@ -288,6 +288,7 @@
             <AccountRecentHealth :account-id="row.id" :health="recentHealthByAccountId[String(row.id)] ?? null">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
             </AccountRecentHealth>
+            <AccountStreamOnlyBadge :account="row" @cleared="patchAccountInList($event as Account)" />
           </template>
           <template #header-schedulable="{ column }"><div class="flex items-center gap-1"><span>{{ column.label }}</span><HelpTooltip :content="t('admin.accounts.schedulableHint')" width-class="w-72" /></div></template>
           <template #cell-schedulable="{ row }">
@@ -527,6 +528,7 @@ import AccountTableActions from '@/components/admin/account/AccountTableActions.
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountColumnSettings from '@/components/admin/account/AccountColumnSettings.vue'
 import AccountRecentHealth from '@/components/admin/account/AccountRecentHealth.vue'
+import AccountStreamOnlyBadge from '@/components/admin/account/AccountStreamOnlyBadge.vue'
 import type { AccountRecentHealth as AccountRecentHealthStats } from '@/api/admin/accounts'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import IQCheckCell from '@/components/account/IQCheckCell.vue'

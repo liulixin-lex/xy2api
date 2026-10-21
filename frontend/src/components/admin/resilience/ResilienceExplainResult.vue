@@ -22,6 +22,7 @@
             <th class="p-2">{{ t('admin.resilience.explain.columns.recoverAt') }}</th>
             <th class="p-2 text-right">{{ t('admin.resilience.explain.columns.sessionFailures') }}</th>
             <th class="p-2">{{ t('admin.resilience.explain.columns.avoided') }}</th>
+            <th class="p-2">{{ t('admin.resilience.explain.columns.learned') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -33,6 +34,7 @@
             <td class="p-2">{{ acc.recover_at ? formatDateTime(acc.recover_at) : '-' }}</td>
             <td class="p-2 text-right tabular-nums">{{ acc.session_failures || '-' }}</td>
             <td class="p-2">{{ acc.avoided ? t('admin.resilience.explain.yes') : '-' }}</td>
+            <td class="p-2" data-testid="resilience-explain-learned">{{ learnedLabel(acc) }}</td>
           </tr>
         </tbody>
       </table>
@@ -45,6 +47,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ResilienceAccountExplanation, ResilienceExplanation } from '@/api/admin/resilience'
+import { activeStreamOnly, streamOnlyProtocols, streamOnlyRemaining } from '@/utils/accountCapability'
 import { formatDateTime } from '@/utils/format'
 
 const props = defineProps<{ explanation: ResilienceExplanation }>()
@@ -58,6 +61,16 @@ const accountLabel = (acc: ResilienceAccountExplanation) => `${acc.name} #${acc.
 function reasonLabel(reason: string): string {
   const key = `admin.resilience.explain.reasons.${reason}`
   return te(key) ? t(key) : reason
+}
+
+function learnedLabel(acc: ResilienceAccountExplanation): string {
+  const entries = activeStreamOnly(acc.capability_learned)
+  if (!entries.length) return '-'
+  const { unit, n } = streamOnlyRemaining(entries)
+  return t('admin.resilience.explain.learned', {
+    protocols: streamOnlyProtocols(entries),
+    time: t(`admin.resilience.capability.${unit}`, { n })
+  })
 }
 
 function tierClass(tier: string): string {

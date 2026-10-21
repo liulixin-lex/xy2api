@@ -2,7 +2,7 @@ export default {
   resilience: {
     settings: {
       title: 'Gateway Resilience',
-      hint: 'Controls upstream failure classification, cooldowns and balance pauses, session rebinding, request budgets, pre-output keepalive, disconnect billing and no-account fallback. Turning the master switch off restores the previous behaviour.',
+      hint: 'Controls upstream failure classification, cooldowns and balance pauses, session rebinding, request budgets, stream prelude staging, pre-output keepalive, disconnect billing, stream-only account learning and no-account fallback. Turning the master switch off restores the previous behaviour.',
       openPanel: 'Open ops panel',
       enabled: 'Master switch',
       enabledHint: 'When off, every resilience feature is disabled and the gateway behaves as before.',
@@ -15,6 +15,10 @@ export default {
         balanceHint: 'Accounts out of upstream balance stop being scheduled for the pause; real traffic retries them afterwards and pauses them again if still short. "Recover State" in the account list puts one back at once.',
         budget: 'Request budget',
         budgetHint: 'Maximum attempts per request and total time before the first output. Streaming requests are held to the total time until their first output; for non-streaming requests it only decides whether another attempt may start, and the attempt in flight is not cut. Same-account retries only for capacity shedding.',
+        failure: 'Failure classification fixes',
+        failureHint: 'Only real capacity signals (server_is_overloaded, slow_down, 529, an explicit overloaded) count as capacity; a plain 429 is a rate limit, and "service busy", "too many pending requests" or "concurrency limit" may move to any host. Off restores the 0.4.3 classification rules; error details are still read more completely, so a few ops records may be classified differently from 0.4.3.',
+        stream: 'Stream prelude and termination',
+        streamHint: 'Which events are held back from the client before the first content, and what counts as a proper end of an upstream stream. A failure while events are held back can move to another account unseen by the client.',
         keepalive: 'Pre-output keepalive',
         keepaliveHint: 'Streaming requests through a CDN get periodic heartbeats before the first output, so CDN idle timeouts do not cut them.',
         stall: 'Stall detection',
@@ -23,6 +27,8 @@ export default {
         disconnectHint: 'A client leaving before any output cancels the upstream and is not billed; after partial output the upstream is read for a bounded time and the usage obtained is billed.',
         errors: 'Error semantics and storm protection',
         errorsHint: 'No-account and rate-limit responses carry Retry-After; a short negative cache; fast replies to repeated identical 503s per key; a cap on consecutive failed turns of a conversation so clients stop retrying.',
+        capability: 'Stream-only account learning',
+        capabilityHint: 'When a non-streaming request gets an upstream 400 that clearly says only streaming requests are accepted, the account is remembered as not taking non-streaming requests on that protocol and the request moves to another account at once (no account failure, no cooldown). Until it expires non-streaming requests that would fail on it skip the account; streaming requests, and requests the gateway already sends as streaming, are unaffected. Moving the current request needs "Failure classification fixes" on. Off stops learning and what was learned no longer affects selection; it still expires on time, and turning learning back on before then filters with the unexpired states again.',
         fallbackGroup: 'No-account fallback groups',
         fallbackGroupHint: 'A group without available accounts is served by its fallback group and returns once stable.',
         cacheAware: 'Cache-aware reservations',
@@ -42,7 +48,21 @@ export default {
         partialDrain: 'Maximum read after partial output (s)',
         abuseThreshold: 'Undelivered abuse threshold (per key and hour)',
         negativeCache: 'No-account negative cache (s)',
-        returnStable: 'Stable time before returning to the group (s)'
+        returnStable: 'Stable time before returning to the group (s)',
+        codexRetryAfterCap: 'Codex Retry-After cap (s)',
+        codexRetryAfterCapHint: 'Upper bound (s) of Retry-After when a Codex client meets no available account or a configuration rejection; 0 turns it off. Needs "Error semantics and storm protection" on.',
+        learnTtl: 'Learned state lifetime (s)',
+        learnTtlHint: 'Default 21600 (6 hours); it clears itself when it expires, and a change applies only to states learned afterwards. It can also be cleared by hand in the status column of the account list.'
+      },
+      switches: {
+        preludeStaging: 'Delay the prelude in compatibility conversion',
+        preludeStagingHint: 'Chat and Messages conversions write their opening events (role chunk, message_start) only at the first content or a terminal event, so a failure after the upstream opened but before any content can move to another account. Off restores the 0.4.3 behaviour.',
+        nativePreludeWhitelist: 'Wider native Responses prelude whitelist',
+        nativePreludeWhitelistHint: 'When the upstream fails after opening but before any content, the opening events that still allow moving to another account extend to response.queued and added events without content; empty deltas before created are dropped as relay pseudo-keepalives. Off restores the 0.4.3 opening events (created, in_progress and keepalive), and before created it drops only frames marked SSE-Keep-Alive.',
+        strictTerminal: 'Strict termination',
+        strictTerminalHint: 'In Chat passthrough an upstream error followed by [DONE] counts as a failure, not a normal end. Off restores the 0.4.3 behaviour.',
+        failedFrameRetryAfter: 'Retry time on response.failed',
+        failedFrameRetryAfterHint: 'A response.failed made by the gateway carries a retry-after when it helps: none or 1 s with a healthy alternative; 2–10 s when no account is healthy and the recovery time is known; never after a turn cap, low balance, a content refusal or a failure that is not retryable (unknown model, request or auth errors). Needs "Error semantics and storm protection" on; off never adds it.'
       },
       advanced: 'Advanced (full JSON)',
       advancedHint: 'Contains every setting; the server validates it on save and rejects invalid documents.',
@@ -83,6 +103,7 @@ export default {
         abuse_guard: 'Abuse guard charges',
         stall: 'Stalled streams',
         post_output_failure: 'Upstream failures after output',
+        pre_created_delta: 'Content before created',
         relay_keepalive: 'Relay keep-alive frames'
       }
     },
@@ -117,6 +138,10 @@ export default {
       groupPlaceholder: 'Select a group',
       model: 'Model (optional)',
       sessionHash: 'Session hash (optional)',
+      mode: 'Request type (optional)',
+      modeHint: 'With a protocol, explain a non-streaming request of it the way selection does: accounts that would fail as stream-only show as skipped. Leave empty for overall health.',
+      modes: { any: 'Any (overall health)', responses: 'Responses, non-streaming', chat: 'Chat, non-streaming' },
+      learned: 'Stream only: {protocols} ({time} left)',
       run: 'Explain',
       running: 'Loading…',
       failed: 'Failed to load the resilience explanation.',
@@ -150,7 +175,8 @@ export default {
         reason: 'Reason',
         recoverAt: 'Recovers at',
         sessionFailures: 'Session failures',
-        avoided: 'Avoided'
+        avoided: 'Avoided',
+        learned: 'Learned'
       },
       tiers: { none: 'Healthy', soft: 'Soft', hard: 'Hard' },
       reasons: {
@@ -161,8 +187,19 @@ export default {
         temp_unschedulable: 'Temporarily unschedulable',
         rate_limited: 'Rate limited',
         overloaded: 'Overloaded',
-        model_rate_limited: 'Model rate limited'
+        model_rate_limited: 'Model rate limited',
+        capability_stream_only: 'Stream only (skipped for non-streaming requests)'
       }
+    },
+    capability: {
+      badge: 'Stream only (learned, {time} left)',
+      hours: '{n} h',
+      minutes: '{n} min',
+      title: 'The upstream only accepts streaming requests ({protocols}): non-streaming requests that would fail on it skip this account; streaming requests, and requests the gateway already sends as streaming, are unaffected. It clears itself when it expires.',
+      clear: 'Clear',
+      clearTitle: 'Clear the learned stream-only state so non-streaming requests may use this account again',
+      cleared: 'Stream-only state cleared',
+      clearFailed: 'Could not clear the stream-only state'
     },
     usage: {
       fallback: 'Fallback: {origin} → {group}',
