@@ -122,6 +122,11 @@ func resilienceTranslateError(c *gin.Context, status int, errType, code, message
 	if c != nil && c.GetBool(ginKeyResilienceTurnCapped) {
 		code = codeServerIsOverloaded
 	}
+	// A committed Responses frame owns its retry message. Appending the
+	// legacy HTTP suffix first would invent punctuation when advice removes it.
+	if c != nil && c.Writer != nil && c.Writer.Written() && inboundIsResponses(c) && resilience.Current().FailedFrameRetryAfterOn() {
+		return errType, code, message
+	}
 	if c != nil && (status == http.StatusServiceUnavailable || resilienceTerminalHint(c, status)) {
 		if secs := c.GetInt(ginKeyResilienceRetryAfter); secs > 0 && !strings.Contains(strings.ToLower(message), "try again in") {
 			message = strings.TrimRight(strings.TrimSpace(message), ". ") + fmt.Sprintf(". Please try again in %ds.", secs)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -426,7 +427,7 @@ func TestMapResponsesErrorCodeResilience(t *testing.T) {
 
 func TestCommittedFailureCarriesRetryHint(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
-		t.Run(boolName(enabled), func(t *testing.T) {
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
 			withHandlerResilience(t, func(s *resilience.Settings) { s.Errors.FailedFrameRetryAfter = enabled })
 			c, w := newGinContextForEndpoint(t, EndpointResponses)
 			c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
@@ -442,6 +443,23 @@ func TestCommittedFailureCarriesRetryHint(t *testing.T) {
 			}
 			assert.Equal(t, message, errObj["message"])
 			assert.NotContains(t, errObj, "headers", "recovery is unknown without a candidate advisor")
+		})
+	}
+}
+
+func TestCommittedFailurePreservesOriginalPunctuation(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, original := range []string{"Unavailable", "Unavailable.", "Unavailable!"} {
+		t.Run(original, func(t *testing.T) {
+			c, w := newGinContextForEndpoint(t, EndpointResponses)
+			c.Request = c.Request.WithContext(resilience.WithRetryAdvice(c.Request.Context(), resilience.RetryAdvice{}))
+			_, err := c.Writer.WriteString(":\n\n")
+			require.NoError(t, err)
+			c.Set(ginKeyResilienceRetryAfter, 30)
+			(&GatewayHandler{}).handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", original, true)
+			_, body := parseResponsesFailedSSE(t, strings.TrimPrefix(w.Body.String(), ":\n\n"))
+			require.Equal(t, original, body["message"])
+			require.NotContains(t, body, "headers")
 		})
 	}
 }
