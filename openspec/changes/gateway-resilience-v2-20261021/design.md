@@ -338,7 +338,7 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 | RA-1 | F37 | §7.1 心跳已提交后全组过载：`response.failed` 带 2–10 秒 retry-after，正文一致 | 红灯（正文 8 秒但帧不带 headers） |
 | RA-2 | — | §7.1 心跳已提交后 B 健康：请求完成，没有延迟提示 | 回归 |
 | ANT-3 | — | §7.4 Messages 无号为 `api_error` | 回归（无号本来就是 `api_error`；本期改的是心跳后的终止帧与按状态码推断的类型，由单测覆盖） |
-| SH-1、SH-2 | — | PR #117 份额：切换到份额按优先级与负载因子选号、真实瞬时失败降低健康权重、回到原版 | — |
+| SH-1、SH-2 | — | PR #117 份额：切换到份额按优先级与负载因子选号、真实瞬时失败降低健康权重、回到原版 | 通过（基线已含 #117） |
 | DC-6（修改） | — | §3.4 兼容转换只写开场就断开：改为断言开场延迟 | 红灯 |
 
 排队 ping 之后的终止帧（§7.3）由单测 `TestCompatibleQueueErrorsEndInInboundProtocol` 覆盖，测试服务器场景 Q-1 为可选。

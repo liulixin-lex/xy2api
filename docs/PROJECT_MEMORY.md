@@ -204,6 +204,7 @@
 - `20261021-resilience-v2-alpha`（α 2026-10-21T01:01Z 经 DOCS 代登记）：分支 `rv2/be-a`，基线 `027a434ad`，初始工作树干净。范围为 RetryAdvice、W5.2、W5.1、W5.4、W5.5、W8-lite；04:45Z 起按约定合入六个分支并串行跑全量门禁。未授权 α 推送、开 PR、发布或碰生产。
 - `20261021-rv2-fe`（FE 2026-10-21T00:55Z 经 DOCS 代登记）：负责新开关的设置界面与 i18n、账号仅流式学习状态的显示与清除、Explain 新原因文案；分支 `rv2/fe`，基线 `027a434ad`，初始工作树干净；只在本地提交。
 - `20261021-resilience-v2-qa`（QA 2026-10-21T00:55Z 经 DOCS 代登记）：分支 `rv2/qa`，基线 `027a434ad`；阶段 1 为新故障与场景，阶段 2（候选验证）在 PM 指定提交放行后才开始。QA 结束时由 DOCS 代为同步交接与操作日志。
+  - 2026-10-21T02:26Z：阶段 1 完成，提交 `ce8c3c01d`（只改 `tools/gateway-resilience/` 下 5 个文件），工作树干净。新增 13 个场景，合计 69 个。基线 `027a434ad` 上 15 项定向场景 8 项通过、7 项是预期的红灯（CV-6、CV-8、RAW-1、RAW-2、SO-1、RA-1、DC-6）；SH-1、SH-2、LR-1 通过。报告在仓库外 `staging/REPORT_PHASE1.md`。阶段 2 等 PM 指定提交放行，**没有构建或验收任何集成候选**。
 - `20261021-resilience-v2-gamma`（γ 2026-10-21T01:27Z 经 DOCS 代登记）：分支 `rv2/be-c`，基线 `027a434ad`；负责 C0、W2.1-lite、W6-lite；只在本地提交，不推送、不碰生产。C0 沿用现有设置键 `gateway_resilience_settings`：0.4.3 读存储时用 `json.Unmarshal`，忽略未知字段；管理端 PUT 的严格校验不影响存储回退。
 - 各 agent 的进度与变更登记在仓库外的 `briefs/PROGRESS_*.md` 与 `contract/CHANGES_*.md`。
 - 第 0 批（Claude 首事件截止，2026-10-21T01:09Z）：生产只读评估 7 天分布后**保持 90 秒，生产未写入**。流式 Messages 首字超过 45 秒约 0.45%，首字只是首事件时延的上界；生产 settings 表里没有韧性设置行（运行态为缺省值），用户限定的单条 CAS UPDATE 无法成立。报告在仓库外 `prod/O4_REPORT.md`。
@@ -943,3 +944,16 @@ pnpm --dir frontend run build
   - `sync.py audit` 需要干净的工作树，提交后再跑。
 - 卡点/风险：无。
 - 下一步：用户授权后提交、推送、开 PR；随下一个版本发布后生产才生效。
+
+### 2026-10-21T02:26Z — `20261021-resilience-v2-qa` — 阶段 1 完成（DOCS 代记）
+
+- 请求/目标：0.4.4 冲刺的 QA 阶段 1，补新故障与测试服务器场景，并在基线上确认它们的结果。
+- 开始状态：分支 `rv2/qa`，自 `027a434ad`，工作树干净。
+- 完成操作：
+  - 新故障 F31–F37 与 F34B，新场景 CV-5–CV-9、RAW-1、RAW-2、SO-1、RA-1、RA-2、ANT-3、SH-1、SH-2；DC-6 改为断言兼容转换的开场延迟，LR-1 改为份额层级取账号优先级。合计 69 个场景。
+  - CV-5 按 PM 指令保留 D18：A 最多试 2 次、每次记一条 `CAPACITY_SHED`，最终在 B 完成。
+  - 基线结果：15 项定向场景 8 项通过，7 项为预期红灯（CV-6、CV-8、RAW-1、RAW-2、SO-1、RA-1、DC-6）。CV-8 复现了“`response.created` 之前的无标记空 delta 让后续失败无法换号”。
+- 修改文件：`tools/gateway-resilience/` 下 5 个文件（提交 `ce8c3c01d`）；场景清单登记在 `gateway-resilience-20261015/staging-validation.md` §6.1（DOCS）。
+- 验证：工具全包 `-race`、Python 编译、文档一致性检查通过；场景在测试服务器的基线上运行。
+- 卡点/风险：无。
+- 下一步：阶段 2（唯一候选的全套场景、升级演练、3 小时浸泡）等 PM 指定提交放行。
