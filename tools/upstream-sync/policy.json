@@ -1374,6 +1374,30 @@
     {
       "path": "backend/internal/handler/gateway_handler_chat_completions.go",
       "value": "// xy2api resilience (review DELTA-P1-1): a stream that broke after"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, reqModel, reasoningEffortValue, startTime)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(upstreamCtx, releaseUpstreamCtx, startTime.Add(firstOutputTimeout))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.handleStreamingResponsePassthroughWithReasoning(ctx, resp, c, account, startTime, reqModel, upstreamPassthroughModel, reasoningEffortValue)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "pendingStage := newDefaultOpenAIFirstOutputStage()"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "return runOpenAIPassthroughReadPump(resp, documentScanner, scanBuf, openAIPassthroughPump{"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "writeHeartbeat(line + \"\\n\\n\")"
     }
   ],
   "forbidden_module_paths": [
@@ -1831,6 +1855,21 @@
       "id": "xy-resilience-v2-handler-exits",
       "path": "backend/internal/handler/gateway_convert_usage_test.go",
       "literal": "func TestGatewayConvertCancelBeforeOutputBillsNothing"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_first_output_test.go",
+      "literal": "func TestOpenAIPassthroughFirstOutputDeadlineSwitchesSilentAttempt"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_first_output_test.go",
+      "literal": "func TestOpenAIPassthroughHeartbeatWriteFailureIsClientGone"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_first_output_test.go",
+      "literal": "func TestOpenAIPassthroughDeadlineSwitchOff"
     }
   ]
 }

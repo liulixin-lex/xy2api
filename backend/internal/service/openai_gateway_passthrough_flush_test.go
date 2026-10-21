@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
 
@@ -128,21 +129,38 @@ func TestOpenAIStreamingPassthroughFlushesAtCompleteEventBoundaries(t *testing.T
 }
 
 func TestOpenAIStreamingPassthroughKeepsPreamblePendingUntilFirstOutputBoundary(t *testing.T) {
-	preamble := "event: response.created\n" +
-		`data: {"type":"response.created","response":{"id":"resp_pending"}}` + "\n\n" +
-		": waiting\n\n"
+	created := "event: response.created\n" +
+		`data: {"type":"response.created","response":{"id":"resp_pending"}}` + "\n\n"
+	comment := ": waiting\n\n"
+	preamble := created + comment
 	firstOutput := `data: {"type":"response.output_text.delta","delta":"ready"}` + "\n\n"
 	terminalEvent := `data: {"type":"response.completed","response":{"id":"resp_pending","usage":{"input_tokens":4,"output_tokens":1,"total_tokens":5}}}` + "\n\n"
 	upstream := preamble + firstOutput + terminalEvent
 
-	_, recorder, writer, err := runPassthroughFlushTest(t, io.NopCloser(strings.NewReader(upstream)), -1)
+	for _, strict := range []bool{false, true} {
+		t.Run(fmtBool(strict), func(t *testing.T) {
+			withResilienceSettings(t, func(s *resilience.Settings) { s.Stream.StrictTerminal = strict })
+			_, recorder, writer, err := runPassthroughFlushTest(t, io.NopCloser(strings.NewReader(upstream)), -1)
 
-	require.NoError(t, err)
-	require.Equal(t, upstream, recorder.Body.String())
-	require.Equal(t, []int{
-		len(preamble) + len(firstOutput),
-		len(upstream),
-	}, writer.flushBodyLengths)
+			require.NoError(t, err)
+			if strict {
+				// An upstream comment is a heartbeat and passes through at once;
+				// the opening stays staged until the first output (R2-P1③).
+				require.Equal(t, comment+created+firstOutput+terminalEvent, recorder.Body.String())
+				require.Equal(t, []int{
+					len(comment),
+					len(upstream) - len(terminalEvent),
+					len(upstream),
+				}, writer.flushBodyLengths)
+				return
+			}
+			require.Equal(t, upstream, recorder.Body.String())
+			require.Equal(t, []int{
+				len(preamble) + len(firstOutput),
+				len(upstream),
+			}, writer.flushBodyLengths)
+		})
+	}
 }
 
 func TestOpenAIStreamingPassthroughFlushesTerminalEventAtEOFWithoutBlankLine(t *testing.T) {
