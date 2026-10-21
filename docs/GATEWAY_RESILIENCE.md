@@ -164,12 +164,14 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 - 运维页“网关韧性”面板：当前实例最近 5 分钟至 1 小时的计数、未送达请求列表；计数与未送达列表按分组名显示。
 - 选号解释：运维页面板底部可选任一分组（含原版调度），可选填模型与会话哈希，只读查看每个账号的硬、软档与原因（余额暂停为 `balance_exhausted`）、恢复时间、会话失败次数与是否回避，以及末位兜底账号与兜底分组决策；填了模型时，若该模型被分组白名单或渠道定价拒绝（所有请求在选号前即失败），在账号表上方提示。份额调度 Explain 的结果中附同样的韧性视图。末位兜底账号不计模型、渠道、额度等逐请求条件，实际选中的可能是后一个候选。
 - 账号列表：余额不足暂停显示为临时不可调度，原因以 `balance:` 开头并附上游原文；“恢复状态”立即放回。欠费但暂时不用的账号，关掉调度即可。
+- 仅流式学习（0.4.4）：被学为只接受流式的账号显示“仅流式（自动学习）”与剩余时间，可以清除；清除后下一个非流式请求即可再选它。选号解释中被跳过的账号显示原因 `capability_stream_only`。
 - 运维错误详情：每次上游失败带失败分类 `resilience_category`（如 `BALANCE`、`TRANSIENT`、`CAPACITY_SHED`）。
 - 告警：不新增余额类指标。RC 的迁移 276 预置过两条余额告警规则，由迁移 277 删除。
 - 接口：
   - `GET /api/v1/admin/resilience/stats?window=15m`（窗口最长 1 小时，计数为单实例内存口径）；
   - `GET /api/v1/admin/resilience/undelivered?page=&page_size=&user_id=&api_key_id=&group_id=&since=&until=`（时间为 RFC3339）；
-  - `GET /api/v1/admin/resilience/groups/:id/explain?session_hash=&model=`（只读）。
+  - `GET /api/v1/admin/resilience/groups/:id/explain?session_hash=&model=`（只读）；
+  - 账号列表与详情的 `capability_learned`（0.4.4）：`[{protocol, mode: "stream_only", expires_at}]`，没有记录时为空数组；`DELETE /api/v1/admin/accounts/:id/capability-learning` 清除。
 
 ### 5.2 计数项
 

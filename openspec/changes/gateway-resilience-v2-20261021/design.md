@@ -148,6 +148,8 @@
 
 ## 5. W2.1-lite 分类修正（`failure.decision_v2`）
 
+实现：纯规则入口 `resilience.ClassifyWithSettings(outcome, settings)`，按 `DecisionV2On()` 在新分类与原 `Classify` 之间切换；service 的 `classifyUpstreamHTTP`、`ClassifyFailoverError`、`opsResilienceCategory` 与已输出后失败（`resilience_post_output.go`）都改用它，避免口径分叉。
+
 根因：`service/resilience_penalty.go` 的 `ClassifyFailoverError` 把所有 `RequestScopedTransient=true` 的失败都当成 `CAPACITY_SHED`，使 Grok 空闲、raw 429、“服务忙”类文案也受“容量只换一次、必须跨主机、整主机排除”的约束。
 
 | 信号 | 0.4.3 | 0.4.4 |
@@ -156,7 +158,7 @@
 | Grok 流空闲（`grok_stream_idle.go`） | `CAPACITY_SHED` | `TRANSIENT` 或 `STALL`【待契约】：允许换号，不消耗容量的跨主机额度，不触发整主机排除 |
 | raw Chat 与 Grok 的可重试 429 | `CAPACITY_SHED` | `RATE_LIMIT`；余额、reset、内容拒绝等更强的结构化证据优先 |
 | “The service is busy”、“Too many pending requests”、“Concurrency limit exceeded for account” | `CAPACITY_SHED` | 429 → `RATE_LIMIT`，5xx → `TRANSIENT`；可以换到任何主机 |
-| typed 首输出超时 | `TRANSIENT` | 运维记录仍为 `TRANSIENT`（兼容），另记 kind/reason 与实际生效的截止秒数【待契约：字段名】 |
+| typed 首输出超时 | `TRANSIENT` | 运维记录仍为 `TRANSIENT`（兼容）；Kind 已是 `first_output_timeout`，Detail 在 `timeout_ms` 旁加 `timeout_seconds`（实际生效的截止，不是配置值），Reason 为 `first_output_timeout`；OpenAI（β）与 Anthropic 首事件守卫（γ）都这样记录。handler 的 `FIRST_OUTPUT_TIMEOUT` 不变；不加列、不加迁移 |
 
 - 运维记录的 `resilience_category` 与 handler 的换号规则用同一个分类结果，不再分叉。
 - D18 不变：容量降载仍是同号先试一次、只跨主机换一次。
@@ -169,7 +171,10 @@
 - **本请求**：立即换号（需要 `failure.decision_v2` 开），不计账号失败、不冷却、不计会话失败，计入请求预算。`decision_v2` 关闭时只学习、过滤后续请求，本请求照旧返回 400。
 - **选号**：OpenAI 选号（`openai_gateway_scheduling.go`、`openai_account_scheduler.go`）对非流式请求跳过被标记的账号，流式请求不受影响。跳过后组内无号时按现有无号处理，带原因码 `capability_stream_only`，不再把 400 归咎于用户。
 - **Explain**：被跳过的账号显示原因 `capability_stream_only` 与剩余有效期。
-- **管理接口**【待契约：CHANGES_G】：账号详情或列表返回 `capability_learned`；清除接口。
+- **管理接口**：
+  - 账号列表与详情返回 `capability_learned: [{protocol: "responses"|"chat", mode: "stream_only", expires_at: <RFC3339 UTC>}]`，没有记录时为空数组；
+  - 清除：`DELETE /api/v1/admin/accounts/:id/capability-learning`，成功时 `data` 为 `{capability_learned: []}`；
+  - 实现：`Account.CapabilityLearned(now)`、`AccountHandler.ClearCapabilityLearning`（γ）；DTO 字段与路由由 α 接入。导出类型【待契约：CHANGES_G 冻结】。
 
 ## 7. W5 信号与终止出口
 
@@ -180,7 +185,8 @@
 - `WithRetryAdvice(ctx, advice)`：必要时挂接 RequestState 并写入；`SetRetryAdvice(ctx, advice)`：更新已有状态，已派生的子 context 立即可见；`RetryAdviceFrom(ctx)`：线程安全快照，缺省为零值。
 - `Suppress` 在同一请求内不可撤销（封顶与终态优先），写入时 `Seconds` 归零。
 - `Headers()` 只生成 `retry-after` 一项（整数秒，防御性夹到 10）；`Seconds<=0` 或 `Suppress` 时为空。合成帧的 `error.headers` 只用它，不复制上游的任意头。
-- 分组 advisor 只基于未尝试、模型兼容、无硬罚的健康候选判断；原 `NoAccountRetryAfter` 保留给 HTTP 无号提示【待契约：γ 的 advisor 方法名】。
+- 惰性求值（PM 决定）：handler 在选号前用 `WithRetryAdviceProvider` 安装请求级 provider，合成点调用 `ResolveRetryAdvice(ctx)`：已直接写入的 advice（如封顶的 `Suppress`）优先，否则调用 provider，最多等 100 ms。这样 service 层在 handler 耗尽出口之前合成的 `response.failed` 也能拿到当时的候选情况。provider 不持有可复用的 Gin context。
+- 分组 advisor 只读进程内的账号与罚则快照，不访问 Redis 或数据库；只基于未尝试、模型兼容、无硬罚的健康候选判断；快照缺失时返回 `unknown`。原 `NoAccountRetryAfter` 保留给 HTTP 无号提示【待契约：γ 的 advisor 方法名】。
 
 | 情况 | `Source` | `response.failed` 的 retry-after |
 |---|---|---|
