@@ -205,7 +205,9 @@
 - `20261021-rv2-fe`（FE 2026-10-21T00:55Z 经 DOCS 代登记）：负责新开关的设置界面与 i18n、账号仅流式学习状态的显示与清除、Explain 新原因文案；分支 `rv2/fe`，基线 `027a434ad`，初始工作树干净；只在本地提交。
 - `20261021-resilience-v2-qa`（QA 2026-10-21T00:55Z 经 DOCS 代登记）：分支 `rv2/qa`，基线 `027a434ad`；阶段 1 为新故障与场景，阶段 2（候选验证）在 PM 指定提交放行后才开始。QA 结束时由 DOCS 代为同步交接与操作日志。
 - 各 agent 的进度与变更登记在仓库外的 `briefs/PROGRESS_*.md` 与 `contract/CHANGES_*.md`。
-- 状态（2026-10-21T00:55Z）：已登记，各 agent 开工；C0 设置契约预计 01:45Z 发布。
+- 第 0 批（Claude 首事件截止，2026-10-21T01:09Z）：生产只读评估 7 天分布后**保持 90 秒，生产未写入**。流式 Messages 首字超过 45 秒约 0.45%，首字只是首事件时延的上界；生产 settings 表里没有韧性设置行（运行态为缺省值），用户限定的单条 CAS UPDATE 无法成立。报告在仓库外 `prod/O4_REPORT.md`。
+- 生产探测（2026-10-21）：多数中转在首个正文 delta 前发 created、in_progress 与空的 added 结构；部分中转在 created 之前先发一个 delta；未观察到 `codex.response.metadata`。PM 据此决定白名单不含元数据事件（OpenSpec design §3.1）。
+- 状态（2026-10-21T01:15Z）：各 agent 开发中；C0 设置契约预计 01:45Z 发布。
 
 ## 操作陷阱
 
