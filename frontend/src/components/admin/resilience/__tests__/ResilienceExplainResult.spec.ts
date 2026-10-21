@@ -66,4 +66,15 @@ describe('resilience explain result', () => {
     const w = mount(ResilienceExplainResult, { props: { explanation: { ...base, model_restriction: 'channel_pricing' } } })
     expect(text(w, 'restriction')).toBe('admin.resilience.explain.restriction.channel_pricing')
   })
+
+  it('names an account skipped as stream-only and when the learned state expires', () => {
+    const skipped: ResilienceExplanation = {
+      ...base,
+      accounts: [{ account_id: 9, name: 'relay', platform: 'openai', priority: 1, tier: 'hard', reason: 'capability_stream_only', recover_at: '2026-10-21T08:00:00Z' }]
+    }
+    const row = mount(ResilienceExplainResult, { props: { explanation: skipped } }).get('[data-testid="resilience-explain-accounts"] tbody tr')
+    expect(row.text()).toContain('admin.resilience.explain.reasons.capability_stream_only')
+    expect(row.text()).toContain('at 2026-10-21T08:00:00Z')
+  })
 })
+
