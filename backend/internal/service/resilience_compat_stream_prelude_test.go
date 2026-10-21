@@ -152,6 +152,75 @@ func TestCompatPreludeHeartbeatDisconnectSkipsOpsAndFailover(t *testing.T) {
 	}
 }
 
+func TestCompatPreludeHeartbeatDisconnectDrainsUsageAfterContent(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, messages := range []bool{false, true} {
+		t.Run(fmtBool(messages), func(t *testing.T) {
+			c, rec := compatStreamContext("/v1/chat/completions", "")
+			state := resilience.NewRequestState()
+			c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+			failedHeartbeat := make(chan struct{})
+			writer := &openAICompatFailingWriter{ResponseWriter: c.Writer, onFailure: func() { close(failedHeartbeat) }}
+			c.Writer = writer
+			svc := compatStreamService(nil, 2, 30, 1)
+			account := rawChatCompletionsTestAccount()
+			started := time.Now()
+			upstreamCtx, guard := svc.armOpenAICompatFirstEvent(c.Request.Context(), context.Background(), account, true, "model", "", started)
+			defer guard.close()
+			pr, pw := io.Pipe()
+			defer func() { _ = pr.Close() }()
+			defer func() { _ = pw.Close() }()
+			wroteTerminal := make(chan error, 1)
+			go func() {
+				// Content arrives after the failed heartbeat but before the first-
+				// output deadline; completion arrives after that original deadline.
+				completedAt := time.NewTimer(time.Until(started.Add(2200 * time.Millisecond)))
+				defer completedAt.Stop()
+				_, err := io.WriteString(pw, keepaliveStallCreated)
+				if err == nil {
+					select {
+					case <-failedHeartbeat:
+						_, err = io.WriteString(pw, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n")
+					case <-upstreamCtx.Done():
+						err = upstreamCtx.Err()
+					}
+				}
+				if err == nil {
+					select {
+					case <-completedAt.C:
+						_, err = io.WriteString(pw, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":13,\"output_tokens\":21}}}\n\n")
+					case <-upstreamCtx.Done():
+						err = upstreamCtx.Err()
+					}
+				}
+				_ = pw.CloseWithError(err)
+				wroteTerminal <- err
+			}()
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: pr, Request: c.Request.WithContext(upstreamCtx)}
+			var result *OpenAIForwardResult
+			var err error
+			if messages {
+				result, err = svc.handleAnthropicStreamingResponse(resp, c, account, "model", "model", "model", started)
+			} else {
+				result, err = svc.handleChatStreamingResponse(resp, c, account, "model", "model", "model", started, 0)
+			}
+			require.NoError(t, err)
+			require.NoError(t, <-wroteTerminal, "a timely content event must allow draining the final usage")
+			require.Equal(t, 1, writer.failedWrites)
+			require.Equal(t, ":\n\n", writer.failedData)
+			require.NoError(t, c.Request.Context().Err())
+			require.True(t, result.ClientDisconnect)
+			require.Equal(t, 13, result.Usage.InputTokens)
+			require.Equal(t, 21, result.Usage.OutputTokens)
+			require.Empty(t, rec.Body.String())
+			require.False(t, state.AccountFailed(account.ID))
+			require.False(t, state.TurnFailed())
+			_, marked := c.Get(OpsUpstreamErrorsKey)
+			require.False(t, marked)
+		})
+	}
+}
+
 func runPreludeCompat(t *testing.T, c *gin.Context, messages bool, body io.Reader, requestBytes int, interval int) (*OpenAIForwardResult, error) {
 	t.Helper()
 	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(body)}
@@ -303,6 +372,7 @@ func TestCompatPreludeCanceledClientClosesUpstream(t *testing.T) {
 		c.Request = c.Request.WithContext(ctx)
 		pr, pw := io.Pipe()
 		defer func() { _ = pw.Close() }()
+		defer func() { _ = pr.Close() }()
 		wrote := make(chan struct{})
 		go func() { _, _ = pw.Write([]byte(keepaliveStallCreated)); close(wrote); <-ctx.Done() }()
 		go func() { <-wrote; cancel() }()
@@ -319,8 +389,14 @@ func TestCompatPreludeCanceledClientClosesUpstream(t *testing.T) {
 		var failover *UpstreamFailoverError
 		require.False(t, errors.As(err, &failover))
 		require.Empty(t, rec.Body.String())
-		_, writeErr := pw.Write([]byte("late"))
-		require.ErrorIs(t, writeErr, io.ErrClosedPipe)
+		writeErr := make(chan error, 1)
+		go func() { _, err := pw.Write([]byte("late")); writeErr <- err }()
+		select {
+		case err := <-writeErr:
+			require.ErrorIs(t, err, io.ErrClosedPipe)
+		case <-time.After(time.Second):
+			t.Fatal("canceled prelude returned without closing the upstream body")
+		}
 	}
 }
 

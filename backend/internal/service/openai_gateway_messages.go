@@ -1005,7 +1005,13 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	preludeTrace := beginOpenAIPreludeTrace(c.Request.Context(), stagePrelude)
 	if stagePrelude {
 		stopPreludeCancel = context.AfterFunc(c.Request.Context(), func() { _ = resp.Body.Close() })
-		defer func() { stopPreludeCancel() }()
+		defer func() {
+			// Cancellation can become visible before its AfterFunc starts.
+			// If cleanup wins that race, it must still close the upstream.
+			if stopPreludeCancel() && c.Request.Context().Err() != nil {
+				_ = resp.Body.Close()
+			}
+		}()
 	}
 	canReplayPrelude := func() bool {
 		return stagePrelude && c.Request.Context().Err() == nil && !clientDisconnected && !openAIStreamClientOutputStarted(c, clientOutputStarted)
@@ -1099,7 +1105,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				streamNonFailoverErr = err
 				return true
 			}
-			if !clientDisconnected && !holdPrelude && !firstEvent.disarm() {
+			// Stop the guard on content even after a downstream write failure,
+			// so the first-output deadline cannot truncate usage draining.
+			if !holdPrelude && !firstEvent.disarm() && !clientDisconnected {
 				streamFailoverErr = s.newOpenAIFirstOutputTimeoutError(c.Request.Context(), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account), firstEvent.started, firstEvent.model, firstEvent.effort, firstEvent.timeout, "first_event", resp.Header)
 				return true
 			}
@@ -1313,7 +1321,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	if streamInterval <= 0 && keepaliveInterval <= 0 {
 		var parser openAICompatSSEFrameParser
 		for scanner.Scan() {
-			if !clientDisconnected && !stagePrelude && !firstEvent.disarm() {
+			if !stagePrelude && !firstEvent.disarm() && !clientDisconnected {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 			}
 			line := scanner.Text()
@@ -1423,7 +1431,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				handleScanErr(ev.err)
 				return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", ev.err)
 			}
-			if !clientDisconnected && !stagePrelude && !firstEvent.disarm() {
+			if !stagePrelude && !firstEvent.disarm() && !clientDisconnected {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 			}
 			lastDataAt = time.Now()
