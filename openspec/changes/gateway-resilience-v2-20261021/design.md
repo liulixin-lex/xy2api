@@ -205,7 +205,8 @@
 ### 6.3 本请求与选号
 
 - **本请求**：`failure.decision_v2` 开启时，钩子返回可换号的哨兵错误（`IsCapabilityStreamOnly()`；不上报账号调度失败、不同号重试），handler 只计请求预算的尝试次数，不记会话失败、不冷却。这次拒绝不写运维的上游错误记录（写入会把账号记为本请求失败），只记中性事件 `resilience.capability_learned`。`decision_v2` 关闭时只学习，钩子返回空，本请求照旧返回 400。
-- **选号**：`Account.CapabilityExclusion(ctx, model, now)` 只在确定的路径上过滤：上游协议与入站相同，且上游的流模式跟随客户端（PM 指令，2026-10-21）。跨协议的转换（如 Chat 转 Responses 上游，这类转换本来就以 `stream=true` 请求上游）、按模型路由的路径，以及路由无法确定的 Grok OAuth Chat 都不过滤；Grok 的两种协议各自独立。不新增路由提示的 helper。OpenAI 选号的共同资格检查（`openai_gateway_scheduling.go`）与 `openai_account_scheduler.go` 的 `isAccountRequestCompatibleReason` 都经钩子 `capabilityEligibilityReason` 过滤，覆盖粘性会话与末位兜底的最后检查；钩子登记到 `scheduler-diff.json` 与 `policy.json`（α）。
+- **选号**：`Account.CapabilityExclusion(ctx, model, now)` 只在确定的路径上过滤：上游协议与入站相同，且上游的流模式跟随客户端（PM 指令，2026-10-21）。跨协议的转换（如 Chat 转 Responses 上游，这类转换本来就以 `stream=true` 请求上游）、按模型路由的路径，以及路由无法确定的 Grok OAuth Chat（可能按请求内容走强制流式的 Responses 桥接，选号时没有请求体）都不过滤；Grok 原生 Responses 与 API Key 账号的 raw Chat 照常过滤；Grok 的两种协议各自独立。不新增路由提示的 helper（γ `a03ad9c79`）。
+- Responses 入站转 raw Chat 上游的路径，上游流模式确实跟随客户端，但它是跨协议路径，本期不做持久过滤；这条路径上的确定性 400 仍按实际的 Chat 协议学习，并在本请求预算内换号。OpenAI 选号的共同资格检查（`openai_gateway_scheduling.go`）与 `openai_account_scheduler.go` 的 `isAccountRequestCompatibleReason` 都经钩子 `capabilityEligibilityReason` 过滤，覆盖粘性会话与末位兜底的最后检查；钩子登记到 `scheduler-diff.json` 与 `policy.json`（α）。
 - **只因能力而无号的应答**（PM 2026-10-21T02:42Z）：两种情形用同一个应答——
   - 选号时全部候选都因能力被过滤（`service.IsCapabilityOnlySelectionError`）；
   - 本请求的失败尝试全部是“只接受流式”的哨兵、没有其他原因（`service.IsCapabilityOnlyExhaustion`；handler 共用的 `resilienceAttemptFailed` 记录有无其他失败，不借用“本请求已失败账号”）。
