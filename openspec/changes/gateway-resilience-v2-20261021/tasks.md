@@ -7,8 +7,8 @@
 - [x] 0.1 项目记忆登记 `20261021-resilience-v2-0.4.4` 与各 agent 的代登记。
 - [ ] 0.2 OpenSpec 变更：proposal、design、tasks、规格增量；`docs/README.md` 目录。
 - [ ] 0.3 C0 设置契约（γ，`contract/C0_SETTINGS.md`）：字段、缺省、范围、存放、回退结论。
-- [ ] 0.4 RetryAdvice 契约（α）。
-- [ ] 0.5 生产探测：Responses 首个 delta 之前的事件类型清单，β 据此定白名单。
+- [x] 0.4 RetryAdvice 契约（α，`contract/RETRY_ADVICE.md`）。
+- [x] 0.5 生产探测：Responses 首个 delta 之前的事件类型清单（2026-10-21，PM 指令据此定白名单，design §3.1）。
 
 ## 1. 设置（C0，γ）
 
@@ -37,9 +37,9 @@
 ## 5. W5 信号与终止出口（α、β）
 
 - [x] 5.1 RetryAdvice 类型与 context 存取（α，`fc9b62751`）。
-- [ ] 5.2 W5.2 排队 ping 之后按协议写终止帧（α）。
-- [ ] 5.3 W5.1 三个专用耗尽出口接入重试提示与回合封顶；一次性 finalize（α）。
-- [ ] 5.4 W5.4 Anthropic 自身失败用 `api_error`（α handler、β `resilience_keepalive.go`）。
+- [x] 5.2 W5.2 排队 ping 之后按协议写终止帧（α，`190f6515a`）。
+- [x] 5.3 W5.1 三个专用耗尽出口接入重试提示与回合封顶；一次性 finalize（α，`a72a29e00`）。
+- [ ] 5.4 W5.4 Anthropic 自身失败用 `api_error`（α handler `fe5dbf503` 已完成；β `resilience_keepalive.go` 待做）。
 - [ ] 5.5 W5.5 Codex 无号 503 的 Retry-After 上限（α）。
 - [ ] 5.6 W5.3 合成 `response.failed` 有条件带 retry-after：handler 侧（α）、service 侧三个点（β）。
 
@@ -52,7 +52,7 @@
 
 ## 7. W8-lite 事件字段（α、β）
 
-- [ ] 7.1 五类事件补 `request_id`、`model`、已送达字节、距首个输出的毫秒数、释放暂存的事件与毫秒数。
+- [ ] 7.1 （α 部分 `0a5bd1c49` 已完成；β 的 prelude 采集与 `keepalive_committed` 待做）五类事件补 `request_id`、`model`、已送达字节、距首个输出的毫秒数、释放暂存的事件与毫秒数。
 
 ## 8. 前端设置（FE）
 
