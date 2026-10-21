@@ -86,14 +86,15 @@ func validCapabilityProtocol(protocol string) bool {
 
 // IsStreamOnlyFailure recognizes only explicit error fields, never echoed
 // request content. Malformed/truncated JSON cannot become a plain-text match.
-func IsStreamOnlyFailure(status int, body []byte) bool {
+func IsStreamOnlyFailure(status int, body []byte, outboundBodies ...[]byte) bool {
 	if status != http.StatusBadRequest || len(body) == 0 || len(body) > inspectLimit {
 		return false
 	}
 	type errorFields struct {
-		Code    string `json:"code"`
-		Type    string `json:"type"`
-		Message string `json:"message"`
+		Code    string          `json:"code"`
+		Type    string          `json:"type"`
+		Message string          `json:"message"`
+		Param   json.RawMessage `json:"param"`
 	}
 	var envelope struct {
 		errorFields
@@ -129,6 +130,17 @@ func IsStreamOnlyFailure(status int, body []byte) bool {
 		}
 		fields.Message = trimmed
 	}
+	if len(fields.Param) > 0 {
+		var param string
+		if json.Unmarshal(fields.Param, &param) != nil || param != "stream" {
+			return false
+		}
+	}
+	for _, outbound := range outboundBodies {
+		if containsStreamOnlyRequestPhrase(outbound) {
+			return false
+		}
+	}
 	result := Classify(Outcome{Source: SourceHTTP, StatusCode: status, Code: fields.Code, Type: fields.Type, Message: fields.Message}, nil)
 	if result.Hard() || result.ContentPolicy() {
 		return false
@@ -139,7 +151,11 @@ func IsStreamOnlyFailure(status int, body []byte) bool {
 			return true
 		}
 	}
-	message := strings.ToLower(strings.Join(strings.Fields(fields.Message), " "))
+	return containsStreamOnlyPhrase(fields.Message)
+}
+
+func containsStreamOnlyPhrase(text string) bool {
+	message := strings.ToLower(strings.Join(strings.Fields(text), " "))
 	for _, phrase := range []string{
 		"only accepts streaming requests", "only supports streaming requests", "only streaming requests are supported",
 		"stream must be true", `"stream" must be true`, "'stream' must be true", "stream=true is required",
@@ -149,4 +165,40 @@ func IsStreamOnlyFailure(status int, body []byte) bool {
 		}
 	}
 	return false
+}
+
+// Error messages can echo user-supplied parameter values. Inspect decoded
+// strings too, so JSON escaping cannot hide the triggering phrase.
+func containsStreamOnlyRequestPhrase(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	if containsStreamOnlyPhrase(string(body)) {
+		return true
+	}
+	var value any
+	if json.Unmarshal(body, &value) != nil {
+		return false
+	}
+	var contains func(any) bool
+	contains = func(value any) bool {
+		switch value := value.(type) {
+		case string:
+			return containsStreamOnlyPhrase(value)
+		case []any:
+			for _, child := range value {
+				if contains(child) {
+					return true
+				}
+			}
+		case map[string]any:
+			for key, child := range value {
+				if containsStreamOnlyPhrase(key) || contains(child) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return contains(value)
 }
