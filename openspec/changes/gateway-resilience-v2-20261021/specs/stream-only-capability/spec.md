@@ -16,7 +16,7 @@ With `capability.stream_only_learning` on, when a non-streaming OpenAI Responses
 
 ### Requirement: Skip learned accounts for non-streaming requests
 
-Account selection for OpenAI groups MUST skip an account learned as stream-only for non-streaming requests of the learned protocol, and MUST NOT skip it for streaming requests. When skipping leaves no account, the request MUST fail as no-account with reason `capability_stream_only`. Explain MUST show the reason and the remaining time for skipped accounts. A learned mark MUST expire after its time to live, and MUST stop filtering while the switch is off.
+Account selection for OpenAI groups MUST skip an account learned as stream-only for a non-streaming request only on paths whose upstream protocol equals the learned protocol and whose upstream stream mode follows the client; it MUST NOT skip it for streaming requests or for requests the gateway sends upstream as streaming anyway (for example Chat converted to a Responses upstream). When skipping leaves no account, the request MUST fail as no-account with reason `capability_stream_only`. Explain MUST show the reason and the remaining time for skipped accounts. A learned mark MUST expire after its time to live, and MUST stop filtering while the switch is off.
 
 #### Scenario: Next non-streaming request avoids the account (SO-1)
 - **WHEN** account A is learned as stream-only and a new non-streaming request arrives
@@ -24,6 +24,10 @@ Account selection for OpenAI groups MUST skip an account learned as stream-only 
 
 #### Scenario: Streaming request still uses the account (SO-1)
 - **WHEN** account A is learned as stream-only and a streaming request arrives
+- **THEN** A remains eligible.
+
+#### Scenario: Converted request is not filtered
+- **WHEN** account A is learned as stream-only for Responses and a non-streaming Chat request is converted to a streaming Responses upstream
 - **THEN** A remains eligible.
 
 #### Scenario: Only the learned account remains
