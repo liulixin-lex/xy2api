@@ -235,6 +235,7 @@
   - 2026-10-21T03:08Z：按 PM 指令 4 给 Q-1 补断言（Responses、Chat 在开场前不得有任何 data 帧，Messages 仍允许 typed ping），提交 `236b12b97`；复核基线原始证据，两条新断言都是红灯，没有重发请求。仍是 71 个场景、基线 17 项定向 8 通过 9 预期红灯。待命，阶段 2 未放行，未构建候选。
   - 2026-10-21T03:35Z：按 PM 指令 5 完成阶段 2 的准备，提交 `a542b3cb7`（新增候选构建与阶段 2 执行脚本，升级演练增加本期的配置并在失败时留证，浸泡判据补强）。只做了本机离线验证与测试服务器的只读资源检查，**没有构建候选、没有跑阶段 2**。估计：71 个场景串行 80–95 分钟，升级演练 10–15 分钟，浸泡 3 小时加 10 分钟静置。
 - `20261021-resilience-v2-gamma`（γ 2026-10-21T01:27Z 经 DOCS 代登记）：分支 `rv2/be-c`，基线 `027a434ad`；负责 C0、W2.1-lite、W6-lite；只在本地提交，不推送、不碰生产。C0 沿用现有设置键 `gateway_resilience_settings`：0.4.3 读存储时用 `json.Unmarshal`，忽略未知字段；管理端 PUT 的严格校验不影响存储回退。
+  - 2026-10-21T04:05Z：**分支冻结**，最终 HEAD `ae783b370`，工作树干净，无推送、无生产操作。C0 `95e8a6416`、W2.1-lite `0d3e72508`、W6 `2cb3343de`、RetryAdvice advisor `d4db8d426`，以及审查修复 `126fead6f`（防误学）、`a03ad9c79`（同协议过滤）、`fae3d89d8`（混合排除保持 503）、`f61b7d497`（只因能力而无号）、`4ac81dc94`（明确限流文案）、`29f26652d`（轻量守卫与 P2-2 登记）、`ae783b370`（纯能力耗尽清理旧重试秒数）。集成须带上后四个，不止 `f61b7d497`。按 PM 裁剪未做：A-P2-4、A-P2-7（物理删除 extra 键）、A-P2-8（按模型学习）；A-P2-3 指纹算法不改，OAuth 刷新后重新学习列为已知限制。
 - 各 agent 的进度与变更登记在仓库外的 `briefs/PROGRESS_*.md` 与 `contract/CHANGES_*.md`。
 - 第 0 批（Claude 首事件截止，2026-10-21T01:09Z）：生产只读评估 7 天分布后**保持 90 秒，生产未写入**。流式 Messages 首字超过 45 秒约 0.45%，首字只是首事件时延的上界；生产 settings 表里没有韧性设置行（运行态为缺省值），用户限定的单条 CAS UPDATE 无法成立。报告在仓库外 `prod/O4_REPORT.md`。
 - 生产探测（2026-10-21）：多数中转在首个正文 delta 前发 created、in_progress 与空的 added 结构；部分中转在 created 之前先发一个 delta；未观察到 `codex.response.metadata`。PM 据此决定白名单不含元数据事件（OpenSpec design §3.1）。
@@ -1039,3 +1040,13 @@ pnpm --dir frontend run build
 - 验证：每项先红后绿，相关包定向 `-race` 通过；增量 lint 收尾中。**全量门禁尚未执行。**
 - 卡点/风险：后端分支间的 cherry-pick 冲突需在集成时按 owner 最新版本解决。
 - 下一步：β、γ 写明最终 HEAD 后开始集成，跑全量门禁。
+
+### 2026-10-21T04:05Z — `20261021-resilience-v2-gamma` — 分支冻结（DOCS 代记）
+
+- 请求/目标：C0 设置、W2.1-lite 分类修正、W6-lite 仅流式学习、RetryAdvice 的分组 advisor，以及 PM 指令分给 γ 的第一轮审查修复。
+- 开始状态：`rv2/be-c` 自 `027a434ad`，工作树干净。
+- 完成操作：提交清单见“进行中的工作”的 γ 条目（HEAD `ae783b370`）。C0 沿用单一设置键，0.4.3 回退安全；分类只把真正的容量信号算作降载，明确的限流文案保留原类别；仅流式学习存于账号 `extra` 的两个键，带凭据指纹，只在同协议、流模式跟随客户端的路径上过滤，只因能力而无号时返回专用 503；advisor 只读 2 秒的本地快照。
+- 修改文件：`backend/internal/resilience` 与 `service` 中 γ 名下的文件（含新增的 `capability*.go`、`settings_compat043_test.go`）；调度文件的钩子 `capabilityEligibilityReason` 等由 α 集成时登记到 `scheduler-diff.json` 与 `policy.json`。
+- 验证：各轮先红后绿；resilience、service、handler、admin、repository 的定向 `-race` 通过，覆盖 Grok 的 A 返回 400、换 B 成功，之后的过滤与流式可用，有效期与清除，旧页面保存时保留学习状态，回退设置，分类证据，纯能力与混合原因的耗尽。γ 树上的文档检查报 10 项，由 rv2/docs 补齐，合入后才通过。
+- 卡点/风险：无。按 PM 裁剪的未做项见上。
+- 下一步：α 统一集成、跑全量门禁并登记钩子。
