@@ -129,7 +129,7 @@
 - **SO-1**：非流式 Responses 请求遇到 400 “only accepts streaming requests”（F36）：本请求换号完成；A 被学为仅流式（`capability_learned`），下一个非流式请求不选 A，流式请求照常可选；清除接口生效后可以重新学习；A 不计账号失败。
 - **RA-1、RA-2**：经 CDN、心跳已提交后：全组过载且能算出恢复时间（F37，延迟的 HTTP 503 带 `Retry-After`）时，`response.failed` 带 2–10 秒的 `error.headers.retry-after`，正文秒数一致；B 健康时请求正常完成，不带延迟提示。
 - **ANT-3**：Messages 入口无号时错误 `type` 为 `api_error`（ANT-1 是已有的正常原生流场景，不占这个编号）。
-- **Q-1**：用户并发 1，第二个流式请求在用户队列中收到 ping 后余额归零：Gateway 入站的 Responses 收到 `response.created` 后跟 `response.failed`，Chat 收到 `error` 后跟 `[DONE]`，不是裸 JSON；Messages 本来就是带名字的 `event: error`。
+- **Q-1**：用户并发 1，第二个流式请求在用户队列中收到 ping 后余额归零：Gateway 入站的 Responses 收到 `response.created` 后跟 `response.failed`，Chat 收到 `error` 后跟 `[DONE]`，不是裸 JSON；Messages 本来就是带名字的 `event: error`。另断言 Responses 与 Chat 在开场之前没有任何 data 帧（不能有 typed ping 或 `[DONE]`，排队心跳只能是注释行），Messages 仍允许 typed `ping`。
 - **CX-1**：识别为 Codex 的请求（`originator` 头与 UA 两种）在无号时 `Retry-After` 不超过 10 秒；普通客户端的对照前后都保持原值。
 - **SH-1、SH-2**（PR #117）：分组切到份额后按账号优先级与负载因子选号，切回原版正常服务；真实的 502 尝试（每次由 B 恢复）降低 A 的健康权重与新会话份额，结束时恢复账号与调度设置。
 
