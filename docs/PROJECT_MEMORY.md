@@ -6,6 +6,12 @@
 
 ## 当前交接状态
 
+### RA-1 上游重试时间 `20261021-retry-advice-upstream-wait`（本地修复已准备；0.4.5 待决定）
+
+- PM 08:14Z 要求从 `a38ae5995` 准备独立分支 `fix/retry-advice-upstream-wait-20261021`，只在本地提交。0.4.4 候选不变，RA-1 仍是 PM 接受的已知缺陷（70/71 场景通过）。
+- 修复与先红后绿回归已完成：耗尽时把最后上游有效 Retry-After 在 provider unknown 时回退为 2–10 秒，保留健康候选与终态优先级；原始上游仅 429/5xx 可提供恢复来源。验证包括真实快照、handler、已提交 failed 与 service 共享 context，定向 `-race` 141 个顶层测试、330 个叶子用例通过且零跳过；标准 lint 零问题。额外 unit 标签 lint 的 9 项输出与候选基线逐字相同，无新增问题。
+- **下一步**：按 PM 08:33Z 指令，OpenSpec、现行文档与 runbook 暂缓，等用户决定 0.4.5 时由 DOCS 补齐，再安排审查和发布前验证；尚未复跑测试服务器 RA-1，不是可发布候选。未推送、未开 PR。0.4.4 合并与发版的正式指令优先。
+
 ### 网关韧性第二期与 0.4.4 发版 `20261021-resilience-v2-0.4.4`（进行中；2026-10-21T06:04Z 更新）
 
 - **背景**：0.4.3 生产只读取证（约 9 小时）中，用户可见失败约 1.42%，主要是原生 Responses 开场后、正文前的带内终止，兼容 Chat 开场后终止，仅流式上游，以及分类与信号缺陷。方案在仓库外 `xy2api-artifacts/resilience-ux-20261020/plan/PLAN_v2.md`；本期规格是 OpenSpec 变更 [`gateway-resilience-v2-20261021`](../openspec/changes/gateway-resilience-v2-20261021/proposal.md)。
@@ -180,6 +186,14 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
+
+### 20261021-retry-advice-upstream-wait — RA-1 的 0.4.5 修复准备（2026-10-21 登记）
+
+- 请求：PM 08:14Z 将 RA-1 作为 0.4.4 已知限制发布；另从候选 `a38ae5995` 建立本地分支 `fix/retry-advice-upstream-wait-20261021`，准备 0.4.5 修复。只本地提交，不推送、不开 PR；合并和发版任务优先。
+- 范围：最终耗尽时，把有效上游 Retry-After 在 provider unknown 时转为有来源的 recovery advice；保留健康候选、终态抑制、关闭开关与其他协议语义，不把旧 advisor 的默认退避当作已知恢复。
+- 状态：8 类回归已先写，在旧代码上 8 个叶子失败；修复后全部通过，含真实服务快照 → handler → 已提交 failed。另先红后修原始上游 400/404 被旧出口映射 502 后不应提升其等待头的两条边界。产品改 5 个 handler 文件（2 个仅同步实参），不改变 service 快照、容量惩罚或设置。
+- 验证：Go 1.27.3，handler/resilience/service 定向 `-race` 141 个顶层、330 个叶子全通过、零跳过；标准 golangci-lint v2.14.0 零问题；unit 标签 handler lint 仅复现基线 9 项（日志逐字一致）；docs、scheduler-diff 通过。policy 同批登记来源钩子与 8 个测试入口；证据在仓库外冲刺目录的 `evidence/ra1-045/`。
+- 下一步：本地修复保留在上述分支，干净树审计与最终 SHA 写入仓库外 PROGRESS_A。PM 08:33Z 明确暂缓 OpenSpec/现行文档/runbook，DOCS 已存档要点，用户决定 0.4.5 时补齐并安排审查/完整验证；本轮不推送、不开 PR、不改 0.4.4 候选。
 
 ### 20261020-share-simplify — 份额调度精简（2026-10-20T12:20Z 登记）
 
@@ -1175,3 +1189,13 @@ pnpm --dir frontend run build
 - 验证：官方安装包与镜像标签已核验，`go version` 为 1.27.3，文档一致性检查通过；全量门禁与 `govulncheck` 将在合入 FE 修复后的干净集成树串行执行。
 - 卡点/风险：旧候选的测试结果不替代新工具链验证；新候选必须等安全扫描与完整门禁通过，之后更新 PR #118 并由 PM 安排复审及 QA。
 - 下一步：合入 FE 安全修复，重跑完整门禁、构建与两端安全扫描，记录新候选 SHA；不合并、不部署。
+
+### 2026-10-21T08:42Z — `20261021-retry-advice-upstream-wait` — RA-1 的 0.4.5 本地修复准备
+
+- 请求/目标：PM 08:14Z 裁定 0.4.4 保留 RA-1 已知限制；从候选 `a38ae5995` 新建独立 worktree/本地分支 `fix/retry-advice-upstream-wait-20261021`，先红测再修，不推送、不开 PR。
+- 开始状态：基线 HEAD 与干净树已核对；原开发与集成树未修改。缺口是上游有效 Retry-After 未进入 RetryAdvice，新鲜快照中唯一账号已失败但无定时惩罚也能复现，不需要假设快照过期。
+- 完成操作：记录最后上游头的来源，只在原始状态 429/5xx、等待有效且 provider unknown 时回退 2–10 秒；健康候选/已有恢复值与 Suppress 优先，取消不回退。缺失/非法最终头与 legacy advisor 覆盖均清来源。先创建的 service context 共享最终 advice，正文与帧内头一致；Chat/Messages/普通未提交 JSON 与开关关闭维持基线。
+- 修改范围：5 个 handler 产品文件、2 个测试文件、policy 钩子与 8 类具名测试、自己的记忆登记；没有新设置、事件、管理接口、错误码、迁移或前端字段。
+- 验证：原始 8 类测试在旧代码有 8 个叶子失败，补充上游 400/404 映射 502 的两条测试在初版修复失败，再收紧来源；最终定向 `go test -race -tags=unit -p 2` 覆盖 handler/resilience/service 的 RetryAdvice、终态、耗尽与回合封顶等 141 个顶层/330 个叶子，全部通过、零跳过。标准 lint 零问题，额外 unit 标签 lint 9 项与干净基线逐字一致；docs 与 scheduler-diff 通过。完整命令、红绿日志、计数与最终 SHA 记录在仓库外冲刺证据和 PROGRESS_A。
+- 卡点/未完成：按 PM 08:33Z 明确例外，OpenSpec、现行文档、runbook 暂缓，由 DOCS 在用户决定 0.4.5 后补；尚无修复后的测试服务器 RA-1 证据，未做发布验证，不将本地定向通过写成可发布。
+- 下一步：本地提交后复核干净树 audit，将 HEAD 交 PM；优先响应 0.4.4 正式合并/发版指令。

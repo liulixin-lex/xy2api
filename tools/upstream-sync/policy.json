@@ -1308,6 +1308,14 @@
       "value": "resilience.RetryAdviceEligible(streamErr.IntendedStatus, errType, mapResponsesErrorCode(errType, code))"
     },
     {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "c.Set(ginKeyResilienceUpstreamRetryAfter, retryAfter)"
+    },
+    {
+      "path": "backend/internal/handler/resilience_retry_advice.go",
+      "value": "if seconds := upstreamRecoverySeconds(c); seconds > 0 {"
+    },
+    {
       "path": "backend/internal/handler/openai_chat_completions.go",
       "value": "// Staged heartbeats commit SSE without delivering semantic output."
     },
@@ -1623,6 +1631,46 @@
       "id": "xy-resilience-v2-handler-exits",
       "path": "backend/internal/handler/resilience_failed_retry_test.go",
       "literal": "func TestResponsesFailedRetryAdvice"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_upstream_retry_wait_test.go",
+      "literal": "func TestUpstreamRetryWaitFallback"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_upstream_retry_wait_test.go",
+      "literal": "func TestUpstreamRetryWaitFromRealSnapshotThroughHandler"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_upstream_retry_wait_test.go",
+      "literal": "func TestUpstreamRetryWaitPreservesAdvicePriority"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_upstream_retry_wait_test.go",
+      "literal": "func TestUpstreamRetryWaitCannotReviveTerminalErrors"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_upstream_retry_wait_test.go",
+      "literal": "func TestUpstreamRetryWaitIgnoresUnprovenAndCanceledHints"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_upstream_retry_wait_test.go",
+      "literal": "func TestUpstreamRetryWaitDisabledPreservesLegacy"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_upstream_retry_wait_test.go",
+      "literal": "func TestUpstreamRetryWaitReachesEarlierServiceContext"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_upstream_retry_wait_test.go",
+      "literal": "func TestUpstreamRetryWaitPreservesOtherProtocols"
     },
     {
       "id": "xy-resilience-v2-handler-exits",

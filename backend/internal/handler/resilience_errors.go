@@ -226,6 +226,7 @@ func codexNoAccountRetryAfter(c *gin.Context, cfg *resilience.Settings, seconds 
 // setNoAccountRetryAfter sets Retry-After to the clamped time until the
 // group's earliest recovery.
 func setNoAccountRetryAfter(c *gin.Context, diag any, apiKey *service.APIKey, routingModel string) {
+	c.Set(ginKeyResilienceUpstreamRetryAfter, "")
 	cfg := resilience.Current()
 	ctx := c.Request.Context()
 	var wait time.Duration

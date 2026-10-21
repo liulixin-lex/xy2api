@@ -437,7 +437,7 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 		return
 	}
 	if lastErr != nil {
-		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
+		copyFailoverRetryAfter(c, lastErr.StatusCode, lastErr.ResponseHeaders)
 	}
 	status = applyExhaustedRetryHint(c, h.gatewayService, status)
 	if streamStarted {

@@ -1695,7 +1695,7 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 			return
 		}
 		if failoverErr != nil {
-			copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
+			copyFailoverRetryAfter(c, failoverErr.StatusCode, failoverErr.ResponseHeaders)
 		}
 		errType = anthropicFailoverErrorType(status, errType, upstreamBody)
 		status = applyExhaustedRetryHint(c, h.gatewayService, status)
@@ -3604,7 +3604,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		h.handleFailoverExhaustedSimple(c, http.StatusBadGateway, streamStarted)
 		return
 	}
-	copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
+	copyFailoverRetryAfter(c, failoverErr.StatusCode, failoverErr.ResponseHeaders)
 	if failoverErr.IsOpenAIRequestBodyTooLarge() {
 		service.SetOpsUpstreamError(c, http.StatusRequestEntityTooLarge, service.OpenAIRequestBodyTooLargeClientMessage, "")
 		h.handleStreamingAwareError(
@@ -3741,13 +3741,21 @@ func credentialFailoverClientResponse(failoverErr *service.UpstreamFailoverError
 	return http.StatusServiceUnavailable, service.GrokCredentialUnavailableClientMessage
 }
 
-func copyFailoverRetryAfter(c *gin.Context, headers http.Header) {
-	if c == nil || headers == nil {
+func copyFailoverRetryAfter(c *gin.Context, status int, headers http.Header) {
+	if c == nil {
 		return
 	}
+	// Every final upstream replaces the provenance, even when its hint is
+	// absent or invalid. Do not revive a previous attempt's delay.
+	c.Set(ginKeyResilienceUpstreamRetryAfter, "")
 	retryAfter := strings.TrimSpace(headers.Get("Retry-After"))
 	if retryAfter == "" || len(retryAfter) > 128 || strings.ContainsAny(retryAfter, "\r\n") || !isSafeRetryAfter(retryAfter) {
 		return
+	}
+	// Keep the legacy HTTP header behavior, but a client error mapped to
+	// 502 is not evidence of a transient upstream recovery.
+	if resilience.RetryAdviceEligible(status, "", "") {
+		c.Set(ginKeyResilienceUpstreamRetryAfter, retryAfter)
 	}
 	c.Header("Retry-After", retryAfter)
 }
