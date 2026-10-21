@@ -9,6 +9,8 @@ are written to fixtures/keys.json (mode 0600) and never printed.
 Usage (on the staging host):
     set -a; . ./.env; [ -f .env.real ] && . ./.env.real; set +a
     [ACCEPT_ADMIN_COMPLIANCE=1] python3 fixtures.py http://127.0.0.1:18210
+    # Independent soak: create only six workload keys for a dedicated user.
+    [ACCEPT_ADMIN_COMPLIANCE=1] python3 fixtures.py http://127.0.0.1:18310 --soak-only
 
 ACCEPT_ADMIN_COMPLIANCE=1 accepts the admin compliance commitment on this
 instance and must only be set with the operator's approval.
@@ -194,6 +196,10 @@ def items(data):
 
 def main() -> int:
     base = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:18210"
+    soak_only = "--soak-only" in sys.argv[2:]
+    groups_spec = {k: v for k, v in GROUPS.items() if k.startswith("G-soak-")} if soak_only else GROUPS
+    owner = "stg-soak@xy2api-staging.local" if soak_only else "stg-user@xy2api-staging.local"
+    users_spec = {owner: 1000.0} if soak_only else USERS
     api = API(base)
     api.token = api.login(os.environ["ADMIN_EMAIL"], os.environ["ADMIN_PASSWORD"])
     # The admin compliance commitment is accepted only when the operator has
@@ -208,12 +214,12 @@ def main() -> int:
     for n in (1, 2, 3):
         if os.environ.get(f"REAL{n}_BASE_URL") and os.environ.get(f"REAL{n}_API_KEY"):
             real[f"REAL{n}"] = (os.environ[f"REAL{n}_BASE_URL"], os.environ[f"REAL{n}_API_KEY"])
-    if len(real) == 3:
+    if len(real) == 3 and not soak_only:
         for name, (accounts, opts) in REAL_GROUPS.items():
             GROUPS[name] = ("openai", accounts, opts)
 
     groups = {g["name"]: g for g in items(api.call("GET", "/api/v1/admin/groups/all"))}
-    for name, (platform, _, opts) in GROUPS.items():
+    for name, (platform, _, opts) in groups_spec.items():
         if name not in groups:
             body = {"name": name, "platform": platform, "rate_multiplier": 1, "subscription_type": "standard",
                     "claude_code_only": bool(opts.get("claude_code_only"))}
@@ -226,7 +232,7 @@ def main() -> int:
                 groups[name] = api.call("PUT", f"/api/v1/admin/groups/{groups[name]['id']}", {
                     "allow_messages_dispatch": True, "default_mapped_model": model,
                     "messages_dispatch_model_config": dispatch})
-    for name, (_, _, opts) in GROUPS.items():
+    for name, (_, _, opts) in groups_spec.items():
         if opts.get("images") and not groups[name].get("allow_image_generation"):
             groups[name] = api.call("PUT", f"/api/v1/admin/groups/{groups[name]['id']}", {"allow_image_generation": True})
         target = opts.get("availability_fallback")
@@ -235,7 +241,7 @@ def main() -> int:
                                     {"availability_fallback_group_id": groups[target]["id"]})
 
     existing = {a["name"]: a for a in items(api.call("GET", "/api/v1/admin/accounts?page=1&page_size=500"))}
-    for gname, (platform, accounts, gopts) in GROUPS.items():
+    for gname, (platform, accounts, gopts) in groups_spec.items():
         for index, (aname, spec, priority) in enumerate(accounts):
             fault_base = BACKUP_FAULT if gopts.get("separate_hosts") and index > 0 else FAULT
             want_base = fault_base + spec + ("/v1" if platform == "grok" else "")
@@ -266,7 +272,7 @@ def main() -> int:
     users = {u["email"]: u for u in items(api.call("GET", "/api/v1/admin/users?page=1&page_size=200"))}
     keys_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "keys.json")
     keys = json.load(open(keys_path)) if os.path.exists(keys_path) else {"users": {}, "keys": {}}
-    for email, balance in USERS.items():
+    for email, balance in users_spec.items():
         password = keys["users"].get(email) or secrets.token_hex(12)
         keys["users"][email] = password
         if email not in users:
@@ -276,38 +282,38 @@ def main() -> int:
         else:
             api.call("POST", f"/api/v1/admin/users/{users[email]['id']}/balance",
                      {"balance": balance, "operation": "set", "notes": "staging fixtures"})
-    owner = "stg-user@xy2api-staging.local"
     user_token = api.login(owner, keys["users"][owner])
     have = {k["name"]: k for k in items(api.call("GET", "/api/v1/keys?page=1&page_size=200", token=user_token))}
-    for gname in GROUPS:
+    for gname in groups_spec:
         kname = "key-" + gname
         if kname not in have:
             have[kname] = api.call("POST", "/api/v1/keys", {"name": kname, "group_id": groups[gname]["id"]}, token=user_token)
         keys["keys"][gname] = have[kname]["key"]
-    small = "stg-small@xy2api-staging.local"
-    small_token = api.login(small, keys["users"][small])
-    have_small = {k["name"]: k for k in items(api.call("GET", "/api/v1/keys?page=1&page_size=200", token=small_token))}
-    if "key-small" not in have_small:
-        have_small["key-small"] = api.call("POST", "/api/v1/keys", {"name": "key-small", "group_id": groups["G-single"]["id"]}, token=small_token)
-    keys["keys"]["small:G-single"] = have_small["key-small"]["key"]
-    if "key-small-long" not in have_small:
-        have_small["key-small-long"] = api.call("POST", "/api/v1/keys", {"name": "key-small-long", "group_id": groups["G-long-first"]["id"]}, token=small_token)
-    keys["keys"]["small:G-long-first"] = have_small["key-small-long"]["key"]
+    if not soak_only:
+        small = "stg-small@xy2api-staging.local"
+        small_token = api.login(small, keys["users"][small])
+        have_small = {k["name"]: k for k in items(api.call("GET", "/api/v1/keys?page=1&page_size=200", token=small_token))}
+        if "key-small" not in have_small:
+            have_small["key-small"] = api.call("POST", "/api/v1/keys", {"name": "key-small", "group_id": groups["G-single"]["id"]}, token=small_token)
+        keys["keys"]["small:G-single"] = have_small["key-small"]["key"]
+        if "key-small-long" not in have_small:
+            have_small["key-small-long"] = api.call("POST", "/api/v1/keys", {"name": "key-small-long", "group_id": groups["G-long-first"]["id"]}, token=small_token)
+        keys["keys"]["small:G-long-first"] = have_small["key-small-long"]["key"]
 
-    queued_owner = "stg-queue-terminal@xy2api-staging.local"
-    queued_token = api.login(queued_owner, keys["users"][queued_owner])
-    have_queued = {k["name"]: k for k in items(api.call("GET", "/api/v1/keys?page=1&page_size=200", token=queued_token))}
-    for gname in ("G-queue-terminal-holder", "G-queue-terminal"):
-        kname = "queue-" + gname
-        if kname not in have_queued:
-            have_queued[kname] = api.call("POST", "/api/v1/keys", {"name": kname, "group_id": groups[gname]["id"]}, token=queued_token)
-        keys["keys"]["queue:" + gname] = have_queued[kname]["key"]
+        queued_owner = "stg-queue-terminal@xy2api-staging.local"
+        queued_token = api.login(queued_owner, keys["users"][queued_owner])
+        have_queued = {k["name"]: k for k in items(api.call("GET", "/api/v1/keys?page=1&page_size=200", token=queued_token))}
+        for gname in ("G-queue-terminal-holder", "G-queue-terminal"):
+            kname = "queue-" + gname
+            if kname not in have_queued:
+                have_queued[kname] = api.call("POST", "/api/v1/keys", {"name": kname, "group_id": groups[gname]["id"]}, token=queued_token)
+            keys["keys"]["queue:" + gname] = have_queued[kname]["key"]
 
     os.makedirs(os.path.dirname(keys_path), exist_ok=True)
     fd = os.open(keys_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as fh:
         json.dump(keys, fh, indent=1)
-    summary = {g: {"id": groups[g]["id"], "accounts": [a for a, _, _ in GROUPS[g][1]]} for g in GROUPS}
+    summary = {g: {"id": groups[g]["id"], "accounts": [a for a, _, _ in GROUPS[g][1]]} for g in groups_spec}
     print(json.dumps(summary, indent=1))
     return 0
 

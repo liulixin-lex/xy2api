@@ -150,7 +150,7 @@ def start(build, evidence):
             raise RuntimeError('soak app did not become ready')
         time.sleep(1)
     with (evidence / 'fixtures.log').open('x') as log:
-        subprocess.run([sys.executable, str(ROOT / 'fixtures.py'), 'http://127.0.0.1:18310'], cwd=ROOT, env=env,
+        subprocess.run([sys.executable, str(ROOT / 'fixtures.py'), 'http://127.0.0.1:18310', '--soak-only'], cwd=ROOT, env=env,
                        stdout=log, stderr=subprocess.STDOUT, check=True)
     proof = same_candidate(build)
     (evidence / 'START.json').write_text(json.dumps(dict(build=build, plan=proposed, identities=proof), indent=2) + '\n')

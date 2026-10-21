@@ -158,7 +158,9 @@ The existing staging CF/direct host settings are required for their six cases.
 
 In a separate process, the independent `xy2api-staging-soak` project can run
 alongside that line. It has its own PostgreSQL, Redis, fault service, network,
-volumes, generated credentials and fixture keys. Its ports are 18310 (app),
+volumes, generated credentials and fixture keys. It initializes fixtures with
+`--soak-only`: six workload groups and a dedicated user, keeping key creation
+below the per-user hourly limit. Its ports are 18310 (app),
 18311 (fault) and 18313 (CDN simulator), all bound to loopback. No image is built
 by this runner: the app is pinned to BUILD.json's image ID and both stacks' image
 IDs and binary SHA-256 values must match before and after the soak.
