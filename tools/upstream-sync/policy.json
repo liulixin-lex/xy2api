@@ -1444,6 +1444,14 @@
       "value": "writeOpenAIStreamRuleError(ctx, c, status, errType, errMsg)"
     },
     {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "applyAttemptHeaders := func() {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "if !reqStream && extractOpenAICodexTurnState(resp.Header) != \"\" {"
+    },
+    {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
       "value": "writeOpenAIStreamRuleError(ctx, c, status, errType, errMsg)"
     }
@@ -1898,6 +1906,16 @@
       "id": "xy-resilience-v2-streams",
       "path": "backend/internal/service/gateway_convert_stream_test.go",
       "literal": "func TestGatewayConvertCancelDuringFirstWriteIsClientCancel"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_attempt_headers_test.go",
+      "literal": "func TestOpenAIPassthroughHeartbeatCommitsOnlyStableStreamHeaders"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_attempt_headers_test.go",
+      "literal": "func TestOpenAIPassthroughAttemptHeadersSwitchOff"
     },
     {
       "id": "xy-resilience-v2-handler-exits",
