@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -326,10 +327,29 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		if clientDisconnected {
 			return
 		}
+		// Comments keep the connection alive while the first data event is
+		// pending. They are not semantic output and must not prevent failover.
+		if terminal.strict && !terminal.sawDataLine && !clientOutputStarted &&
+			(strings.HasPrefix(line, ":") || (line == "" && len(pendingLines) == 0)) {
+			writeStreamHeaders()
+			n, werr := c.Writer.WriteString(line + "\n")
+			recordOpenAIStreamKeepaliveBytes(c, n)
+			if werr == nil && n != len(line)+1 {
+				werr = io.ErrShortWrite
+			}
+			if werr != nil {
+				clientDisconnected = true
+				logger.L().Debug("openai chat_completions raw: client disconnected during comment heartbeat",
+					zap.Error(werr), zap.String("request_id", requestID))
+				return
+			}
+			c.Writer.Flush()
+			return
+		}
 		// Wait for the first data payload before committing its SSE framing.
 		// This bounded prefix lets event:error + data:error fail over too.
 		if terminal.strict && !terminal.sawDataLine && !clientOutputStarted && prefixBytes+len(line)+1 <= ssePendingLimit &&
-			(line == "" || strings.HasPrefix(line, ":") || strings.HasPrefix(line, "event:") || strings.HasPrefix(line, "id:") || strings.HasPrefix(line, "retry:")) {
+			(line == "" || strings.HasPrefix(line, "event:") || strings.HasPrefix(line, "id:") || strings.HasPrefix(line, "retry:")) {
 			pendingLines = append(pendingLines, line)
 			prefixBytes += len(line) + 1
 			return
