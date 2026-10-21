@@ -117,8 +117,12 @@ Run `staging/fixtures.py` before `staging/scenarios.py`. Keep keys and evidence 
 | ANT-3 | Anthropic no-account error is `api_error`; ANT-1 and ANT-2 retain their existing IDs. |
 | SH-1 / SH-2 | Switch to share using account priority and load factors, return to original scheduling, and verify real transient failures reduce health weight and new-session traffic share. |
 | LR-1 / DC-6 | Last resort follows account priority; compatibility openings wait for content while a native Anthropic opening remains unbilled. |
+| Q-1 | A dedicated user with concurrency 1 queues behind a silent holder. After observing a queue ping, set that user's balance to zero; Responses gets created→failed, Chat gets error→DONE, Messages gets a named error. Every entry rejects bare JSON. Restore the user afterwards. |
+| CX-1 | An empty group returns 503; either a Codex originator or Codex UA limits Retry-After to 10 s, while ordinary requests before and after keep the configured maximum. |
 
 Capacity retry fixtures give B a different Docker DNS host name for the same fault service, so the one-host-switch rule can be tested without contacting a real upstream. Scenarios that change shared settings run serially. SH-2 generates real success/502 attempts on its dedicated accounts (temporarily deactivating B during failure injection), then allows up to 150 seconds for the minute-aligned health window; it restores account configuration and scheduling settings afterwards. Before sampling 80 fresh sessions, it proves A can serve at the best priority, then restores equal priorities. This separates health weighting from a lingering cooldown. The cohort checks reduced A traffic, not exact convergence to the new target, because allocation history survives weight changes.
+
+Q-1 uses an Anthropic group for all three queued entry protocols, covering the Gateway Responses/Chat conversion writers and native Messages. The holder uses a separate key of the same user on an OpenAI group; its disconnect releases the shared user slot. A live line callback confirms the queue heartbeat arrived before the balance change, and fault records confirm the queued request never reached an upstream. These additions bring the suite to 71 scenarios.
 
 ## cdn-sim
 

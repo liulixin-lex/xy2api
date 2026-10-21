@@ -53,7 +53,7 @@ def leave(sock):
     sock.close()
 
 
-def stream_request(port, path: str, key: str, body: dict, *, headers=None, disconnect_after=None, timeout=330):
+def stream_request(port, path: str, key: str, body: dict, *, headers=None, disconnect_after=None, timeout=330, on_line=None):
     """Sends a request and records every received line with its offset.
     port is a local port, or an https host name (real Cloudflare tests)."""
     if isinstance(port, str):
@@ -103,7 +103,10 @@ def stream_request(port, path: str, key: str, body: dict, *, headers=None, disco
                 break
             text = line.decode("utf-8", "replace").rstrip("\n")
             if text:
-                out["lines"].append([round(now() - start, 2), text])
+                received = [round(now() - start, 2), text]
+                out["lines"].append(received)
+                if on_line is not None:
+                    on_line(*received)
     except Exception as exc:  # noqa: BLE001 - evidence keeps the failure
         out["error"] = f"{type(exc).__name__}: {exc}"
     finally:
@@ -1630,6 +1633,106 @@ def sh2():
         api.call("PUT", "/api/v1/admin/share-scheduling/settings", {"enabled": settings["enabled"]})
 
 
+@scenario("Q-1", "User queue ping then balance failure: Responses, Chat and Messages end with protocol terminal frames")
+def q1():
+    from fixtures import items
+    api, checks, result = admin_api(), [], {}
+    user = next(u for u in items(api.call("GET", "/api/v1/admin/users?page=1&page_size=200"))
+                if u["email"] == "stg-queue-terminal@xy2api-staging.local")
+    uid = user["id"]
+    def balance(value):
+        operation = "set"
+        if value == 0:
+            # The balance endpoint's required numeric field rejects zero;
+            # subtract this dedicated user's current balance atomically.
+            value = api.call("GET", f"/api/v1/admin/users/{uid}")["balance"]
+            if value == 0:
+                return
+            operation = "subtract"
+        api.call("POST", f"/api/v1/admin/users/{uid}/balance", {"balance": value, "operation": operation, "notes": "staging Q-1"})
+    api.call("PUT", f"/api/v1/admin/users/{uid}", {"concurrency": 1})
+    try:
+        for protocol, path, body in (
+            ("responses", "/v1/responses", responses_body(model="claude-sonnet-5-5", session=fresh_session())),
+            ("chat", "/v1/chat/completions", chat_body(model="claude-sonnet-5-5")),
+            ("messages", "/v1/messages", anthropic_body()),
+        ):
+            balance(1000)
+            ping, ping_at = threading.Event(), []
+            def observe(t, line):
+                is_ping = line.startswith(":") or line == "event: ping"
+                if line.startswith("data:") and line[5:].strip() != "[DONE]":
+                    is_ping = is_ping or json.loads(line[5:]).get("type") == "ping"
+                if is_ping:
+                    ping_at.append(t)
+                    ping.set()
+            mark = fault_last_id()
+            # Separate keys of the same dedicated user prove this is the
+            # user slot queue. The queued Anthropic-backed requests exercise
+            # Gateway Responses/Chat and native Messages error writers.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                holder = pool.submit(stream_request, DIRECT, "/v1/responses", KEYS["queue:G-queue-terminal-holder"],
+                                     responses_body(session=fresh_session()), disconnect_after=25)
+                deadline = now() + 8
+                while now() < deadline and not any(x["stream"] and "tag=qt-holder" in x["spec"] for x in fault_records_since(mark)):
+                    time.sleep(0.1)
+                queued = pool.submit(stream_request, DIRECT, path, KEYS["queue:G-queue-terminal"], body,
+                                     headers={"session_id": fresh_session()}, timeout=50, on_line=observe)
+                committed = ping.wait(timeout=18)
+                if committed:
+                    balance(0)
+                queued_result, held = queued.result(), holder.result()
+            rows = fault_records_since(mark)
+            lines = [l for _, l in queued_result["lines"]]
+            events = data_events(queued_result)
+            failures = [e for e in events if e.get("error") or e.get("type") == "response.failed"]
+            prefix = protocol + ": "
+            check(committed and bool(ping_at), prefix + "queue ping observed before balance was set to zero", checks)
+            check(queued_result["status"] == 200, prefix + "ping committed HTTP 200", checks)
+            check(held.get("disconnected_at") is not None, prefix + "holder released user slot by disconnecting", checks)
+            check(not any("tag=qt-unused" in x["spec"] for x in rows), prefix + "billing failure occurs before queued upstream attempt", checks)
+            check(not any(l.lstrip().startswith(("{", "[")) for l in lines), prefix + "no bare JSON after queue ping", checks)
+            check(bool(failures) and "balance" in json.dumps(failures).lower(), prefix + "terminal identifies balance failure", checks)
+            if protocol == "responses":
+                terminal = [e for e in events if e.get("type") != "ping"]
+                paired = (len(terminal) == 2 and [e.get("type") for e in terminal] == ["response.created", "response.failed"] and
+                          bool(terminal[0].get("response", {}).get("id")) and
+                          terminal[0]["response"]["id"] == terminal[1].get("response", {}).get("id"))
+                check(paired, prefix + "created then failed with the same response ID after queue pings", checks)
+                check(sum(e.get("type") == "response.failed" for e in events) == 1, prefix + "one failed terminal", checks)
+            elif protocol == "chat":
+                payloads = [l for l in lines if l.startswith("data:")]
+                check(len(failures) == 1 and bool(payloads) and payloads[-1].strip() == "data: [DONE]", prefix + "one error followed by DONE", checks)
+            else:
+                check("event: error" in lines and len(failures) == 1, prefix + "one named error event", checks)
+            result[protocol] = {"queued": queued_result, "holder": held, "queue_ping_at": ping_at,
+                                "balance_changed_after_ping": committed, "upstream": rows}
+        return result, checks
+    finally:
+        balance(user["balance"])
+        api.call("PUT", f"/api/v1/admin/users/{uid}", {"concurrency": user["concurrency"]})
+
+
+@scenario("CX-1", "Empty group: Codex originator or UA caps Retry-After at 10 seconds; ordinary requests keep configured maximum")
+def cx1():
+    checks, result = [], {}
+    cfg = admin_api().call("GET", "/api/v1/admin/settings/gateway-resilience")["settings"]
+    maximum = cfg["errors"]["no_account_retry_after"]["max"]
+    check(maximum > 10, "ordinary configured maximum exceeds Codex cap", checks)
+    for name, features in (("ordinary_before", {}), ("originator", {"originator": "codex_cli_rs"}),
+                           ("codex_ua", {"User-Agent": "codex_cli_rs/0.0.0 (staging)"}), ("ordinary_after", {})):
+        r = stream_request(DIRECT, "/v1/responses", KEYS["G-codex-empty"], responses_body(stream=False, session=fresh_session()),
+                           headers={"session_id": fresh_session(), **features})
+        retry = r["headers"].get("retry-after", "")
+        check(r["status"] == 503, name + ": no-account 503", checks)
+        if features:
+            check(retry.isdigit() and 0 < int(retry) <= 10, name + f": Retry-After capped at 10 s ({retry})", checks)
+        else:
+            check(retry.isdigit() and int(retry) == maximum, name + f": keeps ordinary maximum {maximum} s ({retry})", checks)
+        result[name] = r
+    return result, checks
+
+
 def run(sid: str, outdir: str):
     title, fn = SCENARIOS[sid]
     started = now()
@@ -1657,7 +1760,7 @@ def main() -> int:
     os.makedirs(args.evidence, exist_ok=True)
     ids = [s for s in (args.only.split(",") if args.only else SCENARIOS) if s]
     # Balance and fallback scenarios change shared upstream state; run them alone.
-    serial = [s for s in ids if s.startswith(("BAL", "FB", "RES", "ERR-3", "ERR-4", "BUD", "DC", "LR", "SH", "SO", "RA"))]
+    serial = [s for s in ids if s.startswith(("BAL", "FB", "RES", "ERR-3", "ERR-4", "BUD", "DC", "LR", "SH", "SO", "RA", "Q-", "CX"))]
     # DC-2 waits for a 150 s upstream; run it last.
     serial.sort(key=lambda s: s == "DC-2")
     parallel = [s for s in ids if s not in serial]

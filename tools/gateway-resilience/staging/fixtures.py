@@ -95,6 +95,9 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-retry-advice": ("openai", [("ra-only", "F37;delay=20;reset=8", 1)], {}),
     "G-retry-alternative": ("openai", [("ra-a", "F37;delay=20;reset=8", 1), ("ra-b", "F00;tag=ra-b", 2)], {"separate_hosts": True}),
     "G-anthropic-empty": ("anthropic", [], {}),
+    "G-codex-empty": ("openai", [], {}),
+    "G-queue-terminal-holder": ("openai", [("qt-holder", "F17;first=60;tag=qt-holder", 1)], {}),
+    "G-queue-terminal": ("anthropic", [("qt-unused", "F00;tag=qt-unused", 1)], {}),
     # Review F1: one slot; a second stream queues, gets pings, then leaves.
     "G-queue": ("openai", [("q-busy", "F01;secs=20", 1)], {"concurrency": 1}),
     # 0.4.2: opening events only (DC-6), silent upstream at xhigh/max
@@ -149,6 +152,7 @@ USERS = {
     "stg-user@xy2api-staging.local": 1000.0,
     # RES-1 resizes this balance around the live reservation estimate.
     "stg-small@xy2api-staging.local": 0.12,
+    "stg-queue-terminal@xy2api-staging.local": 1000.0,
 }
 
 
@@ -267,7 +271,8 @@ def main() -> int:
         keys["users"][email] = password
         if email not in users:
             users[email] = api.call("POST", "/api/v1/admin/users",
-                                    {"email": email, "password": password, "balance": balance, "concurrency": 100})
+                                    {"email": email, "password": password, "balance": balance,
+                                     "concurrency": 1 if email == "stg-queue-terminal@xy2api-staging.local" else 100})
         else:
             api.call("POST", f"/api/v1/admin/users/{users[email]['id']}/balance",
                      {"balance": balance, "operation": "set", "notes": "staging fixtures"})
@@ -288,6 +293,15 @@ def main() -> int:
     if "key-small-long" not in have_small:
         have_small["key-small-long"] = api.call("POST", "/api/v1/keys", {"name": "key-small-long", "group_id": groups["G-long-first"]["id"]}, token=small_token)
     keys["keys"]["small:G-long-first"] = have_small["key-small-long"]["key"]
+
+    queued_owner = "stg-queue-terminal@xy2api-staging.local"
+    queued_token = api.login(queued_owner, keys["users"][queued_owner])
+    have_queued = {k["name"]: k for k in items(api.call("GET", "/api/v1/keys?page=1&page_size=200", token=queued_token))}
+    for gname in ("G-queue-terminal-holder", "G-queue-terminal"):
+        kname = "queue-" + gname
+        if kname not in have_queued:
+            have_queued[kname] = api.call("POST", "/api/v1/keys", {"name": kname, "group_id": groups[gname]["id"]}, token=queued_token)
+        keys["keys"]["queue:" + gname] = have_queued[kname]["key"]
 
     os.makedirs(os.path.dirname(keys_path), exist_ok=True)
     fd = os.open(keys_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
