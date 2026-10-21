@@ -184,7 +184,7 @@ func applyNoAccountRetryHints(c *gin.Context, diag any, apiKey *service.APIKey, 
 	if c == nil || c.Request == nil || !cfg.ErrorsOn() {
 		return
 	}
-	if cls.ModelNotFound || !candidateRetryAllowed(cls.Status, cls.ErrType, "") {
+	if cls.ModelNotFound || !resilience.RetryAdviceEligible(cls.Status, cls.ErrType, "") {
 		suppressResilienceRetryAdvice(c, "non_retryable")
 		return
 	}
