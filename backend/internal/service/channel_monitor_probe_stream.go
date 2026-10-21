@@ -226,10 +226,16 @@ func (t *probeAnswerTracker) onChatChunk(event string, root gjson.Result) {
 	}
 	root.Get("choices").ForEach(func(_, choice gjson.Result) bool {
 		delta := choice.Get("delta")
+		fullMessage := false
 		if !delta.Exists() {
 			delta = choice.Get("message")
+			fullMessage = true
 		}
-		t.addText(probeContentText(delta.Get("content")))
+		// 有的上游（如 MiniMax）在流的最后一块再给一次完整 message；已经收到增量正文时
+		// 不能再拼上去，否则 "12" 会读成 "1212"。
+		if !fullMessage || t.raw.Len() == 0 {
+			t.addText(probeContentText(delta.Get("content")))
+		}
 		if text := choice.Get("text"); text.Type == gjson.String {
 			t.addText(text.String())
 		}

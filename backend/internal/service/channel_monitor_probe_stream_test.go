@@ -301,3 +301,23 @@ func TestReadProbeJSON(t *testing.T) {
 		})
 	}
 }
+
+// MiniMax-style streams repeat the whole message in the last chunk; it must not
+// be appended to the deltas already received ("12" + "12" would read as 1212).
+func TestReadProbeStream_ChatFinalMessageDoesNotRepeatDeltas(t *testing.T) {
+	stream := probeSSE(
+		`data: {"choices":[{"delta":{"content":"1"}}]}`,
+		`data: {"choices":[{"delta":{"content":"2"}}]}`,
+		`data: {"choices":[{"message":{"role":"assistant","content":"12"},"finish_reason":"stop"}]}`,
+		"data: [DONE]")
+	got := readProbeStream(strings.NewReader(stream), probeProtocolChat, "12")
+	require.True(t, got.Answered, got.Text)
+	require.Equal(t, "12", got.Text)
+
+	// A stream whose only content arrives as message still counts.
+	onlyMessage := probeSSE(
+		`data: {"choices":[{"message":{"role":"assistant","content":"12"},"finish_reason":"stop"}]}`,
+		"data: [DONE]")
+	got = readProbeStream(strings.NewReader(onlyMessage), probeProtocolChat, "12")
+	require.True(t, got.Answered, got.Text)
+}
