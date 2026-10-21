@@ -268,9 +268,9 @@ func applyExhaustedRetryHint(c *gin.Context, diag any, status int) int {
 		}
 		return status
 	}
-	prepareExhaustedRetryAdvice(c, diag)
 	lo, hi := cfg.Errors.NoAccountRetryAfter.Min, cfg.Errors.NoAccountRetryAfter.Max
 	if v := strings.TrimSpace(c.Writer.Header().Get("Retry-After")); v != "" {
+		prepareExhaustedRetryAdvice(c, diag)
 		secs := 0
 		if n, err := strconv.Atoi(v); err == nil {
 			secs = resilience.ClampRetryAfter(time.Duration(n)*time.Second, lo, hi)
@@ -286,6 +286,7 @@ func applyExhaustedRetryHint(c *gin.Context, diag any, status int) int {
 	}
 	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
 	setNoAccountRetryAfter(c, diag, apiKey, exhaustedRetryModel(c))
+	prepareExhaustedRetryAdvice(c, diag)
 	return status
 }
 

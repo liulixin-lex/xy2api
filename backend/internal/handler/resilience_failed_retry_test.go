@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -128,4 +129,29 @@ func TestTerminalReasonsRemoveStaleHTTPHints(t *testing.T) {
 		require.Equal(t, "Rejected", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
 		require.True(t, resilience.RetryAdviceFrom(c.Request.Context()).Suppress)
 	}
+}
+
+type warmingRetryAdvisor struct{ warmed atomic.Bool }
+
+func (a *warmingRetryAdvisor) NoAccountRetryAfter(context.Context, *int64, string) time.Duration {
+	a.warmed.Store(true)
+	return 7 * time.Second
+}
+func (a *warmingRetryAdvisor) RetryAdvice(context.Context, *int64, string) resilience.RetryAdvice {
+	if a.warmed.Load() {
+		return resilience.RetryAdvice{Seconds: 7, Source: "recovery"}
+	}
+	return resilience.RetryAdvice{Source: "unknown"}
+}
+
+func TestExhaustedRetryAdviceWarmsSnapshotBeforeResolving(t *testing.T) {
+	withHandlerResilience(t, nil)
+	c, _ := newResilienceTestContext(t)
+	resilience.StateFrom(c.Request.Context()).SetGroup(20)
+	advisor := &warmingRetryAdvisor{}
+	c.Set("api_key", &service.APIKey{GroupID: new(int64(20))})
+	status := applyExhaustedRetryHint(c, advisor, http.StatusBadGateway)
+	require.Equal(t, http.StatusBadGateway, status)
+	require.True(t, advisor.warmed.Load())
+	require.Equal(t, 7, resilience.RetryAdviceFrom(c.Request.Context()).Seconds)
 }
