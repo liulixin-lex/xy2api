@@ -55,5 +55,18 @@ describe('gateway resilience 0.4.4 locale keys', () => {
       expect(lookup(messages, 'admin.resilience.settings.switches.nativePreludeWhitelistHint')).toContain(offRule)
     }
   )
+
+  // γ a03ad9c79: only requests whose upstream stream follows the client are
+  // filtered; requests the gateway already sends as streaming are not.
+  it.each([['zh', zh, '会因此失败的非流式请求', '改发流式'], ['en', en, 'non-streaming requests that would fail', 'already sends as streaming']])(
+    '%s scopes the stream-only filter to requests that would fail',
+    (_, messages, scope, unaffected) => {
+      for (const key of ['settings.sections.capabilityHint', 'capability.title']) {
+        const text = lookup(messages, `admin.resilience.${key}`) as string
+        expect(text).toContain(scope)
+        expect(text).toContain(unaffected)
+      }
+    }
+  )
 })
 
