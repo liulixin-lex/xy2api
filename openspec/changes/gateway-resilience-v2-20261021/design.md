@@ -186,7 +186,13 @@
 - `WithRetryAdvice(ctx, advice)`：必要时挂接 RequestState 并写入；`SetRetryAdvice(ctx, advice)`：更新已有状态，已派生的子 context 立即可见；`RetryAdviceFrom(ctx)`：线程安全快照，缺省为零值。
 - `Suppress` 在同一请求内不可撤销（封顶与终态优先），写入时 `Seconds` 归零。
 - `Headers()` 只生成 `retry-after` 一项（整数秒，防御性夹到 10）；`Seconds<=0` 或 `Suppress` 时为空。合成帧的 `error.headers` 只用它，不复制上游的任意头。
-- 惰性求值（PM 决定）：handler 在选号前用 `WithRetryAdviceProvider` 安装请求级 provider，合成点调用 `ResolveRetryAdvice(ctx)`：已直接写入的 advice（如封顶的 `Suppress`）优先，否则调用 provider，最多等 100 ms。这样 service 层在 handler 耗尽出口之前合成的 `response.failed` 也能拿到当时的候选情况。provider 不持有可复用的 Gin context。
+- 惰性求值（PM 决定，2026-10-21T01:41Z）：
+  - handler 在请求开始、选号前用 `WithRetryAdviceProvider(ctx, provider)` 安装请求级 provider（`RetryAdviceProvider func(ctx) RetryAdvice`），安装时不查询；
+  - 合成点调用 `ResolveRetryAdvice(ctx)`：先读显式写入的 advice（含显式的零值 `unknown`，以及封顶、余额终态、内容拒绝固定的 `Suppress`），没有才调用 provider；最多等 100 ms，超时或取消就丢弃结果，等待期间新写入的显式 advice 仍然优先；
+  - 惰性结果不缓存，下一次读取能看到候选变化；provider 只读当前请求与进程内快照，无副作用，不访问数据库或 Redis，不持有池化的 Gin context。
+
+  这样 service 层在 handler 耗尽出口之前合成的 `response.failed` 也能拿到当时的候选情况。
+- 正文：`RetryAdvice.Message(message)` 统一处理重试尾句：去掉本地固定格式的旧尾句 “Please try again in Ns.”；秒数为正时追加与 `Headers()` 同样夹到 10 秒的尾句；`unknown` 与 `Suppress` 只去掉旧尾句。只改网关自己的固定后缀，不改写上游的自然语言。
 - 分组 advisor 只读进程内的账号与罚则快照，不访问 Redis 或数据库；只基于未尝试、模型兼容、无硬罚的健康候选判断；快照缺失时返回 `unknown`。原 `NoAccountRetryAfter` 保留给 HTTP 无号提示【待契约：γ 的 advisor 方法名】。
 
 | 情况 | `Source` | `response.failed` 的 retry-after |
