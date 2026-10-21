@@ -10,13 +10,15 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
 // responsesFailedError 对齐 OpenAI Responses 协议 error 子对象。
 type responsesFailedError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code    string            `json:"code"`
+	Message string            `json:"message"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // responsesFailedBody 对齐 apicompat.makeResponsesCompletedEvent 输出的 response 子对象字段集。
@@ -79,6 +81,15 @@ func writeResponsesFailedSSEWithOpening(c *gin.Context, errType, code, message s
 	if forceOpening && opening == "" {
 		opening, sequence = string(service.ResponsesCreatedFrame(id, model, createdAt)), 1
 	}
+	failedError := responsesFailedError{Code: mapResponsesErrorCode(errType, code), Message: message}
+	if resilience.Current().FailedFrameRetryAfterOn() && c.Request != nil {
+		advice := responsesFailedRetryAdvice(c, errType, code)
+		failedError.Headers = advice.Headers()
+		failedError.Message = advice.Message(message)
+		if advice.Suppress && advice.Source == "turn_cap" {
+			failedError.Code = codeServerIsOverloaded
+		}
+	}
 	payload, err := json.Marshal(responsesFailedEvent{
 		Type:           "response.failed",
 		SequenceNumber: sequence,
@@ -89,10 +100,7 @@ func writeResponsesFailedSSEWithOpening(c *gin.Context, errType, code, message s
 			Model:     model,
 			Status:    "failed",
 			Output:    []any{},
-			Error: responsesFailedError{
-				Code:    mapResponsesErrorCode(errType, code),
-				Message: message,
-			},
+			Error:     failedError,
 		},
 	})
 	if err != nil {

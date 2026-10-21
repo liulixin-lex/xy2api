@@ -41,7 +41,11 @@ func TestSpecialExhaustedPathsShareTurnCap(t *testing.T) {
 					write()
 					require.NotEmpty(t, strings.TrimPrefix(rec.Body.String(), ":\n\n"), "committed errors still need a terminal")
 					if attempt == 1 {
-						require.Equal(t, "30", c.Writer.Header().Get("Retry-After"))
+						if stream && endpoint == EndpointResponses {
+							require.Empty(t, c.Writer.Header().Get("Retry-After"), "unknown recovery has no failed-frame hint")
+						} else {
+							require.Equal(t, "30", c.Writer.Header().Get("Retry-After"))
+						}
 					} else {
 						require.Empty(t, c.Writer.Header().Get("Retry-After"))
 						require.Equal(t, "false", c.Writer.Header().Get("x-should-retry"))

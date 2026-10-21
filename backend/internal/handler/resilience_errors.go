@@ -81,6 +81,7 @@ func resilienceContentRejection(c *gin.Context, failoverErr *service.UpstreamFai
 	if c == nil || !resilience.Current().ErrorsOn() || !resilienceContentRejected(failoverErr) {
 		return "", false
 	}
+	suppressResilienceRetryAdvice(c, "content_rejection")
 	upstreamMsg := service.SanitizeUpstreamErrorMessage(strings.TrimSpace(service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody)))
 	service.SetOpsUpstreamError(c, failoverErr.StatusCode, upstreamMsg, "")
 	message := strings.TrimSpace(upstreamURLPattern.ReplaceAllString(upstreamMsg, "[url]"))
@@ -104,6 +105,9 @@ func writeOpenAIContentRejection(c *gin.Context, message string) {
 // resilienceTranslateError maps internal error types to the client-facing
 // type and code, and appends the retry hint to no-account messages.
 func resilienceTranslateError(c *gin.Context, status int, errType, code, message string) (string, string, string) {
+	if suppressResilienceTerminalReason(c, errType, code) || (c != nil && c.GetBool(ginKeyResilienceTurnCapped)) {
+		message = (resilience.RetryAdvice{Suppress: true}).Message(message)
+	}
 	switch errType {
 	case errTypeInsufficientBalance:
 		if code == "" {
@@ -182,6 +186,7 @@ func applyNoAccountRetryHints(c *gin.Context, diag any, apiKey *service.APIKey, 
 	}
 	ctx := c.Request.Context()
 	if resilience.StateFrom(ctx).ConfigError() {
+		resilience.SetRetryAdvice(ctx, resilience.RetryAdvice{Suppress: true, Source: "config_rejection"})
 		c.Header("Retry-After", strconv.Itoa(codexNoAccountRetryAfter(c, cfg, cfg.Errors.ConfigRetryAfterSeconds)))
 		c.Header("x-should-retry", "false")
 		return
@@ -190,6 +195,7 @@ func applyNoAccountRetryHints(c *gin.Context, diag any, apiKey *service.APIKey, 
 		return
 	}
 	setNoAccountRetryAfter(c, diag, apiKey, routingModel)
+	prepareResilienceRetryAdvice(c, diag, apiKey, routingModel)
 	secs := codexNoAccountRetryAfter(c, cfg, c.GetInt(ginKeyResilienceRetryAfter))
 	c.Header("Retry-After", strconv.Itoa(secs))
 	c.Set(ginKeyResilienceRetryAfter, secs)
@@ -248,6 +254,7 @@ func applyExhaustedRetryHint(c *gin.Context, diag any, status int) int {
 		}
 		return status
 	}
+	prepareExhaustedRetryAdvice(c, diag)
 	lo, hi := cfg.Errors.NoAccountRetryAfter.Min, cfg.Errors.NoAccountRetryAfter.Max
 	if v := strings.TrimSpace(c.Writer.Header().Get("Retry-After")); v != "" {
 		secs := 0
@@ -264,7 +271,7 @@ func applyExhaustedRetryHint(c *gin.Context, diag any, status int) int {
 		return status
 	}
 	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
-	setNoAccountRetryAfter(c, diag, apiKey, "")
+	setNoAccountRetryAfter(c, diag, apiKey, exhaustedRetryModel(c))
 	return status
 }
 
