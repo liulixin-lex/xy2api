@@ -154,7 +154,7 @@
 
 ## 5. W2.1-lite 分类修正（`failure.decision_v2`）
 
-实现：纯规则入口 `resilience.ClassifyWithSettings(outcome, settings)`，按 `DecisionV2On()` 在新分类与原 `Classify` 之间切换；service 的 `classifyUpstreamHTTP`、`ClassifyFailoverError`、`opsResilienceCategory` 与已输出后失败（`resilience_post_output.go`）都改用它，避免口径分叉。
+实现：纯规则入口 `resilience.ClassifyWithSettings(outcome, settings)`，按 `DecisionV2On()` 在新分类与原 `Classify` 之间切换；service 的 `classifyUpstreamHTTP`、`ClassifyFailoverError`、`opsResilienceCategory` 与已输出后失败（`resilience_post_output.go` 的 OpenAI、Anthropic 两处，α）都改用它，避免口径分叉。已输出后失败对会话与账号仍统一按 `TRANSIENT` 计（旧 design §7.6），不变。
 
 根因：`service/resilience_penalty.go` 的 `ClassifyFailoverError` 把所有 `RequestScopedTransient=true` 的失败都当成 `CAPACITY_SHED`，使 Grok 空闲、raw 429、“服务忙”类文案也受“容量只换一次、必须跨主机、整主机排除”的约束。
 
