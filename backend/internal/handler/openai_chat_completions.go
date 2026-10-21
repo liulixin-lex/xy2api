@@ -12,6 +12,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/ip"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai_compat"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/tidwall/gjson"
@@ -106,6 +107,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	c.Request = c.Request.WithContext(service.WithRequestReplaySafety(c.Request.Context(), body, false))
 	setOpsRequestContext(c, reqModel, reqStream)
 	installResilienceRetryAdvice(c, h.gatewayService, apiKey, reqModel)
+	if !service.IsExplicitImageGenerationIntent("/v1/chat/completions", reqModel, body) {
+		c.Request = c.Request.WithContext(resilience.WithCapabilityRequest(c.Request.Context(), resilience.CapabilityProtocolChat, reqStream))
+	}
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIChat, reqModel, body); decision != nil && !decision.AllowNextStage {

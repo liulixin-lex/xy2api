@@ -559,6 +559,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// Codex 在所有请求中被动声明 image_gen namespace，宽泛检测会导致禁了生图的
 	// 分组中所有 Codex 请求被 403（#4447），并误占生图并发槽位。
 	imageIntent := service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, body)
+	if !legacyCompact && !nativeV2 && !imageIntent {
+		c.Request = c.Request.WithContext(resilience.WithCapabilityRequest(c.Request.Context(), resilience.CapabilityProtocolResponses, reqStream))
+	}
 	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
 		return
@@ -3605,6 +3608,12 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	}
 	if status, errType, message, ok := resilienceWebSearchHistoryRejected(c, h.gatewayService, failoverErr); ok {
 		h.handleStreamingAwareError(c, status, errType, message, streamStarted)
+		return
+	}
+	if failoverErr.IsCapabilityStreamOnly() {
+		status, errType, message := resilienceCapacityExhausted(c, failoverErr, http.StatusServiceUnavailable, "api_error", "")
+		status = applyExhaustedRetryHint(c, h.gatewayService, status)
+		h.handleStreamingAwareErrorWithCode(c, status, errType, resilience.ReasonCapabilityStreamOnly, message, streamStarted, false)
 		return
 	}
 	// xy2api resilience: upstream balance problems (including image account
