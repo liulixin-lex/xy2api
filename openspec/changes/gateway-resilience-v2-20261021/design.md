@@ -22,7 +22,7 @@
 | W1.1 兼容转换推迟开场 | `stream.prelude_staging`（开） | 总开关 | 收到上游 `response.created` 就写开场 |
 | W1.1 原生 Responses 白名单扩展 | `stream.native_prelude_whitelist`（开） | 总开关 | 开场只认 `response.created`、`response.in_progress`、`keepalive` |
 | W1.2-lite raw Chat 识别 `error` 后跟 `[DONE]` | `stream.strict_terminal`（开） | 总开关 | 当成功处理 |
-| W2.1-lite 分类修正 | `failure.decision_v2`（开） | 总开关 | 旧分类，含 `RequestScopedTransient` → `CAPACITY_SHED` |
+| W2.1-lite 分类修正 | `failure.decision_v2`（开） | 总开关 | 旧分类，含 `RequestScopedTransient` → `CAPACITY_SHED`；分类输入的证据补全保留（§9） |
 | W5.1 三个专用耗尽出口接入重试提示与回合封顶 | 现有 `errors.enabled` | 总开关 | 基线行为 |
 | W5.2 排队 ping 后写协议终止帧 | 无 | — | 不受开关控制（§9） |
 | W5.3 `response.failed` 有条件带 retry-after | `errors.failed_frame_retry_after`（开） | 总开关与 `errors.enabled` | 不带 `error.headers`，正文沿用旧 design §7.6 |
@@ -196,7 +196,7 @@
 ### 6.2 学习与存放
 
 - 学到的是“账号 × 上游协议 × 非流式 → 不可用”，有效期 `capability.learn_ttl_seconds`。
-- 存放在账号 `extra` 的两个键：`capability_learned_responses`、`capability_learned_chat`，值为 `{expires_at: <RFC3339 UTC>, fingerprint: <SHA-256>}`，用既有的 JSONB 原子局部合并写入（含事务 outbox），并同步刷新该账号的调度快照；不加表、不加迁移，也不另设 Redis 或进程内缓存。每个账号最多两条，是否过期在读取时判断。
+- 存放在账号 `extra` 的两个键：`capability_learned_responses`、`capability_learned_chat`，值为 `{expires_at: <RFC3339 UTC>, fingerprint: <SHA-256>}`，用既有的 JSONB 原子局部合并写入（含事务 outbox），并同步刷新该账号的调度快照；不加表、不加迁移，也不另设 Redis 或进程内缓存。每个账号最多两条，是否过期在读取时判断；两个键都不存在或为 null 时直接返回空列表，不对凭据做序列化与哈希（γ `29f26652d`）。
 - 选择理由：复用现有的原子合并与快照同步，不必为 Redis 或进程内缓存另管生命周期；账号行本来就随调度快照读取。
 - 指纹绑定平台、账号类型与上游凭据配置：管理员改了账号的上游配置，或者旧请求的学习迟到写入，都不会封住新配置。
 - `capability_manual` 键保留给以后的手工覆盖，本期不读不写。
@@ -206,7 +206,7 @@
 ### 6.3 本请求与选号
 
 - **本请求**：`failure.decision_v2` 开启时，钩子返回可换号的哨兵错误（`IsCapabilityStreamOnly()`；不上报账号调度失败、不同号重试），handler 只计请求预算的尝试次数，不记会话失败、不冷却。这次拒绝不写运维的上游错误记录（写入会把账号记为本请求失败），只记中性事件 `resilience.capability_learned`。`decision_v2` 关闭时只学习，钩子返回空，本请求照旧返回 400。
-- **选号**：`Account.CapabilityExclusion(ctx, model, now)` 只在确定的路径上过滤：上游协议与入站相同，且上游的流模式跟随客户端（PM 指令，2026-10-21）。跨协议的转换（如 Chat 转 Responses 上游，这类转换本来就以 `stream=true` 请求上游）、按模型路由的路径，以及路由无法确定的 Grok OAuth Chat（可能按请求内容走强制流式的 Responses 桥接，选号时没有请求体）都不过滤；Grok 原生 Responses 与 API Key 账号的 raw Chat 照常过滤；Grok 的两种协议各自独立。不新增路由提示的 helper（γ `a03ad9c79`）。
+- **选号**：`Account.CapabilityExclusion(ctx, model, now)` 只在确定的路径上过滤：上游协议与入站相同，且上游的流模式跟随客户端（PM 指令，2026-10-21）。跨协议的转换（如 Chat 转 Responses 上游，这类转换本来就以 `stream=true` 请求上游）、按模型路由（`routesByModel`）的账号（选号与转发的模型目录路由可能不同；γ `29f26652d`），以及路由无法确定的 Grok OAuth Chat（可能按请求内容走强制流式的 Responses 桥接，选号时没有请求体）都不过滤；Grok 原生 Responses 与 API Key 账号的 raw Chat 照常过滤；Grok 的两种协议各自独立。不新增路由提示的 helper（γ `a03ad9c79`）。
 - Responses 入站转 raw Chat 上游的路径，上游流模式确实跟随客户端，但它是跨协议路径，本期不做持久过滤；这条路径上的确定性 400 仍按实际的 Chat 协议学习，并在本请求预算内换号。OpenAI 选号的共同资格检查（`openai_gateway_scheduling.go`）与 `openai_account_scheduler.go` 的 `isAccountRequestCompatibleReason` 都经钩子 `capabilityEligibilityReason` 过滤，覆盖粘性会话与末位兜底的最后检查；钩子登记到 `scheduler-diff.json` 与 `policy.json`（α）。
 - **只因能力而无号的应答**（PM 2026-10-21T02:42Z）：两种情形用同一个应答——
   - 选号时全部候选都因能力被过滤（`service.IsCapabilityOnlySelectionError`）；
@@ -326,7 +326,7 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 | 排队 ping 之后按协议写终止帧（W5.2） | §7.3；总开关关闭时同样生效 |
 | 换号与写出的协议正确性（审查 R1-P1-9，β） | 只有尚未实际写出、客户端未断开且请求未取消时才换号；`clientOutputStarted` 按实际写出字节（n>0）置位，短写视为 `io.ErrShortWrite`；首事件超时只在请求未取消时生成上游超时。子开关回退的是暂存、白名单与终态策略，不撤销这些防止拼接、重放与错误归因的修正 |
 | 排队心跳按入站协议的格式（审查 R1-P1-4，α `f4a60916e`） | 等待并发槽位与用户消息队列（锁等待、RPM 等待）时的心跳：Responses、compact、Chat 写 SSE 注释 `:`，Messages 保留 Claude 的 `ping`，不发心跳的配置保持不发。按请求选择，不改共享的 helper 配置。上游钩子 `requestQueuePingFormat` |
-| 【待契约】 | CHANGES_G 的 P2-2 等其他登记 |
+| 分类输入的证据补全（审查 P2-2，γ `29f26652d`） | 关闭 `failure.decision_v2` 会恢复旧的分类规则与 `RequestScopedTransient` 分支，但 service 构造分类输入的补全保留：code、type、message 先取调用方给的值，再取 `error` 字段，最后回落到 `response.error.*`；流内事件多带 type，HTTP 缺 message 时从正文补齐。证据更完整，所以旧模式下个别运维分类可能与 0.4.3 不同，不承诺逐字节回到基线 |
 
 ## 10. 回退语义
 

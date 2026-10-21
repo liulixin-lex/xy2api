@@ -229,7 +229,7 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
 | `stream.prelude_staging` | 兼容转换收到上游 `response.created` 就写开场，之后不再换号 |
 | `stream.native_prelude_whitelist` | 原生 Responses 的开场只认 `response.created`、`response.in_progress`、`keepalive` |
 | `stream.strict_terminal` | raw Chat 透传的 `error` 后跟 `[DONE]` 当成功处理 |
-| `failure.decision_v2` | 旧分类：Grok 空闲、raw 429、“服务忙”类文案按容量降载处理；仅流式拒绝只学习，本请求返回 400 |
+| `failure.decision_v2` | 旧分类：Grok 空闲、raw 429、“服务忙”类文案按容量降载处理；仅流式拒绝只学习，本请求返回 400。分类输入的证据补全保留，个别运维分类可能与 0.4.3 不同 |
 | `errors.failed_frame_retry_after` | 合成的 `response.failed` 不带 `error.headers` |
 | `errors.codex_retry_after_cap_seconds` 设为 0 | Codex 请求的无号 `Retry-After` 与其他客户端一样为 2–30 秒 |
 | `capability.stream_only_learning` | 不学习、不过滤；已有记录按到期时间自然过期 |
