@@ -86,7 +86,7 @@ func TestCapabilityLearningLifecycleAndProtocolScope(t *testing.T) {
 	ctx := resilience.WithCapabilityRequest(context.Background(), "responses", false)
 	require.Equal(t, resilience.ReasonCapabilityStreamOnly, capabilityEligibilityReason(ctx, learned, "gpt-test", start))
 	require.Empty(t, capabilityEligibilityReason(resilience.WithCapabilityRequest(context.Background(), "responses", true), learned, "gpt-test", start))
-	require.Equal(t, resilience.ReasonCapabilityStreamOnly, capabilityEligibilityReason(resilience.WithCapabilityRequest(context.Background(), "chat", false), learned, "gpt-test", start), "a chat client routed to upstream Responses uses its Responses observation")
+	require.Empty(t, capabilityEligibilityReason(resilience.WithCapabilityRequest(context.Background(), "chat", false), learned, "gpt-test", start), "Chat to Responses forces upstream streaming")
 	require.Empty(t, capabilityEligibilityReason(context.Background(), learned, "gpt-test", start))
 	require.Empty(t, learned.CapabilityLearned(records[0].ExpiresAt))
 	require.Empty(t, capabilityEligibilityReason(ctx, learned, "gpt-test", records[0].ExpiresAt))
@@ -262,4 +262,30 @@ func TestCapabilityLearningRejectsEchoedOutboundPhrase(t *testing.T) {
 		[]byte(`{"stream":false,"input":"ONLY ACCEPTS STREAMING REQUESTS"}`))
 	require.Nil(t, failure)
 	require.Zero(t, repo.writes)
+}
+
+func TestCapabilityFilteringRequiresSameUpstreamProtocol(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, tc := range []struct {
+		name, platform, kind, inbound, upstream, learned string
+		want                                             bool
+	}{
+		{"native Responses", PlatformOpenAI, AccountTypeAPIKey, "responses", APIProtocolResponses, "responses", true},
+		{"raw Chat", PlatformOpenAI, AccountTypeAPIKey, "chat", APIProtocolChatCompletions, "chat", true},
+		{"Chat to Responses streams", PlatformOpenAI, AccountTypeAPIKey, "chat", APIProtocolResponses, "responses", false},
+		{"Responses to raw Chat conversion excluded from scope", PlatformOpenAI, AccountTypeAPIKey, "responses", APIProtocolChatCompletions, "chat", false},
+		{"Grok native Responses", PlatformGrok, AccountTypeOAuth, "responses", "", "responses", true},
+		{"Grok Chat bridge can force stream", PlatformGrok, AccountTypeOAuth, "chat", "", "chat", false},
+		{"Grok API key raw Chat", PlatformGrok, AccountTypeAPIKey, "chat", "", "chat", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := capabilityTestAccount(1)
+			a.Platform, a.Type = tc.platform, tc.kind
+			a.Credentials["api_protocol"] = tc.upstream
+			a.Extra["openai_responses_supported"] = tc.upstream != APIProtocolChatCompletions
+			a.Extra[capabilityExtraKey(tc.learned)] = map[string]any{"fingerprint": capabilityFingerprint(a), "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)}
+			ctx := resilience.WithCapabilityRequest(context.Background(), tc.inbound, false)
+			require.Equal(t, tc.want, a.CapabilityExclusion(ctx, "grok-4.6", time.Now()) != nil)
+		})
+	}
 }
