@@ -22,22 +22,25 @@ type openAIShareTestEnv struct {
 	repo  schedulerTestOpenAIAccountRepo
 }
 
-func newOpenAIShareTestEnv(t *testing.T, policy sharesched.Policy, ids ...int64) *openAIShareTestEnv {
+func newOpenAIShareTestEnv(t *testing.T, setup shareTestSetup, ids ...int64) *openAIShareTestEnv {
 	t.Helper()
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	policy := setup.policy
 	require.NoError(t, policy.Validate())
 	accounts := make([]Account, 0, len(ids))
 	for _, id := range ids {
-		accounts = append(accounts, Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive,
-			Schedulable: true, Concurrency: 5, AccountGroups: []AccountGroup{{GroupID: shareTestGroupID}}})
+		acc := Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive,
+			Schedulable: true, Concurrency: 5, AccountGroups: []AccountGroup{{GroupID: shareTestGroupID}}}
+		setup.apply(&acc)
+		accounts = append(accounts, acc)
 	}
 	repo := schedulerTestOpenAIAccountRepo{accounts: accounts}
 	cache := newShareTestCache()
 	conc := newShareTestConcurrency()
 	share := NewShareSchedulingService(nil, nil, nil)
-	policy.Freeze() // as decodeShareGroupPolicy does
+	share.attributionRate = 1
 	share.state.Store(&shareSchedulingState{
-		settings: ShareSchedulingSettings{Enabled: true, CacheAttribution: true, AttributionSampleRate: 1, DecisionSamples: true},
+		settings: ShareSchedulingSettings{Enabled: true},
 		groups:   map[int64]*shareGroupPolicy{shareTestGroupID: {groupID: shareTestGroupID, version: 1, policy: policy}},
 	})
 	cfg := &config.Config{}
@@ -109,14 +112,13 @@ func TestOpenAIShareSchedulingNewSessionsFollowWeights(t *testing.T) {
 }
 
 func TestOpenAIShareSchedulingSpillsAndRebinds(t *testing.T) {
-	policy := twoAccountPolicy()
-	policy.Affinity.Wait.MaxWaiting = 0
-	env := newOpenAIShareTestEnv(t, policy, 1, 2)
+	env := newOpenAIShareTestEnv(t, twoAccountPolicy(), 1, 2)
 	target, other := openAIShareTarget(t, "busy")
 	env.cache.bind("openai:busy", target, time.Hour-30*time.Second)
 	env.conc.busy[target] = -1
 
-	result, _ := env.selectAccount(t, cacheableContext(), "", "busy", nil)
+	// A short prompt has no cache worth waiting for.
+	result, _ := env.selectAccount(t, withShareRequestProfile(context.Background(), make([]byte, 400)), "", "busy", nil)
 	require.Equal(t, other, result.Account.ID)
 	require.Equal(t, other, env.cache.sessionBindings["openai:busy"])
 	require.Equal(t, int64(1), env.counter(shareStatsReasonPrefix+string(sharesched.ReasonSpillRebind)))
@@ -136,16 +138,17 @@ func TestOpenAIShareSchedulingSoftSpillKeepsBinding(t *testing.T) {
 }
 
 func TestOpenAIShareSchedulingAdmissionBindKeepsPlannedBinding(t *testing.T) {
-	policy := twoAccountPolicy()
-	policy.Affinity.Wait.MaxWaiting = 0
-	policy.Affinity.OnSpill = sharesched.OnSpillKeep
-	env := newOpenAIShareTestEnv(t, policy, 1, 2)
+	env := newOpenAIShareTestEnv(t, twoAccountPolicy(), 1, 2)
 	target, other := openAIShareTarget(t, "keep")
+	// A one-minute rate limit is a soft penalty: the request spills and the
+	// binding stays with the bound account.
+	resetAt := time.Now().Add(time.Minute)
+	env.account(target).RateLimitResetAt = &resetAt
 	env.cache.bind("openai:keep", target, time.Hour-30*time.Second)
-	env.conc.busy[target] = -1
 
 	result, _ := env.selectAccount(t, cacheableContext(), "", "keep", nil)
 	require.Equal(t, other, result.Account.ID)
+	require.Equal(t, int64(1), env.counter(shareStatsReasonPrefix+string(sharesched.ReasonSoftSpill)))
 
 	// The WebSocket ingress binds after every admission; a spill that keeps
 	// the binding must survive it.
@@ -212,13 +215,14 @@ func TestOpenAIShareSchedulingReadsLegacySessionKey(t *testing.T) {
 }
 
 func TestOpenAIShareSchedulingShadowAndBypasses(t *testing.T) {
+	// A stored shadow policy runs the original scheduler and compares nothing.
 	env := newOpenAIShareTestEnv(t, shareTestPolicy(sharesched.SchedulerShadow,
-		sharesched.AccountRule{AccountID: 1, Tier: 1, Weight: 3},
-		sharesched.AccountRule{AccountID: 2, Tier: 1, Weight: 1}), 1, 2)
+		shareRule{AccountID: 1, Tier: 1, Weight: 3},
+		shareRule{AccountID: 2, Tier: 1, Weight: 1}), 1, 2)
 	_, decision := env.selectAccount(t, context.Background(), "", "shadow", nil)
 	require.NotEqual(t, openAIAccountScheduleLayerShare, decision.Layer)
 	require.Empty(t, env.cache.created)
-	require.Eventually(t, func() bool { return env.counter(shareStatsShadowField) == 1 }, 2*time.Second, 10*time.Millisecond)
+	require.Zero(t, env.counter(shareStatsRequestsField), "no share decision is made or compared")
 
 	share := newOpenAIShareTestEnv(t, twoAccountPolicy(), 1, 2)
 	gid := shareTestGroupID

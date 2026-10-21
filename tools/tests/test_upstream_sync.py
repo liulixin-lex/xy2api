@@ -17,6 +17,24 @@ SPEC.loader.exec_module(SYNC)
 
 
 class UpstreamSyncTests(unittest.TestCase):
+    def test_load_json_rejects_duplicate_keys(self):
+        # A duplicated key silently drops the first value: a required
+        # literal written twice in one object was never checked.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "policy.json"
+            path.write_text('{"items": [\n  {"path": "a", "value": "x",\n   "path": "b", "value": "y"}\n]}\n', encoding="utf-8")
+            with self.assertRaises(SYNC.SyncError) as raised:
+                SYNC.load_json(path)
+            self.assertIn('duplicate key "path"', str(raised.exception))
+            self.assertIn("line 2", str(raised.exception))
+            path.write_text('{"items": [{"path": "a", "value": "x"}, {"path": "b", "value": "y"}]}', encoding="utf-8")
+            self.assertEqual(SYNC.load_json(path)["items"][1]["path"], "b")
+
+    def test_policy_has_no_duplicate_keys(self):
+        policy = SYNC.load_policy()
+        literals = {(item["path"], item["value"]) for item in policy["required_literals"]}
+        self.assertIn(("frontend/src/components/common/GroupSelector.vue", 'data-test="group-exclusive-tag"'), literals)
+
     def test_module_normalization_is_byte_exact(self):
         source = b"github.com/Wei-Shaw/sub2api"
         target = b"github.com/liulixin-lex/xy2api"

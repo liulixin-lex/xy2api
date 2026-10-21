@@ -6,6 +6,46 @@
 
 ## 当前交接状态
 
+### 份额调度精简 `20261020-share-simplify`（进行中；2026-10-20T18:05Z 更新）
+
+- **背景**：仓库外的只读分析（`xy2api-artifacts/share-simplify-20261020/`：A 后端审计、B 前端交互审计、C 生产只读分析、D PM 综合、E 实施说明）结论：份额调度难用的根因是它是第二套、按分组维护、与账号池脱节的配置。管理员日常用的是账号级的优先级、启停与负载因子；策略配置一次后就与账号池偏离；编辑器改权重会冻结层级；缺省权重“等权”= 1 与手填权重不在同一刻度；大多数账号跨多个分组；高级参数与观测模块在生产中从未使用。
+- **目标**：用户 2026-10-20 决定“按你的最佳方案进行。授权到 PR，暂不到服务器测试和发版”。按 E 实施说明执行：
+  - 份额分组的层级 = 账号优先级，权重 = 负载因子（`EffectiveLoadFactor()`），满载与原版对齐；
+  - 每组只剩调度方式（`shadow` 读成原版）与会话保持，全局只剩总开关，其余参数常量化；
+  - 软溢出改用韧性判定；
+  - 删除影子、重平衡、纠偏、选号开销、决策样本、缓存域、排空；
+  - 管理接口按新模型重写。
+- **要求与约束**：
+  - 一个 PR，提交分层（契约 → 后端语义 → 后端删除 → 前端 → 文档与登记）；不改 `VERSION`；不新增迁移；
+  - 保存只改两个字段，保证可回退到 0.4.3 / 0.3.0；
+  - 推送与开 PR 等 PM 通知；不合并、不打 tag、不发版、不连任何服务器；
+  - 前端由另一位 agent 在 `wip/share-simplify-frontend` 分支开发，最后并入本分支。
+- **已完成**：
+  - 契约提交，即 OpenSpec 变更 [`simplify-share-scheduling-20261020`](../openspec/changes/simplify-share-scheduling-20261020/design.md)（design §7 为管理接口契约）；PM 2026-10-20 批准，附 5 处修订（已写入 design）；
+  - 后端语义提交（tasks §2）：内核按优先级与负载因子选号，权重只经 `shareWeight` 取值；参数常量化；软溢出取韧性判定（韧性总开关关闭时回到 0.3.0 规则）；满载闸门；纠偏与选号开销删除；旧版解码器 golden 在 `sharesched/compat043`。
+  - 接口重写与模块删除（tasks §3）：管理接口按 design §7；影子、重平衡、决策样本、首字直方图删除，两个旧接口返回 410；`cache` 小时桶保留 194 小时，切换锚点 `xy2:share:switched:<group>`；本地 PG 18 执行计划写入 design §8。
+  - 自适应权重（tasks §4，PM 2026-10-20 追加，design §11）：有效权重 = 负载因子 × 健康系数 × 爬升系数，在 `shareWeight` 一处叠加；健康系数读 `ops_error_logs.upstream_errors` 与 `usage_logs`，后台每 60 秒刷新；报表输出 `hot_migrations`，不再写 `served`/`ideal`/`ideal_skip`/`key` 计数。
+  - 前端分支并入（`6927438d0`）；文档与登记：`SHARE_SCHEDULING.md` 重写、`GATEWAY_RESILIENCE.md` §8、`account-scheduling.md`、旧变更状态、`docs_consistency.json` 三条 retired、`policy.json` 两条 AccountsView 钩子；`policy.json` 的重复键拆开，`sync.py` 读取时拒绝重复键（`97b3fbcc3`）。
+  - 本机联调（本地 PG 18 与 Redis，只监听本机）：切换后第一次请求起就按健康系数加权（`70bb80673`）；前端联调修复并入（`2e3f7f424`）。联调结束，后端进程、临时库 `xy2e2e`、本地 Redis 第 2 库、临时管理员凭据与本地 PG/Redis 实例的数据目录均已删除。
+  - 全部门禁在 `2e3f7f424` 的干净树上通过：gofmt、四种 vet、golangci-lint、`make generate` 零 diff、`-tags=unit` 与无 tag 测试、`ci_gate.py`（282 个，`-race`，0 SKIP）、`-tags embed` 构建（含前端产物）、前端 lint:check / typecheck / test:run（3134 个）/ build、`tools/tests`、scheduler-diff、文档一致性检查、`sync.py audit`。
+  - 独立审查（仓库外报告 H）结论“需修复后推送”，无 P0。后端修复 `530f94753`、文档 `02fb8fe41`，前端修复并入（`92d7c13c6`），每项先写失败用例：
+    - 热迁移分为份额主动与被动，报表 `hot_migrations.active`，回退线只看它；
+    - proposal 补自适应权重；生产账号号码改为代号；
+    - 从切换点截断的窗口不混入切换前的归因计数；`"affinity": null` 时关闭会话保持不再 panic；健康失败查询超限时按计数降序截断；
+    - 前端：切换时先保存分组再开总开关、空值与类型、系数分解可键盘访问、份额列节流。
+
+    全部门禁在 `92d7c13c6` 的干净树上重跑通过。`reenabled` 采样粒度登记 tasks §8。
+  - 修复经 PM 审核通过（`7dd363a66`）。之后补审查 P2-9 第二点：`docs_consistency.json` 的 `retired` 登记解码器接受并忽略的旧策略字段名（`592f67c2b`）；并入前端的精度说明修复（`400ab364e`）。
+  - 复核结论“可以推送”。分支已推送，Draft [PR #117](https://github.com/liulixin-lex/xy2api/pull/117)（base `main`，头 `c0579a624`）。Draft 的原因：测试服务器场景、升级演练与发版尚未授权。CI 与安全扫描的 push、pull_request 两组共 18 项全部通过，含 integration。
+  - 记忆提交 `e03e9e188` 的 push 运行中，`shell` 作业（macOS 运行机）因 GitHub 托管运行机容量不足被取消，未执行任何步骤，重跑一次同样被取消。同一提交 pull_request 运行的 `shell` 已通过，其余作业全部通过。PM 决定以 pull_request 那次为准，PR 评论已写明：**合并前需重跑该作业并确认通过**。
+- **未完成**：等 PM 决定后续（合并、测试服务器场景、升级演练与发版均未授权）。
+- **卡点与风险**：
+  - 升级瞬间份额分组的新会话分布改由负载因子决定，负载因子很大的账号会拿到绝大多数新会话；
+  - 改负载因子同时影响该账号所在的原版分组。
+
+  见 design §10。
+- **关键位置**：分支 `feat/share-simplify-20261020`（自 origin/main `3092629d7`）；`openspec/changes/simplify-share-scheduling-20261020/`；份额代码在 `backend/internal/sharesched` 与 `backend/internal/service/share_scheduling_*.go`。
+
 ### XY2API 0.4.3 正式发布完成（2026-10-20；生产未部署）
 
 - 发布：`v0.4.3`（annotated 对象 `f30434efb`）→ main 合并提交 `888f49db8`（[PR #114](https://github.com/liulixin-lex/xy2api/pull/114)，头 `972a2211c`，两者源码树相同）。Release run 39392556340；6 个附件（198,544,619 字节）双 SHA 校验通过；五平台 `vcs.revision=888f49db8`、`vcs.modified=false`、embed 构建；GHCR index `sha256:1a2b9127…` 双架构，version、revision、source 标签正确；latest/0/0.4 指向 0.4.3，0.3 仍为 0.3.0；tag 触发的 CI 与安全扫描全绿。
@@ -100,7 +140,11 @@
 
 ## 进行中的工作
 
-- 无。
+### 20261020-share-simplify — 份额调度精简（2026-10-20T12:20Z 登记）
+
+- 请求：用户 2026-10-20 授权到 PR，范围见顶部同名小节与 E 实施说明（仓库外）。本会话是后端 agent，持有 PR 分支 `feat/share-simplify-20261020`；前端 agent 持有 `wip/share-simplify-frontend`；PM 会话协调。
+- 状态：复核通过，已推送并开 Draft [PR #117](https://github.com/liulixin-lex/xy2api/pull/117)，CI 与安全扫描全绿（2026-10-20T17:19Z）。push 运行的 `shell` 作业因运行机容量被取消，合并前需重跑并确认通过（PR 评论已说明）。等 PM 决定后续；不合并、不打 tag、不发版。工作树 `xy2api-wt/share-backend` 保留，后续测试服务器验证可能追加提交。
+- 本机联调的管理员合规承诺：由用户 2026-10-20 授权（协调会话转达），仅在本机临时库 `xy2e2e` 中为本地临时管理员接受；联调结束已随库删除。
 
 ## 操作陷阱
 
@@ -725,3 +769,84 @@ pnpm --dir frontend run build
 - 验证：见上。本收尾为纯文档，跑了文档一致性检查、`sync.py audit` 和 `tools/tests`。
 - 卡点/风险：等待 CI 的脚本在 zsh 下不拆分 `$ids`，空转到时限被停，改用 bash 脚本。macOS 自带的 bash 3.2 没有 `mapfile`。
 - 下一步：见“当前交接状态”中 0.4.3 的遗留与去向。
+
+### 2026-10-20T12:20Z — `20261020-share-simplify` — 只读分析完成，开始实施
+
+- 请求/目标：用户要求在保留必要功能的前提下精简份额调度（设置、界面与模块），允许打破现有框架。先由多个 agent 做只读分析，再由用户决定方案。
+- 开始状态：origin/main `3092629d7`（0.4.3 加文档）；分析期间未改仓库。
+- 完成操作：
+  - 只读分析，报告在仓库外 `xy2api-artifacts/share-simplify-20261020/`：
+    - A 后端审计：设置与模块清单、数据模型替代方案、原版调度对比，以及对 PM 方案的复核；
+    - B 前端交互审计（含截图）；
+    - C 生产只读分析：管理员的真实用法、账号池结构、影子数据；
+    - D PM 综合；
+    - E 实施说明。
+  - 用户决定按 D 的推荐执行（核心方向、删除排空、删除影子、不浸泡），授权到 PR。
+  - 建立分支 `feat/share-simplify-20261020`，提交 OpenSpec 变更与本登记。
+- 修改文件：`openspec/changes/simplify-share-scheduling-20261020/`（新增）、`docs/README.md`、`tools/upstream-sync/policy.json`（`xy_owned`）、本文件。
+- 验证：`check_docs_consistency.py`。
+- 卡点/风险：见顶部同名小节。
+- 下一步：等 PM 确认契约；其间先做不影响契约的后端语义改动。
+
+### 2026-10-20T15:37Z — `20261020-share-simplify` — 实现与本机联调完成，门禁全绿，待独立审查
+
+- 请求/目标：按 E 实施说明与 PM 的逐层批准完成后端、并入前端、本机联调、文档与登记，跑全部门禁后交 PM 安排独立审查。
+- 开始状态：分支 `feat/share-simplify-20261020`（自 origin/main `3092629d7`），契约提交 `47d48d6bc` 之后。
+- 完成操作：
+  - 后端：语义层（`4e0a34b6e`）、韧性关闭回退修复（`afc6e7153`）、接口重写与模块删除（`b5a2242db`）、计数精简（`5e1447c7e`）、自适应权重（`6d8ba41af`）、原版组按需健康系数（`b9b0232ce`）、切换后立即生效的健康系数与因子取整（`70bb80673`）。
+  - 前端分支两次 `--no-ff` 并入（`6927438d0`、`2e3f7f424`）；文档与登记（`a3a13acfc`）；`policy.json` 重复键修复与 `sync.py` 严格解码（`97b3fbcc3`）。
+  - 本机联调：本地 PG 18 与 Redis（只监听本机），种子与脚本在仓库外；结束后停进程、删临时库与 Redis 第 2 库、删临时凭据，停掉本地实例并删除数据目录。
+- 修改文件：相对 origin/main 共 107 个文件，+9418 −7327（本条记录之前）。后端产品 +2488 −2399，后端测试 +2533 −1344，前端产品 +2417 −2890，前端测试 +1028 −596，文档与 OpenSpec +840 −94，工具 +112 −4。
+- 验证：上面“当前交接状态”所列全部门禁在干净树上通过。
+- 卡点/风险：见顶部同名小节与 design §10。
+- 下一步：等独立审查；审查通过并经 PM 通知后推送开 PR，不合并、不打 tag。
+
+### 2026-10-20T16:32Z — `20261020-share-simplify` — 独立审查修复完成，门禁全绿，待复核
+
+- 请求/目标：独立审查（仓库外报告 H，头 `684d83f5e`）结论“需修复后推送”，无 P0。PM 分工：后端修 P1-1 的后端部分、P1-2、P1-3 与 P2-1、P2-2、P2-4、P2-9 的爬升触发；前端在自己的分支修其余前端项；`reenabled` 采样粒度登记后续。
+- 开始状态：`684d83f5e`，工作树干净。
+- 完成操作：
+  - `530f94753`：内核 `Reason.ActiveMigration`（`realign_cold`、`return_cold`；`spill_rebind` 与已退役原因不算主动），报表 `hot_migrations.active`；从切换点截断的窗口精确读取归因计数；`"affinity": null` 的空值处理；健康失败查询 `ORDER BY 6 DESC, 1, 2, 3, 4, 5`。每项先写失败用例并确认修复前失败。
+  - `02fb8fe41`：proposal、design 的生产账号号码、解码夹具里的生产账号号码、`GATEWAY_RESILIENCE.md` 的第三种爬升触发、tasks 4.5、5.2、6.4 与 §8。
+  - 前端 `8746c1951` 以 `--no-ff` 并入（`92d7c13c6`）。
+  - 全分支扫描生产编号与主机信息：除上述两处外没有命中。
+- 修改文件：见上述提交。
+- 验证：
+  - 在 `92d7c13c6` 的干净树上重跑：gofmt、四种 vet、golangci-lint、`make generate` 零 diff、`-tags=unit` 与无 tag 测试、`ci_gate.py`（282 个，0 SKIP）、`-tags embed` 构建、前端四项（3147 个用例）、`tools/tests`、scheduler-diff、文档一致性检查，全部通过。`sync.py audit` 在记忆提交后的干净树上运行。
+  - 本机没有 Docker，集成测试在本机跳过。失败查询的排序在临时的本机 PG 18 上验证，用完即删。
+- 卡点/风险：见顶部同名小节。
+- 下一步：等审查 agent 复核；复核通过并经 PM 通知后推送开 PR，不合并、不打 tag。
+
+### 2026-10-20T16:42Z — `20261020-share-simplify` — 旧策略字段名登记为退役，并入前端精度说明
+
+- 请求/目标：PM 审核通过 `7dd363a66`，同意两处口径（`spill_rebind` 算被动、已退役原因只计 `total`）与夹具号码的改动；要求补审查 P2-9 第二点，并入前端 `061f8fea7` 后重跑。
+- 完成操作：
+  - `592f67c2b`：`retired` 新增一条，登记 `soft_spill_max_seconds`、`ms_per_1k_tokens`、`return_deadline_seconds`、`stable_seconds`、`on_spill`、`on_saturated`、`on_failed`、`min_volume`、`cache_domain`、`drain_until` 与 `"realign"`。只在 `sharesched/policy.go`、`policy_test.go`、`compat043/`、两个份额变更、网关韧性 design 与记忆中放行。
+  - `correction`、`window_minutes`、`ttl_seconds`、`max_ms`、`max_waiting`、`drain` 在别处仍在用，不登记。
+  - 仍点名旧字段的 5 处注释改写（`resilience_session.go`、`share_scheduling_exec.go`、`share_scheduling_service.go`、`share_scheduling_resilience_test.go`、`tools/share-scheduling/baseline.sql`）。
+  - 前端 `061f8fea7` 以 `--no-ff` 并入（`400ab364e`）。
+- 修改文件：见上述提交。
+- 验证：
+  - 规则在基线 `3092629d7` 上命中放行范围外 20 个文件、103 处（旧编辑器、接口类型、内核与服务），在当前树上为 0。
+  - 本轮后端只改了注释，`internal/service` 的 vet、lint 与份额用例通过；完整的后端门禁沿用 `92d7c13c6` 的结果。
+  - 在 `400ab364e` 上重跑前端四项（408 个文件、3148 个用例），以及 `tools/tests`、scheduler-diff、文档一致性检查，全部通过；`sync.py audit` 在记忆提交后的干净树上运行。
+- 下一步：等审查 agent 复核；复核通过并经 PM 通知后推送开 PR。
+
+### 2026-10-20T17:19Z — `20261020-share-simplify` — 复核通过，推送并开 Draft PR #117，CI 全绿
+
+- 请求/目标：独立审查复核结论“可以推送”。PM 要求推送、开 Draft PR，等 CI，再把记忆作为追加提交推送。授权范围到 PR，不合并、不打 tag、不发版、不连任何服务器。
+- 开始状态：`c0579a624`，工作树干净，提交身份为 noreply。
+- 完成操作：
+  - 推送前扫描待推送提交的新增行与提交说明：各任务私有清单里的主机、域名、路径 0 命中；IP、绝对路径、私钥、令牌类模式 0 命中。
+  - 按规定的凭据方式推送 `feat/share-simplify-20261020`，`ls-remote` 核对远端头为 `c0579a624`。
+  - 开 Draft [PR #117](https://github.com/liulixin-lex/xy2api/pull/117)（base `main`，可合并）。描述写明目标与新模型、删除与保留、R1–R3 的口径与失效条件、兼容与回退、升级注意、验证与未做项、文档链接与后续事项。
+- 验证：CI（push 与 pull_request）、Security Scan（push 与 pull_request）共 18 项全部通过。`test` 作业的 unit 与 integration 都通过，integration 在真实容器里跑了 `internal/repository`。
+- 修改文件：本文件（追加提交）。
+- 下一步：等 PM 决定合并与发版步骤；测试服务器场景、升级演练与浸泡需要另行授权。
+
+### 2026-10-20T18:05Z — `20261020-share-simplify` — PR #117 的 CI 说明
+
+- 记忆提交 `e03e9e188` 的 push 运行（CI run 39465158255）中，`shell` 作业在 macOS 运行机上排队未被领取，GitHub 以容量不足取消，未执行任何步骤；重跑一次同样被取消。
+- 同一提交的 pull_request 运行（39465165734）全部通过，含 `shell`。两次 Security Scan 也都通过。
+- PM 决定以 pull_request 那次为准，不再重跑。PR #117 已发评论说明，合并前需重跑该作业并确认通过。
+- 下一步：等 PM 决定合并与发版步骤。工作树保留。

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/sharesched"
@@ -114,30 +113,8 @@ func (s *ShareSchedulingService) shareBindingTTL(groupID int64) (time.Duration, 
 	if s == nil {
 		return 0, false
 	}
-	gp := s.groupPolicy(groupID)
-	if gp == nil || gp.policy.Scheduler != sharesched.SchedulerShare {
+	if !s.shareSchedulingActive(groupID) {
 		return 0, false
 	}
-	return time.Duration(gp.policy.Affinity.TTLSeconds) * time.Second, true
-}
-
-// shareProtectedBindingPrefixes are keys stored next to session bindings
-// that carry protocol continuation or ownership, not placement. A rebalance
-// must never delete them.
-var shareProtectedBindingPrefixes = []string{
-	openAIWSResponseAccountCachePrefix,
-	openAIHTTPResponseOwnerUserPrefix,
-	openAIHTTPResponseOwnerKeyPrefix,
-	"openai:grok-video:",
-}
-
-// IsShareRebalanceableBinding reports whether a session binding key (the
-// part after the group id) is a placement that a rebalance may clear.
-func IsShareRebalanceableBinding(sessionKey string) bool {
-	for _, prefix := range shareProtectedBindingPrefixes {
-		if strings.HasPrefix(sessionKey, prefix) {
-			return false
-		}
-	}
-	return sessionKey != ""
+	return sharesched.BindingTTL, true
 }

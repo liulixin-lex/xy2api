@@ -48,6 +48,7 @@
       "openspec/changes/iq-detection-operations/**",
       "openspec/changes/replace-controlled-with-share-scheduling/**",
       "openspec/changes/gateway-resilience-20261015/**",
+      "openspec/changes/simplify-share-scheduling-20261020/**",
       "skills/**",
       "tools/**"
     ],
@@ -862,7 +863,9 @@
     },
     {
       "path": "frontend/src/components/common/GroupSelector.vue",
-      "value": "data-test=\"group-exclusive-tag\"",
+      "value": "data-test=\"group-exclusive-tag\""
+    },
+    {
       "path": "backend/internal/repository/account_repo.go",
       "value": "entsql.OrderByField(dbaccount.FieldLastUsedAt, direction, entsql.OrderNullsLast()).ToFunc(),"
     },
@@ -897,6 +900,14 @@
     {
       "path": "frontend/src/views/admin/AccountsView.vue",
       "value": "const result = await adminAPI.accounts.getBatchRecentHealth(accountIDs)"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "useAccountShareColumn(() => params.group)"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "if (!nextSchedulable) void notifyShareImpact(a)"
     },
     {
       "path": "frontend/src/views/admin/UsageView.vue",

@@ -17,11 +17,10 @@ import (
 // the advanced scheduler and the Gateway.
 
 func TestResilienceOpenAILegacySchedulerKeepsSoftBinding(t *testing.T) {
-	rules := []sharesched.AccountRule{{AccountID: lrAccountA, Tier: 1, Weight: 1}, {AccountID: lrAccountB, Tier: 1, Weight: 1}}
 	const key = "openai:" + lrSession
 
 	t.Run("last_resort", func(t *testing.T) {
-		env := newOpenAILastResortEnv(t, sharesched.SchedulerSub2API, 5, 1, rules...)
+		env := newOpenAILastResortEnv(t, sharesched.SchedulerSub2API, 5, 1)
 		env.cache.bind(key, lrAccountA, time.Hour-time.Minute)
 		sel := selectOpenAILastResort(t, env)
 		require.Equal(t, lrAccountB, sel.Account.ID, "the original order is by priority")
@@ -29,7 +28,7 @@ func TestResilienceOpenAILegacySchedulerKeepsSoftBinding(t *testing.T) {
 	})
 
 	t.Run("healthy_alternative", func(t *testing.T) {
-		env := newOpenAILastResortEnv(t, sharesched.SchedulerSub2API, 5, 1, rules...)
+		env := newOpenAILastResortEnv(t, sharesched.SchedulerSub2API, 5, 1)
 		healthy := env.account(lrAccountB)
 		healthy.TempUnschedulableUntil, healthy.TempUnschedulableReason = nil, ""
 		healthy.RateLimitResetAt, healthy.OverloadUntil = nil, nil

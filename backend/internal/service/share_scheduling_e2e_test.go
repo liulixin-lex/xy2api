@@ -122,9 +122,9 @@ type shareE2E struct {
 	version  int64
 }
 
-func newShareE2E(t *testing.T, policy sharesched.Policy, accounts ...Account) *shareE2E {
+func newShareE2E(t *testing.T, setup shareTestSetup, accounts ...Account) *shareE2E {
 	t.Helper()
-	env := newShareTestEnv(t, policy, accounts...)
+	env := newShareTestEnv(t, setup, accounts...)
 	env.share.store = &shareMemoryStore{}
 	e := &shareE2E{t: t, env: env, now: time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC), turns: map[string]int{}, version: 3,
 		upstream: &shareSyntheticUpstream{ttl: 5 * time.Minute, cached: map[int64]map[string]shareSimPrefix{}}}
@@ -166,14 +166,16 @@ func (e *shareE2E) bound(session string) int64 {
 	return e.cache.sessionBindings[session]
 }
 
-func (e *shareE2E) setPolicy(policy sharesched.Policy) {
-	require.NoError(e.t, policy.Validate())
-	e.version++
-	state := e.env.share.state.Load()
-	groups := maps.Clone(state.groups)
-	policy.Freeze()
-	groups[shareTestGroupID] = &shareGroupPolicy{groupID: shareTestGroupID, version: e.version, policy: policy}
-	e.env.share.state.Store(&shareSchedulingState{settings: state.settings, groups: groups})
+// setLoadFactors changes account priorities and load factors, as an
+// administrator does in the account settings.
+func (e *shareE2E) setLoadFactors(rules ...shareRule) {
+	setup := shareTestSetup{rules: rules}
+	for i := range e.env.repo.accounts {
+		setup.apply(&e.env.repo.accounts[i])
+	}
+	for _, acc := range e.env.repo.accountsByID {
+		setup.apply(acc)
+	}
 }
 
 // rateLimit marks an account limited until the given real time; nil clears it.
@@ -201,9 +203,9 @@ func TestShareSchedulingE2EWeightsOutagesAndPolicyChanges(t *testing.T) {
 	const a, b, c = int64(1), int64(2), int64(3)
 	accounts := []Account{{ID: a, Concurrency: 10_000}, {ID: b, Concurrency: 10_000}, {ID: c, Concurrency: 10_000}}
 	e := newShareE2E(t, shareTestPolicy(sharesched.SchedulerShare,
-		sharesched.AccountRule{AccountID: a, Tier: 1, Weight: 5},
-		sharesched.AccountRule{AccountID: b, Tier: 1, Weight: 3},
-		sharesched.AccountRule{AccountID: c, Tier: 1, Weight: 2}), accounts...)
+		shareRule{AccountID: a, Tier: 1, Weight: 5},
+		shareRule{AccountID: b, Tier: 1, Weight: 3},
+		shareRule{AccountID: c, Tier: 1, Weight: 2}), accounts...)
 	sessions := shareE2ESessions("conv", 3000)
 
 	// New sessions follow the weights within one percentage point.
@@ -274,7 +276,6 @@ func TestShareSchedulingE2EWeightsOutagesAndPolicyChanges(t *testing.T) {
 	require.InDelta(t, 0.6, float64(moved[b])/float64(len(onA)), 0.05, "B takes three fifths of A's sessions")
 	require.Equal(t, int64(len(onA)), e.counter(shareStatsReasonPrefix+string(sharesched.ReasonRebindUnavailable)))
 	require.Equal(t, int64(len(onA)), e.cacheCounter(shareStatsClassPrefix+shareCacheMissSwitchDown)-switchMisses)
-	require.GreaterOrEqual(t, e.counter(shareStatsIdealSkipPrefix+string(sharesched.ReasonRateLimited)), int64(len(onA)))
 	require.Equal(t, int64(len(onA)), e.counter(shareStatsHotMigrationField), "only the outage moved warm sessions")
 	e.rateLimit(a, nil)
 
@@ -287,11 +288,8 @@ func TestShareSchedulingE2EWeightsOutagesAndPolicyChanges(t *testing.T) {
 		require.Equal(t, before, id, "session %s", s)
 	}
 
-	// New weights and a drain without deadline move no warm session.
-	e.setPolicy(shareTestPolicy(sharesched.SchedulerShare,
-		sharesched.AccountRule{AccountID: a, Tier: 1, Weight: 2},
-		sharesched.AccountRule{AccountID: b, Tier: 1, Weight: 3, Drain: true},
-		sharesched.AccountRule{AccountID: c, Tier: 1, Weight: 5}))
+	// New load factors move no warm session; B nearly stops taking new ones.
+	e.setLoadFactors(shareRule{AccountID: a, Tier: 1, Weight: 2}, shareRule{AccountID: b, Tier: 1, Weight: 1}, shareRule{AccountID: c, Tier: 1, Weight: 7})
 	e.now = e.now.Add(30 * time.Second)
 	onB := 0
 	for _, s := range sessions {
@@ -303,24 +301,27 @@ func TestShareSchedulingE2EWeightsOutagesAndPolicyChanges(t *testing.T) {
 			onB++
 		}
 	}
-	require.Positive(t, onB, "the drained account keeps its warm sessions")
+	require.Positive(t, onB, "the account with a lower load factor keeps its warm sessions")
 	fresh := map[int64]int{}
 	for _, s := range shareE2ESessions("after-change", 700) {
 		id, _ := e.turn(s)
 		fresh[id]++
 	}
-	require.Zero(t, fresh[b], "a drained account takes no new session")
-	require.InDelta(t, 2.0/7, float64(fresh[a])/700, 0.05)
+	require.InDelta(t, 0.1, float64(fresh[b])/700, 0.04)
+	require.InDelta(t, 0.2, float64(fresh[a])/700, 0.05)
 
-	// Once caches are cold the drained account's sessions leave, still
+	// Once caches are cold, sessions realign to the new load factors, still
 	// without a single hot migration.
 	e.now = e.now.Add(6 * time.Minute)
+	stayedOnB := 0
 	for _, s := range sessions {
-		id, _ := e.turn(s)
-		require.NotEqual(t, b, id, "cold session %s leaves the drained account", s)
+		if id, _ := e.turn(s); id == b {
+			stayedOnB++
+		}
 	}
-	require.Equal(t, int64(onB), e.counter(shareStatsReasonPrefix+string(sharesched.ReasonDrainCold)))
-	require.Equal(t, int64(len(onA)), e.counter(shareStatsHotMigrationField), "policy changes moved no warm session")
+	require.Less(t, stayedOnB, onB/2, "most cold sessions leave B")
+	require.Positive(t, e.counter(shareStatsReasonPrefix+string(sharesched.ReasonRealignCold)))
+	require.Equal(t, int64(len(onA)), e.counter(shareStatsHotMigrationField), "load factor changes moved no warm session")
 }
 
 // TestShareSchedulingE2ETierReturnsInColdWindow is the tier part of task
@@ -328,11 +329,8 @@ func TestShareSchedulingE2EWeightsOutagesAndPolicyChanges(t *testing.T) {
 // 1 in their cold window.
 func TestShareSchedulingE2ETierReturnsInColdWindow(t *testing.T) {
 	const primary, backup = int64(1), int64(4)
-	policy := shareTestPolicy(sharesched.SchedulerShare,
-		sharesched.AccountRule{AccountID: primary, Tier: 1, Weight: 1},
-		sharesched.AccountRule{AccountID: backup, Tier: 2, Weight: 1})
-	policy.Tiers.StableSeconds = 0
-	e := newShareE2E(t, policy, Account{ID: primary, Concurrency: 1000}, Account{ID: backup, Concurrency: 1000})
+	e := newShareE2E(t, shareTestPolicy(sharesched.SchedulerShare),
+		Account{ID: primary, Priority: 1, Concurrency: 1000}, Account{ID: backup, Priority: 2, Concurrency: 1000})
 	sessions := shareE2ESessions("tier", 200)
 	for _, s := range sessions {
 		id, _ := e.turn(s)
@@ -358,6 +356,9 @@ func TestShareSchedulingE2ETierReturnsInColdWindow(t *testing.T) {
 		require.Positive(t, read)
 	}
 
+	// Tier 1 has been healthy for the stable period (120 s of real time,
+	// backdated here) and the caches have gone cold.
+	e.env.share.ineligible.Store(primary, time.Now().Add(-sharesched.StableFor-time.Second).UnixNano())
 	e.now = e.now.Add(6 * time.Minute)
 	for _, s := range sessions {
 		id, _ := e.turn(s)
@@ -368,15 +369,15 @@ func TestShareSchedulingE2ETierReturnsInColdWindow(t *testing.T) {
 }
 
 // TestShareSchedulingE2EFailoverOrderIsDeterministic is task 4.2: repeated
-// failures of one session walk the same accounts on every instance, and the
-// same cache domain comes first.
+// failures of one session walk the same accounts on every instance, with
+// accounts of the same class first and the next priority last.
 func TestShareSchedulingE2EFailoverOrderIsDeterministic(t *testing.T) {
-	rules := []sharesched.AccountRule{
-		{AccountID: 1, Tier: 1, Weight: 1, CacheDomain: "ws-a"}, {AccountID: 2, Tier: 1, Weight: 1, CacheDomain: "ws-a"},
+	rules := []shareRule{
+		{AccountID: 1, Tier: 1, Weight: 1}, {AccountID: 2, Tier: 1, Weight: 1},
 		{AccountID: 3, Tier: 1, Weight: 1}, {AccountID: 4, Tier: 1, Weight: 1},
 		{AccountID: 5, Tier: 1, Weight: 1}, {AccountID: 6, Tier: 2, Weight: 1},
 	}
-	accounts := []Account{{ID: 1}, {ID: 2}, {ID: 3}, {ID: 4}, {ID: 5}, {ID: 6}}
+	accounts := []Account{{ID: 1}, {ID: 2}, {ID: 3, Type: AccountTypeOAuth}, {ID: 4}, {ID: 5}, {ID: 6}}
 	walk := func(env *shareTestEnv, session string) []int64 {
 		env.cache.bind(session, 1, time.Hour-30*time.Second)
 		excluded := map[int64]struct{}{1: {}}
@@ -397,8 +398,8 @@ func TestShareSchedulingE2EFailoverOrderIsDeterministic(t *testing.T) {
 	}
 	for _, session := range shareE2ESessions("failover", 20) {
 		want := walk(instances[0], session)
-		require.Equal(t, int64(2), want[0], "the same cache domain is tried first")
-		require.Equal(t, int64(6), want[len(want)-1], "the next tier comes last")
+		require.Equal(t, int64(3), want[len(want)-2], "another account class comes after the same class")
+		require.Equal(t, int64(6), want[len(want)-1], "the next priority comes last")
 		for i := range 3 {
 			require.Equal(t, want, walk(instances[i%2], session), "session %s, repetition %d", session, i)
 		}
@@ -487,10 +488,9 @@ func TestShareSchedulingE2ESwitchesFallBackWithoutMigrating(t *testing.T) {
 	repo := &shareFlakyRepo{shareMemoryRepo: env.policies}
 	env.share.repo = repo
 	ctx := context.Background()
-	_, err := env.share.UpdateSettings(ctx, ShareSchedulingSettings{Enabled: true, CacheAttribution: true, AttributionSampleRate: 1})
+	_, err := env.share.UpdateSettings(ctx, true)
 	require.NoError(t, err)
-	_, err = env.save(t, 0, `{"scheduler":"share","accounts":[
-		{"account_id":1,"tier":1,"weight":5},{"account_id":2,"tier":1,"weight":3},{"account_id":3,"tier":1,"weight":2}]}`)
+	_, err = env.save(t, 0, shareUpdate)
 	require.NoError(t, err)
 
 	sessions := shareE2ESessions("switch", 60)
@@ -518,23 +518,22 @@ func TestShareSchedulingE2ESwitchesFallBackWithoutMigrating(t *testing.T) {
 
 	// Global switch off: the original scheduler serves every session from
 	// its existing binding.
-	_, err = env.share.UpdateSettings(ctx, ShareSchedulingSettings{Enabled: false, CacheAttribution: true, AttributionSampleRate: 1})
+	_, err = env.share.UpdateSettings(ctx, false)
 	require.NoError(t, err)
 	require.Nil(t, env.share.groupPolicy(shareTestGroupID))
 	served("global switch off")
 
 	// Group switch back to the original scheduler.
-	_, err = env.share.UpdateSettings(ctx, ShareSchedulingSettings{Enabled: true, CacheAttribution: true, AttributionSampleRate: 1})
+	_, err = env.share.UpdateSettings(ctx, true)
 	require.NoError(t, err)
-	_, err = env.save(t, 1, `{"scheduler":"sub2api","accounts":[{"account_id":1,"tier":1,"weight":5}]}`)
+	_, err = env.save(t, 1, sub2apiUpdate)
 	require.NoError(t, err)
 	require.Nil(t, env.share.groupPolicy(shareTestGroupID))
 	served("group switch off")
 
 	// Back on share scheduling, the policy store goes down: the last known
 	// policy keeps serving and nothing fails.
-	_, err = env.save(t, 2, `{"scheduler":"share","accounts":[
-		{"account_id":1,"tier":1,"weight":5},{"account_id":2,"tier":1,"weight":3},{"account_id":3,"tier":1,"weight":2}]}`)
+	_, err = env.save(t, 2, shareUpdate)
 	require.NoError(t, err)
 	repo.down.Store(true)
 	require.Error(t, env.share.reloadAll(ctx))

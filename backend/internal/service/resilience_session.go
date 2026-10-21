@@ -182,7 +182,7 @@ type shareLastResortRound struct {
 // the scheduler's view of soft and hard states (resiliencePenaltyOf when
 // nil); gate applies its original gates, in a last-resort context, to an
 // account whose soft restrictions are cleared.
-func (s *ShareSchedulingService) newShareLastResortRound(accounts []Account, model string, excluded, avoided map[int64]struct{}, boundID int64, now time.Time,
+func (s *ShareSchedulingService) newShareLastResortRound(groupID int64, accounts []Account, model string, excluded, avoided map[int64]struct{}, boundID int64, now time.Time,
 	include func(*Account) bool, penalty func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string),
 	gate func(acc *Account, sticky bool) sharesched.Reason) *shareLastResortRound {
 	if penalty == nil {
@@ -194,8 +194,7 @@ func (s *ShareSchedulingService) newShareLastResortRound(accounts []Account, mod
 		if include != nil && !include(&acc) {
 			continue
 		}
-		c := sharesched.Candidate{AccountID: acc.ID, Platform: acc.Platform, Class: shareAccountClass(&acc),
-			Priority: acc.Priority, Concurrency: acc.Concurrency}
+		c := s.shareCandidate(groupID, &acc, now)
 		tier, recoverAt, why := penalty(&acc, model, now)
 		_, isAvoided := avoided[acc.ID]
 		if acc.ID == boundID && !isAvoided && tier != resilience.TierHard {
@@ -206,8 +205,8 @@ func (s *ShareSchedulingService) newShareLastResortRound(accounts []Account, mod
 		}
 		switch _, failed := excluded[acc.ID]; {
 		case failed:
-			// Failed in this request: as in normal placement it only anchors
-			// on_failed=stop.
+			// Failed in this request: as in normal placement it is
+			// excluded and only anchors the spill order.
 			c.Excluded, c.Eligible = true, true
 		case tier == resilience.TierHard:
 			c.Reason = shareLastResortHardReason(&acc, why, now)
@@ -247,11 +246,11 @@ func shareLastResortHardReason(a *Account, why string, now time.Time) sharesched
 // plan runs the share plan over the round with the binding writes of last
 // resort: a soft-penalised owner keeps the binding, a binding to an avoided
 // account moves, and anything else follows the plan.
-func (r *shareLastResortRound) plan(p *sharesched.Policy, req sharesched.Request) sharesched.Decision {
+func (r *shareLastResortRound) plan(req sharesched.Request) sharesched.Decision {
 	if r.rebind {
 		req.Binding = sharesched.Binding{}
 	}
-	d := sharesched.Plan(p, req, r.cands)
+	d := sharesched.Plan(req, r.cands)
 	switch {
 	case r.rebind:
 		d.Write, d.Spill = sharesched.WriteReplace, sharesched.WriteReplace

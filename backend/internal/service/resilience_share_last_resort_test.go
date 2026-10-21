@@ -12,9 +12,9 @@ import (
 )
 
 // Review F3: in a share group, last resort is the share plan run once more
-// with soft-penalised accounts counted as eligible, so it follows tiers,
-// drain and the session binding like normal placement. Each case runs on
-// both schedulers; on the original scheduler last resort keeps ordering by
+// with soft-penalised accounts counted as eligible, so it follows priorities
+// and the session binding like normal placement. Each case runs on both
+// schedulers; on the original scheduler last resort keeps ordering by
 // priority, then by the end of the penalty.
 
 const (
@@ -27,11 +27,11 @@ const (
 var lastResortSchedulers = []sharesched.Scheduler{sharesched.SchedulerSub2API, sharesched.SchedulerShare}
 
 // newGatewayLastResortEnv builds a group of accounts A and B with the given
-// priorities and share rules, both in a soft cooldown.
-func newGatewayLastResortEnv(t *testing.T, scheduler sharesched.Scheduler, priorityA, priorityB int, rules ...sharesched.AccountRule) *shareTestEnv {
+// priorities, both in a soft cooldown.
+func newGatewayLastResortEnv(t *testing.T, scheduler sharesched.Scheduler, priorityA, priorityB int) *shareTestEnv {
 	t.Helper()
 	withResilienceSettings(t, nil)
-	env := newShareTestEnv(t, shareTestPolicy(scheduler, rules...),
+	env := newShareTestEnv(t, shareTestPolicy(scheduler),
 		Account{ID: lrAccountA, Priority: priorityA}, Account{ID: lrAccountB, Priority: priorityB})
 	now := time.Now()
 	softPenalise(env.repo.accountsByID[lrAccountA], now)
@@ -60,30 +60,13 @@ func selectGatewayLastResort(t *testing.T, env *shareTestEnv) (*AccountSelection
 	return result, st
 }
 
-func TestResilienceLastResortFollowsShareTiers(t *testing.T) {
-	// A is on tier 0 with priority 5, B on tier 1 with priority 1.
-	want := map[sharesched.Scheduler]int64{sharesched.SchedulerSub2API: lrAccountB, sharesched.SchedulerShare: lrAccountA}
+func TestResilienceLastResortFollowsPriorities(t *testing.T) {
+	// A has priority 5, B priority 1: both schedulers prefer B.
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newGatewayLastResortEnv(t, scheduler, 5, 1,
-				sharesched.AccountRule{AccountID: lrAccountA, Tier: 0, Weight: 1},
-				sharesched.AccountRule{AccountID: lrAccountB, Tier: 1, Weight: 1})
+			env := newGatewayLastResortEnv(t, scheduler, 5, 1)
 			result, _ := selectGatewayLastResort(t, env)
-			require.Equal(t, want[scheduler], result.Account.ID)
-		})
-	}
-}
-
-func TestResilienceLastResortSkipsDrainedAccounts(t *testing.T) {
-	// A is drained and has the better priority.
-	want := map[sharesched.Scheduler]int64{sharesched.SchedulerSub2API: lrAccountA, sharesched.SchedulerShare: lrAccountB}
-	for _, scheduler := range lastResortSchedulers {
-		t.Run(string(scheduler), func(t *testing.T) {
-			env := newGatewayLastResortEnv(t, scheduler, 1, 5,
-				sharesched.AccountRule{AccountID: lrAccountA, Tier: 1, Weight: 1, Drain: true},
-				sharesched.AccountRule{AccountID: lrAccountB, Tier: 1, Weight: 1})
-			result, _ := selectGatewayLastResort(t, env)
-			require.Equal(t, want[scheduler], result.Account.ID)
+			require.Equal(t, lrAccountB, result.Account.ID)
 		})
 	}
 }
@@ -91,10 +74,9 @@ func TestResilienceLastResortSkipsDrainedAccounts(t *testing.T) {
 func TestResilienceLastResortKeepsSoftBinding(t *testing.T) {
 	// The session is bound to A, which is only soft-penalised; B has the
 	// better priority. Whoever serves, the binding stays on A.
-	rules := []sharesched.AccountRule{{AccountID: lrAccountA, Tier: 1, Weight: 1}, {AccountID: lrAccountB, Tier: 1, Weight: 1}}
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newGatewayLastResortEnv(t, scheduler, 5, 1, rules...)
+			env := newGatewayLastResortEnv(t, scheduler, 5, 1)
 			env.cache.bind(lrSession, lrAccountA, time.Hour-time.Minute)
 			result, _ := selectGatewayLastResort(t, env)
 			if scheduler == sharesched.SchedulerShare {
@@ -106,7 +88,7 @@ func TestResilienceLastResortKeepsSoftBinding(t *testing.T) {
 		})
 	}
 	t.Run("share/bound_busy", func(t *testing.T) {
-		env := newGatewayLastResortEnv(t, sharesched.SchedulerShare, 5, 1, rules...)
+		env := newGatewayLastResortEnv(t, sharesched.SchedulerShare, 5, 1)
 		env.cache.bind(lrSession, lrAccountA, time.Hour-time.Minute)
 		env.conc.busy[lrAccountA] = -1
 		result, _ := selectGatewayLastResort(t, env)
@@ -118,10 +100,9 @@ func TestResilienceLastResortKeepsSoftBinding(t *testing.T) {
 
 func TestResilienceLastResortRebindsFromHardBoundAccount(t *testing.T) {
 	// The bound account is out of balance (hard): the session moves.
-	rules := []sharesched.AccountRule{{AccountID: lrAccountA, Tier: 1, Weight: 1}, {AccountID: lrAccountB, Tier: 1, Weight: 1}}
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newGatewayLastResortEnv(t, scheduler, 1, 5, rules...)
+			env := newGatewayLastResortEnv(t, scheduler, 1, 5)
 			until := time.Now().Add(time.Hour)
 			a := env.repo.accountsByID[lrAccountA]
 			a.TempUnschedulableUntil, a.TempUnschedulableReason = &until, resilience.ReasonPrefixBalanceExhausted+": HTTP 402"
@@ -135,12 +116,11 @@ func TestResilienceLastResortRebindsFromHardBoundAccount(t *testing.T) {
 
 func TestResilienceLastResortRebindsFromAvoidedAccount(t *testing.T) {
 	// The session avoids its healthy bound account A after a failure
-	// streak; B is soft-penalised and preferred by tier and priority. B
-	// serves and takes the binding.
-	rules := []sharesched.AccountRule{{AccountID: lrAccountA, Tier: 1, Weight: 1}, {AccountID: lrAccountB, Tier: 0, Weight: 1}}
+	// streak; B is soft-penalised and preferred by priority. B serves and
+	// takes the binding.
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newGatewayLastResortEnv(t, scheduler, 5, 1, rules...)
+			env := newGatewayLastResortEnv(t, scheduler, 5, 1)
 			a := env.repo.accountsByID[lrAccountA]
 			a.TempUnschedulableUntil, a.TempUnschedulableReason = nil, ""
 			r := env.gateway.resilience
@@ -207,10 +187,10 @@ func TestResilienceLastResortGrantsStickyAllowanceToBoundAccount(t *testing.T) {
 }
 
 // newOpenAILastResortEnv is newGatewayLastResortEnv for the OpenAI scheduler.
-func newOpenAILastResortEnv(t *testing.T, scheduler sharesched.Scheduler, priorityA, priorityB int, rules ...sharesched.AccountRule) *openAIShareTestEnv {
+func newOpenAILastResortEnv(t *testing.T, scheduler sharesched.Scheduler, priorityA, priorityB int) *openAIShareTestEnv {
 	t.Helper()
 	withResilienceSettings(t, nil)
-	env := newOpenAIShareTestEnv(t, shareTestPolicy(scheduler, rules...), lrAccountA, lrAccountB)
+	env := newOpenAIShareTestEnv(t, shareTestPolicy(scheduler), lrAccountA, lrAccountB)
 	now := time.Now()
 	env.account(lrAccountA).Priority = priorityA
 	env.account(lrAccountB).Priority = priorityB
@@ -238,36 +218,20 @@ func selectOpenAILastResort(t *testing.T, env *openAIShareTestEnv) *AccountSelec
 	return sel
 }
 
-func TestResilienceOpenAILastResortFollowsShareTiers(t *testing.T) {
-	want := map[sharesched.Scheduler]int64{sharesched.SchedulerSub2API: lrAccountB, sharesched.SchedulerShare: lrAccountA}
+func TestResilienceOpenAILastResortFollowsPriorities(t *testing.T) {
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newOpenAILastResortEnv(t, scheduler, 5, 1,
-				sharesched.AccountRule{AccountID: lrAccountA, Tier: 0, Weight: 1},
-				sharesched.AccountRule{AccountID: lrAccountB, Tier: 1, Weight: 1})
-			require.Equal(t, want[scheduler], selectOpenAILastResort(t, env).Account.ID)
-		})
-	}
-}
-
-func TestResilienceOpenAILastResortSkipsDrainedAccounts(t *testing.T) {
-	want := map[sharesched.Scheduler]int64{sharesched.SchedulerSub2API: lrAccountA, sharesched.SchedulerShare: lrAccountB}
-	for _, scheduler := range lastResortSchedulers {
-		t.Run(string(scheduler), func(t *testing.T) {
-			env := newOpenAILastResortEnv(t, scheduler, 1, 5,
-				sharesched.AccountRule{AccountID: lrAccountA, Tier: 1, Weight: 1, Drain: true},
-				sharesched.AccountRule{AccountID: lrAccountB, Tier: 1, Weight: 1})
-			require.Equal(t, want[scheduler], selectOpenAILastResort(t, env).Account.ID)
+			env := newOpenAILastResortEnv(t, scheduler, 5, 1)
+			require.Equal(t, lrAccountB, selectOpenAILastResort(t, env).Account.ID)
 		})
 	}
 }
 
 func TestResilienceOpenAILastResortKeepsSoftBinding(t *testing.T) {
-	rules := []sharesched.AccountRule{{AccountID: lrAccountA, Tier: 1, Weight: 1}, {AccountID: lrAccountB, Tier: 1, Weight: 1}}
 	const key = "openai:" + lrSession
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newOpenAILastResortEnv(t, scheduler, 5, 1, rules...)
+			env := newOpenAILastResortEnv(t, scheduler, 5, 1)
 			if scheduler == sharesched.SchedulerSub2API {
 				// The advanced scheduler is where the original scheduler keeps
 				// a soft-penalised binding (design §4.2).
@@ -285,7 +249,7 @@ func TestResilienceOpenAILastResortKeepsSoftBinding(t *testing.T) {
 		})
 	}
 	t.Run("share/bound_busy", func(t *testing.T) {
-		env := newOpenAILastResortEnv(t, sharesched.SchedulerShare, 5, 1, rules...)
+		env := newOpenAILastResortEnv(t, sharesched.SchedulerShare, 5, 1)
 		env.cache.bind(key, lrAccountA, time.Hour-time.Minute)
 		env.conc.busy[lrAccountA] = -1
 		sel := selectOpenAILastResort(t, env)

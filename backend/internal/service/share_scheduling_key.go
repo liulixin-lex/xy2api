@@ -13,13 +13,9 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const (
-	// shareAnchorPrefix marks a conversation anchor: stable across turns of
-	// one conversation, never shared between API keys.
-	shareAnchorPrefix = "anchor:"
-	// sharePrefixKeyPrefix marks a shared-prefix key (affinity.key=prefix).
-	sharePrefixKeyPrefix = "prefix:"
-)
+// shareAnchorPrefix marks a conversation anchor: stable across turns of one
+// conversation, never shared between API keys.
+const shareAnchorPrefix = "anchor:"
 
 // shareRequestProfile carries the request facts the cache profile needs.
 // Handlers install it with the replay-safety marker, before any selection.
@@ -63,13 +59,13 @@ func shareCacheFamily(platform string) sharesched.CacheFamily {
 }
 
 // shareCacheProfile estimates how valuable the session's upstream cache is.
-func shareCacheProfile(ctx context.Context, p *sharesched.Policy, platform, model string) sharesched.CacheProfile {
+func shareCacheProfile(ctx context.Context, platform, model string) sharesched.CacheProfile {
 	profile := shareRequestProfileFromContext(ctx)
 	tokens := 0
 	if profile.bodyBytes > 0 {
 		tokens = profile.bodyBytes / inflightInputBytesPerTokenEstimate
 	}
-	return sharesched.NewCacheProfile(shareCacheFamily(platform), model, profile.cacheOneHour, p.Cache.TTLSeconds, tokens)
+	return sharesched.NewCacheProfile(shareCacheFamily(platform), model, profile.cacheOneHour, tokens)
 }
 
 // shareSessionHash returns the session hash of a share-scheduled group, or
@@ -77,16 +73,12 @@ func shareCacheProfile(ctx context.Context, p *sharesched.Policy, platform, mode
 // turn to turn when a client moves its cache breakpoints, and a system-only
 // breakpoint makes different API keys share one hash. The anchor instead
 // hashes the API key, the system prompt and the first user message, which are
-// fixed for the whole conversation. Explicit session ids keep priority except
-// in prefix mode, where requests sharing a system prompt are grouped on
-// purpose.
+// fixed for the whole conversation. Explicit session ids keep priority.
 func (s *GatewayService) shareSessionHash(parsed *ParsedRequest) string {
 	if parsed == nil || parsed.GroupID == nil || !s.shareScheduling.shareSchedulingActive(*parsed.GroupID) {
 		return ""
 	}
-	gp := s.shareScheduling.groupPolicy(*parsed.GroupID)
-	prefixMode := gp.policy.Affinity.Key == sharesched.AffinityKeyPrefix
-	if !prefixMode && parsed.MetadataUserID != "" {
+	if parsed.MetadataUserID != "" {
 		if uid := ParseMetadataUserID(parsed.MetadataUserID); uid != nil && uid.SessionID != "" {
 			return ""
 		}
@@ -100,9 +92,6 @@ func (s *GatewayService) shareSessionHash(parsed *ParsedRequest) string {
 	system := extractTextFromSystemRaw(parsed.SystemRaw())
 	_, _ = b.WriteString(system)
 	_ = b.WriteByte('|')
-	if prefixMode && system != "" {
-		return sharePrefixKeyPrefix + s.hashContent(b.String())
-	}
 	contentStart := b.Len()
 	appendFirstUserTextFromRaw(&b, parsed.MessagesRaw())
 	if b.Len() == contentStart {
@@ -138,22 +127,16 @@ func appendFirstUserTextFromRaw(builder *strings.Builder, raw []byte) {
 }
 
 // shareAffinityKey derives the affinity key and its source from the session
-// hash under the group's key mode. An empty key means sessionless.
+// hash. An empty key means sessionless: session keeping is off or the request
+// has no session.
 func shareAffinityKey(p *sharesched.Policy, sessionHash string) (string, sharesched.KeySource) {
-	if !p.Affinity.Enabled || p.Affinity.Key == sharesched.AffinityKeyNone || sessionHash == "" {
+	if !p.SessionKeep() || sessionHash == "" {
 		return "", sharesched.KeyNone
 	}
-	switch {
-	case strings.HasPrefix(sessionHash, shareAnchorPrefix):
-		if p.Affinity.Key == sharesched.AffinityKeySession {
-			return "", sharesched.KeyNone
-		}
+	if strings.HasPrefix(sessionHash, shareAnchorPrefix) {
 		return sessionHash, sharesched.KeyAnchor
-	case strings.HasPrefix(sessionHash, sharePrefixKeyPrefix):
-		return sessionHash, sharesched.KeyPrefix
-	default:
-		return sessionHash, sharesched.KeySession
 	}
+	return sessionHash, sharesched.KeySession
 }
 
 // shareSessionlessKey is a fresh random key: sessionless requests spread by

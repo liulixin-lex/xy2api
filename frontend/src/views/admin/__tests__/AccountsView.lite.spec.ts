@@ -17,7 +17,9 @@ const {
   setSchedulable,
   bulkUpdate,
   showError,
-  showWarning
+  showWarning,
+  showInfo,
+  accountRules
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
@@ -30,7 +32,9 @@ const {
   setSchedulable: vi.fn(),
   bulkUpdate: vi.fn(),
   showError: vi.fn(),
-  showWarning: vi.fn()
+  showWarning: vi.fn(),
+  showInfo: vi.fn(),
+  accountRules: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -50,12 +54,13 @@ vi.mock('@/api/admin', () => ({
       refreshCredentials
     },
     proxies: { getAll: getAllProxies },
-    groups: { getAll: getAllGroups }
+    groups: { getAll: getAllGroups },
+    shareScheduling: { accountRules }
   }
 }))
 
 vi.mock('@/stores/app', () => ({
-  useAppStore: () => ({ showError, showWarning, showSuccess: vi.fn(), showInfo: vi.fn() })
+  useAppStore: () => ({ showError, showWarning, showSuccess: vi.fn(), showInfo })
 }))
 
 vi.mock('@/stores/auth', () => ({
@@ -181,6 +186,8 @@ describe('admin AccountsView lite account list', () => {
     bulkUpdate.mockReset()
     showError.mockReset()
     showWarning.mockReset()
+    showInfo.mockReset()
+    accountRules.mockReset().mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -203,6 +210,24 @@ describe('admin AccountsView lite account list', () => {
     await toggle.trigger('click'); await flushPromises()
     expect(setSchedulable).toHaveBeenLastCalledWith(42, true)
     expect(toggle.attributes('aria-checked')).toBe('true')
+    wrapper.unmount()
+  })
+
+  it('names the share groups whose new sessions move after the account stops', async () => {
+    accountRules.mockResolvedValue([
+      { group_id: 18, group_name: 'main', scheduler: 'share', effective: true, priority: 1, load_factor: 30, effective_load_factor: 30, healthy: false, expected_share: 0, share_if_healthy: 0.25 },
+      { group_id: 19, group_name: 'paused', scheduler: 'share', effective: false, priority: 1, load_factor: 30, effective_load_factor: 30, healthy: false, expected_share: 0, share_if_healthy: 0.5 }
+    ])
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('button[role="switch"]').trigger('click'); await flushPromises()
+    expect(accountRules).toHaveBeenCalledWith(42)
+    expect(showInfo).toHaveBeenCalledTimes(1)
+    expect(showInfo.mock.calls[0][0]).toBe('admin.shareScheduling.accountDisabled')
+
+    accountRules.mockClear()
+    await wrapper.get('button[role="switch"]').trigger('click'); await flushPromises()
+    expect(accountRules).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

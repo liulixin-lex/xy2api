@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
@@ -139,18 +140,43 @@ type shareTestEnv struct {
 	repo    *mockAccountRepoForPlatform
 }
 
-func shareTestPolicy(scheduler sharesched.Scheduler, rules ...sharesched.AccountRule) sharesched.Policy {
-	p := sharesched.DefaultPolicy()
-	p.Scheduler = scheduler
-	p.Accounts = rules
-	return p
+// shareRule is a member's tier and weight in a test. Share groups take the
+// tier from the account priority and the weight from the load factor, so the
+// test environments write rules into the accounts.
+type shareRule struct {
+	AccountID    int64
+	Tier, Weight int
 }
 
-func newShareTestEnv(t testing.TB, policy sharesched.Policy, accounts ...Account) *shareTestEnv {
+// shareTestSetup is a group policy with the account settings of a test.
+type shareTestSetup struct {
+	policy sharesched.Policy
+	rules  []shareRule
+}
+
+func shareTestPolicy(scheduler sharesched.Scheduler, rules ...shareRule) shareTestSetup {
+	p := sharesched.DefaultPolicy()
+	p.Scheduler = scheduler
+	return shareTestSetup{policy: p, rules: rules}
+}
+
+// apply writes the rule of acc, if any, into its priority and load factor.
+func (s shareTestSetup) apply(acc *Account) {
+	for _, rule := range s.rules {
+		if rule.AccountID == acc.ID {
+			weight := rule.Weight
+			acc.Priority, acc.LoadFactor = rule.Tier, &weight
+		}
+	}
+}
+
+func newShareTestEnv(t testing.TB, setup shareTestSetup, accounts ...Account) *shareTestEnv {
 	t.Helper()
+	policy := setup.policy
 	require.NoError(t, policy.Validate())
 	repo := &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{}}
 	for _, acc := range accounts {
+		setup.apply(&acc)
 		if acc.Platform == "" {
 			acc.Platform = PlatformAnthropic
 		}
@@ -177,9 +203,9 @@ func newShareTestEnv(t testing.TB, policy sharesched.Policy, accounts ...Account
 	cache := newShareTestCache()
 	conc := newShareTestConcurrency()
 	share := NewShareSchedulingService(nil, nil, nil)
-	policy.Freeze() // as decodeShareGroupPolicy does
+	share.attributionRate = 1
 	share.state.Store(&shareSchedulingState{
-		settings: ShareSchedulingSettings{Enabled: true, CacheAttribution: true, AttributionSampleRate: 1, DecisionSamples: true},
+		settings: ShareSchedulingSettings{Enabled: true},
 		groups:   map[int64]*shareGroupPolicy{shareTestGroupID: {groupID: shareTestGroupID, version: 3, policy: policy}},
 	})
 	gateway := &GatewayService{
@@ -223,10 +249,21 @@ func cacheableContext() context.Context {
 	return withShareRequestProfile(context.Background(), make([]byte, 40_000))
 }
 
-func twoAccountPolicy() sharesched.Policy {
+// accountIn returns the account with id from a listing the test repository
+// serves.
+func accountIn(accounts []Account, id int64) *Account {
+	for i := range accounts {
+		if accounts[i].ID == id {
+			return &accounts[i]
+		}
+	}
+	return nil
+}
+
+func twoAccountPolicy() shareTestSetup {
 	return shareTestPolicy(sharesched.SchedulerShare,
-		sharesched.AccountRule{AccountID: 1, Tier: 1, Weight: 3},
-		sharesched.AccountRule{AccountID: 2, Tier: 1, Weight: 1})
+		shareRule{AccountID: 1, Tier: 1, Weight: 3},
+		shareRule{AccountID: 2, Tier: 1, Weight: 1})
 }
 
 // targetFor places a fresh session and returns its HRW first choice.
@@ -288,34 +325,18 @@ func TestShareSchedulingRealignsColdSessions(t *testing.T) {
 }
 
 func TestShareSchedulingSpillsAndRebindsWhenBoundIsSaturated(t *testing.T) {
-	policy := twoAccountPolicy()
-	policy.Affinity.Wait.MaxWaiting = 0
-	env := newShareTestEnv(t, policy, Account{ID: 1}, Account{ID: 2})
+	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
 	target, other := env.targetFor(t, "busy")
 	env.cache.bind("busy", target, time.Hour-30*time.Second)
 	env.conc.busy[target] = -1
 
-	result := env.selectAccount(t, cacheableContext(), "busy", nil)
+	// A short prompt has no cache worth waiting for.
+	result := env.selectAccount(t, withShareRequestProfile(context.Background(), make([]byte, 400)), "busy", nil)
 	require.Equal(t, other, result.Account.ID)
 	require.True(t, result.Acquired)
-	require.Equal(t, other, env.cache.sessionBindings["busy"], "on_spill=rebind moves the cache with the session")
+	require.Equal(t, other, env.cache.sessionBindings["busy"], "a spill rebinds: the cache moves with the session")
 	require.Equal(t, int64(1), env.counter(shareStatsReasonPrefix+string(sharesched.ReasonSpillRebind)))
-	require.Equal(t, int64(1), env.counter(shareStatsIdealSkipPrefix+string(sharesched.ReasonSaturated)))
-}
-
-func TestShareSchedulingKeepPolicyDoesNotRebindOnSpill(t *testing.T) {
-	policy := twoAccountPolicy()
-	policy.Affinity.Wait.MaxWaiting = 0
-	policy.Affinity.OnSpill = sharesched.OnSpillKeep
-	env := newShareTestEnv(t, policy, Account{ID: 1}, Account{ID: 2})
-	target, other := env.targetFor(t, "keep")
-	env.cache.bind("keep", target, time.Hour-30*time.Second)
-	env.conc.busy[target] = -1
-
-	result := env.selectAccount(t, cacheableContext(), "keep", nil)
-	require.Equal(t, other, result.Account.ID)
-	require.Equal(t, target, env.cache.sessionBindings["keep"])
-	require.Empty(t, env.cache.replaced)
+	require.Equal(t, int64(1), env.counter(fmt.Sprintf("%s%d:%s", shareStatsSkipPrefix, target, sharesched.ReasonSaturated)))
 }
 
 func TestShareSchedulingWaitsBoundedlyForWarmBoundAccount(t *testing.T) {
@@ -407,6 +428,74 @@ func TestShareSchedulingSoftSpillKeepsBindingThroughShortOutage(t *testing.T) {
 	require.Equal(t, int64(1), env.counter(shareStatsReasonPrefix+string(sharesched.ReasonRebindUnavailable)))
 }
 
+// TestShareSchedulingHardTemporaryStateRebinds: soft and hard states follow
+// gateway resilience (design §4). A temporary state whose reason is empty or
+// not a soft prefix is hard, however short, and the session moves at once.
+//
+// With the resilience master switch off the 0.3.0 rule applies: any state
+// that ends within 300 seconds keeps the binding, a balance pause included.
+func TestShareSchedulingHardTemporaryStateRebinds(t *testing.T) {
+	for _, tc := range []struct {
+		reason string
+		off    bool
+		soft   bool
+	}{
+		{"", false, false},
+		{"administrator rule: keyword matched", false, false},
+		{"balance:exhausted: HTTP 402", false, false},
+		{"transient: HTTP 502", false, true},
+		{"", true, true},
+		{"administrator rule: keyword matched", true, true},
+		{"balance:exhausted: HTTP 402", true, true},
+	} {
+		t.Run(fmt.Sprintf("%s/off=%v", tc.reason, tc.off), func(t *testing.T) {
+			if tc.off {
+				orig := *resilience.Current()
+				off := resilience.Defaults()
+				off.Enabled = false
+				resilience.Publish(off)
+				t.Cleanup(func() { resilience.Publish(orig) })
+			}
+			env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
+			target, other := env.targetFor(t, "temp")
+			until := time.Now().Add(time.Minute)
+			for _, acc := range []*Account{env.repo.accountsByID[target], accountIn(env.repo.accounts, target)} {
+				acc.TempUnschedulableUntil, acc.TempUnschedulableReason = &until, tc.reason
+			}
+			env.cache.bind("temp", target, time.Hour-30*time.Second)
+
+			result := env.selectAccount(t, cacheableContext(), "temp", nil)
+			require.Equal(t, other, result.Account.ID)
+			if tc.soft {
+				require.Equal(t, target, env.cache.sessionBindings["temp"], "a soft penalty keeps the binding")
+				require.Equal(t, int64(1), env.counter(shareStatsReasonPrefix+string(sharesched.ReasonSoftSpill)))
+			} else {
+				require.Equal(t, other, env.cache.sessionBindings["temp"], "a hard state moves the session")
+				require.Equal(t, int64(1), env.counter(shareStatsReasonPrefix+string(sharesched.ReasonRebindUnavailable)))
+			}
+		})
+	}
+}
+
+// TestShareSchedulingSkipsAccountsAtFullLoad: new placements and spills skip
+// accounts whose load rate is 100 or more, as the original selection does
+// (design §5); a bound session is judged by its slots only.
+func TestShareSchedulingSkipsAccountsAtFullLoad(t *testing.T) {
+	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
+	// Load factor 3 with three requests in flight: load rate 100.
+	env.conc.mockConcurrencyCache.loadMap = map[int64]*AccountLoadInfo{1: {AccountID: 1, CurrentConcurrency: 3, LoadRate: 100}}
+	for i := 0; i < 40; i++ {
+		result := env.selectAccount(t, context.Background(), fmt.Sprintf("full-%d", i), nil)
+		require.Equal(t, int64(2), result.Account.ID, "new sessions go to the account with room")
+	}
+	require.Positive(t, env.counter(fmt.Sprintf("%s%d:%s", shareStatsSkipPrefix, 1, sharesched.ReasonSaturated)))
+	require.Zero(t, env.conc.attempts[1], "a full account is not even tried")
+
+	env.cache.bind("bound", 1, time.Hour-30*time.Second)
+	result := env.selectAccount(t, cacheableContext(), "bound", nil)
+	require.Equal(t, int64(1), result.Account.ID, "a bound session keeps its account while it has a free slot")
+}
+
 func TestShareSchedulingFailoverMovesToNextAccount(t *testing.T) {
 	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
 	target, other := env.targetFor(t, "failover")
@@ -418,19 +507,17 @@ func TestShareSchedulingFailoverMovesToNextAccount(t *testing.T) {
 	require.Equal(t, int64(1), env.counter(shareStatsReasonPrefix+string(sharesched.ReasonFailoverNext)))
 }
 
-func TestShareSchedulingTierOverflowAndDrain(t *testing.T) {
-	policy := shareTestPolicy(sharesched.SchedulerShare,
-		sharesched.AccountRule{AccountID: 1, Tier: 1, Weight: 1},
-		sharesched.AccountRule{AccountID: 2, Tier: 2, Weight: 1},
-		sharesched.AccountRule{AccountID: 3, Tier: 1, Weight: 1, Drain: true})
-	env := newShareTestEnv(t, policy, Account{ID: 1}, Account{ID: 2}, Account{ID: 3})
+func TestShareSchedulingTierOverflow(t *testing.T) {
+	// Tiers are account priorities.
+	env := newShareTestEnv(t, shareTestPolicy(sharesched.SchedulerShare),
+		Account{ID: 1, Priority: 1}, Account{ID: 2, Priority: 2}, Account{ID: 3, Priority: 3})
 	for i := 0; i < 50; i++ {
 		result := env.selectAccount(t, context.Background(), fmt.Sprintf("tier-%d", i), nil)
-		require.Equal(t, int64(1), result.Account.ID, "the first tier takes every new session; drained accounts take none")
+		require.Equal(t, int64(1), result.Account.ID, "the first priority takes every new session")
 	}
 	env.conc.busy[1] = -1
 	result := env.selectAccount(t, context.Background(), "overflow", nil)
-	require.Equal(t, int64(2), result.Account.ID, "saturation spills to the next tier, never to a drained account")
+	require.Equal(t, int64(2), result.Account.ID, "saturation spills to the next priority")
 }
 
 func TestShareSchedulingFallbackWaitDefersBinding(t *testing.T) {
@@ -470,7 +557,7 @@ func TestShareSchedulingModelRoutingRestrictsThenFallsBack(t *testing.T) {
 func TestShareSchedulingDisabledKeepsOriginalScheduler(t *testing.T) {
 	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
 	state := env.share.state.Load()
-	env.share.state.Store(&shareSchedulingState{settings: ShareSchedulingSettings{Enabled: false, AttributionSampleRate: 1}, groups: state.groups})
+	env.share.state.Store(&shareSchedulingState{settings: ShareSchedulingSettings{Enabled: false}, groups: state.groups})
 
 	result := env.selectAccount(t, context.Background(), "original", nil)
 	require.NotNil(t, result.Account)
@@ -478,40 +565,38 @@ func TestShareSchedulingDisabledKeepsOriginalScheduler(t *testing.T) {
 	require.Zero(t, env.counter(shareStatsRequestsField))
 }
 
-func TestShareSchedulingShadowComparesWithoutRouting(t *testing.T) {
+// TestShareSchedulingStoredShadowRunsOriginal: the retired shadow
+// scheduler runs the original selection and compares nothing (design §3.3).
+func TestShareSchedulingStoredShadowRunsOriginal(t *testing.T) {
 	env := newShareTestEnv(t, shareTestPolicy(sharesched.SchedulerShadow,
-		sharesched.AccountRule{AccountID: 1, Tier: 1, Weight: 3},
-		sharesched.AccountRule{AccountID: 2, Tier: 1, Weight: 1}), Account{ID: 1}, Account{ID: 2})
+		shareRule{AccountID: 1, Tier: 1, Weight: 3},
+		shareRule{AccountID: 2, Tier: 1, Weight: 1}), Account{ID: 1}, Account{ID: 2})
 
 	result := env.selectAccount(t, context.Background(), "shadow", nil)
 	require.NotNil(t, result.Account)
-	require.Empty(t, env.cache.created, "shadow mode never writes share bindings")
-	require.Eventually(t, func() bool { return env.counter(shareStatsShadowField) == 1 }, 2*time.Second, 10*time.Millisecond)
-	require.Zero(t, env.counter(shareStatsRequestsField), "shadow decisions are not served decisions")
+	require.Empty(t, env.cache.created, "the original scheduler binds with a plain SET")
+	require.Zero(t, env.counter(shareStatsRequestsField), "no share decision is made or compared")
 }
 
-func TestShareSchedulingBindStickySessionUsesPolicyTTL(t *testing.T) {
-	policy := twoAccountPolicy()
-	policy.Affinity.TTLSeconds = 1800
-	env := newShareTestEnv(t, policy, Account{ID: 1}, Account{ID: 2})
+func TestShareSchedulingBindStickySessionUsesBindingTTL(t *testing.T) {
+	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
 	gid := shareTestGroupID
 	require.NoError(t, env.gateway.BindStickySession(context.Background(), &gid, "ttl", 1))
-	require.Equal(t, 30*time.Minute, env.cache.ttls["ttl"], "idle time is derived from the policy TTL, so every write must use it")
+	require.Equal(t, sharesched.BindingTTL, env.cache.ttls["ttl"], "idle time is derived from the binding TTL, so every write must use it")
 
 	other := int64(99)
 	require.NoError(t, env.gateway.BindStickySession(context.Background(), &other, "ttl-other", 1))
 	require.Equal(t, stickySessionTTL, env.cache.ttls["ttl-other"])
 }
 
-func TestShareSchedulingDecisionSamplesNeverCarryRawSessionKeys(t *testing.T) {
+func TestShareSchedulingStatisticsNeverCarryRawSessionKeys(t *testing.T) {
 	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
 	env.selectAccount(t, context.Background(), "secret-session-id", nil)
 	batch := env.share.stats.drain()
-	require.Len(t, batch.Decisions[shareTestGroupID], 1)
-	sample := string(batch.Decisions[shareTestGroupID][0])
-	require.NotContains(t, sample, "secret-session-id")
-	require.Contains(t, sample, `"reason":"new_session"`)
-	require.Contains(t, sample, `"version":3`)
+	require.NotEmpty(t, batch.Counters)
+	for counter := range batch.Counters {
+		require.NotContains(t, counter.Field, "secret-session-id")
+	}
 }
 
 func TestShareSessionHashAnchorsConversations(t *testing.T) {
@@ -537,38 +622,43 @@ func TestShareSessionHashAnchorsConversations(t *testing.T) {
 	withSession := `{"model":"m","metadata":{"user_id":"user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_account__session_6f1c3b0e-9d7e-4c2b-8f4a-1b2c3d4e5f60"},"messages":[{"role":"user","content":"hello"}]}`
 	require.False(t, strings.HasPrefix(env.gateway.GenerateSessionHash(parse(t, withSession, 11)), shareAnchorPrefix), "explicit session ids keep priority")
 
+	// The retired prefix key keeps sessions as auto does.
 	state := env.share.state.Load()
-	prefix := state.groups[shareTestGroupID].policy
-	prefix.Affinity.Key = sharesched.AffinityKeyPrefix
+	prefix, err := sharesched.DecodePolicy([]byte(`{"schema":1,"scheduler":"share","affinity":{"key":"prefix"}}`))
+	require.NoError(t, err)
 	env.share.state.Store(&shareSchedulingState{settings: state.settings, groups: map[int64]*shareGroupPolicy{
 		shareTestGroupID: {groupID: shareTestGroupID, version: 4, policy: prefix}}})
 	other := `{"model":"m","system":"you are helpful","messages":[{"role":"user","content":"a different task"}]}`
 	p1 := env.gateway.GenerateSessionHash(parse(t, turn1, 11))
-	require.True(t, strings.HasPrefix(p1, sharePrefixKeyPrefix))
-	require.Equal(t, p1, env.gateway.GenerateSessionHash(parse(t, other, 11)), "prefix mode groups requests that share a system prompt")
+	require.Equal(t, h1, p1)
+	require.NotEqual(t, p1, env.gateway.GenerateSessionHash(parse(t, other, 11)), "requests sharing a system prompt are separate conversations")
 
-	env.share.state.Store(&shareSchedulingState{settings: ShareSchedulingSettings{AttributionSampleRate: 1}, groups: state.groups})
+	env.share.state.Store(&shareSchedulingState{settings: ShareSchedulingSettings{}, groups: state.groups})
 	original := env.gateway.GenerateSessionHash(parse(t, turn1, 11))
 	require.False(t, strings.HasPrefix(original, shareAnchorPrefix), "original groups keep the original hash")
 }
 
-func TestShareAffinityKeyModes(t *testing.T) {
+func TestShareAffinityKeyFollowsSessionKeeping(t *testing.T) {
 	p := sharesched.DefaultPolicy()
 	key, source := shareAffinityKey(&p, "anchor:x")
 	require.Equal(t, "anchor:x", key)
 	require.Equal(t, sharesched.KeyAnchor, source)
 	_, source = shareAffinityKey(&p, "uuid-session")
 	require.Equal(t, sharesched.KeySession, source)
-	_, source = shareAffinityKey(&p, "prefix:x")
-	require.Equal(t, sharesched.KeyPrefix, source)
 
-	p.Affinity.Key = sharesched.AffinityKeySession
-	key, source = shareAffinityKey(&p, "anchor:x")
-	require.Empty(t, key, "session mode only trusts explicit session ids")
+	for _, body := range []string{`{"schema":1,"scheduler":"share","affinity":{"key":"session"}}`, `{"schema":1,"scheduler":"share","affinity":{"key":"prefix"}}`} {
+		retired, err := sharesched.DecodePolicy([]byte(body))
+		require.NoError(t, err)
+		key, source = shareAffinityKey(&retired, "anchor:x")
+		require.Equal(t, "anchor:x", key, "retired keys keep sessions as auto does")
+		require.Equal(t, sharesched.KeyAnchor, source)
+	}
+
+	p.Affinity.Key = sharesched.AffinityKeyNone
+	key, source = shareAffinityKey(&p, "uuid-session")
+	require.Empty(t, key, "session keeping off")
 	require.Equal(t, sharesched.KeyNone, source)
-
-	p.Affinity.Key = sharesched.AffinityKeyAuto
-	p.Affinity.Enabled = false
+	p.Affinity.Key, p.Affinity.Enabled = sharesched.AffinityKeyAuto, false
 	key, _ = shareAffinityKey(&p, "uuid-session")
 	require.Empty(t, key)
 }
@@ -594,30 +684,8 @@ func TestShareRequestProfileDetectsOneHourCache(t *testing.T) {
 	ctx := withShareRequestProfile(context.Background(), []byte(`{"system":[{"type":"text","text":"x","cache_control":{"type":"ephemeral","ttl":"1h"}}]}`))
 	profile := shareRequestProfileFromContext(ctx)
 	require.True(t, profile.cacheOneHour)
-	p := sharesched.DefaultPolicy()
-	require.Equal(t, time.Hour, shareCacheProfile(ctx, &p, PlatformAnthropic, "claude-sonnet-4-5").TTL)
+	require.Equal(t, time.Hour, shareCacheProfile(ctx, PlatformAnthropic, "claude-sonnet-4-5").TTL)
 	plain := withShareRequestProfile(context.Background(), []byte(`{"messages":[]}`))
-	require.Equal(t, 5*time.Minute, shareCacheProfile(plain, &p, PlatformAnthropic, "claude-sonnet-4-5").TTL)
-	require.Equal(t, 30*time.Minute, shareCacheProfile(plain, &p, PlatformOpenAI, "gpt-5.6").TTL)
-}
-
-func TestShareCorrectionFactors(t *testing.T) {
-	p := shareTestPolicy(sharesched.SchedulerShare,
-		sharesched.AccountRule{AccountID: 1, Tier: 1, Weight: 1},
-		sharesched.AccountRule{AccountID: 2, Tier: 1, Weight: 1})
-	p.Balance.Unit = sharesched.UnitRequests
-	p.Balance.Correction = sharesched.CorrectionGentle
-	p.Balance.MinVolume = 10
-	factors := shareCorrectionFactors(&p, map[int64]ShareSchedulingUsage{1: {Requests: 90}, 2: {Requests: 10}})
-	require.Greater(t, factors[2], 1.0, "an under-served account gets a boost")
-	require.Less(t, factors[1], 1.0)
-	require.Empty(t, shareCorrectionFactors(&p, map[int64]ShareSchedulingUsage{1: {Requests: 5}}), "below min_volume nothing is corrected")
-}
-
-func TestShareProtectedBindingsSurviveRebalance(t *testing.T) {
-	require.True(t, IsShareRebalanceableBinding("anchor:abc"))
-	require.True(t, IsShareRebalanceableBinding("openai:session"))
-	require.False(t, IsShareRebalanceableBinding(openAIWSResponseAccountCacheKey("resp_1")))
-	require.False(t, IsShareRebalanceableBinding(openAIHTTPResponseOwnerUserPrefix+"x"))
-	require.False(t, IsShareRebalanceableBinding("openai:grok-video:abc"))
+	require.Equal(t, 5*time.Minute, shareCacheProfile(plain, PlatformAnthropic, "claude-sonnet-4-5").TTL)
+	require.Equal(t, 30*time.Minute, shareCacheProfile(plain, PlatformOpenAI, "gpt-5.6").TTL)
 }

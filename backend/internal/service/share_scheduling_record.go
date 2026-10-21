@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/json"
 	"strconv"
 	"time"
 
@@ -11,48 +10,14 @@ import (
 
 // shareDecisionRecord is the context of one decision for statistics.
 type shareDecisionRecord struct {
-	gp       *shareGroupPolicy
-	source   sharesched.KeySource
-	platform string
-	model    string
-	routing  sharesched.Reason
-	session  string
-	idle     time.Duration
-	cache    sharesched.CacheProfile
-	start    time.Time
-}
-
-// shareDecisionSample is one decision as shown by the admin API.
-type shareDecisionSample struct {
-	At              time.Time `json:"at"`
-	Node            string    `json:"node,omitempty"`
-	Version         int64     `json:"version"`
-	Scheduler       string    `json:"scheduler"`
-	Platform        string    `json:"platform,omitempty"`
-	Model           string    `json:"model,omitempty"`
-	KeySource       string    `json:"key_source"`
-	Session         string    `json:"session,omitempty"`
-	Reason          string    `json:"reason"`
-	Routing         string    `json:"routing,omitempty"`
-	Bound           int64     `json:"bound,omitempty"`
-	Target          int64     `json:"target,omitempty"`
-	Ideal           int64     `json:"ideal,omitempty"`
-	Served          int64     `json:"served,omitempty"`
-	Original        int64     `json:"original,omitempty"`
-	Agree           *bool     `json:"agree,omitempty"`
-	IdealSkip       string    `json:"ideal_skip,omitempty"`
-	Attempts        int       `json:"attempts"`
-	WaitMs          int64     `json:"wait_ms,omitempty"`
-	IdleMs          int64     `json:"idle_ms,omitempty"`
-	CacheTTLSeconds int       `json:"cache_ttl_seconds,omitempty"`
-	EstimatedTokens int       `json:"estimated_tokens,omitempty"`
-	Queued          bool      `json:"queued,omitempty"`
-	HotMigration    bool      `json:"hot_migration,omitempty"`
-	ElapsedUs       int64     `json:"elapsed_us"`
+	gp      *shareGroupPolicy
+	routing sharesched.Reason
+	idle    time.Duration
+	cache   sharesched.CacheProfile
 }
 
 // shareSessionFingerprint truncates a hash of the session key so neither
-// samples nor Redis keys carry the raw session identifier.
+// explanations nor Redis keys carry the raw session identifier.
 func shareSessionFingerprint(key string) string {
 	if key == "" {
 		return ""
@@ -61,35 +26,28 @@ func shareSessionFingerprint(key string) string {
 }
 
 // shareHotMigration reports a binding moved off an account whose cache was
-// still warm: the migrations share scheduling promises to avoid.
+// still warm. Most are forced by the bound account (unavailable, failing,
+// saturated); share scheduling's own moves (Reason.ActiveMigration) only
+// happen once the cache is cold, so the report flags any active one.
 func shareHotMigration(d sharesched.Decision, served int64, write sharesched.Write, cache sharesched.CacheProfile, idle time.Duration) bool {
 	return d.Bound > 0 && served > 0 && served != d.Bound && write == sharesched.WriteReplace && cache.Warm(idle)
 }
 
+// recordDecision counts what the report reads (design §7.7): the decision
+// reason, attempts, skipped accounts, bounded waits and hot migrations.
 func (s *ShareSchedulingService) recordDecision(rec shareDecisionRecord, d sharesched.Decision, out *shareOutcome) {
 	now := time.Now()
 	gid := rec.gp.groupID
-	var buf [16]shareStatsDelta
+	var buf [12]shareStatsDelta
 	deltas := append(buf[:0],
 		shareStatsDelta{shareStatsRequestsField, 1},
 		shareStatsDelta{shareStatsReasonPrefix + string(out.reason), 1},
-		shareStatsDelta{shareStatsKeySourcePrefix + string(rec.source), 1},
 		shareStatsDelta{shareStatsAttemptsField, int64(out.attempts)})
 	if rec.routing != "" {
 		deltas = append(deltas, shareStatsDelta{shareStatsReasonPrefix + string(rec.routing), 1})
 	}
-	if out.served > 0 {
-		deltas = append(deltas, shareStatsDelta{shareStatsServedPrefix + strconv.FormatInt(out.served, 10), 1})
-	}
-	if d.Ideal > 0 {
-		deltas = append(deltas, shareStatsDelta{shareStatsIdealPrefix + strconv.FormatInt(d.Ideal, 10), 1})
-	}
 	for id, reason := range out.skipped {
 		deltas = append(deltas, shareStatsDelta{shareStatsSkipPrefix + strconv.FormatInt(id, 10) + ":" + string(reason), 1})
-	}
-	idealSkip := d.IdealSkipReason(out.served, out.skipped)
-	if idealSkip != "" {
-		deltas = append(deltas, shareStatsDelta{shareStatsIdealSkipPrefix + string(idealSkip), 1})
 	}
 	if out.waited > 0 {
 		deltas = append(deltas, shareStatsDelta{shareStatsWaitCountField, 1}, shareStatsDelta{shareStatsWaitMsField, out.waited.Milliseconds()})
@@ -97,66 +55,8 @@ func (s *ShareSchedulingService) recordDecision(rec shareDecisionRecord, d share
 			deltas = append(deltas, shareStatsDelta{shareStatsWaitHitField, 1})
 		}
 	}
-	hot := shareHotMigration(d, out.served, out.write, rec.cache, rec.idle)
-	if hot {
+	if shareHotMigration(d, out.served, out.write, rec.cache, rec.idle) {
 		deltas = append(deltas, shareStatsDelta{shareStatsHotMigrationField, 1}, shareStatsDelta{shareStatsHotPrefix + string(out.reason), 1})
 	}
 	s.stats.addAll(shareStatsKindShare, gid, now, deltas)
-	if !s.Settings().DecisionSamples || !s.stats.decisionRoom(gid) {
-		return
-	}
-	sample := s.newDecisionSample(rec, d, now)
-	sample.Reason, sample.Served, sample.IdealSkip = string(out.reason), out.served, string(idealSkip)
-	sample.Attempts, sample.WaitMs, sample.HotMigration = out.attempts, out.waited.Milliseconds(), hot
-	sample.Queued = out.result != nil && !out.result.Acquired
-	if raw, err := json.Marshal(sample); err == nil {
-		s.stats.addDecision(gid, raw)
-	}
-}
-
-// recordShadow compares the share plan's first choice with the account the
-// original scheduler served.
-func (s *ShareSchedulingService) recordShadow(rec shareDecisionRecord, d sharesched.Decision, original int64) {
-	now := time.Now()
-	gid := rec.gp.groupID
-	first := int64(0)
-	if len(d.Steps) > 0 {
-		first = d.Steps[0].AccountID
-	}
-	agree := first == original
-	var buf [8]shareStatsDelta
-	deltas := append(buf[:0],
-		shareStatsDelta{shareStatsShadowField, 1},
-		shareStatsDelta{shareStatsShadowPrefix + string(d.Reason), 1},
-		shareStatsDelta{shareStatsKeySourcePrefix + string(rec.source), 1})
-	if agree {
-		deltas = append(deltas, shareStatsDelta{shareStatsShadowAgreeField, 1})
-	}
-	if d.Ideal > 0 {
-		deltas = append(deltas, shareStatsDelta{shareStatsIdealPrefix + strconv.FormatInt(d.Ideal, 10), 1})
-	}
-	if original > 0 {
-		deltas = append(deltas, shareStatsDelta{shareStatsServedPrefix + strconv.FormatInt(original, 10), 1})
-	}
-	hot := shareHotMigration(d, first, d.Write, rec.cache, rec.idle)
-	if hot {
-		deltas = append(deltas, shareStatsDelta{shareStatsHotMigrationField, 1}, shareStatsDelta{shareStatsHotPrefix + string(d.Reason), 1})
-	}
-	s.stats.addAll(shareStatsKindShare, gid, now, deltas)
-	if !s.Settings().DecisionSamples || !s.stats.decisionRoom(gid) {
-		return
-	}
-	sample := s.newDecisionSample(rec, d, now)
-	sample.Reason, sample.Served, sample.Original, sample.Agree, sample.HotMigration = string(d.Reason), first, original, &agree, hot
-	if raw, err := json.Marshal(sample); err == nil {
-		s.stats.addDecision(gid, raw)
-	}
-}
-
-func (s *ShareSchedulingService) newDecisionSample(rec shareDecisionRecord, d sharesched.Decision, now time.Time) shareDecisionSample {
-	return shareDecisionSample{At: now, Node: s.node, Version: rec.gp.version, Scheduler: string(rec.gp.policy.Scheduler),
-		Platform: rec.platform, Model: rec.model, KeySource: string(rec.source), Session: shareSessionFingerprint(rec.session),
-		Routing: string(rec.routing), Bound: d.Bound, Target: d.Target, Ideal: d.Ideal, IdleMs: rec.idle.Milliseconds(),
-		CacheTTLSeconds: int(rec.cache.TTL / time.Second), EstimatedTokens: rec.cache.EstimatedTokens,
-		ElapsedUs: now.Sub(rec.start).Microseconds()}
 }

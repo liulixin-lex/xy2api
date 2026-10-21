@@ -1,56 +1,81 @@
 /**
  * Admin share scheduling API.
- * Policies are versioned per group; saves use expected_version (409 on conflict).
+ *
+ * A share group ranks accounts by their priority and splits new sessions by
+ * their load factor; a group has only two settings, the scheduler and
+ * session keeping. Saves carry expected_version (409 on conflict).
  */
 
 import { apiClient } from '../client'
 import type { ResilienceExplanation } from './resilience'
 
-export type ShareScheduler = 'sub2api' | 'shadow' | 'share'
+export type ShareScheduler = 'sub2api' | 'share'
 
 export interface ShareSchedulingSettings {
   enabled: boolean
-  cache_attribution: boolean
-  attribution_sample_rate: number
-  decision_samples: boolean
 }
 
-export interface ShareAccountRule {
-  account_id: number
-  tier: number
-  weight: number
-  drain?: boolean
-  drain_until?: string
-  cache_domain?: string
-}
-
-export interface SharePolicy {
-  schema: number
+export interface ShareGroupSummary {
+  group_id: number
+  name: string
+  platform: string
+  /** A stored `shadow` reads as `sub2api`. */
   scheduler: ShareScheduler
-  accounts: ShareAccountRule[]
-  defaults: { tier: 'account_priority'; weight: 'concurrency' | 'equal' }
-  affinity: {
-    enabled: boolean
-    key: 'auto' | 'session' | 'prefix' | 'none'
-    ttl_seconds: number
-    wait: { mode: 'auto' | 'fixed' | 'off'; ms_per_1k_tokens: number; max_ms: number; max_waiting: number }
-    on_spill: 'rebind' | 'keep'
-    soft_spill_max_seconds: number
-  }
-  cache: { ttl_seconds: number; realign: 'cold' | 'off' }
-  tiers: {
-    on_saturated: 'spill' | 'wait'
-    on_failed: 'next_tier' | 'stop'
-    return: 'cold' | 'immediate' | 'session_end'
-    stable_seconds: number
-    return_deadline_seconds: number
-  }
-  balance: {
-    unit: 'sessions' | 'requests' | 'tokens' | 'standard_cost'
-    correction: 'off' | 'gentle' | 'strong'
-    window_minutes: number
-    min_volume: number
-  }
+  /** Session keeping; true for a group without a policy. */
+  session_keep: boolean
+  /** The stored scheduler was the retired shadow mode. */
+  legacy_shadow: boolean
+  /** The group stores a policy. */
+  configured: boolean
+  /** The stored policy cannot be decoded; requests use the original scheduler. */
+  invalid: boolean
+  /** The main switch is on and the scheduler is share. */
+  effective: boolean
+  /** 0 when never saved. */
+  version: number
+  updated_at: string | null
+  member_count: number
+  available_count: number
+  requests_1h: number
+  cache_hit_ratio_1h: number | null
+  switch_loss_ratio_1h: number | null
+}
+
+/** Why a member cannot take new sessions now. */
+export type ShareMemberReason =
+  | 'disabled'
+  | 'inactive'
+  | 'not_schedulable'
+  | 'rate_limited'
+  | 'overloaded'
+  | 'temp_unschedulable'
+  | 'balance_exhausted'
+  | 'expired'
+  | 'iq_degraded'
+  | 'quota_exceeded'
+
+/** Health of an account over the last minutes, counting only failures that trigger down-weighting. */
+export interface ShareMemberHealth {
+  window_minutes: number
+  attempts: number
+  soft_failures: number
+  /** Soft failure rate of the account (all groups); null without attempts. */
+  rate: number | null
+  /** Lowest raw soft failure rate among healthy accounts of the same priority. */
+  tier_baseline_rate: number | null
+  /** Too few samples to judge: the account is not down-weighted. */
+  insufficient: boolean
+}
+
+/** Why an account is ramping up after coming back. */
+export type ShareRampCause = 'balance_pause' | 'hard_penalty' | 'reenabled'
+
+export interface ShareMemberRamp {
+  cause: ShareRampCause | string | null
+  /** When the account became eligible again. */
+  since: string | null
+  /** When the ramp reaches full weight. */
+  full_at: string | null
 }
 
 export interface ShareMember {
@@ -58,76 +83,107 @@ export interface ShareMember {
   name: string
   platform: string
   type: string
-  priority: number
-  concurrency: number
   status: string
   schedulable: boolean
+  /** Can take new sessions now; per-request gates are not judged here. */
   healthy: boolean
-  reason?: string
-  recover_at?: string
-  tier: number
-  weight: number
-  configured: boolean
-  drain: boolean
-  drain_until?: string
-  cache_domain: string
-  target_share: number
-  effective_share: number
-  capacity_share: number
-}
-
-export interface ShareGroupSummary {
-  group_id: number
-  name: string
-  platform: string
-  scheduler: ShareScheduler
-  version: number
-  configured: boolean
-  effective: boolean
-  invalid?: boolean
-  imported_from?: string
-  updated_at?: string
-  requests_1h: number
-  cache_read_ratio_1h: number
-  scheduling_miss_ratio_1h: number
-  shadow_agree_rate_1h?: number
+  reason: ShareMemberReason | string | null
+  recover_at: string | null
+  /** The tier: lower numbers are used first. */
+  priority: number
+  concurrency: number
+  /** The account's own load factor; null when unset. */
+  load_factor: number | null
+  /** The load factor share scheduling starts from: load factor, else concurrency, else 1. */
+  effective_load_factor: number
+  /** Automatic health factor (0.2–1); null when not measured or not in effect. */
+  health_factor: number | null
+  health: ShareMemberHealth | null
+  /** Slow start factor after coming back (0.1–1); 1 when not ramping. */
+  ramp_factor: number
+  ramp: ShareMemberRamp | null
+  /** load factor × health factor × ramp factor. */
+  effective_weight: number
+  /** Other groups the account serves; a load factor change reaches them too. */
+  other_group_ids: number[]
+  /** Expected share of new sessions by load factor alone. */
+  base_share: number
+  /**
+   * Expected share of new sessions with the automatic factors applied. It
+   * depends only on priorities, weights and health, so it also tells an
+   * original group what switching would do.
+   */
+  expected_share: number
+  /** The expected share if only this account turned healthy. */
+  share_if_healthy: number
+  actual_requests_1h: number
+  /** Share of the group's successful requests in the last hour. */
+  actual_share_1h: number | null
 }
 
 export interface SharePolicyView {
   group_id: number
   group_name: string
   platform: string
-  version: number
   scheduler: ShareScheduler
+  session_keep: boolean
+  legacy_shadow: boolean
   effective: boolean
-  policy: SharePolicy
-  invalid?: string
-  imported_from?: string
-  updated_by?: number
-  updated_at?: string
-  active_tier: number
+  version: number
+  updated_by: number | null
+  updated_at: string | null
+  /** The main switch. */
+  enabled: boolean
+  /** Why the stored policy cannot be decoded. */
+  invalid: string | null
+  /** Lowest priority with a healthy member; null when none can take new sessions. */
+  active_priority: number | null
   members: ShareMember[]
 }
 
+export interface ShareGroupUpdate {
+  scheduler: ShareScheduler
+  session_keep: boolean
+  expected_version: number
+}
+
+export type ShareWarningCode =
+  | 'global_switch_off'
+  | 'no_healthy_account'
+  | 'top_priority_unhealthy'
+  | 'single_account_dominant'
+  | 'high_load_factor'
+  | 'health_downweighted'
+  | 'ramping'
+
+/**
+ * A preview warning. top_priority_unhealthy: priority is the top priority,
+ * value the active one; single_account_dominant: value is the share;
+ * high_load_factor: value is the load factor; health_downweighted and
+ * ramping: value is the factor.
+ */
 export interface ShareWarning {
-  code: string
-  account_id?: number
-  tier?: number
-  detail?: string
+  code: ShareWarningCode | string
+  account_id: number | null
+  priority: number | null
+  value: number | null
 }
 
 export interface SharePreview {
-  active_tier: number
+  scheduler: ShareScheduler
+  session_keep: boolean
+  enabled: boolean
+  /** The group runs share scheduling after saving. */
+  effective_after: boolean
+  active_priority: number | null
   members: ShareMember[]
-  placement_change: number
-  sampled_keys: number
-  deadline_accounts?: number[]
-  estimated_migrations: number
+  /** Only for scheduler share; empty when going back to the original. */
   warnings: ShareWarning[]
 }
 
 export interface ShareExplainInput {
-  model?: string
+  model: string
+  /** Empty simulates a new session with a random key. */
   session_hash?: string
   estimated_tokens?: number
   cache_one_hour?: boolean
@@ -136,17 +192,21 @@ export interface ShareExplainInput {
 
 export interface ShareExplainEntry {
   account_id: number
-  tier: number
-  weight: number
+  priority: number
+  /** The load factor share scheduling starts from. */
+  load_factor: number
+  health_factor: number | null
+  ramp_factor: number
+  /** load factor × health factor × ramp factor. */
   effective_weight: number
-  configured: boolean
-  drain: boolean
-  cache_domain: string
-  class?: string
   eligible: boolean
   excluded: boolean
-  reason?: string
+  reason?: string | null
   rank: number
+  class?: string | null
+  /** In-flight load against the load factor; null when it could not be read. */
+  load_rate: number | null
+  saturated: boolean
 }
 
 export interface ShareExplanation {
@@ -154,155 +214,126 @@ export interface ShareExplanation {
   platform: string
   scheduler: ShareScheduler
   version: number
+  /** No session hash was given: a random new session was simulated. */
+  simulated_new_session: boolean
   key_source: string
-  session?: string
-  bound_account_id?: number
+  session?: string | null
+  bound_account_id?: number | null
   idle_ms: number
   cache_ttl_seconds: number
   estimated_tokens: number
   cacheable: boolean
   warm: boolean
   wait_budget_ms: number
+  max_waiting?: number
   reason: string
   steps: number[]
   write: string
   spill_write: string
-  spill_reason?: string
-  max_waiting?: number
-  target?: number
-  ideal?: number
-  active_tier: number
+  spill_reason?: string | null
+  target?: number | null
+  ideal?: number | null
+  active_priority: number | null
   entries: ShareExplainEntry[]
-  /** Gateway resilience view of the group and session (design §4.4). */
+  /** Gateway resilience view of the group and session. */
   resilience?: ResilienceExplanation
 }
 
-export interface ShareAccountActual {
-  account_id: number
-  placed: number
-  placed_share: number
+/** Health figures of one window; ratios are 0..1, null without samples. */
+export interface ShareMetrics {
   requests: number
-  request_share: number
-  tokens: number
-  token_share: number
-  standard_cost: number
-  cost_share: number
-  /** Times the account was tried but passed over, by reason. */
-  skipped?: Record<string, number>
-  /** Sampled first-token latency of requests the account served. */
-  ttft?: ShareTTFT
+  cache_hit_ratio: number | null
+  ttft_p50_ms: number | null
+  ttft_p95_ms: number | null
+  ttft_samples: number
+  errors: number
+  error_rate: number | null
+  /** Sampled requests behind switch_rate and switch_loss_ratio (about 1 in 4 sessions). */
+  attribution_samples: number
+  /** Share of sampled requests that switched account while the cache was warm. */
+  switch_rate: number | null
+  /** Share of sampled input tokens that missed the cache because of a switch. */
+  switch_loss_ratio: number | null
 }
 
-export interface ShareTTFT {
-  count: number
-  p50_ms: number | null
-  p95_ms: number | null
-  p99_ms: number | null
+export type ShareBaselineUnavailable = 'not_share' | 'never_switched' | 'out_of_retention'
+
+export interface ShareReportAccount {
+  account_id: number
+  requests: number
+  request_share: number | null
+  tokens: number
+  token_share: number | null
+  standard_cost: number
+  cost_share: number | null
+  /** Times passed over, by reason; share mode only. */
+  skipped?: Record<string, number> | null
 }
+
+export interface ShareReportDetails {
+  /** Both modes. */
+  cache_classes: Record<string, { requests: number; tokens: number }>
+  /** The rest is share mode only. */
+  reasons?: Record<string, number> | null
+  waits?: { count: number; hit: number; avg_ms: number | null } | null
+  attempts?: number | null
+  share_requests?: number | null
+  /**
+   * Sessions moved to another account while their cache was still warm;
+   * share mode only. `total` counts every such move, most of them forced by
+   * an unavailable account or a failure; `active` counts the moves share
+   * scheduling chose itself, which by design should stay at 0.
+   */
+  hot_migrations?: { total: number; active: number; by_reason: Record<string, number> } | null
+}
+
+/** Where the switch time comes from: the switch record, or the policy's updated_at when the record is missing. */
+export type ShareAnchorSource = 'switch_record' | 'policy_updated_at'
 
 export interface ShareReport {
   group_id: number
   scheduler: ShareScheduler
+  session_keep: boolean
   version: number
-  unit: SharePolicy['balance']['unit']
-  from: string
-  to: string
-  active_tier: number
-  members: ShareMember[]
-  actual: ShareAccountActual[]
-  decisions: {
-    requests: number
-    reasons: Record<string, number>
-    key_sources: Record<string, number>
-    ideal_skips: Record<string, number>
-    hot_migrations: number
-    hot_reasons: Record<string, number>
-    wait_count: number
-    wait_hit: number
-    avg_wait_ms: number
-    attempts: number
-    shadow: number
-    shadow_agree: number
-    shadow_agree_rate: number
-    shadow_reasons: Record<string, number>
-    /** Shadow comparisons skipped at the concurrency bound. */
-    shadow_skipped?: number
-    rebalance_cleared: number
-    dropped: number
-  }
-  cache: {
-    requests: number
-    classes: Record<string, number>
-    class_tokens: Record<string, number>
-    prompt_tokens: number
-    cache_read_tokens: number
-    cache_creation_tokens: number
-    read_ratio: number
-    scheduling_miss_ratio: number
-    ttft: Record<string, ShareTTFT>
-    /** Sampled selection cost keyed by share, shadow or original. */
-    selection?: Record<string, ShareSelectionCost>
-    dropped: number
-  }
-  corrections?: Record<string, number>
-  counters_error?: string
-  /** 'hour_rounded' when the window is read from hourly buckets. */
-  counter_precision?: 'minute' | 'hour_rounded'
+  window_seconds: number
+  /** The current window; it starts at the switch when the switch falls inside the asked-for window. */
+  current_from: string
+  current_to: string
+  current: ShareMetrics
+  /** The latest scheduler change (sub2api ↔ share). */
+  switched_at: string | null
+  anchor_source: ShareAnchorSource | null
+  /** The same length window before the switch; share mode only. */
+  baseline_from: string | null
+  baseline_to: string | null
+  baseline: ShareMetrics | null
+  baseline_unavailable: ShareBaselineUnavailable | null
+  accounts: ShareReportAccount[]
+  details: ShareReportDetails
+  counters_error: string | null
+  /**
+   * 'hour_rounded' for the baseline and windows over 2 hours. A window the
+   * switch did not cut is summed to the nearest whole hour (up to 30 minutes
+   * off); one cut at the switch (current_from equals switched_at) counts
+   * from the first whole hour after it, plus the partial hour by the minute
+   * when the switch was within 2 hours (up to 59 minutes short otherwise).
+   */
+  counter_precision: 'minute' | 'hour_rounded'
 }
 
-/** An account's resolved rule in one group that stores a policy. */
+/** An account's place in one group whose stored scheduler is share. */
 export interface ShareAccountGroupRule {
   group_id: number
   group_name: string
   scheduler: ShareScheduler
   effective: boolean
-  configured: boolean
-  tier: number
-  weight: number
-  drain: boolean
-  drain_until?: string
-  cache_domain: string
+  priority: number
+  load_factor: number | null
+  effective_load_factor: number
+  healthy: boolean
+  expected_share: number
+  share_if_healthy: number
 }
-
-/** Redis and database figures need server.enable_server_timing; they are null without metered samples. */
-export interface ShareSelectionCost {
-  samples: number
-  avg_ms: number
-  io_samples: number
-  avg_redis_round_trips: number | null
-  avg_redis_ms: number | null
-  avg_db_queries: number | null
-}
-
-export interface ShareDecisionSample {
-  at: string
-  node?: string
-  version: number
-  scheduler: ShareScheduler
-  platform?: string
-  model?: string
-  key_source: string
-  session?: string
-  reason: string
-  routing?: string
-  bound?: number
-  target?: number
-  ideal?: number
-  served?: number
-  original?: number
-  agree?: boolean
-  ideal_skip?: string
-  attempts: number
-  wait_ms?: number
-  idle_ms?: number
-  cache_ttl_seconds?: number
-  estimated_tokens?: number
-  queued?: boolean
-  hot_migration?: boolean
-  elapsed_us: number
-}
-
-export type ShareRebalanceMode = 'cold' | 'all'
 
 const base = '/admin/share-scheduling'
 
@@ -311,7 +342,7 @@ export async function getSettings(): Promise<ShareSchedulingSettings> {
   return data
 }
 
-export async function updateSettings(settings: Partial<ShareSchedulingSettings>): Promise<ShareSchedulingSettings> {
+export async function updateSettings(settings: ShareSchedulingSettings): Promise<ShareSchedulingSettings> {
   const { data } = await apiClient.put<ShareSchedulingSettings>(`${base}/settings`, settings)
   return data
 }
@@ -326,16 +357,13 @@ export async function getPolicy(groupId: number): Promise<SharePolicyView> {
   return data
 }
 
-export async function updatePolicy(groupId: number, expectedVersion: number, policy: SharePolicy): Promise<SharePolicyView> {
-  const { data } = await apiClient.put<SharePolicyView>(`${base}/groups/${groupId}/policy`, {
-    expected_version: expectedVersion,
-    policy
-  })
+export async function updatePolicy(groupId: number, update: ShareGroupUpdate): Promise<SharePolicyView> {
+  const { data } = await apiClient.put<SharePolicyView>(`${base}/groups/${groupId}/policy`, update)
   return data
 }
 
-export async function preview(groupId: number, policy: SharePolicy): Promise<SharePreview> {
-  const { data } = await apiClient.post<SharePreview>(`${base}/groups/${groupId}/preview`, { policy })
+export async function preview(groupId: number, update: Pick<ShareGroupUpdate, 'scheduler' | 'session_keep'>): Promise<SharePreview> {
+  const { data } = await apiClient.post<SharePreview>(`${base}/groups/${groupId}/preview`, { scheduler: update.scheduler, session_keep: update.session_keep })
   return data
 }
 
@@ -349,19 +377,9 @@ export async function report(groupId: number, window = '1h'): Promise<ShareRepor
   return data
 }
 
-export async function decisions(groupId: number, limit = 100): Promise<ShareDecisionSample[]> {
-  const { data } = await apiClient.get<ShareDecisionSample[]>(`${base}/groups/${groupId}/decisions`, { params: { limit } })
-  return data ?? []
-}
-
 export async function accountRules(accountId: number): Promise<ShareAccountGroupRule[]> {
   const { data } = await apiClient.get<ShareAccountGroupRule[]>(`${base}/accounts/${accountId}/rules`)
   return data ?? []
-}
-
-export async function rebalance(groupId: number, mode: ShareRebalanceMode): Promise<{ mode: ShareRebalanceMode; cleared: number }> {
-  const { data } = await apiClient.post<{ mode: ShareRebalanceMode; cleared: number }>(`${base}/groups/${groupId}/rebalance`, { mode })
-  return data
 }
 
 export const shareSchedulingAPI = {
@@ -373,8 +391,6 @@ export const shareSchedulingAPI = {
   preview,
   explain,
   report,
-  decisions,
-  rebalance,
   accountRules
 }
 
