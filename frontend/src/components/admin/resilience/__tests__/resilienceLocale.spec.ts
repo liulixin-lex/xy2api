@@ -45,5 +45,14 @@ describe('gateway resilience 0.4.4 locale keys', () => {
     expect(whitelist).not.toContain(words.notMetadata)
     expect(text('fields.codexRetryAfterCapHint')).toContain(words.configReject)
   })
+
+  // PM 3 (resilience_relay_keepalive.go): the generalized empty-delta drop
+  // follows the whitelist switch too, so "off" names the marked-frame rule.
+  it.each([['zh', zh, '只丢弃带 SSE-Keep-Alive 标记的帧'], ['en', en, 'only frames marked SSE-Keep-Alive']])(
+    '%s says what is dropped with the whitelist off',
+    (_, messages, offRule) => {
+      expect(lookup(messages, 'admin.resilience.settings.switches.nativePreludeWhitelistHint')).toContain(offRule)
+    }
+  )
 })
 

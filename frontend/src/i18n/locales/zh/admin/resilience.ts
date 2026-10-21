@@ -58,7 +58,7 @@ export default {
         preludeStaging: '兼容转换推迟开场',
         preludeStagingHint: 'Chat 与 Messages 的兼容转换等到首个正文或终态再写开场事件（role 块、message_start）；上游开场后、正文前失败时可以换号。关闭后回到 0.4.3 行为。',
         nativePreludeWhitelist: '原生 Responses 开场白名单扩展',
-        nativePreludeWhitelistHint: '上游开场后、正文前失败时，可以换号的开场事件扩展到 response.queued 与不含内容的 added 事件；created 之前出现的空 delta 按中转伪保活丢弃。关闭后可换号的开场事件回到 0.4.3 的 created、in_progress 与心跳。',
+        nativePreludeWhitelistHint: '上游开场后、正文前失败时，可以换号的开场事件扩展到 response.queued 与不含内容的 added 事件；created 之前出现的空 delta 按中转伪保活丢弃。关闭后，可换号的开场事件回到 0.4.3 的 created、in_progress 与心跳；created 之前的空 delta 也只丢弃带 SSE-Keep-Alive 标记的帧。',
         strictTerminal: '明确终止',
         strictTerminalHint: 'Chat 透传中上游发出 error 后紧跟 [DONE] 时按失败处理，不再当作正常结束。关闭后回到 0.4.3 行为。',
         failedFrameRetryAfter: 'response.failed 附带重试时间',
