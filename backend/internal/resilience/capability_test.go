@@ -77,3 +77,16 @@ func TestStreamOnlyFailureRejectsOtherParameterAndRequestEcho(t *testing.T) {
 		})
 	}
 }
+
+func TestCapabilityOnlyAttemptsDoesNotHideMixedFailures(t *testing.T) {
+	ctx := WithCapabilityRequest(context.Background(), "responses", false)
+	require.False(t, CapabilityOnlyAttempts(ctx))
+	NoteCapabilityAttempt(ctx, true)
+	require.True(t, CapabilityOnlyAttempts(ctx))
+	NoteCapabilityAttempt(ctx, false)
+	NoteCapabilityAttempt(ctx, true)
+	require.False(t, CapabilityOnlyAttempts(ctx), "later capability failures cannot erase another cause")
+	require.False(t, CapabilityOnlyAttempts(WithCapabilityRequest(context.Background(), "responses", false)))
+	NoteCapabilityAttempt(context.Background(), true)
+	require.False(t, CapabilityOnlyAttempts(context.Background()))
+}

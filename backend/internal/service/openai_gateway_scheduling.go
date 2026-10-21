@@ -356,7 +356,7 @@ func NormalizeOpenAICompatiblePlatform(platform string) string {
 // never forward this error text to OpenAI-platform clients (they respond with
 // the generic classification message). Callers that must preserve the legacy
 // message pass "".
-func noAvailableOpenAISelectionError(requestedModel string, compactBlocked bool, details string) error {
+func noAvailableOpenAISelectionError(requestedModel string, compactBlocked bool, details string, capabilityOnly ...bool) error {
 	if compactBlocked {
 		return ErrNoAvailableCompactAccounts
 	}
@@ -367,12 +367,15 @@ func noAvailableOpenAISelectionError(requestedModel string, compactBlocked bool,
 	if details != "" {
 		message += " (" + details + ")"
 	}
-	return openAINoAvailableSelectionError{message: message}
+	return openAINoAvailableSelectionError{message: message, capabilityOnly: len(capabilityOnly) > 0 && capabilityOnly[0]}
 }
 
 type openAINoAvailableSelectionError struct {
-	message string
+	message        string
+	capabilityOnly bool
 }
+
+func (e openAINoAvailableSelectionError) CapabilityOnly() bool { return e.capabilityOnly }
 
 func (e openAINoAvailableSelectionError) Error() string {
 	return e.message
@@ -984,7 +987,7 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusionsStickyHit(ctx 
 	selected, compactBlocked, filterStats := s.selectBestAccount(ctx, groupID, platform, accounts, requestedModel, excludedIDs, requireCompact, requiredCapability, preferLowUpstreamRate)
 
 	if selected == nil {
-		return nil, false, capabilitySelectionError(ctx, noAvailableOpenAISelectionError(requestedModel, compactBlocked, filterStats.summary("")))
+		return nil, false, capabilitySelectionError(ctx, noAvailableOpenAISelectionError(requestedModel, compactBlocked, filterStats.summary(""), filterStats.capabilityOnly()))
 	}
 
 	hydrated, err := s.hydrateSelectedAccount(ctx, selected)
@@ -1384,7 +1387,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	}
 
 	if len(candidates) == 0 {
-		return nil, noAvailableOpenAISelectionError(requestedModel, false, filterStats.summary(""))
+		return nil, noAvailableOpenAISelectionError(requestedModel, false, filterStats.summary(""), filterStats.capabilityOnly())
 	}
 	rateOrder := openAILegacyUpstreamRateOrder{}
 	if preferLowUpstreamRate {

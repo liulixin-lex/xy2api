@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,9 +27,11 @@ type LearnedCapability struct {
 
 type capabilityRequestKey struct{}
 type capabilityRequest struct {
-	protocol string
-	stream   bool
-	excluded sync.Map
+	protocol          string
+	stream            bool
+	excluded          sync.Map
+	capabilityAttempt atomic.Bool
+	otherAttempt      atomic.Bool
 }
 
 // WithCapabilityRequest records an explicitly parsed client mode. Callers
@@ -78,6 +81,28 @@ func CapabilityExcluded(ctx context.Context, accountID int64) bool {
 	found := false
 	request.excluded.Range(func(_, _ any) bool { found = true; return false })
 	return found
+}
+
+// NoteCapabilityAttempt records request-local causes without marking account
+// or session health. A mixed failure must keep its ordinary retry guidance.
+func NoteCapabilityAttempt(ctx context.Context, capability bool) {
+	if _, _, ok := CapabilityRequestFrom(ctx); !ok {
+		return
+	}
+	request := ctx.Value(capabilityRequestKey{}).(*capabilityRequest)
+	if capability {
+		request.capabilityAttempt.Store(true)
+	} else {
+		request.otherAttempt.Store(true)
+	}
+}
+
+func CapabilityOnlyAttempts(ctx context.Context) bool {
+	if _, _, ok := CapabilityRequestFrom(ctx); !ok {
+		return false
+	}
+	request := ctx.Value(capabilityRequestKey{}).(*capabilityRequest)
+	return request.capabilityAttempt.Load() && !request.otherAttempt.Load()
 }
 
 func validCapabilityProtocol(protocol string) bool {

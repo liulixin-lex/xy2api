@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -20,6 +21,7 @@ const (
 	// CapabilityManualExtraKey is reserved for separately managed overrides.
 	// This release neither writes nor interprets manual capability settings.
 	CapabilityManualExtraKey = "capability_manual"
+	CapabilityOnlyMessage    = `No available account in this group supports non-streaming requests; retry with "stream": true`
 )
 
 func capabilityExtraKey(protocol string) string {
@@ -176,6 +178,17 @@ func capabilitySelectionError(ctx context.Context, err error) error {
 		return fmt.Errorf("%w (%s)", err, resilience.ReasonCapabilityStreamOnly)
 	}
 	return err
+}
+
+// IsCapabilityOnlySelectionError is true only when every candidate was
+// excluded for this capability; diagnostic text alone is not authoritative.
+func IsCapabilityOnlySelectionError(err error) bool {
+	var marker interface{ CapabilityOnly() bool }
+	return errors.As(err, &marker) && marker.CapabilityOnly()
+}
+
+func IsCapabilityOnlyExhaustion(ctx context.Context, err *UpstreamFailoverError) bool {
+	return err.IsCapabilityStreamOnly() && resilience.CapabilityOnlyAttempts(ctx)
 }
 
 func (e *UpstreamFailoverError) IsCapabilityStreamOnly() bool {
