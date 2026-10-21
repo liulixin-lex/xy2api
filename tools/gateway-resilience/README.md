@@ -124,6 +124,51 @@ Capacity retry fixtures give B a different Docker DNS host name for the same fau
 
 Q-1 uses an Anthropic group for all three queued entry protocols, covering the Gateway Responses/Chat conversion writers and native Messages. The holder uses a separate key of the same user on an OpenAI group; its disconnect releases the shared user slot. A live line callback confirms the queue heartbeat arrived before the balance change, and fault records confirm the queued request never reached an upstream. Responses and Chat allow only SSE comments before their opening/error; Messages also permits its typed ping data. These additions bring the suite to 71 scenarios.
 
+### Candidate validation preparation
+
+`staging/build_candidate.py COMMIT --pr-head PR_HEAD --host SSH_ALIAS --directory STAGING_DIR`
+plans a build from `git archive` without connecting to the host. After the candidate
+is released, add `--execute` to build it once. The script refuses an existing image
+or evidence directory, verifies the uploaded archive, and records the commit,
+source tree, PR head tree, image ID and `/app/xy2api` SHA-256 in
+`evidence/candidate-COMMIT/BUILD.json`. It leaves the running app unchanged.
+Omit `--pr-head` only when the candidate itself is the intended head; compare the
+recorded tree again if the PR head later changes.
+
+On the staging host, `python3 phase2.py resources` checks disk and available memory
+(30 GiB and 4 GiB minimum). `python3 phase2.py scenarios` prints the 71-case plan;
+`upgrade` and `soak` also default to planning. After selecting the candidate image
+for the app and refreshing `fixtures.py`, execute each stage serially:
+
+```sh
+python3 phase2.py scenarios --execute --build evidence/candidate-COMMIT/BUILD.json --evidence evidence/run-COMMIT
+python3 phase2.py upgrade --execute --build evidence/candidate-COMMIT/BUILD.json --evidence evidence/upgrade-COMMIT
+python3 phase2.py soak --execute --build evidence/candidate-COMMIT/BUILD.json --evidence evidence/soak-COMMIT
+```
+
+The runner loads only `.env`, binds both the running image and binary to BUILD.json,
+locks the staging project, rejects existing output directories and records script
+hashes. Scenarios run with `--parallel 1`; `SUITE.json` includes all 71 records.
+The existing staging CF/direct host settings are required for their six cases.
+
+The upgrade stage uses 0.4.3, a separate synthetic database, rollback and another
+forward upgrade, followed by backup/restore. Every transition checks health,
+readiness, settings and the migration filename/checksum set. It produces a real
+F36 capability learning record and verifies that the account still streams on
+0.4.3, the extra key survives, and non-default v2 settings survive the round trip.
+It does not save settings on 0.4.3: an old-version save drops new fields, as specified
+by the C0 compatibility contract. Failure evidence is retained and the temporary
+application container is removed.
+
+Soak uses `--hours 3 --cycle-minutes 30`, concurrency 20–50 and ten minutes of
+settling; the runner enables `gctrace=1` on the same candidate image. Heap data from
+at least three complete cycles after warm-up is mandatory, with slope at most
+1 MiB/h. Missing heap or goroutine data cannot pass; SQL failures stop validation.
+Every ERROR count is reported; the automatic flood threshold is at least 60 lines
+per minute for three consecutive minutes. Individual errors still need attribution
+in the final report. Existing slot, reservation, memory, panic and duplicate usage
+checks remain in effect.
+
 ## cdn-sim
 
 ```bash

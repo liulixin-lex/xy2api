@@ -151,7 +151,9 @@ def sh(cmd: str, timeout=60) -> str:
 
 
 def psql(sql: str) -> str:
-    return sh(f"docker compose -p {PROJECT} exec -T postgres psql -U xy2api -d xy2api -At -c {json.dumps(sql)}")
+    return subprocess.run(["docker", "compose", "-p", PROJECT, "exec", "-T", "postgres", "psql", "-U", "xy2api",
+                           "-d", "xy2api", "-v", "ON_ERROR_STOP=1", "-At", "-c", sql],
+                          cwd=HERE, capture_output=True, text=True, timeout=60, check=True).stdout.strip()
 
 
 # Counts keys matching ARGV[1]; with ARGV[2] == "members", sums ZCARD of the
@@ -296,6 +298,20 @@ def checks(evidence: str, started_at: str, cycle_minutes: int = 60) -> dict:
     heap = live_heap(started_at)
     heap_slope = None if load_start is None else cycle_slope(heap, load_start, load_end, cycle_minutes)
     logs = sh(f"docker logs --since {started_at} {PROJECT}-app-1 2>&1", timeout=600)
+    timed_logs = sh(f"docker logs --timestamps --since {started_at} {PROJECT}-app-1 2>&1", timeout=600)
+    error_minutes = {}
+    for line in timed_logs.splitlines():
+        if re.search(r'"level"\s*:\s*"error"|\bERROR\b', line):
+            minute = line[:16]
+            error_minutes[minute] = error_minutes.get(minute, 0) + 1
+    # Surface every error count; a sustained minute-rate is the flood gate.
+    flood_run, error_flood = 0, False
+    minute = datetime.datetime.fromisoformat(started_at).replace(second=0, microsecond=0)
+    end = datetime.datetime.fromisoformat(samples[-1]["at"])
+    while minute <= end:
+        flood_run = flood_run + 1 if error_minutes.get(minute.isoformat()[:16], 0) >= 60 else 0
+        error_flood = error_flood or flood_run >= 3
+        minute += datetime.timedelta(minutes=1)
     secrets = list(KEYS.values())
     for n in (1, 2, 3):
         if os.environ.get(f"REAL{n}_API_KEY"):
@@ -319,6 +335,9 @@ def checks(evidence: str, started_at: str, cycle_minutes: int = 60) -> dict:
         "live_heap_mib_first_last": [heap[0][1], heap[-1][1]] if heap else None,
         "live_heap_slope_mib_per_hour": None if heap_slope is None else round(heap_slope, 2),
         "panics": len(re.findall(r"\bpanic\b|goroutine \d+ \[running\]", logs)),
+        "error_lines": sum(error_minutes.values()),
+        "error_lines_per_minute": error_minutes,
+        "error_flood_threshold": "at least 60 ERROR lines/min for 3 consecutive minutes",
         "credential_hits_in_logs": leaked,
         "masked_key_like_strings": len(SECRET.findall(logs)),
         "duplicate_usage_rows": int(dup_usage or 0),
@@ -328,22 +347,22 @@ def checks(evidence: str, started_at: str, cycle_minutes: int = 60) -> dict:
     ok = {
         "no orphan account/user/key slots": all(last[k] == 0 for k in ("slots_account", "slots_user", "slots_key", "slots_live")),
         "no orphan in-flight reservations": last["inflight_keys"] == 0,
-        "goroutines back to baseline (+50)": base["goroutines"] is None or last["goroutines"] is None
-        or last["goroutines"] <= base["goroutines"] + 50,
+        "goroutines measured and back to baseline (+50)": base["goroutines"] is not None and last["goroutines"] is not None
+        and last["goroutines"] <= base["goroutines"] + 50,
         "pg backends back to baseline (+3)": last["pg_backends"] <= base["pg_backends"] + 3,
         # Leaks show as anonymous memory that keeps rising under the same load.
         "app anonymous memory does not trend up (late <= 1.2x early + 16 MiB)": late_anon <= 1.2 * early_anon + 16
         if early_anon is not None and late_anon is not None
         else mem_mib(last["app_mem"]) <= max(1.5 * mem_mib(base["app_mem"]), mem_mib(base["app_mem"]) + 64),
         "no panic": result["panics"] == 0,
+        "no sustained ERROR flood": not error_flood,
         "no credential in logs": leaked == 0,
         "no duplicate usage rows": result["duplicate_usage_rows"] == 0,
         "no duplicate undelivered rows": result["duplicate_undelivered_rows"] == 0,
         "undelivered and unbilled requests have no usage row": result["unbilled_undelivered_with_usage"] == 0,
     }
-    if heap:
-        ok[f"live heap after GC does not trend up (hourly medians, <= {MAX_LIVE_HEAP_SLOPE_MIB_PER_HOUR} MiB/h)"] = (
-            heap_slope is not None and heap_slope <= MAX_LIVE_HEAP_SLOPE_MIB_PER_HOUR)
+    ok[f"live heap after GC measured over >=3 post-warmup cycles (<= {MAX_LIVE_HEAP_SLOPE_MIB_PER_HOUR} MiB/h)"] = (
+        heap_slope is not None and heap_slope <= MAX_LIVE_HEAP_SLOPE_MIB_PER_HOUR)
     result["checks"] = [{"check": k, "ok": v} for k, v in ok.items()]
     result["ok"] = all(ok.values())
     return result
