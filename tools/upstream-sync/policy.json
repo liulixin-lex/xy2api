@@ -1345,7 +1345,7 @@
     },
     {
       "path": "backend/internal/handler/resilience_retry_advice.go",
-      "value": "if seconds := upstreamRecoverySeconds(c); seconds > 0 {"
+      "value": "installRetryAdviceProvider(c, diag, apiKey, model, upstreamRecoverySeconds(c))"
     },
     {
       "path": "backend/internal/handler/openai_chat_completions.go",
@@ -1848,6 +1848,11 @@
       "id": "xy-resilience-v2-streams",
       "path": "backend/internal/service/resilience_heartbeat_headers_test.go",
       "literal": "func TestRawChatCommentHeartbeatCommitsOnlyStableStreamHeaders"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_retry_advice_lazy_test.go",
+      "literal": "func TestRetryAdviceResolvesOnlyForFailedFrames"
     }
   ]
 }

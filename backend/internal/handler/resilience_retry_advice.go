@@ -26,6 +26,13 @@ type retryAdviceAdvisor interface {
 // installResilienceRetryAdvice runs before selection. The closure retains
 // immutable defaults and a service, never the pooled Gin context or API key.
 func installResilienceRetryAdvice(c *gin.Context, diag any, apiKey *service.APIKey, model string) {
+	installRetryAdviceProvider(c, diag, apiKey, model, 0)
+}
+
+// installRetryAdviceProvider installs the lazy candidate advice. recovery is
+// the last upstream's proven wait in seconds, used only when the candidates
+// give no answer (RA-1).
+func installRetryAdviceProvider(c *gin.Context, diag any, apiKey *service.APIKey, model string, recovery int) {
 	if c == nil || c.Request == nil {
 		return
 	}
@@ -37,10 +44,7 @@ func installResilienceRetryAdvice(c *gin.Context, diag any, apiKey *service.APIK
 	if apiKey != nil && apiKey.GroupID != nil {
 		initialGroup = *apiKey.GroupID
 	}
-	c.Request = c.Request.WithContext(resilience.WithRetryAdviceProvider(c.Request.Context(), func(ctx context.Context) resilience.RetryAdvice {
-		if !resilience.Current().FailedFrameRetryAfterOn() || ctx.Err() != nil {
-			return resilience.RetryAdvice{}
-		}
+	candidates := func(ctx context.Context) resilience.RetryAdvice {
 		st := resilience.StateFrom(ctx)
 		if st.ConfigError() {
 			return resilience.RetryAdvice{Suppress: true, Source: "config_rejection"}
@@ -57,24 +61,29 @@ func installResilienceRetryAdvice(c *gin.Context, diag any, apiKey *service.APIK
 			return resilience.RetryAdvice{Source: "unknown"}
 		}
 		return advisor.RetryAdvice(ctx, &group, currentModel)
+	}
+	c.Request = c.Request.WithContext(resilience.WithRetryAdviceProvider(c.Request.Context(), func(ctx context.Context) resilience.RetryAdvice {
+		if !resilience.Current().FailedFrameRetryAfterOn() || ctx.Err() != nil {
+			return resilience.RetryAdvice{}
+		}
+		advice := candidates(ctx)
+		if recovery > 0 && !advice.Suppress && advice.Seconds <= 0 && ctx.Err() == nil {
+			advice = resilience.RetryAdvice{Seconds: recovery, Source: "recovery"}
+		}
+		return advice
 	}))
 }
 
-// prepareResilienceRetryAdvice fixes the final handler result before a
-// downstream wrapper can synthesize its terminal frame.
+// prepareResilienceRetryAdvice prepares the final handler advice for a
+// failed frame. It reads the upstream hint now, because the Retry-After that
+// proves it is rewritten right after; the candidates are queried only when a
+// failed frame is written, by the handler or a downstream wrapper (P2-10).
+// A plain JSON exit never carries the advice and never runs the provider.
 func prepareResilienceRetryAdvice(c *gin.Context, diag any, apiKey *service.APIKey, model string) {
 	if c == nil || c.Request == nil || !resilience.Current().FailedFrameRetryAfterOn() {
 		return
 	}
-	installResilienceRetryAdvice(c, diag, apiKey, model)
-	ctx := c.Request.Context()
-	advice := resilience.ResolveRetryAdvice(ctx)
-	if !advice.Suppress && advice.Seconds <= 0 && ctx.Err() == nil {
-		if seconds := upstreamRecoverySeconds(c); seconds > 0 {
-			advice = resilience.RetryAdvice{Seconds: seconds, Source: "recovery"}
-		}
-	}
-	resilience.SetRetryAdvice(ctx, advice)
+	installRetryAdviceProvider(c, diag, apiKey, model, upstreamRecoverySeconds(c))
 }
 
 func upstreamRecoverySeconds(c *gin.Context) int {
@@ -141,6 +150,8 @@ func responsesFailedRetryAdvice(c *gin.Context, errType, code string) resilience
 		suppressResilienceRetryAdvice(c, "non_retryable")
 	}
 	advice := resilience.ResolveRetryAdvice(c.Request.Context())
+	// The frame's advice is final for the request.
+	resilience.SetRetryAdvice(c.Request.Context(), advice)
 	c.Writer.Header().Del("Retry-After")
 	c.Set(ginKeyResilienceRetryAfter, 0)
 	if headers := advice.Headers(); headers != nil {
