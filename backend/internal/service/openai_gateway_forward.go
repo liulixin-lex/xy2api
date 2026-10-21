@@ -1427,7 +1427,7 @@ func (s *OpenAIGatewayService) learnOpenAIStreamOnlyHTTPFailure(ctx context.Cont
 	if err != nil {
 		return nil
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	body, err := io.ReadAll(reader)
 	if err != nil || IsImageGenerationIntentForPlatform(request.URL.Path, gjson.GetBytes(body, "model").String(), body, account.Platform) {
 		return nil

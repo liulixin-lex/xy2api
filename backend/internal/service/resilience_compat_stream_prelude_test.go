@@ -248,7 +248,7 @@ func TestCompatPreludeCanceledClientClosesUpstream(t *testing.T) {
 		ctx, cancel := context.WithCancel(c.Request.Context())
 		c.Request = c.Request.WithContext(ctx)
 		pr, pw := io.Pipe()
-		defer pw.Close()
+		defer func() { _ = pw.Close() }()
 		wrote := make(chan struct{})
 		go func() { _, _ = pw.Write([]byte(keepaliveStallCreated)); close(wrote); <-ctx.Done() }()
 		go func() { <-wrote; cancel() }()
@@ -296,8 +296,8 @@ func TestCompatPreludeDrainsUsageAfterClientCancellation(t *testing.T) {
 					}
 				}}
 				pr, pw := io.Pipe()
-				defer pr.Close()
-				defer pw.Close()
+				defer func() { _ = pr.Close() }()
+				defer func() { _ = pw.Close() }()
 				wroteTerminal := make(chan error, 1)
 				go func() {
 					_, err := io.WriteString(pw, keepaliveStallCreated+"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n")

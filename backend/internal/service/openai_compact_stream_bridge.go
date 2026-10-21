@@ -118,7 +118,10 @@ func writeOpenAICompactSSEFailureMessage(c *gin.Context, statusCode int, errType
 		ctx = c.Request.Context()
 	}
 	errorBody := openAIResponseFailureError(ctx, errType, errType, message)
-	MarkOpsStreamError(c, errType, errorBody["message"].(string), statusCode)
+	if renderedMessage, ok := errorBody["message"].(string); ok {
+		message = renderedMessage
+	}
+	MarkOpsStreamError(c, errType, message, statusCode)
 	payload, err := json.Marshal(map[string]any{
 		"type":            "response.failed",
 		"sequence_number": 0,

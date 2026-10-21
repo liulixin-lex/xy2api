@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -1307,15 +1308,19 @@ func TestProxyOpenAIWSHTTPBridgeTurnDoesNotReplayCapacityAfterSemanticOutput(t *
 }
 
 func TestProxyOpenAIWSHTTPBridgeSharedPreludeBoundary(t *testing.T) {
-	withResilienceSettings(t, nil)
+	before := resilience.Current().Clone()
+	t.Cleanup(func() { resilience.Publish(before) })
+	resilience.Publish(resilience.Defaults())
+	gin.SetMode(gin.TestMode)
 	for _, event := range []string{"response.queued", "codex.response.metadata"} {
 		t.Run(event, func(t *testing.T) {
-			body := keepaliveStallCreated + "data: {\"type\":\"" + event + "\"}\n\n" +
+			body := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_boundary\"}}\n\n" + "data: {\"type\":\"" + event + "\"}\n\n" +
 				"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"busy\"}}}\n\n"
 			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}}
-			svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
-			account := rawChatCompletionsTestAccount()
-			c, _ := compatStreamContext("/v1/responses", "")
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{ID: 12, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 			payload := []byte(`{"type":"response.create","model":"gpt-5.4","input":"hi"}`)
 			var writes [][]byte
 			_, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "sk-test", payload, len(payload), "gpt-5.4", "", "", "", "", 1, func(data []byte) error {

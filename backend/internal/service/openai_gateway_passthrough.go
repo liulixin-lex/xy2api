@@ -1207,7 +1207,7 @@ func openAIStreamDataStartsClientOutput(data, eventType string) bool {
 	}
 	if resilience.Current().NativePreludeWhitelistOn() {
 		class := resilience.ClassifyStreamEvent("responses", eventType, []byte(trimmed))
-		return class.Kind != resilience.Prelude && !(class.Kind == resilience.TerminalFailure && class.Retryable)
+		return class.Kind != resilience.Prelude && (class.Kind != resilience.TerminalFailure || !class.Retryable)
 	}
 	switch strings.TrimSpace(eventType) {
 	case "response.failed":

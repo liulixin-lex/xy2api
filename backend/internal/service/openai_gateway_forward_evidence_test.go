@@ -27,7 +27,8 @@ func TestOpenAIHTTPFailureKeepsStructuredClassificationEvidence(t *testing.T) {
 			require.Error(t, err)
 			raw, exists := c.Get(OpsUpstreamErrorsKey)
 			require.True(t, exists)
-			events := raw.([]*OpsUpstreamErrorEvent)
+			events, ok := raw.([]*OpsUpstreamErrorEvent)
+			require.True(t, ok)
 			require.NotEmpty(t, events)
 			require.Equal(t, string(resilience.CategoryCapacityShed), events[0].ResilienceCategory)
 		})
@@ -40,7 +41,10 @@ func TestOpenAIFirstOutputTimeoutRecordsActualSeconds(t *testing.T) {
 	svc := compatStreamService(nil, 100, 0, 0)
 	_ = svc.newOpenAIFirstOutputTimeoutError(context.Background(), c, rawChatCompletionsTestAccount(), nil, "", time.Now(), "model", "", 1500*time.Millisecond, "semantic_output", nil)
 	raw, _ := c.Get(OpsUpstreamErrorsKey)
-	event := raw.([]*OpsUpstreamErrorEvent)[0]
+	events, ok := raw.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	require.NotEmpty(t, events)
+	event := events[0]
 	require.Equal(t, "first_output_timeout", event.Reason)
 	require.Contains(t, event.Detail, "timeout_ms=1500")
 	require.Contains(t, event.Detail, "timeout_seconds=1.5")

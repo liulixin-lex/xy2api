@@ -1022,7 +1022,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 		}
 		if !clientDisconnected && !clientOutputStarted {
-			if refusalDetector.IsSilentRefusal() && !(stagePrelude && terminalEventType == "response.incomplete") {
+			if refusalDetector.IsSilentRefusal() && (!stagePrelude || terminalEventType != "response.incomplete") {
 				return nil, newOpenAISilentRefusalFailoverError(c, account, requestID)
 			}
 			if len(pendingSSE) > 0 {

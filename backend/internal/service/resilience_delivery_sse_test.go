@@ -122,8 +122,10 @@ func TestNonSSEResponsesKeepTheByteCount(t *testing.T) {
 
 func TestMessagesConversionClientLeavingAfterOpeningEventsIsNotCharged(t *testing.T) {
 	// The review's reproduction: the upstream only sent response.created;
-	// the Messages conversion wrote message_start, then the client left.
-	withResilienceSettings(t, nil)
+	// the legacy Messages conversion wrote message_start, then the client left.
+	// Keep this delivery regression with staging disabled; the staged cancel
+	// path has separate no-output/no-charge coverage.
+	withResilienceSettings(t, func(s *resilience.Settings) { s.Stream.PreludeStaging = false })
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
