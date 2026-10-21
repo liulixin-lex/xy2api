@@ -47,7 +47,7 @@
 - [x] 4.1 按 RA-1 → ε → DOCS → δ 合入；手工合并 `GATEWAY_RESILIENCE.md` 的可重放前缀与严格终止说明、`policy.json` 的具名补丁测试，两边增补全部保留；`VERSION` 与 `UPSTREAM_BASE.json` 改为 0.4.5。基线既有的 `contentModerationHandlerSettingRepo` 竞争以只改测试的独立提交 `c906ba5ca` 修复，修前复现、修后 `-race -count=3` 通过。四个原版调度文件相对 main 无变化，scheduler-diff 保留既有差异登记。 已增量合入 δ 最终 `50053a8ea` 与 DOCS 最终 `2ebb17d1e`，保留 ε `930213caa`；首次候选 `43be712aa` 门禁为 22/25，不作为候选，见 design §7。
 - [x] 4.2 全量门禁：gofmt、四种 vet、golangci-lint、unit 与无 tag 测试、`ci_gate.py`（`-race`，零跳过）、`govulncheck`、前端四项与依赖审计、`tools/tests`、文档一致性、scheduler-diff、干净树 `sync.py audit`。
   - 2026-10-21T15:51Z，α 在本地集成分支 `integ/0.4.5-prep`：门禁对象是产品代码 `46239531d`，25/25 通过。最终本地候选 `b966306de` 只追加了记忆与归档提交，代码与 `46239531d` 逐字一致，并在最终 HEAD 上复验文档检查与干净树 audit；`VERSION` 与 `UPSTREAM_BASE.json` 为 0.4.5。
-  - unit：第三轮原始结果 24 项通过、1 项失败，失败的是 `TestInflightEstimate_AccountMappingNoDBAndBoundedMemory` 的全局堆阈值（基线既有的偶发，见 7.4）。单独重跑 5 次全过；按 PM 指示用原命令完整重跑 unit（attempt3b）通过，以它替代该项结果，原失败保留。没有跳过用例，也没有放宽阈值。
+  - unit：第三轮原始结果 24 项通过、1 项失败，失败的是 `TestInflightEstimate_AccountMappingNoDBAndBoundedMemory` 的全局堆阈值（基线既有的偶发，见 7.4）。单独重跑 5 次全过；按 PM 指示用原命令完整重跑 unit（attempt3b）通过，以它替代该项结果，原失败保留。没有跳过用例，也没有放宽阈值。 **已修复**：PM 18:42Z 放行 ε 的只改测试提交 `13baa2869`，见 7.4；原始失败记录保留，最终树完整 unit 与 ci_gate 结果另由 α 留证。
   - 其余：无 tag 测试；`ci_gate.py` 390 个顶层用例 `-race` 0 跳过；service 与 handler 的额外定向 `-race` 全部执行、0 失败；前端 413 个文件、3182 个用例；四种 vet 与 lint；`govulncheck` 无可达漏洞；依赖审计无高危、严重；`tools/tests` 41 例；文档检查、scheduler-diff、带前端产物的构建、干净树 audit。
 - [x] 4.3 对集成结果的独立审查：`46239531d` 可以作为 0.4.5 本地候选，没有 P0、P1，也没有新的 P2（REVIEW 增量补审 2026-10-21T15:35Z）；`b966306de` 只追加记忆与归档、无代码改动，确认为最终本地候选（`review/CODE_REVIEW_045_INTEG.md`）。
 - 以上 4.1–4.3 针对不含 O3 的 `b966306de`，它现在只是预跑候选（design §7）。O3 并入后：
@@ -69,11 +69,11 @@
 
 ## 7. 后续（0.4.6 待办，不阻断 0.4.5）
 
-7.1–7.3 由审查在 δ 复核与集成审查中提出（design §8），7.4 来自 0.4.5 第三轮门禁。7.1 已提前到 0.4.5 处理，其余仍留在 0.4.6。
+7.1–7.3 由审查在 δ 复核与集成审查中提出（design §8），7.4 来自 0.4.5 第三轮门禁。7.1 与 7.4 已提前到 0.4.5 处理，7.2、7.3 仍留在 0.4.6。
 
 - [x] 7.1 原生 Responses 路径心跳之后拿不到 turn-state：已在 0.4.5 用 O3 处理（3A，design §3.4）。
 - [ ] 7.2 turn-state 溯源改为在响应头真正发出时才记录，消除“响应到达后、提交前失败并最终耗尽”与 CDN 首包保活微秒级窗口两处不准的记录；同时收窄 `GATEWAY_RESILIENCE.md` 里“溯源只记客户端实际拿到的那次尝试”的措辞（该行归 δ；本变更的 design 与规格已改为“响应尚未提交时到达的尝试”）。
 - [ ] 7.3 LEAK-P2-1：WS 状态绑定表的清理吞吐固定为每表每分钟 512 条。评估按上次清理以来的写入量调整扫描量，或表满时优先淘汰已过期的条目；是否做具名补丁按上游同步机制决定（`review/LEAK_AUDIT_0.4.4.md` 第 5 节）。
-- [ ] 7.4 `TestInflightEstimate_AccountMappingNoDBAndBoundedMemory` 测的是全局 `HeapAlloc` 差值，阈值 8 MiB，本机负载高时偶发超限：0.4.5 第三轮门禁实测 8.26 MiB，单独重跑 5 次为 2.8–4.4 MiB，全部通过。测试文件相对 main 没有改动，属于基线既有的偶发。改为测本次操作的分配量（`testing.AllocsPerRun`，或 `runtime.ReadMemStats` 的 `TotalAlloc` 差值），或在 GC 稳定后再取基线。
+- [x] 7.4 `TestInflightEstimate_AccountMappingNoDBAndBoundedMemory` **已在 0.4.5 修复**（ε `test/inflight-heap-robust-045` @ `13baa2869`，PM 18:42Z 验收并放行，只改测试）。一次 GC 后的 `HeapAlloc` 仍含 sync.Pool victim 与待 finalizer 对象，改为预热 1000 个未定价模型后，在测量前后各连续两次 GC 再读稳定堆；n=20000、8 MiB 阈值与原断言意图保持。ε 单例 `-count=20` 与完整 service `-count=3` 通过（25848 项通过、27 条件跳过、0 失败，堆用例 3/3），灵敏度核对仍能检出按模型缓存。修复前的第三轮偶发、attempt4/4b 与 main 对照失败证据保留；集成最终树按 PM 指令复跑完整 unit 与 ci_gate，结果由 α 留证。
 
 生产部署未授权。

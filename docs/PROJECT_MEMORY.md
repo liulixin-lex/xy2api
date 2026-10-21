@@ -13,8 +13,8 @@
 
 ### XY2API 0.4.5 本地集成候选（2026-10-21；未推送）
 
-- O3 `93fd9bdf2` 与 DOCS `88ad8c43c` 已合入，门禁对象 `4bb8026db` 的新 attempt4 已跑完：24/25 通过；unit **阻塞：只有基线堆阈值用例在完整套件中失败，处理中**。单例五次通过但完整复跑仍失败，未跳过或放宽阈值，原证据完整保留。
-- 按 PM 18:00Z，纯记忆修正后的最终 HEAD 复验 docs/audit 后先交 QA 构建，门禁对象与最终 SHA 只差记忆文档；随后在 main 做完整 unit 对照。ε 只改测试的修复等待 PM 另行裁定。详细状态见“进行中的工作” `20261021-integ-0.4.5-prep`。
+- O3 `93fd9bdf2` 与 DOCS `88ad8c43c` 已合入。原 attempt4 的 24/25 与 unit 堆阈值失败证据保留；main `a1cf8f104` 同命令完整 unit 也只在该用例失败（8,724,016 > 8,388,608 字节）。QA 按 PM 18:00Z 接收的镜像候选仍为 `0c31b5b38`。
+- PM 18:42Z 已验收并放行 ε 的 `13baa2869`：本次只合入该测试修复、同步 tasks 7.4 与记忆，产品代码不变，按 PM 裁定无需重建候选或重跑浸泡。最终 HEAD 的完整 unit、ci_gate、docs、干净树 audit 逐项结果及候选差异统一记录在仓库外 `PROGRESS_A`、`PATCH_REQUESTS` 与 `evidence/integ-045/heapfix-<最终短 SHA>/`；历史失败不改写，不能把 ε 的验证当作集成门禁结果。详细边界见“进行中的工作” `20261021-integ-0.4.5-prep`。
 
 ### XY2API 0.4.4 正式发布完成（2026-10-21；生产未部署）
 
@@ -135,13 +135,14 @@
 - 静态检查：无 tag 与 unit vet 通过；新增夹具的 6 处 nil Context 改为 `context.Background()` 后，最终 49 项三轮竞态与不限同类条数的增量 lint 重新通过（0 issues）。生产实现未再改；首轮 lint 失败与修前绿测均保留。
 - 审查与交接：O3 `93fd9bdf2` 已由 REVIEW 审查放行，无 P0/P1/P2；此前写“交 γ”已按 PM 17:38Z 更正。α 已合入 O3 与 DOCS `88ad8c43c`，门禁结果见集成条目；QA 按 PM 18:00Z 接收最终纯记忆提交后的 SHA 做完整验证。β 原始证据保留于仓库外 `briefs/PROGRESS_B.md`、`evidence/o3-045/REPORT.md`。
 
-### 20261021-integ-0.4.5-prep — O3 门禁完成，unit 阻塞，按 PM 放行交 QA
+### 20261021-integ-0.4.5-prep — ε 堆用例修复已并入，最终树复验按 PM 18:42Z 执行
 
-- 已合入：O3 `93fd9bdf2`（REVIEW 已审，无 P0/P1/P2）与 DOCS 最终 `88ad8c43c`，门禁对象 `4bb8026dba96af541274d8d67c89e3dceabab3e7`。tasks.md 整份采用 DOCS，O3 产品代码/测试/policy/网关说明与 owner 交付逐字一致，ε 三个相关文件不变；309 条 required_literals、112 条 custom_patch_tests 无重复。
-- 新 attempt4 从头执行全部 25 项：24 PASS，unit FAIL。**阻塞：只有基线堆阈值用例在完整套件中失败，处理中**。该测试与 main 逐字一致；attempt4 与 attempt4b 各 25367 pass、39 条件 skip、1 fail，HeapAlloc 差值分别 9100136、8414632 字节（阈值 8388608）。单例五次全过：5377112、2776952、992936、2220536、2822800 字节；单例只用仓库外日志 overlay，完整 unit 不用 overlay。未改测试/断言/阈值，原失败保留，不把单例通过当成完整门禁通过。
-- 其余 24 项通过：gofmt、四 vet、lint 0 issues；无 tag 14519 pass/28 条件 skip；ci_gate 390 顶层、额外 service 184 顶层/488 项与 handler 94/224 项均在 `-race` 下全部实际执行，零失败/跳过/竞争；govulncheck 调用路径 0 漏洞；前端 413 文件/3182 用例及 lint/typecheck/build、依赖审计 high/critical 0、tools 41、audit 校验器 13、docs、scheduler-diff、embed 构建及干净树 audit 均通过。
-- PM 18:00Z 指令：本次只改记忆，最终 HEAD 复验 docs 与干净树 audit 后立即交 QA 构建，不等 unit 修复。门禁对象 `4bb8026db` 与最终 SHA 只差 `docs/PROJECT_MEMORY.md`；最终 SHA 写入仓库外 `PROGRESS_A` 和 `PATCH_REQUESTS`。REVIEW 补审集成增量、QA 对该 SHA 做完整验证。
-- 下一步：交 QA 后在 main `a1cf8f104` 用同一完整 unit 命令对照 1–2 次，结果交 PM；ε 的只改测试修复是否合入等待 PM，不能自行跳过门禁。若获准合入，重跑完整 unit 和 ci_gate，并如实标明与候选的差异。独立 GOCACHE 在基线对照结束后删除；不推送、不开 PR、不发布、不部署。证据在仓库外 `evidence/integ-045/attempt4-4bb8026db/` 与 `attempt4b-4bb8026db/`。
+- 已合入：O3 `93fd9bdf2`（REVIEW 已审，无 P0/P1/P2）与 DOCS `88ad8c43c`；原门禁对象 `4bb8026db`，只追加记忆后的 QA 镜像候选 `0c31b5b38`。本次固定合入 ε `13baa2869`，与该镜像候选的差异只限 `billing_inflight_reservation_test.go`、0.4.5 tasks 与本记忆；产品代码、policy 和调度登记不变，按 PM 不重建镜像、不重跑浸泡。
+- 历史门禁：attempt4 为 24 PASS、unit FAIL；attempt4/attempt4b 各 25367 pass、39 条件 skip、1 fail，堆差值 9100136、8414632 字节（阈值 8388608）。单例五次全过：5377112、2776952、992936、2220536、2822800 字节；单例仅用仓库外日志 overlay，完整 unit 不用 overlay。main `a1cf8f104` 同命令完整 unit 对照为 25081 pass、39 条件 skip、同名唯一失败 8724016 字节。原失败与基线证据保留，不以单例通过替代完整门禁。
+- 其余原 24 项通过：gofmt、四 vet、lint 0 issues；无 tag 14519 pass/28 条件 skip；ci_gate 390 顶层、额外 service 184 顶层/488 项与 handler 94/224 项均在 `-race` 下全部实际执行，零失败/跳过/竞争；govulncheck 调用路径 0 漏洞；前端 413 文件/3182 用例及 lint/typecheck/build、依赖审计 high/critical 0、tools 41、audit 校验器 13、docs、scheduler-diff、embed 构建及干净树 audit 均通过。这些是测试修复前的记录，本轮四项单独留证。
+- 已修复（PM 18:42Z）：ε `13baa2869` 只改测试，先预热 1000 个未定价模型，再在测量前后各连续两次 GC 后读稳定堆，避开一次 GC 后仍存活的 sync.Pool victim 与待 finalizer 对象；测量工作量 n=20000、8 MiB 阈值与按模型增长断言保留。ε 单例 20 次与完整 service `-count=3` 通过（25848 pass、27 条件 skip、0 fail；堆用例 3/3），灵敏度核对仍能检出按模型缓存；未单独以 `-race` 验证该用例。
+- 最终树复验约定：固定本批提交后的 HEAD，独立 GOCACHE、`GOMAXPROCS=2`、`GOFLAGS=-p=2`，完整 unit 使用 attempt4 原命令 `go test -tags=unit -count=1 -timeout=15m -json ./...`；随后运行 ci_gate、文档检查与干净树 audit。ci_gate 的 service 文件模式是 `*resilience*_test.go`，不包含本次堆用例；即使通过，也不能声称该用例获得 `-race` 覆盖。实际结果、退出码、完整 SHA 与 `git diff --stat 0c31b5b38 <最终SHA>` 写入仓库外 `PROGRESS_A`、`PATCH_REQUESTS` 和 `evidence/integ-045/heapfix-<最终短 SHA>/`。
+- 后续与停止条件：本轮任一新失败立即停下报 PM，不自行修复或重跑；完成后删除本轮独立缓存并待命，推送、PR、发版与生产部署继续等待明确指令。此前独立缓存与基线临时树已在对照完成后删除，未动共享缓存；其他任务条目由各 owner 维护。
 
 ### 20261021-soak-6h5-0.4.4 — 生产部署前的 6.5 小时浸泡（2026-10-21T10:50Z 登记）
 
@@ -1156,3 +1157,12 @@ pnpm --dir frontend run build
 - 验证：新 attempt4 全 25 项完成，24 PASS、unit FAIL；同一基线全局 HeapAlloc 用例两次完整运行分别 9100136、8414632 字节超出 8388608，五次单例均通过，测试文件与 main 未变。其余静态、无 tag、竞态、安全、前端、工具、文档、scheduler、embed、干净树 audit 均过，完整数字见进行中条目。失败记录不覆盖，不能声称全绿。
 - 本次修改：只改 `docs/PROJECT_MEMORY.md`，更正 O3 已由 REVIEW 审查的事实、更新集成状态，历史交接对象以追加更正标明。门禁对象 `4bb8026db` 与最终 SHA 只差记忆文档；最终提交上复验 docs/干净 audit，结果及完整 SHA 写仓库外交接。
 - 卡点/下一步：按 PM 授权先把最终 SHA 交 QA，unit 标记“阻塞：只有基线堆阈值用例在完整套件中失败，处理中”；之后 main `a1cf8f104` 同命令完整 unit 对照，ε 测试修复等 PM 裁定。本地缓存与临时基线树在对照结束后清理，未推送、未开 PR、未发布或部署。
+
+### 2026-10-21T18:45:39+00:00 — `20261021-integ-0.4.5-prep` — 堆用例稳健修复并入与最终树复验安排
+
+- 请求/目标：执行 PM 18:42Z，只合入 ε `13baa2869` 并同步指定文档，在最终 HEAD 复跑完整 unit、ci_gate、docs、干净树 audit；新失败停止报告，不自行修。
+- 开始状态：`integ/0.4.5-prep` @ `0c31b5b3861f72f711b376bff61f17a94e5aa674`，工作树干净。ε 分支固定 HEAD `13baa2869f8d9c3221985710f2bb9d01fe07b987` 的父提交是 `4bb8026db`，只改一份测试，普通合并无冲突。
+- 完成操作：按已验收交付保留预热与两次 GC 的修复，未放宽 8 MiB 阈值；tasks 7.4 勾为已在 0.4.5 修复，旧门禁条目补修复指引；顶部及本任务集成条目同步，main 对照结论与历史失败保留。
+- 修改文件：`backend/internal/service/billing_inflight_reservation_test.go`、`openspec/changes/gateway-resilience-045-20261021/tasks.md`、`docs/PROJECT_MEMORY.md`；无产品代码变化，不追加其他 DOCS 分支提交。
+- 验证：ε 的完整 service 三轮已通过，不替代本轮集成门禁；本批提交后按集成条目固定最终 HEAD，运行四项检查，原始日志与结果绑定最终 SHA 写仓库外进度和交接。ci_gate 带 `-race` 但未选择本次堆用例，竞态覆盖按实际选择记录。
+- 卡点/下一步：QA 镜像候选 `0c31b5b38` 不变，测试文件不进入产品镜像；四项若有新失败即停止报告 PM。复验结束清理独立缓存并待命；未推送、未开 PR、未发布或部署。
