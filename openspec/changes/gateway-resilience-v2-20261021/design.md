@@ -145,7 +145,7 @@
 - 取消优先：暂存期内客户端取消就关闭上游，同步读取、异步读取的读错、终态与 EOF 收尾都先返回空结果加取消错误：不把关闭响应体的错误当成上游读错，不记 Warn、不写失败事件、不交部分用量，不计费（审查 R1-P1-1，β `bb2c22122`）。handler 的 Chat 与 Messages 普通错误出口在“结果为空、错误是 `context.Canceled`、请求 context 已取消”三者同时成立时提前结束：按客户端离开记 499，不上报账号失败、不记失败回合、不补错误帧，也就不进入调度上报（α `5924b2b5a`，上游钩子 `client_canceled_before_output`）。第一次实际写出正文之后取消，回到原有的 drain 机制，继续读完并按已得用量计费（审查 P0，β `63718031d`）。
 - 首事件守卫（`resilience_compat_stream.go` 的 `armOpenAICompatFirstEvent`）延长到首个内容或终态；中转伪保活帧仍按“存活”处理（旧 design §7.8）。
 - `clientOutputStarted` 按实际写出的字节置位：短写或部分写出之后不再重放。
-- **暂存期写注释心跳**（PM 2026-10-21T02:42Z 改判方案 U4）：按 `stream_keepalive_interval` 写 `:\n\n`，与原生 Responses 的 `stageFirstOutput` 期间（基线 `openai_gateway_response_handling.go` 约 1000–1012 行）和基线一致。方案原推荐“不提交”，依据是“原生不提交”，这个前提不成立。心跳记为心跳字节（`recordOpenAIStreamKeepaliveBytes`），不置 `clientOutputStarted`，不影响换号；心跳会提交 200，之后若耗尽，以带内终止帧收尾（旧 design §7.6）。Messages 在写出 `message_start` 之后恢复 Anthropic 的 `ping`。64 KiB 以上请求的静默拒绝缓冲不会挡住注释心跳，它对内容的暂存规则不变。失败尝试的开场不会泄漏。经 CDN 的请求照旧另有 handler 的首包前保活。实现 β `4c3256477`。
+- **暂存期写注释心跳**（PM 2026-10-21T02:42Z 改判方案 U4）：按 `stream_keepalive_interval` 写 `:\n\n`，与原生 Responses 的 `stageFirstOutput` 期间（基线 `openai_gateway_response_handling.go` 约 1000–1012 行）和基线一致。方案原推荐“不提交”，依据是“原生不提交”，这个前提不成立。心跳记为心跳字节（`recordOpenAIStreamKeepaliveBytes`），不置 `clientOutputStarted`，不影响换号；心跳会提交 200，之后若耗尽，以带内终止帧收尾（旧 design §7.6）：Chat 与 Messages 的耗尽出口把“已写出心跳”也算作流已开始，Chat 以 `data: {error}` 加 `[DONE]`、Messages 以 `event: error` 结束，不在 `:` 之后追加裸 JSON（第二轮审查 R2-P1①，α；【待契约：α 的提交】）。Messages 在写出 `message_start` 之后恢复 Anthropic 的 `ping`。64 KiB 以上请求的静默拒绝缓冲不会挡住注释心跳，它对内容的暂存规则不变。失败尝试的开场不会泄漏。经 CDN 的请求照旧另有 handler 的首包前保活。实现 β `4c3256477`。
 - 开关关闭时保留旧的“首行”守卫与流内心跳。
 - 与 64 KiB 以上请求的静默拒绝缓冲（`openai_silent_refusal.go`）叠加：先推迟生成开场，释放后再交给旧的探测器，原有的 pendingSSE 缓冲仍由它维护。只有 usage 的合法空回答正常结束；`response.incomplete` 不会因结果为空误触发静默拒绝的重放；原有“无 usage 的静默拒绝”规则不变。
 - 兼容路径 `first_token_ms` 的取点不变（上游第一条数据），避免口径跳变。
@@ -157,7 +157,7 @@
 - 实现提交 `f9edc3a4d`（β），由 `StrictTerminalOn()` 控制。
 - 合法 JSON 的 `error` 字段或 `type: "error"` 一出现，之后的 `[DONE]`、usage、finish 都不再把结果改回成功。
 - 提交前且可重试：返回换号；提交后：原样转发错误与 `[DONE]`，按已输出后失败记账（计入会话失败），并标记终态已写出，handler 不再补一个。内容拒绝不换号；客户端取消优先，不误记为截断。
-- 第一条 data 之前的 SSE 框架行（`event`、`id`、`retry`、注释）有界暂存，使 `event: error` 不会抢先提交响应；不新增 role 或内容的暂存。
+- 第一条 data 之前的 `event`、`id`、`retry` 行有界暂存，使 `event: error` 不会抢先提交响应；不新增 role 或内容的暂存。上游的注释心跳 `:` 直接透传，计为心跳字节，不置 `clientOutputStarted`、不影响之后换号，否则直连客户端在长首字期间收不到任何字节（第二轮审查 R2-P1③，与 R1-P1-2 同类；【待契约：β 的提交】）。
 - 没有 error 的流仍算成功，包括只有 usage 的、或有 finish 但没有 `[DONE]` 的。
 - 开关关闭时回到旧判定：`error` 后跟 `[DONE]` 算成功。
 - 上游文件钩子：`openai_gateway_chat_completions_raw.go` 的 `resilience.Current().StrictTerminalOn()`、`terminal.failurePayload`（登记到 required_literals）。
@@ -245,7 +245,8 @@
 
   这样 service 层在 handler 耗尽出口之前合成的 `response.failed` 也能拿到当时的候选情况。
 - `Suppress` 由识别出终态的一方显式写入：handler 的回合封顶、内容拒绝、用户余额终态（α）；service 在自己合成这类终态帧时，先写 `Suppress` 再 `ResolveRetryAdvice`（β）。provider 本身看不到这些终态。
-- 正文：`RetryAdvice.Message(message)` 统一处理重试尾句：只认句号加空白分隔的本地完整尾句 “Please try again in Ns.”，去掉时保留前一句的句点（“Busy. Please try again in 30s.” → “Busy.”）；秒数为正时把它换成与 `Headers()` 同样夹到 10 秒的尾句，不重复追加；`unknown` 与 `Suppress` 只去掉旧尾句，正文只剩这句尾句时保留原文，不返回空消息。位于正文中间、前面没有空白或没有结束的同样文字不动。只改网关自己的固定后缀，不改写上游的自然语言（审查 P2-15，α `abd7f67a2`）。
+- 是否可带重试建议的判定导出为 `resilience.RetryAdviceEligible(status, errType, code)`：只有 429、5xx 以及网关自身的无号或容量类原因为真，`model_not_found`、`not_found_error`、`billing_service_error`、`invalid_request_error`、`context_length_exceeded` 等为假。handler（P2-11）与 service 的三个合成点共用它；service 遇到不可重试的原因时先写 `Suppress`（`Source` 为 `non_retryable`）再求值，invalid_request、model_not_found 的合成帧不带 `error.headers` 与重试尾句（第二轮审查 R2-P1②，α 导出、β 接入；【待契约：α 与 β 的提交】）。
+- 正文：`RetryAdvice.Message(message)` 统一处理重试尾句：只认句号加空白分隔的本地完整尾句 “Please try again in Ns.”，去掉时保持原文的标点（“Busy. Please try again in 30s.” → “Busy.”；原文前一句没有句点时不补；第二轮审查 R2 P2，【待契约：α 的提交】）；秒数为正时把它换成与 `Headers()` 同样夹到 10 秒的尾句，不重复追加；`unknown` 与 `Suppress` 只去掉旧尾句，正文只剩这句尾句时保留原文，不返回空消息。位于正文中间、前面没有空白或没有结束的同样文字不动。只改网关自己的固定后缀，不改写上游的自然语言（审查 P2-15，α `abd7f67a2`）。
 - 耗尽出口没有复制上游 `Retry-After` 时，先用旧 advisor 预热本地快照再求 advice，避免拿到 `unknown`（审查 P2-9，α `db1dad57e`）。
 - 分组 advisor（γ）只读末位兜底的分组快照（`lastResortGroups` 中未过期的条目，沿用既有的 2 秒缓存 `lastResortCandidateTTL`，锁内取引用、锁外计算），不做冷读取，不访问 Redis 或数据库。快照只在单一候选判断、末位兜底或原无号提示用过时才有；缺失或过期时返回 `unknown`。候选只算未尝试（排除 `RequestState` 里本请求已失败的账号）、模型与平台兼容、能力允许、无硬罚的账号；OpenAI 另看进程内的按模型屏蔽。入口是 `GatewayService` 与 `OpenAIGatewayService` 的同名方法 `RetryAdvice(ctx, groupID, model)`（γ `d4db8d426`），α 的 provider 自动识别；原 `NoAccountRetryAfter` 保留给 HTTP 无号提示。
 
@@ -254,7 +255,7 @@
 | 本请求此刻还有健康备选 | `healthy_candidate` | 1 秒 |
 | 组内没有健康候选，且能算出最早恢复时间 | `recovery` | 向上取整并夹到 2–10 秒；正文 “try again in Ns” 的 N 与之一致 |
 | 恢复时间未知（没有快照、快照过期、请求已取消，或剩下的只有不会自行恢复的硬状态） | `unknown` | 不带 |
-| 回合封顶、用户自身余额不足的终态、内容拒绝、只因能力而无号（§6.3） | `turn_cap`、`balance_terminal`、`content_rejection`、`capability_stream_only`（`Suppress`） | 不带，并删除原有的重试尾句。上游账号余额不足（可换号）与在途预留超额不算终态 |
+| 回合封顶、用户自身余额不足的终态、内容拒绝、只因能力而无号（§6.3）、其他不可重试的原因 | `turn_cap`、`balance_terminal`、`content_rejection`、`capability_stream_only`、`non_retryable`（`Suppress`） | 不带，并删除原有的重试尾句。上游账号余额不足（可换号）与在途预留超额不算终态 |
 | 请求上没有 advice | — | 保持 0.4.3 |
 
 - 写入位置：`error.headers.retry-after`（Codex 从这里读重试等待）。
@@ -273,7 +274,7 @@
 - Gateway Responses、Gateway Chat、OpenAI→Messages 的专用耗尽出口（`handleAnthropicFailoverExhausted` 等）统一调用公共的 `applyExhaustedRetryHint`：429 保持 429；到达回合封顶的 5xx 改为 503，删除 HTTP `Retry-After` 与正文里的重试时间，写 `x-should-retry: false` 与 `server_is_overloaded`，同时把请求的 `RetryAdvice` 置为 `Suppress`。
 - 一个请求的回合计数只增加一次，多次调用读取同一结果。
 - 一次性终止：三个专用出口与公共 Responses/Chat 终态 writer 共用同一个请求标记（`beginResilienceTerminal`）；已尝试写出终态（含短写与断连）后不再追加。
-- 已输出后的耗尽（审查 P2-13，α `0d35b2919`）：Gateway Responses 与 Chat 先判断是否已写出真实内容，再调用 `applyExhaustedRetryHint` 或复制上游的 `Retry-After`。已有内容时只记必要的运维错误，不计失败回合、不加重试提示、不再追加终态；只发过排队心跳时仍按原来的终态收口。
+- 已输出后的耗尽（审查 P2-13，α `0d35b2919`；OpenAI→Messages 出口按第二轮审查 R2 P2 对齐，【待契约：α 的提交】）：Gateway Responses 与 Chat 先判断是否已写出真实内容，再调用 `applyExhaustedRetryHint` 或复制上游的 `Retry-After`。已有内容时只记必要的运维错误，不计失败回合、不加重试提示、不再追加终态；只发过排队心跳时仍按原来的终态收口。
 - 错误字段与基线一致（审查 P2-12，α `8657fca89`）：Gateway Responses 的 JSON 错误保留传入的 `error.code`（如 `insufficient_balance`），Gateway Chat 与 OpenAI→Messages 保留原有的 `error.type`（如 `concurrent_balance_reserved`）；可以另附 `code` 字段，到达回合封顶时 code 改为 `server_is_overloaded`。原生 OpenAI 等基线已接入的翻译函数不变。
 - OpenAI→Messages 的专用 writer 也应用公共的 code 与消息翻译和运维的流内错误标记；Gateway Chat 在只发过排队心跳时也走终止帧，不再直接返回。
 - 不改已写出的真实输出或上游自己的终态。
