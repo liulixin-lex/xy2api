@@ -28,7 +28,7 @@ export default {
         errors: '错误语义与防风暴',
         errorsHint: '无号与限流应答带 Retry-After；短时负缓存；同一 Key 的重复 503 快速返回；同一会话连续失败的回合封顶，避免客户端反复重试。',
         capability: '仅流式账号学习',
-        capabilityHint: '非流式请求遇到上游明确的“只接受流式请求”400 时，记住该账号在当前协议下不收非流式请求，本请求立即换号（不计账号失败、不冷却），有效期内非流式请求不再选它，流式请求不受影响。本请求换号需要“失败分类修正”开启。关闭后不再学习，已学到的状态保留到期满但不参与选号。',
+        capabilityHint: '非流式请求遇到上游明确的“只接受流式请求”400 时，记住该账号在当前协议下不收非流式请求，本请求立即换号（不计账号失败、不冷却），有效期内非流式请求不再选它，流式请求不受影响。本请求换号需要“失败分类修正”开启。关闭后不再学习，已学到的状态不参与选号，到期自然失效；在到期前重新开启，仍按未过期的状态过滤。',
         fallbackGroup: '无号兜底分组',
         fallbackGroupHint: '分组无可用账号时由其配置的兜底分组承接，主分组稳定后切回。',
         cacheAware: '缓存感知预留',
@@ -50,9 +50,9 @@ export default {
         negativeCache: '无号负缓存（秒）',
         returnStable: '主分组稳定多久后切回（秒）',
         codexRetryAfterCap: 'Codex 无号 Retry-After 上限（秒）',
-        codexRetryAfterCapHint: '识别为 Codex 的请求（UA 或 originator）无号返回 503 时，Retry-After 不超过该值；0 表示不单独限制，沿用 2–30 秒。',
+        codexRetryAfterCapHint: '识别为 Codex 的请求（UA 或 originator）无号返回 503 时，Retry-After 不超过该值；0 表示关闭，沿用 2–30 秒。需要“错误语义与防风暴”开启。',
         learnTtl: '学习结果有效期（秒）',
-        learnTtlHint: '默认 21600（6 小时），到期自动恢复；也可在账号列表的状态列手动清除。'
+        learnTtlHint: '默认 21600（6 小时），到期自动恢复；修改只影响之后新学到的记录。也可在账号列表的状态列手动清除。'
       },
       switches: {
         preludeStaging: '兼容转换推迟开场',
@@ -62,7 +62,7 @@ export default {
         strictTerminal: '明确终止',
         strictTerminalHint: 'Chat 透传中上游发出 error 后紧跟 [DONE] 时按失败处理，不再当作正常结束。关闭后回到 0.4.3 行为。',
         failedFrameRetryAfter: 'response.failed 附带重试时间',
-        failedFrameRetryAfterHint: '网关合成的 response.failed 按情况附带 retry-after：有健康备选时不带或只带 1 秒；没有健康账号且能算出恢复时间时带 2–10 秒；回合封顶、余额不足、内容拒绝不带。关闭后不带。'
+        failedFrameRetryAfterHint: '网关合成的 response.failed 按情况附带 retry-after：有健康备选时不带或只带 1 秒；没有健康账号且能算出恢复时间时带 2–10 秒；回合封顶、余额不足、内容拒绝不带。需要“错误语义与防风暴”开启；关闭后不带。'
       },
       advanced: '高级（完整 JSON）',
       advancedHint: '包含全部配置项；保存时由服务端校验，未通过不会生效。',

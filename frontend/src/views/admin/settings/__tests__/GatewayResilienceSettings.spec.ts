@@ -182,4 +182,14 @@ describe('gateway resilience settings', () => {
       expect(w.text()).toContain('admin.resilience.settings.invalidNumber')
     }
   })
+
+  it('greys out the failed-frame switch while the errors card is off', async () => {
+    const w = mountSettings(); await flushPromises()
+    expect(w.get('[data-testid="resilience-switch-failedFrameRetryAfter"]').attributes('disabled')).toBeUndefined()
+    await w.get('[data-testid="resilience-section-errors"]').trigger('click')
+    expect(w.get('[data-testid="resilience-switch-failedFrameRetryAfter"]').attributes('disabled')).toBeDefined()
+    // The stream switches only follow the master switch.
+    expect(w.get('[data-testid="resilience-switch-strictTerminal"]').attributes('disabled')).toBeUndefined()
+  })
 })
+

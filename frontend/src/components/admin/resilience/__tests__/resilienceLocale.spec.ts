@@ -21,4 +21,13 @@ describe('gateway resilience 0.4.4 locale keys', () => {
     const missing = dynamicKeys.filter((key) => typeof lookup(messages, key) !== 'string' || !(lookup(messages, key) as string).trim())
     expect(missing).toEqual([])
   })
+
+  // C0: both errors switches also need errors.enabled; moving the current
+  // request on a stream-only 400 also needs failure.decision_v2.
+  it.each([['zh', zh], ['en', en]])('%s hints name the card each switch depends on', (_, messages) => {
+    const text = (key: string) => lookup(messages, `admin.resilience.settings.${key}`) as string
+    expect(text('switches.failedFrameRetryAfterHint')).toContain(text('sections.errors'))
+    expect(text('fields.codexRetryAfterCapHint')).toContain(text('sections.errors'))
+    expect(text('sections.capabilityHint')).toContain(text('sections.failure'))
+  })
 })

@@ -28,7 +28,7 @@ export default {
         errors: 'Error semantics and storm protection',
         errorsHint: 'No-account and rate-limit responses carry Retry-After; a short negative cache; fast replies to repeated identical 503s per key; a cap on consecutive failed turns of a conversation so clients stop retrying.',
         capability: 'Stream-only account learning',
-        capabilityHint: 'When a non-streaming request gets an upstream 400 that clearly says only streaming requests are accepted, the account is remembered as not taking non-streaming requests on that protocol and the request moves to another account at once (no account failure, no cooldown). Until it expires non-streaming requests skip the account; streaming requests are unaffected. Moving the current request needs "Failure classification fixes" on. Off stops learning; what was learned stays until it expires but no longer affects selection.',
+        capabilityHint: 'When a non-streaming request gets an upstream 400 that clearly says only streaming requests are accepted, the account is remembered as not taking non-streaming requests on that protocol and the request moves to another account at once (no account failure, no cooldown). Until it expires non-streaming requests skip the account; streaming requests are unaffected. Moving the current request needs "Failure classification fixes" on. Off stops learning and what was learned no longer affects selection; it still expires on time, and turning learning back on before then filters with the unexpired states again.',
         fallbackGroup: 'No-account fallback groups',
         fallbackGroupHint: 'A group without available accounts is served by its fallback group and returns once stable.',
         cacheAware: 'Cache-aware reservations',
@@ -50,9 +50,9 @@ export default {
         negativeCache: 'No-account negative cache (s)',
         returnStable: 'Stable time before returning to the group (s)',
         codexRetryAfterCap: 'Codex no-account Retry-After cap (s)',
-        codexRetryAfterCapHint: 'For requests recognised as Codex (user agent or originator), a no-account 503 carries a Retry-After of at most this value; 0 turns the cap off and keeps 2–30 s.',
+        codexRetryAfterCapHint: 'For requests recognised as Codex (user agent or originator), a no-account 503 carries a Retry-After of at most this value; 0 turns the cap off and keeps 2–30 s. Needs "Error semantics and storm protection" on.',
         learnTtl: 'Learned state lifetime (s)',
-        learnTtlHint: 'Default 21600 (6 hours); it clears itself when it expires and can be cleared by hand in the status column of the account list.'
+        learnTtlHint: 'Default 21600 (6 hours); it clears itself when it expires, and a change applies only to states learned afterwards. It can also be cleared by hand in the status column of the account list.'
       },
       switches: {
         preludeStaging: 'Delay the prelude in compatibility conversion',
@@ -62,7 +62,7 @@ export default {
         strictTerminal: 'Strict termination',
         strictTerminalHint: 'In Chat passthrough an upstream error followed by [DONE] counts as a failure, not a normal end. Off restores the 0.4.3 behaviour.',
         failedFrameRetryAfter: 'Retry time on response.failed',
-        failedFrameRetryAfterHint: 'A response.failed made by the gateway carries a retry-after when it helps: none or 1 s with a healthy alternative; 2–10 s when no account is healthy and the recovery time is known; never after a turn cap, low balance or a content refusal. Off never adds it.'
+        failedFrameRetryAfterHint: 'A response.failed made by the gateway carries a retry-after when it helps: none or 1 s with a healthy alternative; 2–10 s when no account is healthy and the recovery time is known; never after a turn cap, low balance or a content refusal. Needs "Error semantics and storm protection" on; off never adds it.'
       },
       advanced: 'Advanced (full JSON)',
       advancedHint: 'Contains every setting; the server validates it on save and rejects invalid documents.',
