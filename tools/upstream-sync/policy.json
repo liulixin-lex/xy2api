@@ -397,6 +397,22 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "openAIMonitorProbeFreeSlot(ctx, tryAcquireFromLoadMap)"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "s.monitorProbeFreeSlot(ctx, candidates, groupID, preferOAuth)"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "range monitorProbeRoutedWait(ctx, routingAvailable)"
+    },
+    {
+      "path": "backend/internal/service/share_scheduling_exec.go",
+      "value": "e.monitorProbeAcquire(d)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
       "value": "if !resilienceBindAllowed(ctx, accountID) {"
     },
     {
@@ -1648,6 +1664,36 @@
       "id": "xy-channel-monitor-probe-lane",
       "path": "backend/internal/service/monitor_probe_scheduling_test.go",
       "literal": "func TestMonitorProbeShareSkipsAffinityWait"
+    },
+    {
+      "id": "xy-channel-monitor-probe-lane",
+      "path": "backend/internal/service/monitor_probe_scheduling_test.go",
+      "literal": "func TestMonitorProbeOpenAITakesSlotSkippedByLoadRate"
+    },
+    {
+      "id": "xy-channel-monitor-probe-lane",
+      "path": "backend/internal/service/monitor_probe_scheduling_test.go",
+      "literal": "func TestMonitorProbeOpenAIWaitsWhenGroupFull"
+    },
+    {
+      "id": "xy-channel-monitor-probe-lane",
+      "path": "backend/internal/service/monitor_probe_scheduling_test.go",
+      "literal": "func TestMonitorProbeGatewayTakesSlotSkippedByLoadRate"
+    },
+    {
+      "id": "xy-channel-monitor-probe-lane",
+      "path": "backend/internal/service/monitor_probe_scheduling_test.go",
+      "literal": "func TestMonitorProbeGatewayRoutedWaitFallsBackToGroup"
+    },
+    {
+      "id": "xy-channel-monitor-probe-lane",
+      "path": "backend/internal/service/monitor_probe_scheduling_test.go",
+      "literal": "func TestMonitorProbeGatewayWaitsWhenGroupFull"
+    },
+    {
+      "id": "xy-channel-monitor-probe-lane",
+      "path": "backend/internal/service/monitor_probe_scheduling_test.go",
+      "literal": "func TestMonitorProbeShareTakesSlotSkippedByLoadRate"
     },
     {
       "id": "xy-graceful-online-update-restart",

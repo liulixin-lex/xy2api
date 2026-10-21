@@ -1552,6 +1552,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				}
 			}
 		}
+		if selection, selectErr := openAIMonitorProbeFreeSlot(ctx, tryAcquireFromLoadMap); selectErr != nil || selection != nil {
+			return selection, selectErr
+		}
 	}
 
 	// ============ Layer 3: Fallback wait ============

@@ -78,12 +78,33 @@ func (c *probeSlotCache) GetAccountsLoadBatch(_ context.Context, accounts []Acco
 	return out, nil
 }
 
+func (c *probeSlotCache) held(accountID int64) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.inFlight[accountID]
+}
+
 func probeTestSchedulingConfig(cfg *config.Config) {
 	cfg.Gateway.Scheduling.LoadBatchEnabled = true
 	cfg.Gateway.Scheduling.StickySessionMaxWaiting = 3
 	cfg.Gateway.Scheduling.StickySessionWaitTimeout = 120 * time.Second
 	cfg.Gateway.Scheduling.FallbackWaitTimeout = 30 * time.Second
 	cfg.Gateway.Scheduling.FallbackMaxWaiting = 100
+}
+
+// probeTestAccounts is the minimal reproduction of the monitor plan: account
+// 1 (priority 1, concurrency 2, load factor 2) holds two requests, account 2
+// (priority 2, concurrency 4, load factor 1) holds one. Both are full by load
+// rate; only account 2 has free slots.
+func probeTestAccounts(platform string) []Account {
+	return []Account{
+		{ID: 1, Platform: platform, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+			Priority: 1, Concurrency: 2, LoadFactor: intPtr(2), GroupIDs: []int64{probeTestGroupID},
+			AccountGroups: []AccountGroup{{GroupID: probeTestGroupID}}},
+		{ID: 2, Platform: platform, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+			Priority: 2, Concurrency: 4, LoadFactor: intPtr(1), GroupIDs: []int64{probeTestGroupID},
+			AccountGroups: []AccountGroup{{GroupID: probeTestGroupID}}},
+	}
 }
 
 // ---- OpenAI default scheduler ----
@@ -111,6 +132,29 @@ func selectOpenAIForProbeTest(t *testing.T, ctx context.Context, svc *OpenAIGate
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
 	return selection
+}
+
+func TestMonitorProbeOpenAITakesSlotSkippedByLoadRate(t *testing.T) {
+	t.Run("regular request keeps the fallback wait", func(t *testing.T) {
+		svc, slots, _ := newOpenAIProbeTestService(probeTestAccounts(PlatformOpenAI), map[int64]int{1: 2, 2: 1}, nil)
+		selection := selectOpenAIForProbeTest(t, context.Background(), svc, "")
+		require.False(t, selection.Acquired)
+		require.NotNil(t, selection.WaitPlan)
+		require.Equal(t, int64(1), selection.WaitPlan.AccountID)
+		require.Equal(t, 30*time.Second, selection.WaitPlan.Timeout)
+		require.Zero(t, slots.tried[2], "a request never tries an account that is full by load rate")
+		require.Equal(t, 1, slots.held(2))
+	})
+	t.Run("probe takes the free slot", func(t *testing.T) {
+		svc, slots, _ := newOpenAIProbeTestService(probeTestAccounts(PlatformOpenAI), map[int64]int{1: 2, 2: 1}, nil)
+		selection := selectOpenAIForProbeTest(t, probeTestContext(), svc, "")
+		require.True(t, selection.Acquired)
+		require.Nil(t, selection.WaitPlan)
+		require.Equal(t, int64(2), selection.Account.ID)
+		require.Equal(t, 2, slots.held(2))
+		selection.ReleaseFunc()
+		require.Equal(t, 1, slots.held(2))
+	})
 }
 
 func TestMonitorProbeOpenAIIgnoresStickyBinding(t *testing.T) {
@@ -141,6 +185,17 @@ func TestMonitorProbeOpenAIIgnoresStickyBinding(t *testing.T) {
 		require.Equal(t, map[string]int64{"openai:sess": 1}, cache.sessionBindings)
 		selection.ReleaseFunc()
 	})
+}
+
+func TestMonitorProbeOpenAIWaitsWhenGroupFull(t *testing.T) {
+	svc, slots, _ := newOpenAIProbeTestService(probeTestAccounts(PlatformOpenAI), map[int64]int{1: 2, 2: 4}, nil)
+	selection := selectOpenAIForProbeTest(t, probeTestContext(), svc, "")
+	require.False(t, selection.Acquired)
+	require.NotNil(t, selection.WaitPlan)
+	require.Equal(t, int64(1), selection.WaitPlan.AccountID)
+	require.Equal(t, 30*time.Second, selection.WaitPlan.Timeout)
+	require.Equal(t, 2, slots.held(1))
+	require.Equal(t, 4, slots.held(2))
 }
 
 func TestMonitorProbeOpenAISessionHashIsEmpty(t *testing.T) {
@@ -194,6 +249,27 @@ func selectGatewayForProbeTest(t *testing.T, ctx context.Context, svc *GatewaySe
 	return result
 }
 
+func TestMonitorProbeGatewayTakesSlotSkippedByLoadRate(t *testing.T) {
+	t.Run("regular request keeps the fallback wait", func(t *testing.T) {
+		svc, slots, _ := newGatewayProbeTestService(probeTestAccounts(PlatformAnthropic), map[int64]int{1: 2, 2: 1}, nil, nil)
+		result := selectGatewayForProbeTest(t, context.Background(), svc, "", "claude-sonnet-4-5")
+		require.False(t, result.Acquired)
+		require.NotNil(t, result.WaitPlan)
+		require.Equal(t, int64(1), result.WaitPlan.AccountID)
+		require.Equal(t, 30*time.Second, result.WaitPlan.Timeout)
+		require.Zero(t, slots.tried[2])
+	})
+	t.Run("probe takes the free slot", func(t *testing.T) {
+		svc, slots, _ := newGatewayProbeTestService(probeTestAccounts(PlatformAnthropic), map[int64]int{1: 2, 2: 1}, nil, nil)
+		result := selectGatewayForProbeTest(t, probeTestContext(), svc, "", "claude-sonnet-4-5")
+		require.True(t, result.Acquired)
+		require.Nil(t, result.WaitPlan)
+		require.Equal(t, int64(2), result.Account.ID)
+		require.Equal(t, 2, slots.held(2))
+		result.ReleaseFunc()
+	})
+}
+
 func TestMonitorProbeGatewayIgnoresStickyBinding(t *testing.T) {
 	accounts := []Account{
 		{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
@@ -229,7 +305,79 @@ func TestMonitorProbeGatewayIgnoresStickyBinding(t *testing.T) {
 	})
 }
 
+func TestMonitorProbeGatewayRoutedWaitFallsBackToGroup(t *testing.T) {
+	// The routed account 1 is below full load rate (load factor 2) but its
+	// only slot is taken; account 2 is not routed and idle.
+	accounts := []Account{
+		{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+			Priority: 1, Concurrency: 1, LoadFactor: intPtr(2), AccountGroups: []AccountGroup{{GroupID: probeTestGroupID}}},
+		{ID: 2, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+			Priority: 2, Concurrency: 1, AccountGroups: []AccountGroup{{GroupID: probeTestGroupID}}},
+	}
+	routed := func() *Group {
+		return &Group{ID: probeTestGroupID, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true,
+			ModelRoutingEnabled: true, ModelRouting: map[string][]int64{"claude-sonnet-4-5": {1}}}
+	}
+	t.Run("regular request waits on the routed account", func(t *testing.T) {
+		svc, _, _ := newGatewayProbeTestService(accounts, map[int64]int{1: 1}, nil, routed())
+		result := selectGatewayForProbeTest(t, context.Background(), svc, "", "claude-sonnet-4-5")
+		require.NotNil(t, result.WaitPlan)
+		require.Equal(t, int64(1), result.WaitPlan.AccountID)
+		require.Equal(t, 120*time.Second, result.WaitPlan.Timeout)
+	})
+	t.Run("probe takes a free slot in the group", func(t *testing.T) {
+		svc, _, _ := newGatewayProbeTestService(accounts, map[int64]int{1: 1}, nil, routed())
+		result := selectGatewayForProbeTest(t, probeTestContext(), svc, "", "claude-sonnet-4-5")
+		require.True(t, result.Acquired)
+		require.Equal(t, int64(2), result.Account.ID)
+		result.ReleaseFunc()
+	})
+}
+
+func TestMonitorProbeGatewayWaitsWhenGroupFull(t *testing.T) {
+	svc, slots, _ := newGatewayProbeTestService(probeTestAccounts(PlatformAnthropic), map[int64]int{1: 2, 2: 4}, nil, nil)
+	result := selectGatewayForProbeTest(t, probeTestContext(), svc, "", "claude-sonnet-4-5")
+	require.False(t, result.Acquired)
+	require.NotNil(t, result.WaitPlan)
+	require.Equal(t, int64(1), result.WaitPlan.AccountID)
+	require.Equal(t, 30*time.Second, result.WaitPlan.Timeout)
+	require.Equal(t, 2, slots.held(1))
+	require.Equal(t, 4, slots.held(2))
+}
+
 // ---- Share scheduling ----
+
+func TestMonitorProbeShareTakesSlotSkippedByLoadRate(t *testing.T) {
+	setup := func() *shareTestEnv {
+		env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
+		// Account 1 is full by load rate yet has free slots; account 2 is busy.
+		env.conc.mockConcurrencyCache.loadMap = map[int64]*AccountLoadInfo{1: {AccountID: 1, CurrentConcurrency: 3, LoadRate: 100}}
+		env.conc.busy[2] = -1
+		return env
+	}
+	t.Run("regular request keeps the fallback wait", func(t *testing.T) {
+		env := setup()
+		result := env.selectAccount(t, context.Background(), "", nil)
+		require.False(t, result.Acquired)
+		require.NotNil(t, result.WaitPlan)
+		require.Zero(t, env.conc.attempts[1], "a request never tries an account that is full by load rate")
+	})
+	t.Run("probe takes the free slot", func(t *testing.T) {
+		env := setup()
+		result := env.selectAccount(t, probeTestContext(), "", nil)
+		require.True(t, result.Acquired)
+		require.Nil(t, result.WaitPlan)
+		require.Equal(t, int64(1), result.Account.ID)
+	})
+	t.Run("probe waits when every slot is taken", func(t *testing.T) {
+		env := setup()
+		env.conc.busy[1] = -1
+		result := env.selectAccount(t, probeTestContext(), "", nil)
+		require.False(t, result.Acquired)
+		require.NotNil(t, result.WaitPlan)
+		require.Equal(t, 30*time.Second, result.WaitPlan.Timeout)
+	})
+}
 
 func TestMonitorProbeShareSkipsAffinityWait(t *testing.T) {
 	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
