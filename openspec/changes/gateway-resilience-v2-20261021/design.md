@@ -189,7 +189,7 @@
 
 - **请求范围**：OpenAI 入站的 Responses 与 Chat 普通文本请求。入口在解析出客户端的 `stream` 后、首次选号前用 `resilience.WithCapabilityRequest(ctx, protocol, stream)` 标记请求（α；`protocol` 为 `responses` 或 `chat`）。未标记、协议未知或 `stream=true` 的请求不过滤；compact、图片、WebSocket 不标记；Messages→OpenAI、Gemini、CN、Bedrock 不在本期。
 - **账号范围**：只学习 OpenAI 与 Grok 平台的账号；OpenAI 强制流式的 OAuth 账号本来就以流式请求上游，不过滤。
-- **触发**：检测钩子 `OpenAIGatewayService.LearnStreamOnlyFailure(ctx, account, protocol, upstreamStream, status, body)`，在处理 400 的副作用与写应答之前调用（β 的 Forward、透传、raw Chat 调用点）。只在实际发给上游的请求为非流式、状态为 400、错误字段确定表示“只接受流式”（表驱动，如 “only accepts streaming requests”、“stream must be true”）时学习；只看错误字段，忽略上游回显的请求内容；截断的 JSON、余额与内容拒绝不算。上游请求本来就是流式时不动作。钩子还要求请求带合法的 `WithCapabilityRequest` 标记且 `stream=false`：没有标记的 compact、图片、WebSocket 完全没有学习副作用。不会自动改发流式。
+- **触发**：检测钩子 `OpenAIGatewayService.LearnStreamOnlyFailure(ctx, account, protocol, upstreamStream, status, errorBody, outboundBodies ...[]byte)`，在处理 400 的副作用与写应答之前调用（β 的 Forward、透传、raw Chat 调用点传实际发给上游的最终请求体；Grok 原生由 γ 传改写后的请求体）。只在实际发给上游的请求为非流式、状态为 400、错误字段确定表示“只接受流式”（表驱动，如 “only accepts streaming requests”、“stream must be true”）时学习；只看错误字段，忽略上游回显的请求内容。以下情况不学：截断的 JSON、余额与内容拒绝；错误带 `param` 且不是 `stream`；出站请求体本身就含这句能力短语（不分大小写，解析 JSON 转义后比较），避免用户在提示词里写了这句话导致误学。上游请求本来就是流式时不动作。钩子还要求请求带合法的 `WithCapabilityRequest` 标记且 `stream=false`：没有标记的 compact、图片、WebSocket 完全没有学习副作用。不会自动改发流式。
 
 ### 6.2 学习与存放
 
@@ -204,7 +204,7 @@
 ### 6.3 本请求与选号
 
 - **本请求**：`failure.decision_v2` 开启时，钩子返回可换号的哨兵错误（`IsCapabilityStreamOnly()`；不上报账号调度失败、不同号重试），handler 只计请求预算的尝试次数，不记会话失败、不冷却。这次拒绝不写运维的上游错误记录（写入会把账号记为本请求失败），只记中性事件 `resilience.capability_learned`。`decision_v2` 关闭时只学习，钩子返回空，本请求照旧返回 400。
-- **选号**：`Account.CapabilityExclusion(ctx, model, now)` 按本请求**实际发给上游**的协议与流模式返回阻断记录：入站 Chat 若转换为 Responses 上游，读 Responses 的学习；Grok 的两种协议各自独立。普通的 Chat→Responses 转换（含 API Key 账号）与 Grok OAuth 的 Chat 桥接都强制上游 `stream=true`，所以不受非流式学习记录过滤。入口在 `WithCapabilityRequest` 之后、首次选号前再用 `service.WithCapabilityRouting(ctx, c, body)` 标出路由提示（只取布尔值，不保留 Gin context 或正文，不做 I/O），用来区分 Chat 路径上的 Responses 形状请求与 Grok Chat 是否走 Responses 桥接。【待契约：γ 的 API 提交】OpenAI 选号的共同资格检查（`openai_gateway_scheduling.go`）与 `openai_account_scheduler.go` 的 `isAccountRequestCompatibleReason` 都经钩子 `capabilityEligibilityReason` 过滤，覆盖粘性会话与末位兜底的最后检查；钩子登记到 `scheduler-diff.json` 与 `policy.json`（α）。
+- **选号**：`Account.CapabilityExclusion(ctx, model, now)` 只在确定的路径上过滤：上游协议与入站相同，且上游的流模式跟随客户端（PM 指令，2026-10-21）。跨协议的转换（如 Chat 转 Responses 上游，这类转换本来就以 `stream=true` 请求上游）、按模型路由的路径，以及路由无法确定的 Grok OAuth Chat 都不过滤；Grok 的两种协议各自独立。不新增路由提示的 helper。OpenAI 选号的共同资格检查（`openai_gateway_scheduling.go`）与 `openai_account_scheduler.go` 的 `isAccountRequestCompatibleReason` 都经钩子 `capabilityEligibilityReason` 过滤，覆盖粘性会话与末位兜底的最后检查；钩子登记到 `scheduler-diff.json` 与 `policy.json`（α）。
 - 全部被过滤后的无号仍是 503，原因码 `capability_stream_only`，不再把 400 归咎于用户；消息提示客户端改用 `"stream": true`，不带 `Retry-After`，写 `x-should-retry: false`：在这些账号恢复前重试同样的非流式请求没有意义（PM 2026-10-21T02:42Z）。【待契约：γ 与 α 的提交】
 - 请求标记里另存本请求的中性排除集合（不借用“本请求已失败账号”），用于最终无号的原因与重试建议的候选排除：被能力挡掉的账号不会被建议成健康备选。
 - 负缓存的键按协议与流模式隔离，能力阻断也不计入全组的快速失败：同一分组的流式请求不会因为非流式请求被挡而拿到缓存的 503。
@@ -217,7 +217,7 @@
 - 账号列表与详情返回 `capability_learned: [{protocol: "responses"|"chat", mode: "stream_only", expires_at: <RFC3339 UTC>}]`（`Account.CapabilityLearned(now)`，导出类型 `resilience.LearnedCapability{Protocol, Mode, ExpiresAt}`），没有记录时为空数组；功能关闭时仍可查看与清除未到期的记录。
 - 清除：`DELETE /api/v1/admin/accounts/:id/capability-learning`，成功时 `data` 为 `{capability_learned: []}`，只更新这两个键（`AccountHandler.ClearCapabilityLearning`，服务方法 `ClearAccountCapabilityLearning` 经可选窄接口调用，不改 `AdminService`）。
 - DTO（α，`bf38c06c5`）：`Account` 与 `AccountListItem`（完整列表、精简列表与详情）都带 `capability_learned`，没有记录时为 `[]`（不省略）；在脱敏前的 service 账号上读取有效记录，过期或指纹不符的不展示；两个内部 `extra` 键从详情与列表中删除，指纹不返回前端。清除路由沿用管理端的鉴权与审计链。
-- Explain：每个账号记录都带 `capability_learned`。`protocol`（`responses` 或 `chat`）与 `stream`（`true` 或 `false`）必须成对出现，缺一个、空值、重复或非法值都返回 400；不带这两个参数时保持原来的整体健康视图。带 `stream=false` 时按该请求形态判断：被阻断的账号原因为 `capability_stream_only`，`recover_at` 为到期时间，另给 `capability_ttl_seconds`，并从本次的健康候选与末位兜底中排除（不变成全局硬罚，也不覆盖已有更强的硬罚原因）；`stream=true` 时不排除。Explain 没有请求体，按普通 Chat 语义判断；Grok OAuth 的 Chat 路由无法确定时不猜测排除，只展示学习记录。【待契约：α 的 Explain 提交】
+- Explain：每个账号记录都带 `capability_learned`。`protocol`（`responses` 或 `chat`）与 `stream`（`true` 或 `false`）必须成对出现，缺一个、空值、重复或非法值都返回 400；不带这两个参数时保持原来的整体健康视图。带 `stream=false` 时按该请求形态判断：被阻断的账号原因为 `capability_stream_only`，`recover_at` 为到期时间，另给 `capability_ttl_seconds`，并从本次的健康候选与末位兜底中排除（不变成全局硬罚，也不覆盖已有更强的硬罚原因）；`stream=true` 时不排除。Explain 没有请求体，只对上述确定路径排除；路由无法确定时不猜测排除，只展示学习记录。【待契约：α 的 Explain 提交】
 - 前端（FE）：账号列表状态列下方的“仅流式（自动学习，剩余 X）”标识与清除按钮（`AccountStreamOnlyBadge`；`AccountsView.vue` 的两处钩子登记为具名补丁 `xy-account-stream-only-learning`）；设置卡片“失败分类修正”“流式开场与终止”“仅流式账号学习”；运维页与份额页的 Explain 多一列“已学能力”和可选的“请求类型”（`ade0f689d`）；运维面板的 `pre_created_delta` 计数文案（`74e392ffd`）。
 
 ## 7. W5 信号与终止出口
