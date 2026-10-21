@@ -157,9 +157,11 @@
 
 ### 7.2 W5.1 耗尽出口统一
 
-- Gateway Responses、Gateway Chat、OpenAI→Messages 的专用耗尽出口（`handleAnthropicFailoverExhausted` 等）接入公共的 `applyExhaustedRetryHint` 与回合封顶。
-- 封顶时 HTTP 头与正文内嵌的 Retry-After 都删除。
-- 一次性 finalize 标记，防止同一请求写两次终止帧。
+- Gateway Responses、Gateway Chat、OpenAI→Messages 的专用耗尽出口（`handleAnthropicFailoverExhausted` 等）统一调用公共的 `applyExhaustedRetryHint`：429 保持 429；到达回合封顶的 5xx 改为 503，删除 HTTP `Retry-After` 与正文里的重试时间，写 `x-should-retry: false` 与 `server_is_overloaded`，同时把请求的 `RetryAdvice` 置为 `Suppress`。
+- 一个请求的回合计数只增加一次，多次调用读取同一结果。
+- 一次性终止：三个专用出口与公共 Responses/Chat 终态 writer 共用同一个请求标记（`beginResilienceTerminal`）；已尝试写出终态（含短写与断连）后不再追加。
+- OpenAI→Messages 的专用 writer 也应用公共的 code 与消息翻译和运维的流内错误标记；Gateway Chat 在只发过排队心跳时也走终止帧，不再直接返回。
+- 不改已写出的真实输出或上游自己的终态。
 - 现有限制：快速失败与配置拒绝不计入回合封顶；回合按进程内 TurnKey 的连续失败与间隔计数，不严格等于客户端的一轮生成。
 
 ### 7.3 W5.2 排队 ping 之后的终止帧
