@@ -1276,6 +1276,22 @@
       "value": "if canceledAfterOutput() {"
     },
     {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "func writeStableStreamHeaders(c *gin.Context) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "writeStableStreamHeaders(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "writeStableStreamHeaders(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "writeStableStreamHeaders(c)"
+    },
+    {
       "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
       "value": "resilience.Current().StrictTerminalOn()"
     },
@@ -1822,6 +1838,16 @@
       "id": "xy-resilience-v2-streams",
       "path": "backend/internal/service/resilience_compat_stream_prelude_test.go",
       "literal": "func TestCompatPreludeCancelDuringFirstWriteIsClientCancel"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_heartbeat_headers_test.go",
+      "literal": "func TestCompatHeartbeatCommitsOnlyStableStreamHeaders"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_heartbeat_headers_test.go",
+      "literal": "func TestRawChatCommentHeartbeatCommitsOnlyStableStreamHeaders"
     }
   ]
 }

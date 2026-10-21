@@ -1501,7 +1501,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 			// Before message_start, comments keep the connection alive without
 			// opening a protocol stream that could belong to a failed attempt.
-			writeStreamHeaders()
+			writeStableStreamHeaders(c)
 			frame := "event: ping\ndata: {\"type\":\"ping\"}\n\n"
 			if stagePrelude && !clientOutputStarted {
 				frame = ":\n\n"
