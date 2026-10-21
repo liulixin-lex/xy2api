@@ -25,7 +25,7 @@ Prelude events are:
 
 #### Scenario: Non-empty delta before created
 - **WHEN** a relay sends a non-empty delta before `response.created`
-- **THEN** the delta is written to the client at once as output, `pre_created_delta` is counted, and the event `resilience.pre_created_delta` records its byte count without content.
+- **THEN** the delta is written to the client at once as output, `pre_created_delta` is counted once for the attempt, and the event `resilience.pre_created_delta` records its byte count without content; later whitespace deltas in that attempt are forwarded as content.
 
 #### Scenario: Encrypted reasoning is content
 - **WHEN** `response.output_item.added` carries a reasoning item with `encrypted_content`

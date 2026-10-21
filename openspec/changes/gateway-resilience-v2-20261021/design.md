@@ -112,6 +112,7 @@
   - `response.created` 之前、`delta` 明确为空字符串或只有空白的 Responses delta：丢弃，算上游存活、不算输出，计入既有的 `relay_keepalive`；
   - `delta` 缺失、为 null 或不是字符串的不丢；`response.created` 之后的普通空 delta 照常转发；带 `SSE-Keep-Alive` 标记的帧行为不变；
   - `response.created` 之前的非空 delta 是真实内容，立即输出（网关不重排上游的真实内容），计数 `pre_created_delta`（按分组、账号、平台），并记 info 事件 `resilience.pre_created_delta`（`group_id`、`account_id`、`bytes`，只记 UTF-8 字节数，不记内容）；
+  - 丢弃空 delta 的窗口在 `response.created` 或第一个非空 delta 到来时关闭，此后的空白 delta 是正文，原样转发；所以 `pre_created_delta` 每次尝试至多计一次、记一条日志，`bytes` 是关闭窗口的那个 delta 的字节数（审查 R1-P1-3，β `97bdc3478`）；
   - 过滤器按行有界解析：超过 4 KiB 的行原样透传，并保守地停止识别之后的空帧（这一行可能就是 created），不冒险丢真实数据。
 - 带标记的伪保活帧仍只受总开关控制（旧行为）；泛化部分受 `stream.native_prelude_whitelist`（`NativePreludeWhitelistOn()`）控制，关闭时只识别带标记的帧。实现提交 `bdbca7197`。
 
