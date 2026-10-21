@@ -1918,6 +1918,11 @@
       "literal": "func TestOpenAIPassthroughAttemptHeadersSwitchOff"
     },
     {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_oauth_passthrough_test.go",
+      "literal": "type passthroughCancelBody struct"
+    },
+    {
       "id": "xy-resilience-v2-handler-exits",
       "path": "backend/internal/handler/gateway_convert_usage_test.go",
       "literal": "func TestGatewayConvertBreakAfterOutputBillsPartialUsageOnce"
