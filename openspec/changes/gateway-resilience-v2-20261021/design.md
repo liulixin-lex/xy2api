@@ -141,8 +141,9 @@
 
 - 适用：Chat 与 Messages 入站、Responses 上游的两条转换（`openai_gateway_chat_completions.go` 的 `handleChatStreamingResponse`、`openai_gateway_messages.go` 的 `handleAnthropicStreamingResponse`），由 `PreludeStagingOn()` 控制。
 - 开场事件是网关合成的，所以在转换器状态里推迟生成 role chunk 或 `message_start`，等首个 `Content` 或终态到来时一并按序写出。暂存期只保留 ID、model 与 service tier，不做字节缓冲；空的 reasoning added 在真正的推理 delta 或 signature 到来时再重建块结构。工具调用的标识本身就是内容，到达即带着开场释放。
-- 暂存期内上游的可重试 `response.failed`、`error`、EOF、读错，在写出任何字节之前返回 `UpstreamFailoverError` 进入换号（§3.2），失败尝试的用量不混入计费；客户端只看到最终成功那次尝试的一个开场。迟到的 created 不改变已经输出的 ID。
-- 取消优先：暂存期内客户端取消就关闭上游，同步读取、异步读取的读错、终态与 EOF 收尾都先返回空结果加取消错误：不把关闭响应体的错误当成上游读错，不记 Warn、不写失败事件、不交部分用量，不计费（审查 R1-P1-1，β `bb2c22122`）。handler 的 Chat 与 Messages 普通错误出口在“结果为空、错误是 `context.Canceled`、请求 context 已取消”三者同时成立时提前结束：按客户端离开记 499，不上报账号失败、不记失败回合、不补错误帧，也就不进入调度上报（α `5924b2b5a`，上游钩子 `client_canceled_before_output`）。第一次实际写出正文之后取消，回到原有的 drain 机制，继续读完并按已得用量计费（审查 P0，β `63718031d`）。
+- 暂存期内上游的可重试 `response.failed`、`error`、EOF、读错，在写出任何字节之前返回 `UpstreamFailoverError` 进入换号（§3.2），失败尝试的用量不混入计费；客户端只看到最终成功那次尝试的一个开场。Messages 暂存期遇到 EOF 或 `[DONE]` 时，换号与运维记录沿用旧路径的错误文案 `OpenAI messages stream ended before a terminal event`（β `dbcc1c80a`），Chat 保持原有通用文案。迟到的 created 不改变已经输出的 ID。
+- 取消优先：暂存期内客户端取消就关闭上游，同步读取、异步读取的读错、终态与 EOF 收尾都先返回空结果加取消错误：不把关闭响应体的错误当成上游读错，不记 Warn、不写失败事件、不交部分用量，不计费（审查 R1-P1-1，β `bb2c22122`）。关闭上游由取消时触发的回调完成；如果转换器已经看到取消并返回，回调还没开始执行，返回时的清理会把回调停掉，上游就不会被关闭。所以清理时只要停掉了回调且请求已取消，就同步关闭上游；回调已经开始执行的仍由它关闭（集成门禁时发现的竞态，PM7，β `c7290e396`）。handler 的 Chat 与 Messages 普通错误出口在“结果为空、错误是 `context.Canceled`、请求 context 已取消”三者同时成立时提前结束：按客户端离开记 499，不上报账号失败、不记失败回合、不补错误帧，也就不进入调度上报（α `5924b2b5a`，上游钩子 `client_canceled_before_output`）。第一次实际写出正文之后取消，回到原有的 drain 机制，继续读完并按已得用量计费（审查 P0，β `63718031d`）。
+- 暂存期写注释心跳失败（客户端已断开，但请求 context 还没取消）之后，上游 EOF 或首输出截止到期都不换号、不记运维失败：两个转换器的首输出守卫照常按事件规则停表，之后再看客户端是否已断开、决定是否换号，所以断开后正文及时到来时仍能读完用量；Chat 的结果带上客户端断开标记（β `766a54fc8`，停表顺序 β `c7290e396`）。handler 的 Chat 普通错误出口收到非空结果且标记了客户端断开时，与 Messages 一致：只提交结果里已有的用量就返回，不上报账号失败、不计失败回合、不补终止帧，记日志 `openai_chat_completions.client_disconnected`（α `32f2a6ca7`）。正文写出之后的 drain 计费不变。这是断开归因的正确性修复，不受 `stream.prelude_staging` 控制（集成门禁时由新用例发现，PM7）。
 - 首事件守卫（`resilience_compat_stream.go` 的 `armOpenAICompatFirstEvent`）延长到首个内容或终态；中转伪保活帧仍按“存活”处理（旧 design §7.8）。
 - `clientOutputStarted` 按实际写出的字节置位：短写或部分写出之后不再重放。
 - **暂存期写注释心跳**（PM 2026-10-21T02:42Z 改判方案 U4）：按 `stream_keepalive_interval` 写 `:\n\n`，与原生 Responses 的 `stageFirstOutput` 期间（基线 `openai_gateway_response_handling.go` 约 1000–1012 行）和基线一致。方案原推荐“不提交”，依据是“原生不提交”，这个前提不成立。心跳记为心跳字节（`recordOpenAIStreamKeepaliveBytes`），不置 `clientOutputStarted`，不影响换号；心跳会提交 200，之后若耗尽，以带内终止帧收尾（旧 design §7.6）：Chat 与 Messages 的耗尽出口把“已写出心跳”也算作流已开始，Chat 以 `data: {error}` 加 `[DONE]`、Messages 以 `event: error` 结束，不在 `:` 之后追加裸 JSON（第二轮审查 R2-P1①，α `25c0f0e36`：失败分支确认没有语义输出后，把“响应已写出”同步为流已开始）。Messages 在写出 `message_start` 之后恢复 Anthropic 的 `ping`。64 KiB 以上请求的静默拒绝缓冲不会挡住注释心跳，它对内容的暂存规则不变。失败尝试的开场不会泄漏。经 CDN 的请求照旧另有 handler 的首包前保活。实现 β `4c3256477`。
@@ -327,7 +328,7 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 | 修复 | 说明 |
 |---|---|
 | 排队 ping 之后按协议写终止帧（W5.2） | §7.3；总开关关闭时同样生效 |
-| 换号与写出的协议正确性（审查 R1-P1-9，β） | 只有尚未实际写出、客户端未断开且请求未取消时才换号；`clientOutputStarted` 按实际写出字节（n>0）置位，短写视为 `io.ErrShortWrite`；首事件超时只在请求未取消时生成上游超时。子开关回退的是暂存、白名单与终态策略，不撤销这些防止拼接、重放与错误归因的修正 |
+| 换号与写出的协议正确性（审查 R1-P1-9，β） | 只有尚未实际写出、客户端未断开且请求未取消时才换号；`clientOutputStarted` 按实际写出字节（n>0）置位，短写视为 `io.ErrShortWrite`；首事件超时只在请求未取消、客户端未断开时生成上游超时（客户端断开部分为 PM7 β `766a54fc8`、α `32f2a6ca7`）。子开关回退的是暂存、白名单与终态策略，不撤销这些防止拼接、重放与错误归因的修正 |
 | 排队心跳按入站协议的格式（审查 R1-P1-4，α `f4a60916e`） | 等待并发槽位与用户消息队列（锁等待、RPM 等待）时的心跳：Responses、compact、Chat 写 SSE 注释 `:`，Messages 保留 Claude 的 `ping`，不发心跳的配置保持不发。按请求选择，不改共享的 helper 配置。上游钩子 `requestQueuePingFormat` |
 | 分类输入的证据补全（审查 P2-2，γ `29f26652d`） | 关闭 `failure.decision_v2` 会恢复旧的分类规则与 `RequestScopedTransient` 分支，但 service 构造分类输入的补全保留：code、type、message 先取调用方给的值，再取 `error` 字段，最后回落到 `response.error.*`；流内事件多带 type，HTTP 缺 message 时从正文补齐。证据更完整，所以旧模式下个别运维分类可能与 0.4.3 不同，不承诺逐字节回到基线 |
 

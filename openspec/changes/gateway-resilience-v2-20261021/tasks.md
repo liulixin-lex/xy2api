@@ -21,7 +21,7 @@
 - [x] 2.2 原生 Responses 白名单扩展（`stream.native_prelude_whitelist`）；送达追踪改用同一判据；伪保活泛化与 `pre_created_delta`（β `bdbca7197`）。
 - [x] 2.3 Chat、Messages 兼容转换推迟开场（`stream.prelude_staging`）；首事件守卫延长到首个内容（β `1a97eebd1`）。
 - [x] 2.4 释放事件采集（`prelude_trace`，β `04aa6f1a6`）。
-- [ ] 2.5 用例：created→failed、created→queued→failed、created→元数据→failed、Chat busy、Messages EOF、内容拒绝与 incomplete 不重放、合法空回答、工具调用首事件、CDN 心跳后换号、客户端取消、失败尝试 usage 不混入、开关关闭回到 0.4.3、严格 SDK 事件顺序。除客户端取消外都已由 β 的用例覆盖；暂存期客户端断开的用例与修复由 β 在集成门禁期间补（PM7）。
+- [x] 2.5 用例：created→failed、created→queued→failed、created→元数据→failed、Chat busy、Messages EOF、内容拒绝与 incomplete 不重放、合法空回答、工具调用首事件、CDN 心跳后换号、客户端取消、失败尝试 usage 不混入、开关关闭回到 0.4.3、严格 SDK 事件顺序。均由 β 的用例覆盖；暂存期客户端写出失败与取消的用例与修复在集成门禁期间补齐（PM7：β `766a54fc8`、`dbcc1c80a`、`c7290e396`，α `32f2a6ca7`）。
 
 ## 3. W1.2-lite（β）
 
