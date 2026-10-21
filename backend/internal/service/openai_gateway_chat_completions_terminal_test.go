@@ -162,3 +162,51 @@ func TestRawChatStrictTerminalSwitchOffAndSuccess(t *testing.T) {
 		})
 	}
 }
+
+func TestRawChatStrictErrorFieldNeedsFailureEvidence(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+		failure bool
+	}{
+		{"empty_string", `{"error":"","choices":[{"delta":{"content":"a"}}]}`, false},
+		{"false", `{"error":false,"choices":[{"delta":{"content":"a"}}]}`, false},
+		{"empty_object", `{"error":{},"choices":[{"delta":{"content":"a"}}]}`, false},
+		{"blank_fields", `{"error":{"message":" ","code":null},"choices":[{"delta":{"content":"a"}}]}`, false},
+		{"null", `{"error":null,"choices":[{"delta":{"content":"a"}}]}`, false},
+		{"message", `{"error":{"message":"busy"}}`, true},
+		{"code", `{"error":{"code":"server_is_overloaded"}}`, true},
+		{"numeric_code", `{"error":{"code":500}}`, true},
+		{"type_error", `{"type":"error","error":"busy"}`, true},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			state := openAIRawStreamTerminalState{strict: true}
+			state.ObserveDataLine(tt.payload)
+			require.Equal(t, tt.failure, state.failurePayload != "")
+		})
+	}
+}
+
+func TestRawChatStrictPlaceholderErrorFieldStreamsNormally(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, placeholder := range []string{`""`, `false`, `{}`} {
+		t.Run(placeholder, func(t *testing.T) {
+			c, rec := compatStreamContext("/v1/chat/completions", "")
+			state := resilience.NewRequestState()
+			c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+			body := `data: {"id":"chat_a","object":"chat.completion.chunk","error":` + placeholder +
+				`,"choices":[{"delta":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3}}` +
+				"\n\ndata: [DONE]\n\n"
+			resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}
+			result, err := compatStreamService(nil, 0, 0, 0).streamRawChatCompletions(c, resp, rawChatCompletionsTestAccount(), "model", "model", "model", nil, nil, time.Now(), 0)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, 3, result.Usage.OutputTokens)
+			require.Equal(t, body, rec.Body.String())
+			require.False(t, state.TurnFailed())
+			_, marked := c.Get(OpsStreamErrorKey)
+			require.False(t, marked)
+		})
+	}
+}
