@@ -150,21 +150,23 @@
   - 下一步：逐项先写红测、单独提交；用户决定发 0.4.5 后合成候选、做全套验证。
   - 卡点：用户决定；建在 RA-1 修复之上，RA-1 分支变动时要同步。
 
-### 20261021-channel-monitor-v1 — 渠道监控 v1 准确性优化（规划完成，待用户确认；2026-10-21T12:20Z 登记）
+### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（本地实现完成，待授权推送；2026-10-21T15:00Z 更新）
 
-- 请求（用户 2026-10-21）：先读 PM 会话 7c768913 及其子代理的改动，避免破坏；新建分支优化渠道监控 v1——“正常可调用，但监控卡很久、黄绿与实际不符；分组部分满载时探测也排队导致超时”；可只读参考生产数据；另派子代理参考 Sub2API 生态仓库的监控实现；全部分析完成后规划最终方案。
-- 分支：`feat/channel-monitor-v1-20261021`（工作树 `xy2api-wt/monitor-v1`，自 origin/main `a1cf8f104`），只在本地；目前只有本条登记的提交，未改代码。
-- 产出（仓库外 `xy2api-artifacts/monitor-v1-20261021/`）：方案 `plan/PLAN.md`；调研 `research/RESEARCH_MONITORING.md`；7 天回放脚本 `scripts/simulate_verdict.py`；主机、生产编号与数据导出只在 `private/`。
-- 结论摘要：
-  - 黄色主要来自判据：非流式总耗时 ≥6 秒（写死）即降级，推理/重型模型正常就超过 6 秒（7 天里 Grok 监控 16% 的探测为黄）。
-  - 红色约一半来自探测口径：30 秒等不到响应头即失败；网关换号恢复约需 25 秒，排队回退 30 秒、粘性 120 秒，非流式请求排队期间不写响应头。
-  - 单次采样定状态，无复测、无防抖；错误不分类（本站 429 `gateway_queue_full`、`gateway_concurrency_limit` 也记为错误）；没有过期态。
-  - runner：pond 队列无界，“池满丢弃”实际不触发，检测排队时结果变旧；启动加载失败不重试（与上游 issue #7209 吻合）。
-  - “部分满载仍排队”属实但路径较窄（粘性账号满了原地等；负载因子小于并发数被提前判满、兜底不看负载）。这是调度缺陷，影响所有请求，建议另开任务交调度维护者。
-- 方案（v3，按用户 2026-10-21 意见重规划，只动探测本身）：判定只有三色——30 秒内拿到正确回答且 ≤10 秒为绿、>10 秒为黄、30 秒内拿不到正确回答为红；不加繁忙、过期、配置异常等分类，不加迁移、不加设置。探针提速：流式读到答案即停、按模型族带最低推理强度（不支持时同轮自动去掉并记住）、零样本短题、按模型族给输出上限、连接复用、HEAD ping 并行；协议兼容矩阵全绿才上线；连接级快速失败在 30 秒内重试一次；runner 启动自愈、对账、错峰、去重；网关识别签名探测头，探测请求优先用空闲账号、不在满载账号上排队（待用户确认是否纳入）。
-- 边界：不碰 δ、ε、RA-1 正在改的网关 handler、`resilience_*`、`GATEWAY_RESILIENCE.md`；`policy.json` 需要登记时另开监控专用补丁；上游 v0.2.16 的三个监控小修复随 v0.2.17 同步带入，不在本分支手工摘取。
-- 下一步：等用户确认 v3 的待决项（探测选号是否纳入、本站探测是否走本机直连、推理强度取 low、发布版本），然后先写失败用例再实现。
-- 卡点：测试服务器由 QA 占用（6.5 小时浸泡、pprof 诊断、0.4.5 自测），本任务的服务器验证需经 PM 协调。
+- 请求（用户 2026-10-21）：优化渠道监控 v1——“正常可调用但监控卡很久、黄绿与实际不符；分组部分满载时探测也排队导致超时”。用户对方案的要求：只动探测本身；30 秒内拿到正确回答且 ≤10 秒为绿、>10 秒为黄、30 秒内拿不到正确回答为红；不新增繁忙、过期等分类；探测协议兼容各种模型；让模型更快回答。随后“按你认为的最佳方案执行”。
+- 分支：`feat/channel-monitor-v1-20261021`（工作树 `xy2api-wt/monitor-v1`，自 origin/main `a1cf8f104`），只在本地，**未推送、未开 PR**。方案与调研在仓库外 `xy2api-artifacts/monitor-v1-20261021/`（`plan/PLAN.md` v3、`research/`、门禁日志 `gates/`）。
+- 已完成（现行说明见 [`CHANNEL_MONITOR_V1.md`](CHANNEL_MONITOR_V1.md)）：
+  - 探针：所有 provider 流式探测、读到答案即停；一句话加法题；按模型族带 `low` 推理强度与输出上限（推理模型 1024，Gemini flash 关思考、pro 取最低预算 128）；参数被拒时同轮修正重发（6 小时过期、按 Key 区分）；快速连接失败在预算内重试一次；10 秒、30 秒口径；HEAD ping 并行；连接复用；只跟随同主机重定向。
+  - 探测通道：监控请求带与 API Key 绑定的签名头 `X-XY2API-Probe`，全局中间件校验后打标记并删除该头；调度对探测不用粘性会话，排队前先按真实并发找空闲槽（OpenAI/Grok 缺省调度、Anthropic 兜底与模型路由、份额调度）；具名补丁 `xy-channel-monitor-probe-lane`，登记 `policy.json`、`scheduler-diff.json`、`UPSTREAM_BASE.json`。
+  - 调度可靠性：启动加载失败退避重试、每 5 分钟对账、首轮错峰、16 个 worker 且排队超过半个间隔跳过、`last_checked_at` 条件更新做跨实例认领、编辑后的首轮强制、检测可取消、手动检测脱离浏览器连接且不推进 `last_checked_at`、超时的一轮照常写入、quota_probe 配额并行。
+  - 读路径 LATERAL 改写；前端：`error` 徽章改红、“响应时间”文案、立即检测超时 60 秒。
+  - 独立代码审查（只读）4 项 P1 与选定 P2 已修，每项先写失败用例。
+- 验证（本机）：gofmt、四种 vet、golangci-lint 增量 0 项；service 全量 unit 与无 tag 测试、repository/server/middleware/monitorprobe 通过；`ci_gate.py` 375 项 `-race` 0 跳过；scheduler-diff、`sync.py audit`、文档一致性、tools 41 项通过；前端 lint、typecheck 与监控相关 21 个测试文件通过。新 SQL 在本机临时 PostgreSQL 18 上与旧查询结果对照一致，执行计划在生产只读核对。
+- 未做与卡点：
+  1. 推送、开 PR、合并、发版、部署都需要用户授权。
+  2. 测试服务器验证（真实上游的兼容矩阵、Grok 等推理模型的响应时间）需要 PM 协调测试服务器。
+  3. 未做：本站探测走本机直连（保留经 CDN 的端到端覆盖）；OpenAI 高级调度器（缺省关闭）只覆盖“无粘性”。
+  4. 审查 P2-7（Anthropic 补选失败时可能泄漏槽位）是原有写法，未改；只有闭合 `</think>` 的上游可能被提前判答，写在文档已知局限。
+- 边界：未碰 δ、ε、RA-1 正在改的 handler、`resilience_*`、`GATEWAY_RESILIENCE.md`；`policy.json` 与它们的分支都有追加，合并时注意顺序。
 
 ## 操作陷阱
 
@@ -1130,3 +1132,13 @@ pnpm --dir frontend run build
 - 验证：`python3 tools/check_docs_consistency.py`。
 - 卡点/风险：探测选号要改两处原版调度出口（只对探测生效），待用户确认。
 - 下一步：见进行中条目。
+
+### 2026-10-21T15:00Z — `20261021-channel-monitor-v1` — 本地实现完成，门禁全绿，待授权推送
+
+- 请求/目标：用户“按你认为的最佳方案执行”方案 v3；取舍：做探测通道（只对签名探测生效），不做本机直连，推理强度取 `low`。
+- 开始状态：分支在 `4442128c1`，工作树干净。
+- 完成操作：先提交签名头契约；两个子代理在独立工作树并行实现“探针本身”与“探测通道”，协调者实现调度可靠性、读路径、前端与文档；两条分支常规合并；独立代码审查后修复 4 项 P1（手动检测与编辑会让下一轮被跳过、签名头可被第三方重放、MiniMax 式流尾重复 message 误判、quota_probe 超时整轮丢弃）与选定 P2；临时工作树与分支已删除。
+- 修改文件：`backend/internal/service/channel_monitor_*`、`monitor_probe_scheduling*.go` 及四个调度文件的调用点、`repository/channel_monitor_repo.go`、`handler/admin/channel_monitor_handler.go`、`pkg/monitorprobe/`、`server/middleware/monitor_probe*.go`、`server/router.go`、前端 3 个文件与 1 个新测试、`docs/CHANNEL_MONITOR_V1.md`（新）、`docs/GROK_MONITOR_RESPONSES.md`、`docs/README.md`、`.gitignore`、`tools/upstream-sync/policy.json`、`scheduler-diff.json`、`UPSTREAM_BASE.json`。
+- 验证：见“进行中的工作”同名条目；第一次门禁的 vet 因共享 Go 编译缓存被并发清理而报错（环境问题），重跑通过；`sync.py audit` 第一次因改名的绑定测试失败，修正后通过。
+- 卡点/风险：未在真实上游验证；本机磁盘余量紧张（约 9 GiB）。
+- 下一步：用户授权后推送并开 PR；测试服务器跑兼容矩阵与响应时间实测；生产部署单独授权。
