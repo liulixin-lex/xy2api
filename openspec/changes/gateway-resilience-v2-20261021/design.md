@@ -157,7 +157,7 @@
 - 实现提交 `f9edc3a4d`（β），由 `StrictTerminalOn()` 控制。
 - 合法 JSON 的 `error` 字段或 `type: "error"` 一出现，之后的 `[DONE]`、usage、finish 都不再把结果改回成功。
 - 提交前且可重试：返回换号；提交后：原样转发错误与 `[DONE]`，按已输出后失败记账（计入会话失败），并标记终态已写出，handler 不再补一个。内容拒绝不换号；客户端取消优先，不误记为截断。
-- 第一条 data 之前的 `event`、`id`、`retry` 行有界暂存，使 `event: error` 不会抢先提交响应；不新增 role 或内容的暂存。上游的注释心跳 `:` 直接透传，计为心跳字节，不置 `clientOutputStarted`、不影响之后换号，否则直连客户端在长首字期间收不到任何字节（第二轮审查 R2-P1③，与 R1-P1-2 同类；【待契约：β 的提交】）。
+- 第一条 data 之前的 `event`、`id`、`retry` 行有界暂存，使 `event: error` 不会抢先提交响应；不新增 role 或内容的暂存。上游的注释心跳 `:`（以及没有暂存元数据时的空分隔行）立即写出并 Flush，按实际写出的字节计为心跳字节（`recordOpenAIStreamKeepaliveBytes`），不置 `clientOutputStarted`、不影响之后换号，也绕过 64 KiB 以上请求的静默拒绝暂存；短写按断开处理。否则直连客户端在长首字期间收不到任何字节（第二轮审查 R2-P1③，与 R1-P1-2 同类；β `a1a2ff211`，上游钩子为该文件的 `recordOpenAIStreamKeepaliveBytes`）。
 - 没有 error 的流仍算成功，包括只有 usage 的、或有 finish 但没有 `[DONE]` 的。
 - 开关关闭时回到旧判定：`error` 后跟 `[DONE]` 算成功。
 - 上游文件钩子：`openai_gateway_chat_completions_raw.go` 的 `resilience.Current().StrictTerminalOn()`、`terminal.failurePayload`（登记到 required_literals）。
