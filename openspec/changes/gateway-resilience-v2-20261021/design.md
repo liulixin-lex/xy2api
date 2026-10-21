@@ -193,7 +193,7 @@
 
 ### 6.3 本请求与选号
 
-- **本请求**：`failure.decision_v2` 开启时，钩子返回可换号的哨兵错误（`IsCapabilityStreamOnly()`；不上报账号调度失败、不同号重试），handler 只计请求预算的尝试次数，不记会话失败、不冷却。`decision_v2` 关闭时只学习，钩子返回空，本请求照旧返回 400。
+- **本请求**：`failure.decision_v2` 开启时，钩子返回可换号的哨兵错误（`IsCapabilityStreamOnly()`；不上报账号调度失败、不同号重试），handler 只计请求预算的尝试次数，不记会话失败、不冷却。这次拒绝不写运维的上游错误记录（写入会把账号记为本请求失败），只记中性事件 `resilience.capability_learned`。`decision_v2` 关闭时只学习，钩子返回空，本请求照旧返回 400。
 - **选号**：`Account.CapabilityExclusion(ctx, model, now)` 按本请求实际会用的上游协议返回阻断记录：入站 Chat 若转换为 Responses 上游，读 Responses 的学习；Grok 的两种协议各自独立。OpenAI 选号的共同资格检查（`openai_gateway_scheduling.go`）与 `openai_account_scheduler.go` 的 `isAccountRequestCompatibleReason` 都经钩子 `capabilityEligibilityReason` 过滤，覆盖粘性会话与末位兜底的最后检查；钩子登记到 `scheduler-diff.json` 与 `policy.json`（α）。
 - 全部被过滤后的无号仍是现有的 503，原因码 `capability_stream_only`，不再把 400 归咎于用户。
 - 本请求里所有候选都以“只接受流式”拒绝、换号耗尽时，同样返回 503（Anthropic 协议为 `api_error`），不返回上游的 400：共用的容量耗尽出口 `resilienceCapacityExhausted` 先识别哨兵（γ），OpenAI 专用出口在透传规则之前加同样的分支（α，必要时 `code` 为 `capability_stream_only`）。【待契约：实现提交】
@@ -222,7 +222,7 @@
 
   这样 service 层在 handler 耗尽出口之前合成的 `response.failed` 也能拿到当时的候选情况。
 - 正文：`RetryAdvice.Message(message)` 统一处理重试尾句：去掉本地固定格式的旧尾句 “Please try again in Ns.”；秒数为正时追加与 `Headers()` 同样夹到 10 秒的尾句；`unknown` 与 `Suppress` 只去掉旧尾句。只改网关自己的固定后缀，不改写上游的自然语言。
-- 分组 advisor（γ）只读末位兜底的分组快照（`lastResortGroups` 中未过期的条目，沿用既有的 5 秒缓存，锁内取引用、锁外计算），不做冷读取，不访问 Redis 或数据库。快照只在单一候选判断、末位兜底或原无号提示用过时才有；缺失或过期时返回 `unknown`。候选只算未尝试（排除 `RequestState` 里本请求已失败的账号）、模型与平台兼容、能力允许、无硬罚的账号；OpenAI 另看进程内的按模型屏蔽。原 `NoAccountRetryAfter` 保留给 HTTP 无号提示【待契约：γ 的 advisor 方法名】。
+- 分组 advisor（γ）只读末位兜底的分组快照（`lastResortGroups` 中未过期的条目，沿用既有的 2 秒缓存 `lastResortCandidateTTL`，锁内取引用、锁外计算），不做冷读取，不访问 Redis 或数据库。快照只在单一候选判断、末位兜底或原无号提示用过时才有；缺失或过期时返回 `unknown`。候选只算未尝试（排除 `RequestState` 里本请求已失败的账号）、模型与平台兼容、能力允许、无硬罚的账号；OpenAI 另看进程内的按模型屏蔽。原 `NoAccountRetryAfter` 保留给 HTTP 无号提示【待契约：γ 的 advisor 方法名】。
 
 | 情况 | `Source` | `response.failed` 的 retry-after |
 |---|---|---|
