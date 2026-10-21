@@ -91,11 +91,26 @@ func runProbe(ctx context.Context, provider, endpoint, apiKey, model string, opt
 	ctx, cancel := context.WithTimeout(ctx, limits.Budget)
 	defer cancel()
 
-	req, err := plan.build(monitorProbeShapeFixes.get(plan.fixKey()))
-	if err != nil {
-		return probeFinish(res, start, MonitorStatusError, err.Error())
+	// 每轮最多 monitorProbeMaxAttempts 次请求：参数被拒时按修正重发（修正记在进程内，下一轮直接用）。
+	key := plan.fixKey()
+	var last probeAttempt
+	for attempt := 1; ; attempt++ {
+		req, err := plan.build(monitorProbeShapeFixes.get(key))
+		if err != nil {
+			return probeFinish(res, start, MonitorStatusError, err.Error())
+		}
+		last = sendProbeAttempt(ctx, plan, req)
+		if last.answered() || ctx.Err() != nil {
+			break
+		}
+		fix, corrected := probeCorrection(req, last.status, last.errBody)
+		if corrected {
+			monitorProbeShapeFixes.learn(key, fix)
+		}
+		if !corrected || attempt >= monitorProbeMaxAttempts {
+			break
+		}
 	}
-	last := sendProbeAttempt(ctx, plan, req)
 	return probeVerdict(res, start, plan, &last, errors.Is(ctx.Err(), context.DeadlineExceeded), limits)
 }
 

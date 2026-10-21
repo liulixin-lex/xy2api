@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
@@ -398,4 +399,40 @@ func probeRequestPath(provider, endpoint string, adapter providerAdapter, model 
 		return adapter.buildStreamPath(model)
 	}
 	return monitorRequestPath(provider, endpoint, adapter, model)
+}
+
+//nolint:gochecknoglobals // 只读的错误文本匹配规则。
+var (
+	// probeReasoningWordRegex 错误文本提到推理参数（reasoning_effort、reasoning.effort、reasoningEffort、thinkingConfig 等）。
+	probeReasoningWordRegex = regexp.MustCompile(`reasoning|thinking`)
+	// probeStreamWordRegex 独立的 stream / streaming 一词（不含 upstream、stream_options）。
+	probeStreamWordRegex = regexp.MustCompile(`(?:^|[^a-z_])stream(?:ing)?(?:[^a-z_]|$)`)
+	// probeRejectionWordRegex 拒绝的说法。
+	probeRejectionWordRegex = regexp.MustCompile(`unsupported|not supported|does not support|doesn't support|not allowed|not permitted|unknown|unrecogni[sz]ed|invalid|unexpected|not available|disabled|cannot|can't`)
+	// probeGenericParamRejectionRegex 没点名的“参数不被接受”。
+	probeGenericParamRejectionRegex = regexp.MustCompile(`(?:unsupported|unknown|unrecogni[sz]ed|invalid|unexpected|extra)\W+(?:\w+\W+){0,3}?(?:parameters?|arguments?|fields?|keys?|propert(?:y|ies)|inputs?)|not permitted`)
+)
+
+// probeCorrection 判断上游的 400 / 422 是否在拒绝我们加的可选参数，返回要追加的修正：
+//   - Chat 的 max_tokens 被要求改用 max_completion_tokens → 改名；
+//   - 错误文本提到推理参数，或没点名地拒绝了某个参数 → 去掉我们注入的推理参数；
+//   - 流式被拒 → 改非流式。
+//
+// replace 模式与用户自己写的推理参数不修正。
+func probeCorrection(req *probeRequest, status int, body string) (probeShapeFix, bool) {
+	if req.Replace || (status != http.StatusBadRequest && status != http.StatusUnprocessableEntity) {
+		return probeShapeFix{}, false
+	}
+	text := strings.ToLower(body)
+	switch {
+	case req.HasMaxTokens && strings.Contains(text, "max_completion_tokens"):
+		return probeShapeFix{UseMaxCompletionTokens: true}, true
+	case req.InjectedReasoning && probeReasoningWordRegex.MatchString(text):
+		return probeShapeFix{DropReasoning: true}, true
+	case req.Stream && probeStreamWordRegex.MatchString(text) && probeRejectionWordRegex.MatchString(text):
+		return probeShapeFix{NoStream: true}, true
+	case req.InjectedReasoning && probeGenericParamRejectionRegex.MatchString(text):
+		return probeShapeFix{DropReasoning: true}, true
+	}
+	return probeShapeFix{}, false
 }
