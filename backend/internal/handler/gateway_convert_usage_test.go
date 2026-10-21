@@ -106,18 +106,26 @@ func TestGatewayConvertBreakAfterOutputBillsPartialUsageOnce(t *testing.T) {
 			body            func() io.Reader
 			failAfterOutput bool
 			wantOutput      int
+			streamInterval  int
 		}{
-			{"error_event", func() io.Reader { return strings.NewReader(gwUsageStart + gwUsageOverloaded) }, false, 0},
-			{"missing_terminal", func() io.Reader { return strings.NewReader(gwUsageStart) }, false, 0},
+			{"error_event", func() io.Reader { return strings.NewReader(gwUsageStart + gwUsageOverloaded) }, false, 0, 0},
+			{"missing_terminal", func() io.Reader { return strings.NewReader(gwUsageStart) }, false, 0, 0},
 			{"read_error", func() io.Reader {
 				return io.MultiReader(strings.NewReader(gwUsageStart), gwUsageReadError{io.ErrUnexpectedEOF})
-			}, false, 0},
-			{"client_gone_then_error", func() io.Reader { return strings.NewReader(gwUsageStart + gwUsageOverloaded) }, true, 0},
-			{"complete", func() io.Reader { return strings.NewReader(gwUsageStart + gwUsageComplete) }, false, 7},
+			}, false, 0, 0},
+			{"client_gone_then_error", func() io.Reader { return strings.NewReader(gwUsageStart + gwUsageOverloaded) }, true, 0, 0},
+			// Review DELTA-P2-6: the stall exit bills like the others.
+			{"stall", func() io.Reader {
+				pr, pw := io.Pipe()
+				go func() { _, _ = io.WriteString(pw, gwUsageStart) }()
+				t.Cleanup(func() { _ = pw.Close() })
+				return pr
+			}, false, 0, 1},
+			{"complete", func() io.Reader { return strings.NewReader(gwUsageStart + gwUsageComplete) }, false, 7, 0},
 		} {
 			t.Run(endpoint.name+"/"+tc.name, func(t *testing.T) {
 				usageRepo := &gwUsageLogRepo{}
-				h := newGatewayConvertUsageHandler(t, usageRepo, &gwUsageUpstream{body: tc.body})
+				h := newGatewayConvertUsageHandler(t, usageRepo, &gwUsageUpstream{body: tc.body}, tc.streamInterval)
 				writer := &gwUsageWriter{ResponseRecorder: httptest.NewRecorder(), failAfterOutput: tc.failAfterOutput}
 				c := newGatewayConvertUsageContext(writer, endpoint.path, endpoint.body)
 
@@ -136,7 +144,7 @@ func TestGatewayConvertBreakAfterOutputBillsPartialUsageOnce(t *testing.T) {
 	}
 }
 
-func newGatewayConvertUsageHandler(t *testing.T, usageRepo service.UsageLogRepository, upstream service.HTTPUpstream) *GatewayHandler {
+func newGatewayConvertUsageHandler(t *testing.T, usageRepo service.UsageLogRepository, upstream service.HTTPUpstream, streamInterval int) *GatewayHandler {
 	t.Helper()
 	groupID := int64(9200)
 	group := &service.Group{ID: groupID, Hydrated: true, Platform: service.PlatformAnthropic, Status: service.StatusActive, RateMultiplier: 1}
@@ -148,6 +156,7 @@ func newGatewayConvertUsageHandler(t *testing.T, usageRepo service.UsageLogRepos
 	}
 	schedulerSnapshot := service.NewSchedulerSnapshotService(&fakeSchedulerCache{accounts: []*service.Account{account}}, nil, nil, nil, nil)
 	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Gateway.StreamDataIntervalTimeout = streamInterval
 	gatewayService := service.NewGatewayService(
 		nil, &fakeGroupRepo{group: group}, usageRepo, nil, nil, nil, nil, nil, cfg,
 		schedulerSnapshot, nil, service.NewBillingService(cfg, nil), nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil,
@@ -197,7 +206,7 @@ func TestGatewayConvertCancelBeforeOutputBillsNothing(t *testing.T) {
 			pr, pw := io.Pipe()
 			t.Cleanup(func() { _ = pw.Close() })
 			usageRepo := &gwUsageLogRepo{}
-			h := newGatewayConvertUsageHandler(t, usageRepo, &gwUsageUpstream{body: func() io.Reader { return pr }})
+			h := newGatewayConvertUsageHandler(t, usageRepo, &gwUsageUpstream{body: func() io.Reader { return pr }}, 0)
 			recorder := httptest.NewRecorder()
 			c := newGatewayConvertUsageContext(recorder, endpoint.path, endpoint.body)
 			ctx, cancel := context.WithCancel(c.Request.Context())
