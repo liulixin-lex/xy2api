@@ -478,15 +478,21 @@ func TestCompatPreludeTerminalSemanticsWithLargeRequest(t *testing.T) {
 	}
 }
 
-// preludeRaceBody signals when the prelude AfterFunc closes it.
+// preludeRaceBody signals when the prelude AfterFunc closes it. With eof
+// the close ends the stream cleanly (EOF) instead of failing the next read.
 type preludeRaceBody struct {
 	*io.PipeReader
+	writer *io.PipeWriter
+	eof    bool
 	closed chan struct{}
 	once   sync.Once
 }
 
 func (b *preludeRaceBody) Close() error {
 	b.once.Do(func() { close(b.closed) })
+	if b.eof {
+		return b.writer.Close()
+	}
 	return b.PipeReader.Close()
 }
 
@@ -513,45 +519,48 @@ func (w *cancelDuringFirstWriteWriter) WriteString(s string) (int, error) {
 }
 
 // R2-P2-4: the client cancels while the first write is in flight. The
-// AfterFunc has already closed the body, so the next read error is the
-// cancellation, not an upstream break after output.
+// AfterFunc has already closed the body, so the next read error, or an EOF
+// without a terminal event, is the cancellation, not an upstream break after
+// output.
 func TestCompatPreludeCancelDuringFirstWriteIsClientCancel(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, messages := range []bool{false, true} {
 		for _, interval := range []int{0, 30} {
-			t.Run(fmtBool(messages)+"/"+fmtBool(interval > 0), func(t *testing.T) {
-				c, _ := compatStreamContext("/v1/chat/completions", "")
-				requestState := resilience.NewRequestState()
-				ctx, cancel := context.WithCancel(resilience.WithRequestState(c.Request.Context(), requestState))
-				defer cancel()
-				c.Request = c.Request.WithContext(ctx)
-				pr, pw := io.Pipe()
-				body := &preludeRaceBody{PipeReader: pr, closed: make(chan struct{})}
-				defer func() { _ = pw.Close() }()
-				c.Writer = &cancelDuringFirstWriteWriter{ResponseWriter: c.Writer, cancel: cancel, closed: body.closed}
-				go func() {
-					_, _ = io.WriteString(pw, keepaliveStallCreated+"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n")
-				}()
-				resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: body}
-				svc := compatStreamService(nil, 0, interval, 0)
-				account := rawChatCompletionsTestAccount()
-				var result *OpenAIForwardResult
-				var err error
-				if messages {
-					result, err = svc.handleAnthropicStreamingResponse(resp, c, account, "model", "model", "model", time.Now())
-				} else {
-					result, err = svc.handleChatStreamingResponse(resp, c, account, "model", "model", "model", time.Now(), 0)
-				}
-				require.ErrorIs(t, err, context.Canceled)
-				_, _, readErr := OpenAIUpstreamStreamReadErrorDetails(err)
-				require.False(t, readErr, "a read error caused by the cancellation is not an upstream break")
-				require.NotNil(t, result, "output reached the client; usage so far is billed")
-				require.True(t, result.ClientDisconnect, "handlers settle it as a client disconnect, without an account failure")
-				require.False(t, requestState.AccountFailed(account.ID))
-				require.False(t, requestState.TurnFailed())
-				_, marked := c.Get(OpsStreamErrorKey)
-				require.False(t, marked)
-			})
+			for _, eof := range []bool{false, true} {
+				t.Run(fmtBool(messages)+"/"+fmtBool(interval > 0)+"/eof="+fmtBool(eof), func(t *testing.T) {
+					c, _ := compatStreamContext("/v1/chat/completions", "")
+					requestState := resilience.NewRequestState()
+					ctx, cancel := context.WithCancel(resilience.WithRequestState(c.Request.Context(), requestState))
+					defer cancel()
+					c.Request = c.Request.WithContext(ctx)
+					pr, pw := io.Pipe()
+					body := &preludeRaceBody{PipeReader: pr, writer: pw, eof: eof, closed: make(chan struct{})}
+					defer func() { _ = pw.Close() }()
+					c.Writer = &cancelDuringFirstWriteWriter{ResponseWriter: c.Writer, cancel: cancel, closed: body.closed}
+					go func() {
+						_, _ = io.WriteString(pw, keepaliveStallCreated+"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n")
+					}()
+					resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: body}
+					svc := compatStreamService(nil, 0, interval, 0)
+					account := rawChatCompletionsTestAccount()
+					var result *OpenAIForwardResult
+					var err error
+					if messages {
+						result, err = svc.handleAnthropicStreamingResponse(resp, c, account, "model", "model", "model", time.Now())
+					} else {
+						result, err = svc.handleChatStreamingResponse(resp, c, account, "model", "model", "model", time.Now(), 0)
+					}
+					require.ErrorIs(t, err, context.Canceled)
+					_, _, readErr := OpenAIUpstreamStreamReadErrorDetails(err)
+					require.False(t, readErr, "a read error caused by the cancellation is not an upstream break")
+					require.NotNil(t, result, "output reached the client; usage so far is billed")
+					require.True(t, result.ClientDisconnect, "handlers settle it as a client disconnect, without an account failure")
+					require.False(t, requestState.AccountFailed(account.ID))
+					require.False(t, requestState.TurnFailed())
+					_, marked := c.Get(OpsStreamErrorKey)
+					require.False(t, marked)
+				})
+			}
 		}
 	}
 }

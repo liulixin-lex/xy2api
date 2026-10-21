@@ -1305,6 +1305,10 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		if err := canceledPrelude(); err != nil {
 			return nil, err
 		}
+		// Closing the body under the reader may also end the scan cleanly.
+		if canceledAfterOutput() {
+			return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", c.Request.Context().Err())
+		}
 		message := "OpenAI messages stream ended before a terminal event"
 		if canReplayPrelude() {
 			return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, nil, message, upstreamModel, resp.Header)
