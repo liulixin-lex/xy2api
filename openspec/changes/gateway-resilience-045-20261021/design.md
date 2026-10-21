@@ -70,7 +70,7 @@
 
 ## 3. W1.2 其余三条路径（δ）
 
-分支 `feat/w12-gateway-guards-045`（基于 `4b0b6d94b`），HEAD `87f9b9356`，7 个提交。
+分支 `feat/w12-gateway-guards-045`（基于 `4b0b6d94b`），HEAD `ab227b00f`，9 个提交。
 
 ### 3.1 Gateway 入站经 Anthropic 上游的 Responses 与 Chat（`bd960dc5a`、`c95aa4e7c`、`8a7fa67ea`、`9f8f5ba6c`）
 
@@ -90,7 +90,7 @@
 - 不重放：不可重试的流内错误（请求过长、内容拒绝、余额等）、`max_tokens` 的 incomplete、refusal、合法空回答与只有 usage 的回答。strict 关、staging 开时，输出前被丢弃的非重试错误之后的 EOF 也不重放（DELTA-P2-1）。
 - 两个开关都关：与 0.4.4 逐行等价。
 
-### 3.2 OpenAI Responses 透传（`e3f902390`、`5f5386f4a`、`87f9b9356`）
+### 3.2 OpenAI Responses 透传（`e3f902390`、`5f5386f4a`、`87f9b9356`、`6420bc73c`）
 
 - `stream.strict_terminal`（开）：
   - 首输出截止与原生路径相同（请求预算下按推理档位，否则 `gateway.openai_first_output_timeout_seconds`），同时约束等待响应头；截止前只有开场事件与心跳时换号（原因 `first_output_timeout`，阶段 `semantic_output` 或 `response_headers`）；
@@ -101,11 +101,12 @@
 - 不受开关控制：
   - 第一个输出前的暂存改用原生路径的有界暂存（8 MiB 上限，超过 64 KiB 写入已解除链接的临时文件），首个输出时整体写出；超出上限时换号。以前是不设上限的内存切片。
   - 输出后断流（`response.failed`、缺终态、读错、停滞）按已读到的用量计费一次，与 Responses handler 处理普通路径部分结果的做法相同（#5148）；以前透传在任何流式错误时都丢掉结果、不记用量。第一个输出前取消与换号不带结果，不会重复计费（审查 DELTA-P2-5，`87f9b9356`）。
+  - 流内 `response.failed` 在第一个输出前命中管理员配置的错误透传规则时：如果心跳已提交 200，停掉保活，按规则的类型与消息写 `response.created` 后跟 `response.failed`（同一个 id），是否带重试提示按规则的状态码与 `RetryAdviceEligible`；尚未提交时仍按规则返回状态码与 JSON。以前会在注释行之后接一段裸 JSON（审查 DELTA-P1-2，与 0.4.4 的 R2-P1① 同类，`6420bc73c`）。
 - 关闭开关：不设截止与停滞检测，心跳仍由独立协程写出，注释随开场暂存（0.4.4 行为）。
 
 ### 3.3 计费与客户端离开
 
-- 输出后异常结束（流内错误、缺终态、读错、停滞，含客户端断开后上游再出错）：handler 按已读到的用量计费一次，与原生 Messages 相同；换号错误不带结果，不会重复计费（反向转换器 DELTA-P1-1 `c95aa4e7c`，Responses 透传 DELTA-P2-5 `87f9b9356`）。
+- 输出后异常结束（流内错误、缺终态、读错、停滞，含客户端断开后上游再出错）：handler 按已读到的用量计费一次，与原生 Messages 相同；换号错误不带结果，不会重复计费（反向转换器 DELTA-P1-1 `c95aa4e7c`，停滞出口的用例 DELTA-P2-6 `ab227b00f`；Responses 透传 DELTA-P2-5 `87f9b9356`）。
 - 暂存期请求取消：关闭上游，不换号、不计费、不报账号失败，记 Info 级 `gateway.responses.client_disconnected` 或 `gateway.cc.client_disconnected`（DELTA-P2-3）。
 - 暂存期心跳写失败、请求未取消：与 0.4.4 兼容路径（PM7）一致，不换号，结果标记客户端断开，读完上游，不报账号失败；是否向用户计费交给既有的送达与未送达规则（DELTA-P2-2，`9f8f5ba6c` 的对照用例）。
 - 输出后客户端断开：不关上游，读完并按用量计费。
@@ -118,7 +119,7 @@
 | `stream.strict_terminal` | 反向转换器的明确终止与停滞检测；Responses 透传的首输出截止、停滞检测、读取循环心跳；raw Chat `error` 新判据 | 反向转换器 EOF 合成为成功；透传不设截止，注释随开场暂存；raw Chat 的 `error` 后跟 `[DONE]` 当成功（0.4.4 及以前） |
 | `errors.failed_frame_retry_after` | RA-1 的上游等待回退；重试建议只在写帧时解析 | 合成的 `response.failed` 不带 `error.headers`，正文与 0.4.3 相同 |
 
-不受开关控制（协议正确性、计费、内存与性能）：心跳只提交网关自身的 SSE 头（§2.2）；`lastResortGroups` 过期清理（§2.4）；首个内容之后免锁（§2.5）；能力原因后缀（§2.7）；Responses 透传的有界暂存与输出后断流计费（§3.2）。
+不受开关控制（协议正确性、计费、内存与性能）：心跳只提交网关自身的 SSE 头（§2.2）；`lastResortGroups` 过期清理（§2.4）；首个内容之后免锁（§2.5）；能力原因后缀（§2.7）；Responses 透传的有界暂存、输出后断流计费与心跳后命中错误透传规则时的终止帧（§3.2）。
 
 回退到 0.4.4：无迁移，无新设置字段，直接换回镜像。
 
@@ -152,6 +153,5 @@
 ## 8. 已知差异与延后
 
 - 心跳先提交 200 时，成功尝试的上游过滤头不再写出，客户端拿到的头会因首字快慢而不同（DELTA-P2-4，与 §2.2 同向，记为已知差异）。
-- Responses 透传暂存期心跳已提交 200 后，若命中管理员配置的错误透传规则，service 仍写 JSON 错误，接在 `:` 之后（0.4.4 既有行为，普通路径相同）；建议后续与 handler 的已提交错误改写统一。
 - raw Chat 的顶层 `"error": true` 与非 0 数字目前不算失败。
 - 基线既有的 handler 测试夹具竞态见 proposal“不做”。

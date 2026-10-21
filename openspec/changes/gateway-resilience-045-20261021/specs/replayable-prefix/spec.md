@@ -47,6 +47,10 @@ With `stream.strict_terminal` on, the OpenAI Responses passthrough MUST apply th
 - **WHEN** a relay accepts the request but sends no response headers before the deadline
 - **THEN** the request switches accounts at stage `response_headers`.
 
+#### Scenario: Error passthrough rule after heartbeats
+- **WHEN** heartbeats have committed HTTP 200 and an in-stream `response.failed` before any output matches an admin error passthrough rule
+- **THEN** the client receives `response.created` followed by `response.failed` with the rule's type and message, and no JSON body after the comment lines.
+
 #### Scenario: Break after output is billed
 - **WHEN** a passthrough account streams content and then the connection breaks
 - **THEN** the request is billed once with the usage read so far.

@@ -16,7 +16,7 @@
 |---|---|---|---|---|
 | `fix/retry-advice-upstream-wait-20261021`（RA-1） | `a38ae5995`（源码树与 main `4b0b6d94b` 相同） | `4ef7be248` | 最终耗尽时，把最后一个可重试上游给出的有效 `Retry-After` 当作已知恢复时间 | 可作为 0.4.5 候选的组成部分 |
 | `fix/review-p2-045`（ε） | `4ef7be248` | `10f2edd6b` | 审查遗留的 P2：raw Chat `error` 判据、心跳只提交网关自身的 SSE 头、首写与取消的竞态、`lastResortGroups` 过期清理、首个内容后免锁、重试建议按需解析、能力原因只在主因时追加 | 可以并入 |
-| `feat/w12-gateway-guards-045`（δ） | `4b0b6d94b` | `87f9b9356` | W1.2 其余三条路径：OpenAI Responses 透传的首输出截止、停滞检测、有界暂存与输出后断流的计费；Gateway 入站经 Anthropic 上游的 Responses 与 Chat 推迟开场、明确终止 | 第一部分（反向转换器）的 P1 已修；透传部分补审中 |
+| `feat/w12-gateway-guards-045`（δ） | `4b0b6d94b` | `ab227b00f` | W1.2 其余三条路径：OpenAI Responses 透传的首输出截止、停滞检测、有界暂存、输出后断流的计费、心跳后命中错误透传规则时的终止帧；Gateway 入站经 Anthropic 上游的 Responses 与 Chat 推迟开场、明确终止 | 第一部分（反向转换器）的 P1 已修；透传部分补审中 |
 | `docs/045-prep`（DOCS） | `a1cf8f104` | 本变更 | OpenSpec、现行文档中 ε 与 δ 没覆盖的部分 | — |
 
 行为细节见 [design](design.md)，规格增量见 `specs/`。
