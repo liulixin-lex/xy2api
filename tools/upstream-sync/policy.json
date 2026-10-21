@@ -1326,6 +1326,38 @@
     {
       "path": "backend/internal/handler/openai_chat_completions.go",
       "value": "if result != nil && result.ClientDisconnect {"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_responses.go",
+      "value": "s.armGatewayConvertFirstEvent(ctx, upstreamCtx, account, clientStream)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_responses.go",
+      "value": "return nil, firstEvent.failoverError(c, account, \"response_headers\")"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_responses.go",
+      "value": "s.newGatewayConvertStream(c, resp, account, gatewayConvertResponses, mappedModel, gatewayConvertHooks{"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_responses.go",
+      "value": "gatewayResponsesFailedFrames(stream.ctx(), state, originalModel, source)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
+      "value": "s.armGatewayConvertFirstEvent(ctx, upstreamCtx, account, clientStream)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
+      "value": "return nil, firstEvent.failoverError(c, account, \"response_headers\")"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
+      "value": "s.newGatewayConvertStream(c, resp, account, gatewayConvertChat, mappedModel, gatewayConvertHooks{"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
+      "value": "ccChunks = deferredOpenAIChatChunks(resEvt, ccState, hold)"
     }
   ],
   "forbidden_module_paths": [
@@ -1753,6 +1785,26 @@
       "id": "xy-resilience-v2-streams",
       "path": "backend/internal/service/resilience_compat_stream_prelude_test.go",
       "literal": "func TestCompatPreludeHeartbeatDisconnectDrainsUsageAfterContent"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/gateway_convert_stream_test.go",
+      "literal": "func TestGatewayConvertRetryableErrorBeforeContentFailsOver"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/gateway_convert_stream_test.go",
+      "literal": "func TestGatewayConvertBreakAfterContentEndsWithProtocolTerminal"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/gateway_convert_stream_test.go",
+      "literal": "func TestGatewayConvertHeartbeatWriteFailureIsClientGone"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/gateway_convert_stream_test.go",
+      "literal": "func TestGatewayConvertSwitchesOffKeepBaseline"
     }
   ]
 }
