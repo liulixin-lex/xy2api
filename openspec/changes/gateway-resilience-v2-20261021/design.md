@@ -136,14 +136,19 @@
 
 ### 3.4 兼容转换推迟开场（`stream.prelude_staging`）
 
-- 适用：Chat → Responses 上游（`openai_gateway_chat_completions.go` 的 `handleChatStreamingResponse`）、Messages → Responses 上游（`openai_gateway_messages.go` 的 `handleAnthropicStreamingResponse`）。
-- 开场事件是网关合成的，所以在转换器状态里推迟生成 role chunk 或 `message_start`，等首个 `Content` 或终态到来时一并按序写出。不做字节暂存。
-- 暂存期内上游的可重试 `response.failed`、`error`、EOF、读错，按 §3.2 转为换号；客户端只看到最终成功那次尝试的一个开场。
-- 首事件守卫（`resilience_compat_stream.go` 的 `armOpenAICompatFirstEvent`）延长到首个内容；中转伪保活帧仍按“存活”处理（旧 design §7.8）。
-- `clientOutputStarted` 只在真正写出时置位。
-- **直连请求保持不提交**：暂存期内直连请求拿不到任何字节，与原生 Responses 自 0.4.0 以来一致；经 CDN 的请求照旧由首包前保活提交并发心跳。下游中转的读超时短于上游推理时间时可能超时，见 §10。
-- 64 KiB 以上请求的静默拒绝缓冲（`openai_silent_refusal.go`）与推迟开场的叠加规则【待契约：CHANGES_B】。
-- 兼容路径 `first_token_ms` 的取点不变（上游第一行），避免口径跳变。
+实现提交 `1a97eebd1`（β）。
+
+- 适用：Chat 与 Messages 入站、Responses 上游的两条转换（`openai_gateway_chat_completions.go` 的 `handleChatStreamingResponse`、`openai_gateway_messages.go` 的 `handleAnthropicStreamingResponse`），由 `PreludeStagingOn()` 控制。
+- 开场事件是网关合成的，所以在转换器状态里推迟生成 role chunk 或 `message_start`，等首个 `Content` 或终态到来时一并按序写出。暂存期只保留 ID、model 与 service tier，不做字节缓冲；空的 reasoning added 在真正的推理 delta 或 signature 到来时再重建块结构。工具调用的标识本身就是内容，到达即带着开场释放。
+- 暂存期内上游的可重试 `response.failed`、`error`、EOF、读错，在写出任何字节之前返回 `UpstreamFailoverError` 进入换号（§3.2），失败尝试的用量不混入计费；客户端只看到最终成功那次尝试的一个开场。迟到的 created 不改变已经输出的 ID。
+- 取消优先：暂存期内客户端取消就关闭上游；第一次实际写出之后回到原有的 drain 机制。
+- 首事件守卫（`resilience_compat_stream.go` 的 `armOpenAICompatFirstEvent`）延长到首个内容或终态；中转伪保活帧仍按“存活”处理（旧 design §7.8）。
+- `clientOutputStarted` 按实际写出的字节置位：短写或部分写出之后不再重放。
+- **直连请求保持不提交**：暂存期内 service 不自己发心跳，直连请求拿不到任何字节，与原生 Responses 自 0.4.0 以来一致；经 CDN 的请求照旧由 handler 的首包前保活提交并发心跳。下游中转的读超时短于上游推理时间时可能超时，见 §11。
+- 开关关闭时保留旧的“首行”守卫与流内心跳。
+- 与 64 KiB 以上请求的静默拒绝缓冲（`openai_silent_refusal.go`）叠加：先推迟生成开场，释放后再交给旧的探测器，原有的 pendingSSE 缓冲仍由它维护。只有 usage 的合法空回答正常结束；`response.incomplete` 不会因结果为空误触发静默拒绝的重放；原有“无 usage 的静默拒绝”规则不变。
+- 兼容路径 `first_token_ms` 的取点不变（上游第一条数据），避免口径跳变。
+- 上游文件钩子（`policy.json` 的 required_literals，α 登记）：`openai_gateway_chat_completions.go` 的 `deferredOpenAIChatChunks`、`canReplayPrelude`；`openai_gateway_messages.go` 的 `deferredOpenAIAnthropicEvents`、`canReplayPrelude`。
 
 ## 4. W1.2-lite raw Chat 明确终止（`stream.strict_terminal`）
 
