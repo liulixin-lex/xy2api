@@ -54,6 +54,7 @@ func resilienceEventFields(ctx context.Context, preOutput bool) []any {
 // Metric names.
 const (
 	MetricKeepaliveCommitted = "keepalive_committed"
+	MetricPreCreatedDelta    = "pre_created_delta"
 	MetricFirstOutputTimeout = "first_output_timeout"
 	MetricBudgetExhausted    = "budget_exhausted"
 	MetricLastResort         = "last_resort"
