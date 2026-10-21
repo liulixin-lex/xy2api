@@ -48,6 +48,20 @@
           "}",
           "}()"
         ]
+      },
+      {
+        "block": "channel-monitor-probe-lane",
+        "note": "Channel monitor probe lane: a verified probe (monitorprobe.IsProbe) has no sticky session, and before a wait is planned it takes a free slot by real concurrency among the candidates (an account whose load factor is below its concurrency counts as full by load rate while it still has free slots); a probe skips the routed wait and goes on to the whole group. A group that is really full still waits. Requests without the probe mark are scheduled unchanged.",
+        "removed": [
+          "for _, item := range routingAvailable {"
+        ],
+        "added": [
+          "sessionHash = monitorProbeSessionHash(ctx, sessionHash)",
+          "for _, item := range monitorProbeRoutedWait(ctx, routingAvailable) {",
+          "if probeResult, ok, probeErr := s.monitorProbeFreeSlot(ctx, candidates, groupID, preferOAuth); probeErr != nil || ok {",
+          "return probeResult, probeErr",
+          "}"
+        ]
       }
     ],
     "backend/internal/service/openai_account_scheduler.go": [
@@ -271,6 +285,14 @@
           "return false, reason",
           "return selection, decision, capabilitySelectionError(ctx, err)"
         ]
+      },
+      {
+        "block": "channel-monitor-probe-lane",
+        "note": "Channel monitor probe lane: a verified probe (monitorprobe.IsProbe) has no sticky session, and before a wait is planned it takes a free slot by real concurrency among the candidates (an account whose load factor is below its concurrency counts as full by load rate while it still has free slots); a probe skips the routed wait and goes on to the whole group. A group that is really full still waits. Requests without the probe mark are scheduled unchanged.",
+        "removed": [],
+        "added": [
+          "sessionHash = monitorProbeSessionHash(ctx, sessionHash)"
+        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [
@@ -462,6 +484,22 @@
           "filterStats.exclude(reason)",
           "defer func() { selectionErr = capabilitySelectionError(ctx, selectionErr) }()",
           "return nil, noAvailableOpenAISelectionError(requestedModel, false, filterStats.summary(\"\"), filterStats.capabilityOnly())"
+        ]
+      },
+      {
+        "block": "channel-monitor-probe-lane",
+        "note": "Channel monitor probe lane: a verified probe (monitorprobe.IsProbe) has no sticky session, and before a wait is planned it takes a free slot by real concurrency among the candidates (an account whose load factor is below its concurrency counts as full by load rate while it still has free slots); a probe skips the routed wait and goes on to the whole group. A group that is really full still waits. Requests without the probe mark are scheduled unchanged.",
+        "removed": [],
+        "added": [
+          "if monitorProbeRequest(c) {",
+          "return \"\"",
+          "}",
+          "if monitorProbeRequest(c) {",
+          "return \"\"",
+          "}",
+          "if selection, selectErr := openAIMonitorProbeFreeSlot(ctx, tryAcquireFromLoadMap); selectErr != nil || selection != nil {",
+          "return selection, selectErr",
+          "}"
         ]
       }
     ],
