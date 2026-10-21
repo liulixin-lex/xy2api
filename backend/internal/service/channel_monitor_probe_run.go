@@ -8,8 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/monitorprobe"
@@ -91,10 +94,13 @@ func runProbe(ctx context.Context, provider, endpoint, apiKey, model string, opt
 	ctx, cancel := context.WithTimeout(ctx, limits.Budget)
 	defer cancel()
 
-	// 每轮最多 monitorProbeMaxAttempts 次请求：参数被拒时按修正重发（修正记在进程内，下一轮直接用）。
+	// 每轮最多 monitorProbeMaxAttempts 次请求：参数被拒时按修正重发（修正记在进程内，下一轮直接用），
+	// 快速失败的连接级错误立即重试；两者共用这个上限。
 	key := plan.fixKey()
 	var last probeAttempt
+	attempts := 0
 	for attempt := 1; ; attempt++ {
+		attempts = attempt
 		req, err := plan.build(monitorProbeShapeFixes.get(key))
 		if err != nil {
 			return probeFinish(res, start, MonitorStatusError, err.Error())
@@ -107,11 +113,14 @@ func runProbe(ctx context.Context, provider, endpoint, apiKey, model string, opt
 		if corrected {
 			monitorProbeShapeFixes.learn(key, fix)
 		}
-		if !corrected || attempt >= monitorProbeMaxAttempts {
+		if attempt >= monitorProbeMaxAttempts {
+			break
+		}
+		if !corrected && !probeShouldRetry(&last, probeRemaining(ctx), limits) {
 			break
 		}
 	}
-	return probeVerdict(res, start, plan, &last, errors.Is(ctx.Err(), context.DeadlineExceeded), limits)
+	return probeVerdict(res, start, plan, &last, attempts, errors.Is(ctx.Err(), context.DeadlineExceeded), limits)
 }
 
 // sendProbeAttempt 发出一次请求并读回答。
@@ -208,40 +217,46 @@ func probeFirstByte(br *bufio.Reader) byte {
 	return 0
 }
 
-// probeVerdict 把最后一次请求的结果换算成状态与 message。
-func probeVerdict(res *CheckResult, start time.Time, plan *probePlan, a *probeAttempt, timedOut bool, limits probeLimits) *CheckResult {
-	latency := time.Since(start)
+// probeVerdict 把最后一次请求的结果换算成状态与 message；一轮发了两次请求时在 message 前注明。
+func probeVerdict(res *CheckResult, start time.Time, plan *probePlan, a *probeAttempt, attempts int, timedOut bool, limits probeLimits) *CheckResult {
+	status, message := probeOutcome(time.Since(start), plan, a, timedOut, limits)
+	if attempts > 1 && status != MonitorStatusOperational && status != MonitorStatusDegraded {
+		message = fmt.Sprintf("attempt %d/%d: %s", attempts, monitorProbeMaxAttempts, message)
+	}
+	return probeFinish(res, start, status, message)
+}
+
+func probeOutcome(latency time.Duration, plan *probePlan, a *probeAttempt, timedOut bool, limits probeLimits) (string, string) {
 	r := a.reading
 	switch {
 	case a.answered():
 		if latency > limits.DegradedAfter {
-			return probeFinish(res, start, MonitorStatusDegraded, fmt.Sprintf("slow response: %dms", latency/time.Millisecond))
+			return MonitorStatusDegraded, fmt.Sprintf("slow response: %dms", latency/time.Millisecond)
 		}
-		return probeFinish(res, start, MonitorStatusOperational, "")
+		return MonitorStatusOperational, ""
 	case a.err != nil && timedOut:
-		return probeFinish(res, start, MonitorStatusError, fmt.Sprintf("timeout after %s: no response headers", limits.Budget))
+		return MonitorStatusError, fmt.Sprintf("timeout after %s: no response headers", limits.Budget)
 	case a.err != nil:
-		return probeFinish(res, start, MonitorStatusError, a.err.Error())
+		return MonitorStatusError, a.err.Error()
 	case a.status < 200 || a.status >= 300:
-		return probeFinish(res, start, MonitorStatusError,
-			fmt.Sprintf("upstream HTTP %d: %s", a.status, truncateForErrorBody(a.errBody)))
+		return MonitorStatusError, fmt.Sprintf("upstream HTTP %d: %s", a.status, truncateForErrorBody(a.errBody))
 	case r.StreamErr != "":
-		return probeFinish(res, start, MonitorStatusError, "stream error: "+r.StreamErr)
+		return MonitorStatusError, "stream error: " + r.StreamErr
 	case r.ReadErr != nil && timedOut:
-		return probeFinish(res, start, MonitorStatusError, fmt.Sprintf("timeout after %s: %s", limits.Budget, probeProgress(r)))
+		return MonitorStatusError, fmt.Sprintf("timeout after %s: %s", limits.Budget, probeProgress(r))
 	case r.ReadErr != nil:
-		return probeFinish(res, start, MonitorStatusError, fmt.Sprintf("read response: %v (%s)", r.ReadErr, probeProgress(r)))
+		return MonitorStatusError, fmt.Sprintf("read response: %v (%s)", r.ReadErr, probeProgress(r))
 	case plan.expected() == "":
-		return probeFinish(res, start, MonitorStatusFailed, "replace-mode: upstream returned 2xx with empty text"+probeStopNote(r, ""))
+		return MonitorStatusFailed, "replace-mode: upstream returned 2xx with empty text" + probeStopNote(r, "")
 	case r.Text == "":
 		note := ""
 		if r.Reasoning {
 			note = "reasoning only"
 		}
-		return probeFinish(res, start, MonitorStatusFailed, "empty reply"+probeStopNote(r, note))
+		return MonitorStatusFailed, "empty reply" + probeStopNote(r, note)
 	default:
-		return probeFinish(res, start, MonitorStatusFailed,
-			fmt.Sprintf("challenge mismatch (expected %s, got %q)", plan.expected(), probeSnippet(r.Text))+probeStopNote(r, ""))
+		return MonitorStatusFailed,
+			fmt.Sprintf("challenge mismatch (expected %s, got %q)", plan.expected(), probeSnippet(r.Text)) + probeStopNote(r, "")
 	}
 }
 
@@ -291,4 +306,65 @@ func probeSnippet(text string) string {
 		return text
 	}
 	return string(runes[:maxRunes]) + "..."
+}
+
+// probeRemaining 本轮预算还剩多少。
+func probeRemaining(ctx context.Context) time.Duration {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return time.Duration(1<<63 - 1)
+	}
+	return time.Until(deadline)
+}
+
+// probeShouldRetry 只对快速失败的连接级错误立即重试一次：连接被重置、EOF、CDN 的 5xx 错误页
+// （HTML，或 Cloudflare 的 JSON 错误页，正文可能写着 overloaded）、网关秒回的 502/503。
+// 超时、答错、流内错误、其他状态码不重试；剩余预算不足 RetryMinRemaining 不重试。
+func probeShouldRetry(a *probeAttempt, remaining time.Duration, limits probeLimits) bool {
+	if remaining < limits.RetryMinRemaining {
+		return false
+	}
+	switch {
+	case a.err != nil:
+		return probeFastConnError(a.err)
+	case a.status >= 500 && a.status <= 599:
+		if probeEdgeErrorPage(a.errBody) {
+			return true
+		}
+		return (a.status == http.StatusBadGateway || a.status == http.StatusServiceUnavailable) && a.elapsed <= limits.FastFailWindow
+	case a.status >= 200 && a.status < 300:
+		return a.reading.StreamErr == "" && probeFastConnError(a.reading.ReadErr)
+	}
+	return false
+}
+
+// probeFastConnError 连接被重置、EOF 一类的快速失败（不含超时）。
+func probeFastConnError(err error) bool {
+	if err == nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNABORTED) || errors.Is(err, syscall.EPIPE) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, s := range []string{"connection reset", "broken pipe", "unexpected eof", "server sent goaway", "stream error", "forcibly closed"} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return msg == "eof" || strings.HasSuffix(msg, ": eof")
+}
+
+// probeCloudflareJSONRegex Cloudflare 的 JSON 错误页（cloudflare_error、error_category: origin）。
+var probeCloudflareJSONRegex = regexp.MustCompile(`"cloudflare_error"\s*:\s*true|"error_category"\s*:\s*"origin"`)
+
+// probeEdgeErrorPage CDN 或代理写的错误页，而不是上游 API 的错误。
+func probeEdgeErrorPage(body string) bool {
+	lower := strings.ToLower(strings.TrimSpace(body))
+	return strings.HasPrefix(lower, "<") || probeCloudflareJSONRegex.MatchString(lower)
 }
