@@ -41,6 +41,8 @@ func newSSRFSafeHTTPClient(timeout time.Duration) *http.Client {
 // CheckOptions 承载一次检测的自定义入参。
 // 所有字段都是可选（零值即等价于"用默认行为"）。
 type CheckOptions struct {
+	// MonitorID 用于给探测请求签名（monitorprobe.HeaderName）；0 表示不签名。
+	MonitorID int64
 	// APIMode 对 OpenAI 与 Grok 生效；空串等同 chat_completions。
 	APIMode string
 	// ExtraHeaders 用户自定义 HTTP 头（merge 到 adapter 默认 headers，用户优先）。
@@ -157,11 +159,14 @@ func pingEndpointOrigin(ctx context.Context, endpoint string) *int {
 //
 // 加新 provider 只需要在 providerAdapters 里增加一个条目，无需触碰 callProvider / validateProvider。
 type providerAdapter struct {
-	buildPath    func(model string) string
-	buildBody    func(model, prompt string) ([]byte, error)
-	buildHeaders func(apiKey string) map[string]string
-	textPath     string // gjson 提取响应文本的 path
-	extractText  func([]byte) string
+	protocol  probeProtocol
+	buildPath func(model string) string
+	// buildStreamPath 流式请求路径；nil 表示与 buildPath 相同。
+	buildStreamPath func(model string) string
+	buildBody       func(model, prompt string) ([]byte, error)
+	buildHeaders    func(apiKey string) map[string]string
+	textPath        string // gjson 提取响应文本的 path
+	extractText     func([]byte) string
 }
 
 // providerAdapters 全部已支持的 provider。键值即 MonitorProvider* 字符串。
@@ -177,6 +182,7 @@ var providerAdapters = map[string]providerAdapter{
 	MonitorProviderDeepseek: providerDeepseekChatAdapter,
 	MonitorProviderMiniMax:  providerMiniMaxChatAdapter,
 	MonitorProviderAnthropic: {
+		protocol:  probeProtocolAnthropic,
 		buildPath: func(string) string { return providerAnthropicPath },
 		buildBody: func(model, prompt string) ([]byte, error) {
 			return json.Marshal(map[string]any{
@@ -195,7 +201,9 @@ var providerAdapters = map[string]providerAdapter{
 	},
 	MonitorProviderGemini: {
 		// Gemini 把 model 名写在 URL path 上：/v1beta/models/{model}:generateContent
-		buildPath: func(model string) string { return fmt.Sprintf(providerGeminiPathTemplate, model) },
+		protocol:        probeProtocolGemini,
+		buildPath:       func(model string) string { return fmt.Sprintf(providerGeminiPathTemplate, model) },
+		buildStreamPath: func(model string) string { return fmt.Sprintf(providerGeminiStreamPathTemplate, model) },
 		buildBody: func(_, prompt string) ([]byte, error) {
 			return json.Marshal(map[string]any{
 				"contents": []map[string]any{
@@ -232,6 +240,7 @@ var providerMiniMaxChatAdapter = newOpenAICompatibleChatAdapter(providerOpenAIPa
 
 func newOpenAICompatibleChatAdapter(path string) providerAdapter {
 	return providerAdapter{
+		protocol:  probeProtocolChat,
 		buildPath: func(string) string { return path },
 		buildBody: func(model, prompt string) ([]byte, error) {
 			return json.Marshal(map[string]any{
@@ -250,6 +259,7 @@ func newOpenAICompatibleChatAdapter(path string) providerAdapter {
 
 //nolint:gochecknoglobals // 适配器表是只读静态数据，初始化后不变更。
 var providerOpenAIResponsesAdapter = providerAdapter{
+	protocol:  probeProtocolResponses,
 	buildPath: func(string) string { return providerOpenAIResponsesPath },
 	buildBody: func(model, prompt string) ([]byte, error) {
 		return json.Marshal(map[string]any{
@@ -455,8 +465,8 @@ func buildRequestBody(adapter providerAdapter, provider, apiMode, model, prompt 
 var bodyMergeKeyDenyList = map[string]map[string]bool{
 	MonitorProviderOpenAI + ":" + MonitorAPIModeChatCompletions: {"model": true, "messages": true, "stream": true},
 	MonitorProviderOpenAI + ":" + MonitorAPIModeResponses:       {"model": true, "instructions": true, "input": true, "stream": true},
-	MonitorProviderAnthropic:                                    {"model": true, "messages": true},
-	MonitorProviderGemini:                                       {"contents": true},
+	MonitorProviderAnthropic:                                    {"model": true, "messages": true, "stream": true},
+	MonitorProviderGemini:                                       {"contents": true, "stream": true},
 	// 国产 3 家与 OpenAI Chat Completions 同构。
 	MonitorProviderKimi:     {"model": true, "messages": true, "stream": true},
 	MonitorProviderZhipu:    {"model": true, "messages": true, "stream": true},

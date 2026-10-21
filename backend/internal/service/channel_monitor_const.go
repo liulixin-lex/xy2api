@@ -61,6 +61,8 @@ const (
 	providerAnthropicPath = "/v1/messages"
 	// providerGeminiPathTemplate Gemini generateContent 路径模板（含 model 占位）。
 	providerGeminiPathTemplate = "/v1beta/models/%s:generateContent"
+	// providerGeminiStreamPathTemplate Gemini 流式路径模板（另加 ?alt=sse）。
+	providerGeminiStreamPathTemplate = "/v1beta/models/%s:streamGenerateContent"
 
 	// MonitorProviderOpenAI 等 provider 字符串常量（也是 ent enum 的实际值）。
 	// 后 4 个 provider（antigravity/kimi/zhipu/deepseek）为配额模式引入：
@@ -129,8 +131,15 @@ const (
 
 	// monitorAnthropicAPIVersion Anthropic Messages API 版本头。
 	monitorAnthropicAPIVersion = "2023-06-01"
-	// monitorChallengeMaxTokens 单次 challenge 请求的 max_tokens（足够回答个位数算术）。
-	monitorChallengeMaxTokens = 50
+	// monitorChallengeMaxTokens 非推理模型的输出上限（OpenAI Responses 要求 max_output_tokens ≥ 16）。
+	monitorChallengeMaxTokens = 16
+	// monitorChallengeReasoningMaxTokens 推理模型的输出上限：推理 token 计在上限里，
+	// 太小会“推理吃光预算、正文为空”；读到答案即停，给大不会变慢。
+	monitorChallengeReasoningMaxTokens = 1024
+	// monitorProbeReasoningEffort 已知支持的模型族注入的推理强度（各家最普遍接受的最低档）。
+	monitorProbeReasoningEffort = "low"
+	// monitorProbeShapeFixMaxEntries 进程内参数修正表的条目上限。
+	monitorProbeShapeFixMaxEntries = 1024
 
 	// monitorRunOneBuffer runOne 的总超时缓冲（除请求超时与 ping 超时外的额外裕量）。
 	monitorRunOneBuffer = 10 * time.Second
