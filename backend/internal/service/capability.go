@@ -43,7 +43,7 @@ func normalizeCapabilityProtocol(protocol string) string {
 
 func capabilityAccountEligible(account *Account) bool {
 	return account != nil && (account.Platform == PlatformOpenAI || account.Platform == PlatformGrok) &&
-		!(account.Platform == PlatformOpenAI && account.IsOpenAIOAuthLike())
+		(account.Platform != PlatformOpenAI || !account.IsOpenAIOAuthLike())
 }
 
 // capabilityFingerprint binds observations to the upstream identity that

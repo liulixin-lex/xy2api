@@ -83,7 +83,7 @@ func TestCapabilityLearningLifecycleAndProtocolScope(t *testing.T) {
 	require.Equal(t, "responses", records[0].Protocol)
 	require.Equal(t, "stream_only", records[0].Mode)
 	require.WithinDuration(t, start.Add(6*time.Hour), records[0].ExpiresAt, time.Second)
-	require.True(t, learned.Extra["unrelated_setting"].(bool))
+	require.Equal(t, true, learned.Extra["unrelated_setting"])
 	ctx := resilience.WithCapabilityRequest(context.Background(), "responses", false)
 	require.Equal(t, resilience.ReasonCapabilityStreamOnly, capabilityEligibilityReason(ctx, learned, "gpt-test", start))
 	require.Empty(t, capabilityEligibilityReason(resilience.WithCapabilityRequest(context.Background(), "responses", true), learned, "gpt-test", start))
@@ -98,7 +98,7 @@ func TestCapabilityLearningLifecycleAndProtocolScope(t *testing.T) {
 	require.NoError(t, admin.ClearAccountCapabilityLearning(context.Background(), 1))
 	cleared, _ := repo.GetByID(context.Background(), 1)
 	require.Empty(t, cleared.CapabilityLearned(start))
-	require.True(t, cleared.Extra["unrelated_setting"].(bool))
+	require.Equal(t, true, cleared.Extra["unrelated_setting"])
 	require.ErrorIs(t, admin.ClearAccountCapabilityLearning(context.Background(), 999), ErrAccountNotFound)
 }
 
@@ -167,7 +167,9 @@ func TestCapabilityManagedFieldsPreserveLatestDatabaseState(t *testing.T) {
 	require.Equal(t, current[capabilityLearnedResponsesKey], merged[capabilityLearnedResponsesKey])
 	require.NotContains(t, merged, capabilityLearnedChatKey)
 	require.Equal(t, true, merged["unrelated_setting"])
-	require.Equal(t, "stale", stale[capabilityLearnedResponsesKey].(map[string]any)["fingerprint"])
+	staleRecord, ok := stale[capabilityLearnedResponsesKey].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "stale", staleRecord["fingerprint"])
 	imported := MergeCapabilityLearningExtra(stale, nil)
 	require.NotContains(t, imported, capabilityLearnedResponsesKey)
 	require.NotContains(t, imported, capabilityLearnedChatKey)

@@ -108,6 +108,7 @@ func TestC0LegacySettingsKeepNewSwitchDefaults(t *testing.T) {
 }
 
 func TestC0StoredDocumentDowngradesTo043(t *testing.T) {
+	require.Equal(t, legacy043SettingKey, SettingKey)
 	old := legacy043Defaults()
 	old.Failure.TransientCooldownSeconds = 57
 	old.Failure.BalanceKeywordsExtra = []string{"custom balance signal"}
