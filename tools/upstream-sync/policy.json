@@ -1743,6 +1743,11 @@
       "id": "xy-resilience-v2-streams",
       "path": "backend/internal/service/openai_compat_model_test.go",
       "literal": "func TestForwardAsAnthropic_MissingTerminalBeforeOutputReturnsFailoverAndOps"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_compat_stream_prelude_test.go",
+      "literal": "func TestCompatPreludeHeartbeatDisconnectDrainsUsageAfterContent"
     }
   ]
 }
