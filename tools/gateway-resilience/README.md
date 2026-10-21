@@ -205,6 +205,21 @@ checks remain in effect.
 
 ## Supplemental 0.4.5 checks
 
+`staging/supplement_045.py` covers twelve Gateway-to-Anthropic cases: both
+Responses and Chat exercise pre-output retry, post-output error, early EOF,
+stall, first-content timeout and non-retryable failure. It is plan-only by
+default; execution requires the full candidate SHA, its `BUILD.json`, the
+expected image ID and a new evidence directory. Run after the 71-case suite,
+using the same main-stack lock. It verifies image and binary identity and
+restores the two fixture accounts and resilience settings afterwards.
+
+Each case uses unique input/message text. These Gateway handlers derive
+their fallback session from that text; changing `session_id` or
+`prompt_cache_key` alone does not isolate them. Reusing a body allows a prior
+case's sticky binding or session failure avoidance to skip fault account A.
+Assertions require A's actual upstream attempt as well as terminal and usage
+evidence, so a direct success on B cannot count as a passed fault case.
+
 `staging/scenarios_045.py` is plan-only by default. With `--execute`, a new
 evidence directory and the expected running image ID, it runs eight cases
 serially on the main stack. Run it first against the formal 0.4.4 image and
