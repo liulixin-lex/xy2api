@@ -1,6 +1,6 @@
 # 网关韧性（Gateway Resilience）
 
-xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失败：上游抖动、单号分组整体不可用、CDN 空闲超时切断、客户端断开后的误计费，以及缺少重试指引的 5xx。0.4.2 修正了两份生产就绪审查（2026-10-19）核实的问题，改动见 tasks“0.4.2”小节。0.4.4 是第二期：上游开场后、正文前的失败可以换号，分类只把真正的容量信号算作降载，失败帧按情况带重试时间，自动识别只接受流式的账号（方案 `openspec/changes/gateway-resilience-v2-20261021/`）。本文已按 0.4.4 的行为更新。
+xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失败：上游抖动、单号分组整体不可用、CDN 空闲超时切断、客户端断开后的误计费，以及缺少重试指引的 5xx。0.4.2 修正了两份生产就绪审查（2026-10-19）核实的问题，改动见 tasks“0.4.2”小节。0.4.4 是第二期：上游开场后、正文前的失败可以换号，分类只把真正的容量信号算作降载，失败帧按情况带重试时间，自动识别只接受流式的账号（方案 `openspec/changes/gateway-resilience-v2-20261021/`）。0.4.5 修复 0.4.4 的已知缺陷 RA-1，补齐 W1.2 的其余三条路径（OpenAI Responses 透传，以及 Gateway 入站经 Anthropic 上游的 Responses 与 Chat），并修复审查遗留的 P2（方案 `openspec/changes/gateway-resilience-045-20261021/`）。本文已按 0.4.5 的行为更新。
 
 - 方案与决策记录：`openspec/changes/gateway-resilience-20261015/`（proposal、design、tasks、runbook、staging-validation）；0.4.4 的改动见 `openspec/changes/gateway-resilience-v2-20261021/`。
 - 全部能力由一份 JSON 设置控制，缺省全部开启，修改无需重启。关闭总开关后韧性能力全部停用、调度与错误处理按 0.3.0 逻辑运行；但有几项缺陷修复不受开关控制，见 §6。0.4.4 新增的开关单独关闭时回到 0.4.3 的对应行为，见 §4.2 与 §6。
@@ -85,6 +85,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 首包前心跳已提交后失败 | 不再改写状态码，改为协议终止帧：Responses 为 `response.failed`（`rate_limit_exceeded` 或 `server_error`），客户端此前只收到心跳时前面先补同一响应的 `response.created`（openai-python 等严格 SDK 要求流以它开始）；Chat 为 `data: {"error":{…,"status":N}}` 后跟 `[DONE]`；Anthropic 为 `event: error` |
 | 合成 `response.failed` 的重试时间（0.4.4） | `errors.failed_frame_retry_after` 开启时写在 `error.headers.retry-after`（Codex 从这里读）：本请求还有健康账号时为 1 秒；组内没有健康账号、能算出最早恢复时间时为 2–10 秒，正文 “try again in Ns” 的 N 相同；恢复时间未知时不带（0.4.3 缺省提示 30 秒）；回合封顶、用户自身余额不足、内容拒绝不带，并去掉正文里的重试句（上游账号余额不足会换号，不算）；配置拒绝、鉴权类错误与其他不可重试的原因（模型不存在、`billing_service_error` 等，只有 429 与 5xx 才可能带）不给重试建议。重试建议只在实际写出 `response.failed` 时计算，以普通 JSON 结束的无号与耗尽出口不再计算（0.4.5）。HTTP 头尚未提交时同步改写 `Retry-After`。关闭时不带 `error.headers`，正文同 0.4.3（用户余额不足与内容拒绝仍不带重试时间，这两项只受 `errors.enabled` 控制） |
 | 排队等待时已发出 ping，之后遇到计费等错误（0.4.4） | 按入站协议写终止帧：Responses 为 `response.created` 后跟 `response.failed`，Chat 为 `error` 后跟 `[DONE]`；不再写裸 JSON（不受开关控制） |
+| 上游给出的等待时间（0.4.5） | `errors.failed_frame_retry_after` 开启、已提交的 Responses 流最终耗尽时：按组内快照算不出恢复时间（没有快照、快照过期，或只剩本请求已失败的账号），而最后一个可重试上游（原始状态 429 或 5xx）给出了有效的 `Retry-After`（正整数秒，或未来的 HTTP 日期），就把它算作已知恢复时间，向上取整并夹到 2–10 秒，写进 `error.headers.retry-after` 与正文 “try again in Ns”。被映射为 502 的 400、404，缺失、非法、非正或已过期的值，以及网关缺省的 30 秒，都不采用；还有健康账号时的 1 秒、按快照算出的恢复时间与终态抑制优先。修复 0.4.4 的已知缺陷 RA-1 |
 | 上游开场后、正文前失败（0.4.4） | 可重试的失败（过载、服务忙、断流、读错）换号，客户端只看到成功那次尝试的开场：Responses 只有一个 `response.created`（新账号的 id），Chat 只有一个 role 分块，Messages 只有一个 `message_start`。兼容转换推迟开场期间按流内心跳间隔写注释行 `:`（与原生 Responses 一致），心跳不算输出、不妨碍换号；心跳已提交 200 后再耗尽时，以协议终止帧结束。`response.incomplete`、内容拒绝、只有 usage 的空回答照常返回，不重放 |
 | 非流式请求被上游以“只接受流式”拒绝（0.4.4） | 例如 “This group only accepts streaming requests”：本请求换号，不计账号失败、不冷却；有效期 `capability.learn_ttl_seconds` 内，会因此失败的非流式请求暂不选该账号（范围见 §7）。`failure.decision_v2` 关闭时只学习，本请求照旧返回 400；本请求的失败尝试全部是这个理由时返回 503（不是 400），应答与上面“无可用账号”中仅流式一种相同；混有其他失败原因时按普通的耗尽处理。无号的负缓存按协议与流模式分开，能力阻断不计入快速失败，流式请求不受影响 |
 | 心跳帧 | Responses / Chat 为 SSE 注释行 `:`；Anthropic 为 `event: ping`。0.4.4 起排队等待并发槽位或用户消息队列时的心跳也按入站协议选择（以前 Responses 与 Chat 也会收到 Claude 风格的 ping） |
@@ -273,7 +274,7 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 - 兼容转换推迟开场期间的注释心跳会提交 200，此后的失败只能以带内终止帧告知客户端（与原生 Responses 相同）。
 - 仅流式学习只认表中确定的结构码与文案（如 “only accepts streaming requests”、“stream must be true”）；其他措辞的同类拒绝仍按客户端错误返回。只覆盖 OpenAI 入站的 Responses 与 Chat 普通文本请求，以及 OpenAI、Grok 平台的账号；compact、图片、WebSocket、Messages 经 OpenAI 转换，以及 Gemini、CN、Bedrock 不学习、不过滤。只在上游协议与入站相同、上游流模式跟随客户端的路径上过滤；跨协议转换（如 Chat 转 Responses 上游）、按模型路由的路径与路由无法确定的 Grok OAuth Chat 不过滤。错误的 `param` 指向 `stream` 以外的参数，或请求体里本来就有这句话（例如写在提示词里）时不学习；`"param": null` 或空值不影响学习。学习结果存在账号 `extra`（`capability_learned_responses`、`capability_learned_chat`），绑定账号的上游配置：改了上游配置的账号不受旧记录影响；复制、创建、导入与导出账号都不带学习结果。
 - 0.4.4 容量判据收紧后，“Codex is at capacity”与非 503 上的 “servers are currently overloaded” 不再算容量降载，会让账号进入软冷却并计入会话失败；Grok 重试耗尽的原始 429 不再转成无号 503，客户端看到 429。
-- 0.4.4 的已知缺陷（0.4.5 修复）：耗尽由上游带 `Retry-After` 的容量失败造成、且组里没有已受罚的账号时，合成的 `response.failed` 不带 `error.headers.retry-after`，正文也不再附 “try again in Ns”（0.4.3 的正文有）。Codex 的重试与 0.4.3 相同。需要 0.4.3 的正文时，把 `errors.failed_frame_retry_after` 设为 false。
+- 0.4.4 的已知缺陷 RA-1（0.4.5 已修复，见 §3“上游给出的等待时间”）：耗尽由上游带 `Retry-After` 的容量失败造成、且组里没有已受罚的账号时，0.4.4 合成的 `response.failed` 不带 `error.headers.retry-after`，正文也不再附 “try again in Ns”（0.4.3 的正文有）。仍在运行 0.4.4 时，需要 0.4.3 的正文可以把 `errors.failed_frame_retry_after` 设为 false。
 - 原生 Responses 路径上，上游在 `response.created` 之前发出的非空 delta 照常先转发（网关不重排上游的真实内容），这类上游下严格 SDK 仍可能报 “Expected to have received response.created”。
 - 仅流式学习记录绑定账号凭据：OAuth 类账号刷新令牌后会重新学习一次。学习粒度是“账号 + 协议”，不分模型：中转只对某个模型要求流式时，该账号所有模型的非流式请求都会被跳过，可以在账号列表手动清除。
 - 断开阶段粒度为上传请求（0.4.3）、选号、等待响应头、首输出前、输出中五段。Chat Completions 与 Messages 经 OpenAI 兼容转换的路径，上游响应头到达后阶段不推进到“首输出前”：只写出开场分块（`message_start`、只带 role 的 chat 分块）就断开时，未送达记录与计数的阶段记为“等待响应头”。这只影响按阶段的统计，不影响是否计费、是否取消上游（两者只看是否写出过内容）。

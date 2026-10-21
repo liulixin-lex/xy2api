@@ -349,7 +349,7 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 - 学习粒度是“账号 + 协议”，不分模型：中转只对某个模型要求流式时，该账号所有模型的非流式请求都会被跳过（审查 A-P2-8）。
 - OpenAI Responses 透传没有新增首输出计时守卫（方案的可选项，延后）；它的开场判定与暂存照常使用 §3.1 的判据。
 - 观测只有日志字段，没有请求与尝试表；“伪已输出”比例要从 `prelude_release_event` 日志统计。
-- **W5.3 的已知缺陷（测试服务器场景 RA-1；PM 2026-10-21T08:14Z 裁定随 0.4.4 发布，0.4.5 修复）**：耗尽由上游带 `Retry-After` 的容量失败造成、且组里没有已受罚的账号时，handler 复制上游重试头的分支没有把这个等待时间交给 RetryAdvice；provider 只看本地快照，又跳过本请求已失败的账号，结果是 `unknown`。合成的 `response.failed` 因此不带 `error.headers.retry-after`，正文也删掉了本地的 “try again in Ns”（0.4.3 的正文有）。Codex 的重试与 0.4.3 相同：两边帧内都没有该头，都走本地退避。把 `errors.failed_frame_retry_after` 设为 false 可以恢复 0.4.3 的正文。
+- **W5.3 的已知缺陷（测试服务器场景 RA-1；PM 2026-10-21T08:14Z 裁定随 0.4.4 发布，0.4.5 修复）**：耗尽由上游带 `Retry-After` 的容量失败造成、且组里没有已受罚的账号时，handler 复制上游重试头的分支没有把这个等待时间交给 RetryAdvice；provider 只看本地快照，又跳过本请求已失败的账号，结果是 `unknown`。合成的 `response.failed` 因此不带 `error.headers.retry-after`，正文也删掉了本地的 “try again in Ns”（0.4.3 的正文有）。Codex 的重试与 0.4.3 相同：两边帧内都没有该头，都走本地退避。把 `errors.failed_frame_retry_after` 设为 false 可以恢复 0.4.3 的正文。0.4.5 的修复见 [`gateway-resilience-045-20261021`](../gateway-resilience-045-20261021/design.md) §1。
 
 ## 12. 验证
 
