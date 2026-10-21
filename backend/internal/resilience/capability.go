@@ -89,7 +89,10 @@ func NoteCapabilityAttempt(ctx context.Context, capability bool) {
 	if _, _, ok := CapabilityRequestFrom(ctx); !ok {
 		return
 	}
-	request := ctx.Value(capabilityRequestKey{}).(*capabilityRequest)
+	request, ok := ctx.Value(capabilityRequestKey{}).(*capabilityRequest)
+	if !ok || request == nil {
+		return
+	}
 	if capability {
 		request.capabilityAttempt.Store(true)
 	} else {
@@ -101,7 +104,10 @@ func CapabilityOnlyAttempts(ctx context.Context) bool {
 	if _, _, ok := CapabilityRequestFrom(ctx); !ok {
 		return false
 	}
-	request := ctx.Value(capabilityRequestKey{}).(*capabilityRequest)
+	request, ok := ctx.Value(capabilityRequestKey{}).(*capabilityRequest)
+	if !ok || request == nil {
+		return false
+	}
 	return request.capabilityAttempt.Load() && !request.otherAttempt.Load()
 }
 
