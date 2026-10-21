@@ -10,7 +10,7 @@ Tools for the 0.4.0 gateway resilience work (`openspec/changes/gateway-resilienc
 | `caddy_cuts.py` | CDN cut rate per entry (Cloudflare, ESA, direct) from Caddy JSON access logs; with `--app`, matches each cut to the application log to find requests completed (and billed) after the client was cut; share of 503 responses with `Retry-After`. `--json` prints one object. |
 | `session_streaks.py` | From application logs (JSON or console format): consecutive failures of one session on one account (requests without a session hash are counted per API key, separately), and the latency of requests that switched accounts and still succeeded. `--json` prints one object. |
 | `metrics_report.py` | design §14 report: `collect` measures one environment into a JSON file, `report` compares a baseline with a candidate against the §14 targets (Markdown; exit 1 when a measured metric misses). |
-| `fault-upstream/` | Fault-injecting upstream (Go, standard library only) with OpenAI Responses/Chat, Anthropic, Gemini, image, `/v1/usage` and new-api billing shapes. Scenarios F00–F30, `BAL` and `MIX`. |
+| `fault-upstream/` | Fault-injecting upstream (Go, standard library only) with OpenAI Responses/Chat, Anthropic, Gemini, image, `/v1/usage` and new-api billing shapes. Scenarios F00–F37 (including F34B), `BAL` and `MIX`. |
 | `cdn-sim/` | CDN edge simulator (Go, standard library only): first-byte and idle read timeouts, `X-XY-Edge` injection, cut and request logs. |
 
 ## Database scripts
@@ -86,12 +86,39 @@ http://fault-upstream:8080/f/F06;secs=200      (account base_url)
 | F28 | Anthropic relay queue timeout: 200 SSE whose first event, after `after` seconds, is an `error` of type `rate_limit_error` | `after` |
 | F29 | Codex backend relay: a Responses request replaying `web_search_call` input without declaring web_search gets 200 SSE, then `response.failed` "response protection is unavailable"; others answer normally | |
 | F30 | 502 Cloudflare JSON error answer (`origin_bad_gateway`, the detail says the origin "is overloaded or misconfigured", `retry_after` 60 in the body) | |
+| F31 | Responses `response.created`, then `response.failed` with `server_is_overloaded` | `after` (default 0.05 s) |
+| F32 | Responses created then failed with `server_error` / `The service is busy` | `after` (default 0.05 s) |
+| F33 | Responses created → `response.in_progress` → overloaded failure | `after` |
+| F34 | Responses created → unknown `codex.response.metadata` → overloaded failure; conservative case that must prevent retry | `after` |
+| F34B | Unmarked empty `response.output_text.delta` → created → in_progress → empty message added → empty output_text part added → overloaded failure | `before` (default 0.1 s), `after` |
+| F35 | Responses endpoint returns 404; raw Chat stream emits error then `[DONE]` (nonstream returns 429) | |
+| F36 | Nonstream returns 400 `This group only accepts streaming requests`; streaming succeeds | `first` |
+| F37 | HTTP 503 `server_is_overloaded` with a known `Retry-After` | `reset` (default 8 s), `delay` (use 20 s for CDN commitment) |
 | BAL | Normal while the balance of `key` is positive, F12 otherwise | `key`, `first`, `reset` (adds a relay's exhausted rate-limit headers) |
 | MIX | A random fault with probability `p` percent per fault type, otherwise normal | `p` |
 
 Any scenario accepts `delay` (seconds) to hold the answer back, for example `F16;delay=20` to return 529 after the gateway's pre-output heartbeats.
 
 Control endpoints: `GET /_scenarios`, `GET /_requests?since=N` (outcome per request: `completed`, `cancelled`, `dropped`, `failed_in_stream`, `error_status`), `GET|POST /_control/balance?key=K&value=V`, `GET /healthz`.
+
+F34B (also accepted as F34b) is a synthetic empty-delta regression case. Probes established the event ordering, but did not inspect delta content. F34's unknown event was not observed; it checks that unknown metadata is treated conservatively. F31–F34B, F36 and F37 answer the gateway's tool capability probe normally so the scenario reaches the native Responses path.
+
+## Staging regressions for 0.4.4
+
+Run `staging/fixtures.py` before `staging/scenarios.py`. Keep keys and evidence outside Git. The runner preserves complete SSE JSON so response IDs and terminal headers can be asserted, and reports SQL/HTTP failures instead of treating them as empty results.
+
+| Scenarios | Assertions |
+|---|---|
+| CV-5–CV-8 | Retry pre-output failures; only B's opening and completion reach the client. CV-5 permits at most two A attempts under D18 and checks their persisted `CAPACITY_SHED` records; CV-6 checks exactly one assistant role and the busy classification; CV-8 rejects the unmarked empty delta before created. |
+| CV-9 | Unknown metadata commits output; no B attempt follows. |
+| RAW-1 / RAW-2 | Raw Chat error + DONE retries on B; a single-account failure is recorded and has no success usage row. |
+| SO-1 | Learn Responses stream-only capability, retry on B, show the Explain exclusion, skip A on later nonstream requests, still use A for streams, clear and relearn; no account failure or cooldown. |
+| RA-1 / RA-2 | After CDN heartbeat, an exhausted request has one created→failed pair and matching 2–10 s advice; a recovered request completes without delayed advice. |
+| ANT-3 | Anthropic no-account error is `api_error`; ANT-1 and ANT-2 retain their existing IDs. |
+| SH-1 / SH-2 | Switch to share using account priority and load factors, return to original scheduling, and verify real transient failures reduce health weight and new-session traffic share. |
+| LR-1 / DC-6 | Last resort follows account priority; compatibility openings wait for content while a native Anthropic opening remains unbilled. |
+
+Capacity retry fixtures give B a different Docker DNS host name for the same fault service, so the one-host-switch rule can be tested without contacting a real upstream. Scenarios that change shared settings run serially. SH-2 generates real success/502 attempts on its dedicated accounts (temporarily deactivating B during failure injection), then allows up to 150 seconds for the minute-aligned health window; it restores account configuration and scheduling settings afterwards. Before sampling 80 fresh sessions, it proves A can serve at the best priority, then restores equal priorities. This separates health weighting from a lingering cooldown. The cohort checks reduced A traffic, not exact convergence to the new target, because allocation history survives weight changes.
 
 ## cdn-sim
 

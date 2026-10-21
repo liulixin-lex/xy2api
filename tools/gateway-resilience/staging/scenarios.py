@@ -18,6 +18,7 @@ import datetime
 import http.client
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -91,6 +92,9 @@ def stream_request(port, path: str, key: str, body: dict, *, headers=None, disco
             try:
                 line = resp.readline()
             except TimeoutError:
+                if disconnect_after is None:
+                    out["error"] = "read timeout"
+                    break
                 continue
             except OSError as exc:  # connection dropped by the peer
                 out["error"] = f"read: {exc}"
@@ -99,7 +103,7 @@ def stream_request(port, path: str, key: str, body: dict, *, headers=None, disco
                 break
             text = line.decode("utf-8", "replace").rstrip("\n")
             if text:
-                out["lines"].append([round(now() - start, 2), text[:400]])
+                out["lines"].append([round(now() - start, 2), text])
     except Exception as exc:  # noqa: BLE001 - evidence keeps the failure
         out["error"] = f"{type(exc).__name__}: {exc}"
     finally:
@@ -187,7 +191,7 @@ def anthropic_body(model="claude-sonnet-5-5", stream=True):
 
 def redis_cli(*args: str) -> str:
     cmd = ["docker", "compose", "-p", "xy2api-staging", "exec", "-T", "redis", "redis-cli", *args]
-    return subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=60).stdout.strip()
+    return subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=60, check=True).stdout.strip()
 
 
 def admin_api():
@@ -198,8 +202,8 @@ def admin_api():
 
 
 def psql(sql: str) -> str:
-    cmd = ["docker", "compose", "-p", "xy2api-staging", "exec", "-T", "postgres", "psql", "-U", "xy2api", "-d", "xy2api", "-At", "-c", sql]
-    return subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=60).stdout.strip()
+    cmd = ["docker", "compose", "-p", "xy2api-staging", "exec", "-T", "postgres", "psql", "-U", "xy2api", "-d", "xy2api", "-v", "ON_ERROR_STOP=1", "-At", "-c", sql]
+    return subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=60, check=True).stdout.strip()
 
 
 # ---- scenarios ---------------------------------------------------------------
@@ -692,7 +696,7 @@ def dc1():
     return r, checks
 
 
-def undelivered_after_opening(group: str, path: str, body: dict, opening: str) -> tuple[dict, list]:
+def undelivered_after_opening(group: str, path: str, body: dict, opening: str, deferred=False) -> tuple[dict, list]:
     """A client leaves after the gateway wrote only opening events (0.4.2,
     review R03): the upstream is cancelled, nothing is billed and an
     undelivered record is written."""
@@ -708,7 +712,8 @@ def undelivered_after_opening(group: str, path: str, body: dict, opening: str) -
     usage = psql(f"select count(*) from usage_logs where {key_filter} and created_at > '{since}'")
     und = psql(f"select disconnect_stage||'|'||billed from gateway_undelivered_requests where {key_filter} order by id desc limit 1")
     if opening:
-        check(opening in received, f"the client got {opening} before leaving", checks)
+        check((opening not in received) if deferred else (opening in received),
+              f"opening {opening} {'deferred until content' if deferred else 'received before leaving'}", checks)
     check(not any('"text_delta"' in l or '"content":"' in l.replace(" ", "") or "output_text.delta" in l for _, l in r["lines"]),
           "no content reached the client", checks)
     check(any(x["outcome"] == "cancelled" for x in recs), "upstream request cancelled", checks)
@@ -717,17 +722,17 @@ def undelivered_after_opening(group: str, path: str, body: dict, opening: str) -
     return r, checks
 
 
-@scenario("DC-6", "Opening events only, then the client leaves (Messages conversion, Chat, Anthropic native): undelivered, not billed, upstream cancelled")
+@scenario("DC-6", "No content before client disconnect: compatibility openings deferred, native Anthropic opening unbilled, upstream cancelled")
 def dc6():
     results, checks = {}, []
     for name, (group, path, body, opening) in {
         "messages": ("G-msg-long", "/v1/messages", anthropic_body(), "message_start"),
-        # The upstream answers on /v1/responses with response.created at once;
-        # the client gets only the role chunk the conversion makes of it.
+        # Compatibility openings wait for content; native Anthropic still
+        # forwards message_start without treating it as billable output.
         "chat": ("G-long-first", "/v1/chat/completions", chat_body(), '"role":"assistant"'),
         "anthropic": ("G-anthropic-stall", "/v1/messages", anthropic_body(), "message_start"),
     }.items():
-        r, c = undelivered_after_opening(group, path, body, opening)
+        r, c = undelivered_after_opening(group, path, body, opening, deferred=name != "anthropic")
         results[name] = {k: r.get(k) for k in ("status", "elapsed", "upstream")}
         checks += [{"check": f"{name}: {x['check']}", "ok": x["ok"]} for x in c]
     return results, checks
@@ -1110,9 +1115,10 @@ def dc4():
     return {"queued": queued, "upstream": recs, "usage": usage, "undelivered": und}, checks
 
 
-@scenario("LR-1", "Share group with every account soft-penalised: last resort follows the share tiers, not account priority")
+@scenario("LR-1", "Share group with every account soft-penalised: last resort follows account priority")
 def lr1():
-    # Review F3: tier 0 holds lr-a (priority 5), tier 1 lr-b (priority 1).
+    # Since the share simplification, tiers come from account priority:
+    # lr-b (priority 1) precedes lr-a (priority 5).
     # Each request carries its own conversation: without one, a share group
     # keys the session on the API key, and the second request would follow
     # the first one's binding. Keeping a soft-penalised binding is covered
@@ -1121,16 +1127,12 @@ def lr1():
     checks = []
     api = admin_api()
     gid = int(psql("select id from groups where name='G-share-lr' and deleted_at is null"))
-    ids = dict(row.split("|") for row in psql("select name||'|'||id from accounts where name in ('lr-a','lr-b') and deleted_at is null").splitlines())
     settings = api.call("GET", "/api/v1/admin/share-scheduling/settings")
     if not settings.get("enabled"):
-        settings["enabled"] = True
-        api.call("PUT", "/api/v1/admin/share-scheduling/settings", settings)
+        api.call("PUT", "/api/v1/admin/share-scheduling/settings", {"enabled": True})
     current = api.call("GET", f"/api/v1/admin/share-scheduling/groups/{gid}/policy")
-    policy = {"schema": 1, "scheduler": "share", "accounts": [
-        {"account_id": int(ids["lr-a"]), "tier": 0, "weight": 1},
-        {"account_id": int(ids["lr-b"]), "tier": 1, "weight": 1}]}
-    api.call("PUT", f"/api/v1/admin/share-scheduling/groups/{gid}/policy", {"expected_version": current.get("version", 0), "policy": policy})
+    api.call("PUT", f"/api/v1/admin/share-scheduling/groups/{gid}/policy",
+             {"expected_version": current.get("version", 0), "scheduler": "share", "session_keep": False})
     time.sleep(3)
 
     key = KEYS["G-share-lr"]
@@ -1140,14 +1142,22 @@ def lr1():
         r = stream_request(DIRECT, "/v1/responses", key, responses_body(stream=False, session=session))
         return r, [x.get("spec", "").split("tag=")[-1] for x in fault_records_since(mark) if "tag=lr-" in x.get("spec", "")]
 
-    # Both relays fail with a Cloudflare 502 and Retry-After: both are
-    # soft-penalised for about a minute.
-    _, first = tried_by(fresh_session())
-    # A new conversation: the relaxed round places it in tier 0.
-    second, tried = tried_by(fresh_session())
-    check(bool(tried), f"last resort tried an account ({tried})", checks)
-    check(bool(tried) and tried[0] == "lr-a", f"tier 0 first, not the higher-priority tier 1 ({tried})", checks)
-    return {"second": second, "first": first, "tried": tried}, checks
+    try:
+        for name in ("lr-a", "lr-b"):
+            restore_account(name)
+        # Both relays fail with a Cloudflare 502 and Retry-After: both are
+        # soft-penalised for about a minute.
+        _, first = tried_by(fresh_session())
+        # A new conversation: the relaxed round uses account priority.
+        second, tried = tried_by(fresh_session())
+        check(bool(tried), f"last resort tried an account ({tried})", checks)
+        check(bool(tried) and tried[0] == "lr-b", f"priority 1 first ({tried})", checks)
+        return {"second": second, "first": first, "tried": tried}, checks
+    finally:
+        for name in ("lr-a", "lr-b"):
+            restore_account(name)
+        share_policy(api, gid, current["scheduler"], current["session_keep"])
+        api.call("PUT", "/api/v1/admin/share-scheduling/settings", {"enabled": settings["enabled"]})
 
 
 @scenario("DC-3", "Client leaves while the upstream headers are still awaited: stage header_wait")
@@ -1214,6 +1224,412 @@ def bal2():
         restore_account("single-ok")
 
 
+# ---- 0.4.4 replay, capability and share regression scenarios -----------------
+
+def data_events(result):
+    events = []
+    for _, line in result["lines"]:
+        if line.startswith("data:") and line[5:].strip() != "[DONE]":
+            events.append(json.loads(line[5:]))
+    return events
+
+
+def account_id(name):
+    return int(psql(f"select id from accounts where name='{name}' and deleted_at is null"))
+
+
+def attempt_events(name, since):
+    """Read persisted upstream attempts, including recovered requests."""
+    aid = account_id(name)
+    raw = psql("select coalesce(jsonb_agg(ev), '[]'::jsonb) from ops_error_logs, "
+               "jsonb_array_elements(coalesce(upstream_errors, '[]'::jsonb)) ev "
+               f"where created_at >= '{since}' and ev->>'account_id' = '{aid}'")
+    return [{k: ev.get(k) for k in ("account_id", "kind", "resilience_category", "upstream_status_code")}
+            for ev in json.loads(raw)]
+
+
+def replay_failure(group, fault, *, chat=False, retry=True):
+    checks = []
+    number = group.removeprefix("G-cv")
+    name = "cv" + number + "-a"
+    restore_account(name)
+    mark = fault_last_id()
+    since = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    path = "/v1/chat/completions" if chat else "/v1/responses"
+    body = chat_body() if chat else responses_body(session=fresh_session())
+    headers = {"User-Agent": "codex_cli_rs/0.0.0 (staging)", "originator": "codex_cli_rs", "session_id": fresh_session()}
+    try:
+        result = stream_request(DIRECT, path, KEYS[group], body, headers=headers)
+        events = data_events(result)
+        recs = [r for r in fault_records_since(mark) if r["stream"] and
+                (r["fault"] == fault or f"tag=cv{number}-b" in r["spec"])]
+        result["upstream"] = recs
+        check(any(r["fault"] == fault for r in recs), "failing A was attempted", checks)
+        check(any(f"tag=cv{number}-b" in r["spec"] for r in recs) == retry,
+              "B attempted" if retry else "unknown event committed: B not attempted", checks)
+        check(result["status"] == 200, "HTTP 200 stream", checks)
+        if chat:
+            roles = [c["delta"]["role"] for e in events for c in e.get("choices", []) if "role" in c.get("delta", {})]
+            check(roles == ["assistant"], "exactly one assistant role chunk", checks)
+            check(any(c.get("finish_reason") == "stop" for e in events for c in e.get("choices", [])), "B completed Chat", checks)
+            check(not any(e.get("error") for e in events), "no failed A error reaches client", checks)
+        elif retry:
+            created = [e.get("response", {}).get("id", "") for e in events if e.get("type") == "response.created"]
+            completed = [e.get("response", {}).get("id", "") for e in events if e.get("type") == "response.completed"]
+            check(bool(events) and events[0].get("type") == "response.created", "first event is B response.created", checks)
+            check(len(created) == 1 and created == completed and bool(created[0]), "one created, same B ID completes", checks)
+            check(not any(f"resp_fault_{fault.lower()}_" in json.dumps(e) for e in events), "A response ID never released", checks)
+            check(not any(e.get("type") == "response.failed" for e in events), "A failure discarded", checks)
+            if fault == "F34B":
+                check(not any(e.get("type") == "response.output_text.delta" and e.get("delta") == "" for e in events),
+                      "unmarked empty delta before created never reaches client", checks)
+        else:
+            check(any(e.get("type") == "codex.response.metadata" for e in events), "unknown metadata released", checks)
+            check(any(e.get("type") == "response.failed" for e in events), "failure after unknown event stays on A", checks)
+        time.sleep(3)
+        result["attempt_events"] = attempt_events(name, since)
+        if fault == "F31":
+            capacity = [e for e in result["attempt_events"] if e["resilience_category"] == "CAPACITY_SHED"]
+            attempts = sum(r["fault"] == fault for r in recs)
+            check(1 <= attempts <= 2, f"A tried at most twice under D18 ({attempts})", checks)
+            check(len(capacity) == attempts, f"one CAPACITY_SHED event per A attempt ({len(capacity)}/{attempts})", checks)
+        if fault == "F32":
+            categories = [e["resilience_category"] for e in result["attempt_events"]]
+            check(bool(categories) and all(c in ("RATE_LIMIT", "TRANSIENT") for c in categories),
+                  f"busy classified as rate limit or transient ({categories})", checks)
+        return result, checks
+    finally:
+        restore_account(name)
+
+
+@scenario("CV-5", "Codex Responses: overloaded retries A at most once, then B completes without leaking A created")
+def cv5():
+    return replay_failure("G-cv5", "F31")
+
+
+@scenario("CV-6", "Chat conversion: created then service busy switches; one role chunk; no capacity misclassification")
+def cv6():
+    return replay_failure("G-cv6", "F32", chat=True)
+
+
+@scenario("CV-7", "Responses: created and in_progress are replayable before overloaded")
+def cv7():
+    return replay_failure("G-cv7", "F33")
+
+
+@scenario("CV-8", "Responses: unmarked empty delta before created and empty added events discarded on retry")
+def cv8():
+    return replay_failure("G-cv8", "F34B")
+
+
+@scenario("CV-9", "Unknown codex.response.metadata commits output and prevents retry")
+def cv9():
+    return replay_failure("G-cv9", "F34", retry=False)
+
+
+@scenario("RAW-1", "Raw Chat error plus DONE before output switches to B")
+def raw1():
+    checks = []
+    restore_account("raw-a")
+    mark = fault_last_id()
+    try:
+        r = stream_request(DIRECT, "/v1/chat/completions", KEYS["G-raw"], chat_body(), headers={"session_id": fresh_session()})
+        events = data_events(r)
+        r["upstream"] = [x for x in fault_records_since(mark) if x["stream"] and (x["fault"] == "F35" or "tag=raw-b" in x["spec"])]
+        check(any(x["fault"] == "F35" and x["path"].endswith("/chat/completions") for x in r["upstream"]), "A used raw Chat path", checks)
+        check(any("tag=raw-b" in x["spec"] for x in r["upstream"]), "B attempted", checks)
+        check(r["status"] == 200 and any(c.get("finish_reason") == "stop" for e in events for c in e.get("choices", [])), "B completes", checks)
+        check(not any(e.get("error") for e in events), "raw error discarded", checks)
+        check(sum(line.strip() == "data: [DONE]" for _, line in r["lines"]) == 1, "one final DONE", checks)
+        return r, checks
+    finally:
+        restore_account("raw-a")
+
+
+@scenario("RAW-2", "Raw Chat single account error plus DONE is recorded as failure and never billed as success")
+def raw2():
+    checks = []
+    restore_account("raw-single")
+    since = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    try:
+        r = stream_request(DIRECT, "/v1/chat/completions", KEYS["G-raw-single"], chat_body(), headers={"session_id": fresh_session()})
+        time.sleep(3)
+        r["attempt_events"] = attempt_events("raw-single", since)
+        usage = psql("select count(*) from usage_logs where api_key_id=(select id from api_keys "
+                     f"where name='key-G-raw-single' and deleted_at is null) and created_at >= '{since}'")
+        check(r["status"] >= 400 or any(e.get("error") for e in data_events(r)), "client receives a failure", checks)
+        check(bool(r["attempt_events"]), "upstream failure recorded", checks)
+        check(usage == "0", "no success usage row", checks)
+        r["usage_rows"] = usage
+        return r, checks
+    finally:
+        restore_account("raw-single")
+
+
+@scenario("SO-1", "Only-stream capability: learn, retry nonstream, skip next nonstream, allow stream, clear and relearn")
+def so1():
+    checks, result = [], {}
+    api = admin_api()
+    aid = account_id("so-a")
+    path = f"/api/v1/admin/accounts/{aid}"
+    restore_account("so-a")
+    def clear():
+        try:
+            api.call("DELETE", path + "/capability-learning")
+            return True
+        except RuntimeError as exc:
+            if "HTTP 404" in str(exc):
+                return False  # baseline: preserve the functional red evidence
+            raise
+    def request(label, stream):
+        mark = fault_last_id()
+        r = stream_request(DIRECT, "/v1/responses", KEYS["G-stream-only"], responses_body(stream=stream, session=fresh_session()))
+        r["upstream"] = [x for x in fault_records_since(mark) if x["fault"] == "F36" or "tag=so-b" in x["spec"]]
+        result[label] = r
+        check(r["status"] == 200, label + " succeeds", checks)
+        return r["upstream"]
+    since = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    clear()
+    try:
+        first = request("first_nonstream", False)
+        check(any(x["fault"] == "F36" and x["status"] == 400 for x in first) and any("tag=so-b" in x["spec"] for x in first), "first nonstream retries A 400 on B", checks)
+        learned = api.call("GET", path).get("capability_learned", [])
+        result["learned"] = learned
+        check(any(x.get("protocol") == "responses" and x.get("mode") == "stream_only" and x.get("expires_at") for x in learned), "Responses stream_only capability learned with expiry", checks)
+        gid = int(psql("select id from groups where name='G-stream-only' and deleted_at is null"))
+        explain = api.call("GET", f"/api/v1/admin/resilience/groups/{gid}/explain?model=gpt-6.1-sol&protocol=responses&stream=false")
+        result["explain"] = explain
+        excluded = [a for a in explain.get("accounts", []) if a["account_id"] == aid]
+        check(bool(excluded) and excluded[0].get("reason") == "capability_stream_only", "Explain shows stream-only exclusion for nonstream", checks)
+        second = request("second_nonstream", False)
+        check(not any(x["fault"] == "F36" for x in second), "next nonstream skips A", checks)
+        streamed = request("stream", True)
+        check(any(x["fault"] == "F36" and x["stream"] for x in streamed), "stream still uses A", checks)
+        reason, left, status = account_pause("so-a")
+        check(left is None and status == "active", f"A active with no cooldown ({reason})", checks)
+        time.sleep(3)
+        result["attempt_events"] = attempt_events("so-a", since)
+        check(not result["attempt_events"], "capability miss does not count as account failure", checks)
+        check(clear(), "clear capability endpoint succeeds", checks)
+        check(not api.call("GET", path).get("capability_learned"), "learned state cleared", checks)
+        after = request("after_clear", False)
+        check(any(x["fault"] == "F36" and x["status"] == 400 for x in after), "A attempted again after clear", checks)
+        check(bool(api.call("GET", path).get("capability_learned")), "capability relearned", checks)
+        return result, checks
+    finally:
+        clear()
+        restore_account("so-a")
+
+
+@scenario("RA-1", "After CDN heartbeat, overload exhaustion emits failed with recovery retry-after 2–10 s and matching message")
+def ra1():
+    checks = []
+    restore_account("ra-only")
+    try:
+        r = stream_request(CDN125, "/v1/responses", KEYS["G-retry-advice"], responses_body(session=fresh_session()))
+        check(r["status"] == 200 and bool(heartbeats(r)), "heartbeat committed before terminal failure", checks)
+        check(opened_then_failed([l for _, l in r["lines"]]), "created then failed for same ID", checks)
+        failures = [e for e in data_events(r) if e.get("type") == "response.failed"]
+        check(len(failures) == 1, "one failed terminal event", checks)
+        err = failures[0].get("response", {}).get("error", {}) if failures else {}
+        retry = str(err.get("headers", {}).get("retry-after", ""))
+        match = re.search(r"try again in (\d+)s", err.get("message", ""), re.I)
+        check(retry.isdigit() and 2 <= int(retry) <= 10, f"failed retry-after 2–10 s ({retry})", checks)
+        check(bool(match) and match.group(1) == retry, "message seconds match retry-after", checks)
+        return r, checks
+    finally:
+        restore_account("ra-only")
+
+
+@scenario("RA-2", "After CDN heartbeat, healthy B completes without delayed retry advice")
+def ra2():
+    checks = []
+    restore_account("ra-a")
+    mark = fault_last_id()
+    try:
+        r = stream_request(CDN125, "/v1/responses", KEYS["G-retry-alternative"], responses_body(session=fresh_session()))
+        events = data_events(r)
+        recs = [x for x in fault_records_since(mark) if x["stream"] and (x["fault"] == "F37" or "tag=ra-b" in x["spec"])]
+        r["upstream"] = recs
+        check(bool(heartbeats(r)) and any(x["fault"] == "F37" for x in recs), "A failed after heartbeat", checks)
+        check(any("tag=ra-b" in x["spec"] for x in recs) and any(e.get("type") == "response.completed" for e in events), "healthy B completed", checks)
+        check(not any(e.get("type") == "response.failed" for e in events), "no failed frame or delayed retry advice on recovered request", checks)
+        check(r["headers"].get("retry-after") in (None, "1"), "no HTTP delay above one second", checks)
+        return r, checks
+    finally:
+        restore_account("ra-a")
+
+
+@scenario("ANT-3", "Anthropic no-account response uses api_error")
+def ant3():
+    checks = []
+    r = stream_request(DIRECT, "/v1/messages", KEYS["G-anthropic-empty"], anthropic_body())
+    body = json.loads("\n".join(l for _, l in r["lines"]))
+    check(r["status"] == 503, "no-account HTTP 503", checks)
+    check(body.get("error", {}).get("type") == "api_error", "gateway no-account type is api_error", checks)
+    return r, checks
+
+
+def share_policy(api, gid, scheduler, session_keep=False):
+    path = f"/api/v1/admin/share-scheduling/groups/{gid}/policy"
+    current = api.call("GET", path)
+    api.call("PUT", path, {"expected_version": current["version"], "scheduler": scheduler, "session_keep": session_keep})
+    return api.call("GET", path)
+
+
+@scenario("SH-1", "Share switch uses account priorities and load factors; returning to original scheduler serves normally")
+def sh1():
+    api, checks, result = admin_api(), [], {}
+    gid = int(psql("select id from groups where name='G-share-v2' and deleted_at is null"))
+    path = f"/api/v1/admin/share-scheduling/groups/{gid}/policy"
+    saved = api.call("GET", path)
+    settings = api.call("GET", "/api/v1/admin/share-scheduling/settings")
+    accounts = {n: api.call("GET", f"/api/v1/admin/accounts/{account_id(n)}") for n in ("sh-a", "sh-b")}
+    try:
+        for n, factor in (("sh-a", 2), ("sh-b", 1)):
+            api.call("PUT", f"/api/v1/admin/accounts/{accounts[n]['id']}", {"priority": 1, "load_factor": factor})
+        api.call("PUT", "/api/v1/admin/share-scheduling/settings", {"enabled": True})
+        view = share_policy(api, gid, "share")
+        result["share"] = view
+        members = {m["name"]: m for m in view["members"]}
+        check(view["scheduler"] == "share" and view["effective"], "share enabled for the group", checks)
+        check(all(m["priority"] == 1 for m in members.values()), "tiers use account priority", checks)
+        check(members["sh-a"]["effective_load_factor"] == 2 and members["sh-b"]["effective_load_factor"] == 1, "weights inherit account load factors", checks)
+        check(abs(members["sh-a"]["base_share"] - 2/3) < 0.01, "base shares reflect 2:1 load factors", checks)
+        r = stream_request(DIRECT, "/v1/responses", KEYS["G-share-v2"], responses_body(session=fresh_session()))
+        check(r["status"] == 200 and any(e.get("type") == "response.completed" for e in data_events(r)), "share request completes", checks)
+        result["original"] = share_policy(api, gid, "sub2api")
+        check(result["original"]["scheduler"] == "sub2api" and not result["original"]["effective"], "switch back to original", checks)
+        r = stream_request(DIRECT, "/v1/responses", KEYS["G-share-v2"], responses_body(session=fresh_session()))
+        check(r["status"] == 200 and any(e.get("type") == "response.completed" for e in data_events(r)), "original scheduler request completes", checks)
+        return result, checks
+    finally:
+        for n, a in accounts.items():
+            api.call("PUT", f"/api/v1/admin/accounts/{a['id']}", {"priority": a["priority"], "load_factor": a.get("load_factor") or 0})
+        share_policy(api, gid, saved["scheduler"], saved["session_keep"])
+        api.call("PUT", "/api/v1/admin/share-scheduling/settings", {"enabled": settings["enabled"]})
+
+
+@scenario("SH-2", "Real transient failures reduce health weight and new-session share; restore original scheduler")
+def sh2():
+    api, checks, result = admin_api(), [], {}
+    gid = int(psql("select id from groups where name='G-share-v2' and deleted_at is null"))
+    path = f"/api/v1/admin/share-scheduling/groups/{gid}/policy"
+    saved = api.call("GET", path)
+    settings = api.call("GET", "/api/v1/admin/share-scheduling/settings")
+    accounts = {n: api.call("GET", f"/api/v1/admin/accounts/{account_id(n)}") for n in ("sh-a", "sh-b")}
+    def update(n, **fields):
+        return api.call("PUT", f"/api/v1/admin/accounts/{accounts[n]['id']}", fields)
+    def traffic(count):
+        mark = fault_last_id()
+        ok = 0
+        for _ in range(count):
+            r = stream_request(DIRECT, "/v1/responses", KEYS["G-share-v2"], responses_body(session=fresh_session()))
+            ok += r["status"] == 200 and any(e.get("type") == "response.completed" for e in data_events(r))
+        recs = [r for r in fault_records_since(mark) if r["stream"] and "tag=sh-" in r["spec"]]
+        counts = {n: sum(f"tag={n}" in r["spec"] for r in recs) for n in accounts}
+        check(ok == count, f"all {count} generated requests completed ({ok})", checks)
+        return counts
+    try:
+        share_policy(api, gid, "sub2api")
+        # Generate real successes for both accounts. No fabricated ops/usage
+        # rows: health must come through the normal request recording path.
+        for n in accounts:
+            restore_account(n)
+            credentials = dict(accounts[n]["credentials"])
+            credentials["base_url"] = f"http://fault-upstream:8080/f/F00;first=0.01;tag={n}"
+            update(n, priority=1, load_factor=1, credentials=credentials)
+        warm = {}
+        for n, other in (("sh-a", "sh-b"), ("sh-b", "sh-a")):
+            update(n, priority=1)
+            update(other, priority=2)
+            warm[n] = traffic(24)
+            check(warm[n][n] == 24, f"24 warmup successes attributed to {n}", checks)
+        result["warmup"] = warm
+        update("sh-a", priority=1)
+        update("sh-b", priority=1)
+        api.call("PUT", "/api/v1/admin/share-scheduling/settings", {"enabled": True})
+        share_policy(api, gid, "share")
+        result["before_distribution"] = traffic(40)
+        # Inject enough real 502 attempts to overcome both the prior and
+        # this account's earlier successful test traffic in the 30m window.
+        # Clear only this test account's cooldown between requests.
+        share_policy(api, gid, "sub2api")
+        bad = dict(accounts["sh-a"]["credentials"])
+        bad["base_url"] = "http://fault-upstream:8080/f/F07;tag=sh-a"
+        update("sh-a", priority=1, credentials=bad)
+        # Isolate A during injection. A healthy B would absorb requests
+        # while the scheduler refreshes its view of A's cleared cooldown.
+        update("sh-b", status="inactive")
+        since = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        successes = int(psql(f"select count(*) from usage_logs where account_id={accounts['sh-a']['id']} and created_at > now() - interval '30 minutes'"))
+        failure_target = max(8, (successes + 23) // 4)
+        result["failure_target"] = failure_target
+        for _ in range(failure_target):
+            # Clearing the account updates its snapshot immediately; bucket
+            # membership can still lag until the scheduler outbox is read.
+            deadline = now() + 20
+            while True:
+                restore_account("sh-a")
+                time.sleep(2)
+                mark = fault_last_id()
+                r = stream_request(DIRECT, "/v1/responses", KEYS["G-share-v2"], responses_body(session=fresh_session()))
+                attempts = [x for x in fault_records_since(mark) if x["stream"] and x["spec"] == "F07;tag=sh-a"]
+                if attempts or now() >= deadline:
+                    break
+            check(len(attempts) == 1 and r["status"] in (502, 503), "one real A 502 attempt during injection", checks)
+        good = dict(accounts["sh-a"]["credentials"])
+        good["base_url"] = "http://fault-upstream:8080/f/F00;first=0.01;tag=sh-a"
+        update("sh-a", credentials=good)
+        update("sh-b", priority=1, status=accounts["sh-b"]["status"])
+        restore_account("sh-a")
+        time.sleep(3)
+        result["failure_events"] = attempt_events("sh-a", since)
+        check(sum(e["resilience_category"] == "TRANSIENT" for e in result["failure_events"]) == failure_target, f"{failure_target} real TRANSIENT attempts recorded", checks)
+        share_policy(api, gid, "share")
+        # Statistics end at a minute boundary and refresh every minute.
+        deadline = now() + 150
+        while True:
+            view = api.call("GET", path)
+            members = {m["name"]: m for m in view["members"]}
+            a, b = members["sh-a"], members["sh-b"]
+            if ((a.get("health_factor") or 1) < (b.get("health_factor") or 1) and
+                    (a.get("health") or {}).get("soft_failures", 0) >= failure_target) or now() >= deadline:
+                break
+            time.sleep(3)
+        result["health"] = view
+        check((a.get("health") or {}).get("soft_failures", 0) >= failure_target, "health window contains injected failures", checks)
+        check(a.get("health_factor") is not None and b.get("health_factor") is not None and a["health_factor"] < b["health_factor"], "A health factor below healthy B", checks)
+        check(a["effective_weight"] < b["effective_weight"] and a["expected_share"] < 0.45, "health factor reduces effective weight and expected share", checks)
+        # Prove A is eligible again before attributing the traffic shift to
+        # weights. A stale cooldown must not make this a false positive.
+        update("sh-a", priority=0)
+        deadline = now() + 75
+        while True:
+            eligible = traffic(1)
+            if eligible["sh-a"] or now() >= deadline:
+                break
+            time.sleep(2)
+        result["eligibility_probe"] = eligible
+        check(eligible["sh-a"] == 1, "A serves successfully when given the best priority", checks)
+        update("sh-a", priority=1)
+        time.sleep(2)
+        counts = traffic(80)
+        result["after_distribution"] = counts
+        total = sum(counts.values())
+        actual = counts["sh-a"] / total if total else 1
+        check(total == 80 and actual < 0.45, f"new-session A traffic share reduced below 45% ({actual:.3f})", checks)
+        # The scheduler carries allocation history across weight changes;
+        # a short cohort need not match the new steady-state target exactly.
+        return result, checks
+    finally:
+        for n, a in accounts.items():
+            update(n, priority=a["priority"], status=a["status"], load_factor=a.get("load_factor") or 0, credentials=a["credentials"])
+            restore_account(n)
+        share_policy(api, gid, saved["scheduler"], saved["session_keep"])
+        api.call("PUT", "/api/v1/admin/share-scheduling/settings", {"enabled": settings["enabled"]})
+
+
 def run(sid: str, outdir: str):
     title, fn = SCENARIOS[sid]
     started = now()
@@ -1241,7 +1657,7 @@ def main() -> int:
     os.makedirs(args.evidence, exist_ok=True)
     ids = [s for s in (args.only.split(",") if args.only else SCENARIOS) if s]
     # Balance and fallback scenarios change shared upstream state; run them alone.
-    serial = [s for s in ids if s.startswith(("BAL", "FB", "RES", "ERR-3", "ERR-4", "BUD", "DC"))]
+    serial = [s for s in ids if s.startswith(("BAL", "FB", "RES", "ERR-3", "ERR-4", "BUD", "DC", "LR", "SH", "SO", "RA"))]
     # DC-2 waits for a 150 s upstream; run it last.
     serial.sort(key=lambda s: s == "DC-2")
     parallel = [s for s in ids if s not in serial]

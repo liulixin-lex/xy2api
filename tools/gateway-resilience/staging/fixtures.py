@@ -24,6 +24,9 @@ import urllib.error
 import urllib.request
 
 FAULT = "http://fault-upstream:8080/f/"
+# Same fault process, distinct DNS host: capacity failover intentionally
+# excludes the failing host. Docker registers its Compose container name.
+BACKUP_FAULT = "http://xy2api-staging-fault-upstream-1:8080/f/"
 
 # group name -> (platform, [(account name, scenario spec, priority)], options)
 GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
@@ -76,9 +79,22 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-grok-balance": ("grok", [("grok-bal", "BAL;key=grok-bal;reset=1700", 1)], {}),
     # R4: an upstream content-safety 403 is the request's fault on every account.
     "G-content-safety": ("openai", [("cs-block", "F27", 1), ("cs-ok", "F00", 2)], {}),
-    # Review F3: a share group whose tiers run against account priority
-    # (LR-1 sets the policy); both relays answer a Cloudflare 502.
+    # Share tiers now follow account priority; LR-1 verifies the same
+    # ordering in the relaxed last-resort round.
     "G-share-lr": ("openai", [("lr-a", "F07;tag=lr-a", 5), ("lr-b", "F07;tag=lr-b", 1)], {}),
+    "G-share-v2": ("openai", [("sh-a", "F00;tag=sh-a", 1), ("sh-b", "F00;tag=sh-b", 1)], {}),
+    # 0.4.4: isolated accounts keep failure/session counters independent.
+    "G-cv5": ("openai", [("cv5-a", "F31", 1), ("cv5-b", "F00;tag=cv5-b", 2)], {"separate_hosts": True}),
+    "G-cv6": ("openai", [("cv6-a", "F32", 1), ("cv6-b", "F00;tag=cv6-b", 2)], {}),
+    "G-cv7": ("openai", [("cv7-a", "F33", 1), ("cv7-b", "F00;tag=cv7-b", 2)], {"separate_hosts": True}),
+    "G-cv8": ("openai", [("cv8-a", "F34B", 1), ("cv8-b", "F00;tag=cv8-b", 2)], {"separate_hosts": True}),
+    "G-cv9": ("openai", [("cv9-a", "F34", 1), ("cv9-b", "F00;tag=cv9-b", 2)], {"separate_hosts": True}),
+    "G-raw": ("openai", [("raw-a", "F35", 1), ("raw-b", "F00;tag=raw-b", 2)], {}),
+    "G-raw-single": ("openai", [("raw-single", "F35", 1)], {}),
+    "G-stream-only": ("openai", [("so-a", "F36", 1), ("so-b", "F00;tag=so-b", 2)], {}),
+    "G-retry-advice": ("openai", [("ra-only", "F37;delay=20;reset=8", 1)], {}),
+    "G-retry-alternative": ("openai", [("ra-a", "F37;delay=20;reset=8", 1), ("ra-b", "F00;tag=ra-b", 2)], {"separate_hosts": True}),
+    "G-anthropic-empty": ("anthropic", [], {}),
     # Review F1: one slot; a second stream queues, gets pings, then leaves.
     "G-queue": ("openai", [("q-busy", "F01;secs=20", 1)], {"concurrency": 1}),
     # 0.4.2: opening events only (DC-6), silent upstream at xhigh/max
@@ -152,10 +168,14 @@ class API:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 payload = json.loads(resp.read() or b"{}")
         except urllib.error.HTTPError as err:
-            payload = json.loads(err.read() or b"{}")
-            raise SystemExit(f"{method} {path}: HTTP {err.code} {payload.get('message') or payload}")
+            raw = err.read()
+            try:
+                payload = json.loads(raw or b"{}")
+            except ValueError:
+                payload = {"message": raw.decode("utf-8", "replace")[:200]}
+            raise RuntimeError(f"{method} {path}: HTTP {err.code} {payload.get('message') or payload}")
         if payload.get("code", 0) != 0:
-            raise SystemExit(f"{method} {path}: {payload.get('message')}")
+            raise RuntimeError(f"{method} {path}: {payload.get('message')}")
         return payload.get("data")
 
     def login(self, email: str, password: str) -> str:
@@ -212,8 +232,9 @@ def main() -> int:
 
     existing = {a["name"]: a for a in items(api.call("GET", "/api/v1/admin/accounts?page=1&page_size=500"))}
     for gname, (platform, accounts, gopts) in GROUPS.items():
-        for aname, spec, priority in accounts:
-            want_base = FAULT + spec + ("/v1" if platform == "grok" else "")
+        for index, (aname, spec, priority) in enumerate(accounts):
+            fault_base = BACKUP_FAULT if gopts.get("separate_hosts") and index > 0 else FAULT
+            want_base = fault_base + spec + ("/v1" if platform == "grok" else "")
             if aname in existing:
                 # Accounts probed before fault-upstream answered the gateway's
                 # tool probe were routed through Chat Completions; re-probe.
@@ -221,7 +242,8 @@ def main() -> int:
                 extra = existing[aname].get("extra") or {}
                 have_base = (existing[aname].get("credentials") or {}).get("base_url")
                 stale = spec not in real and have_base is not None and have_base != want_base
-                if spec not in real and (stale or (platform == "openai" and extra.get("openai_responses_supported") is False)):
+                raw_chat = spec.startswith("F35")
+                if spec not in real and (stale or (platform == "openai" and not raw_chat and extra.get("openai_responses_supported") is False)):
                     api.call("PUT", f"/api/v1/admin/accounts/{existing[aname]['id']}",
                              {"credentials": {"api_key": "sk-fault-" + aname, "base_url": want_base}})
                 continue
@@ -233,6 +255,8 @@ def main() -> int:
             body = {"name": aname, "platform": platform, "type": "apikey",
                     "credentials": credentials,
                     "group_ids": [groups[gname]["id"]], "concurrency": gopts.get("concurrency", 20), "priority": priority}
+            if spec.startswith("F35"):
+                body["extra"] = {"openai_responses_supported": False}
             existing[aname] = api.call("POST", "/api/v1/admin/accounts", body)
 
     users = {u["email"]: u for u in items(api.call("GET", "/api/v1/admin/users?page=1&page_size=200"))}
