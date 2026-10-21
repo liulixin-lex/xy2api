@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
@@ -221,6 +222,7 @@ type Account struct {
 	Credentials             map[string]any                    `json:"credentials"`
 	CredentialsStatus       map[string]bool                   `json:"credentials_status,omitempty"`
 	Extra                   map[string]any                    `json:"extra"`
+	CapabilityLearned       []resilience.LearnedCapability    `json:"capability_learned"`
 	OllamaCloudUsage        *service.OllamaCloudUsageState    `json:"ollama_cloud_usage,omitempty"`
 	CodexTurnTickets        []service.OpenAICodexTicketStatus `json:"codex_turn_tickets,omitempty"`
 	ProxyID                 *int64                            `json:"proxy_id"`
@@ -348,6 +350,7 @@ type AccountListItem struct {
 	Credentials       map[string]any                    `json:"credentials,omitempty"`
 	CredentialsStatus map[string]bool                   `json:"credentials_status,omitempty"`
 	Extra             map[string]any                    `json:"extra,omitempty"`
+	CapabilityLearned []resilience.LearnedCapability    `json:"capability_learned"`
 	OllamaCloudUsage  *service.OllamaCloudUsageState    `json:"ollama_cloud_usage,omitempty"`
 	CodexTurnTickets  []service.OpenAICodexTicketStatus `json:"codex_turn_tickets,omitempty"`
 	OpenCodeGoUsage   *service.OpenCodeGoUsageState     `json:"opencode_go_usage,omitempty"`
