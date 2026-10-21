@@ -138,8 +138,18 @@ func TestOpenAIStreamingPassthroughKeepsPreamblePendingUntilFirstOutputBoundary(
 	upstream := preamble + firstOutput + terminalEvent
 
 	for _, strict := range []bool{false, true} {
-		t.Run(fmtBool(strict), func(t *testing.T) {
-			withResilienceSettings(t, func(s *resilience.Settings) { s.Stream.StrictTerminal = strict })
+		name := "strict_off"
+		if strict {
+			name = "strict_on"
+		}
+		t.Run(name, func(t *testing.T) {
+			// This file also runs without the unit tag: switch the setting
+			// here instead of through the unit-only helpers.
+			orig := *resilience.Current()
+			settings := resilience.Defaults()
+			settings.Stream.StrictTerminal = strict
+			resilience.Publish(settings)
+			t.Cleanup(func() { resilience.Publish(orig) })
 			_, recorder, writer, err := runPassthroughFlushTest(t, io.NopCloser(strings.NewReader(upstream)), -1)
 
 			require.NoError(t, err)
