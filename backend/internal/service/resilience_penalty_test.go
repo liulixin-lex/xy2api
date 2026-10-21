@@ -281,3 +281,58 @@ func TestResilienceOffKeepsLegacyPenalties(t *testing.T) {
 	svc.HandleUpstreamError(context.Background(), account, http.StatusForbidden, http.Header{}, []byte(`{"error":{"message":"insufficient balance"}}`))
 	require.Equal(t, 1, repo.errorCalls)
 }
+
+func TestDecisionV2ClassifiesEvidenceBeforeLegacyRetryFlag(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, tc := range []struct {
+		name    string
+		status  int
+		body    string
+		headers http.Header
+		want    resilience.Category
+	}{
+		{name: "raw 429", status: 429, body: `{"error":{"message":"Too many pending requests"}}`, want: resilience.CategoryRateLimit},
+		{name: "busy 502", status: 502, body: `{"error":{"message":"The service is busy"}}`, want: resilience.CategoryTransient},
+		{name: "concurrency 503", status: 503, body: `{"error":{"message":"Concurrency limit exceeded for account"}}`, want: resilience.CategoryTransient},
+		{name: "grok idle", status: 502, body: `{"error":{"code":"empty_upstream","message":"Grok stream idle timeout"}}`, want: resilience.CategoryTransient},
+		{name: "balance 429", status: 429, body: `{"error":{"message":"insufficient balance"}}`, want: resilience.CategoryBalance},
+		{name: "reset 429", status: 429, body: `{"error":{"code":"rate_limit_exceeded","resets_in_seconds":600}}`, want: resilience.CategoryRateLimitReset},
+		{name: "content refusal 429", status: 429, body: `{"error":{"code":"content_policy_violation","message":"refused"}}`, want: resilience.CategoryClientError},
+		{name: "overload code", status: 429, body: `{"error":{"code":"server_is_overloaded"}}`, want: resilience.CategoryCapacityShed},
+		{name: "slow_down code", status: 429, body: `{"error":{"code":"slow_down"}}`, want: resilience.CategoryCapacityShed},
+		{name: "overloaded type", status: 502, body: `{"error":{"type":"overloaded_error"}}`, want: resilience.CategoryCapacityShed},
+		{name: "overloaded 503", status: 503, body: `{"error":{"message":"server is overloaded"}}`, want: resilience.CategoryCapacityShed},
+		{name: "529", status: 529, body: `{}`, want: resilience.CategoryCapacityShed},
+		{name: "cloudflare 503", status: 503, body: `<html><title>Cloudflare</title>the origin is overloaded or misconfigured</html>`, want: resilience.CategoryTransient},
+		{name: "unstructured overload 429", status: 429, body: `{"error":{"message":"overloaded"}}`, want: resilience.CategoryRateLimit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &UpstreamFailoverError{StatusCode: tc.status, ResponseBody: []byte(tc.body), ResponseHeaders: tc.headers, RequestScopedTransient: true}
+			result := ClassifyFailoverError(e)
+			require.Equal(t, tc.want, result.Category)
+			require.Equal(t, string(tc.want), opsResilienceCategory(&OpsUpstreamErrorEvent{UpstreamStatusCode: tc.status, UpstreamResponseBody: tc.body, Message: extractUpstreamErrorMessage([]byte(tc.body))}))
+		})
+	}
+}
+
+func TestDecisionV2OffRestoresLegacyClassification(t *testing.T) {
+	withResilienceSettings(t, func(s *resilience.Settings) { s.Failure.DecisionV2 = false })
+	e := grokStreamIdleFailoverError(&Account{Platform: PlatformGrok, Type: AccountTypeOAuth}, time.Second)
+	require.Equal(t, resilience.CategoryCapacityShed, ClassifyFailoverError(e).Category)
+	require.Equal(t, resilience.CategoryRateLimit, classifyUpstreamHTTP(502, nil, nil, "The service is busy").Category)
+}
+
+func TestDecisionV2TimeoutOpsKeepsTransientCategory(t *testing.T) {
+	withResilienceSettings(t, nil)
+	e := &OpsUpstreamErrorEvent{UpstreamStatusCode: 504, Kind: "first_output_timeout", UpstreamResponseBody: `{"error":{"type":"first_output_timeout"}}`}
+	require.Equal(t, string(resilience.CategoryTransient), opsResilienceCategory(e))
+}
+
+func TestDecisionV2OpsUsesResponseHeaders(t *testing.T) {
+	withResilienceSettings(t, nil)
+	body := []byte(`{"error":{"message":"Too many pending requests"}}`)
+	headers := http.Header{"Retry-After": []string{"600"}}
+	e := &UpstreamFailoverError{StatusCode: 429, ResponseHeaders: headers, ResponseBody: body, RequestScopedTransient: true}
+	require.Equal(t, string(ClassifyFailoverError(e).Category), opsHTTPResilienceCategory(429, headers, body, "Too many pending requests"))
+	require.Equal(t, string(resilience.CategoryRateLimitReset), opsHTTPResilienceCategory(429, headers, body, "Too many pending requests"))
+}

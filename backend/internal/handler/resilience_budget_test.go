@@ -155,7 +155,8 @@ func TestCapacityExhaustedBecomesNoAccount503(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := newResilienceTestContext(t)
 	c.Request = c.Request.WithContext(budgetCtx(t, resilience.KindText, 7))
-	shed := &service.UpstreamFailoverError{StatusCode: http.StatusBadGateway, RequestScopedTransient: true}
+	shed := &service.UpstreamFailoverError{StatusCode: http.StatusBadGateway, RequestScopedTransient: true,
+		ResponseBody: []byte(`{"error":{"code":"server_is_overloaded"}}`)}
 	status, errType, msg := resilienceCapacityExhausted(c, shed, http.StatusBadGateway, "upstream_error", "Upstream service temporarily unavailable")
 	require.Equal(t, http.StatusServiceUnavailable, status)
 	require.Equal(t, "api_error", errType)
@@ -217,4 +218,29 @@ func TestFailoverLoopSkipsAttemptReportedByStream(t *testing.T) {
 	// Other accounts of the request still count.
 	resilienceAttemptFailed(ctx, 14, bad)
 	require.Equal(t, 1, rec.failures[14])
+}
+
+func TestDecisionV2TransientAndRateLimitKeepSameHostCandidates(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, tc := range []struct {
+		name     string
+		status   int
+		body     string
+		platform string
+	}{
+		{"grok idle OAuth", 502, `{"error":{"code":"empty_upstream","message":"Grok stream idle timeout"}}`, service.PlatformGrok},
+		{"busy 502", 502, `{"error":{"message":"The service is busy"}}`, service.PlatformOpenAI},
+		{"raw 429", 429, `{"error":{"message":"Too many pending requests"}}`, service.PlatformOpenAI},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := budgetCtx(t, resilience.KindText, 7)
+			fs := NewFailoverState(10, false)
+			sched := &hostSharingUnscheduler{sameHost: map[int64][]int64{1: {2, 3}}}
+			e := &service.UpstreamFailoverError{StatusCode: tc.status, ResponseBody: []byte(tc.body), RequestScopedTransient: true}
+			require.Equal(t, FailoverContinue, fs.HandleFailoverError(ctx, sched, 1, tc.platform, 0, e))
+			require.NotContains(t, fs.FailedAccountIDs, int64(2), "another credential on the same host stays eligible")
+			require.NotContains(t, fs.FailedAccountIDs, int64(3))
+			require.True(t, requestBudget(ctx).AllowCapacitySwitch(), "ordinary retries do not consume the capacity host switch")
+		})
+	}
 }

@@ -50,16 +50,37 @@ func resilienceUniform403Eligible(account *Account) bool {
 
 // classifyUpstreamHTTP classifies an upstream HTTP error response.
 func classifyUpstreamHTTP(statusCode int, headers http.Header, body []byte, upstreamMsg string) resilience.Result {
-	cfg := resilience.Current()
-	return resilience.Classify(resilience.Outcome{
+	return classifyUpstreamOutcome(resilience.Outcome{
 		Source:     resilience.SourceHTTP,
 		StatusCode: statusCode,
-		Code:       extractUpstreamErrorCode(body),
-		Type:       strings.TrimSpace(gjson.GetBytes(body, "error.type").String()),
 		Message:    upstreamMsg,
 		Body:       body,
 		Headers:    headers,
-	}, cfg.Failure.BalanceKeywordsExtra)
+	})
+}
+
+// classifyUpstreamOutcome is shared by HTTP, stream ops and handler failover.
+func classifyUpstreamOutcome(outcome resilience.Outcome) resilience.Result {
+	outcome.Code = firstNonEmpty(outcome.Code, extractUpstreamErrorCode(outcome.Body),
+		gjson.GetBytes(outcome.Body, "response.error.code").String())
+	outcome.Type = firstNonEmpty(outcome.Type, gjson.GetBytes(outcome.Body, "error.type").String(),
+		gjson.GetBytes(outcome.Body, "response.error.type").String())
+	outcome.Message = firstNonEmpty(outcome.Message, extractUpstreamErrorMessage(outcome.Body),
+		gjson.GetBytes(outcome.Body, "response.error.message").String())
+	return resilience.ClassifyWithSettings(outcome, resilience.Current())
+}
+
+// opsHTTPResilienceCategory retains header-only reset evidence before the
+// response is reduced to the optional scrubbed ops body.
+func opsHTTPResilienceCategory(status int, headers http.Header, body []byte, message string) string {
+	if !resilience.Current().FailureOn() {
+		return ""
+	}
+	category := classifyUpstreamHTTP(status, headers, body, message).Category
+	if category == resilience.CategoryFirstOutputTimeout {
+		category = resilience.CategoryTransient
+	}
+	return string(category)
 }
 
 // resilienceHandleUpstreamError applies the resilience penalties to an
@@ -346,14 +367,18 @@ func ClassifyFailoverError(e *UpstreamFailoverError) resilience.Result {
 	if e == nil {
 		return resilience.Result{Category: resilience.CategorySuccess}
 	}
-	if e.RequestScopedTransient {
+	if e.RequestScopedTransient && !resilience.Current().DecisionV2On() {
 		return resilience.Result{Category: resilience.CategoryCapacityShed, Reason: "request_scoped"}
 	}
 	if e.IsCredentialFailure() {
 		return resilience.Result{Category: resilience.CategoryAuth, Reason: "credential_failure"}
 	}
 	msg := strings.TrimSpace(extractUpstreamErrorMessage(e.ResponseBody))
-	return classifyUpstreamHTTP(e.StatusCode, e.ResponseHeaders, e.ResponseBody, msg)
+	result := classifyUpstreamHTTP(e.StatusCode, e.ResponseHeaders, e.ResponseBody, msg)
+	if result.Category == resilience.CategorySuccess && e.RequestScopedTransient {
+		return resilience.Result{Category: resilience.CategoryTransient, Reason: "request_scoped_transient"}
+	}
+	return result
 }
 
 // opsResilienceCategory classifies an upstream error event for the ops
@@ -364,22 +389,21 @@ func opsResilienceCategory(ev *OpsUpstreamErrorEvent) string {
 		return ""
 	}
 	body := []byte(ev.UpstreamResponseBody)
+	if ev.Kind == "first_output_timeout" {
+		// Keep the historical ops category; kind/reason carry the typed cause.
+		return string(resilience.CategoryTransient)
+	}
 	switch {
 	case ev.UpstreamStatusCode >= 400:
-		return string(classifyUpstreamHTTP(ev.UpstreamStatusCode, nil, body, ev.Message).Category)
+		return opsHTTPResilienceCategory(ev.UpstreamStatusCode, nil, body, ev.Message)
 	case ev.UpstreamStatusCode == http.StatusOK && (len(body) > 0 || ev.Message != ""):
 		// A Responses response.failed carries its error under "response".
-		code := strings.TrimSpace(gjson.GetBytes(body, "response.error.code").String())
-		if code == "" {
-			code = extractUpstreamErrorCode(body)
-		}
-		return string(resilience.Classify(resilience.Outcome{
+		return string(classifyUpstreamOutcome(resilience.Outcome{
 			Source:     resilience.SourceStreamEvent,
 			StatusCode: http.StatusOK,
-			Code:       code,
 			Message:    ev.Message,
 			Body:       body,
-		}, resilience.Current().Failure.BalanceKeywordsExtra).Category)
+		}).Category)
 	}
 	return ""
 }
