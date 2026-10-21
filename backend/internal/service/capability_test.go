@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -146,7 +147,8 @@ func TestCapabilitySelectionSkipsLearnedAndReportsNoAccountReason(t *testing.T) 
 	require.Contains(t, stats.summary(""), "capability_stream_only=1")
 	selected, _, stats = svc.selectBestAccount(ctx, nil, PlatformOpenAI, []Account{*a}, "gpt-test", nil, false, "", false)
 	require.Nil(t, selected)
-	err := noAvailableOpenAISelectionError("gpt-test", false, stats.summary(""))
+	err := noAvailableOpenAISelectionError("gpt-test", false, stats.summary(""), stats.capabilityOnly())
+	require.True(t, IsCapabilityOnlySelectionError(err))
 	require.True(t, errors.Is(err, ErrNoAvailableAccounts))
 	require.Contains(t, err.Error(), "capability_stream_only")
 	advanced := &defaultOpenAIAccountScheduler{service: svc}
@@ -303,4 +305,27 @@ func TestCapabilityLegacyMixedExclusionsKeepGenericNoAccount(t *testing.T) {
 	err := noAvailableOpenAISelectionError("gpt-test", compactBlocked, stats.summary(""))
 	require.ErrorIs(t, err, ErrNoAvailableAccounts)
 	require.NotContains(t, err.Error(), "model_rate_limited=", "the handler would otherwise turn a mixed 503 into 429")
+}
+
+func TestCapabilityOnlySelectionMarkerRequiresWholePool(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pool    int
+		reasons map[string]int
+		want    bool
+	}{
+		{"empty", 0, nil, false},
+		{"all capability", 2, map[string]int{resilience.ReasonCapabilityStreamOnly: 2}, true},
+		{"mixed", 2, map[string]int{resilience.ReasonCapabilityStreamOnly: 1, "ineligible": 1}, false},
+		{"other gate also failed", 2, map[string]int{resilience.ReasonCapabilityStreamOnly: 2, "runtime_blocked": 1}, false},
+		{"incomplete snapshot", 3, map[string]int{resilience.ReasonCapabilityStreamOnly: 2}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stats := openAISelectionFilterStats{pool: tc.pool, reasons: tc.reasons}
+			err := noAvailableOpenAISelectionError("model", false, stats.summary(""), stats.capabilityOnly())
+			require.Equal(t, tc.want, IsCapabilityOnlySelectionError(fmt.Errorf("selection: %w", err)))
+			require.ErrorIs(t, err, ErrNoAvailableAccounts)
+		})
+	}
+	require.False(t, IsCapabilityOnlySelectionError(nil))
 }

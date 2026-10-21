@@ -288,3 +288,36 @@ func TestCapabilityLegacyMixedExclusionsRemain503(t *testing.T) {
 	fallback := noAccountErrorClassification{Status: http.StatusServiceUnavailable, ErrType: "api_error", Message: "Service temporarily unavailable"}
 	require.Equal(t, fallback, classifySelectionFailureError(err, fallback))
 }
+
+func TestCapabilityOnlyExhaustionStopsBlindRetries(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, mixed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("mixed=%t", mixed), func(t *testing.T) {
+			c, recorder := newResilienceTestContext(t)
+			ctx := resilience.WithCapabilityRequest(c.Request.Context(), "responses", false)
+			c.Request = c.Request.WithContext(ctx)
+			resilience.SetRetryAdvice(ctx, resilience.RetryAdvice{Seconds: 5, Source: "recovery"})
+			c.Header("Retry-After", "5")
+			if mixed {
+				resilienceAttemptFailed(ctx, 1, newTestFailoverErr(502, false, false))
+			}
+			failure := &service.UpstreamFailoverError{StatusCode: 400, Reason: service.GatewayFailureReason(resilience.ReasonCapabilityStreamOnly), NextAccountAction: service.NextAccountRetry}
+			resilienceAttemptFailed(ctx, 2, failure)
+			status, typ, message := resilienceCapacityExhausted(c, failure, 400, "invalid_request_error", "stream must be true")
+			require.Equal(t, 503, status)
+			require.Equal(t, "api_error", typ)
+			require.Equal(t, !mixed, service.IsCapabilityOnlyExhaustion(ctx, failure))
+			if mixed {
+				require.NotEqual(t, service.CapabilityOnlyMessage, message)
+				require.Equal(t, "5", recorder.Header().Get("Retry-After"))
+				require.False(t, resilience.RetryAdviceFrom(ctx).Suppress)
+			} else {
+				require.Equal(t, service.CapabilityOnlyMessage, message)
+				require.Empty(t, recorder.Header().Get("Retry-After"))
+				require.Equal(t, "false", recorder.Header().Get("x-should-retry"))
+				require.True(t, resilience.RetryAdviceFrom(ctx).Suppress)
+				require.NotContains(t, message, "Please try again")
+			}
+		})
+	}
+}
