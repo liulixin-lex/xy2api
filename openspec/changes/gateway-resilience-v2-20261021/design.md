@@ -270,7 +270,8 @@
 - Gateway Responses、Gateway Chat、OpenAI→Messages 的专用耗尽出口（`handleAnthropicFailoverExhausted` 等）统一调用公共的 `applyExhaustedRetryHint`：429 保持 429；到达回合封顶的 5xx 改为 503，删除 HTTP `Retry-After` 与正文里的重试时间，写 `x-should-retry: false` 与 `server_is_overloaded`，同时把请求的 `RetryAdvice` 置为 `Suppress`。
 - 一个请求的回合计数只增加一次，多次调用读取同一结果。
 - 一次性终止：三个专用出口与公共 Responses/Chat 终态 writer 共用同一个请求标记（`beginResilienceTerminal`）；已尝试写出终态（含短写与断连）后不再追加。
-- 错误字段与基线一致（审查 P2-12，α 2026-10-21T03:24Z）：Gateway Responses 的 JSON 错误保留传入的 `error.code`（如 `insufficient_balance`），Gateway Chat 与 OpenAI→Messages 保留原有的 `error.type`（如 `concurrent_balance_reserved`）；可以另附 `code` 字段，到达回合封顶时 code 改为 `server_is_overloaded`。原生 OpenAI 等基线已接入的翻译函数不变。
+- 已输出后的耗尽（审查 P2-13，α `0d35b2919`）：Gateway Responses 与 Chat 先判断是否已写出真实内容，再调用 `applyExhaustedRetryHint` 或复制上游的 `Retry-After`。已有内容时只记必要的运维错误，不计失败回合、不加重试提示、不再追加终态；只发过排队心跳时仍按原来的终态收口。
+- 错误字段与基线一致（审查 P2-12，α `8657fca89`）：Gateway Responses 的 JSON 错误保留传入的 `error.code`（如 `insufficient_balance`），Gateway Chat 与 OpenAI→Messages 保留原有的 `error.type`（如 `concurrent_balance_reserved`）；可以另附 `code` 字段，到达回合封顶时 code 改为 `server_is_overloaded`。原生 OpenAI 等基线已接入的翻译函数不变。
 - OpenAI→Messages 的专用 writer 也应用公共的 code 与消息翻译和运维的流内错误标记；Gateway Chat 在只发过排队心跳时也走终止帧，不再直接返回。
 - 不改已写出的真实输出或上游自己的终态。
 - 现有限制：快速失败与配置拒绝不计入回合封顶；回合按进程内 TurnKey 的连续失败与间隔计数，不严格等于客户端的一轮生成。
