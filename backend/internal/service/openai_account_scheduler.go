@@ -1866,6 +1866,11 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if !accountSupportsOpenAICapabilities(account, req.RequiredCapability, req.RequiredImageCapability) {
 		return false, "capability_mismatch"
 	}
+	if !req.RequireCompact && req.RequiredImageCapability == "" {
+		if reason := capabilityEligibilityReason(ctx, account, req.RequestedModel, time.Now()); reason != "" {
+			return false, reason
+		}
+	}
 	// 分组利润控制：不合格账号在候选过滤与抢槽后终检阶段即被排除，
 	// 排序/评分/粘性/熔断只在合格账号之间工作；named reason 进入 filter stats。
 	if vetoed, reason := openAIProfitControlVetoReason(ctx, account); vetoed {
@@ -2268,7 +2273,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			resilience.StateFrom(ctx).SetSession(derefGroupID(groupID), sessionHash, s.openAISessionRecorder())
 		}
 	}
-	return selection, decision, err
+	return selection, decision, capabilitySelectionError(ctx, err)
 }
 
 func (s *OpenAIGatewayService) selectAccountWithoutQualityRouting(

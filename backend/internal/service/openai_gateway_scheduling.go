@@ -502,6 +502,11 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 	if requireCompact && openAICompactSupportTier(account) == 0 {
 		return "compact_unsupported"
 	}
+	if !requireCompact {
+		if reason := capabilityEligibilityReason(ctx, account, requestedModel, time.Now()); reason != "" {
+			return reason
+		}
+	}
 	return ""
 }
 
@@ -978,7 +983,7 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusionsStickyHit(ctx 
 	selected, compactBlocked, filterStats := s.selectBestAccount(ctx, groupID, platform, accounts, requestedModel, excludedIDs, requireCompact, requiredCapability, preferLowUpstreamRate)
 
 	if selected == nil {
-		return nil, false, noAvailableOpenAISelectionError(requestedModel, compactBlocked, filterStats.summary(""))
+		return nil, false, capabilitySelectionError(ctx, noAvailableOpenAISelectionError(requestedModel, compactBlocked, filterStats.summary("")))
 	}
 
 	hydrated, err := s.hydrateSelectedAccount(ctx, selected)
@@ -1096,7 +1101,11 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 
 		fresh := s.resolveFreshSchedulableOpenAIAccountBeforeProfit(ctx, acc, platform, requestedModel, false, requiredCapability)
 		if fresh == nil {
-			filterStats.exclude("ineligible")
+			reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, acc, platform, requestedModel, requireCompact, requiredCapability)
+			if reason == "" {
+				reason = "ineligible"
+			}
+			filterStats.exclude(reason)
 			continue
 		}
 		fresh = s.recheckSelectedOpenAIAccountFromDBBeforeProfit(ctx, fresh, groupID, platform, requestedModel, false, requiredCapability)
@@ -1190,6 +1199,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 }
 
 func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (selection *AccountSelectionResult, selectionErr error) {
+	defer func() { selectionErr = capabilitySelectionError(ctx, selectionErr) }()
 	if cache, atomic := s.cache.(OpenAIStickyAtomicCache); atomic && openAIAtomicStickySession(sessionHash) && NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !s.qualityOwnsSticky(ctx, groupID, sessionHash) && ctx.Value(openAIStickyReconciledKey{}) == nil {
 		initialOwner, _ := s.getStickySessionAccountID(ctx, groupID, sessionHash)
 		defer func() {
