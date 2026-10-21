@@ -205,10 +205,14 @@
 
 - **本请求**：`failure.decision_v2` 开启时，钩子返回可换号的哨兵错误（`IsCapabilityStreamOnly()`；不上报账号调度失败、不同号重试），handler 只计请求预算的尝试次数，不记会话失败、不冷却。这次拒绝不写运维的上游错误记录（写入会把账号记为本请求失败），只记中性事件 `resilience.capability_learned`。`decision_v2` 关闭时只学习，钩子返回空，本请求照旧返回 400。
 - **选号**：`Account.CapabilityExclusion(ctx, model, now)` 只在确定的路径上过滤：上游协议与入站相同，且上游的流模式跟随客户端（PM 指令，2026-10-21）。跨协议的转换（如 Chat 转 Responses 上游，这类转换本来就以 `stream=true` 请求上游）、按模型路由的路径，以及路由无法确定的 Grok OAuth Chat 都不过滤；Grok 的两种协议各自独立。不新增路由提示的 helper。OpenAI 选号的共同资格检查（`openai_gateway_scheduling.go`）与 `openai_account_scheduler.go` 的 `isAccountRequestCompatibleReason` 都经钩子 `capabilityEligibilityReason` 过滤，覆盖粘性会话与末位兜底的最后检查；钩子登记到 `scheduler-diff.json` 与 `policy.json`（α）。
-- 全部被过滤后的无号仍是 503，原因码 `capability_stream_only`，不再把 400 归咎于用户；消息提示客户端改用 `"stream": true`，不带 `Retry-After`，写 `x-should-retry: false`：在这些账号恢复前重试同样的非流式请求没有意义（PM 2026-10-21T02:42Z）。【待契约：γ 与 α 的提交】
+- **只因能力而无号的应答**（PM 2026-10-21T02:42Z）：两种情形用同一个应答——
+  - 选号时全部候选都因能力被过滤（`service.IsCapabilityOnlySelectionError`）；
+  - 本请求的失败尝试全部是“只接受流式”的哨兵、没有其他原因（`service.IsCapabilityOnlyExhaustion`；handler 共用的 `resilienceAttemptFailed` 记录有无其他失败，不借用“本请求已失败账号”）。
+
+  应答为 503（Anthropic 协议为 `api_error`），原因码 `capability_stream_only`，消息 `No available account in this group supports non-streaming requests; retry with "stream": true`（常量 `service.CapabilityOnlyMessage`），不带 `Retry-After`、不加重试尾句，写 `x-should-retry: false`，并把请求的 `RetryAdvice` 置为 `Suppress`（`Source` 为 `capability_stream_only`）：这些账号恢复前重试同样的非流式请求没有意义。混有其他失败原因时保留原来的无号或耗尽提示。不再把上游的 400 归咎于用户。共用的耗尽出口 `resilienceCapacityExhausted`（γ）与 OpenAI 专用出口（α，在透传规则之前）都按此处理。【待契约：γ 与 α 的提交】
 - 请求标记里另存本请求的中性排除集合（不借用“本请求已失败账号”），用于最终无号的原因与重试建议的候选排除：被能力挡掉的账号不会被建议成健康备选。
 - 负缓存的键按协议与流模式隔离，能力阻断也不计入全组的快速失败：同一分组的流式请求不会因为非流式请求被挡而拿到缓存的 503。
-- 本请求里所有候选都以“只接受流式”拒绝、换号耗尽时，同样返回 503（Anthropic 协议为 `api_error`），不返回上游的 400：共用的容量耗尽出口 `resilienceCapacityExhausted` 先识别哨兵（γ，`2cb3343de`），OpenAI 专用出口在透传规则之前加同样的分支（α，必要时 `code` 为 `capability_stream_only`）。【待契约：α 的实现提交】
+- 份额调度：份额 Explain 与候选原因把 `capability_stream_only` 和 `capability_mismatch` 都映射为 `sharesched.ReasonCapabilityMismatch`（`share_scheduling_openai.go`，α）。
 - 实现提交：γ `2cb3343de`（学习、存放、过滤、哨兵、清除接口与 Grok 原生调用点）；β 接 OpenAI 其余转发的检测钩子；α 接入口标记、DTO、路由与 Explain。
 
 ### 6.4 观测与管理
@@ -244,7 +248,7 @@
 | 本请求此刻还有健康备选 | `healthy_candidate` | 1 秒 |
 | 组内没有健康候选，且能算出最早恢复时间 | `recovery` | 向上取整并夹到 2–10 秒；正文 “try again in Ns” 的 N 与之一致 |
 | 恢复时间未知（没有快照、快照过期、请求已取消，或剩下的只有不会自行恢复的硬状态） | `unknown` | 不带 |
-| 回合封顶、用户自身余额不足的终态、内容拒绝 | `turn_cap`、`balance_terminal`、`content_rejection`（`Suppress`） | 不带，并删除原有的重试尾句。上游账号余额不足（可换号）与在途预留超额不算终态 |
+| 回合封顶、用户自身余额不足的终态、内容拒绝、只因能力而无号（§6.3） | `turn_cap`、`balance_terminal`、`content_rejection`、`capability_stream_only`（`Suppress`） | 不带，并删除原有的重试尾句。上游账号余额不足（可换号）与在途预留超额不算终态 |
 | 请求上没有 advice | — | 保持 0.4.3 |
 
 - 写入位置：`error.headers.retry-after`（Codex 从这里读重试等待）。
