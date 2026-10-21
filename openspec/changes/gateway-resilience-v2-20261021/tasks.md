@@ -48,7 +48,7 @@
 - [x] 6.1 学习、有效期、存放（账号 `extra` 两键加指纹）；本请求换号不计账号失败（γ `2cb3343de`、`126fead6f`；β 的 OpenAI 三处检测钩子 `09ef67f11`）。
 - [ ] 6.2 选号过滤（非流式请求）；无号原因码 `capability_stream_only` 与只因能力而无号的专用应答（γ `2cb3343de`、`a03ad9c79`、`f61b7d497`，α `6322aa374`）；`scheduler-diff.json` 与 `capabilityEligibilityReason` 钩子登记（α 集成时）。
 - [x] 6.3 Explain 原因；管理接口（查看、清除）：DTO 与清除路由 α `bf38c06c5`，Explain 与入口标记 α `affef416f`。
-- [ ] 6.4 前端：账号的仅流式标识与清除；Explain 文案与请求类型选择（FE `e042880ad`、`ade0f689d`、`74e392ffd`；等 α 的 DTO、路由与 Explain 联调）。
+- [x] 6.4 前端：账号的仅流式标识与清除；Explain 文案与请求类型选择（FE `e042880ad`、`ade0f689d`、`74e392ffd`，HEAD `bd215aa0c`；后端 DTO、路由与 Explain 已由 α 提交，联调随集成）。
 
 ## 7. W8-lite 事件字段（α、β）
 
@@ -56,7 +56,7 @@
 
 ## 8. 前端设置（FE）
 
-- [ ] 8.1 新开关的设置界面与中英文说明；单测；lint、typecheck、test、build（FE `41dfd5ea6`、`34d87ef10`）。
+- [x] 8.1 新开关的设置界面与中英文说明；单测；lint、typecheck、test、build（FE `41dfd5ea6`、`34d87ef10`；HEAD `bd215aa0c` 四项全过，3182 个用例）。
 
 ## 9. 文档与登记（DOCS、α）
 
