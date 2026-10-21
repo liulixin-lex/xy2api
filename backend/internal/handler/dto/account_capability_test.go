@@ -24,6 +24,7 @@ func TestAccountCapabilitySummaryAndPrivateExtra(t *testing.T) {
 		{"expired", fingerprint, time.Now().Add(-time.Hour), 0},
 		{"credentials changed", "old-fingerprint", expiry, 0},
 		{"absent", "", time.Time{}, 0},
+		{"cleared null", "", time.Time{}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := &service.Account{ID: 11, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
@@ -34,6 +35,9 @@ func TestAccountCapabilitySummaryAndPrivateExtra(t *testing.T) {
 						"expires_at": tc.expiry.Format(time.RFC3339Nano), "fingerprint": tc.fingerprint,
 					}
 				}
+			}
+			if tc.name == "cleared null" {
+				require.NoError(t, json.Unmarshal([]byte(`{"ordinary":"kept","capability_learned_responses":null,"capability_learned_chat":null}`), &src.Extra))
 			}
 			before, err := json.Marshal(src.Extra)
 			require.NoError(t, err)
