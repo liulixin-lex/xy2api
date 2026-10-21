@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
 	"sort"
 	"time"
 
@@ -31,15 +32,17 @@ type ResilienceExplanation struct {
 
 // ResilienceAccountExplanation is one account of the group.
 type ResilienceAccountExplanation struct {
-	AccountID       int64      `json:"account_id"`
-	Name            string     `json:"name"`
-	Platform        string     `json:"platform"`
-	Priority        int        `json:"priority"`
-	Tier            string     `json:"tier"`
-	Reason          string     `json:"reason,omitempty"`
-	RecoverAt       *time.Time `json:"recover_at,omitempty"`
-	SessionFailures int64      `json:"session_failures,omitempty"`
-	Avoided         bool       `json:"avoided,omitempty"`
+	CapabilityLearned    []resilience.LearnedCapability `json:"capability_learned"`
+	CapabilityTTLSeconds int                            `json:"capability_ttl_seconds,omitempty"`
+	AccountID            int64                          `json:"account_id"`
+	Name                 string                         `json:"name"`
+	Platform             string                         `json:"platform"`
+	Priority             int                            `json:"priority"`
+	Tier                 string                         `json:"tier"`
+	Reason               string                         `json:"reason,omitempty"`
+	RecoverAt            *time.Time                     `json:"recover_at,omitempty"`
+	SessionFailures      int64                          `json:"session_failures,omitempty"`
+	Avoided              bool                           `json:"avoided,omitempty"`
 }
 
 // ResilienceLastResortChoice is the account last-resort selection would try
@@ -113,7 +116,7 @@ func (r *ResilienceService) Explain(ctx context.Context, groupID int64, sessionH
 		acc := accounts[i]
 		tier, recoverAt, reason := resiliencePenaltyOf(&acc, model, now)
 		e := ResilienceAccountExplanation{AccountID: acc.ID, Name: acc.Name, Platform: acc.Platform, Priority: acc.Priority,
-			Tier: tierName(tier), Reason: reason, SessionFailures: failures[acc.ID]}
+			Tier: tierName(tier), Reason: reason, SessionFailures: failures[acc.ID], CapabilityLearned: acc.CapabilityLearned(now)}
 		if !recoverAt.IsZero() {
 			at := recoverAt
 			e.RecoverAt = &at
@@ -121,10 +124,21 @@ func (r *ResilienceService) Explain(ctx context.Context, groupID int64, sessionH
 		if _, ok := avoided[acc.ID]; ok {
 			e.Avoided = true
 		}
-		if tier == resilience.TierNone && !e.Avoided {
+		capability := acc.CapabilityExclusion(ctx, model, now)
+		if capability != nil {
+			e.CapabilityTTLSeconds = int(math.Ceil(capability.ExpiresAt.Sub(now).Seconds()))
+			// This exclusion applies to this request mode, not account health.
+			// A hard penalty still explains the stronger account-wide blocker.
+			if tier != resilience.TierHard {
+				e.Reason = resilience.ReasonCapabilityStreamOnly
+				at := capability.ExpiresAt
+				e.RecoverAt = &at
+			}
+		}
+		if capability == nil && tier == resilience.TierNone && !e.Avoided {
 			out.HealthyCount++
 		}
-		if lastResortTierAllowed(tier, acc.ID, avoided) {
+		if capability == nil && lastResortTierAllowed(tier, acc.ID, avoided) {
 			candidate := acc
 			cands = append(cands, lastResortCandidate{account: &candidate, recoverAt: recoverAt})
 		}
@@ -154,12 +168,34 @@ func (r *ResilienceService) Explain(ctx context.Context, groupID int64, sessionH
 			fb.Usable = resilience.Current().FallbackGroupOn() && fallback.Status == StatusActive &&
 				fallback.Platform == group.Platform && fallback.SubscriptionType != SubscriptionTypeSubscription &&
 				group.SubscriptionType != SubscriptionTypeSubscription
-			fb.FallbackHealthy = r.groupHasHealthyAccount(ctx, fallback.ID, now)
-			fb.WouldMove = fb.Usable && fb.FallbackHealthy && !r.groupHasHealthyAccount(ctx, groupID, now)
+			fb.FallbackHealthy = r.explainGroupHasHealthyAccount(ctx, fallback.ID, model, now)
+			fb.WouldMove = fb.Usable && fb.FallbackHealthy && !r.explainGroupHasHealthyAccount(ctx, groupID, model, now)
 		}
 		out.FallbackGroup = fb
 	}
 	return out, nil
+}
+
+// Keep the default, group-wide fallback explanation. An explicit request mode
+// additionally excludes learned capabilities in both the source and fallback.
+func (r *ResilienceService) explainGroupHasHealthyAccount(ctx context.Context, groupID int64, model string, now time.Time) bool {
+	if _, _, scoped := resilience.CapabilityRequestFrom(ctx); !scoped {
+		return r.groupHasHealthyAccount(ctx, groupID, now)
+	}
+	accounts, err := r.groupAccountsForLastResort(ctx, r.fallbackAccounts, groupID)
+	if err != nil {
+		return true // Preserve the existing unknown-state fallback policy.
+	}
+	for i := range accounts {
+		account := &accounts[i]
+		if !account.IsActive() || !account.Schedulable || account.CapabilityExclusion(ctx, model, now) != nil {
+			continue
+		}
+		if tier, _, _ := resiliencePenaltyOf(account, model, now); tier == resilience.TierNone {
+			return true
+		}
+	}
+	return false
 }
 
 func tierName(t resilience.PenaltyTier) string {

@@ -97,3 +97,22 @@ func TestUserMessageQueuePingsAreNotDelivery(t *testing.T) {
 	require.True(t, gone)
 	require.False(t, delivered, "only queue pings reached the client")
 }
+
+func TestUserMessageQueueUsesInboundPingProtocol(t *testing.T) {
+	for _, endpoint := range []string{EndpointResponses, EndpointChatCompletions} {
+		t.Run(endpoint, func(t *testing.T) {
+			c, rec, _, cancel := trackedQueueContext(t)
+			defer cancel()
+			c.Request.URL.Path = endpoint
+			queue := service.NewUserMessageQueueService(&queuePingLockStub{seq: []bool{false, true}}, nil, &config.UserMessageQueueConfig{})
+			helper := NewUserMsgQueueHelper(queue, SSEPingFormatClaude, 5*time.Millisecond)
+			started := false
+			release, err := helper.AcquireWithWait(c, 7, 0, true, &started, time.Second, zap.NewNop())
+			require.NoError(t, err)
+			defer release()
+			require.True(t, started)
+			require.Empty(t, parseSSEEvents(rec.Body.String()))
+			require.Contains(t, rec.Body.String(), string(SSEPingFormatComment))
+		})
+	}
+}

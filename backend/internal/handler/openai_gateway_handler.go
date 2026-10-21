@@ -547,6 +547,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	c.Request = c.Request.WithContext(service.WithRequestReplaySafety(c.Request.Context(), body, false))
 	setOpsRequestContext(c, reqModel, reqStream)
+	installResilienceRetryAdvice(c, h.gatewayService, apiKey, reqModel)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body); decision != nil && !decision.AllowNextStage {
@@ -558,6 +559,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// Codex 在所有请求中被动声明 image_gen namespace，宽泛检测会导致禁了生图的
 	// 分组中所有 Codex 请求被 403（#4447），并误占生图并发槽位。
 	imageIntent := service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, body)
+	if !legacyCompact && !nativeV2 && !imageIntent {
+		c.Request = c.Request.WithContext(resilience.WithCapabilityRequest(c.Request.Context(), resilience.CapabilityProtocolResponses, reqStream))
+	}
 	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
 		return
@@ -710,9 +714,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "compact_not_supported", "No available accounts support /responses/compact", streamStarted)
 					return
 				}
-				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, requestPlatform)
+				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, requestPlatform, err)
 				cls = classifySelectionFailureError(err, cls)
-				if !cls.ModelNotFound {
+				if !cls.ModelNotFound && !cls.CapabilityOnly {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
 				h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
@@ -727,7 +731,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 		if selection == nil || selection.Account == nil {
 			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, requestPlatform)
-			if !cls.ModelNotFound {
+			if !cls.ModelNotFound && !cls.CapabilityOnly {
 				markOpsRoutingCapacityLimited(c)
 			}
 			h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
@@ -1247,6 +1251,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 	c.Request = c.Request.WithContext(service.WithRequestReplaySafety(c.Request.Context(), body, false))
 	setOpsRequestContext(c, reqModel, reqStream)
+	installResilienceRetryAdvice(c, h.gatewayService, apiKey, reqModel)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && !decision.AllowNextStage {
@@ -1357,7 +1362,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			if len(failedAccountIDs) == 0 {
 				if err != nil {
 					cls := classifyOpenAICompatibleNoAccountErrorFromGin(c, h.gatewayService, apiKey, currentRoutingModel, reqModel)
-					if !cls.ModelNotFound {
+					if !cls.ModelNotFound && !cls.CapabilityOnly {
 						markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 					}
 					h.anthropicStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
@@ -1374,7 +1379,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		}
 		if selection == nil || selection.Account == nil {
 			cls := classifyOpenAICompatibleNoAccountErrorFromGin(c, h.gatewayService, apiKey, currentRoutingModel, reqModel)
-			if !cls.ModelNotFound {
+			if !cls.ModelNotFound && !cls.CapabilityOnly {
 				markOpsRoutingCapacityLimited(c)
 			}
 			h.anthropicStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
@@ -1479,6 +1484,11 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			})
 		}
 		if err != nil {
+			// A canceled pre-output attempt has no billable result or account failure.
+			if result == nil && errors.Is(err, context.Canceled) && failoverClientGone(c) {
+				reqLog.Info("openai_messages.client_canceled_before_output", zap.Int64("account_id", account.ID))
+				return
+			}
 			if result != nil && result.ImageCount > 0 {
 				reqLog.Warn("openai_messages.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),
@@ -1618,31 +1628,45 @@ func resolveOpenAIMessagesMetadataSession(c *gin.Context, sessionHash, promptCac
 
 // anthropicErrorResponse writes an error in Anthropic Messages API format.
 func (h *OpenAIGatewayHandler) anthropicErrorResponse(c *gin.Context, status int, errType, message string) {
+	errType = anthropicLocalErrorType(status, errType)
+	_, code, message := resilienceTranslateError(c, status, errType, "", message)
+	if !beginResilienceTerminal(c) {
+		return
+	}
+	errObj := gin.H{"type": errType, "message": message}
+	if code != "" {
+		errObj["code"] = code
+	}
 	c.JSON(status, gin.H{
-		"type": "error",
-		"error": gin.H{
-			"type":    errType,
-			"message": message,
-		},
+		"type":  "error",
+		"error": errObj,
 	})
 }
 
 // anthropicStreamingAwareError handles errors that may occur during streaming,
 // using Anthropic SSE error format.
 func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, status int, errType, message string, streamStarted bool) {
+	errType = anthropicLocalErrorType(status, errType)
 	// xy2api resilience: a pre-output heartbeat may have committed 200.
 	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
 		streamStarted = true
 	}
 	if streamStarted {
+		_, code, translatedMessage := resilienceTranslateError(c, status, errType, "", message)
+		message = translatedMessage
+		service.MarkOpsStreamError(c, errType, message, status)
 		flusher, ok := c.Writer.(http.Flusher)
 		if ok {
+			if !beginResilienceTerminal(c) {
+				return
+			}
+			errObj := gin.H{"type": errType, "message": message}
+			if code != "" {
+				errObj["code"] = code
+			}
 			errPayload, _ := json.Marshal(gin.H{
-				"type": "error",
-				"error": gin.H{
-					"type":    errType,
-					"message": message,
-				},
+				"type":  "error",
+				"error": errObj,
 			})
 			fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", errPayload) //nolint:errcheck
 			flusher.Flush()
@@ -1654,12 +1678,29 @@ func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, stat
 
 // handleAnthropicFailoverExhausted maps upstream failover errors to Anthropic format.
 func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
+	if c.GetBool(ginKeyResilienceFinalized) {
+		return
+	}
+	write := func(status int, errType, message string) {
+		var upstreamBody []byte
+		if failoverErr != nil {
+			upstreamBody = failoverErr.ResponseBody
+		}
+		errType = anthropicFailoverErrorType(status, errType, upstreamBody)
+		status = applyExhaustedRetryHint(c, h.gatewayService, status)
+		h.anthropicStreamingAwareError(c, status, errType, message, streamStarted)
+	}
 	if failoverErr != nil {
 		copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
 	}
+	if failoverErr.IsCapabilityStreamOnly() {
+		status, errType, message := resilienceCapacityExhausted(c, failoverErr, http.StatusServiceUnavailable, "api_error", "")
+		write(status, errType, message)
+		return
+	}
 	if failoverErr != nil && failoverErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(failoverErr)
-		h.anthropicStreamingAwareError(c, status, "api_error", message, streamStarted)
+		write(status, "api_error", message)
 		return
 	}
 	if failoverErr != nil && failoverErr.IsOpenAICapacityShed() && strings.TrimSpace(failoverErr.ClientMessage) != "" {
@@ -1667,16 +1708,20 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 		if status <= 0 {
 			status = http.StatusServiceUnavailable
 		}
-		h.anthropicStreamingAwareError(c, status, "api_error", failoverErr.ClientMessage, streamStarted)
+		write(status, "api_error", failoverErr.ClientMessage)
 		return
 	}
 	// xy2api resilience: a content-safety refusal is the client's 400.
 	if msg, rejected := resilienceContentRejection(c, failoverErr); rejected {
-		h.anthropicStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", msg, streamStarted)
+		write(http.StatusBadRequest, "invalid_request_error", msg)
 		return
 	}
-	status, errType, errMsg := h.mapUpstreamError(failoverErr.StatusCode)
-	h.anthropicStreamingAwareError(c, status, errType, errMsg, streamStarted)
+	statusCode := http.StatusBadGateway
+	if failoverErr != nil && failoverErr.StatusCode > 0 {
+		statusCode = failoverErr.StatusCode
+	}
+	status, errType, errMsg := h.mapUpstreamError(statusCode)
+	write(status, errType, errMsg)
 }
 
 // ensureAnthropicErrorResponse writes a fallback Anthropic error if no response was written.
@@ -3573,6 +3618,12 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	}
 	if status, errType, message, ok := resilienceWebSearchHistoryRejected(c, h.gatewayService, failoverErr); ok {
 		h.handleStreamingAwareError(c, status, errType, message, streamStarted)
+		return
+	}
+	if failoverErr.IsCapabilityStreamOnly() {
+		status, errType, message := resilienceCapacityExhausted(c, failoverErr, http.StatusServiceUnavailable, "api_error", "")
+		status = applyExhaustedRetryHint(c, h.gatewayService, status)
+		h.handleStreamingAwareErrorWithCode(c, status, errType, resilience.ReasonCapabilityStreamOnly, message, streamStarted, false)
 		return
 	}
 	// xy2api resilience: upstream balance problems (including image account

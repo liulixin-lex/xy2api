@@ -456,13 +456,13 @@ func (s *GatewayService) noteLastResort(ctx context.Context, groupID *int64, acc
 	s.resilience.noteLastResortSelected(account.ID)
 	s.shareScheduling.noteResilienceReason(derefGroupID(groupID), sharesched.ReasonLastResortSoft)
 	resilience.Count(resilience.MetricLastResort, derefGroupID(groupID), account.ID, account.Platform)
-	slog.Warn("resilience.last_resort",
+	slog.Warn("resilience.last_resort", append(resilience.EventFields(ctx),
 		"group_id", derefGroupID(groupID),
 		"account_id", account.ID,
 		"platform", account.Platform,
 		"recover_at", recoverAt,
 		"reason", string(sharesched.ReasonLastResortSoft),
-	)
+	)...)
 }
 
 // noteLastResortSelected remembers that an account served as last resort so
@@ -648,13 +648,13 @@ func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID
 	s.resilience.noteLastResortSelected(account.ID)
 	s.shareScheduling.noteResilienceReason(derefGroupID(groupID), sharesched.ReasonLastResortSoft)
 	resilience.Count(resilience.MetricLastResort, derefGroupID(groupID), account.ID, account.Platform)
-	slog.Warn("resilience.last_resort",
+	slog.Warn("resilience.last_resort", append(resilience.EventFields(ctx),
 		"group_id", derefGroupID(groupID),
 		"account_id", account.ID,
 		"platform", account.Platform,
 		"recover_at", recoverAt,
 		"reason", string(sharesched.ReasonLastResortSoft),
-	)
+	)...)
 }
 
 type resilienceLastResortGateKey struct{}
@@ -715,7 +715,7 @@ func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, s
 	resilience.StateFrom(ctx).AddAvoided(accountID)
 	_ = rec.r.store.ClearSessionFailure(stateCtx, groupID, sessionHash, accountID)
 	resilience.Count(resilience.MetricSessionRebind, groupID, accountID, "resil_failure_streak")
-	slog.Warn("resilience.session_rebind",
+	slog.Warn("resilience.session_rebind", append(resilience.EventFields(ctx),
 		"group_id", groupID,
 		"session", shortSessionHash(sessionHash),
 		"account_id", accountID,
@@ -723,7 +723,7 @@ func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, s
 		"category", string(c),
 		"avoid", avoid.String(),
 		"reason", "resil_failure_streak",
-	)
+	)...)
 }
 
 // Success resets the session's failure count of the account. Only sessions

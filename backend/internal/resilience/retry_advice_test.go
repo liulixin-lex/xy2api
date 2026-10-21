@@ -7,7 +7,8 @@ import (
 )
 
 func TestRetryAdviceContext(t *testing.T) {
-	if got := RetryAdviceFrom(nil); got != (RetryAdvice{}) {
+	var nilContext context.Context
+	if got := RetryAdviceFrom(nilContext); got != (RetryAdvice{}) {
 		t.Fatalf("nil context advice = %#v", got)
 	}
 	root := context.Background()
@@ -31,7 +32,7 @@ func TestRetryAdviceContext(t *testing.T) {
 	if got := RetryAdviceFrom(child); !got.Suppress || got.Seconds != 0 {
 		t.Fatalf("a later hint revived terminal advice: %#v", got)
 	}
-	if SetRetryAdvice(root, a) || SetRetryAdvice(nil, a) {
+	if SetRetryAdvice(root, a) || SetRetryAdvice(nilContext, a) {
 		t.Fatal("advice was stored without request state")
 	}
 }

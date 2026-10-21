@@ -150,6 +150,20 @@ const (
 	SSEPingFormatComment SSEPingFormat = ":\n\n"
 )
 
+// Queue pings follow the inbound protocol even when a shared gateway helper
+// was configured for Anthropic upstreams. Comments are not OpenAI data events.
+func requestQueuePingFormat(c *gin.Context, configured SSEPingFormat) SSEPingFormat {
+	if c == nil || configured == SSEPingFormatNone {
+		return configured
+	}
+	switch GetInboundEndpoint(c) {
+	case EndpointResponses, EndpointResponsesCompact, EndpointChatCompletions:
+		return SSEPingFormatComment
+	default:
+		return configured
+	}
+}
+
 // ConcurrencyError represents a concurrency limit error with context
 type ConcurrencyError struct {
 	SlotType  string
@@ -390,7 +404,8 @@ func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType 
 	}
 
 	// Determine if ping is needed (streaming + ping format defined)
-	needPing := isStream && h.pingFormat != ""
+	pingFormat := requestQueuePingFormat(c, h.pingFormat)
+	needPing := isStream && pingFormat != ""
 
 	var flusher http.Flusher
 	if needPing {
@@ -433,7 +448,7 @@ func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType 
 				c.Header("X-Accel-Buffering", "no")
 				*streamStarted = true
 			}
-			written, err := fmt.Fprint(c.Writer, string(h.pingFormat))
+			written, err := fmt.Fprint(c.Writer, string(pingFormat))
 			if err != nil {
 				return nil, err
 			}

@@ -107,12 +107,23 @@ func (h *ResilienceHandler) Stats(c *gin.Context) {
 // session: penalty tiers, the session's failures and avoid set, the
 // last-resort pick and the availability fallback decision. Read-only; it is
 // the Explain of groups on the original scheduler (design §4).
-// GET /api/v1/admin/resilience/groups/:id/explain?session_hash=&model=
+// GET /api/v1/admin/resilience/groups/:id/explain?session_hash=&model=&protocol=responses&stream=false
 func (h *ResilienceHandler) Explain(c *gin.Context) {
 	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || groupID <= 0 {
 		response.BadRequest(c, "Invalid group ID")
 		return
+	}
+	query := c.Request.URL.Query()
+	if query.Has("protocol") || query.Has("stream") {
+		protocol, stream := query.Get("protocol"), query.Get("stream")
+		if len(query["protocol"]) != 1 || len(query["stream"]) != 1 ||
+			(protocol != resilience.CapabilityProtocolResponses && protocol != resilience.CapabilityProtocolChat) ||
+			(stream != "true" && stream != "false") {
+			response.BadRequest(c, "protocol (responses or chat) and stream (true or false) must be provided together")
+			return
+		}
+		c.Request = c.Request.WithContext(resilience.WithCapabilityRequest(c.Request.Context(), protocol, stream == "true"))
 	}
 	out, err := h.svc.Explain(c.Request.Context(), groupID, strings.TrimSpace(c.Query("session_hash")), strings.TrimSpace(c.Query("model")))
 	if response.ErrorFrom(c, err) {

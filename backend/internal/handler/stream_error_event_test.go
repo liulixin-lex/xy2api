@@ -425,14 +425,23 @@ func TestMapResponsesErrorCodeResilience(t *testing.T) {
 }
 
 func TestCommittedFailureCarriesRetryHint(t *testing.T) {
-	// Design §7.6: once committed, the message is the only retry signal.
-	withHandlerResilience(t, nil)
-	c, w := newGinContextForEndpoint(t, EndpointResponses)
-	c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
-	_, _ = c.Writer.WriteString(":\n\n")
-	applyExhaustedRetryHint(c, nil, http.StatusBadGateway)
-	(&GatewayHandler{}).handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream service temporarily unavailable", true)
-	_, errObj := parseResponsesFailedSSE(t, strings.TrimPrefix(w.Body.String(), ":\n\n"))
-	assert.Equal(t, "server_error", errObj["code"])
-	assert.Equal(t, "Upstream service temporarily unavailable. Please try again in 30s.", errObj["message"])
+	for _, enabled := range []bool{false, true} {
+		t.Run(boolName(enabled), func(t *testing.T) {
+			withHandlerResilience(t, func(s *resilience.Settings) { s.Errors.FailedFrameRetryAfter = enabled })
+			c, w := newGinContextForEndpoint(t, EndpointResponses)
+			c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
+			_, _ = c.Writer.WriteString(":\n\n")
+			applyExhaustedRetryHint(c, nil, http.StatusBadGateway)
+			(&GatewayHandler{}).handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream service temporarily unavailable", true)
+			_, errObj := parseResponsesFailedSSE(t, strings.TrimPrefix(w.Body.String(), ":\n\n"))
+			assert.Equal(t, "server_error", errObj["code"])
+			message := "Upstream service temporarily unavailable"
+			if !enabled {
+				// Turning the feature off restores the legacy message hint.
+				message += ". Please try again in 30s."
+			}
+			assert.Equal(t, message, errObj["message"])
+			assert.NotContains(t, errObj, "headers", "recovery is unknown without a candidate advisor")
+		})
+	}
 }

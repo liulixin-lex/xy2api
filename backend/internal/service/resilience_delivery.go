@@ -2,11 +2,13 @@ package service
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -97,6 +99,7 @@ func (w *deliveryWriter) Write(data []byte) (int, error) {
 	w.written.Add(int64(n))
 	if n > 0 {
 		w.observeStream(data[:n])
+		w.noteFirstOutput(len(bytes.TrimSpace(data[:n])) > 0)
 	}
 	return n, err
 }
@@ -107,7 +110,20 @@ func (w *deliveryWriter) WriteString(s string) (int, error) {
 	if n > 0 && w.stream.observing() {
 		w.observeStream([]byte(s[:n]))
 	}
+	if n > 0 {
+		w.noteFirstOutput(strings.TrimSpace(s[:n]) != "")
+	}
 	return n, err
+}
+
+func (w *deliveryWriter) noteFirstOutput(nonWhitespace bool) {
+	// Do not invoke the delivery probe here: this write can be underneath
+	// a keepalive mutex, and its probe can reenter that mutex.
+	// JSON keepalive writes whitespace. For SSE, a whitespace-only write
+	// can complete a content block, so use the assembled block's state.
+	if (w.stream.kind.Load() != sseKindEventStream && nonWhitespace) || w.stream.content.Load() {
+		w.state.NoteFirstOutput(time.Now())
+	}
 }
 
 // deliveredBytes is the delivery probe: the semantic bytes, except that an

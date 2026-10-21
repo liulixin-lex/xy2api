@@ -10,12 +10,15 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
 // responsesFailedError 对齐 OpenAI Responses 协议 error 子对象。
 type responsesFailedError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code    string            `json:"code"`
+	Message string            `json:"message"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // responsesFailedBody 对齐 apicompat.makeResponsesCompletedEvent 输出的 response 子对象字段集。
@@ -59,13 +62,34 @@ type responsesFailedEvent struct {
 // 此时 caller 也无法回退到 JSON（HTTP 200 已固化），通常意味着连接已经损坏，
 // 应当让请求处理函数 return，由上层关闭连接。
 func writeResponsesFailedSSE(c *gin.Context, errType, code, message string) bool {
+	return writeResponsesFailedSSEWithOpening(c, errType, code, message, false)
+}
+
+// forceOpening covers queue pings on compatible ingress, including when
+// resilience is disabled or delivery tracking was not installed.
+func writeResponsesFailedSSEWithOpening(c *gin.Context, errType, code, message string, forceOpening bool) bool {
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
 		return false
 	}
+	if !beginResilienceTerminal(c) {
+		return true
+	}
 
 	id, createdAt, model := synthesizeResponseID(c), time.Now().Unix(), requestModel(c)
 	opening, sequence := resilienceResponsesOpening(c, id, model, createdAt)
+	if forceOpening && opening == "" {
+		opening, sequence = string(service.ResponsesCreatedFrame(id, model, createdAt)), 1
+	}
+	failedError := responsesFailedError{Code: mapResponsesErrorCode(errType, code), Message: message}
+	if resilience.Current().FailedFrameRetryAfterOn() && c.Request != nil {
+		advice := responsesFailedRetryAdvice(c, errType, code)
+		failedError.Headers = advice.Headers()
+		failedError.Message = advice.Message(message)
+		if advice.Suppress && advice.Source == "turn_cap" {
+			failedError.Code = codeServerIsOverloaded
+		}
+	}
 	payload, err := json.Marshal(responsesFailedEvent{
 		Type:           "response.failed",
 		SequenceNumber: sequence,
@@ -76,10 +100,7 @@ func writeResponsesFailedSSE(c *gin.Context, errType, code, message string) bool
 			Model:     model,
 			Status:    "failed",
 			Output:    []any{},
-			Error: responsesFailedError{
-				Code:    mapResponsesErrorCode(errType, code),
-				Message: message,
-			},
+			Error:     failedError,
 		},
 	})
 	if err != nil {

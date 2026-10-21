@@ -205,6 +205,10 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 		if acc.Platform == service.PlatformOpenAI {
 			iqSettings = acc.IQCheck.CopySettings()
 		}
+		// Learned capabilities belong to this account identity, not an export.
+		extra := service.RedactOpenAICodexTicketExtra(acc.Extra)
+		delete(extra, "capability_learned_responses")
+		delete(extra, "capability_learned_chat")
 		dataAccounts = append(dataAccounts, DataAccount{
 			IQCheck:            iqSettings,
 			Name:               acc.Name,
@@ -212,7 +216,7 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			Platform:           acc.Platform,
 			Type:               acc.Type,
 			Credentials:        acc.Credentials,
-			Extra:              service.RedactOpenAICodexTicketExtra(acc.Extra),
+			Extra:              extra,
 			ProxyKey:           proxyKey,
 			Concurrency:        acc.Concurrency,
 			Priority:           acc.Priority,

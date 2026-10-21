@@ -111,6 +111,9 @@ func writeChatCompletionsErrorSSE(c *gin.Context, errType, code, message string,
 	if !ok {
 		return false
 	}
+	if !beginResilienceTerminal(c) {
+		return true
+	}
 	errObj := gin.H{"type": errType, "message": message, "status": status}
 	if code != "" {
 		errObj["code"] = code

@@ -77,14 +77,14 @@ func noteResiliencePostOutputFailure(ctx context.Context, rl *RateLimitService, 
 	groupID := st.GroupID()
 	resilience.Count(resilience.MetricPostOutputFailure, groupID, account.ID, kind)
 	failures, cooled := rl.notePostOutputFailure(ctx, account)
-	slog.Warn("resilience.post_output_failure",
+	slog.Warn("resilience.post_output_failure", append(resilience.EventFields(ctx),
 		"group_id", groupID,
 		"account_id", account.ID,
 		"platform", account.Platform,
 		"reason", kind,
 		"failures", failures,
 		"cooldown", cooled,
-	)
+	)...)
 }
 
 // notePostOutputFailure counts a failure after output of the account and
@@ -121,12 +121,12 @@ func openAIPostOutputEventCounts(payload []byte, message string) bool {
 	if isOpenAITransientProcessingError(http.StatusBadRequest, message, payload) {
 		return true
 	}
-	return resiliencePostOutputCounts(resilience.Classify(resilience.Outcome{
+	return resiliencePostOutputCounts(resilience.ClassifyWithSettings(resilience.Outcome{
 		Source:     resilience.SourceStreamEvent,
 		StatusCode: http.StatusOK,
 		Code:       openAIStreamFailedEventErrorCode(payload),
 		Message:    message,
-	}, nil))
+	}, resilience.Current()))
 }
 
 // resilienceOpenAIFailedAfterOutput reports an OpenAI failure event that
@@ -183,14 +183,14 @@ func (s *GatewayService) resilienceAnthropicFailedAfterOutput(ctx context.Contex
 		return
 	}
 	body := []byte(eventErr.RawData)
-	res := resilience.Classify(resilience.Outcome{
+	res := resilience.ClassifyWithSettings(resilience.Outcome{
 		Source:     resilience.SourceStreamEvent,
 		StatusCode: http.StatusOK,
 		Code:       extractUpstreamErrorCode(body),
 		Type:       strings.TrimSpace(gjson.GetBytes(body, "error.type").String()),
 		Message:    extractUpstreamErrorMessage(body),
 		Body:       body,
-	}, resilience.Current().Failure.BalanceKeywordsExtra)
+	}, resilience.Current())
 	if !resiliencePostOutputCounts(res) {
 		return
 	}
