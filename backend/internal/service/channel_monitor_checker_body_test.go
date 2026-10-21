@@ -15,13 +15,14 @@ import (
 	"time"
 )
 
-// swapMonitorHTTPClient 临时替换 monitorHTTPClient 为不带 SSRF 校验的普通 client，
-// 让 httptest (127.0.0.1) 能连通。测试结束后恢复。
+// swapMonitorHTTPClient 临时把探测与 ping 客户端换成不带 SSRF 校验的普通 client，
+// 让 httptest (127.0.0.1) 能连通。测试结束后恢复。探测客户端不设总超时（由预算控制）。
 func swapMonitorHTTPClient(t *testing.T) {
 	t.Helper()
-	orig := monitorHTTPClient
-	monitorHTTPClient = &http.Client{Timeout: 5 * time.Second}
-	t.Cleanup(func() { monitorHTTPClient = orig })
+	origProbe, origPing := monitorProbeHTTPClient, monitorPingHTTPClient
+	monitorProbeHTTPClient = &http.Client{}
+	monitorPingHTTPClient = &http.Client{Timeout: 5 * time.Second}
+	t.Cleanup(func() { monitorProbeHTTPClient, monitorPingHTTPClient = origProbe, origPing })
 }
 
 // captureHandler 把每次收到的请求 body 和 headers 存起来，测试断言用。
@@ -88,6 +89,22 @@ func (h *openAICaptureHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	if status == 0 {
 		status = http.StatusOK
 	}
+	answer := answerFromOpenAIRequest(parsed)
+	if parsed["stream"] == true && status == http.StatusOK && h.rawResponse == "" {
+		// 流式请求按 SSE 回答，与真实上游一致。
+		if r.URL.Path == providerOpenAIResponsesPath {
+			events := []string{}
+			if h.responsesLeadingReasoning {
+				events = append(events, `data: {"type":"response.reasoning_summary_text.delta","delta":"adding"}`)
+			}
+			writeProbeSSE(w, append(events,
+				`data: {"type":"response.output_text.delta","delta":"`+answer+`"}`,
+				`data: {"type":"response.completed","response":{"status":"completed"}}`)...)
+			return
+		}
+		writeProbeSSE(w, chatDelta(answer), "data: [DONE]")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if h.rawResponse != "" {
@@ -95,7 +112,6 @@ func (h *openAICaptureHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	answer := answerFromOpenAIRequest(parsed)
 	if r.URL.Path == providerOpenAIResponsesPath {
 		output := []map[string]any{}
 		if h.responsesLeadingReasoning {
@@ -193,8 +209,11 @@ func TestRunCheckForModel_OpenAI_DefaultChatRequest(t *testing.T) {
 	if _, ok := h.capturedBody()["instructions"]; ok {
 		t.Error("chat body must not contain top-level instructions")
 	}
-	if h.capturedBody()["stream"] != false {
-		t.Errorf("chat body should set stream=false, got %v", h.capturedBody()["stream"])
+	if h.capturedBody()["stream"] != true {
+		t.Errorf("chat body should set stream=true, got %v", h.capturedBody()["stream"])
+	}
+	if h.capturedHeaders().Get("Accept") != "text/event-stream" {
+		t.Errorf("streaming probe should accept SSE, got %q", h.capturedHeaders().Get("Accept"))
 	}
 	if h.capturedHeaders().Get("Authorization") != "Bearer sk-openai" {
 		t.Errorf("expected bearer auth header, got %q", h.capturedHeaders().Get("Authorization"))
@@ -240,8 +259,8 @@ func TestRunCheckForModel_Grok_DefaultChatRequest(t *testing.T) {
 	if _, ok := h.capturedBody()["messages"]; !ok {
 		t.Error("Grok body should contain messages")
 	}
-	if h.capturedBody()["stream"] != false {
-		t.Errorf("Grok body should set stream=false, got %v", h.capturedBody()["stream"])
+	if h.capturedBody()["stream"] != true {
+		t.Errorf("Grok body should set stream=true, got %v", h.capturedBody()["stream"])
 	}
 	if h.capturedHeaders().Get("Authorization") != "Bearer xai-key" {
 		t.Errorf("expected Grok bearer auth header, got %q", h.capturedHeaders().Get("Authorization"))
@@ -313,8 +332,8 @@ func TestRunCheckForModel_OpenAIResponses_DefaultRequest(t *testing.T) {
 	if _, ok := h.capturedBody()["messages"]; ok {
 		t.Error("responses body must not contain chat messages")
 	}
-	if h.capturedBody()["stream"] != false {
-		t.Errorf("responses body should set stream=false, got %v", h.capturedBody()["stream"])
+	if h.capturedBody()["stream"] != true {
+		t.Errorf("responses body should set stream=true, got %v", h.capturedBody()["stream"])
 	}
 	if h.capturedHeaders().Get("Authorization") != "Bearer sk-openai" {
 		t.Errorf("expected bearer auth header, got %q", h.capturedHeaders().Get("Authorization"))
@@ -369,7 +388,7 @@ func TestRunCheckForModel_MergeMode_UserFieldsWinButDenyListProtects(t *testing.
 		BodyOverrideMode: MonitorBodyOverrideModeMerge,
 		BodyOverride: map[string]any{
 			"system":     "You are Claude Code...",
-			"max_tokens": float64(999),   // 应该覆盖默认 50
+			"max_tokens": float64(999),   // 应该覆盖默认 16
 			"model":      "hacked-model", // 应该被黑名单挡住，保留原 model
 			"messages":   []any{},        // 同上，被挡
 		},
@@ -506,10 +525,9 @@ func TestValidateChallenge_AnthropicTextAfterThinking(t *testing.T) {
 }
 
 func TestGeminiMonitorBodyIncludesExplicitUserRole(t *testing.T) {
-	adapter := providerAdapters[MonitorProviderGemini]
-	body, err := adapter.buildBody("gemini-3.6-flash", "Reply with only 7.")
+	body, _, err := buildProbeBody(probeProtocolGemini, MonitorProviderGemini, "", "gemini-3.6-flash", "Reply with only 7.", nil, probeShapeFix{})
 	if err != nil {
-		t.Fatalf("buildBody() error = %v", err)
+		t.Fatalf("buildProbeBody() error = %v", err)
 	}
 
 	var payload struct {

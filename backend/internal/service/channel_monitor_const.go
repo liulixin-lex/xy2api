@@ -9,12 +9,21 @@ import (
 // ChannelMonitor 全局常量。
 // 这些是 MVP 阶段的硬编码值，按需可以提到 config 中。
 const (
-	// monitorRequestTimeout 单次模型请求总超时（含 Body 读取）。
-	monitorRequestTimeout = 45 * time.Second
-	// monitorPingTimeout HEAD 请求 endpoint origin 的超时。
+	// monitorRequestTimeout 一轮探测（含参数修正重发与重试）拿到答案的总预算；
+	// 30 秒内拿不到正确回答即为 error / failed。
+	monitorRequestTimeout = 30 * time.Second
+	// monitorPingTimeout HEAD 请求 endpoint origin 的超时（与模型请求并行）。
 	monitorPingTimeout = 8 * time.Second
-	// monitorDegradedThreshold 主请求成功但耗时超过该阈值视为 degraded。
-	monitorDegradedThreshold = 6 * time.Second
+	// monitorDegradedThreshold 拿到正确回答、但响应时间超过该阈值视为 degraded。
+	monitorDegradedThreshold = 10 * time.Second
+	// monitorProbeMaxAttempts 每个模型每轮最多发出的请求数（参数修正重发与重试共用）。
+	monitorProbeMaxAttempts = 2
+	// monitorProbeRetryMinRemaining 剩余预算不足该值时不再重试。
+	monitorProbeRetryMinRemaining = 10 * time.Second
+	// monitorProbeFastFailWindow 在该时间内回的 502/503 算“秒回”，可以立即重试。
+	monitorProbeFastFailWindow = 5 * time.Second
+	// monitorProbeHTTP2PingInterval HTTP/2 连接空闲该时长后发 PING 探活，及早丢弃失效连接。
+	monitorProbeHTTP2PingInterval = 30 * time.Second
 	// monitorHistoryRetentionDays 明细历史保留天数。
 	// 60s 默认间隔 * 30 天 ≈ 43200 行/monitor/model，一般部署总量 <= 2M 行，
 	// PG 无压力；所以直接保留完整明细一个月，可用率查询可以全走原始行不依赖聚合。
@@ -144,8 +153,9 @@ const (
 	// monitorRunOneBuffer runOne 的总超时缓冲（除请求超时与 ping 超时外的额外裕量）。
 	monitorRunOneBuffer = 10 * time.Second
 
-	// monitorIdleConnTimeout HTTP transport 空闲连接关闭超时。
-	monitorIdleConnTimeout = 30 * time.Second
+	// monitorIdleConnTimeout HTTP transport 空闲连接关闭超时：长于 2–5 分钟的检测间隔，
+	// 让每轮探测复用连接，省掉 TLS 握手。
+	monitorIdleConnTimeout = 10 * time.Minute
 	// monitorTLSHandshakeTimeout HTTP transport TLS 握手超时。
 	monitorTLSHandshakeTimeout = 10 * time.Second
 	// monitorResponseHeaderTimeout HTTP transport 等待响应头超时。
