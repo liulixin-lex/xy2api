@@ -318,6 +318,7 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 | 修复 | 说明 |
 |---|---|
 | 排队 ping 之后按协议写终止帧（W5.2） | §7.3；总开关关闭时同样生效 |
+| 排队心跳按入站协议的格式（审查 R1-P1-4，α `f4a60916e`） | 等待并发槽位与用户消息队列（锁等待、RPM 等待）时的心跳：Responses、compact、Chat 写 SSE 注释 `:`，Messages 保留 Claude 的 `ping`，不发心跳的配置保持不发。按请求选择，不改共享的 helper 配置。上游钩子 `requestQueuePingFormat` |
 | 【待契约】 | 各实现方登记的其他协议正确性修复 |
 
 ## 10. 回退语义
