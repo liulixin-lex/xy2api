@@ -105,7 +105,7 @@ func TestRunOne_SkipsRoundClaimedByAnotherInstance(t *testing.T) {
 	svc := &claimingMonitorSvc{claim: false, gaps: make(chan time.Duration, 1)}
 	r := newRunnerForTest(svc)
 	r.Start()
-	r.Schedule(&ChannelMonitor{ID: 1, Enabled: true, IntervalSeconds: 60, JitterSeconds: 10})
+	r.scheduleTask(&ChannelMonitor{ID: 1, Enabled: true, IntervalSeconds: 60, JitterSeconds: 10}, 0, false)
 
 	select {
 	case gap := <-svc.gaps:
@@ -248,4 +248,66 @@ func TestRunCheck_MarksRoundStartTime(t *testing.T) {
 	require.Len(t, repo.markTimes, 1)
 	require.True(t, repo.markTimes[0].Before(before.Add(50*time.Millisecond)),
 		"last_checked_at must be the round start, not its end")
+}
+
+// 新建、编辑、启用触发的首轮不受认领间隔限制，之后各轮照常认领。
+func TestSchedule_FirstRoundAfterEditIsForced(t *testing.T) {
+	svc := &claimingMonitorSvc{claim: true, gaps: make(chan time.Duration, 4)}
+	r := newRunnerForTest(svc)
+	r.Start()
+	r.Schedule(&ChannelMonitor{ID: 1, Enabled: true, IntervalSeconds: 60})
+
+	select {
+	case gap := <-svc.gaps:
+		require.Zero(t, gap, "the first round after an edit must not wait for the claim gap")
+	case <-time.After(2 * time.Second):
+		t.Fatal("claim was never attempted")
+	}
+	task := runnerTaskPtr(r, 1)
+	require.NotNil(t, task)
+	require.False(t, task.forceNext.Load(), "only the first round is forced")
+	stoppedWithin(t, r, 3*time.Second)
+}
+
+func TestRunCheckManual_SurvivesCallerCancelAndKeepsLastCheckedAt(t *testing.T) {
+	usage := &stubMonitorUsageSource{usage: &UsageInfo{}, block: make(chan struct{})}
+	svc, repo := newBlockingQuotaMonitorService(t, usage)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.RunCheckManual(ctx, 1)
+		done <- err
+	}()
+	waitFor(t, time.Second, "manual round started", func() bool { return usage.getCalls() == 1 })
+	cancel() // 浏览器断开
+	close(usage.block)
+	require.NoError(t, <-done)
+
+	require.Len(t, repo.history, 1, "the manual round still completes and is written")
+	require.Empty(t, repo.markTimes, "a manual check must not move last_checked_at")
+}
+
+func TestRunCheck_ClaimedRoundIsNotMarkedAgain(t *testing.T) {
+	svc, repo := newBlockingQuotaMonitorService(t, &stubMonitorUsageSource{usage: &UsageInfo{}})
+
+	_, err := svc.RunCheck(withMonitorRound(context.Background(), monitorRoundClaimed), 1)
+	require.NoError(t, err)
+	require.Len(t, repo.history, 1)
+	require.Empty(t, repo.markTimes, "the claim already recorded the round start")
+}
+
+func TestRunCheck_TimedOutRoundIsStillWritten(t *testing.T) {
+	usage := &stubMonitorUsageSource{usage: &UsageInfo{}, block: make(chan struct{})}
+	svc, repo := newBlockingQuotaMonitorService(t, usage)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		close(usage.block)
+	}()
+	_, err := svc.RunCheck(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, repo.history, 1, "a round that ran out of budget is a result, not a cancellation")
 }

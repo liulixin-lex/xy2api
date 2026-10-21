@@ -126,7 +126,7 @@ func (r *ChannelMonitorRunner) reconcile(snapshot time.Time, enabled []*ChannelM
 	r.mu.Unlock()
 
 	for _, m := range toAdd {
-		r.scheduleWithDelay(m, monitorStartupStagger(time.Duration(m.IntervalSeconds)*time.Second))
+		r.scheduleTask(m, monitorStartupStagger(time.Duration(m.IntervalSeconds)*time.Second), false)
 	}
 	for _, id := range toRemove {
 		r.Unschedule(id)
@@ -159,4 +159,29 @@ func (r *ChannelMonitorRunner) supervise(loaded bool) {
 			retry = nextMonitorRetryDelay(retry)
 		}
 	}
+}
+
+// monitorPersistTimeout 写本轮历史与 last_checked_at 的时限（不占用探测预算）。
+const monitorPersistTimeout = 5 * time.Second
+
+// monitorRoundKind 标记一轮检测的来源，决定写历史时是否推进 last_checked_at。
+type monitorRoundKind int
+
+const (
+	monitorRoundUnmarked monitorRoundKind = iota
+	// monitorRoundClaimed 定时检测，认领时已把 last_checked_at 记为本轮开始。
+	monitorRoundClaimed
+	// monitorRoundManual 管理端手动检测，不推进 last_checked_at。
+	monitorRoundManual
+)
+
+type monitorRoundKindKey struct{}
+
+func withMonitorRound(ctx context.Context, kind monitorRoundKind) context.Context {
+	return context.WithValue(ctx, monitorRoundKindKey{}, kind)
+}
+
+func monitorRoundKindOf(ctx context.Context) monitorRoundKind {
+	kind, _ := ctx.Value(monitorRoundKindKey{}).(monitorRoundKind)
+	return kind
 }

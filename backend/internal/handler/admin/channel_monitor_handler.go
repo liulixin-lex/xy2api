@@ -477,7 +477,7 @@ func (h *ChannelMonitorHandler) Run(c *gin.Context) {
 	if !ok {
 		return
 	}
-	results, err := h.monitorService.RunCheck(c.Request.Context(), id)
+	results, err := h.monitorService.RunCheckManual(c.Request.Context(), id)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

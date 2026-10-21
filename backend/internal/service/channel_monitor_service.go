@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -612,6 +613,16 @@ func (s *ChannelMonitorService) RunCheck(ctx context.Context, id int64) ([]*Chec
 	return results, err
 }
 
+// RunCheckManual 管理端“立即检测”：脱离调用方的连接执行（浏览器断开不会取消这一轮，
+// 也不会连带取消并入的定时检测），不推进 last_checked_at（它只记定时检测的认领时间，
+// 手动检测不会让下一轮定时检测被跳过）；同一监控已有检测在跑时复用它的结果。
+func (s *ChannelMonitorService) RunCheckManual(ctx context.Context, id int64) ([]*CheckResult, error) {
+	detached := withMonitorRound(context.WithoutCancel(ctx), monitorRoundManual)
+	detached, cancel := context.WithTimeout(detached, monitorRequestTimeout+monitorPingTimeout+monitorRunOneBuffer)
+	defer cancel()
+	return s.RunCheck(detached, id)
+}
+
 // ClaimScheduledCheck 认领一轮定时检测（跨实例去重）。仓储不支持认领时总是返回 true。
 func (s *ChannelMonitorService) ClaimScheduledCheck(ctx context.Context, id int64, minGap time.Duration) (bool, error) {
 	claimer, ok := s.repo.(channelMonitorCheckClaimer)
@@ -649,16 +660,23 @@ func (s *ChannelMonitorService) runCheckOnce(ctx context.Context, id int64) ([]*
 	case MonitorCheckModeQuota:
 		results = s.runQuotaOnlyCheck(ctx, m)
 	case MonitorCheckModeQuotaProbe:
+		// 配额抓取与探测并行：一轮的总时限按探测预算给，串行时慢配额会拖垮整轮。
+		snapshots := make(chan *domain.MonitorQuotaSnapshot, 1)
+		go func() { snapshots <- s.fetchQuotaSnapshot(ctx, m) }()
 		results = s.runChecksConcurrent(ctx, m)
-		attachQuotaSnapshot(results, s.fetchQuotaSnapshot(ctx, m))
+		attachQuotaSnapshot(results, <-snapshots)
 	default:
 		results = s.runChecksConcurrent(ctx, m)
 	}
-	if err := ctx.Err(); err != nil {
+	if err := ctx.Err(); errors.Is(err, context.Canceled) {
 		// 监控被停用、删除或进程停机时取消的检测不写历史，避免留下半截结果。
+		// 超时不同：结果里已经记着超时，照常写入。
 		return nil, err
 	}
-	s.persistCheckResults(ctx, m, results, startedAt)
+	// 写库不依赖本轮剩余的时间预算。
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), monitorPersistTimeout)
+	defer cancel()
+	s.persistCheckResults(persistCtx, m, results, startedAt)
 	return results, nil
 }
 
@@ -716,7 +734,11 @@ func (s *ChannelMonitorService) persistCheckResults(ctx context.Context, m *Chan
 		slog.Error("channel_monitor: insert history failed",
 			"monitor_id", m.ID, "name", m.Name, "error", err)
 	}
-	// 记本轮开始时间：定时认领按“开始到开始”的间隔判断，检测耗时不会挤掉下一轮。
+	// 定时检测认领时已把 last_checked_at 记为本轮开始（数据库时间）；手动检测不推进它。
+	// 只有未经认领的检测（认领出错时照常检测、或未接 runner 的调用）在这里补记开始时间。
+	if kind := monitorRoundKindOf(ctx); kind == monitorRoundClaimed || kind == monitorRoundManual {
+		return
+	}
 	if err := s.repo.MarkChecked(ctx, m.ID, startedAt); err != nil {
 		slog.Error("channel_monitor: mark checked failed",
 			"monitor_id", m.ID, "error", err)

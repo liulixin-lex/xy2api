@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alitto/pond/v2"
@@ -80,6 +81,9 @@ type scheduledMonitor struct {
 	cancel   context.CancelFunc
 	// scheduledAt 任务建立时间，对账时只撤销早于库快照的任务。
 	scheduledAt time.Time
+	// forceNext 新建、编辑、启用触发的首轮不受认领间隔限制（仍会认领、记下开始时间），
+	// 否则刚改好的监控要再等一个间隔才更新。
+	forceNext atomic.Bool
 }
 
 // nextDelay 计算下一次触发的等待时长：interval ± [0, jitter] 的均匀随机偏移。
@@ -155,11 +159,12 @@ func (r *ChannelMonitorRunner) Start() {
 //   - 已存在的任务会先被取消再重建（适用于 IntervalSeconds 变更场景）
 //   - 新任务立即触发首次检测，之后按 IntervalSeconds 周期触发
 func (r *ChannelMonitorRunner) Schedule(m *ChannelMonitor) {
-	r.scheduleWithDelay(m, 0)
+	r.scheduleTask(m, 0, true)
 }
 
-// scheduleWithDelay 与 Schedule 相同，但首轮延后 firstDelay（启动与对账补建时错峰用）。
-func (r *ChannelMonitorRunner) scheduleWithDelay(m *ChannelMonitor, firstDelay time.Duration) {
+// scheduleTask 建立任务：首轮延后 firstDelay（启动与对账补建时错峰用）；
+// forceFirst 为 true 时首轮不受认领间隔限制（新建、编辑、启用触发）。
+func (r *ChannelMonitorRunner) scheduleTask(m *ChannelMonitor, firstDelay time.Duration, forceFirst bool) {
 	if r == nil || m == nil {
 		return
 	}
@@ -207,6 +212,7 @@ func (r *ChannelMonitorRunner) scheduleWithDelay(m *ChannelMonitor, firstDelay t
 		cancel:      cancel,
 		scheduledAt: time.Now(),
 	}
+	task.forceNext.Store(forceFirst)
 	r.tasks[m.ID] = task
 	delete(r.removedAt, m.ID)
 	r.wg.Add(1)
@@ -355,7 +361,11 @@ func (r *ChannelMonitorRunner) runOne(taskCtx context.Context, task *scheduledMo
 	}()
 
 	if claimer, ok := r.svc.(monitorCheckClaimer); ok {
-		claimed, err := claimer.ClaimScheduledCheck(ctx, id, monitorClaimGap(task.interval, task.jitter))
+		gap := monitorClaimGap(task.interval, task.jitter)
+		if task.forceNext.Swap(false) {
+			gap = 0
+		}
+		claimed, err := claimer.ClaimScheduledCheck(ctx, id, gap)
 		switch {
 		case err != nil:
 			slog.Warn("channel_monitor: claim check failed, checking anyway",
@@ -364,6 +374,8 @@ func (r *ChannelMonitorRunner) runOne(taskCtx context.Context, task *scheduledMo
 			slog.Debug("channel_monitor: round already checked by another instance",
 				"monitor_id", id, "name", name)
 			return
+		default:
+			ctx = withMonitorRound(ctx, monitorRoundClaimed)
 		}
 	}
 
