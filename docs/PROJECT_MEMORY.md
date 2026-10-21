@@ -153,6 +153,14 @@
   - 下一步：交 α 在 0.4.5 集成时合入；δ 补审结论、候选验证结果出来后更新 tasks 与发版说明。
   - 卡点：用户决定是否发 0.4.5；ε 与 δ 都改了 `GATEWAY_RESILIENCE.md` 第 18 行（可重放前缀）与第 133 行（`stream.strict_terminal`），集成时要手工合并。
 
+### 20261021-qa-0.4.5-b966306de — 0.4.5 候选的完整验证（2026-10-21T15:53Z 登记，DOCS 代记）
+
+- 请求：PM 指令 15。QA 对本地唯一候选 `b966306de`（`integ/0.4.5-prep`）做完整验证：只构建一次；71 个场景（含 RA-1 复跑）；0.4.3 → 0.4.5、0.4.4 → 0.4.5 两条升级演练；6.5 小时浸泡。
+- 范围：QA 只维护测试工具（`tools/gateway-resilience/`）；不推送、不发版、不碰生产。0.4.4 正式镜像的 6.5 小时浸泡（`20261021-soak-6h5-0.4.4`）照常继续。
+- 进度与证据：仓库外 `PROGRESS_Q.md`，最终报告 `staging/REPORT_045_b966306de.md`。
+- 下一步：结果出来后更新本条与 OpenSpec `gateway-resilience-045-20261021` 的 tasks 5.x；是否发 0.4.5 由用户决定。
+- 卡点：两次浸泡与诊断共用测试服务器，资源不足时按 PM 定的优先级让路。
+
 ## 操作陷阱
 
 - 处理 Sub2API 同步只以 `docs/UPSTREAM_SYNC.md`、同步 Skill、policy 和脚本为准。`DEV_GUIDE.md` 的“Git 操作”曾写着直接 merge/rebase 上游 main，2026-10-17 已改为指向同步规范，这两条命令也登记为 `tools/docs_consistency.json` 的退役写法。
