@@ -1889,6 +1889,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	originalModel string,
 	mappedModel string,
 ) (*openaiStreamingResultPassthrough, error) {
+	preludeTrace := beginOpenAIPreludeTrace(ctx, resilience.Current().NativePreludeWhitelistOn())
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
@@ -2052,6 +2053,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			dataBytes := []byte(data)
 			trimmedData := strings.TrimSpace(data)
 			rawEventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
+			observeOpenAIPreludeCreated(preludeTrace, rawEventType)
 			observer.ObserveOpenAI(dataBytes, rawEventType)
 			if needModelReplace {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
@@ -2204,6 +2206,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				line = "data: " + string(sanitizedData)
 			}
 			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(trimmedData, eventType)
+			if lineStartsClientOutput && !clientOutputStarted {
+				releaseOpenAIPrelude(preludeTrace, eventType)
+			}
 			if lineStartsClientOutput && trimmedData != "[DONE]" && !openAIStreamEventTypeIsTerminal(eventType) {
 				semanticOutputSeen = true
 			}

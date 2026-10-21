@@ -189,3 +189,27 @@ func deferredOpenAIAnthropicEvents(event *apicompat.ResponsesStreamEvent, state 
 	}
 	return append(events, apicompat.ResponsesEventToAnthropicEvents(event, state)...)
 }
+
+// A trace is scoped to an attempt; failed preludes must not leak into the next
+// account, including when its first event is content instead of created.
+func beginOpenAIPreludeTrace(ctx context.Context, enabled bool) *resilience.RequestState {
+	state := resilience.StateFrom(ctx)
+	state.NotePreludeCreated(time.Time{})
+	if !enabled {
+		return nil
+	}
+	return state
+}
+
+func observeOpenAIPreludeCreated(state *resilience.RequestState, eventType string) {
+	if eventType == "response.created" && state.PreludeTrace().ReleaseEvent == "" {
+		state.NotePreludeCreated(time.Now())
+	}
+}
+
+func releaseOpenAIPrelude(state *resilience.RequestState, eventType string) {
+	if eventType == "" {
+		eventType = "unknown"
+	}
+	state.NotePreludeReleased(eventType, time.Now())
+}

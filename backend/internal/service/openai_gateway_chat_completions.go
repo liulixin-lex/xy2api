@@ -724,6 +724,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		return err
 	}
 	stagePrelude := resilience.Current().PreludeStagingOn()
+	preludeTrace := beginOpenAIPreludeTrace(c.Request.Context(), stagePrelude)
 	if stagePrelude {
 		stopPreludeCancel = context.AfterFunc(c.Request.Context(), func() { _ = resp.Body.Close() })
 		defer func() { stopPreludeCancel() }()
@@ -806,6 +807,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			)
 			return false
 		}
+		observeOpenAIPreludeCreated(preludeTrace, event.Type)
 		holdPrelude := stagePrelude && openAICompatPreludeEvent(&event, []byte(payload))
 		if stagePrelude {
 			if err := c.Request.Context().Err(); err != nil {
@@ -867,6 +869,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				streamFailoverErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payloadBytes, message, upstreamModel, resp.Header)
 				return true
 			}
+			if !clientOutputStarted {
+				releaseOpenAIPrelude(preludeTrace, event.Type)
+			}
 			s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, payloadBytes, message, clientOutputStarted)
 			message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
 			defaultStatus, defaultErrType, defaultMsg := http.StatusBadGateway, "upstream_error", message
@@ -905,6 +910,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			return true
 		}
 
+		if !holdPrelude && !clientOutputStarted && event.Type != "response.created" {
+			releaseOpenAIPrelude(preludeTrace, event.Type)
+		}
 		var chunks []apicompat.ChatCompletionsChunk
 		if stagePrelude {
 			chunks = deferredOpenAIChatChunks(&event, state, holdPrelude)

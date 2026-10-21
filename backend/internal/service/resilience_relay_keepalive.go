@@ -61,7 +61,7 @@ func (l *relayLiveness) preCreatedDelta(byteCount int) {
 	if l == nil {
 		return
 	}
-	resilience.Count("pre_created_delta", l.groupID, l.accountID, l.platform)
+	resilience.Count(resilience.MetricPreCreatedDelta, l.groupID, l.accountID, l.platform)
 	slog.Info("resilience.pre_created_delta", "group_id", l.groupID, "account_id", l.accountID, "bytes", byteCount)
 }
 

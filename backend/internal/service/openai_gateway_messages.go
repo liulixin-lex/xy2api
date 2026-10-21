@@ -1002,6 +1002,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		return err
 	}
 	stagePrelude := resilience.Current().PreludeStagingOn()
+	preludeTrace := beginOpenAIPreludeTrace(c.Request.Context(), stagePrelude)
 	if stagePrelude {
 		stopPreludeCancel = context.AfterFunc(c.Request.Context(), func() { _ = resp.Body.Close() })
 		defer func() { stopPreludeCancel() }()
@@ -1085,6 +1086,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			)
 			return false
 		}
+		observeOpenAIPreludeCreated(preludeTrace, event.Type)
 		holdPrelude := stagePrelude && openAICompatPreludeEvent(&event, []byte(payload))
 		if stagePrelude {
 			if err := c.Request.Context().Err(); err != nil {
@@ -1153,6 +1155,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					streamFailoverErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payloadBytes, message, upstreamModel, resp.Header)
 					return true
 				}
+				if !clientOutputStarted {
+					releaseOpenAIPrelude(preludeTrace, event.Type)
+				}
 				s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, payloadBytes, message, clientOutputStarted)
 				message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
 				errStatus, errType, errMsg := http.StatusBadGateway, "api_error", message
@@ -1184,6 +1189,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 
 		// Convert to Anthropic events
+		if !holdPrelude && !clientOutputStarted && event.Type != "response.created" {
+			releaseOpenAIPrelude(preludeTrace, event.Type)
+		}
 		var events []apicompat.AnthropicStreamEvent
 		if stagePrelude {
 			events = deferredOpenAIAnthropicEvents(&event, state, holdPrelude)
