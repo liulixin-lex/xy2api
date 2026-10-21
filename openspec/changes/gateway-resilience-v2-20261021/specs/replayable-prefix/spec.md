@@ -15,9 +15,9 @@ Prelude events are:
 - **WHEN** an upstream Responses stream sends an event type the gateway does not know before any content
 - **THEN** the event is treated as content and the request is no longer switched to another account.
 
-#### Scenario: Metadata events are not prelude
-- **WHEN** an upstream sends `codex.response.metadata` or `response.metadata` before any text
-- **THEN** the event is treated as content.
+#### Scenario: Metadata events are not prelude (CV-9)
+- **WHEN** an upstream sends `codex.response.metadata` (or `response.metadata`) after `response.created` and before any text, then fails
+- **THEN** the metadata event counts as output, the failure is forwarded and the request does not switch accounts.
 
 #### Scenario: Empty delta before created
 - **WHEN** a relay sends an empty `response.output_text.delta` before `response.created`
@@ -49,15 +49,19 @@ With `stream.native_prelude_whitelist` on, native Responses streaming MUST keep 
 
 #### Scenario: Created then overloaded (CV-5)
 - **WHEN** account A sends `response.created` then `response.failed` with `server_is_overloaded`, and account B can serve
-- **THEN** the request is served by B, the client receives exactly one `response.created` with B's id, and A records one capacity failure.
+- **THEN** A is tried at most twice (D18 keeps one same-account retry for capacity shedding, each attempt recorded as `CAPACITY_SHED`), the request is served by B, and the client receives exactly one `response.created`, with B's id.
 
-#### Scenario: Queued then failed (CV-7)
+#### Scenario: Created and in_progress then overloaded (CV-7)
+- **WHEN** account A sends `response.created`, `response.in_progress`, then `response.failed` with `server_is_overloaded`
+- **THEN** the request switches to another account and the client sees only the serving account's events.
+
+#### Scenario: Queued then failed
 - **WHEN** account A sends `response.created`, `response.queued`, then a retryable `response.failed`
 - **THEN** the request switches to another account and succeeds.
 
-#### Scenario: Empty added structures then failed (CV-8)
-- **WHEN** account A sends `response.created`, `response.in_progress`, an empty message `response.output_item.added` and an empty output_text `response.content_part.added`, then a retryable `response.failed`
-- **THEN** the request switches to another account and succeeds.
+#### Scenario: Empty delta before created and empty added structures (CV-8)
+- **WHEN** account A sends an unmarked empty `response.output_text.delta` before `response.created`, then `response.created`, an empty message `response.output_item.added`, an empty output_text `response.content_part.added`, and a retryable `response.failed`
+- **THEN** none of A's events reach the client, the request switches to another account and succeeds.
 
 #### Scenario: Whitelist off
 - **WHEN** `stream.native_prelude_whitelist` is off and account A sends `response.created`, `response.queued`, then `response.failed`
@@ -92,5 +96,9 @@ With `stream.prelude_staging` on, Chat Completions and Messages streams converte
 With `stream.strict_terminal` on, the raw Chat Completions passthrough MUST treat `data: {"error":...}` followed by `[DONE]` as a failure: before commit it MUST switch accounts; after commit it MUST be recorded as a post-output failure, not a success. A stream with usage or a finish reason and no error remains a success.
 
 #### Scenario: Error then DONE (RAW-1)
-- **WHEN** an account that does not support `/responses` streams `data: {"error":{...}}` then `[DONE]` before any content
-- **THEN** the request switches to another account and succeeds, or, in a single-account group, ends as a failure and is not recorded as a success.
+- **WHEN** an account that does not support `/responses` streams `data: {"error":{...}}` then `[DONE]` before any content, and account B can serve
+- **THEN** the request switches to B and succeeds.
+
+#### Scenario: Error then DONE on the only account (RAW-2)
+- **WHEN** the same happens in a group whose only account is A
+- **THEN** the request is recorded as a failure, not a success, and no usage is billed for it.

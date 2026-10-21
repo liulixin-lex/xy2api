@@ -4,7 +4,7 @@
 
 ### Requirement: Learn stream-only accounts from deterministic rejections
 
-With `capability.stream_only_learning` on, when a non-streaming request receives an upstream 400 whose code or message deterministically means the upstream only accepts streaming requests, the gateway MUST mark that account as unavailable for non-streaming requests of that protocol (Responses or Chat) for `capability.learn_ttl_seconds` (default 21600). With `failure.decision_v2` on, the request MUST switch accounts immediately; the rejection MUST NOT count as an account failure, a cooldown or a session failure, and MUST count against the request budget. With `failure.decision_v2` off, the account is learned but the current request returns the 400 as before.
+With `capability.stream_only_learning` on, when a non-streaming OpenAI Responses or Chat Completions text request (not compact, image or WebSocket) receives an upstream 400 whose code or message deterministically means the upstream only accepts streaming requests, the gateway MUST mark that account as unavailable for non-streaming requests of that protocol (Responses or Chat) for `capability.learn_ttl_seconds` (default 21600). With `failure.decision_v2` on, the request MUST switch accounts immediately; the rejection MUST NOT count as an account failure, a cooldown or a session failure, and MUST count against the request budget. With `failure.decision_v2` off, the account is learned but the current request returns the 400 as before.
 
 #### Scenario: Learn and switch (SO-1)
 - **WHEN** a non-streaming Responses request is sent to account A, A returns 400 "This group only accepts streaming requests", and account B can serve

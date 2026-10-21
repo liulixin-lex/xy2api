@@ -78,7 +78,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 场景 | 响应 |
 |---|---|
 | 无可用账号 | 503，`Retry-After` 为 2–30 秒（带抖动），消息附 “Please try again in Ns.”。Codex 请求（按 UA 或 `originator` 识别）上限 10 秒（0.4.4，`errors.codex_retry_after_cap_seconds`）：Codex 会按它静默等待。非流式请求只因组内账号都被学为仅流式而无号时，原因码为 `capability_stream_only` |
-| 配置导致的无号（分组仅限 Claude Code、渠道定价限制） | 503，`Retry-After: 60`，`x-should-retry: false` |
+| 配置导致的无号（分组仅限 Claude Code、渠道定价限制） | 503，`Retry-After: 60`，`x-should-retry: false`；Codex 请求的 `Retry-After` 同样不超过 `errors.codex_retry_after_cap_seconds`（0.4.4） |
 | 模型不存在 | 保持原响应，不加重试头 |
 | 余额被在途请求占用 | 429，`rate_limit_error` / `concurrent_balance_reserved`，`Retry-After` 约 5 秒 |
 | 上游余额不足 | 普通用户看到 503；账号暂停期间单号分组的 503 带 `Retry-After`（暂停剩余时间，2–30 秒）；管理员在账号列表看到临时不可调度（原因 `balance:`）。管理员配置的错误透传规则命中时按规则返回 |
@@ -261,7 +261,7 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 - Chat Completions 与 Messages 经 OpenAI 兼容转换时（0.4.2），首输出档位约束等待响应头和第一行上游数据。0.4.4 起开场事件推迟到第一个内容（`stream.prelude_staging`），首事件守卫随之延长到第一个内容，此前的失败可以换号；第一个内容写出之后的静默由停滞检测结束并记账，不再换号；关闭该开关时回到 0.4.2 的行为（第一行之后写出开场，不再换号）；如果此后上游只发中转站伪保活帧、不出内容，按 §7.8 算存活，停滞检测不会结束它。停滞检测未覆盖或不记账的路径：原生 Chat Completions 透传（账号不支持 `/responses` 时）没有停滞检测；CN Anthropic 原生上的 Responses 与 Chat 转换停滞时只结束请求、不冷却账号；Anthropic API Key 透传、Bedrock、CN Anthropic 原生 Messages 记账但不分输出前后，统一按 `stream_data_interval_timeout`；Antigravity 与图片按各自的规则。
 - 0.4.4 的可重放前缀与明确终止只覆盖 OpenAI Responses（含透传的开场判定）、Chat Completions 与 Messages 经 OpenAI 兼容转换、raw Chat 透传。以下路径仍按 0.4.3 的开场与终止行为：Gemini 原生与兼容转换、Bedrock、CN Anthropic 原生、Antigravity（T2）、Gateway 入站经 Anthropic 上游的 Responses 与 Chat 反向转换。
 - 兼容转换推迟开场期间，直连（不经 CDN）的流式请求在第一个内容前收不到任何字节；客户端前面还有一层读超时较短的中转（如 nginx 缺省 60 秒）时，长推理可能超时。经 CDN 的请求有首包前心跳，不受影响。
-- 仅流式学习只认表中确定的结构码与文案（如 “only accepts streaming requests”、“stream must be true”）；其他措辞的同类拒绝仍按客户端错误返回。只对 OpenAI 分组的选号生效。
+- 仅流式学习只认表中确定的结构码与文案（如 “only accepts streaming requests”、“stream must be true”）；其他措辞的同类拒绝仍按客户端错误返回。只覆盖 OpenAI 入站的 Responses 与 Chat 普通文本请求；compact、图片、WebSocket、Messages 经 OpenAI 转换，以及 Gemini、CN、Bedrock 不学习、不过滤。
 - 断开阶段粒度为上传请求（0.4.3）、选号、等待响应头、首输出前、输出中五段。Chat Completions 与 Messages 经 OpenAI 兼容转换的路径，上游响应头到达后阶段不推进到“首输出前”：只写出开场分块（`message_start`、只带 role 的 chat 分块）就断开时，未送达记录与计数的阶段记为“等待响应头”。这只影响按阶段的统计，不影响是否计费、是否取消上游（两者只看是否写出过内容）。
 - 兜底判断、末位兜底与无号 `Retry-After` 读取分组账号的进程内快照（2 秒）。本网关施加的冷却与余额暂停会立即刷新快照；其他来源（上游 429 限流、错误状态、管理员改动、其他实例）最多 2 秒后可见。末位兜底在派发前按账号当前状态复核所选账号，快照的滞后只影响兜底判断与 `Retry-After` 的估算。
 - 失败回合计数在进程内，多实例时各自计数；快速失败的原样返回发生在选号之前，不参与计数；封顶后的终止应答也不计入快速失败。

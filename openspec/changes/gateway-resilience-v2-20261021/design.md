@@ -166,8 +166,9 @@
 
 ## 6. W6-lite 仅流式能力（`capability.stream_only_learning`）
 
-- **触发**：客户端 `stream=false`，上游 400 且结构码或文案确定表示“只接受流式”（表驱动，如 “only accepts streaming requests”、“stream must be true”）。
-- **学习**：账号 × 协议（responses 或 chat）× 非流式 → 不可用，有效期 `capability.learn_ttl_seconds`。存放位置与理由【待契约：CHANGES_G】。手工设置本期不做，只留字段位。
+- **范围**：只对 OpenAI 入站的 Responses 与 Chat 普通文本请求生效。入口在解析出客户端的 `stream` 后、首次选号前用 `resilience.WithCapabilityRequest(ctx, protocol, stream)` 标记请求（α）；compact、图片、WebSocket 不标记，Messages→OpenAI、Gemini、CN、Bedrock 不在本期。
+- **触发**：客户端 `stream=false`、实际发给上游的也是非流式，上游 400 且结构码或文案确定表示“只接受流式”（表驱动，如 “only accepts streaming requests”、“stream must be true”）。检测钩子 `LearnStreamOnlyFailure(ctx, account, protocol, upstreamStream, status, body)` 在处理 400 的副作用与写应答之前调用（β 的 Forward、透传、raw Chat 调用点）；返回空表示走原有错误路径。
+- **学习**：账号 × 协议（responses 或 chat）× 非流式 → 不可用，有效期 `capability.learn_ttl_seconds`。存放在账号 `extra` 的两项里，用局部合并原子更新，并同步调度缓存（γ）；键名、复制与导入边界【待契约：CHANGES_G】。手工设置本期不做，只留字段位。不会自动改发流式。
 - **本请求**：立即换号（需要 `failure.decision_v2` 开），不计账号失败、不冷却、不计会话失败，计入请求预算。`decision_v2` 关闭时只学习、过滤后续请求，本请求照旧返回 400。
 - **选号**：OpenAI 选号（`openai_gateway_scheduling.go`、`openai_account_scheduler.go`）对非流式请求跳过被标记的账号，流式请求不受影响。跳过后组内无号时按现有无号处理，带原因码 `capability_stream_only`，不再把 400 归咎于用户。
 - **Explain**：被跳过的账号显示原因 `capability_stream_only` 与剩余有效期。
@@ -229,7 +230,10 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 
 ### 7.5 W5.5 Codex 的 Retry-After 上限
 
-识别 Codex：UA 含 `codex_cli_rs`、`codex_exec` 或 Codex Desktop，或带 `originator` 头【待契约：CHANGES_A 的最终规则】。无号 503 的 `Retry-After` 上限取 `errors.codex_retry_after_cap_seconds`；其他客户端不变。原因：Codex 0.158.0 起按 `Retry-After` 等待且不封顶，静默等满。
+- 识别 Codex：沿用 `openai.IsCodexOfficialClientByHeaders` 的官方 UA 与 `originator` 家族，另覆盖 UA 中含 `codex_cli_rs`、`codex_exec`、`Codex Desktop`（大小写不敏感，含复合 UA）。只用于重试提示，不影响鉴权。
+- 上限取 `errors.codex_retry_after_cap_seconds`（`CodexRetryAfterCapOn()`；总开关或 `errors.enabled` 关闭时不应用）。截短的是无号应答的 HTTP `Retry-After` 与正文里的秒数；配置拒绝（仅限 Claude Code、渠道定价限制）的 `Retry-After: 60` 对 Codex 同样截到上限，仍带 `x-should-retry: false`、正文不加重试句。其他耗尽错误与其他客户端不变（无号 2–30 秒，配置拒绝 60 秒）。
+- 原因：Codex 0.158.0 起按 `Retry-After` 等待且不封顶，静默等满。
+- 实现在自有的 `handler/resilience_errors.go`，无新增上游钩子。
 
 ## 8. W8-lite 事件字段
 
@@ -269,16 +273,23 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 
 ## 12. 验证
 
-| 测试服务器场景 | 故障 | 覆盖 |
-|---|---|---|
-| CV-5 | F31 | §3.3 原生 created → failed(overloaded) 换号 |
-| CV-6 | F32 | §3.4 Chat 兼容 created → failed(“The service is busy”) 换号 |
-| CV-7 | F33 | §3.3 created → queued → failed 换号 |
-| CV-8 | F34 | §3.3 created → 空的 added 结构 → failed 换号（故障内容以 CHANGES_B 的最终白名单为准） |
-| RAW-1 | F35 | §4 raw Chat `error` + `[DONE]` |
-| SO-1 | F36 | §6 仅流式学习、过滤与清除 |
-| RA-1 | F37 | §7.1 有条件带 retry-after |
-| ANT-1 | — | §7.4 Anthropic 无号为 `api_error` |
-| Q-1 | — | §7.3 排队 ping 后的终止帧 |
+测试服务器场景（QA，`tools/gateway-resilience/staging`）。“基线”一列是 QA 在 `027a434ad` 上的实测：红灯表示本期要修的行为，回归表示基线已经满足、本期防止退化。
+
+| 场景 | 故障 | 覆盖 | 基线 |
+|---|---|---|---|
+| CV-5 | F31 | §3.3 created → failed(overloaded)：A 按 D18 最多试 2 次（各记一条 `CAPACITY_SHED`），在 B 成功，客户端只有 B 的 `response.created` | 回归 |
+| CV-6 | F32 | §3.4 Chat 兼容 created → failed(“The service is busy”) 换号，只有一个 role 分块；不按容量误判（§5） | 红灯 |
+| CV-7 | F33 | §3.3 created、in_progress → failed 换号 | 回归 |
+| CV-8 | F34 | §3.1 created 之前的空 delta 与空的 added 结构在换号时丢弃 | 红灯 |
+| CV-9 | — | §3.1 `codex.response.metadata` 算输出，不再换号 | — |
+| RAW-1 | F35 | §4 raw Chat `error` + `[DONE]` 在输出前换到 B | 红灯 |
+| RAW-2 | F35 | §4 单号组：记为失败，不当成功、不计费 | 红灯 |
+| SO-1 | F36 | §6 仅流式：学习、本请求换号、跳过下一个非流式请求、流式照常、清除后重新学习 | — |
+| RA-1 | F37 | §7.1 心跳已提交后全组过载：`response.failed` 带 2–10 秒 retry-after，正文一致 | 红灯（正文 8 秒但帧不带 headers） |
+| RA-2 | — | §7.1 心跳已提交后 B 健康：请求完成，没有延迟提示 | — |
+| ANT-3 | — | §7.4 Messages 无号为 `api_error` | 回归（无号本来就是 `api_error`；本期改的是心跳后的终止帧与按状态码推断的类型，由单测覆盖） |
+| SH-1、SH-2 | — | PR #117 份额：切换到份额按优先级与负载因子选号、真实瞬时失败降低健康权重、回到原版 | — |
+
+排队 ping 之后的终止帧（§7.3）由单测 `TestCompatibleQueueErrorsEndInInboundProtocol` 覆盖，测试服务器场景 Q-1 为可选。
 
 候选验证：现有 56 个场景加上表、升级演练（0.4.3 → 候选，含回退与再前滚）、3 小时浸泡（存活堆斜率 ≤1 MiB/h）。结果见 tasks。
