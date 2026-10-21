@@ -1317,6 +1317,10 @@
     {
       "path": "backend/internal/service/resilience_keepalive.go",
       "value": "resilience.RetryAdviceEligible"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "if result != nil && result.ClientDisconnect {"
     }
   ],
   "forbidden_module_paths": [
@@ -1719,6 +1723,11 @@
       "id": "xy-resilience-v2-handler-exits",
       "path": "backend/internal/handler/stream_error_event_test.go",
       "literal": "func TestCommittedFailurePreservesOriginalPunctuation"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/openai_compat_client_cancel_test.go",
+      "literal": "func TestOpenAICompatibleWriteDisconnectDoesNotReportAccountFailure"
     }
   ]
 }
