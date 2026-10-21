@@ -1638,7 +1638,7 @@
     {
       "id": "xy-channel-monitor-probe-lane",
       "path": "backend/internal/server/middleware/monitor_probe_test.go",
-      "literal": "func TestMonitorProbeMarksSignedRequest"
+      "literal": "func TestMonitorProbeMarksRequestSignedForItsOwnKey"
     },
     {
       "id": "xy-channel-monitor-probe-lane",

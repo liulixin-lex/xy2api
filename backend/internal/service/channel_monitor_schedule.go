@@ -167,10 +167,10 @@ const monitorPersistTimeout = 5 * time.Second
 // monitorRoundKind 标记一轮检测的来源，决定写历史时是否推进 last_checked_at。
 type monitorRoundKind int
 
+// 零值表示未标记：未经认领的检测，写历史时照常补记 last_checked_at。
 const (
-	monitorRoundUnmarked monitorRoundKind = iota
 	// monitorRoundClaimed 定时检测，认领时已把 last_checked_at 记为本轮开始。
-	monitorRoundClaimed
+	monitorRoundClaimed monitorRoundKind = iota + 1
 	// monitorRoundManual 管理端手动检测，不推进 last_checked_at。
 	monitorRoundManual
 )
