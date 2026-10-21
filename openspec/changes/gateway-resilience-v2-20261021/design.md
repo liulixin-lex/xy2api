@@ -244,7 +244,8 @@
 
   这样 service 层在 handler 耗尽出口之前合成的 `response.failed` 也能拿到当时的候选情况。
 - `Suppress` 由识别出终态的一方显式写入：handler 的回合封顶、内容拒绝、用户余额终态（α）；service 在自己合成这类终态帧时，先写 `Suppress` 再 `ResolveRetryAdvice`（β）。provider 本身看不到这些终态。
-- 正文：`RetryAdvice.Message(message)` 统一处理重试尾句：去掉本地固定格式的旧尾句 “Please try again in Ns.”；秒数为正时追加与 `Headers()` 同样夹到 10 秒的尾句；`unknown` 与 `Suppress` 只去掉旧尾句。只改网关自己的固定后缀，不改写上游的自然语言。
+- 正文：`RetryAdvice.Message(message)` 统一处理重试尾句：只认句号加空白分隔的本地完整尾句 “Please try again in Ns.”，去掉时保留前一句的句点（“Busy. Please try again in 30s.” → “Busy.”）；秒数为正时把它换成与 `Headers()` 同样夹到 10 秒的尾句，不重复追加；`unknown` 与 `Suppress` 只去掉旧尾句，正文只剩这句尾句时保留原文，不返回空消息。位于正文中间、前面没有空白或没有结束的同样文字不动。只改网关自己的固定后缀，不改写上游的自然语言（审查 P2-15，α `abd7f67a2`）。
+- 耗尽出口没有复制上游 `Retry-After` 时，先用旧 advisor 预热本地快照再求 advice，避免拿到 `unknown`（审查 P2-9，α `db1dad57e`）。
 - 分组 advisor（γ）只读末位兜底的分组快照（`lastResortGroups` 中未过期的条目，沿用既有的 2 秒缓存 `lastResortCandidateTTL`，锁内取引用、锁外计算），不做冷读取，不访问 Redis 或数据库。快照只在单一候选判断、末位兜底或原无号提示用过时才有；缺失或过期时返回 `unknown`。候选只算未尝试（排除 `RequestState` 里本请求已失败的账号）、模型与平台兼容、能力允许、无硬罚的账号；OpenAI 另看进程内的按模型屏蔽。入口是 `GatewayService` 与 `OpenAIGatewayService` 的同名方法 `RetryAdvice(ctx, groupID, model)`（γ `d4db8d426`），α 的 provider 自动识别；原 `NoAccountRetryAfter` 保留给 HTTP 无号提示。
 
 | 情况 | `Source` | `response.failed` 的 retry-after |
