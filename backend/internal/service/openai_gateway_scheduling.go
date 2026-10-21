@@ -18,6 +18,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
 
@@ -1101,8 +1102,8 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 
 		fresh := s.resolveFreshSchedulableOpenAIAccountBeforeProfit(ctx, acc, platform, requestedModel, false, requiredCapability)
 		if fresh == nil {
-			reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, acc, platform, requestedModel, requireCompact, requiredCapability)
-			if reason == "" {
+			reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, acc, platform, requestedModel, false, requiredCapability)
+			if reason != resilience.ReasonCapabilityStreamOnly {
 				reason = "ineligible"
 			}
 			filterStats.exclude(reason)

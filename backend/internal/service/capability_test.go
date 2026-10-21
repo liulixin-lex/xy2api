@@ -289,3 +289,18 @@ func TestCapabilityFilteringRequiresSameUpstreamProtocol(t *testing.T) {
 		})
 	}
 }
+
+func TestCapabilityLegacyMixedExclusionsKeepGenericNoAccount(t *testing.T) {
+	withResilienceSettings(t, nil)
+	a, b := capabilityTestAccount(1), capabilityTestAccount(2)
+	a.Extra["model_rate_limits"] = map[string]any{"gpt-test": map[string]any{"rate_limit_reset_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}}
+	b.Schedulable = false
+	svc := &OpenAIGatewayService{}
+	selected, compactBlocked, stats := svc.selectBestAccount(context.Background(), nil, PlatformOpenAI, []Account{*a, *b}, "gpt-test", nil, false, "", false)
+	require.Nil(t, selected)
+	require.False(t, compactBlocked)
+	require.Equal(t, "pool=2, filtered: ineligible=2", stats.summary(""))
+	err := noAvailableOpenAISelectionError("gpt-test", compactBlocked, stats.summary(""))
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.NotContains(t, err.Error(), "model_rate_limited=", "the handler would otherwise turn a mixed 503 into 429")
+}

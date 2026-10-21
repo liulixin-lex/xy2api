@@ -4,6 +4,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -278,4 +279,12 @@ func TestCapabilityExhaustionIsServiceUnavailable(t *testing.T) {
 	require.Equal(t, 503, status)
 	require.Equal(t, "api_error", typ)
 	require.NotContains(t, message, "stream must be true")
+}
+
+func TestCapabilityLegacyMixedExclusionsRemain503(t *testing.T) {
+	// This is the stable legacy scheduler summary for mixed eligibility
+	// failures, including one model rate limit and one disabled account.
+	err := fmt.Errorf("%w (pool=2, filtered: ineligible=2)", service.ErrNoAvailableAccounts)
+	fallback := noAccountErrorClassification{Status: http.StatusServiceUnavailable, ErrType: "api_error", Message: "Service temporarily unavailable"}
+	require.Equal(t, fallback, classifySelectionFailureError(err, fallback))
 }
