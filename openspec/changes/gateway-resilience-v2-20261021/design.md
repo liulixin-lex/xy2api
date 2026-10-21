@@ -355,6 +355,9 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 | SH-1、SH-2 | — | PR #117 份额：切换到份额按优先级与负载因子选号、真实瞬时失败降低健康权重、回到原版 | 通过（基线已含 #117） |
 | DC-6（修改） | — | §3.4 兼容转换只写开场就断开：改为断言开场延迟 | 红灯 |
 
-排队 ping 之后的终止帧（§7.3）由单测 `TestCompatibleQueueErrorsEndInInboundProtocol` 覆盖，测试服务器场景 Q-1 为可选。
+| Q-1 | — | §7.3 用户队列 ping 之后余额归零：Responses 为 created→failed，Chat 为 error→`[DONE]`，不写裸 JSON | 红灯 |
+| CX-1 | — | §7.5 Codex 请求（`originator` 与 UA）无号时 `Retry-After` ≤10 秒，普通客户端不变 | 红灯（基线 30 秒） |
 
-候选验证：全部 69 个场景（原 56 个加上表 13 个）、升级演练（0.4.3 → 候选，含回退与再前滚）、3 小时浸泡（存活堆斜率 ≤1 MiB/h）。结果见 tasks。
+排队 ping 之后的终止帧另由单测 `TestCompatibleQueueErrorsEndInInboundProtocol` 覆盖。
+
+候选验证：全部 71 个场景（原 56 个加上表 15 个）、升级演练（0.4.3 → 候选，含回退与再前滚）、3 小时浸泡（存活堆斜率 ≤1 MiB/h）。结果见 tasks。

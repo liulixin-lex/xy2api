@@ -205,6 +205,7 @@
 - `20261021-rv2-fe`（FE 2026-10-21T00:55Z 经 DOCS 代登记）：负责新开关的设置界面与 i18n、账号仅流式学习状态的显示与清除、Explain 新原因文案；分支 `rv2/fe`，基线 `027a434ad`，初始工作树干净；只在本地提交。
 - `20261021-resilience-v2-qa`（QA 2026-10-21T00:55Z 经 DOCS 代登记）：分支 `rv2/qa`，基线 `027a434ad`；阶段 1 为新故障与场景，阶段 2（候选验证）在 PM 指定提交放行后才开始。QA 结束时由 DOCS 代为同步交接与操作日志。
   - 2026-10-21T02:26Z：阶段 1 完成，提交 `ce8c3c01d`（只改 `tools/gateway-resilience/` 下 5 个文件），工作树干净。新增 13 个场景，合计 69 个。基线 `027a434ad` 上 15 项定向场景 8 项通过、7 项是预期的红灯（CV-6、CV-8、RAW-1、RAW-2、SO-1、RA-1、DC-6）；SH-1、SH-2、LR-1 通过。报告在仓库外 `staging/REPORT_PHASE1.md`。阶段 2 等 PM 指定提交放行，**没有构建或验收任何集成候选**。
+  - 2026-10-21T02:56Z：按 PM 指令补 Q-1（用户队列 ping 后余额归零）与 CX-1（Codex 无号 `Retry-After` 上限），提交 `3320a508a`，合计 71 个场景；基线 17 项定向 8 项通过、9 项预期红灯（新增两项都是红灯）。工作树干净，阶段 2 仍未放行，候选应跑全部 71 项。
 - `20261021-resilience-v2-gamma`（γ 2026-10-21T01:27Z 经 DOCS 代登记）：分支 `rv2/be-c`，基线 `027a434ad`；负责 C0、W2.1-lite、W6-lite；只在本地提交，不推送、不碰生产。C0 沿用现有设置键 `gateway_resilience_settings`：0.4.3 读存储时用 `json.Unmarshal`，忽略未知字段；管理端 PUT 的严格校验不影响存储回退。
 - 各 agent 的进度与变更登记在仓库外的 `briefs/PROGRESS_*.md` 与 `contract/CHANGES_*.md`。
 - 第 0 批（Claude 首事件截止，2026-10-21T01:09Z）：生产只读评估 7 天分布后**保持 90 秒，生产未写入**。流式 Messages 首字超过 45 秒约 0.45%，首字只是首事件时延的上界；生产 settings 表里没有韧性设置行（运行态为缺省值），用户限定的单条 CAS UPDATE 无法成立。报告在仓库外 `prod/O4_REPORT.md`。
@@ -957,3 +958,13 @@ pnpm --dir frontend run build
 - 验证：工具全包 `-race`、Python 编译、文档一致性检查通过；场景在测试服务器的基线上运行。
 - 卡点/风险：无。
 - 下一步：阶段 2（唯一候选的全套场景、升级演练、3 小时浸泡）等 PM 指定提交放行。
+
+### 2026-10-21T02:56Z — `20261021-resilience-v2-qa` — 阶段 1 补充完成（DOCS 代记）
+
+- 请求/目标：PM 指令 3，补排队 ping 后终止帧与 Codex `Retry-After` 上限的测试服务器场景。
+- 开始状态：`rv2/qa` 在 `ce8c3c01d`，工作树干净。
+- 完成操作：新增 Q-1（真实用户队列 ping 后余额归零：基线上 Gateway Responses 与 Chat 写裸 JSON，Messages 已是带名字的 error）与 CX-1（`originator` 与 UA 两种 Codex 标记在基线都是 30 秒，普通客户端对照不变）。合计 71 个场景。
+- 修改文件：`tools/gateway-resilience/` 下 3 个文件（提交 `3320a508a`）；场景清单在 `gateway-resilience-20261015/staging-validation.md` §6.1（DOCS）。
+- 验证：Python 编译、文档一致性与 diff 检查通过；测试用的专用用户已恢复。基线 17 项定向 8 项通过、9 项预期红灯。
+- 卡点/风险：无。
+- 下一步：阶段 2 等 PM 指定提交放行，候选跑全部 71 项。

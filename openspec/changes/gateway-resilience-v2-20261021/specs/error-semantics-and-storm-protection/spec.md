@@ -40,7 +40,7 @@ The Gateway Responses, Gateway Chat and OpenAI-to-Messages exhausted exits MUST 
 
 When a request has already received queue-wait pings and then fails with a billing or other terminal error, the gateway MUST end it with the inbound protocol's terminal frame: Responses `response.created` then `response.failed`, Chat an `error` chunk then `[DONE]`. It MUST NOT write a bare JSON body. This fix is not controlled by any switch.
 
-#### Scenario: Balance exhausted after a queue ping
+#### Scenario: Balance exhausted after a queue ping (Q-1)
 - **WHEN** a user's concurrency is 1, a second streaming request waits in the queue and receives a ping, and then fails on insufficient balance
 - **THEN** a Responses client receives `response.created` then `response.failed`, and a Chat client receives an `error` chunk then `[DONE]`.
 
@@ -56,7 +56,7 @@ For Anthropic Messages clients, the gateway's own no-account and transient failu
 
 For requests identified as Codex (user agent or `originator` header), the `Retry-After` of a no-account 503 and of a configuration-rejected 503 MUST NOT exceed `errors.codex_retry_after_cap_seconds` (default 10; 0 disables the cap), and the seconds in the message MUST match. A configuration rejection MUST keep `x-should-retry: false`. Other clients keep 2–30 seconds for no-account and 60 seconds for configuration rejections; other exhausted errors are unchanged.
 
-#### Scenario: Codex no-account
+#### Scenario: Codex no-account (CX-1)
 - **WHEN** a Codex request finds no account and the group's estimated recovery is 25 seconds
 - **THEN** the response carries `Retry-After` of at most 10.
 
