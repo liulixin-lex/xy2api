@@ -31,7 +31,9 @@ const (
 
 	// ginKeyResilienceRetryAfter carries the Retry-After seconds chosen for a
 	// no-account response to the writers, which add the message hint.
-	ginKeyResilienceRetryAfter = "xy_resilience_retry_after"
+	ginKeyResilienceRetryAfter  = "xy_resilience_retry_after"
+	ginKeyResilienceTurnCounted = "xy_resilience_turn_counted"
+	ginKeyResilienceFinalized   = "xy_resilience_terminal_finalized"
 
 	// ginKeyResilienceTurnCapped marks a failure that ends the client's turn
 	// (design §9.7); the writers give it the code server_is_overloaded.
@@ -51,6 +53,18 @@ const (
 	// contentRejectionMessageMax bounds the upstream text shown to clients.
 	contentRejectionMessageMax = 500
 )
+
+// beginResilienceTerminal claims a handler's terminal write. It is claimed
+// before writing so a failed/short write cannot trigger a second response.
+// Handler writes run on the request goroutine; heartbeat writers are stopped
+// before this marker is used.
+func beginResilienceTerminal(c *gin.Context) bool {
+	if c == nil || c.GetBool(ginKeyResilienceFinalized) {
+		return false
+	}
+	c.Set(ginKeyResilienceFinalized, true)
+	return true
+}
 
 // upstreamURLPattern finds URLs in upstream text, which may name the
 // upstream host.
@@ -251,12 +265,18 @@ func resilienceCapTurn(c *gin.Context) bool {
 	if key == "" {
 		return false
 	}
+	if c.GetBool(ginKeyResilienceTurnCounted) {
+		return c.GetBool(ginKeyResilienceTurnCapped)
+	}
+	c.Set(ginKeyResilienceTurnCounted, true)
 	st.MarkTurnFailed()
 	n := resilience.ProcessTurnCap().Fail(key, time.Duration(tc.WindowSeconds)*time.Second, time.Now())
 	if n < tc.Failures {
 		return false
 	}
 	c.Writer.Header().Del("Retry-After")
+	c.Set(ginKeyResilienceRetryAfter, 0)
+	resilience.SetRetryAdvice(c.Request.Context(), resilience.RetryAdvice{Suppress: true, Source: "turn_cap"})
 	c.Header("x-should-retry", "false")
 	c.Set(ginKeyResilienceTurnCapped, true)
 	resilience.Count(resilience.MetricTurnCap, st.GroupID(), 0, "")

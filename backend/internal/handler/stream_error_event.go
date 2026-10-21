@@ -70,6 +70,9 @@ func writeResponsesFailedSSEWithOpening(c *gin.Context, errType, code, message s
 	if !ok {
 		return false
 	}
+	if !beginResilienceTerminal(c) {
+		return true
+	}
 
 	id, createdAt, model := synthesizeResponseID(c), time.Now().Unix(), requestModel(c)
 	opening, sequence := resilienceResponsesOpening(c, id, model, createdAt)

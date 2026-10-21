@@ -1618,12 +1618,17 @@ func resolveOpenAIMessagesMetadataSession(c *gin.Context, sessionHash, promptCac
 
 // anthropicErrorResponse writes an error in Anthropic Messages API format.
 func (h *OpenAIGatewayHandler) anthropicErrorResponse(c *gin.Context, status int, errType, message string) {
+	errType, code, message := resilienceTranslateError(c, status, errType, "", message)
+	if !beginResilienceTerminal(c) {
+		return
+	}
+	errObj := gin.H{"type": errType, "message": message}
+	if code != "" {
+		errObj["code"] = code
+	}
 	c.JSON(status, gin.H{
-		"type": "error",
-		"error": gin.H{
-			"type":    errType,
-			"message": message,
-		},
+		"type":  "error",
+		"error": errObj,
 	})
 }
 
@@ -1635,14 +1640,21 @@ func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, stat
 		streamStarted = true
 	}
 	if streamStarted {
+		errType, code, translatedMessage := resilienceTranslateError(c, status, errType, "", message)
+		message = translatedMessage
+		service.MarkOpsStreamError(c, errType, message, status)
 		flusher, ok := c.Writer.(http.Flusher)
 		if ok {
+			if !beginResilienceTerminal(c) {
+				return
+			}
+			errObj := gin.H{"type": errType, "message": message}
+			if code != "" {
+				errObj["code"] = code
+			}
 			errPayload, _ := json.Marshal(gin.H{
-				"type": "error",
-				"error": gin.H{
-					"type":    errType,
-					"message": message,
-				},
+				"type":  "error",
+				"error": errObj,
 			})
 			fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", errPayload) //nolint:errcheck
 			flusher.Flush()
@@ -1654,12 +1666,19 @@ func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, stat
 
 // handleAnthropicFailoverExhausted maps upstream failover errors to Anthropic format.
 func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
+	if c.GetBool(ginKeyResilienceFinalized) {
+		return
+	}
+	write := func(status int, errType, message string) {
+		status = applyExhaustedRetryHint(c, h.gatewayService, status)
+		h.anthropicStreamingAwareError(c, status, errType, message, streamStarted)
+	}
 	if failoverErr != nil {
 		copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
 	}
 	if failoverErr != nil && failoverErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(failoverErr)
-		h.anthropicStreamingAwareError(c, status, "api_error", message, streamStarted)
+		write(status, "api_error", message)
 		return
 	}
 	if failoverErr != nil && failoverErr.IsOpenAICapacityShed() && strings.TrimSpace(failoverErr.ClientMessage) != "" {
@@ -1667,16 +1686,20 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 		if status <= 0 {
 			status = http.StatusServiceUnavailable
 		}
-		h.anthropicStreamingAwareError(c, status, "api_error", failoverErr.ClientMessage, streamStarted)
+		write(status, "api_error", failoverErr.ClientMessage)
 		return
 	}
 	// xy2api resilience: a content-safety refusal is the client's 400.
 	if msg, rejected := resilienceContentRejection(c, failoverErr); rejected {
-		h.anthropicStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", msg, streamStarted)
+		write(http.StatusBadRequest, "invalid_request_error", msg)
 		return
 	}
-	status, errType, errMsg := h.mapUpstreamError(failoverErr.StatusCode)
-	h.anthropicStreamingAwareError(c, status, errType, errMsg, streamStarted)
+	statusCode := http.StatusBadGateway
+	if failoverErr != nil && failoverErr.StatusCode > 0 {
+		statusCode = failoverErr.StatusCode
+	}
+	status, errType, errMsg := h.mapUpstreamError(statusCode)
+	write(status, errType, errMsg)
 }
 
 // ensureAnthropicErrorResponse writes a fallback Anthropic error if no response was written.
