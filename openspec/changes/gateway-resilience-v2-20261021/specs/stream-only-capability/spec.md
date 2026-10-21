@@ -28,7 +28,7 @@ Account selection for OpenAI groups MUST skip an account learned as stream-only 
 
 #### Scenario: Only the learned account remains
 - **WHEN** the group has only account A, learned as stream-only, and a non-streaming request arrives
-- **THEN** the request fails as no-account with reason `capability_stream_only`, not as a client error.
+- **THEN** the request fails with 503, reason `capability_stream_only`, a message suggesting `"stream": true`, no `Retry-After` and `x-should-retry: false`, not as a client error.
 
 #### Scenario: Expiry
 - **WHEN** the time to live of the mark passes

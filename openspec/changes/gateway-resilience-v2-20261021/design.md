@@ -144,7 +144,7 @@
 - 取消优先：暂存期内客户端取消就关闭上游；第一次实际写出之后回到原有的 drain 机制。
 - 首事件守卫（`resilience_compat_stream.go` 的 `armOpenAICompatFirstEvent`）延长到首个内容或终态；中转伪保活帧仍按“存活”处理（旧 design §7.8）。
 - `clientOutputStarted` 按实际写出的字节置位：短写或部分写出之后不再重放。
-- **直连请求保持不提交**：暂存期内 service 不自己发心跳，直连请求拿不到任何字节，与原生 Responses 自 0.4.0 以来一致；经 CDN 的请求照旧由 handler 的首包前保活提交并发心跳。下游中转的读超时短于上游推理时间时可能超时，见 §11。
+- **暂存期写注释心跳**（PM 2026-10-21T02:42Z 改判方案 U4）：按 `stream_keepalive_interval` 写 `:\n\n`，与原生 Responses 的 `stageFirstOutput` 期间（基线 `openai_gateway_response_handling.go` 约 1000–1012 行）和基线一致。方案原推荐“不提交”，依据是“原生不提交”，这个前提不成立。心跳记为心跳字节（`recordOpenAIStreamKeepaliveBytes`），不置 `clientOutputStarted`，不影响换号；心跳会提交 200，之后若耗尽，以带内终止帧收尾（旧 design §7.6）。经 CDN 的请求照旧另有 handler 的首包前保活。【待契约：β 的提交】
 - 开关关闭时保留旧的“首行”守卫与流内心跳。
 - 与 64 KiB 以上请求的静默拒绝缓冲（`openai_silent_refusal.go`）叠加：先推迟生成开场，释放后再交给旧的探测器，原有的 pendingSSE 缓冲仍由它维护。只有 usage 的合法空回答正常结束；`response.incomplete` 不会因结果为空误触发静默拒绝的重放；原有“无 usage 的静默拒绝”规则不变。
 - 兼容路径 `first_token_ms` 的取点不变（上游第一条数据），避免口径跳变。
@@ -205,7 +205,7 @@
 
 - **本请求**：`failure.decision_v2` 开启时，钩子返回可换号的哨兵错误（`IsCapabilityStreamOnly()`；不上报账号调度失败、不同号重试），handler 只计请求预算的尝试次数，不记会话失败、不冷却。这次拒绝不写运维的上游错误记录（写入会把账号记为本请求失败），只记中性事件 `resilience.capability_learned`。`decision_v2` 关闭时只学习，钩子返回空，本请求照旧返回 400。
 - **选号**：`Account.CapabilityExclusion(ctx, model, now)` 按本请求**实际发给上游**的协议与流模式返回阻断记录：入站 Chat 若转换为 Responses 上游，读 Responses 的学习；Grok 的两种协议各自独立。普通的 Chat→Responses 转换（含 API Key 账号）与 Grok OAuth 的 Chat 桥接都强制上游 `stream=true`，所以不受非流式学习记录过滤。入口在 `WithCapabilityRequest` 之后、首次选号前再用 `service.WithCapabilityRouting(ctx, c, body)` 标出路由提示（只取布尔值，不保留 Gin context 或正文，不做 I/O），用来区分 Chat 路径上的 Responses 形状请求与 Grok Chat 是否走 Responses 桥接。【待契约：γ 的 API 提交】OpenAI 选号的共同资格检查（`openai_gateway_scheduling.go`）与 `openai_account_scheduler.go` 的 `isAccountRequestCompatibleReason` 都经钩子 `capabilityEligibilityReason` 过滤，覆盖粘性会话与末位兜底的最后检查；钩子登记到 `scheduler-diff.json` 与 `policy.json`（α）。
-- 全部被过滤后的无号仍是现有的 503，原因码 `capability_stream_only`，不再把 400 归咎于用户。
+- 全部被过滤后的无号仍是 503，原因码 `capability_stream_only`，不再把 400 归咎于用户；消息提示客户端改用 `"stream": true`，不带 `Retry-After`，写 `x-should-retry: false`：在这些账号恢复前重试同样的非流式请求没有意义（PM 2026-10-21T02:42Z）。【待契约：γ 与 α 的提交】
 - 请求标记里另存本请求的中性排除集合（不借用“本请求已失败账号”），用于最终无号的原因与重试建议的候选排除：被能力挡掉的账号不会被建议成健康备选。
 - 负缓存的键按协议与流模式隔离，能力阻断也不计入全组的快速失败：同一分组的流式请求不会因为非流式请求被挡而拿到缓存的 503。
 - 本请求里所有候选都以“只接受流式”拒绝、换号耗尽时，同样返回 503（Anthropic 协议为 `api_error`），不返回上游的 400：共用的容量耗尽出口 `resilienceCapacityExhausted` 先识别哨兵（γ，`2cb3343de`），OpenAI 专用出口在透传规则之前加同样的分支（α，必要时 `code` 为 `capability_stream_only`）。【待契约：α 的实现提交】
@@ -297,10 +297,10 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 
 | 事件 | 新增字段 |
 |---|---|
-| `resilience.post_output_failure`、`resilience.session_rebind`、`resilience.last_resort`、`resilience.keepalive_committed`、`resilience.turn_cap` | `request_id`（网关本地请求 ID）、`model`、`delivered_bytes`、`ms_since_first_output`、`prelude_release_event`、`prelude_release_ms` |
+| `resilience.post_output_failure`、`resilience.session_rebind`、`resilience.last_resort`、`resilience.keepalive_committed`、`resilience.turn_cap` | `request_id`、`gateway_request_id`、`model`、`delivered_bytes`、`ms_since_first_output`、`prelude_release_event`、`prelude_release_ms` |
 
 - 字段统一由 `resilience.EventFields(ctx)` 生成，挂在请求的 `RequestState` 上：
-  - `request_id` 是 RequestState 新建时生成的本地 UUID；客户端可以自带 `X-Request-ID`，所以不复用它，也不改变计费与幂等键、HTTP 关联 ID 或 ClientRequestID；
+  - `request_id` 取 `ctxkey.RequestID`，与运维记录和访问日志一致（PM 2026-10-21T02:42Z）；`gateway_request_id` 是 RequestState 新建时生成的本地 UUID，客户端无法指定。两者都不改变计费与幂等键或 ClientRequestID。【待契约：α 的提交】
   - `model` 优先取入站模型，没有时取选号用的模型；
   - `delivered_bytes` 读 `RequestState.DeliveredBytes()`（送达口径，开场与心跳不算）；
   - `ms_since_first_output` 从第一次成功写出内容起算（开场事件与心跳不启动时钟，之后的输出不重置），没有输出时为 0；
@@ -324,7 +324,11 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 ## 11. 已知限制与延后
 
 - 仍未覆盖的路径：Gemini、Bedrock、CN、Antigravity T2、Gateway 入站经 Anthropic 上游的两个反向转换器（Responses、Chat）；它们的开场事件与终止行为保持 0.4.3。
-- 推迟开场期间直连请求收不到任何字节；下游中转的读超时（如 nginx 60 秒）短于上游推理时间时可能超时。经 CDN 的请求不受影响（首包前保活）。
+- 推迟开场期间的注释心跳会提交 200：此后的失败只能以带内终止帧告知客户端，不能再改状态码（与原生 Responses 相同）。
+- 容量判据收紧后，“Codex is at capacity”与非 503 上的 “servers are currently overloaded”（OpenAI 请求级降载）不再算 `CAPACITY_SHED`，会让账号进入软冷却并计入会话失败（临时不可调度仍跳过）；重试耗尽的 Grok 原始 429 不再转成无号 503，客户端看到 429。符合方案（不凭文案判容量），上线后按会话改绑与冷却观察（审查 P2-3）。
+- 原生路径上，上游在 `response.created` 之前发出的非空 delta 照常先转发，网关不重排；这类上游下“Responses 第一个事件总是 created”不成立，严格 SDK 仍可能报错（审查 P2-7）。
+- 仅流式学习记录按凭据指纹失效：OAuth 类账号刷新令牌后指纹改变，需要重新学习一次（审查 A-P2-3）。
+- 学习粒度是“账号 + 协议”，不分模型：中转只对某个模型要求流式时，该账号所有模型的非流式请求都会被跳过（审查 A-P2-8）。
 - 观测只有日志字段，没有请求与尝试表；“伪已输出”比例要从 `prelude_release_event` 日志统计。
 
 ## 12. 验证

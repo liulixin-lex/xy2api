@@ -73,7 +73,7 @@ With `stream.native_prelude_whitelist` on, native Responses streaming MUST keep 
 
 ### Requirement: Deferred opening on compatibility conversion
 
-With `stream.prelude_staging` on, Chat Completions and Messages streams converted from a Responses upstream MUST NOT write the role chunk or `message_start` until the first content or terminal event, and then MUST write the opening and that event in order. A retryable failure, EOF or read error before that point MUST switch accounts, and the client MUST see a single opening. The first-event guard MUST extend to the first content. Direct (non-CDN) requests MUST NOT be committed early; CDN requests keep the pre-output keepalive. The `first_token_ms` measurement point MUST stay at the first upstream line. With the switch off, the opening MUST be written when the upstream `response.created` arrives (0.4.3).
+With `stream.prelude_staging` on, Chat Completions and Messages streams converted from a Responses upstream MUST NOT write the role chunk or `message_start` until the first content or terminal event, and then MUST write the opening and that event in order. A retryable failure, EOF or read error before that point MUST switch accounts, and the client MUST see a single opening. The first-event guard MUST extend to the first content. While staged, the converter MUST write comment heartbeats at the stream keepalive interval; they count as heartbeat bytes, not output, and MUST NOT prevent an account switch. Once heartbeats have committed 200, exhaustion MUST end with the inbound protocol's terminal frame. The `first_token_ms` measurement point MUST stay at the first upstream line. With the switch off, the opening MUST be written when the upstream `response.created` arrives (0.4.3).
 
 #### Scenario: Chat busy after created (CV-6)
 - **WHEN** a streaming `/v1/chat/completions` request is converted to Responses and account A sends `response.created` then `response.failed` with "The service is busy"
@@ -82,6 +82,10 @@ With `stream.prelude_staging` on, Chat Completions and Messages streams converte
 #### Scenario: Messages EOF after created
 - **WHEN** a streaming Messages request is converted and account A sends `response.created` then closes the stream
 - **THEN** the request switches accounts and the client receives exactly one `message_start`.
+
+#### Scenario: Staged longer than the heartbeat interval
+- **WHEN** a converted stream stays staged longer than `stream_keepalive_interval` and account A then fails before content
+- **THEN** the client has received `:` comment heartbeats, the request still switches accounts, and the client sees a single opening.
 
 #### Scenario: Tool call as the first event
 - **WHEN** the first content event is a tool call

@@ -79,5 +79,5 @@
 | 设置 | 新增开关见 design §2；缺省全部开启；总开关关闭时按 0.3.0 运行，子开关关闭回到 0.4.3 / #117 的行为 |
 | 迁移 | 无 |
 | 管理接口 | 账号的仅流式学习状态与清除接口（design §6） |
-| 客户端可见 | 兼容流的开场事件可能更晚到达（与原生 Responses 一致）；暂存期内的失败改为换号；`response.failed` 的重试时间；Anthropic 错误 `type`；Codex 无号 503 的 `Retry-After` 上限 |
+| 客户端可见 | 兼容流的开场事件可能更晚到达，期间照常有注释心跳（与原生 Responses 一致）；暂存期内的失败改为换号；`response.failed` 的重试时间；Anthropic 错误 `type`；Codex 无号 503 的 `Retry-After` 上限 |
 | 上游文件 | 钩子登记在 `tools/upstream-sync/policy.json`，调度文件差异登记在 `scheduler-diff.json`（集成时由 α 汇总） |
