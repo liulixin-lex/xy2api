@@ -6,18 +6,19 @@
 
 ## 当前交接状态
 
-### 网关韧性第二期与 0.4.4 发版 `20261021-resilience-v2-0.4.4`（进行中；2026-10-21T04:05Z 更新）
+### 网关韧性第二期与 0.4.4 发版 `20261021-resilience-v2-0.4.4`（进行中；2026-10-21T04:50Z 更新）
 
 - **背景**：0.4.3 生产只读取证（约 9 小时）中，用户可见失败约 1.42%，主要是原生 Responses 开场后、正文前的带内终止，兼容 Chat 开场后终止，仅流式上游，以及分类与信号缺陷。方案在仓库外 `xy2api-artifacts/resilience-ux-20261020/plan/PLAN_v2.md`；本期规格是 OpenSpec 变更 [`gateway-resilience-v2-20261021`](../openspec/changes/gateway-resilience-v2-20261021/proposal.md)。
 - **目标**（用户 2026-10-21）：实现后合并 #116、#117 与本期 PR，发布 0.4.4；第 0 批只做 Claude 首事件截止；授权一次生产探测；工期 12 小时（00:47Z–12:47Z）。生产部署 0.4.4 未授权。
 - **要求与约束**：各 agent 只改自己拥有的文件、只在本地提交；推送、PR、合并、打 tag 由 PM 安排 α 执行；每项行为改动先写失败用例；公开仓库不写主机与生产编号。
 - **已完成**：
   - 第 0 批：评估后保持 90 秒，生产未写入；生产探测完成，白名单据此确定。
-  - C0 设置（γ `95e8a6416`）、W1.1 与 W1.2-lite（β）、W2.1-lite（γ）、W5.1–W5.5（α、β）、W6-lite（γ、β、α）、W8-lite（α、β）、前端（FE）全部提交；第一轮代码审查（R1）的 P0、P1 与选定的 P2 已修，P2-16 只登记。提交清单见各 agent 的进行中条目与 OpenSpec tasks。
+  - C0 设置（γ `95e8a6416`）、W1.1 与 W1.2-lite（β）、W2.1-lite（γ）、W5.1–W5.5（α、β）、W6-lite（γ、β、α）、W8-lite（α、β）、前端（FE）全部提交；第一轮代码审查（R1）的 P0、P1 与选定的 P2 已修，P2-16 只登记；第二轮审查（R2）的三项 P1 与两项 P2 已修。提交清单见各 agent 的进行中条目与 OpenSpec tasks。
+  - 功能冻结（04:45Z）：各 agent 最终 HEAD 为 α `fc244028a`、β `2323768d9`、γ `fe7d6cbbc`、FE `bd215aa0c`、QA `0ad64390c`；集成分支 `feat/resilience-v2-20261021` 已合入全部业务提交，`VERSION` 为 0.4.4。
   - QA 阶段 1：71 个场景，基线 17 项定向 8 通过、9 预期红灯；阶段 2 工具已就绪（`a542b3cb7`）。
-  - 文档：OpenSpec（proposal、design、tasks、6 份规格）、`GATEWAY_RESILIENCE.md`、旧变更的 design 衔接、staging-validation 与 runbook；发版说明草稿在仓库外。
+  - 文档：OpenSpec（proposal、design、tasks、6 份规格）按最终契约定稿（04:46Z），`GATEWAY_RESILIENCE.md`、旧变更的 design 衔接、staging-validation 与 runbook 同步；文档一致性检查在集成分支上通过；发版说明草稿在仓库外，只差验证结果。
 - **未完成**（按顺序）：
-  1. α 集成到 `feat/resilience-v2-20261021` 并跑全量门禁（尚未执行）；独立审查。
+  1. α 合入 rv2/docs 最终 HEAD 后跑**一次**全量门禁（尚未执行）；第二轮审查收尾。
   2. 推送、开 PR、CI。
   3. QA 阶段 2：唯一候选的 71 个场景、0.4.3 升级演练、3 小时浸泡。
   4. 合并 #116、#117 与本期 PR，打 `v0.4.4`，Release 核验与全新安装。

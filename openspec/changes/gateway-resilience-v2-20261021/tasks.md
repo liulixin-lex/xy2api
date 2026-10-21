@@ -5,7 +5,7 @@
 ## 0. 契约与登记
 
 - [x] 0.1 项目记忆登记 `20261021-resilience-v2-0.4.4` 与各 agent 的代登记。
-- [ ] 0.2 OpenSpec 变更：proposal、design、tasks、规格增量；`docs/README.md` 目录。
+- [x] 0.2 OpenSpec 变更：proposal、design、tasks、规格增量；`docs/README.md` 目录（DOCS，design 按最终契约定稿于 2026-10-21T04:46Z）。
 - [x] 0.3 C0 设置契约（γ，`contract/C0_SETTINGS.md`，2026-10-21T01:30Z 冻结）：字段、缺省、范围、存放、回退结论；已写入 design §1–§2。
 - [x] 0.4 RetryAdvice 契约（α，`contract/RETRY_ADVICE.md`）。
 - [x] 0.5 生产探测：Responses 首个 delta 之前的事件类型清单（2026-10-21，PM 指令据此定白名单，design §3.1）。
@@ -60,14 +60,14 @@
 
 ## 9. 文档与登记（DOCS、α）
 
-- [ ] 9.1 `docs/GATEWAY_RESILIENCE.md`：能力表、客户端可见行为、新字段、事件字段、不受开关控制的修复、已知限制；Codex 重试说法更正。
-- [ ] 9.2 `tools/docs_consistency.json`：新设置与事件名能在文档中找到；退役名登记。
+- [x] 9.1 `docs/GATEWAY_RESILIENCE.md`：能力表、客户端可见行为、新字段、事件字段、不受开关控制的修复、已知限制；Codex 重试说法更正（另同步旧变更的 design §10 衔接、staging-validation §6.1 与 §8、runbook §6）。
+- [x] 9.2 `tools/docs_consistency.json`：新设置与事件名能在文档中找到（规则不变，旧 design §10 列出新字段名并指向新变更）；本期没有发布过又改名的标识，不需要登记退役名。
 - [ ] 9.3 `policy.json` required_literals 与具名补丁、`scheduler-diff.json`（α 集成时汇总各 CHANGES）。
-- [ ] 9.4 `python3 tools/check_docs_consistency.py` 在集成树通过。
+- [x] 9.4 `python3 tools/check_docs_consistency.py` 在集成树通过（集成分支 `4f099f8e1` 合入 rv2/docs 最终 HEAD 的预演通过）。
 
 ## 10. 集成与门禁（α）
 
-- [ ] 10.1 按序 `--no-ff` 合入六个分支；`VERSION` 与 `UPSTREAM_BASE.json` 改为 0.4.4。
+- [x] 10.1 按序 `--no-ff` 合入六个分支；`VERSION` 与 `UPSTREAM_BASE.json` 改为 0.4.4（α，集成分支 `feat/resilience-v2-20261021`；第二轮审查的修复随后增量合入）。
 - [ ] 10.2 全量门禁：gofmt、四种 vet、golangci-lint、unit 与无 tag 测试、`ci_gate.py`（`-race`，零跳过）、前端四项、`tools/tests`、文档一致性、干净树 `sync.py audit`。
 - [ ] 10.3 独立审查与修复。
 
