@@ -238,6 +238,7 @@
   - 2026-10-21T05:00Z：全量门禁进行中，期间发现并修复三处（各自单独提交、合回集成后从中断处继续，不减少门禁项）：基线测试文件的单行 gofmt（`759671ae6`，α 接手该未分配文件）；已提交 Responses 流对无标点原文多补句点（`c3757f8bb`）；无调用点的旧内容拒绝 writer `writeOpenAIContentRejection` 删除（lint 死代码，DOCS 已登记为退役名）。
 - `20261021-rv2-fe`（FE 2026-10-21T00:55Z 经 DOCS 代登记）：负责新开关的设置界面与 i18n、账号仅流式学习状态的显示与清除、Explain 新原因文案；分支 `rv2/fe`，基线 `027a434ad`，初始工作树干净；只在本地提交。
   - 2026-10-21T04:05Z：交付完成，HEAD `bd215aa0c`（15 个提交，只改 `frontend/**`，17 个文件），工作树干净。HEAD 上 lint:check、typecheck、test:run（413 个文件、3182 个用例）、build（含 i18n 检查）全部通过。`AccountsView.vue` 的两处钩子建议登记为具名补丁 `xy-account-stream-only-learning`（α 集成时）。
+  - 2026-10-21T05:11Z：**完成**。`bd215aa0c` 已并入集成（`27cef7db0`），集成上的前端四项门禁通过；钩子已由 α 登记为具名补丁 `xy-account-stream-only-learning`。无遗留卡点。
 - `20261021-resilience-v2-qa`（QA 2026-10-21T00:55Z 经 DOCS 代登记）：分支 `rv2/qa`，基线 `027a434ad`；阶段 1 为新故障与场景，阶段 2（候选验证）在 PM 指定提交放行后才开始。QA 结束时由 DOCS 代为同步交接与操作日志。
   - 2026-10-21T02:26Z：阶段 1 完成，提交 `ce8c3c01d`（只改 `tools/gateway-resilience/` 下 5 个文件），工作树干净。新增 13 个场景，合计 69 个。基线 `027a434ad` 上 15 项定向场景 8 项通过、7 项是预期的红灯（CV-6、CV-8、RAW-1、RAW-2、SO-1、RA-1、DC-6）；SH-1、SH-2、LR-1 通过。报告在仓库外 `staging/REPORT_PHASE1.md`。阶段 2 等 PM 指定提交放行，**没有构建或验收任何集成候选**。
   - 2026-10-21T02:56Z：按 PM 指令补 Q-1（用户队列 ping 后余额归零）与 CX-1（Codex 无号 `Retry-After` 上限），提交 `3320a508a`，合计 71 个场景；基线 17 项定向 8 项通过、9 项预期红灯（新增两项都是红灯）。工作树干净，阶段 2 仍未放行，候选应跑全部 71 项。
@@ -267,6 +268,7 @@
 - macOS 会定期删掉 `/tmp` 下 3 天没访问的文件。0.4.2 期间放在 `/tmp` 的 Go 工具链和测试服务器辅助脚本被删过一次。跨天的任务把工具链和脚本放到用户目录下，`/tmp` 只放当次的临时文件。
 - 提交与打 tag 前先看一眼 `git config user.email`：仓库本地配置可能被别的会话改过（0.4.2 的 `release/0.4.2` 因此留下 4 个占位身份的合并提交）。`gh pr merge --match-head-commit` 要用完整的 40 位 SHA。
 - `sync.py audit` 把工作树里的 `node_modules` 软链接也算作未跟踪文件。借用别处的依赖时放在工作树外面，或者 audit 前删掉软链接。
+- 本机默认的 pnpm（12）不认这份 lockfile 的 `pnpm.overrides`，CI 用 pnpm 9。前端命令用 `npx -y pnpm@9 …`；`corepack pnpm@9 run build` 不够，`build` 脚本里嵌套的 `pnpm run` 仍会从 PATH 取到 12，报 `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN`（2026-10-21 集成门禁遇到）。
 
 ## 项目速览
 
@@ -1126,3 +1128,13 @@ pnpm --dir frontend run build
 - 验证：两项先红后绿；raw 普通与大请求两例、service 54 例（30 例在旧代码失败）与相关回归 `-race` 通过；增量 lint 0 项。DOCS 叠加 `2323768d9` 的全部后端文件到 rv2/docs，文档一致性检查通过。
 - 卡点/风险：无。
 - 下一步：α 增量合入后，与 DOCS 最终 HEAD 一起跑一次全量门禁。
+
+### 2026-10-21T05:11Z — `20261021-rv2-fe` — 前端完成（DOCS 代记）
+
+- 请求/目标：0.4.4 新开关的设置界面与 i18n、账号仅流式学习状态的显示与清除、Explain 的“已学能力”列与“请求类型”、运维面板的 `pre_created_delta` 文案。
+- 开始状态：`rv2/fe` 自 `027a434ad`，工作树干净。
+- 完成操作：15 个提交，只改 `frontend/**`（17 个文件）；文案随 C0 与各 CHANGES 多次对齐（原生白名单不含元数据事件、Codex 上限覆盖配置拒绝、仅流式只影响会因此失败的非流式请求、`decision_v2` 关闭后的说明）。
+- 修改文件：`api/admin/resilience.ts`、新增的 `api/admin/accountCapability.ts`、`utils/accountCapability.ts`、`AccountStreamOnlyBadge.vue`，以及 `ResilienceExplainResult.vue`、`OpsResilienceExplain.vue`、`GatewayResilienceSettings.vue`、中英文 i18n 与测试；上游文件 `AccountsView.vue` 两处钩子登记为具名补丁 `xy-account-stream-only-learning`。
+- 验证：HEAD `bd215aa0c` 上 lint:check、typecheck、test:run（413 个文件、3182 个用例）、build（含 i18n 检查）通过；集成 `27cef7db0` 上的前端四项门禁通过。
+- 卡点/风险：无。本机 pnpm 版本的坑已记入“操作陷阱”。
+- 下一步：无；推送、PR 与发版由 α 与 PM 安排。
