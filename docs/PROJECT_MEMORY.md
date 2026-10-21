@@ -166,6 +166,43 @@
 - `20261020-lazy-modal-first-open`（2026-10-20 登记）：账号页弹窗第一次打开时不加载数据，例如测试连接的模型列表为空、临时不可调度原因为空，第二次打开才正常。分支 `fix/lazy-modal-first-open-20261020`，自 main `3092629d7`（0.4.3）。用户要求：拉取最新代码，分析所有同类问题的根因并修复。根因已确认，是 #112 的弹窗按需挂载。范围只限 `frontend/` 与相关文档；推送和开 PR 需要用户授权。
   - 2026-10-20T14:29Z 状态：已修复并验证；用户授权提交、推送并开 PR（合并、发版、部署另行授权）。
 
+### 20261021-resilience-v2-0.4.4 — 网关韧性第二期与 0.4.4 发版（2026-10-21T00:55Z 登记）
+
+- **用户决定**（2026-10-21）：
+  - 实现本任务后合并所有 PR（#116、#117 与本任务的 PR），发布 0.4.4；
+  - 第 0 批只做 Claude 首事件截止的相关调整；
+  - 授权一次生产探测（只读）；
+  - 推翻既有决定的事项先不考虑；
+  - 工期 12 小时：2026-10-21T00:47Z 起，12:47Z 截止；超时砍范围，不砍验证。
+
+  **未授权**：生产部署 0.4.4，以及任何其他生产改动。
+- **方案依据**：仓库外 `xy2api-artifacts/resilience-ux-20261020/plan/PLAN_v2.md`（v2.1）；冲刺任务书、契约与进度在仓库外 `xy2api-artifacts/resilience-v2-20261021/`。规格写在 OpenSpec 变更 `gateway-resilience-v2-20261021`（DOCS 负责）。
+- **范围**：
+  - C0 新设置开关的契约与实现（命名、存放、回退兼容），最先完成；
+  - W1.1 统一“可重放前缀”判据：原生 Responses 白名单扩展，Chat/Messages 兼容转换推迟开场事件到首个 content 或终态，暂存期内可重试的失败转为换号；
+  - W1.2-lite raw Chat 透传识别 `error` 后跟 `[DONE]`；
+  - W2.1-lite 分类修正：只有真正的容量信号算 CAPACITY；Grok 空闲、raw 429、“busy”类文案改判；typed 首输出超时记独立 kind；
+  - W5.1 三个专用耗尽出口接入公共重试提示与回合封顶；W5.2 排队 ping 后的终态错误按入站协议写终止帧；W5.3 合成 `response.failed` 有条件带 retry-after；W5.4 Anthropic 协议下网关自身失败统一 `api_error`；W5.5 Codex 请求的无号 503 Retry-After 上限 10 秒；
+  - W6-lite 仅流式能力学习（TTL 6 小时，管理端可查看与清除）；
+  - W8-lite 不加表、不加迁移，给五类事件补字段；
+  - 前端设置、i18n 与仅流式状态；文档、规格与发版说明；测试服务器全套场景、升级演练与 3 小时浸泡。
+
+  **不做**：W2.2、W3、W4、W7、W8 新表、Gemini、Bedrock、CN、T2、Gateway 反向转换的守卫、Sub2API v0.2.17 同步。
+- **分支与分工**（共同基线 `027a434ad`，即 `release/0.4.4`：origin/main `3092629d7` 合入 PR #117 与 #116；工作树都在 `xy2api-wt/` 下）：
+
+  | 角色 | 工作树 / 分支 | 负责 |
+  |---|---|---|
+  | α | `rv2-be-a` / `rv2/be-a` | W5.1–W5.5 的 handler 与重试提示、W8 事件字段、`VERSION` 与上游登记；集成分支 `feat/resilience-v2-20261021`（`rv2-int`），统一推送与开 PR |
+  | β | `rv2-be-b` / `rv2/be-b` | W1.1、W1.2-lite、W5.3/W5.4 的 service 部分、释放事件采集 |
+  | γ | `rv2-be-c` / `rv2/be-c` | C0 设置、W2.1-lite 分类、W6-lite 后端 |
+  | FE | `rv2-fe` / `rv2/fe` | 设置界面、i18n、仅流式状态与 Explain |
+  | QA | `rv2-qa` / `rv2/qa` | fault-upstream、测试服务器场景、候选验证 |
+  | DOCS | `rv2-docs` / `rv2/docs` | OpenSpec、现行文档、本文件、发版说明（仓库外） |
+
+  发版分支 `release/0.4.4`（`rel-044`）。各 agent 只改自己拥有的文件，只在本地提交；推送、PR、合并与打 tag 由 PM 安排 α 统一执行。
+- `20261021-rv2-beta`（β 2026-10-21T00:53Z 经 DOCS 代登记）：β 负责 W1.1、W1.2-lite、W5.3/W5.4 的 service 部分与释放事件采集，分支 `rv2/be-b`，基线 `027a434ad`，初始工作树干净；只在本地提交，不推送、不碰生产。
+- 状态（2026-10-21T00:55Z）：已登记，各 agent 开工；C0 设置契约预计 01:45Z 发布。
+
 ## 操作陷阱
 
 - 处理 Sub2API 同步只以 `docs/UPSTREAM_SYNC.md`、同步 Skill、policy 和脚本为准。`DEV_GUIDE.md` 的“Git 操作”曾写着直接 merge/rebase 上游 main，2026-10-17 已改为指向同步规范，这两条命令也登记为 `tools/docs_consistency.json` 的退役写法。
