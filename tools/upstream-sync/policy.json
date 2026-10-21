@@ -1292,6 +1292,10 @@
       "value": "writeStableStreamHeaders(c)"
     },
     {
+      "path": "backend/internal/service/openai_raw_stream_truncation.go",
+      "value": "resilience.ChatErrorField(root)"
+    },
+    {
       "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
       "value": "resilience.Current().StrictTerminalOn()"
     },
