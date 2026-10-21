@@ -117,7 +117,7 @@ def check(checks: list[dict], ok: bool, label: str) -> None:
 def usage_rows(S, key_name: str, since: str):
     sql = ("SELECT coalesce(jsonb_agg(jsonb_build_object('id',u.id,'account_id',u.account_id,"
            "'input_tokens',u.input_tokens,'output_tokens',u.output_tokens,"
-           "'cache_read_tokens',u.cache_read_tokens,'actual_cost',u.actual_cost)), '[]'::jsonb "
+           "'cache_read_tokens',u.cache_read_tokens,'actual_cost',u.actual_cost)), '[]'::jsonb) "
            "FROM usage_logs u WHERE api_key_id=(SELECT id FROM api_keys WHERE name="
            + quoted(key_name) + " AND deleted_at IS NULL) AND created_at>=" + quoted(since))
     return json.loads(S.psql(sql))
