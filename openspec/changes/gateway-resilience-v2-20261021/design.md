@@ -298,7 +298,7 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
   - `model` 优先取入站模型，没有时取选号用的模型；
   - `delivered_bytes` 读 `RequestState.DeliveredBytes()`（送达口径，开场与心跳不算）；
   - `ms_since_first_output` 从第一次成功写出内容起算（开场事件与心跳不启动时钟，之后的输出不重置），没有输出时为 0；
-  - `prelude_release_event`、`prelude_release_ms` 由 β 的 `prelude_trace` 采集：每次新的 `response.created` 重置，首次释放时冻结。
+  - `prelude_release_event`、`prelude_release_ms` 由 β 的 `prelude_trace.go` 采集（`NotePreludeCreated`、`NotePreludeReleased`、`PreludeTrace()`，`04aa6f1a6`）：每次尝试先重置，`response.created` 记下时刻，第一次释放时冻结事件与非负的毫秒差；迟到的 created 不覆盖已有的释放，没有 created 时毫秒为 0。覆盖普通 Responses、透传、Chat 与 Messages 转换。它们表示“决定释放暂存”的那一刻，不保证写出成功。上游文件钩子 `beginOpenAIPreludeTrace`、`releaseOpenAIPrelude`（四个网关文件，登记到 required_literals）。
 - 首输出前的事件（`keepalive_committed`）在持有心跳锁时记录，改用 `resilience.PreOutputEventFields(ctx)`：不读送达探针，`delivered_bytes` 与 `ms_since_first_output` 固定为 0，避免锁重入。
 - 日志点：`resilience_session.go` 的 `session_rebind`、两处 `last_resort`、`post_output_failure`、`turn_cap`（α）；`resilience_keepalive.go` 的 `keepalive_committed`（β）。【待契约：最终提交】
 

@@ -228,8 +228,8 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 | `model` | 入站请求的模型，没有时为选号用的模型 |
 | `delivered_bytes` | 已送达客户端的内容字节（开场事件与心跳不算，口径同 §4.4） |
 | `ms_since_first_output` | 距第一次写出内容的毫秒数；还没有输出时为 0 |
-| `prelude_release_event` | 结束开场暂存、开始向客户端输出的那个上游事件类型；没有暂存过时为空 |
-| `prelude_release_ms` | 上一项距 `response.created` 的毫秒数 |
+| `prelude_release_event` | 结束开场暂存、开始向客户端输出的那个上游事件类型（记的是释放的决定，不保证写出成功）；没有暂存过时为空 |
+| `prelude_release_ms` | 上一项距 `response.created` 的毫秒数；没有收到 created 时为 0 |
 
 `keepalive_committed` 发生在输出之前，`delivered_bytes` 与 `ms_since_first_output` 总是 0。日志不含正文、Key 或完整会话值。
 
