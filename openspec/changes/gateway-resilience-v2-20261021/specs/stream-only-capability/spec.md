@@ -36,7 +36,15 @@ Account selection for OpenAI groups MUST skip an account learned as stream-only 
 
 ### Requirement: Administrators can see and clear learned capability
 
-The account admin API MUST return the learned capability state with protocol, mode and expiry, and MUST provide an operation to clear it. The admin console MUST show a stream-only badge with the remaining time and a clear action.
+The account admin API MUST return the learned capability state with protocol, mode and expiry, and MUST provide an operation to clear it; both MUST work while the switch is off. Saving an account from an older admin page MUST NOT overwrite or restore the learned state. The admin console MUST show a stream-only badge with the remaining time and a clear action.
+
+#### Scenario: Upstream configuration changed
+- **WHEN** account A was learned as stream-only and an administrator then changes A's upstream credentials or endpoint
+- **THEN** the old mark no longer filters A.
+
+#### Scenario: Copied account
+- **WHEN** an administrator copies, creates or imports an account from one that is learned as stream-only
+- **THEN** the new account carries no learned state.
 
 #### Scenario: Clear (SO-1)
 - **WHEN** an administrator clears the learned state of account A

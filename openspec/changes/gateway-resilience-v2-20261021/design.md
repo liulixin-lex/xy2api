@@ -173,17 +173,37 @@
 
 ## 6. W6-lite 仅流式能力（`capability.stream_only_learning`）
 
-- **范围**：只对 OpenAI 入站的 Responses 与 Chat 普通文本请求生效。入口在解析出客户端的 `stream` 后、首次选号前用 `resilience.WithCapabilityRequest(ctx, protocol, stream)` 标记请求（α）；compact、图片、WebSocket 不标记，Messages→OpenAI、Gemini、CN、Bedrock 不在本期。
-- **触发**：客户端 `stream=false`、实际发给上游的也是非流式，上游 400 且结构码或文案确定表示“只接受流式”（表驱动，如 “only accepts streaming requests”、“stream must be true”）。检测钩子 `LearnStreamOnlyFailure(ctx, account, protocol, upstreamStream, status, body)` 在处理 400 的副作用与写应答之前调用（β 的 Forward、透传、raw Chat 调用点）；返回空表示走原有错误路径。
-- **学习**：账号 × 协议（responses 或 chat）× 非流式 → 不可用，有效期 `capability.learn_ttl_seconds`。存放在账号 `extra` 的两项里，用局部合并原子更新，并同步调度缓存（γ）；键名、复制与导入边界【待契约：CHANGES_G】。手工设置本期不做，只留字段位。不会自动改发流式。
-- **本请求**：立即换号（需要 `failure.decision_v2` 开），不计账号失败、不冷却、不计会话失败，计入请求预算。`decision_v2` 关闭时只学习、过滤后续请求，本请求照旧返回 400。
-- **选号**：OpenAI 选号（`openai_gateway_scheduling.go`、`openai_account_scheduler.go`）对非流式请求跳过被标记的账号，流式请求不受影响。跳过后组内无号时按现有无号处理，带原因码 `capability_stream_only`，不再把 400 归咎于用户。
-- **Explain**：被跳过的账号显示原因 `capability_stream_only`，到期时间放在 `recover_at`。
-- **前端**（FE）：账号列表状态列下方的“仅流式（自动学习，剩余 X）”标识与清除按钮（`AccountStreamOnlyBadge`；`AccountsView.vue` 的两处钩子登记为具名补丁 `xy-account-stream-only-learning`）；设置卡片“失败分类修正”“流式开场与终止”“仅流式账号学习”。
-- **管理接口**：
-  - 账号列表与详情返回 `capability_learned: [{protocol: "responses"|"chat", mode: "stream_only", expires_at: <RFC3339 UTC>}]`，没有记录时为空数组；
-  - 清除：`DELETE /api/v1/admin/accounts/:id/capability-learning`，成功时 `data` 为 `{capability_learned: []}`；
-  - 实现：`Account.CapabilityLearned(now)`、`AccountHandler.ClearCapabilityLearning`（γ）；DTO 字段与路由由 α 接入。导出类型【待契约：CHANGES_G 冻结】。
+契约：CHANGES_G“W6 契约冻结”（2026-10-21T01:57Z）。
+
+### 6.1 范围与触发
+
+- **请求范围**：OpenAI 入站的 Responses 与 Chat 普通文本请求。入口在解析出客户端的 `stream` 后、首次选号前用 `resilience.WithCapabilityRequest(ctx, protocol, stream)` 标记请求（α；`protocol` 为 `responses` 或 `chat`）。未标记、协议未知或 `stream=true` 的请求不过滤；compact、图片、WebSocket 不标记；Messages→OpenAI、Gemini、CN、Bedrock 不在本期。
+- **账号范围**：只学习 OpenAI 与 Grok 平台的账号；OpenAI 强制流式的 OAuth 账号本来就以流式请求上游，不过滤。
+- **触发**：检测钩子 `OpenAIGatewayService.LearnStreamOnlyFailure(ctx, account, protocol, upstreamStream, status, body)`，在处理 400 的副作用与写应答之前调用（β 的 Forward、透传、raw Chat 调用点）。只在实际发给上游的请求为非流式、状态为 400、错误字段确定表示“只接受流式”（表驱动，如 “only accepts streaming requests”、“stream must be true”）时学习；只看错误字段，忽略上游回显的请求内容；截断的 JSON、余额与内容拒绝不算。上游请求本来就是流式时不动作。不会自动改发流式。
+
+### 6.2 学习与存放
+
+- 学到的是“账号 × 上游协议 × 非流式 → 不可用”，有效期 `capability.learn_ttl_seconds`。
+- 存放在账号 `extra` 的两个键：`capability_learned_responses`、`capability_learned_chat`，值为 `{expires_at: <RFC3339 UTC>, fingerprint: <SHA-256>}`，用既有的 JSONB 原子局部合并写入（含事务 outbox），并同步刷新该账号的调度快照；不加表、不加迁移，也不另设 Redis 或进程内缓存。每个账号最多两条，是否过期在读取时判断。
+- 选择理由：复用现有的原子合并与快照同步，不必为 Redis 或进程内缓存另管生命周期；账号行本来就随调度快照读取。
+- 指纹绑定平台、账号类型与上游凭据配置：管理员改了账号的上游配置，或者旧请求的学习迟到写入，都不会封住新配置。
+- `capability_manual` 键保留给以后的手工覆盖，本期不读不写。
+- 普通的账号保存在锁定行上合并，保留最新的学习状态：旧页面既不能覆盖新学到的记录，也不能恢复已清除的记录。复制账号、创建与导入时去掉学习键。管理端 DTO 只给出汇总 `capability_learned`，不展示这两个内部键与指纹。
+- 学习不原地修改共享的 Account 对象，仓库写入后重新读取快照。写入失败只记事件，本请求仍可在预算内换号。
+
+### 6.3 本请求与选号
+
+- **本请求**：`failure.decision_v2` 开启时，钩子返回可换号的哨兵错误（`IsCapabilityStreamOnly()`；不上报账号调度失败、不同号重试），handler 只计请求预算的尝试次数，不记会话失败、不冷却。`decision_v2` 关闭时只学习，钩子返回空，本请求照旧返回 400。
+- **选号**：`Account.CapabilityExclusion(ctx, model, now)` 按本请求实际会用的上游协议返回阻断记录：入站 Chat 若转换为 Responses 上游，读 Responses 的学习；Grok 的两种协议各自独立。OpenAI 选号的共同资格检查（`openai_gateway_scheduling.go`）与 `openai_account_scheduler.go` 的 `isAccountRequestCompatibleReason` 都经钩子 `capabilityEligibilityReason` 过滤，覆盖粘性会话与末位兜底的最后检查；钩子登记到 `scheduler-diff.json` 与 `policy.json`（α）。
+- 全部被过滤后的无号仍是现有的 503，原因码 `capability_stream_only`，不再把 400 归咎于用户。
+
+### 6.4 观测与管理
+
+- 事件：`resilience.capability_learned`（info：`account_id`、`protocol`、`expires_at`）；`resilience.capability_learning_failed`（warn：`account_id`、`protocol`、`error`）。
+- 账号列表与详情返回 `capability_learned: [{protocol: "responses"|"chat", mode: "stream_only", expires_at: <RFC3339 UTC>}]`（`Account.CapabilityLearned(now)`，导出类型 `resilience.LearnedCapability{Protocol, Mode, ExpiresAt}`），没有记录时为空数组；功能关闭时仍可查看与清除未到期的记录。
+- 清除：`DELETE /api/v1/admin/accounts/:id/capability-learning`，成功时 `data` 为 `{capability_learned: []}`，只更新这两个键（`AccountHandler.ClearCapabilityLearning`，服务方法 `ClearAccountCapabilityLearning` 经可选窄接口调用，不改 `AdminService`）。
+- Explain：每个账号记录都带 `capability_learned`。查询带 `?protocol=responses|chat&stream=false` 时按该请求形态判断：被阻断的账号原因为 `capability_stream_only`，`recover_at` 为到期时间，另给 `capability_ttl_seconds`，并从本次的健康候选与末位兜底中排除（不变成全局硬罚，也不覆盖已有更强的硬罚原因）。不带这两个参数时保持原来的整体健康视图。
+- 前端（FE）：账号列表状态列下方的“仅流式（自动学习，剩余 X）”标识与清除按钮（`AccountStreamOnlyBadge`；`AccountsView.vue` 的两处钩子登记为具名补丁 `xy-account-stream-only-learning`）；设置卡片“失败分类修正”“流式开场与终止”“仅流式账号学习”。
 
 ## 7. W5 信号与终止出口
 
@@ -283,7 +303,7 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 
 - **总开关关闭**：按 0.3.0 运行，本期新开关一并失效；§9 的修复仍生效。
 - **子开关关闭**：回到 0.4.3 / #117 的行为（§1“关闭后”一列），即时生效，无需重启。
-- **版本回退到 0.4.3**：无迁移，直接换回镜像。设置的兼容与“在 0.4.3 上再次保存会丢弃新字段”的边界见 §2.3。已学到的仅流式能力【待契约：存放位置（CHANGES_G 的 W6）决定 0.4.3 是否看得到】。
+- **版本回退到 0.4.3**：无迁移，直接换回镜像。设置的兼容与“在 0.4.3 上再次保存会丢弃新字段”的边界见 §2.3。已学到的仅流式能力存在账号 `extra` 的两个键里，0.4.3 不读它们，回退后不再过滤；记录留在 `extra` 中，再升级时未到期的仍然生效，最长 `capability.learn_ttl_seconds` 后自然过期。
 
 ## 11. 已知限制与延后
 
