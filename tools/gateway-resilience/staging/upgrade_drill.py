@@ -91,7 +91,8 @@ def api(method: str, path: str, body=None, token: str = ""):
 def start(image: str) -> float:
     sh("docker", "rm", "-f", NAME, check=False)
     started = time.time()
-    sh("docker", "run", "-d", "--name", NAME, "--network", NET, "-p", f"127.0.0.1:{PORT}:8080", "--memory", "3g",
+    sh("docker", "run", "-d", "--name", NAME, "--network", NET, "-p", f"127.0.0.1:{PORT}:8080",
+       "--memory", os.environ.get("UPGRADE_MEMORY", "3g"), "--cpus", os.environ.get("UPGRADE_CPUS", "3"),
        "-e", "AUTO_SETUP=true", "-e", "SERVER_HOST=0.0.0.0", "-e", "SERVER_PORT=8080", "-e", "SERVER_MODE=release",
        "-e", "DATABASE_HOST=postgres", "-e", "DATABASE_PORT=5432", "-e", "DATABASE_USER=xy2api",
        "-e", f"DATABASE_PASSWORD={ENV['POSTGRES_PASSWORD']}", "-e", f"DATABASE_DBNAME={DB}", "-e", "DATABASE_SSLMODE=disable",
@@ -298,6 +299,8 @@ def main() -> int:
         v2_checkpoint("initial 0.4.3", token, original_migrations)
 
     started = time.time()
+    if V2:
+        step("synthetic data fill begins")
     psql(SYNTH.format(group_id=gid))
     uid0, kid0, aid0 = (psql("SELECT min(id) FROM users WHERE email LIKE 'synth%'"),
                         psql("SELECT min(id) FROM api_keys WHERE name LIKE 'synth-%'"),
@@ -366,6 +369,8 @@ def main() -> int:
 
     sh("docker", "rm", "-f", NAME, check=False)
     started = time.time()
+    if V2:
+        step("backup and restore begins")
     dump = "/tmp/xy2api_upgrade.dump"
     sh("docker", "compose", "-p", "xy2api-staging", "exec", "-T", "postgres", "sh", "-c",
        f"pg_dump -U xy2api -Fc -d {DB} -f {dump}", timeout=7200)

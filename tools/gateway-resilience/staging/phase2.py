@@ -100,6 +100,7 @@ def main():
     parser.add_argument('--build', type=Path, help='BUILD.json from the unique released candidate')
     parser.add_argument('--evidence', type=Path, help='new directory; existing evidence is never overwritten')
     parser.add_argument('--execute', action='store_true')
+    parser.add_argument('--parallel-soak', action='store_true', help='use the bounded main stack alongside the isolated soak')
     args = parser.parse_args()
     scenario_ids = ids()
     if args.stage == 'resources':
@@ -113,11 +114,16 @@ def main():
         print(json.dumps(dict(stage=args.stage, mode='plan-only', scenario_count=len(scenario_ids),
                               scenario_ids=scenario_ids, scenario_parallelism=1,
                               soak_arguments=SOAK, upgrade_from='0.4.3',
-                              upgrade_profile='resilience-v2'), indent=2))
+                              upgrade_profile='resilience-v2', soak_runner='soak_stack.py',
+                              parallel_soak=args.parallel_soak), indent=2))
         return 0
+    if args.stage == 'soak':
+        parser.error('use soak_stack.py run for the independent soak project')
     if not args.build or not args.evidence:
         parser.error('--execute requires --build and --evidence')
     load_environment()
+    if args.parallel_soak:
+        os.environ['COMPOSE_FILE'] = str(HERE / 'compose.yaml') + ':' + str(HERE / 'compose.parallel.yaml')
     build = json.loads(args.build.read_text())
     os.environ['APP_IMAGE'] = build['image']
     with (HERE / '.phase2.lock').open('w') as lock:
@@ -144,14 +150,18 @@ def main():
         elif args.stage == 'upgrade':
             os.environ.update(UPGRADE_FROM='ghcr.io/liulixin-lex/xy2api:0.4.3', UPGRADE_TO=build['image'],
                               UPGRADE_PROFILE='resilience-v2', UPGRADE_EVIDENCE=str(args.evidence), ACCEPT_ADMIN_COMPLIANCE='1')
-            status = logged([sys.executable, str(HERE / 'upgrade_drill.py')], args.evidence / 'run.log')
-        else:
-            os.environ['APP_GODEBUG'] = 'gctrace=1'
-            subprocess.run(COMPOSE + ['up', '-d', '--no-deps', 'app'], cwd=HERE, check=True)
-            wait_ready()
-            identity(build)
-            status = logged([sys.executable, str(HERE / 'soak.py'), *SOAK,
-                             '--evidence', str(args.evidence)], args.evidence / 'run.log')
+            if args.parallel_soak:
+                os.environ.update(UPGRADE_MEMORY='1g', UPGRADE_CPUS='0.5')
+            overlap = HERE / 'evidence' / ('parallel-activity-' + build['source_commit'] + '.jsonl')
+            def activity(event):
+                with overlap.open('a') as record:
+                    record.write(json.dumps(dict(event=event, at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                                                 evidence=str(args.evidence))) + '\n')
+            activity('upgrade_start')
+            try:
+                status = logged([sys.executable, str(HERE / 'upgrade_drill.py')], args.evidence / 'run.log')
+            finally:
+                activity('upgrade_end')
         meta.update(after=identity(build), exit_code=status,
                     finished_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
         (args.evidence / 'RUN.json').write_text(json.dumps(meta, indent=2) + '\n')

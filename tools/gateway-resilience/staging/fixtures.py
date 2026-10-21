@@ -26,7 +26,7 @@ import urllib.request
 FAULT = "http://fault-upstream:8080/f/"
 # Same fault process, distinct DNS host: capacity failover intentionally
 # excludes the failing host. Docker registers its Compose container name.
-BACKUP_FAULT = "http://xy2api-staging-fault-upstream-1:8080/f/"
+BACKUP_FAULT = "http://" + os.environ.get("STAGING_PROJECT", "xy2api-staging") + "-fault-upstream-1:8080/f/"
 
 # group name -> (platform, [(account name, scenario spec, priority)], options)
 GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {

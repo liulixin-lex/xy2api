@@ -41,8 +41,12 @@ import time
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-APP, FAULT, CDN125 = 18210, 18211, 18213
-PROJECT = "xy2api-staging"
+APP = int(os.environ.get("STAGING_APP_PORT", "18210"))
+FAULT = int(os.environ.get("STAGING_FAULT_PORT", "18211"))
+CDN125 = int(os.environ.get("STAGING_CDN_PORT", "18213"))
+PROJECT = os.environ.get("STAGING_PROJECT", "xy2api-staging")
+if PROJECT not in ("xy2api-staging", "xy2api-staging-soak"):
+    raise ValueError("unsupported staging project")
 KEYS = json.load(open(os.path.join(HERE, "fixtures", "keys.json")))["keys"]
 MODEL = "gpt-6.1-sol"
 
@@ -268,9 +272,29 @@ def cycle_slope(points: list[tuple[datetime.datetime, float]], start: datetime.d
 GCTRACE = re.compile(r"^(\S+) gc \d+ @[\d.]+s .*? (\d+)->(\d+)->(\d+) MB")
 
 
+def app_logs(started_at: str, timestamps: bool = False) -> str:
+    """The independent stack captures logs continuously, beyond rotation."""
+    path = os.environ.get("STAGING_LOG_FILE")
+    if path:
+        start = datetime.datetime.fromisoformat(started_at)
+        lines = []
+        with open(path) as source:
+            for line in source:
+                stamp, _, body = line.partition(" ")
+                try:
+                    at = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if at >= start:
+                    lines.append(line if timestamps else body)
+        return "".join(lines)
+    flag = "--timestamps " if timestamps else ""
+    return sh(f"docker logs {flag}--since {started_at} {PROJECT}-app-1 2>&1", timeout=600)
+
+
 def live_heap(started_at: str) -> list[tuple[datetime.datetime, float]]:
     """Live heap after each GC (MB) from the app's gctrace lines."""
-    out = sh(f"docker logs --timestamps --since {started_at} {PROJECT}-app-1 2>&1 | grep -E ' gc [0-9]+ @'", timeout=600)
+    out = app_logs(started_at, timestamps=True)
     points = []
     for line in out.splitlines():
         m = GCTRACE.match(line)
@@ -297,8 +321,8 @@ def checks(evidence: str, started_at: str, cycle_minutes: int = 60) -> dict:
         load_start, load_end, cycle_minutes)
     heap = live_heap(started_at)
     heap_slope = None if load_start is None else cycle_slope(heap, load_start, load_end, cycle_minutes)
-    logs = sh(f"docker logs --since {started_at} {PROJECT}-app-1 2>&1", timeout=600)
-    timed_logs = sh(f"docker logs --timestamps --since {started_at} {PROJECT}-app-1 2>&1", timeout=600)
+    logs = app_logs(started_at)
+    timed_logs = app_logs(started_at, timestamps=True)
     error_minutes = {}
     for line in timed_logs.splitlines():
         if re.search(r'"level"\s*:\s*"error"|\bERROR\b', line):
@@ -343,7 +367,20 @@ def checks(evidence: str, started_at: str, cycle_minutes: int = 60) -> dict:
         "duplicate_usage_rows": int(dup_usage or 0),
         "duplicate_undelivered_rows": int(dup_undelivered or 0),
         "unbilled_undelivered_with_usage": int(both or 0),
+        "project": PROJECT,
     }
+    overlap_file = os.environ.get("STAGING_OVERLAP_FILE")
+    if overlap_file and os.path.exists(overlap_file):
+        with open(overlap_file) as source:
+            result["other_stack_activity"] = [json.loads(line) for line in source if line.strip()]
+        io_steps = []
+        for activity in result["other_stack_activity"]:
+            report = os.path.join(activity["evidence"], "REPORT.json")
+            if activity["event"] == "upgrade_end" and os.path.exists(report):
+                with open(report) as source:
+                    io_steps.extend(s for s in json.load(source)["steps"] if s["step"] in (
+                        "synthetic data fill begins", "synthetic production-sized data", "backup and restore begins", "backup and restore"))
+        result["other_stack_io_steps"] = io_steps
     ok = {
         "no orphan account/user/key slots": all(last[k] == 0 for k in ("slots_account", "slots_user", "slots_key", "slots_live")),
         "no orphan in-flight reservations": last["inflight_keys"] == 0,

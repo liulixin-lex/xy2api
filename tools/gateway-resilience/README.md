@@ -136,20 +136,46 @@ Omit `--pr-head` only when the candidate itself is the intended head; compare th
 recorded tree again if the PR head later changes.
 
 On the staging host, `python3 phase2.py resources` checks disk and available memory
-(30 GiB and 4 GiB minimum). `python3 phase2.py scenarios` prints the 71-case plan;
-`upgrade` and `soak` also default to planning. After selecting the candidate image
-for the app and refreshing `fixtures.py`, execute each stage serially:
+(30 GiB and 4 GiB minimum). `python3 phase2.py scenarios` prints the 71-case plan.
+`python3 soak_stack.py plan` also renders both Compose configurations, checks the
+proposed ports and subnet, and budgets both stacks together. It requires the sum
+of their memory limits plus 2 GiB available, and leaves two host CPUs outside the
+combined CPU quotas. Plan commands do not create containers, networks or volumes.
+
+After release, select the candidate and apply `compose.yaml` together with
+`compose.parallel.yaml` to the main stack, then refresh `fixtures.py`. The main
+stack runs its 71 scenarios serially, followed by the upgrade drill:
 
 ```sh
-python3 phase2.py scenarios --execute --build evidence/candidate-COMMIT/BUILD.json --evidence evidence/run-COMMIT
-python3 phase2.py upgrade --execute --build evidence/candidate-COMMIT/BUILD.json --evidence evidence/upgrade-COMMIT
-python3 phase2.py soak --execute --build evidence/candidate-COMMIT/BUILD.json --evidence evidence/soak-COMMIT
+python3 phase2.py scenarios --parallel-soak --execute --build evidence/candidate-COMMIT/BUILD.json --evidence evidence/run-COMMIT
+python3 phase2.py upgrade --parallel-soak --execute --build evidence/candidate-COMMIT/BUILD.json --evidence evidence/upgrade-COMMIT
 ```
 
 The runner loads only `.env`, binds both the running image and binary to BUILD.json,
 locks the staging project, rejects existing output directories and records script
 hashes. Scenarios run with `--parallel 1`; `SUITE.json` includes all 71 records.
 The existing staging CF/direct host settings are required for their six cases.
+
+In a separate process, the independent `xy2api-staging-soak` project can run
+alongside that line. It has its own PostgreSQL, Redis, fault service, network,
+volumes, generated credentials and fixture keys. Its ports are 18310 (app),
+18311 (fault) and 18313 (CDN simulator), all bound to loopback. No image is built
+by this runner: the app is pinned to BUILD.json's image ID and both stacks' image
+IDs and binary SHA-256 values must match before and after the soak.
+
+```sh
+python3 soak_stack.py start --execute --build evidence/candidate-COMMIT/BUILD.json --evidence evidence/soak-COMMIT
+python3 soak_stack.py run --execute --build evidence/candidate-COMMIT/BUILD.json --evidence evidence/soak-COMMIT
+# After collecting the report, remove only the owned soak project and temporary files:
+python3 soak_stack.py cleanup --execute
+```
+
+Without `--execute`, start/run/cleanup only perform the read-only plan. Execution
+uses a separate lock from the main stack. Startup verifies that the main stack's
+parallel limits are applied. The limits total 6.125 GiB and 5.85 CPUs, including
+LEASE-1's extra process or the bounded upgrade process. Both apps have 1 GiB limits.
+Soak evidence stays outside the temporary `soak-stack` directory and survives
+cleanup; the main stack and all candidate images are retained.
 
 The upgrade stage uses 0.4.3, a separate synthetic database, rollback and another
 forward upgrade, followed by backup/restore. Every transition checks health,
@@ -158,10 +184,14 @@ F36 capability learning record and verifies that the account still streams on
 0.4.3, the extra key survives, and non-default v2 settings survive the round trip.
 It does not save settings on 0.4.3: an old-version save drops new fields, as specified
 by the C0 compatibility contract. Failure evidence is retained and the temporary
-application container is removed.
+application container is removed. With `--parallel-soak`, its process is limited
+to 1 GiB and 0.5 CPU. Upgrade start/end and bulk-fill/backup timestamps are included
+in the soak report so overlapping disk I/O remains visible.
 
 Soak uses `--hours 3 --cycle-minutes 30`, concurrency 20–50 and ten minutes of
-settling; the runner enables `gctrace=1` on the same candidate image. Heap data from
+settling; the independent stack enables `gctrace=1` on the same candidate image.
+Logs are captured continuously to evidence so Docker rotation cannot remove the
+early GC samples. Heap data from
 at least three complete cycles after warm-up is mandatory, with slope at most
 1 MiB/h. Missing heap or goroutine data cannot pass; SQL failures stop validation.
 Every ERROR count is reported; the automatic flood threshold is at least 60 lines
