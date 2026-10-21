@@ -1484,6 +1484,11 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			})
 		}
 		if err != nil {
+			// A canceled pre-output attempt has no billable result or account failure.
+			if result == nil && errors.Is(err, context.Canceled) && failoverClientGone(c) {
+				reqLog.Info("openai_messages.client_canceled_before_output", zap.Int64("account_id", account.ID))
+				return
+			}
 			if result != nil && result.ImageCount > 0 {
 				reqLog.Warn("openai_messages.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),
