@@ -117,7 +117,7 @@ func writeOpenAICompactSSEFailureMessage(c *gin.Context, statusCode int, errType
 	if c.Request != nil {
 		ctx = c.Request.Context()
 	}
-	errorBody := openAIResponseFailureError(ctx, errType, errType, message)
+	errorBody := openAIResponseFailureError(ctx, statusCode, errType, errType, message)
 	if renderedMessage, ok := errorBody["message"].(string); ok {
 		message = renderedMessage
 	}

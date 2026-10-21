@@ -182,7 +182,7 @@ func preOutputTerminalFrame(ctx context.Context, protocol string, status int, bo
 				"created_at": createdAt,
 				"status":     "failed",
 				"output":     []any{},
-				"error":      openAIResponseFailureError(ctx, errType, code, message),
+				"error":      openAIResponseFailureError(ctx, status, errType, code, message),
 			},
 		})
 		return append(ResponsesCreatedFrame(id, "", createdAt), "event: response.failed\ndata: "+string(payload)+"\n\n"...)
@@ -246,11 +246,13 @@ func randomKeepaliveHex(n int) string {
 
 // openAIResponseFailureError is shared by the three local failed-frame writers.
 // It never forwards upstream headers or computes a candidate recommendation.
-func openAIResponseFailureError(ctx context.Context, errType, code, message string) map[string]any {
+func openAIResponseFailureError(ctx context.Context, status int, errType, code, message string) map[string]any {
 	errBody := map[string]any{"code": code, "message": message}
 	if resilience.Current().FailedFrameRetryAfterOn() {
-		if resilience.ClassifyWithSettings(resilience.Outcome{Source: resilience.SourceStreamEvent, Type: errType, Code: code, Message: message}, resilience.Current()).ContentPolicy() {
+		if resilience.ClassifyWithSettings(resilience.Outcome{Source: resilience.SourceStreamEvent, StatusCode: status, Type: errType, Code: code, Message: message}, resilience.Current()).ContentPolicy() {
 			resilience.SetRetryAdvice(ctx, resilience.RetryAdvice{Suppress: true, Source: "content_rejection"})
+		} else if !resilience.RetryAdviceEligible(status, errType, code) {
+			resilience.SetRetryAdvice(ctx, resilience.RetryAdvice{Suppress: true, Source: "non_retryable"})
 		}
 		advice := resilience.ResolveRetryAdvice(ctx)
 		errBody["message"] = advice.Message(message)

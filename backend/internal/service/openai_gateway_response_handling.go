@@ -1855,7 +1855,16 @@ func buildOpenAIResponseFailedSSE(ctx context.Context, responseID, model string,
 	if message == "" {
 		message = "Upstream response failed"
 	}
-	errorBody := openAIResponseFailureError(ctx, errorType, code, message)
+	// This is a semantic error inside an HTTP 200 stream. Use an explicit
+	// upstream error status when present; zero leaves eligibility to type/code.
+	status := 0
+	for _, path := range openAIStreamErrorStatusPaths {
+		if candidate := int(gjson.GetBytes(source, path).Int()); candidate >= 400 && candidate < 600 {
+			status = candidate
+			break
+		}
+	}
+	errorBody := openAIResponseFailureError(ctx, status, errorType, code, message)
 	if errorType != "" {
 		errorBody["type"] = errorType
 	}
