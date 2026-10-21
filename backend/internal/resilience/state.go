@@ -14,6 +14,9 @@ type RequestState struct {
 
 	budget *Budget
 
+	// retryAdvice is shared by the handler and service terminal writers.
+	retryAdvice RetryAdvice
+
 	// groupID is the API key's group (0 when ungrouped or unknown).
 	groupID int64
 

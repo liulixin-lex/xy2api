@@ -4,6 +4,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -155,7 +156,8 @@ func TestCapacityExhaustedBecomesNoAccount503(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := newResilienceTestContext(t)
 	c.Request = c.Request.WithContext(budgetCtx(t, resilience.KindText, 7))
-	shed := &service.UpstreamFailoverError{StatusCode: http.StatusBadGateway, RequestScopedTransient: true}
+	shed := &service.UpstreamFailoverError{StatusCode: http.StatusBadGateway, RequestScopedTransient: true,
+		ResponseBody: []byte(`{"error":{"code":"server_is_overloaded"}}`)}
 	status, errType, msg := resilienceCapacityExhausted(c, shed, http.StatusBadGateway, "upstream_error", "Upstream service temporarily unavailable")
 	require.Equal(t, http.StatusServiceUnavailable, status)
 	require.Equal(t, "api_error", errType)
@@ -217,4 +219,109 @@ func TestFailoverLoopSkipsAttemptReportedByStream(t *testing.T) {
 	// Other accounts of the request still count.
 	resilienceAttemptFailed(ctx, 14, bad)
 	require.Equal(t, 1, rec.failures[14])
+}
+
+func TestDecisionV2TransientAndRateLimitKeepSameHostCandidates(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, tc := range []struct {
+		name     string
+		status   int
+		body     string
+		platform string
+	}{
+		{"grok idle OAuth", 502, `{"error":{"code":"empty_upstream","message":"Grok stream idle timeout"}}`, service.PlatformGrok},
+		{"busy 502", 502, `{"error":{"message":"The service is busy"}}`, service.PlatformOpenAI},
+		{"raw 429", 429, `{"error":{"message":"Too many pending requests"}}`, service.PlatformOpenAI},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := budgetCtx(t, resilience.KindText, 7)
+			fs := NewFailoverState(10, false)
+			sched := &hostSharingUnscheduler{sameHost: map[int64][]int64{1: {2, 3}}}
+			e := &service.UpstreamFailoverError{StatusCode: tc.status, ResponseBody: []byte(tc.body), RequestScopedTransient: true}
+			require.Equal(t, FailoverContinue, fs.HandleFailoverError(ctx, sched, 1, tc.platform, 0, e))
+			require.NotContains(t, fs.FailedAccountIDs, int64(2), "another credential on the same host stays eligible")
+			require.NotContains(t, fs.FailedAccountIDs, int64(3))
+			require.True(t, requestBudget(ctx).AllowCapacitySwitch(), "ordinary retries do not consume the capacity host switch")
+		})
+	}
+}
+
+type capabilityAttemptRecorder struct{ calls int }
+
+func (r *capabilityAttemptRecorder) Failure(context.Context, int64, string, int64, resilience.Category) {
+	r.calls++
+}
+func (r *capabilityAttemptRecorder) Success(context.Context, int64, string, int64) {}
+
+func TestCapabilityFailureOnlyConsumesRequestBudget(t *testing.T) {
+	withHandlerResilience(t, nil)
+	ctx := budgetCtx(t, resilience.KindText, 7)
+	recorder := &capabilityAttemptRecorder{}
+	resilience.StateFrom(ctx).SetSession(7, "session", recorder)
+	e := &service.UpstreamFailoverError{StatusCode: 400, Reason: service.GatewayFailureReason(resilience.ReasonCapabilityStreamOnly), NextAccountAction: service.NextAccountRetry}
+	sched := &mockTempUnscheduler{}
+	fs := NewFailoverState(3, false)
+	require.Equal(t, FailoverContinue, fs.HandleFailoverError(ctx, sched, 1, service.PlatformOpenAI, 0, e))
+	require.Equal(t, 1, requestBudget(ctx).Attempts())
+	require.Zero(t, recorder.calls)
+	require.Empty(t, sched.calls)
+	require.False(t, resilience.StateFrom(ctx).AccountFailed(1))
+	require.Contains(t, fs.FailedAccountIDs, int64(1), "only this request excludes the incompatible candidate")
+	require.Equal(t, 1, fs.SwitchCount)
+	require.False(t, requestBudget(ctx).CapacitySwitchUsed())
+}
+
+func TestCapabilityExhaustionIsServiceUnavailable(t *testing.T) {
+	withHandlerResilience(t, nil)
+	c, _ := newResilienceTestContext(t)
+	e := &service.UpstreamFailoverError{StatusCode: 400, Reason: service.GatewayFailureReason(resilience.ReasonCapabilityStreamOnly)}
+	status, typ, message := resilienceCapacityExhausted(c, e, 400, "invalid_request_error", "stream must be true")
+	require.Equal(t, 503, status)
+	require.Equal(t, "api_error", typ)
+	require.NotContains(t, message, "stream must be true")
+}
+
+func TestCapabilityLegacyMixedExclusionsRemain503(t *testing.T) {
+	// This is the stable legacy scheduler summary for mixed eligibility
+	// failures, including one model rate limit and one disabled account.
+	err := fmt.Errorf("%w (pool=2, filtered: ineligible=2)", service.ErrNoAvailableAccounts)
+	fallback := noAccountErrorClassification{Status: http.StatusServiceUnavailable, ErrType: "api_error", Message: "Service temporarily unavailable"}
+	require.Equal(t, fallback, classifySelectionFailureError(err, fallback))
+}
+
+func TestCapabilityOnlyExhaustionStopsBlindRetries(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, mixed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("mixed=%t", mixed), func(t *testing.T) {
+			c, recorder := newResilienceTestContext(t)
+			ctx := resilience.WithCapabilityRequest(c.Request.Context(), "responses", false)
+			c.Request = c.Request.WithContext(ctx)
+			resilience.SetRetryAdvice(ctx, resilience.RetryAdvice{Seconds: 5, Source: "recovery"})
+			c.Header("Retry-After", "5")
+			c.Set(ginKeyResilienceRetryAfter, 5)
+			if mixed {
+				resilienceAttemptFailed(ctx, 1, newTestFailoverErr(502, false, false))
+			}
+			failure := &service.UpstreamFailoverError{StatusCode: 400, Reason: service.GatewayFailureReason(resilience.ReasonCapabilityStreamOnly), NextAccountAction: service.NextAccountRetry}
+			resilienceAttemptFailed(ctx, 2, failure)
+			status, typ, message := resilienceCapacityExhausted(c, failure, 400, "invalid_request_error", "stream must be true")
+			require.Equal(t, 503, status)
+			require.Equal(t, "api_error", typ)
+			_, _, translated := resilienceTranslateError(c, status, typ, "", message)
+			require.Equal(t, !mixed, service.IsCapabilityOnlyExhaustion(ctx, failure))
+			if mixed {
+				require.NotEqual(t, service.CapabilityOnlyMessage, message)
+				require.Equal(t, "5", recorder.Header().Get("Retry-After"))
+				require.False(t, resilience.RetryAdviceFrom(ctx).Suppress)
+				require.Contains(t, translated, "Please try again in 5s")
+			} else {
+				require.Equal(t, service.CapabilityOnlyMessage, message)
+				require.Equal(t, service.CapabilityOnlyMessage, translated)
+				require.Empty(t, recorder.Header().Get("Retry-After"))
+				require.Equal(t, "false", recorder.Header().Get("x-should-retry"))
+				require.True(t, resilience.RetryAdviceFrom(ctx).Suppress)
+				require.NotContains(t, message, "Please try again")
+			}
+		})
+	}
 }
