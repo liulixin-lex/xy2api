@@ -25,7 +25,7 @@
 
 ## 3. W1.2-lite（β）
 
-- [ ] 3.1 raw Chat 透传识别 `error` 后跟 `[DONE]`（`stream.strict_terminal`）。
+- [x] 3.1 raw Chat 透传识别 `error` 后跟 `[DONE]`（`stream.strict_terminal`；β `f9edc3a4d`）。
 - [ ] 3.2 （有余力）OpenAI Responses 透传的首输出守卫；未做则登记到 design §11。
 
 ## 4. W2.1-lite 分类修正（γ）

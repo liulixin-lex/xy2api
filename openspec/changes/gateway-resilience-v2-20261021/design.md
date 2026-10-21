@@ -153,8 +153,13 @@
 ## 4. W1.2-lite raw Chat 明确终止（`stream.strict_terminal`）
 
 - 位置：`openai_gateway_chat_completions_raw.go`、`openai_raw_stream_truncation.go`（账号不支持 `/responses` 时的原生 Chat 透传）。
-- 上游 `data: {"error":...}` 后跟 `[DONE]`：提交前转为换号；提交后按失败记账（计入已输出后失败与会话失败），不当成功。
-- 有 usage 或 finish_reason 且没有 error 的流仍算成功。
+- 实现提交 `f9edc3a4d`（β），由 `StrictTerminalOn()` 控制。
+- 合法 JSON 的 `error` 字段或 `type: "error"` 一出现，之后的 `[DONE]`、usage、finish 都不再把结果改回成功。
+- 提交前且可重试：返回换号；提交后：原样转发错误与 `[DONE]`，按已输出后失败记账（计入会话失败），并标记终态已写出，handler 不再补一个。内容拒绝不换号；客户端取消优先，不误记为截断。
+- 第一条 data 之前的 SSE 框架行（`event`、`id`、`retry`、注释）有界暂存，使 `event: error` 不会抢先提交响应；不新增 role 或内容的暂存。
+- 没有 error 的流仍算成功，包括只有 usage 的、或有 finish 但没有 `[DONE]` 的。
+- 开关关闭时回到旧判定：`error` 后跟 `[DONE]` 算成功。
+- 上游文件钩子：`openai_gateway_chat_completions_raw.go` 的 `resilience.Current().StrictTerminalOn()`、`terminal.failurePayload`（登记到 required_literals）。
 - OpenAI Responses 透传的首输出守卫【待契约：CHANGES_B 是否完成，未完成则列入 §10】。
 
 ## 5. W2.1-lite 分类修正（`failure.decision_v2`）
