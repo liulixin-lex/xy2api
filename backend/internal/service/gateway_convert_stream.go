@@ -45,7 +45,9 @@ const (
 	gatewayConvertChat      = "chat"
 )
 
-var errGatewayConvertClientGone = errors.New("stream usage incomplete: client disconnected before output")
+// ErrGatewayConvertClientGone ends an attempt whose client left before any
+// output: nothing is switched or billed.
+var ErrGatewayConvertClientGone = errors.New("stream usage incomplete: client disconnected before output")
 
 // gatewayConvertGuarded reports whether the Gateway conversions use the
 // staged opening or strict terminal handling.
@@ -403,7 +405,7 @@ func (st *gatewayConvertStream) onStall(threshold time.Duration) gatewayConvertO
 func (st *gatewayConvertStream) deadline() gatewayConvertOutcome {
 	if st.gone || st.ctx().Err() != nil {
 		MarkResponseCommitted(st.c)
-		return gatewayConvertOutcome{err: errGatewayConvertClientGone, noResult: true}
+		return gatewayConvertOutcome{err: ErrGatewayConvertClientGone, noResult: true}
 	}
 	return gatewayConvertOutcome{err: st.firstEvent.failoverError(st.c, st.account, "first_event"), noResult: true}
 }

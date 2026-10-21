@@ -1358,6 +1358,22 @@
     {
       "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
       "value": "ccChunks = deferredOpenAIChatChunks(resEvt, ccState, hold)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "if result == nil && (errors.Is(err, context.Canceled) || errors.Is(err, service.ErrGatewayConvertClientGone)) {"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "// xy2api resilience (review DELTA-P1-1): a stream that broke after"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
+      "value": "if result == nil && (errors.Is(err, context.Canceled) || errors.Is(err, service.ErrGatewayConvertClientGone)) {"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
+      "value": "// xy2api resilience (review DELTA-P1-1): a stream that broke after"
     }
   ],
   "forbidden_module_paths": [
@@ -1805,6 +1821,16 @@
       "id": "xy-resilience-v2-streams",
       "path": "backend/internal/service/gateway_convert_stream_test.go",
       "literal": "func TestGatewayConvertSwitchesOffKeepBaseline"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/gateway_convert_usage_test.go",
+      "literal": "func TestGatewayConvertBreakAfterOutputBillsPartialUsageOnce"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/gateway_convert_usage_test.go",
+      "literal": "func TestGatewayConvertCancelBeforeOutputBillsNothing"
     }
   ]
 }
