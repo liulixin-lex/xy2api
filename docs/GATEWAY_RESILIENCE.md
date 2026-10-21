@@ -170,7 +170,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 - 接口：
   - `GET /api/v1/admin/resilience/stats?window=15m`（窗口最长 1 小时，计数为单实例内存口径）；
   - `GET /api/v1/admin/resilience/undelivered?page=&page_size=&user_id=&api_key_id=&group_id=&since=&until=`（时间为 RFC3339）；
-  - `GET /api/v1/admin/resilience/groups/:id/explain?session_hash=&model=`（只读；0.4.4 起每个账号带 `capability_learned`，`protocol=responses|chat` 与 `stream=true|false` 须成对出现，否则 400；`stream=false` 时按该请求形态排除仅流式账号，原因 `capability_stream_only`、`recover_at` 与 `capability_ttl_seconds`）；
+  - `GET /api/v1/admin/resilience/groups/:id/explain?session_hash=&model=`（只读；0.4.4 起每个账号带 `capability_learned`，`protocol=responses|chat` 与 `stream=true|false` 须成对出现，否则 400；`stream=false` 时按该请求形态排除仅流式账号（主分组与兜底分组都算），原因 `capability_stream_only`、`recover_at` 与 `capability_ttl_seconds`）；
   - 账号列表与详情的 `capability_learned`（0.4.4）：`[{protocol, mode: "stream_only", expires_at}]`，没有记录时为空数组；`DELETE /api/v1/admin/accounts/:id/capability-learning` 清除。
 
 ### 5.2 计数项

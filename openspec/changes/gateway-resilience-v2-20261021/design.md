@@ -187,7 +187,7 @@
 
 ### 6.1 范围与触发
 
-- **请求范围**：OpenAI 入站的 Responses 与 Chat 普通文本请求。入口在解析出客户端的 `stream` 后、首次选号前用 `resilience.WithCapabilityRequest(ctx, protocol, stream)` 标记请求（α；`protocol` 为 `responses` 或 `chat`）。未标记、协议未知或 `stream=true` 的请求不过滤；compact、图片、WebSocket 不标记；Messages→OpenAI、Gemini、CN、Bedrock 不在本期。
+- **请求范围**：OpenAI 入站的 Responses 与 Chat 普通文本请求。入口在解析出客户端的 `stream` 后、首次选号前用 `resilience.WithCapabilityRequest(ctx, protocol, stream)` 标记请求（α；`protocol` 为 `responses` 或 `chat`）。未标记、协议未知或 `stream=true` 的请求不过滤；compact（含路径与 native v2 两种）、带显式图片意图的请求不标记，图片端点与 WebSocket 不改（α `affef416f`）；Messages→OpenAI、Gemini、CN、Bedrock 不在本期。
 - **账号范围**：只学习 OpenAI 与 Grok 平台的账号；OpenAI 强制流式的 OAuth 账号本来就以流式请求上游，不过滤。
 - **触发**：检测钩子 `OpenAIGatewayService.LearnStreamOnlyFailure(ctx, account, protocol, upstreamStream, status, errorBody, outboundBodies ...[]byte)`，在处理 400 的副作用与写应答之前调用（β 的 Forward、透传、raw Chat 调用点传实际发给上游的最终请求体；Grok 原生由 γ 传改写后的请求体）。只在实际发给上游的请求为非流式、状态为 400、错误字段确定表示“只接受流式”（表驱动，如 “only accepts streaming requests”、“stream must be true”）时学习；只看错误字段，忽略上游回显的请求内容。以下情况不学：截断的 JSON、余额与内容拒绝；错误带 `param` 且不是 `stream`；出站请求体本身就含这句能力短语（不分大小写，解析 JSON 转义后比较），避免用户在提示词里写了这句话导致误学。上游请求本来就是流式时不动作。钩子还要求请求带合法的 `WithCapabilityRequest` 标记且 `stream=false`：没有标记的 compact、图片、WebSocket 完全没有学习副作用。不会自动改发流式。
 
@@ -221,7 +221,7 @@
 - 账号列表与详情返回 `capability_learned: [{protocol: "responses"|"chat", mode: "stream_only", expires_at: <RFC3339 UTC>}]`（`Account.CapabilityLearned(now)`，导出类型 `resilience.LearnedCapability{Protocol, Mode, ExpiresAt}`），没有记录时为空数组；功能关闭时仍可查看与清除未到期的记录。
 - 清除：`DELETE /api/v1/admin/accounts/:id/capability-learning`，成功时 `data` 为 `{capability_learned: []}`，只更新这两个键（`AccountHandler.ClearCapabilityLearning`，服务方法 `ClearAccountCapabilityLearning` 经可选窄接口调用，不改 `AdminService`）。
 - DTO（α，`bf38c06c5`）：`Account` 与 `AccountListItem`（完整列表、精简列表与详情）都带 `capability_learned`，没有记录时为 `[]`（不省略）；在脱敏前的 service 账号上读取有效记录，过期或指纹不符的不展示；两个内部 `extra` 键从详情与列表中删除，指纹不返回前端。清除路由沿用管理端的鉴权与审计链。
-- Explain：每个账号记录都带 `capability_learned`。`protocol`（`responses` 或 `chat`）与 `stream`（`true` 或 `false`）必须成对出现，缺一个、空值、重复或非法值都返回 400；不带这两个参数时保持原来的整体健康视图。带 `stream=false` 时按该请求形态判断：被阻断的账号原因为 `capability_stream_only`，`recover_at` 为到期时间，另给 `capability_ttl_seconds`，并从本次的健康候选与末位兜底中排除（不变成全局硬罚，也不覆盖已有更强的硬罚原因）；`stream=true` 时不排除。Explain 没有请求体，只对上述确定路径排除；路由无法确定时不猜测排除，只展示学习记录。【待契约：α 的 Explain 提交】
+- Explain：每个账号记录都带 `capability_learned`。`protocol`（`responses` 或 `chat`）与 `stream`（`true` 或 `false`）必须成对出现，缺一个、空值、重复或非法值都返回 400；不带这两个参数时保持原来的整体健康视图。带 `stream=false` 时按该请求形态判断：被阻断的账号原因为 `capability_stream_only`，`recover_at` 为到期时间，另给 `capability_ttl_seconds`，并从本次的健康候选与末位兜底中排除（不变成全局硬罚，也不覆盖已有更强的硬罚原因）；`stream=true` 时不排除。带这两个参数时，主分组与兜底分组都应用能力过滤。Explain 没有请求体，只对上述确定路径排除；路由无法确定时不猜测排除，只展示学习记录。实现 α `affef416f`。
 - 前端（FE）：账号列表状态列下方的“仅流式（自动学习，剩余 X）”标识与清除按钮（`AccountStreamOnlyBadge`；`AccountsView.vue` 的两处钩子登记为具名补丁 `xy-account-stream-only-learning`）；设置卡片“失败分类修正”“流式开场与终止”“仅流式账号学习”；运维页与份额页的 Explain 多一列“已学能力”和可选的“请求类型”（`ade0f689d`）；运维面板的 `pre_created_delta` 计数文案（`74e392ffd`）。
 
 ## 7. W5 信号与终止出口
