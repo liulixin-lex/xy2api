@@ -163,7 +163,8 @@ func IsStreamOnlyFailure(status int, body []byte, outboundBodies ...[]byte) bool
 	}
 	if len(fields.Param) > 0 {
 		var param string
-		if json.Unmarshal(fields.Param, &param) != nil || param != "stream" {
+		// Compatible upstreams use null or blank values when no parameter is named.
+		if json.Unmarshal(fields.Param, &param) != nil || (strings.TrimSpace(param) != "" && param != "stream") {
 			return false
 		}
 	}
