@@ -22,6 +22,7 @@ removed at the end. Run on the staging host from the staging directory:
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import os
 import subprocess
@@ -50,8 +51,9 @@ def env_file() -> dict:
 
 
 ENV = env_file()
-NEW = ENV["APP_IMAGE"]
-OUT = os.path.join(HERE, "evidence", "upgrade-" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%MZ"))
+NEW = os.environ.get("UPGRADE_TO") or ENV["APP_IMAGE"]
+OUT = os.environ.get("UPGRADE_EVIDENCE") or os.path.join(HERE, "evidence", "upgrade-" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%MZ"))
+V2 = os.environ.get("UPGRADE_PROFILE") == "resilience-v2"
 REPORT: dict = {"old": OLD, "new": NEW, "steps": []}
 
 
@@ -89,7 +91,8 @@ def api(method: str, path: str, body=None, token: str = ""):
 def start(image: str) -> float:
     sh("docker", "rm", "-f", NAME, check=False)
     started = time.time()
-    sh("docker", "run", "-d", "--name", NAME, "--network", NET, "-p", f"127.0.0.1:{PORT}:8080", "--memory", "3g",
+    sh("docker", "run", "-d", "--name", NAME, "--network", NET, "-p", f"127.0.0.1:{PORT}:8080",
+       "--memory", os.environ.get("UPGRADE_MEMORY", "3g"), "--cpus", os.environ.get("UPGRADE_CPUS", "3"),
        "-e", "AUTO_SETUP=true", "-e", "SERVER_HOST=0.0.0.0", "-e", "SERVER_PORT=8080", "-e", "SERVER_MODE=release",
        "-e", "DATABASE_HOST=postgres", "-e", "DATABASE_PORT=5432", "-e", "DATABASE_USER=xy2api",
        "-e", f"DATABASE_PASSWORD={ENV['POSTGRES_PASSWORD']}", "-e", f"DATABASE_DBNAME={DB}", "-e", "DATABASE_SSLMODE=disable",
@@ -124,16 +127,100 @@ def admin_token() -> str:
     return token
 
 
-def gateway_request(key: str) -> dict:
+def gateway_request(key: str, stream: bool = False) -> dict:
     req = urllib.request.Request(BASE + "/v1/responses", method="POST",
-                                 data=json.dumps({"model": "gpt-6.1-sol", "input": "drill"}).encode())
+                                 data=json.dumps({"model": "gpt-6.1-sol", "input": "drill", "stream": stream}).encode())
     req.add_header("Authorization", "Bearer " + key)
     req.add_header("Content-Type", "application/json")
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
-            return {"status": resp.status}
+            body = resp.read()
+            return {"status": resp.status, "completed": not stream or b'"response.completed"' in body}
     except urllib.error.HTTPError as err:
         return {"status": err.code, "body": err.read()[:200].decode("utf-8", "replace")}
+
+
+V2_VALUES = {
+    "stream": {"prelude_staging": False, "native_prelude_whitelist": False, "strict_terminal": False},
+    "failure": {"decision_v2": False},
+    "errors": {"failed_frame_retry_after": False, "codex_retry_after_cap_seconds": 7},
+    "capability": {"stream_only_learning": False, "learn_ttl_seconds": 3600},
+}
+
+
+def require(label: str, condition: bool):
+    REPORT.setdefault("checks", []).append({"check": label, "ok": bool(condition)})
+    if not condition:
+        raise AssertionError(label)
+
+
+def migration_state():
+    rows = psql("SELECT filename || ':' || checksum FROM schema_migrations ORDER BY filename")
+    return {"count": len(rows.splitlines()), "sha256": hashlib.sha256(rows.encode()).hexdigest()}
+
+
+def v2_prepare(token: str, user_token: str):
+    """Produce a real F36 learning record before saving non-default settings."""
+    status, group = api("POST", "/api/v1/admin/groups", {"name": "drill-stream-only", "platform": "openai",
+                        "rate_multiplier": 1, "subscription_type": "standard"}, token)
+    require("learning group created", status == 200)
+    gid = group["data"]["id"]
+    status, account = api("POST", "/api/v1/admin/accounts", {"name": "drill-stream-only", "platform": "openai",
+                          "type": "apikey", "credentials": {"api_key": "sk-fault-drill-only",
+                          "base_url": "http://fault-upstream:8080/f/F36"}, "group_ids": [gid], "concurrency": 10}, token)
+    require("learning account created", status == 200)
+    aid = account["data"]["id"]
+    status, key = api("POST", "/api/v1/keys", {"name": "drill-stream-key", "group_id": gid}, user_token)
+    require("learning key created", status == 200)
+    key = key["data"]["key"]
+    deadline = time.time() + 15
+    while True:
+        outcome = gateway_request(key)
+        stored = psql(f"SELECT coalesce(extra->'capability_learned_responses', 'null'::jsonb) FROM accounts WHERE id={aid}")
+        learned = json.loads(stored)
+        if learned or time.time() >= deadline:
+            break
+        time.sleep(3)
+    require("F36 creates real stream-only learning", outcome["status"] in (400, 503) and
+            isinstance(learned, dict) and bool(learned.get("fingerprint")) and bool(learned.get("expires_at")))
+    status, settings = api("GET", "/api/v1/admin/settings/gateway-resilience", token=token)
+    require("candidate settings readable", status == 200)
+    values = settings["data"]["settings"]
+    for section, fields in V2_VALUES.items():
+        require("candidate exposes " + section, all(k in values.get(section, {}) for k in fields))
+        values[section].update(fields)
+    status, _ = api("PUT", "/api/v1/admin/settings/gateway-resilience", values, token)
+    require("non-default v2 settings saved", status == 200)
+    return aid, key, learned
+
+
+def v2_checkpoint(label, token, expected_migrations, learning=None, old=False):
+    health, _ = api("GET", "/health")
+    ready, body = api("GET", "/ready")
+    require(label + ": healthy and ready", health == ready == 200 and body.get("status") == "ready")
+    migrations = migration_state()
+    require(label + ": migration set and checksums unchanged", migrations == expected_migrations)
+    status, data = api("GET", "/api/v1/admin/settings/gateway-resilience", token=token)
+    require(label + ": settings readable", status == 200)
+    settings = data["data"]["settings"]
+    if learning:
+        require(label + ": old setting retained", settings["keepalive"]["delay_seconds"] == 17)
+        for section, fields in V2_VALUES.items():
+            for field, value in fields.items():
+                visible = settings.get(section, {})
+                require(label + ": " + section + "." + field,
+                        field not in visible if old else visible.get(field) == value)
+        # No old-version PUT: its documented whole-object save drops new fields.
+        saved = json.loads(psql("SELECT value FROM settings WHERE key='gateway_resilience_settings'"))
+        require(label + ": stored v2 fields retained", all(saved[s][k] == v for s, fs in V2_VALUES.items() for k, v in fs.items()))
+        aid, key, learned = learning
+        actual = json.loads(psql(f"SELECT extra->'capability_learned_responses' FROM accounts WHERE id={aid}"))
+        status, _ = api("GET", f"/api/v1/admin/accounts/{aid}", token=token)
+        gateway = gateway_request(key, stream=True)
+        require(label + ": learning extra retained and old-compatible", actual == learned and status == 200 and
+                gateway["status"] == 200 and gateway["completed"])
+    step(label + " compatibility", migrations=migrations, settings_readable=True,
+         new_fields_ignored=old, learning_retained=bool(learning))
 
 
 SYNTH = """
@@ -184,6 +271,8 @@ def probe_locks(stop: threading.Event, worst: list):
 
 
 def main() -> int:
+    if V2 and OLD_TAG != "0.4.3":
+        raise SystemExit("resilience-v2 drill must start at 0.4.3")
     os.makedirs(OUT, exist_ok=True)
     sh("docker", "rm", "-f", NAME, check=False)
     psql(f"DROP DATABASE IF EXISTS {DB}", db="postgres")
@@ -205,8 +294,13 @@ def main() -> int:
          "sustained_minutes, severity, notify_email, cooldown_minutes, created_at, updated_at) VALUES "
          "('上游余额长期未恢复', 'drill', false, 'account_error_count', '>', 0, 5, 1, 'P3', false, 60, NOW(), NOW())")
     step(f"{OLD_TAG} on an empty database", start_s=took, gateway=gateway_request(key))
+    original_migrations = migration_state()
+    if V2:
+        v2_checkpoint("initial 0.4.3", token, original_migrations)
 
     started = time.time()
+    if V2:
+        step("synthetic data fill begins")
     psql(SYNTH.format(group_id=gid))
     uid0, kid0, aid0 = (psql("SELECT min(id) FROM users WHERE email LIKE 'synth%'"),
                         psql("SELECT min(id) FROM api_keys WHERE name LIKE 'synth-%'"),
@@ -246,6 +340,10 @@ def main() -> int:
          new_columns=columns, undelivered_table=undelivered, settings_get=status, settings_put=put_status,
          balance_alert_rules=balance_rules, balance_alert_rules_ok=balance_rules == "上游余额长期未恢复:account_error_count",
          gateway=gateway_request(key), sizes=psql("SELECT pg_size_pretty(pg_total_relation_size('usage_logs'))"))
+    learning = None
+    if V2:
+        learning = v2_prepare(token, ul["data"]["access_token"])
+        v2_checkpoint("candidate", token, original_migrations, learning)
 
     sh("docker", "stop", "-t", "30", NAME)
     took = start(OLD)
@@ -255,6 +353,9 @@ def main() -> int:
     time.sleep(3)
     after = int(psql("SELECT count(*) FROM usage_logs WHERE api_key_id=(SELECT id FROM api_keys WHERE name='drill-key')"))
     step(f"roll back to {OLD_TAG}", start_s=took, login="ok", gateway=gw, billed_rows=after - before)
+    require("rollback gateway and billing", gw["status"] == 200 and after - before == 1)
+    if V2:
+        v2_checkpoint("rollback 0.4.3", token, original_migrations, learning, old=True)
 
     sh("docker", "stop", "-t", "30", NAME)
     took = start(NEW)
@@ -262,9 +363,14 @@ def main() -> int:
     _, settings = api("GET", "/api/v1/admin/settings/gateway-resilience", token=token)
     step("roll forward to the candidate", start_s=took, gateway=gateway_request(key),
          settings_kept=settings["data"]["settings"]["keepalive"]["delay_seconds"] == 17)
+    require("roll-forward settings kept", settings["data"]["settings"]["keepalive"]["delay_seconds"] == 17)
+    if V2:
+        v2_checkpoint("roll-forward candidate", token, original_migrations, learning)
 
     sh("docker", "rm", "-f", NAME, check=False)
     started = time.time()
+    if V2:
+        step("backup and restore begins")
     dump = "/tmp/xy2api_upgrade.dump"
     sh("docker", "compose", "-p", "xy2api-staging", "exec", "-T", "postgres", "sh", "-c",
        f"pg_dump -U xy2api -Fc -d {DB} -f {dump}", timeout=7200)
@@ -278,6 +384,10 @@ def main() -> int:
     sh("docker", "compose", "-p", "xy2api-staging", "exec", "-T", "postgres", "rm", "-f", dump)
     psql("DROP DATABASE xy2api_restore", db="postgres")
     step("backup and restore", seconds=round(time.time() - started, 1), original=original, restored=restored, equal=original == restored)
+    require("backup restored row counts", original == restored)
+    for record in REPORT["steps"]:
+        if "gateway" in record:
+            require(record["step"] + ": gateway succeeds", record["gateway"]["status"] == 200)
 
     with open(os.path.join(OUT, "REPORT.json"), "w") as fh:
         json.dump(REPORT, fh, indent=1, ensure_ascii=False)
@@ -286,4 +396,16 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        status = main()
+        REPORT["ok"] = status == 0
+    except BaseException as exc:
+        REPORT["ok"] = False
+        REPORT["exception"] = f"{type(exc).__name__}: {exc}"
+        raise
+    finally:
+        os.makedirs(OUT, exist_ok=True)
+        with open(os.path.join(OUT, "REPORT.json"), "w") as fh:
+            json.dump(REPORT, fh, indent=1, ensure_ascii=False)
+        sh("docker", "rm", "-f", NAME, check=False)
+    raise SystemExit(status)

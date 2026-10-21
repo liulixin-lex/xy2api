@@ -10,7 +10,7 @@ Tools for the 0.4.0 gateway resilience work (`openspec/changes/gateway-resilienc
 | `caddy_cuts.py` | CDN cut rate per entry (Cloudflare, ESA, direct) from Caddy JSON access logs; with `--app`, matches each cut to the application log to find requests completed (and billed) after the client was cut; share of 503 responses with `Retry-After`. `--json` prints one object. |
 | `session_streaks.py` | From application logs (JSON or console format): consecutive failures of one session on one account (requests without a session hash are counted per API key, separately), and the latency of requests that switched accounts and still succeeded. `--json` prints one object. |
 | `metrics_report.py` | design §14 report: `collect` measures one environment into a JSON file, `report` compares a baseline with a candidate against the §14 targets (Markdown; exit 1 when a measured metric misses). |
-| `fault-upstream/` | Fault-injecting upstream (Go, standard library only) with OpenAI Responses/Chat, Anthropic, Gemini, image, `/v1/usage` and new-api billing shapes. Scenarios F00–F30, `BAL` and `MIX`. |
+| `fault-upstream/` | Fault-injecting upstream (Go, standard library only) with OpenAI Responses/Chat, Anthropic, Gemini, image, `/v1/usage` and new-api billing shapes. Scenarios F00–F37 (including F34B), `BAL` and `MIX`. |
 | `cdn-sim/` | CDN edge simulator (Go, standard library only): first-byte and idle read timeouts, `X-XY-Edge` injection, cut and request logs. |
 
 ## Database scripts
@@ -86,12 +86,118 @@ http://fault-upstream:8080/f/F06;secs=200      (account base_url)
 | F28 | Anthropic relay queue timeout: 200 SSE whose first event, after `after` seconds, is an `error` of type `rate_limit_error` | `after` |
 | F29 | Codex backend relay: a Responses request replaying `web_search_call` input without declaring web_search gets 200 SSE, then `response.failed` "response protection is unavailable"; others answer normally | |
 | F30 | 502 Cloudflare JSON error answer (`origin_bad_gateway`, the detail says the origin "is overloaded or misconfigured", `retry_after` 60 in the body) | |
+| F31 | Responses `response.created`, then `response.failed` with `server_is_overloaded` | `after` (default 0.05 s) |
+| F32 | Responses created then failed with `server_error` / `The service is busy` | `after` (default 0.05 s) |
+| F33 | Responses created → `response.in_progress` → overloaded failure | `after` |
+| F34 | Responses created → unknown `codex.response.metadata` → overloaded failure; conservative case that must prevent retry | `after` |
+| F34B | Unmarked empty `response.output_text.delta` → created → in_progress → empty message added → empty output_text part added → overloaded failure | `before` (default 0.1 s), `after` |
+| F35 | Responses endpoint returns 404; raw Chat stream emits error then `[DONE]` (nonstream returns 429) | |
+| F36 | Nonstream returns 400 `This group only accepts streaming requests`; streaming succeeds | `first` |
+| F37 | HTTP 503 `server_is_overloaded` with a known `Retry-After` | `reset` (default 8 s), `delay` (use 20 s for CDN commitment) |
 | BAL | Normal while the balance of `key` is positive, F12 otherwise | `key`, `first`, `reset` (adds a relay's exhausted rate-limit headers) |
 | MIX | A random fault with probability `p` percent per fault type, otherwise normal | `p` |
 
 Any scenario accepts `delay` (seconds) to hold the answer back, for example `F16;delay=20` to return 529 after the gateway's pre-output heartbeats.
 
 Control endpoints: `GET /_scenarios`, `GET /_requests?since=N` (outcome per request: `completed`, `cancelled`, `dropped`, `failed_in_stream`, `error_status`), `GET|POST /_control/balance?key=K&value=V`, `GET /healthz`.
+
+F34B (also accepted as F34b) is a synthetic empty-delta regression case. Probes established the event ordering, but did not inspect delta content. F34's unknown event was not observed; it checks that unknown metadata is treated conservatively. F31–F34B, F36 and F37 answer the gateway's tool capability probe normally so the scenario reaches the native Responses path.
+
+## Staging regressions for 0.4.4
+
+Run `staging/fixtures.py` before `staging/scenarios.py`. Keep keys and evidence outside Git. The runner preserves complete SSE JSON so response IDs and terminal headers can be asserted, and reports SQL/HTTP failures instead of treating them as empty results.
+
+| Scenarios | Assertions |
+|---|---|
+| CV-5–CV-8 | Retry pre-output failures; only B's opening and completion reach the client. CV-5 permits at most two A attempts under D18 and checks their persisted `CAPACITY_SHED` records; CV-6 checks exactly one assistant role and the busy classification; CV-8 rejects the unmarked empty delta before created. |
+| CV-9 | Unknown metadata commits output; no B attempt follows. |
+| RAW-1 / RAW-2 | Raw Chat error + DONE retries on B; a single-account failure is recorded and has no success usage row. |
+| SO-1 | Learn Responses stream-only capability, retry on B, show the Explain exclusion, skip A on later nonstream requests, still use A for streams, clear and relearn; no account failure or cooldown. |
+| RA-1 / RA-2 | After CDN heartbeat, an exhausted request has one created→failed pair and matching 2–10 s advice; a recovered request completes without delayed advice. |
+| ANT-3 | Anthropic no-account error is `api_error`; ANT-1 and ANT-2 retain their existing IDs. |
+| SH-1 / SH-2 | Switch to share using account priority and load factors, return to original scheduling, and verify real transient failures reduce health weight and new-session traffic share. |
+| LR-1 / DC-6 | Last resort follows account priority; compatibility openings wait for content while a native Anthropic opening remains unbilled. |
+| Q-1 | A dedicated user with concurrency 1 queues behind a silent holder. After observing a queue ping, set that user's balance to zero; Responses gets created→failed, Chat gets error→DONE, Messages gets a named error. Every entry rejects bare JSON. Restore the user afterwards. |
+| CX-1 | An empty group returns 503; either a Codex originator or Codex UA limits Retry-After to 10 s, while ordinary requests before and after keep the configured maximum. |
+
+Capacity retry fixtures give B a different Docker DNS host name for the same fault service, so the one-host-switch rule can be tested without contacting a real upstream. Scenarios that change shared settings run serially. SH-2 generates real success/502 attempts on its dedicated accounts (temporarily deactivating B during failure injection), then allows up to 150 seconds for the minute-aligned health window; it restores account configuration and scheduling settings afterwards. Before sampling 80 fresh sessions, it proves A can serve at the best priority, then restores equal priorities. This separates health weighting from a lingering cooldown. The cohort checks reduced A traffic, not exact convergence to the new target, because allocation history survives weight changes.
+
+Q-1 uses an Anthropic group for all three queued entry protocols, covering the Gateway Responses/Chat conversion writers and native Messages. The holder uses a separate key of the same user on an OpenAI group; its disconnect releases the shared user slot. A live line callback confirms the queue heartbeat arrived before the balance change, and fault records confirm the queued request never reached an upstream. Responses and Chat allow only SSE comments before their opening/error; Messages also permits its typed ping data. These additions bring the suite to 71 scenarios.
+
+### Candidate validation preparation
+
+`staging/build_candidate.py COMMIT --pr-head PR_HEAD --host SSH_ALIAS --directory STAGING_DIR`
+plans a build from `git archive` without connecting to the host. After the candidate
+is released, add `--execute` to build it once. The script refuses an existing image
+or evidence directory, verifies the uploaded archive, and records the commit,
+source tree, PR head tree, image ID and `/app/xy2api` SHA-256 in
+`evidence/candidate-COMMIT/BUILD.json`. It leaves the running app unchanged.
+Omit `--pr-head` only when the candidate itself is the intended head; compare the
+recorded tree again if the PR head later changes.
+
+On the staging host, `python3 phase2.py resources` checks disk and available memory
+(30 GiB and 4 GiB minimum). `python3 phase2.py scenarios` prints the 71-case plan.
+`python3 soak_stack.py plan` also renders both Compose configurations, checks the
+proposed ports and subnet, and budgets both stacks together. It requires the sum
+of their memory limits plus 2 GiB available, and leaves two host CPUs outside the
+combined CPU quotas. Plan commands do not create containers, networks or volumes.
+
+After release, select the candidate and apply `compose.yaml` together with
+`compose.parallel.yaml` to the main stack, then refresh `fixtures.py`. The main
+stack runs its 71 scenarios serially, followed by the upgrade drill:
+
+```sh
+python3 phase2.py scenarios --parallel-soak --execute --build evidence/candidate-COMMIT/BUILD.json --evidence evidence/run-COMMIT
+python3 phase2.py upgrade --parallel-soak --execute --build evidence/candidate-COMMIT/BUILD.json --evidence evidence/upgrade-COMMIT
+```
+
+The runner loads only `.env`, binds both the running image and binary to BUILD.json,
+locks the staging project, rejects existing output directories and records script
+hashes. Scenarios run with `--parallel 1`; `SUITE.json` includes all 71 records.
+The existing staging CF/direct host settings are required for their six cases.
+
+In a separate process, the independent `xy2api-staging-soak` project can run
+alongside that line. It has its own PostgreSQL, Redis, fault service, network,
+volumes, generated credentials and fixture keys. Its ports are 18310 (app),
+18311 (fault) and 18313 (CDN simulator), all bound to loopback. No image is built
+by this runner: the app is pinned to BUILD.json's image ID and both stacks' image
+IDs and binary SHA-256 values must match before and after the soak.
+
+```sh
+python3 soak_stack.py start --execute --build evidence/candidate-COMMIT/BUILD.json --evidence evidence/soak-COMMIT
+python3 soak_stack.py run --execute --build evidence/candidate-COMMIT/BUILD.json --evidence evidence/soak-COMMIT
+# After collecting the report, remove only the owned soak project and temporary files:
+python3 soak_stack.py cleanup --execute
+```
+
+Without `--execute`, start/run/cleanup only perform the read-only plan. Execution
+uses a separate lock from the main stack. Startup verifies that the main stack's
+parallel limits are applied. The limits total 6.125 GiB and 5.85 CPUs, including
+LEASE-1's extra process or the bounded upgrade process. Both apps have 1 GiB limits.
+Soak evidence stays outside the temporary `soak-stack` directory and survives
+cleanup; the main stack and all candidate images are retained.
+
+The upgrade stage uses 0.4.3, a separate synthetic database, rollback and another
+forward upgrade, followed by backup/restore. Every transition checks health,
+readiness, settings and the migration filename/checksum set. It produces a real
+F36 capability learning record and verifies that the account still streams on
+0.4.3, the extra key survives, and non-default v2 settings survive the round trip.
+It does not save settings on 0.4.3: an old-version save drops new fields, as specified
+by the C0 compatibility contract. Failure evidence is retained and the temporary
+application container is removed. With `--parallel-soak`, its process is limited
+to 1 GiB and 0.5 CPU. Upgrade start/end and bulk-fill/backup timestamps are included
+in the soak report so overlapping disk I/O remains visible.
+
+Soak uses `--hours 3 --cycle-minutes 30`, concurrency 20–50 and ten minutes of
+settling; the independent stack enables `gctrace=1` on the same candidate image.
+Logs are captured continuously to evidence so Docker rotation cannot remove the
+early GC samples. Heap data from
+at least three complete cycles after warm-up is mandatory, with slope at most
+1 MiB/h. Missing heap or goroutine data cannot pass; SQL failures stop validation.
+Every ERROR count is reported; the automatic flood threshold is at least 60 lines
+per minute for three consecutive minutes. Individual errors still need attribution
+in the final report. Existing slot, reservation, memory, panic and duplicate usage
+checks remain in effect.
 
 ## cdn-sim
 

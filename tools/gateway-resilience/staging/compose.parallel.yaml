@@ -1,0 +1,39 @@
+# Use with compose.yaml while the independent soak project is running.
+# Includes the LEASE-1 process; upgrade uses the same 1 GiB / 0.5 CPU budget.
+services:
+  app:
+    deploy:
+      resources:
+        limits: { cpus: "1.50", memory: 1G }
+  app2:
+    deploy:
+      resources:
+        limits: { cpus: "0.50", memory: 1G }
+  postgres:
+    deploy:
+      resources:
+        limits: { cpus: "0.75", memory: 1G }
+  redis:
+    deploy:
+      resources:
+        limits: { cpus: "0.15", memory: 320M }
+  fault-upstream:
+    deploy:
+      resources:
+        limits: { cpus: "0.15", memory: 128M }
+  cdn-sim-90:
+    deploy:
+      resources:
+        limits: { cpus: "0.10", memory: 128M }
+  cdn-sim-125:
+    deploy:
+      resources:
+        limits: { cpus: "0.10", memory: 128M }
+  cdn-sim-300:
+    deploy:
+      resources:
+        limits: { cpus: "0.10", memory: 128M }
+  direct-counter:
+    deploy:
+      resources:
+        limits: { cpus: "0.10", memory: 128M }

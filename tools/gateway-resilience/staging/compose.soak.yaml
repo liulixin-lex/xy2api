@@ -1,0 +1,94 @@
+# Independent project: no external volumes, networks, databases or Redis.
+# APP_IMAGE is the immutable image ID from the shared candidate BUILD.json.
+name: xy2api-staging-soak
+
+x-common: &common
+  restart: unless-stopped
+  oom_score_adj: 500
+  networks: [soak]
+  logging:
+    driver: json-file
+    options: { max-size: "100m", max-file: "10" }
+
+services:
+  postgres:
+    <<: *common
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: xy2api
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: xy2api
+    volumes: [pgdata:/var/lib/postgresql]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xy2api -d xy2api"]
+      interval: 5s
+      retries: 20
+    deploy:
+      resources:
+        limits: { cpus: "0.50", memory: 768M }
+  redis:
+    <<: *common
+    image: redis:8-alpine
+    command: [redis-server, --save, "", --appendonly, "no", --maxmemory, 128mb]
+    deploy:
+      resources:
+        limits: { cpus: "0.15", memory: 192M }
+  app:
+    <<: *common
+    image: ${APP_IMAGE:?required}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+    ports: ["127.0.0.1:18310:8080"]
+    volumes: [appdata:/app/data]
+    environment:
+      AUTO_SETUP: "true"
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: "8080"
+      SERVER_MODE: release
+      SERVER_TRUSTED_PROXIES: 172.31.211.0/24
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_USER: xy2api
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_DBNAME: xy2api
+      DATABASE_SSLMODE: disable
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?required}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?required}
+      JWT_SECRET: ${JWT_SECRET:?required}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:?required}
+      TZ: Asia/Shanghai
+      GODEBUG: gctrace=1
+      SECURITY_URL_ALLOWLIST_ENABLED: "false"
+      SECURITY_URL_ALLOWLIST_ALLOW_INSECURE_HTTP: "true"
+      SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS: "true"
+    deploy:
+      resources:
+        limits: { cpus: "1.50", memory: 1G }
+  fault-upstream:
+    <<: *common
+    image: ${FAULT_IMAGE:?required}
+    ports: ["127.0.0.1:18311:8080"]
+    deploy:
+      resources:
+        limits: { cpus: "0.15", memory: 128M }
+  cdn-sim-125:
+    <<: *common
+    image: ${CDN_IMAGE:?required}
+    ports: ["127.0.0.1:18313:8080"]
+    environment: { TARGET: "http://app:8080", FIRST_BYTE_TIMEOUT: 125s, IDLE_TIMEOUT: 125s, EDGE: cf }
+    deploy:
+      resources:
+        limits: { cpus: "0.10", memory: 128M }
+
+volumes:
+  pgdata:
+  appdata:
+
+networks:
+  soak:
+    ipam:
+      config: [{ subnet: 172.31.211.0/24 }]
