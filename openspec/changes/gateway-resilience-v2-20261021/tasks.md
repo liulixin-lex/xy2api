@@ -30,9 +30,9 @@
 
 ## 4. W2.1-lite 分类修正（γ）
 
-- [ ] 4.1 只有真正的容量信号归 `CAPACITY_SHED`；Grok 空闲、raw 429、“服务忙”类文案改判（`failure.decision_v2`）。
-- [ ] 4.2 运维记录与换号规则共用分类结果；typed 首输出超时单独可辨。
-- [ ] 4.3 用例：Grok 空闲不被容量排除；raw 429 与 overloaded 区分；busy 允许同主机换号；429 中的余额文案仍为 BALANCE；开关关闭回到旧分类。
+- [x] 4.1 只有真正的容量信号归 `CAPACITY_SHED`；Grok 空闲、raw 429、“服务忙”类文案改判（`failure.decision_v2`；γ `0d3e72508`）。
+- [ ] 4.2 运维记录与换号规则共用分类结果；typed 首输出超时单独可辨（γ `0d3e72508` 已完成；β 的 HTTP 记录点与 OpenAI typed 超时、α 的已输出后两处待接）。
+- [x] 4.3 用例（`0d3e72508`）：Grok 空闲不被容量排除；raw 429 与 overloaded 区分；busy 允许同主机换号；429 中的余额文案仍为 BALANCE；开关关闭回到旧分类。
 
 ## 5. W5 信号与终止出口（α、β）
 

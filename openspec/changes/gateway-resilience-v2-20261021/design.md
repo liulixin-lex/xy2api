@@ -161,12 +161,13 @@
 | 信号 | 0.4.3 | 0.4.4 |
 |---|---|---|
 | `server_is_overloaded`、`slow_down`、529、结构化 overloaded、503 加 overloaded 文案（保留 0.4.3 的 CDN 错误页例外） | `CAPACITY_SHED` | 不变 |
-| Grok 流空闲（`grok_stream_idle.go`） | `CAPACITY_SHED` | `TRANSIENT` 或 `STALL`【待契约】：允许换号，不消耗容量的跨主机额度，不触发整主机排除 |
+| Grok 流空闲（`grok_stream_idle.go`） | `CAPACITY_SHED` | `TRANSIENT`：允许换号，不消耗容量的跨主机额度，不触发整主机排除 |
 | raw Chat 与 Grok 的可重试 429 | `CAPACITY_SHED` | `RATE_LIMIT`；余额、reset、内容拒绝等更强的结构化证据优先 |
-| “The service is busy”、“Too many pending requests”、“Concurrency limit exceeded for account” | `CAPACITY_SHED` | 429 → `RATE_LIMIT`，5xx → `TRANSIENT`；可以换到任何主机 |
+| “The service is busy”、“Too many pending requests”、“Concurrency limit exceeded for account” | `CAPACITY_SHED` | 5xx → `TRANSIENT`，429 按 raw 429 → `RATE_LIMIT`；可以换到任何主机，含同一主机 |
 | typed 首输出超时 | `TRANSIENT` | 运维记录仍为 `TRANSIENT`（兼容）；Kind 已是 `first_output_timeout`，Detail 在 `timeout_ms` 旁加 `timeout_seconds`（实际生效的截止，不是配置值），Reason 为 `first_output_timeout`；OpenAI（β）与 Anthropic 首事件守卫（γ）都这样记录。handler 的 `FIRST_OUTPUT_TIMEOUT` 不变；不加列、不加迁移 |
 
-- 运维记录的 `resilience_category` 与 handler 的换号规则用同一个分类结果，不再分叉。
+- 运维记录的 `resilience_category` 与 handler 的换号规则用同一个分类结果，不再分叉。HTTP 错误的运维记录在构造时用 `opsHTTPResilienceCategory(status, headers, body, message)` 直接填分类（总开关关闭时为空），保留只靠响应头 reset 判定的证据；流内事件仍从结构化正文推导。
+- `RequestScopedTransient` 只在 `decision_v2` 开启时不再单独推出 `CAPACITY_SHED`；关闭时与 0.4.3 相同。实现提交 `0d3e72508`。
 - D18 不变：容量降载仍是同号先试一次、只跨主机换一次。
 - `RATE_LIMIT` 计入会话失败，改绑可能增多；开关关闭即回到旧分类。
 

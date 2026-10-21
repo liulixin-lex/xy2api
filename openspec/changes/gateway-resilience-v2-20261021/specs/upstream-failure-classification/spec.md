@@ -8,7 +8,7 @@ With `failure.decision_v2` on, a failure MUST be classified `CAPACITY_SHED` only
 
 #### Scenario: Grok idle is not capacity
 - **WHEN** a Grok stream goes idle before output on account A and another OAuth account B on the same host can serve
-- **THEN** the failure is classified as transient or stall, the request may switch to B, and A's host is not excluded as for capacity.
+- **THEN** the failure is classified `TRANSIENT`, the request may switch to B, and A's host is not excluded as for capacity.
 
 #### Scenario: Raw 429 is rate limit
 - **WHEN** a raw Chat or Grok upstream returns a retryable 429 without balance or reset evidence
