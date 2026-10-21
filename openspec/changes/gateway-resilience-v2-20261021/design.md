@@ -25,7 +25,7 @@
 | W2.1-lite 分类修正 | `failure.decision_v2`（开） | 总开关 | 旧分类，含 `RequestScopedTransient` → `CAPACITY_SHED`；分类输入的证据补全保留（§9） |
 | W5.1 三个专用耗尽出口接入重试提示与回合封顶 | 现有 `errors.enabled` | 总开关 | 基线行为 |
 | W5.2 排队 ping 后写协议终止帧 | 无 | — | 不受开关控制（§9） |
-| W5.3 `response.failed` 有条件带 retry-after | `errors.failed_frame_retry_after`（开） | 总开关与 `errors.enabled` | 不带 `error.headers`，正文沿用旧 design §7.6 |
+| W5.3 `response.failed` 有条件带 retry-after | `errors.failed_frame_retry_after`（开） | 总开关与 `errors.enabled` | 不带 `error.headers`，正文沿用旧 design §7.6；例外：用户余额终态与内容拒绝仍删除 `Retry-After` 与重试尾句（由 `errors.enabled` 控制，与基线略有差异，审查 P2-16，按 PM 决定只登记） |
 | W5.4 Anthropic 自身失败用 `api_error` | 现有 `errors.enabled` | 总开关 | 基线类型 |
 | W5.5 Codex 无号 503 的 Retry-After 上限 | `errors.codex_retry_after_cap_seconds`（10；0–30；0 表示关闭） | 总开关与 `errors.enabled` | 2–30 秒 |
 | W6-lite 仅流式学习与过滤 | `capability.stream_only_learning`（开）；有效期 `capability.learn_ttl_seconds`（21600；600–86400） | 总开关 | 不学习、不过滤 |
@@ -212,7 +212,7 @@
   - 选号时全部候选都因能力被过滤（`service.IsCapabilityOnlySelectionError`）；
   - 本请求的失败尝试全部是“只接受流式”的哨兵、没有其他原因（`service.IsCapabilityOnlyExhaustion`；能力尝试由 `resilience.NoteCapabilityAttempt` 记录、`CapabilityOnlyAttempts` 读取，handler 共用的 `resilienceAttemptFailed` 记录其他失败原因，不碰健康与会话状态，也不借用“本请求已失败账号”）。
 
-  应答为 503（Anthropic 协议为 `api_error`），原因码 `capability_stream_only`，消息 `No available account in this group supports non-streaming requests; retry with "stream": true`（常量 `service.CapabilityOnlyMessage`），不带 `Retry-After`、不加重试尾句，写 `x-should-retry: false`，并把请求的 `RetryAdvice` 置为 `Suppress`（`Source` 为 `capability_stream_only`）：这些账号恢复前重试同样的非流式请求没有意义。混有其他失败原因时保留原来的无号或耗尽提示。不再把上游的 400 归咎于用户。共用的耗尽出口 `resilienceCapacityExhausted` 与 legacy、高级调度的无号构造已接入（γ `f61b7d497`）；OpenAI 的 Responses 与 Chat 无号入口把带类型的选号错误传入分类，先于通用 advisor 与回合封顶识别；OpenAI 专用的三种协议耗尽出口在透传规则之前同样处理（α `6322aa374`）。
+  应答为 503（Anthropic 协议为 `api_error`），原因码 `capability_stream_only`，消息 `No available account in this group supports non-streaming requests; retry with "stream": true`（常量 `service.CapabilityOnlyMessage`），不带 `Retry-After`、不加重试尾句、不计失败回合，写 `x-should-retry: false`，并把请求的 `RetryAdvice` 置为 `Suppress`（`Source` 为 `capability_stream_only`）：这些账号恢复前重试同样的非流式请求没有意义。混有其他失败原因时保留原来的无号或耗尽提示。不再把上游的 400 归咎于用户。共用的耗尽出口 `resilienceCapacityExhausted` 与 legacy、高级调度的无号构造已接入（γ `f61b7d497`）；OpenAI 的 Responses 与 Chat 无号入口把带类型的选号错误传入分类，先于通用 advisor 与回合封顶识别；OpenAI 专用的三种协议耗尽出口在透传规则之前同样处理（α `6322aa374`）。
 - 请求标记里另存本请求的中性排除集合（不借用“本请求已失败账号”），用于最终无号的原因与重试建议的候选排除：被能力挡掉的账号不会被建议成健康备选。
 - 负缓存的键按协议与流模式隔离，能力阻断也不计入全组的快速失败：同一分组的流式请求不会因为非流式请求被挡而拿到缓存的 503。
 - 份额调度：份额 Explain 与候选原因把 `capability_stream_only` 和 `capability_mismatch` 都映射为 `sharesched.ReasonCapabilityMismatch`（`share_scheduling_openai.go`，α）。份额分组统计排除原因时，被能力学习挡掉的账号仍记为 `capability_stream_only`，全部候选都因此被排除时（`capabilityOnly()`）同样走上面的专用应答，混合原因不误标（γ `f61b7d497` 提供 `stats.capabilityOnly()` 与 `noAvailableOpenAISelectionError` 的可选第 4 参数，α 在两处份额无号构造接入，只有整个候选池都因能力被排除时才打上类型标记，混合的模型失败仍是普通错误；α `6322aa374`）。
