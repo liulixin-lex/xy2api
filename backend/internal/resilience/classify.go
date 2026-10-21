@@ -428,14 +428,15 @@ func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result 
 	if _, ok := rateLimitCodes[typ]; ok {
 		rateLimited = true
 	}
-	rateText := strings.Contains(text, "rate limit") || strings.Contains(text, "too many requests") ||
-		strings.Contains(text, "service is busy") || strings.Contains(text, "server is busy") || strings.Contains(text, "系统繁忙")
+	rateText := strings.Contains(text, "rate limit") || strings.Contains(text, "too many requests")
+	busyText := strings.Contains(text, "service is busy") || strings.Contains(text, "server is busy") || strings.Contains(text, "系统繁忙")
 	if decisionV2 {
-		// Busy/concurrency wording on 5xx describes a transient service failure.
-		// A structured rate-limit code above remains stronger evidence.
-		rateText = status < 500 && (rateText || strings.Contains(text, "too many pending requests") ||
+		// Only busy/pending/concurrency wording on 5xx becomes transient.
+		// Explicit rate-limit wording retains its reset evidence at every status.
+		busyText = status < 500 && (busyText || strings.Contains(text, "too many pending requests") ||
 			strings.Contains(text, "concurrency limit exceeded"))
 	}
+	rateText = rateText || busyText
 	if !rateLimited && rateText {
 		rateLimited = true
 	}

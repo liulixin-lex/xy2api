@@ -456,3 +456,23 @@ func TestEdgeErrorPagesAreTransientNotCapacity(t *testing.T) {
 		require.Equal(t, CategoryCapacityShed, Classify(tc.in, nil).Category, tc.name)
 	}
 }
+
+func TestDecisionV2PreservesExplicitRateLimitTextOn5xx(t *testing.T) {
+	cfg := Defaults()
+	for _, message := range []string{"Rate limit exceeded", "Too many requests"} {
+		for _, status := range []int{400, 429, 500, 502, 503} {
+			outcome := Outcome{StatusCode: status, Message: message}
+			require.Equal(t, CategoryRateLimit, ClassifyWithSettings(outcome, &cfg).Category, "%d %s", status, message)
+			outcome.Headers = http.Header{"Retry-After": []string{"600"}}
+			result := ClassifyWithSettings(outcome, &cfg)
+			require.Equal(t, CategoryRateLimitReset, result.Category, "%d %s", status, message)
+			require.Equal(t, 600*time.Second, result.RetryAfter)
+		}
+	}
+	for _, message := range []string{"The service is busy", "Too many pending requests", "Concurrency limit exceeded for account"} {
+		require.Equal(t, CategoryRateLimit, ClassifyWithSettings(Outcome{StatusCode: 429, Message: message}, &cfg).Category)
+		require.Equal(t, CategoryTransient, ClassifyWithSettings(Outcome{StatusCode: 502, Message: message}, &cfg).Category)
+	}
+	cfg.Failure.DecisionV2 = false
+	require.Equal(t, CategoryRateLimit, ClassifyWithSettings(Outcome{StatusCode: 502, Message: "The service is busy"}, &cfg).Category)
+}
