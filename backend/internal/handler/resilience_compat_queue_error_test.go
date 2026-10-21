@@ -5,8 +5,10 @@ package handler
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -32,12 +34,14 @@ func TestCompatibleQueueErrorsEndInInboundProtocol(t *testing.T) {
 							c, rec = trackedResponsesContext(t)
 							c.Request.URL.Path = endpoint
 						}
-						c.Writer.Header().Set("Content-Type", "text/event-stream")
-						n, err := c.Writer.WriteString(":\n\n")
+						cache := &helperConcurrencyCacheStub{accountSeq: []bool{false, true}}
+						h := &GatewayHandler{concurrencyHelper: NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatClaude, time.Millisecond)}
+						started := false
+						release, err := h.concurrencyHelper.waitForSlotWithPingTimeout(c, "account", 1, 1, time.Second, true, &started, true)
 						require.NoError(t, err)
-						recordGatewayStreamHeartbeat(c, n)
-						c.Writer.Flush()
-						h := &GatewayHandler{}
+						defer release()
+						require.True(t, started)
+						require.Empty(t, parseSSEEvents(rec.Body.String()), "queue pings must not be protocol data events")
 						if endpoint == EndpointResponses {
 							h.responsesErrorResponse(c, failure.status, failure.kind, "queue failure")
 							failed := requireCreatedThenFailed(t, rec.Body.String())
