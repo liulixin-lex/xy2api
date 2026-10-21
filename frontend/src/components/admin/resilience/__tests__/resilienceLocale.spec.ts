@@ -79,5 +79,11 @@ describe('gateway resilience 0.4.4 locale keys', () => {
       expect(text).toContain(caveat)
     }
   )
+
+  // α P2-11: failures that are not retryable (model not found, input or auth
+  // errors, billing service errors) never carry retry-after either.
+  it.each([['zh', zh, '不可重试'], ['en', en, 'not retryable']])('%s names non-retryable failures in the failed-frame hint', (_, messages, word) => {
+    expect(lookup(messages, 'admin.resilience.settings.switches.failedFrameRetryAfterHint')).toContain(word)
+  })
 })
 

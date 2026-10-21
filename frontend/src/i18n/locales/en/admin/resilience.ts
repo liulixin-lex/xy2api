@@ -62,7 +62,7 @@ export default {
         strictTerminal: 'Strict termination',
         strictTerminalHint: 'In Chat passthrough an upstream error followed by [DONE] counts as a failure, not a normal end. Off restores the 0.4.3 behaviour.',
         failedFrameRetryAfter: 'Retry time on response.failed',
-        failedFrameRetryAfterHint: 'A response.failed made by the gateway carries a retry-after when it helps: none or 1 s with a healthy alternative; 2–10 s when no account is healthy and the recovery time is known; never after a turn cap, low balance or a content refusal. Needs "Error semantics and storm protection" on; off never adds it.'
+        failedFrameRetryAfterHint: 'A response.failed made by the gateway carries a retry-after when it helps: none or 1 s with a healthy alternative; 2–10 s when no account is healthy and the recovery time is known; never after a turn cap, low balance, a content refusal or a failure that is not retryable (unknown model, request or auth errors). Needs "Error semantics and storm protection" on; off never adds it.'
       },
       advanced: 'Advanced (full JSON)',
       advancedHint: 'Contains every setting; the server validates it on save and rejects invalid documents.',

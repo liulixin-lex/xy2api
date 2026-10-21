@@ -62,7 +62,7 @@ export default {
         strictTerminal: '明确终止',
         strictTerminalHint: 'Chat 透传中上游发出 error 后紧跟 [DONE] 时按失败处理，不再当作正常结束。关闭后回到 0.4.3 行为。',
         failedFrameRetryAfter: 'response.failed 附带重试时间',
-        failedFrameRetryAfterHint: '网关合成的 response.failed 按情况附带 retry-after：有健康备选时不带或只带 1 秒；没有健康账号且能算出恢复时间时带 2–10 秒；回合封顶、余额不足、内容拒绝不带。需要“错误语义与防风暴”开启；关闭后不带。'
+        failedFrameRetryAfterHint: '网关合成的 response.failed 按情况附带 retry-after：有健康备选时不带或只带 1 秒；没有健康账号且能算出恢复时间时带 2–10 秒；回合封顶、余额不足、内容拒绝，以及模型不存在、请求或鉴权错误等不可重试的失败都不带。需要“错误语义与防风暴”开启；关闭后不带。'
       },
       advanced: '高级（完整 JSON）',
       advancedHint: '包含全部配置项；保存时由服务端校验，未通过不会生效。',
