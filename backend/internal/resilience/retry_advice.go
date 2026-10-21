@@ -28,7 +28,7 @@ type RetryAdviceProvider func(ctx context.Context) RetryAdvice
 
 const retryAdviceProviderTimeout = 100 * time.Millisecond
 
-var retryAdviceMessageSuffix = regexp.MustCompile(`(^|\.\s+)Please try again in [0-9]+s\.\s*$`)
+var retryAdviceMessageSuffix = regexp.MustCompile(`(^|[.!?。！？]\s+)Please try again in [0-9]+s\.\s*$`)
 
 func (a RetryAdvice) normalized() RetryAdvice {
 	if a.Suppress {
@@ -62,9 +62,12 @@ func (a RetryAdvice) Message(message string) string {
 		}
 		return message
 	}
-	base := strings.TrimRight(strings.TrimSpace(message), ". ")
+	base := strings.TrimSpace(message)
 	if base != "" {
-		base += ". "
+		if strings.TrimRight(base, ".!?。！？") == base {
+			base += "."
+		}
+		base += " "
 	}
 	return base + fmt.Sprintf("Please try again in %ds.", a.Seconds)
 }
