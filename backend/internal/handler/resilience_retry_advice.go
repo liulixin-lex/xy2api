@@ -2,13 +2,20 @@ package handler
 
 import (
 	"context"
+	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
+
+// Only copyFailoverRetryAfter may supply an upstream recovery hint. Legacy
+// HTTP defaults are not evidence that an account will recover.
+const ginKeyResilienceUpstreamRetryAfter = "xy_resilience_upstream_retry_after"
 
 // retryAdviceAdvisor reads only process-local candidate and penalty snapshots.
 // It must not call the legacy advisor, which can load accounts from storage.
@@ -60,7 +67,31 @@ func prepareResilienceRetryAdvice(c *gin.Context, diag any, apiKey *service.APIK
 		return
 	}
 	installResilienceRetryAdvice(c, diag, apiKey, model)
-	resilience.SetRetryAdvice(c.Request.Context(), resilience.ResolveRetryAdvice(c.Request.Context()))
+	ctx := c.Request.Context()
+	advice := resilience.ResolveRetryAdvice(ctx)
+	if !advice.Suppress && advice.Seconds <= 0 && ctx.Err() == nil {
+		if seconds := upstreamRecoverySeconds(c); seconds > 0 {
+			advice = resilience.RetryAdvice{Seconds: seconds, Source: "recovery"}
+		}
+	}
+	resilience.SetRetryAdvice(ctx, advice)
+}
+
+func upstreamRecoverySeconds(c *gin.Context) int {
+	value := c.GetString(ginKeyResilienceUpstreamRetryAfter)
+	if value == "" || value != c.Writer.Header().Get("Retry-After") {
+		return 0
+	}
+	var wait time.Duration
+	if seconds, err := strconv.ParseUint(value, 10, 32); err == nil {
+		wait = time.Duration(seconds) * time.Second
+	} else if at, err := http.ParseTime(value); err == nil {
+		wait = time.Until(at)
+	}
+	if wait <= 0 {
+		return 0
+	}
+	return resilience.ClampRetryAfter(wait, 2, 10)
 }
 
 func exhaustedRetryModel(c *gin.Context) string {
