@@ -37,9 +37,9 @@
 - [x] 3.8 PM 2026-10-21T15:00Z 裁定撤回 INTEG-P2-1，透传心跳的响应头保持 0.4.4（`c5ccb7e14` 回退，`0c01bf2a5` 固定写头时机）；turn-state 溯源只在响应提交前记录（`50053a8ea`，可单独撤回）。最终 HEAD 上定向 `-race -count=3`（service 585 项、handler 93 项）0 失败、0 跳过、0 竞争，增量 lint 0 项，文档检查、scheduler-diff 与干净临时 worktree 的 audit 通过。
 - [x] 3.9 审查 `74133b338..50053a8ea`（8 个提交）：δ @ `50053a8ea` 可以并入 0.4.5 候选，没有 P0、P1；INTEG-P2-1 按 PM 裁定作为已知差异关闭，INTEG-P2-2 已修复关闭；撤回 `c5ccb7e14` 干净（REVIEW 2026-10-21T15:15Z，`review/CODE_REVIEW_045_DELTA.md`）。前提是该 HEAD 的定向 `-race` 通过；集成合并后要重跑全量门禁并补审合并结果（4.2、4.3）。
 
-## 4. 集成（α，用户决定发 0.4.5 之后）
+## 4. 集成（α，PM 2026-10-21T12:51Z 授权本地集成）
 
-- [x] 4.1 合入 ε（含 RA-1）、δ 与本文档分支（首次集成 `43be712aa` 的门禁 22/25，不计入候选，见 design §7）；手工合并 `GATEWAY_RESILIENCE.md` 第 18、133 行与 `policy.json` 的具名补丁测试；`VERSION` 与 `UPSTREAM_BASE.json` 改为 0.4.5。
+- [x] 4.1 按 RA-1 → ε → DOCS → δ 合入；手工合并 `GATEWAY_RESILIENCE.md` 的可重放前缀与严格终止说明、`policy.json` 的具名补丁测试，两边增补全部保留；`VERSION` 与 `UPSTREAM_BASE.json` 改为 0.4.5。基线既有的 `contentModerationHandlerSettingRepo` 竞争以只改测试的独立提交 `c906ba5ca` 修复，修前复现、修后 `-race -count=3` 通过。四个原版调度文件相对 main 无变化，scheduler-diff 保留既有差异登记。 已增量合入 δ 最终 `50053a8ea` 与 DOCS 最终 `2ebb17d1e`，保留 ε `930213caa`；首次候选 `43be712aa` 门禁为 22/25，不作为候选，见 design §7。
 - [x] 4.2 全量门禁：gofmt、四种 vet、golangci-lint、unit 与无 tag 测试、`ci_gate.py`（`-race`，零跳过）、`govulncheck`、前端四项与依赖审计、`tools/tests`、文档一致性、scheduler-diff、干净树 `sync.py audit`。
   - 2026-10-21T15:51Z，α 在本地集成分支 `integ/0.4.5-prep`：门禁对象是产品代码 `46239531d`，25/25 通过。最终本地候选 `b966306de` 只追加了记忆与归档提交，代码与 `46239531d` 逐字一致，并在最终 HEAD 上复验文档检查与干净树 audit；`VERSION` 与 `UPSTREAM_BASE.json` 为 0.4.5。
   - unit：第三轮原始结果 24 项通过、1 项失败，失败的是 `TestInflightEstimate_AccountMappingNoDBAndBoundedMemory` 的全局堆阈值（基线既有的偶发，见 7.4）。单独重跑 5 次全过；按 PM 指示用原命令完整重跑 unit（attempt3b）通过，以它替代该项结果，原失败保留。没有跳过用例，也没有放宽阈值。
