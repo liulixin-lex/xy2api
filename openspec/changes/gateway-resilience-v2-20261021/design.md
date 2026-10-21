@@ -141,7 +141,7 @@
 - 适用：Chat 与 Messages 入站、Responses 上游的两条转换（`openai_gateway_chat_completions.go` 的 `handleChatStreamingResponse`、`openai_gateway_messages.go` 的 `handleAnthropicStreamingResponse`），由 `PreludeStagingOn()` 控制。
 - 开场事件是网关合成的，所以在转换器状态里推迟生成 role chunk 或 `message_start`，等首个 `Content` 或终态到来时一并按序写出。暂存期只保留 ID、model 与 service tier，不做字节缓冲；空的 reasoning added 在真正的推理 delta 或 signature 到来时再重建块结构。工具调用的标识本身就是内容，到达即带着开场释放。
 - 暂存期内上游的可重试 `response.failed`、`error`、EOF、读错，在写出任何字节之前返回 `UpstreamFailoverError` 进入换号（§3.2），失败尝试的用量不混入计费；客户端只看到最终成功那次尝试的一个开场。迟到的 created 不改变已经输出的 ID。
-- 取消优先：暂存期内客户端取消就关闭上游；第一次实际写出之后回到原有的 drain 机制。
+- 取消优先：暂存期内客户端取消就关闭上游，返回取消错误，不计费、不上报账号失败、不记 Warn（审查 R1-P1-1；handler 与调度上报对取消的跳过由 α、γ 落实）；第一次实际写出正文之后取消，回到原有的 drain 机制，继续读完并按已得用量计费（审查 P0）。【待契约：β、α、γ 的修复提交】
 - 首事件守卫（`resilience_compat_stream.go` 的 `armOpenAICompatFirstEvent`）延长到首个内容或终态；中转伪保活帧仍按“存活”处理（旧 design §7.8）。
 - `clientOutputStarted` 按实际写出的字节置位：短写或部分写出之后不再重放。
 - **暂存期写注释心跳**（PM 2026-10-21T02:42Z 改判方案 U4）：按 `stream_keepalive_interval` 写 `:\n\n`，与原生 Responses 的 `stageFirstOutput` 期间（基线 `openai_gateway_response_handling.go` 约 1000–1012 行）和基线一致。方案原推荐“不提交”，依据是“原生不提交”，这个前提不成立。心跳记为心跳字节（`recordOpenAIStreamKeepaliveBytes`），不置 `clientOutputStarted`，不影响换号；心跳会提交 200，之后若耗尽，以带内终止帧收尾（旧 design §7.6）。经 CDN 的请求照旧另有 handler 的首包前保活。【待契约：β 的提交】
