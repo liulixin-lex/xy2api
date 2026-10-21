@@ -92,7 +92,7 @@ http://fault-upstream:8080/f/F06;secs=200      (account base_url)
 | F34 | Responses created → unknown `codex.response.metadata` → overloaded failure; conservative case that must prevent retry | `after` |
 | F34B | Unmarked empty `response.output_text.delta` → created → in_progress → empty message added → empty output_text part added → overloaded failure | `before` (default 0.1 s), `after` |
 | F35 | Responses endpoint returns 404; raw Chat stream emits error then `[DONE]` (nonstream returns 429) | |
-| F36 | Nonstream returns 400 `This group only accepts streaming requests`; streaming succeeds | `first` |
+| F36 | Nonstream returns 400 `This group only accepts streaming requests` with explicit `error.param: null` in the OpenAI error body; streaming succeeds | `first` |
 | F37 | HTTP 503 `server_is_overloaded` with a known `Retry-After` | `reset` (default 8 s), `delay` (use 20 s for CDN commitment) |
 | BAL | Normal while the balance of `key` is positive, F12 otherwise | `key`, `first`, `reset` (adds a relay's exhausted rate-limit headers) |
 | MIX | A random fault with probability `p` percent per fault type, otherwise normal | `p` |
@@ -112,7 +112,7 @@ Run `staging/fixtures.py` before `staging/scenarios.py`. Keep keys and evidence 
 | CV-5–CV-8 | Retry pre-output failures; only B's opening and completion reach the client. CV-5 permits at most two A attempts under D18 and checks their persisted `CAPACITY_SHED` records; CV-6 checks exactly one assistant role and the busy classification; CV-8 rejects the unmarked empty delta before created. |
 | CV-9 | Unknown metadata commits output; no B attempt follows. |
 | RAW-1 / RAW-2 | Raw Chat error + DONE retries on B; a single-account failure is recorded and has no success usage row. |
-| SO-1 | Learn Responses stream-only capability, retry on B, show the Explain exclusion, skip A on later nonstream requests, still use A for streams, clear and relearn; no account failure or cooldown. |
+| SO-1 | Learn Responses stream-only capability from F36's 400 with `error.param: null`, retry on B, show the Explain exclusion, skip A on later nonstream requests, still use A for streams, clear and relearn; no account failure or cooldown. |
 | RA-1 / RA-2 | After CDN heartbeat, an exhausted request has one created→failed pair and matching 2–10 s advice; a recovered request completes without delayed advice. |
 | ANT-3 | Anthropic no-account error is `api_error`; ANT-1 and ANT-2 retain their existing IDs. |
 | SH-1 / SH-2 | Switch to share using account priority and load factors, return to original scheduling, and verify real transient failures reduce health weight and new-session traffic share. |

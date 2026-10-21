@@ -110,6 +110,18 @@ func TestResilienceV2StreamingOnly(t *testing.T) {
 	if w.Code != 400 || !strings.Contains(w.Body.String(), "This group only accepts streaming requests") {
 		t.Fatalf("nonstream = %d %s", w.Code, w.Body.String())
 	}
+	var body struct {
+		Error map[string]any `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if param, present := body.Error["param"]; !present || param != nil {
+		t.Fatalf("expected explicit error.param null, got %s", w.Body.String())
+	}
+	if body.Error["type"] != "invalid_request_error" || body.Error["code"] != "streaming_required" {
+		t.Fatalf("unexpected streaming-only error: %#v", body.Error)
+	}
 	w = faultRequest("F36;first=0", "/v1/responses", `{"stream":true}`)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "response.completed") {
 		t.Fatalf("stream = %d %s", w.Code, w.Body.String())
