@@ -129,12 +129,13 @@
   - RA-1：handler 的上游等待记录与 provider 安装（ε `2cec5c547` 把字面量改为 `installRetryAdviceProvider(c, diag, apiKey, model, upstreamRecoverySeconds(c))`）；
   - ε：`preludeBodyClosed.Store(true)`、`if canceledAfterOutput() {`、`writeStableStreamHeaders(c)` 等字面量，`openai_raw_stream_truncation.go` 的 `resilience.ChatErrorField(root)`；具名补丁 `xy-resilience-v2-streams`、`xy-resilience-v2-handler-exits` 新增测试；
   - δ：`gateway_forward_as_responses.go`、`gateway_forward_as_chat_completions.go` 各 4 条，两个 Gateway handler 各 2 条，`openai_gateway_passthrough.go` 6 条，另有 `87f9b9356` 补登的透传计费钩子；`xy-resilience-v2-streams` 7 条、`xy-resilience-v2-handler-exits` 2 条测试绑定。
-- 各分支在干净临时 worktree 上的 `sync.py audit` 与 `scheduler-diff` 都已通过；集成后要在合并结果上重跑。
+- 各分支在干净临时 worktree 上的 `sync.py audit` 与 `scheduler-diff` 都已通过；集成后要在合并结果上重跑，并核对两边的 required_literals 都还在。
 
 ## 6. 集成说明
 
 - 顺序：ε 已包含 RA-1，合入 ε 即带上 RA-1；δ 基于 main，独立合入；最后合入本文档分支。
-- 已知冲突点：
+- 已知冲突点（审查已在临时文件上逐个文件三方合并核实）：
+  - 两个 Gateway handler（`gateway_handler_responses.go`、`gateway_handler_chat_completions.go`）RA-1 与 δ 都改过，但改动不相交，能自动合并；
   - `docs/GATEWAY_RESILIENCE.md` 第 18 行（§1“可重放前缀”）与第 133 行（§4.2 `stream.strict_terminal`）ε 与 δ 都改过，需要手工合成一行，两边的增补都保留；
   - `tools/upstream-sync/policy.json` 的同一具名补丁（`xy-resilience-v2-streams`、`xy-resilience-v2-handler-exits`）两边都新增了测试；
   - `docs/PROJECT_MEMORY.md`：RA-1 与 ε 分支基于 0.4.4 发版前的记忆，与 main 的收尾版本冲突，以 main 为准，只保留分支里属于本任务的状态。
