@@ -130,14 +130,20 @@
 
 ### 7.1 RetryAdvice（W5.3）
 
-`internal/resilience/retry_advice.go` 定义无 import 环的 `RetryAdvice`，经 request context 传递【待契约：字段与存取函数，α 冻结在 `contract/RETRY_ADVICE.md`】。
+`internal/resilience/retry_advice.go`（`fc9b62751`）定义无 import 环的 `RetryAdvice{Seconds, Source, Suppress}`，挂在请求的 `RequestState` 上，经 request context 传递：
 
-| 情况 | `response.failed` 的 retry-after |
-|---|---|
-| 本请求此刻还有健康备选（未尝试、无硬罚） | 不带，或 1 秒 |
-| 组内没有健康候选，且能算出最早恢复时间 | 2–10 秒；正文 “try again in Ns” 的 N 与之一致 |
-| 回合封顶、余额终态、内容拒绝 | 不带 |
-| 无法判断 | 保持 0.4.3 |
+- `WithRetryAdvice(ctx, advice)`：必要时挂接 RequestState 并写入；`SetRetryAdvice(ctx, advice)`：更新已有状态，已派生的子 context 立即可见；`RetryAdviceFrom(ctx)`：线程安全快照，缺省为零值。
+- `Suppress` 在同一请求内不可撤销（封顶与终态优先），写入时 `Seconds` 归零。
+- `Headers()` 只生成 `retry-after` 一项（整数秒，防御性夹到 10）；`Seconds<=0` 或 `Suppress` 时为空。合成帧的 `error.headers` 只用它，不复制上游的任意头。
+- 分组 advisor 只基于未尝试、模型兼容、无硬罚的健康候选判断；原 `NoAccountRetryAfter` 保留给 HTTP 无号提示【待契约：γ 的 advisor 方法名】。
+
+| 情况 | `Source` | `response.failed` 的 retry-after |
+|---|---|---|
+| 本请求此刻还有健康备选 | `healthy_candidate` | 1 秒 |
+| 组内没有健康候选，且能算出最早恢复时间 | `recovery` | 向上取整并夹到 2–10 秒；正文 “try again in Ns” 的 N 与之一致 |
+| 恢复时间未知 | `unknown` | 不带 |
+| 回合封顶、余额终态、内容拒绝 | `turn_cap`、`balance_terminal`、`content_rejection`（`Suppress`） | 不带，并删除原有的重试尾句 |
+| 请求上没有 advice | — | 保持 0.4.3 |
 
 - 写入位置：`error.headers.retry-after`（Codex 从这里读重试等待）。
 - 合成点：handler 侧 `handler/stream_error_event.go`（α）；service 侧 `resilience_keepalive.go`、`openai_compact_stream_bridge.go`、`openai_gateway_response_handling.go`（β）。
