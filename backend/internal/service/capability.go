@@ -123,14 +123,14 @@ func capabilityEligibilityReason(ctx context.Context, account *Account, model st
 
 // LearnStreamOnlyFailure observes a deterministic upstream 400 before any
 // side effects or client output. Learning is independent of immediate retry.
-func (s *OpenAIGatewayService) LearnStreamOnlyFailure(ctx context.Context, account *Account, protocol string, upstreamStream bool, status int, body []byte) *UpstreamFailoverError {
+func (s *OpenAIGatewayService) LearnStreamOnlyFailure(ctx context.Context, account *Account, protocol string, upstreamStream bool, status int, body []byte, outboundBodies ...[]byte) *UpstreamFailoverError {
 	cfg := resilience.Current()
 	protocol = normalizeCapabilityProtocol(protocol)
 	if s == nil || s.accountRepo == nil || account == nil || account.ID <= 0 || !capabilityAccountEligible(account) ||
-		upstreamStream || capabilityExtraKey(protocol) == "" || !cfg.StreamOnlyLearningOn() || !resilience.IsStreamOnlyFailure(status, body) {
+		upstreamStream || capabilityExtraKey(protocol) == "" || !cfg.StreamOnlyLearningOn() || !resilience.IsStreamOnlyFailure(status, body, outboundBodies...) {
 		return nil
 	}
-	if _, stream, known := resilience.CapabilityRequestFrom(ctx); known && stream {
+	if _, stream, known := resilience.CapabilityRequestFrom(ctx); !known || stream {
 		return nil
 	}
 	fingerprint := capabilityFingerprint(account)

@@ -3,12 +3,18 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
@@ -61,7 +67,7 @@ func TestCapabilityLearningLifecycleAndProtocolScope(t *testing.T) {
 	svc := &OpenAIGatewayService{accountRepo: repo}
 	before, _ := repo.GetByID(context.Background(), 1)
 	start := time.Now()
-	failure := svc.LearnStreamOnlyFailure(context.Background(), before, "responses", false, 400, []byte(`{"error":{"message":"This group only accepts streaming requests"}}`))
+	failure := svc.LearnStreamOnlyFailure(resilience.WithCapabilityRequest(context.Background(), "responses", false), before, "responses", false, 400, []byte(`{"error":{"message":"This group only accepts streaming requests"}}`))
 	require.NotNil(t, failure)
 	require.True(t, failure.IsCapabilityStreamOnly())
 	require.True(t, failure.ShouldRetryNextAccount())
@@ -116,7 +122,7 @@ func TestCapabilityLearningSwitchesAndUpstreamStreamMode(t *testing.T) {
 			a := capabilityTestAccount(1)
 			repo := &capabilityRepo{accounts: map[int64]*Account{1: a}}
 			svc := &OpenAIGatewayService{accountRepo: repo}
-			fail := svc.LearnStreamOnlyFailure(context.Background(), a, "chat", tc.stream, 400, []byte(`{"error":{"message":"stream must be true"}}`))
+			fail := svc.LearnStreamOnlyFailure(resilience.WithCapabilityRequest(context.Background(), "chat", false), a, "chat", tc.stream, 400, []byte(`{"error":{"message":"stream must be true"}}`))
 			require.Equal(t, tc.wantFailover, fail != nil)
 			require.Equal(t, tc.wantWrites, repo.writes)
 			if tc.wantWrites > 0 {
@@ -132,7 +138,7 @@ func TestCapabilitySelectionSkipsLearnedAndReportsNoAccountReason(t *testing.T) 
 	b.Priority = 1
 	repo := &capabilityRepo{accounts: map[int64]*Account{1: a, 2: b}}
 	svc := &OpenAIGatewayService{accountRepo: repo}
-	require.NotNil(t, svc.LearnStreamOnlyFailure(context.Background(), a, "responses", false, 400, []byte(`{"error":{"code":"streaming_required"}}`)))
+	require.NotNil(t, svc.LearnStreamOnlyFailure(resilience.WithCapabilityRequest(context.Background(), "responses", false), a, "responses", false, 400, []byte(`{"error":{"code":"streaming_required"}}`)))
 	ctx := resilience.WithCapabilityRequest(context.Background(), "responses", false)
 	selected, _, stats := svc.selectBestAccount(ctx, nil, PlatformOpenAI, []Account{*a, *b}, "gpt-test", nil, false, "", false)
 	require.NotNil(t, selected)
@@ -177,4 +183,83 @@ func TestCapabilityNegativeCacheSeparatesStreamMode(t *testing.T) {
 	chat := resilience.WithCapabilityRequest(context.Background(), "chat", false)
 	require.NotEqual(t, selectionNegativeKey(nonstream, &group, "model", "openai"), selectionNegativeKey(stream, &group, "model", "openai"))
 	require.NotEqual(t, selectionNegativeKey(nonstream, &group, "model", "openai"), selectionNegativeKey(chat, &group, "model", "openai"))
+}
+
+func TestCapabilityLearningRequiresExplicitNonStreamingScope(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{"missing scope", context.Background()},
+		{"nil context", nil},
+		{"unsupported protocol", resilience.WithCapabilityRequest(context.Background(), "messages", false)},
+		{"streaming client", resilience.WithCapabilityRequest(context.Background(), "responses", true)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := capabilityTestAccount(1)
+			repo := &capabilityRepo{accounts: map[int64]*Account{1: a}}
+			svc := &OpenAIGatewayService{accountRepo: repo}
+			failure := svc.LearnStreamOnlyFailure(tc.ctx, a, "responses", false, 400, []byte(`{"error":{"code":"streaming_required"}}`))
+			require.Nil(t, failure)
+			require.Zero(t, repo.writes, "unscoped paths must not learn")
+			require.False(t, resilience.CapabilityExcluded(tc.ctx, a.ID))
+		})
+	}
+}
+
+func TestCapabilityForwardFailureSelectsAnotherAccountAndSucceeds(t *testing.T) {
+	withResilienceSettings(t, nil)
+	a, b := capabilityTestAccount(1), capabilityTestAccount(2)
+	a.Platform, b.Platform = PlatformGrok, PlatformGrok
+	b.Priority = 1
+	repo := &capabilityRepo{accounts: map[int64]*Account{1: a, 2: b}}
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		{StatusCode: 400, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"This group only accepts streaming requests"}}`))},
+		{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"resp_b","object":"response","model":"grok-4.6","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":1}}`))},
+	}}
+	svc := &OpenAIGatewayService{accountRepo: repo, httpUpstream: upstream}
+	body := []byte(`{"model":"grok-4.6","input":"hello","stream":false}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	ctx := resilience.WithCapabilityRequest(resilience.WithRequestState(context.Background(), resilience.NewRequestState()), "responses", false)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body)).WithContext(ctx)
+	c.Set("api_key", &APIKey{ID: 7})
+	selected, _, _ := svc.selectBestAccount(ctx, nil, PlatformGrok, []Account{*a, *b}, "grok-4.6", nil, false, "", false)
+	require.Equal(t, a.ID, selected.ID)
+	_, err := svc.forwardGrokResponses(ctx, c, selected, body, "grok-4.6", false, time.Now())
+	var failure *UpstreamFailoverError
+	require.ErrorAs(t, err, &failure)
+	require.True(t, failure.IsCapabilityStreamOnly())
+	require.False(t, c.Writer.Written(), "the retryable 400 must not commit output")
+	require.False(t, resilience.StateFrom(ctx).AccountFailed(a.ID))
+	require.Nil(t, a.TempUnschedulableUntil)
+	require.Nil(t, a.RateLimitResetAt)
+	require.Len(t, a.CapabilityLearned(time.Now()), 1)
+	selected, _, _ = svc.selectBestAccount(ctx, nil, PlatformGrok, []Account{*a, *b}, "grok-4.6", map[int64]struct{}{a.ID: {}}, false, "", false)
+	require.Equal(t, b.ID, selected.ID)
+	result, err := svc.forwardGrokResponses(ctx, c, selected, body, "grok-4.6", false, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, "resp_b", result.ResponseID)
+	require.Equal(t, 200, recorder.Code)
+	require.Len(t, upstream.requests, 2)
+	next := resilience.WithCapabilityRequest(context.Background(), "responses", false)
+	selected, _, _ = svc.selectBestAccount(next, nil, PlatformGrok, []Account{*a, *b}, "grok-4.6", nil, false, "", false)
+	require.Equal(t, b.ID, selected.ID)
+	stream := resilience.WithCapabilityRequest(context.Background(), "responses", true)
+	selected, _, _ = svc.selectBestAccount(stream, nil, PlatformGrok, []Account{*a, *b}, "grok-4.6", nil, false, "", false)
+	require.Equal(t, a.ID, selected.ID)
+}
+
+func TestCapabilityLearningRejectsEchoedOutboundPhrase(t *testing.T) {
+	withResilienceSettings(t, nil)
+	a := capabilityTestAccount(1)
+	repo := &capabilityRepo{accounts: map[int64]*Account{1: a}}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	ctx := resilience.WithCapabilityRequest(context.Background(), "responses", false)
+	failure := svc.LearnStreamOnlyFailure(ctx, a, "responses", false, 400,
+		[]byte(`{"error":{"message":"Invalid value: 'only accepts streaming requests'"}}`),
+		[]byte(`{"stream":false,"input":"ONLY ACCEPTS STREAMING REQUESTS"}`))
+	require.Nil(t, failure)
+	require.Zero(t, repo.writes)
 }
