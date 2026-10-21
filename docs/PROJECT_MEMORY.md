@@ -9,12 +9,12 @@
 ### XY2API 0.4.5 O3 原生心跳保留 turn-state（2026-10-21；本地实现）
 
 - PM 指令 8 将 O3 纳入 0.4.5：原生 Responses 首次心跳只额外提交本次暂存的 `x-codex-turn-state` 并同步记账号溯源；不新增开关，其他上游头仍暂存。后续尝试不覆盖已提交的头或溯源。
-- β 分支 `feat/native-heartbeat-turn-state-045` 的实现与定向验证完成：49 个顶层用例各三轮竞态检查、两种 vet、增量 lint 均通过；待 γ 独立审查。α 合入 O3 和 DOCS `c8e3b9669` 后须跑新候选全量门禁。PM 已将 `b966306de` 改为预跑基线，不沿用为最终候选。
+- β 产品提交 `93fd9bdf2` 已经 REVIEW 独立审查，结论可以并入、无 P0/P1/P2（仓库外 `review/CODE_REVIEW_045_O3.md`）；49 个顶层用例各三轮竞态、两种 vet、增量 lint 均通过。α 已合入 O3 与 DOCS `88ad8c43c`，新候选门禁及唯一 unit 阻塞见下节；`b966306de` 仅为预跑基线。
 
 ### XY2API 0.4.5 本地集成候选（2026-10-21；未推送）
 
-- PM 17:42Z 放行 O3 `93fd9bdf2`；已与 DOCS 最终 `88ad8c43c` 合入本地集成分支，正在独立缓存、新 attempt 上从头跑 25 项门禁。旧候选 `b966306de` 的通过记录与 QA 71/71 仅作为预跑证据，不能替代 O3 新候选验证。
-- 完成后交 PM 安排 REVIEW 补审集成增量和 QA 完整验证。详细状态见“进行中的工作” `20261021-integ-0.4.5-prep`。
+- O3 `93fd9bdf2` 与 DOCS `88ad8c43c` 已合入，门禁对象 `4bb8026db` 的新 attempt4 已跑完：24/25 通过；unit **阻塞：只有基线堆阈值用例在完整套件中失败，处理中**。单例五次通过但完整复跑仍失败，未跳过或放宽阈值，原证据完整保留。
+- 按 PM 18:00Z，纯记忆修正后的最终 HEAD 复验 docs/audit 后先交 QA 构建，门禁对象与最终 SHA 只差记忆文档；随后在 main 做完整 unit 对照。ε 只改测试的修复等待 PM 另行裁定。详细状态见“进行中的工作” `20261021-integ-0.4.5-prep`。
 
 ### XY2API 0.4.4 正式发布完成（2026-10-21；生产未部署）
 
@@ -133,14 +133,15 @@
 - 范围：原生心跳分支、定向测试、policy 与现行网关说明；OpenSpec design/spec/tasks 和发布草稿由 DOCS 同步。只本地提交，不推送、不改 Git 配置。
 - 实现与验证：先确认缺陷红测，再只改原生心跳分支；首个语义输出的提交闭包与基线逐字一致。49 个顶层 `-tags=unit -p 2 -race -count=3` 每项三轮，147 顶层结果、含子用例 243 项全过，零失败、跳过与竞争；覆盖 §1.6 的九项清单（不加开关，第 6 项不适用，另测总开关关闭仍生效）。policy 增 1 条钩子、6 条测试，网关说明 §6 同步。
 - 静态检查：无 tag 与 unit vet 通过；新增夹具的 6 处 nil Context 改为 `context.Background()` 后，最终 49 项三轮竞态与不限同类条数的增量 lint 重新通过（0 issues）。生产实现未再改；首轮 lint 失败与修前绿测均保留。
-- 下一步：交 γ 对固定提交做只读独立审查；α 同时合入 DOCS `c8e3b9669` 并跑新候选全量门禁，QA 在新候选重做完整验证。最终 HEAD、提交前复核与提交后干净树 audit 结果放在仓库外冲刺目录的 `briefs/PROGRESS_B.md`、`evidence/o3-045/REPORT.md`；本条不代表集成与候选验证完成。
+- 审查与交接：O3 `93fd9bdf2` 已由 REVIEW 审查放行，无 P0/P1/P2；此前写“交 γ”已按 PM 17:38Z 更正。α 已合入 O3 与 DOCS `88ad8c43c`，门禁结果见集成条目；QA 按 PM 18:00Z 接收最终纯记忆提交后的 SHA 做完整验证。β 原始证据保留于仓库外 `briefs/PROGRESS_B.md`、`evidence/o3-045/REPORT.md`。
 
-### 20261021-integ-0.4.5-prep — O3 增量已合，重新执行完整门禁
+### 20261021-integ-0.4.5-prep — O3 门禁完成，unit 阻塞，按 PM 放行交 QA
 
-- PM 17:42Z 放行 O3：从前一候选 `b966306de` 快进合入 `93fd9bdf2`，再合 DOCS 最终 `88ad8c43c`（含 O3 审查结论）；tasks.md 按指令整份采用 DOCS 版本，其他文件自动合并，保留双方记忆。仅本地操作，不推送、不开 PR。
-- 前一轮完整 25 项门禁通过（产品代码 `46239531d`；unit 按 PM 15:40Z 用 attempt3b 完整重跑通过），原失败和五次 HeapAlloc 差值均保留；前一轮独立缓存已删除。该结果只属于旧候选，不能替代 O3 新候选验证；旧候选 QA 仅预跑 71/71，不作升级或浸泡对象。
-- 本轮：独立 GOCACHE、新 attempt，从头运行全部 25 项门禁；堆阈值用例若再次失败，仍按 PM 15:40Z 单独五次再完整 unit 的规则处理，不跳过、不放宽阈值。结束后删除独立缓存，记录最终本地 SHA 与门禁对象。
-- 下一步：完整门禁通过后交 PM，由 REVIEW 补审集成增量、QA 对新 SHA 做完整验证。推送、PR、候选验证与发布按后续授权执行；证据继续记录仓库外冲刺目录 `evidence/integ-045/` 与 `briefs/PROGRESS_A.md`。
+- 已合入：O3 `93fd9bdf2`（REVIEW 已审，无 P0/P1/P2）与 DOCS 最终 `88ad8c43c`，门禁对象 `4bb8026dba96af541274d8d67c89e3dceabab3e7`。tasks.md 整份采用 DOCS，O3 产品代码/测试/policy/网关说明与 owner 交付逐字一致，ε 三个相关文件不变；309 条 required_literals、112 条 custom_patch_tests 无重复。
+- 新 attempt4 从头执行全部 25 项：24 PASS，unit FAIL。**阻塞：只有基线堆阈值用例在完整套件中失败，处理中**。该测试与 main 逐字一致；attempt4 与 attempt4b 各 25367 pass、39 条件 skip、1 fail，HeapAlloc 差值分别 9100136、8414632 字节（阈值 8388608）。单例五次全过：5377112、2776952、992936、2220536、2822800 字节；单例只用仓库外日志 overlay，完整 unit 不用 overlay。未改测试/断言/阈值，原失败保留，不把单例通过当成完整门禁通过。
+- 其余 24 项通过：gofmt、四 vet、lint 0 issues；无 tag 14519 pass/28 条件 skip；ci_gate 390 顶层、额外 service 184 顶层/488 项与 handler 94/224 项均在 `-race` 下全部实际执行，零失败/跳过/竞争；govulncheck 调用路径 0 漏洞；前端 413 文件/3182 用例及 lint/typecheck/build、依赖审计 high/critical 0、tools 41、audit 校验器 13、docs、scheduler-diff、embed 构建及干净树 audit 均通过。
+- PM 18:00Z 指令：本次只改记忆，最终 HEAD 复验 docs 与干净树 audit 后立即交 QA 构建，不等 unit 修复。门禁对象 `4bb8026db` 与最终 SHA 只差 `docs/PROJECT_MEMORY.md`；最终 SHA 写入仓库外 `PROGRESS_A` 和 `PATCH_REQUESTS`。REVIEW 补审集成增量、QA 对该 SHA 做完整验证。
+- 下一步：交 QA 后在 main `a1cf8f104` 用同一完整 unit 命令对照 1–2 次，结果交 PM；ε 的只改测试修复是否合入等待 PM，不能自行跳过门禁。若获准合入，重跑完整 unit 和 ci_gate，并如实标明与候选的差异。独立 GOCACHE 在基线对照结束后删除；不推送、不开 PR、不发布、不部署。证据在仓库外 `evidence/integ-045/attempt4-4bb8026db/` 与 `attempt4b-4bb8026db/`。
 
 ### 20261021-soak-6h5-0.4.4 — 生产部署前的 6.5 小时浸泡（2026-10-21T10:50Z 登记）
 
@@ -1146,4 +1147,12 @@ pnpm --dir frontend run build
 - 修改文件：`openai_gateway_response_handling.go`、新增 `openai_native_heartbeat_turn_state_test.go`、`tools/upstream-sync/policy.json`、`docs/GATEWAY_RESILIENCE.md` 与本记忆。policy 新增 1 条 required_literal 与 6 条既有补丁测试绑定，无重复；网关说明 §6 登记无开关的受控例外。OpenSpec design/spec/tasks 由 DOCS 在 `c8e3b9669` 同步，按 16:40Z 分工未在本分支修改。
 - 验证：有效红测 6 个顶层中 3 个缺陷用例因首心跳缺少 turn-state 失败、3 个边界回归通过。修后最终 49 个顶层逐项执行 `-tags=unit -p 2 -race -count=3`，147 个顶层结果、含子用例 243 项全部通过，零失败、跳过与竞争；覆盖方案 §1.6 九项清单，第 6 项因不加开关不适用，另测总开关关闭仍生效。service 的无 tag/unit vet 与增量 lint（0 issues）通过。编译/夹具及首轮 lint 的失败记录保留；提交前复核与提交后干净树审计的最终结果在仓库外 `evidence/o3-045/`。
 - 卡点/风险：无实现阻塞。心跳已提交后仍不能补发 request-id 与用量头，是 O3 保留的限制；定向验证不替代新集成候选的全量门禁与 QA。
-- 下一步：在仓库外交接中记录最终完整 HEAD 并通知 γ 只读独立审查；α 合入 O3 与 DOCS 后跑全量门禁、安排 QA 新候选验证。`b966306de` 只作预跑。
+- 下一步：在仓库外交接中记录最终完整 HEAD 并通知 γ 只读独立审查；α 合入 O3 与 DOCS 后跑全量门禁、安排 QA 新候选验证。`b966306de` 只作预跑。 **更正（PM 17:38Z）：独立审查实际由 REVIEW 执行，O3 `93fd9bdf2` 已获放行，无 P0/P1/P2；本条原交接对象不再有效，原始操作记录保留。**
+
+### 2026-10-21T18:05:12+00:00 — `20261021-integ-0.4.5-prep` — O3 新候选门禁与纯记忆交接
+
+- 请求/目标：PM 17:42Z 放行 O3 与 DOCS 最终交付，要求新 attempt/独立缓存从头跑 25 项；17:38Z 要求更正三处 O3 审查归属；18:00Z 要求剩余门禁完成后先交最终 SHA 给 QA，unit 阻塞单独处理。
+- 开始状态：干净本地 `b966306de`；快进 O3 `93fd9bdf2`，常规合入 DOCS `88ad8c43c`，仅 tasks 冲突按指令取 DOCS 整份，得到 `4bb8026db`。O3 代码/测试/policy/网关说明未改，ε EOF 防护保留。
+- 验证：新 attempt4 全 25 项完成，24 PASS、unit FAIL；同一基线全局 HeapAlloc 用例两次完整运行分别 9100136、8414632 字节超出 8388608，五次单例均通过，测试文件与 main 未变。其余静态、无 tag、竞态、安全、前端、工具、文档、scheduler、embed、干净树 audit 均过，完整数字见进行中条目。失败记录不覆盖，不能声称全绿。
+- 本次修改：只改 `docs/PROJECT_MEMORY.md`，更正 O3 已由 REVIEW 审查的事实、更新集成状态，历史交接对象以追加更正标明。门禁对象 `4bb8026db` 与最终 SHA 只差记忆文档；最终提交上复验 docs/干净 audit，结果及完整 SHA 写仓库外交接。
+- 卡点/下一步：按 PM 授权先把最终 SHA 交 QA，unit 标记“阻塞：只有基线堆阈值用例在完整套件中失败，处理中”；之后 main `a1cf8f104` 同命令完整 unit 对照，ε 测试修复等 PM 裁定。本地缓存与临时基线树在对照结束后清理，未推送、未开 PR、未发布或部署。
