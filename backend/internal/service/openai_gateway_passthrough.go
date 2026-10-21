@@ -394,6 +394,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			probeBody := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(probeBody))
+			if failure := s.learnOpenAIStreamOnlyHTTPFailure(ctx, c, account, upstreamReq, resp, probeBody, resilience.CapabilityProtocolResponses); failure != nil {
+				return nil, failure
+			}
 			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, probeBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize passthrough rejected Responses field retry body: %w", retryErr)
 			} else if changed && rejectedFieldRetryState.Allow(retryBody) {

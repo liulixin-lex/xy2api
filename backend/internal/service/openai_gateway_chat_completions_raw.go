@@ -213,6 +213,9 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	// 7. Handle error response with failover
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
+		if failure := s.learnOpenAIStreamOnlyHTTPFailure(ctx, c, account, resp.Request, resp, respBody, resilience.CapabilityProtocolChat); failure != nil {
+			return nil, failure
+		}
 		if account.Platform == PlatformGrok {
 			kind := "http_error"
 			if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
