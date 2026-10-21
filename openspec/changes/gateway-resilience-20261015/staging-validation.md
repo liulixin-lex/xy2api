@@ -126,7 +126,7 @@
 - **CV-8**：`response.created` 之前先到一个无标记的空 delta，随后空的 added 结构与 overloaded（F34B，空内容是合成条件，生产探测没有采集 delta 正文）：空 delta 被丢弃，换号完成，A 的事件不泄露给客户端。
 - **CV-9**：created 之后到达未知的 `codex.response.metadata` 再失败（F34）：元数据算输出，不换号。
 - **RAW-1、RAW-2**：账号不支持 `/responses`，raw Chat 发 `error` 后跟 `[DONE]`（F35）：有备选时在输出前换号完成；单号组记为失败，不当成功、不写用量。
-- **SO-1**：非流式 Responses 请求遇到 400 “only accepts streaming requests”（F36）：本请求换号完成；A 被学为仅流式（`capability_learned`），下一个非流式请求不选 A，流式请求照常可选；清除接口生效后可以重新学习；A 不计账号失败。
+- **SO-1**：非流式 Responses 请求遇到 400 “only accepts streaming requests”（F36，错误体带 `"param": null`，与常见的 OpenAI 兼容错误一致）：本请求换号完成；A 被学为仅流式（`capability_learned`），下一个非流式请求不选 A，流式请求照常可选；清除接口生效后可以重新学习；A 不计账号失败。
 - **RA-1、RA-2**：经 CDN、心跳已提交后：全组过载且能算出恢复时间（F37，延迟的 HTTP 503 带 `Retry-After`）时，`response.failed` 带 2–10 秒的 `error.headers.retry-after`，正文秒数一致；B 健康时请求正常完成，不带延迟提示。
 - **ANT-3**：Messages 入口无号时错误 `type` 为 `api_error`（ANT-1 是已有的正常原生流场景，不占这个编号）。
 - **Q-1**：用户并发 1，第二个流式请求在用户队列中收到 ping 后余额归零：Gateway 入站的 Responses 收到 `response.created` 后跟 `response.failed`，Chat 收到 `error` 后跟 `[DONE]`，不是裸 JSON；Messages 本来就是带名字的 `event: error`。另断言 Responses 与 Chat 在开场之前没有任何 data 帧（不能有 typed ping 或 `[DONE]`，排队心跳只能是注释行），Messages 仍允许 typed `ping`。
