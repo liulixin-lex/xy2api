@@ -86,7 +86,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 合成 `response.failed` 的重试时间（0.4.4） | `errors.failed_frame_retry_after` 开启时写在 `error.headers.retry-after`（Codex 从这里读）：本请求还有健康账号时为 1 秒；组内没有健康账号、能算出最早恢复时间时为 2–10 秒，正文 “try again in Ns” 的 N 相同；恢复时间未知时不带（0.4.3 缺省提示 30 秒）；回合封顶、用户自身余额不足、内容拒绝不带，并去掉正文里的重试句（上游账号余额不足会换号，不算）；配置拒绝与鉴权类错误不给重试建议。HTTP 头尚未提交时同步改写 `Retry-After`。关闭时不带 `error.headers`，正文同 0.4.3 |
 | 排队等待时已发出 ping，之后遇到计费等错误（0.4.4） | 按入站协议写终止帧：Responses 为 `response.created` 后跟 `response.failed`，Chat 为 `error` 后跟 `[DONE]`；不再写裸 JSON（不受开关控制） |
 | 上游开场后、正文前失败（0.4.4） | 可重试的失败（过载、服务忙、断流、读错）换号，客户端只看到成功那次尝试的开场：Responses 只有一个 `response.created`（新账号的 id），Chat 只有一个 role 分块，Messages 只有一个 `message_start`。兼容转换推迟开场期间，直连请求收不到任何字节（与原生 Responses 一致），经 CDN 的请求照常有心跳。`response.incomplete`、内容拒绝、只有 usage 的空回答照常返回，不重放 |
-| 非流式请求被上游以“只接受流式”拒绝（0.4.4） | 例如 “This group only accepts streaming requests”：本请求换号，不计账号失败、不冷却；该账号对该协议的非流式请求在 `capability.learn_ttl_seconds` 内被跳过。`failure.decision_v2` 关闭时只学习，本请求照旧返回 400；本请求的候选全部以同样理由拒绝时返回 503（不是 400），原因码 `capability_stream_only` |
+| 非流式请求被上游以“只接受流式”拒绝（0.4.4） | 例如 “This group only accepts streaming requests”：本请求换号，不计账号失败、不冷却；该账号对该协议的非流式请求在 `capability.learn_ttl_seconds` 内被跳过。`failure.decision_v2` 关闭时只学习，本请求照旧返回 400；本请求的候选全部以同样理由拒绝时返回 503（不是 400），原因码 `capability_stream_only`。无号的负缓存按协议与流模式分开，能力阻断不计入快速失败，流式请求不受影响 |
 | 心跳帧 | Responses / Chat 为 SSE 注释行 `:`；Anthropic 为 `event: ping` |
 | 经 CDN 的请求遇到 502/504 | 改为 503，正文不变，并带 `X-XY-Upstream-Status: 502/504`。Cloudflare 会把源站的 502/504 换成自己的纯文本页面，丢掉 JSON 错误、`Retry-After` 和请求 ID；503 原样透传。直连请求保持原状态码。运维错误记录仍记原始的 502/504 |
 | 换号耗尽的 429/5xx | 带 `Retry-After`：上游给出的值按 2–30 秒封顶，没有时取分组最早恢复时间 |

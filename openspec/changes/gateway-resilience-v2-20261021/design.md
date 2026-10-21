@@ -201,7 +201,10 @@
 - **本请求**：`failure.decision_v2` 开启时，钩子返回可换号的哨兵错误（`IsCapabilityStreamOnly()`；不上报账号调度失败、不同号重试），handler 只计请求预算的尝试次数，不记会话失败、不冷却。这次拒绝不写运维的上游错误记录（写入会把账号记为本请求失败），只记中性事件 `resilience.capability_learned`。`decision_v2` 关闭时只学习，钩子返回空，本请求照旧返回 400。
 - **选号**：`Account.CapabilityExclusion(ctx, model, now)` 按本请求实际会用的上游协议返回阻断记录：入站 Chat 若转换为 Responses 上游，读 Responses 的学习；Grok 的两种协议各自独立。OpenAI 选号的共同资格检查（`openai_gateway_scheduling.go`）与 `openai_account_scheduler.go` 的 `isAccountRequestCompatibleReason` 都经钩子 `capabilityEligibilityReason` 过滤，覆盖粘性会话与末位兜底的最后检查；钩子登记到 `scheduler-diff.json` 与 `policy.json`（α）。
 - 全部被过滤后的无号仍是现有的 503，原因码 `capability_stream_only`，不再把 400 归咎于用户。
-- 本请求里所有候选都以“只接受流式”拒绝、换号耗尽时，同样返回 503（Anthropic 协议为 `api_error`），不返回上游的 400：共用的容量耗尽出口 `resilienceCapacityExhausted` 先识别哨兵（γ），OpenAI 专用出口在透传规则之前加同样的分支（α，必要时 `code` 为 `capability_stream_only`）。【待契约：实现提交】
+- 请求标记里另存本请求的中性排除集合（不借用“本请求已失败账号”），用于最终无号的原因与重试建议的候选排除：被能力挡掉的账号不会被建议成健康备选。
+- 负缓存的键按协议与流模式隔离，能力阻断也不计入全组的快速失败：同一分组的流式请求不会因为非流式请求被挡而拿到缓存的 503。
+- 本请求里所有候选都以“只接受流式”拒绝、换号耗尽时，同样返回 503（Anthropic 协议为 `api_error`），不返回上游的 400：共用的容量耗尽出口 `resilienceCapacityExhausted` 先识别哨兵（γ，`2cb3343de`），OpenAI 专用出口在透传规则之前加同样的分支（α，必要时 `code` 为 `capability_stream_only`）。【待契约：α 的实现提交】
+- 实现提交：γ `2cb3343de`（学习、存放、过滤、哨兵、清除接口与 Grok 原生调用点）；β 接 OpenAI 其余转发的检测钩子；α 接入口标记、DTO、路由与 Explain。
 
 ### 6.4 观测与管理
 
