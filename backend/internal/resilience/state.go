@@ -18,7 +18,9 @@ type RequestState struct {
 	budget *Budget
 
 	// retryAdvice is shared by the handler and service terminal writers.
-	retryAdvice RetryAdvice
+	retryAdvice         RetryAdvice
+	retryAdviceSet      bool
+	retryAdviceProvider RetryAdviceProvider
 
 	// prelude is collected by the stream state machine under mu.
 	prelude preludeTrace
