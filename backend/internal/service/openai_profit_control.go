@@ -355,6 +355,7 @@ func (s *OpenAIGatewayService) bindOpenAIStickySessionDuringSelection(ctx contex
 // account without replacing another owner. Temporary spillover therefore
 // preserves affinity; successful admission promotes a short reservation.
 func (s *OpenAIGatewayService) BindStickySessionAfterProfitAdmission(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
 	if sessionHash == "" || accountID <= 0 {
 		return nil
 	}

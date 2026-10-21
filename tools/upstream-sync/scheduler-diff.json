@@ -48,6 +48,14 @@
           "}",
           "}()"
         ]
+      },
+      {
+        "block": "channel-monitor-probe-lane",
+        "note": "Channel monitor probe lane: a verified probe (monitorprobe.IsProbe) has no sticky session; no binding is read or written for it. Requests without the probe mark are scheduled unchanged.",
+        "removed": [],
+        "added": [
+          "sessionHash = monitorProbeSessionHash(ctx, sessionHash)"
+        ]
       }
     ],
     "backend/internal/service/openai_account_scheduler.go": [
@@ -271,6 +279,14 @@
           "return false, reason",
           "return selection, decision, capabilitySelectionError(ctx, err)"
         ]
+      },
+      {
+        "block": "channel-monitor-probe-lane",
+        "note": "Channel monitor probe lane: a verified probe (monitorprobe.IsProbe) has no sticky session; no binding is read or written for it. Requests without the probe mark are scheduled unchanged.",
+        "removed": [],
+        "added": [
+          "sessionHash = monitorProbeSessionHash(ctx, sessionHash)"
+        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [
@@ -462,6 +478,19 @@
           "filterStats.exclude(reason)",
           "defer func() { selectionErr = capabilitySelectionError(ctx, selectionErr) }()",
           "return nil, noAvailableOpenAISelectionError(requestedModel, false, filterStats.summary(\"\"), filterStats.capabilityOnly())"
+        ]
+      },
+      {
+        "block": "channel-monitor-probe-lane",
+        "note": "Channel monitor probe lane: a verified probe (monitorprobe.IsProbe) has no sticky session; no binding is read or written for it. Requests without the probe mark are scheduled unchanged.",
+        "removed": [],
+        "added": [
+          "if monitorProbeRequest(c) {",
+          "return \"\"",
+          "}",
+          "if monitorProbeRequest(c) {",
+          "return \"\"",
+          "}"
         ]
       }
     ],

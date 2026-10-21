@@ -180,6 +180,9 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 	if c == nil {
 		return ""
 	}
+	if monitorProbeRequest(c) {
+		return ""
+	}
 
 	sessionID := explicitOpenAIRequestSessionID(c, body)
 	if sessionID == "" && len(body) > 0 {
@@ -234,6 +237,9 @@ func grokStickyAffinitySeed(sessionID string, body []byte) string {
 // 该方法用于 WS ingress，避免会话信号缺失时发生跨账号漂移。
 func (s *OpenAIGatewayService) GenerateSessionHashWithFallback(c *gin.Context, body []byte, fallbackSeed string) string {
 	if c == nil {
+		return ""
+	}
+	if monitorProbeRequest(c) {
 		return ""
 	}
 	sessionHash := s.GenerateSessionHash(c, body)

@@ -372,6 +372,30 @@
       "value": "if resilienceKeepsSoftStickyBinding(account, requestedModel) {"
     },
     {
+      "path": "backend/internal/server/router.go",
+      "value": "r.Use(middleware2.MonitorProbe())"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if monitorProbeRequest(c) {"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "sessionHash = monitorProbeSessionHash(ctx, sessionHash)"
+    },
+    {
+      "path": "backend/internal/service/openai_profit_control.go",
+      "value": "sessionHash = monitorProbeSessionHash(ctx, sessionHash)"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "sessionHash = monitorProbeSessionHash(ctx, sessionHash)"
+    },
+    {
+      "path": "backend/internal/service/gateway_service.go",
+      "value": "sessionHash = monitorProbeSessionHash(ctx, sessionHash)"
+    },
+    {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
       "value": "if !resilienceBindAllowed(ctx, accountID) {"
     },
@@ -1372,6 +1396,7 @@
     "xy-group-openai-fast-priority",
     "xy-account-list-usability",
     "xy-account-recent-health",
+    "xy-channel-monitor-probe-lane",
     "xy-graceful-online-update-restart",
     "xy-resilience-v2-handler-exits",
     "xy-resilience-v2-streams",
@@ -1593,6 +1618,36 @@
       "id": "xy-account-recent-health",
       "path": "frontend/src/views/admin/__tests__/UsageView.spec.ts",
       "literal": "opens the error requests tab filtered to the account linked from the accounts list"
+    },
+    {
+      "id": "xy-channel-monitor-probe-lane",
+      "path": "backend/internal/server/middleware/monitor_probe_test.go",
+      "literal": "func TestMonitorProbeMarksSignedRequest"
+    },
+    {
+      "id": "xy-channel-monitor-probe-lane",
+      "path": "backend/internal/server/middleware/monitor_probe_test.go",
+      "literal": "func TestMonitorProbeIgnoresForgedHeaderButStripsIt"
+    },
+    {
+      "id": "xy-channel-monitor-probe-lane",
+      "path": "backend/internal/service/monitor_probe_scheduling_test.go",
+      "literal": "func TestMonitorProbeOpenAIIgnoresStickyBinding"
+    },
+    {
+      "id": "xy-channel-monitor-probe-lane",
+      "path": "backend/internal/service/monitor_probe_scheduling_test.go",
+      "literal": "func TestMonitorProbeOpenAISessionHashIsEmpty"
+    },
+    {
+      "id": "xy-channel-monitor-probe-lane",
+      "path": "backend/internal/service/monitor_probe_scheduling_test.go",
+      "literal": "func TestMonitorProbeGatewayIgnoresStickyBinding"
+    },
+    {
+      "id": "xy-channel-monitor-probe-lane",
+      "path": "backend/internal/service/monitor_probe_scheduling_test.go",
+      "literal": "func TestMonitorProbeShareSkipsAffinityWait"
     },
     {
       "id": "xy-graceful-online-update-restart",
