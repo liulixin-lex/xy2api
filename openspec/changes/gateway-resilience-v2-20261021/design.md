@@ -15,32 +15,71 @@
 
 ## 1. 开关矩阵
 
-开关名与范围以 §2 为准，缺省全部开启。
+开关、门控方法与范围以 §2（C0 契约，2026-10-21T01:32Z 冻结）为准，缺省全部开启。“关闭后”指回到共同基线 `027a434ad`（0.4.3 加 #117、#116）的行为。
 
-| 行为 | 开关（缺省） | 依赖 | 关闭后 |
+| 行为 | 开关（缺省） | 门控要求 | 关闭后 |
 |---|---|---|---|
-| W1.1 兼容转换推迟开场 | `stream.prelude_staging`（开） | 总开关 | 收到上游 `response.created` 就写开场（0.4.3） |
-| W1.1 原生 Responses 白名单扩展 | `stream.native_prelude_whitelist`（开） | 总开关 | 白名单回到 `response.created`、`response.in_progress`、`keepalive` |
-| W1.2-lite raw Chat 识别 `error` 后跟 `[DONE]` | `stream.strict_terminal`（开） | 总开关 | 当成功处理（0.4.3） |
-| W2.1-lite 分类修正 | `failure.decision_v2`（开） | 总开关与 `failure` | 旧分类，含 `RequestScopedTransient` → `CAPACITY_SHED` |
-| W5.1 三个专用耗尽出口接入重试提示与回合封顶 | 现有 `errors` | 总开关 | 0.4.3 |
+| W1.1 兼容转换推迟开场 | `stream.prelude_staging`（开） | 总开关 | 收到上游 `response.created` 就写开场 |
+| W1.1 原生 Responses 白名单扩展 | `stream.native_prelude_whitelist`（开） | 总开关 | 开场只认 `response.created`、`response.in_progress`、`keepalive` |
+| W1.2-lite raw Chat 识别 `error` 后跟 `[DONE]` | `stream.strict_terminal`（开） | 总开关 | 当成功处理 |
+| W2.1-lite 分类修正 | `failure.decision_v2`（开） | 总开关 | 旧分类，含 `RequestScopedTransient` → `CAPACITY_SHED` |
+| W5.1 三个专用耗尽出口接入重试提示与回合封顶 | 现有 `errors.enabled` | 总开关 | 基线行为 |
 | W5.2 排队 ping 后写协议终止帧 | 无 | — | 不受开关控制（§9） |
-| W5.3 `response.failed` 有条件带 retry-after | `errors.failed_frame_retry_after`（开） | `errors` | 不带 `error.headers`，正文沿用旧 design §7.6 |
-| W5.4 Anthropic 自身失败用 `api_error` | 现有 `errors` | 总开关 | 0.4.3 |
-| W5.5 Codex 无号 503 的 Retry-After 上限 | `errors.codex_retry_after_cap_seconds`（10；0 表示关闭；0–30） | `errors` | 2–30 秒 |
-| W6-lite 仅流式学习与过滤 | `capability.stream_only_learning`（开）；有效期 `capability.learn_ttl_seconds`（21600；600–86400） | 总开关；本请求内换号还需要 `failure.decision_v2` | 不学习、不过滤 |
+| W5.3 `response.failed` 有条件带 retry-after | `errors.failed_frame_retry_after`（开） | 总开关与 `errors.enabled` | 不带 `error.headers`，正文沿用旧 design §7.6 |
+| W5.4 Anthropic 自身失败用 `api_error` | 现有 `errors.enabled` | 总开关 | 基线类型 |
+| W5.5 Codex 无号 503 的 Retry-After 上限 | `errors.codex_retry_after_cap_seconds`（10；0–30；0 表示关闭） | 总开关与 `errors.enabled` | 2–30 秒 |
+| W6-lite 仅流式学习与过滤 | `capability.stream_only_learning`（开）；有效期 `capability.learn_ttl_seconds`（21600；600–86400） | 总开关 | 不学习、不过滤 |
+| W6-lite 检测到后本请求换号 | 无单独开关 | `stream_only_learning` 与 `decision_v2` 都开 | 只学习、过滤后续请求，本请求照旧返回 400 |
 | W8-lite 事件字段 | 无 | — | 只加日志字段，不改行为 |
 
-关闭开关时的存量状态：已学到的仅流式能力在有效期内保留，但不再参与过滤；重新打开后，未到期的学习结果继续生效。【待契约：以 γ 的实现为准】
+存量状态：
+
+- `capability.stream_only_learning` 或总开关关闭时，不学习、不过滤；已有的学习记录不删除，按自己的到期时间自然过期，重新开启后未到期的记录继续生效。
+- 修改 `capability.learn_ttl_seconds` 只影响之后新学到的记录，不改写已有记录的到期时间。
 
 ## 2. 设置（C0）
 
-【待契约：`contract/C0_SETTINGS.md`】
+### 2.1 字段
 
-- 字段：JSON 路径、Go 访问方法、缺省值、范围、依赖。
-- 存放位置：现有 `gateway-resilience` 文档，或单独的设置键。
-- 回退结论：0.4.3 读到含新字段的设置文档时是否仍判为合法（证据 `文件:行号`）；回退到 0.4.3 后旧文档与行为是否不变。
-- 管理接口 `GET/PUT /api/v1/admin/settings/gateway-resilience` 的返回与保存方式。
+| JSON 路径 | Go 字段 | 门控方法（`*resilience.Settings`） | 缺省 / 范围 |
+|---|---|---|---|
+| `stream.prelude_staging` | `Stream.PreludeStaging` | `PreludeStagingOn()` | true |
+| `stream.native_prelude_whitelist` | `Stream.NativePreludeWhitelist` | `NativePreludeWhitelistOn()` | true |
+| `stream.strict_terminal` | `Stream.StrictTerminal` | `StrictTerminalOn()` | true |
+| `failure.decision_v2` | `Failure.DecisionV2` | `DecisionV2On()` | true |
+| `errors.failed_frame_retry_after` | `Errors.FailedFrameRetryAfter` | `FailedFrameRetryAfterOn()` | true |
+| `errors.codex_retry_after_cap_seconds` | `Errors.CodexRetryAfterCapSeconds` | `CodexRetryAfterCapOn()` | 10；0–30；0 关闭 |
+| `capability.stream_only_learning` | `Capability.StreamOnlyLearning` | `StreamOnlyLearningOn()` | true |
+| `capability.learn_ttl_seconds` | `Capability.LearnTTLSeconds` | 跟随 `StreamOnlyLearningOn()` | 21600；600–86400 |
+
+- 新增两个顶层段 `stream`、`capability`；`failure`、`errors` 段各加字段。
+- 门控方法对 nil 安全，都要求总开关 `enabled`；两个 `errors` 门控还要求 `errors.enabled`。
+- `StreamOnlyFailoverOn()` = `StreamOnlyLearningOn() && DecisionV2On()`，只管检测到“只接受流式”后本请求是否换号。
+
+### 2.2 存放、管理接口与热更新
+
+- 沿用 `settings` 表的单键 `gateway_resilience_settings`，在同一份 JSON 里扩展；不新增设置键、迁移或单独的扩展文档。
+- `resilience.Parse` 先取缺省值再 `json.Unmarshal`：旧文档缺少的新字段取缺省值，显式的 false 与 0 保留。
+- 管理接口 `GET/PUT /api/v1/admin/settings/gateway-resilience` 的路径与形状不变：GET 返回 `data: {settings, defaults}`，两份都含新字段；PUT 的请求体是设置对象本身，缺项保留当前值，未知字段仍拒绝，数值越界返回 `GATEWAY_RESILIENCE_SETTINGS_INVALID`。
+- 热更新不变：保存的实例立即生效，其他实例每 10 秒重新读取；epoch 防止旧读取覆盖新保存。
+
+### 2.3 回退到 0.4.3
+
+依据 0.4.3 的源码（`3092629d7`）：
+
+| 位置 | 事实 |
+|---|---|
+| `backend/internal/resilience/settings.go:16` | 存储键 `gateway_resilience_settings` |
+| `backend/internal/resilience/settings.go:306`、`:311` | `Parse` 用 `json.Unmarshal` 读存储，**忽略未知字段**，不是严格解码 |
+| `backend/internal/service/resilience_service.go:224`、`:257` | 启动与周期读取经 `Parse`；`UpdateSettings` 整体编码后保存 |
+| `backend/internal/handler/admin/resilience_handler.go:38`、`:51` | 严格解码（`decodeStrictJSON`）只用于管理端 PUT |
+
+结论与边界：
+
+- 0.4.3 能正常读取 0.4.4 保存的设置：新段与新字段被忽略，原有字段取保存的值，行为与 0.4.3 一致。
+- **在 0.4.3 上再次保存设置会丢弃新字段**（0.4.3 整体编码它认识的结构）。之后再升级到 0.4.4 时，新字段回到缺省值（全部开启、上限 10 秒、有效期 6 小时）；回退期间关掉过的新开关需要重新关闭。
+- 回退后，仍打开着 0.4.4 管理页面的浏览器提交设置时会带上新字段，被 0.4.3 的严格 PUT 拒绝；刷新页面，用随 0.4.3 发布的前端即可。这不影响服务启动与读取已保存的设置。
+- 回退安全由 `settings_compat043_test.go` 证明：用冻结的 0.4.3 结构、缺省、解析与校验读取新文档，逐字段比较；并覆盖“0.4.3 保存后再升级”和“严格 PUT 拒绝新字段”。
 
 ## 3. W1.1 可重放前缀
 
@@ -214,7 +253,7 @@ Gateway 入站的 Responses 与 Chat 专用错误出口（`gateway_handler_respo
 
 - **总开关关闭**：按 0.3.0 运行，本期新开关一并失效；§9 的修复仍生效。
 - **子开关关闭**：回到 0.4.3 / #117 的行为（§1“关闭后”一列），即时生效，无需重启。
-- **版本回退到 0.4.3**：无迁移；设置文档的兼容性见 §2；已学到的仅流式能力【待契约：存放位置决定 0.4.3 是否看得到】。
+- **版本回退到 0.4.3**：无迁移，直接换回镜像。设置的兼容与“在 0.4.3 上再次保存会丢弃新字段”的边界见 §2.3。已学到的仅流式能力【待契约：存放位置（CHANGES_G 的 W6）决定 0.4.3 是否看得到】。
 
 ## 11. 已知限制与延后
 

@@ -222,6 +222,18 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
 | `errors.enabled` | 不加 `Retry-After`，不做负缓存与快速失败；Anthropic 已提交流的错误帧不带 `event: error` 行（0.3.0 格式） |
 | `fallback_group.enabled` | 不再转投兜底组 |
 
+0.4.4 新增的开关关闭后回到 0.4.3 的对应行为（详见 [`gateway-resilience-v2-20261021/design.md`](../gateway-resilience-v2-20261021/design.md) §1）：
+
+| 开关 | 关闭后的行为 |
+|---|---|
+| `stream.prelude_staging` | 兼容转换收到上游 `response.created` 就写开场，之后不再换号 |
+| `stream.native_prelude_whitelist` | 原生 Responses 的开场只认 `response.created`、`response.in_progress`、`keepalive` |
+| `stream.strict_terminal` | raw Chat 透传的 `error` 后跟 `[DONE]` 当成功处理 |
+| `failure.decision_v2` | 旧分类：Grok 空闲、raw 429、“服务忙”类文案按容量降载处理；仅流式拒绝只学习，本请求返回 400 |
+| `errors.failed_frame_retry_after` | 合成的 `response.failed` 不带 `error.headers` |
+| `errors.codex_retry_after_cap_seconds` 设为 0 | Codex 请求的无号 `Retry-After` 与其他客户端一样为 2–30 秒 |
+| `capability.stream_only_learning` | 不学习、不过滤；已有记录按到期时间自然过期 |
+
 **关闭总开关的范围：** 韧性能力全部停用，调度与错误处理按 0.3.0 逻辑运行。以下改动不受总开关控制（多为缺陷修复），关闭后仍然生效：
 
 | 改动 | 说明 |
@@ -231,6 +243,7 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
 | 白名单 404 列出可用模型 | HTTP 入口的 404 文案附本分组白名单前 10 项（`xy-allowlist-404-hint`） |
 | 上传中断记 499 | 读请求体时连接中断造成的 400 在运维记录里记为 499 |
 | §9.8 续链被拒整轮重放 | Claude 请求分发到 GPT 中转、续链以笼统 4xx 被拒时去掉续链重放一次并关闭该会话续链 |
+| 排队 ping 之后按协议写终止帧（0.4.4） | Gateway 入站的 Responses 与 Chat 在 HTTP 已提交后遇到计费等错误，写协议终止帧而不是裸 JSON |
 
 管理端只读功能（选号解释中的模型限制提示等）也不受开关影响。
 
@@ -257,6 +270,7 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
 - Caddy 上游顺序改回 `<BLUE_PORT> <GREEN_PORT>`（blue 仍在时），或重新启动 0.3.0 镜像后再调整顺序；
 - 数据库无需回退，新列与新表对 0.3.0 透明；
 - 余额暂停中的账号在暂停到期后回到流量里，0.3.0 下再遇余额失败按原有逻辑处理（402 置错、403 计数）；欠费且暂时不用的账号可先关掉调度；
+- 从 0.4.4 回退到 0.4.3：无迁移，直接换回镜像；0.4.3 读取设置时忽略 0.4.4 新增的字段，原有字段不变。**在 0.4.3 上再次保存设置会丢弃新字段**，再升级时它们回到缺省（全部开启），回退期间关掉过的新开关要重新关闭；还开着 0.4.4 管理页面的浏览器要先刷新，否则保存会因未知字段被拒（设计见 `gateway-resilience-v2-20261021/design.md` §2.3）。
 - 回退后在记忆中记录原因与证据。
 
 **触发条件**（任一满足即先关闭相关开关，必要时整体回退）：

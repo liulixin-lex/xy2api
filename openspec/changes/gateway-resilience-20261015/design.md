@@ -483,6 +483,8 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
 
 某个子开关为 false 时，对应能力回到 0.3.0 行为。读取失败时使用最后已知值；冷启动无值时用缺省值。
 
+**0.4.4 新增字段**（同一份 `gateway_resilience_settings`，缺省全部开启）：新段 `stream`（`prelude_staging`、`native_prelude_whitelist`、`strict_terminal`）与 `capability`（`stream_only_learning`、`learn_ttl_seconds`），`failure.decision_v2`，`errors.failed_frame_retry_after` 与 `errors.codex_retry_after_cap_seconds`。它们关闭后回到 0.4.3 的行为，而不是 0.3.0；含义、范围、门控与回退到 0.4.3 的边界见 [`gateway-resilience-v2-20261021/design.md`](../gateway-resilience-v2-20261021/design.md) §1–§2。
+
 设置在读取与发布时都深拷贝：PUT 请求体解码到副本上，不写入请求路径正在读取的快照，未通过校验的 PUT 不改变运行中的任何值。请求体中出现的 `budget.model_overrides` 整体替换原值（因此可以删除键）。
 
 ## 11. 数据库迁移（只追加）
