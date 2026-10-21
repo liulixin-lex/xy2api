@@ -40,6 +40,7 @@ func TestClassifyStreamEvent(t *testing.T) {
 		{"chat_role", "chat", "", `{"object":"chat.completion.chunk","choices":[{"delta":{"role":"assistant"}}]}`, Prelude, false},
 		{"chat_empty", "chat", "", `{"choices":[{"delta":{"content":""}}]}`, Prelude, false},
 		{"chat_text", "chat", "", `{"choices":[{"delta":{"content":"hi"}}]}`, Content, false},
+		{"chat_null_error", "chat", "", `{"error":null,"choices":[{"delta":{"content":"hi"}}]}`, Content, false},
 		{"chat_tool", "chat", "", `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a"}]}}]}`, Content, false},
 		{"chat_unknown_delta", "chat", "", `{"choices":[{"delta":{"vendor":"value"}}]}`, Content, false},
 		{"chat_finish", "chat", "", `{"choices":[{"delta":{},"finish_reason":"stop"}]}`, TerminalSuccess, false},
@@ -63,5 +64,29 @@ func TestClassifyStreamEvent(t *testing.T) {
 				t.Fatalf("got %+v, want kind=%v retry=%v", got, tt.kind, tt.retry)
 			}
 		})
+	}
+}
+
+func TestClassifyStreamEventUsesConfiguredFailureRules(t *testing.T) {
+	before := Current().Clone()
+	t.Cleanup(func() { Publish(before) })
+	settings := Defaults()
+	settings.Failure.BalanceKeywordsExtra = []string{"wallet_marker"}
+	Publish(settings)
+	got := ClassifyStreamEvent("responses", "error", []byte(`{"error":{"status_code":400,"message":"wallet_marker"}}`))
+	if got.Kind != TerminalFailure || !got.Retryable {
+		t.Fatalf("configured account balance failure must be retryable: %+v", got)
+	}
+	settings.Failure.DecisionV2 = false
+	Publish(settings)
+	got = ClassifyStreamEvent("responses", "error", []byte(`{"error":{"status_code":400,"message":"Concurrency limit exceeded"}}`))
+	if got.Retryable {
+		t.Fatal("disabled decision_v2 must keep the legacy concurrency decision")
+	}
+	settings.Failure.DecisionV2 = true
+	Publish(settings)
+	got = ClassifyStreamEvent("responses", "error", []byte(`{"error":{"status_code":400,"message":"Concurrency limit exceeded"}}`))
+	if !got.Retryable {
+		t.Fatal("decision_v2 concurrency limit must use the configured rate-limit rule")
 	}
 }

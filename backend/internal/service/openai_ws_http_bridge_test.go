@@ -1306,6 +1306,35 @@ func TestProxyOpenAIWSHTTPBridgeTurnDoesNotReplayCapacityAfterSemanticOutput(t *
 	require.True(t, logSink.ContainsFieldValue("path", "ws_http_bridge"))
 }
 
+func TestProxyOpenAIWSHTTPBridgeSharedPreludeBoundary(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, event := range []string{"response.queued", "codex.response.metadata"} {
+		t.Run(event, func(t *testing.T) {
+			body := keepaliveStallCreated + "data: {\"type\":\"" + event + "\"}\n\n" +
+				"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"busy\"}}}\n\n"
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}}
+			svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+			account := rawChatCompletionsTestAccount()
+			c, _ := compatStreamContext("/v1/responses", "")
+			payload := []byte(`{"type":"response.create","model":"gpt-5.4","input":"hi"}`)
+			var writes [][]byte
+			_, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "sk-test", payload, len(payload), "gpt-5.4", "", "", "", "", 1, func(data []byte) error {
+				writes = append(writes, append([]byte(nil), data...))
+				return nil
+			})
+			var failover *UpstreamFailoverError
+			if event == "response.queued" {
+				require.ErrorAs(t, err, &failover)
+				require.Empty(t, writes)
+			} else {
+				require.False(t, errors.As(err, &failover))
+				require.NotEmpty(t, writes)
+				require.Equal(t, "response.created", gjson.GetBytes(writes[0], "type").String())
+			}
+		})
+	}
+}
+
 func TestProxyOpenAIWSHTTPBridgeTurnKeepaliveWriteFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {

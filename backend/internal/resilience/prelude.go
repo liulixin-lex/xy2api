@@ -49,7 +49,7 @@ func ClassifyStreamEvent(protocol, eventType string, payload []byte) EventClass 
 	if typ == "response.incomplete" {
 		return EventClass{Kind: TerminalFailure}
 	}
-	if typ == "response.failed" || typ == "error" || (protocol == "chat" && root.Get("error").Exists()) {
+	if typ == "response.failed" || typ == "error" || (protocol == "chat" && root.Get("error").Exists() && root.Get("error").Type != gjson.Null) {
 		err := root.Get("response.error")
 		if !err.IsObject() {
 			err = root.Get("error")
@@ -61,9 +61,9 @@ func ClassifyStreamEvent(protocol, eventType string, payload []byte) EventClass 
 		if status == 0 {
 			status = int(root.Get("status_code").Int())
 		}
-		result := Classify(Outcome{Source: SourceStreamEvent, StatusCode: status,
+		result := ClassifyWithSettings(Outcome{Source: SourceStreamEvent, StatusCode: status,
 			Code: err.Get("code").String(), Type: err.Get("type").String(),
-			Message: err.Get("message").String(), Body: payload}, nil)
+			Message: err.Get("message").String(), Body: payload}, Current())
 		return EventClass{Kind: TerminalFailure, Retryable: result.Category.SwitchAccount()}
 	}
 	switch protocol {
