@@ -75,7 +75,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	}
 	// x-codex-turn-state 不在通用响应头白名单内，按 Codex 协议显式回传：
 	// 客户端会在同回合的后续请求中回带（openai_codex_turn_state.go）。
-	// OpenAI 首个语义输出前只暂存，溯源在 applyAttemptResponseHeaders 真正提交时记录。
+	// OpenAI 首个语义输出前暂存；首次心跳或语义输出提交 turn-state 时同步记录溯源。
 	if stageFirstOutput {
 		stageOpenAICodexTurnState(&attemptResponseHeaders, resp.Header)
 	} else {
@@ -1001,8 +1001,15 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				continue
 			}
 			if stageFirstOutput {
-				// Bypass attempt-local buffered frames. The stable SSE headers may be
-				// committed here, but account headers remain private until semantic output.
+				// Bypass attempt-local buffered frames. Only turn-state may accompany
+				// the stable SSE headers; record its origin before the heartbeat commits.
+				// Later attempts cannot replace either the committed header or its origin.
+				if !c.Writer.Written() {
+					if turnState := extractOpenAICodexTurnState(attemptResponseHeaders); turnState != "" {
+						c.Writer.Header().Set(openAICodexTurnStateHeader, turnState)
+						s.noteOpenAICodexTurnStateProvenance(c, account)
+					}
+				}
 				n, err := w.Write([]byte(":\n\n"))
 				recordOpenAIStreamKeepaliveBytes(c, n)
 				if err != nil {

@@ -6,6 +6,11 @@
 
 ## 当前交接状态
 
+### XY2API 0.4.5 O3 原生心跳保留 turn-state（2026-10-21；本地实现）
+
+- PM 指令 8 将 O3 纳入 0.4.5：原生 Responses 首次心跳只额外提交本次暂存的 `x-codex-turn-state` 并同步记账号溯源；不新增开关，其他上游头仍暂存。后续尝试不覆盖已提交的头或溯源。
+- β 分支 `feat/native-heartbeat-turn-state-045` 的实现与定向验证完成：49 个顶层用例各三轮竞态检查、两种 vet、增量 lint 均通过；待 γ 独立审查。α 合入 O3 和 DOCS `c8e3b9669` 后须跑新候选全量门禁。PM 已将 `b966306de` 改为预跑基线，不沿用为最终候选。
+
 ### XY2API 0.4.5 本地集成候选（2026-10-21；未推送）
 
 - 产品代码候选 `46239531d` 的完整 25 项门禁通过；unit 采用 PM 指定的 attempt3b 完整重跑，基线偶发失败及复核记录完整保留。δ 与 DOCS 最终交付已合入，ε EOF 取消防护未变，独立缓存已删除。
@@ -121,6 +126,14 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
+
+### 20261021-native-heartbeat-turn-state-045 — β 实现 O3（本地）
+
+- PM 指令 8：从 `b966306de` 创建 `feat/native-heartbeat-turn-state-045`；原生 Responses 第一次心跳提交时只额外带本次暂存的 `x-codex-turn-state`，同时记录溯源；不新增开关。
+- 范围：原生心跳分支、定向测试、policy 与现行网关说明；OpenSpec design/spec/tasks 和发布草稿由 DOCS 同步。只本地提交，不推送、不改 Git 配置。
+- 实现与验证：先确认缺陷红测，再只改原生心跳分支；首个语义输出的提交闭包与基线逐字一致。49 个顶层 `-tags=unit -p 2 -race -count=3` 每项三轮，147 顶层结果、含子用例 243 项全过，零失败、跳过与竞争；覆盖 §1.6 的九项清单（不加开关，第 6 项不适用，另测总开关关闭仍生效）。policy 增 1 条钩子、6 条测试，网关说明 §6 同步。
+- 静态检查：无 tag 与 unit vet 通过；新增夹具的 6 处 nil Context 改为 `context.Background()` 后，最终 49 项三轮竞态与不限同类条数的增量 lint 重新通过（0 issues）。生产实现未再改；首轮 lint 失败与修前绿测均保留。
+- 下一步：交 γ 对固定提交做只读独立审查；α 同时合入 DOCS `c8e3b9669` 并跑新候选全量门禁，QA 在新候选重做完整验证。最终 HEAD、提交前复核与提交后干净树 audit 结果放在仓库外冲刺目录的 `briefs/PROGRESS_B.md`、`evidence/o3-045/REPORT.md`；本条不代表集成与候选验证完成。
 
 ### 20261021-integ-0.4.5-prep — 本地集成完成，待 PM 安排补审
 
@@ -1112,3 +1125,14 @@ pnpm --dir frontend run build
 - 其余门禁：无 tag 14519 pass、28 条件 skip；`ci_gate` 390 顶层 `-race`、额外 service 178 顶层/476 项、handler 94/224 项全部实际执行，零失败/跳过/竞争；gofmt、四 vet、lint（0 issues）通过。前端 413 文件/3182 项、lint/typecheck/build、tools 41 项、audit 校验器 13 项、docs、scheduler-diff、embed 构建和干净树 audit 均通过。govulncheck 调用路径 0 漏洞（另有未调用的包/模块提示）；前端审计 high/critical 为 0，13 moderate/4 low。
 - 证据/清理：完整原始记录与明确引用 attempt3b 的最终 25/25 汇总保存在仓库外 `evidence/integ-045/`；旧候选和环境失败也保留。本轮独立 GOCACHE 已按授权删除，目录占用 7361564672 字节（约 6.86 GiB），未动共享缓存或其他工作树。
 - 卡点/下一步：本地集成与门禁完成；REVIEW 尚需补审最终增量，测试服务器全套候选验证尚未进行。DOCS 跟进 tasks 4.2 与 0.4.6 的测试稳定化待办；后续远端操作等待 PM 指令。
+
+
+### 2026-10-21T17:16:40+00:00 — `20261021-native-heartbeat-turn-state-045` — O3 实现完成，待独立审查
+
+- 请求/目标：PM 指令 8，把原生 Responses 首次心跳提前提交 turn-state 的 O3 修正纳入 0.4.5；不新增开关，只本地提交，不推送、不修改 Git 配置、不操作生产。
+- 开始状态：从 `integ/0.4.5-prep` 的干净基线 `b966306de52d5bf83cf5147971edf346464a3ad5` 建立 `feat/native-heartbeat-turn-state-045`；中断恢复后核对原未提交实现与测试，并完成验证收尾。
+- 完成操作：先确认基线红测，再只修改原生 `stageFirstOutput` 心跳分支：响应尚未提交且暂存头有 turn-state 时，写这一个头并同步记溯源；首个语义输出的 `applyAttemptResponseHeaders` 闭包与基线逐字一致。后续尝试、重复心跳及既有 CDN/排队提交不覆盖头或溯源；其余上游头仍暂存。
+- 修改文件：`openai_gateway_response_handling.go`、新增 `openai_native_heartbeat_turn_state_test.go`、`tools/upstream-sync/policy.json`、`docs/GATEWAY_RESILIENCE.md` 与本记忆。policy 新增 1 条 required_literal 与 6 条既有补丁测试绑定，无重复；网关说明 §6 登记无开关的受控例外。OpenSpec design/spec/tasks 由 DOCS 在 `c8e3b9669` 同步，按 16:40Z 分工未在本分支修改。
+- 验证：有效红测 6 个顶层中 3 个缺陷用例因首心跳缺少 turn-state 失败、3 个边界回归通过。修后最终 49 个顶层逐项执行 `-tags=unit -p 2 -race -count=3`，147 个顶层结果、含子用例 243 项全部通过，零失败、跳过与竞争；覆盖方案 §1.6 九项清单，第 6 项因不加开关不适用，另测总开关关闭仍生效。service 的无 tag/unit vet 与增量 lint（0 issues）通过。编译/夹具及首轮 lint 的失败记录保留；提交前复核与提交后干净树审计的最终结果在仓库外 `evidence/o3-045/`。
+- 卡点/风险：无实现阻塞。心跳已提交后仍不能补发 request-id 与用量头，是 O3 保留的限制；定向验证不替代新集成候选的全量门禁与 QA。
+- 下一步：在仓库外交接中记录最终完整 HEAD 并通知 γ 只读独立审查；α 合入 O3 与 DOCS 后跑全量门禁、安排 QA 新候选验证。`b966306de` 只作预跑。

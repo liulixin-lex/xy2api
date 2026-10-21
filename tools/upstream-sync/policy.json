@@ -1463,6 +1463,10 @@
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
       "value": "writeOpenAIStreamRuleError(ctx, c, status, errType, errMsg)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "c.Writer.Header().Set(openAICodexTurnStateHeader, turnState)"
     }
   ],
   "forbidden_module_paths": [
@@ -2045,6 +2049,36 @@
       "id": "xy-resilience-v2-streams",
       "path": "backend/internal/service/openai_responses_rule_terminal_test.go",
       "literal": "func TestNativeResponsesRuleWithoutHeartbeatKeepsJSON"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_native_heartbeat_turn_state_test.go",
+      "literal": "func TestOpenAINativeHeartbeatCommitsOnlyTurnStateAndProvenance"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_native_heartbeat_turn_state_test.go",
+      "literal": "func TestOpenAINativeHeartbeatFailoverKeepsTurnStateOriginAndGuardsEcho"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_native_heartbeat_turn_state_test.go",
+      "literal": "func TestOpenAINativeTurnStateWithoutHeartbeatCommitsAllHeadersAtOutput"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_native_heartbeat_turn_state_test.go",
+      "literal": "func TestOpenAINativeHeartbeatWithoutTurnStateDoesNotRecordOrigin"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_native_heartbeat_turn_state_test.go",
+      "literal": "func TestOpenAINativeHeartbeatAfterEarlierCommitDoesNotPublishTurnState"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_native_heartbeat_turn_state_test.go",
+      "literal": "func TestOpenAINativeHeartbeatTurnStatePreservesErrorRuleTerminal"
     }
   ]
 }
