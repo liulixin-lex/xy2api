@@ -178,7 +178,8 @@
 - **学习**：账号 × 协议（responses 或 chat）× 非流式 → 不可用，有效期 `capability.learn_ttl_seconds`。存放在账号 `extra` 的两项里，用局部合并原子更新，并同步调度缓存（γ）；键名、复制与导入边界【待契约：CHANGES_G】。手工设置本期不做，只留字段位。不会自动改发流式。
 - **本请求**：立即换号（需要 `failure.decision_v2` 开），不计账号失败、不冷却、不计会话失败，计入请求预算。`decision_v2` 关闭时只学习、过滤后续请求，本请求照旧返回 400。
 - **选号**：OpenAI 选号（`openai_gateway_scheduling.go`、`openai_account_scheduler.go`）对非流式请求跳过被标记的账号，流式请求不受影响。跳过后组内无号时按现有无号处理，带原因码 `capability_stream_only`，不再把 400 归咎于用户。
-- **Explain**：被跳过的账号显示原因 `capability_stream_only` 与剩余有效期。
+- **Explain**：被跳过的账号显示原因 `capability_stream_only`，到期时间放在 `recover_at`。
+- **前端**（FE）：账号列表状态列下方的“仅流式（自动学习，剩余 X）”标识与清除按钮（`AccountStreamOnlyBadge`；`AccountsView.vue` 的两处钩子登记为具名补丁 `xy-account-stream-only-learning`）；设置卡片“失败分类修正”“流式开场与终止”“仅流式账号学习”。
 - **管理接口**：
   - 账号列表与详情返回 `capability_learned: [{protocol: "responses"|"chat", mode: "stream_only", expires_at: <RFC3339 UTC>}]`，没有记录时为空数组；
   - 清除：`DELETE /api/v1/admin/accounts/:id/capability-learning`，成功时 `data` 为 `{capability_learned: []}`；

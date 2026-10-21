@@ -48,7 +48,7 @@
 - [ ] 6.1 学习、有效期、存放；本请求换号不计账号失败。
 - [ ] 6.2 选号过滤（非流式请求）；无号原因码 `capability_stream_only`；`scheduler-diff.json` 登记。
 - [ ] 6.3 Explain 原因；管理接口（查看、清除）。
-- [ ] 6.4 前端：账号的仅流式标识与清除；Explain 文案。
+- [ ] 6.4 前端：账号的仅流式标识与清除；Explain 文案（FE `e042880ad`，等后端接口联调）。
 
 ## 7. W8-lite 事件字段（α、β）
 
@@ -56,7 +56,7 @@
 
 ## 8. 前端设置（FE）
 
-- [ ] 8.1 新开关的设置界面与中英文说明；单测；lint、typecheck、test、build。
+- [ ] 8.1 新开关的设置界面与中英文说明；单测；lint、typecheck、test、build（FE `41dfd5ea6`、`34d87ef10`）。
 
 ## 9. 文档与登记（DOCS、α）
 
