@@ -787,6 +787,21 @@ func TestGatewayConvertStagingWithoutStrictTerminal(t *testing.T) {
 			requireGWFailover(t, err)
 			requireOnlyHeartbeats(t, c, w.Body())
 		})
+		// Review DELTA-P2-1: a non-retryable error before content is dropped
+		// as in 0.4.4, and the end that follows must not replay it.
+		t.Run(path.name+"/non_retryable_error_is_not_replayed", func(t *testing.T) {
+			w := newGWWriter()
+			c := gwContext(gwPathURL(path.name), w)
+			result, err := path.run(gwConvertService(0, 0), c, gwTestAccount(), gwStatic(gwMsgStart+gwInvalid))
+			require.NoError(t, err)
+			require.Equal(t, 100, result.Usage.InputTokens)
+			if path.name == "responses" {
+				require.True(t, strings.HasPrefix(w.Body(), "event: response.created\n"))
+				require.Contains(t, w.Body(), "event: response.completed\n")
+			} else {
+				require.True(t, strings.HasSuffix(w.Body(), "data: [DONE]\n\n"))
+			}
+		})
 		t.Run(path.name+"/after_content", func(t *testing.T) {
 			w := newGWWriter()
 			c := gwContext(gwPathURL(path.name), w)

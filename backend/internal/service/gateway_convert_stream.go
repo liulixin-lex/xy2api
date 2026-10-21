@@ -89,6 +89,7 @@ type gatewayConvertStream struct {
 	held        []string
 	released    bool
 	sawStop     bool
+	sawFailure  bool
 	lineSeen    bool
 	awaitData   bool
 	eventName   string
@@ -321,7 +322,9 @@ func (st *gatewayConvertStream) onErrorEvent(event *apicompat.AnthropicStreamEve
 		return gatewayConvertOutcome{err: &UpstreamFailoverError{StatusCode: status, ResponseBody: body}, noResult: true}, true
 	}
 	if !st.strict {
-		// 0.4.4: the event is dropped and the stream goes on.
+		// 0.4.4: the event is dropped and the stream goes on. Its end is
+		// then no reason to replay (review DELTA-P2-1).
+		st.sawFailure = true
 		st.write(st.hooks.convert(event, payload, false))
 		return gatewayConvertOutcome{}, false
 	}
@@ -341,7 +344,7 @@ func (st *gatewayConvertStream) onErrorEvent(event *apicompat.AnthropicStreamEve
 
 // onEnd handles the end of the upstream: EOF (cause nil) or a read error.
 func (st *gatewayConvertStream) onEnd(cause error) gatewayConvertOutcome {
-	if st.sawStop || !st.guarded {
+	if st.sawStop || st.sawFailure || !st.guarded {
 		if cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) {
 			logger.L().Warn("gateway convert stream: read error", zap.Error(cause),
 				zap.String("request_id", st.requestID), zap.String("protocol", st.protocol))
