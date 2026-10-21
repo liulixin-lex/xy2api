@@ -268,6 +268,44 @@ func TestCapabilityLearningRejectsEchoedOutboundPhrase(t *testing.T) {
 	require.Zero(t, repo.writes)
 }
 
+func TestCapabilityLearningErrorParameter(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, tc := range []struct {
+		name, param string
+		want        bool
+	}{
+		{"null", `null`, true},
+		{"empty", `""`, true},
+		{"whitespace", `" \t\r\n"`, true},
+		{"stream", `"stream"`, true},
+		{"different parameter", `"reasoning.effort"`, false},
+		{"padded parameter", `" stream "`, false},
+		{"object", `{}`, false},
+		{"number", `1`, false},
+		{"array", `[]`, false},
+		{"boolean", `false`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := capabilityTestAccount(1)
+			repo := &capabilityRepo{accounts: map[int64]*Account{1: a}}
+			svc := &OpenAIGatewayService{accountRepo: repo}
+			ctx := resilience.WithCapabilityRequest(context.Background(), "responses", false)
+			body := []byte(fmt.Sprintf(`{"error":{"message":"This group only accepts streaming requests","param":%s}}`, tc.param))
+			failure := svc.LearnStreamOnlyFailure(ctx, a, "responses", false, 400, body)
+			require.Equal(t, tc.want, failure != nil)
+			require.Equal(t, tc.want, resilience.CapabilityExcluded(ctx, a.ID))
+			if tc.want {
+				require.Equal(t, 1, repo.writes)
+				require.Len(t, a.CapabilityLearned(time.Now()), 1)
+				require.True(t, failure.IsCapabilityStreamOnly())
+			} else {
+				require.Zero(t, repo.writes)
+				require.Empty(t, a.CapabilityLearned(time.Now()))
+			}
+		})
+	}
+}
+
 func TestCapabilityFilteringRequiresSameUpstreamProtocol(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, tc := range []struct {
