@@ -39,10 +39,10 @@
 
 ## 3A. 原生 Responses 第一次心跳时带上 turn-state（O3；PM 2026-10-21T16:30Z 纳入 0.4.5）
 
-- [x] 3A.1 实现（β `feat/native-heartbeat-turn-state-045` @ `93fd9bdf2`，基于 `b966306de`）：原生暂存期第一次心跳提交时，如有这次尝试的 `x-codex-turn-state`，只多写这一个头并同时记录溯源；不加开关；登记 required_literal 与具名补丁测试；`GATEWAY_RESILIENCE.md` §6 与“心跳只写网关自身的头”一行注明例外（β）。用例按 `review/PROPOSAL_046.md` §1.6：单次成功拿到 turn-state；心跳后换号时守卫剥离；无心跳、无 turn-state、提交早于响应时行为不变；门票账号、R2-P2-1、原生规则终止帧的既有用例不受影响。新增 6 个顶层用例，其中首心跳带 turn-state、心跳后换号守卫剥离、心跳后错误规则终止帧 3 个在修复前失败；49 个相关顶层用例各三轮 `-race` 全部通过（147 顶层、243 项含子用例，0 失败、0 跳过、0 竞态），增量 lint 0 项，两种 vet 通过；`policy.json` 新增 1 条 required_literal，6 个用例绑定既有具名补丁 `xy-resilience-v2-streams`（仓库外 `evidence/o3-045/REPORT.md`）。
+- [x] 3A.1 实现（β `feat/native-heartbeat-turn-state-045` @ `93fd9bdf2`，基于 `b966306de`）：原生暂存期第一次心跳提交时，如有这次尝试的 `x-codex-turn-state`，只多写这一个头并同时记录溯源；不加开关；登记 required_literal 与具名补丁测试；`GATEWAY_RESILIENCE.md` §6 与“心跳只写网关自身的头”一行注明例外（β）。用例按 `review/PROPOSAL_046.md` §1.6：单次成功拿到 turn-state；心跳后换号时守卫剥离；无心跳、无 turn-state、提交早于响应时行为不变；门票账号、R2-P2-1、原生规则终止帧的既有用例不受影响。新增 6 个顶层用例，其中首心跳带 turn-state、心跳后换号守卫剥离、心跳后错误规则终止帧 3 个在修复前失败；49 个相关顶层用例各三轮 `-race` 全部通过（147 顶层、243 项含子用例，0 失败、0 跳过、0 竞态），增量 lint 0 项，两种 vet 通过；`policy.json` 新增 1 条 required_literal，6 个用例绑定既有具名补丁 `xy-resilience-v2-streams`（仓库外 `evidence/o3-045/REPORT.md`）。分支最终 HEAD `58ad8af6f` 只在产品提交之后追加了记忆里的审查归属，产品代码、测试、`policy.json` 与说明和 `93fd9bdf2` 逐字相同；两者的干净树 audit 都通过。
 - [x] 3A.2 代码审查（REVIEW，`review/CODE_REVIEW_045_O3.md`）：`93fd9bdf2` 可以并入 0.4.5，没有 P0、P1、P2；`PROPOSAL_046` §1.5 的实现要点逐条满足，§1.6 的用例除不适用的开关一项外都有；turn-state 只写一次，不泄漏失败账号的 `x-request-id` 与用量头；门票账号、CDN 首包保活、排队心跳、无心跳与 R2-P2-1 不回归。前提是合入后在新 SHA 上重跑全量门禁（4.5）。
 
-## 4. 集成（α，PM 2026-10-21T12:51Z 授权本地集成）
+## 4. 集成（α，PM 2026-10-21T12:51Z 授权本地集成；2026-10-21T18:20Z 范围冻结，不再出新候选）
 
 - [x] 4.1 按 RA-1 → ε → DOCS → δ 合入；手工合并 `GATEWAY_RESILIENCE.md` 的可重放前缀与严格终止说明、`policy.json` 的具名补丁测试，两边增补全部保留；`VERSION` 与 `UPSTREAM_BASE.json` 改为 0.4.5。基线既有的 `contentModerationHandlerSettingRepo` 竞争以只改测试的独立提交 `c906ba5ca` 修复，修前复现、修后 `-race -count=3` 通过。四个原版调度文件相对 main 无变化，scheduler-diff 保留既有差异登记。 已增量合入 δ 最终 `50053a8ea` 与 DOCS 最终 `2ebb17d1e`，保留 ε `930213caa`；首次候选 `43be712aa` 门禁为 22/25，不作为候选，见 design §7。
 - [x] 4.2 全量门禁：gofmt、四种 vet、golangci-lint、unit 与无 tag 测试、`ci_gate.py`（`-race`，零跳过）、`govulncheck`、前端四项与依赖审计、`tools/tests`、文档一致性、scheduler-diff、干净树 `sync.py audit`。
@@ -51,14 +51,14 @@
   - 其余：无 tag 测试；`ci_gate.py` 390 个顶层用例 `-race` 0 跳过；service 与 handler 的额外定向 `-race` 全部执行、0 失败；前端 413 个文件、3182 个用例；四种 vet 与 lint；`govulncheck` 无可达漏洞；依赖审计无高危、严重；`tools/tests` 41 例；文档检查、scheduler-diff、带前端产物的构建、干净树 audit。
 - [x] 4.3 对集成结果的独立审查：`46239531d` 可以作为 0.4.5 本地候选，没有 P0、P1，也没有新的 P2（REVIEW 增量补审 2026-10-21T15:35Z）；`b966306de` 只追加记忆与归档、无代码改动，确认为最终本地候选（`review/CODE_REVIEW_045_INTEG.md`）。
 - 以上 4.1–4.3 针对不含 O3 的 `b966306de`，它现在只是预跑候选（design §7）。O3 并入后：
-- [ ] 4.4 合入 O3，得到新的候选 SHA。
-- [ ] 4.5 在新 SHA 上重跑全量门禁（同 4.2 的各项）。
-- [ ] 4.6 对 O3 并入后的集成结果做独立审查（REVIEW）。
+- [x] 4.4 合入 O3，得到新的候选 SHA：O3 `93fd9bdf2` 快进合入，DOCS `88ad8c43c` 合入（tasks.md 整份采用 DOCS），门禁对象 `4bb8026db`；O3 的产品代码、测试、`policy.json` 与说明与 β 交付逐字一致，ε 的三个相关文件不变，309 条 required_literals、112 条 custom_patch_tests 无重复。最终 SHA `0c31b5b38` 只在门禁对象之后追加记忆（α，2026-10-21T18:05Z）。
+- [x] 4.5 在新 SHA 上重跑全量门禁（同 4.2 的各项）。第 4 轮（`4bb8026db`）25 项中 24 项通过；**原 unit 阻塞（已由下述复跑解除）**：只有 7.4 那条基线堆阈值用例在完整套件中失败，两次完整运行分别为 9,100,136、8,414,632 字节（阈值 8,388,608），单独跑 5 次全部通过。修复前测试文件与 main 逐字相同，没有跳过用例或放宽阈值，原失败保留。其余 24 项通过：gofmt、四种 vet、lint 0 项、无 tag 测试、`ci_gate.py` 390 个顶层 `-race` 0 跳过、额外 service 与 handler `-race`、`govulncheck`、前端四项与依赖审计、`tools/tests`、文档检查、scheduler-diff、带前端产物的构建、干净树 audit。PM 2026-10-21T18:00Z：不等 unit，先把最终 SHA 交 QA；α 随后在 main `a1cf8f104` 上用同一完整 unit 命令对照，2026-10-21T18:13Z 在基线上复现同一失败（8,724,016 字节），说明这是 O3 之前就有的基线问题，但当时不能把候选的 unit 门禁判为通过。ε 只改测试的修复 `13baa2869` 在 PM 定的 18:50Z 期限前交付，完整 service 套件 `-count=3` 通过；PM 18:42Z 放行，α 合入为 `e9c686e84`（只多这一个测试文件与文档，产品代码不变，测试不进镜像，QA 的候选 `0c31b5b38` 不重建），在这个 HEAD 上的四项复跑已于 2026-10-21T19:08:33Z 全部通过：完整 unit 使用 attempt4 同命令 `go test -tags=unit -count=1 -timeout=15m -json ./...`，`GOMAXPROCS=2`、`GOFLAGS=-p=2`，25368 项通过、39 条件跳过、0 失败，堆用例实际通过；ci_gate 390 个顶层 `-race` 全部实际执行、0 失败、0 跳过，文件匹配规则不包含该堆用例，不据此声称它经过竞态验证；文档检查和干净树 audit 通过。证据在仓库外 `evidence/integ-045/heapfix-e9c686e84/`，原失败保留。按 PM 18:55Z，随后只合入 DOCS `d1fa3a4a3` 并在同一提交内写本记录与 4.6、7.5；产品代码和测试相对 `e9c686e84` 无差异，合后仅复验文档与干净树 audit，不重跑 unit/ci_gate。
+- [x] 4.6 对 O3 并入后的集成结果做独立审查（REVIEW，仓库外 `review/CODE_REVIEW_045_FINAL.md`）：`e9c686e84` 可以作为 0.4.5 发版树，无 P0、P1；前提是该 HEAD 的四项复跑全部通过，现已满足（4.5）。两项 P2 按 PM 19:10Z 登记为 0.4.6 待办，不阻塞本版，见 7.5。
 
 ## 5. 测试服务器验证（QA）
 
-- [ ] 5.1 新故障与场景（QA 工具 `b6805ec73`：F38、F39 与 8 项串行补测已备好）：Gateway 入站经 Anthropic 上游、Responses 透传、心跳响应头、raw Chat 占位 `error`（建议清单见 design §7），先在 0.4.4 上确认。
-- [ ] 5.2 唯一候选：等 O3 并入后的新 SHA。只构建一次；71 个场景（含 RA-1 复跑与 O3 场景）；0.4.3 → 0.4.5、0.4.4 → 0.4.5 两条升级演练；6.5 小时浸泡。
+- [x] 5.1 新故障与场景（QA 工具 `b6805ec73`、夹具修正 `64e28dba5`：F38、F39 与 8 项串行补测；在正式 0.4.4 上 6 项复现旧行为，F39-5R、F39-5C 旧版也通过，F38-12 旧版返回裸 422 JSON）：Gateway 入站经 Anthropic 上游、Responses 透传、心跳响应头、raw Chat 占位 `error`（建议清单见 design §7），先在 0.4.4 上确认。
+- [ ] 5.2 唯一候选 `0c31b5b38`（O3 并入后的最终 SHA，PM 2026-10-21T18:00Z 交 QA；与门禁对象 `4bb8026db` 只差记忆；范围已冻结，PM 18:20Z）。只构建一次；主栈 71 个场景（含 RA-1 复跑与 O3 场景）、12 项补测、0.4.3 → 0.4.5 与 0.4.4 → 0.4.5 两条升级演练；浸泡以 3 小时为发版判据（热身后至少 3 个周期时出阶段判定），继续跑满 6.5 小时作为生产部署的证据，不阻塞发版决策。QA 2026-10-21T18:27Z 完成唯一构建并开始浸泡与场景；3 小时阶段判定约 21:27Z，报告在仓库外 `staging/REPORT_045_0c31b5b38.md`。
 - [x] 5.3 预跑 `b966306de`（QA 2026-10-21T15:53Z 起）：71 个场景 71 个通过，RA-1、RA-2 通过（2026-10-21T17:11Z），作为预跑证据保留，报告在仓库外 `staging/REPORT_045_b966306de.md`。这个 SHA 不做升级演练与浸泡（PM 2026-10-21T16:30Z），不是最终候选。
 
 ## 6. PR 与发版（用户授权后）
@@ -69,11 +69,13 @@
 
 ## 7. 后续（0.4.6 待办，不阻断 0.4.5）
 
-7.1–7.3 由审查在 δ 复核与集成审查中提出（design §8），7.4 来自 0.4.5 第三轮门禁。7.1 与 7.4 已提前到 0.4.5 处理，7.2、7.3 仍留在 0.4.6。
+7.1–7.3 由审查在 δ 复核与集成审查中提出（design §8），7.4 来自 0.4.5 第三轮门禁。7.5 来自最终集成审查。7.1 与 7.4 已提前到 0.4.5 处理，7.2、7.3、7.5 仍留在 0.4.6。
 
 - [x] 7.1 原生 Responses 路径心跳之后拿不到 turn-state：已在 0.4.5 用 O3 处理（3A，design §3.4）。
 - [ ] 7.2 turn-state 溯源改为在响应头真正发出时才记录，消除“响应到达后、提交前失败并最终耗尽”与 CDN 首包保活微秒级窗口两处不准的记录；同时收窄 `GATEWAY_RESILIENCE.md` 里“溯源只记客户端实际拿到的那次尝试”的措辞（该行归 δ；本变更的 design 与规格已改为“响应尚未提交时到达的尝试”）。
 - [ ] 7.3 LEAK-P2-1：WS 状态绑定表的清理吞吐固定为每表每分钟 512 条。评估按上次清理以来的写入量调整扫描量，或表满时优先淘汰已过期的条目；是否做具名补丁按上游同步机制决定（`review/LEAK_AUDIT_0.4.4.md` 第 5 节）。
 - [x] 7.4 `TestInflightEstimate_AccountMappingNoDBAndBoundedMemory` **已在 0.4.5 修复**（ε `test/inflight-heap-robust-045` @ `13baa2869`，PM 18:42Z 验收并放行，只改测试）。一次 GC 后的 `HeapAlloc` 仍含 sync.Pool victim 与待 finalizer 对象，改为预热 1000 个未定价模型后，在测量前后各连续两次 GC 再读稳定堆；n=20000、8 MiB 阈值与原断言意图保持。ε 单例 `-count=20` 与完整 service `-count=3` 通过（25848 项通过、27 条件跳过、0 失败，堆用例 3/3），灵敏度核对仍能检出按模型缓存。修复前的第三轮偶发、attempt4/4b 与 main 对照失败证据保留；集成最终树按 PM 指令复跑完整 unit 与 ci_gate，结果由 α 留证。
+
+- [ ] 7.5 堆用例两项 P2 留到 0.4.6（PM 19:10Z）：FINAL-P2-1 为绝对堆阈值对较小按模型保留的灵敏度下限，FINAL-P2-2 为连续 GC 不等待 finalizer、可能低估增量；后续改进测量方式，见仓库外 `review/CODE_REVIEW_045_FINAL.md` 第 3 节。
 
 生产部署未授权。
