@@ -63,6 +63,22 @@ With `stream.strict_terminal` on, the OpenAI Responses passthrough MUST apply th
 
 When a heartbeat commits HTTP 200 before the first output on the Chat and Messages conversions (staged, or before the first upstream line with staging off), or on the raw Chat passthrough in strict mode, the response MUST carry only the gateway's stream headers (`Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`, `X-Accel-Buffering: no`) and MUST NOT carry the filtered headers of that attempt's upstream. Without a heartbeat, the first output MUST still carry the upstream headers as before. The OpenAI Responses passthrough is excluded: its heartbeats MUST keep carrying the current attempt's upstream headers, including `x-codex-turn-state`, as on 0.4.4, so that a request that heartbeats and then succeeds still delivers the turn state. The passthrough MUST NOT record turn-state provenance for an attempt whose response arrives after the response to the client was committed, so that a later account cannot take over the record with a turn state the client never receives.
 
+### Requirement: Native Responses heartbeat carries the turn state
+
+On the native OpenAI Responses path, independently of any switch, when the first staging heartbeat commits HTTP 200 and the current attempt's staged upstream headers contain `x-codex-turn-state`, the gateway MUST write that one header with the commit and MUST record the turn-state provenance at the same moment. Other upstream headers (`x-request-id`, `x-codex-*` usage headers) MUST still wait for the first semantic output and MUST NOT be written once the response is committed. Without a heartbeat before the first output, all staged headers MUST be written at the first output as before. Without a turn state, or when the response was already committed before the upstream response arrived, the heartbeat MUST carry only the stable stream headers and MUST NOT record provenance.
+
+#### Scenario: Long first token, single attempt
+- **WHEN** an OAuth account on the native path mints a turn state, the first output takes longer than the keepalive interval, and the same attempt succeeds
+- **THEN** the committed response headers contain that attempt's `x-codex-turn-state` but not its `x-request-id` or `x-codex-*` usage headers, the provenance names that account, and the body starts with `:` followed by the normal output.
+
+#### Scenario: Switch after the heartbeat
+- **WHEN** account A's attempt commits a heartbeat with A's turn state, A then times out before output, and account B serves (whether or not B mints its own turn state)
+- **THEN** the client keeps A's turn state and the provenance stays with A; on the next request, the outbound guard strips A's turn state if the request is routed to B and keeps it if routed to A.
+
+#### Scenario: No turn state from the upstream
+- **WHEN** the upstream response carries no `x-codex-turn-state` and a heartbeat commits first
+- **THEN** the heartbeat carries only the stable stream headers and no provenance is recorded.
+
 #### Scenario: Passthrough keeps the attempt headers on heartbeats
 - **WHEN** a passthrough attempt commits a heartbeat and then succeeds
 - **THEN** the client receives that attempt's `x-codex-turn-state` and `x-request-id`.

@@ -37,6 +37,11 @@
 - [x] 3.8 PM 2026-10-21T15:00Z 裁定撤回 INTEG-P2-1，透传心跳的响应头保持 0.4.4（`c5ccb7e14` 回退，`0c01bf2a5` 固定写头时机）；turn-state 溯源只在响应提交前记录（`50053a8ea`，可单独撤回）。最终 HEAD 上定向 `-race -count=3`（service 585 项、handler 93 项）0 失败、0 跳过、0 竞争，增量 lint 0 项，文档检查、scheduler-diff 与干净临时 worktree 的 audit 通过。
 - [x] 3.9 审查 `74133b338..50053a8ea`（8 个提交）：δ @ `50053a8ea` 可以并入 0.4.5 候选，没有 P0、P1；INTEG-P2-1 按 PM 裁定作为已知差异关闭，INTEG-P2-2 已修复关闭；撤回 `c5ccb7e14` 干净（REVIEW 2026-10-21T15:15Z，`review/CODE_REVIEW_045_DELTA.md`）。前提是该 HEAD 的定向 `-race` 通过；集成合并后要重跑全量门禁并补审合并结果（4.2、4.3）。
 
+## 3A. 原生 Responses 第一次心跳时带上 turn-state（O3；PM 2026-10-21T16:30Z 纳入 0.4.5）
+
+- [ ] 3A.1 实现（β）：原生暂存期第一次心跳提交时，如有这次尝试的 `x-codex-turn-state`，只多写这一个头并同时记录溯源；不加开关；登记 required_literal 与具名补丁测试；`GATEWAY_RESILIENCE.md` §6 与“心跳只写网关自身的头”一行注明例外（β）。用例按 `review/PROPOSAL_046.md` §1.6：单次成功拿到 turn-state；心跳后换号时守卫剥离；无心跳、无 turn-state、提交早于响应时行为不变；门票账号、R2-P2-1、原生规则终止帧的既有用例不受影响。
+- [ ] 3A.2 独立审查（γ，只读）。
+
 ## 4. 集成（α，PM 2026-10-21T12:51Z 授权本地集成）
 
 - [x] 4.1 按 RA-1 → ε → DOCS → δ 合入；手工合并 `GATEWAY_RESILIENCE.md` 的可重放前缀与严格终止说明、`policy.json` 的具名补丁测试，两边增补全部保留；`VERSION` 与 `UPSTREAM_BASE.json` 改为 0.4.5。基线既有的 `contentModerationHandlerSettingRepo` 竞争以只改测试的独立提交 `c906ba5ca` 修复，修前复现、修后 `-race -count=3` 通过。四个原版调度文件相对 main 无变化，scheduler-diff 保留既有差异登记。 已增量合入 δ 最终 `50053a8ea` 与 DOCS 最终 `2ebb17d1e`，保留 ε `930213caa`；首次候选 `43be712aa` 门禁为 22/25，不作为候选，见 design §7。
@@ -45,11 +50,16 @@
   - unit：第三轮原始结果 24 项通过、1 项失败，失败的是 `TestInflightEstimate_AccountMappingNoDBAndBoundedMemory` 的全局堆阈值（基线既有的偶发，见 7.4）。单独重跑 5 次全过；按 PM 指示用原命令完整重跑 unit（attempt3b）通过，以它替代该项结果，原失败保留。没有跳过用例，也没有放宽阈值。
   - 其余：无 tag 测试；`ci_gate.py` 390 个顶层用例 `-race` 0 跳过；service 与 handler 的额外定向 `-race` 全部执行、0 失败；前端 413 个文件、3182 个用例；四种 vet 与 lint；`govulncheck` 无可达漏洞；依赖审计无高危、严重；`tools/tests` 41 例；文档检查、scheduler-diff、带前端产物的构建、干净树 audit。
 - [x] 4.3 对集成结果的独立审查：`46239531d` 可以作为 0.4.5 本地候选，没有 P0、P1，也没有新的 P2（REVIEW 增量补审 2026-10-21T15:35Z）；`b966306de` 只追加记忆与归档、无代码改动，确认为最终本地候选（`review/CODE_REVIEW_045_INTEG.md`）。
+- 以上 4.1–4.3 针对不含 O3 的 `b966306de`，它现在只是预跑候选（design §7）。O3 并入后：
+- [ ] 4.4 合入 O3，得到新的候选 SHA。
+- [ ] 4.5 在新 SHA 上重跑全量门禁（同 4.2 的各项）。
+- [ ] 4.6 对 O3 并入后的集成结果做独立审查（codex）。
 
 ## 5. 测试服务器验证（QA）
 
 - [ ] 5.1 新故障与场景：Gateway 入站经 Anthropic 上游、Responses 透传、心跳响应头、raw Chat 占位 `error`（建议清单见 design §7），先在 0.4.4 上确认。
-- [ ] 5.2 唯一候选 `b966306de`（QA 2026-10-21T15:53Z 起，PM 指令 15）：只构建一次；71 个场景（含 RA-1 复跑）；0.4.3 → 0.4.5、0.4.4 → 0.4.5 两条升级演练；6.5 小时浸泡。报告在仓库外 `staging/REPORT_045_b966306de.md`。
+- [ ] 5.2 唯一候选：等 O3 并入后的新 SHA。只构建一次；71 个场景（含 RA-1 复跑与 O3 场景）；0.4.3 → 0.4.5、0.4.4 → 0.4.5 两条升级演练；6.5 小时浸泡。
+- [ ] 5.3 预跑 `b966306de`（QA 2026-10-21T15:53Z 起）：71 个场景作为预跑证据保留，报告在仓库外 `staging/REPORT_045_b966306de.md`；这个 SHA 不做升级演练与浸泡（PM 2026-10-21T16:30Z）。
 
 ## 6. PR 与发版（用户授权后）
 
@@ -59,9 +69,9 @@
 
 ## 7. 后续（0.4.6 待办，不阻断 0.4.5）
 
-7.1–7.3 由审查在 δ 复核与集成审查中提出（design §8），7.4 来自 0.4.5 第三轮门禁。
+7.1–7.3 由审查在 δ 复核与集成审查中提出（design §8），7.4 来自 0.4.5 第三轮门禁。7.1 已提前到 0.4.5 处理，其余仍留在 0.4.6。
 
-- [ ] 7.1 原生 Responses 路径心跳之后拿不到 turn-state（0.4.4 起）：与透传上撤回的 INTEG-P2-1 是同一个取舍。评估原生路径要不要像透传一样，在心跳提交时带出上游头；要先弄清哪些账号类型走原生路径、它们是否铸造 turn-state。
+- [x] 7.1 原生 Responses 路径心跳之后拿不到 turn-state：已在 0.4.5 用 O3 处理（3A，design §3.4）。
 - [ ] 7.2 turn-state 溯源改为在响应头真正发出时才记录，消除“响应到达后、提交前失败并最终耗尽”与 CDN 首包保活微秒级窗口两处不准的记录；同时收窄 `GATEWAY_RESILIENCE.md` 里“溯源只记客户端实际拿到的那次尝试”的措辞（该行归 δ；本变更的 design 与规格已改为“响应尚未提交时到达的尝试”）。
 - [ ] 7.3 LEAK-P2-1：WS 状态绑定表的清理吞吐固定为每表每分钟 512 条。评估按上次清理以来的写入量调整扫描量，或表满时优先淘汰已过期的条目；是否做具名补丁按上游同步机制决定（`review/LEAK_AUDIT_0.4.4.md` 第 5 节）。
 - [ ] 7.4 `TestInflightEstimate_AccountMappingNoDBAndBoundedMemory` 测的是全局 `HeapAlloc` 差值，阈值 8 MiB，本机负载高时偶发超限：0.4.5 第三轮门禁实测 8.26 MiB，单独重跑 5 次为 2.8–4.4 MiB，全部通过。测试文件相对 main 没有改动，属于基线既有的偶发。改为测本次操作的分配量（`testing.AllocsPerRun`，或 `runtime.ReadMemStats` 的 `TotalAlloc` 差值），或在 GC 稳定后再取基线。
