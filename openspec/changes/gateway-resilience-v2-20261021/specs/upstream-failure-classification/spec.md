@@ -4,7 +4,7 @@
 
 ### Requirement: Only real capacity signals are capacity shedding
 
-With `failure.decision_v2` on, a failure MUST be classified `CAPACITY_SHED` only for `server_is_overloaded`, `slow_down`, 529, a structured overloaded error, or 503 with overloaded wording (the 0.4.3 exception for CDN error pages stays). A request-scoped transient failure MUST NOT be promoted to `CAPACITY_SHED` on that ground alone. The operations record (`resilience_category`) and the handler's switching rules MUST use the same classification. With the switch off, the 0.4.3 classification applies.
+With `failure.decision_v2` on, a failure MUST be classified `CAPACITY_SHED` only for `server_is_overloaded`, `slow_down`, 529, a structured overloaded error, or 503 with overloaded wording (the 0.4.3 exception for CDN error pages stays). A request-scoped transient failure MUST NOT be promoted to `CAPACITY_SHED` on that ground alone. The operations record (`resilience_category`) and the handler's switching rules MUST use the same classification. With the switch off, the 0.4.3 classification rules apply; the more complete extraction of code, type and message from the error stays, so a few operations records may be classified differently from 0.4.3.
 
 #### Scenario: Grok idle is not capacity
 - **WHEN** a Grok stream goes idle before output on account A and another OAuth account B on the same host can serve
@@ -32,7 +32,7 @@ With `failure.decision_v2` on, a failure MUST be classified `CAPACITY_SHED` only
 
 #### Scenario: Switch off
 - **WHEN** `failure.decision_v2` is off and a Grok stream goes idle
-- **THEN** the failure is classified as in 0.4.3.
+- **THEN** the failure is classified by the 0.4.3 rules.
 
 ### Requirement: Typed first-output timeout is distinguishable
 
