@@ -181,7 +181,11 @@ type noAccountRetryAdvisor interface {
 // earliest recovery. Status codes and messages stay as they are.
 func applyNoAccountRetryHints(c *gin.Context, diag any, apiKey *service.APIKey, routingModel string, cls noAccountErrorClassification) {
 	cfg := resilience.Current()
-	if c == nil || c.Request == nil || !cfg.ErrorsOn() || cls.ModelNotFound {
+	if c == nil || c.Request == nil || !cfg.ErrorsOn() {
+		return
+	}
+	if cls.ModelNotFound || !candidateRetryAllowed(cls.Status, cls.ErrType, "") {
+		suppressResilienceRetryAdvice(c, "non_retryable")
 		return
 	}
 	if cls.CapabilityOnly {

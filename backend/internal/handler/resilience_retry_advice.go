@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -101,16 +102,28 @@ func suppressResilienceTerminalReason(c *gin.Context, errType, code string) bool
 	return false
 }
 
+// candidateRetryAllowed separates account availability from local business
+// failures. A zero status is only used by standalone protocol writers.
+func candidateRetryAllowed(status int, errType, code string) bool {
+	for _, value := range []string{errType, code} {
+		switch strings.ToLower(value) {
+		case "invalid_request_error", "authentication_error", "permission_error",
+			"model_not_found", "not_found_error", "billing_service_error":
+			return false
+		}
+	}
+	return status == 0 || status == http.StatusTooManyRequests || (status >= 500 && status < 600)
+}
+
 func responsesFailedRetryAdvice(c *gin.Context, errType, code string) resilience.RetryAdvice {
 	suppressResilienceTerminalReason(c, errType, code)
-	advice := resilience.ResolveRetryAdvice(c.Request.Context())
-	// Invalid input and authentication errors are not candidate failures.
-	switch errType {
-	case "invalid_request_error", "authentication_error", "permission_error":
-		advice = resilience.RetryAdvice{Suppress: true, Source: "client_error"}
-		resilience.SetRetryAdvice(c.Request.Context(), advice)
-		advice = resilience.RetryAdviceFrom(c.Request.Context())
+	// All handler stream exits record the intended status before writing;
+	// the wire status may already be 200 because of a heartbeat.
+	streamErr, _ := service.GetOpsStreamError(c)
+	if !candidateRetryAllowed(streamErr.IntendedStatus, errType, code) {
+		suppressResilienceRetryAdvice(c, "non_retryable")
 	}
+	advice := resilience.ResolveRetryAdvice(c.Request.Context())
 	c.Writer.Header().Del("Retry-After")
 	c.Set(ginKeyResilienceRetryAfter, 0)
 	if headers := advice.Headers(); headers != nil {
