@@ -94,14 +94,6 @@ func resilienceContentRejection(c *gin.Context, failoverErr *service.UpstreamFai
 	return message, true
 }
 
-// writeOpenAIContentRejection writes a content-safety refusal in the OpenAI
-// error format.
-func writeOpenAIContentRejection(c *gin.Context, message string) {
-	c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
-		"type": "invalid_request_error", "code": codeContentPolicyViolation, "message": message,
-	}})
-}
-
 // resilienceTranslateError maps internal error types to the client-facing
 // type and code, and appends the retry hint to no-account messages.
 func resilienceTranslateError(c *gin.Context, status int, errType, code, message string) (string, string, string) {
