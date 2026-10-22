@@ -148,13 +148,23 @@
 
 ## 进行中的工作
 
-### 20261022-fallback-group-user-invisible — 无号兜底分组对用户不可见（δ 后端实现中；2026-10-22T08:40Z 登记）
+### 20261022-fallback-group-user-invisible — 无号兜底分组对用户不可见（前后端已在本地分支完成、全量门禁通过，待 REVIEW 与 QA；2026-10-22T11:30Z 更新）
 
 - 请求（用户 2026-10-22）：用户端不显示兜底，分组显示原分组；管理端保留“兜底：原分组 → 实际分组”；按原分组计费，兜底只是内部路由；主分组恢复后路由回来。
 - 设计与 PM 决定在仓库外 `xy2api-artifacts/fallback-billing-20261022/`（`contract/DESIGN.md`、`briefs/PM_DECISION_DESIGN.md`）。统一口径：一次兜底请求的用户价格、权限和限额，等于原分组自己服务这次请求时的结果；兜底组只决定由谁服务、怎么服务；账号侧成本按实际账号计。不做迁移，`usage_logs.group_id` 仍记实际服务的分组。
 - 分支：后端 `feat/fallback-group-user-invisible-20261022`（工作树 `xy2api-wt/fallback-be`，自 origin/main `cfb4fae48`）；前端由 FE 在 `feat/fallback-group-user-invisible-fe-20261022` 上做，完成后并入后端分支再跑全量门禁。PR #121 合入后把 main 合进来。不推送；开 PR、合并等 PM 指令，合并还要用户确认。
 - 范围：计费与 RPM 按原分组（计费 Key）、所有写用量路径补原分组、模型白名单按原分组、`/v1/models` 不经过兜底中间件、用户侧用量读取按原分组、去掉可用渠道与分组 DTO 里的兜底字段、R4 两条切回用例、`GATEWAY_RESILIENCE.md` 同步。
 - 边界：不碰 #121 改的设置与 TPS 文件；前端文件归 FE。
+- 已完成（后端分支，只在本地，未推送）：
+  - 计费 Key：中间件把原 Key 存进请求状态，`service.BillingAPIKey` 在计价、限额、权限处取回。用户价格按原分组（用户×原分组倍率、分组倍率与高峰、图片与视频倍率、分组与渠道定价）；计费模型按原分组渠道（Q9：计费来源是上游、响应模型或缺省时按兜底账号实际服务的模型）；分组 RPM、在途预留同口径；`usage_logs.group_id`、渠道 id、账号统计费用、份额调度观测仍为服务一侧。
+  - Q8（PM 09:50Z 改判）：仅因兜底组“强制 Fast”导致的 priority，在客户端未请求 priority、原分组不强制 Fast 时按 standard 向用户计费，差价由平台承担（`TotalCost` 与 `service_tier` 仍为 priority）。
+  - Q1 白名单（含 Responses WebSocket）按原分组；Q2 模型列表 GET 不经过兜底；Q3 系统提示仍用兜底组；Live 与批量图片按原分组计价与授权（顺带修正 live 旁路在主组恢复后返回 403）。
+  - 用户侧：用户用量 DTO 显示原分组、不带原分组字段；用户筛选、统计、趋势、模型与分组分布、CSV 导出按 `COALESCE(origin_group_id, group_id)`；用户错误请求按 Key 当前分组（Q4）；可用渠道与用户分组 DTO 去掉兜底字段（管理端 `AdminGroup` 保留）。
+  - R4：现有切回机制满足需求，补两条用例并写明切回时机。
+  - 具名补丁 `xy-fallback-group-user-invisible`（`policy.json`、`UPSTREAM_BASE.json`）；退役名字登记 `tools/docs_consistency.json`；现行说明 [`GATEWAY_RESILIENCE.md`](GATEWAY_RESILIENCE.md) §1、§4.3。
+  - 合入 origin/main `e7fe4a8e9`（#121，仅本记忆冲突，两边保留）与 FE 分支 `8e8cd8c79`（无冲突）。
+- 验证（合并后的树，`e89094bf0`）：gofmt；vet 四种 tag；golangci-lint v2.14.0 全量 0 项；`go test -tags=unit ./...` 全部通过（契约用例随字段删除同步更新）；`ci_gate.py` 330 项 `-race` 0 跳过；改动相关用例 `-race -count=3` 通过；前端 pnpm 9 frozen install、lint、typecheck、415 个文件 3197 项、build 通过；文档一致性、scheduler-diff、tools 41 项、干净树 `sync.py audit` 通过。middleware 的 `TestFastFailCountsOnlyGroupLevelNoAccount`、`TestFastFailRetryStormOnSingleAccountGroup` 在 `-count=3` 下失败、`-count=1` 通过，在 main `e7fe4a8e9` 上同样复现（进程级快速失败缓存跨重复残留），与本任务无关。
+- 下一步：REVIEW 审查；QA 在测试服务器定向验证；开 PR、合并等 PM 指令，合并还要用户确认。明细与门禁日志在仓库外 `xy2api-artifacts/fallback-billing-20261022/`（`contract/CHANGES_DELTA.md`、`gates/`）。
 
 ### 20261022-pr121-main-integration — PR #121 合入最新 main 与合并验证
 
