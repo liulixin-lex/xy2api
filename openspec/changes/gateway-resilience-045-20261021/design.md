@@ -166,7 +166,7 @@ PM 2026-10-21T16:30Z 决定纳入 0.4.5（仓库外 `briefs/PM_DECISION_O3.md`�
   - Responses 透传：created 后静默超过首输出截止换号；响应头不来时换号；输出后停滞以 `response.failed` 收尾；中转注释立即可见；暂存期客户端断开不换号；
   - 心跳之后换号成功的兼容 Chat 与 Messages 请求，响应头里没有失败账号的 `x-request-id`；
   - raw Chat 上游在正常分块里放 `"error": ""` 时正常完成。
-- 原生 Responses 的 O3 场景：长首字的单次成功请求拿到 turn-state；心跳后换号时，下一次请求发往新账号的旧 turn-state 被剥离。
+- 原生 Responses 的 O3 场景（长首字的单次成功请求拿到 turn-state；心跳后换号时，下一次请求发往新账号的旧 turn-state 被剥离）：**没有在测试服务器上做**。测试服务器没有 OAuth 夹具，故障端也不生成 `x-codex-turn-state`，这两项只由单元测试覆盖（tasks 3A），没有端到端验证（更正，PM 2026-10-21T20:50Z；实际结果见 tasks 5.2）。
 - 范围冻结后的验证口径（PM 2026-10-21T18:20Z）：候选 `0c31b5b38`；主栈跑 71 个场景、12 项补测与 0.4.3 → 0.4.5、0.4.4 → 0.4.5 两条升级演练；浸泡按 0.4.4 的发版标准以 3 小时为发版判据（热身后至少 3 个周期时出阶段判定），并继续跑满 6.5 小时，作为日后生产部署的证据，不阻塞发版决策。验证结果写入 tasks。
 
 ## 8. 已知限制和后续
@@ -182,5 +182,5 @@ PM 2026-10-21T16:30Z 决定纳入 0.4.5（仓库外 `briefs/PM_DECISION_O3.md`�
 - 原生 Responses 心跳之后：turn-state 由 O3 补上（§3.4）；**用量头和 `x-request-id` 仍然拿不到**，因为它们仍要等首个语义输出，而心跳已经提交。用量头只影响 Codex 界面的额度显示。心跳后又换号时，客户端持有的是失败账号的 turn-state，由溯源加出站守卫保证它到不了其他账号的上游。
 - 集成审查的 INTEG-P2-2（Gateway 反向转换缺少首写与取消竞态的处理）已由 δ `104a92e99` 修复，审查关闭。
 - WS 状态绑定表的过期清理每表每分钟最多扫 512 条（LEAK-P2-1，0.4.4 起既有）。生产上不同响应 ID 超过约 350 个/分钟时，表会长期顶满，并随机淘汰仍有效的条目，续写查询改走 Redis（Redis 有同 TTL 的镜像，功能正确，代价是多一次往返）；内存仍有界，两表合计约 20 MiB（tasks 7.3）。
-- 兼容路径用例 `TestCompatPreludeHeartbeatDisconnectDrainsUsageAfterContent/disabled` 在一次高负载的大集合扫描中失败过一次，单独重复 5 次都通过，判断为时序偶发（δ 未改兼容路径）。
+- 兼容路径用例 `TestCompatPreludeHeartbeatDisconnectDrainsUsageAfterContent/disabled` 在一次高负载的大集合扫描中失败过一次，单独重复 5 次都通过，判断为时序偶发（δ 未改兼容路径）。发版后它在 `v0.4.5` 的 tag CI（`/disabled`）和 #120 的 PR CI（`/enabled`）中又各失败一次，都是单次重跑通过；REVIEW 复核出一个只会少计用量的竞态和一个测试侧的时序原因，登记为 0.4.6 待办 tasks 7.6。
 - 两处基线既有的测试竞态已在本期修掉，见 proposal“不做”。

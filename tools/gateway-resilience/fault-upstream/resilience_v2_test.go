@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func faultRequest(spec, path, body string) *httptest.ResponseRecorder {
@@ -79,8 +82,94 @@ func TestResilienceV2PreludeFailures(t *testing.T) {
 	}
 }
 
+func TestResilienceV2CommentKeepalive(t *testing.T) {
+	for _, tc := range []struct {
+		spec       string
+		last       string
+		wantFailed bool
+	}{
+		{"F38;outcome=failed;code=busy;after=0", "response.failed", true},
+		{"F38;outcome=ok;first=0", "response.completed", false},
+	} {
+		t.Run(tc.spec, func(t *testing.T) {
+			w := faultRequest(tc.spec, "/v1/responses", `{"model":"fault-model","stream":true}`)
+			if w.Code != 200 {
+				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+			}
+			if !strings.HasPrefix(w.Body.String(), ": keep-alive\n\n") {
+				t.Fatalf("first stream bytes must be a flushed SSE comment: %q", w.Body.String())
+			}
+			events := faultEvents(t, w.Body.String())
+			if len(events) < 2 || events[0]["type"] != "response.created" || events[len(events)-1]["type"] != tc.last {
+				t.Fatalf("unexpected event sequence: %#v", events)
+			}
+			if tc.wantFailed {
+				created := events[0]["response"].(map[string]any)
+				failed := events[len(events)-1]["response"].(map[string]any)
+				if created["id"] != failed["id"] {
+					t.Fatalf("created and failed IDs must match: %#v", events)
+				}
+			}
+		})
+	}
+}
+
+func TestResilienceV2CommentFlushedBeforeSemanticGap(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(handle))
+	defer server.Close()
+	client := &http.Client{Timeout: 3 * time.Second}
+	response, err := client.Post(server.URL+"/f/F38;outcome=failed;after_comment=0.2/v1/responses", "application/json", strings.NewReader(`{"model":"fault-model","stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	line, err := reader.ReadString('\n')
+	if err != nil || line != ": keep-alive\n" {
+		t.Fatalf("first flushed line = %q, error = %v", line, err)
+	}
+	commentAt := time.Now()
+	for {
+		line, err = reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasPrefix(line, "data:") {
+			break
+		}
+	}
+	if gap := time.Since(commentAt); gap < 150*time.Millisecond {
+		t.Fatalf("comment was buffered with semantic data, gap = %s", gap)
+	}
+}
+
+func TestResilienceV2AnthropicDeltaEOF(t *testing.T) {
+	w := faultRequest("F39", "/v1/messages", `{"model":"fault-model","stream":true}`)
+	if w.Code != 200 {
+		t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+	}
+	events := faultEvents(t, w.Body.String())
+	if len(events) < 4 || events[len(events)-1]["type"] != "message_delta" {
+		t.Fatalf("expected terminal message_delta: %#v", events)
+	}
+	for _, event := range events {
+		if event["type"] == "message_stop" {
+			t.Fatalf("F39 must close at EOF without message_stop: %#v", events)
+		}
+	}
+	terminal := events[len(events)-1]
+	delta := terminal["delta"].(map[string]any)
+	if delta["stop_reason"] != "end_turn" {
+		t.Fatalf("stop_reason = %#v", delta["stop_reason"])
+	}
+	usage := terminal["usage"].(map[string]any)
+	if usage["input_tokens"] != float64(120) || usage["output_tokens"] != float64(24) || usage["cache_read_input_tokens"] != float64(64) {
+		t.Fatalf("terminal usage = %#v", usage)
+	}
+}
+
 func TestResilienceV2CapabilityProbes(t *testing.T) {
-	for _, id := range []string{"F31", "F32", "F33", "F34", "F34B", "F36", "F37"} {
+	for _, id := range []string{"F31", "F32", "F33", "F34", "F34B", "F36", "F37", "F38", "F39"} {
 		t.Run(id, func(t *testing.T) {
 			w := faultRequest(id, "/v1/responses", `{"stream":false,"tool_choice":"required"}`)
 			if w.Code != 200 || !strings.Contains(w.Body.String(), `"function_call"`) {

@@ -71,6 +71,8 @@ var scenarios = map[string]string{
 	"F35":  "raw Chat only: error data frame followed by [DONE]; Responses endpoint returns 404",
 	"F36":  "nonstream requests get 400 This group only accepts streaming requests with OpenAI error.param=null; streams succeed",
 	"F37":  "503 server_is_overloaded with a known Retry-After (reset=8, delay for CDN commitment)",
+	"F38":  "stream starts with an SSE comment (: keep-alive), then fails or completes (outcome=failed|ok, code=...)",
+	"F39":  "Anthropic stream sends message_delta stop_reason=end_turn with usage, then EOF without message_stop",
 	"BAL":  "normal while the balance of state key=… is positive, F12 otherwise (reset=seconds adds a relay's exhausted ratelimit headers)",
 	"MIX":  "random fault with probability p percent (default 5), otherwise normal",
 }
@@ -299,6 +301,14 @@ func normal(ctx context.Context, w http.ResponseWriter, p protocol, model string
 		return "completed"
 	}
 	startSSE(w)
+	return normalStream(ctx, w, p, model, first, stallAfter, failCode, failAfter, u)
+}
+
+// normalStream writes the streaming part of normal. The response headers and
+// Content-Type must already be sent by the caller; F38 uses this helper after
+// its leading SSE comment so the comment and the first semantic event share a
+// single stream.
+func normalStream(ctx context.Context, w http.ResponseWriter, p protocol, model string, first, stallAfter time.Duration, failCode string, failAfter time.Duration, u usage) string {
 	id := fmt.Sprintf("resp_fault_%d", time.Now().UnixNano())
 	switch p {
 	case protoAnthropic:
@@ -336,6 +346,47 @@ func normal(ctx context.Context, w http.ResponseWriter, p protocol, model string
 		return "dropped"
 	}
 	writeStreamEnd(w, p, id, model, u)
+	return "completed"
+}
+
+// anthropicDeltaEOF models relays that send a terminal message_delta and then
+// close the connection without message_stop. A converter can use the terminal
+// stop_reason and usage to synthesize its own completion event.
+func anthropicDeltaEOF(ctx context.Context, w http.ResponseWriter, model string) string {
+	u := defaultUsage()
+	startSSE(w)
+	id := fmt.Sprintf("msg_fault_%d", time.Now().UnixNano())
+	if err := sse(w, "message_start", map[string]any{"type": "message_start", "message": map[string]any{
+		"id": id, "type": "message", "role": "assistant", "model": model, "content": []any{},
+		"usage": map[string]any{"input_tokens": u.in, "output_tokens": 1, "cache_read_input_tokens": u.cached}}}); err != nil {
+		return "cancelled"
+	}
+	if err := sse(w, "content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}}); err != nil {
+		return "cancelled"
+	}
+	for i := 0; i < 3; i++ {
+		if err := writeDelta(w, protoAnthropic, id, model); err != nil {
+			return "cancelled"
+		}
+		if !sleepCtx(ctx, 200*time.Millisecond) {
+			return "cancelled"
+		}
+	}
+	if err := sse(w, "content_block_stop", map[string]any{"type": "content_block_stop", "index": 0}); err != nil {
+		return "cancelled"
+	}
+	if err := sse(w, "message_delta", map[string]any{
+		"type":  "message_delta",
+		"delta": map[string]any{"stop_reason": "end_turn"},
+		// Keep the complete usage visible on the terminal event. Anthropic
+		// normally repeats only output_tokens here, but relays in this test
+		// suite expose the input/cache counters as well.
+		"usage": map[string]any{"input_tokens": u.in, "output_tokens": u.out, "cache_read_input_tokens": u.cached},
+	}); err != nil {
+		return "cancelled"
+	}
+	// Deliberately omit message_stop: the HTTP handler returns and closes the
+	// stream immediately after the terminal message_delta above.
 	return "completed"
 }
 
@@ -455,6 +506,58 @@ func relayKeepalive(ctx context.Context, w http.ResponseWriter, model string, to
 	return "failed_in_stream"
 }
 
+// commentKeepalive starts a stream with a wire-level SSE comment. Comments
+// are deliberately emitted before any data frame and flushed immediately so
+// the gateway can observe the relay heartbeat while it is waiting for the
+// first semantic event. outcome=ok continues with a normal stream; any other
+// outcome sends a failure frame (busy by default).
+func commentKeepalive(ctx context.Context, w http.ResponseWriter, p protocol, model string, f fault) string {
+	startSSE(w)
+	if _, err := io.WriteString(w, ": keep-alive\n\n"); err != nil {
+		return "cancelled"
+	}
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	if !sleepCtx(ctx, f.secs("after_comment", 0)) {
+		return "cancelled"
+	}
+
+	outcome := strings.ToLower(strings.TrimSpace(f.params["outcome"]))
+	if outcome == "ok" || outcome == "success" || outcome == "complete" || outcome == "completed" {
+		return normalStream(ctx, w, p, model, f.secs("first", 0.2), 0, "", 0, defaultUsage())
+	}
+
+	id := fmt.Sprintf("resp_fault_f38_%d", time.Now().UnixNano())
+	if p == protoResponses {
+		if err := sse(w, "response.created", map[string]any{"type": "response.created", "response": map[string]any{
+			"id": id, "status": "in_progress", "model": model}}); err != nil {
+			return "cancelled"
+		}
+	} else if p == protoAnthropic {
+		if err := sse(w, "message_start", map[string]any{"type": "message_start", "message": map[string]any{
+			"id": id, "type": "message", "role": "assistant", "model": model, "content": []any{},
+			"usage": map[string]any{"input_tokens": 0, "output_tokens": 0}}}); err != nil {
+			return "cancelled"
+		}
+	}
+	if !sleepCtx(ctx, f.secs("after", 0)) {
+		return "cancelled"
+	}
+	code := f.params["code"]
+	if code == "" {
+		code = "busy"
+	}
+	if p == protoResponses {
+		if err := writeResponseFailFrame(w, id, code); err != nil {
+			return "cancelled"
+		}
+	} else {
+		writeFailFrame(w, p, code)
+	}
+	return "failed_in_stream"
+}
+
 // slowStream sends a delta every `every` until `total` has passed, then
 // finishes normally with usage (a long generation a client may abandon).
 func slowStream(ctx context.Context, w http.ResponseWriter, p protocol, model string, total, every time.Duration) string {
@@ -496,6 +599,22 @@ func writeDelta(w http.ResponseWriter, p protocol, id, model string) error {
 	}
 	_, err := io.WriteString(w, deltaText)
 	return err
+}
+
+func responseFailureMessage(code string) string {
+	return map[string]string{
+		"busy":                    "The server is busy. Please try again later.",
+		"server_is_overloaded":    "Overloaded",
+		"server_error":            "The service is busy",
+		"rate_limit_exceeded":     "Rate limit reached. Please try again in 20s.",
+		"insufficient_quota":      "You exceeded your current quota, please check your plan and billing details.",
+		"context_length_exceeded": "Your input exceeds the context window of this model.",
+	}[code]
+}
+
+func writeResponseFailFrame(w http.ResponseWriter, id, code string) error {
+	return sse(w, "response.failed", map[string]any{"type": "response.failed", "response": map[string]any{
+		"id": id, "status": "failed", "error": map[string]any{"code": code, "message": responseFailureMessage(code)}}})
 }
 
 func writeStreamEnd(w http.ResponseWriter, p protocol, id, model string, u usage) {
@@ -547,7 +666,7 @@ func nonStreamBody(p protocol, model string, u usage) any {
 
 func answersNormally(f fault, key string) bool {
 	switch f.id {
-	case "F00", "F17", "F22", "F23", "F24", "F25", "F26", "F29", "F31", "F32", "F33", "F34", "F34B", "F36", "F37":
+	case "F00", "F17", "F22", "F23", "F24", "F25", "F26", "F29", "F31", "F32", "F33", "F34", "F34B", "F36", "F37", "F38", "F39":
 		// F26 fails streams only; the capability probe is not streamed.
 		return true
 	case "BAL":
@@ -564,22 +683,16 @@ func toolCallBody(model string) any {
 }
 
 func writeFailFrame(w http.ResponseWriter, p protocol, code string) {
-	messages := map[string]string{
-		"busy":                    "The server is busy. Please try again later.",
-		"rate_limit_exceeded":     "Rate limit reached. Please try again in 20s.",
-		"insufficient_quota":      "You exceeded your current quota, please check your plan and billing details.",
-		"context_length_exceeded": "Your input exceeds the context window of this model.",
-	}
+	message := responseFailureMessage(code)
 	switch p {
 	case protoAnthropic:
 		t := map[string]string{"busy": "overloaded_error", "rate_limit_exceeded": "rate_limit_error", "insufficient_quota": "billing_error", "context_length_exceeded": "invalid_request_error"}[code]
-		_ = sse(w, "error", map[string]any{"type": "error", "error": map[string]any{"type": t, "message": messages[code]}})
+		_ = sse(w, "error", map[string]any{"type": "error", "error": map[string]any{"type": t, "message": message}})
 	case protoChat:
-		_ = sse(w, "", map[string]any{"error": map[string]any{"code": code, "message": messages[code]}})
+		_ = sse(w, "", map[string]any{"error": map[string]any{"code": code, "message": message}})
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	default:
-		_ = sse(w, "response.failed", map[string]any{"type": "response.failed", "response": map[string]any{
-			"id": "resp_fault", "status": "failed", "error": map[string]any{"code": code, "message": messages[code]}}})
+		_ = writeResponseFailFrame(w, "resp_fault", code)
 	}
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
@@ -749,6 +862,16 @@ func serve(ctx context.Context, w http.ResponseWriter, p protocol, path, model s
 			return normal(ctx, w, p, model, stream, 0, 0, "", 0)
 		}
 		return preludeFailure(ctx, w, model, f)
+	case "F38":
+		if !stream {
+			return normal(ctx, w, p, model, false, f.secs("first", 0.2), 0, "", 0)
+		}
+		return commentKeepalive(ctx, w, p, model, f)
+	case "F39":
+		if p != protoAnthropic || !stream {
+			return normal(ctx, w, p, model, stream, f.secs("first", 0.2), 0, "", 0)
+		}
+		return anthropicDeltaEOF(ctx, w, model)
 	case "F35":
 		if p == protoResponses {
 			apiError(w, p, http.StatusNotFound, "invalid_request_error", "unsupported_endpoint", "Responses endpoint is not supported")

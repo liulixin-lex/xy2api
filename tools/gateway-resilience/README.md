@@ -10,7 +10,7 @@ Tools for the 0.4.0 gateway resilience work (`openspec/changes/gateway-resilienc
 | `caddy_cuts.py` | CDN cut rate per entry (Cloudflare, ESA, direct) from Caddy JSON access logs; with `--app`, matches each cut to the application log to find requests completed (and billed) after the client was cut; share of 503 responses with `Retry-After`. `--json` prints one object. |
 | `session_streaks.py` | From application logs (JSON or console format): consecutive failures of one session on one account (requests without a session hash are counted per API key, separately), and the latency of requests that switched accounts and still succeeded. `--json` prints one object. |
 | `metrics_report.py` | design §14 report: `collect` measures one environment into a JSON file, `report` compares a baseline with a candidate against the §14 targets (Markdown; exit 1 when a measured metric misses). |
-| `fault-upstream/` | Fault-injecting upstream (Go, standard library only) with OpenAI Responses/Chat, Anthropic, Gemini, image, `/v1/usage` and new-api billing shapes. Scenarios F00–F37 (including F34B), `BAL` and `MIX`. |
+| `fault-upstream/` | Fault-injecting upstream (Go, standard library only) with OpenAI Responses/Chat, Anthropic, Gemini, image, `/v1/usage` and new-api billing shapes. Scenarios F00–F39 (including F34B), `BAL` and `MIX`. |
 | `cdn-sim/` | CDN edge simulator (Go, standard library only): first-byte and idle read timeouts, `X-XY-Edge` injection, cut and request logs. |
 
 ## Database scripts
@@ -94,6 +94,8 @@ http://fault-upstream:8080/f/F06;secs=200      (account base_url)
 | F35 | Responses endpoint returns 404; raw Chat stream emits error then `[DONE]` (nonstream returns 429) | |
 | F36 | Nonstream returns 400 `This group only accepts streaming requests` with explicit `error.param: null` in the OpenAI error body; streaming succeeds | `first` |
 | F37 | HTTP 503 `server_is_overloaded` with a known `Retry-After` | `reset` (default 8 s), `delay` (use 20 s for CDN commitment) |
+| F38 | Streaming starts with a flushed `: keep-alive` SSE comment, then emits a normal completion or a failure (`response.created` → `response.failed` for Responses) | `outcome` (`failed` by default, or `ok`), `code`, `after`, `first`, `after_comment` (seconds before any data frame) |
+| F39 | Anthropic streaming sends `message_delta(stop_reason=end_turn)` with terminal usage and closes at EOF without `message_stop`; Responses and Chat conversions should synthesize completion | |
 | BAL | Normal while the balance of `key` is positive, F12 otherwise | `key`, `first`, `reset` (adds a relay's exhausted rate-limit headers) |
 | MIX | A random fault with probability `p` percent per fault type, otherwise normal | `p` |
 
@@ -101,7 +103,7 @@ Any scenario accepts `delay` (seconds) to hold the answer back, for example `F16
 
 Control endpoints: `GET /_scenarios`, `GET /_requests?since=N` (outcome per request: `completed`, `cancelled`, `dropped`, `failed_in_stream`, `error_status`), `GET|POST /_control/balance?key=K&value=V`, `GET /healthz`.
 
-F34B (also accepted as F34b) is a synthetic empty-delta regression case. Probes established the event ordering, but did not inspect delta content. F34's unknown event was not observed; it checks that unknown metadata is treated conservatively. F31–F34B, F36 and F37 answer the gateway's tool capability probe normally so the scenario reaches the native Responses path.
+F34B (also accepted as F34b) is a synthetic empty-delta regression case. Probes established the event ordering, but did not inspect delta content. F34's unknown event was not observed; it checks that unknown metadata is treated conservatively. F31–F34B, F36–F39 answer the gateway's tool capability probe normally so the scenario reaches the native Responses path. F38's leading comment is a wire-level heartbeat and is followed by a semantic event; use `outcome=failed;code=busy` for an error passthrough check and `outcome=ok` for a successful stream. F39 is intended for accounts whose upstream endpoint is Anthropic Messages; a Responses or Chat request converted through that account should complete and retain the terminal usage after the upstream EOF.
 
 ## Staging regressions for 0.4.4
 
@@ -189,6 +191,10 @@ by the C0 compatibility contract. Failure evidence is retained and the temporary
 application container is removed. With `--parallel-soak`, its process is limited
 to 1 GiB and 0.5 CPU. Upgrade start/end and bulk-fill/backup timestamps are included
 in the soak report so overlapping disk I/O remains visible.
+The activity stream also keeps orchestration status events without an evidence
+directory. Only `upgrade_end` records load `REPORT.json`; a malformed upgrade
+record still fails validation. Run the aggregation regression with
+`python3 -m unittest discover -s tools/gateway-resilience/staging -p test_soak.py`.
 
 Soak uses `--hours 3 --cycle-minutes 30`, concurrency 20–50 and ten minutes of
 settling; the independent stack enables `gctrace=1` on the same candidate image.
@@ -200,6 +206,48 @@ Every ERROR count is reported; the automatic flood threshold is at least 60 line
 per minute for three consecutive minutes. Individual errors still need attribution
 in the final report. Existing slot, reservation, memory, panic and duplicate usage
 checks remain in effect.
+
+## Supplemental 0.4.5 checks
+
+`staging/supplement_045.py` covers twelve Gateway-to-Anthropic cases: both
+Responses and Chat exercise pre-output retry, post-output error, early EOF,
+stall, first-content timeout and non-retryable failure. It is plan-only by
+default; execution requires the full candidate SHA, its `BUILD.json`, the
+expected image ID and a new evidence directory. Run after the 71-case suite,
+using the same main-stack lock. It verifies image and binary identity and
+restores the two fixture accounts and resilience settings afterwards.
+
+Each case uses unique input/message text. These Gateway handlers derive
+their fallback session from that text; changing `session_id` or
+`prompt_cache_key` alone does not isolate them. Reusing a body allows a prior
+case's sticky binding or session failure avoidance to skip fault account A.
+Assertions require A's actual upstream attempt as well as terminal and usage
+evidence, so a direct success on B cannot count as a passed fault case.
+
+`staging/scenarios_045.py` is plan-only by default. With `--execute`, a new
+evidence directory and the expected running image ID, it runs eight cases
+serially on the main stack. Run it first against the formal 0.4.4 image and
+then against the released candidate. It never builds or switches an app image.
+The dedicated `G-qa-*` fixtures isolate these requests; settings, account
+configuration and the temporary error rule are restored and checked afterwards.
+Seed only these groups with `fixtures.py http://127.0.0.1:18210 --qa-only`;
+this subset preserves the existing scenario groups and user balance.
+
+- PT-7/PT-8 require the 12-second first-content/header deadline to cancel A
+  and complete on B. Only PT-7 requires an internal comment heartbeat.
+- PT-9 requires `stream_timeout` around 30 seconds and upstream cancellation,
+  so a natural EOF after 50 seconds cannot pass. PT-11 checks one zero-token
+  usage row after a failed passthrough stream.
+- F38-9 enables API-key passthrough and checks that the upstream comment is
+  visible before a two-second semantic gap. F38-12 uses a non-retryable error
+  and a unique rule message to prove the in-stream error-rule path emits a
+  matching created/failed pair after the comment, without bare JSON.
+- F39-5R/F39-5C capture the upstream terminal EOF and verify the actual
+  Anthropic attempt, a single successful converted terminal and one complete
+  usage row (120 input, 24 output, 64 cache-read tokens).
+
+OAuth headers/turn-state, failed terminals carrying nonzero usage, and exact
+write/cancellation races are outside these supplemental scenarios.
 
 ## cdn-sim
 
