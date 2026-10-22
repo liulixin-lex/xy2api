@@ -757,7 +757,6 @@ func setToSlice(set map[int64]struct{}) []int64 {
 	return out
 }
 
-// usageExportWhere shares list and export filtering without pagination or association queries.
 // usageLogGroupColumn is the group a usage row is matched and grouped by:
 // the group that served it, or with callerGroup the group the request was
 // made for (origin_group_id when an availability fallback group served it),
@@ -770,6 +769,7 @@ func usageLogGroupColumn(alias string, callerGroup bool) string {
 	return alias + "group_id"
 }
 
+// usageExportWhere shares list and export filtering without pagination or association queries.
 func usageExportWhere(filters UsageLogFilters) (string, []any) {
 	conditions := make([]string, 0, 9)
 	args := make([]any, 0, 9)
