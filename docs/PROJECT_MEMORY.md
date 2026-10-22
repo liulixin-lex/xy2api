@@ -148,7 +148,7 @@
 
 ## 进行中的工作
 
-### 20261022-fallback-group-user-invisible — 无号兜底分组对用户不可见（前后端已在本地分支完成、全量门禁通过，待 REVIEW 与 QA；2026-10-22T11:30Z 更新）
+### 20261022-fallback-group-user-invisible — 无号兜底分组对用户不可见（REVIEW 补修与 P2 全部完成并集成，最终门禁通过，待 PM 推送与开 PR；2026-10-22T14:40Z 更新）
 
 - 请求（用户 2026-10-22）：用户端不显示兜底，分组显示原分组；管理端保留“兜底：原分组 → 实际分组”；按原分组计费，兜底只是内部路由；主分组恢复后路由回来。
 - 设计与 PM 决定在仓库外 `xy2api-artifacts/fallback-billing-20261022/`（`contract/DESIGN.md`、`briefs/PM_DECISION_DESIGN.md`）。统一口径：一次兜底请求的用户价格、权限和限额，等于原分组自己服务这次请求时的结果；兜底组只决定由谁服务、怎么服务；账号侧成本按实际账号计。不做迁移，`usage_logs.group_id` 仍记实际服务的分组。
@@ -164,7 +164,11 @@
   - 具名补丁 `xy-fallback-group-user-invisible`（`policy.json`、`UPSTREAM_BASE.json`）；退役名字登记 `tools/docs_consistency.json`；现行说明 [`GATEWAY_RESILIENCE.md`](GATEWAY_RESILIENCE.md) §1、§4.3。
   - 合入 origin/main `e7fe4a8e9`（#121，仅本记忆冲突，两边保留）与 FE 分支 `8e8cd8c79`（无冲突）。
 - 验证（合并后的树，`e89094bf0`）：gofmt；vet 四种 tag；golangci-lint v2.14.0 全量 0 项；`go test -tags=unit ./...` 全部通过（契约用例随字段删除同步更新）；`ci_gate.py` 330 项 `-race` 0 跳过；改动相关用例 `-race -count=3` 通过；前端 pnpm 9 frozen install、lint、typecheck、415 个文件 3197 项、build 通过；文档一致性、scheduler-diff、tools 41 项、干净树 `sync.py audit` 通过。middleware 的 `TestFastFailCountsOnlyGroupLevelNoAccount`、`TestFastFailRetryStormOnSingleAccountGroup` 在 `-count=3` 下失败、`-count=1` 通过，在 main `e7fe4a8e9` 上同样复现（进程级快速失败缓存跨重复残留），与本任务无关。
-- 下一步：REVIEW 审查；QA 在测试服务器定向验证；开 PR、合并等 PM 指令，合并还要用户确认。明细与门禁日志在仓库外 `xy2api-artifacts/fallback-billing-20261022/`（`contract/CHANGES_DELTA.md`、`gates/`）。
+- REVIEW 补修（PM 12:00Z 起，12:20Z 改为 P2 全做、由 ε 与 FE 并行）：P1-1 Live 的 Redis 存取读写 `origin_group_id`（`ef5eed100`，miniredis 往返加真实 service 身份判定的仓库层用例，同提交登记 P2-5 的前端钩子与防回归用例）；P2-6 管理端金额口径、用户详情措辞（详情无 `group`，`group_id` 为原分组）、P2-7 注释归位（`aea937053`）；QA 工具三提交普通 cherry-pick（未加 `-x`）；QA 脚本只为断言字段已删而出现退役名，加入 allowed（`2101a6784`）。ε 的 P2-3、P2-2（`f5541a3b7`）与 FE 的 P2-1、P2-4、TestFastFail 测试修正（`fc95d031f`）由 δ 合入（`fbd598204`、`ccf5774a1`，只有 `policy.json` 两边追加冲突，保留双方条目）；lint 修正 `d7cabe427`。
+  - 口径补充：图片生成与 `/v1/messages` 调度两个开关，资格看原分组、能力看兜底组（原分组不允许按原分组 403；兜底组不支持按无号 503，错误不提兜底组）；利润门售价按原分组，门与账号成本仍属兜底组与实际账号；WebSocket 每轮的 Q8 判断在创建计费任务时固定；升级前排队的用户导出按用户分组筛选。
+- 验证（最终树）：`ccf5774a1` 上定向用例（P2-1、P2-2、P2-3 三种组合、P2-4、`TestFastFail*` ×3）通过，P2-2 补出红灯（旧实现两个子用例按兜底组 3 倍判断而失败）；gofmt、四种 vet；`go test -tags=unit ./...` 66 包通过（串行、`GOFLAGS=-p=2`、`-timeout=30m`）；本轮用例 `-race`；文档、scheduler-diff、tools 41 项、干净树 audit 通过。`d7cabe427` 上 golangci-lint 全量 0 项，`ci_gate.py` 413 项 `-race` 0 跳过，`usageexport` unit 与 `-race` 通过。前端（与 `47c6d3393` 相同）pnpm 9 install、lint、typecheck、build 通过；test 415 文件 3197 项全过，但 vitest 因 `AccountsView.selectAllResults.spec.ts` 的未处理 rejection 退出 1，在 origin/main `e7fe4a8e9` 上单独跑 5 次复现 3 次，属原有问题，与本任务无关。`TestFastFail*` 的基线问题已由 FE 只改测试修正。
+  - 负载说明：本机 4 核、负载 40–70 时，`internal/service` 曾超过默认 10 分钟（停在 `TestShareSchedulingSelectionCostAt500Accounts`），两条心跳时序用例偶发失败，单独重跑通过；最终 unit 串行完成。
+- 下一步：PM 推送并开 PR；REVIEW 增量复核、QA 在最终 SHA 复跑 FBILL；合并需用户确认。REVIEW 的 P1、P2 无遗留。明细与门禁日志在仓库外 `xy2api-artifacts/fallback-billing-20261022/`（`contract/CHANGES_DELTA.md`、`CHANGES_EPSILON.md`、`CHANGES_FE.md`、`gates/`）。
 
 ### 20261022-pr121-main-integration — PR #121 合入最新 main 与合并验证
 
@@ -1282,3 +1286,13 @@ pnpm --dir frontend run build
 - 按用户经 PM 08:15Z 的授权，在独立临时分支从 PR #121 原 head `57f30f2ac` 合入 main `cfb4fae48`；唯一冲突为本记忆，两边新增条目与历史日志均完整保留。两个 dashboard 文案文件自动合并，没有手工修改产品代码，差异范围仍为 PR 原有 29 文件。
 - 本地验证：文档一致性、scheduler-diff 通过；Go 1.27.3（GOMAXPROCS=2、GOFLAGS=-p=2）build、unit vet、PR 指定四项设置测试通过；service/handler/server/web 共 10 包 unit 21060 项通过、14 项条件跳过、零失败。pnpm 9 冻结依赖安装、typecheck、lint、414 文件/3192 项测试、build（含 i18n）全部通过。
 - 下一步：提交后复验文档与干净树 audit，普通推送；固定 HEAD 的 push/PR CI 与安全扫描全绿后常规合并，再核对 main CI 并移除临时树。仅已知 7.6 用例允许单次重跑；最终远端事实与清理记录写仓库外 PROGRESS_A。不涉及发版、生产或 Git 配置变更。
+
+### 2026-10-22T14:40Z — `20261022-fallback-group-user-invisible` — REVIEW 补修、P2 集成与最终门禁通过（本地，未推送）
+
+- 请求/目标：PM 12:00Z 按 REVIEW 补修；12:10Z 收窄、12:20Z 改为 P2 全部本期完成（ε 做 P2-3、P2-2，FE 做 P2-1、P2-4、TestFastFail）；13:36Z 由 δ 集成并跑完整门禁；13:50Z 磁盘与负载告急，改为串行。
+- 开始状态：`feat/fallback-group-user-invisible-20261022` @ `47c6d3393`，工作树干净，未推送。
+- 完成操作：P1-1、P2-5、P2-6、P2-7 与契约措辞（`ef5eed100`、`aea937053`）；QA 工具三提交 cherry-pick 与文档检查 allowed（`2101a6784`）；合入 FE `fc95d031f`（`fbd598204`）与 ε `f5541a3b7`（`ccf5774a1`，`policy.json` 按“保留双方条目”合并）；修 FE 用例的 errcheck（`d7cabe427`）。P2-2 的红灯在合并后的树上临时让 `fallbackBillingGroup` 返回空补跑。PR 正文原写 QA 提交“以 `cherry-pick -x` 并入”，实为普通 cherry-pick，正文已更正为列出原提交对应关系。
+- 修改文件（δ 部分）：`backend/internal/repository/gateway_cache.go` 及 `gateway_cache_live_test.go`、`usage_log_repo_query.go`、`backend/internal/usageexport/caller_group_test.go`、`docs/GATEWAY_RESILIENCE.md`、`tools/upstream-sync/policy.json`、`tools/docs_consistency.json`、本记忆；ε、FE 的改动见其 CHANGES。
+- 验证：见上方“进行中的工作”该任务的“验证（最终树）”；日志在仓库外 `gates/`（`*_final_ccf5774a1.log`、`*_final_d7cabe427.log`、`SERIAL_STATUS_*.log`、`T_targeted_ccf5774a1.log`、`RED_r2_*.log`）。独立 GOCACHE 已删除，前端 `node_modules` 与构建产物已删除。
+- 卡点/风险：前端 `AccountsView.selectAllResults.spec.ts` 的未处理 rejection 是 main 上就有的偶发问题，CI 的前端 test 可能因此偶发失败；本机高负载下 `internal/service` 的性能与心跳时序用例可能超时或偶发失败。
+- 下一步：PM 推送并开 PR；REVIEW 增量复核；QA 在最终 SHA 复跑 FBILL；合并需用户确认。
