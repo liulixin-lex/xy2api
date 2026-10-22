@@ -298,28 +298,48 @@ func TestStop_DrainsAllGoroutines(t *testing.T) {
 	stoppedWithin(t, r, 3*time.Second)
 }
 
-// TestStop_WaitsForInFlightCheck 验证 Stop 会等待正在执行的 RunCheck 退出（pool.StopAndWait）。
-func TestStop_WaitsForInFlightCheck(t *testing.T) {
-	svc := &stubMonitorSvc{
-		runCalled:  make(chan int64, 1),
-		runHoldFor: 200 * time.Millisecond,
-	}
+// TestStop_CancelsAndWaitsForInFlightCheck 验证 Stop 会取消正在执行的检测，并等它退出后才返回。
+// xy2api: 检测上下文从任务上下文派生，停机不再等满一整轮（最长约 50 秒）。
+func TestStop_CancelsAndWaitsForInFlightCheck(t *testing.T) {
+	var sawCancel, exited atomic.Bool
+	svc := &cancelObservingMonitorSvc{started: make(chan struct{}, 1), sawCancel: &sawCancel, exited: &exited}
 	r := newRunnerForTest(svc)
 	r.Start()
 	r.Schedule(&ChannelMonitor{ID: 1, Enabled: true, IntervalSeconds: 60})
 
 	select {
-	case <-svc.runCalled:
+	case <-svc.started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("first fire never happened")
 	}
 
-	start := time.Now()
 	stoppedWithin(t, r, 3*time.Second)
-	elapsed := time.Since(start)
-	// Stop 必须等待 in-flight check 跑完（runHoldFor=200ms），耗时下界约 100ms。
-	if elapsed < 100*time.Millisecond {
-		t.Fatalf("Stop returned too fast (%v); did not wait for in-flight check", elapsed)
+	if !sawCancel.Load() {
+		t.Fatal("in-flight check was not cancelled by Stop")
+	}
+	if !exited.Load() {
+		t.Fatal("Stop returned before the in-flight check exited")
+	}
+}
+
+// cancelObservingMonitorSvc 的 RunCheck 一直阻塞到 ctx 取消，并记录是否看到取消。
+type cancelObservingMonitorSvc struct {
+	stubMonitorSvc
+	started   chan struct{}
+	sawCancel *atomic.Bool
+	exited    *atomic.Bool
+}
+
+func (s *cancelObservingMonitorSvc) RunCheck(ctx context.Context, _ int64) ([]*CheckResult, error) {
+	s.started <- struct{}{}
+	defer s.exited.Store(true)
+	select {
+	case <-ctx.Done():
+		s.sawCancel.Store(true)
+		time.Sleep(20 * time.Millisecond) // 模拟收尾，Stop 必须等它
+		return nil, ctx.Err()
+	case <-time.After(5 * time.Second):
+		return nil, nil
 	}
 }
 

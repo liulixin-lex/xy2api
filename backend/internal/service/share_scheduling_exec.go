@@ -537,6 +537,9 @@ func (e *shareExecutor) serve(d sharesched.Decision) *shareOutcome {
 	if out := e.acquire(d); out != nil {
 		return out
 	}
+	if out := e.monitorProbeAcquire(d); out != nil {
+		return out
+	}
 	return e.fallbackWait(d)
 }
 

@@ -9,12 +9,21 @@ import (
 // ChannelMonitor 全局常量。
 // 这些是 MVP 阶段的硬编码值，按需可以提到 config 中。
 const (
-	// monitorRequestTimeout 单次模型请求总超时（含 Body 读取）。
-	monitorRequestTimeout = 45 * time.Second
-	// monitorPingTimeout HEAD 请求 endpoint origin 的超时。
+	// monitorRequestTimeout 一轮探测（含参数修正重发与重试）拿到答案的总预算；
+	// 30 秒内拿不到正确回答即为 error / failed。
+	monitorRequestTimeout = 30 * time.Second
+	// monitorPingTimeout HEAD 请求 endpoint origin 的超时（与模型请求并行）。
 	monitorPingTimeout = 8 * time.Second
-	// monitorDegradedThreshold 主请求成功但耗时超过该阈值视为 degraded。
-	monitorDegradedThreshold = 6 * time.Second
+	// monitorDegradedThreshold 拿到正确回答、但响应时间超过该阈值视为 degraded。
+	monitorDegradedThreshold = 10 * time.Second
+	// monitorProbeMaxAttempts 每个模型每轮最多发出的请求数（参数修正重发与重试共用）。
+	monitorProbeMaxAttempts = 2
+	// monitorProbeRetryMinRemaining 剩余预算不足该值时不再重试。
+	monitorProbeRetryMinRemaining = 10 * time.Second
+	// monitorProbeFastFailWindow 在该时间内回的 502/503 算“秒回”，可以立即重试。
+	monitorProbeFastFailWindow = 5 * time.Second
+	// monitorProbeHTTP2PingInterval HTTP/2 连接空闲该时长后发 PING 探活，及早丢弃失效连接。
+	monitorProbeHTTP2PingInterval = 30 * time.Second
 	// monitorHistoryRetentionDays 明细历史保留天数。
 	// 60s 默认间隔 * 30 天 ≈ 43200 行/monitor/model，一般部署总量 <= 2M 行，
 	// PG 无压力；所以直接保留完整明细一个月，可用率查询可以全走原始行不依赖聚合。
@@ -26,8 +35,6 @@ const (
 	// monitorMaintenanceMaxDaysPerRun 单次维护任务最多聚合的天数。
 	// 用于限制首次上线回填（30 天）+ 少量余量，避免长事务。
 	monitorMaintenanceMaxDaysPerRun = 35
-	// monitorWorkerConcurrency 调度器并发执行的监控数（pond 池容量）。
-	monitorWorkerConcurrency = 5
 	// monitorStartupLoadTimeout Start 时一次性加载所有 enabled monitor 的总超时。
 	monitorStartupLoadTimeout = 10 * time.Second
 	// monitorMinIntervalSeconds / monitorMaxIntervalSeconds 用户配置的检测间隔上下限。
@@ -37,13 +44,17 @@ const (
 	monitorMessageMaxBytes = 500
 	// monitorResponseMaxBytes 单次模型响应最大读取字节，防止 OOM。
 	monitorResponseMaxBytes = 64 * 1024
+	// monitorStreamMaxBytes 一次流式探测最多读取的字节数（推理增量较多时也足够）。
+	monitorStreamMaxBytes = 1 << 20
+	// monitorStreamLineMaxBytes SSE 单行最大字节数。
+	monitorStreamLineMaxBytes = 256 * 1024
 	// monitorErrorBodySnippetMaxBytes 非 2xx 响应时保留上游 body 片段的最大字节数。
 	// 留 300 字节足够覆盖典型结构化错误（如 `{"error":{"message":"..."}}`），
 	// 又给 "upstream HTTP <status>: " 前缀留出余量，避免最终被 monitorMessageMaxBytes (500) 截得太狠。
 	monitorErrorBodySnippetMaxBytes = 300
-	// monitorChallengeMin / monitorChallengeMax challenge 操作数范围。
+	// monitorChallengeMin / monitorChallengeMax challenge 操作数范围（只做加法）。
 	monitorChallengeMin = 1
-	monitorChallengeMax = 50
+	monitorChallengeMax = 20
 
 	// providerOpenAIPath OpenAI Chat Completions 路径（Kimi / DeepSeek 同为 OpenAI 兼容）。
 	providerOpenAIPath = "/v1/chat/completions"
@@ -57,6 +68,8 @@ const (
 	providerAnthropicPath = "/v1/messages"
 	// providerGeminiPathTemplate Gemini generateContent 路径模板（含 model 占位）。
 	providerGeminiPathTemplate = "/v1beta/models/%s:generateContent"
+	// providerGeminiStreamPathTemplate Gemini 流式路径模板（另加 ?alt=sse）。
+	providerGeminiStreamPathTemplate = "/v1beta/models/%s:streamGenerateContent"
 
 	// MonitorProviderOpenAI 等 provider 字符串常量（也是 ent enum 的实际值）。
 	// 后 4 个 provider（antigravity/kimi/zhipu/deepseek）为配额模式引入：
@@ -125,14 +138,26 @@ const (
 
 	// monitorAnthropicAPIVersion Anthropic Messages API 版本头。
 	monitorAnthropicAPIVersion = "2023-06-01"
-	// monitorChallengeMaxTokens 单次 challenge 请求的 max_tokens（足够回答个位数算术）。
-	monitorChallengeMaxTokens = 50
+	// monitorChallengeMaxTokens 非推理模型的输出上限（OpenAI Responses 要求 max_output_tokens ≥ 16）。
+	monitorChallengeMaxTokens = 16
+	// monitorChallengeReasoningMaxTokens 推理模型的输出上限：推理 token 计在上限里，
+	// 太小会“推理吃光预算、正文为空”；读到答案即停，给大不会变慢。
+	monitorChallengeReasoningMaxTokens = 1024
+	// monitorProbeReasoningEffort 已知支持的模型族注入的推理强度（各家最普遍接受的最低档）。
+	monitorProbeReasoningEffort = "low"
+	// monitorProbeGeminiMinThinkingBudget Gemini pro 系允许的最低思考预算。
+	monitorProbeGeminiMinThinkingBudget = 128
+	// monitorProbeShapeFixTTL 学到的参数修正的有效期，过期后重新尝试原始请求形状。
+	monitorProbeShapeFixTTL = 6 * time.Hour
+	// monitorProbeShapeFixMaxEntries 进程内参数修正表的条目上限。
+	monitorProbeShapeFixMaxEntries = 1024
 
 	// monitorRunOneBuffer runOne 的总超时缓冲（除请求超时与 ping 超时外的额外裕量）。
 	monitorRunOneBuffer = 10 * time.Second
 
-	// monitorIdleConnTimeout HTTP transport 空闲连接关闭超时。
-	monitorIdleConnTimeout = 30 * time.Second
+	// monitorIdleConnTimeout HTTP transport 空闲连接关闭超时：长于 2–5 分钟的检测间隔，
+	// 让每轮探测复用连接，省掉 TLS 握手。
+	monitorIdleConnTimeout = 10 * time.Minute
 	// monitorTLSHandshakeTimeout HTTP transport TLS 握手超时。
 	monitorTLSHandshakeTimeout = 10 * time.Second
 	// monitorResponseHeaderTimeout HTTP transport 等待响应头超时。

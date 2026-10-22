@@ -27,15 +27,13 @@ Grok 监控现在可以在保留 `provider=grok` 的同时选择 `api_mode=respo
 
 ## 请求与判定
 
-本次复用现有非流式 Responses JSON 探测：默认请求包含 `model`、`instructions`、算术挑战 `input`、`max_output_tokens=50` 和 `stream=false`。响应解析支持顶层 `output_text`，以及 `output` 中位于 reasoning 条目之后的 message/output_text。
+请求形状、判定口径、参数自适应与重试以 [`CHANNEL_MONITOR_V1.md`](CHANNEL_MONITOR_V1.md) 为准。与 Grok Responses 相关的要点：
 
-- 默认和合并模式仍验证挑战答案。
+- 默认请求为流式 Responses：`model`、`instructions`、一句话加法题 `input`、`max_output_tokens`、`stream=true`；Grok 4 及以上带 `reasoning_effort: "low"`，上游不认时同一轮自动去掉重发。
+- 正文按 `response.output_text.delta` 拼接，reasoning 事件不参与答案校验；`response.failed` 等流内错误判红。上游直接返回 JSON 时按 `output_text` 与 `output` 中的 message 解析。
 - 合并模式保护 `model`、`instructions`、`input`、`stream`，允许调整输出上限等非关键字段。
-- 替换模式要求非空 `instructions` 与 `input`，并沿用“2xx且文本非空”的判定；自行填写的模型仍须有权限使用。
-- 上游非2xx响应继续作为错误展示；不通过改协议隐藏真实故障。
-- 保留完整响应达到6秒标记慢、响应头等待30秒、请求总时限45秒的既有规则。
-
-这是 Responses **JSON** 探测，不等同于账号页的流式 Responses 测试。当前监控不解析 SSE；不要用替换请求体强行设置 `stream=true`。只提供流式输出的上游需要另行实现流事件结束及错误判定。
+- 替换模式原样发送请求体，按其中的 `stream` 决定读法，要求非空 `instructions` 与 `input`，以“2xx 且正文非空”判定；自行填写的模型仍须有权限使用。
+- 30 秒内拿到正确回答且响应时间不超过 10 秒为正常，超过 10 秒为降级，30 秒内拿不到正确回答为错误。上游非 2xx 照常作为错误展示，不通过改协议隐藏真实故障。
 
 xAI 的 Responses API 支持流式和非流式请求，参见 [官方说明](https://docs.x.ai/developers/tools/streaming-and-sync)。真实上游支持情况仍应在启用后检查，合成测试不能证明外部供应商可用。
 

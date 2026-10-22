@@ -32,13 +32,14 @@ func TestRunCheckForModel_GrokResponses(t *testing.T) {
 			require.NotEqual(t, "wrong-challenge", body["input"])
 			require.NotEmpty(t, body["instructions"])
 			require.NotEqual(t, "ignore challenge", body["instructions"])
-			require.Equal(t, false, body["stream"])
+			require.Equal(t, true, body["stream"])
 			require.NotContains(t, body, "messages")
 			require.NotContains(t, body, "max_tokens")
 			if mode == MonitorBodyOverrideModeMerge {
 				require.Equal(t, float64(80), body["max_output_tokens"])
 			} else {
-				require.Equal(t, float64(monitorChallengeMaxTokens), body["max_output_tokens"])
+				require.Equal(t, float64(monitorChallengeReasoningMaxTokens), body["max_output_tokens"])
+				require.Equal(t, map[string]any{"effort": monitorProbeReasoningEffort}, body["reasoning"])
 			}
 		})
 	}
