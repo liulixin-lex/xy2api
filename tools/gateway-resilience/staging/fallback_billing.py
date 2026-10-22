@@ -269,9 +269,17 @@ class Run:
 
     def projection(self, name, row, admin_origin):
         visible = self.user_get(name + "_user_detail", f"/api/v1/usage/{row['id']}")
-        self.check(name + ": user sees A", visible["group_id"] == self.a
-                   and visible.get("group", {}).get("id") == self.a
-                   and visible["group"]["name"] == self.groups["A"]["name"])
+        # Detail intentionally omits related entities; list loads group names.
+        self.check(name + ": user detail group id is A", visible["group_id"] == self.a)
+        if visible.get("group") is not None:
+            self.check(name + ": detail relation is A", visible["group"]["id"] == self.a
+                       and visible["group"]["name"] == self.groups["A"]["name"])
+        user_listing = self.user_get(name + "_user_list", "/api/v1/usage?page_size=100")
+        user_matching = [v for v in items(user_listing) if v["id"] == row["id"]]
+        self.check(name + ": exact user row shows A id and name", len(user_matching) == 1
+                   and user_matching[0]["group_id"] == self.a
+                   and user_matching[0].get("group", {}).get("id") == self.a
+                   and user_matching[0]["group"]["name"] == self.groups["A"]["name"])
         listing = self.api.call("GET", f"/api/v1/admin/usage?user_id={self.uid}&api_key_id={row['api_key_id']}&page_size=100")
         matching = [v for v in items(listing) if v["id"] == row["id"]]
         self.check(name + ": exact admin usage row present", len(matching) == 1)

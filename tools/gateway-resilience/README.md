@@ -283,6 +283,8 @@ Assertions cover user list/detail, filters, statistics and group distribution;
 admin serving/origin fields; equal normal/fallback price; original-group model
 permissions and `/v1/models`; immediate return for untouched K2, continued
 fallback for K1 before 15 seconds, and return for K1 after stability. The
+user detail must contain A's group ID; the list must contain A's ID and name
+(the detail query does not load related group entities). The
 account/group IDs on each owned usage row prove which account served it.
 The primary account is paused/recovered through its dedicated `schedulable`
 endpoint, with a GET readback before testing either transition.
