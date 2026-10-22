@@ -110,7 +110,7 @@
                   >
                     <Icon name="clock" size="xs" class="h-3 w-3" />
                     {{ peakRateLabel(g) }}
-                  </span><span v-if="g.availability_fallback" data-testid="group-availability-fallback" class="inline-flex items-center rounded-md bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:bg-sky-900/20 dark:text-sky-300" :title="t('availableChannels.availabilityFallbackTooltip')">{{ availabilityFallbackLabel(g) }}</span>
+                  </span>
                 </div>
               </div>
               <div
@@ -144,12 +144,12 @@
                   >
                     <Icon name="clock" size="xs" class="h-3 w-3" />
                     {{ peakRateLabel(g) }}
-                  </span><span v-if="g.availability_fallback" data-testid="group-availability-fallback" class="inline-flex items-center rounded-md bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:bg-sky-900/20 dark:text-sky-300" :title="t('availableChannels.availabilityFallbackTooltip')">{{ availabilityFallbackLabel(g) }}</span>
+                  </span>
                 </div>
               </div>
               <div v-for="g in unmarkedGroups(section)" :key="`unmarked-${g.id}`" class="flex min-w-0 flex-wrap items-center gap-1">
                 <GroupBadge :name="g.name" :platform="g.platform as GroupPlatform" :subscription-type="(g.subscription_type || 'standard') as SubscriptionType" :rate-multiplier="g.rate_multiplier" :user-rate-multiplier="userGroupRates[g.id] ?? null" always-show-rate />
-                <span v-if="hasPeakRate(g)" class="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300" :title="peakRateTitle(g)"><Icon name="clock" size="xs" class="h-3 w-3" />{{ peakRateLabel(g) }}</span><span v-if="g.availability_fallback" data-testid="group-availability-fallback" class="inline-flex items-center rounded-md bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:bg-sky-900/20 dark:text-sky-300" :title="t('availableChannels.availabilityFallbackTooltip')">{{ availabilityFallbackLabel(g) }}</span>
+                <span v-if="hasPeakRate(g)" class="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300" :title="peakRateTitle(g)"><Icon name="clock" size="xs" class="h-3 w-3" />{{ peakRateLabel(g) }}</span>
               </div>
               <span v-if="section.groups.length === 0" class="text-xs text-gray-400">-</span>
             </div>
@@ -253,7 +253,7 @@
                       >
                         <Icon name="clock" size="xs" class="h-3 w-3" />
                         {{ peakRateLabel(g) }}
-                      </span><span v-if="g.availability_fallback" data-testid="group-availability-fallback" class="inline-flex items-center rounded-md bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:bg-sky-900/20 dark:text-sky-300" :title="t('availableChannels.availabilityFallbackTooltip')">{{ availabilityFallbackLabel(g) }}</span>
+                      </span>
                     </div>
                   </div>
                   <div
@@ -288,12 +288,12 @@
                       >
                         <Icon name="clock" size="xs" class="h-3 w-3" />
                         {{ peakRateLabel(g) }}
-                      </span><span v-if="g.availability_fallback" data-testid="group-availability-fallback" class="inline-flex items-center rounded-md bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:bg-sky-900/20 dark:text-sky-300" :title="t('availableChannels.availabilityFallbackTooltip')">{{ availabilityFallbackLabel(g) }}</span>
+                      </span>
                     </div>
                   </div>
                   <div v-for="g in unmarkedGroups(section)" :key="`mobile-unmarked-${g.id}`" class="flex min-w-0 flex-wrap items-center gap-1">
                     <GroupBadge class="max-w-full" :name="g.name" :platform="g.platform as GroupPlatform" :subscription-type="(g.subscription_type || 'standard') as SubscriptionType" :rate-multiplier="g.rate_multiplier" :user-rate-multiplier="userGroupRates[g.id] ?? null" always-show-rate />
-                    <span v-if="hasPeakRate(g)" class="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300" :title="peakRateTitle(g)"><Icon name="clock" size="xs" class="h-3 w-3" />{{ peakRateLabel(g) }}</span><span v-if="g.availability_fallback" data-testid="group-availability-fallback" class="inline-flex items-center rounded-md bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:bg-sky-900/20 dark:text-sky-300" :title="t('availableChannels.availabilityFallbackTooltip')">{{ availabilityFallbackLabel(g) }}</span>
+                    <span v-if="hasPeakRate(g)" class="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-300" :title="peakRateTitle(g)"><Icon name="clock" size="xs" class="h-3 w-3" />{{ peakRateLabel(g) }}</span>
                   </div>
                   <span v-if="section.groups.length === 0" class="text-xs text-gray-400">-</span>
                 </dd>
@@ -376,14 +376,6 @@ function publicGroups(section: UserChannelPlatformSection): UserAvailableGroup[]
 }
 
 const appStore = useAppStore()
-
-// 无号兜底分组（网关韧性）：倍率优先取用户专属倍率。
-function availabilityFallbackLabel(group: UserAvailableGroup): string {
-  const fallback = group.availability_fallback
-  if (!fallback) return ''
-  const rate = props.userGroupRates[fallback.id] ?? fallback.rate_multiplier
-  return t('availableChannels.availabilityFallback', { name: fallback.name, rate })
-}
 
 function hasPeakRate(group: UserAvailableGroup): boolean {
   return groupHasPeakRate(group)
