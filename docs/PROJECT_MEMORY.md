@@ -6,6 +6,13 @@
 
 ## 当前交接状态
 
+### XY2API 0.4.6 正式发布完成（2026-10-23；生产未部署）
+
+- 发布：`v0.4.6`（annotated 对象 `f267b5a7e`）→ main 合并提交 `fe7a3b6db`（[PR #129](https://github.com/liulixin-lex/xy2api/pull/129)）。Release run [39840369118](https://github.com/liulixin-lex/xy2api/actions/runs/39840369118) 成功，正式 Release 非 draft、非 prerelease，包含 6 个附件：`checksums.txt` 与 macOS、Linux、Windows 五个平台压缩包。
+- 合并内容：PR #124（Responses `response.metadata` 开场判据，合并提交 `c020d3e71`）、PR #126（按分组并发槽位与 30 分钟健康缓存，合并提交 `8000bcb2b`）、PR #127（管理员分组分类、标签页和筛选，含迁移 278，合并提交 `f4340ff76`）。版本 PR #129 同步 `VERSION`、`UPSTREAM_BASE.json` 到 0.4.6，并把 DOMPurify 及传递依赖锁到 3.4.17。
+- 验证：三个功能 PR 与版本 PR 的最新保护检查全部通过；#127 的 Gateway resilience 单测曾出现一次时序失败，单次重跑通过。版本 PR 首轮前端审计发现 DOMPurify 新公告，升级依赖后安全扫描通过。合并前本地文档一致性、scheduler-diff、upstream sync audit、工具 41 项测试、JSON 与 diff 检查通过；本机没有 Go，未重复运行 Go/前端全量门禁，远端 CI 已覆盖。
+- 遗留与去向：生产部署未执行，需要单独授权；Sub2API 兼容基线保持 `0.2.15`。已结束的本轮合并、版本准备和发布登记详见本文件末尾操作日志，后续历史按规则归档。
+
 ### 使用记录“平均TPS”与指标公开按钮（2026-10-22 合入 main；未发版、未部署）
 
 - 内容：使用记录“延迟”列改为“平均TPS N t/s”；“功能开关 → 管理员使用记录”两项指标各加一个公开按钮，缺省仅管理员可见。无迁移。现行说明见 [`USAGE_METRICS.md`](USAGE_METRICS.md)。
@@ -19,7 +26,7 @@
 - 后续：INC-P2-1，WebSocket 每轮的 Q8 快照取在本轮完成的回调里，客户端提前发出下一轮时有毫秒级窗口，不阻断。
 - 未发版，随下一个版本发布；发版与部署都需要用户另行授权。详细记录已原样移入归档。
 
-### XY2API 0.4.5 正式发布完成（2026-10-22；生产未部署）
+### XY2API 0.4.5 正式发布完成（2026-10-22；生产未部署；已被 0.4.6 取代）
 
 - 发布：`v0.4.5`（annotated 对象 `493133ed3`）→ main 合并提交 `0d8e4920e`（[PR #122](https://github.com/liulixin-lex/xy2api/pull/122)，头 `86607a8f4`，两者源码树相同）。Release run 39708586766 成功。产物核验通过：6 个附件（199,047,660 字节）双 SHA 一致；五个平台 `vcs.revision=0d8e4920e`、`vcs.modified=false`，含前端产物；GHCR 双架构 index `sha256:391fbdc5…`，version、revision、source 标签正确；`latest`、`0`、`0.4` 指向 0.4.5，`0.3` 不变。tag 消息的主题行后少了一个空行，Release 工作流因此丢了介绍段，Release 正文已手工补齐，tag 不动。tag 触发的 CI 有一个已知偶发用例失败，见 tasks 的“发布记录”。
 - 内容（OpenSpec [`gateway-resilience-045-20261021`](../openspec/changes/gateway-resilience-045-20261021/proposal.md)）：
@@ -41,7 +48,7 @@
 - 遗留与去向：
   1. 生产仍未部署 0.4.4 或 0.4.5，需要单独授权；0.4.5 的 6.5 小时浸泡是生产部署的证据。
   2. 0.4.6 待办见 tasks §7：7.2（turn-state 溯源改在响应头真正发出时记录，同时收窄 `GATEWAY_RESILIENCE.md` 的相应措辞）、7.3（LEAK-P2-1）、7.5（堆用例的测量方式）、7.6（心跳写失败后首输出 guard 未转入 drain，终态用量可能少计；0.4.4 引入，P2）。
-  3. PR #120（渠道监控 v1）在 `v0.4.5` 之后合入 main（`27b472e22`，2026-10-22），进入下一个版本。α 在临时树把已发布的 main 并入 #120 的分支，只有本记忆冲突，两边都保留。合并前 PR CI 里 `TestCompatPreludeHeartbeatDisconnectDrainsUsageAfterContent/enabled` 偶发失败一次，单次重跑通过（tasks 7.6）。
+  3. PR #120（渠道监控 v1）在 `v0.4.5` 之后合入 main（`27b472e22`，2026-10-22），已进入后续版本；本次 0.4.6 发布未包含它。
 - 本任务的交接与登记（O3、集成、RA-1、δ/ε/DOCS 预备分支、QA 验证、#120 的发布后集成），以及已完成的 0.4.4 6.5 小时浸泡与 pprof 诊断登记，已原样移入 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)。
 
 ### XY2API 0.4.4 正式发布完成（2026-10-21；生产未部署）
@@ -91,10 +98,10 @@
   6. 测试服务器收尾：本任务的候选镜像（`xy2api-staging:*`）、`evidence/` 下的浸泡与演练目录、升级演练留下的 `xy2api_upgrade` 库，按 staging-validation §11 在生产验证后清理；预上线主机上的两份切换前备份（路径见私有清单）在正式部署后再删。
 - 本任务与 #105、#107、#108、#110、#112 的交接状态与登记已原样移入 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)。
 
-### 版本与环境速览（2026-10-20T08:30Z 核实；2026-10-22 更新正式版）
+### 版本与环境速览（2026-10-23T19:45Z 核实；2026-10-23 更新正式版）
 
-- 正式版：XY2API v0.4.5（2026-10-22，Sub2API 兼容基线 0.2.15）。生产主机 2026-10-20 09:15Z 起经在线更新运行 0.4.3 程序（2026-10-21T11:35Z 只读核实：公开设置的版本为 0.4.3，容器内程序 commit `888f49db8`），容器镜像仍是 0.3.0；部署需要用户单独授权。
-- 待定：XY-image 0.0.17（先交接，并经用户确认）；0.4.5 生产部署（单独授权；正式候选的 6.5 小时浸泡已通过）。预上线主机运行 0.4.2 的浸泡候选 `0ad63fab7`，换成正式镜像需要授权。见上两节。
+- 正式版：XY2API v0.4.6（2026-10-23，Sub2API 兼容基线 0.2.15）。生产主机 2026-10-20 09:15Z 起经在线更新运行 0.4.3 程序（2026-10-21T11:35Z 只读核实：公开设置的版本为 0.4.3，容器内程序 commit `888f49db8`），容器镜像仍是 0.3.0；部署需要用户单独授权。
+- 待定：XY-image 0.0.17（先交接，并经用户确认）；0.4.6 生产部署（单独授权）。预上线主机运行 0.4.2 的浸泡候选 `0ad63fab7`，换成正式镜像需要授权。见上两节。
 - 上游：Sub2API v0.2.17 已发布、尚未同步（2026-10-17 定时检测；2026-10-19 定时同步的 prepare 失败），需按 [`UPSTREAM_SYNC.md`](UPSTREAM_SYNC.md) 另开任务。
 - 工具链：Go 以 `backend/go.mod` 为准（当前 1.27.3）；golangci-lint v2.14.0（与 CI 同版）。
 - 文档一致性：`python3 tools/check_docs_consistency.py`（CI 的 upstream-sync-audit 作业执行），规则在 `tools/docs_consistency.json`，改动时按 [`AGENTS.md`](../AGENTS.md)“变更同步”同步文档。
@@ -1282,3 +1289,12 @@ pnpm --dir frontend run build
 - 卡点/风险：无。
 - 下一步：α 推送并开收尾 PR；发版与部署等用户授权。
 
+### 2026-10-22T19:45Z — `20261023-merge-open-prs-release-046` — PR 合并与 0.4.6 发布完成
+
+- 请求/目标：用户要求合并仓库开放 PR 并发版，最终版本定位 `0.4.6`；生产部署不在授权范围内。
+- 开始状态：origin/main `b2b16d4cd`，开放 PR #124、#126、#127 因基线过期产生冲突；本地集成分支先保留各 PR 的代码、记忆和 upstream policy 登记。
+- 完成操作：解决 #124 的记忆冲突、#126 的记忆与 policy 冲突、#127 的记忆、`UPSTREAM_BASE.json` 与 policy 冲突；更新固定 head 后依次常规合并 #124 → `c020d3e71`、#126 → `8000bcb2b`、#127 → `f4340ff76`。版本 PR #129 将 `VERSION` 和 provenance 晋级为 0.4.6，并因安全门禁新报公告把 DOMPurify 顶层及传递依赖升级/覆盖到 3.4.17，合并为 `fe7a3b6db`。
+- 验证：本地 `check_docs_consistency.py`、`sync.py scheduler-diff`、`sync.py audit`、工具 41 项 unittest、JSON 解析和 `git diff --check` 通过；远端四个 PR 的最新 CI 与安全扫描全部通过。#127 Gateway resilience 一次偶发失败单次重跑通过；#129 首轮 DOMPurIFY 审计失败在依赖升级后通过。
+- 发布：创建 annotated `v0.4.6`（tag object `f267b5a7e`，目标 `fe7a3b6db`），Release run `39840369118` 成功，Release 非 draft/非 prerelease，6 个附件生成；未执行生产部署。
+- 修改文件：`backend/cmd/server/VERSION`、`UPSTREAM_BASE.json`、`frontend/package.json`、`frontend/pnpm-lock.yaml`，以及本记忆和文档目录状态。
+- 卡点/下一步：无阻塞；生产部署仍需单独授权，后续测试 P2 按 OpenSpec tasks §7 管理。
