@@ -402,3 +402,57 @@ func TestFallbackForcedFastFollowsTheLatestTurn(t *testing.T) {
 	require.False(t, fallbackForcedFastChargesStandard(ctx, "priority"))
 	require.False(t, fallbackForcedFastChargesStandard(context.Background(), "priority"), "no fallback")
 }
+
+// A WebSocket turn's usage is recorded by an asynchronous task. The flag is
+// fixed when the task is created: if the next turn's response.create
+// rewrites the connection's flag while turn N's task still waits, turn N is
+// charged by its own value (fallback-billing review P2-1).
+func TestOpenAIRecordUsageChargesTheTurnFlagFixedWhenItsTaskWasCreated(t *testing.T) {
+	inputPrice, outputPrice, fastMultiplier := 0.001, 0.002, 3.0
+	standardTotal := 100*inputPrice + 50*outputPrice
+	for _, tc := range []struct {
+		name                 string
+		turnTier, nextTier   string
+		wantActualMultiplier float64
+	}{
+		{"turn_forced_next_asks_priority", "", "priority", 1},
+		{"turn_asks_priority_next_forced", "priority", "", fastMultiplier},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, authenticated, moved := fallbackBillingFixture(PlatformOpenAI)
+			moved.Group.ForceOpenAIFast = true
+			authenticated.Group.ModelPricing = []ChannelModelPricing{{
+				Models: []string{"gpt-5.6-sol"}, BillingMode: BillingModeToken,
+				InputPrice: &inputPrice, OutputPrice: &outputPrice, FastMultiplier: &fastMultiplier,
+			}}
+			account := &Account{ID: 3020, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+			svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, &fallbackGroupRateRepoStub{})
+			svc.resolver = NewModelPricingResolver(nil, svc.billingService)
+
+			noteFallbackForcedFast(ctx, account, tc.turnTier) // turn N's response.create
+			fixTurn := FreezeFallbackForcedFast(ctx)          // turn N's usage task is created
+			noteFallbackForcedFast(ctx, account, tc.nextTier) // turn N+1 arrives while it waits
+
+			priority := "priority"
+			require.NoError(t, svc.RecordUsage(fixTurn(ctx), &OpenAIRecordUsageInput{
+				Result: &OpenAIForwardResult{
+					RequestID:                   "fallback_ws_turn_" + tc.name,
+					ServiceTier:                 &priority,
+					UpstreamResponseServiceTier: "priority",
+					Usage:                       OpenAIUsage{InputTokens: 100, OutputTokens: 50},
+					Model:                       "gpt-5.6-sol",
+					Duration:                    time.Second,
+				},
+				APIKey:  moved,
+				User:    moved.User,
+				Account: account,
+			}))
+			log := usageRepo.lastLog
+			require.NotNil(t, log)
+			require.InDelta(t, standardTotal*fastMultiplier, log.TotalCost, 1e-10)
+			require.InDelta(t, standardTotal*tc.wantActualMultiplier, log.ActualCost, 1e-10)
+		})
+	}
+	require.Equal(t, context.Background(), FreezeFallbackForcedFast(context.Background())(context.Background()), "nothing to fix without a fallback")
+}
