@@ -31,6 +31,7 @@
 | [`OPENAI_FAST.md`](OPENAI_FAST.md) | OpenAI 分组 Fast 优先级、全局过滤与档位计费 |
 | [`COMPOSITE_GROUPS.md`](COMPOSITE_GROUPS.md) | 组合分组 |
 | [`GROUP_SYSTEM_PROMPTS.md`](GROUP_SYSTEM_PROMPTS.md) | 分组标识与系统提示词 |
+| [`GROUP_CATEGORIES.md`](GROUP_CATEGORIES.md) | 分组分类（管理端整理，不影响调度、计费和用户端） |
 | [`CHANNEL_MONITOR_V1.md`](CHANNEL_MONITOR_V1.md) | 渠道监控 v1：判定口径（10 秒黄、30 秒红）、流式探测与请求形状、探测选号、调度可靠性 |
 | [`GROK_MONITOR_RESPONSES.md`](GROK_MONITOR_RESPONSES.md) | Grok 渠道监控的 Responses 模式（0.4.1 起，可选） |
 | [`ASYNC_IMAGE_TASKS.md`](ASYNC_IMAGE_TASKS.md) | 异步生图任务 |

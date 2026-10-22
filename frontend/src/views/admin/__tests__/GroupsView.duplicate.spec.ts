@@ -52,6 +52,10 @@ vi.mock('@/api/admin', () => ({
   }
 }))
 
+vi.mock('@/api/admin/groupCategories', () => ({
+  default: { list: vi.fn(async () => []), save: vi.fn(), setGroupCategories: vi.fn() }
+}))
+
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({ showSuccess, showError })
 }))

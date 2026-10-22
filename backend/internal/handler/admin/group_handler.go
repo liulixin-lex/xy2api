@@ -381,6 +381,9 @@ func (h *GroupHandler) List(c *gin.Context) {
 		val := isExclusiveStr == "true"
 		isExclusive = &val
 	}
+	if !bindGroupCategoryQuery(c, service.WithGroupListCategoryFilter) {
+		return
+	}
 
 	groups, total, err := h.adminService.ListGroups(c.Request.Context(), page, pageSize, platform, status, search, isExclusive, sortBy, sortOrder)
 	if err != nil {

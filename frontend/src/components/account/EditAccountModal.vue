@@ -3076,6 +3076,7 @@
         :groups="selectableGroups"
         :platform="account?.platform"
         :mixed-scheduling="mixedScheduling"
+        category-tabs
         data-tour="account-form-groups"
       />
 

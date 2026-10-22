@@ -3595,6 +3595,7 @@
           :groups="groups"
           :platform="form.platform"
           :mixed-scheduling="mixedScheduling"
+          category-tabs
           data-tour="account-form-groups"
         />
       </div>

@@ -9,6 +9,7 @@ import promptAudit from './promptAudit'
 import plugins from './plugins'
 import shareScheduling from './shareScheduling'
 import resilience from './resilience'
+import groupCategories from './groupCategories'
 
 export default {
   ...overview,
@@ -22,4 +23,5 @@ export default {
   ...plugins,
   ...shareScheduling,
   ...resilience,
+  ...groupCategories,
 }

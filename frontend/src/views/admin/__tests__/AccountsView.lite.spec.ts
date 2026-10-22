@@ -138,7 +138,7 @@ function mountView(stubActionMenu = true) {
         AccountCapacityCell: true,
         AccountStatusIndicator: true,
         AccountTodayStatsCell: true,
-        AccountGroupsCell: AccountGroupsCellStub,
+        AccountGroupsCellButton: AccountGroupsCellStub,
         AccountUsageCell: true,
         UpstreamBillingRateCell: true,
         HelpTooltip: true,

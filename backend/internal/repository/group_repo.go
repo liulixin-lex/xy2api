@@ -483,6 +483,7 @@ func (r *groupRepository) ListBindableWithFilters(ctx context.Context, params pa
 }
 
 func (r *groupRepository) listWithFiltersQuery(ctx context.Context, q *dbent.GroupQuery, params pagination.PaginationParams, platform, status, search string, isExclusive *bool) ([]service.Group, *pagination.PaginationResult, error) {
+	q = applyGroupListCategoryFilter(ctx, q)
 
 	if platform != "" {
 		q = q.Where(group.PlatformEQ(platform))

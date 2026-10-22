@@ -923,6 +923,7 @@ var ProviderSet = wire.NewSet(
 	ProvideGeminiTokenProvider,
 	NewGeminiMessagesCompatService,
 	ProvideShareSchedulingService,
+	NewGroupCategoryService,
 	ProvideResilienceService,
 	ProvideAntigravityTokenProvider,
 	ProvideGrokTokenProvider,
