@@ -166,7 +166,7 @@
   4. 审查 P2-7（Anthropic 补选失败时可能泄漏槽位）是原有写法，未改；只有闭合 `</think>` 的上游可能被提前判答，写在文档已知局限。
 - 边界：未碰 δ、ε、RA-1 正在改的 handler、`resilience_*`、`GATEWAY_RESILIENCE.md`；`policy.json` 与它们的分支都有追加，合并时注意顺序。
 
-### 20261022-codex-metadata-prelude — 原生 Responses 把 `response.metadata` 算开场（代码与文档完成，待开 PR；2026-10-22）
+### 20261022-codex-metadata-prelude — 原生 Responses 把 `response.metadata` 算开场（[PR #124](https://github.com/liulixin-lex/xy2api/pull/124) 已开，待 CI 与合并；2026-10-22）
 
 - 请求（用户 2026-10-22）：修复生产上 Codex 中转账号在输出前过载却不能换号的问题；先确认 GitHub 上没有冲突的 PR 分支再修。用户选定范围：只把 `response.metadata` 加入原生 Responses 开场白名单，受现有开关 `stream.native_prelude_whitelist` 控制，关闭开关回到旧行为；`codex.response.metadata` 与其他未知事件仍算输出；同步更新 CV-9 规格、design §3.1 与 `GATEWAY_RESILIENCE.md`，先写失败用例。
 - 依据（生产只读诊断，2026-10-22）：一个 Codex 中转（CLIProxyAPI 系）背后的 OpenAI Codex 后端过载时先回 HTTP 200，再依次发 `response.created`(0)、`response.in_progress`(1)、`response.metadata`(2)，随后在 seq 3 发 `event: error`（`server_is_overloaded`）。网关把 `response.metadata` 当已输出，压下了输出前换号（`gateway.failover_suppressed_after_semantic_output`），错误直接到客户端。中转侧的抓包显示该帧逐字节来自上游。这与 0.4.4 设计时“`response.metadata` 出现在正文之后”的探测结论不同。
@@ -177,7 +177,7 @@
   - 先写失败用例再修：分类表与开关测试；原生与透传复现生产序列（裸 `error` 无 `response.failed`）；换号边界、首输出截止、成功路径顺序、WS 桥两种开关、兼容转换两种结尾、送达口径与旧单测行；新增用例都放在 `ci_gate.py` 会收集的文件里。用 `go test -overlay` 换回旧分类器做变异核对：开关开启的用例全部变红，关闭的全部通过。
   - 文档：0.4.4 变更的 replayable-prefix 规格（CV-9 只保留 `codex.response.metadata`，新增 `response.metadata` 场景）、design §3.1/§3.3、proposal、tasks 2.2 的修订指向；045 tasks 7.7；`GATEWAY_RESILIENCE.md`（§1、§4、§4.4、§7）、0.4.0 runbook §6、旧送达规格与 design 的指向、可观测性规格场景、`docs/README.md`；设置页提示（中英）与其文案测试。
   - 独立审查（只读，3 个视角，逐条反驳核实）：无 P0/P1。首输出截止不再被 `response.metadata` 提前解除，核实为既定策略（没有早发元数据的流本来就这样），已写进文档与 tasks 7.7 的上线前观测建议；其余 P3（兼容转换依赖两个开关的说明、措辞、旧规格指向、测试显式固定全局设置等）已全部处理。
-- 验证（本机，Go 1.27.3）：`ci_gate.py` 396 项 `-race` 全过、零跳过；resilience 与相关 service 用例通过；gofmt、四种 vet、golangci-lint 增量 0 项；前端 resilience 与 i18n 测试 68 项、lint、typecheck 通过；`check_docs_consistency.py` 通过。完整 unit 与干净树 `sync.py audit` 的结果见操作日志。
+- 验证（本机，Go 1.27.3）：`ci_gate.py` 396 项 `-race` 全过、零跳过；resilience 与相关 service 用例通过；gofmt、四种 vet、golangci-lint 增量 0 项；前端 resilience 与 i18n 测试 68 项、lint、typecheck 通过；`check_docs_consistency.py` 通过。完整 `go test -tags=unit ./...` 66 个包通过、0 失败；干净树 `sync.py audit` 与 `scheduler-diff` 通过。
 - 未做：测试服务器场景（F34 之外的两类新故障）与上线前的间隔观测，见 045 tasks 7.7；发版与生产部署需用户另行授权。
 
 ## 操作陷阱
@@ -1244,3 +1244,13 @@ pnpm --dir frontend run build
 - 验证：见“进行中的工作”条目；完整 unit 与干净树 audit 在提交后补记。
 - 卡点/风险：生产仍是 0.4.3，修复随下一版发布、经授权部署后才生效。首输出截止现在也覆盖 `response.metadata` 之后的等待，上线前按 tasks 7.7 观测。
 - 下一步：提交、推送、开 PR 并等 CI 全绿；合并由另一位作者处理。
+
+### 2026-10-22T10:55Z — `20261022-codex-metadata-prelude` — 开 PR #124
+
+- 请求/目标：补记上一条日志留下的验证结果，并登记 PR。
+- 开始状态：分支 `fix/codex-metadata-prelude-20261022` 的提交 `dd2e4bb78`（自 origin/main `cfb4fae48`），工作树干净。
+- 完成操作：完整 unit 与干净树审计通过后，用 gh 凭据推送分支，开 [PR #124](https://github.com/liulixin-lex/xy2api/pull/124)；本提交只改本文件。
+- 修改文件：`docs/PROJECT_MEMORY.md`。
+- 验证：`go test -tags=unit ./...` 66 个包通过、0 失败；`sync.py audit`、`scheduler-diff` 通过。
+- 卡点/风险：无。
+- 下一步：等 PR 的 CI 与安全扫描全绿；合并由另一位作者处理；发版与生产部署另行授权。
