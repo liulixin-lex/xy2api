@@ -349,7 +349,7 @@ func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID i
 	}
 
 	// Generate unique request ID for this slot
-	requestID := generateRequestID()
+	requestID := withSlotGroup(ctx, generateRequestID())
 
 	acquired, err := s.cache.AcquireAccountSlot(ctx, accountID, maxConcurrency, requestID)
 	if err != nil {

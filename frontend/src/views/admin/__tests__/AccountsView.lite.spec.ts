@@ -80,6 +80,7 @@ const DataTableStub = defineComponent({
         <slot name="cell-groups" :row="row" />
         <slot name="cell-schedulable" :row="row" />
         <span data-test="account-rate"><slot name="cell-rate_multiplier" :row="row" /></span>
+        <slot name="cell-capacity" :row="row" />
         <span data-test="select-account"><slot name="cell-select" :row="row" /></span>
         <slot name="cell-actions" :row="row" />
       </div>
@@ -90,6 +91,11 @@ const DataTableStub = defineComponent({
 const AccountGroupsCellStub = defineComponent({
   props: { groups: { type: Array, default: () => [] } },
   template: '<span data-test="account-groups">{{ groups.map(group => group.name).join(",") }}</span>'
+})
+
+const AccountCapacityCellStub = defineComponent({
+  props: { account: { type: Object, required: true } },
+  template: '<span data-test="account-group-concurrency">{{ account.current_group_concurrency }}</span>'
 })
 
 const EditAccountModalStub = defineComponent({
@@ -135,7 +141,7 @@ function mountView(stubActionMenu = true) {
         EditAccountModal: EditAccountModalStub,
         BulkEditAccountModal: true,
         PlatformTypeBadge: true,
-        AccountCapacityCell: true,
+        AccountCapacityCell: AccountCapacityCellStub,
         AccountStatusIndicator: true,
         AccountTodayStatsCell: true,
         AccountGroupsCell: AccountGroupsCellStub,
@@ -396,6 +402,21 @@ describe('admin AccountsView lite account list', () => {
     wrapper.unmount()
   })
 
+  it('redraws a row when only its group concurrency changes on an automatic ETag refresh', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
+    const groupRow = { ...listRow, current_concurrency: 2 }
+    listAccounts.mockResolvedValue({ items: [{ ...groupRow, current_group_concurrency: 1 }], total: 1, page: 1, page_size: 20, pages: 1 })
+    listWithEtag.mockResolvedValueOnce({ notModified: false, etag: 'group-busy', data: { items: [{ ...groupRow, current_group_concurrency: 2 }], total: 1, pages: 1 } })
+    const wrapper = mountView(); await flushPromises()
+    expect(wrapper.get('[data-test="account-group-concurrency"]').text()).toBe('1')
+    await vi.advanceTimersByTimeAsync(6000); await flushPromises()
+    expect(listWithEtag).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-test="account-group-concurrency"]').text()).toBe('2')
+    wrapper.unmount()
+  })
+
   it('prevents bulk and single-account scheduling writes from racing on selected accounts', async () => {
     listAccounts.mockResolvedValue({ items: [listRow, { ...listRow, id: 43, name: 'second' }], total: 2, page: 1, page_size: 20, pages: 1 })
     let finishSingle!: (value: unknown) => void
@@ -523,6 +544,20 @@ describe('admin AccountsView lite account list', () => {
     expect(refreshCredentials).toHaveBeenCalledWith(42)
     expect(wrapper.get('[data-account-name]').attributes('data-account-name')).toBe('refreshed account')
     expect(showWarning).toHaveBeenCalledWith('Token refreshed, but project_id is temporarily unavailable')
+    wrapper.unmount()
+  })
+
+  it('keeps the group concurrency when a single-account response patches the row', async () => {
+    listAccounts.mockResolvedValue({ items: [{ ...listRow, current_group_concurrency: 3 }], total: 1, page: 1, page_size: 20, pages: 1 })
+    refreshCredentials.mockResolvedValue({ account: { ...fullAccount, name: 'refreshed account' } })
+    const wrapper = mountView(false)
+    await flushPromises()
+
+    wrapper.findComponent(AccountActionMenu).vm.$emit('refresh-token', listRow)
+    await flushPromises()
+
+    expect(wrapper.get('[data-account-name]').attributes('data-account-name')).toBe('refreshed account')
+    expect(wrapper.get('[data-test="account-group-concurrency"]').text()).toBe('3')
     wrapper.unmount()
   })
 

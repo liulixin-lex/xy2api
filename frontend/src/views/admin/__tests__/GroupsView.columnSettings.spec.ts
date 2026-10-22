@@ -163,6 +163,9 @@ const DataTableStub = {
       <div v-if="data.length" data-test="usage-cell">
         <slot name="cell-usage" :row="data[0]" />
       </div>
+      <div v-if="data.length" data-test="capacity-cell">
+        <slot name="cell-capacity" :row="data[0]" />
+      </div>
     </div>
   `,
 }
@@ -430,5 +433,16 @@ describe('admin GroupsView column settings', () => {
     expect(text).toContain('Total$9.75')
     expect(text.indexOf('Today')).toBeLessThan(text.indexOf('Yesterday'))
     expect(text.indexOf('Yesterday')).toBeLessThan(text.indexOf('Total'))
+  })
+
+  it('passes the group concurrency from the capacity summary to the badge', async () => {
+    getCapacitySummary.mockResolvedValue([
+      { group_id: 1, concurrency_used: 5, concurrency_max: 600, concurrency_group_used: 3, sessions_used: 0, sessions_max: 0, rpm_used: 0, rpm_max: 0 },
+    ])
+
+    const wrapper = await mountView()
+    const badge = wrapper.getComponent({ name: 'GroupCapacityBadge' })
+
+    expect(badge.props()).toMatchObject({ concurrencyUsed: 5, concurrencyMax: 600, concurrencyGroupUsed: 3 })
   })
 })

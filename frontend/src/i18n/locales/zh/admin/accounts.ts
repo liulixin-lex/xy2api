@@ -178,6 +178,8 @@ export default {
       recentErrorsTitle: '最近 10 分钟 {count} 次错误请求，点击在新标签页查看',
       firstTokenAvg: '首字 {value}',
       firstTokenAvgTitle: '最近 3 分钟 {count} 次请求的首字平均时间',
+      cacheReadRatio: '缓存率 {value}',
+      cacheReadRatioTitle: '最近 30 分钟 {count} 次请求的缓存读取占比：缓存读取 ÷（输入 + 缓存写入 + 缓存读取）',
       selectedCount: '已选 {count}',
       dataExportConfirmMessage: '导出的数据包含账号与代理的敏感信息，请妥善保存。',
       dataExportConfirm: '确认导出',
@@ -602,6 +604,7 @@ export default {
       subscriptionExpires: '到期',
       // 容量状态提示
       capacity: {
+        concurrencyGroup: '当前 {current} · 上限 {max} · 本分组 {group}',
         windowCost: {
           blocked: '5h窗口费用超限，账号暂停调度',
           stickyOnly: '5h窗口费用达阈值，仅允许粘性会话',

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 import AccountsView from '../AccountsView.vue'
@@ -126,6 +126,83 @@ describe('admin AccountsView recent health in the status column', () => {
     const quiet = wrapper.get('[data-test="status-2"]')
     expect(quiet.find('[data-test="recent-errors"]').exists()).toBe(false)
     expect(quiet.find('[data-test="first-token-avg"]').exists()).toBe(false)
+  })
+
+  it('shows the 30-minute cache read share under the first token', async () => {
+    getBatchRecentHealth.mockResolvedValue({
+      stats: {
+        '1': {
+          first_token_avg_ms: 1200,
+          first_token_samples: 6,
+          recent_errors: 0,
+          input_tokens: 300,
+          cache_creation_tokens: 77,
+          cache_read_tokens: 623,
+          cache_samples: 9
+        }
+      },
+      first_token_window_seconds: 180,
+      errors_window_seconds: 600,
+      cache_window_seconds: 1800
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="status-1"] [data-test="cache-read-ratio"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="status-2"]').find('[data-test="cache-read-ratio"]').exists()).toBe(false)
+  })
+
+  describe('after the table loader reloads rows', () => {
+    const row = (id: number, name: string) => ({ id, name, platform: 'openai', type: 'apikey', status: 'active', schedulable: true })
+
+    beforeEach(() => {
+      listAccounts
+        .mockResolvedValueOnce({ items: [row(1, 'busy'), row(2, 'quiet')], total: 3, page: 1, page_size: 2, pages: 2 })
+        .mockResolvedValue({ items: [row(3, 'next')], total: 3, page: 2, page_size: 2, pages: 2 })
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('asks once on the initial load and again for the new rows after a page change', async () => {
+      const wrapper = mountView()
+      await flushPromises()
+      expect(getBatchRecentHealth).toHaveBeenCalledTimes(1)
+
+      wrapper.getComponent({ name: 'Pagination' }).vm.$emit('update:page', 2)
+      await flushPromises()
+
+      expect(listAccounts).toHaveBeenLastCalledWith(2, expect.any(Number), expect.anything(), expect.anything())
+      expect(getBatchRecentHealth).toHaveBeenCalledTimes(2)
+      expect(getBatchRecentHealth).toHaveBeenLastCalledWith([3])
+    })
+
+    it('asks again after a page-size change', async () => {
+      const wrapper = mountView()
+      await flushPromises()
+
+      wrapper.getComponent({ name: 'Pagination' }).vm.$emit('update:pageSize', 50)
+      await flushPromises()
+
+      expect(listAccounts).toHaveBeenLastCalledWith(1, 50, expect.anything(), expect.anything())
+      expect(getBatchRecentHealth).toHaveBeenCalledTimes(2)
+      expect(getBatchRecentHealth).toHaveBeenLastCalledWith([3])
+    })
+
+    it('asks again after the debounced filter reload', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountView()
+      await flushPromises()
+
+      wrapper.getComponent({ name: 'AccountTableFilters' }).vm.$emit('change')
+      await vi.advanceTimersByTimeAsync(300)
+      await flushPromises()
+
+      expect(listAccounts).toHaveBeenCalledTimes(2)
+      expect(getBatchRecentHealth).toHaveBeenCalledTimes(2)
+      expect(getBatchRecentHealth).toHaveBeenLastCalledWith([3])
+    })
   })
 
   it('skips the request while the status column is hidden', async () => {
