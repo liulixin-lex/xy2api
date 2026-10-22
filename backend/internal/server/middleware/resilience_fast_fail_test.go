@@ -52,9 +52,23 @@ func serve(router *gin.Engine, method, path, key string, headers map[string]stri
 	return w
 }
 
+// resetFastFailKeys clears the process-wide fast-fail record of keyIDs before
+// and after a test, so a repeated run (-count) starts from a clean streak.
+func resetFastFailKeys(t *testing.T, keyIDs ...int64) {
+	t.Helper()
+	reset := func() {
+		for _, id := range keyIDs {
+			resilience.ProcessFastFail().Reset(id)
+		}
+	}
+	reset()
+	t.Cleanup(reset)
+}
+
 func TestFastFailRetryStormOnSingleAccountGroup(t *testing.T) {
 	// Spec: after the tenth identical 503 within 30 s, the following requests
 	// return the same 503 immediately.
+	resetFastFailKeys(t, 9101)
 	orig := *resilience.Current()
 	resilience.Publish(resilience.Defaults())
 	t.Cleanup(func() { resilience.Publish(orig) })
@@ -373,6 +387,7 @@ func TestFastFailCountsOnlyGroupLevelNoAccount(t *testing.T) {
 	// Review F5: a key with several sessions sees 503s that only concern one
 	// session (a new session in a sticky-only group); they must not stop the
 	// key's bound sessions.
+	resetFastFailKeys(t, 9107, 9108)
 	orig := *resilience.Current()
 	resilience.Publish(resilience.Defaults())
 	t.Cleanup(func() { resilience.Publish(orig) })
