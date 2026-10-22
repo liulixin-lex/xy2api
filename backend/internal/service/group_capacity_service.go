@@ -14,6 +14,8 @@ type GroupCapacitySummary struct {
 	SessionsMax     int   `json:"sessions_max"`
 	RPMUsed         int   `json:"rpm_used"`
 	RPMMax          int   `json:"rpm_max"`
+	// xy2api 分组并发：本分组的请求在同一批账号上占用的槽位（容量列第三个数，不超过 ConcurrencyUsed）
+	ConcurrencyGroupUsed int `json:"concurrency_group_used"`
 }
 
 // GroupAccountCapacityRow is the lightweight account projection needed for
@@ -204,9 +206,12 @@ func (s *GroupCapacityService) getGroupCapacitiesBatch(ctx context.Context, grou
 		rpmMap, _ = s.rpmCache.GetRPMBatch(ctx, rpmAccountIDs)
 	}
 
+	groupConcurrency := s.concurrencyService.GetAccountGroupConcurrencyBatch(ctx, accountIDs)
+
 	for _, ref := range refs {
 		idx := groupIndex[ref.groupID]
 		results[idx].ConcurrencyUsed += concurrencyMap[ref.accountID]
+		results[idx].ConcurrencyGroupUsed += groupSlotsWithin(groupConcurrency, ref.accountID, ref.groupID, concurrencyMap[ref.accountID])
 		if sessionsMap != nil && results[idx].SessionsMax > 0 {
 			results[idx].SessionsUsed += sessionsMap[ref.accountID]
 		}
@@ -269,6 +274,7 @@ func (s *GroupCapacityService) getGroupCapacity(ctx context.Context, groupID int
 
 	// Batch query runtime data from Redis
 	concurrencyMap, _ := s.concurrencyService.GetAccountConcurrencyBatch(ctx, accountIDs)
+	concurrencyGroupUsed := groupSlotsUsed(s.concurrencyService.GetAccountGroupConcurrencyBatch(ctx, accountIDs), groupID, accountIDs, concurrencyMap)
 
 	var sessionsMap map[int64]int
 	if sessionsMax > 0 && s.sessionLimitCache != nil {
@@ -299,5 +305,7 @@ func (s *GroupCapacityService) getGroupCapacity(ctx context.Context, groupID int
 		SessionsMax:     sessionsMax,
 		RPMUsed:         rpmUsed,
 		RPMMax:          rpmMax,
+		// xy2api 分组并发
+		ConcurrencyGroupUsed: concurrencyGroupUsed,
 	}, nil
 }

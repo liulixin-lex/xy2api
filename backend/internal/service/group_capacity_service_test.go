@@ -147,6 +147,8 @@ func TestGetAllGroupCapacityBatchAggregatesRuntimeAndLimits(t *testing.T) {
 			SessionsMax:     3,
 			RPMUsed:         5,
 			RPMMax:          11,
+			// the cache stub has no group slot reader
+			ConcurrencyGroupUsed: 0,
 		},
 		{
 			GroupID:         20,
@@ -156,6 +158,8 @@ func TestGetAllGroupCapacityBatchAggregatesRuntimeAndLimits(t *testing.T) {
 			SessionsMax:     4,
 			RPMUsed:         12,
 			RPMMax:          24,
+			// the cache stub has no group slot reader
+			ConcurrencyGroupUsed: 0,
 		},
 	}, results)
 }
@@ -173,7 +177,7 @@ func TestGetAllGroupCapacityBatchKeepsEmptyGroupRows(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, []GroupCapacitySummary{
-		{GroupID: 10},
-		{GroupID: 20, ConcurrencyMax: 4},
+		{GroupID: 10, ConcurrencyGroupUsed: 0},
+		{GroupID: 20, ConcurrencyMax: 4, ConcurrencyGroupUsed: 0},
 	}, results)
 }

@@ -14,6 +14,10 @@
         <span class="font-mono">{{ concurrencyUsed }}</span>
         <span class="text-gray-400 dark:text-gray-500">/</span>
         <span class="font-mono">{{ concurrencyMax }}</span>
+        <template v-if="concurrencyGroupUsed != null">
+          <span class="text-gray-400 dark:text-gray-500">/</span>
+          <span class="font-mono text-emerald-600 dark:text-emerald-400" data-test="capacity-group-current">{{ concurrencyGroupUsed }}</span>
+        </template>
       </span>
     </div>
 
@@ -61,6 +65,8 @@ interface Props {
   sessionsMax: number
   rpmUsed: number
   rpmMax: number
+  // 记在本分组名下的并发，绿色第三个数
+  concurrencyGroupUsed?: number | null
 }
 
 withDefaults(defineProps<Props>(), {

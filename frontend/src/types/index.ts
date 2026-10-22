@@ -1289,6 +1289,7 @@ export interface Account {
   concurrency: number
   load_factor?: number | null
   current_concurrency?: number // Real-time concurrency count from Redis
+  current_group_concurrency?: number | null // 列表筛选具体分组时，该分组占用的并发
   scheduler_score?: {
     base_score: number
     sticky_score?: number

@@ -178,6 +178,8 @@ export default {
       recentErrorsTitle: '{count} failed requests in the last 10 minutes. Click to open them in a new tab.',
       firstTokenAvg: 'TTFT {value}',
       firstTokenAvgTitle: 'Average time to first token over {count} requests in the last 3 minutes',
+      cacheReadRatio: 'Cache {value}',
+      cacheReadRatioTitle: 'Cache read share over {count} requests in the last 30 minutes: cache read ÷ (input + cache write + cache read)',
       selectedCount: '{count} selected',
       dataExportConfirmMessage: 'The exported data contains sensitive account and proxy information. Store it securely.',
       dataExportConfirm: 'Confirm Export',
@@ -756,6 +758,7 @@ export default {
       subscriptionExpires: 'Expires',
       // Capacity status tooltips
       capacity: {
+        concurrencyGroup: 'Current {current} · Limit {max} · This group {group}',
         windowCost: {
           blocked: '5h window cost exceeded, account scheduling paused',
           stickyOnly: '5h window cost at threshold, only sticky sessions allowed',

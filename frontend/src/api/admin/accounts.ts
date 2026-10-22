@@ -620,16 +620,22 @@ export interface AccountRecentHealth {
   first_token_avg_ms: number | null
   first_token_samples: number
   recent_errors: number
+  // 近 30 分钟三项 Token 之和，前端按 cacheReadRatio 算缓存读取占比
+  input_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  cache_samples: number
 }
 
 export interface BatchRecentHealthResponse {
   stats: Record<string, AccountRecentHealth>
   first_token_window_seconds: number
   errors_window_seconds: number
+  cache_window_seconds: number
 }
 
 /**
- * 批量获取账号近 3 分钟首字平均与近 10 分钟错误请求数（口径同“使用记录 → 错误请求”页）
+ * 批量获取账号近 3 分钟首字平均、近 10 分钟错误请求数（口径同“使用记录 → 错误请求”页）与近 30 分钟缓存 Token
  * @param accountIds - 账号 ID 列表（最多 1000 个）
  */
 export async function getBatchRecentHealth(accountIds: number[]): Promise<BatchRecentHealthResponse> {

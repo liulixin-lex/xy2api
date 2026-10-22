@@ -315,6 +315,8 @@ type AccountWithConcurrency struct {
 	CurrentWindowCost *float64 `json:"current_window_cost,omitempty"` // 当前窗口费用
 	ActiveSessions    *int     `json:"active_sessions,omitempty"`     // 当前活跃会话数
 	CurrentRPM        *int     `json:"current_rpm,omitempty"`         // 当前分钟 RPM 计数
+	// xy2api 分组并发：列表按具体分组筛选时才返回，本分组的请求在该账号上占用的槽位
+	CurrentGroupConcurrency *int `json:"current_group_concurrency,omitempty"`
 }
 
 // AccountListItemWithConcurrency is the compact account-list envelope used
@@ -328,6 +330,8 @@ type AccountListItemWithConcurrency struct {
 	CurrentWindowCost  *float64                     `json:"current_window_cost,omitempty"`
 	ActiveSessions     *int                         `json:"active_sessions,omitempty"`
 	CurrentRPM         *int                         `json:"current_rpm,omitempty"`
+	// xy2api 分组并发，同 AccountWithConcurrency.CurrentGroupConcurrency
+	CurrentGroupConcurrency *int `json:"current_group_concurrency,omitempty"`
 }
 
 type simpleModeGroupReference struct {
@@ -965,6 +969,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 
 		result[i] = item
 	}
+	h.fillCurrentGroupConcurrency(c.Request.Context(), result, groupID)
 
 	h.enrichShadowParents(c.Request.Context(), result)
 
@@ -981,6 +986,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 				ActiveSessions:     item.ActiveSessions,
 				CurrentRPM:         item.CurrentRPM,
 			}
+			compact[i].CurrentGroupConcurrency = item.CurrentGroupConcurrency
 		}
 		etag := buildAccountsListETag(compact, total, page, pageSize, platform, accountType, status, search, true)
 		if etag != "" {
