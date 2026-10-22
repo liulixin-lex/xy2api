@@ -1,6 +1,7 @@
 package usageexport
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -10,7 +11,11 @@ import (
 type rawTaskRow string
 
 func (r rawTaskRow) Scan(dest ...any) error {
-	*dest[0].(*[]byte) = []byte(r)
+	out, ok := dest[0].(*[]byte)
+	if !ok {
+		return fmt.Errorf("rawTaskRow scans into *[]byte, got %T", dest[0])
+	}
+	*out = []byte(r)
 	return nil
 }
 
