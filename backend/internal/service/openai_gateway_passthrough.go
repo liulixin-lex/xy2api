@@ -285,14 +285,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		attemptImageIntentInvalidated,
 		IsImageGenerationIntent,
 	)
-	if imageIntent && !GroupAllowsImageGeneration(apiKeyGroup(apiKey)) {
-		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": gin.H{
-				"type":    "permission_error",
-				"message": ImageGenerationPermissionMessage(),
-			},
-		})
+	if gate := ImageGenerationGate(ctx, apiKey); imageIntent && gate != GroupGateAllowed {
+		writeImageGenerationGateError(c, gate)
 		return nil, errors.New("image generation disabled for group")
 	}
 	imageBillingModel := ""

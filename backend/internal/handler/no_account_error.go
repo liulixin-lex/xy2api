@@ -195,6 +195,18 @@ func classifyNoAccountErrorFromGin(
 	return classification
 }
 
+// fallbackGateNoAccount answers service.GroupGateNoAccount like a no-account
+// failure of the key's own group (PM decision P2-3): 503 with the no-account
+// retry hints, never naming the availability fallback group.
+func fallbackGateNoAccount(c *gin.Context, diag any, apiKey *service.APIKey, model string) noAccountErrorClassification {
+	cls := noAccountErrorClassification{Status: http.StatusServiceUnavailable, ErrType: "api_error", Message: "Service temporarily unavailable"}
+	if c != nil && c.Request != nil {
+		apiKey = service.BillingAPIKey(c.Request.Context(), apiKey)
+	}
+	applyNoAccountRetryHints(c, diag, apiKey, model, cls)
+	return cls
+}
+
 func classifyOpenAICompatibleNoAccountErrorFromGin(
 	c *gin.Context,
 	diag service.ModelAvailabilityDiagnoser,

@@ -128,8 +128,13 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
 
 	if endpoint.IsGenerationRequest() {
-		if !service.GroupAllowsImageGeneration(apiKey.Group) {
+		switch service.ImageGenerationGate(c.Request.Context(), apiKey) {
+		case service.GroupGateDenied:
 			h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
+			return
+		case service.GroupGateNoAccount:
+			cls := fallbackGateNoAccount(c, h.gatewayService, apiKey, requestModel)
+			h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
 			return
 		}
 		if moderationBody := requestInfo.ModerationBody(); len(moderationBody) > 0 {
