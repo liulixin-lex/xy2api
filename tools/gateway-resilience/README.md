@@ -191,6 +191,10 @@ by the C0 compatibility contract. Failure evidence is retained and the temporary
 application container is removed. With `--parallel-soak`, its process is limited
 to 1 GiB and 0.5 CPU. Upgrade start/end and bulk-fill/backup timestamps are included
 in the soak report so overlapping disk I/O remains visible.
+The activity stream also keeps orchestration status events without an evidence
+directory. Only `upgrade_end` records load `REPORT.json`; a malformed upgrade
+record still fails validation. Run the aggregation regression with
+`python3 -m unittest discover -s tools/gateway-resilience/staging -p test_soak.py`.
 
 Soak uses `--hours 3 --cycle-minutes 30`, concurrency 20–50 and ten minutes of
 settling; the independent stack enables `gctrace=1` on the same candidate image.
