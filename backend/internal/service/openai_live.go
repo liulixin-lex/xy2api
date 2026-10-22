@@ -176,7 +176,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 		}
 
 		account := selection.Account
-		leaseID := generateRequestID()
+		leaseID := withSlotGroupID(identity.GroupID, generateRequestID())
 		acquired, acquireErr := liveCache.AcquireLiveLease(
 			ctx,
 			account.ID,

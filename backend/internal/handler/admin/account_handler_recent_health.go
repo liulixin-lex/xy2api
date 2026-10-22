@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// 窗口只有 3/10 分钟，自动刷新最快 5 秒一次：缓存 10 秒，数字最多滞后约 10 秒。
+// 窗口为 3/10/30 分钟，自动刷新最快 5 秒一次：缓存 10 秒，数字最多滞后约 10 秒。
 var accountRecentHealthBatchCache = newSnapshotCache(10 * time.Second)
 
 // accountRecentHealthMaxIDs 与账号列表每页条数上限一致。
@@ -22,7 +22,8 @@ type BatchRecentHealthRequest struct {
 	AccountIDs []int64 `json:"account_ids" binding:"required"`
 }
 
-// GetBatchRecentHealth 批量获取账号列表“状态”列的近 3 分钟首字平均与近 10 分钟错误请求数。
+// GetBatchRecentHealth 批量获取账号列表“状态”列的近 3 分钟首字平均、近 10 分钟错误请求数，
+// 以及近 30 分钟的三类输入 Token 合计（前端据此算缓存率）。
 // POST /api/v1/admin/accounts/recent-health/batch
 func (h *AccountHandler) GetBatchRecentHealth(c *gin.Context) {
 	var req BatchRecentHealthRequest
@@ -76,5 +77,6 @@ func recentHealthPayload(stats map[int64]service.AccountRecentHealth) gin.H {
 		"stats":                      stats,
 		"first_token_window_seconds": int(service.AccountRecentFirstTokenWindow / time.Second),
 		"errors_window_seconds":      int(service.AccountRecentErrorsWindow / time.Second),
+		"cache_window_seconds":       int(service.AccountRecentCacheWindow / time.Second),
 	}
 }

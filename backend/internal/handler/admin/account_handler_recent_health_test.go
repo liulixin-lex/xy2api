@@ -23,11 +23,14 @@ type recentHealthRepoStub struct {
 	stats map[int64]service.AccountRecentHealth
 }
 
-func (s *recentHealthRepoStub) GetAccountRecentHealthBatch(_ context.Context, accountIDs []int64, _, _ time.Time) (map[int64]service.AccountRecentHealth, error) {
+func (s *recentHealthRepoStub) GetAccountRecentHealthBatch(_ context.Context, accountIDs []int64, _, _, _ time.Time) (map[int64]service.AccountRecentHealth, error) {
 	s.calls++
 	s.ids = append([]int64(nil), accountIDs...)
 	return s.stats, nil
 }
+
+// The reader is matched by type assertion, so a stale stub signature would only fail at runtime.
+var _ service.AccountRecentHealthBatchReader = (*recentHealthRepoStub)(nil)
 
 func postRecentHealth(t *testing.T, repo *recentHealthRepoStub, body string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -49,6 +52,7 @@ type recentHealthResponse struct {
 		Stats                   map[string]service.AccountRecentHealth `json:"stats"`
 		FirstTokenWindowSeconds int                                    `json:"first_token_window_seconds"`
 		ErrorsWindowSeconds     int                                    `json:"errors_window_seconds"`
+		CacheWindowSeconds      int                                    `json:"cache_window_seconds"`
 	} `json:"data"`
 }
 
@@ -56,7 +60,7 @@ func TestGetBatchRecentHealthReturnsStatsKeyedByAccountAndCachesThem(t *testing.
 	accountRecentHealthBatchCache = newSnapshotCache(10 * time.Second)
 	avg := int64(850)
 	repo := &recentHealthRepoStub{stats: map[int64]service.AccountRecentHealth{
-		11: {FirstTokenAvgMs: &avg, FirstTokenSamples: 3, RecentErrors: 5},
+		11: {FirstTokenAvgMs: &avg, FirstTokenSamples: 3, RecentErrors: 5, InputTokens: 3, CacheCreationTokens: 120, CacheReadTokens: 877, CacheSamples: 4},
 	}}
 
 	first := postRecentHealth(t, repo, `{"account_ids":[11,12,11,0]}`)
@@ -67,8 +71,14 @@ func TestGetBatchRecentHealthReturnsStatsKeyedByAccountAndCachesThem(t *testing.
 	require.Equal(t, []int64{11, 12}, repo.ids)
 	require.Equal(t, 180, body.Data.FirstTokenWindowSeconds)
 	require.Equal(t, 600, body.Data.ErrorsWindowSeconds)
+	require.Equal(t, 1800, body.Data.CacheWindowSeconds)
 	require.Equal(t, int64(850), *body.Data.Stats["11"].FirstTokenAvgMs)
 	require.Equal(t, 5, body.Data.Stats["11"].RecentErrors)
+	require.Equal(t, int64(3), body.Data.Stats["11"].InputTokens)
+	require.Equal(t, int64(120), body.Data.Stats["11"].CacheCreationTokens)
+	require.Equal(t, int64(877), body.Data.Stats["11"].CacheReadTokens)
+	require.Equal(t, 4, body.Data.Stats["11"].CacheSamples)
+	require.Contains(t, first.Body.String(), `"input_tokens":3,"cache_creation_tokens":120,"cache_read_tokens":877,"cache_samples":4`)
 	require.Nil(t, body.Data.Stats["12"].FirstTokenAvgMs)
 	require.Zero(t, body.Data.Stats["12"].RecentErrors)
 

@@ -1507,6 +1507,118 @@
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
       "value": "c.Writer.Header().Set(openAICodexTurnStateHeader, turnState)"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_handler.go",
+      "value": "h.fillCurrentGroupConcurrency(c.Request.Context(), result, groupID)"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_handler.go",
+      "value": "CurrentGroupConcurrency *int `json:\"current_group_concurrency,omitempty\"`"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_handler.go",
+      "value": "compact[i].CurrentGroupConcurrency = item.CurrentGroupConcurrency"
+    },
+    {
+      "path": "backend/internal/service/concurrency_service.go",
+      "value": "requestID := withSlotGroup(ctx, generateRequestID())"
+    },
+    {
+      "path": "backend/internal/service/openai_live.go",
+      "value": "leaseID := withSlotGroupID(identity.GroupID, generateRequestID())"
+    },
+    {
+      "path": "backend/internal/service/group_capacity_service.go",
+      "value": "ConcurrencyGroupUsed int `json:\"concurrency_group_used\"`"
+    },
+    {
+      "path": "backend/internal/service/group_capacity_service.go",
+      "value": "results[idx].ConcurrencyGroupUsed += groupSlotsWithin(groupConcurrency, ref.accountID, ref.groupID, concurrencyMap[ref.accountID])"
+    },
+    {
+      "path": "backend/internal/service/group_capacity_service.go",
+      "value": "concurrencyGroupUsed := groupSlotsUsed(s.concurrencyService.GetAccountGroupConcurrencyBatch(ctx, accountIDs), groupID, accountIDs, concurrencyMap)"
+    },
+    {
+      "path": "frontend/src/components/account/CapacityBadge.vue",
+      "value": "extra?: string | number | null"
+    },
+    {
+      "path": "frontend/src/components/account/CapacityBadge.vue",
+      "value": "v-if=\"extra != null\""
+    },
+    {
+      "path": "frontend/src/components/account/CapacityBadge.vue",
+      "value": "text-emerald-600 dark:text-emerald-400"
+    },
+    {
+      "path": "frontend/src/components/account/AccountCapacityCell.vue",
+      "value": ":extra=\"account.current_group_concurrency\""
+    },
+    {
+      "path": "frontend/src/components/account/AccountCapacityCell.vue",
+      "value": "return t('admin.accounts.capacity.concurrencyGroup', { current: currentConcurrency.value, max: props.account.concurrency, group })"
+    },
+    {
+      "path": "frontend/src/components/common/GroupCapacityBadge.vue",
+      "value": "concurrencyGroupUsed?: number | null"
+    },
+    {
+      "path": "frontend/src/components/common/GroupCapacityBadge.vue",
+      "value": "{{ concurrencyGroupUsed }}"
+    },
+    {
+      "path": "frontend/src/views/admin/GroupsView.vue",
+      "value": ":concurrency-group-used=\"capacityMap.get(row.id)!.concurrencyGroupUsed\""
+    },
+    {
+      "path": "frontend/src/views/admin/GroupsView.vue",
+      "value": "concurrencyGroupUsed: item.concurrency_group_used"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "current.current_group_concurrency !== next.current_group_concurrency"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "current_group_concurrency: updatedAccount.current_group_concurrency ?? oldAccount.current_group_concurrency"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "void refreshRecentHealthBatch()"
+    },
+    {
+      "path": "frontend/src/api/admin/accounts.ts",
+      "value": "cache_window_seconds: number"
+    },
+    {
+      "path": "frontend/src/api/admin/accounts.ts",
+      "value": "cache_read_tokens: number"
+    },
+    {
+      "path": "frontend/src/api/admin/accounts.ts",
+      "value": "input_tokens: number"
+    },
+    {
+      "path": "frontend/src/api/admin/accounts.ts",
+      "value": "cache_creation_tokens: number"
+    },
+    {
+      "path": "frontend/src/api/admin/groups.ts",
+      "value": "concurrency_group_used: number"
+    },
+    {
+      "path": "frontend/src/types/index.ts",
+      "value": "current_group_concurrency?: number | null"
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh/admin/accounts.ts",
+      "value": "cacheReadRatio: '缓存率 {value}'"
+    },
+    {
+      "path": "frontend/src/i18n/locales/en/admin/accounts.ts",
+      "value": "cacheReadRatio: 'Cache {value}'"
     }
   ],
   "forbidden_module_paths": [
@@ -1558,7 +1670,8 @@
     "xy-resilience-v2-handler-exits",
     "xy-resilience-v2-streams",
     "xy-account-stream-only-learning",
-    "xy-resilience-v2-classification"
+    "xy-resilience-v2-classification",
+    "xy-group-slot-concurrency"
   ],
   "custom_patch_tests": [
     {
@@ -2180,6 +2293,21 @@
       "id": "xy-resilience-v2-streams",
       "path": "backend/internal/service/openai_native_heartbeat_turn_state_test.go",
       "literal": "func TestOpenAINativeHeartbeatTurnStatePreservesErrorRuleTerminal"
+    },
+    {
+      "id": "xy-group-slot-concurrency",
+      "path": "backend/internal/service/concurrency_group_slot_test.go",
+      "literal": "func TestAcquireAccountSlotTagsTheMemberWithTheContextGroup"
+    },
+    {
+      "id": "xy-group-slot-concurrency",
+      "path": "backend/internal/repository/concurrency_group_slot_cache_test.go",
+      "literal": "func TestGetAccountGroupConcurrencyBatchCountsSuffixedMembersReadOnly"
+    },
+    {
+      "id": "xy-group-slot-concurrency",
+      "path": "backend/internal/service/group_capacity_group_concurrency_test.go",
+      "literal": "func TestGetAllGroupCapacityCountsGroupSlotsOnSharedAccounts"
     }
   ]
 }
