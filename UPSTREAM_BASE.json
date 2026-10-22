@@ -187,6 +187,7 @@
     "xy-account-list-usability",
     "xy-account-recent-health",
     "xy-channel-monitor-probe-lane",
+    "xy-fallback-group-user-invisible",
     "xy-graceful-online-update-restart",
     "xy-resilience-v2-handler-exits",
     "xy-resilience-v2-streams",
