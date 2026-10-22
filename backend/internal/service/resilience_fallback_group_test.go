@@ -279,3 +279,44 @@ func TestSoleCandidateCountsOnlyAccountsThatCanServeTheRequest(t *testing.T) {
 	st.MarkAccountFailed(7)
 	require.True(t, resilienceLastCandidate(ctx, 2), "an account that already failed in this request is not")
 }
+
+// R4 (fallback-billing design §3): once the primary group recovers, a key
+// that was never moved to the fallback group is served by the primary at
+// once, while a moved key waits for return_stable_seconds.
+func TestFallbackReturnNeverMovedKeyServesTheRecoveredPrimaryAtOnce(t *testing.T) {
+	r, _, accounts, moved := newFallbackFixture(t)
+	ctx := context.Background()
+	require.NotNil(t, r.AvailabilityFallbackGroup(ctx, moved), "the primary has no account: key 77 moves")
+
+	accounts.byGroup[10] = []Account{healthyAccount(1)}
+	r.lastResortGroups.entries = nil
+	never := *moved
+	never.ID = 78
+	require.Nil(t, r.AvailabilityFallbackGroup(ctx, &never), "a key that never moved returns at once")
+	require.NotNil(t, r.AvailabilityFallbackGroup(ctx, moved), "the moved key waits for stability")
+}
+
+// R4: a moved key stays in the fallback group until the primary has been
+// healthy for return_stable_seconds (120 s by default), then returns and is
+// forgotten.
+func TestFallbackReturnMovedKeyReturnsAfterThePrimaryIsStable(t *testing.T) {
+	r, store, accounts, moved := newFallbackFixture(t)
+	ctx := context.Background()
+	require.NotNil(t, r.AvailabilityFallbackGroup(ctx, moved))
+
+	accounts.byGroup[10] = []Account{healthyAccount(1)}
+	r.lastResortGroups.entries = nil
+	stableFor := func(d time.Duration) {
+		store.mu.Lock()
+		store.stable[10] = time.Now().Add(-d)
+		store.mu.Unlock()
+	}
+	stableFor(119 * time.Second)
+	require.NotNil(t, r.AvailabilityFallbackGroup(ctx, moved), "healthy for 119 s: stay")
+
+	stableFor(121 * time.Second)
+	require.Nil(t, r.AvailabilityFallbackGroup(ctx, moved), "healthy for 120 s: return")
+	remembered, _ := store.FallbackKey(ctx, 10, moved.ID)
+	require.False(t, remembered, "the key is forgotten")
+	require.Nil(t, r.AvailabilityFallbackGroup(ctx, moved), "and stays in the primary")
+}

@@ -1676,6 +1676,16 @@
   "custom_patch_tests": [
     {
       "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_group_test.go",
+      "literal": "func TestFallbackReturnNeverMovedKeyServesTheRecoveredPrimaryAtOnce"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_group_test.go",
+      "literal": "func TestFallbackReturnMovedKeyReturnsAfterThePrimaryIsStable"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
       "path": "backend/internal/handler/resilience_fallback_billing_test.go",
       "literal": "func TestUserAvailableGroupHasNoFallback"
     },
