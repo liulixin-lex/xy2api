@@ -50,12 +50,15 @@ type LiveCallIdentity struct {
 }
 
 type LiveCallRecord struct {
-	CallID          string
-	CallHash        string
-	AccountID       int64
-	APIKeyID        int64
-	UserID          int64
-	GroupID         int64
+	CallID    string
+	CallHash  string
+	AccountID int64
+	APIKeyID  int64
+	UserID    int64
+	GroupID   int64
+	// OriginGroupID is the group the call was made for when an availability
+	// fallback group serves it (xy2api resilience); 0 otherwise.
+	OriginGroupID   int64
 	SubscriptionID  int64
 	LeaseID         string
 	Model           string

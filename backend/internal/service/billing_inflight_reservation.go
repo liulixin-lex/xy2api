@@ -624,6 +624,10 @@ func (d inflightEstimateDeps) estimate(ctx context.Context, apiKey *APIKey, req 
 	if apiKey == nil || apiKey.User == nil {
 		return 0, false
 	}
+	// xy2api resilience: priced like the billing of the request, by the group
+	// it was made for; account mappings come from the serving group.
+	served := apiKey
+	apiKey = BillingAPIKey(ctx, apiKey)
 	if req.Model == "" || (req.Kind == InflightEstimateAudio && req.AudioUnits <= 0) {
 		// 非计量请求（媒体状态查询、custom-voices 等）：无需预留，也不算「无法定价」。
 		return 0, true
@@ -664,7 +668,7 @@ func (d inflightEstimateDeps) estimate(ctx context.Context, apiKey *APIKey, req 
 		}
 		// 无价、composite 或缓存冷写预留均检查账号级映射（调度器快照），避免低估最终模型。
 		if (best <= 0 || composite || req.ClaudeCacheColdWrite) && d.accountMappedModels != nil {
-			if c := bestOf(d.accountMappedModels(ctx, apiKey, upstreamInput)); c > best {
+			if c := bestOf(d.accountMappedModels(ctx, served, upstreamInput)); c > best {
 				best = c
 			}
 		}

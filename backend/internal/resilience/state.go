@@ -58,6 +58,9 @@ type RequestState struct {
 	// fallback group (design §5).
 	originGroupID int64
 	fallbackUsed  bool
+	// fallbackOrigin is the API key as authenticated, with the group the
+	// request was made for; the service package stores and reads it.
+	fallbackOrigin any
 
 	// configError is set when selection failed for a configuration reason
 	// (channel pricing restriction, Claude-Code-only group) so the response
@@ -515,6 +518,27 @@ func (s *RequestState) OriginGroupID() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.originGroupID
+}
+
+// SetFallbackOrigin keeps the caller's view of a request moved to an
+// availability fallback group: the API key as authenticated.
+func (s *RequestState) SetFallbackOrigin(v any) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fallbackOrigin = v
+}
+
+// FallbackOrigin returns the value stored by SetFallbackOrigin, or nil.
+func (s *RequestState) FallbackOrigin() any {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.fallbackOrigin
 }
 
 // MarkConfigError records a configuration-caused selection failure.

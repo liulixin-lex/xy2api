@@ -167,7 +167,14 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)
 	}
 
-	apiKey := input.APIKey
+	// xy2api resilience: under an availability fallback the user's price
+	// follows the group the request was made for, including its Fast rules
+	// and how it picks the billing model (fallback-billing design §2.1, PM
+	// decisions Q8, Q9); the serving key keeps the usage row's group and the
+	// account-side cost.
+	servedKey := input.APIKey
+	apiKey := BillingAPIKey(ctx, servedKey)
+	billingFields := billingChannelFields(ctx, s.channelService, servedKey, apiKey, input.ChannelUsageFields)
 	user := input.User
 	account := input.Account
 	subscription := input.Subscription
@@ -220,16 +227,16 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if result.BillingModel != "" {
 		billingModel = strings.TrimSpace(result.BillingModel)
 	}
-	if input.BillingModelSource == BillingModelSourceChannelMapped && input.ChannelMappedModel != "" && input.ChannelMappedModel != input.OriginalModel {
-		billingModel = input.ChannelMappedModel
+	if billingFields.BillingModelSource == BillingModelSourceChannelMapped && billingFields.ChannelMappedModel != "" && billingFields.ChannelMappedModel != input.OriginalModel {
+		billingModel = billingFields.ChannelMappedModel
 	}
-	if input.BillingModelSource == BillingModelSourceRequested && input.OriginalModel != "" {
+	if billingFields.BillingModelSource == BillingModelSourceRequested && input.OriginalModel != "" {
 		billingModel = input.OriginalModel
 	}
 	billingModels := usageBillingModelCandidates(
 		billingModel,
 		result.BillingModel,
-		input.ChannelMappedModel,
+		billingFields.ChannelMappedModel,
 		input.OriginalModel,
 		result.UpstreamModel,
 		result.Model,
@@ -262,7 +269,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			zap.String("component", "service.openai_gateway"),
 			zap.Strings("billing_models", billingModels),
 			zap.String("requested_model", input.OriginalModel),
-			zap.String("mapped_model", input.ChannelMappedModel),
+			zap.String("mapped_model", billingFields.ChannelMappedModel),
 			zap.String("upstream_model", result.UpstreamModel),
 			zap.Int64("api_key_id", apiKey.ID),
 			zap.Int64("account_id", account.ID),
@@ -275,7 +282,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// 既有行为。响应模型与基线同名时直接跳过：重算必然同价，白跑一次定价解析。
 	baselineBillingModel := firstUsageBillingModel(billingModels)
 	if responseModel := responseModelBillingDeclaration(
-		input.BillingModelSource,
+		billingFields.BillingModelSource,
 		result.UpstreamResponseModel,
 		result.UpstreamResponseModelConflict,
 		result.ImageCount > 0 || result.VideoCount > 0 || result.WebSearchCalls > 0 ||
@@ -482,17 +489,17 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		usageLog.SessionID = optionalTrimmedStringPtr(result.CacheDiagnostic.Session)
 	}
 
-	if apiKey.GroupID != nil {
-		usageLog.GroupID = apiKey.GroupID
+	if servedKey.GroupID != nil {
+		usageLog.GroupID = servedKey.GroupID
 	}
 	if subscription != nil {
 		usageLog.SubscriptionID = &subscription.ID
 	}
 
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
-	if apiKey.GroupID != nil {
+	if servedKey.GroupID != nil {
 		applyAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
-			account.ID, *apiKey.GroupID, result.UpstreamModel, result.Model,
+			account.ID, *servedKey.GroupID, result.UpstreamModel, result.Model,
 			tokens, cost.TotalCost, pricingAt,
 			accountStatsLongContextPricingEnabled(longContextBillingGate),
 		)

@@ -34,7 +34,7 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Live is not supported for this platform")
 		return
 	}
-	if !liveEnabledForAPIKey(apiKey) {
+	if !liveEnabledForAPIKey(service.BillingAPIKey(c.Request.Context(), apiKey)) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", "Live is not enabled for this group")
 		return
 	}
@@ -209,14 +209,16 @@ func (h *OpenAIGatewayHandler) LiveSideband(c *gin.Context) {
 		h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
 		return
 	}
-	if !liveEnabledForAPIKey(apiKey) {
+	if !liveEnabledForAPIKey(service.BillingAPIKey(c.Request.Context(), apiKey)) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", "Live is not enabled for this group")
 		return
 	}
+	// xy2api resilience: the call belongs to the group it was made for,
+	// whichever group serves this sideband request.
 	identity := service.LiveCallIdentity{
 		APIKeyID: apiKey.ID,
 		UserID:   subject.UserID,
-		GroupID:  apiKey.GroupID,
+		GroupID:  service.BillingAPIKey(c.Request.Context(), apiKey).GroupID,
 	}
 	record, err := h.gatewayService.GetLiveCallForIdentity(c.Request.Context(), c.Param("call_id"), identity)
 	if err != nil {
@@ -241,6 +243,8 @@ func (h *OpenAIGatewayHandler) LiveSideband(c *gin.Context) {
 	_ = downstream.Close(coderws.StatusNormalClosure, "")
 }
 
+// liveEnabledForAPIKey reports whether the key's own group (the group the
+// request was made for, see service.BillingAPIKey) allows Live.
 func liveEnabledForAPIKey(apiKey *service.APIKey) bool {
 	return apiKey != nil &&
 		apiKey.Group != nil &&

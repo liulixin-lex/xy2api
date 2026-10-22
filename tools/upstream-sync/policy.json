@@ -233,6 +233,58 @@
   },
   "required_literals": [
     {
+      "path": "backend/internal/server/middleware/resilience_fallback.go",
+      "value": "service.RememberAvailabilityFallbackOrigin(c.Request.Context(), apiKey)"
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "value": "apiKey := BillingAPIKey(ctx, servedKey)"
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "value": "usageLog.GroupID = servedKey.GroupID"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "apiKey := BillingAPIKey(ctx, servedKey)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "usageLog.GroupID = servedKey.GroupID"
+    },
+    {
+      "path": "backend/internal/service/billing_cache_service.go",
+      "value": "if billing := BillingAPIKey(ctx, apiKey); billing != apiKey {"
+    },
+    {
+      "path": "backend/internal/service/billing_inflight_reservation.go",
+      "value": "apiKey = BillingAPIKey(ctx, apiKey)"
+    },
+    {
+      "path": "backend/internal/service/batch_image_public.go",
+      "value": "owner.billingGroupID()"
+    },
+    {
+      "path": "backend/internal/service/openai_live.go",
+      "value": "liveOriginGroupID(ctx)"
+    },
+    {
+      "path": "backend/internal/service/openai_live.go",
+      "value": "liveCallerGroupID(record) != liveGroupID(identity.GroupID)"
+    },
+    {
+      "path": "backend/internal/handler/batch_image_handler.go",
+      "value": "owner.BillingGroupID = billing.GroupID"
+    },
+    {
+      "path": "backend/internal/handler/openai_live.go",
+      "value": "liveEnabledForAPIKey(service.BillingAPIKey(c.Request.Context(), apiKey))"
+    },
+    {
+      "path": "backend/internal/handler/openai_live.go",
+      "value": "service.BillingAPIKey(c.Request.Context(), apiKey).GroupID"
+    },
+    {
       "path": "backend/Dockerfile",
       "value": "FROM golang:1.27.3-alpine"
     },
@@ -1554,6 +1606,7 @@
     "xy-account-list-usability",
     "xy-account-recent-health",
     "xy-channel-monitor-probe-lane",
+    "xy-fallback-group-user-invisible",
     "xy-graceful-online-update-restart",
     "xy-resilience-v2-handler-exits",
     "xy-resilience-v2-streams",
@@ -1561,6 +1614,56 @@
     "xy-resilience-v2-classification"
   ],
   "custom_patch_tests": [
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestGatewayRecordUsageUnderFallbackBillsTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestOpenAIRecordUsageUnderFallbackBillsTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestGatewayRecordUsageUnderFallbackResolvesTheBillingModelLikeTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestOpenAIRecordUsageUnderFallbackAppliesTheOriginFastRules"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestCheckBillingEligibilityUnderFallbackLimitsTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestInflightEstimateUnderFallbackPricesLikeTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestLiveCallUnderFallbackKeepsTheCallerGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestBatchImageSubmitUnderFallbackPricesTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/server/middleware/resilience_fallback_test.go",
+      "literal": "func TestAvailabilityFallbackMiddlewareRemembersTheAuthenticatedKey"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/handler/resilience_fallback_billing_test.go",
+      "literal": "func TestBatchImageOwnerUnderFallbackCarriesTheBillingGroup"
+    },
     {
       "id": "xy-group-openai-fast-priority",
       "path": "backend/internal/service/openai_group_fast_priority_test.go",

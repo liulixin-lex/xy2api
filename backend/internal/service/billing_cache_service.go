@@ -753,6 +753,12 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 		return ErrBillingServiceUnavailable
 	}
 
+	// xy2api resilience: under an availability fallback the limits are the
+	// group the request was made for (fallback-billing design §2.2).
+	if billing := BillingAPIKey(ctx, apiKey); billing != apiKey {
+		apiKey, group = billing, billing.Group
+	}
+
 	// 判断计费模式
 	isSubscriptionMode := group != nil && group.IsSubscriptionType() && subscription != nil
 

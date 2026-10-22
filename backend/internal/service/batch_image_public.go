@@ -78,7 +78,19 @@ type BatchImageReferenceInput struct {
 type BatchImageOwner struct {
 	UserID   int64
 	APIKeyID int64
-	GroupID  *int64
+	// GroupID is the group whose accounts serve the job.
+	GroupID *int64
+	// BillingGroupID is the group the request was made for when an
+	// availability fallback group serves it; it prices and permits the job.
+	BillingGroupID *int64
+}
+
+// billingGroupID is the group that prices and permits the job.
+func (o BatchImageOwner) billingGroupID() *int64 {
+	if o.BillingGroupID != nil {
+		return o.BillingGroupID
+	}
+	return o.GroupID
 }
 
 type BatchImagePublicService struct {
@@ -207,7 +219,7 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 	}
 	// 与 ListModels 使用同一鉴权谓词（AllowBatchImageGeneration + Platform==Gemini），
 	// 避免两个入口校验口径不一致留下防御纵深缺口。
-	if err := s.ensureGroupAllowsBatchImage(ctx, owner.GroupID); err != nil {
+	if err := s.ensureGroupAllowsBatchImage(ctx, owner.billingGroupID()); err != nil {
 		return nil, err
 	}
 	requestHash := HashBatchImageSubmitRequest(normalized)
@@ -621,7 +633,7 @@ func (s *BatchImagePublicService) ListModels(ctx context.Context, owner BatchIma
 	if s.Pricing == nil {
 		return nil, ErrBatchImageSettlementPricingMissing
 	}
-	if err := s.ensureGroupAllowsBatchImage(ctx, owner.GroupID); err != nil {
+	if err := s.ensureGroupAllowsBatchImage(ctx, owner.billingGroupID()); err != nil {
 		return nil, err
 	}
 
@@ -1002,11 +1014,11 @@ func (s *BatchImagePublicService) resolvePricingSnapshot(ctx context.Context, ow
 	groupMultiplier := 1.0
 	discountMultiplier := defaultBatchImageDiscountMultiplier
 	holdMultiplier := defaultBatchImageHoldMultiplier
-	if owner.GroupID != nil && *owner.GroupID > 0 {
+	if billingGroupID := owner.billingGroupID(); billingGroupID != nil && *billingGroupID > 0 {
 		if s.GroupRepo == nil {
 			return nil, ErrBatchImageSettlementPricingMissing
 		}
-		group, err := s.GroupRepo.GetByIDLite(ctx, *owner.GroupID)
+		group, err := s.GroupRepo.GetByIDLite(ctx, *billingGroupID)
 		if err != nil || group == nil {
 			return nil, ErrBatchImageSettlementPricingMissing
 		}
