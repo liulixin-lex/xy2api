@@ -334,6 +334,17 @@ func allowOpenAICompatibleMessagesDispatch(c *gin.Context, apiKey *service.APIKe
 	return apiKey.Group.AllowMessagesDispatch
 }
 
+// openAICompatibleMessagesDispatchGate applies allow_messages_dispatch under
+// an availability fallback (PM decision P2-3): the key's own group decides
+// eligibility, the serving group capability.
+func openAICompatibleMessagesDispatchGate(c *gin.Context, apiKey *service.APIKey) service.GroupGate {
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	return service.FallbackGroupGate(ctx, apiKey, func(key *service.APIKey) bool { return allowOpenAICompatibleMessagesDispatch(c, key) })
+}
+
 func openAICompatibleTextTargetAllowed(c *gin.Context, apiKey *service.APIKey, model string) bool {
 	return compositeTargetPlatformAllowed(c, apiKey, model,
 		domain.PlatformIDsWhere(func(spec domain.PlatformSpec) bool {
@@ -562,8 +573,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	if !legacyCompact && !nativeV2 && !imageIntent {
 		c.Request = c.Request.WithContext(resilience.WithCapabilityRequest(c.Request.Context(), resilience.CapabilityProtocolResponses, reqStream))
 	}
-	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
+	if gate := service.ImageGenerationGate(c.Request.Context(), apiKey); imageIntent && gate == service.GroupGateDenied {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
+		return
+	} else if imageIntent && gate == service.GroupGateNoAccount {
+		cls := fallbackGateNoAccount(c, h.gatewayService, apiKey, reqModel)
+		h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
 		return
 	}
 	var imageReleaseFunc func()
@@ -1201,9 +1216,14 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	)
 
 	// 检查分组是否允许 /v1/messages 调度
-	if !allowOpenAICompatibleMessagesDispatch(c, apiKey) {
+	switch openAICompatibleMessagesDispatchGate(c, apiKey) {
+	case service.GroupGateDenied:
 		h.anthropicErrorResponse(c, http.StatusForbidden, "permission_error",
 			"This group does not allow /v1/messages dispatch")
+		return
+	case service.GroupGateNoAccount:
+		cls := fallbackGateNoAccount(c, h.gatewayService, apiKey, "")
+		h.anthropicErrorResponse(c, cls.Status, cls.ErrType, cls.Message)
 		return
 	}
 
@@ -2626,7 +2646,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// 必须在合成路由解析和上游模型映射之前执行。
 	// 与 HTTP 准入一致：帧内重复 model 键/大小写变体可能被上游按末值绑定，
 	// 全部候选值逐一校验，任一未命中即拒绝。
-	if blocked := blockedModelAllowlistCandidate(apiKey.Group, requestmodel.FromBodyCandidates("", "application/json", firstMessage)); blocked != "" {
+	if blocked := blockedModelAllowlistCandidate(modelAllowlistGroup(c, apiKey), requestmodel.FromBodyCandidates("", "application/json", firstMessage)); blocked != "" {
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 		middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, fmt.Sprintf("Model %q is not available for this group", blocked))
@@ -2679,8 +2699,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	}
 
 	imageIntent := service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, firstMessage)
-	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
+	if gate := service.ImageGenerationGate(ctx, apiKey); imageIntent && gate == service.GroupGateDenied {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, service.ImageGenerationPermissionMessage())
+		return
+	} else if imageIntent && gate == service.GroupGateNoAccount {
+		closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account")
 		return
 	}
 
@@ -3102,7 +3125,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 帧内重复 model 键/大小写变体/嵌套 session.model 额外逐一校验，
 				// 防止候选集非空时掩盖被轮换掉的禁用模型。
 				candidates := append([]string{model}, requestmodel.FromBodyCandidates("", "application/json", payload)...)
-				if blocked := blockedModelAllowlistCandidate(apiKey.Group, candidates); blocked != "" {
+				if blocked := blockedModelAllowlistCandidate(modelAllowlistGroup(c, apiKey), candidates); blocked != "" {
 					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 					middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("Model %q is not available for this group", blocked), nil)
@@ -3268,9 +3291,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				sessionID := service.ExtractClientSessionID(c)
 				turnRecordPricingAt := turnPricing.currentOr(turnStart)
 				turnBillingAPIKey := turnBillingAPIKeys.forTurn(turn, apiKey)
+				fixTurnFallbackFast := service.FreezeFallbackForcedFast(ctx)
 				cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 				h.submitOpenAIUsageRecordTask(ctx, result, func(taskCtx context.Context) {
-					if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
+					if err := h.gatewayService.RecordUsage(fixTurnFallbackFast(taskCtx), &service.OpenAIRecordUsageInput{
 						Result:             result,
 						APIKey:             turnBillingAPIKey,
 						User:               apiKey.User,
@@ -4089,6 +4113,19 @@ func isOpenAIWSUpgradeRequest(r *http.Request) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(strings.TrimSpace(r.Header.Get("Connection"))), "upgrade")
+}
+
+// modelAllowlistGroup is the group whose model allow-list applies to the
+// request: the group it was made for, also when an availability fallback
+// group serves it (xy2api resilience, PM decision Q1).
+func modelAllowlistGroup(c *gin.Context, apiKey *service.APIKey) *service.Group {
+	if apiKey == nil {
+		return nil
+	}
+	if c != nil && c.Request != nil {
+		apiKey = service.BillingAPIKey(c.Request.Context(), apiKey)
+	}
+	return apiKey.Group
 }
 
 // blockedModelAllowlistCandidate 对全部候选模型逐一校验分组白名单，返回第一个

@@ -177,6 +177,9 @@ type UsageLog struct {
 	OriginGroupID *int64
 	// OriginGroupName is loaded with the associations for display.
 	OriginGroupName string
+	// OriginGroup is the origin group, loaded with the associations for the
+	// user view, which shows the group the request was made for.
+	OriginGroup *Group
 
 	BillingType        int8
 	RequestType        RequestType

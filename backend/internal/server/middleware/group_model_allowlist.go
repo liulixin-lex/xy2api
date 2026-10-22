@@ -32,6 +32,11 @@ import (
 func GroupModelAllowlist() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		apiKey, ok := GetAPIKeyFromContext(c)
+		if ok && c.Request != nil {
+			// xy2api resilience: the allow-list is the user's permission, so
+			// under an availability fallback it is the origin group's.
+			apiKey = service.BillingAPIKey(c.Request.Context(), apiKey)
+		}
 		if !ok || apiKey == nil || apiKey.Group == nil || !apiKey.Group.ModelAllowlistEnabled() {
 			c.Next()
 			return

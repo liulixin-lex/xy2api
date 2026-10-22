@@ -249,8 +249,11 @@ func (s *OpenAIGatewayService) resolveOpenAIProfitControlGate(ctx context.Contex
 	//（composite 请求即父分组）的"用户覆盖 ?? 分组默认 × 高峰因子"计算，
 	// 因此优先取认证中间件放入 ctx 的分组；ctx 中无有效分组（内部调用）时
 	// 退回调度分组组合，直连 openai 分组场景两者等价。
+	// 无号兜底时售价按原分组（计费 Key 的分组，PM P2-2）；成本仍按实际账号。
 	billingGroup := group
-	if ctxGroup, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(ctxGroup) {
+	if origin := fallbackBillingGroup(ctx); origin != nil {
+		billingGroup = origin
+	} else if ctxGroup, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(ctxGroup) {
 		billingGroup = ctxGroup
 	}
 	downstream := billingGroup.RateMultiplier

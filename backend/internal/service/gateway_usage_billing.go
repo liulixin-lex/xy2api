@@ -820,7 +820,13 @@ func logResponseModelBillingApplied(component string, account *Account, requestI
 func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsageCoreInput) error {
 	s.resilience.NoteAccountSuccess(ctx, input.Account)
 	result := input.Result
-	apiKey := input.APIKey
+	// xy2api resilience: under an availability fallback the user's price
+	// follows the group the request was made for, including how it picks the
+	// billing model (fallback-billing design §2.1); the serving key keeps the
+	// usage row's group and the account-side cost.
+	servedKey := input.APIKey
+	apiKey := BillingAPIKey(ctx, servedKey)
+	billingFields := billingChannelFields(ctx, s.channelService, servedKey, apiKey, input.ChannelUsageFields)
 	user := input.User
 	account := input.Account
 	subscription := input.Subscription
@@ -868,10 +874,10 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// 确定计费模型
 	concreteBillingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
 	billingModel := concreteBillingModel
-	if input.BillingModelSource == BillingModelSourceChannelMapped && input.ChannelMappedModel != "" {
-		billingModel = input.ChannelMappedModel
+	if billingFields.BillingModelSource == BillingModelSourceChannelMapped && billingFields.ChannelMappedModel != "" {
+		billingModel = billingFields.ChannelMappedModel
 	}
-	if input.BillingModelSource == BillingModelSourceRequested && input.OriginalModel != "" {
+	if billingFields.BillingModelSource == BillingModelSourceRequested && input.OriginalModel != "" {
 		billingModel = input.OriginalModel
 	}
 	// composite 分组的公开别名（如 all/claude）会经 OriginalModel/ChannelMappedModel
@@ -898,7 +904,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// + responseModelBillingAdoptable。任一条件不满足都静默回落基线，即开启本模式前的
 	// 既有行为。响应模型与基线同名时直接跳过：重算必然同价，白跑一次定价解析。
 	if responseModel := responseModelBillingDeclaration(
-		input.BillingModelSource,
+		billingFields.BillingModelSource,
 		result.UpstreamResponseModel,
 		result.UpstreamResponseModelConflict,
 		result.ImageCount > 0 || result.AudioUsage != nil || result.SearchCount > 0,
@@ -926,12 +932,13 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	accountRateMultiplier := account.BillingRateMultiplier()
 	usageLog := s.buildRecordUsageLog(ctx, input, result, apiKey, user, account, subscription,
 		requestedModel, multiplier, imageMultiplier, accountRateMultiplier, billingType, cacheTTLOverridden, cost)
+	usageLog.GroupID = servedKey.GroupID
 	s.shareScheduling.observeUsage(ctx, usageLog)
 
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
-	if apiKey.GroupID != nil {
+	if servedKey.GroupID != nil {
 		applyAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
-			account.ID, *apiKey.GroupID, result.UpstreamModel, result.Model,
+			account.ID, *servedKey.GroupID, result.UpstreamModel, result.Model,
 			// Anthropic's input_tokens excludes cache_read and cache_creation (billed separately);
 			// OpenAI gateway uses actualInputTokens which also excludes cache_read for the same reason.
 			UsageTokens{

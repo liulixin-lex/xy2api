@@ -18,6 +18,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
@@ -63,6 +64,21 @@ func liveGroupID(groupID *int64) int64 {
 		return 0
 	}
 	return *groupID
+}
+
+// liveOriginGroupID is the group a live call is made for when an
+// availability fallback group serves it, or 0.
+func liveOriginGroupID(ctx context.Context) int64 {
+	return resilience.StateFrom(ctx).OriginGroupID()
+}
+
+// liveCallerGroupID is the group that owns a live call: the group it was made
+// for, which an availability fallback group may have served.
+func liveCallerGroupID(record *LiveCallRecord) int64 {
+	if record.OriginGroupID > 0 {
+		return record.OriginGroupID
+	}
+	return record.GroupID
 }
 
 func liveOptionalID(value int64) *int64 {
@@ -219,6 +235,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			APIKeyID:              identity.APIKeyID,
 			UserID:                identity.UserID,
 			GroupID:               liveGroupID(identity.GroupID),
+			OriginGroupID:         liveOriginGroupID(ctx),
 			SubscriptionID:        liveGroupID(identity.SubscriptionID),
 			LeaseID:               leaseID,
 			Model:                 model,
@@ -479,7 +496,7 @@ func (s *OpenAIGatewayService) GetLiveCallForIdentity(
 	if record.CallID != callID ||
 		record.APIKeyID != identity.APIKeyID ||
 		record.UserID != identity.UserID ||
-		record.GroupID != liveGroupID(identity.GroupID) {
+		liveCallerGroupID(record) != liveGroupID(identity.GroupID) {
 		return nil, ErrLiveIdentityMismatch
 	}
 	if record.Controller == LiveControllerClosed {
@@ -840,6 +857,7 @@ func (s *OpenAIGatewayService) finalizeLiveCall(record *LiveCallRecord) {
 		Model:            record.Model,
 		RequestedModel:   record.Model,
 		GroupID:          liveOptionalID(record.GroupID),
+		OriginGroupID:    liveOptionalID(record.OriginGroupID),
 		SubscriptionID:   liveOptionalID(record.SubscriptionID),
 		RateMultiplier:   1,
 		BillingType:      billingType,

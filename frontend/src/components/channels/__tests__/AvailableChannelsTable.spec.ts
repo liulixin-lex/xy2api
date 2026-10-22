@@ -119,14 +119,15 @@ function mountTable(props = {}) {
 }
 
 describe('AvailableChannelsTable responsive surfaces', () => {
-  it('shows the availability fallback group next to a group on both surfaces', () => {
-    const fallbackRows = structuredClone(rows)
+  it('never shows a fallback group to users, even if an older server still sends one', () => {
+    // Fallback is internal routing: users see and are billed for their own group only.
+    const fallbackRows = structuredClone(rows) as unknown as Array<{ platforms: Array<{ groups: Array<Record<string, unknown>> }> }>
     fallbackRows[0].platforms[0].groups[0].availability_fallback = { id: 9, name: 'Backup', rate_multiplier: 1.5 }
-    expect(mountTable().findAll('[data-testid="group-availability-fallback"]')).toHaveLength(0)
-    const chips = mountTable({ rows: fallbackRows }).findAll('[data-testid="group-availability-fallback"]')
-    expect(chips).toHaveLength(2)
-    expect(chips[0].text()).toBe('availableChannels.availabilityFallback')
-    expect(chips[0].attributes('title')).toBe('availableChannels.availabilityFallbackTooltip')
+    const wrapper = mountTable({ rows: fallbackRows })
+    expect(wrapper.find('[data-testid="group-availability-fallback"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Backup')
+    expect(wrapper.text()).not.toContain('availableChannels.availabilityFallback')
+    expect(wrapper.html()).not.toContain('availableChannels.availabilityFallbackTooltip')
   })
 
   it('keeps the five-column table as the desktop-only surface', () => {

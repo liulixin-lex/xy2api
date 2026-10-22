@@ -163,7 +163,7 @@ function mountUsageView() {
         DateRangePicker: true,
         Icon: true,
         UsageStatsCards: chartStub,
-        UsageTable: { ...chartStub, props: ['columns', 'showCacheHitRate', 'showTokenSpeed'] },
+        UsageTable: { ...chartStub, props: ['columns', 'showCacheHitRate', 'showTokenSpeed', 'showFallbackOrigin'] },
         UserErrorRequestsTable: chartStub,
         ModelDistributionChart: chartStub,
         GroupDistributionChart: chartStub,
@@ -226,6 +226,14 @@ describe('user UsageView', () => {
     const table = wrapper.findComponent(UsageTable)
     expect(table.props('showCacheHitRate')).toBe(false)
     expect(table.props('showTokenSpeed')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('never asks the usage table for the availability fallback origin', async () => {
+    // Fallback is internal routing: users only ever see their own group.
+    const wrapper = mountUsageView()
+    await flushPromises()
+    expect(wrapper.findComponent(UsageTable).props('showFallbackOrigin')).toBeUndefined()
     wrapper.unmount()
   })
 

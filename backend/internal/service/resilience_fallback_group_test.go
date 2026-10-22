@@ -192,25 +192,6 @@ func TestPublishedInstance(t *testing.T) {
 	require.Same(t, r, Resilience())
 }
 
-func TestAvailabilityFallbackOfIgnoresHealth(t *testing.T) {
-	r, _, accounts, key := newFallbackFixture(t)
-	// The relationship is shown even while the fallback group is unhealthy.
-	accounts.byGroup[20] = []Account{softAccount(2)}
-	fb := r.AvailabilityFallbackOf(context.Background(), key.Group)
-	require.NotNil(t, fb)
-	require.Equal(t, int64(20), fb.ID)
-	require.Equal(t, 1.5, fb.RateMultiplier)
-
-	require.Nil(t, r.AvailabilityFallbackOf(context.Background(), &Group{ID: 20, Platform: PlatformOpenAI}))
-	other := *key.Group
-	other.Platform = PlatformAnthropic
-	require.Nil(t, r.AvailabilityFallbackOf(context.Background(), &other))
-	withResilienceSettings(t, func(s *resilience.Settings) { s.FallbackGroup.Enabled = false })
-	require.Nil(t, r.AvailabilityFallbackOf(context.Background(), key.Group))
-	var nilService *ResilienceService
-	require.Nil(t, nilService.AvailabilityFallbackOf(context.Background(), key.Group))
-}
-
 func TestSoleCandidateIsLastCandidate(t *testing.T) {
 	// Staging KA-6: the only account of a group must not be cut at the
 	// per-attempt tier; there is nobody to switch to.
@@ -297,4 +278,45 @@ func TestSoleCandidateCountsOnlyAccountsThatCanServeTheRequest(t *testing.T) {
 	require.False(t, resilienceLastCandidate(ctx, 2), "an account serving model-a is an alternative")
 	st.MarkAccountFailed(7)
 	require.True(t, resilienceLastCandidate(ctx, 2), "an account that already failed in this request is not")
+}
+
+// R4 (fallback-billing design §3): once the primary group recovers, a key
+// that was never moved to the fallback group is served by the primary at
+// once, while a moved key waits for return_stable_seconds.
+func TestFallbackReturnNeverMovedKeyServesTheRecoveredPrimaryAtOnce(t *testing.T) {
+	r, _, accounts, moved := newFallbackFixture(t)
+	ctx := context.Background()
+	require.NotNil(t, r.AvailabilityFallbackGroup(ctx, moved), "the primary has no account: key 77 moves")
+
+	accounts.byGroup[10] = []Account{healthyAccount(1)}
+	r.lastResortGroups.entries = nil
+	never := *moved
+	never.ID = 78
+	require.Nil(t, r.AvailabilityFallbackGroup(ctx, &never), "a key that never moved returns at once")
+	require.NotNil(t, r.AvailabilityFallbackGroup(ctx, moved), "the moved key waits for stability")
+}
+
+// R4: a moved key stays in the fallback group until the primary has been
+// healthy for return_stable_seconds (120 s by default), then returns and is
+// forgotten.
+func TestFallbackReturnMovedKeyReturnsAfterThePrimaryIsStable(t *testing.T) {
+	r, store, accounts, moved := newFallbackFixture(t)
+	ctx := context.Background()
+	require.NotNil(t, r.AvailabilityFallbackGroup(ctx, moved))
+
+	accounts.byGroup[10] = []Account{healthyAccount(1)}
+	r.lastResortGroups.entries = nil
+	stableFor := func(d time.Duration) {
+		store.mu.Lock()
+		store.stable[10] = time.Now().Add(-d)
+		store.mu.Unlock()
+	}
+	stableFor(119 * time.Second)
+	require.NotNil(t, r.AvailabilityFallbackGroup(ctx, moved), "healthy for 119 s: stay")
+
+	stableFor(121 * time.Second)
+	require.Nil(t, r.AvailabilityFallbackGroup(ctx, moved), "healthy for 120 s: return")
+	remembered, _ := store.FallbackKey(ctx, 10, moved.ID)
+	require.False(t, remembered, "the key is forgotten")
+	require.Nil(t, r.AvailabilityFallbackGroup(ctx, moved), "and stays in the primary")
 }

@@ -2072,6 +2072,7 @@ func (s *OpenAIGatewayService) applyOpenAIFastPolicyToBody(ctx context.Context, 
 		return body, nil
 	}
 	if openAIGroupForcesFast(ctx, account) {
+		noteFallbackForcedFast(ctx, account, gjson.GetBytes(body, "service_tier").String())
 		updated, err := sjson.SetBytes(body, "service_tier", OpenAIFastTierPriority)
 		if err != nil {
 			return body, fmt.Errorf("force group service_tier priority on body: %w", err)
@@ -2198,6 +2199,7 @@ func (s *OpenAIGatewayService) applyOpenAIFastPolicyToWSResponseCreate(
 		return frame, nil, nil
 	}
 	if openAIGroupForcesFast(ctx, account) {
+		noteFallbackForcedFast(ctx, account, gjson.GetBytes(frame, "service_tier").String())
 		updated, err := sjson.SetBytes(frame, "service_tier", OpenAIFastTierPriority)
 		if err != nil {
 			return frame, nil, fmt.Errorf("force group service_tier priority in ws frame: %w", err)

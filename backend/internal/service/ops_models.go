@@ -74,6 +74,9 @@ type OpsErrorLog struct {
 	// 关联 api_key 名称（LEFT JOIN api_keys 取得；软删只覆盖 key 列，name 保留，故已删 key 仍有原名）。
 	APIKeyName    string `json:"api_key_name,omitempty"`
 	APIKeyDeleted bool   `json:"api_key_deleted,omitempty"`
+	// APIKeyGroupName is the API key's current group, which users see for
+	// their errors instead of a serving fallback group (xy2api resilience).
+	APIKeyGroupName string `json:"-"`
 }
 
 type OpsErrorLogDetail struct {

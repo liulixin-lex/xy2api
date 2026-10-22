@@ -99,6 +99,11 @@ func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 	}
 	var t Task
 	err := json.Unmarshal(b, &t)
+	// A user export queued before the fallback-billing upgrade stored no
+	// CallerGroup: users always filter by the group the request was made for.
+	if t.Scope == "user" {
+		t.Options.Filters.CallerGroup = true
+	}
 	return &t, err
 }
 func (e *Engine) Get(ctx context.Context, owner int64, scope, id string) (*Task, error) {

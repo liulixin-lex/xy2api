@@ -629,7 +629,6 @@ export interface Group {
   claude_code_only: boolean
   fallback_group_id: number | null
   fallback_group_id_on_invalid_request: number | null
-  availability_fallback_group_id?: number | null
   // OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程）
   allow_messages_dispatch?: boolean
   // OpenAI Live 接口开关
@@ -644,6 +643,8 @@ export interface Group {
 
 export interface AdminGroup extends Group {
   system_prompt_config?: GroupSystemPromptConfig
+  // 无号兜底分组（网关韧性，仅管理员可见）：兜底只是内部路由，用户侧接口不再下发。
+  availability_fallback_group_id?: number | null
   force_openai_fast: boolean
   free_openai_fast: boolean
   model_pricing: import('@/api/admin/channels').ChannelModelPricing[]
@@ -1826,9 +1827,6 @@ export interface UsageLog {
   stream: boolean
   openai_ws_mode?: boolean
   native_compaction_v2: boolean
-  // 网关韧性：无号兜底时原请求分组（服务分组见 group / group_id）
-  origin_group_id?: number | null
-  origin_group_name?: string
   duration_ms: number | null
   first_token_ms: number | null
 
@@ -1868,6 +1866,9 @@ export interface UsageLogAccountSummary {
 }
 
 export interface AdminUsageLog extends UsageLog {
+  // 网关韧性：无号兜底时原请求分组（服务分组见 group / group_id，仅管理员可见；用户端的 group 已是原分组）
+  origin_group_id?: number | null
+  origin_group_name?: string
   upstream_model?: string | null
   upstream_reasoning_effort?: string | null
   upstream_response_model?: string | null

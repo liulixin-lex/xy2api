@@ -114,7 +114,7 @@ func ToUserErrorRequest(e *OpsErrorLog) *UserErrorRequest {
 		KeyName:         e.APIKeyName,
 		KeyDeleted:      e.APIKeyDeleted,
 		ClientIP:        clientIP,
-		GroupName:       e.GroupName,
+		GroupName:       userErrorGroupName(e),
 		RequestType:     e.RequestType,
 		Stream:          e.Stream,
 		UserAgent:       e.UserAgent,
@@ -141,4 +141,14 @@ func ToUserErrorRequestDetail(e *OpsErrorLogDetail) *UserErrorRequestDetail {
 		ErrorBody:          e.ErrorBody,
 		UpstreamStatusCode: e.UpstreamStatusCode,
 	}
+}
+
+// userErrorGroupName is the group a user sees for an error: the API key's
+// current group, so a serving availability fallback group never shows (PM
+// decision Q4); the recorded group when the key has none.
+func userErrorGroupName(e *OpsErrorLog) string {
+	if e.APIKeyGroupName != "" {
+		return e.APIKeyGroupName
+	}
+	return e.GroupName
 }

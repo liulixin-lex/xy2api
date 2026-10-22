@@ -109,8 +109,13 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 		imageTaskJSONError(c, http.StatusNotFound, "not_found_error", "Images API is not supported for this platform")
 		return
 	}
-	if !service.GroupAllowsImageGeneration(apiKey.Group) {
+	switch service.ImageGenerationGate(c.Request.Context(), apiKey) {
+	case service.GroupGateDenied:
 		imageTaskJSONError(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
+		return
+	case service.GroupGateNoAccount:
+		cls := fallbackGateNoAccount(c, nil, apiKey, "")
+		imageTaskJSONError(c, cls.Status, cls.ErrType, cls.Message)
 		return
 	}
 	if h == nil || h.tasks == nil || h.execute == nil {
@@ -444,7 +449,8 @@ func (h *AsyncImageHandler) Capabilities(c *gin.Context) {
 		platform = apiKey.Group.Platform
 	}
 	supported := platform == service.PlatformOpenAI || platform == service.PlatformGrok
-	enabled := h.enabled() && supported && service.GroupAllowsImageGeneration(apiKey.Group) && !h.draining.Load()
+	// Users see their own group: eligibility, not the fallback group's capability.
+	enabled := h.enabled() && supported && service.ImageGenerationGate(c.Request.Context(), apiKey) != service.GroupGateDenied && !h.draining.Load()
 	concurrency := 0
 	if subject, ok := middleware2.GetAuthSubjectFromContext(c); ok {
 		concurrency = subject.Concurrency

@@ -233,6 +233,130 @@
   },
   "required_literals": [
     {
+      "path": "frontend/src/components/admin/usage/UsageTable.vue",
+      "value": "v-if=\"showFallbackOrigin && row.origin_group_id\""
+    },
+    {
+      "path": "frontend/src/components/admin/usage/UsageTable.vue",
+      "value": "showFallbackOrigin: false,"
+    },
+    {
+      "path": "frontend/src/views/admin/UsageView.vue",
+      "value": "show-fallback-origin"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_request_body.go",
+      "value": "noteFallbackForcedFast(ctx, account, gjson.GetBytes(body, \"service_tier\").String())"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_request_body.go",
+      "value": "noteFallbackForcedFast(ctx, account, gjson.GetBytes(frame, \"service_tier\").String())"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "noteFallbackForcedFast(ctx, account, requestView.ServiceTier)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "|| fallbackForcedFastChargesStandard(ctx, serviceTier) {"
+    },
+    {
+      "path": "backend/internal/handler/dto/mappers.go",
+      "value": "u.Group = GroupFromServiceShallow(l.OriginGroup)"
+    },
+    {
+      "path": "backend/internal/handler/usage_handler.go",
+      "value": "CallerGroup:"
+    },
+    {
+      "path": "backend/internal/repository/usage_log_repo_query.go",
+      "value": "usageLogGroupColumn(\"\", filters.CallerGroup)"
+    },
+    {
+      "path": "backend/internal/repository/usage_log_repo_stats.go",
+      "value": "usageLogGroupColumn(\"\", filters.CallerGroup)"
+    },
+    {
+      "path": "backend/internal/repository/usage_log_repo_trend.go",
+      "value": "groupExpr := usageLogGroupColumn(\"ul.\", callerGroup)"
+    },
+    {
+      "path": "backend/internal/repository/ops_repo.go",
+      "value": "LEFT JOIN groups kg ON kg.id = ak.group_id"
+    },
+    {
+      "path": "backend/internal/service/ops_user_error.go",
+      "value": "GroupName:       userErrorGroupName(e),"
+    },
+    {
+      "path": "backend/internal/server/middleware/resilience_fallback.go",
+      "value": "if c.Request == nil || isModelListing(c) {"
+    },
+    {
+      "path": "backend/internal/server/middleware/group_model_allowlist.go",
+      "value": "apiKey = service.BillingAPIKey(c.Request.Context(), apiKey)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "blockedModelAllowlistCandidate(modelAllowlistGroup(c, apiKey), candidates)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "blockedModelAllowlistCandidate(modelAllowlistGroup(c, apiKey), requestmodel.FromBodyCandidates("
+    },
+    {
+      "path": "backend/internal/server/middleware/resilience_fallback.go",
+      "value": "service.RememberAvailabilityFallbackOrigin(c.Request.Context(), apiKey)"
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "value": "apiKey := BillingAPIKey(ctx, servedKey)"
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "value": "usageLog.GroupID = servedKey.GroupID"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "apiKey := BillingAPIKey(ctx, servedKey)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "usageLog.GroupID = servedKey.GroupID"
+    },
+    {
+      "path": "backend/internal/service/billing_cache_service.go",
+      "value": "if billing := BillingAPIKey(ctx, apiKey); billing != apiKey {"
+    },
+    {
+      "path": "backend/internal/service/billing_inflight_reservation.go",
+      "value": "apiKey = BillingAPIKey(ctx, apiKey)"
+    },
+    {
+      "path": "backend/internal/service/batch_image_public.go",
+      "value": "owner.billingGroupID()"
+    },
+    {
+      "path": "backend/internal/service/openai_live.go",
+      "value": "liveOriginGroupID(ctx)"
+    },
+    {
+      "path": "backend/internal/service/openai_live.go",
+      "value": "liveCallerGroupID(record) != liveGroupID(identity.GroupID)"
+    },
+    {
+      "path": "backend/internal/handler/batch_image_handler.go",
+      "value": "owner.BillingGroupID = billing.GroupID"
+    },
+    {
+      "path": "backend/internal/handler/openai_live.go",
+      "value": "liveEnabledForAPIKey(service.BillingAPIKey(c.Request.Context(), apiKey))"
+    },
+    {
+      "path": "backend/internal/handler/openai_live.go",
+      "value": "service.BillingAPIKey(c.Request.Context(), apiKey).GroupID"
+    },
+    {
       "path": "backend/Dockerfile",
       "value": "FROM golang:1.27.3-alpine"
     },
@@ -1507,6 +1631,86 @@
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
       "value": "c.Writer.Header().Set(openAICodexTurnStateHeader, turnState)"
+    },
+    {
+      "path": "backend/internal/repository/gateway_cache.go",
+      "value": "record.OriginGroupID,"
+    },
+    {
+      "path": "backend/internal/repository/gateway_cache.go",
+      "value": "parseInt(\"origin_group_id\"),"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "fixTurnFallbackFast := service.FreezeFallbackForcedFast(ctx)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "h.gatewayService.RecordUsage(fixTurnFallbackFast(taskCtx), &service.OpenAIRecordUsageInput{"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "switch openAICompatibleMessagesDispatchGate(c, apiKey) {"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "if gate := service.ImageGenerationGate(c.Request.Context(), apiKey); imageIntent && gate == service.GroupGateDenied {"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "if gate := service.ImageGenerationGate(ctx, apiKey); imageIntent && gate == service.GroupGateDenied {"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_count_tokens.go",
+      "value": "switch openAICompatibleMessagesDispatchGate(c, apiKey) {"
+    },
+    {
+      "path": "backend/internal/handler/openai_images.go",
+      "value": "switch service.ImageGenerationGate(c.Request.Context(), apiKey) {"
+    },
+    {
+      "path": "backend/internal/handler/grok_media.go",
+      "value": "switch service.ImageGenerationGate(c.Request.Context(), apiKey) {"
+    },
+    {
+      "path": "backend/internal/handler/image_task_handler.go",
+      "value": "switch service.ImageGenerationGate(c.Request.Context(), apiKey) {"
+    },
+    {
+      "path": "backend/internal/handler/image_task_handler.go",
+      "value": "service.ImageGenerationGate(c.Request.Context(), apiKey) != service.GroupGateDenied"
+    },
+    {
+      "path": "backend/internal/handler/no_account_error.go",
+      "value": "func fallbackGateNoAccount(c *gin.Context, diag any, apiKey *service.APIKey, model string) noAccountErrorClassification {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "imageGenerationGate := ImageGenerationGate(ctx, apiKey)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "if gate := ImageGenerationGate(ctx, apiKey); imageIntent && gate != GroupGateAllowed {"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
+      "value": "imageGenerationAllowed := ImageGenerationGate(ctx, apiKey) == GroupGateAllowed"
+    },
+    {
+      "path": "backend/internal/service/image_generation_intent.go",
+      "value": "func writeImageGenerationGateError(c *gin.Context, gate GroupGate) {"
+    },
+    {
+      "path": "backend/internal/service/gateway_request_pricing.go",
+      "value": "if group := fallbackBillingGroup(ctx); group != nil {"
+    },
+    {
+      "path": "backend/internal/service/gateway_profit_control.go",
+      "value": "billingGroup := fallbackBillingGroup(ctx)"
+    },
+    {
+      "path": "backend/internal/service/openai_profit_control.go",
+      "value": "if origin := fallbackBillingGroup(ctx); origin != nil {"
     }
   ],
   "forbidden_module_paths": [
@@ -1554,6 +1758,7 @@
     "xy-account-list-usability",
     "xy-account-recent-health",
     "xy-channel-monitor-probe-lane",
+    "xy-fallback-group-user-invisible",
     "xy-graceful-online-update-restart",
     "xy-resilience-v2-handler-exits",
     "xy-resilience-v2-streams",
@@ -1561,6 +1766,146 @@
     "xy-resilience-v2-classification"
   ],
   "custom_patch_tests": [
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "frontend/src/components/admin/usage/__tests__/UsageTable.fallback.spec.ts",
+      "literal": "never shows the fallback to users, even if an older server still sends the origin fields"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "frontend/src/components/channels/__tests__/AvailableChannelsTable.spec.ts",
+      "literal": "never shows a fallback group to users, even if an older server still sends one"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "frontend/src/views/user/__tests__/UsageView.spec.ts",
+      "literal": "never asks the usage table for the availability fallback origin"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "frontend/src/views/admin/__tests__/UsageView.spec.ts",
+      "literal": "asks the usage table to show the availability fallback origin on the admin page"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_group_test.go",
+      "literal": "func TestFallbackReturnNeverMovedKeyServesTheRecoveredPrimaryAtOnce"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_group_test.go",
+      "literal": "func TestFallbackReturnMovedKeyReturnsAfterThePrimaryIsStable"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/handler/resilience_fallback_billing_test.go",
+      "literal": "func TestUserAvailableGroupHasNoFallback"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/handler/dto/usage_log_caller_group_test.go",
+      "literal": "func TestGroupDTOHidesTheFallbackFromUsers"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestOpenAIRecordUsageUnderFallbackChargesForcedFastAtStandard"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestFallbackForcedFastFollowsTheLatestTurn"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/repository/usage_log_caller_group_unit_test.go",
+      "literal": "func TestUsageExportWhereMatchesTheCallerGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/repository/usage_log_caller_group_unit_test.go",
+      "literal": "func TestGroupStatsForCallersUseTheCallerGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/handler/dto/usage_log_caller_group_test.go",
+      "literal": "func TestUserUsageLogShowsTheCallerGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/handler/dto/usage_log_caller_group_test.go",
+      "literal": "func TestAdminUsageLogKeepsTheFallback"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestUserErrorRequestShowsTheKeyGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/server/middleware/resilience_fallback_test.go",
+      "literal": "func TestAvailabilityFallbackMiddlewareSkipsModelListings"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/server/middleware/resilience_fallback_test.go",
+      "literal": "func TestGroupModelAllowlistUnderFallbackUsesTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/handler/resilience_fallback_billing_test.go",
+      "literal": "func TestResponsesWebSocketAllowlistUnderFallbackIsTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestGatewayRecordUsageUnderFallbackBillsTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestOpenAIRecordUsageUnderFallbackBillsTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestGatewayRecordUsageUnderFallbackResolvesTheBillingModelLikeTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestOpenAIRecordUsageUnderFallbackAppliesTheOriginFastRules"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestCheckBillingEligibilityUnderFallbackLimitsTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestInflightEstimateUnderFallbackPricesLikeTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestLiveCallUnderFallbackKeepsTheCallerGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestBatchImageSubmitUnderFallbackPricesTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/server/middleware/resilience_fallback_test.go",
+      "literal": "func TestAvailabilityFallbackMiddlewareRemembersTheAuthenticatedKey"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/handler/resilience_fallback_billing_test.go",
+      "literal": "func TestBatchImageOwnerUnderFallbackCarriesTheBillingGroup"
+    },
     {
       "id": "xy-group-openai-fast-priority",
       "path": "backend/internal/service/openai_group_fast_priority_test.go",
@@ -2180,6 +2525,41 @@
       "id": "xy-resilience-v2-streams",
       "path": "backend/internal/service/openai_native_heartbeat_turn_state_test.go",
       "literal": "func TestOpenAINativeHeartbeatTurnStatePreservesErrorRuleTerminal"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/repository/gateway_cache_live_test.go",
+      "literal": "func TestGatewayCacheLiveCallKeepsTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestOpenAIRecordUsageChargesTheTurnFlagFixedWhenItsTaskWasCreated"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/usageexport/caller_group_test.go",
+      "literal": "func TestTaskQueuedBeforeTheUpgradeKeepsItsScopeGroupView"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_gating_test.go",
+      "literal": "func TestFallbackImageGenerationGate("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_gating_test.go",
+      "literal": "func TestFallbackImageGenerationGateResponses("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_gating_test.go",
+      "literal": "func TestProfitControlPricesFallbackAtOriginGroup("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/handler/openai_fallback_gating_test.go",
+      "literal": "func TestMessagesDispatchUnderFallbackFollowsOriginEligibility("
     }
   ]
 }

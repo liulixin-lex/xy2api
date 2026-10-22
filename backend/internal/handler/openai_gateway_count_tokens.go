@@ -198,9 +198,14 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 		zap.Any("group_id", apiKey.GroupID),
 	)
 
-	if !allowOpenAICompatibleMessagesDispatch(c, apiKey) {
+	switch openAICompatibleMessagesDispatchGate(c, apiKey) {
+	case service.GroupGateDenied:
 		h.anthropicErrorResponse(c, http.StatusForbidden, "permission_error",
 			"This group does not allow /v1/messages dispatch")
+		return
+	case service.GroupGateNoAccount:
+		cls := fallbackGateNoAccount(c, h.gatewayService, apiKey, "")
+		h.anthropicErrorResponse(c, cls.Status, cls.ErrType, cls.Message)
 		return
 	}
 

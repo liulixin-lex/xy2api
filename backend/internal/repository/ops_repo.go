@@ -280,13 +280,15 @@ SELECT
   COALESCE(e.user_agent, ''),
   e.request_type,
   COALESCE(ak.name, ''),
-  ak.deleted_at
+  ak.deleted_at,
+  COALESCE(kg.name, '')
 FROM ops_error_logs e
 LEFT JOIN accounts a ON e.account_id = a.id
 LEFT JOIN groups g ON e.group_id = g.id
 LEFT JOIN users u ON e.user_id = u.id
 LEFT JOIN users u2 ON e.resolved_by_user_id = u2.id
 LEFT JOIN api_keys ak ON ak.id = e.api_key_id
+LEFT JOIN groups kg ON kg.id = ak.group_id
 ` + where + `
 ORDER BY ` + opsErrorLogsOrderBy(filter) + `
 LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
@@ -351,6 +353,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 			&requestType,
 			&apiKeyName,
 			&apiKeyDeletedAt,
+			&item.APIKeyGroupName,
 		); err != nil {
 			return nil, err
 		}
@@ -462,12 +465,14 @@ SELECT
   e.time_to_first_token_ms,
   COALESCE(e.api_key_prefix, ''),
   COALESCE(ak.name, ''),
-  ak.deleted_at
+  ak.deleted_at,
+  COALESCE(kg.name, '')
 FROM ops_error_logs e
 LEFT JOIN users u ON e.user_id = u.id
 LEFT JOIN accounts a ON e.account_id = a.id
 LEFT JOIN groups g ON e.group_id = g.id
 LEFT JOIN api_keys ak ON ak.id = e.api_key_id
+LEFT JOIN groups kg ON kg.id = ak.group_id
 WHERE e.id = $1
 LIMIT 1`
 
@@ -537,6 +542,7 @@ LIMIT 1`
 		&out.APIKeyPrefix,
 		&detailAPIKeyName,
 		&detailAPIKeyDeletedAt,
+		&out.APIKeyGroupName,
 	)
 	if err != nil {
 		return nil, err

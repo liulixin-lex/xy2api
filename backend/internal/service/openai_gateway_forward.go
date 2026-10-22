@@ -364,10 +364,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	apiKey := getAPIKeyFromContext(c)
-	imageGenerationAllowed := GroupAllowsImageGeneration(nil)
-	if apiKey != nil {
-		imageGenerationAllowed = GroupAllowsImageGeneration(apiKey.Group)
-	}
+	imageGenerationGate := ImageGenerationGate(ctx, apiKey)
+	imageGenerationAllowed := imageGenerationGate == GroupGateAllowed
 	codexImageGenerationBridgeEnabled := isCodexCLI &&
 		!isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) &&
 		imageGenerationAllowed &&
@@ -389,8 +387,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		imageIntent = canonicalImageIntent
 	}
 	if imageIntent && !imageGenerationAllowed {
-		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
-		c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"type": "permission_error", "message": ImageGenerationPermissionMessage()}})
+		writeImageGenerationGateError(c, imageGenerationGate)
 		return nil, errors.New("image generation disabled for group")
 	}
 
@@ -439,8 +436,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 	imageIntent = imageIntent || IsImageGenerationIntent(openAIResponsesEndpoint, reqModel, nil) || isOpenAIImageGenerationModel(upstreamModel)
 	if imageIntent && !imageGenerationAllowed {
-		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
-		c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"type": "permission_error", "message": ImageGenerationPermissionMessage()}})
+		writeImageGenerationGateError(c, imageGenerationGate)
 		return nil, errors.New("image generation disabled for group")
 	}
 
@@ -667,6 +663,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 	rawTier := requestView.ServiceTier
 	if openAIGroupForcesFast(ctx, account) {
+		noteFallbackForcedFast(ctx, account, requestView.ServiceTier)
 		rawTier = OpenAIFastTierPriority
 		if requestView.ServiceTier != OpenAIFastTierPriority {
 			markPatchSet("service_tier", OpenAIFastTierPriority)
