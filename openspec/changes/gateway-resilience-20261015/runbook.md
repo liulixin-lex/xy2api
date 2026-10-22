@@ -226,11 +226,11 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
 
 | 开关 | 关闭后的行为 |
 |---|---|
-| `stream.prelude_staging` | 兼容转换收到上游 `response.created` 就写开场，之后不再换号 |
+| `stream.prelude_staging` | 兼容转换收到上游 `response.created` 就写开场，之后不再换号；0.4.5 起 Gateway 入站经 Anthropic 上游的 Responses 与 Chat 收到 `message_start` 就写开场 |
 | `stream.native_prelude_whitelist` | 原生 Responses 的开场只认 `response.created`、`response.in_progress`、`keepalive` |
-| `stream.strict_terminal` | raw Chat 透传的 `error` 后跟 `[DONE]` 当成功处理 |
+| `stream.strict_terminal` | raw Chat 透传的 `error` 后跟 `[DONE]` 当成功处理；0.4.5 起 Gateway 入站经 Anthropic 上游的断流与 EOF 合成为成功，OpenAI Responses 透传不设首输出截止与停滞检测 |
 | `failure.decision_v2` | 旧分类：Grok 空闲、raw 429、“服务忙”类文案按容量降载处理；仅流式拒绝只学习，本请求返回 400。分类输入的证据补全保留，个别运维分类可能与 0.4.3 不同 |
-| `errors.failed_frame_retry_after` | 合成的 `response.failed` 不带 `error.headers` |
+| `errors.failed_frame_retry_after` | 合成的 `response.failed` 不带 `error.headers`，正文与 0.4.3 相同（0.4.4 的 RA-1 场景因此恢复 “try again in Ns”）；0.4.5 起也不再采用上游给出的等待时间。这只回退重试提示，不代表其他行为回到 0.4.3 |
 | `errors.codex_retry_after_cap_seconds` 设为 0 | Codex 请求的无号 `Retry-After` 与其他客户端一样为 2–30 秒 |
 | `capability.stream_only_learning` | 不学习、不过滤；已有记录按到期时间自然过期 |
 
@@ -246,6 +246,9 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
 | 换号与写出的协议正确性（0.4.4） | 只在尚未实际写出、客户端未断开且请求未取消时换号；按实际写出字节判断已输出；取消不记成首输出超时 |
 | 排队心跳按入站协议的格式（0.4.4） | 等待槽位与用户消息队列时，Responses、compact、Chat 写注释行，Messages 写 `ping` |
 | 排队 ping 之后按协议写终止帧（0.4.4） | Gateway 入站的 Responses 与 Chat 在 HTTP 已提交后遇到计费等错误，写协议终止帧而不是裸 JSON |
+| 心跳只提交网关自身的 SSE 头（0.4.5） | 第一个输出之前用心跳提交 200 时，只写网关的流式头，不带这次尝试的上游头；换号后客户端不会拿到失败账号的 `x-request-id` |
+| OpenAI Responses 透传的有界暂存（0.4.5） | 第一个输出前的开场暂存上限 8 MiB（超过 64 KiB 写入已解除链接的临时文件），超出时换号 |
+| 末位兜底快照的过期清理（0.4.5） | 过期的分组快照在写入新快照前与每分钟的会话标记清理时删除，不再常驻内存 |
 
 管理端只读功能（选号解释中的模型限制提示等）也不受开关影响。
 

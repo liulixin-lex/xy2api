@@ -344,6 +344,13 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 					return
 				}
 			}
+			// xy2api resilience: a client that left before any output is a
+			// cancellation, not a forward failure (review DELTA-P2-3).
+			if result == nil && (errors.Is(err, context.Canceled) || errors.Is(err, service.ErrGatewayConvertClientGone)) {
+				failoverClientGone(c)
+				reqLog.Info("gateway.cc.client_disconnected", zap.Int64("account_id", account.ID), zap.Error(err))
+				return
+			}
 			upstreamErrorAlreadyCommunicated := gatewayForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 			wroteFallback := false
 			if !upstreamErrorAlreadyCommunicated {
@@ -355,7 +362,13 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
 				zap.Error(err),
 			)
-			return
+			// xy2api resilience (review DELTA-P1-1): a stream that broke after
+			// output returns its partial result; its usage, already metered by
+			// the upstream, is recorded below as on success (#5148). Failover
+			// errors carry no result, so nothing is billed twice.
+			if result == nil {
+				return
+			}
 		}
 
 		// 6. Record usage
@@ -431,7 +444,7 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 			return
 		}
 		if lastErr != nil {
-			copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
+			copyFailoverRetryAfter(c, lastErr.StatusCode, lastErr.ResponseHeaders)
 		}
 		status = applyExhaustedRetryHint(c, h.gatewayService, status)
 		if streamStarted {

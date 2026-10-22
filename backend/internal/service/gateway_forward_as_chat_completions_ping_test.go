@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
 
@@ -48,6 +49,20 @@ func (writer *ccPingResponseWriter) Flush() {
 }
 
 func TestHandleCCStreamingFromAnthropic_PingFlushesImmediately(t *testing.T) {
+	// Pings flush at once in every mode; the staged opening is covered by
+	// TestGatewayConvertUpstreamHeartbeatPassesThroughDuringStaging.
+	for _, strict := range []bool{false, true} {
+		t.Run(fmtBool(strict), func(t *testing.T) {
+			withResilienceSettings(t, func(s *resilience.Settings) {
+				s.Stream.PreludeStaging = false
+				s.Stream.StrictTerminal = strict
+			})
+			testCCStreamingPingFlushesImmediately(t)
+		})
+	}
+}
+
+func testCCStreamingPingFlushesImmediately(t *testing.T) {
 	writer := &ccPingResponseWriter{
 		ResponseRecorder: httptest.NewRecorder(),
 		flushed:          make(chan string, 32),
@@ -61,7 +76,7 @@ func TestHandleCCStreamingFromAnthropic_PingFlushesImmediately(t *testing.T) {
 	finished := make(chan outcome, 1)
 	go func() {
 		result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
-			&http.Response{Body: reader}, context, "gpt-5", "claude-sonnet-4.5", nil, time.Now(),
+			&http.Response{Body: reader}, context, nil, "gpt-5", "claude-sonnet-4.5", nil, time.Now(),
 		)
 		finished <- outcome{result: result, err: err}
 	}()
@@ -157,18 +172,47 @@ func TestHandleCCStreamingFromAnthropic_PingFlushesImmediately(t *testing.T) {
 }
 
 func TestHandleCCStreamingFromAnthropic_PingDoesNotSetFirstToken(t *testing.T) {
-	writer := httptest.NewRecorder()
-	context, _ := gin.CreateTestContext(writer)
-	result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
-		&http.Response{Body: io.NopCloser(strings.NewReader("event: ping\ndata: {\"type\":\"ping\"}\n\n"))},
-		context, "gpt-5", "claude-sonnet-4.5", nil, time.Now(),
-	)
-	require.NoError(t, err)
-	require.Nil(t, result.FirstTokenMs)
-	require.True(t, strings.HasPrefix(writer.Body.String(), ": ping\n\n"))
+	for _, guarded := range []bool{false, true} {
+		t.Run(fmtBool(guarded), func(t *testing.T) {
+			withResilienceSettings(t, func(s *resilience.Settings) {
+				s.Stream.PreludeStaging = guarded
+				s.Stream.StrictTerminal = guarded
+			})
+			writer := httptest.NewRecorder()
+			context, _ := gin.CreateTestContext(writer)
+			result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
+				&http.Response{Body: io.NopCloser(strings.NewReader("event: ping\ndata: {\"type\":\"ping\"}\n\n"))},
+				context, nil, "gpt-5", "claude-sonnet-4.5", nil, time.Now(),
+			)
+			require.True(t, strings.HasPrefix(writer.Body.String(), ": ping\n\n"))
+			if guarded {
+				// A ping is a heartbeat: the attempt that ends after it is switched.
+				var failover *UpstreamFailoverError
+				require.ErrorAs(t, err, &failover)
+				require.Nil(t, result)
+				return
+			}
+			require.NoError(t, err)
+			require.Nil(t, result.FirstTokenMs)
+		})
+	}
 }
 
 func TestHandleCCStreamingFromAnthropic_PingWriteFailureStopsDownstream(t *testing.T) {
+	for _, guarded := range []bool{false, true} {
+		t.Run(fmtBool(guarded), func(t *testing.T) {
+			withResilienceSettings(t, func(s *resilience.Settings) {
+				s.Stream.PreludeStaging = guarded
+				s.Stream.StrictTerminal = guarded
+			})
+			testCCStreamingPingWriteFailure(t, guarded)
+		})
+	}
+}
+
+// A failed ping write ends the downstream. Guarded, the upstream is still
+// read for its usage (review P0, PM7); switched off, 0.4.4 stops at once.
+func testCCStreamingPingWriteFailure(t *testing.T, guarded bool) {
 	for _, withUsage := range []bool{false, true} {
 		name := "before_message_start"
 		if withUsage {
@@ -186,13 +230,18 @@ func TestHandleCCStreamingFromAnthropic_PingWriteFailureStopsDownstream(t *testi
 				"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
 			result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
 				&http.Response{Body: io.NopCloser(strings.NewReader(stream))},
-				context, "gpt-5", "claude-sonnet-4.5", nil, time.Now(),
+				context, nil, "gpt-5", "claude-sonnet-4.5", nil, time.Now(),
 			)
 			require.NoError(t, err)
 			require.True(t, writer.failed)
 			require.Zero(t, writer.writesAfterError)
 			require.Zero(t, writer.flushesAfterError)
 			require.NotContains(t, writer.Body.String(), "[DONE]")
+			if guarded {
+				require.True(t, result.ClientDisconnect)
+				require.Equal(t, 7, result.Usage.OutputTokens)
+				return
+			}
 			require.Zero(t, result.Usage.OutputTokens)
 			if withUsage {
 				require.Equal(t, 10, result.Usage.InputTokens)

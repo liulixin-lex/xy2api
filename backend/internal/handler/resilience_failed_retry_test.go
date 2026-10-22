@@ -153,5 +153,6 @@ func TestExhaustedRetryAdviceWarmsSnapshotBeforeResolving(t *testing.T) {
 	status := applyExhaustedRetryHint(c, advisor, http.StatusBadGateway)
 	require.Equal(t, http.StatusBadGateway, status)
 	require.True(t, advisor.warmed.Load())
-	require.Equal(t, 7, resilience.RetryAdviceFrom(c.Request.Context()).Seconds)
+	// The exit only prepares the advice (P2-10); a failed frame resolves it.
+	require.Equal(t, 7, resilience.ResolveRetryAdvice(c.Request.Context()).Seconds)
 }

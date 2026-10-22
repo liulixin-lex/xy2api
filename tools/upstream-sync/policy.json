@@ -51,7 +51,8 @@
       "openspec/changes/simplify-share-scheduling-20261020/**",
       "skills/**",
       "tools/**",
-      "openspec/changes/gateway-resilience-v2-20261021/**"
+      "openspec/changes/gateway-resilience-v2-20261021/**",
+      "openspec/changes/gateway-resilience-045-20261021/**"
     ],
     "manual_merge": [
       "Makefile",
@@ -1300,6 +1301,42 @@
       "value": "releaseOpenAIPrelude"
     },
     {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "preludeBodyClosed.Store(true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "if canceledAfterOutput() {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "preludeBodyClosed.Store(true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "if canceledAfterOutput() {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "func writeStableStreamHeaders(c *gin.Context) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "writeStableStreamHeaders(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "writeStableStreamHeaders(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "writeStableStreamHeaders(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_raw_stream_truncation.go",
+      "value": "resilience.ChatErrorField(root)"
+    },
+    {
       "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
       "value": "resilience.Current().StrictTerminalOn()"
     },
@@ -1348,6 +1385,14 @@
       "value": "resilience.RetryAdviceEligible(streamErr.IntendedStatus, errType, mapResponsesErrorCode(errType, code))"
     },
     {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "c.Set(ginKeyResilienceUpstreamRetryAfter, retryAfter)"
+    },
+    {
+      "path": "backend/internal/handler/resilience_retry_advice.go",
+      "value": "installRetryAdviceProvider(c, diag, apiKey, model, upstreamRecoverySeconds(c))"
+    },
+    {
       "path": "backend/internal/handler/openai_chat_completions.go",
       "value": "// Staged heartbeats commit SSE without delivering semantic output."
     },
@@ -1366,6 +1411,102 @@
     {
       "path": "backend/internal/handler/openai_chat_completions.go",
       "value": "if result != nil && result.ClientDisconnect {"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_responses.go",
+      "value": "s.armGatewayConvertFirstEvent(ctx, upstreamCtx, account, clientStream)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_responses.go",
+      "value": "return nil, firstEvent.failoverError(c, account, \"response_headers\")"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_responses.go",
+      "value": "s.newGatewayConvertStream(c, resp, account, gatewayConvertResponses, mappedModel, gatewayConvertHooks{"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_responses.go",
+      "value": "gatewayResponsesFailedFrames(stream.ctx(), state, originalModel, source)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
+      "value": "s.armGatewayConvertFirstEvent(ctx, upstreamCtx, account, clientStream)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
+      "value": "return nil, firstEvent.failoverError(c, account, \"response_headers\")"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
+      "value": "s.newGatewayConvertStream(c, resp, account, gatewayConvertChat, mappedModel, gatewayConvertHooks{"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
+      "value": "ccChunks = deferredOpenAIChatChunks(resEvt, ccState, hold)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "if result == nil && (errors.Is(err, context.Canceled) || errors.Is(err, service.ErrGatewayConvertClientGone)) {"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "// xy2api resilience (review DELTA-P1-1): a stream that broke after"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
+      "value": "if result == nil && (errors.Is(err, context.Canceled) || errors.Is(err, service.ErrGatewayConvertClientGone)) {"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
+      "value": "// xy2api resilience (review DELTA-P1-1): a stream that broke after"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, reqModel, reasoningEffortValue, startTime)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(upstreamCtx, releaseUpstreamCtx, startTime.Add(firstOutputTimeout))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.handleStreamingResponsePassthroughWithReasoning(ctx, resp, c, account, startTime, reqModel, upstreamPassthroughModel, reasoningEffortValue)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "pendingStage := newDefaultOpenAIFirstOutputStage()"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "return runOpenAIPassthroughReadPump(resp, documentScanner, scanBuf, openAIPassthroughPump{"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "writeHeartbeat(line + \"\\n\\n\")"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "if result != nil && result.clientSawOutput && !errors.As(handleErr, &failoverErr) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "return forwardResult, partialErr"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "writeOpenAIStreamRuleError(ctx, c, status, errType, errMsg)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "if extractOpenAICodexTurnState(resp.Header) != \"\" && !c.Writer.Written() {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "writeOpenAIStreamRuleError(ctx, c, status, errType, errMsg)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "c.Writer.Header().Set(openAICodexTurnStateHeader, turnState)"
     }
   ],
   "forbidden_module_paths": [
@@ -1727,6 +1868,46 @@
     },
     {
       "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_upstream_retry_wait_test.go",
+      "literal": "func TestUpstreamRetryWaitFallback"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_upstream_retry_wait_test.go",
+      "literal": "func TestUpstreamRetryWaitFromRealSnapshotThroughHandler"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_upstream_retry_wait_test.go",
+      "literal": "func TestUpstreamRetryWaitPreservesAdvicePriority"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_upstream_retry_wait_test.go",
+      "literal": "func TestUpstreamRetryWaitCannotReviveTerminalErrors"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_upstream_retry_wait_test.go",
+      "literal": "func TestUpstreamRetryWaitIgnoresUnprovenAndCanceledHints"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_upstream_retry_wait_test.go",
+      "literal": "func TestUpstreamRetryWaitDisabledPreservesLegacy"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_upstream_retry_wait_test.go",
+      "literal": "func TestUpstreamRetryWaitReachesEarlierServiceContext"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_upstream_retry_wait_test.go",
+      "literal": "func TestUpstreamRetryWaitPreservesOtherProtocols"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
       "path": "backend/internal/handler/openai_compat_client_cancel_test.go",
       "literal": "func TestOpenAICompatibleClientCancelDoesNotReportAccountFailure"
     },
@@ -1854,6 +2035,151 @@
       "id": "xy-resilience-v2-streams",
       "path": "backend/internal/service/resilience_compat_stream_prelude_test.go",
       "literal": "func TestCompatPreludeHeartbeatDisconnectDrainsUsageAfterContent"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_compat_stream_prelude_test.go",
+      "literal": "func TestCompatPreludeCancelDuringFirstWriteIsClientCancel"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_heartbeat_headers_test.go",
+      "literal": "func TestCompatHeartbeatCommitsOnlyStableStreamHeaders"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/resilience_heartbeat_headers_test.go",
+      "literal": "func TestRawChatCommentHeartbeatCommitsOnlyStableStreamHeaders"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/resilience_retry_advice_lazy_test.go",
+      "literal": "func TestRetryAdviceResolvesOnlyForFailedFrames"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/gateway_convert_stream_test.go",
+      "literal": "func TestGatewayConvertRetryableErrorBeforeContentFailsOver"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/gateway_convert_stream_test.go",
+      "literal": "func TestGatewayConvertBreakAfterContentEndsWithProtocolTerminal"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/gateway_convert_stream_test.go",
+      "literal": "func TestGatewayConvertHeartbeatWriteFailureIsClientGone"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/gateway_convert_stream_test.go",
+      "literal": "func TestGatewayConvertSwitchesOffKeepBaseline"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/gateway_convert_stream_test.go",
+      "literal": "func TestGatewayConvertCancelDuringFirstWriteIsClientCancel"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_oauth_passthrough_test.go",
+      "literal": "type passthroughCancelBody struct"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_turn_state_test.go",
+      "literal": "func TestOpenAIPassthroughHeartbeatCommitsAttemptHeaders"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_turn_state_test.go",
+      "literal": "func TestOpenAIPassthroughSwitchAfterHeartbeatKeepsFirstHeadersAndGuardStripsEcho"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/gateway_convert_usage_test.go",
+      "literal": "func TestGatewayConvertBreakAfterOutputBillsPartialUsageOnce"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/gateway_convert_usage_test.go",
+      "literal": "func TestGatewayConvertCancelBeforeOutputBillsNothing"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_first_output_test.go",
+      "literal": "func TestOpenAIPassthroughFirstOutputDeadlineSwitchesSilentAttempt"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_first_output_test.go",
+      "literal": "func TestOpenAIPassthroughHeartbeatWriteFailureIsClientGone"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_first_output_test.go",
+      "literal": "func TestOpenAIPassthroughDeadlineSwitchOff"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/openai_passthrough_usage_test.go",
+      "literal": "func TestOpenAIPassthroughBreakAfterOutputBillsPartialUsageOnce"
+    },
+    {
+      "id": "xy-resilience-v2-handler-exits",
+      "path": "backend/internal/handler/openai_passthrough_usage_test.go",
+      "literal": "func TestOpenAIPassthroughCancelBeforeOutputBillsNothing"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_first_output_test.go",
+      "literal": "func TestOpenAIPassthroughRuleAfterHeartbeatEndsWithResponsesTerminal"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_passthrough_first_output_test.go",
+      "literal": "func TestOpenAIPassthroughRuleWithoutHeartbeatKeepsJSON"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_responses_rule_terminal_test.go",
+      "literal": "func TestNativeResponsesRuleAfterHeartbeatEndsWithResponsesTerminal"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_responses_rule_terminal_test.go",
+      "literal": "func TestNativeResponsesRuleWithoutHeartbeatKeepsJSON"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_native_heartbeat_turn_state_test.go",
+      "literal": "func TestOpenAINativeHeartbeatCommitsOnlyTurnStateAndProvenance"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_native_heartbeat_turn_state_test.go",
+      "literal": "func TestOpenAINativeHeartbeatFailoverKeepsTurnStateOriginAndGuardsEcho"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_native_heartbeat_turn_state_test.go",
+      "literal": "func TestOpenAINativeTurnStateWithoutHeartbeatCommitsAllHeadersAtOutput"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_native_heartbeat_turn_state_test.go",
+      "literal": "func TestOpenAINativeHeartbeatWithoutTurnStateDoesNotRecordOrigin"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_native_heartbeat_turn_state_test.go",
+      "literal": "func TestOpenAINativeHeartbeatAfterEarlierCommitDoesNotPublishTurnState"
+    },
+    {
+      "id": "xy-resilience-v2-streams",
+      "path": "backend/internal/service/openai_native_heartbeat_turn_state_test.go",
+      "literal": "func TestOpenAINativeHeartbeatTurnStatePreservesErrorRuleTerminal"
     }
   ]
 }
