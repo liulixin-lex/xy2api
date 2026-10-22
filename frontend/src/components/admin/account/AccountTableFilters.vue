@@ -13,6 +13,7 @@
     <Select :model-value="filters.status" :aria-label="t('admin.accounts.allStatus')" class="min-w-0 w-full sm:w-44" :options="sOpts" @update:model-value="updateStatus" @change="$emit('change')" />
     <Select :model-value="filters.privacy_mode" :aria-label="t('admin.accounts.allPrivacyModes')" class="min-w-0 w-full sm:w-44" :options="privacyOpts" @update:model-value="updatePrivacyMode" @change="$emit('change')" />
     <Select :model-value="filters.iq_status" :aria-label="t('admin.accounts.allIQStatuses')" class="min-w-0 w-full sm:w-44" :options="iqOpts" @update:model-value="updateIQStatus" @change="$emit('change')" />
+    <GroupCategoryFilter :model-value="filters.group_category ?? ''" class="min-w-0 w-full sm:w-44" @update:model-value="(value: string) => $emit('update:filters', { ...filters, group_category: value })" @change="$emit('change')" />
     <Select :model-value="filters.group" :aria-label="t('admin.accounts.allGroups')" class="min-w-0 w-full sm:w-44" :options="gOpts" @update:model-value="updateGroup" @change="$emit('change')" />
   </div>
 </template>
@@ -21,6 +22,7 @@
 import { computed } from 'vue'; import { useI18n } from 'vue-i18n'; import Select from '@/components/common/Select.vue'; import SearchInput from '@/components/common/SearchInput.vue'
 import type { AdminGroup } from '@/types'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
+import GroupCategoryFilter from '@/components/admin/group/GroupCategoryFilter.vue'
 const props = defineProps<{ searchQuery: string; filters: Record<string, any>; groups?: AdminGroup[] }>()
 const emit = defineEmits(['update:searchQuery', 'update:filters', 'change']); const { t } = useI18n()
 const updatePlatform = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, platform: value }) }

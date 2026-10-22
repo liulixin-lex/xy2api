@@ -1,0 +1,32 @@
+export default {
+  groupCategories: {
+    column: '分类',
+    field: '分类',
+    fieldHint: '只用于后台整理分组，不影响调度、计费和用户看到的内容；分组是否对用户公开仍由“专属”决定。',
+    fieldEmpty: '还没有分类，可在分组列表点“管理分类”添加',
+    allCategories: '全部分类',
+    manage: '管理分类',
+    managerHint: '拖动调整顺序，分类标签和筛选按此顺序显示。',
+    namePlaceholder: '输入分类名称',
+    add: '添加',
+    dragHandle: '拖动排序',
+    remove: '删除',
+    groupCount: '{count} 个分组',
+    empty: '还没有分类',
+    deleteConfirmTitle: '删除分类',
+    deleteConfirm: '将删除分类「{names}」，它们会从 {count} 个分组中移除，分组本身不受影响。',
+    nameRequired: '分类名称不能为空',
+    nameTooLong: '分类名称最多 32 个字符',
+    nameInvalid: '分类名称不能包含控制字符',
+    nameDuplicate: '已有同名分类',
+    limitReached: '最多 50 个分类',
+    saved: '分类已保存',
+    saveFailed: '保存分类失败',
+    loadFailed: '加载分类失败',
+    groupSavedCategoriesFailed: '分组已保存，但分类没有保存：{message}',
+    groupCopiedCategoriesFailed: '分组已复制，但分类没有复制：{message}',
+    tabsLabel: '按分类筛选',
+    editAccountGroups: '编辑分组 · {name}',
+    editAccountGroupsAria: '编辑账号 {name} 的分组'
+  }
+}

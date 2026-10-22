@@ -6,6 +6,9 @@ import SearchInput from '@/components/common/SearchInput.vue'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import type { AdminGroup } from '@/types'
 
+const categoriesApi = vi.hoisted(() => ({ list: vi.fn().mockResolvedValue([]), save: vi.fn(), setGroupCategories: vi.fn() }))
+vi.mock('@/api/admin/groupCategories', () => ({ default: categoriesApi }))
+
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   return {

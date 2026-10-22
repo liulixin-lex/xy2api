@@ -1,0 +1,32 @@
+export default {
+  groupCategories: {
+    column: 'Categories',
+    field: 'Categories',
+    fieldHint: 'For admin organisation only; does not affect scheduling, billing or what users see. Whether users see a group is still set by "Exclusive".',
+    fieldEmpty: 'No categories yet; add them with "Manage categories" on the groups page',
+    allCategories: 'All categories',
+    manage: 'Manage categories',
+    managerHint: 'Drag to reorder; tabs and filters follow this order.',
+    namePlaceholder: 'Category name',
+    add: 'Add',
+    dragHandle: 'Drag to reorder',
+    remove: 'Delete',
+    groupCount: '{count} groups',
+    empty: 'No categories yet',
+    deleteConfirmTitle: 'Delete categories',
+    deleteConfirm: 'Deleting "{names}" removes them from {count} groups; the groups themselves are unchanged.',
+    nameRequired: 'Enter a category name',
+    nameTooLong: 'Category names can have at most 32 characters',
+    nameInvalid: 'Category names cannot contain control characters',
+    nameDuplicate: 'A category with this name already exists',
+    limitReached: 'At most 50 categories',
+    saved: 'Categories saved',
+    saveFailed: 'Failed to save categories',
+    loadFailed: 'Failed to load categories',
+    groupSavedCategoriesFailed: 'The group was saved, but its categories were not: {message}',
+    groupCopiedCategoriesFailed: 'The group was copied, but its categories were not: {message}',
+    tabsLabel: 'Filter by category',
+    editAccountGroups: 'Edit groups · {name}',
+    editAccountGroupsAria: 'Edit the groups of account {name}'
+  }
+}

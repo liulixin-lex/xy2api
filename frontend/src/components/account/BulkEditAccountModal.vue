@@ -1424,6 +1424,7 @@
           <GroupSelector
             v-model="groupIds"
             :groups="groups"
+            category-tabs
             aria-labelledby="bulk-edit-groups-label"
           />
         </div>

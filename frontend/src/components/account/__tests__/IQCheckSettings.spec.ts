@@ -5,6 +5,8 @@ import IQCheckSettings from '../IQCheckSettings.vue'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 const fetchModels = vi.hoisted(() => vi.fn())
 vi.mock('@/api/admin/accounts', () => ({ getIQCheckModels: fetchModels }))
+vi.mock('@/api/admin/groupCategories', () => ({ default: { list: vi.fn(async () => []), save: vi.fn(), setGroupCategories: vi.fn() } }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isSimpleMode: false }) }))
 vi.mock('@/utils/format', () => ({ formatDateTime: (value: string) => value }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, te: () => false }) }))
 afterEach(() => { document.body.innerHTML = ''; vi.clearAllMocks() })

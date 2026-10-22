@@ -295,6 +295,7 @@ type BulkUpdateAccountFilters struct {
 	Group       string `json:"group"`
 	Search      string `json:"search"`
 	PrivacyMode string `json:"privacy_mode"`
+	Category    string `json:"group_category"`
 }
 
 // CheckMixedChannelRequest represents check mixed channel risk request
@@ -805,6 +806,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 
+	if !bindGroupCategoryQuery(c, service.WithAccountGroupCategoryFilter) {
+		return
+	}
 	listCtx := service.WithIQStatusFilter(c.Request.Context(), iqStatus)
 	accounts, total, err := h.adminService.ListAccounts(listCtx, page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
 	if err != nil {
@@ -2553,6 +2557,7 @@ func toServiceBulkUpdateAccountFilters(filters *BulkUpdateAccountFilters) *servi
 		Search:      filters.Search,
 		PrivacyMode: filters.PrivacyMode,
 		IQStatus:    filters.IQStatus,
+		Category:    filters.Category,
 	}
 }
 
