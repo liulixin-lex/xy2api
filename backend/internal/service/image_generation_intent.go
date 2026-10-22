@@ -1,8 +1,10 @@
 package service
 
 import (
+	"net/http"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
 
@@ -29,6 +31,18 @@ func isOpenAIResponsesLiteWebSocketPayload(body []byte) bool {
 // ImageGenerationPermissionMessage returns the stable end-user error text for disabled groups.
 func ImageGenerationPermissionMessage() string {
 	return imageGenerationPermissionMessage
+}
+
+// writeImageGenerationGateError answers a refused image request: the key's
+// group refusing is a permission error, the fallback group refusing is the
+// no-account 503 (PM decision P2-3).
+func writeImageGenerationGateError(c *gin.Context, gate GroupGate) {
+	MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
+	if gate == GroupGateNoAccount {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"type": "api_error", "message": "Service temporarily unavailable"}})
+		return
+	}
+	c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"type": "permission_error", "message": ImageGenerationPermissionMessage()}})
 }
 
 // GroupAllowsImageGeneration preserves ungrouped-key behavior and enforces the flag when a group is present.

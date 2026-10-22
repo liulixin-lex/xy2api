@@ -36,6 +36,49 @@ func BillingAPIKey(ctx context.Context, apiKey *APIKey) *APIKey {
 	return origin
 }
 
+// GroupGate is the verdict of a group capability flag on a request.
+type GroupGate uint8
+
+const (
+	GroupGateAllowed GroupGate = iota
+	// GroupGateDenied: the key's own group refuses; answered as the
+	// permission error that group gives when it serves the request.
+	GroupGateDenied
+	// GroupGateNoAccount: the key's own group allows it but the availability
+	// fallback group serving the request does not; answered as no available
+	// account, without naming the fallback group.
+	GroupGateNoAccount
+)
+
+// FallbackGroupGate applies a group capability flag under an availability
+// fallback (PM decision P2-3): eligibility follows the group the key belongs
+// to, capability the group that serves the request.
+func FallbackGroupGate(ctx context.Context, apiKey *APIKey, allows func(*APIKey) bool) GroupGate {
+	if !allows(BillingAPIKey(ctx, apiKey)) {
+		return GroupGateDenied
+	}
+	if !allows(apiKey) {
+		return GroupGateNoAccount
+	}
+	return GroupGateAllowed
+}
+
+// ImageGenerationGate is FallbackGroupGate for allow_image_generation.
+func ImageGenerationGate(ctx context.Context, apiKey *APIKey) GroupGate {
+	return FallbackGroupGate(ctx, apiKey, func(key *APIKey) bool { return GroupAllowsImageGeneration(apiKeyGroup(key)) })
+}
+
+// fallbackBillingGroup is the group whose price the user pays when the
+// request was moved to an availability fallback group, or nil.
+func fallbackBillingGroup(ctx context.Context) *Group {
+	st := resilience.StateFrom(ctx)
+	origin, ok := st.FallbackOrigin().(*APIKey)
+	if !ok || origin == nil || origin.GroupID == nil || *origin.GroupID != st.OriginGroupID() || !IsGroupContextValid(origin.Group) {
+		return nil
+	}
+	return origin.Group
+}
+
 // billingChannelFields returns the channel fields that decide the billing
 // model. Under an availability fallback they are what the origin group's
 // channel resolves for the requested model (PM decision Q9): a requested or

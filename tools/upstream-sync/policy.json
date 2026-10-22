@@ -1647,6 +1647,70 @@
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
       "value": "h.gatewayService.RecordUsage(fixTurnFallbackFast(taskCtx), &service.OpenAIRecordUsageInput{"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "switch openAICompatibleMessagesDispatchGate(c, apiKey) {"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "if gate := service.ImageGenerationGate(c.Request.Context(), apiKey); imageIntent && gate == service.GroupGateDenied {"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "if gate := service.ImageGenerationGate(ctx, apiKey); imageIntent && gate == service.GroupGateDenied {"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_count_tokens.go",
+      "value": "switch openAICompatibleMessagesDispatchGate(c, apiKey) {"
+    },
+    {
+      "path": "backend/internal/handler/openai_images.go",
+      "value": "switch service.ImageGenerationGate(c.Request.Context(), apiKey) {"
+    },
+    {
+      "path": "backend/internal/handler/grok_media.go",
+      "value": "switch service.ImageGenerationGate(c.Request.Context(), apiKey) {"
+    },
+    {
+      "path": "backend/internal/handler/image_task_handler.go",
+      "value": "switch service.ImageGenerationGate(c.Request.Context(), apiKey) {"
+    },
+    {
+      "path": "backend/internal/handler/image_task_handler.go",
+      "value": "service.ImageGenerationGate(c.Request.Context(), apiKey) != service.GroupGateDenied"
+    },
+    {
+      "path": "backend/internal/handler/no_account_error.go",
+      "value": "func fallbackGateNoAccount(c *gin.Context, diag any, apiKey *service.APIKey, model string) noAccountErrorClassification {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "imageGenerationGate := ImageGenerationGate(ctx, apiKey)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "if gate := ImageGenerationGate(ctx, apiKey); imageIntent && gate != GroupGateAllowed {"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
+      "value": "imageGenerationAllowed := ImageGenerationGate(ctx, apiKey) == GroupGateAllowed"
+    },
+    {
+      "path": "backend/internal/service/image_generation_intent.go",
+      "value": "func writeImageGenerationGateError(c *gin.Context, gate GroupGate) {"
+    },
+    {
+      "path": "backend/internal/service/gateway_request_pricing.go",
+      "value": "if group := fallbackBillingGroup(ctx); group != nil {"
+    },
+    {
+      "path": "backend/internal/service/gateway_profit_control.go",
+      "value": "billingGroup := fallbackBillingGroup(ctx)"
+    },
+    {
+      "path": "backend/internal/service/openai_profit_control.go",
+      "value": "if origin := fallbackBillingGroup(ctx); origin != nil {"
     }
   ],
   "forbidden_module_paths": [
@@ -2476,6 +2540,26 @@
       "id": "xy-fallback-group-user-invisible",
       "path": "backend/internal/usageexport/caller_group_test.go",
       "literal": "func TestTaskQueuedBeforeTheUpgradeKeepsItsScopeGroupView"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_gating_test.go",
+      "literal": "func TestFallbackImageGenerationGate("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_gating_test.go",
+      "literal": "func TestFallbackImageGenerationGateResponses("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_gating_test.go",
+      "literal": "func TestProfitControlPricesFallbackAtOriginGroup("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/handler/openai_fallback_gating_test.go",
+      "literal": "func TestMessagesDispatchUnderFallbackFollowsOriginEligibility("
     }
   ]
 }

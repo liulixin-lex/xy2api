@@ -95,8 +95,13 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		zap.String("img_size", parsed.Size),
 	)
 
-	if !service.GroupAllowsImageGeneration(apiKey.Group) {
+	switch service.ImageGenerationGate(c.Request.Context(), apiKey) {
+	case service.GroupGateDenied:
 		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
+		return
+	case service.GroupGateNoAccount:
+		cls := fallbackGateNoAccount(c, h.gatewayService, apiKey, requestModel)
+		h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
 		return
 	}
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, parsed.ModerationBody()); decision != nil && !decision.AllowNextStage {

@@ -334,6 +334,17 @@ func allowOpenAICompatibleMessagesDispatch(c *gin.Context, apiKey *service.APIKe
 	return apiKey.Group.AllowMessagesDispatch
 }
 
+// openAICompatibleMessagesDispatchGate applies allow_messages_dispatch under
+// an availability fallback (PM decision P2-3): the key's own group decides
+// eligibility, the serving group capability.
+func openAICompatibleMessagesDispatchGate(c *gin.Context, apiKey *service.APIKey) service.GroupGate {
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	return service.FallbackGroupGate(ctx, apiKey, func(key *service.APIKey) bool { return allowOpenAICompatibleMessagesDispatch(c, key) })
+}
+
 func openAICompatibleTextTargetAllowed(c *gin.Context, apiKey *service.APIKey, model string) bool {
 	return compositeTargetPlatformAllowed(c, apiKey, model,
 		domain.PlatformIDsWhere(func(spec domain.PlatformSpec) bool {
@@ -562,8 +573,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	if !legacyCompact && !nativeV2 && !imageIntent {
 		c.Request = c.Request.WithContext(resilience.WithCapabilityRequest(c.Request.Context(), resilience.CapabilityProtocolResponses, reqStream))
 	}
-	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
+	if gate := service.ImageGenerationGate(c.Request.Context(), apiKey); imageIntent && gate == service.GroupGateDenied {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
+		return
+	} else if imageIntent && gate == service.GroupGateNoAccount {
+		cls := fallbackGateNoAccount(c, h.gatewayService, apiKey, reqModel)
+		h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
 		return
 	}
 	var imageReleaseFunc func()
@@ -1201,9 +1216,14 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	)
 
 	// 检查分组是否允许 /v1/messages 调度
-	if !allowOpenAICompatibleMessagesDispatch(c, apiKey) {
+	switch openAICompatibleMessagesDispatchGate(c, apiKey) {
+	case service.GroupGateDenied:
 		h.anthropicErrorResponse(c, http.StatusForbidden, "permission_error",
 			"This group does not allow /v1/messages dispatch")
+		return
+	case service.GroupGateNoAccount:
+		cls := fallbackGateNoAccount(c, h.gatewayService, apiKey, "")
+		h.anthropicErrorResponse(c, cls.Status, cls.ErrType, cls.Message)
 		return
 	}
 
@@ -2679,8 +2699,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	}
 
 	imageIntent := service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, firstMessage)
-	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
+	if gate := service.ImageGenerationGate(ctx, apiKey); imageIntent && gate == service.GroupGateDenied {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, service.ImageGenerationPermissionMessage())
+		return
+	} else if imageIntent && gate == service.GroupGateNoAccount {
+		closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account")
 		return
 	}
 
