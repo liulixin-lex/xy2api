@@ -60,10 +60,10 @@ export const useGroupCategoriesStore = defineStore('groupCategories', () => {
     return inflight
   }
 
-  /** Loads once; later calls share the request or do nothing. */
+  /** Loads once successfully; failed loads can retry and share the request. */
   function ensureLoaded(): Promise<void> {
     if (inflight) return inflight
-    if (loadState.value !== 'idle') return Promise.resolve()
+    if (loadState.value === 'ready') return Promise.resolve()
     return reload()
   }
 

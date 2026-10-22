@@ -1,6 +1,6 @@
 <template>
   <div
-    v-roving-tabs
+    v-roving-tabs.manual
     role="tablist"
     :aria-label="t('admin.groupCategories.tabsLabel')"
     data-test="group-category-tabs"

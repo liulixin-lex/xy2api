@@ -17,7 +17,7 @@
         :platform="fresh.platform"
         :mixed-scheduling="fresh.extra?.mixed_scheduling === true"
         category-tabs
-        list-class="max-h-80"
+        list-class="!max-h-80"
       />
     </div>
 

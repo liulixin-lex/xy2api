@@ -14,6 +14,7 @@
       >
         <input
           v-model="selected"
+          @change="dirty = true"
           type="checkbox"
           :value="category.id"
           :data-category-id="category.id"
@@ -47,6 +48,7 @@ const store = useGroupCategoriesStore()
 
 const selected = ref<number[]>([])
 let initial: number[] = []
+const dirty = ref(false)
 
 const currentIds = (groupId: number | undefined) =>
   groupId ? store.categoriesForGroup(groupId).map((category) => category.id) : []
@@ -54,7 +56,7 @@ const currentIds = (groupId: number | undefined) =>
 onMounted(async () => {
   await store.ensureLoaded()
   initial = currentIds(props.groupId)
-  selected.value = [...initial]
+  if (!dirty.value) selected.value = [...initial]
 })
 
 const sameSet = (left: number[], right: number[]) =>

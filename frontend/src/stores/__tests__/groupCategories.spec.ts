@@ -48,6 +48,23 @@ describe('group categories store', () => {
     expect(store.categories.map((item) => item.id)).toEqual([1])
   })
 
+  it('retries a failed ensureLoaded and shares the retry in flight', async () => {
+    const store = useGroupCategoriesStore()
+    api.list.mockRejectedValueOnce(new Error('offline'))
+    await store.ensureLoaded()
+    expect(store.loadState).toBe('failed')
+    let resolve!: (value: unknown) => void
+    api.list.mockImplementationOnce(() => new Promise((done) => { resolve = done }))
+    const retry = store.ensureLoaded()
+    const shared = store.ensureLoaded()
+    expect(api.list).toHaveBeenCalledTimes(2)
+    resolve([category(1, 0, [])])
+    await Promise.all([retry, shared])
+    expect(store.loadState).toBe('ready')
+    await store.ensureLoaded()
+    expect(api.list).toHaveBeenCalledTimes(2)
+  })
+
   it('matches filters leniently until the list is loaded', async () => {
     const store = useGroupCategoriesStore()
     expect(store.matchesFilter([1], '3')).toBe(true)

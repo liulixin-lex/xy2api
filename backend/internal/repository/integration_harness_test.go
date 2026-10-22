@@ -50,14 +50,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	postgresDSN := strings.TrimSpace(os.Getenv("XY2API_TEST_POSTGRES_DSN"))
-	redisAddr := strings.TrimSpace(os.Getenv("XY2API_TEST_REDIS_ADDR"))
-	useLocalServices := postgresDSN != "" || redisAddr != ""
-	if useLocalServices && (postgresDSN == "" || redisAddr == "") {
-		log.Printf("XY2API_TEST_POSTGRES_DSN and XY2API_TEST_REDIS_ADDR must be set together")
-		os.Exit(1)
-	}
-	if !useLocalServices && !dockerIsAvailable(ctx) {
+	if !dockerIsAvailable(ctx) {
 		// In CI we expect Docker to be available so integration tests should fail loudly.
 		if os.Getenv("CI") != "" {
 			log.Printf("docker is not available (CI=true); failing integration tests")
@@ -67,48 +60,38 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
-	var err error
-	if !useLocalServices {
-		postgresImage := selectDockerImage(ctx, postgresImageTag)
-		pgContainer, startErr := tcpostgres.Run(
-			ctx,
-			postgresImage,
-			tcpostgres.WithDatabase("xy2api_test"),
-			tcpostgres.WithUsername("postgres"),
-			tcpostgres.WithPassword("postgres"),
-			tcpostgres.BasicWaitStrategies(),
-		)
-		if startErr != nil {
-			log.Printf("failed to start postgres container: %v", startErr)
-			os.Exit(1)
-		}
-		defer func() { _ = pgContainer.Terminate(ctx) }()
-		postgresDSN, err = pgContainer.ConnectionString(ctx, "sslmode=disable", "TimeZone=UTC")
-		if err != nil {
-			log.Printf("failed to get postgres dsn: %v", err)
-			os.Exit(1)
-		}
+	postgresImage := selectDockerImage(ctx, postgresImageTag)
+	pgContainer, err := tcpostgres.Run(
+		ctx,
+		postgresImage,
+		tcpostgres.WithDatabase("xy2api_test"),
+		tcpostgres.WithUsername("postgres"),
+		tcpostgres.WithPassword("postgres"),
+		tcpostgres.BasicWaitStrategies(),
+	)
+	if err != nil {
+		log.Printf("failed to start postgres container: %v", err)
+		os.Exit(1)
+	}
+	defer func() { _ = pgContainer.Terminate(ctx) }()
 
-		redisContainer, startErr := tcredis.Run(ctx, redisImageTag)
-		if startErr != nil {
-			log.Printf("failed to start redis: %v", startErr)
-			os.Exit(1)
-		}
-		defer func() { _ = redisContainer.Terminate(ctx) }()
-		redisHost, hostErr := redisContainer.Host(ctx)
-		if hostErr != nil {
-			log.Printf("failed to get redis host: %v", hostErr)
-			os.Exit(1)
-		}
-		redisPort, portErr := redisContainer.MappedPort(ctx, "6379/tcp")
-		if portErr != nil {
-			log.Printf("failed to get redis port: %v", portErr)
-			os.Exit(1)
-		}
-		redisAddr = fmt.Sprintf("%s:%d", redisHost, redisPort.Int())
+	redisContainer, err := tcredis.Run(
+		ctx,
+		redisImageTag,
+	)
+	if err != nil {
+		log.Printf("failed to start redis container: %v", err)
+		os.Exit(1)
+	}
+	defer func() { _ = redisContainer.Terminate(ctx) }()
+
+	dsn, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "TimeZone=UTC")
+	if err != nil {
+		log.Printf("failed to get postgres dsn: %v", err)
+		os.Exit(1)
 	}
 
-	integrationDB, err = openSQLWithRetry(ctx, postgresDSN, 30*time.Second)
+	integrationDB, err = openSQLWithRetry(ctx, dsn, 30*time.Second)
 	if err != nil {
 		log.Printf("failed to open sql db: %v", err)
 		os.Exit(1)
@@ -122,8 +105,19 @@ func TestMain(m *testing.M) {
 	drv := entsql.OpenDB(dialect.Postgres, integrationDB)
 	integrationEntClient = dbent.NewClient(dbent.Driver(drv))
 
+	redisHost, err := redisContainer.Host(ctx)
+	if err != nil {
+		log.Printf("failed to get redis host: %v", err)
+		os.Exit(1)
+	}
+	redisPort, err := redisContainer.MappedPort(ctx, "6379/tcp")
+	if err != nil {
+		log.Printf("failed to get redis port: %v", err)
+		os.Exit(1)
+	}
+
 	integrationRedis = redisclient.NewClient(&redisclient.Options{
-		Addr: redisAddr,
+		Addr: fmt.Sprintf("%s:%d", redisHost, redisPort.Int()),
 		DB:   0,
 	})
 	if err := integrationRedis.Ping(ctx).Err(); err != nil {

@@ -49,6 +49,8 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/group/__tests__/GroupCategoryFilter.spec.ts \
 	src/components/admin/account/__tests__/AccountGroupsCellButton.spec.ts \
 	src/components/admin/account/__tests__/AccountGroupsDialog.spec.ts \
+	src/components/admin/group/__tests__/GroupCategoryTabs.spec.ts \
+	src/components/admin/account/__tests__/AccountTableFilters.groupCategories.spec.ts \
 	src/components/admin/account/__tests__/AccountTableFilters.spec.ts \
 	src/views/admin/__tests__/GroupsView.columnSettings.spec.ts \
 	src/views/admin/__tests__/GroupsView.categories.spec.ts \

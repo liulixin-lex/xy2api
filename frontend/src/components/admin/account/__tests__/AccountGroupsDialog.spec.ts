@@ -80,7 +80,7 @@ describe('AccountGroupsDialog', () => {
     const props = selector(wrapper).props()
     expect(props.modelValue).toEqual([3, 1])
     expect(props.categoryTabs).toBe(true)
-    expect(props.listClass).toBe('max-h-80')
+    expect(props.listClass).toBe('!max-h-80')
     expect(props.platform).toBe('anthropic')
   })
 

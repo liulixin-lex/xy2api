@@ -1,4 +1,5 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
+import { flushPromises } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import GroupSelector from '../GroupSelector.vue'
 
@@ -176,9 +177,9 @@ describe('GroupSelector category tabs', () => {
   })
 
   it('uses the given list height', async () => {
-    const wrapper = await mountPicker({ categoryTabs: true, listClass: 'max-h-80' })
+    const wrapper = await mountPicker({ categoryTabs: true, listClass: '!max-h-80' })
     const list = groupList(wrapper)
-    expect(list.classes()).toContain('max-h-80')
-    expect(list.classes()).not.toContain('max-h-32')
+    expect(list.classes()).toContain('!max-h-80')
+    expect(list.classes()).toContain('max-h-32')
   })
 })

@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { useGroupCategoriesStore } from '@/stores/groupCategories'
 import GroupCategoryField from '../GroupCategoryField.vue'
 
 const api = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), setGroupCategories: vi.fn() }))
@@ -45,6 +46,24 @@ describe('GroupCategoryField', () => {
     expect(checkbox(wrapper, 1).element.checked).toBe(true)
     expect(checkbox(wrapper, 2).element.checked).toBe(false)
     expect(checkbox(wrapper, 3).element.checked).toBe(true)
+  })
+
+  it('keeps ticks made while an existing category list is reloading', async () => {
+    const store = useGroupCategoriesStore()
+    await store.reload()
+    let resolve!: (value: typeof categories) => void
+    api.list.mockImplementationOnce(() => new Promise((done) => { resolve = done }))
+    const reload = store.reload()
+    const wrapper = mount(GroupCategoryField)
+    await checkbox(wrapper, 2).setValue(true)
+    resolve(categories)
+    await reload
+    await flushPromises()
+
+    expect(checkbox(wrapper, 2).element.checked).toBe(true)
+    api.setGroupCategories.mockResolvedValueOnce({ group_id: 8, category_ids: [2] })
+    expect(await (wrapper.vm as unknown as FieldVM).save(8)).toBe(true)
+    expect(api.setGroupCategories).toHaveBeenCalledWith(8, [2])
   })
 
   it('sends no request when nothing changed', async () => {

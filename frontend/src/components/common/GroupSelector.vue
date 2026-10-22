@@ -19,7 +19,8 @@
     </div>
     <div
       :class="[
-        `grid ${listClass} grid-cols-2 gap-1 overflow-y-auto p-2`,
+        'grid max-h-32 grid-cols-2 gap-1 overflow-y-auto p-2',
+        listClass,
         isSearchable
           ? 'rounded-b-lg border border-t-0 border-gray-200 bg-gray-50 dark:border-dark-600 dark:bg-dark-800'
           : 'rounded-lg border border-gray-200 bg-gray-50 dark:border-dark-600 dark:bg-dark-800'
@@ -90,7 +91,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  listClass: 'max-h-32',
+  listClass: '',
   searchable: 'auto'
 })
 const emit = defineEmits<{
