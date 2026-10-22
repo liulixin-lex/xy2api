@@ -186,6 +186,8 @@
           :server-side-sort="true"
           :show-account-billing="false"
           :show-upstream-endpoint="false"
+          :show-cache-hit-rate="appStore.cachedPublicSettings?.user_usage_cache_hit_rate_enabled === true"
+          :show-token-speed="appStore.cachedPublicSettings?.user_usage_token_speed_enabled === true"
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"

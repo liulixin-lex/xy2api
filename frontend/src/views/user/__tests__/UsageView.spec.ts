@@ -163,7 +163,7 @@ function mountUsageView() {
         DateRangePicker: true,
         Icon: true,
         UsageStatsCards: chartStub,
-        UsageTable: { ...chartStub, props: ['columns'] },
+        UsageTable: { ...chartStub, props: ['columns', 'showCacheHitRate', 'showTokenSpeed'] },
         UserErrorRequestsTable: chartStub,
         ModelDistributionChart: chartStub,
         GroupDistributionChart: chartStub,
@@ -220,13 +220,28 @@ describe('user UsageView', () => {
     getAvailable.mockResolvedValue([{ id: 1, name: 'default' }])
   })
 
-  it('never enables admin usage metrics on the user page', async () => {
+  it('keeps usage metrics hidden from users until an admin makes them public', async () => {
     const wrapper = mountUsageView()
     await flushPromises()
     const table = wrapper.findComponent(UsageTable)
-    expect(table.props('showCacheHitRate')).toBeUndefined()
-    expect(table.props('showTokenSpeed')).toBeUndefined()
+    expect(table.props('showCacheHitRate')).toBe(false)
+    expect(table.props('showTokenSpeed')).toBe(false)
     wrapper.unmount()
+  })
+
+  it.each([[true, false], [false, true], [true, true]])('shows each public usage metric on its own: cache %s / TPS %s', async (cache, speed) => {
+    const previous = appStoreState.cachedPublicSettings
+    appStoreState.cachedPublicSettings = { ...previous, user_usage_cache_hit_rate_enabled: cache, user_usage_token_speed_enabled: speed }
+    try {
+      const wrapper = mountUsageView()
+      await flushPromises()
+      const table = wrapper.findComponent(UsageTable)
+      expect(table.props('showCacheHitRate')).toBe(cache)
+      expect(table.props('showTokenSpeed')).toBe(speed)
+      wrapper.unmount()
+    } finally {
+      appStoreState.cachedPublicSettings = previous
+    }
   })
 
   it('loads logs, stats, model stats, and snapshot on first render', async () => {

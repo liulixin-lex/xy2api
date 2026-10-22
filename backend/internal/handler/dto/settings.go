@@ -316,6 +316,8 @@ type SystemSettings struct {
 	ClaudeCacheFallbackPolicy     service.ClaudeCacheFallbackPolicy `json:"claude_cache_fallback_policy"`
 	AdminUsageCacheHitRateEnabled bool                              `json:"admin_usage_cache_hit_rate_enabled"`
 	AdminUsageTokenSpeedEnabled   bool                              `json:"admin_usage_token_speed_enabled"`
+	UsageCacheHitRatePublic       bool                              `json:"usage_cache_hit_rate_public"`
+	UsageTokenSpeedPublic         bool                              `json:"usage_token_speed_public"`
 
 	// Channel Monitor feature
 	ChannelMonitorEnabled                bool   `json:"channel_monitor_enabled"`
@@ -458,6 +460,9 @@ type PublicSettings struct {
 	RiskControlEnabled bool `json:"risk_control_enabled"`
 
 	AllowUserViewErrorRequests bool `json:"allow_user_view_error_requests"`
+
+	UserUsageCacheHitRateEnabled bool `json:"user_usage_cache_hit_rate_enabled"`
+	UserUsageTokenSpeedEnabled   bool `json:"user_usage_token_speed_enabled"`
 }
 
 type LoginAgreementDocument struct {

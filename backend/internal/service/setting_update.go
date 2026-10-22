@@ -432,6 +432,8 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyClaudeCacheFallbackPolicy] = string(cachePolicyJSON)
 	updates[SettingKeyAdminUsageCacheHitRateEnabled] = strconv.FormatBool(settings.AdminUsageCacheHitRateEnabled)
 	updates[SettingKeyAdminUsageTokenSpeedEnabled] = strconv.FormatBool(settings.AdminUsageTokenSpeedEnabled)
+	updates[SettingKeyUsageCacheHitRatePublic] = strconv.FormatBool(settings.UsageCacheHitRatePublic)
+	updates[SettingKeyUsageTokenSpeedPublic] = strconv.FormatBool(settings.UsageTokenSpeedPublic)
 
 	// Channel monitor feature switch
 	updates[SettingKeyChannelMonitorEnabled] = strconv.FormatBool(settings.ChannelMonitorEnabled)
