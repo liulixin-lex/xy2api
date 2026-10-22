@@ -6,11 +6,18 @@
 
 ## 当前交接状态
 
-### 使用记录“平均TPS”与指标公开按钮（2026-10-21；PR #121 已开，未发版、未部署）
+### 使用记录“平均TPS”与指标公开按钮（2026-10-22 合入 main；未发版、未部署）
 
-- 内容：使用记录“延迟”列改为“平均TPS N t/s”；“功能开关 → 管理员使用记录”两项指标的开关左边各加一个公开按钮（打开 = 公开，关闭 = 仅管理员可见，缺省关闭）。无迁移。
-- 状态：[PR #121](https://github.com/liulixin-lex/xy2api/pull/121)（2026-10-21T18:08Z 开），本地验证全绿；CI 结果以 GitHub 为准。用户已于 2026-10-22 经 PM 08:15Z 授权合并，α 正在集成最新 main 并复验；发版与生产部署需另行授权。
-- 详情：“进行中的工作”的 `20261021-usage-tps-public`。
+- 内容：使用记录“延迟”列改为“平均TPS N t/s”；“功能开关 → 管理员使用记录”两项指标各加一个公开按钮，缺省仅管理员可见。无迁移。现行说明见 [`USAGE_METRICS.md`](USAGE_METRICS.md)。
+- 合并：[PR #121](https://github.com/liulixin-lex/xy2api/pull/121) 于 2026-10-22T10:13Z 常规合并，合并提交 `e7fe4a8e9`。合并前 α 把 main `cfb4fae48` 并入固定 head，只有本记忆冲突，两边保留。
+- 未发版，随下一个版本发布；发版与部署都需要用户另行授权。详细记录已原样移入 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)。
+
+### 无号兜底分组对用户不可见（2026-10-22 合入 main；未发版、未部署）
+
+- 内容：用户端不再显示兜底，分组一律显示原分组；管理端保留“兜底：原分组 → 实际分组”。计费、限额和权限都按原分组，兜底组只决定由谁服务；主分组恢复后按现有机制切回。不做迁移，`usage_logs.group_id` 仍记实际服务的分组；管理端的倍率和金额从本版起是原分组口径；历史兜底请求不追溯重新计费。现行说明见 [`GATEWAY_RESILIENCE.md`](GATEWAY_RESILIENCE.md)。
+- 合并：[PR #125](https://github.com/liulixin-lex/xy2api/pull/125) 于 2026-10-22T16:11:41Z 常规合并，合并提交 `c369e1cab`（head `58edc20de`）。REVIEW 无 P0、P1，上一轮的 P1 与七项 P2 都已关闭；QA 在 `ccf5774a1` 上 FBILL-1 到 10 共 107/107；CI 与安全扫描 18/18。
+- 后续：INC-P2-1，WebSocket 每轮的 Q8 快照取在本轮完成的回调里，客户端提前发出下一轮时有毫秒级窗口，不阻断。
+- 未发版，随下一个版本发布；发版与部署都需要用户另行授权。详细记录已原样移入归档。
 
 ### XY2API 0.4.5 正式发布完成（2026-10-22；生产未部署）
 
@@ -147,47 +154,6 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
-
-### 20261022-fallback-group-user-invisible — 无号兜底分组对用户不可见（REVIEW 补修与 P2 全部完成并集成，最终门禁通过，待 PM 推送与开 PR；2026-10-22T14:40Z 更新）
-
-- 请求（用户 2026-10-22）：用户端不显示兜底，分组显示原分组；管理端保留“兜底：原分组 → 实际分组”；按原分组计费，兜底只是内部路由；主分组恢复后路由回来。
-- 设计与 PM 决定在仓库外 `xy2api-artifacts/fallback-billing-20261022/`（`contract/DESIGN.md`、`briefs/PM_DECISION_DESIGN.md`）。统一口径：一次兜底请求的用户价格、权限和限额，等于原分组自己服务这次请求时的结果；兜底组只决定由谁服务、怎么服务；账号侧成本按实际账号计。不做迁移，`usage_logs.group_id` 仍记实际服务的分组。
-- 分支：后端 `feat/fallback-group-user-invisible-20261022`（工作树 `xy2api-wt/fallback-be`，自 origin/main `cfb4fae48`）；前端由 FE 在 `feat/fallback-group-user-invisible-fe-20261022` 上做，完成后并入后端分支再跑全量门禁。PR #121 合入后把 main 合进来。不推送；开 PR、合并等 PM 指令，合并还要用户确认。
-- 范围：计费与 RPM 按原分组（计费 Key）、所有写用量路径补原分组、模型白名单按原分组、`/v1/models` 不经过兜底中间件、用户侧用量读取按原分组、去掉可用渠道与分组 DTO 里的兜底字段、R4 两条切回用例、`GATEWAY_RESILIENCE.md` 同步。
-- 边界：不碰 #121 改的设置与 TPS 文件；前端文件归 FE。
-- 已完成（后端分支，只在本地，未推送）：
-  - 计费 Key：中间件把原 Key 存进请求状态，`service.BillingAPIKey` 在计价、限额、权限处取回。用户价格按原分组（用户×原分组倍率、分组倍率与高峰、图片与视频倍率、分组与渠道定价）；计费模型按原分组渠道（Q9：计费来源是上游、响应模型或缺省时按兜底账号实际服务的模型）；分组 RPM、在途预留同口径；`usage_logs.group_id`、渠道 id、账号统计费用、份额调度观测仍为服务一侧。
-  - Q8（PM 09:50Z 改判）：仅因兜底组“强制 Fast”导致的 priority，在客户端未请求 priority、原分组不强制 Fast 时按 standard 向用户计费，差价由平台承担（`TotalCost` 与 `service_tier` 仍为 priority）。
-  - Q1 白名单（含 Responses WebSocket）按原分组；Q2 模型列表 GET 不经过兜底；Q3 系统提示仍用兜底组；Live 与批量图片按原分组计价与授权（顺带修正 live 旁路在主组恢复后返回 403）。
-  - 用户侧：用户用量 DTO 显示原分组、不带原分组字段；用户筛选、统计、趋势、模型与分组分布、CSV 导出按 `COALESCE(origin_group_id, group_id)`；用户错误请求按 Key 当前分组（Q4）；可用渠道与用户分组 DTO 去掉兜底字段（管理端 `AdminGroup` 保留）。
-  - R4：现有切回机制满足需求，补两条用例并写明切回时机。
-  - 具名补丁 `xy-fallback-group-user-invisible`（`policy.json`、`UPSTREAM_BASE.json`）；退役名字登记 `tools/docs_consistency.json`；现行说明 [`GATEWAY_RESILIENCE.md`](GATEWAY_RESILIENCE.md) §1、§4.3。
-  - 合入 origin/main `e7fe4a8e9`（#121，仅本记忆冲突，两边保留）与 FE 分支 `8e8cd8c79`（无冲突）。
-- 验证（合并后的树，`e89094bf0`）：gofmt；vet 四种 tag；golangci-lint v2.14.0 全量 0 项；`go test -tags=unit ./...` 全部通过（契约用例随字段删除同步更新）；`ci_gate.py` 330 项 `-race` 0 跳过；改动相关用例 `-race -count=3` 通过；前端 pnpm 9 frozen install、lint、typecheck、415 个文件 3197 项、build 通过；文档一致性、scheduler-diff、tools 41 项、干净树 `sync.py audit` 通过。middleware 的 `TestFastFailCountsOnlyGroupLevelNoAccount`、`TestFastFailRetryStormOnSingleAccountGroup` 在 `-count=3` 下失败、`-count=1` 通过，在 main `e7fe4a8e9` 上同样复现（进程级快速失败缓存跨重复残留），与本任务无关。
-- REVIEW 补修（PM 12:00Z 起，12:20Z 改为 P2 全做、由 ε 与 FE 并行）：P1-1 Live 的 Redis 存取读写 `origin_group_id`（`ef5eed100`，miniredis 往返加真实 service 身份判定的仓库层用例，同提交登记 P2-5 的前端钩子与防回归用例）；P2-6 管理端金额口径、用户详情措辞（详情无 `group`，`group_id` 为原分组）、P2-7 注释归位（`aea937053`）；QA 工具三提交普通 cherry-pick（未加 `-x`）；QA 脚本只为断言字段已删而出现退役名，加入 allowed（`2101a6784`）。ε 的 P2-3、P2-2（`f5541a3b7`）与 FE 的 P2-1、P2-4、TestFastFail 测试修正（`fc95d031f`）由 δ 合入（`fbd598204`、`ccf5774a1`，只有 `policy.json` 两边追加冲突，保留双方条目）；lint 修正 `d7cabe427`。
-  - 口径补充：图片生成与 `/v1/messages` 调度两个开关，资格看原分组、能力看兜底组（原分组不允许按原分组 403；兜底组不支持按无号 503，错误不提兜底组）；利润门售价按原分组，门与账号成本仍属兜底组与实际账号；WebSocket 每轮的 Q8 判断在创建计费任务时固定；升级前排队的用户导出按用户分组筛选。
-- 验证（最终树）：`ccf5774a1` 上定向用例（P2-1、P2-2、P2-3 三种组合、P2-4、`TestFastFail*` ×3）通过，P2-2 补出红灯（旧实现两个子用例按兜底组 3 倍判断而失败）；gofmt、四种 vet；`go test -tags=unit ./...` 66 包通过（串行、`GOFLAGS=-p=2`、`-timeout=30m`）；本轮用例 `-race`；文档、scheduler-diff、tools 41 项、干净树 audit 通过。`d7cabe427` 上 golangci-lint 全量 0 项，`ci_gate.py` 413 项 `-race` 0 跳过，`usageexport` unit 与 `-race` 通过。前端（与 `47c6d3393` 相同）pnpm 9 install、lint、typecheck、build 通过；test 415 文件 3197 项全过，但 vitest 因 `AccountsView.selectAllResults.spec.ts` 的未处理 rejection 退出 1，在 origin/main `e7fe4a8e9` 上单独跑 5 次复现 3 次，属原有问题，与本任务无关。`TestFastFail*` 的基线问题已由 FE 只改测试修正。
-  - 负载说明：本机 4 核、负载 40–70 时，`internal/service` 曾超过默认 10 分钟（停在 `TestShareSchedulingSelectionCostAt500Accounts`），两条心跳时序用例偶发失败，单独重跑通过；最终 unit 串行完成。
-- 下一步：PM 推送并开 PR；REVIEW 增量复核、QA 在最终 SHA 复跑 FBILL；合并需用户确认。REVIEW 的 P1、P2 无遗留。明细与门禁日志在仓库外 `xy2api-artifacts/fallback-billing-20261022/`（`contract/CHANGES_DELTA.md`、`CHANGES_EPSILON.md`、`CHANGES_FE.md`、`gates/`）。
-
-### 20261022-pr121-main-integration — PR #121 合入最新 main 与合并验证
-
-- 请求/授权：用户经 PM 2026-10-22T08:15Z 授权合并 PR #121，先把 main `cfb4fae48` 合入固定 head `57f30f2ac`；普通推送、两组 CI 与安全扫描全绿后按固定 HEAD 常规合并。
-- 范围：独立临时分支 `tmp/merge-pr121-045-20261022`；仅处理本记忆的预期冲突，保留双方条目，其他冲突或新检查失败停止报告。原有工作树保持不变。
-- 验证计划：文档一致性、干净树 audit、scheduler-diff；Go 1.27.3 的 build、unit vet、PR 列出的设置测试及 service/handler/server/web 全包 unit；pnpm 9 的 install、typecheck、lint、test、build。
-- 状态/下一步：本地合入 main，仅本记忆冲突且双方条目与历史完整保留；产品代码与 dashboard 文案由 Git 自动合并。指定检查已通过：文档一致性、scheduler-diff、后端 build/vet、四项设置测试、四类包 unit（10 包、21060 项通过、14 条件跳过），前端 pnpm 9 install/typecheck/lint/test/build（414 文件、3192 项通过）。提交合并后还需在干净 HEAD 复验文档与 audit，随后普通推送、固定 HEAD 双事件检查全绿再常规合并；最终 SHA、远端 CI 与清理事实写仓库外 PROGRESS_A，以 GitHub 为准。
-- 边界：7.6 心跳断连测试任一子例允许单次失败作业重跑，其他失败停止；不发版、不部署、不修改 Git 配置。
-
-### 20261021-usage-tps-public — 使用记录“平均TPS”与指标公开按钮（2026-10-21 登记）
-
-- 请求（用户 2026-10-21）：后台使用记录“延迟”列的“平均输出速率 N tokens/s”改为“平均TPS N t/s”；系统设置“功能开关 → 管理员使用记录”卡片里，两项指标的开关左边各加一个公开按钮：打开 = 公开（普通用户的使用记录也显示），关闭 = 仅管理员可见（默认）。不加第三个开关。
-- 范围：新设置键 `usage_cache_hit_rate_public`、`usage_token_speed_public`（默认 false）；公开设置只给出生效值 `user_usage_cache_hit_rate_enabled`、`user_usage_token_speed_enabled`（显示开关与公开按钮都打开才为 true），用户使用记录页据此显示。无迁移，用量数据与接口字段不变。
-- 分支：`feat/usage-tps-public-metrics-20261021`（自 main `a1cf8f104`），功能提交 `9a4e2bef7`；文档 [`USAGE_METRICS.md`](USAGE_METRICS.md)“平均TPS”“显示与公开”已同步。
-- 授权：用户要求改代码；按惯例止于开 PR、CI 全绿，不合并、不发版、不部署。
-- 本地验证：新测试先红（25 项）后绿；前端全量 413 个文件 3190 项、typecheck、lint、build 通过；后端 Go 1.27.3 `-tags=unit` 的 service、handler、server、web 共 10 个包通过，go vet、gofmt、golangci-lint v2.14.0（0 项）通过；文档一致性、`scheduler-diff`、`tools/tests` 41 项通过。
-- PR：[#121](https://github.com/liulixin-lex/xy2api/pull/121)（2026-10-21T18:08Z 开）。
-- 授权更新（2026-10-22，PM 08:15Z）：用户已授权合并；α 先合入最新 main 并完成指定验证，随后普通推送、检查全绿后常规合并。原授权与历史日志保留，发版和部署仍需单独授权。
-- 下一步（PM 2026-10-22T08:15Z 更新）：α 完成最新 main 集成和指定本地检查后，普通推送，核对 push/PR 两组 CI 与安全扫描全绿，再以固定 HEAD 常规合并；远端进展见 GitHub 与仓库外 PROGRESS_A。发版与生产部署另行授权。
 
 ### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（PR #120 已合入 main，进入下一个版本；待真实上游验证；2026-10-22 DOCS 更新状态）
 
@@ -1296,3 +1262,23 @@ pnpm --dir frontend run build
 - 验证：见上方“进行中的工作”该任务的“验证（最终树）”；日志在仓库外 `gates/`（`*_final_ccf5774a1.log`、`*_final_d7cabe427.log`、`SERIAL_STATUS_*.log`、`T_targeted_ccf5774a1.log`、`RED_r2_*.log`）。独立 GOCACHE 已删除，前端 `node_modules` 与构建产物已删除。
 - 卡点/风险：前端 `AccountsView.selectAllResults.spec.ts` 的未处理 rejection 是 main 上就有的偶发问题，CI 的前端 test 可能因此偶发失败；本机高负载下 `internal/service` 的性能与心跳时序用例可能超时或偶发失败。
 - 下一步：PM 推送并开 PR；REVIEW 增量复核；QA 在最终 SHA 复跑 FBILL；合并需用户确认。
+
+### 2026-10-22T16:14Z — `20261022-fallback-group-user-invisible`、`20261021-usage-tps-public` — 两个 PR 合并后的记忆收尾（DOCS 代记）
+
+- 请求/目标：PM 2026-10-22T16:15Z：#121 与兜底分组都已合入 main，主文件里的状态已过时；只改文档，把两条任务的详细记录原样归档，主文件只留结果摘要。
+- 开始状态：origin/main `c369e1cab`；新分支 `docs/post-merge-fallback-121-20261022`，工作树干净。
+- 合并事实：
+  - PR #121 于 2026-10-22T10:13Z 常规合并为 `e7fe4a8e9`；
+  - PR #125（兜底分组）于 2026-10-22T16:11:41Z 常规合并为 `c369e1cab`，head `58edc20de`。
+  - 两个 PR 都未发版、未部署。
+- 验证与审查：
+  - CI：GitHub Actions 故障期间 macOS runner 容量不足，#125 的 `shell` 作业多次被取消，重跑后通过；最终 CI 与安全扫描 18/18。
+  - QA：在 `ccf5774a1` 上跑 FBILL-1 到 10，107/107，首轮全过。
+  - REVIEW：增量审查无 P0、P1，上一轮的 P1 与七项 P2 全部关闭。
+  - 后续项 INC-P2-1：WebSocket 每轮的 Q8 快照取在本轮完成的回调里，客户端提前发出下一轮时有毫秒级窗口，不阻断。
+- 完成操作：把 #121 的交接，以及 `20261021-usage-tps-public`、`20261022-pr121-main-integration`、`20261022-fallback-group-user-invisible` 三条登记原样移入归档；主文件“当前交接状态”换成两节结果摘要。
+- 修改文件：`docs/PROJECT_MEMORY.md`、`docs/PROJECT_MEMORY_ARCHIVE.md`。
+- 验证：`check_docs_consistency.py`、干净树 `sync.py audit`。
+- 卡点/风险：无。
+- 下一步：α 推送并开收尾 PR；发版与部署等用户授权。
+
