@@ -771,6 +771,15 @@ func UsageLogFromService(l *service.UsageLog) *UsageLog {
 		return nil
 	}
 	u := usageLogFromServiceUser(l)
+	// xy2api resilience: users see the group the request was made for and
+	// nothing of an availability fallback group that served it.
+	if l.OriginGroupID != nil {
+		origin := *l.OriginGroupID
+		u.GroupID = &origin
+		u.Group = GroupFromServiceShallow(l.OriginGroup)
+	}
+	u.OriginGroupID = nil
+	u.OriginGroupName = ""
 	return &u
 }
 

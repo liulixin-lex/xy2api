@@ -275,6 +275,7 @@ func (r *usageLogRepository) hydrateUsageLogAssociations(ctx context.Context, lo
 		if logs[i].OriginGroupID != nil {
 			if group, ok := groups[*logs[i].OriginGroupID]; ok {
 				logs[i].OriginGroupName = group.Name
+				logs[i].OriginGroup = group
 			}
 		}
 		if logs[i].SubscriptionID != nil {
@@ -757,6 +758,18 @@ func setToSlice(set map[int64]struct{}) []int64 {
 }
 
 // usageExportWhere shares list and export filtering without pagination or association queries.
+// usageLogGroupColumn is the group a usage row is matched and grouped by:
+// the group that served it, or with callerGroup the group the request was
+// made for (origin_group_id when an availability fallback group served it),
+// which is how users see their usage. alias is "" or a table alias with its
+// dot.
+func usageLogGroupColumn(alias string, callerGroup bool) string {
+	if callerGroup {
+		return "COALESCE(" + alias + "origin_group_id, " + alias + "group_id)"
+	}
+	return alias + "group_id"
+}
+
 func usageExportWhere(filters UsageLogFilters) (string, []any) {
 	conditions := make([]string, 0, 9)
 	args := make([]any, 0, 9)
@@ -774,7 +787,7 @@ func usageExportWhere(filters UsageLogFilters) (string, []any) {
 		args = append(args, filters.AccountID)
 	}
 	if filters.GroupID > 0 {
-		conditions = append(conditions, fmt.Sprintf("group_id = $%d", len(args)+1))
+		conditions = append(conditions, fmt.Sprintf("%s = $%d", usageLogGroupColumn("", filters.CallerGroup), len(args)+1))
 		args = append(args, filters.GroupID)
 	}
 	if requestID := strings.TrimSpace(filters.RequestID); requestID != "" {

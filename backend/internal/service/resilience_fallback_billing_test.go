@@ -317,3 +317,14 @@ func TestBatchImageSubmitUnderFallbackPricesTheOriginGroup(t *testing.T) {
 	require.NoError(t, err, "the origin group allows batch images")
 	require.InDelta(t, 1.0, repo.jobs[got.ID].GroupRateMultiplier, 1e-12)
 }
+
+// Users see their errors under their key's group, not a serving fallback
+// group (PM decision Q4).
+func TestUserErrorRequestShowsTheKeyGroup(t *testing.T) {
+	served := int64(20)
+	e := &OpsErrorLog{GroupID: &served, GroupName: "GPT-企业专线", APIKeyGroupName: "GPT-不降智", StatusCode: 502}
+	require.Equal(t, "GPT-不降智", ToUserErrorRequest(e).GroupName)
+
+	e.APIKeyGroupName = ""
+	require.Equal(t, "GPT-企业专线", ToUserErrorRequest(e).GroupName, "a key without a group keeps the recorded group")
+}

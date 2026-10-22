@@ -287,6 +287,11 @@ type UsageLogFilters struct {
 	EndTime               *time.Time
 	// ExactTotal requests exact COUNT(*) for pagination. Default false for fast large-table paging.
 	ExactTotal bool
+	// CallerGroup matches and groups rows by the group the request was made
+	// for (origin_group_id when an availability fallback group served it),
+	// which is how users see their usage. Admin views leave it false and use
+	// the serving group (xy2api resilience).
+	CallerGroup bool
 }
 
 // UsageStats represents usage statistics

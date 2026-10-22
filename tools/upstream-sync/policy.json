@@ -233,6 +233,34 @@
   },
   "required_literals": [
     {
+      "path": "backend/internal/handler/dto/mappers.go",
+      "value": "u.Group = GroupFromServiceShallow(l.OriginGroup)"
+    },
+    {
+      "path": "backend/internal/handler/usage_handler.go",
+      "value": "CallerGroup:"
+    },
+    {
+      "path": "backend/internal/repository/usage_log_repo_query.go",
+      "value": "usageLogGroupColumn(\"\", filters.CallerGroup)"
+    },
+    {
+      "path": "backend/internal/repository/usage_log_repo_stats.go",
+      "value": "usageLogGroupColumn(\"\", filters.CallerGroup)"
+    },
+    {
+      "path": "backend/internal/repository/usage_log_repo_trend.go",
+      "value": "groupExpr := usageLogGroupColumn(\"ul.\", callerGroup)"
+    },
+    {
+      "path": "backend/internal/repository/ops_repo.go",
+      "value": "LEFT JOIN groups kg ON kg.id = ak.group_id"
+    },
+    {
+      "path": "backend/internal/service/ops_user_error.go",
+      "value": "GroupName:       userErrorGroupName(e),"
+    },
+    {
       "path": "backend/internal/server/middleware/resilience_fallback.go",
       "value": "if c.Request == nil || isModelListing(c) {"
     },
@@ -1630,6 +1658,31 @@
     "xy-resilience-v2-classification"
   ],
   "custom_patch_tests": [
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/repository/usage_log_caller_group_unit_test.go",
+      "literal": "func TestUsageExportWhereMatchesTheCallerGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/repository/usage_log_caller_group_unit_test.go",
+      "literal": "func TestGroupStatsForCallersUseTheCallerGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/handler/dto/usage_log_caller_group_test.go",
+      "literal": "func TestUserUsageLogShowsTheCallerGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/handler/dto/usage_log_caller_group_test.go",
+      "literal": "func TestAdminUsageLogKeepsTheFallback"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestUserErrorRequestShowsTheKeyGroup"
+    },
     {
       "id": "xy-fallback-group-user-invisible",
       "path": "backend/internal/server/middleware/resilience_fallback_test.go",
