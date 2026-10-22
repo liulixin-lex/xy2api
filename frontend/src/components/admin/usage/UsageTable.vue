@@ -124,7 +124,7 @@
             </span>
             <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
             <span
-              v-if="row.origin_group_id"
+              v-if="showFallbackOrigin && row.origin_group_id"
               data-testid="usage-fallback-marker"
               class="text-xs text-amber-700 dark:text-amber-300"
               :title="t('admin.resilience.usage.fallbackTitle')"
@@ -616,6 +616,8 @@ interface Props {
   showTokenSpeed?: boolean
   showAccountBilling?: boolean
   showUpstreamEndpoint?: boolean
+  /** 无号兜底只是内部路由：只有管理端显示“兜底：原分组 → 实际分组”，用户端只看到原分组 */
+  showFallbackOrigin?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
 }
@@ -629,6 +631,7 @@ const props = withDefaults(defineProps<Props>(), {
   showTokenSpeed: false,
   showAccountBilling: true,
   showUpstreamEndpoint: true,
+  showFallbackOrigin: false,
   flat: false
 })
 const emit = defineEmits<{
