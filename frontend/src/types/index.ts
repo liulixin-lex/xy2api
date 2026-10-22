@@ -1824,9 +1824,6 @@ export interface UsageLog {
   stream: boolean
   openai_ws_mode?: boolean
   native_compaction_v2: boolean
-  // 网关韧性：无号兜底时原请求分组（服务分组见 group / group_id）
-  origin_group_id?: number | null
-  origin_group_name?: string
   duration_ms: number | null
   first_token_ms: number | null
 
@@ -1866,6 +1863,9 @@ export interface UsageLogAccountSummary {
 }
 
 export interface AdminUsageLog extends UsageLog {
+  // 网关韧性：无号兜底时原请求分组（服务分组见 group / group_id，仅管理员可见；用户端的 group 已是原分组）
+  origin_group_id?: number | null
+  origin_group_name?: string
   upstream_model?: string | null
   upstream_reasoning_effort?: string | null
   upstream_response_model?: string | null

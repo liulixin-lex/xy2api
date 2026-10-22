@@ -128,6 +128,7 @@
             flat
             :show-cache-hit-rate="adminSettingsStore.usageCacheHitRateEnabled"
             :show-token-speed="adminSettingsStore.usageTokenSpeedEnabled"
+            show-fallback-origin
             :data="usageLogs"
             :loading="loading"
             :columns="visibleColumns"

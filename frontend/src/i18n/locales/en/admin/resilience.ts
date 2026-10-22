@@ -203,7 +203,7 @@ export default {
     },
     usage: {
       fallback: 'Fallback: {origin} → {group}',
-      fallbackTitle: 'The original group had no available account; the fallback group served the request at its rate'
+      fallbackTitle: 'The original group had no available account and the fallback group served the request; it is billed by the original group, and the user sees only the original group'
     }
   }
 }
