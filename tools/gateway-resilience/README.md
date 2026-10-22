@@ -249,6 +249,52 @@ this subset preserves the existing scenario groups and user balance.
 OAuth headers/turn-state, failed terminals carrying nonzero usage, and exact
 write/cancellation races are outside these supplemental scenarios.
 
+## Fallback billing and user visibility
+
+`staging/fallback_billing.py` prepares a targeted development-image check;
+it is separate from release-candidate validation. By default it only prints
+the plan, without reading credentials or contacting Docker, the database or
+HTTP services:
+
+```bash
+python3 tools/gateway-resilience/staging/fallback_billing.py
+```
+
+After PM releases the development commit, build from that immutable local
+Git object and record its image ID, binary SHA-256 and revision label. Deploy
+the script beside the staging Compose project and supply those exact identities:
+
+```bash
+python3 fallback_billing.py --execute --dev-sha "$DEV_SHA" \
+  --expected-image-id "$DEV_IMAGE_ID" --expected-binary-sha256 "$DEV_BINARY_SHA" \
+  --staging-dir "$STAGING_DIR" --evidence "$NEW_EVIDENCE_DIR"
+```
+
+Only the staging administrator environment is needed; existing fixture key
+files and real-upstream credentials are not loaded. Execution requires an
+already accepted admin compliance commitment, enabled fallback and available
+channels, a healthy matching app, and the exclusive `.phase2.lock`. A disabled
+available-channels feature is an environment blocker, not a passing empty-list
+check; the script does not toggle it. It does not build or switch the app.
+
+The run creates exclusive A/B groups (rates 1/2), two F00 accounts, a dedicated
+user with an A override of 0.8, K1/K2, and a channel without price overrides.
+Assertions cover user list/detail, filters, statistics and group distribution;
+admin serving/origin fields; equal normal/fallback price; original-group model
+permissions and `/v1/models`; immediate return for untouched K2, continued
+fallback for K1 before 15 seconds, and return for K1 after stability. The
+account/group IDs on each owned usage row prove which account served it.
+This is HTTP/database coverage; frontend visual behavior remains covered by
+the frontend component tests.
+
+The only global change is `fallback_group.return_stable_seconds=15`, restored
+in `finally` (also after SIGINT/SIGTERM). Cleanup checks fixture ownership,
+deletes through APIs to invalidate caches, and removes only those users/keys'
+usage, dedup and error rows. API soft-delete tombstones and audit history remain;
+shared fixtures, Redis namespaces, other settings and containers are not reset.
+Evidence uses a new private directory, redacts credentials, retains exact
+fixture IDs, and treats cleanup or app-identity changes as a failed run.
+
 ## cdn-sim
 
 ```bash
