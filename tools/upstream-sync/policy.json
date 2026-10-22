@@ -1823,6 +1823,162 @@
     {
       "path": "frontend/src/i18n/locales/en/admin/accounts.ts",
       "value": "cacheReadRatio: 'Cache {value}'"
+    },
+    {
+      "path": "backend/internal/handler/admin/group_handler.go",
+      "value": "bindGroupCategoryQuery(c, service.WithGroupListCategoryFilter)"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_handler.go",
+      "value": "bindGroupCategoryQuery(c, service.WithAccountGroupCategoryFilter)"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_handler.go",
+      "value": "`json:\"group_category\"`"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_handler.go",
+      "value": "filters.Category,"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_upstream_billing_rates.go",
+      "value": "bindGroupCategoryQuery(c, service.WithAccountGroupCategoryFilter)"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_data.go",
+      "value": "bindGroupCategoryQuery(c, service.WithAccountGroupCategoryFilter)"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "ctx = WithAccountGroupCategoryFilter(ctx, groupCategoryID)"
+    },
+    {
+      "path": "backend/internal/repository/group_repo.go",
+      "value": "q = applyGroupListCategoryFilter(ctx, q)"
+    },
+    {
+      "path": "backend/internal/repository/account_repo.go",
+      "value": "q = applyAccountGroupCategoryFilter(ctx, q)"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "registerGroupCategoryRoutes(admin, h)"
+    },
+    {
+      "path": "backend/internal/repository/wire.go",
+      "value": "NewGroupCategoryRepository,"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "NewGroupCategoryService,"
+    },
+    {
+      "path": "backend/internal/handler/wire.go",
+      "value": "admin.NewGroupCategoryHandler,"
+    },
+    {
+      "path": "backend/internal/handler/handler.go",
+      "value": "*admin.GroupCategoryHandler"
+    },
+    {
+      "path": "frontend/src/components/common/GroupSelector.vue",
+      "value": "<GroupCategoryTabs"
+    },
+    {
+      "path": "frontend/src/components/common/GroupSelector.vue",
+      "value": "activeCategoryGroupIds.value"
+    },
+    {
+      "path": "frontend/src/components/account/EditAccountModal.vue",
+      "value": "category-tabs"
+    },
+    {
+      "path": "frontend/src/components/account/CreateAccountModal.vue",
+      "value": "category-tabs"
+    },
+    {
+      "path": "frontend/src/components/account/BulkEditAccountModal.vue",
+      "value": "category-tabs"
+    },
+    {
+      "path": "frontend/src/views/admin/GroupsView.vue",
+      "value": "<GroupCategoryFilter"
+    },
+    {
+      "path": "frontend/src/views/admin/GroupsView.vue",
+      "value": "<GroupCategoryManagerButton"
+    },
+    {
+      "path": "frontend/src/views/admin/GroupsView.vue",
+      "value": "<GroupCategoryTags"
+    },
+    {
+      "path": "frontend/src/views/admin/GroupsView.vue",
+      "value": "key: \"category\""
+    },
+    {
+      "path": "frontend/src/views/admin/GroupsView.vue",
+      "value": "createCategoryFieldRef.value?.save("
+    },
+    {
+      "path": "frontend/src/views/admin/GroupsView.vue",
+      "value": "editCategoryFieldRef.value?.save("
+    },
+    {
+      "path": "frontend/src/views/admin/GroupsView.vue",
+      "value": "copyGroupCategories("
+    },
+    {
+      "path": "frontend/src/views/admin/GroupsView.vue",
+      "value": "group_category: filters.group_category"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "<AccountGroupsCellButton"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "<AccountGroupsDialog"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "groupCategories.matchesFilter("
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "groupsDialogAccount.value !== null ||"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "group_category: params.group_category"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "group_category: typeof rawParams.group_category"
+    },
+    {
+      "path": "frontend/src/components/admin/account/AccountTableFilters.vue",
+      "value": "<GroupCategoryFilter"
+    },
+    {
+      "path": "frontend/src/api/admin/accounts.ts",
+      "value": "params.group_category = group_category"
+    },
+    {
+      "path": "frontend/src/api/admin/groups.ts",
+      "value": "group_category?: string"
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh/admin/index.ts",
+      "value": "...groupCategories,"
+    },
+    {
+      "path": "frontend/src/i18n/locales/en/admin/index.ts",
+      "value": "...groupCategories,"
+    },
+    {
+      "path": "backend/internal/handler/wire.go",
+      "value": "GroupCategory:          groupCategoryHandler,"
     }
   ],
   "forbidden_module_paths": [
@@ -1872,6 +2028,7 @@
     "xy-channel-monitor-probe-lane",
     "xy-fallback-group-user-invisible",
     "xy-group-slot-concurrency",
+    "xy-group-categories",
     "xy-graceful-online-update-restart",
     "xy-resilience-v2-handler-exits",
     "xy-resilience-v2-streams",
@@ -2688,6 +2845,36 @@
       "id": "xy-group-slot-concurrency",
       "path": "backend/internal/service/group_capacity_group_concurrency_test.go",
       "literal": "func TestGetAllGroupCapacityCountsGroupSlotsOnSharedAccounts"
+    },
+    {
+      "id": "xy-group-categories",
+      "path": "backend/internal/repository/group_category_repo_integration_test.go",
+      "literal": "func TestGroupCategoryFiltersNarrowGroupAndAccountLists"
+    },
+    {
+      "id": "xy-group-categories",
+      "path": "backend/internal/handler/admin/group_category_handler_test.go",
+      "literal": "func TestGroupCategoryFilterReachesListContexts"
+    },
+    {
+      "id": "xy-group-categories",
+      "path": "backend/internal/service/group_category_isolation_test.go",
+      "literal": "func TestGroupCategoriesStayOutOfRequestPath"
+    },
+    {
+      "id": "xy-group-categories",
+      "path": "frontend/src/components/common/__tests__/GroupSelector.spec.ts",
+      "literal": "keeps ticks made under other category tabs"
+    },
+    {
+      "id": "xy-group-categories",
+      "path": "frontend/src/views/admin/__tests__/AccountsView.groupCategories.spec.ts",
+      "literal": "opens the group dialog from the groups cell and saves only group_ids"
+    },
+    {
+      "id": "xy-group-categories",
+      "path": "frontend/src/views/admin/__tests__/GroupsView.categories.spec.ts",
+      "literal": "saves categories after the group is created"
     }
   ]
 }

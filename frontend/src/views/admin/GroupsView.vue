@@ -43,6 +43,7 @@
               class="w-44"
               @change="loadGroups"
             />
+            <GroupCategoryFilter v-if="!authStore.isSimpleMode" v-model="filters.group_category" class="w-44" @change="loadGroups" />
           </div>
 
           <!-- Right: actions -->
@@ -93,6 +94,7 @@
                 </button>
               </div>
             </div>
+            <GroupCategoryManagerButton v-if="!authStore.isSimpleMode" />
             <button
               v-if="!authStore.isSimpleMode"
               @click="openSortModal"
@@ -274,6 +276,7 @@
               }}
             </span>
           </template>
+          <template #cell-category="{ row }"><GroupCategoryTags :group-id="row.id" /></template>
 
           <template #cell-account_count="{ row }">
             <div class="space-y-0.5 text-xs">
@@ -522,6 +525,7 @@
           />
           <p class="input-hint">{{ t("admin.groups.platformHint") }}</p>
         </div>
+        <GroupCategoryField v-if="!authStore.isSimpleMode" ref="createCategoryFieldRef" />
         <!-- 从分组复制账号 -->
         <div v-if="!authStore.isSimpleMode && copyAccountsGroupOptions.length > 0">
           <div class="mb-1.5 flex items-center gap-1">
@@ -2195,6 +2199,7 @@
           />
           <p class="input-hint">{{ t("admin.groups.platformNotEditable") }}</p>
         </div>
+        <GroupCategoryField v-if="!authStore.isSimpleMode" ref="editCategoryFieldRef" :group-id="editingGroup.id" />
         <template v-if="!authStore.isSimpleMode">
         <!-- 从分组复制账号（编辑时） -->
         <div v-if="copyAccountsGroupOptionsForEdit.length > 0">
@@ -4380,6 +4385,11 @@ import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffor
 import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
 import LongContextPricingFields from "@/components/admin/group/LongContextPricingFields.vue";
 import GroupSystemPromptFields from "@/components/admin/group/GroupSystemPromptFields.vue";
+import GroupCategoryFilter from "@/components/admin/group/GroupCategoryFilter.vue";
+import GroupCategoryManagerButton from "@/components/admin/group/GroupCategoryManagerButton.vue";
+import GroupCategoryTags from "@/components/admin/group/GroupCategoryTags.vue";
+import GroupCategoryField from "@/components/admin/group/GroupCategoryField.vue";
+import { useGroupCategoriesStore } from "@/stores/groupCategories";
 import { cloneGroupSystemPromptConfig } from "@/utils/groupSystemPrompt";
 import PricingEntryCard from "@/components/admin/channel/PricingEntryCard.vue";
 import type { PricingFormEntry } from "@/components/admin/channel/types";
@@ -4530,6 +4540,7 @@ const { t } = useI18n();
 const appStore = useAppStore();
 const authStore = useAuthStore();
 const onboardingStore = useOnboardingStore();
+const groupCategories = useGroupCategoriesStore();
 
 const ALWAYS_VISIBLE_COLUMNS = new Set(["name", "actions"]);
 // Default hidden columns (hidden on first load / after schema bumps).
@@ -4557,6 +4568,7 @@ const allColumns = computed<Column[]>(() => {
     { key: "billing_type", label: t("admin.groups.columns.billingType"), sortable: true },
     { key: "rate_multiplier", label: t("admin.groups.columns.rateMultiplier"), sortable: true },
     { key: "is_exclusive", label: t("admin.groups.columns.type"), sortable: true },
+    { key: "category", label: t("admin.groupCategories.column"), sortable: false },
     basic[3],
     { key: "capacity", label: t("admin.groups.columns.capacity"), sortable: false },
     { key: "usage", label: t("admin.groups.columns.usage"), sortable: false },
@@ -4916,6 +4928,7 @@ const filters = reactive({
   platform: "",
   status: "",
   is_exclusive: "",
+  group_category: "",
 });
 const pagination = reactive({
   page: 1,
@@ -4999,6 +5012,8 @@ const createReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | n
 const editReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | null>(null);
 const createSystemPromptRef = ref<InstanceType<typeof GroupSystemPromptFields> | null>(null);
 const editSystemPromptRef = ref<InstanceType<typeof GroupSystemPromptFields> | null>(null);
+const createCategoryFieldRef = ref<InstanceType<typeof GroupCategoryField> | null>(null);
+const editCategoryFieldRef = ref<InstanceType<typeof GroupCategoryField> | null>(null);
 
 // 固定账号获取 Codex Model Manifest（仅 openai 分组编辑对话框）
 type CodexManifestAccountsFieldExpose = {
@@ -5740,6 +5755,7 @@ const loadGroups = async () => {
         search: searchQuery.value.trim() || undefined,
         sort_by: sortState.sort_by,
         sort_order: sortState.sort_order,
+        group_category: filters.group_category || undefined,
       },
       { signal },
     );
@@ -6162,8 +6178,9 @@ const handleCreateGroup = async () => {
           system_prompt_config: createForm.system_prompt_config,
         }
       : requestData;
-    await adminAPI.groups.create(payload);
-    appStore.showSuccess(t("admin.groups.groupCreated"));
+    const created = await adminAPI.groups.create(payload);
+    // XY2API：分类没保存时只提示“分组已保存，分类未保存”，免得被当成创建失败
+    if ((await createCategoryFieldRef.value?.save(created.id)) !== false) appStore.showSuccess(t("admin.groups.groupCreated"));
     closeCreateModal();
     loadGroups();
     // Only advance tour if active, on submit step, and creation succeeded
@@ -6530,7 +6547,7 @@ const handleUpdateGroup = async () => {
         }
       : payload;
     await adminAPI.groups.update(editingGroup.value.id, requestData);
-    appStore.showSuccess(t("admin.groups.groupUpdated"));
+    if ((await editCategoryFieldRef.value?.save(editingGroup.value.id)) !== false) appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
     loadGroups();
   } catch (error: any) {
@@ -6583,6 +6600,9 @@ const handleDuplicate = async (group: AdminGroup) => {
   duplicatingGroupIds.add(group.id);
   try {
     const duplicate = await adminAPI.groups.duplicate(group.id);
+    await groupCategories.copyGroupCategories(group.id, duplicate.id, (message) =>
+      appStore.showWarning(t("admin.groupCategories.groupCopiedCategoriesFailed", { message })),
+    );
     appStore.showSuccess(
       t("admin.groups.duplicateSuccess", { name: duplicate.name }),
     );

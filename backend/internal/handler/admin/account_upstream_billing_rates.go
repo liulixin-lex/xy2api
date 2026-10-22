@@ -65,6 +65,9 @@ func (h *AccountHandler) GetUpstreamBillingRates(c *gin.Context) {
 			groupID = parsed
 		}
 	}
+	if !bindGroupCategoryQuery(c, service.WithAccountGroupCategoryFilter) {
+		return
+	}
 
 	accounts, total, err := h.adminService.ListAccounts(
 		service.WithIQStatusFilter(c.Request.Context(), iqStatus), page, pageSize, platform, accountType, status,

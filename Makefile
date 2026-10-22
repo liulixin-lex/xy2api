@@ -37,7 +37,24 @@ FRONTEND_CRITICAL_VITEST := \
 	src/features/channel-monitor-v2/__tests__/designSystem.structure.spec.ts \
 	src/features/channel-monitor-v2/__tests__/monitorFormat.spec.ts \
 	src/features/channel-monitor-v2/__tests__/monitorZoom.spec.ts \
-	src/components/admin/channel/__tests__/PricingEntryCard.modelDefaultPrice.spec.ts
+	src/components/admin/channel/__tests__/PricingEntryCard.modelDefaultPrice.spec.ts \
+	src/stores/__tests__/groupCategories.spec.ts \
+	src/composables/__tests__/useGroupCategoryTabs.spec.ts \
+	src/api/__tests__/admin.groupCategories.spec.ts \
+	src/utils/__tests__/groupCategories.spec.ts \
+	src/utils/__tests__/accountGroupSelection.spec.ts \
+	src/components/common/__tests__/GroupSelector.spec.ts \
+	src/components/admin/group/__tests__/GroupCategoryManagerButton.spec.ts \
+	src/components/admin/group/__tests__/GroupCategoryField.spec.ts \
+	src/components/admin/group/__tests__/GroupCategoryFilter.spec.ts \
+	src/components/admin/account/__tests__/AccountGroupsCellButton.spec.ts \
+	src/components/admin/account/__tests__/AccountGroupsDialog.spec.ts \
+	src/components/admin/group/__tests__/GroupCategoryTabs.spec.ts \
+	src/components/admin/account/__tests__/AccountTableFilters.groupCategories.spec.ts \
+	src/components/admin/account/__tests__/AccountTableFilters.spec.ts \
+	src/views/admin/__tests__/GroupsView.columnSettings.spec.ts \
+	src/views/admin/__tests__/GroupsView.categories.spec.ts \
+	src/views/admin/__tests__/AccountsView.groupCategories.spec.ts
 
 # 一键编译前后端
 build: build-backend build-frontend

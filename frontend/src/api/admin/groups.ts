@@ -38,6 +38,7 @@ export async function list(
     search?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
+    group_category?: string
   },
   options?: {
     signal?: AbortSignal

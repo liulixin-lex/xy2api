@@ -492,6 +492,7 @@ type BulkUpdateAccountFilters struct {
 	Group       string
 	Search      string
 	PrivacyMode string
+	Category    string
 }
 
 // BulkUpdateAccountResult captures the result for a single account update.

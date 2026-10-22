@@ -15,10 +15,12 @@
         :placeholder="t('common.searchPlaceholder')"
         class="flex-1 bg-transparent text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none dark:text-gray-100 dark:placeholder:text-dark-400"
       />
+      <GroupCategoryTabs v-if="categoryTabList.length" :tabs="categoryTabList" :active-id="activeCategoryId" @toggle="toggleCategoryTab" />
     </div>
     <div
       :class="[
         'grid max-h-32 grid-cols-2 gap-1 overflow-y-auto p-2',
+        listClass,
         isSearchable
           ? 'rounded-b-lg border border-t-0 border-gray-200 bg-gray-50 dark:border-dark-600 dark:bg-dark-800'
           : 'rounded-lg border border-gray-200 bg-gray-50 dark:border-dark-600 dark:bg-dark-800'
@@ -72,6 +74,8 @@ import GroupBadge from './GroupBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { Group, GroupPlatform } from '@/types'
 import { useAuthStore } from '@/stores'
+import GroupCategoryTabs from '@/components/admin/group/GroupCategoryTabs.vue'
+import { useGroupCategoryTabs } from '@/composables/useGroupCategoryTabs'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -82,9 +86,12 @@ interface Props {
   platform?: GroupPlatform // Optional platform filter
   mixedScheduling?: boolean // For antigravity accounts: allow anthropic/gemini groups
   searchable?: boolean | 'auto'
+  categoryTabs?: boolean // XY2API：按分组分类显示标签
+  listClass?: string // XY2API：分组列表高度
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  listClass: '',
   searchable: 'auto'
 })
 const emit = defineEmits<{
@@ -94,12 +101,13 @@ const emit = defineEmits<{
 const searchText = ref('')
 
 const isSearchable = computed(() => {
+  if (categoryTabList.value.length > 0) return true
   if (props.searchable === 'auto') return props.groups.length > 5
   return props.searchable
 })
 
 // Filter groups by platform if specified
-const filteredGroups = computed(() => {
+const eligibleGroups = computed(() => {
   let result = authStore.isSimpleMode
     ? props.groups.filter((g) => g.platform !== 'composite')
     : props.groups
@@ -114,6 +122,13 @@ const filteredGroups = computed(() => {
       result = result.filter((g) => g.platform === props.platform || g.platform === 'composite')
     }
   }
+  return result
+})
+// XY2API：分类标签只在这里过滤显示，不改 groups 和已勾选的值
+const { tabs: categoryTabList, activeId: activeCategoryId, activeGroupIds: activeCategoryGroupIds, toggle: toggleCategoryTab } = useGroupCategoryTabs(() => !!props.categoryTabs, () => eligibleGroups.value)
+const filteredGroups = computed(() => {
+  let result = eligibleGroups.value
+  if (activeCategoryGroupIds.value) result = result.filter((g) => activeCategoryGroupIds.value!.has(g.id))
   if (isSearchable.value && searchText.value) {
     const q = searchText.value.toLowerCase()
     result = result.filter(

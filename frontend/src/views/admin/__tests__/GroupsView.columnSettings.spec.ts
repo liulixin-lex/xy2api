@@ -17,6 +17,7 @@ const {
   isCurrentStep,
   nextStep,
   authState,
+  listGroupCategories,
 } = vi.hoisted(() => ({
   listGroups: vi.fn(),
   getAllGroups: vi.fn(),
@@ -30,6 +31,7 @@ const {
   isCurrentStep: vi.fn(),
   nextStep: vi.fn(),
   authState: { isSimpleMode: false },
+  listGroupCategories: vi.fn(),
 }))
 
 const messages: Record<string, string> = {
@@ -68,6 +70,10 @@ vi.mock('@/api/admin', () => ({
       list: listAccounts,
     },
   },
+}))
+
+vi.mock('@/api/admin/groupCategories', () => ({
+  default: { list: listGroupCategories, save: vi.fn(), setGroupCategories: vi.fn() },
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -252,6 +258,8 @@ describe('admin GroupsView column settings', () => {
     isCurrentStep.mockReset()
     nextStep.mockReset()
     authState.isSimpleMode = false
+    listGroupCategories.mockReset()
+    listGroupCategories.mockResolvedValue([])
 
     listGroups.mockResolvedValue({
       items: [createGroup()],
@@ -277,6 +285,7 @@ describe('admin GroupsView column settings', () => {
     expect(getModelAllowlistCandidates).not.toHaveBeenCalled()
     expect(getUsageSummary).not.toHaveBeenCalled()
     expect(getCapacitySummary).not.toHaveBeenCalled()
+    expect(listGroupCategories).not.toHaveBeenCalled()
     expect(listGroups).toHaveBeenCalledWith(
       expect.any(Number),
       expect.any(Number),
@@ -299,6 +308,7 @@ describe('admin GroupsView column settings', () => {
       'billing_type',
       'rate_multiplier',
       'is_exclusive',
+      'category',
       'account_count',
       'capacity',
       'usage',
@@ -325,6 +335,7 @@ describe('admin GroupsView column settings', () => {
       'billing_type',
       'rate_multiplier',
       'is_exclusive',
+      'category',
       'account_count',
       'status',
       'actions',
@@ -343,6 +354,7 @@ describe('admin GroupsView column settings', () => {
       'billing_type',
       'rate_multiplier',
       'is_exclusive',
+      'category',
       'account_count',
       'capacity',
       'status',
@@ -366,6 +378,7 @@ describe('admin GroupsView column settings', () => {
       'billing_type',
       'rate_multiplier',
       'is_exclusive',
+      'category',
       'account_count',
       'capacity',
       'status',
@@ -389,6 +402,7 @@ describe('admin GroupsView column settings', () => {
       'billing_type',
       'rate_multiplier',
       'is_exclusive',
+      'category',
       'account_count',
       'capacity',
       'usage',

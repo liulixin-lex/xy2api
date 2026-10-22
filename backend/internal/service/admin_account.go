@@ -1278,6 +1278,11 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 		return nil, ErrIQCheckInvalid
 	}
 	ctx = WithIQStatusFilter(ctx, filters.IQStatus)
+	groupCategoryID, err := ParseGroupCategoryFilter(filters.Category)
+	if err != nil {
+		return nil, err
+	}
+	ctx = WithAccountGroupCategoryFilter(ctx, groupCategoryID)
 	const pageSize = 500
 	page := 1
 	accountIDs := make([]int64, 0, pageSize)

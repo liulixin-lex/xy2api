@@ -4,6 +4,7 @@ import type { Directive } from 'vue'
  * v-roving-tabs：挂在 role="tablist" 的容器上，给其中的 role="tab" 按钮补上键盘操作。
  * - ←/→（竖排时 ↑/↓ 也可）切换并选中相邻标签，Home/End 跳到首尾，循环移动；
  * - 只有选中的标签留在 Tab 顺序里（tabindex=0），其余为 -1；
+ * - .manual 只移动焦点，由 Enter/Space 激活按钮；
  * - 选中通过触发按钮自身的 click 完成，组件原有的切换逻辑不需要改。
  */
 const KEY_STEP: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }
@@ -22,7 +23,7 @@ function syncTabindex(container: HTMLElement) {
 }
 
 export const vRovingTabs: Directive<TablistElement> = {
-  mounted(el) {
+  mounted(el, binding) {
     el.__rovingTabsKeydown = (event: KeyboardEvent) => {
       if (event.altKey || event.ctrlKey || event.metaKey) return
       const tabs = tabsOf(el)
@@ -40,7 +41,9 @@ export const vRovingTabs: Directive<TablistElement> = {
       event.preventDefault()
       const target = tabs[next]
       target.focus()
-      target.click()
+      if (binding.modifiers.manual) {
+        for (const tab of tabs) tab.tabIndex = tab === target ? 0 : -1
+      } else target.click()
     }
     el.addEventListener('keydown', el.__rovingTabsKeydown)
     syncTabindex(el)
