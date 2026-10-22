@@ -1639,6 +1639,14 @@
     {
       "path": "backend/internal/repository/gateway_cache.go",
       "value": "parseInt(\"origin_group_id\"),"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "fixTurnFallbackFast := service.FreezeFallbackForcedFast(ctx)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "h.gatewayService.RecordUsage(fixTurnFallbackFast(taskCtx), &service.OpenAIRecordUsageInput{"
     }
   ],
   "forbidden_module_paths": [
@@ -2458,6 +2466,11 @@
       "id": "xy-fallback-group-user-invisible",
       "path": "backend/internal/repository/gateway_cache_live_test.go",
       "literal": "func TestGatewayCacheLiveCallKeepsTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestOpenAIRecordUsageChargesTheTurnFlagFixedWhenItsTaskWasCreated"
     }
   ]
 }

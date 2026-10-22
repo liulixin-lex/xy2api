@@ -81,11 +81,34 @@ func noteFallbackForcedFast(ctx context.Context, account *Account, clientTier st
 	}
 }
 
+// fallbackForcedFastKey carries a turn's flag fixed by FreezeFallbackForcedFast.
+type fallbackForcedFastKey struct{}
+
+// FreezeFallbackForcedFast fixes the flag noteFallbackForcedFast recorded for
+// the current WebSocket turn when that turn's usage task is created. The
+// connection's request state follows the latest turn, so by the time the
+// asynchronous task runs, the next response.create may have rewritten it.
+// The returned function applies the fixed value to the task's context.
+func FreezeFallbackForcedFast(ctx context.Context) func(context.Context) context.Context {
+	st := resilience.StateFrom(ctx)
+	if origin, ok := st.FallbackOrigin().(*APIKey); !ok || origin == nil {
+		return func(taskCtx context.Context) context.Context { return taskCtx }
+	}
+	forced := st.FallbackForcedFast()
+	return func(taskCtx context.Context) context.Context {
+		return context.WithValue(taskCtx, fallbackForcedFastKey{}, forced)
+	}
+}
+
 // fallbackForcedFastChargesStandard reports a priority request whose
-// priority only the serving fallback group's forced Fast caused.
+// priority only the serving fallback group's forced Fast caused. A value
+// fixed for an asynchronous turn record wins over the connection's state.
 func fallbackForcedFastChargesStandard(ctx context.Context, serviceTier string) bool {
 	switch normalizeBillingServiceTier(serviceTier) {
 	case OpenAIFastTierPriority, "fast":
+		if forced, ok := ctx.Value(fallbackForcedFastKey{}).(bool); ok {
+			return forced
+		}
 		return resilience.StateFrom(ctx).FallbackForcedFast()
 	}
 	return false
