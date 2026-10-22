@@ -233,6 +233,18 @@
   },
   "required_literals": [
     {
+      "path": "frontend/src/components/admin/usage/UsageTable.vue",
+      "value": "v-if=\"showFallbackOrigin && row.origin_group_id\""
+    },
+    {
+      "path": "frontend/src/components/admin/usage/UsageTable.vue",
+      "value": "showFallbackOrigin: false,"
+    },
+    {
+      "path": "frontend/src/views/admin/UsageView.vue",
+      "value": "show-fallback-origin"
+    },
+    {
       "path": "backend/internal/service/openai_gateway_request_body.go",
       "value": "noteFallbackForcedFast(ctx, account, gjson.GetBytes(body, \"service_tier\").String())"
     },
@@ -1619,6 +1631,14 @@
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
       "value": "c.Writer.Header().Set(openAICodexTurnStateHeader, turnState)"
+    },
+    {
+      "path": "backend/internal/repository/gateway_cache.go",
+      "value": "record.OriginGroupID,"
+    },
+    {
+      "path": "backend/internal/repository/gateway_cache.go",
+      "value": "parseInt(\"origin_group_id\"),"
     }
   ],
   "forbidden_module_paths": [
@@ -1674,6 +1694,26 @@
     "xy-resilience-v2-classification"
   ],
   "custom_patch_tests": [
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "frontend/src/components/admin/usage/__tests__/UsageTable.fallback.spec.ts",
+      "literal": "never shows the fallback to users, even if an older server still sends the origin fields"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "frontend/src/components/channels/__tests__/AvailableChannelsTable.spec.ts",
+      "literal": "never shows a fallback group to users, even if an older server still sends one"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "frontend/src/views/user/__tests__/UsageView.spec.ts",
+      "literal": "never asks the usage table for the availability fallback origin"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "frontend/src/views/admin/__tests__/UsageView.spec.ts",
+      "literal": "asks the usage table to show the availability fallback origin on the admin page"
+    },
     {
       "id": "xy-fallback-group-user-invisible",
       "path": "backend/internal/service/resilience_fallback_group_test.go",
@@ -2413,6 +2453,11 @@
       "id": "xy-resilience-v2-streams",
       "path": "backend/internal/service/openai_native_heartbeat_turn_state_test.go",
       "literal": "func TestOpenAINativeHeartbeatTurnStatePreservesErrorRuleTerminal"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/repository/gateway_cache_live_test.go",
+      "literal": "func TestGatewayCacheLiveCallKeepsTheOriginGroup"
     }
   ]
 }
