@@ -258,6 +258,36 @@ func TestCompatPreludeFailureBeforeContent(t *testing.T) {
 	}
 }
 
+// 兼容转换（Chat/Messages）同样经 ClassifyStreamEvent 判开场：response.metadata
+// 跟随原生白名单开关，关闭时回到旧口径（到达即释放开场、不换号）。
+func TestCompatPreludeResponseMetadataFollowsNativeWhitelist(t *testing.T) {
+	created := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_a\"}}\n\n"
+	metadata := "data: {\"type\":\"response.metadata\",\"metadata\":{\"openai_chatgpt_moderation_metadata\":{}}}\n\n"
+	failed := "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_a\",\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"Our servers are currently overloaded. Please try again later.\"}}}\n\n"
+	// The production shape: a bare error frame and no response.failed.
+	bareError := "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"service_unavailable_error\",\"code\":\"server_is_overloaded\",\"message\":\"Our servers are currently overloaded. Please try again later.\",\"param\":null},\"sequence_number\":3}\n\n"
+	for _, ending := range []struct{ name, frame string }{{"failed", failed}, {"bare_error", bareError}} {
+		for _, whitelist := range []bool{true, false} {
+			for _, messages := range []bool{false, true} {
+				t.Run(ending.name+"/"+fmtBool(whitelist)+"/"+fmtBool(messages), func(t *testing.T) {
+					withResilienceSettings(t, func(s *resilience.Settings) { s.Stream.NativePreludeWhitelist = whitelist })
+					c, rec := compatStreamContext("/v1/chat/completions", "")
+					_, err := runPreludeCompat(t, c, messages, strings.NewReader(created+metadata+ending.frame), 0, 0)
+					var failover *UpstreamFailoverError
+					if whitelist {
+						require.ErrorAs(t, err, &failover)
+						require.Empty(t, rec.Body.String())
+						return
+					}
+					require.Error(t, err)
+					require.False(t, errors.As(err, &failover))
+					require.NotEmpty(t, rec.Body.String())
+				})
+			}
+		}
+	}
+}
+
 type preludeBrokenReader struct{}
 
 func (preludeBrokenReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }

@@ -7,7 +7,7 @@
 The gateway MUST classify each complete upstream SSE event as prelude, content, terminal success, terminal failure (retryable or not) or unknown with one shared function, and every covered stream path (native Responses staging and pending lines, Chat and Messages compatibility conversion, delivery tracking) MUST use it. Unknown events MUST be treated as content.
 
 Prelude events are:
-- Responses: `response.created`, `response.in_progress`, `response.queued`, `keepalive`, and `response.output_item.added`, `response.content_part.added` or `response.reasoning_summary_part.added` whose known fields are all empty (no text, no encrypted reasoning, no tool arguments, no unknown non-empty field);
+- Responses: `response.created`, `response.in_progress`, `response.queued`, `keepalive`, `response.metadata` (exact type only, with `stream.native_prelude_whitelist` on; revised 2026-10-22, see design §3.1), and `response.output_item.added`, `response.content_part.added` or `response.reasoning_summary_part.added` whose known fields are all empty (no text, no encrypted reasoning, no tool arguments, no unknown non-empty field);
 - Chat: a chunk that carries only the role, or an empty content delta;
 - Messages: `message_start`, `ping`, and `content_block_start` of an empty text or thinking block.
 
@@ -15,9 +15,13 @@ Prelude events are:
 - **WHEN** an upstream Responses stream sends an event type the gateway does not know before any content
 - **THEN** the event is treated as content and the request is no longer switched to another account.
 
-#### Scenario: Metadata events are not prelude (CV-9)
-- **WHEN** an upstream sends `codex.response.metadata` (or `response.metadata`) after `response.created` and before any text, then fails
-- **THEN** the metadata event counts as output, the failure is forwarded and the request does not switch accounts.
+#### Scenario: Codex metadata event is not prelude (CV-9)
+- **WHEN** an upstream sends `codex.response.metadata` after `response.created` and before any text, then fails
+- **THEN** the event counts as output, the failure is forwarded and the request does not switch accounts.
+
+#### Scenario: response.metadata before content is prelude (revised 2026-10-22)
+- **WHEN** with `stream.native_prelude_whitelist` on, an upstream sends `response.created`, `response.in_progress` and `response.metadata`, then a retryable failure such as a bare `error` with `server_is_overloaded`, before any content
+- **THEN** nothing from the failed attempt is written to the client and the failure is handled before output as in CV-5 (at most one same-account retry for capacity shedding, then another account); the client then sees only the successful attempt's events. Like other prelude, `response.metadata` does not stop the first-output deadline. With the switch off, `response.metadata` counts as output as in 0.4.3, also in the Chat and Messages conversions.
 
 #### Scenario: Empty delta before created
 - **WHEN** a relay sends a Responses delta whose `delta` is an empty or whitespace-only string before `response.created`

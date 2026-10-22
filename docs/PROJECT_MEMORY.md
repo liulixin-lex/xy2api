@@ -27,7 +27,7 @@
   - O3 与 OAuth 头只由单元测试覆盖。正式镜像全新安装通过：空库，启动 3.2 秒，324 条迁移，29 项检查全部通过，公开版本 0.4.5，计费请求写入 1 条正费用的用量记录，安装日志 0 条 ERROR。明细见 OpenSpec tasks 5.2、6.x 与“发布记录”。
 - 遗留与去向：
   1. 生产仍未部署 0.4.4 或 0.4.5，需要单独授权；0.4.5 的 6.5 小时浸泡是生产部署的证据。
-  2. 0.4.6 待办见 tasks §7：7.2（turn-state 溯源改在响应头真正发出时记录，同时收窄 `GATEWAY_RESILIENCE.md` 的相应措辞）、7.3（LEAK-P2-1）、7.5（堆用例的测量方式）、7.6（心跳写失败后首输出 guard 未转入 drain，终态用量可能少计；0.4.4 引入，P2）。
+  2. 0.4.6 待办见 tasks §7：7.2（turn-state 溯源改在响应头真正发出时记录，同时收窄 `GATEWAY_RESILIENCE.md` 的相应措辞）、7.3（LEAK-P2-1）、7.5（堆用例的测量方式）、7.6（心跳写失败后首输出 guard 未转入 drain，终态用量可能少计；0.4.4 引入，P2）、7.7（`response.metadata` 算开场，分支 `fix/codex-metadata-prelude-20261022`，见“进行中的工作”）。
   3. PR #120（渠道监控 v1）在 `v0.4.5` 之后合入 main（`27b472e22`，2026-10-22），进入下一个版本。α 在临时树把已发布的 main 并入 #120 的分支，只有本记忆冲突，两边都保留。合并前 PR CI 里 `TestCompatPreludeHeartbeatDisconnectDrainsUsageAfterContent/enabled` 偶发失败一次，单次重跑通过（tasks 7.6）。
 - 本任务的交接与登记（O3、集成、RA-1、δ/ε/DOCS 预备分支、QA 验证、#120 的发布后集成），以及已完成的 0.4.4 6.5 小时浸泡与 pprof 诊断登记，已原样移入 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)。
 
@@ -165,6 +165,20 @@
   3. 未做：本站探测走本机直连（保留经 CDN 的端到端覆盖）；OpenAI 高级调度器（缺省关闭）只覆盖“无粘性”。
   4. 审查 P2-7（Anthropic 补选失败时可能泄漏槽位）是原有写法，未改；只有闭合 `</think>` 的上游可能被提前判答，写在文档已知局限。
 - 边界：未碰 δ、ε、RA-1 正在改的 handler、`resilience_*`、`GATEWAY_RESILIENCE.md`；`policy.json` 与它们的分支都有追加，合并时注意顺序。
+
+### 20261022-codex-metadata-prelude — 原生 Responses 把 `response.metadata` 算开场（代码与文档完成，待开 PR；2026-10-22）
+
+- 请求（用户 2026-10-22）：修复生产上 Codex 中转账号在输出前过载却不能换号的问题；先确认 GitHub 上没有冲突的 PR 分支再修。用户选定范围：只把 `response.metadata` 加入原生 Responses 开场白名单，受现有开关 `stream.native_prelude_whitelist` 控制，关闭开关回到旧行为；`codex.response.metadata` 与其他未知事件仍算输出；同步更新 CV-9 规格、design §3.1 与 `GATEWAY_RESILIENCE.md`，先写失败用例。
+- 依据（生产只读诊断，2026-10-22）：一个 Codex 中转（CLIProxyAPI 系）背后的 OpenAI Codex 后端过载时先回 HTTP 200，再依次发 `response.created`(0)、`response.in_progress`(1)、`response.metadata`(2)，随后在 seq 3 发 `event: error`（`server_is_overloaded`）。网关把 `response.metadata` 当已输出，压下了输出前换号（`gateway.failover_suppressed_after_semantic_output`），错误直接到客户端。中转侧的抓包显示该帧逐字节来自上游。这与 0.4.4 设计时“`response.metadata` 出现在正文之后”的探测结论不同。
+- 冲突核实（2026-10-22）：唯一开着的 PR #121（用量 TPS）不碰相关文件；未合并的旧分支（`feat/native-stream-recovery-20260930`、`fix/native-stream-concurrency-20261001`、`fix/signature-retry-preserve-tool-result-media`）都没有 PR，也不改 `openAIStreamEventIsMetadata` 与开场白名单。
+- 分支：`fix/codex-metadata-prelude-20261022`（工作树 `xy2api-wt/metadata-prelude`，自 origin/main `cfb4fae48`）。生产仍运行 0.4.3（没有 0.4.4 的开场白名单），本修复要在生产升级后才生效。
+- 已完成：
+  - 代码只改一处：`backend/internal/resilience/prelude.go` 的 `ClassifyStreamEvent` 对确切事件名 `response.metadata` 在 `Current().NativePreludeWhitelistOn()` 时返回 `Prelude`，否则落回 `Unknown`（算内容）。开关读在分类函数里，因为兼容转换的 `openAICompatPreludeEvent` 只看 `prelude_staging`；这样关闭开关时原生、透传、WS 桥、兼容转换与送达追踪都和以前一样。`openAIStreamEventIsMetadata`（开关关闭的边界与语义首字）不动。
+  - 先写失败用例再修：分类表与开关测试；原生与透传复现生产序列（裸 `error` 无 `response.failed`）；换号边界、首输出截止、成功路径顺序、WS 桥两种开关、兼容转换两种结尾、送达口径与旧单测行；新增用例都放在 `ci_gate.py` 会收集的文件里。用 `go test -overlay` 换回旧分类器做变异核对：开关开启的用例全部变红，关闭的全部通过。
+  - 文档：0.4.4 变更的 replayable-prefix 规格（CV-9 只保留 `codex.response.metadata`，新增 `response.metadata` 场景）、design §3.1/§3.3、proposal、tasks 2.2 的修订指向；045 tasks 7.7；`GATEWAY_RESILIENCE.md`（§1、§4、§4.4、§7）、0.4.0 runbook §6、旧送达规格与 design 的指向、可观测性规格场景、`docs/README.md`；设置页提示（中英）与其文案测试。
+  - 独立审查（只读，3 个视角，逐条反驳核实）：无 P0/P1。首输出截止不再被 `response.metadata` 提前解除，核实为既定策略（没有早发元数据的流本来就这样），已写进文档与 tasks 7.7 的上线前观测建议；其余 P3（兼容转换依赖两个开关的说明、措辞、旧规格指向、测试显式固定全局设置等）已全部处理。
+- 验证（本机，Go 1.27.3）：`ci_gate.py` 396 项 `-race` 全过、零跳过；resilience 与相关 service 用例通过；gofmt、四种 vet、golangci-lint 增量 0 项；前端 resilience 与 i18n 测试 68 项、lint、typecheck 通过；`check_docs_consistency.py` 通过。完整 unit 与干净树 `sync.py audit` 的结果见操作日志。
+- 未做：测试服务器场景（F34 之外的两类新故障）与上线前的间隔观测，见 045 tasks 7.7；发版与生产部署需用户另行授权。
 
 ## 操作陷阱
 
@@ -1221,3 +1235,12 @@ pnpm --dir frontend run build
 - 卡点/风险：无。生产部署 0.4.4、0.4.5 都未授权。
 - 下一步：α 推送并开收尾 PR，CI 全绿后合并。0.4.6 待办见 tasks §7（7.2、7.3、7.5、7.6）。
 
+### 2026-10-22T10:30Z — `20261022-codex-metadata-prelude` — `response.metadata` 算开场：代码、测试与文档完成
+
+- 请求/目标：用户 2026-10-22 要求先确认 GitHub 上没有冲突的 PR 分支，再修复 Codex 中转账号输出前过载不能换号的问题；范围由用户选定（见“进行中的工作”同名条目）。
+- 开始状态：自 origin/main `cfb4fae48` 建分支 `fix/codex-metadata-prelude-20261022` 与独立工作树；原工作区（`feat/usage-tps-public-metrics-20261021`）未动。
+- 完成操作：冲突核实（开着的只有 PR #121，不相关；三个未合并旧分支没有 PR，也不碰判定函数）；发现 0.4.4 规格 CV-9 明确写着 `response.metadata` 不算开场，先请用户决定，用户选只放行确切事件名、受开关控制。先写失败用例并确认按预期变红，再改分类器；独立审查后补测试与文档。
+- 修改文件：`backend/internal/resilience/prelude.go` 及 7 个测试文件；OpenSpec `gateway-resilience-v2-20261021`（spec、design、proposal、tasks、可观测性规格）、`gateway-resilience-045-20261021/tasks.md`、`gateway-resilience-20261015`（runbook、送达规格、design）；`docs/GATEWAY_RESILIENCE.md`、`docs/README.md`、本文件；前端中英设置提示与文案测试。
+- 验证：见“进行中的工作”条目；完整 unit 与干净树 audit 在提交后补记。
+- 卡点/风险：生产仍是 0.4.3，修复随下一版发布、经授权部署后才生效。首输出截止现在也覆盖 `response.metadata` 之后的等待，上线前按 tasks 7.7 观测。
+- 下一步：提交、推送、开 PR 并等 CI 全绿；合并由另一位作者处理。

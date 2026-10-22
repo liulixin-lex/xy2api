@@ -58,7 +58,7 @@ export default {
         preludeStaging: 'Delay the prelude in compatibility conversion',
         preludeStagingHint: 'Chat and Messages conversions write their opening events (role chunk, message_start) only at the first content or a terminal event, so a failure after the upstream opened but before any content can move to another account. Off restores the 0.4.3 behaviour.',
         nativePreludeWhitelist: 'Wider native Responses prelude whitelist',
-        nativePreludeWhitelistHint: 'When the upstream fails after opening but before any content, the opening events that still allow moving to another account extend to response.queued and added events without content; empty deltas before created are dropped as relay pseudo-keepalives. Off restores the 0.4.3 opening events (created, in_progress and keepalive), and before created it drops only frames marked SSE-Keep-Alive.',
+        nativePreludeWhitelistHint: 'When the upstream fails after opening but before any content, the opening events that still allow moving to another account extend to response.queued, response.metadata and added events without content (response.metadata also in Chat/Messages compatibility conversion); empty deltas before created are dropped as relay pseudo-keepalives. Off restores the 0.4.3 opening events (created, in_progress and keepalive), and before created it drops only frames marked SSE-Keep-Alive.',
         strictTerminal: 'Strict termination',
         strictTerminalHint: 'In Chat passthrough an upstream error followed by [DONE] counts as a failure, not a normal end. Off restores the 0.4.3 behaviour.',
         failedFrameRetryAfter: 'Retry time on response.failed',
