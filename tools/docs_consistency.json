@@ -260,6 +260,18 @@
         "docs/PROJECT_MEMORY.md",
         "docs/PROJECT_MEMORY_ARCHIVE.md"
       ]
+    },
+    {
+      "pattern": "(?<![A-Za-z_])availability_fallback(?![A-Za-z_.])|availabilityFallbackTooltip|availabilityFallbackLabel|group-availability-fallback|availableChannels\\.availabilityFallback",
+      "reason": "the availability fallback group is internal routing (2026-10-22): the available channels page and its API no longer show it; the staging fixtures keep an option key of that name for the admin fallback setting",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "backend/internal/handler/dto/usage_log_caller_group_test.go",
+        "backend/internal/handler/resilience_fallback_billing_test.go",
+        "frontend/src/components/channels/__tests__/AvailableChannelsTable.spec.ts",
+        "tools/gateway-resilience/staging/fixtures.py"
+      ]
     }
   ],
   "private": [
