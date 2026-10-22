@@ -369,3 +369,44 @@ func TestCapabilityOnlySelectionMarkerRequiresWholePool(t *testing.T) {
 	}
 	require.False(t, IsCapabilityOnlySelectionError(nil))
 }
+
+// A-P2-4: a no-account error names the capability exclusion only when it is
+// the cause, by the rule of IsCapabilityOnlyExhaustion: every failed attempt
+// of the request was a stream-only exclusion.
+func TestCapabilitySelectionErrorNamesCapabilityOnlyAsTheCause(t *testing.T) {
+	withResilienceSettings(t, nil)
+	summary := "pool=2, filtered: excluded=1 rate_limited=1"
+	cases := []struct {
+		name     string
+		attempts []bool
+		want     bool
+	}{
+		{"filtered_earlier_no_attempt", nil, false},
+		{"other_failure", []bool{false}, false},
+		{"mixed_failures", []bool{true, false}, false},
+		{"capability_only", []bool{true}, true},
+		{"capability_only_twice", []bool{true, true}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := resilience.WithCapabilityRequest(context.Background(), "responses", false)
+			// An earlier selection pass (or the primary group before a
+			// fallback) dropped a learned stream-only account.
+			resilience.NoteCapabilityExcluded(ctx, 7)
+			for _, capability := range tc.attempts {
+				resilience.NoteCapabilityAttempt(ctx, capability)
+			}
+			err := capabilitySelectionError(ctx, noAvailableOpenAISelectionError("gpt-test", false, summary))
+			require.True(t, errors.Is(err, ErrNoAvailableAccounts))
+			require.Equal(t, tc.want, strings.Contains(err.Error(), resilience.ReasonCapabilityStreamOnly), err.Error())
+		})
+	}
+
+	// A summary that already names the reason is not repeated.
+	ctx := resilience.WithCapabilityRequest(context.Background(), "responses", false)
+	resilience.NoteCapabilityExcluded(ctx, 7)
+	resilience.NoteCapabilityAttempt(ctx, true)
+	err := capabilitySelectionError(ctx, noAvailableOpenAISelectionError("gpt-test", false, "pool=1, filtered: capability_stream_only=1", true))
+	require.Equal(t, 1, strings.Count(err.Error(), resilience.ReasonCapabilityStreamOnly))
+	require.True(t, IsCapabilityOnlySelectionError(err))
+}

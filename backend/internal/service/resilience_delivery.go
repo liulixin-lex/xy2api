@@ -117,6 +117,11 @@ func (w *deliveryWriter) WriteString(s string) (int, error) {
 }
 
 func (w *deliveryWriter) noteFirstOutput(nonWhitespace bool) {
+	// After the first content every write lands here; skip the clock and
+	// the state lock.
+	if w.state.FirstOutputNoted() {
+		return
+	}
 	// Do not invoke the delivery probe here: this write can be underneath
 	// a keepalive mutex, and its probe can reenter that mutex.
 	// JSON keepalive writes whitespace. For SSE, a whitespace-only write

@@ -331,7 +331,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		// pending. They are not semantic output and must not prevent failover.
 		if terminal.strict && !terminal.sawDataLine && !clientOutputStarted &&
 			(strings.HasPrefix(line, ":") || (line == "" && len(pendingLines) == 0)) {
-			writeStreamHeaders()
+			writeStableStreamHeaders(c)
 			n, werr := c.Writer.WriteString(line + "\n")
 			recordOpenAIStreamKeepaliveBytes(c, n)
 			if werr == nil && n != len(line)+1 {

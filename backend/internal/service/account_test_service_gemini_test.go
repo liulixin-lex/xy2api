@@ -38,8 +38,8 @@ func TestCreateGeminiTestPayload_ImageModel(t *testing.T) {
 }
 
 func TestProcessGeminiStream_EmitsImageEvent(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: newTestContext calls gin.SetMode, which writes a package
+	// global that parallel tests read through gin.New (-race).
 	ctx, recorder := newTestContext()
 	svc := &AccountTestService{}
 

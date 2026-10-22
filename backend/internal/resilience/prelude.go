@@ -49,7 +49,7 @@ func ClassifyStreamEvent(protocol, eventType string, payload []byte) EventClass 
 	if typ == "response.incomplete" {
 		return EventClass{Kind: TerminalFailure}
 	}
-	if typ == "response.failed" || typ == "error" || (protocol == "chat" && root.Get("error").Exists() && root.Get("error").Type != gjson.Null) {
+	if typ == "response.failed" || typ == "error" || (protocol == "chat" && ChatErrorField(root)) {
 		err := root.Get("response.error")
 		if !err.IsObject() {
 			err = root.Get("error")
@@ -104,6 +104,31 @@ func ClassifyStreamEvent(protocol, eventType string, payload []byte) EventClass 
 		}
 	}
 	return EventClass{Kind: Unknown}
+}
+
+// ChatErrorField reports whether a Chat chunk's error field carries failure
+// evidence: a non-blank string, or an object with a non-empty message, code
+// or type. Relays may leave placeholders such as null, "", false, 0, {} or an
+// object of empty fields in normal chunks.
+func ChatErrorField(root gjson.Result) bool {
+	err := root.Get("error")
+	if err.Type == gjson.String {
+		return strings.TrimSpace(err.Str) != ""
+	}
+	if !err.IsObject() {
+		return false
+	}
+	return chatErrorValue(err.Get("message")) || chatErrorValue(err.Get("code")) || chatErrorValue(err.Get("type"))
+}
+
+func chatErrorValue(value gjson.Result) bool {
+	switch value.Type {
+	case gjson.String:
+		return strings.TrimSpace(value.Str) != ""
+	case gjson.Number:
+		return value.Num != 0
+	}
+	return false
 }
 
 func eventContentUnlessEmpty(value string) EventClass {

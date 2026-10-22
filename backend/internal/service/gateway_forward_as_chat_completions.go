@@ -126,6 +126,9 @@ func (s *GatewayService) ForwardAsChatCompletions(
 
 	// 10. Build upstream request
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
+	// xy2api resilience (W1.2): the first-event deadline of a guarded stream.
+	upstreamCtx, firstEvent := s.armGatewayConvertFirstEvent(ctx, upstreamCtx, account, clientStream)
+	defer firstEvent.Release()
 	upstreamReq, forwardedBody, err := s.buildUpstreamRequest(upstreamCtx, c, account, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
 	releaseUpstreamCtx()
 	if err != nil {
@@ -141,6 +144,9 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
+		}
+		if firstEvent.Fired() {
+			return nil, firstEvent.failoverError(c, account, "response_headers")
 		}
 		return nil, s.handleUpstreamTransportError(ctx, c, account, err, OpsUpstreamErrorEvent{
 			UpstreamURL: safeUpstreamURL(upstreamReq.URL.String()),
@@ -188,7 +194,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	// Read Anthropic SSE → convert to Responses events → convert to CC format
 	var handleErr error
 	if clientStream {
-		result, handleErr = s.handleCCStreamingFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
+		result, handleErr = s.handleCCStreamingFromAnthropic(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime)
 	} else {
 		result, handleErr = s.handleCCBufferedFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
 	}
@@ -360,21 +366,13 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 func (s *GatewayService) handleCCStreamingFromAnthropic(
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	originalModel string,
 	mappedModel string,
 	reasoningEffort *string,
 	startTime time.Time,
 ) (*ForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
-
-	if s.responseHeaderFilter != nil {
-		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-	}
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
-	c.Writer.WriteHeader(http.StatusOK)
 
 	// Use Anthropic→Responses state machine, then convert Responses→CC
 	anthState := apicompat.NewAnthropicEventToResponsesState()
@@ -385,13 +383,6 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	var usage ClaudeUsage
 	var firstTokenMs *int
 	firstChunk := true
-
-	scanner := bufio.NewScanner(resp.Body)
-	maxLineSize := defaultMaxLineSize
-	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
-		maxLineSize = s.cfg.Gateway.MaxLineSize
-	}
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
 
 	resultWithUsage := func() *ForwardResult {
 		return &ForwardResult{
@@ -407,31 +398,33 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 		}
 	}
 
-	writeChunk := func(chunk apicompat.ChatCompletionsChunk) bool {
-		sse, err := apicompat.ChatChunkToSSE(chunk)
-		if err != nil {
-			return false
+	var stream *gatewayConvertStream
+	chunkFrames := func(resEvt *apicompat.ResponsesStreamEvent, hold bool) []string {
+		// xy2api resilience (W1.1): a staged stream sends the role chunk with
+		// its first content instead of on response.created.
+		var ccChunks []apicompat.ChatCompletionsChunk
+		if stream.staging {
+			ccChunks = deferredOpenAIChatChunks(resEvt, ccState, hold)
+		} else {
+			ccChunks = apicompat.ResponsesEventToChatChunks(resEvt, ccState)
 		}
-		// Reverse tool name mapping: fake → real, per-chunk bytes.Replace.
-		// c 可能持有请求侧注入的 ToolNameRewrite；无则仅做静态前缀还原。
-		out := string(reverseToolNamesIfPresent(c, []byte(sse)))
-		if _, err := fmt.Fprint(c.Writer, out); err != nil {
-			return true // client disconnected
+		var frames []string
+		for _, chunk := range ccChunks {
+			sse, err := apicompat.ChatChunkToSSE(chunk)
+			if err != nil {
+				continue
+			}
+			// Reverse tool name mapping: fake → real, per-chunk bytes.Replace.
+			// c 可能持有请求侧注入的 ToolNameRewrite；无则仅做静态前缀还原。
+			frames = append(frames, string(reverseToolNamesIfPresent(c, []byte(sse))))
 		}
-		return false
+		return frames
 	}
 
-	processAnthropicEvent := func(event *apicompat.AnthropicStreamEvent) bool {
-		if event == nil {
-			return false
-		}
-		if event.Type == "ping" {
-			if _, err := fmt.Fprint(c.Writer, ": ping\n\n"); err != nil {
-				return true
-			}
-			c.Writer.Flush()
-			return false
-		}
+	processAnthropicEvent := func(event *apicompat.AnthropicStreamEvent, payload string, hold bool) []string {
+		// Forward received usage regardless of the client stream_options.
+		// The intermediate Responses converter synthesizes usage even when absent.
+		ccState.IncludeUsage = ccState.IncludeUsage || anthropicChatStreamHasUsage(event, payload)
 		if firstChunk {
 			firstChunk = false
 			ms := int(time.Since(startTime).Milliseconds())
@@ -453,75 +446,41 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 		normalizeAnthropicEventUsageForResponses(event, usage)
 
 		// Chain: Anthropic event → Responses events → CC chunks
-		responsesEvents := apicompat.AnthropicEventToResponsesEvents(event, anthState)
-		for _, resEvt := range responsesEvents {
-			ccChunks := apicompat.ResponsesEventToChatChunks(&resEvt, ccState)
-			for _, chunk := range ccChunks {
-				if disconnected := writeChunk(chunk); disconnected {
-					return true
-				}
+		var frames []string
+		for _, resEvt := range apicompat.AnthropicEventToResponsesEvents(event, anthState) {
+			frames = append(frames, chunkFrames(&resEvt, hold)...)
+		}
+		return frames
+	}
+
+	// Finalize both state machines, then the [DONE] marker.
+	finalizeStream := func() []string {
+		var frames []string
+		for _, resEvt := range apicompat.FinalizeAnthropicResponsesStream(anthState) {
+			frames = append(frames, chunkFrames(&resEvt, false)...)
+		}
+		for _, chunk := range apicompat.FinalizeResponsesChatStream(ccState) {
+			if sse, err := apicompat.ChatChunkToSSE(chunk); err == nil {
+				frames = append(frames, string(reverseToolNamesIfPresent(c, []byte(sse))))
 			}
 		}
-		c.Writer.Flush()
-		return false
+		return append(frames, "data: [DONE]\n\n")
 	}
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		// 与缓冲路径一致：接受 SSE 紧凑格式（冒号后无空格，#4653 同根因）。
-		if _, ok := extractOpenAISSEEventLine(line); !ok {
-			continue
-		}
-
-		if !scanner.Scan() {
-			break
-		}
-		payload, ok := extractOpenAISSEDataLine(scanner.Text())
-		if !ok {
-			continue
-		}
-
-		var event apicompat.AnthropicStreamEvent
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			continue
-		}
-
-		// Forward received usage regardless of the client stream_options.
-		// The intermediate Responses converter synthesizes usage even when absent.
-		ccState.IncludeUsage = ccState.IncludeUsage || anthropicChatStreamHasUsage(&event, payload)
-
-		if processAnthropicEvent(&event) {
-			return resultWithUsage(), nil
-		}
+	// xy2api resilience (W1.1, W1.2): the driver reads the Anthropic stream,
+	// stages the role chunk and ends a broken stream with an error chunk.
+	stream = s.newGatewayConvertStream(c, resp, account, gatewayConvertChat, mappedModel, gatewayConvertHooks{
+		convert:  processAnthropicEvent,
+		finalize: finalizeStream,
+		failure:  gatewayChatFailureFrames,
+	})
+	outcome := stream.run()
+	if outcome.noResult {
+		return nil, outcome.err
 	}
-
-	if err := scanner.Err(); err != nil {
-		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			logger.L().Warn("forward_as_cc stream: read error",
-				zap.Error(err),
-				zap.String("request_id", requestID),
-			)
-		}
-	}
-
-	// Finalize both state machines
-	finalResEvents := apicompat.FinalizeAnthropicResponsesStream(anthState)
-	for _, resEvt := range finalResEvents {
-		ccChunks := apicompat.ResponsesEventToChatChunks(&resEvt, ccState)
-		for _, chunk := range ccChunks {
-			writeChunk(chunk) //nolint:errcheck
-		}
-	}
-	finalCCChunks := apicompat.FinalizeResponsesChatStream(ccState)
-	for _, chunk := range finalCCChunks {
-		writeChunk(chunk) //nolint:errcheck
-	}
-
-	// Write [DONE] marker
-	fmt.Fprint(c.Writer, "data: [DONE]\n\n") //nolint:errcheck
-	c.Writer.Flush()
-
-	return resultWithUsage(), nil
+	result := resultWithUsage()
+	result.ClientDisconnect = stream.guarded && stream.gone
+	return result, outcome.err
 }
 
 // writeGatewayCCError writes an error in OpenAI Chat Completions format for

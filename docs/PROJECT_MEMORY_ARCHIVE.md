@@ -2486,3 +2486,16 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 验证：本地对 PR #90 head `a30fc223d` 试合并（`git merge-tree`）：冲突为 `controlled_scheduling_request.go`（#90 删除、本分支修改）、`cmd/server/{wire,wire_gen,wire_gen_test}.go`、本文件；#90 中已无 `ControlledSchedulingMiddleware`、`clientContext`、`beginDispatch`。
 - 卡点/风险：合并顺序由维护者决定；后合并的一方需按上文处理冲突并复测。
 - 下一步：等待合并授权；发版与主站部署另需授权。
+
+## 2026-10-21 — 0.4.5 本地集成阶段登记（原样归档）
+
+### 20261021-integ-0.4.5-prep — 0.4.5 本地集成（2026-10-21T12:51Z 授权）
+
+- 请求：PM 放行从 main `a1cf8f104` 建本地分支 `integ/0.4.5-prep`，按 RA-1 → ε → DOCS → δ 合入；仅本地提交，不推送、不开 PR、不发布或部署。
+- 已合入：RA-1 `4ef7be248` → ε `10f2edd6b` → DOCS `eb95a4a10` → δ `74133b338`（owner 已确认该 HEAD 定向 `-race` 通过），随后补合 DOCS 最终审查记录 `a52387c0b`。记忆以 main 为准；网关说明冲突与 policy 测试列表冲突保留双方增补，已逐项核对 required_literals 与 custom_patch_tests 无丢失。
+- 夹具修复：独立提交 `c906ba5ca` 仅改测试，给 `contentModerationHandlerSettingRepo` 全部读写方法加 RWMutex，新增直接并发回归。在 main `a1cf8f104` 的未修夹具上，原取消/断连用例与新回归分别 `-race -count=3` 复现；修后三条用例同参数通过（21 项、零失败/跳过/竞争）。临时基线工作树已恢复自己的改动并正常移除。
+- 当前：产品版本改为 0.4.5；四个原版调度文件相对 main 无变化，保留既有 scheduler-diff 差异块并注明复核。首候选 `43be712aa` 全部 25 项门禁已收集：22 项通过，unit/无 tag 各仅旧 OAuth 预取消断言失败，干净树 audit 另报 6 个新 OpenSpec 文件未分类；已在 `7930a65af` 精确补登变更目录 `xy_owned`，干净树 audit 复验通过。
+- 验证：四种 vet、lint、`ci_gate`（390 个顶层 `-race`、零跳过）、额外 service 126/368 与 handler 94/224 项竞态检查、govulncheck（调用路径 0 漏洞）、前端四项（413 文件、3182 用例）、依赖审计检查（高危/严重 0）、tools 41 项、文档与构建通过。共享缓存首轮失败为环境故障，单独留证。
+- 增量：按 PM 15:18Z 与 REVIEW 放行，合入 δ 最终 `50053a8ea`（撤回透传稳定头、恢复 0.4.4 时机并限制 turn-state 溯源）和 DOCS 最终 `2ebb17d1e`；保留 ε `930213caa` 的 EOF 取消防护与测试，三文件相对合并前逐字不变。网关说明同时保留双方增补；policy 有效登记取并集去重，已删除撤回钩子及测试登记，保留精确 OpenSpec 所有权登记。
+- 待完成：在新 attempt 目录、独立 GOCACHE 从头跑全部 25 项门禁，向 PM 交付固定本地候选 SHA 后安排集成增量补审；全部结束后删除本轮独立 GOCACHE。推送、PR、候选构建和发版均待后续授权。
+- 证据：仓库外冲刺目录 `evidence/integ-045/` 与 `briefs/PROGRESS_A.md`；不合入监控或诊断分支。

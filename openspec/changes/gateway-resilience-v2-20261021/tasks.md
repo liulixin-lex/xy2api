@@ -41,7 +41,7 @@
 - [x] 5.3 W5.1 三个专用耗尽出口接入重试提示与回合封顶；一次性 finalize（α，`a72a29e00`）。
 - [x] 5.4 W5.4 Anthropic 自身失败用 `api_error`（α handler `fe5dbf503`；β `resilience_keepalive.go` `e30e6c384`）。
 - [x] 5.5 W5.5 Codex 无号 503 的 Retry-After 上限（α `0c2a67ca5`）。
-- [x] 5.6 W5.3 合成 `response.failed` 有条件带 retry-after：handler 侧（α `9b951b4de`）、分组 advisor（γ `d4db8d426`）、service 侧三个点（β `e30e6c384`）。已知缺陷：上游带 `Retry-After` 的容量失败造成耗尽时不带该头、正文也没有重试秒数（测试服务器 RA-1 失败；PM 裁定随 0.4.4 发布，0.4.5 修复，design §11）。
+- [x] 5.6 W5.3 合成 `response.failed` 有条件带 retry-after：handler 侧（α `9b951b4de`）、分组 advisor（γ `d4db8d426`）、service 侧三个点（β `e30e6c384`）。已知缺陷：上游带 `Retry-After` 的容量失败造成耗尽时不带该头、正文也没有重试秒数（测试服务器 RA-1 失败；PM 裁定随 0.4.4 发布，0.4.5 修复，design §11；修复见 `gateway-resilience-045-20261021`）。
 
 ## 6. W6-lite 仅流式能力（γ、FE）
 
@@ -95,4 +95,4 @@
 - 产物核验（现行校验入口，全部通过）：6 个附件共 198,881,025 字节，双 SHA 一致；五个平台的二进制 `vcs.revision=4b0b6d94b`、`vcs.modified=false`，含前端产物；GHCR 有 linux/amd64 与 linux/arm64，两个架构的 version、revision、source 标签正确；`0.4.4`、`latest`、`0`、`0.4` 指向同一 index `sha256:2f5133cb…`，`0.3` 仍是 0.3.0 的 digest。第一次核验因校验脚本用了旧的远端入口失败，属于环境问题，没有改 tag、Release 或源码，换用现行入口重跑通过。
 - 正式镜像全新安装（测试服务器，空库，按 digest `sha256:2f5133cb…` 拉取 `ghcr.io/liulixin-lex/xy2api:0.4.4`）：通过。启动 2.2 秒，324 条迁移；`/ready` 返回 JSON，`/health`、首页、6 个静态资源与 `/auth/me` 均为 200；公开设置的版本为 0.4.4；经故障上游的计费请求返回 200，`usage_logs` 记 1 条正费用；安装日志 0 条 ERROR；临时容器、卷与数据库已清理。第一次执行时，安装脚本的默认数据库指向已清理的演练库而退出，属于夹具问题，修正后重跑通过，未发现产品问题。
 
-生产部署 0.4.4 未授权：需要单独授权，并且要先通过生产部署前的 6.5 小时浸泡。
+生产部署 0.4.4 未授权：需要单独授权，并且要先通过生产部署前的 6.5 小时浸泡。该浸泡用正式镜像（GHCR digest `sha256:2f5133cb…`）在测试服务器独立栈上跑，2026-10-21T17:57Z 验收通过：按完整小时口径 12/12，存活堆斜率 0.5 MiB/h（门槛 ≤1），0 次重启（报告在仓库外 `staging/SOAK65_v0.4.4.md`）。
