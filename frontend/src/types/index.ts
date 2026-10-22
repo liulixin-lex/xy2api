@@ -287,6 +287,9 @@ export interface PublicSettings {
   service_quota_enabled: boolean
   affiliate_enabled: boolean
   allow_user_view_error_requests?: boolean
+  // Effective user usage metrics: the display switch and its public button are both on
+  user_usage_cache_hit_rate_enabled?: boolean
+  user_usage_token_speed_enabled?: boolean
 }
 
 export interface AuthResponse {

@@ -23,16 +23,16 @@ describe('per-request usage metrics', () => {
   })
   it('uses complete request duration even when first-token time is available', () => {
     expect(tokenSpeed(row)).toBeCloseTo(100 / 3)
-    expect(formatTokenSpeed(row)).toBe('33.3 tokens/s')
-    expect(formatTokenSpeed({ ...row, first_token_ms: null })).toBe('33.3 tokens/s')
-    expect(formatTokenSpeed({ ...row, first_token_ms: 0 })).toBe('33.3 tokens/s')
+    expect(formatTokenSpeed(row)).toBe('33.3 t/s')
+    expect(formatTokenSpeed({ ...row, first_token_ms: null })).toBe('33.3 t/s')
+    expect(formatTokenSpeed({ ...row, first_token_ms: 0 })).toBe('33.3 t/s')
     expect(formatTokenSpeed({ ...row, output_tokens: 0 })).toBe('—')
   })
   it.each([0, -1, null, NaN, Infinity])('handles invalid duration %s', duration_ms => {
     expect(formatTokenSpeed({ ...row, duration_ms })).toBe('—')
   })
   it.each([-1, 3000, 4000, NaN, Infinity])('does not use unrelated first-token timing %s', first_token_ms => {
-    expect(formatTokenSpeed({ ...row, first_token_ms })).toBe('33.3 tokens/s')
+    expect(formatTokenSpeed({ ...row, first_token_ms })).toBe('33.3 t/s')
   })
   it.each([-1, NaN, Infinity])('handles invalid token count %s', value => {
     expect(formatTokenSpeed({ ...row, output_tokens: value })).toBe('—')

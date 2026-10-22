@@ -488,6 +488,12 @@ const (
 	// AdminUsageTokenSpeedEnabled controls an admin-only usage display; it does not affect collection.
 	SettingKeyAdminUsageTokenSpeedEnabled = "admin_usage_token_speed_enabled"
 
+	// UsageCacheHitRatePublic also shows an enabled cache read share in user usage records.
+	SettingKeyUsageCacheHitRatePublic = "usage_cache_hit_rate_public"
+
+	// UsageTokenSpeedPublic also shows an enabled average TPS in user usage records.
+	SettingKeyUsageTokenSpeedPublic = "usage_token_speed_public"
+
 	// SettingKeyChannelMonitorEnabled is a DB-backed soft switch for the channel monitor feature.
 	// When false: runner skips scheduling and user-facing endpoints return an empty list.
 	SettingKeyChannelMonitorEnabled = "channel_monitor_enabled"

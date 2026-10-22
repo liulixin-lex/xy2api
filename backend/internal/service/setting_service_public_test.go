@@ -180,6 +180,68 @@ func TestSettingService_GetPublicSettings_ExposesAllowUserViewErrorRequests(t *t
 	require.True(t, settings.AllowUserViewErrorRequests)
 }
 
+func TestSettingService_GetPublicSettings_UserUsageMetricsNeedDisplayAndPublic(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		values       map[string]string
+		cache, speed bool
+	}{
+		{name: "nothing saved", values: map[string]string{}},
+		{
+			name: "public with display left at its default",
+			values: map[string]string{
+				SettingKeyUsageCacheHitRatePublic: "true",
+				SettingKeyUsageTokenSpeedPublic:   "true",
+			},
+			cache: true, speed: true,
+		},
+		{
+			name: "public but display off",
+			values: map[string]string{
+				SettingKeyAdminUsageCacheHitRateEnabled: "false",
+				SettingKeyAdminUsageTokenSpeedEnabled:   "false",
+				SettingKeyUsageCacheHitRatePublic:       "true",
+				SettingKeyUsageTokenSpeedPublic:         "true",
+			},
+		},
+		{
+			name: "display on but admin only",
+			values: map[string]string{
+				SettingKeyAdminUsageCacheHitRateEnabled: "true",
+				SettingKeyAdminUsageTokenSpeedEnabled:   "true",
+				SettingKeyUsageCacheHitRatePublic:       "false",
+				SettingKeyUsageTokenSpeedPublic:         "false",
+			},
+		},
+		{
+			name: "each metric decided on its own",
+			values: map[string]string{
+				SettingKeyAdminUsageCacheHitRateEnabled: "true",
+				SettingKeyAdminUsageTokenSpeedEnabled:   "false",
+				SettingKeyUsageCacheHitRatePublic:       "true",
+				SettingKeyUsageTokenSpeedPublic:         "true",
+			},
+			cache: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := NewSettingService(&settingPublicRepoStub{values: tc.values}, &config.Config{})
+
+			settings, err := svc.GetPublicSettings(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, tc.cache, settings.UserUsageCacheHitRateEnabled)
+			require.Equal(t, tc.speed, settings.UserUsageTokenSpeedEnabled)
+
+			injected, err := svc.GetPublicSettingsForInjection(context.Background())
+			require.NoError(t, err)
+			payload, ok := injected.(*PublicSettingsInjectionPayload)
+			require.True(t, ok)
+			require.Equal(t, tc.cache, payload.UserUsageCacheHitRateEnabled)
+			require.Equal(t, tc.speed, payload.UserUsageTokenSpeedEnabled)
+		})
+	}
+}
+
 func TestSettingService_GetPublicSettings_ExposesWeChatOAuthModeCapabilities(t *testing.T) {
 	svc := NewSettingService(&settingPublicRepoStub{
 		values: map[string]string{
