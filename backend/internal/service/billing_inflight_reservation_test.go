@@ -453,19 +453,33 @@ func TestInflightEstimate_AccountMappingNoDBAndBoundedMemory(t *testing.T) {
 	}
 	require.Zero(t, snap.reads.Load(), "priced models must never trigger account-mapping lookup")
 
-	var before, after runtime.MemStats
-	runtime.GC()
-	runtime.ReadMemStats(&before)
-	const n = 20000
-	for i := 0; i < n; i++ {
-		_, priced := svc.EstimateInflightReservation(ctx, apiKey, InflightEstimateRequest{Model: fmt.Sprintf("rand-%d-%d", i, time.Now().UnixNano()), BodyBytes: 4000, MaxTokens: 1000})
-		require.False(t, priced)
+	estimateUnpriced := func(prefix string, count int) {
+		for i := 0; i < count; i++ {
+			_, priced := svc.EstimateInflightReservation(ctx, apiKey, InflightEstimateRequest{Model: fmt.Sprintf("%s-%d-%d", prefix, i, time.Now().UnixNano()), BodyBytes: 4000, MaxTokens: 1000})
+			require.False(t, priced)
+		}
 	}
-	runtime.GC()
-	runtime.ReadMemStats(&after)
+	// The first unpriced lookups build some state once (fallback pricing,
+	// the rate resolver cache); warm it up so only per-model growth remains.
+	const warmup, n = 1000, 20000
+	estimateUnpriced("warm", warmup)
+	before := settledHeapAlloc()
+	estimateUnpriced("rand", n)
+	after := settledHeapAlloc()
 	require.Zero(t, repo.dbCalls.Load(), "no direct DB query on the request path")
-	require.Equal(t, int64(n), snap.reads.Load(), "unpriced lookups read the scheduler snapshot only")
-	require.Less(t, int64(after.HeapAlloc)-int64(before.HeapAlloc), int64(8<<20), "no per-model cache growth")
+	require.Equal(t, int64(warmup+n), snap.reads.Load(), "unpriced lookups read the scheduler snapshot only")
+	require.Less(t, int64(after)-int64(before), int64(8<<20), "no per-model cache growth")
+}
+
+// settledHeapAlloc reads the live heap after two collections. Objects in
+// sync.Pool victim caches, and other tests' objects kept for finalizers,
+// survive the first one; a per-model cache survives any number of them.
+func settledHeapAlloc() uint64 {
+	var m runtime.MemStats
+	runtime.GC()
+	runtime.GC()
+	runtime.ReadMemStats(&m)
+	return m.HeapAlloc
 }
 
 // 无分组 API Key：使用调度器的未分组账号池，估算与计费回退的账号映射模型同口径。

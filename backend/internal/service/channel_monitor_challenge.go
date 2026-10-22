@@ -5,22 +5,24 @@ import (
 	"math/rand/v2"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
-// monitorChallengePromptTemplate 1:1 复刻 BingZi-233/check-cx 的 few-shot 模板。
-const monitorChallengePromptTemplate = `Calculate and respond with ONLY the number, nothing else.
+// monitorChallengePromptTemplate 零样本一句话加法题。推理模型对简单题想得更少，
+// 不再带 few-shot 示例（XY2API 渠道监控 v1 探测优化）。
+const monitorChallengePromptTemplate = "Reply with only the number. %d + %d = ?"
 
-Q: 3 + 5 = ?
-A: 8
-
-Q: 12 - 7 = ?
-A: 5
-
-Q: %d %s %d = ?
-A:`
+// monitorChallengeInstruction Responses 的 instructions、Anthropic 的 system 只留这一句。
+const monitorChallengeInstruction = "Reply with only the number."
 
 // monitorChallengeNumberRegex 提取响应中的所有整数（含负号）。
 var monitorChallengeNumberRegex = regexp.MustCompile(`-?\d+`)
+
+// monitorThinkOpenRegex / monitorThinkCloseRegex 正文里的推理标签（<think>、<thinking>）。
+var (
+	monitorThinkOpenRegex  = regexp.MustCompile(`(?i)<think(?:ing)?>`)
+	monitorThinkCloseRegex = regexp.MustCompile(`(?i)</think(?:ing)?>`)
+)
 
 // monitorChallenge 一次 challenge 的 prompt + 期望答案。
 type monitorChallenge struct {
@@ -28,32 +30,16 @@ type monitorChallenge struct {
 	Expected string
 }
 
-// generateChallenge 生成一次随机算术 challenge：
-//   - 随机两个 [monitorChallengeMin, monitorChallengeMax] 整数
-//   - 50% 加 / 50% 减；减法用 max - min 保证非负
-//   - 渲染 few-shot 模板
+// generateChallenge 生成一次随机加法题：两个 [monitorChallengeMin, monitorChallengeMax]
+// 整数相加。仍然随机，防缓存。
 //
 // 不强求加密随机：math/rand/v2 足够分散，避免 crypto/rand 的开销。
 func generateChallenge() monitorChallenge {
 	a := randIntInRange(monitorChallengeMin, monitorChallengeMax)
 	b := randIntInRange(monitorChallengeMin, monitorChallengeMax)
-
-	if rand.IntN(2) == 0 { //nolint:gosec // 仅用于生成测试问题，无安全影响
-		// 加法
-		return monitorChallenge{
-			Prompt:   fmt.Sprintf(monitorChallengePromptTemplate, a, "+", b),
-			Expected: strconv.Itoa(a + b),
-		}
-	}
-
-	// 减法，保证非负
-	hi, lo := a, b
-	if lo > hi {
-		hi, lo = lo, hi
-	}
 	return monitorChallenge{
-		Prompt:   fmt.Sprintf(monitorChallengePromptTemplate, hi, "-", lo),
-		Expected: strconv.Itoa(hi - lo),
+		Prompt:   fmt.Sprintf(monitorChallengePromptTemplate, a, b),
+		Expected: strconv.Itoa(a + b),
 	}
 }
 
@@ -65,16 +51,48 @@ func randIntInRange(minVal, maxVal int) int {
 	return minVal + rand.IntN(maxVal-minVal+1) //nolint:gosec
 }
 
-// validateChallenge 在响应文本中查找 expected 整数答案，返回是否通过校验。
-func validateChallenge(responseText, expected string) bool {
-	if responseText == "" || expected == "" {
+// probeAnswerFound 在正文 visible 中查找独立出现的整数 expected。
+// 末尾的数字可能还没收完（"4" 之后还会来 "0"），所以只有后面紧跟非数字字符，
+// 或 final（正文已经完整）时才算找到。
+func probeAnswerFound(visible, expected string, final bool) bool {
+	if visible == "" || expected == "" {
 		return false
 	}
-	matches := monitorChallengeNumberRegex.FindAllString(responseText, -1)
-	for _, m := range matches {
-		if m == expected {
+	for _, loc := range monitorChallengeNumberRegex.FindAllStringIndex(visible, -1) {
+		if visible[loc[0]:loc[1]] != expected {
+			continue
+		}
+		if loc[1] < len(visible) || final {
 			return true
 		}
 	}
 	return false
+}
+
+// stripThinkBlocks 去掉正文中的推理标签及其内容：未闭合的开标签隐藏其后全部内容；
+// 部分部署省略开标签、只输出闭标签，此时闭标签之前的内容都视为推理。
+func stripThinkBlocks(text string) string {
+	if !strings.Contains(text, "<") {
+		return text
+	}
+	rest := text
+	open := monitorThinkOpenRegex.FindStringIndex(rest)
+	if closing := monitorThinkCloseRegex.FindStringIndex(rest); closing != nil && (open == nil || closing[0] < open[0]) {
+		rest = rest[closing[1]:]
+	}
+	var b strings.Builder
+	for {
+		open = monitorThinkOpenRegex.FindStringIndex(rest)
+		if open == nil {
+			_, _ = b.WriteString(rest)
+			return b.String()
+		}
+		_, _ = b.WriteString(rest[:open[0]])
+		rest = rest[open[1]:]
+		closing := monitorThinkCloseRegex.FindStringIndex(rest)
+		if closing == nil {
+			return b.String()
+		}
+		rest = rest[closing[1]:]
+	}
 }

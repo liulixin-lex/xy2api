@@ -1266,11 +1266,56 @@ func TestOpenAIResponsesWebSocket_PreviousResponseIDKindLoggedBeforeAcquireFailu
 	require.Contains(t, strings.ToLower(closeErr.Reason), "failed to acquire user concurrency slot")
 }
 
+// SettingService can refresh settings while the handler reads them or test
+// cleanup restores them. Exercise the same repository through concurrent calls.
+func TestContentModerationHandlerSettingRepoConcurrentAccess(t *testing.T) {
+	repo := &contentModerationHandlerSettingRepo{}
+	ctx := context.Background()
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for worker := 0; worker < 4; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for range 100 {
+				_, _ = repo.Get(ctx, "key")
+				_, _ = repo.GetValue(ctx, "key")
+				_, _ = repo.GetMultiple(ctx, []string{"key"})
+				_, _ = repo.GetAll(ctx)
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		for range 100 {
+			_ = repo.Set(ctx, "key", "value")
+			_ = repo.SetMultiple(ctx, map[string]string{"key": "updated"})
+			_ = repo.Delete(ctx, "key")
+		}
+	}()
+	close(start)
+	wg.Wait()
+	require.NoError(t, repo.Set(ctx, "key", "final"))
+	all, err := repo.GetAll(ctx)
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{"key": "final"}, all)
+	all["key"] = "changed copy"
+	value, err := repo.GetValue(ctx, "key")
+	require.NoError(t, err)
+	require.Equal(t, "final", value)
+}
+
 type contentModerationHandlerSettingRepo struct {
+	mu     sync.RWMutex
 	values map[string]string
 }
 
 func (r *contentModerationHandlerSettingRepo) Get(ctx context.Context, key string) (*service.Setting, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	if value, ok := r.values[key]; ok {
 		return &service.Setting{Key: key, Value: value}, nil
 	}
@@ -1278,6 +1323,8 @@ func (r *contentModerationHandlerSettingRepo) Get(ctx context.Context, key strin
 }
 
 func (r *contentModerationHandlerSettingRepo) GetValue(ctx context.Context, key string) (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	if value, ok := r.values[key]; ok {
 		return value, nil
 	}
@@ -1285,6 +1332,8 @@ func (r *contentModerationHandlerSettingRepo) GetValue(ctx context.Context, key 
 }
 
 func (r *contentModerationHandlerSettingRepo) Set(ctx context.Context, key, value string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.values == nil {
 		r.values = map[string]string{}
 	}
@@ -1293,6 +1342,8 @@ func (r *contentModerationHandlerSettingRepo) Set(ctx context.Context, key, valu
 }
 
 func (r *contentModerationHandlerSettingRepo) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	out := map[string]string{}
 	for _, key := range keys {
 		if value, ok := r.values[key]; ok {
@@ -1303,6 +1354,8 @@ func (r *contentModerationHandlerSettingRepo) GetMultiple(ctx context.Context, k
 }
 
 func (r *contentModerationHandlerSettingRepo) SetMultiple(ctx context.Context, settings map[string]string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.values == nil {
 		r.values = map[string]string{}
 	}
@@ -1313,6 +1366,8 @@ func (r *contentModerationHandlerSettingRepo) SetMultiple(ctx context.Context, s
 }
 
 func (r *contentModerationHandlerSettingRepo) GetAll(ctx context.Context) (map[string]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	out := make(map[string]string, len(r.values))
 	for key, value := range r.values {
 		out[key] = value
@@ -1321,6 +1376,8 @@ func (r *contentModerationHandlerSettingRepo) GetAll(ctx context.Context) (map[s
 }
 
 func (r *contentModerationHandlerSettingRepo) Delete(ctx context.Context, key string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	delete(r.values, key)
 	return nil
 }

@@ -57,7 +57,7 @@ func TestNormalizeMonitorEndpoint_PreservesBasePath(t *testing.T) {
 		normalizeEndpoint("https://relay.example/tenant%2Fone/anthropic/v1/"))
 }
 
-func TestCallProvider_BasePath(t *testing.T) {
+func TestRunCheckForModel_BasePath(t *testing.T) {
 	swapMonitorHTTPClient(t)
 	requests := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -84,17 +84,16 @@ func TestCallProvider_BasePath(t *testing.T) {
 		{"openai responses version", MonitorProviderOpenAI, MonitorAPIModeResponses, "/relay/v1", "/relay/v1/responses"},
 		{"grok responses origin", MonitorProviderGrok, MonitorAPIModeResponses, "", "/v1/responses"},
 		{"grok responses version", MonitorProviderGrok, MonitorAPIModeResponses, "/relay/v1", "/relay/v1/responses"},
-		{"gemini version", MonitorProviderGemini, "", "/relay/v1beta", "/relay/v1beta/models/test-model:generateContent"},
+		{"gemini version", MonitorProviderGemini, "", "/relay/v1beta", "/relay/v1beta/models/test-model:streamGenerateContent?alt=sse"},
 		{"zhipu version", MonitorProviderZhipu, "", "/api/paas/v4", "/api/paas/v4/chat/completions"},
 		{"zhipu coding plan", MonitorProviderZhipu, "", "/api/coding/paas/v4", "/api/coding/paas/v4/chat/completions"},
 		{"zhipu relay origin", MonitorProviderZhipu, "", "", "/v1/chat/completions"},
 		{"zhipu relay version", MonitorProviderZhipu, "", "/relay/v1", "/relay/v1/chat/completions"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, status, err := callProvider(context.Background(), tc.provider,
-				server.URL+tc.basePath, "test-key", "test-model", "hello", &CheckOptions{APIMode: tc.apiMode})
-			require.NoError(t, err)
-			require.Equal(t, http.StatusOK, status)
+			res := runCheckForModel(context.Background(), tc.provider,
+				server.URL+tc.basePath, "test-key", "test-model", &CheckOptions{APIMode: tc.apiMode})
+			require.Equal(t, MonitorStatusFailed, res.Status, res.Message)
 			require.Equal(t, tc.wantPath, <-requests)
 		})
 	}

@@ -174,8 +174,14 @@ func (s *OpenAIGatewayService) LearnStreamOnlyFailure(ctx context.Context, accou
 	}
 }
 
+// capabilitySelectionError names the stream-only exclusion on a no-account
+// error when it is the cause: every failed attempt of the request was such an
+// exclusion, the rule of IsCapabilityOnlyExhaustion. Accounts the selection
+// filter dropped for it are already in the summary; an exclusion earlier in
+// the request (or in the group before a fallback) must not relabel another
+// cause such as rate limits.
 func capabilitySelectionError(ctx context.Context, err error) error {
-	if isNoAccountSelectionError(err) && resilience.CapabilityExcluded(ctx, 0) &&
+	if isNoAccountSelectionError(err) && resilience.CapabilityOnlyAttempts(ctx) &&
 		!strings.Contains(err.Error(), resilience.ReasonCapabilityStreamOnly) {
 		return fmt.Errorf("%w (%s)", err, resilience.ReasonCapabilityStreamOnly)
 	}

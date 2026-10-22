@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai_compat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -841,50 +843,97 @@ func TestOpenAIGatewayService_OAuthPassthrough_CompactUsesJSONAndKeepsNonStreami
 	require.Contains(t, rec.Body.String(), `"id":"cmp_123"`)
 }
 
+// passthroughCancelBody records a close from any goroutine: with
+// stream.strict_terminal the request's cancel AfterFunc closes it.
+type passthroughCancelBody struct {
+	io.Reader
+	closed atomic.Bool
+}
+
+func (b *passthroughCancelBody) Close() error {
+	b.closed.Store(true)
+	return nil
+}
+
+// The client cancels before Forward. The upstream request is sent on a
+// detached context either way; what happens next depends on
+// stream.strict_terminal (xy2api W1.2, PM instruction 7). Off, as in 0.4.4,
+// the stream is read to its end and the request succeeds. On, a client
+// that left before the first output ends the attempt: context.Canceled,
+// the upstream body closed, nothing billed and no account failure.
 func TestOpenAIGatewayService_OAuthPassthrough_UpstreamRequestIgnoresClientCancel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	reqCtx, cancel := context.WithCancel(context.Background())
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil)).WithContext(reqCtx)
-	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
-	cancel()
+	for _, strict := range []bool{false, true} {
+		name := "strict_terminal_off"
+		if strict {
+			name = "strict_terminal_on"
+		}
+		t.Run(name, func(t *testing.T) {
+			// This file also runs without the unit tag: switch the setting
+			// here instead of through the unit-only helpers.
+			orig := *resilience.Current()
+			settings := resilience.Defaults()
+			settings.Stream.StrictTerminal = strict
+			resilience.Publish(settings)
+			t.Cleanup(func() { resilience.Publish(orig) })
 
-	originalBody := []byte(`{"model":"gpt-5.2","stream":true,"store":true,"instructions":"local-test-instructions","input":[{"type":"text","text":"hi"}]}`)
-	upstream := &httpUpstreamRecorder{resp: &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_passthrough_ctx"}},
-		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
-			`data: {"type":"response.completed","response":{"usage":{"input_tokens":2,"output_tokens":1}}}`,
-			"",
-			"data: [DONE]",
-			"",
-		}, "\n"))),
-	}}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			state := resilience.NewRequestState()
+			reqCtx, cancel := context.WithCancel(resilience.WithRequestState(context.Background(), state))
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil)).WithContext(reqCtx)
+			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
+			cancel()
 
-	svc := &OpenAIGatewayService{
-		cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
-		httpUpstream: upstream,
+			originalBody := []byte(`{"model":"gpt-5.2","stream":true,"store":true,"instructions":"local-test-instructions","input":[{"type":"text","text":"hi"}]}`)
+			body := &passthroughCancelBody{Reader: strings.NewReader(strings.Join([]string{
+				`data: {"type":"response.completed","response":{"usage":{"input_tokens":2,"output_tokens":1}}}`,
+				"",
+				"data: [DONE]",
+				"",
+			}, "\n"))}
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_passthrough_ctx"}},
+				Body:       body,
+			}}
+
+			svc := &OpenAIGatewayService{
+				cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+				httpUpstream: upstream,
+			}
+			account := &Account{
+				ID:             123,
+				Name:           "acc",
+				Platform:       PlatformOpenAI,
+				Type:           AccountTypeOAuth,
+				Concurrency:    1,
+				Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+				Extra:          map[string]any{"openai_passthrough": true, "openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeOff},
+				Status:         StatusActive,
+				Schedulable:    true,
+				RateMultiplier: f64p(1),
+			}
+
+			result, err := svc.Forward(reqCtx, c, account, originalBody)
+			require.NotNil(t, upstream.lastReq, "the upstream request is sent despite the cancel")
+			if !strict {
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.NoError(t, upstream.lastReq.Context().Err())
+				return
+			}
+			require.ErrorIs(t, err, context.Canceled)
+			require.Nil(t, result, "nothing is billed")
+			require.True(t, body.closed.Load(), "the upstream body is closed")
+			require.False(t, state.AccountFailed(account.ID), "no account failure")
+			require.False(t, state.TurnFailed())
+			_, reported := c.Get(OpsUpstreamErrorsKey)
+			require.False(t, reported)
+			require.NotContains(t, rec.Body.String(), "response.completed")
+		})
 	}
-	account := &Account{
-		ID:             123,
-		Name:           "acc",
-		Platform:       PlatformOpenAI,
-		Type:           AccountTypeOAuth,
-		Concurrency:    1,
-		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": true, "openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeOff},
-		Status:         StatusActive,
-		Schedulable:    true,
-		RateMultiplier: f64p(1),
-	}
-
-	result, err := svc.Forward(reqCtx, c, account, originalBody)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.NotNil(t, upstream.lastReq)
-	require.NoError(t, upstream.lastReq.Context().Err())
 }
 
 func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsGetsDefault(t *testing.T) {

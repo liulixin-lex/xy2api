@@ -4,15 +4,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain"
-	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 )
 
 // ChannelMonitorRepository 渠道监控数据访问接口。
@@ -82,6 +82,9 @@ type ChannelMonitorService struct {
 	// 之后构造，构造参数注入会破坏既有依赖顺序）。nil 时 fail-closed：
 	// 配额模式的检测产出「未配置」错误快照，Create/Update 关联账号直接报错。
 	quotaFetcher *ChannelMonitorQuotaFetcher
+	// checkFlight 合并同一监控的并发检测（定时与手动“立即检测”），
+	// 后到的调用复用正在进行的那一轮结果。
+	checkFlight singleflight.Group
 }
 
 const maxChannelMonitorNameRunes = 100
@@ -603,6 +606,39 @@ func (s *ChannelMonitorService) ListHistory(ctx context.Context, id int64, model
 // 按 check_mode 分派：probe（默认，现状探活）/ quota（仅查关联账号配额，
 // 零 LLM 成本）/ quota_probe（探活 + 配额快照挂主模型行）。
 func (s *ChannelMonitorService) RunCheck(ctx context.Context, id int64) ([]*CheckResult, error) {
+	v, err, _ := s.checkFlight.Do(strconv.FormatInt(id, 10), func() (any, error) {
+		return s.runCheckOnce(ctx, id)
+	})
+	results, _ := v.([]*CheckResult)
+	return results, err
+}
+
+// RunCheckManual 管理端“立即检测”：脱离调用方的连接执行（浏览器断开不会取消这一轮，
+// 也不会连带取消并入的定时检测），不推进 last_checked_at（它只记定时检测的认领时间，
+// 手动检测不会让下一轮定时检测被跳过）；同一监控已有检测在跑时复用它的结果。
+func (s *ChannelMonitorService) RunCheckManual(ctx context.Context, id int64) ([]*CheckResult, error) {
+	detached := withMonitorRound(context.WithoutCancel(ctx), monitorRoundManual)
+	detached, cancel := context.WithTimeout(detached, monitorRequestTimeout+monitorPingTimeout+monitorRunOneBuffer)
+	defer cancel()
+	return s.RunCheck(detached, id)
+}
+
+// ClaimScheduledCheck 认领一轮定时检测（跨实例去重）。仓储不支持认领时总是返回 true。
+func (s *ChannelMonitorService) ClaimScheduledCheck(ctx context.Context, id int64, minGap time.Duration) (bool, error) {
+	claimer, ok := s.repo.(channelMonitorCheckClaimer)
+	if !ok {
+		return true, nil
+	}
+	return claimer.ClaimCheck(ctx, id, minGap)
+}
+
+// channelMonitorCheckClaimer 是仓储的可选能力：按 last_checked_at 原子认领一轮检测。
+type channelMonitorCheckClaimer interface {
+	ClaimCheck(ctx context.Context, id int64, minGap time.Duration) (bool, error)
+}
+
+func (s *ChannelMonitorService) runCheckOnce(ctx context.Context, id int64) ([]*CheckResult, error) {
+	startedAt := time.Now()
 	rt := s.probeRuntime(ctx)
 	if !rt.Enabled {
 		return nil, ErrChannelMonitorDisabled
@@ -624,12 +660,23 @@ func (s *ChannelMonitorService) RunCheck(ctx context.Context, id int64) ([]*Chec
 	case MonitorCheckModeQuota:
 		results = s.runQuotaOnlyCheck(ctx, m)
 	case MonitorCheckModeQuotaProbe:
+		// 配额抓取与探测并行：一轮的总时限按探测预算给，串行时慢配额会拖垮整轮。
+		snapshots := make(chan *domain.MonitorQuotaSnapshot, 1)
+		go func() { snapshots <- s.fetchQuotaSnapshot(ctx, m) }()
 		results = s.runChecksConcurrent(ctx, m)
-		attachQuotaSnapshot(results, s.fetchQuotaSnapshot(ctx, m))
+		attachQuotaSnapshot(results, <-snapshots)
 	default:
 		results = s.runChecksConcurrent(ctx, m)
 	}
-	s.persistCheckResults(ctx, m, results)
+	if err := ctx.Err(); errors.Is(err, context.Canceled) {
+		// 监控被停用、删除或进程停机时取消的检测不写历史，避免留下半截结果。
+		// 超时不同：结果里已经记着超时，照常写入。
+		return nil, err
+	}
+	// 写库不依赖本轮剩余的时间预算。
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), monitorPersistTimeout)
+	defer cancel()
+	s.persistCheckResults(persistCtx, m, results, startedAt)
 	return results, nil
 }
 
@@ -669,7 +716,7 @@ func attachQuotaSnapshot(results []*CheckResult, snapshot *domain.MonitorQuotaSn
 
 // persistCheckResults 写入本次检测的历史记录并更新 last_checked_at。
 // 任一写库失败都只记日志，不影响调用方拿到 results（与 MVP 期望一致：宁可漏记历史也要先返回结果）。
-func (s *ChannelMonitorService) persistCheckResults(ctx context.Context, m *ChannelMonitor, results []*CheckResult) {
+func (s *ChannelMonitorService) persistCheckResults(ctx context.Context, m *ChannelMonitor, results []*CheckResult, startedAt time.Time) {
 	rows := make([]*ChannelMonitorHistoryRow, 0, len(results))
 	for _, r := range results {
 		rows = append(rows, &ChannelMonitorHistoryRow{
@@ -687,44 +734,21 @@ func (s *ChannelMonitorService) persistCheckResults(ctx context.Context, m *Chan
 		slog.Error("channel_monitor: insert history failed",
 			"monitor_id", m.ID, "name", m.Name, "error", err)
 	}
-	if err := s.repo.MarkChecked(ctx, m.ID, time.Now()); err != nil {
+	// 定时检测认领时已把 last_checked_at 记为本轮开始（数据库时间）；手动检测不推进它。
+	// 只有未经认领的检测（认领出错时照常检测、或未接 runner 的调用）在这里补记开始时间。
+	if kind := monitorRoundKindOf(ctx); kind == monitorRoundClaimed || kind == monitorRoundManual {
+		return
+	}
+	if err := s.repo.MarkChecked(ctx, m.ID, startedAt); err != nil {
 		slog.Error("channel_monitor: mark checked failed",
 			"monitor_id", m.ID, "error", err)
 	}
 }
 
-// runChecksConcurrent 对 primary + extra 模型并发执行检测。
-// errgroup 仅用于等待，不传播错误（每个 model 失败都已打包进 CheckResult）。
+// runChecksConcurrent 对 primary + extra 模型并发执行一轮探测，HEAD ping 与模型请求并行，
+// 都在 30 秒预算内（见 channel_monitor_probe_round.go）。
 func (s *ChannelMonitorService) runChecksConcurrent(ctx context.Context, m *ChannelMonitor) []*CheckResult {
-	models := append([]string{m.PrimaryModel}, m.ExtraModels...)
-	results := make([]*CheckResult, len(models))
-
-	// ping 共享一次，所有模型记录同一个 ping 延迟。
-	pingMs := pingEndpointOrigin(ctx, m.Endpoint)
-
-	// 所有模型共用同一份 CheckOptions（来自监控的快照字段）。
-	opts := &CheckOptions{
-		APIMode:          m.APIMode,
-		ExtraHeaders:     m.ExtraHeaders,
-		BodyOverrideMode: m.BodyOverrideMode,
-		BodyOverride:     m.BodyOverride,
-	}
-
-	var eg errgroup.Group
-	var mu sync.Mutex
-	for i, model := range models {
-		i, model := i, model
-		eg.Go(func() error {
-			r := runCheckForModel(ctx, m.Provider, m.Endpoint, m.APIKey, model, opts)
-			r.PingLatencyMs = pingMs
-			mu.Lock()
-			results[i] = r
-			mu.Unlock()
-			return nil
-		})
-	}
-	_ = eg.Wait()
-	return results
+	return runMonitorProbeRound(ctx, m, defaultProbeLimits())
 }
 
 // ---------- 调度器协作 ----------

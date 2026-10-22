@@ -60,8 +60,10 @@ export function useChannelMonitorFormat() {
       case STATUS_DEGRADED:
         return 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
       case STATUS_FAILED:
-        return 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300'
       case STATUS_ERROR:
+        // Both mean "no correct answer within the probe budget"; the timeline
+        // already draws them red, so the badge matches.
+        return 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300'
       default:
         return NEUTRAL_BADGE
     }

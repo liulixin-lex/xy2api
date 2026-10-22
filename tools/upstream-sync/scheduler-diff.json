@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "upstream_commit": "f2669c8cf62555cd92389b3f55920e9e6e7c6ff2",
-  "description": "Reviewed differences between the original Sub2API scheduler files and the recorded upstream commit. Any other change, or a changed upstream commit, fails `sync.py scheduler-diff` until reviewed. Reviewed for v0.2.15: all existing XY2API difference blocks are unchanged; the upstream NormalizeOpenAICompatiblePlatform change to domain.UsesOpenAIGateway is adopted verbatim after module-path normalization. Reviewed for 0.4.0: gateway resilience hooks are registered as `gateway-resilience` blocks; two earlier lines were rewritten by them (named results of SelectAccountWithLoadAwareness, the last-resort runtime-block gate).",
+  "description": "Reviewed differences between the original Sub2API scheduler files and the recorded upstream commit. Any other change, or a changed upstream commit, fails `sync.py scheduler-diff` until reviewed. Reviewed for v0.2.15: all existing XY2API difference blocks are unchanged; the upstream NormalizeOpenAICompatiblePlatform change to domain.UsesOpenAIGateway is adopted verbatim after module-path normalization. Reviewed for 0.4.0: gateway resilience hooks are registered as `gateway-resilience` blocks; two earlier lines were rewritten by them (named results of SelectAccountWithLoadAwareness, the last-resort runtime-block gate). Reviewed for 0.4.5 local integration: all four original scheduler files are byte-for-byte unchanged from the 0.4.4 post-release main; the existing reviewed difference blocks remain valid.",
   "files": {
     "backend/internal/service/gateway_scheduling.go": [
       {
@@ -47,6 +47,20 @@
           "return nil, cachedErr",
           "}",
           "}()"
+        ]
+      },
+      {
+        "block": "channel-monitor-probe-lane",
+        "note": "Channel monitor probe lane: a verified probe (monitorprobe.IsProbe) has no sticky session, and before a wait is planned it takes a free slot by real concurrency among the candidates (an account whose load factor is below its concurrency counts as full by load rate while it still has free slots); a probe skips the routed wait and goes on to the whole group. A group that is really full still waits. Requests without the probe mark are scheduled unchanged.",
+        "removed": [
+          "for _, item := range routingAvailable {"
+        ],
+        "added": [
+          "sessionHash = monitorProbeSessionHash(ctx, sessionHash)",
+          "for _, item := range monitorProbeRoutedWait(ctx, routingAvailable) {",
+          "if probeResult, ok, probeErr := s.monitorProbeFreeSlot(ctx, candidates, groupID, preferOAuth); probeErr != nil || ok {",
+          "return probeResult, probeErr",
+          "}"
         ]
       }
     ],
@@ -271,6 +285,14 @@
           "return false, reason",
           "return selection, decision, capabilitySelectionError(ctx, err)"
         ]
+      },
+      {
+        "block": "channel-monitor-probe-lane",
+        "note": "Channel monitor probe lane: a verified probe (monitorprobe.IsProbe) has no sticky session, and before a wait is planned it takes a free slot by real concurrency among the candidates (an account whose load factor is below its concurrency counts as full by load rate while it still has free slots); a probe skips the routed wait and goes on to the whole group. A group that is really full still waits. Requests without the probe mark are scheduled unchanged.",
+        "removed": [],
+        "added": [
+          "sessionHash = monitorProbeSessionHash(ctx, sessionHash)"
+        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [
@@ -462,6 +484,22 @@
           "filterStats.exclude(reason)",
           "defer func() { selectionErr = capabilitySelectionError(ctx, selectionErr) }()",
           "return nil, noAvailableOpenAISelectionError(requestedModel, false, filterStats.summary(\"\"), filterStats.capabilityOnly())"
+        ]
+      },
+      {
+        "block": "channel-monitor-probe-lane",
+        "note": "Channel monitor probe lane: a verified probe (monitorprobe.IsProbe) has no sticky session, and before a wait is planned it takes a free slot by real concurrency among the candidates (an account whose load factor is below its concurrency counts as full by load rate while it still has free slots); a probe skips the routed wait and goes on to the whole group. A group that is really full still waits. Requests without the probe mark are scheduled unchanged.",
+        "removed": [],
+        "added": [
+          "if monitorProbeRequest(c) {",
+          "return \"\"",
+          "}",
+          "if monitorProbeRequest(c) {",
+          "return \"\"",
+          "}",
+          "if selection, selectErr := openAIMonitorProbeFreeSlot(ctx, tryAcquireFromLoadMap); selectErr != nil || selection != nil {",
+          "return selection, selectErr",
+          "}"
         ]
       }
     ],

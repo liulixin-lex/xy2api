@@ -375,8 +375,10 @@ def checks(evidence: str, started_at: str, cycle_minutes: int = 60) -> dict:
             result["other_stack_activity"] = [json.loads(line) for line in source if line.strip()]
         io_steps = []
         for activity in result["other_stack_activity"]:
+            if activity["event"] != "upgrade_end":
+                continue  # Orchestrator status events need no evidence directory.
             report = os.path.join(activity["evidence"], "REPORT.json")
-            if activity["event"] == "upgrade_end" and os.path.exists(report):
+            if os.path.exists(report):
                 with open(report) as source:
                     io_steps.extend(s for s in json.load(source)["steps"] if s["step"] in (
                         "synthetic data fill begins", "synthetic production-sized data", "backup and restore begins", "backup and restore"))

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
 
@@ -47,8 +48,8 @@ func (t *openAIRawStreamTerminalState) ObserveDataLine(payload string) {
 	}
 	t.sawDataLine = true
 	if t.strict && gjson.Valid(payload) {
-		err := gjson.Get(payload, "error")
-		if (err.Exists() && err.Type != gjson.Null) || gjson.Get(payload, "type").String() == "error" {
+		root := gjson.Parse(payload)
+		if resilience.ChatErrorField(root) || root.Get("type").String() == "error" {
 			if t.failurePayload == "" {
 				t.failurePayload = payload
 			}

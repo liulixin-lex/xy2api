@@ -96,6 +96,14 @@ GROUPS: dict[str, tuple[str, list[tuple[str, str, int]], dict]] = {
     "G-stream-only": ("openai", [("so-a", "F36", 1), ("so-b", "F00;tag=so-b", 2)], {}),
     "G-retry-advice": ("openai", [("ra-only", "F37;delay=20;reset=8", 1)], {}),
     "G-retry-alternative": ("openai", [("ra-a", "F37;delay=20;reset=8", 1), ("ra-b", "F00;tag=ra-b", 2)], {"separate_hosts": True}),
+    # 0.4.5 supplemental paths. These accounts are kept separate from the
+    # ordinary fixtures so the API-key passthrough gate is explicit and can
+    # be restored without changing a production-shaped account.
+    "G-qa-passthrough": ("openai", [("qa-pt-a", "F17;first=45;tag=qa-pt-a", 1), ("qa-pt-b", "F00;first=0.05;tag=qa-pt-b", 2)],
+                         {"openai_passthrough": True, "separate_hosts": True}),
+    "G-qa-f38": ("openai", [("qa-f38", "F38;outcome=failed;code=busy", 1)], {}),
+    "G-qa-f39": ("anthropic", [("qa-f39", "F39", 1)],
+                 {"allow_messages_dispatch": True, "default_mapped_model": "claude-sonnet-5-5"}),
     "G-anthropic-empty": ("anthropic", [], {}),
     "G-codex-empty": ("openai", [], {}),
     "G-queue-terminal-holder": ("openai", [("qt-holder", "F17;first=60;tag=qt-holder", 1)], {}),
@@ -197,9 +205,13 @@ def items(data):
 def main() -> int:
     base = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:18210"
     soak_only = "--soak-only" in sys.argv[2:]
-    groups_spec = {k: v for k, v in GROUPS.items() if k.startswith("G-soak-")} if soak_only else GROUPS
+    qa_only = "--qa-only" in sys.argv[2:]
+    if soak_only and qa_only:
+        raise SystemExit("choose only one fixture subset")
+    prefix = "G-soak-" if soak_only else "G-qa-" if qa_only else None
+    groups_spec = {k: v for k, v in GROUPS.items() if k.startswith(prefix)} if prefix else GROUPS
     owner = "stg-soak@xy2api-staging.local" if soak_only else "stg-user@xy2api-staging.local"
-    users_spec = {owner: 1000.0} if soak_only else USERS
+    users_spec = {owner: 1000.0} if soak_only or qa_only else USERS
     api = API(base)
     api.token = api.login(os.environ["ADMIN_EMAIL"], os.environ["ADMIN_PASSWORD"])
     # The admin compliance commitment is accepted only when the operator has
@@ -214,7 +226,7 @@ def main() -> int:
     for n in (1, 2, 3):
         if os.environ.get(f"REAL{n}_BASE_URL") and os.environ.get(f"REAL{n}_API_KEY"):
             real[f"REAL{n}"] = (os.environ[f"REAL{n}_BASE_URL"], os.environ[f"REAL{n}_API_KEY"])
-    if len(real) == 3 and not soak_only:
+    if len(real) == 3 and not soak_only and not qa_only:
         for name, (accounts, opts) in REAL_GROUPS.items():
             GROUPS[name] = ("openai", accounts, opts)
 
@@ -256,6 +268,12 @@ def main() -> int:
                 if spec not in real and (stale or (platform == "openai" and not raw_chat and extra.get("openai_responses_supported") is False)):
                     api.call("PUT", f"/api/v1/admin/accounts/{existing[aname]['id']}",
                              {"credentials": {"api_key": "sk-fault-" + aname, "base_url": want_base}})
+                if gopts.get("openai_passthrough") and extra.get("openai_passthrough") is not True:
+                    # Merge this fixture's marker instead of replacing any
+                    # unrelated account metadata owned by the staging stack.
+                    merged_extra = dict(extra)
+                    merged_extra["openai_passthrough"] = True
+                    api.call("PUT", f"/api/v1/admin/accounts/{existing[aname]['id']}", {"extra": merged_extra})
                 continue
             if spec in real:
                 credentials = {"api_key": real[spec][1], "base_url": real[spec][0]}
@@ -265,8 +283,13 @@ def main() -> int:
             body = {"name": aname, "platform": platform, "type": "apikey",
                     "credentials": credentials,
                     "group_ids": [groups[gname]["id"]], "concurrency": gopts.get("concurrency", 20), "priority": priority}
+            extra = {}
             if spec.startswith("F35"):
-                body["extra"] = {"openai_responses_supported": False}
+                extra["openai_responses_supported"] = False
+            if gopts.get("openai_passthrough"):
+                extra["openai_passthrough"] = True
+            if extra:
+                body["extra"] = extra
             existing[aname] = api.call("POST", "/api/v1/admin/accounts", body)
 
     users = {u["email"]: u for u in items(api.call("GET", "/api/v1/admin/users?page=1&page_size=200"))}
@@ -279,7 +302,7 @@ def main() -> int:
             users[email] = api.call("POST", "/api/v1/admin/users",
                                     {"email": email, "password": password, "balance": balance,
                                      "concurrency": 1 if email == "stg-queue-terminal@xy2api-staging.local" else 100})
-        else:
+        elif not qa_only:
             api.call("POST", f"/api/v1/admin/users/{users[email]['id']}/balance",
                      {"balance": balance, "operation": "set", "notes": "staging fixtures"})
     user_token = api.login(owner, keys["users"][owner])
@@ -289,7 +312,7 @@ def main() -> int:
         if kname not in have:
             have[kname] = api.call("POST", "/api/v1/keys", {"name": kname, "group_id": groups[gname]["id"]}, token=user_token)
         keys["keys"][gname] = have[kname]["key"]
-    if not soak_only:
+    if not soak_only and not qa_only:
         small = "stg-small@xy2api-staging.local"
         small_token = api.login(small, keys["users"][small])
         have_small = {k["name"]: k for k in items(api.call("GET", "/api/v1/keys?page=1&page_size=200", token=small_token))}
