@@ -6,6 +6,16 @@
 
 ## 当前交接状态
 
+### 分组分类（2026-10-22；PR #127 已开，未发版、未部署）
+
+- 内容：
+  - 分组可以设置多个自定义分类，分组管理页新增“管理分类”按钮。
+  - 创建、编辑分组时勾选分类；分组列表新增“分类”列和分类筛选。
+  - 账号侧分组选择框按分类分成标签；点账号的分组单元格会弹出居中的编辑弹窗；账号列表新增分类筛选。
+  - 迁移 278 新增两张表，不改 `groups`、ent、DTO 和鉴权快照，不影响路由、调度、计费和用户端。
+- 状态：[PR #127](https://github.com/liulixin-lex/xy2api/pull/127)（2026-10-22T15:28Z 开）。本地门禁、本机集成测试、独立审查和本机端到端 43/43 全部通过；CI 以 GitHub 为准。合并由另一位作者操作；发版与部署需另行授权。
+- 详情：“进行中的工作”的 `20261022-group-categories`。
+
 ### 使用记录“平均TPS”与指标公开按钮（2026-10-21；PR #121 已开，未发版、未部署）
 
 - 内容：使用记录“延迟”列改为“平均TPS N t/s”；“功能开关 → 管理员使用记录”两项指标的开关左边各加一个公开按钮（打开 = 公开，关闭 = 仅管理员可见，缺省关闭）。无迁移。
@@ -165,6 +175,26 @@
   - 分类只用于管理端整理，不影响路由、调度、计费和用户端。
 - 分支：`feat/group-categories-20261022`（工作树 `xy2api-wt/group-categories`，自 origin/main `e7fe4a8e9`）。
 - 授权：用户批准方案并要求改代码；按惯例止于开 PR、CI 全绿，不合并、不发版、不部署。同批的分组并发与缓存率另开 PR（`20261022-group-concurrency-cache`）。
+- 实现：
+  - Codex（gpt-6-astra）在协调者审查下完成：功能提交 `72d1b0e8a`，审查修复 `26dc57e02`。中途因额度上限中断过一次，接续时保留了已有改动。
+  - 新文件：`service/group_category.go`、`repository/group_category_repo.go`、`handler/admin/group_category_handler.go`、`server/routes/group_categories.go`，以及前端 store、composable、分类组件、账号分组弹窗。
+  - 具名补丁 `xy-group-categories`；新文档 [`GROUP_CATEGORIES.md`](GROUP_CATEGORIES.md)。
+- 审查：两名只读审查员（正确性；隔离与上游同步）都没有发现 P0、P1、P2 级问题。6 个 P3 已修：
+  - 分类加载完成前的勾选会被覆盖；
+  - 加载失败后不能重试；
+  - 方向键切换标签会误关当前标签；
+  - 测试文件和列表高度改成只加行，不改上游原有行；
+  - 补登记处理器注入那一行；
+  - 文档补上错误码。
+  - Codex 为本机集成测试改过上游的 `integration_harness_test.go`，已撤回，另存为仓库外的仅测试补丁。
+- 本地验证：
+  - 后端：gofmt、四种 vet、`-tags=unit` 全量（22,094 项通过，17 项条件跳过）、golangci-lint。
+  - 前端：全量 428 个文件 3,260 项、typecheck、lint、i18n、build。
+  - 仓库工具：文档一致性、scheduler-diff、tools 41 项、干净树 audit。
+  - 集成测试：本机临时 PostgreSQL 与 Redis，分类 4 项、分组 38 项、账号 53 项通过。
+  - 本机端到端：43/43 通过，报告在仓库外 artifacts `group-categories-20261022/e2e/REPORT.md`。
+- PR：[#127](https://github.com/liulixin-lex/xy2api/pull/127)。
+- 下一步：CI 全绿后交给另一位作者审查合并；发版、部署另行授权。与 PR #126 都改了 `GroupsView.columnSettings.spec.ts`、`policy.json` 末尾和本记忆，后合并的一方需要处理冲突。
 
 ### 20261022-pr121-main-integration — PR #121 合入最新 main 与合并验证
 
@@ -1282,3 +1312,18 @@ pnpm --dir frontend run build
 - 按用户经 PM 08:15Z 的授权，在独立临时分支从 PR #121 原 head `57f30f2ac` 合入 main `cfb4fae48`；唯一冲突为本记忆，两边新增条目与历史日志均完整保留。两个 dashboard 文案文件自动合并，没有手工修改产品代码，差异范围仍为 PR 原有 29 文件。
 - 本地验证：文档一致性、scheduler-diff 通过；Go 1.27.3（GOMAXPROCS=2、GOFLAGS=-p=2）build、unit vet、PR 指定四项设置测试通过；service/handler/server/web 共 10 包 unit 21060 项通过、14 项条件跳过、零失败。pnpm 9 冻结依赖安装、typecheck、lint、414 文件/3192 项测试、build（含 i18n）全部通过。
 - 下一步：提交后复验文档与干净树 audit，普通推送；固定 HEAD 的 push/PR CI 与安全扫描全绿后常规合并，再核对 main CI 并移除临时树。仅已知 7.6 用例允许单次重跑；最终远端事实与清理记录写仓库外 PROGRESS_A。不涉及发版、生产或 Git 配置变更。
+
+### 2026-10-22T15:30Z — `20261022-group-categories` — PR #127 已开
+
+- 请求/目标：分组可以设置自定义分类，创建和编辑分组时勾选；账号侧分组选择框按分类分成标签；点账号的分组单元格快速改分组；顺带做分组列表的分类列和筛选、账号列表的分类筛选。
+- 开始状态：工作树 `xy2api-wt/group-categories`，分支 `feat/group-categories-20261022`，自 origin/main `e7fe4a8e9`。
+- 完成操作：
+  - 迁移 278 新增两张表。
+  - 新增分类管理接口；分组和账号列表加 `group_category` 筛选，经请求上下文传入。
+  - 前端：管理弹窗、分类字段、列与筛选、分类标签、账号分组弹窗。
+  - 登记具名补丁，补写文档。
+  - 实现由 Codex（gpt-6-astra）完成；协调者组织独立审查，Codex 修复全部 6 个 P3，并撤回越界的测试框架改动。
+- 修改文件：`72d1b0e8a`、`26dc57e02`，共 83 个文件；另有本记忆。
+- 验证：见进行中条目；本机集成测试与端到端 43/43 通过。未连接任何服务器。
+- 卡点/风险：仓库集成测试框架强制使用 Docker，本机只能借仓库外的仅测试补丁运行。
+- 下一步：CI 全绿后交给另一位作者审查合并；发版与部署另行授权。
