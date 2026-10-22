@@ -2471,6 +2471,11 @@
       "id": "xy-fallback-group-user-invisible",
       "path": "backend/internal/service/resilience_fallback_billing_test.go",
       "literal": "func TestOpenAIRecordUsageChargesTheTurnFlagFixedWhenItsTaskWasCreated"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/usageexport/caller_group_test.go",
+      "literal": "func TestTaskQueuedBeforeTheUpgradeKeepsItsScopeGroupView"
     }
   ]
 }
