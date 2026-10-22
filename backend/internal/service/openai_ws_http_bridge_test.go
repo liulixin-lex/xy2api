@@ -1312,7 +1312,7 @@ func TestProxyOpenAIWSHTTPBridgeSharedPreludeBoundary(t *testing.T) {
 	t.Cleanup(func() { resilience.Publish(before) })
 	resilience.Publish(resilience.Defaults())
 	gin.SetMode(gin.TestMode)
-	for _, event := range []string{"response.queued", "codex.response.metadata"} {
+	for _, event := range []string{"response.queued", "response.metadata", "codex.response.metadata"} {
 		t.Run(event, func(t *testing.T) {
 			body := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_boundary\"}}\n\n" + "data: {\"type\":\"" + event + "\"}\n\n" +
 				"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"busy\"}}}\n\n"
@@ -1328,7 +1328,7 @@ func TestProxyOpenAIWSHTTPBridgeSharedPreludeBoundary(t *testing.T) {
 				return nil
 			})
 			var failover *UpstreamFailoverError
-			if event == "response.queued" {
+			if event == "response.queued" || event == "response.metadata" {
 				require.ErrorAs(t, err, &failover)
 				require.Empty(t, writes)
 			} else {

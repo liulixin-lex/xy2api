@@ -226,8 +226,8 @@ API 路径（`/v1*`、`/v1beta*`、`/responses*`）的 `handle_errors` 返回 JS
 
 | 开关 | 关闭后的行为 |
 |---|---|
-| `stream.prelude_staging` | 兼容转换收到上游 `response.created` 就写开场，之后不再换号；0.4.5 起 Gateway 入站经 Anthropic 上游的 Responses 与 Chat 收到 `message_start` 就写开场 |
-| `stream.native_prelude_whitelist` | 原生 Responses 的开场只认 `response.created`、`response.in_progress`、`keepalive` |
+| `stream.prelude_staging` | 兼容转换收到上游 `response.created` 就写开场，之后不再换号（`response.metadata` 也就不再按开场暂存）；0.4.5 起 Gateway 入站经 Anthropic 上游的 Responses 与 Chat 收到 `message_start` 就写开场 |
+| `stream.native_prelude_whitelist` | 原生 Responses 的开场只认 `response.created`、`response.in_progress`、`keepalive`；0.4.6 起 `response.metadata`（原生与兼容转换）回到算输出、到达即解除首输出截止 |
 | `stream.strict_terminal` | raw Chat 透传的 `error` 后跟 `[DONE]` 当成功处理；0.4.5 起 Gateway 入站经 Anthropic 上游的断流与 EOF 合成为成功，OpenAI Responses 透传不设首输出截止与停滞检测 |
 | `failure.decision_v2` | 旧分类：Grok 空闲、raw 429、“服务忙”类文案按容量降载处理；仅流式拒绝只学习，本请求返回 400。分类输入的证据补全保留，个别运维分类可能与 0.4.3 不同 |
 | `errors.failed_frame_retry_after` | 合成的 `response.failed` 不带 `error.headers`，正文与 0.4.3 相同（0.4.4 的 RA-1 场景因此恢复 “try again in Ns”）；0.4.5 起也不再采用上游给出的等待时间。这只回退重试提示，不代表其他行为回到 0.4.3 |
