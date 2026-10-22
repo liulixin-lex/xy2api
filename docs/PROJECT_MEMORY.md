@@ -6,6 +6,12 @@
 
 ## 当前交接状态
 
+### 使用记录“平均TPS”与指标公开按钮（2026-10-21；PR #121 已开，未发版、未部署）
+
+- 内容：使用记录“延迟”列改为“平均TPS N t/s”；“功能开关 → 管理员使用记录”两项指标的开关左边各加一个公开按钮（打开 = 公开，关闭 = 仅管理员可见，缺省关闭）。无迁移。
+- 状态：[PR #121](https://github.com/liulixin-lex/xy2api/pull/121)（2026-10-21T18:08Z 开），本地验证全绿；CI 结果以 GitHub 为准。用户已于 2026-10-22 经 PM 08:15Z 授权合并，α 正在集成最新 main 并复验；发版与生产部署需另行授权。
+- 详情：“进行中的工作”的 `20261021-usage-tps-public`。
+
 ### XY2API 0.4.5 正式发布完成（2026-10-22；生产未部署）
 
 - 发布：`v0.4.5`（annotated 对象 `493133ed3`）→ main 合并提交 `0d8e4920e`（[PR #122](https://github.com/liulixin-lex/xy2api/pull/122)，头 `86607a8f4`，两者源码树相同）。Release run 39708586766 成功。产物核验通过：6 个附件（199,047,660 字节）双 SHA 一致；五个平台 `vcs.revision=0d8e4920e`、`vcs.modified=false`，含前端产物；GHCR 双架构 index `sha256:391fbdc5…`，version、revision、source 标签正确；`latest`、`0`、`0.4` 指向 0.4.5，`0.3` 不变。tag 消息的主题行后少了一个空行，Release 工作流因此丢了介绍段，Release 正文已手工补齐，tag 不动。tag 触发的 CI 有一个已知偶发用例失败，见 tasks 的“发布记录”。
@@ -141,6 +147,25 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
+
+### 20261022-pr121-main-integration — PR #121 合入最新 main 与合并验证
+
+- 请求/授权：用户经 PM 2026-10-22T08:15Z 授权合并 PR #121，先把 main `cfb4fae48` 合入固定 head `57f30f2ac`；普通推送、两组 CI 与安全扫描全绿后按固定 HEAD 常规合并。
+- 范围：独立临时分支 `tmp/merge-pr121-045-20261022`；仅处理本记忆的预期冲突，保留双方条目，其他冲突或新检查失败停止报告。原有工作树保持不变。
+- 验证计划：文档一致性、干净树 audit、scheduler-diff；Go 1.27.3 的 build、unit vet、PR 列出的设置测试及 service/handler/server/web 全包 unit；pnpm 9 的 install、typecheck、lint、test、build。
+- 状态/下一步：本地合入 main，仅本记忆冲突且双方条目与历史完整保留；产品代码与 dashboard 文案由 Git 自动合并。指定检查已通过：文档一致性、scheduler-diff、后端 build/vet、四项设置测试、四类包 unit（10 包、21060 项通过、14 条件跳过），前端 pnpm 9 install/typecheck/lint/test/build（414 文件、3192 项通过）。提交合并后还需在干净 HEAD 复验文档与 audit，随后普通推送、固定 HEAD 双事件检查全绿再常规合并；最终 SHA、远端 CI 与清理事实写仓库外 PROGRESS_A，以 GitHub 为准。
+- 边界：7.6 心跳断连测试任一子例允许单次失败作业重跑，其他失败停止；不发版、不部署、不修改 Git 配置。
+
+### 20261021-usage-tps-public — 使用记录“平均TPS”与指标公开按钮（2026-10-21 登记）
+
+- 请求（用户 2026-10-21）：后台使用记录“延迟”列的“平均输出速率 N tokens/s”改为“平均TPS N t/s”；系统设置“功能开关 → 管理员使用记录”卡片里，两项指标的开关左边各加一个公开按钮：打开 = 公开（普通用户的使用记录也显示），关闭 = 仅管理员可见（默认）。不加第三个开关。
+- 范围：新设置键 `usage_cache_hit_rate_public`、`usage_token_speed_public`（默认 false）；公开设置只给出生效值 `user_usage_cache_hit_rate_enabled`、`user_usage_token_speed_enabled`（显示开关与公开按钮都打开才为 true），用户使用记录页据此显示。无迁移，用量数据与接口字段不变。
+- 分支：`feat/usage-tps-public-metrics-20261021`（自 main `a1cf8f104`），功能提交 `9a4e2bef7`；文档 [`USAGE_METRICS.md`](USAGE_METRICS.md)“平均TPS”“显示与公开”已同步。
+- 授权：用户要求改代码；按惯例止于开 PR、CI 全绿，不合并、不发版、不部署。
+- 本地验证：新测试先红（25 项）后绿；前端全量 413 个文件 3190 项、typecheck、lint、build 通过；后端 Go 1.27.3 `-tags=unit` 的 service、handler、server、web 共 10 个包通过，go vet、gofmt、golangci-lint v2.14.0（0 项）通过；文档一致性、`scheduler-diff`、`tools/tests` 41 项通过。
+- PR：[#121](https://github.com/liulixin-lex/xy2api/pull/121)（2026-10-21T18:08Z 开）。
+- 授权更新（2026-10-22，PM 08:15Z）：用户已授权合并；α 先合入最新 main 并完成指定验证，随后普通推送、检查全绿后常规合并。原授权与历史日志保留，发版和部署仍需单独授权。
+- 下一步（PM 2026-10-22T08:15Z 更新）：α 完成最新 main 集成和指定本地检查后，普通推送，核对 push/PR 两组 CI 与安全扫描全绿，再以固定 HEAD 常规合并；远端进展见 GitHub 与仓库外 PROGRESS_A。发版与生产部署另行授权。
 
 ### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（PR #120 已合入 main，进入下一个版本；待真实上游验证；2026-10-22 DOCS 更新状态）
 
@@ -1196,6 +1221,19 @@ pnpm --dir frontend run build
 - 验证与证据：本次文档提交后仅复验 `check_docs_consistency.py` 与干净树 `sync.py audit`；最终 SHA、退出码、相对 `0c31b5b38` 的测试/文档差异，以及相对 `e9c686e84` 的代码/测试零差异，统一写仓库外 `PROGRESS_A`、`PATCH_REQUESTS` 与 `evidence/integ-045/heapfix-e9c686e84/`。QA 继续验证原镜像候选，不重建、不重新浸泡。
 - 卡点/下一步：没有产品代码新增问题；本轮最后两项若有新失败停止报 PM，不修。通过后本地树冻结并待命，推送、PR 与发布等用户决定，生产部署未授权。
 
+### 2026-10-21T18:07Z — `20261021-usage-tps-public` — 本地完成，推送并开 PR
+
+- 请求/目标：用户 2026-10-21（附截图）：使用记录“延迟”列改为“平均TPS N t/s”；“功能开关 → 管理员使用记录”两项指标的开关左边各加一个公开按钮，打开 = 公开，关闭 = 仅管理员可见（用户明确不要第三个开关）。
+- 开始状态：本地检出原在 `feat/account-recent-health-20261019` 且落后远端；`git fetch` 后自 main `a1cf8f104`（0.4.4 发布后）建 `feat/usage-tps-public-metrics-20261021`，工作树干净。
+- 完成操作：
+  - 文案：`formatTokenSpeed` 后缀改为 `t/s`；`usage.outputTps` 改为“平均TPS”/“Avg TPS”；设置卡片改为“显示平均TPS”，单位 t/s。运维页与渠道监控的 tokens/s 不变。
+  - 公开按钮：新键 `usage_cache_hit_rate_public`、`usage_token_speed_public`（缺省 false，管理接口部分更新保留旧值）；公开设置与页面注入只给生效值 `user_usage_cache_hit_rate_enabled`、`user_usage_token_speed_enabled`（显示开关与公开按钮都打开）；用户使用记录页按它传 `UsageTable` 的两个 prop。按钮只有两种状态、不置灰，样式沿用同页模式按钮。
+  - 无迁移；用户接口字段不变（本来就返回 Token 与耗时），只改页面是否展示。
+- 修改文件：后端设置常量、解析、写入、视图、DTO、管理与公开处理器及其测试、API 契约夹具；前端 `usageMetrics.ts`、`SettingsView.vue`、用户 `UsageView.vue`、类型与 app store 兜底、中英文案及对应测试；`docs/USAGE_METRICS.md`。
+- 验证：见“进行中的工作”本条；`sync.py audit` 在提交后的干净树执行。
+- 卡点/风险：无。生产仍为旧版本，本改动随下次发版才上线。
+- 下一步：推送、开 PR、等 CI 全绿；不合并、不发版、不部署。
+
 ### 2026-10-22T03:16:51Z — `20261022-pr120-release045-integration` — 合入已发布的 main，四项本地检查通过
 
 - 请求/目标：执行 PM 00:55Z 的 B，临时工作树集成 #120；PM 02:30Z 允许指定心跳断连用例的失败作业单次重跑，其余新失败停止。
@@ -1221,3 +1259,8 @@ pnpm --dir frontend run build
 - 卡点/风险：无。生产部署 0.4.4、0.4.5 都未授权。
 - 下一步：α 推送并开收尾 PR，CI 全绿后合并。0.4.6 待办见 tasks §7（7.2、7.3、7.5、7.6）。
 
+### 2026-10-22T09:19Z — `20261022-pr121-main-integration` — main 集成与指定本地检查通过
+
+- 按用户经 PM 08:15Z 的授权，在独立临时分支从 PR #121 原 head `57f30f2ac` 合入 main `cfb4fae48`；唯一冲突为本记忆，两边新增条目与历史日志均完整保留。两个 dashboard 文案文件自动合并，没有手工修改产品代码，差异范围仍为 PR 原有 29 文件。
+- 本地验证：文档一致性、scheduler-diff 通过；Go 1.27.3（GOMAXPROCS=2、GOFLAGS=-p=2）build、unit vet、PR 指定四项设置测试通过；service/handler/server/web 共 10 包 unit 21060 项通过、14 项条件跳过、零失败。pnpm 9 冻结依赖安装、typecheck、lint、414 文件/3192 项测试、build（含 i18n）全部通过。
+- 下一步：提交后复验文档与干净树 audit，普通推送；固定 HEAD 的 push/PR CI 与安全扫描全绿后常规合并，再核对 main CI 并移除临时树。仅已知 7.6 用例允许单次重跑；最终远端事实与清理记录写仓库外 PROGRESS_A。不涉及发版、生产或 Git 配置变更。

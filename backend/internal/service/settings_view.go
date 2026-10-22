@@ -201,6 +201,9 @@ type SystemSettings struct {
 	// Admin-only usage display switches (default: enabled).
 	AdminUsageCacheHitRateEnabled bool `json:"admin_usage_cache_hit_rate_enabled"`
 	AdminUsageTokenSpeedEnabled   bool `json:"admin_usage_token_speed_enabled"`
+	// Also show an enabled metric to regular users (default: admin only).
+	UsageCacheHitRatePublic bool `json:"usage_cache_hit_rate_public"`
+	UsageTokenSpeedPublic   bool `json:"usage_token_speed_public"`
 
 	// Channel Monitor feature
 	ChannelMonitorEnabled                bool   `json:"channel_monitor_enabled"`
@@ -427,6 +430,10 @@ type PublicSettings struct {
 
 	// 允许终端用户在用量页查看自己的失败请求
 	AllowUserViewErrorRequests bool `json:"allow_user_view_error_requests"`
+
+	// 用户使用记录是否显示缓存读取占比与平均 TPS：显示开关与公开按钮都打开才为 true
+	UserUsageCacheHitRateEnabled bool `json:"user_usage_cache_hit_rate_enabled"`
+	UserUsageTokenSpeedEnabled   bool `json:"user_usage_token_speed_enabled"`
 }
 
 type LoginAgreementDocument struct {

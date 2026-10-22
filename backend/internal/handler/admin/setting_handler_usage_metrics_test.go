@@ -67,3 +67,57 @@ func TestAdminUsageMetricsSettings(t *testing.T) {
 		require.NotContains(t, string(encoded), "AdminUsage")
 	}
 }
+
+func TestUsageMetricsPublicSettings(t *testing.T) {
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{})
+	read := func() map[string]any {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings", nil)
+		h.GetSettings(c)
+		require.Equal(t, http.StatusOK, rec.Code)
+		var body struct {
+			Data map[string]any `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		return body.Data
+	}
+	const cacheKey = "usage_cache_hit_rate_public"
+	const speedKey = "usage_token_speed_public"
+	initial := read()
+	require.Equal(t, false, initial[cacheKey])
+	require.Equal(t, false, initial[speedKey])
+	for _, cache := range []bool{false, true} {
+		for _, speed := range []bool{false, true} {
+			rec := doUpdateSettings(t, h, map[string]any{cacheKey: cache, speedKey: speed}, nil)
+			require.Equal(t, http.StatusOK, rec.Code)
+			var body struct {
+				Data map[string]any `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			require.Equal(t, cache, body.Data[cacheKey])
+			require.Equal(t, speed, body.Data[speedKey])
+			fetched := read()
+			require.Equal(t, cache, fetched[cacheKey])
+			require.Equal(t, speed, fetched[speedKey])
+		}
+	}
+	// A partial save must not make the other metric admin-only again.
+	require.Equal(t, http.StatusOK, doUpdateSettings(t, h, map[string]any{cacheKey: true, speedKey: true}, nil).Code)
+	require.Equal(t, http.StatusOK, doUpdateSettings(t, h, map[string]any{cacheKey: false}, nil).Code)
+	require.Equal(t, "false", repo.values[service.SettingKeyUsageCacheHitRatePublic])
+	require.Equal(t, "true", repo.values[service.SettingKeyUsageTokenSpeedPublic])
+	require.Equal(t, http.StatusOK, doUpdateSettings(t, h, map[string]any{"site_name": "Metrics fixture"}, nil).Code)
+	require.Equal(t, true, read()[speedKey])
+	require.Equal(t, http.StatusBadRequest, doUpdateSettings(t, h, map[string]any{speedKey: "true"}, nil).Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyUsageTokenSpeedPublic])
+	// Public payloads carry only the effective user switches, never the raw admin choices.
+	for _, public := range []any{dto.PublicSettings{}, service.PublicSettings{}, service.PublicSettingsInjectionPayload{}} {
+		encoded, err := json.Marshal(public)
+		require.NoError(t, err)
+		require.NotContains(t, string(encoded), cacheKey)
+		require.NotContains(t, string(encoded), speedKey)
+		require.Contains(t, string(encoded), `"user_usage_cache_hit_rate_enabled":false`)
+		require.Contains(t, string(encoded), `"user_usage_token_speed_enabled":false`)
+	}
+}

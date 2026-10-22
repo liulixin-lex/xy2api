@@ -383,6 +383,8 @@ export const useAppStore = defineStore('app', () => {
         service_quota_enabled: false,
         affiliate_enabled: false,
         allow_user_view_error_requests: false,
+        user_usage_cache_hit_rate_enabled: false,
+        user_usage_token_speed_enabled: false,
       })
     }
 
