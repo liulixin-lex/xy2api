@@ -62,11 +62,15 @@ export default {
       features: {
         usageMetrics: {
           title: '管理员使用记录',
-          description: '控制管理员使用记录中的指标显示，不影响统计与计费。',
+          description: '控制使用记录中的指标显示，不影响统计与计费。打开“公开”后，普通用户的使用记录也显示该指标。',
           cacheHitRate: '显示缓存读取占比',
           cacheHitRateHint: '在 Token 列显示缓存读取占全部输入的计费用量比例。强制缓存计费会影响此比例。',
-          tokenSpeed: '显示平均输出速率',
-          tokenSpeedHint: '在延迟列显示输出 Token ÷ 请求总耗时（含首 Token 等待），单位 tokens/s。',
+          tokenSpeed: '显示平均TPS',
+          tokenSpeedHint: '在延迟列显示输出 Token ÷ 请求总耗时（含首 Token 等待），单位 t/s。',
+          visibilityPublic: '公开',
+          visibilityAdminOnly: '仅管理员可见',
+          visibilityPublicHint: '普通用户的使用记录也显示此指标。点击改为仅管理员可见。',
+          visibilityAdminOnlyHint: '只在管理员使用记录显示此指标。点击公开给普通用户。',
         },
         channelMonitor: {
           title: '渠道监控',

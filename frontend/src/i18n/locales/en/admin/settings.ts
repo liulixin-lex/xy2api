@@ -62,11 +62,15 @@ export default {
       features: {
         usageMetrics: {
           title: 'Admin usage records',
-          description: 'Control metrics shown in admin usage records without changing collection or billing.',
+          description: 'Control metrics shown in usage records without changing collection or billing. A Public metric is also shown to regular users in their usage records.',
           cacheHitRate: 'Show cache read share',
           cacheHitRateHint: 'Show cache read tokens as a share of all input billing tokens in the Token column. Forced cache billing affects this ratio.',
-          tokenSpeed: 'Show average output rate',
-          tokenSpeedHint: 'Show output tokens ÷ total request duration, including first-token wait, in the latency column. Unit: tokens/s.',
+          tokenSpeed: 'Show average TPS',
+          tokenSpeedHint: 'Show output tokens ÷ total request duration, including first-token wait, in the latency column. Unit: t/s.',
+          visibilityPublic: 'Public',
+          visibilityAdminOnly: 'Admins only',
+          visibilityPublicHint: 'Regular users also see this metric in their usage records. Click to make it admin-only.',
+          visibilityAdminOnlyHint: 'Only admin usage records show this metric. Click to make it public.',
         },
         channelMonitor: {
           title: 'Channel Monitor',

@@ -340,6 +340,8 @@ type UpdateSettingsRequest struct {
 	ClaudeCacheFallbackPolicy     json.RawMessage `json:"claude_cache_fallback_policy"`
 	AdminUsageCacheHitRateEnabled *bool           `json:"admin_usage_cache_hit_rate_enabled"`
 	AdminUsageTokenSpeedEnabled   *bool           `json:"admin_usage_token_speed_enabled"`
+	UsageCacheHitRatePublic       *bool           `json:"usage_cache_hit_rate_public"`
+	UsageTokenSpeedPublic         *bool           `json:"usage_token_speed_public"`
 
 	// Channel Monitor feature switch
 	ChannelMonitorEnabled                *bool   `json:"channel_monitor_enabled"`
@@ -1967,6 +1969,18 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.AdminUsageTokenSpeedEnabled
 		}(),
+		UsageCacheHitRatePublic: func() bool {
+			if req.UsageCacheHitRatePublic != nil {
+				return *req.UsageCacheHitRatePublic
+			}
+			return previousSettings.UsageCacheHitRatePublic
+		}(),
+		UsageTokenSpeedPublic: func() bool {
+			if req.UsageTokenSpeedPublic != nil {
+				return *req.UsageTokenSpeedPublic
+			}
+			return previousSettings.UsageTokenSpeedPublic
+		}(),
 		ChannelMonitorEnabled: func() bool {
 			if req.ChannelMonitorEnabled != nil {
 				return *req.ChannelMonitorEnabled
@@ -2485,6 +2499,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ClaudeCacheFallbackPolicy:            updatedSettings.ClaudeCacheFallbackPolicy,
 		AdminUsageCacheHitRateEnabled:        updatedSettings.AdminUsageCacheHitRateEnabled,
 		AdminUsageTokenSpeedEnabled:          updatedSettings.AdminUsageTokenSpeedEnabled,
+		UsageCacheHitRatePublic:              updatedSettings.UsageCacheHitRatePublic,
+		UsageTokenSpeedPublic:                updatedSettings.UsageTokenSpeedPublic,
 		ChannelMonitorEnabled:                updatedSettings.ChannelMonitorEnabled,
 		ChannelMonitorMode:                   updatedSettings.ChannelMonitorMode,
 		ChannelMonitorDefaultIntervalSeconds: updatedSettings.ChannelMonitorDefaultIntervalSeconds,

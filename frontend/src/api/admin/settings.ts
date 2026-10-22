@@ -743,6 +743,9 @@ export interface SystemSettings {
   // Admin-only usage display switches
   admin_usage_cache_hit_rate_enabled: boolean;
   admin_usage_token_speed_enabled: boolean;
+  // Also show an enabled metric in regular users' usage records
+  usage_cache_hit_rate_public: boolean;
+  usage_token_speed_public: boolean;
   // Channel Monitor feature switch
   channel_monitor_enabled: boolean;
   channel_monitor_mode?: 'v1' | 'v2';
@@ -1061,6 +1064,8 @@ export interface UpdateSettingsRequest {
   // Admin-only usage display switches
   admin_usage_cache_hit_rate_enabled?: boolean;
   admin_usage_token_speed_enabled?: boolean;
+  usage_cache_hit_rate_public?: boolean;
+  usage_token_speed_public?: boolean;
   // Channel Monitor feature switch
   channel_monitor_enabled?: boolean;
   channel_monitor_mode?: 'v1' | 'v2';

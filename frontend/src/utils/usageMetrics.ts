@@ -48,5 +48,5 @@ export function formatCacheHitRate(row: CacheTokenCounts & TokenMetricEligibilit
 
 export function formatTokenSpeed(row: OutputRateRow): string {
   const speed = tokenSpeed(row)
-  return speed == null ? '—' : `${speed.toFixed(1)} tokens/s`
+  return speed == null ? '—' : `${speed.toFixed(1)} t/s`
 }

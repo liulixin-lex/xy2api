@@ -753,6 +753,40 @@ describe("admin SettingsView payment visible method controls", () => {
     wrapper.unmount();
   });
 
+  const usageVisibilityLabel = (isPublic: boolean) =>
+    `admin.settings.features.usageMetrics.${isPublic ? "visibilityPublic" : "visibilityAdminOnly"}`;
+
+  it.each([[false, false], [true, false], [false, true], [true, true]])("loads, flips and saves the usage metric public buttons %s / %s", async (cache, speed) => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, usage_cache_hit_rate_public: cache, usage_token_speed_public: speed });
+    const wrapper = mountView();
+    await flushPromises();
+    const cacheButton = wrapper.get('[data-testid="usage-cache-hit-rate-public"]');
+    const speedButton = wrapper.get('[data-testid="usage-token-speed-public"]');
+    expect(cacheButton.text()).toBe(usageVisibilityLabel(cache));
+    expect(speedButton.text()).toBe(usageVisibilityLabel(speed));
+    await cacheButton.trigger("click");
+    await speedButton.trigger("click");
+    expect(cacheButton.text()).toBe(usageVisibilityLabel(!cache));
+    expect(speedButton.text()).toBe(usageVisibilityLabel(!speed));
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ usage_cache_hit_rate_public: !cache, usage_token_speed_public: !speed }));
+    wrapper.unmount();
+  });
+
+  it("keeps usage metrics admin-only for older settings responses and lets a hidden metric be made public", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, admin_usage_cache_hit_rate_enabled: false });
+    const wrapper = mountView();
+    await flushPromises();
+    const cacheButton = wrapper.get('[data-testid="usage-cache-hit-rate-public"]');
+    expect(cacheButton.text()).toBe(usageVisibilityLabel(false));
+    expect(wrapper.get('[data-testid="usage-token-speed-public"]').text()).toBe(usageVisibilityLabel(false));
+    expect(cacheButton.attributes("disabled")).toBeUndefined();
+    await cacheButton.trigger("click");
+    expect(cacheButton.text()).toBe(usageVisibilityLabel(true));
+    wrapper.unmount();
+  });
+
   it("submits the Codex ticket harvest toggle", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
