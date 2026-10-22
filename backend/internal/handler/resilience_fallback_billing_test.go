@@ -41,3 +41,16 @@ func TestBatchImageOwnerUnderFallbackCarriesTheBillingGroup(t *testing.T) {
 	require.NotNil(t, owner.BillingGroupID)
 	require.Equal(t, int64(10), *owner.BillingGroupID)
 }
+
+// The Responses WebSocket checks every response.create against the model
+// allow-list of the group the request was made for (PM decision Q1).
+func TestResponsesWebSocketAllowlistUnderFallbackIsTheOriginGroup(t *testing.T) {
+	c, authenticated := fallbackMovedContext(t)
+	moved, _ := middleware.GetAPIKeyFromContext(c)
+	require.Same(t, authenticated.Group, modelAllowlistGroup(c, moved))
+
+	plain, _ := gin.CreateTestContext(httptest.NewRecorder())
+	plain.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	require.Same(t, moved.Group, modelAllowlistGroup(plain, moved), "no fallback: the key's own group")
+	require.Nil(t, modelAllowlistGroup(plain, nil))
+}

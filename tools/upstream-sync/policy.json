@@ -234,6 +234,22 @@
   "required_literals": [
     {
       "path": "backend/internal/server/middleware/resilience_fallback.go",
+      "value": "if c.Request == nil || isModelListing(c) {"
+    },
+    {
+      "path": "backend/internal/server/middleware/group_model_allowlist.go",
+      "value": "apiKey = service.BillingAPIKey(c.Request.Context(), apiKey)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "blockedModelAllowlistCandidate(modelAllowlistGroup(c, apiKey), candidates)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "blockedModelAllowlistCandidate(modelAllowlistGroup(c, apiKey), requestmodel.FromBodyCandidates("
+    },
+    {
+      "path": "backend/internal/server/middleware/resilience_fallback.go",
       "value": "service.RememberAvailabilityFallbackOrigin(c.Request.Context(), apiKey)"
     },
     {
@@ -1614,6 +1630,21 @@
     "xy-resilience-v2-classification"
   ],
   "custom_patch_tests": [
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/server/middleware/resilience_fallback_test.go",
+      "literal": "func TestAvailabilityFallbackMiddlewareSkipsModelListings"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/server/middleware/resilience_fallback_test.go",
+      "literal": "func TestGroupModelAllowlistUnderFallbackUsesTheOriginGroup"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/handler/resilience_fallback_billing_test.go",
+      "literal": "func TestResponsesWebSocketAllowlistUnderFallbackIsTheOriginGroup"
+    },
     {
       "id": "xy-fallback-group-user-invisible",
       "path": "backend/internal/service/resilience_fallback_billing_test.go",
