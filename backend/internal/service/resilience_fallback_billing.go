@@ -59,3 +59,34 @@ func billingChannelFields(ctx context.Context, channels *ChannelService, served,
 	}
 	return out
 }
+
+// noteFallbackForcedFast is called where a group's forced Fast rewrites a
+// request to priority. When the request is under an availability fallback,
+// its client did not ask for priority and its own group does not force
+// Fast, only the fallback made it priority: the user is charged the standard
+// tier and the platform bears the difference (PM ruling on Q8).
+func noteFallbackForcedFast(ctx context.Context, account *Account, clientTier string) {
+	st := resilience.StateFrom(ctx)
+	origin, ok := st.FallbackOrigin().(*APIKey)
+	if !ok || origin == nil {
+		return
+	}
+	// A WebSocket connection keeps one state across turns: each forced
+	// rewrite records its own outcome.
+	switch normalizeBillingServiceTier(clientTier) {
+	case OpenAIFastTierPriority, "fast":
+		st.SetFallbackForcedFast(false)
+	default:
+		st.SetFallbackForcedFast(!groupForcesOpenAIFast(origin.Group, account))
+	}
+}
+
+// fallbackForcedFastChargesStandard reports a priority request whose
+// priority only the serving fallback group's forced Fast caused.
+func fallbackForcedFastChargesStandard(ctx context.Context, serviceTier string) bool {
+	switch normalizeBillingServiceTier(serviceTier) {
+	case OpenAIFastTierPriority, "fast":
+		return resilience.StateFrom(ctx).FallbackForcedFast()
+	}
+	return false
+}

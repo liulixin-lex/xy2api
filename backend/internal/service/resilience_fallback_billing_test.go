@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
@@ -327,4 +328,77 @@ func TestUserErrorRequestShowsTheKeyGroup(t *testing.T) {
 
 	e.APIKeyGroupName = ""
 	require.Equal(t, "GPT-企业专线", ToUserErrorRequest(e).GroupName, "a key without a group keeps the recorded group")
+}
+
+// PM ruling on Q8: priority that only the serving fallback group's forced
+// Fast caused, for a client that did not ask for it in a group that does not
+// force Fast, is charged at the standard tier. The platform bears the
+// difference: TotalCost and service_tier stay priority.
+func TestOpenAIRecordUsageUnderFallbackChargesForcedFastAtStandard(t *testing.T) {
+	inputPrice, outputPrice, fastMultiplier := 0.001, 0.002, 3.0
+	standardTotal := 100*inputPrice + 50*outputPrice
+	for _, tc := range []struct {
+		name         string
+		body         string
+		originForces bool
+		wantActual   float64
+	}{
+		{"client_did_not_ask", `{"model":"gpt-5.6-sol"}`, false, standardTotal},
+		{"client_asked_standard", `{"model":"gpt-5.6-sol","service_tier":"default"}`, false, standardTotal},
+		{"client_asked_priority", `{"model":"gpt-5.6-sol","service_tier":"priority"}`, false, standardTotal * fastMultiplier},
+		{"origin_group_forces_fast", `{"model":"gpt-5.6-sol"}`, true, standardTotal * fastMultiplier},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, authenticated, moved := fallbackBillingFixture(PlatformOpenAI)
+			moved.Group.ForceOpenAIFast = true
+			authenticated.Group.ForceOpenAIFast = tc.originForces
+			authenticated.Group.ModelPricing = []ChannelModelPricing{{
+				Models: []string{"gpt-5.6-sol"}, BillingMode: BillingModeToken,
+				InputPrice: &inputPrice, OutputPrice: &outputPrice, FastMultiplier: &fastMultiplier,
+			}}
+			account := &Account{ID: 3020, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+			svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, &fallbackGroupRateRepoStub{})
+			svc.resolver = NewModelPricingResolver(nil, svc.billingService)
+
+			// The serving group's forced Fast rewrites the request.
+			body, err := svc.applyOpenAIFastPolicyToBody(context.WithValue(ctx, ctxkey.Group, moved.Group), account, "gpt-5.6-sol", []byte(tc.body))
+			require.NoError(t, err)
+			require.Contains(t, string(body), `"service_tier":"priority"`)
+
+			priority := "priority"
+			require.NoError(t, svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
+				Result: &OpenAIForwardResult{
+					RequestID:                   "fallback_forced_fast_" + tc.name,
+					ServiceTier:                 &priority,
+					UpstreamResponseServiceTier: "priority",
+					Usage:                       OpenAIUsage{InputTokens: 100, OutputTokens: 50},
+					Model:                       "gpt-5.6-sol",
+					Duration:                    time.Second,
+				},
+				APIKey:  moved,
+				User:    moved.User,
+				Account: account,
+			}))
+			log := usageRepo.lastLog
+			require.NotNil(t, log)
+			require.Equal(t, "priority", *log.ServiceTier, "the tier actually served")
+			require.InDelta(t, standardTotal*fastMultiplier, log.TotalCost, 1e-10)
+			require.InDelta(t, tc.wantActual, log.ActualCost, 1e-10)
+		})
+	}
+}
+
+// A WebSocket connection keeps one request state: a later turn whose client
+// asks for priority is not charged at the standard tier because an earlier
+// turn was.
+func TestFallbackForcedFastFollowsTheLatestTurn(t *testing.T) {
+	ctx, _, moved := fallbackBillingFixture(PlatformOpenAI)
+	moved.Group.ForceOpenAIFast = true
+	account := &Account{ID: 3020, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	noteFallbackForcedFast(ctx, account, "")
+	require.True(t, fallbackForcedFastChargesStandard(ctx, "priority"))
+	noteFallbackForcedFast(ctx, account, "priority")
+	require.False(t, fallbackForcedFastChargesStandard(ctx, "priority"))
+	require.False(t, fallbackForcedFastChargesStandard(context.Background(), "priority"), "no fallback")
 }

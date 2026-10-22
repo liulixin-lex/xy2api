@@ -233,6 +233,22 @@
   },
   "required_literals": [
     {
+      "path": "backend/internal/service/openai_gateway_request_body.go",
+      "value": "noteFallbackForcedFast(ctx, account, gjson.GetBytes(body, \"service_tier\").String())"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_request_body.go",
+      "value": "noteFallbackForcedFast(ctx, account, gjson.GetBytes(frame, \"service_tier\").String())"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "noteFallbackForcedFast(ctx, account, requestView.ServiceTier)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "|| fallbackForcedFastChargesStandard(ctx, serviceTier) {"
+    },
+    {
       "path": "backend/internal/handler/dto/mappers.go",
       "value": "u.Group = GroupFromServiceShallow(l.OriginGroup)"
     },
@@ -1658,6 +1674,16 @@
     "xy-resilience-v2-classification"
   ],
   "custom_patch_tests": [
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestOpenAIRecordUsageUnderFallbackChargesForcedFastAtStandard"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestFallbackForcedFastFollowsTheLatestTurn"
+    },
     {
       "id": "xy-fallback-group-user-invisible",
       "path": "backend/internal/repository/usage_log_caller_group_unit_test.go",

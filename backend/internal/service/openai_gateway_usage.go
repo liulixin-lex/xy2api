@@ -310,7 +310,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// Free Fast changes only the customer charge. Keep priority TotalCost and
 	// service_tier for upstream accounting, but evaluate ActualCost once more at
 	// the Standard tier using the same channel, peak, and long-context policy.
-	if groupBillsOpenAIFastAtStandard(apiKey, billingAccount, serviceTier) {
+	// xy2api resilience: priority that only a serving fallback group's forced
+	// Fast caused is charged like Free Fast (PM ruling on Q8).
+	if groupBillsOpenAIFastAtStandard(apiKey, billingAccount, serviceTier) || fallbackForcedFastChargesStandard(ctx, serviceTier) {
 		standardCost, standardErr := s.calculateOpenAIRecordUsageCost(
 			ctx,
 			result,

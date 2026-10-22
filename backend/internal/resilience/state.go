@@ -61,6 +61,9 @@ type RequestState struct {
 	// fallbackOrigin is the API key as authenticated, with the group the
 	// request was made for; the service package stores and reads it.
 	fallbackOrigin any
+	// fallbackForcedFast is set when only the serving fallback group's
+	// forced Fast made the request priority.
+	fallbackForcedFast bool
 
 	// configError is set when selection failed for a configuration reason
 	// (channel pricing restriction, Claude-Code-only group) so the response
@@ -539,6 +542,27 @@ func (s *RequestState) FallbackOrigin() any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.fallbackOrigin
+}
+
+// SetFallbackForcedFast records whether only the serving fallback group's
+// forced Fast made the latest request (or WebSocket turn) priority.
+func (s *RequestState) SetFallbackForcedFast(v bool) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fallbackForcedFast = v
+}
+
+// FallbackForcedFast reports SetFallbackForcedFast.
+func (s *RequestState) FallbackForcedFast() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.fallbackForcedFast
 }
 
 // MarkConfigError records a configuration-caused selection failure.
