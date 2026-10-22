@@ -183,23 +183,6 @@ func (r *ResilienceService) loadFallbackGroup(ctx context.Context, id int64, now
 	return g
 }
 
-// AvailabilityFallbackOf returns the usable availability fallback group
-// configured for group, regardless of current account health, so user pages
-// can show the relationship and its rate (design §9.2). It returns nil when
-// the feature is off or the fallback group is unusable.
-func (r *ResilienceService) AvailabilityFallbackOf(ctx context.Context, group *Group) *Group {
-	if r == nil || r.fallbackGroups == nil || !resilience.Current().FallbackGroupOn() ||
-		group == nil || group.AvailabilityFallbackGroupID == nil || group.SubscriptionType == SubscriptionTypeSubscription {
-		return nil
-	}
-	fallback := r.loadFallbackGroup(ctx, *group.AvailabilityFallbackGroupID, time.Now())
-	if fallback == nil || fallback.Status != StatusActive || fallback.Platform != group.Platform ||
-		fallback.SubscriptionType == SubscriptionTypeSubscription {
-		return nil
-	}
-	return fallback
-}
-
 // CloneAPIKeyWithGroup returns a copy of apiKey bound to group.
 func CloneAPIKeyWithGroup(apiKey *APIKey, group *Group) *APIKey {
 	if apiKey == nil || group == nil {

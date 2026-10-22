@@ -143,8 +143,6 @@ type Group struct {
 	FallbackGroupID *int64 `json:"fallback_group_id"`
 	// 无效请求兜底分组
 	FallbackGroupIDOnInvalidRequest *int64 `json:"fallback_group_id_on_invalid_request"`
-	// 无号兜底分组（xy2api gateway resilience）
-	AvailabilityFallbackGroupID *int64 `json:"availability_fallback_group_id"`
 
 	// OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程）
 	AllowMessagesDispatch bool `json:"allow_messages_dispatch"`
@@ -177,6 +175,9 @@ type AdminGroup struct {
 	ForceOpenAIFast bool `json:"force_openai_fast"`
 	// FreeOpenAIFast 是管理端计费策略，用户侧分组 DTO 无需暴露。
 	FreeOpenAIFast bool `json:"free_openai_fast"`
+	// AvailabilityFallbackGroupID is the availability fallback group (xy2api
+	// gateway resilience). It is internal routing: users never see it.
+	AvailabilityFallbackGroupID *int64 `json:"availability_fallback_group_id"`
 
 	// 分组利润控制（五个 token 平台分组可启用；margin/buffer 为小数存储）。
 	// 仅管理员可见：这三个字段与同响应中的 rate_multiplier 相乘即可反推出

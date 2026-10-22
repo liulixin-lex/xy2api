@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -53,4 +54,13 @@ func TestResponsesWebSocketAllowlistUnderFallbackIsTheOriginGroup(t *testing.T) 
 	plain.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	require.Same(t, moved.Group, modelAllowlistGroup(plain, moved), "no fallback: the key's own group")
 	require.Nil(t, modelAllowlistGroup(plain, nil))
+}
+
+// Users never see an availability fallback group: the available channel
+// groups carry no fallback field (fallback-billing design §2.4).
+func TestUserAvailableGroupHasNoFallback(t *testing.T) {
+	typ := reflect.TypeOf(userAvailableGroup{})
+	for i := 0; i < typ.NumField(); i++ {
+		require.NotContains(t, typ.Field(i).Tag.Get("json"), "availability_fallback", typ.Field(i).Name)
+	}
 }

@@ -63,9 +63,6 @@ type userAvailableGroup struct {
 	PeakRateMultiplier float64 `json:"peak_rate_multiplier"`
 	IsExclusive        bool    `json:"is_exclusive"`
 	ShowExclusiveBadge bool    `json:"show_exclusive_badge"`
-	// AvailabilityFallback is the group that serves requests when this one
-	// has no available account (xy2api gateway resilience).
-	AvailabilityFallback *userFallbackGroup `json:"availability_fallback,omitempty"`
 }
 
 // userSupportedModelPricing 用户可见的定价字段白名单。
@@ -151,7 +148,6 @@ func (h *AvailableChannelHandler) List(c *gin.Context) {
 	for i := range userGroups {
 		allowedGroupIDs[userGroups[i].ID] = struct{}{}
 	}
-	fallbacks := availabilityFallbacksOf(c.Request.Context(), userGroups)
 
 	channels, err := h.channelService.ListAvailable(c.Request.Context())
 	if err != nil {
@@ -165,7 +161,6 @@ func (h *AvailableChannelHandler) List(c *gin.Context) {
 			continue
 		}
 		visibleGroups := filterUserVisibleGroups(ch.Groups, allowedGroupIDs)
-		attachAvailabilityFallbacks(visibleGroups, fallbacks)
 		if len(visibleGroups) == 0 {
 			continue
 		}

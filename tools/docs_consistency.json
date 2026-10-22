@@ -252,6 +252,14 @@
         "docs/PROJECT_MEMORY.md",
         "docs/PROJECT_MEMORY_ARCHIVE.md"
       ]
+    },
+    {
+      "pattern": "AvailabilityFallbackOf|availabilityFallbacksOf|attachAvailabilityFallbacks|userFallbackGroup",
+      "reason": "the availability fallback group is internal routing (2026-10-22): user pages no longer show it, so the user-facing fallback summary was removed",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
     }
   ],
   "private": [

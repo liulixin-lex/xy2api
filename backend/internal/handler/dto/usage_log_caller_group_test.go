@@ -47,3 +47,18 @@ func TestUserUsageLogWithoutFallbackIsUnchanged(t *testing.T) {
 	require.Equal(t, int64(20), *out.GroupID)
 	require.Equal(t, "GPT-企业专线", out.Group.Name)
 }
+
+// The user group DTO does not name an availability fallback group; the
+// admin group DTO keeps it.
+func TestGroupDTOHidesTheFallbackFromUsers(t *testing.T) {
+	fallback := int64(20)
+	group := &service.Group{ID: 10, Name: "GPT-不降智", AvailabilityFallbackGroupID: &fallback}
+
+	raw, err := json.Marshal(GroupFromService(group))
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "availability_fallback")
+
+	admin, err := json.Marshal(GroupFromServiceAdmin(group))
+	require.NoError(t, err)
+	require.Contains(t, string(admin), `"availability_fallback_group_id":20`)
+}
