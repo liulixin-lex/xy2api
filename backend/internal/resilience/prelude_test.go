@@ -3,6 +3,9 @@ package resilience
 import "testing"
 
 func TestClassifyStreamEvent(t *testing.T) {
+	before := Current().Clone()
+	t.Cleanup(func() { Publish(before) })
+	Publish(Defaults())
 	tests := []struct {
 		name, protocol, event, payload string
 		kind                           EventKind
@@ -19,6 +22,10 @@ func TestClassifyStreamEvent(t *testing.T) {
 		{"malformed_message_content", "responses", "response.output_item.added", `{"item":{"type":"message","content":"opaque"}}`, Content, false},
 		{"phase_is_metadata", "responses", "response.output_item.added", `{"item":{"id":"msg_a","type":"message","status":"in_progress","role":"assistant","phase":"answer","content":[]}}`, Prelude, false},
 		{"unknown_codex_metadata", "responses", "codex.response.metadata", `{}`, Unknown, false},
+		{"response_metadata", "responses", "response.metadata", `{"type":"response.metadata","sequence_number":2,"metadata":{"openai_chatgpt_moderation_metadata":{}}}`, Prelude, false},
+		{"response_metadata_type_only", "responses", "", `{"type":"response.metadata","metadata":{}}`, Prelude, false},
+		{"codex_metadata_payload_type_wins", "responses", "response.metadata", `{"type":"codex.response.metadata"}`, Unknown, false},
+		{"response_metadata_not_messages", "messages", "response.metadata", `{}`, Unknown, false},
 		{"empty_reasoning", "responses", "response.output_item.added", `{"item":{"type":"reasoning","summary":[]}}`, Prelude, false},
 		{"encrypted_reasoning", "responses", "response.output_item.added", `{"item":{"type":"reasoning","encrypted_content":"secret"}}`, Content, false},
 		{"empty_tool", "responses", "response.output_item.added", `{"item":{"type":"function_call","arguments":""}}`, Prelude, false},
@@ -71,6 +78,37 @@ func TestClassifyStreamEvent(t *testing.T) {
 			got := ClassifyStreamEvent(tt.protocol, tt.event, []byte(tt.payload))
 			if got.Kind != tt.kind || got.Retryable != tt.retry {
 				t.Fatalf("got %+v, want kind=%v retry=%v", got, tt.kind, tt.retry)
+			}
+		})
+	}
+}
+
+// response.metadata is prelude only while the native whitelist is on. With it
+// off the old rule holds (unknown means content), so the compat conversions,
+// which only check prelude_staging, do not change on their own either.
+func TestClassifyStreamEventResponseMetadataFollowsNativeWhitelist(t *testing.T) {
+	before := Current().Clone()
+	t.Cleanup(func() { Publish(before) })
+	payload := []byte(`{"type":"response.metadata","metadata":{"openai_chatgpt_moderation_metadata":{}}}`)
+	for _, tc := range []struct {
+		name              string
+		master, whitelist bool
+		want              EventKind
+	}{
+		{"on", true, true, Prelude},
+		{"whitelist_off", true, false, Unknown},
+		{"master_off", false, true, Unknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			settings := Defaults()
+			settings.Enabled = tc.master
+			settings.Stream.NativePreludeWhitelist = tc.whitelist
+			Publish(settings)
+			if got := ClassifyStreamEvent("responses", "response.metadata", payload); got.Kind != tc.want {
+				t.Fatalf("got %+v, want kind=%v", got, tc.want)
+			}
+			if got := ClassifyStreamEvent("responses", "codex.response.metadata", []byte(`{}`)); got.Kind != Unknown {
+				t.Fatalf("codex.response.metadata must stay unknown: %+v", got)
 			}
 		})
 	}

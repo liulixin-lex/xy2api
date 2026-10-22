@@ -14,7 +14,7 @@
 | 协议与信号缺陷 | 无法从库里量化 | 排队 ping 之后写裸 JSON；三个专用耗尽出口没走公共重试提示与回合封顶；合成的 `response.failed` 不带重试时间；Grok 空闲与 raw 429 被当成容量降载；raw Chat 的 `error` 后跟 `[DONE]` 被当成成功；Anthropic 协议下网关自身的 503 被标成 `overloaded_error` |
 | 观测缺口 | 284 个已输出后失败事件没有请求 ID，也没有释放暂存的事件类型、首个输出时间和字节数 | 无法判定“伪已输出”，也无法给后续优化定参数 |
 
-2026-10-21 的生产探测（几个主力中转各 2 个最小 Codex 形态请求，只记事件类型）：多数中转在第一个 `response.output_text.delta` 之前依次发 `response.created`、`response.in_progress`、空的 `response.output_item.added`（message）与空的 `response.content_part.added`（output_text）；部分中转在 `response.created` 之前先发一个 delta；`response.metadata` 出现在正文之后；没有观察到 `codex.response.metadata`。白名单据此确定，不按事件名整体放行元数据类事件（design §3.1）。
+2026-10-21 的生产探测（几个主力中转各 2 个最小 Codex 形态请求，只记事件类型）：多数中转在第一个 `response.output_text.delta` 之前依次发 `response.created`、`response.in_progress`、空的 `response.output_item.added`（message）与空的 `response.content_part.added`（output_text）；部分中转在 `response.created` 之前先发一个 delta；`response.metadata` 出现在正文之后；没有观察到 `codex.response.metadata`。白名单据此确定，不按事件名整体放行元数据类事件（design §3.1）。（2026-10-22 更正：生产诊断发现 Codex 后端过载时 `response.metadata` 出现在正文与错误之前，已按确切事件名加入开场，见 design §3.1。）
 
 完整方案（v2.1）与两份审查在仓库外 `xy2api-artifacts/resilience-ux-20261020/`；本变更是它按用户决定裁剪出的 0.4.4 部分。
 

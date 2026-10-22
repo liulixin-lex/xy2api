@@ -71,6 +71,13 @@ func ClassifyStreamEvent(protocol, eventType string, payload []byte) EventClass 
 		switch typ {
 		case "response.created", "response.in_progress", "response.queued", "keepalive":
 			return EventClass{Kind: Prelude}
+		case "response.metadata":
+			// The Codex backend sends it before any content and before a
+			// capacity error. Exact name only, and only with the native
+			// whitelist on; otherwise it falls through to Unknown (content).
+			if Current().NativePreludeWhitelistOn() {
+				return EventClass{Kind: Prelude}
+			}
 		case "response.completed", "response.done":
 			return EventClass{Kind: TerminalSuccess}
 		case "response.output_item.added", "response.content_part.added", "response.reasoning_summary_part.added":

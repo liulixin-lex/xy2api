@@ -99,14 +99,14 @@
 
 | 协议 | `Prelude` |
 |---|---|
-| Responses | `response.created`、`response.in_progress`、`response.queued`、`keepalive`；不带内容的 `response.output_item.added`（reasoning 项无 `encrypted_content` 且摘要为空，message 项的文本为空）、`content_part.added`、`reasoning_summary_part.added` |
+| Responses | `response.created`、`response.in_progress`、`response.queued`、`keepalive`、`response.metadata`（2026-10-22 修订）；不带内容的 `response.output_item.added`（reasoning 项无 `encrypted_content` 且摘要为空，message 项的文本为空）、`content_part.added`、`reasoning_summary_part.added` |
 | Chat | 只带 role 的 chunk；空 content 增量 |
 | Messages | `message_start`、`ping`；空 text/thinking 的 `content_block_start` |
 
 依据生产探测（2026-10-21，去标识）：
 
 - 多数中转在第一个 `response.output_text.delta` 之前依次发 `response.created`、`response.in_progress`、空的 message `output_item.added`、空的 output_text `content_part.added`，都在上表内。
-- `codex.response.metadata` 没有观察到，`response.metadata` 出现在正文之后，二者都**不**加入开场；`codex.*`、rate_limits 一类不按名字通配放行，仍按 `Unknown` 即内容处理。
+- `codex.response.metadata` 没有观察到，不加入开场；`codex.*`、rate_limits 一类不按名字通配放行，仍按 `Unknown` 即内容处理。`response.metadata` 在 2026-10-21 的探测中出现在正文之后，0.4.4 因此没有加入。2026-10-22 修订：生产诊断发现 OpenAI Codex 后端（经中转）过载时依次发 `response.created`、`response.in_progress`、`response.metadata`（载荷只有 `metadata.openai_chatgpt_moderation_metadata`），随后才发 `error`（`server_is_overloaded`），网关因此不换号。按用户 2026-10-22 的决定，这个确切事件名加入开场，不看载荷；只在 `stream.native_prelude_whitelist` 开启时生效（判定在 `ClassifyStreamEvent` 内读开关，兼容转换也随之一致），关闭时仍算内容（0.4.6；登记见 `gateway-resilience-045-20261021` tasks 7.7）。
 - added 结构只在严格确认已知字段为空时算开场；带正文、工具参数、加密载荷或未知非空字段的，一律算内容。
 - 部分中转在 `response.created` **之前**先发一个 delta。中转伪保活帧的判据（旧 design §7.8，`resilience_relay_keepalive.go`）泛化：
   - `response.created` 之前、`delta` 明确为空字符串或只有空白的 Responses delta：丢弃，算上游存活、不算输出，计入既有的 `relay_keepalive`；
@@ -131,7 +131,7 @@
 ### 3.3 原生 Responses 白名单（`stream.native_prelude_whitelist`）
 
 - 改动位置：`openai_gateway_passthrough.go` 的 `openAIStreamEventIsMetadata` 一带，普通路径的暂存与透传的 pendingLines 共用 §3.1 的判据（上游钩子 `resilience.ClassifyStreamEvent("responses", eventType, []byte(trimmed))`，登记到 `policy.json` 的 required_literals）。
-- 开关关闭时回到旧的首输出边界。`response.queued` 可以暂存；`codex.response.metadata`、`response.metadata` 与未知事件不在白名单，到达即释放暂存，并按原顺序转发。
+- 开关关闭时回到旧的首输出边界（`openAIStreamDataStartsClientOutput` 的关闭分支：`openAIStreamEventIsMetadata` 认 `response.created`、`response.in_progress`、`keepalive`，不带内容的 added 结构另行判定）。开关开启时 `response.queued` 与 `response.metadata`（2026-10-22 修订）可以暂存，释放时按原顺序转发，换号时与失败尝试的其他开场一起丢弃；`codex.response.metadata` 与未知事件不在白名单，到达即释放暂存，并按原顺序转发。
 - 送达追踪 `resilience_delivery_sse.go` 的开场名单也改用 §3.1；送达计费口径不变：开场不算送达。
 - **严格 SDK 约束**：换号后只转发新账号的 `response.created`，旧尝试的开场全部丢弃、不拼接；response id 与序号沿用新尝试的值。客户端看到的第一个事件始终是 `response.created`，id 不变。
 

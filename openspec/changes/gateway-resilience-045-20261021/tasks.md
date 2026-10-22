@@ -78,7 +78,7 @@
 
 ## 7. 后续（0.4.6 待办，不阻断 0.4.5）
 
-7.1–7.3 由审查在 δ 复核与集成审查中提出（design §8），7.4 来自 0.4.5 第三轮门禁。7.5 来自最终集成审查，7.6 来自 `v0.4.5` tag CI 的偶发失败。7.1 与 7.4 已提前到 0.4.5 处理，7.2、7.3、7.5、7.6 仍留在 0.4.6。
+7.1–7.3 由审查在 δ 复核与集成审查中提出（design §8），7.4 来自 0.4.5 第三轮门禁。7.5 来自最终集成审查，7.6 来自 `v0.4.5` tag CI 的偶发失败，7.7 来自 2026-10-22 的生产诊断。7.1 与 7.4 已提前到 0.4.5 处理，7.2、7.3、7.5、7.6、7.7 仍留在 0.4.6。
 
 - [x] 7.1 原生 Responses 路径心跳之后拿不到 turn-state：已在 0.4.5 用 O3 处理（3A，design §3.4）。
 - [ ] 7.2 turn-state 溯源改为在响应头真正发出时才记录，消除“响应到达后、提交前失败并最终耗尽”与 CDN 首包保活微秒级窗口两处不准的记录；同时收窄 `GATEWAY_RESILIENCE.md` 里“溯源只记客户端实际拿到的那次尝试”的措辞（该行归 δ；本变更的 design 与规格已改为“响应尚未提交时到达的尝试”）。
@@ -88,6 +88,8 @@
 - [ ] 7.5 堆用例两项 P2 留到 0.4.6（PM 19:10Z）：FINAL-P2-1 为绝对堆阈值对较小按模型保留的灵敏度下限，FINAL-P2-2 为连续 GC 不等待 finalizer、可能低估增量；后续改进测量方式，见仓库外 `review/CODE_REVIEW_045_FINAL.md` 第 3 节。
 
 - [ ] 7.6 （P2，PM 2026-10-22T03:40Z）客户端在内容前断开、心跳写失败之后，首输出 guard 没有同步转入 drain。如果首个内容恰好在期限前一个调度延迟内到达、还没被主循环消费，guard 到期就会取消上游，终态用量随之丢失（Responses 的用量只在 `response.completed` 里，这种请求实际按零用量记账）。只会少计，结果落回“输出前断开不计费”的既定规则；没有多计或重复计费。0.4.4 引入，0.4.3 没有；0.4.5 没有扩大这个窗口，但 Responses 透传的 read pump 里有一个同类窗口。修复方向：心跳写失败时立即解除 guard，或在读取时记录进展；透传在期限分支先排空已就绪的事件；把 `TestCompatPreludeHeartbeatDisconnectDrainsUsageAfterContent` 改成确定性的。这个用例在 `v0.4.5` 的 tag CI（`/disabled`）和 #120 的 PR CI（`/enabled`）中各偶发失败一次，都是单次重跑通过；REVIEW 另指出一个测试侧的可能原因：created 事件刷新了 `lastDataAt`，第一次心跳被跳过。不阻塞 0.4.5 的生产部署。分析见仓库外 `review/CODE_REVIEW_046_DRAIN_RACE.md` 与 `contract/CHANGES_B_046.md`。
+
+- [ ] 7.7 （用户 2026-10-22）原生 Responses 把 `response.metadata` 算开场：按确切事件名，只在 `stream.native_prelude_whitelist` 开启时生效，关闭时回到旧边界；`codex.response.metadata` 与其他未知事件仍算内容。依据：生产上一个 Codex 中转背后的 OpenAI Codex 后端过载时先回 200，依次发 created、in_progress、`response.metadata`，再在 seq 3 发 `server_is_overloaded`；0.4.3 至 0.4.5 把 `response.metadata` 当已输出，记 `gateway.failover_suppressed_after_semantic_output`，不换号，错误直接到客户端。分支 `fix/codex-metadata-prelude-20261022`；规格修订见 0.4.4 变更的 design §3.1、§3.3 与 replayable-prefix 规格（CV-9 只保留 `codex.response.metadata`）。首输出截止随之覆盖 `response.metadata` 之后到首个正文的时间（审查 2026-10-22：既定策略，0.4.3 至 0.4.5 是意外提前解除），上线前在测试服务器或灰度用 `openai_ttft_mode=visible` 或 `prelude_release_*` 观测 Codex 账号从 `response.metadata` 到首个正文的间隔，必要时调高档位或按模型覆盖。测试服务器场景（在 F34 之外新增“created、in_progress、`response.metadata` 后裸 error”与“`response.metadata` 后只有心跳、超过档位才有正文”两类故障与对应场景）留给 QA。
 
 ## 发布记录（2026-10-22）
 
