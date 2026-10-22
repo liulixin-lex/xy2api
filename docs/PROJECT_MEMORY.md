@@ -6,6 +6,16 @@
 
 ## 当前交接状态
 
+### 容量列的分组并发与近 30 分钟缓存率（2026-10-22；PR #126 已开，未发版、未部署）
+
+- 内容：
+  - 账号管理、分组管理的容量列加绿色的第三个数，即分组并发。分组页每行都显示；账号页只在顶部选了具体分组时显示。
+  - 账号“状态”列在“首字”下面加“缓存率”，指近 30 分钟的缓存读取占比。
+  - 并发槽成员末尾带 `|g<分组ID>`，不加 Redis 写操作，不改选号、路由和计费。
+  - 无迁移，无新设置。
+- 状态：[PR #126](https://github.com/liulixin-lex/xy2api/pull/126)（2026-10-22T14:51Z 开）。本地门禁、本机集成测试和本机端到端 25/25 全部通过；CI 以 GitHub 为准。合并由另一位作者操作；发版与部署需另行授权。
+- 详情：“进行中的工作”的 `20261022-group-concurrency-cache`。
+
 ### 使用记录“平均TPS”与指标公开按钮（2026-10-21；PR #121 已开，未发版、未部署）
 
 - 内容：使用记录“延迟”列改为“平均TPS N t/s”；“功能开关 → 管理员使用记录”两项指标的开关左边各加一个公开按钮（打开 = 公开，关闭 = 仅管理员可见，缺省关闭）。无迁移。
@@ -161,6 +171,19 @@
   - 无迁移，无新设置。
 - 分支：`feat/group-concurrency-cache-20261022`（工作树 `xy2api-wt/group-concurrency`，自 origin/main `e7fe4a8e9`）。
 - 授权：用户批准方案并要求改代码；按惯例止于开 PR、CI 全绿，不合并、不发版、不部署。分组分类另开 PR（`20261022-group-categories`）。
+- 实现：Codex（gpt-6-astra）在协调者审查下完成，功能提交 `49fe8d115`。中途因额度上限中断过一次，接续时保留了已有改动。
+  - 新文件：`service/concurrency_group_slot.go`、`repository/concurrency_group_slot_cache.go`、`handler/admin/account_handler_group_concurrency.go`。
+  - 上游钩子：`concurrency_service.go`、`openai_live.go`、`account_handler.go`、`group_capacity_service.go`，以及 4 个前端文件。
+  - 具名补丁 `xy-group-slot-concurrency`。
+  - 文档：`USAGE_METRICS.md` 新增“容量列的分组并发”。
+- 本地验证：
+  - 后端：gofmt、四种 vet、`-tags=unit` 全量、golangci-lint 0 项。
+  - 前端：全量 416 个文件 3208 项、typecheck、lint、i18n、build。
+  - 仓库工具：文档一致性、scheduler-diff、tools 41 项、干净树 audit。
+  - 集成测试：本机临时 PostgreSQL 与 Redis，只在一次性检出里临时改测试框架，未提交。`TestConcurrencyCacheSuite`（含新增 4 项）和近期健康两项通过。
+  - 本机端到端：25/25 通过，报告在仓库外 artifacts `group-concurrency-20261022/e2e/REPORT.md`。
+- PR：[#126](https://github.com/liulixin-lex/xy2api/pull/126)。
+- 下一步：CI 全绿后交给另一位作者审查合并；发版、部署另行授权。
 
 ### 20261022-pr121-main-integration — PR #121 合入最新 main 与合并验证
 
@@ -1278,3 +1301,19 @@ pnpm --dir frontend run build
 - 按用户经 PM 08:15Z 的授权，在独立临时分支从 PR #121 原 head `57f30f2ac` 合入 main `cfb4fae48`；唯一冲突为本记忆，两边新增条目与历史日志均完整保留。两个 dashboard 文案文件自动合并，没有手工修改产品代码，差异范围仍为 PR 原有 29 文件。
 - 本地验证：文档一致性、scheduler-diff 通过；Go 1.27.3（GOMAXPROCS=2、GOFLAGS=-p=2）build、unit vet、PR 指定四项设置测试通过；service/handler/server/web 共 10 包 unit 21060 项通过、14 项条件跳过、零失败。pnpm 9 冻结依赖安装、typecheck、lint、414 文件/3192 项测试、build（含 i18n）全部通过。
 - 下一步：提交后复验文档与干净树 audit，普通推送；固定 HEAD 的 push/PR CI 与安全扫描全绿后常规合并，再核对 main CI 并移除临时树。仅已知 7.6 用例允许单次重跑；最终远端事实与清理记录写仓库外 PROGRESS_A。不涉及发版、生产或 Git 配置变更。
+
+### 2026-10-22T14:52Z — `20261022-group-concurrency-cache` — PR #126 已开
+
+- 请求/目标：用户要求容量列加“分组并发”（绿色第三个数），账号“首字”下面加近 30 分钟缓存率，两项同一个 PR。账号页只在选了具体分组时显示第三个数。
+- 开始状态：工作树 `xy2api-wt/group-concurrency`，分支 `feat/group-concurrency-cache-20261022`，自 origin/main `e7fe4a8e9`。
+- 完成操作：
+  - 并发槽成员带分组后缀，管理端只读计数；读取失败按 0 处理。
+  - 分组容量摘要与账号列表返回第三个数，并按当前并发截断。
+  - 近期健康改为一次 30 分钟扫描，并汇总三类 Token。
+  - 修复翻页、筛选后近期健康不刷新。
+  - 登记具名补丁，补写文档。
+  - 实现由 Codex（gpt-6-astra）完成，协调者审查核心代码，无需返工。
+- 修改文件：功能提交 `49fe8d115`，共 40 个文件；另有本记忆。
+- 验证：见进行中条目；本机集成测试与端到端 25/25 通过。未连接任何服务器。
+- 卡点/风险：无。仓库集成测试框架强制使用 Docker，本机无 Docker，所以用本机服务测试的框架改动只做临时补丁，没有进 PR。
+- 下一步：CI 全绿后交给另一位作者审查合并；发版与部署另行授权。
