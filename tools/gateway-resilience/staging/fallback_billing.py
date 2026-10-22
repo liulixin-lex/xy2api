@@ -291,14 +291,20 @@ class Run:
         self.check(name + ": HTTP 200", status == 200)
         return {m["id"] for m in data["data"]}
 
+    def set_primary_schedulable(self, value):
+        path = f"/api/v1/admin/accounts/{self.accounts['A']['id']}"
+        self.api.call("POST", path + "/schedulable", {"schedulable": value})
+        actual = self.api.call("GET", path)
+        self.evidence("primary_schedulable_" + str(value).lower(), actual)
+        self.check("primary scheduling switch readback=" + str(value), actual["schedulable"] is value)
+
     def validate(self):
         k1, k2 = self.api_keys
         normal = self.request_usage("normal", k1)
         self.route("normal", normal, "A", None)
         baseline_models = self.models("models_normal", k1)
         self.check("normal models are A only", baseline_models == {MODEL_A})
-        account_path = f"/api/v1/admin/accounts/{self.accounts['A']['id']}"
-        self.api.call("PUT", account_path, {"schedulable": False})
+        self.set_primary_schedulable(False)
         time.sleep(2.2)
         fallback = self.request_usage("fallback", k1)
         self.route("fallback", fallback, "B", self.a)
@@ -345,7 +351,7 @@ class Run:
         self.check("B-only model rejected by A whitelist", status == 404
                    and MODEL_A in json.dumps(denied) and "not available for this group" in json.dumps(denied))
         self.check("blocked model creates no billed usage", self.rows(k1["id"]) == before)
-        self.api.call("PUT", account_path, {"schedulable": True})
+        self.set_primary_schedulable(True)
         time.sleep(2.2)
         # K2 has never called the gateway or /models during the outage.
         stable_start = time.monotonic()
