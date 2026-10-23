@@ -2227,6 +2227,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	beginCacheTraceSelection(ctx)
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
 	origExcluded := excludedIDs
 	resilience.StateFrom(ctx).NoteTurn(derefGroupID(groupID), requestedModel, sessionHash)
@@ -2273,6 +2274,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		resilienceMarkGroupNoAccount(ctx, groupID, requestedModel, origExcluded)
 	}
 	if err == nil && selection != nil {
+		noteCacheTraceSelection(ctx, selection, decision)
 		s.shareScheduling.recordSelection(ctx, selection.Account)
 		if sessionHash != "" {
 			resilience.StateFrom(ctx).SetSession(derefGroupID(groupID), sessionHash, s.openAISessionRecorder())

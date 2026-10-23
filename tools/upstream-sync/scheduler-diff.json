@@ -293,6 +293,15 @@
         "added": [
           "sessionHash = monitorProbeSessionHash(ctx, sessionHash)"
         ]
+      },
+      {
+        "block": "cache-trace-p0a-routing-observation",
+        "note": "Observation-only request-local routing markers: reset per-selection markers before existing selection, then record the final successful result. No scheduler branch, binding, capacity or retry decision changes.",
+        "removed": [],
+        "added": [
+          "beginCacheTraceSelection(ctx)",
+          "noteCacheTraceSelection(ctx, selection, decision)"
+        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [

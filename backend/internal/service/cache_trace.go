@@ -33,6 +33,7 @@ type cacheTrace struct {
 	emitted                bool
 	settled                bool
 	timing                 cacheTraceTimingToken
+	routing                cacheTraceRoutingState
 	window                 cacheTraceWindow
 	usageObservationFailed bool
 	skipUsage              bool // budget rejection: use the final billing usage only
@@ -206,6 +207,7 @@ func (s *OpenAIGatewayService) beginCacheTrace(c *gin.Context, body []byte) {
 		t.data.GroupID = getOpenAIGroupIDFromContext(c)
 		t.data.SessionDigest = sessionKey
 		t.mu.Unlock()
+		noteCacheTraceFallback(c.Request.Context())
 		return
 	}
 
@@ -235,6 +237,7 @@ func (s *OpenAIGatewayService) beginCacheTrace(c *gin.Context, body []byte) {
 		ReasoningContextEffective: "unknown", PromptCacheDiagnostics: "absent", ResponseCacheTTL: "absent",
 	}}
 	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), cacheTraceKey{}, t))
+	noteCacheTraceFallback(c.Request.Context())
 }
 
 func (t *cacheTrace) setPCKSource(source string) {

@@ -1,6 +1,6 @@
 package service
 
-// Reviewer R: baseline-compatible (no P0a symbols). Disabled cache_trace with
+// Baseline-compatible fixture (no P0a symbols). Disabled cache_trace with
 // diagnostics on (production config); measures allocs/op of full streaming
 // paths whose per-frame hooks convert string payloads to []byte.
 

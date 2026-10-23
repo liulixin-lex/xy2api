@@ -110,10 +110,16 @@ func cacheTraceNewContractFixture(t *testing.T, name, protocol string) *cacheTra
 
 func (f *cacheTraceContractFixture) forward(t *testing.T, protocol string, stream bool) *OpenAIForwardResult {
 	t.Helper()
+	return f.forwardReply(t, protocol, stream, traceForwardSSE)
+}
+
+func (f *cacheTraceContractFixture) forwardReply(t *testing.T, protocol string, stream bool, reply string) *OpenAIForwardResult {
+	t.Helper()
 	if stream {
 		f.body = bytes.Replace(f.body, []byte(`"stream":false`), []byte(`"stream":true`), 1)
 	}
 	response := traceForwardOK()
+	response.Body = io.NopCloser(strings.NewReader(reply))
 	response.Header.Set("X-Request-Id", f.id)
 	f.s.httpUpstream = &httpUpstreamRecorder{resp: response}
 	f.s.GenerateSessionHash(f.c, f.body)
@@ -166,6 +172,11 @@ func cacheTraceContractBillingSnapshot(t *testing.T, rows *openAIRecordUsageLogR
 // parsed usage and RecordUsage arguments; only observation sidecars differ.
 func (f *cacheTraceContractFixture) settle(t *testing.T, result *OpenAIForwardResult) string {
 	t.Helper()
+	return f.settleContext(t, context.Background(), result)
+}
+
+func (f *cacheTraceContractFixture) settleContext(t *testing.T, ctx context.Context, result *OpenAIForwardResult) string {
+	t.Helper()
 	requestHMAC := f.s.cacheUsageRequestDigest(result)
 	require.Regexp(t, `^[0-9a-f]{64}$`, requestHMAC)
 	result.RequestID = "ctc-private-mutated-after-snapshot-" + f.id
@@ -179,15 +190,15 @@ func (f *cacheTraceContractFixture) settle(t *testing.T, result *OpenAIForwardRe
 	controlResult, controlInput := *result, *input
 	controlResult.CacheTrace, controlResult.cacheTraceFailure, controlResult.CacheDiagnostic = nil, nil, nil
 	controlInput.Result = &controlResult
-	controlErr := control.RecordUsage(context.Background(), &controlInput)
-	err := f.s.RecordUsage(context.Background(), input)
+	controlErr := control.RecordUsage(ctx, &controlInput)
+	err := f.s.RecordUsage(ctx, input)
 	require.NoError(t, err)
 	require.Equal(t, 1, f.rows.calls)
 	require.Equal(t, 1, f.billing.calls)
 	require.Equal(t, cacheTraceContractBillingSnapshot(t, controlRows, controlBilling, controlErr), cacheTraceContractBillingSnapshot(t, f.rows, f.billing, err), "observer must not affect billing parameters, records, calls, or errors")
 	// Retry the observation settlement hook, not billing; there must still be
 	// exactly one trace and one legacy usage event for this request.
-	f.s.settleCacheTrace(context.Background(), result, f.account)
+	f.s.settleCacheTrace(ctx, result, f.account)
 	return requestHMAC
 }
 
@@ -380,6 +391,8 @@ func cacheTraceRunProductionLoggerContract(t *testing.T) {
 		}
 	}
 
+	extraManifest, extraExpected, extraHashes := cacheTraceRunExtendedLoggerContract(t)
+	blockHashes = append(blockHashes, extraHashes...)
 	appLogger.Sync()
 	raw, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -411,8 +424,8 @@ func cacheTraceRunProductionLoggerContract(t *testing.T) {
 	}
 	require.Len(t, manifest, 16)
 	require.Len(t, noSessionUsage, 4)
-	require.Len(t, traces, len(manifest))
-	require.Len(t, usages, len(manifest)-len(noSessionUsage))
+	require.Len(t, traces, len(manifest)+len(extraManifest))
+	require.Len(t, usages, len(manifest)-len(noSessionUsage)+len(extraManifest))
 	minimalKeys := strings.Fields("v platform loss_class na_reason request_id_hmac session_digest account_id group_id P read pol_rev ua_family")
 	boolKeys := strings.Fields("pck_out_is_uuid thread_present chain_sampled blk_order_physical_eq_logical include_encrypted_reasoning store_false ingress_ws_bridge rsn_boundary_hit read_short_of_fork")
 	for name, key := range manifest {
@@ -489,6 +502,11 @@ func cacheTraceRunProductionLoggerContract(t *testing.T) {
 			require.NotContains(t, string(traceWire[key]), fmt.Sprintf("%016x", hash), "in-memory xxhash must never enter cache_trace")
 			require.NotContains(t, string(traceWire[key]), strconv.FormatUint(hash, 10), "in-memory xxhash must never enter cache_trace")
 		}
+	}
+	cacheTraceAssertExtendedLoggerContract(t, extraManifest, extraExpected, traces, usages, traceWire, blockHashes)
+	for name, key := range extraManifest {
+		require.NotContains(t, manifest, name)
+		manifest[name] = key
 	}
 	if path := os.Getenv(cacheTraceContractManifestEnv); path != "" {
 		encoded, err := json.MarshalIndent(manifest, "", "  ")

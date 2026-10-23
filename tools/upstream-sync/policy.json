@@ -2135,6 +2135,50 @@
     {
       "path": "backend/internal/service/openai_gateway_messages.go",
       "value": "observeCacheTraceTypedPrompt(cacheTraceTyped, response.Usage == event.Usage)"
+    },
+    {
+      "path": "backend/internal/service/cache_trace.go",
+      "value": "routing                cacheTraceRoutingState"
+    },
+    {
+      "path": "backend/internal/service/cache_trace.go",
+      "value": "noteCacheTraceFallback(c.Request.Context())"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "beginCacheTraceSelection(ctx)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "noteCacheTraceSelection(ctx, selection, decision)"
+    },
+    {
+      "path": "backend/internal/service/resilience_session.go",
+      "value": "noteCacheTraceSoftOwner(ctx, account.ID)"
+    },
+    {
+      "path": "backend/internal/service/resilience_session.go",
+      "value": "noteCacheTraceLastResort(ctx, account.ID)"
+    },
+    {
+      "path": "backend/internal/service/resilience_session.go",
+      "value": "noteCacheTraceRebind(ctx, c)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "service.NoteCacheTraceFailover(c.Request.Context(), switchCount)"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "service.NoteCacheTraceFailover(c.Request.Context(), switchCount)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "func processOpenAICompatBufferedEvent("
+    },
+    {
+      "path": "backend/internal/service/cache_trace_settlement.go",
+      "value": "s.settleCacheTraceUndelivered(result, account)"
     }
   ],
   "forbidden_module_paths": [
@@ -2189,7 +2233,8 @@
     "xy-resilience-v2-handler-exits",
     "xy-resilience-v2-streams",
     "xy-account-stream-only-learning",
-    "xy-resilience-v2-classification"
+    "xy-resilience-v2-classification",
+    "xy-openai-cache-trace"
   ],
   "custom_patch_tests": [
     {
@@ -3031,6 +3076,66 @@
       "id": "xy-group-categories",
       "path": "frontend/src/views/admin/__tests__/GroupsView.categories.spec.ts",
       "literal": "saves categories after the group is created"
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_forward_test.go",
+      "literal": "func TestCacheTraceWireCategoriesAndEnabledGolden("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_prefix_chain_test.go",
+      "literal": "func TestCachePrefixAppendModifyDelete("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_classify_test.go",
+      "literal": "func TestT3ClassifierLossTable("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_disabled_structure_test.go",
+      "literal": "func TestCacheTraceDisabledCannotReachBodyWork("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_disabled_test.go",
+      "literal": "func TestCacheTraceDisabledForwardEntryStub("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_routing_test.go",
+      "literal": "func TestCacheTraceRoutingFinalSuccessfulForwardPreservesDecision("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/handler/cache_trace_fallback_visibility_test.go",
+      "literal": "func TestCacheTraceFallbackInvisibleInResponseAndUserUsage("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_routing_retry_test.go",
+      "literal": "func TestCacheTraceRoutingLastResortThenFailedForwardAndSuccessfulFailover("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_undelivered_review_test.go",
+      "literal": "func TestCacheTraceUndeliveredAbuseMinimalEventAndBilling("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_undelivered_review_test.go",
+      "literal": "func TestCacheTraceZeroUpstreamAttemptsEmitNeitherEvent("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_usage_ingress_structure_test.go",
+      "literal": "func TestCacheTraceUsageStructureRecognizesRenamedHooks("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_logger_contract_test.go",
+      "literal": "func TestCacheTraceProductionLoggerContract("
     }
   ]
 }

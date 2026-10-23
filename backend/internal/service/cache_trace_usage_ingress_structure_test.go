@@ -53,28 +53,71 @@ func assertCacheTraceUsageIngressStructure(t *testing.T) {
 	}
 	key := func(file, fn, helper string) string { return file + ":" + fn + ":" + helper }
 	want, actual := map[string]cacheTraceUsageIngressSite{}, map[string]int{}
+	// Counts are per function, including calls outside any gate. The typed
+	// observer shares its indexed parser's disabled branch, so do not count
+	// that branch twice. This restores messages.go's exact two originals.
+	originalCounts := map[string]map[string]int{}
+	originals := []string{original, jsonOriginal, bufferedOriginal, rawOriginal}
 	helpers := map[string]bool{"observeCacheTraceUsage": true, "observeCacheTraceUsageString": true}
 	legacyAdapters := 0
 	for _, site := range sites {
 		want[key(site.file, site.function, site.helper)] = site
 		helpers[site.helper] = true
+		fnKey := key(site.file, site.function, "")
+		if originalCounts[fnKey] == nil {
+			originalCounts[fnKey] = map[string]int{}
+		}
+		if site.helper != typed {
+			originalCounts[fnKey][site.original] += site.count
+		}
 	}
+	require.Len(t, originalCounts, 12, "the transport/shape manifest must cover every ingress")
+	totalHooks := 0
+	for _, site := range sites {
+		totalHooks += site.count
+	}
+	require.Equal(t, 20, totalHooks, "every observation point must remain explicitly enumerated")
 	files, err := os.ReadDir(".")
 	require.NoError(t, err)
+	parsed := map[string]*ast.File{}
+	fset := token.NewFileSet()
 	for _, entry := range files {
 		name := entry.Name()
 		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		fset := token.NewFileSet()
 		file, err := parser.ParseFile(fset, name, nil, 0)
 		require.NoError(t, err)
+		parsed[name] = file
+	}
+	// Follow package functions and receiver methods into trace code. Renaming
+	// an observer or hiding it behind an innocuously named wrapper must not
+	// make it invisible to this gate. The 12 audited ingress functions are
+	// boundaries: their callers need not add a second per-frame gate.
+	sensitive := cacheTraceUsageSensitiveFunctions(parsed, originalCounts)
+	for _, entry := range files {
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file := parsed[name]
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Body == nil {
 				continue
 			}
 			parents := cacheTraceUsageASTParents(fn.Body)
+			expectedOriginals, ingress := originalCounts[key(name, fn.Name.Name, "")]
+			if ingress {
+				for _, parserName := range originals {
+					require.Len(t, cacheTraceUsageASTCalls(fn.Body, parserName), expectedOriginals[parserName],
+						"%s:%s original parser %s count changed (including outside its gate)", name, fn.Name.Name, parserName)
+				}
+				assertCacheTraceUsageNoOtherHooks(t, fn, parents, helpers, sensitive)
+			}
+			if name == "openai_gateway_messages.go" && fn.Name.Name == "readOpenAICompatBufferedTerminal" {
+				assertCacheTraceBufferedSharedTerminal(t, fn, parents)
+			}
 			guardedCalls := 0
 			for _, call := range cacheTraceUsageASTCalls(fn.Body, "") {
 				helper := cacheTraceUsageCallName(call)
@@ -163,6 +206,152 @@ func assertCacheTraceUsageIngressStructure(t *testing.T) {
 	}
 }
 
+// assertCacheTraceBufferedSharedTerminal prevents the observation branches
+// from regaining independent terminal usage folding. Both normal/EOF paths
+// call the same non-observing function with identical arguments.
+func assertCacheTraceBufferedSharedTerminal(t *testing.T, fn *ast.FuncDecl, parents map[ast.Node]ast.Node) {
+	t.Helper()
+	const shared = "processOpenAICompatBufferedEvent"
+	require.Len(t, cacheTraceUsageASTCalls(fn.Body, shared), 4)
+	for _, forbidden := range []string{"ProcessEvent", "openAICompatTerminalResponse", "copyOpenAIUsageFromResponsesUsage"} {
+		require.Empty(t, cacheTraceUsageASTCalls(fn.Body, forbidden), "terminal folding must stay in the shared function")
+	}
+	for _, call := range cacheTraceUsageASTCalls(fn.Body, "parseSSEUsageBytesWithTypeForCacheTrace") {
+		gate := cacheTraceUsageEnabledAncestor(call, parents)
+		require.NotNil(t, gate)
+		if gate == nil {
+			continue
+		}
+		enabled := cacheTraceUsageASTCalls(gate.Body, shared)
+		disabled := cacheTraceUsageASTCalls(gate.Else, shared)
+		require.Len(t, enabled, 1)
+		require.Len(t, disabled, 1)
+		if len(enabled) == 1 && len(disabled) == 1 {
+			require.Equal(t, []string{"&event", "payloadBytes", "acc", "&usage"}, cacheTraceUsageASTArgs(enabled[0].Args))
+			require.Equal(t, cacheTraceUsageASTArgs(enabled[0].Args), cacheTraceUsageASTArgs(disabled[0].Args))
+		}
+	}
+}
+
+func assertCacheTraceUsageNoOtherHooks(t *testing.T, fn *ast.FuncDecl, parents map[ast.Node]ast.Node, helpers, sensitive map[string]bool) {
+	t.Helper()
+	// A direct field/context access must not evade the call-based manifest.
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		identifier, ok := node.(*ast.Ident)
+		if !ok || !strings.Contains(strings.ToLower(identifier.Name), "cachetrace") {
+			return true
+		}
+		name := identifier.Name
+		require.True(t, helpers[name] || name == "cacheTraceActive" || name == "cacheTraceTyped" ||
+			name == "cacheTraceObserving" || name == "cacheTraceFromGin",
+			"%s: unregistered direct trace access %s", fn.Name.Name, name)
+		return true
+	})
+	for _, call := range cacheTraceUsageASTCalls(fn.Body, "") {
+		name := cacheTraceUsageCallName(call)
+		if helpers[name] || name == "cacheTraceObserving" {
+			continue // exact counts, arguments and gate placement checked separately
+		}
+		if name == "cacheTraceFromGin" {
+			// The only extra trace access is the typed observer's receiver,
+			// inside its existing parse gate. No standalone lookup is allowed.
+			selector, ok := parents[call].(*ast.SelectorExpr)
+			require.True(t, ok && selector.X == call && selector.Sel.Name == "observeCacheTraceTypedPrompt",
+				"%s: trace lookup must only be the typed observer receiver", fn.Name.Name)
+			require.Equal(t, []string{"c"}, cacheTraceUsageASTArgs(call.Args))
+			require.NotNil(t, cacheTraceUsageEnabledAncestor(call, parents), "%s: trace access outside enabled branch", fn.Name.Name)
+			continue
+		}
+		require.False(t, strings.Contains(strings.ToLower(name), "cachetrace") || sensitive[cacheTraceUsageCallSymbol(call, fn)],
+			"%s: unregistered or renamed trace hook %s", fn.Name.Name, name)
+	}
+}
+
+func cacheTraceUsageFunctionSymbol(fn *ast.FuncDecl) string {
+	if fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return fn.Name.Name
+	}
+	return cacheTraceUsageReceiverType(fn.Recv.List[0].Type) + "." + fn.Name.Name
+}
+
+func cacheTraceUsageReceiverType(expr ast.Expr) string {
+	if pointer, ok := expr.(*ast.StarExpr); ok {
+		expr = pointer.X
+	}
+	if identifier, ok := expr.(*ast.Ident); ok {
+		return identifier.Name
+	}
+	return ""
+}
+
+func cacheTraceUsageCallSymbol(call *ast.CallExpr, fn *ast.FuncDecl) string {
+	if identifier, ok := call.Fun.(*ast.Ident); ok {
+		return identifier.Name
+	}
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return ""
+	}
+	receiver, ok := selector.X.(*ast.Ident)
+	if !ok {
+		return "" // nested trace accesses are checked as their own calls
+	}
+	for _, fields := range []*ast.FieldList{fn.Recv, fn.Type.Params} {
+		if fields == nil {
+			continue
+		}
+		for _, field := range fields.List {
+			for _, name := range field.Names {
+				if name.Name == receiver.Name {
+					return cacheTraceUsageReceiverType(field.Type) + "." + selector.Sel.Name
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// A function's source and trace references, not just its name, establish
+// sensitivity. The fixed-point pass catches renamed wrappers across files.
+func cacheTraceUsageSensitiveFunctions(files map[string]*ast.File, ingress map[string]map[string]int) map[string]bool {
+	functions := map[string]*ast.FuncDecl{}
+	sensitive := map[string]bool{}
+	for filename, file := range files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil || ingress[filename+":"+fn.Name.Name+":"] != nil {
+				continue
+			}
+			symbol := cacheTraceUsageFunctionSymbol(fn)
+			functions[symbol] = fn
+			if strings.HasPrefix(filename, "cache_trace") {
+				sensitive[symbol] = true
+			}
+			ast.Inspect(fn, func(node ast.Node) bool {
+				if identifier, ok := node.(*ast.Ident); ok && strings.Contains(strings.ToLower(identifier.Name), "cachetrace") {
+					sensitive[symbol] = true
+				}
+				return true
+			})
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for symbol, fn := range functions {
+			if sensitive[symbol] {
+				continue
+			}
+			for _, call := range cacheTraceUsageASTCalls(fn.Body, "") {
+				if sensitive[cacheTraceUsageCallSymbol(call, fn)] {
+					sensitive[symbol], changed = true, true
+					break
+				}
+			}
+		}
+	}
+	return sensitive
+}
+
 func cacheTraceUsageCallName(call *ast.CallExpr) string {
 	switch called := call.Fun.(type) {
 	case *ast.Ident:
@@ -233,4 +422,53 @@ func cacheTraceUsageASTArgs(args []ast.Expr) []string {
 		}
 	}
 	return out
+}
+
+// These small AST fixtures exercise the guard itself: neutral helper names
+// and cross-file wrappers still lead to trace code, while a reviewed ingress
+// remains a boundary and does not force its caller to gate a second time.
+func TestCacheTraceUsageStructureRecognizesRenamedHooks(t *testing.T) {
+	fset := token.NewFileSet()
+	sources := map[string]string{
+		"cache_trace_hidden.go": `package service
+func hiddenRoot(c *Context) { c.Get("key") }
+func (t *traceState) hiddenMethod() {}`,
+		"neutral.go": `package service
+func renamed(c *Context) { hiddenRoot(c) }
+func outer(c *Context) { renamed(c) }
+func (s *Gateway) innocentName(c *Context) { outer(c) }
+func methodCaller(s *Gateway, c *Context) { s.innocentName(c) }
+func directAccess(c *Context) { _ = c.CacheTrace }
+func plain(c *Context) { c.Get("ordinary") }
+func auditedIngress(c *Context) { hiddenRoot(c) }
+func ingressCaller(c *Context) { auditedIngress(c) }`,
+	}
+	files := map[string]*ast.File{}
+	for filename, source := range sources {
+		file, err := parser.ParseFile(fset, filename, source, 0)
+		require.NoError(t, err)
+		files[filename] = file
+	}
+	sensitive := cacheTraceUsageSensitiveFunctions(files, map[string]map[string]int{
+		"neutral.go:auditedIngress:": {},
+	})
+	for _, test := range []struct {
+		symbol string
+		want   bool
+	}{
+		{"hiddenRoot", true},
+		{"traceState.hiddenMethod", true},
+		{"renamed", true},
+		{"outer", true},
+		{"Gateway.innocentName", true},
+		{"methodCaller", true},
+		{"directAccess", true},
+		{"plain", false},
+		{"auditedIngress", false},
+		{"ingressCaller", false},
+	} {
+		t.Run(test.symbol, func(t *testing.T) {
+			require.Equal(t, test.want, sensitive[test.symbol])
+		})
+	}
 }

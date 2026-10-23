@@ -16,14 +16,22 @@ func (s *OpenAIGatewayService) settleCacheTrace(ctx context.Context, result *Ope
 	// Event/observer failures must never escape into billing. No error or panic
 	// value is logged, and no recover is added to a frame traversal.
 	defer func() { _ = recover() }()
+	undeliveredAbuse := false
 	if st := resilience.StateFrom(ctx); st != nil {
-		disconnected, delivered, _ := st.Disconnect()
+		disconnected, delivered, abuse := st.Disconnect()
 		if disconnected && !delivered {
-			return
+			if !abuse {
+				return
+			}
+			undeliveredAbuse = true
 		}
 	}
 	diagnostic := result.CacheDiagnostic
 	if diagnostic == nil || account == nil || account.Platform != PlatformOpenAI {
+		return
+	}
+	if undeliveredAbuse {
+		s.settleCacheTraceUndelivered(result, account)
 		return
 	}
 	if failed := result.cacheTraceFailure; failed != nil {
@@ -98,4 +106,41 @@ func (s *OpenAIGatewayService) settleCacheTrace(ctx context.Context, result *Ope
 		async.publish(s, session)
 	}
 	t.emitCacheTrace()
+}
+
+// Already-attempted requests billed under the existing abuse policy retain one
+// minimal joinable event. No body/usage reparse or loss attribution is performed.
+// The caller provides validated observation, diagnostic and account pointers and
+// isolates all observer failures from billing with its request-level recover.
+func (s *OpenAIGatewayService) settleCacheTraceUndelivered(result *OpenAIForwardResult, account *Account) {
+	var d cacheTraceData
+	var timing cacheTraceTimingToken
+	if failed := result.cacheTraceFailure; failed != nil {
+		if !failed.emitted.CompareAndSwap(false, true) {
+			return
+		}
+		d, timing = failed.data, failed.timing
+	} else {
+		t := result.CacheTrace
+		t.mu.Lock()
+		if t.settled || t.emitted {
+			t.mu.Unlock()
+			return
+		}
+		t.settled, t.emitted = true, true
+		d, timing = t.data, t.timing
+		t.async = nil // never publish undelivered history, including late results
+		t.mu.Unlock()
+	}
+	diagnostic := result.CacheDiagnostic
+	d.SessionDigest, d.GroupID, d.AccountID = diagnostic.Session, diagnostic.GroupID, account.ID
+	d.PromptTokens, d.ReadTokens = result.Usage.InputTokens, result.Usage.CacheReadInputTokens
+	d.NAReason = "undelivered"
+	if timing.sequence != 0 && !timing.sentAt.IsZero() {
+		telemetry := s.cacheTelemetry()
+		telemetry.mu.Lock()
+		cacheTraceSettleTimingLocked(telemetry, diagnostic.Session, timing, time.Now())
+		telemetry.mu.Unlock()
+	}
+	emitCacheTraceRejected(d)
 }

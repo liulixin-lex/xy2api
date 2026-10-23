@@ -63,6 +63,20 @@ buffered SSE 的观测复用既有计费遍历已解析的帧；关闭时直接�
 
 异步结果未就绪时，入站 body 类别为 unknown；出站 prompt cache key 如没有注入来源标记也记 unknown，待 worker 确认存在性后才判 passthrough 或 none。
 
+缓存观测覆盖至少发生一次上游尝试、并进入用量结算的 OpenAI 请求；仅入站或调度、尚未尝试上游的请求不输出 `cache_trace` 或 `openai_cache_usage`。未投递且不计费的请求不输出 `cache_trace`；若既有 abuse 规则仍按上游成本计费，则只输出 12 字段最小事件，`loss_class=n/a_sampled_out`、`na_reason=undelivered`，P/read 和关联键复用同次计费用量，不参与损失归因。已有发送时序会关闭，但这类请求不补入链历史。
+
+事件在 `RecordUsage` 入口、后续计费持久化之前输出，与既有 `openai_cache_usage` 一致；它表示已进入结算处理，不证明数据库写入或扣费最终成功。buffered 共用遍历的观测异常按请求隔离；流式逐帧观测依赖只读解析和固定字段，不加入逐帧 recover。结算及日志输出的异常隔离独立存在。
+
+### 路由原因与改绑原因
+
+完整 `cache_trace` 事件的 `route_reason` 记录本次请求实际决策点，优先级为 `last_resort > fallback_group > failover_n > session_rebind > soft_divert > overflow > prev_owner > sticky_hit > sticky_new`；证据不足时为 `unknown`。它观察最终选号结果与既有切换计数，不参与排序、准入、绑定、槽位或重试预算。每次选择仅清除上次的软罚保留与末位兜底候选标记；已确认的最高路由原因、请求级切换与改绑原因保留到最终成功尝试，不会因后续尝试而降级。
+
+`sticky_hit`、`prev_owner`、`overflow` 来自调度器已有的准确标记，`sticky_new` 仅用于明确的负载均衡新选；`soft_divert` 要求既有逻辑保留软罚所有者、最终实际选择另一账号。`last_resort` 只对应真实末位兜底选择，`fallback_group` 只读取已成功的无号兜底事实，`failover_n` 只在 handler 已批准跨账号切换后记录，同账号重试不计入。份额调度缺少上述标记的分流、新会话等路径仍为 `unknown`，不从名称推测路由原因。
+
+`rebind_cause` 只有既有会话失败计数达到改绑阈值后才更新，独立于更高优先级的路由原因：`stall` 表示停滞，`first_event_timeout` 表示首输出超时，`pre_output_error` / `post_output` 按既有错误类别与真实首输出状态区分，其余为 `other`；未改绑为 `none`。原 `RequestState` 不新增字段或写入。
+
+这些字段只出现在内部完整事件；预算、未就绪等最小事件仍保持既有 12 字段格式。无会话请求沿用 `session_digest=""`、`gap_src=no_session` 的观测，不为路由归因新建会话或历史。兜底组的原组 ID、组名不写入 trace，响应头、响应正文与用户用量 DTO 也不增加路由原因或兜底信息；用户用量仍按既有原分组口径展示。
+
 ### 出站块链与位置
 
 `gateway.cache_trace.chain_percent`（`GATEWAY_CACHE_TRACE_CHAIN_PERCENT`）默认 100，按隔离后的会话稳定采样；0 不计算块链。Responses 按 tools → instructions → text/reasoning/tool_choice → input 各项分块；Chat 按 tools → messages 各项分块。只读最终原始字节，不重写请求。
