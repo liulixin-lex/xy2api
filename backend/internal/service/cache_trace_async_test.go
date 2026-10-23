@@ -187,9 +187,12 @@ func TestCacheTraceAsyncRetryImmutableAndLateHistory(t *testing.T) {
 		telemetry.mu.Lock()
 		previous := telemetry.sessions["retry"]
 		previous.at = time.Now()
+		if previous.traceChains == nil {
+			previous.traceChains = new(cacheTraceSessionState)
+		}
 		telemetry.sessions["retry"] = previous
 		telemetry.mu.Unlock()
-		state.settled.Store(&cacheTraceSettlement{prompt: 9000, at: time.Now()})
+		state.settled.Store(&cacheTraceSettlement{prompt: 9000, at: time.Now(), owner: previous.traceChains})
 		close(ready)
 		wg.Add(1)
 		go func() {
@@ -210,7 +213,7 @@ func TestCacheTraceAsyncRetryImmutableAndLateHistory(t *testing.T) {
 	telemetry.mu.Lock()
 	defer telemetry.mu.Unlock()
 	require.NotNil(t, telemetry.sessions["retry"].traceChains)
-	require.Equal(t, 9000, telemetry.sessions["retry"].traceChains[0].prompt)
+	require.Equal(t, 9000, telemetry.sessions["retry"].traceChains.chains[0].prompt)
 }
 
 func TestCacheTraceAsyncDoesNotCompareFutureSettlement(t *testing.T) {
@@ -219,14 +222,14 @@ func TestCacheTraceAsyncDoesNotCompareFutureSettlement(t *testing.T) {
 	chain, _, _ := prefixTestScan(body)
 	chain.settledAt = before.Add(time.Second)
 	telemetry := s.cacheTelemetry()
-	telemetry.sessions["future"] = openAICacheHistory{traceChains: &[3]cachePrefixChain{chain}}
+	telemetry.sessions["future"] = openAICacheHistory{traceChains: &cacheTraceSessionState{chains: [3]cachePrefixChain{chain}}}
 	got := s.computeCacheTrace(body, body, 1, false, "future", "responses", "http", before)
 	require.True(t, got.prefix.HistoryUnsampled, "newer settlement cannot explain an earlier request")
 	require.Equal(t, "none", got.prefix.ForkRef)
 	chain.anchor = got.anchor
 	future := chain
 	chain.settledAt = before.Add(-time.Second)
-	telemetry.sessions["future"] = openAICacheHistory{traceChains: &[3]cachePrefixChain{future, chain}}
+	telemetry.sessions["future"] = openAICacheHistory{traceChains: &cacheTraceSessionState{chains: [3]cachePrefixChain{future, chain}}}
 	got = s.computeCacheTrace(body, body, 1, false, "future", "responses", "http", before)
 	require.False(t, got.prefix.HistoryUnsampled)
 	require.Equal(t, "prev1", got.prefix.ForkRef)

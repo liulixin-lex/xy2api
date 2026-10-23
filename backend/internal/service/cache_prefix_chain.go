@@ -39,6 +39,7 @@ type cachePrefixPositions struct {
 
 type cachePrefixObservation struct {
 	pckExists, pckUUID                                                            bool
+	historyAt                                                                     time.Time
 	BlockN, BytesOut, ForkBlock, ForkByte                                         int
 	BytesOutRaw, ForkRawByte, FirstOldReasoningRawByte                            int
 	BlockOrderPhysicalEqLogical                                                   bool
@@ -383,6 +384,7 @@ func compareCachePrefix(current cachePrefixChain, offsets cachePrefixPositions, 
 	}
 	old, m := histories[best], offsets.matches[best]
 	o.PreviousPrompt = old.prompt
+	o.historyAt = old.settledAt
 	o.HistoryAgeSeconds = -1
 	if !old.settledAt.IsZero() {
 		o.HistoryAgeSeconds = max(0, int(time.Since(old.settledAt).Seconds()))
@@ -432,6 +434,8 @@ func compareCachePrefix(current cachePrefixChain, offsets cachePrefixPositions, 
 // gjson.ForEach eagerly unescapes every string, including multi-MB tool output,
 // even though only four metadata fields matter here. Hashing still consumes the
 // original item.Raw unchanged. This helper is used only by the async worker.
+// Duplicate metadata keys retain the last value, matching the original ForEach
+// traversal (not gjson.Get, which returns the first matching key).
 func cachePrefixItemMetadata(raw string) (role, kind string, encrypted, hasReasoning bool) {
 	if len(raw) == 0 || raw[0] != '{' {
 		return
@@ -494,7 +498,9 @@ func cachePrefixItemMetadata(raw string) (role, kind string, encrypted, hasReaso
 		case "encrypted_content":
 			encrypted = len(value) >= 2 && value[0] == '"' && value != `""`
 		case "reasoning_content":
-			hasReasoning = gjson.Parse(value).Exists()
+			// Presence of a JSON string is enough; do not unescape reasoning.
+			// Preserve best-effort semantics for other or malformed raw values.
+			hasReasoning = len(value) >= 2 && value[0] == '"' || gjson.Parse(value).Exists()
 		}
 	}
 	return

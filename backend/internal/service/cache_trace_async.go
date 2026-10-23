@@ -36,8 +36,9 @@ type cacheTraceJob struct {
 	getBody                      func() (io.ReadCloser, error)
 	size                         int64
 	created                      time.Time
+	sentAt                       time.Time
 	queuedAt                     time.Time
-	history                      *[cachePrefixHistoryCount]cachePrefixChain
+	history                      *cacheTraceSessionState
 }
 
 type cacheTraceComputed struct {
@@ -48,6 +49,7 @@ type cacheTraceComputed struct {
 }
 
 type cacheTraceSettlement struct {
+	owner  *cacheTraceSessionState
 	prompt int
 	at     time.Time
 }
@@ -73,7 +75,7 @@ func (a *cacheTraceAsync) publish(s *OpenAIGatewayService, session string) {
 	}
 	chain := r.chain
 	chain.settledAt = settlement.at
-	s.rememberCachePrefix(session, chain, settlement.prompt)
+	s.rememberCachePrefix(session, chain, settlement.prompt, settlement.owner)
 }
 
 // Workers exist only while there is queued work; idle test services and closed
@@ -275,8 +277,12 @@ func (j *cacheTraceJob) compute() {
 	}
 	// This is the only production call site. Results contain only owned HMAC
 	// strings, enum constants, counts and process-local xxhash checkpoints.
+	cutoff := j.sentAt
+	if cutoff.IsZero() {
+		cutoff = j.created // adapters that do not dispatch retain their old cutoff
+	}
 	compute := func(body []byte) *cacheTraceComputed {
-		return j.service.computeCacheTrace(j.ingress, body, j.apiKeyID, j.headerSource, j.session, j.protocol, j.transport, j.created)
+		return j.service.computeCacheTrace(j.ingress, body, j.apiKeyID, j.headerSource, j.session, j.protocol, j.transport, cutoff)
 	}
 	var result *cacheTraceComputed
 	if direct, ok := reader.(io.WriterTo); ok {
@@ -309,6 +315,15 @@ func (j *cacheTraceJob) compute() {
 			return
 		}
 		result = compute(body)
+	}
+	if j.historyEvicted() {
+		j.state.reason.Store(cacheTraceExpired)
+		return
+	}
+	// A cold request cannot become a missing-history request because its own
+	// legacy usage entry was installed while the worker was scanning.
+	if j.history == nil && result.prefix.ForkRef == "none" {
+		result.prefix.HistoryUnsampled = false
 	}
 	j.state.result.Store(result)
 	j.state.publish(j.service, j.session)

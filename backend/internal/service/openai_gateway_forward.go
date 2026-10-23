@@ -1084,6 +1084,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Send request
 		upstreamStart := time.Now()
+		s.markCacheTraceSent(c)
 		resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		s.startCacheTraceRequest(c)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())

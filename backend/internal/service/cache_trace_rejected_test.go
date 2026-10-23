@@ -28,7 +28,7 @@ func rejectedTraceFixture(t testing.TB, size int) (*OpenAIGatewayService, *gin.C
 	s := &OpenAIGatewayService{cfg: cfg}
 	c := cacheTestContext(1, 10)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	session := s.cacheIdentityDigest("openai-session", "private-rejected-session")
+	session, _ := deriveOpenAISessionHashes(s.cacheIdentityDigest("openai-session", "private-rejected-session"))
 	c.Set(openAICacheSessionGinKey, session)
 	body := []byte(`{"input":"` + strings.Repeat("x", size) + `","prompt_cache_key":"private-rejected-pck"}`)
 	s.beginCacheTrace(c, body)
@@ -47,14 +47,10 @@ func TestCacheTraceRejectedSchemaAndLegacyLinks(t *testing.T) {
 			s.captureCacheTraceRequest(c, req, &Account{ID: 9, Platform: PlatformOpenAI}, "responses")
 			live := cacheTraceFromGin(c)
 			require.Nil(t, live.pending)
-			require.Nil(t, live.async.result.Load())
+			require.Nil(t, live.async, "rejection state lives on trace without an allocation")
 			require.True(t, live.skipUsage)
-			switch reason {
-			case "expired":
-				live.async.reason.Store(cacheTraceExpired)
-			case "not_ready":
-				live.async.reason.Store(0)
-			}
+			live.data.NAReason = reason
+
 			body := "data: " + `{"type":"response.completed","response":{"usage":{"input_tokens":4321,"input_tokens_details":{"cached_tokens":1024},"output_tokens":2}}}` + "\n\n"
 			// Rejected buffered requests use exactly the existing billing traversal.
 			usage := s.parseSSEUsageWithCacheTrace(c, body)
@@ -99,17 +95,17 @@ func TestCacheTraceRejectedSchemaAndLegacyLinks(t *testing.T) {
 			// The exact same JSON is also replayed through A's actual schema validator
 			// in the external evidence harness; no private path is embedded in Go tests.
 			allowed := map[string]bool{}
-			for _, key := range strings.Fields("time level msg v platform loss_class na_reason request_id_hmac session_digest account_id group_id P read") {
+			for _, key := range strings.Fields("time level msg v platform loss_class na_reason request_id_hmac session_digest account_id group_id P read pol_rev ua_family") {
 				allowed[key] = true
 			}
 			for key := range event {
 				require.True(t, allowed[key], "unexpected event field")
 			}
-			for _, key := range strings.Fields("v platform account_id group_id P read request_id_hmac session_digest") {
+			for _, key := range strings.Fields("v platform account_id group_id P read request_id_hmac session_digest pol_rev ua_family") {
 				require.Contains(t, event, key)
 			}
 			require.Regexp(t, regexp.MustCompile(`^[0-9a-f]{64}$`), event["request_id_hmac"])
-			require.Regexp(t, regexp.MustCompile(`^[0-9a-f]{64}$`), event["session_digest"])
+			require.Regexp(t, regexp.MustCompile(`^(?:v2:)?[0-9a-f]{16}$`), event["session_digest"])
 			require.Equal(t, float64(1), event["v"])
 			require.Equal(t, "openai", event["platform"])
 			for _, marker := range []string{"private-rejected", "must-not-rehash"} {
@@ -178,7 +174,7 @@ func TestCacheTraceRejectedCaptureAllocationsFlat(t *testing.T) {
 			p.budget = 1
 			account := &Account{ID: 9, Platform: PlatformOpenAI}
 			allocations := testing.AllocsPerRun(1000, func() { s.captureCacheTraceRequest(c, req, account, "responses") })
-			require.Equal(t, float64(1), allocations, "fixed-size rejection state only; no job or body work")
+			require.Zero(t, allocations, "rejection reason lives on trace; no job, async handle or body work")
 			require.Nil(t, cacheTraceFromGin(c).pending)
 			require.Zero(t, p.reserved.Load())
 		})

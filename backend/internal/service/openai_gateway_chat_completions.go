@@ -389,6 +389,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
+	s.markCacheTraceSent(c)
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	s.startCacheTraceRequest(c)
 	if firstEvent.expired() {
@@ -865,9 +866,10 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		observer.ObserveOpenAI([]byte(payload), event.Type)
 		refusalDetector.ObservePayload([]byte(payload))
 		if cacheTraceActive {
-			observeCacheTraceUsageString(c, payload)
+			s.parseSSEUsageBytesWithTypeForCacheTrace(c, []byte(payload), event.Type, &usage)
+		} else {
+			s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
 		}
-		s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
 
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)
 		if isTerminalEvent {

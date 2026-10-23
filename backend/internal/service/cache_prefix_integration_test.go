@@ -94,7 +94,7 @@ func TestCacheTracePrefixMemoryBoundAndExistingTelemetry(t *testing.T) {
 	require.Len(t, telemetry.sessions, 2048)
 	retained := 0
 	for _, session := range telemetry.sessions {
-		for i, chain := range session.traceChains {
+		for i, chain := range session.traceChains.chains {
 			require.LessOrEqual(t, len(chain.hashes), 512)
 			require.Equal(t, 9003-i, chain.prompt)
 			retained += cap(chain.hashes) * 8

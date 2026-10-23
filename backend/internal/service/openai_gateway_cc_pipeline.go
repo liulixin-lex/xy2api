@@ -267,6 +267,7 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
+	s.markCacheTraceSent(c)
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	s.startCacheTraceRequest(c)
 	if err != nil {
@@ -331,11 +332,10 @@ func (s *OpenAIGatewayService) scanCCStream(
 		}
 
 		if cacheTraceActive {
-
-			observeCacheTraceUsageString(c, payload)
-
-		}
-		if u := extractCCStreamUsage(payload); u != nil {
+			if u := extractCCStreamUsageForCacheTrace(c, payload); u != nil {
+				st.Usage = *u
+			}
+		} else if u := extractCCStreamUsage(payload); u != nil {
 			st.Usage = *u
 		}
 
@@ -380,6 +380,7 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 	resp *http.Response,
 	writeError compatErrorWriter,
 ) (_ *apicompat.ChatCompletionsResponse, _ OpenAIUsage, retErr error) {
+	cacheTraceActive := cacheTraceObserving(c)
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		classified := nonstreamReadError(c.Request.Context(), resp, err)
@@ -405,9 +406,14 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 	}
 
 	usage := OpenAIUsage{}
-	observeCacheTraceUsage(c, respBody)
-	if parsed, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
-		usage = parsed
+	if cacheTraceActive {
+		if parsed, ok := extractOpenAIUsageForCacheTrace(c, respBody); ok {
+			usage = parsed
+		}
+	} else {
+		if parsed, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
+			usage = parsed
+		}
 	}
 	return &ccResp, usage, nil
 }

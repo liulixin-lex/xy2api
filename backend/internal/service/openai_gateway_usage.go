@@ -160,6 +160,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		return errors.New("openai usage result is nil")
 	}
 	s.observeCacheUsage(result, input.Account, time.Now())
+	if result.CacheTrace != nil || result.cacheTraceFailure != nil {
+		s.settleCacheTrace(ctx, result, input.Account)
+	}
 	s.resilience.NoteAccountSuccess(ctx, input.Account)
 	// OpenAI input_tokens already include cache reads and writes.
 	s.resilience.NoteSessionCacheUsage(ctx, result.Usage.CacheReadInputTokens, result.Usage.InputTokens)

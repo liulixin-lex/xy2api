@@ -1165,6 +1165,7 @@ type GatewayConfig struct {
 }
 
 type CacheTraceConfig struct {
+	MinCacheableTokens    int           `mapstructure:"min_cacheable_tokens"`
 	MaxQueueWait          time.Duration `mapstructure:"max_queue_wait"`
 	AsyncByteBudget       int64         `mapstructure:"async_byte_budget"`
 	AsyncWorkers          int           `mapstructure:"async_workers"`
@@ -2592,6 +2593,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.cache_trace.async_bytes_per_second", int64(32<<20))
 	viper.SetDefault("gateway.cache_trace.enabled", false)
 	viper.SetDefault("gateway.cache_trace.chain_percent", 100)
+	viper.SetDefault("gateway.cache_trace.min_cacheable_tokens", 1024)
 	viper.SetDefault("gateway.cache_trace.reasoning_context_paths", []string{"reasoning.context"})
 	viper.SetDefault("gateway.openai_cache.diagnostics_enabled", false)
 	viper.SetDefault("gateway.openai_cache.aware_routing_enabled", false)
@@ -2838,6 +2840,9 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if c.Gateway.CacheTrace.MinCacheableTokens < 0 {
+		return fmt.Errorf("gateway.cache_trace.min_cacheable_tokens must be nonnegative")
+	}
 	if c.Gateway.CacheTrace.MaxQueueWait < 0 {
 		return fmt.Errorf("gateway.cache_trace.max_queue_wait must be nonnegative")
 	}

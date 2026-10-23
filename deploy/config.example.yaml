@@ -484,6 +484,7 @@ gateway:
     enabled: false
     chain_percent: 100
     reasoning_context_paths: ["reasoning.context"]
+    min_cacheable_tokens: 1024
   openai_cache:
     diagnostics_enabled: false
     aware_routing_enabled: false

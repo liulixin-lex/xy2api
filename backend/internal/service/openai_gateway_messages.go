@@ -886,21 +886,36 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 					if err := json.Unmarshal([]byte(payload), &event); err == nil {
 						payloadBytes := []byte(payload)
 						if cacheTraceActive {
-							observeCacheTraceUsage(c, payloadBytes)
-						}
-						s.parseSSEUsageBytesWithType(payloadBytes, event.Type, &usage)
-						acc.ProcessEvent(&event)
-						if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
-							if event.Usage != nil {
-								usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
-								if response.Usage == nil {
-									response.Usage = event.Usage
+							cacheTraceTyped := s.parseSSEUsageBytesWithTypeForCacheTrace(c, payloadBytes, event.Type, &usage, event.Usage != nil || event.Response != nil && event.Response.Usage != nil)
+							acc.ProcessEvent(&event)
+							if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
+								if event.Usage != nil {
+									usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
+									if response.Usage == nil {
+										response.Usage = event.Usage
+									}
 								}
+								if response.Usage != nil {
+									usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
+									cacheTraceFromGin(c).observeCacheTraceTypedPrompt(cacheTraceTyped, response.Usage == event.Usage)
+								}
+								return response, usage, acc, nil
 							}
-							if response.Usage != nil {
-								usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
+						} else {
+							s.parseSSEUsageBytesWithType(payloadBytes, event.Type, &usage)
+							acc.ProcessEvent(&event)
+							if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
+								if event.Usage != nil {
+									usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
+									if response.Usage == nil {
+										response.Usage = event.Usage
+									}
+								}
+								if response.Usage != nil {
+									usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
+								}
+								return response, usage, acc, nil
 							}
-							return response, usage, acc, nil
 						}
 					}
 				}
@@ -937,23 +952,38 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 			}
 			payloadBytes := []byte(payload)
 			if cacheTraceActive {
-				observeCacheTraceUsage(c, payloadBytes)
-			}
-			s.parseSSEUsageBytesWithType(payloadBytes, event.Type, &usage)
+				cacheTraceTyped := s.parseSSEUsageBytesWithTypeForCacheTrace(c, payloadBytes, event.Type, &usage, event.Usage != nil || event.Response != nil && event.Response.Usage != nil)
+				acc.ProcessEvent(&event)
 
-			acc.ProcessEvent(&event)
-
-			if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
-				if event.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
-					if response.Usage == nil {
-						response.Usage = event.Usage
+				if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
+					if event.Usage != nil {
+						usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
+						if response.Usage == nil {
+							response.Usage = event.Usage
+						}
 					}
+					if response.Usage != nil {
+						usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
+						cacheTraceFromGin(c).observeCacheTraceTypedPrompt(cacheTraceTyped, response.Usage == event.Usage)
+					}
+					return response, usage, acc, nil
 				}
-				if response.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
+			} else {
+				s.parseSSEUsageBytesWithType(payloadBytes, event.Type, &usage)
+				acc.ProcessEvent(&event)
+
+				if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
+					if event.Usage != nil {
+						usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
+						if response.Usage == nil {
+							response.Usage = event.Usage
+						}
+					}
+					if response.Usage != nil {
+						usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
+					}
+					return response, usage, acc, nil
 				}
-				return response, usage, acc, nil
 			}
 
 		case <-timeoutCh:

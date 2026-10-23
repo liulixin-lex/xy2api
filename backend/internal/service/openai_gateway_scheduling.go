@@ -190,6 +190,9 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 		sessionID = deriveOpenAIContentSessionSeed(body)
 	}
 	if sessionID == "" {
+		// Missing routing identity must not hide an enabled observation. The
+		// trace keeps an empty digest and never creates a session/history key.
+		s.beginCacheTrace(c, body)
 		return ""
 	}
 

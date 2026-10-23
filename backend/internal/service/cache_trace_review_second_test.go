@@ -15,18 +15,13 @@ func TestCacheTraceUsageStringDisabledAllocationsAndFiveSites(t *testing.T) {
 	c := cacheTestContext(1, 10)
 	payload := strings.Repeat("private-payload", 2000)
 	require.Zero(t, testing.AllocsPerRun(1000, func() { observeCacheTraceUsageString(c, payload) }))
-	// Cover the argument evaluation at all five real hooks, not just the helper.
-	for _, file := range []string{"openai_gateway_chat_completions.go", "openai_gateway_chat_completions_raw.go", "openai_gateway_cc_pipeline.go"} {
+	assertCacheTraceUsageIngressStructure(t)
+	// Preserve the original ban on allocating string-to-byte observer hooks.
+	for _, file := range []string{"openai_gateway_chat_completions.go", "openai_gateway_chat_completions_raw.go", "openai_gateway_cc_pipeline.go", "openai_gateway_messages.go"} {
 		content, err := os.ReadFile(file)
 		require.NoError(t, err)
-		require.Equal(t, 1, strings.Count(string(content), "observeCacheTraceUsageString(c, payload)"))
 		require.NotContains(t, string(content), "observeCacheTraceUsage(c, []byte(payload))")
 	}
-	content, err := os.ReadFile("openai_gateway_messages.go")
-	require.NoError(t, err)
-	require.Equal(t, 2, strings.Count(string(content), "observeCacheTraceUsage(c, payloadBytes)"))
-	require.Equal(t, 2, strings.Count(string(content), "parseSSEUsageBytesWithType(payloadBytes, event.Type, &usage)"))
-	require.NotContains(t, string(content), "observeCacheTraceUsage(c, []byte(payload))")
 }
 
 func TestCacheTraceUsageWriteNumberPresence(t *testing.T) {

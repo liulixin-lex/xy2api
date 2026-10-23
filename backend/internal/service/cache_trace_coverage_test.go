@@ -53,14 +53,14 @@ func TestCacheTraceCoverageReasons(t *testing.T) {
 }
 func TestCacheTraceQueueWaitAndEviction(t *testing.T) {
 	s := &OpenAIGatewayService{}
-	histories := new([cachePrefixHistoryCount]cachePrefixChain)
+	histories := new(cacheTraceSessionState)
 	telemetry := s.cacheTelemetry()
 	telemetry.sessions["private-session"] = openAICacheHistory{traceChains: histories}
 	job := &cacheTraceJob{service: s, session: "private-session", history: histories}
 	require.False(t, job.historyEvicted())
 	delete(telemetry.sessions, "private-session")
 	require.True(t, job.historyEvicted())
-	telemetry.sessions["private-session"] = openAICacheHistory{traceChains: new([cachePrefixHistoryCount]cachePrefixChain)}
+	telemetry.sessions["private-session"] = openAICacheHistory{traceChains: new(cacheTraceSessionState)}
 	require.True(t, job.historyEvicted(), "reinserted same key is a different history")
 	job.history = nil
 	require.False(t, job.historyEvicted(), "new session is cold, not evicted")

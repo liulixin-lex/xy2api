@@ -42,8 +42,8 @@ type OpenAICacheDiagnostic struct {
 
 type openAICacheHistory struct {
 	// Optional: keep the existing map value small enough for inline storage.
-	// Allocated only when a sampled, settled chain is actually retained.
-	traceChains *[cachePrefixHistoryCount]cachePrefixChain
+	// Allocated only for enabled trace timing or retained sampled chains.
+	traceChains *cacheTraceSessionState
 	account     int64
 	prefix      string
 	at          time.Time

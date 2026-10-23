@@ -397,6 +397,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 
 		upstreamStart := time.Now()
+		s.markCacheTraceSent(c)
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		s.startCacheTraceRequest(c)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
@@ -2287,9 +2288,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				// 再打 cyber 标记，否则 mark 记到的是解析前的 0，导致流式 cyber 按 0 token 计费
 				// 而漏记真实用量。对齐 WS V2 / Chat 流式路径（均先解析 usage 再 Mark）。
 				if cacheTraceActive {
-					observeCacheTraceUsage(c, dataBytes)
+					s.parseSSEUsageBytesWithTypeForCacheTrace(c, dataBytes, eventType, usage)
+				} else {
+					s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
 				}
-				s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
 				if hit, code, msg := detectOpenAICyberPolicy(dataBytes); hit {
 					cyberHit = true
 					MarkOpsCyberPolicy(c, CyberPolicyMark{
@@ -2404,9 +2406,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				firstTokenMs = &ms
 			}
 			if cacheTraceActive {
-				observeCacheTraceUsage(c, dataBytes)
+				s.parseSSEUsageBytesWithTypeForCacheTrace(c, dataBytes, eventType, usage)
+			} else {
+				s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
 			}
-			s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
 		}
 		if line == "" {
 			pendingSSEEventType = ""
@@ -2632,6 +2635,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	originalModel string,
 	mappedModel string,
 ) (_ *openaiNonStreamingResultPassthrough, retErr error) {
+	cacheTraceActive := cacheTraceObserving(c)
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		return nil, nonstreamReadError(ctx, resp, err)
@@ -2658,15 +2662,25 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	usage := &OpenAIUsage{}
 	usageParsed := false
 	if len(body) > 0 {
-		observeCacheTraceUsage(c, body)
-		if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(body); ok {
-			*usage = parsedUsage
-			usageParsed = true
+		if cacheTraceActive {
+			if parsedUsage, ok := extractOpenAIUsageForCacheTrace(c, body); ok {
+				*usage = parsedUsage
+				usageParsed = true
+			}
+		} else {
+			if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(body); ok {
+				*usage = parsedUsage
+				usageParsed = true
+			}
 		}
 	}
 	if !usageParsed {
 		// 兜底：尝试从 SSE 文本中解析 usage
-		usage = s.parseSSEUsageFromBody(string(body))
+		if cacheTraceActive {
+			usage = s.parseSSEUsageWithCacheTrace(c, string(body))
+		} else {
+			usage = s.parseSSEUsageFromBody(string(body))
+		}
 	}
 	logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false)
 
@@ -2705,6 +2719,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 // preserving passthrough payloads, except compact-only model remapping may
 // rewrite model fields back to the original requested model.
 func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel string, mappedModel string) (*openaiNonStreamingResultPassthrough, error) {
+	cacheTraceActive := cacheTraceObserving(c)
 	bodyText := string(body)
 	terminalType, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
 	if terminalOK && (terminalType == "response.failed" || terminalType == "error") {
@@ -2722,10 +2737,21 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 	}
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 
-	usage := s.parseSSEUsageWithCacheTrace(c, bodyText)
+	var usage *OpenAIUsage
+	if cacheTraceActive {
+		usage = s.parseSSEUsageWithCacheTrace(c, bodyText)
+	} else {
+		usage = s.parseSSEUsageFromBody(bodyText)
+	}
 	if ok {
-		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
-			*usage = parsedUsage
+		if cacheTraceActive {
+			if parsedUsage, parsed := extractOpenAIUsageForCacheTrace(c, finalResponse); parsed {
+				*usage = parsedUsage
+			}
+		} else {
+			if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
+				*usage = parsedUsage
+			}
 		}
 		// When the terminal event has an empty output array, reconstruct
 		// output from accumulated delta events so the client gets full content.

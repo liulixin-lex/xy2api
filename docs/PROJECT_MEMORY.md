@@ -6,6 +6,10 @@
 
 ## 当前交接状态
 
+### OpenAI 缓存 P0a（2026-10-23，开发中）
+
+- T0a.3 结算事件、缓存损失分类及 S3/S4/S5 已完成；接着 T0a.4 路由决策观测，T0a.5 由 G2 并行开发。正式性能门禁合并到 M1 集成候选；当前未推送、合并或部署。详细状态见本文件 P0a 进行中条目。
+
 ### XY2API 0.4.6 正式发布完成（2026-10-23；生产未部署）
 
 - 发布：`v0.4.6`（annotated 对象 `f267b5a7e`）→ main 合并提交 `fe7a3b6db`（[PR #129](https://github.com/liulixin-lex/xy2api/pull/129)）。Release run [39840369118](https://github.com/liulixin-lex/xy2api/actions/runs/39840369118) 成功，正式 Release 非 draft、非 prerelease，包含 6 个附件：`checksums.txt` 与 macOS、Linux、Windows 五个平台压缩包。
@@ -172,10 +176,12 @@
 ### 20261023-cache-p0a — OpenAI 缓存旁路观测（开发中）
 
 - 授权：PM 批准 P0a 先行；基线 `e369fd3bb`，分支 `cache/p0a`，每任务独立提交；不推送、不合并、不部署。
-- 范围：T0a.1 类别与位图、T0a.2 出站块链、T0a.3 结算、T0a.4 路由原因、T0a.5 运行时管理员开关后端；默认关闭、日志仅枚举/整数/HMAC。
-- 约束：保持出站字节和选号；不改 RecordUsage 主体、resilience/state.go 与插件路径。按设计 v1.7.5 及其关闭态澄清与 PM 补充执行；运行时策略按 v1.6，在 T0a.3/T0a.4 后实现。
-- 状态：T0a.1、T0a.2、T0a.1-fix 已独立提交。T0a.2-fix 实现异步有界观测、末块/稀疏检查点、fork_kind、覆盖缺口原因和关闭路径分配修复；默认单 worker、64 MiB 预算、32 MiB/s 消费速率与 10s 队列等待上限。buffered SSE 复用计费帧遍历，观测异常按请求隔离，计费语料与纯基线逐字段比较。预算先 CAS 预留再建任务；拒绝跳过逐帧观测，精简事件保留计费 P/read 和与原日志复用的 HMAC 关联键；worker 借用不可变完整缓冲区以减少复制，回调后不得保留原始视图。当前正在复核拒绝、所有权、schema 和性能，尚未放行。提交以完整 d1、生产画像 d2、分配对照及全量门禁通过为前提；最终提交树必须与正式 d2 候选相同。T0a.3 事件结算、T0a.4 路由及 T0a.5 运行时策略仍按顺序接入，未推送、合并或部署。
-- PM 基线更新：0.4.6 已发布，基于 e369fd3bb 重新录制 golden 并重跑全量门禁；只读取回退状态，不改中间件或 resilience/state.go。
+- 分工：G 负责 T0a.1–T0a.4（类别、异步块链、结算事件、路由原因）；G2 并行负责 T0a.5 运行时策略服务/管理员接口及启用接缝。G 不再改启用配置；事件预留请求快照 `PolRev`。所有功能默认关闭。
+- 约束：出站字节与选号不变；不改 RecordUsage 主体、resilience/state.go、插件路径。事件仅枚举、整数、布尔和HMAC，内部块/线程哈希不输出；回退观测仅内部日志。
+- 已完成：T0a.1、T0a.2、T0a.1-fix；T0a.2-fix 提交 `882ce6a66`，tree `2b2fee0f84a9012a1773c36f1fe1da36165a5996`，含有界异步worker、稀疏/末块检查点、预算先预留、拒绝简化、不可变body借用、关闭态分配修复。正式d1沿用仅差7文件lint修复的候选，pooled p99 0.501593ms。新树lint、定向/race、110组计费等价、关闭零执行、140组分配及400帧线程CPU ABBA通过；全量unit/integration（repository环境受限）、韧性与ci_gate沿用lint前候选。墙钟buffered差异与AA噪声证据保留供评审。
+- 当前：T0a.3 已完成纯值分类、S3/S4/S5、恰好一次结算、observer_failed 最小事件、缺 usage 元数据、typed buffered 读取位、无会话分支和异步历史 epoch 校验。unit、integration（repository 环境受限排除）、韧性、ci_gate、race、lint、110 组计费三方对照、140 组分配及关闭零执行均通过；真实日志严格校验 16 条通过（12 精确关联、4 无会话单列），数值回放可比 86/86 对齐。拒绝路径四档 0 B/op、0 allocs/op。随后接入 T0a.4 已准备的决策点与隐私测试；未推送、合并或部署。
+- 门禁安排：每子任务仅功能、分配、关闭零执行，可加非独占d1-lite；正式d1/d2由G在M1集成冻结候选统一运行。T0a.2-fix未单独运行正式d2。普通重任务走协调队列，正式计时走独占窗口。
+- 已知限制：repository在测试服务器的Docker端口环境受限，PR CI复核；Codex同工作区对话锚点可能相撞；冷会话并发和四槽时序历史会保守缺失。生产EXP-0待用户决定开启后验证。
 
 
 ### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（PR #120 已合入 main，进入下一个版本；待真实上游验证；2026-10-22 DOCS 更新状态）
@@ -1314,3 +1320,16 @@ pnpm --dir frontend run build
 - 发布：创建 annotated `v0.4.6`（tag object `f267b5a7e`，目标 `fe7a3b6db`），Release run `39840369118` 成功，Release 非 draft/非 prerelease，6 个附件生成；未执行生产部署。
 - 修改文件：`backend/cmd/server/VERSION`、`UPSTREAM_BASE.json`、`frontend/package.json`、`frontend/pnpm-lock.yaml`，以及本记忆和文档目录状态。
 - 卡点/下一步：无阻塞；生产部署仍需单独授权，后续测试 P2 按 OpenSpec tasks §7 管理。
+
+### 2026-10-23T14:50Z — `20261023-cache-p0a` — T0a.2-fix提交与T0a.3接线
+
+- 完成：`882ce6a66`保留冻结产品tree，补齐lint、产品代码分配/零执行、计费等价及线程CPU ABBA证据；基线与候选分配次数相等。默认GC的字节噪声和buffered墙钟差异如实保留，线程CPU无显著增量。
+- 决策：正式d1/d2留M1，G只做T0a.3/T0a.4；T0a.5由G2负责。
+- 下一步：权威事件契约、分类与S3/S4/S5接线，observer故障最小事件保留旧nil断言；随后路由埋点。已知限制继续在测试证据中登记，不改计费或选号语义。
+
+### 2026-10-23T17:40Z — `20261023-cache-p0a` — T0a.3 结算事件与缓存损失分类完成
+
+- 完成：完整与最小事件遵守权威契约；session_digest/request_id_hmac 与原用量日志同值；加入 S3/S4/S5、逻辑位置分类、缺字段与显式零区分、observer 故障隔离、迟到历史的 epoch 校验。
+- 验证：冻结产品 tree `2d27b47da04dd565dd85d2e18636577d24e88c83` 的全量非计时 Go 门禁、计费等价、分配、零执行与实际 JSON 严格校验通过；提交前只同步类型保护登记和本记忆。外部关闭证明夹具曾将 enabled/disabled 拼入 JSON，已仅改布尔格式后复跑，业务断言不变；首轮失败保留。
+- 限制：repository integration 仍由 GitHub CI 复核；数值回放不证明真实分叉位置；正式 d1/d2 留 M1 集成候选，生产 EXP-0 未执行。
+- 下一步：T0a.4 只在已有路由决策点标记原因，G2 继续运行时策略接缝；评审由 PM 安排。

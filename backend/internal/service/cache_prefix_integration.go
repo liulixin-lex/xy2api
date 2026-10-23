@@ -1,9 +1,10 @@
 package service
 
 import (
-	"github.com/tidwall/gjson"
 	"strings"
 	"time"
+
+	"github.com/tidwall/gjson"
 )
 
 // captureCachePrefix is read-only with respect to telemetry. Only settlement
@@ -24,7 +25,7 @@ func (s *OpenAIGatewayService) captureCachePrefix(t *cacheTrace, body []byte, pr
 		previous, exists := telemetry.sessions[session]
 		var histories [cachePrefixHistoryCount]cachePrefixChain
 		if previous.traceChains != nil {
-			histories = *previous.traceChains
+			histories = previous.traceChains.chains
 			if len(cutoff) > 0 {
 				eligible := [cachePrefixHistoryCount]cachePrefixChain{}
 				n := 0
@@ -56,7 +57,7 @@ func (s *OpenAIGatewayService) captureCachePrefix(t *cacheTrace, body []byte, pr
 
 // observeCacheUsage creates/evicts the existing session entry first. Do not
 // create a second map, a second lock, or resurrect an entry evicted meanwhile.
-func (s *OpenAIGatewayService) rememberCachePrefix(session string, chain cachePrefixChain, prompt int) {
+func (s *OpenAIGatewayService) rememberCachePrefix(session string, chain cachePrefixChain, prompt int, owners ...*cacheTraceSessionState) {
 	if len(chain.hashes) == 0 {
 		return
 	}
@@ -71,18 +72,23 @@ func (s *OpenAIGatewayService) rememberCachePrefix(session string, chain cachePr
 	if !exists {
 		return
 	}
+	// Async publication pins the settlement epoch, including nil: absent
+	// ownership must never create or reuse a later session with the same key.
+	if len(owners) > 0 && (owners[0] == nil || previous.traceChains != owners[0]) {
+		return
+	}
 	if previous.traceChains == nil {
-		previous.traceChains = new([cachePrefixHistoryCount]cachePrefixChain)
+		previous.traceChains = new(cacheTraceSessionState)
 	}
 
 	for i := 0; i < cachePrefixHistoryCount; i++ {
-		if previous.traceChains[i].settledAt.After(chain.settledAt) {
+		if previous.traceChains.chains[i].settledAt.After(chain.settledAt) {
 			continue
 		}
 		for j := cachePrefixHistoryCount - 1; j > i; j-- {
-			previous.traceChains[j] = previous.traceChains[j-1]
+			previous.traceChains.chains[j] = previous.traceChains.chains[j-1]
 		}
-		previous.traceChains[i] = chain
+		previous.traceChains.chains[i] = chain
 		break
 	}
 	telemetry.sessions[session] = previous
@@ -91,7 +97,7 @@ func (s *OpenAIGatewayService) rememberCachePrefix(session string, chain cachePr
 func cachePrefixUnavailable(rawBytes int) cachePrefixObservation {
 	return cachePrefixObservation{BytesOutRaw: rawBytes, BytesOut: -1, BlockN: -1, ForkBlock: -1, ForkByte: -1, ForkRawByte: -1,
 		ForkRef: "none", ForkPrecision: "none", ForkKind: "none", ForkBlockHi: -1, ForkByteHi: -1, PreviousPrompt: -1, HistoryAgeSeconds: -1,
-		TailKind: "n/a", ReasoningContext: "n/a", ModelGen: "n/a", ReasoningItemsN: -1, OldReasoningN: -1, ReasoningEncryptedN: -1,
+		TailKind: "unknown", ReasoningContext: "unknown", ModelGen: "unknown", ReasoningItemsN: -1, OldReasoningN: -1, ReasoningEncryptedN: -1,
 		FirstOldReasoningBlock: -1, FirstOldReasoningByte: -1, FirstOldReasoningRawByte: -1}
 }
 
@@ -120,6 +126,10 @@ func (s *OpenAIGatewayService) computeCacheTrace(ingress, body []byte, apiKeyID 
 		items = messages
 	}
 	r := &cacheTraceComputed{anchor: s.cacheTraceAnchorParts(apiKeyID, instructions, items), pckIn: cacheTracePCKIn(pck), idSource: "content_seed", thread: thread}
+	if session == "" {
+		// A missing routing seed is not a successfully derived content seed.
+		r.idSource = "unknown"
+	}
 	if headerSource {
 		r.idSource = "header"
 	} else if strings.TrimSpace(pck.String()) != "" {
