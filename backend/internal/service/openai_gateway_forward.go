@@ -23,6 +23,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	defer func() { s.finishCacheDiagnostic(c, body, result) }()
 	if c != nil {
 		c.Set("openai_cache_diagnostic", nil)
+		resetCacheTraceAttempt(c)
 	}
 	// Validate the original request before compatibility filters can discard an
 	// explicit effort. Use the same final account/compact model as forwarding.
@@ -558,7 +559,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Account namespace is orthogonal to fingerprint convergence: preserve
 		// each client's identity cardinality, but never reuse it across OAuth
 		// credentials after scheduler failover.
-		if !isCompactRequest && applyCodexAccountIdentityClientMetadataMap(decoded, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c)) {
+		if !isCompactRequest && applyCodexAccountIdentityClientMetadataMap(decoded, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c), cacheTraceFromGin(c)) {
 			markDecodedModified()
 		}
 		stageCodexFingerprintIDs(c, nil)
@@ -571,7 +572,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			fpIDs := resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
 			if fpIDs != nil {
-				if applyCodexFingerprintClientMetadata(decoded, fpIDs) {
+				if applyCodexFingerprintClientMetadata(decoded, fpIDs, cacheTraceFromGin(c)) {
 					markDecodedModified()
 				}
 			}
@@ -1507,6 +1508,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		if openaiAllowedHeaders[lowerKey] {
 			for _, v := range values {
 				req.Header.Add(key, v)
+				if strings.EqualFold(key, "session_id") {
+					cacheTraceFromGin(c).setSessionSource("client_value")
+				}
 			}
 		}
 	}
@@ -1538,12 +1542,14 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			}
 			compactSession := resolveOpenAICompactSessionID(c)
 			req.Header.Set("session_id", isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), compactSession))
+			cacheTraceFromGin(c).setSessionSource("gw_isolated")
 		} else {
 			req.Header.Set("accept", "text/event-stream")
 		}
 		if promptCacheKey != "" {
 			isolated := isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), promptCacheKey)
 			req.Header.Set("session_id", isolated)
+			cacheTraceFromGin(c).setSessionSource("gw_isolated")
 			if !compatMessagesBridge || clientConversationID != "" {
 				req.Header.Set("conversation_id", isolated)
 			}
@@ -1602,6 +1608,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	if err := applyMappedGPT55LiteCompatibility(req, account, body); err != nil {
 		return nil, err
 	}
+	s.captureCacheTraceRequest(c, req, account, "responses")
 	return req, nil
 }
 

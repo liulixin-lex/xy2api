@@ -62,6 +62,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	defer func() { s.finishCacheDiagnostic(c, body, result) }()
 	if c != nil {
 		c.Set("openai_cache_diagnostic", nil)
+		resetCacheTraceAttempt(c)
 	}
 	return s.forwardAsChatCompletions(ctx, c, account, body, promptCacheKey, defaultMappedModel, false)
 }
@@ -185,6 +186,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		if compatPromptCacheInjected && account.IsOpenAIApiKey() {
 			promptCacheKey = isolateOpenAISessionID(getAPIKeyIDFromContext(c), promptCacheKey)
 			compatPromptCacheTenantIsolated = true
+			cacheTraceFromGin(c).setPCKSource("gw_compat_hex")
 		}
 	}
 
@@ -298,7 +300,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		} else if promptCacheKey != "" {
 			reqBody["prompt_cache_key"] = promptCacheKey
 		}
-		applyCodexAccountIdentityClientMetadataMap(reqBody, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+		applyCodexAccountIdentityClientMetadataMap(reqBody, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c), cacheTraceFromGin(c))
 		responsesBody, err = json.Marshal(reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("remarshal after codex transform: %w", err)
@@ -316,6 +318,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			}
 			if existing, ok := reqBody["prompt_cache_key"].(string); !ok || strings.TrimSpace(existing) == "" {
 				reqBody["prompt_cache_key"] = trimmedKey
+				if !compatPromptCacheInjected {
+					cacheTraceFromGin(c).setPCKSource("gw_from_header")
+				}
 				responsesBody, err = json.Marshal(reqBody)
 				if err != nil {
 					return nil, fmt.Errorf("remarshal after prompt cache key injection: %w", err)
@@ -372,8 +377,10 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			sessionKey = isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), promptCacheKey)
 		}
 		upstreamReq.Header.Set("session_id", generateSessionUUID(sessionKey))
+		cacheTraceFromGin(c).setSessionSource("uuid_of_pck")
 	}
 
+	captureCacheTraceHeaders(c, upstreamReq)
 	// 7. Send request
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -850,6 +857,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 		observer.ObserveOpenAI([]byte(payload), event.Type)
 		refusalDetector.ObservePayload([]byte(payload))
+		observeCacheTraceUsage(c, []byte(payload))
 		s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
 
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)

@@ -235,6 +235,7 @@ type OpenAIUsage struct {
 
 // OpenAIForwardResult represents the result of forwarding
 type OpenAIForwardResult struct {
+	CacheTrace       *cacheTrace            `json:"-"`
 	CacheDiagnostic  *OpenAICacheDiagnostic `json:"-"`
 	RoutingSessionID string                 `json:"-"`
 	RequestID        string

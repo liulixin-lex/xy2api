@@ -411,7 +411,7 @@ func rewriteCodexTurnMetadataFields(h http.Header, fields map[string]any) {
 
 // applyCodexFingerprintClientMetadata 按预计算的收敛 ID 改写请求体中的 client_metadata。
 // 使用与头改写相同的 ids 实例，确保 turn_id 等随机字段一致。
-func applyCodexFingerprintClientMetadata(reqBody map[string]any, ids *codexFingerprintIDs) bool {
+func applyCodexFingerprintClientMetadata(reqBody map[string]any, ids *codexFingerprintIDs, traces ...*cacheTrace) bool {
 	if reqBody == nil || ids == nil {
 		return false
 	}
@@ -428,6 +428,7 @@ func applyCodexFingerprintClientMetadata(reqBody map[string]any, ids *codexFinge
 		modified = true
 	}
 	if applyCodexFingerprintPromptCacheKey(reqBody, ids) {
+		markCacheTracePCK(traces, "oauth_rewritten")
 		modified = true
 	}
 	return modified
@@ -532,7 +533,7 @@ func applyCodexFingerprintPromptCacheKey(reqBody map[string]any, ids *codexFinge
 // 其余字节原样保留；root prompt_cache_key 仅在可证明是 body session 默认值时
 // 做标量改写。语义与 applyCodexFingerprintClientMetadata 逐点一致（含
 // "非对象值整体替换为收敛集合"的行为）。
-func applyCodexFingerprintClientMetadataRaw(body []byte, ids *codexFingerprintIDs) ([]byte, bool, error) {
+func applyCodexFingerprintClientMetadataRaw(body []byte, ids *codexFingerprintIDs, traces ...*cacheTrace) ([]byte, bool, error) {
 	if len(body) == 0 || ids == nil {
 		return body, false, nil
 	}
@@ -570,6 +571,7 @@ func applyCodexFingerprintClientMetadataRaw(body []byte, ids *codexFingerprintID
 	}
 	promptCacheKey := gjson.GetBytes(body, "prompt_cache_key")
 	if promptCacheKey.Exists() && promptCacheKey.Type == gjson.String && strings.TrimSpace(promptCacheKey.String()) != "" && shouldRewriteCodexFingerprintPromptCacheKey(ids, promptCacheKey.String()) {
+		markCacheTracePCK(traces, "oauth_rewritten")
 		rewritten, err := sjson.SetBytes(next, "prompt_cache_key", ids.sessionID)
 		if err != nil {
 			return body, false, fmt.Errorf("splice converged prompt_cache_key: %w", err)

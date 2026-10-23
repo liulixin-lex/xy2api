@@ -1071,6 +1071,7 @@ type GatewayConfig struct {
 	// OpenAIScheduler: OpenAI 高级调度器粘性逃逸配置
 	OpenAIScheduler      GatewayOpenAISchedulerConfig `mapstructure:"openai_scheduler"`
 	OpenAIQualityRouting OpenAIQualityRoutingConfig   `mapstructure:"openai_quality_routing"`
+	CacheTrace           CacheTraceConfig             `mapstructure:"cache_trace"`
 	OpenAICache          OpenAICacheConfig            `mapstructure:"openai_cache"`
 	// OpenAIHTTP2: OpenAI HTTP 上游协议策略（默认启用 HTTP/2，可按代理能力回退 HTTP/1.1）
 	OpenAIHTTP2 GatewayOpenAIHTTP2Config `mapstructure:"openai_http2"`
@@ -1161,6 +1162,10 @@ type GatewayConfig struct {
 	// CNProviders: 国产 OpenAI 兼容供应商（kimi/zhipu/deepseek）的余额检测配置。
 	// 仅作用于 payg（按量付费）账号：周期探测余额，低于阈值则临时停调。
 	CNProviders GatewayCNProvidersConfig `mapstructure:"cn_providers"`
+}
+
+type CacheTraceConfig struct {
+	Enabled bool `mapstructure:"enabled"`
 }
 
 type OpenAICacheConfig struct {
@@ -2575,6 +2580,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.dial_timeout_seconds", 10)
 	viper.SetDefault("gateway.openai_quality_routing.mode", "enforce")
 	viper.SetDefault("gateway.openai_quality_routing.avoid_seconds", 300)
+	viper.SetDefault("gateway.cache_trace.enabled", false)
 	viper.SetDefault("gateway.openai_cache.diagnostics_enabled", false)
 	viper.SetDefault("gateway.openai_cache.aware_routing_enabled", false)
 	viper.SetDefault("gateway.openai_cache.rollout_percent", 0)

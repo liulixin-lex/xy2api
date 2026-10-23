@@ -150,6 +150,7 @@ func (s *OpenAIGatewayService) GenerateExplicitSessionHash(c *gin.Context, body 
 		legacyHash = ""
 	}
 	c.Set(openAICacheSessionGinKey, currentHash)
+	s.beginCacheTrace(c, body)
 	if c.Request != nil {
 		if diagnostic := s.newCacheDiagnostic(c, body, "ingress"); diagnostic != nil {
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAICacheDiagnosticKey{}, diagnostic))
@@ -203,6 +204,7 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 		legacyHash = ""
 	}
 	c.Set(openAICacheSessionGinKey, currentHash)
+	s.beginCacheTrace(c, body)
 	if c.Request != nil {
 		if diagnostic := s.newCacheDiagnostic(c, body, "ingress"); diagnostic != nil {
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAICacheDiagnosticKey{}, diagnostic))
@@ -259,6 +261,7 @@ func (s *OpenAIGatewayService) GenerateSessionHashWithFallback(c *gin.Context, b
 		legacyHash = ""
 	}
 	c.Set(openAICacheSessionGinKey, currentHash)
+	s.beginCacheTrace(c, body)
 	if c.Request != nil {
 		if diagnostic := s.newCacheDiagnostic(c, body, "ingress"); diagnostic != nil {
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAICacheDiagnosticKey{}, diagnostic))

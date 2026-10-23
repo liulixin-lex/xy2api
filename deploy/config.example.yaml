@@ -475,6 +475,9 @@ gateway:
   # Privacy-safe cache diagnostics and optional cold-session tie-breaker.
   # Existing owners, health, priority, capacity and admission remain authoritative.
   # See docs/openai-cache-reliability.md for rollout and rollback.
+  # OpenAI cache_trace v1 observation (requires diagnostics_enabled too).
+  cache_trace:
+    enabled: false
   openai_cache:
     diagnostics_enabled: false
     aware_routing_enabled: false

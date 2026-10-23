@@ -235,6 +235,9 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 		if openaiCCRawAllowedHeaders[lowerKey] {
 			for _, v := range values {
 				upstreamReq.Header.Add(key, v)
+				if strings.EqualFold(key, "session_id") {
+					cacheTraceFromGin(c).setSessionSource("client_value")
+				}
 			}
 		}
 	}
@@ -258,6 +261,7 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	applyOpenCodeSessionHeader(c, account, targetURL, upstreamReq.Header, body)
 	s.prepareQualityHTTP(ctx, c, account, upstreamReq, body)
 	s.captureCacheRequestDiagnostic(c, upstreamReq)
+	s.captureCacheTraceRequest(c, upstreamReq, account, "chat")
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -322,6 +326,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 			observer.ObserveOpenAI([]byte(payload), "")
 		}
 
+		observeCacheTraceUsage(c, []byte(payload))
 		if u := extractCCStreamUsage(payload); u != nil {
 			st.Usage = *u
 		}
@@ -392,6 +397,7 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 	}
 
 	usage := OpenAIUsage{}
+	observeCacheTraceUsage(c, respBody)
 	if parsed, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
 		usage = parsed
 	}

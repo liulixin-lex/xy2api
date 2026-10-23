@@ -181,7 +181,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 		reqStream = gjson.GetBytes(body, "stream").Bool()
 
-		accountScopedBody, accountScoped, scopeErr := applyCodexAccountIdentityClientMetadataRaw(body, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+		accountScopedBody, accountScoped, scopeErr := applyCodexAccountIdentityClientMetadataRaw(body, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c), cacheTraceFromGin(c))
 		if scopeErr != nil {
 			return nil, scopeErr
 		}
@@ -201,7 +201,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			}
 			fpIDs := resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
 			if fpIDs != nil {
-				fpBody, fpChanged, fpErr := applyCodexFingerprintClientMetadataRaw(body, fpIDs)
+				fpBody, fpChanged, fpErr := applyCodexFingerprintClientMetadataRaw(body, fpIDs, cacheTraceFromGin(c))
 				if fpErr != nil {
 					return nil, fpErr
 				}
@@ -697,6 +697,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 			}
 			for _, v := range values {
 				req.Header.Add(key, v)
+				if strings.EqualFold(key, "session_id") {
+					cacheTraceFromGin(c).setSessionSource("client_value")
+				}
 			}
 		}
 	}
@@ -760,6 +763,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		}
 		if clientSessionID != "" {
 			req.Header.Set("session_id", isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), clientSessionID))
+			cacheTraceFromGin(c).setSessionSource("gw_isolated")
 		}
 		if clientConversationID != "" {
 			req.Header.Set("conversation_id", isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), clientConversationID))
@@ -812,6 +816,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	if err := applyMappedGPT55LiteCompatibility(req, account, body); err != nil {
 		return nil, err
 	}
+	s.captureCacheTraceRequest(c, req, account, "responses")
 	return req, nil
 }
 
@@ -2277,6 +2282,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				// response.failed 自带上游已消耗的 usage（input token 通常已扣）；必须先解析
 				// 再打 cyber 标记，否则 mark 记到的是解析前的 0，导致流式 cyber 按 0 token 计费
 				// 而漏记真实用量。对齐 WS V2 / Chat 流式路径（均先解析 usage 再 Mark）。
+				observeCacheTraceUsage(c, dataBytes)
 				s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
 				if hit, code, msg := detectOpenAICyberPolicy(dataBytes); hit {
 					cyberHit = true
@@ -2391,6 +2397,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms
 			}
+			observeCacheTraceUsage(c, dataBytes)
 			s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
 		}
 		if line == "" {
@@ -2643,6 +2650,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	usage := &OpenAIUsage{}
 	usageParsed := false
 	if len(body) > 0 {
+		observeCacheTraceUsage(c, body)
 		if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(body); ok {
 			*usage = parsedUsage
 			usageParsed = true
@@ -2706,6 +2714,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 	}
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 
+	observeCacheTraceSSE(c, body)
 	usage := s.parseSSEUsageFromBody(bodyText)
 	if ok {
 		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {

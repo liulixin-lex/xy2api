@@ -160,6 +160,7 @@ func (s *OpenAIGatewayService) captureCacheRequestDiagnostic(c *gin.Context, req
 }
 
 func (s *OpenAIGatewayService) finishCacheDiagnostic(c *gin.Context, body []byte, result *OpenAIForwardResult) {
+	s.finishCacheTrace(c, result)
 	if c == nil || result == nil {
 		return
 	}

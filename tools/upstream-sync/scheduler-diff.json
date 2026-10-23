@@ -501,6 +501,16 @@
           "return selection, selectErr",
           "}"
         ]
+      },
+      {
+        "block": "cache-trace-p0a",
+        "note": "Read-only request-local cache observation; disabled before parsing; no scheduling decisions change.",
+        "removed": [],
+        "added": [
+          "s.beginCacheTrace(c, body)",
+          "s.beginCacheTrace(c, body)",
+          "s.beginCacheTrace(c, body)"
+        ]
       }
     ],
     "backend/internal/service/gemini_messages_compat_service.go": [

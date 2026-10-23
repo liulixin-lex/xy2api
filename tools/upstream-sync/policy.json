@@ -1979,6 +1979,46 @@
     {
       "path": "backend/internal/handler/wire.go",
       "value": "GroupCategory:          groupCategoryHandler,"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "s.beginCacheTrace(c, body)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "s.captureCacheTraceRequest(c, req, account, \"responses\")"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.captureCacheTraceRequest(c, req, account, \"responses\")"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "s.captureCacheTraceRequest(c, upstreamReq, account, \"chat\")"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "captureCacheTraceHeaders(c, upstreamReq)"
+    },
+    {
+      "path": "backend/internal/service/openai_cache_diagnostics.go",
+      "value": "s.finishCacheTrace(c, result)"
+    },
+    {
+      "path": "backend/internal/service/openai_codex_account_identity.go",
+      "value": "markCacheTracePCK(traces, \"oauth_rewritten\")"
+    },
+    {
+      "path": "backend/internal/service/openai_codex_fingerprint.go",
+      "value": "markCacheTracePCK(traces, \"oauth_rewritten\")"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "observeCacheTraceUsage(c, dataBytes)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "observeCacheTraceUsage(c, respBody)"
     }
   ],
   "forbidden_module_paths": [

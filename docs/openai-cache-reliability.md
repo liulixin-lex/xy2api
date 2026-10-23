@@ -46,3 +46,15 @@ Compose / 环境变量对应 `GATEWAY_OPENAI_CACHE_DIAGNOSTICS_ENABLED`、`GATEW
 建议先仅启用诊断，按模型、账号、缓存模式、格式和长度桶比较相同前缀的续请求；再从 1% 启用偏好，观察缓存 token 比例、首字延迟、错误/切换率、结算与上游账单。用量别名修复可能使报告命中率变化，应分别比较真实缓存收益与统计修正。回退偏好只需关闭 `aware_routing_enabled` 并将比例归零，基础计量和租户隔离修复仍保留。
 
 本地和 CI 使用合成上游、并发测试及独立 Redis 验证，不证明生产命中率已经提升。短提示、不稳定的前置内容、请求间隔、错误切换和代理内部凭据池仍可能导致低命中；发布后需结合诊断确认，不能一律归因于网关调度。
+
+## cache_trace v1（P0a）
+
+静态 `gateway.cache_trace.enabled` 默认 false（环境变量 `GATEWAY_CACHE_TRACE_ENABLED`），仅在 `gateway.openai_cache.diagnostics_enabled` 也为 true 且有持久 JWT secret 时采集。关闭时不进行额外 JSON 解析或请求体读取。观测不改变请求 bytes、选号、turn-state 或计费；结果在原有 usage 结算时输出 Info 事件 `cache_trace`。
+
+- 入站 `pck_class_in` 只看原 body：none / empty / client_uuid / client_non_uuid；UUID 用固定 8-4-4-4-12 十六进制正则，不校验版本位。
+- 出站 `pck_class_out` 按实际注入/改写点记录：none / passthrough / gw_compat_hex / gw_from_header / oauth_rewritten；gw_grok 仅预留来源标记（P0a 排除 Grok），gw_uuid 留给后续身份改动。`pck_out_is_uuid` 只表示形态，不用于推导来源。
+- `sess_out_relation` 表示下划线 session_id 的来源：none / client_value / gw_isolated / uuid_of_pck（eq_pck 预留），不与本地 RoutingSessionID 比较。`sess_hdr_in/out` 的位 0–13 依次为 session_id、session-id、conversation_id、x-session-id、x-session-affinity、x-opencode-session、x-conversation-id、thread_id、thread-id、x-codex-turn-state、x-codex-turn-metadata、x-client-request-id、x-claude-code-session-id、x-grok-conv-id；14 留给 Anthropic metadata.user_id，15 保留。`thread_present` 同时识别 client_metadata.thread_id 的存在性。
+- `usage_fields` 位 0–5：cached_tokens（含 cache_read_tokens 兼容别名）、prompt_cache_hit_tokens、cache_read_input_tokens、cachedContentTokenCount、cache write/creation 系列、prompt_cache_diagnostics。显式 0 仍记为存在；位图不改变 usage 优先级或启用新别名计费。
+- `id_source` 复用本地会话信号的选择顺序；`conv_anchor` 为 API key 作用域内前导指令与首条 user 的 HMAC（8 字节）。request_id_hmac 是现有 openai-request HMAC 的前 12 字节，能与既有事件按此前缀关联；session_digest 为本地隔离身份的独立域 HMAC（12 字节）。不记录明文 body、会话头或缓存键。布尔字段在事件中编码为 0/1。
+- `transport=plugin` 来自现有 ShouldRouteOpenAIOAuth 的只读判断；其快照属于插件前，请勿当作最终上游 wire。`ingress_ws_bridge` 在 HTTP builder 中根据既有 WS 客户端标记尽力填写；没有标记时为 0。不改插件路径。
+- P0a 仅覆盖 OpenAI Responses / Chat HTTP；原生 WS、非 OpenAI、monitor probe 不新增归因。快照在最终兼容处理后抓取，Chat 的最终 session_id 单独更新，失败尝试之间重置出站字段；异步结算持有独立快照。
