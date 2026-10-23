@@ -353,6 +353,28 @@ describe('CacheSettingsPanel', () => {
     }
   })
 
+  it('keeps focus in the change log when a retry or a gap refresh swaps its content', async () => {
+    const { wrapper, api } = mountPanel(m1Response(), validation(), { attach: true })
+    api.listHistory.mockRejectedValueOnce(new Error('offline')).mockResolvedValue(history('history_gap'))
+    await flushPromises()
+    await wrapper.get('[data-test="policy-observability"]').findAll('button').find((b) => b.text().includes('history.toggle'))!.trigger('click')
+    await flushPromises()
+    const log = wrapper.get<HTMLElement>('[data-test="policy-history"]').element
+    // Failed load, then a log with a gap: each button is replaced by the loading line when clicked.
+    for (const name of ['admin.cacheSettings.retry', 'admin.cacheSettings.history.refresh']) {
+      const button = wrapper.get('[data-test="policy-history"]').findAll('button').find((b) => b.text() === name)!.element as HTMLButtonElement
+      button.focus()
+      button.click()
+      await flushPromises()
+      expect(document.activeElement, name).not.toBe(document.body)
+      expect(document.activeElement, name).toBe(log)
+    }
+    expect(api.listHistory).toHaveBeenCalledTimes(3)
+    expect(wrapper.find('[data-test="history-refresh"]').exists()).toBe(true)
+    // The focused log is named, so a screen reader says where focus went.
+    expect(log.getAttribute('aria-label')).toBe('admin.cacheSettings.history.toggle')
+  })
+
   it('links to the gateway tab, names the place with the settings page keys and follows only in-app links (C-14)', async () => {
     const { wrapper } = mountPanel()
     await flushPromises()

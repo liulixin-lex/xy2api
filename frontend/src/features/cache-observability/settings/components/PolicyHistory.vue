@@ -1,9 +1,17 @@
 <template>
-  <div :id="id" class="mt-3 rounded-2xl bg-gray-50 p-4 dark:bg-dark-900/60" data-test="policy-history">
+  <div
+    :id="id"
+    ref="root"
+    tabindex="-1"
+    role="region"
+    :aria-label="t('admin.cacheSettings.history.toggle')"
+    class="mt-3 rounded-2xl bg-gray-50 p-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:bg-dark-900/60"
+    data-test="policy-history"
+  >
     <p v-if="!history || history === 'loading'" class="text-sm text-gray-600 dark:text-dark-300" role="status">{{ t('admin.cacheSettings.history.loading') }}</p>
     <div v-else-if="history === 'failed'" class="flex flex-wrap items-center gap-3" role="alert">
       <p class="text-sm text-red-700 dark:text-red-300">{{ t('admin.cacheSettings.history.failed') }}</p>
-      <button type="button" class="btn btn-secondary btn-sm" @click="emit('retry')">{{ t('admin.cacheSettings.retry') }}</button>
+      <button type="button" class="btn btn-secondary btn-sm" @click="reload">{{ t('admin.cacheSettings.retry') }}</button>
     </div>
     <template v-else>
       <p v-if="!history.items.length" class="text-sm text-gray-600 dark:text-dark-300">{{ t('admin.cacheSettings.history.empty') }}</p>
@@ -32,7 +40,7 @@
       <!-- The reason says whether older entries are gone for good or a gap may still fill in (§7.6). -->
       <div v-if="!history.history_complete" class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600 dark:text-dark-300" data-test="history-incomplete">
         <p>{{ t(`admin.cacheSettings.history.incomplete.${incompleteReason(history)}`) }}</p>
-        <button v-if="incompleteReason(history) === 'gap'" type="button" class="btn btn-ghost btn-sm" data-test="history-refresh" @click="emit('retry')">
+        <button v-if="incompleteReason(history) === 'gap'" type="button" class="btn btn-ghost btn-sm" data-test="history-refresh" @click="reload">
           {{ t('admin.cacheSettings.history.refresh') }}
         </button>
       </div>
@@ -41,6 +49,7 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { fieldCopyKey } from '../catalog'
 import { formatBoth } from '../format'
@@ -48,6 +57,14 @@ import type { HistoryIncompleteReason, HistoryResponse } from '../types'
 
 const props = defineProps<{ id: string; policyKey: string; history: HistoryResponse | 'loading' | 'failed' | undefined }>()
 const emit = defineEmits<{ (e: 'retry'): void }>()
+const root = ref<HTMLElement | null>(null)
+
+/** Reloading swaps the list, and the button with it, for a loading line; keep focus in the change log, not on <body>. */
+function reload() {
+  root.value?.focus()
+  emit('retry')
+}
+
 const { t, te } = useI18n()
 
 /** The audit log stores field paths; show the same names the card uses. */
