@@ -170,6 +170,13 @@
   - 不改 `GroupSelector` 的默认样式，也不改其他调用它的弹窗。
 - 分支：`fix/account-groups-dialog-size-20261023`（工作树 `xy2api-wt/groups-dialog-size`，自 origin/main `e369fd3bb`）。
 - 授权：用户要求修改；按惯例止于开 PR、CI 全绿，不合并、不发版、不部署。
+- 实现：提交 `fix(accounts): widen the account groups dialog so group names fit`；spec 增加对弹窗宽度和列表高度的断言；`GROUP_CATEGORIES.md` 的弹窗描述同步更新。
+- 本地验证：
+  - 前端：lint、typecheck、i18n 3/3、全量 431 个文件 3281 项、build 通过，构建出的 CSS 里有 `max-height:60vh!important`。
+  - 仓库工具：文档一致性、干净树 audit 通过。
+  - 没有起页面截图核对，部署后请在页面上确认。
+- PR：[#131](https://github.com/liulixin-lex/xy2api/pull/131)（2026-10-23T05:27Z 开）。
+- 下一步：CI 全绿后交给另一位作者审查合并；发版与部署另行授权。
 
 ### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（PR #120 已合入 main，进入下一个版本；待真实上游验证；2026-10-22 DOCS 更新状态）
 
@@ -1307,3 +1314,13 @@ pnpm --dir frontend run build
 - 发布：创建 annotated `v0.4.6`（tag object `f267b5a7e`，目标 `fe7a3b6db`），Release run `39840369118` 成功，Release 非 draft/非 prerelease，6 个附件生成；未执行生产部署。
 - 修改文件：`backend/cmd/server/VERSION`、`UPSTREAM_BASE.json`、`frontend/package.json`、`frontend/pnpm-lock.yaml`，以及本记忆和文档目录状态。
 - 卡点/下一步：无阻塞；生产部署仍需单独授权，后续测试 P2 按 OpenSpec tasks §7 管理。
+
+### 2026-10-23T05:28Z — `20261023-groups-dialog-size` — PR #131 已开
+
+- 请求/目标：用户反馈 v0.4.6 的账号“编辑分组”弹窗太小，分组名被截断，要调大。
+- 开始状态：工作树 `xy2api-wt/groups-dialog-size`，分支 `fix/account-groups-dialog-size-20261023`，自 origin/main `e369fd3bb`；PR #126、#127 已合入并随 v0.4.6 发布。
+- 完成操作：弹窗宽度从 `normal` 改为 `wide`，分组列表最大高度从 320px 改为 60vh；spec 增加断言；文档同步更新。
+- 修改文件：`AccountGroupsDialog.vue`、`AccountGroupsDialog.spec.ts`、`docs/GROUP_CATEGORIES.md`，以及本记忆。
+- 验证：见进行中条目。
+- 卡点/风险：无。
+- 下一步：CI 全绿后交给另一位作者审查合并；发版与部署另行授权。
