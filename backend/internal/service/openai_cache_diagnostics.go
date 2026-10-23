@@ -41,9 +41,10 @@ type OpenAICacheDiagnostic struct {
 }
 
 type openAICacheHistory struct {
-	account int64
-	prefix  string
-	at      time.Time
+	traceChains [cachePrefixHistoryCount]cachePrefixChain
+	account     int64
+	prefix      string
+	at          time.Time
 }
 
 type openAICacheSample struct {
@@ -228,7 +229,7 @@ func (s *OpenAIGatewayService) observeCacheUsage(result *OpenAIForwardResult, ac
 		}
 		delete(t.sessions, oldestKey)
 	}
-	t.sessions[d.Session] = openAICacheHistory{account.ID, d.WirePrefix, now}
+	t.sessions[d.Session] = openAICacheHistory{account: account.ID, prefix: d.WirePrefix, at: now, traceChains: previous.traceChains}
 	usage := result.Usage
 	if reason == "comparable_continuation" && usage.InputTokens >= 1024 && usage.CacheReadSource != "" && usage.CacheReadInputTokens <= usage.InputTokens && usage.CacheCreationInputTokens <= usage.InputTokens-usage.CacheReadInputTokens {
 		key := cacheSampleKey(d, account, d.Model)

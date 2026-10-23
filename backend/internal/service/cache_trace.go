@@ -28,9 +28,11 @@ type cacheTrace struct {
 	data       cacheTraceData
 	sessionKey string
 	emitted    bool
+	chain      cachePrefixChain
 }
 
 type cacheTraceData struct {
+	Prefix                                   cachePrefixObservation
 	RequestIDHMAC, SessionDigest, ConvAnchor string
 	ProtocolIn, ProtocolOut                  string
 	GroupID, AccountID                       int64
@@ -250,6 +252,8 @@ func resetCacheTraceAttempt(c *gin.Context) {
 	t.data.AccountID = 0
 	t.data.ProtocolOut = ""
 	t.data.Transport = "http"
+	t.data.Prefix = cachePrefixObservation{}
+	t.chain = cachePrefixChain{}
 }
 
 func (s *OpenAIGatewayService) captureCacheTraceRequest(c *gin.Context, req *http.Request, account *Account, protocol string) {
@@ -287,6 +291,7 @@ func (s *OpenAIGatewayService) captureCacheTraceRequest(c *gin.Context, req *htt
 	// sends bypass these builders; no plugin code or turn state is inspected.
 	t.data.IngressWSBridge = GetOpenAIClientTransport(c) == OpenAIClientTransportWS
 	t.mu.Unlock()
+	s.captureCachePrefix(t, body, protocol)
 }
 
 func captureCacheTraceHeaders(c *gin.Context, req *http.Request) {
@@ -350,7 +355,7 @@ func (s *OpenAIGatewayService) finishCacheTrace(c *gin.Context, result *OpenAIFo
 	}
 	data := t.data
 	data.RequestIDHMAC = traceDigestPrefix(s.cacheIdentityDigest("openai-request", result.RequestID), 24)
-	result.CacheTrace = &cacheTrace{data: data, sessionKey: t.sessionKey}
+	result.CacheTrace = &cacheTrace{data: data, sessionKey: t.sessionKey, chain: t.chain}
 }
 
 func traceBool(value bool) int {
@@ -377,6 +382,15 @@ func (t *cacheTrace) emitCacheTrace() {
 		"pck_class_in", d.PCKClassIn, "pck_class_out", d.PCKClassOut, "pck_out_is_uuid", traceBool(d.PCKOutIsUUID),
 		"sess_hdr_in", int(d.SessHdrIn), "sess_hdr_out", int(d.SessHdrOut), "sess_out_relation", d.SessOutRelation,
 		"id_source", d.IDSource, "thread_present", traceBool(d.ThreadPresent), "usage_fields", int(d.UsageFields),
+		"blk_n", d.Prefix.BlockN, "bytes_out", d.Prefix.BytesOut, "fork_blk", d.Prefix.ForkBlock,
+		"fork_byte", d.Prefix.ForkByte, "fork_ref", d.Prefix.ForkRef,
+		"bytes_out_raw", d.Prefix.BytesOutRaw, "fork_raw_byte", d.Prefix.ForkRawByte,
+		"first_old_reasoning_raw_byte", d.Prefix.FirstOldReasoningRawByte,
+		"blk_order_physical_eq_logical", traceBool(d.Prefix.BlockOrderPhysicalEqLogical),
+		"tail_kind", d.Prefix.TailKind, "reasoning_items_n", d.Prefix.ReasoningItemsN, "old_reasoning_n", d.Prefix.OldReasoningN,
+		"first_old_reasoning_blk", d.Prefix.FirstOldReasoningBlock, "first_old_reasoning_byte", d.Prefix.FirstOldReasoningByte,
+		"include_encrypted_reasoning", traceBool(d.Prefix.IncludeEncryptedReasoning), "store_false", traceBool(d.Prefix.StoreFalse),
+		"reasoning_enc_n", d.Prefix.ReasoningEncryptedN, "reasoning_ctx", d.Prefix.ReasoningContext, "model_gen", d.Prefix.ModelGen,
 		"transport", d.Transport, "ingress_ws_bridge", traceBool(d.IngressWSBridge), "route_reason", d.RouteReason, "rebind_cause", d.RebindCause)
 }
 

@@ -478,6 +478,8 @@ gateway:
   # OpenAI cache_trace v1 observation (requires diagnostics_enabled too).
   cache_trace:
     enabled: false
+    chain_percent: 100
+    reasoning_context_paths: ["reasoning.context"]
   openai_cache:
     diagnostics_enabled: false
     aware_routing_enabled: false

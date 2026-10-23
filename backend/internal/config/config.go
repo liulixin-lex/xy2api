@@ -1165,7 +1165,9 @@ type GatewayConfig struct {
 }
 
 type CacheTraceConfig struct {
-	Enabled bool `mapstructure:"enabled"`
+	Enabled               bool     `mapstructure:"enabled"`
+	ChainPercent          int      `mapstructure:"chain_percent"`
+	ReasoningContextPaths []string `mapstructure:"reasoning_context_paths"`
 }
 
 type OpenAICacheConfig struct {
@@ -2581,6 +2583,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_quality_routing.mode", "enforce")
 	viper.SetDefault("gateway.openai_quality_routing.avoid_seconds", 300)
 	viper.SetDefault("gateway.cache_trace.enabled", false)
+	viper.SetDefault("gateway.cache_trace.chain_percent", 100)
+	viper.SetDefault("gateway.cache_trace.reasoning_context_paths", []string{"reasoning.context"})
 	viper.SetDefault("gateway.openai_cache.diagnostics_enabled", false)
 	viper.SetDefault("gateway.openai_cache.aware_routing_enabled", false)
 	viper.SetDefault("gateway.openai_cache.rollout_percent", 0)
@@ -2826,6 +2830,9 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if c.Gateway.CacheTrace.ChainPercent < 0 || c.Gateway.CacheTrace.ChainPercent > 100 {
+		return fmt.Errorf("gateway.cache_trace.chain_percent must be between 0 and 100")
+	}
 	// Absolute Redis snapshots could overwrite usage committed by atomic billing.
 	if c.Database.UserPlatformQuotaFlusherEnabled {
 		return fmt.Errorf("atomic billing requires database.user_platform_quota_flusher_enabled=false; flush legacy quota snapshots before upgrading")

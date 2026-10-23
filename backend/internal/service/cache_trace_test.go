@@ -17,7 +17,10 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func traceTestConfig(cfg *config.Config) { cfg.Gateway.CacheTrace.Enabled = true }
+func traceTestConfig(cfg *config.Config) {
+	cfg.Gateway.CacheTrace.Enabled = true
+	cfg.Gateway.CacheTrace.ChainPercent = 100
+}
 
 func TestCacheTraceWireCategoriesAndEnabledGolden(t *testing.T) {
 	data, err := os.ReadFile("testdata/cache_trace_wire_e369fd3bb.json")
