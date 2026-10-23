@@ -1,0 +1,64 @@
+{
+  "_contract": [
+    "C-4"
+  ],
+  "_note": "M4：选号键开启 → 最高风险，要求理由、勾选与输入键名；warnings 中的 static_aware_routing 依赖以 blocker 形式出现在预览中。",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/routing/validate",
+    "body": {
+      "expected_rev": 0,
+      "spec": {
+        "affinity_mode": "host"
+      },
+      "reason": "小比例试运行",
+      "confirm": {
+        "checkbox": true,
+        "typed": "cache_routing_policy"
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": true,
+      "errors": [],
+      "warnings": [
+        "decision_pending_static_routing"
+      ],
+      "diff": [
+        {
+          "field": "affinity_mode",
+          "before": "score",
+          "after": "host"
+        }
+      ],
+      "risk": "highest",
+      "direction": "enable",
+      "confirm": {
+        "reason_required": true,
+        "checkbox_required": true,
+        "type_to_confirm": "cache_routing_policy"
+      },
+      "current_rev": 0,
+      "rev_stale": false,
+      "effective_preview": {
+        "state": "blocked",
+        "active": false,
+        "blockers": [
+          "static_aware_routing_disabled"
+        ]
+      },
+      "affected": [
+        {
+          "key": "routing",
+          "state_before": "off",
+          "state_after": "blocked",
+          "active_after": false
+        }
+      ]
+    }
+  }
+}

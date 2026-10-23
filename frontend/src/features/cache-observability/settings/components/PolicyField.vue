@@ -1,29 +1,19 @@
 <template>
   <div
-    class="grid gap-3 py-4 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,24rem)] lg:gap-8"
+    class="grid gap-3 py-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-8"
     :class="modified ? '-mx-3 rounded-xl bg-amber-50/70 px-3 dark:bg-amber-900/10' : ''"
     :data-test="`field-${policyKey}.${field.field}`"
     :data-modified="modified || undefined"
   >
     <div class="min-w-0">
       <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <label :for="controlId" class="text-sm font-semibold text-gray-900 dark:text-white">{{ label }}</label>
-        <code class="break-all text-xs text-gray-500 dark:text-dark-400">{{ field.field }}</code>
+        <!-- Only controls that carry controlId get a <label for>; the others name themselves (fieldset legend, aria-label). -->
+        <component :is="labelable ? 'label' : 'span'" :for="labelable ? controlId : undefined" class="text-sm font-semibold text-gray-900 dark:text-white">{{ label }}</component>
         <span v-if="modified" class="badge badge-warning">{{ t('admin.cacheSettings.modified') }}</span>
-        <span v-if="masked" class="badge badge-gray" data-test="masked-by-master">
-          <Icon name="lock" size="xs" aria-hidden="true" />
-          {{ t('admin.cacheSettings.maskedByMaster') }}
-        </span>
         <span v-if="clipped" class="badge badge-warning">{{ t('admin.cacheSettings.clipped') }}</span>
       </div>
       <p v-if="description" :id="descId" class="mt-1 max-w-prose text-sm text-gray-600 dark:text-dark-300">{{ description }}</p>
-      <p v-if="impact" :id="impactId" class="mt-1.5 flex max-w-prose items-start gap-1.5 text-xs text-gray-700 dark:text-dark-200">
-        <Icon name="exclamationCircle" size="xs" class="mt-0.5 shrink-0" aria-hidden="true" />
-        <span><span class="font-semibold">{{ t('admin.cacheSettings.impact') }}</span>{{ impact }}</span>
-      </p>
-      <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">
-        {{ t('admin.cacheSettings.defaultValue', { value: show(defaultValue) }) }}<template v-if="modified">{{ t('admin.cacheSettings.listSeparator') }}{{ t('admin.cacheSettings.originalValue', { value: show(storedValue) }) }}</template>
-      </p>
+      <p v-if="modified" :id="origId" class="mt-1 text-xs text-gray-600 dark:text-dark-300" data-test="field-original">{{ t('admin.cacheSettings.originalValue', { value: show(storedValue) }) }}</p>
       <ul v-if="messages.length" :id="issuesId" class="mt-2 space-y-1" role="list">
         <li
           v-for="message in messages"
@@ -36,8 +26,35 @@
           <span>{{ message.text }}</span>
         </li>
       </ul>
+      <!-- Impact, default and cap source on demand: the field row keeps label, description and problems (m-6). -->
+      <details class="group mt-1.5 max-w-prose text-xs text-gray-600 dark:text-dark-300" data-test="field-details">
+        <summary
+          class="inline-flex cursor-pointer list-none items-center gap-1 rounded text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-dark-300 dark:hover:text-white [&::-webkit-details-marker]:hidden"
+        >
+          <Icon name="chevronRight" size="xs" class="transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
+          {{ t('admin.cacheSettings.details') }}
+        </summary>
+        <dl class="mt-1.5 space-y-1 border-l-2 border-gray-200 pl-3 dark:border-dark-600">
+          <div v-if="impact" class="flex gap-1">
+            <dt class="shrink-0 font-semibold text-gray-700 dark:text-dark-200">{{ t('admin.cacheSettings.impact') }}</dt>
+            <dd>{{ impact }}</dd>
+          </div>
+          <div class="flex gap-1">
+            <dt class="shrink-0">{{ t('admin.cacheSettings.defaultLabel') }}</dt>
+            <dd>{{ show(defaultValue) }}</dd>
+          </div>
+          <div v-if="field.cap_source" class="flex gap-1">
+            <dt class="shrink-0">{{ t('admin.cacheSettings.capLabel') }}</dt>
+            <dd class="break-all font-mono">{{ field.cap_source }}</dd>
+          </div>
+          <div class="flex gap-1">
+            <dt class="shrink-0">{{ t('admin.cacheSettings.fieldKey') }}</dt>
+            <dd class="break-all font-mono">{{ field.field }}</dd>
+          </div>
+        </dl>
+      </details>
     </div>
-    <div class="min-w-0 lg:justify-self-end">
+    <div class="min-w-0">
       <FieldControl
         :field="field"
         :value="value"
@@ -60,9 +77,9 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdminGroup } from '@/types'
 import Icon from '@/components/icons/Icon.vue'
-import { fieldCopyKey } from '../catalog'
-import { codeLabel, formatValue } from '../format'
-import { sameValue, type InlineIssue } from '../schema'
+import { controlIdFor, fieldCopyKey } from '../catalog'
+import { codeLabel, errorParams, formatValue, idNames } from '../format'
+import { fieldKind, sameValue, type InlineIssue } from '../schema'
 import type { FieldError, SchemaField } from '../types'
 import FieldControl from './FieldControl.vue'
 
@@ -76,7 +93,6 @@ const props = defineProps<{
   serverErrors: FieldError[]
   lock: string | null
   disabled: boolean
-  masked: boolean
   clipped: boolean
   groups: AdminGroup[]
   groupsFailed: boolean
@@ -86,10 +102,10 @@ const emit = defineEmits<{ (e: 'update', value: unknown): void }>()
 const { t, te } = useI18n()
 
 const slug = computed(() => `${props.policyKey}-${props.field.field}`.replace(/[^a-z0-9]+/gi, '-'))
-const controlId = computed(() => `cache-policy-${slug.value}`)
+const controlId = computed(() => controlIdFor(props.policyKey, props.field.field))
 const descId = computed(() => `cache-policy-desc-${slug.value}`)
-const impactId = computed(() => `cache-policy-impact-${slug.value}`)
 const issuesId = computed(() => `cache-policy-issues-${slug.value}`)
+const origId = computed(() => `cache-policy-orig-${slug.value}`)
 
 function copy(part: 'label' | 'description' | 'risk'): string {
   const key = fieldCopyKey(props.policyKey, props.field.field, part)
@@ -99,16 +115,13 @@ const label = computed(() => copy('label') || props.field.field)
 const description = computed(() => copy('description'))
 const impact = computed(() => copy('risk'))
 const modified = computed(() => !sameValue(props.value, props.storedValue))
+const labelable = computed(() => !['enum_list', 'threshold_rules', 'unknown'].includes(fieldKind(props.field)))
 
-function groupName(id: number): string {
-  const group = props.groups.find((g) => g.id === id)
-  return group ? `${group.name} (#${id})` : t('admin.cacheSettings.groupPicker.groupID', { id })
-}
 function show(value: unknown): string {
-  return formatValue(props.field, value, t, te, { group: groupName, account: (id) => t('admin.cacheSettings.ids.item', { id }) })
+  return formatValue(props.field, value, t, te, idNames(props.field, props.groups, t))
 }
 
-type MessageIcon = 'xCircle' | 'exclamationTriangle' | 'lock'
+type MessageIcon = 'xCircle' | 'exclamationTriangle' | 'lock' | 'infoCircle'
 interface Message {
   key: string
   code: string
@@ -130,6 +143,17 @@ const messages = computed<Message[]>(() => {
       icon: 'lock',
     })
   }
+  // A stored value above a lowered cap runs at the cap; say what actually runs (C-10).
+  if (props.clipped && typeof props.storedValue === 'number' && props.field.max !== undefined && props.storedValue > props.field.max) {
+    list.push({
+      key: 'clipped',
+      code: 'clipped',
+      level: 'info',
+      text: t('admin.cacheSettings.clippedRunsAt', { value: show(props.field.max) }),
+      tone: 'text-gray-700 dark:text-dark-200',
+      icon: 'infoCircle',
+    })
+  }
   const seen = new Set<string>()
   for (const error of props.serverErrors) {
     seen.add(error.code)
@@ -137,7 +161,7 @@ const messages = computed<Message[]>(() => {
       key: `server-${error.code}`,
       code: error.code,
       level: 'error',
-      text: codeLabel('errors', error.code, t, te, { limit: error.limit ?? '-', min: props.field.min ?? '-', max: props.field.max ?? '-' }),
+      text: codeLabel('errors', error.code, t, te, errorParams(props.field, error)),
       tone: 'text-red-700 dark:text-red-300',
       icon: 'xCircle',
     })
@@ -156,7 +180,7 @@ const messages = computed<Message[]>(() => {
   return list
 })
 
-const describedBy = computed(() =>
-  [description.value ? descId.value : '', impact.value ? impactId.value : '', messages.value.length ? issuesId.value : ''].filter(Boolean).join(' ') || undefined,
+const describedBy = computed(
+  () => [description.value ? descId.value : '', modified.value ? origId.value : '', messages.value.length ? issuesId.value : ''].filter(Boolean).join(' ') || undefined,
 )
 </script>

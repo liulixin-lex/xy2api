@@ -1,0 +1,51 @@
+{
+  "_contract": [
+    "C-12"
+  ],
+  "_note": "变更记录：来自 audit_logs（action 前缀 admin.cache.policies.、PUT）；失败的写入也列出（rev_before/rev_after 为 null）；changed_fields 只含字段名；validate 不出现在这里。after_rev 参数用于 409 合并时只取中间的写入。",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/cache/policies/history?key=upstream_identity&after_rev=4",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "items": [
+        {
+          "at": "2026-10-23T08:58:10Z",
+          "key": "upstream_identity",
+          "action": "admin.cache.policies.upstream_identity.update",
+          "actor": {
+            "user_id": 2,
+            "email": "oncall@example.com"
+          },
+          "status_code": 200,
+          "rev_before": 4,
+          "rev_after": 5,
+          "changed_fields": [
+            "rollout_percent"
+          ],
+          "reason": "错误率上升，先调回 0"
+        },
+        {
+          "at": "2026-10-23T08:57:30Z",
+          "key": "upstream_identity",
+          "action": "admin.cache.policies.upstream_identity.update",
+          "actor": {
+            "user_id": 2,
+            "email": "oncall@example.com"
+          },
+          "status_code": 422,
+          "rev_before": null,
+          "rev_after": null,
+          "changed_fields": [],
+          "reason": null
+        }
+      ],
+      "history_complete": true
+    }
+  }
+}

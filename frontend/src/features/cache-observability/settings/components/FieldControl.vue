@@ -1,13 +1,12 @@
 <template>
   <div class="min-w-0" :data-test="`control-${field.field}`">
-    <Toggle
+    <PolicySwitch
       v-if="kind === 'bool'"
       :id="controlId"
       :model-value="value === true"
       :disabled="disabled"
       :aria-label="label"
       :aria-describedby="describedBy"
-      :class="disabled ? 'cursor-not-allowed opacity-50' : ''"
       @update:model-value="emit('update', $event)"
     />
 
@@ -24,12 +23,12 @@
         :value="typeof value === 'number' ? value : ''"
         :disabled="disabled"
         :aria-label="label"
-        :aria-describedby="describedBy"
+        :aria-describedby="[describedBy, rangeText ? `${controlId}-range` : ''].filter(Boolean).join(' ') || undefined"
         :aria-invalid="invalid || undefined"
         @change="onNumber(($event.target as HTMLInputElement).value)"
       />
-      <span v-if="field.unit" class="text-sm text-gray-600 dark:text-dark-300">{{ field.unit === 'percent' ? '%' : field.unit }}</span>
-      <span v-if="rangeText" class="w-full text-xs text-gray-500 dark:text-dark-400">{{ rangeText }}</span>
+      <span v-if="field.unit" class="text-sm text-gray-600 dark:text-dark-300">{{ unitSuffix(field.unit, t) }}</span>
+      <span v-if="rangeText" :id="`${controlId}-range`" class="w-full text-xs text-gray-600 dark:text-dark-300">{{ rangeText }}</span>
     </div>
 
     <div v-else-if="kind === 'enum'" class="w-full sm:w-72">
@@ -50,7 +49,7 @@
       <label v-for="option in options" :key="option" class="inline-flex items-center gap-2 text-sm text-gray-800 dark:text-gray-200">
         <input
           type="checkbox"
-          class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500 dark:bg-dark-800"
+          class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-0 focus-visible:ring-2 focus-visible:ring-primary-500 dark:border-dark-500 dark:bg-dark-800"
           :checked="Array.isArray(value) && value.includes(option)"
           :disabled="disabled"
           @change="toggleOption(option, ($event.target as HTMLInputElement).checked)"
@@ -114,12 +113,12 @@
       <p v-else-if="!ids.length" class="input-hint">{{ t('admin.cacheSettings.ids.emptyMeansAll') }}</p>
       <ul v-if="ids.length" class="mt-2 flex flex-wrap gap-2" :aria-label="label">
         <li v-for="id in ids" :key="id" class="flex items-center gap-1 rounded-md bg-gray-100 py-1 pl-2.5 pr-1 text-sm tabular-nums text-gray-800 dark:bg-dark-700 dark:text-gray-100">
-          {{ t('admin.cacheSettings.ids.item', { id }) }}
+          {{ names.account(id) }}
           <button
             type="button"
             class="rounded p-1 text-gray-600 hover:bg-gray-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500 disabled:opacity-50 dark:text-dark-300 dark:hover:bg-dark-600"
             :disabled="disabled"
-            :aria-label="t('admin.cacheSettings.ids.remove', { id })"
+            :aria-label="t('admin.cacheSettings.ids.remove', { id: names.account(id) })"
             @click="removeId(id)"
           >
             <Icon name="x" size="sm" />
@@ -163,12 +162,12 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdminGroup } from '@/types'
-import Toggle from '@/components/common/Toggle.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { codeLabel } from '../format'
+import { codeLabel, idNames, unitSuffix } from '../format'
 import { fieldKind, fieldOptions, idRef } from '../schema'
 import type { SchemaField } from '../types'
+import PolicySwitch from './PolicySwitch.vue'
 import ThresholdRulesEditor from './ThresholdRulesEditor.vue'
 
 const props = defineProps<{
@@ -190,11 +189,11 @@ const kind = computed(() => fieldKind(props.field))
 const refKind = computed(() => idRef(props.field))
 const options = computed(() => fieldOptions(props.field))
 const ids = computed(() => (Array.isArray(props.value) ? props.value.filter((v): v is number => typeof v === 'number') : []))
+// The cap source sits in the field's details; the range stays next to the input.
 const rangeText = computed(() => {
-  const { min, max, cap_source: cap } = props.field
+  const { min, max } = props.field
   if (min === undefined && max === undefined) return ''
-  const range = t('admin.cacheSettings.range', { min: min ?? '-', max: max ?? '-' })
-  return cap ? `${range}${t('admin.cacheSettings.capSource', { source: cap })}` : range
+  return t('admin.cacheSettings.range', { min: min ?? '-', max: max ?? '-' })
 })
 const enumOptions = computed(() => {
   const list = [...options.value]
@@ -211,10 +210,8 @@ const groupOptions = computed(() =>
     })),
 )
 
-function groupName(id: number): string {
-  const group = props.groups.find((g) => g.id === id)
-  return group ? `${group.name} (#${id})` : t('admin.cacheSettings.groupPicker.groupID', { id })
-}
+const names = computed(() => idNames(props.field, props.groups, t))
+const groupName = (id: number) => names.value.group(id)
 
 function onNumber(raw: string) {
   const trimmed = raw.trim()

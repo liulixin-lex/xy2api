@@ -54,7 +54,13 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/account/__tests__/AccountTableFilters.spec.ts \
 	src/views/admin/__tests__/GroupsView.columnSettings.spec.ts \
 	src/views/admin/__tests__/GroupsView.categories.spec.ts \
-	src/views/admin/__tests__/AccountsView.groupCategories.spec.ts
+	src/views/admin/__tests__/AccountsView.groupCategories.spec.ts \
+	src/i18n/__tests__/localesNoKeyCollision.spec.ts \
+	src/features/cache-observability/__tests__/integrationSurface.spec.ts \
+	src/features/cache-observability/settings/__tests__/schema.spec.ts \
+	src/features/cache-observability/settings/__tests__/usePolicies.spec.ts \
+	src/features/cache-observability/settings/__tests__/contract.spec.ts \
+	src/features/cache-observability/settings/__tests__/CacheSettingsPanel.spec.ts
 
 # 一键编译前后端
 build: build-backend build-frontend

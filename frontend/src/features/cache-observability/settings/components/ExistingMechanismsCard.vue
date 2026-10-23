@@ -12,28 +12,28 @@
     <dl class="mt-4 divide-y divide-gray-100 text-sm dark:divide-dark-700">
       <div class="flex flex-wrap items-center justify-between gap-3 py-3">
         <dt class="min-w-0">
-          <span class="font-medium text-gray-900 dark:text-white">{{ t('admin.cacheSettings.existing.claudeFallback') }}</span>
-          <code class="ml-2 break-all text-xs text-gray-500 dark:text-dark-400">claude_cache_fallback_policy</code>
+          <span class="font-medium text-gray-900 dark:text-white">{{ claudeTitle }}</span>
+          <code class="ml-2 break-all text-xs text-gray-600 dark:text-dark-300">claude_cache_fallback_policy</code>
         </dt>
         <dd class="flex items-center gap-3 text-gray-700 dark:text-dark-200">
           <span>{{ claudeText }}</span>
-          <router-link :to="claudeLink" class="text-primary-700 underline-offset-2 hover:underline dark:text-primary-300">{{ t('admin.cacheSettings.existing.editInSettings') }}</router-link>
+          <router-link :to="claudeLink" class="text-primary-700 underline-offset-2 hover:underline dark:text-primary-300">{{ editAt(claudeTitle) }}</router-link>
         </dd>
       </div>
       <div v-for="row in staticRows" :key="row.name" class="flex flex-wrap items-center justify-between gap-3 py-3">
         <dt class="min-w-0">
           <span class="font-medium text-gray-900 dark:text-white">{{ t(`admin.cacheSettings.existing.${row.label}`) }}</span>
-          <code class="ml-2 break-all text-xs text-gray-500 dark:text-dark-400">{{ row.name }}</code>
+          <code class="ml-2 break-all text-xs text-gray-600 dark:text-dark-300">{{ row.name }}</code>
         </dt>
         <dd class="flex items-center gap-3 text-gray-700 dark:text-dark-200">
           <span class="tabular-nums">{{ row.value }}</span>
-          <span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.cacheSettings.existing.staticNote') }}</span>
+          <span class="text-xs text-gray-600 dark:text-dark-300">{{ t('admin.cacheSettings.existing.staticNote') }}</span>
         </dd>
       </div>
       <div class="flex flex-wrap items-center justify-between gap-3 py-3">
-        <dt class="font-medium text-gray-900 dark:text-white">{{ t('admin.cacheSettings.existing.resilience') }}</dt>
+        <dt class="font-medium text-gray-900 dark:text-white">{{ resilienceTitle }}</dt>
         <dd>
-          <router-link to="/admin/settings" class="text-primary-700 underline-offset-2 hover:underline dark:text-primary-300">{{ t('admin.cacheSettings.existing.editInSettings') }}</router-link>
+          <router-link :to="GATEWAY_SETTINGS" class="text-primary-700 underline-offset-2 hover:underline dark:text-primary-300">{{ editAt(resilienceTitle) }}</router-link>
         </dd>
       </div>
     </dl>
@@ -60,7 +60,16 @@ const claudeText = computed(() => {
     ? t('admin.cacheSettings.existing.claudeConfigured', { n: claude.value.group_count })
     : t('admin.cacheSettings.values.off')
 })
-// Only an in-app path is followed; anything else falls back to the settings page.
+// Names come from the settings page's own keys, so a rename there shows up here too (§11.7).
+const claudeTitle = computed(() => t('admin.settings.claudeCacheFallback.title'))
+const resilienceTitle = computed(() => t('admin.resilience.settings.title'))
+/** Links land on the tab without scrolling (FE-Q11), so the text says where the setting is. */
+function editAt(section: string): string {
+  return t('admin.cacheSettings.existing.editAt', { page: t('admin.settings.title'), tab: t('admin.settings.tabs.gateway'), section })
+}
+// Both settings are on the gateway tab of the settings page.
+const GATEWAY_SETTINGS = '/admin/settings?tab=gateway'
+// Only an in-app path from the server is followed (FE-Q7); anything else falls back to the settings page.
 const claudeLink = computed(() => {
   const link = claude.value?.settings_link
   return typeof link === 'string' && link.startsWith('/admin/') ? link : '/admin/settings'

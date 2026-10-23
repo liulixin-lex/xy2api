@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { changedFields, fieldKind, getPath, inlineIssues, lockReason, partialSpec, rebaseDraft, setPath } from '../schema'
-import type { PolicyEntry } from '../types'
-import { identityEntry, observabilityEntry } from './fixtures'
+import { applyChoices, changedFields, fieldKind, fieldOptions, getPath, idOptions, inlineIssues, lockReason, mergeDraft, partialSpec, setPath, trend } from '../schema'
+import type { AvailablePolicy } from '../types'
+import { identityEntry, observabilityEntry, rewritten } from './fixtures'
 
 describe('policy schema helpers', () => {
   it('reads and writes nested field paths without mutating the source', () => {
@@ -21,7 +21,7 @@ describe('policy schema helpers', () => {
   })
 
   it('sends only changed top-level fields, nested objects whole', () => {
-    const entry: PolicyEntry = {
+    const entry: AvailablePolicy = {
       ...observabilityEntry(),
       key: 'routing',
       stored: { ...observabilityEntry().stored, spec: { keep_sticky_on_busy: { enabled: false, rollout_percent: 0 }, affinity_mode: 'score' } },
@@ -43,7 +43,10 @@ describe('policy schema helpers', () => {
     draft = setPath(draft, 'sample_percent', 12.5)
     const codes = inlineIssues(entry, draft).map((i) => `${i.field}:${i.code}`)
     expect(codes).toEqual(expect.arrayContaining(['byte_budget_mib:exceeds_static_cap', 'sample_percent:not_integer']))
-    expect(inlineIssues(entry, setPath(entry.stored.spec, 'chain_percent', -1))[0]).toMatchObject({ code: 'out_of_range' })
+    expect(inlineIssues(entry, setPath(entry.stored.spec, 'chain_percent', -1))[0]).toMatchObject({ code: 'out_of_range', params: { min: 0, max: 100 } })
+    // Untouched values are never flagged, so a lowered cap cannot block other edits (C-10).
+    const clipped = { ...entry, stored: { ...entry.stored, spec: { ...entry.stored.spec, byte_budget_mib: 128 } } }
+    expect(inlineIssues(clipped, setPath(clipped.stored.spec, 'chain_percent', 50))).toEqual([])
   })
 
   it('mirrors the hard rules of DESIGN §11.3 and locks dependent switches', () => {
@@ -57,7 +60,7 @@ describe('policy schema helpers', () => {
     // forward_session_headers does not depend on the mode (L-02).
     expect(lockReason(entry, off, entry.schema.find((f) => f.field === 'forward_session_headers')!)).toBeNull()
 
-    const anthropic: PolicyEntry = {
+    const anthropic: AvailablePolicy = {
       ...entry,
       key: 'anthropic_identity',
       stored: { ...entry.stored, spec: { anchor_group_ids: [1], metadata_group_ids: [] } },
@@ -71,7 +74,7 @@ describe('policy schema helpers', () => {
   })
 
   it('requires a new north-star version when a rule changes, but not for the job switches', () => {
-    const entry: PolicyEntry = {
+    const entry: AvailablePolicy = {
       ...observabilityEntry(),
       key: 'northstar',
       stored: { ...observabilityEntry().stored, spec: { rollup_enabled: false, policy_version: '2026-10-22-v1', exclude_media: true } },
@@ -87,11 +90,39 @@ describe('policy schema helpers', () => {
     expect(inlineIssues(entry, setPath(rule, 'policy_version', '2026-10-24-v1'))).toEqual([])
   })
 
-  it('re-applies only the admin edits on top of a newer stored value after a conflict', () => {
-    const old = identityEntry()
-    const draft = setPath(old.stored.spec, 'rollout_percent', 20)
-    const fresh = identityEntry({ stored: { ...old.stored, rev: 4, spec: { ...old.stored.spec, forward_session_headers: 'normalize' } } })
-    const rebased = rebaseDraft(old, draft, fresh)
-    expect(rebased).toMatchObject({ rollout_percent: 20, forward_session_headers: 'normalize' })
+  it('merges three ways: one-sided edits merge, clashes wait for a choice and flag a reverted rollback', () => {
+    const base = identityEntry()
+    let draft = setPath(base.stored.spec, 'rollout_percent', 60)
+    draft = setPath(draft, 'forward_session_headers', 'normalize')
+    draft = setPath(draft, 'chat_compat_uuid', true)
+    const latest = rewritten(base, 5, { rollout_percent: 0, header_only_uuid: true, chat_compat_uuid: true })
+    const merge = mergeDraft(base, draft, latest)
+    expect(merge.theirFields).toEqual(['rollout_percent', 'chat_compat_uuid', 'header_only_uuid'])
+    // chat_compat_uuid: both made the same change, so nothing to decide.
+    expect(merge.merged).toEqual(['forward_session_headers'])
+    expect(merge.overlaps).toEqual([{ field: 'rollout_percent', base: 50, mine: 60, theirs: 0, choice: null, reverting: true }])
+    expect(merge.draft).toMatchObject({ rollout_percent: 0, header_only_uuid: true, forward_session_headers: 'normalize' })
+    expect(applyChoices(merge.draft, [{ ...merge.overlaps[0], choice: 'mine' }])).toMatchObject({ rollout_percent: 60 })
+    expect(applyChoices(merge.draft, [{ ...merge.overlaps[0], choice: 'theirs' }])).toMatchObject({ rollout_percent: 0 })
+  })
+
+  it('tells turning up from turning down', () => {
+    expect([trend(false, true), trend(true, false), trend(10, 0), trend(0, 10), trend('off', 'uuid_fill'), trend('uuid_fill', 'off'), trend('whitelist', 'normalize'), trend(1, 1)]).toEqual([
+      'up',
+      'down',
+      'down',
+      'up',
+      'up',
+      'down',
+      null,
+      null,
+    ])
+  })
+
+  it('reads string options and named account candidates from the schema', () => {
+    const fields = identityEntry().schema
+    expect(fieldOptions(fields.find((f) => f.field === 'mode')!)).toEqual(['off', 'uuid_fill'])
+    expect(fieldOptions(fields.find((f) => f.field === 'account_ids')!)).toEqual([])
+    expect(idOptions(fields.find((f) => f.field === 'account_ids')!)[0]).toEqual({ id: 101, name: 'relay-a-01', platform: 'openai' })
   })
 })

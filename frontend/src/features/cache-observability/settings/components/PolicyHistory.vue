@@ -11,33 +11,47 @@
         <li
           v-for="(item, index) in history.items"
           :key="`${item.at}-${index}`"
-          class="grid gap-x-4 gap-y-0.5 text-sm sm:grid-cols-[13rem_minmax(0,1fr)]"
-          :class="item.status_code >= 400 ? 'text-gray-400 dark:text-dark-500' : 'text-gray-800 dark:text-gray-100'"
+          class="grid gap-x-4 gap-y-0.5 text-sm text-gray-800 dark:text-gray-100 sm:grid-cols-[19rem_minmax(0,1fr)]"
           :data-failed="item.status_code >= 400 || undefined"
         >
-          <time :datetime="item.at" :title="formatUtc(item.at)" class="whitespace-nowrap tabular-nums text-gray-600 dark:text-dark-300">{{ formatUtc(item.at) }}</time>
+          <time :datetime="item.at" class="tabular-nums text-gray-600 dark:text-dark-300">{{ formatBoth(item.at, t) }}</time>
           <div class="min-w-0">
             <p class="break-words">
               {{ item.actor?.email || t('admin.cacheSettings.footer.unknownActor') }}
-              <span v-if="item.rev_before !== null && item.rev_after !== null" class="tabular-nums">{{ t('admin.cacheSettings.history.revChange', { from: item.rev_before, to: item.rev_after }) }}</span>
-              <span v-if="item.status_code >= 400">{{ t('admin.cacheSettings.history.failedWrite', { status: item.status_code }) }}</span>
+              <span v-if="item.rev_after !== null" class="tabular-nums">{{ t('admin.cacheSettings.history.wrote', { rev: item.rev_after }) }}</span>
+              <!-- Failed writes matter most when tracing an incident: marked and explained, not dimmed (m-5). -->
+              <span v-if="item.status_code >= 400" class="badge badge-danger ml-1 align-middle">{{ failureText(item.status_code) }}</span>
             </p>
-            <p v-if="item.changed_fields.length" class="break-all font-mono text-xs text-gray-500 dark:text-dark-400">{{ item.changed_fields.join(', ') }}</p>
+            <p v-if="item.changed_fields.length" class="break-words text-xs text-gray-600 dark:text-dark-300" :title="item.changed_fields.join(', ')">
+              {{ t('admin.cacheSettings.history.changed', { fields: item.changed_fields.map(fieldLabel).join(t('admin.cacheSettings.nameSeparator')) }) }}
+            </p>
             <p v-if="item.reason" class="break-words text-xs">{{ t('admin.cacheSettings.footer.reason') }}{{ item.reason }}</p>
           </div>
         </li>
       </ol>
-      <p v-if="!history.history_complete" class="mt-3 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.cacheSettings.history.incomplete') }}</p>
+      <p v-if="!history.history_complete" class="mt-3 text-xs text-gray-600 dark:text-dark-300">{{ t('admin.cacheSettings.history.incomplete') }}</p>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { formatUtc } from '../format'
+import { fieldCopyKey } from '../catalog'
+import { formatBoth } from '../format'
 import type { HistoryResponse } from '../types'
 
-defineProps<{ id: string; history: HistoryResponse | 'loading' | 'failed' | undefined; now: Date }>()
+const props = defineProps<{ id: string; policyKey: string; history: HistoryResponse | 'loading' | 'failed' | undefined }>()
 const emit = defineEmits<{ (e: 'retry'): void }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
+
+/** The audit log stores field paths; show the same names the card uses. */
+function fieldLabel(path: string): string {
+  const key = fieldCopyKey(props.policyKey, path, 'label')
+  return te(key) ? t(key) : path
+}
+
+function failureText(status: number): string {
+  const key = `admin.cacheSettings.history.status.${status}`
+  return t('admin.cacheSettings.history.failedWrite', { status, what: te(key) ? t(key) : t('admin.cacheSettings.history.status.other') })
+}
 </script>

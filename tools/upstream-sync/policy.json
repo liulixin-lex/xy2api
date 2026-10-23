@@ -2332,6 +2332,18 @@
     {
       "path": "backend/internal/service/cache_trace.go",
       "value": "PolRev: CachePolicyFromGin(c).Revision()"
+    },
+    {
+      "path": "frontend/src/router/index.ts",
+      "value": "    path: '/admin/cache',\n    name: 'AdminCacheObservability',\n    component: () => import('@/features/cache-observability/CacheObservabilityView.vue'),\n    meta: {\n      requiresAuth: true,\n      requiresAdmin: true,"
+    },
+    {
+      "path": "frontend/src/components/layout/AppSidebar.vue",
+      "value": "{ path: '/admin/cache', label: t('nav.cacheObservability'), icon: DatabaseIcon },"
+    },
+    {
+      "path": "frontend/src/components/layout/AppSidebar.vue",
+      "value": "const DatabaseIcon = {"
     }
   ],
   "forbidden_module_paths": [

@@ -1,4 +1,4 @@
-import type { PolicyEntry, PolicySpec, SchemaField } from './types'
+import type { AvailablePolicy, ConflictOverlap, IdOption, PolicyEntry, PolicySpec, SchemaField } from './types'
 
 export type FieldKind = 'bool' | 'int' | 'enum' | 'enum_list' | 'string' | 'id_list' | 'threshold_rules' | 'unknown'
 
@@ -25,8 +25,21 @@ export function fieldKind(field: SchemaField): FieldKind {
   return KIND_ALIASES[field.type] ?? 'unknown'
 }
 
+/** String options of an enum or enum_list (`options` is the only key, §7.2). */
 export function fieldOptions(field: SchemaField): string[] {
-  return field.options ?? field.enum ?? []
+  return (field.options ?? []).filter((o): o is string => typeof o === 'string')
+}
+
+/** Named candidates of an account id list (FE-Q3); empty when the server sends none. */
+export function idOptions(field: SchemaField): IdOption[] {
+  return (field.options ?? []).filter(
+    (o): o is IdOption => !!o && typeof o === 'object' && typeof (o as IdOption).id === 'number' && typeof (o as IdOption).name === 'string',
+  )
+}
+
+/** A key this build ships, with its stored value and defaults present. */
+export function isAvailable(entry: PolicyEntry | null | undefined): entry is AvailablePolicy {
+  return !!entry && entry.available && !!entry.stored && !!entry.defaults
 }
 
 /** `group` / `account` for id lists; inferred from the field name when the schema has no `ref`. */
@@ -39,6 +52,15 @@ export function idRef(field: SchemaField): 'group' | 'account' | null {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+/**
+ * Deep copy of a spec value. Drafts live in reactive refs, so values read from
+ * them are Vue proxies, which structuredClone rejects (DataCloneError); specs
+ * are plain JSON, so a JSON round trip is exact.
+ */
+export function cloneValue<T>(value: T): T {
+  return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T)
 }
 
 export function stableStringify(value: unknown): string {
@@ -67,7 +89,7 @@ export function getPath(spec: PolicySpec | null | undefined, path: string): unkn
 
 export function setPath(spec: PolicySpec, path: string, value: unknown): PolicySpec {
   const [head, ...rest] = path.split('.')
-  if (!rest.length) return { ...spec, [head]: structuredClone(value) }
+  if (!rest.length) return { ...spec, [head]: cloneValue(value) }
   const child = isPlainObject(spec[head]) ? (spec[head] as PolicySpec) : {}
   return { ...spec, [head]: setPath(child, rest.join('.'), value) }
 }
@@ -78,7 +100,7 @@ export interface FieldChange {
   after: unknown
 }
 
-export function changedFields(entry: PolicyEntry, draft: PolicySpec): FieldChange[] {
+export function changedFields(entry: AvailablePolicy, draft: PolicySpec): FieldChange[] {
   return entry.schema
     .map((field) => ({ field, before: getPath(entry.stored.spec, field.field), after: getPath(draft, field.field) }))
     .filter((c) => !sameValue(c.before, c.after))
@@ -93,18 +115,64 @@ export function partialSpec(draft: PolicySpec, changes: FieldChange[]): PolicySp
   const spec: PolicySpec = {}
   for (const change of changes) {
     const top = change.field.field.split('.')[0]
-    spec[top] = structuredClone(draft[top])
+    spec[top] = cloneValue(draft[top])
   }
   return spec
 }
 
-/** Re-applies the admin's edits on top of a newer stored value after a 409. */
-export function rebaseDraft(oldEntry: PolicyEntry, oldDraft: PolicySpec, freshEntry: PolicyEntry): PolicySpec {
-  let draft = structuredClone(freshEntry.stored.spec)
-  for (const change of changedFields(oldEntry, oldDraft)) {
-    if (freshEntry.schema.some((f) => f.field === change.field.field)) draft = setPath(draft, change.field.field, change.after)
+/** Whether a value moves a feature up (on, wider, higher) or down; null when it cannot be told. */
+export function trend(from: unknown, to: unknown): 'up' | 'down' | null {
+  if (sameValue(from, to)) return null
+  if (typeof from === 'boolean' && typeof to === 'boolean') return to ? 'up' : 'down'
+  if (typeof from === 'number' && typeof to === 'number') return to > from ? 'up' : 'down'
+  if (typeof from === 'string' && typeof to === 'string') {
+    if (to === 'off') return 'down'
+    if (from === 'off') return 'up'
   }
-  return draft
+  return null
+}
+
+export interface MergeResult {
+  /** Latest stored value with the admin's clean edits applied; overlapping fields keep the latest value until chosen. */
+  draft: PolicySpec
+  theirFields: string[]
+  merged: string[]
+  overlaps: ConflictOverlap[]
+}
+
+/**
+ * Three-way merge after someone else wrote the key (409, or a refresh while a
+ * draft was open). `base` is the entry the admin started editing from. A
+ * field only one side changed merges silently; a field both sides changed to
+ * different values becomes an overlap that the admin must decide (M-3).
+ */
+export function mergeDraft(base: AvailablePolicy, draft: PolicySpec, latest: AvailablePolicy): MergeResult {
+  const theirFields = latest.schema
+    .filter((f) => !sameValue(getPath(base.stored.spec, f.field), getPath(latest.stored.spec, f.field)))
+    .map((f) => f.field)
+  let next = cloneValue(latest.stored.spec)
+  const merged: string[] = []
+  const overlaps: ConflictOverlap[] = []
+  for (const change of changedFields(base, draft)) {
+    const path = change.field.field
+    if (!latest.schema.some((f) => f.field === path)) continue
+    const theirs = getPath(latest.stored.spec, path)
+    if (!theirFields.includes(path)) {
+      next = setPath(next, path, change.after)
+      merged.push(path)
+    } else if (!sameValue(theirs, change.after)) {
+      const reverting = trend(change.before, theirs) === 'down' && trend(theirs, change.after) === 'up'
+      overlaps.push({ field: path, base: change.before, mine: change.after, theirs, choice: null, reverting })
+    }
+  }
+  return { draft: next, theirFields, merged, overlaps }
+}
+
+/** Applies the admin's per-field decisions to a merged draft. */
+export function applyChoices(draft: PolicySpec, overlaps: ConflictOverlap[]): PolicySpec {
+  let next = draft
+  for (const o of overlaps) next = setPath(next, o.field, o.choice === 'mine' ? o.mine : o.theirs)
+  return next
 }
 
 export interface InlineIssue {
@@ -119,13 +187,15 @@ export interface InlineIssue {
  * authority; these checks only mirror the schema ranges and the hard rules of
  * DESIGN §11.3 so a wrong value is visible before the preview.
  */
-export function inlineIssues(entry: PolicyEntry, draft: PolicySpec, baseline: PolicySpec = entry.stored.spec): InlineIssue[] {
+export function inlineIssues(entry: AvailablePolicy, draft: PolicySpec, baseline: PolicySpec = entry.stored.spec): InlineIssue[] {
   const issues: InlineIssue[] = []
   const has = (path: string) => entry.schema.some((f) => f.field === path)
   const get = (path: string) => getPath(draft, path)
 
   for (const field of entry.schema) {
     const value = get(field.field)
+    // Only edits are checked: an untouched value above a lowered cap is shown as "clipped" and never blocks other edits (C-10).
+    if (sameValue(getPath(baseline, field.field), value)) continue
     const kind = fieldKind(field)
     if (kind === 'int') {
       if (typeof value !== 'number' || !Number.isInteger(value)) issues.push({ field: field.field, level: 'error', code: 'not_integer' })
@@ -178,7 +248,7 @@ export function inlineIssues(entry: PolicyEntry, draft: PolicySpec, baseline: Po
  * Controls that cannot be switched on yet because a hard prerequisite is
  * missing. A field that already deviates stays editable so it can be fixed.
  */
-export function lockReason(entry: PolicyEntry, draft: PolicySpec, field: SchemaField): string | null {
+export function lockReason(entry: AvailablePolicy, draft: PolicySpec, field: SchemaField): string | null {
   if (entry.key !== 'upstream_identity') return null
   if (!['chat_compat_uuid', 'header_only_uuid'].includes(field.field)) return null
   if (getPath(draft, field.field) === true) return null
@@ -186,6 +256,6 @@ export function lockReason(entry: PolicyEntry, draft: PolicySpec, field: SchemaF
 }
 
 /** Whether a field holds something other than its default (used for "overridden by master" marks). */
-export function isConfigured(entry: PolicyEntry, draft: PolicySpec, field: SchemaField): boolean {
+export function isConfigured(entry: AvailablePolicy, draft: PolicySpec, field: SchemaField): boolean {
   return !sameValue(getPath(entry.defaults, field.field), getPath(draft, field.field))
 }
