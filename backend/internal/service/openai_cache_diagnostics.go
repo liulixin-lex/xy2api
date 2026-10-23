@@ -41,7 +41,9 @@ type OpenAICacheDiagnostic struct {
 }
 
 type openAICacheHistory struct {
-	traceChains [cachePrefixHistoryCount]cachePrefixChain
+	// Optional: keep the existing map value small enough for inline storage.
+	// Allocated only when a sampled, settled chain is actually retained.
+	traceChains *[cachePrefixHistoryCount]cachePrefixChain
 	account     int64
 	prefix      string
 	at          time.Time
@@ -189,7 +191,7 @@ func (s *OpenAIGatewayService) logCacheSettlement(result *OpenAIForwardResult, u
 	if s.cfg == nil || !s.cfg.Gateway.OpenAICache.DiagnosticsEnabled || result.CacheDiagnostic == nil {
 		return
 	}
-	slog.Info("openai_cache_settled_usage", "session_digest", result.CacheDiagnostic.Session, "request_id_hmac", s.cacheIdentityDigest("openai-request", result.RequestID), "input_tokens", usage.InputTokens, "cache_read_tokens", usage.CacheReadTokens, "cache_write_tokens", usage.CacheCreationTokens, "total_cost", usage.TotalCost, "actual_cost", usage.ActualCost)
+	slog.Info("openai_cache_settled_usage", "session_digest", result.CacheDiagnostic.Session, "request_id_hmac", s.cacheUsageRequestDigest(result), "input_tokens", usage.InputTokens, "cache_read_tokens", usage.CacheReadTokens, "cache_write_tokens", usage.CacheCreationTokens, "total_cost", usage.TotalCost, "actual_cost", usage.ActualCost)
 }
 
 func cacheSampleKey(d *OpenAICacheDiagnostic, account *Account, model string) string {
@@ -264,7 +266,7 @@ func (s *OpenAIGatewayService) observeCacheUsage(result *OpenAIForwardResult, ac
 	}
 	t.mu.Unlock()
 	if s.cfg != nil && s.cfg.Gateway.OpenAICache.DiagnosticsEnabled {
-		slog.Info("openai_cache_usage", "session_digest", d.Session, "prefix_hmac", d.WirePrefix, "fingerprint_source", d.Source, "account_id", account.ID, "group_id", d.GroupID, "model", d.Model, "cache_mode", d.Mode, "format", d.Format, "length_bucket", d.LengthBucket, "reason", reason, "input_tokens", usage.InputTokens, "cache_read_tokens", usage.CacheReadInputTokens, "cache_write_tokens", usage.CacheCreationInputTokens, "read_source", usage.CacheReadSource, "write_source", usage.CacheWriteSource, "request_id_hmac", s.cacheIdentityDigest("openai-request", result.RequestID))
+		slog.Info("openai_cache_usage", "session_digest", d.Session, "prefix_hmac", d.WirePrefix, "fingerprint_source", d.Source, "account_id", account.ID, "group_id", d.GroupID, "model", d.Model, "cache_mode", d.Mode, "format", d.Format, "length_bucket", d.LengthBucket, "reason", reason, "input_tokens", usage.InputTokens, "cache_read_tokens", usage.CacheReadInputTokens, "cache_write_tokens", usage.CacheCreationInputTokens, "read_source", usage.CacheReadSource, "write_source", usage.CacheWriteSource, "request_id_hmac", s.cacheUsageRequestDigest(result))
 	}
 }
 

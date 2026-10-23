@@ -17,7 +17,7 @@ func prefixTestScan(body []byte) (cachePrefixChain, cachePrefixPositions, cacheP
 }
 func prefixTestCompare(old, next []byte) cachePrefixObservation {
 	a, _, _ := prefixTestScan(old)
-	b, offsets, o := prefixTestScan(next)
+	b, offsets, o := scanCachePrefix(next, "responses", prefixTestKey, nil, [3]cachePrefixChain{a})
 	a.anchor = "same"
 	b.anchor = "same"
 	a.prompt = 10000
@@ -34,16 +34,16 @@ func TestCachePrefixAppendModifyDelete(t *testing.T) {
 		block  int
 		marker string
 	}{
-		{"append", prefixTestBody(append(append([]string{}, items...), `{"role":"assistant","content":"four"}`)...), 6, `{"role":"assistant","content":"four"}`},
+		{"append", prefixTestBody(append(append([]string{}, items...), `{"role":"assistant","content":"four"}`)...), -1, ""},
 		{"modify", prefixTestBody(items[0], `{"role":"assistant","content":"changed"}`, items[2]), 4, `{"role":"assistant","content":"changed"}`},
 		{"delete-middle", prefixTestBody(items[0], items[2]), 4, items[2]},
-		{"identical", old, 6, ""},
+		{"identical", old, -1, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			original := append([]byte(nil), tc.body...)
 			o := prefixTestCompare(old, tc.body)
-			want := len(tc.body)
+			want := -1
 			if tc.marker != "" {
 				want = bytes.Index(tc.body, []byte(tc.marker))
 			}
@@ -85,7 +85,7 @@ func TestCachePrefixInterleaving(t *testing.T) {
 	next, offsets, o := prefixTestScan(prefixTestBody(`{"role":"user","content":"A"}`, `{"role":"assistant","content":"continue"}`))
 	next.anchor = "a"
 	compareCachePrefix(next, offsets, [3]cachePrefixChain{b, a}, &o)
-	if o.ForkRef != "prevk" || o.PreviousPrompt != 9000 || o.ForkBlock != 4 {
+	if o.ForkRef != "prevk" || o.PreviousPrompt != 9000 || o.ForkBlock != -1 {
 		t.Fatalf("%+v", o)
 	}
 	next.anchor = "c"
@@ -102,26 +102,27 @@ func TestCachePrefixTruncation(t *testing.T) {
 	}
 	body := prefixTestBody(items...)
 	chain, _, _ := prefixTestScan(body)
-	if len(chain.hashes) != 512 || !chain.truncated || chain.blocks != 623 {
+	if len(chain.hashes) > 512 || !chain.truncated || chain.blocks != 623 {
 		t.Fatal("unbounded chain")
 	}
 	for _, index := range []int{5, 507, 508, 600} {
 		changed := append([]string{}, items...)
 		changed[index] = `{"role":"user","content":"changed"}`
 		o := prefixTestCompare(body, prefixTestBody(changed...))
-		if index+3 < 511 {
-			if o.TruncatedUnknown || o.ForkBlock != index+3 {
-				t.Fatalf("known fork %d: %+v", index, o)
+
+		if o.ForkPrecision == "exact" {
+			if o.ForkBlock != index+3 {
+				t.Fatalf("exact fork %d: %+v", index, o)
 			}
-		} else if !o.TruncatedUnknown || o.ForkBlock != -1 {
-			t.Fatalf("unknown tail fork %d: %+v", index, o)
+		} else if o.ForkPrecision != "range" || o.ForkBlock > index+3 || o.ForkBlockHi < index+3 || o.ForkBlockHi-o.ForkBlock >= chain.stride {
+			t.Fatalf("bounded tail fork %d: %+v", index, o)
 		}
 	}
-	if o := prefixTestCompare(body, body); !o.TruncatedUnknown {
+	if o := prefixTestCompare(body, body); o.ForkPrecision != "none" {
 		t.Fatalf("truncated identical %+v", o)
 	}
 	// A short reference ending before the cap has a known append boundary.
-	if o := prefixTestCompare(prefixTestBody(items[:10]...), body); o.TruncatedUnknown || o.ForkBlock != 13 {
+	if o := prefixTestCompare(prefixTestBody(items[:10]...), body); o.TruncatedUnknown || o.ForkPrecision != "none" {
 		t.Fatalf("short reference %+v", o)
 	}
 }
@@ -250,7 +251,7 @@ func TestCachePrefixLogicalOrderIndependentOfWireOrder(t *testing.T) {
 	last := []byte(`{"input":` + input + `,"tools":` + tools + `}`)
 	a, offsetsA, oa := prefixTestScan(first)
 	b, offsetsB, ob := prefixTestScan(last)
-	if cachePrefixEqualBlocks(a, b) != a.blocks || offsetsA.n != offsetsB.n {
+	if a.final != b.final || offsetsA.n != offsetsB.n {
 		t.Fatal("wire order changed logical prefix")
 	}
 	for i := range offsetsA.n {

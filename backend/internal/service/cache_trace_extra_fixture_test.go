@@ -113,5 +113,6 @@ func traceExtraRun(t *testing.T, rc traceExtraCase, configure func(*config.Confi
 	clone.Body = io.NopCloser(bytes.NewReader(wire))
 	dump, err := httputil.DumpRequestOut(clone, true)
 	require.NoError(t, err)
+	awaitCacheTrace(t, s, c, result)
 	return c, string(dump), wire, req.Header, result
 }

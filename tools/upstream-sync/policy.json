@@ -2022,11 +2022,11 @@
     },
     {
       "path": "backend/internal/service/openai_cache_diagnostics.go",
-      "value": "[cachePrefixHistoryCount]cachePrefixChain"
+      "value": "*[cachePrefixHistoryCount]cachePrefixChain"
     },
     {
       "path": "backend/internal/service/openai_gateway_messages.go",
-      "value": "observeCacheTraceUsage(c, []byte(payload))"
+      "value": "observeCacheTraceUsage(c, payloadBytes)"
     },
     {
       "path": "backend/internal/service/openai_codex_fingerprint.go",
@@ -2039,6 +2039,38 @@
     {
       "path": "backend/internal/service/openai_gateway_chat_completions.go",
       "value": "resetCacheTraceAttempt(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "s.startCacheTraceRequest(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "s.startCacheTraceRequest(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.startCacheTraceRequest(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "s.startCacheTraceRequest(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_service.go",
+      "value": "cacheTraceWorkersOnce"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_service.go",
+      "value": "cacheTraceWorkers"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "usage := s.parseSSEUsageWithCacheTrace(c, bodyText)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "usage := s.parseSSEUsageWithCacheTrace(c, bodyText)"
     }
   ],
   "forbidden_module_paths": [

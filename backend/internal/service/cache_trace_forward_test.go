@@ -43,7 +43,11 @@ func TestCacheTraceWireCategoriesAndEnabledGolden(t *testing.T) {
 				case strings.HasPrefix(tc.Kind, "oauth"):
 					require.Equal(t, "oauth_rewritten", d.PCKClassOut)
 				default:
-					require.Contains(t, []string{"gw_compat_hex", "gw_from_header"}, d.PCKClassOut)
+					source := "gw_compat_hex"
+					if tc.Header != "none" {
+						source = "gw_from_header"
+					}
+					require.Equal(t, source, d.PCKClassOut)
 				}
 				require.Equal(t, cacheTraceHeaderBits(hdr), d.SessHdrOut)
 				if hdr.Get("session_id") == "" {
@@ -51,7 +55,11 @@ func TestCacheTraceWireCategoriesAndEnabledGolden(t *testing.T) {
 				} else if hdr.Get("session_id") == "trace-private-header" {
 					require.Equal(t, "client_value", d.SessOutRelation)
 				} else {
-					require.Contains(t, []string{"uuid_of_pck", "gw_isolated"}, d.SessOutRelation)
+					source := "gw_isolated"
+					if tc.Proto == "chat" {
+						source = "uuid_of_pck"
+					}
+					require.Equal(t, source, d.SessOutRelation)
 				}
 				require.Equal(t, "http", d.Transport)
 				require.False(t, d.IngressWSBridge)

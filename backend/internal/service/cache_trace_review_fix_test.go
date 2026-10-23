@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,7 @@ func traceSuccessfulForward(t *testing.T, protocol, kind string, stream, eof boo
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.CacheTrace)
+	awaitCacheTrace(t, s, c, result)
 	return s, c, result
 }
 
@@ -85,7 +87,9 @@ func TestCacheTraceIdentifiersMatchExistingUsageEvent(t *testing.T) {
 	for _, line := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n")) {
 		var e map[string]any
 		require.NoError(t, json.Unmarshal(line, &e))
-		events[e["msg"].(string)] = e
+		name, ok := e["msg"].(string)
+		require.True(t, ok, "structured log event must have a string message")
+		events[name] = e
 	}
 	require.Contains(t, events, "openai_cache_usage")
 	require.Contains(t, events, "cache_trace")
@@ -150,7 +154,7 @@ func TestCacheTraceProductionPrivacyMarkers(t *testing.T) {
 }
 
 func TestCacheTraceExcludedIngresses(t *testing.T) {
-	for _, path := range []string{"/v1/messages", "/v1/messages/count_tokens", "/v1/images/generations", "/v1/search", "/v1/responses"} {
+	for _, path := range []string{"/v1/messages", "/v1/messages/count_tokens", "/v1/images/generations", "/v1/alpha/search", "/v1/responses"} {
 		cfg := &config.Config{JWT: config.JWTConfig{Secret: "trace-test-secret"}}
 		cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
 		traceTestConfig(cfg)
@@ -207,12 +211,21 @@ func TestCacheTraceActiveFingerprintProduction(t *testing.T) {
 		for _, key := range []string{"none", "trace-private-key"} {
 			for _, header := range []string{"none", "session_id", "session-id"} {
 				t.Run(mode+"/"+key+"/"+header, func(t *testing.T) {
+					var previousWire string
 					for _, enabled := range []bool{false, true} {
 						configure := func(cfg *config.Config) { traceTestConfig(cfg); cfg.Gateway.CacheTrace.Enabled = enabled }
-						c, _, body, headers, _ := traceExtraRun(t, traceExtraCase{Scenario: mode, Key: key, Header: header}, configure, nil, func(a *Account) { a.Extra[codexFingerprintSeedExtraKey] = seed })
+						c, wire, body, headers, _ := traceExtraRun(t, traceExtraCase{Scenario: mode, Key: key, Header: header}, configure, nil, func(a *Account) { a.Extra[codexFingerprintSeedExtraKey] = seed })
 						ids := stagedCodexFingerprintIDs(c, &Account{ID: 9, Platform: PlatformOpenAI, Type: AccountTypeOAuth})
 						require.NotNil(t, ids, "seeded convergence must be active")
 						require.NotEmpty(t, ids.sessionID)
+						normalized := strings.ReplaceAll(wire, ids.turnID, strings.Repeat("0", len(ids.turnID)))
+						stamp := strconv.FormatInt(ids.turnStartedAtUnixMs, 10)
+						normalized = strings.ReplaceAll(normalized, stamp, strings.Repeat("0", len(stamp)))
+						if enabled {
+							require.Equal(t, previousWire, normalized, "seeded convergence must preserve normalized wire bytes")
+						} else {
+							previousWire = normalized
+						}
 						require.Equal(t, ids.sessionID, headers.Get("session_id"))
 						require.Equal(t, ids.sessionID, headers.Get("session-id"))
 						require.Equal(t, ids.sessionID, parseRawJSONView(body).Get("client_metadata.session_id").Str)

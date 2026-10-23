@@ -390,6 +390,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		proxyURL = account.Proxy.URL()
 	}
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+	s.startCacheTraceRequest(c)
 	if firstEvent.expired() {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
@@ -707,6 +708,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	startTime time.Time,
 	requestBodyLen int,
 ) (*OpenAIForwardResult, error) {
+	// The attempt-local gate keeps the disabled per-frame path to one bool check.
+	cacheTraceActive := cacheTraceObserving(c)
+
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -860,7 +864,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 		observer.ObserveOpenAI([]byte(payload), event.Type)
 		refusalDetector.ObservePayload([]byte(payload))
-		observeCacheTraceUsage(c, []byte(payload))
+		if cacheTraceActive {
+			observeCacheTraceUsageString(c, payload)
+		}
 		s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
 
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)

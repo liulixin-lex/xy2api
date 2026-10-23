@@ -268,6 +268,7 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 		proxyURL = account.Proxy.URL()
 	}
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+	s.startCacheTraceRequest(c)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
@@ -302,6 +303,9 @@ func (s *OpenAIGatewayService) scanCCStream(
 	startTime time.Time,
 	emit func(*apicompat.ChatCompletionsChunk),
 ) ccStreamScanState {
+	// The attempt-local gate keeps the disabled per-frame path to one bool check.
+	cacheTraceActive := cacheTraceObserving(c)
+
 	var st ccStreamScanState
 
 	scanner := s.newUpstreamSSEScanner(resp.Body, relayLivenessFor(c, account))
@@ -326,7 +330,11 @@ func (s *OpenAIGatewayService) scanCCStream(
 			observer.ObserveOpenAI([]byte(payload), "")
 		}
 
-		observeCacheTraceUsage(c, []byte(payload))
+		if cacheTraceActive {
+
+			observeCacheTraceUsageString(c, payload)
+
+		}
 		if u := extractCCStreamUsage(payload); u != nil {
 			st.Usage = *u
 		}

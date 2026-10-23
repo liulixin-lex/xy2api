@@ -477,6 +477,10 @@ gateway:
   # See docs/openai-cache-reliability.md for rollout and rollback.
   # OpenAI cache_trace v1 observation (requires diagnostics_enabled too).
   cache_trace:
+    async_byte_budget: 67108864
+    max_queue_wait: 10s
+    async_workers: 1
+    async_bytes_per_second: 33554432
     enabled: false
     chain_percent: 100
     reasoning_context_paths: ["reasoning.context"]

@@ -49,6 +49,8 @@ Compose / 环境变量对应 `GATEWAY_OPENAI_CACHE_DIAGNOSTICS_ENABLED`、`GATEW
 
 ## cache_trace v1（P0a）
 
+buffered SSE 的观测复用既有计费遍历已解析的帧；关闭时直接调用原解析器。每个 buffered 请求只设置一次异常隔离：观测返回错误后停用该请求后续观测，panic 后丢弃局部 usage 并用原解析器重算；这一步不执行结算，原有结算仍只执行一次。观测失败的尝试不发布 trace，避免把缺失观测误报为上游缺少 usage；异常原文不写日志。
+
 静态 `gateway.cache_trace.enabled` 默认 false（环境变量 `GATEWAY_CACHE_TRACE_ENABLED`），仅在 `gateway.openai_cache.diagnostics_enabled` 也为 true 且有持久 JWT secret 时采集。关闭时不进行额外 JSON 解析或请求体读取。观测不改变请求 bytes、选号、turn-state 或计费；事件输出由 T0a.3 在原有 usage 结算时接入；此前提交只准备快照。
 
 - 入站 `pck_class_in` 只看原 body：none / empty / client_uuid / client_non_uuid；UUID 用固定 8-4-4-4-12 十六进制正则，不校验版本位。
@@ -59,20 +61,32 @@ Compose / 环境变量对应 `GATEWAY_OPENAI_CACHE_DIAGNOSTICS_ENABLED`、`GATEW
 - `transport=plugin` 来自现有 ShouldRouteOpenAIOAuth 的只读判断；其快照属于插件前，请勿当作最终上游 wire。P0a 不输出 WS Bridge 轮次；`ingress_ws_bridge` 恒为 0。不改插件路径。
 - P0a 仅覆盖 OpenAI Responses / Chat HTTP；原生 WS、非 OpenAI、monitor probe 不新增归因。快照在最终兼容处理后抓取，Chat 的最终 session_id 单独更新，失败尝试之间重置出站字段；异步结算持有独立快照。
 
+异步结果未就绪时，入站 body 类别为 unknown；出站 prompt cache key 如没有注入来源标记也记 unknown，待 worker 确认存在性后才判 passthrough 或 none。
+
 ### 出站块链与位置
 
 `gateway.cache_trace.chain_percent`（`GATEWAY_CACHE_TRACE_CHAIN_PERCENT`）默认 100，按隔离后的会话稳定采样；0 不计算块链。Responses 按 tools → instructions → text/reasoning/tool_choice → input 各项分块；Chat 按 tools → messages 各项分块。只读最终原始字节，不重写请求。
 
 - `blk_n` 是完整块数。`bytes_out` 为协议块逻辑字节总数（不含 JSON 骨架及非块字段）；`fork_blk`、`fork_byte` 是与最近三条历史中最长匹配链的分叉位置，`fork_ref` 为 none / prev1 / prevk / other_conv。`fork_raw_byte` 和 `bytes_out_raw` 保留 wire 偏移/长度。`blk_order_physical_eq_logical` 表示各块物理起点是否按逻辑顺序递增。
-- 每条历史最多 512 个 uint64；超长链保留前 511 个精确块及末尾聚合哈希，聚合部分不能定位分叉。沿用原 telemetry 的 2048 会话上限和锁；最多 2048×3×512×8 = 25,165,824 字节哈希，另有少量元数据。失败或未送达尝试不成为历史。所有位置仅在请求内使用，不存入历史。
+- 每条历史最多 512 个 uint64 检查点，另存末块哈希、块数与逻辑总长；前 64 块保持精确，尾部检查点达到上限时隔一个保留一个、步长翻倍。扫描到上一轮末块并命中其哈希，就证明完整覆盖上一轮，任意长度的纯追加均可识别。沿用原 telemetry 的 2048 会话上限和锁；最多 2048×3×512×8 = 25,165,824 字节哈希，另有少量元数据。失败或未送达尝试不成为历史。检查点序号由步长推导，分叉坐标在当前扫描中取得；历史只保留逻辑总长。可选历史指针仅在采样且结算时分配，默认关闭不会使 legacy map 值超过 Go 的内联阈值。
 - 块哈希使用进程启动随机种子的 xxhash64，只在内存中比较，禁止出现在日志、接口或持久化中；日志标识仍使用 HMAC。逻辑和 raw 位置在同次扫描中取得，关闭观测不扫描。
 - `tail_kind`、`reasoning_items_n`、`old_reasoning_n`、`first_old_reasoning_blk/byte` 记录 reasoning 相对最后一条 user 的位置；仅最后 user 之前的 reasoning 算旧回合。`first_old_reasoning_raw_byte` 为排查保留 wire 位置。
 - `include_encrypted_reasoning`、`store_false`、`reasoning_enc_n` 只记录，不推断提供方是否保留密文。`reasoning_ctx` 读取最终出站字段（absent / auto / current_turn / all_turns / other）；静态路径列表 `gateway.cache_trace.reasoning_context_paths` 默认 `["reasoning.context"]`。原生 Chat 记 absent。
 - `model_gen` 细分为 pre56 / gpt56 / gpt6x / other_openai / non_openai，只记录类别，不输出上游原始型号。
 
-提供方实际渲染模板和 tokenizer 未知，逻辑字节位置只是近似前缀位置；原始 JSON 字段顺序不参与 token 位置估算。块链 benchmark 不包含转发器已有处理或启用观测后的 GetBody 副本开销，端到端 p99 需上线实验验证。
+提供方实际渲染模板和 tokenizer 未知，逻辑字节位置只是近似前缀位置；原始 JSON 字段顺序不参与 token 位置估算。Codex 形态 1MB / 2MB / 5MB 基准分别报告同步路径 p99 增量与 worker 吞吐；部署后的真实端到端延迟仍由 EXP-0 验证。
 
-关闭路径回归使用 `python3 tools/cache-trace/check_disabled.py --baseline <baseline-worktree> --output <evidence-directory>`：同一生产转发/结算夹具在纯基线与当前树比较分配；Go overlay 桩断言关闭时不进入块链、P0a JSON 读取或 loss_class 计算。该工具不修改基线，也不在生产代码中保留测试钩子。
+关闭路径由 Go 入口测试、生产转发快照和分配对照共同验证；trace 只在总闸之后创建，关闭时不入队、不读取 body、不计算链。
+
+异步预算 `gateway.cache_trace.async_byte_budget` 默认 67108864（64MiB），`async_workers` 默认 1（1–8；代码构造配置的 0 使用默认）。入站顶层查找、锚点 HMAC、最终出站读取及块链均在 HTTP 调用返回响应头后由 worker 执行；同步路径仅保存只读引用、来源标记和头位图。预算在创建任务、查历史之前以 CAS 预留，包括待发送、排队和执行中的入站引用、出站引用、备用读取副本和任务元数据；超预算直接丢弃，不等待。未发送的替换或失败尝试释放预留，已入队任务由 worker 释放。worker 对支持一次完整 WriterTo 的不可变出站源仅在回调内借用，结果不保留原始视图；其他源在预算内复制。`gateway.cache_trace.async_bytes_per_second` 默认 33554432（32MiB/s），worker 按入站与出站原始字节之和等待令牌，突发容量等于内存预算；令牌不足时任务继续占用队列预算，只有 worker 等待，转发及结算不等待。队列及令牌等待超过 `gateway.cache_trace.max_queue_wait`（默认 10s）或已建立的会话链历史被淘汰才按 `expired` 丢弃；从实际入队开始计时。不存在独立的 body 大小门槛。覆盖原因 `na_reason` 按 `chain_percent`、`budget_full`、`expired`、`not_ready`、`hist_unavailable` 排序，仅随结算事件的 `loss_class=n/a_sampled_out` 输出。结算时结果未就绪也记覆盖缺口，响应和结算绝不等待。budget_full、expired、not_ready 的精简事件保留版本、平台、原因、账号/分组数字 ID、最终计费 P/read 及关联键；P/read 直接复用最终 usage，request_id_hmac/session_digest 与既有用量日志同值，已计算的 request HMAC 直接复用。预算拒绝不执行逐帧观测，已知过期的响应也直接使用原计费解析器。两者都到齐的历史才发布，超过 10 分钟不再发布；晚完成按结算时间排序，不能覆盖更新的历史。
+
+`chain_sampled=0` 表示链未计算/未就绪（含插件）；未知块数/逻辑长度/reasoning 数为 −1，相关枚举为 n/a。同步来源仍可用，但异步类别未完成时 pck_class_in/id_source 可以是 unknown，conv_anchor 为空；这类记录不得当作正常分类样本。布尔位置字段在 chain_sampled=0 时不解读。
+
+`fork_kind` 为 append（纯追加）/ identical（完全相同）/ cur_prefix（可证明的截尾，exact）/ tail_unproven（检查点间截尾，range）/ diverge（已发现不等检查点，exact 或 range）/ none（无历史或链未就绪）。append、identical、none 的 fork_precision 为 none。K=3 候选按可精确证明优先、已证明前缀最长、历史最新排序。
+
+`fork_precision` 为 exact / range / none。none 表示完整覆盖历史或无历史，位置为 −1，通过 fork_ref 区分；range 的 fork_blk/byte 与 fork_blk_hi/byte_hi 分别给出包含真实分叉的下界和上界。截尾恰落在可验证检查点时可精确定位；落在稀疏间隔中仍保留范围，避免把无法验证的尾部误称未变。`p_prev` 和 `hist_age_s` 是最佳匹配已结算请求的 P 与结算年龄（秒）；无历史为 −1。上一响应结算尚未完成时可能匹配到更早的链，EXP-0 应结合年龄量化错位。
+
+Responses 的 input 从第 3 块开始，Chat 的 messages 从第 1 块开始；缺失结构块也占序号。设置块保留整个 text 对象（含 verbosity）。删除结构块时 fork_raw_byte 可以为 −1；raw 字段只作排查，逻辑字段用于归因。model_gen 同时识别 openai/ 前缀和 codex-mini 系列。
 
 ### P0a 入口范围与关联字段
 
@@ -84,4 +98,4 @@ P0a 只为 HTTP Responses（含 compact）、Chat→Responses 和原生 Chat 生
 
 conv_anchor 按既定的前导 system/developer 和首条 user 计算；Codex 的首条 user 可能只是 AGENTS 或环境信息，同一工作区的不同对话可能共享锚点，从而低估 other_conv。此限制留待 P0b 与 EXP-0 校验。
 
-正式回归包含基线上的 510 组生产转发路径快照（开关两态逐字节比对）、成功响应 usage 观测和日志隐私断言。早期 120 组 builder 快照仅作补充，不计作独立生产路径覆盖。启用观测时类别和块链共享一次最终 body 读取，按 ContentLength 预分配；既有诊断的 Lite 改写前读取保持原口径，端到端成本单独报告。
+正式回归包含基线上的 510 组生产转发路径快照（开关两态逐字节比对）、成功响应 usage 观测和日志隐私断言。早期 120 组 builder 快照仅作补充，不计作独立生产路径覆盖。启用观测时类别和块链在 worker 中共享一次最终 body 读取，优先借用不可变完整缓冲区，不支持借用时按 ContentLength 预分配；既有诊断的 Lite 改写前读取保持原口径，端到端成本单独报告。

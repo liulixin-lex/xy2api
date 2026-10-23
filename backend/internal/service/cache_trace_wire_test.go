@@ -72,6 +72,7 @@ func cacheTraceWireFixture(t *testing.T, protocol, kind, key, header string, con
 	wire, err := io.ReadAll(r)
 	require.NoError(t, err)
 	require.NoError(t, r.Close())
+	awaitCacheTrace(t, s, c, nil)
 	return s, c, req, wire
 }
 

@@ -95,11 +95,13 @@ func TestCacheTraceDisabledHasNoReadsOrAllocations(t *testing.T) {
 		allocations := testing.AllocsPerRun(100, func() {
 			s.beginCacheTrace(c, body)
 			s.captureCacheTraceRequest(c, req, a, "responses")
+			s.startCacheTraceRequest(c)
 			observeCacheTraceUsage(c, body)
 			s.finishCacheTrace(c, nil)
 		})
 		require.Zero(t, allocations)
 		require.Nil(t, cacheTraceFromGin(c))
+		require.Nil(t, s.cacheTraceWorkers)
 	}
 	require.Nil(t, cacheTraceFrom(context.Background()))
 }

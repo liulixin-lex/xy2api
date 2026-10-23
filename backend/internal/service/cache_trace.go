@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -22,16 +24,26 @@ type cacheTraceKey struct{}
 
 // The trace is request-local and contains only enums, counts and digests.
 // A separate snapshot is attached to the forward result before async billing.
-// It never owns request/response bodies, headers, or a Gin context.
+// Only the live request keeps the immutable ingress body; snapshots keep an
+// atomic async result handle, never bodies, headers, or a Gin context.
 type cacheTrace struct {
-	mu         sync.Mutex
-	data       cacheTraceData
-	sessionKey string
-	emitted    bool
-	chain      cachePrefixChain
+	mu                     sync.Mutex
+	data                   cacheTraceData
+	sessionKey             string
+	emitted                bool
+	usageObservationFailed bool
+	skipUsage              bool // budget rejection: use the final billing usage only
+	chain                  cachePrefixChain
+	ingress                []byte
+	apiKeyID               int64
+	headerSource           bool
+	pending                *cacheTraceJob
+	async                  *cacheTraceAsync
 }
 
 type cacheTraceData struct {
+	LossClass, NAReason                      string
+	PromptTokens, ReadTokens                 int
 	Prefix                                   cachePrefixObservation
 	RequestIDHMAC, SessionDigest, ConvAnchor string
 	ProtocolIn, ProtocolOut                  string
@@ -56,6 +68,16 @@ var cacheTraceHeaders = [...]string{
 	"x-client-request-id", "x-claude-code-session-id", "x-grok-conv-id",
 }
 
+// Canonicalize the fixed names once. Header presence is checked several times
+// per request; repeated CanonicalHeaderKey calls allocate for uncommon names.
+var cacheTraceHeaderKeys = func() [len(cacheTraceHeaders)]string {
+	var keys [len(cacheTraceHeaders)]string
+	for i, name := range cacheTraceHeaders {
+		keys[i] = http.CanonicalHeaderKey(name)
+	}
+	return keys
+}()
+
 func cacheTraceFrom(ctx context.Context) *cacheTrace {
 	if ctx == nil {
 		return nil
@@ -76,8 +98,8 @@ func (s *OpenAIGatewayService) cacheTraceEnabled() bool {
 }
 
 func cacheTraceHeaderBits(h http.Header) (bits uint16) {
-	for i, name := range cacheTraceHeaders {
-		if _, ok := h[http.CanonicalHeaderKey(name)]; ok {
+	for i, name := range cacheTraceHeaderKeys {
+		if _, ok := h[name]; ok {
 			bits |= 1 << i
 		}
 	}
@@ -97,31 +119,36 @@ func cacheTracePCKIn(value gjson.Result) string {
 	return "client_non_uuid"
 }
 
-func cacheTraceProtocol(c *gin.Context, root gjson.Result) string {
-	if c != nil && c.Request != nil && strings.Contains(c.Request.URL.Path, "/chat/completions") {
-		return "chat"
+// Each part is length-delimited; no concatenation ambiguity or retained content.
+func (s *OpenAIGatewayService) cacheTraceAnchorForKey(apiKeyID int64, root gjson.Result) string {
+	var instructions, items, messages gjson.Result
+	root.ForEach(func(k, v gjson.Result) bool {
+		switch k.Str {
+		case "instructions":
+			instructions = v
+		case "input":
+			items = v
+		case "messages":
+			messages = v
+		}
+		return true
+	})
+	if !items.Exists() {
+		items = messages
 	}
-	if root.Get("messages").IsArray() {
-		return "chat"
-	}
-	return "responses"
+	return s.cacheTraceAnchorParts(apiKeyID, instructions, items)
 }
 
-// Each part is length-delimited; no concatenation ambiguity or retained content.
-func (s *OpenAIGatewayService) cacheTraceAnchor(c *gin.Context, root gjson.Result) string {
+func (s *OpenAIGatewayService) cacheTraceAnchorParts(apiKeyID int64, instructions, items gjson.Result) string {
 	h := hmac.New(sha256.New, []byte(s.cfg.JWT.Secret))
-	_, _ = io.WriteString(h, "cache-trace-anchor-v1\x00"+strconv.FormatInt(getAPIKeyIDFromContext(c), 10))
+	_, _ = io.WriteString(h, "cache-trace-anchor-v1\x00"+strconv.FormatInt(apiKeyID, 10))
 	var size [8]byte
 	part := func(raw string) {
 		binary.BigEndian.PutUint64(size[:], uint64(len(raw)))
 		_, _ = h.Write(size[:])
 		_, _ = io.WriteString(h, raw)
 	}
-	part(root.Get("instructions").Raw)
-	items := root.Get("input")
-	if !items.Exists() {
-		items = root.Get("messages")
-	}
+	part(instructions.Raw)
 	if items.Type == gjson.String {
 		part(items.Raw)
 	} else {
@@ -152,7 +179,7 @@ func (s *OpenAIGatewayService) beginCacheTrace(c *gin.Context, body []byte) {
 	// P0a covers HTTP Responses (including compact) and Chat only. Messages,
 	// WS turns, count_tokens, images and search need their own P0b metadata.
 	path := strings.TrimSuffix(c.Request.URL.Path, "/")
-	if GetOpenAIClientTransport(c) == OpenAIClientTransportWS || !(strings.HasSuffix(path, "/responses") || strings.HasSuffix(path, "/responses/compact") || strings.HasSuffix(path, "/chat/completions")) {
+	if GetOpenAIClientTransport(c) == OpenAIClientTransportWS || (!strings.HasSuffix(path, "/responses") && !strings.HasSuffix(path, "/responses/compact") && !strings.HasSuffix(path, "/chat/completions")) {
 		return
 	}
 	if key, ok := c.Get("api_key"); ok {
@@ -173,28 +200,25 @@ func (s *OpenAIGatewayService) beginCacheTrace(c *gin.Context, body []byte) {
 		t.mu.Unlock()
 		return
 	}
-	root := parseRawJSONView(body)
-	// Mirrors explicitOpenAIRequestSessionID precedence. Non-HTTP/fallback-seed
-	// entry points are excluded above, so content_seed is unambiguous in P0a.
-	source := "content_seed"
-	if explicitOpenAIHeaderSessionID(c) != "" {
-		source = "header"
-	} else if strings.TrimSpace(root.Get("prompt_cache_key").String()) != "" {
-		source = "body_pck"
-	}
-	pck := cacheTracePCKIn(root.Get("prompt_cache_key"))
-	out := "none"
-	if pck != "none" {
-		out = "passthrough"
-	}
+
+	// Entire-body lookups (including a missing pck and the HMAC anchor) belong
+	// to the worker. The request already owns this non-pooled immutable slice.
 	bits := cacheTraceHeaderBits(c.Request.Header)
-	t := &cacheTrace{sessionKey: sessionKey, data: cacheTraceData{
-		SessionDigest: sessionKey,
-		ConvAnchor:    s.cacheTraceAnchor(c, root), GroupID: getOpenAIGroupIDFromContext(c),
-		ProtocolIn: cacheTraceProtocol(c, root), PCKClassIn: pck, PCKClassOut: out,
+	source := "unknown"
+	headerSource := explicitOpenAIHeaderSessionID(c) != ""
+	if headerSource {
+		source = "header"
+	}
+	protocol := "responses"
+	if strings.HasSuffix(path, "/chat/completions") {
+		protocol = "chat"
+	}
+	t := &cacheTrace{sessionKey: sessionKey, ingress: body, apiKeyID: getAPIKeyIDFromContext(c), headerSource: headerSource, data: cacheTraceData{
+		SessionDigest: sessionKey, GroupID: getOpenAIGroupIDFromContext(c),
+		ProtocolIn: protocol, PCKClassIn: "unknown", PCKClassOut: "unknown",
 		SessHdrIn: bits, SessOutRelation: "none", IDSource: source,
-		ThreadPresent: bits&((1<<7)|(1<<8)) != 0 || root.Get("client_metadata.thread_id").Exists(),
-		Transport:     "http", RouteReason: "unknown", RebindCause: "none",
+		ThreadPresent: bits&((1<<7)|(1<<8)) != 0,
+		Transport:     "http", RouteReason: "unknown", RebindCause: "none", Prefix: cachePrefixUnavailable(0),
 	}}
 	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), cacheTraceKey{}, t))
 }
@@ -242,18 +266,25 @@ func resetCacheTraceAttempt(c *gin.Context) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.data.PCKClassOut = "none"
-	if t.data.PCKClassIn != "none" {
+	t.data.PCKClassOut = "unknown"
+	if t.data.PCKClassIn == "none" {
+		t.data.PCKClassOut = "none"
+	} else if t.data.PCKClassIn != "unknown" {
 		t.data.PCKClassOut = "passthrough"
 	}
 	t.data.PCKOutIsUUID = false
 	t.data.SessHdrOut = 0
 	t.data.SessOutRelation = "none"
 	t.data.UsageFields = 0
+	t.usageObservationFailed = false
 	t.data.AccountID = 0
 	t.data.ProtocolOut = ""
 	t.data.Transport = "http"
-	t.data.Prefix = cachePrefixObservation{}
+	t.data.Prefix = cachePrefixUnavailable(0)
+	t.pending.cancelPending()
+	t.pending = nil
+	t.skipUsage = false
+	t.async = nil
 	t.chain = cachePrefixChain{}
 }
 
@@ -262,34 +293,23 @@ func (s *OpenAIGatewayService) captureCacheTraceRequest(c *gin.Context, req *htt
 	if t == nil || account == nil || account.Platform != PlatformOpenAI || req == nil || req.GetBody == nil {
 		return
 	}
-	r, err := req.GetBody()
-	if err != nil {
-		return
-	}
-	// The category snapshot and block chain share this one read. Builders set
-	// ContentLength from the final body, avoiding ReadAll's repeated growth.
-	var body []byte
-	if req.ContentLength > 0 {
-		body = make([]byte, req.ContentLength)
-		_, err = io.ReadFull(r, body)
-	} else {
-		body, err = io.ReadAll(r)
-	}
-	_ = r.Close()
-	if err != nil {
-		return
-	}
-	root := parseRawJSONView(body)
+
 	t.mu.Lock()
+	// Free an unsent/replaced attempt before trying to own the final wire body.
+	t.pending.cancelPending()
+	t.pending = nil
+	t.skipUsage = false
+	pool := s.cacheTraceWorkerPool()
+	cost, admitted := pool.reserve(int64(len(t.ingress)), req.ContentLength)
+
 	t.data.AccountID = account.ID
 	t.data.ProtocolOut = protocol
-	pck := root.Get("prompt_cache_key")
-	if !pck.Exists() {
-		t.data.PCKClassOut = "none"
+	t.data.Prefix = cachePrefixUnavailable(int(req.ContentLength))
+	if model := c.GetString(OpsUpstreamModelKey); model != "" {
+		t.data.Prefix.ModelGen = cachePrefixModelGeneration(model)
 	}
-	t.data.PCKOutIsUUID = pck.Type == gjson.String && cacheTraceUUID.MatchString(pck.Str)
 	t.data.SessHdrOut = cacheTraceHeaderBits(req.Header)
-	if req.Header.Get("session_id") == "" {
+	if req.Header.Get("Session_id") == "" {
 		t.data.SessOutRelation = "none"
 	}
 	t.data.Transport = "http"
@@ -301,8 +321,25 @@ func (s *OpenAIGatewayService) captureCacheTraceRequest(c *gin.Context, req *htt
 	}
 	// P0a does not emit WS turns; retained schema field is always zero.
 	t.data.IngressWSBridge = false
+
+	if !admitted {
+		// A fixed-size state keeps the settlement snapshot independent of retries.
+		// In particular, rejected traffic never allocates a job or visits history.
+		t.async = &cacheTraceAsync{}
+		t.async.reason.Store(cacheTraceBudgetFull)
+		t.skipUsage = true
+		t.mu.Unlock()
+		return
+	}
+
+	t.async = &cacheTraceAsync{chainExcluded: sha256SumCacheCohort(t.sessionKey) >= s.cfg.Gateway.CacheTrace.ChainPercent}
+	telemetry := s.cacheTelemetry()
+	telemetry.mu.Lock()
+	history := telemetry.sessions[t.sessionKey].traceChains
+	telemetry.mu.Unlock()
+	t.pending = &cacheTraceJob{pool: pool, cost: cost, state: t.async, service: s, ingress: t.ingress, apiKeyID: t.apiKeyID, headerSource: t.headerSource,
+		history: history, session: t.sessionKey, protocol: protocol, transport: t.data.Transport, getBody: req.GetBody, size: req.ContentLength, created: time.Now()}
 	t.mu.Unlock()
-	s.captureCachePrefix(t, body, protocol)
 }
 
 func captureCacheTraceHeaders(c *gin.Context, req *http.Request) {
@@ -312,7 +349,7 @@ func captureCacheTraceHeaders(c *gin.Context, req *http.Request) {
 	}
 	t.mu.Lock()
 	t.data.SessHdrOut = cacheTraceHeaderBits(req.Header)
-	if req.Header.Get("session_id") == "" {
+	if req.Header.Get("Session_id") == "" {
 		t.data.SessOutRelation = "none"
 	}
 	t.mu.Unlock()
@@ -322,7 +359,13 @@ func captureCacheTraceHeaders(c *gin.Context, req *http.Request) {
 // from the upstream payload before any client-facing translation.
 func observeCacheTraceUsage(c *gin.Context, body []byte) {
 	t := cacheTraceFromGin(c)
-	if t == nil {
+	if t == nil || t.skipUsage {
+		return
+	}
+	// Match the billing parser's fast rejection of the common delta frame.
+	// Progressive usage on any event type remains observable; event type alone
+	// must never suppress explicit zero or an upstream usage alias.
+	if !bytes.Contains(body, []byte(`"usage"`)) && !bytes.Contains(body, []byte(`"prompt_cache_diagnostics"`)) {
 		return
 	}
 	root := parseRawJSONView(body)
@@ -339,7 +382,7 @@ func observeCacheTraceUsage(c *gin.Context, body []byte) {
 			{"prompt_cache_diagnostics"},
 		} {
 			for _, p := range paths {
-				if v := u.Get(p); (i < 4 && v.Type == gjson.Number) || (i >= 4 && v.Exists()) {
+				if v := u.Get(p); (i < 5 && v.Type == gjson.Number) || (i == 5 && v.Exists()) {
 					bits |= 1 << i
 					break
 				}
@@ -356,17 +399,27 @@ func observeCacheTraceUsage(c *gin.Context, body []byte) {
 
 func (s *OpenAIGatewayService) finishCacheTrace(c *gin.Context, result *OpenAIForwardResult) {
 	t := cacheTraceFromGin(c)
-	if t == nil || result == nil {
+	if t == nil {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.pending.cancelPending()
+	t.pending = nil
+	if result == nil {
+		return
+	}
+	if t.usageObservationFailed {
+		return
+	}
 	if t.data.AccountID == 0 || t.data.ProtocolOut == "" {
 		return
 	}
+	t.applyCacheTraceComputed()
 	data := t.data
+	data.PromptTokens, data.ReadTokens = result.Usage.InputTokens, result.Usage.CacheReadInputTokens
 	data.RequestIDHMAC = s.cacheIdentityDigest("openai-request", result.RequestID)
-	result.CacheTrace = &cacheTrace{data: data, sessionKey: t.sessionKey, chain: t.chain}
+	result.CacheTrace = &cacheTrace{data: data, sessionKey: t.sessionKey, chain: t.chain, async: t.async}
 }
 
 func traceBool(value bool) int {
@@ -386,28 +439,209 @@ func (t *cacheTrace) emitCacheTrace() {
 		return
 	}
 	t.emitted = true
+	t.applyCacheTraceComputed()
 	d := t.data
-	slog.Info("cache_trace", "v", 1, "request_id_hmac", d.RequestIDHMAC, "session_digest", d.SessionDigest,
-		"platform", "openai", "protocol_in", d.ProtocolIn, "protocol_out", d.ProtocolOut,
-		"group_id", d.GroupID, "account_id", d.AccountID, "conv_anchor", d.ConvAnchor,
-		"pck_class_in", d.PCKClassIn, "pck_class_out", d.PCKClassOut, "pck_out_is_uuid", traceBool(d.PCKOutIsUUID),
-		"sess_hdr_in", int(d.SessHdrIn), "sess_hdr_out", int(d.SessHdrOut), "sess_out_relation", d.SessOutRelation,
-		"id_source", d.IDSource, "thread_present", traceBool(d.ThreadPresent), "usage_fields", int(d.UsageFields),
-		"blk_n", d.Prefix.BlockN, "bytes_out", d.Prefix.BytesOut, "fork_blk", d.Prefix.ForkBlock,
-		"fork_byte", d.Prefix.ForkByte, "fork_ref", d.Prefix.ForkRef,
-		"bytes_out_raw", d.Prefix.BytesOutRaw, "fork_raw_byte", d.Prefix.ForkRawByte,
-		"first_old_reasoning_raw_byte", d.Prefix.FirstOldReasoningRawByte,
-		"blk_order_physical_eq_logical", traceBool(d.Prefix.BlockOrderPhysicalEqLogical),
-		"tail_kind", d.Prefix.TailKind, "reasoning_items_n", d.Prefix.ReasoningItemsN, "old_reasoning_n", d.Prefix.OldReasoningN,
-		"first_old_reasoning_blk", d.Prefix.FirstOldReasoningBlock, "first_old_reasoning_byte", d.Prefix.FirstOldReasoningByte,
-		"include_encrypted_reasoning", traceBool(d.Prefix.IncludeEncryptedReasoning), "store_false", traceBool(d.Prefix.StoreFalse),
-		"reasoning_enc_n", d.Prefix.ReasoningEncryptedN, "reasoning_ctx", d.Prefix.ReasoningContext, "model_gen", d.Prefix.ModelGen,
-		"transport", d.Transport, "ingress_ws_bridge", traceBool(d.IngressWSBridge), "route_reason", d.RouteReason, "rebind_cause", d.RebindCause)
-}
-
-func observeCacheTraceSSE(c *gin.Context, body []byte) {
-	if cacheTraceFromGin(c) == nil {
+	// Coverage gaps retain the strict schema's identifiers and billing totals.
+	// No body-derived metadata, logger.With, or large event is built here.
+	if d.Transport != "plugin" && (d.LossClass == "" || d.LossClass == "n/a_sampled_out") &&
+		(d.NAReason == "budget_full" || d.NAReason == "expired" || d.NAReason == "not_ready") {
+		slog.LogAttrs(context.Background(), slog.LevelInfo, "cache_trace",
+			slog.Int("v", 1), slog.String("platform", "openai"),
+			slog.String("loss_class", "n/a_sampled_out"), slog.String("na_reason", d.NAReason),
+			slog.String("request_id_hmac", d.RequestIDHMAC), slog.String("session_digest", d.SessionDigest),
+			slog.Int64("account_id", d.AccountID), slog.Int64("group_id", d.GroupID),
+			slog.Int("P", d.PromptTokens), slog.Int("read", d.ReadTokens))
 		return
 	}
-	forEachOpenAISSEFrame(string(body), func(_ string, data []byte) { observeCacheTraceUsage(c, data) })
+	logger := slog.Default()
+	if d.LossClass != "" {
+		logger = logger.With("loss_class", d.LossClass)
+		if d.LossClass == "n/a_sampled_out" {
+			logger = logger.With("na_reason", d.NAReason)
+		}
+	}
+	logger.LogAttrs(context.Background(), slog.LevelInfo, "cache_trace",
+		slog.Int("v", 1),
+		slog.String("request_id_hmac", d.RequestIDHMAC),
+		slog.String("session_digest", d.SessionDigest),
+		slog.String("platform", "openai"),
+		slog.String("protocol_in", d.ProtocolIn),
+		slog.String("protocol_out", d.ProtocolOut),
+		slog.Int64("group_id", d.GroupID),
+		slog.Int64("account_id", d.AccountID),
+		slog.String("conv_anchor", d.ConvAnchor),
+		slog.String("pck_class_in", d.PCKClassIn),
+		slog.String("pck_class_out", d.PCKClassOut),
+		slog.Int("pck_out_is_uuid", traceBool(d.PCKOutIsUUID)),
+		slog.Int("sess_hdr_in", int(d.SessHdrIn)),
+		slog.Int("sess_hdr_out", int(d.SessHdrOut)),
+		slog.String("sess_out_relation", d.SessOutRelation),
+		slog.String("id_source", d.IDSource),
+		slog.Int("thread_present", traceBool(d.ThreadPresent)),
+		slog.Int("usage_fields", int(d.UsageFields)),
+		slog.Int("blk_n", d.Prefix.BlockN),
+		slog.Int("bytes_out", d.Prefix.BytesOut),
+		slog.Int("fork_blk", d.Prefix.ForkBlock),
+		slog.Int("fork_byte", d.Prefix.ForkByte),
+		slog.String("fork_ref", d.Prefix.ForkRef),
+		slog.String("fork_kind", d.Prefix.ForkKind),
+		slog.String("fork_precision", d.Prefix.ForkPrecision),
+		slog.Int("fork_blk_hi", d.Prefix.ForkBlockHi),
+		slog.Int("fork_byte_hi", d.Prefix.ForkByteHi),
+		slog.Int("p_prev", d.Prefix.PreviousPrompt),
+		slog.Int("hist_age_s", d.Prefix.HistoryAgeSeconds),
+		slog.Int("chain_sampled", traceBool(d.Prefix.Sampled)),
+		slog.Int("bytes_out_raw", d.Prefix.BytesOutRaw),
+		slog.Int("fork_raw_byte", d.Prefix.ForkRawByte),
+		slog.Int("first_old_reasoning_raw_byte", d.Prefix.FirstOldReasoningRawByte),
+		slog.Int("blk_order_physical_eq_logical", traceBool(d.Prefix.BlockOrderPhysicalEqLogical)),
+		slog.String("tail_kind", d.Prefix.TailKind),
+		slog.Int("reasoning_items_n", d.Prefix.ReasoningItemsN),
+		slog.Int("old_reasoning_n", d.Prefix.OldReasoningN),
+		slog.Int("first_old_reasoning_blk", d.Prefix.FirstOldReasoningBlock),
+		slog.Int("first_old_reasoning_byte", d.Prefix.FirstOldReasoningByte),
+		slog.Int("include_encrypted_reasoning", traceBool(d.Prefix.IncludeEncryptedReasoning)),
+		slog.Int("store_false", traceBool(d.Prefix.StoreFalse)),
+		slog.Int("reasoning_enc_n", d.Prefix.ReasoningEncryptedN),
+		slog.String("reasoning_ctx", d.Prefix.ReasoningContext),
+		slog.String("model_gen", d.Prefix.ModelGen),
+		slog.String("transport", d.Transport),
+		slog.Int("ingress_ws_bridge", traceBool(d.IngressWSBridge)),
+		slog.String("route_reason", d.RouteReason),
+		slog.String("rebind_cause", d.RebindCause),
+	)
+}
+
+// Reuse the billing traversal's decoded frames. An independent trace pass over
+// buffered SSE would repeat framing, validation and per-frame allocations.
+// The disabled branch calls the unchanged parser, preserving its allocations.
+func (s *OpenAIGatewayService) parseSSEUsageWithCacheTrace(c *gin.Context, body string) *OpenAIUsage {
+	t := cacheTraceFromGin(c)
+	if t == nil || !cacheTraceObserving(c) {
+		return s.parseSSEUsageFromBody(body)
+	}
+	usage, complete := s.parseSSEUsageObserving(body, func(data []byte) error {
+		observeCacheTraceUsage(c, data)
+		return nil
+	})
+	if !complete {
+		// An incomplete observation must not look like absent upstream usage.
+		// Suppress this attempt's trace; billing still uses the full parser result.
+		t.mu.Lock()
+		t.usageObservationFailed = true
+		t.mu.Unlock()
+	}
+	return usage
+}
+
+// The only recover is per buffered request, never per frame. Parsing has no
+// settlement side effects: after an observer panic, discard its local partial
+// usage and recompute with the unchanged parser. An observer error disables
+// observation for remaining frames. Neither path logs the error/panic value.
+func (s *OpenAIGatewayService) parseSSEUsageObserving(body string, observe func([]byte) error) (usage *OpenAIUsage, complete bool) {
+	if observe == nil {
+		return s.parseSSEUsageFromBody(body), true
+	}
+	defer func() {
+		if recover() != nil {
+			usage = s.parseSSEUsageFromBody(body)
+			complete = false
+		}
+	}()
+	usage, complete = &OpenAIUsage{}, true
+	forEachOpenAISSEFrame(body, func(eventType string, data []byte) {
+		s.parseSSEUsageBytesWithType(data, eventType, usage)
+		if observe != nil {
+			if err := observe(data); err != nil {
+				observe, complete = nil, false
+			}
+		}
+	})
+	return usage, complete
+}
+
+// startCacheTraceRequest is after the send/response-header boundary in each
+// HTTP path. No scan, read, copy, or await occurs on the forwarding goroutine.
+func (s *OpenAIGatewayService) startCacheTraceRequest(c *gin.Context) {
+	t := cacheTraceFromGin(c)
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	job := t.pending
+	t.pending = nil
+	t.mu.Unlock()
+	if job == nil {
+		return
+	}
+	s.cacheTraceWorkerPool().submit(job)
+}
+
+// Requires t.mu. Only scalar computed fields are merged; source markers and
+// headers remain those of the actual final forwarding attempt.
+func (t *cacheTrace) applyCacheTraceComputed() {
+	if t.async == nil {
+		return
+	}
+	r := t.async.result.Load()
+	t.data.NAReason = t.async.coverageReason(r)
+	if r == nil {
+		return
+	}
+	t.data.ConvAnchor = r.anchor
+	t.data.PCKClassIn = r.pckIn
+	t.data.IDSource = r.idSource
+	t.data.ThreadPresent = t.data.ThreadPresent || r.thread
+	if !r.pckExists {
+		t.data.PCKClassOut = "none"
+	} else if t.data.PCKClassOut == "unknown" {
+		// Existing presence with no injection marker is client passthrough.
+		t.data.PCKClassOut = "passthrough"
+	}
+	t.data.PCKOutIsUUID = r.pckUUID
+	modelGen := t.data.Prefix.ModelGen
+	t.data.Prefix = r.prefix
+	if modelGen != "n/a" && modelGen != "" {
+		t.data.Prefix.ModelGen = modelGen
+	}
+	t.chain = r.chain
+}
+
+// Kept as a small test/helper adapter; production supplies only the numeric
+// key scope to the worker, never a Gin context.
+func (s *OpenAIGatewayService) cacheTraceAnchor(c *gin.Context, root gjson.Result) string {
+	return s.cacheTraceAnchorForKey(getAPIKeyIDFromContext(c), root)
+}
+
+// A string-to-byte argument conversion at a call site allocates before the
+// callee's guard. Keep it behind the trace gate for every streamed SSE frame.
+func observeCacheTraceUsageString(c *gin.Context, payload string) {
+	t := cacheTraceFromGin(c)
+	if t == nil || t.skipUsage {
+		return
+	}
+	if !strings.Contains(payload, `"usage"`) && !strings.Contains(payload, `"prompt_cache_diagnostics"`) {
+		return
+	}
+	observeCacheTraceUsage(c, []byte(payload))
+}
+
+// Called once at response entry, outside frame traversal. The budget-full fast
+// path uses the original billing parser; expiration already known at response
+// entry does likewise. Workers never mutate the request-local trace itself.
+func cacheTraceObserving(c *gin.Context) bool {
+	t := cacheTraceFromGin(c)
+	if t == nil || t.skipUsage {
+		return false
+	}
+	return t.async == nil || t.async.reason.Load() == 0
+}
+
+// The trace snapshot already owns the same HMAC needed by both legacy usage
+// events. Disabled requests retain the original single calculation per event.
+func (s *OpenAIGatewayService) cacheUsageRequestDigest(result *OpenAIForwardResult) string {
+	if result.CacheTrace != nil && result.CacheTrace.data.RequestIDHMAC != "" {
+		return result.CacheTrace.data.RequestIDHMAC
+	}
+	return s.cacheIdentityDigest("openai-request", result.RequestID)
 }

@@ -801,6 +801,9 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 	logPrefix string,
 	requestID string,
 ) (*apicompat.ResponsesResponse, OpenAIUsage, *apicompat.BufferedResponseAccumulator, error) {
+	// The attempt-local gate keeps the disabled per-frame path to one bool check.
+	cacheTraceActive := cacheTraceObserving(c)
+
 	acc := apicompat.NewBufferedResponseAccumulator()
 	var usage OpenAIUsage
 	if resp == nil || resp.Body == nil {
@@ -881,8 +884,11 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 					payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
 					var event apicompat.ResponsesStreamEvent
 					if err := json.Unmarshal([]byte(payload), &event); err == nil {
-						observeCacheTraceUsage(c, []byte(payload))
-						s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
+						payloadBytes := []byte(payload)
+						if cacheTraceActive {
+							observeCacheTraceUsage(c, payloadBytes)
+						}
+						s.parseSSEUsageBytesWithType(payloadBytes, event.Type, &usage)
 						acc.ProcessEvent(&event)
 						if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
 							if event.Usage != nil {
@@ -929,8 +935,11 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 				)
 				continue
 			}
-			observeCacheTraceUsage(c, []byte(payload))
-			s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
+			payloadBytes := []byte(payload)
+			if cacheTraceActive {
+				observeCacheTraceUsage(c, payloadBytes)
+			}
+			s.parseSSEUsageBytesWithType(payloadBytes, event.Type, &usage)
 
 			acc.ProcessEvent(&event)
 

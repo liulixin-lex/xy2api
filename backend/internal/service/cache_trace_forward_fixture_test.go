@@ -45,30 +45,30 @@ func traceForwardCases() []traceForwardCase {
 func traceForwardBody(rc traceForwardCase) string {
 	var b strings.Builder
 	if rc.Proto == "chat" {
-		b.WriteString(`{"model":"gpt-5.4","messages":[`)
+		_, _ = b.WriteString(`{"model":"gpt-5.4","messages":[`)
 		if rc.Variant == "rich" {
-			b.WriteString(`{"role":"system","content":"trace-private-sys"},`)
+			_, _ = b.WriteString(`{"role":"system","content":"trace-private-sys"},`)
 		}
-		b.WriteString(`{"role":"user","content":"trace-private-body"}]`)
+		_, _ = b.WriteString(`{"role":"user","content":"trace-private-body"}]`)
 		if rc.Variant == "rich" {
-			b.WriteString(`,"tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object","properties":{}}}}]`)
+			_, _ = b.WriteString(`,"tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object","properties":{}}}}]`)
 		}
 	} else {
-		b.WriteString(`{"model":"gpt-5.4"`)
+		_, _ = b.WriteString(`{"model":"gpt-5.4"`)
 		if rc.Variant == "rich" {
-			b.WriteString(`,"instructions":"trace-private-sys","tools":[{"type":"function","name":"f","parameters":{"type":"object","properties":{}}}],"reasoning":{"effort":"high"}`)
+			_, _ = b.WriteString(`,"instructions":"trace-private-sys","tools":[{"type":"function","name":"f","parameters":{"type":"object","properties":{}}}],"reasoning":{"effort":"high"}`)
 		}
-		b.WriteString(`,"input":[{"role":"user","content":"trace-private-body"}]`)
+		_, _ = b.WriteString(`,"input":[{"role":"user","content":"trace-private-body"}]`)
 	}
 	if rc.Variant == "private" {
-		b.WriteString(`,"instructions":"trace-private-instructions","client_metadata":{"thread_id":"trace-private-metadata"}`)
+		_, _ = b.WriteString(`,"instructions":"trace-private-instructions","client_metadata":{"thread_id":"trace-private-metadata"}`)
 	}
-	b.WriteString(`,"stream":false`)
+	_, _ = b.WriteString(`,"stream":false`)
 	if rc.Key != "none" {
 		enc, _ := json.Marshal(rc.Key)
-		b.WriteString(`,"prompt_cache_key":` + string(enc))
+		_, _ = b.WriteString(`,"prompt_cache_key":` + string(enc))
 	}
-	b.WriteString("}")
+	_, _ = b.WriteString("}")
 	return b.String()
 }
 
@@ -128,5 +128,6 @@ func traceForwardRun(t *testing.T, rc traceForwardCase, configure func(*config.C
 	clone.Body = io.NopCloser(bytes.NewReader(wire))
 	dump, err := httputil.DumpRequestOut(clone, true)
 	require.NoError(t, err)
+	awaitCacheTrace(t, s, c, nil)
 	return s, c, string(dump), wire, req.Header
 }

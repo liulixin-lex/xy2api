@@ -1165,9 +1165,13 @@ type GatewayConfig struct {
 }
 
 type CacheTraceConfig struct {
-	Enabled               bool     `mapstructure:"enabled"`
-	ChainPercent          int      `mapstructure:"chain_percent"`
-	ReasoningContextPaths []string `mapstructure:"reasoning_context_paths"`
+	MaxQueueWait          time.Duration `mapstructure:"max_queue_wait"`
+	AsyncByteBudget       int64         `mapstructure:"async_byte_budget"`
+	AsyncWorkers          int           `mapstructure:"async_workers"`
+	AsyncBytesPerSecond   int64         `mapstructure:"async_bytes_per_second"`
+	Enabled               bool          `mapstructure:"enabled"`
+	ChainPercent          int           `mapstructure:"chain_percent"`
+	ReasoningContextPaths []string      `mapstructure:"reasoning_context_paths"`
 }
 
 type OpenAICacheConfig struct {
@@ -2582,6 +2586,10 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.dial_timeout_seconds", 10)
 	viper.SetDefault("gateway.openai_quality_routing.mode", "enforce")
 	viper.SetDefault("gateway.openai_quality_routing.avoid_seconds", 300)
+	viper.SetDefault("gateway.cache_trace.max_queue_wait", 10*time.Second)
+	viper.SetDefault("gateway.cache_trace.async_byte_budget", int64(64<<20))
+	viper.SetDefault("gateway.cache_trace.async_workers", 1)
+	viper.SetDefault("gateway.cache_trace.async_bytes_per_second", int64(32<<20))
 	viper.SetDefault("gateway.cache_trace.enabled", false)
 	viper.SetDefault("gateway.cache_trace.chain_percent", 100)
 	viper.SetDefault("gateway.cache_trace.reasoning_context_paths", []string{"reasoning.context"})
@@ -2830,6 +2838,15 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if c.Gateway.CacheTrace.MaxQueueWait < 0 {
+		return fmt.Errorf("gateway.cache_trace.max_queue_wait must be nonnegative")
+	}
+	if c.Gateway.CacheTrace.AsyncBytesPerSecond < 0 {
+		return fmt.Errorf("gateway.cache_trace.async_bytes_per_second must be nonnegative")
+	}
+	if c.Gateway.CacheTrace.AsyncByteBudget < 0 || c.Gateway.CacheTrace.AsyncWorkers < 0 || c.Gateway.CacheTrace.AsyncWorkers > 8 {
+		return fmt.Errorf("gateway.cache_trace async_byte_budget must be nonnegative and async_workers between 0 and 8")
+	}
 	if c.Gateway.CacheTrace.ChainPercent < 0 || c.Gateway.CacheTrace.ChainPercent > 100 {
 		return fmt.Errorf("gateway.cache_trace.chain_percent must be between 0 and 100")
 	}

@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"strings"
+	"time"
 
 	"github.com/cespare/xxhash/v2"
 	"github.com/tidwall/gjson"
@@ -12,7 +13,7 @@ import (
 const cachePrefixMaxBlocks = 512
 const cachePrefixHistoryCount = 3
 
-// Only hashes and scalar metadata survive the synchronous body scan.
+// Only hashes and scalar metadata survive the asynchronous body scan.
 // Offsets are request-local; histories do not retain payloads or gjson views.
 type cachePrefixChain struct {
 	hashes    []uint64
@@ -20,23 +21,32 @@ type cachePrefixChain struct {
 	truncated bool
 	anchor    string
 	prompt    int
+	final     uint64
+	bytes     int
+	stride    int
+	settledAt time.Time
 }
 
 // Fixed scratch returned by value stays on the caller stack. Raw and logical
 // positions are collected in the same scan and never stored with history.
 type cachePrefixPositions struct {
-	logical [cachePrefixMaxBlocks]uint32
-	raw     [cachePrefixMaxBlocks]int32
-	n       int
+	logical  [cachePrefixMaxBlocks]uint32
+	raw      [cachePrefixMaxBlocks]int32
+	n        int
+	matches  [cachePrefixHistoryCount]cachePrefixMatch
+	compared bool
 }
 
 type cachePrefixObservation struct {
+	pckExists, pckUUID                                                            bool
 	BlockN, BytesOut, ForkBlock, ForkByte                                         int
 	BytesOutRaw, ForkRawByte, FirstOldReasoningRawByte                            int
 	BlockOrderPhysicalEqLogical                                                   bool
 	ForkRef                                                                       string
 	Sampled, HistoryUnsampled, TruncatedUnknown                                   bool
-	PreviousPrompt                                                                int
+	PreviousPrompt, HistoryAgeSeconds                                             int
+	ForkPrecision, ForkKind                                                       string
+	ForkBlockHi, ForkByteHi                                                       int
 	TailKind, ReasoningContext, ModelGen                                          string
 	ReasoningItemsN, OldReasoningN, FirstOldReasoningBlock, FirstOldReasoningByte int
 	IncludeEncryptedReasoning, StoreFalse                                         bool
@@ -70,7 +80,10 @@ func cachePrefixContext(v gjson.Result) string {
 // Explicit family rules. Unknown future families never inherit a reasoning
 // default. The upstream model is inspected but is never added to trace logs.
 func cachePrefixModelGeneration(model string) string {
-	model = strings.ToLower(model)
+	model = strings.TrimPrefix(strings.ToLower(model), "openai/")
+	if model == "codex-mini-latest" || strings.HasPrefix(model, "codex-mini-") {
+		return "pre56"
+	}
 	family := func(prefix string) bool {
 		return model == prefix || strings.HasPrefix(model, prefix+"-") || strings.HasPrefix(model, prefix+".")
 	}
@@ -98,9 +111,9 @@ func cachePrefixModelGeneration(model string) string {
 // scanCachePrefix hashes raw JSON slices in protocol order. It never remarshal
 // or mutate the wire body. A fixed framing length disambiguates absent fields
 // and multiple settings in the combined settings block.
-func scanCachePrefix(body []byte, protocol string, seed uint64, paths []string) (cachePrefixChain, cachePrefixPositions, cachePrefixObservation) {
+func scanCachePrefix(body []byte, protocol string, seed uint64, paths []string, history ...[cachePrefixHistoryCount]cachePrefixChain) (cachePrefixChain, cachePrefixPositions, cachePrefixObservation) {
 	root := parseRawJSONView(body)
-	o := cachePrefixObservation{BytesOutRaw: len(body), ForkRawByte: -1, FirstOldReasoningRawByte: -1, BlockOrderPhysicalEqLogical: true, ForkBlock: -1, ForkByte: -1, ForkRef: "none", Sampled: true,
+	o := cachePrefixObservation{BytesOutRaw: len(body), ForkRawByte: -1, FirstOldReasoningRawByte: -1, BlockOrderPhysicalEqLogical: true, ForkBlock: -1, ForkByte: -1, ForkRef: "none", ForkPrecision: "none", ForkKind: "none", ForkBlockHi: -1, ForkByteHi: -1, PreviousPrompt: -1, HistoryAgeSeconds: -1, Sampled: true,
 		TailKind: "other", ReasoningContext: "absent", ModelGen: "non_openai",
 		FirstOldReasoningBlock: -1, FirstOldReasoningByte: -1}
 	// One top-level scan; do not repeatedly search the full body for missing
@@ -109,6 +122,9 @@ func scanCachePrefix(body []byte, protocol string, seed uint64, paths []string) 
 	var items, tools, instructions, textFormat, reasoning, toolChoice, include gjson.Result
 	root.ForEach(func(k, v gjson.Result) bool {
 		switch k.Str {
+		case "prompt_cache_key":
+			o.pckExists = v.Exists()
+			o.pckUUID = v.Type == gjson.String && cacheTraceUUID.MatchString(v.Str)
 		case "model":
 			o.ModelGen = cachePrefixModelGeneration(v.Str)
 		case "tools":
@@ -161,6 +177,15 @@ func scanCachePrefix(body []byte, protocol string, seed uint64, paths []string) 
 	})
 	var hashes [cachePrefixMaxBlocks]uint64
 	var positions cachePrefixPositions
+	var histories [cachePrefixHistoryCount]cachePrefixChain
+	if len(history) > 0 {
+		histories = history[0]
+		positions.compared = true
+	}
+	for i := range positions.matches {
+		positions.matches[i] = cachePrefixMatch{lowerRaw: -1}
+	}
+	stored, stride := 0, 1
 	var h xxhash.Digest
 	var frame [16]byte
 	binary.LittleEndian.PutUint64(frame[:8], seed)
@@ -181,9 +206,7 @@ func scanCachePrefix(body []byte, protocol string, seed uint64, paths []string) 
 		var size [8]byte
 		binary.LittleEndian.PutUint64(size[:], uint64(len(v.Raw)))
 		_, _ = h.Write(size[:])
-		if v.Index >= 0 && v.Index+len(v.Raw) <= len(body) {
-			_, _ = h.Write(body[v.Index : v.Index+len(v.Raw)])
-		}
+		_, _ = h.WriteString(v.Raw)
 	}
 	end := func() {
 		if rawStart >= 0 {
@@ -193,13 +216,62 @@ func scanCachePrefix(body []byte, protocol string, seed uint64, paths []string) 
 			lastRawOffset = rawStart
 		}
 		previous = h.Sum64()
-		slot := min(blockIndex, cachePrefixMaxBlocks-1)
-		hashes[slot] = previous
-		// First 511 exact blocks plus an aggregate final hash. The tail hash must
-		// never be binary-searched as if it identified a single block.
+
 		if blockIndex < cachePrefixMaxBlocks {
-			positions.logical[slot] = uint32(logicalStart)
-			positions.raw[slot] = int32(rawStart)
+			positions.logical[blockIndex] = uint32(logicalStart)
+			positions.raw[blockIndex] = int32(rawStart)
+		}
+		for i, old := range histories {
+			m := &positions.matches[i]
+			if old.blocks == 0 || m.different {
+				continue
+			}
+			if blockIndex == m.lower {
+				m.lowerRaw = rawStart
+			}
+			checkpoint := blockIndex < 64 || old.stride <= 1 || (blockIndex-63)%old.stride == 0
+			if blockIndex >= old.blocks {
+				continue
+			}
+			var expected uint64
+			if blockIndex == old.blocks-1 {
+				expected = old.final
+			} else if checkpoint {
+				slot := blockIndex
+				if slot >= 64 {
+					slot = 63 + (blockIndex-63)/max(1, old.stride)
+				}
+				if slot >= len(old.hashes) {
+					continue
+				}
+				expected = old.hashes[slot]
+			} else {
+				continue
+			}
+			if previous == expected {
+				m.lower, m.lowerByte = blockIndex+1, o.BytesOut
+				m.complete = blockIndex == old.blocks-1
+			} else {
+				m.different, m.upper, m.upperByte = true, blockIndex, logicalStart
+			}
+		}
+		if blockIndex < 64 || (blockIndex-63)%stride == 0 {
+			if stored == cachePrefixMaxBlocks {
+				// Keep the first 64 dense checkpoints and every second tail
+				// checkpoint. Indices are implicit; no per-checkpoint offsets
+				// are retained, preserving the original 512*8-byte bound.
+				keep := 64
+				for i := 65; i < stored; i += 2 {
+					hashes[keep] = hashes[i]
+					keep++
+				}
+				stored = keep
+				stride *= 2
+			}
+			if blockIndex < 64 || (blockIndex-63)%stride == 0 {
+				hashes[stored] = previous
+				stored++
+			}
 		}
 		blockIndex++
 	}
@@ -215,13 +287,8 @@ func scanCachePrefix(body []byte, protocol string, seed uint64, paths []string) 
 	}
 	firstReasoningBlock, firstReasoningByte, firstReasoningRawByte := -1, -1, -1
 	visit := func(item gjson.Result) {
-		role := item.Get("role").Str
-		kind := ""
-		// In the input union, role-bearing items are messages. Looking for a
-		// missing type in every long message would rescan its entire content.
-		if role == "" {
-			kind = item.Get("type").Str
-		}
+
+		role, kind, encrypted, hasReasoning := cachePrefixItemMetadata(item.Raw)
 		if role == "user" {
 			o.OldReasoningN = o.ReasoningItemsN
 			if o.OldReasoningN > 0 {
@@ -232,7 +299,7 @@ func scanCachePrefix(body []byte, protocol string, seed uint64, paths []string) 
 		}
 		isReasoning := kind == "reasoning"
 		if protocol == "chat" {
-			isReasoning = role == "assistant" && item.Get("reasoning_content").Exists()
+			isReasoning = role == "assistant" && hasReasoning
 		}
 		if isReasoning {
 			o.ReasoningItemsN++
@@ -241,7 +308,7 @@ func scanCachePrefix(body []byte, protocol string, seed uint64, paths []string) 
 				firstReasoningByte = o.BytesOut
 				firstReasoningRawByte = item.Index
 			}
-			if v := item.Get("encrypted_content"); v.Type == gjson.String && v.Str != "" {
+			if encrypted {
 				o.ReasoningEncryptedN++
 			}
 		}
@@ -259,51 +326,67 @@ func scanCachePrefix(body []byte, protocol string, seed uint64, paths []string) 
 	} else if items.Exists() {
 		visit(items)
 	}
-	n := min(blockIndex, cachePrefixMaxBlocks)
-	chain := cachePrefixChain{hashes: make([]uint64, n), blocks: blockIndex, truncated: blockIndex > cachePrefixMaxBlocks}
+	n := stored
+	chain := cachePrefixChain{hashes: make([]uint64, n), blocks: blockIndex, truncated: stride > 1, stride: stride, final: previous, bytes: o.BytesOut}
 	copy(chain.hashes, hashes[:n])
-	positions.n = n
+	positions.n = min(blockIndex, cachePrefixMaxBlocks)
 	o.BlockN = blockIndex
 	return chain, positions, o
 }
 
-func cachePrefixComparableBlocks(c cachePrefixChain) int {
-	if c.truncated {
-		return len(c.hashes) - 1
-	}
-	return len(c.hashes)
-}
-
-// Chain hashes make equality monotonic, permitting O(log n) lookup.
-func cachePrefixEqualBlocks(a, b cachePrefixChain) int {
-	lo, hi := 0, min(cachePrefixComparableBlocks(a), cachePrefixComparableBlocks(b))
-	for lo < hi {
-		mid := lo + (hi-lo)/2
-		if a.hashes[mid] == b.hashes[mid] {
-			lo = mid + 1
-		} else {
-			hi = mid
-		}
-	}
-	return lo
+// Per-history comparison state is scratch, never retained in the LRU.
+type cachePrefixMatch struct {
+	lower, lowerByte, lowerRaw int
+	upper, upperByte           int
+	different, complete        bool
 }
 
 func compareCachePrefix(current cachePrefixChain, offsets cachePrefixPositions, histories [cachePrefixHistoryCount]cachePrefixChain, o *cachePrefixObservation) {
 	best, common := -1, -1
+	bestExact := false
 	for i, old := range histories {
-		if len(old.hashes) == 0 {
+		if old.blocks == 0 {
 			continue
 		}
-		matched := cachePrefixEqualBlocks(current, old)
-		if matched > common || matched == common && best >= 0 && old.anchor == current.anchor && histories[best].anchor != current.anchor {
-			best, common = i, matched
+		m := offsets.matches[i]
+		// Small-chain callers may compare after scanning; production passes the
+		// histories into the scanner so it can compare every historical checkpoint.
+		if !offsets.compared {
+			for j := 0; j < min(current.blocks, old.blocks, 64); j++ {
+				if current.hashes[j] != old.hashes[j] {
+					m.different = true
+					m.upper = j
+					m.upperByte = int(offsets.logical[j])
+					break
+				}
+				m.lower = j + 1
+				if m.lower < offsets.n {
+					m.lowerByte = int(offsets.logical[m.lower])
+					m.lowerRaw = int(offsets.raw[m.lower])
+				} else {
+					m.lowerByte = o.BytesOut
+					m.lowerRaw = o.BytesOutRaw
+				}
+			}
+			m.complete = m.lower == old.blocks
+			offsets.matches[i] = m
+		}
+		// PM: a fully proven candidate (including identical/append "none")
+		// outranks a range, then choose longest lower bound and latest settlement.
+		exact := m.complete || m.different && m.lower == m.upper || !m.different && m.lower == current.blocks
+		if best < 0 || exact && !bestExact || exact == bestExact && (m.lower > common || m.lower == common && old.settledAt.After(histories[best].settledAt)) {
+			best, common, bestExact = i, m.lower, exact
 		}
 	}
 	if best < 0 {
 		return
 	}
-	old := histories[best]
+	old, m := histories[best], offsets.matches[best]
 	o.PreviousPrompt = old.prompt
+	o.HistoryAgeSeconds = -1
+	if !old.settledAt.IsZero() {
+		o.HistoryAgeSeconds = max(0, int(time.Since(old.settledAt).Seconds()))
+	}
 	o.ForkRef = "prev1"
 	if best > 0 {
 		o.ForkRef = "prevk"
@@ -311,15 +394,130 @@ func compareCachePrefix(current cachePrefixChain, offsets cachePrefixPositions, 
 	if old.anchor != current.anchor {
 		o.ForkRef = "other_conv"
 	}
-	o.TruncatedUnknown = (current.truncated || old.truncated) && common == min(cachePrefixComparableBlocks(current), cachePrefixComparableBlocks(old)) && common >= cachePrefixMaxBlocks-1
-	if o.TruncatedUnknown {
+	o.ForkPrecision = "none"
+	o.ForkBlock, o.ForkByte, o.ForkRawByte, o.ForkBlockHi, o.ForkByteHi = -1, -1, -1, -1, -1
+	if m.complete {
+		o.ForkKind = "append"
+		if current.blocks == old.blocks {
+			o.ForkKind = "identical"
+		}
 		return
 	}
-	o.ForkBlock = common
-	o.ForkByte = o.BytesOut
-	o.ForkRawByte = o.BytesOutRaw
-	if common < offsets.n {
-		o.ForkByte = int(offsets.logical[common])
-		o.ForkRawByte = int(offsets.raw[common])
+	o.ForkKind = "diverge"
+	if !m.different {
+		o.ForkKind = "tail_unproven"
+		if m.lower == current.blocks {
+			o.ForkKind = "cur_prefix"
+		}
 	}
+	if !m.different {
+		m.upper, m.upperByte = current.blocks, o.BytesOut
+		if m.lower == current.blocks {
+			m.lowerByte = o.BytesOut
+			m.lowerRaw = o.BytesOutRaw
+		}
+	}
+	o.ForkBlock, o.ForkByte, o.ForkRawByte = m.lower, m.lowerByte, m.lowerRaw
+	o.ForkPrecision = "exact"
+	if m.upper > m.lower {
+		o.ForkPrecision = "range"
+		o.ForkBlockHi, o.ForkByteHi = m.upper, m.upperByte
+	}
+	// Whether an uncertain range changes loss_class is decided at settlement,
+	// with the reported P/read. A range alone is not n/a_truncated.
+	o.TruncatedUnknown = false
+}
+
+// cachePrefixItemMetadata skips unrelated raw values without decoding strings.
+// gjson.ForEach eagerly unescapes every string, including multi-MB tool output,
+// even though only four metadata fields matter here. Hashing still consumes the
+// original item.Raw unchanged. This helper is used only by the async worker.
+func cachePrefixItemMetadata(raw string) (role, kind string, encrypted, hasReasoning bool) {
+	if len(raw) == 0 || raw[0] != '{' {
+		return
+	}
+	for i := 1; i < len(raw); {
+		for i < len(raw) && (raw[i] <= ' ' || raw[i] == ',') {
+			i++
+		}
+		if i >= len(raw) || raw[i] != '"' {
+			return
+		}
+		keyStart := i
+		i = cachePrefixJSONStringEnd(raw, i)
+		if i > len(raw) || i <= keyStart+1 {
+			return
+		}
+		keyRaw := raw[keyStart:i]
+		key := keyRaw[1 : len(keyRaw)-1]
+		if strings.ContainsRune(key, '\\') {
+			key = gjson.Parse(keyRaw).Str
+		}
+		for i < len(raw) && raw[i] <= ' ' {
+			i++
+		}
+		if i >= len(raw) || raw[i] != ':' {
+			return
+		}
+		i++
+		for i < len(raw) && raw[i] <= ' ' {
+			i++
+		}
+		start := i
+		depth := 0
+		for i < len(raw) {
+			ch := raw[i]
+			if ch == '"' {
+				i = cachePrefixJSONStringEnd(raw, i)
+				continue
+			}
+			if ch == '{' || ch == '[' {
+				depth++
+			}
+			if ch == '}' || ch == ']' {
+				if depth == 0 {
+					break
+				}
+				depth--
+			}
+			if ch == ',' && depth == 0 {
+				break
+			}
+			i++
+		}
+		value := strings.TrimSpace(raw[start:i])
+		switch key {
+		case "role":
+			role = gjson.Parse(value).Str
+		case "type":
+			kind = gjson.Parse(value).Str
+		case "encrypted_content":
+			encrypted = len(value) >= 2 && value[0] == '"' && value != `""`
+		case "reasoning_content":
+			hasReasoning = gjson.Parse(value).Exists()
+		}
+	}
+	return
+}
+
+// Return the exclusive end of a raw JSON string. Quote searches avoid copying
+// or unescaping the (usually large) ignored tool output. An unterminated string
+// consumes the remainder, matching the scanner's best-effort observation role.
+func cachePrefixJSONStringEnd(raw string, start int) int {
+	for at := start + 1; at < len(raw); {
+		n := strings.IndexByte(raw[at:], '"')
+		if n < 0 {
+			return len(raw)
+		}
+		end := at + n
+		backslashes := 0
+		for j := end - 1; j > start && raw[j] == '\\'; j-- {
+			backslashes++
+		}
+		if backslashes%2 == 0 {
+			return end + 1
+		}
+		at = end + 1
+	}
+	return len(raw)
 }
