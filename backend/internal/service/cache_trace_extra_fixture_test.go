@@ -50,7 +50,7 @@ func traceExtraBody(rc traceExtraCase) (string, string) {
 	}
 }
 
-func traceExtraRun(t *testing.T, rc traceExtraCase, configure func(*config.Config), resp *http.Response) (*gin.Context, string, []byte, http.Header, *OpenAIForwardResult) {
+func traceExtraRun(t *testing.T, rc traceExtraCase, configure func(*config.Config), resp *http.Response, configureAccount ...func(*Account)) (*gin.Context, string, []byte, http.Header, *OpenAIForwardResult) {
 	t.Helper()
 	path, body := traceExtraBody(rc)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -87,6 +87,9 @@ func traceExtraRun(t *testing.T, rc traceExtraCase, configure func(*config.Confi
 		a.Extra["codex_fingerprint_mode"] = "session"
 	case "fp_full_oauth":
 		a.Extra["codex_fingerprint_mode"] = "full"
+	}
+	for _, configure := range configureAccount {
+		configure(a)
 	}
 	s.GenerateSessionHash(c, []byte(body))
 	var result *OpenAIForwardResult

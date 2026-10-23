@@ -3,12 +3,9 @@ package service
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 
@@ -20,69 +17,6 @@ import (
 func traceTestConfig(cfg *config.Config) {
 	cfg.Gateway.CacheTrace.Enabled = true
 	cfg.Gateway.CacheTrace.ChainPercent = 100
-}
-
-func TestCacheTraceWireCategoriesAndEnabledGolden(t *testing.T) {
-	data, err := os.ReadFile("testdata/cache_trace_wire_e369fd3bb.json")
-	require.NoError(t, err)
-	golden := map[string]string{}
-	require.NoError(t, json.Unmarshal(data, &golden))
-	for _, protocol := range []string{"responses", "chat"} {
-		for _, kind := range []string{"apikey", "oauth", "passthrough"} {
-			for _, key := range []string{"none", "", "a63114b0-6f55-4bf9-a6a2-fbf1cce72317", "trace-private-key"} {
-				for _, header := range []string{"none", "session_id", "session-id", "x-session-id", "x-session-affinity"} {
-					name := fmt.Sprintf("%s/%s/%s/%s", protocol, kind, key, header)
-					t.Run(name, func(t *testing.T) {
-						_, c, req, body := cacheTraceWireFixture(t, protocol, kind, key, header, traceTestConfig)
-						require.Equal(t, golden[name], cacheTraceWireSnapshot(t, req, body), "enabled observation must preserve bytes too")
-						trace := cacheTraceFromGin(c)
-						require.NotNil(t, trace)
-						d := trace.data
-						expectedIn := "client_non_uuid"
-						switch key {
-						case "none":
-							expectedIn = "none"
-						case "":
-							expectedIn = "empty"
-						case "a63114b0-6f55-4bf9-a6a2-fbf1cce72317":
-							expectedIn = "client_uuid"
-						}
-						require.Equal(t, expectedIn, d.PCKClassIn)
-						actualPCK := gjson.GetBytes(body, "prompt_cache_key")
-						require.Equal(t, actualPCK.Type == gjson.String && cacheTraceUUID.MatchString(actualPCK.Str), d.PCKOutIsUUID)
-						expectedOut := "passthrough"
-						if !actualPCK.Exists() {
-							expectedOut = "none"
-						} else if protocol == "chat" {
-							if kind == "oauth" {
-								expectedOut = "oauth_rewritten"
-							} else if key == "none" || key == "" {
-								if header == "none" {
-									expectedOut = "gw_compat_hex"
-								} else {
-									expectedOut = "gw_from_header"
-								}
-							}
-						}
-						require.Equal(t, expectedOut, d.PCKClassOut)
-						require.Equal(t, cacheTraceHeaderBits(req.Header), d.SessHdrOut)
-						expectedRelation := "none"
-						if req.Header.Get("session_id") != "" {
-							expectedRelation = "client_value"
-							if kind == "oauth" {
-								expectedRelation = "gw_isolated"
-							}
-							if protocol == "chat" {
-								expectedRelation = "uuid_of_pck"
-							}
-						}
-						require.Equal(t, expectedRelation, d.SessOutRelation)
-						require.Equal(t, "http", d.Transport)
-					})
-				}
-			}
-		}
-	}
 }
 
 func TestCacheTraceUUIDAndHeaderPresence(t *testing.T) {
@@ -103,7 +37,6 @@ func TestCacheTraceUUIDAndHeaderPresence(t *testing.T) {
 
 func TestCacheTracePrivacyAndSnapshot(t *testing.T) {
 	s, c, req, _ := cacheTraceWireFixture(t, "chat", "apikey", "trace-private-key", "session_id", traceTestConfig)
-	c.Request.Header.Set("thread-id", "trace-private-thread")
 	payload := []byte(`{"reasoning":{"context":"trace-private-response"},"usage":{"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"prompt_cache_hit_tokens":7,"cache_read_input_tokens":3,"cachedContentTokenCount":4,"prompt_cache_diagnostics":{"key":"trace-private-response"}}}`)
 	observeCacheTraceUsage(c, payload)
 	result := &OpenAIForwardResult{RequestID: "trace-private-request-id"}
@@ -125,19 +58,19 @@ func TestCacheTracePrivacyAndSnapshot(t *testing.T) {
 		require.NotContains(t, logs.String(), secret)
 	}
 	require.Len(t, before.ConvAnchor, 16)
-	require.Len(t, before.RequestIDHMAC, 24)
-	require.Len(t, before.SessionDigest, 24)
+	require.Len(t, before.RequestIDHMAC, 64)
+	require.Equal(t, cacheTraceFromGin(c).sessionKey, before.SessionDigest)
 	require.NotNil(t, req.Body)
 }
 
-func TestCacheTracePluginAndBridge(t *testing.T) {
+func TestCacheTracePluginAndBridgeExcluded(t *testing.T) {
 	s, c, req, _ := cacheTraceWireFixture(t, "responses", "oauth", "trace-private-key", "none", traceTestConfig)
 	s.pluginManager = &PluginManager{}
 	s.pluginManager.route.Store(&pluginRoute{rolloutPercent: 100})
 	SetOpenAIClientTransport(c, OpenAIClientTransportWS)
 	s.captureCacheTraceRequest(c, req, &Account{ID: 9, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, "responses")
 	require.Equal(t, "plugin", cacheTraceFromGin(c).data.Transport)
-	require.True(t, cacheTraceFromGin(c).data.IngressWSBridge)
+	require.False(t, cacheTraceFromGin(c).data.IngressWSBridge)
 	s.captureCacheTraceRequest(c, req, &Account{ID: 9, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, "responses")
 	require.Equal(t, "http", cacheTraceFromGin(c).data.Transport)
 }

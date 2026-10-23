@@ -107,13 +107,6 @@ func cacheTraceProtocol(c *gin.Context, root gjson.Result) string {
 	return "responses"
 }
 
-func traceDigestPrefix(value string, n int) string {
-	if len(value) > n {
-		return value[:n]
-	}
-	return value
-}
-
 // Each part is length-delimited; no concatenation ambiguity or retained content.
 func (s *OpenAIGatewayService) cacheTraceAnchor(c *gin.Context, root gjson.Result) string {
 	h := hmac.New(sha256.New, []byte(s.cfg.JWT.Secret))
@@ -153,7 +146,13 @@ func (s *OpenAIGatewayService) cacheTraceAnchor(c *gin.Context, root gjson.Resul
 
 func (s *OpenAIGatewayService) beginCacheTrace(c *gin.Context, body []byte) {
 	// Gate before any JSON access, context creation, or allocation.
-	if !s.cacheTraceEnabled() || c == nil || c.Request == nil || getAPIKeyIDFromContext(c) <= 0 || isGrokRequestContext(c) || monitorProbeRequest(c) {
+	if !s.cacheTraceEnabled() || c == nil || c.Request == nil || c.Request.URL == nil || getAPIKeyIDFromContext(c) <= 0 || isGrokRequestContext(c) || monitorProbeRequest(c) {
+		return
+	}
+	// P0a covers HTTP Responses (including compact) and Chat only. Messages,
+	// WS turns, count_tokens, images and search need their own P0b metadata.
+	path := strings.TrimSuffix(c.Request.URL.Path, "/")
+	if GetOpenAIClientTransport(c) == OpenAIClientTransportWS || !(strings.HasSuffix(path, "/responses") || strings.HasSuffix(path, "/responses/compact") || strings.HasSuffix(path, "/chat/completions")) {
 		return
 	}
 	if key, ok := c.Get("api_key"); ok {
@@ -170,11 +169,13 @@ func (s *OpenAIGatewayService) beginCacheTrace(c *gin.Context, body []byte) {
 		t.mu.Lock()
 		t.sessionKey = sessionKey
 		t.data.GroupID = getOpenAIGroupIDFromContext(c)
-		t.data.SessionDigest = traceDigestPrefix(s.cacheIdentityDigest("cache-trace-session", sessionKey), 24)
+		t.data.SessionDigest = sessionKey
 		t.mu.Unlock()
 		return
 	}
 	root := parseRawJSONView(body)
+	// Mirrors explicitOpenAIRequestSessionID precedence. Non-HTTP/fallback-seed
+	// entry points are excluded above, so content_seed is unambiguous in P0a.
 	source := "content_seed"
 	if explicitOpenAIHeaderSessionID(c) != "" {
 		source = "header"
@@ -188,7 +189,7 @@ func (s *OpenAIGatewayService) beginCacheTrace(c *gin.Context, body []byte) {
 	}
 	bits := cacheTraceHeaderBits(c.Request.Header)
 	t := &cacheTrace{sessionKey: sessionKey, data: cacheTraceData{
-		SessionDigest: traceDigestPrefix(s.cacheIdentityDigest("cache-trace-session", sessionKey), 24),
+		SessionDigest: sessionKey,
 		ConvAnchor:    s.cacheTraceAnchor(c, root), GroupID: getOpenAIGroupIDFromContext(c),
 		ProtocolIn: cacheTraceProtocol(c, root), PCKClassIn: pck, PCKClassOut: out,
 		SessHdrIn: bits, SessOutRelation: "none", IDSource: source,
@@ -223,7 +224,7 @@ func (t *cacheTrace) setSessionSource(source string) {
 		return
 	}
 	switch source {
-	case "none", "client_value", "uuid_of_pck", "gw_isolated":
+	case "none", "client_value", "uuid_of_pck", "gw_isolated", "fingerprint_converged":
 	default:
 		return
 	}
@@ -265,7 +266,15 @@ func (s *OpenAIGatewayService) captureCacheTraceRequest(c *gin.Context, req *htt
 	if err != nil {
 		return
 	}
-	body, err := io.ReadAll(r)
+	// The category snapshot and block chain share this one read. Builders set
+	// ContentLength from the final body, avoiding ReadAll's repeated growth.
+	var body []byte
+	if req.ContentLength > 0 {
+		body = make([]byte, req.ContentLength)
+		_, err = io.ReadFull(r, body)
+	} else {
+		body, err = io.ReadAll(r)
+	}
 	_ = r.Close()
 	if err != nil {
 		return
@@ -284,12 +293,14 @@ func (s *OpenAIGatewayService) captureCacheTraceRequest(c *gin.Context, req *htt
 		t.data.SessOutRelation = "none"
 	}
 	t.data.Transport = "http"
-	if s.pluginManager.ShouldRouteOpenAIOAuth(account) {
+	s.openaiCodexTransportMu.RLock()
+	pluginManager := s.pluginManager
+	s.openaiCodexTransportMu.RUnlock()
+	if pluginManager.ShouldRouteOpenAIOAuth(account) {
 		t.data.Transport = "plugin"
 	}
-	// HTTP builders called for a WS client are the host HTTP bridge. Native WS
-	// sends bypass these builders; no plugin code or turn state is inspected.
-	t.data.IngressWSBridge = GetOpenAIClientTransport(c) == OpenAIClientTransportWS
+	// P0a does not emit WS turns; retained schema field is always zero.
+	t.data.IngressWSBridge = false
 	t.mu.Unlock()
 	s.captureCachePrefix(t, body, protocol)
 }
@@ -328,7 +339,7 @@ func observeCacheTraceUsage(c *gin.Context, body []byte) {
 			{"prompt_cache_diagnostics"},
 		} {
 			for _, p := range paths {
-				if u.Get(p).Exists() {
+				if v := u.Get(p); (i < 4 && v.Type == gjson.Number) || (i >= 4 && v.Exists()) {
 					bits |= 1 << i
 					break
 				}
@@ -354,7 +365,7 @@ func (s *OpenAIGatewayService) finishCacheTrace(c *gin.Context, result *OpenAIFo
 		return
 	}
 	data := t.data
-	data.RequestIDHMAC = traceDigestPrefix(s.cacheIdentityDigest("openai-request", result.RequestID), 24)
+	data.RequestIDHMAC = s.cacheIdentityDigest("openai-request", result.RequestID)
 	result.CacheTrace = &cacheTrace{data: data, sessionKey: t.sessionKey, chain: t.chain}
 }
 

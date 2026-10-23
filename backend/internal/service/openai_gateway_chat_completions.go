@@ -183,6 +183,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if promptCacheKey == "" && !isResponsesShape && (account.UsesOpenAICodexProtocol() || account.IsOpenAIApiKey()) && shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
 		promptCacheKey = deriveCompatPromptCacheKey(&chatReq, upstreamModel)
 		compatPromptCacheInjected = promptCacheKey != ""
+		if compatPromptCacheInjected {
+			cacheTraceFromGin(c).setPCKSource("gw_compat_hex")
+		}
 		if compatPromptCacheInjected && account.IsOpenAIApiKey() {
 			promptCacheKey = isolateOpenAISessionID(getAPIKeyIDFromContext(c), promptCacheKey)
 			compatPromptCacheTenantIsolated = true

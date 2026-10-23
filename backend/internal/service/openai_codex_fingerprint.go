@@ -50,7 +50,7 @@ func stagedCodexFingerprintIDs(c *gin.Context, account *Account) *codexFingerpri
 // 非透传与透传两个请求构造器共用本函数，防止应用语义漂移。仅解析该
 // snapshot 的 OAuth 账号可读取，避免 stale context 跨账号 failover 泄漏。
 func applyStagedCodexFingerprintHeaders(c *gin.Context, account *Account, h http.Header) {
-	applyCodexFingerprintHeaders(h, stagedCodexFingerprintIDs(c, account))
+	applyCodexFingerprintHeaders(h, stagedCodexFingerprintIDs(c, account), cacheTraceFromGin(c))
 }
 
 func applyStagedCodexFingerprintClientMetadata(c *gin.Context, account *Account, reqBody map[string]any) bool {
@@ -354,7 +354,7 @@ func resolveCodexFingerprintIDsFromRequest(account *Account, clientHeaders http.
 
 // applyCodexFingerprintHeaders 按预计算的收敛 ID 改写出站 HTTP 头中的设备指纹。
 // 在 buildUpstreamRequest 的白名单透传之后、enforceCodexIdentityHeaders 之前调用。
-func applyCodexFingerprintHeaders(h http.Header, ids *codexFingerprintIDs) {
+func applyCodexFingerprintHeaders(h http.Header, ids *codexFingerprintIDs, traces ...*cacheTrace) {
 	if h == nil || ids == nil {
 		return
 	}
@@ -375,6 +375,9 @@ func applyCodexFingerprintHeaders(h http.Header, ids *codexFingerprintIDs) {
 	// 连字符形式和下划线形式都改写，保证一致
 	h.Set("session-id", ids.sessionID)
 	h.Set("session_id", ids.sessionID)
+	if len(traces) > 0 {
+		traces[0].setSessionSource("fingerprint_converged")
+	}
 	h.Set("thread-id", ids.threadID)
 
 	rewriteCodexTurnMetadataFields(h, map[string]any{

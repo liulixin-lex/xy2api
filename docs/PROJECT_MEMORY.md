@@ -174,8 +174,7 @@
 - 授权：PM 批准 P0a 先行；基线 `e369fd3bb`，分支 `cache/p0a`，每任务独立提交；不推送、不合并、不部署。
 - 范围：T0a.1 类别与位图、T0a.2 出站块链、T0a.3 结算、T0a.4 路由原因；默认关闭、日志仅枚举/整数/HMAC。
 - 约束：保持出站字节和选号；不改 RecordUsage 主体、resilience/state.go 与插件路径。已吸收设计 v1.2 的八条规格变更。
-- 状态：T0a.2 必需检查已完成；repository环境受限，心跳偶发依PM对照口径处置；原始失败及复核单独保留（unit、integration、韧性、ci_gate、race、golden、文档）；下一步 T0a.1-fix 评审修复。已实现部分按任务独立提交，未推送/合并/部署。
-
+- 状态：T0a.1-fix 必需检查已完成；repository环境受限，心跳偶发依PM对照口径处置；原始失败及复核单独保留（unit、integration、韧性、ci_gate、race、golden、文档）；下一步 T0a.2-fix 异步与超长链评审修复。已实现部分按任务独立提交，未推送/合并/部署。
 - PM 基线更新：0.4.6 已发布，基于 e369fd3bb 重新录制 golden 并重跑全量门禁；只读取回退状态，不改中间件或 resilience/state.go。
 
 

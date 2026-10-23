@@ -49,14 +49,14 @@ Compose / 环境变量对应 `GATEWAY_OPENAI_CACHE_DIAGNOSTICS_ENABLED`、`GATEW
 
 ## cache_trace v1（P0a）
 
-静态 `gateway.cache_trace.enabled` 默认 false（环境变量 `GATEWAY_CACHE_TRACE_ENABLED`），仅在 `gateway.openai_cache.diagnostics_enabled` 也为 true 且有持久 JWT secret 时采集。关闭时不进行额外 JSON 解析或请求体读取。观测不改变请求 bytes、选号、turn-state 或计费；结果在原有 usage 结算时输出 Info 事件 `cache_trace`。
+静态 `gateway.cache_trace.enabled` 默认 false（环境变量 `GATEWAY_CACHE_TRACE_ENABLED`），仅在 `gateway.openai_cache.diagnostics_enabled` 也为 true 且有持久 JWT secret 时采集。关闭时不进行额外 JSON 解析或请求体读取。观测不改变请求 bytes、选号、turn-state 或计费；事件输出由 T0a.3 在原有 usage 结算时接入；此前提交只准备快照。
 
 - 入站 `pck_class_in` 只看原 body：none / empty / client_uuid / client_non_uuid；UUID 用固定 8-4-4-4-12 十六进制正则，不校验版本位。
 - 出站 `pck_class_out` 按实际注入/改写点记录：none / passthrough / gw_compat_hex / gw_from_header / oauth_rewritten；gw_grok 仅预留来源标记（P0a 排除 Grok），gw_uuid 留给后续身份改动。`pck_out_is_uuid` 只表示形态，不用于推导来源。
 - `sess_out_relation` 表示下划线 session_id 的来源：none / client_value / gw_isolated / uuid_of_pck（eq_pck 预留），不与本地 RoutingSessionID 比较。`sess_hdr_in/out` 的位 0–13 依次为 session_id、session-id、conversation_id、x-session-id、x-session-affinity、x-opencode-session、x-conversation-id、thread_id、thread-id、x-codex-turn-state、x-codex-turn-metadata、x-client-request-id、x-claude-code-session-id、x-grok-conv-id；14 留给 Anthropic metadata.user_id，15 保留。`thread_present` 同时识别 client_metadata.thread_id 的存在性。
 - `usage_fields` 位 0–5：cached_tokens（含 cache_read_tokens 兼容别名）、prompt_cache_hit_tokens、cache_read_input_tokens、cachedContentTokenCount、cache write/creation 系列、prompt_cache_diagnostics。显式 0 仍记为存在；位图不改变 usage 优先级或启用新别名计费。
-- `id_source` 复用本地会话信号的选择顺序；`conv_anchor` 为 API key 作用域内前导指令与首条 user 的 HMAC（8 字节）。request_id_hmac 是现有 openai-request HMAC 的前 12 字节，能与既有事件按此前缀关联；session_digest 为本地隔离身份的独立域 HMAC（12 字节）。不记录明文 body、会话头或缓存键。布尔字段在事件中编码为 0/1。
-- `transport=plugin` 来自现有 ShouldRouteOpenAIOAuth 的只读判断；其快照属于插件前，请勿当作最终上游 wire。`ingress_ws_bridge` 在 HTTP builder 中根据既有 WS 客户端标记尽力填写；没有标记时为 0。不改插件路径。
+- `id_source` 复用本地会话信号的选择顺序；`conv_anchor` 为 API key 作用域内前导指令与首条 user 的 HMAC（8 字节）。request_id_hmac 和 session_digest 与既有 openai_cache_usage 的对应字段完全同值，不另加域、不再截断。不记录明文 body、会话头或缓存键。布尔字段在事件中编码为 0/1。
+- `transport=plugin` 来自现有 ShouldRouteOpenAIOAuth 的只读判断；其快照属于插件前，请勿当作最终上游 wire。P0a 不输出 WS Bridge 轮次；`ingress_ws_bridge` 恒为 0。不改插件路径。
 - P0a 仅覆盖 OpenAI Responses / Chat HTTP；原生 WS、非 OpenAI、monitor probe 不新增归因。快照在最终兼容处理后抓取，Chat 的最终 session_id 单独更新，失败尝试之间重置出站字段；异步结算持有独立快照。
 
 ### 出站块链与位置
@@ -73,3 +73,15 @@ Compose / 环境变量对应 `GATEWAY_OPENAI_CACHE_DIAGNOSTICS_ENABLED`、`GATEW
 提供方实际渲染模板和 tokenizer 未知，逻辑字节位置只是近似前缀位置；原始 JSON 字段顺序不参与 token 位置估算。块链 benchmark 不包含转发器已有处理或启用观测后的 GetBody 副本开销，端到端 p99 需上线实验验证。
 
 关闭路径回归使用 `python3 tools/cache-trace/check_disabled.py --baseline <baseline-worktree> --output <evidence-directory>`：同一生产转发/结算夹具在纯基线与当前树比较分配；Go overlay 桩断言关闭时不进入块链、P0a JSON 读取或 loss_class 计算。该工具不修改基线，也不在生产代码中保留测试钩子。
+
+### P0a 入口范围与关联字段
+
+P0a 只为 HTTP Responses（含 compact）、Chat→Responses 和原生 Chat 生成快照。Messages 桥、WS/HTTP Bridge 轮次、count_tokens、images 和 alpha search 排除，留待 P0b。`ingress_ws_bridge` 在 P0a 输出中恒为 0；不将 WS 首轮入站信息复用于后续轮次。事件输出由 T0a.3 接入，T0a.1/T0a.2 及其修复只准备快照。
+
+`session_digest` 完全沿用 `openai_cache_usage` 的会话摘要；`request_id_hmac` 沿用该事件完整的请求 HMAC。两者不另加域或再截断，离线可以直接关联。`sess_out_relation=fingerprint_converged` 表示指纹收敛写入账号级常量 session_id，与 gw_isolated 区分。所有标识仅内部使用，块哈希仍不出日志。
+
+读取位只接受数值类型；null、字符串等无效值不表示可用读取字段，数字 0 算存在。非流式 Chat 的 buffered 终帧与流式路径使用相同的存在性观测，不改变计费解析或读取优先级。
+
+conv_anchor 按既定的前导 system/developer 和首条 user 计算；Codex 的首条 user 可能只是 AGENTS 或环境信息，同一工作区的不同对话可能共享锚点，从而低估 other_conv。此限制留待 P0b 与 EXP-0 校验。
+
+正式回归包含基线上的 510 组生产转发路径快照（开关两态逐字节比对）、成功响应 usage 观测和日志隐私断言。早期 120 组 builder 快照仅作补充，不计作独立生产路径覆盖。启用观测时类别和块链共享一次最终 body 读取，按 ContentLength 预分配；既有诊断的 Lite 改写前读取保持原口径，端到端成本单独报告。
