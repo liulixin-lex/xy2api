@@ -377,7 +377,7 @@ describe('CacheSettingsPanel', () => {
 describe('cache settings copy', () => {
   const pick = (locale: typeof zh) => (locale.admin as Record<string, any>).cacheSettings
 
-  it('names every card, state, blocker, warning, error and missing confirmation in both locales', () => {
+  it('names every card, state, blocker, warning, error, missing confirmation and option in both locales', () => {
     const codes = {
       states: ['off', 'on', 'masked_by_master', 'killed', 'blocked', 'pending_reload', 'parse_error', 'not_in_build'],
       blockers: ['diagnostics_disabled', 'static_aware_routing_disabled', 'parse_error', 'kill_switch'],
@@ -407,12 +407,19 @@ describe('cache settings copy', () => {
         'malformed_body',
       ],
       missing: ['reason', 'checkbox', 'typed'],
+      // Enum values by i18n key ('+' becomes '_plus_'); affinity_mode uses the DESIGN v1.7.6 names.
+      options: ['off', 'uuid_fill', 'whitelist', 'normalize', 'score', 'prev_host', 'prev_host_plus_quality', 'aux_only', 'openai', 'anthropic', 'gemini', 'messages_bridge'],
     }
+    const routingValues = sampleValidation('validate_ok_routing_enable_m4').diff.filter((d) => d.field === 'affinity_mode').flatMap((d) => [d.before, d.after])
+    expect(routingValues).toContain('prev_host')
     for (const locale of [zh, en]) {
       const copy = pick(locale)
       for (const card of POLICY_CARDS) expect(copy.policies[card.key].title).toBeTruthy()
       for (const [group, list] of Object.entries(codes)) for (const code of list) expect(copy[group][code], `${group}.${code}`).toBeTruthy()
       for (const code of [...codes.warnings, ...codes.blockers]) expect(copy.acks[code], `acks.${code}`).toBeTruthy()
+      for (const value of routingValues) expect(copy.options[String(value).replace(/\+/g, '_plus_')], `options.${value}`).toBeTruthy()
+      // The names before v1.7.6 are gone, not kept beside the new ones.
+      for (const old of ['host', 'host_plus_score']) expect(copy.options[old], `options.${old}`).toBeUndefined()
     }
   })
 

@@ -2,10 +2,10 @@
   "_contract": [
     "C-12"
   ],
-  "_note": "变更记录：来自 audit_logs（action 前缀 admin.cache.policies.、PUT）；失败的写入也列出（rev_before/rev_after 为 null）；changed_fields 只含字段名；validate 不出现在这里。after_rev 参数用于 409 合并时只取中间的写入。",
+  "_note": "变更记录（不带 after_rev）：来自 audit_logs（action 前缀 admin.cache.policies.、PUT）；失败的写入也列出（rev_before/rev_after 为 null）；changed_fields 只含字段名；validate 不出现在这里。",
   "request": {
     "method": "GET",
-    "path": "/api/v1/admin/cache/policies/history?key=upstream_identity&after_rev=4",
+    "path": "/api/v1/admin/cache/policies/history?key=upstream_identity",
     "body": null
   },
   "status": 200,

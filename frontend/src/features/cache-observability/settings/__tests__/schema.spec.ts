@@ -28,7 +28,7 @@ describe('policy schema helpers', () => {
       schema: [
         { field: 'keep_sticky_on_busy.enabled', type: 'bool' },
         { field: 'keep_sticky_on_busy.rollout_percent', type: 'int', min: 0, max: 100 },
-        { field: 'affinity_mode', type: 'enum', options: ['score', 'host'] },
+        { field: 'affinity_mode', type: 'enum', options: ['score', 'prev_host', 'prev_host+quality'] },
       ],
     }
     const draft = setPath(entry.stored.spec, 'keep_sticky_on_busy.enabled', true)

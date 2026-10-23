@@ -9,7 +9,7 @@
     "body": {
       "expected_rev": 0,
       "spec": {
-        "affinity_mode": "host"
+        "affinity_mode": "prev_host"
       },
       "reason": "小比例试运行",
       "confirm": {
@@ -32,7 +32,7 @@
         {
           "field": "affinity_mode",
           "before": "score",
-          "after": "host"
+          "after": "prev_host"
         }
       ],
       "risk": "highest",

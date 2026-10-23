@@ -161,8 +161,9 @@ describe('cache policies contract v1.7.4', () => {
     expect(confirms.validate_ok_master_enable_m3).toEqual({ reason_required: true, checkbox_required: true, type_to_confirm: null })
     expect(confirms.validate_ok_routing_enable_m4).toMatchObject({ reason_required: true, checkbox_required: true, type_to_confirm: 'cache_routing_policy' })
 
-    respond(sample('put_422'))
-    const failure = toWriteFailure(await rejected(putPolicy('routing', { expected_rev: 0, spec: { affinity_mode: 'host' } })))
+    const unconfirmed = sample('put_422')
+    respond(unconfirmed)
+    const failure = toWriteFailure(await rejected(putPolicy('routing', unconfirmed.request.body as Parameters<typeof putPolicy>[1])))
     expect(failure).toEqual({ kind: 'confirm', missing: ['reason', 'checkbox', 'typed'], typeToConfirm: 'cache_routing_policy' })
   })
 
@@ -172,9 +173,17 @@ describe('cache policies contract v1.7.4', () => {
       kind: 'conflict',
       currentRev: 5,
     })
-    respond(sample('history'))
+    const between = sample('history_after_rev')
+    respond(between)
     const history = await listHistory('upstream_identity', 20, 4)
-    expect(calls[1]).toMatchObject({ method: 'GET', url: '/admin/cache/policies/history', params: expect.objectContaining({ key: 'upstream_identity', limit: 20, after_rev: 4 }) })
+    const query = new URLSearchParams(between.request.path.split('?')[1])
+    expect(calls[1]).toMatchObject({
+      method: 'GET',
+      url: '/admin/cache/policies/history',
+      params: expect.objectContaining({ key: query.get('key'), limit: 20, after_rev: Number(query.get('after_rev')) }),
+    })
+    // §7.6: with after_rev only rev_after > after_rev comes back, so a failed attempt (rev_after null) never does.
+    expect(history.items.map((i) => i.rev_after)).toEqual([5])
     expect(history.items[0]).toMatchObject({ rev_before: 4, rev_after: 5, changed_fields: ['rollout_percent'] })
   })
 
@@ -185,7 +194,7 @@ describe('cache policies contract v1.7.4', () => {
     state.update('upstream_identity', 'rollout_percent', 60)
     // Someone on call set the share back to 0 meanwhile (rev 5).
     const latest = rewritten(identityEntry(), 5, { rollout_percent: 0 }, 'oncall@example.com', '错误率上升，先调回 0')
-    respond(sample('validate_rev_stale'), ok(latest), sample('history'))
+    respond(sample('validate_rev_stale'), ok(latest), sample('history_after_rev'))
     await state.openPreview('upstream_identity')
     await flushPromises()
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
@@ -199,7 +208,7 @@ describe('cache policies contract v1.7.4', () => {
     expect(preview.result).toBeNull()
     expect(preview.conflict).toMatchObject({ baseRev: 4, latestRev: 5, theirFields: ['rollout_percent'], merged: [] })
     expect(preview.conflict?.overlaps).toEqual([{ field: 'rollout_percent', base: 50, mine: 60, theirs: 0, choice: null, reverting: true }])
-    // Only the successful write in between is listed; the failed 422 attempt is not a write.
+    // The writes in between, as the history answers for after_rev (§7.6).
     expect(preview.conflict?.writes?.map((w) => w.rev_after)).toEqual([5])
 
     state.setChoice('rollout_percent', 'theirs')
@@ -313,6 +322,9 @@ describe('cache policies contract v1.7.4', () => {
   it('C-12 lists failed writes too, with field names only', async () => {
     respond(sample('history'))
     const history = await listHistory('upstream_identity')
+    // The change log asks without after_rev, so failed attempts are listed too.
+    expect(new URLSearchParams(sample('history').request.path.split('?')[1]).has('after_rev')).toBe(false)
+    expect(calls[0].params).not.toHaveProperty('after_rev')
     expect(history.items.every((i) => /^admin\.cache\.policies\.[a-z_]+\.update$/.test(i.action))).toBe(true)
     expect(history.items[1]).toMatchObject({ status_code: 422, rev_before: null, rev_after: null, changed_fields: [] })
     expect(history.items.flatMap((i) => i.changed_fields).every((f) => /^[a-z_.]+$/.test(f))).toBe(true)

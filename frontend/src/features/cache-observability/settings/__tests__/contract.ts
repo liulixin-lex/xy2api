@@ -1,4 +1,4 @@
-// F's contract samples for /api/v1/admin/cache/policies (v1.7.4, C-1 to C-14),
+// F's contract samples for /api/v1/admin/cache/policies (v1.7.4.4, C-1 to C-14),
 // copied verbatim into ./contract. The backend handler tests use the same
 // files; when a sample and CACHE_PANEL_API §7 disagree, the document wins and
 // the sample is fixed upstream, then copied again.

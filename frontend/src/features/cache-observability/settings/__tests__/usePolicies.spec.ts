@@ -107,6 +107,7 @@ describe('usePolicies', () => {
     const conflict = state.preview.value!.conflict!
     expect(conflict).toMatchObject({ baseRev: 4, latestRev: 5, theirFields: ['rollout_percent'], merged: ['forward_session_headers'] })
     expect(conflict.overlaps).toEqual([{ field: 'rollout_percent', base: 50, mine: 60, theirs: 0, choice: null, reverting: true }])
+    // The mock answers with the full change log, failed attempt included (a backend ignoring after_rev): still only the write after the base.
     expect(conflict.writes?.map((w) => w.actor?.email)).toEqual(['oncall@example.com'])
     expect(state.preview.value?.result).toBeNull()
 
