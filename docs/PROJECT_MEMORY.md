@@ -1371,3 +1371,7 @@ pnpm --dir frontend run build
 - 从最新 main 按 G → G2 → UI 导入；冲突仅记忆与 policy，保留各任务历史及有效字面量，G2 旧任务按来源原样归档。未夹带 M2。运行时策略覆盖 trace 构造、异步与结算路径，T4 决策点只读已有 trace。
 - 已按项目惯例改写 author/committer 并保留 Co-Authored-By。CSV 夹具只归一化行尾，内容不变。
 - 待验证：固定候选的 CI 等价预跑、真实仓储 integration、独立终审和端到端；生产仍不变更。详细 SHA/tree 与原始结果保存在仓库外报告。
+
+### 2026-10-23T20:13Z — `20261023-cache-m1-integration` — 调度登记元数据补齐
+
+- 首轮工具单测发现 no-session 观测 allowlist 缺少必需 note；仅补说明，不改审计规则、diff 块、测试断言或产品代码。原失败保留，复验工具/文档/审计门禁；其余产品预跑结果按相同源码继承。
