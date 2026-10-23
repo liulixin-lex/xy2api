@@ -57,6 +57,8 @@ const defaultDeps: PolicyDeps = {
 
 /** Automatic re-merges when validate keeps answering `rev_stale` (someone writing in a loop). */
 const MAX_STALE_RETRIES = 2
+/** Re-reads of a pending_reload key, one refresh period apart, before the panel leaves it to the reload button (n-new-2). */
+const PENDING_REREADS = 3
 
 export function usePolicies(overrides: Partial<PolicyDeps> = {}) {
   const deps = { ...defaultDeps, ...overrides }
@@ -73,7 +75,8 @@ export function usePolicies(overrides: Partial<PolicyDeps> = {}) {
   const preview = ref<PreviewState | null>(null)
   const receipts = ref<Record<string, WriteReceipt>>({})
   const histories = ref<Record<string, HistoryResponse | 'loading' | 'failed'>>({})
-  const fetchedDeadlines = new Set<string>()
+  /** Re-reads already made for each deadline tag. */
+  const rereads = new Map<string, number>()
 
   const killSwitch = computed(() => data.value?.static.kill_switch === true)
   const refreshSeconds = computed(() => data.value?.refresh_interval_s ?? DEFAULT_REFRESH_SECONDS)
@@ -471,21 +474,32 @@ export function usePolicies(overrides: Partial<PolicyDeps> = {}) {
     return null
   }
 
+  /**
+   * When the next re-read for a deadline is due, or null once they are used up: a receipt re-reads once; a key still
+   * pending_reload re-reads each refresh period, a bounded number of times, in case an instance loads late (n-new-2).
+   */
+  function nextReread(deadline: { tag: string; at: Date; receipt: boolean }): Date | null {
+    const done = rereads.get(deadline.tag) ?? 0
+    if (done >= (deadline.receipt ? 1 : PENDING_REREADS)) return null
+    return new Date(deadline.at.getTime() + done * refreshSeconds.value * 1000)
+  }
+
   /** Whether a countdown is running or due, so the panel's clock needs second resolution. */
   function hasCountdown(): boolean {
     return (data.value?.policies ?? []).some((p) => {
       const deadline = deadlineOf(p.key)
-      return !!deadline && !fetchedDeadlines.has(deadline.tag)
+      return !!deadline && !!nextReread(deadline)
     })
   }
 
-  /** Driven by the panel's clock: once a countdown runs out, re-read the server state exactly once (M-2). */
+  /** Driven by the panel's clock: once a countdown runs out, re-read the server state (M-2). */
   function tick(now: Date) {
     let due = false
     for (const p of data.value?.policies ?? []) {
       const deadline = deadlineOf(p.key)
-      if (!deadline || now < deadline.at || fetchedDeadlines.has(deadline.tag)) continue
-      fetchedDeadlines.add(deadline.tag)
+      const at = deadline && nextReread(deadline)
+      if (!deadline || !at || now < at) continue
+      rereads.set(deadline.tag, (rereads.get(deadline.tag) ?? 0) + 1)
       if (deadline.receipt) receipts.value = { ...receipts.value, [p.key]: { ...receipts.value[p.key], settled: true } }
       due = true
     }

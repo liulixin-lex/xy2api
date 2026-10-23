@@ -3,7 +3,12 @@
   <section class="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700 sm:p-6" aria-labelledby="cache-master-title" data-test="master-bar">
     <div class="flex flex-wrap items-start justify-between gap-6">
       <div class="min-w-0 max-w-2xl">
-        <h2 id="cache-master-title" class="flex flex-wrap items-center gap-2 text-base font-bold text-gray-900 dark:text-white">
+        <h2
+          id="cache-master-title"
+          ref="heading"
+          tabindex="-1"
+          class="flex flex-wrap items-center gap-2 rounded text-base font-bold text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-white"
+        >
           {{ t('admin.cacheSettings.master.title') }}
           <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium" :class="tone.pill" data-test="master-state">
             <span class="h-1.5 w-1.5 rounded-full" :class="tone.dot" aria-hidden="true" />
@@ -17,6 +22,7 @@
       <div v-if="master" class="flex items-center gap-3">
         <span id="cache-master-switch-label" class="text-sm font-medium text-gray-700 dark:text-gray-200">{{ t('admin.cacheSettings.master.switchLabel') }}</span>
         <PolicySwitch
+          ref="masterSwitch"
           large
           :model-value="masterOn"
           aria-labelledby="cache-master-switch-label"
@@ -76,10 +82,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { MASTER_KEY } from '../catalog'
+import { returnFocusAfterPreview } from '../focusReturn'
 import { codeLabel, formatBoth, formatUtc, relativeTime, stateTone } from '../format'
 import type { PoliciesState } from '../usePolicies'
 import PolicyReceipt from './PolicyReceipt.vue'
@@ -116,4 +123,9 @@ function toggle(next: boolean) {
   const m = master.value
   if (m) void props.state.openPreview(MASTER_KEY, { ...m.stored.spec, enabled: next })
 }
+
+// The switch is disabled while its confirmation is open; hand focus back to it once it closes.
+const heading = ref<HTMLElement | null>(null)
+const masterSwitch = ref<InstanceType<typeof PolicySwitch> | null>(null)
+returnFocusAfterPreview(props.state, MASTER_KEY, () => [masterSwitch.value?.$el as HTMLElement | undefined, heading.value])
 </script>

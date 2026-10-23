@@ -1,5 +1,5 @@
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh'
 
@@ -34,7 +34,8 @@ const stubs = {
   RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' },
 }
 
-function mountPanel(response: PoliciesResponse = m1Response(), validate: ValidateResult = validation()) {
+/** `attach` renders the real BaseDialog into the document, so focus moves the way it does in a browser. */
+function mountPanel(response: PoliciesResponse = m1Response(), validate: ValidateResult = validation(), options: { attach?: boolean } = {}) {
   const api = {
     listPolicies: vi.fn().mockResolvedValue(response),
     getPolicy: vi.fn(),
@@ -43,9 +44,19 @@ function mountPanel(response: PoliciesResponse = m1Response(), validate: Validat
     listHistory: vi.fn().mockResolvedValue(history()),
   }
   const deps = { api, loadGroups: vi.fn().mockResolvedValue([]), now: () => new Date('2026-10-23T09:00:00Z') }
-  const wrapper = mount(CacheSettingsPanel, { props: { deps }, global: { stubs } })
+  const wrapper = mount(CacheSettingsPanel, {
+    props: { deps },
+    global: { stubs: options.attach ? { ...stubs, BaseDialog: false } : stubs },
+    attachTo: options.attach ? document.body : undefined,
+  })
   const state = (wrapper.vm as unknown as { state: PoliciesState }).state
   return { wrapper, api, state }
+}
+
+/** The real dialog leaves through its transition; focus is checked once it is out of the document, as in a browser. */
+async function dialogGone() {
+  await flushPromises()
+  await vi.waitFor(() => expect(document.querySelector('[data-base-dialog]')).toBeNull())
 }
 
 async function previewObservability(wrapper: ReturnType<typeof mountPanel>['wrapper']) {
@@ -56,6 +67,8 @@ async function previewObservability(wrapper: ReturnType<typeof mountPanel>['wrap
 
 describe('CacheSettingsPanel', () => {
   beforeEach(() => vi.clearAllMocks())
+  // Attached panels must leave the document between tests, even when an assertion fails.
+  enableAutoUnmount(afterEach)
 
   it('lays out the M1 build: status, passive cards, then the master group; missing keys fold into one line each', async () => {
     const { wrapper } = mountPanel()
@@ -164,6 +177,46 @@ describe('CacheSettingsPanel', () => {
     const group = wrapper.get('[data-test="master-bar"]')
     expect(group.get('[data-test="policy-pending"]').text()).toContain('admin.cacheSettings.written')
     expect(group.get('[data-test="policy-live"]').text()).toContain('admin.cacheSettings.writtenLive')
+  })
+
+  it('hands focus back to the master switch after its confirmation closes, though it was disabled meanwhile (m-new-1)', async () => {
+    const { wrapper } = mountPanel(m1Response(), validation(), { attach: true })
+    await flushPromises()
+    const masterSwitch = wrapper.get<HTMLButtonElement>('[data-test="master-switch"]').element
+    masterSwitch.focus()
+    masterSwitch.click()
+    await flushPromises()
+    expect(document.querySelector('[data-base-dialog]')).not.toBeNull()
+    expect(masterSwitch.disabled).toBe(true)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
+    await dialogGone()
+    expect(document.activeElement).not.toBe(document.body)
+    expect(document.activeElement).toBe(masterSwitch)
+  })
+
+  it('hands focus back to Preview after a cancel, and to the card title once the saved draft disables it (m-new-1)', async () => {
+    const { wrapper, api } = mountPanel(m1Response(), validation(), { attach: true })
+    await flushPromises()
+    await wrapper.get('[data-test="field-observability.enabled"] [role="switch"]').trigger('click')
+    const preview = wrapper.get<HTMLButtonElement>('[data-test="preview-observability"]').element
+    const open = async () => {
+      preview.focus()
+      preview.click()
+      await flushPromises()
+      expect(document.activeElement?.closest('[data-base-dialog]')).not.toBeNull()
+    }
+    await open()
+    document.querySelector<HTMLButtonElement>('[data-test="confirm-cancel"]')!.click()
+    await dialogGone()
+    expect(document.activeElement).toBe(preview)
+
+    await open()
+    api.putPolicy.mockResolvedValueOnce(rewritten(observabilityEntry(), 1, { enabled: true }))
+    document.querySelector<HTMLButtonElement>('[data-test="confirm-submit"]')!.click()
+    await dialogGone()
+    expect(preview.disabled).toBe(true)
+    expect(document.activeElement).not.toBe(document.body)
+    expect(document.activeElement?.id).toBe('cache-policy-observability')
   })
 
   it('marks a card with unsubmitted edits and states what a clipped value runs at', async () => {
@@ -313,13 +366,11 @@ describe('CacheSettingsPanel', () => {
   })
 
   it('explains a backend without the endpoints', async () => {
-    const { wrapper, api } = mountPanel()
+    const { api } = mountPanel()
     api.listPolicies.mockReset().mockRejectedValue(rejection('put_404'))
     const fresh = mount(CacheSettingsPanel, { props: { deps: { api, loadGroups: vi.fn().mockResolvedValue([]), now: () => new Date() } }, global: { stubs } })
     await flushPromises()
     expect(fresh.get('[data-test="settings-load-error"]').text()).toContain('admin.cacheSettings.unavailable')
-    wrapper.unmount()
-    fresh.unmount()
   })
 })
 

@@ -209,7 +209,7 @@
         <p v-if="stillNeeded.length" id="cache-policy-submit-hint" class="mr-auto text-xs text-gray-700 dark:text-dark-200" data-test="submit-hint">
           {{ t('admin.cacheSettings.dialog.stillNeeded', { items: stillNeeded.join(t('admin.cacheSettings.nameSeparator')) }) }}
         </p>
-        <button ref="cancelButton" type="button" class="btn btn-secondary" :disabled="preview?.submitting" @click="cancel">
+        <button ref="cancelButton" type="button" class="btn btn-secondary" :disabled="preview?.submitting" data-test="confirm-cancel" @click="cancel">
           {{ preview?.nothingLeft ? t('admin.cacheSettings.dialog.close') : t('admin.cacheSettings.dialog.cancel') }}
         </button>
         <button

@@ -8,7 +8,13 @@
   >
     <header class="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
       <div class="min-w-0">
-        <component :is="nested ? 'h4' : 'h2'" :id="titleId" class="text-base font-bold text-gray-900 dark:text-white">
+        <component
+          :is="nested ? 'h4' : 'h2'"
+          :id="titleId"
+          ref="heading"
+          tabindex="-1"
+          class="rounded text-base font-bold text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-white"
+        >
           {{ t(`admin.cacheSettings.policies.${meta.key}.title`) }}
         </component>
         <p class="mt-1 max-w-prose text-sm text-gray-600 dark:text-dark-300">{{ t(`admin.cacheSettings.policies.${meta.key}.description`) }}</p>
@@ -138,6 +144,7 @@
           {{ t('admin.cacheSettings.discard') }}
         </button>
         <button
+          ref="previewButton"
           type="button"
           class="btn btn-primary btn-sm"
           :disabled="!dirty || busy || errorFields.length > 0"
@@ -158,6 +165,7 @@ import { computed, nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { controlIdFor, type PolicyCardMeta } from '../catalog'
+import { returnFocusAfterPreview } from '../focusReturn'
 import { codeLabel, formatBoth, formatUtc, relativeTime, stateTone } from '../format'
 import { getPath, lockReason } from '../schema'
 import type { PoliciesState } from '../usePolicies'
@@ -206,6 +214,11 @@ async function goToFirstError() {
   const control = document.getElementById(controlIdFor(props.meta.key, field))
   ;(control ?? row?.querySelector<HTMLElement>('input, select, button, [tabindex]'))?.focus({ preventScroll: true })
 }
+
+// Back to "Preview" after the confirmation closes; once the draft is saved that button is disabled, so the title.
+const heading = ref<HTMLElement | null>(null)
+const previewButton = ref<HTMLButtonElement | null>(null)
+returnFocusAfterPreview(props.state, props.meta.key, () => [previewButton.value, heading.value])
 
 const historyOpen = ref(false)
 function toggleHistory() {

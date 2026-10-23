@@ -254,7 +254,7 @@ describe('cache policies contract v1.7.4', () => {
     expect(state.stateOf('upstream_identity')).toBe('on')
   })
 
-  it('C-9 re-reads once when a pending_reload countdown runs out, and shows a parse error as such', async () => {
+  it('C-9 re-reads when a pending_reload countdown runs out, then once a refresh period while it stays pending, three times in all; shows a parse error as such', async () => {
     respond(sample('list_pending_reload'))
     const state = setup({ now: '2026-10-23T08:59:50Z' })
     await state.load()
@@ -263,11 +263,16 @@ describe('cache policies contract v1.7.4', () => {
     expect(state.hasCountdown()).toBe(true)
     state.tick(new Date('2026-10-23T09:00:20Z'))
     expect(calls).toHaveLength(1)
-    respond(sample('list_pending_reload'))
-    state.tick(new Date('2026-10-23T09:00:41Z'))
-    state.tick(new Date('2026-10-23T09:00:42Z'))
-    await flushPromises()
-    expect(calls).toHaveLength(2)
+    // An instance that loads late keeps the key pending after the first re-read (n-new-2); refresh_interval_s is 60 here.
+    respond(sample('list_pending_reload'), sample('list_pending_reload'), sample('list_pending_reload'))
+    const reads: number[] = []
+    for (const at of ['09:00:41', '09:00:42', '09:01:39', '09:01:41', '09:02:41', '09:03:41', '09:05:00']) {
+      state.tick(new Date(`2026-10-23T${at}Z`))
+      await flushPromises()
+      reads.push(calls.length)
+    }
+    expect(reads).toEqual([2, 2, 2, 3, 4, 4, 4])
+    expect(state.stateOf('observability')).toBe('pending_reload')
     expect(state.hasCountdown()).toBe(false)
 
     respond(sample('list_parse_error'))
