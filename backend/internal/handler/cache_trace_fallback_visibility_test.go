@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/handler/dto"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/server/middleware"
@@ -39,6 +40,13 @@ func (w *traceVisibilityLog) text() string {
 	return w.Buffer.String()
 }
 
+// Only settings reads are needed to publish an enabled production snapshot.
+type traceVisibilityPolicyStore struct{ service.SettingRepository }
+
+func (*traceVisibilityPolicyStore) GetMultiple(context.Context, []string) (map[string]string, error) {
+	return map[string]string{"cache_observability_policy": `{"rev":1,"spec":{"enabled":true,"chain_percent":100}}`}, nil
+}
+
 // INV-18: exercise the actual handler, forwarded response and billing row.
 // Only internal cache_trace may disclose that an availability fallback ran.
 func TestCacheTraceFallbackInvisibleInResponseAndUserUsage(t *testing.T) {
@@ -56,11 +64,14 @@ func TestCacheTraceFallbackInvisibleInResponseAndUserUsage(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &gwUsageLogRepo{}
 			terminal := strings.Replace(ptUsageCompleted, `"input_tokens":11`, `"input_tokens":12000,"input_tokens_details":{"cached_tokens":0}`, 1)
-			h := newPassthroughUsageHandler(t, repo, &ptUsageUpstream{body: func() io.ReadCloser { return io.NopCloser(strings.NewReader(ptUsageOpening + terminal)) }}, 0)
+			policyConfig := &config.Config{}
+			policyConfig.Gateway.OpenAICache.DiagnosticsEnabled = true
+			policies := service.NewCachePolicyService(&traceVisibilityPolicyStore{}, policyConfig)
+			require.NoError(t, policies.Refresh(context.Background()))
+			require.True(t, policies.Snapshot().TraceEnabled())
+			h := newPassthroughUsageHandler(t, repo, &ptUsageUpstream{body: func() io.ReadCloser { return io.NopCloser(strings.NewReader(ptUsageOpening + terminal)) }}, 0, policies)
 			h.cfg.JWT.Secret = "trace-visibility-synthetic-secret"
 			h.cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-			h.cfg.Gateway.CacheTrace.Enabled = true
-			h.cfg.Gateway.CacheTrace.ChainPercent = 100
 			h.cfg.Gateway.CacheTrace.MinCacheableTokens = 1024
 			originID := int64(918)
 			origin := &service.APIKey{ID: 912, UserID: 913, GroupID: &originID,

@@ -56,7 +56,7 @@ func TestCacheTraceUndeliveredAbuseMinimalEventAndBilling(t *testing.T) {
 			traces := t3SettlementEvents(t, logs, "cache_trace")
 			require.Len(t, usage, 1)
 			require.Len(t, traces, 1, "repeated observer settlement cannot duplicate the event")
-			payload := t3SettlementPayload(t, traces[0], true)
+			payload := t3SettlementPayload(t, traces[0], true, CachePolicyFromGin(f.c).Revision())
 			require.Equal(t, "n/a_sampled_out", payload["loss_class"])
 			require.Equal(t, "undelivered", payload["na_reason"])
 			t3SettlementAssertUsageLink(t, traces[0], usage[0], result, f.account)
