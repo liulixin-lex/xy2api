@@ -1,9 +1,9 @@
 <template>
-  <!-- 账号列表的“编辑分组”弹窗：只改 group_ids，取消不保存 -->
+  <!-- 账号列表的“编辑分组”弹窗：只改 group_ids，取消不保存；用宽版，两列分组名不被截断 -->
   <BaseDialog
     :show="true"
     :title="t('admin.groupCategories.editAccountGroups', { name: account.name })"
-    width="normal"
+    width="wide"
     @close="handleClose"
   >
     <div data-test="account-groups-dialog">
@@ -17,7 +17,7 @@
         :platform="fresh.platform"
         :mixed-scheduling="fresh.extra?.mixed_scheduling === true"
         category-tabs
-        list-class="!max-h-80"
+        list-class="!max-h-[60vh]"
       />
     </div>
 
