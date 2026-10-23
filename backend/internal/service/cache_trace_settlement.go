@@ -133,11 +133,11 @@ func (s *OpenAIGatewayService) settleCacheTraceUndelivered(result *OpenAIForward
 		d, timing = t.data, t.timing
 		t.async = nil // never publish undelivered history, including late results
 		t.mu.Unlock()
+		d.NAReason = "undelivered"
 	}
 	diagnostic := result.CacheDiagnostic
 	d.SessionDigest, d.GroupID, d.AccountID = diagnostic.Session, diagnostic.GroupID, account.ID
 	d.PromptTokens, d.ReadTokens = result.Usage.InputTokens, result.Usage.CacheReadInputTokens
-	d.NAReason = "undelivered"
 	if timing.sequence != 0 && !timing.sentAt.IsZero() {
 		telemetry := s.cacheTelemetry()
 		telemetry.mu.Lock()

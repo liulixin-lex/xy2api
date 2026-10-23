@@ -161,3 +161,50 @@ func TestCacheTraceUndeliveredLogFailureCannotChangeBilling(t *testing.T) {
 		})
 	}
 }
+
+// Observer failure has higher contract priority than delivery coverage.
+func TestCacheTraceObserverFailureTakesPrecedenceOverUndelivered(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, fault := range []string{"panic", "error"} {
+		t.Run(fault, func(t *testing.T) {
+			s, c, result, body := t3SettlementForwardReply(t, "responses", false, traceForwardSSE, false)
+			live := cacheTraceFromGin(c)
+			usage, complete := s.parseSSEUsageObserving(traceForwardSSE, func([]byte) error {
+				if fault == "panic" {
+					panic("synthetic-undelivered-observer-panic")
+				}
+				return errors.New("synthetic-undelivered-observer-error")
+			}, live)
+			require.False(t, complete)
+			require.Equal(t, s.parseSSEUsageFromBody(traceForwardSSE), usage)
+			result.Usage = *usage
+			result.CacheTrace = nil
+			s.finishCacheDiagnostic(c, body, result)
+			require.Nil(t, result.CacheTrace)
+			require.NotNil(t, result.cacheTraceFailure)
+			resilience.SetUndeliveredAbuseCheck(func(int64) bool { return true })
+			t.Cleanup(func() { resilience.SetUndeliveredAbuseCheck(nil) })
+			ctx := disconnectedState(t, 0, 1)
+			disconnected, delivered, abuse := resilience.StateFrom(ctx).Disconnect()
+			require.True(t, disconnected)
+			require.False(t, delivered)
+			require.True(t, abuse)
+			account := &Account{ID: 9, Platform: PlatformOpenAI}
+			logs := t3SettlementCapture(t)
+			s.observeCacheUsage(result, account, time.Now())
+			s.settleCacheTrace(ctx, result, account)
+			first := logs.String()
+			s.settleCacheTrace(ctx, result, account)
+			require.Equal(t, first, logs.String(), "settlement emits exactly once")
+			traces := t3SettlementEvents(t, logs, "cache_trace")
+			usages := t3SettlementEvents(t, logs, "openai_cache_usage")
+			require.Len(t, traces, 1)
+			require.Len(t, usages, 1)
+			payload := t3SettlementPayload(t, traces[0], true, CachePolicyFromGin(c).Revision())
+			require.Equal(t, "n/a_sampled_out", payload["loss_class"])
+			require.Equal(t, "observer_failed", payload["na_reason"])
+			t3SettlementAssertUsageLink(t, traces[0], usages[0], result, account)
+			t3SettlementAssertPrivate(t, logs)
+		})
+	}
+}
