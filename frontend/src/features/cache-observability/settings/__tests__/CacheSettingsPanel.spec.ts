@@ -18,7 +18,7 @@ vi.mock('@/api/client', () => ({ apiClient: { get: vi.fn(), post: vi.fn(), put: 
 
 import CacheSettingsPanel from '../CacheSettingsPanel.vue'
 import { POLICY_CARDS, fieldCopyKey } from '../catalog'
-import type { PoliciesResponse, ValidateResult } from '../types'
+import type { HistoryResponse, PoliciesResponse, ValidateResult } from '../types'
 import type { PoliciesState } from '../usePolicies'
 import { history, list, rejection, validation as sampleValidation } from './contract'
 import { identityEntry, m1Response, m3Response, observabilityEntry, rewritten, validation, withEntry } from './fixtures'
@@ -43,7 +43,7 @@ function mountPanel(response: PoliciesResponse = m1Response(), validate: Validat
     putPolicy: vi.fn(),
     listHistory: vi.fn().mockResolvedValue(history()),
   }
-  const deps = { api, loadGroups: vi.fn().mockResolvedValue([]), now: () => new Date('2026-10-23T09:00:00Z') }
+  const deps = { api, loadGroups: vi.fn().mockResolvedValue([]), now: () => new Date('2026-10-23T09:00:00Z'), later: vi.fn() }
   const wrapper = mount(CacheSettingsPanel, {
     props: { deps },
     global: { stubs: options.attach ? { ...stubs, BaseDialog: false } : stubs },
@@ -324,6 +324,35 @@ describe('CacheSettingsPanel', () => {
     expect(written).toContain('admin.cacheSettings.fields.observability.rollout_percent.label')
   })
 
+  it('says why the change log is incomplete and offers a refresh only for a gap (§7.6)', async () => {
+    const legacy = { ...history('history_truncated_retention'), history_incomplete_reason: undefined } as unknown as HistoryResponse
+    const cases: [string, HistoryResponse, string | null][] = [
+      ['history_truncated_retention', history('history_truncated_retention'), 'earlier_missing'],
+      ['history_empty_outside_window', history('history_empty_outside_window'), 'earlier_missing'],
+      ['history_gap', history('history_gap'), 'gap'],
+      ['history_pending_flush', history('history_pending_flush'), null],
+      ['history_empty_within_window', history('history_empty_within_window'), null],
+      // A backend before v1.7.4.6 sends no reason; its only cause was the retention period.
+      ['no reason', legacy, 'earlier_missing'],
+    ]
+    for (const [name, response, reason] of cases) {
+      const { wrapper, api } = mountPanel()
+      api.listHistory.mockResolvedValue(response)
+      await flushPromises()
+      await wrapper.get('[data-test="policy-observability"]').findAll('button').find((b) => b.text().includes('history.toggle'))!.trigger('click')
+      await flushPromises()
+      const note = wrapper.find('[data-test="history-incomplete"]')
+      expect(note.exists(), name).toBe(reason !== null)
+      if (!reason) continue
+      expect(note.text(), name).toContain(`admin.cacheSettings.history.incomplete.${reason}`)
+      const refresh = wrapper.find('[data-test="history-refresh"]')
+      expect(refresh.exists(), name).toBe(reason === 'gap')
+      if (reason !== 'gap') continue
+      await refresh.trigger('click')
+      expect(api.listHistory, name).toHaveBeenCalledTimes(2)
+    }
+  })
+
   it('links to the gateway tab, names the place with the settings page keys and follows only in-app links (C-14)', async () => {
     const { wrapper } = mountPanel()
     await flushPromises()
@@ -418,6 +447,8 @@ describe('cache settings copy', () => {
       for (const [group, list] of Object.entries(codes)) for (const code of list) expect(copy[group][code], `${group}.${code}`).toBeTruthy()
       for (const code of [...codes.warnings, ...codes.blockers]) expect(copy.acks[code], `acks.${code}`).toBeTruthy()
       for (const value of routingValues) expect(copy.options[String(value).replace(/\+/g, '_plus_')], `options.${value}`).toBeTruthy()
+      for (const reason of ['earlier_missing', 'gap']) expect(copy.history.incomplete[reason], `history.incomplete.${reason}`).toBeTruthy()
+      expect(copy.history.refresh).toBeTruthy()
       // The names before v1.7.6 are gone, not kept beside the new ones.
       for (const old of ['host', 'host_plus_score']) expect(copy.options[old], `options.${old}`).toBeUndefined()
     }

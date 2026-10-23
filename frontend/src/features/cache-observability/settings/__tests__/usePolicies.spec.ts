@@ -18,8 +18,9 @@ function setup(response = m1Response()) {
     putPolicy: vi.fn(),
     listHistory: vi.fn().mockResolvedValue(history()),
   }
-  const state = usePolicies({ api: api as typeof policyApi, loadGroups: vi.fn().mockResolvedValue([]), now: () => new Date('2026-10-23T09:00:00Z') })
-  return { api, state }
+  const later = vi.fn()
+  const state = usePolicies({ api: api as typeof policyApi, loadGroups: vi.fn().mockResolvedValue([]), now: () => new Date('2026-10-23T09:00:00Z'), later })
+  return { api, state, later }
 }
 
 describe('cache policy api', () => {
@@ -203,6 +204,32 @@ describe('usePolicies', () => {
     expect(state.dirtyKeys.value).toEqual(['observability'])
     await state.openPreview('observability')
     expect(api.validatePolicy).toHaveBeenCalledWith('observability', { expected_rev: 0, spec: { enabled: true } })
+  })
+
+  it('reads the change log once more, quietly, when it does not show a fresh write yet (§7.6)', async () => {
+    const { api, state, later } = setup()
+    await state.load()
+    api.listHistory.mockResolvedValueOnce(history('history_pending_flush'))
+    await state.loadHistory('observability')
+    state.update('observability', 'enabled', true)
+    await state.openPreview('observability')
+    api.putPolicy.mockResolvedValueOnce(rewritten(observabilityEntry(), 3, { enabled: true }))
+    // The audit writer has not flushed rev 3 yet: the log still ends at rev 2, and that is not an error.
+    const flushing = history('history_pending_flush')
+    api.listHistory.mockResolvedValueOnce(flushing)
+    await state.submit({ reason: '', checkbox: false, typed: '' })
+    await flushPromises()
+    expect(state.histories.value.observability).toEqual(flushing)
+    expect(later).toHaveBeenCalledTimes(1)
+    expect(later.mock.calls[0][1]).toBe(2000)
+    const saved = { ...flushing, items: [{ ...flushing.items[0], rev_before: 2, rev_after: 3 }, ...flushing.items] }
+    api.listHistory.mockResolvedValueOnce(saved)
+    later.mock.calls[0][0]()
+    // The second read keeps the list on screen instead of a loading state.
+    expect(state.histories.value.observability).toEqual(flushing)
+    await flushPromises()
+    expect(state.histories.value.observability).toEqual(saved)
+    expect(later).toHaveBeenCalledTimes(1)
   })
 
   it('settles a receipt when its countdown ends and re-reads once', async () => {

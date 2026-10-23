@@ -158,9 +158,13 @@ export interface HistoryItem {
   reason: string | null
 }
 
+/** Why `history_complete` is false (§7.6, v1.7.4.6); null when it is true. */
+export type HistoryIncompleteReason = 'earlier_missing' | 'gap'
+
 export interface HistoryResponse {
   items: HistoryItem[]
   history_complete: boolean
+  history_incomplete_reason: HistoryIncompleteReason | null
 }
 
 export type WriteFailure =

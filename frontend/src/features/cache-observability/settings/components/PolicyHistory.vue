@@ -29,7 +29,13 @@
           </div>
         </li>
       </ol>
-      <p v-if="!history.history_complete" class="mt-3 text-xs text-gray-600 dark:text-dark-300">{{ t('admin.cacheSettings.history.incomplete') }}</p>
+      <!-- The reason says whether older entries are gone for good or a gap may still fill in (§7.6). -->
+      <div v-if="!history.history_complete" class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600 dark:text-dark-300" data-test="history-incomplete">
+        <p>{{ t(`admin.cacheSettings.history.incomplete.${incompleteReason(history)}`) }}</p>
+        <button v-if="incompleteReason(history) === 'gap'" type="button" class="btn btn-ghost btn-sm" data-test="history-refresh" @click="emit('retry')">
+          {{ t('admin.cacheSettings.history.refresh') }}
+        </button>
+      </div>
     </template>
   </div>
 </template>
@@ -38,7 +44,7 @@
 import { useI18n } from 'vue-i18n'
 import { fieldCopyKey } from '../catalog'
 import { formatBoth } from '../format'
-import type { HistoryResponse } from '../types'
+import type { HistoryIncompleteReason, HistoryResponse } from '../types'
 
 const props = defineProps<{ id: string; policyKey: string; history: HistoryResponse | 'loading' | 'failed' | undefined }>()
 const emit = defineEmits<{ (e: 'retry'): void }>()
@@ -48,6 +54,11 @@ const { t, te } = useI18n()
 function fieldLabel(path: string): string {
   const key = fieldCopyKey(props.policyKey, path, 'label')
   return te(key) ? t(key) : path
+}
+
+/** A backend before v1.7.4.6 sends no reason; its only cause was the retention period. */
+function incompleteReason(history: HistoryResponse): HistoryIncompleteReason {
+  return history.history_incomplete_reason === 'gap' ? 'gap' : 'earlier_missing'
 }
 
 function failureText(status: number): string {

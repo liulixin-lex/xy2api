@@ -1,4 +1,4 @@
-// F's contract samples for /api/v1/admin/cache/policies (v1.7.4.4, C-1 to C-14),
+// F's contract samples for /api/v1/admin/cache/policies (v1.7.4.6, C-1 to C-14),
 // copied verbatim into ./contract. The backend handler tests use the same
 // files; when a sample and CACHE_PANEL_API §7 disagree, the document wins and
 // the sample is fixed upstream, then copied again.
@@ -7,6 +7,8 @@ import type { HistoryResponse, PoliciesResponse, PolicyEntry, ValidateResult } f
 export interface ContractSample {
   _contract: string[]
   _note: string
+  /** History samples: the state the backend tests preset (audit rows, stored rev, clock). Not part of the response. */
+  _fixture?: unknown
   request: { method: string; path: string; body: unknown }
   status: number
   response: Record<string, any>

@@ -330,6 +330,31 @@ describe('cache policies contract v1.7.4', () => {
     expect(history.items.flatMap((i) => i.changed_fields).every((f) => /^[a-z_.]+$/.test(f))).toBe(true)
   })
 
+  it('C-12 says why a change log is incomplete, for every history sample (v1.7.4.6)', async () => {
+    const expected: Record<string, [boolean, string | null]> = {
+      history: [true, null],
+      history_after_rev: [true, null],
+      history_pending_flush: [true, null],
+      history_empty_within_window: [true, null],
+      history_empty_outside_window: [false, 'earlier_missing'],
+      history_truncated_retention: [false, 'earlier_missing'],
+      history_gap: [false, 'gap'],
+    }
+    expect(SAMPLE_NAMES.filter((n) => n.startsWith('history')).sort()).toEqual(Object.keys(expected).sort())
+    for (const [name, [complete, reason]] of Object.entries(expected)) {
+      const s = sample(name)
+      const query = new URLSearchParams(s.request.path.split('?')[1])
+      const limit = Number(query.get('limit') ?? 20)
+      const afterRev = query.get('after_rev')
+      respond(s)
+      const history = await listHistory(query.get('key')!, limit, afterRev === null ? undefined : Number(afterRev))
+      const params = calls[calls.length - 1].params
+      expect(params, name).toMatchObject({ key: query.get('key'), limit })
+      expect('after_rev' in params, name).toBe(afterRev !== null)
+      expect([history.history_complete, history.history_incomplete_reason], name).toEqual([complete, reason])
+    }
+  })
+
   it('C-13 treats the platform 403 as a plain failure and derives fallback groups from availability_fallback_group_id', async () => {
     respond(sample('put_403'))
     expect(toWriteFailure(await rejected(putPolicy('observability', { expected_rev: 0, spec: { enabled: true } })))).toEqual({

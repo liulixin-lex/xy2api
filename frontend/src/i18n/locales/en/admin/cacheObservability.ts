@@ -216,7 +216,11 @@ export default {
         423: 'compliance acknowledgement required',
         other: 'other error',
       },
-      incomplete: 'Older entries are past the audit retention period.',
+      incomplete: {
+        earlier_missing: 'Earlier changes are not in the audit log (past the retention period or cleared).',
+        gap: 'Some change records are missing (possibly an audit write failure, or writes from multiple instances not all saved yet). Refresh in a moment.',
+      },
+      refresh: 'Refresh change log',
     },
     caps: {
       title: 'Static caps (read-only)',

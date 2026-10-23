@@ -47,18 +47,25 @@ export interface PolicyDeps {
   api: PolicyApi
   loadGroups: () => Promise<AdminGroup[]>
   now: () => Date
+  /** Runs `callback` after `ms`; injected so tests can step the history catch-up. */
+  later: (callback: () => void, ms: number) => void
 }
 
 const defaultDeps: PolicyDeps = {
   api: policyApi,
   loadGroups: () => adminAPI.groups.getAllIncludingInactive(),
   now: () => new Date(),
+  later: (callback, ms) => {
+    setTimeout(callback, ms)
+  },
 }
 
 /** Automatic re-merges when validate keeps answering `rev_stale` (someone writing in a loop). */
 const MAX_STALE_RETRIES = 2
 /** Re-reads of a pending_reload key, one refresh period apart, before the panel leaves it to the reload button (n-new-2). */
 const PENDING_REREADS = 3
+/** The audit log is flushed about once a second; a change log read right after a write may not show it yet (§7.6). */
+const HISTORY_CATCH_UP_MS = 2000
 
 export function usePolicies(overrides: Partial<PolicyDeps> = {}) {
   const deps = { ...defaultDeps, ...overrides }
@@ -417,7 +424,7 @@ export function usePolicies(overrides: Partial<PolicyDeps> = {}) {
           savedOnly,
         },
       }
-      if (histories.value[state.key]) void loadHistory(state.key)
+      if (histories.value[state.key]) void loadHistory(state.key, saved.stored?.rev)
       preview.value = null
       // Other keys depend on this write (master gates three of them); re-read them all.
       void refresh()
@@ -453,12 +460,19 @@ export function usePolicies(overrides: Partial<PolicyDeps> = {}) {
     await reloadAndMerge(state)
   }
 
-  async function loadHistory(key: string) {
-    histories.value = { ...histories.value, [key]: 'loading' }
+  /**
+   * Loads a key's change log. After a write (`wroteRev`) the newest entry may not be flushed yet: that is not an
+   * error, so the log is read once more, quietly, about two seconds later (§7.6).
+   */
+  async function loadHistory(key: string, wroteRev?: number, quiet = false) {
+    if (!quiet) histories.value = { ...histories.value, [key]: 'loading' }
     try {
-      histories.value = { ...histories.value, [key]: await deps.api.listHistory(key, 20) }
+      const history = await deps.api.listHistory(key, 20)
+      histories.value = { ...histories.value, [key]: history }
+      const newest = Math.max(0, ...history.items.map((i) => i.rev_after ?? 0))
+      if (wroteRev !== undefined && newest < wroteRev) deps.later(() => void loadHistory(key, undefined, true), HISTORY_CATCH_UP_MS)
     } catch {
-      histories.value = { ...histories.value, [key]: 'failed' }
+      if (!quiet) histories.value = { ...histories.value, [key]: 'failed' }
     }
   }
 
