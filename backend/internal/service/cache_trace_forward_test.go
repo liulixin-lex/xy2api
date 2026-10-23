@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -22,7 +21,10 @@ func TestCacheTraceWireCategoriesAndEnabledGolden(t *testing.T) {
 	for _, tc := range traceForwardCases() {
 		t.Run(tc.name(), func(t *testing.T) {
 			for _, enabled := range []bool{false, true} {
-				configure := func(cfg *config.Config) { traceTestConfig(cfg); cfg.Gateway.CacheTrace.Enabled = enabled }
+				configure := func(s *OpenAIGatewayService) {
+					traceTestConfig(s)
+					traceTestSetPolicy(s, map[string]any{"enabled": enabled})
+				}
 				_, c, wire, body, hdr := traceForwardRun(t, tc, configure)
 				require.Equal(t, golden[tc.name()], wire, "enabled=%v", enabled)
 				trace := cacheTraceFromGin(c)
@@ -77,7 +79,10 @@ func TestCacheTraceExtraProductionGolden(t *testing.T) {
 	for _, tc := range traceExtraCases() {
 		t.Run(tc.name(), func(t *testing.T) {
 			for _, enabled := range []bool{false, true} {
-				configure := func(cfg *config.Config) { traceTestConfig(cfg); cfg.Gateway.CacheTrace.Enabled = enabled }
+				configure := func(s *OpenAIGatewayService) {
+					traceTestConfig(s)
+					traceTestSetPolicy(s, map[string]any{"enabled": enabled})
+				}
 				c, wire, _, hdr, _ := traceExtraRun(t, tc, configure, nil)
 				require.Equal(t, golden[tc.name()], wire, "enabled=%v", enabled)
 				trace := cacheTraceFromGin(c)

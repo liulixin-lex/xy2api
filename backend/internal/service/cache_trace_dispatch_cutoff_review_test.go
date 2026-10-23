@@ -20,7 +20,7 @@ func TestCacheTraceReviewHistoryCutoffUsesDispatchTime(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _, _ := rejectedTraceFixture(t, 32)
 			body := []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"synthetic-cutoff-body"}]}`)
-			baseline := s.computeCacheTrace(body, body, 1, false, "cutoff", "responses", "http")
+			baseline := s.computeCacheTrace(body, body, 1, false, "cutoff", "responses", "http", s.cachePolicies.Snapshot())
 			if len(baseline.chain.hashes) == 0 {
 				t.Fatal("fixture did not produce a comparable chain")
 			}
@@ -34,7 +34,7 @@ func TestCacheTraceReviewHistoryCutoffUsesDispatchTime(t *testing.T) {
 			owner := &cacheTraceSessionState{chains: [cachePrefixHistoryCount]cachePrefixChain{chain}}
 			s.cacheTelemetry().sessions["cutoff"] = openAICacheHistory{traceChains: owner}
 			state := &cacheTraceAsync{}
-			job := &cacheTraceJob{service: s, state: state, ingress: body, apiKeyID: 1,
+			job := &cacheTraceJob{policy: s.cachePolicies.Snapshot(), service: s, state: state, ingress: body, apiKeyID: 1,
 				session: "cutoff", protocol: "responses", transport: "http", size: int64(len(body)), history: owner,
 				created: start, sentAt: start.Add(2 * time.Second),
 				getBody: func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }}

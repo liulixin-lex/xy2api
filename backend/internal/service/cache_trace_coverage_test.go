@@ -56,7 +56,7 @@ func TestCacheTraceQueueWaitAndEviction(t *testing.T) {
 	histories := new(cacheTraceSessionState)
 	telemetry := s.cacheTelemetry()
 	telemetry.sessions["private-session"] = openAICacheHistory{traceChains: histories}
-	job := &cacheTraceJob{service: s, session: "private-session", history: histories}
+	job := &cacheTraceJob{service: s, policy: s.cachePolicies.Snapshot(), session: "private-session", history: histories}
 	require.False(t, job.historyEvicted())
 	delete(telemetry.sessions, "private-session")
 	require.True(t, job.historyEvicted())

@@ -81,6 +81,9 @@ func cacheBillingErr(err error) string {
 	return fmt.Sprintf("%T: %s", err, err.Error())
 }
 
+// Optional fixture hook keeps this corpus usable in an unmodified baseline.
+var cacheBillingConfigureTrace func(*OpenAIGatewayService, bool)
+
 func cacheBillingRun(t *testing.T, tc cacheBillingCorpusCase, protocol, kind string, stream, enabled bool) map[string]any {
 	t.Helper()
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
@@ -91,10 +94,8 @@ func cacheBillingRun(t *testing.T, tc cacheBillingCorpusCase, protocol, kind str
 	svc.cfg.JWT.Secret = "synthetic-corpus-secret"
 	svc.cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
 	svc.cfg.Gateway.MaxLineSize = tc.maxLine
-	trace := reflect.ValueOf(&svc.cfg.Gateway).Elem().FieldByName("CacheTrace")
-	if trace.IsValid() {
-		trace.FieldByName("Enabled").SetBool(enabled)
-		trace.FieldByName("ChainPercent").SetInt(100)
+	if cacheBillingConfigureTrace != nil {
+		cacheBillingConfigureTrace(svc, enabled)
 	} else {
 		require.False(t, enabled)
 	}

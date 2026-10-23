@@ -48,7 +48,7 @@ func t3SettlementEvents(t *testing.T, logs *bytes.Buffer, kind string) []map[str
 	return matches
 }
 
-func t3SettlementPayload(t *testing.T, event map[string]any, minimal bool) map[string]any {
+func t3SettlementPayload(t *testing.T, event map[string]any, minimal bool, expectedRevision string) map[string]any {
 	t.Helper()
 	payload := make(map[string]any, len(event))
 	for key, value := range event {
@@ -82,7 +82,7 @@ func t3SettlementPayload(t *testing.T, event map[string]any, minimal bool) map[s
 	if minimal {
 		require.Len(t, payload, 12)
 	}
-	require.Equal(t, "m0.o0.u0.a0.r0", payload["pol_rev"])
+	require.Equal(t, expectedRevision, payload["pol_rev"])
 	require.Equal(t, "openai", payload["platform"])
 	require.Equal(t, float64(1), payload["v"])
 	require.Regexp(t, `^[0-9a-f]{12,64}$`, payload["request_id_hmac"])
@@ -159,11 +159,11 @@ func t3SettlementForwardReply(t *testing.T, protocol string, stream bool, reply 
 	c.Set("api_key", &APIKey{ID: 1, GroupID: &group})
 	cfg := &config.Config{JWT: config.JWTConfig{Secret: "trace-test-secret"}}
 	cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-	traceTestConfig(cfg)
 	response := traceForwardOK()
 	response.Header.Set("X-Request-Id", "t3-private-upstream-request")
 	response.Body = io.NopCloser(strings.NewReader(reply))
 	s := &OpenAIGatewayService{cfg: cfg, httpUpstream: &httpUpstreamRecorder{resp: response}}
+	traceTestConfig(s)
 	if budgetRejected {
 		s.cacheTraceWorkerPool().budget = 1
 	}
@@ -213,7 +213,7 @@ func TestCacheTraceT3SettlementProductionForwardLinksAndOnce(t *testing.T) {
 					usages := t3SettlementEvents(t, logs, "openai_cache_usage")
 					require.Len(t, traces, 1)
 					require.Len(t, usages, 1)
-					payload := t3SettlementPayload(t, traces[0], false)
+					payload := t3SettlementPayload(t, traces[0], false, CachePolicyFromGin(c).Revision())
 					require.Equal(t, "cold", payload["loss_class"])
 					require.Equal(t, true, payload["chain_sampled"])
 					require.NotEqual(t, float64(-1), payload["tok_per_byte_milli"])
@@ -309,7 +309,7 @@ func TestCacheTraceT3SettlementUsagePresenceAndHistory(t *testing.T) {
 				usages := t3SettlementEvents(t, logs, "openai_cache_usage")
 				require.Len(t, traces, 1)
 				require.Len(t, usages, 1)
-				payload := t3SettlementPayload(t, traces[0], false)
+				payload := t3SettlementPayload(t, traces[0], false, CachePolicyFromGin(c).Revision())
 				require.Equal(t, tc.want, payload["loss_class"])
 				t3SettlementAssertUsageLink(t, traces[0], usages[0], result, account)
 				owner := s.cacheTelemetry().sessions[result.CacheDiagnostic.Session].traceChains
@@ -364,7 +364,7 @@ func TestCacheTraceT3SettlementRangeEndpointWiring(t *testing.T) {
 			s.settleCacheTrace(c.Request.Context(), result, account)
 			traces := t3SettlementEvents(t, logs, "cache_trace")
 			require.Len(t, traces, 1)
-			payload := t3SettlementPayload(t, traces[0], false)
+			payload := t3SettlementPayload(t, traces[0], false, CachePolicyFromGin(c).Revision())
 			require.Equal(t, tc.want, payload["loss_class"])
 			require.Equal(t, float64(tc.previous), payload["p_prev"])
 			historyAge, ok := payload["hist_age_s"].(float64)
@@ -441,7 +441,7 @@ func TestCacheTraceT3SettlementMinimalShapesAndUsageLinks(t *testing.T) {
 			usages := t3SettlementEvents(t, logs, "openai_cache_usage")
 			require.Len(t, traces, 1)
 			require.Len(t, usages, 1)
-			payload := t3SettlementPayload(t, traces[0], true)
+			payload := t3SettlementPayload(t, traces[0], true, CachePolicyFromGin(c).Revision())
 			require.Equal(t, "n/a_sampled_out", payload["loss_class"])
 			require.Equal(t, reason, payload["na_reason"])
 			if reason == "budget_full" {
@@ -471,7 +471,7 @@ func TestCacheTraceT3SettlementLateWorkerCannotRewriteEvent(t *testing.T) {
 	s.settleCacheTrace(c.Request.Context(), result, account)
 	traces := t3SettlementEvents(t, logs, "cache_trace")
 	require.Len(t, traces, 1)
-	payload := t3SettlementPayload(t, traces[0], true)
+	payload := t3SettlementPayload(t, traces[0], true, CachePolicyFromGin(c).Revision())
 	require.Equal(t, "not_ready", payload["na_reason"])
 	first, frozen := logs.String(), trace.data
 	require.Nil(t, trace.async, "settlement severs the event's async result handle")

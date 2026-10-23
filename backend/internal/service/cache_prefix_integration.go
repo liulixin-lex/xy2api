@@ -18,7 +18,7 @@ func (s *OpenAIGatewayService) captureCachePrefix(t *cacheTrace, body []byte, pr
 	t.mu.Unlock()
 	observation := cachePrefixUnavailable(len(body))
 	var chain cachePrefixChain
-	if transport != "plugin" && sha256SumCacheCohort(session) < s.cfg.Gateway.CacheTrace.ChainPercent {
+	if transport != "plugin" && cacheTraceChainSampled(t.policy, session) {
 
 		telemetry := s.cacheTelemetry()
 		telemetry.mu.Lock()
@@ -48,6 +48,7 @@ func (s *OpenAIGatewayService) captureCachePrefix(t *cacheTrace, body []byte, pr
 		}
 		observation.HistoryUnsampled = exists && !hasHistory
 		compareCachePrefix(chain, offsets, histories, &observation)
+		chain = limitCachePrefixCheckpoints(chain, s.cacheTraceCaps().MaxCheckpoints)
 	}
 	t.mu.Lock()
 	t.chain = chain
@@ -61,6 +62,8 @@ func (s *OpenAIGatewayService) rememberCachePrefix(session string, chain cachePr
 	if len(chain.hashes) == 0 {
 		return
 	}
+	caps := s.cacheTraceCaps()
+	chain = limitCachePrefixCheckpoints(chain, caps.MaxCheckpoints)
 	chain.prompt = prompt
 	if chain.settledAt.IsZero() {
 		chain.settledAt = time.Now()
@@ -78,14 +81,15 @@ func (s *OpenAIGatewayService) rememberCachePrefix(session string, chain cachePr
 		return
 	}
 	if previous.traceChains == nil {
+		s.limitCacheTraceSessionsLocked(telemetry, session)
 		previous.traceChains = new(cacheTraceSessionState)
 	}
 
-	for i := 0; i < cachePrefixHistoryCount; i++ {
+	for i := 0; i < caps.ChainsPerSession; i++ {
 		if previous.traceChains.chains[i].settledAt.After(chain.settledAt) {
 			continue
 		}
-		for j := cachePrefixHistoryCount - 1; j > i; j-- {
+		for j := caps.ChainsPerSession - 1; j > i; j-- {
 			previous.traceChains.chains[j] = previous.traceChains.chains[j-1]
 		}
 		previous.traceChains.chains[i] = chain
@@ -103,7 +107,7 @@ func cachePrefixUnavailable(rawBytes int) cachePrefixObservation {
 
 // Worker-only. All body scans, including absence checks, are off the request
 // goroutine. Category fields are still computed when chain sampling is off.
-func (s *OpenAIGatewayService) computeCacheTrace(ingress, body []byte, apiKeyID int64, headerSource bool, session, protocol, transport string, cutoff ...time.Time) *cacheTraceComputed {
+func (s *OpenAIGatewayService) computeCacheTrace(ingress, body []byte, apiKeyID int64, headerSource bool, session, protocol, transport string, policy *CachePolicySnapshot, cutoff ...time.Time) *cacheTraceComputed {
 
 	var pck, instructions, items, messages gjson.Result
 	var thread bool
@@ -136,7 +140,7 @@ func (s *OpenAIGatewayService) computeCacheTrace(ingress, body []byte, apiKeyID 
 		r.idSource = "body_pck"
 	}
 
-	trace := &cacheTrace{sessionKey: session, data: cacheTraceData{ConvAnchor: r.anchor, Transport: transport}}
+	trace := &cacheTrace{policy: policy, sessionKey: session, data: cacheTraceData{ConvAnchor: r.anchor, Transport: transport}}
 	s.captureCachePrefix(trace, body, protocol, cutoff...)
 	r.prefix, r.chain = trace.data.Prefix, trace.chain
 	if r.prefix.Sampled {

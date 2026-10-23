@@ -2276,6 +2276,62 @@
     {
       "path": "backend/internal/server/routes/cache_policy.go",
       "value": "policies.PUT(\"/\"+key, p.Put(key))"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "ProvideOpenAIGatewayServiceWithCachePolicies,"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_service.go",
+      "value": "cachePolicies"
+    },
+    {
+      "path": "backend/internal/service/cache_policy_gateway.go",
+      "value": "s.cachePolicies = policies"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "h.gatewayService.CaptureCachePolicy(c)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "h.gatewayService.CaptureCachePolicyTurn(c)"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "h.gatewayService.CaptureCachePolicy(c)"
+    },
+    {
+      "path": "backend/internal/service/cache_trace.go",
+      "value": "s.CaptureCachePolicy(c).TraceEnabled()"
+    },
+    {
+      "path": "backend/internal/service/cache_trace.go",
+      "value": "policy: CachePolicyFromGin(c)"
+    },
+    {
+      "path": "backend/internal/service/cache_trace_async.go",
+      "value": "s.cachePolicies.subscribe(s.cacheTraceWorkers.applyPolicy)"
+    },
+    {
+      "path": "backend/internal/service/cache_prefix_integration.go",
+      "value": "cacheTraceChainSampled(t.policy, session)"
+    },
+    {
+      "path": "backend/internal/service/cache_trace_send.go",
+      "value": "s.limitCacheTraceSessionsLocked(telemetry, t.sessionKey)"
+    },
+    {
+      "path": "backend/internal/service/cache_trace_settlement.go",
+      "value": "s.limitCacheTraceSessionsLocked(telemetry, diagnostic.Session)"
+    },
+    {
+      "path": "backend/internal/service/cache_trace.go",
+      "value": "result.CacheTrace = &cacheTrace{policy: t.policy,"
+    },
+    {
+      "path": "backend/internal/service/cache_trace.go",
+      "value": "PolRev: CachePolicyFromGin(c).Revision()"
     }
   ],
   "forbidden_module_paths": [

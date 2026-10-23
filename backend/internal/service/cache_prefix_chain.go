@@ -353,7 +353,7 @@ func compareCachePrefix(current cachePrefixChain, offsets cachePrefixPositions, 
 		// Small-chain callers may compare after scanning; production passes the
 		// histories into the scanner so it can compare every historical checkpoint.
 		if !offsets.compared {
-			for j := 0; j < min(current.blocks, old.blocks, 64); j++ {
+			for j := 0; j < min(current.blocks, old.blocks, 64, len(current.hashes), len(old.hashes)); j++ {
 				if current.hashes[j] != old.hashes[j] {
 					m.different = true
 					m.upper = j

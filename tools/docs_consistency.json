@@ -273,6 +273,14 @@
         "tools/gateway-resilience/staging/fixtures.py",
         "tools/gateway-resilience/staging/fallback_billing.py"
       ]
+    },
+    {
+      "pattern": "gateway\\.cache_trace\\.(?:enabled|chain_percent|async_byte_budget|async_workers|async_bytes_per_second)|GATEWAY_CACHE_TRACE_(?:ENABLED|CHAIN_PERCENT|ASYNC_BYTE_BUDGET|ASYNC_WORKERS|ASYNC_BYTES_PER_SECOND)",
+      "reason": "Cache trace enablement, sampling, byte budget and rate are administrator runtime policies; static configuration contains only kill switch and hard limits.",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
     }
   ],
   "private": [

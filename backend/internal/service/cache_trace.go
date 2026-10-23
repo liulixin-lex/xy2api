@@ -26,6 +26,7 @@ type cacheTraceKey struct{}
 // Only the live request keeps the immutable ingress body; snapshots keep an
 // atomic async result handle, never bodies, headers, or a Gin context.
 type cacheTrace struct {
+	policy                 *CachePolicySnapshot
 	mu                     sync.Mutex
 	data                   cacheTraceData
 	sessionKey             string
@@ -104,8 +105,8 @@ func cacheTraceFromGin(c *gin.Context) *cacheTrace {
 	return cacheTraceFrom(c.Request.Context())
 }
 
-func (s *OpenAIGatewayService) cacheTraceEnabled() bool {
-	return s != nil && s.cfg != nil && s.cfg.Gateway.CacheTrace.Enabled && s.cfg.Gateway.OpenAICache.DiagnosticsEnabled && s.cfg.JWT.Secret != ""
+func (s *OpenAIGatewayService) cacheTraceEnabled(c *gin.Context) bool {
+	return s != nil && s.cfg != nil && s.cfg.JWT.Secret != "" && s.CaptureCachePolicy(c).TraceEnabled()
 }
 
 func cacheTraceHeaderBits(h http.Header) (bits uint16) {
@@ -184,7 +185,7 @@ func (s *OpenAIGatewayService) cacheTraceAnchorParts(apiKeyID int64, instruction
 
 func (s *OpenAIGatewayService) beginCacheTrace(c *gin.Context, body []byte) {
 	// Gate before any JSON access, context creation, or allocation.
-	if !s.cacheTraceEnabled() || c == nil || c.Request == nil || c.Request.URL == nil || getAPIKeyIDFromContext(c) <= 0 || isGrokRequestContext(c) || monitorProbeRequest(c) {
+	if !s.cacheTraceEnabled(c) || c == nil || c.Request == nil || c.Request.URL == nil || getAPIKeyIDFromContext(c) <= 0 || isGrokRequestContext(c) || monitorProbeRequest(c) {
 		return
 	}
 	// P0a covers HTTP Responses (including compact) and Chat only. Messages,
@@ -200,10 +201,13 @@ func (s *OpenAIGatewayService) beginCacheTrace(c *gin.Context, body []byte) {
 	}
 	session, _ := c.Get(openAICacheSessionGinKey)
 	sessionKey, _ := session.(string)
+	if !cacheTraceRequestSampled(c, CachePolicyFromGin(c), sessionKey) {
+		return
+	}
 	if t := cacheTraceFromGin(c); t != nil {
 		t.mu.Lock()
 		t.sessionKey = sessionKey
-		t.cohort = cacheTraceSessionCohort(sessionKey)
+		t.cohort = cacheTraceChainCohort(sessionKey)
 		t.data.GroupID = getOpenAIGroupIDFromContext(c)
 		t.data.SessionDigest = sessionKey
 		t.mu.Unlock()
@@ -227,9 +231,9 @@ func (s *OpenAIGatewayService) beginCacheTrace(c *gin.Context, body []byte) {
 	if sessionKey == "" {
 		gapSource = "no_session"
 	}
-	t := &cacheTrace{sessionKey: sessionKey, cohort: cacheTraceSessionCohort(sessionKey), ingress: body, apiKeyID: getAPIKeyIDFromContext(c), headerSource: headerSource, window: cacheTraceParseWindow(c.Request.Header.Get("X-Codex-Window-Id")), data: cacheTraceData{
+	t := &cacheTrace{policy: CachePolicyFromGin(c), sessionKey: sessionKey, cohort: cacheTraceChainCohort(sessionKey), ingress: body, apiKeyID: getAPIKeyIDFromContext(c), headerSource: headerSource, window: cacheTraceParseWindow(c.Request.Header.Get("X-Codex-Window-Id")), data: cacheTraceData{
 		SessionDigest: sessionKey, GroupID: getOpenAIGroupIDFromContext(c), ConvAnchor: "unknown",
-		PolRev: "m0.o0.u0.a0.r0", UAFamily: cacheTraceUAFamily(c.Request.UserAgent()), CodexHeaders: cacheTraceCodexHeaderBits(c.Request.Header), WindowSequenceDelta: -1, GapSource: gapSource, TokensPerByteMilli: -1,
+		PolRev: CachePolicyFromGin(c).Revision(), UAFamily: cacheTraceUAFamily(c.Request.UserAgent()), CodexHeaders: cacheTraceCodexHeaderBits(c.Request.Header), WindowSequenceDelta: -1, GapSource: gapSource, TokensPerByteMilli: -1,
 		ProtocolIn: protocol, PCKClassIn: "unknown", PCKClassOut: "unknown",
 		SessHdrIn: bits, SessOutRelation: "none", IDSource: source,
 		ThreadPresent: bits&((1<<7)|(1<<8)) != 0,
@@ -328,7 +332,7 @@ func (s *OpenAIGatewayService) captureCacheTraceRequest(c *gin.Context, req *htt
 	t.skipUsage = false
 	pool := s.cacheTraceWorkerPool()
 	cost, admitted := pool.reserve(int64(len(t.ingress)), req.ContentLength)
-	chainExcluded := t.cohort >= s.cfg.Gateway.CacheTrace.ChainPercent
+	chainExcluded := t.cohort >= t.policy.ChainPercent()
 	t.data.NAReason = ""
 	t.async = nil
 
@@ -369,7 +373,7 @@ func (s *OpenAIGatewayService) captureCacheTraceRequest(c *gin.Context, req *htt
 	telemetry.mu.Lock()
 	history := telemetry.sessions[t.sessionKey].traceChains
 	telemetry.mu.Unlock()
-	t.pending = &cacheTraceJob{pool: pool, cost: cost, state: t.async, service: s, ingress: t.ingress, apiKeyID: t.apiKeyID, headerSource: t.headerSource,
+	t.pending = &cacheTraceJob{policy: t.policy, pool: pool, cost: cost, state: t.async, service: s, ingress: t.ingress, apiKeyID: t.apiKeyID, headerSource: t.headerSource,
 		history: history, session: t.sessionKey, protocol: protocol, transport: t.data.Transport, getBody: req.GetBody, size: req.ContentLength, created: time.Now()}
 	t.mu.Unlock()
 }
@@ -459,7 +463,7 @@ func (s *OpenAIGatewayService) finishCacheTrace(c *gin.Context, result *OpenAIFo
 	data := t.data
 	data.PromptTokens, data.ReadTokens = result.Usage.InputTokens, result.Usage.CacheReadInputTokens
 	data.RequestIDHMAC = s.cacheIdentityDigest("openai-request", result.RequestID)
-	result.CacheTrace = &cacheTrace{data: data, sessionKey: t.sessionKey, chain: t.chain, async: t.async, timing: t.timing}
+	result.CacheTrace = &cacheTrace{policy: t.policy, data: data, sessionKey: t.sessionKey, chain: t.chain, async: t.async, timing: t.timing}
 }
 
 // Reuse the billing traversal's decoded frames. An independent trace pass over

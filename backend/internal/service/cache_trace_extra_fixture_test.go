@@ -50,7 +50,7 @@ func traceExtraBody(rc traceExtraCase) (string, string) {
 	}
 }
 
-func traceExtraRun(t *testing.T, rc traceExtraCase, configure func(*config.Config), resp *http.Response, configureAccount ...func(*Account)) (*gin.Context, string, []byte, http.Header, *OpenAIForwardResult) {
+func traceExtraRun(t *testing.T, rc traceExtraCase, configure func(*OpenAIGatewayService), resp *http.Response, configureAccount ...func(*Account)) (*gin.Context, string, []byte, http.Header, *OpenAIForwardResult) {
 	t.Helper()
 	path, body := traceExtraBody(rc)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -71,10 +71,10 @@ func traceExtraRun(t *testing.T, rc traceExtraCase, configure func(*config.Confi
 	upstream := &httpUpstreamRecorder{resp: resp}
 	cfg := &config.Config{JWT: config.JWTConfig{Secret: "trace-test-secret"}}
 	cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-	if configure != nil {
-		configure(cfg)
-	}
 	s := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	if configure != nil {
+		configure(s)
+	}
 	a := &Account{ID: 9, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "synthetic-token"}, Extra: map[string]any{"openai_responses_supported": true}}
 	if strings.HasSuffix(rc.Scenario, "_oauth") {
 		a.Type = AccountTypeOAuth

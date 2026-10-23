@@ -42,6 +42,7 @@ func (s *OpenAIGatewayService) settleCacheTrace(ctx context.Context, result *Ope
 		if failed.timing.sequence != 0 && !failed.timing.sentAt.IsZero() {
 			telemetry := s.cacheTelemetry()
 			telemetry.mu.Lock()
+			s.limitCacheTraceSessionsLocked(telemetry, diagnostic.Session)
 			cacheTraceSettleTimingLocked(telemetry, diagnostic.Session, failed.timing, time.Now())
 			telemetry.mu.Unlock()
 		}
@@ -93,6 +94,7 @@ func (s *OpenAIGatewayService) settleCacheTrace(ctx context.Context, result *Ope
 	if t.timing.sequence != 0 && !t.timing.sentAt.IsZero() {
 		telemetry := s.cacheTelemetry()
 		telemetry.mu.Lock()
+		s.limitCacheTraceSessionsLocked(telemetry, diagnostic.Session)
 		gap, state := cacheTraceSettleTimingLocked(telemetry, diagnostic.Session, t.timing, now)
 		telemetry.mu.Unlock()
 		d.GapSource, d.GapSendMS, owner = gap.source, gap.milliseconds, state

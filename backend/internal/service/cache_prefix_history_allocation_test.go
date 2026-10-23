@@ -24,8 +24,8 @@ func TestCacheTraceDisabledSessionInsertionDoesNotAllocate(t *testing.T) {
 
 func TestCacheTraceConcurrentHistorySnapshots(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Gateway.CacheTrace.ChainPercent = 100
 	svc := &OpenAIGatewayService{cfg: cfg}
+	traceTestConfig(svc)
 	const session = "synthetic-concurrent-history"
 	result := &OpenAIForwardResult{CacheDiagnostic: &OpenAICacheDiagnostic{Session: session}}
 	account := &Account{ID: 9, Platform: PlatformOpenAI}
@@ -38,7 +38,7 @@ func TestCacheTraceConcurrentHistorySnapshots(t *testing.T) {
 		go func() {
 			defer workers.Done()
 			<-start
-			trace := &cacheTrace{sessionKey: session, data: cacheTraceData{Transport: "http", ConvAnchor: "synthetic-anchor"}}
+			trace := &cacheTrace{policy: svc.cachePolicies.Snapshot(), sessionKey: session, data: cacheTraceData{Transport: "http", ConvAnchor: "synthetic-anchor"}}
 			for range 40 {
 				svc.captureCachePrefix(trace, body, "responses")
 				svc.rememberCachePrefix(session, trace.chain, 2048)
@@ -48,7 +48,7 @@ func TestCacheTraceConcurrentHistorySnapshots(t *testing.T) {
 	}
 	close(start)
 	workers.Wait()
-	trace := &cacheTrace{sessionKey: session, data: cacheTraceData{Transport: "http", ConvAnchor: "synthetic-anchor"}}
+	trace := &cacheTrace{policy: svc.cachePolicies.Snapshot(), sessionKey: session, data: cacheTraceData{Transport: "http", ConvAnchor: "synthetic-anchor"}}
 	svc.captureCachePrefix(trace, body, "responses")
 	require.Equal(t, "prev1", trace.data.Prefix.ForkRef)
 	require.Equal(t, 2048, trace.data.Prefix.PreviousPrompt)

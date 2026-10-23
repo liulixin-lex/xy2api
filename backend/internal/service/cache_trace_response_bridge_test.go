@@ -7,8 +7,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	traceconfig "github.com/liulixin-lex/xy2api/internal/config"
 )
 
 func TestCacheTraceIndexedStreamFoldMatchesOriginal(t *testing.T) {
@@ -140,7 +138,10 @@ func TestCacheTraceBufferedTypedPresenceMatchesFinalUsage(t *testing.T) {
 			for _, enabled := range []bool{false, true} {
 				configure := traceTestConfig
 				if !enabled {
-					configure = func(cfg *traceconfig.Config) { traceTestConfig(cfg); cfg.Gateway.CacheTrace.Enabled = false }
+					configure = func(s *OpenAIGatewayService) {
+						traceTestConfig(s)
+						traceTestSetPolicy(s, map[string]any{"enabled": false})
+					}
 				}
 				svc, c, _, _ := cacheTraceWireFixture(t, "chat", "apikey", "private-pck", "session_id", configure)
 				if enabled {

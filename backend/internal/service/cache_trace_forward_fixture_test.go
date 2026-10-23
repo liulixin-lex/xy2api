@@ -72,7 +72,7 @@ func traceForwardBody(rc traceForwardCase) string {
 	return b.String()
 }
 
-func traceForwardRun(t *testing.T, rc traceForwardCase, configure func(*config.Config)) (*OpenAIGatewayService, *gin.Context, string, []byte, http.Header) {
+func traceForwardRun(t *testing.T, rc traceForwardCase, configure func(*OpenAIGatewayService)) (*OpenAIGatewayService, *gin.Context, string, []byte, http.Header) {
 	t.Helper()
 	body := traceForwardBody(rc)
 	path := "/v1/responses"
@@ -95,10 +95,10 @@ func traceForwardRun(t *testing.T, rc traceForwardCase, configure func(*config.C
 	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 400, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"synthetic stop"}}`))}}
 	cfg := &config.Config{JWT: config.JWTConfig{Secret: "trace-test-secret"}}
 	cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-	if configure != nil {
-		configure(cfg)
-	}
 	s := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	if configure != nil {
+		configure(s)
+	}
 	a := &Account{ID: 9, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "synthetic-token"}, Extra: map[string]any{"openai_responses_supported": true}}
 	if strings.HasPrefix(rc.Kind, "oauth") {
 		a.Type = AccountTypeOAuth

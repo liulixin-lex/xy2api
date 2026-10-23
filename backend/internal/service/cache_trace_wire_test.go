@@ -19,7 +19,7 @@ import (
 
 // Snapshots were captured from e369fd3bbfd577de766689f5c6df3b76c43a35f1
 // before adding observation hooks. All credentials and content are synthetic.
-func cacheTraceWireFixture(t *testing.T, protocol, kind, key, header string, configure func(*config.Config)) (*OpenAIGatewayService, *gin.Context, *http.Request, []byte) {
+func cacheTraceWireFixture(t *testing.T, protocol, kind, key, header string, configure func(*OpenAIGatewayService)) (*OpenAIGatewayService, *gin.Context, *http.Request, []byte) {
 	t.Helper()
 	body := `{"model":"gpt-5.4","input":[{"role":"user","content":"trace-private-body"}],"stream":false`
 	path := "/v1/responses"
@@ -43,10 +43,10 @@ func cacheTraceWireFixture(t *testing.T, protocol, kind, key, header string, con
 	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 400, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"synthetic stop"}}`))}}
 	cfg := &config.Config{JWT: config.JWTConfig{Secret: "trace-test-secret"}}
 	cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-	if configure != nil {
-		configure(cfg)
-	}
 	s := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	if configure != nil {
+		configure(s)
+	}
 	a := &Account{ID: 9, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "synthetic-token"}, Extra: map[string]any{"openai_responses_supported": true}}
 	if kind == "oauth" {
 		a.Type = AccountTypeOAuth

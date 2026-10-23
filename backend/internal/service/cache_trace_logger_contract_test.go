@@ -78,7 +78,7 @@ func cacheTraceNewContractFixture(t *testing.T, name, protocol string) *cacheTra
 	s := newOpenAIRecordUsageServiceWithBillingRepoForTest(rows, billing, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
 	s.cfg.JWT.Secret = "ctc-private-signing-secret"
 	s.cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-	traceTestConfig(s.cfg)
+	traceTestConfig(s)
 	api := openAIRecordUsageAPIKeyWithGroup(s, 1000, false)
 	groupID := int64(1)
 	api.GroupID = &groupID
@@ -258,7 +258,7 @@ func cacheTraceRunProductionLoggerContract(t *testing.T) {
 				require.NotNil(t, result.cacheTraceFailure)
 			} else {
 				if name == "budget_full_no_session" {
-					f.s.cfg.Gateway.CacheTrace.AsyncByteBudget = 1
+					f.s.cacheTraceWorkerPool().budget = 1
 				}
 				result = f.forward(t, "responses", false)
 				require.NotNil(t, result.CacheTrace)
@@ -280,7 +280,7 @@ func cacheTraceRunProductionLoggerContract(t *testing.T) {
 	for _, name := range []string{"plugin_unknown_anchor", "chain_percent_unknown_anchor", "budget_full"} {
 		t.Run(name, func(t *testing.T) {
 			f := cacheTraceNewContractFixture(t, name, "responses")
-			f.s.cfg.Gateway.CacheTrace.AsyncByteBudget = 1
+			f.s.cacheTraceWorkerPool().budget = 1
 			var result *OpenAIForwardResult
 			if name == "plugin_unknown_anchor" {
 				// The plugin process is not launched by this contract test. Its
@@ -293,7 +293,8 @@ func cacheTraceRunProductionLoggerContract(t *testing.T) {
 				result = f.finish(t, f.s.parseSSEUsageWithCacheTrace(f.c, traceForwardSSE))
 			} else {
 				if name == "chain_percent_unknown_anchor" {
-					f.s.cfg.Gateway.CacheTrace.ChainPercent = 0
+					traceTestSetPolicy(f.s, map[string]any{"chain_percent": 0})
+					f.s.cacheTraceWorkerPool().budget = 1
 				}
 				result = f.forward(t, "responses", false)
 			}

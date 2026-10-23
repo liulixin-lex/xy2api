@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,9 +15,35 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func traceTestConfig(cfg *config.Config) {
-	cfg.Gateway.CacheTrace.Enabled = true
-	cfg.Gateway.CacheTrace.ChainPercent = 100
+func traceTestConfig(s *OpenAIGatewayService) {
+	s.cachePolicies = NewCachePolicyService(nil, s.cfg)
+	traceTestSetPolicy(s, map[string]any{"enabled": true})
+}
+
+// Fixture-only publisher: use the production parser and snapshot computation.
+func traceTestSetPolicy(s *OpenAIGatewayService, fields map[string]any) {
+	if s.cachePolicies == nil {
+		s.cachePolicies = NewCachePolicyService(nil, s.cfg)
+	}
+	spec := map[string]any{}
+	for k, v := range s.cachePolicies.Snapshot().entries[1].envelope.Spec {
+		spec[k] = v
+	}
+	for k, v := range fields {
+		spec[k] = v
+	}
+	raw, err := json.Marshal(map[string]any{"rev": s.cachePolicies.Snapshot().ObservabilityRevision() + 1, "spec": spec})
+	if err != nil {
+		panic(err)
+	}
+	s.cachePolicies.publish(map[string]string{cachePolicySettings[1]: string(raw)})
+}
+
+func init() {
+	cacheBillingConfigureTrace = func(s *OpenAIGatewayService, enabled bool) {
+		traceTestConfig(s)
+		traceTestSetPolicy(s, map[string]any{"enabled": enabled})
+	}
 }
 
 func TestCacheTraceUUIDAndHeaderPresence(t *testing.T) {
@@ -86,8 +113,11 @@ func TestCacheTraceAnchorAndScope(t *testing.T) {
 }
 
 func TestCacheTraceDisabledHasNoReadsOrAllocations(t *testing.T) {
-	for _, cfg := range []*config.Config{nil, {}, {Gateway: config.GatewayConfig{CacheTrace: config.CacheTraceConfig{Enabled: true}}}} {
+	for _, cfg := range []*config.Config{nil, {}, {JWT: config.JWTConfig{Secret: "synthetic-disabled-secret"}}} {
 		s := &OpenAIGatewayService{cfg: cfg}
+		if cfg != nil {
+			traceTestConfig(s)
+		} // enabled policy remains blocked by diagnostics
 		c := cacheTestContext(1, 10)
 		req := &http.Request{GetBody: func() (io.ReadCloser, error) { panic("disabled trace read body") }}
 		body := bytes.Repeat([]byte("not-json"), 25600)

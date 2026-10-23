@@ -36,13 +36,13 @@ func BenchmarkCacheTraceCodexWorker(b *testing.B) {
 		body := cacheTraceCodexBody(size * 1024 * 1024 / 5250)
 		b.Run(fmt.Sprintf("%dMB_bytes_%d", size, len(body)), func(b *testing.B) {
 			cfg := &config.Config{JWT: config.JWTConfig{Secret: "synthetic-bench-secret"}}
-			cfg.Gateway.CacheTrace.ChainPercent = 100
 			svc := &OpenAIGatewayService{cfg: cfg}
+			traceTestConfig(svc)
 			b.ReportAllocs()
 			b.SetBytes(int64(len(body)))
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				svc.computeCacheTrace(body, body, 1, false, "synthetic-session", "responses", "http")
+				svc.computeCacheTrace(body, body, 1, false, "synthetic-session", "responses", "http", svc.cachePolicies.Snapshot())
 			}
 		})
 	}
@@ -59,10 +59,11 @@ func TestCacheTraceAsyncCodexPathP99(t *testing.T) {
 		body := cacheTraceCodexBody(size * 1024 * 1024 / 5250)
 		t.Run(fmt.Sprintf("%dMB", size), func(t *testing.T) {
 			cfg := &config.Config{JWT: config.JWTConfig{Secret: "synthetic-bench-secret"}}
-			traceTestConfig(cfg)
 			cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-			cfg.Gateway.CacheTrace.AsyncBytesPerSecond = 64 << 30 // admitted-hook microbenchmark; d3 uses production default
 			svc := &OpenAIGatewayService{cfg: cfg}
+			traceTestConfig(svc)
+			pool := svc.cacheTraceWorkerPool()
+			pool.bytesPerSecond = 64 << 30 // fixture-only admitted-hook microbenchmark
 			c := cacheTestContext(1, 10)
 			c.Request, _ = http.NewRequest(http.MethodPost, "http://fixture/v1/responses", bytes.NewReader(body))
 			c.Set(openAICacheSessionGinKey, "synthetic-session")

@@ -1178,13 +1178,9 @@ type CacheTraceConfig struct {
 	ChainsPerSession   int `mapstructure:"chains_per_session"`
 	MaxCheckpoints     int `mapstructure:"max_checkpoints"`
 
-	MaxQueueWait          time.Duration `mapstructure:"max_queue_wait"`
-	AsyncByteBudget       int64         `mapstructure:"async_byte_budget"`
-	AsyncWorkers          int           `mapstructure:"async_workers"`
-	AsyncBytesPerSecond   int64         `mapstructure:"async_bytes_per_second"`
-	Enabled               bool          `mapstructure:"enabled"`
-	ChainPercent          int           `mapstructure:"chain_percent"`
-	ReasoningContextPaths []string      `mapstructure:"reasoning_context_paths"`
+	MaxQueueWait time.Duration `mapstructure:"max_queue_wait"`
+
+	ReasoningContextPaths []string `mapstructure:"reasoning_context_paths"`
 }
 
 type OpenAICacheConfig struct {
@@ -2600,9 +2596,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_quality_routing.mode", "enforce")
 	viper.SetDefault("gateway.openai_quality_routing.avoid_seconds", 300)
 	viper.SetDefault("gateway.cache_trace.max_queue_wait", 10*time.Second)
-	viper.SetDefault("gateway.cache_trace.async_byte_budget", int64(64<<20))
-	viper.SetDefault("gateway.cache_trace.async_workers", 1)
-	viper.SetDefault("gateway.cache_trace.async_bytes_per_second", int64(32<<20))
+
 	viper.SetDefault("gateway.cache_features.kill_switch", false)
 	viper.SetDefault("gateway.cache_trace.workers", 1)
 	viper.SetDefault("gateway.cache_trace.max_byte_budget_mib", 64)
@@ -2610,8 +2604,6 @@ func setDefaults() {
 	viper.SetDefault("gateway.cache_trace.max_sessions", 1024)
 	viper.SetDefault("gateway.cache_trace.chains_per_session", 3)
 	viper.SetDefault("gateway.cache_trace.max_checkpoints", 512)
-	viper.SetDefault("gateway.cache_trace.enabled", false)
-	viper.SetDefault("gateway.cache_trace.chain_percent", 100)
 	viper.SetDefault("gateway.cache_trace.min_cacheable_tokens", 1024)
 	viper.SetDefault("gateway.cache_trace.reasoning_context_paths", []string{"reasoning.context"})
 	viper.SetDefault("gateway.openai_cache.diagnostics_enabled", false)
@@ -2865,21 +2857,22 @@ func (c *Config) Validate() error {
 	if c.Gateway.CacheTrace.Workers < 1 || c.Gateway.CacheTrace.Workers > 2 {
 		return fmt.Errorf("gateway.cache_trace.workers must be between 1 and 2")
 	}
-	if c.Gateway.CacheTrace.MaxByteBudgetMiB < 8 || c.Gateway.CacheTrace.MaxRateMiBPerS < 1 ||
-		c.Gateway.CacheTrace.MaxSessions < 1 || c.Gateway.CacheTrace.ChainsPerSession < 1 || c.Gateway.CacheTrace.MaxCheckpoints < 1 {
-		return fmt.Errorf("gateway.cache_trace caps must be positive; max_byte_budget_mib must be at least 8")
+	for _, cap := range []struct {
+		name            string
+		value, min, max int
+	}{
+		{"max_byte_budget_mib", c.Gateway.CacheTrace.MaxByteBudgetMiB, 8, 64},
+		{"max_rate_mib_per_s", c.Gateway.CacheTrace.MaxRateMiBPerS, 1, 32},
+		{"max_sessions", c.Gateway.CacheTrace.MaxSessions, 1, 1024},
+		{"chains_per_session", c.Gateway.CacheTrace.ChainsPerSession, 1, 3},
+		{"max_checkpoints", c.Gateway.CacheTrace.MaxCheckpoints, 1, 512},
+	} {
+		if cap.value < cap.min || cap.value > cap.max {
+			return fmt.Errorf("gateway.cache_trace.%s must be between %d and %d", cap.name, cap.min, cap.max)
+		}
 	}
 	if c.Gateway.CacheTrace.MaxQueueWait < 0 {
 		return fmt.Errorf("gateway.cache_trace.max_queue_wait must be nonnegative")
-	}
-	if c.Gateway.CacheTrace.AsyncBytesPerSecond < 0 {
-		return fmt.Errorf("gateway.cache_trace.async_bytes_per_second must be nonnegative")
-	}
-	if c.Gateway.CacheTrace.AsyncByteBudget < 0 || c.Gateway.CacheTrace.AsyncWorkers < 0 || c.Gateway.CacheTrace.AsyncWorkers > 8 {
-		return fmt.Errorf("gateway.cache_trace async_byte_budget must be nonnegative and async_workers between 0 and 8")
-	}
-	if c.Gateway.CacheTrace.ChainPercent < 0 || c.Gateway.CacheTrace.ChainPercent > 100 {
-		return fmt.Errorf("gateway.cache_trace.chain_percent must be between 0 and 100")
 	}
 	// Absolute Redis snapshots could overwrite usage committed by atomic billing.
 	if c.Database.UserPlatformQuotaFlusherEnabled {

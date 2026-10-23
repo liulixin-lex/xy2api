@@ -45,7 +45,7 @@ func t3AssertMissingUsageSettlement(t *testing.T, s *OpenAIGatewayService, c *gi
 	usageEvents := t3SettlementEvents(t, logs, "openai_cache_usage")
 	require.Len(t, events, 1)
 	require.Len(t, usageEvents, 1)
-	payload := t3SettlementPayload(t, events[0], false)
+	payload := t3SettlementPayload(t, events[0], false, CachePolicyFromGin(c).Revision())
 	require.Equal(t, "n/a_usage", payload["loss_class"])
 	require.NotContains(t, payload, "na_reason", "an observed absence is not a not_ready observation gap")
 	require.Equal(t, float64(0), payload["P"])
@@ -108,10 +108,10 @@ func TestCacheTraceMissingUsagePlainForwardBillingParity(t *testing.T) {
 					c.Set("api_key", &APIKey{ID: 1, GroupID: &group})
 					cfg := &config.Config{JWT: config.JWTConfig{Secret: "trace-test-secret"}}
 					cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-					traceTestConfig(cfg)
-					cfg.Gateway.CacheTrace.Enabled = enabled
 					resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}, "X-Request-Id": {"t3-private-upstream-request"}}, Body: io.NopCloser(strings.NewReader(reply))}
 					s := &OpenAIGatewayService{cfg: cfg, httpUpstream: &httpUpstreamRecorder{resp: resp}}
+					traceTestConfig(s)
+					traceTestSetPolicy(s, map[string]any{"enabled": enabled})
 					account := &Account{ID: 9, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "synthetic-token"}, Extra: map[string]any{"openai_responses_supported": !raw}}
 					s.GenerateSessionHash(c, body)
 					var result *OpenAIForwardResult

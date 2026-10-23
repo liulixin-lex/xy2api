@@ -30,10 +30,10 @@ func TestCacheTraceNoSessionForwardAndSettlement(t *testing.T) {
 			c.Set("api_key", &APIKey{ID: 1, GroupID: &group})
 			cfg := &config.Config{JWT: config.JWTConfig{Secret: "trace-test-secret"}}
 			cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-			traceTestConfig(cfg)
 			response := traceForwardOK()
 			response.Header.Set("X-Request-Id", "t3-private-no-session-request")
 			s := &OpenAIGatewayService{cfg: cfg, httpUpstream: &httpUpstreamRecorder{resp: response}}
+			traceTestConfig(s)
 			if rejected {
 				s.cacheTraceWorkerPool().budget = 1
 			}
@@ -104,6 +104,7 @@ func TestCacheTraceNoSessionDisabledDoesNotCreateTrace(t *testing.T) {
 	cfg := &config.Config{JWT: config.JWTConfig{Secret: "trace-test-secret"}}
 	cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
 	s := &OpenAIGatewayService{cfg: cfg}
+	s.cachePolicies = NewCachePolicyService(nil, cfg)
 	require.Empty(t, s.GenerateSessionHash(c, body))
 	require.Nil(t, cacheTraceFromGin(c))
 	require.Nil(t, s.cacheTraceWorkers)

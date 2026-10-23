@@ -167,7 +167,7 @@ func TestCacheTraceAsyncRetryImmutableAndLateHistory(t *testing.T) {
 		// the live trace without touching any previous attempt's immutable job.
 		local := *c.Request
 		cc := &gin.Context{Request: &local}
-		first := &cacheTrace{sessionKey: "retry", ingress: wire, apiKeyID: 1, data: cacheTraceData{Transport: "http"}}
+		first := &cacheTrace{policy: s.cachePolicies.Snapshot(), sessionKey: "retry", ingress: wire, apiKeyID: 1, data: cacheTraceData{Transport: "http"}}
 		cc.Request = cc.Request.WithContext(context.WithValue(cc.Request.Context(), cacheTraceKey{}, first))
 		snapshotReq := req.Clone(req.Context())
 		original := snapshotReq.GetBody
@@ -223,14 +223,14 @@ func TestCacheTraceAsyncDoesNotCompareFutureSettlement(t *testing.T) {
 	chain.settledAt = before.Add(time.Second)
 	telemetry := s.cacheTelemetry()
 	telemetry.sessions["future"] = openAICacheHistory{traceChains: &cacheTraceSessionState{chains: [3]cachePrefixChain{chain}}}
-	got := s.computeCacheTrace(body, body, 1, false, "future", "responses", "http", before)
+	got := s.computeCacheTrace(body, body, 1, false, "future", "responses", "http", s.cachePolicies.Snapshot(), before)
 	require.True(t, got.prefix.HistoryUnsampled, "newer settlement cannot explain an earlier request")
 	require.Equal(t, "none", got.prefix.ForkRef)
 	chain.anchor = got.anchor
 	future := chain
 	chain.settledAt = before.Add(-time.Second)
 	telemetry.sessions["future"] = openAICacheHistory{traceChains: &cacheTraceSessionState{chains: [3]cachePrefixChain{future, chain}}}
-	got = s.computeCacheTrace(body, body, 1, false, "future", "responses", "http", before)
+	got = s.computeCacheTrace(body, body, 1, false, "future", "responses", "http", s.cachePolicies.Snapshot(), before)
 	require.False(t, got.prefix.HistoryUnsampled)
 	require.Equal(t, "prev1", got.prefix.ForkRef)
 }

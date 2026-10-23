@@ -55,8 +55,9 @@ func TestCacheTracePrefixSamplingStableAndHistoryGap(t *testing.T) {
 	s, c, _, body := cacheTraceWireFixture(t, "responses", "apikey", "trace-private-key", "none", traceTestConfig)
 	trace := cacheTraceFromGin(c)
 	for _, percent := range []int{0, 1, 37, 100} {
-		s.cfg.Gateway.CacheTrace.ChainPercent = percent
-		expected := sha256SumCacheCohort(trace.sessionKey) < percent
+		traceTestSetPolicy(s, map[string]any{"chain_percent": percent})
+		trace.policy = s.cachePolicies.Snapshot()
+		expected := sha256SumCacheCohort("cache-trace-chain\x00"+trace.sessionKey) < percent
 		for i := 0; i < 3; i++ {
 			s.captureCachePrefix(trace, body, "responses")
 			require.Equal(t, expected, trace.data.Prefix.Sampled)
@@ -92,15 +93,20 @@ func TestCacheTracePrefixMemoryBoundAndExistingTelemetry(t *testing.T) {
 		s.observeCacheUsage(result, account, time.Unix(int64(i+1), 0))
 	}
 	require.Len(t, telemetry.sessions, 2048)
-	retained := 0
+	retained, tracedSessions := 0, 0
 	for _, session := range telemetry.sessions {
+		if session.traceChains == nil {
+			continue
+		}
+		tracedSessions++
 		for i, chain := range session.traceChains.chains {
 			require.LessOrEqual(t, len(chain.hashes), 512)
 			require.Equal(t, 9003-i, chain.prompt)
 			retained += cap(chain.hashes) * 8
 		}
 	}
-	require.LessOrEqual(t, retained, 2048*3*512*8)
+	require.Equal(t, 1024, tracedSessions)
+	require.LessOrEqual(t, retained, 1024*3*512*8)
 	// Observation adds no context/state to unrelated schedulers.
 	require.Nil(t, cacheTraceFrom(context.Background()))
 }
@@ -118,8 +124,8 @@ func TestCacheTracePrefixCapturesFinalLiteContext(t *testing.T) {
 			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_lite_trace\",\"usage\":{\"input_tokens\":12000,\"output_tokens\":1}}}\n\n"))}}
 			cfg := &config.Config{JWT: config.JWTConfig{Secret: "trace-test-secret"}}
 			cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-			traceTestConfig(cfg)
 			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+			traceTestConfig(svc)
 			account := &Account{ID: 501, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "synthetic-token", "chatgpt_account_id": "synthetic-account"}, Extra: map[string]any{"openai_passthrough": passthrough}}
 			svc.GenerateSessionHash(c, body)
 			result, err := svc.Forward(c.Request.Context(), c, account, body)

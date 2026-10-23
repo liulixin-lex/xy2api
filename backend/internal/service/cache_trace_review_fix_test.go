@@ -33,12 +33,12 @@ func traceSuccessfulForward(t *testing.T, protocol, kind string, stream, eof boo
 	c.Set("api_key", &APIKey{ID: 1, GroupID: &group})
 	cfg := &config.Config{JWT: config.JWTConfig{Secret: "trace-test-secret"}}
 	cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-	traceTestConfig(cfg)
 	resp := traceForwardOK()
 	if eof {
 		resp.Body = io.NopCloser(strings.NewReader(strings.TrimRight(traceForwardSSE, "\n")))
 	}
 	s := &OpenAIGatewayService{cfg: cfg, httpUpstream: &httpUpstreamRecorder{resp: resp}}
+	traceTestConfig(s)
 	account := &Account{ID: 9, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "synthetic-token"}, Extra: map[string]any{"openai_responses_supported": true}}
 	if kind == "oauth" {
 		account.Type = AccountTypeOAuth
@@ -157,8 +157,8 @@ func TestCacheTraceExcludedIngresses(t *testing.T) {
 	for _, path := range []string{"/v1/messages", "/v1/messages/count_tokens", "/v1/images/generations", "/v1/alpha/search", "/v1/responses"} {
 		cfg := &config.Config{JWT: config.JWTConfig{Secret: "trace-test-secret"}}
 		cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-		traceTestConfig(cfg)
 		s := &OpenAIGatewayService{cfg: cfg}
+		traceTestConfig(s)
 		c := cacheTestContext(1, 10)
 		c.Request.URL.Path = path
 		if path == "/v1/responses" {
@@ -172,8 +172,8 @@ func TestCacheTraceExcludedIngresses(t *testing.T) {
 func BenchmarkCacheTraceEnabled200KB(b *testing.B) {
 	cfg := &config.Config{JWT: config.JWTConfig{Secret: "trace-test-secret"}}
 	cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-	traceTestConfig(cfg)
 	s := &OpenAIGatewayService{cfg: cfg}
+	traceTestConfig(s)
 	c := cacheTestContext(1, 10)
 	body := []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"` + strings.Repeat("x", 200*1024) + `"}]}`)
 	s.GenerateSessionHash(c, body)
@@ -213,7 +213,10 @@ func TestCacheTraceActiveFingerprintProduction(t *testing.T) {
 				t.Run(mode+"/"+key+"/"+header, func(t *testing.T) {
 					var previousWire string
 					for _, enabled := range []bool{false, true} {
-						configure := func(cfg *config.Config) { traceTestConfig(cfg); cfg.Gateway.CacheTrace.Enabled = enabled }
+						configure := func(s *OpenAIGatewayService) {
+							traceTestConfig(s)
+							traceTestSetPolicy(s, map[string]any{"enabled": enabled})
+						}
 						c, wire, body, headers, _ := traceExtraRun(t, traceExtraCase{Scenario: mode, Key: key, Header: header}, configure, nil, func(a *Account) { a.Extra[codexFingerprintSeedExtraKey] = seed })
 						ids := stagedCodexFingerprintIDs(c, &Account{ID: 9, Platform: PlatformOpenAI, Type: AccountTypeOAuth})
 						require.NotNil(t, ids, "seeded convergence must be active")

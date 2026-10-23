@@ -24,6 +24,7 @@ const cacheTraceAsyncLifetime = 10 * time.Minute
 // Retrying builds another request and never writes these arrays. Holding the
 // reference keeps it alive independently of the request's lifetime.
 type cacheTraceJob struct {
+	policy                       *CachePolicySnapshot
 	pool                         *cacheTraceWorkers
 	cost                         int64
 	next                         *cacheTraceJob
@@ -97,14 +98,14 @@ type cacheTraceWorkers struct {
 
 func (s *OpenAIGatewayService) cacheTraceWorkerPool() *cacheTraceWorkers {
 	s.cacheTraceWorkersOnce.Do(func() {
-		budget, n := s.cfg.Gateway.CacheTrace.AsyncByteBudget, s.cfg.Gateway.CacheTrace.AsyncWorkers
+		budget, n := cacheTraceDefaultByteBudget, s.cfg.Gateway.CacheTrace.Workers
 		if budget <= 0 {
 			budget = cacheTraceDefaultByteBudget
 		}
 		if n <= 0 {
 			n = cacheTraceDefaultWorkers
 		}
-		rate := s.cfg.Gateway.CacheTrace.AsyncBytesPerSecond
+		rate := cacheTraceDefaultBytesPerSecond
 		if rate <= 0 {
 			rate = cacheTraceDefaultBytesPerSecond
 		}
@@ -113,6 +114,9 @@ func (s *OpenAIGatewayService) cacheTraceWorkerPool() *cacheTraceWorkers {
 			wait = cacheTraceDefaultQueueWait
 		}
 		s.cacheTraceWorkers = &cacheTraceWorkers{budget: budget, workers: n, bytesPerSecond: rate, maxQueueWait: wait}
+		if s.cachePolicies != nil {
+			s.cachePolicies.subscribe(s.cacheTraceWorkers.applyPolicy)
+		}
 	})
 	return s.cacheTraceWorkers
 }
@@ -122,8 +126,8 @@ func (s *OpenAIGatewayService) cacheTraceWorkerPool() *cacheTraceWorkers {
 // even when the worker can borrow the source without a scratch allocation.
 func (p *cacheTraceWorkers) reserve(ingress, output int64) (int64, bool) {
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	budget := p.budget
-	p.mu.Unlock()
 	if ingress < 0 || output < 0 || ingress > budget-1024 || output > (budget-ingress-1024)/2 {
 		return 0, false
 	}
@@ -196,9 +200,13 @@ func (p *cacheTraceWorkers) run() {
 			if bytesPerSecond <= 0 {
 				bytesPerSecond = cacheTraceDefaultBytesPerSecond
 			}
-			// Burst equals the memory budget, so any admitted job fits. Rate
-			// reservations belong to workers, never to the forwarding path.
-			p.limiter = rate.NewLimiter(rate.Limit(bytesPerSecond), int(p.budget))
+			// A policy may shrink the budget after admission but before this
+			// first worker starts. Preserve those reservations in the burst.
+			burst := p.budget
+			if reserved := p.reserved.Load(); reserved > burst {
+				burst = reserved
+			}
+			p.limiter = rate.NewLimiter(rate.Limit(bytesPerSecond), int(burst))
 		}
 		limiter := p.limiter
 		p.mu.Unlock()
@@ -282,7 +290,7 @@ func (j *cacheTraceJob) compute() {
 		cutoff = j.created // adapters that do not dispatch retain their old cutoff
 	}
 	compute := func(body []byte) *cacheTraceComputed {
-		return j.service.computeCacheTrace(j.ingress, body, j.apiKeyID, j.headerSource, j.session, j.protocol, j.transport, cutoff)
+		return j.service.computeCacheTrace(j.ingress, body, j.apiKeyID, j.headerSource, j.session, j.protocol, j.transport, j.policy, cutoff)
 	}
 	var result *cacheTraceComputed
 	if direct, ok := reader.(io.WriterTo); ok {
@@ -378,4 +386,23 @@ func (j *cacheTraceJob) historyEvicted() bool {
 	current, exists := telemetry.sessions[j.session]
 	telemetry.mu.Unlock()
 	return !exists || current.traceChains != j.history
+}
+
+// applyPolicy is called under the policy publisher lock. It never allocates a
+// new pool or cancels admitted work. Lower budgets reject new admissions until
+// existing reservations drain; running requests retain their sampling snapshot.
+func (p *cacheTraceWorkers) applyPolicy(policy *CachePolicySnapshot) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.budget = policy.ByteBudget()
+	p.bytesPerSecond = policy.RateBytesPerSecond()
+	if p.limiter != nil {
+		now := time.Now()
+		p.limiter.SetLimitAt(now, rate.Limit(p.bytesPerSecond))
+		burst := p.budget
+		if reserved := p.reserved.Load(); reserved > burst {
+			burst = reserved
+		}
+		p.limiter.SetBurstAt(now, int(burst))
+	}
 }

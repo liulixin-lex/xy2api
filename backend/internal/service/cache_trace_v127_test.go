@@ -111,15 +111,15 @@ func TestCacheTraceByteRateDefaults(t *testing.T) {
 
 func TestCacheTraceWorkerWaitsForRateTokens(t *testing.T) {
 	cfg := &config.Config{JWT: config.JWTConfig{Secret: "synthetic-secret"}}
-	traceTestConfig(cfg)
 	svc := &OpenAIGatewayService{cfg: cfg}
+	traceTestConfig(svc)
 	limiter := rate.NewLimiter(128, 4096)
 	require.True(t, limiter.AllowN(time.Now(), 4096))
 	pool := &cacheTraceWorkers{budget: 4096, workers: 1, bytesPerSecond: 128, limiter: limiter}
 	state := &cacheTraceAsync{}
 	body := []byte(`{"input":"synthetic","prompt_cache_key":"synthetic"}`)
 	opened := make(chan struct{})
-	job := &cacheTraceJob{state: state, service: svc, ingress: body, size: int64(len(body)), created: time.Now(), session: "wait", protocol: "responses", transport: "http",
+	job := &cacheTraceJob{state: state, service: svc, policy: svc.cachePolicies.Snapshot(), ingress: body, size: int64(len(body)), created: time.Now(), session: "wait", protocol: "responses", transport: "http",
 		getBody: func() (io.ReadCloser, error) { close(opened); return io.NopCloser(bytes.NewReader(body)), nil }}
 	require.True(t, pool.submit(job), "rate exhaustion must never reject admission")
 	require.Eventually(t, func() bool { return limiter.Tokens() < 0 }, time.Second, time.Millisecond, "worker should reserve tokens and wait")
@@ -166,15 +166,18 @@ func TestCacheTraceBudgetRejectsWithoutReadingOrOverflow(t *testing.T) {
 
 func TestCacheTraceRateConfiguration(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Gateway.CacheTrace.AsyncWorkers = 2
-	cfg.Gateway.CacheTrace.AsyncByteBudget = 128 << 20
-	cfg.Gateway.CacheTrace.AsyncBytesPerSecond = 8 << 20
-	p := (&OpenAIGatewayService{cfg: cfg}).cacheTraceWorkerPool()
+	cfg.Gateway.CacheTrace.Workers = 2
+	svc := &OpenAIGatewayService{cfg: cfg}
+	traceTestConfig(svc)
+	traceTestSetPolicy(svc, map[string]any{"byte_budget_mib": 32, "rate_mib_per_s": 8})
+	p := svc.cacheTraceWorkerPool()
 	require.Equal(t, 2, p.workers)
-	require.Equal(t, int64(128<<20), p.budget)
+	require.Equal(t, int64(32<<20), p.budget)
 	require.Equal(t, int64(8<<20), p.bytesPerSecond)
-	cfg.Gateway.CacheTrace.AsyncBytesPerSecond = -1
-	require.ErrorContains(t, cfg.Validate(), "async_bytes_per_second")
+	traceTestSetPolicy(svc, map[string]any{"byte_budget_mib": 16, "rate_mib_per_s": 4})
+	require.Same(t, p, svc.cacheTraceWorkerPool())
+	require.Equal(t, int64(16<<20), p.budget)
+	require.Equal(t, int64(4<<20), p.bytesPerSecond)
 }
 
 func TestCacheTraceRateCannotDiscardBeforeActualExpiry(t *testing.T) {

@@ -1,14 +1,12 @@
 package service
 
 import (
+	"github.com/stretchr/testify/require"
 	"io"
 	"net/http"
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/liulixin-lex/xy2api/internal/config"
-	"github.com/stretchr/testify/require"
 )
 
 func TestCacheTraceResponseMetadataIndependentOfUsageSlot(t *testing.T) {
@@ -137,7 +135,10 @@ func TestCacheTraceBufferedTypedReadAndTTLFieldsFollowSelectedUsage(t *testing.T
 			for _, enabled := range []bool{false, true} {
 				configure := traceTestConfig
 				if !enabled {
-					configure = func(cfg *config.Config) { traceTestConfig(cfg); cfg.Gateway.CacheTrace.Enabled = false }
+					configure = func(s *OpenAIGatewayService) {
+						traceTestConfig(s)
+						traceTestSetPolicy(s, map[string]any{"enabled": false})
+					}
 				}
 				svc, c, _, _ := cacheTraceWireFixture(t, "chat", "apikey", "boundary-private-pck", "session_id", configure)
 				if enabled {

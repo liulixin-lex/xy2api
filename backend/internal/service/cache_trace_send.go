@@ -41,6 +41,7 @@ func (s *OpenAIGatewayService) markCacheTraceSent(c *gin.Context) {
 	telemetry.mu.Lock()
 	// Take the monotonic timestamp after acquiring the shared telemetry lock:
 	// contention before dispatch must not appear as upstream time.
+	s.limitCacheTraceSessionsLocked(telemetry, t.sessionKey)
 	t.timing = cacheTraceSendLocked(telemetry, t.sessionKey, sequence, time.Now(), t.window, t.timing)
 	if t.pending != nil {
 		// Pin the epoch selected at actual send, including a state that was

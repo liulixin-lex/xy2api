@@ -51,7 +51,7 @@ Compose / 环境变量对应 `GATEWAY_OPENAI_CACHE_DIAGNOSTICS_ENABLED`、`GATEW
 
 buffered SSE 的观测复用既有计费遍历已解析的帧；关闭时直接调用原解析器。每个 buffered 请求只设置一次异常隔离：观测返回错误后停用该请求后续观测，panic 后丢弃局部 usage 并用原解析器重算；这一步不执行结算，原有结算仍只执行一次。观测失败保持 `result.CacheTrace=nil`，由独立失败标记在结算时输出恰好一条 `observer_failed` 最小事件；它只使用计费已有的 P/read、关联键和入口标量，不重解析。异常原文不写日志，事件输出失败也不能影响计费。流式路径不增加逐帧 recover，依赖只读解析与固定字段操作；上述回调故障隔离范围是 buffered 遍历。
 
-静态 `gateway.cache_trace.enabled` 默认 false（环境变量 `GATEWAY_CACHE_TRACE_ENABLED`），仅在 `gateway.openai_cache.diagnostics_enabled` 也为 true 且有持久 JWT secret 时采集。关闭时不进行额外 JSON 解析或请求体读取。观测不改变请求 bytes、选号、turn-state 或计费；在原有 usage 观测之后输出结算事件；未送达请求不输出，失败尝试不成为历史。
+运行时 `cache_observability_policy.enabled` 默认 false；管理员在“缓存观测 → 开关与参数”开启。生效条件是静态 `gateway.cache_features.kill_switch=false`、观测策略开启、既有 `gateway.openai_cache.diagnostics_enabled=true`，并有持久 JWT secret。关闭时不进行额外 JSON 解析或请求体读取。观测不改变请求 bytes、选号、turn-state 或计费；事件在原有 usage 观测之后结算输出；未送达请求不输出，失败尝试不成为历史。完整、拒绝、observer_failed 和 no_session 路径共用请求入口的运行时门控，关闭请求不创建观测状态、不进入结算或输出。
 
 - 入站 `pck_class_in` 只看原 body：none / empty / client_uuid / client_non_uuid；UUID 用固定 8-4-4-4-12 十六进制正则，不校验版本位。
 - 出站 `pck_class_out` 按实际注入/改写点记录：none / passthrough / gw_compat_hex / gw_from_header / oauth_rewritten；gw_grok 仅预留来源标记（P0a 排除 Grok），gw_uuid 留给后续身份改动。`pck_out_is_uuid` 只表示形态，不用于推导来源。
@@ -79,10 +79,12 @@ buffered SSE 的观测复用既有计费遍历已解析的帧；关闭时直接�
 
 ### 出站块链与位置
 
-`gateway.cache_trace.chain_percent`（`GATEWAY_CACHE_TRACE_CHAIN_PERCENT`）默认 100，按隔离后的会话稳定采样；0 不计算块链。Responses 按 tools → instructions → text/reasoning/tool_choice → input 各项分块；Chat 按 tools → messages 各项分块。只读最终原始字节，不重写请求。
+运行时 `sample_percent` 默认 100，按隔离后的会话稳定采样；`chain_percent` 默认 100，在第一层样本内用独立会话分桶采样，0 不计算块链。Responses 按 tools → instructions → text/reasoning/tool_choice → input 各项分块；Chat 按 tools → messages 各项分块。只读最终原始字节，不重写请求。
 
 - `blk_n` 是完整块数。`bytes_out` 为协议块逻辑字节总数（不含 JSON 骨架及非块字段）；`fork_blk`、`fork_byte` 是与最近三条历史中最长匹配链的分叉位置，`fork_ref` 为 none / prev1 / prevk / other_conv。`fork_raw_byte` 和 `bytes_out_raw` 保留 wire 偏移/长度。`blk_order_physical_eq_logical` 表示各块物理起点是否按逻辑顺序递增。
 - 每条历史最多 512 个 uint64 检查点，另存末块哈希、块数与逻辑总长；前 64 块保持精确，尾部检查点达到上限时隔一个保留一个、步长翻倍。扫描到上一轮末块并命中其哈希，就证明完整覆盖上一轮，任意长度的纯追加均可识别。沿用原 telemetry 的 2048 会话上限和锁；最多 2048×3×512×8 = 25,165,824 字节哈希，另有少量元数据。失败或未送达尝试不成为历史。检查点序号由步长推导，分叉坐标在当前扫描中取得；历史只保留逻辑总长。可选历史指针仅在观测开启且已有会话的发送或结算时分配，默认关闭不会使 legacy map 值超过 Go 的内联阈值。
+
+- 每条历史最多 512 个 uint64 检查点，另存末块哈希、块数与逻辑总长；默认上限下前 64 块保持精确，尾部检查点达到上限时隔一个保留一个、步长翻倍。扫描到上一轮末块并命中其哈希，就证明完整覆盖上一轮，任意长度的纯追加均可识别。沿用原 telemetry 的锁与 2048 个 diagnostics 会话；新增 trace 历史默认最多 1024 个会话，最多 1024×3×512×8 = 12,582,912 字节保留哈希，另有元数据。静态上限调低时，只减少 trace 历史与保留检查点，末块哈希仍保留。失败或未送达尝试不成为历史。检查点序号由步长推导，分叉坐标在当前扫描中取得；历史只保留逻辑总长。可选历史指针仅在采样且结算时分配，默认关闭不会使 legacy map 值超过 Go 的内联阈值。
 - 块哈希使用进程启动随机种子的 xxhash64，只在内存中比较，禁止出现在日志、接口或持久化中；日志标识仍使用 HMAC。逻辑和 raw 位置在同次扫描中取得，关闭观测不扫描。
 - `tail_kind`、`reasoning_items_n`、`old_reasoning_n`、`first_old_reasoning_blk/byte` 记录 reasoning 相对最后一条 user 的位置；仅最后 user 之前的 reasoning 算旧回合。`first_old_reasoning_raw_byte` 为排查保留 wire 位置。
 - `include_encrypted_reasoning`、`store_false`、`reasoning_enc_n` 只记录，不推断提供方是否保留密文。`reasoning_ctx` 读取最终出站字段（absent / auto / current_turn / all_turns / other）；静态路径列表 `gateway.cache_trace.reasoning_context_paths` 默认 `["reasoning.context"]`。原生 Chat 记 absent。
@@ -92,7 +94,8 @@ buffered SSE 的观测复用既有计费遍历已解析的帧；关闭时直接�
 
 关闭路径由 Go 入口测试、生产转发快照和分配对照共同验证；trace 只在总闸之后创建，关闭时不入队、不读取 body、不计算链。
 
-异步预算 `gateway.cache_trace.async_byte_budget` 默认 67108864（64MiB），`async_workers` 默认 1（1–8；代码构造配置的 0 使用默认）。入站顶层查找、锚点 HMAC、最终出站读取及块链均在 HTTP 调用返回响应头后由 worker 执行；同步路径仅保存只读引用、来源标记和头位图。预算在创建任务、查历史之前以 CAS 预留，包括待发送、排队和执行中的入站引用、出站引用、备用读取副本和任务元数据；超预算直接丢弃，不等待。未发送的替换或失败尝试释放预留，已入队任务由 worker 释放。worker 对支持一次完整 WriterTo 的不可变出站源仅在回调内借用，结果不保留原始视图；其他源在预算内复制。`gateway.cache_trace.async_bytes_per_second` 默认 33554432（32MiB/s），worker 按入站与出站原始字节之和等待令牌，突发容量等于内存预算；令牌不足时任务继续占用队列预算，只有 worker 等待，转发及结算不等待。队列及令牌等待超过 `gateway.cache_trace.max_queue_wait`（默认 10s）或已建立的会话链历史被淘汰才按 `expired` 丢弃；从实际入队开始计时。不存在独立的 body 大小门槛。覆盖原因 `na_reason` 按 `chain_percent`、`budget_full`、`expired`、`not_ready`、`hist_unavailable` 排序，仅随结算事件的 `loss_class=n/a_sampled_out` 输出。结算时结果未就绪也记覆盖缺口，响应和结算绝不等待。budget_full、expired、not_ready、observer_failed 的最小事件固定保留 12 个字段：v、platform、loss_class、na_reason、request_id_hmac、session_digest、account_id、group_id、P、read、pol_rev、ua_family；P/read 直接复用最终 usage，request_id_hmac/session_digest 与既有用量日志同值，已计算的 request HMAC 直接复用。预算拒绝不执行逐帧观测，进入解析器前已知过期的响应也直接使用原计费解析器；进入后保持该次尝试的观察决定。两者都到齐的历史才发布，超过 10 分钟不再发布；晚完成按结算时间排序，不能覆盖更新的历史。
+运行时 `cache_observability_policy.byte_budget_mib` 默认 64 MiB，静态 `gateway.cache_trace.workers` 默认 1（1–2）。入站顶层查找、锚点 HMAC、最终出站读取及块链均在 HTTP 调用返回响应头后由 worker 执行；同步路径仅保存只读引用、来源标记和头位图。预算在创建任务、查历史之前以 CAS 预留，包括待发送、排队和执行中的入站引用、出站引用、备用读取副本和任务元数据；超预算直接丢弃，不等待。未发送的替换或失败尝试释放预留，已入队任务由 worker 释放。worker 对支持一次完整 WriterTo 的不可变出站源仅在回调内借用，结果不保留原始视图；其他源在预算内复制。运行时 `cache_observability_policy.rate_mib_per_s` 默认 32 MiB/s，worker 按入站与出站原始字节之和等待令牌，突发容量等于内存预算；令牌不足时任务继续占用队列预算，只有 worker 等待，转发及结算不等待。队列及令牌等待超过 `gateway.cache_trace.max_queue_wait`（默认 10s）或已建立的会话链历史被淘汰才按 `expired` 丢弃；从实际入队开始计时。不存在独立的 body 大小门槛。覆盖原因 `na_reason` 按 `chain_percent`、`budget_full`、`expired`、`not_ready`、`hist_unavailable` 排序，仅随结算事件的 `loss_class=n/a_sampled_out` 输出。结算时结果未就绪也记覆盖缺口，响应和结算绝不等待。budget_full、expired、not_ready、observer_failed 的最小事件固定保留 12 个字段：v、platform、loss_class、na_reason、request_id_hmac、session_digest、account_id、group_id、P、read、pol_rev、ua_family；P/read 直接复用最终 usage，request_id_hmac/session_digest 与既有用量日志同值，已计算的 request HMAC 直接复用。预算拒绝不执行逐帧观测，进入解析器前已知过期的响应也直接使用原计费解析器；进入后保持该次尝试的观察决定。两者都到齐的历史才发布，超过 10 分钟不再发布；晚完成按结算时间排序，不能覆盖更新的历史。
+
 
 `chain_sampled=false` 表示链未计算/未就绪（含插件）；未知块数/逻辑长度/reasoning 数为 −1，相关枚举为 unknown，相关布尔为 false。同步来源仍可用，异步类别未完成时 pck_class_in/id_source 和 conv_anchor 可以是 unknown；chain_sampled=true 时 conv_anchor 必须是 HMAC。
 
@@ -128,7 +131,7 @@ conv_anchor 按既定的前导 system/developer 和首条 user 计算；Codex �
 
 `codex_hdr` 的前三位依次表示 x-openai-subagent、x-codex-parent-thread-id、x-codex-window-id 的存在性，其他位为 0；不输出头值。window_seq_delta 比较相同 thread 的窗口序号，未知 −1、thread 改变 −2、序号倒退 −3，不输出 thread 原文。`ua_family` 仅看 UA 首个 / 之前的产品 token、忽略大小写，枚举为 codex_cli_rs / codex_tui / codex_desktop / codex_exec / codex_vscode / codex_other / litellm / go_http / openai_sdk / other；没有 UA 或未识别产品均为 other。
 
-`pcd` 只记录 prompt_cache_diagnostics 的白名单枚举，未出现为 absent、未识别为 other。`resp_cache_ttl` 为 30m / 12h / 24h / in_memory / other / absent；响应字段与计费使用同一遍历结果。usage_fields 的 bit6/bit7 分别记录 30m/12h 写入明细的存在性，显式 0 同样记为存在。pol_rev 在运行时策略接入前为 m0.o0.u0.a0.r0；后续从请求开始时取得的策略快照读取。
+`pcd` 只记录 prompt_cache_diagnostics 的白名单枚举，未出现为 absent、未识别为 other。`resp_cache_ttl` 为 30m / 12h / 24h / in_memory / other / absent；响应字段与计费使用同一遍历结果。usage_fields 的 bit6/bit7 分别记录 30m/12h 写入明细的存在性，显式 0 同样记为存在。pol_rev 从请求开始时取得的策略快照读取，异步结算与 observer_failed 标记沿用同一版本。
 
 cache_trace 仅为内部 Info 日志，经现有 slog→zap JSON logger 输出；事件载荷平铺，采集端剥离 level/time/logger/caller/msg/service/env/stacktrace 后校验。关闭态逐帧最多一次 attempt-local 布尔判断，直接使用原计费解析器。日志采样会降低事件覆盖率，采集端应与同请求的 openai_cache_usage 一对一核对关联键、账号、服务分组及 P/read。
 
@@ -146,7 +149,11 @@ cache_trace 仅为内部 Info 日志，经现有 slog→zap JSON logger 输出�
 validate 的校验失败返回 200、`valid=false`，不写审计；PUT 成败均由管理审计
 中间件记录，成功记录四个摘要 `policy_key/rev_before/rev_after/changed_fields`。
 history 缺省最近 20 条，最多 100 条；可按键、时间和 `after_rev` 查询。
-审计被清空或保留期造成历史缺口时返回 `history_complete=false`。
+完整性按每键全部已落盘的成功 revision 判断，不受分页影响，失败写入不消耗 revision。
+最小 revision 大于 1 时，返回 `history_complete=false` 与 `history_incomplete_reason="earlier_missing"`；
+从 1 开始但中间缺号时，原因为 `gap`。完整时原因为 null。最新一条尚未落盘不算缺失。
+若没有成功记录，保存的 rev 为 0 或更新时间距服务端现在不超过 5 秒时仍视为完整，否则为 earlier_missing。
+多键查询中，任一键不完整就返回 false，earlier_missing 优先于 gap。
 
 写入实例立即发布不可变原子快照，其他实例周期刷新，正常数据库可用时最多约
 60 秒生效；读库失败保留已加载快照，单键存储无法解析则关闭该键。每个请求和
@@ -166,3 +173,10 @@ max_checkpoints 512。运行时 byte_budget_mib 最小 8、rate_mib_per_s 最小
 写入超出静态上限返回 400。重启降低上限后保留存储值，实际值取较小者，并在
 clipped_fields 中报告。sample_percent 与 chain_percent 为 0..100，
 按会话稳定采样；总闸需要修改配置并重启，普通参数无需重启。
+
+
+运行时观测接线后，每个 HTTP 请求在鉴权与初始 serving 组解析后固定一份不可变策略；同一请求的重试、回退和流式结算沿用它。WS 入站每个 turn 重新固定策略，当前版本的 trace 采集范围仍为 HTTP Responses/Chat。事件的 `pol_rev` 使用该请求的版本向量，例如 `m3.o7.u0.a0.r0`，不会在请求中途变化。
+
+静态资源上限支持调低：`max_byte_budget_mib` 为 8–64、`max_rate_mib_per_s` 为 1–32、`max_sessions` 为 1–1024、`chains_per_session` 为 1–3、`max_checkpoints` 为 1–512。会话与检查点上限仅限制新增 trace 历史和时序状态，既有 diagnostics 的会话保留与排序不受影响；worker 固定大小的临时扫描空间仍按 512 个检查点预留。运行时预算缩小时，已预留的任务正常排空，新任务需符合新预算；速率通过原 limiter 更新，不重建池、不等待转发。重启后静态上限变小，生效值取保存值与新上限的较小值，接口在 `clipped_fields` 提示。
+
+撤回观测：在管理员面板关闭观测，检查本实例 `loaded.rev` 与保存的 `stored.rev` 一致，并等待其他实例最多 60 秒刷新。已在处理的请求沿用原快照；下一请求采用新策略。关闭总开关只停止受它控制的行为类策略，观测不受总开关控制。若 settings 故障，修改静态 kill switch 并按部署流程重启；总闸期间仍可保存策略，解除前可先关闭领域开关。每次 PUT 的操作者、理由、前后版本和字段名写入现有审计日志，409 冲突须刷新当前版本后重新确认。

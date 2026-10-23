@@ -339,7 +339,7 @@ func TestCacheTraceBillingReadBitsReadyNormalShapes(t *testing.T) {
 					usages := cacheTraceBillingPositiveEvents(t, logs.snapshot(), "openai_cache_usage")
 					require.Len(t, traces, 1)
 					require.Len(t, usages, 1)
-					payload := t3SettlementPayload(t, traces[0], false)
+					payload := t3SettlementPayload(t, traces[0], false, CachePolicyFromGin(f.c).Revision())
 					t3SettlementAssertUsageLink(t, traces[0], usages[0], result, f.account)
 					require.NotContains(t, payload, "na_reason")
 					require.NotEqual(t, "n/a_usage", payload["loss_class"])

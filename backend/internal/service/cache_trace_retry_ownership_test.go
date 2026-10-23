@@ -32,9 +32,9 @@ func (r *cacheTraceReleaseReader) Read(p []byte) (int, error) {
 func TestCacheTraceHTTPRetryKeepsBothWireBodiesImmutable(t *testing.T) {
 	cfg := &config.Config{JWT: config.JWTConfig{Secret: "synthetic-retry-secret"}}
 	cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-	traceTestConfig(cfg)
-	cfg.Gateway.CacheTrace.AsyncWorkers = 1
+	cfg.Gateway.CacheTrace.Workers = 1
 	s := &OpenAIGatewayService{cfg: cfg}
+	traceTestConfig(s)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	body := []byte(`{"model":"gpt-5.4","stream":false,"input":[{"type":"reasoning","encrypted_content":"retry-private-cipher","summary":[{"type":"summary_text","text":"keep"}]},{"role":"user","content":"` + strings.Repeat("x", 200000) + `"}]}`)
 	original := bytes.Clone(body)
@@ -49,7 +49,7 @@ func TestCacheTraceHTTPRetryKeepsBothWireBodiesImmutable(t *testing.T) {
 	unblock := func() { releaseOnce.Do(func() { close(release) }) }
 	defer unblock()
 	require.True(t, s.cacheTraceWorkerPool().submit(&cacheTraceJob{
-		state: &cacheTraceAsync{}, service: s, ingress: []byte("{}"), size: 2,
+		state: &cacheTraceAsync{}, service: s, policy: s.cachePolicies.Snapshot(), ingress: []byte("{}"), size: 2,
 		apiKeyID: 1, session: "queue-sentinel", protocol: "responses", transport: "http", created: time.Now(),
 		getBody: func() (io.ReadCloser, error) {
 			close(blocked)

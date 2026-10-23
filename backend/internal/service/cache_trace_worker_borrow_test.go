@@ -51,10 +51,10 @@ func TestCacheTraceWorkerBodyBorrowOwnership(t *testing.T) {
 			s, c, _ := rejectedTraceFixture(t, 1024)
 			ingress := cacheTraceFromGin(c).ingress
 			wire := bytes.Clone(ingress)
-			expected := s.computeCacheTrace(ingress, wire, 1, false, cacheTraceFromGin(c).sessionKey, "responses", "http")
+			expected := s.computeCacheTrace(ingress, wire, 1, false, cacheTraceFromGin(c).sessionKey, "responses", "http", s.cachePolicies.Snapshot())
 			state := &cacheTraceAsync{}
 			opens := 0
-			job := &cacheTraceJob{service: s, state: state, ingress: ingress, apiKeyID: 1, session: cacheTraceFromGin(c).sessionKey, protocol: "responses", transport: "http", size: int64(len(wire)), created: time.Now()}
+			job := &cacheTraceJob{service: s, policy: s.cachePolicies.Snapshot(), state: state, ingress: ingress, apiKeyID: 1, session: cacheTraceFromGin(c).sessionKey, protocol: "responses", transport: "http", size: int64(len(wire)), created: time.Now()}
 			job.getBody = func() (io.ReadCloser, error) {
 				opens++
 				switch kind {
@@ -94,7 +94,7 @@ func BenchmarkCacheTraceWorkerBorrow(b *testing.B) {
 			s, c, req := rejectedTraceFixture(b, size)
 			// Ingress shape is irrelevant to the borrow; retain a short input to make
 			// output-copy allocations visible independently of body metadata scanning.
-			job := &cacheTraceJob{service: s, state: &cacheTraceAsync{}, ingress: []byte(`{}`), apiKeyID: 1, session: cacheTraceFromGin(c).sessionKey, protocol: "responses", transport: "http", size: req.ContentLength, getBody: req.GetBody, created: time.Now()}
+			job := &cacheTraceJob{service: s, policy: s.cachePolicies.Snapshot(), state: &cacheTraceAsync{}, ingress: []byte(`{}`), apiKeyID: 1, session: cacheTraceFromGin(c).sessionKey, protocol: "responses", transport: "http", size: req.ContentLength, getBody: req.GetBody, created: time.Now()}
 			b.ReportAllocs()
 			b.SetBytes(req.ContentLength)
 			b.ResetTimer()

@@ -24,8 +24,8 @@ func rejectedTraceFixture(t testing.TB, size int) (*OpenAIGatewayService, *gin.C
 	t.Helper()
 	cfg := &config.Config{JWT: config.JWTConfig{Secret: "private-rejected-secret"}}
 	cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-	traceTestConfig(cfg)
 	s := &OpenAIGatewayService{cfg: cfg}
+	traceTestConfig(s)
 	c := cacheTestContext(1, 10)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	session, _ := deriveOpenAISessionHashes(s.cacheIdentityDigest("openai-session", "private-rejected-session"))
@@ -108,6 +108,7 @@ func TestCacheTraceRejectedSchemaAndLegacyLinks(t *testing.T) {
 			require.Regexp(t, regexp.MustCompile(`^(?:v2:)?[0-9a-f]{16}$`), event["session_digest"])
 			require.Equal(t, float64(1), event["v"])
 			require.Equal(t, "openai", event["platform"])
+			require.Equal(t, result.CacheTrace.data.PolRev, event["pol_rev"])
 			for _, marker := range []string{"private-rejected", "must-not-rehash"} {
 				require.NotContains(t, out.String(), marker)
 			}

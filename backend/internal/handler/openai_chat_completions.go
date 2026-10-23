@@ -165,6 +165,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	defer inflightRelease()
 
+	h.gatewayService.CaptureCachePolicy(c)
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
 
