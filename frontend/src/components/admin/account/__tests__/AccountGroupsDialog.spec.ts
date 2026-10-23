@@ -37,7 +37,7 @@ const freshAccount = (overrides: Record<string, unknown> = {}) => ({
 })
 
 const BaseDialogStub = defineComponent({
-  props: ['show', 'title'],
+  props: ['show', 'title', 'width'],
   emits: ['close'],
   template: '<div v-if="show" data-test="dialog"><h3>{{ title }}</h3><button data-test="dialog-x" @click="$emit(\'close\')">x</button><slot /><slot name="footer" /></div>'
 })
@@ -80,7 +80,9 @@ describe('AccountGroupsDialog', () => {
     const props = selector(wrapper).props()
     expect(props.modelValue).toEqual([3, 1])
     expect(props.categoryTabs).toBe(true)
-    expect(props.listClass).toBe('!max-h-80')
+    expect(props.listClass).toBe('!max-h-[60vh]')
+    // 宽版弹窗：两列分组名不被截断
+    expect(wrapper.getComponent(BaseDialogStub).props('width')).toBe('wide')
     expect(props.platform).toBe('anthropic')
   })
 
