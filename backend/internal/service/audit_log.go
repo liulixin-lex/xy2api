@@ -62,6 +62,14 @@ type AuditLog struct {
 
 // AuditLogFilter 审计日志列表查询条件。
 type AuditLogFilter struct {
+	// Internal policy history filters; never bound by the generic audit handler.
+	CachePolicyOnly         bool
+	CachePolicyCoverage     bool
+	CachePolicyRevisionOnly bool
+	CachePolicyAfterRev     *int64
+	CachePolicyBefore       *time.Time
+	IncludeRequestBody      bool
+
 	Page     int
 	PageSize int
 
@@ -80,11 +88,18 @@ type AuditLogFilter struct {
 }
 
 // AuditLogList 分页结果。
+// CachePolicyRevisionCoverage describes only successful, persisted writes.
+// M1 starts at revision 1; there is no migrated revision baseline.
+type CachePolicyRevisionCoverage struct {
+	Count, MinRev, MaxRev int64
+}
+
 type AuditLogList struct {
-	Logs     []*AuditLog
-	Total    int
-	Page     int
-	PageSize int
+	PolicyRevisions *CachePolicyRevisionCoverage `json:"-"`
+	Logs            []*AuditLog
+	Total           int
+	Page            int
+	PageSize        int
 }
 
 // AuditLogRepository 审计日志持久化端口。

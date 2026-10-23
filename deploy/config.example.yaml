@@ -476,7 +476,15 @@ gateway:
   # Existing owners, health, priority, capacity and admission remain authoritative.
   # See docs/openai-cache-reliability.md for rollout and rollback.
   # OpenAI cache_trace v1 observation (requires diagnostics_enabled too).
+  cache_features:
+    kill_switch: false # Emergency stop for new cache features; settings remain writable.
   cache_trace:
+    workers: 1 # 1..2
+    max_byte_budget_mib: 64
+    max_rate_mib_per_s: 32
+    max_sessions: 1024
+    chains_per_session: 3
+    max_checkpoints: 512
     async_byte_budget: 67108864
     max_queue_wait: 10s
     async_workers: 1

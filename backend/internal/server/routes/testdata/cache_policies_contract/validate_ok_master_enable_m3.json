@@ -1,0 +1,60 @@
+{
+  "_contract": [
+    "C-4"
+  ],
+  "_note": "M3：打开总开关 → 高风险，要求理由与勾选；affected[] 列出 3 个受控键提交后的状态（未提供的键不列）。",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/master/validate",
+    "body": {
+      "expected_rev": 0,
+      "spec": {
+        "enabled": true
+      },
+      "reason": "开始试运行",
+      "confirm": {
+        "checkbox": true,
+        "typed": null
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": true,
+      "errors": [],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "enabled",
+          "before": false,
+          "after": true
+        }
+      ],
+      "risk": "high",
+      "direction": "enable",
+      "confirm": {
+        "reason_required": true,
+        "checkbox_required": true,
+        "type_to_confirm": null
+      },
+      "current_rev": 0,
+      "rev_stale": false,
+      "effective_preview": {
+        "state": "on",
+        "active": true,
+        "blockers": []
+      },
+      "affected": [
+        {
+          "key": "upstream_identity",
+          "state_before": "masked_by_master",
+          "state_after": "on",
+          "active_after": true
+        }
+      ]
+    }
+  }
+}

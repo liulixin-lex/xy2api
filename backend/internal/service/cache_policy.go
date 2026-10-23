@@ -1,0 +1,322 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/config"
+)
+
+const CachePolicyRefreshInterval = 60 * time.Second
+
+// Shared by all service instances in this process, including delayed construction.
+var cachePolicyProcessStartedAt = time.Now().UTC()
+
+var cachePolicyKeys = [...]string{"master", "observability", "northstar", "upstream_identity", "anthropic_identity", "routing"}
+var cachePolicySettings = [...]string{"cache_feature_master", "cache_observability_policy", "cache_northstar_policy", "cache_upstream_identity_policy", "cache_anthropic_identity_policy", "cache_routing_policy"}
+
+// CachePolicyStore serializes read/validate/write in one database transaction,
+// including the first write when the settings row does not yet exist.
+type CachePolicyStore interface {
+	UpdateCachePolicy(context.Context, string, func(string) (string, error)) error
+}
+
+type CachePolicyActor struct {
+	UserID int64  `json:"user_id"`
+	Email  string `json:"email"`
+}
+type CachePolicyEnvelope struct {
+	Rev       int64             `json:"rev"`
+	UpdatedAt *time.Time        `json:"updated_at"`
+	UpdatedBy *CachePolicyActor `json:"updated_by"`
+	Reason    *string           `json:"reason"`
+	Spec      map[string]any    `json:"spec"`
+}
+type CachePolicyCaps struct {
+	Workers          int `json:"workers"`
+	MaxByteBudgetMiB int `json:"max_byte_budget_mib"`
+	MaxRateMiBPerS   int `json:"max_rate_mib_per_s"`
+	MaxSessions      int `json:"max_sessions"`
+	ChainsPerSession int `json:"chains_per_session"`
+	MaxCheckpoints   int `json:"max_checkpoints"`
+}
+type cachePolicyEntry struct {
+	envelope   CachePolicyEnvelope
+	parseError bool
+	loadedAt   time.Time
+}
+
+// CachePolicySnapshot contains only immutable, value data. Requests hold one
+// pointer across retries and streaming; readers never consult settings.
+type CachePolicySnapshot struct {
+	kill          bool
+	master        bool
+	trace         bool
+	samplePercent int
+	chainPercent  int
+	byteBudget    int64
+	rate          int64
+	revs          [6]int64
+	revision      string
+	entries       [2]cachePolicyEntry
+}
+
+func (p *CachePolicySnapshot) TraceEnabled() bool  { return p != nil && p.trace }
+func (p *CachePolicySnapshot) MasterEnabled() bool { return p != nil && !p.kill && p.master }
+func (p *CachePolicySnapshot) SamplePercent() int {
+	if p == nil {
+		return 0
+	}
+	return p.samplePercent
+}
+func (p *CachePolicySnapshot) ChainPercent() int {
+	if p == nil {
+		return 0
+	}
+	return p.chainPercent
+}
+func (p *CachePolicySnapshot) ByteBudget() int64 {
+	if p == nil {
+		return 0
+	}
+	return p.byteBudget
+}
+func (p *CachePolicySnapshot) RateBytesPerSecond() int64 {
+	if p == nil {
+		return 0
+	}
+	return p.rate
+}
+func (p *CachePolicySnapshot) Revision() string {
+	if p == nil {
+		return "m0.o0.u0.a0.r0"
+	}
+	return p.revision
+}
+func (p *CachePolicySnapshot) ObservabilityRevision() int64 {
+	if p == nil {
+		return 0
+	}
+	return p.revs[1]
+}
+
+// CachePolicyOption configures immutable service dependencies at construction.
+type CachePolicyOption func(*CachePolicyService)
+
+// WithCachePolicyClock makes policy and audit timestamps deterministic for
+// callers that supply a clock. Request snapshot reads never call this function.
+func WithCachePolicyClock(now func() time.Time) CachePolicyOption {
+	return func(s *CachePolicyService) {
+		if now != nil {
+			s.now = now
+		}
+	}
+}
+
+type CachePolicyService struct {
+	now                      func() time.Time
+	repo                     SettingRepository
+	store                    CachePolicyStore
+	caps                     CachePolicyCaps
+	kill, diagnostics, aware bool
+	rollout                  int
+	started                  time.Time
+	snapshot                 atomic.Pointer[CachePolicySnapshot]
+	mu                       sync.Mutex
+	cancel                   context.CancelFunc
+	wg                       sync.WaitGroup
+	listeners                []func(*CachePolicySnapshot)
+}
+
+func NewCachePolicyService(repo SettingRepository, cfg *config.Config, options ...CachePolicyOption) *CachePolicyService {
+	s := &CachePolicyService{now: time.Now, repo: repo, started: cachePolicyProcessStartedAt, caps: CachePolicyCaps{1, 64, 32, 1024, 3, 512}}
+	for _, option := range options {
+		option(s)
+	}
+	s.store, _ = repo.(CachePolicyStore)
+	if cfg != nil {
+		c := cfg.Gateway.CacheTrace
+		s.kill = cfg.Gateway.CacheFeatures.KillSwitch
+		s.diagnostics = cfg.Gateway.OpenAICache.DiagnosticsEnabled
+		s.aware = cfg.Gateway.OpenAICache.AwareRoutingEnabled
+		s.rollout = cfg.Gateway.OpenAICache.RolloutPercent
+		if c.Workers > 0 {
+			s.caps.Workers = c.Workers
+		}
+		if c.MaxByteBudgetMiB > 0 {
+			s.caps.MaxByteBudgetMiB = c.MaxByteBudgetMiB
+		}
+		if c.MaxRateMiBPerS > 0 {
+			s.caps.MaxRateMiBPerS = c.MaxRateMiBPerS
+		}
+		if c.MaxSessions > 0 {
+			s.caps.MaxSessions = c.MaxSessions
+		}
+		if c.ChainsPerSession > 0 {
+			s.caps.ChainsPerSession = c.ChainsPerSession
+		}
+		if c.MaxCheckpoints > 0 {
+			s.caps.MaxCheckpoints = c.MaxCheckpoints
+		}
+	}
+	s.publish(map[string]string{})
+	return s
+}
+
+// Snapshot is a single atomic load and allocates nothing.
+func (s *CachePolicyService) Snapshot() *CachePolicySnapshot {
+	if s == nil {
+		return nil
+	}
+	return s.snapshot.Load()
+}
+func (s *CachePolicyService) Start() {
+	s.mu.Lock()
+	if s.cancel != nil {
+		s.mu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancel = cancel
+	s.wg.Add(1)
+	s.mu.Unlock()
+	if err := s.Refresh(ctx); err != nil {
+		slog.Warn("cache policy refresh failed")
+	}
+	go func() {
+		defer s.wg.Done()
+		// Leave headroom for the bounded database read within the 60s contract.
+		ticker := time.NewTicker(CachePolicyRefreshInterval / 2)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := s.Refresh(ctx); err != nil {
+					slog.Warn("cache policy refresh failed")
+				}
+			}
+		}
+	}()
+}
+func (s *CachePolicyService) Stop() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.cancel != nil {
+		s.cancel()
+	}
+	s.mu.Unlock()
+	s.wg.Wait()
+}
+func (s *CachePolicyService) Refresh(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	raw, err := s.repo.GetMultiple(ctx, cachePolicySettings[:])
+	if err != nil {
+		return err
+	} // Keep the last valid snapshot on read failure.
+	s.publish(raw)
+	return nil
+}
+func (s *CachePolicyService) publish(raw map[string]string) {
+	entries := [2]cachePolicyEntry{}
+	for i := range entries {
+		entries[i] = s.parse(i, raw[cachePolicySettings[i]])
+	}
+	s.publishEntries(entries)
+}
+func (s *CachePolicyService) publishEntries(entries [2]cachePolicyEntry) {
+	p := &CachePolicySnapshot{kill: s.kill, entries: entries}
+	for i := range entries {
+		p.revs[i] = entries[i].envelope.Rev
+	}
+	p.master, _ = entries[0].envelope.Spec["enabled"].(bool)
+	o := entries[1].envelope.Spec
+	enabled, _ := o["enabled"].(bool)
+	p.trace = !s.kill && enabled && s.diagnostics && !entries[1].parseError
+	p.samplePercent = policyInt(o["sample_percent"])
+	p.chainPercent = policyInt(o["chain_percent"])
+	p.byteBudget = int64(min(policyInt(o["byte_budget_mib"]), s.caps.MaxByteBudgetMiB)) << 20
+	p.rate = int64(min(policyInt(o["rate_mib_per_s"]), s.caps.MaxRateMiBPerS)) << 20
+	p.revision = fmt.Sprintf("m%d.o%d.u%d.a%d.r%d", p.revs[0], p.revs[1], p.revs[3], p.revs[4], p.revs[5])
+	for _, notify := range s.listeners {
+		notify(p)
+	}
+	s.snapshot.Store(p)
+}
+func (s *CachePolicyService) parse(index int, raw string) cachePolicyEntry {
+	e := cachePolicyEntry{envelope: CachePolicyEnvelope{Spec: policyDefaults(index)}, loadedAt: s.now().UTC()}
+	if raw == "" {
+		return e
+	}
+	var stored struct {
+		Rev       *int64            `json:"rev"`
+		UpdatedAt *time.Time        `json:"updated_at"`
+		UpdatedBy *CachePolicyActor `json:"updated_by"`
+		Reason    *string           `json:"reason"`
+		Spec      json.RawMessage   `json:"spec"`
+	}
+	err := json.Unmarshal([]byte(raw), &stored)
+	if stored.Rev != nil && *stored.Rev >= 0 {
+		e.envelope.Rev = *stored.Rev
+		e.envelope.UpdatedAt = stored.UpdatedAt
+		e.envelope.UpdatedBy = stored.UpdatedBy
+		e.envelope.Reason = stored.Reason
+	}
+	spec, _, errs := s.merge(index, policyDefaults(index), stored.Spec, false)
+	if err != nil || stored.Rev == nil || *stored.Rev < 0 || len(errs) != 0 {
+		e.parseError = true
+		slog.Warn("cache policy parse failed", "policy_key", cachePolicyKeys[index])
+	} else {
+		e.envelope.Spec = spec
+	}
+	return e
+}
+func policyIndex(key string) int {
+	for i, k := range cachePolicyKeys {
+		if key == k {
+			return i
+		}
+	}
+	return -1
+}
+func policyDefaults(index int) map[string]any {
+	if index == 0 {
+		return map[string]any{"enabled": false}
+	}
+	return map[string]any{"enabled": false, "sample_percent": 100, "chain_percent": 100, "byte_budget_mib": 64, "rate_mib_per_s": 32}
+}
+func policyInt(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	}
+	return 0
+}
+
+func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config) *CachePolicyService {
+	s := NewCachePolicyService(repo, cfg)
+	s.Start()
+	return s
+}
+
+// subscribe is used only by lazily constructed resource pools. Publication and
+// subscription share the writer lock, preventing a pool from missing an update.
+func (s *CachePolicyService) subscribe(notify func(*CachePolicySnapshot)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.listeners = append(s.listeners, notify)
+	notify(s.Snapshot())
+}

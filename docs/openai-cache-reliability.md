@@ -131,3 +131,38 @@ conv_anchor 按既定的前导 system/developer 和首条 user 计算；Codex �
 `pcd` 只记录 prompt_cache_diagnostics 的白名单枚举，未出现为 absent、未识别为 other。`resp_cache_ttl` 为 30m / 12h / 24h / in_memory / other / absent；响应字段与计费使用同一遍历结果。usage_fields 的 bit6/bit7 分别记录 30m/12h 写入明细的存在性，显式 0 同样记为存在。pol_rev 在运行时策略接入前为 m0.o0.u0.a0.r0；后续从请求开始时取得的策略快照读取。
 
 cache_trace 仅为内部 Info 日志，经现有 slog→zap JSON logger 输出；事件载荷平铺，采集端剥离 level/time/logger/caller/msg/service/env/stacktrace 后校验。关闭态逐帧最多一次 attempt-local 布尔判断，直接使用原计费解析器。日志采样会降低事件覆盖率，采集端应与同请求的 openai_cache_usage 一对一核对关联键、账号、服务分组及 P/read。
+
+## 运行时缓存策略管理
+
+管理员专用接口位于 `/api/v1/admin/cache/policies`：列表、按键读取、
+`POST /{key}/validate`、`PUT /{key}`、`GET /history`。当前构建提供
+`master`（`cache_feature_master`）和 `observability`
+（`cache_observability_policy`）；两者缺省关闭。其余四个键保留在列表中，
+标记为不可用；单项读写返回 404，存储值和 schema 不对用户接口公开。
+
+写入省略的字段保留原值，未知字段拒绝。每键的 `expected_rev` 在数据库
+事务和行锁内比较；冲突返回 409。启用总开关要求理由和勾选，PUT 会重新计算，
+缺失返回 422；关闭方向不要求确认。理由去掉首尾空白后最多 200 个 Unicode 字符。
+validate 的校验失败返回 200、`valid=false`，不写审计；PUT 成败均由管理审计
+中间件记录，成功记录四个摘要 `policy_key/rev_before/rev_after/changed_fields`。
+history 缺省最近 20 条，最多 100 条；可按键、时间和 `after_rev` 查询。
+审计被清空或保留期造成历史缺口时返回 `history_complete=false`。
+
+写入实例立即发布不可变原子快照，其他实例周期刷新，正常数据库可用时最多约
+60 秒生效；读库失败保留已加载快照，单键存储无法解析则关闭该键。每个请求和
+WebSocket turn 使用固定快照，重试、failover 和流式过程不重新加载。后台循环
+每轮获取一次。开关读取无数据库访问、零分配。
+
+`gateway.cache_features.kill_switch` 是静态紧急总闸，默认 false。总闸开启时仍可
+保存配置，界面显示 killed。它和运行时总开关均不控制既有的
+`gateway.openai_cache.*`、Claude 自动缓存或韧性设置；既有机制只读展示，
+管理链接为 `/admin/settings?tab=gateway`。观测不受 master 控制，
+实际条件为总闸关闭、观测 enabled、原有 diagnostics_enabled 开启。
+没有指标自动调整开关。
+
+资源配置是硬上限：workers 1..2（默认 1）、max_byte_budget_mib 64、
+max_rate_mib_per_s 32、max_sessions 1024、chains_per_session 3、
+max_checkpoints 512。运行时 byte_budget_mib 最小 8、rate_mib_per_s 最小 1；
+写入超出静态上限返回 400。重启降低上限后保留存储值，实际值取较小者，并在
+clipped_fields 中报告。sample_percent 与 chain_percent 为 0..100，
+按会话稳定采样；总闸需要修改配置并重启，普通参数无需重启。

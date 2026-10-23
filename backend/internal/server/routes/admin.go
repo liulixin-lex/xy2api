@@ -63,6 +63,7 @@ func RegisterAdminRoutes(
 
 		// 网关韧性
 		registerResilienceRoutes(admin, h)
+		registerCachePolicyRoutes(admin, h)
 
 		// 分组分类
 		registerGroupCategoryRoutes(admin, h)
