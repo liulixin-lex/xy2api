@@ -1,0 +1,26 @@
+{
+  "policy_version": "2026-10-22-v1",
+  "currency": "USD",
+  "excluded_group_ids": [
+    99
+  ],
+  "exclude_media": true,
+  "unknown_threshold": "aux_only",
+  "model_thresholds": [
+    {
+      "match": "exact",
+      "model": "gpt-5.6",
+      "minimum": 1024
+    },
+    {
+      "match": "prefix",
+      "model": "claude-",
+      "minimum": 2048
+    },
+    {
+      "match": "exact",
+      "model": "gemini-2.5",
+      "minimum": 4096
+    }
+  ]
+}

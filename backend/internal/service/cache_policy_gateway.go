@@ -79,9 +79,11 @@ func ProvideOpenAIGatewayServiceWithCachePolicies(
 	settingService *SettingService,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
 	policies *CachePolicyService,
+	counters *CacheTraceCounters,
 ) *OpenAIGatewayService {
 	s := NewOpenAIGatewayService(accountRepo, usageLogRepo, usageBillingRepo, userRepo, userSubRepo, userGroupRateRepo, cache, cfg, schedulerSnapshot, concurrencyService, billingService, rateLimitService, billingCacheService, httpUpstream, deferredService, openAITokenProvider, grokTokenProvider, resolver, channelService, balanceNotifyService, settingService, userPlatformQuotaRepo)
 	s.cachePolicies = policies
+	s.cacheCounters = counters
 	return s
 }
 

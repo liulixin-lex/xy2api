@@ -20,7 +20,7 @@
 | [`GATEWAY_RESILIENCE.md`](GATEWAY_RESILIENCE.md) | 网关韧性（0.4.0）：失败分类、余额暂停、会话改绑、末位兜底、请求预算、首包前保活、断开计费、错误语义 |
 | [`SHARE_SCHEDULING.md`](SHARE_SCHEDULING.md) | 份额调度（0.3.0 起，默认关闭）：层级取账号优先级、权重取负载因子与自适应系数 |
 | [`account-scheduling.md`](account-scheduling.md) | 账号调度：日常开关、原版调度规则与 0.4.0 韧性规则 |
-| [`openai-cache-reliability.md`](openai-cache-reliability.md) | OpenAI 缓存计量与可靠性 |
+| [`openai-cache-reliability.md`](openai-cache-reliability.md) | OpenAI 缓存计量、运行时策略与管理员图表 |
 | [`CLAUDE_CACHE_FALLBACK.md`](CLAUDE_CACHE_FALLBACK.md) | Claude 自动缓存（按分组） |
 | [`OPENAI_QUALITY_ROUTING.md`](OPENAI_QUALITY_ROUTING.md) | OpenAI 会话质量路由 |
 | [`OPENAI_IQ_CHECK.md`](OPENAI_IQ_CHECK.md) | OpenAI 智商检测 |
@@ -77,6 +77,7 @@
 
 | 变更 | 内容 | 状态 |
 |---|---|---|
+| [`cache-northstar-panel`](../openspec/changes/cache-northstar-panel/) | 在线北极星、金额汇总与管理员图表 | 后端本地完成，待集成验收 |
 | [`cache-runtime-policies`](../openspec/changes/cache-runtime-policies/) | 运行时缓存策略：管理员开关、请求快照与审计 | 开发中 |
 | [`gateway-resilience-045-20261021`](../openspec/changes/gateway-resilience-045-20261021/) | 网关韧性 0.4.5：RA-1 修复、OpenAI Responses 透传与 Gateway 入站经 Anthropic 上游的明确终止、审查遗留 P2 | 0.4.5、0.4.6 已发布（生产未部署）；后续待办见其 tasks §7 |
 | [`gateway-resilience-v2-20261021`](../openspec/changes/gateway-resilience-v2-20261021/) | 网关韧性第二期：可重放前缀与推迟开场、分类修正、失败帧重试提示、仅流式能力学习、事件字段 | 0.4.4 已发布；已知缺陷 RA-1 已在 0.4.5 修复（`gateway-resilience-045-20261021`）；`response.metadata` 的开场判据于 2026-10-22 修订（0.4.6，见 045 tasks 7.7）；浸泡见其 tasks |

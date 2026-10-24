@@ -57,13 +57,16 @@ type CachePolicySnapshot struct {
 	kill          bool
 	master        bool
 	trace         bool
+	northstar     bool
+	persistTrace  bool
+	northstarSpec CacheNorthstarPolicy
 	samplePercent int
 	chainPercent  int
 	byteBudget    int64
 	rate          int64
 	revs          [6]int64
 	revision      string
-	entries       [2]cachePolicyEntry
+	entries       [3]cachePolicyEntry
 }
 
 func (p *CachePolicySnapshot) TraceEnabled() bool  { return p != nil && p.trace }
@@ -108,6 +111,33 @@ func (p *CachePolicySnapshot) ObservabilityRevision() int64 {
 // CachePolicyOption configures immutable service dependencies at construction.
 type CachePolicyOption func(*CachePolicyService)
 
+// WithCacheNorthstar enables the M2 build capability, never a runtime setting.
+func WithCacheNorthstar() CachePolicyOption {
+	return func(s *CachePolicyService) { s.northstarAvailable = true }
+}
+func (s *CachePolicyService) availablePolicyCount() int {
+	if s.northstarAvailable {
+		return 3
+	}
+	return 2
+}
+func (p *CachePolicySnapshot) NorthstarEnabled() bool { return p != nil && p.northstar }
+func (p *CachePolicySnapshot) NorthstarPolicy() CacheNorthstarPolicy {
+	if p == nil {
+		return CacheNorthstarPolicy{}
+	}
+	copy := p.northstarSpec
+	copy.ExcludedGroupIDs = append([]int64{}, copy.ExcludedGroupIDs...)
+	copy.ModelThresholds = append([]CacheNorthstarThresholdRule{}, copy.ModelThresholds...)
+	return copy
+}
+func (p *CachePolicySnapshot) NorthstarRevision() int64 {
+	if p == nil {
+		return 0
+	}
+	return p.revs[2]
+}
+
 // WithCachePolicyClock makes policy and audit timestamps deterministic for
 // callers that supply a clock. Request snapshot reads never call this function.
 func WithCachePolicyClock(now func() time.Time) CachePolicyOption {
@@ -131,6 +161,7 @@ type CachePolicyService struct {
 	cancel                   context.CancelFunc
 	wg                       sync.WaitGroup
 	listeners                []func(*CachePolicySnapshot)
+	northstarAvailable       bool
 }
 
 func NewCachePolicyService(repo SettingRepository, cfg *config.Config, options ...CachePolicyOption) *CachePolicyService {
@@ -229,21 +260,28 @@ func (s *CachePolicyService) Refresh(ctx context.Context) error {
 	return nil
 }
 func (s *CachePolicyService) publish(raw map[string]string) {
-	entries := [2]cachePolicyEntry{}
-	for i := range entries {
+	entries := [3]cachePolicyEntry{}
+	for i := range s.availablePolicyCount() {
 		entries[i] = s.parse(i, raw[cachePolicySettings[i]])
 	}
 	s.publishEntries(entries)
 }
-func (s *CachePolicyService) publishEntries(entries [2]cachePolicyEntry) {
+func (s *CachePolicyService) publishEntries(entries [3]cachePolicyEntry) {
 	p := &CachePolicySnapshot{kill: s.kill, entries: entries}
 	for i := range entries {
 		p.revs[i] = entries[i].envelope.Rev
 	}
 	p.master, _ = entries[0].envelope.Spec["enabled"].(bool)
+	if s.northstarAvailable {
+		p.northstarSpec = parseNorthstarPolicy(entries[2].envelope.Spec)
+		p.northstar = !s.kill && !entries[2].parseError && p.northstarSpec.RollupEnabled
+	}
+
 	o := entries[1].envelope.Spec
 	enabled, _ := o["enabled"].(bool)
 	p.trace = !s.kill && enabled && s.diagnostics && !entries[1].parseError
+	persist, _ := o["persist_trace_hourly"].(bool)
+	p.persistTrace = p.trace && persist
 	p.samplePercent = policyInt(o["sample_percent"])
 	p.chainPercent = policyInt(o["chain_percent"])
 	p.byteBudget = int64(min(policyInt(o["byte_budget_mib"]), s.caps.MaxByteBudgetMiB)) << 20
@@ -255,7 +293,7 @@ func (s *CachePolicyService) publishEntries(entries [2]cachePolicyEntry) {
 	s.snapshot.Store(p)
 }
 func (s *CachePolicyService) parse(index int, raw string) cachePolicyEntry {
-	e := cachePolicyEntry{envelope: CachePolicyEnvelope{Spec: policyDefaults(index)}, loadedAt: s.now().UTC()}
+	e := cachePolicyEntry{envelope: CachePolicyEnvelope{Spec: s.defaults(index)}, loadedAt: s.now().UTC()}
 	if raw == "" {
 		return e
 	}
@@ -273,7 +311,7 @@ func (s *CachePolicyService) parse(index int, raw string) cachePolicyEntry {
 		e.envelope.UpdatedBy = stored.UpdatedBy
 		e.envelope.Reason = stored.Reason
 	}
-	spec, _, errs := s.merge(index, policyDefaults(index), stored.Spec, false)
+	spec, _, errs := s.merge(index, s.defaults(index), stored.Spec, false)
 	if err != nil || stored.Rev == nil || *stored.Rev < 0 || len(errs) != 0 {
 		e.parseError = true
 		slog.Warn("cache policy parse failed", "policy_key", cachePolicyKeys[index])
@@ -291,6 +329,9 @@ func policyIndex(key string) int {
 	return -1
 }
 func policyDefaults(index int) map[string]any {
+	if index == 2 {
+		return northstarPolicyDefaults()
+	}
 	if index == 0 {
 		return map[string]any{"enabled": false}
 	}
@@ -307,7 +348,7 @@ func policyInt(v any) int {
 }
 
 func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config) *CachePolicyService {
-	s := NewCachePolicyService(repo, cfg)
+	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar())
 	s.Start()
 	return s
 }
@@ -320,3 +361,13 @@ func (s *CachePolicyService) subscribe(notify func(*CachePolicySnapshot)) {
 	s.listeners = append(s.listeners, notify)
 	notify(s.Snapshot())
 }
+
+func (s *CachePolicyService) defaults(index int) map[string]any {
+	out := policyDefaults(index)
+	if s.northstarAvailable && index == 1 {
+		out["persist_trace_hourly"] = true
+	}
+	return out
+}
+func (p *CachePolicySnapshot) NorthstarRollupEnabled() bool    { return p.NorthstarEnabled() }
+func (p *CachePolicySnapshot) PersistTraceHourlyEnabled() bool { return p != nil && p.persistTrace }

@@ -1,0 +1,77 @@
+{
+  "_contract": [
+    "P-1",
+    "P-6",
+    "P-5"
+  ],
+  "_note": "dimension=protocol。key 为协议枚举；meta 为空对象。其余行与 other 的金额按总额重新加权，不平均各行比率。",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/cache/breakdown?dimension=protocol&window=7d&platform=all&sort=opportunity&limit=10",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "policy_version": "2026-10-22-v1",
+      "as_of": "2026-10-23T07:00:00Z",
+      "generated_at": "2026-10-23T07:03:12Z",
+      "window": {
+        "start": "2026-10-16T07:00:00Z",
+        "end": "2026-10-23T07:00:00Z"
+      },
+      "dimension": "protocol",
+      "sort": "opportunity",
+      "platform": "all",
+      "cost": {
+        "currency": "USD",
+        "view": "list",
+        "pricing_source": "settled_cost",
+        "pricing_changed_in_window": false,
+        "notes": []
+      },
+      "total": {
+        "requests": 128473,
+        "prompt_tokens": 17757879000,
+        "read_tokens": 14262547000,
+        "opportunity_recorded_tokens": 2469214000
+      },
+      "rows": [
+        {
+          "key": "responses_http",
+          "label": "responses_http",
+          "meta": {},
+          "requests": 98000,
+          "prompt_tokens": 13800000000,
+          "read_tokens": 11130000000,
+          "token_hit_upper": 0.806522,
+          "token_hit_lower": 0.806522,
+          "request_hit": 0.910204,
+          "opportunity_recorded_tokens": 1900000000,
+          "opportunity_share": 0.769,
+          "saved_amount": 14310.8,
+          "opportunity_amount": 2401.0,
+          "opportunity_amount_share": 0.77,
+          "token_hit_cost_weighted_upper": 0.8061
+        }
+      ],
+      "other": {
+        "count": 23,
+        "requests": 9100,
+        "prompt_tokens": 1210000000,
+        "read_tokens": 950000000,
+        "token_hit_upper": 0.785124,
+        "token_hit_lower": 0.785124,
+        "request_hit": 0.901099,
+        "opportunity_recorded_tokens": 210000000,
+        "opportunity_share": 0.085,
+        "saved_amount": 1201.3,
+        "opportunity_amount": 262.8,
+        "opportunity_amount_share": 0.084,
+        "token_hit_cost_weighted_upper": 0.7902
+      }
+    }
+  }
+}

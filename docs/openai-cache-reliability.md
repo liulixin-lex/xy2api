@@ -138,9 +138,9 @@ cache_trace 仅为内部 Info 日志，经现有 slog→zap JSON logger 输出�
 ## 运行时缓存策略管理
 
 管理员专用接口位于 `/api/v1/admin/cache/policies`：列表、按键读取、
-`POST /{key}/validate`、`PUT /{key}`、`GET /history`。当前构建提供
-`master`（`cache_feature_master`）和 `observability`
-（`cache_observability_policy`）；两者缺省关闭。其余四个键保留在列表中，
+`POST /{key}/validate`、`PUT /{key}`、`GET /history`。当前构建提供 `master`（`cache_feature_master`）、`observability`
+（`cache_observability_policy`）与 `northstar`（`cache_northstar_policy`）；
+三者缺省关闭。其余三个键保留在列表中，
 标记为不可用；单项读写返回 404，存储值和 schema 不对用户接口公开。
 
 写入省略的字段保留原值，未知字段拒绝。每键的 `expected_rev` 在数据库
@@ -180,3 +180,57 @@ clipped_fields 中报告。sample_percent 与 chain_percent 为 0..100，
 静态资源上限支持调低：`max_byte_budget_mib` 为 8–64、`max_rate_mib_per_s` 为 1–32、`max_sessions` 为 1–1024、`chains_per_session` 为 1–3、`max_checkpoints` 为 1–512。会话与检查点上限仅限制新增 trace 历史和时序状态，既有 diagnostics 的会话保留与排序不受影响；worker 固定大小的临时扫描空间仍按 512 个检查点预留。运行时预算缩小时，已预留的任务正常排空，新任务需符合新预算；速率通过原 limiter 更新，不重建池、不等待转发。重启后静态上限变小，生效值取保存值与新上限的较小值，接口在 `clipped_fields` 提示。
 
 撤回观测：在管理员面板关闭观测，检查本实例 `loaded.rev` 与保存的 `stored.rev` 一致，并等待其他实例最多 60 秒刷新。已在处理的请求沿用原快照；下一请求采用新策略。关闭总开关只停止受它控制的行为类策略，观测不受总开关控制。若 settings 故障，修改静态 kill switch 并按部署流程重启；总闸期间仍可保存策略，解除前可先关闭领域开关。每次 PUT 的操作者、理由、前后版本和字段名写入现有审计日志，409 冲突须刷新当前版本后重新确认。
+
+## 在线北极星与管理员图表
+
+管理员 GET 接口为 `/api/v1/admin/cache/{northstar,breakdown,stats,experiments}`，
+沿用管理员鉴权。普通用户无权访问，用户设置与 DTO 不包含这些数据。
+`northstar` 和 `breakdown` 只查询小时汇总，缓存响应 60 秒；
+未产生完整小时时返回 503 / `CACHE_ROLLUP_NOT_READY`。
+`stats` 是当前进程的最近 1h/24h 分钟计数，重启清零；观测关闭时返回
+200、空数组和 null 比率。`experiments` 在本阶段返回空列表。
+
+`cache_northstar_policy.rollup_enabled` 默认 false，独立于 master，
+受静态 `gateway.cache_features.kill_switch` 控制。它沿用策略管理的 revision、
+loaded rev、约 60 秒跨实例刷新与管理员审计。首次开启从最近完整小时开始，
+再按 `backfill_days` 小块向前回填，默认 7 天、最大 30 天。
+变更排除组、媒体规则、模型阈值或客户端家族规则时须同时更新 `policy_version`；
+不同版本不拼接。阈值仅允许 512、1024、2048、4096、6144，精确规则优先，
+前缀规则取最长匹配。未知阈值模型保留在业务范围与排名中，严格北极星不包含它们。
+
+汇总统一使用 UTC 和互斥入库 token 桶：
+P = input + cache creation + cache read。平台优先取服务分组配置，其次取账号配置。
+会话机会量为 max(min(P_prev, P) − read, 0)，在所有 P>0 行中按完成时刻和 ID
+配对；同 API key、服务分组与平台的记录会话间隔超过 1 小时断开，空会话不重建。
+数据库仅保留会话复合键摘要，不向接口输出摘要、用户 ID、API key、会话值或 UA 原文。
+账号、host、客户端家族、协议为汇总维度；账号名称与 host 取聚合时快照，
+host 不含凭据、端口、路径或查询参数。少于 10 个请求的组并入 other。
+
+后台沿用 dashboard 的 leader 锁，在其更新水位后独立执行；北极星使用自己的水位，
+不修改 dashboard 表、间隔或水位，也不写 usage_logs。默认关闭时入口即返回，
+不执行聚合、回填、清理 SQL。每天 00:30 UTC 后第一次运行，在同一事务内重算前一
+UTC 日 24 个小时，吸收迟到行；失败回滚，可安全重复或从已提交回填边界恢复。
+小时完成标记区分真实空桶与缺失小时，窗口边界日和缺小时标为 partial。
+汇总保留 180 天，trace 小时计数保留 90 天。
+
+金额以已结算分项成本计算窗口内 platform/model 加权单价，
+不是当前价目表。Anthropic 有 creation 时使用实际混合 creation 单价。
+无正价或分母不足时金额为 null。list 是价差节省，
+charged 使用逐请求 actual/total（零总额回退请求倍率），upstream 只使用未重新定价的
+account_stats_cost 与账号倍率；美元加权命中率始终使用 list。
+窗口均价也用于小时趋势；标注价格覆盖、窗口内价格变化和本地改写候选，
+这些值仅供展示，不进入选号、sticky、准入、overflow 或自动开关。
+本阶段没有固定构成权重表，standardized 字段返回 null。
+事件只来自缓存配置审计及当前进程启动，不补历史生产部署时间线。
+
+`cache_observability_policy.persist_trace_hourly` 只在观测开启时生效；
+小时计数在整点后的 leader 周期幂等写入，携带进程标识防止覆盖其他进程数据。
+计数与统计不修改 cache_trace 日志载荷、计费或出站内容。
+
+撤回：关闭 rollup_enabled，检查 loaded rev 并等待其他实例刷新；
+下一后台周期不再聚合或回填，已提交汇总仍可查询。关闭观测会停止新的 trace 计数，
+已在途请求沿用入口快照。紧急总闸按部署流程配置并重启。
+迁移 279 只新增 northstar、会话状态、小时完成标记、事件与 trace 汇总表；
+回退程序可保留这些表，禁止回退时修改既有 usage/dashboard 数据或已登记迁移校验和。
+
+北极星按 UTC 存取小时边界和事件时间，数据库会话时区不会改变图表分桶。小时查询同时读取前一小时，在会话内配对后再截取目标小时；因此跨整点机会量不依赖持久化会话状态。迁移 279 为跨口径版本的保留期清理提供单列时间索引，首次在共享数据库执行后保持校验和不变，结构修订需另加迁移。
