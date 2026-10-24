@@ -94,7 +94,8 @@
               "sample_percent": 100,
               "chain_percent": 100,
               "byte_budget_mib": 64,
-              "rate_mib_per_s": 32
+              "rate_mib_per_s": 32,
+              "persist_trace_hourly": true
             }
           },
           "loaded": {
@@ -113,7 +114,8 @@
             "sample_percent": 100,
             "chain_percent": 100,
             "byte_budget_mib": 64,
-            "rate_mib_per_s": 32
+            "rate_mib_per_s": 32,
+            "persist_trace_hourly": true
           },
           "schema": [
             {
@@ -149,6 +151,10 @@
               "max": 32,
               "unit": "MiB/s",
               "cap_source": "gateway.cache_trace.max_rate_mib_per_s"
+            },
+            {
+              "field": "persist_trace_hourly",
+              "type": "bool"
             }
           ]
         },
@@ -169,7 +175,158 @@
               "policy_version": "2026-10-22-v1",
               "excluded_group_ids": [],
               "exclude_media": true,
-              "model_thresholds": [],
+              "model_thresholds": [
+                {
+                  "match": "prefix",
+                  "model": "gpt-",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "chatgpt-",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "codex-",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "o1",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "o3",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "o4",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-fable-5",
+                  "threshold": 512
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-fable-5-1",
+                  "threshold": 512
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-haiku-3-5",
+                  "threshold": 2048
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-haiku-4-5",
+                  "threshold": 4096
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-haiku-5-5",
+                  "threshold": 512
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-mythos-5",
+                  "threshold": 512
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-mythos-5-1",
+                  "threshold": 512
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-opus-4",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-opus-4-1",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-opus-4-5",
+                  "threshold": 4096
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-opus-4-6",
+                  "threshold": 4096
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-opus-4-7",
+                  "threshold": 2048
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-opus-4-8",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-opus-5",
+                  "threshold": 512
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-opus-5-5",
+                  "threshold": 512
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-sonnet-4-5",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-sonnet-4-6",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-sonnet-5",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-sonnet-5-5",
+                  "threshold": 512
+                },
+                {
+                  "match": "prefix",
+                  "model": "gemini-2.5-flash",
+                  "threshold": 2048
+                },
+                {
+                  "match": "prefix",
+                  "model": "gemini-2.5-pro",
+                  "threshold": 2048
+                },
+                {
+                  "match": "prefix",
+                  "model": "gemini-3.1-pro-preview",
+                  "threshold": 4096
+                },
+                {
+                  "match": "prefix",
+                  "model": "gemini-3.6-flash",
+                  "threshold": 4096
+                },
+                {
+                  "match": "prefix",
+                  "model": "gemini-3.8-flash",
+                  "threshold": 4096
+                }
+              ],
               "unknown_threshold": "aux_only"
             }
           },
@@ -190,7 +347,158 @@
             "policy_version": "2026-10-22-v1",
             "excluded_group_ids": [],
             "exclude_media": true,
-            "model_thresholds": [],
+            "model_thresholds": [
+              {
+                "match": "prefix",
+                "model": "gpt-",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "chatgpt-",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "codex-",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "o1",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "o3",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "o4",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "claude-fable-5",
+                "threshold": 512
+              },
+              {
+                "match": "prefix",
+                "model": "claude-fable-5-1",
+                "threshold": 512
+              },
+              {
+                "match": "prefix",
+                "model": "claude-haiku-3-5",
+                "threshold": 2048
+              },
+              {
+                "match": "prefix",
+                "model": "claude-haiku-4-5",
+                "threshold": 4096
+              },
+              {
+                "match": "prefix",
+                "model": "claude-haiku-5-5",
+                "threshold": 512
+              },
+              {
+                "match": "prefix",
+                "model": "claude-mythos-5",
+                "threshold": 512
+              },
+              {
+                "match": "prefix",
+                "model": "claude-mythos-5-1",
+                "threshold": 512
+              },
+              {
+                "match": "prefix",
+                "model": "claude-opus-4",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "claude-opus-4-1",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "claude-opus-4-5",
+                "threshold": 4096
+              },
+              {
+                "match": "prefix",
+                "model": "claude-opus-4-6",
+                "threshold": 4096
+              },
+              {
+                "match": "prefix",
+                "model": "claude-opus-4-7",
+                "threshold": 2048
+              },
+              {
+                "match": "prefix",
+                "model": "claude-opus-4-8",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "claude-opus-5",
+                "threshold": 512
+              },
+              {
+                "match": "prefix",
+                "model": "claude-opus-5-5",
+                "threshold": 512
+              },
+              {
+                "match": "prefix",
+                "model": "claude-sonnet-4-5",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "claude-sonnet-4-6",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "claude-sonnet-5",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "claude-sonnet-5-5",
+                "threshold": 512
+              },
+              {
+                "match": "prefix",
+                "model": "gemini-2.5-flash",
+                "threshold": 2048
+              },
+              {
+                "match": "prefix",
+                "model": "gemini-2.5-pro",
+                "threshold": 2048
+              },
+              {
+                "match": "prefix",
+                "model": "gemini-3.1-pro-preview",
+                "threshold": 4096
+              },
+              {
+                "match": "prefix",
+                "model": "gemini-3.6-flash",
+                "threshold": 4096
+              },
+              {
+                "match": "prefix",
+                "model": "gemini-3.8-flash",
+                "threshold": 4096
+              }
+            ],
             "unknown_threshold": "aux_only"
           },
           "schema": [
@@ -202,8 +510,7 @@
               "field": "backfill_days",
               "type": "int",
               "min": 0,
-              "max": 30,
-              "unit": "days"
+              "max": 30
             },
             {
               "field": "policy_version",
@@ -220,7 +527,14 @@
             },
             {
               "field": "model_thresholds",
-              "type": "threshold_rules"
+              "type": "threshold_rules",
+              "options": [
+                512,
+                1024,
+                2048,
+                4096,
+                6144
+              ]
             },
             {
               "field": "unknown_threshold",

@@ -1,5 +1,5 @@
 // M3: cache_upstream_identity_policy (L-01) on the generic policy card, driven by F's m3m4
-// samples (v1.0.3, M3 part; checked against G's cache/p1-l01 d74eaf603): schema, defaults,
+// samples (v1.1, M3 part; checked against G's cache/p1-l01 d74eaf603): schema, defaults,
 // risk "high", and a reason plus a check in any direction but "disable".
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
