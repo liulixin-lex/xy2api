@@ -60,7 +60,11 @@ FRONTEND_CRITICAL_VITEST := \
 	src/features/cache-observability/settings/__tests__/schema.spec.ts \
 	src/features/cache-observability/settings/__tests__/usePolicies.spec.ts \
 	src/features/cache-observability/settings/__tests__/contract.spec.ts \
-	src/features/cache-observability/settings/__tests__/CacheSettingsPanel.spec.ts
+	src/features/cache-observability/settings/__tests__/CacheSettingsPanel.spec.ts \
+	src/features/cache-observability/charts/__tests__/viewModel.spec.ts \
+	src/features/cache-observability/charts/__tests__/mock.spec.ts \
+	src/features/cache-observability/charts/__tests__/ChartsPanel.spec.ts \
+	src/features/cache-observability/charts/__tests__/contract.spec.ts
 
 # 一键编译前后端
 build: build-backend build-frontend

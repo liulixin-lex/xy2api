@@ -2,15 +2,34 @@
 
 > 跨 Agent、跨会话的持续交接文件。开始仓库任务前必须完整阅读本文件；执行过程中在关键节点更新；结束前写明结果、验证、卡点和下一步。项目事实变化时同步更新本文件，不能只追加日志而保留过期的顶部状态。
 >
-> 本文件只放进行中与近期的内容。已结束任务的交接状态、登记，以及 2026-10-12 及以前的操作日志在 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)（2026-10-17 原样移入）。文档目录见 [`README.md`](README.md)。
+> 本文件只放进行中与近期的内容。已结束任务的交接状态、登记，以及 2026-10-19 及以前的操作日志在 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)（按归档规范原样移入，最近一次为 2026-10-24）。文档目录见 [`README.md`](README.md)。
 
 ## 当前交接状态
 
-### 缓存 M1 集成候选（预跑与终审完成，待推送确认）
+- G：M1 日志 Attr 合并已验证；正式 d1 待复核，详见归档。
 
-- 三份输入已冻结：G 至 `4eed9797a`；G2 按序 `c493068db`、`ea16d7e22`；UI 六提交至 `ace3741b1`，不含 M2。集成提交统一项目 noreply 身份并保留协作尾注。
-- 产品代码自动合并：保留 T4 路由与 undelivered 观测及每请求运行时策略，路由只读取已存在的 trace；关闭态不创建 trace，结算只接收已启用的请求结果。policy 保留有效登记并集，记忆保留双方历史。
-- 产品验证候选 `25df25ab7` 已通过独立终审、端到端、关闭态零执行及可在测试环境预跑的门禁；测试 API 接缝和双故障 observer_failed 优先级已修复。下一步等项目负责人确认推送，再通过单个 PR 的八项必需检查；正式 d1/d2 不阻塞默认关闭的 M1。未推送、未部署。
+### 缓存策略历史 UTC（M1.1，本地完成）
+
+- 基于 main `72c2d0169`，history `at` 按 UTC 输出；八例时区回归及相关门禁通过。详见归档，未推送或部署；后续性能修复独立提交。
+
+### 缓存 P0b / M2 后端（2026-10-24，本地实现完成）
+
+- 基于文档前置 0dfeb9980 及已合入 M1 的 main；默认关闭的在线北极星、三种金额视角和四个管理员图表接口已完成，等待独立评审、集成与 staging 验证。
+- 本地功能、race、真实 PostgreSQL 对账、五种构建方式 vet、完整韧性门禁及全量 lint 已通过。handler 全包仅有两项原有跳过；原编译接缝失败修复后全包复验通过，原始记录保留。
+- 迁移 279 已在共享数据库使用前定稿，含保留期索引、不含会话状态表；部署后不得改写。详细登记在下方 G2 条目，提交号以本分支日志为准。未推送、部署或访问生产。
+
+### 缓存 M1 已合入 main（2026-10-24）
+
+- [PR #132](https://github.com/liulixin-lex/xy2api/pull/132) 于 2026-10-24T04:35:11Z 合入，merge commit `72c2d01698cd859223e943a0fa61b3454bca31ec`；tree 与批准候选 `6ba7c345c` 一致。
+- 八项必需检查全部通过、独立终审无阻塞、端到端五项通过，分支保留；功能默认关闭，未部署。正式 d1/d2 由 G 另行交付，仅影响是否开启生产观测。
+- P 的原交接与登记原样移入 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)；其中“待推送”等文字保留当时状态，以本摘要为当前事实。
+
+### 缓存 M2 与 M1.1 集成候选（2026-10-24，待预跑与终审）
+
+- 输入：文档公共base `0dfeb9980`；G2 P0b及R16/R17三提交至 `94481bcf4`；UI四提交至 `e1c9f78b1`；M1.1 UTC修复 `411540d5d` 与日志属性优化 `d24ed1a2c`，不含M3。
+- 已完成：按顺序导入，统一项目noreply并保留协作尾注；唯一文本冲突在记忆文件，保留两方交接和历史；UI请求竞态、邮箱标签隐私、严格范围模型计数修补均已导入，产品改动自动合并。
+- 下一步：旧候选五种tag全包vet已通过；本次固定候选仍须五种tag编译复核，随后全量lint、CI等价、迁移279、关闭态零执行、独立终审与staging。G2的本地lint超时不作通过证据；全部通过后等待推送确认。
+- 约束：公共base分支不动；默认关闭，不推送或部署。迁移279已定为五张表及两个索引，不含旧会话状态表；其最终字节在集成证据中冻结，合入后不修改。
 
 ### 运行时缓存策略 T0a.5（2026-10-23，本地完成）
 
@@ -178,11 +197,27 @@
 
 ## 进行中的工作
 
-### 20261023-cache-m1-integration
 
-- 执行者：P。按冻结输入集成缓存观测、运行时策略与管理员面板；默认关闭，不变更生产。
-- 顺序：G T0a.1–T0a.4 → G2 核心与接缝 → UI 六提交；改写项目身份并保留协作尾注。
-- 当前：组装、预跑、终审与端到端已完成；等待推送确认及后续 GitHub 必需检查，通过单个 PR 用 merge commit 合入 main。
+### 20261023-cache-p0b — 在线缓存北极星与管理员图表（G2，实现完成，待集成）
+
+- 追加审查（R17，已完成）：priced_models 改为严格范围内已定价模型计数，priced_p_share 保持业务范围；新增范围差异回归，独立提交，lint 由 P 在 M2 最终候选上的全量 golangci 覆盖。
+
+- 追加审查（R16）已修：邮箱账号名按 meta.platform/key 生成稳定标签，分组名采用相同判定；普通名称和原数据保留。v1.0.2 源样例自检、86 项定向 race、27 份实际 handler 输出校验均通过；lint 由 P 在 M2 最终候选上的全量 golangci 覆盖，独立提交交付集成。
+
+- 授权：cache/p0b 基于文档归档提交 0dfeb9980（父提交为已合入 M1 的 main 72c2d0169）；只本地开发与提交，不推送、不部署。保留 main 的 T0a.4 API 对齐和 observer_failed 优先级修补。
+- 范围：northstar 默认关闭的运行时策略、UTC 小时 rollup/回填/D-1、trace 小时计数与持久化、四个管理员图表接口与三种金额口径。沿用既有鉴权、审计与快照，不改变路由、用量或账单。
+- 数据正确性：非 UTC 数据库时间、趋势/价格键和事件输出统一 UTC；每小时先读取前一小时再做会话 LAG，跨整点机会量不依赖持久会话状态。279 含 bucket_start B-tree，不含 session_state；跨整点独立期望值为 0/17011。
+- 迁移冻结：279 的 sha256(TrimSpace) 为 58dc0c8572b7ecd1899db8f995d1f2795a40762a9d94e864ac6a8f377bc3447e，第一次在共享数据库执行后不再修改；后续结构修订使用新迁移。没有提交本地 embed 占位资源。
+- 新基线验证：1613 项缓存 race、304 项配置/Wire race、6 项关闭态独立探针通过；F 契约实际 handler 输出 20 项自检通过。全 handler unit race 为 2035 通过、2 项既有跳过、0 race；完整 ci_gate 419 项通过、0 skip；default/unit/integration/e2e/embed vet 通过；默认全量 lint 0 问题。
+- 编译接缝：原 unit vet 发现 M1 既有测试未传 provider 的新计数器参数，补 nil 且保留全部断言；定向及全包复验通过。所有改签名函数按不限 tag 的全 backend 引用核对，产品源码不受这行测试修复影响。
+- 当前：最终真实 PostgreSQL DinD 两项通过，0 fail/skip；对账、跨整点独立期望、重复重放、D-1 事务和失败回滚均覆盖，临时资源按 ID 清理完毕。41 项同步工具测试及调度差异检查通过，干净提交再核验同步审计与文档。原始失败与环境记录保留，独立评审、staging 端到端、集成和 GitHub 必需检查由负责人安排；未推送、部署。
+
+
+### 20261024-cache-m2-integration-prep — M2 与 M1.1 集成（预跑待完成）
+
+- 执行者：P；从固定公共base `0dfeb9980` 导入G2、UI及PM指定的M1.1两项修复；原来源映射与冲突说明保留在仓库外。
+- 当前：九条源提交已导入，身份统一；公共base、既有归档与其他进行中事项保留。UI乱序、R16与R17均已纳入，迁移说明不再列会话状态表。下一步复核五种tag，再运行最终候选全量lint和其余门禁并交R/S验收。
+- 边界：仅本地候选；READY-TO-PUSH后等PM确认，不自动推送或改变生产。
 
 ### 20261023-cache-p0a — OpenAI 缓存旁路观测（开发中）
 
@@ -197,9 +232,9 @@
 ### 20261023-cache-fe-panel — 管理后台缓存开关与参数（F-1a，开发中）
 
 - 授权：缓存项目 PM 指派；基线 `e369fd3bb`，分支 `cache/fe-panel`；不推送、不合并、不部署。
-- 范围：M1 只交付前端“开关与参数”页（`/admin/cache`，仅管理员，侧栏在“运维监控”之后），对接 `/api/v1/admin/cache/policies` 的列表、预校验、带 `expected_rev` 的写入与变更记录；后端接口缺失（404）时页面提示后端版本未提供。观测图表（F-1）留在本分支后续提交，等 P0b 接口。
+- 范围：M1 只交付前端“开关与参数”页（`/admin/cache`，仅管理员，侧栏在“运维监控”之后），对接 `/api/v1/admin/cache/policies` 的列表、预校验、带 `expected_rev` 的写入与变更记录；后端接口缺失（404）时页面提示后端版本未提供。观测图表（F-1）为本分支单独提交：图表接口（P0b）存在时才显示“巡检”页签，缺失时页面只显示开关；生产构建只读真实接口，mock 数据仅开发环境可用。
 - 约束：默认全部关闭；表单范围以接口返回的 schema 为准；总开关只覆盖改出站或选号的三个键；`claude_cache_fallback_policy` 与 `gateway.openai_cache.*` 只读展示并链接原设置页，不改其存储与语义。
-- 状态：首版 `ec311712c` 经评审有条件通过后，已按评审与 v1.7.4 契约修复：错误按平台信封的 `reason` 识别，写入后整页重读，409 与 `rev_stale` 走三方合并，确认框列出提交后的影响，静态总闸期间仍可保存。接口契约样例作为前端测试夹具，相关测试已列入根 `Makefile` 的关键 vitest 清单；路由与侧栏入口已登记到 `tools/upstream-sync/policy.json` 的 required_literals。待后端接口落地后联调。
+- 状态：首版 `ec311712c` 经评审有条件通过后，已按评审与 v1.7.4 契约修复：错误按平台信封的 `reason` 识别，写入后整页重读，409 与 `rev_stale` 走三方合并，确认框列出提交后的影响，静态总闸期间仍可保存。接口契约样例作为前端测试夹具，相关测试已列入根 `Makefile` 的关键 vitest 清单；路由与侧栏入口已登记到 `tools/upstream-sync/policy.json` 的 required_literals。图表按 v1.7.4 §8 对齐金额口径与回退组标注，图表测试同样列入关键清单。待后端接口落地后联调。
 
 ### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（PR #120 已合入 main，进入下一个版本；待真实上游验证；2026-10-22 DOCS 更新状态）
 
@@ -354,404 +389,6 @@ pnpm --dir frontend run build
 ## 操作日志
 
 <!-- 按时间从旧到新追加。历史记录只允许追加更正，不应静默改写。 -->
-
-### 2026-10-13 — 20261013-sub2api-v0.2.15-full-release — 本地集成与专项修复
-
-- 请求范围含标准上游同步、备份修复、开放PR整合、指标算法/文案及发版；用户追加并行开发和生产只读分析。执行使用独立clone并保留原main未提交记忆。
-- 通过doctor严格预检后prepare首次被17个新冲突阻断，核对后独立登记policy并重新执行；保留原失败报告。官方merge、归一、人工裁决、两PR merge、生成代码、备份/指标/图像修复分别提交，旧迁移不改写。
-- 备份：生产版本/权限只读确认后选择public；普通表范围演练曾通过，但扩展索引演练实际失败（DROP SCHEMA遇pg_trgm依赖），因此没有放行；最终采用原生TOC精确省略namespace元条目、保留业务对象/数据，新恢复矩阵通过。旧psql SQL错误会回滚但退出0，新参数消除误报成功；没有声称旧版部分提交。
-- 验证失败和资源中断分别保留：初轮后端旧charged fixture、前端IQ筛选旧索引，以及多并发编译造成内存压力。改为单个重型Go进程、低并发前端，未改断言来掩盖业务问题。最终全量及远端/制品工作仍在进行，以上条目不是发版完成记录。
-
-### 2026-10-13 — 20261013-sub2api-v0.2.15-full-release — 草稿 PR 与首轮最终门禁
-
-- 创建独立RC版本提交并推送同步分支/不可变sub2api/v0.2.15标签，开草稿PR #92，单独提交真实sync_pr来源；main和已发布标签保持原状态。
-- 前端最终3026项完整测试、38项文案补验及构建通过；后端最终unit62包/23651测试及子测试通过（40项依赖条件跳过），完整integration与固定head远端门禁进行中。
-- CI静态检查发现3个上游归一化文件import未gofmt，纯格式修正；原始失败日志保留。已通过前后端安全、前端、Windows插件、shell、审计与发布辅助上下文，仍须新head全部通过。
-- RC/正式发布仍未执行，本记录不构成发行成功结论。生产只读故障定位完成，备份验证临时容器/进程/归档已独立核查无残留。
-
-### 2026-10-13 — 20261013-sub2api-v0.2.15-full-release — 集成合并、RC 发布与制品演练
-
-- PR92最终bcb62e580两组18项检查成功，精确head审计comment后常规merge成8f47f8fb2；PR90/91自动merged且历史保持。未绕过保护或force push。
-- RC annotated e96985ec1→8f47f8fb2，Release run38345930894成功；六资产双SHA、五平台二进制、GHCR双架构labels与stable aliases保持通过。镜像index f5b7500bc785c679f200266d312ec695f1857904618116d072fb1af20ba8c563。
-- 真实发行镜像新装、316→318升级、完整PG/Redis/app-data备份恢复到0.2.6通过；3个PG客户端18.6，4个既有部署完全不变。原本地integration242引用失败及gofmt截断诊断已闭环，但原失败日志仍保留。
-- 正式晋级从main独立创建release/0.3.0，VERSION与provenance产品版本提交独立于记忆；业务/前端/SQL与已验RC保持。正式外部发布门禁尚待执行，不能视作已完成。生产没有写入或部署。
-
-### 2026-10-13 — 20261013-sub2api-v0.2.15-full-release — 发布构建可追溯性修正
-
-- RC五个平台的vcs.modified=true不是前端产物导致；精确RC隔离clone下载实际前端artifact后status仍空，随后与发布流程相同的Go1.27.2 tidy仅删除5个未使用工具模块的10条go.sum记录，go.mod完全不变，5个模块均不在已发RC二进制dep中。
-- 正式PR93追加该checksum整理，并让make generate在Ent/Wire后执行tidy，避免工具生成再次引入多余sum。完整make generate与git diff --exit-code实跑通过，未改运行时代码、SQL、前端或依赖版本；backend/Makefile经审查登记manual_merge及resolved来源说明。
-- PR93原head ab0af029两组18项检查已全部通过；追加修正后须以新精确head重新通过完整CI/安全，不复用旧head为最终通过。正式资产核验提高为require-clean-vcs。RC标签保持不动，升级/回退证据继续适用于相同业务代码和运行依赖。
-
-### 2026-10-13 — 20261013-sub2api-v0.2.15-full-release — 正式发行与清理完成
-
-- 正式PR93最终77d43e92两组18/18检查全绿，以merge commit1e0fbdd704合入受保护main，annotated v0.3.0 objectdb6f317e指向该源码；未force push、未改既有tag或分支保护。Release38353591650成功，正式flags正确。
-- 独立六资产双SHA、五平台buildinfo（均vcs.modified=false）、双架构image index5560a67e10b463dbab3e20fca5e719b2933f93dd9f341e890bfe34a12f7f7281及version/revision/source/stable aliases全部通过。正式镜像新装318迁移与三个PG18.6客户端通过；RC已完成316→318升级与PG/Redis/app-data成套恢复。
-- 清理仅本任务prefix+label容器/网络/卷和指定敏感fixture路径；保留hash/JSON/日志，4个既有部署完全不变。临时VCS复现clone已删；生产没有写入或部署。
-- 按AGENTS在正式发行后补齐记忆并清理本任务进行中条目，本收尾仅改PROJECT_MEMORY，使用独立PR和完整保护检查。不可变发行tag保持1e0fbdd704；收尾main的业务树与正式tag完全一致，此纯文档领先记录是对runbook收尾“main等于tag”的明确例外，避免为补记发行结果移动标签。
-- 没有未完成业务修复或发行验收；后续仅为用户实际部署时的public设置、生产恢复验证与可选share影子/灰度，未在此次只读生产授权外执行。证据及历史失败/中断均保留，未保证无法证明的零风险。
-
-### 2026-10-15T03:20Z — `20261015-prod-ux-analysis` — 完成
-
-- 请求/目标：用户授权只读 SSH 生产，分析近 48 小时全部请求、错误、用户断连、重试/回退与账号调度，实时抓取最新请求，规划除上游自身原因以外的体验优化方向。
-- 开始状态：本机原在 `feat/share-scheduling-20261010`（已随 v0.3.0 合入）；fetch 后基于 origin/main `f8fec15a2` 新建 `analysis/prod-ux-20261015`。生产运行 `xy2api:0.3.0`（他人于 00:42Z 部署、00:46Z 切换流量）。
-- 完成操作：
-  - 只读 psql（`default_transaction_read_only=on`）统计 `usage_logs`、`ops_error_logs`、`ops_system_logs`、`ops_system_metrics`、`settings`、`accounts`、`groups`、`audit_logs`；
-  - 下载应用日志（约 2 小时）与 Caddy 轮转日志，实时抓取约 25 分钟；
-  - 对照 v0.3.0 源码核实重试、换号、冷却、keepalive 与错误映射；
-  - 用“IP、路径、开始时间”把 CDN 切断与应用结果逐条对应。
-- 修改文件：新增 `docs/PROD_UX_ANALYSIS_20261015.md`；更新本文件。没有业务代码改动。
-- 验证：所有数字来自上述只读查询与日志脚本，报告中注明了口径和样本窗口；未运行构建或测试（无代码改动）。
-- 卡点/风险：
-  - Caddy 日志只保留约 2 小时，CDN 层结论是样本外推；
-  - 00:46Z 切换后 3.5 分钟不可用的确切原因（健康检查状态）未能确认；
-  - 旧镜像期间“余额不足同号重试”的触发条件在 0.3.0 下没有复现，需另行回归。
-- 下一步：等待用户确认优化规划与计费决策。本地已删除下载的生产日志副本，SSH 连接已关闭；分析脚本在 `/tmp/xy2-prodana/bin`，不含凭据，可删除。
-
-### 2026-10-15T03:40Z — `20261015-prod-ux-analysis` — 补充 CDN 超时建议
-
-- 核对官方文档：ESA 回源 HTTP 请求超时默认 30s、上限 300s；Cloudflare 的 Proxy Read Timeout 默认 125s，仅 Enterprise 可调（最多 6000s）。已把报告 7.1 第 1 项改为：ESA 设 300s；Cloudflare 不升级套餐，改走 ESA 或仅 DNS 子域名，并与网关首包心跳、首包超时换号一起实施。只改了本地未提交的报告与本记忆。
-
-### 2026-10-15T06:55Z — `20261015-prod-ux-analysis` — Codex 重连现象排查（只读）
-
-- 用户反馈 ESA 改为 300s 后 Codex 出现“idle timeout waiting for SSE”及两种 429。只读排查结论：与 ESA 调整无关。
-  - ESA 约在 06:40Z 生效；同类错误 06:20 起已在账号 292 出现，Cloudflare 链路也有；
-  - 两种 429 来自上游账号 307、292 在流内发出的忙或限流失败，网关原样透传，只冷却 2s，粘性会话又把请求送回同一账号；
-  - idle timeout 是 Codex 自身 300s 的事件空闲计时，起因是上游中途停住。
-- 已追加到报告第 8 节（建议把 429 冷却调到 30–60s、对问题账号降权，并做流内失败换号与改绑等代码改进）。生产未做任何修改。
-- 补充（同日）：核实了“为何没有换号”。0.3.0 只在客户端尚无输出时才允许换号；这几次失败前已向客户端写出 2.3–3.8KB 真实内容（心跳会被扣除）。客户端重连后，又因 429 冷却只有 2s、sticky escape 只看账号整体指标、没有按会话连续失败改绑的规则，回到同一账号。已追加到报告第 8 节。
-
-### 2026-10-15T07:10Z — `20261015-prod-ux-analysis` — 复核用户配置调整并更新剩余清单
-
-- 只读确认生产配置：429 冷却 45s（07:05:04 修改）、过载冷却 2 分钟、ESA 300s。429 冷却每次从库中读取，立即生效。
-- 最近 60 分钟仍然突出的问题：
-  - 组 28 只剩账号 158 可用，出现重试风暴；
-  - 组 53 的 `gpt-5.5` 定价限制返回 503，约 94 次/小时；
-  - 组 72 两个 OAuth 账号均已 revoked；
-  - 多名用户在同一不稳定账号上连续失败。
-- 已把进度与剩余清单写入报告第 9 节。没有修改生产或代码。
-
-### 2026-10-15T07:40Z — `20261015-prod-ux-analysis` — 优化规划访谈（grilling）进行中
-
-- 用户要求全量读取两份生态 CSV（精选 36 项、候选 349 项，其中 140 项为无独有描述的通用 fork），参考生态实现，并结合线上请求与 XY-image 代码，规划可上线的优化方案。已派出 3 个只读研究代理：生态调度与健康、生态重试与保活、XY-image 集成；报告写入 `/tmp/xy2-grill/research/`。
-- 第 1 轮已定稿：
-  - 范围为 P0 与 P1 做到可上线，P2 只给进入条件，交付 OpenSpec 加运维 runbook；
-  - 零字节未送达：立即取消上游且不向用户计费；
-  - 流式请求延迟提交 SSE 头加心跳（通过校验与选号后，T=15s 仍无上游响应头才提交）；
-  - 余额不足进入可恢复的独立状态；
-  - 采用“xy2api 自有模块加最少钩子”，不向 Sub2API 官方提交任何改动；
-  - 本次不修改 XY-image，xy2api 必须保持对它兼容；
-  - 会话改绑必须照顾单号组，不能因为一次波动导致整组无号。
-- 更正：`fallback_group_id` 不是无号兜底，只用于仅限 Claude Code 分组的降级；报告第 7.1、9 节已改，并补充第 10 节更正记录。
-- 第 2 轮定稿（2026-10-15）：
-  - Q10 同源联动：不做。
-  - Q12：未送达的请求不写用量行，单独存一份仅运营可见的记录。
-  - Q8、Q9、Q11 按生态调研结论执行：
-    - Q8 失败即按 owner 解绑；回避集 60–120s，10 分钟内失败 ≥2 次延长到 10 分钟；选号分三遍；并发满、TTFT 抖动、客户端错误不改绑。
-    - Q9 余额状态机 OK/SUSPECT/EXHAUSTED/RECOVERING；复检间隔 1→2→5→10→15 分钟；探测优先 sub2api 的 `/v1/usage`，其次 new-api（待实测），最后 1 token 生成探测（有日预算）；半开逐步恢复。
-    - Q11 无号兜底组：只在无可用账号时触发、每个请求一次、同平台、按兜底组计费并对用户可见；先走兜底组，再在兜底组里取最不坏的账号，没有兜底组才在原组取最不坏的。
-  - 用户改为允许修改 XY-image。XY-image 调研结论见 `/tmp/xy2-grill/research/xy-image-integration.md`；生产为 v0.0.16（258c0c9），生图并发 16。生态调度调研见 `/tmp/xy2-grill/research/ecosystem-scheduling.md`。
-- 第 3 轮（2026-10-15）：
-  - Q16：状态码维持不变（C）。
-  - Q13、Q14 按推荐：XY-image 修高危问题；只对经 CDN 的请求提前提交。
-  - 用户新增要求：Q8 的绑定释放规则太严，必须与份额调度一致，层级与权重由管理员掌控。已改为分级处理，等待确认。
-  - Q11 主组恢复后要切回；Q15 上游余额只给管理员看。
-- 已核实的事实：
-  - 用户看到的“余额不足”几乎都来自本站计费：48h 内 1457 次是真余额 ≤0，约 500 次是在途预留之和超过余额（用户余额为正），上游余额泄漏只有 4 次（图片账号 402）。
-  - xy2api 现存缺陷：
-    - G2：流间隔检测的 ticker 周期等于阈值，实际在 T 到 2T 之间才触发；
-    - G3：Anthropic 心跳后的错误帧缺 `event: error`，SDK 静默丢弃（`gateway_handler.go` 约 2012 行）；
-    - G8：暂存的账号响应头（含 `x-codex-turn-state`）只在首次写出前生效，心跳先写出后会丢失。
-- 研究报告：
-  - `/tmp/xy2-grill/research/ecosystem-retry-keepalive.md`。要点：Codex 300s 空闲计时不被注释行重置；5xx 不带 Retry-After 时一个回合约产生 30 次请求；Retry-After 无上限；429 不带 Retry-After 即终止。
-  - Gemini SDK 遇注释行会报错；上游 sub2api 在 v0.2.15 之后没有相关修复。
-- 第 4 轮（2026-10-15）：
-  - Q8、Q11、Q15、Q17–Q24 按调研方案执行（Q23 选 B，其余为 A）。
-  - Q26 改为不做灰度：直接开发，在用户指定的测试服务器（地址见仓库外私有清单）上测试与预上线，确认全部闭环后再提 PR、发版。凭据只存放在本机临时文件，不写入 Git 或记忆。
-  - 测试服务器只读勘察：
-    - Ubuntu 26.04，8 核，15G 内存，可用磁盘 133G；是共享开发测试机。
-    - 已有多套服务：旧版 xy2api、旧测试站、两套 XY-image（其中一套调用生产主站）以及若干主机服务。清单见私有清单，本方案一律不碰。
-    - 测试域名所在区在 Cloudflare 上，但都是灰云直连。
-  - 需要新建一套完全隔离的预上线环境。
-
-### 2026-10-15T11:10Z — `20261015-prod-ux-analysis` — 上线级优化方案（OpenSpec）完成
-
-- 请求/目标：用户确认访谈结论后要求“先完善整个方案”，随后指示“按上述方案执行”，即完成整套方案文档。开发、测试服务器部署、DNS、PR、发版、生产部署都不在本轮范围内。
-- 完成内容：
-  - 新增 `openspec/changes/gateway-resilience-20261015/`：proposal（含决策 D1–D33）、design（§0–§17）、tasks（第 0–15 节）、runbook、staging-validation、xy-image-appendix、8 个 spec（42 条需求、65 个场景），以及 `evidence/production-analysis.md`（去标识的生产分析摘要）、`evidence/research-summary.md`（34 个第三方仓库的固定 SHA、许可证与借鉴取舍，不含第三方代码）。
-  - 复核两份 CSV 行数（精选 36、候选 349）。修正两处交叉引用：proposal 的 P2 进入条件指向 tasks 第 15 节；design 中 new-api 余额接口实测指向 tasks 12.6。
-- 安全与数据处理：
-  - 发现 liulixin-lex/xy2api 为公开仓库。已把方案文件与本轮新增（尚未提交）的记忆条目中的两台主机地址、测试机共存服务与端口、宿主机路径和内网网段改为代称；原信息移到仓库外的 `xy2api-artifacts/gateway-resilience-20261015/private/HOSTS.md`（0600，不含凭据）。
-  - spec 场景中的生产账号编号改为 account A。
-  - 完整生产报告副本放到仓库外 `production/` 目录。
-  - 删除本机残留的生产日志摘录 `/tmp/xy2-prodana/data/inflight_rej.txt`，结论此前已记录。
-  - 本机辅助脚本只从环境变量读取口令，不落盘。
-- 验证：
-  - 本机没有 OpenSpec CLI，改用脚本做结构检查：每个 spec 都有 ADDED 段；每条需求都含 MUST/SHALL 且至少有一个带 WHEN/THEN 的场景。结果没有结构问题。
-  - 方案目录的敏感信息扫描（口令、主机地址、`ubuntu@`/`root@`、本机绝对路径、生产编号）为零命中。
-  - 没有代码改动，未运行构建或测试。
-- 未完成、卡点与下一步：
-  - 等用户授权开始开发。授权后从 origin/main 新建 `feat/gateway-resilience-20261015`，并把本方案目录带到该分支。
-  - 测试服务器部署要用户确认；测试 DNS 记录和真实测试 Key 由用户提供或授权。
-  - PR、发版、生产部署各需单独授权。
-  - 本分支与工作树改动都未提交、未推送。
-
-### 2026-10-15T22:00Z — 20261015-gateway-resilience 最终候选复验与续链修复
-
-- 内容：
-  - 完成剩余开发：3.5 只读 Explain（原版调度入口在运维页）、12.10 指标对照工具；新增调度矩阵 24 例、韧性 Redis/PostgreSQL 集成测试、Claude Code 兜底独立性测试。
-  - 真实中转复测发现 0.3.0 已有的续链缺陷（Messages 转 Responses 时多账号中转以笼统 400 拒绝 `previous_response_id`），修复为整轮重放并关闭会话续链（design §9.8，`fe6d43c50`）。
-  - 测试工具：KA-8（300 秒 CDN 档）、CONT-1（fault-upstream F25）、anthropic-python 已提交错误事件用例、fault-upstream `delay` 参数。
-- 验证：
-  - 本机：后端全量 unit、四种标签 vet、韧性相关 `-race`（修复一处测试数据竞争）；前端 lint、vue-tsc、全量 vitest、构建；选号基准与 0.3.0 持平。
-  - 测试服务器（最终候选 `fe6d43c50`）：场景 37/37、客户端 16/16、XY-image 回放 181/181；升级演练、浏览器与键盘检查沿用前一候选（迁移与前端未变）。
-  - 集成测试在测试服务器容器内运行：韧性 6 例通过；全量仅 PgDumper 因容器缺 `pg_restore` 失败（v0.3.0 同样失败）。
-- 未完成与下一步：24 小时浸泡（`soak-d80f35fdb`）与 design §14 指标报告；之后推送、PR、RC、正式版；生产部署需单独授权。未推送，未改生产。
-
-### 2026-10-16T10:45Z — 20261015-gateway-resilience 生产报错优化合入与最终候选
-
-- 内容：
-  - 生产近 3 小时报错复盘（子 Agent 只读分析，1,649 次失败）的根因纳入本次：R1 Grok 余额 429（主 Agent）、R2 已输出后失败（子 Agent B）、R3 web_search 历史回放（子 Agent C）、R4 内容安全拒绝与 R7 Anthropic 流内状态（子 Agent A），以及 R5/R6/R10b/全 0 会话 ID 小项；三个子 Agent 在独立 worktree 开发，提交无冲突 cherry-pick 合入后删除 worktree。
-  - 合并后补修：已输出后失败的 200 不再清零失败回合计数（`eaa63fd30`）。
-  - 文档：design §2/§9.7/§13/§18、tasks“生产报错优化”、4 个 spec 新场景、覆盖矩阵、`GATEWAY_RESILIENCE.md`、去标识证据 `evidence/production-errors-20261016.md`。
-  - 测试工具：fault-upstream F26–F29 与 BAL `reset`；场景 PE-1/2/3/4/7；夹具在场景规格变化时更新已有账号地址。
-  - 内存诊断结论：无泄漏（诊断镜像与脚本已删除）。
-- 验证：本机全量与 CI 门禁全绿；测试服务器 `eaa63fd30` 场景 42/42（首轮 PE-3 因同一进程已记住账号失败，用例已兼容并重启应用复跑）、客户端 16/16、XY-image 回放 181/181 ×2、在线对话 4/4。
-- 未完成与下一步：等待 24 小时浸泡（约 2026-10-17T10:30Z）→ 指标报告与私有测试报告 → 用户确认提交作者身份是否改写 → 推送、PR、RC、正式版；生产部署单独授权。管理员配置项与代理凭据轮换建议已汇报用户。未推送，未改生产。
-
-### 2026-10-16T12:10Z — 20261015-gateway-resilience 推送前历史整理、浸泡改判据、PR #97
-
-- 内容：
-  - 用户选择把分支提交作者改为 noreply 身份；推送前扫描发现方案文档含测试子域（灰云直连会暴露测试服务器地址），一并从全部历史去掉。最终树相对改写前只差该文档一行；哈希引用按映射更新（`a0fef9807`）。
-  - 用户决定浸泡缩短为 6.5 小时并与 PR 的 CI 并行。
-  - **更正 08:50Z 的“无泄漏”结论**：诊断运行完整数据（116 个样本）显示匿名内存后段约 +5.2 MiB/h，但 Go 堆在用 7 份 profile 持平（58–60 MB）、goroutine 持平，增长来自运行时保留的内存，不是对象泄漏。容器内存因此不能作为泄漏判据：浸泡改为开启 gctrace，以 GC 后存活堆的完整小时中位数斜率判定（`688bd9d68`），匿名内存斜率只作参考。
-  - 推送因本机 Git Credential Manager 卡在交互提示而超时一次，改用 gh 凭据助手完成；PR #97 已开。
-- 验证：同步审计、scheduler-diff 通过；后端与前端代码相对改写前无差异；推送后远端 head 与本地一致。
-- 未完成与下一步：等 CI 与浸泡（约 17:53Z）；通过后合并、打 RC、校验制品、RC 复跑关键子集、晋级 0.4.0。生产部署单独授权。
-
-### 2026-10-16T12:10Z — 20261016-scheduling-review — 已完成（只读；主 Agent 代为追加）
-
-- 请求/目标：用户要求全量审查原版调度、份额调度与网关韧性的问题、重叠、互补与耦合，交主 agent 优化。
-- 开始状态：分支 feat/gateway-resilience-20261015，HEAD 21f2417f4（PR #97 头 688bd9d68），工作树干净。
-- 完成操作：只读通读代码与文档，未改仓库、未跑测试、未访问生产或测试服务器。
-- 结论：交接文档 xy2api-artifacts/gateway-resilience-20261015/review/SCHEDULING_REVIEW_20261016.md。RC 前建议修 F1（排队 ping 计为已送达）、F2/F5（负缓存与快速失败与请求相关）；启用份额前修 F3（末位兜底不遵守份额策略）。
-- 修改文件：无（仓库外新增上述文档）。
-- 验证：静态审查，结论按“已读码确认/推断”标注；未运行测试。
-- 卡点/风险：F2 严重度取决于生产是否使用仅粘性阈值或 /antigravity 路由，待用户确认。
-- 下一步：主 agent 与用户确认第 9 节后排期。（12:20Z 用户已按“决策”一节定稿：0.4.0 修 F1、F2+F5、F3、F4、F7、F12、F14。）
-
-### 2026-10-16 — 20261016-grok-monitor-responses — 原生协议功能与 PR 交付
-
-- 请求：根据只读审查中 Grok 监控固定 Chat、账号测试使用 Responses 的证据，在指定仓库增加原生协议选项并提交 PR；未授权生产变更或合并发布。
-- 开始状态：干净 main `f8fec15a23ab37a6efdbc02b0db0376ed6b60dbb`；原工作树不变，独立分支与工作树完成实现。没有把生产凭据、IP、用户信息或原始日志提交到仓库。
-- 修改：后端监控/模板校验、Responses adapter 选择、文本提取入口、合并字段保护、部分更新保留协议；前端监控及模板编辑/筛选/展示、请求示例和中英文说明。无迁移或依赖升级，Chat及OpenAI原有行为保持。
-- 验证：本地18项前端新增及相关回归、类型/lint/生产构建、19项工具、来源审计及调度差异检查通过；补充后端HTTP路径/字段/错误与创建/更新/模板回归。初轮编译空间问题、可选参数类型错误及缺endpoint测试夹具均保留记录，修正后的后端与最终完整CI明细保存在外部VALIDATION及PR。
-- 交付：[PR #98](https://github.com/liulixin-lex/xy2api/pull/98)；文档说明非流式JSON和既有6/30/45秒阈值边界。源码功能与使用说明完整提交，本Agent不合并、不发布、不部署。下一步由维护者评审并按目标供应商验证实际服务可用性。
-
-### 2026-10-16T18:35:42Z — `20261016-iq-conflict-aiportx` — 只读诊断完成
-
-- 请求/目标：账号 #307 `port015`（OpenAI API Key，上游 aiportx 中转，检测模型 gpt-6-astra/low/compat）的智商检测持续返回 `conflicting_final_response`（“最终响应互相冲突”），查明原因。
-- 开始状态：`main` HEAD `f8fec15a2`，工作树干净；生产 `xy2api-prod-app` 运行 `xy2api:0.3.0`，与本地 `iqcheck` 源码一致。
-- 完成操作：只读查询生产库 `accounts.iq_check` 与 `account_iq_check_results/attempts` 的诊断；在生产宿主机用与 IQ 探测相同的请求体直连该账号上游，共发出 11 次测试请求。key 只在服务器内通过 curl 的 stdin 配置传递，未打印、未落盘、未回传；请求不经 XY2API，未写生产数据。
-- 结论：该中转会在真实输出前注入占位 assistant 消息（`msg_ft_*`，正文为单个空格，无 `phase`，响应 ID 变为 `resp_ft_*`），并把它写进 `response.completed.output`。`parse.go` 的 `terminal()` 把无 phase 且文本非空的 assistant 消息都当作最终回答，空格也算非空，因此与真实的 `final_answer` 冲突（`parse.go:401-404`）。生产 9 次调用的诊断（done_messages 2/3、terminal_items 3/4、ignored_items 2/1）与“1–2 条占位 + reasoning + 最终答案”的结构逐项吻合。
-- 其他观察：占位注入不是每次都有。直连拿到完整响应的 6 次中有 2 次出现，都是短提示词；4 次检测原题都没有出现，而生产 9 次调用全部命中。差异可能与 IQ 探测携带的 `prompt_cache_key` 或客户端特征有关，未证实。带 `prompt_cache_key` 的 curl 请求在该中转上，HTTP/1.1 会超时，HTTP/2 会被整段缓冲约 66 秒，原因未查明，不影响上述结论。该账号业务流量正常，最近一小时有上百次成功请求。本机与生产均无 Go 1.27 工具链，未用真实解析器回放，结论依据代码逐行推导和既有用例 `parse_http_test.go:182`。
-- 修改文件：仅本文件（本条及顶部交接项）。未改业务代码，未部署，未改生产配置。
-- 下一步（待用户授权）：在 `terminal()` 中把纯空白的 assistant 消息视为非答案（与 design.md:92“只提取完整最终回答”及 `Grade` 先做 TrimSpace 一致），并补占位消息回归用例；或者请上游关闭占位注入。
-
-### 2026-10-16T20:21:37Z — `20261016-iq-blank-placeholder-0.3.1` — PR #99 已开，按用户决定止于提交 PR
-
-- 请求/目标：修复账号 #307 智商检测误判（见 `20261016-iq-conflict-aiportx`）。用户先授权修复测试、提交 PR、发版部署三步全部完成；`gh pr merge` 被 Claude Code 自动权限检查拦截后，用户改为“提交了 PR 就行”。合并、打 tag、发版和生产部署均未执行。
-- 开始状态：`main` `f8fec15a2`，工作树只有上一条诊断记录的未提交改动；分支 `fix/iq-blank-placeholder-20261016`。
-- 完成操作：`terminal()` 跳过仅含空白的 assistant 消息，并记为忽略类型 `blank`；解析器版本升为 `iq-response-v6`；产品版本 0.3.1（`VERSION` 与 `UPSTREAM_BASE.json`）；`docs/OPENAI_IQ_CHECK.md` 同步说明。先写回归用例，在未修复代码上确认失败后再修复。用真实解析器回放按抓包结构构造的流，1 条和 2 条占位的诊断计数与生产 9 次调用的两种形态逐字段一致。
-- 修改文件：`backend/internal/pkg/iqcheck/{parse.go,diagnostic.go,parse_http_test.go,reliability_test.go}`、`backend/cmd/server/VERSION`、`UPSTREAM_BASE.json`、`docs/OPENAI_IQ_CHECK.md`、本文件。
-- 验证：本机 Go 1.27.2（`/tmp/xy2-toolchain`，安装包 SHA256 与官方一致）下以下检查通过：`go test -race ./internal/pkg/iqcheck/`、`-tags=unit` 的 IQ 相关 service/repository/handler 单测、gofmt、go vet、golangci-lint v2.14.0（iqcheck 0 issues）。`sync.py audit`、`scheduler-diff` 和同步工具 19 项测试也通过。PR #99 head `67497e325` 的 8 项必需检查（push 与 PR 两份）全部成功；本条为纯文档提交，推送后新 head 需重新通过检查。
-- 卡点/风险：本机全局凭据助手是 Git Credential Manager，HTTPS 推送会挂起等待交互。本次改用单条命令 `git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push`。合并由维护者执行。
-- 下一步：维护者审阅 PR #99，并以 merge commit 合并；随后从合并提交创建 annotated `v0.3.1` tag 触发 Release，核验制品与 GHCR 镜像。生产部署需另行授权。届时按 2026-10-15 升级现场的方式只替换镜像行，用 `docker compose -p production` 原地重建。无迁移，回滚即恢复 0.3.0 镜像行；pgBackRest 与 WAL 归档可提供 PITR。
-
-### 2026-10-17T04:45Z — 20261015-gateway-resilience 审查与生产核查修复、测试服务器闭环、PR #97 合并与 v0.4.0-rc.1
-
-- 请求/目标：按独立审查（F1–F14）与生产只读核查修复 0.4.0，测试服务器全部闭环后推送 PR #97、合并、打 RC，再晋级 0.4.0；生产部署单独授权。
-- 完成操作：
-  - 审查修复与复核后续：F1 `685986a68`、F2+F5 `6cfd31e4a`/`e18275960`、F3 `1b3d8e4fe`、F4 `60cc7d6fb`、F7 `25bb15ca2`、F12 `f2b077c4e`、F14 `a53b90175`；OpenAI 旧调度路径软罚保留绑定 `d6c8fd1e6`；OpenAI 按模型瞬时屏蔽按软罚参与末位兜底 `31407833d`（测试服务器复跑时发现）。
-  - 生产核查修复：伪保活帧丢弃后仍算上游存活 `9adce14cb`；余额关键字补 `insufficient user balance` `8285e6926`；首输出超时不冷却账号按代码对齐文档 `fdb7cfdcb`，评审复核后更正“级联网关仍冷却”的错误说法 `7043f32cb`。
-  - 测试工具：DC-5 改号与重复编号报错、`stream_request` 真正断开、LR-1 独立会话、KA-9 与 F24 `output=1`。
-  - 候选 `934bcf2bc`：场景 45/45、客户端 16/16、6.5 小时浸泡 11 项全过（存活堆 0.3 MiB/h）；§14 报告 15 项达标，4 项为合成负载所致。
-  - PR #97 18/18 全绿后常规 merge `ca2bdd111`；`v0.4.0-rc.1` 发布与制品、镜像校验全过；RC 镜像在测试服务器全新安装、场景 45/45、升级回退恢复通过，真实客户端 14/16（两项失败于真实中转高峰期）。
-  - 用户 2026-10-17 要求余额提示恢复 0.3.0 原文：`24cfc6511`（晋级分支）。
-- 验证：每轮本机全量验证（四种 vet、lint 0、unit/无 tag/embed、CI 门禁 256、同步审计与 scheduler-diff、前端 389 文件/3047 项与构建）全绿；PR 与 main CI 全绿；推送前扫描无主机、域名、凭据，作者均为 noreply。
-- 卡点/风险：“未送达不计费只覆盖 OpenAI Responses 路径”待用户确认；两项真实客户端用例未在 RC 上重跑；0.4.1 后续见 tasks“后续”小节（xhigh/max 静默上游不换号、屏蔽期间保留绑定、`relay_keepalive` 原生 CC 路径计数、F2 会话上限判据等）。
-- 下一步：用户确认待定项后，完成晋级 PR（`release/0.4.0`，已含版本号与文案改动）→ CI → 常规 merge → annotated `v0.4.0`（说明见仓库外 `RELEASE_NOTES_v0.4.0.md`）→ 用 `/tmp/xy2-verify-release.sh` 校验正式制品与稳定别名 → 正式镜像全新安装检查 → 发版后纯文档收尾；XY-image 0.0.17 先交接并经用户确认；生产部署单独授权。
-
-### 2026-10-17T08:35Z — 20261017-repo-consistency-sweep — 完成
-
-- 请求/目标：用户要求全量审查工作区代码、结构与文档，按最新进度规范化、补齐漏改的代码与文档，并建立机制，让后续开发时刻保持最新、不漏模块或文档。
-- 开始状态：`release/0.4.0`，HEAD `5fdd1e589`，工作树干净。主 agent 在同一工作区等 `soak-c6b837dca` 浸泡，已告知；约定由它在浸泡结束后复跑门禁并随 PR #100 推送，我不推送。
-- 审查结论：
-  - 代码：`backend/`、`frontend/` 没有需要改的残留。余额精简删掉的标识符只剩迁移测试与历史注记；韧性相关包没有未引用的函数；前端韧性 143 个文案键都有引用，API 没有死函数。本任务未改任何源码，浸泡候选与正式镜像不因此产生差异。
-  - 与代码不符的方案与文档（均已修正）：design §2.2 余额行、§8.2 与 disconnect spec 列了不存在的 `slot_wait` 阶段、§9.2 与 error spec 的“余额状态”、§12 的 `resilience.balance_transition` 与缺漏事件；keepalive spec 写首输出超时会软罚账号；proposal 的 D13、D16 缺修订；管理员文档 §5.3 漏 5 个日志事件；account-scheduling、SHARE_SCHEDULING 未写 0.4.0 规则；部署文档未写 CDN 部署所需的 `X-XY-Edge` 与受信代理；ASYNC_IMAGE_TASKS、USAGE_METRICS 未跟上 0.4.0；tools README 与首字校准 SQL 停在旧分档与 F24；三语 README 与 DEV_GUIDE 的 Go、lint 版本，DEV_GUIDE 直接 merge/rebase 上游的写法；两份 openspec 中已随 0.3.0 完成的任务未勾选；docs 白名单漏了 13 个已跟踪文件。
-  - 结构：项目记忆 454 KB，历史原样移入 `docs/PROJECT_MEMORY_ARCHIVE.md`，主文件 92 KB；主 agent 的 0.4.0 两节与 0.3.0 发布记录逐字保留，逐行对账无丢失。新增 `docs/README.md` 文档目录（现行、记录、历史与 OpenSpec 变更状态）。
-- 机制：`tools/check_docs_consistency.py`（规则 `tools/docs_consistency.json`，单测 9 个）检查相对链接、文档目录与白名单、Go 与 lint 版本、韧性计数/日志事件/设置是否写进文档、退役名字是否残留、记忆主文件大小与日志结构，接入 backend-ci 的 upstream-sync-audit 作业；AGENTS.md 加“变更同步”表与归档规则；DEV_GUIDE、同步规范与同步 Skill 的门禁列表同步。用修正前的管理员文档回放，检查器正好报出本次发现的 5 个漏记事件。
-- 修改文件：docs（GATEWAY_RESILIENCE、account-scheduling、SHARE_SCHEDULING、ASYNC_IMAGE_TASKS、USAGE_METRICS、STRIPE_HOSTED、UPSTREAM_SYNC，新增 README 与记忆归档）；openspec（gateway-resilience 的 design、proposal、3 份 spec、tasks、2 份 evidence，async-image-tasks-v2 与 share-scheduling 的 tasks）；deploy（EDGE_SECURITY、config.example.yaml 与 Caddyfile 的注释）；tools（gateway-resilience 的 README 与 SQL、检查脚本、规则、单测）；三语 README、DEV_GUIDE、AGENTS.md、.gitignore、backend-ci.yml、同步 Skill 的 runbook。提交自 `f568a3437` 至本条所在提交（`git log 5fdd1e589..` 可列出）。
-- 验证：`sync.py audit`、`sync.py scheduler-diff`、`tools/tests` 37 个、`check_docs_consistency.py`、Caddyfile 策略脚本与 `config.example.yaml` 解析均通过；`git diff 5fdd1e589..HEAD -- backend frontend` 为空。未改源码，未跑 Go 与前端测试。
-- 卡点/风险：无。留给 0.4.1 决定：测试环境 `fixtures.py` 有 10 个分组从未被场景使用（含 `G-balance-429`），fault-upstream 的 F19/F20 只服务已删除的余额探测；浸泡期间不动测试服务器脚本。
-- 下一步：主 agent 浸泡结束后复跑门禁并随 PR #100 推送这些提交，同时刷新它的顶部状态（仍为 04:45Z 的内容）。
-
-### 2026-10-17T09:00Z — 20261017-repo-consistency-sweep — 公开仓库主机信息清理（完成）
-
-- 请求/目标：主 agent 推送前扫描发现归档中有旧测试站域名与开发机路径；用户授权“可以处理，由你决定”。
-- 决定：只清理当前跟踪文件，不改写已公开的 Git 历史（main 与已发布标签不强推）。能定位真实主机的信息（测试站域名及与之绑定的 Compose 项目名、端口、凭据目录，同机共存服务名，生产 SSH 账号）与开发机、宿主机路径一律改为代称；对外公开的生产入口域名、产品默认安装路径 `/opt/xy2api`（部署文档与脚本）、测试工具里的测试环境项目名与端口、上游 Sub2API 带来的 openspec 文件和测试代码里的示例保持不变。
-- 完成：19 个文件改为代称（记忆主文件与归档、13 份早期功能与修复记录、4 份 openspec 文件；`<测试站点>`、`<工作机 A>` 等），归档开头写明；代称对照表追加到仓库外私有主机清单。检查脚本新增 `private` 检查（规则在 `tools/docs_consistency.json`）：这些标识、文档中的公网 IPv4、`ubuntu@`/`root@` 主机写法入库即失败；新增单测 1 个。AGENTS.md 工作原则写明公开仓库的主机信息规则。
-- 验证：`check_docs_consistency.py`、`tools/tests` 38 个、`sync.py audit` 与 `scheduler-diff` 通过；`BILLING_INTEGRITY_PROVENANCE.json` 仍为合法 JSON；全仓库复扫无残留。
-- 卡点/风险：Git 历史仍含原文，只能靠轮换或下线测试站消除（该测试站若仍在运行，建议下线或更换域名）。
-- 下一步：随 PR #100 由主 agent 推送。
-
-### 2026-10-17T09:25Z — 20261017-repo-consistency-sweep — 主机信息检查改为只存哈希（完成）
-
-- 起因：主 agent 复核 `95e6828f5` 时指出，`private` 规则为了拦截被清理的标识，把它们的原文又写进了规则文件。
-- 修改：主机类标识（测试站域名与项目名、共存服务名、Windows 工作机目录名）改为登记规范化后的 SHA-256，检查时对文本中每个词串的整词片段算哈希比对；工作机路径根与用户目录用通用正则取出目录名再比对哈希；报错只显示哈希前缀。公网 IPv4 与 `ubuntu@`/`root@` 两条通用规则不变。规则文件里不再有这些原文（哈希只是不写原文，短词仍可被字典反查）。AGENTS.md 写明登记方式。
-- 验证：用 `a12d33b82` 上清理前的归档回放，命中 189 处，与清理范围一致；检查器单测 11 个、`tools/tests` 39 个、一致性检查（约 2.6 秒）通过。
-- 下一步：随 PR #100 由主 agent 推送。
-
-### 2026-10-17T10:05:55Z — `20261017-codex-websearch-502-terra` — 只读诊断完成，待修复
-
-- 请求/目标：用户反馈某账号持续报错（gpt-5.6-terra，404），要求只读排查生产；随后要求先把问题记录下来，暂不修复。
-- 开始状态：分支 `fix/iq-blank-placeholder-20261016`，HEAD `07b9dcfcc`，工作树干净；生产为 `ghcr.io/liulixin-lex/xy2api:0.3.0`。
-- 完成操作：只读查询生产库（会话设 `default_transaction_read_only=on`）的 `ops_error_logs`、`usage_logs`、`accounts`、`account_groups`、`groups`、`audit_logs`，并读取 Caddy 访问日志；对照源码定位 404 文案（`backend/internal/handler/no_account_error.go:129`）和 web_search 修补的生效条件。结论见顶部同名条目。
-- 修改文件：本文件（仅本条记录与顶部条目）。生产无任何改动。
-- 验证：审计日志中两次账号映射修改的时间，与 378、365 的 502 停止时间及 404 起始时间逐秒吻合。未改代码，未运行测试。
-- 卡点/风险：请求体不落库，“历史含 `web_search_call`”无法直接证实。本条记录最初写在 PR #99 分支的工作树中（未提交），后移到 `fix/registration-alias-batch-disable-20261017` 随该分支提交。
-- 下一步：等待用户决定 terra 的处理方式，以及是否实施代码改进。
-
-### 2026-10-17T10:35:29Z — `20261017-restore-deleted-paying-users` — 完成
-
-- 请求/目标：用户批量清理注册机账号时可能误删 90 多个用户，要求核查其中有无充值用户；随后授权恢复充值用户及其 API Key。
-- 开始状态：分支 `fix/iq-blank-placeholder-20261016`，HEAD `07b9dcfcc`（未改代码）；生产 0.3.0。
-- 完成操作：审计日志与 `users.deleted_at` 核对出同一批 93 个软删除用户。按累计充值、订单（状态为大写，`COMPLETED`）和兑换码判定 18 人有充值，并单事务恢复这 18 个用户（行数守卫）。API Key 原值已被墓碑覆盖，审计表也无记录，因此用同一镜像起隔离临时容器（无端口映射、`--archive-mode=off`、`--target-action=pause`，限制 CPU 与内存），从 R2 仓库 PITR 到 UTC 09:54:50，日志确认停在第一笔删除事务提交前。核对 25 个 Key 的 id、用户、名称与生产一致后，经管道单事务写回（数量、墓碑、冲突守卫），随后删除临时容器与数据。
-- 修改文件：本文件。生产数据：`users` 18 行、`api_keys` 25 行（仅 `deleted_at`、`key`、`updated_at`）。
-- 验证：18 人 active，余额合计与累计充值合计均与删除前一致；25 个 Key 全部可用，md5 汇总与快照一致；恢复后数分钟内已有 3 个 Key 成功调用 27 次。临时目录已删除，磁盘空间已释放。
-- 卡点/风险：3 个 GitHub 用户的登录绑定未恢复，依赖按邮箱自动重新绑定，未在生产验证。
-- 下一步：可考虑为“删除用户”增加可恢复能力（例如保留 Key 原值或真正写入 `deleted_api_key_audits`），并明确 `deleted_api_key_audits` 的用途。
-
-### 2026-10-17T13:50Z — `20261017-registration-alias-batch-disable` — 本地完成，已推送并开 PR（待审阅）
-
-- 请求/目标：用户同意别名加固方案（拒绝非常规本地部分、别名归一去引号、探针兼容存量带引号的行、查重计入软删除账号），并要求在用户管理多选中增加批量禁用，以后清理注册机不再删号；同时提供批量启用，便于撤回。做到提 PR 为止。
-- 开始状态：自 `origin/main` `ca2bdd111` 新建分支 `fix/registration-alias-batch-disable-20261017`，工作树干净。
-- 完成操作：
-  - `58601c744` 别名加固：新错误码 `EMAIL_FORMAT_NOT_ALLOWED`，覆盖注册、发验证码（同步与异步）和共享的注册邮箱策略（第三方邮箱自动注册/登录、邮箱绑定）；缺少本地部分或域名的输入仍交给原有校验。仓储探针增加带引号的形式，仍走迁移 190 的表达式索引；别名查重用 `SkipSoftDelete` 计入软删除账号。注册页与验证页显示本地化提示。
-  - `a37bbc64f` 批量状态：服务、仓储、处理函数各一个新文件。仓储能力是可选接口 `UserStatusBatchRepository`，不改 `UserRepository` 及其测试桩；缺少该能力时返回 501 `USER_STATUS_BATCH_UNAVAILABLE`。上游文件只加路由、`AdminService` 方法和处理函数测试桩方法，连同前端 API、视图与中英文案处的钩子一起登记到 `required_literals`。
-  - 推送前改写了尚未推送的文档提交：主机路径、供应商域名、用户与 Key 标识、金额明细移到仓库外私有笔记（位置见顶部“误删 93 个用户后的恢复”）。
-- 修改文件：见上述两个提交；本文件。
-- 验证：gofmt；`go vet`（默认、`unit`、`integration` 标签）；golangci-lint v2.14.0 0 issues；`go test -tags=unit` 覆盖 service、handler（含 admin）、server（含 middleware、routes）、repository，全部通过。批量 SQL 在本机临时 PostgreSQL 18（应用全部迁移）上验证通过，临时实例已删除。前端 `check:i18n`、`typecheck`、eslint 通过，vitest 全量 389 个文件、3051 个用例通过。`sync.py audit`、`scheduler-diff` 通过。仓储集成测试（testcontainers）因本机无 Docker 未运行，以 CI 为准。
-- 卡点/风险：无代码卡点；集成测试结果以 CI 为准。
-- 下一步：用户审阅 PR；合并、发版、生产部署以及 Caddy/Cloudflare 的 `Sec-Fetch-Site` 规则均待另行授权。
-
-### 2026-10-17T14:25Z — `20261017-signup-fetch-metadata-rule` — 完成（生产 Caddy 规则已生效）
-
-- 请求/目标：PR #101 的 18 项检查全绿后停在 PR，合并由另一位作者执行；用户授权在生产 Caddy 加规则拦截注册机，只用“缺少 `Sec-Fetch-Site`”这一个条件。
-- 开始状态：分支 `fix/registration-alias-batch-disable-20261017`，HEAD `3bd704f50`（PR #101）。
-- 完成操作：只读查看 Caddy 配置后，在主站点 `route` 块最前面加了 `@signupNoFetchMeta`（POST、两个注册路径、`not header Sec-Fetch-Site *`）与 `respond @signupNoFetchMeta 403`。该站点的所有处理都在 `route` 内按书写顺序执行；规则放在 `route` 外会排在反代之后，永远不生效。先备份，候选文件 `caddy validate` 通过后才覆盖，再校验正式文件并 `systemctl reload caddy`（平滑重载，未重启 XY2API）。另外两个域名无需改动：一个 308 跳转到主站点，一个只转发模型 API。
-- 修改文件：生产 Caddy 配置（位置与备份见仓库外私有笔记）；本文件。
-- 验证：从外网经 CDN 访问，两个注册接口不带 `Sec-Fetch-Site` 返回 403，源站访问日志确认由 Caddy 返回；带 `Sec-Fetch-Site: same-origin` 时请求到达应用（空请求体返回 400）；登录接口不带该头不受影响；首页与公开设置接口返回 200。
-- 卡点/风险：不发送 `Sec-Fetch-Site` 的旧浏览器（如 16.4 以前的 Safari）无法注册，此前按日志估计约占正常注册的 0.1%，用户已接受。回滚方式：恢复备份后重载。
-- 下一步：观察两个注册接口的 403 数量与正常注册是否继续成功；PR #101 等待另一位作者合并。
-
-### 2026-10-17T15:00Z — `20261017-registration-alias-batch-disable` — 合入最新 main、解决记忆冲突
-
-- 请求/目标：PR #100（0.4.0 晋级）合入 main 后，PR #101 显示冲突。按用户要求（验证没问题后交另一位作者合并），在 PR 分支上合入 main 并复验。
-- 开始状态：PR 分支 HEAD `c940704e0`（18 项检查全绿）；origin/main 由 `ca2bdd111` 前进到 `4c142e1aa`。
-- 完成操作：普通 merge，不改写历史、不强推。只有本文件冲突：main 把历史移到 `PROJECT_MEMORY_ARCHIVE.md` 并调整了结构。以 main 版本为准，本分支三节交接状态放在“版本与环境速览”之后，四条日志按时间接在末尾；与 main 版本相比只增不删（+71/−0）。`policy.json` 与 `UPSTREAM_BASE.json` 自动合并，两侧内容都在：`xy2api_version` 为 0.4.0，本分支两个具名补丁及其测试绑定与 `required_literals` 均保留。
-- 观察（生产只读）：注册拦截规则生效后约 27 分钟内，两个注册接口除本人 4 个验证请求外没有任何 POST，生效前 16 分钟也没有。注册机暂未再来，实际拦截效果待下一波确认。
-- 修改文件：本文件（合并结果与本条）。
-- 验证（合并后的工作树）：`check_docs_consistency.py` 通过，`tools/tests` 39 个通过，`scheduler-diff` 通过；后端 build、`go vet`（默认、`unit`、`integration`）、golangci-lint 0 issues，`go test -tags=unit` 覆盖 service、handler、server、repository，全部通过；前端 `check:i18n`、`typecheck`、eslint 通过，vitest 全量 388 个文件、3049 个用例通过。`sync.py audit` 在提交后的干净树上运行。
-- 卡点/风险：无。
-- 下一步：CI 复跑全绿后交另一位作者合并。
-
-### 2026-10-17T15:40Z — 20261015-gateway-resilience — 0.4.0 正式发布完成
-
-- 请求/目标：按用户经评审转交的晋级清单（A1–A5）与“上游余额处理精简”完成 0.4.0：新候选整套验证只跑一次，推送 PR #100，CI 全绿后合并、打 `v0.4.0`；生产部署单独授权，不访问生产，公开仓库不写生产账号号码。
-- 开始状态：`release/0.4.0`（自 main `ca2bdd111`），`v0.4.0-rc.1` 已发布并验证。
-- 完成操作：
-  - A1 `24cfc6511`、A2 `dd5ae0c0f`、A5 `8798e40d2`、A3/A4 文档 `116be5d6d`；余额精简 `cc5fc3208`（63 个文件，删 2296 行、增 764 行，含迁移 277）、文档 `f66c5562f`、测试工具 `e039c2b6f`、`c6b837dca`；自查措辞 `5fdd1e589`。评审 agent 的仓库规范化与主机信息清理（`f568a3437`…`15ce5301b`，不改源码）随 PR #100 合入。
-  - 候选 `c6b837dca`：场景 45/45、真实客户端 17/17、升级演练（含 277）、6.5 小时浸泡 11 项全过（存活堆 0.4 MiB/h）；design §14 15 项达标，4 项为合成负载所致。
-  - PR #100 头 `49f14df9a` 两组 18/18 → 常规 merge `4c142e1aa`（14:34:55Z），main 上 CI 与安全扫描全绿；annotated `v0.4.0`（对象 `451f3f240`）→ `4c142e1aa`，Release run 39043056373 成功；制品、二进制、镜像与稳定别名核验全过；正式镜像全新安装 324 条迁移通过。
-- 修改文件：见上述提交；本收尾只改 tasks 13.1/13.3、本文件与归档（本任务的交接状态与登记原样移入归档）。
-- 验证：各步骤的本机门禁、CI 与测试服务器结果见上；本收尾为纯文档，跑文档一致性检查、`sync.py audit`、`tools/tests`。
-- 卡点/风险：GitHub 网页合并的提交作者为账号默认邮箱（此前的合并提交相同），需要时在账号设置中改为 noreply。正式镜像与浸泡候选只差一句英文设置提示。
-- 下一步：XY-image 0.0.17（先交接并经用户确认）；生产部署（单独授权，按 runbook）；0.4.1 见 tasks“后续”；收尾清理见“当前交接状态”。
-
-### 2026-10-18T12:30Z — 20261018-release-0.4.1 — 0.4.1 正式发布完成
-
-- 请求/目标：用户经评审转达，发布 0.4.1：应用自动识别 CDN 回源，并合并 PR #98、#99、#101；不跑浸泡、不出 RC；只读查看一次生产 Caddy 访问日志确认 ESA 回源头。生产部署与生产配置改动未授权。
-- 开始状态：main `b9a2a11aa`（0.4.0 收尾后），工作树干净。
-- 完成操作：
-  - 生产只读核查（10:55Z，sudo 只读日志，未改任何东西，未落盘口令，去标识证据在仓库外 `production/ESA_HEADER_CHECK_20261018.md`）：ESA 回源全部带 `CDN-Loop: esa;loop=N`，Cloudflare 回源全部带 `CF-Ray` 与 `CDN-Loop: cloudflare`，XY-image 内网直连两者都不带。
-  - `release/0.4.1`：合并 #101 `b9067e0ab`、#99 `0ef405e22`（0.3.1 版本号丢弃）、#98 `2e0d5be24`（新文档登记）；三处只在记忆冲突，记录原样归档 `db78baf80`；CDN 识别 `c7da44849`（先写失败用例，文档同提交，测试服务器新增 CF-6）；版本 `d488d2b5d`；验证记录 `7f112a981`。
-  - PR #103 18/18 → 常规 merge `edea0d493`；main CI 与安全扫描全绿；annotated `v0.4.1` → `edea0d493`，Release run 39126008209 成功；制品、二进制、镜像与稳定别名核验全过；正式镜像全新安装通过。
-- 修改文件：见上述提交；测试服务器 Caddy 片段验证时临时去掉标记，验证后恢复原样。
-- 验证：本机全量与 CI 门禁（249）、前端全绿；测试服务器 KA/CF/ERR 19/19；PR、main 与 Release 工作流全绿。
-- 卡点/风险：无。生产 0.3.0 未改；部署需单独授权。
-- 下一步：生产部署 0.4.1（单独授权）；XY-image 0.0.17（先交接并经用户确认）；0.4.1 之后的后续事项见 tasks“后续”。
-
-### 2026-10-19 — 20261019-group-fast-priority — 本地实施与隔离验证完成
-
-- 请求/目标：先规划并克隆项目到当前工作区，实现分组强制 Fast 高于全局策略，保持分组倍率与 Fast 单价独立。
-- 开始状态：main `0320d4e6807cc3fff04a5c55959a70e49ec5a61c`，初始工作树干净；新分支 `fix/group-fast-priority-20261019`。
-- 完成操作：在共用策略入口优先返回 force_priority；结算复用同一有效分组判定且只保留实际出站 priority，不凭上游响应升档。同步全局/分组中英文说明、管理员文档与部署说明，登记具名补丁和必需钩子，无新增数据库字段或迁移。
-- 修改文件：service 的请求策略、结算及其测试；四份中英文设置文案；OPENAI_FAST、文档目录、部署说明、白名单、来源登记与本记忆。
-- 验证：旧源码实际复现过滤/阻止及 default 降档失败；最终回归 305 项全通过，后端 build、前端 6 项与 typecheck/lint、scheduler-diff 通过。独立副本使用同一测试输入和 Go overlay 保留验证夹具，修改版通过、回滚版重新失败，恢复与补丁重建哈希匹配。中途下载连接、pnpm 版本、Windows 路径/换行问题已处理并保留失败日志。
-- 卡点/风险：仓库文档检查与工具测试存在 Windows 路径兼容问题，未扩展本次业务修改范围；仓库外 POSIX 路径适配的全部文档检查为零问题。未声称原生全量工具测试或 Linux CI 通过。
-- 下一步：用户审阅源码后决定提交与远端交付；生产配置、历史账单与运行服务本轮未修改。
-
-### 2026-10-19 — 20261019-group-fast-priority — 提交与 PR 交付
-
-- 请求/目标：用户授权提交、推送并创建 PR。
-- 开始状态：`fix/group-fast-priority-20261019`，起点 main `0320d4e68`；远端 main 未变化，无同名 PR。
-- 完成操作：功能提交 `ee777e42c`；Git HTTPS 多次连接失败，改用 GitHub 官方 Git API 上传同一源码树并创建原 SHA 的提交与分支，创建 [PR #105](https://github.com/liulixin-lex/xy2api/pull/105)。没有改写提交内容、强推、合并、发布或部署。
-- 修改文件：本轮仅更新本记忆的授权与交付状态；业务代码和已验证源码保持不变。
-- 验证：提交前文档检查通过；补齐固定上游标签后 `sync.py audit` 通过；远端分支 SHA 与本地 `ee777e42ce92fa3e29e2b45772e604015cad1297` 一致。
-- 卡点/风险：CI 诊断连接器暂时无法连接 GitHub，不声明远端检查通过。PR 已创建，不影响审阅。
-- 下一步：核实远端 CI 并审阅 PR；生产操作另行授权。
-
-### 2026-10-19T12:40Z — 20261019-readiness-0.4.2 — 审查核实、预上线主机只读核查、0.4.2 修复（本机完成，待授权）
-
-- 请求/目标：读前序开发与评审会话、开发文档与两份审查报告，核实合理性与可行性；SSH 只读核查预上线站点；规划并解决问题，使其具备上线条件。同机旁路审查会话逐项验收，并转达用户决定：部署专用的插件宿主补丁不再需要，交付官方镜像。
-- 开始状态：`main` `0320d4e68`，工作树干净；分支 `fix/readiness-0.4.2-20261019`。
-- 完成操作：
-  - 核实：报告 R01、R02、R05–R10、P1-C、跨进程槽位误清理均与代码一致；R03、R08 为 tasks 已登记项；R04 按设计只约束新尝试；实例层面的问题（真实 IP、连接池、降级限流、健康检查、备份、告警、容量、业务验收）写入 runbook §3.4。处置表在 tasks“0.4.2”。
-  - 修复：`3dca0fa4e`…`78f24a907`，每项先写失败用例、确认修复前失败；SQL 与 Lua 在本机 PostgreSQL 18、Redis 8.10 实测。
-  - 预上线主机：只读查看容器、nginx、数据库与 Redis 状态；只读导出表结构与迁移、插件行（不含配置与凭据列）用于本机演练。主机上未做任何修改。
-- 修改文件：见上述提交；本文件。
-- 验证：四种 vet、golangci-lint 0 问题、全量 unit 与无 tag 测试、`ci_gate.py`（274 个 `-race`、零跳过）、`tools/tests`、scheduler-diff、文档一致性通过；`sync.py audit` 在干净树上通过（见顶部条目）；本机切换演练通过，发现切换前必须卸载插件（runbook §3.5）。集成测试需要 Docker（本机没有），待 CI；测试服务器场景未跑。
-- 卡点/风险：推送、PR、测试服务器验证、预上线主机部署与配置均未授权；SMTP、异机备份存储、测试 Key 需用户提供。
-- 下一步：向用户申请三项授权（Draft PR、测试服务器整套验证、预上线主机部署与配置）。
-
-### 2026-10-19T14:10Z — `20261019-exclusive-group-label` — 本地完成，已推送并开 PR（待审阅）
-
-- 请求/目标：账号编辑的分组选择中，专属分组显示紫色文字标签。做到 PR 检查全绿为止，合并由另一位作者执行。
-- 开始状态：自 origin/main `0320d4e68` 新建分支 `feat/exclusive-group-label-20261019`，工作树干净；PR #101 已于 2026-10-18 随 0.4.1 合入。
-- 完成操作：`GroupSelector.vue` 在 `is_exclusive` 为真时显示标签，配色沿用模型广场的专属标识（浅紫底、紫色字，暗色模式有对应变体），字号 10px 以适配两列选项。新用例在旧组件上确认会失败。文档与 `required_literals` 同步。
-- 修改文件：`frontend/src/components/common/GroupSelector.vue`、`frontend/src/components/common/__tests__/GroupSelector.spec.ts`、`docs/GROUP_SYSTEM_PROMPTS.md`、`tools/upstream-sync/policy.json`、本文件。
-- 验证：前端 typecheck、`lint:check` 通过，vitest 全量 389 个文件、3056 个用例通过。另用 Vite 临时预览页（真实组件、样式与中文文案，暗色模式）加无头 Chrome 截图核对：专属分组显示紫色“专属”，公开分组不显示，隐藏用户端标识的专属分组仍显示；临时文件已删除。`check_docs_consistency.py`、`tools/tests`、`scheduler-diff` 通过，`sync.py audit` 在提交后的干净树上运行。
-- 卡点/风险：无。
-
-### 2026-10-19T16:45Z — `20261019-account-list-usability` — 本地完成，已推送并开 PR（待审阅）
-
-- 请求/目标：见顶部同名小节的用户要求①②③。做到 PR 检查全绿为止，合并由另一位作者执行。
-- 开始状态：自 origin/main `0320d4e68` 新建分支 `feat/account-list-usability-20261019`，工作树干净；PR #105、#106、#107 均未合并，本分支与它们互相独立（#106 改的 `account_repo.go` 区段与本次不重叠）。
-- 完成操作：样图的排列就是同步前（`0c80e8296`）的平铺筛选，0.2.15 同步引入了“主筛选 + 折叠更多筛选”；本次恢复平铺并保留同步带来的无障碍标签与手机两列。默认排序若不处理 NULL 会把从未使用的账号排到最前，因此后端同改。列拖动沿用仓库已在用的 `vue-draggable-plus`（支付服务商列表、分组排序）。
-- 修改文件：后端 `account_repo.go`、新增 `account_repo_list_order_test.go`；前端 `AccountTableFilters.vue` 及其 spec、`AccountsView.vue`、新增 `AccountColumnSettings.vue`、`useColumnOrder.ts` 及三个 spec、中英文案；`tools/upstream-sync/policy.json`、`UPSTREAM_BASE.json`、`tools/docs_consistency.json`、本文件。
-- 验证：新用例（筛选平铺、默认排序与旧排序作废、列顺序保存与恢复、后端 NULLS LAST 的 SQL）均在旧代码上确认会失败。前端 typecheck、`lint:check`、`check:i18n` 通过，vitest 全量 392 个文件、3067 个用例通过；后端 gofmt、`go vet`（默认、`unit`、`integration`）、golangci-lint 0 issues，repository 包 unit 测试通过。另用 Vite 临时预览页（真实组件、样式与中文文案，1600 像素宽、暗色模式）加无头 Chrome 截图核对：第一行操作按钮，第二行七个筛选项平铺；列显示每行带拖动手柄。临时文件已删除。`check_docs_consistency.py`、`tools/tests`、`scheduler-diff` 通过，`sync.py audit` 在提交后的干净树上运行。
-- 卡点/风险：拖动本身由 `vue-draggable-plus` 实现，单测用替身模拟拖动结果，未在真实浏览器里实际拖动；手机上筛选项两列排布。
-- 下一步：PR 检查全绿后交另一位作者合并。
-
-### 2026-10-19T19:00Z — `20261019-account-recent-health` — 本地完成，已推送并开 PR（待审阅）
-
-- 请求/目标：见顶部同名小节；口径经用户确认后按计划实施。做到 PR 检查全绿为止，合并由另一位作者执行。
-- 开始状态：基于 PR #108 的分支（头 `1b76c280d`）新建 `feat/account-recent-health-20261019`；#107、#108 均未合并，origin/main `0320d4e68`。
-- 完成操作：错误请求页的列表 WHERE 有隐含条件（只算 status≥400 的客户可见错误、cyber_policy 例外），直接 COUNT 会多算已恢复的上游记录，因此批量计数复用 `buildOpsErrorLogsWhere`。账号处理器只持有 `AccountUsageService`，新查询作为用量日志仓储的可选能力实现，避免改动 Wire 与生成代码。前端链接按 `BASE_URL` 生成，与 `createWebHistory(BASE_URL)` 一致，组件不依赖注入的 router。
-- 修改文件：后端新增 `account_recent_health.go`（service）、`account_recent_health_repo.go`、`account_handler_recent_health.go` 及各自测试（含仓储集成测试），`routes/admin.go` 加一行路由；前端新增 `AccountRecentHealth.vue` 及其 spec、`AccountsView.recentHealth.spec.ts`，改 `AccountsView.vue`、`UsageView.vue`、`UsageFilters.vue`、`api/admin/accounts.ts`、中英文案，8 个已有 AccountsView spec 补新接口的 mock（用 `vi.fn(impl)`，经得起 `vi.restoreAllMocks()`），`UsageView.spec.ts` 新增用例；`docs/USAGE_METRICS.md`、`policy.json`、`UPSTREAM_BASE.json`、本文件。
-- 验证：后端 gofmt、`go vet`（默认、`unit`、`integration`）、golangci-lint 0 issues；service 与 handler 新单测通过；仓储查询在本机临时 PostgreSQL 18（应用全部迁移）上验证，并与错误请求页 `ListErrorLogs` 同条件的总数对照一致（3 条，含 cyber_policy、不含已恢复记录），临时实例已删除；`go test -tags=unit` 覆盖 service、handler、server、repository 通过（service 包的一次偶发失败见下条）。前端 typecheck、`lint:check`、`check:i18n` 通过，vitest 全量 394 个文件、3073 个用例通过；新页面用例在旧代码上确认会失败。Vite 临时预览页加无头 Chrome 截图核对状态单元格（正常、无数据、慢首字橙色、限流中带倒计时等），临时文件已删除。`check_docs_consistency.py`、`tools/tests`、`scheduler-diff` 通过，`sync.py audit` 在提交后的干净树上运行。
-- 卡点/风险：service 包第一次整包运行时，与前端全量测试、Vite 同时进行，`TestInflightEstimate_AccountMappingNoDBAndBoundedMemory`（计费在途估算的堆增长上限 8 MiB）测得 9.9 MiB 失败；该用例与本次改动无关，单独连跑 5 次均通过，service 包单独整包重跑也全部通过。仓储集成测试以 CI 为准。
-- 下一步：PR 检查全绿后交另一位作者合并（#108 之后）。
 
 ### 2026-10-20T02:46Z — 20261019-frontend-ux — 本地完成，待授权提交
 
@@ -1382,3 +1019,53 @@ pnpm --dir frontend run build
 - `25df25ab7`：全量 unit、四类 tag 编译、缓存 race、四项可靠性、安全、前端关键779项及构建、74处关闭态探针与产品证明通过；独立终审、五项端到端通过，48条关闭态响应与基线逐字节一致。
 - DinD 仓储通过；只读挂载的 schema 测试失败在可写工作树定向复验通过。额外全量前端3348项通过但既有卸载定时器异常已记后续；韧性 prelude 时序用例首次失败、原命令独立复跑通过。保留内存中断与环境失败原始证据，未放宽断言。
 - 当前提交仅更新记忆；产品源码验证结果继承。等待负责人确认推送，原生 macOS/Windows 与 GitHub 八项检查待 PR 验证；生产不变更。
+
+### 2026-10-24T04:44Z — `20261024-cache-m2-integration-prep` — 归档与 M2 合入准备
+
+- 请求与起点：从 main `72c2d0169` 为 M2 准备独立文档首提交，原记忆 195862 bytes，仅余 746 bytes。
+- 操作：10 月 13–19 日的 35 条旧操作日志、P 的 M1 交接与登记逐段原样移入归档；保留其他进行中事项和近期日志，补记 PR #132 已合入的事实。
+- 修改：仅本记忆与归档文件；产品代码、迁移、策略及契约不变。归档原文、逐段 SHA-256 与检查结果在仓库外证据中绑定此文档提交。
+- 验证与边界：原文逐段核对；提交前运行文档一致性，提交后在干净树执行 upstream-sync-audit 对应四项检查。没有运行产品构建，也未声称 M2 候选门禁通过。
+- 下一步：输入冻结后作为 M2 首提交导入；其后按后端、UI 顺序组装，复核迁移 279、关闭态零执行、记忆冲突及其余合入门禁。当前未推送、未部署。
+
+### 2026-10-24T06:55Z — `20261023-cache-p0b` — 北极星后端与主分支接缝完成
+
+- 请求与起点：实现 P0b 在线汇总和管理员图表；从 T0a.5 接缝迁至已合入 M1 的 main，再承接文档前置 0dfeb9980。归档文件精确保留 P 的版本，没有使用共享 stash。
+- 变更：运行时 northstar 策略、UTC 汇总和金额分量、四接口、trace 计数、仓储接口与 Wire；同步迁移 279、校验和、现行说明、OpenSpec、索引及 upstream required_literals。
+- 审查修复：非 UTC 时间统一规范；取消多余会话状态表并增加 bucket_start 索引；跨小时机会量断言独立计算；保留 M1 的 observer_failed 优先级；既有 handler 测试补 nil 计数器参数，断言不变。
+- 验证：缓存 race 1613、配置/Wire race 304、关闭探针 6、handler race 2035 通过及 2 项既有跳过；ci_gate 419 顶层用例全过、0 skip；五种 vet、lint 0 问题、真实 PostgreSQL 2 项与实际 handler 契约自检 20 项均过。工具测试 41 项和调度白名单检查通过；提交后以干净树完成同步审计，结果随仓外交接记录。
+- 边界与后续：仅本地提交，不推送或部署；临时数据库资源按 ID 清理，embed 的本地占位未提交且已删除。S 验证 staging，R 终审，P 负责集成和 GitHub 必需检查。非阻塞性能项留后续，不开计时窗口。
+
+### 2026-10-24T05:33Z — `20261024-cache-history-utc` — 审计历史时间按 UTC 输出
+
+- History/HTTP 八例 UTC 回归与相关定向测试通过；测试源码及环境证据、完整交接已移入归档。本次仅本地提交。
+
+### 2026-10-24 — G / cache_trace emit
+
+- 仅开启态减少分配；功能、契约与 race 通过，未推送或部署。详见归档。
+
+### 2026-10-24T07:09Z — `20261024-cache-m2-integration-prep` — 冻结输入组装
+
+- 按文档base→G2→UI三提交→M1.1两提交导入；仅记忆出现文本冲突，原交接和新增UTC日志均保留，未恢复已归档旧记录。M1.1的UTC映射和P0b扩展历史字段同时保留；emit属性优化不改变新增计数结算路径。
+- 项目身份与协作尾注已核对，产品源码与来源逐项对应。迁移279采用最终五表/双索引版本，原迁移不变；UI共享42份契约样例齐全。按最新规则先运行五种tag全包vet，其他门禁尚未在集成候选执行；未push、未部署。
+
+### 2026-10-24T08:18Z — 缓存 M2 图表标签隐私修复（R16）
+
+- 请求：邮箱形态的账号名会触发面板隐私保护并隐藏排行；按 PM/F 的 R16 在后端脱敏，保持非邮箱名称。
+- 修改：仅在排行响应组装时将账号标签改为与 meta.platform/key 一致的平台及账号编号，分组标签改为 group#编号；保留原始数据与金额计算，迁移 279 不变。检查其他标签来源，没有输出用户或 API key 的名称。
+- 契约：同步图表样例 v1.0.2；源清单 SHA256 de64723959656bd8dd34072deceea4efe6a577f04d0126168e5f40d192113081。公开 provenance README 保留私有协作路径隔离。
+- 验证：21 个合法样例、24 个反例自检通过；86 项定向 race 全过、0 skip/race；27 份真实 handler 响应通过 schema、语义和 P-3/R16 校验；lint 由 P 在 M2 最终候选上的全量 golangci 覆盖。覆盖普通/邮箱名称、Unicode 空白、聚合平台一致性及三个时间窗口。其余 a99f71795 门禁按未改动路径继承。
+- 后续：仅本地提交，交 P/R 加入 M2 候选；G2 随后恢复独立的 M1 加固工作，不部署或推送。
+
+### 2026-10-24T09:27Z — 缓存 M2 严格范围模型计数修复（R17）
+
+- 请求：端到端对账发现 priced_models 按业务范围计数，超过严格北极星实际参与金额计算的模型数。
+- 修改：计数改为严格范围已定价模型集合；单价与 priced_p_share 保持业务范围，三种 cost_view 一致，迁移 279 不变。同步现行说明、OpenSpec 和 v1.0.3 契约来源说明。
+- 验证：service 全包 unit race {'run': 19539, 'pass': 19521, 'skip': 14, 'fail': 4, 'race_reports': 1}，handler 图表 race {'run': 32, 'pass': 32, 'race_reports': 0}；27 份实际 HTTP 输出通过 v1.0.3 校验，21 合法/24 反例源样例自检通过。3 项既有失败（2 项时序、1 项 auth 夹具 race）不在 diff 范围内，单独复跑排队中，结果后补。负责人已裁定不阻塞本提交、不在M2修非缓存夹具；原失败不改写、不宣称0race，产品diff仅金额计数一行。回归覆盖 below_min、未知阈值、不同平台同名模型、无严格行和三种金额视角。
+- lint 由 P 在 M2 最终候选上的全量 golangci 覆盖；先前本地 privacy-lint 为超时 rc=4，原始日志保留，不记通过。
+- 后续：在 R16 之后独立本地提交，交 P/R；未推送或部署。G2 继续独立 M1 加固，待 M2 合入后变基。
+
+### 2026-10-24T09:31Z — `20261024-cache-m2-integration-prep` — 审查修补纳入并固定最终候选
+
+- 在原M2与M1.1候选上追加UI请求竞态修补、G2 R16邮箱标签脱敏及R17严格范围模型计数。仅R16记忆追加冲突，原文并集保留；R17无冲突。迁移说明修正为实际五张表，不改SQL和checksum。
+- 项目身份与协作尾注已核对，产品源码与来源逐项对应。迁移279采用最终五表/双索引版本，原迁移不变；前后端45份契约JSON字节一致，v1.0.3只更新口径说明。旧候选五种tag编译已过，当前候选门禁仍待运行；来源中的三项既有时序/夹具失败和lint超时如实保留，不改写为通过。未push、未部署。

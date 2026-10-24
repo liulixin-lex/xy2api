@@ -50,6 +50,9 @@ func (s *OpenAIGatewayService) settleCacheTrace(ctx context.Context, result *Ope
 		d.SessionDigest, d.GroupID, d.AccountID = diagnostic.Session, diagnostic.GroupID, account.ID
 		d.PromptTokens, d.ReadTokens = result.Usage.InputTokens, result.Usage.CacheReadInputTokens
 		emitCacheTraceRejected(d)
+		if result.cachePanel != nil {
+			s.recordCachePanelTrace(result)
+		}
 		return
 	}
 	t := result.CacheTrace
@@ -108,6 +111,9 @@ func (s *OpenAIGatewayService) settleCacheTrace(ctx context.Context, result *Ope
 		async.publish(s, session)
 	}
 	t.emitCacheTrace()
+	if result.cachePanel != nil {
+		s.recordCachePanelTrace(result)
+	}
 }
 
 // Already-attempted requests billed under the existing abuse policy retain one
@@ -145,4 +151,11 @@ func (s *OpenAIGatewayService) settleCacheTraceUndelivered(result *OpenAIForward
 		telemetry.mu.Unlock()
 	}
 	emitCacheTraceRejected(d)
+	if result.cachePanel != nil {
+		// This path emits a local final payload without changing the trace's
+		// attribution/history state. Counters consume exactly that emitted usage.
+		d.LossClass = "n/a_sampled_out"
+		result.cachePanel.rejected.Store(&d)
+		s.recordCachePanelTrace(result)
+	}
 }

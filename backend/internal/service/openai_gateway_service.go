@@ -235,6 +235,7 @@ type OpenAIUsage struct {
 
 // OpenAIForwardResult represents the result of forwarding
 type OpenAIForwardResult struct {
+	cachePanel        *cachePanelRequest
 	CacheTrace        *cacheTrace `json:"-"`
 	cacheTraceFailure *cacheTraceFailure
 	CacheDiagnostic   *OpenAICacheDiagnostic `json:"-"`
@@ -449,6 +450,7 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
 	cachePolicies         *CachePolicyService
+	cacheCounters         *CacheTraceCounters
 	cacheTraceWorkersOnce sync.Once
 	cacheTraceWorkers     *cacheTraceWorkers
 	openaiCacheOnce       sync.Once

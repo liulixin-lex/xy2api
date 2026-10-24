@@ -30,11 +30,14 @@ describe('Cache observability integration surface', () => {
     expect(en.nav.cacheObservability).toBeTruthy()
   })
 
-  it('ships only the switches in M1, without mock data', () => {
+  it('shows the daily-check tab only when the chart endpoints exist and keeps mock data out of production', () => {
     const view = read('../CacheObservabilityView.vue')
     expect(view).toContain('<CacheSettingsPanel />')
+    expect(view).toContain('v-if="charts.available.value"')
     expect(view).not.toMatch(/mock/i)
-    const api = read('../settings/api.ts')
-    expect(api).toContain("const base = '/admin/cache/policies'")
+    const source = read('../charts/dataSource.ts')
+    expect(source).toContain('if (!env.DEV) return')
+    expect(source).toContain("if (import.meta.env.DEV && source === 'mock')")
+    expect(read('../settings/api.ts')).toContain("const base = '/admin/cache/policies'")
   })
 })

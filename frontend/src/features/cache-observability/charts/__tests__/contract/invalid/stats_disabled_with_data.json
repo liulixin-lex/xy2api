@@ -1,0 +1,100 @@
+{
+  "_contract": [
+    "P-2",
+    "P-7"
+  ],
+  "_note": "必须被拒绝：trace_enabled=false 时数组必须为空、比率为 null",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/cache/stats?window=1h&platform=openai",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "policy_version": "2026-10-22-v1",
+      "as_of": "2026-10-23T07:03:12Z",
+      "generated_at": "2026-10-23T07:03:12Z",
+      "window": {
+        "start": "2026-10-23T06:03:12Z",
+        "end": "2026-10-23T07:03:12Z"
+      },
+      "effective_start": "2026-10-23T06:03:12Z",
+      "process_started_at": "2026-10-22T11:30:00Z",
+      "trace_enabled": false,
+      "trace_policy_rev": 7,
+      "schema_version": 1,
+      "platforms_covered": [
+        "openai"
+      ],
+      "scope_notes": [
+        "messages_bridge_excluded"
+      ],
+      "coverage": {
+        "business_requests": 0,
+        "business_prompt_tokens": 0,
+        "traced_requests": 0,
+        "traced_prompt_tokens": 0,
+        "coverage_ratio": null,
+        "category_known_ratio": null,
+        "targets": {
+          "coverage_ratio": 0.95,
+          "category_known_ratio": 0.99
+        }
+      },
+      "loss_classes": [
+        {
+          "class": "full",
+          "requests": 41020,
+          "prompt_tokens": 5800000000,
+          "read_tokens": 5420000000,
+          "opportunity_tokens": 0,
+          "excluded": false
+        },
+        {
+          "class": "under_read",
+          "requests": 3110,
+          "prompt_tokens": 520000000,
+          "read_tokens": 300000000,
+          "opportunity_tokens": 180000000,
+          "excluded": false
+        },
+        {
+          "class": "cold",
+          "requests": 4300,
+          "prompt_tokens": 560000000,
+          "read_tokens": 0,
+          "opportunity_tokens": 0,
+          "excluded": false
+        },
+        {
+          "class": "n/a_sampled_out",
+          "requests": 2400,
+          "prompt_tokens": 240000000,
+          "read_tokens": 190000000,
+          "opportunity_tokens": null,
+          "excluded": true
+        },
+        {
+          "class": "n/a_other",
+          "requests": 60,
+          "prompt_tokens": 5000000,
+          "read_tokens": 3000000,
+          "opportunity_tokens": null,
+          "excluded": true
+        }
+      ],
+      "pck_in": [],
+      "pck_out": [],
+      "pck_out_is_uuid_ratio": null,
+      "session_headers": [],
+      "sess_out_relation": [],
+      "route_reasons": [],
+      "rebind_causes": [],
+      "model_isolated_switch_rate": null,
+      "host_read_ewma": []
+    }
+  }
+}

@@ -53,7 +53,8 @@
       "tools/**",
       "openspec/changes/gateway-resilience-v2-20261021/**",
       "openspec/changes/gateway-resilience-045-20261021/**",
-      "openspec/changes/cache-runtime-policies/**"
+      "openspec/changes/cache-runtime-policies/**",
+      "openspec/changes/cache-northstar-panel/**"
     ],
     "manual_merge": [
       "Makefile",
@@ -2344,6 +2345,102 @@
     {
       "path": "frontend/src/components/layout/AppSidebar.vue",
       "value": "const DatabaseIcon = {"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "registerCacheObservabilityRoutes(admin, h)"
+    },
+    {
+      "path": "backend/internal/server/routes/cache_observability.go",
+      "value": "panel.GET(\"/northstar\", read.Read(\"northstar\"))"
+    },
+    {
+      "path": "backend/internal/server/routes/cache_observability.go",
+      "value": "panel.GET(\"/breakdown\", read.Read(\"breakdown\"))"
+    },
+    {
+      "path": "backend/internal/server/routes/cache_observability.go",
+      "value": "panel.GET(\"/stats\", read.Read(\"stats\"))"
+    },
+    {
+      "path": "backend/internal/server/routes/cache_observability.go",
+      "value": "panel.GET(\"/experiments\", read.Read(\"experiments\"))"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "NewCacheNorthstarAggregator,"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "NewCacheObservabilityService,"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "NewCacheTraceCounters,"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "svc.cacheNorthstar = northstar"
+    },
+    {
+      "path": "backend/internal/repository/wire.go",
+      "value": "NewCacheNorthstarRepository,"
+    },
+    {
+      "path": "backend/internal/service/dashboard_aggregation_service.go",
+      "value": "defer s.runScheduledCacheNorthstar()"
+    },
+    {
+      "path": "backend/internal/service/cache_policy.go",
+      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar())"
+    },
+    {
+      "path": "backend/internal/service/openai_cache_diagnostics.go",
+      "value": "result.cachePanel = &cachePanelRequest{policy: p}"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_v2_passthrough_adapter.go",
+      "value": "turnResult.cachePanel = &cachePanelRequest{policy: p}"
+    },
+    {
+      "path": "backend/internal/service/cache_policy_gateway.go",
+      "value": "s.cacheCounters = counters"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "s.recordCachePanelSettlement(result, usageLog, account)"
+    },
+    {
+      "path": "backend/internal/service/cache_trace_settlement.go",
+      "value": "s.recordCachePanelTrace(result)"
+    },
+    {
+      "path": "backend/internal/repository/cache_northstar_repo.go",
+      "value": "pg_advisory_xact_lock(20261023,279)"
+    },
+    {
+      "path": "backend/internal/repository/cache_northstar_source.sql",
+      "value": "WHERE u.created_at >= $1::timestamptz - interval '1 hour' AND u.created_at < $2"
+    },
+    {
+      "path": "backend/internal/service/dashboard_aggregation_service.go",
+      "value": "s.timingWheel.ScheduleRecurring(\"cache:northstar\", time.Minute, s.runStandaloneCacheNorthstar)"
+    },
+    {
+      "path": "backend/internal/service/dashboard_aggregation_service.go",
+      "value": "s.cacheNorthstar.Cleanup(ctx, now)"
+    },
+    {
+      "path": "backend/internal/handler/wire.go",
+      "value": "CacheObservability:     cacheObservabilityHandler,"
+    },
+    {
+      "path": "backend/internal/handler/wire.go",
+      "value": "ProvideCacheObservabilityHandler,"
+    },
+    {
+      "path": "backend/internal/handler/wire.go",
+      "value": "ProvideCachePanelBuildInfo,"
     }
   ],
   "forbidden_module_paths": [

@@ -1,0 +1,98 @@
+{
+  "_contract": [
+    "P-1",
+    "P-6",
+    "P-5"
+  ],
+  "_note": "dimension=group。排名按业务全量范围；meta 只有 platform。回退组由前端按 §7.1 从 availability_fallback_group_id 推导，响应中没有 is_fallback（v1.7.4，INV-18）。其余行与 other 的金额按总额重新加权，不平均各行比率。",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/cache/breakdown?dimension=group&window=7d&platform=all&sort=opportunity&limit=10",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "policy_version": "2026-10-22-v1",
+      "as_of": "2026-10-23T07:00:00Z",
+      "generated_at": "2026-10-23T07:03:12Z",
+      "window": {
+        "start": "2026-10-16T07:00:00Z",
+        "end": "2026-10-23T07:00:00Z"
+      },
+      "dimension": "group",
+      "sort": "opportunity",
+      "platform": "all",
+      "cost": {
+        "currency": "USD",
+        "view": "list",
+        "pricing_source": "settled_cost",
+        "pricing_changed_in_window": false,
+        "notes": []
+      },
+      "total": {
+        "requests": 128473,
+        "prompt_tokens": 17757879000,
+        "read_tokens": 14262547000,
+        "opportunity_recorded_tokens": 2469214000
+      },
+      "rows": [
+        {
+          "key": "18",
+          "label": "pool-a",
+          "meta": {
+            "platform": "openai"
+          },
+          "requests": 52000,
+          "prompt_tokens": 7420000000,
+          "read_tokens": 6110000000,
+          "token_hit_upper": 0.82345,
+          "token_hit_lower": 0.82345,
+          "request_hit": 0.921154,
+          "opportunity_recorded_tokens": 902000000,
+          "opportunity_share": 0.365,
+          "saved_amount": 7802.4,
+          "opportunity_amount": 1120.3,
+          "opportunity_amount_share": 0.359,
+          "token_hit_cost_weighted_upper": 0.8264
+        },
+        {
+          "key": "31",
+          "label": "pool-b",
+          "meta": {
+            "platform": "anthropic"
+          },
+          "requests": 30110,
+          "prompt_tokens": 4150000000,
+          "read_tokens": 3290000000,
+          "token_hit_upper": 0.792771,
+          "token_hit_lower": 0.791108,
+          "request_hit": 0.897376,
+          "opportunity_recorded_tokens": 611000000,
+          "opportunity_share": 0.247,
+          "saved_amount": 4410.9,
+          "opportunity_amount": 801.2,
+          "opportunity_amount_share": 0.257,
+          "token_hit_cost_weighted_upper": 0.7951
+        }
+      ],
+      "other": {
+        "count": 23,
+        "requests": 9100,
+        "prompt_tokens": 1210000000,
+        "read_tokens": 950000000,
+        "token_hit_upper": 0.785124,
+        "token_hit_lower": 0.785124,
+        "request_hit": 0.901099,
+        "opportunity_recorded_tokens": 210000000,
+        "opportunity_share": 0.085,
+        "saved_amount": 1201.3,
+        "opportunity_amount": 262.8,
+        "opportunity_amount_share": 0.084,
+        "token_hit_cost_weighted_upper": 0.7902
+      }
+    }
+  }
+}

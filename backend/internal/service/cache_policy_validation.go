@@ -96,6 +96,9 @@ type CachePolicyValidation struct {
 }
 
 func (s *CachePolicyService) merge(index int, before map[string]any, raw json.RawMessage, writing bool) (map[string]any, []CachePolicyDiff, []CachePolicyFieldError) {
+	if index == 2 {
+		return mergeNorthstarPolicy(before, raw, writing)
+	}
 	out := make(map[string]any, len(before))
 	for k, v := range before {
 		out[k] = v
@@ -111,7 +114,7 @@ func (s *CachePolicyService) merge(index int, before map[string]any, raw json.Ra
 		names = append(names, field)
 	}
 	sort.Strings(names)
-	defaults := policyDefaults(index)
+	defaults := s.defaults(index)
 	for _, field := range names {
 		value := patch[field]
 		if _, ok := defaults[field]; !ok {
@@ -135,7 +138,7 @@ func (s *CachePolicyService) merge(index int, before map[string]any, raw json.Ra
 			continue
 		}
 		var next any
-		if field == "enabled" {
+		if field == "enabled" || field == "persist_trace_hourly" {
 			var v bool
 			if string(value) == "null" || json.Unmarshal(value, &v) != nil {
 				errs = append(errs, CachePolicyFieldError{Field: field, Code: "malformed_body"})
@@ -240,7 +243,7 @@ func (s *CachePolicyService) validation(index int, entry cachePolicyEntry, w Cac
 }
 func (s *CachePolicyService) Validate(ctx context.Context, key string, w CachePolicyWrite, bodyErrors []CachePolicyFieldError) (CachePolicyValidation, error) {
 	i := policyIndex(key)
-	if i < 0 || i > 1 {
+	if i < 0 || i >= s.availablePolicyCount() {
 		return CachePolicyValidation{}, PolicyNotInBuild(key)
 	}
 	rows, err := s.repo.GetMultiple(ctx, []string{cachePolicySettings[i]})
@@ -256,7 +259,7 @@ func invalidPolicy(errs []CachePolicyFieldError) error {
 }
 func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePolicyWrite, bodyErrors []CachePolicyFieldError, actor CachePolicyActor) (CachePolicyView, []CachePolicyDiff, error) {
 	i := policyIndex(key)
-	if i < 0 || i > 1 {
+	if i < 0 || i >= s.availablePolicyCount() {
 		return CachePolicyView{}, nil, PolicyNotInBuild(key)
 	}
 	if s.store == nil {
