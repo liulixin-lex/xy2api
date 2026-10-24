@@ -202,6 +202,11 @@
 
 ## 进行中的工作
 
+### 20261024-cache-m3-e9 — L-01 租户种子门禁（G，进行中）
+
+- 基于冻结M3候选6188d5d04，仅在policy关闭早退后、cohort前要求RoutingSession带v2:；非隔离旧种子记no_routing_session，不变更0.4.x粘性与显式键处理。
+- 覆盖三处真实哈希入口、复合组OpenAI apikey真实Forward与policy_off零执行顺序；附平台闸门阳性/阴性对照，内部skip不代表复合组public trace。单批五tag、L01 focused unit/race、增量lint待执行。T4.0暂停，未推送或部署。
+
 ### 20261024-cache-m3-integration — hardening、L-01 与管理员策略卡片（P，进行中）
 
 - 基于已合入 M2 的 main `16a776e347`，依次集成 G2 hardening、G P1/M3 与 UI 卡片；保留 M2、M1.1、迁移 279 和 northstar 测试隔离。项目 noreply 身份与来源尾注保留。
@@ -1141,3 +1146,8 @@ pnpm --dir frontend run build
 
 - P 依次导入 G2 e7e906619、G c9d2bcc77 与 UI 3b1ddef82，共23项；身份统一为项目noreply，来源说明与尾注保留。文档冲突保留双方记录；279及northstar隔离测试不变，无新迁移。
 - 发布锁与账号options接缝按独立评审建议保持事务外I/O及新revision优先；旧M1期望不改写，M3契约用完整实际响应验收。五tag、unit/race、零执行/logger/compat、lint、安全、前端、DinD与独立golden/staging待最终候选一次流水线，不引用来源编译冒称测试通过。
+
+### 2026-10-24 — 20261024-cache-m3-e9 — 租户种子注入边界
+
+- 仅在策略启用分支、cohort之前接受v2:隔离种子；复合组、无API key与非OpenAI组旧种子沿用no_routing_session内部跳过，既有sticky不变，trace平台范围不扩展。
+- 新增三入口scope、两个租户实际Forward、policy关闭顺序与trace平台对照；allocation控制组夹具补v2:，保持原断言。单条五tag、L01 unit/race及相对6188的增量lint待执行，结果在仓库外PROGRESS补记；不推送、不部署。

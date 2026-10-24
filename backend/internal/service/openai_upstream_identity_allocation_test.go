@@ -24,7 +24,7 @@ func TestOpenAIUpstreamIdentityPrepareAllocationBoundaries(t *testing.T) {
 	session := ""
 	bucket := 0
 	for n := 0; bucket == 0; n++ {
-		session = "synthetic-l01-allocation-session-" + strconv.Itoa(n)
+		session = "v2:synthetic-l01-allocation-session-" + strconv.Itoa(n)
 		bucket = openAIUpstreamIdentityCohort(session)
 	}
 	for _, state := range []string{"off", "control", "account_out_of_scope"} {

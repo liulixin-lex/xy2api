@@ -68,7 +68,10 @@ func prepareOpenAIUpstreamIdentity(c *gin.Context, account *Account) openAIUpstr
 	}
 	session, _ := c.Get(openAICacheSessionGinKey)
 	d.RoutingSession, _ = session.(string)
-	if d.RoutingSession == "" {
+	// Only v2 routing identities are tenant scoped. Composite/non-OpenAI
+	// groups and unauthenticated contexts retain legacy sticky seeds; never
+	// reuse those shared content identities as an upstream UUID.
+	if !strings.HasPrefix(d.RoutingSession, "v2:") {
 		d.Skip = "no_routing_session"
 		return d
 	}

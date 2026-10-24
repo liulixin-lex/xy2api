@@ -258,6 +258,11 @@ cache_trace 在送达分类确定后、真正扣费及用量落库之前输出�
 
 ## OpenAI UUID 会话键补全（L-01）
 
+注入只接受带 `v2:` 前缀的租户隔离路由种子；复合组或其他入口仍使用旧内容种子时，
+L-01 记 `no_routing_session` 并跳过，不进入实验分桶。既有本地 sticky 与兼容转发不变；
+关闭策略在读取种子和前缀检查之前早退。这里的 skip 是内部决策；复合组仍被既有 trace 平台闸门排除，
+不会因此新增客户端可见字段或 cache_trace 事件。
+
 管理员在缓存策略的 `upstream_identity` 中设置 `mode=uuid_fill`、
 `rollout_percent` 和可选的 `account_ids`。默认 `mode=off`、比例 0、账号列表为空、
 `chat_compat_uuid=false`。它受 `cache_feature_master` 和静态紧急总闸共同控制；
