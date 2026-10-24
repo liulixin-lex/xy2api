@@ -386,3 +386,24 @@ func TestCachePolicyUpstreamInvalidAccountsClearEffectiveWarnings(t *testing.T) 
 		})
 	}
 }
+
+func TestCachePolicyM3AndNorthstarPublishedTogether(t *testing.T) {
+	store := newPolicyTestStore()
+	store.rows["cache_feature_master"] = `{"rev":1,"spec":{"enabled":true}}`
+	store.rows["cache_northstar_policy"] = `{"rev":2,"spec":{"rollup_enabled":true}}`
+	store.rows["cache_upstream_identity_policy"] = `{"rev":3,"spec":{"mode":"uuid_fill","rollout_percent":100}}`
+	policies := NewCachePolicyService(store, policyTestConfig(), WithCacheNorthstar())
+	require.NoError(t, policies.Refresh(context.Background()))
+	before := policies.Snapshot()
+	require.True(t, before.NorthstarEnabled())
+	require.EqualValues(t, 2, before.NorthstarRevision())
+	require.True(t, before.UpstreamIdentity().Enabled())
+	require.EqualValues(t, 3, before.UpstreamIdentity().Revision())
+	_, _, err := policies.Update(context.Background(), "northstar", policyWrite(t, `{"expected_rev":2,"spec":{"rollup_enabled":false}}`), nil, CachePolicyActor{})
+	require.NoError(t, err)
+	after := policies.Snapshot()
+	require.False(t, after.NorthstarEnabled())
+	require.True(t, after.UpstreamIdentity().Enabled())
+	require.EqualValues(t, 3, after.UpstreamIdentity().Revision())
+	require.True(t, before.NorthstarEnabled())
+}

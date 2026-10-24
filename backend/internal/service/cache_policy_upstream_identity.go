@@ -9,11 +9,13 @@ import (
 	"sort"
 )
 
-// Keep this explicit: index 2 is northstar, which this build does not implement.
+// Build capabilities are explicit; production enables northstar alongside L-01.
 func (s *CachePolicyService) cachePolicySupported(index int) bool {
 	switch index {
 	case 0, 1, 3:
 		return true
+	case 2:
+		return s.northstarAvailable
 	default:
 		return false
 	}
