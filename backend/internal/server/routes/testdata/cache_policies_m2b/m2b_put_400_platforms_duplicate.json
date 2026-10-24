@@ -1,0 +1,30 @@
+{
+  "_contract": [
+    "P-M2B",
+    "C-6"
+  ],
+  "_note": "M2b：platforms 中的值不得重复，code=duplicate（与 m3m4 的 id 列表同一个错误码）。",
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/observability",
+    "body": {
+      "expected_rev": 2,
+      "spec": {
+        "platforms": [
+          "openai",
+          "openai"
+        ]
+      },
+      "reason": "重复"
+    }
+  },
+  "status": 400,
+  "response": {
+    "code": 400,
+    "message": "cache policy validation failed",
+    "reason": "CACHE_POLICY_INVALID",
+    "metadata": {
+      "errors": "[{\"field\":\"platforms\",\"code\":\"duplicate\"}]"
+    }
+  }
+}

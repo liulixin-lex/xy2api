@@ -232,6 +232,12 @@
 - 当前：完整四提交已变基到M2 main；northstar、计数器、M1.1 emit-only/UTC与仓储测试隔离保留。1e31dbe3c五tag编译全部通过；v1.1后继e972cd4e7仅改样例/unit测试，unit补查通过，其余四tag按未变化编译输入继承。R已核对变基语义无阻塞；工作树待本次纯记忆收尾后交P。实际unit/race、zero/logger/compat/lint、22样例回放与staging仍由最终M3候选统一执行，来源没有重复长测试。未推送、未变更生产。
 
 
+### 20261024-cache-p0b-fields — M2b（G2，进行中）
+
+- 基于 M2 main 16a776e347 开展 T0b.4，保留已合入 M2 的产品、迁移与隔离测试；本地检查点不是可集成提交。默认关闭，不改变出站及计费。
+- 在原 main 72c2d0169 上已录制 20 组出站和 50 组用量/计费，来源与摘要在 testdata；当前仅实现平台与入站链策略字段，provider 捕获和结算尚未接入。
+- 策略旧存储仅在内存补齐 ingress_chain_percent=min(10,chain_percent)，不写回或改变 rev；validate/PUT 使用同一合并基础。契约已发布，无需等待；别名计费变化按裁定延期，不合并。未推送或部署。
+
 
 ### 20261023-cache-p0b — 在线缓存北极星与管理员图表（G2，实现完成，待集成）
 
