@@ -224,7 +224,7 @@
 - 基点main `16a776e347`（M2 已合入），分支 `cache/p1-l01`。既有响应/cohort补修 `05b3f3cfe`、管理员API `a90727351` 已交R；本轮按PM/R追加原位null和管理员候选故障降级，提交号以git log为准。仅实际注入时恢复已有响应字段为null，未生效与显式客户端值不动；不同上游无key形态仍需在实验中核对。
 - 管理API：账号options静态合格、升序最多500；候选失败不阻断List/Get/PUT，空options并追加account_options_unavailable；disable方向Validate/PUT不访问账号表，开启/mixed保持必要校验。管理契约已同步v1.0.2的五份修正及v1.0.3四份增量，共22个原字节M3样例。
 - 验证范围：既有r5 focused7031与140分配对照是旧树证据；13:30剩余重任务按PM中止。本轮仅格式、diff、文档、静态契约与干净树审计，不宣称新增Go测试已通过。Q5是保存的官方文档流示例，不是实际请求录制。
-- 当前：完整四提交已变基到 M2 main，保留 northstar、计数器、M1.1 emit-only/UTC 与仓储测试隔离；接缝和冻结夹具投影已对齐。先经协调队列一次执行 default/unit/integration/e2e/embed 编译检查。P 已确认其余 race/zero/logger/compat/lint 与22样例回放统一在最终 M3 候选运行，来源不重复长门禁；编译结果待补。未推送、未变更生产。
+- 当前：完整四提交已变基到 M2 main，保留 northstar、计数器、M1.1 emit-only/UTC 与仓储测试隔离。候选1e31dbe3c的default/unit/integration/e2e/embed编译全部通过；首轮重复helper失败与修复保留。F新发布m3m4 v1.1，五份list改为M2实际形态，移除旧投影后完整响应比较；仅补查受影响unit tag，结果待补。P已确认race/zero/logger/compat/lint与22样例实际回放在最终M3候选统一执行。未推送、未变更生产。
 
 
 
@@ -1125,3 +1125,8 @@ pnpm --dir frontend run build
 - 来源只做一次 default/unit/integration/e2e/embed 编译检查；结果待补。按 P 的协调，race、零执行、实际日志、兼容、lint 与22样例回放合并到最终 M3 候选执行，不重复来源长门禁。原始证据与逐提交映射在仓库外保留，未推送或部署。
 
 - 编译接缝补充：首轮 default vet 发现 M2/P1 同名 cloneCachePolicyValue；复用 M2 已含 ID 与阈值规则切片的实现，删除 P1 的窄重复定义，保留首轮失败证据。未运行长门禁；修后五tag结果待补。
+
+### 2026-10-24T15:27Z — 20261023-cache-p1-l01 — M2 列表契约 v1.1
+
+- F 发布列表契约更新后，同步五份 M3 list 原字节与 SHA；其余17份未变。实际 HTTP 测试移除 M2 字段投影，连同 northstar 与 persist_trace_hourly 全量比较，仍只归一化 UTC 时间。产品运行时代码不变。
+- 五tag r2已在1e31dbe3c通过；本提交只补unit tag，其他四tag按源码范围继承。实际测试执行与长门禁由P在最终M3一次覆盖；当前unit补证待完成，原始失败与所有继承证据保留。

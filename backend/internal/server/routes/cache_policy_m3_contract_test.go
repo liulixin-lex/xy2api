@@ -25,8 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This branch includes M2. M3 fixtures exclude northstar semantics; the
-// unchanged M2 tests retain those assertions on the combined capability set.
+// M3 v1.1 list fixtures include the actual M2 capability and full schema.
 const cacheM3ContractIncludesNorthstar = true
 
 type cacheM3OptionAccounts struct{}
@@ -240,26 +239,6 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 				require.Len(t, policies, 6)
 				require.Equal(t, "northstar", policies[2].(map[string]any)["key"])
 				require.Equal(t, cacheM3ContractIncludesNorthstar, policies[2].(map[string]any)["available"])
-				// The M3 contract explicitly leaves the M2 card out of scope.
-				// Check its availability here; full northstar behavior remains in
-				// the unchanged M2 policy/API suites. Do not rewrite frozen JSON.
-				require.Equal(t, "cache_northstar_policy", policies[2].(map[string]any)["setting_key"])
-				require.NotEmpty(t, policies[2].(map[string]any)["schema"])
-				got["data"].(map[string]any)["policies"] = append(policies[:2:2], policies[3:]...)
-				expectedPolicies := expected["data"].(map[string]any)["policies"].([]any)
-				expected["data"].(map[string]any)["policies"] = append(expectedPolicies[:2:2], expectedPolicies[3:]...)
-				// M2 adds exactly this optional observability field. Assert its
-				// value and schema before projecting to the frozen M3 shape.
-				observability := policies[1].(map[string]any)
-				stored := observability["stored"].(map[string]any)["spec"].(map[string]any)
-				defaults := observability["defaults"].(map[string]any)
-				require.Equal(t, true, stored["persist_trace_hourly"])
-				require.Equal(t, true, defaults["persist_trace_hourly"])
-				delete(stored, "persist_trace_hourly")
-				delete(defaults, "persist_trace_hourly")
-				schema := observability["schema"].([]any)
-				require.Equal(t, map[string]any{"field": "persist_trace_hourly", "type": "bool"}, schema[len(schema)-1])
-				observability["schema"] = schema[:len(schema)-1]
 			}
 			normalizePolicyTimes(t, got)
 			normalizePolicyTimes(t, expected)
