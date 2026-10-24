@@ -265,8 +265,6 @@ func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePoli
 	if s.store == nil {
 		return CachePolicyView{}, nil, fmt.Errorf("cache policy transaction store unavailable")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	var updated cachePolicyEntry
 	var diff []CachePolicyDiff
 	err := s.store.UpdateCachePolicy(ctx, cachePolicySettings[i], func(raw string) (string, error) {
@@ -301,8 +299,14 @@ func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePoli
 	if err != nil {
 		return CachePolicyView{}, nil, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	entries := s.snapshot.Load().entries
-	entries[i] = updated
-	s.publishEntries(entries)
+	// Another completed transaction may already have published a newer rev
+	// while this transaction was returning from the repository.
+	if updated.envelope.Rev > entries[i].envelope.Rev {
+		entries[i] = updated
+		s.publishEntries(entries)
+	}
 	return s.view(i, updated, s.snapshot.Load()), diff, nil
 }

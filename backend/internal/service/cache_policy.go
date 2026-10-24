@@ -248,15 +248,20 @@ func (s *CachePolicyService) Stop() {
 	s.wg.Wait()
 }
 func (s *CachePolicyService) Refresh(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	before := s.snapshot.Load()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	raw, err := s.repo.GetMultiple(ctx, cachePolicySettings[:])
 	if err != nil {
 		return err
 	} // Keep the last valid snapshot on read failure.
-	s.publish(raw)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// A successful write or another refresh published while storage was being
+	// read. Discard this possibly stale read; the next poll will reconcile.
+	if s.snapshot.Load() == before {
+		s.publish(raw)
+	}
 	return nil
 }
 func (s *CachePolicyService) publish(raw map[string]string) {
