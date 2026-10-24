@@ -325,6 +325,15 @@ routing 默认 keep_sticky_on_busy.enabled=false、group_ids=[]、rollout_percen
 affinity_mode=score。busy 的空分组列表表示全部；本构建只接受 score，
 其他取值在 validate 中为 unsupported_in_build、PUT 为 CACHE_POLICY_UNSUPPORTED。
 
+策略管理与请求行为使用独立的静态构建能力。T4.0 的 L-04、L-03、L-07
+能力均为 false；能力字段的启用或扩张在 validate 中为 unsupported_in_build，
+PUT 返回 400 CACHE_POLICY_UNSUPPORTED，不保存待未来版本自动激活的配置。
+关闭、收窄及整体回到默认值仍可保存且不查询分组表；rollout 不是能力字段，
+单独增加仍按既有方向与确认规则处理。字段 schema 标记 not_implemented_in_build。
+数据库只激活未实现行为时，effective 为 blocked、active=false，带同名 blocker；
+过渡构建中已实现行为照常决定状态。L-03 依赖 L-04，生产构造不声明这三项能力。
+后续行为实现必须显式声明各自的构建能力，请求 accessor 也必须与能力位做 AND。
+
 嵌套对象整体或部分提交时按点路径的实际变化生成 diff、direction 与审计。
 anthropic_identity 为 high，开启和 mixed 要求理由及勾选；
 routing 为 highest，还要精确输入 cache_routing_policy。

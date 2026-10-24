@@ -135,7 +135,7 @@ func (s *CachePolicyService) schema(i int) []map[string]any {
 		return upstreamIdentitySchema()
 	}
 	if i == 4 || i == 5 {
-		return m4PolicySchema(i)
+		return s.m4Schema(i)
 	}
 	fields := []map[string]any{{"field": "enabled", "type": "bool"}}
 	if i == 1 {

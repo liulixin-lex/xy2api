@@ -238,10 +238,32 @@ func (s *CachePolicyService) validation(index int, entry cachePolicyEntry, w Cac
 		errs = bodyErrors
 		diff = []CachePolicyDiff{}
 	}
+	if len(errs) == 0 && (index == 4 || index == 5) {
+		errs = s.m4UnsupportedChanges(index, spec, diff)
+		if len(errs) > 0 {
+			accepted := make([]CachePolicyDiff, 0, len(diff))
+			for _, change := range diff {
+				unsupported := false
+				for _, fieldError := range errs {
+					unsupported = unsupported || change.Field == fieldError.Field
+				}
+				if !unsupported {
+					accepted = append(accepted, change)
+				}
+			}
+			diff = accepted
+		}
+	}
 	if utf8.RuneCountInString(strings.TrimSpace(w.Reason)) > 200 {
 		errs = append(errs, CachePolicyFieldError{Field: "reason", Code: "too_long", Limit: map[string]int{"max": 200}})
 	}
-	v := CachePolicyValidation{Valid: len(errs) == 0, Errors: errs, Warnings: []string{}, Diff: diff, Risk: policyRisk(index), Direction: policyDirection(diff), CurrentRev: entry.envelope.Rev, Affected: []CachePolicyAffected{}}
+	direction := policyDirection(diff)
+	if reflect.DeepEqual(spec, s.defaults(index)) {
+		// Restoring the complete defaults cannot activate anything. In
+		// particular resetting busy group_ids to [] must not require a lookup.
+		direction = "disable"
+	}
+	v := CachePolicyValidation{Valid: len(errs) == 0, Errors: errs, Warnings: []string{}, Diff: diff, Risk: policyRisk(index), Direction: direction, CurrentRev: entry.envelope.Rev, Affected: []CachePolicyAffected{}}
 	v.RevStale = w.ExpectedRev != nil && *w.ExpectedRev != v.CurrentRev
 	if (index == 0 || index >= 3) && v.Direction != "disable" {
 		v.Confirm.ReasonRequired = true
@@ -293,7 +315,7 @@ func invalidPolicy(errs []CachePolicyFieldError) error {
 	b, _ := json.Marshal(errs)
 	reason := "CACHE_POLICY_INVALID"
 	for _, e := range errs {
-		if e.Code == "unsupported_in_build" && (e.Field == "header_only_uuid" || e.Field == "forward_session_headers" || e.Field == "affinity_mode") {
+		if e.Code == "unsupported_in_build" && (e.Field == "header_only_uuid" || e.Field == "forward_session_headers" || e.Field == "affinity_mode" || e.Field == "anchor_group_ids" || e.Field == "gemini_anchor" || e.Field == "metadata_group_ids" || e.Field == "keep_sticky_on_busy.enabled" || e.Field == "keep_sticky_on_busy.group_ids") {
 			reason = "CACHE_POLICY_UNSUPPORTED"
 			break
 		}

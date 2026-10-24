@@ -152,6 +152,7 @@ type CachePolicyService struct {
 	accounts                        CachePolicyAccountLookup
 	groups                          CachePolicyGroupLookup
 	m4Available                     bool
+	m4Behaviors                     CacheM4BuildCapabilities
 	anthropicObservabilityAvailable bool
 	caps                            CachePolicyCaps
 	kill, diagnostics, aware        bool

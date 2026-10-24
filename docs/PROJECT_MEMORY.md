@@ -215,8 +215,9 @@
 
 ### 20261024-cache-m4-t40 — M4 两个管理员策略键（G，开发中）
 
-- 基于冻结 M3 候选 6188d5d04，分支 cache/m4-t40；仅实现 anthropic_identity 与 routing 的管理、验证、存储和分组选项，默认关闭且没有请求路径接线。保留0.4.x与M3行为。
+- 已变基到冻结 M3 最终候选 4a0c1107f，分支 cache/m4-t40；仅实现 anthropic_identity 与 routing 的管理、验证、存储和分组选项，默认关闭且没有请求路径接线。保留0.4.x与M3行为。
 - 依据M4开工包§1及m3m4 v1.1：routing仅score；点路径实际diff、风险确认、分组白名单/降级warning和disable零查询与契约一致；northstar形态不变。
+- X-B1按F m3m4 v1.2：独立L-04/L-03/L-07静态能力且生产全false，能力字段拒绝启用，关闭及恢复默认零组查询；DB只激活未实现行为时blocked+not_implemented_in_build，过渡构建按已实现行为决定状态。已准备10份dormant样例及9反例；不排新heavy，待X-E9与S r3结束后仅排r3。
 - 计划：完成实现及20个M4样例/反例与M3保留回放，交付前一个heavy跑五tag编译、受影响包unit和回放。M3统一流水线优先，重任务按预算排队；不stash/autostash、不push、不部署。M3若有修补则跟进最终head。
 
 ### 20261024-cache-m3-integration — hardening、L-01 与管理员策略卡片（P，进行中）
@@ -1163,3 +1164,7 @@ pnpm --dir frontend run build
 
 - 仅在策略启用分支、cohort之前接受v2:隔离种子；复合组、无API key与非OpenAI组旧种子沿用no_routing_session内部跳过，既有sticky不变，trace平台范围不扩展。
 - 新增三入口scope、两个租户实际Forward、policy关闭顺序与trace平台对照；allocation控制组夹具补v2:，保持原断言。单条五tag、L01 unit/race及相对6188的增量lint待执行，结果在仓库外PROGRESS补记；不推送、不部署。
+
+### 2026-10-24 — T4.0 X-B1 休眠能力门禁准备
+
+- 保留WIP对象和patch后，不使用stash/autostash变基到M3最终4a0c1107f。产品自动重放，唯一记忆冲突保留双方记录。能力字段启用拒绝、关闭零查询、DB防御及10个dormant/9个反例按v1.2准备；只做轻检，五tag和触及包unit/回放等待单批r3，未声称通过。

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -90,6 +91,15 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 	hashes := map[string]string{}
 	require.NoError(t, json.Unmarshal(b, &hashes))
 	require.Len(t, hashes, 20)
+	b, err = os.ReadFile(filepath.Join(root, "M4_DORMANT_SHA256.json"))
+	require.NoError(t, err)
+	dormantHashes := map[string]string{}
+	require.NoError(t, json.Unmarshal(b, &dormantHashes))
+	require.Len(t, dormantHashes, 10)
+	for name, hash := range dormantHashes {
+		require.NotContains(t, hashes, name)
+		hashes[name] = hash
+	}
 	names := make([]string, 0, len(hashes))
 	for name := range hashes {
 		names = append(names, name)
@@ -104,6 +114,14 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			require.Equal(t, hashes[name], fmt.Sprintf("%x", sha256.Sum256(raw)))
 			var f cacheContract
 			require.NoError(t, json.Unmarshal(raw, &f))
+			var fixture struct {
+				Setup struct {
+					BuildCapabilities *service.CacheM4BuildCapabilities `json:"build_capabilities"`
+					StoredSpec        map[string]any                    `json:"stored_spec"`
+				} `json:"_fixture"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &fixture))
+			scenario := strings.Replace(name, "m4_dormant_", "m4_", 1)
 			requests[name] = f
 			expected := contractMap(t, f.Response)
 			data, _ := f.Response["data"].(map[string]any)
@@ -115,6 +133,9 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			auditRepo := &cacheRouteAudit{}
 			audit := service.NewAuditLogService(auditRepo, nil)
 			groups := &cacheM4Groups{fail: name == "m4_list_group_options_unavailable.json", forbid: name == "m4_put_routing_disable_skip_group_options.json" || strings.HasPrefix(name, "m4_validate_routing_disable")}
+			if fixture.Setup.BuildCapabilities != nil && f.Request.Method != http.MethodGet {
+				groups.forbid = true
+			}
 			cfg := &config.Config{}
 			cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
 			now := time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)
@@ -132,7 +153,7 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 				repo.rows[setting] = string(b)
 			}
 			switch {
-			case strings.HasPrefix(name, "m4_list_"):
+			case strings.HasPrefix(scenario, "m4_list_"):
 				b, err := json.Marshal(data)
 				require.NoError(t, err)
 				var list service.CachePolicyList
@@ -151,12 +172,12 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 				for _, v := range list.Policies {
 					seedPolicy(t, repo, v)
 				}
-			case strings.HasPrefix(name, "m4_validate_"):
+			case strings.HasPrefix(scenario, "m4_validate_"):
 				rev := int64(data["current_rev"].(float64))
 				put(rev, m4ContractSpec(t, key, rev > 0))
 			case name == "m4_put_routing_disable_skip_group_options.json":
 				put(1, m4ContractSpec(t, key, true))
-			case strings.HasPrefix(name, "m4_put_"):
+			case strings.HasPrefix(scenario, "m4_put_"):
 				var request struct {
 					ExpectedRev int64 `json:"expected_rev"`
 				}
@@ -187,7 +208,19 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			default:
 				t.Fatalf("unhandled fixture %s", name)
 			}
-			options := []service.CachePolicyOption{service.WithCacheNorthstar(), service.WithCachePolicyAccounts(cacheM3OptionAccounts{}), service.WithCacheM4Policies(groups), service.WithCachePolicyClock(func() time.Time { return now })}
+			if fixture.Setup.StoredSpec != nil {
+				var request struct {
+					ExpectedRev int64 `json:"expected_rev"`
+				}
+				require.NoError(t, json.Unmarshal(f.Request.Body, &request))
+				put(request.ExpectedRev, fixture.Setup.StoredSpec)
+			}
+			// The frozen v1.1 scenarios describe a complete M4 build. Default
+			// T4.0 capability rejection is replayed separately from v1.2.
+			options := []service.CachePolicyOption{service.WithCacheNorthstar(), service.WithCachePolicyAccounts(cacheM3OptionAccounts{}), service.WithCacheM4Policies(groups), service.WithCacheM4BuildCapabilities(service.CacheM4BuildCapabilities{L04: true, L03: true, L07: true}), service.WithCachePolicyClock(func() time.Time { return now })}
+			if fixture.Setup.BuildCapabilities != nil {
+				options = append(options, service.WithCacheM4BuildCapabilities(*fixture.Setup.BuildCapabilities))
+			}
 			// The contract explicitly makes this one scenario a build with
 			// Anthropic observation support; it is not a runtime toggle.
 			if name == "m4_validate_anthropic_fallback_warning.json" {
@@ -225,12 +258,22 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 	// actual handler result above: corrupted responses must not be accepted.
 	b, err = os.ReadFile(filepath.Join(root, "M4_INVALID.json"))
 	require.NoError(t, err)
-	var invalid map[string]struct {
+	type invalidFixture struct {
 		Source string `json:"source"`
 		SHA    string `json:"sha256"`
 	}
+	var invalid map[string]invalidFixture
 	require.NoError(t, json.Unmarshal(b, &invalid))
 	require.Len(t, invalid, 20)
+	b, err = os.ReadFile(filepath.Join(root, "M4_DORMANT_INVALID.json"))
+	require.NoError(t, err)
+	dormantInvalid := map[string]invalidFixture{}
+	require.NoError(t, json.Unmarshal(b, &dormantInvalid))
+	require.Len(t, dormantInvalid, 9)
+	for name, entry := range dormantInvalid {
+		require.NotContains(t, invalid, name)
+		invalid[name] = entry
+	}
 	for name, entry := range invalid {
 		t.Run("reject/"+name, func(t *testing.T) {
 			raw, err := os.ReadFile(filepath.Join(root, "invalid-m4", name))
@@ -287,7 +330,7 @@ func TestCachePolicyM4RetainsM3ListEdges(t *testing.T) {
 			cfg.Gateway.CacheFeatures.KillSwitch = list.Static.KillSwitch
 			accounts := &cacheM3FaultAccounts{failOptions: name == "m3_list_account_options_unavailable.json"}
 			groups := &cacheM4Groups{}
-			policies := service.NewCachePolicyService(repo, cfg, service.WithCacheNorthstar(), service.WithCacheM4Policies(groups), service.WithCachePolicyAccounts(accounts))
+			policies := service.NewCachePolicyService(repo, cfg, service.WithCacheNorthstar(), service.WithCacheM4Policies(groups), service.WithCacheM4BuildCapabilities(service.CacheM4BuildCapabilities{L04: true, L03: true, L07: true}), service.WithCachePolicyAccounts(accounts))
 			require.NoError(t, policies.Refresh(context.Background()))
 			audit := service.NewAuditLogService(&cacheRouteAudit{}, nil)
 			router := cacheM4ContractRouter(policies, audit, list.BuildVersion, service.CachePolicyActor{UserID: 1, Email: "admin@example.com"})

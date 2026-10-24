@@ -57,3 +57,5 @@ null 形态依据保存的兼容 Responses 官方流示例及协议允许的空�
 ## M4 T4.0 管理能力
 
 基于 M3 候选，仅开放 index4/5 的管理员策略读写，不接入请求或路由。生产构造注入只读分组仓储；组候选与校验均在管理员操作且发布锁之外。关闭方向完全不读组、不使用旧事实。嵌套对象按叶子点路径 diff；anchor/metadata 空范围表示关闭，busy/account 空范围表示全部；routing 开启与mixed要求输入完整键名。仅支持score，其余值沿用UNSUPPORTED错误信封。观测missing为静态构建能力，on/masked提示；fallback样例显式注入覆盖能力。细节与API现行说明见openai-cache-reliability.md，20份M4原字节契约/相关反例及M3保留回放随实现提交。
+
+X-B1：管理能力不代表行为可用。L-04、L-03、L-07 各有静态能力，生产默认均 false；未实现能力字段的启用方向返回 unsupported_in_build，PUT 返回 CACHE_POLICY_UNSUPPORTED，关闭方向不依赖分组目录。按F v1.2，rollout不是能力字段；整体默认恒为disable。数据库只激活未实现行为时blocked/active=false，blockers带not_implemented_in_build，优先于masked；过渡构建按已实现行为决定状态。schema标记能力字段，L-03依赖L-04，未来请求accessor也要与能力位做AND。原20样例字节不变、注入完整能力；追加10份默认构建样例与部分能力/故障桩回归。

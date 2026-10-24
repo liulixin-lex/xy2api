@@ -24,6 +24,20 @@ func WithCacheM4Policies(groups CachePolicyGroupLookup) CachePolicyOption {
 	}
 }
 
+// CacheM4BuildCapabilities describes implemented behavior, independently of
+// administrator storage/API support. Zero values keep T4.0 storage-only.
+type CacheM4BuildCapabilities struct {
+	L04 bool
+	L03 bool
+	L07 bool
+}
+
+func WithCacheM4BuildCapabilities(capabilities CacheM4BuildCapabilities) CachePolicyOption {
+	// Metadata behavior derives its candidate identity from L-04.
+	capabilities.L03 = capabilities.L03 && capabilities.L04
+	return func(s *CachePolicyService) { s.m4Behaviors = capabilities }
+}
+
 // This is a build capability, not a runtime setting or request-time probe.
 func WithCacheAnthropicObservability() CachePolicyOption {
 	return func(s *CachePolicyService) { s.anthropicObservabilityAvailable = true }
@@ -206,6 +220,49 @@ func cachePolicyExplicitScopeDirection(before, after []int64) (up, down bool) {
 	return up, len(old) != 0
 }
 
+// Capability checks use actual leaf changes, rather than merely inspecting the
+// resulting configured value. A rollback must remain possible after downgrade.
+func (s *CachePolicyService) m4UnsupportedChanges(index int, spec map[string]any, diff []CachePolicyDiff) []CachePolicyFieldError {
+	errs := []CachePolicyFieldError{}
+	if reflect.DeepEqual(spec, m4PolicyDefaults(index)) {
+		return errs
+	}
+	for _, change := range diff {
+		if policyDirection([]CachePolicyDiff{change}) == "disable" {
+			continue
+		}
+		if reflect.DeepEqual(change.After, m4PolicyField(m4PolicyDefaults(index), change.Field)) {
+			continue
+		}
+		unsupported := false
+		switch change.Field {
+		case "anchor_group_ids", "gemini_anchor":
+			unsupported = !s.m4Behaviors.L04
+		case "metadata_group_ids":
+			unsupported = !s.m4Behaviors.L03
+		case "keep_sticky_on_busy.enabled", "keep_sticky_on_busy.group_ids":
+			unsupported = !s.m4Behaviors.L07
+		}
+		if unsupported {
+			errs = append(errs, CachePolicyFieldError{Field: change.Field, Code: "unsupported_in_build"})
+		}
+	}
+	return errs
+}
+
+func (s *CachePolicyService) m4ConfiguredCapabilities(index int, spec map[string]any) (implemented, unimplemented bool) {
+	if index == 4 {
+		anchors, _ := spec["anchor_group_ids"].([]int64)
+		metadata, _ := spec["metadata_group_ids"].([]int64)
+		gemini, _ := spec["gemini_anchor"].(bool)
+		anchor := len(anchors) > 0 || gemini
+		meta := len(metadata) > 0
+		return (s.m4Behaviors.L04 && anchor) || (s.m4Behaviors.L03 && meta), (!s.m4Behaviors.L04 && anchor) || (!s.m4Behaviors.L03 && meta)
+	}
+	enabled, _ := m4PolicyField(spec, "keep_sticky_on_busy.enabled").(bool)
+	return enabled && s.m4Behaviors.L07, enabled && !s.m4Behaviors.L07
+}
+
 func m4PolicyConfigured(index int, spec map[string]any) (configured bool, rollout int) {
 	if index == 4 {
 		ids, _ := spec["anchor_group_ids"].([]int64)
@@ -222,7 +279,9 @@ func (s *CachePolicyService) m4Effective(index int, stored, loaded cachePolicyEn
 	masterInvalid := p != nil && p.entries[0].parseError
 	invalid := stored.parseError || loaded.parseError || masterInvalid
 	configured, rollout := m4PolicyConfigured(index, loaded.envelope.Spec)
-	enabled := configured && rollout > 0
+	implemented, unimplemented := s.m4ConfiguredCapabilities(index, loaded.envelope.Spec)
+	blocked := unimplemented && !implemented
+	enabled := implemented && rollout > 0
 	active = enabled && !invalid && !s.kill && p.MasterEnabled()
 	if s.kill {
 		e.Blockers = append(e.Blockers, "kill_switch")
@@ -230,11 +289,16 @@ func (s *CachePolicyService) m4Effective(index int, stored, loaded cachePolicyEn
 	if invalid {
 		e.Blockers = append(e.Blockers, "parse_error")
 	}
+	if blocked {
+		e.Blockers = append(e.Blockers, "not_implemented_in_build")
+	}
 	switch {
 	case s.kill:
 		e.State = "killed"
 	case invalid:
 		e.State = "parse_error"
+	case blocked:
+		e.State = "blocked"
 	case enabled && !p.MasterEnabled():
 		e.State = "masked_by_master"
 	case loaded.envelope.Rev < stored.envelope.Rev:
@@ -269,6 +333,25 @@ func m4PolicySchema(index int) []map[string]any {
 		{"field": "keep_sticky_on_busy.rollout_percent", "type": "int", "min": 0, "max": 100, "unit": "percent"},
 		{"field": "affinity_mode", "type": "enum", "options": []string{"score", "prev_host", "prev_host+quality"}},
 	}
+}
+
+func (s *CachePolicyService) m4Schema(index int) []map[string]any {
+	schema := m4PolicySchema(index)
+	for _, field := range schema {
+		unsupported := false
+		switch field["field"] {
+		case "anchor_group_ids", "gemini_anchor":
+			unsupported = !s.m4Behaviors.L04
+		case "metadata_group_ids":
+			unsupported = !s.m4Behaviors.L03
+		case "keep_sticky_on_busy.enabled", "keep_sticky_on_busy.group_ids":
+			unsupported = !s.m4Behaviors.L07
+		}
+		if unsupported {
+			field["not_implemented_in_build"] = true
+		}
+	}
+	return schema
 }
 
 func m4PolicyGroupFields(index int) []string {
