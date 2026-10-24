@@ -47,6 +47,7 @@ func ProvideAdminHandlers(
 	affiliateHandler *admin.AffiliateHandler,
 	complianceHandler *admin.ComplianceHandler,
 	auditLogHandler *admin.AuditLogHandler,
+	cachePolicyHandler *admin.CachePolicyHandler,
 	shareSchedulingHandler *admin.ShareSchedulingHandler,
 	groupCategoryHandler *admin.GroupCategoryHandler,
 	resilienceHandler *admin.ResilienceHandler,
@@ -102,6 +103,7 @@ func ProvideAdminHandlers(
 		Affiliate:              affiliateHandler,
 		Compliance:             complianceHandler,
 		AuditLog:               auditLogHandler,
+		CachePolicy:            cachePolicyHandler,
 		ShareScheduling:        shareSchedulingHandler,
 		GroupCategory:          groupCategoryHandler,
 		Resilience:             resilienceHandler,
@@ -304,6 +306,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewAffiliateHandler,
 	admin.NewComplianceHandler,
 	admin.NewAuditLogHandler,
+	ProvideCachePolicyHandler,
 	admin.NewShareSchedulingHandler,
 	admin.NewGroupCategoryHandler,
 	admin.NewResilienceHandler,
@@ -312,3 +315,7 @@ var ProviderSet = wire.NewSet(
 	ProvideAdminHandlers,
 	ProvideHandlers,
 )
+
+func ProvideCachePolicyHandler(policies *service.CachePolicyService, audit *service.AuditLogService, build BuildInfo) *admin.CachePolicyHandler {
+	return admin.NewCachePolicyHandler(policies, audit, build.Version)
+}

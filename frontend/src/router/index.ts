@@ -428,6 +428,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/cache',
+    name: 'AdminCacheObservability',
+    component: () => import('@/features/cache-observability/CacheObservabilityView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Cache Observability',
+      titleKey: 'admin.cacheObservability.title',
+      descriptionKey: 'admin.cacheObservability.description'
+    }
+  },
+  {
     path: '/admin/audit-logs',
     name: 'AdminAuditLogs',
     component: () => import('@/views/admin/AuditLogView.vue'),

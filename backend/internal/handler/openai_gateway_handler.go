@@ -655,6 +655,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	defer inflightRelease()
 
 	// Generate session hash (header first; fallback to prompt_cache_key)
+	h.gatewayService.CaptureCachePolicy(c)
 	sessionHash := h.gatewayService.GenerateSessionHash(c, sessionHashBody)
 	if h.rejectIfCyberSessionBlocked(c, apiKey, sessionHashBody, reqModel, cyberBlockFormatResponses) {
 		return
@@ -981,6 +982,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						return
 					}
 					switchCount++
+					service.NoteCacheTraceFailover(c.Request.Context(), switchCount)
 					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
@@ -1324,6 +1326,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	}
 	defer inflightDone()
 
+	h.gatewayService.CaptureCachePolicy(c)
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
 	sessionHash, promptCacheKey = resolveOpenAIMessagesMetadataSession(c, sessionHash, promptCacheKey, reqModel, body)
@@ -2820,6 +2823,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return nil
 	}
 
+	h.gatewayService.CaptureCachePolicy(c)
 	sessionHash := h.gatewayService.GenerateSessionHashWithFallback(
 		c,
 		firstMessage,
@@ -3166,6 +3170,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return mapping.MappedModel, nil
 			},
 			BeforeTurn: func(turn int) error {
+				if turn > 1 {
+					h.gatewayService.CaptureCachePolicyTurn(c)
+				}
 				// turn==1 的会话屏蔽已由握手层检查覆盖；连接内 flag 只拦截后续 turn。
 				if cyberBlockedThisConn && !h.cyberPolicyLogOnly(c, apiKey) {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, cyberSessionBlockedClientMsg, nil)

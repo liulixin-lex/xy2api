@@ -1,0 +1,29 @@
+{
+  "_contract": [
+    "C-6",
+    "C-7",
+    "C-10"
+  ],
+  "_note": "PUT 校验失败（竞态兜底）：平台信封，无 data；reason=CACHE_POLICY_INVALID；metadata.errors 为 errors[] 的 JSON 字符串，前端需 JSON.parse，失败时降级为通用提示。",
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/observability",
+    "body": {
+      "expected_rev": 3,
+      "spec": {
+        "byte_budget_mib": 128,
+        "unknown_x": 1
+      },
+      "reason": "x"
+    }
+  },
+  "status": 400,
+  "response": {
+    "code": 400,
+    "message": "cache policy validation failed",
+    "reason": "CACHE_POLICY_INVALID",
+    "metadata": {
+      "errors": "[{\"field\":\"byte_budget_mib\",\"code\":\"exceeds_static_cap\",\"limit\":{\"max\":64}},{\"field\":\"unknown_x\",\"code\":\"unknown_field\"}]"
+    }
+  }
+}

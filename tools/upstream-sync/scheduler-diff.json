@@ -293,6 +293,15 @@
         "added": [
           "sessionHash = monitorProbeSessionHash(ctx, sessionHash)"
         ]
+      },
+      {
+        "block": "cache-trace-p0a-routing-observation",
+        "note": "Observation-only request-local routing markers: reset per-selection markers before existing selection, then record the final successful result. No scheduler branch, binding, capacity or retry decision changes.",
+        "removed": [],
+        "added": [
+          "beginCacheTraceSelection(ctx)",
+          "noteCacheTraceSelection(ctx, selection, decision)"
+        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [
@@ -501,6 +510,26 @@
           "return selection, selectErr",
           "}"
         ]
+      },
+      {
+        "block": "cache-trace-p0a",
+        "note": "Read-only request-local cache observation; disabled before parsing; no scheduling decisions change.",
+        "removed": [],
+        "added": [
+          "s.beginCacheTrace(c, body)",
+          "s.beginCacheTrace(c, body)",
+          "s.beginCacheTrace(c, body)"
+        ]
+      },
+      {
+        "block": "cache-trace-p0a-no-session-observation",
+        "removed": [],
+        "added": [
+          "// Missing routing identity must not hide an enabled observation. The",
+          "// trace keeps an empty digest and never creates a session/history key.",
+          "s.beginCacheTrace(c, body)"
+        ],
+        "note": "Observe enabled HTTP requests without a session after cache diagnostics return; capture no-session cache trace metadata only, without changing session generation, sticky binding, account selection or billing. Runtime policy is frozen per request and disabled observations return before body work."
       }
     ],
     "backend/internal/service/gemini_messages_compat_service.go": [

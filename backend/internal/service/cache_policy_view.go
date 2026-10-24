@@ -1,0 +1,190 @@
+package service
+
+import (
+	"context"
+	"time"
+)
+
+type CachePolicyEffective struct {
+	State         string   `json:"state"`
+	Active        *bool    `json:"active"`
+	Blockers      []string `json:"blockers"`
+	Warnings      []string `json:"warnings"`
+	ClippedFields []string `json:"clipped_fields"`
+}
+type CachePolicyLoaded struct {
+	Rev      int64     `json:"rev"`
+	LoadedAt time.Time `json:"loaded_at"`
+}
+type CachePolicyView struct {
+	Key           string               `json:"key"`
+	SettingKey    string               `json:"setting_key"`
+	Available     bool                 `json:"available"`
+	Risk          string               `json:"risk"`
+	GatedByMaster bool                 `json:"gated_by_master"`
+	Stored        *CachePolicyEnvelope `json:"stored"`
+	Loaded        *CachePolicyLoaded   `json:"loaded"`
+	Effective     CachePolicyEffective `json:"effective"`
+	Defaults      map[string]any       `json:"defaults"`
+	Schema        []map[string]any     `json:"schema"`
+}
+type CachePolicyList struct {
+	GeneratedAt      time.Time `json:"generated_at"`
+	ProcessStartedAt time.Time `json:"process_started_at"`
+	BuildVersion     string    `json:"build_version"`
+	RefreshIntervalS int       `json:"refresh_interval_s"`
+	Static           struct {
+		KillSwitch bool            `json:"kill_switch"`
+		Caps       CachePolicyCaps `json:"caps"`
+	} `json:"static"`
+	Existing struct {
+		Diagnostics  bool `json:"openai_cache_diagnostics_enabled"`
+		AwareRouting bool `json:"openai_cache_aware_routing_enabled"`
+		Rollout      int  `json:"openai_cache_rollout_percent"`
+		Claude       struct {
+			Configured   bool   `json:"configured"`
+			GroupCount   int    `json:"group_count"`
+			SettingsLink string `json:"settings_link"`
+		} `json:"claude_cache_fallback"`
+	} `json:"existing"`
+	Policies []CachePolicyView `json:"policies"`
+}
+
+func policyRisk(i int) string {
+	switch i {
+	case 1, 2:
+		return "low"
+	case 5:
+		return "highest"
+	default:
+		return "high"
+	}
+}
+func (s *CachePolicyService) effective(i int, stored, loaded cachePolicyEntry) CachePolicyEffective {
+	active := false
+	e := CachePolicyEffective{Active: &active, Blockers: []string{}, Warnings: []string{}, ClippedFields: []string{}}
+	if i > 1 {
+		e.State = "not_in_build"
+		e.Active = nil
+		return e
+	}
+	enabled, _ := loaded.envelope.Spec["enabled"].(bool)
+	active = enabled && !loaded.parseError && !s.kill && (i == 0 || s.diagnostics)
+	if i == 1 {
+		if policyInt(loaded.envelope.Spec["byte_budget_mib"]) > s.caps.MaxByteBudgetMiB {
+			e.ClippedFields = append(e.ClippedFields, "byte_budget_mib")
+		}
+		if policyInt(loaded.envelope.Spec["rate_mib_per_s"]) > s.caps.MaxRateMiBPerS {
+			e.ClippedFields = append(e.ClippedFields, "rate_mib_per_s")
+		}
+	}
+	if s.kill {
+		e.Blockers = append(e.Blockers, "kill_switch")
+	}
+	if loaded.parseError || stored.parseError {
+		e.Blockers = append(e.Blockers, "parse_error")
+	}
+	if i == 1 && !s.diagnostics {
+		e.Blockers = append(e.Blockers, "diagnostics_disabled")
+	}
+	switch {
+	case s.kill:
+		e.State = "killed"
+	case loaded.parseError || stored.parseError:
+		e.State = "parse_error"
+	case i == 1 && !s.diagnostics:
+		e.State = "blocked"
+	case loaded.envelope.Rev < stored.envelope.Rev:
+		e.State = "pending_reload"
+	case active:
+		e.State = "on"
+	default:
+		e.State = "off"
+	}
+	return e
+}
+func (s *CachePolicyService) schema(i int) []map[string]any {
+	if i > 1 {
+		return []map[string]any{}
+	}
+	fields := []map[string]any{{"field": "enabled", "type": "bool"}}
+	if i == 1 {
+		fields = append(fields,
+			map[string]any{"field": "sample_percent", "type": "int", "min": 0, "max": 100, "unit": "percent"},
+			map[string]any{"field": "chain_percent", "type": "int", "min": 0, "max": 100, "unit": "percent"},
+			map[string]any{"field": "byte_budget_mib", "type": "int", "min": 8, "max": s.caps.MaxByteBudgetMiB, "unit": "MiB", "cap_source": "gateway.cache_trace.max_byte_budget_mib"},
+			map[string]any{"field": "rate_mib_per_s", "type": "int", "min": 1, "max": s.caps.MaxRateMiBPerS, "unit": "MiB/s", "cap_source": "gateway.cache_trace.max_rate_mib_per_s"})
+	}
+	return fields
+}
+func (s *CachePolicyService) view(i int, stored cachePolicyEntry, p *CachePolicySnapshot) CachePolicyView {
+	v := CachePolicyView{Key: cachePolicyKeys[i], SettingKey: cachePolicySettings[i], Risk: policyRisk(i), GatedByMaster: i >= 3, Schema: s.schema(i)}
+	if i > 1 {
+		v.Effective = s.effective(i, stored, stored)
+		return v
+	}
+	v.Available = true
+	// Never expose the snapshot's mutable maps to admin callers.
+	copyEnvelope := stored.envelope
+	if stored.envelope.UpdatedBy != nil {
+		actor := *stored.envelope.UpdatedBy
+		copyEnvelope.UpdatedBy = &actor
+	}
+	if stored.envelope.UpdatedAt != nil {
+		at := *stored.envelope.UpdatedAt
+		copyEnvelope.UpdatedAt = &at
+	}
+	if stored.envelope.Reason != nil {
+		reason := *stored.envelope.Reason
+		copyEnvelope.Reason = &reason
+	}
+
+	copyEnvelope.Spec = make(map[string]any, len(stored.envelope.Spec))
+	for k, value := range stored.envelope.Spec {
+		copyEnvelope.Spec[k] = value
+	}
+	v.Stored = &copyEnvelope
+	loaded := p.entries[i]
+	v.Loaded = &CachePolicyLoaded{loaded.envelope.Rev, loaded.loadedAt}
+	v.Defaults = policyDefaults(i)
+	v.Effective = s.effective(i, stored, loaded)
+	return v
+}
+func (s *CachePolicyService) Get(ctx context.Context, key string) (CachePolicyView, error) {
+	i := policyIndex(key)
+	if i < 0 || i > 1 {
+		return CachePolicyView{}, PolicyNotInBuild(key)
+	}
+	raw, err := s.repo.GetMultiple(ctx, []string{cachePolicySettings[i]})
+	if err != nil {
+		return CachePolicyView{}, err
+	}
+	return s.view(i, s.parse(i, raw[cachePolicySettings[i]]), s.Snapshot()), nil
+}
+func (s *CachePolicyService) List(ctx context.Context, version string) (CachePolicyList, error) {
+	keys := append([]string{}, cachePolicySettings[:]...)
+	keys = append(keys, SettingKeyClaudeCacheFallbackPolicy)
+	raw, err := s.repo.GetMultiple(ctx, keys)
+	if err != nil {
+		return CachePolicyList{}, err
+	}
+	p := s.Snapshot()
+	list := CachePolicyList{GeneratedAt: s.now().UTC(), ProcessStartedAt: s.started, BuildVersion: version, RefreshIntervalS: 60, Policies: make([]CachePolicyView, 0, 6)}
+	list.Static.KillSwitch = s.kill
+	list.Static.Caps = s.caps
+	list.Existing.Diagnostics = s.diagnostics
+	list.Existing.AwareRouting = s.aware
+	list.Existing.Rollout = s.rollout
+	claude := readClaudeCacheFallbackPolicy([]byte(raw[SettingKeyClaudeCacheFallbackPolicy]))
+	list.Existing.Claude.Configured = raw[SettingKeyClaudeCacheFallbackPolicy] != ""
+	list.Existing.Claude.GroupCount = len(claude.GroupIDs)
+	list.Existing.Claude.SettingsLink = "/admin/settings?tab=gateway"
+	for i := range cachePolicyKeys {
+		e := cachePolicyEntry{}
+		if i < 2 {
+			e = s.parse(i, raw[cachePolicySettings[i]])
+		}
+		list.Policies = append(list.Policies, s.view(i, e, p))
+	}
+	return list, nil
+}

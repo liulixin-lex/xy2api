@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import enAdminAccounts from '../locales/en/admin/accounts'
+import enAdminCacheObservability from '../locales/en/admin/cacheObservability'
 import enAdminChannels from '../locales/en/admin/channels'
 import enAdminOps from '../locales/en/admin/ops'
 import enAdminOverview from '../locales/en/admin/overview'
@@ -11,6 +12,7 @@ import enDashboard from '../locales/en/dashboard'
 import enLanding from '../locales/en/landing'
 import enMisc from '../locales/en/misc'
 import zhAdminAccounts from '../locales/zh/admin/accounts'
+import zhAdminCacheObservability from '../locales/zh/admin/cacheObservability'
 import zhAdminChannels from '../locales/zh/admin/channels'
 import zhAdminOps from '../locales/zh/admin/ops'
 import zhAdminOverview from '../locales/zh/admin/overview'
@@ -53,7 +55,8 @@ const admins: Record<string, Modules> = {
     accounts: zhAdminAccounts,
     resources: zhAdminResources,
     ops: zhAdminOps,
-    settings: zhAdminSettings
+    settings: zhAdminSettings,
+    cacheObservability: zhAdminCacheObservability
   },
   en: {
     overview: enAdminOverview,
@@ -61,7 +64,8 @@ const admins: Record<string, Modules> = {
     accounts: enAdminAccounts,
     resources: enAdminResources,
     ops: enAdminOps,
-    settings: enAdminSettings
+    settings: enAdminSettings,
+    cacheObservability: enAdminCacheObservability
   }
 }
 

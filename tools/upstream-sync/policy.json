@@ -52,7 +52,8 @@
       "skills/**",
       "tools/**",
       "openspec/changes/gateway-resilience-v2-20261021/**",
-      "openspec/changes/gateway-resilience-045-20261021/**"
+      "openspec/changes/gateway-resilience-045-20261021/**",
+      "openspec/changes/cache-runtime-policies/**"
     ],
     "manual_merge": [
       "Makefile",
@@ -1979,6 +1980,370 @@
     {
       "path": "backend/internal/handler/wire.go",
       "value": "GroupCategory:          groupCategoryHandler,"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "s.beginCacheTrace(c, body)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "s.captureCacheTraceRequest(c, req, account, \"responses\")"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.captureCacheTraceRequest(c, req, account, \"responses\")"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "s.captureCacheTraceRequest(c, upstreamReq, account, \"chat\")"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "captureCacheTraceHeaders(c, upstreamReq)"
+    },
+    {
+      "path": "backend/internal/service/openai_cache_diagnostics.go",
+      "value": "s.finishCacheTrace(c, result)"
+    },
+    {
+      "path": "backend/internal/service/openai_codex_account_identity.go",
+      "value": "markCacheTracePCK(traces, \"oauth_rewritten\")"
+    },
+    {
+      "path": "backend/internal/service/openai_codex_fingerprint.go",
+      "value": "markCacheTracePCK(traces, \"oauth_rewritten\")"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "s.parseSSEUsageBytesWithTypeForCacheTrace(c, dataBytes, eventType, usage)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "extractOpenAIUsageForCacheTrace(c, respBody)"
+    },
+    {
+      "path": "backend/internal/service/openai_cache_diagnostics.go",
+      "value": "traceChains *cacheTraceSessionState"
+    },
+    {
+      "path": "backend/internal/service/cache_trace_timing.go",
+      "value": "chains [cachePrefixHistoryCount]cachePrefixChain"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "s.parseSSEUsageBytesWithTypeForCacheTrace(c, payloadBytes, event.Type, &usage,"
+    },
+    {
+      "path": "backend/internal/service/openai_codex_fingerprint.go",
+      "value": "fingerprint_converged"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "resetCacheTraceAttempt(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "resetCacheTraceAttempt(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "s.startCacheTraceRequest(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "s.startCacheTraceRequest(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.startCacheTraceRequest(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "s.startCacheTraceRequest(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_service.go",
+      "value": "cacheTraceWorkersOnce"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_service.go",
+      "value": "cacheTraceWorkers"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "usage = s.parseSSEUsageWithCacheTrace(c, bodyText)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "usage = s.parseSSEUsageWithCacheTrace(c, bodyText)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "s.markCacheTraceSent(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.markCacheTraceSent(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "s.markCacheTraceSent(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "s.markCacheTraceSent(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "cacheTraceActive := cacheTraceObserving(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "cacheTraceActive := cacheTraceObserving(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "cacheTraceActive := cacheTraceObserving(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "cacheTraceActive := cacheTraceObserving(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "cacheTraceActive := cacheTraceObserving(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "cacheTraceActive := cacheTraceObserving(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "s.settleCacheTrace(ctx, result, input.Account)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "if result.CacheTrace != nil || result.cacheTraceFailure != nil {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "extractCCStreamUsageForCacheTrace(c, payload)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "extractCCStreamUsageForCacheTrace(c, payload)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "observeCacheTraceTypedPrompt(cacheTraceTyped, response.Usage == event.Usage)"
+    },
+    {
+      "path": "backend/internal/service/cache_trace.go",
+      "value": "routing                cacheTraceRoutingState"
+    },
+    {
+      "path": "backend/internal/service/cache_trace.go",
+      "value": "noteCacheTraceFallback(c.Request.Context())"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "beginCacheTraceSelection(ctx)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "noteCacheTraceSelection(ctx, selection, decision)"
+    },
+    {
+      "path": "backend/internal/service/resilience_session.go",
+      "value": "noteCacheTraceSoftOwner(ctx, account.ID)"
+    },
+    {
+      "path": "backend/internal/service/resilience_session.go",
+      "value": "noteCacheTraceLastResort(ctx, account.ID)"
+    },
+    {
+      "path": "backend/internal/service/resilience_session.go",
+      "value": "noteCacheTraceRebind(ctx, c)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "service.NoteCacheTraceFailover(c.Request.Context(), switchCount)"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "service.NoteCacheTraceFailover(c.Request.Context(), switchCount)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "func processOpenAICompatBufferedEvent("
+    },
+    {
+      "path": "backend/internal/service/cache_trace_settlement.go",
+      "value": "s.settleCacheTraceUndelivered(result, account)"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "registerCachePolicyRoutes(admin, h)"
+    },
+    {
+      "path": "backend/internal/server/middleware/audit_log.go",
+      "value": "\"policy_key\": {}"
+    },
+    {
+      "path": "backend/internal/server/middleware/audit_log.go",
+      "value": "key == \"changed_fields\""
+    },
+    {
+      "path": "backend/internal/handler/handler.go",
+      "value": "*admin.CachePolicyHandler"
+    },
+    {
+      "path": "backend/internal/handler/wire.go",
+      "value": "ProvideCachePolicyHandler,"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "ProvideCachePolicyService,"
+    },
+    {
+      "path": "backend/internal/config/config.go",
+      "value": "mapstructure:\"cache_features\""
+    },
+    {
+      "path": "backend/internal/config/config.go",
+      "value": "viper.SetDefault(\"gateway.cache_trace.max_byte_budget_mib\", 64)"
+    },
+    {
+      "path": "backend/cmd/server/wire.go",
+      "value": "cachePolicies.Stop()"
+    },
+    {
+      "path": "backend/internal/service/cache_policy.go",
+      "value": "\"cache_feature_master\""
+    },
+    {
+      "path": "backend/internal/service/cache_policy.go",
+      "value": "\"cache_observability_policy\""
+    },
+    {
+      "path": "backend/internal/service/cache_policy.go",
+      "value": "\"cache_northstar_policy\""
+    },
+    {
+      "path": "backend/internal/service/cache_policy.go",
+      "value": "\"cache_upstream_identity_policy\""
+    },
+    {
+      "path": "backend/internal/service/cache_policy.go",
+      "value": "\"cache_anthropic_identity_policy\""
+    },
+    {
+      "path": "backend/internal/service/cache_policy.go",
+      "value": "\"cache_routing_policy\""
+    },
+    {
+      "path": "backend/internal/repository/cache_policy_repo.go",
+      "value": "ForUpdate().Only(ctx)"
+    },
+    {
+      "path": "backend/internal/service/cache_policy.go",
+      "value": "store, _ = repo.(CachePolicyStore)"
+    },
+    {
+      "path": "backend/internal/service/cache_policy.go",
+      "value": "atomic.Pointer[CachePolicySnapshot]"
+    },
+    {
+      "path": "backend/internal/server/routes/cache_policy.go",
+      "value": "policies := admin.Group(\"/cache/policies\")"
+    },
+    {
+      "path": "backend/internal/server/routes/cache_policy.go",
+      "value": "policies.GET(\"\", p.List)"
+    },
+    {
+      "path": "backend/internal/server/routes/cache_policy.go",
+      "value": "policies.GET(\"/history\", p.History)"
+    },
+    {
+      "path": "backend/internal/server/routes/cache_policy.go",
+      "value": "policies.GET(\"/\"+key, p.Get(key))"
+    },
+    {
+      "path": "backend/internal/server/routes/cache_policy.go",
+      "value": "policies.POST(\"/\"+key+\"/validate\", p.Validate(key))"
+    },
+    {
+      "path": "backend/internal/server/routes/cache_policy.go",
+      "value": "policies.PUT(\"/\"+key, p.Put(key))"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "ProvideOpenAIGatewayServiceWithCachePolicies,"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_service.go",
+      "value": "cachePolicies"
+    },
+    {
+      "path": "backend/internal/service/cache_policy_gateway.go",
+      "value": "s.cachePolicies = policies"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "h.gatewayService.CaptureCachePolicy(c)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "h.gatewayService.CaptureCachePolicyTurn(c)"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "h.gatewayService.CaptureCachePolicy(c)"
+    },
+    {
+      "path": "backend/internal/service/cache_trace.go",
+      "value": "s.CaptureCachePolicy(c).TraceEnabled()"
+    },
+    {
+      "path": "backend/internal/service/cache_trace.go",
+      "value": "policy: CachePolicyFromGin(c)"
+    },
+    {
+      "path": "backend/internal/service/cache_trace_async.go",
+      "value": "s.cachePolicies.subscribe(s.cacheTraceWorkers.applyPolicy)"
+    },
+    {
+      "path": "backend/internal/service/cache_prefix_integration.go",
+      "value": "cacheTraceChainSampled(t.policy, session)"
+    },
+    {
+      "path": "backend/internal/service/cache_trace_send.go",
+      "value": "s.limitCacheTraceSessionsLocked(telemetry, t.sessionKey)"
+    },
+    {
+      "path": "backend/internal/service/cache_trace_settlement.go",
+      "value": "s.limitCacheTraceSessionsLocked(telemetry, diagnostic.Session)"
+    },
+    {
+      "path": "backend/internal/service/cache_trace.go",
+      "value": "result.CacheTrace = &cacheTrace{policy: t.policy,"
+    },
+    {
+      "path": "backend/internal/service/cache_trace.go",
+      "value": "PolRev: CachePolicyFromGin(c).Revision()"
+    },
+    {
+      "path": "frontend/src/router/index.ts",
+      "value": "    path: '/admin/cache',\n    name: 'AdminCacheObservability',\n    component: () => import('@/features/cache-observability/CacheObservabilityView.vue'),\n    meta: {\n      requiresAuth: true,\n      requiresAdmin: true,"
+    },
+    {
+      "path": "frontend/src/components/layout/AppSidebar.vue",
+      "value": "{ path: '/admin/cache', label: t('nav.cacheObservability'), icon: DatabaseIcon },"
+    },
+    {
+      "path": "frontend/src/components/layout/AppSidebar.vue",
+      "value": "const DatabaseIcon = {"
     }
   ],
   "forbidden_module_paths": [
@@ -2033,7 +2398,8 @@
     "xy-resilience-v2-handler-exits",
     "xy-resilience-v2-streams",
     "xy-account-stream-only-learning",
-    "xy-resilience-v2-classification"
+    "xy-resilience-v2-classification",
+    "xy-openai-cache-trace"
   ],
   "custom_patch_tests": [
     {
@@ -2875,6 +3241,66 @@
       "id": "xy-group-categories",
       "path": "frontend/src/views/admin/__tests__/GroupsView.categories.spec.ts",
       "literal": "saves categories after the group is created"
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_forward_test.go",
+      "literal": "func TestCacheTraceWireCategoriesAndEnabledGolden("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_prefix_chain_test.go",
+      "literal": "func TestCachePrefixAppendModifyDelete("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_classify_test.go",
+      "literal": "func TestT3ClassifierLossTable("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_disabled_structure_test.go",
+      "literal": "func TestCacheTraceDisabledCannotReachBodyWork("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_disabled_test.go",
+      "literal": "func TestCacheTraceDisabledForwardEntryStub("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_routing_test.go",
+      "literal": "func TestCacheTraceRoutingFinalSuccessfulForwardPreservesDecision("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/handler/cache_trace_fallback_visibility_test.go",
+      "literal": "func TestCacheTraceFallbackInvisibleInResponseAndUserUsage("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_routing_retry_test.go",
+      "literal": "func TestCacheTraceRoutingLastResortThenFailedForwardAndSuccessfulFailover("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_undelivered_review_test.go",
+      "literal": "func TestCacheTraceUndeliveredAbuseMinimalEventAndBilling("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_undelivered_review_test.go",
+      "literal": "func TestCacheTraceZeroUpstreamAttemptsEmitNeitherEvent("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_usage_ingress_structure_test.go",
+      "literal": "func TestCacheTraceUsageStructureRecognizesRenamedHooks("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_trace_logger_contract_test.go",
+      "literal": "func TestCacheTraceProductionLoggerContract("
     }
   ]
 }

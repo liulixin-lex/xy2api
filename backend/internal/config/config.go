@@ -1071,6 +1071,8 @@ type GatewayConfig struct {
 	// OpenAIScheduler: OpenAI 高级调度器粘性逃逸配置
 	OpenAIScheduler      GatewayOpenAISchedulerConfig `mapstructure:"openai_scheduler"`
 	OpenAIQualityRouting OpenAIQualityRoutingConfig   `mapstructure:"openai_quality_routing"`
+	CacheFeatures        CacheFeaturesConfig          `mapstructure:"cache_features"`
+	CacheTrace           CacheTraceConfig             `mapstructure:"cache_trace"`
 	OpenAICache          OpenAICacheConfig            `mapstructure:"openai_cache"`
 	// OpenAIHTTP2: OpenAI HTTP 上游协议策略（默认启用 HTTP/2，可按代理能力回退 HTTP/1.1）
 	OpenAIHTTP2 GatewayOpenAIHTTP2Config `mapstructure:"openai_http2"`
@@ -1161,6 +1163,24 @@ type GatewayConfig struct {
 	// CNProviders: 国产 OpenAI 兼容供应商（kimi/zhipu/deepseek）的余额检测配置。
 	// 仅作用于 payg（按量付费）账号：周期探测余额，低于阈值则临时停调。
 	CNProviders GatewayCNProvidersConfig `mapstructure:"cn_providers"`
+}
+
+type CacheFeaturesConfig struct {
+	KillSwitch bool `mapstructure:"kill_switch"`
+}
+
+type CacheTraceConfig struct {
+	MinCacheableTokens int `mapstructure:"min_cacheable_tokens"`
+	Workers            int `mapstructure:"workers"`
+	MaxByteBudgetMiB   int `mapstructure:"max_byte_budget_mib"`
+	MaxRateMiBPerS     int `mapstructure:"max_rate_mib_per_s"`
+	MaxSessions        int `mapstructure:"max_sessions"`
+	ChainsPerSession   int `mapstructure:"chains_per_session"`
+	MaxCheckpoints     int `mapstructure:"max_checkpoints"`
+
+	MaxQueueWait time.Duration `mapstructure:"max_queue_wait"`
+
+	ReasoningContextPaths []string `mapstructure:"reasoning_context_paths"`
 }
 
 type OpenAICacheConfig struct {
@@ -2575,6 +2595,17 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.dial_timeout_seconds", 10)
 	viper.SetDefault("gateway.openai_quality_routing.mode", "enforce")
 	viper.SetDefault("gateway.openai_quality_routing.avoid_seconds", 300)
+	viper.SetDefault("gateway.cache_trace.max_queue_wait", 10*time.Second)
+
+	viper.SetDefault("gateway.cache_features.kill_switch", false)
+	viper.SetDefault("gateway.cache_trace.workers", 1)
+	viper.SetDefault("gateway.cache_trace.max_byte_budget_mib", 64)
+	viper.SetDefault("gateway.cache_trace.max_rate_mib_per_s", 32)
+	viper.SetDefault("gateway.cache_trace.max_sessions", 1024)
+	viper.SetDefault("gateway.cache_trace.chains_per_session", 3)
+	viper.SetDefault("gateway.cache_trace.max_checkpoints", 512)
+	viper.SetDefault("gateway.cache_trace.min_cacheable_tokens", 1024)
+	viper.SetDefault("gateway.cache_trace.reasoning_context_paths", []string{"reasoning.context"})
 	viper.SetDefault("gateway.openai_cache.diagnostics_enabled", false)
 	viper.SetDefault("gateway.openai_cache.aware_routing_enabled", false)
 	viper.SetDefault("gateway.openai_cache.rollout_percent", 0)
@@ -2820,6 +2851,29 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if c.Gateway.CacheTrace.MinCacheableTokens < 0 {
+		return fmt.Errorf("gateway.cache_trace.min_cacheable_tokens must be nonnegative")
+	}
+	if c.Gateway.CacheTrace.Workers < 1 || c.Gateway.CacheTrace.Workers > 2 {
+		return fmt.Errorf("gateway.cache_trace.workers must be between 1 and 2")
+	}
+	for _, cap := range []struct {
+		name            string
+		value, min, max int
+	}{
+		{"max_byte_budget_mib", c.Gateway.CacheTrace.MaxByteBudgetMiB, 8, 64},
+		{"max_rate_mib_per_s", c.Gateway.CacheTrace.MaxRateMiBPerS, 1, 32},
+		{"max_sessions", c.Gateway.CacheTrace.MaxSessions, 1, 1024},
+		{"chains_per_session", c.Gateway.CacheTrace.ChainsPerSession, 1, 3},
+		{"max_checkpoints", c.Gateway.CacheTrace.MaxCheckpoints, 1, 512},
+	} {
+		if cap.value < cap.min || cap.value > cap.max {
+			return fmt.Errorf("gateway.cache_trace.%s must be between %d and %d", cap.name, cap.min, cap.max)
+		}
+	}
+	if c.Gateway.CacheTrace.MaxQueueWait < 0 {
+		return fmt.Errorf("gateway.cache_trace.max_queue_wait must be nonnegative")
+	}
 	// Absolute Redis snapshots could overwrite usage committed by atomic billing.
 	if c.Database.UserPlatformQuotaFlusherEnabled {
 		return fmt.Errorf("atomic billing requires database.user_platform_quota_flusher_enabled=false; flush legacy quota snapshots before upgrading")

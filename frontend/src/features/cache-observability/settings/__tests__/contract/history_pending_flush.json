@@ -1,0 +1,66 @@
+{
+  "_contract": [
+    "C-12"
+  ],
+  "_note": "v1.7.4.5 刚写入：PUT observability 刚返回 rev=3，随即 GET。rev 3 的审计记录尚未落盘（单个写入器每秒一批，约 1 秒内），items 只有 rev 1、2。v1.7.4.6 复算：有已落盘的成功记录，第 1 步不适用；最小 rev 为 1 且连续，history_complete=true，原因为 null。不拿条数或最大 rev 与 stored.rev（=3）比较。前端看到最大 rev_after 小于刚返回的 rev 时不提示错误，需要时约 2 秒后再拉一次。_fixture 是后端测试需预置的状态（该键已落盘的成功记录的 rev_after、stored.rev/updated_at、服务端当前时间），不属于响应。",
+  "_fixture": {
+    "key": "observability",
+    "persisted_success_rev_after": [
+      1,
+      2
+    ],
+    "stored": {
+      "rev": 3,
+      "updated_at": "2026-10-23T09:12:00Z"
+    },
+    "now": "2026-10-23T09:12:00.600Z"
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/cache/policies/history?key=observability",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "items": [
+        {
+          "at": "2026-10-23T09:10:05Z",
+          "key": "observability",
+          "action": "admin.cache.policies.observability.update",
+          "actor": {
+            "user_id": 1,
+            "email": "admin@example.com"
+          },
+          "status_code": 200,
+          "rev_before": 1,
+          "rev_after": 2,
+          "changed_fields": [
+            "chain_percent"
+          ],
+          "reason": "降低链路扫描比例"
+        },
+        {
+          "at": "2026-10-23T09:00:00Z",
+          "key": "observability",
+          "action": "admin.cache.policies.observability.update",
+          "actor": {
+            "user_id": 1,
+            "email": "admin@example.com"
+          },
+          "status_code": 200,
+          "rev_before": 0,
+          "rev_after": 1,
+          "changed_fields": [
+            "enabled"
+          ],
+          "reason": "开启观测"
+        }
+      ],
+      "history_complete": true,
+      "history_incomplete_reason": null
+    }
+  }
+}

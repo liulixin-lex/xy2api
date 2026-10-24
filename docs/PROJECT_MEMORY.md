@@ -6,6 +6,22 @@
 
 ## 当前交接状态
 
+### 缓存 M1 集成候选（预跑与终审完成，待推送确认）
+
+- 三份输入已冻结：G 至 `4eed9797a`；G2 按序 `c493068db`、`ea16d7e22`；UI 六提交至 `ace3741b1`，不含 M2。集成提交统一项目 noreply 身份并保留协作尾注。
+- 产品代码自动合并：保留 T4 路由与 undelivered 观测及每请求运行时策略，路由只读取已存在的 trace；关闭态不创建 trace，结算只接收已启用的请求结果。policy 保留有效登记并集，记忆保留双方历史。
+- 产品验证候选 `25df25ab7` 已通过独立终审、端到端、关闭态零执行及可在测试环境预跑的门禁；测试 API 接缝和双故障 observer_failed 优先级已修复。下一步等项目负责人确认推送，再通过单个 PR 的八项必需检查；正式 d1/d2 不阻塞默认关闭的 M1。未推送、未部署。
+
+### 运行时缓存策略 T0a.5（2026-10-23，本地完成）
+
+- 核心已在 T0a.3 d770e4dbb 上独立提交为 c493068db；接缝独立提交，提交号以本分支 git log 为准。默认关闭、管理员审计、每请求固定快照与远端约60秒刷新已验证。
+- T0a.3 接缝全量缓存 race 加 undelivered 夹具定向复验、关闭态产品证明及59处独立零执行探针、默认全量 lint 均通过。完整门禁与已知 prelude 偶发证据见归档登记；G2 输入已固定且不再 rebase；T4 与运行时开关的跨分支接缝由集成终审复核。未推送、部署或访问生产。
+
+
+### OpenAI 缓存 P0a（2026-10-23，开发中）
+
+- T0a.3 已提交 `d770e4dbb`；T0a.4 路由观测、回退用户不可见及 T3 评审五项 MINOR 已完成并通过非计时收尾核验。已定性 prelude 偶发与分配改善的原始失败记录保留，repository integration 仍待 CI 复核。T0a.5 核心/接缝由 G2 单独交付，待集成。正式性能只决定生产是否开启观测；当前未推送、合并或部署。
+
 ### XY2API 0.4.6 正式发布完成（2026-10-23；生产未部署）
 
 - 发布：`v0.4.6`（annotated 对象 `f267b5a7e`）→ main 合并提交 `fe7a3b6db`（[PR #129](https://github.com/liulixin-lex/xy2api/pull/129)）。Release run [39840369118](https://github.com/liulixin-lex/xy2api/actions/runs/39840369118) 成功，正式 Release 非 draft、非 prerelease，包含 6 个附件：`checksums.txt` 与 macOS、Linux、Windows 五个平台压缩包。
@@ -161,6 +177,29 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
+
+### 20261023-cache-m1-integration
+
+- 执行者：P。按冻结输入集成缓存观测、运行时策略与管理员面板；默认关闭，不变更生产。
+- 顺序：G T0a.1–T0a.4 → G2 核心与接缝 → UI 六提交；改写项目身份并保留协作尾注。
+- 当前：组装、预跑、终审与端到端已完成；等待推送确认及后续 GitHub 必需检查，通过单个 PR 用 merge commit 合入 main。
+
+### 20261023-cache-p0a — OpenAI 缓存旁路观测（开发中）
+
+- 授权：PM 批准 P0a 先行；基线 `e369fd3bb`，分支 `cache/p0a`，每任务独立提交；不推送、不合并、不部署。
+- 分工：G 负责 T0a.1–T0a.4（类别、异步块链、结算事件、路由原因）；G2 并行负责 T0a.5 运行时策略服务/管理员接口及启用接缝。G 不再改启用配置；事件预留请求快照 `PolRev`。所有功能默认关闭。
+- 约束：出站字节与选号不变；不改 RecordUsage 主体、resilience/state.go、插件路径。事件仅枚举、整数、布尔和HMAC，内部块/线程哈希不输出；回退观测仅内部日志。
+- 已完成：T0a.1、T0a.2、T0a.1-fix；T0a.2-fix 提交 `882ce6a66`，tree `2b2fee0f84a9012a1773c36f1fe1da36165a5996`，含有界异步worker、稀疏/末块检查点、预算先预留、拒绝简化、不可变body借用、关闭态分配修复。正式d1沿用仅差7文件lint修复的候选，pooled p99 0.501593ms。新树lint、定向/race、110组计费等价、关闭零执行、140组分配及400帧线程CPU ABBA通过；全量unit/integration（repository环境受限）、韧性与ci_gate沿用lint前候选。墙钟buffered差异与AA噪声证据保留供评审。
+- 当前：T0a.3 已完成纯值分类、S3/S4/S5、恰好一次结算、observer_failed 最小事件、缺 usage 元数据、typed buffered 读取位、无会话分支和异步历史 epoch 校验。unit、integration（repository 环境受限排除）、韧性、ci_gate、race、lint、110 组计费三方对照、140 组分配及关闭零执行均通过；真实日志严格校验 16 条通过（12 精确关联、4 无会话单列），数值回放可比 86/86 对齐。拒绝路径四档 0 B/op、0 allocs/op。T0a.3 提交 `d770e4dbb`；T0a.4 完成 9 个既有决策调用点、跨尝试最高优先级和独立 rebind_cause；新增 undelivered 最小事件、共享终帧、精确 AST、73 处零执行探针与 22 条真实事件严格校验。全量 unit、受限 integration、韧性、trace/routing race、lint、文档和审计通过；ci_gate 仅既有已定性时序偶发。140 配对无新增分配，其中 buffered 固定减少 202 次。非阻塞细节进后续 backlog；未推送、合并或部署。
+- 门禁安排：每子任务仅功能、分配、关闭零执行，可加非独占d1-lite；正式d1/d2由G在M1集成冻结候选统一运行。T0a.2-fix未单独运行正式d2。普通重任务走协调队列，正式计时走独占窗口。
+- 已知限制：repository在测试服务器的Docker端口环境受限，PR CI复核；Codex同工作区对话锚点可能相撞；冷会话并发和四槽时序历史会保守缺失。生产EXP-0待用户决定开启后验证。
+
+### 20261023-cache-fe-panel — 管理后台缓存开关与参数（F-1a，开发中）
+
+- 授权：缓存项目 PM 指派；基线 `e369fd3bb`，分支 `cache/fe-panel`；不推送、不合并、不部署。
+- 范围：M1 只交付前端“开关与参数”页（`/admin/cache`，仅管理员，侧栏在“运维监控”之后），对接 `/api/v1/admin/cache/policies` 的列表、预校验、带 `expected_rev` 的写入与变更记录；后端接口缺失（404）时页面提示后端版本未提供。观测图表（F-1）留在本分支后续提交，等 P0b 接口。
+- 约束：默认全部关闭；表单范围以接口返回的 schema 为准；总开关只覆盖改出站或选号的三个键；`claude_cache_fallback_policy` 与 `gateway.openai_cache.*` 只读展示并链接原设置页，不改其存储与语义。
+- 状态：首版 `ec311712c` 经评审有条件通过后，已按评审与 v1.7.4 契约修复：错误按平台信封的 `reason` 识别，写入后整页重读，409 与 `rev_stale` 走三方合并，确认框列出提交后的影响，静态总闸期间仍可保存。接口契约样例作为前端测试夹具，相关测试已列入根 `Makefile` 的关键 vitest 清单；路由与侧栏入口已登记到 `tools/upstream-sync/policy.json` 的 required_literals。待后端接口落地后联调。
 
 ### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（PR #120 已合入 main，进入下一个版本；待真实上游验证；2026-10-22 DOCS 更新状态）
 
@@ -1298,3 +1337,48 @@ pnpm --dir frontend run build
 - 发布：创建 annotated `v0.4.6`（tag object `f267b5a7e`，目标 `fe7a3b6db`），Release run `39840369118` 成功，Release 非 draft/非 prerelease，6 个附件生成；未执行生产部署。
 - 修改文件：`backend/cmd/server/VERSION`、`UPSTREAM_BASE.json`、`frontend/package.json`、`frontend/pnpm-lock.yaml`，以及本记忆和文档目录状态。
 - 卡点/下一步：无阻塞；生产部署仍需单独授权，后续测试 P2 按 OpenSpec tasks §7 管理。
+
+### 2026-10-23T14:50Z — `20261023-cache-p0a` — T0a.2-fix提交与T0a.3接线
+
+- 完成：`882ce6a66`保留冻结产品tree，补齐lint、产品代码分配/零执行、计费等价及线程CPU ABBA证据；基线与候选分配次数相等。默认GC的字节噪声和buffered墙钟差异如实保留，线程CPU无显著增量。
+- 决策：正式d1/d2留M1，G只做T0a.3/T0a.4；T0a.5由G2负责。
+- 下一步：权威事件契约、分类与S3/S4/S5接线，observer故障最小事件保留旧nil断言；随后路由埋点。已知限制继续在测试证据中登记，不改计费或选号语义。
+
+### 2026-10-23T17:40Z — `20261023-cache-p0a` — T0a.3 结算事件与缓存损失分类完成
+
+- 完成：完整与最小事件遵守权威契约；session_digest/request_id_hmac 与原用量日志同值；加入 S3/S4/S5、逻辑位置分类、缺字段与显式零区分、observer 故障隔离、迟到历史的 epoch 校验。
+- 验证：冻结产品 tree `2d27b47da04dd565dd85d2e18636577d24e88c83` 的全量非计时 Go 门禁、计费等价、分配、零执行与实际 JSON 严格校验通过；提交前只同步类型保护登记和本记忆。外部关闭证明夹具曾将 enabled/disabled 拼入 JSON，已仅改布尔格式后复跑，业务断言不变；首轮失败保留。
+- 限制：repository integration 仍由 GitHub CI 复核；数值回放不证明真实分叉位置；正式 d1/d2 留 M1 集成候选，生产 EXP-0 未执行。
+- 下一步：T0a.4 只在已有路由决策点标记原因，G2 继续运行时策略接缝；评审由 PM 安排。
+
+### 2026-10-23T19:56Z — `20261023-cache-p0a` — T0a.4 路由观测与评审收尾完成
+
+- 完成：只观察九处既有决策，路由原因按已批准优先级跨重试累积；回退只读且用户不可见，不新增选号状态读写。未投递但滥用计费的上游尝试输出可关联的十二字段最小事件；零次上游尝试和未结算请求不出两类事件。
+- T3 评审：五项 MINOR 全部处理；共享终帧处理、恢复原解析器精确计数、73 探针覆盖十二种入口、真实历史/metadata/settled gap 语料，以及未投递范围回归。其余非阻塞事项按后续 backlog 跟踪。
+- 验证：产品测试树 `ddeda3a4e8716cbc34dc993e0337665842b8c995`；全量 unit、排除既定环境受限 repository 的 integration、service/handler 韧性、trace/routing race、lint 零问题、文档、scheduler-diff 和上游审计通过；110 组计费三方等价、22 条严格事件及 73 探针通过。
+- 原始失败与判定：完整 ci_gate 仅失败于 PM 已定性的 prelude 时序用例；140 组分配无新增成本，buffered 二十配对固定减少 202 次，原严格相等失败保持原样并单列窄化非退化判定。未修改既有业务断言；repository 环境豁免待 CI。
+- 提交前仅补本记忆，保存与测试树的文档差异，不重复 Go 门禁。正式 d1/d2 已参数化候选 SHA，尚未在 M1 集成树执行，不据此开启生产。
+- 下一步：交 P 组装 M1，R/S 与 CI 复核；从已提交运行时策略接缝启动独立 P1 L-01 分支，M1 合入后再重基。
+
+### 2026-10-23T19:00Z — `20261023-cache-p0a-t5` — T0a.3 运行时策略接缝交付
+
+- 保留 T0a.3 的输出、结算、拒绝、observer_failed、no_session 入口；启用取请求快照，静态仅保留总闸和上限。关闭矩阵含实际按 abuse 结算的 undelivered 请求。
+- race-r2共1596执行，17个失败项均来自同一 undelivered 夹具漏设 abuse 前提；只修夹具后定向race及59处独立探针通过，0race。拒绝零分配、并发切换、正常轮询的开启/关闭各不超过60秒在r2通过。默认全量lint0问题。
+- 文档与部署示例、required_literals同步；核心与接缝分开。下一步等待T0a.4提交，rebase并补受影响验证；随后在新分支开展M2汇总与管理员图表接口。
+
+### 2026-10-23T20:03Z — `20261023-cache-m1-integration` — 三份冻结输入组装
+
+- 从最新 main 按 G → G2 → UI 导入；冲突仅记忆与 policy，保留各任务历史及有效字面量，G2 旧任务按来源原样归档。未夹带 M2。运行时策略覆盖 trace 构造、异步与结算路径，T4 决策点只读已有 trace。
+- 已按项目惯例改写 author/committer 并保留 Co-Authored-By。CSV 夹具只归一化行尾，内容不变。
+- 待验证：固定候选的 CI 等价预跑、真实仓储 integration、独立终审和端到端；生产仍不变更。详细 SHA/tree 与原始结果保存在仓库外报告。
+
+### 2026-10-23T20:13Z — `20261023-cache-m1-integration` — 调度登记元数据补齐
+
+- 首轮工具单测发现 no-session 观测 allowlist 缺少必需 note；仅补说明，不改审计规则、diff 块、测试断言或产品代码。原失败保留，复验工具/文档/审计门禁；其余产品预跑结果按相同源码继承。
+
+### 2026-10-23T23:43Z — `20261023-cache-m1-integration` — 预跑与终审收尾
+
+- 修复两个测试包的运行时策略 API 接缝；observer_failed 高于 undelivered，新增双故障回归。项目提交身份和协作尾注保持一致。
+- `25df25ab7`：全量 unit、四类 tag 编译、缓存 race、四项可靠性、安全、前端关键779项及构建、74处关闭态探针与产品证明通过；独立终审、五项端到端通过，48条关闭态响应与基线逐字节一致。
+- DinD 仓储通过；只读挂载的 schema 测试失败在可写工作树定向复验通过。额外全量前端3348项通过但既有卸载定时器异常已记后续；韧性 prelude 时序用例首次失败、原命令独立复跑通过。保留内存中断与环境失败原始证据，未放宽断言。
+- 当前提交仅更新记忆；产品源码验证结果继承。等待负责人确认推送，原生 macOS/Windows 与 GitHub 八项检查待 PR 验证；生产不变更。
