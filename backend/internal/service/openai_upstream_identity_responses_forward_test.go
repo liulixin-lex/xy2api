@@ -174,7 +174,7 @@ func TestL01ResponsesForwardCohortSurvivesAccountAndGroupChange(t *testing.T) {
 	for group := int64(1); group <= 256 && (treatmentGroup == 0 || controlGroup == 0); group++ {
 		key.GroupID = &group
 		routing := f.service.GenerateSessionHash(f.context, []byte(body))
-		if sha256SumCacheCohort(routing) < 50 {
+		if openAIUpstreamIdentityCohort(routing) < 50 {
 			treatmentGroup, treatmentRouting = group, routing
 		} else {
 			controlGroup, controlRouting = group, routing

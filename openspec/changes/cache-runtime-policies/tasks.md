@@ -12,6 +12,10 @@
 
 ### M3 / L-01（本地完成，待评审）
 
+- [x] B-M3-1 响应回显还原与 L-01 独立 cohort 域；旧基点 focused 与原生分配矩阵通过。
+- [x] 七项非公开入口的只读来源核对，区分已有单测和 HTTP 可达性。
+- [ ] M2 合入并变基后，单次完成全 tag、补修 race/zero/logger/compat/lint及管理员API契约门禁；旧基点余项按PM优先级中止。
+
 - [x] upstream_identity 类型化快照、严格字段与账号校验、确认/审计接线。
 - [x] Responses 缺键头部插入与 Chat 复用既有 UUID 的接线。
 - [x] 显式值优先、四重建路径、会话作用域、关闭 golden/分配/零执行验证。

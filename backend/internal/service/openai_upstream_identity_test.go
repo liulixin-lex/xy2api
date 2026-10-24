@@ -124,16 +124,6 @@ func TestL01DisabledPreparationDoesNotAllocate(t *testing.T) {
 	require.NotContains(t, c.Keys, openAIUpstreamIdentityCohortGinKey)
 }
 
-func TestL01CohortMatchesExistingBucket(t *testing.T) {
-	for _, size := range []int{0, 1, 16, 19, 32, 33, 64, 65, 128, 1024} {
-		seed := strings.Repeat("s", size)
-		require.Equal(t, sha256SumCacheCohort(seed), openAIUpstreamIdentityCohort(seed))
-		if size <= 64 {
-			require.Zero(t, testing.AllocsPerRun(100, func() { _ = openAIUpstreamIdentityCohort(seed) }))
-		}
-	}
-}
-
 func TestL01UnsupportedIngressPrecedesAccountAndSession(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
 		for _, kind := range []string{AccountTypeAPIKey, AccountTypeOAuth} {

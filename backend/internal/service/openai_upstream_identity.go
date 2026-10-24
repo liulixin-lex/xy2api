@@ -86,17 +86,22 @@ func prepareOpenAIUpstreamIdentity(c *gin.Context, account *Account) openAIUpstr
 	return d
 }
 
-// Routing digests are 16 hex characters, optionally prefixed with v2:.
-// Keep their SHA-256 input on the stack: converting a dynamic string longer
-// than the compiler's small buffer allocates. The calculation is identical to
-// sha256SumCacheCohort; unexpected longer identities keep its exact behavior.
+// L-01 rollout must be independent of trace sampling: hashing the same bare
+// session would make the treatment arm depend on whether observation is sampled.
+// Keep this fixed domain separate from sha256SumCacheCohort, whose existing trace
+// assignments remain unchanged. Routing digests (including v2:) fit on the stack;
+// unexpected longer identities use exactly the same domain-prefixed algorithm.
 func openAIUpstreamIdentityCohort(session string) int {
-	var input [64]byte
-	if len(session) > len(input) {
-		return sha256SumCacheCohort(session)
+	const domain = "l01-cohort|"
+	var input [len(domain) + 64]byte
+	var digest [sha256.Size]byte
+	if len(session) > len(input)-len(domain) {
+		digest = sha256.Sum256([]byte(domain + session))
+	} else {
+		n := copy(input[:], domain)
+		n += copy(input[n:], session)
+		digest = sha256.Sum256(input[:n])
 	}
-	n := copy(input[:], session)
-	digest := sha256.Sum256(input[:n])
 	return int(digest[0]) * 100 / 256
 }
 

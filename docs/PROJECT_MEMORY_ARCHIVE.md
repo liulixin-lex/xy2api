@@ -3177,3 +3177,14 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 约束：默认关闭并受 master/kill 控制；显式字段只读保护，关闭出站与基线相同；无新增整 body 扫描，不改 GenerateSessionHash/选号/计费/插件/WS；快照与会话分桶在请求内固定，UUID按 serving scope 派生，原 lineage 身份不反馈注入值。
 - 当前：策略、Responses/Chat、M3 full-only 观测已实现。r3 tree cb177bba 的 6186 项功能测试、关闭 golden/零执行、126 分配边界与 140 配对分配均通过，B/op 均值 −0.5～+0.2 且置信区间含 0；真实 logger M3 严格校验通过。完整 lint 仅两项，已修类型断言检查和等价布尔式，待增量验证。既有 quality enforce 轮换与 L01 来源冲突已真实复现，外部草案 8/8 通过；PM 已批准 quality_rotation、unsupported_ingress、no_compat_seed，正在按 M3 v1.0.1 优先级接入产品并扩充真实出站等价测试，新树门禁待跑。插件关闭优先级的契约矛盾继续跟进。M1 已继承 T4 路由/评审修复、运行时 API 与 UI、observer_failed 优先级修复；本分支在已合入 M1 的新基点继续验证，不重放旧头。未提交、推送或部署。
 - 下一步：冻结变基后的源码树，按新 HEAD/tree 运行功能、race、关闭零执行、分配、实际 M3 logger、兼容与 lint 门禁；重任务遵守现有计时窗口，不在旧头上重放。结果通过前不提交，不推送或部署。
+
+
+## 2026-10-24T13:31Z — G M3 响应隐私修复前的交接原文
+
+### 20261023-cache-p1-l01 — M3 上游 UUID 会话键补全（G，评审阻塞修复中）
+
+- 基点：M1 合并后的 main `72c2d0169`；分支 `cache/p1-l01`，提交号以本分支 git log 为准。仅 T1.1/T1.2 的 L-01，默认关闭；L-02、header_only_uuid 与 T1.3 留后续。
+- 当前：基于已交付的 `d74eaf603` 修复 B-M3-1 响应 key 回显；仅实际注入时还原响应，关闭与 skip 字节保持原样。L-01 cohort 增加独立哈希域，trace 抽样保持原样；完成受影响门禁后独立提交，M2b 暂停。
+- 完成：运行时策略、Responses/Chat 补键、M3 观测与真实出站回归；显式客户端身份和既有质量轮换优先，原调度/计费/插件行为保留。
+- 验证：产品 tree `90f2a7374fed0fd3726e0ba5a92624b71ddff36a` 的 focused、race、关闭 golden/零执行、分配、真实日志、兼容与 lint 全部通过；default/unit/integration/e2e 四 tag vet 补证通过。测试后仅更新 G 记忆、归档和任务状态，产品字节不变。
+- 限制与下一步：独立评审、staging 与 CI 待完成；后续吸收 M2/main 前先做四 tag vet。质量性能对比用例因未配置专用 Redis 测试环境跳过，不据此认定性能验收通过。未推送、未部署；详细开发交接原文见归档。

@@ -25,7 +25,7 @@ func TestOpenAIUpstreamIdentityPrepareAllocationBoundaries(t *testing.T) {
 	bucket := 0
 	for n := 0; bucket == 0; n++ {
 		session = "synthetic-l01-allocation-session-" + strconv.Itoa(n)
-		bucket = sha256SumCacheCohort(session)
+		bucket = openAIUpstreamIdentityCohort(session)
 	}
 	for _, state := range []string{"off", "control", "account_out_of_scope"} {
 		for _, padding := range []int{0, 1, 3, 4, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16, 24, 25, 26, 27, 28, 29, 32} {

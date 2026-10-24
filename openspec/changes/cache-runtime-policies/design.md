@@ -35,3 +35,15 @@ L-01 遵守既有质量机制的优先级：仅当只读 qualityRotation accesso
 compat seed 与 Chat 开关之后；不调用轮换推进或调度写入。记录 quality_rotation，
 原始 Chat 等排除入口记录 unsupported_ingress，未产生旧 compat seed 记录
 no_compat_seed。三者 applied=false，body/header 与 L-01 关闭时逐字节一致。
+
+L-01 灰度使用独立域 `SHA256("l01-cohort|" + session)`，再按首字节映射到 0–99；
+观测采样的原哈希保持不变，避免小比例观测只包含实验组。
+
+仅当本次尝试实际注入 UUID 时，在客户端写回前恢复 Responses 的
+`prompt_cache_key`：按官方未提供 key 的完整响应示例省略该成员，涵盖普通 JSON、
+流式生命周期事件、buffered SSE 及 compact。依据为官方
+[create 示例](https://developers.openai.com/api/reference/resources/responses/methods/create)
+与 [compact 示例](https://developers.openai.com/api/reference/resources/responses/methods/compact)；
+类型可为空本身不作为默认形态证据。原本省略的字段不新增，输出内容/工具参数不改。
+实际注入标记与观测开关独立并限定当前账号；关闭或跳过 L-01 时不运行响应还原，
+保持客户端响应字节不变。UUID 仅用于上游身份，不进入客户端输出。

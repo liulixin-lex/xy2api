@@ -88,7 +88,7 @@ func TestOpenAIUpstreamIdentityDisabledForwardGolden(t *testing.T) {
 			require.Equal(t, golden[tc.name()], wire, "pre-L01 baseline")
 			routing := c.GetString(openAICacheSessionGinKey)
 			require.NotEmpty(t, routing)
-			bucket := sha256SumCacheCohort(routing)
+			bucket := openAIUpstreamIdentityCohort(routing)
 			if bucket == 0 {
 				zeroBucket++
 			}
@@ -101,7 +101,7 @@ func TestOpenAIUpstreamIdentityDisabledForwardGolden(t *testing.T) {
 					require.Equal(t, routing, c.GetString(openAICacheSessionGinKey), "policy must not alter routing identity")
 					require.Equal(t, golden[tc.name()], actual, "gate=%s", state.name)
 					if state.name == "control" {
-						require.GreaterOrEqual(t, sha256SumCacheCohort(c.GetString(openAICacheSessionGinKey)), state.percent)
+						require.GreaterOrEqual(t, openAIUpstreamIdentityCohort(c.GetString(openAICacheSessionGinKey)), state.percent)
 						controls++
 					}
 				})
@@ -118,7 +118,7 @@ func TestOpenAIUpstreamIdentityDisabledExtraGolden(t *testing.T) {
 		t.Run(tc.name(), func(t *testing.T) {
 			c, wire, _, _, _ := traceExtraRun(t, tc, l01WireConfigure(t, l01DisabledWireState{mode: "off"}), nil)
 			require.Equal(t, golden[tc.name()], wire)
-			bucket := sha256SumCacheCohort(c.GetString(openAICacheSessionGinKey))
+			bucket := openAIUpstreamIdentityCohort(c.GetString(openAICacheSessionGinKey))
 			for _, state := range l01DisabledWireStates(bucket) {
 				t.Run(state.name, func(t *testing.T) {
 					_, actual, _, _, _ := traceExtraRun(t, tc, l01WireConfigure(t, state), nil)
@@ -143,7 +143,7 @@ func TestOpenAIUpstreamIdentityDisabledBuilderGolden(t *testing.T) {
 					_, c, req, body := cacheTraceWireFixture(t, parts[0], parts[1], parts[2], parts[3], l01WireConfigure(t, l01DisabledWireState{mode: "off", observer: observer}))
 					require.Equal(t, expected, cacheTraceWireSnapshot(t, req, body))
 					baselineComparisons++
-					bucket := sha256SumCacheCohort(c.GetString(openAICacheSessionGinKey))
+					bucket := openAIUpstreamIdentityCohort(c.GetString(openAICacheSessionGinKey))
 					// The shared fixture selects Chat before its passthrough branch:
 					// chat/passthrough therefore uses an ordinary eligible API key.
 					// Only actual OAuth or Responses passthrough is excluded here.

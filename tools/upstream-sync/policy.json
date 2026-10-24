@@ -2461,6 +2461,22 @@
     {
       "path": "backend/internal/service/cache_policy_upstream_identity.go",
       "value": "func (p *CachePolicySnapshot) UpstreamIdentity()"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "l01ResponseApplied := openAIUpstreamIdentityResponseApplied(c, account)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "l01ResponseBuffer = &openAIUpstreamIdentitySSEBuffer{limit: maxLineSize}"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "restoreOpenAIUpstreamIdentitySSE(body)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_upstream_errors.go",
+      "value": "clientBody, err = restoreOpenAIUpstreamIdentityResponse(body)"
     }
   ],
   "forbidden_module_paths": [

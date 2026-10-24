@@ -88,7 +88,7 @@ func l01QualityReproContext(t *testing.T, protocol string, observer bool, arm st
 	session := s.GenerateSessionHash(c, body)
 	require.NotEmpty(t, session)
 	if arm == "control" {
-		bucket := sha256SumCacheCohort(session)
+		bucket := openAIUpstreamIdentityCohort(session)
 		require.Positive(t, bucket, "caller must choose a realizable control cohort")
 		snapshot.upstream.RolloutPercent = bucket
 	}
@@ -155,7 +155,7 @@ func TestL01QualityRotationPreservesBaseline(t *testing.T) {
 				apiID := int64(99)
 				for ; apiID < 355; apiID++ {
 					s, c, _, _, _, body := l01QualityReproContext(t, protocol, false, "policy_off", apiID)
-					if sha256SumCacheCohort(s.GenerateSessionHash(c, body)) > 0 {
+					if openAIUpstreamIdentityCohort(s.GenerateSessionHash(c, body)) > 0 {
 						break
 					}
 				}
