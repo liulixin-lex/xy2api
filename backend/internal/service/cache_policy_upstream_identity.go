@@ -16,6 +16,8 @@ func (s *CachePolicyService) cachePolicySupported(index int) bool {
 		return true
 	case 2:
 		return s.northstarAvailable
+	case 4, 5:
+		return s.m4Available
 	default:
 		return false
 	}
@@ -207,6 +209,10 @@ func upstreamIdentityScopeDirection(before, after []int64) (up, down bool) {
 
 func (s *CachePolicyService) validationForWrite(ctx context.Context, index int, entry cachePolicyEntry, w CachePolicyWrite, bodyErrors []CachePolicyFieldError) (CachePolicyValidation, map[string]any, error) {
 	v, spec := s.validation(index, entry, w, bodyErrors)
+	if index == 4 || index == 5 {
+		validated, err := s.validateM4Groups(ctx, index, v, spec)
+		return validated, spec, err
+	}
 	// Rollbacks must work even when the account repository is unavailable.
 	// Direction comes from actual, strictly parsed changes: disable cannot
 	// grant any new scope, and still retains field and revision validation.

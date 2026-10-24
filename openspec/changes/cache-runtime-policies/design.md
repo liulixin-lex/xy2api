@@ -53,3 +53,7 @@ null 形态依据保存的兼容 Responses 官方流示例及协议允许的空�
 ## M3 管理员账号选项
 
 管理员账号选项通过已注入仓储的分页能力查询，按静态协议资格过滤后取前 500 个，响应只含 ID、名称、平台。停用账号仍可配置；不以健康、冷却、分组并发或选号状态筛选。未实现分页能力的最小服务返回显式空数组。候选查询失败不影响策略读取或已提交的写入，部分候选丢弃，options返回空数组，effective.warnings末尾追加account_options_unavailable。关闭方向的validate与PUT跳过账号校验及候选查询；PUT带同一提示，validate不带。开启和混合方向仍校验账号，校验查询失败拒绝；账号查验失败时清空生效warnings，与其他invalid校验一致。PUT 的 `CACHE_POLICY_UNSUPPORTED` 与 validate 的 `unsupported_in_build` 保持既有映射，以原字节契约样例逐字段核对。
+
+## M4 T4.0 管理能力
+
+基于 M3 候选，仅开放 index4/5 的管理员策略读写，不接入请求或路由。生产构造注入只读分组仓储；组候选与校验均在管理员操作且发布锁之外。关闭方向完全不读组、不使用旧事实。嵌套对象按叶子点路径 diff；anchor/metadata 空范围表示关闭，busy/account 空范围表示全部；routing 开启与mixed要求输入完整键名。仅支持score，其余值沿用UNSUPPORTED错误信封。观测missing为静态构建能力，on/masked提示；fallback样例显式注入覆盖能力。细节与API现行说明见openai-cache-reliability.md，20份M4原字节契约/相关反例及M3保留回放随实现提交。

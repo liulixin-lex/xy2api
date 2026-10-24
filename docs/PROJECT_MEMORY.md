@@ -202,10 +202,22 @@
 
 ## 进行中的工作
 
+### 20261024-cache-m31-m4a-integration — M3.1 与 T4.0 联合候选（P，组装中）
+
+- 已按授权合入 PR #134：main `c07ece514`，tree 与批准的 `4a0c1107f` 一致；18 项检查全部成功，strict 与讨论要求已核，merge commit 带协作尾注且保留分支。M3 的实际执行、继承及已定性工具/环境失败分别留证，未变更生产。
+- 在该新 main 上依次重放 G T4.0、G M3.1、UI M4、UI M3.1；来源身份/尾注、迁移279及关闭路径不变。六份派生列表做真实HTTP完整回放，最终仅一条联合门禁、一次组合 golden 与一轮 staging。T4来源已通过，M3.1原来源任务运行中，组装验证尚未执行。
+
+
 ### 20261024-cache-m3-e9 — L-01 租户种子门禁（G，进行中）
 
 - 基于冻结M3候选6188d5d04，仅在policy关闭早退后、cohort前要求RoutingSession带v2:；非隔离旧种子记no_routing_session，不变更0.4.x粘性与显式键处理。
 - 覆盖三处真实哈希入口、复合组OpenAI apikey真实Forward与policy_off零执行顺序；附平台闸门阳性/阴性对照，内部skip不代表复合组public trace。单批五tag、L01 focused unit/race、增量lint待执行。T4.0暂停，未推送或部署。
+
+### 20261024-cache-m4-t40 — M4 两个管理员策略键（G，开发中）
+
+- 基于冻结 M3 候选 6188d5d04，分支 cache/m4-t40；仅实现 anthropic_identity 与 routing 的管理、验证、存储和分组选项，默认关闭且没有请求路径接线。保留0.4.x与M3行为。
+- 依据M4开工包§1及m3m4 v1.1：routing仅score；点路径实际diff、风险确认、分组白名单/降级warning和disable零查询与契约一致；northstar形态不变。
+- 计划：完成实现及20个M4样例/反例与M3保留回放，交付前一个heavy跑五tag编译、受影响包unit和回放。M3统一流水线优先，重任务按预算排队；不stash/autostash、不push、不部署。M3若有修补则跟进最终head。
 
 ### 20261024-cache-m3-integration — hardening、L-01 与管理员策略卡片（P，进行中）
 

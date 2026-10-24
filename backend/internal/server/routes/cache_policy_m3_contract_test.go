@@ -15,18 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
-	"github.com/liulixin-lex/xy2api/internal/handler"
-	adminhandler "github.com/liulixin-lex/xy2api/internal/handler/admin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
-	"github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
-
-// M3 v1.1 list fixtures include the actual M2 capability and full schema.
-const cacheM3ContractIncludesNorthstar = true
 
 type cacheM3OptionAccounts struct{}
 
@@ -88,8 +81,12 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 	require.Len(t, hashes, 22)
 	names := make([]string, 0, len(hashes))
 	for name := range hashes {
-		names = append(names, name)
+		// M4's four full list fixtures replace the M3 build's unavailable cards.
+		if !strings.HasPrefix(name, "m3_list_") {
+			names = append(names, name)
+		}
 	}
+	require.Len(t, names, 17)
 	sort.Strings(names)
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
@@ -109,7 +106,6 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 			}
 			cfg := &config.Config{}
 			cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-			version := "0.0.0-contract"
 			now := time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)
 			// Confirm/preview fixtures assume master on. List fixtures below
 			// replace all supported envelopes with their published exact state.
@@ -121,27 +117,6 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 				repo.rows[key] = string(b)
 			}
 			switch {
-			case strings.HasPrefix(name, "m3_list_"):
-				b, err := json.Marshal(data)
-				require.NoError(t, err)
-				var list service.CachePolicyList
-				require.NoError(t, json.Unmarshal(b, &list))
-				version = list.BuildVersion
-				cfg.Gateway.CacheFeatures.KillSwitch = list.Static.KillSwitch
-				cfg.Gateway.OpenAICache.DiagnosticsEnabled = list.Existing.Diagnostics
-				cfg.Gateway.OpenAICache.AwareRoutingEnabled = list.Existing.AwareRouting
-				cfg.Gateway.OpenAICache.RolloutPercent = list.Existing.Rollout
-				cfg.Gateway.CacheTrace.Workers = list.Static.Caps.Workers
-				cfg.Gateway.CacheTrace.MaxByteBudgetMiB = list.Static.Caps.MaxByteBudgetMiB
-				cfg.Gateway.CacheTrace.MaxRateMiBPerS = list.Static.Caps.MaxRateMiBPerS
-				cfg.Gateway.CacheTrace.MaxSessions = list.Static.Caps.MaxSessions
-				cfg.Gateway.CacheTrace.ChainsPerSession = list.Static.Caps.ChainsPerSession
-				cfg.Gateway.CacheTrace.MaxCheckpoints = list.Static.Caps.MaxCheckpoints
-				for _, policy := range list.Policies {
-					if policy.Available {
-						seedPolicy(t, repo, policy)
-					}
-				}
 			case name == "m3_get_account_options_unavailable.json":
 				b, err := json.Marshal(data)
 				require.NoError(t, err)
@@ -217,13 +192,9 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 					}
 				}
 			}
-			policies := service.NewCachePolicyService(repo, cfg, service.WithCacheNorthstar(), service.WithCachePolicyAccounts(accounts), service.WithCachePolicyClock(func() time.Time { return now }))
+			policies := service.NewCachePolicyService(repo, cfg, service.WithCacheNorthstar(), service.WithCachePolicyAccounts(accounts), service.WithCacheM4Policies(&cacheM4Groups{}), service.WithCachePolicyClock(func() time.Time { return now }))
 			require.NoError(t, policies.Refresh(context.Background()))
 			router := cacheTestRouter(policies, audit, nil)
-			// Keep the product build-version field exact for list fixtures.
-			if strings.HasPrefix(name, "m3_list_") {
-				router = cacheM3ContractRouter(policies, audit, version)
-			}
 			status, got := cacheCall(t, router, f.Request.Method, f.Request.Path, f.Request.Body)
 			require.Equal(t, f.Status, status)
 			require.NotContains(t, fmt.Sprint(got), "ACCOUNT_OPTIONS_HTTP_SECRET_ERROR_MARKER")
@@ -234,32 +205,11 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 			if accounts.failOptions {
 				require.Equal(t, 1, accounts.listCalls)
 			}
-			if strings.HasPrefix(name, "m3_list_") {
-				policies := got["data"].(map[string]any)["policies"].([]any)
-				require.Len(t, policies, 6)
-				require.Equal(t, "northstar", policies[2].(map[string]any)["key"])
-				require.Equal(t, cacheM3ContractIncludesNorthstar, policies[2].(map[string]any)["available"])
-			}
 			normalizePolicyTimes(t, got)
 			normalizePolicyTimes(t, expected)
 			require.Equal(t, expected, got, "compare every field, including options and JSON-string metadata.errors")
 		})
 	}
-}
-
-func cacheM3ContractRouter(p *service.CachePolicyService, audit *service.AuditLogService, version string) *gin.Engine {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	group := r.Group("/api/v1/admin")
-	group.Use(func(c *gin.Context) {
-		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1})
-		c.Set(middleware.ContextKeyAuthEmail, "admin@example.com")
-		c.Next()
-	})
-	group.Use(gin.HandlerFunc(middleware.NewAuditLogMiddleware(audit)))
-	h := &handler.Handlers{Admin: &handler.AdminHandlers{CachePolicy: adminhandler.NewCachePolicyHandler(p, audit, version)}}
-	registerCachePolicyRoutes(group, h)
-	return r
 }
 
 func TestCachePolicyM3EnablePutOptionsFailure(t *testing.T) {
@@ -287,7 +237,7 @@ func TestCachePolicyM3EnablePutOptionsFailure(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
 	accounts := &cacheM3FaultAccounts{failOptions: true}
-	policies := service.NewCachePolicyService(repo, cfg, service.WithCachePolicyAccounts(accounts))
+	policies := service.NewCachePolicyService(repo, cfg, service.WithCachePolicyAccounts(accounts), service.WithCacheM4Policies(&cacheM4Groups{}))
 	require.NoError(t, policies.Refresh(context.Background()))
 	auditRows := &cacheRouteAudit{}
 	audit := service.NewAuditLogService(auditRows, nil)

@@ -146,20 +146,23 @@ func WithCachePolicyClock(now func() time.Time) CachePolicyOption {
 }
 
 type CachePolicyService struct {
-	now                      func() time.Time
-	repo                     SettingRepository
-	store                    CachePolicyStore
-	accounts                 CachePolicyAccountLookup
-	caps                     CachePolicyCaps
-	kill, diagnostics, aware bool
-	rollout                  int
-	started                  time.Time
-	snapshot                 atomic.Pointer[CachePolicySnapshot]
-	mu                       sync.Mutex
-	cancel                   context.CancelFunc
-	wg                       sync.WaitGroup
-	listeners                []func(*CachePolicySnapshot)
-	northstarAvailable       bool
+	now                             func() time.Time
+	repo                            SettingRepository
+	store                           CachePolicyStore
+	accounts                        CachePolicyAccountLookup
+	groups                          CachePolicyGroupLookup
+	m4Available                     bool
+	anthropicObservabilityAvailable bool
+	caps                            CachePolicyCaps
+	kill, diagnostics, aware        bool
+	rollout                         int
+	started                         time.Time
+	snapshot                        atomic.Pointer[CachePolicySnapshot]
+	mu                              sync.Mutex
+	cancel                          context.CancelFunc
+	wg                              sync.WaitGroup
+	listeners                       []func(*CachePolicySnapshot)
+	northstarAvailable              bool
 }
 
 func NewCachePolicyService(repo SettingRepository, cfg *config.Config, options ...CachePolicyOption) *CachePolicyService {
@@ -336,6 +339,9 @@ func policyIndex(key string) int {
 	return -1
 }
 func policyDefaults(index int) map[string]any {
+	if index == 4 || index == 5 {
+		return m4PolicyDefaults(index)
+	}
 	if index == 2 {
 		return northstarPolicyDefaults()
 	}
@@ -357,8 +363,8 @@ func policyInt(v any) int {
 	return 0
 }
 
-func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config, accounts AccountRepository) *CachePolicyService {
-	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts))
+func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config, accounts AccountRepository, groups GroupRepository) *CachePolicyService {
+	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups))
 	s.Start()
 	return s
 }

@@ -140,8 +140,9 @@ cache_trace 仅为内部 Info 日志，经现有 slog→zap JSON logger 输出�
 管理员专用接口位于 `/api/v1/admin/cache/policies`：列表、按键读取、
 POST /{key}/validate、PUT /{key}、GET /history。当前构建提供 master（cache_feature_master）、
 observability（cache_observability_policy）、northstar（cache_northstar_policy）和
-upstream_identity（cache_upstream_identity_policy）；四者缺省关闭。其余两个键保留在列表中，
-标记为不可用；单项读写返回 404，存储值和 schema 不对用户接口公开。
+upstream_identity（cache_upstream_identity_policy）、anthropic_identity
+（cache_anthropic_identity_policy）和 routing（cache_routing_policy）；六者缺省关闭。
+T4.0 的后两个键支持管理员读写与审计，仅保存配置，尚未接入会话身份或选号行为。
 
 写入省略的字段保留原值，未知字段拒绝。每键的 `expected_rev` 在数据库
 事务和行锁内比较；冲突返回 409。启用总开关要求理由和勾选，PUT 会重新计算，
@@ -313,3 +314,33 @@ L-01 灰度使用独立域 `SHA256("l01-cohort|" + session)`，再按首字节�
 null 形态依据保存的兼容 Responses 官方流示例及协议允许的空值，不代表已对每个
 上游实测；某上游若对无 key 请求省略该字段，两组仍可能呈现不同形态，需要在
 启用实验中监测。
+
+
+## Claude/Gemini 身份与粘性策略管理（T4.0）
+
+anthropic_identity 默认 anchor_group_ids=[]、metadata_group_ids=[]、
+gemini_anchor=false、rollout_percent=0；metadata 范围必须是 anchor 范围的子集。
+两组 ID 只接受存在的 anthropic 分组，空列表表示关闭。
+routing 默认 keep_sticky_on_busy.enabled=false、group_ids=[]、rollout_percent=0，
+affinity_mode=score。busy 的空分组列表表示全部；本构建只接受 score，
+其他取值在 validate 中为 unsupported_in_build、PUT 为 CACHE_POLICY_UNSUPPORTED。
+
+嵌套对象整体或部分提交时按点路径的实际变化生成 diff、direction 与审计。
+anthropic_identity 为 high，开启和 mixed 要求理由及勾选；
+routing 为 highest，还要精确输入 cache_routing_policy。
+关闭方向不要求确认、不查分组表，也不复用之前查询的回退事实；
+格式、子集和 revision 校验仍然执行。
+
+三个分组选择字段都给出按 ID 升序、最多 500 项的 options，只有 id/name/platform。
+读取候选失败时仍可读取或保存策略，所有相关字段的 options 同时为空，
+effective.warnings 最后追加 group_options_unavailable，不返回内部错误。
+关闭写入主动跳过候选查询，使用同一提示；validate 不带候选提示。
+northstar.excluded_group_ids 保持原形态，不添加 options。
+
+anthropic_observability_missing 由静态构建能力决定，只在配置状态为 on
+或 masked_by_master 时出现；off（包括 rollout=0）不出现。
+构建是否包含 Anthropic 观测由构造参数声明，不在请求中探测。
+选中的组若被任一组的 availability_fallback_group_id 引用，管理员响应提示
+fallback_group_selected；它不进入用户输出。两个提示共存时，missing 在前。
+T4.0 只提供上述管理与存储能力；实际请求、分桶、metadata 改写、sticky 与调度接线
+由后续任务交付，当前版本不会因这两个键改变出站请求或选号。

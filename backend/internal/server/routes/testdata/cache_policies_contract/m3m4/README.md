@@ -5,3 +5,7 @@
 五份列表包括 M2 的 northstar 与 observability.persist_trace_hourly，实际 HTTP 响应全字段结构比较，不再投影或替换卡片。仅归一化已验证为 UTC RFC3339 的时间值。其他17份样例与v1.0.3相同。
 
 回放按样例固定 revision、diff.before、时钟及审计。候选查询失败由 error 桩注入；disable validate/PUT 使用 panic 桩证明没有账号查询，保留 warnings、错误码与完整 metadata.errors 比较。
+
+T4.0采用m3m4 v1.1.1（响应与v1.1相同）：20份M4样例在真实管理员handler逐字段回放，20份相关反例复用同输入的实际输出作负向比较。M4_SHA256.json和M4_INVALID.json分别固定原字节。M3的17份非list样例在M4构建保持完整比较；其5份旧构建list由4份M4完整list替代，另保留账号候选失败与观测关闭两个M3边界，前四卡原样比较，新增两卡明确取F的M4默认卡。原M3 JSON不改写。
+
+构建能力只有fallback_warning样例注入Anthropic观测已覆盖；其余样例按未覆盖，missing在on/masked_by_master出现。关闭方向用panic桩证明零分组查询，不复用旧回退事实。

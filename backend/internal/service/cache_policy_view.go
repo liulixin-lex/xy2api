@@ -75,6 +75,9 @@ func (s *CachePolicyService) effectiveAt(i int, stored, loaded cachePolicyEntry,
 	if i == 3 {
 		return s.upstreamIdentityEffective(stored, loaded, p)
 	}
+	if i == 4 || i == 5 {
+		return s.m4Effective(i, stored, loaded, p)
+	}
 	enabled, _ := loaded.envelope.Spec["enabled"].(bool)
 	if i == 2 {
 		enabled, _ = loaded.envelope.Spec["rollup_enabled"].(bool)
@@ -130,6 +133,9 @@ func (s *CachePolicyService) schema(i int) []map[string]any {
 	}
 	if i == 3 {
 		return upstreamIdentitySchema()
+	}
+	if i == 4 || i == 5 {
+		return m4PolicySchema(i)
 	}
 	fields := []map[string]any{{"field": "enabled", "type": "bool"}}
 	if i == 1 {
@@ -190,6 +196,9 @@ func (s *CachePolicyService) Get(ctx context.Context, key string) (CachePolicyVi
 	if i == 3 {
 		s.populateCachePolicyAccountOptions(ctx, &view)
 	}
+	if i == 4 || i == 5 {
+		s.populateCachePolicyGroupOptions(ctx, &view)
+	}
 	return view, nil
 }
 func (s *CachePolicyService) List(ctx context.Context, version string) (CachePolicyList, error) {
@@ -218,11 +227,20 @@ func (s *CachePolicyService) List(ctx context.Context, version string) (CachePol
 		list.Policies = append(list.Policies, s.view(i, e, p))
 	}
 	s.populateCachePolicyAccountOptions(ctx, &list.Policies[3])
+	if s.m4Available {
+		s.populateCachePolicyGroupOptions(ctx, &list.Policies[4], &list.Policies[5])
+	}
 	return list, nil
 }
 
 func cloneCachePolicyValue(value any) any {
 	switch v := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			out[key] = cloneCachePolicyValue(item)
+		}
+		return out
 	case []int64:
 		return append([]int64{}, v...)
 	case []CacheNorthstarThresholdRule:
