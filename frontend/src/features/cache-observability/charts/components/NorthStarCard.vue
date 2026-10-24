@@ -73,7 +73,7 @@
               </div>
             </dl>
             <p class="mt-2 text-xs text-gray-600 dark:text-dark-300" data-test="cost-basis">
-              {{ t('admin.cacheCharts.cost.basis', { n: cost.priced_models ?? '-', share: formatPct(cost.priced_p_share, 1) }) }}
+              {{ t('admin.cacheCharts.cost.basis', { n: cost.priced_models ?? EMPTY, share: formatPct(cost.priced_p_share, 1) }) }}
               <template v-if="typeof cost.upstream_covered_p_share === 'number'">{{ t('admin.cacheCharts.cost.upstreamCovered', { share: formatPct(cost.upstream_covered_p_share, 1) }) }}</template>
             </p>
             <ul v-if="costNotes.length" class="mt-2 space-y-1" role="list" data-test="cost-notes">
@@ -97,7 +97,7 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import type { CacheChartsState } from '../useCacheCharts'
-import { formatInterval, formatMoney, formatPct, formatPp, formatSignedMoney, formatTokensM, ratioDeltaPp } from '../viewModel'
+import { EMPTY, formatInterval, formatMoney, formatPct, formatPp, formatSignedMoney, formatTokensM, ratioDeltaPp } from '../viewModel'
 import NorthStarTrend from './NorthStarTrend.vue'
 import SectionShell from './SectionShell.vue'
 

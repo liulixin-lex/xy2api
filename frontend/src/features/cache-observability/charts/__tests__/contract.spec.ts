@@ -222,7 +222,7 @@ describe('cache panel contract samples v1.0.2', () => {
       data.summary.previous = { token_hit_upper: null, token_hit_lower: null, request_hit: null }
     })
     const { wrapper } = await render(s)
-    expect(wrapper.get('[data-test="northstar-delta"]').text()).toContain('"delta":"-"')
+    expect(wrapper.get('[data-test="northstar-delta"]').text()).toContain('"delta":"—"')
     expectClean(wrapper, 'R5')
   })
 

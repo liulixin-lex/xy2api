@@ -13,8 +13,8 @@
     </span>
     <span class="tabular-nums text-gray-700 dark:text-dark-200">
       {{ t('admin.cacheCharts.experiment.arms', {
-        off: summary.off?.sessions ?? '-',
-        on: summary.on?.sessions ?? '-',
+        off: summary.off?.sessions ?? EMPTY,
+        on: summary.on?.sessions ?? EMPTY,
         planned: summary.experiment.planned_per_arm,
       }) }}
     </span>
@@ -34,7 +34,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { Experiment } from '../types'
-import { formatPp, runningExperiment } from '../viewModel'
+import { EMPTY, formatPp, runningExperiment } from '../viewModel'
 
 const props = defineProps<{ experiments: Experiment[] }>()
 const emit = defineEmits<{ (e: 'open'): void }>()

@@ -2,23 +2,25 @@
 import type { Experiment, ExperimentSlice, LossClassStat, TraceStatsResponse } from './types'
 
 const MINUS = '−'
+/** A value that is not there (null) shows as an em dash (contract R5). */
+export const EMPTY = '—'
 
 export function formatPct(ratio: number | null | undefined, digits = 2): string {
-  return typeof ratio === 'number' && Number.isFinite(ratio) ? `${(ratio * 100).toFixed(digits)}%` : '-'
+  return typeof ratio === 'number' && Number.isFinite(ratio) ? `${(ratio * 100).toFixed(digits)}%` : EMPTY
 }
 
 /** "80.28 ~ 80.32%" for a lower/upper pair; a single value when both round to the same text. */
 export function formatInterval(lower: number | null | undefined, upper: number | null | undefined, digits = 2): string {
   const lo = typeof lower === 'number' && Number.isFinite(lower) ? (lower * 100).toFixed(digits) : null
   const hi = typeof upper === 'number' && Number.isFinite(upper) ? (upper * 100).toFixed(digits) : null
-  if (lo === null && hi === null) return '-'
+  if (lo === null && hi === null) return EMPTY
   if (lo === null || hi === null || lo === hi) return `${hi ?? lo}%`
   return `${lo} ~ ${hi}%`
 }
 
 /** Signed percentage-point delta with a real minus sign. */
 export function formatPp(delta: number | null | undefined, digits = 2): string {
-  if (typeof delta !== 'number' || !Number.isFinite(delta)) return '-'
+  if (typeof delta !== 'number' || !Number.isFinite(delta)) return EMPTY
   const text = Math.abs(delta).toFixed(digits)
   if (Number(text) === 0) return `0.${'0'.repeat(digits)}pp`
   return `${delta > 0 ? '+' : MINUS}${text}pp`
@@ -29,26 +31,27 @@ export function ratioDeltaPp(current: number | null | undefined, previous: numbe
 }
 
 export function formatTokensM(tokens: number | null | undefined): string {
-  if (typeof tokens !== 'number' || !Number.isFinite(tokens)) return '-'
+  if (typeof tokens !== 'number' || !Number.isFinite(tokens)) return EMPTY
   return `${(tokens / 1e6).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}M`
 }
 
 export function formatCount(n: number | null | undefined): string {
-  return typeof n === 'number' && Number.isFinite(n) ? n.toLocaleString('en-US') : '-'
+  return typeof n === 'number' && Number.isFinite(n) ? n.toLocaleString('en-US') : EMPTY
 }
 
-export function formatMoney(amount: number | null | undefined, currency: string | null | undefined): string {
-  if (typeof amount !== 'number' || !Number.isFinite(amount)) return '-'
+/** Two decimals; `maxDigits` keeps more for small unit prices such as w_m ($0.075, not $0.08). */
+export function formatMoney(amount: number | null | undefined, currency: string | null | undefined, maxDigits = 2): string {
+  if (typeof amount !== 'number' || !Number.isFinite(amount)) return EMPTY
   const code = currency || 'USD'
   try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: code, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: code, minimumFractionDigits: 2, maximumFractionDigits: maxDigits }).format(amount)
   } catch {
     return `${amount.toFixed(2)} ${code}`
   }
 }
 
 export function formatSignedMoney(delta: number | null | undefined, currency: string | null | undefined): string {
-  if (typeof delta !== 'number' || !Number.isFinite(delta)) return '-'
+  if (typeof delta !== 'number' || !Number.isFinite(delta)) return EMPTY
   const text = formatMoney(Math.abs(delta), currency)
   return delta === 0 ? text : `${delta > 0 ? '+' : MINUS}${text}`
 }
