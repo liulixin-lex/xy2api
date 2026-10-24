@@ -200,6 +200,17 @@
 
 ## 进行中的工作
 
+### 20261024-cache-m3-integration — hardening、L-01 与管理员策略卡片（P，进行中）
+
+- 基于已合入 M2 的 main `16a776e347`，依次集成 G2 hardening、G P1/M3 与 UI 卡片；保留 M2、M1.1、迁移 279 和 northstar 测试隔离。项目 noreply 身份与来源尾注保留。
+- 三方来源已独立审查；集成后固定候选，由一次合并流水线、独立关闭态 golden 与正式 staging 验收。全部通过后按授权经 PR、八项必需检查与 strict 合入；不部署生产。当前尚未执行集成门禁。
+
+
+### 20261024-cache-m1-hardening — M1 后端加固（G2，开发中）
+
+- 授权与基点：从 M2 后端 a99f71795 建立 cache/m1-hardening；每项小提交，不推送。M2 合入后再变基 main，先检查全部构建 tag；M2 评审阻塞优先修。
+- 范围：T0a.4 N-2/N-3/N-4/N-5、T0a.5 N-3/N-7、T0a.2-fix n-2/n-5，以及 T0a.3 n-2/n-3/n-4；已完成的 observer_failed 优先级与 policy history UTC 不重复处理。
+- 当前：读取既有调用与回归测试，优先修复非 abuse 未送达请求未关闭发送计时的问题；不扩展到其他 backlog。
 
 ### 20261023-cache-p0b — 在线缓存北极星与管理员图表（G2，实现完成，待集成）
 

@@ -16,23 +16,16 @@ func (s *OpenAIGatewayService) settleCacheTrace(ctx context.Context, result *Ope
 	// Event/observer failures must never escape into billing. No error or panic
 	// value is logged, and no recover is added to a frame traversal.
 	defer func() { _ = recover() }()
-	undeliveredAbuse := false
-	if st := resilience.StateFrom(ctx); st != nil {
-		disconnected, delivered, abuse := st.Disconnect()
-		if disconnected && !delivered {
-			if !abuse {
-				return
-			}
-			undeliveredAbuse = true
-		}
-	}
 	diagnostic := result.CacheDiagnostic
 	if diagnostic == nil || account == nil || account.Platform != PlatformOpenAI {
 		return
 	}
-	if undeliveredAbuse {
-		s.settleCacheTraceUndelivered(result, account)
-		return
+	if st := resilience.StateFrom(ctx); st != nil {
+		disconnected, delivered, abuse := st.Disconnect()
+		if disconnected && !delivered {
+			s.settleCacheTraceUndelivered(result, account, abuse)
+			return
+		}
 	}
 	if failed := result.cacheTraceFailure; failed != nil {
 		if !failed.emitted.CompareAndSwap(false, true) {
@@ -116,11 +109,11 @@ func (s *OpenAIGatewayService) settleCacheTrace(ctx context.Context, result *Ope
 	}
 }
 
-// Already-attempted requests billed under the existing abuse policy retain one
-// minimal joinable event. No body/usage reparse or loss attribution is performed.
+// Close every attempted undelivered send without publishing cache history.
+// Only requests billed under the existing abuse policy emit a minimal event.
 // The caller provides validated observation, diagnostic and account pointers and
 // isolates all observer failures from billing with its request-level recover.
-func (s *OpenAIGatewayService) settleCacheTraceUndelivered(result *OpenAIForwardResult, account *Account) {
+func (s *OpenAIGatewayService) settleCacheTraceUndelivered(result *OpenAIForwardResult, account *Account, abuse bool) {
 	var d cacheTraceData
 	var timing cacheTraceTimingToken
 	if failed := result.cacheTraceFailure; failed != nil {
@@ -147,8 +140,12 @@ func (s *OpenAIGatewayService) settleCacheTraceUndelivered(result *OpenAIForward
 	if timing.sequence != 0 && !timing.sentAt.IsZero() {
 		telemetry := s.cacheTelemetry()
 		telemetry.mu.Lock()
+		s.limitCacheTraceSessionsLocked(telemetry, diagnostic.Session)
 		cacheTraceSettleTimingLocked(telemetry, diagnostic.Session, timing, time.Now())
 		telemetry.mu.Unlock()
+	}
+	if !abuse {
+		return
 	}
 	emitCacheTraceRejected(d)
 	if result.cachePanel != nil {
