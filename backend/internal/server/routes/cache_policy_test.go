@@ -114,7 +114,8 @@ func (r *cacheRouteAudit) List(_ context.Context, f *service.AuditLogFilter) (*s
 }
 
 type cacheContract struct {
-	Fixture *struct {
+	Contracts []string `json:"_contract"`
+	Fixture   *struct {
 		Key       string  `json:"key"`
 		Revisions []int64 `json:"persisted_success_rev_after"`
 		Stored    struct {
@@ -202,9 +203,9 @@ func cacheCall(t *testing.T, r *gin.Engine, method, path string, body []byte) (i
 	return rec.Code, out
 }
 
-// Future milestone fixtures are replayed against M1 availability, never used
-// to expose unimplemented policies. Their 409/422 rules are exercised on the
-// available keys by the service and HTTP tests.
+// Available fixtures use the real HTTP service. Future milestone fixtures keep
+// their exact expected values in a separate serialization/envelope contract test;
+// they do not claim that unavailable policies execute in this build.
 func TestCachePolicyContractFixtures(t *testing.T) {
 	root := "testdata/cache_policies_contract"
 	manifest, err := os.ReadFile(filepath.Join(root, "SHA256.json"))
@@ -212,11 +213,6 @@ func TestCachePolicyContractFixtures(t *testing.T) {
 	hashes := map[string]string{}
 	require.NoError(t, json.Unmarshal(manifest, &hashes))
 	require.Len(t, hashes, 27)
-	defaultRaw, err := os.ReadFile(filepath.Join(root, "list_default_all_off.json"))
-	require.NoError(t, err)
-	var defaultFixture cacheContract
-	require.NoError(t, json.Unmarshal(defaultRaw, &defaultFixture))
-	defaultPolicies := defaultFixture.Response["data"].(map[string]any)["policies"].([]any)
 	names := make([]string, 0, len(hashes))
 	for name := range hashes {
 		names = append(names, name)
@@ -229,6 +225,10 @@ func TestCachePolicyContractFixtures(t *testing.T) {
 			require.Equal(t, hashes[name], fmt.Sprintf("%x", sha256.Sum256(raw)))
 			var f cacheContract
 			require.NoError(t, json.Unmarshal(raw, &f))
+			if cachePolicyFutureFixture(name) {
+				t.Run("future_shape_only", func(t *testing.T) { testCachePolicyFutureShape(t, name, f) })
+				return
+			}
 			repo := &cacheRouteStore{rows: map[string]string{service.SettingKeyClaudeCacheFallbackPolicy: `{"enabled":true,"group_ids":[1,2]}`}}
 			cfg := &config.Config{}
 			cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
@@ -259,13 +259,7 @@ func TestCachePolicyContractFixtures(t *testing.T) {
 					b, _ := json.Marshal(doc)
 					repo.rows["cache_observability_policy"] = string(b)
 				}
-				// M3 list cases still execute against M1 and keep their master/observability state.
-				if strings.Contains(name, "m3") {
-					ps := data["policies"].([]any)
-					for i := 2; i < 6; i++ {
-						ps[i] = contractMap(t, defaultPolicies[i])
-					}
-				}
+
 			} else {
 				switch name {
 				case "put_200.json", "put_partial_update.json":
@@ -301,16 +295,6 @@ func TestCachePolicyContractFixtures(t *testing.T) {
 			case "put_403.json":
 				// Permission fixture is replayed using the real JWT/admin middleware below.
 				router = cacheTestRouter(s, audit, cacheOrdinaryUserAuth(t))
-			case "put_409.json", "put_422.json", "validate_rev_stale.json", "validate_ok_routing_enable_m4.json":
-				parts := strings.Split(f.Request.Path, "/")
-				key := parts[6]
-				expectedStatus = 404
-				expected = map[string]any{"code": float64(404), "message": "cache policy not available in this build", "reason": "CACHE_POLICY_NOT_IN_BUILD", "metadata": map[string]any{"key": key}}
-			case "validate_ok_master_enable_m3.json":
-				data["affected"] = []any{}
-				for _, key := range []string{"upstream_identity", "anthropic_identity", "routing"} {
-					data["affected"] = append(data["affected"].([]any), map[string]any{"key": key, "state_before": "not_in_build", "state_after": "not_in_build", "active_after": nil})
-				}
 			case "history.json", "history_after_rev.json", "history_pending_flush.json",
 				"history_truncated_retention.json", "history_empty_within_window.json",
 				"history_empty_outside_window.json", "history_gap.json":
@@ -322,43 +306,7 @@ func TestCachePolicyContractFixtures(t *testing.T) {
 					"spec": map[string]any{"enabled": false}})
 				require.NoError(t, err)
 				repo.rows[settings[f.Fixture.Key]] = string(stored)
-				present := map[int64]bool{}
-				oldest := f.Fixture.Now
-				items := data["items"].([]any)
-				for _, rawItem := range items {
-					b, _ := json.Marshal(rawItem)
-					var item service.CachePolicyHistoryItem
-					require.NoError(t, json.Unmarshal(b, &item))
-					var uid *int64
-					email := ""
-					if item.Actor != nil {
-						uid = &item.Actor.UserID
-						email = item.Actor.Email
-					}
-					row := &service.AuditLog{CreatedAt: item.At, Action: item.Action, Method: "PUT", ActorUserID: uid, ActorEmail: email, StatusCode: item.StatusCode, Extra: map[string]any{}}
-					if item.At.Before(oldest) {
-						oldest = item.At
-					}
-					if item.RevAfter != nil {
-						present[*item.RevAfter] = true
-						row.Extra["rev_after"] = *item.RevAfter
-						row.Extra["rev_before"] = *item.RevBefore
-					}
-					row.Extra["changed_fields"] = strings.Join(item.ChangedFields, ",")
-					b, _ = json.Marshal(map[string]any{"reason": item.Reason})
-					row.RequestBody = string(b)
-					auditRepo.rows = append(auditRepo.rows, row)
-				}
-				for _, rev := range f.Fixture.Revisions {
-					if present[rev] {
-						continue
-					}
-					auditRepo.rows = append(auditRepo.rows, &service.AuditLog{
-						CreatedAt: oldest.Add(-time.Duration(100-rev) * time.Minute),
-						Action:    "admin.cache.policies." + f.Fixture.Key + ".update", Method: "PUT", StatusCode: 200,
-						Extra: map[string]any{"rev_after": rev, "rev_before": rev - 1},
-					})
-				}
+				auditRepo.rows = cachePolicyHistorySeeds(t, name)
 			}
 			status, got := cacheCall(t, router, f.Request.Method, f.Request.Path, f.Request.Body)
 			require.Equal(t, expectedStatus, status, got)
@@ -426,12 +374,12 @@ func TestCachePolicyHTTPConfirmConflictMalformed(t *testing.T) {
 	path := "/api/v1/admin/cache/policies/master"
 	status, body := cacheCall(t, router, "PUT", path, []byte(`{"expected_rev":0,"spec":{"enabled":true}}`))
 	require.Equal(t, 422, status)
-	require.Equal(t, "reason,checkbox", body["metadata"].(map[string]any)["missing"])
+	require.Equal(t, map[string]any{"code": float64(422), "message": "confirmation required", "reason": "CACHE_POLICY_CONFIRM_REQUIRED", "metadata": map[string]any{"missing": "reason,checkbox"}}, body)
 	status, _ = cacheCall(t, router, "PUT", path, []byte(`{"expected_rev":0,"spec":{"enabled":true},"reason":"确认","confirm":{"checkbox":true}}`))
 	require.Equal(t, 200, status)
 	status, body = cacheCall(t, router, "PUT", path, []byte(`{"expected_rev":0,"spec":{"enabled":false}}`))
 	require.Equal(t, 409, status)
-	require.Equal(t, map[string]any{"current_rev": "1", "expected_rev": "0"}, body["metadata"])
+	require.Equal(t, map[string]any{"code": float64(409), "message": "cache policy has been modified", "reason": "CACHE_POLICY_REV_CONFLICT", "metadata": map[string]any{"current_rev": "1", "expected_rev": "0"}}, body)
 	for _, raw := range []string{"{", "null", `{}`, `{"expected_rev":0,"spec":{}} {}`} {
 		status, body = cacheCall(t, router, "POST", path+"/validate", []byte(raw))
 		require.Equal(t, 200, status)

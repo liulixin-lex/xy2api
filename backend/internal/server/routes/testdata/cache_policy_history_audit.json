@@ -1,0 +1,196 @@
+{
+  "history.json": [
+    {
+      "at": "2026-10-23T08:58:10Z",
+      "action": "admin.cache.policies.upstream_identity.update",
+      "status_code": 200,
+      "user_id": 2,
+      "email": "oncall@example.com",
+      "rev_before": 4,
+      "rev_after": 5,
+      "changed_fields": "rollout_percent",
+      "request_body": "{\"reason\": \"错误率上升，先调回 0\"}"
+    },
+    {
+      "at": "2026-10-23T08:57:30Z",
+      "action": "admin.cache.policies.upstream_identity.update",
+      "status_code": 422,
+      "user_id": 2,
+      "email": "oncall@example.com",
+      "rev_before": null,
+      "rev_after": null,
+      "changed_fields": "",
+      "request_body": "{\"reason\": null}"
+    },
+    {
+      "at": "2026-10-23T07:18:30Z",
+      "action": "admin.cache.policies.upstream_identity.update",
+      "status_code": 200,
+      "rev_after": 1,
+      "rev_before": 0,
+      "changed_fields": "",
+      "request_body": ""
+    },
+    {
+      "at": "2026-10-23T07:19:30Z",
+      "action": "admin.cache.policies.upstream_identity.update",
+      "status_code": 200,
+      "rev_after": 2,
+      "rev_before": 1,
+      "changed_fields": "",
+      "request_body": ""
+    },
+    {
+      "at": "2026-10-23T07:20:30Z",
+      "action": "admin.cache.policies.upstream_identity.update",
+      "status_code": 200,
+      "rev_after": 3,
+      "rev_before": 2,
+      "changed_fields": "",
+      "request_body": ""
+    },
+    {
+      "at": "2026-10-23T07:21:30Z",
+      "action": "admin.cache.policies.upstream_identity.update",
+      "status_code": 200,
+      "rev_after": 4,
+      "rev_before": 3,
+      "changed_fields": "",
+      "request_body": ""
+    }
+  ],
+  "history_after_rev.json": [
+    {
+      "at": "2026-10-23T08:58:10Z",
+      "action": "admin.cache.policies.upstream_identity.update",
+      "status_code": 200,
+      "user_id": 2,
+      "email": "oncall@example.com",
+      "rev_before": 4,
+      "rev_after": 5,
+      "changed_fields": "rollout_percent",
+      "request_body": "{\"reason\": \"错误率上升，先调回 0\"}"
+    },
+    {
+      "at": "2026-10-23T07:19:10Z",
+      "action": "admin.cache.policies.upstream_identity.update",
+      "status_code": 200,
+      "rev_after": 1,
+      "rev_before": 0,
+      "changed_fields": "",
+      "request_body": ""
+    },
+    {
+      "at": "2026-10-23T07:20:10Z",
+      "action": "admin.cache.policies.upstream_identity.update",
+      "status_code": 200,
+      "rev_after": 2,
+      "rev_before": 1,
+      "changed_fields": "",
+      "request_body": ""
+    },
+    {
+      "at": "2026-10-23T07:21:10Z",
+      "action": "admin.cache.policies.upstream_identity.update",
+      "status_code": 200,
+      "rev_after": 3,
+      "rev_before": 2,
+      "changed_fields": "",
+      "request_body": ""
+    },
+    {
+      "at": "2026-10-23T07:22:10Z",
+      "action": "admin.cache.policies.upstream_identity.update",
+      "status_code": 200,
+      "rev_after": 4,
+      "rev_before": 3,
+      "changed_fields": "",
+      "request_body": ""
+    }
+  ],
+  "history_empty_outside_window.json": [],
+  "history_empty_within_window.json": [],
+  "history_gap.json": [
+    {
+      "at": "2026-10-23T09:40:00Z",
+      "action": "admin.cache.policies.observability.update",
+      "status_code": 200,
+      "user_id": 1,
+      "email": "admin@example.com",
+      "rev_before": 3,
+      "rev_after": 4,
+      "changed_fields": "byte_budget_mib",
+      "request_body": "{\"reason\": \"调大字节预算\"}"
+    },
+    {
+      "at": "2026-10-23T09:10:05Z",
+      "action": "admin.cache.policies.observability.update",
+      "status_code": 200,
+      "user_id": 1,
+      "email": "admin@example.com",
+      "rev_before": 1,
+      "rev_after": 2,
+      "changed_fields": "chain_percent",
+      "request_body": "{\"reason\": \"降低链路扫描比例\"}"
+    },
+    {
+      "at": "2026-10-23T09:00:00Z",
+      "action": "admin.cache.policies.observability.update",
+      "status_code": 200,
+      "user_id": 1,
+      "email": "admin@example.com",
+      "rev_before": 0,
+      "rev_after": 1,
+      "changed_fields": "enabled",
+      "request_body": "{\"reason\": \"开启观测\"}"
+    }
+  ],
+  "history_pending_flush.json": [
+    {
+      "at": "2026-10-23T09:10:05Z",
+      "action": "admin.cache.policies.observability.update",
+      "status_code": 200,
+      "user_id": 1,
+      "email": "admin@example.com",
+      "rev_before": 1,
+      "rev_after": 2,
+      "changed_fields": "chain_percent",
+      "request_body": "{\"reason\": \"降低链路扫描比例\"}"
+    },
+    {
+      "at": "2026-10-23T09:00:00Z",
+      "action": "admin.cache.policies.observability.update",
+      "status_code": 200,
+      "user_id": 1,
+      "email": "admin@example.com",
+      "rev_before": 0,
+      "rev_after": 1,
+      "changed_fields": "enabled",
+      "request_body": "{\"reason\": \"开启观测\"}"
+    }
+  ],
+  "history_truncated_retention.json": [
+    {
+      "at": "2026-10-23T09:20:00Z",
+      "action": "admin.cache.policies.observability.update",
+      "status_code": 200,
+      "user_id": 2,
+      "email": "oncall@example.com",
+      "rev_before": 5,
+      "rev_after": 6,
+      "changed_fields": "sample_percent",
+      "request_body": "{\"reason\": \"调回全量采样\"}"
+    },
+    {
+      "at": "2026-10-23T09:15:00Z",
+      "action": "admin.cache.policies.observability.update",
+      "status_code": 200,
+      "user_id": 2,
+      "email": "oncall@example.com",
+      "rev_before": 4,
+      "rev_after": 5,
+      "changed_fields": "sample_percent",
+      "request_body": "{\"reason\": \"临时降低采样比例\"}"
+    }
+  ]
+}
