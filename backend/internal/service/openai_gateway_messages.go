@@ -36,6 +36,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 ) (forwardResult *OpenAIForwardResult, forwardErr error) {
 	defer func() { s.finishCacheDiagnostic(c, body, forwardResult) }()
 	if c != nil {
+		resetCacheTraceAttempt(c)
 		c.Set("openai_cache_diagnostic", nil)
 	}
 	// 工具 Schema 清洗必须先于所有分流：下游每条路径（原生 Anthropic 直通、
@@ -377,6 +378,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if account.Platform != PlatformGrok && promptCacheKey != "" {
 		isolatedSessionID := generateSessionUUID(isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), promptCacheKey))
 		upstreamReq.Header.Set("session_id", isolatedSessionID)
+		cacheTraceFromGin(c).setSessionSource("gw_isolated")
 		if upstreamReq.Header.Get("conversation_id") != "" {
 			upstreamReq.Header.Set("conversation_id", isolatedSessionID)
 		}
@@ -424,7 +426,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				return nil, fmt.Errorf("build grok retry request: %w", err)
 			}
 		}
+		captureCacheTraceHeaders(c, upstreamReq)
+		s.markCacheTraceSent(c)
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+		s.startCacheTraceRequest(c)
 		if firstEvent.expired() {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
@@ -1007,6 +1012,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	upstreamModel string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
+	cacheTraceActive := cacheTraceObserving(c)
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -1156,11 +1162,17 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 		}
 		observer.ObserveOpenAI([]byte(payload), event.Type)
-		s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
-
 		eventType := strings.TrimSpace(event.Type)
 		isBareErrorEvent := eventType == "error"
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(eventType) || isBareErrorEvent
+		if cacheTraceActive {
+			cacheTraceTyped := s.parseSSEUsageBytesWithTypeForCacheTrace(c, []byte(payload), event.Type, &usage, event.Usage != nil || event.Response != nil && event.Response.Usage != nil)
+			if isTerminalEvent && (event.Usage != nil || event.Response != nil && event.Response.Usage != nil) {
+				cacheTraceFromGin(c).observeCacheTraceTypedPrompt(cacheTraceTyped, event.Usage != nil)
+			}
+		} else {
+			s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
+		}
 		if isTerminalEvent {
 			terminalEventType = eventType
 			if event.Response != nil {

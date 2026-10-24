@@ -109,7 +109,7 @@ func cacheTraceFromGin(c *gin.Context) *cacheTrace {
 }
 
 func (s *OpenAIGatewayService) cacheTraceEnabled(c *gin.Context) bool {
-	return s != nil && s.cfg != nil && s.cfg.JWT.Secret != "" && s.CaptureCachePolicy(c).TraceEnabled()
+	return s != nil && s.cfg != nil && s.cfg.JWT.Secret != "" && s.CaptureCachePolicy(c).TraceEnabledFor(cacheTraceOpenAIPlatform(c))
 }
 
 func cacheTraceHeaderBits(h http.Header) (bits uint16) {
@@ -191,10 +191,10 @@ func (s *OpenAIGatewayService) beginCacheTrace(c *gin.Context, body []byte) {
 	if !s.cacheTraceEnabled(c) || c == nil || c.Request == nil || c.Request.URL == nil || getAPIKeyIDFromContext(c) <= 0 || isGrokRequestContext(c) || monitorProbeRequest(c) {
 		return
 	}
-	// P0a covers HTTP Responses (including compact) and Chat only. Messages,
-	// WS turns, count_tokens, images and search need their own P0b metadata.
+	// HTTP Responses (including compact), Chat and the explicitly enabled
+	// Messages bridge share the OpenAI worker. WS turns remain out of scope.
 	path := strings.TrimSuffix(c.Request.URL.Path, "/")
-	if GetOpenAIClientTransport(c) == OpenAIClientTransportWS || (!strings.HasSuffix(path, "/responses") && !strings.HasSuffix(path, "/responses/compact") && !strings.HasSuffix(path, "/chat/completions")) {
+	if GetOpenAIClientTransport(c) == OpenAIClientTransportWS || (!strings.HasSuffix(path, "/responses") && !strings.HasSuffix(path, "/responses/compact") && !strings.HasSuffix(path, "/chat/completions") && !strings.HasSuffix(path, "/messages")) {
 		return
 	}
 	if key, ok := c.Get("api_key"); ok {
@@ -230,6 +230,8 @@ func (s *OpenAIGatewayService) beginCacheTrace(c *gin.Context, body []byte) {
 	protocol := "responses"
 	if strings.HasSuffix(path, "/chat/completions") {
 		protocol = "chat"
+	} else if strings.HasSuffix(path, "/messages") {
+		protocol = "messages"
 	}
 	gapSource := "no_prev"
 	if sessionKey == "" {
@@ -339,7 +341,8 @@ func resetCacheTraceAttempt(c *gin.Context) {
 
 func (s *OpenAIGatewayService) captureCacheTraceRequest(c *gin.Context, req *http.Request, account *Account, protocol string) {
 	t := cacheTraceFromGin(c)
-	if t == nil || account == nil || account.Platform != PlatformOpenAI || req == nil || req.GetBody == nil {
+	if t == nil || account == nil || account.Platform != PlatformOpenAI || req == nil || req.GetBody == nil ||
+		(t.data.ProtocolIn == "messages" && protocol != "responses") {
 		return
 	}
 
@@ -473,7 +476,7 @@ func (s *OpenAIGatewayService) finishCacheTrace(c *gin.Context, result *OpenAIFo
 	defer t.mu.Unlock()
 	t.pending.cancelPending()
 	t.pending = nil
-	if result == nil {
+	if result == nil || !cacheTraceMessagesAttemptAllowed(c) {
 		return
 	}
 	if t.usageObservationFailed {
@@ -639,7 +642,7 @@ func observeCacheTraceUsageString(c *gin.Context, payload string) {
 // resetCacheTraceAttempt clears the marker before another forwarding attempt.
 func cacheTraceObserving(c *gin.Context) bool {
 	t := cacheTraceFromGin(c)
-	if t == nil || t.skipUsage {
+	if t == nil || t.skipUsage || !cacheTraceMessagesAttemptAllowed(c) {
 		return false
 	}
 	t.mu.Lock()

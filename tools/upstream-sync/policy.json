@@ -2305,7 +2305,7 @@
     },
     {
       "path": "backend/internal/service/cache_trace.go",
-      "value": "s.CaptureCachePolicy(c).TraceEnabled()"
+      "value": "s.CaptureCachePolicy(c).TraceEnabledFor(cacheTraceOpenAIPlatform(c))"
     },
     {
       "path": "backend/internal/service/cache_trace.go",
@@ -2502,6 +2502,46 @@
     {
       "path": "backend/internal/server/routes/cache_provider_stats_contract_test.go",
       "value": "func TestCacheProviderStatsHandlerContract("
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "captureCacheTraceHeaders(c, upstreamReq)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "cacheTraceFromGin(c).setSessionSource(\"gw_isolated\")"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "s.markCacheTraceSent(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "s.startCacheTraceRequest(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "observeCacheTraceTypedPrompt(cacheTraceTyped, event.Usage != nil)"
+    },
+    {
+      "path": "backend/internal/service/openai_cache_diagnostics.go",
+      "value": "p.TraceEnabledFor(cacheTraceOpenAIPlatform(c))"
+    },
+    {
+      "path": "backend/internal/service/cache_trace_messages.go",
+      "value": "func cacheTraceMessagesAttemptAllowed("
+    },
+    {
+      "path": "backend/internal/service/cache_provider_messages_test.go",
+      "value": "func TestCacheProviderMessagesGateWireAndSettlement("
+    },
+    {
+      "path": "backend/internal/service/cache_provider_messages_test.go",
+      "value": "func TestCacheProviderMessagesNativeSubpathExcluded("
+    },
+    {
+      "path": "backend/internal/service/cache_provider_messages_test.go",
+      "value": "func TestCacheProviderOpenAIExcludedPlatformZeroWork("
     }
   ],
   "forbidden_module_paths": [
