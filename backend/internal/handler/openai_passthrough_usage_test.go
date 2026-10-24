@@ -62,7 +62,7 @@ func newPassthroughUsageHandler(t *testing.T, usageRepo service.UsageLogReposito
 	gateway := service.ProvideOpenAIGatewayServiceWithCachePolicies(
 		repo, usageRepo, nil, nil, nil, nil, nil, cfg, nil, nil,
 		service.NewBillingService(cfg, nil), nil, billing, upstream,
-		&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil, policy,
+		&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil, policy, nil,
 	)
 	cache := &concurrencyCacheMock{
 		acquireUserSlotFn:    func(context.Context, int64, int, string) (bool, error) { return true, nil },

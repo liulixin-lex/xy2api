@@ -5,7 +5,7 @@
 本地写锁避免旧刷新覆盖已提交的本地写入，atomic.Pointer 发布不可变快照。
 
 管理员接口使用字面路由和既有鉴权、合规及审计中间件；validate 使用 SkipAudit。
-审计历史仅投影管理员、时间、revision、字段名和理由，不能返回原始审计 body。
+审计历史仅投影管理员、时间、revision、字段名和理由，不能返回原始审计 body。历史时间 `at` 归一化为 RFC3339 UTC，保留原时间点。
 用户侧 DTO 与公开 settings 不注册这六个键。
 
 请求固定快照确保 attempt、failover 和流式帧保持相同策略。静态总闸与资源上限

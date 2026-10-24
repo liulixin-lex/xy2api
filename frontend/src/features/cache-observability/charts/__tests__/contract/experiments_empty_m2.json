@@ -1,0 +1,27 @@
+{
+  "_contract": [
+    "P-1",
+    "P-8"
+  ],
+  "_note": "M2：没有登记实验，恒返回空列表；前端显示占位说明，首屏不出现实验卡。该接口不接受任何查询参数。",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/cache/experiments",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "policy_version": "2026-10-22-v1",
+      "as_of": "2026-10-23T07:00:00Z",
+      "generated_at": "2026-10-23T07:03:12Z",
+      "window": {
+        "start": "2026-10-16T07:00:00Z",
+        "end": "2026-10-23T07:00:00Z"
+      },
+      "experiments": []
+    }
+  }
+}

@@ -383,8 +383,9 @@ func ProvideGrokTokenProvider(
 }
 
 // ProvideDashboardAggregationService 创建并启动仪表盘聚合服务
-func ProvideDashboardAggregationService(repo DashboardAggregationRepository, timingWheel *TimingWheelService, lockCache LeaderLockCache, db *sql.DB, cfg *config.Config, settingRepo SettingRepository) *DashboardAggregationService {
+func ProvideDashboardAggregationService(repo DashboardAggregationRepository, timingWheel *TimingWheelService, lockCache LeaderLockCache, db *sql.DB, cfg *config.Config, settingRepo SettingRepository, northstar *CacheNorthstarAggregator) *DashboardAggregationService {
 	svc := NewDashboardAggregationService(repo, timingWheel, cfg)
+	svc.cacheNorthstar = northstar
 	svc.settingRepo = settingRepo
 	svc.SetLeaderLock(lockCache, db)
 	svc.Start()
@@ -951,6 +952,9 @@ var ProviderSet = wire.NewSet(
 	ProvideOpsIngressRejectAggregator,
 	ProvideAuditLogService,
 	ProvideCachePolicyService,
+	NewCacheTraceCounters,
+	NewCacheNorthstarAggregator,
+	NewCacheObservabilityService,
 	ProvideOpsMetricsCollector,
 	ProvideOpsAggregationService,
 	ProvideOpsAlertEvaluatorService,

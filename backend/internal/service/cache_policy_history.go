@@ -70,7 +70,7 @@ func (s *CachePolicyService) History(ctx context.Context, audit *AuditLogService
 		if policyIndex(key) < 0 || row.Action != cachePolicyAction(key) || row.Method != "PUT" {
 			continue
 		}
-		item := CachePolicyHistoryItem{At: row.CreatedAt, Key: key, Action: row.Action, StatusCode: row.StatusCode, ChangedFields: []string{}}
+		item := CachePolicyHistoryItem{At: row.CreatedAt.UTC(), Key: key, Action: row.Action, StatusCode: row.StatusCode, ChangedFields: []string{}}
 		if row.ActorUserID != nil {
 			item.Actor = &CachePolicyActor{*row.ActorUserID, row.ActorEmail}
 		}
@@ -134,7 +134,7 @@ func cachePolicyHistoryField(key, field string) bool {
 	fields := map[string]string{
 		"master":             "enabled",
 		"observability":      "enabled sample_percent chain_percent byte_budget_mib rate_mib_per_s platforms ingress_chain_percent persist_trace_hourly",
-		"northstar":          "rollup_enabled backfill_days policy_version model_thresholds",
+		"northstar":          "rollup_enabled backfill_days policy_version model_thresholds excluded_group_ids exclude_media unknown_threshold",
 		"upstream_identity":  "mode account_ids rollout_percent chat_compat_uuid header_only_uuid forward_session_headers",
 		"anthropic_identity": "anchor_group_ids gemini_anchor metadata_group_ids rollout_percent",
 		"routing":            "keep_sticky_on_busy.enabled keep_sticky_on_busy.group_ids keep_sticky_on_busy.rollout_percent affinity_mode",

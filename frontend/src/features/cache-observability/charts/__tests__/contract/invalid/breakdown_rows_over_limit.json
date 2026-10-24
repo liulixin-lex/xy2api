@@ -1,0 +1,123 @@
+{
+  "_contract": [
+    "P-1",
+    "P-5",
+    "P-6"
+  ],
+  "_note": "必须被拒绝：rows 超过请求的 limit=2",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/cache/breakdown?dimension=model&window=7d&platform=all&sort=opportunity_amount&limit=2",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "policy_version": "2026-10-22-v1",
+      "as_of": "2026-10-23T07:00:00Z",
+      "generated_at": "2026-10-23T07:03:12Z",
+      "window": {
+        "start": "2026-10-16T07:00:00Z",
+        "end": "2026-10-23T07:00:00Z"
+      },
+      "dimension": "model",
+      "sort": "opportunity_amount",
+      "platform": "all",
+      "cost": {
+        "currency": "USD",
+        "view": "list",
+        "pricing_source": "settled_cost",
+        "pricing_changed_in_window": false,
+        "notes": []
+      },
+      "total": {
+        "requests": 128473,
+        "prompt_tokens": 17757879000,
+        "read_tokens": 14262547000,
+        "opportunity_recorded_tokens": 2469214000
+      },
+      "rows": [
+        {
+          "key": "gpt-5-codex",
+          "label": "gpt-5-codex",
+          "meta": {
+            "platform": "openai",
+            "w_m": 1.125,
+            "priced": true
+          },
+          "requests": 61000,
+          "prompt_tokens": 9100000000,
+          "read_tokens": 7550000000,
+          "token_hit_upper": 0.82967,
+          "token_hit_lower": 0.82967,
+          "request_hit": 0.919672,
+          "opportunity_recorded_tokens": 1210000000,
+          "opportunity_share": 0.49,
+          "saved_amount": 8493.8,
+          "opportunity_amount": 1361.3,
+          "opportunity_amount_share": 0.512,
+          "token_hit_cost_weighted_upper": 0.8297
+        },
+        {
+          "key": "model-unpriced-x",
+          "label": "model-unpriced-x",
+          "meta": {
+            "platform": "openai",
+            "w_m": null,
+            "priced": false
+          },
+          "requests": 1200,
+          "prompt_tokens": 140000000,
+          "read_tokens": 101000000,
+          "token_hit_upper": 0.721429,
+          "token_hit_lower": 0.721429,
+          "request_hit": 0.833333,
+          "opportunity_recorded_tokens": 30000000,
+          "opportunity_share": 0.012,
+          "saved_amount": null,
+          "opportunity_amount": null,
+          "opportunity_amount_share": null,
+          "token_hit_cost_weighted_upper": null
+        },
+        {
+          "key": "gpt-5",
+          "label": "gpt-5",
+          "meta": {
+            "platform": "openai",
+            "w_m": 1.125,
+            "priced": true
+          },
+          "requests": 61000,
+          "prompt_tokens": 9100000000,
+          "read_tokens": 7550000000,
+          "token_hit_upper": 0.82967,
+          "token_hit_lower": 0.82967,
+          "request_hit": 0.919672,
+          "opportunity_recorded_tokens": 1210000000,
+          "opportunity_share": 0.49,
+          "saved_amount": 8493.8,
+          "opportunity_amount": 1361.3,
+          "opportunity_amount_share": 0.512,
+          "token_hit_cost_weighted_upper": 0.8297
+        }
+      ],
+      "other": {
+        "count": 23,
+        "requests": 9100,
+        "prompt_tokens": 1210000000,
+        "read_tokens": 950000000,
+        "token_hit_upper": 0.785124,
+        "token_hit_lower": 0.785124,
+        "request_hit": 0.901099,
+        "opportunity_recorded_tokens": 210000000,
+        "opportunity_share": 0.085,
+        "saved_amount": 1201.3,
+        "opportunity_amount": 262.8,
+        "opportunity_amount_share": 0.084,
+        "token_hit_cost_weighted_upper": 0.7902
+      }
+    }
+  }
+}

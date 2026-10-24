@@ -1,0 +1,99 @@
+{
+  "_contract": [
+    "P-1",
+    "P-4",
+    "P-5"
+  ],
+  "_note": "必须被拒绝：30d 未传 granularity，默认应为 1d，响应却回显 1h",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/cache/northstar?window=30d&platform=openai&cost_view=charged",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "policy_version": "2026-10-22-v1",
+      "as_of": "2026-10-23T07:00:00Z",
+      "generated_at": "2026-10-23T07:03:12Z",
+      "window": {
+        "start": "2026-09-23T07:00:00Z",
+        "end": "2026-10-23T07:00:00Z"
+      },
+      "granularity": "1h",
+      "platform": "openai",
+      "scope": {
+        "name": "strict_known_minimum",
+        "business_prompt_tokens": 18102669000,
+        "excluded": {
+          "media_requests": 1204,
+          "zero_prompt_requests": 88,
+          "probe_group_requests": 3311,
+          "below_min_requests": 12078,
+          "unknown_threshold_requests": 3540
+        }
+      },
+      "summary": {
+        "requests": 128473,
+        "prompt_tokens": 17757879000,
+        "read_tokens": 14262547000,
+        "token_hit_upper": 0.803167,
+        "token_hit_lower": 0.802767,
+        "request_hit": 0.910308,
+        "opportunity_recorded_tokens": 2469214000,
+        "business_coverage": 0.98095,
+        "standardized_hit": 0.8031,
+        "standardized_weight_coverage": 1.0,
+        "previous": null,
+        "cost": {
+          "currency": "USD",
+          "view": "charged",
+          "pricing_source": "settled_cost",
+          "pricing_changed_in_window": false,
+          "priced_p_share": 0.9712,
+          "upstream_covered_p_share": null,
+          "priced_models": 14,
+          "saved_amount": 21880.1,
+          "opportunity_amount": 3744.92,
+          "token_hit_cost_weighted_upper": 0.8203,
+          "token_hit_cost_weighted_lower": 0.8199,
+          "previous": null,
+          "notes": [
+            "cost_weighted_hit_uses_list"
+          ]
+        }
+      },
+      "series": [
+        {
+          "bucket_start": "2026-09-23T00:00:00Z",
+          "requests": 18010,
+          "prompt_tokens": 2489000000,
+          "token_hit_upper": 0.80233,
+          "token_hit_lower": 0.801945,
+          "request_hit": 0.91005,
+          "opportunity_recorded_tokens": 349000000,
+          "partial": true,
+          "saved_amount": 2551.2,
+          "opportunity_amount": 444.3,
+          "token_hit_cost_weighted_upper": 0.8199
+        },
+        {
+          "bucket_start": "2026-09-24T00:00:00Z",
+          "requests": 18320,
+          "prompt_tokens": 2531000000,
+          "token_hit_upper": 0.803635,
+          "token_hit_lower": 0.803244,
+          "request_hit": 0.911572,
+          "opportunity_recorded_tokens": 352000000,
+          "partial": false,
+          "saved_amount": 2601.8,
+          "opportunity_amount": 448.9,
+          "token_hit_cost_weighted_upper": 0.8205
+        }
+      ],
+      "events": []
+    }
+  }
+}

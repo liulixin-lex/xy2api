@@ -76,17 +76,19 @@ func (t *cacheTrace) emitCacheTrace() {
 	if d.ConvAnchor == "" && !d.Prefix.Sampled {
 		d.ConvAnchor = "unknown"
 	}
-	logger := slog.Default()
+	// Keep optional and fixed fields in one record; cloning a logger per
+	// request adds allocations without providing a persistent context.
+	attrs := make([]slog.Attr, 0, 72)
 	if d.LossClass != "" {
-		logger = logger.With("loss_class", d.LossClass)
+		attrs = append(attrs, slog.String("loss_class", d.LossClass))
 		if d.LossClass == "n/a_sampled_out" {
-			logger = logger.With("na_reason", d.NAReason)
+			attrs = append(attrs, slog.String("na_reason", d.NAReason))
 		}
 	}
 	if d.GapSource == "settled" {
-		logger = logger.With("gap_send_ms", d.GapSendMS)
+		attrs = append(attrs, slog.Int64("gap_send_ms", d.GapSendMS))
 	}
-	logger.LogAttrs(context.Background(), slog.LevelInfo, "cache_trace",
+	attrs = append(attrs,
 		slog.Int("v", 1),
 		slog.String("request_id_hmac", d.RequestIDHMAC), slog.String("session_digest", d.SessionDigest),
 		slog.String("platform", "openai"), slog.String("protocol_in", d.ProtocolIn), slog.String("protocol_out", d.ProtocolOut),
@@ -112,4 +114,5 @@ func (t *cacheTrace) emitCacheTrace() {
 		slog.String("pol_rev", d.PolRev), slog.String("gap_src", d.GapSource), slog.Int("codex_hdr", int(d.CodexHeaders)),
 		slog.Int64("window_seq_delta", d.WindowSequenceDelta), slog.String("ua_family", d.UAFamily),
 		slog.String("pcd", d.PromptCacheDiagnostics), slog.String("resp_cache_ttl", d.ResponseCacheTTL))
+	slog.LogAttrs(context.Background(), slog.LevelInfo, "cache_trace", attrs...)
 }

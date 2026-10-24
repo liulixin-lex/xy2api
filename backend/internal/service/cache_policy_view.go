@@ -63,13 +63,16 @@ func policyRisk(i int) string {
 func (s *CachePolicyService) effective(i int, stored, loaded cachePolicyEntry) CachePolicyEffective {
 	active := false
 	e := CachePolicyEffective{Active: &active, Blockers: []string{}, Warnings: []string{}, ClippedFields: []string{}}
-	if i > 1 {
+	if i >= s.availablePolicyCount() {
 		e.State = "not_in_build"
 		e.Active = nil
 		return e
 	}
 	enabled, _ := loaded.envelope.Spec["enabled"].(bool)
-	active = enabled && !loaded.parseError && !s.kill && (i == 0 || s.diagnostics)
+	if i == 2 {
+		enabled, _ = loaded.envelope.Spec["rollup_enabled"].(bool)
+	}
+	active = enabled && !loaded.parseError && !s.kill && (i != 1 || s.diagnostics)
 	if i == 1 {
 		if policyInt(loaded.envelope.Spec["byte_budget_mib"]) > s.caps.MaxByteBudgetMiB {
 			e.ClippedFields = append(e.ClippedFields, "byte_budget_mib")
@@ -104,8 +107,19 @@ func (s *CachePolicyService) effective(i int, stored, loaded cachePolicyEntry) C
 	return e
 }
 func (s *CachePolicyService) schema(i int) []map[string]any {
-	if i > 1 {
+	if i >= s.availablePolicyCount() {
 		return []map[string]any{}
+	}
+	if i == 2 {
+		return []map[string]any{
+			{"field": "rollup_enabled", "type": "bool"},
+			{"field": "backfill_days", "type": "int", "min": 0, "max": 30},
+			{"field": "policy_version", "type": "string"},
+			{"field": "excluded_group_ids", "type": "id_list", "ref": "group"},
+			{"field": "exclude_media", "type": "bool"},
+			{"field": "model_thresholds", "type": "threshold_rules", "options": []int{512, 1024, 2048, 4096, 6144}},
+			{"field": "unknown_threshold", "type": "enum", "options": []string{"aux_only"}},
+		}
 	}
 	fields := []map[string]any{{"field": "enabled", "type": "bool"}}
 	if i == 1 {
@@ -115,11 +129,14 @@ func (s *CachePolicyService) schema(i int) []map[string]any {
 			map[string]any{"field": "byte_budget_mib", "type": "int", "min": 8, "max": s.caps.MaxByteBudgetMiB, "unit": "MiB", "cap_source": "gateway.cache_trace.max_byte_budget_mib"},
 			map[string]any{"field": "rate_mib_per_s", "type": "int", "min": 1, "max": s.caps.MaxRateMiBPerS, "unit": "MiB/s", "cap_source": "gateway.cache_trace.max_rate_mib_per_s"})
 	}
+	if i == 1 && s.northstarAvailable {
+		fields = append(fields, map[string]any{"field": "persist_trace_hourly", "type": "bool"})
+	}
 	return fields
 }
 func (s *CachePolicyService) view(i int, stored cachePolicyEntry, p *CachePolicySnapshot) CachePolicyView {
 	v := CachePolicyView{Key: cachePolicyKeys[i], SettingKey: cachePolicySettings[i], Risk: policyRisk(i), GatedByMaster: i >= 3, Schema: s.schema(i)}
-	if i > 1 {
+	if i >= s.availablePolicyCount() {
 		v.Effective = s.effective(i, stored, stored)
 		return v
 	}
@@ -141,18 +158,18 @@ func (s *CachePolicyService) view(i int, stored cachePolicyEntry, p *CachePolicy
 
 	copyEnvelope.Spec = make(map[string]any, len(stored.envelope.Spec))
 	for k, value := range stored.envelope.Spec {
-		copyEnvelope.Spec[k] = value
+		copyEnvelope.Spec[k] = cloneCachePolicyValue(value)
 	}
 	v.Stored = &copyEnvelope
 	loaded := p.entries[i]
 	v.Loaded = &CachePolicyLoaded{loaded.envelope.Rev, loaded.loadedAt}
-	v.Defaults = policyDefaults(i)
+	v.Defaults = s.defaults(i)
 	v.Effective = s.effective(i, stored, loaded)
 	return v
 }
 func (s *CachePolicyService) Get(ctx context.Context, key string) (CachePolicyView, error) {
 	i := policyIndex(key)
-	if i < 0 || i > 1 {
+	if i < 0 || i >= s.availablePolicyCount() {
 		return CachePolicyView{}, PolicyNotInBuild(key)
 	}
 	raw, err := s.repo.GetMultiple(ctx, []string{cachePolicySettings[i]})
@@ -181,10 +198,21 @@ func (s *CachePolicyService) List(ctx context.Context, version string) (CachePol
 	list.Existing.Claude.SettingsLink = "/admin/settings?tab=gateway"
 	for i := range cachePolicyKeys {
 		e := cachePolicyEntry{}
-		if i < 2 {
+		if i < s.availablePolicyCount() {
 			e = s.parse(i, raw[cachePolicySettings[i]])
 		}
 		list.Policies = append(list.Policies, s.view(i, e, p))
 	}
 	return list, nil
+}
+
+func cloneCachePolicyValue(value any) any {
+	switch v := value.(type) {
+	case []int64:
+		return append([]int64{}, v...)
+	case []CacheNorthstarThresholdRule:
+		return append([]CacheNorthstarThresholdRule{}, v...)
+	default:
+		return value
+	}
 }

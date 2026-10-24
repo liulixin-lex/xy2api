@@ -522,6 +522,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		writeUsageLogAfterBilling(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 		logger.LegacyPrintf("service.openai_gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.logCacheSettlement(result, usageLog)
+		if result.cachePanel != nil {
+			s.recordCachePanelSettlement(result, usageLog, account)
+		}
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
 		return nil
 	}
@@ -553,6 +556,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 	writeUsageLogAfterBilling(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 	s.logCacheSettlement(result, usageLog)
+	if result.cachePanel != nil {
+		s.recordCachePanelSettlement(result, usageLog, account)
+	}
 
 	return nil
 }
