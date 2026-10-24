@@ -358,7 +358,7 @@ func TestCachePolicyAdminPermissionAllEndpoints(t *testing.T) {
 	repo := &cacheRouteStore{rows: map[string]string{}}
 	s := service.NewCachePolicyService(repo, &config.Config{})
 	router := cacheTestRouter(s, service.NewAuditLogService(&cacheRouteAudit{}, nil), cacheOrdinaryUserAuth(t))
-	for _, v := range []struct{ method, path string }{{"GET", ""}, {"GET", "/observability"}, {"POST", "/observability/validate"}, {"PUT", "/observability"}, {"GET", "/history"}} {
+	for _, v := range []struct{ method, path string }{{"GET", ""}, {"GET", "/observability"}, {"POST", "/observability/validate"}, {"PUT", "/observability"}, {"GET", "/upstream_identity"}, {"POST", "/upstream_identity/validate"}, {"PUT", "/upstream_identity"}, {"GET", "/history"}} {
 		status, body := cacheCall(t, router, v.method, "/api/v1/admin/cache/policies"+v.path, []byte(`{}`))
 		require.Equal(t, 403, status)
 		require.Equal(t, "FORBIDDEN", body["code"])

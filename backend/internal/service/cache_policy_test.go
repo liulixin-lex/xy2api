@@ -185,7 +185,8 @@ func TestCachePolicyLayersCapsAndFutureKeys(t *testing.T) {
 	list, err := s.List(ctx, "test")
 	require.NoError(t, err)
 	require.Len(t, list.Policies, 6)
-	for _, p := range list.Policies[2:] {
+	for _, i := range []int{2, 4, 5} {
+		p := list.Policies[i]
 		require.False(t, p.Available)
 		require.Nil(t, p.Stored)
 		require.Nil(t, p.Loaded)

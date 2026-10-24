@@ -177,6 +177,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	originalBody := body
 	rememberOpenCodeInboundBody(c, originalBody)
 	requestView := newOpenAIRequestView(body)
+	clientHasPromptCacheKey, clientPromptCacheKeyEmpty := requestView.HasPromptCacheKey, requestView.PromptCacheKeyEmpty
 	reqModel, reqStream, promptCacheKey := requestView.Model, requestView.Stream, requestView.PromptCacheKey
 	originalModel := reqModel
 
@@ -1035,6 +1036,28 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, wsErr
 	}
 
+	// HTTP only, after the original lineage entry identity has been fixed.
+	// Keep the generated key out of GenerateSessionHash and all routing inputs.
+	l01 := prepareOpenAIUpstreamIdentity(c, account)
+	l01UUID := ""
+	if l01.eligible() {
+		if clientHasPromptCacheKey {
+			l01.Skip = "client_pck"
+			if clientPromptCacheKeyEmpty {
+				l01.Skip = "client_empty"
+			}
+		} else if openAIUpstreamIdentityHasClientHeader(c) {
+			l01.Skip = "header_only_off"
+		} else if s.qualityRotation(ctx, account) != "" {
+			// Existing quality rotation owns the final identity. Observe its
+			// request-local decision before deriving or writing an L-01 UUID.
+			l01.Skip = "quality_rotation"
+		} else {
+			l01UUID = generateSessionUUID("openai-upstream-session:v1:" + l01.RoutingSession)
+		}
+	}
+	recordOpenAIUpstreamIdentity(c, l01, false, l01.Skip)
+
 	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
 	// 国产模型默认 effort 补充：此处 reqModel 已被 mapping 重写为 billingModel。
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, reqModel)
@@ -1057,6 +1080,21 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	agentTaskRecoveryTried := false
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
 	for {
+		// Every existing rebuild returns here. Reuse the one UUID and the
+		// existing view's presence bit; no additional full-body parse.
+		if l01UUID != "" {
+			if !requestView.HasPromptCacheKey {
+				body = fillOpenAIUpstreamIdentityBody(body, false, l01UUID)
+				requestView.body, requestView.HasPromptCacheKey, requestView.PromptCacheKey = body, true, l01UUID
+				if reqBody != nil {
+					reqBody["prompt_cache_key"] = l01UUID
+				}
+			}
+			promptCacheKey = l01UUID
+			rememberOpenAIUpstreamIdentityWire(c, account, l01UUID)
+			cacheTraceFromGin(c).setPCKSource("gw_uuid")
+			recordOpenAIUpstreamIdentity(c, l01, true, "none")
+		}
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		var headerGuard *openAIFirstOutputHeaderGuard
@@ -1599,6 +1637,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
 	account.ApplyHeaderOverrides(req.Header)
 	applyOpenCodeSessionHeader(c, account, targetURL, req.Header, body, openCodeSessionHintBody(promptCacheKey))
+	applyOpenAIUpstreamIdentityHeaders(c, account, req)
 	// x-codex-beta-features：按真实 Codex 的会话级行为补注（在账号级覆写之后，
 	// 保证不被覆盖丢失）。
 	applyOpenAICodexBetaFeatures(c, account, req.Header)

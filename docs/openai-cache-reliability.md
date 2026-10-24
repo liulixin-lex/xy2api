@@ -138,9 +138,9 @@ cache_trace 仅为内部 Info 日志，经现有 slog→zap JSON logger 输出�
 ## 运行时缓存策略管理
 
 管理员专用接口位于 `/api/v1/admin/cache/policies`：列表、按键读取、
-`POST /{key}/validate`、`PUT /{key}`、`GET /history`。当前构建提供 `master`（`cache_feature_master`）、`observability`
-（`cache_observability_policy`）与 `northstar`（`cache_northstar_policy`）；
-三者缺省关闭。其余三个键保留在列表中，
+POST /{key}/validate、PUT /{key}、GET /history。当前构建提供 master（cache_feature_master）、
+observability（cache_observability_policy）、northstar（cache_northstar_policy）和
+upstream_identity（cache_upstream_identity_policy）；四者缺省关闭。其余两个键保留在列表中，
 标记为不可用；单项读写返回 404，存储值和 schema 不对用户接口公开。
 
 写入省略的字段保留原值，未知字段拒绝。每键的 `expected_rev` 在数据库
@@ -255,3 +255,40 @@ cache_trace 在送达分类确定后、真正扣费及用量落库之前输出�
 流式观测在既有逐帧只读解析路径上运行，没有 buffered 观测回调的 panic 隔离；结算入口的 recover 只保护结算，不覆盖流式逐帧解析。
 
 路由归因反映请求中观察到的最高优先级决策，不保证最终选中的账号来自该决策：无会话也可记 sticky_new，但不会创建粘性绑定；failover 观察点早于 OAuth 429 的停止检查，因此被停止的切换也会计数；放弃或等待失败的候选仍参与最高级归因。多次故障改绑以快照前最后一次 rebind_cause 为准，快照后的改绑不进入事件。M1 只输出九个已接入原因及 unknown；capacity_shed、hard_clear、iq_bypass、quality_excluded、non_fault_rebind、affinity_pref 均为保留值，不单独输出，请求内因容量降载换号归 failover_n，其他行为按实际经过的既有九个决策点归因。
+
+## OpenAI UUID 会话键补全（L-01）
+
+管理员在缓存策略的 `upstream_identity` 中设置 `mode=uuid_fill`、
+`rollout_percent` 和可选的 `account_ids`。默认 `mode=off`、比例 0、账号列表为空、
+`chat_compat_uuid=false`。它受 `cache_feature_master` 和静态紧急总闸共同控制；
+观测开关独立。配置按既有 revision、预校验、确认和审计流程更新，最多约 60 秒生效；
+请求内沿用同一快照。启用、扩大比例或账号范围需要理由和勾选确认，撤回不需要。
+账号列表只接受存在的 OpenAI apikey 账号，空列表表示所有合格账号。
+
+功能仅覆盖 Responses HTTP 与可选的 Chat→Responses。客户端显式给出
+`prompt_cache_key`（包括空串、null 或其他类型），或任一已有会话头时，
+L-01 都不覆盖客户端设置。Codex/OAuth、透传、Grok、探测、原始 Chat、Messages
+和 WebSocket 不参与。没有网关路由会话的请求也不参与。
+`header_only_uuid=true` 与 `forward_session_headers=normalize` 属于后续功能，
+本版本的写入返回 `CACHE_POLICY_UNSUPPORTED`。
+
+Responses 为缺键请求补上稳定 UUID，并在最终出站没有 `session_id` 时使用同值。
+UUID 按网关已有的 API key、serving 分组及模型作用域派生；不使用计费源分组。
+同一请求首次确定分桶后不因账号或 host 切换重新分桶；同一服务作用域的重建与
+重试使用相同 UUID，服务作用域变化时身份随之变化。生成的键不反馈到选号、sticky
+或原有 lineage 身份。关闭或对照组保持原出站行为，不新增整请求解析。
+
+Chat 的 `chat_compat_uuid=true` 只把已有兼容种子实际注入的出站 pck 改成原有
+session header 的 UUID；内部种子及 header 派生不变，不重复隔离或二次 UUID 化。
+不产生旧兼容种子的请求保持原行为，记 `l01_skip=no_compat_seed`；原始 Chat 等
+排除入口记 `unsupported_ingress`。本请求实际触发既有 quality enforce 身份轮换时，
+L-01 让位并记 `quality_rotation`，不会推进轮换状态；只配置轮换而未触发的请求
+仍按通常规则处理。三个原因都记 `l01_applied=false`，出站与 L-01 关闭时相同。
+跳过原因先判策略和入口，再判账号及会话分桶；处理组内依次判客户端 pck、
+会话头、旧 compat seed、Chat 开关，最后判实际质量轮换。
+
+完整内部 cache_trace 增加 `l01_arm`（none/on/off）、`l01_applied`、
+`l01_skip` 和 `l01_policy_rev`。实际注入来源为 `pck_class_out=gw_uuid`，同值
+session header 来源为 `sess_out_relation=eq_pck`；最小事件仍保留原有 12 字段。
+这些字段只记录枚举、布尔和 revision，不输出生成的 UUID、会话种子或头原文。
+撤回时设置 `mode=off` 或比例 0；在途请求保持旧快照，新请求按刷新后的策略执行。

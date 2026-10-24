@@ -58,18 +58,19 @@ func t3SettlementPayload(t *testing.T, event map[string]any, minimal bool, expec
 			payload[key] = value
 		}
 	}
-	// Exact required/allowed sets from cache_trace_contract v1.7.8.2. This
-	// shape assertion complements the external authoritative schema validator.
+	// Exact M1 required/allowed sets plus the four M3 L01 full-event fields.
+	// M1 contract files remain frozen; the dedicated M3 extension is additive.
+	// This assertion complements the external authoritative schema validator.
 	fields := "v platform loss_class na_reason request_id_hmac session_digest account_id group_id P read pol_rev ua_family"
 	if !minimal {
-		fields = "v request_id_hmac session_digest platform protocol_in protocol_out group_id account_id transport ingress_ws_bridge pol_rev pck_class_in pck_class_out pck_out_is_uuid sess_hdr_in sess_hdr_out sess_out_relation id_source conv_anchor thread_present codex_hdr window_seq_delta ua_family gap_src chain_sampled blk_n bytes_out bytes_out_raw blk_order_physical_eq_logical fork_ref fork_kind fork_precision fork_blk fork_byte fork_blk_hi fork_byte_hi fork_raw_byte p_prev hist_age_s tail_kind reasoning_items_n old_reasoning_n first_old_reasoning_blk first_old_reasoning_byte first_old_reasoning_raw_byte include_encrypted_reasoning store_false reasoning_enc_n reasoning_ctx reasoning_ctx_eff model_gen rsn_boundary_hit read_short_of_fork P read tok_per_byte_milli usage_fields pcd resp_cache_ttl loss_class route_reason rebind_cause"
+		fields = "v request_id_hmac session_digest platform protocol_in protocol_out group_id account_id transport ingress_ws_bridge pol_rev pck_class_in pck_class_out pck_out_is_uuid sess_hdr_in sess_hdr_out sess_out_relation id_source conv_anchor thread_present codex_hdr window_seq_delta ua_family gap_src chain_sampled blk_n bytes_out bytes_out_raw blk_order_physical_eq_logical fork_ref fork_kind fork_precision fork_blk fork_byte fork_blk_hi fork_byte_hi fork_raw_byte p_prev hist_age_s tail_kind reasoning_items_n old_reasoning_n first_old_reasoning_blk first_old_reasoning_byte first_old_reasoning_raw_byte include_encrypted_reasoning store_false reasoning_enc_n reasoning_ctx reasoning_ctx_eff model_gen rsn_boundary_hit read_short_of_fork P read tok_per_byte_milli usage_fields pcd resp_cache_ttl loss_class route_reason rebind_cause l01_arm l01_applied l01_skip l01_policy_rev"
 		if payload["loss_class"] == "n/a_sampled_out" {
 			fields += " na_reason"
 		}
 		if payload["gap_src"] == "settled" {
 			fields += " gap_send_ms"
 		}
-		for _, field := range strings.Fields("pck_out_is_uuid thread_present chain_sampled blk_order_physical_eq_logical include_encrypted_reasoning store_false ingress_ws_bridge rsn_boundary_hit read_short_of_fork") {
+		for _, field := range strings.Fields("pck_out_is_uuid thread_present chain_sampled blk_order_physical_eq_logical include_encrypted_reasoning store_false ingress_ws_bridge rsn_boundary_hit read_short_of_fork l01_applied") {
 			_, ok := payload[field].(bool)
 			require.True(t, ok, "%s must be a JSON boolean", field)
 		}

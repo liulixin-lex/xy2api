@@ -2392,7 +2392,7 @@
     },
     {
       "path": "backend/internal/service/cache_policy.go",
-      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar())"
+      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts))"
     },
     {
       "path": "backend/internal/service/openai_cache_diagnostics.go",
@@ -2441,6 +2441,26 @@
     {
       "path": "backend/internal/handler/wire.go",
       "value": "ProvideCachePanelBuildInfo,"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "l01 := prepareOpenAIUpstreamIdentity(c, account)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "applyOpenAIUpstreamIdentityHeaders(c, account, req)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_request_body.go",
+      "value": "HasPromptCacheKey"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "decodeL01ChatRequestWithPresence(body, &chatReq, &clientPCKEmpty)"
+    },
+    {
+      "path": "backend/internal/service/cache_policy_upstream_identity.go",
+      "value": "func (p *CachePolicySnapshot) UpstreamIdentity()"
     }
   ],
   "forbidden_module_paths": [
@@ -2496,7 +2516,8 @@
     "xy-resilience-v2-streams",
     "xy-account-stream-only-learning",
     "xy-resilience-v2-classification",
-    "xy-openai-cache-trace"
+    "xy-openai-cache-trace",
+    "xy-openai-upstream-identity-l01"
   ],
   "custom_patch_tests": [
     {
@@ -3398,6 +3419,21 @@
       "id": "xy-openai-cache-trace",
       "path": "backend/internal/service/cache_trace_logger_contract_test.go",
       "literal": "func TestCacheTraceProductionLoggerContract("
+    },
+    {
+      "id": "xy-openai-upstream-identity-l01",
+      "path": "backend/internal/service/openai_upstream_identity_disabled_wire_test.go",
+      "literal": "func TestOpenAIUpstreamIdentityDisabledForwardGolden("
+    },
+    {
+      "id": "xy-openai-upstream-identity-l01",
+      "path": "backend/internal/service/openai_upstream_identity_chat_forward_test.go",
+      "literal": "func TestL01ChatForwardWireAndExplicitFields("
+    },
+    {
+      "id": "xy-openai-upstream-identity-l01",
+      "path": "backend/internal/service/openai_upstream_identity_test.go",
+      "literal": "func TestL01BodyInsertionPreservesOriginalSuffixAndPresence("
     }
   ]
 }

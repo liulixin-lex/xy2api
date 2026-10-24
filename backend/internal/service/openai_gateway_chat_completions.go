@@ -161,10 +161,23 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 
 	startTime := time.Now()
 
-	// 1. Parse Chat Completions request
+	// 1. Parse Chat Completions request. A treatment request captures pck
+	// presence during this existing decode; the disabled branch retains the
+	// original parser and never creates the presence wrapper.
+	identityDecision := prepareOpenAIUpstreamIdentity(c, account)
+	identityChatCandidate := identityDecision.eligible()
+	var clientPCKPresent, clientPCKEmpty bool
 	var chatReq apicompat.ChatCompletionsRequest
-	if err := json.Unmarshal(body, &chatReq); err != nil {
-		return nil, fmt.Errorf("parse chat completions request: %w", err)
+	if identityChatCandidate {
+		var parseErr error
+		clientPCKPresent, parseErr = decodeL01ChatRequestWithPresence(body, &chatReq, &clientPCKEmpty)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse chat completions request: %w", parseErr)
+		}
+	} else {
+		if err := json.Unmarshal(body, &chatReq); err != nil {
+			return nil, fmt.Errorf("parse chat completions request: %w", err)
+		}
 	}
 	originalModel := chatReq.Model
 	clientStream := chatReq.Stream
@@ -192,6 +205,38 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			cacheTraceFromGin(c).setPCKSource("gw_compat_hex")
 		}
 	}
+
+	// Keep the internal compat seed unchanged across task recovery. Only the
+	// wire pck is upgraded: assigning this UUID to promptCacheKey would make a
+	// recursive attempt derive a second UUID or repeat tenant isolation.
+	identityChatUUID := ""
+	identityChatApplied := false
+	identitySkip := identityDecision.Skip
+	if identityDecision.eligible() {
+		switch {
+		case clientPCKPresent:
+			identitySkip = "client_pck"
+			if clientPCKEmpty {
+				identitySkip = "client_empty"
+			}
+		case openAIUpstreamIdentityHasClientHeader(c):
+			identitySkip = "header_only_off"
+		case isResponsesShape || !compatPromptCacheInjected && !compatPromptCacheTenantIsolated:
+			identitySkip = "no_compat_seed"
+		case !identityDecision.ChatCompatUUID:
+			identitySkip = "chat_compat_off"
+		case s.qualityRotation(ctx, account) != "":
+			// Preserve the existing quality identity before writing the wire UUID.
+			identitySkip = "quality_rotation"
+		default:
+			sessionKey := promptCacheKey
+			if !compatPromptCacheTenantIsolated {
+				sessionKey = isolateOpenAIUpstreamSessionID(getAPIKeyIDFromContext(c), codexAccountIdentitySource(c, account), promptCacheKey)
+			}
+			identityChatUUID = generateSessionUUID(sessionKey)
+		}
+	}
+	recordOpenAIUpstreamIdentity(c, identityDecision, false, identitySkip)
 
 	// 3. Build the upstream (Responses API) body.
 	//
@@ -320,9 +365,16 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 				return nil, fmt.Errorf("unmarshal for prompt cache key injection: %w", err)
 			}
 			if existing, ok := reqBody["prompt_cache_key"].(string); !ok || strings.TrimSpace(existing) == "" {
-				reqBody["prompt_cache_key"] = trimmedKey
-				if !compatPromptCacheInjected {
-					cacheTraceFromGin(c).setPCKSource("gw_from_header")
+				if identityChatUUID != "" {
+					reqBody["prompt_cache_key"] = identityChatUUID
+					identityChatApplied = true
+					cacheTraceFromGin(c).setPCKSource("gw_uuid")
+					recordOpenAIUpstreamIdentity(c, identityDecision, true, "none")
+				} else {
+					reqBody["prompt_cache_key"] = trimmedKey
+					if !compatPromptCacheInjected {
+						cacheTraceFromGin(c).setPCKSource("gw_from_header")
+					}
 				}
 				responsesBody, err = json.Marshal(reqBody)
 				if err != nil {
@@ -379,8 +431,13 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		if !compatPromptCacheTenantIsolated {
 			sessionKey = isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), promptCacheKey)
 		}
-		upstreamReq.Header.Set("session_id", generateSessionUUID(sessionKey))
-		cacheTraceFromGin(c).setSessionSource("uuid_of_pck")
+		if identityChatApplied {
+			upstreamReq.Header.Set("session_id", identityChatUUID)
+			cacheTraceFromGin(c).setSessionSource("eq_pck")
+		} else {
+			upstreamReq.Header.Set("session_id", generateSessionUUID(sessionKey))
+			cacheTraceFromGin(c).setSessionSource("uuid_of_pck")
+		}
 	}
 
 	captureCacheTraceHeaders(c, upstreamReq)
@@ -430,6 +487,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 				zap.Int("upstream_status", resp.StatusCode),
 				zap.String("upstream_message", upstreamMsg),
 			)
+			// The final raw attempt must not inherit a failed Responses attempt's
+			// L-01 application, outgoing source markers, or usage observation.
+			resetCacheTraceAttempt(c)
 			return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 		}
 		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {

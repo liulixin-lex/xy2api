@@ -51,8 +51,9 @@ type cachePolicyEntry struct {
 	loadedAt   time.Time
 }
 
-// CachePolicySnapshot contains only immutable, value data. Requests hold one
-// pointer across retries and streaming; readers never consult settings.
+// CachePolicySnapshot contains immutable policy data. Collection fields stay
+// private and are built once at publication. Requests hold one pointer across
+// retries and streaming; readers never consult settings.
 type CachePolicySnapshot struct {
 	kill          bool
 	master        bool
@@ -66,7 +67,9 @@ type CachePolicySnapshot struct {
 	rate          int64
 	revs          [6]int64
 	revision      string
-	entries       [3]cachePolicyEntry
+	entries       [6]cachePolicyEntry
+	upstream      CacheUpstreamIdentityPolicy
+	cohortViews   [2]cachePolicyCohortView
 }
 
 func (p *CachePolicySnapshot) TraceEnabled() bool  { return p != nil && p.trace }
@@ -115,12 +118,6 @@ type CachePolicyOption func(*CachePolicyService)
 func WithCacheNorthstar() CachePolicyOption {
 	return func(s *CachePolicyService) { s.northstarAvailable = true }
 }
-func (s *CachePolicyService) availablePolicyCount() int {
-	if s.northstarAvailable {
-		return 3
-	}
-	return 2
-}
 func (p *CachePolicySnapshot) NorthstarEnabled() bool { return p != nil && p.northstar }
 func (p *CachePolicySnapshot) NorthstarPolicy() CacheNorthstarPolicy {
 	if p == nil {
@@ -152,6 +149,7 @@ type CachePolicyService struct {
 	now                      func() time.Time
 	repo                     SettingRepository
 	store                    CachePolicyStore
+	accounts                 CachePolicyAccountLookup
 	caps                     CachePolicyCaps
 	kill, diagnostics, aware bool
 	rollout                  int
@@ -265,13 +263,15 @@ func (s *CachePolicyService) Refresh(ctx context.Context) error {
 	return nil
 }
 func (s *CachePolicyService) publish(raw map[string]string) {
-	entries := [3]cachePolicyEntry{}
-	for i := range s.availablePolicyCount() {
-		entries[i] = s.parse(i, raw[cachePolicySettings[i]])
+	entries := [6]cachePolicyEntry{}
+	for i := range entries {
+		if s.cachePolicySupported(i) {
+			entries[i] = s.parse(i, raw[cachePolicySettings[i]])
+		}
 	}
 	s.publishEntries(entries)
 }
-func (s *CachePolicyService) publishEntries(entries [3]cachePolicyEntry) {
+func (s *CachePolicyService) publishEntries(entries [6]cachePolicyEntry) {
 	p := &CachePolicySnapshot{kill: s.kill, entries: entries}
 	for i := range entries {
 		p.revs[i] = entries[i].envelope.Rev
@@ -291,7 +291,9 @@ func (s *CachePolicyService) publishEntries(entries [3]cachePolicyEntry) {
 	p.chainPercent = policyInt(o["chain_percent"])
 	p.byteBudget = int64(min(policyInt(o["byte_budget_mib"]), s.caps.MaxByteBudgetMiB)) << 20
 	p.rate = int64(min(policyInt(o["rate_mib_per_s"]), s.caps.MaxRateMiBPerS)) << 20
+	p.upstream = upstreamIdentityFromEntry(entries[3], p.MasterEnabled())
 	p.revision = fmt.Sprintf("m%d.o%d.u%d.a%d.r%d", p.revs[0], p.revs[1], p.revs[3], p.revs[4], p.revs[5])
+	p.initCohortViews()
 	for _, notify := range s.listeners {
 		notify(p)
 	}
@@ -340,6 +342,9 @@ func policyDefaults(index int) map[string]any {
 	if index == 0 {
 		return map[string]any{"enabled": false}
 	}
+	if index == 3 {
+		return map[string]any{"mode": "off", "account_ids": []int64{}, "rollout_percent": 0, "chat_compat_uuid": false, "header_only_uuid": false, "forward_session_headers": "whitelist"}
+	}
 	return map[string]any{"enabled": false, "sample_percent": 100, "chain_percent": 100, "byte_budget_mib": 64, "rate_mib_per_s": 32}
 }
 func policyInt(v any) int {
@@ -352,8 +357,8 @@ func policyInt(v any) int {
 	return 0
 }
 
-func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config) *CachePolicyService {
-	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar())
+func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config, accounts AccountRepository) *CachePolicyService {
+	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts))
 	s.Start()
 	return s
 }
