@@ -3117,3 +3117,11 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 验证：`go test -json -tags=unit -p=1 -count=1 -timeout=10m -run '^TestCachePolicy(History|ContractFixtures)' ./internal/service/ ./internal/server/routes/` 通过；新增八例覆盖 +08、−07、+05:45、UTC 与成功/失败审计，跨日和微秒精度、真实 HTTP JSON `Z`、时间点和仓储原值均验证。
 - 测试树 `4493e0657d40a83223b300d08a2353b1793d2491`，HEAD `72c2d0169`、dirty=true，执行前后相同；60 条通过记录、无失败。完成后仅补记忆与归档，不重复 Go 门禁。
 - 下一步：本地独立提交，交性能修复执行者；未推送、未部署、未修改生产或其他工作树。
+
+## 2026-10-24 — G / M1 开启态日志 Attr 合并
+
+- 基于UTC独立提交 `411540d5d`，只改 `cache_trace_event.go` 完整事件的属性组装：把loss_class、na_reason、gap_send_ms和固定字段一次交给LogAttrs，避免短命logger/handler克隆。nil、最小事件、HMAC、计费与出站逻辑不改。没有新增字段或运行时配置。
+- 先以外部test-only overlay做5轮ABBA、每边20样本，三类事件JSON字段逐一相同。完整事件14→1alloc，CPU均值25.95→24.36µs但p=0.072不显著；抽样外完整事件20→1alloc，CPU中位数下降17.14%且p<0.001；最小事件保持1alloc/288B，CPU无显著差异。测量版与产品优化文件逐字一致。
+- 未插桩产品测试tree `de2c60c9d15e512f3c4cd38abd69a1367917e743`：`go test -tags=unit ./internal/service -run 'CacheTrace|CachePrefix'` 1444 tests/subtests通过，包含22项Disabled；实际logger语料严格schema和usage关联22条通过，其中18条精确关联、4条无会话按契约不可关联。定向race 195项通过，文档检查通过。实际命令额外限制并发并禁用测试结果缓存；证据索引保留完整命令、源码树、原始日志及SHA。
+- 原正式M1 d1 pooled p99为1.066862ms，未达开启门槛；旧0.501593ms与新测量范围不同，不能把差额直接归为同工作退化。本次小修不宣称formal通过；正式d1/d2由独立窗口复核。SSE framing与worker JSON的大改仅保留后续方向，不在本提交实现。
+- 提交仅在上述测试tree后收束本人的记忆/归档，产品源码完全相同；未推送、部署或改变生产。
