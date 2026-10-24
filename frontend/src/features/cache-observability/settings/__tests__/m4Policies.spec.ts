@@ -1,5 +1,5 @@
 // M4: cache_anthropic_identity_policy (risk high) and cache_routing_policy (risk highest) on the
-// generic policy card, driven by F's m3m4 samples (v1.0.3, M4 part). The backend (T4.0) is not
+// generic policy card, driven by F's m3m4 samples (v1.1, M4 part). The backend (T4.0) is not
 // built yet, so the samples follow DESIGN §11 and the M4 brief: group candidates (FE-Q3), dot
 // paths for the nested routing fields, and the key name typed before routing widens (§11.7).
 import { flushPromises, mount } from '@vue/test-utils'
