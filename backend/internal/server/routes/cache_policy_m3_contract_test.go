@@ -1,0 +1,222 @@
+//go:build unit
+
+package routes
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/handler"
+	adminhandler "github.com/liulixin-lex/xy2api/internal/handler/admin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
+	"github.com/liulixin-lex/xy2api/internal/server/middleware"
+	"github.com/liulixin-lex/xy2api/internal/service"
+	"github.com/stretchr/testify/require"
+)
+
+// This branch implements M1 and M3. On integration with M2, update this
+// explicit build expectation; never infer expected availability from List().
+const cacheM3ContractIncludesNorthstar = false
+
+type cacheM3OptionAccounts struct{}
+
+func (cacheM3OptionAccounts) GetByIDs(_ context.Context, ids []int64) ([]*service.Account, error) {
+	out := []*service.Account{}
+	for _, id := range ids {
+		switch id {
+		case 101, 102, 103:
+			out = append(out, &service.Account{ID: id, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey})
+		case 201:
+			out = append(out, &service.Account{ID: id, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth})
+		}
+	}
+	return out, nil
+}
+func (cacheM3OptionAccounts) ListWithFilters(_ context.Context, _ pagination.PaginationParams, _, _, _, _ string, _ int64, _ string) ([]service.Account, *pagination.PaginationResult, error) {
+	return []service.Account{
+		{ID: 101, Name: "relay-a-01", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey},
+		{ID: 102, Name: "relay-b-01", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: "disabled"},
+		{ID: 103, Name: "relay-c-01", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey},
+		{ID: 201, Name: "excluded-oauth", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth},
+		{ID: 202, Name: "excluded-passthrough", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Extra: map[string]any{"openai_passthrough": true}},
+	}, &pagination.PaginationResult{Total: 5}, nil
+}
+
+func TestCachePolicyM3ContractReplay(t *testing.T) {
+	root := "testdata/cache_policies_contract/m3m4"
+	manifest, err := os.ReadFile(filepath.Join(root, "SHA256.json"))
+	require.NoError(t, err)
+	hashes := map[string]string{}
+	require.NoError(t, json.Unmarshal(manifest, &hashes))
+	require.Len(t, hashes, 18)
+	names := make([]string, 0, len(hashes))
+	for name := range hashes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join(root, name))
+			require.NoError(t, err)
+			require.Equal(t, hashes[name], fmt.Sprintf("%x", sha256.Sum256(raw)))
+			var f cacheContract
+			require.NoError(t, json.Unmarshal(raw, &f))
+			expected := contractMap(t, f.Response)
+			data, _ := f.Response["data"].(map[string]any)
+			repo := &cacheRouteStore{rows: map[string]string{service.SettingKeyClaudeCacheFallbackPolicy: `{"enabled":true,"group_ids":[1,2]}`}}
+			auditRepo := &cacheRouteAudit{}
+			audit := service.NewAuditLogService(auditRepo, nil)
+			cfg := &config.Config{}
+			cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
+			version := "0.0.0-contract"
+			now := time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)
+			// Confirm/preview fixtures assume master on. List fixtures below
+			// replace all supported envelopes with their published exact state.
+			repo.rows["cache_feature_master"] = `{"rev":1,"spec":{"enabled":true}}`
+			repo.rows["cache_observability_policy"] = `{"rev":1,"spec":{"enabled":true}}`
+			putSetting := func(key string, rev int64, spec map[string]any) {
+				b, err := json.Marshal(map[string]any{"rev": rev, "spec": spec})
+				require.NoError(t, err)
+				repo.rows[key] = string(b)
+			}
+			switch {
+			case strings.HasPrefix(name, "m3_list_"):
+				b, err := json.Marshal(data)
+				require.NoError(t, err)
+				var list service.CachePolicyList
+				require.NoError(t, json.Unmarshal(b, &list))
+				// README §2 explicitly excludes northstar from the M3 contract.
+				// Preserve every M3 field and compare this unsupported card to
+				// the frozen M1 shape until M2 is integrated into this branch.
+				if !cacheM3ContractIncludesNorthstar {
+					m1Raw, err := os.ReadFile("testdata/cache_policies_contract/list_default_all_off.json")
+					require.NoError(t, err)
+					var m1 cacheContract
+					require.NoError(t, json.Unmarshal(m1Raw, &m1))
+					northstar := m1.Response["data"].(map[string]any)["policies"].([]any)[2]
+					require.Equal(t, "northstar", northstar.(map[string]any)["key"])
+					require.Equal(t, false, northstar.(map[string]any)["available"])
+					expected["data"].(map[string]any)["policies"].([]any)[2] = contractMap(t, northstar)
+				}
+				version = list.BuildVersion
+				cfg.Gateway.CacheFeatures.KillSwitch = list.Static.KillSwitch
+				cfg.Gateway.OpenAICache.DiagnosticsEnabled = list.Existing.Diagnostics
+				cfg.Gateway.OpenAICache.AwareRoutingEnabled = list.Existing.AwareRouting
+				cfg.Gateway.OpenAICache.RolloutPercent = list.Existing.Rollout
+				cfg.Gateway.CacheTrace.Workers = list.Static.Caps.Workers
+				cfg.Gateway.CacheTrace.MaxByteBudgetMiB = list.Static.Caps.MaxByteBudgetMiB
+				cfg.Gateway.CacheTrace.MaxRateMiBPerS = list.Static.Caps.MaxRateMiBPerS
+				cfg.Gateway.CacheTrace.MaxSessions = list.Static.Caps.MaxSessions
+				cfg.Gateway.CacheTrace.ChainsPerSession = list.Static.Caps.ChainsPerSession
+				cfg.Gateway.CacheTrace.MaxCheckpoints = list.Static.Caps.MaxCheckpoints
+				for _, policy := range list.Policies {
+					if policy.Available {
+						seedPolicy(t, repo, policy)
+					}
+				}
+			case strings.HasPrefix(name, "m3_validate_"):
+				rev := int64(data["current_rev"].(float64))
+				spec := map[string]any{"mode": "off", "account_ids": []int64{}, "rollout_percent": 0}
+				if rev > 0 {
+					spec = map[string]any{"mode": "uuid_fill", "account_ids": []int64{101, 102}, "rollout_percent": 50}
+				}
+				for _, entry := range data["diff"].([]any) {
+					diff := entry.(map[string]any)
+					spec[diff["field"].(string)] = diff["before"]
+				}
+				for _, warning := range data["warnings"].([]any) {
+					if warning == "observability_off" {
+						repo.rows["cache_observability_policy"] = `{"rev":0,"spec":{"enabled":false}}`
+					}
+				}
+				putSetting("cache_upstream_identity_policy", rev, spec)
+			case strings.HasPrefix(name, "m3_put_"):
+				var request struct {
+					ExpectedRev int64 `json:"expected_rev"`
+				}
+				require.NoError(t, json.Unmarshal(f.Request.Body, &request))
+				putSetting("cache_upstream_identity_policy", request.ExpectedRev, map[string]any{"mode": "off"})
+			case name == "m3_history.json":
+				require.NotNil(t, f.Fixture)
+				now = f.Fixture.Now
+				stored, err := json.Marshal(map[string]any{"rev": f.Fixture.Stored.Rev, "updated_at": f.Fixture.Stored.UpdatedAt, "spec": map[string]any{"mode": "off"}})
+				require.NoError(t, err)
+				repo.rows["cache_upstream_identity_policy"] = string(stored)
+				present := map[int64]bool{}
+				oldest := now
+				for _, rawItem := range data["items"].([]any) {
+					b, err := json.Marshal(rawItem)
+					require.NoError(t, err)
+					var item service.CachePolicyHistoryItem
+					require.NoError(t, json.Unmarshal(b, &item))
+					var uid *int64
+					email := ""
+					if item.Actor != nil {
+						uid, email = &item.Actor.UserID, item.Actor.Email
+					}
+					row := &service.AuditLog{CreatedAt: item.At, Action: item.Action, Method: "PUT", ActorUserID: uid, ActorEmail: email, StatusCode: item.StatusCode, Extra: map[string]any{}}
+					if item.At.Before(oldest) {
+						oldest = item.At
+					}
+					if item.RevAfter != nil {
+						present[*item.RevAfter] = true
+						row.Extra["rev_after"], row.Extra["rev_before"] = *item.RevAfter, *item.RevBefore
+					}
+					row.Extra["changed_fields"] = strings.Join(item.ChangedFields, ",")
+					b, err = json.Marshal(map[string]any{"reason": item.Reason})
+					require.NoError(t, err)
+					row.RequestBody = string(b)
+					auditRepo.rows = append(auditRepo.rows, row)
+				}
+				for _, rev := range f.Fixture.Revisions {
+					if !present[rev] {
+						auditRepo.rows = append(auditRepo.rows, &service.AuditLog{CreatedAt: oldest.Add(-time.Duration(100-rev) * time.Minute), Action: "admin.cache.policies.upstream_identity.update", Method: "PUT", StatusCode: 200, Extra: map[string]any{"rev_after": rev, "rev_before": rev - 1}})
+					}
+				}
+			}
+			policies := service.NewCachePolicyService(repo, cfg, service.WithCachePolicyAccounts(cacheM3OptionAccounts{}), service.WithCachePolicyClock(func() time.Time { return now }))
+			require.NoError(t, policies.Refresh(context.Background()))
+			router := cacheTestRouter(policies, audit, nil)
+			// Keep the product build-version field exact for list fixtures.
+			if strings.HasPrefix(name, "m3_list_") {
+				router = cacheM3ContractRouter(policies, audit, version)
+			}
+			status, got := cacheCall(t, router, f.Request.Method, f.Request.Path, f.Request.Body)
+			require.Equal(t, f.Status, status)
+			if strings.HasPrefix(name, "m3_list_") {
+				policies := got["data"].(map[string]any)["policies"].([]any)
+				require.Len(t, policies, 6)
+				require.Equal(t, "northstar", policies[2].(map[string]any)["key"])
+				require.Equal(t, cacheM3ContractIncludesNorthstar, policies[2].(map[string]any)["available"])
+			}
+			normalizePolicyTimes(t, got)
+			normalizePolicyTimes(t, expected)
+			require.Equal(t, expected, got, "compare every field, including options and JSON-string metadata.errors")
+		})
+	}
+}
+
+func cacheM3ContractRouter(p *service.CachePolicyService, audit *service.AuditLogService, version string) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	group := r.Group("/api/v1/admin")
+	group.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1})
+		c.Set(middleware.ContextKeyAuthEmail, "admin@example.com")
+		c.Next()
+	})
+	group.Use(gin.HandlerFunc(middleware.NewAuditLogMiddleware(audit)))
+	h := &handler.Handlers{Admin: &handler.AdminHandlers{CachePolicy: adminhandler.NewCachePolicyHandler(p, audit, version)}}
+	registerCachePolicyRoutes(group, h)
+	return r
+}

@@ -186,7 +186,15 @@ func (s *CachePolicyService) Get(ctx context.Context, key string) (CachePolicyVi
 	if err != nil {
 		return CachePolicyView{}, err
 	}
-	return s.view(i, s.parse(i, raw[cachePolicySettings[i]]), s.Snapshot()), nil
+	view := s.view(i, s.parse(i, raw[cachePolicySettings[i]]), s.Snapshot())
+	if i == 3 {
+		options, err := s.upstreamIdentityAccountOptions(ctx)
+		if err != nil {
+			return CachePolicyView{}, err
+		}
+		setCachePolicyAccountOptions(&view, options)
+	}
+	return view, nil
 }
 func (s *CachePolicyService) List(ctx context.Context, version string) (CachePolicyList, error) {
 	keys := append([]string{}, cachePolicySettings[:]...)
@@ -213,6 +221,11 @@ func (s *CachePolicyService) List(ctx context.Context, version string) (CachePol
 		}
 		list.Policies = append(list.Policies, s.view(i, e, p))
 	}
+	options, err := s.upstreamIdentityAccountOptions(ctx)
+	if err != nil {
+		return CachePolicyList{}, err
+	}
+	setCachePolicyAccountOptions(&list.Policies[3], options)
 	return list, nil
 }
 

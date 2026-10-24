@@ -219,11 +219,12 @@
 - 授权与基点：从 M2 后端 a99f71795 建立 cache/m1-hardening；每项小提交，不推送。M2 合入后再变基 main，先检查全部构建 tag；M2 评审阻塞优先修。
 - 范围：T0a.4 N-2/N-3/N-4/N-5、T0a.5 N-3/N-7、T0a.2-fix n-2/n-5，以及 T0a.3 n-2/n-3/n-4；已完成的 observer_failed 优先级与 policy history UTC 不重复处理。
 - 当前：10 个提交仅重放到 M2 main 16a776e347；产品补丁无冲突，保留 main 的 M2/R16/R17/隔离测试及记忆归档。旧门禁由 M3 最终候选流水线取代，已有失败保留；最小测试修正：正常计费模式断言为 token、未送达已关闭计时、legacy logger 夹具保留认证身份并显式注入历史摘要。五 tag 编译全部通过，计费与 logger 定向 race 通过，28 条事件严格校验通过；未送达旧测试另需将“容器为空”精确改为“计时关闭且前缀历史为空”，只补跑该组。长门禁交集成候选。
-### 20261023-cache-p1-l01 — M3 上游 UUID 会话键补全（G，响应隐私补修待合并门禁）
+### 20261023-cache-p1-l01 — M3 上游 UUID 会话键补全（G，本地补修待新基点门禁）
 
-- 基点 main `72c2d0169`，分支 `cache/p1-l01`。B-M3-1 仅在实际注入时移除 Responses 回显身份，覆盖 JSON、SSE、多行/EOF、buffered、compact 与原体错误路径；未生效时保留原字节。L-01 使用独立哈希域，trace 抽样不变。
-- 验证：产品 tree `eb6093b43924344c41292ba433c1c2e278bef5b5` 的 focused 7031与140组配对分配通过。race及后续被PM优先级中止，未完成；不标为通过。140分配对照中120组严格相等，20组保留已批准T4的精确-202；stream3801/3801。七项不可达枚举保留既有入口/优先级，不伪造HTTP覆盖。
-- 下一步：PM已授权先提交本轮补修和独立管理员API补丁，供静态增量评审；吸收M2新main后先全部tag编译，再单流水线完成race、zero、logger、compat、lint和管理员契约门禁。未推送或变更生产；详细旧交接原样归档。
+- 基点 main `72c2d0169`，分支 `cache/p1-l01`。响应回显与独立cohort补修为 `05b3f3cfe`，实测tree `eb6093b4` 到提交仅文档不同；仅实际注入时还原Responses，未生效时保留原字节，trace采样不变。
+- 管理API独立补修：账号options仅静态合格OpenAI apikey，按ID升序最多500，允许停用账号；invalid账号清理残留生效warnings。18份原字节M3样例及服务边界测试已加入；UNSUPPORTED映射保持原行为。没有改请求路径。
+- 已验证：r5 focused7031与140配对分配通过（120严格相等、20继承T4精确-202；stream3801/3801），docs/diff/clean audit通过。余项按PM优先级于13:30中止，不冒称全部门禁通过；管理员新Go测试尚未执行。
+- 下一步：两个独立本地提交供R静态增量核对；M2合入后变基，先全部tag编译，再同一流水线执行受影响unit/race、zero/logger/compat/lint及管理员契约。northstar夹具届时显式升级构建预期。未推送或变更生产。
 
 
 
@@ -1104,3 +1105,9 @@ pnpm --dir frontend run build
 - 已完成B-M3-1与独立cohort域；提供方未传key形态依据已保存官方/D1完整示例，不冒称新的线上实验。10万key列联表通过，trace既有三个产品文件逐字不变。
 - r3的stream固定+3分配已修为bytes-only事件buffer；r4漏io导入的编译失败与各轮原始证据保留。r5未插桩完整分配矩阵通过原批准口径，拒绝将20组T4负增量写成严格相等。
 - 原allocation/focused自然结束，剩余单条重任务于13:30 UTC按PM优先级要求中止，race及后续未完成。已通过的分配/focused保存原树证据；余项与管理员API在M2合入变基后统一运行。最终收尾只改G记忆/归档与任务状态，附产品树继承证明。
+
+### 2026-10-24T13:36Z — `20261023-cache-p1-l01` — 管理账号候选与契约补证准备
+
+- FE-Q3只改管理员view/validation：分页静态资格、最多500条白名单字段；查询失败发生在提交前。请求snapshot及转发代码与r5相同，分配/golden不因本补丁重复执行。
+- 原UNSUPPORTED映射已正确；新增18份原字节HTTP样例回放。账号查验失败清warnings，与其他invalid分支及F样例一致；合法rollout0仍有提示。northstar按当前pre-M2构建明确not_in_build，fallback按样例前提seed。
+- PM要求先本地提交供静态评审，轻量docs/diff/clean audit收尾；所有新增Go测试与r5余项统一等待M2合入变基后的单条门禁，当前未执行，不作为完成验收。

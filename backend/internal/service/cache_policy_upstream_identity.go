@@ -237,6 +237,8 @@ func (s *CachePolicyService) validationForWrite(ctx context.Context, index int, 
 	}
 	v.Valid = len(v.Errors) == 0
 	if !v.Valid {
+		// Match syntactic validation: invalid policies have no effective warnings.
+		v.Warnings = []string{}
 		v.EffectivePreview = nil
 		v.Affected = []CachePolicyAffected{}
 	}
@@ -246,7 +248,7 @@ func (s *CachePolicyService) validationForWrite(ctx context.Context, index int, 
 func upstreamIdentitySchema() []map[string]any {
 	return []map[string]any{
 		{"field": "mode", "type": "enum", "options": []string{"off", "uuid_fill"}},
-		{"field": "account_ids", "type": "id_list", "ref": "account"},
+		{"field": "account_ids", "type": "id_list", "ref": "account", "options": []cachePolicyAccountOption{}},
 		{"field": "rollout_percent", "type": "int", "min": 0, "max": 100, "unit": "percent"},
 		{"field": "chat_compat_uuid", "type": "bool"},
 		{"field": "header_only_uuid", "type": "bool"},

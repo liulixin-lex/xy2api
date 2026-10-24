@@ -300,6 +300,7 @@ func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePoli
 	}
 	var updated cachePolicyEntry
 	var diff []CachePolicyDiff
+	var accountOptions []cachePolicyAccountOption
 	err := s.store.UpdateCachePolicy(ctx, cachePolicySettings[i], func(raw string) (string, error) {
 		current := s.parse(i, raw)
 		v, spec, err := s.validationForWrite(ctx, i, current, w, bodyErrors)
@@ -325,6 +326,14 @@ func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePoli
 		if len(missing) > 0 {
 			return "", &CachePolicyError{422, "CACHE_POLICY_CONFIRM_REQUIRED", "confirmation required", map[string]string{"missing": strings.Join(missing, ",")}}
 		}
+		if i == 3 {
+			// Read options before the transaction commits. A lookup failure must
+			// not report failure after the policy has already been persisted.
+			accountOptions, err = s.upstreamIdentityAccountOptions(ctx)
+			if err != nil {
+				return "", err
+			}
+		}
 		now := s.now().UTC()
 		reason := strings.TrimSpace(w.Reason)
 		updated = cachePolicyEntry{envelope: CachePolicyEnvelope{v.CurrentRev + 1, &now, &actor, &reason, spec}, loadedAt: now}
@@ -344,5 +353,9 @@ func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePoli
 		entries[i] = updated
 		s.publishEntries(entries)
 	}
-	return s.view(i, updated, s.snapshot.Load()), diff, nil
+	view := s.view(i, updated, s.snapshot.Load())
+	if i == 3 {
+		setCachePolicyAccountOptions(&view, accountOptions)
+	}
+	return view, diff, nil
 }

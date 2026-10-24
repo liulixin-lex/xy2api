@@ -89,7 +89,7 @@ func TestCachePolicyUpstreamDefaultsAndExplicitSupport(t *testing.T) {
 	require.Len(t, upstream.Schema, 6)
 	require.True(t, upstream.GatedByMaster)
 	require.Equal(t, "high", upstream.Risk)
-	require.Equal(t, map[string]any{"field": "account_ids", "type": "id_list", "ref": "account"}, upstream.Schema[1])
+	require.Equal(t, map[string]any{"field": "account_ids", "type": "id_list", "ref": "account", "options": []cachePolicyAccountOption{}}, upstream.Schema[1])
 	require.Equal(t, 0.0, testing.AllocsPerRun(1000, func() {
 		p := s.Snapshot().UpstreamIdentity()
 		if p.Enabled() || !p.AllowsAccount(101) {
@@ -345,4 +345,44 @@ func TestCachePolicyUpstreamParseLogContainsNoPlaintext(t *testing.T) {
 	require.NotContains(t, log.String(), "POLICY_REASON_MARKER")
 	require.NotContains(t, log.String(), "POLICY_BODY_MARKER")
 	require.NotContains(t, log.String(), "unknown_body_marker")
+}
+
+func TestCachePolicyUpstreamInvalidAccountsClearEffectiveWarnings(t *testing.T) {
+	store := newPolicyTestStore()
+	store.rows["cache_feature_master"] = `{"rev":1,"spec":{"enabled":true}}`
+	store.rows["cache_observability_policy"] = `{"rev":1,"spec":{"enabled":true}}`
+	s := NewCachePolicyService(store, policyTestConfig(), WithCachePolicyAccounts(upstreamPolicyAccountsFixture()))
+	require.NoError(t, s.Refresh(context.Background()))
+	for _, tc := range []struct {
+		name  string
+		ids   string
+		codes []string
+	}{
+		{"missing", "[101,999]", []string{"unknown_account"}},
+		{"wrong_type", "[101,103]", []string{"wrong_platform"}},
+		{"both", "[101,999,103]", []string{"unknown_account", "wrong_platform"}},
+		{"valid", "[101,102]", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, err := s.Validate(context.Background(), "upstream_identity", upstreamPolicyWrite(t, 0,
+				fmt.Sprintf(`{"mode":"uuid_fill","rollout_percent":0,"account_ids":%s}`, tc.ids)), nil)
+			require.NoError(t, err)
+			if len(tc.codes) == 0 {
+				require.True(t, v.Valid)
+				require.Empty(t, v.Errors)
+				require.Equal(t, []string{"no_effect_rollout_zero"}, v.Warnings)
+				require.NotNil(t, v.EffectivePreview)
+				return
+			}
+			require.False(t, v.Valid)
+			want := make([]CachePolicyFieldError, len(tc.codes))
+			for i, code := range tc.codes {
+				want[i] = CachePolicyFieldError{Field: "account_ids", Code: code}
+			}
+			require.Equal(t, want, v.Errors)
+			require.Equal(t, []string{}, v.Warnings)
+			require.Nil(t, v.EffectivePreview)
+			require.Equal(t, []CachePolicyAffected{}, v.Affected)
+		})
+	}
 }
