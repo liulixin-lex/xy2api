@@ -515,6 +515,7 @@ export default {
       errorWith: 'Could not load: {message}',
       retry: 'Retry',
       notReady: 'The rollup job has not produced its first full hour yet; check back later.',
+      rejected: 'The endpoint returned fields or identifiers it must not send, so this section is not shown. Please ask the backend team to check.',
       unavailable: 'This backend version does not provide this endpoint.',
     },
     filters: {

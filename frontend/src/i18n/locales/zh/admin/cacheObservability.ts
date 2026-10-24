@@ -515,6 +515,7 @@ export default {
       errorWith: '读取失败：{message}',
       retry: '重试',
       notReady: '汇总任务尚未产出第一个完整小时，稍后再看。',
+      rejected: '接口返回了不应出现的字段或身份标识，本区块不予显示，请联系后端排查。',
       unavailable: '当前后端版本没有提供此接口。',
     },
     filters: {

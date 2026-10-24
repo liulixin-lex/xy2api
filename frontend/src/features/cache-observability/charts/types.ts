@@ -22,10 +22,11 @@ interface PanelEnvelope {
   generated_at: string
 }
 
+/** Contract R5: null when the previous window had nothing to divide by. */
 export interface NorthStarPrevious {
-  token_hit_upper: number
-  token_hit_lower: number
-  request_hit: number
+  token_hit_upper: number | null
+  token_hit_lower: number | null
+  request_hit: number | null
 }
 
 export interface NorthStarSummary {

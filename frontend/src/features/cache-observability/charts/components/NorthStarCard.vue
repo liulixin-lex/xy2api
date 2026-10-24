@@ -22,6 +22,10 @@
           <Icon :name="delta < 0 ? 'arrowDown' : 'arrowUp'" size="xs" aria-hidden="true" />
           {{ t('admin.cacheCharts.northstar.delta', { delta: formatPp(delta), window: state.filters.summaryWindow }) }}
         </p>
+        <!-- Contract R5: the previous window may have no ratio to compare with; say so instead of hiding the line. -->
+        <p v-else-if="summary?.previous" class="mt-1 text-sm text-gray-500 dark:text-dark-400" data-test="northstar-delta">
+          {{ t('admin.cacheCharts.northstar.delta', { delta: formatPp(null), window: state.filters.summaryWindow }) }}
+        </p>
 
         <dl class="mt-5 space-y-2 text-sm">
           <div class="flex justify-between gap-4">

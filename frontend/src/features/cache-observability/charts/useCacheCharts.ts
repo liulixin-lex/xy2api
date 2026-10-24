@@ -1,6 +1,7 @@
 import { computed, reactive, ref, shallowRef, watch } from 'vue'
 import { adminAPI } from '@/api/admin'
 import { createChartsClient, resolveDataSource, type ChartsDataSource } from './dataSource'
+import { ContractRejection } from './guard'
 import type {
   BreakdownDimension,
   BreakdownResponse,
@@ -15,7 +16,8 @@ import type {
   TraceWindow,
 } from './types'
 
-export type SectionStatus = 'idle' | 'loading' | 'ready' | 'error' | 'unavailable' | 'not_ready'
+/** `rejected`: the answer carried data the panel must not show (guard.ts), so none of it is rendered. */
+export type SectionStatus = 'idle' | 'loading' | 'ready' | 'error' | 'unavailable' | 'not_ready' | 'rejected'
 
 export interface Section<T> {
   status: SectionStatus
@@ -31,14 +33,17 @@ function section<T>(): Section<T> {
 
 interface RejectedApiError {
   status?: number
-  code?: string
+  code?: string | number
+  reason?: string
   message?: string
 }
 
 function classify(error: unknown): { status: SectionStatus; message: string | null } {
+  if (error instanceof ContractRejection) return { status: 'rejected', message: null }
   const e = (error && typeof error === 'object' ? error : {}) as RejectedApiError
   if (e.status === 404) return { status: 'unavailable', message: null }
-  if (e.status === 503 || e.code === 'CACHE_ROLLUP_NOT_READY') return { status: 'not_ready', message: null }
+  // §4 and contract P-9 name it by reason; a bare 503 without one is read the same way.
+  if (e.reason === 'CACHE_ROLLUP_NOT_READY' || (e.status === 503 && !e.reason)) return { status: 'not_ready', message: null }
   return { status: 'error', message: typeof e.message === 'string' ? e.message : null }
 }
 
@@ -97,7 +102,7 @@ export function useCacheCharts(deps: ChartsDeps = {}) {
   /** null until the first northstar answer; false when this backend has no chart endpoints (404). */
   const available = computed<boolean | null>(() => {
     if (northstar.status === 'unavailable') return false
-    if (northstar.status === 'ready' || northstar.status === 'not_ready' || northstar.status === 'error') return true
+    if (northstar.status === 'ready' || northstar.status === 'not_ready' || northstar.status === 'error' || northstar.status === 'rejected') return true
     return northstar.data ? true : null
   })
 
