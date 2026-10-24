@@ -1,5 +1,5 @@
 // M4: cache_anthropic_identity_policy (risk high) and cache_routing_policy (risk highest) on the
-// generic policy card, driven by F's m3m4 samples (v1.0.2, M4 part). The backend (T4.0) is not
+// generic policy card, driven by F's m3m4 samples (v1.0.3, M4 part). The backend (T4.0) is not
 // built yet, so the samples follow DESIGN §11 and the M4 brief: group candidates (FE-Q3), dot
 // paths for the nested routing fields, and the key name typed before routing widens (§11.7).
 import { flushPromises, mount } from '@vue/test-utils'
@@ -96,7 +96,7 @@ describe('anthropic_identity and routing (M4) on the generic policy card, m3m4 s
   beforeEach(() => vi.clearAllMocks())
 
   it('has the M4 samples the cards use', () => {
-    expect(M3M4_NAMES.filter((n) => n.startsWith('m4_'))).toHaveLength(18)
+    expect(M3M4_NAMES.filter((n) => n.startsWith('m4_'))).toHaveLength(20)
   })
 
   it('renders the identity card under the master switch: high risk, the observability warning, groups by name (m4_list_masked_by_master)', async () => {
@@ -137,6 +137,34 @@ describe('anthropic_identity and routing (M4) on the generic policy card, m3m4 s
     await flushPromises()
     expect(picker(unlisted.wrapper, ANTHROPIC, 'anchor_group_ids').attributes('disabled')).toBeDefined()
     expect(field(unlisted.wrapper, ANTHROPIC, 'anchor_group_ids').text()).toContain('admin.cacheSettings.groupPicker.loadFailed')
+  })
+
+  it('keeps groups editable when their candidates were not loaded, offers the admin list, and reads them again (m4_list_group_options_unavailable)', async () => {
+    const { wrapper, api } = mountPanel('m4_list_group_options_unavailable')
+    await flushPromises()
+    for (const key of [ANTHROPIC, ROUTING]) {
+      expect(wrapper.get(`[data-test="policy-${key}"] [data-test="policy-warnings"]`).text(), key).toContain('admin.cacheSettings.warnings.group_options_unavailable')
+    }
+    // "Not loaded" is not "none eligible": the stored groups stay, named from the admin list, which the
+    // picker falls back to; the server checks what is added (README §3.4, v1.0.3).
+    expect(field(wrapper, ANTHROPIC, 'anchor_group_ids').text()).toContain('claude-pool-a (#31)')
+    expect(picker(wrapper, ANTHROPIC, 'anchor_group_ids').attributes('disabled')).toBeUndefined()
+    expect(offered(wrapper, ANTHROPIC, 'anchor_group_ids')).toEqual(['18', '77'])
+    expect(offered(wrapper, ROUTING, 'keep_sticky_on_busy.group_ids')).toEqual(['18', '32', '77'])
+    const reads = api.listPolicies.mock.calls.length
+    api.listPolicies.mockResolvedValue(m3m4List('m4_list_on'))
+    await wrapper.get(`[data-test="policy-${ROUTING}"] [data-test="reload-candidates"]`).trigger('click')
+    await flushPromises()
+    expect(api.listPolicies).toHaveBeenCalledTimes(reads + 1)
+    expect(wrapper.find('[data-test="reload-candidates"]').exists()).toBe(false)
+    expect(offered(wrapper, ANTHROPIC, 'anchor_group_ids')).toEqual(['77'])
+
+    // Without the warning an empty list still means that no group qualifies.
+    const none = m3m4List('m4_list_default')
+    for (const f of entry(none, ANTHROPIC).schema) if (f.ref === 'group') f.options = []
+    const empty = mountPanel(none)
+    await flushPromises()
+    expect(offered(empty.wrapper, ANTHROPIC, 'anchor_group_ids')).toEqual([])
   })
 
   it('asks for a reason and a check before widening the identity, names the warning, and writes the sample body (m4_validate_anthropic_enable)', async () => {
@@ -275,5 +303,15 @@ describe('anthropic_identity and routing (M4) on the generic policy card, m3m4 s
     expect(wrapper.find('[data-test="confirm-checkbox"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="confirm-typed"]').exists()).toBe(false)
     expect(submit(wrapper).attributes('disabled')).toBeUndefined()
+
+    // The disable PUT skips the group table and leaves the candidates out; the card reads them again.
+    const saved = m3m4Written('m4_put_routing_disable_skip_group_options')
+    expect(saved.effective.warnings).toContain('group_options_unavailable')
+    const reads = api.listPolicies.mock.calls.length
+    api.putPolicy.mockResolvedValueOnce(saved)
+    await submit(wrapper).trigger('click')
+    await flushPromises()
+    expect(api.putPolicy.mock.calls[0][1]).toMatchObject(m3m4Body('m4_put_routing_disable_skip_group_options'))
+    expect(api.listPolicies).toHaveBeenCalledTimes(reads + 1)
   })
 })
