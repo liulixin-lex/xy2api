@@ -197,6 +197,26 @@ describe('cache panel contract samples v1.0.2', () => {
     }
   })
 
+  it('shows a ranking whose entries were all merged into other, and says "no data" only when there is none (§1.1)', async () => {
+    const merged = variant('breakdown_group', (data) => {
+      data.rows = []
+    })
+    expect(merged.response.data.other).not.toBeNull()
+    let { wrapper } = await render(merged)
+    const table = wrapper.get('[data-test="breakdown-table"]')
+    expect(table.findAll('tbody tr')).toHaveLength(1)
+    expect(table.text()).toContain('admin.cacheCharts.breakdown.other')
+    expect(table.text()).toContain('admin.cacheCharts.columns.saved')
+    expect(wrapper.get('[data-test="section-breakdown"]').text()).not.toContain('admin.cacheCharts.breakdown.empty')
+    expectClean(wrapper, 'merged into other')
+    ;({ wrapper } = await render(variant('breakdown_group', (data) => {
+      data.rows = []
+      data.other = null
+    })))
+    expect(wrapper.find('[data-test="breakdown-table"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="section-breakdown"]').text()).toContain('admin.cacheCharts.breakdown.empty')
+  })
+
   it('shows a previous window without a ratio as a placeholder (R5)', async () => {
     const s = variant('northstar_7d_list', (data) => {
       data.summary.previous = { token_hit_upper: null, token_hit_lower: null, request_hit: null }

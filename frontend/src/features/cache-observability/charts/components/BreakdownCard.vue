@@ -34,7 +34,8 @@
       </button>
     </div>
 
-    <p v-if="data && !data.rows.length" class="text-sm text-gray-600 dark:text-dark-300">{{ t('admin.cacheCharts.breakdown.empty') }}</p>
+    <!-- Small entries are merged into `other` (§1.1, fewer than 10 requests); with only that, the table still shows it. -->
+    <p v-if="data && !data.rows.length && !data.other" class="text-sm text-gray-600 dark:text-dark-300">{{ t('admin.cacheCharts.breakdown.empty') }}</p>
     <div v-else-if="data" class="overflow-x-auto" role="tabpanel">
       <table class="w-full min-w-[56rem] text-sm" data-test="breakdown-table">
         <caption class="sr-only">{{ t('admin.cacheCharts.breakdown.caption', { dimension: t(`admin.cacheCharts.breakdown.dimensions.${data.dimension}`) }) }}</caption>
@@ -105,7 +106,7 @@ const sorts: BreakdownSort[] = ['opportunity', 'opportunity_amount', 'prompt', '
 const section = computed(() => props.state.breakdown)
 const data = computed(() => section.value.data)
 const amountSort = computed(() => props.state.filters.sort === 'opportunity_amount')
-const hasAmount = computed(() => !!data.value?.rows.some((r) => typeof r.saved_amount === 'number'))
+const hasAmount = computed(() => !!data.value && (data.value.rows.some((r) => typeof r.saved_amount === 'number') || typeof data.value.other?.saved_amount === 'number'))
 const currency = computed(() => data.value?.cost?.currency ?? null)
 
 function metaText(row: BreakdownRow, dimension: BreakdownDimension, currencyCode: string | null): string {
