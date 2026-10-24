@@ -1,9 +1,25 @@
 package service
 
 import (
+	"regexp"
 	"sort"
 	"strconv"
 )
+
+// P-3 uses [^@\s]+@[^@\s]+\.[A-Za-z]+ with Python's Unicode whitespace.
+// Include its Unicode separators and additional whitespace control characters.
+var cachePanelEmailLabel = regexp.MustCompile(`[^@\s\p{Z}\x{000B}\x{0085}\x{001C}-\x{001F}]+@[^@\s\p{Z}\x{000B}\x{0085}\x{001C}-\x{001F}]+\.[A-Za-z]+`)
+
+func cacheBreakdownLabel(label, dimension, key string, meta map[string]any) string {
+	if (dimension != "account" && dimension != "group") || !cachePanelEmailLabel.MatchString(label) {
+		return label
+	}
+	if dimension == "account" {
+		platform, _ := meta["platform"].(string)
+		return platform + "#" + key
+	}
+	return "group#" + key
+}
 
 func cacheBreakdownIdentity(row CacheNorthstarRow, dimension string) (string, string) {
 	switch dimension {
@@ -100,7 +116,9 @@ func buildCacheBreakdown(meta CachePanelMeta, q CachePanelQuery, policy CacheNor
 			otherCount++
 			continue
 		}
-		candidates = append(candidates, CacheBreakdownRow{Key: key, Label: labels[key], Meta: cacheBreakdownMeta(group, q.Dimension, prices), CacheBreakdownMetrics: metrics})
+		rowMeta := cacheBreakdownMeta(group, q.Dimension, prices)
+		label := cacheBreakdownLabel(labels[key], q.Dimension, key, rowMeta)
+		candidates = append(candidates, CacheBreakdownRow{Key: key, Label: label, Meta: rowMeta, CacheBreakdownMetrics: metrics})
 	}
 	score := func(row CacheBreakdownRow) float64 {
 		switch q.Sort {

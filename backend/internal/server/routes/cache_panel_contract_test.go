@@ -60,7 +60,7 @@ func (r cachePanelUnavailableCost) Query(context.Context, string, service.CacheP
 	return r.value, nil
 }
 
-func cachePanelContractService(t *testing.T, ready, empty, trace bool) (*service.CacheObservabilityService, *service.CachePolicyService) {
+func cachePanelContractService(t *testing.T, ready, empty, trace bool, privateLabels ...bool) (*service.CacheObservabilityService, *service.CachePolicyService) {
 	t.Helper()
 	store := &cacheRouteStore{rows: map[string]string{}}
 	cfg := &config.Config{}
@@ -81,9 +81,15 @@ func cachePanelContractService(t *testing.T, ready, empty, trace bool) (*service
 		if !empty {
 			row := service.CacheNorthstarRow{BucketStart: end.Add(-time.Hour), Platform: "openai", GroupID: 101, GroupLabel: "pool-a", AccountID: 201, AccountLabel: "relay-a-01", UpstreamHost: "relay-a.example", ClientFamily: "codex_cli_rs", Protocol: "responses_http", Model: "gpt-5.4", ThresholdBand: 2048,
 				CacheNorthstarTotals: service.CacheNorthstarTotals{Requests: 12, RequestsHit: 9, PromptTokens: 48000, ReadTokens: 36000, InputTokens: 12000, InputCostMicros: 12000, ReadCostMicros: 3600, OpportunityTokens: 6000, ReadChargedMicro: 36000e6, OpportunityChargedMicro: 6000e6, ReadUpstreamMicro: 36000e6, OpportunityUpstreamMicro: 6000e6, UpstreamCoveredPromptTokens: 48000}}
+			if len(privateLabels) > 0 && privateLabels[0] {
+				row.AccountID, row.AccountLabel, row.GroupLabel = 102, "oauth.owner+tag@example.test", "group.owner@example.test"
+			}
 			repo.data.Rows = append(repo.data.Rows, row)
 			row.GroupID, row.AccountID, row.Requests, row.RequestsHit = 102, 202, 2, 1
 			row.GroupLabel, row.AccountLabel = "pool-b", "relay-b-01"
+			if len(privateLabels) > 0 && privateLabels[0] {
+				row.AccountID, row.AccountLabel, row.Requests = 101, "relay-a-01", 12
+			}
 			repo.data.Rows = append(repo.data.Rows, row)
 		}
 	}
@@ -148,7 +154,7 @@ func TestCacheNorthstarHandlerContract(t *testing.T) {
 				Response map[string]any `json:"response"`
 			}
 			require.NoError(t, json.Unmarshal(raw, &sample))
-			panel, _ := cachePanelContractService(t, sample.Status != 503, name == "northstar_no_data.json", name == "stats_24h.json")
+			panel, _ := cachePanelContractService(t, sample.Status != 503, name == "northstar_no_data.json", name == "stats_24h.json", name == "breakdown_account_masked_label.json")
 			var reader adminhandler.CachePanelReader = panel
 			// Cost-column availability is a DTO compatibility shape; it is not a
 			// claim that the current migration can omit settled cost columns.
@@ -240,5 +246,44 @@ func TestCacheNorthstarHandlerNonUTCHourAndEvents(t *testing.T) {
 		raw, err := json.MarshalIndent(map[string]any{"_contract": []string{"P-1", "P-4", "P-5"}, "_note": "Actual handler with non-UTC repository rows and events.", "request": map[string]any{"method": "GET", "path": path, "body": nil}, "status": status, "response": body}, "", "  ")
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(filepath.Join(output, "northstar_timezone.json"), raw, 0o644))
+	}
+}
+
+func TestCacheNorthstarHandlerMasksPrivateLabels(t *testing.T) {
+	for _, dimension := range []string{"account", "group"} {
+		for _, window := range []string{"24h", "7d", "30d"} {
+			t.Run(dimension+"_"+window, func(t *testing.T) {
+				panel, _ := cachePanelContractService(t, true, false, false, true)
+				path := "/api/v1/admin/cache/breakdown?dimension=" + dimension + "&window=" + window
+				status, body := cacheCall(t, cachePanelRouter(panel, nil), "GET", path, nil)
+				require.Equal(t, 200, status)
+				data := body["data"].(map[string]any)
+				labels := map[string]string{}
+				for _, item := range data["rows"].([]any) {
+					row := item.(map[string]any)
+					labels[row["key"].(string)] = row["label"].(string)
+					if dimension == "account" && row["key"] == "102" {
+						require.Equal(t, row["meta"].(map[string]any)["platform"].(string)+"#"+row["key"].(string), row["label"])
+					}
+				}
+				if dimension == "account" {
+					require.Equal(t, map[string]string{"102": "openai#102", "101": "relay-a-01"}, labels)
+				} else {
+					require.Equal(t, map[string]string{"101": "group#101", "102": "pool-b"}, labels)
+				}
+				raw, err := json.Marshal(body)
+				require.NoError(t, err)
+				require.NotContains(t, string(raw), "@")
+				if output := os.Getenv("CACHE_PANEL_CONTRACT_OUTPUT"); output != "" {
+					require.NoError(t, os.MkdirAll(output, 0o755))
+					raw, err = json.MarshalIndent(map[string]any{
+						"_contract": []string{"P-3", "P-6"}, "_note": "Actual HTTP response with synthetic private labels.",
+						"request": map[string]any{"method": "GET", "path": path, "body": nil}, "status": status, "response": body,
+					}, "", "  ")
+					require.NoError(t, err)
+					require.NoError(t, os.WriteFile(filepath.Join(output, "breakdown_private_"+dimension+"_"+window+".json"), raw, 0o644))
+				}
+			})
+		}
 	}
 }

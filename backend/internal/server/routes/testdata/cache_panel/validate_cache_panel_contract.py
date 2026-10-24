@@ -106,6 +106,10 @@ def semantic(kind, q, data, out):
         for i, row in enumerate(data["rows"]):
             check_metrics(row, f"rows[{i}]", out)
             m = row["meta"]
+            # v1.0.2（R16）：邮箱形态的账号名脱敏为 <platform>#<account_id>，且必须与 meta.platform、key 一致
+            if data["dimension"] == "account" and re.fullmatch(r"[a-z_]+#\d+", row["label"]) and isinstance(m, dict):
+                if row["label"] != f"{m.get('platform')}#{row['key']}":
+                    out.append(f"rows[{i}].label：脱敏标签应为 <meta.platform>#<key>")
             if isinstance(m, dict) and data["dimension"] == "model" and m.get("priced") is False:
                 if m.get("w_m") is not None: out.append(f"rows[{i}].meta.w_m：priced=false 时应为 null")
                 if any(row[k] is not None for k in ("saved_amount", "opportunity_amount", "opportunity_amount_share", "token_hit_cost_weighted_upper")):
