@@ -81,6 +81,7 @@ export default {
       not_in_build: '当前版本未包含',
     },
     blockers: {
+      not_implemented_in_build: '当前版本尚未包含这项功能：已保存的配置不会生效，可以把相关项关闭或移除。',
       diagnostics_disabled: '系统的缓存诊断开关是关闭的，缓存观测无法工作。请联系运维开启（需要修改配置并重启）。',
       static_aware_routing_disabled: '这一项依赖一个需要修改配置并重启才能打开的系统开关，目前是关闭的。保存后不会生效；请联系运维评估。',
       parse_error: '存储的配置无法识别，已按关闭处理。重新保存一次即可恢复。',
@@ -102,6 +103,7 @@ export default {
       reload: '重新加载候选',
     },
     acks: {
+      not_implemented_in_build: '当前版本尚未包含这项功能，保存后不会生效',
       observability_off: '缓存观测未开启，这项改动的效果将无法评估',
       anthropic_observability_missing: '缓存观测尚未覆盖 Claude/Gemini 请求，这项改动的效果将无法评估',
       fallback_group_selected: '所选分组含回退组，回退流量也会按此配置改写',
@@ -141,6 +143,7 @@ export default {
       typed: '输入键名',
     },
     locked: {
+      not_implemented_in_build: '当前版本尚未包含该功能，升级后可开启。',
       requires_mode_uuid_fill: '先把补全方式设为 uuid_fill 才能开启此项',
     },
     direction: {

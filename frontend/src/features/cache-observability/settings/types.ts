@@ -60,6 +60,8 @@ export interface SchemaField {
   options?: (string | number | IdOption)[] | null
   ref?: string
   cap_source?: string
+  /** The behaviour behind the field is not in this build (m3m4 v1.2, X-B1): it cannot be switched on here. */
+  not_implemented_in_build?: boolean
 }
 
 export interface PolicyEntry {
