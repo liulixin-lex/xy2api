@@ -160,8 +160,18 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		return errors.New("openai usage result is nil")
 	}
 	s.observeCacheUsage(result, input.Account, time.Now())
+	var traceResult *OpenAIForwardResult
 	if result.CacheTrace != nil || result.cacheTraceFailure != nil {
-		s.settleCacheTrace(ctx, result, input.Account)
+		// Billing resolution can rewrite usage. Observe the upstream values.
+		snapshot := *result
+		traceResult = &snapshot
+		defer func() {
+			if traceResult != nil {
+				// Pricing/credential errors never reach a billing decision.
+				// Close the send without training history or emitting an event.
+				s.settleCacheTrace(ctx, traceResult, input.Account, cacheTraceUnbilled)
+			}
+		}()
 	}
 	s.resilience.NoteAccountSuccess(ctx, input.Account)
 	// OpenAI input_tokens already include cache reads and writes.
@@ -514,7 +524,18 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// xy2api resilience: a client that left before any output is not billed,
 	// except at upstream cost under the abuse guard (design §8.2).
 	resilienceAnnotateUsage(ctx, usageLog)
-	if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {
+	skipBilling := resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier)
+	if traceResult != nil {
+		delivery := cacheTraceDelivered
+		if skipBilling {
+			delivery = cacheTraceUnbilled
+		} else if usageLog.BillingMode != nil && *usageLog.BillingMode == UsageBillingModeUndeliveredAbuse {
+			delivery = cacheTraceAbuse
+		}
+		s.settleCacheTrace(ctx, traceResult, input.Account, delivery)
+		traceResult = nil
+	}
+	if skipBilling {
 		return nil
 	}
 	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, apiKey)

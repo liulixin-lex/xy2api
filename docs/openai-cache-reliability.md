@@ -138,9 +138,9 @@ cache_trace 仅为内部 Info 日志，经现有 slog→zap JSON logger 输出�
 ## 运行时缓存策略管理
 
 管理员专用接口位于 `/api/v1/admin/cache/policies`：列表、按键读取、
-`POST /{key}/validate`、`PUT /{key}`、`GET /history`。当前构建提供 `master`（`cache_feature_master`）、`observability`
-（`cache_observability_policy`）与 `northstar`（`cache_northstar_policy`）；
-三者缺省关闭。其余三个键保留在列表中，
+POST /{key}/validate、PUT /{key}、GET /history。当前构建提供 master（cache_feature_master）、
+observability（cache_observability_policy）、northstar（cache_northstar_policy）和
+upstream_identity（cache_upstream_identity_policy）；四者缺省关闭。其余两个键保留在列表中，
 标记为不可用；单项读写返回 404，存储值和 schema 不对用户接口公开。
 
 写入省略的字段保留原值，未知字段拒绝。每键的 `expected_rev` 在数据库
@@ -239,3 +239,77 @@ priced_p_share 仍按业务范围的有价 P / 业务 P 计算，三种 cost_vie
 北极星按 UTC 存取小时边界和事件时间，数据库会话时区不会改变图表分桶。小时查询同时读取前一小时，在会话内配对后再截取目标小时；因此跨整点机会量不依赖持久化会话状态。迁移 279 为跨口径版本的保留期清理提供单列时间索引，首次在共享数据库执行后保持校验和不变，结构修订需另加迁移。
 
 管理员图表对符合邮箱形态的账号名使用 `<platform>#<account_id>` 稳定标签，并保证与响应行的 `meta.platform` 和 `key` 一致；分组名采用同一邮箱判定并替换为 `group#<group_id>`。普通名称不变，原始账号、分组和汇总数据不改写；API key 或用户名称不进入排行响应。
+
+未送达且未按 abuse 计费的请求不输出 cache_trace，但仍关闭已记录的发送计时，避免影响同一会话下一请求的 gap_src；不向前缀历史发布结果。所有未送达结算分支均遵守观测会话数上限。
+
+未送达分类与计费使用同一次判定结果：RecordUsage 先执行既有 DisconnectOn 与断连检查，再把正常、未计费或 abuse 分类交给观测结算。观测不重复读取运行时开关，也不改变是否计费的决定。
+
+观测保留计费解析之前的上游用量快照。若凭据或定价错误使请求未到达计费判定，关闭发送计时但不输出事件或训练前缀历史。
+
+请求的字节预算准入使用原子快照与原子预留，不等待 worker 队列锁；运行时调小预算仍允许已有预留排空。
+
+策略存取期间不持有快照发布锁；事务返回乱序时只发布较新 revision，刷新期间若本实例已有新发布则丢弃这次可能过期的读取。仓储不支持事务写入时返回存储错误。
+
+cache_trace 在送达分类确定后、真正扣费及用量落库之前输出，与既有 openai_cache_usage 一样不代表账单提交成功；之后扣费或落库失败不会撤回已输出的观测事件。
+
+流式观测在既有逐帧只读解析路径上运行，没有 buffered 观测回调的 panic 隔离；结算入口的 recover 只保护结算，不覆盖流式逐帧解析。
+
+路由归因反映请求中观察到的最高优先级决策，不保证最终选中的账号来自该决策：无会话也可记 sticky_new，但不会创建粘性绑定；failover 观察点早于 OAuth 429 的停止检查，因此被停止的切换也会计数；放弃或等待失败的候选仍参与最高级归因。多次故障改绑以快照前最后一次 rebind_cause 为准，快照后的改绑不进入事件。M1 只输出九个已接入原因及 unknown；capacity_shed、hard_clear、iq_bypass、quality_excluded、non_fault_rebind、affinity_pref 均为保留值，不单独输出，请求内因容量降载换号归 failover_n，其他行为按实际经过的既有九个决策点归因。
+
+## OpenAI UUID 会话键补全（L-01）
+
+注入只接受带 `v2:` 前缀的租户隔离路由种子；复合组或其他入口仍使用旧内容种子时，
+L-01 记 `no_routing_session` 并跳过，不进入实验分桶。既有本地 sticky 与兼容转发不变；
+关闭策略在读取种子和前缀检查之前早退。这里的 skip 是内部决策；复合组仍被既有 trace 平台闸门排除，
+不会因此新增客户端可见字段或 cache_trace 事件。
+
+管理员在缓存策略的 `upstream_identity` 中设置 `mode=uuid_fill`、
+`rollout_percent` 和可选的 `account_ids`。默认 `mode=off`、比例 0、账号列表为空、
+`chat_compat_uuid=false`。它受 `cache_feature_master` 和静态紧急总闸共同控制；
+观测开关独立。配置按既有 revision、预校验、确认和审计流程更新，最多约 60 秒生效；
+请求内沿用同一快照。启用、扩大比例或账号范围需要理由和勾选确认，撤回不需要。
+账号列表只接受存在的 OpenAI apikey 账号，空列表表示所有合格账号。
+
+管理接口的 `account_ids.options` 返回最多 500 个合格账号，按 ID 升序，元素只含 `id`、`name`、`platform`；无候选时返回空数组。候选排除 Codex、透传、Grok 等不合格协议，停用或暂不可调度的合格账号仍可用于配置。候选不受总开关、当前比例或已保存账号列表过滤；超过候选上限的已保存账号 ID 仍保留。候选查询仅用于管理员响应，不进入转发、选号或请求快照路径。查询失败（含分页中途失败）时，策略照常返回，丢弃部分候选并给出 `options: []`，在 `effective.warnings` 末尾追加 `account_options_unavailable`；不返回底层错误文本。关闭方向的预校验与 PUT 不访问账号表，原有格式、revision 与确认规则仍有效；PUT 同样给出候选未加载提示，需要候选时另发 GET。validate 的 warnings 只反映生效状态，不带候选提示。非法账号校验不返回生效状态警告；有效配置比例为 0 时仍显示 `no_effect_rollout_zero`。
+
+功能仅覆盖 Responses HTTP 与可选的 Chat→Responses。客户端显式给出
+`prompt_cache_key`（包括空串、null 或其他类型），或任一已有会话头时，
+L-01 都不覆盖客户端设置。Codex/OAuth、透传、Grok、探测、原始 Chat、Messages
+和 WebSocket 不参与。没有网关路由会话的请求也不参与。
+`header_only_uuid=true` 与 `forward_session_headers=normalize` 属于后续功能，
+本版本的写入返回 `CACHE_POLICY_UNSUPPORTED`。
+
+Responses 为缺键请求补上稳定 UUID，并在最终出站没有 `session_id` 时使用同值。
+UUID 按网关已有的 API key、serving 分组及模型作用域派生；不使用计费源分组。
+同一请求首次确定分桶后不因账号或 host 切换重新分桶；同一服务作用域的重建与
+重试使用相同 UUID，服务作用域变化时身份随之变化。生成的键不反馈到选号、sticky
+或原有 lineage 身份。关闭或对照组保持原出站行为，不新增整请求解析。
+
+Chat 的 `chat_compat_uuid=true` 只把已有兼容种子实际注入的出站 pck 改成原有
+session header 的 UUID；内部种子及 header 派生不变，不重复隔离或二次 UUID 化。
+不产生旧兼容种子的请求保持原行为，记 `l01_skip=no_compat_seed`；原始 Chat 等
+排除入口记 `unsupported_ingress`。本请求实际触发既有 quality enforce 身份轮换时，
+L-01 让位并记 `quality_rotation`，不会推进轮换状态；只配置轮换而未触发的请求
+仍按通常规则处理。三个原因都记 `l01_applied=false`，出站与 L-01 关闭时相同。
+跳过原因先判策略和入口，再判账号及会话分桶；处理组内依次判客户端 pck、
+会话头、旧 compat seed、Chat 开关，最后判实际质量轮换。
+
+完整内部 cache_trace 增加 `l01_arm`（none/on/off）、`l01_applied`、
+`l01_skip` 和 `l01_policy_rev`。实际注入来源为 `pck_class_out=gw_uuid`，同值
+session header 来源为 `sess_out_relation=eq_pck`；最小事件仍保留原有 12 字段。
+这些字段只记录枚举、布尔和 revision，不输出生成的 UUID、会话种子或头原文。
+撤回时设置 `mode=off` 或比例 0；在途请求保持旧快照，新请求按刷新后的策略执行。
+
+L-01 灰度使用独立域 `SHA256("l01-cohort|" + session)`，再按首字节映射到 0–99；
+观测采样的原哈希保持不变，避免小比例观测只包含实验组。
+
+仅当本次尝试实际注入 UUID 时，在客户端写回前将 Responses 中现有的
+`prompt_cache_key` 原值原位替换为 `null`，保留字段及成员顺序；普通 JSON 和
+单行 SSE 保留其他字节，多行 data 仍按完整事件合并为一行。还原覆盖普通 JSON、
+流式生命周期事件（含 EOF）、SSE→JSON 及 compact。
+本来为 null 的值保持原样，原本省略的字段不新增，输出内容/工具参数不改。
+实际注入标记与观测开关独立并限定当前账号；关闭或跳过 L-01 时不运行响应还原，
+客户端显式提供的 key 保持原样。UUID 仅用于上游身份，不进入客户端输出。
+null 形态依据保存的兼容 Responses 官方流示例及协议允许的空值，不代表已对每个
+上游实测；某上游若对无 key 请求省略该字段，两组仍可能呈现不同形态，需要在
+启用实验中监测。

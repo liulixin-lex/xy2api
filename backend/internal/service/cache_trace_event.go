@@ -76,6 +76,21 @@ func (t *cacheTrace) emitCacheTrace() {
 	if d.ConvAnchor == "" && !d.Prefix.Sampled {
 		d.ConvAnchor = "unknown"
 	}
+	// L01 is a M3 extension of full events only. Old/manual snapshots receive
+	// fixed defaults without consulting bodies, headers or mutable settings.
+	policy := t.policy.UpstreamIdentity()
+	if d.L01Arm == "" {
+		d.L01Arm = "none"
+	}
+	if d.L01Skip == "" {
+		d.L01Skip = "policy_off"
+		if policy.Enabled() {
+			d.L01Skip = "unsupported_ingress"
+		}
+	}
+	if d.L01PolicyRevision == 0 {
+		d.L01PolicyRevision = policy.Revision()
+	}
 	// Keep optional and fixed fields in one record; cloning a logger per
 	// request adds allocations without providing a persistent context.
 	attrs := make([]slog.Attr, 0, 72)
@@ -113,6 +128,8 @@ func (t *cacheTrace) emitCacheTrace() {
 		slog.String("reasoning_ctx_eff", d.ReasoningContextEffective), slog.Bool("rsn_boundary_hit", d.ReasoningBoundaryHit), slog.Bool("read_short_of_fork", d.ReadShortOfFork),
 		slog.String("pol_rev", d.PolRev), slog.String("gap_src", d.GapSource), slog.Int("codex_hdr", int(d.CodexHeaders)),
 		slog.Int64("window_seq_delta", d.WindowSequenceDelta), slog.String("ua_family", d.UAFamily),
-		slog.String("pcd", d.PromptCacheDiagnostics), slog.String("resp_cache_ttl", d.ResponseCacheTTL))
+		slog.String("pcd", d.PromptCacheDiagnostics), slog.String("resp_cache_ttl", d.ResponseCacheTTL),
+		slog.String("l01_arm", d.L01Arm), slog.Bool("l01_applied", d.L01Applied),
+		slog.String("l01_skip", d.L01Skip), slog.Int64("l01_policy_rev", d.L01PolicyRevision))
 	slog.LogAttrs(context.Background(), slog.LevelInfo, "cache_trace", attrs...)
 }

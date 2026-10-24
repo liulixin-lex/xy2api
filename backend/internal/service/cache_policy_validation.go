@@ -99,6 +99,9 @@ func (s *CachePolicyService) merge(index int, before map[string]any, raw json.Ra
 	if index == 2 {
 		return mergeNorthstarPolicy(before, raw, writing)
 	}
+	if index == 3 {
+		return mergeUpstreamIdentity(before, raw)
+	}
 	out := make(map[string]any, len(before))
 	for k, v := range before {
 		out[k] = v
@@ -192,6 +195,21 @@ func policyDirection(diff []CachePolicyDiff) string {
 			} else {
 				down = true
 			}
+		case string:
+			if n == "off" || n == "whitelist" {
+				down = true
+			} else {
+				up = true
+			}
+		case []int64:
+			before, ok := d.Before.([]int64)
+			if !ok {
+				// An unknown prior scope must never bypass enable confirmation.
+				up = true
+				continue
+			}
+			added, removed := upstreamIdentityScopeDirection(before, n)
+			up, down = up || added, down || removed
 		case int:
 			if n > policyInt(d.Before) {
 				up = true
@@ -219,7 +237,7 @@ func (s *CachePolicyService) validation(index int, entry cachePolicyEntry, w Cac
 	}
 	v := CachePolicyValidation{Valid: len(errs) == 0, Errors: errs, Warnings: []string{}, Diff: diff, Risk: policyRisk(index), Direction: policyDirection(diff), CurrentRev: entry.envelope.Rev, Affected: []CachePolicyAffected{}}
 	v.RevStale = w.ExpectedRev != nil && *w.ExpectedRev != v.CurrentRev
-	if index == 0 && v.Direction != "disable" {
+	if (index == 0 || index == 3) && v.Direction != "disable" {
 		v.Confirm.ReasonRequired = true
 		v.Confirm.CheckboxRequired = true
 	}
@@ -229,12 +247,20 @@ func (s *CachePolicyService) validation(index int, entry cachePolicyEntry, w Cac
 	next := entry
 	next.parseError = false
 	next.envelope.Spec = spec
-	before := s.effective(index, entry, entry)
-	after := s.effective(index, next, next)
+	snapshot := s.Snapshot()
+	before := s.effectiveAt(index, entry, entry, snapshot)
+	after := s.effectiveAt(index, next, next, snapshot)
+	v.Warnings = append(v.Warnings, after.Warnings...)
 	v.EffectivePreview = &CachePolicyPreview{after.State, after.Active, after.Blockers}
 	if index == 0 {
+		preview := *snapshot
+		preview.entries[0] = next
+		preview.master, _ = spec["enabled"].(bool)
 		for i := 3; i < 6; i++ {
-			v.Affected = append(v.Affected, CachePolicyAffected{cachePolicyKeys[i], "not_in_build", "not_in_build", nil})
+			child := snapshot.entries[i]
+			was := s.effectiveAt(i, child, child, snapshot)
+			will := s.effectiveAt(i, child, child, &preview)
+			v.Affected = append(v.Affected, CachePolicyAffected{cachePolicyKeys[i], was.State, will.State, will.Active})
 		}
 	} else {
 		v.Affected = append(v.Affected, CachePolicyAffected{cachePolicyKeys[index], before.State, after.State, after.Active})
@@ -243,35 +269,44 @@ func (s *CachePolicyService) validation(index int, entry cachePolicyEntry, w Cac
 }
 func (s *CachePolicyService) Validate(ctx context.Context, key string, w CachePolicyWrite, bodyErrors []CachePolicyFieldError) (CachePolicyValidation, error) {
 	i := policyIndex(key)
-	if i < 0 || i >= s.availablePolicyCount() {
+	if !s.cachePolicySupported(i) {
 		return CachePolicyValidation{}, PolicyNotInBuild(key)
 	}
 	rows, err := s.repo.GetMultiple(ctx, []string{cachePolicySettings[i]})
 	if err != nil {
 		return CachePolicyValidation{}, err
 	}
-	v, _ := s.validation(i, s.parse(i, rows[cachePolicySettings[i]]), w, bodyErrors)
-	return v, nil
+	v, _, err := s.validationForWrite(ctx, i, s.parse(i, rows[cachePolicySettings[i]]), w, bodyErrors)
+	return v, err
 }
 func invalidPolicy(errs []CachePolicyFieldError) error {
 	b, _ := json.Marshal(errs)
-	return &CachePolicyError{400, "CACHE_POLICY_INVALID", "cache policy validation failed", map[string]string{"errors": string(b)}}
+	reason := "CACHE_POLICY_INVALID"
+	for _, e := range errs {
+		if e.Code == "unsupported_in_build" && (e.Field == "header_only_uuid" || e.Field == "forward_session_headers") {
+			reason = "CACHE_POLICY_UNSUPPORTED"
+			break
+		}
+	}
+	return &CachePolicyError{400, reason, "cache policy validation failed", map[string]string{"errors": string(b)}}
 }
 func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePolicyWrite, bodyErrors []CachePolicyFieldError, actor CachePolicyActor) (CachePolicyView, []CachePolicyDiff, error) {
 	i := policyIndex(key)
-	if i < 0 || i >= s.availablePolicyCount() {
+	if !s.cachePolicySupported(i) {
 		return CachePolicyView{}, nil, PolicyNotInBuild(key)
 	}
 	if s.store == nil {
 		return CachePolicyView{}, nil, fmt.Errorf("cache policy transaction store unavailable")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	var updated cachePolicyEntry
 	var diff []CachePolicyDiff
+	var skipAccountOptions bool
 	err := s.store.UpdateCachePolicy(ctx, cachePolicySettings[i], func(raw string) (string, error) {
 		current := s.parse(i, raw)
-		v, spec := s.validation(i, current, w, bodyErrors)
+		v, spec, err := s.validationForWrite(ctx, i, current, w, bodyErrors)
+		if err != nil {
+			return "", err
+		}
 		if !v.Valid {
 			return "", invalidPolicy(v.Errors)
 		}
@@ -291,6 +326,9 @@ func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePoli
 		if len(missing) > 0 {
 			return "", &CachePolicyError{422, "CACHE_POLICY_CONFIRM_REQUIRED", "confirmation required", map[string]string{"missing": strings.Join(missing, ",")}}
 		}
+		// Candidate enumeration is response metadata, performed after commit.
+		// Disable must avoid both account validation and candidate enumeration.
+		skipAccountOptions = v.Direction == "disable"
 		now := s.now().UTC()
 		reason := strings.TrimSpace(w.Reason)
 		updated = cachePolicyEntry{envelope: CachePolicyEnvelope{v.CurrentRev + 1, &now, &actor, &reason, spec}, loadedAt: now}
@@ -301,8 +339,27 @@ func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePoli
 	if err != nil {
 		return CachePolicyView{}, nil, err
 	}
-	entries := s.snapshot.Load().entries
-	entries[i] = updated
-	s.publishEntries(entries)
-	return s.view(i, updated, s.snapshot.Load()), diff, nil
+	var view CachePolicyView
+	func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		entries := s.snapshot.Load().entries
+		// Another completed transaction may already have published a newer rev
+		// while this transaction was returning from the repository.
+		if updated.envelope.Rev > entries[i].envelope.Rev {
+			entries[i] = updated
+			s.publishEntries(entries)
+		}
+		view = s.view(i, updated, s.snapshot.Load())
+	}()
+	// Candidate lookup only enriches this local response; never hold the
+	// publication lock across administrator repository I/O.
+	if i == 3 {
+		if skipAccountOptions {
+			setCachePolicyUnavailableAccountOptions(&view)
+		} else {
+			s.populateCachePolicyAccountOptions(ctx, &view)
+		}
+	}
+	return view, diff, nil
 }

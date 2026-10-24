@@ -1,8 +1,7 @@
 package service
 
-// Baseline-compatible fixture (no P0a symbols). Disabled cache_trace with
-// diagnostics on (production config); measures allocs/op of full streaming
-// paths whose per-frame hooks convert string payloads to []byte.
+// Measures allocations for complete streaming paths with cache_trace disabled
+// and diagnostics enabled, including per-frame string-to-byte conversions.
 
 import (
 	"io"

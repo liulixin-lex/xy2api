@@ -542,7 +542,15 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		if contentType == "" {
 			contentType = "application/json"
 		}
-		c.Data(resp.StatusCode, contentType, body)
+		clientBody := body
+		if openAIUpstreamIdentityResponseApplied(c, account) {
+			var err error
+			clientBody, err = restoreOpenAIUpstreamIdentityResponse(body)
+			if err != nil {
+				return nil, err
+			}
+		}
+		c.Data(resp.StatusCode, contentType, clientBody)
 		if cyberMsg == "" {
 			return nil, fmt.Errorf("openai cyber_policy: %d", resp.StatusCode)
 		}

@@ -12,8 +12,13 @@ func CaptureCachePolicy(c *gin.Context, policies *CachePolicyService) *CachePoli
 		return policies.Snapshot()
 	}
 	if value, ok := c.Get(cachePolicySnapshotGinKey); ok {
-		p, _ := value.(*CachePolicySnapshot)
-		return p
+		if p, plain := value.(*CachePolicySnapshot); plain {
+			return p
+		}
+		if cohort, wrapped := value.(*cachePolicyCohortView); wrapped && cohort != nil {
+			return cohort.snapshot
+		}
+		return nil
 	}
 	p := policies.Snapshot()
 	c.Set(cachePolicySnapshotGinKey, p)
@@ -34,6 +39,11 @@ func CachePolicyFromGin(c *gin.Context) *CachePolicySnapshot {
 		return nil
 	}
 	value, _ := c.Get(cachePolicySnapshotGinKey)
-	p, _ := value.(*CachePolicySnapshot)
-	return p
+	if p, plain := value.(*CachePolicySnapshot); plain {
+		return p
+	}
+	if cohort, wrapped := value.(*cachePolicyCohortView); wrapped && cohort != nil {
+		return cohort.snapshot
+	}
+	return nil
 }

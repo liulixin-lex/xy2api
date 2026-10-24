@@ -1048,15 +1048,17 @@ func deriveOpenAIReasoningEffortFromModelCandidates(models []string) string {
 }
 
 type openAIRequestView struct {
-	body               []byte
-	Model              string
-	Stream             bool
-	PromptCacheKey     string
-	PreviousResponseID string
-	ServiceTier        string
-	ReasoningEffort    string
-	patches            []openAIRequestPatch
-	patchesDisabled    bool
+	body                []byte
+	Model               string
+	Stream              bool
+	HasPromptCacheKey   bool
+	PromptCacheKeyEmpty bool
+	PromptCacheKey      string
+	PreviousResponseID  string
+	ServiceTier         string
+	ReasoningEffort     string
+	patches             []openAIRequestPatch
+	patchesDisabled     bool
 }
 
 type openAIRequestPatch struct {
@@ -1097,8 +1099,10 @@ func newOpenAIRequestView(body []byte) openAIRequestView {
 				seen |= streamField
 			}
 		case "prompt_cache_key":
+			view.HasPromptCacheKey = true
 			if seen&promptCacheKeyField == 0 {
 				view.PromptCacheKey = strings.TrimSpace(value.String())
+				view.PromptCacheKeyEmpty = value.Type == gjson.String && value.Str == ""
 				seen |= promptCacheKeyField
 			}
 		case "previous_response_id":

@@ -57,6 +57,8 @@ interface RejectedApiError {
 export const POLICY_ERROR_REASONS = {
   conflict: 'CACHE_POLICY_REV_CONFLICT',
   invalid: 'CACHE_POLICY_INVALID',
+  /** A value this build does not implement; `metadata.errors` as for invalid (F, M3: DESIGN §11.3, m3m4 README). */
+  unsupported: 'CACHE_POLICY_UNSUPPORTED',
   confirm: 'CACHE_POLICY_CONFIRM_REQUIRED',
   notInBuild: 'CACHE_POLICY_NOT_IN_BUILD',
 } as const
@@ -107,7 +109,7 @@ export function toWriteFailure(raw: unknown): WriteFailure {
   if (reason === POLICY_ERROR_REASONS.conflict || (!reason && error.status === 409)) {
     return { kind: 'conflict', currentRev: parseRev(metadata.current_rev) }
   }
-  if (reason === POLICY_ERROR_REASONS.invalid || (!reason && error.status === 400)) {
+  if (reason === POLICY_ERROR_REASONS.invalid || reason === POLICY_ERROR_REASONS.unsupported || (!reason && error.status === 400)) {
     return { kind: 'invalid', errors: parseFieldErrors(metadata.errors) }
   }
   if (reason === POLICY_ERROR_REASONS.confirm || (!reason && error.status === 422)) {

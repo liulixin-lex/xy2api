@@ -61,12 +61,19 @@ func policyRisk(i int) string {
 	}
 }
 func (s *CachePolicyService) effective(i int, stored, loaded cachePolicyEntry) CachePolicyEffective {
+	return s.effectiveAt(i, stored, loaded, s.Snapshot())
+}
+
+func (s *CachePolicyService) effectiveAt(i int, stored, loaded cachePolicyEntry, p *CachePolicySnapshot) CachePolicyEffective {
 	active := false
 	e := CachePolicyEffective{Active: &active, Blockers: []string{}, Warnings: []string{}, ClippedFields: []string{}}
-	if i >= s.availablePolicyCount() {
+	if !s.cachePolicySupported(i) {
 		e.State = "not_in_build"
 		e.Active = nil
 		return e
+	}
+	if i == 3 {
+		return s.upstreamIdentityEffective(stored, loaded, p)
 	}
 	enabled, _ := loaded.envelope.Spec["enabled"].(bool)
 	if i == 2 {
@@ -107,7 +114,7 @@ func (s *CachePolicyService) effective(i int, stored, loaded cachePolicyEntry) C
 	return e
 }
 func (s *CachePolicyService) schema(i int) []map[string]any {
-	if i >= s.availablePolicyCount() {
+	if !s.cachePolicySupported(i) {
 		return []map[string]any{}
 	}
 	if i == 2 {
@@ -120,6 +127,9 @@ func (s *CachePolicyService) schema(i int) []map[string]any {
 			{"field": "model_thresholds", "type": "threshold_rules", "options": []int{512, 1024, 2048, 4096, 6144}},
 			{"field": "unknown_threshold", "type": "enum", "options": []string{"aux_only"}},
 		}
+	}
+	if i == 3 {
+		return upstreamIdentitySchema()
 	}
 	fields := []map[string]any{{"field": "enabled", "type": "bool"}}
 	if i == 1 {
@@ -136,7 +146,7 @@ func (s *CachePolicyService) schema(i int) []map[string]any {
 }
 func (s *CachePolicyService) view(i int, stored cachePolicyEntry, p *CachePolicySnapshot) CachePolicyView {
 	v := CachePolicyView{Key: cachePolicyKeys[i], SettingKey: cachePolicySettings[i], Risk: policyRisk(i), GatedByMaster: i >= 3, Schema: s.schema(i)}
-	if i >= s.availablePolicyCount() {
+	if !s.cachePolicySupported(i) {
 		v.Effective = s.effective(i, stored, stored)
 		return v
 	}
@@ -169,14 +179,18 @@ func (s *CachePolicyService) view(i int, stored cachePolicyEntry, p *CachePolicy
 }
 func (s *CachePolicyService) Get(ctx context.Context, key string) (CachePolicyView, error) {
 	i := policyIndex(key)
-	if i < 0 || i >= s.availablePolicyCount() {
+	if !s.cachePolicySupported(i) {
 		return CachePolicyView{}, PolicyNotInBuild(key)
 	}
 	raw, err := s.repo.GetMultiple(ctx, []string{cachePolicySettings[i]})
 	if err != nil {
 		return CachePolicyView{}, err
 	}
-	return s.view(i, s.parse(i, raw[cachePolicySettings[i]]), s.Snapshot()), nil
+	view := s.view(i, s.parse(i, raw[cachePolicySettings[i]]), s.Snapshot())
+	if i == 3 {
+		s.populateCachePolicyAccountOptions(ctx, &view)
+	}
+	return view, nil
 }
 func (s *CachePolicyService) List(ctx context.Context, version string) (CachePolicyList, error) {
 	keys := append([]string{}, cachePolicySettings[:]...)
@@ -198,11 +212,12 @@ func (s *CachePolicyService) List(ctx context.Context, version string) (CachePol
 	list.Existing.Claude.SettingsLink = "/admin/settings?tab=gateway"
 	for i := range cachePolicyKeys {
 		e := cachePolicyEntry{}
-		if i < s.availablePolicyCount() {
+		if s.cachePolicySupported(i) {
 			e = s.parse(i, raw[cachePolicySettings[i]])
 		}
 		list.Policies = append(list.Policies, s.view(i, e, p))
 	}
+	s.populateCachePolicyAccountOptions(ctx, &list.Policies[3])
 	return list, nil
 }
 

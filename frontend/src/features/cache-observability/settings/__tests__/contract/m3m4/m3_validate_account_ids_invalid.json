@@ -1,0 +1,73 @@
+{
+  "_contract": [
+    "M3-3",
+    "C-3"
+  ],
+  "_note": "M3：account_ids 含不存在的账号（999）与非 OpenAI apikey 账号（201，OAuth）：每个问题 ID 一条错误，错误码 unknown_account、wrong_platform（§7.4 词表；字段错误只有 field、code、limit）。",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/upstream_identity/validate",
+    "body": {
+      "expected_rev": 0,
+      "spec": {
+        "mode": "uuid_fill",
+        "account_ids": [
+          101,
+          999,
+          201
+        ]
+      },
+      "reason": "试运行",
+      "confirm": {
+        "checkbox": true,
+        "typed": null
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": false,
+      "errors": [
+        {
+          "field": "account_ids",
+          "code": "unknown_account"
+        },
+        {
+          "field": "account_ids",
+          "code": "wrong_platform"
+        }
+      ],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "account_ids",
+          "before": [],
+          "after": [
+            101,
+            999,
+            201
+          ]
+        },
+        {
+          "field": "mode",
+          "before": "off",
+          "after": "uuid_fill"
+        }
+      ],
+      "risk": "high",
+      "direction": "mixed",
+      "confirm": {
+        "reason_required": true,
+        "checkbox_required": true,
+        "type_to_confirm": null
+      },
+      "current_rev": 0,
+      "rev_stale": false,
+      "effective_preview": null,
+      "affected": []
+    }
+  }
+}

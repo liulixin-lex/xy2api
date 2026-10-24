@@ -3125,3 +3125,66 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 未插桩产品测试tree `de2c60c9d15e512f3c4cd38abd69a1367917e743`：`go test -tags=unit ./internal/service -run 'CacheTrace|CachePrefix'` 1444 tests/subtests通过，包含22项Disabled；实际logger语料严格schema和usage关联22条通过，其中18条精确关联、4条无会话按契约不可关联。定向race 195项通过，文档检查通过。实际命令额外限制并发并禁用测试结果缓存；证据索引保留完整命令、源码树、原始日志及SHA。
 - 原正式M1 d1 pooled p99为1.066862ms，未达开启门槛；旧0.501593ms与新测量范围不同，不能把差额直接归为同工作退化。本次小修不宣称formal通过；正式d1/d2由独立窗口复核。SSE framing与worker JSON的大改仅保留后续方向，不在本提交实现。
 - 提交仅在上述测试tree后收束本人的记忆/归档，产品源码完全相同；未推送、部署或改变生产。
+
+
+## G：P0a 完成后归档（2026-10-24，M1 已合入）
+
+### OpenAI 缓存 P0a（2026-10-23，开发中）
+
+- T0a.3 已提交 `d770e4dbb`；T0a.4 路由观测、回退用户不可见及 T3 评审五项 MINOR 已完成并通过非计时收尾核验。已定性 prelude 偶发与分配改善的原始失败记录保留，repository integration 仍待 CI 复核。T0a.5 核心/接缝由 G2 单独交付，待集成。正式性能只决定生产是否开启观测；当前未推送、合并或部署。
+
+### 20261023-cache-p0a — OpenAI 缓存旁路观测（开发中）
+
+- 授权：PM 批准 P0a 先行；基线 `e369fd3bb`，分支 `cache/p0a`，每任务独立提交；不推送、不合并、不部署。
+- 分工：G 负责 T0a.1–T0a.4（类别、异步块链、结算事件、路由原因）；G2 并行负责 T0a.5 运行时策略服务/管理员接口及启用接缝。G 不再改启用配置；事件预留请求快照 `PolRev`。所有功能默认关闭。
+- 约束：出站字节与选号不变；不改 RecordUsage 主体、resilience/state.go、插件路径。事件仅枚举、整数、布尔和HMAC，内部块/线程哈希不输出；回退观测仅内部日志。
+- 已完成：T0a.1、T0a.2、T0a.1-fix；T0a.2-fix 提交 `882ce6a66`，tree `2b2fee0f84a9012a1773c36f1fe1da36165a5996`，含有界异步worker、稀疏/末块检查点、预算先预留、拒绝简化、不可变body借用、关闭态分配修复。正式d1沿用仅差7文件lint修复的候选，pooled p99 0.501593ms。新树lint、定向/race、110组计费等价、关闭零执行、140组分配及400帧线程CPU ABBA通过；全量unit/integration（repository环境受限）、韧性与ci_gate沿用lint前候选。墙钟buffered差异与AA噪声证据保留供评审。
+- 当前：T0a.3 已完成纯值分类、S3/S4/S5、恰好一次结算、observer_failed 最小事件、缺 usage 元数据、typed buffered 读取位、无会话分支和异步历史 epoch 校验。unit、integration（repository 环境受限排除）、韧性、ci_gate、race、lint、110 组计费三方对照、140 组分配及关闭零执行均通过；真实日志严格校验 16 条通过（12 精确关联、4 无会话单列），数值回放可比 86/86 对齐。拒绝路径四档 0 B/op、0 allocs/op。T0a.3 提交 `d770e4dbb`；T0a.4 完成 9 个既有决策调用点、跨尝试最高优先级和独立 rebind_cause；新增 undelivered 最小事件、共享终帧、精确 AST、73 处零执行探针与 22 条真实事件严格校验。全量 unit、受限 integration、韧性、trace/routing race、lint、文档和审计通过；ci_gate 仅既有已定性时序偶发。140 配对无新增分配，其中 buffered 固定减少 202 次。非阻塞细节进后续 backlog；未推送、合并或部署。
+- 门禁安排：每子任务仅功能、分配、关闭零执行，可加非独占d1-lite；正式d1/d2由G在M1集成冻结候选统一运行。T0a.2-fix未单独运行正式d2。普通重任务走协调队列，正式计时走独占窗口。
+- 已知限制：repository在测试服务器的Docker端口环境受限，PR CI复核；Codex同工作区对话锚点可能相撞；冷会话并发和四槽时序历史会保守缺失。生产EXP-0待用户决定开启后验证。
+
+### 2026-10-23T14:50Z — `20261023-cache-p0a` — T0a.2-fix提交与T0a.3接线
+
+- 完成：`882ce6a66`保留冻结产品tree，补齐lint、产品代码分配/零执行、计费等价及线程CPU ABBA证据；基线与候选分配次数相等。默认GC的字节噪声和buffered墙钟差异如实保留，线程CPU无显著增量。
+- 决策：正式d1/d2留M1，G只做T0a.3/T0a.4；T0a.5由G2负责。
+- 下一步：权威事件契约、分类与S3/S4/S5接线，observer故障最小事件保留旧nil断言；随后路由埋点。已知限制继续在测试证据中登记，不改计费或选号语义。
+
+### 2026-10-23T17:40Z — `20261023-cache-p0a` — T0a.3 结算事件与缓存损失分类完成
+
+- 完成：完整与最小事件遵守权威契约；session_digest/request_id_hmac 与原用量日志同值；加入 S3/S4/S5、逻辑位置分类、缺字段与显式零区分、observer 故障隔离、迟到历史的 epoch 校验。
+- 验证：冻结产品 tree `2d27b47da04dd565dd85d2e18636577d24e88c83` 的全量非计时 Go 门禁、计费等价、分配、零执行与实际 JSON 严格校验通过；提交前只同步类型保护登记和本记忆。外部关闭证明夹具曾将 enabled/disabled 拼入 JSON，已仅改布尔格式后复跑，业务断言不变；首轮失败保留。
+- 限制：repository integration 仍由 GitHub CI 复核；数值回放不证明真实分叉位置；正式 d1/d2 留 M1 集成候选，生产 EXP-0 未执行。
+- 下一步：T0a.4 只在已有路由决策点标记原因，G2 继续运行时策略接缝；评审由 PM 安排。
+
+### 2026-10-23T19:56Z — `20261023-cache-p0a` — T0a.4 路由观测与评审收尾完成
+
+- 完成：只观察九处既有决策，路由原因按已批准优先级跨重试累积；回退只读且用户不可见，不新增选号状态读写。未投递但滥用计费的上游尝试输出可关联的十二字段最小事件；零次上游尝试和未结算请求不出两类事件。
+- T3 评审：五项 MINOR 全部处理；共享终帧处理、恢复原解析器精确计数、73 探针覆盖十二种入口、真实历史/metadata/settled gap 语料，以及未投递范围回归。其余非阻塞事项按后续 backlog 跟踪。
+- 验证：产品测试树 `ddeda3a4e8716cbc34dc993e0337665842b8c995`；全量 unit、排除既定环境受限 repository 的 integration、service/handler 韧性、trace/routing race、lint 零问题、文档、scheduler-diff 和上游审计通过；110 组计费三方等价、22 条严格事件及 73 探针通过。
+- 原始失败与判定：完整 ci_gate 仅失败于 PM 已定性的 prelude 时序用例；140 组分配无新增成本，buffered 二十配对固定减少 202 次，原严格相等失败保持原样并单列窄化非退化判定。未修改既有业务断言；repository 环境豁免待 CI。
+- 提交前仅补本记忆，保存与测试树的文档差异，不重复 Go 门禁。正式 d1/d2 已参数化候选 SHA，尚未在 M1 集成树执行，不据此开启生产。
+- 下一步：交 P 组装 M1，R/S 与 CI 复核；从已提交运行时策略接缝启动独立 P1 L-01 分支，M1 合入后再重基。
+
+<!-- End of verbatim G P0a archive transfer, 2026-10-24. -->
+
+
+## 2026-10-24 P1 L-01 本地完成前交接（原样归档）
+
+### 20261023-cache-p1-l01 — M3 上游 UUID 会话键补全（G，开发中）
+
+- 授权：PM 批准 T0a.4 提交后提前开发；独立分支 cache/p1-l01 已于 M1 的 PR #132 合入后变基至 main `72c2d01698cd859223e943a0fa61b3454bca31ec`。P1 改动仍未提交，不将其混入已合入的 M1。
+- 范围：仅 T1.1 运行时 upstream_identity 与 T1.2 Responses HTTP/Chat→Responses 的 L-01；L-02、header_only_uuid、T1.3 不在本次，非默认配置报 unsupported。
+- 约束：默认关闭并受 master/kill 控制；显式字段只读保护，关闭出站与基线相同；无新增整 body 扫描，不改 GenerateSessionHash/选号/计费/插件/WS；快照与会话分桶在请求内固定，UUID按 serving scope 派生，原 lineage 身份不反馈注入值。
+- 当前：策略、Responses/Chat、M3 full-only 观测已实现。r3 tree cb177bba 的 6186 项功能测试、关闭 golden/零执行、126 分配边界与 140 配对分配均通过，B/op 均值 −0.5～+0.2 且置信区间含 0；真实 logger M3 严格校验通过。完整 lint 仅两项，已修类型断言检查和等价布尔式，待增量验证。既有 quality enforce 轮换与 L01 来源冲突已真实复现，外部草案 8/8 通过；PM 已批准 quality_rotation、unsupported_ingress、no_compat_seed，正在按 M3 v1.0.1 优先级接入产品并扩充真实出站等价测试，新树门禁待跑。插件关闭优先级的契约矛盾继续跟进。M1 已继承 T4 路由/评审修复、运行时 API 与 UI、observer_failed 优先级修复；本分支在已合入 M1 的新基点继续验证，不重放旧头。未提交、推送或部署。
+- 下一步：冻结变基后的源码树，按新 HEAD/tree 运行功能、race、关闭零执行、分配、实际 M3 logger、兼容与 lint 门禁；重任务遵守现有计时窗口，不在旧头上重放。结果通过前不提交，不推送或部署。
+
+
+## 2026-10-24T13:31Z — G M3 响应隐私修复前的交接原文
+
+### 20261023-cache-p1-l01 — M3 上游 UUID 会话键补全（G，评审阻塞修复中）
+
+- 基点：M1 合并后的 main `72c2d0169`；分支 `cache/p1-l01`，提交号以本分支 git log 为准。仅 T1.1/T1.2 的 L-01，默认关闭；L-02、header_only_uuid 与 T1.3 留后续。
+- 当前：基于已交付的 `d74eaf603` 修复 B-M3-1 响应 key 回显；仅实际注入时还原响应，关闭与 skip 字节保持原样。L-01 cohort 增加独立哈希域，trace 抽样保持原样；完成受影响门禁后独立提交，M2b 暂停。
+- 完成：运行时策略、Responses/Chat 补键、M3 观测与真实出站回归；显式客户端身份和既有质量轮换优先，原调度/计费/插件行为保留。
+- 验证：产品 tree `90f2a7374fed0fd3726e0ba5a92624b71ddff36a` 的 focused、race、关闭 golden/零执行、分配、真实日志、兼容与 lint 全部通过；default/unit/integration/e2e 四 tag vet 补证通过。测试后仅更新 G 记忆、归档和任务状态，产品字节不变。
+- 限制与下一步：独立评审、staging 与 CI 待完成；后续吸收 M2/main 前先做四 tag vet。质量性能对比用例因未配置专用 Redis 测试环境跳过，不据此认定性能验收通过。未推送、未部署；详细开发交接原文见归档。

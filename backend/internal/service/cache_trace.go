@@ -47,6 +47,9 @@ type cacheTrace struct {
 }
 
 type cacheTraceData struct {
+	L01Arm, L01Skip                                                     string
+	L01Applied                                                          bool
+	L01PolicyRevision                                                   int64
 	LossClass, NAReason                                                 string
 	PromptTokens, ReadTokens                                            int
 	Prefix                                                              cachePrefixObservation
@@ -210,6 +213,7 @@ func (s *OpenAIGatewayService) beginCacheTrace(c *gin.Context, body []byte) {
 		t.cohort = cacheTraceChainCohort(sessionKey)
 		t.data.GroupID = getOpenAIGroupIDFromContext(c)
 		t.data.SessionDigest = sessionKey
+		t.resetL01Attempt()
 		t.mu.Unlock()
 		noteCacheTraceFallback(c.Request.Context())
 		return
@@ -240,6 +244,7 @@ func (s *OpenAIGatewayService) beginCacheTrace(c *gin.Context, body []byte) {
 		Transport:     "http", RouteReason: "unknown", RebindCause: "none", Prefix: cachePrefixUnavailable(0),
 		ReasoningContextEffective: "unknown", PromptCacheDiagnostics: "absent", ResponseCacheTTL: "absent",
 	}}
+	t.resetL01Attempt()
 	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), cacheTraceKey{}, t))
 	noteCacheTraceFallback(c.Request.Context())
 }
@@ -249,7 +254,7 @@ func (t *cacheTrace) setPCKSource(source string) {
 		return
 	}
 	switch source {
-	case "none", "passthrough", "gw_compat_hex", "gw_from_header", "gw_grok", "oauth_rewritten":
+	case "none", "passthrough", "gw_compat_hex", "gw_from_header", "gw_grok", "gw_uuid", "oauth_rewritten":
 	default:
 		return
 	}
@@ -269,13 +274,25 @@ func (t *cacheTrace) setSessionSource(source string) {
 		return
 	}
 	switch source {
-	case "none", "client_value", "uuid_of_pck", "gw_isolated", "fingerprint_converged":
+	case "none", "client_value", "uuid_of_pck", "gw_isolated", "fingerprint_converged", "eq_pck":
 	default:
 		return
 	}
 	t.mu.Lock()
 	t.data.SessOutRelation = source
 	t.mu.Unlock()
+}
+
+// Requires t.mu or a newly created trace. A request keeps its policy snapshot
+// across retries; account eligibility and wire application belong to each
+// attempt. Uninstrumented protocols therefore cannot inherit a prior success.
+func (t *cacheTrace) resetL01Attempt() {
+	p := t.policy.UpstreamIdentity()
+	t.data.L01Arm, t.data.L01Applied = "none", false
+	t.data.L01Skip, t.data.L01PolicyRevision = "policy_off", p.Revision()
+	if p.Enabled() {
+		t.data.L01Skip = "unsupported_ingress"
+	}
 }
 
 // Forward attempts share ingress metadata, but must not carry output or usage
@@ -287,6 +304,7 @@ func resetCacheTraceAttempt(c *gin.Context) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.resetL01Attempt()
 	t.data.PCKClassOut = "unknown"
 	if t.data.PCKClassIn == "none" {
 		t.data.PCKClassOut = "none"
@@ -338,6 +356,19 @@ func (s *OpenAIGatewayService) captureCacheTraceRequest(c *gin.Context, req *htt
 
 	t.data.AccountID = account.ID
 	t.data.ProtocolOut = protocol
+	// Responses passthrough returns before the L-01 injection decision. Keep
+	// its exclusion precise using only the selected account's existing flags.
+	// policy_off and raw Chat exclusions retain their earlier priority.
+	if t.data.L01Skip == "unsupported_ingress" && protocol == "responses" && account.IsOpenAIPassthroughEnabled() {
+		switch {
+		case !account.IsOpenAIApiKey():
+			t.data.L01Skip = "not_apikey"
+		case account.UsesOpenAICodexProtocol():
+			t.data.L01Skip = "codex_protocol"
+		default:
+			t.data.L01Skip = "passthrough"
+		}
+	}
 	t.data.Prefix = cachePrefixUnavailable(int(req.ContentLength))
 	if model := c.GetString(OpsUpstreamModelKey); model != "" {
 		t.data.Prefix.ModelGen = cachePrefixModelGeneration(model)
@@ -560,13 +591,19 @@ func (t *cacheTrace) applyCacheTraceComputed() {
 	t.data.PCKClassIn = r.pckIn
 	t.data.IDSource = r.idSource
 	t.data.ThreadPresent = t.data.ThreadPresent || r.thread
-	if !r.pckExists {
+	if t.data.L01Applied {
+		// The known UUID writer remains authoritative when a skipped chain
+		// returns only coverage metadata without an outgoing body scan.
+		t.data.PCKClassOut, t.data.PCKOutIsUUID = "gw_uuid", true
+	} else if !r.pckExists {
 		t.data.PCKClassOut = "none"
 	} else if t.data.PCKClassOut == "unknown" {
 		// Existing presence with no injection marker is client passthrough.
 		t.data.PCKClassOut = "passthrough"
 	}
-	t.data.PCKOutIsUUID = r.pckUUID
+	if !t.data.L01Applied {
+		t.data.PCKOutIsUUID = r.pckUUID
+	}
 	modelGen := t.data.Prefix.ModelGen
 	t.data.Prefix = r.prefix
 	if modelGen != "unknown" && modelGen != "" {

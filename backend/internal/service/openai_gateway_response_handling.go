@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -52,6 +53,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string) (*openaiStreamingResult, error) {
 	// The attempt-local gate keeps the disabled per-frame path to one bool check.
 	cacheTraceActive := cacheTraceObserving(c)
+	l01ResponseApplied := openAIUpstreamIdentityResponseApplied(c, account)
 
 	preludeTrace := beginOpenAIPreludeTrace(ctx, resilience.Current().NativePreludeWhitelistOn())
 	observer := upstreamResponseModelObserverFromContext(c)
@@ -138,7 +140,32 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 		}()
 	}
+	var l01ResponseBuffer *openAIUpstreamIdentitySSEBuffer
+	if l01ResponseApplied {
+		l01ResponseBuffer = &openAIUpstreamIdentitySSEBuffer{limit: maxLineSize}
+	}
 	writePendingString := func(value string) (int, error) {
+		if l01ResponseBuffer != nil {
+			restored, err := l01ResponseBuffer.Append(value)
+			if err != nil {
+				return 0, err
+			}
+			if len(restored) > 0 {
+				var n int
+				if firstOutputStage != nil && !firstOutputStage.closed {
+					n, err = firstOutputStage.Write(restored)
+				} else {
+					n, err = bufferedWriter.Write(restored)
+				}
+				if err == nil && n != len(restored) {
+					err = io.ErrShortWrite
+				}
+				if err != nil {
+					return 0, err
+				}
+			}
+			return len(value), nil
+		}
 		if firstOutputStage != nil && !firstOutputStage.closed {
 			return firstOutputStage.WriteString(value)
 		}
@@ -385,6 +412,29 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		lastDownstreamWriteAt = time.Now()
 	}
 	finalizeStream := func() (*openaiStreamingResult, error) {
+		if l01ResponseBuffer != nil {
+			restored, err := l01ResponseBuffer.Finish()
+			if err == nil && len(restored) > 0 {
+				// Keep the existing writers local. Saving them in a heap
+				// callback would add allocations to every disabled response.
+				var n int
+				if firstOutputStage != nil && !firstOutputStage.closed {
+					n, err = firstOutputStage.Write(restored)
+				} else {
+					n, err = bufferedWriter.Write(restored)
+				}
+				if err == nil && n != len(restored) {
+					err = io.ErrShortWrite
+				}
+			}
+			if err != nil {
+				handlePendingWriteError(err)
+				if streamEarlyErr != nil {
+					return resultWithUsage(), streamEarlyErr
+				}
+				return resultWithUsage(), fmt.Errorf("restore response identity at EOF: %w", err)
+			}
+		}
 		if stageFirstOutput && eventInProgress {
 			// EOF dispatches the final SSE event even without a trailing blank line.
 			completeGuardedEvent(true)
@@ -915,11 +965,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		select {
 		case ev, ok := <-events:
 			if !ok {
-				if stageFirstOutput && eventInProgress {
-					// EOF dispatches the final SSE event even without a trailing blank
-					// line. Do not synthesize extra bytes on the downstream wire.
-					completeGuardedEvent(true)
-				}
+				// Finalization restores a pending L-01 event before the existing
+				// first-output stage is committed, just as in the synchronous path.
 				return finalizeStream()
 			}
 			if result, err, done := handleScanErr(ev.err); done {
@@ -1693,6 +1740,12 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		return nil, fmt.Errorf("restore OpenAI namespace response: %w", err)
 	}
 	body = restoreCodexToolNamesFromContext(c, body)
+	if openAIUpstreamIdentityResponseApplied(c, account) {
+		body, err = restoreOpenAIUpstreamIdentityResponse(body)
+		if err != nil {
+			return nil, err
+		}
+	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	// Codex 协议要求 /responses/compact JSON 响应携带 x-codex-turn-state
 	// （codex-api/src/endpoint/compact.rs 从响应头捕获），显式回传。
@@ -1811,6 +1864,17 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			bodyText = s.replaceModelInSSEBody(bodyText, mappedModel, originalModel)
 		}
 		body = []byte(bodyText)
+	}
+	if openAIUpstreamIdentityResponseApplied(c, account) {
+		var err error
+		if ok {
+			body, err = restoreOpenAIUpstreamIdentityResponse(body)
+		} else {
+			body, err = restoreOpenAIUpstreamIdentitySSE(body)
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)

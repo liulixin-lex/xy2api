@@ -23,6 +23,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	appLogger "github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
 
@@ -59,16 +60,17 @@ func TestCacheTraceProductionLoggerContract(t *testing.T) {
 }
 
 type cacheTraceContractFixture struct {
-	s            *OpenAIGatewayService
-	c            *gin.Context
-	api          *APIKey
-	user         *User
-	account      *Account
-	rows         *openAIRecordUsageLogRepoStub
-	billing      *openAIRecordUsageBillingRepoStub
-	body         []byte
-	id           string
-	pricingModel string // only for the model-less no-session service fixture
+	s              *OpenAIGatewayService
+	c              *gin.Context
+	api            *APIKey
+	user           *User
+	account        *Account
+	rows           *openAIRecordUsageLogRepoStub
+	billing        *openAIRecordUsageBillingRepoStub
+	body           []byte
+	id             string
+	pricingModel   string // only for the model-less no-session service fixture
+	routingSession string // compatibility fixture for a previously selected legacy digest
 }
 
 func cacheTraceNewContractFixture(t *testing.T, name, protocol string) *cacheTraceContractFixture {
@@ -123,6 +125,11 @@ func (f *cacheTraceContractFixture) forwardReply(t *testing.T, protocol string, 
 	response.Header.Set("X-Request-Id", f.id)
 	f.s.httpUpstream = &httpUpstreamRecorder{resp: response}
 	f.s.GenerateSessionHash(f.c, f.body)
+	if f.routingSession != "" {
+		f.c.Set(openAICacheSessionGinKey, f.routingSession)
+		f.s.beginCacheTrace(f.c, f.body)
+		f.s.captureCacheDiagnostic(f.c, f.body)
+	}
 	var result *OpenAIForwardResult
 	var err error
 	if protocol == "chat" {
@@ -214,12 +221,39 @@ func cacheTraceRunProductionLoggerContract(t *testing.T) {
 	var blockHashes []uint64
 
 	for _, tc := range []struct {
-		name, protocol string
-		stream         bool
-	}{{"admitted_responses", "responses", false}, {"admitted_chat_buffered", "chat", false}, {"admitted_chat_stream", "chat", true}} {
+		name, protocol                          string
+		stream, passthrough, raw, legacyRouting bool
+	}{
+		{name: "admitted_responses", protocol: "responses"},
+		{name: "admitted_responses_stream", protocol: "responses", stream: true},
+		{name: "admitted_chat_buffered", protocol: "chat"},
+		{name: "admitted_chat_stream", protocol: "chat", stream: true},
+		{name: "admitted_passthrough_buffered", protocol: "responses", passthrough: true},
+		{name: "admitted_passthrough_stream", protocol: "responses", passthrough: true, stream: true},
+		{name: "admitted_rawcc_buffered", protocol: "chat", raw: true},
+		{name: "admitted_rawcc_stream", protocol: "chat", raw: true, stream: true},
+		{name: "admitted_legacy_routing", protocol: "responses", legacyRouting: true},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := cacheTraceNewContractFixture(t, tc.name, tc.protocol)
-			result := f.forward(t, tc.protocol, tc.stream)
+			f.account.Extra["openai_passthrough"] = tc.passthrough
+			f.account.Extra["openai_responses_supported"] = !tc.raw
+			if tc.legacyRouting {
+				// Inject a previously selected legacy digest while retaining the
+				// authenticated key required by both trace and usage diagnostics.
+				// This covers logger compatibility, not a legacy routing decision.
+				f.routingSession, _ = deriveOpenAISessionHashes(explicitOpenAIRequestSessionID(f.c, f.body))
+				require.Regexp(t, `^[0-9a-f]{16}$`, f.routingSession)
+				f.c.Request = f.c.Request.WithContext(resilience.WithRequestState(f.c.Request.Context(), resilience.NewRequestState()))
+				f.s.GenerateSessionHash(f.c, f.body)
+				noteCacheTraceRebind(f.c.Request.Context(), resilience.CategoryStall)
+				NoteCacheTraceFailover(f.c.Request.Context(), 1)
+			}
+			reply := traceForwardSSE
+			if tc.raw {
+				reply = traceAllocationSSE(2, true)
+			}
+			result := f.forwardReply(t, tc.protocol, tc.stream, reply)
 			require.NotNil(t, result.CacheTrace)
 			awaitCacheTrace(t, f.s, f.c, result)
 			require.True(t, result.CacheTrace.data.Prefix.Sampled)
@@ -423,7 +457,7 @@ func cacheTraceRunProductionLoggerContract(t *testing.T) {
 			usages[key] = append(usages[key], event)
 		}
 	}
-	require.Len(t, manifest, 16)
+	require.Len(t, manifest, 22)
 	require.Len(t, noSessionUsage, 4)
 	require.Len(t, traces, len(manifest)+len(extraManifest))
 	require.Len(t, usages, len(manifest)-len(noSessionUsage)+len(extraManifest))
@@ -446,6 +480,11 @@ func cacheTraceRunProductionLoggerContract(t *testing.T) {
 		} else {
 			require.Len(t, usages[key], 1, name)
 			usage := usages[key][0]
+			if name == "admitted_legacy_routing" {
+				require.Regexp(t, `^[0-9a-f]{16}$`, trace["session_digest"])
+				require.Equal(t, "failover_n", trace["route_reason"])
+				require.Equal(t, "stall", trace["rebind_cause"])
+			}
 			for _, field := range strings.Fields("request_id_hmac session_digest account_id group_id") {
 				require.Equal(t, usage[field], trace[field], name+":"+field)
 			}

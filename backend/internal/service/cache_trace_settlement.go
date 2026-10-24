@@ -7,31 +7,43 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
+type cacheTraceDelivery uint8
+
+const (
+	cacheTraceDelivered cacheTraceDelivery = iota
+	cacheTraceUnbilled
+	cacheTraceAbuse
+)
+
+// The billing entry passes its completed delivery classification. The optional
+// fallback supports observation-only callers and respects the same master gate.
 // Called only when the forward result carries an enabled observation. The
 // legacy usage update runs first; neither billing nor routing state is changed.
-func (s *OpenAIGatewayService) settleCacheTrace(ctx context.Context, result *OpenAIForwardResult, account *Account) {
+func (s *OpenAIGatewayService) settleCacheTrace(ctx context.Context, result *OpenAIForwardResult, account *Account, billingDelivery ...cacheTraceDelivery) {
 	if result == nil || (result.CacheTrace == nil && result.cacheTraceFailure == nil) {
 		return
 	}
 	// Event/observer failures must never escape into billing. No error or panic
 	// value is logged, and no recover is added to a frame traversal.
 	defer func() { _ = recover() }()
-	undeliveredAbuse := false
-	if st := resilience.StateFrom(ctx); st != nil {
-		disconnected, delivered, abuse := st.Disconnect()
-		if disconnected && !delivered {
-			if !abuse {
-				return
-			}
-			undeliveredAbuse = true
-		}
-	}
 	diagnostic := result.CacheDiagnostic
 	if diagnostic == nil || account == nil || account.Platform != PlatformOpenAI {
 		return
 	}
-	if undeliveredAbuse {
-		s.settleCacheTraceUndelivered(result, account)
+	delivery := cacheTraceDelivered
+	if len(billingDelivery) > 0 {
+		delivery = billingDelivery[0]
+	} else if st := resilience.StateFrom(ctx); st != nil && resilience.Current().DisconnectOn() {
+		disconnected, delivered, abuse := st.Disconnect()
+		if disconnected && !delivered {
+			delivery = cacheTraceUnbilled
+			if abuse {
+				delivery = cacheTraceAbuse
+			}
+		}
+	}
+	if delivery != cacheTraceDelivered {
+		s.settleCacheTraceUndelivered(result, account, delivery == cacheTraceAbuse)
 		return
 	}
 	if failed := result.cacheTraceFailure; failed != nil {
@@ -116,11 +128,11 @@ func (s *OpenAIGatewayService) settleCacheTrace(ctx context.Context, result *Ope
 	}
 }
 
-// Already-attempted requests billed under the existing abuse policy retain one
-// minimal joinable event. No body/usage reparse or loss attribution is performed.
+// Close every attempted undelivered send without publishing cache history.
+// Only requests billed under the existing abuse policy emit a minimal event.
 // The caller provides validated observation, diagnostic and account pointers and
 // isolates all observer failures from billing with its request-level recover.
-func (s *OpenAIGatewayService) settleCacheTraceUndelivered(result *OpenAIForwardResult, account *Account) {
+func (s *OpenAIGatewayService) settleCacheTraceUndelivered(result *OpenAIForwardResult, account *Account, abuse bool) {
 	var d cacheTraceData
 	var timing cacheTraceTimingToken
 	if failed := result.cacheTraceFailure; failed != nil {
@@ -147,8 +159,12 @@ func (s *OpenAIGatewayService) settleCacheTraceUndelivered(result *OpenAIForward
 	if timing.sequence != 0 && !timing.sentAt.IsZero() {
 		telemetry := s.cacheTelemetry()
 		telemetry.mu.Lock()
+		s.limitCacheTraceSessionsLocked(telemetry, diagnostic.Session)
 		cacheTraceSettleTimingLocked(telemetry, diagnostic.Session, timing, time.Now())
 		telemetry.mu.Unlock()
+	}
+	if !abuse {
+		return
 	}
 	emitCacheTraceRejected(d)
 	if result.cachePanel != nil {
