@@ -216,8 +216,7 @@
             {
               "field": "excluded_group_ids",
               "type": "id_list",
-              "ref": "group",
-              "options": []
+              "ref": "group"
             },
             {
               "field": "exclude_media",
