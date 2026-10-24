@@ -96,6 +96,7 @@ export default {
       decision_pending_header_policy: 'How to turn this on is still awaiting a decision by the owner. Make sure it is approved before saving.',
       decision_pending_fallback_scope: 'How to turn this on is still awaiting a decision by the owner. Make sure it is approved before saving.',
       decision_pending_static_routing: 'How to turn this on is still awaiting a decision by the owner. Make sure it is approved before saving.',
+      l01_all_accounts_unverified: 'This applies to all eligible accounts: during the rollout, select accounts explicitly.',
       account_options_unavailable: 'Account candidates were not loaded this time. Selected accounts stay, and those without a name show by ID. You can still enter account IDs; the server checks them.',
       group_options_unavailable: 'Group candidates were not loaded this time. Selected groups stay, and the picker lists all groups for now; the server checks them.',
     },
@@ -112,6 +113,7 @@ export default {
       decision_pending_header_policy: 'this awaits an owner decision, and I have the approval',
       decision_pending_fallback_scope: 'this awaits an owner decision, and I have the approval',
       decision_pending_static_routing: 'this awaits an owner decision, and I have the approval',
+      l01_all_accounts_unverified: 'This applies to all eligible accounts; none are selected explicitly',
       diagnostics_disabled: 'cache diagnostics are off, so cache observation will not work after saving',
       static_aware_routing_disabled: 'a required system switch is off, so saving has no effect',
       parse_error: 'the old configuration is unreadable and this save replaces it',
@@ -469,6 +471,11 @@ export default {
           label: 'Session header forwarding',
           description: 'whitelist forwards session headers as they are; normalize normalizes them first.',
           risk: 'Changes outbound headers; independent of the fill mode.',
+        },
+        max_inflight_per_key: {
+          label: 'In-flight cap per session',
+          description: 'Once a session has this many requests in flight, further requests get no filled session identifier, so a burst does not share one identifier.',
+          risk: 'A higher cap lets more concurrent requests share one session identifier.',
         },
       },
       anthropic_identity: {

@@ -96,6 +96,7 @@ export default {
       decision_pending_header_policy: '这一项的开启方式尚待负责人决定。保存前请确认已获批准。',
       decision_pending_fallback_scope: '这一项的开启方式尚待负责人决定。保存前请确认已获批准。',
       decision_pending_static_routing: '这一项的开启方式尚待负责人决定。保存前请确认已获批准。',
+      l01_all_accounts_unverified: '当前对全部合格账号生效：灰度期建议显式选择账号。',
       account_options_unavailable: '账号候选这次没有加载：已选账号照常保留，没有名称的只显示 ID；仍可手动输入账号 ID，由服务端校验。',
       group_options_unavailable: '分组候选这次没有加载：已选分组照常保留；选择器暂时列出全部分组，由服务端校验。',
     },
@@ -112,6 +113,7 @@ export default {
       decision_pending_header_policy: '这一项的开启方式尚待负责人决定，我已获批准',
       decision_pending_fallback_scope: '这一项的开启方式尚待负责人决定，我已获批准',
       decision_pending_static_routing: '这一项的开启方式尚待负责人决定，我已获批准',
+      l01_all_accounts_unverified: '当前对全部合格账号生效，没有显式选择账号',
       diagnostics_disabled: '缓存诊断开关关闭，缓存观测保存后不会工作',
       static_aware_routing_disabled: '依赖的系统开关尚未打开，保存后不会生效',
       parse_error: '原有配置无法识别，本次保存将覆盖它',
@@ -469,6 +471,11 @@ export default {
           label: '会话头转发方式',
           description: 'whitelist 按白名单原样转发会话头；normalize 规范化后再转发。',
           risk: '改变出站请求头；与会话标识补全方式无关。',
+        },
+        max_inflight_per_key: {
+          label: '每个会话的在途补全上限',
+          description: '同一会话的在途请求数达到这个值时，后续请求不再补全会话标识，避免大量并发请求共用一个标识。',
+          risk: '调高后，更多并发请求会共用同一个会话标识。',
         },
       },
       anthropic_identity: {
