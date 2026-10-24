@@ -1,4 +1,4 @@
-// F's M3 and M4 policy samples (00-shared/cache_policies_contract/m3m4, v1.0.2),
+// F's M3 and M4 policy samples (00-shared/cache_policies_contract/m3m4, v1.0.3),
 // copied verbatim into ./contract/m3m4 in the format of ./contract. The parent
 // samples (v1.7.4.6) stay frozen; these add the upstream_identity,
 // anthropic_identity and routing keys. When a sample and DESIGN §11 or

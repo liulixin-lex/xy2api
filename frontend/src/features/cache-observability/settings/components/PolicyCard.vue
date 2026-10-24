@@ -57,9 +57,20 @@
       </li>
     </ul>
     <ul v-if="entry.effective.warnings.length" class="mt-3 space-y-1" role="list" data-test="policy-warnings">
-      <li v-for="w in entry.effective.warnings" :key="w" class="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300">
+      <li v-for="w in entry.effective.warnings" :key="w" class="flex flex-wrap items-start gap-x-2 gap-y-1 text-sm text-amber-800 dark:text-amber-300">
         <Icon name="exclamationTriangle" size="sm" class="mt-0.5 shrink-0" aria-hidden="true" />
-        {{ codeLabel('warnings', w, t, te) }}
+        <span class="min-w-0 flex-1">{{ codeLabel('warnings', w, t, te) }}</span>
+        <!-- Candidates left out of this answer come back with a new read (v1.0.3). -->
+        <button
+          v-if="CANDIDATE_WARNINGS.includes(w)"
+          type="button"
+          class="btn btn-secondary btn-sm"
+          :disabled="state.loading.value || state.refreshing.value"
+          data-test="reload-candidates"
+          @click="reloadCandidates"
+        >
+          {{ t('admin.cacheSettings.candidates.reload') }}
+        </button>
       </li>
     </ul>
     <PolicyReceipt :state="state" :policy-key="meta.key" :now="now" />
@@ -69,7 +80,7 @@
         v-for="field in entry.schema"
         :key="field.field"
         :policy-key="meta.key"
-        :field="field"
+        :field="servedField(entry, field)"
         :value="getPath(draft, field.field)"
         :stored-value="getPath(base.stored.spec, field.field)"
         :default-value="getPath(entry.defaults, field.field)"
@@ -167,7 +178,7 @@ import Icon from '@/components/icons/Icon.vue'
 import { controlIdFor, type PolicyCardMeta } from '../catalog'
 import { returnFocusAfterPreview } from '../focusReturn'
 import { codeLabel, formatBoth, formatUtc, relativeTime, stateTone } from '../format'
-import { getPath, lockReason } from '../schema'
+import { CANDIDATE_WARNINGS, getPath, lockReason, servedField } from '../schema'
 import type { PoliciesState } from '../usePolicies'
 import PolicyField from './PolicyField.vue'
 import PolicyHistory from './PolicyHistory.vue'
@@ -219,6 +230,13 @@ async function goToFirstError() {
 const heading = ref<HTMLElement | null>(null)
 const previewButton = ref<HTMLButtonElement | null>(null)
 returnFocusAfterPreview(props.state, props.meta.key, () => [previewButton.value, heading.value])
+
+// The warning and its button go once the candidates are back; keep focus in the card (m-new-1).
+async function reloadCandidates() {
+  await props.state.refresh()
+  await nextTick()
+  if (!document.activeElement || document.activeElement === document.body) heading.value?.focus()
+}
 
 const historyOpen = ref(false)
 function toggleHistory() {

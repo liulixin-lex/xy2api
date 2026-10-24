@@ -95,6 +95,11 @@ export default {
       decision_pending_header_policy: '这一项的开启方式尚待负责人决定。保存前请确认已获批准。',
       decision_pending_fallback_scope: '这一项的开启方式尚待负责人决定。保存前请确认已获批准。',
       decision_pending_static_routing: '这一项的开启方式尚待负责人决定。保存前请确认已获批准。',
+      account_options_unavailable: '账号候选这次没有加载：已选账号照常保留，没有名称的只显示 ID；仍可手动输入账号 ID，由服务端校验。',
+      group_options_unavailable: '分组候选这次没有加载：已选分组照常保留；选择器暂时列出全部分组，由服务端校验。',
+    },
+    candidates: {
+      reload: '重新加载候选',
     },
     acks: {
       observability_off: '缓存观测未开启，这项改动的效果将无法评估',

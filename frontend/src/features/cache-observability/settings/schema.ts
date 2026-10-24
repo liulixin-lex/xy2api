@@ -50,6 +50,23 @@ export function idRef(field: SchemaField): 'group' | 'account' | null {
   return null
 }
 
+/**
+ * Warnings that mean the server left a key's candidates out of this answer (m3m4 README §3.4,
+ * v1.0.3): a failed lookup, or a disable-direction PUT that skips the account and group tables.
+ * An empty `options` then means "not loaded", not "none eligible".
+ */
+export const CANDIDATE_WARNINGS: readonly string[] = ['account_options_unavailable', 'group_options_unavailable']
+
+/**
+ * The field as the card offers it: candidates the server did not load count as absent. The
+ * selection stays as stored, ids without a name show as ids, and the server checks what is added.
+ */
+export function servedField(entry: PolicyEntry, field: SchemaField): SchemaField {
+  const unloaded =
+    !!idRef(field) && Array.isArray(field.options) && !field.options.length && entry.effective.warnings.some((w) => CANDIDATE_WARNINGS.includes(w))
+  return unloaded ? { ...field, options: undefined } : field
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }

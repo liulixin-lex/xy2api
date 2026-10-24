@@ -1,5 +1,5 @@
 // M3: cache_upstream_identity_policy (L-01) on the generic policy card, driven by F's m3m4
-// samples (v1.0.2, M3 part; checked against G's cache/p1-l01 d74eaf603): schema, defaults,
+// samples (v1.0.3, M3 part; checked against G's cache/p1-l01 d74eaf603): schema, defaults,
 // risk "high", and a reason plus a check in any direction but "disable".
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -89,7 +89,7 @@ describe('upstream_identity (M3) on the generic policy card, m3m4 samples', () =
   beforeEach(() => vi.clearAllMocks())
 
   it('has the M3 samples the card uses', () => {
-    expect(M3M4_NAMES.filter((n) => n.startsWith('m3_'))).toHaveLength(18)
+    expect(M3M4_NAMES.filter((n) => n.startsWith('m3_'))).toHaveLength(22)
   })
 
   it('renders every field of the served schema under the master switch, with the high risk tag', async () => {
@@ -251,6 +251,72 @@ describe('upstream_identity (M3) on the generic policy card, m3m4 samples', () =
     await preview(wrapper)
     expect(wrapper.get('[data-test="validate-errors"]').text()).toContain('admin.cacheSettings.errors.forbidden_field')
     expect(wrapper.get('[data-test="confirm-submit"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('keeps accounts editable when their candidates were not loaded, and reads them again (m3_list_account_options_unavailable)', async () => {
+    const { wrapper, api, state } = mountPanel('m3_list_account_options_unavailable')
+    await flushPromises()
+    const card = () => wrapper.get(`[data-test="policy-${KEY}"]`)
+    expect(card().get('[data-test="policy-warnings"]').text()).toContain('admin.cacheSettings.warnings.account_options_unavailable')
+    // "Not loaded" is not "none eligible": the stored accounts stay, by id, and more can be added.
+    const accounts = wrapper.get('[data-test="control-account_ids"]')
+    expect(accounts.text()).toContain('admin.cacheSettings.ids.item:{"id":101}')
+    expect(accounts.get('input').attributes('disabled')).toBeUndefined()
+    await addAccounts(wrapper, '103')
+    expect(state.draftOf(KEY).account_ids).toEqual([101, 102, 103])
+    const reads = api.listPolicies.mock.calls.length
+    api.listPolicies.mockResolvedValue(m3m4List('m3_list_on'))
+    await card().get('[data-test="reload-candidates"]').trigger('click')
+    await flushPromises()
+    expect(api.listPolicies).toHaveBeenCalledTimes(reads + 1)
+    expect(card().find('[data-test="policy-warnings"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="control-account_ids"]').text()).toContain('relay-a-01 (#101)')
+    expect(state.draftOf(KEY).account_ids).toEqual([101, 102, 103])
+
+    // GET of the key: the hint goes last, after the warnings already there (m3_get_account_options_unavailable).
+    const list = m3m4List('m3_list_on')
+    list.policies = list.policies.map((p) => (p.key === KEY ? m3m4Written('m3_get_account_options_unavailable') : p))
+    const both = mountPanel(list)
+    await flushPromises()
+    const warnings = both.wrapper.get(`[data-test="policy-${KEY}"] [data-test="policy-warnings"]`)
+    expect(warnings.findAll('li').map((li) => li.text())).toEqual([
+      'admin.cacheSettings.warnings.observability_off',
+      expect.stringContaining('admin.cacheSettings.warnings.account_options_unavailable'),
+    ])
+    expect(warnings.findAll('[data-test="reload-candidates"]')).toHaveLength(1)
+  })
+
+  it('reads the candidates again after a disable, whose PUT leaves them out (m3_put_disable_skip_account_options)', async () => {
+    const { wrapper, api } = mountPanel('m3_list_on', m3m4Validation('m3_validate_disable'))
+    await flushPromises()
+    await field(wrapper, 'mode').get('select').setValue('off')
+    await preview(wrapper)
+    const saved = m3m4Written('m3_put_disable_skip_account_options')
+    const reread = m3m4List('m3_list_on')
+    reread.policies = reread.policies.map((p) => (p.key === KEY ? { ...saved, schema: p.schema, effective: { ...saved.effective, warnings: [] } } : p))
+    api.putPolicy.mockResolvedValueOnce(saved)
+    api.listPolicies.mockResolvedValue(reread)
+    const reads = api.listPolicies.mock.calls.length
+    const body = m3m4Body('m3_put_disable_skip_account_options')
+    await wrapper.get('[data-test="reason"]').setValue(body.reason as string)
+    await wrapper.get('[data-test="confirm-submit"]').trigger('click')
+    await flushPromises()
+    expect(api.putPolicy.mock.calls[0]).toEqual([KEY, { ...body, confirm: { checkbox: false, typed: null } }])
+    expect(api.listPolicies).toHaveBeenCalledTimes(reads + 1)
+    expect(wrapper.find(`[data-test="policy-${KEY}"] [data-test="policy-warnings"]`).exists()).toBe(false)
+    expect(wrapper.get('[data-test="control-account_ids"]').text()).toContain('relay-a-01 (#101)')
+  })
+
+  it('narrows to ids the server does not look up as a plain disable (m3_validate_disable_ids_unverified)', async () => {
+    const { wrapper, api } = mountPanel('m3_list_default', m3m4Validation('m3_validate_disable_ids_unverified'))
+    await flushPromises()
+    await addAccounts(wrapper, '101, 999')
+    await preview(wrapper)
+    expect(api.validatePolicy).toHaveBeenCalledWith(KEY, m3m4Draft('m3_validate_disable_ids_unverified'))
+    expect(wrapper.get('[data-test="dialog-risk"]').classes()).toContain('badge-gray')
+    expect(field(wrapper, 'account_ids').text()).not.toContain('admin.cacheSettings.errors.')
+    expect(wrapper.find('[data-test="confirm-checkbox"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="confirm-submit"]').attributes('disabled')).toBeUndefined()
   })
 
   it('reads the M3 error envelopes: 400 unsupported and invalid, 422 confirm', () => {

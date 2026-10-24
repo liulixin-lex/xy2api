@@ -95,6 +95,11 @@ export default {
       decision_pending_header_policy: 'How to turn this on is still awaiting a decision by the owner. Make sure it is approved before saving.',
       decision_pending_fallback_scope: 'How to turn this on is still awaiting a decision by the owner. Make sure it is approved before saving.',
       decision_pending_static_routing: 'How to turn this on is still awaiting a decision by the owner. Make sure it is approved before saving.',
+      account_options_unavailable: 'Account candidates were not loaded this time. Selected accounts stay, and those without a name show by ID. You can still enter account IDs; the server checks them.',
+      group_options_unavailable: 'Group candidates were not loaded this time. Selected groups stay, and the picker lists all groups for now; the server checks them.',
+    },
+    candidates: {
+      reload: 'Reload candidates',
     },
     acks: {
       observability_off: 'cache observation is off, so the effect of this change cannot be evaluated',
