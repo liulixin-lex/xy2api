@@ -264,9 +264,13 @@ func TestCacheTraceT3SettlementUndeliveredEmitsNoRow(t *testing.T) {
 			s.settleCacheTrace(ctx, result, account)
 			if !delivered {
 				require.Empty(t, logs.String())
-				require.False(t, trace.settled)
+				require.True(t, trace.settled, "unbilled requests close send timing exactly once")
 				require.Nil(t, async.settled.Load(), "undelivered must not enable late history publication")
-				require.Nil(t, s.cacheTelemetry().sessions[result.CacheDiagnostic.Session].traceChains)
+				history := s.cacheTelemetry().sessions[result.CacheDiagnostic.Session].traceChains
+				require.NotNil(t, history, "closing the send keeps timing state")
+				require.Equal(t, [cachePrefixHistoryCount]cachePrefixChain{}, history.chains, "undelivered usage must not train prefix history")
+				require.Equal(t, trace.timing.sequence, history.recent[0].sequence)
+				require.False(t, history.recent[0].settledAt.IsZero(), "the retained send is closed")
 				return
 			}
 			traces := t3SettlementEvents(t, logs, "cache_trace")

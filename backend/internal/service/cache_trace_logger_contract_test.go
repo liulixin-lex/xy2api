@@ -60,16 +60,17 @@ func TestCacheTraceProductionLoggerContract(t *testing.T) {
 }
 
 type cacheTraceContractFixture struct {
-	s            *OpenAIGatewayService
-	c            *gin.Context
-	api          *APIKey
-	user         *User
-	account      *Account
-	rows         *openAIRecordUsageLogRepoStub
-	billing      *openAIRecordUsageBillingRepoStub
-	body         []byte
-	id           string
-	pricingModel string // only for the model-less no-session service fixture
+	s              *OpenAIGatewayService
+	c              *gin.Context
+	api            *APIKey
+	user           *User
+	account        *Account
+	rows           *openAIRecordUsageLogRepoStub
+	billing        *openAIRecordUsageBillingRepoStub
+	body           []byte
+	id             string
+	pricingModel   string // only for the model-less no-session service fixture
+	routingSession string // compatibility fixture for a previously selected legacy digest
 }
 
 func cacheTraceNewContractFixture(t *testing.T, name, protocol string) *cacheTraceContractFixture {
@@ -124,6 +125,11 @@ func (f *cacheTraceContractFixture) forwardReply(t *testing.T, protocol string, 
 	response.Header.Set("X-Request-Id", f.id)
 	f.s.httpUpstream = &httpUpstreamRecorder{resp: response}
 	f.s.GenerateSessionHash(f.c, f.body)
+	if f.routingSession != "" {
+		f.c.Set(openAICacheSessionGinKey, f.routingSession)
+		f.s.beginCacheTrace(f.c, f.body)
+		f.s.captureCacheDiagnostic(f.c, f.body)
+	}
 	var result *OpenAIForwardResult
 	var err error
 	if protocol == "chat" {
@@ -233,11 +239,13 @@ func cacheTraceRunProductionLoggerContract(t *testing.T) {
 			f.account.Extra["openai_passthrough"] = tc.passthrough
 			f.account.Extra["openai_responses_supported"] = !tc.raw
 			if tc.legacyRouting {
-				// Legacy callers without an API-key identity use the 16-hex
-				// routing digest. Billing still receives the explicit fixture key.
-				f.c.Set("api_key", &APIKey{GroupID: f.api.GroupID, Group: f.api.Group})
+				// Inject a previously selected legacy digest while retaining the
+				// authenticated key required by both trace and usage diagnostics.
+				// This covers logger compatibility, not a legacy routing decision.
+				f.routingSession, _ = deriveOpenAISessionHashes(explicitOpenAIRequestSessionID(f.c, f.body))
+				require.Regexp(t, `^[0-9a-f]{16}$`, f.routingSession)
 				f.c.Request = f.c.Request.WithContext(resilience.WithRequestState(f.c.Request.Context(), resilience.NewRequestState()))
-				require.Regexp(t, `^[0-9a-f]{16}$`, f.s.GenerateSessionHash(f.c, f.body))
+				f.s.GenerateSessionHash(f.c, f.body)
 				noteCacheTraceRebind(f.c.Request.Context(), resilience.CategoryStall)
 				NoteCacheTraceFailover(f.c.Request.Context(), 1)
 			}

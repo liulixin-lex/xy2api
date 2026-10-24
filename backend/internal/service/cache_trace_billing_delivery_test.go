@@ -90,7 +90,8 @@ func TestCacheTraceRecordUsageUsesBillingDeliveryDecision(t *testing.T) {
 					require.Equal(t, UsageBillingModeUndeliveredAbuse, *f.rows.lastLog.BillingMode)
 				} else {
 					require.NotEqual(t, "undelivered", events[0]["na_reason"])
-					require.Nil(t, f.rows.lastLog.BillingMode)
+					require.NotNil(t, f.rows.lastLog.BillingMode)
+					require.Equal(t, string(BillingModeToken), *f.rows.lastLog.BillingMode)
 				}
 			}
 		})
