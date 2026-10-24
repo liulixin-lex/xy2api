@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -15,9 +16,43 @@ import (
 	"testing"
 	"time"
 
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
+	dbent "github.com/liulixin-lex/xy2api/ent"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
+	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 )
+
+// northstarPostgres isolates committed rollups and usage fixtures from the
+// package's shared database, including its heap pages and planner statistics.
+// The repository owns its transactions, so an outer rollback cannot isolate
+// these tests. A separate server also avoids VACUUM/ANALYZE on shared tables.
+func northstarPostgres(t *testing.T) (*sql.DB, *dbent.Client) {
+	t.Helper()
+	ctx := context.Background()
+	pg, err := tcpostgres.Run(ctx, selectDockerImage(ctx, postgresImageTag),
+		tcpostgres.WithDatabase("xy2api_northstar_test"),
+		tcpostgres.WithUsername("postgres"),
+		tcpostgres.WithPassword("postgres"),
+		tcpostgres.BasicWaitStrategies(),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		require.NoError(t, pg.Terminate(cleanupCtx))
+	})
+	dsn, err := pg.ConnectionString(ctx, "sslmode=disable", "TimeZone=UTC")
+	require.NoError(t, err)
+	db, err := openSQLWithRetry(ctx, dsn, 30*time.Second)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	require.NoError(t, ApplyMigrations(ctx, db))
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	return db, client
+}
 
 func northstarCSV(t *testing.T, name string) []map[string]string {
 	t.Helper()
@@ -38,8 +73,7 @@ func northstarCSV(t *testing.T, name string) []map[string]string {
 
 func TestCacheNorthstarPostgresReconciliation(t *testing.T) {
 	ctx := context.Background()
-	db := integrationDB
-	client := testEntClient(t)
+	db, client := northstarPostgres(t)
 	manifest, err := os.ReadFile("testdata/northstar/SHA256.json")
 	require.NoError(t, err)
 	hashes := map[string]string{}
@@ -51,14 +85,12 @@ func TestCacheNorthstarPostgresReconciliation(t *testing.T) {
 	}
 	user := mustCreateUser(t, client, &service.User{})
 	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: fmt.Sprintf("northstar-%d", user.ID), Name: "synthetic"})
-	t.Cleanup(func() { _, e := db.Exec("DELETE FROM users WHERE id=$1", user.ID); require.NoError(t, e) })
 	accounts := map[string]int64{}
 	groups := map[string]int64{}
 	originalGroups := map[int64]string{0: "0"}
 	for _, platform := range []string{"openai", "anthropic", "gemini"} {
 		a := mustCreateAccount(t, client, &service.Account{Name: "northstar-" + platform, Platform: platform, Type: "apikey", Credentials: map[string]any{"base_url": "https://credential:synthetic@relay.example/v1"}})
 		accounts[platform] = a.ID
-		t.Cleanup(func() { _, e := db.Exec("DELETE FROM accounts WHERE id=$1", a.ID); require.NoError(t, e) })
 	}
 	for _, row := range northstarCSV(t, "usage.csv") {
 		var group any
@@ -68,7 +100,6 @@ func TestCacheNorthstarPostgresReconciliation(t *testing.T) {
 				g := mustCreateGroup(t, client, &service.Group{Name: "northstar-" + label, Platform: row["platform"]})
 				groups[label] = g.ID
 				originalGroups[g.ID] = row["group_id"]
-				t.Cleanup(func() { _, e := db.Exec("DELETE FROM groups WHERE id=$1", g.ID); require.NoError(t, e) })
 			}
 			group = groups[label]
 		}
@@ -90,14 +121,7 @@ func TestCacheNorthstarPostgresReconciliation(t *testing.T) {
 	p := service.CacheNorthstarPolicy{PolicyVersion: "synthetic-reconciliation", ExcludeMedia: true, UnknownThreshold: "aux_only",
 		ModelThresholds:  []service.CacheNorthstarThresholdRule{{Match: "exact", Model: "gpt-5.6", Threshold: 1024}, {Match: "prefix", Model: "claude-", Threshold: 2048}, {Match: "exact", Model: "gemini-2.5", Threshold: 4096}},
 		ExcludedGroupIDs: []int64{groups["openai:99"]}}
-	t.Cleanup(func() {
-		for _, table := range []string{"cache_northstar_hourly", "cache_northstar_hours"} {
-			_, e := db.Exec("DELETE FROM "+table+" WHERE policy_version=$1", p.PolicyVersion)
-			require.NoError(t, e)
-		}
-		_, e := db.Exec("DELETE FROM cache_northstar_rollup_state WHERE policy_version=$1", p.PolicyVersion)
-		require.NoError(t, e)
-	})
+
 	start := time.Date(2026, 10, 23, 10, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
 	repo := NewCacheNorthstarRepository(db)
@@ -207,17 +231,12 @@ func TestCacheNorthstarPostgresReconciliation(t *testing.T) {
 
 func TestCacheNorthstarPostgresAtomicReplay(t *testing.T) {
 	ctx := context.Background()
-	db := integrationDB
+	db, _ := northstarPostgres(t)
 	repo := NewCacheNorthstarRepository(db)
 	p := service.CacheNorthstarPolicy{PolicyVersion: "atomic-replay"}
 	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
-	t.Cleanup(func() {
-		for _, table := range []string{"cache_northstar_hourly", "cache_northstar_hours", "cache_northstar_rollup_state"} {
-			_, e := db.Exec("DELETE FROM "+table+" WHERE policy_version=$1", p.PolicyVersion)
-			require.NoError(t, e)
-		}
-	})
+
 	require.NoError(t, repo.AggregateCacheNorthstar(ctx, end.Add(-time.Hour), end, p, end, false))
 	require.NoError(t, repo.AggregateCacheNorthstar(ctx, start, end, p, end, true))
 	state, err := repo.GetCacheNorthstarState(ctx)
@@ -232,10 +251,7 @@ func TestCacheNorthstarPostgresAtomicReplay(t *testing.T) {
 	_, err = db.Exec(`CREATE FUNCTION cache_northstar_test_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic failure'; END $$;
  CREATE TRIGGER cache_northstar_test_fail BEFORE INSERT ON cache_northstar_hours FOR EACH ROW EXECUTE FUNCTION cache_northstar_test_fail()`)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		_, e := db.Exec("DROP TRIGGER IF EXISTS cache_northstar_test_fail ON cache_northstar_hours; DROP FUNCTION IF EXISTS cache_northstar_test_fail()")
-		require.NoError(t, e)
-	})
+
 	require.Error(t, repo.AggregateCacheNorthstar(ctx, start, end, p, end.Add(time.Hour), true))
 	after, err := repo.GetCacheNorthstarState(ctx)
 	require.NoError(t, err)
