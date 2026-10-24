@@ -1,5 +1,5 @@
-// M2b: stats split by platform (00-shared/cache_panel_contract/m2b v1.0, README §1.3 and §1.5).
-// F's four samples, copied verbatim into ./contract/m2b, pass the production guard and drive the
+// M2b: stats split by platform (00-shared/cache_panel_contract/m2b v1.0.2, README §1.3 to §1.5).
+// F's samples, copied verbatim into ./contract/m2b, pass the production guard and drive the
 // two cards that carry OpenAI-only metrics: IdentityCard (pck, session headers) and CoverageCard
 // (category completeness). The default platform=openai answer (parent stats_24h) stays as in M2.
 import { mount } from '@vue/test-utils'
@@ -60,8 +60,8 @@ const tag = (wrapper: ReturnType<typeof mount>, name: 'openaiOnly' | 'bridgeOnly
 const metricLabels = (coverage: ReturnType<typeof mount>) => coverage.findAll('dt').map((dt) => dt.text())
 
 describe('M2b stats scope notes on the stats cards (cache_panel_contract/m2b v1.0)', () => {
-  it('has the four samples, each accepted by the production guard', () => {
-    expect(NAMES.sort()).toEqual(['m2b_stats_all', 'm2b_stats_anthropic', 'm2b_stats_openai_bridge_only', 'm2b_stats_platform_not_covered'])
+  it('has the samples, each accepted by the production guard', () => {
+    expect(NAMES.sort()).toEqual(['m2b_stats_all', 'm2b_stats_all_without_openai', 'm2b_stats_anthropic', 'm2b_stats_openai_bridge_only', 'm2b_stats_openai_history_not_covered', 'm2b_stats_platform_not_covered'])
     for (const name of NAMES) expect(() => stats(name), name).not.toThrow()
   })
 
@@ -107,6 +107,22 @@ describe('M2b stats scope notes on the stats cards (cache_panel_contract/m2b v1.
     expect(identity.find('[data-test="pck-out"]').exists()).toBe(true)
     expect(metricLabels(coverage)).toHaveLength(2)
     expect(coverage.text()).toContain('admin.cacheCharts.coverage.notes.openai_native_excluded')
+  })
+
+  it('says the same in the all view when that view covers no OpenAI traffic (m2b_stats_all_without_openai)', () => {
+    // v1.0.2 §1.4: q=all sums the covered partitions only; without openai the OpenAI-only metrics are [] or null.
+    expect(statsScope(stats('m2b_stats_all_without_openai'))).toMatchObject({ openaiOnly: true, openaiMetricsAbsent: true })
+    const { identity, coverage } = mountCards('m2b_stats_all_without_openai')
+    expect(identity.get('[data-test="identity-openai-only"]').text()).toContain('admin.cacheCharts.identity.openaiOnlyEmpty')
+    expect(metricLabels(coverage)).toHaveLength(1)
+  })
+
+  it('keeps the recorded data of a platform observed earlier in the window, under the not-observed note (m2b_stats_openai_history_not_covered)', () => {
+    const { identity, coverage } = mountCards('m2b_stats_openai_history_not_covered')
+    expect(coverage.get('[data-test="coverage-not-covered"]').exists()).toBe(true)
+    expect(identity.find('[data-test="pck-out"]').exists()).toBe(true)
+    expect(tag(identity, 'openaiOnly')).toHaveLength(0)
+    expect(metricLabels(coverage)).toHaveLength(2)
   })
 
   it('leaves the default platform=openai answer as in M2: no tags, both metrics (stats_24h)', () => {

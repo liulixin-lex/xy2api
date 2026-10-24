@@ -706,7 +706,7 @@ export default {
       inbound: 'Inbound',
       outbound: 'Outbound',
       relation: 'Outbound session_id source: ',
-      openaiOnlyEmpty: 'Session keys and session headers exist for OpenAI requests only; this platform has none.',
+      openaiOnlyEmpty: 'Session keys and session headers count OpenAI requests only; there are none in the current scope.',
     },
     routing: {
       title: 'Routing and rebind reasons',

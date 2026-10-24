@@ -706,7 +706,7 @@ export default {
       inbound: '入站',
       outbound: '出站',
       relation: '出站 session_id 来源：',
-      openaiOnlyEmpty: '会话键与会话头只对 OpenAI 请求定义，当前平台没有这些指标。',
+      openaiOnlyEmpty: '会话键与会话头只统计 OpenAI 请求，当前范围内没有这些数据。',
     },
     routing: {
       title: '选号与换号原因',
