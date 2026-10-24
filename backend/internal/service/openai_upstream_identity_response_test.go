@@ -22,7 +22,8 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// Echo the actual request member. Omitting it in this mock would hide B-M3-1.
+// Echo explicit request members, and return null when none was supplied.
+// Both arms must retain this no-key response shape; omission would hide B-M3-1-r1.
 type l01EchoUpstream struct {
 	*httpUpstreamRecorder
 	format string
@@ -39,12 +40,13 @@ func (u *l01EchoUpstream) Do(req *http.Request, proxy string, accountID int64, c
 	if strings.HasPrefix(u.format, "compact") {
 		payload = []byte(`{"id":"cmp-l01-synthetic","object":"response.compaction","output":[{"type":"compaction","id":"cmp-item","encrypted_content":"synthetic"}],"usage":{"input_tokens":2048,"input_tokens_details":{"cached_tokens":1024},"output_tokens":7}}`)
 	}
+	keyJSON := []byte("null")
 	if key := gjson.GetBytes(u.lastBody, "prompt_cache_key"); key.Exists() {
-		var err error
-		payload, err = sjson.SetRawBytes(payload, "prompt_cache_key", []byte(key.Raw))
-		if err != nil {
-			return nil, err
-		}
+		keyJSON = []byte(key.Raw)
+	}
+	payload, err := sjson.SetRawBytes(payload, "prompt_cache_key", keyJSON)
+	if err != nil {
+		return nil, err
 	}
 	contentType := "application/json"
 	if strings.HasPrefix(u.format, "sse") {
@@ -60,10 +62,13 @@ func (u *l01EchoUpstream) Do(req *http.Request, proxy string, accountID int64, c
 				_, _ = fmt.Fprintf(&stream, "event: %s\ndata: {\"type\":%q,\"response\":%s}\n\n", kind, kind, payload)
 			}
 		}
-		if !strings.Contains(u.format, "unfinished") {
+		if !strings.Contains(u.format, "unfinished") && !strings.Contains(u.format, "eof") {
 			_, _ = stream.WriteString("data: [DONE]\n\n")
 		}
 		payload = []byte(stream.String())
+		if strings.Contains(u.format, "eof") {
+			payload = bytes.TrimSuffix(payload, []byte("\n\n"))
+		}
 	}
 	status := http.StatusOK
 	if u.format == "cyber" {
@@ -87,6 +92,9 @@ var l01EchoCases = []l01EchoCase{
 	{name: "json", format: "json"},
 	{name: "stream", format: "sse", stream: true},
 	{name: "stream_multiline", format: "sse_multiline", stream: true},
+	{name: "stream_eof", format: "sse_eof", stream: true},
+	{name: "stream_multiline_eof", format: "sse_multiline_eof", stream: true},
+	{name: "buffered_eof", format: "sse_eof"},
 	{name: "buffered_multiline_unfinished", format: "sse_multiline_unfinished"},
 	{name: "buffered", format: "sse"},
 	{name: "buffered_unfinished", format: "sse_unfinished"},
@@ -97,8 +105,13 @@ var l01EchoCases = []l01EchoCase{
 func l01EchoFixture(t *testing.T, tc l01EchoCase, enabled, observe bool, skip string) (l01ResponsesForwardFixture, string) {
 	t.Helper()
 	body := fmt.Sprintf(`{"model":"gpt-5.4","input":[{"type":"message","role":"user","content":"synthetic-stable-history"}],"stream":%t}`, tc.stream)
-	if skip == "client_pck" {
+	switch skip {
+	case "client_pck":
 		body = strings.TrimSuffix(body, "}") + `,"prompt_cache_key":"explicit-client-key"}`
+	case "client_pck_null":
+		body = strings.TrimSuffix(body, "}") + `,"prompt_cache_key":null}`
+	case "client_pck_empty":
+		body = strings.TrimSuffix(body, "}") + `,"prompt_cache_key":""}`
 	}
 	f := newL01ResponsesForwardFixture(t, body, l01ChatTestPolicy(enabled, true), 99, 10)
 	if !observe {
@@ -131,13 +144,14 @@ func TestL01ResponseEchoApplied(t *testing.T) {
 				require.NotEmpty(t, uuid, "exercise actual injection")
 				require.True(t, openAIUpstreamIdentityResponseApplied(candidate.context, candidate.account))
 				require.NotContains(t, candidate.response.Body.String(), uuid)
-				require.NotContains(t, candidate.response.Body.String(), "prompt_cache_key")
+				require.Contains(t, base.response.Body.String(), `"prompt_cache_key":null`, "baseline must exercise explicit null")
+				require.Contains(t, candidate.response.Body.String(), `"prompt_cache_key":null`, "retain the baseline member")
 				require.Equal(t, base.response.Code, candidate.response.Code)
 				require.Equal(t, base.response.Header(), candidate.response.Header())
 				if strings.Contains(tc.format, "multiline") {
 					require.Equal(t, l01EchoSSEObjects(t, base.response.Body.String()), l01EchoSSEObjects(t, candidate.response.Body.String()), "restore each complete SSE object")
 				} else {
-					require.Equal(t, base.response.Body.Bytes(), candidate.response.Body.Bytes(), "restore documented no-key shape")
+					require.Equal(t, base.response.Body.Bytes(), candidate.response.Body.Bytes(), "restore baseline null bytes and member position")
 				}
 				require.Equal(t, want.Usage, got.Usage, "scrubbing cannot change billing")
 				if observe {
@@ -158,7 +172,10 @@ func TestL01ResponseEchoInactive(t *testing.T) {
 		}{
 			{"mode_off", false, ""},
 			{"mode_off_explicit", false, "client_pck"},
+			{"mode_off_explicit_null", false, "client_pck_null"},
 			{"client_pck", true, "client_pck"},
+			{"client_pck_null", true, "client_pck_null"},
+			{"client_pck_empty", true, "client_pck_empty"},
 			{"header_only_off", true, "header_only_off"},
 		} {
 			for _, observe := range []bool{false, true} {
@@ -186,11 +203,14 @@ func TestL01ResponseEchoInactive(t *testing.T) {
 func TestL01ResponseRestorationBoundaries(t *testing.T) {
 	for _, tc := range []struct{ name, input, want string }{
 		{"absent", `{"object":"response","usage":{"input_tokens":7}}`, `{"object":"response","usage":{"input_tokens":7}}`},
-		{"root", `{"prompt_cache_key":"u","output":[]}`, `{"output":[]}`},
-		{"duplicate", `{"prompt_cache_key":"u","prompt_cache_key":"u","output":[]}`, `{"output":[]}`},
-		{"null", `{"prompt_cache_key":null,"output":[]}`, `{"output":[]}`},
-		{"nested", `{"type":"response.completed","response":{"prompt_cache_key":"u","output":[]}}`, `{"type":"response.completed","response":{"output":[]}}`},
-		{"content_untouched", `{"prompt_cache_key":"u","output":[{"prompt_cache_key":"client-data","text":"prompt_cache_key"}]}`, `{"output":[{"prompt_cache_key":"client-data","text":"prompt_cache_key"}]}`},
+		{"root", `{"prompt_cache_key":"u","output":[]}`, `{"prompt_cache_key":null,"output":[]}`},
+		{"duplicate", `{"prompt_cache_key":"u","prompt_cache_key":"u","output":[]}`, `{"prompt_cache_key":null,"prompt_cache_key":null,"output":[]}`},
+		{"null", `{"prompt_cache_key":null,"output":[]}`, `{"prompt_cache_key":null,"output":[]}`},
+		{"nested", `{"type":"response.completed","response":{"prompt_cache_key":"u","output":[]}}`, `{"type":"response.completed","response":{"prompt_cache_key":null,"output":[]}}`},
+		{"content_untouched", `{"prompt_cache_key":"u","output":[{"prompt_cache_key":"client-data","text":"prompt_cache_key"}]}`, `{"prompt_cache_key":null,"output":[{"prompt_cache_key":"client-data","text":"prompt_cache_key"}]}`},
+		{"position_and_spacing", `{ "before":1, "prompt_cache_key" : "u" , "after":2 }`, `{ "before":1, "prompt_cache_key" : null , "after":2 }`},
+		{"null_then_duplicate", `{"prompt_cache_key":null,"prompt_cache_key":"u"}`, `{"prompt_cache_key":null,"prompt_cache_key":null}`},
+		{"escaped_member", `{"\u0070rompt_cache_key":"u"}`, `{"\u0070rompt_cache_key":null}`},
 		{"delta", `{"type":"response.output_text.delta","delta":"prompt_cache_key"}`, `{"type":"response.output_text.delta","delta":"prompt_cache_key"}`},
 		{"done", `[DONE]`, `[DONE]`},
 	} {
@@ -205,14 +225,15 @@ func TestL01ResponseRestorationBoundaries(t *testing.T) {
 			input := fmt.Sprintf(`{"type":"response.%s","response":{"prompt_cache_key":"u","output":[],"usage":{"input_tokens":7}}}`, kind)
 			got, err := restoreOpenAIUpstreamIdentityResponse([]byte(input))
 			require.NoError(t, err)
-			require.False(t, gjson.GetBytes(got, "response.prompt_cache_key").Exists())
+			require.True(t, gjson.GetBytes(got, "response.prompt_cache_key").Exists())
+			require.Equal(t, "null", gjson.GetBytes(got, "response.prompt_cache_key").Raw)
 			require.Equal(t, int64(7), gjson.GetBytes(got, "response.usage.input_tokens").Int())
 		})
 	}
 	const body = ": keepalive\r\nevent: response.created\r\nid: 12\r\ndata:  {\"response\":{\"prompt_cache_key\":\"u\",\"output\":[]}} \r\n\r\ndata:[DONE]\r\n"
 	got, err := restoreOpenAIUpstreamIdentitySSE([]byte(body))
 	require.NoError(t, err)
-	require.Equal(t, strings.Replace(body, `"prompt_cache_key":"u",`, "", 1), string(got))
+	require.Equal(t, strings.Replace(body, `"prompt_cache_key":"u"`, `"prompt_cache_key":null`, 1), string(got))
 }
 
 func TestL01ResponseAppliedMarkerScope(t *testing.T) {
@@ -276,7 +297,7 @@ func TestL01ResponseDuplicateEnvelope(t *testing.T) {
 	body := []byte(`{"type":"response.completed","response":{"prompt_cache_key":"u"},"response":{"prompt_cache_key":"u","output":[]}}`)
 	got, err := restoreOpenAIUpstreamIdentityResponse(body)
 	require.NoError(t, err)
-	require.Equal(t, `{"type":"response.completed","response":{},"response":{"output":[]}}`, string(got))
+	require.Equal(t, `{"type":"response.completed","response":{"prompt_cache_key":null},"response":{"prompt_cache_key":null,"output":[]}}`, string(got))
 }
 
 func TestL01ResponseSSEBufferFragmentsAndEOF(t *testing.T) {
@@ -296,8 +317,8 @@ func TestL01ResponseSSEBufferFragmentsAndEOF(t *testing.T) {
 		tail, err := w.Finish()
 		require.NoError(t, err)
 		_, _ = output.Write(tail)
-		require.NotContains(t, output.String(), "prompt_cache_key")
-		require.Equal(t, l01EchoSSEObjects(t, strings.Replace(input, `"prompt_cache_key":"u",`, "", 1)), l01EchoSSEObjects(t, output.String()))
+		require.Contains(t, output.String(), `"prompt_cache_key":null`)
+		require.Equal(t, l01EchoSSEObjects(t, strings.Replace(input, `"prompt_cache_key":"u"`, `"prompt_cache_key":null`, 1)), l01EchoSSEObjects(t, output.String()))
 	}
 	var output strings.Builder
 	w := openAIUpstreamIdentitySSEBuffer{limit: 4}

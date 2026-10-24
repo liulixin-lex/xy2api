@@ -2,13 +2,16 @@ package service
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"sort"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 )
 
 const cachePolicyAccountOptionLimit = 500
+const cachePolicyAccountOptionsUnavailable = "account_options_unavailable"
+
+var errCachePolicyAccountOptionsUnavailable = errors.New("cache policy account options unavailable")
 
 // Optional administrator-only capability on the already injected repository.
 // Keep lookup-only test/minimal services valid without widening their interface.
@@ -41,7 +44,9 @@ func (s *CachePolicyService) upstreamIdentityAccountOptions(ctx context.Context)
 		params := pagination.PaginationParams{Page: page, PageSize: cachePolicyAccountOptionLimit, SortBy: "id", SortOrder: pagination.SortOrderAsc}
 		accounts, _, err := lookup.ListWithFilters(ctx, params, PlatformOpenAI, AccountTypeAPIKey, "", "", 0, "")
 		if err != nil {
-			return nil, fmt.Errorf("list cache policy account options: %w", err)
+			// Never propagate provider/database details to an admin response or log.
+			// A failed later page invalidates the entire candidate snapshot.
+			return []cachePolicyAccountOption{}, errCachePolicyAccountOptionsUnavailable
 		}
 		for i := range accounts {
 			account := &accounts[i]
@@ -71,4 +76,20 @@ func setCachePolicyAccountOptions(view *CachePolicyView, options []cachePolicyAc
 			return
 		}
 	}
+}
+
+// Options are response-only picker metadata, not a prerequisite for reading or
+// committing policy state. The warning never enters runtime snapshots/validate.
+func (s *CachePolicyService) populateCachePolicyAccountOptions(ctx context.Context, view *CachePolicyView) {
+	options, err := s.upstreamIdentityAccountOptions(ctx)
+	if err != nil {
+		setCachePolicyUnavailableAccountOptions(view)
+		return
+	}
+	setCachePolicyAccountOptions(view, options)
+}
+
+func setCachePolicyUnavailableAccountOptions(view *CachePolicyView) {
+	setCachePolicyAccountOptions(view, []cachePolicyAccountOption{})
+	view.Effective.Warnings = append(view.Effective.Warnings, cachePolicyAccountOptionsUnavailable)
 }

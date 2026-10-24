@@ -3,7 +3,7 @@
     "M3-2",
     "C-4"
   ],
-  "_note": "M3 方向样例 mixed：rollout 50→80 为扩大，account_ids 从空（全部）改为 [101] 为收窄。两者同时出现即 mixed，按非 disable 方向处理：要求理由与勾选。",
+  "_note": "M3 方向样例 mixed：rollout 50→80 为扩大，account_ids 从 [101,102] 改为 [101]（移除 102）为收窄。两者同时出现即 mixed，按非 disable 方向处理：要求理由与勾选。v1.0.1：diff 的 before 更正为与 m3_list_on 同一 rev 4 的存储值 [101,102]（请求不变）。",
   "request": {
     "method": "POST",
     "path": "/api/v1/admin/cache/policies/upstream_identity/validate",
@@ -33,7 +33,10 @@
       "diff": [
         {
           "field": "account_ids",
-          "before": [],
+          "before": [
+            101,
+            102
+          ],
           "after": [
             101
           ]

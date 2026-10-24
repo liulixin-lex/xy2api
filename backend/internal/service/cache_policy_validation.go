@@ -300,7 +300,7 @@ func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePoli
 	}
 	var updated cachePolicyEntry
 	var diff []CachePolicyDiff
-	var accountOptions []cachePolicyAccountOption
+	var skipAccountOptions bool
 	err := s.store.UpdateCachePolicy(ctx, cachePolicySettings[i], func(raw string) (string, error) {
 		current := s.parse(i, raw)
 		v, spec, err := s.validationForWrite(ctx, i, current, w, bodyErrors)
@@ -326,14 +326,9 @@ func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePoli
 		if len(missing) > 0 {
 			return "", &CachePolicyError{422, "CACHE_POLICY_CONFIRM_REQUIRED", "confirmation required", map[string]string{"missing": strings.Join(missing, ",")}}
 		}
-		if i == 3 {
-			// Read options before the transaction commits. A lookup failure must
-			// not report failure after the policy has already been persisted.
-			accountOptions, err = s.upstreamIdentityAccountOptions(ctx)
-			if err != nil {
-				return "", err
-			}
-		}
+		// Candidate enumeration is response metadata, performed after commit.
+		// Disable must avoid both account validation and candidate enumeration.
+		skipAccountOptions = v.Direction == "disable"
 		now := s.now().UTC()
 		reason := strings.TrimSpace(w.Reason)
 		updated = cachePolicyEntry{envelope: CachePolicyEnvelope{v.CurrentRev + 1, &now, &actor, &reason, spec}, loadedAt: now}
@@ -355,7 +350,11 @@ func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePoli
 	}
 	view := s.view(i, updated, s.snapshot.Load())
 	if i == 3 {
-		setCachePolicyAccountOptions(&view, accountOptions)
+		if skipAccountOptions {
+			setCachePolicyUnavailableAccountOptions(&view)
+		} else {
+			s.populateCachePolicyAccountOptions(ctx, &view)
+		}
 	}
 	return view, diff, nil
 }

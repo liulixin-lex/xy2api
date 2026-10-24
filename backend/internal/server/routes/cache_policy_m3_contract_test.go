@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,13 +53,40 @@ func (cacheM3OptionAccounts) ListWithFilters(_ context.Context, _ pagination.Pag
 	}, &pagination.PaginationResult{Total: 5}, nil
 }
 
+type cacheM3FaultAccounts struct {
+	cacheM3OptionAccounts
+	failOptions   bool
+	forbidQueries bool
+	getCalls      int
+	listCalls     int
+}
+
+func (r *cacheM3FaultAccounts) GetByIDs(ctx context.Context, ids []int64) ([]*service.Account, error) {
+	r.getCalls++
+	if r.forbidQueries {
+		panic("rollback must not query accounts")
+	}
+	return r.cacheM3OptionAccounts.GetByIDs(ctx, ids)
+}
+
+func (r *cacheM3FaultAccounts) ListWithFilters(ctx context.Context, p pagination.PaginationParams, platform, kind, status, search string, group int64, privacy string) ([]service.Account, *pagination.PaginationResult, error) {
+	r.listCalls++
+	if r.forbidQueries {
+		panic("rollback must not enumerate account options")
+	}
+	if r.failOptions {
+		return nil, nil, errors.New("ACCOUNT_OPTIONS_HTTP_SECRET_ERROR_MARKER")
+	}
+	return r.cacheM3OptionAccounts.ListWithFilters(ctx, p, platform, kind, status, search, group, privacy)
+}
+
 func TestCachePolicyM3ContractReplay(t *testing.T) {
 	root := "testdata/cache_policies_contract/m3m4"
 	manifest, err := os.ReadFile(filepath.Join(root, "SHA256.json"))
 	require.NoError(t, err)
 	hashes := map[string]string{}
 	require.NoError(t, json.Unmarshal(manifest, &hashes))
-	require.Len(t, hashes, 18)
+	require.Len(t, hashes, 22)
 	names := make([]string, 0, len(hashes))
 	for name := range hashes {
 		names = append(names, name)
@@ -76,6 +104,10 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 			repo := &cacheRouteStore{rows: map[string]string{service.SettingKeyClaudeCacheFallbackPolicy: `{"enabled":true,"group_ids":[1,2]}`}}
 			auditRepo := &cacheRouteAudit{}
 			audit := service.NewAuditLogService(auditRepo, nil)
+			accounts := &cacheM3FaultAccounts{
+				failOptions:   name == "m3_list_account_options_unavailable.json" || name == "m3_get_account_options_unavailable.json",
+				forbidQueries: name == "m3_put_disable_skip_account_options.json" || name == "m3_validate_disable_ids_unverified.json",
+			}
 			cfg := &config.Config{}
 			cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
 			version := "0.0.0-contract"
@@ -124,6 +156,21 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 						seedPolicy(t, repo, policy)
 					}
 				}
+			case name == "m3_get_account_options_unavailable.json":
+				b, err := json.Marshal(data)
+				require.NoError(t, err)
+				var view service.CachePolicyView
+				require.NoError(t, json.Unmarshal(b, &view))
+				seedPolicy(t, repo, view)
+				repo.rows["cache_observability_policy"] = `{"rev":0,"spec":{"enabled":false}}`
+			case name == "m3_put_disable_skip_account_options.json":
+				b, err := json.Marshal(data)
+				require.NoError(t, err)
+				var view service.CachePolicyView
+				require.NoError(t, json.Unmarshal(b, &view))
+				view.Stored.Rev--
+				view.Stored.Spec["mode"] = "uuid_fill"
+				seedPolicy(t, repo, view)
 			case strings.HasPrefix(name, "m3_validate_"):
 				rev := int64(data["current_rev"].(float64))
 				spec := map[string]any{"mode": "off", "account_ids": []int64{}, "rollout_percent": 0}
@@ -184,7 +231,7 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 					}
 				}
 			}
-			policies := service.NewCachePolicyService(repo, cfg, service.WithCachePolicyAccounts(cacheM3OptionAccounts{}), service.WithCachePolicyClock(func() time.Time { return now }))
+			policies := service.NewCachePolicyService(repo, cfg, service.WithCachePolicyAccounts(accounts), service.WithCachePolicyClock(func() time.Time { return now }))
 			require.NoError(t, policies.Refresh(context.Background()))
 			router := cacheTestRouter(policies, audit, nil)
 			// Keep the product build-version field exact for list fixtures.
@@ -193,6 +240,14 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 			}
 			status, got := cacheCall(t, router, f.Request.Method, f.Request.Path, f.Request.Body)
 			require.Equal(t, f.Status, status)
+			require.NotContains(t, fmt.Sprint(got), "ACCOUNT_OPTIONS_HTTP_SECRET_ERROR_MARKER")
+			if accounts.forbidQueries {
+				require.Zero(t, accounts.getCalls)
+				require.Zero(t, accounts.listCalls)
+			}
+			if accounts.failOptions {
+				require.Equal(t, 1, accounts.listCalls)
+			}
 			if strings.HasPrefix(name, "m3_list_") {
 				policies := got["data"].(map[string]any)["policies"].([]any)
 				require.Len(t, policies, 6)
@@ -219,4 +274,51 @@ func cacheM3ContractRouter(p *service.CachePolicyService, audit *service.AuditLo
 	h := &handler.Handlers{Admin: &handler.AdminHandlers{CachePolicy: adminhandler.NewCachePolicyHandler(p, audit, version)}}
 	registerCachePolicyRoutes(group, h)
 	return r
+}
+
+func TestCachePolicyM3EnablePutOptionsFailure(t *testing.T) {
+	// Keep the success fixture exact except for the two fields affected by
+	// optional candidate lookup failure. Commit, state and audit still succeed.
+	raw, err := os.ReadFile("testdata/cache_policies_contract/m3m4/m3_put_200.json")
+	require.NoError(t, err)
+	var f cacheContract
+	require.NoError(t, json.Unmarshal(raw, &f))
+	expected := contractMap(t, f.Response)
+	data := expected["data"].(map[string]any)
+	data["effective"].(map[string]any)["warnings"] = []any{"account_options_unavailable"}
+	data["schema"].([]any)[1].(map[string]any)["options"] = []any{}
+	b, err := json.Marshal(f.Response["data"])
+	require.NoError(t, err)
+	var prior service.CachePolicyView
+	require.NoError(t, json.Unmarshal(b, &prior))
+	prior.Stored.Rev--
+	prior.Stored.Spec["mode"] = "off"
+	repo := &cacheRouteStore{rows: map[string]string{
+		"cache_feature_master":       `{"rev":1,"spec":{"enabled":true}}`,
+		"cache_observability_policy": `{"rev":1,"spec":{"enabled":true}}`,
+	}}
+	seedPolicy(t, repo, prior)
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
+	accounts := &cacheM3FaultAccounts{failOptions: true}
+	policies := service.NewCachePolicyService(repo, cfg, service.WithCachePolicyAccounts(accounts))
+	require.NoError(t, policies.Refresh(context.Background()))
+	auditRows := &cacheRouteAudit{}
+	audit := service.NewAuditLogService(auditRows, nil)
+	status, got := cacheCall(t, cacheTestRouter(policies, audit, nil), f.Request.Method, f.Request.Path, f.Request.Body)
+	require.Equal(t, 200, status)
+	normalizePolicyTimes(t, got)
+	normalizePolicyTimes(t, expected)
+	require.Equal(t, expected, got)
+	require.NotContains(t, fmt.Sprint(got), "ACCOUNT_OPTIONS_HTTP_SECRET_ERROR_MARKER")
+	require.Equal(t, 1, accounts.getCalls)
+	require.Equal(t, 1, accounts.listCalls)
+	require.EqualValues(t, 4, policies.Snapshot().UpstreamIdentity().Revision())
+	require.True(t, policies.Snapshot().UpstreamIdentity().Enabled())
+	audit.Start()
+	audit.Stop()
+	require.Len(t, auditRows.rows, 1)
+	require.Equal(t, "admin.cache.policies.upstream_identity.update", auditRows.rows[0].Action)
+	require.Equal(t, 200, auditRows.rows[0].StatusCode)
+	require.EqualValues(t, 4, auditRows.rows[0].Extra["rev_after"])
 }

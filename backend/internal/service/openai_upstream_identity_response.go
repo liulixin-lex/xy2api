@@ -8,7 +8,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 // Resolve the actual write marker once per response attempt, independently of
@@ -22,25 +21,45 @@ func openAIUpstreamIdentityResponseApplied(c *gin.Context, account *Account) boo
 	return ok && account != nil && wire.accountID == account.ID && wire.uuid != ""
 }
 
-// Official no-key Responses and compaction examples omit this member. Only
-// call after an actual L-01 write. Never recurse into output or tool content.
+// Only an actual L-01 write enables restoration. Preserve each member and its
+// position, replacing the injected value with the no-key null response shape.
+// Never recurse into user output or tool content; an absent member stays absent.
 func restoreOpenAIUpstreamIdentityResponse(body []byte) ([]byte, error) {
-	removeKey := func(input []byte) ([]byte, error) {
-		for gjson.GetBytes(input, "prompt_cache_key").Exists() {
-			next, err := sjson.DeleteBytes(input, "prompt_cache_key")
-			if err != nil || len(next) >= len(input) {
-				return nil, fmt.Errorf("restore upstream response identity: invalid response object")
+	nullKeys := func(input []byte) ([]byte, error) {
+		var out []byte
+		last := 0
+		var invalid bool
+		gjson.ParseBytes(input).ForEach(func(key, value gjson.Result) bool {
+			if key.Str != "prompt_cache_key" || value.Raw == "null" {
+				return true
 			}
-			input = next
+			end := value.Index + len(value.Raw)
+			if value.Index < last || end > len(input) || len(value.Raw) == 0 {
+				invalid = true
+				return false
+			}
+			if out == nil {
+				out = make([]byte, 0, len(input))
+			}
+			out = append(out, input[last:value.Index]...)
+			out = append(out, "null"...)
+			last = end
+			return true
+		})
+		if invalid {
+			return nil, fmt.Errorf("restore upstream response identity: invalid response object")
 		}
-		return input, nil
+		if out == nil {
+			return input, nil
+		}
+		return append(out, input[last:]...), nil
 	}
-	body, err := removeKey(body)
+	body, err := nullKeys(body)
 	if err != nil {
 		return nil, err
 	}
 	// Visit every response member, including ambiguous duplicate envelopes.
-	// A last-member-wins client must not recover a key from an unvisited copy.
+	// A last-member-wins client must not recover an unvisited injected value.
 	var out []byte
 	last := 0
 	gjson.ParseBytes(body).ForEach(func(key, value gjson.Result) bool {
@@ -48,7 +67,7 @@ func restoreOpenAIUpstreamIdentityResponse(body []byte) ([]byte, error) {
 			return true
 		}
 		var restored []byte
-		restored, err = removeKey([]byte(value.Raw))
+		restored, err = nullKeys([]byte(value.Raw))
 		if err != nil {
 			return false
 		}

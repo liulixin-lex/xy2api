@@ -219,12 +219,12 @@
 - 授权与基点：从 M2 后端 a99f71795 建立 cache/m1-hardening；每项小提交，不推送。M2 合入后再变基 main，先检查全部构建 tag；M2 评审阻塞优先修。
 - 范围：T0a.4 N-2/N-3/N-4/N-5、T0a.5 N-3/N-7、T0a.2-fix n-2/n-5，以及 T0a.3 n-2/n-3/n-4；已完成的 observer_failed 优先级与 policy history UTC 不重复处理。
 - 当前：10 个提交仅重放到 M2 main 16a776e347；产品补丁无冲突，保留 main 的 M2/R16/R17/隔离测试及记忆归档。旧门禁由 M3 最终候选流水线取代，已有失败保留；最小测试修正：正常计费模式断言为 token、未送达已关闭计时、legacy logger 夹具保留认证身份并显式注入历史摘要。五 tag 编译全部通过，计费与 logger 定向 race 通过，28 条事件严格校验通过；未送达旧测试另需将“容器为空”精确改为“计时关闭且前缀历史为空”，只补跑该组。长门禁交集成候选。
-### 20261023-cache-p1-l01 — M3 上游 UUID 会话键补全（G，本地补修待新基点门禁）
+### 20261023-cache-p1-l01 — M3 上游 UUID 会话键补全（G，增量修复待新基点门禁）
 
-- 基点 main `72c2d0169`，分支 `cache/p1-l01`。响应回显与独立cohort补修为 `05b3f3cfe`，实测tree `eb6093b4` 到提交仅文档不同；仅实际注入时还原Responses，未生效时保留原字节，trace采样不变。
-- 管理API独立补修：账号options仅静态合格OpenAI apikey，按ID升序最多500，允许停用账号；invalid账号清理残留生效warnings。18份原字节M3样例及服务边界测试已加入；UNSUPPORTED映射保持原行为。没有改请求路径。
-- 已验证：r5 focused7031与140配对分配通过（120严格相等、20继承T4精确-202；stream3801/3801），docs/diff/clean audit通过。余项按PM优先级于13:30中止，不冒称全部门禁通过；管理员新Go测试尚未执行。
-- 下一步：两个独立本地提交供R静态增量核对；M2合入后变基，先全部tag编译，再同一流水线执行受影响unit/race、zero/logger/compat/lint及管理员契约。northstar夹具届时显式升级构建预期。未推送或变更生产。
+- 基点main `72c2d0169`，分支 `cache/p1-l01`。既有响应/cohort补修 `05b3f3cfe`、管理员API `a90727351` 已交R；本轮按PM/R追加原位null和管理员候选故障降级，提交号以git log为准。仅实际注入时恢复已有响应字段为null，未生效与显式客户端值不动；不同上游无key形态仍需在实验中核对。
+- 管理API：账号options静态合格、升序最多500；候选失败不阻断List/Get/PUT，空options并追加account_options_unavailable；disable方向Validate/PUT不访问账号表，开启/mixed保持必要校验。管理契约已同步v1.0.2的五份修正及v1.0.3四份增量，共22个原字节M3样例。
+- 验证范围：既有r5 focused7031与140分配对照是旧树证据；13:30剩余重任务按PM中止。本轮仅格式、diff、文档、静态契约与干净树审计，不宣称新增Go测试已通过。Q5是保存的官方文档流示例，不是实际请求录制。
+- 下一步：交R静态增量核对；M2合入后干净变基，先全tag编译，再单批unit/race、zero/logger/compat/lint及22样例真实回放。northstar构建夹具届时显式升级。未推送、未变更生产。
 
 
 
@@ -1111,3 +1111,9 @@ pnpm --dir frontend run build
 - FE-Q3只改管理员view/validation：分页静态资格、最多500条白名单字段；查询失败发生在提交前。请求snapshot及转发代码与r5相同，分配/golden不因本补丁重复执行。
 - 原UNSUPPORTED映射已正确；新增18份原字节HTTP样例回放。账号查验失败清warnings，与其他invalid分支及F样例一致；合法rollout0仍有提示。northstar按当前pre-M2构建明确not_in_build，fallback按样例前提seed。
 - PM要求先本地提交供静态评审，轻量docs/diff/clean audit收尾；所有新增Go测试与r5余项统一等待M2合入变基后的单条门禁，当前未执行，不作为完成验收。
+
+### 2026-10-24T14:17Z — `20261023-cache-p1-l01` — null形态与管理员关闭路径补修
+
+- B-M3-1-r1按PM选法2：保留响应字段，原位替换值为null；mock无key回显null，更新重复键/空白位置、EOF与显式客户端值断言。Q5来源更正为官方文档保存样例，未执行真实上游请求；省略形态上游的残留可区分风险已记录。
+- 管理员候选只作响应元数据，分页错误丢弃partial，固定warning且不泄露底层错误。关闭、降比例、收窄的Validate/PUT均跳过账号校验与枚举，保留格式/rev校验；开启/mixed仍要求账号校验成功。同步v1.0.2五样例与v1.0.3四增量，22份F原字节，回放与故障注入测试已准备。
+- PM要求本轮只轻量检查并本地提交，重门禁不启动；post-M2单批runner已更新22样例与新测试必跑清单，历史r5的通过项不改绑成本轮通过。

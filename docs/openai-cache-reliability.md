@@ -265,7 +265,7 @@ cache_trace 在送达分类确定后、真正扣费及用量落库之前输出�
 请求内沿用同一快照。启用、扩大比例或账号范围需要理由和勾选确认，撤回不需要。
 账号列表只接受存在的 OpenAI apikey 账号，空列表表示所有合格账号。
 
-管理接口的 `account_ids.options` 返回最多 500 个合格账号，按 ID 升序，元素只含 `id`、`name`、`platform`；无候选时返回空数组。候选排除 Codex、透传、Grok 等不合格协议，停用或暂不可调度的合格账号仍可用于配置。候选不受总开关、当前比例或已保存账号列表过滤；超过候选上限的已保存账号 ID 仍保留。查询仅在管理员列表、单项读取和成功写入响应时执行，不进入转发、选号或请求快照路径。非法账号校验不返回生效状态警告；有效配置比例为 0 时仍显示 `no_effect_rollout_zero`。
+管理接口的 `account_ids.options` 返回最多 500 个合格账号，按 ID 升序，元素只含 `id`、`name`、`platform`；无候选时返回空数组。候选排除 Codex、透传、Grok 等不合格协议，停用或暂不可调度的合格账号仍可用于配置。候选不受总开关、当前比例或已保存账号列表过滤；超过候选上限的已保存账号 ID 仍保留。候选查询仅用于管理员响应，不进入转发、选号或请求快照路径。查询失败（含分页中途失败）时，策略照常返回，丢弃部分候选并给出 `options: []`，在 `effective.warnings` 末尾追加 `account_options_unavailable`；不返回底层错误文本。关闭方向的预校验与 PUT 不访问账号表，原有格式、revision 与确认规则仍有效；PUT 同样给出候选未加载提示，需要候选时另发 GET。validate 的 warnings 只反映生效状态，不带候选提示。非法账号校验不返回生效状态警告；有效配置比例为 0 时仍显示 `no_effect_rollout_zero`。
 
 功能仅覆盖 Responses HTTP 与可选的 Chat→Responses。客户端显式给出
 `prompt_cache_key`（包括空串、null 或其他类型），或任一已有会话头时，
@@ -298,11 +298,13 @@ session header 来源为 `sess_out_relation=eq_pck`；最小事件仍保留原�
 L-01 灰度使用独立域 `SHA256("l01-cohort|" + session)`，再按首字节映射到 0–99；
 观测采样的原哈希保持不变，避免小比例观测只包含实验组。
 
-仅当本次尝试实际注入 UUID 时，在客户端写回前恢复 Responses 的
-`prompt_cache_key`：按官方未提供 key 的完整响应示例省略该成员，涵盖普通 JSON、
-流式生命周期事件、buffered SSE 及 compact。依据为官方
-[create 示例](https://developers.openai.com/api/reference/resources/responses/methods/create)
-与 [compact 示例](https://developers.openai.com/api/reference/resources/responses/methods/compact)；
-类型可为空本身不作为默认形态证据。原本省略的字段不新增，输出内容/工具参数不改。
+仅当本次尝试实际注入 UUID 时，在客户端写回前将 Responses 中现有的
+`prompt_cache_key` 原值原位替换为 `null`，保留字段及成员顺序；普通 JSON 和
+单行 SSE 保留其他字节，多行 data 仍按完整事件合并为一行。还原覆盖普通 JSON、
+流式生命周期事件（含 EOF）、SSE→JSON 及 compact。
+本来为 null 的值保持原样，原本省略的字段不新增，输出内容/工具参数不改。
 实际注入标记与观测开关独立并限定当前账号；关闭或跳过 L-01 时不运行响应还原，
-保持客户端响应字节不变。UUID 仅用于上游身份，不进入客户端输出。
+客户端显式提供的 key 保持原样。UUID 仅用于上游身份，不进入客户端输出。
+null 形态依据保存的兼容 Responses 官方流示例及协议允许的空值，不代表已对每个
+上游实测；某上游若对无 key 请求省略该字段，两组仍可能呈现不同形态，需要在
+启用实验中监测。

@@ -121,9 +121,9 @@ func TestCachePolicyUpstreamStrictValidation(t *testing.T) {
 		{"id_string", `{"account_ids":["101"]}`, "account_ids", "malformed_body"},
 		{"ids_null", `{"account_ids":null}`, "account_ids", "malformed_body"},
 		{"ids_object", `{"account_ids":{}}`, "account_ids", "malformed_body"},
-		{"unknown_account", `{"account_ids":[999]}`, "account_ids", "unknown_account"},
-		{"oauth_account", `{"account_ids":[103]}`, "account_ids", "wrong_platform"},
-		{"other_platform", `{"account_ids":[104]}`, "account_ids", "wrong_platform"},
+		{"unknown_account", `{"mode":"uuid_fill","account_ids":[999]}`, "account_ids", "unknown_account"},
+		{"oauth_account", `{"mode":"uuid_fill","account_ids":[103]}`, "account_ids", "wrong_platform"},
+		{"other_platform", `{"mode":"uuid_fill","account_ids":[104]}`, "account_ids", "wrong_platform"},
 		{"normalize_forbidden", `{"normalize_client_pck":false}`, "normalize_client_pck", "forbidden_field"},
 		{"unknown_field", `{"future":false}`, "future", "unknown_field"},
 	} {

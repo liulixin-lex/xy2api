@@ -205,7 +205,10 @@ func upstreamIdentityScopeDirection(before, after []int64) (up, down bool) {
 
 func (s *CachePolicyService) validationForWrite(ctx context.Context, index int, entry cachePolicyEntry, w CachePolicyWrite, bodyErrors []CachePolicyFieldError) (CachePolicyValidation, map[string]any, error) {
 	v, spec := s.validation(index, entry, w, bodyErrors)
-	if index != 3 || !v.Valid {
+	// Rollbacks must work even when the account repository is unavailable.
+	// Direction comes from actual, strictly parsed changes: disable cannot
+	// grant any new scope, and still retains field and revision validation.
+	if index != 3 || !v.Valid || v.Direction == "disable" {
 		return v, spec, nil
 	}
 	ids, _ := spec["account_ids"].([]int64)
