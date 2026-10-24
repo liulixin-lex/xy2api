@@ -1,4 +1,4 @@
-// Chart endpoint contract tests (00-shared/cache_panel_contract v1.0.1, P-1 to P-10, R1 to R15).
+// Chart endpoint contract tests (00-shared/cache_panel_contract v1.0.2, P-1 to P-10, R1 to R16).
 // F's samples run through the real apiClient (stub adapter), the API layer, useCacheCharts and the
 // rendered panel, so envelope unwrapping, error rejection and guard.ts are the production ones.
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
@@ -154,9 +154,9 @@ function expectClean(wrapper: ReturnType<typeof mount>, name: string) {
 
 const SECTION: Record<Endpoint, string> = { northstar: 'northstar', breakdown: 'breakdown', stats: 'loss', experiments: 'experiments' }
 
-describe('cache panel contract samples v1.0.1', () => {
-  it('has the 20 valid samples and the 22 that must be refused or degraded', () => {
-    expect(VALID_NAMES).toHaveLength(20)
+describe('cache panel contract samples v1.0.2', () => {
+  it('has the 21 valid samples and the 24 that must be refused or degraded', () => {
+    expect(VALID_NAMES).toHaveLength(21)
     expect(INVALID_NAMES.sort()).toEqual(Object.keys(INVALID_EXPECT).sort())
   })
 
@@ -187,6 +187,9 @@ describe('cache panel contract samples v1.0.1', () => {
     if (endpoint === 'breakdown') {
       const data = state.breakdown.data as BreakdownResponse
       expect(wrapper.findAll('[data-test="breakdown-table"] tbody tr').length, name).toBeGreaterThanOrEqual(data.rows.length)
+      // Labels show as sent, including the masked `<platform>#<account_id>` of R16.
+      const table = wrapper.get('[data-test="breakdown-table"]').text()
+      for (const row of data.rows) expect(table, `${name} ${row.key}`).toContain(row.label)
     }
     if (endpoint === 'stats') {
       const data = state.stats.data as TraceStatsResponse
@@ -283,6 +286,10 @@ const INVALID_EXPECT: Record<string, Outcome> = {
   breakdown_is_fallback: { status: 'rejected', check: ({ wrapper }) => expect(wrapper.find('[data-test="breakdown-table"]').exists()).toBe(false) },
   breakdown_privacy_api_key_id: { status: 'rejected', check: ({ wrapper }) => expect(wrapper.find('[data-test="breakdown-table"]').exists()).toBe(false) },
   breakdown_privacy_hmac_label: { status: 'rejected', check: ({ wrapper }) => expect(wrapper.html()).not.toContain('v2:5f2c9a1e7b3d4068') },
+  // R16: an account name shaped like an email must arrive masked; sent as is, the ranking is withheld.
+  breakdown_email_label: { status: 'rejected', check: ({ wrapper }) => expect(wrapper.html()).not.toMatch(/[^@\s]+@[^@\s]+\.[A-Za-z]+/) },
+  // R16: a masked label that disagrees with key or platform carries no identity; the panel cannot tell which side is wrong.
+  breakdown_masked_label_mismatch: { status: 'ready' },
   // P-6, §8.3: degraded to what the contract allows.
   breakdown_meta_null: { status: 'ready', check: ({ state }) => expect(state.breakdown.data!.rows[0].meta).toEqual({}) },
   breakdown_rows_over_limit: { status: 'ready' },
@@ -343,7 +350,7 @@ const INVALID_EXPECT: Record<string, Outcome> = {
   success_message_ok: { status: 'ready' },
 }
 
-describe('cache panel contract counter-examples v1.0.1', () => {
+describe('cache panel contract counter-examples v1.0.2', () => {
   it.each(INVALID_NAMES)('handles %s by its contract meaning', async (name) => {
     const s = sample(name)
     const expected = INVALID_EXPECT[name]

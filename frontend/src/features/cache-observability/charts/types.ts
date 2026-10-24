@@ -335,10 +335,15 @@ export interface TraceStatsQuery {
   platform: PanelPlatform
 }
 
+/** `signal` lets the panel cancel a read that a newer selection has made obsolete. */
+export interface RequestOptions {
+  signal?: AbortSignal
+}
+
 /** The four reads the panel needs; implemented by the live API and by the mock. */
 export interface CachePanelClient {
-  getNorthStar(query: NorthStarQuery): Promise<NorthStarResponse>
-  getBreakdown(query: BreakdownQuery): Promise<BreakdownResponse>
-  getTraceStats(query: TraceStatsQuery): Promise<TraceStatsResponse>
-  listExperiments(): Promise<ExperimentsResponse>
+  getNorthStar(query: NorthStarQuery, options?: RequestOptions): Promise<NorthStarResponse>
+  getBreakdown(query: BreakdownQuery, options?: RequestOptions): Promise<BreakdownResponse>
+  getTraceStats(query: TraceStatsQuery, options?: RequestOptions): Promise<TraceStatsResponse>
+  listExperiments(options?: RequestOptions): Promise<ExperimentsResponse>
 }

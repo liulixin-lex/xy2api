@@ -106,38 +106,56 @@ export function useCacheCharts(deps: ChartsDeps = {}) {
     return northstar.data ? true : null
   })
 
-  async function run<T>(target: Section<T>, fetcher: (c: CachePanelClient) => Promise<T>) {
+  // Each section has one current read, numbered in order. A newer read aborts the older one, and an older
+  // answer, even one that arrives last, never overwrites what the current selection asked for (R B-UI-1).
+  // A superseded read leaves no trace: no data, no error, and it does not end the refreshing state (N9).
+  const current = new WeakMap<object, { seq: number; abort: AbortController }>()
+  let sequence = 0
+
+  async function run<T>(target: Section<T>, fetcher: (c: CachePanelClient, signal: AbortSignal) => Promise<T>) {
+    current.get(target)?.abort.abort()
+    const read = { seq: ++sequence, abort: new AbortController() }
+    current.set(target, read)
+    const latest = () => current.get(target)?.seq === read.seq
     target.refreshing = target.data !== null
     if (!target.refreshing) target.status = 'loading'
     target.error = null
     try {
-      const data = await fetcher(await client())
+      const data = await fetcher(await client(), read.abort.signal)
+      if (!latest()) return
       target.data = data as T
       target.status = 'ready'
     } catch (error) {
+      if (!latest()) return
       const result = classify(error)
       target.status = result.status
       target.error = result.message
       if (result.status !== 'error') target.data = null
     } finally {
-      target.refreshing = false
+      if (latest()) {
+        target.refreshing = false
+        current.delete(target)
+      }
     }
   }
 
   const loadNorthStar = () =>
-    run(northstar, (c) => c.getNorthStar({ window: filters.summaryWindow, platform: filters.platform, cost_view: filters.costView }))
+    run(northstar, (c, signal) => c.getNorthStar({ window: filters.summaryWindow, platform: filters.platform, cost_view: filters.costView }, { signal }))
   const loadBreakdown = () =>
-    run(breakdown, (c) =>
-      c.getBreakdown({
-        dimension: filters.dimension,
-        window: filters.summaryWindow,
-        platform: filters.platform,
-        sort: filters.sort,
-        cost_view: filters.costView,
-      }),
+    run(breakdown, (c, signal) =>
+      c.getBreakdown(
+        {
+          dimension: filters.dimension,
+          window: filters.summaryWindow,
+          platform: filters.platform,
+          sort: filters.sort,
+          cost_view: filters.costView,
+        },
+        { signal },
+      ),
     )
-  const loadStats = () => run(stats, (c) => c.getTraceStats({ window: filters.traceWindow, platform: filters.platform }))
-  const loadExperiments = () => run(experiments, (c) => c.listExperiments())
+  const loadStats = () => run(stats, (c, signal) => c.getTraceStats({ window: filters.traceWindow, platform: filters.platform }, { signal }))
+  const loadExperiments = () => run(experiments, (c, signal) => c.listExperiments({ signal }))
 
   /** Probes the chart endpoints through northstar first, then loads the rest only if they exist. */
   async function loadAll() {

@@ -14,11 +14,13 @@ vi.mock('@/api/admin', () => ({ adminAPI: { groups: {} } }))
 vi.mock('vue-chartjs', () => ({ Line: { props: ['data', 'options', 'plugins'], template: '<canvas data-test="line-chart" />' } }))
 
 import ChartsPanel from '../ChartsPanel.vue'
-import { createMockCachePanelClient, mockTraceStats } from '../mock'
+import { createMockCachePanelClient, mockNorthStar, mockTraceStats } from '../mock'
 import { useCacheCharts } from '../useCacheCharts'
-import type { CachePanelClient } from '../types'
+import type { CachePanelClient, RequestOptions } from '../types'
 
 const now = () => new Date('2026-10-23T08:20:00Z')
+/** The window the synthetic backend answers for a summary window. */
+const mockNorthStarWindow = (window: '24h' | '7d' | '30d') => mockNorthStar({ window, platform: 'all' }, now()).window
 const stubs = { Icon: true, HelpTooltip: true }
 
 function setup(overrides: Partial<CachePanelClient> = {}, experiments: 'running' | 'none' = 'running') {
@@ -71,6 +73,122 @@ describe('useCacheCharts', () => {
     expect(state.northstar.data).toBe(before)
     await pending
     expect(state.northstar.refreshing).toBe(false)
+  })
+})
+
+describe('useCacheCharts with answers out of order (R B-UI-1)', () => {
+  type Kind = 'getNorthStar' | 'getBreakdown' | 'getTraceStats' | 'listExperiments'
+  interface Read {
+    kind: Kind
+    query: unknown
+    signal?: AbortSignal
+    resolve: (value: unknown) => void
+    reject: (error: unknown) => void
+  }
+
+  /** A client whose answers the test releases one by one, in any order. */
+  function held() {
+    const reads: Read[] = []
+    const hold = (kind: Kind) => (...args: unknown[]) =>
+      new Promise((resolve, reject) => {
+        const options = (kind === 'listExperiments' ? args[0] : args[1]) as RequestOptions | undefined
+        reads.push({ kind, query: kind === 'listExperiments' ? null : args[0], signal: options?.signal, resolve, reject })
+      })
+    const client = { getNorthStar: hold('getNorthStar'), getBreakdown: hold('getBreakdown'), getTraceStats: hold('getTraceStats'), listExperiments: hold('listExperiments') }
+    return { client: client as unknown as CachePanelClient, reads }
+  }
+
+  const backend = createMockCachePanelClient({ now, latencyMs: 0, experiments: 'none' })
+  /** Answers a held read with what the backend would send for that query. */
+  async function answer(read: Read) {
+    const fn = backend[read.kind] as (q?: unknown) => Promise<unknown>
+    read.resolve(await (read.kind === 'listExperiments' ? fn() : fn(read.query)))
+    await flushPromises()
+  }
+
+  async function loaded() {
+    const { client, reads } = held()
+    const state = useCacheCharts({ client, source: 'live', loadGroups: async () => [] })
+    const all = state.loadAll()
+    await flushPromises()
+    await answer(reads.shift()!)
+    while (reads.length) await answer(reads.shift()!)
+    await all
+    return { state, reads }
+  }
+
+  /** Switches one filter twice; returns the reads started for each value, nothing answered yet. */
+  async function switchTwice<K extends keyof ReturnType<typeof useCacheCharts>['filters']>(
+    state: ReturnType<typeof useCacheCharts>,
+    reads: Read[],
+    key: K,
+    first: ReturnType<typeof useCacheCharts>['filters'][K],
+    second: ReturnType<typeof useCacheCharts>['filters'][K],
+  ) {
+    state.setFilter(key, first)
+    await flushPromises()
+    const older = reads.splice(0)
+    state.setFilter(key, second)
+    await flushPromises()
+    const newer = reads.splice(0)
+    expect(older.length).toBeGreaterThan(0)
+    expect(newer.map((r) => r.kind)).toEqual(older.map((r) => r.kind))
+    return { older, newer }
+  }
+
+  it('keeps the newer window when the older answer arrives last', async () => {
+    const { state, reads } = await loaded()
+    const { older, newer } = await switchTwice(state, reads, 'summaryWindow', '30d', '24h')
+    for (const read of newer) await answer(read)
+    for (const read of older) await answer(read)
+    expect(older.every((r) => r.signal?.aborted)).toBe(true)
+    expect(state.northstar.data!.granularity).toBe('1h')
+    expect(state.northstar.data!.window).toEqual(mockNorthStarWindow('24h'))
+    expect(state.breakdown.data!.window).toEqual(mockNorthStarWindow('24h'))
+    expect(state.northstar).toMatchObject({ status: 'ready', error: null, refreshing: false })
+  })
+
+  it('keeps the newer cost view, and an aborted read that fails later is not an error', async () => {
+    const { state, reads } = await loaded()
+    const { older, newer } = await switchTwice(state, reads, 'costView', 'charged', 'upstream')
+    for (const read of newer) await answer(read)
+    // What the platform client turns an aborted request into.
+    for (const read of older) read.reject({ status: 0, code: 'ERR_CANCELED', message: 'Network error. Please check your connection.' })
+    await flushPromises()
+    expect(state.northstar.data!.summary.cost!.view).toBe('upstream')
+    expect(state.breakdown.data!.cost!.view).toBe('upstream')
+    expect(state.northstar).toMatchObject({ status: 'ready', error: null })
+    expect(state.breakdown).toMatchObject({ status: 'ready', error: null })
+  })
+
+  it('keeps the newer ranking dimension when the older answer arrives last', async () => {
+    const { state, reads } = await loaded()
+    const { older, newer } = await switchTwice(state, reads, 'dimension', 'model', 'account')
+    for (const read of newer) await answer(read)
+    for (const read of older) await answer(read)
+    expect(state.breakdown.data!.dimension).toBe('account')
+    expect(older.every((r) => r.signal?.aborted)).toBe(true)
+  })
+
+  it('keeps the newer ranking sort when the older answer arrives last', async () => {
+    const { state, reads } = await loaded()
+    const { older, newer } = await switchTwice(state, reads, 'sort', 'prompt', 'token_hit')
+    for (const read of newer) await answer(read)
+    for (const read of older) await answer(read)
+    expect(state.breakdown.data!.sort).toBe('token_hit')
+    expect(older.every((r) => r.signal?.aborted)).toBe(true)
+  })
+
+  it('stays refreshing, on the data already shown, while only the older read has answered (N9)', async () => {
+    const { state, reads } = await loaded()
+    const before = state.northstar.data
+    const { older, newer } = await switchTwice(state, reads, 'summaryWindow', '30d', '24h')
+    for (const read of older) await answer(read)
+    expect(state.northstar.refreshing).toBe(true)
+    expect(state.northstar.data).toBe(before)
+    for (const read of newer) await answer(read)
+    expect(state.northstar.refreshing).toBe(false)
+    expect(state.northstar.data!.window).toEqual(mockNorthStarWindow('24h'))
   })
 })
 
@@ -136,7 +254,7 @@ describe('ChartsPanel', () => {
     expect(wrapper.get('[data-test="northstar-cost"]').text()).toContain('admin.cacheCharts.cost.unavailable')
     await wrapper.get('[data-test="dimension-model"]').trigger('click')
     await flushPromises()
-    expect(client.getBreakdown).toHaveBeenLastCalledWith(expect.objectContaining({ dimension: 'model', cost_view: 'list' }))
+    expect(client.getBreakdown).toHaveBeenLastCalledWith(expect.objectContaining({ dimension: 'model', cost_view: 'list' }), expect.anything())
   })
 })
 

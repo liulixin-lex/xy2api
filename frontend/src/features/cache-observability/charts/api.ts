@@ -7,6 +7,7 @@ import type {
   ExperimentsResponse,
   NorthStarQuery,
   NorthStarResponse,
+  RequestOptions,
   TraceStatsQuery,
   TraceStatsResponse,
 } from './types'
@@ -26,15 +27,15 @@ const paramsSerializer = {
     ).toString(),
 }
 
-export async function getNorthStar(query: NorthStarQuery): Promise<NorthStarResponse> {
+export async function getNorthStar(query: NorthStarQuery, options: RequestOptions = {}): Promise<NorthStarResponse> {
   const params: Record<string, string> = { window: query.window, platform: query.platform }
   if (query.granularity) params.granularity = query.granularity
   if (query.cost_view) params.cost_view = query.cost_view
-  const { data } = await apiClient.get<NorthStarResponse>(`${basePath}/northstar`, { params, paramsSerializer })
+  const { data } = await apiClient.get<NorthStarResponse>(`${basePath}/northstar`, { params, paramsSerializer, signal: options.signal })
   return checkNorthStar(data)
 }
 
-export async function getBreakdown(query: BreakdownQuery): Promise<BreakdownResponse> {
+export async function getBreakdown(query: BreakdownQuery, options: RequestOptions = {}): Promise<BreakdownResponse> {
   const limit = query.limit ?? 10
   const { data } = await apiClient.get<BreakdownResponse>(`${basePath}/breakdown`, {
     params: {
@@ -46,20 +47,22 @@ export async function getBreakdown(query: BreakdownQuery): Promise<BreakdownResp
       ...(query.cost_view ? { cost_view: query.cost_view } : {}),
     },
     paramsSerializer,
+    signal: options.signal,
   })
   return checkBreakdown(data, limit)
 }
 
-export async function getTraceStats(query: TraceStatsQuery): Promise<TraceStatsResponse> {
+export async function getTraceStats(query: TraceStatsQuery, options: RequestOptions = {}): Promise<TraceStatsResponse> {
   const { data } = await apiClient.get<TraceStatsResponse>(`${basePath}/stats`, {
     params: { window: query.window, platform: query.platform },
     paramsSerializer,
+    signal: options.signal,
   })
   return checkTraceStats(data)
 }
 
-export async function listExperiments(): Promise<ExperimentsResponse> {
-  const { data } = await apiClient.get<ExperimentsResponse>(`${basePath}/experiments`, { paramsSerializer })
+export async function listExperiments(options: RequestOptions = {}): Promise<ExperimentsResponse> {
+  const { data } = await apiClient.get<ExperimentsResponse>(`${basePath}/experiments`, { paramsSerializer, signal: options.signal })
   return checkExperiments(data)
 }
 
