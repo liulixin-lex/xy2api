@@ -43,6 +43,7 @@ type CacheUpstreamIdentityPolicy struct {
 	ChatCompatUUID        bool
 	HeaderOnlyUUID        bool
 	ForwardSessionHeaders string
+	MaxInflightPerKey     int
 	active                bool
 	revision              int64
 	accounts              map[int64]struct{}
@@ -50,7 +51,7 @@ type CacheUpstreamIdentityPolicy struct {
 
 func (p *CachePolicySnapshot) UpstreamIdentity() CacheUpstreamIdentityPolicy {
 	if p == nil {
-		return CacheUpstreamIdentityPolicy{Mode: "off", ForwardSessionHeaders: "whitelist"}
+		return CacheUpstreamIdentityPolicy{Mode: "off", ForwardSessionHeaders: "whitelist", MaxInflightPerKey: 2}
 	}
 	return p.upstream
 }
@@ -73,6 +74,7 @@ func upstreamIdentityFromEntry(entry cachePolicyEntry, master bool) CacheUpstrea
 	p.Mode, _ = spec["mode"].(string)
 	p.ForwardSessionHeaders, _ = spec["forward_session_headers"].(string)
 	p.RolloutPercent = policyInt(spec["rollout_percent"])
+	p.MaxInflightPerKey = policyInt(spec["max_inflight_per_key"])
 	p.ChatCompatUUID, _ = spec["chat_compat_uuid"].(bool)
 	p.HeaderOnlyUUID, _ = spec["header_only_uuid"].(bool)
 	if ids, ok := spec["account_ids"].([]int64); ok && len(ids) > 0 {
@@ -135,12 +137,16 @@ func mergeUpstreamIdentity(before map[string]any, raw json.RawMessage) (map[stri
 					code = "unsupported_in_build"
 				}
 				next = flag
-			case "rollout_percent":
+			case "rollout_percent", "max_inflight_per_key":
 				var percent int
+				min, max := 0, 100
+				if field == "max_inflight_per_key" {
+					min, max = 1, 16
+				}
 				if json.Unmarshal(value, &percent) != nil {
 					code = "malformed_body"
-				} else if percent < 0 || percent > 100 {
-					errs = append(errs, CachePolicyFieldError{Field: field, Code: "out_of_range", Limit: map[string]int{"min": 0, "max": 100}})
+				} else if percent < min || percent > max {
+					errs = append(errs, CachePolicyFieldError{Field: field, Code: "out_of_range", Limit: map[string]int{"min": min, "max": max}})
 					continue
 				}
 				next = percent
@@ -264,6 +270,7 @@ func upstreamIdentitySchema() []map[string]any {
 		{"field": "chat_compat_uuid", "type": "bool"},
 		{"field": "header_only_uuid", "type": "bool"},
 		{"field": "forward_session_headers", "type": "enum", "options": []string{"whitelist", "normalize"}},
+		{"field": "max_inflight_per_key", "type": "int", "min": 1, "max": 16},
 	}
 }
 
@@ -302,6 +309,10 @@ func (s *CachePolicyService) upstreamIdentityEffective(stored, loaded cachePolic
 		e.State = "on"
 	default:
 		e.State = "off"
+	}
+	ids, _ := stored.envelope.Spec["account_ids"].([]int64)
+	if stored.envelope.Spec["mode"] == "uuid_fill" && len(ids) == 0 {
+		e.Warnings = append(e.Warnings, "l01_all_accounts_unverified")
 	}
 	return e
 }

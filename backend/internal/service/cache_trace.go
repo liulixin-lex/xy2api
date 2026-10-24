@@ -48,6 +48,7 @@ type cacheTrace struct {
 
 type cacheTraceData struct {
 	L01Arm, L01Skip                                                     string
+	L01RestoreFallback                                                  string
 	L01Applied                                                          bool
 	L01PolicyRevision                                                   int64
 	LossClass, NAReason                                                 string
@@ -289,6 +290,7 @@ func (t *cacheTrace) setSessionSource(source string) {
 func (t *cacheTrace) resetL01Attempt() {
 	p := t.policy.UpstreamIdentity()
 	t.data.L01Arm, t.data.L01Applied = "none", false
+	t.data.L01RestoreFallback = ""
 	t.data.L01Skip, t.data.L01PolicyRevision = "policy_off", p.Revision()
 	if p.Enabled() {
 		t.data.L01Skip = "unsupported_ingress"

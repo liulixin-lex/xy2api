@@ -59,7 +59,11 @@ func (u *l01EchoUpstream) Do(req *http.Request, proxy string, accountID int64, c
 			if strings.Contains(u.format, "multiline") && kind != "response.completed" {
 				_, _ = fmt.Fprintf(&stream, "event: %s\ndata: {\"type\":%q,\ndata: \"response\":%s}\n\n", kind, kind, payload)
 			} else {
-				_, _ = fmt.Fprintf(&stream, "event: %s\ndata: {\"type\":%q,\"response\":%s}\n\n", kind, kind, payload)
+				_, _ = fmt.Fprintf(&stream, "event: %s\ndata: {\"type\":%q,\"response\":%s}\n", kind, kind, payload)
+				if u.format == "sse_oversize" && kind == "response.created" {
+					_, _ = stream.WriteString(strings.Repeat(":"+strings.Repeat("x", 64)+"\n", 1200))
+				}
+				_, _ = stream.WriteString("\n")
 			}
 		}
 		if !strings.Contains(u.format, "unfinished") && !strings.Contains(u.format, "eof") {
@@ -322,9 +326,13 @@ func TestL01ResponseSSEBufferFragmentsAndEOF(t *testing.T) {
 	}
 	var output strings.Builder
 	w := openAIUpstreamIdentitySSEBuffer{limit: 4}
-	_, err := w.Append("data: ")
-	require.Error(t, err)
-	require.Empty(t, output.String())
+	data, err := w.Append("data: ")
+	require.NoError(t, err)
+	_, _ = output.Write(data)
+	tail, err := w.Finish()
+	require.NoError(t, err)
+	_, _ = output.Write(tail)
+	require.Equal(t, "data: ", output.String())
 }
 
 func TestL01ResponseEOFFailurePreservesUsage(t *testing.T) {

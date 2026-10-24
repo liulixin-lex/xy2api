@@ -1040,6 +1040,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// Keep the generated key out of GenerateSessionHash and all routing inputs.
 	l01 := prepareOpenAIUpstreamIdentity(c, account)
 	l01UUID := ""
+	var l01Lease *openAIUpstreamIdentityLease
 	if l01.eligible() {
 		if clientHasPromptCacheKey {
 			l01.Skip = "client_pck"
@@ -1053,7 +1054,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			// request-local decision before deriving or writing an L-01 UUID.
 			l01.Skip = "quality_rotation"
 		} else {
-			l01UUID = generateSessionUUID("openai-upstream-session:v1:" + l01.RoutingSession)
+			l01Lease, l01.Skip = s.reserveOpenAIUpstreamIdentity(c, account, l01)
+			if l01Lease != nil {
+				defer l01Lease.release()
+				l01UUID = generateSessionUUID("openai-upstream-session:v1:" + l01.RoutingSession)
+			}
 		}
 	}
 	recordOpenAIUpstreamIdentity(c, l01, false, l01.Skip)
@@ -1158,6 +1163,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			respBody := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			if handled, rejectErr := s.handleOpenAIUpstreamIdentityRejection(c, account, resp, respBody, l01UUID != "", nil); handled {
+				return nil, rejectErr
+			}
+			if l01UUID != "" {
+				respBody = restoreOpenAIUpstreamIdentityErrorBody(c, resp, respBody)
+				resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			}
 			if failure := s.learnOpenAIStreamOnlyHTTPFailure(ctx, c, account, upstreamReq, resp, respBody, resilience.CapabilityProtocolResponses); failure != nil {
 				return nil, failure
 			}

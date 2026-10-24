@@ -2468,15 +2468,39 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
-      "value": "l01ResponseBuffer = &openAIUpstreamIdentitySSEBuffer{limit: maxLineSize}"
+      "value": "l01ResponseBuffer = &openAIUpstreamIdentitySSEBuffer{limit: maxLineSize, uuid: openAIUpstreamIdentityUUID(c), context: c}"
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
-      "value": "restoreOpenAIUpstreamIdentitySSE(body)"
+      "value": "restoreOpenAIUpstreamIdentityForClient(c, body, !ok)"
     },
     {
       "path": "backend/internal/service/openai_gateway_upstream_errors.go",
-      "value": "clientBody, err = restoreOpenAIUpstreamIdentityResponse(body)"
+      "value": "body = restoreOpenAIUpstreamIdentityErrorBody(c, resp, body)"
+    },
+    {
+      "path": "backend/internal/service/openai_upstream_identity.go",
+      "value": "!c.GetBool(openAICacheSessionProvenanceGinKey) || d.RoutingSession == \"\""
+    },
+    {
+      "path": "backend/internal/service/openai_upstream_identity_runtime.go",
+      "value": "const openAIIdentityCapacity = 65536"
+    },
+    {
+      "path": "backend/internal/service/openai_upstream_identity_runtime.go",
+      "value": "const openAIIdentityRejectTTL = 24 * time.Hour"
+    },
+    {
+      "path": "backend/internal/service/openai_upstream_identity_response.go",
+      "value": "return bytes.ReplaceAll(body, []byte(uuid), nil)"
+    },
+    {
+      "path": "backend/internal/service/openai_upstream_identity_m31_test.go",
+      "value": "func TestL01M31ForgedScopeKeepsDisabledStickyBytes(t *testing.T)"
+    },
+    {
+      "path": "backend/internal/service/openai_upstream_identity_m31_test.go",
+      "value": "func TestL01M31BaselineResponseErrorsStayBaseline(t *testing.T)"
     }
   ],
   "forbidden_module_paths": [

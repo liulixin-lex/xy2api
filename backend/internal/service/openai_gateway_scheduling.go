@@ -143,13 +143,16 @@ func (s *OpenAIGatewayService) GenerateExplicitSessionHash(c *gin.Context, body 
 		return ""
 	}
 
-	sessionID = s.scopedOpenAISessionSeed(c, body, sessionID)
+	sessionID, tenantScoped := s.scopedOpenAISessionSeed(c, body, sessionID)
 	currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)
 	if strings.HasPrefix(sessionID, "openai-routing-v2:") {
 		currentHash = "v2:" + currentHash
 		legacyHash = ""
 	}
 	c.Set(openAICacheSessionGinKey, currentHash)
+	if CachePolicyFromGin(c).UpstreamIdentity().Enabled() {
+		c.Set(openAICacheSessionProvenanceGinKey, tenantScoped)
+	}
 	s.beginCacheTrace(c, body)
 	if c.Request != nil {
 		if diagnostic := s.newCacheDiagnostic(c, body, "ingress"); diagnostic != nil {
@@ -200,13 +203,16 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 		sessionID = grokStickyAffinitySeed(sessionID, body)
 	}
 
-	sessionID = s.scopedOpenAISessionSeed(c, body, sessionID)
+	sessionID, tenantScoped := s.scopedOpenAISessionSeed(c, body, sessionID)
 	currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)
 	if strings.HasPrefix(sessionID, "openai-routing-v2:") {
 		currentHash = "v2:" + currentHash
 		legacyHash = ""
 	}
 	c.Set(openAICacheSessionGinKey, currentHash)
+	if CachePolicyFromGin(c).UpstreamIdentity().Enabled() {
+		c.Set(openAICacheSessionProvenanceGinKey, tenantScoped)
+	}
 	s.beginCacheTrace(c, body)
 	if c.Request != nil {
 		if diagnostic := s.newCacheDiagnostic(c, body, "ingress"); diagnostic != nil {
@@ -257,13 +263,16 @@ func (s *OpenAIGatewayService) GenerateSessionHashWithFallback(c *gin.Context, b
 		return ""
 	}
 
-	seed = s.scopedOpenAISessionSeed(c, body, seed)
+	seed, tenantScoped := s.scopedOpenAISessionSeed(c, body, seed)
 	currentHash, legacyHash := deriveOpenAISessionHashes(seed)
 	if strings.HasPrefix(seed, "openai-routing-v2:") {
 		currentHash = "v2:" + currentHash
 		legacyHash = ""
 	}
 	c.Set(openAICacheSessionGinKey, currentHash)
+	if CachePolicyFromGin(c).UpstreamIdentity().Enabled() {
+		c.Set(openAICacheSessionProvenanceGinKey, tenantScoped)
+	}
 	s.beginCacheTrace(c, body)
 	if c.Request != nil {
 		if diagnostic := s.newCacheDiagnostic(c, body, "ingress"); diagnostic != nil {

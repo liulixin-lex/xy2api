@@ -19,7 +19,7 @@ import (
 func l01ChatTestPolicy(enabled, chat bool) *CachePolicySnapshot {
 	p := &CachePolicySnapshot{master: enabled, upstream: CacheUpstreamIdentityPolicy{
 		Mode: "uuid_fill", RolloutPercent: 100, ChatCompatUUID: chat, active: enabled, revision: 7,
-		ForwardSessionHeaders: "whitelist",
+		ForwardSessionHeaders: "whitelist", MaxInflightPerKey: 2,
 	}}
 	p.initCohortViews()
 	return p
@@ -45,6 +45,7 @@ func newL01ChatForwardFixture(t *testing.T, body string, policy *CachePolicySnap
 	}
 	c.Set("api_key", &APIKey{ID: 99})
 	c.Set(openAICacheSessionGinKey, "v2:0123456789abcdef")
+	c.Set(openAICacheSessionProvenanceGinKey, true)
 	c.Set(cachePolicySnapshotGinKey, policy)
 	trace := &cacheTrace{policy: policy}
 	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), cacheTraceKey{}, trace))

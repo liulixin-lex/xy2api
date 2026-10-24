@@ -73,6 +73,7 @@ func TestL01PolicySnapshotAndAttemptCohort(t *testing.T) {
 	c.Set(cachePolicySnapshotGinKey, l01ChatTestPolicy(true, true))
 	first := "v2:0123456789abcdef"
 	c.Set(openAICacheSessionGinKey, first)
+	c.Set(openAICacheSessionProvenanceGinKey, true)
 	account := &Account{ID: 9, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 	d := prepareOpenAIUpstreamIdentity(c, account)
 	require.True(t, d.eligible())
@@ -87,6 +88,7 @@ func TestL01PolicySnapshotAndAttemptCohort(t *testing.T) {
 	d = prepareOpenAIUpstreamIdentity(c, account)
 	require.Equal(t, "on", d.Arm, "cohort is fixed after the first nonempty routing session")
 	c.Set(openAICacheSessionGinKey, "v2:fedcba9876543210")
+	c.Set(openAICacheSessionProvenanceGinKey, true)
 	account.ID = 10
 	next := prepareOpenAIUpstreamIdentity(c, account)
 	require.Equal(t, d.Arm, next.Arm, "account and serving scope do not rebucket an existing request")

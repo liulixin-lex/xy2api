@@ -64,6 +64,9 @@ func t3SettlementPayload(t *testing.T, event map[string]any, minimal bool, expec
 	fields := "v platform loss_class na_reason request_id_hmac session_digest account_id group_id P read pol_rev ua_family"
 	if !minimal {
 		fields = "v request_id_hmac session_digest platform protocol_in protocol_out group_id account_id transport ingress_ws_bridge pol_rev pck_class_in pck_class_out pck_out_is_uuid sess_hdr_in sess_hdr_out sess_out_relation id_source conv_anchor thread_present codex_hdr window_seq_delta ua_family gap_src chain_sampled blk_n bytes_out bytes_out_raw blk_order_physical_eq_logical fork_ref fork_kind fork_precision fork_blk fork_byte fork_blk_hi fork_byte_hi fork_raw_byte p_prev hist_age_s tail_kind reasoning_items_n old_reasoning_n first_old_reasoning_blk first_old_reasoning_byte first_old_reasoning_raw_byte include_encrypted_reasoning store_false reasoning_enc_n reasoning_ctx reasoning_ctx_eff model_gen rsn_boundary_hit read_short_of_fork P read tok_per_byte_milli usage_fields pcd resp_cache_ttl loss_class route_reason rebind_cause l01_arm l01_applied l01_skip l01_policy_rev"
+		if payload["l01_applied"] == true {
+			fields += " l01_restore_fallback"
+		}
 		if payload["loss_class"] == "n/a_sampled_out" {
 			fields += " na_reason"
 		}
