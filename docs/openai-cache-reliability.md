@@ -219,6 +219,8 @@ UTC 日 24 个小时，吸收迟到行；失败回滚，可安全重复或从已
 无正价或分母不足时金额为 null。list 是价差节省，
 charged 使用逐请求 actual/total（零总额回退请求倍率），upstream 只使用未重新定价的
 account_stats_cost 与账号倍率；美元加权命中率始终使用 list。
+北极星的 priced_models 只计严格范围内有行的已定价 (platform, model_key)，
+priced_p_share 仍按业务范围的有价 P / 业务 P 计算，三种 cost_view 计数一致。
 窗口均价也用于小时趋势；标注价格覆盖、窗口内价格变化和本地改写候选，
 这些值仅供展示，不进入选号、sticky、准入、overflow 或自动开关。
 本阶段没有固定构成权重表，standardized 字段返回 null。

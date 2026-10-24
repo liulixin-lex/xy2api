@@ -208,7 +208,7 @@ func northstarCost(rows, business []CacheNorthstarRow, prices cacheNorthstarPric
 	if total.PromptTokens > 0 {
 		result.PricedPromptShare = float64(coverage.pricedPrompt) / float64(total.PromptTokens)
 	}
-	result.PricedModels = len(coverage.models)
+	result.PricedModels = len(values.models)
 	if len(values.models) > 0 {
 		result.SavedAmount = &values.saved
 		result.OpportunityAmount = &values.opportunity

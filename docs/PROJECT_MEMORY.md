@@ -200,6 +200,8 @@
 
 ### 20261023-cache-p0b — 在线缓存北极星与管理员图表（G2，实现完成，待集成）
 
+- 追加审查（R17，已完成）：priced_models 改为严格范围内已定价模型计数，priced_p_share 保持业务范围；新增范围差异回归，独立提交，lint 由 P 在 M2 最终候选上的全量 golangci 覆盖。
+
 - 追加审查（R16）已修：邮箱账号名按 meta.platform/key 生成稳定标签，分组名采用相同判定；普通名称和原数据保留。v1.0.2 源样例自检、86 项定向 race、27 份实际 handler 输出校验均通过；lint 由 P 在 M2 最终候选上的全量 golangci 覆盖，独立提交交付集成。
 
 - 授权：cache/p0b 基于文档归档提交 0dfeb9980（父提交为已合入 M1 的 main 72c2d0169）；只本地开发与提交，不推送、不部署。保留 main 的 T0a.4 API 对齐和 observer_failed 优先级修补。
@@ -1054,3 +1056,11 @@ pnpm --dir frontend run build
 - 契约：同步图表样例 v1.0.2；源清单 SHA256 de64723959656bd8dd34072deceea4efe6a577f04d0126168e5f40d192113081。公开 provenance README 保留私有协作路径隔离。
 - 验证：21 个合法样例、24 个反例自检通过；86 项定向 race 全过、0 skip/race；27 份真实 handler 响应通过 schema、语义和 P-3/R16 校验；lint 由 P 在 M2 最终候选上的全量 golangci 覆盖。覆盖普通/邮箱名称、Unicode 空白、聚合平台一致性及三个时间窗口。其余 a99f71795 门禁按未改动路径继承。
 - 后续：仅本地提交，交 P/R 加入 M2 候选；G2 随后恢复独立的 M1 加固工作，不部署或推送。
+
+### 2026-10-24T09:27Z — 缓存 M2 严格范围模型计数修复（R17）
+
+- 请求：端到端对账发现 priced_models 按业务范围计数，超过严格北极星实际参与金额计算的模型数。
+- 修改：计数改为严格范围已定价模型集合；单价与 priced_p_share 保持业务范围，三种 cost_view 一致，迁移 279 不变。同步现行说明、OpenSpec 和 v1.0.3 契约来源说明。
+- 验证：service 全包 unit race {'run': 19539, 'pass': 19521, 'skip': 14, 'fail': 4, 'race_reports': 1}，handler 图表 race {'run': 32, 'pass': 32, 'race_reports': 0}；27 份实际 HTTP 输出通过 v1.0.3 校验，21 合法/24 反例源样例自检通过。3 项既有失败（2 项时序、1 项 auth 夹具 race）不在 diff 范围内，单独复跑排队中，结果后补。负责人已裁定不阻塞本提交、不在M2修非缓存夹具；原失败不改写、不宣称0race，产品diff仅金额计数一行。回归覆盖 below_min、未知阈值、不同平台同名模型、无严格行和三种金额视角。
+- lint 由 P 在 M2 最终候选上的全量 golangci 覆盖；先前本地 privacy-lint 为超时 rc=4，原始日志保留，不记通过。
+- 后续：在 R16 之后独立本地提交，交 P/R；未推送或部署。G2 继续独立 M1 加固，待 M2 合入后变基。

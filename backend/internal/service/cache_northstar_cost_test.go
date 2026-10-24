@@ -98,3 +98,46 @@ func TestCacheNorthstarPriceChangeIgnoresTinyModels(t *testing.T) {
 	result := northstarCost(rows, rows, northstarPrices(rows), "list")
 	require.False(t, result.PricingChangedInWindow)
 }
+
+// R17 counts priced models only when they participate in the strict result;
+// pricing coverage still includes all business rows and is independent of view.
+func TestCacheNorthstarPricedModelsUseStrictScope(t *testing.T) {
+	hour := time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC)
+	row := CacheNorthstarRow{BucketStart: hour, Platform: PlatformOpenAI, Model: "gpt-shared", ThresholdBand: 1024,
+		CacheNorthstarTotals: CacheNorthstarTotals{Requests: 10, PromptTokens: 12000, InputTokens: 6000, ReadTokens: 6000, InputCostMicros: 60000, ReadCostMicros: 6000}}
+	otherPlatform := row
+	otherPlatform.Platform = PlatformAnthropic // Same model name is a distinct price key.
+	below := row
+	below.Model, below.ThresholdBand = "gpt-below", 512
+	unknown := row
+	unknown.Model = "unknown-threshold"
+	unpriced := row
+	unpriced.Model, unpriced.ReadTokens, unpriced.InputTokens = "gpt-no-read", 0, 12000
+	unpriced.ReadCostMicros = 0
+	policy := parseNorthstarPolicy(northstarPolicyDefaults())
+	meta := CachePanelMeta{PolicyVersion: policy.PolicyVersion, AsOf: hour.Add(time.Hour), GeneratedAt: hour.Add(time.Hour), Window: CachePanelWindow{Start: hour, End: hour.Add(time.Hour)}}
+	for _, view := range []string{"list", "charged", "upstream"} {
+		t.Run(view, func(t *testing.T) {
+			for _, tc := range []struct {
+				name       string
+				rows       []CacheNorthstarRow
+				wantModels int
+				wantShare  float64
+			}{
+				{"mixed", []CacheNorthstarRow{row, otherPlatform, below, unknown, unpriced}, 2, 0.8},
+				{"business_only", []CacheNorthstarRow{below, unknown}, 0, 1},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					got := buildCacheNorthstar(meta, CachePanelQuery{Window: "24h", Granularity: "1h", Platform: "all", CostView: view}, policy,
+						&CacheNorthstarState{PolicyChangedAt: hour}, CacheNorthstarData{Rows: tc.rows, Hours: []CacheNorthstarHour{{BucketStart: hour}}}, nil)
+					require.Equal(t, tc.wantModels, got.Summary.Cost.PricedModels)
+					require.InDelta(t, tc.wantShare, got.Summary.Cost.PricedPromptShare, 1e-12)
+					if tc.wantModels == 0 {
+						require.Nil(t, got.Summary.Cost.SavedAmount)
+						require.Nil(t, got.Summary.Cost.OpportunityAmount)
+					}
+				})
+			}
+		})
+	}
+}
