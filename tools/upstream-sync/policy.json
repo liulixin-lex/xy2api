@@ -2542,6 +2542,26 @@
     {
       "path": "backend/internal/service/cache_provider_messages_test.go",
       "value": "func TestCacheProviderOpenAIExcludedPlatformZeroWork("
+    },
+    {
+      "path": "backend/internal/service/cache_trace_classify.go",
+      "value": "readKnown := in.UsageObserved && in.UsageFields&13 != 0"
+    },
+    {
+      "path": "backend/internal/service/cache_trace_classify_test.go",
+      "value": "func TestT3ClassifierAliasOnlyReadUnknown("
+    },
+    {
+      "path": "backend/internal/service/cache_provider_alias_test.go",
+      "value": "func TestCacheProviderAliasOnlySettlement("
+    },
+    {
+      "path": "backend/internal/service/cache_provider_scope.go",
+      "value": "s.cacheIdentityDigest(\"cache-trace-anth-v1\", value)"
+    },
+    {
+      "path": "backend/internal/service/cache_provider_history.go",
+      "value": "map[cacheProviderSessionKey]*cacheProviderHistoryEntry"
     }
   ],
   "forbidden_module_paths": [
@@ -3515,6 +3535,16 @@
       "id": "xy-openai-upstream-identity-l01",
       "path": "backend/internal/service/openai_upstream_identity_test.go",
       "literal": "func TestL01BodyInsertionPreservesOriginalSuffixAndPresence("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_provider_scope_test.go",
+      "literal": "func TestCacheProviderSessionTenantAndServingScope("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_provider_history_test.go",
+      "literal": "func TestCacheProviderHistoryTenantAndEpochIsolation("
     }
   ]
 }

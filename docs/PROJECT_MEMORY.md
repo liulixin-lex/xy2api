@@ -235,6 +235,7 @@
 ### 20261024-cache-p0b-fields — M2b（G2，进行中）
 
 - 进度：新 main 五 tag 编译全过，20 出站与 50 用量/计费 golden 通过；23 个策略 HTTP 契约中 22 个通过。修正两个测试初始化问题与 unsupported 字段的错误 reason，随后按追加契约实现 stats 平台分区（含 host、会话及容量隔离）。新的重门禁为 M3 集成让行，原失败保留，轻量实现继续；Messages 桥已接线待验证，Anthropic/Gemini 捕获/结算尚未接入。
+- 追加裁定：FX-OBS-1 已将 alias-only 读量改为 n/a_usage，补 Responses/Chat/Messages 的真实 emitter 回归；v1.2 原样例未改。FX-L04-7 的租户/serving 组 HMAC 与独立有界历史存储已补基础实现和测试，尚未接入 provider 挂点。新增 Go 测试等待 M3 关键路径释放，不能视为通过。
 
 - 基于 M2 main 16a776e347 开展 T0b.4，保留已合入 M2 的产品、迁移与隔离测试；本地检查点不是可集成提交。默认关闭，不改变出站及计费。
 - 在原 main 72c2d0169 上已录制 20 组出站和 50 组用量/计费，来源与摘要在 testdata；已实现平台与入站链策略字段及 stats 分区，Anthropic/Gemini 捕获和结算尚未接入；Messages 桥接线和回归测试已补，待验证。
@@ -1171,3 +1172,9 @@ pnpm --dir frontend run build
 - 为桥补齐发送时标、最终请求头、流式用量存在性和结算计数；平台开关按路径区分 openai/messages_bridge，原生 Anthropic 与 raw Chat 子路径排除。计费赋值和路由选择未改。
 - 测试覆盖两种响应模式的八态开关矩阵、typed 显式零/缺字段、原生子路径、OpenAI 被排除时零 body 读取；原入口结构清单增加一条流式入口，旧断言全部保留。
 - 桥的独立 main 出站/计费基线及新增 Go/race 均待资源释放后执行，目前只有格式和静态检查。Anthropic/Gemini、后续字段组仍未完成，不推送、不部署、不称交付。
+
+### 2026-10-24T18:51Z — M2b 观测别名与 provider 租户隔离基础
+
+- 分类器读取类位改为 bit0/2/3；alias-only 保留 usage_fields、按 n/a_usage 输出且无 na_reason，依赖读量的两个标记关闭，计费解析未变。追加六种真实转发事件回归及 canonical/metadata 位/优先级测试，复制 v1.2 schema 和增量样例，44 份旧夹具 SHA 不变。
+- provider session_digest 按指定 HMAC 域和 API key、serving 组、原会话哈希生成，内部历史键另带 platform。独立有界 LRU 只收此键，发送、结算、历史发布分开，失效 owner 不能发布到复用摘要的新 epoch；没有 OpenAI 旧会话表读写。尚未接入 Anthropic/Gemini 生产挂点，属于实现基础。
+- 源契约自检、格式及静态文档检查；所有新增 Go/race 与实际输出校验仍待执行，重门禁按负责人要求给 M3 让行，不重复排队。非阻塞的保留期清理与行为策略过期保护保留在后续维护范围。未推送、部署或访问生产。

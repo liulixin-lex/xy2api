@@ -1,8 +1,8 @@
 {
-  "version": "cache_trace M2b v1.1",
-  "source_manifest_sha256": "94792eb9ab8565f477d9deb0b5e671b395f34c5ee8c8b82b175f20661da997bd",
+  "version": "cache_trace M2b v1.2",
+  "source_manifest_sha256": "b9114bb85133ea5e94a811f03b8ee1c5450ec72d2cc2b3be5e2747637e38f958",
   "files": {
-    "cache_trace.v1.m2b.schema.json": "415bfd6e84ff672ac128d73c4c625d876bbac5d3c397986a7be7e5fd8b129404",
+    "cache_trace.v1.m2b.schema.json": "8363061f76296dbf0e68ee6a4c9bb96be4353bf7058fe8529aeea4cfcd1ccf36",
     "examples/anthropic_admitted_full.json": "a608de920c77cd678ecf760c3fb56dfd1bec3095bc1377b2f1e12530c642e264",
     "examples/anthropic_cc_fallback_injected.json": "43bb37c4fd51a25bc87a14a1038bbe9f839059ce93f57d81f193259a46a7ee66",
     "examples/anthropic_model_unsupported_rebind.json": "eb277e18a665e797f8812cefcad088fa312d7242a09576110a6452164f9dcde5",
@@ -20,6 +20,9 @@
     "examples/openai_v11_t0b0_s1s2s6.json": "7422eb383d2071099dbe312b7854e234eb1c18ce341164f164b15d15470125c3",
     "examples/openai_v11_unsampled_t0b0.json": "726cb00f823e3eb22544548dc026f2c6936583b8a6bf432a3639d670c83e64df",
     "examples/openai_v11_ws_bridge.json": "f42a41f6334af91bb48a384f880290e5471985859a77f5f62b0a81330ff4f034",
+    "examples/openai_v12_alias_only_n_a_usage.json": "550f303fc4aa57c32c81c53a251d8857f212d598200acfd1402c2fd80e6fcab8",
+    "examples/openai_v12_m31_fanin_cap.json": "7e8d62525e4d61b37847d51903dc306dea4c30e71af6a92fa51f297bc4dc2ec6",
+    "examples/openai_v12_m31_restore_literal.json": "4834d19c222b8751044aa705726103e493a58afc313916fc8b8b84876cc4398b",
     "examples/rejected_anthropic_budget_full.json": "05952f3c70d19dfe27497e5d6c40a44baa39fd9618e15e3fd3142e032f997ac7",
     "invalid/invalid_anthropic_gemini_id_source.json": "262d177e9086b80e833f31fdfbd675bad9fd712b3704bd7a437586a8fb5e8c3e",
     "invalid/invalid_bridge_l01_arm_on.json": "919222e99cf190e00b450dd8c2484e07c6d612983af29afc2eb5370da311f743",
@@ -46,6 +49,9 @@
     "invalid/invalid_v11_read_blk_lo_gt_hi.json": "7c9d6fa69bcd74ac04a64afca7312b028bb4894d941cebcd4fc30f4576892ece",
     "invalid/invalid_v11_relay_family_value.json": "11c80c4ad981389ecf50588aec1b2bcf597b7291449dc3a57449f45a3631616d",
     "invalid/invalid_v11_t0b0_partial.json": "758577f555de2f37737a4058c18725257dd1c360cf7e43aaf23555fc801bc298",
-    "invalid/invalid_v11_unsampled_with_s1.json": "4a86c77831e560e6e41cc7d9740955b109b882385f21482d25d0761b8065c565"
+    "invalid/invalid_v11_unsampled_with_s1.json": "4a86c77831e560e6e41cc7d9740955b109b882385f21482d25d0761b8065c565",
+    "invalid/invalid_v12_alias_only_under_read.json": "1c760d3c0376eaa3667a0d7542921bb352b067b11bdb94fb59289d9a05e3ee75",
+    "invalid/invalid_v12_restore_not_applied.json": "a93aa8efbdb84718a40e025ffcdde3947ce635a942ed638f36380c8bc545cae9",
+    "validate_trace_contract_m2b.py": "f290904b68305a45e032a5231d3545ccb345bc494e937563e8babbde62a5e077"
   }
 }

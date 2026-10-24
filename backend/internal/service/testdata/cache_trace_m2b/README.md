@@ -1,3 +1,3 @@
-# cache_trace M2b v1.1
+# cache_trace M2b v1.2
 
-Immutable contract JSON copies. SOURCE_SHA256.json binds every file to its source bytes. Build-specific policy envelopes replace only the explicitly derived cases; frozen M1 examples remain unchanged.
+Immutable contract copies. SOURCE_SHA256.json binds every file to its source bytes. All earlier examples remain byte-for-byte unchanged. The source validator includes the FX-OBS-1 alias-only rule and M3.1 additive compatibility; JSON Schema alone cannot enforce all semantic checks.

@@ -119,7 +119,7 @@ conv_anchor 按既定的前导 system/developer 和首条 user 计算；Codex �
 
 ### 结算分类与覆盖缺口
 
-完整事件包含 P/read、p_prev、hist_age_s、chain_sampled 和归因输入。分类顺序为 n/a_plugin → n/a_usage → n/a_sampled_out → n/a_truncated → below_min → cold → other_conv → full → prefix_changed → provider_reasoning_drop_suspect → under_read。缺少 P 或数值缓存读取字段属于 n/a_usage，显式数字 0 视为存在。覆盖缺口不计入机会量归因；plugin 和 chain_percent 仍输出完整事件，异步未就绪或拒绝输出最小事件。结算冻结一次 worker 快照，不等待，也不补发事件。
+完整事件包含 P/read、p_prev、hist_age_s、chain_sampled 和归因输入。分类顺序为 n/a_plugin → n/a_usage → n/a_sampled_out → n/a_truncated → below_min → cold → other_conv → full → prefix_changed → provider_reasoning_drop_suspect → under_read。缺少 P 或数值缓存读取字段属于 n/a_usage，显式数字 0 视为存在。OpenAI（含 Messages 桥）的读取类位为 usage_fields 的 bit0/2/3；只有 bit1（prompt_cache_hit_tokens 别名）时，计费解析没有可用 read，因此同样记 n/a_usage，不输出 na_reason，也不设置读量归因标记。别名存在性仍保留，计费保持原行为。覆盖缺口不计入机会量归因；plugin 和 chain_percent 仍输出完整事件，异步未就绪或拒绝输出最小事件。结算冻结一次 worker 快照，不等待，也不补发事件。
 
 `gateway.cache_trace.min_cacheable_tokens` 默认 1024，比较上游报告的 P；P 缺失不能判 below_min。主力 GPT-5.6 及以上型号的最低可缓存长度为 1024 可见 token，旧型号和非官方后端可能不同，在线不维护模型阈值表，离线分析可按型号重新分类。`tok_per_byte_milli` 是 P/逻辑总字节数的千倍整数；未知记 −1，判定使用未取整的密度。full 比较 read 与 min(p_prev,P)，精确计数容差固定 256；涉及估算 token 位置的容差为 max(256,3%·估算值)。range 两端结论相同才采用，否则 n/a_truncated；检查点间截尾的上界按可能未分叉解释。
 

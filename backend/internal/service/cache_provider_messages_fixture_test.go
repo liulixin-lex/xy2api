@@ -26,7 +26,7 @@ type cacheProviderMessagesGolden struct {
 
 // This fixture also compiles on unmodified main16a. Record there first;
 // candidate output must never replace the baseline.
-func cacheProviderMessagesForward(t *testing.T, stream bool, configure func(*OpenAIGatewayService)) (*cacheTraceContractFixture, *OpenAIForwardResult, string) {
+func cacheProviderMessagesForward(t *testing.T, stream bool, configure func(*OpenAIGatewayService), reply ...string) (*cacheTraceContractFixture, *OpenAIForwardResult, string) {
 	t.Helper()
 	f := cacheTraceNewContractFixture(t, "messages-bridge", "responses")
 	f.s.cachePolicies = NewCachePolicyService(nil, f.s.cfg)
@@ -40,6 +40,9 @@ func cacheProviderMessagesForward(t *testing.T, stream bool, configure func(*Ope
 		configure(f.s)
 	}
 	response := traceForwardOK()
+	if len(reply) > 0 {
+		response.Body = io.NopCloser(strings.NewReader(reply[0]))
+	}
 	response.Header.Set("X-Request-Id", "ctc-private-bridge-request")
 	recorder := &httpUpstreamRecorder{resp: response}
 	f.s.httpUpstream = recorder
