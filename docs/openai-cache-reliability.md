@@ -253,3 +253,5 @@ priced_p_share 仍按业务范围的有价 P / 业务 P 计算，三种 cost_vie
 cache_trace 在送达分类确定后、真正扣费及用量落库之前输出，与既有 openai_cache_usage 一样不代表账单提交成功；之后扣费或落库失败不会撤回已输出的观测事件。
 
 流式观测在既有逐帧只读解析路径上运行，没有 buffered 观测回调的 panic 隔离；结算入口的 recover 只保护结算，不覆盖流式逐帧解析。
+
+路由归因反映请求中观察到的最高优先级决策，不保证最终选中的账号来自该决策：无会话也可记 sticky_new，但不会创建粘性绑定；failover 观察点早于 OAuth 429 的停止检查，因此被停止的切换也会计数；放弃或等待失败的候选仍参与最高级归因。多次故障改绑以快照前最后一次 rebind_cause 为准，快照后的改绑不进入事件。M1 只输出九个已接入原因及 unknown；capacity_shed、hard_clear、iq_bypass、quality_excluded、non_fault_rebind、affinity_pref 均为保留值，不单独输出，请求内因容量降载换号归 failover_n，其他行为按实际经过的既有九个决策点归因。
