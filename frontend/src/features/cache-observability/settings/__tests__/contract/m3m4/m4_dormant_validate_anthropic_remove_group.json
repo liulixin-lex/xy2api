@@ -1,0 +1,85 @@
+{
+  "_contract": [
+    "M4-2",
+    "M4-D4",
+    "C-4"
+  ],
+  "_note": "v1.2：在 m4_dormant_list_db_enabled 的状态上移除 anchor 中的 32。能力为 false 的字段允许关闭方向的变化（移除 ID、开关改为 false）与改回默认值，所以有效；方向为 disable，不要求确认。metadata_group_ids 仍为 [31]，配置中仍有未实现的功能，所以 effective_preview 仍为 blocked，blockers=[not_implemented_in_build]。",
+  "_fixture": {
+    "build_capabilities": {
+      "l04": false,
+      "l03": false,
+      "l07": false
+    },
+    "说明": "后端测试需预置的静态构建能力，不属于响应；没有 _fixture 的 m4 样例按三项都为 true 处理",
+    "stored_spec": {
+      "anchor_group_ids": [
+        31,
+        32
+      ],
+      "gemini_anchor": false,
+      "metadata_group_ids": [
+        31
+      ],
+      "rollout_percent": 50
+    }
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/anthropic_identity/validate",
+    "body": {
+      "expected_rev": 2,
+      "spec": {
+        "anchor_group_ids": [
+          31
+        ]
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": true,
+      "errors": [],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "anchor_group_ids",
+          "before": [
+            31,
+            32
+          ],
+          "after": [
+            31
+          ]
+        }
+      ],
+      "risk": "high",
+      "direction": "disable",
+      "confirm": {
+        "reason_required": false,
+        "checkbox_required": false,
+        "type_to_confirm": null
+      },
+      "current_rev": 2,
+      "rev_stale": false,
+      "effective_preview": {
+        "state": "blocked",
+        "active": false,
+        "blockers": [
+          "not_implemented_in_build"
+        ]
+      },
+      "affected": [
+        {
+          "key": "anthropic_identity",
+          "state_before": "blocked",
+          "state_after": "blocked",
+          "active_after": false
+        }
+      ]
+    }
+  }
+}

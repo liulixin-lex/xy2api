@@ -81,6 +81,7 @@ export default {
       not_in_build: 'Not in this version',
     },
     blockers: {
+      not_implemented_in_build: 'This version does not include this feature yet: the saved configuration has no effect. You can turn the affected settings off or remove them.',
       diagnostics_disabled: 'The system cache diagnostics switch is off, so cache observation cannot work. Ask operations to turn it on (needs a config change and a restart).',
       static_aware_routing_disabled: 'This depends on a system switch that needs a config change and a restart, and it is off. Saving has no effect; ask operations to assess it.',
       parse_error: 'The stored configuration cannot be read and is treated as off. Saving once restores it.',
@@ -102,6 +103,7 @@ export default {
       reload: 'Reload candidates',
     },
     acks: {
+      not_implemented_in_build: 'This version does not include this feature, so saving has no effect',
       observability_off: 'cache observation is off, so the effect of this change cannot be evaluated',
       anthropic_observability_missing: 'cache observation does not cover Claude/Gemini yet, so the effect cannot be evaluated',
       fallback_group_selected: 'a selected group is a fallback group, so fallback traffic is rewritten too',
@@ -141,6 +143,7 @@ export default {
       typed: 'the typed key',
     },
     locked: {
+      not_implemented_in_build: 'This version does not include this feature yet; it can be turned on after an upgrade.',
       requires_mode_uuid_fill: 'Set the fill mode to uuid_fill before turning this on',
     },
     direction: {

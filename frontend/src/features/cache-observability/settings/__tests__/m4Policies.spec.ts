@@ -1,5 +1,5 @@
 // M4: cache_anthropic_identity_policy (risk high) and cache_routing_policy (risk highest) on the
-// generic policy card, driven by F's m3m4 samples (v1.1, M4 part). The backend (T4.0) is not
+// generic policy card, driven by F's m3m4 samples (v1.2, M4 part). The backend (T4.0) is not
 // built yet, so the samples follow DESIGN §11 and the M4 brief: group candidates (FE-Q3), dot
 // paths for the nested routing fields, and the key name typed before routing widens (§11.7).
 import { flushPromises, mount } from '@vue/test-utils'
@@ -96,7 +96,7 @@ describe('anthropic_identity and routing (M4) on the generic policy card, m3m4 s
   beforeEach(() => vi.clearAllMocks())
 
   it('has the M4 samples the cards use', () => {
-    expect(M3M4_NAMES.filter((n) => n.startsWith('m4_'))).toHaveLength(20)
+    expect(M3M4_NAMES.filter((n) => n.startsWith('m4_'))).toHaveLength(30)
   })
 
   it('renders the identity card under the master switch: high risk, the observability warning, groups by name (m4_list_masked_by_master)', async () => {
@@ -313,5 +313,124 @@ describe('anthropic_identity and routing (M4) on the generic policy card, m3m4 s
     await flushPromises()
     expect(api.putPolicy.mock.calls[0][1]).toMatchObject(m3m4Body('m4_put_routing_disable_skip_group_options'))
     expect(api.listPolicies).toHaveBeenCalledTimes(reads + 1)
+  })
+})
+
+/**
+ * The validate body the card sends and a sample's describe the same write: every key the card sent is in
+ * the sample, and every key it left out holds the stored value (the card sends changed top-level keys only).
+ */
+function sameWrite(sent: { expected_rev: number; spec: PolicySpec }, sample: { expected_rev: number; spec: PolicySpec }, stored: PolicySpec) {
+  expect(sent.expected_rev).toBe(sample.expected_rev)
+  for (const key of Object.keys(sent.spec)) expect(sent.spec[key], key).toEqual(sample.spec[key])
+  for (const key of Object.keys(sample.spec)) expect(sent.spec[key] ?? stored[key], key).toEqual(sample.spec[key])
+}
+
+// X-B1 (m3m4 v1.2, README §3.6): in a build without L-04, L-03 and L-07 the five fields behind them carry
+// not_implemented_in_build. At their default they are locked; written by an earlier build, they stay
+// editable so they can be turned off, and the server refuses any widening as unsupported_in_build.
+describe('M4 keys whose behaviour this build lacks (m3m4 v1.2, m4_dormant_*)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const MARKED = {
+    [ANTHROPIC]: ['anchor_group_ids', 'gemini_anchor', 'metadata_group_ids'],
+    [ROUTING]: ['keep_sticky_on_busy.enabled', 'keep_sticky_on_busy.group_ids'],
+  }
+  const control = (wrapper: Wrapper, key: string, name: string) => field(wrapper, key, name).find('select, [role="switch"]')
+
+  it('locks the marked fields at their defaults and says why; the others stay editable (m4_dormant_list_default)', async () => {
+    const { wrapper } = mountPanel('m4_dormant_list_default')
+    await flushPromises()
+    for (const [key, names] of Object.entries(MARKED)) {
+      expect(entry(m3m4List('m4_dormant_list_default'), key).schema.filter((f) => f.not_implemented_in_build).map((f) => f.field)).toEqual(names)
+      for (const name of names) {
+        expect(field(wrapper, key, name).text(), name).toContain('admin.cacheSettings.locked.not_implemented_in_build')
+        expect(control(wrapper, key, name).attributes('disabled'), name).toBeDefined()
+      }
+    }
+    expect(field(wrapper, ANTHROPIC, 'rollout_percent').get('input').attributes('disabled')).toBeUndefined()
+    expect(field(wrapper, ROUTING, 'keep_sticky_on_busy.rollout_percent').get('input').attributes('disabled')).toBeUndefined()
+    expect(picker(wrapper, ROUTING, 'affinity_mode').attributes('disabled')).toBeUndefined()
+    // Options still come, so names still resolve once something is selected (README §3.6).
+    expect(offered(wrapper, ANTHROPIC, 'anchor_group_ids')).toEqual(['31', '32', '77'])
+  })
+
+  it('keeps fields an earlier build switched on editable, under a blocked state (m4_dormant_list_db_enabled)', async () => {
+    const { wrapper } = mountPanel('m4_dormant_list_db_enabled')
+    await flushPromises()
+    for (const key of [ANTHROPIC, ROUTING]) {
+      const card = wrapper.get(`[data-test="policy-${key}"]`)
+      expect(card.attributes('data-state'), key).toBe('blocked')
+      expect(card.get('[data-test="policy-blockers"]').text(), key).toContain('admin.cacheSettings.blockers.not_implemented_in_build')
+    }
+    expect(picker(wrapper, ANTHROPIC, 'anchor_group_ids').attributes('disabled')).toBeUndefined()
+    expect(picker(wrapper, ANTHROPIC, 'metadata_group_ids').attributes('disabled')).toBeUndefined()
+    expect(control(wrapper, ANTHROPIC, 'gemini_anchor').attributes('disabled')).toBeDefined()
+    expect(control(wrapper, ROUTING, 'keep_sticky_on_busy.enabled').attributes('disabled')).toBeUndefined()
+    expect(control(wrapper, ROUTING, 'keep_sticky_on_busy.enabled').attributes('aria-checked')).toBe('true')
+  })
+
+  it('removes a group as a plain disable that stays blocked (m4_dormant_validate_anthropic_remove_group)', async () => {
+    const { wrapper, api } = mountPanel('m4_dormant_list_db_enabled', { validate: m3m4Validation('m4_dormant_validate_anthropic_remove_group') })
+    await flushPromises()
+    const chip = field(wrapper, ANTHROPIC, 'anchor_group_ids').findAll('li').find((li) => li.text().includes('#32'))
+    await chip!.get('button').trigger('click')
+    await preview(wrapper, ANTHROPIC)
+    expect(api.validatePolicy).toHaveBeenCalledWith(ANTHROPIC, m3m4Draft('m4_dormant_validate_anthropic_remove_group'))
+    expect(wrapper.get('[data-test="dialog-risk"]').classes()).toContain('badge-gray')
+    expect(wrapper.find('[data-test="confirm-checkbox"]').exists()).toBe(false)
+    expect(submit(wrapper).attributes('disabled')).toBeUndefined()
+  })
+
+  it('restores routing to its defaults in one disable step, then locks the fields again (m4_dormant_validate_routing_restore_defaults)', async () => {
+    const { wrapper, api } = mountPanel('m4_dormant_list_db_enabled', { validate: m3m4Validation('m4_dormant_validate_routing_restore_defaults') })
+    await flushPromises()
+    await control(wrapper, ROUTING, 'keep_sticky_on_busy.enabled').trigger('click')
+    await field(wrapper, ROUTING, 'keep_sticky_on_busy.group_ids').get('li button').trigger('click')
+    await setNumber(wrapper, ROUTING, 'keep_sticky_on_busy.rollout_percent', '0')
+    for (const name of MARKED[ROUTING]) expect(control(wrapper, ROUTING, name).attributes('disabled'), name).toBeDefined()
+    await preview(wrapper, ROUTING)
+    const stored = entry(m3m4List('m4_dormant_list_db_enabled'), ROUTING).stored!.spec
+    sameWrite(api.validatePolicy.mock.calls[0][1], m3m4Draft('m4_dormant_validate_routing_restore_defaults'), stored)
+    // Back to the defaults is a disable even for the highest risk key: no reason, check or key name.
+    expect(wrapper.get('[data-test="dialog-risk"]').classes()).toContain('badge-gray')
+    expect(wrapper.find('[data-test="confirm-checkbox"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="confirm-typed"]').exists()).toBe(false)
+    api.putPolicy.mockResolvedValueOnce(m3m4Written('m4_dormant_put_routing_restore_200'))
+    await submit(wrapper).trigger('click')
+    await flushPromises()
+    sameWrite(api.putPolicy.mock.calls[0][1], m3m4Body('m4_dormant_put_routing_restore_200'), stored)
+  })
+
+  it('restores the identity to its defaults as the same write as the sample (m4_dormant_validate_anthropic_restore_defaults)', async () => {
+    const { wrapper, api } = mountPanel('m4_dormant_list_db_enabled', { validate: m3m4Validation('m4_dormant_validate_anthropic_restore_defaults') })
+    await flushPromises()
+    // Metadata first: it must stay within the anchor groups at every step.
+    await field(wrapper, ANTHROPIC, 'metadata_group_ids').get('li button').trigger('click')
+    for (let i = 0; i < 2; i++) await field(wrapper, ANTHROPIC, 'anchor_group_ids').get('li button').trigger('click')
+    await setNumber(wrapper, ANTHROPIC, 'rollout_percent', '0')
+    await preview(wrapper, ANTHROPIC)
+    const stored = entry(m3m4List('m4_dormant_list_db_enabled'), ANTHROPIC).stored!.spec
+    sameWrite(api.validatePolicy.mock.calls[0][1], m3m4Draft('m4_dormant_validate_anthropic_restore_defaults'), stored)
+    expect(wrapper.get('[data-test="dialog-risk"]').classes()).toContain('badge-gray')
+  })
+
+  it('shows a widening the server refuses at the marked field, and reads the 400 envelopes', async () => {
+    // Values from m4_dormant_validate_routing_enable_unsupported; the card cannot switch a locked field on,
+    // so the refused widening here is a higher share on a key an earlier build switched on.
+    const { wrapper } = mountPanel('m4_dormant_list_db_enabled', { validate: m3m4Validation('m4_dormant_validate_routing_enable_unsupported') })
+    await flushPromises()
+    await setNumber(wrapper, ROUTING, 'keep_sticky_on_busy.rollout_percent', '40')
+    await preview(wrapper, ROUTING)
+    expect(field(wrapper, ROUTING, 'keep_sticky_on_busy.enabled').text()).toContain('admin.cacheSettings.errors.unsupported_in_build')
+    expect(submit(wrapper).attributes('disabled')).toBeDefined()
+    expect(toWriteFailure(m3m4Rejection('m4_dormant_put_anthropic_unsupported'))).toEqual({
+      kind: 'invalid',
+      errors: [
+        { field: 'anchor_group_ids', code: 'unsupported_in_build' },
+        { field: 'metadata_group_ids', code: 'unsupported_in_build' },
+      ],
+    })
+    expect(toWriteFailure(m3m4Rejection('m4_dormant_put_routing_unsupported'))).toEqual({ kind: 'invalid', errors: [{ field: 'keep_sticky_on_busy.enabled', code: 'unsupported_in_build' }] })
   })
 })
