@@ -1,0 +1,369 @@
+{
+  "_contract": [
+    "M3-1",
+    "C-1",
+    "C-2",
+    "FE-Q3"
+  ],
+  "_note": "M3 构建：upstream_identity 可用、从未写过（rev=0、spec=defaults），state=off；anthropic_identity、routing 仍为 not_in_build。account_ids（id_list，ref=account）下发 options：只列合格账号（OpenAI apikey，排除 Codex 协议、passthrough、grok 等），最多 500 个，按 id 升序（FE-Q3）。header_only_uuid 与 forward_session_headers 在 M3 构建中只接受默认值，非默认值由 validate/PUT 拒绝（README §3.3）。",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/cache/policies",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "generated_at": "2026-10-24T09:00:05Z",
+      "process_started_at": "2026-10-24T08:40:00Z",
+      "build_version": "0.0.0-contract",
+      "refresh_interval_s": 60,
+      "static": {
+        "kill_switch": false,
+        "caps": {
+          "workers": 1,
+          "max_byte_budget_mib": 64,
+          "max_rate_mib_per_s": 32,
+          "max_sessions": 1024,
+          "chains_per_session": 3,
+          "max_checkpoints": 512
+        }
+      },
+      "existing": {
+        "openai_cache_diagnostics_enabled": true,
+        "openai_cache_aware_routing_enabled": false,
+        "openai_cache_rollout_percent": 0,
+        "claude_cache_fallback": {
+          "configured": true,
+          "group_count": 2,
+          "settings_link": "/admin/settings?tab=gateway"
+        }
+      },
+      "policies": [
+        {
+          "key": "master",
+          "setting_key": "cache_feature_master",
+          "available": true,
+          "risk": "high",
+          "gated_by_master": false,
+          "stored": {
+            "rev": 0,
+            "updated_at": null,
+            "updated_by": null,
+            "reason": null,
+            "spec": {
+              "enabled": false
+            }
+          },
+          "loaded": {
+            "rev": 0,
+            "loaded_at": "2026-10-24T08:40:01Z"
+          },
+          "effective": {
+            "state": "off",
+            "active": false,
+            "blockers": [],
+            "warnings": [],
+            "clipped_fields": []
+          },
+          "defaults": {
+            "enabled": false
+          },
+          "schema": [
+            {
+              "field": "enabled",
+              "type": "bool"
+            }
+          ]
+        },
+        {
+          "key": "observability",
+          "setting_key": "cache_observability_policy",
+          "available": true,
+          "risk": "low",
+          "gated_by_master": false,
+          "stored": {
+            "rev": 0,
+            "updated_at": null,
+            "updated_by": null,
+            "reason": null,
+            "spec": {
+              "enabled": false,
+              "sample_percent": 100,
+              "chain_percent": 100,
+              "byte_budget_mib": 64,
+              "rate_mib_per_s": 32
+            }
+          },
+          "loaded": {
+            "rev": 0,
+            "loaded_at": "2026-10-24T08:40:01Z"
+          },
+          "effective": {
+            "state": "off",
+            "active": false,
+            "blockers": [],
+            "warnings": [],
+            "clipped_fields": []
+          },
+          "defaults": {
+            "enabled": false,
+            "sample_percent": 100,
+            "chain_percent": 100,
+            "byte_budget_mib": 64,
+            "rate_mib_per_s": 32
+          },
+          "schema": [
+            {
+              "field": "enabled",
+              "type": "bool"
+            },
+            {
+              "field": "sample_percent",
+              "type": "int",
+              "min": 0,
+              "max": 100,
+              "unit": "percent"
+            },
+            {
+              "field": "chain_percent",
+              "type": "int",
+              "min": 0,
+              "max": 100,
+              "unit": "percent"
+            },
+            {
+              "field": "byte_budget_mib",
+              "type": "int",
+              "min": 8,
+              "max": 64,
+              "unit": "MiB",
+              "cap_source": "gateway.cache_trace.max_byte_budget_mib"
+            },
+            {
+              "field": "rate_mib_per_s",
+              "type": "int",
+              "min": 1,
+              "max": 32,
+              "unit": "MiB/s",
+              "cap_source": "gateway.cache_trace.max_rate_mib_per_s"
+            }
+          ]
+        },
+        {
+          "key": "northstar",
+          "setting_key": "cache_northstar_policy",
+          "available": true,
+          "risk": "low",
+          "gated_by_master": false,
+          "stored": {
+            "rev": 0,
+            "updated_at": null,
+            "updated_by": null,
+            "reason": null,
+            "spec": {
+              "rollup_enabled": false,
+              "backfill_days": 7,
+              "policy_version": "2026-10-22-v1",
+              "excluded_group_ids": [],
+              "exclude_media": true,
+              "model_thresholds": [],
+              "unknown_threshold": "aux_only"
+            }
+          },
+          "loaded": {
+            "rev": 0,
+            "loaded_at": "2026-10-24T08:40:01Z"
+          },
+          "effective": {
+            "state": "off",
+            "active": false,
+            "blockers": [],
+            "warnings": [],
+            "clipped_fields": []
+          },
+          "defaults": {
+            "rollup_enabled": false,
+            "backfill_days": 7,
+            "policy_version": "2026-10-22-v1",
+            "excluded_group_ids": [],
+            "exclude_media": true,
+            "model_thresholds": [],
+            "unknown_threshold": "aux_only"
+          },
+          "schema": [
+            {
+              "field": "rollup_enabled",
+              "type": "bool"
+            },
+            {
+              "field": "backfill_days",
+              "type": "int",
+              "min": 0,
+              "max": 30,
+              "unit": "days"
+            },
+            {
+              "field": "policy_version",
+              "type": "string"
+            },
+            {
+              "field": "excluded_group_ids",
+              "type": "id_list",
+              "ref": "group",
+              "options": []
+            },
+            {
+              "field": "exclude_media",
+              "type": "bool"
+            },
+            {
+              "field": "model_thresholds",
+              "type": "threshold_rules"
+            },
+            {
+              "field": "unknown_threshold",
+              "type": "enum",
+              "options": [
+                "aux_only"
+              ]
+            }
+          ]
+        },
+        {
+          "key": "upstream_identity",
+          "setting_key": "cache_upstream_identity_policy",
+          "available": true,
+          "risk": "high",
+          "gated_by_master": true,
+          "stored": {
+            "rev": 0,
+            "updated_at": null,
+            "updated_by": null,
+            "reason": null,
+            "spec": {
+              "mode": "off",
+              "account_ids": [],
+              "rollout_percent": 0,
+              "chat_compat_uuid": false,
+              "header_only_uuid": false,
+              "forward_session_headers": "whitelist"
+            }
+          },
+          "loaded": {
+            "rev": 0,
+            "loaded_at": "2026-10-24T08:40:01Z"
+          },
+          "effective": {
+            "state": "off",
+            "active": false,
+            "blockers": [],
+            "warnings": [],
+            "clipped_fields": []
+          },
+          "defaults": {
+            "mode": "off",
+            "account_ids": [],
+            "rollout_percent": 0,
+            "chat_compat_uuid": false,
+            "header_only_uuid": false,
+            "forward_session_headers": "whitelist"
+          },
+          "schema": [
+            {
+              "field": "mode",
+              "type": "enum",
+              "options": [
+                "off",
+                "uuid_fill"
+              ]
+            },
+            {
+              "field": "account_ids",
+              "type": "id_list",
+              "ref": "account",
+              "options": [
+                {
+                  "id": 101,
+                  "name": "relay-a-01",
+                  "platform": "openai"
+                },
+                {
+                  "id": 102,
+                  "name": "relay-b-01",
+                  "platform": "openai"
+                },
+                {
+                  "id": 103,
+                  "name": "relay-c-01",
+                  "platform": "openai"
+                }
+              ]
+            },
+            {
+              "field": "rollout_percent",
+              "type": "int",
+              "min": 0,
+              "max": 100,
+              "unit": "percent"
+            },
+            {
+              "field": "chat_compat_uuid",
+              "type": "bool"
+            },
+            {
+              "field": "header_only_uuid",
+              "type": "bool"
+            },
+            {
+              "field": "forward_session_headers",
+              "type": "enum",
+              "options": [
+                "whitelist",
+                "normalize"
+              ]
+            }
+          ]
+        },
+        {
+          "key": "anthropic_identity",
+          "setting_key": "cache_anthropic_identity_policy",
+          "available": false,
+          "risk": "high",
+          "gated_by_master": true,
+          "stored": null,
+          "loaded": null,
+          "effective": {
+            "state": "not_in_build",
+            "active": null,
+            "blockers": [],
+            "warnings": [],
+            "clipped_fields": []
+          },
+          "defaults": null,
+          "schema": []
+        },
+        {
+          "key": "routing",
+          "setting_key": "cache_routing_policy",
+          "available": false,
+          "risk": "highest",
+          "gated_by_master": true,
+          "stored": null,
+          "loaded": null,
+          "effective": {
+            "state": "not_in_build",
+            "active": null,
+            "blockers": [],
+            "warnings": [],
+            "clipped_fields": []
+          },
+          "defaults": null,
+          "schema": []
+        }
+      ]
+    }
+  }
+}

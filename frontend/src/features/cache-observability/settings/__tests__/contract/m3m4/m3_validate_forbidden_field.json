@@ -1,0 +1,44 @@
+{
+  "_contract": [
+    "M3-3",
+    "C-3"
+  ],
+  "_note": "M3：normalize_client_pck 在解析层拒绝（INV-02），错误码 forbidden_field。",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/upstream_identity/validate",
+    "body": {
+      "expected_rev": 0,
+      "spec": {
+        "normalize_client_pck": true
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": false,
+      "errors": [
+        {
+          "field": "normalize_client_pck",
+          "code": "forbidden_field"
+        }
+      ],
+      "warnings": [],
+      "diff": [],
+      "risk": "high",
+      "direction": "disable",
+      "confirm": {
+        "reason_required": false,
+        "checkbox_required": false,
+        "type_to_confirm": null
+      },
+      "current_rev": 0,
+      "rev_stale": false,
+      "effective_preview": null,
+      "affected": []
+    }
+  }
+}

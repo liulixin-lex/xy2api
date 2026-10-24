@@ -1,0 +1,71 @@
+{
+  "_contract": [
+    "M3-2",
+    "C-4"
+  ],
+  "_note": "M3 方向样例 mixed：rollout 50→80 为扩大，account_ids 从空（全部）改为 [101] 为收窄。两者同时出现即 mixed，按非 disable 方向处理：要求理由与勾选。",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/upstream_identity/validate",
+    "body": {
+      "expected_rev": 4,
+      "spec": {
+        "rollout_percent": 80,
+        "account_ids": [
+          101
+        ]
+      },
+      "reason": "比例调高，但只限一个账号",
+      "confirm": {
+        "checkbox": true,
+        "typed": null
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": true,
+      "errors": [],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "account_ids",
+          "before": [],
+          "after": [
+            101
+          ]
+        },
+        {
+          "field": "rollout_percent",
+          "before": 50,
+          "after": 80
+        }
+      ],
+      "risk": "high",
+      "direction": "mixed",
+      "confirm": {
+        "reason_required": true,
+        "checkbox_required": true,
+        "type_to_confirm": null
+      },
+      "current_rev": 4,
+      "rev_stale": false,
+      "effective_preview": {
+        "state": "on",
+        "active": true,
+        "blockers": []
+      },
+      "affected": [
+        {
+          "key": "upstream_identity",
+          "state_before": "on",
+          "state_after": "on",
+          "active_after": true
+        }
+      ]
+    }
+  }
+}
