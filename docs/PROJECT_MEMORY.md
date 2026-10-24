@@ -222,9 +222,9 @@
 ### 20261023-cache-p1-l01 — M3 上游 UUID 会话键补全（G，增量修复待新基点门禁）
 
 - 基点main `16a776e347`（M2 已合入），分支 `cache/p1-l01`。既有响应/cohort补修 `05b3f3cfe`、管理员API `a90727351` 已交R；本轮按PM/R追加原位null和管理员候选故障降级，提交号以git log为准。仅实际注入时恢复已有响应字段为null，未生效与显式客户端值不动；不同上游无key形态仍需在实验中核对。
-- 管理API：账号options静态合格、升序最多500；候选失败不阻断List/Get/PUT，空options并追加account_options_unavailable；disable方向Validate/PUT不访问账号表，开启/mixed保持必要校验。管理契约已同步v1.0.2的五份修正及v1.0.3四份增量，共22个原字节M3样例。
+- 管理API：账号options静态合格、升序最多500；候选失败不阻断List/Get/PUT，空options并追加account_options_unavailable；disable方向Validate/PUT不访问账号表，开启/mixed保持必要校验。管理契约已同步m3m4 v1.1，共22个原字节M3样例；五份list含M2实际形态，回放完整比较。
 - 验证范围：既有r5 focused7031与140分配对照是旧树证据；13:30剩余重任务按PM中止。本轮仅格式、diff、文档、静态契约与干净树审计，不宣称新增Go测试已通过。Q5是保存的官方文档流示例，不是实际请求录制。
-- 当前：完整四提交已变基到 M2 main，保留 northstar、计数器、M1.1 emit-only/UTC 与仓储测试隔离。候选1e31dbe3c的default/unit/integration/e2e/embed编译全部通过；首轮重复helper失败与修复保留。F新发布m3m4 v1.1，五份list改为M2实际形态，移除旧投影后完整响应比较；仅补查受影响unit tag，结果待补。P已确认race/zero/logger/compat/lint与22样例实际回放在最终M3候选统一执行。未推送、未变更生产。
+- 当前：完整四提交已变基到M2 main；northstar、计数器、M1.1 emit-only/UTC与仓储测试隔离保留。1e31dbe3c五tag编译全部通过；v1.1后继e972cd4e7仅改样例/unit测试，unit补查通过，其余四tag按未变化编译输入继承。R已核对变基语义无阻塞；工作树待本次纯记忆收尾后交P。实际unit/race、zero/logger/compat/lint、22样例回放与staging仍由最终M3候选统一执行，来源没有重复长测试。未推送、未变更生产。
 
 
 
@@ -1130,3 +1130,9 @@ pnpm --dir frontend run build
 
 - F 发布列表契约更新后，同步五份 M3 list 原字节与 SHA；其余17份未变。实际 HTTP 测试移除 M2 字段投影，连同 northstar 与 persist_trace_hourly 全量比较，仍只归一化 UTC 时间。产品运行时代码不变。
 - 五tag r2已在1e31dbe3c通过；本提交只补unit tag，其他四tag按源码范围继承。实际测试执行与长门禁由P在最终M3一次覆盖；当前unit补证待完成，原始失败与所有继承证据保留。
+
+### 2026-10-24T15:33Z — 20261023-cache-p1-l01 — M2 变基编译与契约补证收尾
+
+- 五tag r2在1e31dbe3c全部退出0；v1.1后继e972cd4e7的unit补查退出0（约12秒），源码前后相同。其他四tag的Go编译输入未变，继承证明已保存。本提交仅更新记忆，不重复Go门禁。
+- 交付范围为新main16a776e347之后的完整四来源重放、接缝、v1.1夹具以及本记忆。175个M2非重叠路径、279及仓储隔离测试保持；22样例与F原字节相同。映射、range-diff、原编译失败、修复与新旧证据绑定在仓库外交接中。
+- R变基审查无阻塞；中间提交不能独立编译的bisect建议登记后续，集成人可在不改变最终产品树的前提下整理。最终集成单条流水线、实际22样例回放、S端到端和GitHub CI仍由P统筹；未把来源编译当作测试执行。未推送、合并或部署。
