@@ -1,5 +1,5 @@
 // M4: cache_anthropic_identity_policy (risk high) and cache_routing_policy (risk highest) on the
-// generic policy card, driven by F's m3m4 samples (v1.0, M4 part). The backend (T4.0) is not
+// generic policy card, driven by F's m3m4 samples (v1.0.2, M4 part). The backend (T4.0) is not
 // built yet, so the samples follow DESIGN §11 and the M4 brief: group candidates (FE-Q3), dot
 // paths for the nested routing fields, and the key name typed before routing widens (§11.7).
 import { flushPromises, mount } from '@vue/test-utils'
@@ -96,7 +96,7 @@ describe('anthropic_identity and routing (M4) on the generic policy card, m3m4 s
   beforeEach(() => vi.clearAllMocks())
 
   it('has the M4 samples the cards use', () => {
-    expect(M3M4_NAMES.filter((n) => n.startsWith('m4_'))).toHaveLength(17)
+    expect(M3M4_NAMES.filter((n) => n.startsWith('m4_'))).toHaveLength(18)
   })
 
   it('renders the identity card under the master switch: high risk, the observability warning, groups by name (m4_list_masked_by_master)', async () => {
@@ -261,14 +261,17 @@ describe('anthropic_identity and routing (M4) on the generic policy card, m3m4 s
     expect(toWriteFailure(m3m4Rejection('m4_put_routing_422_typed'))).toEqual({ kind: 'confirm', missing: ['typed'], typeToConfirm: 'cache_routing_policy' })
   })
 
-  it('turns stickiness off in one step under a neutral badge, no key name (m4_validate_routing_disable)', async () => {
-    const { wrapper, api } = mountPanel('m4_list_on', { validate: m3m4Validation('m4_validate_routing_disable') })
+  it('turns stickiness off in one step under a neutral badge, no key name (m4_validate_routing_disable_whole_object)', async () => {
+    // v1.0.1: the whole nested object, siblings at their stored values, answers exactly as {enabled: false} alone.
+    expect(m3m4Validation('m4_validate_routing_disable_whole_object')).toEqual(m3m4Validation('m4_validate_routing_disable'))
+    const { wrapper, api } = mountPanel('m4_list_on', { validate: m3m4Validation('m4_validate_routing_disable_whole_object') })
     await flushPromises()
     await field(wrapper, ROUTING, 'keep_sticky_on_busy.enabled').get('[role="switch"]').trigger('click')
     await preview(wrapper, ROUTING)
-    expect(api.validatePolicy.mock.calls[0]).toMatchObject([ROUTING, m3m4Draft('m4_validate_routing_disable')])
+    expect(api.validatePolicy).toHaveBeenCalledWith(ROUTING, m3m4Draft('m4_validate_routing_disable_whole_object'))
     expect(wrapper.get('[data-test="dialog-risk"]').classes()).toContain('badge-gray')
     expect(wrapper.find('[data-test="diff-keep_sticky_on_busy.enabled"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="diff-keep_sticky_on_busy.group_ids"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="confirm-checkbox"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="confirm-typed"]').exists()).toBe(false)
     expect(submit(wrapper).attributes('disabled')).toBeUndefined()

@@ -1,0 +1,63 @@
+{
+  "_contract": [
+    "M4-2",
+    "C-4",
+    "C-7"
+  ],
+  "_note": "v1.0.1（UI 提出）：前端修改嵌套对象的任一子字段时，会整体发送该对象，未改的兄弟字段按存储值带上（M1 partialSpec 的做法）。这与 m4_validate_routing_disable 只发 {enabled:false} 表达同一次写入：后端按点路径的实际变化判断 diff、direction、confirm 与审计中的 changed_fields，未变的 group_ids、rollout_percent 不进 diff。所以结果与只发子字段时逐项相同：disable，不要求确认。",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/routing/validate",
+    "body": {
+      "expected_rev": 1,
+      "spec": {
+        "keep_sticky_on_busy": {
+          "enabled": false,
+          "group_ids": [
+            31
+          ],
+          "rollout_percent": 20
+        }
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": true,
+      "errors": [],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "keep_sticky_on_busy.enabled",
+          "before": true,
+          "after": false
+        }
+      ],
+      "risk": "highest",
+      "direction": "disable",
+      "confirm": {
+        "reason_required": false,
+        "checkbox_required": false,
+        "type_to_confirm": null
+      },
+      "current_rev": 1,
+      "rev_stale": false,
+      "effective_preview": {
+        "state": "off",
+        "active": false,
+        "blockers": []
+      },
+      "affected": [
+        {
+          "key": "routing",
+          "state_before": "on",
+          "state_after": "off",
+          "active_after": false
+        }
+      ]
+    }
+  }
+}
