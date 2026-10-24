@@ -253,6 +253,7 @@ export default {
       remove: '移除 {name}',
       groupID: '分组 #{id}',
       loadFailed: '分组列表读取失败，只能查看已选分组的 ID',
+      fallbackUnknown: '分组列表读取失败，无法标出回退组',
       fallbackTag: '回退组',
       servingScope: '按实际服务的分组生效',
     },

@@ -27,16 +27,16 @@ export function unitSuffix(unit: string | undefined, t: Translate): string {
   return unit
 }
 
-/** "name (#id)" for groups (admin group list) and accounts (the field's own candidates), else the bare ID. */
+/** "name (#id)" from the field's own candidates (FE-Q3), for groups else from the admin group list; the bare ID otherwise. */
 export function idNames(field: SchemaField | undefined, groups: { id: number; name: string }[], t: Translate) {
-  const accounts = field ? idOptions(field) : []
+  const candidates = field ? idOptions(field) : []
   return {
     group: (id: number) => {
-      const group = groups.find((g) => g.id === id)
+      const group = candidates.find((g) => g.id === id) ?? groups.find((g) => g.id === id)
       return group ? `${group.name} (#${id})` : t(`${P}.groupPicker.groupID`, { id })
     },
     account: (id: number) => {
-      const account = accounts.find((a) => a.id === id)
+      const account = candidates.find((a) => a.id === id)
       return account ? `${account.name} (#${id})` : t(`${P}.ids.item`, { id })
     },
   }

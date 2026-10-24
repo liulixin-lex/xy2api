@@ -42,7 +42,7 @@ export interface PolicyEffective {
   clipped_fields: string[]
 }
 
-/** Candidate of an `id_list` with `ref=account` (FE-Q3): only accounts the server deems eligible. */
+/** Candidate of an `id_list` with `ref=account` or `ref=group` (FE-Q3): only what the server deems eligible. */
 export interface IdOption {
   id: number
   name: string
