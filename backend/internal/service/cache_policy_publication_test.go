@@ -4,10 +4,12 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
 
@@ -110,4 +112,66 @@ func TestCachePolicyRefreshDoesNotOverwriteConcurrentWrite(t *testing.T) {
 	require.NoError(t, <-done)
 	require.True(t, s.Snapshot().TraceEnabled())
 	require.EqualValues(t, 1, s.Snapshot().revs[1])
+}
+
+type policyBlockedAccountOptions struct {
+	CachePolicyAccountLookup
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *policyBlockedAccountOptions) ListWithFilters(context.Context, pagination.PaginationParams, string, string, string, string, int64, string) ([]Account, *pagination.PaginationResult, error) {
+	close(r.entered)
+	<-r.release
+	return nil, nil, errors.New("options unavailable")
+}
+
+func TestCachePolicySlowAccountOptionsDoesNotBlockPublication(t *testing.T) {
+	accounts := &policyBlockedAccountOptions{entered: make(chan struct{}), release: make(chan struct{})}
+	s := NewCachePolicyService(newPolicyTestStore(), policyTestConfig(), WithCachePolicyAccounts(accounts))
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(accounts.release) }) })
+	type result struct {
+		view CachePolicyView
+		err  error
+	}
+	done := make(chan result, 1)
+	first := policyWrite(t, `{"expected_rev":0,"spec":{"mode":"uuid_fill","rollout_percent":50},"reason":"enable","confirm":{"checkbox":true}}`)
+	go func() {
+		view, _, err := s.Update(context.Background(), "upstream_identity", first, nil, CachePolicyActor{})
+		done <- result{view, err}
+	}()
+	select {
+	case <-accounts.entered:
+	case <-time.After(time.Second):
+		t.Fatal("committed update did not reach candidate lookup")
+	}
+	require.EqualValues(t, 1, s.Snapshot().revs[3])
+	subscribed := make(chan struct{})
+	go func() { s.subscribe(func(*CachePolicySnapshot) {}); close(subscribed) }()
+	select {
+	case <-subscribed:
+	case <-time.After(time.Second):
+		t.Fatal("subscription waited for account lookup")
+	}
+	second := policyWrite(t, `{"expected_rev":1,"spec":{"mode":"off"}}`)
+	disabled := make(chan error, 1)
+	go func() {
+		_, _, err := s.Update(context.Background(), "upstream_identity", second, nil, CachePolicyActor{})
+		disabled <- err
+	}()
+	select {
+	case err := <-disabled:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("rollback waited for account lookup")
+	}
+	require.EqualValues(t, 2, s.Snapshot().revs[3])
+	release.Do(func() { close(accounts.release) })
+	firstResult := <-done
+	require.NoError(t, firstResult.err)
+	require.EqualValues(t, 1, firstResult.view.Stored.Rev)
+	require.Contains(t, firstResult.view.Effective.Warnings, cachePolicyAccountOptionsUnavailable)
+	require.EqualValues(t, 2, s.Snapshot().revs[3])
+	require.Equal(t, "off", s.Snapshot().UpstreamIdentity().Mode)
 }

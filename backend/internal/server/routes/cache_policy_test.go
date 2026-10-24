@@ -312,7 +312,11 @@ func TestCachePolicyContractFixtures(t *testing.T) {
 			require.Equal(t, expectedStatus, status, got)
 			normalizePolicyTimes(t, got)
 			normalizePolicyTimes(t, expected)
-			require.Equal(t, expected, got)
+			if strings.HasPrefix(name, "list_") {
+				assertCachePolicyM1ListWithM3Capability(t, expected, got)
+			} else {
+				require.Equal(t, expected, got)
+			}
 			// Drain middleware output synchronously; validate must produce zero records.
 			audit.Start()
 			audit.Stop()

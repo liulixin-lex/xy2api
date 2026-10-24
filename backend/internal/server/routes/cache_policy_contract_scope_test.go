@@ -92,3 +92,59 @@ func cachePolicyHistorySeeds(t *testing.T, name string) []*service.AuditLog {
 	}
 	return rows
 }
+
+// Frozen M1 lists predate the upstream identity build capability. Compare every
+// envelope/data field and every other card exactly, without rewriting fixtures.
+// The complete new card is checked by the 22 real M3 v1.1 HTTP replays.
+func assertCachePolicyM1ListWithM3Capability(t *testing.T, expected, got map[string]any) {
+	t.Helper()
+	require.Len(t, got, len(expected))
+	for key, value := range expected {
+		require.Contains(t, got, key)
+		if key != "data" {
+			require.Equal(t, value, got[key], key)
+		}
+	}
+	expectedData := expected["data"].(map[string]any)
+	gotData := got["data"].(map[string]any)
+	require.Len(t, gotData, len(expectedData))
+	for key, value := range expectedData {
+		require.Contains(t, gotData, key)
+		if key != "policies" {
+			require.Equal(t, value, gotData[key], key)
+		}
+	}
+	expectedPolicies := expectedData["policies"].([]any)
+	gotPolicies := gotData["policies"].([]any)
+	require.Len(t, expectedPolicies, 6)
+	require.Len(t, gotPolicies, len(expectedPolicies))
+	for i, raw := range expectedPolicies {
+		want := raw.(map[string]any)
+		actual := gotPolicies[i].(map[string]any)
+		require.Equal(t, want["key"], actual["key"])
+		if i != 3 {
+			require.Equal(t, want, actual)
+			continue
+		}
+		require.Equal(t, "upstream_identity", want["key"])
+		require.Equal(t, false, want["available"])
+		require.Equal(t, "not_in_build", want["effective"].(map[string]any)["state"])
+		require.Equal(t, "cache_upstream_identity_policy", actual["setting_key"])
+		require.Equal(t, true, actual["available"])
+		require.Equal(t, true, actual["gated_by_master"])
+		require.NotEmpty(t, actual["schema"])
+		state := "off"
+		blockers := []any{}
+		if expectedData["static"].(map[string]any)["kill_switch"].(bool) {
+			state = "killed"
+			blockers = append(blockers, "kill_switch")
+		}
+		require.Equal(t, map[string]any{
+			"state": state, "active": false, "blockers": blockers,
+			"warnings": []any{}, "clipped_fields": []any{},
+		}, actual["effective"])
+		require.Equal(t, actual["defaults"], actual["stored"].(map[string]any)["spec"])
+		require.Equal(t, float64(0), actual["stored"].(map[string]any)["rev"])
+		require.Equal(t, float64(0), actual["loaded"].(map[string]any)["rev"])
+	}
+}

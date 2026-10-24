@@ -339,16 +339,21 @@ func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePoli
 	if err != nil {
 		return CachePolicyView{}, nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entries := s.snapshot.Load().entries
-	// Another completed transaction may already have published a newer rev
-	// while this transaction was returning from the repository.
-	if updated.envelope.Rev > entries[i].envelope.Rev {
-		entries[i] = updated
-		s.publishEntries(entries)
-	}
-	view := s.view(i, updated, s.snapshot.Load())
+	var view CachePolicyView
+	func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		entries := s.snapshot.Load().entries
+		// Another completed transaction may already have published a newer rev
+		// while this transaction was returning from the repository.
+		if updated.envelope.Rev > entries[i].envelope.Rev {
+			entries[i] = updated
+			s.publishEntries(entries)
+		}
+		view = s.view(i, updated, s.snapshot.Load())
+	}()
+	// Candidate lookup only enriches this local response; never hold the
+	// publication lock across administrator repository I/O.
 	if i == 3 {
 		if skipAccountOptions {
 			setCachePolicyUnavailableAccountOptions(&view)
