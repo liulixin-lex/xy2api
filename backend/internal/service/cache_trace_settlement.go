@@ -7,9 +7,19 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
+type cacheTraceDelivery uint8
+
+const (
+	cacheTraceDelivered cacheTraceDelivery = iota
+	cacheTraceUnbilled
+	cacheTraceAbuse
+)
+
+// The billing entry passes its completed delivery classification. The optional
+// fallback supports observation-only callers and respects the same master gate.
 // Called only when the forward result carries an enabled observation. The
 // legacy usage update runs first; neither billing nor routing state is changed.
-func (s *OpenAIGatewayService) settleCacheTrace(ctx context.Context, result *OpenAIForwardResult, account *Account) {
+func (s *OpenAIGatewayService) settleCacheTrace(ctx context.Context, result *OpenAIForwardResult, account *Account, billingDelivery ...cacheTraceDelivery) {
 	if result == nil || (result.CacheTrace == nil && result.cacheTraceFailure == nil) {
 		return
 	}
@@ -20,12 +30,21 @@ func (s *OpenAIGatewayService) settleCacheTrace(ctx context.Context, result *Ope
 	if diagnostic == nil || account == nil || account.Platform != PlatformOpenAI {
 		return
 	}
-	if st := resilience.StateFrom(ctx); st != nil {
+	delivery := cacheTraceDelivered
+	if len(billingDelivery) > 0 {
+		delivery = billingDelivery[0]
+	} else if st := resilience.StateFrom(ctx); st != nil && resilience.Current().DisconnectOn() {
 		disconnected, delivered, abuse := st.Disconnect()
 		if disconnected && !delivered {
-			s.settleCacheTraceUndelivered(result, account, abuse)
-			return
+			delivery = cacheTraceUnbilled
+			if abuse {
+				delivery = cacheTraceAbuse
+			}
 		}
+	}
+	if delivery != cacheTraceDelivered {
+		s.settleCacheTraceUndelivered(result, account, delivery == cacheTraceAbuse)
+		return
 	}
 	if failed := result.cacheTraceFailure; failed != nil {
 		if !failed.emitted.CompareAndSwap(false, true) {

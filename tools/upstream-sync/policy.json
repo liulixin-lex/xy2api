@@ -560,7 +560,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_usage.go",
-      "value": "if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {"
+      "value": "skipBilling := resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier)"
     },
     {
       "path": "backend/internal/server/middleware/client_request_id.go",
@@ -2120,7 +2120,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_usage.go",
-      "value": "s.settleCacheTrace(ctx, result, input.Account)"
+      "value": "s.settleCacheTrace(ctx, traceResult, input.Account, delivery)"
     },
     {
       "path": "backend/internal/service/openai_gateway_usage.go",
@@ -2180,7 +2180,7 @@
     },
     {
       "path": "backend/internal/service/cache_trace_settlement.go",
-      "value": "s.settleCacheTraceUndelivered(result, account, abuse)"
+      "value": "s.settleCacheTraceUndelivered(result, account, delivery == cacheTraceAbuse)"
     },
     {
       "path": "backend/internal/server/routes/admin.go",
