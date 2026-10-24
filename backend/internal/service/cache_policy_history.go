@@ -70,7 +70,7 @@ func (s *CachePolicyService) History(ctx context.Context, audit *AuditLogService
 		if policyIndex(key) < 0 || row.Action != cachePolicyAction(key) || row.Method != "PUT" {
 			continue
 		}
-		item := CachePolicyHistoryItem{At: row.CreatedAt, Key: key, Action: row.Action, StatusCode: row.StatusCode, ChangedFields: []string{}}
+		item := CachePolicyHistoryItem{At: row.CreatedAt.UTC(), Key: key, Action: row.Action, StatusCode: row.StatusCode, ChangedFields: []string{}}
 		if row.ActorUserID != nil {
 			item.Actor = &CachePolicyActor{*row.ActorUserID, row.ActorEmail}
 		}

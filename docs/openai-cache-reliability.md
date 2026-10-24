@@ -149,6 +149,7 @@ cache_trace 仅为内部 Info 日志，经现有 slog→zap JSON logger 输出�
 validate 的校验失败返回 200、`valid=false`，不写审计；PUT 成败均由管理审计
 中间件记录，成功记录四个摘要 `policy_key/rev_before/rev_after/changed_fields`。
 history 缺省最近 20 条，最多 100 条；可按键、时间和 `after_rev` 查询。
+历史项的 `at` 统一按 RFC3339 UTC（`Z` 后缀）返回，不受审计数据库读取会话时区影响。
 完整性按每键全部已落盘的成功 revision 判断，不受分页影响，失败写入不消耗 revision。
 最小 revision 大于 1 时，返回 `history_complete=false` 与 `history_incomplete_reason="earlier_missing"`；
 从 1 开始但中间缺号时，原因为 `gap`。完整时原因为 null。最新一条尚未落盘不算缺失。
