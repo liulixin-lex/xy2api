@@ -50,6 +50,7 @@ type CacheTraceCounters struct {
 	sessions     map[cacheCounterSessionKey]cacheCounterSession
 	sessionOrder [2048]cacheCounterSessionKey
 	nextSession  int
+	providers    [2]*CacheTraceCounters
 }
 
 func NewCacheTraceCounters() *CacheTraceCounters {
@@ -119,7 +120,28 @@ func (c *CacheTraceCounters) RecordBusiness(now time.Time, prompt, read int64, h
 	}
 }
 
+// CacheTraceCounterSample contains only aggregation facts from a settled
+// emitted event. Request identifiers and session digests do not enter it.
+type CacheTraceCounterSample struct {
+	PromptTokens, ReadTokens, PreviousPrompt int
+	LossClass, Transport, ModelGen, ForkKind string
+	PCKClassIn, PCKClassOut, SessOutRelation string
+	RouteReason, RebindCause                 string
+	SessHdrIn, SessHdrOut                    uint16
+	PCKOutIsUUID                             bool
+}
+
 func (c *CacheTraceCounters) RecordTrace(now time.Time, d cacheTraceData) {
+	c.recordTraceSample(now, CacheTraceCounterSample{
+		PromptTokens: d.PromptTokens, ReadTokens: d.ReadTokens, PreviousPrompt: d.Prefix.PreviousPrompt,
+		LossClass: d.LossClass, Transport: d.Transport, ModelGen: d.Prefix.ModelGen, ForkKind: d.Prefix.ForkKind,
+		PCKClassIn: d.PCKClassIn, PCKClassOut: d.PCKClassOut, SessOutRelation: d.SessOutRelation,
+		RouteReason: d.RouteReason, RebindCause: d.RebindCause, SessHdrIn: d.SessHdrIn, SessHdrOut: d.SessHdrOut,
+		PCKOutIsUUID: d.PCKOutIsUUID,
+	})
+}
+
+func (c *CacheTraceCounters) recordTraceSample(now time.Time, d CacheTraceCounterSample) {
 	if c == nil {
 		return
 	}
@@ -128,7 +150,7 @@ func (c *CacheTraceCounters) RecordTrace(now time.Time, d cacheTraceData) {
 	value := cacheCounterValue{requests: 1, prompt: int64(d.PromptTokens), read: int64(d.ReadTokens)}
 	excluded := len(d.LossClass) >= 4 && d.LossClass[:4] == "n/a_"
 	if !excluded && d.LossClass != "cold" && d.LossClass != "below_min" {
-		value.opportunity = int64(max(0, min(d.Prefix.PreviousPrompt, d.PromptTokens)-d.ReadTokens))
+		value.opportunity = int64(max(0, min(d.PreviousPrompt, d.PromptTokens)-d.ReadTokens))
 	}
 	b := c.minute(now)
 	b.trace.add(value)
@@ -168,7 +190,7 @@ func (c *CacheTraceCounters) RecordTrace(now time.Time, d cacheTraceData) {
 		hour = &cacheCounterHour{at: at, values: map[cacheCounterHourKey]cacheCounterValue{}}
 		c.hours[index] = hour
 	}
-	key := cacheCounterHourKey{d.Transport, "unknown", d.PCKClassOut, d.LossClass, d.Prefix.ModelGen, d.Prefix.ForkKind}
+	key := cacheCounterHourKey{d.Transport, "unknown", d.PCKClassOut, d.LossClass, d.ModelGen, d.ForkKind}
 	if _, ok := hour.values[key]; !ok && len(hour.values) >= 2048 {
 		key = cacheCounterHourKey{"other", "unknown", "other", "other", "other", "other"}
 	}
@@ -177,7 +199,7 @@ func (c *CacheTraceCounters) RecordTrace(now time.Time, d cacheTraceData) {
 	hour.values[key] = old
 }
 
-func (c *CacheTraceCounters) PreviousHour(now time.Time) []CacheTraceHour {
+func (c *CacheTraceCounters) previousPlatformHour(now time.Time, platform string) []CacheTraceHour {
 	out := []CacheTraceHour{}
 	if c == nil {
 		return out
@@ -190,7 +212,7 @@ func (c *CacheTraceCounters) PreviousHour(now time.Time) []CacheTraceHour {
 			continue
 		}
 		for key, value := range hour.values {
-			out = append(out, CacheTraceHour{BucketStart: hour.at, ProcessID: c.processID, Platform: "openai", Transport: key.transport, RelayFamily: key.relay, PCKClassOut: key.pck, LossClass: key.loss, ModelGen: key.model, ForkKind: key.fork, Requests: value.requests, PromptTokens: value.prompt, ReadTokens: value.read, OpportunityTokens: value.opportunity})
+			out = append(out, CacheTraceHour{BucketStart: hour.at, ProcessID: c.processID, Platform: platform, Transport: key.transport, RelayFamily: key.relay, PCKClassOut: key.pck, LossClass: key.loss, ModelGen: key.model, ForkKind: key.fork, Requests: value.requests, PromptTokens: value.prompt, ReadTokens: value.read, OpportunityTokens: value.opportunity})
 		}
 	}
 	return out
@@ -202,47 +224,36 @@ func (c *CacheTraceCounters) Snapshot(now time.Time, q CachePanelQuery, policy *
 	if c.started.After(effective) {
 		effective = c.started
 	}
+	covered, notes := cacheCounterScope(policy, q.Platform)
 	result := map[string]any{
 		"policy_version": policy.NorthstarPolicy().PolicyVersion, "as_of": now, "generated_at": now,
 		"window": CachePanelWindow{Start: start, End: now}, "effective_start": effective, "process_started_at": c.started,
 		"trace_enabled": policy.TraceEnabled(), "trace_policy_rev": policy.ObservabilityRevision(), "schema_version": 1,
-		"platforms_covered": []string{"openai"}, "scope_notes": []string{"messages_bridge_excluded"},
+		"platforms_covered": covered, "scope_notes": notes,
 		"coverage":     map[string]any{"business_requests": int64(0), "business_prompt_tokens": int64(0), "traced_requests": int64(0), "traced_prompt_tokens": int64(0), "coverage_ratio": nil, "category_known_ratio": nil, "targets": map[string]float64{"coverage_ratio": 0.95, "category_known_ratio": 0.99}},
 		"loss_classes": []any{}, "pck_in": []any{}, "pck_out": []any{}, "pck_out_is_uuid_ratio": nil,
 		"session_headers": []any{}, "sess_out_relation": []any{}, "route_reasons": []any{}, "rebind_causes": []any{}, "model_isolated_switch_rate": nil, "host_read_ewma": []any{},
 	}
-	if !policy.TraceEnabled() || q.Platform != "all" && q.Platform != "openai" {
+	if !policy.TraceEnabled() {
 		return result
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	total := cacheCounterMinute{dimensions: map[string]map[string]cacheCounterValue{}}
-	for _, b := range c.minutes {
-		if b == nil || b.at.Before(start.Truncate(time.Minute)) || b.at.After(now) {
-			continue
-		}
-		total.business.add(b.business)
-		total.trace.add(b.trace)
-		total.known += b.known
-		total.uuid += b.uuid
-		total.pairs += b.pairs
-		total.switches += b.switches
-		for i := range total.headersIn {
-			total.headersIn[i] += b.headersIn[i]
-			total.headersOut[i] += b.headersOut[i]
-		}
-		for dimension, values := range b.dimensions {
-			for key, value := range values {
-				total.add(dimension, key, value)
-			}
-		}
+	selected := covered
+	if q.Platform != "all" {
+		// An explicit query can still inspect its recorded window after the
+		// platform is removed from the current observation policy.
+		selected = []string{q.Platform}
 	}
+	total, openAI, hostsByName := c.selectedSnapshot(now, start, selected)
 	result["coverage"] = map[string]any{"business_requests": total.business.requests, "business_prompt_tokens": total.business.prompt, "traced_requests": total.trace.requests, "traced_prompt_tokens": total.trace.prompt,
-		"coverage_ratio": northstarRatio(float64(total.trace.prompt), float64(total.business.prompt)), "category_known_ratio": northstarRatio(float64(total.known), float64(total.trace.requests)),
+		"coverage_ratio": northstarRatio(float64(total.trace.prompt), float64(total.business.prompt)), "category_known_ratio": northstarRatio(float64(openAI.known), float64(openAI.trace.requests)),
 		"targets": map[string]float64{"coverage_ratio": 0.95, "category_known_ratio": 0.99}}
 	for _, dim := range []struct{ source, target, key string }{{"loss", "loss_classes", "class"}, {"pck_in", "pck_in", "class"}, {"pck_out", "pck_out", "class"}, {"relation", "sess_out_relation", "relation"}, {"route", "route_reasons", "reason"}, {"rebind", "rebind_causes", "cause"}} {
 		values := map[string]cacheCounterValue{}
-		for key, value := range total.dimensions[dim.source] {
+		basis := &total
+		if dim.source == "pck_in" || dim.source == "pck_out" || dim.source == "relation" {
+			basis = &openAI
+		}
+		for key, value := range basis.dimensions[dim.source] {
 			if key == "" {
 				key = "unknown"
 			}
@@ -288,28 +299,28 @@ func (c *CacheTraceCounters) Snapshot(now time.Time, q CachePanelQuery, policy *
 		}
 		result[dim.target] = items
 	}
-	result["pck_out_is_uuid_ratio"] = northstarRatio(float64(total.uuid), float64(total.trace.requests))
+	result["pck_out_is_uuid_ratio"] = northstarRatio(float64(openAI.uuid), float64(openAI.trace.requests))
 	result["model_isolated_switch_rate"] = northstarRatio(float64(total.switches), float64(total.pairs))
 	headers := []any{}
-	for i := range total.headersIn {
-		if total.headersIn[i] == 0 && total.headersOut[i] == 0 {
+	for i := range openAI.headersIn {
+		if openAI.headersIn[i] == 0 && openAI.headersOut[i] == 0 {
 			continue
 		}
 		name := "metadata.user_id"
 		if i < len(cacheTraceHeaders) {
 			name = cacheTraceHeaders[i]
 		}
-		headers = append(headers, map[string]any{"header": name, "in_ratio": northstarRatio(float64(total.headersIn[i]), float64(total.trace.requests)), "out_ratio": northstarRatio(float64(total.headersOut[i]), float64(total.trace.requests))})
+		headers = append(headers, map[string]any{"header": name, "in_ratio": northstarRatio(float64(openAI.headersIn[i]), float64(openAI.trace.requests)), "out_ratio": northstarRatio(float64(openAI.headersOut[i]), float64(openAI.trace.requests))})
 	}
 	result["session_headers"] = headers
 	hosts := []any{}
-	names := make([]string, 0, len(c.hosts))
-	for name := range c.hosts {
+	names := make([]string, 0, len(hostsByName))
+	for name := range hostsByName {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		h := c.hosts[name]
+		h := hostsByName[name]
 		if h.samples < 10 || now.Sub(h.at) > 30*time.Minute {
 			continue
 		}

@@ -4,6 +4,7 @@
 - [x] 准备真实请求构造、转发与计费基线夹具。
 - [x] 在未修改主分支录制 golden，固定 SHA256 与来源。
 - [ ] 放开 platforms、ingress_chain_percent，补管理员校验、schema 与快照。
+- [ ] 验证 stats 平台分区：默认兼容、容量污染、EWMA、会话隔离、历史查询及 handler 契约（实现与测试已补，待门禁）。
 - [ ] 接入 Anthropic、Gemini、Messages 桥，复用有界 worker 与既有决策。
 - [ ] 实际事件通过追加契约，P/read 与最终计费逐字段相等。
 - [ ] 完成等值的 Anthropic 归一化及粘性日志脱敏；计费别名另行处理。

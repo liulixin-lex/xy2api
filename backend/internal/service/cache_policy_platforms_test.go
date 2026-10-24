@@ -16,6 +16,7 @@ func TestCacheProviderPolicyLegacyReadAndPartialWrite(t *testing.T) {
 	raw := `{"rev":3,"spec":{"enabled":true,"chain_percent":5,"rate_mib_per_s":32}}`
 	store.rows[cachePolicySettings[1]] = raw
 	svc := NewCachePolicyService(store, policyTestConfig(), WithProviderCacheTrace())
+	require.NoError(t, svc.Refresh(ctx))
 	view, err := svc.Get(ctx, "observability")
 	require.NoError(t, err)
 	require.Equal(t, "on", view.Effective.State)
@@ -100,7 +101,7 @@ func TestCacheProviderPolicyValidation(t *testing.T) {
 
 func TestCacheProviderPolicyBuildBoundaries(t *testing.T) {
 	svc := NewCachePolicyService(newPolicyTestStore(), policyTestConfig())
-	v, err := svc.Validate(context.Background(), "observability", policyWrite(t, `{"spec":{"platforms":["anthropic"]}}`), nil)
+	v, err := svc.Validate(context.Background(), "observability", policyWrite(t, `{"expected_rev":0,"spec":{"platforms":["anthropic"]}}`), nil)
 	require.NoError(t, err)
 	require.False(t, v.Valid)
 	require.Equal(t, "unsupported_in_build", v.Errors[0].Code)

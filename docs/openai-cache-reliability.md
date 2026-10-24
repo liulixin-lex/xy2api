@@ -313,3 +313,9 @@ L-01 灰度使用独立域 `SHA256("l01-cohort|" + session)`，再按首字节�
 null 形态依据保存的兼容 Responses 官方流示例及协议允许的空值，不代表已对每个
 上游实测；某上游若对无 key 请求省略该字段，两组仍可能呈现不同形态，需要在
 启用实验中监测。
+
+### 多平台观测的 stats 口径（M2b）
+
+平台扩展由 observability 的 platforms 控制，默认仍只有 openai。stats 的分钟桶、小时桶、host EWMA 与会话配对按平台隔离，各自沿用容量上限；Messages 桥属于 openai 分区。all 只汇总当前覆盖的平台，先合并计数再折叠小样本。同名 host 按统一时刻衰减后合并；PCK、会话头、UUID 比例与类别完整率只使用选中的 OpenAI 分区。
+
+单独查询已关闭平台仍可读取窗口内历史，带 platform_not_covered；all 排除该平台。provider 视图的 OpenAI 专属数组为空、比率为 null，并带 openai_only_metrics。仅启用 Messages 桥时，OpenAI 视图带 openai_native_excluded；未启用桥时继续标注 messages_bridge_excluded。默认配置的 openai、all 查询和小时行保持 M2 口径，不更改迁移或计费。

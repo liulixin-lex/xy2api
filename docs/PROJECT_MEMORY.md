@@ -234,8 +234,10 @@
 
 ### 20261024-cache-p0b-fields — M2b（G2，进行中）
 
+- 进度：新 main 五 tag 编译全过，20 出站与 50 用量/计费 golden 通过；23 个策略 HTTP 契约中 22 个通过。修正两个测试初始化问题与 unsupported 字段的错误 reason，随后按追加契约实现 stats 平台分区（含 host、会话及容量隔离）。新的重门禁为 M3 集成让行，原失败保留，轻量实现继续；provider 捕获/结算尚未接入。
+
 - 基于 M2 main 16a776e347 开展 T0b.4，保留已合入 M2 的产品、迁移与隔离测试；本地检查点不是可集成提交。默认关闭，不改变出站及计费。
-- 在原 main 72c2d0169 上已录制 20 组出站和 50 组用量/计费，来源与摘要在 testdata；当前仅实现平台与入站链策略字段，provider 捕获和结算尚未接入。
+- 在原 main 72c2d0169 上已录制 20 组出站和 50 组用量/计费，来源与摘要在 testdata；已实现平台与入站链策略字段及 stats 分区，provider 捕获和结算尚未接入。
 - 策略旧存储仅在内存补齐 ingress_chain_percent=min(10,chain_percent)，不写回或改变 rev；validate/PUT 使用同一合并基础。契约已发布，无需等待；别名计费变化按裁定延期，不合并。未推送或部署。
 
 
@@ -1157,3 +1159,9 @@ pnpm --dir frontend run build
 
 - 仅在策略启用分支、cohort之前接受v2:隔离种子；复合组、无API key与非OpenAI组旧种子沿用no_routing_session内部跳过，既有sticky不变，trace平台范围不扩展。
 - 新增三入口scope、两个租户实际Forward、policy关闭顺序与trace平台对照；allocation控制组夹具补v2:，保持原断言。单条五tag、L01 unit/race及相对6188的增量lint待执行，结果在仓库外PROGRESS补记；不推送、不部署。
+
+### 2026-10-24T16:54Z — 缓存 M2b stats 平台分区（本地检查点）
+
+- 按 v1.0.2 区分当前覆盖和显式平台历史；host EWMA、会话与容量分区，跨平台先求和后折叠；默认 OpenAI/all 与小时行用 main16a 原函数逐字段对照。新 HTTP 测试用固定独立计数并校验契约原元数据，源样例 SHA 完整保留。
+- 原五 tag、20 出站和 50 计费 golden 已过，原策略三处失败已修正但未复跑；新增 stats 测试尚未运行。重任务为 M3 候选让行，当前不是可集成交付。文档与保护登记已同步，不改调度、迁移或账单。
+- 下一步：继续 provider 捕获/结算，资源释放后统一补增量门禁与实际输出契约校验；不重复未受影响且通过的检查。未推送或部署。

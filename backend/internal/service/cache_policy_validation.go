@@ -305,6 +305,13 @@ func invalidPolicy(errs []CachePolicyFieldError) error {
 			break
 		}
 	}
+	unsupported := len(errs) > 0
+	for _, fieldErr := range errs {
+		unsupported = unsupported && fieldErr.Code == "unsupported_in_build"
+	}
+	if unsupported {
+		reason = "CACHE_POLICY_UNSUPPORTED"
+	}
 	return &CachePolicyError{400, reason, "cache policy validation failed", map[string]string{"errors": string(b)}}
 }
 func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePolicyWrite, bodyErrors []CachePolicyFieldError, actor CachePolicyActor) (CachePolicyView, []CachePolicyDiff, error) {

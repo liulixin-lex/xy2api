@@ -25,3 +25,13 @@ origin_group_id 与 serving group 分开，relay_family 缺省 unknown，OpenAI 
 先在未修改的主分支录制出站和实际计费 golden，再接入挂点。动态 SigV4 时间与签名以固定合成凭据和固定时刻规范化，其他请求内容逐字节比较。保留普通非流式与其他 Anthropic 路径的现有差异；只合并逐路径计费相等的归一化。
 
 粘性日志的 session、device 与原始 metadata 标识改为 HMAC；缺密钥时不回退输出原值。会话哈希返回值及选号输入不变。
+
+## 管理员 stats 分区
+
+分钟与小时计数、host EWMA、会话配对表按 openai、anthropic、gemini 独立分区，沿用每分区既有容量与 other 折叠。Messages 桥归入 openai。小时行保存真实 platform，迁移 279 不变。
+
+all 只汇总当前覆盖的分区，维度先求和再按小样本折叠；同名 host 衰减到同一时刻后合并。OpenAI 专属指标只来自选中的 OpenAI 分区，不以其他平台请求作分母。单独查询已关闭的平台仍可读取窗口内历史；all 不纳入该分区。
+
+默认 platforms=[openai] 时，openai、all 查询及小时行与 M2 主分支逐字段相同；其他平台查询修正旧的错误覆盖标注。覆盖范围与提示按追加契约输出，查询未覆盖平台仍返回 200。默认兼容、跨平台污染、容量隔离、汇总及历史切换有独立回归与实际 handler 输出验证。
+
+当前只完成策略字段及 stats 分区的实现草稿，新增分区测试尚待门禁；provider 采集与结算接缝继续开发，不作为可部署完成状态。

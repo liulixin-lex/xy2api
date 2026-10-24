@@ -2393,7 +2393,7 @@
     },
     {
       "path": "backend/internal/service/cache_policy.go",
-      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts))"
+      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithProviderCacheTrace())"
     },
     {
       "path": "backend/internal/service/openai_cache_diagnostics.go",
@@ -2478,6 +2478,30 @@
     {
       "path": "backend/internal/service/openai_gateway_upstream_errors.go",
       "value": "clientBody, err = restoreOpenAIUpstreamIdentityResponse(body)"
+    },
+    {
+      "path": "backend/internal/service/cache_trace_counter_platforms.go",
+      "value": "func (c *CacheTraceCounters) RecordPlatformBusiness("
+    },
+    {
+      "path": "backend/internal/service/cache_trace_counter_platforms.go",
+      "value": "func (c *CacheTraceCounters) RecordPlatformTrace("
+    },
+    {
+      "path": "backend/internal/service/cache_trace_counter_platforms.go",
+      "value": "func (c *CacheTraceCounters) selectedSnapshot("
+    },
+    {
+      "path": "backend/internal/service/cache_trace_counter_platforms_test.go",
+      "value": "func TestCacheProviderCountersDoNotPolluteOpenAI("
+    },
+    {
+      "path": "backend/internal/service/cache_trace_counter_platforms_test.go",
+      "value": "func TestCacheProviderCountersDefaultMain16Parity("
+    },
+    {
+      "path": "backend/internal/server/routes/cache_provider_stats_contract_test.go",
+      "value": "func TestCacheProviderStatsHandlerContract("
     }
   ],
   "forbidden_module_paths": [
