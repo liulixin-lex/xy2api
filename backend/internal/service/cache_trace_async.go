@@ -90,7 +90,7 @@ type cacheTraceWorkers struct {
 	reserved       atomic.Int64 // pending + queued + active ownership, reserved before job allocation
 	bytes          int64        // queued + active; guarded by mu for existing queue diagnostics
 	active         int
-	budget         int64
+	budget         int64 // accessed atomically after pool publication
 	workers        int
 	bytesPerSecond int64
 	limiter        *rate.Limiter
@@ -125,15 +125,19 @@ func (s *OpenAIGatewayService) cacheTraceWorkerPool() *cacheTraceWorkers {
 // lookup, hashing, or parsing may precede it. Include the fallback read copy
 // even when the worker can borrow the source without a scratch allocation.
 func (p *cacheTraceWorkers) reserve(ingress, output int64) (int64, bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	budget := p.budget
+	budget := atomic.LoadInt64(&p.budget)
 	if ingress < 0 || output < 0 || ingress > budget-1024 || output > (budget-ingress-1024)/2 {
 		return 0, false
 	}
 	cost := ingress + 2*output + 1024
 	for used := p.reserved.Load(); used <= budget-cost; used = p.reserved.Load() {
 		if p.reserved.CompareAndSwap(used, used+cost) {
+			// A shrink may have published after the first budget load.
+			// Undo this admission if it exceeds the now-current limit.
+			if used+cost > atomic.LoadInt64(&p.budget) {
+				p.reserved.Add(-cost)
+				return 0, false
+			}
 			return cost, true
 		}
 	}
@@ -202,7 +206,7 @@ func (p *cacheTraceWorkers) run() {
 			}
 			// A policy may shrink the budget after admission but before this
 			// first worker starts. Preserve those reservations in the burst.
-			burst := p.budget
+			burst := atomic.LoadInt64(&p.budget)
 			if reserved := p.reserved.Load(); reserved > burst {
 				burst = reserved
 			}
@@ -394,12 +398,12 @@ func (j *cacheTraceJob) historyEvicted() bool {
 func (p *cacheTraceWorkers) applyPolicy(policy *CachePolicySnapshot) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.budget = policy.ByteBudget()
+	atomic.StoreInt64(&p.budget, policy.ByteBudget())
 	p.bytesPerSecond = policy.RateBytesPerSecond()
 	if p.limiter != nil {
 		now := time.Now()
 		p.limiter.SetLimitAt(now, rate.Limit(p.bytesPerSecond))
-		burst := p.budget
+		burst := atomic.LoadInt64(&p.budget)
 		if reserved := p.reserved.Load(); reserved > burst {
 			burst = reserved
 		}
