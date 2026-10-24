@@ -42,6 +42,6 @@ Messages 桥复用 OpenAI 的有界 worker 与结算链，保持事件 platform=
 
 OpenAI（含 Messages 桥）的 usage_fields 只认 bit0/2/3 为已知读量，只有 bit1 别名时归 n/a_usage，不带 na_reason；已知 P 的密度保留，依赖读量的标记保持 false。此裁定不修改计费解析。M2b v1.2 schema 接受 M3.1 的追加 l01_skip 与可选恢复标记，后者出现时必须 applied=true。
 
-Anthropic/Gemini 的 session_digest 与 history/LRU 键统一使用 cacheIdentityDigest("cache-trace-anth-v1", api_key|serving_group|sessionHash) 的前 16 位；原始会话哈希不得直接用作历史键。不同租户、serving 组必须隔离，缺少 HMAC 密钥时不回退使用原值。
+Anthropic/Gemini 的 session_digest 与 history/LRU 键统一使用 cacheIdentityDigest("<platform>-session", api_key_id|serving_group_id|sessionHash) 的前 16 位；原始会话哈希不得直接用作历史键。platform 取 anthropic 或 gemini。不同租户、serving 组和平台必须隔离；history/LRU 及后续 S2/S6 均使用同一个摘要，缺少 HMAC 密钥时不回退使用原值。
 
 provider 历史基础使用独立有界 LRU，按 platform 与上述 HMAC 摘要索引；发送、计时关闭与链发布分开，淘汰后迟到 worker 必须匹配原 owner 才能发布。基础实现与隔离/并发测试已补，尚未接入 provider 发送和计费挂点，不能视为已完成平台接线。

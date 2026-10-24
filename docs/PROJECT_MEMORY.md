@@ -12,6 +12,11 @@
 - P1 L-01 已在吸收 M1 后完成本地实现与非计时门禁，保持默认关闭，待独立评审；当前交接见下方 P1 条目。
 
 
+### 缓存 M2b / provider session digest（2026-10-24，WIP）
+
+- 已按 trace v1.2.1 更正 Anthropic/Gemini 的 HMAC 域为 <platform>-session，摘要与独立 history/LRU 共用租户和 serving 组作用域；原计算向量已加入测试。
+- 源契约与轻量检查通过；新增 Go/race 尚待同一增量流水线，为 M3 关键路径让行。provider 生产挂点尚未接入，当前不是可集成或部署交付。
+
 - G：M1 日志 Attr 合并已验证；正式 d1 待复核，详见归档。
 
 ### 缓存策略历史 UTC（M1.1，本地完成）
@@ -236,6 +241,7 @@
 
 - 进度：新 main 五 tag 编译全过，20 出站与 50 用量/计费 golden 通过；23 个策略 HTTP 契约中 22 个通过。修正两个测试初始化问题与 unsupported 字段的错误 reason，随后按追加契约实现 stats 平台分区（含 host、会话及容量隔离）。新的重门禁为 M3 集成让行，原失败保留，轻量实现继续；Messages 桥已接线待验证，Anthropic/Gemini 捕获/结算尚未接入。
 - 追加裁定：FX-OBS-1 已将 alias-only 读量改为 n/a_usage，补 Responses/Chat/Messages 的真实 emitter 回归；v1.2 原样例未改。FX-L04-7 的租户/serving 组 HMAC 与独立有界历史存储已补基础实现和测试，尚未接入 provider 挂点。新增 Go 测试等待 M3 关键路径释放，不能视为通过。
+- 域串更正：F 的 v1.2.1 统一为 <platform>-session，输入为 api_key_id|serving_group_id|本地会话哈希；摘要及 history/LRU 同步使用，四条合法与一条反例向量已原样加入回归，待同一增量门禁执行。后续 S2/S6 也只用此值。
 
 - 基于 M2 main 16a776e347 开展 T0b.4，保留已合入 M2 的产品、迁移与隔离测试；本地检查点不是可集成提交。默认关闭，不改变出站及计费。
 - 在原 main 72c2d0169 上已录制 20 组出站和 50 组用量/计费，来源与摘要在 testdata；已实现平台与入站链策略字段及 stats 分区，Anthropic/Gemini 捕获和结算尚未接入；Messages 桥接线和回归测试已补，待验证。
@@ -1178,3 +1184,8 @@ pnpm --dir frontend run build
 - 分类器读取类位改为 bit0/2/3；alias-only 保留 usage_fields、按 n/a_usage 输出且无 na_reason，依赖读量的两个标记关闭，计费解析未变。追加六种真实转发事件回归及 canonical/metadata 位/优先级测试，复制 v1.2 schema 和增量样例，44 份旧夹具 SHA 不变。
 - provider session_digest 按指定 HMAC 域和 API key、serving 组、原会话哈希生成，内部历史键另带 platform。独立有界 LRU 只收此键，发送、结算、历史发布分开，失效 owner 不能发布到复用摘要的新 epoch；没有 OpenAI 旧会话表读写。尚未接入 Anthropic/Gemini 生产挂点，属于实现基础。
 - 源契约自检、格式及静态文档检查；所有新增 Go/race 与实际输出校验仍待执行，重门禁按负责人要求给 M3 让行，不重复排队。非阻塞的保留期清理与行为策略过期保护保留在后续维护范围。未推送、部署或访问生产。
+
+### 2026-10-24T18:56Z — M2b session digest 契约域更正
+
+- 按 F v1.2.1 更正 provider HMAC 域为 <platform>-session，保留租户与 serving 组输入及 16 位 hex 格式；原域来自开工包笔误。历史键复用同一计算结果，后续 S2/S6 也使用它。
+- 四条合法、一条无作用域反例向量原样复制并登记 SHA；新增直接对期望摘要及真实历史键的测试，Anthropic/Gemini 摘要自身亦相互隔离。源契约、格式与轻量文档检查，Go/race 继续并入已有待执行增量流水线，为 M3 让行。尚未接入 provider 挂点，不是可集成交付。

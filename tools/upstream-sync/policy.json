@@ -2557,7 +2557,7 @@
     },
     {
       "path": "backend/internal/service/cache_provider_scope.go",
-      "value": "s.cacheIdentityDigest(\"cache-trace-anth-v1\", value)"
+      "value": "s.cacheIdentityDigest(platform+\"-session\", value)"
     },
     {
       "path": "backend/internal/service/cache_provider_history.go",
@@ -3545,6 +3545,11 @@
       "id": "xy-openai-cache-trace",
       "path": "backend/internal/service/cache_provider_history_test.go",
       "literal": "func TestCacheProviderHistoryTenantAndEpochIsolation("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_provider_scope_test.go",
+      "literal": "func TestCacheProviderSessionContractVectors("
     }
   ]
 }

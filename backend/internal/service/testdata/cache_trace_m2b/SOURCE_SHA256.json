@@ -1,6 +1,6 @@
 {
-  "version": "cache_trace M2b v1.2",
-  "source_manifest_sha256": "b9114bb85133ea5e94a811f03b8ee1c5450ec72d2cc2b3be5e2747637e38f958",
+  "version": "cache_trace M2b v1.2.1",
+  "source_manifest_sha256": "d5dbdc28349a686511ecac93cc6c7b8e5ff5c27860f32423948bb7848288fa91",
   "files": {
     "cache_trace.v1.m2b.schema.json": "8363061f76296dbf0e68ee6a4c9bb96be4353bf7058fe8529aeea4cfcd1ccf36",
     "examples/anthropic_admitted_full.json": "a608de920c77cd678ecf760c3fb56dfd1bec3095bc1377b2f1e12530c642e264",
@@ -52,6 +52,7 @@
     "invalid/invalid_v11_unsampled_with_s1.json": "4a86c77831e560e6e41cc7d9740955b109b882385f21482d25d0761b8065c565",
     "invalid/invalid_v12_alias_only_under_read.json": "1c760d3c0376eaa3667a0d7542921bb352b067b11bdb94fb59289d9a05e3ee75",
     "invalid/invalid_v12_restore_not_applied.json": "a93aa8efbdb84718a40e025ffcdde3947ce635a942ed638f36380c8bc545cae9",
-    "validate_trace_contract_m2b.py": "f290904b68305a45e032a5231d3545ccb345bc494e937563e8babbde62a5e077"
+    "session_digest_vectors.json": "9c0b2579f3966f1feac7ffe9e6c1ae7427b6bfa24bfa7ada3a798f93e1c477b7",
+    "validate_trace_contract_m2b.py": "2d43341249fe049e6b9325a5dc4b84ce8a2756d92ff0320b0d1ffac0ada7203a"
   }
 }

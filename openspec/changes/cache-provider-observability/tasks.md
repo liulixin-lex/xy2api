@@ -16,4 +16,4 @@
 - [ ] 更新同步登记及部署说明，固定提交并完成独立评审。
 
 - [ ] 验证 FX-OBS-1：alias-only 为 n/a_usage、无 na_reason，canonical 显式零及优先级不变，实际 emitter 输出通过 v1.2（代码和回归已补，待重门禁）。
-- [ ] 验证 FX-L04-7：相同内容、同组不同 API key 的 provider digest 与历史键不同。
+- [ ] 验证 FX-L04-7：相同内容、同组不同 API key 的 provider digest 与历史键不同，并通过 v1.2.1 的四条正向、一条反例计算向量。

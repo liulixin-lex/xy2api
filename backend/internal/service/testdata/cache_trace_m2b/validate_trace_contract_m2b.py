@@ -57,5 +57,20 @@ for k in ('prefix_changed_client', 'prefix_changed_gateway'):
 plat = {load(os.path.join(md, 'examples', n)).get('platform') for n in ex}
 for p in ('anthropic', 'gemini', 'openai'):
     if p not in plat: print('PLATFORM_NOT_EXERCISED', p); bad += 1
+# v1.2.1：session_digest 向量（Anthropic/Gemini 按 api_key 与 serving 组隔离）
+import hmac, hashlib
+vec = json.load(open(os.path.join(md, 'session_digest_vectors.json'), encoding='utf-8'))
+def scoped(e): return hmac.new(vec['secret'].encode(), (e['platform'] + '-session\x00' + f"{e['api_key_id']}|{e['serving_group_id']}|{e['local_session_hash']}").encode(), hashlib.sha256).hexdigest()[:16]
+for e in vec['valid']:
+    if scoped(e) != e['expected']: print('VECTOR_MISMATCH', e); bad += 1
+groups = {}
+for e in vec['valid']: groups.setdefault((e['platform'], e['local_session_hash']), set()).add(e['expected'])
+for k, vals in groups.items():
+    n = sum(1 for e in vec['valid'] if (e['platform'], e['local_session_hash']) == k)
+    if len(vals) != n: print('VECTOR_NOT_ISOLATED', k); bad += 1
+for e in vec['invalid']:
+    ok = scoped(e) == e['claimed']
+    print(f"invalid vector {e['platform']} key={e['api_key_id']}: {'ACCEPTED' if ok else 'REJECTED — 未按 (api_key, serving 组) 计算'}")
+    if ok: bad += 1
 print('frozen', nf, 'm2b_examples', len(ex), 'm2b_invalid', len(inv), 'm3_examples_under_m2b', len(m3ex), 'm1_examples_under_m2b', len(m1all), 'problems', bad)
 sys.exit(1 if bad else 0)

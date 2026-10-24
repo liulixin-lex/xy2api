@@ -9,7 +9,7 @@ type cacheProviderSessionKey struct {
 	platform, digest string
 }
 
-// FX-L04-7: both providers use the specified domain and tenant/serving scope.
+// FX-L04-7: use each platform's session domain and tenant/serving scope.
 // Routing continues to use its original hash; observation never rewrites it.
 func (s *OpenAIGatewayService) cacheProviderSessionScope(platform string, apiKeyID, servingGroupID int64, sessionHash string) cacheProviderSessionKey {
 	if (platform != PlatformAnthropic && platform != PlatformGemini) ||
@@ -17,7 +17,7 @@ func (s *OpenAIGatewayService) cacheProviderSessionScope(platform string, apiKey
 		return cacheProviderSessionKey{}
 	}
 	value := strconv.FormatInt(apiKeyID, 10) + "|" + strconv.FormatInt(servingGroupID, 10) + "|" + sessionHash
-	digest := s.cacheIdentityDigest("cache-trace-anth-v1", value)
+	digest := s.cacheIdentityDigest(platform+"-session", value)
 	if digest == "" {
 		return cacheProviderSessionKey{}
 	}
