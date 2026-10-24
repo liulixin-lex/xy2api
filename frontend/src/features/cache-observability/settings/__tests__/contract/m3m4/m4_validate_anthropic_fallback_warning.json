@@ -3,7 +3,7 @@
     "M4-2",
     "C-4"
   ],
-  "_note": "M4：anchor_group_ids 加入回退组（77 被其他分组的 availability_fallback_group_id 引用）：允许写入，warnings 带 fallback_group_selected。",
+  "_note": "M4：anchor_group_ids 加入回退组（77 被其他分组的 availability_fallback_group_id 引用）：允许写入，warnings 带 fallback_group_selected。v1.1.1 登记前提（PM 裁定）：本例假定构建已含 Anthropic 观测，即静态构建参数为 true，所以没有 anthropic_observability_missing；默认构建（参数为 false）中同一请求的 warnings 为 [anthropic_observability_missing, fallback_group_selected]，按 §7.2 的顺序排列（README §3.5）。响应字节不变。",
   "request": {
     "method": "POST",
     "path": "/api/v1/admin/cache/policies/anthropic_identity/validate",
