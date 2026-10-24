@@ -30,7 +30,7 @@ export function fieldOptions(field: SchemaField): string[] {
   return (field.options ?? []).filter((o): o is string => typeof o === 'string')
 }
 
-/** Named candidates of an account id list (FE-Q3); empty when the server sends none. */
+/** Named candidates of an account or group id list (FE-Q3); empty when the server sends none. */
 export function idOptions(field: SchemaField): IdOption[] {
   return (field.options ?? []).filter(
     (o): o is IdOption => !!o && typeof o === 'object' && typeof (o as IdOption).id === 'number' && typeof (o as IdOption).name === 'string',

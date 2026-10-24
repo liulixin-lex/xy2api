@@ -1,0 +1,35 @@
+{
+  "_contract": [
+    "M4-4",
+    "C-4"
+  ],
+  "_note": "M4：highest 的开启只缺输入键名：422、metadata.missing=typed，并给出 type_to_confirm=cache_routing_policy（与父目录 put_422 同形）。",
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/routing",
+    "body": {
+      "expected_rev": 0,
+      "spec": {
+        "keep_sticky_on_busy": {
+          "enabled": true,
+          "rollout_percent": 20
+        }
+      },
+      "reason": "全部 Claude 分组 20% 试运行",
+      "confirm": {
+        "checkbox": true,
+        "typed": null
+      }
+    }
+  },
+  "status": 422,
+  "response": {
+    "code": 422,
+    "message": "confirmation required",
+    "reason": "CACHE_POLICY_CONFIRM_REQUIRED",
+    "metadata": {
+      "missing": "typed",
+      "type_to_confirm": "cache_routing_policy"
+    }
+  }
+}

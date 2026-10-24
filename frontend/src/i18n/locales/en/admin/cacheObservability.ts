@@ -253,6 +253,7 @@ export default {
       remove: 'Remove {name}',
       groupID: 'Group #{id}',
       loadFailed: 'Could not load the group list; only the IDs of selected groups are shown',
+      fallbackUnknown: 'Could not load the group list, so fallback groups are not marked',
       fallbackTag: 'Fallback',
       servingScope: 'Applies by the group that actually serves the request',
     },
