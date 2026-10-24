@@ -2492,7 +2492,7 @@
     },
     {
       "path": "backend/internal/service/openai_upstream_identity_response.go",
-      "value": "return bytes.ReplaceAll(body, []byte(uuid), nil)"
+      "value": "return literalOpenAIUpstreamIdentityPrefix(body, uuid, len(body), false, true)"
     },
     {
       "path": "backend/internal/service/openai_upstream_identity_m31_test.go",
