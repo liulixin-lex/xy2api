@@ -15,7 +15,7 @@ const basePath = '/admin/cache'
 
 /**
  * Contract P-10: each endpoint takes only its own parameters and answers 400 to anything else. The platform
- * client adds `timezone` to every GET, so the URL leaves it out here (FE-Q15).
+ * client adds `timezone` to every GET, and the contract refuses it too (R15), so the URL leaves it out here.
  */
 const paramsSerializer = {
   serialize: (params: Record<string, unknown>) =>

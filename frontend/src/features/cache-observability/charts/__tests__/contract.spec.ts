@@ -1,4 +1,4 @@
-// Chart endpoint contract tests (00-shared/cache_panel_contract v1.0, P-1 to P-10).
+// Chart endpoint contract tests (00-shared/cache_panel_contract v1.0.1, P-1 to P-10, R1 to R15).
 // F's samples run through the real apiClient (stub adapter), the API layer, useCacheCharts and the
 // rendered panel, so envelope unwrapping, error rejection and guard.ts are the production ones.
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
@@ -154,9 +154,9 @@ function expectClean(wrapper: ReturnType<typeof mount>, name: string) {
 
 const SECTION: Record<Endpoint, string> = { northstar: 'northstar', breakdown: 'breakdown', stats: 'loss', experiments: 'experiments' }
 
-describe('cache panel contract samples v1.0', () => {
-  it('has the 19 valid samples and the 22 that must be refused or degraded', () => {
-    expect(VALID_NAMES).toHaveLength(19)
+describe('cache panel contract samples v1.0.1', () => {
+  it('has the 20 valid samples and the 22 that must be refused or degraded', () => {
+    expect(VALID_NAMES).toHaveLength(20)
     expect(INVALID_NAMES.sort()).toEqual(Object.keys(INVALID_EXPECT).sort())
   })
 
@@ -246,12 +246,25 @@ describe('cache panel contract samples v1.0', () => {
     expect(calls.find((c) => c.endpoint === 'experiments')!.params).toEqual({})
   })
 
-  it('leaves the platform timezone out of the URL, since the endpoints refuse unknown parameters (P-10, FE-Q15)', async () => {
+  it('leaves the platform timezone out of the URL, since the endpoints refuse unknown parameters (P-10, R15)', async () => {
     await render()
     for (const call of calls) {
       expect(call.given, call.endpoint).toHaveProperty('timezone')
       expect(call.params, call.endpoint).not.toHaveProperty('timezone')
     }
+  })
+
+  it('never sends the timezone R15 refuses, and shows that 400 as a failure if it comes (P-10, R15)', async () => {
+    const refused = sample('error_400_timezone_param')
+    expect(queryOf(refused).get('timezone')).toBeTruthy()
+    const { wrapper } = await render(refused)
+    const sent = calls.find((c) => c.endpoint === 'northstar')!
+    expect(sent.given).toHaveProperty('timezone')
+    expect(sent.params).not.toHaveProperty('timezone')
+    // The same window and platform as the refused request, without the timezone.
+    for (const [key, value] of queryOf(refused)) if (key !== 'timezone') expect(sent.params[key], key).toBe(value)
+    expect(statusOf(wrapper, 'northstar')).toBe('error')
+    expect(wrapper.get('[data-test="section-northstar"]').text()).toContain('invalid cache panel query')
   })
 
   it('keeps at most the requested rows (P-6)', async () => {
@@ -330,7 +343,7 @@ const INVALID_EXPECT: Record<string, Outcome> = {
   success_message_ok: { status: 'ready' },
 }
 
-describe('cache panel contract counter-examples v1.0', () => {
+describe('cache panel contract counter-examples v1.0.1', () => {
   it.each(INVALID_NAMES)('handles %s by its contract meaning', async (name) => {
     const s = sample(name)
     const expected = INVALID_EXPECT[name]

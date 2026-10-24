@@ -1,5 +1,5 @@
 // The chart endpoints' contract as the panel enforces it (CACHE_PANEL_API §1, §1.1, §8; contract
-// samples in 00-shared/cache_panel_contract v1.0). A response that carries identity data is refused
+// samples in 00-shared/cache_panel_contract v1.0.1). A response that carries identity data is refused
 // whole; a value that would mislead is shown as "not computed" instead. Everything else renders as sent.
 import type { BreakdownResponse, ExperimentsResponse, NorthStarResponse, TraceStatsResponse } from './types'
 
