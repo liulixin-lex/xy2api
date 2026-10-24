@@ -655,6 +655,9 @@ export default {
       requests: '{n} requests',
       notes: {
         messages_bridge_excluded: 'The Messages bridge is not observed yet and stays out of the denominator.',
+        openai_only_metrics: 'pck, session headers and category completeness count OpenAI requests only.',
+        platform_not_covered: 'Observation is not on for this platform.',
+        openai_native_excluded: 'Messages bridge only: the OpenAI partition holds only requests through the Messages bridge; native OpenAI requests are not observed.',
       },
       policyRev: 'Observation policy rev {rev}',
     },
@@ -687,6 +690,10 @@ export default {
       wm: '{value} per million tokens',
       other: 'Other ({n})',
     },
+    scopeTags: {
+      openaiOnly: 'OpenAI only',
+      bridgeOnly: 'Messages bridge only',
+    },
     identity: {
       title: 'Session keys and headers',
       pckOut: 'Outbound session key source',
@@ -699,6 +706,7 @@ export default {
       inbound: 'Inbound',
       outbound: 'Outbound',
       relation: 'Outbound session_id source: ',
+      openaiOnlyEmpty: 'Session keys and session headers exist for OpenAI requests only; this platform has none.',
     },
     routing: {
       title: 'Routing and rebind reasons',

@@ -655,6 +655,9 @@ export default {
       requests: '{n} 个请求',
       notes: {
         messages_bridge_excluded: 'Messages 桥暂不在观测范围内，不计入分母。',
+        openai_only_metrics: 'pck、会话头与类别完整率只统计 OpenAI 请求。',
+        platform_not_covered: '该平台的观测未开启。',
+        openai_native_excluded: '仅 Messages 桥：OpenAI 分区只有经 Messages 桥的请求，原生 OpenAI 请求不在观测范围内。',
       },
       policyRev: '观测策略 rev {rev}',
     },
@@ -687,6 +690,10 @@ export default {
       wm: '每百万 token 价值 {value}',
       other: '其它（{n} 项）',
     },
+    scopeTags: {
+      openaiOnly: '仅 OpenAI',
+      bridgeOnly: '仅 Messages 桥',
+    },
     identity: {
       title: '会话键与会话头',
       pckOut: '出站会话键来源',
@@ -699,6 +706,7 @@ export default {
       inbound: '入站',
       outbound: '出站',
       relation: '出站 session_id 来源：',
+      openaiOnlyEmpty: '会话键与会话头只对 OpenAI 请求定义，当前平台没有这些指标。',
     },
     routing: {
       title: '选号与换号原因',
