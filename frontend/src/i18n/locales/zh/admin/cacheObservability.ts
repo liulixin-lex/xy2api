@@ -482,6 +482,22 @@ export default {
           description: '同一会话的在途请求数达到这个值时，后续请求不再补全会话标识，避免大量并发请求共用一个标识。',
           risk: '调高后，更多并发请求会共用同一个会话标识。',
         },
+        grok_chat_body_key: {
+          label: 'Grok 对话请求在正文中带会话标识',
+          description: '打开后，Grok 账号的对话请求除了请求头，也在正文中携带同一个会话标识。上游是否使用它需要先验证。',
+          risk: '改变 Grok 对话请求的出站请求体。',
+        },
+        grok_compact_identity: {
+          label: 'Grok 压缩请求带会话标识',
+          description: '打开后，Grok 的上下文压缩请求也携带会话标识，以便命中缓存；不会额外添加工具。',
+          risk: '改变 Grok 压缩请求的出站请求体。',
+        },
+        grok_account_ids: {
+          label: '启用以上两项的 Grok 账号',
+          description: '只对这些 Grok 账号生效，可以先只选一个账号试运行。',
+          risk: '所选账号的 Grok 出站请求会按以上两项改变。',
+          empty: '为空时不生效',
+        },
       },
       anthropic_identity: {
         anchor_group_ids: {

@@ -482,6 +482,22 @@ export default {
           description: 'Once a session has this many requests in flight, further requests get no filled session identifier, so a burst does not share one identifier.',
           risk: 'A higher cap lets more concurrent requests share one session identifier.',
         },
+        grok_chat_body_key: {
+          label: 'Send the session ID in the request body for Grok chat',
+          description: 'When on, Grok chat requests carry the same session ID in the body as well as the header. Verify upstream support before turning it on.',
+          risk: 'Changes the outbound body of Grok chat requests.',
+        },
+        grok_compact_identity: {
+          label: 'Send the session ID with Grok compaction requests',
+          description: 'When on, Grok compaction requests also carry the session ID so they can hit the cache. No tools are added.',
+          risk: 'Changes the outbound body of Grok compaction requests.',
+        },
+        grok_account_ids: {
+          label: 'Grok accounts for these fixes',
+          description: 'Applies only to these Grok accounts. You can start with a single account.',
+          risk: 'Outbound Grok requests of these accounts change as set above.',
+          empty: 'No effect when empty',
+        },
       },
       anthropic_identity: {
         anchor_group_ids: {
