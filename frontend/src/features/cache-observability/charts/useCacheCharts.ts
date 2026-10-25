@@ -42,8 +42,8 @@ function classify(error: unknown): { status: SectionStatus; message: string | nu
   if (error instanceof ContractRejection) return { status: 'rejected', message: null }
   const e = (error && typeof error === 'object' ? error : {}) as RejectedApiError
   if (e.status === 404) return { status: 'unavailable', message: null }
-  // §4 and contract P-9 name it by reason; a bare 503 without one is read the same way.
-  if (e.reason === 'CACHE_ROLLUP_NOT_READY' || (e.status === 503 && !e.reason)) return { status: 'not_ready', message: null }
+  // §4 and contract P-9 name it by reason. A bare 503 (a proxy during a deploy, say) is an ordinary error (R M2-U-3).
+  if (e.reason === 'CACHE_ROLLUP_NOT_READY') return { status: 'not_ready', message: null }
   return { status: 'error', message: typeof e.message === 'string' ? e.message : null }
 }
 

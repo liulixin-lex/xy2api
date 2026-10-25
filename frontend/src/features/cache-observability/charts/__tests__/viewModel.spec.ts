@@ -29,7 +29,7 @@ describe('chart formatters', () => {
   it('formats intervals, deltas, tokens and money without dashes as separators', () => {
     expect(formatInterval(0.80281, 0.80322)).toBe('80.28 ~ 80.32%')
     expect(formatInterval(0.8, 0.80001)).toBe('80.00%')
-    expect(formatInterval(null, null)).toBe('-')
+    expect(formatInterval(null, null)).toBe('—')
     expect(formatPp(-1.66)).toBe('−1.66pp')
     expect(formatPp(0.004)).toBe('0.00pp')
     expect(formatTokensM(2_469_214_000)).toBe('2,469.2M')

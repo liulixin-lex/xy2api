@@ -78,7 +78,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
-import { isStale } from '../viewModel'
+import { EMPTY, isStale } from '../viewModel'
 import type { CacheChartsState } from '../useCacheCharts'
 import type { CostView, PanelPlatform, SummaryWindow, TraceWindow } from '../types'
 
@@ -90,8 +90,10 @@ const traceWindows: TraceWindow[] = ['1h', '24h']
 const platforms: PanelPlatform[] = ['all', 'openai', 'anthropic', 'gemini', 'grok']
 const costViews: CostView[] = ['list', 'charged', 'upstream']
 
-const asOf = computed(() => props.state.northstar.data?.as_of ?? null)
-const policyVersion = computed(() => props.state.northstar.data?.policy_version ?? '-')
+// A failed read keeps the last answer for the next retry; freshness only speaks for a current one (R M2-U-3).
+const current = computed(() => (props.state.northstar.status === 'ready' ? props.state.northstar.data : null))
+const asOf = computed(() => current.value?.as_of ?? null)
+const policyVersion = computed(() => current.value?.policy_version ?? EMPTY)
 const stale = computed(() => isStale(asOf.value, props.now))
 const busy = computed(() =>
   [props.state.northstar, props.state.breakdown, props.state.stats, props.state.experiments].some((s) => s.status === 'loading' || s.refreshing),
@@ -100,7 +102,7 @@ const announced = ref('')
 
 function formatAsOf(value: string): string {
   const d = new Date(value)
-  return Number.isNaN(d.getTime()) ? '-' : `${d.toISOString().slice(0, 16).replace('T', ' ')} UTC`
+  return Number.isNaN(d.getTime()) ? EMPTY : `${d.toISOString().slice(0, 16).replace('T', ' ')} UTC`
 }
 
 async function refresh() {

@@ -117,7 +117,7 @@ function metaText(row: BreakdownRow, dimension: BreakdownDimension, currencyCode
   if (typeof meta.upstream_host === 'string') parts.push(meta.upstream_host)
   if (typeof meta.accounts === 'number') parts.push(t('admin.cacheCharts.breakdown.accounts', { n: meta.accounts }))
   // w_m: list-price value of a million tokens that could have been read (§8.3), not scaled by the cost view.
-  if (typeof meta.w_m === 'number') parts.push(t('admin.cacheCharts.breakdown.wm', { value: formatMoney(meta.w_m, currencyCode) }))
+  if (typeof meta.w_m === 'number') parts.push(t('admin.cacheCharts.breakdown.wm', { value: formatMoney(meta.w_m, currencyCode, 4) }))
   if (meta.priced === false) parts.push(t('admin.cacheCharts.breakdown.unpriced'))
   return parts.join(', ')
 }

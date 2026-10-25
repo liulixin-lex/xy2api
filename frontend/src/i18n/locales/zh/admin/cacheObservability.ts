@@ -1,7 +1,10 @@
 export default {
   cacheObservability: {
     title: '缓存观测',
-    description: '上游提示缓存的命中、损失与原因，以及全部缓存功能的开关与参数（默认全部关闭）。仅管理员可见。',
+    description: '缓存功能的开关与参数（默认全部关闭）。仅管理员可见。',
+    descriptionCharts: '上游提示缓存的命中、损失与原因，以及全部缓存功能的开关与参数（默认全部关闭）。仅管理员可见。',
+    descriptionSettingsOnly: '全部缓存功能的开关与参数（默认全部关闭）。当前版本未提供巡检接口。仅管理员可见。',
+    checking: '正在确认当前版本提供的内容…',
     tabsAria: '缓存观测页面',
     tabs: {
       patrol: '巡检',

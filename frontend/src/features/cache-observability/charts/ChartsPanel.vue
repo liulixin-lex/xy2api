@@ -2,7 +2,8 @@
   <div class="space-y-6" data-test="charts-panel">
     <ChartsFilterBar :state="state" :now="now" />
 
-    <ExperimentStrip v-if="state.experiments.data" :experiments="state.experiments.data.experiments" @open="openExperiments" />
+    <!-- Only a current answer: after a failed read the strip would repeat old numbers (R M2-U-3). -->
+    <ExperimentStrip v-if="state.experiments.status === 'ready' && state.experiments.data" :experiments="state.experiments.data.experiments" @open="openExperiments" />
 
     <NorthStarCard :state="state" />
 

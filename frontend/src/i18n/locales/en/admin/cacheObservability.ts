@@ -1,7 +1,10 @@
 export default {
   cacheObservability: {
     title: 'Cache Observability',
-    description: 'Upstream prompt cache hits, losses and causes, plus the switches and parameters of every cache feature (all off by default). Visible to admins only.',
+    description: 'Switches and settings of the cache features (all off by default). Admins only.',
+    descriptionCharts: 'Hits, losses and their causes for upstream prompt caching, and the switches and settings of all cache features (all off by default). Admins only.',
+    descriptionSettingsOnly: 'Switches and settings of all cache features (all off by default). This version has no daily-check endpoints. Admins only.',
+    checking: 'Checking what this version provides…',
     tabsAria: 'Cache observability page',
     tabs: {
       patrol: 'Daily check',
