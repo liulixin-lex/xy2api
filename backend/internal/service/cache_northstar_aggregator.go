@@ -4,7 +4,14 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
+)
+
+const (
+	cacheNorthstarRetentionDays   = 180
+	cacheTraceHourlyRetentionDays = 90
+	cacheNorthstarRetentionEvery  = time.Hour
 )
 
 // CacheNorthstarAggregator is called under the existing dashboard leader lease.
@@ -17,6 +24,7 @@ type CacheNorthstarAggregator struct {
 	mu              sync.Mutex
 	startupRecorded bool
 	traceHour       time.Time
+	retentionAt     atomic.Int64 // Unix seconds of the last retention attempt.
 }
 
 func NewCacheNorthstarAggregator(repo CacheNorthstarRepository, policies *CachePolicyService, counters *CacheTraceCounters, build CachePanelBuildInfo) *CacheNorthstarAggregator {
@@ -132,35 +140,74 @@ func (s *CacheNorthstarAggregator) Tick(ctx context.Context, now time.Time) erro
 	}
 	return nil
 }
-func (s *CacheNorthstarAggregator) Cleanup(ctx context.Context, now time.Time) error {
-	if !s.Enabled() {
-		return nil
+
+// retentionDue is lock-free so schedulers return before any I/O. Retention does
+// not depend on rollup, persistence, observability or the kill switch; nothing
+// can be stored before observability or northstar is first saved (rev > 0).
+func (s *CacheNorthstarAggregator) retentionDue(now time.Time) bool {
+	if s == nil {
+		return false
 	}
 	p := s.policies.Snapshot()
-	var rollup, trace time.Time
-	if p.NorthstarRollupEnabled() {
-		rollup = now.AddDate(0, 0, -180)
+	if p.ObservabilityRevision() == 0 && p.NorthstarRevision() == 0 {
+		return false
 	}
-	if p.PersistTraceHourlyEnabled() {
-		trace = now.AddDate(0, 0, -90)
+	last := s.retentionAt.Load()
+	return last == 0 || now.Unix()-last >= int64(cacheNorthstarRetentionEvery/time.Second)
+}
+
+// Cleanup is attempted at most once per hour by the leader, whatever its
+// outcome: rollups, hour markers and events keep 180 days, trace hours 90 days.
+func (s *CacheNorthstarAggregator) Cleanup(ctx context.Context, now time.Time) error {
+	if !s.retentionDue(now) || ctx.Err() != nil {
+		return nil
 	}
-	return s.repo.CleanupCacheNorthstar(ctx, rollup, trace)
+	if !s.mu.TryLock() {
+		return nil
+	}
+	defer s.mu.Unlock()
+	if !s.retentionDue(now) {
+		return nil
+	}
+	s.retentionAt.Store(now.Unix())
+	return s.repo.CleanupCacheNorthstar(ctx, now.AddDate(0, 0, -cacheNorthstarRetentionDays), now.AddDate(0, 0, -cacheTraceHourlyRetentionDays))
+}
+
+// due reports whether a leader cycle has any work, without I/O.
+func (s *CacheNorthstarAggregator) due(now time.Time) (enabled, ok bool) {
+	if s == nil {
+		return false, false
+	}
+	enabled = s.Enabled()
+	return enabled, enabled || s.retentionDue(now)
+}
+func (s *CacheNorthstarAggregator) runLeaderCycle(ctx context.Context, now time.Time, enabled bool) {
+	if enabled {
+		if err := s.Tick(ctx, now); err != nil {
+			slog.Warn("cache northstar aggregation failed", "error", err)
+		}
+	}
+	if err := s.Cleanup(ctx, now); err != nil {
+		slog.Warn("cache northstar retention failed", "error", err)
+	}
 }
 
 func (s *DashboardAggregationService) runScheduledCacheNorthstar() {
-	if s.cacheNorthstar == nil || !s.cacheNorthstar.Enabled() {
+	now := time.Now().UTC()
+	enabled, ok := s.cacheNorthstar.due(now)
+	if !ok {
 		return
 	}
 	// Independent from the dashboard's deadline and outcome, within the same
 	// existing five-minute leader lease (40s + the two existing two-minute stages).
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
-	if err := s.cacheNorthstar.Tick(ctx, time.Now().UTC()); err != nil {
-		slog.Warn("cache northstar aggregation failed", "error", err)
-	}
+	s.cacheNorthstar.runLeaderCycle(ctx, now, enabled)
 }
 func (s *DashboardAggregationService) runStandaloneCacheNorthstar() {
-	if s.cacheNorthstar == nil || !s.cacheNorthstar.Enabled() {
+	now := time.Now().UTC()
+	enabled, ok := s.cacheNorthstar.due(now)
+	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
@@ -170,7 +217,5 @@ func (s *DashboardAggregationService) runStandaloneCacheNorthstar() {
 		return
 	}
 	defer release()
-	if err := s.cacheNorthstar.Tick(ctx, time.Now().UTC()); err != nil {
-		slog.Warn("cache northstar aggregation failed", "error", err)
-	}
+	s.cacheNorthstar.runLeaderCycle(ctx, now, enabled)
 }

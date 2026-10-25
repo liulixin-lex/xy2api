@@ -191,30 +191,48 @@ func (r *cacheNorthstarRepository) ReadCacheNorthstar(ctx context.Context, versi
 	return result, hours.Err()
 }
 
+// cacheNorthstarCleanupBatch bounds each autocommitted retention DELETE.
+const cacheNorthstarCleanupBatch = 5000
+
+// CleanupCacheNorthstar probes all retained tables in one query and deletes only
+// from tables that have rows strictly before their cutoff, in short batches.
 func (r *cacheNorthstarRepository) CleanupCacheNorthstar(ctx context.Context, rollupCutoff, traceCutoff time.Time) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
+	targets := []struct {
+		table, column string
+		cutoff        time.Time
+		expired       bool
+	}{
+		{"cache_northstar_hourly", "bucket_start", rollupCutoff, false},
+		{"cache_northstar_hours", "bucket_start", rollupCutoff, false},
+		{"cache_observability_events", "at", rollupCutoff, false},
+		{"cache_trace_hourly", "bucket_start", traceCutoff, false},
+	}
+	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cache_northstar_hourly WHERE bucket_start<$1),
+ EXISTS(SELECT 1 FROM cache_northstar_hours WHERE bucket_start<$1),
+ EXISTS(SELECT 1 FROM cache_observability_events WHERE at<$1),
+ EXISTS(SELECT 1 FROM cache_trace_hourly WHERE bucket_start<$2)`, rollupCutoff, traceCutoff).Scan(&targets[0].expired, &targets[1].expired, &targets[2].expired, &targets[3].expired); err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
-
-	if !rollupCutoff.IsZero() {
-		for _, table := range []string{"cache_northstar_hourly", "cache_northstar_hours"} {
-			if _, err = tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE bucket_start<$1", rollupCutoff); err != nil {
+	for _, target := range targets {
+		if !target.expired {
+			continue
+		}
+		query := fmt.Sprintf("DELETE FROM %[1]s WHERE ctid = ANY(ARRAY(SELECT ctid FROM %[1]s WHERE %[2]s<$1 LIMIT %[3]d))", target.table, target.column, cacheNorthstarCleanupBatch)
+		for {
+			result, err := r.db.ExecContext(ctx, query, target.cutoff)
+			if err != nil {
 				return err
 			}
-		}
-		if _, err = tx.ExecContext(ctx, "DELETE FROM cache_observability_events WHERE at<$1", rollupCutoff); err != nil {
-			return err
+			deleted, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if deleted < cacheNorthstarCleanupBatch {
+				break
+			}
 		}
 	}
-	if !traceCutoff.IsZero() {
-		if _, err = tx.ExecContext(ctx, "DELETE FROM cache_trace_hourly WHERE bucket_start<$1", traceCutoff); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
+	return nil
 }
 
 func (r *cacheNorthstarRepository) SaveCacheTraceHours(ctx context.Context, hours []service.CacheTraceHour) error {

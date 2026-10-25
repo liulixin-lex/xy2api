@@ -65,6 +65,40 @@ func (s *CachePolicyService) effective(i int, stored, loaded cachePolicyEntry) C
 }
 
 func (s *CachePolicyService) effectiveAt(i int, stored, loaded cachePolicyEntry, p *CachePolicySnapshot) CachePolicyEffective {
+	return cachePolicyStaleEffective(i, p, s.policyEffectiveAt(i, stored, loaded, p))
+}
+
+// A stale-bounded snapshot blocks every master-gated behavior key available in
+// this build. stale_snapshot follows kill_switch and parse_error and precedes
+// all other blockers; killed and parse_error keep their state.
+func cachePolicyStaleEffective(i int, p *CachePolicySnapshot, e CachePolicyEffective) CachePolicyEffective {
+	if i < 3 || e.Active == nil || !p.behaviorStale() {
+		return e
+	}
+	inactive := false
+	e.Active = &inactive
+	at := 0
+	for at < len(e.Blockers) && (e.Blockers[at] == "kill_switch" || e.Blockers[at] == "parse_error") {
+		at++
+	}
+	blockers := make([]string, 0, len(e.Blockers)+1)
+	blockers = append(append(blockers, e.Blockers[:at]...), "stale_snapshot")
+	e.Blockers = append(blockers, e.Blockers[at:]...)
+	if e.State != "killed" && e.State != "parse_error" {
+		e.State = "blocked"
+	}
+	// Reported only for on or masked_by_master, neither of which remains.
+	warnings := make([]string, 0, len(e.Warnings))
+	for _, warning := range e.Warnings {
+		if warning != "anthropic_observability_missing" {
+			warnings = append(warnings, warning)
+		}
+	}
+	e.Warnings = warnings
+	return e
+}
+
+func (s *CachePolicyService) policyEffectiveAt(i int, stored, loaded cachePolicyEntry, p *CachePolicySnapshot) CachePolicyEffective {
 	active := false
 	e := CachePolicyEffective{Active: &active, Blockers: []string{}, Warnings: []string{}, ClippedFields: []string{}}
 	if !s.cachePolicySupported(i) {

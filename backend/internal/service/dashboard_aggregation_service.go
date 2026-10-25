@@ -368,14 +368,6 @@ func (s *DashboardAggregationService) maybeCleanupRetention(ctx context.Context,
 		}
 	}
 
-	if s.cacheNorthstar != nil && s.cacheNorthstar.Enabled() {
-		defer func() {
-			if err := s.cacheNorthstar.Cleanup(ctx, now); err != nil {
-				slog.Warn("cache northstar retention failed", "error", err)
-			}
-		}()
-	}
-
 	usageDays, err := s.requestRetentionDays(ctx)
 	if err != nil {
 		// Never fall back to a shorter window after a settings read failure.

@@ -11,6 +11,8 @@ type CacheNorthstarRepository interface {
 	GetCacheNorthstarState(context.Context) (*CacheNorthstarState, error)
 	AggregateCacheNorthstar(context.Context, time.Time, time.Time, CacheNorthstarPolicy, time.Time, bool) error
 	ReadCacheNorthstar(context.Context, string, time.Time, time.Time, string) (CacheNorthstarData, error)
+	// CleanupCacheNorthstar deletes rollups, hour markers and events before the
+	// first cutoff and trace hours before the second; rows at a cutoff remain.
 	CleanupCacheNorthstar(context.Context, time.Time, time.Time) error
 	SaveCacheTraceHours(context.Context, []CacheTraceHour) error
 	ListCachePanelEvents(context.Context, time.Time, time.Time) ([]CachePanelEvent, error)

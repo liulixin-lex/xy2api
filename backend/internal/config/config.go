@@ -1072,6 +1072,7 @@ type GatewayConfig struct {
 	OpenAIScheduler      GatewayOpenAISchedulerConfig `mapstructure:"openai_scheduler"`
 	OpenAIQualityRouting OpenAIQualityRoutingConfig   `mapstructure:"openai_quality_routing"`
 	CacheFeatures        CacheFeaturesConfig          `mapstructure:"cache_features"`
+	CachePolicy          CachePolicyConfig            `mapstructure:"cache_policy"`
 	CacheTrace           CacheTraceConfig             `mapstructure:"cache_trace"`
 	OpenAICache          OpenAICacheConfig            `mapstructure:"openai_cache"`
 	// OpenAIHTTP2: OpenAI HTTP 上游协议策略（默认启用 HTTP/2，可按代理能力回退 HTTP/1.1）
@@ -1167,6 +1168,12 @@ type GatewayConfig struct {
 
 type CacheFeaturesConfig struct {
 	KillSwitch bool `mapstructure:"kill_switch"`
+}
+
+// CachePolicyConfig bounds how long a process may keep enforcing a cache policy
+// snapshot after settings reads start failing. Zero disables the bound.
+type CachePolicyConfig struct {
+	MaxStaleSeconds int `mapstructure:"max_stale_seconds"`
 }
 
 type CacheTraceConfig struct {
@@ -2598,6 +2605,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.cache_trace.max_queue_wait", 10*time.Second)
 
 	viper.SetDefault("gateway.cache_features.kill_switch", false)
+	viper.SetDefault("gateway.cache_policy.max_stale_seconds", 900)
 	viper.SetDefault("gateway.cache_trace.workers", 1)
 	viper.SetDefault("gateway.cache_trace.max_byte_budget_mib", 64)
 	viper.SetDefault("gateway.cache_trace.max_rate_mib_per_s", 32)
@@ -2873,6 +2881,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.CacheTrace.MaxQueueWait < 0 {
 		return fmt.Errorf("gateway.cache_trace.max_queue_wait must be nonnegative")
+	}
+	if stale := c.Gateway.CachePolicy.MaxStaleSeconds; stale != 0 && (stale < 60 || stale > 86400) {
+		return fmt.Errorf("gateway.cache_policy.max_stale_seconds must be 0 or between 60 and 86400")
 	}
 	// Absolute Redis snapshots could overwrite usage committed by atomic billing.
 	if c.Database.UserPlatformQuotaFlusherEnabled {

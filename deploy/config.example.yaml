@@ -479,6 +479,8 @@ gateway:
   # Local writes apply immediately; other instances refresh within 60s.
   cache_features:
     kill_switch: false # Emergency stop for new cache features; settings remain writable.
+  cache_policy:
+    max_stale_seconds: 900 # 0 or 60..86400; failed policy refreshes beyond this turn behavior policies off; 0 = no bound.
   cache_trace:
     workers: 1 # 1..2
     max_byte_budget_mib: 64
