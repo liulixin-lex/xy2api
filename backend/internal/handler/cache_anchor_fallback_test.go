@@ -327,7 +327,12 @@ func TestL04ClaudeCodeSkippedActualHandlersOffOnBytesAndSequence(t *testing.T) {
 					require.False(t, strings.HasPrefix(call.hash, "a2:"))
 				}
 				require.Equal(t, "get", cache.calls[0].operation)
-				require.Equal(t, int64(31), cache.calls[0].group, "handler lookup retains the authenticated group")
+				firstLookupGroup := int64(31)
+				if scenario.path != "/v1/messages" {
+					// Compat goes directly to the selector without Messages' prefetch lookup.
+					firstLookupGroup = 77
+				}
+				require.Equal(t, firstLookupGroup, cache.calls[0].group, "retain each ingress's baseline first lookup")
 				// The synthetic 400 skips the handler's success-only final bind.
 				// The baseline scheduler eagerly binds in the resolved CC fallback group.
 				require.Equal(t, "set", cache.calls[len(cache.calls)-1].operation)
