@@ -82,6 +82,7 @@ export default {
     },
     blockers: {
       not_implemented_in_build: '当前版本尚未包含这项功能：已保存的配置不会生效，可以把相关项关闭或移除。',
+      guard_tripped: '护栏已暂停忙时保持粘性，10 分钟后自动恢复。',
       diagnostics_disabled: '系统的缓存诊断开关是关闭的，缓存观测无法工作。请联系运维开启（需要修改配置并重启）。',
       static_aware_routing_disabled: '这一项依赖一个需要修改配置并重启才能打开的系统开关，目前是关闭的。保存后不会生效；请联系运维评估。',
       parse_error: '存储的配置无法识别，已按关闭处理。重新保存一次即可恢复。',
@@ -91,6 +92,7 @@ export default {
       observability_off: '缓存观测未开启：开启后将无法评估这项改动的效果。建议先开启“缓存观测”。',
       anthropic_observability_missing: '当前版本的缓存观测尚未覆盖 Claude/Gemini 请求：开启后无法评估效果。建议升级到包含该观测的版本后再开启。',
       fallback_group_selected: '所选分组中有回退组：发生回退时，回退流量也会按此配置改写。如不希望影响回退流量，请移除该分组。',
+      share_group_no_effect: '所选分组中有共享调度分组，该功能在其中不生效。',
       no_effect_rollout_zero: '比例为 0：保存后不会产生任何效果。',
       high_rollout_without_experiment: '比例较高：建议先以较小比例运行，确认效果后再扩大。',
       decision_pending_header_policy: '这一项的开启方式尚待负责人决定。保存前请确认已获批准。',
@@ -104,9 +106,11 @@ export default {
     },
     acks: {
       not_implemented_in_build: '当前版本尚未包含这项功能，保存后不会生效',
+      guard_tripped: '护栏已暂停这项功能，恢复前保存不会生效',
       observability_off: '缓存观测未开启，这项改动的效果将无法评估',
       anthropic_observability_missing: '缓存观测尚未覆盖 Claude/Gemini 请求，这项改动的效果将无法评估',
       fallback_group_selected: '所选分组含回退组，回退流量也会按此配置改写',
+      share_group_no_effect: '所选分组含共享调度分组，该功能在其中不生效',
       no_effect_rollout_zero: '比例为 0，保存后不会产生效果',
       high_rollout_without_experiment: '比例较高，尚未以小比例验证效果',
       decision_pending_header_policy: '这一项的开启方式尚待负责人决定，我已获批准',
@@ -508,6 +512,31 @@ export default {
           label: '繁忙时保持粘性的灰度比例',
           description: '按会话分桶的处理组比例。',
           risk: '比例越高影响越大。',
+        },
+        keep_sticky_on_busy_max_consecutive_busy: {
+          label: '连续繁忙保持次数上限',
+          description: '同一会话因原账号繁忙而连续保持的次数达到这个值后，改为重新选号；原账号成功服务一次即清零。',
+          risk: '调高后，每段繁忙期可能多等待几次。',
+        },
+        keep_sticky_on_busy_max_hold_seconds: {
+          label: '单段繁忙期最长保持（秒）',
+          description: '从第一次因繁忙而保持算起，超过这个时长原账号仍繁忙时，视为已饱和，改为重新选号。',
+          risk: '调高后，会话可能等待更久。',
+        },
+        keep_sticky_on_busy_owner_busy_skip_per_min_cap: {
+          label: '每个原账号每分钟的保持次数上限',
+          description: '原账号最近 60 秒内因繁忙而被保持的次数（全部会话合计）达到这个值后，不再为它保持，防止热点账号积累会话。0 表示自动：取 4 与账号并发数 2 倍中的较大者。',
+          risk: '调高后，热点账号可能积累更多会话。',
+        },
+        keep_sticky_on_busy_group_keep_ratio_pct: {
+          label: '分组保持比例上限',
+          description: '分组内最近 5 分钟因繁忙而保持的次数占请求数的比例达到这个值后，不再保持。',
+          risk: '调高后，分组内更多请求会等待原账号。',
+        },
+        keep_sticky_on_busy_health_lookback_seconds: {
+          label: '原账号健康回看时长（秒）',
+          description: '这段时间内本会话在原账号上出现过限流、瞬时错误或首包失败时，不为它保持。时长越长越保守。',
+          risk: '调低后，刚出过错的账号也可能被保持。',
         },
         affinity_mode: {
           label: '同档亲和方式',

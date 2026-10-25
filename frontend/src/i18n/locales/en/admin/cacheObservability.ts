@@ -82,6 +82,7 @@ export default {
     },
     blockers: {
       not_implemented_in_build: 'This version does not include this feature yet: the saved configuration has no effect. You can turn the affected settings off or remove them.',
+      guard_tripped: 'The guard paused keeping sessions on busy accounts; it resumes by itself after 10 minutes.',
       diagnostics_disabled: 'The system cache diagnostics switch is off, so cache observation cannot work. Ask operations to turn it on (needs a config change and a restart).',
       static_aware_routing_disabled: 'This depends on a system switch that needs a config change and a restart, and it is off. Saving has no effect; ask operations to assess it.',
       parse_error: 'The stored configuration cannot be read and is treated as off. Saving once restores it.',
@@ -91,6 +92,7 @@ export default {
       observability_off: 'Cache observation is off: the effect of this change cannot be evaluated. Turn on Cache observation first.',
       anthropic_observability_missing: 'Cache observation in this version does not cover Claude/Gemini requests yet: the effect cannot be evaluated. Upgrade to a version that includes it first.',
       fallback_group_selected: 'A selected group is a fallback group: fallback traffic is rewritten by this configuration too. Remove the group if fallback traffic should stay untouched.',
+      share_group_no_effect: 'Some selected groups use shared scheduling; the feature has no effect in them.',
       no_effect_rollout_zero: 'The share is 0: saving has no effect.',
       high_rollout_without_experiment: 'The share is high: run with a small share first and widen it once the effect is confirmed.',
       decision_pending_header_policy: 'How to turn this on is still awaiting a decision by the owner. Make sure it is approved before saving.',
@@ -104,9 +106,11 @@ export default {
     },
     acks: {
       not_implemented_in_build: 'This version does not include this feature, so saving has no effect',
+      guard_tripped: 'The guard has paused this feature, so saving has no effect until it resumes',
       observability_off: 'cache observation is off, so the effect of this change cannot be evaluated',
       anthropic_observability_missing: 'cache observation does not cover Claude/Gemini yet, so the effect cannot be evaluated',
       fallback_group_selected: 'a selected group is a fallback group, so fallback traffic is rewritten too',
+      share_group_no_effect: 'Some selected groups use shared scheduling, where the feature has no effect',
       no_effect_rollout_zero: 'the share is 0, so saving has no effect',
       high_rollout_without_experiment: 'the share is high and has not been tried at a small share',
       decision_pending_header_policy: 'this awaits an owner decision, and I have the approval',
@@ -508,6 +512,31 @@ export default {
           label: 'Share for keeping stickiness',
           description: 'Treatment share of session buckets.',
           risk: 'More share means more impact.',
+        },
+        keep_sticky_on_busy_max_consecutive_busy: {
+          label: 'Consecutive busy holds per session',
+          description: 'Once a session has been held for its busy account this many times in a row, it is routed again; one successful response resets the count.',
+          risk: 'A higher value can mean more waits in each busy spell.',
+        },
+        keep_sticky_on_busy_max_hold_seconds: {
+          label: 'Longest hold in a busy spell (seconds)',
+          description: 'Counted from the first hold for a busy account; if the account is still busy after this time, it counts as saturated and the session is routed again.',
+          risk: 'A higher value lets sessions wait longer.',
+        },
+        keep_sticky_on_busy_owner_busy_skip_per_min_cap: {
+          label: 'Holds per account per minute',
+          description: 'Once an account has been held for this many times in the last 60 seconds (all sessions together), it is no longer held for, so a hot account does not gather sessions. 0 means automatic: the larger of 4 and twice the account concurrency.',
+          risk: 'A higher cap lets a hot account gather more sessions.',
+        },
+        keep_sticky_on_busy_group_keep_ratio_pct: {
+          label: 'Hold share per group',
+          description: 'Once holds make up this share of the group requests over the last 5 minutes, holding stops.',
+          risk: 'A higher share makes more requests in the group wait for their account.',
+        },
+        keep_sticky_on_busy_health_lookback_seconds: {
+          label: 'Account health look-back (seconds)',
+          description: 'If the session met a rate limit, a transient error or a first-output failure on its account within this time, it is not held for. A longer time is more cautious.',
+          risk: 'A shorter time can hold for an account that just failed.',
         },
         affinity_mode: {
           label: 'Same-tier affinity',
