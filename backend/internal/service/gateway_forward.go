@@ -89,6 +89,9 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 
 // Forward 转发请求到Claude API
 func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, parsed *ParsedRequest) (result *ForwardResult, err error) {
+	if s.providerTraceEngine != nil {
+		defer func() { s.providerTraceEngine.finishProviderCacheTrace(c, result) }()
+	}
 	startTime := time.Now()
 	if parsed == nil {
 		return nil, fmt.Errorf("parse request: empty request")
@@ -418,7 +421,14 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		lastWireBody = wireBody
 
 		// 发送请求
+		if s.providerTraceEngine != nil {
+			s.providerTraceEngine.captureProviderCacheTrace(c, upstreamReq, account, "messages")
+			s.providerTraceEngine.markProviderCacheTraceSent(c)
+		}
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+		if s.providerTraceEngine != nil {
+			s.providerTraceEngine.submitCacheTraceJob(c)
+		}
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
@@ -484,7 +494,14 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					retryReq, retryWireBody, buildErr := s.buildUpstreamRequest(retryCtx, c, account, filteredBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 					releaseRetryCtx()
 					if buildErr == nil {
+						if s.providerTraceEngine != nil {
+							s.providerTraceEngine.captureProviderCacheTrace(c, retryReq, account, "messages")
+							s.providerTraceEngine.markProviderCacheTraceSent(c)
+						}
 						retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+						if s.providerTraceEngine != nil {
+							s.providerTraceEngine.submitCacheTraceJob(c)
+						}
 						if retryErr == nil {
 							if retryResp.StatusCode < 400 {
 								// 重试请求被上游接受后同步 ParsedRequest，保证 usage/日志看到真实请求体。
@@ -527,7 +544,14 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 									retryReq2, retryWireBody2, buildErr2 := s.buildUpstreamRequest(retryCtx2, c, account, filteredBody2, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 									releaseRetryCtx2()
 									if buildErr2 == nil {
+										if s.providerTraceEngine != nil {
+											s.providerTraceEngine.captureProviderCacheTrace(c, retryReq2, account, "messages")
+											s.providerTraceEngine.markProviderCacheTraceSent(c)
+										}
 										retryResp2, retryErr2 := s.httpUpstream.DoWithTLS(retryReq2, proxyURL, account.ID, account.Concurrency, tlsProfile)
+										if s.providerTraceEngine != nil {
+											s.providerTraceEngine.submitCacheTraceJob(c)
+										}
 										if retryErr2 == nil {
 											if retryResp2.StatusCode < 400 {
 												// 二阶段工具块降级成功时也必须更新当前 body。
@@ -610,7 +634,14 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						budgetRetryReq, budgetWireBody, buildErr := s.buildUpstreamRequest(budgetRetryCtx, c, account, rectifiedBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 						releaseBudgetRetryCtx()
 						if buildErr == nil {
+							if s.providerTraceEngine != nil {
+								s.providerTraceEngine.captureProviderCacheTrace(c, budgetRetryReq, account, "messages")
+								s.providerTraceEngine.markProviderCacheTraceSent(c)
+							}
 							budgetRetryResp, retryErr := s.httpUpstream.DoWithTLS(budgetRetryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+							if s.providerTraceEngine != nil {
+								s.providerTraceEngine.submitCacheTraceJob(c)
+							}
 							if retryErr == nil {
 								if budgetRetryResp.StatusCode < 400 {
 									// budget 修正请求成功后，ParsedRequest 也要描述被接受的修正版。

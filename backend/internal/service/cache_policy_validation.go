@@ -144,7 +144,14 @@ func (s *CachePolicyService) merge(index int, before map[string]any, raw json.Ra
 			continue
 		}
 		var next any
-		if field == "enabled" || field == "persist_trace_hourly" {
+		if field == "platforms" {
+			platforms, code := parseCacheTracePlatforms(value)
+			if code != "" {
+				errs = append(errs, CachePolicyFieldError{Field: field, Code: code})
+				continue
+			}
+			next = platforms
+		} else if field == "enabled" || field == "persist_trace_hourly" {
 			var v bool
 			if string(value) == "null" || json.Unmarshal(value, &v) != nil {
 				errs = append(errs, CachePolicyFieldError{Field: field, Code: "malformed_body"})
@@ -175,6 +182,9 @@ func (s *CachePolicyService) merge(index int, before map[string]any, raw json.Ra
 			} else if capped && writing && v > hi {
 				errs = append(errs, CachePolicyFieldError{Field: field, Code: "exceeds_static_cap", Limit: map[string]int{"max": hi}})
 			}
+			if field == "ingress_chain_percent" && (v < lo || v > hi) {
+				continue
+			}
 		}
 		out[field] = next
 		old := before[field]
@@ -185,6 +195,9 @@ func (s *CachePolicyService) merge(index int, before map[string]any, raw json.Ra
 			diff = append(diff, CachePolicyDiff{field, old, next})
 		}
 	}
+	if index == 1 && s.providerTraceAvailable {
+		diff, errs = validateCacheIngressPercent(out, before, patch, diff, errs, writing)
+	}
 	return out, diff, errs
 }
 
@@ -192,6 +205,10 @@ func policyDirection(diff []CachePolicyDiff) string {
 	up, down := false, false
 	for _, d := range diff {
 		switch n := d.After.(type) {
+		case []string:
+			before, after := cacheTracePlatformsMask(d.Before), cacheTracePlatformsMask(n)
+			up = up || after&^before != 0
+			down = down || before&^after != 0
 		case bool:
 			if n {
 				up = true
@@ -319,6 +336,13 @@ func invalidPolicy(errs []CachePolicyFieldError) error {
 			reason = "CACHE_POLICY_UNSUPPORTED"
 			break
 		}
+	}
+	unsupported := len(errs) > 0
+	for _, fieldErr := range errs {
+		unsupported = unsupported && fieldErr.Code == "unsupported_in_build"
+	}
+	if unsupported {
+		reason = "CACHE_POLICY_UNSUPPORTED"
 	}
 	return &CachePolicyError{400, reason, "cache policy validation failed", map[string]string{"errors": string(b)}}
 }

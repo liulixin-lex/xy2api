@@ -12,8 +12,9 @@ type cacheTraceClassificationInput struct {
 
 	// UsageObserved distinguishes an observed missing field from an observer
 	// intentionally skipped on rejection. UsagePromptPresent distinguishes an
-	// absent P from an explicitly reported zero. UsageFields bits 0..3 mean a
-	// cache-read field was present, including an explicitly reported zero.
+	// absent P from an explicitly reported zero. UsageFields bits 0, 2 and 3
+	// identify fields read by the billing parser, including an explicit zero.
+	// Bit 1 records an observed alias that billing does not currently consume.
 	UsageObserved, UsagePromptPresent bool
 	UsageFields                       uint8
 	PromptTokens, ReadTokens          int
@@ -61,7 +62,7 @@ func classifyCacheTrace(in cacheTraceClassificationInput, minCacheableTokens int
 			out.TokensPerByteMilli = int(milli)
 		}
 	}
-	readKnown := in.UsageObserved && in.UsageFields&15 != 0
+	readKnown := in.UsageObserved && in.UsageFields&13 != 0
 	if densityKnown && readKnown {
 		reasoningTokens := float64(in.FirstOldReasoningByte) * density
 		out.ReasoningBoundaryHit = in.OldReasoningN > 0 && in.FirstOldReasoningByte >= 0 &&
@@ -80,7 +81,7 @@ func classifyCacheTrace(in cacheTraceClassificationInput, minCacheableTokens int
 	case in.Transport == "plugin":
 		out.LossClass = "n/a_plugin"
 		return out
-	case in.UsageObserved && (!in.UsagePromptPresent || in.UsageFields&15 == 0):
+	case in.UsageObserved && (!in.UsagePromptPresent || !readKnown):
 		out.LossClass = "n/a_usage"
 		return out
 	case in.CoverageReason != "":

@@ -1,0 +1,30 @@
+{
+  "_contract": [
+    "P-M2B",
+    "C-6"
+  ],
+  "_note": "M2b：platforms 只能取 openai、anthropic、gemini、messages_bridge；其他值返回 400 CACHE_POLICY_INVALID，code=invalid_option。",
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/observability",
+    "body": {
+      "expected_rev": 2,
+      "spec": {
+        "platforms": [
+          "openai",
+          "grok"
+        ]
+      },
+      "reason": "试图加入不支持的平台"
+    }
+  },
+  "status": 400,
+  "response": {
+    "code": 400,
+    "message": "cache policy validation failed",
+    "reason": "CACHE_POLICY_INVALID",
+    "metadata": {
+      "errors": "[{\"field\":\"platforms\",\"code\":\"invalid_option\"}]"
+    }
+  }
+}

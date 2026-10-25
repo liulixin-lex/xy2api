@@ -26,6 +26,10 @@ type cacheTraceKey struct{}
 // Only the live request keeps the immutable ingress body; snapshots keep an
 // atomic async result handle, never bodies, headers, or a Gin context.
 type cacheTrace struct {
+	providerKey            cacheProviderSessionKey
+	providerSampled        bool
+	providerLocalSession   string
+	providerHost           string
 	policy                 *CachePolicySnapshot
 	mu                     sync.Mutex
 	data                   cacheTraceData
@@ -47,6 +51,8 @@ type cacheTrace struct {
 }
 
 type cacheTraceData struct {
+	Platform                                                            string
+	Provider                                                            cacheProviderFields
 	L01Arm, L01Skip                                                     string
 	L01RestoreFallback                                                  string
 	L01Applied                                                          bool
@@ -110,7 +116,7 @@ func cacheTraceFromGin(c *gin.Context) *cacheTrace {
 }
 
 func (s *OpenAIGatewayService) cacheTraceEnabled(c *gin.Context) bool {
-	return s != nil && s.cfg != nil && s.cfg.JWT.Secret != "" && s.CaptureCachePolicy(c).TraceEnabled()
+	return s != nil && s.cfg != nil && s.cfg.JWT.Secret != "" && s.CaptureCachePolicy(c).TraceEnabledFor(cacheTraceOpenAIPlatform(c))
 }
 
 func cacheTraceHeaderBits(h http.Header) (bits uint16) {
@@ -156,6 +162,18 @@ func (s *OpenAIGatewayService) cacheTraceAnchorForKey(apiKeyID int64, root gjson
 }
 
 func (s *OpenAIGatewayService) cacheTraceAnchorParts(apiKeyID int64, instructions, items gjson.Result) string {
+	return s.cacheTraceAnchorPartsWithContent(apiKeyID, instructions, items, "content")
+}
+
+func (s *OpenAIGatewayService) cacheProviderTraceAnchorParts(apiKeyID int64, instructions, items gjson.Result, platform string) string {
+	contentField := "content"
+	if platform == PlatformGemini {
+		contentField = "parts"
+	}
+	return s.cacheTraceAnchorPartsWithContent(apiKeyID, instructions, items, contentField)
+}
+
+func (s *OpenAIGatewayService) cacheTraceAnchorPartsWithContent(apiKeyID int64, instructions, items gjson.Result, contentField string) string {
 	h := hmac.New(sha256.New, []byte(s.cfg.JWT.Secret))
 	_, _ = io.WriteString(h, "cache-trace-anchor-v1\x00"+strconv.FormatInt(apiKeyID, 10))
 	var size [8]byte
@@ -177,7 +195,7 @@ func (s *OpenAIGatewayService) cacheTraceAnchorParts(apiKeyID int64, instruction
 			}
 			leading = false
 			if role == "user" {
-				part(item.Get("content").Raw)
+				part(item.Get(contentField).Raw)
 				return false
 			}
 			return true
@@ -192,10 +210,10 @@ func (s *OpenAIGatewayService) beginCacheTrace(c *gin.Context, body []byte) {
 	if !s.cacheTraceEnabled(c) || c == nil || c.Request == nil || c.Request.URL == nil || getAPIKeyIDFromContext(c) <= 0 || isGrokRequestContext(c) || monitorProbeRequest(c) {
 		return
 	}
-	// P0a covers HTTP Responses (including compact) and Chat only. Messages,
-	// WS turns, count_tokens, images and search need their own P0b metadata.
+	// HTTP Responses (including compact), Chat and the explicitly enabled
+	// Messages bridge share the OpenAI worker. WS turns remain out of scope.
 	path := strings.TrimSuffix(c.Request.URL.Path, "/")
-	if GetOpenAIClientTransport(c) == OpenAIClientTransportWS || (!strings.HasSuffix(path, "/responses") && !strings.HasSuffix(path, "/responses/compact") && !strings.HasSuffix(path, "/chat/completions")) {
+	if GetOpenAIClientTransport(c) == OpenAIClientTransportWS || (!strings.HasSuffix(path, "/responses") && !strings.HasSuffix(path, "/responses/compact") && !strings.HasSuffix(path, "/chat/completions") && !strings.HasSuffix(path, "/messages")) {
 		return
 	}
 	if key, ok := c.Get("api_key"); ok {
@@ -231,6 +249,8 @@ func (s *OpenAIGatewayService) beginCacheTrace(c *gin.Context, body []byte) {
 	protocol := "responses"
 	if strings.HasSuffix(path, "/chat/completions") {
 		protocol = "chat"
+	} else if strings.HasSuffix(path, "/messages") {
+		protocol = "messages"
 	}
 	gapSource := "no_prev"
 	if sessionKey == "" {
@@ -341,7 +361,8 @@ func resetCacheTraceAttempt(c *gin.Context) {
 
 func (s *OpenAIGatewayService) captureCacheTraceRequest(c *gin.Context, req *http.Request, account *Account, protocol string) {
 	t := cacheTraceFromGin(c)
-	if t == nil || account == nil || account.Platform != PlatformOpenAI || req == nil || req.GetBody == nil {
+	if t == nil || account == nil || account.Platform != PlatformOpenAI || req == nil || req.GetBody == nil ||
+		(t.data.ProtocolIn == "messages" && protocol != "responses") {
 		return
 	}
 
@@ -475,7 +496,7 @@ func (s *OpenAIGatewayService) finishCacheTrace(c *gin.Context, result *OpenAIFo
 	defer t.mu.Unlock()
 	t.pending.cancelPending()
 	t.pending = nil
-	if result == nil {
+	if result == nil || !cacheTraceMessagesAttemptAllowed(c) {
 		return
 	}
 	if t.usageObservationFailed {
@@ -590,6 +611,15 @@ func (t *cacheTrace) applyCacheTraceComputed() {
 		return
 	}
 	t.data.ConvAnchor = r.anchor
+	if t.data.Platform != "" {
+		t.data.Prefix = r.prefix
+		t.chain = r.chain
+		dropped, skip := t.data.Provider.ThinkingDropped, t.data.Provider.OwnerSkip
+		t.data.Provider = r.provider
+		t.data.Provider.ThinkingDropped = dropped
+		t.data.Provider.OwnerSkip = skip
+		return
+	}
 	t.data.PCKClassIn = r.pckIn
 	t.data.IDSource = r.idSource
 	t.data.ThreadPresent = t.data.ThreadPresent || r.thread
@@ -641,7 +671,7 @@ func observeCacheTraceUsageString(c *gin.Context, payload string) {
 // resetCacheTraceAttempt clears the marker before another forwarding attempt.
 func cacheTraceObserving(c *gin.Context) bool {
 	t := cacheTraceFromGin(c)
-	if t == nil || t.skipUsage {
+	if t == nil || t.skipUsage || !cacheTraceMessagesAttemptAllowed(c) {
 		return false
 	}
 	t.mu.Lock()

@@ -46,6 +46,8 @@ func assertCacheTraceUsageIngressStructure(t *testing.T) {
 		{"openai_gateway_chat_completions.go", "handleChatStreamingResponse", indexed, original, 1},
 		{"openai_gateway_messages.go", "readOpenAICompatBufferedTerminal", indexed, original, 2}, // normal + EOF flush
 		{"openai_gateway_messages.go", "readOpenAICompatBufferedTerminal", typed, original, 2},
+		{"openai_gateway_messages.go", "handleAnthropicStreamingResponse", indexed, original, 1},
+		{"openai_gateway_messages.go", "handleAnthropicStreamingResponse", typed, original, 1},
 		{"openai_gateway_chat_completions_raw.go", "streamRawChatCompletions", rawHelper, rawOriginal, 1},
 		{"openai_gateway_chat_completions_raw.go", "bufferRawChatCompletions", jsonHelper, jsonOriginal, 1},
 		{"openai_gateway_cc_pipeline.go", "scanCCStream", rawHelper, rawOriginal, 1},
@@ -71,12 +73,12 @@ func assertCacheTraceUsageIngressStructure(t *testing.T) {
 			originalCounts[fnKey][site.original] += site.count
 		}
 	}
-	require.Len(t, originalCounts, 12, "the transport/shape manifest must cover every ingress")
+	require.Len(t, originalCounts, 13, "the transport/shape manifest must cover every ingress")
 	totalHooks := 0
 	for _, site := range sites {
 		totalHooks += site.count
 	}
-	require.Equal(t, 20, totalHooks, "every observation point must remain explicitly enumerated")
+	require.Equal(t, 22, totalHooks, "every observation point must remain explicitly enumerated")
 	files, err := os.ReadDir(".")
 	require.NoError(t, err)
 	parsed := map[string]*ast.File{}
@@ -92,7 +94,7 @@ func assertCacheTraceUsageIngressStructure(t *testing.T) {
 	}
 	// Follow package functions and receiver methods into trace code. Renaming
 	// an observer or hiding it behind an innocuously named wrapper must not
-	// make it invisible to this gate. The 12 audited ingress functions are
+	// make it invisible to this gate. The 13 audited ingress functions are
 	// boundaries: their callers need not add a second per-frame gate.
 	sensitive := cacheTraceUsageSensitiveFunctions(parsed, originalCounts)
 	for _, entry := range files {

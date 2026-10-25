@@ -119,7 +119,7 @@ conv_anchor 按既定的前导 system/developer 和首条 user 计算；Codex �
 
 ### 结算分类与覆盖缺口
 
-完整事件包含 P/read、p_prev、hist_age_s、chain_sampled 和归因输入。分类顺序为 n/a_plugin → n/a_usage → n/a_sampled_out → n/a_truncated → below_min → cold → other_conv → full → prefix_changed → provider_reasoning_drop_suspect → under_read。缺少 P 或数值缓存读取字段属于 n/a_usage，显式数字 0 视为存在。覆盖缺口不计入机会量归因；plugin 和 chain_percent 仍输出完整事件，异步未就绪或拒绝输出最小事件。结算冻结一次 worker 快照，不等待，也不补发事件。
+完整事件包含 P/read、p_prev、hist_age_s、chain_sampled 和归因输入。分类顺序为 n/a_plugin → n/a_usage → n/a_sampled_out → n/a_truncated → below_min → cold → other_conv → full → prefix_changed → provider_reasoning_drop_suspect → under_read。缺少 P 或数值缓存读取字段属于 n/a_usage，显式数字 0 视为存在。OpenAI（含 Messages 桥）的读取类位为 usage_fields 的 bit0/2/3；只有 bit1（prompt_cache_hit_tokens 别名）时，计费解析没有可用 read，因此同样记 n/a_usage，不输出 na_reason，也不设置读量归因标记。别名存在性仍保留，计费保持原行为。覆盖缺口不计入机会量归因；plugin 和 chain_percent 仍输出完整事件，异步未就绪或拒绝输出最小事件。结算冻结一次 worker 快照，不等待，也不补发事件。
 
 `gateway.cache_trace.min_cacheable_tokens` 默认 1024，比较上游报告的 P；P 缺失不能判 below_min。主力 GPT-5.6 及以上型号的最低可缓存长度为 1024 可见 token，旧型号和非官方后端可能不同，在线不维护模型阈值表，离线分析可按型号重新分类。`tok_per_byte_milli` 是 P/逻辑总字节数的千倍整数；未知记 −1，判定使用未取整的密度。full 比较 read 与 min(p_prev,P)，精确计数容差固定 256；涉及估算 token 位置的容差为 max(256,3%·估算值)。range 两端结论相同才采用，否则 n/a_truncated；检查点间截尾的上界按可能未分叉解释。
 
@@ -421,3 +421,13 @@ Chat Completions 经 Responses 上游的成功 HTTP 响应，在实际 L-01 注�
 Responses 原生流式的规则错误直接写客户端，独立清除已解码 message 中的已知 U。
 未注入或策略关闭时使用原 reader/writer，不分配还原对象。Messages 兼容入站不在
 L-01 允许的 ingress 中，维持原有身份与转换逻辑，不扩大注入范围。
+
+### 多平台观测的 stats 口径（M2b）
+
+平台扩展由 observability 的 platforms 控制，默认仍只有 openai。stats 的分钟桶、小时桶、host EWMA 与会话配对按平台隔离，各自沿用容量上限；Messages 桥属于 openai 分区。all 只汇总当前覆盖的平台，先合并计数再折叠小样本。同名 host 按统一时刻衰减后合并；PCK、会话头、UUID 比例与类别完整率只使用选中的 OpenAI 分区。
+
+单独查询已关闭平台仍可读取窗口内历史，带 platform_not_covered；all 排除该平台。provider 视图的 OpenAI 专属数组为空、比率为 null，并带 openai_only_metrics。仅启用 Messages 桥时，OpenAI 视图带 openai_native_excluded；未启用桥时继续标注 messages_bridge_excluded。默认配置的 openai、all 查询和小时行保持 M2 口径，不更改迁移或计费。
+
+### M2b Messages 桥观测接线（开发中）
+
+Messages 桥由运行时观测策略中的 messages_bridge 独立选择，默认 platforms 仍只含 openai。仅经 Responses 出站的桥进入 OpenAI 事件和统计分区；经原生 Anthropic 或 raw Chat 出站的子路径不在本期覆盖内。发送标记及最终请求头观察位于实际发送边界，流式用量观察复用现有解析，账单数值与原规则保持一致。关闭平台、总闸或诊断开关时不启动该平台的异步观测；每请求继续固定策略快照。当前接线待验证，不能据此开启生产。

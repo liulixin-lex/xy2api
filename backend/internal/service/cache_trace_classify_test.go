@@ -88,7 +88,7 @@ func TestT3ClassifierLossTable(t *testing.T) {
 			}
 		})
 	}
-	for _, bit := range []uint8{1, 2, 4, 8, 15} {
+	for _, bit := range []uint8{1, 4, 8, 15} {
 		in := t3ClassifierFixture()
 		in.UsageFields, in.ReadTokens = bit, 0
 		if got := classifyCacheTrace(in, 1024); got.LossClass != "under_read" {
@@ -393,5 +393,43 @@ func TestT3ClassifierAllocations(t *testing.T) {
 				t.Fatalf("classification allocations=%v, want 0", allocations)
 			}
 		})
+	}
+}
+
+// FX-OBS-1: alias presence is useful metadata but is not a billed read.
+// Check the whole byte so metadata bits cannot make the alias a known read.
+func TestT3ClassifierAliasOnlyReadUnknown(t *testing.T) {
+	for metadata := 0; metadata < 16; metadata++ {
+		for _, read := range []int{0, 6000, 12000} {
+			in := t3ClassifierFixture()
+			in.UsageFields, in.ReadTokens = uint8(metadata<<4)|2, read
+			got := classifyCacheTrace(in, 1024)
+			if got.LossClass != "n/a_usage" || got.NAReason != "" ||
+				got.ReasoningBoundaryHit || got.ReadShortOfFork || got.TokensPerByteMilli != 1000 {
+				t.Fatalf("alias-only fields=%d read=%d: %+v", in.UsageFields, read, got)
+			}
+			// Observed absence still precedes sampling exclusions; plugin
+			// remains the first exclusion in the established precedence.
+			in.CoverageReason, in.ChainSampled = "budget_full", false
+			if got := classifyCacheTrace(in, 1024); got.LossClass != "n/a_usage" || got.NAReason != "" {
+				t.Fatalf("alias-only sampling precedence: %+v", got)
+			}
+			in.Transport = "plugin"
+			if got := classifyCacheTrace(in, 1024); got.LossClass != "n/a_plugin" || got.NAReason != "" {
+				t.Fatalf("plugin precedence: %+v", got)
+			}
+		}
+	}
+	for _, canonical := range []uint8{1, 4, 8, 13} {
+		for _, read := range []int{0, 6000, 12000} {
+			in := t3ClassifierFixture()
+			in.UsageFields, in.ReadTokens = canonical, read
+			want := classifyCacheTrace(in, 1024)
+			in.UsageFields |= 2
+			if got := classifyCacheTrace(in, 1024); got != want {
+				t.Fatalf("alias changed canonical classification fields=%d read=%d: got %+v want %+v",
+					in.UsageFields, read, got, want)
+			}
+		}
 	}
 }

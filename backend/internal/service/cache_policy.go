@@ -55,22 +55,24 @@ type cachePolicyEntry struct {
 // private and are built once at publication. Requests hold one pointer across
 // retries and streaming; readers never consult settings.
 type CachePolicySnapshot struct {
-	kill          bool
-	stale         bool
-	master        bool
-	trace         bool
-	northstar     bool
-	persistTrace  bool
-	northstarSpec CacheNorthstarPolicy
-	samplePercent int
-	chainPercent  int
-	byteBudget    int64
-	rate          int64
-	revs          [6]int64
-	revision      string
-	entries       [6]cachePolicyEntry
-	upstream      CacheUpstreamIdentityPolicy
-	cohortViews   [2]cachePolicyCohortView
+	kill                bool
+	stale               bool
+	master              bool
+	trace               bool
+	northstar           bool
+	persistTrace        bool
+	northstarSpec       CacheNorthstarPolicy
+	samplePercent       int
+	chainPercent        int
+	byteBudget          int64
+	rate                int64
+	revs                [6]int64
+	revision            string
+	entries             [6]cachePolicyEntry
+	upstream            CacheUpstreamIdentityPolicy
+	cohortViews         [2]cachePolicyCohortView
+	platforms           uint8
+	ingressChainPercent int
 }
 
 func (p *CachePolicySnapshot) TraceEnabled() bool  { return p != nil && p.trace }
@@ -171,6 +173,7 @@ type CachePolicyService struct {
 	wg                              sync.WaitGroup
 	listeners                       []func(*CachePolicySnapshot)
 	northstarAvailable              bool
+	providerTraceAvailable          bool
 
 	// Staleness bound, guarded by mu. refreshedAt is the last successful
 	// settings read; administrator writes neither refresh nor clear it.
@@ -335,6 +338,11 @@ func (s *CachePolicyService) publishEntries(entries [6]cachePolicyEntry) {
 	p.persistTrace = p.trace && persist
 	p.samplePercent = policyInt(o["sample_percent"])
 	p.chainPercent = policyInt(o["chain_percent"])
+	p.platforms = cacheTracePlatformOpenAI
+	if s.providerTraceAvailable {
+		p.platforms = cacheTracePlatformsMask(o["platforms"])
+		p.ingressChainPercent = policyInt(o["ingress_chain_percent"])
+	}
 	p.byteBudget = int64(min(policyInt(o["byte_budget_mib"]), s.caps.MaxByteBudgetMiB)) << 20
 	p.rate = int64(min(policyInt(o["rate_mib_per_s"]), s.caps.MaxRateMiBPerS)) << 20
 	p.upstream = upstreamIdentityFromEntry(entries[3], p.MasterEnabled() && !p.stale)
@@ -407,7 +415,7 @@ func policyInt(v any) int {
 }
 
 func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config, accounts AccountRepository, groups GroupRepository) *CachePolicyService {
-	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups))
+	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups), WithProviderCacheTrace())
 	s.Start()
 	return s
 }
@@ -423,6 +431,10 @@ func (s *CachePolicyService) subscribe(notify func(*CachePolicySnapshot)) {
 
 func (s *CachePolicyService) defaults(index int) map[string]any {
 	out := policyDefaults(index)
+	if index == 1 && s.providerTraceAvailable {
+		out["platforms"] = []string{"openai"}
+		out["ingress_chain_percent"] = 10
+	}
 	if s.northstarAvailable && index == 1 {
 		out["persist_trace_hourly"] = true
 	}
