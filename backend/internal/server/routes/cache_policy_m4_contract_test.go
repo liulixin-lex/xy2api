@@ -487,7 +487,7 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 // Preserve the two M3 list edge scenarios that have no separate M4 sample.
 // The expected new cards come from F's explicit M4 default fixture, never List.
 func TestCachePolicyM4RetainsM3ListEdges(t *testing.T) {
-	root := "testdata/cache_policies_contract/m31"
+	root := cacheL17Root
 	// The two M4 cards come from F's T3.1a derivation of the M4 default list.
 	raw, err := os.ReadFile(filepath.Join(cacheL09ARoot, "l09a_m4l07_m4_list_default.json"))
 	require.NoError(t, err)
@@ -499,7 +499,7 @@ func TestCachePolicyM4RetainsM3ListEdges(t *testing.T) {
 			require.NoError(t, err)
 			var fixture cacheContract
 			require.NoError(t, json.Unmarshal(raw, &fixture))
-			expected := cacheL17ProjectLegacy(t, contractMap(t, fixture.Response), false)
+			expected := contractMap(t, fixture.Response)
 			raw, err = json.Marshal(fixture.Response["data"])
 			require.NoError(t, err)
 			var list service.CachePolicyList
