@@ -326,7 +326,12 @@ func TestL04ClaudeCodeSkippedActualHandlersOffOnBytesAndSequence(t *testing.T) {
 				for _, call := range cache.calls {
 					require.False(t, strings.HasPrefix(call.hash, "a2:"))
 				}
-				require.Equal(t, int64(31), cache.calls[len(cache.calls)-1].group, "handler's final bind remains in the baseline namespace")
+				require.Equal(t, "get", cache.calls[0].operation)
+				require.Equal(t, int64(31), cache.calls[0].group, "handler lookup retains the authenticated group")
+				// The synthetic 400 skips the handler's success-only final bind.
+				// The baseline scheduler eagerly binds in the resolved CC fallback group.
+				require.Equal(t, "set", cache.calls[len(cache.calls)-1].operation)
+				require.Equal(t, int64(77), cache.calls[len(cache.calls)-1].group, "scheduler eager bind retains the baseline fallback group")
 				results = append(results, result{client, up.bodies, cache.calls, up.ids})
 			}
 			require.Equal(t, results[0], results[1], "no change to client/upstream bytes, chosen accounts or any sticky call on skipped requests")
