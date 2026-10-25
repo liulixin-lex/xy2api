@@ -1532,6 +1532,28 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 顺序：G T0a.1–T0a.4 → G2 核心与接缝 → UI 六提交；改写项目身份并保留协作尾注。
 - 当前：组装、预跑、终审与端到端已完成；等待推送确认及后续 GitHub 必需检查，通过单个 PR 用 merge commit 合入 main。
 
+### 20261023-groups-dialog-size — 账号“编辑分组”弹窗加大（2026-10-23 登记）
+
+- 请求（用户 2026-10-23，附 v0.4.6 截图）：账号管理页点击分组弹出的“编辑分组”面板太小，很多分组名被省略号截断，要调大。
+- 范围：
+  - 只改 `AccountGroupsDialog.vue`：弹窗宽度从 `normal`（最大 512px）改为 `wide`（大屏最大 896px）；分组列表最大高度从 320px 改为屏幕高度的 60%。
+  - 不改 `GroupSelector` 的默认样式，也不改其他调用它的弹窗。
+- 分支：`fix/account-groups-dialog-size-20261023`（工作树 `xy2api-wt/groups-dialog-size`，自 origin/main `e369fd3bb`）。
+- 授权：用户要求修改；按惯例止于开 PR、CI 全绿，不合并、不发版、不部署。
+- 实现：提交 `fix(accounts): widen the account groups dialog so group names fit`；spec 增加对弹窗宽度和列表高度的断言；`GROUP_CATEGORIES.md` 的弹窗描述同步更新。
+- 本地验证：
+  - 前端：lint、typecheck、i18n 3/3、全量 431 个文件 3281 项、build 通过，构建出的 CSS 里有 `max-height:60vh!important`。
+  - 仓库工具：文档一致性、干净树 audit 通过。
+  - 没有起页面截图核对，部署后请在页面上确认。
+- PR：[#131](https://github.com/liulixin-lex/xy2api/pull/131)（2026-10-23T05:27Z 开）。
+- 生产（用户 2026-10-23 明确授权“同意在生产替换程序”）：
+  - 只读核对：生产主机运行的是 0.4.6（`vcs.revision=fe7a3b6db`）；数据库已执行 325 条迁移，278 在其中，分类两张表都在。确认新程序不会改动数据库。
+  - 05:43Z 换上 PR #131 提交 `77e29da83` 的构建：编译参数与正式发版相同（`-tags=embed`、`CGO_ENABLED=0`、release ldflags），linux/amd64，`vcs.modified=false`，sha256 `13890fdb…`。
+  - 先在宿主机和容器内各备份一份 0.4.6 程序，再重启容器。重启用时 8.5 秒，6 秒后健康检查通过。
+  - 验证：运行中进程的 sha256 与 `vcs.revision` 正确，`/health` 与首页 200，公网拿到的 CSS 含新样式；迁移记录仍是 325 条且没有新增；重启后 3 分钟内 508 个请求返回 200，新进程没有 ERROR。
+  - 仍是在线更新程序，容器镜像标签与实际程序不一致的老问题没变；重建容器会回到镜像里的程序。合并后建议走正式发版、更新镜像。
+- 下一步：CI 全绿后交给另一位作者审查合并；发版与部署另行授权。
+
 ## 历史重要事项（原“当前重要事项”）
 
 ### OpenAI 智商检测与 XY2API v0.0.8 已完成
