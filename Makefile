@@ -61,6 +61,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/features/cache-observability/settings/__tests__/m4l04.spec.ts \
 	src/features/cache-observability/settings/__tests__/m4l03.spec.ts \
 	src/features/cache-observability/settings/__tests__/schema.spec.ts \
+	src/features/cache-observability/settings/__tests__/m4l07.spec.ts \
 	src/features/cache-observability/settings/__tests__/usePolicies.spec.ts \
 	src/features/cache-observability/settings/__tests__/upstreamIdentity.spec.ts \
 	src/features/cache-observability/settings/__tests__/m31.spec.ts \
