@@ -1,0 +1,122 @@
+{
+  "_contract": [
+    "M4-4",
+    "M4-D4",
+    "C-7",
+    "FE-Q3"
+  ],
+  "_note": "v1.2 默认构建：整体恢复默认的 PUT 成功，rev 1→2。响应中能力字段仍带 not_implemented_in_build: true；state=off。恢复默认是 disable 方向，不查询分组表，所以 group_ids 为 options: []，并带 group_options_unavailable（v1.0.3）。",
+  "_fixture": {
+    "build_capabilities": {
+      "l04": false,
+      "l03": false,
+      "l07": false
+    },
+    "说明": "后端测试需预置的静态构建能力，不属于响应；没有 _fixture 的 m4 样例按三项都为 true 处理",
+    "stored_spec": {
+      "keep_sticky_on_busy": {
+        "enabled": true,
+        "group_ids": [
+          31
+        ],
+        "rollout_percent": 20
+      },
+      "affinity_mode": "score"
+    }
+  },
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/routing",
+    "body": {
+      "expected_rev": 1,
+      "spec": {
+        "keep_sticky_on_busy": {
+          "enabled": false,
+          "group_ids": [],
+          "rollout_percent": 0
+        },
+        "affinity_mode": "score"
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "key": "routing",
+      "setting_key": "cache_routing_policy",
+      "available": true,
+      "risk": "highest",
+      "gated_by_master": true,
+      "stored": {
+        "rev": 2,
+        "updated_at": "2026-10-24T09:00:00Z",
+        "updated_by": {
+          "user_id": 2,
+          "email": "oncall@example.com"
+        },
+        "reason": null,
+        "spec": {
+          "keep_sticky_on_busy": {
+            "enabled": false,
+            "group_ids": [],
+            "rollout_percent": 0
+          },
+          "affinity_mode": "score"
+        }
+      },
+      "loaded": {
+        "rev": 2,
+        "loaded_at": "2026-10-24T08:40:01Z"
+      },
+      "effective": {
+        "state": "off",
+        "active": false,
+        "blockers": [],
+        "warnings": [
+          "group_options_unavailable"
+        ],
+        "clipped_fields": []
+      },
+      "defaults": {
+        "keep_sticky_on_busy": {
+          "enabled": false,
+          "group_ids": [],
+          "rollout_percent": 0
+        },
+        "affinity_mode": "score"
+      },
+      "schema": [
+        {
+          "field": "keep_sticky_on_busy.enabled",
+          "type": "bool",
+          "not_implemented_in_build": true
+        },
+        {
+          "field": "keep_sticky_on_busy.group_ids",
+          "type": "id_list",
+          "ref": "group",
+          "options": [],
+          "not_implemented_in_build": true
+        },
+        {
+          "field": "keep_sticky_on_busy.rollout_percent",
+          "type": "int",
+          "min": 0,
+          "max": 100,
+          "unit": "percent"
+        },
+        {
+          "field": "affinity_mode",
+          "type": "enum",
+          "options": [
+            "score",
+            "prev_host",
+            "prev_host+quality"
+          ]
+        }
+      ]
+    }
+  }
+}

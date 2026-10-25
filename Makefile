@@ -57,9 +57,11 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/admin/__tests__/AccountsView.groupCategories.spec.ts \
 	src/i18n/__tests__/localesNoKeyCollision.spec.ts \
 	src/features/cache-observability/__tests__/integrationSurface.spec.ts \
+	src/features/cache-observability/settings/__tests__/m4Policies.spec.ts \
 	src/features/cache-observability/settings/__tests__/schema.spec.ts \
 	src/features/cache-observability/settings/__tests__/usePolicies.spec.ts \
 	src/features/cache-observability/settings/__tests__/upstreamIdentity.spec.ts \
+	src/features/cache-observability/settings/__tests__/m31.spec.ts \
 	src/features/cache-observability/settings/__tests__/contract.spec.ts \
 	src/features/cache-observability/settings/__tests__/CacheSettingsPanel.spec.ts \
 	src/features/cache-observability/charts/__tests__/viewModel.spec.ts \

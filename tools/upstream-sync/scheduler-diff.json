@@ -370,7 +370,7 @@
           "if c == nil {",
           "return \"\"",
           "}",
-          "sessionID = s.scopedOpenAISessionSeed(c, body, sessionID)",
+          "sessionID, tenantScoped := s.scopedOpenAISessionSeed(c, body, sessionID)",
           "if strings.HasPrefix(sessionID, \"openai-routing-v2:\") {",
           "currentHash = \"v2:\" + currentHash",
           "legacyHash = \"\"",
@@ -381,7 +381,7 @@
           "c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAICacheDiagnosticKey{}, diagnostic))",
           "}",
           "}",
-          "sessionID = s.scopedOpenAISessionSeed(c, body, sessionID)",
+          "sessionID, tenantScoped := s.scopedOpenAISessionSeed(c, body, sessionID)",
           "if strings.HasPrefix(sessionID, \"openai-routing-v2:\") {",
           "currentHash = \"v2:\" + currentHash",
           "legacyHash = \"\"",
@@ -396,7 +396,7 @@
           "if c == nil {",
           "return \"\"",
           "}",
-          "seed = s.scopedOpenAISessionSeed(c, body, seed)",
+          "seed, tenantScoped := s.scopedOpenAISessionSeed(c, body, seed)",
           "if strings.HasPrefix(seed, \"openai-routing-v2:\") {",
           "currentHash = \"v2:\" + currentHash",
           "legacyHash = \"\"",
@@ -530,6 +530,22 @@
           "s.beginCacheTrace(c, body)"
         ],
         "note": "Observe enabled HTTP requests without a session after cache diagnostics return; capture no-session cache trace metadata only, without changing session generation, sticky binding, account selection or billing. Runtime policy is frozen per request and disabled observations return before body work."
+      },
+      {
+        "block": "cache-l01-scope-provenance",
+        "note": "M3.1 server-only provenance is recorded only for enabled L-01. Existing routing hash, v2 text marker and legacy sticky key bytes remain unchanged; only upstream injection eligibility consumes the explicit scope decision.",
+        "removed": [],
+        "added": [
+          "if CachePolicyFromGin(c).UpstreamIdentity().Enabled() {",
+          "c.Set(openAICacheSessionProvenanceGinKey, tenantScoped)",
+          "}",
+          "if CachePolicyFromGin(c).UpstreamIdentity().Enabled() {",
+          "c.Set(openAICacheSessionProvenanceGinKey, tenantScoped)",
+          "}",
+          "if CachePolicyFromGin(c).UpstreamIdentity().Enabled() {",
+          "c.Set(openAICacheSessionProvenanceGinKey, tenantScoped)",
+          "}"
+        ]
       }
     ],
     "backend/internal/service/gemini_messages_compat_service.go": [

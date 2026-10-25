@@ -1,0 +1,38 @@
+{
+  "inv_dormant_add_group.json": {
+    "source": "m4_dormant_validate_anthropic_remove_group.json",
+    "sha256": "b3ceefb892009e88b5cd88126b4624555cd11ce4937fc04a36d7e41df65785e2"
+  },
+  "inv_dormant_blocker_missing.json": {
+    "source": "m4_dormant_list_db_enabled.json",
+    "sha256": "708cb426549ebaddb9549610bf36249ea9dcf82da5ec8f8129ef91ae343e86d0"
+  },
+  "inv_dormant_db_enabled_on.json": {
+    "source": "m4_dormant_list_db_enabled.json",
+    "sha256": "9edcf3934466a6e70bf79e05d604f2f9e98fd19ba7e25251603b7b7a71123ae7"
+  },
+  "inv_dormant_enable_accepted.json": {
+    "source": "m4_dormant_validate_anthropic_enable_unsupported.json",
+    "sha256": "59a2f36472533a44fa39dd41e4a53523ee75183c97c4df76e1b83384a75e3f79"
+  },
+  "inv_dormant_field_marker_missing.json": {
+    "source": "m4_dormant_list_default.json",
+    "sha256": "c3aed5a4eead150652cb078a20df7458e2e971c90e0c0cfabf77faa83165e077"
+  },
+  "inv_dormant_marker_on_rollout.json": {
+    "source": "m4_dormant_list_default.json",
+    "sha256": "0a10c3d8e86fa502a4bda2f3e1a784e34696904b59b49aafe94dff61c093b86a"
+  },
+  "inv_dormant_put_reason_invalid.json": {
+    "source": "m4_dormant_put_anthropic_unsupported.json",
+    "sha256": "3e0d3da8761e34123d6a044f41abc6e2d2bf615c0115553cbbc20afac6c7ea7b"
+  },
+  "inv_dormant_restore_as_mixed.json": {
+    "source": "m4_dormant_validate_routing_restore_defaults.json",
+    "sha256": "5c51e53f1f3b43cce1603f1320d188fb0d72ddf2541e939de9a3a2cd5dc01dfb"
+  },
+  "inv_full_build_marker.json": {
+    "source": "m4_list_on.json",
+    "sha256": "9694ca838c665a3d95ad00beb34517e46109cc90d4314a1eebb374c4b916d803"
+  }
+}

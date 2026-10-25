@@ -1,0 +1,75 @@
+{
+  "_contract": [
+    "M4-2",
+    "C-4"
+  ],
+  "_note": "必须被拒绝：两个提示同时出现时按 CACHE_PANEL_API §7.2 的枚举顺序排列（v1.1.1）",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/anthropic_identity/validate",
+    "body": {
+      "expected_rev": 2,
+      "spec": {
+        "anchor_group_ids": [
+          31,
+          32,
+          77
+        ]
+      },
+      "reason": "加入备用组",
+      "confirm": {
+        "checkbox": true,
+        "typed": null
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": true,
+      "errors": [],
+      "warnings": [
+        "fallback_group_selected",
+        "anthropic_observability_missing"
+      ],
+      "diff": [
+        {
+          "field": "anchor_group_ids",
+          "before": [
+            31,
+            32
+          ],
+          "after": [
+            31,
+            32,
+            77
+          ]
+        }
+      ],
+      "risk": "high",
+      "direction": "enable",
+      "confirm": {
+        "reason_required": true,
+        "checkbox_required": true,
+        "type_to_confirm": null
+      },
+      "current_rev": 2,
+      "rev_stale": false,
+      "effective_preview": {
+        "state": "on",
+        "active": true,
+        "blockers": []
+      },
+      "affected": [
+        {
+          "key": "anthropic_identity",
+          "state_before": "on",
+          "state_after": "on",
+          "active_after": true
+        }
+      ]
+    }
+  }
+}

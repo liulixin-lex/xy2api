@@ -30,7 +30,7 @@ export function fieldOptions(field: SchemaField): string[] {
   return (field.options ?? []).filter((o): o is string => typeof o === 'string')
 }
 
-/** Named candidates of an account id list (FE-Q3); empty when the server sends none. */
+/** Named candidates of an account or group id list (FE-Q3); empty when the server sends none. */
 export function idOptions(field: SchemaField): IdOption[] {
   return (field.options ?? []).filter(
     (o): o is IdOption => !!o && typeof o === 'object' && typeof (o as IdOption).id === 'number' && typeof (o as IdOption).name === 'string',
@@ -266,6 +266,11 @@ export function inlineIssues(entry: AvailablePolicy, draft: PolicySpec, baseline
  * missing. A field that already deviates stays editable so it can be fixed.
  */
 export function lockReason(entry: AvailablePolicy, draft: PolicySpec, field: SchemaField): string | null {
+  // X-B1 (m3m4 v1.2): a field whose behaviour this build lacks stays off. One that already deviates
+  // (written by an earlier build) stays editable so it can be turned off; the server refuses widening.
+  if (field.not_implemented_in_build) {
+    return sameValue(getPath(draft, field.field), getPath(entry.defaults, field.field)) ? 'not_implemented_in_build' : null
+  }
   if (entry.key !== 'upstream_identity') return null
   if (!['chat_compat_uuid', 'header_only_uuid'].includes(field.field)) return null
   if (getPath(draft, field.field) === true) return null

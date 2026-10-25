@@ -2392,7 +2392,7 @@
     },
     {
       "path": "backend/internal/service/cache_policy.go",
-      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts))"
+      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups))"
     },
     {
       "path": "backend/internal/service/openai_cache_diagnostics.go",
@@ -2472,15 +2472,51 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
-      "value": "l01ResponseBuffer = &openAIUpstreamIdentitySSEBuffer{limit: maxLineSize}"
+      "value": "l01ResponseBuffer = &openAIUpstreamIdentitySSEBuffer{limit: maxLineSize, uuid: openAIUpstreamIdentityUUID(c), context: c}"
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
-      "value": "restoreOpenAIUpstreamIdentitySSE(body)"
+      "value": "restoreOpenAIUpstreamIdentityForClient(c, body, !ok)"
     },
     {
       "path": "backend/internal/service/openai_gateway_upstream_errors.go",
-      "value": "clientBody, err = restoreOpenAIUpstreamIdentityResponse(body)"
+      "value": "body = restoreOpenAIUpstreamIdentityErrorBody(c, resp, body)"
+    },
+    {
+      "path": "backend/internal/service/openai_upstream_identity.go",
+      "value": "!c.GetBool(openAICacheSessionProvenanceGinKey) || d.RoutingSession == \"\""
+    },
+    {
+      "path": "backend/internal/service/openai_upstream_identity_runtime.go",
+      "value": "const openAIIdentityCapacity = 65536"
+    },
+    {
+      "path": "backend/internal/service/openai_upstream_identity_runtime.go",
+      "value": "const openAIIdentityRejectTTL = 24 * time.Hour"
+    },
+    {
+      "path": "backend/internal/service/openai_upstream_identity_response.go",
+      "value": "return literalOpenAIUpstreamIdentityPrefix(body, uuid, len(body), false, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_upstream_identity_m31_test.go",
+      "value": "func TestL01M31ForgedScopeKeepsDisabledStickyBytes(t *testing.T)"
+    },
+    {
+      "path": "backend/internal/service/openai_upstream_identity_m31_test.go",
+      "value": "func TestL01M31BaselineResponseErrorsStayBaseline(t *testing.T)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "restoredBody := s.restoreOpenAIUpstreamIdentityChatBody(c, resp.Body)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "errMsg = restoreOpenAIUpstreamIdentityErrorMessage(c, errMsg)"
+    },
+    {
+      "path": "backend/internal/service/openai_upstream_identity_response.go",
+      "value": "func (b *openAIUpstreamIdentitySSEBody) Read(p []byte) (int, error)"
     }
   ],
   "forbidden_module_paths": [
@@ -3454,6 +3490,31 @@
       "id": "xy-openai-upstream-identity-l01",
       "path": "backend/internal/service/openai_upstream_identity_test.go",
       "literal": "func TestL01BodyInsertionPreservesOriginalSuffixAndPresence("
+    },
+    {
+      "id": "xy-openai-upstream-identity-l01",
+      "path": "backend/internal/service/openai_upstream_identity_conversion_test.go",
+      "literal": "func TestL01M31ChatConversionClientPrivacy("
+    },
+    {
+      "id": "xy-openai-upstream-identity-l01",
+      "path": "backend/internal/service/openai_upstream_identity_conversion_test.go",
+      "literal": "func TestL01M31ChatConversionDisabledRetainsEcho("
+    },
+    {
+      "id": "xy-openai-upstream-identity-l01",
+      "path": "backend/internal/service/openai_upstream_identity_conversion_test.go",
+      "literal": "func TestL01M31ResponsesRuleErrorPrivacy("
+    },
+    {
+      "id": "xy-openai-upstream-identity-l01",
+      "path": "backend/internal/service/openai_upstream_identity_conversion_test.go",
+      "literal": "func TestL01M31MessagesConversionCannotInject("
+    },
+    {
+      "id": "xy-openai-upstream-identity-l01",
+      "path": "backend/internal/service/openai_upstream_identity_conversion_test.go",
+      "literal": "func TestL01M31ConversionBodyEOFAndReadError("
     }
   ]
 }

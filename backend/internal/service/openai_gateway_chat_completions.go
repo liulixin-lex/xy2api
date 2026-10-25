@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -210,6 +211,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	// wire pck is upgraded: assigning this UUID to promptCacheKey would make a
 	// recursive attempt derive a second UUID or repeat tenant isolation.
 	identityChatUUID := ""
+	var identityLease *openAIUpstreamIdentityLease
 	identityChatApplied := false
 	identitySkip := identityDecision.Skip
 	if identityDecision.eligible() {
@@ -229,6 +231,11 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			// Preserve the existing quality identity before writing the wire UUID.
 			identitySkip = "quality_rotation"
 		default:
+			identityLease, identitySkip = s.reserveOpenAIUpstreamIdentity(c, account, identityDecision)
+			if identityLease == nil {
+				break
+			}
+			defer identityLease.release()
 			sessionKey := promptCacheKey
 			if !compatPromptCacheTenantIsolated {
 				sessionKey = isolateOpenAIUpstreamSessionID(getAPIKeyIDFromContext(c), codexAccountIdentitySource(c, account), promptCacheKey)
@@ -368,6 +375,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 				if identityChatUUID != "" {
 					reqBody["prompt_cache_key"] = identityChatUUID
 					identityChatApplied = true
+					rememberOpenAIUpstreamIdentityWire(c, account, identityChatUUID)
 					cacheTraceFromGin(c).setPCKSource("gw_uuid")
 					recordOpenAIUpstreamIdentity(c, identityDecision, true, "none")
 				} else {
@@ -471,11 +479,20 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if resp.StatusCode >= 400 {
 		_ = firstEvent.disarm()
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
+		if handled, rejectErr := s.handleOpenAIUpstreamIdentityRejection(c, account, resp, respBody, identityChatApplied, writeChatCompletionsError); handled {
+			return nil, rejectErr
+		}
+		if identityChatApplied {
+			respBody = restoreOpenAIUpstreamIdentityErrorBody(c, resp, respBody)
+			upstreamMsg = strings.ReplaceAll(upstreamMsg, identityChatUUID, "")
+			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+		}
 		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 			expectedTaskID := account.GetCredential("task_id")
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
 				return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
 			}
+			identityLease.release()
 			return s.forwardAsChatCompletions(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated)
 		}
 		if account.Type == AccountTypeAPIKey &&
@@ -489,6 +506,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			)
 			// The final raw attempt must not inherit a failed Responses attempt's
 			// L-01 application, outgoing source markers, or usage observation.
+			identityLease.release()
 			resetCacheTraceAttempt(c)
 			return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 		}
@@ -496,6 +514,13 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			return nil, foErr
 		}
 		return s.handleChatCompletionsErrorResponse(resp, c, account, billingModel)
+	}
+
+	// All buffered/streaming Chat conversion and SSE error exits consume this
+	// restored body. Disabled attempts keep the original reader and allocation path.
+	if identityChatApplied {
+		restoredBody := s.restoreOpenAIUpstreamIdentityChatBody(c, resp.Body)
+		resp.Body = restoredBody
 	}
 
 	// 9. Handle normal response

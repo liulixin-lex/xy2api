@@ -262,6 +262,27 @@ func assertCacheTraceUsageNoOtherHooks(t *testing.T, fn *ast.FuncDecl, parents m
 			require.NotNil(t, cacheTraceUsageEnabledAncestor(call, parents), "%s: trace access outside enabled branch", fn.Name.Name)
 			continue
 		}
+		if name == "restoreOpenAIUpstreamIdentityErrorMessage" {
+			// The stream rule writer bypasses the normal native SSE buffer.
+			require.Equal(t, "handleStreamingResponseWithReasoning", fn.Name.Name)
+			require.Len(t, cacheTraceUsageASTCalls(fn.Body, name), 1)
+			require.NotNil(t, cacheTraceUsageL01AppliedAncestor(call, parents),
+				"%s: rule error restoration outside its applied gate", fn.Name.Name)
+			continue
+		}
+		if name == "restoreOpenAIUpstreamIdentityForClient" {
+			// M3.1 FX-L01-1: restoration records l01_restore_fallback in the trace,
+			// so it is sensitive. It runs only for an attempt that actually injected U:
+			// once, directly in the body of the applied gate, whose first check is the
+			// L-01 policy (false and allocation-free when disabled; see
+			// TestCacheTraceM31RestoreGateFalseWhenL01Disabled).
+			require.Contains(t, []string{"handleNonStreamingResponse", "handleSSEToJSON"}, fn.Name.Name,
+				"%s: unregistered L-01 restoration site", fn.Name.Name)
+			require.Len(t, cacheTraceUsageASTCalls(fn.Body, name), 1, "%s: exactly one L-01 restoration", fn.Name.Name)
+			require.NotNil(t, cacheTraceUsageL01AppliedAncestor(call, parents),
+				"%s: L-01 restoration outside its applied gate", fn.Name.Name)
+			continue
+		}
 		require.False(t, strings.Contains(strings.ToLower(name), "cachetrace") || sensitive[cacheTraceUsageCallSymbol(call, fn)],
 			"%s: unregistered or renamed trace hook %s", fn.Name.Name, name)
 	}
@@ -407,6 +428,24 @@ func cacheTraceUsageEnabledAncestor(node ast.Node, parents map[ast.Node]ast.Node
 			}
 			return nil // an observer in the false/condition branch is forbidden
 		}
+	}
+	return nil
+}
+
+// cacheTraceUsageL01AppliedAncestor returns the nearest enclosing if statement
+// only when it is `if openAIUpstreamIdentityResponseApplied(c, account) {...}`
+// without an init clause and node lies in its body (not its condition or else).
+func cacheTraceUsageL01AppliedAncestor(node ast.Node, parents map[ast.Node]ast.Node) *ast.IfStmt {
+	for child := node; child != nil; child = parents[child] {
+		conditional, ok := parents[child].(*ast.IfStmt)
+		if !ok {
+			continue
+		}
+		if conditional.Init == nil && child == conditional.Body &&
+			cacheTraceUsageASTArgs([]ast.Expr{conditional.Cond})[0] == "openAIUpstreamIdentityResponseApplied(c, account)" {
+			return conditional
+		}
+		return nil
 	}
 	return nil
 }

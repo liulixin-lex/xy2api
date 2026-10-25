@@ -142,7 +142,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	}
 	var l01ResponseBuffer *openAIUpstreamIdentitySSEBuffer
 	if l01ResponseApplied {
-		l01ResponseBuffer = &openAIUpstreamIdentitySSEBuffer{limit: maxLineSize}
+		l01ResponseBuffer = &openAIUpstreamIdentitySSEBuffer{limit: maxLineSize, uuid: openAIUpstreamIdentityUUID(c), context: c}
 	}
 	writePendingString := func(value string) (int, error) {
 		if l01ResponseBuffer != nil {
@@ -674,6 +674,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 							// xy2api resilience (PM instruction 5, as DELTA-P1-2): after
 							// heartbeats committed 200 the rule's error ends the stream
 							// as the Responses terminal event instead of a bare JSON body.
+							// Rule errors bypass the native SSE restoration writer.
+							if openAIUpstreamIdentityResponseApplied(c, account) {
+								errMsg = restoreOpenAIUpstreamIdentityErrorMessage(c, errMsg)
+							}
 							writeOpenAIStreamRuleError(ctx, c, status, errType, errMsg)
 							streamEarlyErr = fmt.Errorf("upstream response failed: passthrough rule matched message=%s", errMsg)
 							return
@@ -1741,10 +1745,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	}
 	body = restoreCodexToolNamesFromContext(c, body)
 	if openAIUpstreamIdentityResponseApplied(c, account) {
-		body, err = restoreOpenAIUpstreamIdentityResponse(body)
-		if err != nil {
-			return nil, err
-		}
+		body = restoreOpenAIUpstreamIdentityForClient(c, body, false)
 	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	// Codex 协议要求 /responses/compact JSON 响应携带 x-codex-turn-state
@@ -1866,15 +1867,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		body = []byte(bodyText)
 	}
 	if openAIUpstreamIdentityResponseApplied(c, account) {
-		var err error
-		if ok {
-			body, err = restoreOpenAIUpstreamIdentityResponse(body)
-		} else {
-			body, err = restoreOpenAIUpstreamIdentitySSE(body)
-		}
-		if err != nil {
-			return nil, err
-		}
+		body = restoreOpenAIUpstreamIdentityForClient(c, body, !ok)
 	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)

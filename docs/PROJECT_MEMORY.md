@@ -6,6 +6,21 @@
 
 ## 当前交接状态
 
+### M3.1 转换出口隐私补修（2026-10-25，G，本地冻结待独立验证）
+
+- 在联合候选 efd7d3aaf 的独立评审 v2 精确树上补修：Chat 转换前统一还原，原生 Responses 规则错误清除已知 U；Messages 不扩大注入资格。实际 Forward 回显、关闭控制、结构门控及 reader EOF/读错测试已准备。
+- 本次仅轻检，不宣称运行通过。负责人指定唯一合并定向与 golden 由独立评审执行，staging 只补 active/T4.0；原联合候选的失败证据保留。不推送、不部署。
+
+### 缓存 M3.1 与 T4.0 联合集成（2026-10-24，P，待最终候选门禁）
+
+- M3 PR #134 已常规合入main c07ece514，tree与4a0c一致；本批在实际新main组装11个来源提交并独立补测试接缝，保留M31/T4及UI语义、全部冻结fixtures与迁移。T4来源已通过；M31来源收集器中断保留原rc1，按裁定由本联合流水线完整覆盖，不续跑来源。
+- 当前只有组装与轻量核对完成；五tag、完整unit、缓存race、lint、实际HTTP/trace及前端、最终R/S和CI均待执行，未宣称READY、未推送/部署。详见进行中P条目。
+
+
+### 缓存 M3.1 / L-01 启用前安全（2026-10-24，本地冻结待验证）
+
+- 从M3最终4a0c1107f独立开发，代码与27个新顶层测试准备完成，早期静态审查及E1/E2增量无阻塞；仅格式、文档、diff和契约文件轻检通过，全部Go执行仍待单批heavy。保留关闭态routing/sticky字节，启用路径以服务端provenance防伪；上游本来无效的usage/单行上限维持基线。M3-only回放27份，M4派生6份留集成；未推送、未部署。
+
 ### OpenAI 缓存 P0a（2026-10-24，M1 已合入）
 
 - T0a.1–T0a.4、运行时策略与管理员面板已随 PR #132 合入 main `72c2d0169`，功能默认关闭，未变更生产。G 的详细实现与验证记录已原样移入 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)。
@@ -202,10 +217,35 @@
 
 ## 进行中的工作
 
+### 20261025-cache-m31-conversion-privacy — L-01 客户端转换出口补修（G，进行中）
+
+- 按负责人裁定，从联合候选 efd7d3aaf 应用独立评审 v2，精确基线 tree a56c02da；在其上修复 Chat buffered 回显注入标识的问题，并审计 Chat 流式、Messages 兼容及错误出口。
+- 还原仅在实际注入且策略启用的门控中执行，维持关闭态字节和分配；补回显测试、结构登记及同步文档。产品补修 00407e03a 已本地提交，格式、diff 与文档一致性通过。Go 未执行；独立评审执行唯一合并定向与 golden。不推送、不部署。
+
+### 20261024-cache-m31-m4a-integration — M3.1 与 T4.0 联合候选（P，冻结待统一门禁）
+
+- PR #134 已常规合入，main c07ece514，tree 与批准的4a0c相同。以该新main重放G T4.0两提交、G M31两提交、UI重基M4六提交和M31一提交；原说明/协作尾注保留，作者与提交者统一项目noreply。仅测试接缝独立提交，不改来源产品语义。
+- T4.0来源r3五tag与完整实际契约通过；M31来源五tag及106顶层PASS，随后日志收集器逐片JSON解析中断，原rc1保留，race/lint未执行。PM裁定不续跑来源，由最终候选一次执行五tag、完整unit、缓存race、lint、HTTP/trace、前端及工具门禁。采用已核对的换行拼接收集器，原分片/补suffix证明仅解析器向量，不冒充产品事件。
+- M31-only完整27份回放保留；M4六列表用权威M31派生完整HTTP相等，29反例原文件不改、同投影六正例自检必须相等，两份M3 list边界仍保留。新增options阻塞时M4回退与M31降cap均发布、双revision不回退且零分组查询的确定性回归。全部新增测试待本联合流水线实际执行。
+- 下一步：冻结最终SHA/tree与11条来源映射；R独立组装/身份/接缝核对和一次组合golden，S一次staging；所有门禁闭合才READY、普通push/PR，保护检查/strict/讨论满足后merge commit。279及checksum不变，默认关闭，无生产操作。
+
+### 20261024-cache-m31-l01（G，进行中）
+
+- 基线 M3 最终 4a0c1107f，独立 cache/m31-l01；FX-L01-1 fail-safe 还原、24h账号拒绝记忆、65536项在途上限、max_inflight_per_key默认2/范围1..16、history及软提示的代码与定向测试已写入。按PM只做轻检，不排heavy；Go编译、unit/race与样例实际回放均未执行。
+- 依PM防伪裁定与DESIGN §3.9，保持全部routing hash/legacy sticky字节；仅Enabled时记录/消费显式provenance，判定仍在原no_routing_session位置。补伪造关闭/开启、正常scoped、错误体四形态、还原oversize与基线usage/scanner边界测试。gofmt/diff/docs与39份契约原字节轻检通过；6份M4派生列表等T4.0集成。X-E9原队列不变，之后T4.0与M3.1各单批执行，未推送/部署。
+
+
 ### 20261024-cache-m3-e9 — L-01 租户种子门禁（G，进行中）
 
 - 基于冻结M3候选6188d5d04，仅在policy关闭早退后、cohort前要求RoutingSession带v2:；非隔离旧种子记no_routing_session，不变更0.4.x粘性与显式键处理。
 - 覆盖三处真实哈希入口、复合组OpenAI apikey真实Forward与policy_off零执行顺序；附平台闸门阳性/阴性对照，内部skip不代表复合组public trace。单批五tag、L01 focused unit/race、增量lint待执行。T4.0暂停，未推送或部署。
+
+### 20261024-cache-m4-t40 — M4 两个管理员策略键（G，开发中）
+
+- 已变基到冻结 M3 最终候选 4a0c1107f，分支 cache/m4-t40；仅实现 anthropic_identity 与 routing 的管理、验证、存储和分组选项，默认关闭且没有请求路径接线。保留0.4.x与M3行为。
+- 依据M4开工包§1及m3m4 v1.1：routing仅score；点路径实际diff、风险确认、分组白名单/降级warning和disable零查询与契约一致；northstar形态不变。
+- X-B1按F m3m4 v1.2：独立L-04/L-03/L-07静态能力且生产全false，能力字段拒绝启用，关闭及恢复默认零组查询；DB只激活未实现行为时blocked+not_implemented_in_build，过渡构建按已实现行为决定状态。已准备10份dormant样例及9反例；不排新heavy，待X-E9与S r3结束后仅排r3。
+- 计划：完成实现及20个M4样例/反例与M3保留回放，交付前一个heavy跑五tag编译、受影响包unit和回放。M3统一流水线优先，重任务按预算排队；不stash/autostash、不push、不部署。M3若有修补则跟进最终head。
 
 ### 20261024-cache-m3-integration — hardening、L-01 与管理员策略卡片（P，进行中）
 
@@ -1151,3 +1191,36 @@ pnpm --dir frontend run build
 
 - 仅在策略启用分支、cohort之前接受v2:隔离种子；复合组、无API key与非OpenAI组旧种子沿用no_routing_session内部跳过，既有sticky不变，trace平台范围不扩展。
 - 新增三入口scope、两个租户实际Forward、policy关闭顺序与trace平台对照；allocation控制组夹具补v2:，保持原断言。单条五tag、L01 unit/race及相对6188的增量lint待执行，结果在仓库外PROGRESS补记；不推送、不部署。
+
+### 2026-10-24 — T4.0 X-B1 休眠能力门禁准备
+
+- 保留WIP对象和patch后，不使用stash/autostash变基到M3最终4a0c1107f。产品自动重放，唯一记忆冲突保留双方记录。能力字段启用拒绝、关闭零查询、DB防御及10个dormant/9个反例按v1.2准备；只做轻检，五tag和触及包unit/回放等待单批r3，未声称通过。
+
+### 2026-10-24 M3.1 代码草稿与轻检（G）
+
+- 基于4a0c1107f写入还原fail-safe、拒绝记忆、in-flight上限、策略字段/提示和provenance防伪；受影响测试与M31契约回放已准备。PM/F明确关闭态hash/legacy行为完全保留，防伪仅影响L-01注入资格；错误体不含U时字节不动。格式、diff、文档与契约原字节轻检通过，Go尚未执行，不视为验收；等待X-E9/S结束后先T4.0、再M3.1各单批heavy。
+
+### 2026-10-24 M3.1 早期审查增量（G）
+
+- 按负责人要求补齐 M31-E1/E2：字面还原区分转义引号和对象键，SSE保留跨片转义上下文；拒绝路径标记已提交，复用端点基线400格式。新增语法/分片及两端点非JSON类型的格式回归；策略回放输出具名事件便于提取证据。仅格式、diff、文档轻检，Go未执行；待既有优先任务结束后单批验证，非阻塞项仍留后续。
+
+### 2026-10-24 M3.1 本地候选冻结（G）
+
+- E1/E2经独立静态核对，空message也按各端点基线兜底；现以项目身份本地提交供后续源绑定。27个新顶层测试及HTTP/trace契约回放尚未Go执行，不标验收通过。格式、diff、文档轻检后提交，再做干净树同步审计；单批heavy仍排在既有M3优先任务与T4.0之后，未推送/部署。
+
+### 2026-10-24 M3.1 同步登记接缝（G）
+
+- 干净树审计发现E1改写后仍登记旧的字面替换return，保留原失败，改为完整上下文感知helper的精确调用锚点；不放宽审计规则。此后继仅同步登记与本记忆，backend和契约与b0396455完全相同；Go仍未执行，关闭态golden实际绑定b039并以同backend树继承。
+
+### 2026-10-24 — M3.1 与 T4.0 联合组装（P）
+
+- 在已合入M3的新main上依序重放T4、M31及UI，共11个来源提交。产品自动合并保留两侧语义；路由M3测试采用完整M31裸构造版本；四份文档冲突保留双方新增内容。重基UI不再引入已合入的M3改动。
+- 独立测试接缝完整回放六派生列表、保留两M3 list边界；29冻结反例不改，同一内存投影先经六正例严格自检。新增M31 options阻塞下的M4回退及M31降cap并发发布断言。冻结fixture/manifest和279不改。
+- M31来源unit因仓外收集器对1024字节Output首片过早解码中断，原失败及106具名PASS分别保留，race/lint未执行；按PM不续跑来源。最终候选采用按Package/Test换行拼接的已审收集器，完整unit与缓存race均核27策略/5trace/6派生的实际事件、具名PASS和进程rc，不以解析器向量替代执行。
+- 本提交前仅格式、diff、文档和来源字节核对；实际最终门禁、组合golden、staging与CI待执行。未推送、合入或操作生产。
+
+### 2026-10-25 — 20261025-cache-m31-conversion-privacy — 转换出口补修准备
+
+- 从 efd7 独立应用已审 v2，精确 tree a56c02da；产品提交只改 service，文档/policy/记忆同步后继与其 backend 同树。Chat 实际写入标记内用既有 SSEBuffer 包住成功响应正文，统一覆盖 buffered、流式、failed 与 cyber 客户端出口；原生规则错误 message 另作精确删除并计 error_body。
+- 六个新顶层测试覆盖实际注入回显、工具、累积输出、超大事件、失败/HTTP 错误、关闭态控制、Messages 不可注入及 EOF/原始读错；结构登记锁定实际写入门控。只做格式/diff/文档/来源审计，不冒称 Go 实跑。
+- 后续由独立评审做一次合并定向与 golden，P 核来源并组装，S 仅补 active/T4.0；本分支冻结后不改运行树、不重复排 heavy。

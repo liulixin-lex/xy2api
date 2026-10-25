@@ -30,6 +30,7 @@ func newCacheTraceL01Fixture(t *testing.T, enabled bool) (*OpenAIGatewayService,
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
 	c.Request.Header.Set("X-Client-Request-Id", "PRIVATE_L01_TRACE_HEADER")
 	c.Set(openAICacheSessionGinKey, "v2:0011223344556677")
+	c.Set(openAICacheSessionProvenanceGinKey, true)
 	s.beginCacheTrace(c, body)
 	trace := cacheTraceFromGin(c)
 	require.NotNil(t, trace)

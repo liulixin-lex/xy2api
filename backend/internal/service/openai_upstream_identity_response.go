@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
 
@@ -117,6 +119,9 @@ func restoreOpenAIUpstreamIdentitySSE(body []byte) ([]byte, error) {
 			}
 		}
 		joined := bytes.Join(payloads, []byte("\n"))
+		if len(joined) > 0 && !bytes.Equal(joined, []byte("[DONE]")) && !gjson.ValidBytes(joined) {
+			return nil, fmt.Errorf("invalid SSE JSON")
+		}
 		restored, err := restoreOpenAIUpstreamIdentityResponse(joined)
 		if err != nil {
 			return nil, err
@@ -153,37 +158,223 @@ func restoreOpenAIUpstreamIdentitySSE(body []byte) ([]byte, error) {
 	return out, nil
 }
 
-// This buffer sits after the existing per-line billing/classification path.
-// It owns only event bytes, never a callback capturing the existing writers:
-// such a callback would move those writers to the heap even when L-01 is off.
+// Literal fallback uses only the UUID written by this attempt. Embedded UUIDs
+// are removed as bytes as well (including escaped quotes in error.message).
+func literalOpenAIUpstreamIdentity(body []byte, uuid string) []byte {
+	return literalOpenAIUpstreamIdentityPrefix(body, uuid, len(body), false, true)
+}
+
+// Only a complete, unescaped string value becomes null. An object key or an
+// embedded UUID loses just the UUID bytes, retaining valid JSON syntax. Partial
+// SSE output can inspect its retained suffix; ambiguous strings stay quoted.
+func literalOpenAIUpstreamIdentityPrefix(body []byte, uuid string, cut int, prefixEscape, final bool) []byte {
+	if uuid == "" || !bytes.Contains(body[:cut], []byte(uuid)) {
+		return body[:cut]
+	}
+	out := make([]byte, 0, cut)
+	last, search := 0, 0
+	for search < cut {
+		i := bytes.Index(body[search:cut], []byte(uuid))
+		if i < 0 {
+			break
+		}
+		i += search
+		end := i + len(uuid)
+		start, next := i, end
+		nullValue := i > 0 && body[i-1] == '"' && end < cut && body[end] == '"'
+		if nullValue {
+			escaped := false
+			j := i - 2
+			for j >= 0 && body[j] == '\\' {
+				escaped = !escaped
+				j--
+			}
+			if j < 0 && prefixEscape {
+				escaped = !escaped
+			}
+			j = end + 1
+			for {
+				for j < len(body) && (body[j] == ' ' || body[j] == '\t' || body[j] == '\n' || body[j] == '\r') {
+					j++
+				}
+				// An oversize SSE JSON key may put its colon in the next data
+				// field. These field prefixes are not part of the JSON payload.
+				if !bytes.HasPrefix(body[j:], []byte("data:")) {
+					break
+				}
+				j += len("data:")
+			}
+			nullValue = !escaped && (j < len(body) && body[j] != ':' || j == len(body) && final)
+		}
+		if nullValue {
+			start, next = i-1, end+1
+		}
+		out = append(out, body[last:start]...)
+		if nullValue {
+			out = append(out, "null"...)
+		}
+		last, search = next, next
+	}
+	return append(out, body[last:cut]...)
+}
+
+func openAIUpstreamIdentityUUID(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	value, _ := c.Get(openAIUpstreamIdentityWireGinKey)
+	wire, _ := value.(openAIUpstreamIdentityWire)
+	return wire.uuid
+}
+
+func recordOpenAIUpstreamIdentityRestoreFallback(c *gin.Context, kind string) {
+	if kind == "none" || c == nil {
+		return
+	}
+	traceKind := kind
+	if kind == "error_body" {
+		traceKind = "literal"
+	}
+	value, _ := c.Get(openAIUpstreamIdentityWireGinKey)
+	wire, ok := value.(openAIUpstreamIdentityWire)
+	if !ok || wire.restore == nil {
+		return
+	}
+	// At most once per kind per attempt. Oversize dominates the trace enum.
+	bit := uint32(1)
+	if kind == "sse_oversize" { //nolint:staticcheck // QF1003: restore-only path kept byte-identical to the verified candidate; tagged switch deferred
+		bit = 2
+	} else if kind == "error_body" {
+		bit = 4
+	}
+	old := wire.restore.fallback.Or(bit)
+	if old&bit == 0 {
+		resilience.Count("l01_restore_fallback_total", 0, 0, kind)
+	}
+	if t := cacheTraceFromGin(c); t != nil {
+		t.mu.Lock()
+		if t.data.L01Applied && t.data.L01RestoreFallback != "sse_oversize" {
+			t.data.L01RestoreFallback = traceKind
+		}
+		t.mu.Unlock()
+	}
+}
+
+func restoreOpenAIUpstreamIdentityLiteralForClient(c *gin.Context, body []byte, kind string) []byte {
+	restored := literalOpenAIUpstreamIdentity(body, openAIUpstreamIdentityUUID(c))
+	if !bytes.Equal(restored, body) {
+		recordOpenAIUpstreamIdentityRestoreFallback(c, kind)
+	}
+	return restored
+}
+
+// Rule writers receive an already-decoded message, not a JSON document. Remove
+// U as text so quotes around an embedded echo retain the baseline message shape.
+func restoreOpenAIUpstreamIdentityErrorMessage(c *gin.Context, message string) string {
+	restored := strings.ReplaceAll(message, openAIUpstreamIdentityUUID(c), "")
+	if restored != message {
+		recordOpenAIUpstreamIdentityRestoreFallback(c, "error_body")
+	}
+	return restored
+}
+
+// This wrapper never returns an error to forwarding or resilience. Structural
+// parsing is optional: invalid objects and unknown envelopes use known-U bytes.
+func restoreOpenAIUpstreamIdentityForClient(c *gin.Context, body []byte, sse bool) []byte {
+	var restored []byte
+	var err error
+	if sse {
+		restored, err = restoreOpenAIUpstreamIdentitySSE(body)
+	} else if gjson.ValidBytes(body) {
+		restored, err = restoreOpenAIUpstreamIdentityResponse(body)
+	} else {
+		err = fmt.Errorf("invalid response JSON")
+	}
+	if err != nil {
+		recordOpenAIUpstreamIdentityRestoreFallback(c, "literal")
+		return literalOpenAIUpstreamIdentity(body, openAIUpstreamIdentityUUID(c))
+	}
+	// Also covers unexpected envelopes and error strings left by structured work.
+	return restoreOpenAIUpstreamIdentityLiteralForClient(c, restored, "literal")
+}
+
+// This buffer runs only for actually injected requests. Oversize events switch
+// to bounded literal streaming, retaining a suffix so no UUID can cross a write.
+// The billing/classification scanner and every disabled writer stay unchanged.
 type openAIUpstreamIdentitySSEBuffer struct {
-	pending   []byte
-	lineStart int
-	limit     int
+	pending           []byte
+	lineNonWhitespace bool
+	oversize          bool
+	limit             int
+	uuid              string
+	context           *gin.Context
+	literalEscape     bool
+}
+
+func (b *openAIUpstreamIdentitySSEBuffer) drainLiteral(final bool) []byte {
+	cut := len(b.pending)
+	if !final && b.uuid != "" {
+		cut -= len(b.uuid) + 2
+		if cut <= 0 {
+			return nil
+		}
+		for _, token := range []string{`"` + b.uuid + `"`, b.uuid} {
+			for start := 0; start < cut; {
+				i := bytes.Index(b.pending[start:], []byte(token))
+				if i < 0 {
+					break
+				}
+				i += start
+				if i < cut && i+len(token) > cut {
+					cut = i
+					break
+				}
+				start = i + len(token)
+			}
+		}
+	}
+	output := literalOpenAIUpstreamIdentityPrefix(b.pending, b.uuid, cut, b.literalEscape, final)
+	// Copy before reusing the backing array: output may alias pending unchanged.
+	output = append([]byte(nil), output...)
+	for _, char := range b.pending[:cut] {
+		if char == '\\' {
+			b.literalEscape = !b.literalEscape
+		} else {
+			b.literalEscape = false
+		}
+	}
+	b.pending = append(b.pending[:0], b.pending[cut:]...)
+	return output
 }
 
 func (b *openAIUpstreamIdentitySSEBuffer) Append(value string) ([]byte, error) {
 	var output []byte
 	for len(value) > 0 {
 		n := strings.IndexByte(value, '\n')
-		if n < 0 {
-			n = len(value)
-		} else {
+		completeLine := n >= 0
+		if completeLine {
 			n++
+		} else {
+			n = len(value)
 		}
-		if len(b.pending)+n > b.limit {
-			return nil, fmt.Errorf("upstream identity SSE event exceeds response limit")
+		segment := value[:n]
+		blank := !b.lineNonWhitespace && strings.TrimSpace(segment) == ""
+		if strings.TrimSpace(segment) != "" {
+			b.lineNonWhitespace = true
 		}
-		b.pending = append(b.pending, value[:n]...)
+		b.pending = append(b.pending, segment...)
 		value = value[n:]
-		if b.pending[len(b.pending)-1] == '\n' {
-			blank := len(bytes.TrimSpace(b.pending[b.lineStart:])) == 0
-			b.lineStart = len(b.pending)
+		if !b.oversize && b.limit > 0 && len(b.pending) > b.limit {
+			b.oversize = true
+			recordOpenAIUpstreamIdentityRestoreFallback(b.context, "sse_oversize")
+		}
+		if b.oversize {
+			output = append(output, b.drainLiteral(false)...)
+		}
+		if completeLine {
+			b.lineNonWhitespace = false
 			if blank {
-				frame, err := b.Finish()
-				if err != nil {
-					return nil, err
-				}
+				frame, _ := b.Finish()
 				output = append(output, frame...)
 			}
 		}
@@ -193,13 +384,76 @@ func (b *openAIUpstreamIdentitySSEBuffer) Append(value string) ([]byte, error) {
 
 func (b *openAIUpstreamIdentitySSEBuffer) Finish() ([]byte, error) {
 	if len(b.pending) == 0 {
+		b.oversize = false
+		b.lineNonWhitespace = false
+		b.literalEscape = false
 		return nil, nil
 	}
-	restored, err := restoreOpenAIUpstreamIdentitySSE(b.pending)
-	if err != nil {
-		return nil, err
+	var restored []byte
+	if b.oversize {
+		restored = b.drainLiteral(true)
+	} else if b.context != nil {
+		restored = restoreOpenAIUpstreamIdentityForClient(b.context, b.pending, true)
+	} else {
+		// Standalone callers have the same no-error contract.
+		var err error
+		restored, err = restoreOpenAIUpstreamIdentitySSE(b.pending)
+		if err != nil {
+			restored = literalOpenAIUpstreamIdentity(b.pending, b.uuid)
+		}
 	}
-	b.pending = b.pending[:0]
-	b.lineStart = 0
+	b.pending = nil
+	b.lineNonWhitespace = false
+	b.oversize = false
+	b.literalEscape = false
 	return restored, nil
+}
+
+// Restore before the Responses-to-Chat converters consume any event. This is
+// attempt-local and installed only after a real L-01 write. Buffering and literal
+// fallback are shared with the native writer, including EOF and oversize events;
+// only errors from the original upstream reader reach the compatibility parser.
+type openAIUpstreamIdentitySSEBody struct {
+	io.ReadCloser
+	buffer  openAIUpstreamIdentitySSEBuffer
+	ready   []byte
+	readErr error
+	scratch [4096]byte
+}
+
+func (s *OpenAIGatewayService) restoreOpenAIUpstreamIdentityChatBody(c *gin.Context, body io.ReadCloser) *openAIUpstreamIdentitySSEBody {
+	limit := defaultMaxLineSize
+	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
+		limit = s.cfg.Gateway.MaxLineSize
+	}
+	return &openAIUpstreamIdentitySSEBody{ReadCloser: body, buffer: openAIUpstreamIdentitySSEBuffer{
+		limit: limit, uuid: openAIUpstreamIdentityUUID(c), context: c,
+	}}
+}
+
+func (b *openAIUpstreamIdentitySSEBody) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	for len(b.ready) == 0 && b.readErr == nil {
+		n, err := b.ReadCloser.Read(b.scratch[:])
+		if n > 0 {
+			b.ready, _ = b.buffer.Append(string(b.scratch[:n]))
+		}
+		if err != nil {
+			// Flush even on a non-EOF read error, then preserve that exact error.
+			tail, _ := b.buffer.Finish()
+			b.ready = append(b.ready, tail...)
+			b.readErr = err
+		}
+		if n == 0 && err == nil {
+			return 0, nil
+		}
+	}
+	if len(b.ready) > 0 {
+		n := copy(p, b.ready)
+		b.ready = b.ready[n:]
+		return n, nil
+	}
+	return 0, b.readErr
 }

@@ -1,0 +1,67 @@
+{
+  "_contract": [
+    "M4-3",
+    "C-3"
+  ],
+  "_note": "M4：keep_sticky_on_busy.group_ids 含非 anthropic 分组：错误码 wrong_platform（嵌套字段用点路径）。",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/routing/validate",
+    "body": {
+      "expected_rev": 0,
+      "spec": {
+        "keep_sticky_on_busy": {
+          "enabled": true,
+          "group_ids": [
+            18
+          ]
+        }
+      },
+      "reason": "试运行",
+      "confirm": {
+        "checkbox": true,
+        "typed": "cache_routing_policy"
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": false,
+      "errors": [
+        {
+          "field": "keep_sticky_on_busy.group_ids",
+          "code": "wrong_platform"
+        }
+      ],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "keep_sticky_on_busy.enabled",
+          "before": false,
+          "after": true
+        },
+        {
+          "field": "keep_sticky_on_busy.group_ids",
+          "before": [],
+          "after": [
+            18
+          ]
+        }
+      ],
+      "risk": "highest",
+      "direction": "mixed",
+      "confirm": {
+        "reason_required": true,
+        "checkbox_required": true,
+        "type_to_confirm": "cache_routing_policy"
+      },
+      "current_rev": 0,
+      "rev_stale": false,
+      "effective_preview": null,
+      "affected": []
+    }
+  }
+}

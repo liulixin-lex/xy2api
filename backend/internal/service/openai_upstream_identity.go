@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 )
@@ -68,10 +69,10 @@ func prepareOpenAIUpstreamIdentity(c *gin.Context, account *Account) openAIUpstr
 	}
 	session, _ := c.Get(openAICacheSessionGinKey)
 	d.RoutingSession, _ = session.(string)
-	// Only v2 routing identities are tenant scoped. Composite/non-OpenAI
-	// groups and unauthenticated contexts retain legacy sticky seeds; never
-	// reuse those shared content identities as an upstream UUID.
-	if !strings.HasPrefix(d.RoutingSession, "v2:") {
+	// Trust only the server's actual scope decision, never a client-controlled
+	// seed prefix. Legacy routing strings stay unchanged even for forged seeds.
+	// Keep this at the existing no_routing_session position before the cohort.
+	if !c.GetBool(openAICacheSessionProvenanceGinKey) || d.RoutingSession == "" {
 		d.Skip = "no_routing_session"
 		return d
 	}
@@ -170,10 +171,18 @@ func fillOpenAIUpstreamIdentityBody(body []byte, hasPromptCacheKey bool, uuid st
 type openAIUpstreamIdentityWire struct {
 	accountID int64
 	uuid      string
+	restore   *openAIUpstreamIdentityRestoration
 }
 
+type openAIUpstreamIdentityRestoration struct{ fallback atomic.Uint32 }
+
 func rememberOpenAIUpstreamIdentityWire(c *gin.Context, account *Account, uuid string) {
-	c.Set(openAIUpstreamIdentityWireGinKey, openAIUpstreamIdentityWire{accountID: account.ID, uuid: uuid})
+	if value, ok := c.Get(openAIUpstreamIdentityWireGinKey); ok {
+		if wire, ok := value.(openAIUpstreamIdentityWire); ok && wire.accountID == account.ID && wire.uuid == uuid {
+			return
+		}
+	}
+	c.Set(openAIUpstreamIdentityWireGinKey, openAIUpstreamIdentityWire{accountID: account.ID, uuid: uuid, restore: &openAIUpstreamIdentityRestoration{}})
 }
 
 func applyUpstreamSessionIdentity(req *http.Request, c *gin.Context, uuid string) {
@@ -209,7 +218,11 @@ func recordOpenAIUpstreamIdentity(c *gin.Context, d openAIUpstreamIdentityDecisi
 	t.mu.Lock()
 	t.data.L01Arm, t.data.L01Skip = d.Arm, skip
 	t.data.L01Applied, t.data.L01PolicyRevision = applied, d.PolicyRevision
+	if !applied {
+		t.data.L01RestoreFallback = ""
+	}
 	if applied {
+		t.data.L01RestoreFallback = "none"
 		// The writer generated a UUID; this fact does not require the worker.
 		t.data.PCKOutIsUUID = true
 	}

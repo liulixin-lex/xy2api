@@ -81,6 +81,7 @@ export default {
       not_in_build: '当前版本未包含',
     },
     blockers: {
+      not_implemented_in_build: '当前版本尚未包含这项功能：已保存的配置不会生效，可以把相关项关闭或移除。',
       diagnostics_disabled: '系统的缓存诊断开关是关闭的，缓存观测无法工作。请联系运维开启（需要修改配置并重启）。',
       static_aware_routing_disabled: '这一项依赖一个需要修改配置并重启才能打开的系统开关，目前是关闭的。保存后不会生效；请联系运维评估。',
       parse_error: '存储的配置无法识别，已按关闭处理。重新保存一次即可恢复。',
@@ -95,6 +96,7 @@ export default {
       decision_pending_header_policy: '这一项的开启方式尚待负责人决定。保存前请确认已获批准。',
       decision_pending_fallback_scope: '这一项的开启方式尚待负责人决定。保存前请确认已获批准。',
       decision_pending_static_routing: '这一项的开启方式尚待负责人决定。保存前请确认已获批准。',
+      l01_all_accounts_unverified: '当前对全部合格账号生效：灰度期建议显式选择账号。',
       account_options_unavailable: '账号候选这次没有加载：已选账号照常保留，没有名称的只显示 ID；仍可手动输入账号 ID，由服务端校验。',
       group_options_unavailable: '分组候选这次没有加载：已选分组照常保留；选择器暂时列出全部分组，由服务端校验。',
     },
@@ -102,6 +104,7 @@ export default {
       reload: '重新加载候选',
     },
     acks: {
+      not_implemented_in_build: '当前版本尚未包含这项功能，保存后不会生效',
       observability_off: '缓存观测未开启，这项改动的效果将无法评估',
       anthropic_observability_missing: '缓存观测尚未覆盖 Claude/Gemini 请求，这项改动的效果将无法评估',
       fallback_group_selected: '所选分组含回退组，回退流量也会按此配置改写',
@@ -110,6 +113,7 @@ export default {
       decision_pending_header_policy: '这一项的开启方式尚待负责人决定，我已获批准',
       decision_pending_fallback_scope: '这一项的开启方式尚待负责人决定，我已获批准',
       decision_pending_static_routing: '这一项的开启方式尚待负责人决定，我已获批准',
+      l01_all_accounts_unverified: '当前对全部合格账号生效，没有显式选择账号',
       diagnostics_disabled: '缓存诊断开关关闭，缓存观测保存后不会工作',
       static_aware_routing_disabled: '依赖的系统开关尚未打开，保存后不会生效',
       parse_error: '原有配置无法识别，本次保存将覆盖它',
@@ -141,6 +145,7 @@ export default {
       typed: '输入键名',
     },
     locked: {
+      not_implemented_in_build: '当前版本尚未包含该功能，升级后可开启。',
       requires_mode_uuid_fill: '先把补全方式设为 uuid_fill 才能开启此项',
     },
     direction: {
@@ -253,6 +258,7 @@ export default {
       remove: '移除 {name}',
       groupID: '分组 #{id}',
       loadFailed: '分组列表读取失败，只能查看已选分组的 ID',
+      fallbackUnknown: '分组列表读取失败，无法标出回退组',
       fallbackTag: '回退组',
       servingScope: '按实际服务的分组生效',
     },
@@ -465,6 +471,11 @@ export default {
           label: '会话头转发方式',
           description: 'whitelist 按白名单原样转发会话头；normalize 规范化后再转发。',
           risk: '改变出站请求头；与会话标识补全方式无关。',
+        },
+        max_inflight_per_key: {
+          label: '每个会话的在途补全上限',
+          description: '同一会话的在途请求数达到这个值时，后续请求不再补全会话标识，避免大量并发请求共用一个标识。',
+          risk: '调高后，更多并发请求会共用同一个会话标识。',
         },
       },
       anthropic_identity: {

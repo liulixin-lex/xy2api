@@ -63,7 +63,7 @@
         :id="controlId"
         :model-value="null"
         :options="groupOptions"
-        :disabled="disabled || groupsFailed"
+        :disabled="disabled || (groupsFailed && !servedGroups)"
         :aria-label="label"
         :aria-describedby="describedBy"
         :placeholder="t('admin.cacheSettings.groupPicker.placeholder')"
@@ -72,7 +72,9 @@
         @update:model-value="addId"
       />
       <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.cacheSettings.groupPicker.servingScope') }}</p>
-      <p v-if="groupsFailed" class="mt-1 text-xs text-amber-800 dark:text-amber-300">{{ t('admin.cacheSettings.groupPicker.loadFailed') }}</p>
+      <p v-if="groupsFailed" class="mt-1 text-xs text-amber-800 dark:text-amber-300">
+        {{ t(servedGroups ? 'admin.cacheSettings.groupPicker.fallbackUnknown' : 'admin.cacheSettings.groupPicker.loadFailed') }}
+      </p>
       <ul v-if="ids.length" class="mt-2 flex flex-wrap gap-2" :aria-label="label">
         <li v-for="id in ids" :key="id" class="flex min-w-0 max-w-full items-center gap-1 rounded-md bg-gray-100 py-1 pl-2.5 pr-1 text-sm text-gray-800 dark:bg-dark-700 dark:text-gray-100">
           <span class="min-w-0 break-words">{{ groupName(id) }}</span>
@@ -165,7 +167,7 @@ import type { AdminGroup } from '@/types'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { codeLabel, idNames, unitSuffix } from '../format'
-import { fieldKind, fieldOptions, idRef } from '../schema'
+import { fieldKind, fieldOptions, idOptions, idRef } from '../schema'
 import type { SchemaField } from '../types'
 import PolicySwitch from './PolicySwitch.vue'
 import ThresholdRulesEditor from './ThresholdRulesEditor.vue'
@@ -201,8 +203,11 @@ const enumOptions = computed(() => {
   if (typeof current === 'string' && current && !list.includes(current)) list.push(current)
   return list.map((value) => ({ value, label: codeLabel('options', value, t, te) }))
 })
+// The server lists the groups a field accepts (FE-Q3; the Anthropic groups for the M4 keys). Without that
+// list any admin group is offered. Fallback marks always come from the admin group list (C-13).
+const servedGroups = computed(() => Array.isArray(props.field.options))
 const groupOptions = computed(() =>
-  props.groups
+  (servedGroups.value ? idOptions(props.field) : props.groups)
     .filter((g) => !ids.value.includes(g.id))
     .map((g) => ({
       value: g.id,

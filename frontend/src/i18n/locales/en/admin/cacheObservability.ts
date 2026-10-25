@@ -81,6 +81,7 @@ export default {
       not_in_build: 'Not in this version',
     },
     blockers: {
+      not_implemented_in_build: 'This version does not include this feature yet: the saved configuration has no effect. You can turn the affected settings off or remove them.',
       diagnostics_disabled: 'The system cache diagnostics switch is off, so cache observation cannot work. Ask operations to turn it on (needs a config change and a restart).',
       static_aware_routing_disabled: 'This depends on a system switch that needs a config change and a restart, and it is off. Saving has no effect; ask operations to assess it.',
       parse_error: 'The stored configuration cannot be read and is treated as off. Saving once restores it.',
@@ -95,6 +96,7 @@ export default {
       decision_pending_header_policy: 'How to turn this on is still awaiting a decision by the owner. Make sure it is approved before saving.',
       decision_pending_fallback_scope: 'How to turn this on is still awaiting a decision by the owner. Make sure it is approved before saving.',
       decision_pending_static_routing: 'How to turn this on is still awaiting a decision by the owner. Make sure it is approved before saving.',
+      l01_all_accounts_unverified: 'This applies to all eligible accounts: during the rollout, select accounts explicitly.',
       account_options_unavailable: 'Account candidates were not loaded this time. Selected accounts stay, and those without a name show by ID. You can still enter account IDs; the server checks them.',
       group_options_unavailable: 'Group candidates were not loaded this time. Selected groups stay, and the picker lists all groups for now; the server checks them.',
     },
@@ -102,6 +104,7 @@ export default {
       reload: 'Reload candidates',
     },
     acks: {
+      not_implemented_in_build: 'This version does not include this feature, so saving has no effect',
       observability_off: 'cache observation is off, so the effect of this change cannot be evaluated',
       anthropic_observability_missing: 'cache observation does not cover Claude/Gemini yet, so the effect cannot be evaluated',
       fallback_group_selected: 'a selected group is a fallback group, so fallback traffic is rewritten too',
@@ -110,6 +113,7 @@ export default {
       decision_pending_header_policy: 'this awaits an owner decision, and I have the approval',
       decision_pending_fallback_scope: 'this awaits an owner decision, and I have the approval',
       decision_pending_static_routing: 'this awaits an owner decision, and I have the approval',
+      l01_all_accounts_unverified: 'This applies to all eligible accounts; none are selected explicitly',
       diagnostics_disabled: 'cache diagnostics are off, so cache observation will not work after saving',
       static_aware_routing_disabled: 'a required system switch is off, so saving has no effect',
       parse_error: 'the old configuration is unreadable and this save replaces it',
@@ -141,6 +145,7 @@ export default {
       typed: 'the typed key',
     },
     locked: {
+      not_implemented_in_build: 'This version does not include this feature yet; it can be turned on after an upgrade.',
       requires_mode_uuid_fill: 'Set the fill mode to uuid_fill before turning this on',
     },
     direction: {
@@ -253,6 +258,7 @@ export default {
       remove: 'Remove {name}',
       groupID: 'Group #{id}',
       loadFailed: 'Could not load the group list; only the IDs of selected groups are shown',
+      fallbackUnknown: 'Could not load the group list, so fallback groups are not marked',
       fallbackTag: 'Fallback',
       servingScope: 'Applies by the group that actually serves the request',
     },
@@ -465,6 +471,11 @@ export default {
           label: 'Session header forwarding',
           description: 'whitelist forwards session headers as they are; normalize normalizes them first.',
           risk: 'Changes outbound headers; independent of the fill mode.',
+        },
+        max_inflight_per_key: {
+          label: 'In-flight cap per session',
+          description: 'Once a session has this many requests in flight, further requests get no filled session identifier, so a burst does not share one identifier.',
+          risk: 'A higher cap lets more concurrent requests share one session identifier.',
         },
       },
       anthropic_identity: {

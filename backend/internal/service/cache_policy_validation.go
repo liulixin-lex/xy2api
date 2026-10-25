@@ -102,6 +102,9 @@ func (s *CachePolicyService) merge(index int, before map[string]any, raw json.Ra
 	if index == 3 {
 		return mergeUpstreamIdentity(before, raw)
 	}
+	if index == 4 || index == 5 {
+		return mergeM4Policy(index, before, raw)
+	}
 	out := make(map[string]any, len(before))
 	for k, v := range before {
 		out[k] = v
@@ -196,7 +199,7 @@ func policyDirection(diff []CachePolicyDiff) string {
 				down = true
 			}
 		case string:
-			if n == "off" || n == "whitelist" {
+			if n == "off" || n == "whitelist" || n == "score" {
 				down = true
 			} else {
 				up = true
@@ -209,6 +212,9 @@ func policyDirection(diff []CachePolicyDiff) string {
 				continue
 			}
 			added, removed := upstreamIdentityScopeDirection(before, n)
+			if d.Field == "anchor_group_ids" || d.Field == "metadata_group_ids" {
+				added, removed = cachePolicyExplicitScopeDirection(before, n)
+			}
 			up, down = up || added, down || removed
 		case int:
 			if n > policyInt(d.Before) {
@@ -232,14 +238,40 @@ func (s *CachePolicyService) validation(index int, entry cachePolicyEntry, w Cac
 		errs = bodyErrors
 		diff = []CachePolicyDiff{}
 	}
+	if len(errs) == 0 && (index == 4 || index == 5) {
+		errs = s.m4UnsupportedChanges(index, spec, diff)
+		if len(errs) > 0 {
+			accepted := make([]CachePolicyDiff, 0, len(diff))
+			for _, change := range diff {
+				unsupported := false
+				for _, fieldError := range errs {
+					unsupported = unsupported || change.Field == fieldError.Field
+				}
+				if !unsupported {
+					accepted = append(accepted, change)
+				}
+			}
+			diff = accepted
+		}
+	}
 	if utf8.RuneCountInString(strings.TrimSpace(w.Reason)) > 200 {
 		errs = append(errs, CachePolicyFieldError{Field: "reason", Code: "too_long", Limit: map[string]int{"max": 200}})
 	}
-	v := CachePolicyValidation{Valid: len(errs) == 0, Errors: errs, Warnings: []string{}, Diff: diff, Risk: policyRisk(index), Direction: policyDirection(diff), CurrentRev: entry.envelope.Rev, Affected: []CachePolicyAffected{}}
+	direction := policyDirection(diff)
+	if reflect.DeepEqual(spec, s.defaults(index)) {
+		// Restoring the complete defaults cannot activate anything. In
+		// particular resetting busy group_ids to [] must not require a lookup.
+		direction = "disable"
+	}
+	v := CachePolicyValidation{Valid: len(errs) == 0, Errors: errs, Warnings: []string{}, Diff: diff, Risk: policyRisk(index), Direction: direction, CurrentRev: entry.envelope.Rev, Affected: []CachePolicyAffected{}}
 	v.RevStale = w.ExpectedRev != nil && *w.ExpectedRev != v.CurrentRev
-	if (index == 0 || index == 3) && v.Direction != "disable" {
+	if (index == 0 || index >= 3) && v.Direction != "disable" {
 		v.Confirm.ReasonRequired = true
 		v.Confirm.CheckboxRequired = true
+		if index == 5 {
+			key := cachePolicySettings[5]
+			v.Confirm.TypeToConfirm = &key
+		}
 	}
 	if !v.Valid {
 		return v, spec
@@ -283,7 +315,7 @@ func invalidPolicy(errs []CachePolicyFieldError) error {
 	b, _ := json.Marshal(errs)
 	reason := "CACHE_POLICY_INVALID"
 	for _, e := range errs {
-		if e.Code == "unsupported_in_build" && (e.Field == "header_only_uuid" || e.Field == "forward_session_headers") {
+		if e.Code == "unsupported_in_build" && (e.Field == "header_only_uuid" || e.Field == "forward_session_headers" || e.Field == "affinity_mode" || e.Field == "anchor_group_ids" || e.Field == "gemini_anchor" || e.Field == "metadata_group_ids" || e.Field == "keep_sticky_on_busy.enabled" || e.Field == "keep_sticky_on_busy.group_ids") {
 			reason = "CACHE_POLICY_UNSUPPORTED"
 			break
 		}
@@ -323,8 +355,15 @@ func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePoli
 		if v.Confirm.CheckboxRequired && !w.Confirm.Checkbox {
 			missing = append(missing, "checkbox")
 		}
+		if v.Confirm.TypeToConfirm != nil && (w.Confirm.Typed == nil || *w.Confirm.Typed != *v.Confirm.TypeToConfirm) {
+			missing = append(missing, "typed")
+		}
 		if len(missing) > 0 {
-			return "", &CachePolicyError{422, "CACHE_POLICY_CONFIRM_REQUIRED", "confirmation required", map[string]string{"missing": strings.Join(missing, ",")}}
+			metadata := map[string]string{"missing": strings.Join(missing, ",")}
+			if v.Confirm.TypeToConfirm != nil && (w.Confirm.Typed == nil || *w.Confirm.Typed != *v.Confirm.TypeToConfirm) {
+				metadata["type_to_confirm"] = *v.Confirm.TypeToConfirm
+			}
+			return "", &CachePolicyError{422, "CACHE_POLICY_CONFIRM_REQUIRED", "confirmation required", metadata}
 		}
 		// Candidate enumeration is response metadata, performed after commit.
 		// Disable must avoid both account validation and candidate enumeration.
@@ -332,6 +371,9 @@ func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePoli
 		now := s.now().UTC()
 		reason := strings.TrimSpace(w.Reason)
 		updated = cachePolicyEntry{envelope: CachePolicyEnvelope{v.CurrentRev + 1, &now, &actor, &reason, spec}, loadedAt: now}
+		if reason == "" && (i == 4 || i == 5) {
+			updated.envelope.Reason = nil
+		}
 		diff = v.Diff
 		b, err := json.Marshal(updated.envelope)
 		return string(b), err
@@ -359,6 +401,13 @@ func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePoli
 			setCachePolicyUnavailableAccountOptions(&view)
 		} else {
 			s.populateCachePolicyAccountOptions(ctx, &view)
+		}
+	}
+	if i == 4 || i == 5 {
+		if skipAccountOptions {
+			setCachePolicyUnavailableGroupOptions(&view)
+		} else {
+			s.populateCachePolicyGroupOptions(ctx, &view)
 		}
 	}
 	return view, diff, nil
