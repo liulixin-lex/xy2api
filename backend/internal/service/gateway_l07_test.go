@@ -872,6 +872,33 @@ func TestL07AccessorANDsCapabilityKillAndMaster(t *testing.T) {
 	require.Nil(t, st.L07())
 }
 
+// Stored limits reach the request path as effective values, clipped by a
+// lowered static cap (contract m4l07 §1).
+func TestL07StoredLimitsReachTheRequestPath(t *testing.T) {
+	store := newPolicyTestStore()
+	store.rows["cache_feature_master"] = `{"rev":1,"spec":{"enabled":true}}`
+	store.rows["cache_routing_policy"] = `{"rev":7,"spec":{"keep_sticky_on_busy":{"enabled":true,"group_ids":[31],"rollout_percent":20,` +
+		`"max_consecutive_busy":4,"max_hold_seconds":200,"owner_busy_skip_per_min_cap":8,"group_keep_ratio_pct":15,"health_lookback_seconds":300}}}`
+	for _, tc := range []struct {
+		caps                   [3]int
+		consecutive, hold, pct int
+	}{
+		{[3]int{0, 0, 0}, 4, 200, 15},
+		{[3]int{3, 120, 10}, 3, 120, 10},
+	} {
+		cfg := policyTestConfig()
+		cfg.Gateway.CacheRouting.L07MaxConsecutiveCap = tc.caps[0]
+		cfg.Gateway.CacheRouting.L07MaxHoldSecondsCap = tc.caps[1]
+		cfg.Gateway.CacheRouting.L07GroupKeepRatioCapPct = tc.caps[2]
+		s := NewCachePolicyService(store, cfg, WithCacheM4Policies(nil), WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L07: true}))
+		require.NoError(t, s.Refresh(context.Background()))
+		p := s.Snapshot().RoutingL07()
+		require.NotNil(t, p)
+		require.Equal(t, []int{20, tc.consecutive, tc.hold, 8, tc.pct, 300, 7},
+			[]int{p.RolloutPercent, p.MaxConsecutiveBusy, p.MaxHoldSeconds, p.OwnerBusySkipPerMinCap, p.GroupKeepRatioPct, p.HealthLookbackSeconds, int(p.Revision())})
+	}
+}
+
 func TestL07StaticCapsClipEffectiveValues(t *testing.T) {
 	entry := cachePolicyEntry{envelope: CachePolicyEnvelope{Rev: 4, Spec: map[string]any{"keep_sticky_on_busy": map[string]any{
 		"enabled": true, "group_ids": []int64{}, "rollout_percent": 10,
