@@ -12,10 +12,10 @@
 - P1 L-01 已在吸收 M1 后完成本地实现与非计时门禁，保持默认关闭，待独立评审；当前交接见下方 P1 条目。
 
 
-### 缓存 M2b / provider session digest（2026-10-24，WIP）
+### 缓存 M2b / provider 挂点（2026-10-25，编译排队）
 
-- 已按 trace v1.2.1 更正 Anthropic/Gemini 的 HMAC 域为 <platform>-session，摘要与独立 history/LRU 共用租户和 serving 组作用域；原计算向量已加入测试。
-- 源契约与轻量检查通过；新增 Go/race 尚待同一增量流水线，为 M3 关键路径让行。provider 生产挂点尚未接入，当前不是可集成或部署交付。
+- 已变基到 M3 main c07ece514。Anthropic/Gemini 生产发送、原始 usage、计费后结算与 Wire 接线已补；Begin/Bind/accessor 及平台、租户、serving 组作用域的摘要/history 键保持冻结。入站锚点按实际协议读取，涵盖 Messages/Responses 转换。
+- 唯一增量流水线已排队，先做五 tag vet；通过立即提交固定检查点给依赖方，随后继续 unit/race、实际输出契约、golden、stats S1–S5 与 Messages 桥。新增挂点五 tag vet 已通过，其余行为门禁仍在同一流水线执行，尚不能视为集成或部署交付；后续字段组尚未完成。
 
 - G：M1 日志 Attr 合并已验证；正式 d1 待复核，详见归档。
 
@@ -239,14 +239,10 @@
 
 ### 20261024-cache-p0b-fields — M2b（G2，进行中）
 
-- 进度：新 main 五 tag 编译全过，20 出站与 50 用量/计费 golden 通过；23 个策略 HTTP 契约中 22 个通过。修正两个测试初始化问题与 unsupported 字段的错误 reason，随后按追加契约实现 stats 平台分区（含 host、会话及容量隔离）。新的重门禁为 M3 集成让行，原失败保留，轻量实现继续；Messages 桥已接线待验证，Anthropic/Gemini 捕获/结算尚未接入。
-- 追加裁定：FX-OBS-1 已将 alias-only 读量改为 n/a_usage，补 Responses/Chat/Messages 的真实 emitter 回归；v1.2 原样例未改。FX-L04-7 的租户/serving 组 HMAC 与独立有界历史存储已补基础实现和测试，尚未接入 provider 挂点。新增 Go 测试等待 M3 关键路径释放，不能视为通过。
-- 域串更正：F 的 v1.2.1 统一为 <platform>-session，输入为 api_key_id|serving_group_id|本地会话哈希；摘要及 history/LRU 同步使用，四条合法与一条反例向量已原样加入回归，待同一增量门禁执行。后续 S2/S6 也只用此值。
-
-- 基于 M2 main 16a776e347 开展 T0b.4，保留已合入 M2 的产品、迁移与隔离测试；本地检查点不是可集成提交。默认关闭，不改变出站及计费。
-- 在原 main 72c2d0169 上已录制 20 组出站和 50 组用量/计费，来源与摘要在 testdata；已实现平台与入站链策略字段及 stats 分区，Anthropic/Gemini 捕获和结算尚未接入；Messages 桥接线和回归测试已补，待验证。
-- 策略旧存储仅在内存补齐 ingress_chain_percent=min(10,chain_percent)，不写回或改变 rev；validate/PUT 使用同一合并基础。契约已发布，无需等待；别名计费变化按裁定延期，不合并。未推送或部署。
-
+- 基点 c07ece514；五个既有检查点以 rebase --onto 重放，保留 M2/M3 与仓储隔离。当前 provider 挂点、原始 usage 和计费后结算已接齐，等待同一条增量流水线编译；先前 main16a 的五 tag、20 出站/50 计费 golden 是旧树证据，不能冒称当前挂点通过。
+- 接口冻结：BeginProviderCacheTrace、BindProviderCacheTraceSession、ProviderCacheTraceSessionDigest；摘要按 <platform>-session 域和 api_key_id|serving_group_id|local_hash 计算，前 16 hex，history/LRU 带平台。L-04 决策不读取观测 accessor。Gemini 来源保留合法 cacheable_content/message_content_fallback，M4 只追加 anchor_v2。
+- 单条流水线先五 tag，通过即本地提交编译检查点并通知依赖方；同租约继续触及包 unit、race、真实输出契约与 golden、stats S1–S5、Messages 桥和增量 lint。不重复任务，可信编译缓存播种，测试 -count=1；结果待补。
+- 旧存储只在内存补 ingress_chain_percent=min(10,chain_percent)，不写回或改 rev，validate/PUT 共用基础；FX-OBS-1 alias-only 按 n/a_usage，计费解析不改。T0b.5 别名计费变化按裁定延期。其他字段组待后续实现，未推送或部署。
 
 ### 20261023-cache-p0b — 在线缓存北极星与管理员图表（G2，实现完成，待集成）
 
@@ -1189,3 +1185,13 @@ pnpm --dir frontend run build
 
 - 按 F v1.2.1 更正 provider HMAC 域为 <platform>-session，保留租户与 serving 组输入及 16 位 hex 格式；原域来自开工包笔误。历史键复用同一计算结果，后续 S2/S6 也使用它。
 - 四条合法、一条无作用域反例向量原样复制并登记 SHA；新增直接对期望摘要及真实历史键的测试，Anthropic/Gemini 摘要自身亦相互隔离。源契约、格式与轻量文档检查，Go/race 继续并入已有待执行增量流水线，为 M3 让行。尚未接入 provider 挂点，不是可集成交付。
+
+### 2026-10-25T04:06Z — M2b provider 挂点编译准备
+
+- 补齐 Anthropic 原生、passthrough、两种协议转换、Vertex/Bedrock 发送及原始 usage，Gemini compat/native 的 buffered、streaming 与 SSE 聚合回调；Wire 复用同一策略、计数与观测服务。Begin/Bind/accessor 签名和 scoped HMAC/history 键保持冻结；L-04 不依赖观测开关。
+- 结算在既有 force-cache/TTL 处理后读取快照，仅成功计费或 usage-only 路径发布；失败和普通未送达只关闭计时，不训练历史。计费算法不改。新增 provider 出站/计费对照、关闭态、usage 位和失败发布边界测试。
+- 本轮新 Go 尚未运行；唯一增量流水线先做五 tag 编译，通过即提交检查点，然后 unit/race、真实输出契约与 golden、平台分区及 Messages 桥。可信编译缓存可播种，所有测试使用 -count=1；不重复旧任务。
+
+### 2026-10-25T05:38Z — T0b.4 provider 编译检查点
+
+- 五 tag vet 全部通过；Begin/Bind/accessor 与 session digest/history 键保持冻结。仅编译已验收，provider 行为、计费和关闭态回放由同一重任务后续执行，结果待补；不作为 M2b 最终集成交付。

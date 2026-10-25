@@ -437,6 +437,12 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 						// 记录粘性缓存未命中的结构化日志
 						if stickyCacheMissReason != "" {
+							switch stickyCacheMissReason {
+							case "wait_queue_full":
+								noteProviderCacheTraceOwnerSkip(ctx, "busy_wait_full")
+							case "gate_check", "rpm_red":
+								noteProviderCacheTraceOwnerSkip(ctx, stickyCacheMissReason)
+							}
 							baseRPM := stickyAccount.GetBaseRPM()
 							var currentRPM int
 							if count, ok := rpmFromPrefetchContext(ctx, stickyAccount.ID); ok {
@@ -608,6 +614,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							return s.newSelectionResult(ctx, account, true, result.ReleaseFunc, nil)
 						}
 					} else {
+						noteProviderCacheTraceOwnerSkip(ctx, "busy_quota_full")
 						slog.Debug("sticky.layer1_5_no_routing_slot_busy",
 							"account_id", accountID,
 							"session", shortSessionHash(sessionHash),
@@ -632,13 +639,27 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 								MaxWaiting:     cfg.StickySessionMaxWaiting,
 							})
 						}
+					} else {
+						noteProviderCacheTraceOwnerSkip(ctx, "busy_wait_full")
 					}
-				} else if !clearSticky {
-					slog.Debug("sticky.layer1_5_no_routing_miss",
-						"account_id", accountID,
-						"reason", "gate_check_failed",
-						"session", shortSessionHash(sessionHash),
-					)
+				} else {
+					switch {
+					case !modelSupported:
+						noteProviderCacheTraceOwnerSkip(ctx, "model_unsupported")
+					case !rpmOK:
+						noteProviderCacheTraceOwnerSkip(ctx, "rpm_red")
+					case !quotaOK || !windowCostOK:
+						noteProviderCacheTraceOwnerSkip(ctx, "busy_quota_full")
+					default:
+						noteProviderCacheTraceOwnerSkip(ctx, "other")
+					}
+					if !clearSticky {
+						slog.Debug("sticky.layer1_5_no_routing_miss",
+							"account_id", accountID,
+							"reason", "gate_check_failed",
+							"session", shortSessionHash(sessionHash),
+						)
+					}
 				}
 			} else {
 				slog.Debug("sticky.layer1_5_no_routing_miss",

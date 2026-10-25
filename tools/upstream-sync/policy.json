@@ -2562,6 +2562,82 @@
     {
       "path": "backend/internal/service/cache_provider_history.go",
       "value": "map[cacheProviderSessionKey]*cacheProviderHistoryEntry"
+    },
+    {
+      "path": "backend/internal/service/cache_provider_trace.go",
+      "value": "func (s *GatewayService) BeginProviderCacheTrace("
+    },
+    {
+      "path": "backend/internal/service/cache_provider_trace.go",
+      "value": "func (s *GatewayService) BindProviderCacheTraceSession("
+    },
+    {
+      "path": "backend/internal/service/cache_provider_trace.go",
+      "value": "func ProviderCacheTraceSessionDigest("
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "h.gatewayService.BeginProviderCacheTrace(c, platform, \"messages\", body, parsedReq)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
+      "value": "h.gatewayService.BeginProviderCacheTrace(c, groupPlatform, \"chat\", body, parsedReq)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "h.gatewayService.BeginProviderCacheTrace(c, effectiveAPIKeyPlatform(c, apiKey), \"responses\", body, parsedReq)"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "providerTraceEligible := shouldTraceGeminiProviderAction(action)"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "h.gatewayService.BindProviderCacheTraceSession(c, sessionHash, traceSource)"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "ProvideGatewayServiceWithCacheTrace"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "ProvideGeminiMessagesCompatServiceWithCacheTrace"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "func shouldTraceGeminiProviderAction(action string) bool"
+    },
+    {
+      "path": "backend/internal/service/cache_provider_settlement.go",
+      "value": "func (s *OpenAIGatewayService) settleProviderCacheTrace("
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "value": "s.providerTraceEngine.settleProviderCacheTrace(providerTraceResult, providerDelivery, true)"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "noteProviderCacheTraceOwnerSkip(ctx, \"busy_wait_full\")"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "noteProviderCacheTraceOwnerSkip(ctx, \"model_unsupported\")"
+    },
+    {
+      "path": "backend/internal/service/cache_trace.go",
+      "value": "func (s *OpenAIGatewayService) cacheProviderTraceAnchorParts("
+    },
+    {
+      "path": "backend/internal/service/cache_provider_scope_test.go",
+      "value": "func TestCacheProviderGeminiAnchorUsesParts("
+    },
+    {
+      "path": "backend/internal/handler/cache_provider_trace_handler_test.go",
+      "value": "func TestShouldTraceGeminiProviderAction("
+    },
+    {
+      "path": "backend/internal/service/bedrock_stream.go",
+      "value": "observeProviderCacheTrace(c, sseData)"
     }
   ],
   "forbidden_module_paths": [

@@ -996,6 +996,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			}
 		}
 
+		if providerCacheTraceFromGin(c) != nil {
+			observeProviderCacheTraceMap(c, event)
+		}
 		usagePatch := s.extractSSEUsagePatch(event)
 		if anthropicStreamEventIsTerminal(eventName, dataLine) {
 			sawTerminalEvent = true

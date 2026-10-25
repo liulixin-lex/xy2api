@@ -1,15 +1,47 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
+
+func TestCacheProviderSessionGeminiSources(t *testing.T) {
+	for _, source := range []string{"gemini_cli", "gemini_digest", "cacheable_content", "message_content_fallback", "metadata_user_id", "anchor_v2"} {
+		t.Run(source, func(t *testing.T) {
+			cfg := &config.Config{JWT: config.JWTConfig{Secret: "synthetic-provider-secret"}}
+			cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
+			engine := &OpenAIGatewayService{cfg: cfg}
+			engine.cachePolicies = NewCachePolicyService(nil, cfg, WithProviderCacheTrace())
+			traceTestSetPolicy(engine, map[string]any{"enabled": true, "platforms": []string{PlatformGemini}})
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			group := int64(101)
+			c.Set("api_key", &APIKey{ID: 11, GroupID: &group, Group: &Group{ID: group, Platform: PlatformGemini}})
+			gateway := &GatewayService{providerTraceEngine: engine}
+			gateway.BeginProviderCacheTrace(c, PlatformGemini, "messages", nil, nil)
+			gateway.BindProviderCacheTraceSession(c, "synthetic-session", source)
+			trace := cacheTraceFromGin(c)
+			require.NotNil(t, trace)
+			want := source
+			if source == "metadata_user_id" || source == "anchor_v2" {
+				want = "unknown" // anchor_v2 belongs to the later T2.2 build.
+			}
+			require.Equal(t, want, trace.data.IDSource)
+			require.Equal(t, engine.cacheProviderSessionScope(PlatformGemini, 11, group, "synthetic-session").digest, ProviderCacheTraceSessionDigest(c.Request.Context()))
+		})
+	}
+}
 
 func TestCacheProviderSessionTenantAndServingScope(t *testing.T) {
 	s := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "synthetic-provider-secret"}}}
@@ -93,5 +125,59 @@ func TestCacheProviderSessionContractVectors(t *testing.T) {
 		scope := s.cacheProviderSessionScope(v.Platform, v.APIKeyID, v.ServingGroupID, v.LocalSessionHash)
 		require.NotEqual(t, v.Claimed, scope.digest, "unscoped HMAC vector must be rejected")
 		require.Contains(t, history.entries, scope, "the scoped key matches its positive vector")
+	}
+}
+
+func TestCacheProviderGeminiAnchorUsesParts(t *testing.T) {
+	s := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "synthetic-provider-secret"}}}
+	first := []byte(`{"systemInstruction":{"parts":[{"text":"system"}]},"contents":[{"role":"user","parts":[{"text":"alpha"}]}]}`)
+	second := []byte(`{"systemInstruction":{"parts":[{"text":"system"}]},"contents":[{"role":"user","parts":[{"text":"beta"}]}]}`)
+	anchor := func(body []byte) string {
+		return s.cacheProviderTraceAnchorParts(11, gjson.GetBytes(body, "systemInstruction"), gjson.GetBytes(body, "contents"), PlatformGemini)
+	}
+	require.Regexp(t, `^[0-9a-f]{16}$`, anchor(first))
+	require.NotEqual(t, anchor(first), anchor(second), "Gemini user parts must contribute to the conversation anchor")
+
+	anthropic := []byte(`{"system":"system","messages":[{"role":"user","content":[{"type":"text","text":"alpha"}]}]}`)
+	legacy := s.cacheTraceAnchorParts(11, gjson.GetBytes(anthropic, "system"), gjson.GetBytes(anthropic, "messages"))
+	provider := s.cacheProviderTraceAnchorParts(11, gjson.GetBytes(anthropic, "system"), gjson.GetBytes(anthropic, "messages"), PlatformAnthropic)
+	require.Equal(t, legacy, provider, "Anthropic retains the existing content-based anchor")
+}
+
+func TestCacheProviderOwnerSkipUsesExistingDecisionOnly(t *testing.T) {
+	trace := &cacheTrace{data: cacheTraceData{Platform: PlatformAnthropic, RouteReason: "sticky_new"}}
+	ctx := context.WithValue(context.Background(), cacheTraceKey{}, trace)
+	noteProviderCacheTraceOwnerSkip(ctx, "busy_wait_full")
+	trace.mu.Lock()
+	require.Equal(t, "busy_wait_full", trace.data.Provider.OwnerSkip)
+	require.Equal(t, "non_fault_rebind", trace.data.RouteReason)
+	trace.mu.Unlock()
+
+	noteProviderCacheTraceOwnerSkip(ctx, "model_unsupported")
+	trace.mu.Lock()
+	require.Equal(t, "model_unsupported", trace.data.Provider.OwnerSkip)
+	require.Equal(t, "non_fault_rebind", trace.data.RouteReason, "model incompatibility does not become a non-fault rebind")
+	trace.mu.Unlock()
+
+	noteProviderCacheTraceOwnerSkip(ctx, "not-a-contract-reason")
+	trace.mu.Lock()
+	require.Equal(t, "model_unsupported", trace.data.Provider.OwnerSkip)
+	trace.mu.Unlock()
+}
+
+func TestCacheProviderSessionIngressAnchorsAcrossTranslations(t *testing.T) {
+	s := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "synthetic-provider-secret"}}}
+	for _, fixture := range []struct{ protocol, first, second string }{
+		{"messages", `{"system":"system","messages":[{"role":"user","content":"alpha"}]}`, `{"system":"system","messages":[{"role":"user","content":"beta"}]}`},
+		{"chat", `{"messages":[{"role":"system","content":"system"},{"role":"user","content":"alpha"}]}`, `{"messages":[{"role":"system","content":"system"},{"role":"user","content":"beta"}]}`},
+		{"responses", `{"instructions":"system","input":[{"role":"user","content":"alpha"}]}`, `{"instructions":"system","input":[{"role":"user","content":"beta"}]}`},
+		{"gemini", `{"systemInstruction":{"parts":[{"text":"system"}]},"contents":[{"role":"user","parts":[{"text":"alpha"}]}]}`, `{"systemInstruction":{"parts":[{"text":"system"}]},"contents":[{"role":"user","parts":[{"text":"beta"}]}]}`},
+	} {
+		t.Run(fixture.protocol, func(t *testing.T) {
+			first := s.cacheProviderTraceIngressAnchor(11, parseRawJSONView([]byte(fixture.first)), fixture.protocol)
+			second := s.cacheProviderTraceIngressAnchor(11, parseRawJSONView([]byte(fixture.second)), fixture.protocol)
+			require.Regexp(t, `^[0-9a-f]{16}$`, first)
+			require.NotEqual(t, first, second, "first user content must affect the anchor through protocol translation")
+		})
 	}
 }

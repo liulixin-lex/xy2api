@@ -26,6 +26,10 @@ type cacheTraceKey struct{}
 // Only the live request keeps the immutable ingress body; snapshots keep an
 // atomic async result handle, never bodies, headers, or a Gin context.
 type cacheTrace struct {
+	providerKey            cacheProviderSessionKey
+	providerSampled        bool
+	providerLocalSession   string
+	providerHost           string
 	policy                 *CachePolicySnapshot
 	mu                     sync.Mutex
 	data                   cacheTraceData
@@ -47,6 +51,8 @@ type cacheTrace struct {
 }
 
 type cacheTraceData struct {
+	Platform                                                            string
+	Provider                                                            cacheProviderFields
 	L01Arm, L01Skip                                                     string
 	L01Applied                                                          bool
 	L01PolicyRevision                                                   int64
@@ -155,6 +161,18 @@ func (s *OpenAIGatewayService) cacheTraceAnchorForKey(apiKeyID int64, root gjson
 }
 
 func (s *OpenAIGatewayService) cacheTraceAnchorParts(apiKeyID int64, instructions, items gjson.Result) string {
+	return s.cacheTraceAnchorPartsWithContent(apiKeyID, instructions, items, "content")
+}
+
+func (s *OpenAIGatewayService) cacheProviderTraceAnchorParts(apiKeyID int64, instructions, items gjson.Result, platform string) string {
+	contentField := "content"
+	if platform == PlatformGemini {
+		contentField = "parts"
+	}
+	return s.cacheTraceAnchorPartsWithContent(apiKeyID, instructions, items, contentField)
+}
+
+func (s *OpenAIGatewayService) cacheTraceAnchorPartsWithContent(apiKeyID int64, instructions, items gjson.Result, contentField string) string {
 	h := hmac.New(sha256.New, []byte(s.cfg.JWT.Secret))
 	_, _ = io.WriteString(h, "cache-trace-anchor-v1\x00"+strconv.FormatInt(apiKeyID, 10))
 	var size [8]byte
@@ -176,7 +194,7 @@ func (s *OpenAIGatewayService) cacheTraceAnchorParts(apiKeyID int64, instruction
 			}
 			leading = false
 			if role == "user" {
-				part(item.Get("content").Raw)
+				part(item.Get(contentField).Raw)
 				return false
 			}
 			return true
@@ -591,6 +609,15 @@ func (t *cacheTrace) applyCacheTraceComputed() {
 		return
 	}
 	t.data.ConvAnchor = r.anchor
+	if t.data.Platform != "" {
+		t.data.Prefix = r.prefix
+		t.chain = r.chain
+		dropped, skip := t.data.Provider.ThinkingDropped, t.data.Provider.OwnerSkip
+		t.data.Provider = r.provider
+		t.data.Provider.ThinkingDropped = dropped
+		t.data.Provider.OwnerSkip = skip
+		return
+	}
 	t.data.PCKClassIn = r.pckIn
 	t.data.IDSource = r.idSource
 	t.data.ThreadPresent = t.data.ThreadPresent || r.thread

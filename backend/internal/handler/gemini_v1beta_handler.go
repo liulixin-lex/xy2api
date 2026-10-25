@@ -406,7 +406,12 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 
 	// 3) select account (sticky session based on request body)
 	// 优先使用 Gemini CLI 的会话标识（privileged-user-id + tmp 目录哈希）
+	providerTraceEligible := shouldTraceGeminiProviderAction(action)
+	if providerTraceEligible {
+		h.gatewayService.BeginProviderCacheTrace(c, service.PlatformGemini, "gemini", body, nil)
+	}
 	sessionHash := extractGeminiCLISessionHash(c, body)
+	traceSource := "gemini_cli"
 	if sessionHash == "" {
 		// Fallback: 使用通用的会话哈希生成逻辑（适用于其他客户端）
 		parsedReq, _ := service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformGemini)
@@ -418,6 +423,10 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			}
 		}
 		sessionHash = h.gatewayService.GenerateSessionHash(parsedReq)
+		traceSource = "gemini_digest"
+	}
+	if providerTraceEligible {
+		h.gatewayService.BindProviderCacheTraceSession(c, sessionHash, traceSource)
 	}
 	sessionKey := sessionHash
 	if sessionHash != "" {
@@ -780,6 +789,10 @@ func parseGeminiModelAction(rest string) (model string, action string, err error
 	}
 
 	return "", "", &pathParseError{"invalid model action path"}
+}
+
+func shouldTraceGeminiProviderAction(action string) bool {
+	return action == "generateContent" || action == "streamGenerateContent"
 }
 
 func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError) {

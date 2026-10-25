@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -64,8 +65,45 @@ func m2bBillingGolden(t *testing.T, usage ClaudeUsage, model string, account *Ac
 	return map[string]any{"input": u.InputTokens, "output": u.OutputTokens, "create": u.CacheCreationTokens, "read": u.CacheReadTokens, "input_cost": u.InputCost, "output_cost": u.OutputCost, "create_cost": u.CacheCreationCost, "read_cost": u.CacheReadCost, "total_cost": u.TotalCost, "actual_cost": u.ActualCost}
 }
 
-func m2bRunProviderWire(t *testing.T, route string, stream bool) m2bWireGolden {
+func m2bProviderTraceEngine(cfg *config.Config, platform string, enabled bool) *OpenAIGatewayService {
+	cfg.JWT.Secret = "m2b-provider-trace-test-secret"
+	cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
+	engine := &OpenAIGatewayService{cfg: cfg}
+	engine.cachePolicies = NewCachePolicyService(nil, cfg, WithProviderCacheTrace())
+	traceTestSetPolicy(engine, map[string]any{
+		"enabled": enabled, "platforms": []string{platform}, "sample_percent": 100, "chain_percent": 100,
+	})
+	engine.cacheCounters = NewCacheTraceCounters()
+	return engine
+}
+
+func m2bAwaitProviderTrace(t *testing.T, engine *OpenAIGatewayService, result *ForwardResult) {
 	t.Helper()
+	trace := result.providerTrace
+	require.NotNil(t, trace)
+	if trace.async != nil {
+		require.Eventually(t, func() bool { return trace.async.result.Load() != nil }, 5*time.Second, time.Millisecond)
+		trace.mu.Lock()
+		trace.applyCacheTraceComputed()
+		trace.mu.Unlock()
+	}
+	t3SettlementWorkerDrained(t, engine)
+}
+
+type m2bProviderTraceOptions struct {
+	enabled           bool
+	policyOff         bool
+	forceCacheBilling bool
+	billingErr        error
+}
+
+func m2bRunProviderWire(t *testing.T, route string, stream bool, traceOptions ...m2bProviderTraceOptions) m2bWireGolden {
+	t.Helper()
+	var traceOptionsValue m2bProviderTraceOptions
+	if len(traceOptions) > 0 {
+		traceOptionsValue = traceOptions[0]
+	}
+	traceEnabled := traceOptionsValue.enabled
 	gin.SetMode(gin.TestMode)
 	ctx := context.Background()
 	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
@@ -91,6 +129,22 @@ func m2bRunProviderWire(t *testing.T, route string, stream bool) m2bWireGolden {
 	upstream := &anthropicHTTPUpstreamRecorder{resp: m2bClaudeResponse(stream || route == "chat" || route == "responses")}
 	svc := newForwardPartialUsageServiceForTest(upstream)
 	svc.cfg = cfg
+	var traceEngine *OpenAIGatewayService
+	var traceLogs *bytes.Buffer
+	if traceEnabled {
+		platform := PlatformAnthropic
+		if strings.HasPrefix(route, "gemini_") {
+			platform = PlatformGemini
+		}
+		traceEngine = m2bProviderTraceEngine(cfg, platform, !traceOptionsValue.policyOff)
+		svc.providerTraceEngine = traceEngine
+		traceLogs = t3SettlementCapture(t)
+	}
+	beginTrace := func(platform, protocol, source string, parsed *ParsedRequest) {
+		gateway := &GatewayService{providerTraceEngine: traceEngine}
+		gateway.BeginProviderCacheTrace(c, platform, protocol, body, parsed)
+		gateway.BindProviderCacheTraceSession(c, "m2b-provider-session", source)
+	}
 	var req *http.Request
 	var result *ForwardResult
 	var err error
@@ -102,6 +156,16 @@ func m2bRunProviderWire(t *testing.T, route string, stream bool) m2bWireGolden {
 		}
 		parsed, parseErr := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
 		require.NoError(t, parseErr)
+		if traceEngine != nil {
+			protocol := "messages"
+			switch route {
+			case "chat":
+				protocol = "chat"
+			case "responses":
+				protocol = "responses"
+			}
+			beginTrace(PlatformAnthropic, protocol, "cacheable_content", parsed)
+		}
 		switch route {
 		case "chat":
 			result, err = svc.ForwardAsChatCompletions(ctx, c, account, body, parsed)
@@ -160,6 +224,8 @@ func m2bRunProviderWire(t *testing.T, route string, stream bool) m2bWireGolden {
 		}
 	case "gemini_compat", "gemini_native":
 		account = &Account{ID: 703, Platform: PlatformGemini, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "fixture-key"}}
+		geminiGroupID := int64(401)
+		c.Set("api_key", &APIKey{ID: 501, GroupID: &geminiGroupID, Group: &Group{ID: 401, Platform: PlatformGemini}})
 		response := "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"fixture reply\"}],\"role\":\"model\"},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1046,\"cachedContentTokenCount\":1024,\"candidatesTokenCount\":9,\"totalTokenCount\":1055}}"
 		contentType := "application/json"
 		if stream {
@@ -168,8 +234,14 @@ func m2bRunProviderWire(t *testing.T, route string, stream bool) m2bWireGolden {
 		}
 		upstream.resp = &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}, "X-Request-Id": {"fixture-gemini"}}, Body: io.NopCloser(strings.NewReader(response))}
 		gemini := &GeminiMessagesCompatService{cfg: cfg, httpUpstream: upstream}
+		if traceEngine != nil {
+			gemini.providerTraceEngine = traceEngine
+		}
 		if route == "gemini_compat" {
 			body = []byte(fmt.Sprintf("{\"model\":\"gemini-2.5-flash\",\"stream\":%t,\"max_tokens\":64,\"system\":\"fixture system\",\"messages\":[{\"role\":\"user\",\"content\":\"fixture user\"}]}", stream))
+			if traceEngine != nil {
+				beginTrace(PlatformGemini, "messages", "gemini_digest", nil)
+			}
 			result, err = gemini.Forward(ctx, c, account, body)
 		} else {
 			action := "generateContent"
@@ -178,6 +250,9 @@ func m2bRunProviderWire(t *testing.T, route string, stream bool) m2bWireGolden {
 			}
 			body = []byte("{\"systemInstruction\":{\"parts\":[{\"text\":\"fixture system\"}]},\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"fixture user\"}]}]}")
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:"+action, bytes.NewReader(body))
+			if traceEngine != nil {
+				beginTrace(PlatformGemini, "gemini", "gemini_digest", nil)
+			}
 			result, err = gemini.ForwardNative(ctx, c, account, "gemini-2.5-flash", action, stream, body)
 		}
 		require.NoError(t, err)
@@ -186,6 +261,60 @@ func m2bRunProviderWire(t *testing.T, route string, stream bool) m2bWireGolden {
 		req = upstream.lastReq
 	default:
 		t.Fatalf("unknown route %s", route)
+	}
+	if traceEngine != nil && result != nil {
+		trace := result.providerTrace
+		if traceOptionsValue.policyOff {
+			require.Nil(t, trace, "closed runtime policy leaves no provider trace snapshot")
+			require.Nil(t, traceEngine.cacheTraceWorkers, "closed runtime policy does not allocate a provider body worker")
+			require.Empty(t, t3SettlementEvents(t, traceLogs, "cache_trace"))
+		} else {
+			require.NotNil(t, trace, "enabled provider forwarding attaches a settlement snapshot")
+			wantPlatform, wantFields := PlatformAnthropic, uint8(7)
+			if strings.HasPrefix(route, "gemini_") {
+				wantPlatform, wantFields = PlatformGemini, 8
+			}
+			require.Equal(t, wantPlatform, trace.data.Platform)
+			require.Equal(t, wantFields, trace.data.UsageFields)
+			require.True(t, trace.data.UsagePromptPresent)
+			require.Equal(t, wantPlatform, trace.providerKey.platform)
+			wantSession := traceEngine.cacheProviderSessionScope(wantPlatform, 501, 401, "m2b-provider-session").digest
+			require.Equal(t, wantSession, trace.data.SessionDigest)
+			require.Equal(t, wantSession, ProviderCacheTraceSessionDigest(c.Request.Context()))
+			m2bAwaitProviderTrace(t, traceEngine, result)
+
+			rows := &openAIRecordUsageLogRepoStub{inserted: true}
+			billing := &openAIRecordUsageBillingRepoStub{err: traceOptionsValue.billingErr}
+			gateway := newGatewayRecordUsageServiceWithBillingRepoForTest(rows, billing, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+			gateway.providerTraceEngine = traceEngine
+			apiKeyValue, ok := c.Get("api_key")
+			require.True(t, ok)
+			apiKey := apiKeyValue.(*APIKey)
+			recordErr := gateway.RecordUsage(context.Background(), &RecordUsageInput{
+				Result: result, APIKey: apiKey, User: &User{ID: 601}, Account: account,
+				ForceCacheBilling: traceOptionsValue.forceCacheBilling,
+			})
+			events := t3SettlementEvents(t, traceLogs, "cache_trace")
+			if traceOptionsValue.billingErr != nil {
+				require.ErrorIs(t, recordErr, traceOptionsValue.billingErr)
+				require.Empty(t, events, "failed billing closes timing without emitting a provider event")
+			} else {
+				require.NoError(t, recordErr)
+				require.Len(t, events, 1)
+				event := events[0]
+				require.Equal(t, wantPlatform, event["platform"])
+				require.EqualValues(t, wantFields, event["usage_fields"])
+				require.EqualValues(t, rows.lastLog.InputTokens+rows.lastLog.CacheReadTokens+rows.lastLog.CacheCreationTokens, event["P"])
+				require.EqualValues(t, rows.lastLog.CacheReadTokens, event["read"])
+				if output := os.Getenv("M2B_PROVIDER_TRACE_EVENTS"); output != "" {
+					require.NoError(t, os.MkdirAll(output, 0700))
+					encoded, err := json.Marshal(event)
+					require.NoError(t, err)
+					name := fmt.Sprintf("%s-stream-%t.json", route, stream)
+					require.NoError(t, os.WriteFile(output+"/"+name, encoded, 0600))
+				}
+			}
+		}
 	}
 	require.NotNil(t, req)
 	payload, err := io.ReadAll(req.Body)
@@ -196,6 +325,67 @@ func m2bRunProviderWire(t *testing.T, route string, stream bool) m2bWireGolden {
 		model = "gemini-2.5-flash"
 	}
 	return m2bWireGolden{Method: req.Method, URL: req.URL.String(), Headers: req.Header.Clone(), Body: string(payload), Usage: usage, Billing: m2bBillingGolden(t, usage, model, account)}
+}
+
+func TestCacheProviderTracePreservesWireAndBillingGoldens(t *testing.T) {
+	golden, err := os.ReadFile("testdata/cache_provider_wire_main.json")
+	require.NoError(t, err)
+	var want map[string]m2bWireGolden
+	require.NoError(t, json.Unmarshal(golden, &want))
+	for _, route := range []string{"native", "passthrough", "chat", "responses", "gemini_compat", "gemini_native"} {
+		for _, stream := range []bool{false, true} {
+			name := fmt.Sprintf("%s/stream=%t", route, stream)
+			t.Run(name, func(t *testing.T) {
+				got := m2bRunProviderWire(t, route, stream, m2bProviderTraceOptions{enabled: true})
+				require.Equal(t, want[name], got, "trace-enabled provider path must preserve the main wire and billing golden")
+			})
+		}
+	}
+}
+
+func TestCacheProviderTraceClosedPolicyPreservesGoldenWithZeroWork(t *testing.T) {
+	golden, err := os.ReadFile("testdata/cache_provider_wire_main.json")
+	require.NoError(t, err)
+	var want map[string]m2bWireGolden
+	require.NoError(t, json.Unmarshal(golden, &want))
+	for _, route := range []string{"native", "gemini_native"} {
+		for _, stream := range []bool{false, true} {
+			name := fmt.Sprintf("%s/stream=%t", route, stream)
+			t.Run(name, func(t *testing.T) {
+				got := m2bRunProviderWire(t, route, stream, m2bProviderTraceOptions{enabled: true, policyOff: true})
+				require.Equal(t, want[name], got)
+			})
+		}
+	}
+}
+
+func TestCacheProviderBillingFailureAndFinalUsageSettlement(t *testing.T) {
+	goldenRaw, err := os.ReadFile("testdata/cache_provider_wire_main.json")
+	require.NoError(t, err)
+	var golden map[string]m2bWireGolden
+	require.NoError(t, json.Unmarshal(goldenRaw, &golden))
+
+	t.Run("finalized usage after force-cache", func(t *testing.T) {
+		got := m2bRunProviderWire(t, "native", false, m2bProviderTraceOptions{enabled: true, forceCacheBilling: true})
+		want := golden["native/stream=false"]
+		require.Equal(t, want.Method, got.Method)
+		require.Equal(t, want.URL, got.URL)
+		require.Equal(t, want.Headers, got.Headers)
+		require.Equal(t, want.Body, got.Body)
+		require.Equal(t, want.Usage, got.Usage)
+		require.Equal(t, want.Billing, got.Billing)
+	})
+	t.Run("billing failure emits no event", func(t *testing.T) {
+		billingErr := errors.New("synthetic billing failure")
+		got := m2bRunProviderWire(t, "native", false, m2bProviderTraceOptions{enabled: true, billingErr: billingErr})
+		want := golden["native/stream=false"]
+		require.Equal(t, want.Method, got.Method)
+		require.Equal(t, want.URL, got.URL)
+		require.Equal(t, want.Headers, got.Headers)
+		require.Equal(t, want.Body, got.Body)
+		require.Equal(t, want.Usage, got.Usage)
+		require.Equal(t, want.Billing, got.Billing)
+	})
 }
 
 func TestCacheProviderWireAndBillingGolden(t *testing.T) {

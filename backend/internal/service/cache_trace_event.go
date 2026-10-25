@@ -35,7 +35,7 @@ func emitCacheTraceRejected(d cacheTraceData) {
 		d.UAFamily = "other"
 	}
 	slog.LogAttrs(context.Background(), slog.LevelInfo, "cache_trace",
-		slog.Int("v", 1), slog.String("platform", "openai"),
+		slog.Int("v", 1), slog.String("platform", cacheTraceEventPlatform(d.Platform)),
 		slog.String("loss_class", "n/a_sampled_out"), slog.String("na_reason", d.NAReason),
 		slog.String("request_id_hmac", d.RequestIDHMAC), slog.String("session_digest", d.SessionDigest),
 		slog.Int64("account_id", d.AccountID), slog.Int64("group_id", d.GroupID),
@@ -76,6 +76,10 @@ func (t *cacheTrace) emitCacheTrace() {
 	if d.ConvAnchor == "" && !d.Prefix.Sampled {
 		d.ConvAnchor = "unknown"
 	}
+	if d.Platform != "" {
+		emitProviderCacheTrace(d)
+		return
+	}
 	// L01 is a M3 extension of full events only. Old/manual snapshots receive
 	// fixed defaults without consulting bodies, headers or mutable settings.
 	policy := t.policy.UpstreamIdentity()
@@ -106,7 +110,7 @@ func (t *cacheTrace) emitCacheTrace() {
 	attrs = append(attrs,
 		slog.Int("v", 1),
 		slog.String("request_id_hmac", d.RequestIDHMAC), slog.String("session_digest", d.SessionDigest),
-		slog.String("platform", "openai"), slog.String("protocol_in", d.ProtocolIn), slog.String("protocol_out", d.ProtocolOut),
+		slog.String("platform", cacheTraceEventPlatform(d.Platform)), slog.String("protocol_in", d.ProtocolIn), slog.String("protocol_out", d.ProtocolOut),
 		slog.Int64("group_id", d.GroupID), slog.Int64("account_id", d.AccountID),
 		slog.String("conv_anchor", d.ConvAnchor), slog.String("pck_class_in", d.PCKClassIn), slog.String("pck_class_out", d.PCKClassOut),
 		slog.Bool("pck_out_is_uuid", d.PCKOutIsUUID), slog.Int("sess_hdr_in", int(d.SessHdrIn)), slog.Int("sess_hdr_out", int(d.SessHdrOut)),
