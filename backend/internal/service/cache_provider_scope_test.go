@@ -34,9 +34,10 @@ func TestCacheProviderSessionGeminiSources(t *testing.T) {
 			trace := cacheTraceFromGin(c)
 			require.NotNil(t, trace)
 			want := source
-			if source == "metadata_user_id" || source == "anchor_v2" {
-				want = "unknown" // anchor_v2 belongs to the later T2.2 build.
+			if source == "metadata_user_id" {
+				want = "unknown"
 			}
+			// anchor_v2 is a Gemini provider source once T2.2 is in the build.
 			require.Equal(t, want, trace.data.IDSource)
 			require.Equal(t, engine.cacheProviderSessionScope(PlatformGemini, 11, group, "synthetic-session").digest, ProviderCacheTraceSessionDigest(c.Request.Context()))
 		})
