@@ -262,12 +262,17 @@ export default {
       fallbackTag: '回退组',
       servingScope: '按实际服务的分组生效',
     },
+    accountPicker: {
+      placeholder: '选择账号，可多选',
+      empty: '没有可选账号',
+    },
     ids: {
       placeholder: '输入账号 ID 后回车',
       add: '添加',
       remove: '移除 {id}',
       invalid: '只能输入正整数 ID',
       emptyMeansAll: '为空表示全部合格账号',
+      manual: '手动输入账号 ID',
       item: '账号 #{id}',
     },
     rules: {

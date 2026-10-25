@@ -262,12 +262,17 @@ export default {
       fallbackTag: 'Fallback',
       servingScope: 'Applies by the group that actually serves the request',
     },
+    accountPicker: {
+      placeholder: 'Select accounts',
+      empty: 'No accounts available',
+    },
     ids: {
       placeholder: 'Type an account ID and press Enter',
       add: 'Add',
       remove: 'Remove {id}',
       invalid: 'Only positive integer IDs are allowed',
       emptyMeansAll: 'Empty means every eligible account',
+      manual: 'Enter account IDs',
       item: 'Account #{id}',
     },
     rules: {

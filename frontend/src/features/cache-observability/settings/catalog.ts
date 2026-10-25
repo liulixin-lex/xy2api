@@ -32,7 +32,7 @@ export function controlIdFor(key: string, path: string): string {
   return `cache-policy-${`${key}-${path}`.replace(/[^a-z0-9]+/gi, '-')}`
 }
 
-export function fieldCopyKey(key: string, path: string, part: 'label' | 'description' | 'risk'): string {
+export function fieldCopyKey(key: string, path: string, part: 'label' | 'description' | 'risk' | 'empty'): string {
   return `admin.cacheSettings.fields.${key}.${fieldSlug(path)}.${part}`
 }
 
