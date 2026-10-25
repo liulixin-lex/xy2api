@@ -674,6 +674,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 							// xy2api resilience (PM instruction 5, as DELTA-P1-2): after
 							// heartbeats committed 200 the rule's error ends the stream
 							// as the Responses terminal event instead of a bare JSON body.
+							// Rule errors bypass the native SSE restoration writer.
+							if openAIUpstreamIdentityResponseApplied(c, account) {
+								errMsg = restoreOpenAIUpstreamIdentityErrorMessage(c, errMsg)
+							}
 							writeOpenAIStreamRuleError(ctx, c, status, errType, errMsg)
 							streamEarlyErr = fmt.Errorf("upstream response failed: passthrough rule matched message=%s", errMsg)
 							return

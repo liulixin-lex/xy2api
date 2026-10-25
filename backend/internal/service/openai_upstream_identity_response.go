@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -267,6 +268,16 @@ func restoreOpenAIUpstreamIdentityLiteralForClient(c *gin.Context, body []byte, 
 	return restored
 }
 
+// Rule writers receive an already-decoded message, not a JSON document. Remove
+// U as text so quotes around an embedded echo retain the baseline message shape.
+func restoreOpenAIUpstreamIdentityErrorMessage(c *gin.Context, message string) string {
+	restored := strings.ReplaceAll(message, openAIUpstreamIdentityUUID(c), "")
+	if restored != message {
+		recordOpenAIUpstreamIdentityRestoreFallback(c, "error_body")
+	}
+	return restored
+}
+
 // This wrapper never returns an error to forwarding or resilience. Structural
 // parsing is optional: invalid objects and unknown envelopes use known-U bytes.
 func restoreOpenAIUpstreamIdentityForClient(c *gin.Context, body []byte, sse bool) []byte {
@@ -396,4 +407,53 @@ func (b *openAIUpstreamIdentitySSEBuffer) Finish() ([]byte, error) {
 	b.oversize = false
 	b.literalEscape = false
 	return restored, nil
+}
+
+// Restore before the Responses-to-Chat converters consume any event. This is
+// attempt-local and installed only after a real L-01 write. Buffering and literal
+// fallback are shared with the native writer, including EOF and oversize events;
+// only errors from the original upstream reader reach the compatibility parser.
+type openAIUpstreamIdentitySSEBody struct {
+	io.ReadCloser
+	buffer  openAIUpstreamIdentitySSEBuffer
+	ready   []byte
+	readErr error
+	scratch [4096]byte
+}
+
+func (s *OpenAIGatewayService) restoreOpenAIUpstreamIdentityChatBody(c *gin.Context, body io.ReadCloser) *openAIUpstreamIdentitySSEBody {
+	limit := defaultMaxLineSize
+	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
+		limit = s.cfg.Gateway.MaxLineSize
+	}
+	return &openAIUpstreamIdentitySSEBody{ReadCloser: body, buffer: openAIUpstreamIdentitySSEBuffer{
+		limit: limit, uuid: openAIUpstreamIdentityUUID(c), context: c,
+	}}
+}
+
+func (b *openAIUpstreamIdentitySSEBody) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	for len(b.ready) == 0 && b.readErr == nil {
+		n, err := b.ReadCloser.Read(b.scratch[:])
+		if n > 0 {
+			b.ready, _ = b.buffer.Append(string(b.scratch[:n]))
+		}
+		if err != nil {
+			// Flush even on a non-EOF read error, then preserve that exact error.
+			tail, _ := b.buffer.Finish()
+			b.ready = append(b.ready, tail...)
+			b.readErr = err
+		}
+		if n == 0 && err == nil {
+			return 0, nil
+		}
+	}
+	if len(b.ready) > 0 {
+		n := copy(p, b.ready)
+		b.ready = b.ready[n:]
+		return n, nil
+	}
+	return 0, b.readErr
 }

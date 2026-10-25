@@ -516,6 +516,13 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		return s.handleChatCompletionsErrorResponse(resp, c, account, billingModel)
 	}
 
+	// All buffered/streaming Chat conversion and SSE error exits consume this
+	// restored body. Disabled attempts keep the original reader and allocation path.
+	if identityChatApplied {
+		restoredBody := s.restoreOpenAIUpstreamIdentityChatBody(c, resp.Body)
+		resp.Body = restoredBody
+	}
+
 	// 9. Handle normal response
 	var result *OpenAIForwardResult
 	var handleErr error

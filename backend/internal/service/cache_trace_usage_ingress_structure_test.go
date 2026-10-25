@@ -262,6 +262,14 @@ func assertCacheTraceUsageNoOtherHooks(t *testing.T, fn *ast.FuncDecl, parents m
 			require.NotNil(t, cacheTraceUsageEnabledAncestor(call, parents), "%s: trace access outside enabled branch", fn.Name.Name)
 			continue
 		}
+		if name == "restoreOpenAIUpstreamIdentityErrorMessage" {
+			// The stream rule writer bypasses the normal native SSE buffer.
+			require.Equal(t, "handleStreamingResponseWithReasoning", fn.Name.Name)
+			require.Len(t, cacheTraceUsageASTCalls(fn.Body, name), 1)
+			require.NotNil(t, cacheTraceUsageL01AppliedAncestor(call, parents),
+				"%s: rule error restoration outside its applied gate", fn.Name.Name)
+			continue
+		}
 		if name == "restoreOpenAIUpstreamIdentityForClient" {
 			// M3.1 FX-L01-1: restoration records l01_restore_fallback in the trace,
 			// so it is sensitive. It runs only for an attempt that actually injected U:
