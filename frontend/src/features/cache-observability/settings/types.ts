@@ -42,7 +42,7 @@ export interface PolicyEffective {
   clipped_fields: string[]
 }
 
-/** Candidate of an `id_list` with `ref=account` (FE-Q3): only accounts the server deems eligible. */
+/** Candidate of an `id_list` with `ref=account` or `ref=group` (FE-Q3): only what the server deems eligible. */
 export interface IdOption {
   id: number
   name: string
@@ -60,6 +60,8 @@ export interface SchemaField {
   options?: (string | number | IdOption)[] | null
   ref?: string
   cap_source?: string
+  /** The behaviour behind the field is not in this build (m3m4 v1.2, X-B1): it cannot be switched on here. */
+  not_implemented_in_build?: boolean
 }
 
 export interface PolicyEntry {

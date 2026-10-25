@@ -1,0 +1,122 @@
+{
+  "_contract": [
+    "M4-4",
+    "C-7"
+  ],
+  "_note": "M4：routing 写入成功（嵌套对象中省略的子字段保持原值）。",
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/routing",
+    "body": {
+      "expected_rev": 0,
+      "spec": {
+        "keep_sticky_on_busy": {
+          "enabled": true,
+          "group_ids": [
+            31
+          ],
+          "rollout_percent": 20
+        }
+      },
+      "reason": "一个分组 20% 试运行",
+      "confirm": {
+        "checkbox": true,
+        "typed": "cache_routing_policy"
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "key": "routing",
+      "setting_key": "cache_routing_policy",
+      "available": true,
+      "risk": "highest",
+      "gated_by_master": true,
+      "stored": {
+        "rev": 1,
+        "updated_at": "2026-10-24T08:57:00Z",
+        "updated_by": {
+          "user_id": 2,
+          "email": "oncall@example.com"
+        },
+        "reason": "一个分组 20% 试运行",
+        "spec": {
+          "keep_sticky_on_busy": {
+            "enabled": true,
+            "group_ids": [
+              31
+            ],
+            "rollout_percent": 20
+          },
+          "affinity_mode": "score"
+        }
+      },
+      "loaded": {
+        "rev": 1,
+        "loaded_at": "2026-10-24T08:40:01Z"
+      },
+      "effective": {
+        "state": "on",
+        "active": true,
+        "blockers": [],
+        "warnings": [],
+        "clipped_fields": []
+      },
+      "defaults": {
+        "keep_sticky_on_busy": {
+          "enabled": false,
+          "group_ids": [],
+          "rollout_percent": 0
+        },
+        "affinity_mode": "score"
+      },
+      "schema": [
+        {
+          "field": "keep_sticky_on_busy.enabled",
+          "type": "bool"
+        },
+        {
+          "field": "keep_sticky_on_busy.group_ids",
+          "type": "id_list",
+          "ref": "group",
+          "options": [
+            {
+              "id": 31,
+              "name": "claude-pool-a",
+              "platform": "anthropic"
+            },
+            {
+              "id": 32,
+              "name": "claude-pool-b",
+              "platform": "anthropic"
+            },
+            {
+              "id": 77,
+              "name": "claude-standby",
+              "platform": "anthropic"
+            }
+          ]
+        },
+        {
+          "field": "keep_sticky_on_busy.rollout_percent",
+          "type": "int",
+          "min": 0,
+          "max": 100,
+          "unit": "percent"
+        },
+        {
+          "field": "affinity_mode",
+          "type": "enum",
+          "options": [
+            "score",
+            "prev_host",
+            "prev_host+quality"
+          ]
+        }
+      ]
+    }
+  }
+}

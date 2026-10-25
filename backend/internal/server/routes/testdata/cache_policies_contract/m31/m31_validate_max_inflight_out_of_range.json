@@ -1,0 +1,48 @@
+{
+  "_contract": [
+    "M3-3",
+    "M31"
+  ],
+  "_note": "M3.1：max_inflight_per_key 的范围是 1..16，超出时 out_of_range，limit 给出 min、max；出错的字段不进入 diff。",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/upstream_identity/validate",
+    "body": {
+      "expected_rev": 4,
+      "spec": {
+        "max_inflight_per_key": 32
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": false,
+      "errors": [
+        {
+          "field": "max_inflight_per_key",
+          "code": "out_of_range",
+          "limit": {
+            "min": 1,
+            "max": 16
+          }
+        }
+      ],
+      "warnings": [],
+      "diff": [],
+      "risk": "high",
+      "direction": "disable",
+      "confirm": {
+        "reason_required": false,
+        "checkbox_required": false,
+        "type_to_confirm": null
+      },
+      "current_rev": 4,
+      "rev_stale": false,
+      "effective_preview": null,
+      "affected": []
+    }
+  }
+}

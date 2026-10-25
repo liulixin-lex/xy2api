@@ -146,20 +146,24 @@ func WithCachePolicyClock(now func() time.Time) CachePolicyOption {
 }
 
 type CachePolicyService struct {
-	now                      func() time.Time
-	repo                     SettingRepository
-	store                    CachePolicyStore
-	accounts                 CachePolicyAccountLookup
-	caps                     CachePolicyCaps
-	kill, diagnostics, aware bool
-	rollout                  int
-	started                  time.Time
-	snapshot                 atomic.Pointer[CachePolicySnapshot]
-	mu                       sync.Mutex
-	cancel                   context.CancelFunc
-	wg                       sync.WaitGroup
-	listeners                []func(*CachePolicySnapshot)
-	northstarAvailable       bool
+	now                             func() time.Time
+	repo                            SettingRepository
+	store                           CachePolicyStore
+	accounts                        CachePolicyAccountLookup
+	groups                          CachePolicyGroupLookup
+	m4Available                     bool
+	m4Behaviors                     CacheM4BuildCapabilities
+	anthropicObservabilityAvailable bool
+	caps                            CachePolicyCaps
+	kill, diagnostics, aware        bool
+	rollout                         int
+	started                         time.Time
+	snapshot                        atomic.Pointer[CachePolicySnapshot]
+	mu                              sync.Mutex
+	cancel                          context.CancelFunc
+	wg                              sync.WaitGroup
+	listeners                       []func(*CachePolicySnapshot)
+	northstarAvailable              bool
 }
 
 func NewCachePolicyService(repo SettingRepository, cfg *config.Config, options ...CachePolicyOption) *CachePolicyService {
@@ -336,6 +340,9 @@ func policyIndex(key string) int {
 	return -1
 }
 func policyDefaults(index int) map[string]any {
+	if index == 4 || index == 5 {
+		return m4PolicyDefaults(index)
+	}
 	if index == 2 {
 		return northstarPolicyDefaults()
 	}
@@ -343,7 +350,7 @@ func policyDefaults(index int) map[string]any {
 		return map[string]any{"enabled": false}
 	}
 	if index == 3 {
-		return map[string]any{"mode": "off", "account_ids": []int64{}, "rollout_percent": 0, "chat_compat_uuid": false, "header_only_uuid": false, "forward_session_headers": "whitelist"}
+		return map[string]any{"mode": "off", "account_ids": []int64{}, "rollout_percent": 0, "chat_compat_uuid": false, "header_only_uuid": false, "forward_session_headers": "whitelist", "max_inflight_per_key": 2}
 	}
 	return map[string]any{"enabled": false, "sample_percent": 100, "chain_percent": 100, "byte_budget_mib": 64, "rate_mib_per_s": 32}
 }
@@ -357,8 +364,8 @@ func policyInt(v any) int {
 	return 0
 }
 
-func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config, accounts AccountRepository) *CachePolicyService {
-	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts))
+func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config, accounts AccountRepository, groups GroupRepository) *CachePolicyService {
+	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups))
 	s.Start()
 	return s
 }

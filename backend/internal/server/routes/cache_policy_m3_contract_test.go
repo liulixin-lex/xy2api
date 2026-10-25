@@ -86,16 +86,29 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 	hashes := map[string]string{}
 	require.NoError(t, json.Unmarshal(manifest, &hashes))
 	require.Len(t, hashes, 22)
-	names := make([]string, 0, len(hashes))
+	m31Root := "testdata/cache_policies_contract/m31"
+	m31Raw, err := os.ReadFile(filepath.Join(m31Root, "SHA256.json"))
+	require.NoError(t, err)
+	m31Hashes := map[string]string{}
+	require.NoError(t, json.Unmarshal(m31Raw, &m31Hashes))
+	names := make([]string, 0, len(hashes)+5)
 	for name := range hashes {
 		names = append(names, name)
 	}
+	names = append(names, "m31_list_all_accounts_unverified.json", "m31_validate_max_inflight_out_of_range.json", "m31_validate_max_inflight_raise.json", "m31_put_200_max_inflight.json", "m31_put_200_legacy_fill.json")
 	sort.Strings(names)
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
-			raw, err := os.ReadFile(filepath.Join(root, name))
+			path, wantHash := filepath.Join(root, name), hashes[name]
+			if digest, ok := m31Hashes["m31_"+name]; ok {
+				path, wantHash = filepath.Join(m31Root, "m31_"+name), digest
+			} else if digest, ok := m31Hashes[name]; ok {
+				path, wantHash = filepath.Join(m31Root, name), digest
+			}
+			raw, err := os.ReadFile(path)
 			require.NoError(t, err)
-			require.Equal(t, hashes[name], fmt.Sprintf("%x", sha256.Sum256(raw)))
+			require.Equal(t, wantHash, fmt.Sprintf("%x", sha256.Sum256(raw)))
+			isList := strings.HasPrefix(name, "m3_list_") || name == "m31_list_all_accounts_unverified.json"
 			var f cacheContract
 			require.NoError(t, json.Unmarshal(raw, &f))
 			expected := contractMap(t, f.Response)
@@ -105,7 +118,7 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 			audit := service.NewAuditLogService(auditRepo, nil)
 			accounts := &cacheM3FaultAccounts{
 				failOptions:   name == "m3_list_account_options_unavailable.json" || name == "m3_get_account_options_unavailable.json",
-				forbidQueries: name == "m3_put_disable_skip_account_options.json" || name == "m3_validate_disable_ids_unverified.json",
+				forbidQueries: name == "m3_put_disable_skip_account_options.json" || name == "m3_validate_disable_ids_unverified.json" || name == "m31_put_200_max_inflight.json",
 			}
 			cfg := &config.Config{}
 			cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
@@ -121,7 +134,7 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 				repo.rows[key] = string(b)
 			}
 			switch {
-			case strings.HasPrefix(name, "m3_list_"):
+			case isList:
 				b, err := json.Marshal(data)
 				require.NoError(t, err)
 				var list service.CachePolicyList
@@ -157,7 +170,7 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 				view.Stored.Rev--
 				view.Stored.Spec["mode"] = "uuid_fill"
 				seedPolicy(t, repo, view)
-			case strings.HasPrefix(name, "m3_validate_"):
+			case strings.HasPrefix(name, "m3_validate_") || strings.HasPrefix(name, "m31_validate_"):
 				rev := int64(data["current_rev"].(float64))
 				spec := map[string]any{"mode": "off", "account_ids": []int64{}, "rollout_percent": 0}
 				if rev > 0 {
@@ -173,6 +186,16 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 					}
 				}
 				putSetting("cache_upstream_identity_policy", rev, spec)
+			case name == "m31_put_200_legacy_fill.json":
+				var fixture struct {
+					Fixture struct {
+						Stored map[string]any `json:"stored_raw_spec"`
+					} `json:"_fixture"`
+				}
+				require.NoError(t, json.Unmarshal(raw, &fixture))
+				putSetting("cache_upstream_identity_policy", 3, fixture.Fixture.Stored)
+			case name == "m31_put_200_max_inflight.json":
+				putSetting("cache_upstream_identity_policy", 4, map[string]any{"mode": "uuid_fill", "account_ids": []int64{101, 102}, "rollout_percent": 50, "max_inflight_per_key": 2})
 			case strings.HasPrefix(name, "m3_put_"):
 				var request struct {
 					ExpectedRev int64 `json:"expected_rev"`
@@ -221,7 +244,7 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 			require.NoError(t, policies.Refresh(context.Background()))
 			router := cacheTestRouter(policies, audit, nil)
 			// Keep the product build-version field exact for list fixtures.
-			if strings.HasPrefix(name, "m3_list_") {
+			if isList {
 				router = cacheM3ContractRouter(policies, audit, version)
 			}
 			status, got := cacheCall(t, router, f.Request.Method, f.Request.Path, f.Request.Body)
@@ -234,7 +257,7 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 			if accounts.failOptions {
 				require.Equal(t, 1, accounts.listCalls)
 			}
-			if strings.HasPrefix(name, "m3_list_") {
+			if isList {
 				policies := got["data"].(map[string]any)["policies"].([]any)
 				require.Len(t, policies, 6)
 				require.Equal(t, "northstar", policies[2].(map[string]any)["key"])
@@ -243,6 +266,9 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 			normalizePolicyTimes(t, got)
 			normalizePolicyTimes(t, expected)
 			require.Equal(t, expected, got, "compare every field, including options and JSON-string metadata.errors")
+			event, err := json.Marshal(map[string]any{"fixture": path, "status": status, "response": got})
+			require.NoError(t, err)
+			t.Logf("M31_POLICY_CONTRACT_EVENT %s", event)
 		})
 	}
 }
@@ -265,7 +291,7 @@ func cacheM3ContractRouter(p *service.CachePolicyService, audit *service.AuditLo
 func TestCachePolicyM3EnablePutOptionsFailure(t *testing.T) {
 	// Keep the success fixture exact except for the two fields affected by
 	// optional candidate lookup failure. Commit, state and audit still succeed.
-	raw, err := os.ReadFile("testdata/cache_policies_contract/m3m4/m3_put_200.json")
+	raw, err := os.ReadFile("testdata/cache_policies_contract/m31/m31_m3_put_200.json")
 	require.NoError(t, err)
 	var f cacheContract
 	require.NoError(t, json.Unmarshal(raw, &f))

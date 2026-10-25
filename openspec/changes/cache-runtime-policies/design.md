@@ -53,3 +53,34 @@ null 形态依据保存的兼容 Responses 官方流示例及协议允许的空�
 ## M3 管理员账号选项
 
 管理员账号选项通过已注入仓储的分页能力查询，按静态协议资格过滤后取前 500 个，响应只含 ID、名称、平台。停用账号仍可配置；不以健康、冷却、分组并发或选号状态筛选。未实现分页能力的最小服务返回显式空数组。候选查询失败不影响策略读取或已提交的写入，部分候选丢弃，options返回空数组，effective.warnings末尾追加account_options_unavailable。关闭方向的validate与PUT跳过账号校验及候选查询；PUT带同一提示，validate不带。开启和混合方向仍校验账号，校验查询失败拒绝；账号查验失败时清空生效warnings，与其他invalid校验一致。PUT 的 `CACHE_POLICY_UNSUPPORTED` 与 validate 的 `unsupported_in_build` 保持既有映射，以原字节契约样例逐字段核对。
+
+## M4 T4.0 管理能力
+
+基于 M3 候选，仅开放 index4/5 的管理员策略读写，不接入请求或路由。生产构造注入只读分组仓储；组候选与校验均在管理员操作且发布锁之外。关闭方向完全不读组、不使用旧事实。嵌套对象按叶子点路径 diff；anchor/metadata 空范围表示关闭，busy/account 空范围表示全部；routing 开启与mixed要求输入完整键名。仅支持score，其余值沿用UNSUPPORTED错误信封。观测missing为静态构建能力，on/masked提示；fallback样例显式注入覆盖能力。细节与API现行说明见openai-cache-reliability.md，20份M4原字节契约/相关反例及M3保留回放随实现提交。
+
+X-B1：管理能力不代表行为可用。L-04、L-03、L-07 各有静态能力，生产默认均 false；未实现能力字段的启用方向返回 unsupported_in_build，PUT 返回 CACHE_POLICY_UNSUPPORTED，关闭方向不依赖分组目录。按F v1.2，rollout不是能力字段；整体默认恒为disable。数据库只激活未实现行为时blocked/active=false，blockers带not_implemented_in_build，优先于masked；过渡构建按已实现行为决定状态。schema标记能力字段，L-03依赖L-04，未来请求accessor也要与能力位做AND。原20样例字节不变、注入完整能力；追加10份默认构建样例与部分能力/故障桩回归。
+
+
+## M3.1 / L-01 启用前边界
+
+实现范围为 fail-safe 还原、账号拒绝记忆、在途汇聚上限，以及种子来源显式标志；
+不修改关闭态 writer、既有调度、韧性、重试或计费解析边界。完整行为和指标见
+[OpenAI 缓存可靠性](../../../docs/openai-cache-reliability.md#m31启用前安全边界)。
+`max_inflight_per_key` 默认 2、范围 1–16，内存补齐旧存储并纳入 history；升 enable、降 disable。
+新跳过原因按 quality_rotation → upstream_rejects → fanin_cap 排序。
+实际生效时追加 l01_restore_fallback，最小事件与未生效事件形态保持。
+字面还原识别转义引号与对象键；拒绝路径标记响应已提交并复用原端点 400 writer。
+M3-only 基点仅回放 M31 的 10 个 M3 派生与 5 个新样例；6 个 M4 派生 list 留集成回放。
+
+M3.1 的种子防伪保留全部既有 routing hash / legacy sticky 字节：仅在 L-01 Enabled 时
+把 scopedOpenAISessionSeed 的显式 provenance bool 写入服务端内部上下文并消费。
+prepare 在 policy_off 早退之后、原 no_routing_session 的位置要求 provenance=true，
+再进入 cohort；客户端的 openai-routing-v2: 文本不能获得注入资格。
+
+
+### M3.1 客户端转换出口
+
+实际注入后的 Chat Responses 上游正文先经同一有界 SSE 还原缓冲，再由 buffered
+或流式转换器消费，包含失败/cyber 事件及累积内容。原生 Responses 的规则错误出口
+独立清除 message 中已知 U。关闭态沿用原 reader/writer；不扩大 Messages、WS、
+passthrough 或 raw Chat 的注入资格，不新增重试或恢复失败归因。

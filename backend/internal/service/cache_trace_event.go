@@ -131,5 +131,11 @@ func (t *cacheTrace) emitCacheTrace() {
 		slog.String("pcd", d.PromptCacheDiagnostics), slog.String("resp_cache_ttl", d.ResponseCacheTTL),
 		slog.String("l01_arm", d.L01Arm), slog.Bool("l01_applied", d.L01Applied),
 		slog.String("l01_skip", d.L01Skip), slog.Int64("l01_policy_rev", d.L01PolicyRevision))
+	if d.L01Applied {
+		if d.L01RestoreFallback == "" {
+			d.L01RestoreFallback = "none"
+		}
+		attrs = append(attrs, slog.String("l01_restore_fallback", d.L01RestoreFallback))
+	}
 	slog.LogAttrs(context.Background(), slog.LevelInfo, "cache_trace", attrs...)
 }

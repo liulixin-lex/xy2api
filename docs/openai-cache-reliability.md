@@ -140,8 +140,9 @@ cache_trace 仅为内部 Info 日志，经现有 slog→zap JSON logger 输出�
 管理员专用接口位于 `/api/v1/admin/cache/policies`：列表、按键读取、
 POST /{key}/validate、PUT /{key}、GET /history。当前构建提供 master（cache_feature_master）、
 observability（cache_observability_policy）、northstar（cache_northstar_policy）和
-upstream_identity（cache_upstream_identity_policy）；四者缺省关闭。其余两个键保留在列表中，
-标记为不可用；单项读写返回 404，存储值和 schema 不对用户接口公开。
+upstream_identity（cache_upstream_identity_policy）、anthropic_identity
+（cache_anthropic_identity_policy）和 routing（cache_routing_policy）；六者缺省关闭。
+T4.0 的后两个键支持管理员读写与审计，仅保存配置，尚未接入会话身份或选号行为。
 
 写入省略的字段保留原值，未知字段拒绝。每键的 `expected_rev` 在数据库
 事务和行锁内比较；冲突返回 409。启用总开关要求理由和勾选，PUT 会重新计算，
@@ -258,15 +259,16 @@ cache_trace 在送达分类确定后、真正扣费及用量落库之前输出�
 
 ## OpenAI UUID 会话键补全（L-01）
 
-注入只接受带 `v2:` 前缀的租户隔离路由种子；复合组或其他入口仍使用旧内容种子时，
+注入只接受服务端确认已按租户隔离的路由种子；复合组或其他入口仍使用旧内容种子时，
 L-01 记 `no_routing_session` 并跳过，不进入实验分桶。既有本地 sticky 与兼容转发不变；
-关闭策略在读取种子和前缀检查之前早退。这里的 skip 是内部决策；复合组仍被既有 trace 平台闸门排除，
+关闭策略在读取种子和作用域来源之前早退。这里的 skip 是内部决策；复合组仍被既有 trace 平台闸门排除，
 不会因此新增客户端可见字段或 cache_trace 事件。
 
 管理员在缓存策略的 `upstream_identity` 中设置 `mode=uuid_fill`、
 `rollout_percent` 和可选的 `account_ids`。默认 `mode=off`、比例 0、账号列表为空、
-`chat_compat_uuid=false`。它受 `cache_feature_master` 和静态紧急总闸共同控制；
-观测开关独立。配置按既有 revision、预校验、确认和审计流程更新，最多约 60 秒生效；
+`chat_compat_uuid=false`、`max_inflight_per_key=2`（可设 1–16）。它受 `cache_feature_master` 和静态紧急总闸共同控制；
+观测开关独立。配置按既有 revision、预校验、确认和审计流程更新，快照每 30 秒刷新；API 的
+`refresh_interval_s=60` 表示 60 秒内生效的上限；
 请求内沿用同一快照。启用、扩大比例或账号范围需要理由和勾选确认，撤回不需要。
 账号列表只接受存在的 OpenAI apikey 账号，空列表表示所有合格账号。
 
@@ -280,19 +282,20 @@ L-01 都不覆盖客户端设置。Codex/OAuth、透传、Grok、探测、原始
 本版本的写入返回 `CACHE_POLICY_UNSUPPORTED`。
 
 Responses 为缺键请求补上稳定 UUID，并在最终出站没有 `session_id` 时使用同值。
-UUID 按网关已有的 API key、serving 分组及模型作用域派生；不使用计费源分组。
+UUID 的有效熵为 64-bit，按网关已有的 API key、serving 分组及模型作用域派生；不使用计费源分组。
 同一请求首次确定分桶后不因账号或 host 切换重新分桶；同一服务作用域的重建与
 重试使用相同 UUID，服务作用域变化时身份随之变化。生成的键不反馈到选号、sticky
 或原有 lineage 身份。关闭或对照组保持原出站行为，不新增整请求解析。
 
 Chat 的 `chat_compat_uuid=true` 只把已有兼容种子实际注入的出站 pck 改成原有
-session header 的 UUID；内部种子及 header 派生不变，不重复隔离或二次 UUID 化。
+session header 的 UUID；U_chat 只按 API key 作用域，serving 分组回退前后保持相同。
+内部种子及 header 派生不变，不重复隔离或二次 UUID 化。
 不产生旧兼容种子的请求保持原行为，记 `l01_skip=no_compat_seed`；原始 Chat 等
 排除入口记 `unsupported_ingress`。本请求实际触发既有 quality enforce 身份轮换时，
 L-01 让位并记 `quality_rotation`，不会推进轮换状态；只配置轮换而未触发的请求
 仍按通常规则处理。三个原因都记 `l01_applied=false`，出站与 L-01 关闭时相同。
 跳过原因先判策略和入口，再判账号及会话分桶；处理组内依次判客户端 pck、
-会话头、旧 compat seed、Chat 开关，最后判实际质量轮换。
+会话头、旧 compat seed、Chat 开关，再判实际质量轮换，最后按顺序检查 `upstream_rejects` 和 `fanin_cap`。
 
 完整内部 cache_trace 增加 `l01_arm`（none/on/off）、`l01_applied`、
 `l01_skip` 和 `l01_policy_rev`。实际注入来源为 `pck_class_out=gw_uuid`，同值
@@ -313,3 +316,90 @@ L-01 灰度使用独立域 `SHA256("l01-cohort|" + session)`，再按首字节�
 null 形态依据保存的兼容 Responses 官方流示例及协议允许的空值，不代表已对每个
 上游实测；某上游若对无 key 请求省略该字段，两组仍可能呈现不同形态，需要在
 启用实验中监测。
+
+
+## Claude/Gemini 身份与粘性策略管理（T4.0）
+
+anthropic_identity 默认 anchor_group_ids=[]、metadata_group_ids=[]、
+gemini_anchor=false、rollout_percent=0；metadata 范围必须是 anchor 范围的子集。
+两组 ID 只接受存在的 anthropic 分组，空列表表示关闭。
+routing 默认 keep_sticky_on_busy.enabled=false、group_ids=[]、rollout_percent=0，
+affinity_mode=score。busy 的空分组列表表示全部；本构建只接受 score，
+其他取值在 validate 中为 unsupported_in_build、PUT 为 CACHE_POLICY_UNSUPPORTED。
+
+策略管理与请求行为使用独立的静态构建能力。T4.0 的 L-04、L-03、L-07
+能力均为 false；能力字段的启用或扩张在 validate 中为 unsupported_in_build，
+PUT 返回 400 CACHE_POLICY_UNSUPPORTED，不保存待未来版本自动激活的配置。
+关闭、收窄及整体回到默认值仍可保存且不查询分组表；rollout 不是能力字段，
+单独增加仍按既有方向与确认规则处理。字段 schema 标记 not_implemented_in_build。
+数据库只激活未实现行为时，effective 为 blocked、active=false，带同名 blocker；
+过渡构建中已实现行为照常决定状态。L-03 依赖 L-04，生产构造不声明这三项能力。
+后续行为实现必须显式声明各自的构建能力，请求 accessor 也必须与能力位做 AND。
+
+嵌套对象整体或部分提交时按点路径的实际变化生成 diff、direction 与审计。
+anthropic_identity 为 high，开启和 mixed 要求理由及勾选；
+routing 为 highest，还要精确输入 cache_routing_policy。
+关闭方向不要求确认、不查分组表，也不复用之前查询的回退事实；
+格式、子集和 revision 校验仍然执行。
+
+三个分组选择字段都给出按 ID 升序、最多 500 项的 options，只有 id/name/platform。
+读取候选失败时仍可读取或保存策略，所有相关字段的 options 同时为空，
+effective.warnings 最后追加 group_options_unavailable，不返回内部错误。
+关闭写入主动跳过候选查询，使用同一提示；validate 不带候选提示。
+northstar.excluded_group_ids 保持原形态，不添加 options。
+
+anthropic_observability_missing 由静态构建能力决定，只在配置状态为 on
+或 masked_by_master 时出现；off（包括 rollout=0）不出现。
+构建是否包含 Anthropic 观测由构造参数声明，不在请求中探测。
+选中的组若被任一组的 availability_fallback_group_id 引用，管理员响应提示
+fallback_group_selected；它不进入用户输出。两个提示共存时，missing 在前。
+T4.0 只提供上述管理与存储能力；实际请求、分桶、metadata 改写、sticky 与调度接线
+由后续任务交付，当前版本不会因这两个键改变出站请求或选号。
+
+### M3.1：启用前安全边界
+
+种子的租户作用域由 `scopedOpenAISessionSeed` 显式返回。客户端提供的
+`openai-routing-v2:` 文本不能作为已隔离来源；复合组、无 API key 等入口仍跳过注入。
+只有 L-01 开启时才记录、消费服务端内部的来源布尔值；prepare 在 policy_off 早退后，
+按原 no_routing_session 顺序检查它。routing hash、legacy sticky key 与 lineage 的派生
+保持原实现，包括关闭态下伪造前缀的既有 hash 字节；客户端文本不会赋予注入资格。
+
+当且仅当实际注入的请求收到 400，且 `error.param` 或 message 指向
+`prompt_cache_key` 时，本进程对该账号记忆 24 小时，后续记 `upstream_rejects`。
+首次 400 不新增重试、不切账号、不调用 penalty、session_rebind 或冷却；客户端自带
+key 的拒绝保持原有行为，不会标记账号。拒绝记忆有界，容量耗尽时保守停止注入，
+不会通过驱逐仍有效记录恢复注入。
+拒绝响应先标记已提交，再沿用 Responses 或 Chat 的基线确定性 400 writer；
+不含 U 时保留基线错误格式，不依赖上游 Content-Type，也不追加 handler 兜底错误。
+
+进程内按 RoutingSessionID 记录实际参与 L-01 的在途请求，表最多 65536 项；
+达到 `max_inflight_per_key`、表满或计数异常时记 `fanin_cap` 并使用原出站 body/header。
+错误、取消和原有重试结束均释放预留；内部原有 Responses 重试复用同一预留。
+增大上限属于 enable，减小属于 disable。旧存储在内存中补默认 2，不写回、不改 revision；
+validate 和 PUT 使用同一补齐基础，history 保留 `max_inflight_per_key` 的变更。
+`mode=uuid_fill` 且账号列表为空时，提示 `l01_all_accounts_unverified`，与 master、rollout 无关。
+
+还原只运行于实际注入的尝试。结构化还原失败时，把已知的 `"<U>"` 替换为 `null`；
+仅完整、未转义的字符串值替换为 null；U 作为对象键、嵌在消息字符串中，或分片
+上下文不明确时只删除这 36 字节，保留引号和 JSON 合法性。还原缓冲的 SSE 事件超过上限时改用
+有界字面替换流式输出，跨分片保留足够尾部以防 U 跨客户端写入边界泄漏。还原自身
+永不返回错误，不影响既有失败归因。既有 scanner 单物理行上限和无效 usage JSON
+解析错误仍执行原来的韧性与计费校验，不用这项兜底绕过。
+
+所有透传的上游错误体均执行同一隐私处理；状态、其它头和剩余字节保持，变化后
+重算 Content-Length。普通没有 U 的错误体逐字节保持。`l01_restore_fallback` 仅在
+实际生效时输出 `none`、`literal` 或 `sse_oversize`，后者优先；未生效时不输出该字段。
+通过既有 resilience 指标接口提供 `l01_restore_fallback_total{kind}`（含 error_body）
+和 `l01_upstream_reject_total`；首次拒绝另记不含 UUID、prompt 的告警日志。
+实验应监测 fanin_cap 比例及两组 429 率差，差值超过 0.5pp 时人工停止扩量；不自动翻转。
+
+
+#### M3.1 转换出口隐私补修
+
+Chat Completions 经 Responses 上游的成功 HTTP 响应，在实际 L-01 注入标记为真时，
+先通过同一有界 SSE 还原缓冲再进入转换器。这覆盖 buffered JSON、累积内容补齐、
+转换流式 chunk、response.failed 与 cyber 错误的全部客户端出口；既有用量解析与错误
+判定继续执行。分片、EOF 和超大事件沿用相同的结构还原与字面兜底，不新增重试。
+Responses 原生流式的规则错误直接写客户端，独立清除已解码 message 中的已知 U。
+未注入或策略关闭时使用原 reader/writer，不分配还原对象。Messages 兼容入站不在
+L-01 允许的 ingress 中，维持原有身份与转换逻辑，不扩大注入范围。

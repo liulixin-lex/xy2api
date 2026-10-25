@@ -28,3 +28,31 @@
 - [x] M3 实际事件契约、质量/重试兼容、race、lint 与四 tag vet 补证。
 - [x] M1 合入后重基，并绑定验证产品源码与提交的文档差异。
 - [ ] 独立评审、staging 与 CI；后续新 main 重基先跑四 tag vet。
+
+## M4 T4.0 两个管理员策略键
+
+- [x] anthropic_identity/routing 默认关闭的存储、校验、风险确认与审计；仅score。
+- [x] 点路径实际diff、两种空列表语义、分组选项与失败降级、关闭零组查询。
+- [ ] X-B1：独立L-04/L-03/L-07静态构建能力，默认拒绝启用并防御数据库遗留配置；v1.2回放。
+- [x] 准备20份M4实际handler回放、相关反例与17份M3非list回放；额外保留M3列表边界。
+- [ ] 单批五tag编译、触及包unit与实际样例回放通过（实现准备不代表已运行）。
+- [ ] R增量评审与PR候选关闭态golden；P组装M4 PR及UI联调。
+
+
+### M3.1 / L-01 启用前安全（开发中）
+
+- [x] 写入 max_inflight_per_key、旧存储补齐、方向/schema/history 与全账号软提示。
+- [x] 写入显式种子作用域，防止客户端伪造 v2 标记。
+- [x] 写入还原 fail-safe、SSE 有界 oversize 处理、错误体隐私与指标。
+- [x] 写入 24h 拒绝记忆、有界 in-flight 预留/释放，不新增重试。
+- [x] 准备定向测试与 M31 策略/trace 回放；当前只做轻检。
+- [ ] 在 M3 与 T4.0 后按规则执行一次合并 heavy，记录五 tag 与受影响门禁。
+- [ ] R 增量评审及最终集成关闭态证据。
+
+
+### M3.1 转换出口补修
+
+- [x] Chat buffered/streaming 在实际注入门控内统一还原，覆盖成功、failed 与 cyber。
+- [x] 原生 Responses 规则错误出口清除已知 U；新增结构注册及实际 Forward 回显测试。
+- [x] Messages ingress 不可注入边界与 EOF/读错/关闭态控制测试已准备。
+- [ ] 独立评审执行唯一合并定向补跑及关闭态 golden；staging 仅补 active 与 T4.0。

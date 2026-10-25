@@ -118,6 +118,7 @@ func TestL01PolicyOffPrecedesRoutingPrefixGuard(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 		c.Set(cachePolicySnapshotGinKey, l01ChatTestPolicy(false, true))
 		c.Set(openAICacheSessionGinKey, routing)
+		c.Set(openAICacheSessionProvenanceGinKey, true)
 		c.Set(openAIUpstreamIdentityWireGinKey, "synthetic-prior-wire")
 		d := prepareOpenAIUpstreamIdentity(c, &Account{ID: 41, Platform: PlatformOpenAI, Type: AccountTypeAPIKey})
 		require.Equal(t, "policy_off", d.Skip)

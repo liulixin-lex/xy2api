@@ -52,6 +52,9 @@ func TestOpenAIUpstreamIdentityPrepareAllocationBoundaries(t *testing.T) {
 						c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 						c.Set(cachePolicySnapshotGinKey, policy)
 						c.Set(openAICacheSessionGinKey, session)
+						if state == "control" {
+							c.Set(openAICacheSessionProvenanceGinKey, true)
+						}
 						c.Set("api_key", &APIKey{ID: 99})
 						for key := 0; key < padding; key++ {
 							c.Set("synthetic-padding-"+strconv.Itoa(key), key)
@@ -75,7 +78,11 @@ func TestOpenAIUpstreamIdentityPrepareAllocationBoundaries(t *testing.T) {
 					require.Equal(t, wantSkip, decision.Skip)
 					require.False(t, decision.eligible())
 					for _, c := range contexts {
-						require.Len(t, c.Keys, 3+padding, "cohort preparation must not grow the Gin map")
+						keys := 3 + padding
+						if state == "control" {
+							keys++
+						}
+						require.Len(t, c.Keys, keys, "cohort preparation must not grow the Gin map")
 						require.Same(t, policy, CachePolicyFromGin(c), "cohort wrapper preserves the captured snapshot")
 						require.Same(t, policy, CaptureCachePolicy(c, nil), "retry capture preserves the original snapshot")
 						treatment, fixed := cachePolicyL01CohortFromGin(c)

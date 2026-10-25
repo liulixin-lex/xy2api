@@ -1,0 +1,61 @@
+{
+  "_contract": [
+    "M3-2",
+    "M31"
+  ],
+  "_note": "M3.1：调高 max_inflight_per_key 是放宽汇聚上限，按 int 的方向规则属于 enable，要求理由与勾选；调低属于 disable。",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/upstream_identity/validate",
+    "body": {
+      "expected_rev": 4,
+      "spec": {
+        "max_inflight_per_key": 4
+      },
+      "reason": "批量任务需要更多并发",
+      "confirm": {
+        "checkbox": true,
+        "typed": null
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": true,
+      "errors": [],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "max_inflight_per_key",
+          "before": 2,
+          "after": 4
+        }
+      ],
+      "risk": "high",
+      "direction": "enable",
+      "confirm": {
+        "reason_required": true,
+        "checkbox_required": true,
+        "type_to_confirm": null
+      },
+      "current_rev": 4,
+      "rev_stale": false,
+      "effective_preview": {
+        "state": "on",
+        "active": true,
+        "blockers": []
+      },
+      "affected": [
+        {
+          "key": "upstream_identity",
+          "state_before": "on",
+          "state_after": "on",
+          "active_after": true
+        }
+      ]
+    }
+  }
+}

@@ -135,7 +135,7 @@ func cachePolicyHistoryField(key, field string) bool {
 		"master":             "enabled",
 		"observability":      "enabled sample_percent chain_percent byte_budget_mib rate_mib_per_s platforms ingress_chain_percent persist_trace_hourly",
 		"northstar":          "rollup_enabled backfill_days policy_version model_thresholds excluded_group_ids exclude_media unknown_threshold",
-		"upstream_identity":  "mode account_ids rollout_percent chat_compat_uuid header_only_uuid forward_session_headers",
+		"upstream_identity":  "mode account_ids rollout_percent chat_compat_uuid header_only_uuid forward_session_headers max_inflight_per_key",
 		"anthropic_identity": "anchor_group_ids gemini_anchor metadata_group_ids rollout_percent",
 		"routing":            "keep_sticky_on_busy.enabled keep_sticky_on_busy.group_ids keep_sticky_on_busy.rollout_percent affinity_mode",
 	}
