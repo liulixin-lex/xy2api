@@ -103,7 +103,7 @@ func (s *CachePolicyService) merge(index int, before map[string]any, raw json.Ra
 		return mergeUpstreamIdentity(before, raw)
 	}
 	if index == 4 || index == 5 {
-		return mergeM4Policy(index, before, raw)
+		return mergeM4Policy(index, before, raw, s.l07Caps, writing)
 	}
 	out := make(map[string]any, len(before))
 	for k, v := range before {
@@ -234,7 +234,9 @@ func policyDirection(diff []CachePolicyDiff) string {
 			}
 			up, down = up || added, down || removed
 		case int:
-			if n > policyInt(d.Before) {
+			if raised, lowered, special := cacheL07Direction(d.Field, policyInt(d.Before), n); special {
+				up, down = up || raised, down || lowered
+			} else if n > policyInt(d.Before) {
 				up = true
 			} else {
 				down = true

@@ -1129,6 +1129,8 @@ func ProvideShareSchedulingService(repo ShareSchedulingRepository, store ShareSc
 	s.opsEnabled = cfg == nil || cfg.Ops.Enabled
 	gateway.shareScheduling = s
 	openai.shareScheduling = s
+	// The routing policy view warns about share-active busy groups (m4l07).
+	openai.cachePolicies.attachShareScheduling(s)
 	s.attachGateways(gateway, openai)
 	s.Start()
 	return s

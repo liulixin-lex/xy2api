@@ -52,10 +52,9 @@ func m4PolicyDefaults(index int) map[string]any {
 			"metadata_rollout_percent": 0, "max_inflight_per_anchor": 2,
 		}
 	}
-	return map[string]any{
-		"keep_sticky_on_busy": map[string]any{"enabled": false, "group_ids": []int64{}, "rollout_percent": 0},
-		"affinity_mode":       "score",
-	}
+	busy := map[string]any{"enabled": false, "group_ids": []int64{}, "rollout_percent": 0}
+	cacheL07AddDefaults(busy)
+	return map[string]any{"keep_sticky_on_busy": busy, "affinity_mode": "score"}
 }
 
 func m4PolicyField(spec map[string]any, field string) any {
@@ -77,7 +76,7 @@ func setM4PolicyField(spec map[string]any, field string, value any) {
 	object[child] = value
 }
 
-func mergeM4Policy(index int, before map[string]any, raw json.RawMessage) (map[string]any, []CachePolicyDiff, []CachePolicyFieldError) {
+func mergeM4Policy(index int, before map[string]any, raw json.RawMessage, caps cacheL07Caps, writing bool) (map[string]any, []CachePolicyDiff, []CachePolicyFieldError) {
 	out := make(map[string]any, len(before))
 	for field, value := range before {
 		out[field] = cloneCachePolicyValue(value)
@@ -145,8 +144,8 @@ func mergeM4Policy(index int, before map[string]any, raw json.RawMessage) (map[s
 				var v int
 				if json.Unmarshal(value, &v) != nil {
 					code = "malformed_body"
-				} else if lo, hi := m4PolicyIntRange(field); v < lo || v > hi {
-					errs = append(errs, CachePolicyFieldError{Field: field, Code: "out_of_range", Limit: map[string]int{"min": lo, "max": hi}})
+				} else if fieldErr := cacheM4IntError(index, field, v, caps, writing); fieldErr != nil {
+					errs = append(errs, *fieldErr)
 					continue
 				}
 				next = v
@@ -312,17 +311,25 @@ func (s *CachePolicyService) m4Effective(index int, stored, loaded cachePolicyEn
 	invalid := stored.parseError || loaded.parseError || masterInvalid
 	configured, rollout := m4PolicyConfigured(index, loaded.envelope.Spec)
 	implemented, unimplemented := s.m4ConfiguredCapabilities(index, loaded.envelope.Spec)
-	blocked := unimplemented && !implemented
+	// The process guard (A5) pauses L-07 only where it would otherwise run.
+	guard := index == 5 && implemented && s.L07GuardTripped()
+	blocked := (unimplemented && !implemented) || guard
 	enabled := implemented && rollout > 0
-	active = enabled && !invalid && !s.kill && p.MasterEnabled()
+	active = enabled && !invalid && !s.kill && p.MasterEnabled() && !guard
+	if index == 5 {
+		e.ClippedFields = s.cacheL07ClippedFields(loaded.envelope.Spec)
+	}
 	if s.kill {
 		e.Blockers = append(e.Blockers, "kill_switch")
 	}
 	if invalid {
 		e.Blockers = append(e.Blockers, "parse_error")
 	}
-	if blocked {
+	if unimplemented && !implemented {
 		e.Blockers = append(e.Blockers, "not_implemented_in_build")
+	}
+	if guard {
+		e.Blockers = append(e.Blockers, "guard_tripped")
 	}
 	switch {
 	case s.kill:
@@ -346,10 +353,13 @@ func (s *CachePolicyService) m4Effective(index int, stored, loaded cachePolicyEn
 	if configured && rollout == 0 && !invalid {
 		e.Warnings = append(e.Warnings, "no_effect_rollout_zero")
 	}
+	if index == 5 && s.cacheL07ShareGroupSelected(stored.envelope.Spec) {
+		e.Warnings = append(e.Warnings, "share_group_no_effect")
+	}
 	return e
 }
 
-func m4PolicySchema(index int) []map[string]any {
+func m4PolicySchema(index int, caps cacheL07Caps) []map[string]any {
 	options := []cachePolicyAccountOption{}
 	if index == 4 {
 		return []map[string]any{
@@ -362,16 +372,17 @@ func m4PolicySchema(index int) []map[string]any {
 			{"field": "max_inflight_per_anchor", "type": "int", "min": 1, "max": 16},
 		}
 	}
-	return []map[string]any{
+	schema := []map[string]any{
 		{"field": "keep_sticky_on_busy.enabled", "type": "bool"},
 		{"field": "keep_sticky_on_busy.group_ids", "type": "id_list", "ref": "group", "options": options},
 		{"field": "keep_sticky_on_busy.rollout_percent", "type": "int", "min": 0, "max": 100, "unit": "percent"},
-		{"field": "affinity_mode", "type": "enum", "options": []string{"score", "prev_host", "prev_host+quality"}},
 	}
+	schema = append(schema, cacheL07Schema(caps)...)
+	return append(schema, map[string]any{"field": "affinity_mode", "type": "enum", "options": []string{"score", "prev_host", "prev_host+quality"}})
 }
 
 func (s *CachePolicyService) m4Schema(index int) []map[string]any {
-	schema := m4PolicySchema(index)
+	schema := m4PolicySchema(index, s.l07Caps)
 	for _, field := range schema {
 		unsupported := false
 		switch field["field"] {

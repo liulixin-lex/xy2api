@@ -827,6 +827,9 @@ type GatewayService struct {
 	shareScheduling *ShareSchedulingService
 	// resilience is the xy2api gateway resilience runtime (optional).
 	resilience *ResilienceService
+	// cachePolicies is installed by ProvideGatewayServiceWithCacheTrace; nil keeps every
+	// cache routing behavior (L-07) off.
+	cachePolicies *CachePolicyService
 }
 
 // NewGatewayService creates a new GatewayService

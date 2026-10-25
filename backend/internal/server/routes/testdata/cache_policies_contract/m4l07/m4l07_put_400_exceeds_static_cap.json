@@ -1,0 +1,42 @@
+{
+  "_contract": [
+    "M4-3",
+    "M4-L07",
+    "C-6"
+  ],
+  "_note": "运行时值超过静态硬上限 l07_max_consecutive_cap=5：400 CACHE_POLICY_INVALID，错误码 exceeds_static_cap，limit.max 为当前上限（同 observability 的静态上限）。",
+  "_fixture": {
+    "build_capabilities": {
+      "l04": false,
+      "l03": false,
+      "l07": true
+    },
+    "说明": "T2.5 构建的静态能力（l07 为 true；T2.2/T2.3 未合入时 l04、l03 为 false），不属于响应"
+  },
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/routing",
+    "body": {
+      "expected_rev": 1,
+      "spec": {
+        "keep_sticky_on_busy": {
+          "max_consecutive_busy": 6
+        }
+      },
+      "reason": "放宽",
+      "confirm": {
+        "checkbox": true,
+        "typed": "cache_routing_policy"
+      }
+    }
+  },
+  "status": 400,
+  "response": {
+    "code": 400,
+    "message": "cache policy validation failed",
+    "reason": "CACHE_POLICY_INVALID",
+    "metadata": {
+      "errors": "[{\"field\":\"keep_sticky_on_busy.max_consecutive_busy\",\"code\":\"exceeds_static_cap\",\"limit\":{\"max\":5}}]"
+    }
+  }
+}

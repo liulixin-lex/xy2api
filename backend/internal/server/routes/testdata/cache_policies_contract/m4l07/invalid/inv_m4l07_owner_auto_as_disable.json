@@ -1,0 +1,86 @@
+{
+  "_contract": [
+    "M4-2",
+    "M4-L07"
+  ],
+  "_note": "必须被拒绝：owner_busy_skip_per_min_cap 从非 0 改为 0 属于 enable",
+  "_fixture": {
+    "build_capabilities": {
+      "l04": false,
+      "l03": false,
+      "l07": true
+    },
+    "说明": "T2.5 构建的静态能力（l07 为 true；T2.2/T2.3 未合入时 l04、l03 为 false），不属于响应",
+    "stored_spec": {
+      "keep_sticky_on_busy": {
+        "enabled": true,
+        "group_ids": [
+          31
+        ],
+        "rollout_percent": 20,
+        "max_consecutive_busy": 2,
+        "max_hold_seconds": 60,
+        "owner_busy_skip_per_min_cap": 8,
+        "group_keep_ratio_pct": 5,
+        "health_lookback_seconds": 120
+      },
+      "affinity_mode": "score"
+    }
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/routing/validate",
+    "body": {
+      "expected_rev": 2,
+      "spec": {
+        "keep_sticky_on_busy": {
+          "owner_busy_skip_per_min_cap": 0
+        }
+      },
+      "reason": "改为按并发自动计算",
+      "confirm": {
+        "checkbox": true,
+        "typed": "cache_routing_policy"
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": true,
+      "errors": [],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "keep_sticky_on_busy.owner_busy_skip_per_min_cap",
+          "before": 8,
+          "after": 0
+        }
+      ],
+      "risk": "highest",
+      "direction": "disable",
+      "confirm": {
+        "reason_required": false,
+        "checkbox_required": false,
+        "type_to_confirm": null
+      },
+      "current_rev": 2,
+      "rev_stale": false,
+      "effective_preview": {
+        "state": "on",
+        "active": true,
+        "blockers": []
+      },
+      "affected": [
+        {
+          "key": "routing",
+          "state_before": "on",
+          "state_after": "on",
+          "active_after": true
+        }
+      ]
+    }
+  }
+}

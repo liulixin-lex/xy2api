@@ -257,6 +257,12 @@
 - 实现 serving 组隔离的 a2、原层级之后的本地 sticky、三条换组重派生、count_tokens 排除、Gemini、并发上限与契约；请求 accessor 同时检查构建能力与行为过期保护。L-03/L-07 不在范围内。
 - 当前仅草稿与轻检；开发定向与交付单批检查尚未执行，不声称验收通过。不推送、不部署。
 
+### 20261025-cache-m4-l07 — T2.5 L-07 Anthropic 忙时保持粘性（O-L07，候选待统一门禁）
+
+- 基于联合候选 d866d29c4。sticky owner 槽位忙且等待队列满时，Layer2 照常服务本次 attempt，但借软罚拒写通道（INV-04）让选号层 7 处与 handler 层 7 处绑定都不改绑；下一次选号前释放（按 attempt）。H1–H3、A1–A6 都在 0.4.x 既有判定之后叠加，只会更早回到基线；状态读写失败一律放弃。
+- 策略侧按 cache_policies_contract/m4l07（5 个上限字段、静态上限与 clipped、guard_tripped、share_group_no_effect）；trace 只提供 L07TraceFieldsFromContext，写入 Anthropic 事件的一行待与 M2b 组合时接线。能力位 l07=true 为单独提交，策略默认关闭；生产启用要求 M2b 观测在线。
+- 关闭态（kill、总开关、能力为 false、策略关、分组外、对照组）选号、sticky 写入序列与 allocs/op 与基线相同，由测试锁定。不推送、不部署。
+
 ### 20261025-cache-m31-conversion-privacy — L-01 客户端转换出口补修（G，进行中）
 
 - 按负责人裁定，从联合候选 efd7d3aaf 应用独立评审 v2，精确基线 tree a56c02da；在其上修复 Chat buffered 回显注入标识的问题，并审计 Chat 流式、Messages 兼容及错误出口。
@@ -1344,6 +1350,11 @@ pnpm --dir frontend run build
 
 - 依序 merge M2b、T2.3（含 T2.2）与五个 UI 来源；冲突均保留双方，Go 冲突文件 gofmt。首版 T2.3 合并重复声明一个字段，本地编译发现后在未发布分支上重做，旧提交作废。
 - 补交从未入库的 Messages golden（在未修改的 main16a 上独立重录，逐字节一致）；policy 回放改为按构建选样；登记 T2.2 的原版调度等价改写。T2.2 not_subset 为来源缺陷，契约裁定保留该字段于 diff，待来源修复。开发期定向、race、前端与轻量门禁结果见当前交接状态；全量门禁交 CI。
+
+### 2026-10-25 — 20261025-cache-m4-l07 — T2.5 L-07 实现
+
+- 请求记录只为处理组分配并挂在 resilience RequestState 上（keptBusy 落在填充位、l07 槽 16B，结构体仍在 576B size class 内）；对照组共用不可变 sentinel。A1/A2 状态为 Redis 哈希 l07:<gid>:<session>，读取与 owner 的 xy:resil:sf 计数同一 pipeline，只在保持时写入；Layer1.5 owner 命中用同一 pipeline 的 EXPIRE+DEL 清零。A3/A4/A5 为进程内有界计数，多实例时为单实例近似值。
+- H1 的近期失败读取既有的 session failure 计数，实际回看上限为 min(health_lookback_seconds, streak_window_seconds)。护栏两边各至少 20 个样本才比较，只暂停本进程、不改存储的策略。
 
 ### 2026-10-25 — T2.2 关闭态分配修复（O-L04 接手 G）
 

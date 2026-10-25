@@ -35,6 +35,10 @@ func ProvideGatewayServiceWithCacheTrace(
 ) *GatewayService {
 	s := NewGatewayService(accountRepo, groupRepo, usageLogRepo, usageBillingRepo, userRepo, userSubRepo, userGroupRateRepo, cache, cfg, schedulerSnapshot, concurrencyService, billingService, rateLimitService, billingCacheService, identityService, httpUpstream, deferredService, claudeTokenProvider, sessionLimitCache, rpmCache, digestStore, settingService, tlsFPProfileService, channelService, resolver, compositeResolver, balanceNotifyService, userPlatformQuotaRepo)
 	s.providerTraceEngine = engine
+	if engine != nil {
+		// L-07 reads the same policy snapshots as the provider trace.
+		s.cachePolicies = engine.cachePolicies
+	}
 	return s
 }
 

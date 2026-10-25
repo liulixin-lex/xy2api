@@ -72,6 +72,7 @@ type CachePolicySnapshot struct {
 	anchorPolicy        cacheAnthropicAnchorPolicy
 	l04Available        bool
 	upstream            CacheUpstreamIdentityPolicy
+	routingL07          CacheRoutingL07Policy
 	cohortViews         [2]cachePolicyCohortView
 	platforms           uint8
 	ingressChainPercent int
@@ -176,6 +177,9 @@ type CachePolicyService struct {
 	wg                              sync.WaitGroup
 	listeners                       []func(*CachePolicySnapshot)
 	northstarAvailable              bool
+	l07Caps                         cacheL07Caps
+	l07                             *l07Runtime
+	share                           cachePolicyShareLookup
 
 	// Staleness bound, guarded by mu. refreshedAt is the last successful
 	// settings read; administrator writes neither refresh nor clear it.
@@ -186,7 +190,7 @@ type CachePolicyService struct {
 }
 
 func NewCachePolicyService(repo SettingRepository, cfg *config.Config, options ...CachePolicyOption) *CachePolicyService {
-	s := &CachePolicyService{now: time.Now, repo: repo, started: cachePolicyProcessStartedAt, caps: CachePolicyCaps{1, 64, 32, 1024, 3, 512}}
+	s := &CachePolicyService{now: time.Now, repo: repo, started: cachePolicyProcessStartedAt, caps: CachePolicyCaps{1, 64, 32, 1024, 3, 512}, l07Caps: cacheL07CapsFromConfig(cfg), l07: newL07Runtime()}
 	for _, option := range options {
 		option(s)
 	}
@@ -350,6 +354,7 @@ func (s *CachePolicyService) publishEntries(entries [6]cachePolicyEntry) {
 	p.upstream = upstreamIdentityFromEntry(entries[3], p.MasterEnabled() && !p.stale)
 	p.l04Available = s.m4Behaviors.L04
 	p.anchorPolicy = cacheAnthropicAnchorPolicyFromEntry(entries[4], s.m4Behaviors)
+	p.routingL07 = routingL07FromEntry(entries[5], p.MasterEnabled() && !entries[0].parseError, s.m4Available && s.m4Behaviors.L07, s.l07Caps)
 	p.revision = fmt.Sprintf("m%d.o%d.u%d.a%d.r%d", p.revs[0], p.revs[1], p.revs[3], p.revs[4], p.revs[5])
 	p.initCohortViews()
 	for _, notify := range s.listeners {
@@ -419,7 +424,9 @@ func policyInt(v any) int {
 }
 
 func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config, accounts AccountRepository, groups GroupRepository) *CachePolicyService {
-	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups), WithProviderCacheTrace(), WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L04: true, L03: true}), WithCacheAnthropicObservability())
+	// T2.2/T2.3 implement L-04/L-03 and T2.5 implements L-07 with every limit of
+	// M4 kickoff §11 (DESIGN §6.1A).
+	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups), WithProviderCacheTrace(), WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L04: true, L03: true, L07: true}), WithCacheAnthropicObservability())
 	s.Start()
 	return s
 }
