@@ -66,6 +66,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/features/cache-observability/settings/__tests__/CacheSettingsPanel.spec.ts \
 	src/features/cache-observability/charts/__tests__/viewModel.spec.ts \
 	src/features/cache-observability/charts/__tests__/mock.spec.ts \
+	src/features/cache-observability/charts/__tests__/m2bStats.spec.ts \
 	src/features/cache-observability/charts/__tests__/ChartsPanel.spec.ts \
 	src/features/cache-observability/charts/__tests__/contract.spec.ts
 

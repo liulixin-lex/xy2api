@@ -9,7 +9,11 @@
     :skeleton-rows="7"
     @retry="state.loadStats()"
   >
+    <template #actions><ScopeTags :tags="tags" /></template>
     <TraceDisabled v-if="data && !data.trace_enabled" @open-settings="emit('open-settings')" />
+    <p v-else-if="data && scope?.openaiMetricsAbsent" class="text-sm text-gray-600 dark:text-dark-300" data-test="identity-openai-only">
+      {{ t('admin.cacheCharts.identity.openaiOnlyEmpty') }}
+    </p>
     <template v-else-if="data">
       <h3 class="text-xs font-semibold text-gray-700 dark:text-dark-200">{{ t('admin.cacheCharts.identity.pckOut') }}</h3>
       <div class="mt-2 overflow-x-auto">
@@ -74,7 +78,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { CacheChartsState } from '../useCacheCharts'
-import { formatPct, LOSS_COLORS } from '../viewModel'
+import { formatPct, LOSS_COLORS, statsScope } from '../viewModel'
+import ScopeTags from './ScopeTags.vue'
 import SectionShell from './SectionShell.vue'
 import TraceDisabled from './TraceDisabled.vue'
 
@@ -84,6 +89,13 @@ const { t } = useI18n()
 
 const section = computed(() => props.state.stats)
 const data = computed(() => section.value.data)
+const scope = computed(() => (data.value ? statsScope(data.value) : null))
+const tags = computed(() => {
+  const list: ('openaiOnly' | 'bridgeOnly')[] = []
+  if (scope.value?.openaiOnly) list.push('openaiOnly')
+  if (scope.value?.bridgeOnly) list.push('bridgeOnly')
+  return list
+})
 const dark = computed(() => document.documentElement.classList.contains('dark'))
 // Two series from the validated categorical slots 1 and 2.
 const inColor = computed(() => (dark.value ? LOSS_COLORS.prefix_changed.dark : LOSS_COLORS.prefix_changed.light))

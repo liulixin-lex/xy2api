@@ -165,6 +165,35 @@ export interface CoverageSegments {
 }
 
 /** Shares of the in-scope business prompt tokens (DESIGN §2.7 acceptance (a)). */
+export interface StatsScope {
+  /** pck, session headers and the category completeness count OpenAI only (`openai_only_metrics`). */
+  openaiOnly: boolean
+  /** The OpenAI partition holds Messages-bridge requests only (`openai_native_excluded`). */
+  bridgeOnly: boolean
+  /** The queried platform is not observed (`platform_not_covered`). */
+  notCovered: boolean
+  /** A provider view: the OpenAI-only metrics are [] or null there, so the cards hide them. */
+  openaiMetricsAbsent: boolean
+}
+
+/** What the M2b `scope_notes` mean for the stats cards (cache_panel_contract/m2b README §1.3, §1.5). */
+export function statsScope(stats: TraceStatsResponse): StatsScope {
+  const notes = stats.scope_notes ?? []
+  const openaiOnly = notes.includes('openai_only_metrics')
+  return {
+    openaiOnly,
+    bridgeOnly: notes.includes('openai_native_excluded'),
+    notCovered: notes.includes('platform_not_covered'),
+    openaiMetricsAbsent:
+      openaiOnly &&
+      !stats.pck_in.length &&
+      !stats.pck_out.length &&
+      !stats.session_headers.length &&
+      !stats.sess_out_relation.length &&
+      stats.pck_out_is_uuid_ratio === null,
+  }
+}
+
 export function coverageSegments(stats: TraceStatsResponse): CoverageSegments | null {
   const business = stats.coverage.business_prompt_tokens
   if (!business) return null
