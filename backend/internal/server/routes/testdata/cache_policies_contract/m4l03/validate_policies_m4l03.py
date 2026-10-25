@@ -5,6 +5,7 @@
 - 复用 m3m4 的自检规则，anthropic_identity 的字段集换成 T2.3 的（m4l04 的两个字段，加 metadata_account_ids），并加入：
   metadata_account_ids 是 l03 的能力字段、空表示不生效；错误码 official_endpoint、not_apikey、exceeds_rollout_percent；
   账号候选与 account_options_unavailable 只管 metadata_account_ids，分组候选与 group_options_unavailable 只管分组字段；
+  validate 的 diff 按字段名的字典序排列（v1.0.2）；
 - 派生样例可由 m4l04 源样例重新生成；m4l04 中未变化的样例在本目录规则下同样通过；invalid/ 全部被拒。"""
 import copy, hashlib, importlib.util, json, os, sys
 sys.dont_write_bytecode = True
@@ -95,6 +96,9 @@ def check(o, derived_dir="m4l04"):
         if s.get("metadata_rollout_percent", 0) > s.get("rollout_percent", 0): out.append("metadata_rollout_percent 不得超过 rollout_percent")
         if not set(s.get("metadata_group_ids", [])) <= set(s.get("anchor_group_ids", [])): out.append("存储值中 metadata_group_ids ⊆ anchor_group_ids")
     d = o["response"].get("data") if isinstance(o.get("response"), dict) else None
+    if isinstance(d, dict) and isinstance(d.get("diff"), list):   # v1.0.2：diff 按字段名（点路径）的字典序排列，与 m3m4 起的全部样例及实现（sort.Strings）一致
+        fs = [x.get("field") for x in d["diff"]]
+        if fs != sorted(fs): out.append("diff 应按字段名的字典序排列")
     if isinstance(d, dict) and "errors" in d:
         for e in d["errors"]:
             if e.get("code") in ("official_endpoint", "not_apikey") and e.get("field") != "metadata_account_ids": out.append(f"{e['code']} 只用于 metadata_account_ids")

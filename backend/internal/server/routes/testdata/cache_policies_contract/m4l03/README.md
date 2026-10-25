@@ -1,4 +1,4 @@
-# cache_policies_contract/m4l03 · T2.3 L-03 的策略增量（v1.0.1）
+# cache_policies_contract/m4l03 · T2.3 L-03 的策略增量（v1.0.2）
 
 > 作者：F，2026-10-25。依据：M4 开工包 v1.3.2 §10.4（FX-L04-4，含 A 的 sub2api 核对结论）、§10.2；DESIGN v1.7.8.16 §4.2；m3m4 §3.1、§3.6；RULES §9。trace 侧见 `cache_trace_contract/m4l03/`。
 > **与冻结内容的关系**：父目录（v1.7.4.6）、`m3m4/`（v1.2）与 `m4l04/`（v1.0）一个字节都没改，sha256 记在 `FROZEN.sha256`（155 个文件）。T2.3 叠在 T2.2 上，所以样例由 m4l04 派生。
@@ -30,7 +30,7 @@
 |---|---|
 | `m4l03_list_t23.json` | L-04 与 L-03 都开启，metadata 两个字段不带标记，账号候选下发 |
 | `m4l03_list_account_options_unavailable.json` | 账号候选为 []，带 account_options_unavailable；分组候选照常 |
-| `m4l03_validate_metadata_enable.json` | 三个字段都是开启方向，要求理由与勾选 |
+| `m4l03_validate_metadata_enable.json` | 三个字段都是开启方向，要求理由与勾选；diff 按字段名字典序：metadata_account_ids、metadata_group_ids、metadata_rollout_percent |
 | `m4l03_validate_account_rejected.json` | 新增 503（官方端点）与 504（OAuth）：official_endpoint、not_apikey |
 | `m4l03_validate_accounts_clear.json` | 清空为关闭方向，不要求确认；L-04 仍生效 |
 | `m4l03_put_metadata_enable_200.json` | PUT 开启 L-03，rev 2→3 |
@@ -42,7 +42,7 @@
 
 ## 3. 自检
 - 命令：`python3 -I -B m4l03/validate_policies_m4l03.py <cache_policies_contract 目录>`，只用标准库，直接运行。
-- 复用 m3m4 的全部规则，anthropic_identity 的字段集换成 T2.3 的，并加入：能力字段与“空表示关闭”；错误码 official_endpoint、not_apikey；账号候选与 account_options_unavailable 的单独核对；派生样例可以重新生成。
+- 复用 m3m4 的全部规则，anthropic_identity 的字段集换成 T2.3 的，并加入：能力字段与“空表示关闭”；错误码 official_endpoint、not_apikey；账号候选与 account_options_unavailable 的单独核对；validate 的 diff 按字段名字典序（v1.0.2）；派生样例可以重新生成。
 - 生成器：`07-design/scripts/gen_policies_m4l03.py`。
 
 ## 4. 各方动作
@@ -55,3 +55,4 @@
   1. **client_user_id**：客户端带了任何非空的 metadata.user_id（不论能否解析）一律不覆盖，本请求不做 L-03，trace 记 `l03_skip=client_user_id`。理由是 INV-02 客户端值优先，中转不得替换 SDK 自己的终端用户标识；带任意值的客户端得不到 L-03，代价已接受。§1 的生效条件原本就按此写，DESIGN §4.2 已同步（v1.7.8.17）。trace 契约 m4l03 的字节不变。
   2. **候选未加载时的前端**：改为手动输入 ID，不加载管理端账号列表（§1）。只改了 `m4l03_list_account_options_unavailable.json` 的 `_note` 与本 README，响应字节不变；自检与 SHA256SUMS 已重算。
   - 同时写明：提示按候选类型作用；disable 方向的 PUT 跳过账号查询。这两条是对已有规则的明文化，不改任何样例。
+- **v1.0.2（2026-10-25）**：G 在实际回放中发现 `m4l03_validate_metadata_enable.json` 的 diff 按 schema 顺序排列（group、account、rollout），而 m3m4 起的全部样例与实现（mergeM4Policy 的 sort.Strings）都按字段名的字典序排列。这是 F 的样例错误：改为 account、group、rollout，其余字节不变，自检加入“diff 按字典序”一条。产品排序不变。
