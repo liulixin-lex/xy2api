@@ -7,6 +7,7 @@ import (
 )
 
 func TestCacheRoutingL07CapsDefaultsAndRanges(t *testing.T) {
+	resetViperWithJWTSecret(t)
 	cfg, err := Load()
 	require.NoError(t, err)
 	require.Equal(t, CacheRoutingConfig{L07MaxConsecutiveCap: 5, L07MaxHoldSecondsCap: 300, L07GroupKeepRatioCapPct: 20, L07GuardErrorDeltaPP: 5, L07GuardPauseSeconds: 600}, cfg.Gateway.CacheRouting)
@@ -27,6 +28,7 @@ func TestCacheRoutingL07CapsDefaultsAndRanges(t *testing.T) {
 		{"guard pause", func(c *CacheRoutingConfig) { c.L07GuardPauseSeconds = 30 }, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			resetViperWithJWTSecret(t)
 			cfg, err := Load()
 			require.NoError(t, err)
 			tc.mutate(&cfg.Gateway.CacheRouting)

@@ -530,11 +530,12 @@ func TestL07HoldTimeOwnerCapAndGroupBudget(t *testing.T) {
 			s := fmt.Sprintf("s%d", i)
 			f.bind(s, 1)
 			ctx, _ := newL07Ctx(t)
-			f.selectWith(t, ctx, s, nil)
+			r := f.selectWith(t, ctx, s, nil)
 			if i < 4 {
 				require.Equal(t, int64(1), f.bound(s), s)
 			} else {
-				require.Equal(t, int64(2), f.bound(s))
+				require.Equal(t, r.Account.ID, f.bound(s), "baseline rebind to the Layer2 account")
+				require.NotEqual(t, int64(1), f.bound(s))
 				require.Equal(t, "owner_cap", l07Fields(ctx, "busy_wait_full").Abandon)
 			}
 		}
