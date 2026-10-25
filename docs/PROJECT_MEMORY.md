@@ -240,6 +240,37 @@
 
 ## 进行中的工作
 
+### 20261025-pr131-release047 — 合并 PR #131 并发布 0.4.7（进行中）
+
+- 用户明确授权使用本机 GitHub 凭据，将 PR #131 合入 main 并发布 0.4.7。
+- 使用独立工作树与集成分支，保留原 main 上既有未提交记忆；普通 merge 解决冲突，不改写历史、不绕过保护。
+- 起点：PR #131 `46e79a5a2`；远端 main `a19d7c5b9`，已包含缓存 PR #132–#140；当前正式版 0.4.6。
+- 集成 `d892dcc02` 只在记忆发生冲突并保留两侧记录；前端定向 19 项、typecheck、文档、audit、scheduler-diff 与工具 41 项通过。GitHub 其余 16 检查通过，两次 test 均在 main 新增的 `TestGrokL17DisabledStatesZeroExtraAllocs` 失败，关闭态完整转发的 allocs/op 相差 1–4；后端树与 main 相同。先定向复现测量干扰，保留精确零额外分配约束，修复后重新通过保护检查。
+- 原测试单独连续 10 轮通过；`AllocsPerRun` 计入同进程其他 goroutine 分配。将原分配测试移入新测试子进程，原场景、五轮取最小值及精确相等断言保持；全部 Grok L-17 与策略 L-17 定向连续三轮通过，完整 service unit 复验中。补丁只改测试隔离，不改业务逻辑。
+- 下一步：合入 main、核对冲突与检查，合并 #131；独立版本提交/PR 同步 VERSION 与 provenance，全部检查通过后打 annotated v0.4.7 并核验正式制品。
+
+### 20261023-groups-dialog-size — 账号“编辑分组”弹窗加大（2026-10-23 登记）
+
+- 请求（用户 2026-10-23，附 v0.4.6 截图）：账号管理页点击分组弹出的“编辑分组”面板太小，很多分组名被省略号截断，要调大。
+- 范围：
+  - 只改 `AccountGroupsDialog.vue`：弹窗宽度从 `normal`（最大 512px）改为 `wide`（大屏最大 896px）；分组列表最大高度从 320px 改为屏幕高度的 60%。
+  - 不改 `GroupSelector` 的默认样式，也不改其他调用它的弹窗。
+- 分支：`fix/account-groups-dialog-size-20261023`（工作树 `xy2api-wt/groups-dialog-size`，自 origin/main `e369fd3bb`）。
+- 授权：用户要求修改；按惯例止于开 PR、CI 全绿，不合并、不发版、不部署。
+- 实现：提交 `fix(accounts): widen the account groups dialog so group names fit`；spec 增加对弹窗宽度和列表高度的断言；`GROUP_CATEGORIES.md` 的弹窗描述同步更新。
+- 本地验证：
+  - 前端：lint、typecheck、i18n 3/3、全量 431 个文件 3281 项、build 通过，构建出的 CSS 里有 `max-height:60vh!important`。
+  - 仓库工具：文档一致性、干净树 audit 通过。
+  - 没有起页面截图核对，部署后请在页面上确认。
+- PR：[#131](https://github.com/liulixin-lex/xy2api/pull/131)（2026-10-23T05:27Z 开）。
+- 生产（用户 2026-10-23 明确授权“同意在生产替换程序”）：
+  - 只读核对：生产主机运行的是 0.4.6（`vcs.revision=fe7a3b6db`）；数据库已执行 325 条迁移，278 在其中，分类两张表都在。确认新程序不会改动数据库。
+  - 05:43Z 换上 PR #131 提交 `77e29da83` 的构建：编译参数与正式发版相同（`-tags=embed`、`CGO_ENABLED=0`、release ldflags），linux/amd64，`vcs.modified=false`，sha256 `13890fdb…`。
+  - 先在宿主机和容器内各备份一份 0.4.6 程序，再重启容器。重启用时 8.5 秒，6 秒后健康检查通过。
+  - 验证：运行中进程的 sha256 与 `vcs.revision` 正确，`/health` 与首页 200，公网拿到的 CSS 含新样式；迁移记录仍是 325 条且没有新增；重启后 3 分钟内 508 个请求返回 200，新进程没有 ERROR。
+  - 仍是在线更新程序，容器镜像标签与实际程序不一致的老问题没变；重建容器会回到镜像里的程序。合并后建议走正式发版、更新镜像。
+- 下一步：CI 全绿后交给另一位作者审查合并；发版与部署另行授权。
+
 ### 20261025-cache-t31a-l09a — T3.1a L-09a OpenAI 上一主机偏好（O-L09A，候选待评审）
 
 - 按开工包 v1.1（方案 A）：新请求首次普通选号中，sticky 层在既有删除处因 owner 硬失效删除绑定时，以被删除 owner 的主机为提示，在原 cache hook 之后的证据完整同档块内排列；没有跨请求存储，不改删除条件、CountsForSession 或局部 sticky 变量，选号器只调用一次。
@@ -1391,3 +1422,23 @@ pnpm --dir frontend run build
 ### 2026-10-25 — T2.3 能力测试期望对齐（O-L04）
 
 - 原 73eaf 上两个能力测试仍按 T2.2 期望：生产装配已是 L03=true，metadata_account_ids 在 L-03 不可用时同样标记未实现。只改测试期望，产品不变。
+
+### 2026-10-23T05:28Z — `20261023-groups-dialog-size` — PR #131 已开
+
+- 请求/目标：用户反馈 v0.4.6 的账号“编辑分组”弹窗太小，分组名被截断，要调大。
+- 开始状态：工作树 `xy2api-wt/groups-dialog-size`，分支 `fix/account-groups-dialog-size-20261023`，自 origin/main `e369fd3bb`；PR #126、#127 已合入并随 v0.4.6 发布。
+- 完成操作：弹窗宽度从 `normal` 改为 `wide`，分组列表最大高度从 320px 改为 60vh；spec 增加断言；文档同步更新。
+- 修改文件：`AccountGroupsDialog.vue`、`AccountGroupsDialog.spec.ts`、`docs/GROUP_CATEGORIES.md`，以及本记忆。
+- 验证：见进行中条目。
+- 卡点/风险：无。
+- 下一步：CI 全绿后交给另一位作者审查合并；发版与部署另行授权。
+
+### 2026-10-23T05:50Z — `20261023-groups-dialog-size` — 经授权替换生产程序
+
+- 请求/目标：用户要求先在生产修复弹窗，明确授权“同意在生产替换程序”。
+- 开始状态：生产主机运行 0.4.6（`fe7a3b6db`），迁移 325 条；PR #131 头为 `77e29da83`，CI 进行中。
+- 完成操作：只读核对版本与迁移 → 本机按正式参数编译 → 上传并核对 sha256 → 宿主机和容器内各备份旧程序 → 原子替换 → 重启容器 → 验证。
+- 修改文件：无仓库文件，只有本记忆；生产主机上替换了程序，旧程序备份保留。
+- 验证：见进行中条目。数据库没有变化。
+- 卡点/风险：如果 PR #131 合并前代码有变化，生产会与 main 不一致。回滚办法：用备份的 0.4.6 程序替换回去，再重启容器。
+- 下一步：PR #131 由另一位作者审查合并；之后建议正式发版并更新镜像。
