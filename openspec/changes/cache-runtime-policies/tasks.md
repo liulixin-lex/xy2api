@@ -48,3 +48,11 @@
 - [x] 准备定向测试与 M31 策略/trace 回放；当前只做轻检。
 - [ ] 在 M3 与 T4.0 后按规则执行一次合并 heavy，记录五 tag 与受影响门禁。
 - [ ] R 增量评审及最终集成关闭态证据。
+
+
+### M3.1 转换出口补修
+
+- [x] Chat buffered/streaming 在实际注入门控内统一还原，覆盖成功、failed 与 cyber。
+- [x] 原生 Responses 规则错误出口清除已知 U；新增结构注册及实际 Forward 回显测试。
+- [x] Messages ingress 不可注入边界与 EOF/读错/关闭态控制测试已准备。
+- [ ] 独立评审执行唯一合并定向补跑及关闭态 golden；staging 仅补 active 与 T4.0。

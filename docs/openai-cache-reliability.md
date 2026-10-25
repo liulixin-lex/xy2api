@@ -392,3 +392,14 @@ validate 和 PUT 使用同一补齐基础，history 保留 `max_inflight_per_key
 通过既有 resilience 指标接口提供 `l01_restore_fallback_total{kind}`（含 error_body）
 和 `l01_upstream_reject_total`；首次拒绝另记不含 UUID、prompt 的告警日志。
 实验应监测 fanin_cap 比例及两组 429 率差，差值超过 0.5pp 时人工停止扩量；不自动翻转。
+
+
+#### M3.1 转换出口隐私补修
+
+Chat Completions 经 Responses 上游的成功 HTTP 响应，在实际 L-01 注入标记为真时，
+先通过同一有界 SSE 还原缓冲再进入转换器。这覆盖 buffered JSON、累积内容补齐、
+转换流式 chunk、response.failed 与 cyber 错误的全部客户端出口；既有用量解析与错误
+判定继续执行。分片、EOF 和超大事件沿用相同的结构还原与字面兜底，不新增重试。
+Responses 原生流式的规则错误直接写客户端，独立清除已解码 message 中的已知 U。
+未注入或策略关闭时使用原 reader/writer，不分配还原对象。Messages 兼容入站不在
+L-01 允许的 ingress 中，维持原有身份与转换逻辑，不扩大注入范围。

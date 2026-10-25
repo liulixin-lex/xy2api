@@ -76,3 +76,11 @@ M3.1 的种子防伪保留全部既有 routing hash / legacy sticky 字节：仅
 把 scopedOpenAISessionSeed 的显式 provenance bool 写入服务端内部上下文并消费。
 prepare 在 policy_off 早退之后、原 no_routing_session 的位置要求 provenance=true，
 再进入 cohort；客户端的 openai-routing-v2: 文本不能获得注入资格。
+
+
+### M3.1 客户端转换出口
+
+实际注入后的 Chat Responses 上游正文先经同一有界 SSE 还原缓冲，再由 buffered
+或流式转换器消费，包含失败/cyber 事件及累积内容。原生 Responses 的规则错误出口
+独立清除 message 中已知 U。关闭态沿用原 reader/writer；不扩大 Messages、WS、
+passthrough 或 raw Chat 的注入资格，不新增重试或恢复失败归因。
