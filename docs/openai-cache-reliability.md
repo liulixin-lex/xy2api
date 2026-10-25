@@ -439,7 +439,7 @@ Messages 桥由运行时观测策略中的 messages_bridge 独立选择，默认
 
 T2.2 构建声明 L-04=true、L-03=false、L-07=false；后续 T2.3 构建在此基础上声明 L-03=true。请求 accessor 同时检查能力、
 行为快照过期保护、总闸、master 与键的有效性；默认名单为空、Gemini 关闭、rollout=0，
-因此默认沿用原有请求、会话 hash 和选号。过期保护在独立维护功能合入前使用返回 false 的集成接缝。
+因此默认沿用原有请求、会话 hash 和选号。过期保护即 FX-POL-2 的快照陈旧标记：设置刷新持续失败超过 `gateway.cache_policy.max_stale_seconds` 后，本地锚点与上游元数据都回到原有行为，刷新恢复后按存储值继续。
 
 anthropic_identity 的 schema 末尾追加 metadata_rollout_percent（0..100，默认0）和
 max_inflight_per_anchor（1..16，默认2），两个字段均记录 history；调高为 enable。
