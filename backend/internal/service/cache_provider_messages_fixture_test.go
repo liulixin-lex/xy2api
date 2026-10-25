@@ -78,7 +78,7 @@ func TestCacheProviderMessagesWireBaseline(t *testing.T) {
 		f, result, wire := cacheProviderMessagesForward(t, stream, nil)
 		require.Nil(t, result.CacheTrace)
 		require.Nil(t, result.cachePanel)
-		snapshots[fmt.Sprint(stream)] = cacheProviderMessagesGolden{Wire: wire, Usage: result.Usage, Billing: cacheProviderMessagesBilling(t, f, result)}
+		snapshots[fmt.Sprint(stream)] = cacheProviderMessagesGolden{Wire: wire, Usage: cacheProviderMessagesStoredUsage(t, result.Usage), Billing: cacheProviderMessagesBilling(t, f, result)}
 	}
 	if out := os.Getenv("CACHE_PROVIDER_MESSAGES_RECORD"); out != "" {
 		data, err := json.MarshalIndent(snapshots, "", "  ")
@@ -91,6 +91,19 @@ func TestCacheProviderMessagesWireBaseline(t *testing.T) {
 	want := map[string]cacheProviderMessagesGolden{}
 	require.NoError(t, json.Unmarshal(raw, &want))
 	require.Equal(t, want, snapshots)
+}
+
+// cacheProviderMessagesStoredUsage gives live usage the JSON round trip the
+// golden went through. OpenAIUsage's json:"-" diagnostics (CacheReadSource,
+// CacheWriteSource) are never stored there; their effect on compat output is
+// covered by the Wire bytes, and they are not billed. Token counts stay exact.
+func cacheProviderMessagesStoredUsage(t *testing.T, usage OpenAIUsage) OpenAIUsage {
+	t.Helper()
+	raw, err := json.Marshal(usage)
+	require.NoError(t, err)
+	var stored OpenAIUsage
+	require.NoError(t, json.Unmarshal(raw, &stored))
+	return stored
 }
 
 func cacheProviderMessagesUsageSSE(usage string) string {

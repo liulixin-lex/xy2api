@@ -52,7 +52,7 @@ func TestCacheProviderMessagesGateWireAndSettlement(t *testing.T) {
 					cacheProviderMessagesPolicy(s, platforms, mode != "off", sample)
 				})
 				require.Equal(t, baseline[fmt.Sprint(stream)].Wire, wire)
-				require.Equal(t, baseline[fmt.Sprint(stream)].Usage, result.Usage)
+				require.Equal(t, baseline[fmt.Sprint(stream)].Usage, cacheProviderMessagesStoredUsage(t, result.Usage))
 				if admitted {
 					require.NotNil(t, result.CacheTrace)
 					require.Equal(t, "messages", result.CacheTrace.data.ProtocolIn)
@@ -123,13 +123,22 @@ func TestCacheProviderMessagesNativeSubpathExcluded(t *testing.T) {
 	cacheProviderMessagesPolicy(f.s, []string{"messages_bridge"}, true, 100)
 	f.c.Request.URL.Path = "/v1/messages"
 	f.body = []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"synthetic"}],"stream":false,"max_tokens":32}`)
+	// api_protocol only applies to multi-protocol API key platforms; an OpenAI
+	// account would take the Responses bridge instead of the native subpath.
+	f.account.Platform = PlatformKimi
+	require.True(t, f.account.IsMultiProtocolAPIKey())
 	f.account.Credentials["api_protocol"] = APIProtocolAnthropic
 	f.account.Credentials["api_base_urls"] = map[string]any{APIProtocolAnthropic: "http://anthropic.example"}
-	f.s.httpUpstream = &httpUpstreamRecorder{resp: nativeAnthropicBufferedResponse()}
+	require.Equal(t, APIProtocolAnthropic, f.account.GetAPIProtocol())
+	upstream := &httpUpstreamRecorder{resp: nativeAnthropicBufferedResponse()}
+	f.s.httpUpstream = upstream
 	f.s.GenerateSessionHash(f.c, f.body)
 	result, err := f.s.ForwardAsAnthropic(f.c.Request.Context(), f.c, f.account, f.body, "", "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	// The Responses bridge would post to .../responses instead.
+	require.True(t, strings.HasSuffix(upstream.lastReq.URL.Path, "/v1/messages"), "native Anthropic subpath: %s", upstream.lastReq.URL)
 	require.Nil(t, result.CacheTrace)
 	require.Nil(t, result.cachePanel)
 	require.Nil(t, f.s.cacheTraceWorkers)
