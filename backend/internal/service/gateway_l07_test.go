@@ -982,20 +982,145 @@ func TestL07RuntimeMapsStayBounded(t *testing.T) {
 	r := newL07Runtime()
 	now := time.Now()
 	p := &CacheRoutingL07Policy{OwnerBusySkipPerMinCap: 1000, GroupKeepRatioPct: 20}
+	for i := 0; i < 100000; i++ {
+		r.noteRequest(1, now)
+	}
 	for i := 0; i < l07MaxOwners+10; i++ {
-		r.noteKeep(int64(i), 1, fmt.Sprint(i), now.Add(time.Minute), now)
+		r.reserve(int64(i), 1, 1, p, now)
 	}
 	require.LessOrEqual(t, len(r.owners), l07MaxOwners)
-	require.Equal(t, "owner_cap", r.admit(int64(l07MaxOwners+100), 1, 1, p, now), "a full map refuses")
+	require.Equal(t, "owner_cap", r.reserve(int64(l07MaxOwners+100), 1, 1, p, now), "a full map refuses")
 	later := now.Add(2 * time.Minute)
 	r.noteRequest(2, later)
-	require.Equal(t, "", r.admit(int64(l07MaxOwners+100), 1, 2, p, later), "idle owners are evicted")
+	require.Equal(t, "", r.reserve(int64(l07MaxOwners+100), 1, 2, p, later), "idle owners are evicted")
 	for i := 0; i < l07MaxRecent+10; i++ {
-		r.noteKeep(1, 1, fmt.Sprint("s", i), now.Add(time.Minute), now)
+		r.noteKeep(1, fmt.Sprint("s", i), now.Add(time.Minute), now)
 	}
 	require.LessOrEqual(t, len(r.recent), l07MaxRecent)
 	for i := 0; i < l07MaxGroups+10; i++ {
 		r.noteRequest(int64(i), now)
 	}
 	require.LessOrEqual(t, len(r.groups), l07MaxGroups)
+}
+
+// B-T25-1: the A3/A4 check and the count are one critical section, so a
+// burst of concurrent busy requests never overshoots either cap.
+func TestL07ReserveIsAtomicUnderConcurrency(t *testing.T) {
+	burst := func(n int, reserve func(i int) string) int {
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		ok := 0
+		start := make(chan struct{})
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				<-start
+				if reserve(i) == "" {
+					mu.Lock()
+					ok++
+					mu.Unlock()
+				}
+			}(i)
+		}
+		close(start)
+		wg.Wait()
+		return ok
+	}
+	now := time.Now()
+	t.Run("owner cap", func(t *testing.T) {
+		r := newL07Runtime()
+		for i := 0; i < 1000; i++ {
+			r.noteRequest(1, now)
+		}
+		p := &CacheRoutingL07Policy{GroupKeepRatioPct: 20} // auto cap max(4, 2×1) = 4
+		require.Equal(t, 4, burst(100, func(int) string { return r.reserve(7, 1, 1, p, now) }))
+		require.Equal(t, int64(4), r.owners[7].sum(now, l07OwnerBucket, l07OwnerBuckets))
+	})
+	t.Run("group budget", func(t *testing.T) {
+		r := newL07Runtime()
+		for i := 0; i < 1000; i++ {
+			r.noteRequest(1, now)
+		}
+		p := &CacheRoutingL07Policy{GroupKeepRatioPct: 5} // 5% of 1000 requests
+		require.Equal(t, 50, burst(200, func(i int) string { return r.reserve(int64(100+i), 1, 1, p, now) }))
+		require.Equal(t, int64(50), r.groups[1].keeps.sum(now, l07GroupBucket, l07GroupBuckets))
+	})
+	t.Run("busy decisions of 100 sessions on one owner", func(t *testing.T) {
+		f := newL07Fixture(t, nil)
+		f.withPolicies(t, nil, true, false, func(p *CacheRoutingL07Policy) { p.GroupKeepRatioPct = 20 })
+		f.padRequests(1000)
+		owner := f.accounts[0]
+		group := &Group{ID: l07TestGroup, Platform: PlatformAnthropic}
+		kept := burst(100, func(i int) string {
+			ctx, _ := newL07Ctx(t)
+			session := fmt.Sprintf("burst-%d", i)
+			rec := f.svc.l07Begin(ctx, group, session, PlatformAnthropic, 0)
+			if f.svc.l07OwnerBusy(ctx, rec, &owner, session, l07TestModel, &AcquireResult{}, nil, nil) {
+				return ""
+			}
+			return "abandoned"
+		})
+		require.Equal(t, 4, kept, "auto owner cap holds under a concurrent burst")
+		require.Equal(t, int64(4), f.svc.cachePolicies.L07Counters().KeepTotal)
+		require.Equal(t, int64(96), f.svc.cachePolicies.L07Counters().AbandonTotal["owner_cap"])
+	})
+}
+
+// B-T25-1: a reservation whose keep fails afterwards is returned, so failures
+// never consume the owner or group budget.
+func TestL07ReservationRollsBackOnFailure(t *testing.T) {
+	ownerKeeps := func(f *l07Fixture) (int64, int64) {
+		r := f.svc.cachePolicies.l07
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		var o, g int64
+		if w := r.owners[1]; w != nil {
+			o = w.sum(f.now, l07OwnerBucket, l07OwnerBuckets)
+		}
+		if gr := r.groups[l07TestGroup]; gr != nil {
+			g = gr.keeps.sum(f.now, l07GroupBucket, l07GroupBuckets)
+		}
+		return o, g
+	}
+	for _, tc := range []struct {
+		name  string
+		setup func(*l07Fixture, *resilience.RequestState)
+		want  string
+	}{
+		{"guard", func(f *l07Fixture, _ *resilience.RequestState) {
+			f.svc.cachePolicies.l07.guardUntil.Store(f.now.Add(time.Minute).UnixNano())
+		}, "guard"},
+		{"redis write", func(f *l07Fixture, _ *resilience.RequestState) { f.cache.writeErr = errors.New("redis down") }, "state_error"},
+		{"keep", func(_ *l07Fixture, st *resilience.RequestState) { st.KeepSticky(9) }, "state_error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newL07Fixture(t, nil)
+			f.withPolicies(t, nil, true, false, nil)
+			f.padRequests(100)
+			ctx, st := newL07Ctx(t)
+			tc.setup(f, st)
+			rec := f.svc.l07Begin(ctx, &Group{ID: l07TestGroup, Platform: PlatformAnthropic}, "sess", PlatformAnthropic, 0)
+			require.False(t, f.svc.l07OwnerBusy(ctx, rec, &f.accounts[0], "sess", l07TestModel, &AcquireResult{}, nil, nil))
+			require.Equal(t, tc.want, L07TraceFieldsFromContext(ctx, "busy_wait_full").Abandon)
+			o, g := ownerKeeps(f)
+			require.Zero(t, o, "owner window unchanged")
+			require.Zero(t, g, "group keeps unchanged")
+			require.Zero(t, f.svc.cachePolicies.L07Counters().KeepTotal)
+		})
+	}
+	// After a rollback the budget is intact: the next busy request is kept.
+	f := newL07Fixture(t, nil)
+	f.withPolicies(t, nil, true, false, func(p *CacheRoutingL07Policy) { p.OwnerBusySkipPerMinCap = 1 })
+	f.padRequests(100)
+	f.cache.writeErr = errors.New("redis down")
+	ctx, _ := newL07Ctx(t)
+	rec := f.svc.l07Begin(ctx, &Group{ID: l07TestGroup, Platform: PlatformAnthropic}, "a", PlatformAnthropic, 0)
+	require.False(t, f.svc.l07OwnerBusy(ctx, rec, &f.accounts[0], "a", l07TestModel, &AcquireResult{}, nil, nil))
+	f.cache.writeErr = nil
+	ctx2, _ := newL07Ctx(t)
+	rec2 := f.svc.l07Begin(ctx2, &Group{ID: l07TestGroup, Platform: PlatformAnthropic}, "b", PlatformAnthropic, 0)
+	require.True(t, f.svc.l07OwnerBusy(ctx2, rec2, &f.accounts[0], "b", l07TestModel, &AcquireResult{}, nil, nil), "cap 1 is still free")
+	o, _ := ownerKeeps(f)
+	require.Equal(t, int64(1), o)
 }

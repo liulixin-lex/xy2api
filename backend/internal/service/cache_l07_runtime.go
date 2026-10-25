@@ -73,6 +73,16 @@ func (w *l07Window) add(now time.Time, width time.Duration, buckets int, delta i
 	w.n[i] += delta
 }
 
+// undo takes back one event added at the given time, unless its bucket was
+// reused since.
+func (w *l07Window) undo(at time.Time, width time.Duration, buckets int) {
+	e := at.UnixNano() / int64(width)
+	i := int(e % int64(buckets))
+	if w.epoch[i] == e && w.n[i] > 0 {
+		w.n[i]--
+	}
+}
+
 func (w *l07Window) sum(now time.Time, width time.Duration, buckets int) int64 {
 	e := now.UnixNano() / int64(width)
 	var total int64
@@ -157,9 +167,12 @@ func (r *l07Runtime) noteRequest(groupID int64, now time.Time) {
 	r.mu.Unlock()
 }
 
-// admit checks A3 then A4 for one more keep. It reports "" when both allow
-// it, otherwise the abandon reason. A full map refuses (toward baseline).
-func (r *l07Runtime) admit(ownerID int64, ownerConcurrency int, groupID int64, p *CacheRoutingL07Policy, now time.Time) string {
+// reserve checks A3 then A4 for one more keep and, when both allow it,
+// counts the keep in the same critical section, so concurrent busy requests
+// can never overshoot either cap. It reports "" on success, otherwise the
+// abandon reason. A full map refuses (toward baseline). A reservation whose
+// keep fails afterwards is returned with release.
+func (r *l07Runtime) reserve(ownerID int64, ownerConcurrency int, groupID int64, p *CacheRoutingL07Policy, now time.Time) string {
 	limit := int64(p.OwnerBusySkipPerMinCap)
 	if limit == 0 {
 		limit = int64(max(l07OwnerAutoCapFloor, 2*ownerConcurrency))
@@ -179,19 +192,28 @@ func (r *l07Runtime) admit(ownerID int64, ownerConcurrency int, groupID int64, p
 	if keeps*100 >= int64(p.GroupKeepRatioPct)*requests {
 		return "group_budget"
 	}
+	w.add(now, l07OwnerBucket, l07OwnerBuckets, 1)
+	g.keeps.add(now, l07GroupBucket, l07GroupBuckets, 1)
 	return ""
 }
 
-// noteKeep records an admitted keep (A3, A4) and the session as recently
-// kept by this instance until the state key expires.
-func (r *l07Runtime) noteKeep(ownerID, groupID int64, session string, until, now time.Time) {
+// release returns a reservation made at the given time.
+func (r *l07Runtime) release(ownerID, groupID int64, at time.Time) {
 	r.mu.Lock()
-	if w := r.ownerLocked(ownerID, now); w != nil {
-		w.add(now, l07OwnerBucket, l07OwnerBuckets, 1)
+	defer r.mu.Unlock()
+	if w := r.owners[ownerID]; w != nil {
+		w.undo(at, l07OwnerBucket, l07OwnerBuckets)
 	}
-	if g := r.groupLocked(groupID, now); g != nil {
-		g.keeps.add(now, l07GroupBucket, l07GroupBuckets, 1)
+	if g := r.groups[groupID]; g != nil {
+		g.keeps.undo(at, l07GroupBucket, l07GroupBuckets)
 	}
+}
+
+// noteKeep records a completed keep (its A3/A4 share was counted by
+// reserve) and the session as recently kept by this instance until the
+// state key expires.
+func (r *l07Runtime) noteKeep(groupID int64, session string, until, now time.Time) {
+	r.mu.Lock()
 	key := l07RecentKey(groupID, session)
 	if _, ok := r.recent[key]; !ok && len(r.recent) >= l07MaxRecent {
 		ms := now.UnixMilli()

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/sha256"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -184,6 +185,20 @@ func (s *GatewayService) l07OwnerBusy(ctx context.Context, rec *l07Request, owne
 	if !rec.armed() || owner == nil {
 		return false
 	}
+	kept := s.l07DecideBusy(ctx, rec, owner, sessionHash, model, slot, slotErr, waitErr)
+	// One line per busy decision of a treatment request (enums and integers only).
+	rec.mu.Lock()
+	abandon, busyN, holdMS := rec.abandon, rec.busyN, rec.holdMS
+	rec.mu.Unlock()
+	if kept {
+		abandon = "none"
+	}
+	slog.Info("cache.l07_decision", "group_id", rec.groupID, "session", shortSessionHash(sessionHash), "owner_account_id", owner.ID,
+		"kept", kept, "abandon", abandon, "busy_n", busyN, "hold_ms", holdMS)
+	return kept
+}
+
+func (s *GatewayService) l07DecideBusy(ctx context.Context, rec *l07Request, owner *Account, sessionHash, model string, slot *AcquireResult, slotErr, waitErr error) bool {
 	now := rec.now()
 	if slotErr == nil && slot != nil && slot.Acquired {
 		// The slot was free but the session quota refused it (H3).
@@ -250,27 +265,29 @@ func (s *GatewayService) l07OwnerBusy(ctx context.Context, rec *l07Request, owne
 		rec.abandonOnce("hold_time", now)
 		return false
 	}
-	if reason := rec.runtime.admit(owner.ID, owner.Concurrency, rec.groupID, p, now); reason != "" { // A3, A4
+	if reason := rec.runtime.reserve(owner.ID, owner.Concurrency, rec.groupID, p, now); reason != "" { // A3, A4
+		rec.abandonOnce(reason, now)
+		return false
+	}
+	abandon := func(reason string) bool {
+		rec.runtime.release(owner.ID, rec.groupID, now)
 		rec.abandonOnce(reason, now)
 		return false
 	}
 	if rec.runtime.guardTripped(now) { // A5
-		rec.abandonOnce("guard", now)
-		return false
+		return abandon("guard")
 	}
 	ttl := 2 * time.Duration(p.MaxHoldSeconds) * time.Second
 	if err := store.L07WriteBusy(stateCtx, rec.groupID, sessionHash, owner.ID, first, n, ttl); err != nil {
-		rec.abandonOnce("state_error", now)
-		return false
+		return abandon("state_error")
 	}
 	if !st.KeepStickyForAttempt(owner.ID) {
-		rec.abandonOnce("state_error", now)
-		return false
+		return abandon("state_error")
 	}
 	rec.mu.Lock()
 	rec.kept, rec.keptAttempt, rec.owner = true, true, owner.ID
 	rec.mu.Unlock()
-	rec.runtime.noteKeep(owner.ID, rec.groupID, sessionHash, now.Add(ttl), now)
+	rec.runtime.noteKeep(rec.groupID, sessionHash, now.Add(ttl), now)
 	return true
 }
 
