@@ -187,6 +187,7 @@ func TestL04ClaudeCodeFallbackStickyNamespaceC2C3(t *testing.T) {
 			s, c, key, p := l04RequestFixture(t, CacheM4BuildCapabilities{L04: true}, true)
 			fallback := gatewayProfitTestGroup(77, PlatformAnthropic)
 			fallback.ProfitControlEnabled = profit
+			key.Group.RateMultiplier = 0.5 // Production billing origin supplies the profit denominator.
 			key.Group.ClaudeCodeOnly = true
 			key.Group.FallbackGroupID = &fallback.ID
 			s.groupRepo = &mockGroupRepoForGateway{groups: map[int64]*Group{31: key.Group, 77: fallback}}

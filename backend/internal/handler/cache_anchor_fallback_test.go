@@ -113,6 +113,7 @@ func l04HandlerPlatformPolicyFixture(t *testing.T, caps service.CacheM4BuildCapa
 	if promptFallback {
 		first.Platform = service.PlatformAntigravity
 		first.Type = service.AccountTypeOAuth
+		first.Extra = map[string]any{"mixed_scheduling": true}
 		first.Credentials = map[string]any{"access_token": "synthetic", "project_id": "synthetic-project", "expires_at": time.Now().Add(24 * time.Hour).Format(time.RFC3339)}
 	}
 	second := &service.Account{ID: 2, Platform: platform, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "synthetic"}, AccountGroups: []service.AccountGroup{{GroupID: 77, AccountID: 2}}}
@@ -120,7 +121,8 @@ func l04HandlerPlatformPolicyFixture(t *testing.T, caps service.CacheM4BuildCapa
 	groups := &groupMapRepo{fakeGroupRepo: &fakeGroupRepo{}, groups: map[int64]*service.Group{31: a, 77: b}}
 	cache := &l04HandlerSticky{}
 	upstream := &l04HandlerUpstream{promptFallback: promptFallback}
-	gateway := service.ProvideGatewayServiceWithCacheTrace(nil, groups, nil, nil, nil, nil, nil, cache, cfg, scheduler, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, &service.TLSFingerprintProfileService{}, nil, nil, nil, nil, nil, engine)
+	settings := service.NewSettingService(&contentModerationHandlerSettingRepo{values: map[string]string{}}, cfg)
+	gateway := service.ProvideGatewayServiceWithCacheTrace(nil, groups, nil, nil, nil, nil, nil, cache, cfg, scheduler, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, settings, &service.TLSFingerprintProfileService{}, nil, nil, nil, nil, nil, engine)
 	billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billing.Stop)
 	h := &GatewayHandler{gatewayService: gateway, billingCacheService: billing, concurrencyHelper: NewConcurrencyHelper(service.NewConcurrencyService(&fakeConcurrencyCache{}), SSEPingFormatClaude, 0), cfg: cfg, maxAccountSwitches: 1}
