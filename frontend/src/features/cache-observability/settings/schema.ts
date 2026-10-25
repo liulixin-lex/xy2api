@@ -58,12 +58,13 @@ export function idRef(field: SchemaField): 'group' | 'account' | null {
 export const CANDIDATE_WARNINGS: readonly string[] = ['account_options_unavailable', 'group_options_unavailable']
 
 /**
- * The field as the card offers it: candidates the server did not load count as absent. The
- * selection stays as stored, ids without a name show as ids, and the server checks what is added.
+ * The field as the card offers it: candidates the server did not load count as absent. Each
+ * warning covers only its own candidate type (m4l03 README §1). The selection stays as stored,
+ * ids without a name show as ids, and the server checks what is added.
  */
 export function servedField(entry: PolicyEntry, field: SchemaField): SchemaField {
-  const unloaded =
-    !!idRef(field) && Array.isArray(field.options) && !field.options.length && entry.effective.warnings.some((w) => CANDIDATE_WARNINGS.includes(w))
+  const ref = idRef(field)
+  const unloaded = !!ref && Array.isArray(field.options) && !field.options.length && entry.effective.warnings.includes(`${ref}_options_unavailable`)
   return unloaded ? { ...field, options: undefined } : field
 }
 

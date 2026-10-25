@@ -160,9 +160,9 @@ export default {
       uuid_fill: 'uuid_fill（补全 UUID 会话标识）',
       whitelist: 'whitelist（白名单原样转发）',
       normalize: 'normalize（规范化后转发）',
-      score: 'score（现状）',
-      prev_host: 'prev_host（同档优先本会话上一次的上游 host）',
-      prev_host_plus_quality: 'prev_host+quality（再按上游 host 的缓存读取占比排序）',
+      score: '按缓存表现排序（现状）',
+      prev_host: '优先上一次服务的上游主机',
+      prev_host_plus_quality: '上一主机加主机质量（暂不可用）',
       aux_only: 'aux_only（只计入辅助值）',
       openai: 'OpenAI',
       anthropic: 'Anthropic',
@@ -264,12 +264,17 @@ export default {
       fallbackTag: '回退组',
       servingScope: '按实际服务的分组生效',
     },
+    accountPicker: {
+      placeholder: '选择账号，可多选',
+      empty: '没有可选账号',
+    },
     ids: {
       placeholder: '输入账号 ID 后回车',
       add: '添加',
       remove: '移除 {id}',
       invalid: '只能输入正整数 ID',
       emptyMeansAll: '为空表示全部合格账号',
+      manual: '手动输入账号 ID',
       item: '账号 #{id}',
     },
     rules: {
@@ -479,6 +484,22 @@ export default {
           description: '同一会话的在途请求数达到这个值时，后续请求不再补全会话标识，避免大量并发请求共用一个标识。',
           risk: '调高后，更多并发请求会共用同一个会话标识。',
         },
+        grok_chat_body_key: {
+          label: 'Grok 对话请求在正文中带会话标识',
+          description: '打开后，Grok 账号的对话请求除了请求头，也在正文中携带同一个会话标识。上游是否使用它需要先验证。',
+          risk: '改变 Grok 对话请求的出站请求体。',
+        },
+        grok_compact_identity: {
+          label: 'Grok 压缩请求带会话标识',
+          description: '打开后，Grok 的上下文压缩请求也携带会话标识，以便命中缓存；不会额外添加工具。',
+          risk: '改变 Grok 压缩请求的出站请求体。',
+        },
+        grok_account_ids: {
+          label: '启用以上两项的 Grok 账号',
+          description: '只对这些 Grok 账号生效，可以先只选一个账号试运行。',
+          risk: '所选账号的 Grok 出站请求会按以上两项改变。',
+          empty: '为空时不生效',
+        },
       },
       anthropic_identity: {
         anchor_group_ids: {
@@ -520,8 +541,13 @@ export default {
         },
         affinity_mode: {
           label: '同档亲和方式',
-          description: 'score 为现状；prev_host 在同一档候选中优先本会话上一次的上游 host，现有缓存评分作次级；prev_host+quality 在此基础上再按上游 host 的缓存读取占比排序。',
+          description: '只在会话需要重新选择账号、且候选的负载与优先级完全相同时，优先选择与上一次相同上游主机的账号。不会增加重试，也不会选用不健康的账号。',
           risk: '只调整同档候选的先后，不改变准入、冷却与回退；需要部署配置中的缓存感知路由已开启。',
+        },
+        affinity_rollout_percent: {
+          label: '上一主机偏好的灰度比例',
+          description: '在已开启缓存感知排序的会话中，按此比例启用；其余会话作为对照。',
+          risk: '比例越高，受这项偏好影响的会话越多。',
         },
       },
     },
