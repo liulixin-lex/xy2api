@@ -164,10 +164,12 @@ type CachePolicyService struct {
 	wg                              sync.WaitGroup
 	listeners                       []func(*CachePolicySnapshot)
 	northstarAvailable              bool
+	l07Caps                         cacheL07Caps
+	l07                             *l07Runtime
 }
 
 func NewCachePolicyService(repo SettingRepository, cfg *config.Config, options ...CachePolicyOption) *CachePolicyService {
-	s := &CachePolicyService{now: time.Now, repo: repo, started: cachePolicyProcessStartedAt, caps: CachePolicyCaps{1, 64, 32, 1024, 3, 512}}
+	s := &CachePolicyService{now: time.Now, repo: repo, started: cachePolicyProcessStartedAt, caps: CachePolicyCaps{1, 64, 32, 1024, 3, 512}, l07Caps: cacheL07CapsFromConfig(cfg), l07: newL07Runtime()}
 	for _, option := range options {
 		option(s)
 	}
