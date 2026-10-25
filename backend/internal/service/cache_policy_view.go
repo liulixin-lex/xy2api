@@ -145,6 +145,11 @@ func (s *CachePolicyService) schema(i int) []map[string]any {
 			map[string]any{"field": "byte_budget_mib", "type": "int", "min": 8, "max": s.caps.MaxByteBudgetMiB, "unit": "MiB", "cap_source": "gateway.cache_trace.max_byte_budget_mib"},
 			map[string]any{"field": "rate_mib_per_s", "type": "int", "min": 1, "max": s.caps.MaxRateMiBPerS, "unit": "MiB/s", "cap_source": "gateway.cache_trace.max_rate_mib_per_s"})
 	}
+	if i == 1 && s.providerTraceAvailable {
+		fields = append(fields,
+			map[string]any{"field": "platforms", "type": "enum_list", "options": []string{"openai", "anthropic", "gemini", "messages_bridge"}},
+			map[string]any{"field": "ingress_chain_percent", "type": "int", "min": 0, "max": 100, "unit": "percent"})
+	}
 	if i == 1 && s.northstarAvailable {
 		fields = append(fields, map[string]any{"field": "persist_trace_hourly", "type": "bool"})
 	}

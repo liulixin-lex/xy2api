@@ -27,6 +27,11 @@
 - P1 L-01 已在吸收 M1 后完成本地实现与非计时门禁，保持默认关闭，待独立评审；当前交接见下方 P1 条目。
 
 
+### 缓存 M2b / provider 挂点（2026-10-25，编译排队）
+
+- 已变基到 M3 main c07ece514。Anthropic/Gemini 生产发送、原始 usage、计费后结算与 Wire 接线已补；Begin/Bind/accessor 及平台、租户、serving 组作用域的摘要/history 键保持冻结。入站锚点按实际协议读取，涵盖 Messages/Responses 转换。
+- 唯一增量流水线已排队，先做五 tag vet；通过立即提交固定检查点给依赖方，随后继续 unit/race、实际输出契约、golden、stats S1–S5 与 Messages 桥。新增挂点五 tag vet 已通过，其余行为门禁仍在同一流水线执行，尚不能视为集成或部署交付；后续字段组尚未完成。
+
 - G：M1 日志 Attr 合并已验证；正式 d1 待复核，详见归档。
 
 ### 缓存策略历史 UTC（M1.1，本地完成）
@@ -272,6 +277,12 @@
 - 当前：完整四提交已变基到M2 main；northstar、计数器、M1.1 emit-only/UTC与仓储测试隔离保留。1e31dbe3c五tag编译全部通过；v1.1后继e972cd4e7仅改样例/unit测试，unit补查通过，其余四tag按未变化编译输入继承。R已核对变基语义无阻塞；工作树待本次纯记忆收尾后交P。实际unit/race、zero/logger/compat/lint、22样例回放与staging仍由最终M3候选统一执行，来源没有重复长测试。未推送、未变更生产。
 
 
+### 20261024-cache-p0b-fields — M2b（G2，进行中）
+
+- 基点 c07ece514；五个既有检查点以 rebase --onto 重放，保留 M2/M3 与仓储隔离。当前 provider 挂点、原始 usage 和计费后结算已接齐，等待同一条增量流水线编译；先前 main16a 的五 tag、20 出站/50 计费 golden 是旧树证据，不能冒称当前挂点通过。
+- 接口冻结：BeginProviderCacheTrace、BindProviderCacheTraceSession、ProviderCacheTraceSessionDigest；摘要按 <platform>-session 域和 api_key_id|serving_group_id|local_hash 计算，前 16 hex，history/LRU 带平台。L-04 决策不读取观测 accessor。Gemini 来源保留合法 cacheable_content/message_content_fallback，M4 只追加 anchor_v2。
+- 单条流水线先五 tag，通过即本地提交编译检查点并通知依赖方；同租约继续触及包 unit、race、真实输出契约与 golden、stats S1–S5、Messages 桥和增量 lint。不重复任务，可信编译缓存播种，测试 -count=1；结果待补。
+- 旧存储只在内存补 ingress_chain_percent=min(10,chain_percent)，不写回或改 rev，validate/PUT 共用基础；FX-OBS-1 alias-only 按 n/a_usage，计费解析不改。T0b.5 别名计费变化按裁定延期。其他字段组待后续实现，未推送或部署。
 
 ### 20261023-cache-p0b — 在线缓存北极星与管理员图表（G2，实现完成，待集成）
 
@@ -1224,3 +1235,36 @@ pnpm --dir frontend run build
 - 从 efd7 独立应用已审 v2，精确 tree a56c02da；产品提交只改 service，文档/policy/记忆同步后继与其 backend 同树。Chat 实际写入标记内用既有 SSEBuffer 包住成功响应正文，统一覆盖 buffered、流式、failed 与 cyber 客户端出口；原生规则错误 message 另作精确删除并计 error_body。
 - 六个新顶层测试覆盖实际注入回显、工具、累积输出、超大事件、失败/HTTP 错误、关闭态控制、Messages 不可注入及 EOF/原始读错；结构登记锁定实际写入门控。只做格式/diff/文档/来源审计，不冒称 Go 实跑。
 - 后续由独立评审做一次合并定向与 golden，P 核来源并组装，S 仅补 active/T4.0；本分支冻结后不改运行树、不重复排 heavy。
+
+### 2026-10-24T16:54Z — 缓存 M2b stats 平台分区（本地检查点）
+
+- 按 v1.0.2 区分当前覆盖和显式平台历史；host EWMA、会话与容量分区，跨平台先求和后折叠；默认 OpenAI/all 与小时行用 main16a 原函数逐字段对照。新 HTTP 测试用固定独立计数并校验契约原元数据，源样例 SHA 完整保留。
+- 原五 tag、20 出站和 50 计费 golden 已过，原策略三处失败已修正但未复跑；新增 stats 测试尚未运行。重任务为 M3 候选让行，当前不是可集成交付。文档与保护登记已同步，不改调度、迁移或账单。
+- 下一步：继续 provider 捕获/结算，资源释放后统一补增量门禁与实际输出契约校验；不重复未受影响且通过的检查。未推送或部署。
+
+### 2026-10-24T17:07Z — 缓存 M2b Messages 桥接线（本地，未验收）
+
+- 为桥补齐发送时标、最终请求头、流式用量存在性和结算计数；平台开关按路径区分 openai/messages_bridge，原生 Anthropic 与 raw Chat 子路径排除。计费赋值和路由选择未改。
+- 测试覆盖两种响应模式的八态开关矩阵、typed 显式零/缺字段、原生子路径、OpenAI 被排除时零 body 读取；原入口结构清单增加一条流式入口，旧断言全部保留。
+- 桥的独立 main 出站/计费基线及新增 Go/race 均待资源释放后执行，目前只有格式和静态检查。Anthropic/Gemini、后续字段组仍未完成，不推送、不部署、不称交付。
+
+### 2026-10-24T18:51Z — M2b 观测别名与 provider 租户隔离基础
+
+- 分类器读取类位改为 bit0/2/3；alias-only 保留 usage_fields、按 n/a_usage 输出且无 na_reason，依赖读量的两个标记关闭，计费解析未变。追加六种真实转发事件回归及 canonical/metadata 位/优先级测试，复制 v1.2 schema 和增量样例，44 份旧夹具 SHA 不变。
+- provider session_digest 按指定 HMAC 域和 API key、serving 组、原会话哈希生成，内部历史键另带 platform。独立有界 LRU 只收此键，发送、结算、历史发布分开，失效 owner 不能发布到复用摘要的新 epoch；没有 OpenAI 旧会话表读写。尚未接入 Anthropic/Gemini 生产挂点，属于实现基础。
+- 源契约自检、格式及静态文档检查；所有新增 Go/race 与实际输出校验仍待执行，重门禁按负责人要求给 M3 让行，不重复排队。非阻塞的保留期清理与行为策略过期保护保留在后续维护范围。未推送、部署或访问生产。
+
+### 2026-10-24T18:56Z — M2b session digest 契约域更正
+
+- 按 F v1.2.1 更正 provider HMAC 域为 <platform>-session，保留租户与 serving 组输入及 16 位 hex 格式；原域来自开工包笔误。历史键复用同一计算结果，后续 S2/S6 也使用它。
+- 四条合法、一条无作用域反例向量原样复制并登记 SHA；新增直接对期望摘要及真实历史键的测试，Anthropic/Gemini 摘要自身亦相互隔离。源契约、格式与轻量文档检查，Go/race 继续并入已有待执行增量流水线，为 M3 让行。尚未接入 provider 挂点，不是可集成交付。
+
+### 2026-10-25T04:06Z — M2b provider 挂点编译准备
+
+- 补齐 Anthropic 原生、passthrough、两种协议转换、Vertex/Bedrock 发送及原始 usage，Gemini compat/native 的 buffered、streaming 与 SSE 聚合回调；Wire 复用同一策略、计数与观测服务。Begin/Bind/accessor 签名和 scoped HMAC/history 键保持冻结；L-04 不依赖观测开关。
+- 结算在既有 force-cache/TTL 处理后读取快照，仅成功计费或 usage-only 路径发布；失败和普通未送达只关闭计时，不训练历史。计费算法不改。新增 provider 出站/计费对照、关闭态、usage 位和失败发布边界测试。
+- 本轮新 Go 尚未运行；唯一增量流水线先做五 tag 编译，通过即提交检查点，然后 unit/race、真实输出契约与 golden、平台分区及 Messages 桥。可信编译缓存可播种，所有测试使用 -count=1；不重复旧任务。
+
+### 2026-10-25T05:38Z — T0b.4 provider 编译检查点
+
+- 五 tag vet 全部通过；Begin/Bind/accessor 与 session digest/history 键保持冻结。仅编译已验收，provider 行为、计费和关闭态回放由同一重任务后续执行，结果待补；不作为 M2b 最终集成交付。

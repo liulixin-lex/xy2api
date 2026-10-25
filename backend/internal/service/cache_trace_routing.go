@@ -161,6 +161,8 @@ func cacheTraceRoutePriority(reason string) int {
 		return 4
 	case "soft_divert":
 		return 5
+	case "non_fault_rebind":
+		return 55
 	case "session_rebind":
 		return 6
 	case "failover_n":

@@ -24,6 +24,9 @@ const cacheTraceAsyncLifetime = 10 * time.Minute
 // Retrying builds another request and never writes these arrays. Holding the
 // reference keeps it alive independently of the request's lifetime.
 type cacheTraceJob struct {
+	providerKey                  cacheProviderSessionKey
+	providerPlatform             string
+	providerProtocolIn           string
 	policy                       *CachePolicySnapshot
 	pool                         *cacheTraceWorkers
 	cost                         int64
@@ -43,6 +46,7 @@ type cacheTraceJob struct {
 }
 
 type cacheTraceComputed struct {
+	provider                   cacheProviderFields
 	prefix                     cachePrefixObservation
 	chain                      cachePrefixChain
 	anchor, pckIn, idSource    string
@@ -59,6 +63,7 @@ type cacheTraceSettlement struct {
 // for JSON, hashing, queue locks, or an active worker. History publication needs
 // both a delivered settlement and a computed chain, in either order.
 type cacheTraceAsync struct {
+	providerKey   cacheProviderSessionKey
 	result        atomic.Pointer[cacheTraceComputed]
 	settled       atomic.Pointer[cacheTraceSettlement]
 	published     atomic.Bool
@@ -76,6 +81,10 @@ func (a *cacheTraceAsync) publish(s *OpenAIGatewayService, session string) {
 	}
 	chain := r.chain
 	chain.settledAt = settlement.at
+	if a.providerKey.platform != "" {
+		s.providerHistory.remember(a.providerKey, settlement.owner, chain, settlement.prompt, settlement.at, s.cacheTraceCaps())
+		return
+	}
 	s.rememberCachePrefix(session, chain, settlement.prompt, settlement.owner)
 }
 
@@ -294,6 +303,9 @@ func (j *cacheTraceJob) compute() {
 		cutoff = j.created // adapters that do not dispatch retain their old cutoff
 	}
 	compute := func(body []byte) *cacheTraceComputed {
+		if j.providerPlatform != "" {
+			return j.service.computeProviderCacheTrace(j, body, cutoff)
+		}
 		return j.service.computeCacheTrace(j.ingress, body, j.apiKeyID, j.headerSource, j.session, j.protocol, j.transport, j.policy, cutoff)
 	}
 	var result *cacheTraceComputed
@@ -384,6 +396,9 @@ func (a *cacheTraceAsync) coverageReason(r *cacheTraceComputed) string {
 func (j *cacheTraceJob) historyEvicted() bool {
 	if j.history == nil || j.service == nil {
 		return false
+	}
+	if j.providerPlatform != "" {
+		return !j.service.providerHistory.current(j.providerKey, j.history)
 	}
 	telemetry := j.service.cacheTelemetry()
 	telemetry.mu.Lock()

@@ -54,7 +54,8 @@
       "openspec/changes/gateway-resilience-v2-20261021/**",
       "openspec/changes/gateway-resilience-045-20261021/**",
       "openspec/changes/cache-runtime-policies/**",
-      "openspec/changes/cache-northstar-panel/**"
+      "openspec/changes/cache-northstar-panel/**",
+      "openspec/changes/cache-provider-observability/**"
     ],
     "manual_merge": [
       "Makefile",
@@ -2304,10 +2305,6 @@
     },
     {
       "path": "backend/internal/service/cache_trace.go",
-      "value": "s.CaptureCachePolicy(c).TraceEnabled()"
-    },
-    {
-      "path": "backend/internal/service/cache_trace.go",
       "value": "policy: CachePolicyFromGin(c)"
     },
     {
@@ -2392,7 +2389,7 @@
     },
     {
       "path": "backend/internal/service/cache_policy.go",
-      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups))"
+      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups), WithProviderCacheTrace())"
     },
     {
       "path": "backend/internal/service/openai_cache_diagnostics.go",
@@ -2513,6 +2510,174 @@
     {
       "path": "backend/internal/service/openai_upstream_identity_response.go",
       "value": "func (b *openAIUpstreamIdentitySSEBody) Read(p []byte) (int, error)"
+    },
+    {
+      "path": "backend/internal/service/cache_trace.go",
+      "value": "s.CaptureCachePolicy(c).TraceEnabledFor(cacheTraceOpenAIPlatform(c))"
+    },
+    {
+      "path": "backend/internal/service/cache_policy.go",
+      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithProviderCacheTrace())"
+    },
+    {
+      "path": "backend/internal/service/cache_trace_counter_platforms.go",
+      "value": "func (c *CacheTraceCounters) RecordPlatformBusiness("
+    },
+    {
+      "path": "backend/internal/service/cache_trace_counter_platforms.go",
+      "value": "func (c *CacheTraceCounters) RecordPlatformTrace("
+    },
+    {
+      "path": "backend/internal/service/cache_trace_counter_platforms.go",
+      "value": "func (c *CacheTraceCounters) selectedSnapshot("
+    },
+    {
+      "path": "backend/internal/service/cache_trace_counter_platforms_test.go",
+      "value": "func TestCacheProviderCountersDoNotPolluteOpenAI("
+    },
+    {
+      "path": "backend/internal/service/cache_trace_counter_platforms_test.go",
+      "value": "func TestCacheProviderCountersDefaultMain16Parity("
+    },
+    {
+      "path": "backend/internal/server/routes/cache_provider_stats_contract_test.go",
+      "value": "func TestCacheProviderStatsHandlerContract("
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "captureCacheTraceHeaders(c, upstreamReq)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "cacheTraceFromGin(c).setSessionSource(\"gw_isolated\")"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "s.markCacheTraceSent(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "s.startCacheTraceRequest(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "observeCacheTraceTypedPrompt(cacheTraceTyped, event.Usage != nil)"
+    },
+    {
+      "path": "backend/internal/service/openai_cache_diagnostics.go",
+      "value": "p.TraceEnabledFor(cacheTraceOpenAIPlatform(c))"
+    },
+    {
+      "path": "backend/internal/service/cache_trace_messages.go",
+      "value": "func cacheTraceMessagesAttemptAllowed("
+    },
+    {
+      "path": "backend/internal/service/cache_provider_messages_test.go",
+      "value": "func TestCacheProviderMessagesGateWireAndSettlement("
+    },
+    {
+      "path": "backend/internal/service/cache_provider_messages_test.go",
+      "value": "func TestCacheProviderMessagesNativeSubpathExcluded("
+    },
+    {
+      "path": "backend/internal/service/cache_provider_messages_test.go",
+      "value": "func TestCacheProviderOpenAIExcludedPlatformZeroWork("
+    },
+    {
+      "path": "backend/internal/service/cache_trace_classify.go",
+      "value": "readKnown := in.UsageObserved && in.UsageFields&13 != 0"
+    },
+    {
+      "path": "backend/internal/service/cache_trace_classify_test.go",
+      "value": "func TestT3ClassifierAliasOnlyReadUnknown("
+    },
+    {
+      "path": "backend/internal/service/cache_provider_alias_test.go",
+      "value": "func TestCacheProviderAliasOnlySettlement("
+    },
+    {
+      "path": "backend/internal/service/cache_provider_scope.go",
+      "value": "s.cacheIdentityDigest(platform+\"-session\", value)"
+    },
+    {
+      "path": "backend/internal/service/cache_provider_history.go",
+      "value": "map[cacheProviderSessionKey]*cacheProviderHistoryEntry"
+    },
+    {
+      "path": "backend/internal/service/cache_provider_trace.go",
+      "value": "func (s *GatewayService) BeginProviderCacheTrace("
+    },
+    {
+      "path": "backend/internal/service/cache_provider_trace.go",
+      "value": "func (s *GatewayService) BindProviderCacheTraceSession("
+    },
+    {
+      "path": "backend/internal/service/cache_provider_trace.go",
+      "value": "func ProviderCacheTraceSessionDigest("
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "h.gatewayService.BeginProviderCacheTrace(c, platform, \"messages\", body, parsedReq)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
+      "value": "h.gatewayService.BeginProviderCacheTrace(c, groupPlatform, \"chat\", body, parsedReq)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "h.gatewayService.BeginProviderCacheTrace(c, effectiveAPIKeyPlatform(c, apiKey), \"responses\", body, parsedReq)"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "providerTraceEligible := shouldTraceGeminiProviderAction(action)"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "h.gatewayService.BindProviderCacheTraceSession(c, sessionHash, traceSource)"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "ProvideGatewayServiceWithCacheTrace"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "ProvideGeminiMessagesCompatServiceWithCacheTrace"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "func shouldTraceGeminiProviderAction(action string) bool"
+    },
+    {
+      "path": "backend/internal/service/cache_provider_settlement.go",
+      "value": "func (s *OpenAIGatewayService) settleProviderCacheTrace("
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "value": "s.providerTraceEngine.settleProviderCacheTrace(providerTraceResult, providerDelivery, true)"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "noteProviderCacheTraceOwnerSkip(ctx, \"busy_wait_full\")"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "noteProviderCacheTraceOwnerSkip(ctx, \"model_unsupported\")"
+    },
+    {
+      "path": "backend/internal/service/cache_trace.go",
+      "value": "func (s *OpenAIGatewayService) cacheProviderTraceAnchorParts("
+    },
+    {
+      "path": "backend/internal/service/cache_provider_scope_test.go",
+      "value": "func TestCacheProviderGeminiAnchorUsesParts("
+    },
+    {
+      "path": "backend/internal/handler/cache_provider_trace_handler_test.go",
+      "value": "func TestShouldTraceGeminiProviderAction("
+    },
+    {
+      "path": "backend/internal/service/bedrock_stream.go",
+      "value": "observeProviderCacheTrace(c, sseData)"
     }
   ],
   "forbidden_module_paths": [
@@ -3511,6 +3676,21 @@
       "id": "xy-openai-upstream-identity-l01",
       "path": "backend/internal/service/openai_upstream_identity_conversion_test.go",
       "literal": "func TestL01M31ConversionBodyEOFAndReadError("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_provider_scope_test.go",
+      "literal": "func TestCacheProviderSessionTenantAndServingScope("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_provider_history_test.go",
+      "literal": "func TestCacheProviderHistoryTenantAndEpochIsolation("
+    },
+    {
+      "id": "xy-openai-cache-trace",
+      "path": "backend/internal/service/cache_provider_scope_test.go",
+      "literal": "func TestCacheProviderSessionContractVectors("
     }
   ]
 }

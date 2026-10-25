@@ -130,6 +130,26 @@ func scanCachePrefix(body []byte, protocol string, seed uint64, paths []string, 
 			o.ModelGen = cachePrefixModelGeneration(v.Str)
 		case "tools":
 			tools = v
+		case "system":
+			if protocol == "messages" {
+				instructions = v
+			}
+		case "systemInstruction":
+			if protocol == "gemini" {
+				instructions = v
+			}
+		case "thinking":
+			if protocol == "messages" {
+				reasoning = v
+			}
+		case "generationConfig":
+			if protocol == "gemini" {
+				reasoning = v
+			}
+		case "contents":
+			if protocol == "gemini" {
+				items = v
+			}
 		case "instructions":
 			instructions = v
 		case "text":
@@ -143,11 +163,11 @@ func scanCachePrefix(body []byte, protocol string, seed uint64, paths []string, 
 		case "store":
 			o.StoreFalse = v.Type == gjson.False
 		case "input":
-			if protocol != "chat" {
+			if protocol == "responses" {
 				items = v
 			}
 		case "messages":
-			if protocol == "chat" {
+			if protocol == "chat" || protocol == "messages" {
 				items = v
 			}
 		}
@@ -323,7 +343,33 @@ func scanCachePrefix(body []byte, protocol string, seed uint64, paths []string, 
 		add(item)
 	}
 	if items.IsArray() {
-		items.ForEach(func(_, item gjson.Result) bool { visit(item); return true })
+		items.ForEach(func(_, item gjson.Result) bool {
+			if protocol == "messages" || protocol == "gemini" {
+				blocks := item.Get("content")
+				if protocol == "gemini" {
+					blocks = item.Get("parts")
+				}
+				role := item.Get("role").Str
+				if !blocks.IsArray() {
+					visit(item)
+					return true
+				}
+				blocks.ForEach(func(_, block gjson.Result) bool {
+					add(block)
+					o.TailKind = "other"
+					if role == "user" {
+						o.TailKind = "user_msg"
+					}
+					if block.Get("type").Str == "tool_result" || block.Get("functionResponse").Exists() {
+						o.TailKind = "tool_output"
+					}
+					return true
+				})
+			} else {
+				visit(item)
+			}
+			return true
+		})
 	} else if items.Exists() {
 		visit(items)
 	}

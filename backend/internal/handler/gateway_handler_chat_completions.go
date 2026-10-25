@@ -178,8 +178,10 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		UserAgent: c.GetHeader("User-Agent"),
 		APIKeyID:  apiKey.ID,
 	}
-	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 	groupPlatform := effectiveAPIKeyPlatform(c, apiKey)
+	h.gatewayService.BeginProviderCacheTrace(c, groupPlatform, "chat", body, parsedReq)
+	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	h.gatewayService.BindProviderCacheTraceSession(c, sessionHash, "")
 	selectionSessionHash := sessionHash
 	if groupPlatform == service.PlatformGemini && selectionSessionHash != "" {
 		selectionSessionHash = "gemini:" + selectionSessionHash
