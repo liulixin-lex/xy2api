@@ -162,6 +162,19 @@ history 缺省最近 20 条，最多 100 条；可按键、时间和 `after_rev`
 WebSocket turn 使用固定快照，重试、failover 和流式过程不重新加载。后台循环
 每轮获取一次。开关读取无数据库访问、零分配。
 
+保留已加载快照有上限：静态 `gateway.cache_policy.max_stale_seconds`，默认 900，
+取值 0 或 60..86400，0 表示不设上限。本实例距最近一次成功刷新超过该值后，下一次
+失败的刷新（每 30 秒一次）在后台发布一次陈旧快照：行为类策略 upstream_identity
+（以及构建提供的 anthropic_identity、routing）按关闭处理，出站回到基线；master、
+observability、northstar 与各 revision、pol_rev 不变，不写数据库。这些键的
+effective 为 blocked、active=false，blockers 含 `stale_snapshot`（killed 与
+parse_error 保留原状态），validate 预览同样覆盖。陈旧期间 PUT 照常提交并发布，
+但陈旧标记保留到下一次成功刷新；刷新成功即恢复。进入陈旧时输出 Warn 日志
+`cache policy snapshot stale`，字段为 `cache_policy_snapshot_age_seconds`、
+`cache_policy_stale_total`、`max_stale_seconds`；恢复时输出 Info 日志
+`cache policy snapshot refreshed`。按该 Warn 配置告警，只通知。代价：L-01 因陈旧
+关闭和恢复时，上游身份各变化一次，中转侧缓存各冷启动一次；900 秒只是默认值。
+
 `gateway.cache_features.kill_switch` 是静态紧急总闸，默认 false。总闸开启时仍可
 保存配置，界面显示 killed。它和运行时总开关均不控制既有的
 `gateway.openai_cache.*`、Claude 自动缓存或韧性设置；既有机制只读展示，
@@ -181,7 +194,7 @@ clipped_fields 中报告。sample_percent 与 chain_percent 为 0..100，
 
 静态资源上限支持调低：`max_byte_budget_mib` 为 8–64、`max_rate_mib_per_s` 为 1–32、`max_sessions` 为 1–1024、`chains_per_session` 为 1–3、`max_checkpoints` 为 1–512。会话与检查点上限仅限制新增 trace 历史和时序状态，既有 diagnostics 的会话保留与排序不受影响；worker 固定大小的临时扫描空间仍按 512 个检查点预留。运行时预算缩小时，已预留的任务正常排空，新任务需符合新预算；速率通过原 limiter 更新，不重建池、不等待转发。重启后静态上限变小，生效值取保存值与新上限的较小值，接口在 `clipped_fields` 提示。
 
-撤回观测：在管理员面板关闭观测，检查本实例 `loaded.rev` 与保存的 `stored.rev` 一致，并等待其他实例最多 60 秒刷新。已在处理的请求沿用原快照；下一请求采用新策略。关闭总开关只停止受它控制的行为类策略，观测不受总开关控制。若 settings 故障，修改静态 kill switch 并按部署流程重启；总闸期间仍可保存策略，解除前可先关闭领域开关。每次 PUT 的操作者、理由、前后版本和字段名写入现有审计日志，409 冲突须刷新当前版本后重新确认。
+撤回观测：在管理员面板关闭观测，检查本实例 `loaded.rev` 与保存的 `stored.rev` 一致，并等待其他实例最多 60 秒刷新。已在处理的请求沿用原快照；下一请求采用新策略。关闭总开关只停止受它控制的行为类策略，观测不受总开关控制。若 settings 故障，行为类策略在 `max_stale_seconds` 后自动按关闭处理，无需重启；需要立即停止时，修改静态 kill switch 并按部署流程重启；总闸期间仍可保存策略，解除前可先关闭领域开关。每次 PUT 的操作者、理由、前后版本和字段名写入现有审计日志，409 冲突须刷新当前版本后重新确认。
 
 ## 在线北极星与管理员图表
 
@@ -209,11 +222,16 @@ P = input + cache creation + cache read。平台优先取服务分组配置，�
 host 不含凭据、端口、路径或查询参数。少于 10 个请求的组并入 other。
 
 后台沿用 dashboard 的 leader 锁，在其更新水位后独立执行；北极星使用自己的水位，
-不修改 dashboard 表、间隔或水位，也不写 usage_logs。默认关闭时入口即返回，
+不修改 dashboard 表、间隔或水位，也不写 usage_logs。默认关闭、且观测与北极星
+两项策略从未保存过（revision 均为 0）时，入口即返回，不参与 leader 选举，
 不执行聚合、回填、清理 SQL。每天 00:30 UTC 后第一次运行，在同一事务内重算前一
 UTC 日 24 个小时，吸收迟到行；失败回滚，可安全重复或从已提交回填边界恢复。
 小时完成标记区分真实空桶与缺失小时，窗口边界日和缺小时标为 partial。
-汇总保留 180 天，trace 小时计数保留 90 天。
+汇总、小时完成标记与事件保留 180 天，trace 小时计数保留 90 天。保留期与开关解耦：
+两项策略任一保存过之后，无论 rollup_enabled、persist_trace_hourly、观测开关或静态
+kill switch 如何，leader 每小时最多尝试一次清理，失败也计一次。先用一条 EXISTS
+查询判断四张表是否有过期行，没有就结束，不写任何数据；有过期行时只清理这些表，
+每批最多 5000 行，逐批自动提交，不形成长事务。只删除时间严格早于截止时刻的行。
 
 金额以已结算分项成本计算窗口内 platform/model 加权单价，
 不是当前价目表。Anthropic 有 creation 时使用实际混合 creation 单价。
@@ -232,7 +250,7 @@ priced_p_share 仍按业务范围的有价 P / 业务 P 计算，三种 cost_vie
 计数与统计不修改 cache_trace 日志载荷、计费或出站内容。
 
 撤回：关闭 rollup_enabled，检查 loaded rev 并等待其他实例刷新；
-下一后台周期不再聚合或回填，已提交汇总仍可查询。关闭观测会停止新的 trace 计数，
+下一后台周期不再聚合或回填，已提交汇总仍可查询，并照常按保留期清理。关闭观测会停止新的 trace 计数，
 已在途请求沿用入口快照。紧急总闸按部署流程配置并重启。
 迁移 279 只新增北极星小时汇总、汇总水位、小时完成标记、事件与 trace 小时汇总五张表；
 回退程序可保留这些表，禁止回退时修改既有 usage/dashboard 数据或已登记迁移校验和。
