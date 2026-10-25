@@ -137,7 +137,7 @@ func cachePolicyHistoryField(key, field string) bool {
 		"northstar":          "rollup_enabled backfill_days policy_version model_thresholds excluded_group_ids exclude_media unknown_threshold",
 		"upstream_identity":  "mode account_ids rollout_percent chat_compat_uuid header_only_uuid forward_session_headers max_inflight_per_key",
 		"anthropic_identity": "anchor_group_ids gemini_anchor metadata_group_ids rollout_percent",
-		"routing":            "keep_sticky_on_busy.enabled keep_sticky_on_busy.group_ids keep_sticky_on_busy.rollout_percent affinity_mode",
+		"routing":            "keep_sticky_on_busy.enabled keep_sticky_on_busy.group_ids keep_sticky_on_busy.rollout_percent keep_sticky_on_busy.max_consecutive_busy keep_sticky_on_busy.max_hold_seconds keep_sticky_on_busy.owner_busy_skip_per_min_cap keep_sticky_on_busy.group_keep_ratio_pct keep_sticky_on_busy.health_lookback_seconds affinity_mode",
 	}
 	for _, candidate := range strings.Fields(fields[key]) {
 		if candidate == field {

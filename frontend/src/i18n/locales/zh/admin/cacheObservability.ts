@@ -86,6 +86,7 @@ export default {
       static_aware_routing_disabled: '这一项依赖一个需要修改配置并重启才能打开的系统开关，目前是关闭的。保存后不会生效；请联系运维评估。',
       parse_error: '存储的配置无法识别，已按关闭处理。重新保存一次即可恢复。',
       kill_switch: '静态总闸已开启：保存的配置要等总闸解除后才生效。',
+      stale_snapshot: '策略快照已过期：数据库刷新连续失败超过上限，行为类策略暂按关闭处理，刷新恢复后自动恢复。',
     },
     warnings: {
       observability_off: '缓存观测未开启：开启后将无法评估这项改动的效果。建议先开启“缓存观测”。',
@@ -118,6 +119,7 @@ export default {
       static_aware_routing_disabled: '依赖的系统开关尚未打开，保存后不会生效',
       parse_error: '原有配置无法识别，本次保存将覆盖它',
       kill_switch: '静态总闸已开启，本次只保存，解除后才生效',
+      stale_snapshot: '策略快照已过期，刷新恢复前保存不会生效',
     },
     errors: {
       out_of_range: '超出允许范围（{min} 到 {max}）',

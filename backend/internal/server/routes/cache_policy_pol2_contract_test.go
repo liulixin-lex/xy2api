@@ -91,7 +91,9 @@ func TestCachePolicyPOL2ContractReplay(t *testing.T) {
 			}
 			require.NoError(t, json.Unmarshal(raw, &meta))
 			require.True(t, meta.Fixture.SnapshotStale)
-			expected := contractMap(t, f.Response)
+			// This build carries T2.5: routing has the m4l07 keep_sticky_on_busy
+			// leaves (the F derivation, proven by TestCachePolicyM4L07OverlayMatchesAuthority).
+			expected := cacheM4L07Overlay(t, f.Response)
 			data, _ := f.Response["data"].(map[string]any)
 			repo := &cacheRouteStore{rows: map[string]string{
 				service.SettingKeyClaudeCacheFallbackPolicy: `{"enabled":true,"group_ids":[1,2]}`,

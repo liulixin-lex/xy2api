@@ -63,6 +63,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/features/cache-observability/settings/__tests__/upstreamIdentity.spec.ts \
 	src/features/cache-observability/settings/__tests__/m31.spec.ts \
 	src/features/cache-observability/settings/__tests__/contract.spec.ts \
+	src/features/cache-observability/settings/__tests__/pol2.spec.ts \
 	src/features/cache-observability/settings/__tests__/CacheSettingsPanel.spec.ts \
 	src/features/cache-observability/charts/__tests__/viewModel.spec.ts \
 	src/features/cache-observability/charts/__tests__/mock.spec.ts \
