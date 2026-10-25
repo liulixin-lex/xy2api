@@ -2688,8 +2688,8 @@
       "value": "p.anchorPolicy.available && !p.behaviorStale() && p.MasterEnabled()"
     },
     {
-      "path": "backend/internal/handler/gateway_handler.go",
-      "value": "h.gatewayService.PrepareCacheAnchor(c, apiKey, parsedReq, service.PlatformAnthropic, true)"
+      "path": "backend/internal/handler/cache_anchor_handler_structure_test.go",
+      "value": "count_tokens does not enter the behavior or observation path"
     },
     {
       "path": "backend/internal/handler/gemini_v1beta_handler.go",
