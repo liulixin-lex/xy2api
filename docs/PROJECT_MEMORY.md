@@ -12,10 +12,10 @@
 - P1 L-01 已在吸收 M1 后完成本地实现与非计时门禁，保持默认关闭，待独立评审；当前交接见下方 P1 条目。
 
 
-### 缓存 M2b / provider 挂点（2026-10-25，编译排队）
+### 缓存 M2b / provider 挂点（2026-10-25，编译已过）
 
 - 已变基到 M3 main c07ece514。Anthropic/Gemini 生产发送、原始 usage、计费后结算与 Wire 接线已补；Begin/Bind/accessor 及平台、租户、serving 组作用域的摘要/history 键保持冻结。入站锚点按实际协议读取，涵盖 Messages/Responses 转换。
-- 唯一增量流水线已排队，先做五 tag vet；通过立即提交固定检查点给依赖方，随后继续 unit/race、实际输出契约、golden、stats S1–S5 与 Messages 桥。新增挂点五 tag vet 已通过，其余行为门禁仍在同一流水线执行，尚不能视为集成或部署交付；后续字段组尚未完成。
+- 检查点 `9243c2867` 已通过五 tag vet、docs/diff，并通知依赖方。audit 因旧内联未送达判断的字面量登记停止；仅同步登记到相同的调用与提前返回，源码不变，继承五 tag 结果后续跑 unit/race、实际契约/golden、stats S1–S5 与 Messages 桥。行为门禁及后续字段组尚未完成，不作为最终集成交付。
 
 - G：M1 日志 Attr 合并已验证；正式 d1 待复核，详见归档。
 
@@ -239,7 +239,7 @@
 
 ### 20261024-cache-p0b-fields — M2b（G2，进行中）
 
-- 基点 c07ece514；五个既有检查点以 rebase --onto 重放，保留 M2/M3 与仓储隔离。当前 provider 挂点、原始 usage 和计费后结算已接齐，等待同一条增量流水线编译；先前 main16a 的五 tag、20 出站/50 计费 golden 是旧树证据，不能冒称当前挂点通过。
+- 基点 c07ece514；五个既有检查点以 rebase --onto 重放，保留 M2/M3 与仓储隔离。当前 provider 挂点、原始 usage 和计费后结算已接齐，检查点 9243c2867 的五 tag vet 全过；先前 main16a 的 golden 是基线证据，当前候选行为回放待同一流水线续跑。
 - 接口冻结：BeginProviderCacheTrace、BindProviderCacheTraceSession、ProviderCacheTraceSessionDigest；摘要按 <platform>-session 域和 api_key_id|serving_group_id|local_hash 计算，前 16 hex，history/LRU 带平台。L-04 决策不读取观测 accessor。Gemini 来源保留合法 cacheable_content/message_content_fallback，M4 只追加 anchor_v2。
 - 单条流水线先五 tag，通过即本地提交编译检查点并通知依赖方；同租约继续触及包 unit、race、真实输出契约与 golden、stats S1–S5、Messages 桥和增量 lint。不重复任务，可信编译缓存播种，测试 -count=1；结果待补。
 - 旧存储只在内存补 ingress_chain_percent=min(10,chain_percent)，不写回或改 rev，validate/PUT 共用基础；FX-OBS-1 alias-only 按 n/a_usage，计费解析不改。T0b.5 别名计费变化按裁定延期。其他字段组待后续实现，未推送或部署。
@@ -1195,3 +1195,13 @@ pnpm --dir frontend run build
 ### 2026-10-25T05:38Z — T0b.4 provider 编译检查点
 
 - 五 tag vet 全部通过；Begin/Bind/accessor 与 session digest/history 键保持冻结。仅编译已验收，provider 行为、计费和关闭态回放由同一重任务后续执行，结果待补；不作为 M2b 最终集成交付。
+
+### 2026-10-25T05:43Z — T0b.4 编译检查点与 audit 登记接缝
+
+- 检查点 `9243c2867` 五 tag vet、docs/diff 全过，已交依赖方。audit 要求旧的内联未送达条件字面量，但现实现先保存相同调用的返回值，再提前返回；仅将 required_literals 同步为实际调用和返回保护，产品 Go 源码不改。
+- 原失败报告与日志完整保留；相同 Go 指纹继承全部已过编译，从 audit 续跑未执行项，独立缓存复用、测试 -count=1。behavior gates 尚无通过结论，后续字段组未完成；未 push 或部署。
+
+### 2026-10-25T06:05Z — provider 未送达兼容登记对齐
+
+- 只将 upstream policy 的旧内联未送达字面量替换为现有的返回值赋值与提前返回两条保护，产品 Go 文件零 diff；独立元数据提交供依赖方按范围继承。当前五 tag 编译检查点仍为 `9243c2867`。
+- 轻量 audit、docs 和 diff-check 随本次元数据检查登记在仓库外报告；续跑继承相同 Go 源指纹与通过项，不重新启动或重复编译，行为门禁尚待完成。

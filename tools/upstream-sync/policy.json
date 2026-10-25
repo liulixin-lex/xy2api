@@ -557,7 +557,11 @@
     },
     {
       "path": "backend/internal/service/gateway_usage_billing.go",
-      "value": "if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {"
+      "value": "undelivered := resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier)"
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "value": "if undelivered {\n\t\treturn nil\n\t}"
     },
     {
       "path": "backend/internal/service/openai_gateway_usage.go",
