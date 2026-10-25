@@ -217,6 +217,11 @@
 
 ## 进行中的工作
 
+### 20261025-cache-p3-l17 — T3.4 L-17 Grok 身份缺口（O-L17，进行中）
+
+- 自 main a003162ff 建 cache/p3-l17。按契约 l17 v1.1 写入 grok.chat_body_key、grok.compact_identity、grok.account_ids（能力 l17、空列表不生效、只核对新增 ID）；原始 Chat 写作用域身份、compact 带身份不加工具、实际写入后的 prompt_cache_key 400 按账号跳过 24h。T-c 不做。
+- 定向 Go 测试与契约回放在本机分流执行；全量门禁交 CI，R 静态评审后由 P 开 PR。未推送、未部署。
+
 ### 20261025-cache-m31-conversion-privacy — L-01 客户端转换出口补修（G，进行中）
 
 - 按负责人裁定，从联合候选 efd7d3aaf 应用独立评审 v2，精确基线 tree a56c02da；在其上修复 Chat buffered 回显注入标识的问题，并审计 Chat 流式、Messages 兼容及错误出口。
@@ -1224,3 +1229,8 @@ pnpm --dir frontend run build
 - 从 efd7 独立应用已审 v2，精确 tree a56c02da；产品提交只改 service，文档/policy/记忆同步后继与其 backend 同树。Chat 实际写入标记内用既有 SSEBuffer 包住成功响应正文，统一覆盖 buffered、流式、failed 与 cyber 客户端出口；原生规则错误 message 另作精确删除并计 error_body。
 - 六个新顶层测试覆盖实际注入回显、工具、累积输出、超大事件、失败/HTTP 错误、关闭态控制、Messages 不可注入及 EOF/原始读错；结构登记锁定实际写入门控。只做格式/diff/文档/来源审计，不冒称 Go 实跑。
 - 后续由独立评审做一次合并定向与 golden，P 核来源并组装，S 仅补 active/T4.0；本分支冻结后不改运行树、不重复排 heavy。
+
+### 2026-10-25 — 20261025-cache-p3-l17 — L-17 后端实现
+
+- 新增 upstream_identity 的三个 grok 字段与 l17 能力位，快照发布时与 kill、master、解析与陈旧上限合并；关闭态只读一次布尔再早退。原始 Chat 与 compact 两处挂点、compact 禁止 Free 工具注入，拒绝跳过复用 L-01 的 24h 表但独立实例。
+- 路由回放改用 F 的 17 份 l17 派生样例，pol2 与 M4 反例经同一投影（先与 17 份权威样例严格比对），另回放 10 份 l17 原生样例与 8 个反例。未推送、未部署。
