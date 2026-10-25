@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
 	"github.com/stretchr/testify/require"
@@ -232,16 +233,39 @@ func TestL01M31ResponsesRuleErrorPrivacy(t *testing.T) {
 				f.service.httpUpstream = upstream
 				bindPassthroughRule(f.context, PlatformOpenAI, []string{"context_length_exceeded"}, 400)
 				if committed {
-					f.response.Header().Set("Content-Type", "text/event-stream")
-					f.context.Writer.WriteHeaderNow()
+					// Commit a real heartbeat without starting semantic output. A bare
+					// WriteHeaderNow is treated as output and bypasses the C4 rule writer.
+					stop := startOpenAISSEKeepalive(f.context, time.Hour)
+					defer stop()
+					value, ok := f.context.Get(openAICompactSSEKeepaliveKey)
+					require.True(t, ok)
+					heartbeat, ok := value.(*openAICompactSSEKeepalive)
+					require.True(t, ok)
+					require.True(t, heartbeat.beat())
+					require.True(t, f.context.Writer.Written())
+					require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(f.context))
+					require.False(t, openAIStreamClientOutputStarted(f.context, false))
 				}
+				require.False(t, IsResponseCommitted(f.context), "the C4 rule path must mark its own response")
 				f.service.GenerateSessionHash(f.context, []byte(body))
 				_, err := f.service.Forward(f.context.Request.Context(), f.context, f.account, []byte(body))
-				require.Error(t, err)
+				require.ErrorContains(t, err, "passthrough rule matched")
 				require.True(t, IsResponseCommitted(f.context), "exercise the stream rule writer")
 				require.Len(t, f.upstream.requests, 1)
 				key := gjson.GetBytes(f.upstream.lastBody, "prompt_cache_key").String()
-				require.NotEmpty(t, f.response.Body.String())
+				client := f.response.Body.String()
+				if committed {
+					require.Equal(t, http.StatusOK, f.response.Code)
+					require.Contains(t, client, "event: response.created\ndata: ")
+					require.Contains(t, client, "event: response.failed\ndata: ")
+					require.NotContains(t, client, "resp-conversion", "the staged upstream opening must not be released")
+					require.NotContains(t, client, "\n{", "no bare JSON after the heartbeat")
+				} else {
+					require.Equal(t, http.StatusBadRequest, f.response.Code)
+					require.True(t, json.Valid([]byte(client)))
+					require.Contains(t, gjson.Get(client, "error.message").String(), "context window")
+					require.NotContains(t, client, "event:")
+				}
 				if enabled {
 					require.True(t, cacheTraceUUID.MatchString(key))
 					require.NotContains(t, f.response.Body.String(), key)
