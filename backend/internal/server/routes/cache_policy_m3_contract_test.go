@@ -38,11 +38,24 @@ func (cacheM3OptionAccounts) GetByIDs(_ context.Context, ids []int64) ([]*servic
 			out = append(out, &service.Account{ID: id, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey})
 		case 201:
 			out = append(out, &service.Account{ID: id, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth})
+		case 501:
+			out = append(out, &service.Account{ID: id, Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey})
+		case 701:
+			out = append(out, &service.Account{ID: id, Platform: service.PlatformGrok, Type: service.AccountTypeOAuth})
+		case 702:
+			out = append(out, &service.Account{ID: id, Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey})
 		}
 	}
 	return out, nil
 }
-func (cacheM3OptionAccounts) ListWithFilters(_ context.Context, _ pagination.PaginationParams, _, _, _, _ string, _ int64, _ string) ([]service.Account, *pagination.PaginationResult, error) {
+func (cacheM3OptionAccounts) ListWithFilters(_ context.Context, _ pagination.PaginationParams, platform, _, _, _ string, _ int64, _ string) ([]service.Account, *pagination.PaginationResult, error) {
+	// L-17 grok.account_ids candidates come from a separate Grok-only query.
+	if platform == service.PlatformGrok {
+		return []service.Account{
+			{ID: 701, Name: "grok-oauth-a", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth},
+			{ID: 702, Name: "grok-key-b", Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey},
+		}, &pagination.PaginationResult{Total: 2}, nil
+	}
 	return []service.Account{
 		{ID: 101, Name: "relay-a-01", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey},
 		{ID: 102, Name: "relay-b-01", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: "disabled"},
@@ -91,6 +104,7 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 	require.NoError(t, err)
 	m31Hashes := map[string]string{}
 	require.NoError(t, json.Unmarshal(m31Raw, &m31Hashes))
+	l17Hashes := cacheL17Hashes(t)
 	names := make([]string, 0, len(hashes)+5)
 	for name := range hashes {
 		names = append(names, name)
@@ -104,6 +118,11 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 				path, wantHash = filepath.Join(m31Root, "m31_"+name), digest
 			} else if digest, ok := m31Hashes[name]; ok {
 				path, wantHash = filepath.Join(m31Root, name), digest
+			}
+			// This build also carries L-17: F's l17 derivatives supersede the
+			// M3.1 shapes (three grok fields appended, l17 undeclared = false).
+			if digest, ok := l17Hashes["l17_"+filepath.Base(path)]; ok {
+				path, wantHash = filepath.Join(cacheL17Root, "l17_"+filepath.Base(path)), digest
 			}
 			raw, err := os.ReadFile(path)
 			require.NoError(t, err)
@@ -291,7 +310,7 @@ func cacheM3ContractRouter(p *service.CachePolicyService, audit *service.AuditLo
 func TestCachePolicyM3EnablePutOptionsFailure(t *testing.T) {
 	// Keep the success fixture exact except for the two fields affected by
 	// optional candidate lookup failure. Commit, state and audit still succeed.
-	raw, err := os.ReadFile("testdata/cache_policies_contract/m31/m31_m3_put_200.json")
+	raw, err := os.ReadFile(filepath.Join(cacheL17Root, "l17_m31_m3_put_200.json"))
 	require.NoError(t, err)
 	var f cacheContract
 	require.NoError(t, json.Unmarshal(raw, &f))
@@ -299,6 +318,8 @@ func TestCachePolicyM3EnablePutOptionsFailure(t *testing.T) {
 	data := expected["data"].(map[string]any)
 	data["effective"].(map[string]any)["warnings"] = []any{"account_options_unavailable"}
 	data["schema"].([]any)[1].(map[string]any)["options"] = []any{}
+	// One candidate warning covers both upstream_identity account pickers.
+	data["schema"].([]any)[9].(map[string]any)["options"] = []any{}
 	b, err := json.Marshal(f.Response["data"])
 	require.NoError(t, err)
 	var prior service.CachePolicyView

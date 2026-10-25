@@ -86,7 +86,11 @@ func TestCachePolicyUpstreamDefaultsAndExplicitSupport(t *testing.T) {
 	upstream, err := s.Get(context.Background(), "upstream_identity")
 	require.NoError(t, err)
 	require.Equal(t, policyDefaults(3), upstream.Stored.Spec)
-	require.Len(t, upstream.Schema, 7)
+	require.Len(t, upstream.Schema, 10)
+	// L-17 fields are present but not implemented without WithCacheL17.
+	for _, field := range upstream.Schema[7:] {
+		require.Equal(t, true, field["not_implemented_in_build"], field["field"])
+	}
 	require.True(t, upstream.GatedByMaster)
 	require.Equal(t, "high", upstream.Risk)
 	require.Equal(t, map[string]any{"field": "account_ids", "type": "id_list", "ref": "account", "options": []cachePolicyAccountOption{}}, upstream.Schema[1])

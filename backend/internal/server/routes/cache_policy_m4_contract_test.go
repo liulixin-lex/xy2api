@@ -114,16 +114,13 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			require.Equal(t, hashes[name], fmt.Sprintf("%x", sha256.Sum256(raw)))
 			fixturePath := filepath.Join(root, name)
 			if strings.HasPrefix(name, "m4_list_") || strings.HasPrefix(name, "m4_dormant_list_") {
-				// These six complete responses are F's frozen M31 x M4 derivatives.
+				// These six complete responses are F's frozen M31 x M4 derivatives,
+				// replayed through their L-17 successors (l17 undeclared = false).
 				// They retain the M4 build prerequisites and include the M31 card.
-				derivedRoot := "testdata/cache_policies_contract/m31"
-				manifest, err := os.ReadFile(filepath.Join(derivedRoot, "SHA256.json"))
-				require.NoError(t, err)
-				derivedHashes := map[string]string{}
-				require.NoError(t, json.Unmarshal(manifest, &derivedHashes))
-				derivedName := "m31_" + name
+				derivedHashes := cacheL17Hashes(t)
+				derivedName := "l17_m31_" + name
 				require.Contains(t, derivedHashes, derivedName)
-				fixturePath = filepath.Join(derivedRoot, derivedName)
+				fixturePath = filepath.Join(cacheL17Root, derivedName)
 				raw, err = os.ReadFile(fixturePath)
 				require.NoError(t, err)
 				require.Equal(t, derivedHashes[derivedName], fmt.Sprintf("%x", sha256.Sum256(raw)))
@@ -267,7 +264,7 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			normalizePolicyTimes(t, got)
 			normalizePolicyTimes(t, expected)
 			require.Equal(t, expected, got, "entire HTTP envelope and payload, including metadata.errors")
-			if strings.HasPrefix(filepath.Base(fixturePath), "m31_m4_") {
+			if strings.HasPrefix(filepath.Base(fixturePath), "l17_m31_m4_") {
 				event, err := json.Marshal(map[string]any{"fixture": fixturePath, "source_fixture": name, "status": status, "response": got})
 				require.NoError(t, err)
 				t.Logf("M31_M4_POLICY_CONTRACT_EVENT %s", event)
@@ -311,7 +308,7 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			require.True(t, ok, "canonical HTTP must have passed")
 			wrong := contractMap(t, bad.Response)
 			if strings.HasPrefix(entry.Source, "m4_list_") || strings.HasPrefix(entry.Source, "m4_dormant_list_") {
-				wrong = cacheM31M4ProjectLegacyList(t, wrong)
+				wrong = cacheL17ProjectLegacy(t, cacheM31M4ProjectLegacyList(t, wrong), false)
 			}
 			normalizePolicyTimes(t, wrong)
 			require.NotEqual(t, wrong, actual, "the corrupted contract response cannot pass full replay")
@@ -322,12 +319,12 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 // Preserve the two M3 list edge scenarios that have no separate M4 sample.
 // The expected new cards come from F's explicit M4 default fixture, never List.
 func TestCachePolicyM4RetainsM3ListEdges(t *testing.T) {
-	root := "testdata/cache_policies_contract/m31"
-	raw, err := os.ReadFile(filepath.Join(root, "m31_m4_list_default.json"))
+	root := cacheL17Root
+	raw, err := os.ReadFile(filepath.Join(root, "l17_m31_m4_list_default.json"))
 	require.NoError(t, err)
 	var defaults cacheContract
 	require.NoError(t, json.Unmarshal(raw, &defaults))
-	for _, name := range []string{"m31_m3_list_account_options_unavailable.json", "m31_m3_list_observability_off.json"} {
+	for _, name := range []string{"l17_m31_m3_list_account_options_unavailable.json", "l17_m31_m3_list_observability_off.json"} {
 		t.Run(name, func(t *testing.T) {
 			raw, err := os.ReadFile(filepath.Join(root, name))
 			require.NoError(t, err)
@@ -352,7 +349,7 @@ func TestCachePolicyM4RetainsM3ListEdges(t *testing.T) {
 			cfg.Gateway.OpenAICache.AwareRoutingEnabled = list.Existing.AwareRouting
 			cfg.Gateway.OpenAICache.RolloutPercent = list.Existing.Rollout
 			cfg.Gateway.CacheFeatures.KillSwitch = list.Static.KillSwitch
-			accounts := &cacheM3FaultAccounts{failOptions: name == "m31_m3_list_account_options_unavailable.json"}
+			accounts := &cacheM3FaultAccounts{failOptions: name == "l17_m31_m3_list_account_options_unavailable.json"}
 			groups := &cacheM4Groups{}
 			policies := service.NewCachePolicyService(repo, cfg, service.WithCacheNorthstar(), service.WithCacheM4Policies(groups), service.WithCacheM4BuildCapabilities(service.CacheM4BuildCapabilities{L04: true, L03: true, L07: true}), service.WithCachePolicyAccounts(accounts))
 			require.NoError(t, policies.Refresh(context.Background()))

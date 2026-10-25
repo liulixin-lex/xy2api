@@ -69,27 +69,68 @@ func (s *CachePolicyService) upstreamIdentityAccountOptions(ctx context.Context)
 	return options, nil
 }
 
-func setCachePolicyAccountOptions(view *CachePolicyView, options []cachePolicyAccountOption) {
+// grok.account_ids (L-17) candidates: every Grok account, OAuth and API key.
+func (s *CachePolicyService) grokIdentityAccountOptions(ctx context.Context) ([]cachePolicyAccountOption, error) {
+	options := []cachePolicyAccountOption{}
+	lookup, ok := s.accounts.(cachePolicyAccountPageLookup)
+	if !ok {
+		return options, nil
+	}
+	seen := make(map[int64]bool)
+	for page := 1; len(options) < cachePolicyAccountOptionLimit; page++ {
+		params := pagination.PaginationParams{Page: page, PageSize: cachePolicyAccountOptionLimit, SortBy: "id", SortOrder: pagination.SortOrderAsc}
+		accounts, _, err := lookup.ListWithFilters(ctx, params, PlatformGrok, "", "", "", 0, "")
+		if err != nil {
+			return []cachePolicyAccountOption{}, errCachePolicyAccountOptionsUnavailable
+		}
+		for i := range accounts {
+			account := &accounts[i]
+			if account.ID <= 0 || seen[account.ID] || account.Platform != PlatformGrok {
+				continue
+			}
+			seen[account.ID] = true
+			options = append(options, cachePolicyAccountOption{account.ID, account.Name, account.Platform})
+			if len(options) == cachePolicyAccountOptionLimit {
+				break
+			}
+		}
+		if len(accounts) < params.PageSize {
+			break
+		}
+	}
+	sort.Slice(options, func(i, j int) bool { return options[i].ID < options[j].ID })
+	return options, nil
+}
+
+func setCachePolicyAccountOptions(view *CachePolicyView, options, grokOptions []cachePolicyAccountOption) {
 	for _, field := range view.Schema {
-		if field["field"] == "account_ids" {
+		switch field["field"] {
+		case "account_ids":
 			field["options"] = options
-			return
+		case "grok.account_ids":
+			field["options"] = grokOptions
 		}
 	}
 }
 
 // Options are response-only picker metadata, not a prerequisite for reading or
 // committing policy state. The warning never enters runtime snapshots/validate.
+// One warning covers both account pickers of upstream_identity.
 func (s *CachePolicyService) populateCachePolicyAccountOptions(ctx context.Context, view *CachePolicyView) {
 	options, err := s.upstreamIdentityAccountOptions(ctx)
 	if err != nil {
 		setCachePolicyUnavailableAccountOptions(view)
 		return
 	}
-	setCachePolicyAccountOptions(view, options)
+	grokOptions, err := s.grokIdentityAccountOptions(ctx)
+	if err != nil {
+		setCachePolicyUnavailableAccountOptions(view)
+		return
+	}
+	setCachePolicyAccountOptions(view, options, grokOptions)
 }
 
 func setCachePolicyUnavailableAccountOptions(view *CachePolicyView) {
-	setCachePolicyAccountOptions(view, []cachePolicyAccountOption{})
+	setCachePolicyAccountOptions(view, []cachePolicyAccountOption{}, []cachePolicyAccountOption{})
 	view.Effective.Warnings = append(view.Effective.Warnings, cachePolicyAccountOptionsUnavailable)
 }

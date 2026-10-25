@@ -166,7 +166,7 @@ func (s *CachePolicyService) schema(i int) []map[string]any {
 		}
 	}
 	if i == 3 {
-		return upstreamIdentitySchema()
+		return s.upstreamIdentitySchema()
 	}
 	if i == 4 || i == 5 {
 		return s.m4Schema(i)

@@ -1,0 +1,80 @@
+{
+  "_contract": [
+    "M3-3",
+    "T34-L17"
+  ],
+  "_note": "v1.1：只核对新增的 ID。501 是 anthropic 账号，报 wrong_platform；999 不存在，报 unknown_account（按 ID 升序）。语义错误，字段照常进入 diff。",
+  "_fixture": {
+    "build_capabilities": {
+      "l04": false,
+      "l03": false,
+      "l07": false,
+      "l17": true
+    },
+    "说明": "T3.4 构建的静态能力（l17 为 true；不含 M4 行为时 l04、l03、l07 为 false，M3 形态的样例中 M4 键为 not_in_build），后端测试预置，不属于响应"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/upstream_identity/validate",
+    "body": {
+      "expected_rev": 5,
+      "spec": {
+        "grok": {
+          "account_ids": [
+            701,
+            501,
+            999
+          ]
+        }
+      },
+      "reason": "加账号",
+      "confirm": {
+        "checkbox": true,
+        "typed": null
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": false,
+      "errors": [
+        {
+          "field": "grok.account_ids",
+          "code": "wrong_platform"
+        },
+        {
+          "field": "grok.account_ids",
+          "code": "unknown_account"
+        }
+      ],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "grok.account_ids",
+          "before": [
+            701
+          ],
+          "after": [
+            701,
+            501,
+            999
+          ]
+        }
+      ],
+      "risk": "high",
+      "direction": "enable",
+      "confirm": {
+        "reason_required": true,
+        "checkbox_required": true,
+        "type_to_confirm": null
+      },
+      "current_rev": 5,
+      "rev_stale": false,
+      "effective_preview": null,
+      "affected": []
+    }
+  }
+}

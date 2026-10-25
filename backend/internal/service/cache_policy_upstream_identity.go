@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 )
 
 // Build capabilities are explicit; production enables northstar alongside L-01.
@@ -45,6 +46,9 @@ type CacheUpstreamIdentityPolicy struct {
 	ForwardSessionHeaders string
 	MaxInflightPerKey     int
 	active                bool
+	grokChatBodyKey       bool
+	grokCompactIdentity   bool
+	grokAccounts          map[int64]struct{}
 	revision              int64
 	accounts              map[int64]struct{}
 }
@@ -58,6 +62,26 @@ func (p *CachePolicySnapshot) UpstreamIdentity() CacheUpstreamIdentityPolicy {
 func (p CacheUpstreamIdentityPolicy) Enabled() bool   { return p.active }
 func (p CacheUpstreamIdentityPolicy) Revision() int64 { return p.revision }
 
+// GrokChatBodyKey and GrokCompactIdentity (L-17) are independent of the L-01
+// mode, scope and rollout. Publication already ANDs the l17 build capability,
+// the kill switch, master, parse state and the stale bound into each bool; an
+// empty grok.account_ids is off. A request without a snapshot reads false.
+// The gateway additionally applies its per-account upstream reject skip.
+func (p *CachePolicySnapshot) GrokChatBodyKey(accountID int64) bool {
+	if p == nil || !p.upstream.grokChatBodyKey {
+		return false
+	}
+	_, ok := p.upstream.grokAccounts[accountID]
+	return ok
+}
+func (p *CachePolicySnapshot) GrokCompactIdentity(accountID int64) bool {
+	if p == nil || !p.upstream.grokCompactIdentity {
+		return false
+	}
+	_, ok := p.upstream.grokAccounts[accountID]
+	return ok
+}
+
 // AllowsAccount tests the configured scope only. Empty means all eligible
 // accounts; T1.2 must still require an OpenAI apikey serving account.
 func (p CacheUpstreamIdentityPolicy) AllowsAccount(id int64) bool {
@@ -68,7 +92,7 @@ func (p CacheUpstreamIdentityPolicy) AllowsAccount(id int64) bool {
 	return ok
 }
 
-func upstreamIdentityFromEntry(entry cachePolicyEntry, master bool) CacheUpstreamIdentityPolicy {
+func upstreamIdentityFromEntry(entry cachePolicyEntry, master, l17 bool) CacheUpstreamIdentityPolicy {
 	spec := entry.envelope.Spec
 	p := CacheUpstreamIdentityPolicy{revision: entry.envelope.Rev}
 	p.Mode, _ = spec["mode"].(string)
@@ -84,7 +108,145 @@ func upstreamIdentityFromEntry(entry cachePolicyEntry, master bool) CacheUpstrea
 		}
 	}
 	p.active = master && !entry.parseError && p.Mode == "uuid_fill" && p.RolloutPercent > 0
+	grok := master && !entry.parseError && l17
+	p.grokChatBodyKey = grok && grokIdentityPolicyField(spec, "chat_body_key")
+	p.grokCompactIdentity = grok && grokIdentityPolicyField(spec, "compact_identity")
+	if ids := grokIdentityPolicyAccounts(spec); (p.grokChatBodyKey || p.grokCompactIdentity) && len(ids) > 0 {
+		p.grokAccounts = make(map[int64]struct{}, len(ids))
+		for _, id := range ids {
+			p.grokAccounts[id] = struct{}{}
+		}
+	}
 	return p
+}
+
+// WithCacheL17 declares the L-17 Grok identity behavior as implemented in this
+// build. Without it both grok fields are not_implemented_in_build.
+func WithCacheL17() CachePolicyOption {
+	return func(s *CachePolicyService) { s.l17 = true }
+}
+
+func grokIdentityPolicyDefaults() map[string]any {
+	return map[string]any{"chat_body_key": false, "compact_identity": false, "account_ids": []int64{}}
+}
+
+func grokIdentityPolicyAccounts(spec map[string]any) []int64 {
+	grok, _ := spec["grok"].(map[string]any)
+	ids, _ := grok["account_ids"].([]int64)
+	return ids
+}
+
+// Only IDs added by this write are looked up; removals are always allowed.
+func grokIdentityAddedAccounts(before, after map[string]any) []int64 {
+	old := make(map[int64]bool)
+	for _, id := range grokIdentityPolicyAccounts(before) {
+		old[id] = true
+	}
+	added := []int64{}
+	for _, id := range grokIdentityPolicyAccounts(after) {
+		if !old[id] {
+			added = append(added, id)
+		}
+	}
+	sort.Slice(added, func(i, j int) bool { return added[i] < added[j] })
+	return added
+}
+
+func grokIdentityPolicyField(spec map[string]any, child string) bool {
+	grok, _ := spec["grok"].(map[string]any)
+	enabled, _ := grok[child].(bool)
+	return enabled
+}
+
+// An empty grok.account_ids is off, like L-03 metadata_account_ids.
+func grokIdentityPolicyConfigured(spec map[string]any) bool {
+	return (grokIdentityPolicyField(spec, "chat_body_key") || grokIdentityPolicyField(spec, "compact_identity")) && len(grokIdentityPolicyAccounts(spec)) > 0
+}
+
+// Like M4, only a change toward a non-default value is a capability use, so a
+// downgraded build can still turn either field back off.
+func (s *CachePolicyService) l17UnsupportedChanges(diff []CachePolicyDiff) []CachePolicyFieldError {
+	errs := []CachePolicyFieldError{}
+	if s.l17 {
+		return errs
+	}
+	for _, change := range diff {
+		if !strings.HasPrefix(change.Field, "grok.") || policyDirection([]CachePolicyDiff{change}) == "disable" {
+			continue
+		}
+		errs = append(errs, CachePolicyFieldError{Field: change.Field, Code: "unsupported_in_build"})
+	}
+	return errs
+}
+
+// mergeGrokIdentityPolicy merges the nested grok object leaf by leaf; omitted
+// children keep their stored value. Diff and errors use dotted leaf names.
+func mergeGrokIdentityPolicy(out map[string]any, before map[string]any, value json.RawMessage) ([]CachePolicyDiff, []CachePolicyFieldError) {
+	diff := []CachePolicyDiff{}
+	errs := []CachePolicyFieldError{}
+	var patch map[string]json.RawMessage
+	if json.Unmarshal(value, &patch) != nil || patch == nil {
+		return diff, append(errs, CachePolicyFieldError{Field: "grok", Code: "malformed_body"})
+	}
+	grok, _ := out["grok"].(map[string]any)
+	if grok == nil {
+		grok = grokIdentityPolicyDefaults()
+		out["grok"] = grok
+	}
+	old, _ := before["grok"].(map[string]any)
+	children := make([]string, 0, len(patch))
+	for child := range patch {
+		children = append(children, child)
+	}
+	sort.Strings(children)
+	for _, child := range children {
+		field := "grok." + child
+		if child == "account_ids" {
+			var ids []int64
+			code := ""
+			if bytes.Equal(bytes.TrimSpace(patch[child]), []byte("null")) || json.Unmarshal(patch[child], &ids) != nil {
+				code = "malformed_body"
+			} else {
+				seen := make(map[int64]bool, len(ids))
+				for _, id := range ids {
+					if id <= 0 {
+						code = "unknown_account"
+						break
+					}
+					if seen[id] {
+						code = "duplicate"
+						break
+					}
+					seen[id] = true
+				}
+			}
+			if code != "" {
+				errs = append(errs, CachePolicyFieldError{Field: field, Code: code})
+				continue
+			}
+			previous, _ := old[child].([]int64)
+			grok[child] = ids
+			if !reflect.DeepEqual(previous, ids) {
+				diff = append(diff, CachePolicyDiff{field, append([]int64{}, previous...), append([]int64{}, ids...)})
+			}
+			continue
+		}
+		if child != "chat_body_key" && child != "compact_identity" {
+			errs = append(errs, CachePolicyFieldError{Field: field, Code: "unknown_field"})
+			continue
+		}
+		var flag bool
+		if bytes.Equal(bytes.TrimSpace(patch[child]), []byte("null")) || json.Unmarshal(patch[child], &flag) != nil {
+			errs = append(errs, CachePolicyFieldError{Field: field, Code: "malformed_body"})
+			continue
+		}
+		grok[child] = flag
+		previous, _ := old[child].(bool)
+		if previous != flag {
+			diff = append(diff, CachePolicyDiff{field, previous, flag})
+		}
+	}
+	return diff, errs
 }
 
 func mergeUpstreamIdentity(before map[string]any, raw json.RawMessage) (map[string]any, []CachePolicyDiff, []CachePolicyFieldError) {
@@ -150,6 +312,11 @@ func mergeUpstreamIdentity(before map[string]any, raw json.RawMessage) (map[stri
 					continue
 				}
 				next = percent
+			case "grok":
+				grokDiff, grokErrs := mergeGrokIdentityPolicy(out, before, value)
+				diff = append(diff, grokDiff...)
+				errs = append(errs, grokErrs...)
+				continue
 			case "account_ids":
 				var ids []int64
 				if json.Unmarshal(value, &ids) != nil {
@@ -226,30 +393,54 @@ func (s *CachePolicyService) validationForWrite(ctx context.Context, index int, 
 		return v, spec, nil
 	}
 	ids, _ := spec["account_ids"].([]int64)
-	if len(ids) == 0 {
+	grokAdded := grokIdentityAddedAccounts(entry.envelope.Spec, spec)
+	if len(ids) == 0 && len(grokAdded) == 0 {
 		return v, spec, nil
 	}
 	if s.accounts == nil {
 		return v, spec, fmt.Errorf("cache policy account validation unavailable")
 	}
-	accounts, err := s.accounts.GetByIDs(ctx, ids)
-	if err != nil {
-		return v, spec, fmt.Errorf("validate cache policy accounts: %w", err)
-	}
-	found := make(map[int64]*Account, len(accounts))
-	for _, account := range accounts {
-		if account != nil {
-			found[account.ID] = account
+	if len(ids) > 0 {
+		accounts, err := s.accounts.GetByIDs(ctx, ids)
+		if err != nil {
+			return v, spec, fmt.Errorf("validate cache policy accounts: %w", err)
+		}
+		found := make(map[int64]*Account, len(accounts))
+		for _, account := range accounts {
+			if account != nil {
+				found[account.ID] = account
+			}
+		}
+		for _, id := range ids {
+			account := found[id]
+			if account == nil {
+				v.Errors = append(v.Errors, CachePolicyFieldError{Field: "account_ids", Code: "unknown_account"})
+			} else if !account.IsOpenAIApiKey() {
+				// The shared contract uses wrong_platform for ineligible accounts;
+				// this also excludes OpenAI OAuth/setup-token types.
+				v.Errors = append(v.Errors, CachePolicyFieldError{Field: "account_ids", Code: "wrong_platform"})
+			}
 		}
 	}
-	for _, id := range ids {
-		account := found[id]
-		if account == nil {
-			v.Errors = append(v.Errors, CachePolicyFieldError{Field: "account_ids", Code: "unknown_account"})
-		} else if !account.IsOpenAIApiKey() {
-			// The shared contract uses wrong_platform for ineligible accounts;
-			// this also excludes OpenAI OAuth/setup-token types.
-			v.Errors = append(v.Errors, CachePolicyFieldError{Field: "account_ids", Code: "wrong_platform"})
+	if len(grokAdded) > 0 {
+		accounts, err := s.accounts.GetByIDs(ctx, grokAdded)
+		if err != nil {
+			return v, spec, fmt.Errorf("validate cache policy accounts: %w", err)
+		}
+		found := make(map[int64]*Account, len(accounts))
+		for _, account := range accounts {
+			if account != nil {
+				found[account.ID] = account
+			}
+		}
+		// Ascending ID order; both Grok OAuth and API-key accounts are eligible.
+		for _, id := range grokAdded {
+			account := found[id]
+			if account == nil {
+				v.Errors = append(v.Errors, CachePolicyFieldError{Field: "grok.account_ids", Code: "unknown_account"})
+			} else if account.Platform != PlatformGrok {
+				v.Errors = append(v.Errors, CachePolicyFieldError{Field: "grok.account_ids", Code: "wrong_platform"})
+			}
 		}
 	}
 	v.Valid = len(v.Errors) == 0
@@ -262,8 +453,8 @@ func (s *CachePolicyService) validationForWrite(ctx context.Context, index int, 
 	return v, spec, nil
 }
 
-func upstreamIdentitySchema() []map[string]any {
-	return []map[string]any{
+func (s *CachePolicyService) upstreamIdentitySchema() []map[string]any {
+	schema := []map[string]any{
 		{"field": "mode", "type": "enum", "options": []string{"off", "uuid_fill"}},
 		{"field": "account_ids", "type": "id_list", "ref": "account", "options": []cachePolicyAccountOption{}},
 		{"field": "rollout_percent", "type": "int", "min": 0, "max": 100, "unit": "percent"},
@@ -271,7 +462,16 @@ func upstreamIdentitySchema() []map[string]any {
 		{"field": "header_only_uuid", "type": "bool"},
 		{"field": "forward_session_headers", "type": "enum", "options": []string{"whitelist", "normalize"}},
 		{"field": "max_inflight_per_key", "type": "int", "min": 1, "max": 16},
+		{"field": "grok.chat_body_key", "type": "bool"},
+		{"field": "grok.compact_identity", "type": "bool"},
+		{"field": "grok.account_ids", "type": "id_list", "ref": "account", "options": []cachePolicyAccountOption{}},
 	}
+	if !s.l17 {
+		for _, field := range schema[len(schema)-3:] {
+			field["not_implemented_in_build"] = true
+		}
+	}
+	return schema
 }
 
 func (s *CachePolicyService) upstreamIdentityEffective(stored, loaded cachePolicyEntry, p *CachePolicySnapshot) CachePolicyEffective {
@@ -280,13 +480,21 @@ func (s *CachePolicyService) upstreamIdentityEffective(stored, loaded cachePolic
 	masterInvalid := p != nil && p.entries[0].parseError
 	invalid := loaded.parseError || stored.parseError || masterInvalid
 	configured := loaded.envelope.Spec["mode"] == "uuid_fill"
+	// Either L-01 or an implemented grok field makes the card active. A grok
+	// field without the l17 capability blocks only when nothing else is on.
+	grok := grokIdentityPolicyConfigured(loaded.envelope.Spec)
+	grokImplemented := grok && s.l17
+	blocked := grok && !s.l17 && !configured
 	master := p.MasterEnabled()
-	active = !s.kill && !loaded.parseError && !masterInvalid && master && configured && policyInt(loaded.envelope.Spec["rollout_percent"]) > 0
+	active = !s.kill && !loaded.parseError && !masterInvalid && master && ((configured && policyInt(loaded.envelope.Spec["rollout_percent"]) > 0) || grokImplemented)
 	if s.kill {
 		e.Blockers = append(e.Blockers, "kill_switch")
 	}
 	if invalid {
 		e.Blockers = append(e.Blockers, "parse_error")
+	}
+	if blocked {
+		e.Blockers = append(e.Blockers, "not_implemented_in_build")
 	}
 	if configured {
 		if policyInt(loaded.envelope.Spec["rollout_percent"]) == 0 {
@@ -301,7 +509,9 @@ func (s *CachePolicyService) upstreamIdentityEffective(stored, loaded cachePolic
 		e.State = "killed"
 	case invalid:
 		e.State = "parse_error"
-	case configured && !master:
+	case blocked:
+		e.State = "blocked"
+	case (configured || grokImplemented) && !master:
 		e.State = "masked_by_master"
 	case loaded.envelope.Rev < stored.envelope.Rev:
 		e.State = "pending_reload"

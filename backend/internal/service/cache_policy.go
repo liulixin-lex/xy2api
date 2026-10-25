@@ -171,6 +171,7 @@ type CachePolicyService struct {
 	wg                              sync.WaitGroup
 	listeners                       []func(*CachePolicySnapshot)
 	northstarAvailable              bool
+	l17                             bool
 
 	// Staleness bound, guarded by mu. refreshedAt is the last successful
 	// settings read; administrator writes neither refresh nor clear it.
@@ -337,7 +338,7 @@ func (s *CachePolicyService) publishEntries(entries [6]cachePolicyEntry) {
 	p.chainPercent = policyInt(o["chain_percent"])
 	p.byteBudget = int64(min(policyInt(o["byte_budget_mib"]), s.caps.MaxByteBudgetMiB)) << 20
 	p.rate = int64(min(policyInt(o["rate_mib_per_s"]), s.caps.MaxRateMiBPerS)) << 20
-	p.upstream = upstreamIdentityFromEntry(entries[3], p.MasterEnabled() && !p.stale)
+	p.upstream = upstreamIdentityFromEntry(entries[3], p.MasterEnabled() && !p.stale, s.l17)
 	p.revision = fmt.Sprintf("m%d.o%d.u%d.a%d.r%d", p.revs[0], p.revs[1], p.revs[3], p.revs[4], p.revs[5])
 	p.initCohortViews()
 	for _, notify := range s.listeners {
@@ -392,7 +393,7 @@ func policyDefaults(index int) map[string]any {
 		return map[string]any{"enabled": false}
 	}
 	if index == 3 {
-		return map[string]any{"mode": "off", "account_ids": []int64{}, "rollout_percent": 0, "chat_compat_uuid": false, "header_only_uuid": false, "forward_session_headers": "whitelist", "max_inflight_per_key": 2}
+		return map[string]any{"mode": "off", "account_ids": []int64{}, "rollout_percent": 0, "chat_compat_uuid": false, "header_only_uuid": false, "forward_session_headers": "whitelist", "max_inflight_per_key": 2, "grok": grokIdentityPolicyDefaults()}
 	}
 	return map[string]any{"enabled": false, "sample_percent": 100, "chain_percent": 100, "byte_budget_mib": 64, "rate_mib_per_s": 32}
 }
@@ -407,7 +408,7 @@ func policyInt(v any) int {
 }
 
 func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config, accounts AccountRepository, groups GroupRepository) *CachePolicyService {
-	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups))
+	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups), WithCacheL17())
 	s.Start()
 	return s
 }

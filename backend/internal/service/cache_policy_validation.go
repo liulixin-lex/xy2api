@@ -212,7 +212,7 @@ func policyDirection(diff []CachePolicyDiff) string {
 				continue
 			}
 			added, removed := upstreamIdentityScopeDirection(before, n)
-			if d.Field == "anchor_group_ids" || d.Field == "metadata_group_ids" {
+			if d.Field == "anchor_group_ids" || d.Field == "metadata_group_ids" || d.Field == "grok.account_ids" {
 				added, removed = cachePolicyExplicitScopeDirection(before, n)
 			}
 			up, down = up || added, down || removed
@@ -238,8 +238,12 @@ func (s *CachePolicyService) validation(index int, entry cachePolicyEntry, w Cac
 		errs = bodyErrors
 		diff = []CachePolicyDiff{}
 	}
-	if len(errs) == 0 && (index == 4 || index == 5) {
-		errs = s.m4UnsupportedChanges(index, spec, diff)
+	if len(errs) == 0 && (index == 3 || index == 4 || index == 5) {
+		if index == 3 {
+			errs = s.l17UnsupportedChanges(diff)
+		} else {
+			errs = s.m4UnsupportedChanges(index, spec, diff)
+		}
 		if len(errs) > 0 {
 			accepted := make([]CachePolicyDiff, 0, len(diff))
 			for _, change := range diff {
@@ -315,7 +319,7 @@ func invalidPolicy(errs []CachePolicyFieldError) error {
 	b, _ := json.Marshal(errs)
 	reason := "CACHE_POLICY_INVALID"
 	for _, e := range errs {
-		if e.Code == "unsupported_in_build" && (e.Field == "header_only_uuid" || e.Field == "forward_session_headers" || e.Field == "affinity_mode" || e.Field == "anchor_group_ids" || e.Field == "gemini_anchor" || e.Field == "metadata_group_ids" || e.Field == "keep_sticky_on_busy.enabled" || e.Field == "keep_sticky_on_busy.group_ids") {
+		if e.Code == "unsupported_in_build" && (e.Field == "header_only_uuid" || e.Field == "forward_session_headers" || e.Field == "affinity_mode" || e.Field == "anchor_group_ids" || e.Field == "gemini_anchor" || e.Field == "metadata_group_ids" || e.Field == "keep_sticky_on_busy.enabled" || e.Field == "keep_sticky_on_busy.group_ids" || e.Field == "grok.chat_body_key" || e.Field == "grok.compact_identity" || e.Field == "grok.account_ids") {
 			reason = "CACHE_POLICY_UNSUPPORTED"
 			break
 		}
