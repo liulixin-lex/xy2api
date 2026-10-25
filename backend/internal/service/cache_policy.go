@@ -370,7 +370,10 @@ func policyInt(v any) int {
 }
 
 func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config, accounts AccountRepository, groups GroupRepository, gateway *GatewayService) *CachePolicyService {
-	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups))
+	// T2.5 implements L-07 with every limit of M4 kickoff §11 (DESIGN §6.1A);
+	// L-04 and L-03 stay storage-only until T2.2/T2.3.
+	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups),
+		WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L07: true}))
 	if gateway != nil {
 		gateway.cachePolicies = s
 	}
