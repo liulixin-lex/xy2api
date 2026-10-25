@@ -35,11 +35,9 @@ type l07Request struct {
 	runtime *l07Runtime
 	now     func() time.Time // the policy service clock
 	groupID int64
-	session string
 	arm     string
 
 	mu           sync.Mutex
-	selections   int
 	retry        bool // the current selection is not the first attempt (H2)
 	kept         bool
 	keptAttempt  bool
@@ -135,7 +133,6 @@ func (s *GatewayService) l07Begin(ctx context.Context, group *Group, sessionHash
 	if rec := l07FromState(st); rec != nil {
 		if rec.armed() {
 			rec.mu.Lock()
-			rec.selections++
 			rec.retry = true
 			rec.mu.Unlock()
 		}
@@ -150,7 +147,7 @@ func (s *GatewayService) l07Begin(ctx context.Context, group *Group, sessionHash
 		st.SetL07(l07Control)
 		return l07Control
 	}
-	rec := &l07Request{policy: policy, runtime: s.cachePolicies.l07, now: s.cachePolicies.now, groupID: group.ID, session: sessionHash, arm: l07ArmOn, selections: 1, retry: excluded > 0}
+	rec := &l07Request{policy: policy, runtime: s.cachePolicies.l07, now: s.cachePolicies.now, groupID: group.ID, arm: l07ArmOn, retry: excluded > 0}
 	st.SetL07(rec)
 	return rec
 }
