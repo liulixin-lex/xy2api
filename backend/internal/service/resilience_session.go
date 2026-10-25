@@ -563,6 +563,7 @@ func (s *OpenAIGatewayService) resilienceKeepOpenAISoftOwner(ctx context.Context
 		return false
 	}
 	resilience.StateFrom(ctx).KeepSticky(account.ID)
+	noteCacheTraceSoftOwner(ctx, account.ID)
 	return true
 }
 
@@ -662,6 +663,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 
 func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time) {
 	resilience.StateFrom(ctx).SetLastResort(account.ID)
+	noteCacheTraceLastResort(ctx, account.ID)
 	s.resilience.noteLastResortSelected(account.ID)
 	s.shareScheduling.noteResilienceReason(derefGroupID(groupID), sharesched.ReasonLastResortSoft)
 	resilience.Count(resilience.MetricLastResort, derefGroupID(groupID), account.ID, account.Platform)
@@ -707,6 +709,7 @@ type sessionFailureRecorder struct {
 // threshold deletes the binding (owner-checked) and avoids the account for
 // the session (design §4.1-§4.2).
 func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, sessionHash string, accountID int64, c resilience.Category) {
+	noteL07AttemptFailure(ctx, accountID, c)
 	cfg := resilience.Current()
 	if rec == nil || rec.r == nil || rec.r.store == nil || !cfg.SessionOn() || !c.CountsForSession() {
 		return
@@ -732,6 +735,7 @@ func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, s
 	resilience.StateFrom(ctx).AddAvoided(accountID)
 	_ = rec.r.store.ClearSessionFailure(stateCtx, groupID, sessionHash, accountID)
 	resilience.Count(resilience.MetricSessionRebind, groupID, accountID, "resil_failure_streak")
+	noteCacheTraceRebind(ctx, c)
 	slog.Warn("resilience.session_rebind", append(resilience.EventFields(ctx),
 		"group_id", groupID,
 		"session", shortSessionHash(sessionHash),

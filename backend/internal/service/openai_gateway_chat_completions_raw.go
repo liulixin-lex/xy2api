@@ -82,6 +82,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	}
 	SetOpsUpstreamModel(c, upstreamModel)
 	grokCacheIdentity := ""
+	grokBodyKeyApplied := false
 	if account.Platform == PlatformGrok {
 		// Resolve before image bridging or other body rewrites so the fallback is
 		// anchored to the client's stable conversation prefix.
@@ -162,9 +163,20 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		}
 	}
 	if account.Platform == PlatformGrok {
-		upstreamBody, err = stripGrokChatPromptCacheKey(upstreamBody)
-		if err != nil {
-			return nil, fmt.Errorf("remove Responses-only Grok prompt cache key: %w", err)
+		if grokCacheIdentity != "" && s.grokIdentityFixEnabled(c, account, grokIdentityFixChatBodyKey) {
+			// L-17: carry the scoped identity already sent as X-Grok-Conv-Id,
+			// never the client's raw key. An empty identity is still removed.
+			upstreamBody, err = sjson.SetBytes(upstreamBody, "prompt_cache_key", grokCacheIdentity)
+			if err != nil {
+				return nil, fmt.Errorf("apply Grok chat prompt cache identity: %w", err)
+			}
+			grokBodyKeyApplied = true
+			recordGrokIdentityFixApplied(account, grokIdentityFixChatBodyKey)
+		} else {
+			upstreamBody, err = stripGrokChatPromptCacheKey(upstreamBody)
+			if err != nil {
+				return nil, fmt.Errorf("remove Responses-only Grok prompt cache key: %w", err)
+			}
 		}
 		upstreamBody, err = normalizeGrokChatReasoningEffort(upstreamBody, upstreamModel)
 		if err != nil {
@@ -214,6 +226,9 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	// 7. Handle error response with failover
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
+		if grokBodyKeyApplied {
+			s.learnGrokIdentityRejection(account, grokIdentityFixChatBodyKey, resp.StatusCode, respBody)
+		}
 		if failure := s.learnOpenAIStreamOnlyHTTPFailure(ctx, c, account, resp.Request, resp, respBody, resilience.CapabilityProtocolChat); failure != nil {
 			return nil, failure
 		}
@@ -305,6 +320,9 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	startTime time.Time,
 	requestBodyLen int,
 ) (*OpenAIForwardResult, error) {
+	// The attempt-local gate keeps the disabled per-frame path to one bool check.
+	cacheTraceActive := cacheTraceObserving(c)
+
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
@@ -397,7 +415,11 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			if trimmedPayload != "[DONE]" {
 				observer.ObserveOpenAI([]byte(payload), strings.TrimSpace(gjson.Get(payload, "type").String()))
 				usageOnlyChunk := isOpenAIChatUsageOnlyStreamChunk(payload)
-				if u := extractCCStreamUsage(payload); u != nil {
+				if cacheTraceActive {
+					if u := extractCCStreamUsageForCacheTrace(c, payload); u != nil {
+						usage = *u
+					}
+				} else if u := extractCCStreamUsage(payload); u != nil {
 					usage = *u
 				}
 				if firstTokenMs == nil && !usageOnlyChunk {
@@ -569,6 +591,7 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 	serviceTier *string,
 	startTime time.Time,
 ) (_ *OpenAIForwardResult, retErr error) {
+	cacheTraceActive := cacheTraceObserving(c)
 	requestID := resp.Header.Get("x-request-id")
 
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
@@ -591,8 +614,14 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 	observer.ObserveOpenAI(respBody, strings.TrimSpace(gjson.GetBytes(respBody, "type").String()))
 
 	var usage OpenAIUsage
-	if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
-		usage = parsedUsage
+	if cacheTraceActive {
+		if parsedUsage, ok := extractOpenAIUsageForCacheTrace(c, respBody); ok {
+			usage = parsedUsage
+		}
+	} else {
+		if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
+			usage = parsedUsage
+		}
 	}
 	responseModel := gjson.GetBytes(respBody, "model").String()
 	if requiresBillableGrokChatUsage(account, billingModel, upstreamModel, responseModel) && !hasBillableGrokChatUsage(usage) {

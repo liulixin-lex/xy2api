@@ -1,0 +1,55 @@
+{
+  "_contract": [
+    "C-4"
+  ],
+  "_note": "关闭方向：direction=disable，confirm 全 false/null（一步完成），风险徽标用中性样式。",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/observability/validate",
+    "body": {
+      "expected_rev": 2,
+      "spec": {
+        "enabled": false
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": true,
+      "errors": [],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "enabled",
+          "before": true,
+          "after": false
+        }
+      ],
+      "risk": "low",
+      "direction": "disable",
+      "confirm": {
+        "reason_required": false,
+        "checkbox_required": false,
+        "type_to_confirm": null
+      },
+      "current_rev": 2,
+      "rev_stale": false,
+      "effective_preview": {
+        "state": "off",
+        "active": false,
+        "blockers": []
+      },
+      "affected": [
+        {
+          "key": "observability",
+          "state_before": "on",
+          "state_after": "off",
+          "active_after": false
+        }
+      ]
+    }
+  }
+}

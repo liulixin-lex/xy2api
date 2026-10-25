@@ -1,0 +1,68 @@
+{
+  "_contract": [
+    "M4-4",
+    "C-12"
+  ],
+  "_note": "M4：anthropic_identity 的变更记录。规则同父目录 v1.7.4.6 的 history 样例；_fixture 是后端测试需预置的状态，不属于响应。",
+  "_fixture": {
+    "key": "anthropic_identity",
+    "persisted_success_rev_after": [
+      1,
+      2
+    ],
+    "stored": {
+      "rev": 2,
+      "updated_at": "2026-10-24T08:56:00Z"
+    },
+    "now": "2026-10-24T09:00:00Z"
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/cache/policies/history?key=anthropic_identity",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "items": [
+        {
+          "at": "2026-10-24T08:56:00Z",
+          "key": "anthropic_identity",
+          "action": "admin.cache.policies.anthropic_identity.update",
+          "actor": {
+            "user_id": 1,
+            "email": "admin@example.com"
+          },
+          "status_code": 200,
+          "rev_before": 1,
+          "rev_after": 2,
+          "changed_fields": [
+            "metadata_group_ids",
+            "rollout_percent"
+          ],
+          "reason": "两个 Claude 分组试运行"
+        },
+        {
+          "at": "2026-10-24T08:50:00Z",
+          "key": "anthropic_identity",
+          "action": "admin.cache.policies.anthropic_identity.update",
+          "actor": {
+            "user_id": 1,
+            "email": "admin@example.com"
+          },
+          "status_code": 200,
+          "rev_before": 0,
+          "rev_after": 1,
+          "changed_fields": [
+            "anchor_group_ids"
+          ],
+          "reason": "先开锚点"
+        }
+      ],
+      "history_complete": true,
+      "history_incomplete_reason": null
+    }
+  }
+}

@@ -47,6 +47,8 @@ func ProvideAdminHandlers(
 	affiliateHandler *admin.AffiliateHandler,
 	complianceHandler *admin.ComplianceHandler,
 	auditLogHandler *admin.AuditLogHandler,
+	cachePolicyHandler *admin.CachePolicyHandler,
+	cacheObservabilityHandler *admin.CacheObservabilityHandler,
 	shareSchedulingHandler *admin.ShareSchedulingHandler,
 	groupCategoryHandler *admin.GroupCategoryHandler,
 	resilienceHandler *admin.ResilienceHandler,
@@ -102,6 +104,8 @@ func ProvideAdminHandlers(
 		Affiliate:              affiliateHandler,
 		Compliance:             complianceHandler,
 		AuditLog:               auditLogHandler,
+		CachePolicy:            cachePolicyHandler,
+		CacheObservability:     cacheObservabilityHandler,
 		ShareScheduling:        shareSchedulingHandler,
 		GroupCategory:          groupCategoryHandler,
 		Resilience:             resilienceHandler,
@@ -304,6 +308,9 @@ var ProviderSet = wire.NewSet(
 	admin.NewAffiliateHandler,
 	admin.NewComplianceHandler,
 	admin.NewAuditLogHandler,
+	ProvideCachePolicyHandler,
+	ProvideCacheObservabilityHandler,
+	ProvideCachePanelBuildInfo,
 	admin.NewShareSchedulingHandler,
 	admin.NewGroupCategoryHandler,
 	admin.NewResilienceHandler,
@@ -312,3 +319,14 @@ var ProviderSet = wire.NewSet(
 	ProvideAdminHandlers,
 	ProvideHandlers,
 )
+
+func ProvideCachePolicyHandler(policies *service.CachePolicyService, audit *service.AuditLogService, build BuildInfo) *admin.CachePolicyHandler {
+	return admin.NewCachePolicyHandler(policies, audit, build.Version)
+}
+
+func ProvideCacheObservabilityHandler(panel *service.CacheObservabilityService) *admin.CacheObservabilityHandler {
+	return admin.NewCacheObservabilityHandler(panel)
+}
+func ProvideCachePanelBuildInfo(build BuildInfo) service.CachePanelBuildInfo {
+	return service.CachePanelBuildInfo{Version: build.Version}
+}

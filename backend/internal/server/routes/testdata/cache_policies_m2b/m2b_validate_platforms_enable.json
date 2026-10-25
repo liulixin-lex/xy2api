@@ -1,0 +1,65 @@
+{
+  "_contract": [
+    "P-M2B",
+    "C-3",
+    "C-4"
+  ],
+  "_note": "M2b：platforms 增加 anthropic。观测键为低风险，扩大范围属于 enable 方向，不需要确认。观测本身仍关闭，所以生效预览为 off。",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/observability/validate",
+    "body": {
+      "expected_rev": 0,
+      "spec": {
+        "platforms": [
+          "openai",
+          "anthropic"
+        ]
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": true,
+      "errors": [],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "platforms",
+          "before": [
+            "openai"
+          ],
+          "after": [
+            "openai",
+            "anthropic"
+          ]
+        }
+      ],
+      "risk": "low",
+      "direction": "enable",
+      "confirm": {
+        "reason_required": false,
+        "checkbox_required": false,
+        "type_to_confirm": null
+      },
+      "current_rev": 0,
+      "rev_stale": false,
+      "effective_preview": {
+        "state": "off",
+        "active": false,
+        "blockers": []
+      },
+      "affected": [
+        {
+          "key": "observability",
+          "state_before": "off",
+          "state_after": "off",
+          "active_after": false
+        }
+      ]
+    }
+  }
+}

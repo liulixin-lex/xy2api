@@ -1,0 +1,27 @@
+{
+  "_contract": [
+    "M3-4",
+    "C-4"
+  ],
+  "_note": "M3：非 disable 方向缺少理由与勾选：422、reason=CACHE_POLICY_CONFIRM_REQUIRED，metadata.missing=reason,checkbox；不要求输入键名，没有 type_to_confirm。",
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/upstream_identity",
+    "body": {
+      "expected_rev": 0,
+      "spec": {
+        "mode": "uuid_fill",
+        "rollout_percent": 10
+      }
+    }
+  },
+  "status": 422,
+  "response": {
+    "code": 422,
+    "message": "confirmation required",
+    "reason": "CACHE_POLICY_CONFIRM_REQUIRED",
+    "metadata": {
+      "missing": "reason,checkbox"
+    }
+  }
+}

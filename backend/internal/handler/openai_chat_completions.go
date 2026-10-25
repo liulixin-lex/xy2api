@@ -165,6 +165,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	defer inflightRelease()
 
+	h.gatewayService.CaptureCachePolicy(c)
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
 
@@ -182,6 +183,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 	// xy2api resilience: the pre-output heartbeat ends with the request (design §7.2).
 	defer stopPreOutputKeepalive(c)
+	// Cache L-09a: positive first-selection permit; a no-op unless effective.
+	h.gatewayService.ArmCacheL09A(c, c.Request.Context())
 	for {
 		if failoverClientGone(c) {
 			return
@@ -407,6 +410,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 						return
 					}
 					switchCount++
+					service.NoteCacheTraceFailover(c.Request.Context(), switchCount)
 					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return

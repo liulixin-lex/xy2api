@@ -1,0 +1,32 @@
+{
+  "_contract": [
+    "M3-3",
+    "C-6"
+  ],
+  "_note": "M3：PUT 不支持的取值：400，reason=CACHE_POLICY_UNSUPPORTED（M3 及以后的构建新增，README §3.3），metadata.errors 的格式与 CACHE_POLICY_INVALID 相同：errors[] 的 JSON 字符串，元素为 {field, code:\"unsupported_in_build\"}。",
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/upstream_identity",
+    "body": {
+      "expected_rev": 4,
+      "spec": {
+        "header_only_uuid": true,
+        "forward_session_headers": "normalize"
+      },
+      "reason": "试一下",
+      "confirm": {
+        "checkbox": true,
+        "typed": null
+      }
+    }
+  },
+  "status": 400,
+  "response": {
+    "code": 400,
+    "message": "cache policy validation failed",
+    "reason": "CACHE_POLICY_UNSUPPORTED",
+    "metadata": {
+      "errors": "[{\"field\":\"forward_session_headers\",\"code\":\"unsupported_in_build\"},{\"field\":\"header_only_uuid\",\"code\":\"unsupported_in_build\"}]"
+    }
+  }
+}

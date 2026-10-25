@@ -1,0 +1,42 @@
+{
+  "_contract": [
+    "M4-3",
+    "M4-D2",
+    "C-6"
+  ],
+  "_note": "v1.2 默认构建：PUT keep_sticky_on_busy.enabled=true（l07）：400、reason=CACHE_POLICY_UNSUPPORTED。",
+  "_fixture": {
+    "build_capabilities": {
+      "l04": false,
+      "l03": false,
+      "l07": false
+    },
+    "说明": "后端测试需预置的静态构建能力，不属于响应；没有 _fixture 的 m4 样例按三项都为 true 处理"
+  },
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/routing",
+    "body": {
+      "expected_rev": 0,
+      "spec": {
+        "keep_sticky_on_busy": {
+          "enabled": true
+        }
+      },
+      "reason": "试运行",
+      "confirm": {
+        "checkbox": true,
+        "typed": "cache_routing_policy"
+      }
+    }
+  },
+  "status": 400,
+  "response": {
+    "code": 400,
+    "message": "cache policy validation failed",
+    "reason": "CACHE_POLICY_UNSUPPORTED",
+    "metadata": {
+      "errors": "[{\"field\":\"keep_sticky_on_busy.enabled\",\"code\":\"unsupported_in_build\"}]"
+    }
+  }
+}

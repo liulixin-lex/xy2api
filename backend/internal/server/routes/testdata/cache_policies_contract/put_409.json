@@ -1,0 +1,31 @@
+{
+  "_contract": [
+    "C-5"
+  ],
+  "_note": "rev 冲突：reason=CACHE_POLICY_REV_CONFLICT；metadata.current_rev、expected_rev 为十进制字符串。前端随后 GET 单项与 history?key=&after_rev=<expected_rev>，做三方合并（DESIGN §11.7）。",
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/upstream_identity",
+    "body": {
+      "expected_rev": 4,
+      "spec": {
+        "rollout_percent": 60
+      },
+      "reason": "扩大到 60%",
+      "confirm": {
+        "checkbox": true,
+        "typed": null
+      }
+    }
+  },
+  "status": 409,
+  "response": {
+    "code": 409,
+    "message": "cache policy has been modified",
+    "reason": "CACHE_POLICY_REV_CONFLICT",
+    "metadata": {
+      "current_rev": "5",
+      "expected_rev": "4"
+    }
+  }
+}

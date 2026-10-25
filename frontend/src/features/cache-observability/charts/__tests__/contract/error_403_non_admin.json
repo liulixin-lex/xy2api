@@ -1,0 +1,16 @@
+{
+  "_contract": [
+    "P-9"
+  ],
+  "_note": "非管理员：沿用平台 admin 鉴权中间件的响应（字符串 code，无 reason/metadata），前端交给全局处理。4 个接口都如此。",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/cache/northstar?window=7d",
+    "body": null
+  },
+  "status": 403,
+  "response": {
+    "code": "FORBIDDEN",
+    "message": "Admin access required"
+  }
+}

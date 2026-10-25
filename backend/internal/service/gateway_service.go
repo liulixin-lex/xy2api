@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -619,6 +620,8 @@ type AudioUsage struct {
 }
 
 type ForwardResult struct {
+	providerTrace       *cacheTrace
+	providerBusiness    *cacheProviderBusiness
 	ClaudeCacheFallback *ClaudeCacheFallbackDecision
 	RequestID           string
 	// UpstreamHeaders 是直接上游的响应头，用于按账户配置解析上游请求标识。
@@ -780,6 +783,9 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 
 // GatewayService handles API gateway operations
 type GatewayService struct {
+	anchorInflight        cacheAnchorInflight
+	anchorInflightOnce    sync.Once
+	providerTraceEngine   *OpenAIGatewayService
 	accountRepo           AccountRepository
 	groupRepo             GroupRepository
 	usageLogRepo          UsageLogRepository
@@ -821,6 +827,9 @@ type GatewayService struct {
 	shareScheduling *ShareSchedulingService
 	// resilience is the xy2api gateway resilience runtime (optional).
 	resilience *ResilienceService
+	// cachePolicies is installed by ProvideGatewayServiceWithCacheTrace; nil keeps every
+	// cache routing behavior (L-07) off.
+	cachePolicies *CachePolicyService
 }
 
 // NewGatewayService creates a new GatewayService
@@ -915,6 +924,10 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 		return ""
 	}
 	if anchor := s.shareSessionHash(parsed); anchor != "" {
+		if parsed.cacheTraceSource != nil {
+			*parsed.cacheTraceSource = "share_anchor"
+		}
+		s.cacheAnchorEarlierTier(parsed)
 		return anchor
 	}
 
@@ -928,6 +941,10 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 				"device_id", uid.DeviceID,
 				"is_new_format", uid.IsNewFormat,
 			)
+			if parsed.cacheTraceSource != nil {
+				*parsed.cacheTraceSource = "metadata_user_id"
+			}
+			s.cacheAnchorEarlierTier(parsed)
 			return uid.SessionID
 		}
 		slog.Info("sticky.hash_metadata_parse_failed",
@@ -944,7 +961,15 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 			"source", "cacheable_content",
 			"hash", hash,
 		)
-		return hash
+		if parsed.cacheTraceSource != nil {
+			*parsed.cacheTraceSource = "cacheable_content"
+		}
+		s.cacheAnchorEarlierTier(parsed)
+		return (hash)
+	}
+
+	if anchor := s.cacheAnchorSession(parsed); anchor != "" {
+		return anchor
 	}
 
 	// 3. 最后 fallback: 使用 session上下文 + system + 所有消息的完整摘要串
@@ -973,6 +998,9 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 			"hash", hash,
 			"content_len", combined.Len(),
 		)
+		if parsed.cacheTraceSource != nil {
+			*parsed.cacheTraceSource = "message_content_fallback"
+		}
 		return hash
 	}
 

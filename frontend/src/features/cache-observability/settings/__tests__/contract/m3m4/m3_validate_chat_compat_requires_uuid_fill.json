@@ -1,0 +1,55 @@
+{
+  "_contract": [
+    "M3-3",
+    "C-3"
+  ],
+  "_note": "M3：chat_compat_uuid=true 而 mode=off：硬校验，validate 200、valid=false，错误码 requires_mode_uuid_fill（CACHE_PANEL_API §7.4 词表）。",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/upstream_identity/validate",
+    "body": {
+      "expected_rev": 0,
+      "spec": {
+        "chat_compat_uuid": true
+      },
+      "reason": "试一下",
+      "confirm": {
+        "checkbox": true,
+        "typed": null
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": false,
+      "errors": [
+        {
+          "field": "chat_compat_uuid",
+          "code": "requires_mode_uuid_fill"
+        }
+      ],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "chat_compat_uuid",
+          "before": false,
+          "after": true
+        }
+      ],
+      "risk": "high",
+      "direction": "enable",
+      "confirm": {
+        "reason_required": true,
+        "checkbox_required": true,
+        "type_to_confirm": null
+      },
+      "current_rev": 0,
+      "rev_stale": false,
+      "effective_preview": null,
+      "affected": []
+    }
+  }
+}

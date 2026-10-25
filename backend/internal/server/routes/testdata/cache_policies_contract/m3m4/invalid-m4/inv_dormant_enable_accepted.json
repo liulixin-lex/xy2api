@@ -1,0 +1,81 @@
+{
+  "_contract": [
+    "M4-3",
+    "M4-D2",
+    "C-3"
+  ],
+  "_note": "必须被拒绝：能力为 false 时能力字段不得改为非默认值，必须报 unsupported_in_build（v1.2）",
+  "_fixture": {
+    "build_capabilities": {
+      "l04": false,
+      "l03": false,
+      "l07": false
+    },
+    "说明": "后端测试需预置的静态构建能力，不属于响应；没有 _fixture 的 m4 样例按三项都为 true 处理"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/anthropic_identity/validate",
+    "body": {
+      "expected_rev": 0,
+      "spec": {
+        "anchor_group_ids": [
+          31,
+          32
+        ],
+        "gemini_anchor": true,
+        "metadata_group_ids": [
+          31
+        ],
+        "rollout_percent": 50
+      },
+      "reason": "试运行",
+      "confirm": {
+        "checkbox": true,
+        "typed": null
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": true,
+      "errors": [],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "anchor_group_ids",
+          "before": [],
+          "after": [
+            31,
+            32
+          ]
+        },
+        {
+          "field": "rollout_percent",
+          "before": 0,
+          "after": 50
+        }
+      ],
+      "risk": "high",
+      "direction": "enable",
+      "confirm": {
+        "reason_required": true,
+        "checkbox_required": true,
+        "type_to_confirm": null
+      },
+      "current_rev": 0,
+      "rev_stale": false,
+      "effective_preview": {
+        "state": "blocked",
+        "active": false,
+        "blockers": [
+          "not_implemented_in_build"
+        ]
+      },
+      "affected": []
+    }
+  }
+}

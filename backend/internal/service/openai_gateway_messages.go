@@ -36,6 +36,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 ) (forwardResult *OpenAIForwardResult, forwardErr error) {
 	defer func() { s.finishCacheDiagnostic(c, body, forwardResult) }()
 	if c != nil {
+		resetCacheTraceAttempt(c)
 		c.Set("openai_cache_diagnostic", nil)
 	}
 	// 工具 Schema 清洗必须先于所有分流：下游每条路径（原生 Anthropic 直通、
@@ -377,6 +378,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if account.Platform != PlatformGrok && promptCacheKey != "" {
 		isolatedSessionID := generateSessionUUID(isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), promptCacheKey))
 		upstreamReq.Header.Set("session_id", isolatedSessionID)
+		cacheTraceFromGin(c).setSessionSource("gw_isolated")
 		if upstreamReq.Header.Get("conversation_id") != "" {
 			upstreamReq.Header.Set("conversation_id", isolatedSessionID)
 		}
@@ -424,7 +426,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				return nil, fmt.Errorf("build grok retry request: %w", err)
 			}
 		}
+		captureCacheTraceHeaders(c, upstreamReq)
+		s.markCacheTraceSent(c)
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+		s.startCacheTraceRequest(c)
 		if firstEvent.expired() {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
@@ -793,6 +798,32 @@ func openAICompatTerminalResponse(event *apicompat.ResponsesStreamEvent, payload
 	}
 }
 
+// processOpenAICompatBufferedEvent owns terminal usage precedence for both
+// observation states, including the EOF-flushed frame. It performs no trace
+// work, so the disabled caller retains the original parser and one bool gate.
+func processOpenAICompatBufferedEvent(
+	event *apicompat.ResponsesStreamEvent,
+	payload []byte,
+	acc *apicompat.BufferedResponseAccumulator,
+	usage *OpenAIUsage,
+) *apicompat.ResponsesResponse {
+	acc.ProcessEvent(event)
+	response := openAICompatTerminalResponse(event, payload)
+	if !isOpenAICompatResponsesTerminalEvent(event.Type) || response == nil {
+		return nil
+	}
+	if event.Usage != nil {
+		*usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
+		if response.Usage == nil {
+			response.Usage = event.Usage
+		}
+	}
+	if response.Usage != nil {
+		*usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
+	}
+	return response
+}
+
 func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 	resp *http.Response,
 	c *gin.Context,
@@ -801,6 +832,9 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 	logPrefix string,
 	requestID string,
 ) (*apicompat.ResponsesResponse, OpenAIUsage, *apicompat.BufferedResponseAccumulator, error) {
+	// The attempt-local gate keeps the disabled per-frame path to one bool check.
+	cacheTraceActive := cacheTraceObserving(c)
+
 	acc := apicompat.NewBufferedResponseAccumulator()
 	var usage OpenAIUsage
 	if resp == nil || resp.Body == nil {
@@ -881,19 +915,20 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 					payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
 					var event apicompat.ResponsesStreamEvent
 					if err := json.Unmarshal([]byte(payload), &event); err == nil {
-						s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
-						acc.ProcessEvent(&event)
-						if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
-							if event.Usage != nil {
-								usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
-								if response.Usage == nil {
-									response.Usage = event.Usage
+						payloadBytes := []byte(payload)
+						if cacheTraceActive {
+							cacheTraceTyped := s.parseSSEUsageBytesWithTypeForCacheTrace(c, payloadBytes, event.Type, &usage, event.Usage != nil || event.Response != nil && event.Response.Usage != nil)
+							if response := processOpenAICompatBufferedEvent(&event, payloadBytes, acc, &usage); response != nil {
+								if response.Usage != nil {
+									cacheTraceFromGin(c).observeCacheTraceTypedPrompt(cacheTraceTyped, response.Usage == event.Usage)
 								}
+								return response, usage, acc, nil
 							}
-							if response.Usage != nil {
-								usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
+						} else {
+							s.parseSSEUsageBytesWithType(payloadBytes, event.Type, &usage)
+							if response := processOpenAICompatBufferedEvent(&event, payloadBytes, acc, &usage); response != nil {
+								return response, usage, acc, nil
 							}
-							return response, usage, acc, nil
 						}
 					}
 				}
@@ -928,21 +963,20 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 				)
 				continue
 			}
-			s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
-
-			acc.ProcessEvent(&event)
-
-			if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
-				if event.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
-					if response.Usage == nil {
-						response.Usage = event.Usage
+			payloadBytes := []byte(payload)
+			if cacheTraceActive {
+				cacheTraceTyped := s.parseSSEUsageBytesWithTypeForCacheTrace(c, payloadBytes, event.Type, &usage, event.Usage != nil || event.Response != nil && event.Response.Usage != nil)
+				if response := processOpenAICompatBufferedEvent(&event, payloadBytes, acc, &usage); response != nil {
+					if response.Usage != nil {
+						cacheTraceFromGin(c).observeCacheTraceTypedPrompt(cacheTraceTyped, response.Usage == event.Usage)
 					}
+					return response, usage, acc, nil
 				}
-				if response.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
+			} else {
+				s.parseSSEUsageBytesWithType(payloadBytes, event.Type, &usage)
+				if response := processOpenAICompatBufferedEvent(&event, payloadBytes, acc, &usage); response != nil {
+					return response, usage, acc, nil
 				}
-				return response, usage, acc, nil
 			}
 
 		case <-timeoutCh:
@@ -978,6 +1012,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	upstreamModel string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
+	cacheTraceActive := cacheTraceObserving(c)
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -1127,11 +1162,17 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 		}
 		observer.ObserveOpenAI([]byte(payload), event.Type)
-		s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
-
 		eventType := strings.TrimSpace(event.Type)
 		isBareErrorEvent := eventType == "error"
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(eventType) || isBareErrorEvent
+		if cacheTraceActive {
+			cacheTraceTyped := s.parseSSEUsageBytesWithTypeForCacheTrace(c, []byte(payload), event.Type, &usage, event.Usage != nil || event.Response != nil && event.Response.Usage != nil)
+			if isTerminalEvent && (event.Usage != nil || event.Response != nil && event.Response.Usage != nil) {
+				cacheTraceFromGin(c).observeCacheTraceTypedPrompt(cacheTraceTyped, event.Usage != nil)
+			}
+		} else {
+			s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
+		}
 		if isTerminalEvent {
 			terminalEventType = eventType
 			if event.Response != nil {

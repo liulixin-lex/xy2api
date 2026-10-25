@@ -475,6 +475,22 @@ gateway:
   # Privacy-safe cache diagnostics and optional cold-session tie-breaker.
   # Existing owners, health, priority, capacity and admission remain authoritative.
   # See docs/openai-cache-reliability.md for rollout and rollback.
+  # Observation defaults off. Enable via /admin/cache; diagnostics_enabled is required.
+  # Local writes apply immediately; other instances refresh within 60s.
+  cache_features:
+    kill_switch: false # Emergency stop for new cache features; settings remain writable.
+  cache_policy:
+    max_stale_seconds: 900 # 0 or 60..86400; failed policy refreshes beyond this turn behavior policies off; 0 = no bound.
+  cache_trace:
+    workers: 1 # 1..2
+    max_byte_budget_mib: 64
+    max_rate_mib_per_s: 32
+    max_sessions: 1024 # 1..1024; trace histories only
+    chains_per_session: 3 # 1..3
+    max_checkpoints: 512 # 1..512 retained hashes per chain
+    max_queue_wait: 10s
+    reasoning_context_paths: ["reasoning.context"]
+    min_cacheable_tokens: 1024
   openai_cache:
     diagnostics_enabled: false
     aware_routing_enabled: false

@@ -1,0 +1,47 @@
+{
+  "_contract": [
+    "M3-3",
+    "C-3"
+  ],
+  "_note": "M3：account_ids 有重复：错误码 duplicate；出错的字段不进入 diff。",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/upstream_identity/validate",
+    "body": {
+      "expected_rev": 0,
+      "spec": {
+        "account_ids": [
+          101,
+          101
+        ]
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": false,
+      "errors": [
+        {
+          "field": "account_ids",
+          "code": "duplicate"
+        }
+      ],
+      "warnings": [],
+      "diff": [],
+      "risk": "high",
+      "direction": "disable",
+      "confirm": {
+        "reason_required": false,
+        "checkbox_required": false,
+        "type_to_confirm": null
+      },
+      "current_rev": 0,
+      "rev_stale": false,
+      "effective_preview": null,
+      "affected": []
+    }
+  }
+}

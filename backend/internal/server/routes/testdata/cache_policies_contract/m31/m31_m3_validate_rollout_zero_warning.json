@@ -1,0 +1,66 @@
+{
+  "_contract": [
+    "M3-2",
+    "C-4",
+    "M31"
+  ],
+  "_note": "M3.1 构建版本：由 m3m4 v1.2 的 m3_validate_rollout_zero_warning.json 按 README §1 的规则派生（upstream_identity 追加 max_inflight_per_key；请求后或存储中 mode=uuid_fill 且 account_ids 为空时带 l01_all_accounts_unverified），其余逐字相同。原说明：M3：mode 改为 uuid_fill 但 rollout_percent 仍为 0：方向为 enable（要求确认），保存后不生效，warnings 带 no_effect_rollout_zero，预览为 off。",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/upstream_identity/validate",
+    "body": {
+      "expected_rev": 0,
+      "spec": {
+        "mode": "uuid_fill"
+      },
+      "reason": "先只打开模式",
+      "confirm": {
+        "checkbox": true,
+        "typed": null
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": true,
+      "errors": [],
+      "warnings": [
+        "no_effect_rollout_zero",
+        "l01_all_accounts_unverified"
+      ],
+      "diff": [
+        {
+          "field": "mode",
+          "before": "off",
+          "after": "uuid_fill"
+        }
+      ],
+      "risk": "high",
+      "direction": "enable",
+      "confirm": {
+        "reason_required": true,
+        "checkbox_required": true,
+        "type_to_confirm": null
+      },
+      "current_rev": 0,
+      "rev_stale": false,
+      "effective_preview": {
+        "state": "off",
+        "active": false,
+        "blockers": []
+      },
+      "affected": [
+        {
+          "key": "upstream_identity",
+          "state_before": "off",
+          "state_after": "off",
+          "active_after": false
+        }
+      ]
+    }
+  },
+  "_derived_from": "m3_validate_rollout_zero_warning.json"
+}

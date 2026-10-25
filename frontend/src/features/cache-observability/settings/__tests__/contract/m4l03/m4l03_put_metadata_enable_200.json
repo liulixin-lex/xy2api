@@ -1,0 +1,180 @@
+{
+  "_contract": [
+    "M4-4",
+    "M4-L03"
+  ],
+  "_note": "T2.3 构建：PUT 开启 L-03，rev 2→3，state=on。enable 方向照常加载候选，metadata_account_ids 的 options 下发。",
+  "_fixture": {
+    "build_capabilities": {
+      "l04": true,
+      "l03": true,
+      "l07": false
+    },
+    "说明": "T2.3 构建的静态能力（叠在 T2.2 上：l04、l03 为 true，l07 为 false），不属于响应；包含 T0b.4，所以没有 anthropic_observability_missing"
+  },
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/anthropic_identity",
+    "body": {
+      "expected_rev": 2,
+      "spec": {
+        "metadata_group_ids": [
+          31
+        ],
+        "metadata_account_ids": [
+          501
+        ],
+        "metadata_rollout_percent": 20
+      },
+      "reason": "中转账号 501 已核实按 session 粘性",
+      "confirm": {
+        "checkbox": true,
+        "typed": null
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "key": "anthropic_identity",
+      "setting_key": "cache_anthropic_identity_policy",
+      "available": true,
+      "risk": "high",
+      "gated_by_master": true,
+      "stored": {
+        "rev": 3,
+        "updated_at": "2026-10-25T05:10:00Z",
+        "updated_by": {
+          "user_id": 1,
+          "email": "admin@example.com"
+        },
+        "reason": "中转账号 501 已核实按 session 粘性",
+        "spec": {
+          "anchor_group_ids": [
+            31,
+            32
+          ],
+          "gemini_anchor": false,
+          "metadata_group_ids": [
+            31
+          ],
+          "metadata_account_ids": [
+            501
+          ],
+          "rollout_percent": 50,
+          "metadata_rollout_percent": 20,
+          "max_inflight_per_anchor": 2
+        }
+      },
+      "loaded": {
+        "rev": 3,
+        "loaded_at": "2026-10-25T05:10:20Z"
+      },
+      "effective": {
+        "state": "on",
+        "active": true,
+        "blockers": [],
+        "warnings": [],
+        "clipped_fields": []
+      },
+      "defaults": {
+        "anchor_group_ids": [],
+        "gemini_anchor": false,
+        "metadata_group_ids": [],
+        "metadata_account_ids": [],
+        "rollout_percent": 0,
+        "metadata_rollout_percent": 0,
+        "max_inflight_per_anchor": 2
+      },
+      "schema": [
+        {
+          "field": "anchor_group_ids",
+          "type": "id_list",
+          "ref": "group",
+          "options": [
+            {
+              "id": 31,
+              "name": "claude-pool-a",
+              "platform": "anthropic"
+            },
+            {
+              "id": 32,
+              "name": "claude-pool-b",
+              "platform": "anthropic"
+            },
+            {
+              "id": 77,
+              "name": "claude-standby",
+              "platform": "anthropic"
+            }
+          ]
+        },
+        {
+          "field": "gemini_anchor",
+          "type": "bool"
+        },
+        {
+          "field": "metadata_group_ids",
+          "type": "id_list",
+          "ref": "group",
+          "options": [
+            {
+              "id": 31,
+              "name": "claude-pool-a",
+              "platform": "anthropic"
+            },
+            {
+              "id": 32,
+              "name": "claude-pool-b",
+              "platform": "anthropic"
+            },
+            {
+              "id": 77,
+              "name": "claude-standby",
+              "platform": "anthropic"
+            }
+          ]
+        },
+        {
+          "field": "metadata_account_ids",
+          "type": "id_list",
+          "ref": "account",
+          "options": [
+            {
+              "id": 501,
+              "name": "relay-claude-a",
+              "platform": "anthropic"
+            },
+            {
+              "id": 502,
+              "name": "relay-claude-b",
+              "platform": "anthropic"
+            }
+          ]
+        },
+        {
+          "field": "rollout_percent",
+          "type": "int",
+          "min": 0,
+          "max": 100,
+          "unit": "percent"
+        },
+        {
+          "field": "metadata_rollout_percent",
+          "type": "int",
+          "min": 0,
+          "max": 100,
+          "unit": "percent"
+        },
+        {
+          "field": "max_inflight_per_anchor",
+          "type": "int",
+          "min": 1,
+          "max": 16
+        }
+      ]
+    }
+  }
+}

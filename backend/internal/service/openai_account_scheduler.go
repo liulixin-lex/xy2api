@@ -567,6 +567,9 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	}
 	if shouldClearStickySession(account, req.RequestedModel) || account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() || !account.IsSchedulable() {
 		clearBinding()
+		if !req.PreserveStickyBinding {
+			s.service.l09aOwnerCleared(ctx, account)
+		}
 		return nil, false, nil
 	}
 	if !s.isAccountRequestCompatible(ctx, account, req) {
@@ -1087,6 +1090,9 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 	plan.selectionOrder = s.buildOpenAISelectionOrder(req, plan)
 	if req.PreviousResponseID == "" && req.StickyAccountID == 0 && req.StickyPreviousAccountID == 0 && !req.StickyWeighted {
 		s.service.preferCacheScoredCandidates(ctx, plan.selectionOrder, req.RequestedModel)
+	}
+	if l09a := s.service.l09aFirst(ctx); l09a != nil {
+		s.service.l09aPreferCacheScoredCandidates(ctx, l09a, req, plan)
 	}
 	return plan
 }
@@ -2227,6 +2233,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	beginCacheTraceSelection(ctx)
+	l09a := s.l09aEnterSelection(ctx)
+	defer l09aDone(l09a)
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
 	origExcluded := excludedIDs
 	resilience.StateFrom(ctx).NoteTurn(derefGroupID(groupID), requestedModel, sessionHash)
@@ -2272,7 +2281,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	if !negativeCacheable && isNoAccountSelectionError(err) {
 		resilienceMarkGroupNoAccount(ctx, groupID, requestedModel, origExcluded)
 	}
+	s.l09aFinish(ctx, l09a, selection, decision)
 	if err == nil && selection != nil {
+		noteCacheTraceSelection(ctx, selection, decision)
 		s.shareScheduling.recordSelection(ctx, selection.Account)
 		if sessionHash != "" {
 			resilience.StateFrom(ctx).SetSession(derefGroupID(groupID), sessionHash, s.openAISessionRecorder())

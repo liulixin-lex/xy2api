@@ -7,6 +7,8 @@ import (
 
 // AdminHandlers contains all admin-related HTTP handlers
 type AdminHandlers struct {
+	CacheObservability     *admin.CacheObservabilityHandler
+	CachePolicy            *admin.CachePolicyHandler
 	Dashboard              *admin.DashboardHandler
 	User                   *admin.UserHandler
 	Group                  *admin.GroupHandler

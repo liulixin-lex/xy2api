@@ -1,0 +1,120 @@
+{
+  "_contract": [
+    "P-1",
+    "P-4",
+    "P-5"
+  ],
+  "_note": "必须被拒绝：summary 缺 cost 键（§8.2：键总是出现，不可用时为 null）",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/cache/northstar?window=7d&platform=all",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "policy_version": "2026-10-22-v1",
+      "as_of": "2026-10-23T07:00:00Z",
+      "generated_at": "2026-10-23T07:03:12Z",
+      "window": {
+        "start": "2026-10-16T07:00:00Z",
+        "end": "2026-10-23T07:00:00Z"
+      },
+      "granularity": "1h",
+      "platform": "all",
+      "scope": {
+        "name": "strict_known_minimum",
+        "business_prompt_tokens": 18102669000,
+        "excluded": {
+          "media_requests": 1204,
+          "zero_prompt_requests": 88,
+          "probe_group_requests": 3311,
+          "below_min_requests": 12078,
+          "unknown_threshold_requests": 3540
+        }
+      },
+      "summary": {
+        "requests": 128473,
+        "prompt_tokens": 17757879000,
+        "read_tokens": 14262547000,
+        "token_hit_upper": 0.803167,
+        "token_hit_lower": 0.802767,
+        "request_hit": 0.910308,
+        "opportunity_recorded_tokens": 2469214000,
+        "business_coverage": 0.98095,
+        "standardized_hit": 0.8031,
+        "standardized_weight_coverage": 1.0,
+        "previous": {
+          "token_hit_upper": 0.8197,
+          "token_hit_lower": 0.8195,
+          "request_hit": 0.9116
+        }
+      },
+      "series": [
+        {
+          "bucket_start": "2026-10-16T07:00:00Z",
+          "requests": 760,
+          "prompt_tokens": 105600000,
+          "token_hit_upper": 0.80303,
+          "token_hit_lower": 0.802652,
+          "request_hit": 0.910526,
+          "opportunity_recorded_tokens": 14200000,
+          "partial": false,
+          "saved_amount": 108.4,
+          "opportunity_amount": 18.6,
+          "token_hit_cost_weighted_upper": 0.8209
+        },
+        {
+          "bucket_start": "2026-10-16T08:00:00Z",
+          "requests": 812,
+          "prompt_tokens": 113900000,
+          "token_hit_upper": 0.803336,
+          "token_hit_lower": 0.802941,
+          "request_hit": 0.912562,
+          "opportunity_recorded_tokens": 15100000,
+          "partial": false,
+          "saved_amount": 116.9,
+          "opportunity_amount": 19.7,
+          "token_hit_cost_weighted_upper": 0.8214
+        },
+        {
+          "bucket_start": "2026-10-23T06:00:00Z",
+          "requests": 794,
+          "prompt_tokens": 110200000,
+          "token_hit_upper": 0.799456,
+          "token_hit_lower": 0.799083,
+          "request_hit": 0.906801,
+          "opportunity_recorded_tokens": 14900000,
+          "partial": true,
+          "saved_amount": 112.6,
+          "opportunity_amount": 19.4,
+          "token_hit_cost_weighted_upper": 0.8198
+        }
+      ],
+      "events": [
+        {
+          "at": "2026-10-20T09:15:00Z",
+          "kind": "release",
+          "label": "0.0.0-contract",
+          "version": "0.0.0-contract",
+          "cold_until": "2026-10-20T10:15:00Z"
+        },
+        {
+          "at": "2026-10-21T03:00:00Z",
+          "kind": "config",
+          "label": "observability rev 7",
+          "policy_key": "observability"
+        },
+        {
+          "at": "2026-10-22T11:30:00Z",
+          "kind": "restart",
+          "label": "restart",
+          "version": "0.0.0-contract",
+          "cold_until": "2026-10-22T12:30:00Z"
+        }
+      ]
+    }
+  }
+}

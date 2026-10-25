@@ -1,0 +1,27 @@
+{
+  "_contract": [
+    "P-M2B",
+    "C-6"
+  ],
+  "_note": "M2b：platforms 必须是非空子集；空数组返回 400 CACHE_POLICY_INVALID，code=empty。要停止观测请关闭 enabled。",
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/observability",
+    "body": {
+      "expected_rev": 2,
+      "spec": {
+        "platforms": []
+      },
+      "reason": "清空平台"
+    }
+  },
+  "status": 400,
+  "response": {
+    "code": 400,
+    "message": "cache policy validation failed",
+    "reason": "CACHE_POLICY_INVALID",
+    "metadata": {
+      "errors": "[{\"field\":\"platforms\",\"code\":\"empty\"}]"
+    }
+  }
+}

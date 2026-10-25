@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -50,6 +51,10 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string) (*openaiStreamingResult, error) {
+	// The attempt-local gate keeps the disabled per-frame path to one bool check.
+	cacheTraceActive := cacheTraceObserving(c)
+	l01ResponseApplied := openAIUpstreamIdentityResponseApplied(c, account)
+
 	preludeTrace := beginOpenAIPreludeTrace(ctx, resilience.Current().NativePreludeWhitelistOn())
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
@@ -135,7 +140,32 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 		}()
 	}
+	var l01ResponseBuffer *openAIUpstreamIdentitySSEBuffer
+	if l01ResponseApplied {
+		l01ResponseBuffer = &openAIUpstreamIdentitySSEBuffer{limit: maxLineSize, uuid: openAIUpstreamIdentityUUID(c), context: c}
+	}
 	writePendingString := func(value string) (int, error) {
+		if l01ResponseBuffer != nil {
+			restored, err := l01ResponseBuffer.Append(value)
+			if err != nil {
+				return 0, err
+			}
+			if len(restored) > 0 {
+				var n int
+				if firstOutputStage != nil && !firstOutputStage.closed {
+					n, err = firstOutputStage.Write(restored)
+				} else {
+					n, err = bufferedWriter.Write(restored)
+				}
+				if err == nil && n != len(restored) {
+					err = io.ErrShortWrite
+				}
+				if err != nil {
+					return 0, err
+				}
+			}
+			return len(value), nil
+		}
 		if firstOutputStage != nil && !firstOutputStage.closed {
 			return firstOutputStage.WriteString(value)
 		}
@@ -382,6 +412,29 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		lastDownstreamWriteAt = time.Now()
 	}
 	finalizeStream := func() (*openaiStreamingResult, error) {
+		if l01ResponseBuffer != nil {
+			restored, err := l01ResponseBuffer.Finish()
+			if err == nil && len(restored) > 0 {
+				// Keep the existing writers local. Saving them in a heap
+				// callback would add allocations to every disabled response.
+				var n int
+				if firstOutputStage != nil && !firstOutputStage.closed {
+					n, err = firstOutputStage.Write(restored)
+				} else {
+					n, err = bufferedWriter.Write(restored)
+				}
+				if err == nil && n != len(restored) {
+					err = io.ErrShortWrite
+				}
+			}
+			if err != nil {
+				handlePendingWriteError(err)
+				if streamEarlyErr != nil {
+					return resultWithUsage(), streamEarlyErr
+				}
+				return resultWithUsage(), fmt.Errorf("restore response identity at EOF: %w", err)
+			}
+		}
 		if stageFirstOutput && eventInProgress {
 			// EOF dispatches the final SSE event even without a trailing blank line.
 			completeGuardedEvent(true)
@@ -551,7 +604,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				// response.failed 自带上游已消耗的 usage（input token 通常已扣）；必须先解析
 				// 再打 cyber 标记，否则 mark 记到的是解析前的 0，导致流式 cyber 按 0 token 计费
 				// 而漏记真实用量。对齐 WS V2 / Chat 流式路径（均先解析 usage 再 Mark）。
-				s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
+				if cacheTraceActive {
+					s.parseSSEUsageBytesWithTypeForCacheTrace(c, dataBytes, eventType, usage)
+				} else {
+					s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
+				}
 				if hit, code, msg := detectOpenAICyberPolicy(dataBytes); hit {
 					cyberHit = true
 					MarkOpsCyberPolicy(c, CyberPolicyMark{
@@ -617,6 +674,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 							// xy2api resilience (PM instruction 5, as DELTA-P1-2): after
 							// heartbeats committed 200 the rule's error ends the stream
 							// as the Responses terminal event instead of a bare JSON body.
+							// Rule errors bypass the native SSE restoration writer.
+							if openAIUpstreamIdentityResponseApplied(c, account) {
+								errMsg = restoreOpenAIUpstreamIdentityErrorMessage(c, errMsg)
+							}
 							writeOpenAIStreamRuleError(ctx, c, status, errType, errMsg)
 							streamEarlyErr = fmt.Errorf("upstream response failed: passthrough rule matched message=%s", errMsg)
 							return
@@ -747,7 +808,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				firstTokenMs = &ms
 				stopFirstOutputTimer()
 			}
-			s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
+			if cacheTraceActive {
+				s.parseSSEUsageBytesWithTypeForCacheTrace(c, dataBytes, eventType, usage)
+			} else {
+				s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
+			}
 			return
 		}
 
@@ -904,11 +969,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		select {
 		case ev, ok := <-events:
 			if !ok {
-				if stageFirstOutput && eventInProgress {
-					// EOF dispatches the final SSE event even without a trailing blank
-					// line. Do not synthesize extra bytes on the downstream wire.
-					completeGuardedEvent(true)
-				}
+				// Finalization restores a pending L-01 event before the existing
+				// first-output stage is committed, just as in the synchronous path.
 				return finalizeStream()
 			}
 			if result, err, done := handleScanErr(ev.err); done {
@@ -1604,6 +1666,7 @@ func openAICacheCreationTokensFromUsage(value gjson.Result) int {
 }
 
 func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (*openaiNonStreamingResult, error) {
+	cacheTraceActive := cacheTraceObserving(c)
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		return nil, nonstreamReadError(ctx, resp, err)
@@ -1648,7 +1711,13 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		}
 	}
 
-	usageValue, usageOK := extractOpenAIUsageFromJSONBytes(body)
+	var usageValue OpenAIUsage
+	var usageOK bool
+	if cacheTraceActive {
+		usageValue, usageOK = extractOpenAIUsageForCacheTrace(c, body)
+	} else {
+		usageValue, usageOK = extractOpenAIUsageFromJSONBytes(body)
+	}
 	if !usageOK {
 		if bodyLooksLikeSSE {
 			return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
@@ -1675,6 +1744,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		return nil, fmt.Errorf("restore OpenAI namespace response: %w", err)
 	}
 	body = restoreCodexToolNamesFromContext(c, body)
+	if openAIUpstreamIdentityResponseApplied(c, account) {
+		body = restoreOpenAIUpstreamIdentityForClient(c, body, false)
+	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	// Codex 协议要求 /responses/compact JSON 响应携带 x-codex-turn-state
 	// （codex-api/src/endpoint/compact.rs 从响应头捕获），显式回传。
@@ -1723,6 +1795,7 @@ func bodyHasSSEFraming(body []byte) bool {
 }
 
 func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel, mappedModel string) (*openaiNonStreamingResult, error) {
+	cacheTraceActive := cacheTraceObserving(c)
 	bodyText := string(body)
 	terminalType, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
 	if terminalOK && (terminalType == "response.failed" || terminalType == "error") {
@@ -1740,10 +1813,21 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	}
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 
-	usage := s.parseSSEUsageFromBody(bodyText)
+	var usage *OpenAIUsage
+	if cacheTraceActive {
+		usage = s.parseSSEUsageWithCacheTrace(c, bodyText)
+	} else {
+		usage = s.parseSSEUsageFromBody(bodyText)
+	}
 	if ok {
-		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
-			*usage = parsedUsage
+		if cacheTraceActive {
+			if parsedUsage, parsed := extractOpenAIUsageForCacheTrace(c, finalResponse); parsed {
+				*usage = parsedUsage
+			}
+		} else {
+			if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
+				*usage = parsedUsage
+			}
 		}
 		// When the terminal event has an empty output array, reconstruct
 		// output from accumulated delta events so the client gets full content.
@@ -1781,6 +1865,9 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			bodyText = s.replaceModelInSSEBody(bodyText, mappedModel, originalModel)
 		}
 		body = []byte(bodyText)
+	}
+	if openAIUpstreamIdentityResponseApplied(c, account) {
+		body = restoreOpenAIUpstreamIdentityForClient(c, body, !ok)
 	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)

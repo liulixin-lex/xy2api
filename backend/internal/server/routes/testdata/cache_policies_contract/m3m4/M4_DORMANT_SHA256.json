@@ -1,0 +1,12 @@
+{
+  "m4_dormant_list_db_enabled.json": "f57afa56c278c2ac9faa5b19cb90e50c28a68ea7169abae16ec1e73b87e61d89",
+  "m4_dormant_list_default.json": "0e4a7c32d7207c2fa6d4202f66c4a3a609ec84ae0a8b13411c005976ac6c3881",
+  "m4_dormant_put_anthropic_unsupported.json": "7a841ed371892dbf0ab3a52337992a36fc55a50cbbdcf8d31048a896097a12dd",
+  "m4_dormant_put_routing_restore_200.json": "b559542d536125ebfbaf0dd578d50f5e6e6521d21d1a6cb1c3fc7d66489f92ad",
+  "m4_dormant_put_routing_unsupported.json": "1cadf30253dd1fbc3ca0fe6bf4a3f58911640cf9ba6b8de3290055f666301d0e",
+  "m4_dormant_validate_anthropic_enable_unsupported.json": "af644364e3e61d9e43e13bc552c8ff77aac66bf504cf35172088f17e6d16ae51",
+  "m4_dormant_validate_anthropic_remove_group.json": "8f7c35c15d2b78296674aeb11630e1e50cf7ee38e2ab6465248f9f47b0d234c0",
+  "m4_dormant_validate_anthropic_restore_defaults.json": "1afa96cefb855053a0e2ebdde47dd8306e0ed9a9f6ba00a2a19cab6a100aed18",
+  "m4_dormant_validate_routing_enable_unsupported.json": "9cfcaf9e998c9cfa5bc1cfa0b03e09f16c7b65c60b22e46bb216f2a189707a42",
+  "m4_dormant_validate_routing_restore_defaults.json": "45eb30fc68d30ffecea5e58e9feb6eaee402cdcdee0a799c893c328c6f080094"
+}

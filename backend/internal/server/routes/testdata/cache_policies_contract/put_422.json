@@ -1,0 +1,26 @@
+{
+  "_contract": [
+    "C-4"
+  ],
+  "_note": "绕过前端直接 PUT、缺少确认：reason=CACHE_POLICY_CONFIRM_REQUIRED；metadata.missing 为逗号分隔的 reason/checkbox/typed 子集；含 typed 时给出 type_to_confirm。",
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/routing",
+    "body": {
+      "expected_rev": 0,
+      "spec": {
+        "affinity_mode": "prev_host"
+      }
+    }
+  },
+  "status": 422,
+  "response": {
+    "code": 422,
+    "message": "confirmation required",
+    "reason": "CACHE_POLICY_CONFIRM_REQUIRED",
+    "metadata": {
+      "missing": "reason,checkbox,typed",
+      "type_to_confirm": "cache_routing_policy"
+    }
+  }
+}

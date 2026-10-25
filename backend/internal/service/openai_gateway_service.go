@@ -235,10 +235,13 @@ type OpenAIUsage struct {
 
 // OpenAIForwardResult represents the result of forwarding
 type OpenAIForwardResult struct {
-	CacheDiagnostic  *OpenAICacheDiagnostic `json:"-"`
-	RoutingSessionID string                 `json:"-"`
-	RequestID        string
-	ResponseID       string
+	cachePanel        *cachePanelRequest
+	CacheTrace        *cacheTrace `json:"-"`
+	cacheTraceFailure *cacheTraceFailure
+	CacheDiagnostic   *OpenAICacheDiagnostic `json:"-"`
+	RoutingSessionID  string                 `json:"-"`
+	RequestID         string
+	ResponseID        string
 	// UpstreamHeaders 是直接上游的响应头，用于按账户配置解析上游请求标识。
 	UpstreamHeaders http.Header
 	Usage           OpenAIUsage
@@ -446,6 +449,13 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
+	openaiIdentityRuntime openAIUpstreamIdentityRuntime
+	grokIdentityRuntime   openAIUpstreamIdentityRuntime
+	cachePolicies         *CachePolicyService
+	cacheCounters         *CacheTraceCounters
+	cacheTraceWorkersOnce sync.Once
+	cacheTraceWorkers     *cacheTraceWorkers
+	providerHistory       cacheProviderTraceHistory
 	openaiCacheOnce       sync.Once
 	openaiCacheTelemetry  *openAICacheTelemetry
 	openaiQualityStates   sync.Map // scoped digest -> *openAIQualityLocal

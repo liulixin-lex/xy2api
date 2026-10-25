@@ -820,6 +820,22 @@ func logResponseModelBillingApplied(component string, account *Account, requestI
 func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsageCoreInput) error {
 	s.resilience.NoteAccountSuccess(ctx, input.Account)
 	result := input.Result
+	providerBusiness := result.providerBusiness
+	providerBusinessUsage := result.Usage
+	var providerTraceResult *ForwardResult
+	if result.providerTrace != nil {
+		defer func() {
+			if s.providerTraceEngine != nil {
+				// Any early billing/credential error closes timing without emitting
+				// an event or training provider history.
+				traceResult := result
+				if providerTraceResult != nil {
+					traceResult = providerTraceResult
+				}
+				s.providerTraceEngine.settleProviderCacheTrace(traceResult, cacheTraceUnbilled, false)
+			}
+		}()
+	}
 	// xy2api resilience: under an availability fallback the user's price
 	// follows the group the request was made for, including how it picks the
 	// billing model (fallback-billing design §2.1); the serving key keeps the
@@ -837,6 +853,8 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// the forced cache billing below rewrites the token split.
 	s.resilience.NoteSessionCacheUsage(ctx, result.Usage.CacheReadInputTokens,
 		result.Usage.InputTokens+result.Usage.CacheReadInputTokens+result.Usage.CacheCreationInputTokens)
+	s.l07NoteUsage(ctx, input.Account, result.Usage.CacheReadInputTokens,
+		result.Usage.InputTokens+result.Usage.CacheReadInputTokens+result.Usage.CacheCreationInputTokens)
 	// 强制缓存计费：将 input_tokens 转为 cache_read_input_tokens
 	// 用于粘性会话切换时的特殊计费处理
 	if input.ForceCacheBilling && result.Usage.InputTokens > 0 {
@@ -852,6 +870,10 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	if overrideTarget, ok := s.resolveCacheTTLUsageOverrideTarget(ctx, account); ok {
 		applyCacheTTLOverride(&result.Usage, overrideTarget)
 		cacheTTLOverridden = (result.Usage.CacheCreation5mTokens + result.Usage.CacheCreation1hTokens) > 0
+	}
+	if result.providerTrace != nil {
+		traceSnapshot := *result
+		providerTraceResult = &traceSnapshot
 	}
 
 	// 获取费率倍数（优先级：用户专属 > 分组默认 > 系统默认）
@@ -956,8 +978,13 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// xy2api resilience: a client that left before any output is not billed,
 	// except at upstream cost under the abuse guard (design §8.2).
 	resilienceAnnotateUsage(ctx, usageLog)
-	if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {
+	undelivered := resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier)
+	if undelivered {
 		return nil
+	}
+	providerDelivery := cacheTraceDelivered
+	if usageLog.BillingMode != nil && *usageLog.BillingMode == UsageBillingModeUndeliveredAbuse {
+		providerDelivery = cacheTraceAbuse
 	}
 
 	cacheSettlementOutcome := "pending"
@@ -967,6 +994,11 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, apiKey)
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
 		writeUsageLogAfterBilling(ctx, s.usageLogRepo, usageLog, "service.gateway")
+		if providerTraceResult != nil && s.providerTraceEngine != nil {
+			s.providerTraceEngine.settleProviderCacheTrace(providerTraceResult, providerDelivery, true)
+			providerTraceResult = nil
+		}
+		s.recordProviderCacheBusiness(providerBusiness, providerBusinessUsage, result, account)
 		cacheSettlementOutcome = "usage_only"
 		logger.LegacyPrintf("service.gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
@@ -1006,6 +1038,11 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		return billingErr
 	}
 	writeUsageLogAfterBilling(ctx, s.usageLogRepo, usageLog, "service.gateway")
+	if providerTraceResult != nil && s.providerTraceEngine != nil {
+		s.providerTraceEngine.settleProviderCacheTrace(providerTraceResult, providerDelivery, true)
+		providerTraceResult = nil
+	}
+	s.recordProviderCacheBusiness(providerBusiness, providerBusinessUsage, result, account)
 
 	return nil
 }

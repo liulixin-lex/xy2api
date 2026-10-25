@@ -1,0 +1,150 @@
+{
+  "_contract": [
+    "M3-4",
+    "C-7",
+    "C-12",
+    "M31",
+    "POL-2"
+  ],
+  "_note": "FX-POL-2（v1.1）：M3.1 构建中陈旧期间 PUT（只返回 upstream_identity，含或不含 T4.0 都适用）：写入成功照常发布，响应仍为陈旧覆盖后的值。由 m31 v1.0.2 的 m31_m3_put_200.json 按 README §1 的陈旧覆盖机械派生。",
+  "_fixture": {
+    "snapshot_stale": true
+  },
+  "_derived_from": "m31/m31_m3_put_200.json",
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/upstream_identity",
+    "body": {
+      "expected_rev": 3,
+      "spec": {
+        "mode": "uuid_fill",
+        "account_ids": [
+          101,
+          102
+        ],
+        "rollout_percent": 50
+      },
+      "reason": "两个账号按 50% 会话试运行",
+      "confirm": {
+        "checkbox": true,
+        "typed": null
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "key": "upstream_identity",
+      "setting_key": "cache_upstream_identity_policy",
+      "available": true,
+      "risk": "high",
+      "gated_by_master": true,
+      "stored": {
+        "rev": 4,
+        "updated_at": "2026-10-24T08:55:00Z",
+        "updated_by": {
+          "user_id": 1,
+          "email": "admin@example.com"
+        },
+        "reason": "两个账号按 50% 会话试运行",
+        "spec": {
+          "mode": "uuid_fill",
+          "account_ids": [
+            101,
+            102
+          ],
+          "rollout_percent": 50,
+          "chat_compat_uuid": false,
+          "header_only_uuid": false,
+          "forward_session_headers": "whitelist",
+          "max_inflight_per_key": 2
+        }
+      },
+      "loaded": {
+        "rev": 4,
+        "loaded_at": "2026-10-24T08:40:01Z"
+      },
+      "effective": {
+        "state": "blocked",
+        "active": false,
+        "blockers": [
+          "stale_snapshot"
+        ],
+        "warnings": [],
+        "clipped_fields": []
+      },
+      "defaults": {
+        "mode": "off",
+        "account_ids": [],
+        "rollout_percent": 0,
+        "chat_compat_uuid": false,
+        "header_only_uuid": false,
+        "forward_session_headers": "whitelist",
+        "max_inflight_per_key": 2
+      },
+      "schema": [
+        {
+          "field": "mode",
+          "type": "enum",
+          "options": [
+            "off",
+            "uuid_fill"
+          ]
+        },
+        {
+          "field": "account_ids",
+          "type": "id_list",
+          "ref": "account",
+          "options": [
+            {
+              "id": 101,
+              "name": "relay-a-01",
+              "platform": "openai"
+            },
+            {
+              "id": 102,
+              "name": "relay-b-01",
+              "platform": "openai"
+            },
+            {
+              "id": 103,
+              "name": "relay-c-01",
+              "platform": "openai"
+            }
+          ]
+        },
+        {
+          "field": "rollout_percent",
+          "type": "int",
+          "min": 0,
+          "max": 100,
+          "unit": "percent"
+        },
+        {
+          "field": "chat_compat_uuid",
+          "type": "bool"
+        },
+        {
+          "field": "header_only_uuid",
+          "type": "bool"
+        },
+        {
+          "field": "forward_session_headers",
+          "type": "enum",
+          "options": [
+            "whitelist",
+            "normalize"
+          ]
+        },
+        {
+          "field": "max_inflight_per_key",
+          "type": "int",
+          "min": 1,
+          "max": 16
+        }
+      ]
+    }
+  }
+}

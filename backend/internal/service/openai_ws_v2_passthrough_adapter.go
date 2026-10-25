@@ -1284,6 +1284,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					Duration:                      turn.Duration,
 					FirstTokenMs:                  turn.FirstTokenMs,
 				}
+				if p := CachePolicyFromGin(c); p.TraceEnabled() {
+					turnResult.cachePanel = &cachePanelRequest{policy: p}
+				}
 				if d := usageMeta.cacheDiagnostic.Load(); d != nil {
 					copy := *d
 					copy.Model = openAICacheModelLabel(turnUpstreamModel)

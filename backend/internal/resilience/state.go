@@ -86,6 +86,10 @@ type RequestState struct {
 	turnSession string
 	turnNoted   bool
 	turnFailed  bool
+	// keptBusy is set when keptSticky holds for the current attempt only:
+	// L-07 kept a busy owner (cache DESIGN §6.1A.2 step 5). The next
+	// selection releases it, so a later attempt may bind its account.
+	keptBusy bool
 
 	// avoided is the session's avoid set read at selection (design §4.2).
 	avoided map[int64]struct{}
@@ -94,6 +98,48 @@ type RequestState struct {
 	// streamFailures maps an account to its latest failed attempt that the
 	// stream handler already reported (design §7.6).
 	streamFailures map[int64]any
+
+	// l07 is the service-owned L-07 record of the request; it is stored only
+	// when the routing policy armed the request.
+	l07 atomic.Value
+	// l09a is the cache L-09a first-selection permit. The handler stores it
+	// only when the request's policy snapshot activates L-09a. One pointer
+	// keeps the struct within its allocation size class.
+	l09a atomic.Pointer[CacheL09A]
+}
+
+// CacheL09A is the first-selection permit of the cache L-09a preference
+// (cache DESIGN §6.2, T3.1a). Phase moves only forward: armed by the
+// handler, entered by the first selection, done when it returns. Record
+// belongs to the service package; this package only stores it.
+type CacheL09A struct {
+	Phase  atomic.Int32
+	Record any
+}
+
+// Phases of CacheL09A.
+const (
+	CacheL09AArmed int32 = iota
+	CacheL09AInFirstSelection
+	CacheL09ADone
+)
+
+// ArmCacheL09A stores the permit before the request's first selection. It
+// reports false, storing nothing, when a selection already began or a
+// permit exists.
+func (s *RequestState) ArmCacheL09A(p *CacheL09A) bool {
+	if s == nil || p == nil || s.SelectionNoted() {
+		return false
+	}
+	return s.l09a.CompareAndSwap(nil, p)
+}
+
+// CacheL09A returns the permit, or nil when the request was not armed.
+func (s *RequestState) CacheL09A() *CacheL09A {
+	if s == nil {
+		return nil
+	}
+	return s.l09a.Load()
 }
 
 // preludeTrace is storage shared with prelude_trace.go. Its accessors live
@@ -444,7 +490,63 @@ func (s *RequestState) KeepSticky(accountID int64) {
 	}
 	s.mu.Lock()
 	s.keptSticky = accountID
+	s.keptBusy = false
 	s.mu.Unlock()
+}
+
+// KeepStickyForAttempt keeps the binding to accountID for the current
+// attempt only (L-07). A binding already kept for the request wins; the
+// result reports whether accountID is kept.
+func (s *RequestState) KeepStickyForAttempt(accountID int64) bool {
+	if s == nil || accountID <= 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.keptSticky != 0 {
+		return s.keptSticky == accountID
+	}
+	s.keptSticky, s.keptBusy = accountID, true
+	return true
+}
+
+// ReleaseAttemptSticky drops a binding kept only for the previous attempt.
+func (s *RequestState) ReleaseAttemptSticky() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.keptBusy {
+		s.keptSticky, s.keptBusy = 0, false
+	}
+	s.mu.Unlock()
+}
+
+// SelectionNoted reports whether a selection of this request already ended.
+func (s *RequestState) SelectionNoted() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.turnNoted
+}
+
+// SetL07 stores the service-owned L-07 record; v must always be the same
+// pointer type.
+func (s *RequestState) SetL07(v any) {
+	if s == nil || v == nil {
+		return
+	}
+	s.l07.Store(v)
+}
+
+// L07 returns the L-07 record, or nil when the request was not armed.
+func (s *RequestState) L07() any {
+	if s == nil {
+		return nil
+	}
+	return s.l07.Load()
 }
 
 // KeptSticky returns the account whose binding must not be replaced.

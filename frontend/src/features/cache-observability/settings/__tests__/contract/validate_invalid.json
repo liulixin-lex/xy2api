@@ -1,0 +1,67 @@
+{
+  "_contract": [
+    "C-3",
+    "C-7"
+  ],
+  "_note": "校验不通过一律 HTTP 200 + valid=false + errors[]（不用 400）。示例含越界、未知字段、理由过长。",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/observability/validate",
+    "body": {
+      "expected_rev": 2,
+      "spec": {
+        "sample_percent": 150,
+        "unknown_x": 1
+      },
+      "reason": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": false,
+      "errors": [
+        {
+          "field": "sample_percent",
+          "code": "out_of_range",
+          "limit": {
+            "min": 0,
+            "max": 100
+          }
+        },
+        {
+          "field": "unknown_x",
+          "code": "unknown_field"
+        },
+        {
+          "field": "reason",
+          "code": "too_long",
+          "limit": {
+            "max": 200
+          }
+        }
+      ],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "sample_percent",
+          "before": 100,
+          "after": 150
+        }
+      ],
+      "risk": "low",
+      "direction": "enable",
+      "confirm": {
+        "reason_required": false,
+        "checkbox_required": false,
+        "type_to_confirm": null
+      },
+      "current_rev": 2,
+      "rev_stale": false,
+      "effective_preview": null,
+      "affected": []
+    }
+  }
+}

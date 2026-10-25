@@ -1,0 +1,18 @@
+{
+  "derived": [
+    "m4l04_list_t22.json",
+    "m4l04_m4_dormant_list_db_enabled.json",
+    "m4l04_m4_dormant_list_default.json",
+    "m4l04_m4_list_default.json",
+    "m4l04_m4_list_group_options_unavailable.json",
+    "m4l04_m4_list_masked_by_master.json",
+    "m4l04_m4_list_on.json",
+    "m4l04_m4_put_anthropic_200.json",
+    "m4l04_put_anchor_enable_200.json"
+  ],
+  "unchanged_in_m4l04": [
+    "m4l04_validate_max_inflight_anchor_raise.json",
+    "m4l04_validate_metadata_dormant.json",
+    "m4l04_validate_metadata_rollout_exceeds.json"
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "_contract": [
+    "C-12",
+    "C-5"
+  ],
+  "_note": "带 after_rev（409 合并时取中间的写入）：按 API §7.6 只返回 rev_after > after_rev 的记录，因此失败的写入（rev_after=null）不出现（v1.7.4.4 更正：此前样例在这里含 422 记录，与正文不符）。v1.7.4.5：history_complete 同样按该键全部已落盘的成功记录计算，不受 after_rev 影响。v1.7.4.6：完整时 history_incomplete_reason 为 null。_fixture 是后端测试需预置的状态（该键已落盘的成功记录的 rev_after、stored.rev/updated_at、服务端当前时间），不属于响应。",
+  "_fixture": {
+    "key": "upstream_identity",
+    "persisted_success_rev_after": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "stored": {
+      "rev": 5,
+      "updated_at": "2026-10-23T08:58:10Z"
+    },
+    "now": "2026-10-23T09:00:00Z"
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/cache/policies/history?key=upstream_identity&after_rev=4",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "items": [
+        {
+          "at": "2026-10-23T08:58:10Z",
+          "key": "upstream_identity",
+          "action": "admin.cache.policies.upstream_identity.update",
+          "actor": {
+            "user_id": 2,
+            "email": "oncall@example.com"
+          },
+          "status_code": 200,
+          "rev_before": 4,
+          "rev_after": 5,
+          "changed_fields": [
+            "rollout_percent"
+          ],
+          "reason": "错误率上升，先调回 0"
+        }
+      ],
+      "history_complete": true,
+      "history_incomplete_reason": null
+    }
+  }
+}

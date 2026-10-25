@@ -273,6 +273,14 @@
         "tools/gateway-resilience/staging/fixtures.py",
         "tools/gateway-resilience/staging/fallback_billing.py"
       ]
+    },
+    {
+      "pattern": "gateway\\.cache_trace\\.(?:enabled|chain_percent|async_byte_budget|async_workers|async_bytes_per_second)|GATEWAY_CACHE_TRACE_(?:ENABLED|CHAIN_PERCENT|ASYNC_BYTE_BUDGET|ASYNC_WORKERS|ASYNC_BYTES_PER_SECOND)",
+      "reason": "Cache trace enablement, sampling, byte budget and rate are administrator runtime policies; static configuration contains only kill switch and hard limits.",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
     }
   ],
   "private": [
@@ -367,7 +375,12 @@
         "deploy/**",
         "skills/**"
       ],
-      "reason": "public repository: real host addresses stay in the private host notes; examples use 192.0.2.0/24, 198.51.100.0/24 or 203.0.113.0/24"
+      "allowed": [
+        "backend/internal/server/routes/testdata/cache_policies_contract/m4l04/README.md",
+        "backend/internal/server/routes/testdata/cache_policies_contract/m4l03/README.md",
+        "backend/internal/service/testdata/cache_trace_contract/m4l03/README.md"
+      ],
+      "reason": "public repository: real host addresses stay in the private host notes; examples use 192.0.2.0/24, 198.51.100.0/24 or 203.0.113.0/24; the frozen m4l04/m4l03 contract READMEs contain a four-component parent version, verified by its source hash"
     },
     {
       "pattern": "\\b(?:ubuntu|root)@(?!localhost\\b)[A-Za-z0-9.-]+",
