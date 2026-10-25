@@ -358,11 +358,11 @@ func (s *GatewayService) l07NoteUsage(ctx context.Context, account *Account, rea
 	}
 }
 
-// noteL07AttemptFailure records an account-attributable failure of the first
-// attempt of an armed request for the guard (A5).
+// noteL07AttemptFailure records an upstream failure of the first attempt of
+// an armed request for the guard (A5).
 func noteL07AttemptFailure(ctx context.Context, accountID int64, c resilience.Category) {
 	rec := l07FromState(resilience.StateFrom(ctx))
-	if !rec.armed() || !c.AccountScoped() {
+	if !rec.armed() || !l07UpstreamFailure(c) {
 		return
 	}
 	rec.mu.Lock()
@@ -373,6 +373,18 @@ func noteL07AttemptFailure(ctx context.Context, accountID int64, c resilience.Ca
 	if first {
 		rec.runtime.noteOutcome(rec.groupID, spill, true, rec.policy.GuardErrorDeltaPP, rec.policy.GuardPauseSeconds, rec.now())
 	}
+}
+
+// l07UpstreamFailure reports whether an attempt failure counts against the
+// account that served it for the guard. Capacity sheds (529 overloaded) are
+// the most likely failure of a spill account and count; a client cancel or a
+// request the upstream refused for its content says nothing about it.
+func l07UpstreamFailure(c resilience.Category) bool {
+	switch c {
+	case resilience.CategorySuccess, resilience.CategoryClientCancel, resilience.CategoryClientError:
+		return false
+	}
+	return c != ""
 }
 
 // L07TraceFields are the l07_* fields of an Anthropic cache_trace event

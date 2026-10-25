@@ -1138,3 +1138,37 @@ func TestL07ReservationRollsBackOnFailure(t *testing.T) {
 	o, _ := ownerKeeps(f)
 	require.Equal(t, int64(1), o)
 }
+
+// Staging chaos (S, 2026-10-25): 529 overloaded answers on the spill account
+// are classified CAPACITY_SHED and must count for the guard (A5).
+func TestL07GuardCountsSpillCapacityShed(t *testing.T) {
+	run := func(t *testing.T, category resilience.Category) bool {
+		f := newL07Fixture(t, nil)
+		f.withPolicies(t, nil, true, false, func(p *CacheRoutingL07Policy) {
+			p.OwnerBusySkipPerMinCap, p.GroupKeepRatioPct = 1000, 20
+		})
+		f.padRequests(1000)
+		group := &Group{ID: l07TestGroup, Platform: PlatformAnthropic}
+		for i := 0; i < l07GuardMinSamples; i++ { // treatment requests served without a keep
+			ctx, _ := newL07Ctx(t)
+			f.svc.l07Begin(ctx, group, fmt.Sprintf("other-%d", i), PlatformAnthropic, 0)
+			f.svc.l07NoteUsage(ctx, &f.accounts[1], 900, 1000)
+		}
+		for i := 0; i < l07GuardMinSamples; i++ { // kept requests whose spill attempt fails
+			ctx, _ := newL07Ctx(t)
+			session := fmt.Sprintf("kept-%d", i)
+			rec := f.svc.l07Begin(ctx, group, session, PlatformAnthropic, 0)
+			require.True(t, f.svc.l07OwnerBusy(ctx, rec, &f.accounts[0], session, l07TestModel, &AcquireResult{}, nil, nil), session)
+			// What sessionFailureRecorder.Failure reports for the failed attempt.
+			noteL07AttemptFailure(ctx, 2, category)
+		}
+		return f.svc.cachePolicies.L07GuardTripped()
+	}
+	require.True(t, run(t, resilience.CategoryCapacityShed), "529 on the spill account trips the guard")
+	require.True(t, run(t, resilience.CategoryTransient))
+	require.False(t, run(t, resilience.CategoryClientError), "content refusals never count")
+	require.False(t, run(t, resilience.CategoryClientCancel))
+	for _, c := range []resilience.Category{resilience.CategoryCapacityShed, resilience.CategoryRateLimit, resilience.CategoryAuth, resilience.CategoryStall} {
+		require.True(t, l07UpstreamFailure(c), c)
+	}
+}
