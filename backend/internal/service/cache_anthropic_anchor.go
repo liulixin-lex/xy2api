@@ -135,7 +135,7 @@ func anchorRequestText(platform string, systemRaw, messagesRaw []byte) (system, 
 	system = anchorTextBlocks(gjson.ParseBytes(systemRaw), gemini)
 	gjson.ParseBytes(messagesRaw).ForEach(func(_, message gjson.Result) bool {
 		role := message.Get("role").String()
-		if role != "user" && !(gemini && role == "") {
+		if role != "user" && (!gemini || role != "") {
 			return true
 		}
 		field := "content"

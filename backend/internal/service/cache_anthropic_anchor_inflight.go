@@ -22,6 +22,7 @@ type cacheAnchorLease struct {
 	released atomic.Bool
 }
 
+//nolint:unused // Used by the unit-tagged tests; production embeds the zero value in GatewayService and sets capacity once.
 func newCacheAnchorInflight(capacity int) *cacheAnchorInflight {
 	return &cacheAnchorInflight{capacity: min(capacity, cacheAnchorInflightHardCap)}
 }

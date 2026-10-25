@@ -61,7 +61,7 @@ func (h *cacheProviderTraceHistory) send(key cacheProviderSessionKey, sequence u
 // worker/timing owner; late publication must never recreate the old epoch.
 func (h *cacheProviderTraceHistory) evictOldest() {
 	if oldest := h.order.Back(); oldest != nil {
-		entry := oldest.Value.(*cacheProviderHistoryEntry)
+		entry := oldest.Value.(*cacheProviderHistoryEntry) //nolint:errcheck // send is the only writer of order and pushes *cacheProviderHistoryEntry.
 		delete(h.entries, entry.key)
 		h.order.Remove(oldest)
 	}

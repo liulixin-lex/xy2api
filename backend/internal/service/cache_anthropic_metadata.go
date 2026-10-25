@@ -212,7 +212,7 @@ func (s *GatewayService) applyCacheMetadata(ctx context.Context, c *gin.Context,
 func cacheMetadataHasClientValue(value gjson.Result) bool {
 	// Absent/empty string can be filled. Nulls, numbers, booleans, arrays and objects
 	// are client values too; treating an unparseable value as absent violates INV-02.
-	return value.Exists() && !(value.Type == gjson.String && value.Str == "")
+	return value.Exists() && (value.Type != gjson.String || value.Str != "")
 }
 
 // Prior to request building the outcome is conservative. A completed attempt

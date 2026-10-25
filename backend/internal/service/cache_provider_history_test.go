@@ -48,9 +48,9 @@ func TestCacheProviderHistoryTimingAndRetry(t *testing.T) {
 	first := history.send(key, 10, now, caps)
 	gap, _ := history.settle(key, first, now.Add(time.Second))
 	require.Equal(t, "no_prev", gap.source)
-	second := history.send(key, 11, now.Add(2*time.Second), caps)
+	history.send(key, 11, now.Add(2*time.Second), caps)
 	// Retry is still a single logical request. Its send timestamp moves.
-	second = history.send(key, 11, now.Add(3*time.Second), caps)
+	second := history.send(key, 11, now.Add(3*time.Second), caps)
 	gap, _ = history.settle(key, second, now.Add(4*time.Second))
 	require.Equal(t, "settled", gap.source)
 	require.EqualValues(t, 2000, gap.milliseconds)

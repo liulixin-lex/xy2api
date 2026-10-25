@@ -30,7 +30,7 @@ func (c *CacheTraceCounters) platformPartition(platform string, create bool) *Ca
 	if platform == PlatformOpenAI {
 		return c
 	}
-	index := -1
+	var index int
 	switch platform {
 	case PlatformAnthropic:
 		index = 0
