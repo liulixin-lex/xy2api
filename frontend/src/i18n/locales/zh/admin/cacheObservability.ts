@@ -131,6 +131,8 @@ export default {
       unknown_account: '账号不存在或不符合条件',
       unknown_group: '分组不存在',
       wrong_platform: '平台不符合要求',
+      official_endpoint: '官方端点的账号不能加入',
+      not_apikey: '只能选择 API Key 账号',
       duplicate: '有重复项',
       unsupported_in_build: '当前版本不支持该取值',
       forbidden_field: '不允许设置此字段',
@@ -140,6 +142,7 @@ export default {
       ids: 'ID 必须是正整数',
       unknown_option: '页面不认识的取值：{value}',
       ingress_above_chain: '不能高于出站前缀比对采样率（当前 {chain}%）',
+      exceeds_rollout_percent: '不能高于灰度比例（当前 {limit}%）',
       version_must_change: '口径规则有改动，必须同时换一个新的口径版本',
     },
     missing: {
@@ -265,12 +268,17 @@ export default {
       fallbackTag: '回退组',
       servingScope: '按实际服务的分组生效',
     },
+    accountPicker: {
+      placeholder: '选择账号，可多选',
+      empty: '没有可选账号',
+    },
     ids: {
       placeholder: '输入账号 ID 后回车',
       add: '添加',
       remove: '移除 {id}',
       invalid: '只能输入正整数 ID',
       emptyMeansAll: '为空表示全部合格账号',
+      manual: '手动输入账号 ID',
       item: '账号 #{id}',
     },
     rules: {
@@ -497,10 +505,26 @@ export default {
           description: '在这些分组内，客户端没有带 metadata.user_id 时由网关生成并写入上游。必须同时在“稳定会话标识的分组”中。',
           risk: '改变出站请求体；客户端已带的值始终优先。',
         },
+        metadata_account_ids: {
+          label: '生成 metadata 的中转账号',
+          description: '只列出 Anthropic 平台、非官方端点的 API Key 账号，请只选择已确认按会话粘性的中转账号。',
+          risk: '改变发往这些账号的出站请求体；客户端已带的值始终优先。',
+          empty: '为空时不生效',
+        },
         rollout_percent: {
           label: '灰度比例',
           description: '按会话分桶的处理组比例。',
           risk: '比例越高影响越大；缓存观测尚未覆盖 Claude/Gemini 时无法评估效果。',
+        },
+        metadata_rollout_percent: {
+          label: '生成 metadata 的灰度比例',
+          description: '在稳定会话标识的处理组中，再按这个比例为客户端没带 metadata.user_id 的请求生成并写入上游。不能高于上面的灰度比例。生成 metadata 的功能尚未实现时不生效。',
+          risk: '改变出站请求体；客户端已带的值始终优先。',
+        },
+        max_inflight_per_anchor: {
+          label: '每个会话标识的在途上限',
+          description: '同一个稳定会话标识的在途请求数达到这个值时，后续请求不再使用它，避免大量并发请求共用一个标识。',
+          risk: '调高后，更多并发请求会共用同一个会话标识。',
         },
       },
       routing: {

@@ -131,6 +131,8 @@ export default {
       unknown_account: 'Account does not exist or is not eligible',
       unknown_group: 'Group does not exist',
       wrong_platform: 'Wrong platform',
+      official_endpoint: 'Accounts on the official Anthropic endpoint cannot be added',
+      not_apikey: 'Only API key accounts can be selected',
       duplicate: 'Contains duplicates',
       unsupported_in_build: 'This version does not support the value',
       forbidden_field: 'This field cannot be set',
@@ -140,6 +142,7 @@ export default {
       ids: 'IDs must be positive integers',
       unknown_option: 'Value unknown to this page: {value}',
       ingress_above_chain: 'Cannot exceed the outbound prefix comparison rate (currently {chain}%)',
+      exceeds_rollout_percent: 'Cannot exceed the rollout share (currently {limit}%)',
       version_must_change: 'Rules changed, so the definition version must change too',
     },
     missing: {
@@ -265,12 +268,17 @@ export default {
       fallbackTag: 'Fallback',
       servingScope: 'Applies by the group that actually serves the request',
     },
+    accountPicker: {
+      placeholder: 'Select accounts',
+      empty: 'No accounts available',
+    },
     ids: {
       placeholder: 'Type an account ID and press Enter',
       add: 'Add',
       remove: 'Remove {id}',
       invalid: 'Only positive integer IDs are allowed',
       emptyMeansAll: 'Empty means every eligible account',
+      manual: 'Enter account IDs',
       item: 'Account #{id}',
     },
     rules: {
@@ -497,10 +505,26 @@ export default {
           description: 'In these groups, when the client sends no metadata.user_id, the gateway generates one and writes it upstream. Each must also be a stable session identifier group.',
           risk: 'Changes the outbound body; a value sent by the client always wins.',
         },
+        metadata_account_ids: {
+          label: 'Relay accounts for generated metadata',
+          description: 'Only Anthropic API key accounts on non official endpoints are listed. Choose relays confirmed to keep sessions sticky.',
+          risk: 'Changes the outbound body of requests to these accounts; a value sent by the client always wins.',
+          empty: 'No effect when empty',
+        },
         rollout_percent: {
           label: 'Share',
           description: 'Treatment share of session buckets.',
           risk: 'More share means more impact; without cache observation for Claude/Gemini the effect cannot be evaluated.',
+        },
+        metadata_rollout_percent: {
+          label: 'Metadata rollout share',
+          description: 'Within the treatment group for stable session identifiers, the share of requests without a client metadata.user_id that get one generated and sent upstream. It cannot exceed the rollout share above. No effect until metadata generation is implemented.',
+          risk: 'Changes the outbound request body; a value the client sent always wins.',
+        },
+        max_inflight_per_anchor: {
+          label: 'In-flight cap per session identifier',
+          description: 'Once a stable session identifier has this many requests in flight, further requests do not use it, so a burst does not share one identifier.',
+          risk: 'A higher cap lets more concurrent requests share one session identifier.',
         },
       },
       routing: {

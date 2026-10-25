@@ -93,9 +93,23 @@
     </div>
 
     <div v-else-if="kind === 'id_list'" class="w-full max-w-xl">
+      <Select
+        v-if="servedAccounts"
+        :id="controlId"
+        class="mb-2"
+        :model-value="null"
+        :options="accountOptions"
+        :disabled="disabled"
+        :aria-label="label"
+        :aria-describedby="describedBy"
+        :placeholder="t('admin.cacheSettings.accountPicker.placeholder')"
+        :empty-text="t('admin.cacheSettings.accountPicker.empty')"
+        searchable
+        @update:model-value="addId"
+      />
       <div class="flex gap-2">
         <input
-          :id="controlId"
+          :id="servedAccounts ? `${controlId}-manual` : controlId"
           v-model="idInput"
           type="text"
           inputmode="numeric"
@@ -103,7 +117,7 @@
           :class="idInputError ? 'input-error' : ''"
           :placeholder="t('admin.cacheSettings.ids.placeholder')"
           :disabled="disabled"
-          :aria-label="label"
+          :aria-label="servedAccounts ? t('admin.cacheSettings.ids.manual') : label"
           :aria-describedby="describedBy"
           @keydown.enter.prevent="commitIdInput"
         />
@@ -112,7 +126,7 @@
         </button>
       </div>
       <p v-if="idInputError" class="input-error-text" role="alert">{{ t('admin.cacheSettings.ids.invalid') }}</p>
-      <p v-else-if="!ids.length" class="input-hint">{{ t('admin.cacheSettings.ids.emptyMeansAll') }}</p>
+      <p v-else-if="!ids.length" class="input-hint">{{ emptyHint || t('admin.cacheSettings.ids.emptyMeansAll') }}</p>
       <ul v-if="ids.length" class="mt-2 flex flex-wrap gap-2" :aria-label="label">
         <li v-for="id in ids" :key="id" class="flex items-center gap-1 rounded-md bg-gray-100 py-1 pl-2.5 pr-1 text-sm tabular-nums text-gray-800 dark:bg-dark-700 dark:text-gray-100">
           {{ names.account(id) }}
@@ -180,6 +194,7 @@ const props = defineProps<{
   disabled: boolean
   invalid: boolean
   describedBy?: string
+  emptyHint?: string
   groups: AdminGroup[]
   groupsFailed: boolean
   fallbackGroupIds: Set<number>
@@ -217,6 +232,15 @@ const groupOptions = computed(() =>
 
 const names = computed(() => idNames(props.field, props.groups, t))
 const groupName = (id: number) => names.value.group(id)
+
+// Served account candidates (FE-Q3) can be picked. Typing ids stays possible, and is all there is while
+// the candidates were not loaded (servedField); the server checks every added id.
+const servedAccounts = computed(() => refKind.value === 'account' && Array.isArray(props.field.options))
+const accountOptions = computed(() =>
+  idOptions(props.field)
+    .filter((a) => !ids.value.includes(a.id))
+    .map((a) => ({ value: a.id, label: names.value.account(a.id) })),
+)
 
 function onNumber(raw: string) {
   const trimmed = raw.trim()

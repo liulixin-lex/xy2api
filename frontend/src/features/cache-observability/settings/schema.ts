@@ -58,12 +58,13 @@ export function idRef(field: SchemaField): 'group' | 'account' | null {
 export const CANDIDATE_WARNINGS: readonly string[] = ['account_options_unavailable', 'group_options_unavailable']
 
 /**
- * The field as the card offers it: candidates the server did not load count as absent. The
- * selection stays as stored, ids without a name show as ids, and the server checks what is added.
+ * The field as the card offers it: candidates the server did not load count as absent. Each
+ * warning covers only its own candidate type (m4l03 README §1). The selection stays as stored,
+ * ids without a name show as ids, and the server checks what is added.
  */
 export function servedField(entry: PolicyEntry, field: SchemaField): SchemaField {
-  const unloaded =
-    !!idRef(field) && Array.isArray(field.options) && !field.options.length && entry.effective.warnings.some((w) => CANDIDATE_WARNINGS.includes(w))
+  const ref = idRef(field)
+  const unloaded = !!ref && Array.isArray(field.options) && !field.options.length && entry.effective.warnings.includes(`${ref}_options_unavailable`)
   return unloaded ? { ...field, options: undefined } : field
 }
 
@@ -243,6 +244,14 @@ export function inlineIssues(entry: AvailablePolicy, draft: PolicySpec, baseline
     const uuidFill = get('mode') === 'uuid_fill'
     for (const sub of ['chat_compat_uuid', 'header_only_uuid']) {
       if (has(sub) && get(sub) === true && !uuidFill) issues.push({ field: sub, level: 'error', code: 'requires_mode_uuid_fill' })
+    }
+  }
+  // T2.2 (m4l04 v1.0): the metadata share is a part of the anchor share, never above it.
+  if (entry.key === 'anthropic_identity' && has('metadata_rollout_percent') && has('rollout_percent')) {
+    const metadata = get('metadata_rollout_percent')
+    const rollout = get('rollout_percent')
+    if (typeof metadata === 'number' && typeof rollout === 'number' && metadata > rollout) {
+      issues.push({ field: 'metadata_rollout_percent', level: 'error', code: 'exceeds_rollout_percent', params: { limit: rollout } })
     }
   }
   if (entry.key === 'anthropic_identity' && has('metadata_group_ids')) {
