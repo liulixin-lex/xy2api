@@ -1074,6 +1074,7 @@ type GatewayConfig struct {
 	CacheFeatures        CacheFeaturesConfig          `mapstructure:"cache_features"`
 	CachePolicy          CachePolicyConfig            `mapstructure:"cache_policy"`
 	CacheTrace           CacheTraceConfig             `mapstructure:"cache_trace"`
+	CacheRouting         CacheRoutingConfig           `mapstructure:"cache_routing"`
 	OpenAICache          OpenAICacheConfig            `mapstructure:"openai_cache"`
 	// OpenAIHTTP2: OpenAI HTTP 上游协议策略（默认启用 HTTP/2，可按代理能力回退 HTTP/1.1）
 	OpenAIHTTP2 GatewayOpenAIHTTP2Config `mapstructure:"openai_http2"`
@@ -1188,6 +1189,18 @@ type CacheTraceConfig struct {
 	MaxQueueWait time.Duration `mapstructure:"max_queue_wait"`
 
 	ReasoningContextPaths []string `mapstructure:"reasoning_context_paths"`
+}
+
+// CacheRoutingConfig holds static hard caps of the runtime routing policy
+// (L-07). Runtime values above a cap are rejected; a lowered cap clips the
+// stored value. Zero keeps the documented default. The guard values are
+// static only and never part of the runtime policy.
+type CacheRoutingConfig struct {
+	L07MaxConsecutiveCap    int `mapstructure:"l07_max_consecutive_cap"`
+	L07MaxHoldSecondsCap    int `mapstructure:"l07_max_hold_seconds_cap"`
+	L07GroupKeepRatioCapPct int `mapstructure:"l07_group_keep_ratio_cap_pct"`
+	L07GuardErrorDeltaPP    int `mapstructure:"l07_guard_error_delta_pp"`
+	L07GuardPauseSeconds    int `mapstructure:"l07_guard_pause_seconds"`
 }
 
 type OpenAICacheConfig struct {
@@ -2614,6 +2627,11 @@ func setDefaults() {
 	viper.SetDefault("gateway.cache_trace.max_checkpoints", 512)
 	viper.SetDefault("gateway.cache_trace.min_cacheable_tokens", 1024)
 	viper.SetDefault("gateway.cache_trace.reasoning_context_paths", []string{"reasoning.context"})
+	viper.SetDefault("gateway.cache_routing.l07_max_consecutive_cap", 5)
+	viper.SetDefault("gateway.cache_routing.l07_max_hold_seconds_cap", 300)
+	viper.SetDefault("gateway.cache_routing.l07_group_keep_ratio_cap_pct", 20)
+	viper.SetDefault("gateway.cache_routing.l07_guard_error_delta_pp", 5)
+	viper.SetDefault("gateway.cache_routing.l07_guard_pause_seconds", 600)
 	viper.SetDefault("gateway.openai_cache.diagnostics_enabled", false)
 	viper.SetDefault("gateway.openai_cache.aware_routing_enabled", false)
 	viper.SetDefault("gateway.openai_cache.rollout_percent", 0)
@@ -2881,6 +2899,21 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.CacheTrace.MaxQueueWait < 0 {
 		return fmt.Errorf("gateway.cache_trace.max_queue_wait must be nonnegative")
+	}
+	// Zero keeps the default; a cap can only lower the contract range.
+	for _, cap := range []struct {
+		name            string
+		value, min, max int
+	}{
+		{"l07_max_consecutive_cap", c.Gateway.CacheRouting.L07MaxConsecutiveCap, 1, 5},
+		{"l07_max_hold_seconds_cap", c.Gateway.CacheRouting.L07MaxHoldSecondsCap, 10, 300},
+		{"l07_group_keep_ratio_cap_pct", c.Gateway.CacheRouting.L07GroupKeepRatioCapPct, 1, 20},
+		{"l07_guard_error_delta_pp", c.Gateway.CacheRouting.L07GuardErrorDeltaPP, 1, 100},
+		{"l07_guard_pause_seconds", c.Gateway.CacheRouting.L07GuardPauseSeconds, 60, 86400},
+	} {
+		if cap.value != 0 && (cap.value < cap.min || cap.value > cap.max) {
+			return fmt.Errorf("gateway.cache_routing.%s must be between %d and %d", cap.name, cap.min, cap.max)
+		}
 	}
 	if stale := c.Gateway.CachePolicy.MaxStaleSeconds; stale != 0 && (stale < 60 || stale > 86400) {
 		return fmt.Errorf("gateway.cache_policy.max_stale_seconds must be 0 or between 60 and 86400")

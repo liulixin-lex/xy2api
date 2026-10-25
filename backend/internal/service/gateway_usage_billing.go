@@ -837,6 +837,8 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// the forced cache billing below rewrites the token split.
 	s.resilience.NoteSessionCacheUsage(ctx, result.Usage.CacheReadInputTokens,
 		result.Usage.InputTokens+result.Usage.CacheReadInputTokens+result.Usage.CacheCreationInputTokens)
+	s.l07NoteUsage(ctx, input.Account, result.Usage.CacheReadInputTokens,
+		result.Usage.InputTokens+result.Usage.CacheReadInputTokens+result.Usage.CacheCreationInputTokens)
 	// 强制缓存计费：将 input_tokens 转为 cache_read_input_tokens
 	// 用于粘性会话切换时的特殊计费处理
 	if input.ForceCacheBilling && result.Usage.InputTokens > 0 {

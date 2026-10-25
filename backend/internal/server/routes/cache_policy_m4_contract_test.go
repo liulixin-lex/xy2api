@@ -104,42 +104,53 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 	for name := range hashes {
 		names = append(names, name)
 	}
+	// T2.5: the eight new m4l07 samples, and F's m4l07 derivations replacing
+	// their nine m3m4 sources (cache_policies_contract/m4l07 SCOPE.json).
+	m4l07Hashes, m4l07Derived := cacheM4L07Manifest(t)
+	for name := range m4l07Derived {
+		require.Contains(t, hashes, name)
+	}
+	for _, name := range cacheM4L07NewSamples {
+		require.NotContains(t, hashes, name)
+		names = append(names, name)
+	}
 	sort.Strings(names)
 	observed := map[string]map[string]any{}
 	requests := map[string]cacheContract{}
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
-			raw, err := os.ReadFile(filepath.Join(root, name))
-			require.NoError(t, err)
-			require.Equal(t, hashes[name], fmt.Sprintf("%x", sha256.Sum256(raw)))
 			fixturePath := filepath.Join(root, name)
-			if strings.HasPrefix(name, "m4_list_") || strings.HasPrefix(name, "m4_dormant_list_") {
-				// These six complete responses are F's frozen M31 x M4 derivatives.
-				// They retain the M4 build prerequisites and include the M31 card.
-				derivedRoot := "testdata/cache_policies_contract/m31"
-				manifest, err := os.ReadFile(filepath.Join(derivedRoot, "SHA256.json"))
-				require.NoError(t, err)
-				derivedHashes := map[string]string{}
-				require.NoError(t, json.Unmarshal(manifest, &derivedHashes))
-				derivedName := "m31_" + name
-				require.Contains(t, derivedHashes, derivedName)
-				fixturePath = filepath.Join(derivedRoot, derivedName)
-				raw, err = os.ReadFile(fixturePath)
-				require.NoError(t, err)
-				require.Equal(t, derivedHashes[derivedName], fmt.Sprintf("%x", sha256.Sum256(raw)))
+			wantHash := hashes[name]
+			switch {
+			case strings.HasPrefix(name, "m4l07_"):
+				fixturePath, wantHash = filepath.Join(cacheM4L07Root, name), m4l07Hashes[name]
+			case m4l07Derived[name]:
+				// F's frozen T2.5 derivative of this m3m4 sample. The M3.1 card
+				// of the list samples is overlaid below (combo_t22 README §1).
+				fixturePath, wantHash = filepath.Join(cacheM4L07Root, "m4l07_"+name), m4l07Hashes["m4l07_"+name]
 			}
+			require.NotEmpty(t, wantHash)
+			raw, err := os.ReadFile(fixturePath)
+			require.NoError(t, err)
+			require.Equal(t, wantHash, fmt.Sprintf("%x", sha256.Sum256(raw)))
 			var f cacheContract
 			require.NoError(t, json.Unmarshal(raw, &f))
 			var fixture struct {
 				Setup struct {
-					BuildCapabilities *service.CacheM4BuildCapabilities `json:"build_capabilities"`
-					StoredSpec        map[string]any                    `json:"stored_spec"`
+					BuildCapabilities   *service.CacheM4BuildCapabilities `json:"build_capabilities"`
+					StoredSpec          map[string]any                    `json:"stored_spec"`
+					StaticCaps          map[string]int                    `json:"static_caps"`
+					ShareActiveGroupIDs []int64                           `json:"share_active_group_ids"`
 				} `json:"_fixture"`
 			}
 			require.NoError(t, json.Unmarshal(raw, &fixture))
 			scenario := strings.Replace(name, "m4_dormant_", "m4_", 1)
 			requests[name] = f
 			expected := contractMap(t, f.Response)
+			isList := cacheM4ListSample(name)
+			if isList {
+				expected = cacheM31M4ProjectLegacyList(t, expected)
+			}
 			data, _ := f.Response["data"].(map[string]any)
 			repo := &cacheRouteStore{rows: map[string]string{
 				"cache_feature_master":                      `{"rev":1,"spec":{"enabled":true}}`,
@@ -149,7 +160,11 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			auditRepo := &cacheRouteAudit{}
 			audit := service.NewAuditLogService(auditRepo, nil)
 			groups := &cacheM4Groups{fail: name == "m4_list_group_options_unavailable.json", forbid: name == "m4_put_routing_disable_skip_group_options.json" || strings.HasPrefix(name, "m4_validate_routing_disable")}
-			if fixture.Setup.BuildCapabilities != nil && f.Request.Method != http.MethodGet {
+			if fixture.Setup.BuildCapabilities != nil && f.Request.Method != http.MethodGet && !strings.HasPrefix(name, "m4l07_") {
+				groups.forbid = true
+			}
+			if strings.HasPrefix(name, "m4l07_") && f.Request.Method != http.MethodGet && (f.Status != http.StatusOK || data["direction"] == "disable") {
+				// Rejected writes and the disable direction never read groups.
 				groups.forbid = true
 			}
 			cfg := &config.Config{}
@@ -168,8 +183,20 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 				require.NoError(t, err)
 				repo.rows[setting] = string(b)
 			}
+			for key, value := range fixture.Setup.StaticCaps {
+				switch key {
+				case "gateway.cache_routing.l07_max_consecutive_cap":
+					cfg.Gateway.CacheRouting.L07MaxConsecutiveCap = value
+				case "gateway.cache_routing.l07_max_hold_seconds_cap":
+					cfg.Gateway.CacheRouting.L07MaxHoldSecondsCap = value
+				case "gateway.cache_routing.l07_group_keep_ratio_cap_pct":
+					cfg.Gateway.CacheRouting.L07GroupKeepRatioCapPct = value
+				default:
+					t.Fatalf("unknown static cap %s", key)
+				}
+			}
 			switch {
-			case strings.HasPrefix(scenario, "m4_list_"):
+			case strings.HasPrefix(scenario, "m4_list_") || strings.HasPrefix(name, "m4l07_list_"):
 				b, err := json.Marshal(data)
 				require.NoError(t, err)
 				var list service.CachePolicyList
@@ -188,6 +215,14 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 				for _, v := range list.Policies {
 					seedPolicy(t, repo, v)
 				}
+			case strings.HasPrefix(name, "m4l07_validate_") || strings.HasPrefix(name, "m4l07_put_"):
+				// The prior routing policy is the legacy (pre-T2.5) stored spec,
+				// so validate and PUT also replay the in-memory default fill.
+				var request struct {
+					ExpectedRev int64 `json:"expected_rev"`
+				}
+				require.NoError(t, json.Unmarshal(f.Request.Body, &request))
+				put(request.ExpectedRev, m4ContractSpec(t, key, true))
 			case strings.HasPrefix(scenario, "m4_validate_"):
 				rev := int64(cacheM4As[float64](t, data["current_rev"]))
 				put(rev, m4ContractSpec(t, key, rev > 0))
@@ -242,6 +277,18 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			if name == "m4_validate_anthropic_fallback_warning.json" {
 				options = append(options, service.WithCacheAnthropicObservability())
 			}
+			if len(fixture.Setup.ShareActiveGroupIDs) > 0 {
+				share := map[int64]bool{}
+				for _, id := range fixture.Setup.ShareActiveGroupIDs {
+					share[id] = true
+				}
+				options = append(options, service.WithCachePolicyShareActive(func(id int64) bool { return share[id] }))
+			}
+			// The A5 guard is process state, not storage: this sample is a
+			// process whose guard paused L-07 a moment ago.
+			if name == "m4l07_list_guard_tripped.json" {
+				options = append(options, service.WithCacheL07GuardTrippedUntil(now.Add(10*time.Minute)))
+			}
 			policies := service.NewCachePolicyService(repo, cfg, options...)
 			require.NoError(t, policies.Refresh(context.Background()))
 			router := cacheM4ContractRouter(policies, audit, version, actor)
@@ -251,7 +298,7 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			if groups.forbid {
 				require.Zero(t, groups.calls)
 			}
-			if groups.fail {
+			if groups.fail || isList {
 				require.Equal(t, 1, groups.calls)
 			}
 			if dir := os.Getenv("M4_POLICY_OUTPUT_DIR"); dir != "" {
@@ -267,10 +314,10 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			normalizePolicyTimes(t, got)
 			normalizePolicyTimes(t, expected)
 			require.Equal(t, expected, got, "entire HTTP envelope and payload, including metadata.errors")
-			if strings.HasPrefix(filepath.Base(fixturePath), "m31_m4_") {
+			if strings.HasPrefix(filepath.Base(fixturePath), "m4l07_") {
 				event, err := json.Marshal(map[string]any{"fixture": fixturePath, "source_fixture": name, "status": status, "response": got})
 				require.NoError(t, err)
-				t.Logf("M31_M4_POLICY_CONTRACT_EVENT %s", event)
+				t.Logf("M4L07_POLICY_CONTRACT_EVENT %s", event)
 			}
 			observed[name] = got
 		})
@@ -310,7 +357,43 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			actual, ok := observed[entry.Source]
 			require.True(t, ok, "canonical HTTP must have passed")
 			wrong := contractMap(t, bad.Response)
-			if strings.HasPrefix(entry.Source, "m4_list_") || strings.HasPrefix(entry.Source, "m4_dormant_list_") {
+			if cacheM4ListSample(entry.Source) {
+				wrong = cacheM31M4ProjectLegacyList(t, wrong)
+			}
+			if m4l07Derived[entry.Source] {
+				// Same T2.5 overlay as F's derivation, so only the original
+				// corruption can differ from the replayed response.
+				wrong = cacheM4L07Overlay(t, wrong)
+			}
+			normalizePolicyTimes(t, wrong)
+			require.NotEqual(t, wrong, actual, "the corrupted contract response cannot pass full replay")
+		})
+	}
+	// F's seven m4l07 negatives, each against its canonical replay above.
+	entries, err := os.ReadDir(filepath.Join(cacheM4L07Root, "invalid"))
+	require.NoError(t, err)
+	require.Len(t, entries, len(cacheM4L07InvalidSources))
+	for _, item := range entries {
+		name := item.Name()
+		t.Run("reject/m4l07/"+name, func(t *testing.T) {
+			source, ok := cacheM4L07InvalidSources[name]
+			require.True(t, ok)
+			raw, err := os.ReadFile(filepath.Join(cacheM4L07Root, "invalid", name))
+			require.NoError(t, err)
+			require.Equal(t, m4l07Hashes["invalid/"+name], fmt.Sprintf("%x", sha256.Sum256(raw)))
+			var bad cacheContract
+			require.NoError(t, json.Unmarshal(raw, &bad))
+			canonical, ok := requests[source]
+			require.True(t, ok)
+			require.Equal(t, canonical.Request.Method, bad.Request.Method)
+			require.Equal(t, canonical.Request.Path, bad.Request.Path)
+			if len(canonical.Request.Body) > 0 && string(canonical.Request.Body) != "null" {
+				require.JSONEq(t, string(canonical.Request.Body), string(bad.Request.Body))
+			}
+			actual, ok := observed[source]
+			require.True(t, ok, "canonical HTTP must have passed")
+			wrong := contractMap(t, bad.Response)
+			if cacheM4ListSample(source) {
 				wrong = cacheM31M4ProjectLegacyList(t, wrong)
 			}
 			normalizePolicyTimes(t, wrong)
@@ -323,7 +406,8 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 // The expected new cards come from F's explicit M4 default fixture, never List.
 func TestCachePolicyM4RetainsM3ListEdges(t *testing.T) {
 	root := "testdata/cache_policies_contract/m31"
-	raw, err := os.ReadFile(filepath.Join(root, "m31_m4_list_default.json"))
+	// The two M4 cards come from F's T2.5 derivation of the M4 default list.
+	raw, err := os.ReadFile(filepath.Join(cacheM4L07Root, "m4l07_m4_list_default.json"))
 	require.NoError(t, err)
 	var defaults cacheContract
 	require.NoError(t, json.Unmarshal(raw, &defaults))

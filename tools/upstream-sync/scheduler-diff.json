@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "upstream_commit": "f2669c8cf62555cd92389b3f55920e9e6e7c6ff2",
-  "description": "Reviewed differences between the original Sub2API scheduler files and the recorded upstream commit. Any other change, or a changed upstream commit, fails `sync.py scheduler-diff` until reviewed. Reviewed for v0.2.15: all existing XY2API difference blocks are unchanged; the upstream NormalizeOpenAICompatiblePlatform change to domain.UsesOpenAIGateway is adopted verbatim after module-path normalization. Reviewed for 0.4.0: gateway resilience hooks are registered as `gateway-resilience` blocks; two earlier lines were rewritten by them (named results of SelectAccountWithLoadAwareness, the last-resort runtime-block gate). Reviewed for 0.4.5 local integration: all four original scheduler files are byte-for-byte unchanged from the 0.4.4 post-release main; the existing reviewed difference blocks remain valid.",
+  "description": "Reviewed differences between the original Sub2API scheduler files and the recorded upstream commit. Any other change, or a changed upstream commit, fails `sync.py scheduler-diff` until reviewed. Reviewed for v0.2.15: all existing XY2API difference blocks are unchanged; the upstream NormalizeOpenAICompatiblePlatform change to domain.UsesOpenAIGateway is adopted verbatim after module-path normalization. Reviewed for 0.4.0: gateway resilience hooks are registered as `gateway-resilience` blocks; two earlier lines were rewritten by them (named results of SelectAccountWithLoadAwareness, the last-resort runtime-block gate). Reviewed for 0.4.5 local integration: all four original scheduler files are byte-for-byte unchanged from the 0.4.4 post-release main; the existing reviewed difference blocks remain valid. Reviewed for T2.5 L-07: the cache-l07 block only adds hooks after the existing decisions.",
   "files": {
     "backend/internal/service/gateway_scheduling.go": [
       {
@@ -61,6 +61,41 @@
           "if probeResult, ok, probeErr := s.monitorProbeFreeSlot(ctx, candidates, groupID, preferOAuth); probeErr != nil || ok {",
           "return probeResult, probeErr",
           "}"
+        ]
+      },
+      {
+        "block": "cache-l07",
+        "note": "T2.5 L-07 keep sticky on busy (cache DESIGN 6.1A): per-attempt release at selection start, the request record after platform resolution, owner-skip/busy hooks in the routed and Layer1.5 sticky paths, and the owner-hit refresh that also ends the busy segment. The wait-count error is kept for the L-07 state_error abandon; baseline control flow is unchanged.",
+        "removed": [
+          "waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, stickyAccountID)",
+          "waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, accountID)"
+        ],
+        "added": [
+          "// L-07: a keep of the previous attempt ends before this one may bind.",
+          "s.l07ReleaseAttempt(ctx)",
+          "}",
+          "}",
+          "// L-07 record of the request; nil unless the routing policy armed it.",
+          "l07 := s.l07Begin(ctx, group, sessionHash, platform, len(origExcluded))",
+          "s.l07RoutedOwnerHit(ctx, l07, sessionHash, stickyAccountID)",
+          "waitingCount, waitErr := s.concurrencyService.GetAccountWaitingCount(ctx, stickyAccountID)",
+          "s.l07OwnerBusy(ctx, l07, stickyAccount, sessionHash, requestedModel, result, err, waitErr)",
+          "if stickyCacheMissReason != \"\" && stickyCacheMissReason != \"wait_queue_full\" {",
+          "s.l07OwnerSkipped(l07)",
+          "s.l07OwnerSkipped(l07)",
+          "s.l07OwnerSkipped(l07)",
+          "s.l07OwnerSkipped(l07)",
+          "if l07.armed() {",
+          "s.l07RefreshOnOwnerHit(ctx, l07, derefGroupID(groupID), sessionHash, accountID, stickySessionTTL)",
+          "} else {",
+          "waitingCount, waitErr := s.concurrencyService.GetAccountWaitingCount(ctx, accountID)",
+          "s.l07OwnerSkipped(l07)",
+          "} else {",
+          "// Busy owner, full queue: L-07 may keep the binding while",
+          "// Layer2 serves this attempt (DESIGN §6.1A).",
+          "s.l07OwnerBusy(ctx, l07, account, sessionHash, requestedModel, result, err, waitErr)",
+          "s.l07OwnerSkipped(l07)",
+          "s.l07OwnerSkipped(l07)"
         ]
       }
     ],

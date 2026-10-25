@@ -156,12 +156,20 @@ func (s *CachePolicyService) validateM4Groups(ctx context.Context, index int, v 
 	return v, nil
 }
 
-// Preserve the contract enum order even when rollout=0 also produces a warning.
+// Warnings that follow fallback_group_selected in the contract enum order.
+var cachePolicyWarningsAfterFallback = map[string]bool{
+	"no_effect_rollout_zero": true, "high_rollout_without_experiment": true, "decision_pending_header_policy": true,
+	"decision_pending_fallback_scope": true, "decision_pending_static_routing": true, "share_group_no_effect": true,
+	"account_options_unavailable": true, cachePolicyGroupOptionsUnavailable: true,
+}
+
+// Preserve the contract enum order even when rollout=0 or a share-active
+// busy group also produces a warning.
 func cachePolicyM4FallbackWarning(warnings []string) []string {
 	out := make([]string, 0, len(warnings)+1)
 	added := false
 	for _, warning := range warnings {
-		if !added && warning == "no_effect_rollout_zero" {
+		if !added && cachePolicyWarningsAfterFallback[warning] {
 			out = append(out, "fallback_group_selected")
 			added = true
 		}
