@@ -126,15 +126,11 @@ func (p *CacheRoutingL07Policy) Revision() int64 {
 
 // RoutingL07 returns the request policy of L-07 when it is active, nil
 // otherwise: no kill switch, master on, build capability l07, valid entries,
-// enabled with a positive rollout, and a fresh snapshot.
+// enabled with a positive rollout, and a fresh snapshot (FX-POL-2: routing is
+// a behavior key, so a stale-bounded snapshot turns it off).
 func (p *CachePolicySnapshot) RoutingL07() *CacheRoutingL07Policy {
-	if p == nil || !p.routingL07.active || cacheL07SnapshotStale(p) {
+	if p == nil || !p.routingL07.active || p.behaviorStale() {
 		return nil
 	}
 	return &p.routingL07
 }
-
-// cacheL07SnapshotStale is the seam of FX-POL-2 (behavior keys stop acting on
-// a stale snapshot). Replace the body with p.behaviorStale() when
-// cache/maint-obs2-pol2 is merged.
-func cacheL07SnapshotStale(p *CachePolicySnapshot) bool { return false }

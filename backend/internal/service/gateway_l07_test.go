@@ -1172,3 +1172,60 @@ func TestL07GuardCountsSpillCapacityShed(t *testing.T) {
 		require.True(t, l07UpstreamFailure(c), c)
 	}
 }
+
+// A-L07-1 (FX-POL-2): a stale-bounded snapshot never arms L-07.
+func TestL07StaleSnapshotTurnsRoutingOff(t *testing.T) {
+	f := newL07Fixture(t, nil)
+	f.withPolicies(t, nil, true, false, nil)
+	p := f.svc.cachePolicies.Snapshot()
+	require.NotNil(t, p.RoutingL07())
+	p.stale = true
+	require.Nil(t, p.RoutingL07(), "a stale snapshot never arms L-07")
+	f.bind("sess", 1)
+	ctx, st := newL07Ctx(t)
+	f.selectWith(t, ctx, "sess", nil)
+	require.Equal(t, int64(2), f.bound("sess"), "baseline rebind")
+	require.Nil(t, st.L07())
+	require.Zero(t, f.cache.l07Calls)
+}
+
+// A-L07-1: the routing view of an L-07 build reports the bound with the
+// blocker order kill_switch, parse_error, stale_snapshot, …, guard_tripped.
+func TestL07StaleSnapshotBlocksRoutingView(t *testing.T) {
+	ctx := context.Background()
+	repo := newPolicyTestStore()
+	repo.rows["cache_feature_master"] = `{"rev":1,"spec":{"enabled":true}}`
+	repo.rows["cache_routing_policy"] = l07OnRouting
+	clock := &cachePolicyStaleClock{now: time.Date(2026, 10, 25, 4, 0, 0, 0, time.UTC)}
+	cfg := policyTestConfig()
+	cfg.Gateway.CachePolicy.MaxStaleSeconds = 60
+	groups := &m4PolicyGroups{rows: []Group{{ID: 31, Name: "claude-pool-a", Platform: PlatformAnthropic}}}
+	s := NewCachePolicyService(repo, cfg, WithCacheM4Policies(groups),
+		WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L07: true}), WithCachePolicyClock(clock.Now))
+	require.NoError(t, s.Refresh(ctx))
+	require.NotNil(t, s.Snapshot().RoutingL07())
+	require.Equal(t, "on", cachePolicyListView(t, s, "routing").Effective.State)
+
+	setPolicyTestReadErr(repo, errors.New("settings unavailable"))
+	clock.Advance(61 * time.Second)
+	require.Error(t, s.Refresh(ctx))
+	require.True(t, s.Snapshot().behaviorStale())
+	require.Nil(t, s.Snapshot().RoutingL07())
+
+	setPolicyTestReadErr(repo, nil)
+	view := cachePolicyListView(t, s, "routing")
+	require.Equal(t, "blocked", view.Effective.State)
+	require.False(t, *view.Effective.Active)
+	require.Equal(t, []string{"stale_snapshot"}, view.Effective.Blockers)
+
+	s.l07.guardUntil.Store(clock.Now().Add(time.Minute).UnixNano())
+	view = cachePolicyListView(t, s, "routing")
+	require.Equal(t, "blocked", view.Effective.State)
+	require.Equal(t, []string{"stale_snapshot", "guard_tripped"}, view.Effective.Blockers)
+
+	// A successful refresh restores the policy.
+	s.l07.guardUntil.Store(0)
+	require.NoError(t, s.Refresh(ctx))
+	require.NotNil(t, s.Snapshot().RoutingL07())
+	require.Equal(t, "on", cachePolicyListView(t, s, "routing").Effective.State)
+}
