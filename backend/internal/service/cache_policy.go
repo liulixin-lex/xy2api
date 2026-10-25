@@ -166,6 +166,7 @@ type CachePolicyService struct {
 	northstarAvailable              bool
 	l07Caps                         cacheL07Caps
 	l07                             *l07Runtime
+	share                           cachePolicyShareLookup
 }
 
 func NewCachePolicyService(repo SettingRepository, cfg *config.Config, options ...CachePolicyOption) *CachePolicyService {
