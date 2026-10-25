@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -819,10 +820,17 @@ func TestL07DisabledStatesEqualBaseline(t *testing.T) {
 }
 
 func TestL07DisabledStatesAllocateLikeBaseline(t *testing.T) {
-	measure := func(f *l07Fixture, sc l07Scenario, session string) float64 {
-		f.slots.inFlight[1], f.slots.waiting[1] = sc.inFlight, sc.waiting
+	// Both arms run on one fixture, interleaved, so they share every map,
+	// slot and mock state: the baseline is the same service without the
+	// policy service, which skips every L-07 hook. AllocsPerRun counts
+	// process-wide mallocs, and a full package run leaves background
+	// goroutines of other tests that may allocate while the measured
+	// selection writes its logs. Noise only ever adds, so the minimum over
+	// a few rounds is each arm's own count, and the arms must be equal.
+	measure := func(f *l07Fixture, policies *CachePolicyService, sc l07Scenario, session string) float64 {
+		f.svc.cachePolicies = policies
 		gid := l07TestGroup
-		return testing.AllocsPerRun(50, func() {
+		return testing.AllocsPerRun(20, func() {
 			f.cache.sessionBindings[session] = 1
 			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
 			r, err := f.svc.SelectAccountWithLoadAwareness(ctx, &gid, session, l07TestModel, sc.excluded, "", 0)
@@ -839,11 +847,17 @@ func TestL07DisabledStatesAllocateLikeBaseline(t *testing.T) {
 	}
 	for _, state := range l07DisabledStates(t) {
 		for _, sc := range l07Scenarios() {
-			base := newL07Fixture(t, nil)
-			want := measure(base, sc, state.session)
 			f := newL07Fixture(t, nil)
 			state.install(f)
-			require.Equal(t, want, measure(f, sc, state.session), "%s/%s allocs/op", state.name, sc.name)
+			policies := f.svc.cachePolicies
+			f.slots.inFlight[1], f.slots.waiting[1] = sc.inFlight, sc.waiting
+			base, got := math.Inf(1), math.Inf(1)
+			for round := 0; round < 5; round++ {
+				base = math.Min(base, measure(f, nil, sc, state.session))
+				got = math.Min(got, measure(f, policies, sc, state.session))
+			}
+			require.Equal(t, base, got, "%s/%s allocs/op", state.name, sc.name)
+			require.Zero(t, f.cache.l07Calls, "%s/%s: no L-07 state access", state.name, sc.name)
 		}
 	}
 }
