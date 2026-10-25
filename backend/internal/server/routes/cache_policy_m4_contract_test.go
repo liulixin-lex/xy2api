@@ -364,6 +364,22 @@ func TestCachePolicyM4RetainsM3ListEdges(t *testing.T) {
 			normalizePolicyTimes(t, got)
 			normalizePolicyTimes(t, expected)
 			expected = cacheL04ExtendLegacyResponse(t, expected)
+			if name == "m31_m3_list_account_options_unavailable.json" {
+				// T2.3+ builds: the shared account lookup failure also reaches
+				// anthropic_identity's metadata_account_ids. That card's edge is
+				// m4l03_list_account_options_unavailable, replayed by
+				// TestCachePolicyL03CompleteCombinedListReplay; upstream_identity
+				// keeps this sample's edge and every other card stays exact.
+				successors, err := os.ReadFile("testdata/cache_policies_contract/m4l03/SOURCE_SHA256.json")
+				require.NoError(t, err)
+				require.Contains(t, string(successors), `"m4l03_list_account_options_unavailable.json"`)
+				gotCards := cacheM4As[[]any](t, cacheM4As[map[string]any](t, got["data"])["policies"])
+				wantCards := cacheM4As[[]any](t, cacheM4As[map[string]any](t, expected["data"])["policies"])
+				anthropic := cacheM4As[map[string]any](t, gotCards[4])
+				require.Equal(t, "anthropic_identity", anthropic["key"])
+				require.Contains(t, cacheM4As[[]any](t, cacheM4As[map[string]any](t, anthropic["effective"])["warnings"]), "account_options_unavailable")
+				gotCards[4] = wantCards[4]
+			}
 			require.Equal(t, expected, got)
 			require.Equal(t, 1, groups.calls)
 		})
