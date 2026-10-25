@@ -56,6 +56,7 @@ type cachePolicyEntry struct {
 // retries and streaming; readers never consult settings.
 type CachePolicySnapshot struct {
 	kill          bool
+	stale         bool
 	master        bool
 	trace         bool
 	northstar     bool
@@ -74,6 +75,12 @@ type CachePolicySnapshot struct {
 
 func (p *CachePolicySnapshot) TraceEnabled() bool  { return p != nil && p.trace }
 func (p *CachePolicySnapshot) MasterEnabled() bool { return p != nil && !p.kill && p.master }
+
+// behaviorStale marks a snapshot republished after settings refreshes failed for
+// longer than gateway.cache_policy.max_stale_seconds. Behavior accessors AND it
+// with master and build capability at publication; master, observability and
+// northstar ignore it.
+func (p *CachePolicySnapshot) behaviorStale() bool { return p != nil && p.stale }
 func (p *CachePolicySnapshot) SamplePercent() int {
 	if p == nil {
 		return 0
@@ -164,6 +171,13 @@ type CachePolicyService struct {
 	wg                              sync.WaitGroup
 	listeners                       []func(*CachePolicySnapshot)
 	northstarAvailable              bool
+
+	// Staleness bound, guarded by mu. refreshedAt is the last successful
+	// settings read; administrator writes neither refresh nor clear it.
+	maxStale    time.Duration
+	refreshedAt time.Time
+	stale       bool
+	staleTotal  int64
 }
 
 func NewCachePolicyService(repo SettingRepository, cfg *config.Config, options ...CachePolicyOption) *CachePolicyService {
@@ -178,6 +192,7 @@ func NewCachePolicyService(repo SettingRepository, cfg *config.Config, options .
 		s.diagnostics = cfg.Gateway.OpenAICache.DiagnosticsEnabled
 		s.aware = cfg.Gateway.OpenAICache.AwareRoutingEnabled
 		s.rollout = cfg.Gateway.OpenAICache.RolloutPercent
+		s.maxStale = time.Duration(cfg.Gateway.CachePolicy.MaxStaleSeconds) * time.Second
 		if c.Workers > 0 {
 			s.caps.Workers = c.Workers
 		}
@@ -197,6 +212,7 @@ func NewCachePolicyService(repo SettingRepository, cfg *config.Config, options .
 			s.caps.MaxCheckpoints = c.MaxCheckpoints
 		}
 	}
+	s.refreshedAt = s.now().UTC()
 	s.publish(map[string]string{})
 	return s
 }
@@ -254,17 +270,43 @@ func (s *CachePolicyService) Refresh(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	raw, err := s.repo.GetMultiple(ctx, cachePolicySettings[:])
-	if err != nil {
-		return err
-	} // Keep the last valid snapshot on read failure.
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err != nil {
+		// Keep the last valid snapshot on read failure, up to max_stale_seconds.
+		s.boundStaleLocked()
+		return err
+	}
+	now := s.now().UTC()
+	age := now.Sub(s.refreshedAt)
+	s.refreshedAt = now
 	// A successful write or another refresh published while storage was being
 	// read. Discard this possibly stale read; the next poll will reconcile.
 	if s.snapshot.Load() == before {
+		if s.stale {
+			s.stale = false
+			slog.Info("cache policy snapshot refreshed", "cache_policy_snapshot_age_seconds", int64(age/time.Second))
+		}
 		s.publish(raw)
 	}
 	return nil
+}
+
+// boundStaleLocked republishes the loaded entries once, with behavior policies
+// off, after refreshes have failed for longer than max_stale_seconds. It never
+// writes settings or revisions; the next successful refresh restores them.
+func (s *CachePolicyService) boundStaleLocked() {
+	if s.maxStale <= 0 || s.stale {
+		return
+	}
+	age := s.now().UTC().Sub(s.refreshedAt)
+	if age <= s.maxStale {
+		return
+	}
+	s.stale = true
+	s.staleTotal++
+	slog.Warn("cache policy snapshot stale", "cache_policy_snapshot_age_seconds", int64(age/time.Second), "cache_policy_stale_total", s.staleTotal, "max_stale_seconds", int64(s.maxStale/time.Second))
+	s.publishEntries(s.snapshot.Load().entries)
 }
 func (s *CachePolicyService) publish(raw map[string]string) {
 	entries := [6]cachePolicyEntry{}
@@ -276,7 +318,7 @@ func (s *CachePolicyService) publish(raw map[string]string) {
 	s.publishEntries(entries)
 }
 func (s *CachePolicyService) publishEntries(entries [6]cachePolicyEntry) {
-	p := &CachePolicySnapshot{kill: s.kill, entries: entries}
+	p := &CachePolicySnapshot{kill: s.kill, stale: s.stale, entries: entries}
 	for i := range entries {
 		p.revs[i] = entries[i].envelope.Rev
 	}
@@ -295,7 +337,7 @@ func (s *CachePolicyService) publishEntries(entries [6]cachePolicyEntry) {
 	p.chainPercent = policyInt(o["chain_percent"])
 	p.byteBudget = int64(min(policyInt(o["byte_budget_mib"]), s.caps.MaxByteBudgetMiB)) << 20
 	p.rate = int64(min(policyInt(o["rate_mib_per_s"]), s.caps.MaxRateMiBPerS)) << 20
-	p.upstream = upstreamIdentityFromEntry(entries[3], p.MasterEnabled())
+	p.upstream = upstreamIdentityFromEntry(entries[3], p.MasterEnabled() && !p.stale)
 	p.revision = fmt.Sprintf("m%d.o%d.u%d.a%d.r%d", p.revs[0], p.revs[1], p.revs[3], p.revs[4], p.revs[5])
 	p.initCohortViews()
 	for _, notify := range s.listeners {
