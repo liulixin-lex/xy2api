@@ -1,0 +1,888 @@
+{
+  "_contract": [
+    "M4-1",
+    "T31A-L09A"
+  ],
+  "_note": "必须被拒绝：T3.1a 构建的 routing 必须带 affinity_rollout_percent",
+  "_fixture": {
+    "build_capabilities": {
+      "l04": false,
+      "l03": false,
+      "l07": true,
+      "l09a": true
+    },
+    "说明": "T3.1a 构建的静态能力（叠在 T2.5 上：l07、l09a 为 true；本目录的 anthropic_identity 沿用 m4l07 的休眠形态），后端测试预置，不属于响应"
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/cache/policies",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "generated_at": "2026-10-24T09:00:05Z",
+      "process_started_at": "2026-10-24T08:40:00Z",
+      "build_version": "0.0.0-contract",
+      "refresh_interval_s": 60,
+      "static": {
+        "kill_switch": false,
+        "caps": {
+          "workers": 1,
+          "max_byte_budget_mib": 64,
+          "max_rate_mib_per_s": 32,
+          "max_sessions": 1024,
+          "chains_per_session": 3,
+          "max_checkpoints": 512
+        }
+      },
+      "existing": {
+        "openai_cache_diagnostics_enabled": true,
+        "openai_cache_aware_routing_enabled": true,
+        "openai_cache_rollout_percent": 50,
+        "claude_cache_fallback": {
+          "configured": true,
+          "group_count": 2,
+          "settings_link": "/admin/settings?tab=gateway"
+        }
+      },
+      "policies": [
+        {
+          "key": "master",
+          "setting_key": "cache_feature_master",
+          "available": true,
+          "risk": "high",
+          "gated_by_master": false,
+          "stored": {
+            "rev": 1,
+            "updated_at": "2026-10-24T08:50:00Z",
+            "updated_by": {
+              "user_id": 1,
+              "email": "admin@example.com"
+            },
+            "reason": "开始试运行",
+            "spec": {
+              "enabled": true
+            }
+          },
+          "loaded": {
+            "rev": 1,
+            "loaded_at": "2026-10-24T08:40:01Z"
+          },
+          "effective": {
+            "state": "on",
+            "active": true,
+            "blockers": [],
+            "warnings": [],
+            "clipped_fields": []
+          },
+          "defaults": {
+            "enabled": false
+          },
+          "schema": [
+            {
+              "field": "enabled",
+              "type": "bool"
+            }
+          ]
+        },
+        {
+          "key": "observability",
+          "setting_key": "cache_observability_policy",
+          "available": true,
+          "risk": "low",
+          "gated_by_master": false,
+          "stored": {
+            "rev": 2,
+            "updated_at": "2026-10-24T08:45:00Z",
+            "updated_by": {
+              "user_id": 1,
+              "email": "admin@example.com"
+            },
+            "reason": "开启观测",
+            "spec": {
+              "enabled": true,
+              "sample_percent": 100,
+              "chain_percent": 100,
+              "byte_budget_mib": 64,
+              "rate_mib_per_s": 32,
+              "persist_trace_hourly": true
+            }
+          },
+          "loaded": {
+            "rev": 2,
+            "loaded_at": "2026-10-24T08:40:01Z"
+          },
+          "effective": {
+            "state": "on",
+            "active": true,
+            "blockers": [],
+            "warnings": [],
+            "clipped_fields": []
+          },
+          "defaults": {
+            "enabled": false,
+            "sample_percent": 100,
+            "chain_percent": 100,
+            "byte_budget_mib": 64,
+            "rate_mib_per_s": 32,
+            "persist_trace_hourly": true
+          },
+          "schema": [
+            {
+              "field": "enabled",
+              "type": "bool"
+            },
+            {
+              "field": "sample_percent",
+              "type": "int",
+              "min": 0,
+              "max": 100,
+              "unit": "percent"
+            },
+            {
+              "field": "chain_percent",
+              "type": "int",
+              "min": 0,
+              "max": 100,
+              "unit": "percent"
+            },
+            {
+              "field": "byte_budget_mib",
+              "type": "int",
+              "min": 8,
+              "max": 64,
+              "unit": "MiB",
+              "cap_source": "gateway.cache_trace.max_byte_budget_mib"
+            },
+            {
+              "field": "rate_mib_per_s",
+              "type": "int",
+              "min": 1,
+              "max": 32,
+              "unit": "MiB/s",
+              "cap_source": "gateway.cache_trace.max_rate_mib_per_s"
+            },
+            {
+              "field": "persist_trace_hourly",
+              "type": "bool"
+            }
+          ]
+        },
+        {
+          "key": "northstar",
+          "setting_key": "cache_northstar_policy",
+          "available": true,
+          "risk": "low",
+          "gated_by_master": false,
+          "stored": {
+            "rev": 0,
+            "updated_at": null,
+            "updated_by": null,
+            "reason": null,
+            "spec": {
+              "rollup_enabled": false,
+              "backfill_days": 7,
+              "policy_version": "2026-10-22-v1",
+              "excluded_group_ids": [],
+              "exclude_media": true,
+              "model_thresholds": [
+                {
+                  "match": "prefix",
+                  "model": "gpt-",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "chatgpt-",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "codex-",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "o1",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "o3",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "o4",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-fable-5",
+                  "threshold": 512
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-fable-5-1",
+                  "threshold": 512
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-haiku-3-5",
+                  "threshold": 2048
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-haiku-4-5",
+                  "threshold": 4096
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-haiku-5-5",
+                  "threshold": 512
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-mythos-5",
+                  "threshold": 512
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-mythos-5-1",
+                  "threshold": 512
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-opus-4",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-opus-4-1",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-opus-4-5",
+                  "threshold": 4096
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-opus-4-6",
+                  "threshold": 4096
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-opus-4-7",
+                  "threshold": 2048
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-opus-4-8",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-opus-5",
+                  "threshold": 512
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-opus-5-5",
+                  "threshold": 512
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-sonnet-4-5",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-sonnet-4-6",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-sonnet-5",
+                  "threshold": 1024
+                },
+                {
+                  "match": "prefix",
+                  "model": "claude-sonnet-5-5",
+                  "threshold": 512
+                },
+                {
+                  "match": "prefix",
+                  "model": "gemini-2.5-flash",
+                  "threshold": 2048
+                },
+                {
+                  "match": "prefix",
+                  "model": "gemini-2.5-pro",
+                  "threshold": 2048
+                },
+                {
+                  "match": "prefix",
+                  "model": "gemini-3.1-pro-preview",
+                  "threshold": 4096
+                },
+                {
+                  "match": "prefix",
+                  "model": "gemini-3.6-flash",
+                  "threshold": 4096
+                },
+                {
+                  "match": "prefix",
+                  "model": "gemini-3.8-flash",
+                  "threshold": 4096
+                }
+              ],
+              "unknown_threshold": "aux_only"
+            }
+          },
+          "loaded": {
+            "rev": 0,
+            "loaded_at": "2026-10-24T08:40:01Z"
+          },
+          "effective": {
+            "state": "off",
+            "active": false,
+            "blockers": [],
+            "warnings": [],
+            "clipped_fields": []
+          },
+          "defaults": {
+            "rollup_enabled": false,
+            "backfill_days": 7,
+            "policy_version": "2026-10-22-v1",
+            "excluded_group_ids": [],
+            "exclude_media": true,
+            "model_thresholds": [
+              {
+                "match": "prefix",
+                "model": "gpt-",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "chatgpt-",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "codex-",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "o1",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "o3",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "o4",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "claude-fable-5",
+                "threshold": 512
+              },
+              {
+                "match": "prefix",
+                "model": "claude-fable-5-1",
+                "threshold": 512
+              },
+              {
+                "match": "prefix",
+                "model": "claude-haiku-3-5",
+                "threshold": 2048
+              },
+              {
+                "match": "prefix",
+                "model": "claude-haiku-4-5",
+                "threshold": 4096
+              },
+              {
+                "match": "prefix",
+                "model": "claude-haiku-5-5",
+                "threshold": 512
+              },
+              {
+                "match": "prefix",
+                "model": "claude-mythos-5",
+                "threshold": 512
+              },
+              {
+                "match": "prefix",
+                "model": "claude-mythos-5-1",
+                "threshold": 512
+              },
+              {
+                "match": "prefix",
+                "model": "claude-opus-4",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "claude-opus-4-1",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "claude-opus-4-5",
+                "threshold": 4096
+              },
+              {
+                "match": "prefix",
+                "model": "claude-opus-4-6",
+                "threshold": 4096
+              },
+              {
+                "match": "prefix",
+                "model": "claude-opus-4-7",
+                "threshold": 2048
+              },
+              {
+                "match": "prefix",
+                "model": "claude-opus-4-8",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "claude-opus-5",
+                "threshold": 512
+              },
+              {
+                "match": "prefix",
+                "model": "claude-opus-5-5",
+                "threshold": 512
+              },
+              {
+                "match": "prefix",
+                "model": "claude-sonnet-4-5",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "claude-sonnet-4-6",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "claude-sonnet-5",
+                "threshold": 1024
+              },
+              {
+                "match": "prefix",
+                "model": "claude-sonnet-5-5",
+                "threshold": 512
+              },
+              {
+                "match": "prefix",
+                "model": "gemini-2.5-flash",
+                "threshold": 2048
+              },
+              {
+                "match": "prefix",
+                "model": "gemini-2.5-pro",
+                "threshold": 2048
+              },
+              {
+                "match": "prefix",
+                "model": "gemini-3.1-pro-preview",
+                "threshold": 4096
+              },
+              {
+                "match": "prefix",
+                "model": "gemini-3.6-flash",
+                "threshold": 4096
+              },
+              {
+                "match": "prefix",
+                "model": "gemini-3.8-flash",
+                "threshold": 4096
+              }
+            ],
+            "unknown_threshold": "aux_only"
+          },
+          "schema": [
+            {
+              "field": "rollup_enabled",
+              "type": "bool"
+            },
+            {
+              "field": "backfill_days",
+              "type": "int",
+              "min": 0,
+              "max": 30
+            },
+            {
+              "field": "policy_version",
+              "type": "string"
+            },
+            {
+              "field": "excluded_group_ids",
+              "type": "id_list",
+              "ref": "group"
+            },
+            {
+              "field": "exclude_media",
+              "type": "bool"
+            },
+            {
+              "field": "model_thresholds",
+              "type": "threshold_rules",
+              "options": [
+                512,
+                1024,
+                2048,
+                4096,
+                6144
+              ]
+            },
+            {
+              "field": "unknown_threshold",
+              "type": "enum",
+              "options": [
+                "aux_only"
+              ]
+            }
+          ]
+        },
+        {
+          "key": "upstream_identity",
+          "setting_key": "cache_upstream_identity_policy",
+          "available": true,
+          "risk": "high",
+          "gated_by_master": true,
+          "stored": {
+            "rev": 0,
+            "updated_at": null,
+            "updated_by": null,
+            "reason": null,
+            "spec": {
+              "mode": "off",
+              "account_ids": [],
+              "rollout_percent": 0,
+              "chat_compat_uuid": false,
+              "header_only_uuid": false,
+              "forward_session_headers": "whitelist"
+            }
+          },
+          "loaded": {
+            "rev": 0,
+            "loaded_at": "2026-10-24T08:40:01Z"
+          },
+          "effective": {
+            "state": "off",
+            "active": false,
+            "blockers": [],
+            "warnings": [],
+            "clipped_fields": []
+          },
+          "defaults": {
+            "mode": "off",
+            "account_ids": [],
+            "rollout_percent": 0,
+            "chat_compat_uuid": false,
+            "header_only_uuid": false,
+            "forward_session_headers": "whitelist"
+          },
+          "schema": [
+            {
+              "field": "mode",
+              "type": "enum",
+              "options": [
+                "off",
+                "uuid_fill"
+              ]
+            },
+            {
+              "field": "account_ids",
+              "type": "id_list",
+              "ref": "account",
+              "options": [
+                {
+                  "id": 101,
+                  "name": "relay-a-01",
+                  "platform": "openai"
+                },
+                {
+                  "id": 102,
+                  "name": "relay-b-01",
+                  "platform": "openai"
+                },
+                {
+                  "id": 103,
+                  "name": "relay-c-01",
+                  "platform": "openai"
+                }
+              ]
+            },
+            {
+              "field": "rollout_percent",
+              "type": "int",
+              "min": 0,
+              "max": 100,
+              "unit": "percent"
+            },
+            {
+              "field": "chat_compat_uuid",
+              "type": "bool"
+            },
+            {
+              "field": "header_only_uuid",
+              "type": "bool"
+            },
+            {
+              "field": "forward_session_headers",
+              "type": "enum",
+              "options": [
+                "whitelist",
+                "normalize"
+              ]
+            }
+          ]
+        },
+        {
+          "key": "anthropic_identity",
+          "setting_key": "cache_anthropic_identity_policy",
+          "available": true,
+          "risk": "high",
+          "gated_by_master": true,
+          "stored": {
+            "rev": 0,
+            "updated_at": null,
+            "updated_by": null,
+            "reason": null,
+            "spec": {
+              "anchor_group_ids": [],
+              "gemini_anchor": false,
+              "metadata_group_ids": [],
+              "rollout_percent": 0
+            }
+          },
+          "loaded": {
+            "rev": 0,
+            "loaded_at": "2026-10-24T08:40:01Z"
+          },
+          "effective": {
+            "state": "off",
+            "active": false,
+            "blockers": [],
+            "warnings": [],
+            "clipped_fields": []
+          },
+          "defaults": {
+            "anchor_group_ids": [],
+            "gemini_anchor": false,
+            "metadata_group_ids": [],
+            "rollout_percent": 0
+          },
+          "schema": [
+            {
+              "field": "anchor_group_ids",
+              "type": "id_list",
+              "ref": "group",
+              "options": [
+                {
+                  "id": 31,
+                  "name": "claude-pool-a",
+                  "platform": "anthropic"
+                },
+                {
+                  "id": 32,
+                  "name": "claude-pool-b",
+                  "platform": "anthropic"
+                },
+                {
+                  "id": 77,
+                  "name": "claude-standby",
+                  "platform": "anthropic"
+                }
+              ],
+              "not_implemented_in_build": true
+            },
+            {
+              "field": "gemini_anchor",
+              "type": "bool",
+              "not_implemented_in_build": true
+            },
+            {
+              "field": "metadata_group_ids",
+              "type": "id_list",
+              "ref": "group",
+              "options": [
+                {
+                  "id": 31,
+                  "name": "claude-pool-a",
+                  "platform": "anthropic"
+                },
+                {
+                  "id": 32,
+                  "name": "claude-pool-b",
+                  "platform": "anthropic"
+                },
+                {
+                  "id": 77,
+                  "name": "claude-standby",
+                  "platform": "anthropic"
+                }
+              ],
+              "not_implemented_in_build": true
+            },
+            {
+              "field": "rollout_percent",
+              "type": "int",
+              "min": 0,
+              "max": 100,
+              "unit": "percent"
+            }
+          ]
+        },
+        {
+          "key": "routing",
+          "setting_key": "cache_routing_policy",
+          "available": true,
+          "risk": "highest",
+          "gated_by_master": true,
+          "stored": {
+            "rev": 1,
+            "updated_at": "2026-10-24T08:57:00Z",
+            "updated_by": {
+              "user_id": 2,
+              "email": "oncall@example.com"
+            },
+            "reason": "上一 host 偏好试运行",
+            "spec": {
+              "keep_sticky_on_busy": {
+                "enabled": false,
+                "group_ids": [],
+                "rollout_percent": 20,
+                "max_consecutive_busy": 2,
+                "max_hold_seconds": 60,
+                "owner_busy_skip_per_min_cap": 0,
+                "group_keep_ratio_pct": 5,
+                "health_lookback_seconds": 120
+              },
+              "affinity_mode": "prev_host",
+              "affinity_rollout_percent": 20
+            }
+          },
+          "loaded": {
+            "rev": 1,
+            "loaded_at": "2026-10-24T08:40:01Z"
+          },
+          "effective": {
+            "state": "on",
+            "active": true,
+            "blockers": [],
+            "warnings": [],
+            "clipped_fields": []
+          },
+          "defaults": {
+            "keep_sticky_on_busy": {
+              "enabled": false,
+              "group_ids": [],
+              "rollout_percent": 0,
+              "max_consecutive_busy": 2,
+              "max_hold_seconds": 60,
+              "owner_busy_skip_per_min_cap": 0,
+              "group_keep_ratio_pct": 5,
+              "health_lookback_seconds": 120
+            },
+            "affinity_mode": "score",
+            "affinity_rollout_percent": 0
+          },
+          "schema": [
+            {
+              "field": "keep_sticky_on_busy.enabled",
+              "type": "bool"
+            },
+            {
+              "field": "keep_sticky_on_busy.group_ids",
+              "type": "id_list",
+              "ref": "group",
+              "options": [
+                {
+                  "id": 31,
+                  "name": "claude-pool-a",
+                  "platform": "anthropic"
+                },
+                {
+                  "id": 32,
+                  "name": "claude-pool-b",
+                  "platform": "anthropic"
+                },
+                {
+                  "id": 77,
+                  "name": "claude-standby",
+                  "platform": "anthropic"
+                }
+              ]
+            },
+            {
+              "field": "keep_sticky_on_busy.rollout_percent",
+              "type": "int",
+              "min": 0,
+              "max": 100,
+              "unit": "percent"
+            },
+            {
+              "field": "keep_sticky_on_busy.max_consecutive_busy",
+              "type": "int",
+              "min": 1,
+              "max": 5,
+              "cap_source": "gateway.cache_routing.l07_max_consecutive_cap"
+            },
+            {
+              "field": "keep_sticky_on_busy.max_hold_seconds",
+              "type": "int",
+              "min": 10,
+              "max": 300,
+              "cap_source": "gateway.cache_routing.l07_max_hold_seconds_cap"
+            },
+            {
+              "field": "keep_sticky_on_busy.owner_busy_skip_per_min_cap",
+              "type": "int",
+              "min": 0,
+              "max": 1000
+            },
+            {
+              "field": "keep_sticky_on_busy.group_keep_ratio_pct",
+              "type": "int",
+              "min": 1,
+              "max": 20,
+              "unit": "percent",
+              "cap_source": "gateway.cache_routing.l07_group_keep_ratio_cap_pct"
+            },
+            {
+              "field": "keep_sticky_on_busy.health_lookback_seconds",
+              "type": "int",
+              "min": 30,
+              "max": 600
+            },
+            {
+              "field": "affinity_mode",
+              "type": "enum",
+              "options": [
+                "score",
+                "prev_host",
+                "prev_host+quality"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,1531 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://schemas.xy2api.invalid/cache_trace/v1-l09a.json",
+ "title": "cache_trace v=1 线上事件载荷 · T3.1a 追加（L-09a 同 host 重选偏好）",
+ "description": "在 m31 之上：OpenAI admitted 事件必有 l09a_arm、l09a_applied、l09a_skip。route_reason 的枚举不变（affinity_pref 不启用）。v 仍为 1。见 l09a/README.md。",
+ "oneOf": [
+  {
+   "$ref": "#/$defs/rejected"
+  },
+  {
+   "$ref": "#/$defs/admitted"
+  }
+ ],
+ "$defs": {
+  "rejected": {
+   "description": "最小事件：loss_class=n/a_sampled_out 且 na_reason ∈ {budget_full, expired, not_ready, observer_failed, undelivered}。只含关联键、计量值与分段所需的同步字段。observer_failed（v1.7.8.2）在 observer panic 或返回错误、trace 被丢弃时，由结算处根据独立的失败标记输出。undelivered（v1.7.8.6）用于有上游尝试、客户端在任何输出前断开、但已结算（例如按 abuse 规则计费）的请求，不参与损失归因。",
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "v": {
+     "const": 1
+    },
+    "platform": {
+     "type": "string",
+     "enum": [
+      "openai"
+     ]
+    },
+    "loss_class": {
+     "const": "n/a_sampled_out"
+    },
+    "na_reason": {
+     "type": "string",
+     "enum": [
+      "budget_full",
+      "expired",
+      "not_ready",
+      "observer_failed",
+      "undelivered"
+     ]
+    },
+    "request_id_hmac": {
+     "type": "string",
+     "pattern": "^[0-9a-f]{12,64}$"
+    },
+    "session_digest": {
+     "type": "string",
+     "anyOf": [
+      {
+       "pattern": "^v2:[0-9a-f]{16}$"
+      },
+      {
+       "pattern": "^[0-9a-f]{16}$"
+      },
+      {
+       "const": ""
+      }
+     ]
+    },
+    "account_id": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "group_id": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "P": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "read": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "pol_rev": {
+     "type": "string",
+     "pattern": "^m[0-9]{1,19}\\.o[0-9]{1,19}\\.u[0-9]{1,19}\\.a[0-9]{1,19}\\.r[0-9]{1,19}$"
+    },
+    "ua_family": {
+     "type": "string",
+     "enum": [
+      "codex_cli_rs",
+      "codex_tui",
+      "codex_desktop",
+      "codex_exec",
+      "codex_vscode",
+      "codex_other",
+      "litellm",
+      "go_http",
+      "openai_sdk",
+      "other"
+     ]
+    }
+   },
+   "required": [
+    "v",
+    "platform",
+    "loss_class",
+    "na_reason",
+    "request_id_hmac",
+    "session_digest",
+    "account_id",
+    "group_id",
+    "P",
+    "read",
+    "pol_rev",
+    "ua_family"
+   ]
+  },
+  "admitted": {
+   "description": "完整事件：除上述三种拒绝原因之外的全部情形（含 n/a_plugin、n/a_usage、n/a_truncated、chain_percent 与 hist_unavailable 的 n/a_sampled_out）。",
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "v": {
+     "const": 1
+    },
+    "request_id_hmac": {
+     "type": "string",
+     "pattern": "^[0-9a-f]{12,64}$"
+    },
+    "session_digest": {
+     "type": "string",
+     "anyOf": [
+      {
+       "pattern": "^v2:[0-9a-f]{16}$"
+      },
+      {
+       "pattern": "^[0-9a-f]{16}$"
+      },
+      {
+       "const": ""
+      }
+     ]
+    },
+    "platform": {
+     "type": "string",
+     "enum": [
+      "openai"
+     ]
+    },
+    "protocol_in": {
+     "type": "string",
+     "enum": [
+      "responses",
+      "chat",
+      "unknown"
+     ]
+    },
+    "protocol_out": {
+     "type": "string",
+     "enum": [
+      "responses",
+      "chat",
+      "unknown"
+     ]
+    },
+    "group_id": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "account_id": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "transport": {
+     "type": "string",
+     "enum": [
+      "http",
+      "plugin"
+     ]
+    },
+    "ingress_ws_bridge": {
+     "const": false
+    },
+    "pol_rev": {
+     "type": "string",
+     "pattern": "^m[0-9]{1,19}\\.o[0-9]{1,19}\\.u[0-9]{1,19}\\.a[0-9]{1,19}\\.r[0-9]{1,19}$"
+    },
+    "pck_class_in": {
+     "type": "string",
+     "enum": [
+      "none",
+      "empty",
+      "client_uuid",
+      "client_non_uuid",
+      "unknown"
+     ]
+    },
+    "pck_class_out": {
+     "type": "string",
+     "enum": [
+      "none",
+      "passthrough",
+      "gw_compat_hex",
+      "gw_from_header",
+      "gw_grok",
+      "oauth_rewritten",
+      "gw_uuid",
+      "unknown"
+     ]
+    },
+    "pck_out_is_uuid": {
+     "type": "boolean"
+    },
+    "sess_hdr_in": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 32767
+    },
+    "sess_hdr_out": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 32767
+    },
+    "sess_out_relation": {
+     "type": "string",
+     "enum": [
+      "uuid_of_pck",
+      "gw_isolated",
+      "client_value",
+      "fingerprint_converged",
+      "none",
+      "eq_pck",
+      "unknown"
+     ]
+    },
+    "id_source": {
+     "type": "string",
+     "enum": [
+      "header",
+      "body_pck",
+      "content_seed",
+      "prev_response",
+      "unknown"
+     ]
+    },
+    "conv_anchor": {
+     "type": "string",
+     "anyOf": [
+      {
+       "pattern": "^[0-9a-f]{8,64}$"
+      },
+      {
+       "const": "unknown"
+      }
+     ]
+    },
+    "thread_present": {
+     "type": "boolean"
+    },
+    "codex_hdr": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 7
+    },
+    "window_seq_delta": {
+     "type": "integer",
+     "minimum": -3
+    },
+    "ua_family": {
+     "type": "string",
+     "enum": [
+      "codex_cli_rs",
+      "codex_tui",
+      "codex_desktop",
+      "codex_exec",
+      "codex_vscode",
+      "codex_other",
+      "litellm",
+      "go_http",
+      "openai_sdk",
+      "other"
+     ]
+    },
+    "gap_src": {
+     "type": "string",
+     "enum": [
+      "settled",
+      "prev_unsettled",
+      "no_prev",
+      "no_session"
+     ]
+    },
+    "gap_send_ms": {
+     "type": "integer"
+    },
+    "chain_sampled": {
+     "type": "boolean"
+    },
+    "blk_n": {
+     "type": "integer",
+     "minimum": -1
+    },
+    "bytes_out": {
+     "type": "integer",
+     "minimum": -1
+    },
+    "bytes_out_raw": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "blk_order_physical_eq_logical": {
+     "type": "boolean"
+    },
+    "fork_ref": {
+     "type": "string",
+     "enum": [
+      "prev1",
+      "prevk",
+      "other_conv",
+      "none"
+     ]
+    },
+    "fork_kind": {
+     "type": "string",
+     "enum": [
+      "append",
+      "identical",
+      "cur_prefix",
+      "tail_unproven",
+      "diverge",
+      "none"
+     ]
+    },
+    "fork_precision": {
+     "type": "string",
+     "enum": [
+      "exact",
+      "range",
+      "none"
+     ]
+    },
+    "fork_blk": {
+     "type": "integer",
+     "minimum": -1
+    },
+    "fork_byte": {
+     "type": "integer",
+     "minimum": -1
+    },
+    "fork_blk_hi": {
+     "type": "integer",
+     "minimum": -1
+    },
+    "fork_byte_hi": {
+     "type": "integer",
+     "minimum": -1
+    },
+    "fork_raw_byte": {
+     "type": "integer",
+     "minimum": -1
+    },
+    "p_prev": {
+     "type": "integer",
+     "minimum": -1
+    },
+    "hist_age_s": {
+     "type": "integer",
+     "minimum": -1
+    },
+    "tail_kind": {
+     "type": "string",
+     "enum": [
+      "user_msg",
+      "tool_output",
+      "other",
+      "unknown"
+     ]
+    },
+    "reasoning_items_n": {
+     "type": "integer",
+     "minimum": -1
+    },
+    "old_reasoning_n": {
+     "type": "integer",
+     "minimum": -1
+    },
+    "first_old_reasoning_blk": {
+     "type": "integer",
+     "minimum": -1
+    },
+    "first_old_reasoning_byte": {
+     "type": "integer",
+     "minimum": -1
+    },
+    "first_old_reasoning_raw_byte": {
+     "type": "integer",
+     "minimum": -1
+    },
+    "include_encrypted_reasoning": {
+     "type": "boolean"
+    },
+    "store_false": {
+     "type": "boolean"
+    },
+    "reasoning_enc_n": {
+     "type": "integer",
+     "minimum": -1
+    },
+    "reasoning_ctx": {
+     "type": "string",
+     "enum": [
+      "absent",
+      "auto",
+      "current_turn",
+      "all_turns",
+      "other",
+      "unknown"
+     ]
+    },
+    "reasoning_ctx_eff": {
+     "type": "string",
+     "enum": [
+      "absent",
+      "auto",
+      "current_turn",
+      "all_turns",
+      "other",
+      "unknown"
+     ]
+    },
+    "model_gen": {
+     "type": "string",
+     "enum": [
+      "pre56",
+      "gpt56",
+      "gpt6x",
+      "other_openai",
+      "non_openai",
+      "unknown"
+     ]
+    },
+    "rsn_boundary_hit": {
+     "type": "boolean"
+    },
+    "read_short_of_fork": {
+     "type": "boolean"
+    },
+    "P": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "read": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "tok_per_byte_milli": {
+     "type": "integer",
+     "minimum": -1
+    },
+    "usage_fields": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 255
+    },
+    "pcd": {
+     "type": "string",
+     "enum": [
+      "absent",
+      "model_changed",
+      "prompt_cache_key_changed",
+      "tools_changed",
+      "text_format_changed",
+      "reasoning_effort_changed",
+      "verbosity_changed",
+      "context_compacted",
+      "input_changed",
+      "service_tier_changed",
+      "other"
+     ]
+    },
+    "resp_cache_ttl": {
+     "type": "string",
+     "enum": [
+      "30m",
+      "12h",
+      "24h",
+      "in_memory",
+      "other",
+      "absent"
+     ]
+    },
+    "loss_class": {
+     "type": "string",
+     "enum": [
+      "n/a_plugin",
+      "n/a_usage",
+      "n/a_sampled_out",
+      "n/a_truncated",
+      "below_min",
+      "cold",
+      "other_conv",
+      "full",
+      "prefix_changed",
+      "provider_reasoning_drop_suspect",
+      "under_read"
+     ]
+    },
+    "na_reason": {
+     "type": "string",
+     "enum": [
+      "chain_percent",
+      "budget_full",
+      "expired",
+      "not_ready",
+      "hist_unavailable",
+      "observer_failed",
+      "undelivered"
+     ]
+    },
+    "route_reason": {
+     "type": "string",
+     "enum": [
+      "last_resort",
+      "fallback_group",
+      "failover_n",
+      "session_rebind",
+      "soft_divert",
+      "overflow",
+      "prev_owner",
+      "sticky_hit",
+      "sticky_new",
+      "unknown"
+     ]
+    },
+    "rebind_cause": {
+     "type": "string",
+     "enum": [
+      "post_output",
+      "stall",
+      "pre_output_error",
+      "first_event_timeout",
+      "other",
+      "none"
+     ]
+    },
+    "l01_arm": {
+     "type": "string",
+     "enum": [
+      "on",
+      "off",
+      "none"
+     ]
+    },
+    "l01_applied": {
+     "type": "boolean"
+    },
+    "l01_skip": {
+     "type": "string",
+     "enum": [
+      "none",
+      "policy_off",
+      "unsupported_ingress",
+      "not_apikey",
+      "codex_protocol",
+      "passthrough",
+      "grok",
+      "fingerprint_converged",
+      "account_out_of_scope",
+      "iq",
+      "monitor_probe",
+      "no_routing_session",
+      "arm_off",
+      "client_pck",
+      "client_empty",
+      "header_only_off",
+      "no_compat_seed",
+      "chat_compat_off",
+      "quality_rotation",
+      "upstream_rejects",
+      "fanin_cap"
+     ]
+    },
+    "l01_policy_rev": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "l01_restore_fallback": {
+     "type": "string",
+     "enum": [
+      "none",
+      "literal",
+      "sse_oversize"
+     ]
+    },
+    "l09a_arm": {
+     "type": "string",
+     "enum": [
+      "none",
+      "off",
+      "on"
+     ]
+    },
+    "l09a_applied": {
+     "type": "boolean"
+    },
+    "l09a_skip": {
+     "type": "string",
+     "enum": [
+      "none",
+      "policy_off",
+      "excluded_path",
+      "not_first_selection",
+      "sticky_present",
+      "aware_gate",
+      "arm_off",
+      "no_hint",
+      "hint_unusable",
+      "overflow_tail",
+      "insufficient_samples",
+      "no_same_host_candidate"
+     ]
+    }
+   },
+   "required": [
+    "v",
+    "request_id_hmac",
+    "session_digest",
+    "platform",
+    "protocol_in",
+    "protocol_out",
+    "group_id",
+    "account_id",
+    "transport",
+    "ingress_ws_bridge",
+    "pol_rev",
+    "pck_class_in",
+    "pck_class_out",
+    "pck_out_is_uuid",
+    "sess_hdr_in",
+    "sess_hdr_out",
+    "sess_out_relation",
+    "id_source",
+    "conv_anchor",
+    "thread_present",
+    "codex_hdr",
+    "window_seq_delta",
+    "ua_family",
+    "gap_src",
+    "chain_sampled",
+    "blk_n",
+    "bytes_out",
+    "bytes_out_raw",
+    "blk_order_physical_eq_logical",
+    "fork_ref",
+    "fork_kind",
+    "fork_precision",
+    "fork_blk",
+    "fork_byte",
+    "fork_blk_hi",
+    "fork_byte_hi",
+    "fork_raw_byte",
+    "p_prev",
+    "hist_age_s",
+    "tail_kind",
+    "reasoning_items_n",
+    "old_reasoning_n",
+    "first_old_reasoning_blk",
+    "first_old_reasoning_byte",
+    "first_old_reasoning_raw_byte",
+    "include_encrypted_reasoning",
+    "store_false",
+    "reasoning_enc_n",
+    "reasoning_ctx",
+    "reasoning_ctx_eff",
+    "model_gen",
+    "rsn_boundary_hit",
+    "read_short_of_fork",
+    "P",
+    "read",
+    "tok_per_byte_milli",
+    "usage_fields",
+    "pcd",
+    "resp_cache_ttl",
+    "loss_class",
+    "route_reason",
+    "rebind_cause",
+    "l01_arm",
+    "l01_applied",
+    "l01_skip",
+    "l01_policy_rev",
+    "l09a_arm",
+    "l09a_applied",
+    "l09a_skip"
+   ],
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "loss_class": {
+        "const": "n/a_sampled_out"
+       }
+      },
+      "required": [
+       "loss_class"
+      ]
+     },
+     "then": {
+      "required": [
+       "na_reason"
+      ],
+      "properties": {
+       "na_reason": {
+        "enum": [
+         "chain_percent",
+         "hist_unavailable"
+        ]
+       }
+      }
+     },
+     "else": {
+      "not": {
+       "anyOf": [
+        {
+         "required": [
+          "na_reason"
+         ]
+        }
+       ]
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "session_digest": {
+        "const": ""
+       }
+      },
+      "required": [
+       "session_digest"
+      ]
+     },
+     "then": {
+      "properties": {
+       "gap_src": {
+        "const": "no_session"
+       }
+      }
+     },
+     "else": {
+      "properties": {
+       "gap_src": {
+        "not": {
+         "const": "no_session"
+        }
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "gap_src": {
+        "const": "settled"
+       }
+      },
+      "required": [
+       "gap_src"
+      ]
+     },
+     "then": {
+      "required": [
+       "gap_send_ms"
+      ]
+     },
+     "else": {
+      "not": {
+       "anyOf": [
+        {
+         "required": [
+          "gap_send_ms"
+         ]
+        }
+       ]
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "chain_sampled": {
+        "const": false
+       }
+      },
+      "required": [
+       "chain_sampled"
+      ]
+     },
+     "then": {
+      "properties": {
+       "loss_class": {
+        "enum": [
+         "n/a_plugin",
+         "n/a_usage",
+         "n/a_sampled_out"
+        ]
+       },
+       "na_reason": {
+        "const": "chain_percent"
+       },
+       "blk_n": {
+        "const": -1
+       },
+       "bytes_out": {
+        "const": -1
+       },
+       "tok_per_byte_milli": {
+        "const": -1
+       },
+       "fork_ref": {
+        "const": "none"
+       },
+       "fork_kind": {
+        "const": "none"
+       },
+       "fork_precision": {
+        "const": "none"
+       },
+       "fork_blk": {
+        "const": -1
+       },
+       "fork_byte": {
+        "const": -1
+       },
+       "fork_blk_hi": {
+        "const": -1
+       },
+       "fork_byte_hi": {
+        "const": -1
+       },
+       "fork_raw_byte": {
+        "const": -1
+       },
+       "p_prev": {
+        "const": -1
+       },
+       "hist_age_s": {
+        "const": -1
+       },
+       "tail_kind": {
+        "const": "unknown"
+       },
+       "reasoning_ctx": {
+        "const": "unknown"
+       },
+       "reasoning_items_n": {
+        "const": -1
+       },
+       "old_reasoning_n": {
+        "const": -1
+       },
+       "reasoning_enc_n": {
+        "const": -1
+       },
+       "first_old_reasoning_blk": {
+        "const": -1
+       },
+       "first_old_reasoning_byte": {
+        "const": -1
+       },
+       "first_old_reasoning_raw_byte": {
+        "const": -1
+       },
+       "blk_order_physical_eq_logical": {
+        "const": false
+       },
+       "include_encrypted_reasoning": {
+        "const": false
+       },
+       "store_false": {
+        "const": false
+       },
+       "rsn_boundary_hit": {
+        "const": false
+       },
+       "read_short_of_fork": {
+        "const": false
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "chain_sampled": {
+        "const": true
+       }
+      },
+      "required": [
+       "chain_sampled"
+      ]
+     },
+     "then": {
+      "properties": {
+       "conv_anchor": {
+        "pattern": "^[0-9a-f]{8,64}$"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "chain_sampled": {
+        "const": true
+       },
+       "loss_class": {
+        "const": "n/a_sampled_out"
+       }
+      },
+      "required": [
+       "chain_sampled",
+       "loss_class"
+      ]
+     },
+     "then": {
+      "properties": {
+       "na_reason": {
+        "const": "hist_unavailable"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "transport": {
+        "const": "plugin"
+       }
+      },
+      "required": [
+       "transport"
+      ]
+     },
+     "then": {
+      "properties": {
+       "loss_class": {
+        "const": "n/a_plugin"
+       },
+       "chain_sampled": {
+        "const": false
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "fork_precision": {
+        "const": "none"
+       }
+      },
+      "required": [
+       "fork_precision"
+      ]
+     },
+     "then": {
+      "properties": {
+       "fork_blk": {
+        "const": -1
+       },
+       "fork_byte": {
+        "const": -1
+       },
+       "fork_blk_hi": {
+        "const": -1
+       },
+       "fork_byte_hi": {
+        "const": -1
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "fork_precision": {
+        "const": "exact"
+       }
+      },
+      "required": [
+       "fork_precision"
+      ]
+     },
+     "then": {
+      "properties": {
+       "fork_blk": {
+        "minimum": 0
+       },
+       "fork_byte": {
+        "minimum": 0
+       },
+       "fork_blk_hi": {
+        "const": -1
+       },
+       "fork_byte_hi": {
+        "const": -1
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "fork_precision": {
+        "const": "range"
+       }
+      },
+      "required": [
+       "fork_precision"
+      ]
+     },
+     "then": {
+      "properties": {
+       "fork_blk": {
+        "minimum": 0
+       },
+       "fork_byte": {
+        "minimum": 0
+       },
+       "fork_blk_hi": {
+        "minimum": 0
+       },
+       "fork_byte_hi": {
+        "minimum": 0
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "l01_applied": {
+        "const": true
+       }
+      },
+      "required": [
+       "l01_applied"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l01_skip": {
+        "const": "none"
+       }
+      },
+      "required": [
+       "l01_skip"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "l01_skip": {
+        "const": "none"
+       }
+      },
+      "required": [
+       "l01_skip"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l01_applied": {
+        "const": true
+       }
+      },
+      "required": [
+       "l01_applied"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "l01_applied": {
+        "const": true
+       }
+      },
+      "required": [
+       "l01_applied"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l01_arm": {
+        "const": "on"
+       },
+       "pck_class_out": {
+        "const": "gw_uuid"
+       },
+       "sess_out_relation": {
+        "const": "eq_pck"
+       },
+       "pck_out_is_uuid": {
+        "const": true
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "pck_class_out": {
+        "const": "gw_uuid"
+       }
+      },
+      "required": [
+       "pck_class_out"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l01_applied": {
+        "const": true
+       }
+      },
+      "required": [
+       "l01_applied"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "sess_out_relation": {
+        "const": "eq_pck"
+       }
+      },
+      "required": [
+       "sess_out_relation"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l01_applied": {
+        "const": true
+       }
+      },
+      "required": [
+       "l01_applied"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "l01_arm": {
+        "const": "off"
+       }
+      },
+      "required": [
+       "l01_arm"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l01_skip": {
+        "const": "arm_off"
+       }
+      },
+      "required": [
+       "l01_skip"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "l01_skip": {
+        "const": "arm_off"
+       }
+      },
+      "required": [
+       "l01_skip"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l01_arm": {
+        "const": "off"
+       }
+      },
+      "required": [
+       "l01_arm"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "l01_arm": {
+        "const": "none"
+       }
+      },
+      "required": [
+       "l01_arm"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l01_skip": {
+        "enum": [
+         "policy_off",
+         "unsupported_ingress",
+         "not_apikey",
+         "codex_protocol",
+         "passthrough",
+         "grok",
+         "fingerprint_converged",
+         "account_out_of_scope",
+         "iq",
+         "monitor_probe",
+         "no_routing_session"
+        ]
+       }
+      },
+      "required": [
+       "l01_skip"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "l01_skip": {
+        "enum": [
+         "policy_off",
+         "unsupported_ingress",
+         "not_apikey",
+         "codex_protocol",
+         "passthrough",
+         "grok",
+         "fingerprint_converged",
+         "account_out_of_scope",
+         "iq",
+         "monitor_probe",
+         "no_routing_session"
+        ]
+       }
+      },
+      "required": [
+       "l01_skip"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l01_arm": {
+        "const": "none"
+       }
+      },
+      "required": [
+       "l01_arm"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "transport": {
+        "const": "plugin"
+       }
+      },
+      "required": [
+       "transport"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l01_arm": {
+        "const": "none"
+       },
+       "l01_skip": {
+        "enum": [
+         "policy_off",
+         "unsupported_ingress",
+         "not_apikey"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "l01_applied": {
+        "const": false
+       }
+      },
+      "required": [
+       "l01_applied"
+      ]
+     },
+     "then": {
+      "not": {
+       "required": [
+        "l01_restore_fallback"
+       ]
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "l01_applied": {
+        "const": true
+       }
+      },
+      "required": [
+       "l01_applied"
+      ]
+     },
+     "then": {
+      "required": [
+       "l01_restore_fallback"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "l09a_applied": {
+        "const": true
+       }
+      },
+      "required": [
+       "l09a_applied"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l09a_skip": {
+        "const": "none"
+       }
+      },
+      "required": [
+       "l09a_skip"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "l09a_skip": {
+        "const": "none"
+       }
+      },
+      "required": [
+       "l09a_skip"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l09a_applied": {
+        "const": true
+       }
+      },
+      "required": [
+       "l09a_applied"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "l09a_arm": {
+        "const": "none"
+       }
+      },
+      "required": [
+       "l09a_arm"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l09a_skip": {
+        "enum": [
+         "policy_off",
+         "excluded_path",
+         "not_first_selection",
+         "sticky_present",
+         "aware_gate"
+        ]
+       }
+      },
+      "required": [
+       "l09a_skip"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "l09a_skip": {
+        "enum": [
+         "policy_off",
+         "excluded_path",
+         "not_first_selection",
+         "sticky_present",
+         "aware_gate"
+        ]
+       }
+      },
+      "required": [
+       "l09a_skip"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l09a_arm": {
+        "const": "none"
+       }
+      },
+      "required": [
+       "l09a_arm"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "l09a_arm": {
+        "const": "off"
+       }
+      },
+      "required": [
+       "l09a_arm"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l09a_skip": {
+        "const": "arm_off"
+       }
+      },
+      "required": [
+       "l09a_skip"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "l09a_skip": {
+        "const": "arm_off"
+       }
+      },
+      "required": [
+       "l09a_skip"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l09a_arm": {
+        "const": "off"
+       }
+      },
+      "required": [
+       "l09a_arm"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "route_reason": {
+        "enum": [
+         "sticky_hit",
+         "prev_owner",
+         "soft_divert"
+        ]
+       }
+      },
+      "required": [
+       "route_reason"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l09a_skip": {
+        "enum": [
+         "policy_off",
+         "excluded_path",
+         "not_first_selection",
+         "sticky_present"
+        ]
+       }
+      },
+      "required": [
+       "l09a_skip"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "route_reason": {
+        "const": "fallback_group"
+       }
+      },
+      "required": [
+       "route_reason"
+      ]
+     },
+     "then": {
+      "properties": {
+       "l09a_skip": {
+        "enum": [
+         "policy_off",
+         "excluded_path"
+        ]
+       }
+      },
+      "required": [
+       "l09a_skip"
+      ]
+     }
+    }
+   ],
+   "dependentRequired": {
+    "l01_restore_fallback": [
+     "l01_applied"
+    ]
+   }
+  }
+ }
+}

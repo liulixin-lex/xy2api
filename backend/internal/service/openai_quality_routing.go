@@ -856,6 +856,8 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 	if state.Generation == 0 || s.qualityConfig().EffectiveMode() != "enforce" {
 		return selectPass(excluded)
 	}
+	// Quality routing owns this selection; L-09a does not apply (INV-13).
+	s.l09aExclude(ctx)
 	if pinned {
 		canMove = false
 		qualityEvent("continuation_pinned", scope, state.Binding, state.Generation)

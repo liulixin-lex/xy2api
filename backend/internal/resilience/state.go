@@ -102,6 +102,44 @@ type RequestState struct {
 	// l07 is the service-owned L-07 record of the request; it is stored only
 	// when the routing policy armed the request.
 	l07 atomic.Value
+	// l09a is the cache L-09a first-selection permit. The handler stores it
+	// only when the request's policy snapshot activates L-09a. One pointer
+	// keeps the struct within its allocation size class.
+	l09a atomic.Pointer[CacheL09A]
+}
+
+// CacheL09A is the first-selection permit of the cache L-09a preference
+// (cache DESIGN §6.2, T3.1a). Phase moves only forward: armed by the
+// handler, entered by the first selection, done when it returns. Record
+// belongs to the service package; this package only stores it.
+type CacheL09A struct {
+	Phase  atomic.Int32
+	Record any
+}
+
+// Phases of CacheL09A.
+const (
+	CacheL09AArmed int32 = iota
+	CacheL09AInFirstSelection
+	CacheL09ADone
+)
+
+// ArmCacheL09A stores the permit before the request's first selection. It
+// reports false, storing nothing, when a selection already began or a
+// permit exists.
+func (s *RequestState) ArmCacheL09A(p *CacheL09A) bool {
+	if s == nil || p == nil || s.SelectionNoted() {
+		return false
+	}
+	return s.l09a.CompareAndSwap(nil, p)
+}
+
+// CacheL09A returns the permit, or nil when the request was not armed.
+func (s *RequestState) CacheL09A() *CacheL09A {
+	if s == nil {
+		return nil
+	}
+	return s.l09a.Load()
 }
 
 // preludeTrace is storage shared with prelude_trace.go. Its accessors live

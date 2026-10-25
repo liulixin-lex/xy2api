@@ -183,6 +183,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 	// xy2api resilience: the pre-output heartbeat ends with the request (design §7.2).
 	defer stopPreOutputKeepalive(c)
+	// Cache L-09a: positive first-selection permit; a no-op unless effective.
+	h.gatewayService.ArmCacheL09A(c, c.Request.Context())
 	for {
 		if failoverClientGone(c) {
 			return

@@ -692,6 +692,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	// xy2api resilience: the pre-output heartbeat ends with the request (design §7.2).
 	defer stopPreOutputKeepalive(c)
+	// Cache L-09a: positive first-selection permit; a no-op unless effective.
+	h.gatewayService.ArmCacheL09A(c, c.Request.Context())
 	for {
 		// Streaming Forward intentionally detaches the upstream request so usage can
 		// be drained after a disconnect. Re-check the client context before every
@@ -1350,6 +1352,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 	// xy2api resilience: the pre-output heartbeat ends with the request (design §7.2).
 	defer stopPreOutputKeepalive(c)
+	// Cache L-09a: positive first-selection permit; a no-op unless effective.
+	h.gatewayService.ArmCacheL09A(c, c.Request.Context())
 	for {
 		if failoverClientGone(c) {
 			return
@@ -2917,6 +2921,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	wsPricingCtx, _ := h.gatewayService.WithOpenAIRequestPricingContext(ctx, apiKey.GroupID)
 	ctx = wsPricingCtx
 
+	// Cache L-09a: only the connection's first selection may carry the
+	// permit; later turns never do.
+	h.gatewayService.ArmCacheL09A(c, ctx)
 	for {
 		if ctx.Err() != nil {
 			return

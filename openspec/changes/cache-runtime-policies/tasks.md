@@ -72,3 +72,10 @@
 - [x] trace accessor 与 m4l07 样例逐字段回放；进程内计数器与 slog 摘要。
 - [ ] 合并 heavy 一次（五 tag vet、unit、race、增量 lint、契约回放）；R 终审与关闭态 golden；S 混沌矩阵（§11.4 第 9 条）。
 - [ ] 与 M2b 组合时接上 Anthropic 完整事件的 l07_* 写入并通过 trace m4l07 自检。
+
+### T3.1a / L-09a 上一主机偏好
+
+- [x] routing.affinity_mode=prev_host 与 affinity_rollout_percent、能力 l09a、blocker static_aware_routing_disabled、prev_host+quality 保持 unsupported；l09a 策略契约回放。
+- [x] 方案 A：首次选号中硬失效 owner 被删除时以其主机为提示，白名单与进程内主机旁证；首次选号标记只在生效时置于 RequestState。
+- [x] 原 cache hook 不变、其后排列；trace l09a_* 与契约样例逐字段回放；关闭态 allocs 对照与正例测试。
+- [ ] R 静态评审与关闭态 golden；X 复核白名单与排除清单；启用前数据门控与 B8 决策。

@@ -217,6 +217,12 @@
 
 ## 进行中的工作
 
+### 20261025-cache-t31a-l09a — T3.1a L-09a OpenAI 上一主机偏好（O-L09A，候选待评审）
+
+- 按开工包 v1.1（方案 A）：新请求首次普通选号中，sticky 层在既有删除处因 owner 硬失效删除绑定时，以被删除 owner 的主机为提示，在原 cache hook 之后的证据完整同档块内排列；没有跨请求存储，不改删除条件、CountsForSession 或局部 sticky 变量，选号器只调用一次。
+- 策略按 cache_policies_contract/l09a（affinity_rollout_percent、能力 l09a、static_aware_routing_disabled，prev_host+quality 保持 unsupported），trace 按 cache_trace_contract/l09a v1.0.1。首次选号许可只在快照生效时挂到 RequestState（一个 8B 指针，结构体仍在 576B size class）；生产的静态 cache-aware 关闭，L-09a 零执行。
+- 启用前：白名单与排除清单由 X 复核；B8（静态 aware routing 改为运行时可调）待用户决策；数据门控不变。不推送、不部署。
+
 ### 20261025-cache-m4-l07 — T2.5 L-07 Anthropic 忙时保持粘性（O-L07，候选待统一门禁）
 
 - 基于联合候选 d866d29c4。sticky owner 槽位忙且等待队列满时，Layer2 照常服务本次 attempt，但借软罚拒写通道（INV-04）让选号层 7 处与 handler 层 7 处绑定都不改绑；下一次选号前释放（按 attempt）。H1–H3、A1–A6 都在 0.4.x 既有判定之后叠加，只会更早回到基线；状态读写失败一律放弃。
@@ -1245,3 +1251,8 @@ pnpm --dir frontend run build
 
 - 新增 upstream_identity 的三个 grok 字段与 l17 能力位，快照发布时与 kill、master、解析与陈旧上限合并；关闭态只读一次布尔再早退。原始 Chat 与 compact 两处挂点、compact 禁止 Free 工具注入，拒绝跳过复用 L-01 的 24h 表但独立实例。
 - 路由回放改用 F 的 17 份 l17 派生样例，pol2 与 M4 反例经同一投影（先与 17 份权威样例严格比对），另回放 10 份 l17 原生样例与 8 个反例。未推送、未部署。
+
+### 2026-10-25 — 20261025-cache-t31a-l09a — T3.1a L-09a 实现
+
+- 原 cache hook 的门、比较函数与排序原样保留，L-09a 作为其后的附加步骤，只重排含提示主机候选的完整同档块；未生效时不评估。advanced 的成本 overflow 与 stale 尾部、fallback 请求与目标组、quality 接管、guardian、探针、quarantine fail-open、last-resort 均不施加。
+- 主机旁证为进程内有界窗口（10 分钟、每主机 16 个账号、1024 个主机），只在 L-09a 生效时由 OpenAI 上游错误入口喂入；回退目标组随策略刷新读取，读取失败时 L-09a 关闭。

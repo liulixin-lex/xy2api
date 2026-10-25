@@ -1319,6 +1319,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				clearSticky := shouldClearStickySession(account, requestedModel)
 				if clearSticky {
 					_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+					s.l09aOwnerCleared(ctx, account)
 				}
 				if !clearSticky && isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability) {
 					account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
@@ -1464,6 +1465,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		shuffleWithinSortGroups(available)
 		if !rateOrder.enabled && !stickySpillover && stickyAccountID == 0 {
 			s.preferCacheCandidates(ctx, available, requestedModel)
+		}
+		if l09a := s.l09aFirst(ctx); l09a != nil {
+			s.l09aPreferCacheCandidates(ctx, l09a, available, requestedModel, rateOrder.enabled, stickySpillover, stickyAccountID)
 		}
 		if rateOrder.enabled {
 			sort.SliceStable(available, func(i, j int) bool {

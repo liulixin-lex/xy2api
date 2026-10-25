@@ -91,6 +91,9 @@ func (t *cacheTrace) emitCacheTrace() {
 	if d.L01PolicyRevision == 0 {
 		d.L01PolicyRevision = policy.Revision()
 	}
+	// L-09a fields come from the first selection; without one, the trace's
+	// own snapshot decides (cache_trace l09a §2).
+	l09aTraceDefaults(&d, t.policy)
 	// Keep optional and fixed fields in one record; cloning a logger per
 	// request adds allocations without providing a persistent context.
 	attrs := make([]slog.Attr, 0, 72)
@@ -130,7 +133,8 @@ func (t *cacheTrace) emitCacheTrace() {
 		slog.Int64("window_seq_delta", d.WindowSequenceDelta), slog.String("ua_family", d.UAFamily),
 		slog.String("pcd", d.PromptCacheDiagnostics), slog.String("resp_cache_ttl", d.ResponseCacheTTL),
 		slog.String("l01_arm", d.L01Arm), slog.Bool("l01_applied", d.L01Applied),
-		slog.String("l01_skip", d.L01Skip), slog.Int64("l01_policy_rev", d.L01PolicyRevision))
+		slog.String("l01_skip", d.L01Skip), slog.Int64("l01_policy_rev", d.L01PolicyRevision),
+		slog.String("l09a_arm", d.L09AArm), slog.Bool("l09a_applied", d.L09AApplied), slog.String("l09a_skip", d.L09ASkip))
 	if d.L01Applied {
 		if d.L01RestoreFallback == "" {
 			d.L01RestoreFallback = "none"
