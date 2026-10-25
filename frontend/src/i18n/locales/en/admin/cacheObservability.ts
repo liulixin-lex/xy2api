@@ -135,6 +135,7 @@ export default {
       ids: 'IDs must be positive integers',
       unknown_option: 'Value unknown to this page: {value}',
       ingress_above_chain: 'Cannot exceed the outbound prefix comparison rate (currently {chain}%)',
+      exceeds_rollout_percent: 'Cannot exceed the rollout share (currently {limit}%)',
       version_must_change: 'Rules changed, so the definition version must change too',
     },
     missing: {
@@ -491,6 +492,16 @@ export default {
           label: 'Share',
           description: 'Treatment share of session buckets.',
           risk: 'More share means more impact; without cache observation for Claude/Gemini the effect cannot be evaluated.',
+        },
+        metadata_rollout_percent: {
+          label: 'Metadata rollout share',
+          description: 'Within the treatment group for stable session identifiers, the share of requests without a client metadata.user_id that get one generated and sent upstream. It cannot exceed the rollout share above. No effect until metadata generation is implemented.',
+          risk: 'Changes the outbound request body; a value the client sent always wins.',
+        },
+        max_inflight_per_anchor: {
+          label: 'In-flight cap per session identifier',
+          description: 'Once a stable session identifier has this many requests in flight, further requests do not use it, so a burst does not share one identifier.',
+          risk: 'A higher cap lets more concurrent requests share one session identifier.',
         },
       },
       routing: {

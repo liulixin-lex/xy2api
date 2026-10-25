@@ -58,6 +58,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/i18n/__tests__/localesNoKeyCollision.spec.ts \
 	src/features/cache-observability/__tests__/integrationSurface.spec.ts \
 	src/features/cache-observability/settings/__tests__/m4Policies.spec.ts \
+	src/features/cache-observability/settings/__tests__/m4l04.spec.ts \
 	src/features/cache-observability/settings/__tests__/schema.spec.ts \
 	src/features/cache-observability/settings/__tests__/usePolicies.spec.ts \
 	src/features/cache-observability/settings/__tests__/upstreamIdentity.spec.ts \

@@ -135,6 +135,7 @@ export default {
       ids: 'ID 必须是正整数',
       unknown_option: '页面不认识的取值：{value}',
       ingress_above_chain: '不能高于出站前缀比对采样率（当前 {chain}%）',
+      exceeds_rollout_percent: '不能高于灰度比例（当前 {limit}%）',
       version_must_change: '口径规则有改动，必须同时换一个新的口径版本',
     },
     missing: {
@@ -491,6 +492,16 @@ export default {
           label: '灰度比例',
           description: '按会话分桶的处理组比例。',
           risk: '比例越高影响越大；缓存观测尚未覆盖 Claude/Gemini 时无法评估效果。',
+        },
+        metadata_rollout_percent: {
+          label: '生成 metadata 的灰度比例',
+          description: '在稳定会话标识的处理组中，再按这个比例为客户端没带 metadata.user_id 的请求生成并写入上游。不能高于上面的灰度比例。生成 metadata 的功能尚未实现时不生效。',
+          risk: '改变出站请求体；客户端已带的值始终优先。',
+        },
+        max_inflight_per_anchor: {
+          label: '每个会话标识的在途上限',
+          description: '同一个稳定会话标识的在途请求数达到这个值时，后续请求不再使用它，避免大量并发请求共用一个标识。',
+          risk: '调高后，更多并发请求会共用同一个会话标识。',
         },
       },
       routing: {
