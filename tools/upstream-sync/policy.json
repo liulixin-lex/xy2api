@@ -2392,7 +2392,19 @@
     },
     {
       "path": "backend/internal/service/cache_policy.go",
-      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups))"
+      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups),"
+    },
+    {
+      "path": "backend/internal/service/cache_policy.go",
+      "value": "WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L07: true})"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "s.l07ReleaseAttempt(ctx)"
+    },
+    {
+      "path": "backend/internal/service/gateway_service.go",
+      "value": "if !s.resilienceGatewayBindAllowed(ctx, accountID) {"
     },
     {
       "path": "backend/internal/service/openai_cache_diagnostics.go",
