@@ -17,7 +17,7 @@ func TestCacheAnchorMetadataStaleSnapshotFailsSafe(t *testing.T) {
 	ctx := context.Background()
 	repo := newPolicyTestStore()
 	repo.rows[cachePolicySettings[0]] = `{"rev":1,"spec":{"enabled":true}}`
-	repo.rows[cachePolicySettings[4]] = `{"rev":2,"spec":{"anchor_group_ids":[31],"metadata_group_ids":[31],"rollout_percent":100,"metadata_rollout_percent":50}}`
+	repo.rows[cachePolicySettings[4]] = `{"rev":2,"spec":{"anchor_group_ids":[31],"metadata_group_ids":[31],"metadata_account_ids":[501],"rollout_percent":100,"metadata_rollout_percent":50}}`
 	clock := &cachePolicyStaleClock{now: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)}
 	cfg := policyTestConfig()
 	cfg.Gateway.CachePolicy.MaxStaleSeconds = 60
