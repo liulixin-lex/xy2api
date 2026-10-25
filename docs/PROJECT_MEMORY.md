@@ -6,6 +6,12 @@
 
 ## 当前交接状态
 
+### 缓存 PR C 组装（2026-10-25，O-MNT，draft 待 CI）
+
+- 在 main a003162ff（#136）上依次 merge M2b（含 Messages 测试与 golden 补交）、T2.3（含 T2.2 全部内容）及 fe-m2b、fe-m2-fixes、fe-m4l03（含 fe-m4l04）、fe-m4l07 四个 UI 来源；只用 merge commit，来源 SHA 不变。T2.2/T2.3 的同名 behaviorStale 占位在合并中删除，接入 #136 的真实陈旧标记，A-T22-1 单独补测试与 runbook。
+- 只改测试或登记的接缝独立提交：policy 回放按构建与能力选样（combo_prc 取代 m2m2b 的 list 与 pol2 的 list，替代样例必须在回放）、Gemini anchor_v2 期望、M4 账号候选边界选样、T2.2 原版调度等价改写的 scheduler-diff 登记。独立评审静态通过。
+- 开发期定向：service、handler 全部通过；routes 仅余 T2.2 not_subset 产品缺陷 2 例，待 T2.2 负责人修复后再 merge；race 无数据竞争；前端 vitest 与 vue-tsc 通过；上游审计、调度 diff、文档与 diff-check 通过。#137 合入后再 merge main 并追加 A-L07-3。最终 head 的 provider/OpenAI golden 由独立评审执行。未合入、未部署。
+
 ### T2.3 / L-03（2026-10-25，G，本地冻结待定向验证）
 
 - 叠在冻结 T2.2 上接入 L-03 策略、账号候选/校验/history、Anthropic trace 与真实发送出口。任何非空客户端 user_id 都优先；a2 与 L-04 共用作用域和 lease，cacheable_content 先命中时允许生成但不改本地身份。
@@ -233,6 +239,11 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
+
+### 20261025-cache-prc-assembly — PR C 组装（O-MNT，进行中）
+
+- 分支 cache/prc-assembly，基于 main a003162ff。已完成来源 merge、接缝提交与开发期定向；以 draft PR 先跑 CI，后续修复与 main merge 只追加提交。
+- 待办：T2.2 not_subset 与分配修复交付后再 merge 并复验受影响回放；#137 合入后 merge main 并 cherry-pick A-L07-3；最终 head golden。不推送正式 PR 以外的分支，不部署。
 
 ### 20261025-cache-m4-l03 — T2.3 上游元数据身份（G，进行中）
 
@@ -1328,3 +1339,8 @@ pnpm --dir frontend run build
 
 - 首轮开发期定向的失败原记录保留。L-03 唯一失败由冻结契约修正为字典序，按负责人最新裁定同步策略 v1.0.2 与来源哈希，产品排序零修改。
 - 三处 L-04 新夹具补全真实装配条件：Antigravity mixed_scheduling、非空 SettingService 与原组计费倍率；均只改新测试，不改变既有产品路径或旧测试。受影响项在本地开发环境补验，Linux golden 仍由独立评审执行，全量门禁交 CI。
+
+### 2026-10-25 — 20261025-cache-prc-assembly — PR C 组装候选
+
+- 依序 merge M2b、T2.3（含 T2.2）与五个 UI 来源；冲突均保留双方，Go 冲突文件 gofmt。首版 T2.3 合并重复声明一个字段，本地编译发现后在未发布分支上重做，旧提交作废。
+- 补交从未入库的 Messages golden（在未修改的 main16a 上独立重录，逐字节一致）；policy 回放改为按构建选样；登记 T2.2 的原版调度等价改写。T2.2 not_subset 为来源缺陷，契约裁定保留该字段于 diff，待来源修复。开发期定向、race、前端与轻量门禁结果见当前交接状态；全量门禁交 CI。
