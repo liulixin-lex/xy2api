@@ -63,6 +63,7 @@
         :disabled="disabled || !!lock"
         :invalid="messages.some((m) => m.level === 'error')"
         :described-by="describedBy"
+        :empty-hint="emptyHint"
         :groups="groups"
         :groups-failed="groupsFailed"
         :fallback-group-ids="fallbackGroupIds"
@@ -107,11 +108,13 @@ const descId = computed(() => `cache-policy-desc-${slug.value}`)
 const issuesId = computed(() => `cache-policy-issues-${slug.value}`)
 const origId = computed(() => `cache-policy-orig-${slug.value}`)
 
-function copy(part: 'label' | 'description' | 'risk'): string {
+function copy(part: 'label' | 'description' | 'risk' | 'empty'): string {
   const key = fieldCopyKey(props.policyKey, props.field.field, part)
   return te(key) ? t(key) : ''
 }
 const label = computed(() => copy('label') || props.field.field)
+// What an empty id list means differs per field (all eligible accounts, or no effect); copy without it keeps the generic hint.
+const emptyHint = computed(() => copy('empty'))
 const description = computed(() => copy('description'))
 const impact = computed(() => copy('risk'))
 const modified = computed(() => !sameValue(props.value, props.storedValue))

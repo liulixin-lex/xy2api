@@ -126,6 +126,8 @@ export default {
       unknown_account: 'Account does not exist or is not eligible',
       unknown_group: 'Group does not exist',
       wrong_platform: 'Wrong platform',
+      official_endpoint: 'Accounts on the official Anthropic endpoint cannot be added',
+      not_apikey: 'Only API key accounts can be selected',
       duplicate: 'Contains duplicates',
       unsupported_in_build: 'This version does not support the value',
       forbidden_field: 'This field cannot be set',
@@ -261,12 +263,17 @@ export default {
       fallbackTag: 'Fallback',
       servingScope: 'Applies by the group that actually serves the request',
     },
+    accountPicker: {
+      placeholder: 'Select accounts',
+      empty: 'No accounts available',
+    },
     ids: {
       placeholder: 'Type an account ID and press Enter',
       add: 'Add',
       remove: 'Remove {id}',
       invalid: 'Only positive integer IDs are allowed',
       emptyMeansAll: 'Empty means every eligible account',
+      manual: 'Enter account IDs',
       item: 'Account #{id}',
     },
     rules: {
@@ -487,6 +494,12 @@ export default {
           label: 'Groups that generate metadata',
           description: 'In these groups, when the client sends no metadata.user_id, the gateway generates one and writes it upstream. Each must also be a stable session identifier group.',
           risk: 'Changes the outbound body; a value sent by the client always wins.',
+        },
+        metadata_account_ids: {
+          label: 'Relay accounts for generated metadata',
+          description: 'Only Anthropic API key accounts on non official endpoints are listed. Choose relays confirmed to keep sessions sticky.',
+          risk: 'Changes the outbound body of requests to these accounts; a value sent by the client always wins.',
+          empty: 'No effect when empty',
         },
         rollout_percent: {
           label: 'Share',
