@@ -16,7 +16,7 @@
         <header class="flex flex-wrap items-center gap-x-3 gap-y-1">
           <h3 :id="`cache-exp-${exp.id}`" class="text-sm font-semibold text-gray-900 dark:text-white">{{ exp.id }} {{ exp.lever }} {{ exp.title }}</h3>
           <span class="badge" :class="exp.status === 'running' ? 'badge-primary' : 'badge-gray'">{{ label('status', exp.status) }}</span>
-          <span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.cacheCharts.experiment.meta', { build: exp.build_id, phase: exp.phase, rev: exp.policy_rev, start: exp.started_at ? exp.started_at.slice(0, 16).replace('T', ' ') : '-' }) }}</span>
+          <span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.cacheCharts.experiment.meta', { build: exp.build_id, phase: exp.phase, rev: exp.policy_rev, start: exp.started_at ? exp.started_at.slice(0, 16).replace('T', ' ') : EMPTY }) }}</span>
           <span class="ml-auto text-sm font-medium" :class="verdictTone(exp.verdict)">{{ label('verdict', exp.verdict) }}</span>
         </header>
 
@@ -40,9 +40,9 @@
                 <td class="py-1.5 pr-3 text-right">{{ formatCount(arm.sessions) }} / {{ formatCount(exp.planned_per_arm) }}</td>
                 <td class="py-1.5 pr-3 text-right">{{ formatPct(arm.token_hit) }}</td>
                 <td class="py-1.5 pr-3 text-right">{{ formatPct(arm.under_read_share, 1) }}</td>
-                <td class="py-1.5 pr-3 text-right">{{ arm.switches_per_100 ?? '-' }}</td>
-                <td class="py-1.5 pr-3 text-right">{{ arm.errors === null || arm.attempts === null ? '-' : `${formatCount(arm.errors)} / ${formatCount(arm.attempts)}` }}</td>
-                <td class="py-1.5 text-right">{{ arm.undelivered === null ? '-' : formatCount(arm.undelivered) }}</td>
+                <td class="py-1.5 pr-3 text-right">{{ arm.switches_per_100 ?? EMPTY }}</td>
+                <td class="py-1.5 pr-3 text-right">{{ arm.errors === null || arm.attempts === null ? EMPTY : `${formatCount(arm.errors)} / ${formatCount(arm.attempts)}` }}</td>
+                <td class="py-1.5 text-right">{{ arm.undelivered === null ? EMPTY : formatCount(arm.undelivered) }}</td>
               </tr>
             </tbody>
           </table>
@@ -90,7 +90,7 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { CacheChartsState } from '../useCacheCharts'
 import type { Experiment, ExperimentCriterion } from '../types'
-import { formatCount, formatPct, formatPp } from '../viewModel'
+import { EMPTY, formatCount, formatPct, formatPp } from '../viewModel'
 import SectionShell from './SectionShell.vue'
 
 const props = defineProps<{ state: CacheChartsState }>()

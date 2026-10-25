@@ -446,6 +446,12 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 						}
 						// 记录粘性缓存未命中的结构化日志
 						if stickyCacheMissReason != "" {
+							switch stickyCacheMissReason {
+							case "wait_queue_full":
+								noteProviderCacheTraceOwnerSkip(ctx, "busy_wait_full")
+							case "gate_check", "rpm_red":
+								noteProviderCacheTraceOwnerSkip(ctx, stickyCacheMissReason)
+							}
 							baseRPM := stickyAccount.GetBaseRPM()
 							var currentRPM int
 							if count, ok := rpmFromPrefetchContext(ctx, stickyAccount.ID); ok {
@@ -624,6 +630,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							return s.newSelectionResult(ctx, account, true, result.ReleaseFunc, nil)
 						}
 					} else {
+						noteProviderCacheTraceOwnerSkip(ctx, "busy_quota_full")
 						slog.Debug("sticky.layer1_5_no_routing_slot_busy",
 							"account_id", accountID,
 							"session", shortSessionHash(sessionHash),
@@ -650,17 +657,30 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							})
 						}
 					} else {
+						noteProviderCacheTraceOwnerSkip(ctx, "busy_wait_full")
 						// Busy owner, full queue: L-07 may keep the binding while
 						// Layer2 serves this attempt (DESIGN §6.1A).
 						s.l07OwnerBusy(ctx, l07, account, sessionHash, requestedModel, result, err, waitErr)
 					}
-				} else if !clearSticky {
-					slog.Debug("sticky.layer1_5_no_routing_miss",
-						"account_id", accountID,
-						"reason", "gate_check_failed",
-						"session", shortSessionHash(sessionHash),
-					)
-					s.l07OwnerSkipped(l07)
+				} else {
+					switch {
+					case !modelSupported:
+						noteProviderCacheTraceOwnerSkip(ctx, "model_unsupported")
+					case !rpmOK:
+						noteProviderCacheTraceOwnerSkip(ctx, "rpm_red")
+					case !quotaOK || !windowCostOK:
+						noteProviderCacheTraceOwnerSkip(ctx, "busy_quota_full")
+					default:
+						noteProviderCacheTraceOwnerSkip(ctx, "other")
+					}
+					if !clearSticky {
+						slog.Debug("sticky.layer1_5_no_routing_miss",
+							"account_id", accountID,
+							"reason", "gate_check_failed",
+							"session", shortSessionHash(sessionHash),
+						)
+						s.l07OwnerSkipped(l07)
+					}
 				}
 			} else {
 				slog.Debug("sticky.layer1_5_no_routing_miss",
@@ -983,7 +1003,7 @@ func (s *GatewayService) resolveGatewayGroup(ctx context.Context, groupID *int64
 			return nil, nil, err
 		}
 
-		if !group.ClaudeCodeOnly || IsClaudeCodeClient(ctx) {
+		if !cacheClaudeCodeFallbackNeeded(group, IsClaudeCodeClient(ctx)) {
 			return group, &currentID, nil
 		}
 

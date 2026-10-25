@@ -8,11 +8,23 @@
     :error="section.error"
     @retry="state.loadStats()"
   >
+    <template #actions><ScopeTags :tags="scope?.bridgeOnly ? ['bridgeOnly'] : []" /></template>
     <TraceDisabled v-if="data && !data.trace_enabled" @open-settings="emit('open-settings')" />
     <template v-else-if="data">
+      <p
+        v-if="scope?.notCovered"
+        class="mb-4 flex items-start gap-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-900/20 dark:text-amber-100"
+        data-test="coverage-not-covered"
+      >
+        <Icon name="infoCircle" size="sm" class="mt-0.5 shrink-0" aria-hidden="true" />
+        {{ t('admin.cacheCharts.coverage.notes.platform_not_covered') }}
+      </p>
       <dl class="space-y-3 text-sm">
         <div v-for="metric in metrics" :key="metric.key" class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <dt class="text-gray-600 dark:text-dark-300">{{ t(`admin.cacheCharts.coverage.${metric.key}`) }}</dt>
+          <dt class="flex flex-wrap items-center gap-2 text-gray-600 dark:text-dark-300">
+            {{ t(`admin.cacheCharts.coverage.${metric.key}`) }}
+            <ScopeTags v-if="metric.openaiOnly" :tags="['openaiOnly']" />
+          </dt>
           <dd class="flex items-center gap-2 tabular-nums">
             <span class="text-lg font-semibold text-gray-900 dark:text-white">{{ formatPct(metric.value, 1) }}</span>
             <span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.cacheCharts.coverage.target', { target: formatPct(metric.target, 0) }) }}</span>
@@ -51,7 +63,7 @@
       </div>
 
       <ul class="mt-4 space-y-1 text-xs text-gray-500 dark:text-dark-400" role="list">
-        <li v-for="note in data.scope_notes" :key="note">{{ te(`admin.cacheCharts.coverage.notes.${note}`) ? t(`admin.cacheCharts.coverage.notes.${note}`) : note }}</li>
+        <li v-for="note in notes" :key="note">{{ te(`admin.cacheCharts.coverage.notes.${note}`) ? t(`admin.cacheCharts.coverage.notes.${note}`) : note }}</li>
         <li v-if="truncated">{{ t('admin.cacheCharts.trace.truncated', { time: `${data.process_started_at.slice(0, 16).replace('T', ' ')} UTC` }) }}</li>
         <li v-if="typeof data.trace_policy_rev === 'number'">{{ t('admin.cacheCharts.coverage.policyRev', { rev: data.trace_policy_rev }) }}</li>
       </ul>
@@ -64,7 +76,8 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { CacheChartsState } from '../useCacheCharts'
-import { coverageSegments, formatCount, formatPct, isTruncated } from '../viewModel'
+import { coverageSegments, formatCount, formatPct, isTruncated, statsScope } from '../viewModel'
+import ScopeTags from './ScopeTags.vue'
 import SectionShell from './SectionShell.vue'
 import TraceDisabled from './TraceDisabled.vue'
 
@@ -76,12 +89,17 @@ const section = computed(() => props.state.stats)
 const data = computed(() => section.value.data)
 const segments = computed(() => (data.value ? coverageSegments(data.value) : null))
 const truncated = computed(() => (data.value ? isTruncated(data.value) : false))
+const scope = computed(() => (data.value ? statsScope(data.value) : null))
+// The callout above says it; the list does not repeat it.
+const notes = computed(() => (data.value?.scope_notes ?? []).filter((n) => n !== 'platform_not_covered'))
 const metrics = computed(() => {
   const c = data.value?.coverage
   if (!c) return []
+  const openaiOnly = !!scope.value?.openaiOnly
   return [
-    { key: 'traceCoverage', value: c.coverage_ratio, target: c.targets.coverage_ratio },
-    { key: 'categoryKnown', value: c.category_known_ratio, target: c.targets.category_known_ratio },
-  ]
+    { key: 'traceCoverage', value: c.coverage_ratio, target: c.targets.coverage_ratio, openaiOnly: false },
+    // OpenAI only (M2b §1.3): marked as such, and left out of a provider view where it is null.
+    { key: 'categoryKnown', value: c.category_known_ratio, target: c.targets.category_known_ratio, openaiOnly },
+  ].filter((m) => !(m.openaiOnly && m.value === null))
 })
 </script>

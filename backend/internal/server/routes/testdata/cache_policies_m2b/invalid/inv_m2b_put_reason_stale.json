@@ -1,0 +1,138 @@
+{
+  "_contract": [
+    "P-M2B",
+    "C-7",
+    "C-12"
+  ],
+  "_note": "必须被拒绝：PUT 成功后 stored.reason 为本次请求的理由，不沿用旧理由（v1.1.1，G2 提出）",
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/observability",
+    "body": {
+      "expected_rev": 2,
+      "spec": {
+        "platforms": [
+          "openai",
+          "anthropic",
+          "messages_bridge"
+        ]
+      },
+      "reason": "扩大观测到 Claude 与 Messages 桥"
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "key": "observability",
+      "setting_key": "cache_observability_policy",
+      "available": true,
+      "risk": "low",
+      "gated_by_master": false,
+      "stored": {
+        "rev": 3,
+        "updated_at": "2026-10-23T09:00:04Z",
+        "updated_by": {
+          "user_id": 1,
+          "email": "admin@example.com"
+        },
+        "reason": "开启观测",
+        "spec": {
+          "enabled": true,
+          "sample_percent": 100,
+          "chain_percent": 100,
+          "byte_budget_mib": 64,
+          "rate_mib_per_s": 32,
+          "platforms": [
+            "openai",
+            "anthropic",
+            "messages_bridge"
+          ],
+          "ingress_chain_percent": 10,
+          "persist_trace_hourly": true
+        }
+      },
+      "loaded": {
+        "rev": 3,
+        "loaded_at": "2026-10-23T08:40:01Z"
+      },
+      "effective": {
+        "state": "on",
+        "active": true,
+        "blockers": [],
+        "warnings": [],
+        "clipped_fields": []
+      },
+      "defaults": {
+        "enabled": false,
+        "sample_percent": 100,
+        "chain_percent": 100,
+        "byte_budget_mib": 64,
+        "rate_mib_per_s": 32,
+        "platforms": [
+          "openai"
+        ],
+        "ingress_chain_percent": 10,
+        "persist_trace_hourly": true
+      },
+      "schema": [
+        {
+          "field": "enabled",
+          "type": "bool"
+        },
+        {
+          "field": "sample_percent",
+          "type": "int",
+          "min": 0,
+          "max": 100,
+          "unit": "percent"
+        },
+        {
+          "field": "chain_percent",
+          "type": "int",
+          "min": 0,
+          "max": 100,
+          "unit": "percent"
+        },
+        {
+          "field": "byte_budget_mib",
+          "type": "int",
+          "min": 8,
+          "max": 64,
+          "unit": "MiB",
+          "cap_source": "gateway.cache_trace.max_byte_budget_mib"
+        },
+        {
+          "field": "rate_mib_per_s",
+          "type": "int",
+          "min": 1,
+          "max": 32,
+          "unit": "MiB/s",
+          "cap_source": "gateway.cache_trace.max_rate_mib_per_s"
+        },
+        {
+          "field": "platforms",
+          "type": "enum_list",
+          "options": [
+            "openai",
+            "anthropic",
+            "gemini",
+            "messages_bridge"
+          ]
+        },
+        {
+          "field": "ingress_chain_percent",
+          "type": "int",
+          "min": 0,
+          "max": 100,
+          "unit": "percent"
+        },
+        {
+          "field": "persist_trace_hourly",
+          "type": "bool"
+        }
+      ]
+    }
+  }
+}

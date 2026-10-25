@@ -384,6 +384,10 @@ func (s *CachePolicyService) validationForWrite(ctx context.Context, index int, 
 	v, spec := s.validation(index, entry, w, bodyErrors)
 	if index == 4 || index == 5 {
 		validated, err := s.validateM4Groups(ctx, index, v, spec)
+		if err != nil || index != 4 {
+			return validated, spec, err
+		}
+		validated, err = s.validateCacheMetadataAccounts(ctx, validated)
 		return validated, spec, err
 	}
 	// Rollbacks must work even when the account repository is unavailable.

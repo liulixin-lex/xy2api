@@ -1,0 +1,17 @@
+{
+  "source_commit": "72c2d01698cd859223e943a0fa61b3454bca31ec",
+  "backend_tree": "0d38eb5ec4ce3761bb9ec99f32ec235db97c14bf",
+  "fixture_sha256": "328494d344ecffb751bd0c9357c57a8b3a7ebb8e65f8cac2e2049bed4e341839",
+  "recorded_at": "2026-10-24T14:32:01.358840+00:00",
+  "files": {
+    "cache_provider_wire_main.json": {
+      "sha256": "dd1a54a478f6e40e3d951c26980893f061f55892041accac27338ff00133eb28",
+      "cases": 20
+    },
+    "cache_provider_usage_main.json": {
+      "sha256": "f2555771abb7addd729edba13a6e3faf7d63a938d18620b28f468cf01587fa9e",
+      "cases": 50
+    }
+  },
+  "normalization": "Only AWS date/signature use a fixed synthetic signing instant. Builder and response-parser cases are separate, not end-to-end transport proofs."
+}

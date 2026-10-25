@@ -1,0 +1,66 @@
+{
+  "_contract": [
+    "M4-2",
+    "M4-L03"
+  ],
+  "_note": "清空 metadata_account_ids：空表示 L-03 不生效，属于关闭方向，不要求确认，也不核对账号。L-04 照常生效，所以 state 仍为 on。",
+  "_fixture": {
+    "build_capabilities": {
+      "l04": true,
+      "l03": true,
+      "l07": false
+    },
+    "说明": "T2.3 构建的静态能力（叠在 T2.2 上：l04、l03 为 true，l07 为 false），不属于响应；包含 T0b.4，所以没有 anthropic_observability_missing"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/anthropic_identity/validate",
+    "body": {
+      "expected_rev": 3,
+      "spec": {
+        "metadata_account_ids": []
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": true,
+      "errors": [],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "metadata_account_ids",
+          "before": [
+            501
+          ],
+          "after": []
+        }
+      ],
+      "risk": "high",
+      "direction": "disable",
+      "confirm": {
+        "reason_required": false,
+        "checkbox_required": false,
+        "type_to_confirm": null
+      },
+      "current_rev": 3,
+      "rev_stale": false,
+      "effective_preview": {
+        "state": "on",
+        "active": true,
+        "blockers": []
+      },
+      "affected": [
+        {
+          "key": "anthropic_identity",
+          "state_before": "on",
+          "state_after": "on",
+          "active_after": true
+        }
+      ]
+    }
+  }
+}

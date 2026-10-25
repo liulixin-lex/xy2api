@@ -9,7 +9,7 @@
           </span>
           {{ t('admin.cacheObservability.title') }}
         </h1>
-        <p class="mt-1.5 max-w-3xl text-sm text-gray-600 dark:text-dark-300">{{ t('admin.cacheObservability.description') }}</p>
+        <p class="mt-1.5 max-w-3xl text-sm text-gray-600 dark:text-dark-300" data-test="page-description">{{ t(descriptionKey) }}</p>
       </header>
 
       <!-- Charts depend on the P0b endpoints; without them (404) the page shows only the switches (DESIGN §11.7). -->
@@ -31,8 +31,12 @@
         </button>
       </div>
 
+      <!-- Until northstar answers it is unknown whether this build has the charts; no chart skeleton meanwhile (R M2-U-3). -->
+      <p v-if="charts.available.value === null" class="text-sm text-gray-600 dark:text-dark-300" role="status" data-test="availability-pending">
+        {{ t('admin.cacheObservability.checking') }}
+      </p>
       <div
-        v-if="charts.available.value !== false"
+        v-if="charts.available.value"
         id="cache-panel-patrol"
         v-show="activeTab === 'patrol'"
         role="tabpanel"
@@ -76,6 +80,12 @@ const route = useRoute()
 const router = useRouter()
 const charts = useCacheCharts()
 const tabs: Tab[] = ['patrol', 'settings']
+// The route description is neutral (the app header shows it before availability is known); this card says more.
+const descriptionKey = computed(() => {
+  if (charts.available.value === true) return 'admin.cacheObservability.descriptionCharts'
+  if (charts.available.value === false) return 'admin.cacheObservability.descriptionSettingsOnly'
+  return 'admin.cacheObservability.description'
+})
 
 const activeTab = computed<Tab>(() => {
   if (charts.available.value === false) return 'settings'

@@ -105,7 +105,7 @@ func (s *CachePolicyService) grokIdentityAccountOptions(ctx context.Context) ([]
 func setCachePolicyAccountOptions(view *CachePolicyView, options, grokOptions []cachePolicyAccountOption) {
 	for _, field := range view.Schema {
 		switch field["field"] {
-		case "account_ids":
+		case "account_ids", "metadata_account_ids":
 			field["options"] = options
 		case "grok.account_ids":
 			field["options"] = grokOptions
@@ -117,15 +117,23 @@ func setCachePolicyAccountOptions(view *CachePolicyView, options, grokOptions []
 // committing policy state. The warning never enters runtime snapshots/validate.
 // One warning covers both account pickers of upstream_identity.
 func (s *CachePolicyService) populateCachePolicyAccountOptions(ctx context.Context, view *CachePolicyView) {
-	options, err := s.upstreamIdentityAccountOptions(ctx)
+	var options []cachePolicyAccountOption
+	var err error
+	if view.Key == "anthropic_identity" {
+		options, err = s.cacheMetadataAccountOptions(ctx)
+	} else {
+		options, err = s.upstreamIdentityAccountOptions(ctx)
+	}
 	if err != nil {
 		setCachePolicyUnavailableAccountOptions(view)
 		return
 	}
-	grokOptions, err := s.grokIdentityAccountOptions(ctx)
-	if err != nil {
-		setCachePolicyUnavailableAccountOptions(view)
-		return
+	grokOptions := []cachePolicyAccountOption{}
+	if view.Key != "anthropic_identity" {
+		if grokOptions, err = s.grokIdentityAccountOptions(ctx); err != nil {
+			setCachePolicyUnavailableAccountOptions(view)
+			return
+		}
 	}
 	setCachePolicyAccountOptions(view, options, grokOptions)
 }

@@ -820,6 +820,9 @@ func TestL07DisabledStatesEqualBaseline(t *testing.T) {
 }
 
 func TestL07DisabledStatesAllocateLikeBaseline(t *testing.T) {
+	if l07RaceBuild {
+		t.Skip("allocs/op is not defined under the race detector")
+	}
 	// Both arms run on one fixture, interleaved, so they share every map,
 	// slot and mock state: the baseline is the same service without the
 	// policy service, which skips every L-07 hook. AllocsPerRun counts

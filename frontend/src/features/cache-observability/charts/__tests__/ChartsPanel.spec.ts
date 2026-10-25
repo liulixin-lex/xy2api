@@ -52,7 +52,7 @@ describe('useCacheCharts', () => {
 
   it('isolates failures per section and maps 503 to "rollup not ready"', async () => {
     const { state } = setup({
-      getBreakdown: vi.fn().mockRejectedValue({ status: 503, code: 'CACHE_ROLLUP_NOT_READY' }),
+      getBreakdown: vi.fn().mockRejectedValue({ status: 503, reason: 'CACHE_ROLLUP_NOT_READY' }),
       listExperiments: vi.fn().mockRejectedValue({ status: 500, message: 'boom' }),
     })
     await state.loadAll()

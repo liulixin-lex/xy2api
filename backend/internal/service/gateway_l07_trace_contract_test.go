@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -59,73 +60,65 @@ func l07FieldsFromExample(t *testing.T, p map[string]any) (L07TraceFields, strin
 	return L07TraceFields{Arm: arm, Kept: kept, Abandon: abandon, BusyN: n("l07_busy_n"), HoldMS: n("l07_hold_ms")}, skip
 }
 
+// l07TraceScenarios produce each Anthropic example by a real selection on
+// ctx, which carries the request state (and, for the emitter replay, the
+// trace of the request).
+var l07TraceScenarios = map[string]func(t *testing.T, ctx context.Context){
+	"anthropic_l07_kept.json": func(t *testing.T, ctx context.Context) {
+		f := newL07Fixture(t, nil)
+		f.withPolicies(t, nil, true, false, nil)
+		f.bind("sess", 1)
+		f.selectWith(t, ctx, "sess", nil)
+	},
+	"anthropic_l07_abandon_consecutive.json": func(t *testing.T, ctx context.Context) {
+		f := newL07Fixture(t, nil)
+		f.withPolicies(t, nil, true, false, nil)
+		f.bind("sess", 1)
+		f.cache.segments["sess"] = L07BusyState{Owner: 1, FirstBusyMs: f.now.Add(-18 * time.Second).UnixMilli(), BusyN: 1}
+		f.selectWith(t, ctx, "sess", nil)
+	},
+	"anthropic_l07_abandon_not_busy.json": func(t *testing.T, ctx context.Context) {
+		f := newL07Fixture(t, func(a []Account) { a[0].Type, a[0].Extra = AccountTypeOAuth, map[string]any{"max_sessions": 1} })
+		// Slot busy, queue open, session quota full: the wait plan is
+		// refused, so owner_skip_reason stays busy_quota_full (M2b).
+		f.limits.full[1] = true
+		f.slots.waiting[1] = 0
+		f.withPolicies(t, nil, true, false, nil)
+		f.bind("sess", 1)
+		f.selectWith(t, ctx, "sess", nil)
+	},
+	"anthropic_l07_abandon_state_error.json": func(t *testing.T, ctx context.Context) {
+		f := newL07Fixture(t, nil)
+		f.withPolicies(t, nil, true, false, nil)
+		f.cache.readErr = os.ErrDeadlineExceeded
+		f.bind("sess", 1)
+		f.selectWith(t, ctx, "sess", nil)
+	},
+	"anthropic_l07_control.json": func(t *testing.T, ctx context.Context) {
+		f := newL07Fixture(t, nil)
+		f.withPolicies(t, map[string]string{"cache_routing_policy": `{"rev":3,"spec":{"keep_sticky_on_busy":{"enabled":true,"group_ids":[31],"rollout_percent":50}}}`}, true, false, nil)
+		s := l07SessionInCohort(t, false)
+		f.bind(s, 1)
+		f.selectWith(t, ctx, s, nil)
+		require.Equal(t, int64(2), f.bound(s), "control rebinds as the baseline")
+	},
+	"anthropic_l07_policy_off_not_busy.json": func(t *testing.T, ctx context.Context) {
+		f := newL07Fixture(t, nil)
+		f.withPolicies(t, map[string]string{"cache_routing_policy": `{"rev":3,"spec":{"keep_sticky_on_busy":{"enabled":false}}}`}, true, false, nil)
+		f.slots.inFlight[1], f.slots.waiting[1] = 0, 0
+		f.bind("sess", 1)
+		require.Equal(t, int64(1), f.selectWith(t, ctx, "sess", nil).Account.ID)
+	},
+	"anthropic_l07_with_l04.json": func(t *testing.T, ctx context.Context) {
+		f := newL07Fixture(t, nil)
+		f.withPolicies(t, nil, true, false, nil)
+		f.slots.inFlight[1], f.slots.waiting[1] = 0, 0
+		f.bind("sess", 1)
+		require.Equal(t, int64(1), f.selectWith(t, ctx, "sess", nil).Account.ID)
+	},
+}
+
 func TestL07TraceFieldsMatchContractExamples(t *testing.T) {
-	scenarios := map[string]func(t *testing.T, skip string) L07TraceFields{
-		"anthropic_l07_kept.json": func(t *testing.T, skip string) L07TraceFields {
-			f := newL07Fixture(t, nil)
-			f.withPolicies(t, nil, true, false, nil)
-			f.bind("sess", 1)
-			ctx, _ := newL07Ctx(t)
-			f.selectWith(t, ctx, "sess", nil)
-			return L07TraceFieldsFromContext(ctx, skip)
-		},
-		"anthropic_l07_abandon_consecutive.json": func(t *testing.T, skip string) L07TraceFields {
-			f := newL07Fixture(t, nil)
-			f.withPolicies(t, nil, true, false, nil)
-			f.bind("sess", 1)
-			f.cache.segments["sess"] = L07BusyState{Owner: 1, FirstBusyMs: f.now.Add(-18 * time.Second).UnixMilli(), BusyN: 1}
-			ctx, _ := newL07Ctx(t)
-			f.selectWith(t, ctx, "sess", nil)
-			return L07TraceFieldsFromContext(ctx, skip)
-		},
-		"anthropic_l07_abandon_not_busy.json": func(t *testing.T, skip string) L07TraceFields {
-			f := newL07Fixture(t, func(a []Account) { a[0].Type, a[0].Extra = AccountTypeOAuth, map[string]any{"max_sessions": 1} })
-			f.limits.full[1] = true
-			f.slots.inFlight[1], f.slots.waiting[1] = 0, 0
-			f.withPolicies(t, nil, true, false, nil)
-			f.bind("sess", 1)
-			ctx, _ := newL07Ctx(t)
-			f.selectWith(t, ctx, "sess", nil)
-			return L07TraceFieldsFromContext(ctx, skip)
-		},
-		"anthropic_l07_abandon_state_error.json": func(t *testing.T, skip string) L07TraceFields {
-			f := newL07Fixture(t, nil)
-			f.withPolicies(t, nil, true, false, nil)
-			f.cache.readErr = os.ErrDeadlineExceeded
-			f.bind("sess", 1)
-			ctx, _ := newL07Ctx(t)
-			f.selectWith(t, ctx, "sess", nil)
-			return L07TraceFieldsFromContext(ctx, skip)
-		},
-		"anthropic_l07_control.json": func(t *testing.T, skip string) L07TraceFields {
-			f := newL07Fixture(t, nil)
-			f.withPolicies(t, map[string]string{"cache_routing_policy": `{"rev":3,"spec":{"keep_sticky_on_busy":{"enabled":true,"group_ids":[31],"rollout_percent":50}}}`}, true, false, nil)
-			s := l07SessionInCohort(t, false)
-			f.bind(s, 1)
-			ctx, _ := newL07Ctx(t)
-			f.selectWith(t, ctx, s, nil)
-			require.Equal(t, int64(2), f.bound(s), "control rebinds as the baseline")
-			return L07TraceFieldsFromContext(ctx, skip)
-		},
-		"anthropic_l07_policy_off_not_busy.json": func(t *testing.T, skip string) L07TraceFields {
-			f := newL07Fixture(t, nil)
-			f.withPolicies(t, map[string]string{"cache_routing_policy": `{"rev":3,"spec":{"keep_sticky_on_busy":{"enabled":false}}}`}, true, false, nil)
-			f.slots.inFlight[1], f.slots.waiting[1] = 0, 0
-			f.bind("sess", 1)
-			ctx, _ := newL07Ctx(t)
-			require.Equal(t, int64(1), f.selectWith(t, ctx, "sess", nil).Account.ID)
-			return L07TraceFieldsFromContext(ctx, skip)
-		},
-		"anthropic_l07_with_l04.json": func(t *testing.T, skip string) L07TraceFields {
-			f := newL07Fixture(t, nil)
-			f.withPolicies(t, nil, true, false, nil)
-			f.slots.inFlight[1], f.slots.waiting[1] = 0, 0
-			f.bind("sess", 1)
-			ctx, _ := newL07Ctx(t)
-			require.Equal(t, int64(1), f.selectWith(t, ctx, "sess", nil).Account.ID)
-			return L07TraceFieldsFromContext(ctx, skip)
-		},
-	}
 	entries, err := os.ReadDir(filepath.Join(l07TraceDir, "examples"))
 	require.NoError(t, err)
 	require.Len(t, entries, 8)
@@ -145,9 +138,11 @@ func TestL07TraceFieldsMatchContractExamples(t *testing.T) {
 				return
 			}
 			want, skip := l07FieldsFromExample(t, ex.Payload)
-			produce, ok := scenarios[name]
+			produce, ok := l07TraceScenarios[name]
 			require.True(t, ok, "no scenario for %s", name)
-			got := produce(t, skip)
+			ctx, _ := newL07Ctx(t)
+			produce(t, ctx)
+			got := L07TraceFieldsFromContext(ctx, skip)
 			require.Equal(t, want, got)
 			requireL07TraceRules(t, got, skip)
 		})

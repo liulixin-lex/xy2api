@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -50,7 +51,8 @@ func m4PolicyDefaults(index int) map[string]any {
 	if index == 4 {
 		return map[string]any{
 			"anchor_group_ids": []int64{}, "gemini_anchor": false,
-			"metadata_group_ids": []int64{}, "rollout_percent": 0,
+			"metadata_group_ids": []int64{}, "metadata_account_ids": []int64{}, "rollout_percent": 0,
+			"metadata_rollout_percent": 0, "max_inflight_per_anchor": 2,
 		}
 	}
 	busy := map[string]any{"enabled": false, "group_ids": []int64{}, "rollout_percent": 0}
@@ -169,6 +171,9 @@ func mergeM4Policy(index int, before map[string]any, raw json.RawMessage, caps c
 					for _, id := range ids {
 						if id <= 0 {
 							code = "unknown_group"
+							if field == "metadata_account_ids" {
+								code = "unknown_account"
+							}
 							break
 						}
 						if seen[id] {
@@ -193,6 +198,9 @@ func mergeM4Policy(index int, before map[string]any, raw json.RawMessage, caps c
 		}
 	}
 	if index == 4 {
+		if policyInt(out["metadata_rollout_percent"]) > policyInt(out["rollout_percent"]) {
+			errs = append(errs, CachePolicyFieldError{Field: "metadata_rollout_percent", Code: "exceeds_rollout_percent", Limit: map[string]int{"max": policyInt(out["rollout_percent"])}})
+		}
 		anchors, _ := out["anchor_group_ids"].([]int64)
 		metadata, _ := out["metadata_group_ids"].([]int64)
 		members := make(map[int64]bool, len(anchors))
@@ -206,7 +214,30 @@ func mergeM4Policy(index int, before map[string]any, raw json.RawMessage, caps c
 			}
 		}
 	}
+	// A leaf that fails parsing or its own value limit never participates in
+	// direction or confirmation. Reference and relational errors (for example
+	// not_subset_of_anchor_groups) keep the field in the diff (m3m4 v1.2).
+	for _, err := range errs {
+		if cachePolicyErrorDropsDiff(err.Code) {
+			diff = slices.DeleteFunc(diff, func(d CachePolicyDiff) bool { return d.Field == err.Field })
+		}
+	}
 	return out, diff, errs
+}
+
+func cachePolicyErrorDropsDiff(code string) bool {
+	switch code {
+	case "unsupported_in_build", "forbidden_field", "duplicate", "malformed_body", "unknown_field", "exceeds_rollout_percent", "exceeds_chain_percent":
+		return true
+	}
+	return false
+}
+
+func m4PolicyIntRange(field string) (int, int) {
+	if field == "max_inflight_per_anchor" {
+		return 1, 16
+	}
+	return 0, 100
 }
 
 // Unlike account_ids and busy scope, an empty anchor/metadata list is disabled.
@@ -242,7 +273,7 @@ func (s *CachePolicyService) m4UnsupportedChanges(index int, spec map[string]any
 		switch change.Field {
 		case "anchor_group_ids", "gemini_anchor":
 			unsupported = !s.m4Behaviors.L04
-		case "metadata_group_ids":
+		case "metadata_group_ids", "metadata_account_ids":
 			unsupported = !s.m4Behaviors.L03
 		case "keep_sticky_on_busy.enabled", "keep_sticky_on_busy.group_ids":
 			unsupported = !s.m4Behaviors.L07
@@ -262,7 +293,8 @@ func (s *CachePolicyService) m4ConfiguredCapabilities(index int, spec map[string
 		metadata, _ := spec["metadata_group_ids"].([]int64)
 		gemini, _ := spec["gemini_anchor"].(bool)
 		anchor := len(anchors) > 0 || gemini
-		meta := len(metadata) > 0
+		accounts, _ := spec["metadata_account_ids"].([]int64)
+		meta := len(metadata) > 0 || len(accounts) > 0
 		return (s.m4Behaviors.L04 && anchor) || (s.m4Behaviors.L03 && meta), (!s.m4Behaviors.L04 && anchor) || (!s.m4Behaviors.L03 && meta)
 	}
 	enabled, _ := m4PolicyField(spec, "keep_sticky_on_busy.enabled").(bool)
@@ -358,7 +390,10 @@ func m4PolicySchema(index int, caps cacheL07Caps) []map[string]any {
 			{"field": "anchor_group_ids", "type": "id_list", "ref": "group", "options": options},
 			{"field": "gemini_anchor", "type": "bool"},
 			{"field": "metadata_group_ids", "type": "id_list", "ref": "group", "options": options},
+			{"field": "metadata_account_ids", "type": "id_list", "ref": "account", "options": []cachePolicyAccountOption{}},
 			{"field": "rollout_percent", "type": "int", "min": 0, "max": 100, "unit": "percent"},
+			{"field": "metadata_rollout_percent", "type": "int", "min": 0, "max": 100, "unit": "percent"},
+			{"field": "max_inflight_per_anchor", "type": "int", "min": 1, "max": 16},
 		}
 	}
 	schema := []map[string]any{
@@ -378,7 +413,7 @@ func (s *CachePolicyService) m4Schema(index int) []map[string]any {
 		switch field["field"] {
 		case "anchor_group_ids", "gemini_anchor":
 			unsupported = !s.m4Behaviors.L04
-		case "metadata_group_ids":
+		case "metadata_group_ids", "metadata_account_ids":
 			unsupported = !s.m4Behaviors.L03
 		case "keep_sticky_on_busy.enabled", "keep_sticky_on_busy.group_ids":
 			unsupported = !s.m4Behaviors.L07

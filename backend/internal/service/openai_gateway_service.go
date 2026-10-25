@@ -455,6 +455,7 @@ type OpenAIGatewayService struct {
 	cacheCounters         *CacheTraceCounters
 	cacheTraceWorkersOnce sync.Once
 	cacheTraceWorkers     *cacheTraceWorkers
+	providerHistory       cacheProviderTraceHistory
 	openaiCacheOnce       sync.Once
 	openaiCacheTelemetry  *openAICacheTelemetry
 	openaiQualityStates   sync.Map // scoped digest -> *openAIQualityLocal

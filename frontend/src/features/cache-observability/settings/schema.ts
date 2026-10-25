@@ -246,6 +246,14 @@ export function inlineIssues(entry: AvailablePolicy, draft: PolicySpec, baseline
       if (has(sub) && get(sub) === true && !uuidFill) issues.push({ field: sub, level: 'error', code: 'requires_mode_uuid_fill' })
     }
   }
+  // T2.2 (m4l04 v1.0): the metadata share is a part of the anchor share, never above it.
+  if (entry.key === 'anthropic_identity' && has('metadata_rollout_percent') && has('rollout_percent')) {
+    const metadata = get('metadata_rollout_percent')
+    const rollout = get('rollout_percent')
+    if (typeof metadata === 'number' && typeof rollout === 'number' && metadata > rollout) {
+      issues.push({ field: 'metadata_rollout_percent', level: 'error', code: 'exceeds_rollout_percent', params: { limit: rollout } })
+    }
+  }
   if (entry.key === 'anthropic_identity' && has('metadata_group_ids')) {
     const anchors = Array.isArray(get('anchor_group_ids')) ? (get('anchor_group_ids') as unknown[]) : []
     const metadata = Array.isArray(get('metadata_group_ids')) ? (get('metadata_group_ids') as unknown[]) : []

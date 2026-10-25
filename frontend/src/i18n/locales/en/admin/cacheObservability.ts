@@ -1,7 +1,10 @@
 export default {
   cacheObservability: {
     title: 'Cache Observability',
-    description: 'Upstream prompt cache hits, losses and causes, plus the switches and parameters of every cache feature (all off by default). Visible to admins only.',
+    description: 'Switches and settings of the cache features (all off by default). Admins only.',
+    descriptionCharts: 'Hits, losses and their causes for upstream prompt caching, and the switches and settings of all cache features (all off by default). Admins only.',
+    descriptionSettingsOnly: 'Switches and settings of all cache features (all off by default). This version has no daily-check endpoints. Admins only.',
+    checking: 'Checking what this version provides…',
     tabsAria: 'Cache observability page',
     tabs: {
       patrol: 'Daily check',
@@ -82,6 +85,7 @@ export default {
     },
     blockers: {
       not_implemented_in_build: 'This version does not include this feature yet: the saved configuration has no effect. You can turn the affected settings off or remove them.',
+      guard_tripped: 'The guard paused keeping sessions on busy accounts; it resumes by itself after 10 minutes.',
       diagnostics_disabled: 'The system cache diagnostics switch is off, so cache observation cannot work. Ask operations to turn it on (needs a config change and a restart).',
       static_aware_routing_disabled: 'This depends on a system switch that needs a config change and a restart, and it is off. Saving has no effect; ask operations to assess it.',
       parse_error: 'The stored configuration cannot be read and is treated as off. Saving once restores it.',
@@ -92,6 +96,7 @@ export default {
       observability_off: 'Cache observation is off: the effect of this change cannot be evaluated. Turn on Cache observation first.',
       anthropic_observability_missing: 'Cache observation in this version does not cover Claude/Gemini requests yet: the effect cannot be evaluated. Upgrade to a version that includes it first.',
       fallback_group_selected: 'A selected group is a fallback group: fallback traffic is rewritten by this configuration too. Remove the group if fallback traffic should stay untouched.',
+      share_group_no_effect: 'Some selected groups use shared scheduling; the feature has no effect in them.',
       no_effect_rollout_zero: 'The share is 0: saving has no effect.',
       high_rollout_without_experiment: 'The share is high: run with a small share first and widen it once the effect is confirmed.',
       decision_pending_header_policy: 'How to turn this on is still awaiting a decision by the owner. Make sure it is approved before saving.',
@@ -106,9 +111,11 @@ export default {
     },
     acks: {
       not_implemented_in_build: 'This version does not include this feature, so saving has no effect',
+      guard_tripped: 'The guard has paused this feature, so saving has no effect until it resumes',
       observability_off: 'cache observation is off, so the effect of this change cannot be evaluated',
       anthropic_observability_missing: 'cache observation does not cover Claude/Gemini yet, so the effect cannot be evaluated',
       fallback_group_selected: 'a selected group is a fallback group, so fallback traffic is rewritten too',
+      share_group_no_effect: 'Some selected groups use shared scheduling, where the feature has no effect',
       no_effect_rollout_zero: 'the share is 0, so saving has no effect',
       high_rollout_without_experiment: 'the share is high and has not been tried at a small share',
       decision_pending_header_policy: 'this awaits an owner decision, and I have the approval',
@@ -130,6 +137,8 @@ export default {
       unknown_account: 'Account does not exist or is not eligible',
       unknown_group: 'Group does not exist',
       wrong_platform: 'Wrong platform',
+      official_endpoint: 'Accounts on the official Anthropic endpoint cannot be added',
+      not_apikey: 'Only API key accounts can be selected',
       duplicate: 'Contains duplicates',
       unsupported_in_build: 'This version does not support the value',
       forbidden_field: 'This field cannot be set',
@@ -139,6 +148,7 @@ export default {
       ids: 'IDs must be positive integers',
       unknown_option: 'Value unknown to this page: {value}',
       ingress_above_chain: 'Cannot exceed the outbound prefix comparison rate (currently {chain}%)',
+      exceeds_rollout_percent: 'Cannot exceed the rollout share (currently {limit}%)',
       version_must_change: 'Rules changed, so the definition version must change too',
     },
     missing: {
@@ -517,10 +527,26 @@ export default {
           description: 'In these groups, when the client sends no metadata.user_id, the gateway generates one and writes it upstream. Each must also be a stable session identifier group.',
           risk: 'Changes the outbound body; a value sent by the client always wins.',
         },
+        metadata_account_ids: {
+          label: 'Relay accounts for generated metadata',
+          description: 'Only Anthropic API key accounts on non official endpoints are listed. Choose relays confirmed to keep sessions sticky.',
+          risk: 'Changes the outbound body of requests to these accounts; a value sent by the client always wins.',
+          empty: 'No effect when empty',
+        },
         rollout_percent: {
           label: 'Share',
           description: 'Treatment share of session buckets.',
           risk: 'More share means more impact; without cache observation for Claude/Gemini the effect cannot be evaluated.',
+        },
+        metadata_rollout_percent: {
+          label: 'Metadata rollout share',
+          description: 'Within the treatment group for stable session identifiers, the share of requests without a client metadata.user_id that get one generated and sent upstream. It cannot exceed the rollout share above. No effect until metadata generation is implemented.',
+          risk: 'Changes the outbound request body; a value the client sent always wins.',
+        },
+        max_inflight_per_anchor: {
+          label: 'In-flight cap per session identifier',
+          description: 'Once a stable session identifier has this many requests in flight, further requests do not use it, so a burst does not share one identifier.',
+          risk: 'A higher cap lets more concurrent requests share one session identifier.',
         },
       },
       routing: {
@@ -538,6 +564,31 @@ export default {
           label: 'Share for keeping stickiness',
           description: 'Treatment share of session buckets.',
           risk: 'More share means more impact.',
+        },
+        keep_sticky_on_busy_max_consecutive_busy: {
+          label: 'Consecutive busy holds per session',
+          description: 'Once a session has been held for its busy account this many times in a row, it is routed again; one successful response resets the count.',
+          risk: 'A higher value can mean more waits in each busy spell.',
+        },
+        keep_sticky_on_busy_max_hold_seconds: {
+          label: 'Longest hold in a busy spell (seconds)',
+          description: 'Counted from the first hold for a busy account; if the account is still busy after this time, it counts as saturated and the session is routed again.',
+          risk: 'A higher value lets sessions wait longer.',
+        },
+        keep_sticky_on_busy_owner_busy_skip_per_min_cap: {
+          label: 'Holds per account per minute',
+          description: 'Once an account has been held for this many times in the last 60 seconds (all sessions together), it is no longer held for, so a hot account does not gather sessions. 0 means automatic: the larger of 4 and twice the account concurrency.',
+          risk: 'A higher cap lets a hot account gather more sessions.',
+        },
+        keep_sticky_on_busy_group_keep_ratio_pct: {
+          label: 'Hold share per group',
+          description: 'Once holds make up this share of the group requests over the last 5 minutes, holding stops.',
+          risk: 'A higher share makes more requests in the group wait for their account.',
+        },
+        keep_sticky_on_busy_health_lookback_seconds: {
+          label: 'Account health look-back (seconds)',
+          description: 'If the session met a rate limit, a transient error or a first-output failure on its account within this time, it is not held for. A longer time is more cautious.',
+          risk: 'A shorter time can hold for an account that just failed.',
         },
         affinity_mode: {
           label: 'Same-tier affinity',
@@ -699,6 +750,9 @@ export default {
       requests: '{n} requests',
       notes: {
         messages_bridge_excluded: 'The Messages bridge is not observed yet and stays out of the denominator.',
+        openai_only_metrics: 'pck, session headers and category completeness count OpenAI requests only.',
+        platform_not_covered: 'Observation is not on for this platform.',
+        openai_native_excluded: 'Messages bridge only: the OpenAI partition holds only requests through the Messages bridge; native OpenAI requests are not observed.',
       },
       policyRev: 'Observation policy rev {rev}',
     },
@@ -731,6 +785,10 @@ export default {
       wm: '{value} per million tokens',
       other: 'Other ({n})',
     },
+    scopeTags: {
+      openaiOnly: 'OpenAI only',
+      bridgeOnly: 'Messages bridge only',
+    },
     identity: {
       title: 'Session keys and headers',
       pckOut: 'Outbound session key source',
@@ -743,6 +801,7 @@ export default {
       inbound: 'Inbound',
       outbound: 'Outbound',
       relation: 'Outbound session_id source: ',
+      openaiOnlyEmpty: 'Session keys and session headers count OpenAI requests only; there are none in the current scope.',
     },
     routing: {
       title: 'Routing and rebind reasons',
