@@ -15,12 +15,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Byte-identical copy of 00-shared/cache_policies_contract/m4l07 (v1.0).
-// SHA256SUMS digest as published in 08-impl-p0a/M4L07_CONTRACT_READY.md.
+// Byte-identical copy of 00-shared/cache_policies_contract/m4l07 (v1.0),
+// except the omitted files below. SHA256SUMS digest as published in
+// 08-impl-p0a/M4L07_CONTRACT_READY.md.
 const (
 	cacheM4L07Root    = "testdata/cache_policies_contract/m4l07"
 	cacheM4L07SumsSHA = "483aed2fbee9ca6f0df2526309e441e04468559d73e98730d38cf9eab05eaa5a"
 )
+
+// Listed in SHA256SUMS but not copied: the README only documents the
+// contract, and its version strings trip the repository docs consistency
+// check. Like the m31 and m3m4 copies, the testdata carries no README.
+var cacheM4L07Omitted = map[string]bool{"README.md": true}
 
 // The T2.5 samples (_fixture.build_capabilities l07=true), replayed through
 // TestCachePolicyM4ContractReplay together with the derived ones.
@@ -51,22 +57,30 @@ func cacheM4ListSample(name string) bool {
 	return strings.HasPrefix(name, "m4_list_") || strings.HasPrefix(name, "m4_dormant_list_") || strings.HasPrefix(name, "m4l07_list_")
 }
 
-// cacheM4L07Manifest checks every file of the copy against SHA256SUMS and
-// returns the digests plus the m3m4 sources that F derived for T2.5.
+// cacheM4L07Manifest checks every copied file against SHA256SUMS and returns
+// the digests plus the m3m4 sources that F derived for T2.5.
 func cacheM4L07Manifest(t *testing.T) (map[string]string, map[string]bool) {
 	t.Helper()
 	sums, err := os.ReadFile(filepath.Join(cacheM4L07Root, "SHA256SUMS"))
 	require.NoError(t, err)
 	require.Equal(t, cacheM4L07SumsSHA, fmt.Sprintf("%x", sha256.Sum256(sums)))
 	hashes := map[string]string{}
+	omitted := 0
 	for _, line := range strings.Split(strings.TrimSpace(string(sums)), "\n") {
 		parts := strings.Fields(line)
 		require.Len(t, parts, 2)
+		if cacheM4L07Omitted[parts[1]] {
+			_, err := os.Stat(filepath.Join(cacheM4L07Root, parts[1]))
+			require.True(t, os.IsNotExist(err), parts[1])
+			omitted++
+			continue
+		}
 		raw, err := os.ReadFile(filepath.Join(cacheM4L07Root, parts[1]))
 		require.NoError(t, err)
 		require.Equal(t, parts[0], fmt.Sprintf("%x", sha256.Sum256(raw)), parts[1])
 		hashes[parts[1]] = parts[0]
 	}
+	require.Equal(t, len(cacheM4L07Omitted), omitted)
 	// No file outside the published set.
 	require.NoError(t, filepath.WalkDir(cacheM4L07Root, func(path string, d fs.DirEntry, err error) error {
 		require.NoError(t, err)
