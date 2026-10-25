@@ -93,6 +93,16 @@
           "noteProviderCacheTraceOwnerSkip(ctx, \"other\")",
           "if !clearSticky {"
         ]
+      },
+      {
+        "block": "t22-claude-code-fallback-predicate",
+        "note": "T2.2 (L-04) shares the claude_code_only fallback predicate with the anchor path. For the group returned by the lookup the condition is identical (!ClaudeCodeOnly || claude code client); a nil group now returns the current group instead of dereferencing. No candidate filtering, scheduling, failover, fallback or billing decision changes. Registered during PR C assembly; awaiting R's static review.",
+        "removed": [
+          "if !group.ClaudeCodeOnly || IsClaudeCodeClient(ctx) {"
+        ],
+        "added": [
+          "if !cacheClaudeCodeFallbackNeeded(group, IsClaudeCodeClient(ctx)) {"
+        ]
       }
     ],
     "backend/internal/service/openai_account_scheduler.go": [
