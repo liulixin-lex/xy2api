@@ -101,6 +101,11 @@ func (s *OpenAIGatewayService) beginProviderCacheTrace(c *gin.Context, platform,
 		t.data.L03Arm = "none"
 		t.data.L03Skip = "policy_off"
 	}
+	if platform == PlatformAnthropic && policy.l07Available {
+		// trace m4l07: every full Anthropic event of an l07 build has l07_*.
+		t.data.L07Present = true
+		t.data.L07 = L07TraceFields{Arm: "none", Abandon: "none"}
+	}
 	if policy.l04Available {
 		t.data.L04Present = true
 		t.data.L04Arm = "none"
@@ -234,6 +239,10 @@ func (s *OpenAIGatewayService) finishProviderCacheTrace(c *gin.Context, result *
 		return
 	}
 	t.applyCacheTraceComputed()
+	if t.data.L07Present {
+		// The selection of this forward has run; its L-07 record is final.
+		t.data.L07 = L07TraceFieldsFromContext(c.Request.Context(), t.data.Provider.OwnerSkip)
+	}
 	data := t.data
 	data.RequestIDHMAC = s.cacheIdentityDigest(data.Platform+"-request", result.RequestID)
 	result.providerTrace = &cacheTrace{policy: t.policy, data: data, providerKey: t.providerKey, sessionKey: t.sessionKey, async: t.async, timing: t.timing, chain: t.chain, usageObservationFailed: t.usageObservationFailed}

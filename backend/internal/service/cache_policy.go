@@ -71,6 +71,7 @@ type CachePolicySnapshot struct {
 	entries             [6]cachePolicyEntry
 	anchorPolicy        cacheAnthropicAnchorPolicy
 	l04Available        bool
+	l07Available        bool
 	upstream            CacheUpstreamIdentityPolicy
 	routingL07          CacheRoutingL07Policy
 	cohortViews         [2]cachePolicyCohortView
@@ -353,6 +354,7 @@ func (s *CachePolicyService) publishEntries(entries [6]cachePolicyEntry) {
 	p.rate = int64(min(policyInt(o["rate_mib_per_s"]), s.caps.MaxRateMiBPerS)) << 20
 	p.upstream = upstreamIdentityFromEntry(entries[3], p.MasterEnabled() && !p.stale)
 	p.l04Available = s.m4Behaviors.L04
+	p.l07Available = s.m4Available && s.m4Behaviors.L07
 	p.anchorPolicy = cacheAnthropicAnchorPolicyFromEntry(entries[4], s.m4Behaviors)
 	p.routingL07 = routingL07FromEntry(entries[5], p.MasterEnabled() && !entries[0].parseError, s.m4Available && s.m4Behaviors.L07, s.l07Caps)
 	p.revision = fmt.Sprintf("m%d.o%d.u%d.a%d.r%d", p.revs[0], p.revs[1], p.revs[3], p.revs[4], p.revs[5])

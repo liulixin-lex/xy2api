@@ -56,6 +56,8 @@ type cacheTraceData struct {
 	L03Arm, L03Skip                                                     string
 	L03Applied                                                          bool
 	L04Present                                                          bool
+	L07Present                                                          bool
+	L07                                                                 L07TraceFields
 	L04Arm, L04Skip                                                     string
 	L04Applied                                                          bool
 	L04PolicyRevision                                                   int64
