@@ -62,6 +62,37 @@
           "return probeResult, probeErr",
           "}"
         ]
+      },
+      {
+        "block": "m2b-provider-cache-trace",
+        "note": "M2b provider trace instrumentation reviewed by R: owner-skip attribution, Gemini capture/observe/settle hooks, and the SSE observation callback. No candidate filtering, scheduling, failover, fallback, or billing decision changes.",
+        "removed": [
+          "} else if !clearSticky {"
+        ],
+        "added": [
+          "}",
+          "}",
+          "}",
+          "switch stickyCacheMissReason {",
+          "case \"wait_queue_full\":",
+          "noteProviderCacheTraceOwnerSkip(ctx, \"busy_wait_full\")",
+          "noteProviderCacheTraceOwnerSkip(ctx, \"busy_wait_full\")",
+          "case \"gate_check\", \"rpm_red\":",
+          "noteProviderCacheTraceOwnerSkip(ctx, stickyCacheMissReason)",
+          "noteProviderCacheTraceOwnerSkip(ctx, \"busy_quota_full\")",
+          "noteProviderCacheTraceOwnerSkip(ctx, \"busy_quota_full\")",
+          "} else {",
+          "} else {",
+          "switch {",
+          "case !modelSupported:",
+          "noteProviderCacheTraceOwnerSkip(ctx, \"model_unsupported\")",
+          "case !rpmOK:",
+          "noteProviderCacheTraceOwnerSkip(ctx, \"rpm_red\")",
+          "case !quotaOK || !windowCostOK:",
+          "default:",
+          "noteProviderCacheTraceOwnerSkip(ctx, \"other\")",
+          "if !clearSticky {"
+        ]
       }
     ],
     "backend/internal/service/openai_account_scheduler.go": [
@@ -573,7 +604,7 @@
       },
       {
         "block": "gemini-sse-collector",
-        "note": "Unused collectGeminiSSE wrapper inlined into its only caller.",
+        "note": "Unused collectGeminiSSE wrapper inlined into its caller; provider trace callback is allowlisted below.",
         "removed": [
           "collected, usageObj, err := collectGeminiSSE(resp.Body, true)",
           "func collectGeminiSSE(body io.Reader, isOAuth bool) (map[string]any, *ClaudeUsage, error) {",
@@ -581,9 +612,7 @@
           "return collected, usage, err",
           "}"
         ],
-        "added": [
-          "collected, usageObj, _, err := collectGeminiSSEObserved(resp.Body, true, nil)"
-        ]
+        "added": []
       },
       {
         "block": "nonstream-read-failover",
@@ -662,6 +691,59 @@
           "}",
           "}",
           "}"
+        ]
+      },
+      {
+        "block": "m2b-provider-cache-trace",
+        "note": "M2b provider trace instrumentation reviewed by R: owner-skip attribution, Gemini capture/observe/settle hooks, and the SSE observation callback. No candidate filtering, scheduling, failover, fallback, or billing decision changes.",
+        "removed": [
+          "func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {",
+          "func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (*ForwardResult, error) {"
+        ],
+        "added": [
+          "providerTraceEngine       *OpenAIGatewayService",
+          "func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *ForwardResult, err error) {",
+          "if s.providerTraceEngine != nil {",
+          "if s.providerTraceEngine != nil {",
+          "if s.providerTraceEngine != nil {",
+          "if s.providerTraceEngine != nil {",
+          "if s.providerTraceEngine != nil {",
+          "if s.providerTraceEngine != nil {",
+          "defer func() { s.providerTraceEngine.finishProviderCacheTrace(c, result) }()",
+          "defer func() { s.providerTraceEngine.finishProviderCacheTrace(c, result) }()",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "s.providerTraceEngine.captureProviderCacheTrace(c, upstreamReq, account, \"gemini\")",
+          "s.providerTraceEngine.captureProviderCacheTrace(c, upstreamReq, account, \"gemini\")",
+          "s.providerTraceEngine.markProviderCacheTraceSent(c)",
+          "s.providerTraceEngine.markProviderCacheTraceSent(c)",
+          "s.providerTraceEngine.submitCacheTraceJob(c)",
+          "s.providerTraceEngine.submitCacheTraceJob(c)",
+          "collected, usageObj, _, err := collectGeminiSSEObserved(resp.Body, true, func(rawBytes []byte) {",
+          "if providerCacheTraceFromGin(c) != nil {",
+          "if providerCacheTraceFromGin(c) != nil {",
+          "if providerCacheTraceFromGin(c) != nil {",
+          "if providerCacheTraceFromGin(c) != nil {",
+          "if providerCacheTraceFromGin(c) != nil {",
+          "if providerCacheTraceFromGin(c) != nil {",
+          "observeProviderCacheTrace(c, rawBytes)",
+          "observeProviderCacheTrace(c, rawBytes)",
+          "observeProviderCacheTrace(c, rawBytes)",
+          "})",
+          "func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (result *ForwardResult, err error) {",
+          "observeProviderCacheTrace(c, unwrappedBody)",
+          "observeProviderCacheTrace(c, unwrappedBytes)",
+          "observeProviderCacheTrace(c, respBody)"
         ]
       }
     ]
