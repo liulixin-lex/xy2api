@@ -1355,3 +1355,7 @@ pnpm --dir frontend run build
 
 - 按 cherry-pick 并入 T2.2 的关闭态分配修复（不变基）。L-03 对照臂与名单外组在挂 attempt 前判定，不再为每次 attempt 分配 context；metadata_account_ids 为空时整体关闭，不读客户端值、不取在途登记、不解析端点，trace 记 not_in_metadata_accounts；客户端值只在处理臂读取。
 - 新增 service 与真实 handler 的同夹具交替 allocs 断言，修复前红测失败（对照臂 +1、空名单 +2/请求）。routes 中 m31 旧 M4 卡片样例的组合构建回放失败在原 73eaf 上即存在，由组装分支的按构建选样处理。
+
+### 2026-10-25 — T2.3 能力测试期望对齐（O-L04）
+
+- 原 73eaf 上两个能力测试仍按 T2.2 期望：生产装配已是 L03=true，metadata_account_ids 在 L-03 不可用时同样标记未实现。只改测试期望，产品不变。

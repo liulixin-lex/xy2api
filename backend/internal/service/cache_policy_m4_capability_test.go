@@ -117,7 +117,7 @@ func TestCachePolicyM4DefaultWiringNeverReportsUnimplementedActive(t *testing.T)
 				// Use the production constructor, rather than the full-build test fixture.
 				s := ProvideCachePolicyService(store, policyTestConfig(), nil, nil)
 				t.Cleanup(s.Stop)
-				require.Equal(t, CacheM4BuildCapabilities{L04: true}, s.m4Behaviors)
+				require.Equal(t, CacheM4BuildCapabilities{L04: true, L03: true}, s.m4Behaviors)
 				require.NoError(t, s.Refresh(context.Background()))
 				view, err := s.Get(context.Background(), tc.key)
 				require.NoError(t, err)
@@ -157,7 +157,7 @@ func TestCachePolicyM4PartialBuildUsesImplementedBehavior(t *testing.T) {
 		require.Empty(t, view.Effective.Blockers)
 		for _, field := range view.Schema {
 			marked, exists := field["not_implemented_in_build"]
-			if field["field"] == "metadata_group_ids" {
+			if field["field"] == "metadata_group_ids" || field["field"] == "metadata_account_ids" {
 				require.True(t, exists)
 				require.Equal(t, true, marked)
 			} else {
