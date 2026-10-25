@@ -996,6 +996,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			}
 		}
 
+		if providerCacheTraceFromGin(c) != nil {
+			observeProviderCacheTraceMap(c, event)
+		}
 		usagePatch := s.extractSSEUsagePatch(event)
 		if anthropicStreamEventIsTerminal(eventName, dataLine) {
 			sawTerminalEvent = true
@@ -1421,6 +1424,9 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, anthropicTooLargeError)
 	if err != nil {
 		return nil, nonstreamReadError(ctx, resp, err)
+	}
+	if providerCacheTraceFromGin(c) != nil {
+		observeProviderCacheTrace(c, body)
 	}
 
 	observer := upstreamResponseModelObserverFromContext(c)

@@ -1,0 +1,125 @@
+{
+  "_contract": [
+    "P-7",
+    "M2B-S5"
+  ],
+  "_note": "M2b：platforms=[messages_bridge]（不含 openai）：openai 分区只有经 Messages 桥的请求，OpenAI 原生请求不出 trace，也不计入覆盖率分母。platforms_covered 为 [openai]，scope_notes 带 openai_native_excluded，前端据此标注“仅 Messages 桥”。",
+  "_fixture": {
+    "observability_platforms": [
+      "messages_bridge"
+    ],
+    "counter_set": "S3",
+    "说明": "后端测试需预置的 observability.platforms 与计数集；同一 counter_set 的样例来自同一组计数，q=all 必须等于各分区之和（README §1.4）"
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/admin/cache/stats?window=24h&platform=openai",
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "policy_version": "2026-10-22-v1",
+      "as_of": "2026-10-23T07:03:12Z",
+      "generated_at": "2026-10-23T07:03:12Z",
+      "window": {
+        "start": "2026-10-22T07:03:12Z",
+        "end": "2026-10-23T07:03:12Z"
+      },
+      "effective_start": "2026-10-22T11:30:00Z",
+      "process_started_at": "2026-10-22T11:30:00Z",
+      "trace_enabled": true,
+      "trace_policy_rev": 7,
+      "schema_version": 1,
+      "platforms_covered": [
+        "openai"
+      ],
+      "scope_notes": [
+        "openai_native_excluded"
+      ],
+      "coverage": {
+        "business_requests": 900,
+        "business_prompt_tokens": 90000000,
+        "traced_requests": 880,
+        "traced_prompt_tokens": 88000000,
+        "coverage_ratio": 0.977778,
+        "category_known_ratio": 0.9909,
+        "targets": {
+          "coverage_ratio": 0.95,
+          "category_known_ratio": 0.99
+        }
+      },
+      "loss_classes": [
+        {
+          "class": "cold",
+          "requests": 80,
+          "prompt_tokens": 8000000,
+          "read_tokens": 0,
+          "opportunity_tokens": 0,
+          "excluded": false
+        },
+        {
+          "class": "full",
+          "requests": 800,
+          "prompt_tokens": 80000000,
+          "read_tokens": 70000000,
+          "opportunity_tokens": 0,
+          "excluded": false
+        }
+      ],
+      "pck_in": [
+        {
+          "class": "client_uuid",
+          "requests": 880,
+          "prompt_tokens": 88000000,
+          "read_tokens": 70000000
+        }
+      ],
+      "pck_out": [
+        {
+          "class": "passthrough",
+          "relay_family": "unknown",
+          "requests": 880,
+          "prompt_tokens": 88000000,
+          "read_tokens": 70000000,
+          "under_read_tokens": 0
+        }
+      ],
+      "pck_out_is_uuid_ratio": 1.0,
+      "session_headers": [
+        {
+          "header": "session_id",
+          "in_ratio": 1.0,
+          "out_ratio": 1.0
+        }
+      ],
+      "sess_out_relation": [
+        {
+          "relation": "client_value",
+          "requests": 880,
+          "prompt_tokens": 88000000
+        }
+      ],
+      "route_reasons": [
+        {
+          "reason": "sticky_hit",
+          "requests": 880,
+          "prompt_tokens": 88000000,
+          "read_tokens": 70000000
+        }
+      ],
+      "rebind_causes": [],
+      "model_isolated_switch_rate": 0.0,
+      "host_read_ewma": [
+        {
+          "host": "relay-a.example",
+          "read_share": 0.7955,
+          "samples": 300,
+          "half_life_s": 1800
+        }
+      ]
+    }
+  }
+}

@@ -84,8 +84,8 @@ func cacheL07Schema(caps cacheL07Caps) []map[string]any {
 func cacheM4IntError(index int, field string, v int, caps cacheL07Caps, writing bool) *CachePolicyFieldError {
 	f, ok := cacheL07FieldOf(field)
 	if index != 5 || !ok {
-		if v < 0 || v > 100 {
-			return &CachePolicyFieldError{Field: field, Code: "out_of_range", Limit: map[string]int{"min": 0, "max": 100}}
+		if lo, hi := m4PolicyIntRange(field); v < lo || v > hi {
+			return &CachePolicyFieldError{Field: field, Code: "out_of_range", Limit: map[string]int{"min": lo, "max": hi}}
 		}
 		return nil
 	}

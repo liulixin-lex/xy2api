@@ -6,6 +6,24 @@
 
 ## 当前交接状态
 
+### 缓存 PR C 组装（2026-10-25，O-MNT，draft 待 CI）
+
+- 在 main a003162ff（#136）上依次 merge M2b（含 Messages 测试与 golden 补交）、T2.3（含 T2.2 全部内容）及 fe-m2b、fe-m2-fixes、fe-m4l03（含 fe-m4l04）、fe-m4l07 四个 UI 来源；只用 merge commit，来源 SHA 不变。T2.2/T2.3 的同名 behaviorStale 占位在合并中删除，接入 #136 的真实陈旧标记，A-T22-1 单独补测试与 runbook。
+- 只改测试或登记的接缝独立提交：policy 回放按构建与能力选样（combo_prc 取代 m2m2b 的 list 与 pol2 的 list，替代样例必须在回放）、Gemini anchor_v2 期望、M4 账号候选边界选样、T2.2 原版调度等价改写的 scheduler-diff 登记。独立评审静态通过。
+- 开发期定向：service、handler 全部通过；routes 仅余 T2.2 not_subset 产品缺陷 2 例，待 T2.2 负责人修复后再 merge；race 无数据竞争；前端 vitest 与 vue-tsc 通过；上游审计、调度 diff、文档与 diff-check 通过。#137 合入后再 merge main 并追加 A-L07-3。最终 head 的 provider/OpenAI golden 由独立评审执行。未合入、未部署。
+
+### T2.3 / L-03（2026-10-25，G，本地冻结待定向验证）
+
+- 叠在冻结 T2.2 上接入 L-03 策略、账号候选/校验/history、Anthropic trace 与真实发送出口。任何非空客户端 user_id 都优先；a2 与 L-04 共用作用域和 lease，cacheable_content 先命中时允许生成但不改本地身份。
+- 实现与24个新顶层测试已准备，策略 v1.0.2、trace v1.0 原字节同步。首轮定向23/24顶层通过；唯一失败为契约 diff 排序笔误，按负责人更正同步冻结样例，产品字典序保持。受影响回放补验中；只跑触及包定向与契约，全量通用门禁交 CI，独立 golden 待评审方执行；T2.2 先于 T2.3 合入。不推送、不部署。
+
+### T2.2 / L-04（2026-10-25，G，实现草稿）
+
+- 临时合并已冻结的 M3.1/T4 与 provider 编译检查点后，实现原生 Messages/Gemini 的 serving-scoped a2、能力与策略双门控、在途上限、策略字段与 trace 契约。依赖的 provider 行为验收仍待完成。
+- 仅实际生效的 a2 才让 routing/sticky 消费解析后的 serving 组；Prepare 始终返回原 APIKey，跳过与对照请求保留基线 sticky/prefetch/选号序列；认证、计费与既有组级转换保留原 APIKey。兼容 Chat/Responses 不映射文本，按 empty_anchor 走原兜底；count_tokens 不派生。元数据接口仍只留集成接缝，不实现 L-03/L-07。
+- HMAC、租户与作用域、C2/C3、换组、实际 handler 字节对照和完整契约回放已准备；定向 Go 待执行，尚未通过验收。后续单批检查与独立关闭态 golden，未推送、部署。
+
+
 ### M3.1 转换出口隐私补修（2026-10-25，G，本地冻结待独立验证）
 
 - 在联合候选 efd7d3aaf 的独立评审 v2 精确树上补修：Chat 转换前统一还原，原生 Responses 规则错误清除已知 U；Messages 不扩大注入资格。实际 Forward 回显、关闭控制、结构门控及 reader EOF/读错测试已准备。
@@ -26,6 +44,11 @@
 - T0a.1–T0a.4、运行时策略与管理员面板已随 PR #132 合入 main `72c2d0169`，功能默认关闭，未变更生产。G 的详细实现与验证记录已原样移入 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)。
 - P1 L-01 已在吸收 M1 后完成本地实现与非计时门禁，保持默认关闭，待独立评审；当前交接见下方 P1 条目。
 
+
+### 缓存 M2b / provider 挂点（2026-10-25，编译已过）
+
+- 已变基到 M3 main c07ece514。Anthropic/Gemini 生产发送、原始 usage、计费后结算与 Wire 接线已补；Begin/Bind/accessor 及平台、租户、serving 组作用域的摘要/history 键保持冻结。入站锚点按实际协议读取，涵盖 Messages/Responses 转换。
+- 检查点 `9243c2867` 已通过五 tag vet、docs/diff，并通知依赖方。audit 因旧内联未送达判断的字面量登记停止；仅同步登记到相同的调用与提前返回，源码不变，继承五 tag 结果后续跑 unit/race、实际契约/golden、stats S1–S5 与 Messages 桥。行为门禁及后续字段组尚未完成，不作为最终集成交付。
 
 - G：M1 日志 Attr 合并已验证；正式 d1 待复核，详见归档。
 
@@ -217,6 +240,23 @@
 
 ## 进行中的工作
 
+### 20261025-cache-prc-assembly — PR C 组装（O-MNT，进行中）
+
+- 分支 cache/prc-assembly，基于 main a003162ff。已完成来源 merge、接缝提交与开发期定向；以 draft PR 先跑 CI，后续修复与 main merge 只追加提交。
+- 待办：T2.2 not_subset 与分配修复交付后再 merge 并复验受影响回放；#137 合入后 merge main 并 cherry-pick A-L07-3；最终 head golden。不推送正式 PR 以外的分支，不部署。
+
+### 20261025-cache-m4-l03 — T2.3 上游元数据身份（G，进行中）
+
+- 叠在 T2.2 冻结提交上，独立工作树开发；不改正在验证的 T2.2 与 L-01 修复来源。
+- 按现行契约由作用域匹配的非空 a2 派生会话，账号决定完整64位设备 HMAC；允许 cacheable_content 先命中，metadata 与锚点共享 lease。任何非空客户端值与 metadata 透传优先；官方端点、非APIKey、CLI与账号名单运行时校验，关闭态零触达。
+- 策略 m4l03 v1.0.1、trace v1.0 已原字节同步；新增账号字段只核新增ID，disable PUT跳过账号查询，账号/组提示分域。普通与透传发送出口均接线，生成值从本地同步与调试输出排除。定向与独立 golden仍待执行；全量通用检查交CI。
+
+### 20261025-cache-m4-l04 — T2.2 本地锚点（G，进行中）
+
+- 临时基线合并已冻结 M3.1/T4.0 与已通过五 tag 编译的 T0b.4 检查点；仅本任务增量在其上提交，依赖合入后再变基，不使用 stash。
+- 实现 serving 组隔离的 a2、原层级之后的本地 sticky、三条换组重派生、count_tokens 排除、Gemini、并发上限与契约；请求 accessor 同时检查构建能力与行为过期保护。L-03/L-07 不在范围内。
+- 当前仅草稿与轻检；开发定向与交付单批检查尚未执行，不声称验收通过。不推送、不部署。
+
 ### 20261025-cache-m4-l07 — T2.5 L-07 Anthropic 忙时保持粘性（O-L07，候选待统一门禁）
 
 - 基于联合候选 d866d29c4。sticky owner 槽位忙且等待队列满时，Layer2 照常服务本次 attempt，但借软罚拒写通道（INV-04）让选号层 7 处与 handler 层 7 处绑定都不改绑；下一次选号前释放（按 attempt）。H1–H3、A1–A6 都在 0.4.x 既有判定之后叠加，只会更早回到基线；状态读写失败一律放弃。
@@ -278,6 +318,12 @@
 - 当前：完整四提交已变基到M2 main；northstar、计数器、M1.1 emit-only/UTC与仓储测试隔离保留。1e31dbe3c五tag编译全部通过；v1.1后继e972cd4e7仅改样例/unit测试，unit补查通过，其余四tag按未变化编译输入继承。R已核对变基语义无阻塞；工作树待本次纯记忆收尾后交P。实际unit/race、zero/logger/compat/lint、22样例回放与staging仍由最终M3候选统一执行，来源没有重复长测试。未推送、未变更生产。
 
 
+### 20261024-cache-p0b-fields — M2b（G2，进行中）
+
+- 基点 c07ece514；五个既有检查点以 rebase --onto 重放，保留 M2/M3 与仓储隔离。当前 provider 挂点、原始 usage 和计费后结算已接齐，检查点 9243c2867 的五 tag vet 全过；先前 main16a 的 golden 是基线证据，当前候选行为回放待同一流水线续跑。
+- 接口冻结：BeginProviderCacheTrace、BindProviderCacheTraceSession、ProviderCacheTraceSessionDigest；摘要按 <platform>-session 域和 api_key_id|serving_group_id|local_hash 计算，前 16 hex，history/LRU 带平台。L-04 决策不读取观测 accessor。Gemini 来源保留合法 cacheable_content/message_content_fallback，M4 只追加 anchor_v2。
+- 单条流水线先五 tag，通过即本地提交编译检查点并通知依赖方；同租约继续触及包 unit、race、真实输出契约与 golden、stats S1–S5、Messages 桥和增量 lint。不重复任务，可信编译缓存播种，测试 -count=1；结果待补。
+- 旧存储只在内存补 ingress_chain_percent=min(10,chain_percent)，不写回或改 rev，validate/PUT 共用基础；FX-OBS-1 alias-only 按 n/a_usage，计费解析不改。T0b.5 别名计费变化按裁定延期。其他字段组待后续实现，未推送或部署。
 
 ### 20261023-cache-p0b — 在线缓存北极星与管理员图表（G2，实现完成，待集成）
 
@@ -1231,7 +1277,96 @@ pnpm --dir frontend run build
 - 六个新顶层测试覆盖实际注入回显、工具、累积输出、超大事件、失败/HTTP 错误、关闭态控制、Messages 不可注入及 EOF/原始读错；结构登记锁定实际写入门控。只做格式/diff/文档/来源审计，不冒称 Go 实跑。
 - 后续由独立评审做一次合并定向与 golden，P 核来源并组装，S 仅补 active/T4.0；本分支冻结后不改运行树、不重复排 heavy。
 
+### 2026-10-24T16:54Z — 缓存 M2b stats 平台分区（本地检查点）
+
+- 按 v1.0.2 区分当前覆盖和显式平台历史；host EWMA、会话与容量分区，跨平台先求和后折叠；默认 OpenAI/all 与小时行用 main16a 原函数逐字段对照。新 HTTP 测试用固定独立计数并校验契约原元数据，源样例 SHA 完整保留。
+- 原五 tag、20 出站和 50 计费 golden 已过，原策略三处失败已修正但未复跑；新增 stats 测试尚未运行。重任务为 M3 候选让行，当前不是可集成交付。文档与保护登记已同步，不改调度、迁移或账单。
+- 下一步：继续 provider 捕获/结算，资源释放后统一补增量门禁与实际输出契约校验；不重复未受影响且通过的检查。未推送或部署。
+
+### 2026-10-24T17:07Z — 缓存 M2b Messages 桥接线（本地，未验收）
+
+- 为桥补齐发送时标、最终请求头、流式用量存在性和结算计数；平台开关按路径区分 openai/messages_bridge，原生 Anthropic 与 raw Chat 子路径排除。计费赋值和路由选择未改。
+- 测试覆盖两种响应模式的八态开关矩阵、typed 显式零/缺字段、原生子路径、OpenAI 被排除时零 body 读取；原入口结构清单增加一条流式入口，旧断言全部保留。
+- 桥的独立 main 出站/计费基线及新增 Go/race 均待资源释放后执行，目前只有格式和静态检查。Anthropic/Gemini、后续字段组仍未完成，不推送、不部署、不称交付。
+
+### 2026-10-24T18:51Z — M2b 观测别名与 provider 租户隔离基础
+
+- 分类器读取类位改为 bit0/2/3；alias-only 保留 usage_fields、按 n/a_usage 输出且无 na_reason，依赖读量的两个标记关闭，计费解析未变。追加六种真实转发事件回归及 canonical/metadata 位/优先级测试，复制 v1.2 schema 和增量样例，44 份旧夹具 SHA 不变。
+- provider session_digest 按指定 HMAC 域和 API key、serving 组、原会话哈希生成，内部历史键另带 platform。独立有界 LRU 只收此键，发送、结算、历史发布分开，失效 owner 不能发布到复用摘要的新 epoch；没有 OpenAI 旧会话表读写。尚未接入 Anthropic/Gemini 生产挂点，属于实现基础。
+- 源契约自检、格式及静态文档检查；所有新增 Go/race 与实际输出校验仍待执行，重门禁按负责人要求给 M3 让行，不重复排队。非阻塞的保留期清理与行为策略过期保护保留在后续维护范围。未推送、部署或访问生产。
+
+### 2026-10-24T18:56Z — M2b session digest 契约域更正
+
+- 按 F v1.2.1 更正 provider HMAC 域为 <platform>-session，保留租户与 serving 组输入及 16 位 hex 格式；原域来自开工包笔误。历史键复用同一计算结果，后续 S2/S6 也使用它。
+- 四条合法、一条无作用域反例向量原样复制并登记 SHA；新增直接对期望摘要及真实历史键的测试，Anthropic/Gemini 摘要自身亦相互隔离。源契约、格式与轻量文档检查，Go/race 继续并入已有待执行增量流水线，为 M3 让行。尚未接入 provider 挂点，不是可集成交付。
+
+### 2026-10-25T04:06Z — M2b provider 挂点编译准备
+
+- 补齐 Anthropic 原生、passthrough、两种协议转换、Vertex/Bedrock 发送及原始 usage，Gemini compat/native 的 buffered、streaming 与 SSE 聚合回调；Wire 复用同一策略、计数与观测服务。Begin/Bind/accessor 签名和 scoped HMAC/history 键保持冻结；L-04 不依赖观测开关。
+- 结算在既有 force-cache/TTL 处理后读取快照，仅成功计费或 usage-only 路径发布；失败和普通未送达只关闭计时，不训练历史。计费算法不改。新增 provider 出站/计费对照、关闭态、usage 位和失败发布边界测试。
+- 本轮新 Go 尚未运行；唯一增量流水线先做五 tag 编译，通过即提交检查点，然后 unit/race、真实输出契约与 golden、平台分区及 Messages 桥。可信编译缓存可播种，所有测试使用 -count=1；不重复旧任务。
+
+### 2026-10-25T05:38Z — T0b.4 provider 编译检查点
+
+- 五 tag vet 全部通过；Begin/Bind/accessor 与 session digest/history 键保持冻结。仅编译已验收，provider 行为、计费和关闭态回放由同一重任务后续执行，结果待补；不作为 M2b 最终集成交付。
+
+### 2026-10-25T05:43Z — T0b.4 编译检查点与 audit 登记接缝
+
+- 检查点 `9243c2867` 五 tag vet、docs/diff 全过，已交依赖方。audit 要求旧的内联未送达条件字面量，但现实现先保存相同调用的返回值，再提前返回；仅将 required_literals 同步为实际调用和返回保护，产品 Go 源码不改。
+- 原失败报告与日志完整保留；相同 Go 指纹继承全部已过编译，从 audit 续跑未执行项，独立缓存复用、测试 -count=1。behavior gates 尚无通过结论，后续字段组未完成；未 push 或部署。
+
+### 2026-10-25T06:05Z — provider 未送达兼容登记对齐
+
+- 只将 upstream policy 的旧内联未送达字面量替换为现有的返回值赋值与提前返回两条保护，产品 Go 文件零 diff；独立元数据提交供依赖方按范围继承。当前五 tag 编译检查点仍为 `9243c2867`。
+- 轻量 audit、docs 和 diff-check 随本次元数据检查登记在仓库外报告；续跑继承相同 Go 源指纹与通过项，不重新启动或重复编译，行为门禁尚待完成。
+
+### 2026-10-25 — T2.2 原生锚点接线草稿
+
+- 仅原生 Messages/Gemini 派生，兼容入口保持原解析与原 hash；候选与分桶不读观测 digest。Claude Code 限制、prompt-too-long 和中间件 serving 组变化均重新判定；认证与计费不换 key，trace 单独使用 serving 组。
+- 同步策略新字段、history、完整契约与 JWT 轮换说明；有界在途计数异常回基线。包含定向与实际 handler 对照测试草稿，尚无 Go 通过结论。provider 五 tag 编译不等于行为验收；集成依赖合入后再按来源变基，不使用 stash。
+
+### 2026-10-25 — T2.2 静态边界与登记收尾
+
+- count_tokens handler 完全绕过锚点与 provider trace 准备，AST 断言零触达；纯准备函数保留内部 count_tokens 原因。Gemini 入站模型捕获位于原生 POST 解析之后、映射之前。实际 fallback 测试只对既有 Antigravity 随机 requestId 的精确值跨度做规范化，其他出站/客户端字节及关闭态调用序列严格比较。
+- 冻结契约 README 的四段父版本触发 IPv4 文档误报，仅为该精确路径登记 IPv4 规则例外，契约字节与源 SHA 保持，不放宽其他敏感项规则。原误报记录保留；后继只改文档和工具登记，backend 不变，Go 定向仍在原队列等待，不声称验收。
+
+### 2026-10-25 — T2.2 B-T22-1 跳过请求命名空间修复
+
+- 独立静态审查发现准备阶段提前返回 serving 克隆，会改变 Claude Code 回退组中未生效请求的 sticky 行为；改为只记录内部作用域，拿到实际锚点与在途许可后才设置 GroupID，三个 handler 接缝均以 CacheAnchorApplied 为条件。兼容入口恒返回原 key。
+- 补六种跳过状态的真实 cache/prefetch/选号序列对照，以及真实 handler 的客户端/出站字节对照；applied 的 C2/C3 断言仍在。先停止自动提交合并检查的条件控制器，原定向队列绑定修复后 SHA，未重复排队；本提交仍无 Go 通过结论。
+- 组装要求：T0b.4 在本任务之前合入；与维护分支接入真实 behaviorStale 时删除 cache_policy_behavior_stale.go 占位文件，不能同时保留两个定义。
+
+### 2026-10-25：G 冻结 T2.3 / L-03 待验证
+
+- 在冻结 T2.2 之上接入原生 Anthropic 元数据身份、策略账号字段与候选、history 和 trace；任意非空客户端值优先，Claude CLI、官方端点、兼容入口和 count_tokens 排除。账号变更逐 attempt 重查条件；生成值只留在上游，常规同步、透传本地 body、调试 body/header 与普通指纹日志均排除生成身份。
+- 24 个新顶层测试覆盖纯函数向量、租户作用域、跳过顺序、嵌套分桶、共享 lease、关闭零分配、真实 Forward 和完整 HTTP/trace 契约。Go 尚未执行，不宣称通过；轻检与独立评审结果以后续交接为准，全量检查交 CI。
+
+### 2026-10-25 — G 开发期定向失败处置
+
+- 首轮开发期定向的失败原记录保留。L-03 唯一失败由冻结契约修正为字典序，按负责人最新裁定同步策略 v1.0.2 与来源哈希，产品排序零修改。
+- 三处 L-04 新夹具补全真实装配条件：Antigravity mixed_scheduling、非空 SettingService 与原组计费倍率；均只改新测试，不改变既有产品路径或旧测试。受影响项在本地开发环境补验，Linux golden 仍由独立评审执行，全量门禁交 CI。
+
+### 2026-10-25 — 20261025-cache-prc-assembly — PR C 组装候选
+
+- 依序 merge M2b、T2.3（含 T2.2）与五个 UI 来源；冲突均保留双方，Go 冲突文件 gofmt。首版 T2.3 合并重复声明一个字段，本地编译发现后在未发布分支上重做，旧提交作废。
+- 补交从未入库的 Messages golden（在未修改的 main16a 上独立重录，逐字节一致）；policy 回放改为按构建选样；登记 T2.2 的原版调度等价改写。T2.2 not_subset 为来源缺陷，契约裁定保留该字段于 diff，待来源修复。开发期定向、race、前端与轻量门禁结果见当前交接状态；全量门禁交 CI。
+
 ### 2026-10-25 — 20261025-cache-m4-l07 — T2.5 L-07 实现
 
 - 请求记录只为处理组分配并挂在 resilience RequestState 上（keptBusy 落在填充位、l07 槽 16B，结构体仍在 576B size class 内）；对照组共用不可变 sentinel。A1/A2 状态为 Redis 哈希 l07:<gid>:<session>，读取与 owner 的 xy:resil:sf 计数同一 pipeline，只在保持时写入；Layer1.5 owner 命中用同一 pipeline 的 EXPIRE+DEL 清零。A3/A4/A5 为进程内有界计数，多实例时为单实例近似值。
 - H1 的近期失败读取既有的 session failure 计数，实际回看上限为 min(health_lookback_seconds, streak_window_seconds)。护栏两边各至少 20 个样本才比较，只暂停本进程、不改存储的策略。
+
+### 2026-10-25 — T2.2 关闭态分配修复（O-L04 接手 G）
+
+- provider golden 发现名单外请求先分配判定结构再判组（每请求 +1，Claude Code 回退 +2，prompt-too-long 回退另有重算哈希）。改为派生前的跳过一律只记 trace、不保留判定；Claude Code 回退按直连回退组判名单，名单外不查组；prompt-too-long 只在 A 已生效或 B 待定时重算；Gemini 在 gemini_anchor 关闭时不为锚点解析请求体。对照臂与 earlier_tier 的 a2 分桶开销按开工包 v1.3.3 只报告，不改。
+- 按 F 裁定，策略 diff 只对解析阶段错误与 exceeds_rollout_percent/exceeds_chain_percent 去掉字段；not_subset_of_anchor_groups 等引用与关系错误保留字段（m3m4 v1.2）。
+- 新增 service 与真实 handler 的同夹具交替 allocs 断言（每臂 5 轮取最小，先预热一轮），关闭态严格相等；在原 240d 产品上红测失败、修复后通过。wire、选号与 sticky 断言不变；未推送、未部署。
+
+### 2026-10-25 — T2.3 L-03 关闭态分配修复（O-L04 接手 G）
+
+- 按 cherry-pick 并入 T2.2 的关闭态分配修复（不变基）。L-03 对照臂与名单外组在挂 attempt 前判定，不再为每次 attempt 分配 context；metadata_account_ids 为空时整体关闭，不读客户端值、不取在途登记、不解析端点，trace 记 not_in_metadata_accounts；客户端值只在处理臂读取。
+- 新增 service 与真实 handler 的同夹具交替 allocs 断言，修复前红测失败（对照臂 +1、空名单 +2/请求）。routes 中 m31 旧 M4 卡片样例的组合构建回放失败在原 73eaf 上即存在，由组装分支的按构建选样处理。
+
+### 2026-10-25 — T2.3 能力测试期望对齐（O-L04）
+
+- 原 73eaf 上两个能力测试仍按 T2.2 期望：生产装配已是 L03=true，metadata_account_ids 在 L-03 不可用时同样标记未实现。只改测试期望，产品不变。

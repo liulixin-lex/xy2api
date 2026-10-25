@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,17 +34,24 @@ func (r *cachePOL2Store) GetMultiple(ctx context.Context, keys []string) (map[st
 	return r.cacheRouteStore.GetMultiple(ctx, keys)
 }
 
-// This build contains M3.1 and M4 T4.0, so pol2 v1.0 samples are kept byte for
-// byte but replayed through their pol2 v1.1 successors: the M3 shapes describe
-// an M3-only build and none of v1.0 carries the M3.1 upstream increments.
+// The PR C build (M3.1, T4.0, POL-2, M2b, T2.2, T2.3) replays the pol2
+// samples that only describe upstream_identity, and F's combo_prc stale lists.
+// Every other pol2 sample stays byte for byte and names its final successor:
+// v1.0 lacks M3.1, and the pol2_m31 lists lack M2b observability and the
+// T2.2/T2.3 anthropic_identity fields.
 var cachePOL2Superseded = map[string]string{
-	"pol2_m3_list_on.json":                 "pol2_m31_m4_dormant_list_default.json",
-	"pol2_m3_validate_enable.json":         "pol2_m31_m3_validate_enable.json",
-	"pol2_m3_put_200.json":                 "pol2_m31_m3_put_200.json",
-	"pol2_m4_list_on.json":                 "pol2_m31_m4_list_on.json",
-	"pol2_m4_list_masked_by_master.json":   "pol2_m31_m4_list_masked_by_master.json",
-	"pol2_m4_dormant_list_db_enabled.json": "pol2_m31_m4_dormant_list_db_enabled.json",
-	"pol2_list_killed_and_stale.json":      "pol2_m31_list_killed_and_stale.json",
+	"pol2_m3_list_on.json":                     "prc_pol2_list_default_all_off.json",
+	"pol2_m3_validate_enable.json":             "pol2_m31_m3_validate_enable.json",
+	"pol2_m3_put_200.json":                     "pol2_m31_m3_put_200.json",
+	"pol2_m4_list_on.json":                     "prc_pol2_list_on.json",
+	"pol2_m4_list_masked_by_master.json":       "prc_pol2_list_masked_by_master.json",
+	"pol2_m4_dormant_list_db_enabled.json":     "prc_pol2_list_dormant_db_enabled.json",
+	"pol2_list_killed_and_stale.json":          "prc_pol2_list_kill_switch.json",
+	"pol2_m31_m4_dormant_list_default.json":    "prc_pol2_list_default_all_off.json",
+	"pol2_m31_m4_dormant_list_db_enabled.json": "prc_pol2_list_dormant_db_enabled.json",
+	"pol2_m31_m4_list_on.json":                 "prc_pol2_list_on.json",
+	"pol2_m31_m4_list_masked_by_master.json":   "prc_pol2_list_masked_by_master.json",
+	"pol2_m31_list_killed_and_stale.json":      "prc_pol2_list_kill_switch.json",
 }
 
 func TestCachePolicyPOL2ContractReplay(t *testing.T) {
@@ -52,6 +60,7 @@ func TestCachePolicyPOL2ContractReplay(t *testing.T) {
 	require.NoError(t, err)
 	hashes := map[string]string{}
 	require.NoError(t, json.Unmarshal(manifest, &hashes))
+	dirs := map[string]string{}
 	names := make([]string, 0, len(hashes))
 	for name, digest := range hashes {
 		raw, err := os.ReadFile(filepath.Join(root, name))
@@ -59,27 +68,32 @@ func TestCachePolicyPOL2ContractReplay(t *testing.T) {
 		require.Equal(t, digest, fmt.Sprintf("%x", sha256.Sum256(raw)), name)
 		if _, superseded := cachePOL2Superseded[name]; !superseded {
 			names = append(names, name)
+			dirs[name] = root
 		}
+	}
+	prcRoot, prcNames := cachePRCContractNames(t, "prc_pol2_")
+	for _, name := range prcNames {
+		names = append(names, name)
+		dirs[name] = prcRoot
 	}
 	for old, successor := range cachePOL2Superseded {
 		require.Contains(t, hashes, old)
-		require.Contains(t, hashes, successor, "%s needs a replayed successor", old)
-		require.NotContains(t, cachePOL2Superseded, successor)
+		require.Contains(t, dirs, successor, "%s needs a replayed successor", old)
 	}
 	sort.Strings(names)
 	require.Equal(t, []string{
-		"pol2_m31_list_killed_and_stale.json",
 		"pol2_m31_m3_put_200.json",
 		"pol2_m31_m3_validate_enable.json",
-		"pol2_m31_m4_dormant_list_db_enabled.json",
-		"pol2_m31_m4_dormant_list_default.json",
-		"pol2_m31_m4_list_masked_by_master.json",
-		"pol2_m31_m4_list_on.json",
+		"prc_pol2_list_default_all_off.json",
+		"prc_pol2_list_dormant_db_enabled.json",
+		"prc_pol2_list_kill_switch.json",
+		"prc_pol2_list_masked_by_master.json",
+		"prc_pol2_list_on.json",
 	}, names)
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			raw, err := os.ReadFile(filepath.Join(root, name))
+			raw, err := os.ReadFile(filepath.Join(dirs[name], name))
 			require.NoError(t, err)
 			var f cacheContract
 			require.NoError(t, json.Unmarshal(raw, &f))
@@ -165,20 +179,28 @@ func TestCachePolicyPOL2ContractReplay(t *testing.T) {
 			default:
 				t.Fatalf("unexpected request %s %s", f.Request.Method, f.Request.Path)
 			}
-			// Absent build capabilities mean every M4 behavior is implemented.
-			capabilities := service.CacheM4BuildCapabilities{L04: true, L03: true, L07: true}
-			if meta.Fixture.BuildCapabilities != nil {
-				capabilities = *meta.Fixture.BuildCapabilities
-			}
 			store := &cachePOL2Store{cacheRouteStore: repo}
 			now := time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)
-			policies := service.NewCachePolicyService(store, cfg,
-				service.WithCacheNorthstar(),
-				service.WithCachePolicyAccounts(&cacheM3FaultAccounts{}),
-				service.WithCacheM4Policies(&cacheM4Groups{}),
-				service.WithCacheM4BuildCapabilities(capabilities),
-				service.WithCachePolicyClock(func() time.Time { return now }),
-			)
+			clock := func() time.Time { return now }
+			var options []service.CachePolicyOption
+			if strings.HasPrefix(name, "prc_") {
+				var stale bool
+				options, stale = cachePRCBuildOptions(t, raw, clock)
+				require.True(t, stale)
+			} else {
+				// upstream_identity only: the PR C production capabilities.
+				require.Nil(t, meta.Fixture.BuildCapabilities)
+				options = []service.CachePolicyOption{
+					service.WithCacheNorthstar(),
+					service.WithCachePolicyAccounts(cacheL03ContractAccounts{}),
+					service.WithCacheM4Policies(&cacheM4Groups{}),
+					service.WithProviderCacheTrace(),
+					service.WithCacheAnthropicObservability(),
+					service.WithCacheM4BuildCapabilities(service.CacheM4BuildCapabilities{L04: true, L03: true}),
+					service.WithCachePolicyClock(clock),
+				}
+			}
+			policies := service.NewCachePolicyService(store, cfg, options...)
 			require.NoError(t, policies.Refresh(ctx))
 			fresh := policies.Snapshot()
 			// Refreshes fail beyond the bound; the request then reads settings again.

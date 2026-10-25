@@ -1,0 +1,84 @@
+{
+  "_contract": [
+    "M4-2",
+    "M4-L07"
+  ],
+  "_note": "group_ids 加入 share active 的分组（32）：share 组由钩子整体接管选号，L-07 在其中无效，warnings 带 share_group_no_effect，允许写入。在已有 [31] 上新增 ID 属于开启方向。",
+  "_fixture": {
+    "build_capabilities": {
+      "l04": false,
+      "l03": false,
+      "l07": true
+    },
+    "说明": "T2.5 构建的静态能力（l07 为 true；T2.2/T2.3 未合入时 l04、l03 为 false），不属于响应",
+    "share_active_group_ids": [
+      32
+    ]
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/routing/validate",
+    "body": {
+      "expected_rev": 1,
+      "spec": {
+        "keep_sticky_on_busy": {
+          "group_ids": [
+            31,
+            32
+          ]
+        }
+      },
+      "reason": "加入第二个分组",
+      "confirm": {
+        "checkbox": true,
+        "typed": "cache_routing_policy"
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": true,
+      "errors": [],
+      "warnings": [
+        "share_group_no_effect"
+      ],
+      "diff": [
+        {
+          "field": "keep_sticky_on_busy.group_ids",
+          "before": [
+            31
+          ],
+          "after": [
+            31,
+            32
+          ]
+        }
+      ],
+      "risk": "highest",
+      "direction": "enable",
+      "confirm": {
+        "reason_required": true,
+        "checkbox_required": true,
+        "type_to_confirm": "cache_routing_policy"
+      },
+      "current_rev": 1,
+      "rev_stale": false,
+      "effective_preview": {
+        "state": "on",
+        "active": true,
+        "blockers": []
+      },
+      "affected": [
+        {
+          "key": "routing",
+          "state_before": "on",
+          "state_after": "on",
+          "active_after": true
+        }
+      ]
+    }
+  }
+}

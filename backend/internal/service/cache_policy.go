@@ -55,23 +55,28 @@ type cachePolicyEntry struct {
 // private and are built once at publication. Requests hold one pointer across
 // retries and streaming; readers never consult settings.
 type CachePolicySnapshot struct {
-	kill          bool
-	stale         bool
-	master        bool
-	trace         bool
-	northstar     bool
-	persistTrace  bool
-	northstarSpec CacheNorthstarPolicy
-	samplePercent int
-	chainPercent  int
-	byteBudget    int64
-	rate          int64
-	revs          [6]int64
-	revision      string
-	entries       [6]cachePolicyEntry
-	upstream      CacheUpstreamIdentityPolicy
-	routingL07    CacheRoutingL07Policy
-	cohortViews   [2]cachePolicyCohortView
+	kill                bool
+	stale               bool
+	master              bool
+	trace               bool
+	northstar           bool
+	persistTrace        bool
+	northstarSpec       CacheNorthstarPolicy
+	samplePercent       int
+	chainPercent        int
+	byteBudget          int64
+	rate                int64
+	revs                [6]int64
+	revision            string
+	entries             [6]cachePolicyEntry
+	anchorPolicy        cacheAnthropicAnchorPolicy
+	l04Available        bool
+	l07Available        bool
+	upstream            CacheUpstreamIdentityPolicy
+	routingL07          CacheRoutingL07Policy
+	cohortViews         [2]cachePolicyCohortView
+	platforms           uint8
+	ingressChainPercent int
 }
 
 func (p *CachePolicySnapshot) TraceEnabled() bool  { return p != nil && p.trace }
@@ -162,6 +167,7 @@ type CachePolicyService struct {
 	m4Available                     bool
 	m4Behaviors                     CacheM4BuildCapabilities
 	anthropicObservabilityAvailable bool
+	providerTraceAvailable          bool
 	caps                            CachePolicyCaps
 	kill, diagnostics, aware        bool
 	rollout                         int
@@ -339,9 +345,17 @@ func (s *CachePolicyService) publishEntries(entries [6]cachePolicyEntry) {
 	p.persistTrace = p.trace && persist
 	p.samplePercent = policyInt(o["sample_percent"])
 	p.chainPercent = policyInt(o["chain_percent"])
+	p.platforms = cacheTracePlatformOpenAI
+	if s.providerTraceAvailable {
+		p.platforms = cacheTracePlatformsMask(o["platforms"])
+		p.ingressChainPercent = policyInt(o["ingress_chain_percent"])
+	}
 	p.byteBudget = int64(min(policyInt(o["byte_budget_mib"]), s.caps.MaxByteBudgetMiB)) << 20
 	p.rate = int64(min(policyInt(o["rate_mib_per_s"]), s.caps.MaxRateMiBPerS)) << 20
 	p.upstream = upstreamIdentityFromEntry(entries[3], p.MasterEnabled() && !p.stale)
+	p.l04Available = s.m4Behaviors.L04
+	p.l07Available = s.m4Available && s.m4Behaviors.L07
+	p.anchorPolicy = cacheAnthropicAnchorPolicyFromEntry(entries[4], s.m4Behaviors)
 	p.routingL07 = routingL07FromEntry(entries[5], p.MasterEnabled() && !entries[0].parseError, s.m4Available && s.m4Behaviors.L07, s.l07Caps)
 	p.revision = fmt.Sprintf("m%d.o%d.u%d.a%d.r%d", p.revs[0], p.revs[1], p.revs[3], p.revs[4], p.revs[5])
 	p.initCohortViews()
@@ -411,14 +425,10 @@ func policyInt(v any) int {
 	return 0
 }
 
-func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config, accounts AccountRepository, groups GroupRepository, gateway *GatewayService) *CachePolicyService {
-	// T2.5 implements L-07 with every limit of M4 kickoff §11 (DESIGN §6.1A);
-	// L-04 and L-03 stay storage-only until T2.2/T2.3.
-	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups),
-		WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L07: true}))
-	if gateway != nil {
-		gateway.cachePolicies = s
-	}
+func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config, accounts AccountRepository, groups GroupRepository) *CachePolicyService {
+	// T2.2/T2.3 implement L-04/L-03 and T2.5 implements L-07 with every limit of
+	// M4 kickoff §11 (DESIGN §6.1A).
+	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups), WithProviderCacheTrace(), WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L04: true, L03: true, L07: true}), WithCacheAnthropicObservability())
 	s.Start()
 	return s
 }
@@ -434,6 +444,10 @@ func (s *CachePolicyService) subscribe(notify func(*CachePolicySnapshot)) {
 
 func (s *CachePolicyService) defaults(index int) map[string]any {
 	out := policyDefaults(index)
+	if index == 1 && s.providerTraceAvailable {
+		out["platforms"] = []string{"openai"}
+		out["ingress_chain_percent"] = 10
+	}
 	if s.northstarAvailable && index == 1 {
 		out["persist_trace_hourly"] = true
 	}

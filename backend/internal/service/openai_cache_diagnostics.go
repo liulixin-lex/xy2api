@@ -163,8 +163,8 @@ func (s *OpenAIGatewayService) captureCacheRequestDiagnostic(c *gin.Context, req
 }
 
 func (s *OpenAIGatewayService) finishCacheDiagnostic(c *gin.Context, body []byte, result *OpenAIForwardResult) {
-	if result != nil && c != nil && c.Request != nil && !strings.HasSuffix(c.Request.URL.Path, "/messages") {
-		if p := CachePolicyFromGin(c); p.TraceEnabled() {
+	if result != nil && c != nil && c.Request != nil && cacheTraceMessagesAttemptAllowed(c) {
+		if p := CachePolicyFromGin(c); p.TraceEnabledFor(cacheTraceOpenAIPlatform(c)) {
 			result.cachePanel = &cachePanelRequest{policy: p}
 		}
 	}

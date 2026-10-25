@@ -179,6 +179,11 @@ func (s *CachePolicyService) schema(i int) []map[string]any {
 			map[string]any{"field": "byte_budget_mib", "type": "int", "min": 8, "max": s.caps.MaxByteBudgetMiB, "unit": "MiB", "cap_source": "gateway.cache_trace.max_byte_budget_mib"},
 			map[string]any{"field": "rate_mib_per_s", "type": "int", "min": 1, "max": s.caps.MaxRateMiBPerS, "unit": "MiB/s", "cap_source": "gateway.cache_trace.max_rate_mib_per_s"})
 	}
+	if i == 1 && s.providerTraceAvailable {
+		fields = append(fields,
+			map[string]any{"field": "platforms", "type": "enum_list", "options": []string{"openai", "anthropic", "gemini", "messages_bridge"}},
+			map[string]any{"field": "ingress_chain_percent", "type": "int", "min": 0, "max": 100, "unit": "percent"})
+	}
 	if i == 1 && s.northstarAvailable {
 		fields = append(fields, map[string]any{"field": "persist_trace_hourly", "type": "bool"})
 	}
@@ -227,7 +232,7 @@ func (s *CachePolicyService) Get(ctx context.Context, key string) (CachePolicyVi
 		return CachePolicyView{}, err
 	}
 	view := s.view(i, s.parse(i, raw[cachePolicySettings[i]]), s.Snapshot())
-	if i == 3 {
+	if i == 3 || i == 4 {
 		s.populateCachePolicyAccountOptions(ctx, &view)
 	}
 	if i == 4 || i == 5 {
@@ -262,6 +267,7 @@ func (s *CachePolicyService) List(ctx context.Context, version string) (CachePol
 	}
 	s.populateCachePolicyAccountOptions(ctx, &list.Policies[3])
 	if s.m4Available {
+		s.populateCachePolicyAccountOptions(ctx, &list.Policies[4])
 		s.populateCachePolicyGroupOptions(ctx, &list.Policies[4], &list.Policies[5])
 	}
 	return list, nil

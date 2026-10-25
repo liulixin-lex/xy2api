@@ -114,15 +114,25 @@ func TestCachePolicyM4DefaultWiringNeverReportsUnimplementedActive(t *testing.T)
 				store.rows["cache_feature_master"] = fmt.Sprintf(`{"rev":1,"spec":{"enabled":%t}}`, master)
 				store.rows["cache_"+tc.key+"_policy"] = `{"rev":1,"spec":` + tc.spec + `}`
 				// Use the production constructor, rather than the full-build test fixture.
-				s := ProvideCachePolicyService(store, policyTestConfig(), nil, nil, nil)
+				s := ProvideCachePolicyService(store, policyTestConfig(), nil, nil)
 				t.Cleanup(s.Stop)
-				require.Equal(t, CacheM4BuildCapabilities{L07: true}, s.m4Behaviors)
+				require.Equal(t, CacheM4BuildCapabilities{L04: true, L03: true, L07: true}, s.m4Behaviors)
 				require.NoError(t, s.Refresh(context.Background()))
 				view, err := s.Get(context.Background(), tc.key)
 				require.NoError(t, err)
-				require.Equal(t, "blocked", view.Effective.State)
-				require.False(t, *view.Effective.Active)
-				require.Equal(t, []string{"not_implemented_in_build"}, view.Effective.Blockers)
+				if tc.key == "routing" {
+					require.Equal(t, "blocked", view.Effective.State)
+					require.False(t, *view.Effective.Active)
+					require.Equal(t, []string{"not_implemented_in_build"}, view.Effective.Blockers)
+				} else {
+					require.Equal(t, master, *view.Effective.Active)
+					require.Empty(t, view.Effective.Blockers)
+					state := "masked_by_master"
+					if master {
+						state = "on"
+					}
+					require.Equal(t, state, view.Effective.State)
+				}
 				require.NotContains(t, view.Effective.Warnings, "anthropic_observability_missing")
 			})
 		}
@@ -136,9 +146,10 @@ func TestCachePolicyProductionWiringImplementsL07(t *testing.T) {
 		store := newPolicyTestStore()
 		store.rows["cache_feature_master"] = fmt.Sprintf(`{"rev":1,"spec":{"enabled":%t}}`, master)
 		store.rows["cache_routing_policy"] = `{"rev":1,"spec":{"keep_sticky_on_busy":{"enabled":true,"rollout_percent":50}}}`
-		gateway := &GatewayService{}
-		s := ProvideCachePolicyService(store, policyTestConfig(), nil, nil, gateway)
+		s := ProvideCachePolicyService(store, policyTestConfig(), nil, nil)
 		t.Cleanup(s.Stop)
+		cfg := policyTestConfig()
+		gateway := ProvideGatewayServiceWithCacheTrace(nil, nil, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &TLSFingerprintProfileService{}, nil, nil, nil, nil, nil, &OpenAIGatewayService{cfg: cfg, cachePolicies: s})
 		require.Same(t, s, gateway.cachePolicies, "the Anthropic gateway reads the same snapshots")
 		require.NoError(t, s.Refresh(context.Background()))
 		view, err := s.Get(context.Background(), "routing")
@@ -171,7 +182,7 @@ func TestCachePolicyM4PartialBuildUsesImplementedBehavior(t *testing.T) {
 		require.Empty(t, view.Effective.Blockers)
 		for _, field := range view.Schema {
 			marked, exists := field["not_implemented_in_build"]
-			if field["field"] == "metadata_group_ids" {
+			if field["field"] == "metadata_group_ids" || field["field"] == "metadata_account_ids" {
 				require.True(t, exists)
 				require.Equal(t, true, marked)
 			} else {

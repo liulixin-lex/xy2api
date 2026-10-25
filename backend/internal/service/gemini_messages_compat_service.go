@@ -56,6 +56,7 @@ const (
 const geminiDummyThoughtSignature = "skip_thought_signature_validator"
 
 type GeminiMessagesCompatService struct {
+	providerTraceEngine       *OpenAIGatewayService
 	accountRepo               AccountRepository
 	groupRepo                 GroupRepository
 	cache                     GatewayCache
@@ -617,7 +618,10 @@ func (s *GeminiMessagesCompatService) SelectAccountForAIStudioEndpoints(ctx cont
 	return s.hydrateSelectedAccount(ctx, selected)
 }
 
-func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
+func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *ForwardResult, err error) {
+	if s.providerTraceEngine != nil {
+		defer func() { s.providerTraceEngine.finishProviderCacheTrace(c, result) }()
+	}
 	beginUpstreamResponseModelObservation(c)
 	beginGeminiImageOutputObservation(c)
 	startTime := time.Now()
@@ -819,7 +823,14 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		}
 		requestIDHeader = idHeader
 
+		if s.providerTraceEngine != nil {
+			s.providerTraceEngine.captureProviderCacheTrace(c, upstreamReq, account, "gemini")
+			s.providerTraceEngine.markProviderCacheTraceSent(c)
+		}
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		if s.providerTraceEngine != nil {
+			s.providerTraceEngine.submitCacheTraceJob(c)
+		}
 		if err != nil {
 			return nil, s.handleUpstreamTransportError(ctx, c, account, err)
 		}
@@ -1112,7 +1123,11 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		firstTokenMs = streamRes.firstTokenMs
 	} else {
 		if useUpstreamStream {
-			collected, usageObj, _, err := collectGeminiSSEObserved(resp.Body, true, nil)
+			collected, usageObj, _, err := collectGeminiSSEObserved(resp.Body, true, func(rawBytes []byte) {
+				if providerCacheTraceFromGin(c) != nil {
+					observeProviderCacheTrace(c, rawBytes)
+				}
+			})
 			if err != nil {
 				return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Failed to read upstream stream")
 			}
@@ -1163,7 +1178,10 @@ func isGeminiSignatureRelatedError(respBody []byte) bool {
 	return strings.Contains(msg, "thought_signature") || strings.Contains(msg, "signature")
 }
 
-func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (*ForwardResult, error) {
+func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (result *ForwardResult, err error) {
+	if s.providerTraceEngine != nil {
+		defer func() { s.providerTraceEngine.finishProviderCacheTrace(c, result) }()
+	}
 	beginUpstreamResponseModelObservation(c)
 	beginGeminiImageOutputObservation(c)
 	startTime := time.Now()
@@ -1367,7 +1385,14 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		}
 		requestIDHeader = idHeader
 
+		if s.providerTraceEngine != nil {
+			s.providerTraceEngine.captureProviderCacheTrace(c, upstreamReq, account, "gemini")
+			s.providerTraceEngine.markProviderCacheTraceSent(c)
+		}
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		if s.providerTraceEngine != nil {
+			s.providerTraceEngine.submitCacheTraceJob(c)
+		}
 		if err != nil {
 			transportErr := s.handleUpstreamTransportError(ctx, c, account, err)
 			// countTokens 不因上游链路故障而失败：本地估算兜底，不换号。
@@ -1623,6 +1648,9 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		if useUpstreamStream {
 			var best geminiResponseSignal
 			collected, usageObj, stats, err := collectGeminiSSEObserved(resp.Body, isOAuth, func(rawBytes []byte) {
+				if providerCacheTraceFromGin(c) != nil {
+					observeProviderCacheTrace(c, rawBytes)
+				}
 				if sig, ok := detectGeminiResponseSignal(rawBytes); ok && sig.Kind > best.Kind {
 					best = sig
 				}
@@ -2143,6 +2171,9 @@ func (s *GeminiMessagesCompatService) handleNonStreamingResponse(c *gin.Context,
 	}
 	observer.ObserveGemini(unwrappedBody)
 	observeGeminiImageOutputs(c, unwrappedBody)
+	if providerCacheTraceFromGin(c) != nil {
+		observeProviderCacheTrace(c, unwrappedBody)
+	}
 
 	var geminiResp map[string]any
 	if err := json.Unmarshal(unwrappedBody, &geminiResp); err != nil {
@@ -2378,6 +2409,10 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 				}
 				flusher.Flush()
 			}
+		}
+
+		if providerCacheTraceFromGin(c) != nil {
+			observeProviderCacheTrace(c, unwrappedBytes)
 		}
 
 		if u := extractGeminiUsage(unwrappedBytes); u != nil {
@@ -2771,6 +2806,10 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 	}
 	c.Data(resp.StatusCode, contentType, respBody)
 
+	if providerCacheTraceFromGin(c) != nil {
+		observeProviderCacheTrace(c, respBody)
+	}
+
 	if u := extractGeminiUsage(respBody); u != nil {
 		return u, nil
 	}
@@ -2847,6 +2886,9 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 					sawDataEvent = true
 					if sig, ok := detectGeminiResponseSignal(rawBytes); ok && sig.Kind > best.Kind {
 						best = sig
+					}
+					if providerCacheTraceFromGin(c) != nil {
+						observeProviderCacheTrace(c, rawBytes)
 					}
 					if u := extractGeminiUsage(rawBytes); u != nil {
 						usage = u

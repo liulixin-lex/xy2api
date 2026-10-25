@@ -64,6 +64,47 @@
         ]
       },
       {
+        "block": "m2b-provider-cache-trace",
+        "note": "M2b provider trace instrumentation reviewed by R: owner-skip attribution, Gemini capture/observe/settle hooks, and the SSE observation callback. No candidate filtering, scheduling, failover, fallback, or billing decision changes.",
+        "removed": [
+          "} else if !clearSticky {"
+        ],
+        "added": [
+          "}",
+          "}",
+          "}",
+          "switch stickyCacheMissReason {",
+          "case \"wait_queue_full\":",
+          "noteProviderCacheTraceOwnerSkip(ctx, \"busy_wait_full\")",
+          "noteProviderCacheTraceOwnerSkip(ctx, \"busy_wait_full\")",
+          "case \"gate_check\", \"rpm_red\":",
+          "noteProviderCacheTraceOwnerSkip(ctx, stickyCacheMissReason)",
+          "noteProviderCacheTraceOwnerSkip(ctx, \"busy_quota_full\")",
+          "noteProviderCacheTraceOwnerSkip(ctx, \"busy_quota_full\")",
+          "} else {",
+          "} else {",
+          "switch {",
+          "case !modelSupported:",
+          "noteProviderCacheTraceOwnerSkip(ctx, \"model_unsupported\")",
+          "case !rpmOK:",
+          "noteProviderCacheTraceOwnerSkip(ctx, \"rpm_red\")",
+          "case !quotaOK || !windowCostOK:",
+          "default:",
+          "noteProviderCacheTraceOwnerSkip(ctx, \"other\")",
+          "if !clearSticky {"
+        ]
+      },
+      {
+        "block": "t22-claude-code-fallback-predicate",
+        "note": "T2.2 (L-04) shares the claude_code_only fallback predicate with the anchor path. For the group returned by the lookup the condition is identical (!ClaudeCodeOnly || claude code client); a nil group now returns the current group instead of dereferencing. No candidate filtering, scheduling, failover, fallback or billing decision changes. Registered during PR C assembly; awaiting R's static review.",
+        "removed": [
+          "if !group.ClaudeCodeOnly || IsClaudeCodeClient(ctx) {"
+        ],
+        "added": [
+          "if !cacheClaudeCodeFallbackNeeded(group, IsClaudeCodeClient(ctx)) {"
+        ]
+      },
+      {
         "block": "cache-l07",
         "note": "T2.5 L-07 keep sticky on busy (cache DESIGN 6.1A): per-attempt release at selection start, the request record after platform resolution, owner-skip/busy hooks in the routed and Layer1.5 sticky paths, and the owner-hit refresh that also ends the busy segment. The wait-count error is kept for the L-07 state_error abandon; baseline control flow is unchanged.",
         "removed": [
@@ -87,7 +128,6 @@
           "s.l07OwnerSkipped(l07)",
           "if l07.armed() {",
           "s.l07RefreshOnOwnerHit(ctx, l07, derefGroupID(groupID), sessionHash, accountID, stickySessionTTL)",
-          "} else {",
           "waitingCount, waitErr := s.concurrencyService.GetAccountWaitingCount(ctx, accountID)",
           "s.l07OwnerSkipped(l07)",
           "} else {",
@@ -624,7 +664,7 @@
       },
       {
         "block": "gemini-sse-collector",
-        "note": "Unused collectGeminiSSE wrapper inlined into its only caller.",
+        "note": "Unused collectGeminiSSE wrapper inlined into its caller; provider trace callback is allowlisted below.",
         "removed": [
           "collected, usageObj, err := collectGeminiSSE(resp.Body, true)",
           "func collectGeminiSSE(body io.Reader, isOAuth bool) (map[string]any, *ClaudeUsage, error) {",
@@ -632,9 +672,7 @@
           "return collected, usage, err",
           "}"
         ],
-        "added": [
-          "collected, usageObj, _, err := collectGeminiSSEObserved(resp.Body, true, nil)"
-        ]
+        "added": []
       },
       {
         "block": "nonstream-read-failover",
@@ -713,6 +751,59 @@
           "}",
           "}",
           "}"
+        ]
+      },
+      {
+        "block": "m2b-provider-cache-trace",
+        "note": "M2b provider trace instrumentation reviewed by R: owner-skip attribution, Gemini capture/observe/settle hooks, and the SSE observation callback. No candidate filtering, scheduling, failover, fallback, or billing decision changes.",
+        "removed": [
+          "func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {",
+          "func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (*ForwardResult, error) {"
+        ],
+        "added": [
+          "providerTraceEngine       *OpenAIGatewayService",
+          "func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *ForwardResult, err error) {",
+          "if s.providerTraceEngine != nil {",
+          "if s.providerTraceEngine != nil {",
+          "if s.providerTraceEngine != nil {",
+          "if s.providerTraceEngine != nil {",
+          "if s.providerTraceEngine != nil {",
+          "if s.providerTraceEngine != nil {",
+          "defer func() { s.providerTraceEngine.finishProviderCacheTrace(c, result) }()",
+          "defer func() { s.providerTraceEngine.finishProviderCacheTrace(c, result) }()",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "s.providerTraceEngine.captureProviderCacheTrace(c, upstreamReq, account, \"gemini\")",
+          "s.providerTraceEngine.captureProviderCacheTrace(c, upstreamReq, account, \"gemini\")",
+          "s.providerTraceEngine.markProviderCacheTraceSent(c)",
+          "s.providerTraceEngine.markProviderCacheTraceSent(c)",
+          "s.providerTraceEngine.submitCacheTraceJob(c)",
+          "s.providerTraceEngine.submitCacheTraceJob(c)",
+          "collected, usageObj, _, err := collectGeminiSSEObserved(resp.Body, true, func(rawBytes []byte) {",
+          "if providerCacheTraceFromGin(c) != nil {",
+          "if providerCacheTraceFromGin(c) != nil {",
+          "if providerCacheTraceFromGin(c) != nil {",
+          "if providerCacheTraceFromGin(c) != nil {",
+          "if providerCacheTraceFromGin(c) != nil {",
+          "if providerCacheTraceFromGin(c) != nil {",
+          "observeProviderCacheTrace(c, rawBytes)",
+          "observeProviderCacheTrace(c, rawBytes)",
+          "observeProviderCacheTrace(c, rawBytes)",
+          "})",
+          "func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (result *ForwardResult, err error) {",
+          "observeProviderCacheTrace(c, unwrappedBody)",
+          "observeProviderCacheTrace(c, unwrappedBytes)",
+          "observeProviderCacheTrace(c, respBody)"
         ]
       }
     ]

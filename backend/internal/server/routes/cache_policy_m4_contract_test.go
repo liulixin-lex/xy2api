@@ -146,7 +146,7 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			require.NoError(t, json.Unmarshal(raw, &fixture))
 			scenario := strings.Replace(name, "m4_dormant_", "m4_", 1)
 			requests[name] = f
-			expected := contractMap(t, f.Response)
+			expected := cacheL04ExtendLegacyResponse(t, f.Response)
 			isList := cacheM4ListSample(name)
 			if isList {
 				expected = cacheM31M4ProjectLegacyList(t, expected)
@@ -396,6 +396,7 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			if cacheM4ListSample(source) {
 				wrong = cacheM31M4ProjectLegacyList(t, wrong)
 			}
+			wrong = cacheL04ExtendLegacyResponse(t, wrong)
 			normalizePolicyTimes(t, wrong)
 			require.NotEqual(t, wrong, actual, "the corrupted contract response cannot pass full replay")
 		})
@@ -446,6 +447,23 @@ func TestCachePolicyM4RetainsM3ListEdges(t *testing.T) {
 			require.Equal(t, fixture.Status, status)
 			normalizePolicyTimes(t, got)
 			normalizePolicyTimes(t, expected)
+			expected = cacheL04ExtendLegacyResponse(t, expected)
+			if name == "m31_m3_list_account_options_unavailable.json" {
+				// T2.3+ builds: the shared account lookup failure also reaches
+				// anthropic_identity's metadata_account_ids. That card's edge is
+				// m4l03_list_account_options_unavailable, replayed by
+				// TestCachePolicyL03CompleteCombinedListReplay; upstream_identity
+				// keeps this sample's edge and every other card stays exact.
+				successors, err := os.ReadFile("testdata/cache_policies_contract/m4l03/SOURCE_SHA256.json")
+				require.NoError(t, err)
+				require.Contains(t, string(successors), `"m4l03_list_account_options_unavailable.json"`)
+				gotCards := cacheM4As[[]any](t, cacheM4As[map[string]any](t, got["data"])["policies"])
+				wantCards := cacheM4As[[]any](t, cacheM4As[map[string]any](t, expected["data"])["policies"])
+				anthropic := cacheM4As[map[string]any](t, gotCards[4])
+				require.Equal(t, "anthropic_identity", anthropic["key"])
+				require.Contains(t, cacheM4As[[]any](t, cacheM4As[map[string]any](t, anthropic["effective"])["warnings"]), "account_options_unavailable")
+				gotCards[4] = wantCards[4]
+			}
 			require.Equal(t, expected, got)
 			require.Equal(t, 1, groups.calls)
 		})

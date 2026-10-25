@@ -263,6 +263,8 @@ const options = computed(() => {
       x: {
         type: 'category' as const,
         grid: { display: false },
+        // Bucket labels are UTC, as in the table's time column.
+        title: { display: true, text: t('admin.cacheCharts.trend.time'), color: c.text, font: { size: 10 } },
         ticks: { color: c.text, font: { size: 10 }, maxTicksLimit: 8, autoSkip: true, maxRotation: 0 },
       },
       y: {

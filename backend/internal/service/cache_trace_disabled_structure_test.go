@@ -18,10 +18,10 @@ import (
 func TestCacheTraceDisabledCannotReachBodyWork(t *testing.T) {
 	allowed := map[string]map[string]bool{
 		"WaitN":                  {"run": true},
-		"scanCachePrefix":        {"captureCachePrefix": true},
+		"scanCachePrefix":        {"captureCachePrefix": true, "computeProviderCacheTrace": true},
 		"captureCachePrefix":     {"computeCacheTrace": true},
 		"computeCacheTrace":      {"compute": true},
-		"cacheTraceAnchorParts":  {"computeCacheTrace": true, "cacheTraceAnchorForKey": true},
+		"cacheTraceAnchorParts":  {"computeCacheTrace": true, "cacheTraceAnchorForKey": true, "cacheProviderTraceIngressAnchor": true},
 		"cacheTraceAnchorForKey": {"cacheTraceAnchor": true},
 		"cacheTraceAnchor":       {}, // test-only adapter, no product caller
 	}
@@ -80,6 +80,6 @@ func TestCacheTraceDisabledCannotReachBodyWork(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, counts["WaitN"])
-	require.Equal(t, 1, counts["scanCachePrefix"])
+	require.Equal(t, 2, counts["scanCachePrefix"])
 	require.Equal(t, 1, counts["computeCacheTrace"])
 }
