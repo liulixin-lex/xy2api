@@ -981,7 +981,7 @@ func (s *GatewayService) resolveGatewayGroup(ctx context.Context, groupID *int64
 			return nil, nil, err
 		}
 
-		if !group.ClaudeCodeOnly || IsClaudeCodeClient(ctx) {
+		if !cacheClaudeCodeFallbackNeeded(group, IsClaudeCodeClient(ctx)) {
 			return group, &currentID, nil
 		}
 

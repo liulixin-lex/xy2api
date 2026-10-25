@@ -183,6 +183,8 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		APIKeyID:  apiKey.ID,
 	}
 	h.gatewayService.BeginProviderCacheTrace(c, effectiveAPIKeyPlatform(c, apiKey), "responses", body, parsedReq)
+	h.gatewayService.PrepareCompatCacheAnchor(c, apiKey, parsedReq, effectiveAPIKeyPlatform(c, apiKey))
+	defer h.gatewayService.ReleaseCacheAnchor(parsedReq)
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 	h.gatewayService.BindProviderCacheTraceSession(c, sessionHash, "")
 	requestCtx = c.Request.Context()

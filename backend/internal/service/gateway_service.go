@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -782,6 +783,8 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 
 // GatewayService handles API gateway operations
 type GatewayService struct {
+	anchorInflight        cacheAnchorInflight
+	anchorInflightOnce    sync.Once
 	providerTraceEngine   *OpenAIGatewayService
 	accountRepo           AccountRepository
 	groupRepo             GroupRepository
@@ -921,6 +924,7 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 		if parsed.cacheTraceSource != nil {
 			*parsed.cacheTraceSource = "share_anchor"
 		}
+		s.cacheAnchorEarlierTier(parsed)
 		return anchor
 	}
 
@@ -937,6 +941,7 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 			if parsed.cacheTraceSource != nil {
 				*parsed.cacheTraceSource = "metadata_user_id"
 			}
+			s.cacheAnchorEarlierTier(parsed)
 			return uid.SessionID
 		}
 		slog.Info("sticky.hash_metadata_parse_failed",
@@ -956,7 +961,12 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 		if parsed.cacheTraceSource != nil {
 			*parsed.cacheTraceSource = "cacheable_content"
 		}
+		s.cacheAnchorEarlierTier(parsed)
 		return (hash)
+	}
+
+	if anchor := s.cacheAnchorSession(parsed); anchor != "" {
+		return anchor
 	}
 
 	// 3. 最后 fallback: 使用 session上下文 + system + 所有消息的完整摘要串

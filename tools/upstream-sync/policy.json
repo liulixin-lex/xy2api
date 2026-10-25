@@ -2309,10 +2309,6 @@
     },
     {
       "path": "backend/internal/service/cache_trace.go",
-      "value": "s.CaptureCachePolicy(c).TraceEnabledFor(cacheTraceOpenAIPlatform(c))"
-    },
-    {
-      "path": "backend/internal/service/cache_trace.go",
       "value": "policy: CachePolicyFromGin(c)"
     },
     {
@@ -2397,7 +2393,7 @@
     },
     {
       "path": "backend/internal/service/cache_policy.go",
-      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups), WithProviderCacheTrace())"
+      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups), WithProviderCacheTrace(), WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L04: true, L03: true}), WithCacheAnthropicObservability())"
     },
     {
       "path": "backend/internal/service/openai_cache_diagnostics.go",
@@ -2522,6 +2518,10 @@
     {
       "path": "backend/internal/service/openai_upstream_identity_response.go",
       "value": "func (b *openAIUpstreamIdentitySSEBody) Read(p []byte) (int, error)"
+    },
+    {
+      "path": "backend/internal/service/cache_trace.go",
+      "value": "s.CaptureCachePolicy(c).TraceEnabledFor(cacheTraceOpenAIPlatform(c))"
     },
     {
       "path": "backend/internal/service/cache_trace_counter_platforms.go",
@@ -2682,6 +2682,102 @@
     {
       "path": "backend/internal/service/bedrock_stream.go",
       "value": "observeProviderCacheTrace(c, sseData)"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_anchor.go",
+      "value": "io.WriteString(h, \"cache-anchor-v2\\x00\")"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_anchor_request.go",
+      "value": "func (s *GatewayService) PrepareCacheAnchor("
+    },
+    {
+      "path": "backend/internal/service/cache_policy_anchor.go",
+      "value": "p.anchorPolicy.available && !p.behaviorStale() && p.MasterEnabled()"
+    },
+    {
+      "path": "backend/internal/handler/cache_anchor_handler_structure_test.go",
+      "value": "count_tokens does not enter the behavior or observation path"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "anchorParsed.Model = inboundAnchorModel"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
+      "value": "PrepareCompatCacheAnchor(c, apiKey, parsedReq, groupPlatform)"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_anchor_request.go",
+      "value": "if !native {"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "useDigestFallback := sessionBoundAccountID == 0 && !h.gatewayService.CacheAnchorApplied(anchorParsed)"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_anchor_request.go",
+      "value": "parsed.GroupID = &d.groupID"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_anchor_request_test.go",
+      "value": "func TestL04ClaudeCodeSkippedRequestsKeepBaselineStickySequence("
+    },
+    {
+      "path": "backend/internal/handler/cache_anchor_fallback_test.go",
+      "value": "func TestL04ClaudeCodeSkippedActualHandlersOffOnBytesAndSequence("
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "if h.gatewayService.CacheAnchorApplied(parsedReq) {\n\t\tsessionGroupID = parsedReq.GroupID\n\t}"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "if h.gatewayService.CacheAnchorApplied(anchorParsed) {\n\t\tsessionRoutingGroupID = anchorParsed.GroupID\n\t}"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_metadata.go",
+      "value": "!p.behaviorStale() && p.MasterEnabled()"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_metadata.go",
+      "value": "io.WriteString(h, \"anth-device|\")"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_metadata.go",
+      "value": "generateSessionUUID(\"anthropic-upstream-session:v1:\" + value)"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_metadata.go",
+      "value": "sjson.SetBytes(body, \"metadata.user_id\", userID)"
+    },
+    {
+      "path": "backend/internal/service/gateway_upstream_request.go",
+      "value": "body = s.applyCacheMetadata(ctx, c, account, body, enableMPT)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward.go",
+      "value": "wire = withoutCacheMetadata(ctx, wire, parsed.Body.Bytes())"
+    },
+    {
+      "path": "backend/internal/service/gateway_anthropic_passthrough.go",
+      "value": "s.applyCacheMetadataPassthrough(upstreamCtx, c, account, upstreamReq, wireBody)"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_metadata_request_test.go",
+      "value": "func TestL03NativeForwardWireAndObservationIndependence("
+    },
+    {
+      "path": "backend/internal/service/gateway_forward.go",
+      "value": "ctx = s.beginCacheMetadataAttempt(ctx, c, parsed, account)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_responses.go",
+      "value": "ctx = s.beginCacheMetadataAttempt(ctx, c, parsed, account)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
+      "value": "ctx = s.beginCacheMetadataAttempt(ctx, c, parsed, account)"
     }
   ],
   "forbidden_module_paths": [

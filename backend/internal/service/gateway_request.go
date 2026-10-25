@@ -281,6 +281,8 @@ func DescribeInvalidJSON(body []byte) error {
 // 2. 将解析结果 ParsedRequest 传递给 Service 层
 // 3. 避免重复 json.Unmarshal，减少 CPU 和内存开销
 type ParsedRequest struct {
+	AnchorV2         CacheAnchorV2
+	cacheL04         *cacheAnchorDecision
 	cacheTraceSource *string         // optional observer sink; never affects routing identity
 	Body             *RequestBodyRef // 原始请求体引用（保留用于转发）；替换内容请走 ReplaceBody
 	Model            string          // 请求的模型名称

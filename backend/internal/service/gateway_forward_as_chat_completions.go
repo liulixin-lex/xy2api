@@ -38,6 +38,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	}
 	startTime := time.Now()
 	ctx, cacheDecision := s.beginClaudeCacheAttempt(ctx, parsed, account)
+	ctx = s.beginCacheMetadataAttempt(ctx, c, parsed, account)
 	defer func() { finishClaudeCacheAttempt(cacheDecision, result) }()
 
 	// 1. Parse Chat Completions request

@@ -431,3 +431,84 @@ L-01 允许的 ingress 中，维持原有身份与转换逻辑，不扩大注入
 ### M2b Messages 桥观测接线（开发中）
 
 Messages 桥由运行时观测策略中的 messages_bridge 独立选择，默认 platforms 仍只含 openai。仅经 Responses 出站的桥进入 OpenAI 事件和统计分区；经原生 Anthropic 或 raw Chat 出站的子路径不在本期覆盖内。发送标记及最终请求头观察位于实际发送边界，流式用量观察复用现有解析，账单数值与原规则保持一致。关闭平台、总闸或诊断开关时不启动该平台的异步观测；每请求继续固定策略快照。当前接线待验证，不能据此开启生产。
+
+
+
+
+## T2.2：Claude/Gemini 本地锚点（L-04）
+
+T2.2 构建声明 L-04=true、L-03=false、L-07=false；后续 T2.3 构建在此基础上声明 L-03=true。请求 accessor 同时检查能力、
+行为快照过期保护、总闸、master 与键的有效性；默认名单为空、Gemini 关闭、rollout=0，
+因此默认沿用原有请求、会话 hash 和选号。过期保护在独立维护功能合入前使用返回 false 的集成接缝。
+
+anthropic_identity 的 schema 末尾追加 metadata_rollout_percent（0..100，默认0）和
+max_inflight_per_anchor（1..16，默认2），两个字段均记录 history；调高为 enable。
+metadata_rollout_percent 不得超过请求后的 rollout_percent，错误码为 exceeds_rollout_percent，
+limit.max 为请求后的 rollout_percent；无效字段不参与 diff。旧存储只在内存中补默认，
+不写回、不改 rev。metadata 灰度不是能力字段，可以先存储，T2.2 中 L-03 尚未实现；T2.3 的生成条件见下节。
+
+服务端使用认证 API key ID、有效 serving 组 ID、入站模型族、规范化 system 和首条非空
+user 文本生成 a2。HMAC-SHA256 使用 JWT secret，消息以 cache-anchor-v2 加 NUL 开头，
+五字段各用8字节大端长度前缀，截取前16字节小写 hex，带 a2: 前缀。忽略图片、工具、
+thinking 和整块 system-reminder，只压缩文本中的 Unicode 空白；不截断输入、不使用
+未隔离的旧 session 或观测 digest。两文本均空、缺 key/组/secret、平台不匹配均不派生。
+
+share active 保持既有路径；metadata、cacheable_content 与 Gemini CLI 等既有前档优先。
+其余候选按同一 anth-cohort|a2 哈希的嵌套阈值分桶，本期只会产生 l04_only/off。
+原有 sticky 之外的出站 body/header、metadata 和重试规则不变。候选携带 serving 作用域，
+使用时不匹配则回到基线；中间件换组、prompt-too-long 和 Claude Code 限制回退均重新判定。
+count_tokens 不进入派生或计数。只有 a2 实际生效时才补 serving GroupID；名单外、对照组、兼容入口、早期层级命中或在途上限跳过时，保留原 sticky/prefetch/选号序列。Gemini 保留 CLI 优先级。
+
+按 a2 维护进程内最多65536项在途计数，归零删除；超限、容量满或异常时回到基线，
+记 fanin_cap 并增加 l04_fanin_skip_total。请求结束和换组释放预留；多实例上限近似为
+单实例上限乘实例数。fanin_cap 超过候选的5%时人工缩小名单，不自动改变策略。
+
+完整 Anthropic/Gemini trace 在支持 L-04 的构建增加 l04_arm、l04_applied、l04_skip、
+l04_policy_rev，实际使用时 id_source=anchor_v2；OpenAI 与最小事件不变。
+观测开关不改变锚点、分桶或任何 L-04 决策；session_digest 仅由 T0b.4 对实际 hash 做隔离摘要。
+
+JWT secret 以 DB security_secrets.jwt_secret 为准。轮换将同时改变 OpenAI sticky、L-01 U、
+trace 锚点和 a2，导致一次全站冷启动；旧 Redis 键按 TTL 回收，期间约双倍内存。
+轮换安排在低峰期，在实验记录标明断点，之后24小时观察命中回升与 Redis 内存；
+实验按断点分段，不跨密钥周期合并。优先选择已启用 claude_cache_fallback 或上游会补断点的组。
+
+锚点文本只取原生 Messages 或原生 Gemini 的入站解析结果，由 handler 入口显式声明。
+Responses 与 Chat 兼容入口均不把 instructions/input/role=system 映射成锚点输入，
+即使携带同形 messages 也视为空锚点，记 empty_anchor，保留原有 hash 与出站字节。
+兼容入口的文本映射留待独立流量评估后决定，不由请求 body 自称原生来源。
+
+
+## T2.3：Anthropic 上游元数据身份（L-03）
+
+本构建声明 L-04=true、L-03=true、L-07=false。L-03 accessor 与能力位、
+`!behaviorStale()`、master 与 kill 在同一处门控，观测开关不参与决策。
+默认 metadata_group_ids=[]、metadata_account_ids=[]、metadata_rollout_percent=0，均不生成元数据。
+
+anthropic_identity 在 metadata_group_ids 后追加 metadata_account_ids（id_list、account、默认[]）。
+新增 ID 是开启方向，移除是关闭方向，只验证新增加的账号：不存在、平台不符、官方端点、
+非 APIKey 分别为 unknown_account、wrong_platform、official_endpoint、not_apikey；重复为 duplicate。
+旧存储读取时在内存补[]，不写回、不改 rev；新增字段纳入策略 history。
+候选只列非官方 Anthropic APIKey，最多500个，按ID升序；查询失败或 disable PUT 跳过查询时
+返回[]并给 account_options_unavailable。这个提示只作用于 metadata_account_ids；
+group_options_unavailable 只作用于两个组字段；两者同时出现时 account 在前。
+候选不可用时管理员界面手动输入ID，不查询完整账号列表。
+
+只对原生 Messages 入口的非空 serving-scoped a2 生成。Chat/Responses 兼容、count_tokens、
+Gemini、share active 与名单外请求不生成。分桶沿用 anth-cohort|a2 的同一哈希，
+metadata_rollout_percent 不得超过 rollout_percent。cacheable_content 先命中时仍可生成，
+但不得改变原本的本地会话身份、sticky、选号、认证和计费。
+
+客户端任何非空 metadata.user_id 都优先，不论能否解析；未提供或空字符串才可补齐。
+metadata 透传、claude-cli UA、作用域不符、在途超限、非APIKey、官方端点、账号名单外依序跳过。
+账号保存后改为官方端点或非APIKey，运行时也跳过。a2 与 L-04 共用有界在途计数，
+同一请求跨 attempt 只持有一份登记，释放沿用请求生命周期。
+
+每次 attempt 都按实际账号派生 device_id=HMAC-SHA256(K,anth-device|account_id) 的64位小写hex；
+session_id=generateSessionUUID(anthropic-upstream-session:v1:+a2)，account_uuid为空。
+使用 FormatMetadataUserID 的旧格式，只写上游。生成值不写回 ParsedRequest，不进入本地身份或日志，
+不新增 X-Claude-Code-Session-Id；该头原有的同步规则继续执行。
+普通 builder 与 APIKey 透传 builder 各自覆盖实际发送路径；兼容路径不扩大 a2 解析范围。
+
+Anthropic 完整 trace 在 l04_* 后增加 l03_arm、l03_applied、l03_skip，记录最终 attempt；
+Gemini/OpenAI 和最小事件不带 l03_*，Gemini 不进入 both 臂。l03_arm=on 当且仅当 l04_arm=both；
+策略版本沿用 l04_policy_rev，id_source 继续表示本地实际来源。所有身份值都不进入 trace。

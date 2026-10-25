@@ -109,6 +109,8 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			input.Body = input.Parsed.Body.Bytes()
 		}
 
+		s.applyCacheMetadataPassthrough(upstreamCtx, c, account, upstreamReq, wireBody)
+
 		if s.providerTraceEngine != nil {
 			s.providerTraceEngine.captureProviderCacheTrace(c, upstreamReq, account, "messages")
 			s.providerTraceEngine.markProviderCacheTraceSent(c)

@@ -180,6 +180,8 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	groupPlatform := effectiveAPIKeyPlatform(c, apiKey)
 	h.gatewayService.BeginProviderCacheTrace(c, groupPlatform, "chat", body, parsedReq)
+	h.gatewayService.PrepareCompatCacheAnchor(c, apiKey, parsedReq, groupPlatform)
+	defer h.gatewayService.ReleaseCacheAnchor(parsedReq)
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 	h.gatewayService.BindProviderCacheTraceSession(c, sessionHash, "")
 	selectionSessionHash := sessionHash

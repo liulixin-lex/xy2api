@@ -1,0 +1,157 @@
+{
+  "_contract": [
+    "M4-4",
+    "M4-L04",
+    "C-7"
+  ],
+  "_note": "T2.2 构建：PUT 开启 L-04（anchor_group_ids、rollout 50），rev 1→2，state=on。响应中 metadata_group_ids 带标记（l03），新字段为默认值。enable 方向照常加载候选，options 下发。",
+  "_fixture": {
+    "build_capabilities": {
+      "l04": true,
+      "l03": false,
+      "l07": false
+    },
+    "说明": "T2.2 构建的静态能力（l04 为 true，l03、l07 仍为 false），不属于响应；同时包含 T0b.4，所以 Anthropic 观测参数为 true"
+  },
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/anthropic_identity",
+    "body": {
+      "expected_rev": 1,
+      "spec": {
+        "anchor_group_ids": [
+          31,
+          32
+        ],
+        "rollout_percent": 50
+      },
+      "reason": "两个 Claude 分组试运行",
+      "confirm": {
+        "checkbox": true,
+        "typed": null
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "key": "anthropic_identity",
+      "setting_key": "cache_anthropic_identity_policy",
+      "available": true,
+      "risk": "high",
+      "gated_by_master": true,
+      "stored": {
+        "rev": 2,
+        "updated_at": "2026-10-24T08:56:00Z",
+        "updated_by": {
+          "user_id": 1,
+          "email": "admin@example.com"
+        },
+        "reason": "两个 Claude 分组试运行",
+        "spec": {
+          "anchor_group_ids": [
+            31,
+            32
+          ],
+          "gemini_anchor": false,
+          "metadata_group_ids": [],
+          "rollout_percent": 50,
+          "metadata_rollout_percent": 0,
+          "max_inflight_per_anchor": 2
+        }
+      },
+      "loaded": {
+        "rev": 2,
+        "loaded_at": "2026-10-24T08:40:01Z"
+      },
+      "effective": {
+        "state": "on",
+        "active": true,
+        "blockers": [],
+        "warnings": [],
+        "clipped_fields": []
+      },
+      "defaults": {
+        "anchor_group_ids": [],
+        "gemini_anchor": false,
+        "metadata_group_ids": [],
+        "rollout_percent": 0,
+        "metadata_rollout_percent": 0,
+        "max_inflight_per_anchor": 2
+      },
+      "schema": [
+        {
+          "field": "anchor_group_ids",
+          "type": "id_list",
+          "ref": "group",
+          "options": [
+            {
+              "id": 31,
+              "name": "claude-pool-a",
+              "platform": "anthropic"
+            },
+            {
+              "id": 32,
+              "name": "claude-pool-b",
+              "platform": "anthropic"
+            },
+            {
+              "id": 77,
+              "name": "claude-standby",
+              "platform": "anthropic"
+            }
+          ]
+        },
+        {
+          "field": "gemini_anchor",
+          "type": "bool"
+        },
+        {
+          "field": "metadata_group_ids",
+          "type": "id_list",
+          "ref": "group",
+          "options": [
+            {
+              "id": 31,
+              "name": "claude-pool-a",
+              "platform": "anthropic"
+            },
+            {
+              "id": 32,
+              "name": "claude-pool-b",
+              "platform": "anthropic"
+            },
+            {
+              "id": 77,
+              "name": "claude-standby",
+              "platform": "anthropic"
+            }
+          ],
+          "not_implemented_in_build": true
+        },
+        {
+          "field": "rollout_percent",
+          "type": "int",
+          "min": 0,
+          "max": 100,
+          "unit": "percent"
+        },
+        {
+          "field": "metadata_rollout_percent",
+          "type": "int",
+          "min": 0,
+          "max": 100,
+          "unit": "percent"
+        },
+        {
+          "field": "max_inflight_per_anchor",
+          "type": "int",
+          "min": 1,
+          "max": 16
+        }
+      ]
+    }
+  }
+}

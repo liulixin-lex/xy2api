@@ -232,7 +232,7 @@ func (s *CachePolicyService) Get(ctx context.Context, key string) (CachePolicyVi
 		return CachePolicyView{}, err
 	}
 	view := s.view(i, s.parse(i, raw[cachePolicySettings[i]]), s.Snapshot())
-	if i == 3 {
+	if i == 3 || i == 4 {
 		s.populateCachePolicyAccountOptions(ctx, &view)
 	}
 	if i == 4 || i == 5 {
@@ -267,6 +267,7 @@ func (s *CachePolicyService) List(ctx context.Context, version string) (CachePol
 	}
 	s.populateCachePolicyAccountOptions(ctx, &list.Policies[3])
 	if s.m4Available {
+		s.populateCachePolicyAccountOptions(ctx, &list.Policies[4])
 		s.populateCachePolicyGroupOptions(ctx, &list.Policies[4], &list.Policies[5])
 	}
 	return list, nil

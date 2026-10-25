@@ -229,7 +229,7 @@ func policyDirection(diff []CachePolicyDiff) string {
 				continue
 			}
 			added, removed := upstreamIdentityScopeDirection(before, n)
-			if d.Field == "anchor_group_ids" || d.Field == "metadata_group_ids" {
+			if d.Field == "anchor_group_ids" || d.Field == "metadata_group_ids" || d.Field == "metadata_account_ids" {
 				added, removed = cachePolicyExplicitScopeDirection(before, n)
 			}
 			up, down = up || added, down || removed
@@ -332,7 +332,7 @@ func invalidPolicy(errs []CachePolicyFieldError) error {
 	b, _ := json.Marshal(errs)
 	reason := "CACHE_POLICY_INVALID"
 	for _, e := range errs {
-		if e.Code == "unsupported_in_build" && (e.Field == "header_only_uuid" || e.Field == "forward_session_headers" || e.Field == "affinity_mode" || e.Field == "anchor_group_ids" || e.Field == "gemini_anchor" || e.Field == "metadata_group_ids" || e.Field == "keep_sticky_on_busy.enabled" || e.Field == "keep_sticky_on_busy.group_ids") {
+		if e.Code == "unsupported_in_build" && (e.Field == "header_only_uuid" || e.Field == "forward_session_headers" || e.Field == "affinity_mode" || e.Field == "anchor_group_ids" || e.Field == "gemini_anchor" || e.Field == "metadata_group_ids" || e.Field == "metadata_account_ids" || e.Field == "keep_sticky_on_busy.enabled" || e.Field == "keep_sticky_on_busy.group_ids") {
 			reason = "CACHE_POLICY_UNSUPPORTED"
 			break
 		}
@@ -420,7 +420,7 @@ func (s *CachePolicyService) Update(ctx context.Context, key string, w CachePoli
 	}()
 	// Candidate lookup only enriches this local response; never hold the
 	// publication lock across administrator repository I/O.
-	if i == 3 {
+	if i == 3 || i == 4 {
 		if skipAccountOptions {
 			setCachePolicyUnavailableAccountOptions(&view)
 		} else {
