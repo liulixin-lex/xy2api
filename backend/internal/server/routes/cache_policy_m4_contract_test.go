@@ -529,7 +529,7 @@ func TestCachePolicyM4RetainsM3ListEdges(t *testing.T) {
 			normalizePolicyTimes(t, got)
 			normalizePolicyTimes(t, expected)
 			expected = cacheL04ExtendLegacyResponse(t, expected)
-			if name == "m31_m3_list_account_options_unavailable.json" {
+			if name == "l17_m31_m3_list_account_options_unavailable.json" {
 				// T2.3+ builds: the shared account lookup failure also reaches
 				// anthropic_identity's metadata_account_ids. That card's edge is
 				// m4l03_list_account_options_unavailable, replayed by
