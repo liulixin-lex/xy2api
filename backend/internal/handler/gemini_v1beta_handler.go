@@ -413,7 +413,8 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	}
 	sessionRoutingGroupID := apiKey.GroupID
 	var anchorParsed *service.ParsedRequest
-	if providerTraceEligible && h.gatewayService.CacheAnchorEnabled(c) {
+	// The body is parsed only for an in-scope anchor (e.g. not with gemini_anchor off).
+	if providerTraceEligible && h.gatewayService.CacheAnchorEnabled(c) && !h.gatewayService.CacheAnchorOutOfScope(c, apiKey, service.PlatformGemini) {
 		anchorParsed, _ = service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformGemini)
 		if anchorParsed != nil {
 			anchorParsed.Model = inboundAnchorModel

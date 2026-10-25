@@ -98,10 +98,18 @@ func l04HandlerPlatformFixture(t *testing.T, caps service.CacheM4BuildCapabiliti
 }
 func l04HandlerPlatformPolicyFixture(t *testing.T, caps service.CacheM4BuildCapabilities, enabled, promptFallback bool, platform, policy string) (*GatewayHandler, *service.APIKey, *l04HandlerSticky, *l04HandlerUpstream) {
 	t.Helper()
+	h, k, cache, upstream, _ := l04HandlerStoreFixture(t, caps, &l04HandlerPolicyStore{enabled: enabled, spec: policy}, promptFallback, platform)
+	return h, k, cache, upstream
+}
+
+// l04HandlerStoreFixture also returns the policy service, so a test can switch
+// policy states on one fixture by changing the store and refreshing.
+func l04HandlerStoreFixture(t *testing.T, caps service.CacheM4BuildCapabilities, store *l04HandlerPolicyStore, promptFallback bool, platform string) (*GatewayHandler, *service.APIKey, *l04HandlerSticky, *l04HandlerUpstream, *service.CachePolicyService) {
+	t.Helper()
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cfg.JWT.Secret = "l04-handler-synthetic"
 	cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-	policies := service.NewCachePolicyService(&l04HandlerPolicyStore{enabled: enabled, spec: policy}, cfg, service.WithCacheM4Policies(nil), service.WithCacheM4BuildCapabilities(caps), service.WithProviderCacheTrace())
+	policies := service.NewCachePolicyService(store, cfg, service.WithCacheM4Policies(nil), service.WithCacheM4BuildCapabilities(caps), service.WithProviderCacheTrace())
 	require.NoError(t, policies.Refresh(context.Background()))
 	engine := service.ProvideOpenAIGatewayServiceWithCachePolicies(nil, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, policies, nil)
 	a := &service.Group{ID: 31, Hydrated: true, Platform: platform, Status: service.StatusActive}
@@ -129,7 +137,7 @@ func l04HandlerPlatformPolicyFixture(t *testing.T, caps service.CacheM4BuildCapa
 	h.antigravityGatewayService = service.NewAntigravityGatewayService(nil, cache, scheduler, service.NewAntigravityTokenProvider(nil, nil, nil), nil, upstream, nil, nil)
 	h.geminiCompatService = service.ProvideGeminiMessagesCompatServiceWithCacheTrace(nil, groups, cache, scheduler, nil, nil, upstream, h.antigravityGatewayService, cfg, engine)
 	k := &service.APIKey{ID: 101, UserID: 102, GroupID: &a.ID, Group: a, Status: service.StatusActive, User: &service.User{ID: 102, Concurrency: 10, Balance: 100}}
-	return h, k, cache, upstream
+	return h, k, cache, upstream, policies
 }
 func l04ServeHandler(t *testing.T, h *GatewayHandler, k *service.APIKey, path, body string, call func(*GatewayHandler, *gin.Context)) []byte {
 	t.Helper()

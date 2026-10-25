@@ -1344,3 +1344,9 @@ pnpm --dir frontend run build
 
 - 依序 merge M2b、T2.3（含 T2.2）与五个 UI 来源；冲突均保留双方，Go 冲突文件 gofmt。首版 T2.3 合并重复声明一个字段，本地编译发现后在未发布分支上重做，旧提交作废。
 - 补交从未入库的 Messages golden（在未修改的 main16a 上独立重录，逐字节一致）；policy 回放改为按构建选样；登记 T2.2 的原版调度等价改写。T2.2 not_subset 为来源缺陷，契约裁定保留该字段于 diff，待来源修复。开发期定向、race、前端与轻量门禁结果见当前交接状态；全量门禁交 CI。
+
+### 2026-10-25 — T2.2 关闭态分配修复（O-L04 接手 G）
+
+- provider golden 发现名单外请求先分配判定结构再判组（每请求 +1，Claude Code 回退 +2，prompt-too-long 回退另有重算哈希）。改为派生前的跳过一律只记 trace、不保留判定；Claude Code 回退按直连回退组判名单，名单外不查组；prompt-too-long 只在 A 已生效或 B 待定时重算；Gemini 在 gemini_anchor 关闭时不为锚点解析请求体。对照臂与 earlier_tier 的 a2 分桶开销按开工包 v1.3.3 只报告，不改。
+- 按 F 裁定，策略 diff 只对解析阶段错误与 exceeds_rollout_percent/exceeds_chain_percent 去掉字段；not_subset_of_anchor_groups 等引用与关系错误保留字段（m3m4 v1.2）。
+- 新增 service 与真实 handler 的同夹具交替 allocs 断言（每臂 5 轮取最小，先预热一轮），关闭态严格相等；在原 240d 产品上红测失败、修复后通过。wire、选号与 sticky 断言不变；未推送、未部署。

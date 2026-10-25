@@ -210,11 +210,23 @@ func mergeM4Policy(index int, before map[string]any, raw json.RawMessage) (map[s
 			}
 		}
 	}
-	// Invalid leaves never participate in direction or confirmation.
+	// A leaf that fails parsing or its own value limit never participates in
+	// direction or confirmation. Reference and relational errors (for example
+	// not_subset_of_anchor_groups) keep the field in the diff (m3m4 v1.2).
 	for _, err := range errs {
-		diff = slices.DeleteFunc(diff, func(d CachePolicyDiff) bool { return d.Field == err.Field })
+		if cachePolicyErrorDropsDiff(err.Code) {
+			diff = slices.DeleteFunc(diff, func(d CachePolicyDiff) bool { return d.Field == err.Field })
+		}
 	}
 	return out, diff, errs
+}
+
+func cachePolicyErrorDropsDiff(code string) bool {
+	switch code {
+	case "unsupported_in_build", "forbidden_field", "duplicate", "malformed_body", "unknown_field", "exceeds_rollout_percent", "exceeds_chain_percent":
+		return true
+	}
+	return false
 }
 
 func m4PolicyIntRange(field string) (int, int) {

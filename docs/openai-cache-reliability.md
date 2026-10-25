@@ -458,6 +458,10 @@ share active 保持既有路径；metadata、cacheable_content 与 Gemini CLI �
 原有 sticky 之外的出站 body/header、metadata 和重试规则不变。候选携带 serving 作用域，
 使用时不匹配则回到基线；中间件换组、prompt-too-long 和 Claude Code 限制回退均重新判定。
 count_tokens 不进入派生或计数。只有 a2 实际生效时才补 serving GroupID；名单外、对照组、兼容入口、早期层级命中或在途上限跳过时，保留原 sticky/prefetch/选号序列。Gemini 保留 CLI 优先级。
+名单外、其他平台、兼容入口与 share active 在派生 a2 之前判定，不分配、不查组：Claude Code
+限制回退按直连回退组判定名单（管理端禁止回退组再开 claude_code_only），名单外不解析回退组；
+Gemini 在 gemini_anchor 关闭时不为锚点解析请求体；prompt-too-long 换组只在 A 已生效或 B 仍待定时
+重算会话哈希。这些状态的 allocs/op 与关闭态严格相等，只有待定候选才保留判定结构。
 
 按 a2 维护进程内最多65536项在途计数，归零删除；超限、容量满或异常时回到基线，
 记 fanin_cap 并增加 l04_fanin_skip_total。请求结束和换组释放预留；多实例上限近似为

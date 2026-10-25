@@ -1071,13 +1071,18 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						}
 						sessionSlotAccounts = make(map[int64]*service.Account)
 						if h.gatewayService.CacheAnchorEnabled(c) {
+							// Only an anchor applied in A or still pending in B can change the
+							// baseline hash; any other state would recompute the same value.
+							applied := h.gatewayService.CacheAnchorApplied(parsedReq)
 							h.gatewayService.ReleaseCacheAnchor(parsedReq)
 							h.gatewayService.PrepareCacheAnchor(c, fallbackAPIKey, parsedReq, fallbackGroup.Platform, false)
-							sessionHash = h.gatewayService.GenerateSessionHash(parsedReq)
-							if h.gatewayService.CacheAnchorApplied(parsedReq) {
-								sessionGroupID = parsedReq.GroupID
+							if applied || h.gatewayService.CacheAnchorPending(parsedReq) {
+								sessionHash = h.gatewayService.GenerateSessionHash(parsedReq)
+								if h.gatewayService.CacheAnchorApplied(parsedReq) {
+									sessionGroupID = parsedReq.GroupID
+								}
+								sessionKey = sessionHash
 							}
-							sessionKey = sessionHash
 							h.gatewayService.BindProviderCacheTraceSession(c, sessionHash, "")
 						} else {
 							currentAPIKey = fallbackAPIKey

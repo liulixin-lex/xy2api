@@ -69,86 +69,112 @@ func (s *GatewayService) prepareCacheAnchor(c *gin.Context, key *APIKey, parsed 
 	}
 	s.ReleaseCacheAnchor(parsed)
 	parsed.AnchorV2 = CacheAnchorV2{}
-	d := &cacheAnchorDecision{policy: p.anchorPolicy, arm: "none", trace: cacheTraceFromGin(c), platform: platform, metadataEnabled: p.cacheMetadataEnabled()}
+	parsed.cacheL04 = nil
+	d := cacheAnchorDecision{policy: p.anchorPolicy, arm: "none", trace: cacheTraceFromGin(c), platform: platform, metadataEnabled: p.cacheMetadataEnabled()}
 	if d.metadataEnabled {
 		d.clientUserID = cacheMetadataHasClientValue(gjson.GetBytes(parsed.Body.Bytes(), "metadata.user_id"))
 	}
-	parsed.cacheL04 = d
 	if d.trace != nil {
 		parsed.cacheTraceSource = &d.trace.data.IDSource
 	}
-	defer d.publish()
+	if s.cacheAnchorScope(c, key, platform, native, &d) {
+		s.deriveCacheAnchor(key, parsed, platform, &d)
+	}
+	// Every skip is final and is only recorded. A decision outlives preparation
+	// (and is allocated) only while a later tier can still apply it.
+	if d.skip != "" {
+		d.publish()
+		return key
+	}
+	retained := d
+	parsed.cacheL04 = &retained
+	retained.publish()
+	return key
+}
+
+// CacheAnchorOutOfScope decides and records the skips that need no request
+// body, so a caller that parses only for the anchor can return before parsing.
+func (s *GatewayService) CacheAnchorOutOfScope(c *gin.Context, key *APIKey, platform string) bool {
+	if !s.CacheAnchorEnabled(c) {
+		return true
+	}
+	d := cacheAnchorDecision{policy: s.providerTraceEngine.CaptureCachePolicy(c).anchorPolicy, arm: "none", trace: cacheTraceFromGin(c), platform: platform}
+	if s.cacheAnchorScope(c, key, platform, true, &d) {
+		return false
+	}
+	d.publish()
+	return true
+}
+
+// cacheAnchorScope makes the skip decisions that precede the anchor, in trace
+// order. An out-of-scope request returns before any allocation or group IO.
+func (s *GatewayService) cacheAnchorScope(c *gin.Context, key *APIKey, platform string, native bool, d *cacheAnchorDecision) bool {
 	if key == nil || key.ID <= 0 {
 		d.skip = "no_api_key"
-		return key
+		return false
 	}
 	if key.Group == nil || key.GroupID == nil || key.Group.Platform != platform || (platform != PlatformAnthropic && platform != PlatformGemini) {
 		d.skip = "not_anthropic_group"
-		return key
+		return false
 	}
 	group := key.Group
 	// ForcePlatform deliberately bypasses the selector's Claude Code restriction.
 	force, _ := c.Request.Context().Value(ctxkey.ForcePlatform).(string)
 	if force == "" && cacheClaudeCodeFallbackNeeded(group, IsClaudeCodeClient(c.Request.Context())) {
+		// A fallback group cannot itself be claude_code_only (validateFallbackGroup),
+		// so the direct fallback is the serving group; an unlisted one needs no lookup.
+		if next := group.FallbackGroupID; next != nil && *next > 0 && !d.policy.servesGroup(platform, *next) {
+			d.groupID, d.skip = *next, "not_in_group"
+			return false
+		}
 		resolved, _, err := s.resolveGatewayGroup(c.Request.Context(), key.GroupID)
 		if err != nil || resolved == nil {
 			d.skip = "group_unresolved"
-			return key
+			return false
 		}
 		group = resolved
 	}
 	if group.ID <= 0 {
 		d.skip = "group_unresolved"
-		return key
+		return false
 	}
 	if group.Platform != platform {
 		d.skip = "not_anthropic_group"
-		return key
+		return false
 	}
 	// Resolution is needed for anchor scope, eligibility and trace only. Returning
 	// a serving clone here would also change skipped/control requests' sticky IO.
 	d.groupID = group.ID
-	if platform == PlatformGemini {
-		if !d.policy.gemini {
-			d.skip = "not_in_group"
-			return key
-		}
-	} else {
-		listed := false
-		for _, id := range d.policy.groups {
-			if id == group.ID {
-				listed = true
-				break
-			}
-		}
-		if !listed {
-			d.skip = "not_in_group"
-			return key
-		}
+	if !d.policy.servesGroup(platform, group.ID) {
+		d.skip = "not_in_group"
+		return false
 	}
 	if s.shareScheduling.shareSchedulingActive(group.ID) {
 		d.skip = "share_active"
-		return key
+		return false
 	}
 	if !native {
 		d.skip = "empty_anchor"
-		return key
+		return false
 	}
+	return true
+}
+
+func (s *GatewayService) deriveCacheAnchor(key *APIKey, parsed *ParsedRequest, platform string, d *cacheAnchorDecision) {
 	secret := ""
 	if s.cfg != nil {
 		secret = s.cfg.JWT.Secret
 	}
-	value := deriveCacheAnchorV2(secret, key.ID, group.ID, parsed.Model, platform, parsed.SystemRaw(), parsed.MessagesRaw())
-	parsed.AnchorV2 = CacheAnchorV2{value: value, servingGroupID: group.ID, policyRev: d.policy.revision}
+	value := deriveCacheAnchorV2(secret, key.ID, d.groupID, parsed.Model, platform, parsed.SystemRaw(), parsed.MessagesRaw())
+	parsed.AnchorV2 = CacheAnchorV2{value: value, servingGroupID: d.groupID, policyRev: d.policy.revision}
 	if value == "" {
 		d.skip = "empty_anchor"
-		return key
+		return
 	}
-	d.arm = parsed.AnchorV2.armForGroup(group.ID, d.policy.rollout, d.policy.metadataRollout, d.policy.metadataAvailable && platform == PlatformAnthropic && slices.Contains(d.policy.metadataGroups, group.ID))
+	d.arm = parsed.AnchorV2.armForGroup(d.groupID, d.policy.rollout, d.policy.metadataRollout, d.policy.metadataAvailable && platform == PlatformAnthropic && slices.Contains(d.policy.metadataGroups, d.groupID))
 	if d.arm == "off" {
 		d.skip = "arm_off"
 	}
-	return key
 }
 
 func (d *cacheAnchorDecision) publish() {
@@ -228,6 +254,11 @@ func (s *GatewayService) ReleaseCacheAnchor(parsed *ParsedRequest) {
 func (s *GatewayService) CacheAnchorApplied(parsed *ParsedRequest) bool {
 	return parsed != nil && parsed.cacheL04 != nil && parsed.cacheL04.skip == "none" &&
 		parsed.AnchorV2.sessionForGroup(derefGroupID(parsed.GroupID)) != ""
+}
+
+// CacheAnchorPending reports a prepared candidate that hashing may still apply.
+func (s *GatewayService) CacheAnchorPending(parsed *ParsedRequest) bool {
+	return parsed != nil && parsed.cacheL04 != nil && parsed.cacheL04.skip == ""
 }
 
 func (s *GatewayService) CacheAnchorEarlierTier(parsed *ParsedRequest) {

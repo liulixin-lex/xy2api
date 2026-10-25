@@ -1,5 +1,7 @@
 package service
 
+import "slices"
+
 // Runtime policy is frozen at publication. The lists are private and never
 // returned to request callers; observations are not inputs to this policy.
 type cacheAnthropicAnchorPolicy struct {
@@ -23,4 +25,12 @@ func cacheAnthropicAnchorPolicyFromEntry(e cachePolicyEntry, caps CacheM4BuildCa
 func (p *CachePolicySnapshot) cacheAnchorEnabled() bool {
 	return p != nil && p.anchorPolicy.available && !p.behaviorStale() && p.MasterEnabled() &&
 		p.anchorPolicy.valid && p.anchorPolicy.rollout > 0 && (len(p.anchorPolicy.groups) > 0 || p.anchorPolicy.gemini)
+}
+
+// Gemini anchors are scoped by gemini_anchor alone, Anthropic ones by group.
+func (p *cacheAnthropicAnchorPolicy) servesGroup(platform string, groupID int64) bool {
+	if platform == PlatformGemini {
+		return p.gemini
+	}
+	return slices.Contains(p.groups, groupID)
 }

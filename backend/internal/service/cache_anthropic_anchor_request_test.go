@@ -40,6 +40,18 @@ func l04RequestFixture(t *testing.T, caps CacheM4BuildCapabilities, trace bool) 
 	return svc, c, key, parsed
 }
 
+// l04Skip returns the outcome of a prepared request. Final skips retain no
+// decision, so their reason is only observable through the trace.
+func l04Skip(t *testing.T, c *gin.Context, p *ParsedRequest) string {
+	t.Helper()
+	if p.cacheL04 != nil {
+		return p.cacheL04.skip
+	}
+	tr := cacheTraceFromGin(c)
+	require.NotNil(t, tr)
+	return tr.data.L04Skip
+}
+
 func TestL04RequestObservationIndependentAndTenantScoped(t *testing.T) {
 	var hashes []string
 	for _, trace := range []bool{false, true} {
@@ -111,7 +123,7 @@ func TestL04RequestSkipOrderAndScope(t *testing.T) {
 			s, c, k, p := l04RequestFixture(t, CacheM4BuildCapabilities{L04: true}, true)
 			tc.mutate(s, k, p)
 			s.PrepareCacheAnchor(c, k, p, PlatformAnthropic, false)
-			require.Equal(t, tc.skip, p.cacheL04.skip)
+			require.Equal(t, tc.skip, l04Skip(t, c, p))
 			require.Empty(t, p.AnchorV2.value)
 			s.GenerateSessionHash(p)
 			require.False(t, s.CacheAnchorApplied(p))
@@ -254,7 +266,7 @@ func TestL04RequestGroupSwitchRecomputesEligibility(t *testing.T) {
 	b.Group = &Group{ID: 32, Platform: PlatformAnthropic}
 	b.GroupID = &b.Group.ID
 	s.PrepareCacheAnchor(c, &b, p, PlatformAnthropic, false)
-	require.Equal(t, "not_in_group", p.cacheL04.skip)
+	require.Equal(t, "not_in_group", l04Skip(t, c, p))
 	require.NotEqual(t, a, s.GenerateSessionHash(p))
 	require.Empty(t, s.anchorInflight.entries)
 	s.ReleaseCacheAnchor(p)
@@ -278,7 +290,7 @@ func TestL04GeminiPrecedenceAndEmptyDigest(t *testing.T) {
 			s.CacheAnchorEarlierTier(p)
 			require.Equal(t, "earlier_tier", p.cacheL04.skip)
 		} else {
-			require.Equal(t, "empty_anchor", p.cacheL04.skip)
+			require.Equal(t, "empty_anchor", l04Skip(t, c, p))
 		}
 		s.ReleaseCacheAnchor(p)
 	}
@@ -322,7 +334,7 @@ func TestL04RequestExclusionAndCounterFaultBoundaries(t *testing.T) {
 		s, c, k, p := l04RequestFixture(t, CacheM4BuildCapabilities{L04: true}, true)
 		k.Group.ClaudeCodeOnly = true
 		s.PrepareCacheAnchor(c, k, p, PlatformAnthropic, false)
-		require.Equal(t, "group_unresolved", p.cacheL04.skip)
+		require.Equal(t, "group_unresolved", l04Skip(t, c, p))
 		require.Empty(t, p.AnchorV2.value)
 		require.Empty(t, s.anchorInflight.entries)
 	})
@@ -332,7 +344,7 @@ func TestL04RequestExclusionAndCounterFaultBoundaries(t *testing.T) {
 		// Empty secret and nil repository cannot be observed after this gate.
 		s.cfg.JWT.Secret = ""
 		s.PrepareCacheAnchor(c, k, p, PlatformAnthropic, false)
-		require.Equal(t, "not_anthropic_group", p.cacheL04.skip)
+		require.Equal(t, "not_anthropic_group", l04Skip(t, c, p))
 		require.Empty(t, p.AnchorV2.value)
 		require.Empty(t, s.anchorInflight.entries)
 	})
@@ -342,7 +354,7 @@ func TestL04RequestExclusionAndCounterFaultBoundaries(t *testing.T) {
 		share.state.Store(&shareSchedulingState{settings: ShareSchedulingSettings{Enabled: true}, groups: map[int64]*shareGroupPolicy{31: {groupID: 31, policy: sharesched.Policy{Scheduler: sharesched.SchedulerShare}}}})
 		s.shareScheduling = share
 		s.PrepareCacheAnchor(c, k, p, PlatformAnthropic, false)
-		require.Equal(t, "share_active", p.cacheL04.skip)
+		require.Equal(t, "share_active", l04Skip(t, c, p))
 		require.Empty(t, p.AnchorV2.value)
 		require.Empty(t, s.anchorInflight.entries)
 	})
@@ -368,7 +380,7 @@ func TestL04CompatIngressNeverUsesMessagesShapedBody(t *testing.T) {
 			before := s.GenerateSessionHash(p)
 			s.PrepareCompatCacheAnchor(c, k, p, PlatformAnthropic)
 			require.Empty(t, p.AnchorV2.value)
-			require.Equal(t, "empty_anchor", p.cacheL04.skip)
+			require.Equal(t, "empty_anchor", l04Skip(t, c, p))
 			require.Equal(t, before, s.GenerateSessionHash(p))
 			require.Equal(t, raw, p.Body.Bytes())
 			require.Empty(t, s.anchorInflight.entries)
@@ -443,8 +455,10 @@ func TestL04ClaudeCodeSkippedRequestsKeepBaselineStickySequence(t *testing.T) {
 				prefetch, selected int64
 			}
 			var results []result
-			for _, enabled := range []bool{false, true} {
-				s, c, key, p := l04RequestFixture(t, CacheM4BuildCapabilities{L04: enabled}, false)
+			// The traced arm records the skip reason; it must not change any call.
+			for _, arm := range []struct{ enabled, trace bool }{{false, false}, {true, false}, {true, true}} {
+				enabled := arm.enabled
+				s, c, key, p := l04RequestFixture(t, CacheM4BuildCapabilities{L04: enabled}, arm.trace)
 				fallback := gatewayProfitTestGroup(77, PlatformAnthropic)
 				key.Group.ClaudeCodeOnly = true
 				key.Group.FallbackGroupID = &fallback.ID
@@ -491,7 +505,13 @@ func TestL04ClaudeCodeSkippedRequestsKeepBaselineStickySequence(t *testing.T) {
 					if want == "compat" {
 						want = "empty_anchor"
 					}
-					require.Equal(t, want, p.cacheL04.skip)
+					if arm.trace {
+						require.Equal(t, want, l04Skip(t, c, p))
+					} else if want != "earlier_tier" && want != "fanin_cap" {
+						require.Nil(t, p.cacheL04, "final skips retain no decision")
+					} else {
+						require.Equal(t, want, p.cacheL04.skip)
+					}
 				}
 				routingGroupID := key.GroupID
 				if s.CacheAnchorApplied(p) {
@@ -523,6 +543,7 @@ func TestL04ClaudeCodeSkippedRequestsKeepBaselineStickySequence(t *testing.T) {
 				s.ReleaseCacheAnchor(p)
 			}
 			require.Equal(t, results[0], results[1], "enabled-but-skipped must preserve every sticky call, prefetch, selection and hash")
+			require.Equal(t, results[0], results[2], "observation must not change a skipped request")
 		})
 	}
 }
