@@ -577,7 +577,10 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 
 	// processEvent converts a single parsed Anthropic SSE event into the
 	// Responses SSE frames for the client.
-	processEvent := func(event *apicompat.AnthropicStreamEvent) []string {
+	processEvent := func(event *apicompat.AnthropicStreamEvent, payload string) []string {
+		if providerCacheTraceFromGin(c) != nil {
+			observeProviderCacheTrace(c, []byte(payload))
+		}
 		if firstChunk {
 			firstChunk = false
 			ms := int(time.Since(startTime).Milliseconds())
@@ -644,7 +647,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	// stages the opening and ends a broken stream with response.failed.
 	var stream *gatewayConvertStream
 	stream = s.newGatewayConvertStream(c, resp, account, gatewayConvertResponses, mappedModel, gatewayConvertHooks{
-		convert:  func(event *apicompat.AnthropicStreamEvent, _ string, _ bool) []string { return processEvent(event) },
+		convert: func(event *apicompat.AnthropicStreamEvent, payload string, _ bool) []string {
+			return processEvent(event, payload)
+		},
 		finalize: finalizeStream,
 		failure: func(source []byte) []string {
 			return gatewayResponsesFailedFrames(stream.ctx(), state, originalModel, source)

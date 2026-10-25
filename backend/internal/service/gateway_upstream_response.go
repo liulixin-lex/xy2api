@@ -1425,6 +1425,9 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 	if err != nil {
 		return nil, nonstreamReadError(ctx, resp, err)
 	}
+	if providerCacheTraceFromGin(c) != nil {
+		observeProviderCacheTrace(c, body)
+	}
 
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {

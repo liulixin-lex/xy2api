@@ -435,6 +435,9 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	}
 
 	processAnthropicEvent := func(event *apicompat.AnthropicStreamEvent, payload string, hold bool) []string {
+		if providerCacheTraceFromGin(c) != nil {
+			observeProviderCacheTrace(c, []byte(payload))
+		}
 		// Forward received usage regardless of the client stream_options.
 		// The intermediate Responses converter synthesizes usage even when absent.
 		ccState.IncludeUsage = ccState.IncludeUsage || anthropicChatStreamHasUsage(event, payload)
