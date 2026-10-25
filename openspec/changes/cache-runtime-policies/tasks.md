@@ -56,3 +56,11 @@
 - [x] 原生 Responses 规则错误出口清除已知 U；新增结构注册及实际 Forward 回显测试。
 - [x] Messages ingress 不可注入边界与 EOF/读错/关闭态控制测试已准备。
 - [ ] 独立评审执行唯一合并定向补跑及关闭态 golden；staging 仅补 active 与 T4.0。
+
+### M4 T2.5 / L-07 忙时保持粘性
+
+- [x] routing.keep_sticky_on_busy 追加 5 个上限字段、静态上限与 clipped、guard_tripped、share_group_no_effect，m4l07 回放。
+- [x] 选号层与 handler 层 14 个绑定点在保持时拒写，按 attempt 释放；H1–H3、A1–A6 与 state_error 回退；关闭态序列与 allocs 对照测试。
+- [x] trace accessor 与 m4l07 样例逐字段回放；进程内计数器与 slog 摘要。
+- [ ] 合并 heavy 一次（五 tag vet、unit、race、增量 lint、契约回放）；R 终审与关闭态 golden；S 混沌矩阵（§11.4 第 9 条）。
+- [ ] 与 M2b 组合时接上 Anthropic 完整事件的 l07_* 写入并通过 trace m4l07 自检。
