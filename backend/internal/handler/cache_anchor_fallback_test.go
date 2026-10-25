@@ -84,6 +84,10 @@ func (u *l04HandlerUpstream) DoWithTLS(r *http.Request, p string, id int64, n in
 }
 
 func l04HandlerFixture(t *testing.T, caps service.CacheM4BuildCapabilities, enabled, promptFallback bool) (*GatewayHandler, *service.APIKey, *l04HandlerSticky, *l04HandlerUpstream) {
+	return l04HandlerPlatformFixture(t, caps, enabled, promptFallback, service.PlatformAnthropic)
+}
+
+func l04HandlerPlatformFixture(t *testing.T, caps service.CacheM4BuildCapabilities, enabled, promptFallback bool, platform string) (*GatewayHandler, *service.APIKey, *l04HandlerSticky, *l04HandlerUpstream) {
 	t.Helper()
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cfg.JWT.Secret = "l04-handler-synthetic"
@@ -91,18 +95,18 @@ func l04HandlerFixture(t *testing.T, caps service.CacheM4BuildCapabilities, enab
 	policies := service.NewCachePolicyService(&l04HandlerPolicyStore{enabled: enabled}, cfg, service.WithCacheM4Policies(nil), service.WithCacheM4BuildCapabilities(caps), service.WithProviderCacheTrace())
 	require.NoError(t, policies.Refresh(context.Background()))
 	engine := service.ProvideOpenAIGatewayServiceWithCachePolicies(nil, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, policies, nil)
-	a := &service.Group{ID: 31, Hydrated: true, Platform: service.PlatformAnthropic, Status: service.StatusActive}
-	b := &service.Group{ID: 77, Hydrated: true, Platform: service.PlatformAnthropic, Status: service.StatusActive}
+	a := &service.Group{ID: 31, Hydrated: true, Platform: platform, Status: service.StatusActive}
+	b := &service.Group{ID: 77, Hydrated: true, Platform: platform, Status: service.StatusActive}
 	if promptFallback {
 		a.FallbackGroupIDOnInvalidRequest = &b.ID
 	}
-	first := &service.Account{ID: 1, Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "synthetic"}, AccountGroups: []service.AccountGroup{{GroupID: 31, AccountID: 1}}}
+	first := &service.Account{ID: 1, Platform: platform, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "synthetic"}, AccountGroups: []service.AccountGroup{{GroupID: 31, AccountID: 1}}}
 	if promptFallback {
 		first.Platform = service.PlatformAntigravity
 		first.Type = service.AccountTypeOAuth
 		first.Credentials = map[string]any{"access_token": "synthetic", "project_id": "synthetic-project", "expires_at": time.Now().Add(24 * time.Hour).Format(time.RFC3339)}
 	}
-	second := &service.Account{ID: 2, Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "synthetic"}, AccountGroups: []service.AccountGroup{{GroupID: 77, AccountID: 2}}}
+	second := &service.Account{ID: 2, Platform: platform, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "synthetic"}, AccountGroups: []service.AccountGroup{{GroupID: 77, AccountID: 2}}}
 	scheduler := service.NewSchedulerSnapshotService(&groupScopedSchedulerCache{fakeSchedulerCache: &fakeSchedulerCache{accounts: []*service.Account{first, second}}}, nil, nil, nil, nil)
 	groups := &groupMapRepo{fakeGroupRepo: &fakeGroupRepo{}, groups: map[int64]*service.Group{31: a, 77: b}}
 	cache := &l04HandlerSticky{}
@@ -112,6 +116,7 @@ func l04HandlerFixture(t *testing.T, caps service.CacheM4BuildCapabilities, enab
 	t.Cleanup(billing.Stop)
 	h := &GatewayHandler{gatewayService: gateway, billingCacheService: billing, concurrencyHelper: NewConcurrencyHelper(service.NewConcurrencyService(&fakeConcurrencyCache{}), SSEPingFormatClaude, 0), cfg: cfg, maxAccountSwitches: 1}
 	h.antigravityGatewayService = service.NewAntigravityGatewayService(nil, cache, scheduler, service.NewAntigravityTokenProvider(nil, nil, nil), nil, upstream, nil, nil)
+	h.geminiCompatService = service.ProvideGeminiMessagesCompatServiceWithCacheTrace(nil, groups, cache, scheduler, nil, nil, upstream, h.antigravityGatewayService, cfg, engine)
 	k := &service.APIKey{ID: 101, UserID: 102, GroupID: &a.ID, Group: a, Status: service.StatusActive, User: &service.User{ID: 102, Concurrency: 10, Balance: 100}}
 	return h, k, cache, upstream
 }
@@ -121,6 +126,9 @@ func l04ServeHandler(t *testing.T, h *GatewayHandler, k *service.APIKey, path, b
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body)).WithContext(context.WithValue(context.Background(), ctxkey.Group, k.Group))
 	c.Request.Header.Set("Content-Type", "application/json")
+	if strings.HasPrefix(path, "/v1beta/models/") {
+		c.Params = gin.Params{{Key: "modelAction", Value: "/" + strings.TrimPrefix(path, "/v1beta/models/")}}
+	}
 	c.Set(string(middleware.ContextKeyAPIKey), k)
 	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: k.UserID, Concurrency: 10})
 	call(h, c)
@@ -228,6 +236,48 @@ func TestL04CompatActualHandlersOffOnOutboundBytes(t *testing.T) {
 			require.Equal(t, bodies[0], bodies[1])
 			require.Equal(t, clients[0], clients[1])
 			require.Equal(t, calls[0], calls[1])
+		})
+	}
+}
+
+func TestL04GeminiActualHandlerAnchorCLIAndCountTokens(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, scenario := range []struct {
+		name, action, body string
+		anchor             bool
+	}{
+		{"native_anchor", "generateContent", `{"systemInstruction":{"parts":[{"text":"same system"}]},"contents":[{"role":"user","parts":[{"text":"first user"}]}]}`, true},
+		{"cli_first", "generateContent", `{"systemInstruction":{"parts":[{"text":"/.gemini/tmp/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]},"contents":[{"parts":[{"text":"first user"}]}]}`, false},
+		{"count_tokens_excluded", "countTokens", `{"systemInstruction":{"parts":[{"text":"same system"}]},"contents":[{"parts":[{"text":"first user"}]}]}`, false},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			type result struct {
+				client []byte
+				bodies [][]byte
+				calls  []l04HandlerStickyCall
+			}
+			var got []result
+			for _, tc := range []struct {
+				caps    service.CacheM4BuildCapabilities
+				enabled bool
+			}{{service.CacheM4BuildCapabilities{}, true}, {service.CacheM4BuildCapabilities{L04: true}, false}, {service.CacheM4BuildCapabilities{L04: true}, true}} {
+				h, k, cache, up := l04HandlerPlatformFixture(t, tc.caps, tc.enabled, false, service.PlatformGemini)
+				client := l04ServeHandler(t, h, k, "/v1beta/models/gemini-2.5-flash:"+scenario.action, scenario.body, (*GatewayHandler).GeminiV1BetaModels)
+				require.Equal(t, []int64{1}, up.ids)
+				require.NotEmpty(t, cache.calls)
+				usesAnchor := false
+				for _, call := range cache.calls {
+					usesAnchor = usesAnchor || strings.HasPrefix(call.hash, "gemini:a2:")
+				}
+				require.Equal(t, scenario.anchor && tc.enabled && tc.caps.L04, usesAnchor)
+				got = append(got, result{client, up.bodies, cache.calls})
+			}
+			require.Equal(t, got[0], got[1], "capability false with enabled DB and master off retain every byte and sticky call")
+			require.Equal(t, got[0].client, got[2].client)
+			require.Equal(t, got[0].bodies, got[2].bodies)
+			if !scenario.anchor {
+				require.Equal(t, got[0].calls, got[2].calls)
+			}
 		})
 	}
 }
