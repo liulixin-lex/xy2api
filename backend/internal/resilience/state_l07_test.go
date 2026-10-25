@@ -49,11 +49,11 @@ func TestSelectionNotedAndL07Record(t *testing.T) {
 	type rec struct{ n int }
 	r := &rec{1}
 	s.SetL07(r)
-	if s.L07().(*rec) != r {
+	if got, ok := s.L07().(*rec); !ok || got != r {
 		t.Fatal("record")
 	}
 	s.SetL07(nil)
-	if s.L07().(*rec) != r {
+	if got, ok := s.L07().(*rec); !ok || got != r {
 		t.Fatal("nil ignored")
 	}
 }

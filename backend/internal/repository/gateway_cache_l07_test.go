@@ -17,8 +17,10 @@ func TestGatewayCacheL07State(t *testing.T) {
 	server := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	cache := NewGatewayCache(rdb).(*gatewayCache)
-	store := NewResilienceStore(rdb).(*resilienceStore)
+	cache, ok := NewGatewayCache(rdb).(*gatewayCache)
+	require.True(t, ok)
+	store, ok := NewResilienceStore(rdb).(*resilienceStore)
+	require.True(t, ok)
 	clock := time.Unix(1_800_000_000, 0)
 	store.now = func() time.Time { return clock }
 	ctx := context.Background()
