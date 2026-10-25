@@ -625,3 +625,38 @@ func TestCachePolicyL09ARules(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "parse_error", view.Effective.State)
 }
+
+// The AUTH class reads the error status text that the existing 401 handling
+// writes (X P3_REVIEW appendix): drive real 401 bodies of an OpenAI API-key
+// account through HandleUpstreamError and classify what SetError stored, so
+// a changed wording cannot silently disable or widen the AUTH whitelist.
+func TestCacheL09AAuthClassMatchesSetErrorText(t *testing.T) {
+	now := time.Now()
+	for name, body := range map[string]string{
+		"error_message": `{"error":{"message":"Incorrect API key provided","type":"invalid_request_error"}}`,
+		"detail":        `{"detail":"Unauthorized"}`,
+		"token_revoked": `{"error":{"code":"token_revoked","message":"revoked"}}`,
+		"plain_text":    `unauthorized`,
+		"empty_body":    ``,
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &rateLimitAccountRepoStub{}
+			rl := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			account := &Account{ID: 7, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true}
+			rl.HandleUpstreamError(context.Background(), account, http.StatusUnauthorized, http.Header{}, []byte(body))
+			require.Equal(t, 1, repo.setErrorCalls)
+			owner := *account
+			owner.Status, owner.ErrorMessage = StatusError, repo.lastErrorMsg
+			require.Equal(t, "auth", l09aOwnerHardClass(&owner, now), repo.lastErrorMsg)
+		})
+	}
+	// Other error statuses stay outside the AUTH class.
+	repo := &rateLimitAccountRepoStub{}
+	rl := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{ID: 8, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true}
+	rl.HandleUpstreamError(context.Background(), account, http.StatusBadRequest, http.Header{}, []byte(`{"error":{"message":"organization has been disabled"}}`))
+	require.Equal(t, 1, repo.setErrorCalls)
+	owner := *account
+	owner.Status, owner.ErrorMessage = StatusError, repo.lastErrorMsg
+	require.Equal(t, "other", l09aOwnerHardClass(&owner, now))
+}
