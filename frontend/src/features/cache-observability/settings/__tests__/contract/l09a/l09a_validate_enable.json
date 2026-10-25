@@ -1,0 +1,78 @@
+{
+  "_contract": [
+    "M4-2",
+    "T31A-L09A"
+  ],
+  "_note": "在 L-07 已生效的 routing 上开启 L-09a：两项都是 enable，routing 为 highest 风险，要求理由、勾选与输入键名。静态 cache-aware 关闭，所以预览带 static_aware_routing_disabled；L-07 仍生效，state 仍为 on（routing 的 state 取各功能中生效的一项，开工包 §5）。",
+  "_fixture": {
+    "build_capabilities": {
+      "l04": false,
+      "l03": false,
+      "l07": true,
+      "l09a": true
+    },
+    "说明": "T3.1a 构建的静态能力（叠在 T2.5 上：l07、l09a 为 true；本目录的 anthropic_identity 沿用 m4l07 的休眠形态），后端测试预置，不属于响应"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/routing/validate",
+    "body": {
+      "expected_rev": 1,
+      "spec": {
+        "affinity_mode": "prev_host",
+        "affinity_rollout_percent": 20
+      },
+      "reason": "上一 host 偏好试运行",
+      "confirm": {
+        "checkbox": true,
+        "typed": "cache_routing_policy"
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": true,
+      "errors": [],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "affinity_mode",
+          "before": "score",
+          "after": "prev_host"
+        },
+        {
+          "field": "affinity_rollout_percent",
+          "before": 0,
+          "after": 20
+        }
+      ],
+      "risk": "highest",
+      "direction": "enable",
+      "confirm": {
+        "reason_required": true,
+        "checkbox_required": true,
+        "type_to_confirm": "cache_routing_policy"
+      },
+      "current_rev": 1,
+      "rev_stale": false,
+      "effective_preview": {
+        "state": "on",
+        "active": true,
+        "blockers": [
+          "static_aware_routing_disabled"
+        ]
+      },
+      "affected": [
+        {
+          "key": "routing",
+          "state_before": "on",
+          "state_after": "on",
+          "active_after": true
+        }
+      ]
+    }
+  }
+}

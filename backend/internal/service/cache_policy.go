@@ -74,6 +74,7 @@ type CachePolicySnapshot struct {
 	l07Available        bool
 	upstream            CacheUpstreamIdentityPolicy
 	routingL07          CacheRoutingL07Policy
+	routingL09A         CacheRoutingL09APolicy
 	cohortViews         [2]cachePolicyCohortView
 	platforms           uint8
 	ingressChainPercent int
@@ -181,6 +182,13 @@ type CachePolicyService struct {
 	l07Caps                         cacheL07Caps
 	l07                             *l07Runtime
 	share                           cachePolicyShareLookup
+	l17                             bool
+	l09a                            *l09aRuntime
+
+	// L-09a group roles, guarded by mu: the availability fallback targets
+	// read with the last refresh that needed them (cache T3.1a §4).
+	l09aTargets      map[int64]struct{}
+	l09aTargetsKnown bool
 
 	// Staleness bound, guarded by mu. refreshedAt is the last successful
 	// settings read; administrator writes neither refresh nor clear it.
@@ -191,7 +199,7 @@ type CachePolicyService struct {
 }
 
 func NewCachePolicyService(repo SettingRepository, cfg *config.Config, options ...CachePolicyOption) *CachePolicyService {
-	s := &CachePolicyService{now: time.Now, repo: repo, started: cachePolicyProcessStartedAt, caps: CachePolicyCaps{1, 64, 32, 1024, 3, 512}, l07Caps: cacheL07CapsFromConfig(cfg), l07: newL07Runtime()}
+	s := &CachePolicyService{now: time.Now, repo: repo, started: cachePolicyProcessStartedAt, caps: CachePolicyCaps{1, 64, 32, 1024, 3, 512}, l07Caps: cacheL07CapsFromConfig(cfg), l07: newL07Runtime(), l09a: newL09ARuntime()}
 	for _, option := range options {
 		option(s)
 	}
@@ -280,12 +288,23 @@ func (s *CachePolicyService) Refresh(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	raw, err := s.repo.GetMultiple(ctx, cachePolicySettings[:])
+	// L-09a excludes fallback targets; their roles are read only while the
+	// routing setting selects prev_host. A failed read fails L-09a closed.
+	var targets map[int64]struct{}
+	targetsRead, targetsKnown := false, false
+	if err == nil && s.l09aWantsGroupRoles(raw[cachePolicySettings[5]]) {
+		targets, targetsKnown = s.l09aLoadGroupRoles(ctx)
+		targetsRead = true
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err != nil {
 		// Keep the last valid snapshot on read failure, up to max_stale_seconds.
 		s.boundStaleLocked()
 		return err
+	}
+	if targetsRead {
+		s.l09aTargets, s.l09aTargetsKnown = targets, targetsKnown
 	}
 	now := s.now().UTC()
 	age := now.Sub(s.refreshedAt)
@@ -352,11 +371,13 @@ func (s *CachePolicyService) publishEntries(entries [6]cachePolicyEntry) {
 	}
 	p.byteBudget = int64(min(policyInt(o["byte_budget_mib"]), s.caps.MaxByteBudgetMiB)) << 20
 	p.rate = int64(min(policyInt(o["rate_mib_per_s"]), s.caps.MaxRateMiBPerS)) << 20
-	p.upstream = upstreamIdentityFromEntry(entries[3], p.MasterEnabled() && !p.stale)
+	p.upstream = upstreamIdentityFromEntry(entries[3], p.MasterEnabled() && !p.stale, s.l17)
 	p.l04Available = s.m4Behaviors.L04
 	p.l07Available = s.m4Available && s.m4Behaviors.L07
 	p.anchorPolicy = cacheAnthropicAnchorPolicyFromEntry(entries[4], s.m4Behaviors)
 	p.routingL07 = routingL07FromEntry(entries[5], p.MasterEnabled() && !entries[0].parseError, s.m4Available && s.m4Behaviors.L07, s.l07Caps)
+	p.routingL09A = routingL09AFromEntry(entries[5], p.MasterEnabled() && !entries[0].parseError, s.m4Available && s.m4Behaviors.L09A,
+		cacheL09AStaticReady(s.aware, s.rollout), s.l09aTargets, s.l09aTargetsKnown, s.snapshot.Load(), s.now())
 	p.revision = fmt.Sprintf("m%d.o%d.u%d.a%d.r%d", p.revs[0], p.revs[1], p.revs[3], p.revs[4], p.revs[5])
 	p.initCohortViews()
 	for _, notify := range s.listeners {
@@ -411,7 +432,7 @@ func policyDefaults(index int) map[string]any {
 		return map[string]any{"enabled": false}
 	}
 	if index == 3 {
-		return map[string]any{"mode": "off", "account_ids": []int64{}, "rollout_percent": 0, "chat_compat_uuid": false, "header_only_uuid": false, "forward_session_headers": "whitelist", "max_inflight_per_key": 2}
+		return map[string]any{"mode": "off", "account_ids": []int64{}, "rollout_percent": 0, "chat_compat_uuid": false, "header_only_uuid": false, "forward_session_headers": "whitelist", "max_inflight_per_key": 2, "grok": grokIdentityPolicyDefaults()}
 	}
 	return map[string]any{"enabled": false, "sample_percent": 100, "chain_percent": 100, "byte_budget_mib": 64, "rate_mib_per_s": 32}
 }
@@ -426,9 +447,10 @@ func policyInt(v any) int {
 }
 
 func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config, accounts AccountRepository, groups GroupRepository) *CachePolicyService {
-	// T2.2/T2.3 implement L-04/L-03 and T2.5 implements L-07 with every limit of
-	// M4 kickoff §11 (DESIGN §6.1A).
-	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups), WithProviderCacheTrace(), WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L04: true, L03: true, L07: true}), WithCacheAnthropicObservability())
+	// T2.2/T2.3 implement L-04/L-03, T2.5 implements L-07 with every limit of
+	// M4 kickoff §11 (DESIGN §6.1A), T3.1a the prev_host affinity (L-09a) and
+	// T3.4 the Grok identity (L-17).
+	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups), WithProviderCacheTrace(), WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L04: true, L03: true, L07: true, L09A: true}), WithCacheAnthropicObservability(), WithCacheL17())
 	s.Start()
 	return s
 }

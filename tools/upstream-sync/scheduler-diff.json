@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "upstream_commit": "f2669c8cf62555cd92389b3f55920e9e6e7c6ff2",
-  "description": "Reviewed differences between the original Sub2API scheduler files and the recorded upstream commit. Any other change, or a changed upstream commit, fails `sync.py scheduler-diff` until reviewed. Reviewed for v0.2.15: all existing XY2API difference blocks are unchanged; the upstream NormalizeOpenAICompatiblePlatform change to domain.UsesOpenAIGateway is adopted verbatim after module-path normalization. Reviewed for 0.4.0: gateway resilience hooks are registered as `gateway-resilience` blocks; two earlier lines were rewritten by them (named results of SelectAccountWithLoadAwareness, the last-resort runtime-block gate). Reviewed for 0.4.5 local integration: all four original scheduler files are byte-for-byte unchanged from the 0.4.4 post-release main; the existing reviewed difference blocks remain valid. Reviewed for T2.5 L-07: the cache-l07 block only adds hooks after the existing decisions.",
+  "description": "Reviewed differences between the original Sub2API scheduler files and the recorded upstream commit. Any other change, or a changed upstream commit, fails `sync.py scheduler-diff` until reviewed. Reviewed for v0.2.15: all existing XY2API difference blocks are unchanged; the upstream NormalizeOpenAICompatiblePlatform change to domain.UsesOpenAIGateway is adopted verbatim after module-path normalization. Reviewed for 0.4.0: gateway resilience hooks are registered as `gateway-resilience` blocks; two earlier lines were rewritten by them (named results of SelectAccountWithLoadAwareness, the last-resort runtime-block gate). Reviewed for 0.4.5 local integration: all four original scheduler files are byte-for-byte unchanged from the 0.4.4 post-release main; the existing reviewed difference blocks remain valid. Reviewed for T2.5 L-07: the cache-l07 block only adds hooks after the existing decisions. Reviewed for T3.1a L-09a: the cache-l09a block only adds the first-selection permit, the hard-owner note at the existing sticky delete and a hook after the unchanged cache hooks.",
   "files": {
     "backend/internal/service/gateway_scheduling.go": [
       {
@@ -377,6 +377,22 @@
           "beginCacheTraceSelection(ctx)",
           "noteCacheTraceSelection(ctx, selection, decision)"
         ]
+      },
+      {
+        "block": "cache-l09a",
+        "note": "T3.1a L-09a prev_host preference (cache kickoff v1.1): the first-selection permit flips at selectAccountWithScheduler entry and closes after last resort; the hard-invalid owner note follows the existing clearBinding (skipped when the binding is preserved); the ordering hook follows the unchanged original cache hook. No selector is called twice and no gate or score changes.",
+        "removed": [],
+        "added": [
+          "if !req.PreserveStickyBinding {",
+          "s.service.l09aOwnerCleared(ctx, account)",
+          "}",
+          "if l09a := s.service.l09aFirst(ctx); l09a != nil {",
+          "s.service.l09aPreferCacheScoredCandidates(ctx, l09a, req, plan)",
+          "}",
+          "l09a := s.l09aEnterSelection(ctx)",
+          "defer l09aDone(l09a)",
+          "s.l09aFinish(ctx, l09a, selection, decision)"
+        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [
@@ -619,6 +635,17 @@
           "}",
           "if CachePolicyFromGin(c).UpstreamIdentity().Enabled() {",
           "c.Set(openAICacheSessionProvenanceGinKey, tenantScoped)",
+          "}"
+        ]
+      },
+      {
+        "block": "cache-l09a",
+        "note": "T3.1a L-09a prev_host preference (cache kickoff v1.1): note a hard-invalid owner at the existing Layer1 sticky delete, and order the tied cache blocks after the unchanged original hook while the request is in its first selection. Delete conditions, the original gate and comparator, the shuffle and stickyAccountID are unchanged.",
+        "removed": [],
+        "added": [
+          "s.l09aOwnerCleared(ctx, account)",
+          "if l09a := s.l09aFirst(ctx); l09a != nil {",
+          "s.l09aPreferCacheCandidates(ctx, l09a, available, requestedModel, rateOrder.enabled, stickySpillover, stickyAccountID)",
           "}"
         ]
       }

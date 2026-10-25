@@ -105,9 +105,12 @@ func TestCachePolicyPOL2ContractReplay(t *testing.T) {
 			}
 			require.NoError(t, json.Unmarshal(raw, &meta))
 			require.True(t, meta.Fixture.SnapshotStale)
-			// This build carries T2.5: routing has the m4l07 keep_sticky_on_busy
-			// leaves (the F derivation, proven by TestCachePolicyM4L07OverlayMatchesAuthority).
-			expected := cacheM4L07Overlay(t, f.Response)
+			// This build carries T2.5 and T3.1a: routing has the m4l07
+			// keep_sticky_on_busy leaves and affinity_rollout_percent (the F
+			// derivations, proven by TestCachePolicyM4L07OverlayMatchesAuthority
+			// and TestCachePolicyL09AOverlayMatchesAuthority).
+			l09a := meta.Fixture.BuildCapabilities != nil && meta.Fixture.BuildCapabilities.L09A
+			expected := cacheL09AOverlay(t, cacheM4L07Overlay(t, f.Response), l09a)
 			data, _ := f.Response["data"].(map[string]any)
 			repo := &cacheRouteStore{rows: map[string]string{
 				service.SettingKeyClaudeCacheFallbackPolicy: `{"enabled":true,"group_ids":[1,2]}`,
@@ -218,6 +221,8 @@ func TestCachePolicyPOL2ContractReplay(t *testing.T) {
 			}
 			status, got := cacheCall(t, router, f.Request.Method, f.Request.Path, f.Request.Body)
 			require.Equal(t, f.Status, status)
+			// pol2 is frozen; this build appends the L-17 grok fields (l17 false).
+			expected = cacheL17ProjectLegacy(t, expected, false)
 			normalizePolicyTimes(t, got)
 			normalizePolicyTimes(t, expected)
 			require.Equal(t, expected, got, "compare every field")

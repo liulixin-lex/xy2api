@@ -170,9 +170,9 @@ export default {
       uuid_fill: 'uuid_fill (fill a UUID session identifier)',
       whitelist: 'whitelist (forward as is)',
       normalize: 'normalize (normalize, then forward)',
-      score: 'score (current behavior)',
-      prev_host: 'prev_host (prefer the upstream host the session used last, within a tier)',
-      prev_host_plus_quality: 'prev_host+quality (then rank hosts by cache read share)',
+      score: 'Order by cache score (current)',
+      prev_host: 'Prefer the previous upstream host',
+      prev_host_plus_quality: 'Previous host plus host quality (not available yet)',
       aux_only: 'aux_only (auxiliary value only)',
       openai: 'OpenAI',
       anthropic: 'Anthropic',
@@ -494,6 +494,22 @@ export default {
           description: 'Once a session has this many requests in flight, further requests get no filled session identifier, so a burst does not share one identifier.',
           risk: 'A higher cap lets more concurrent requests share one session identifier.',
         },
+        grok_chat_body_key: {
+          label: 'Send the session ID in the request body for Grok chat',
+          description: 'When on, Grok chat requests carry the same session ID in the body as well as the header. Verify upstream support before turning it on.',
+          risk: 'Changes the outbound body of Grok chat requests.',
+        },
+        grok_compact_identity: {
+          label: 'Send the session ID with Grok compaction requests',
+          description: 'When on, Grok compaction requests also carry the session ID so they can hit the cache. No tools are added.',
+          risk: 'Changes the outbound body of Grok compaction requests.',
+        },
+        grok_account_ids: {
+          label: 'Grok accounts for these fixes',
+          description: 'Applies only to these Grok accounts. You can start with a single account.',
+          risk: 'Outbound Grok requests of these accounts change as set above.',
+          empty: 'No effect when empty',
+        },
       },
       anthropic_identity: {
         anchor_group_ids: {
@@ -576,8 +592,13 @@ export default {
         },
         affinity_mode: {
           label: 'Same-tier affinity',
-          description: 'score keeps the current behavior; prev_host prefers the upstream host the session used last within a tier, with the current cache score second; prev_host+quality then also ranks hosts by cache read share.',
+          description: 'Only when a session has to pick a new account and the candidates are tied on priority and load, prefer an account on the same upstream host as last time. It never adds retries or picks unhealthy accounts.',
           risk: 'Only reorders same-tier candidates; admission, cooldown and fallback are unchanged. Needs cache-aware routing on in the deployment config.',
+        },
+        affinity_rollout_percent: {
+          label: 'Rollout for previous host preference',
+          description: 'Applies to this share of sessions that already use cache aware ordering; the rest serve as the control group.',
+          risk: 'The higher the share, the more sessions follow the preference.',
         },
       },
     },

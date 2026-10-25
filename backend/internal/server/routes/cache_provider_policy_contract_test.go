@@ -234,6 +234,10 @@ func cacheProviderPolicyReplay(t *testing.T, name string, raw []byte, options []
 	// PR C samples predate T2.5: an l07 build adds the m4l07 routing leaves
 	// (F derivation, proven by TestCachePolicyM4L07OverlayMatchesAuthority).
 	expected := cacheM4L07Overlay(t, f.Response)
+	// P3 builds add the T3.1a routing leaf and the T3.4 grok leaves; neither is
+	// declared here (F derivations, proven by TestCachePolicyL09AOverlayMatchesAuthority
+	// and TestCachePolicyL17LegacyProjectionMatchesAuthority).
+	expected = cacheL17ProjectLegacy(t, cacheL09AOverlay(t, expected, false), false)
 	normalizePolicyTimes(t, got)
 	normalizePolicyTimes(t, expected)
 	require.Equal(t, expected, got)

@@ -336,14 +336,43 @@ null 形态依据保存的兼容 Responses 官方流示例及协议允许的空�
 启用实验中监测。
 
 
+## Grok 身份缺口（L-17）
+
+`upstream_identity` 末尾的 `grok.chat_body_key`、`grok.compact_identity` 与
+`grok.account_ids` 修补 Grok 的两处身份缺口，与 L-01 的 mode、账号范围和比例相互独立。
+默认 false、false、[]，等于原行为；账号列表为空表示不生效，两个开关只对列表中的 Grok
+账号（OAuth 与 API key）生效，按每次尝试的账号判定。三项属于静态能力 l17：能力为
+false 时字段带 `not_implemented_in_build`，启用方向返回 `CACHE_POLICY_UNSUPPORTED`，
+关闭与清空照常；数据库已启用时 state 为 blocked。请求快照在发布时把能力、紧急总闸、
+`cache_feature_master`、解析状态与陈旧上限合并为布尔值，无快照时为 false。
+
+- `chat_body_key`：Grok 走原始 xAI Chat 时，body 的 `prompt_cache_key` 改写为与
+  `X-Grok-Conv-Id` 相同的租户作用域身份，不转发客户端原值；身份为空时仍删除该字段。
+- `compact_identity`：`/responses/compact` 按同一种子链计算身份，body 与
+  `X-Grok-Conv-Id` 都携带；compact 不接受 `tool_choice`，因此不注入 Free 档原生工具，
+  也不走 Free 函数工具缓存路由。
+- 只有 L-17 实际写入 body 键的尝试收到 400，且 `error.param` 或 message 指向
+  `prompt_cache_key` 时，本进程对该账号跳过 L-17 两项 24 小时。该 400 保持端点原有的
+  呈现、重试与 failover，不新增重试；跳过表与 L-01 使用同一机制，但条目互不共用。
+- 通过既有 resilience 指标接口提供 `grok_identity_fix_applied_total{fix}` 与
+  `grok_identity_upstream_reject_total{fix}`；拒绝另记不含身份的告警日志
+  `grok_identity_upstream_reject`。Grok 不进入 cache_trace。
+- 管理接口的 `grok.account_ids.options` 只列 Grok 账号；候选查询失败时
+  `account_options_unavailable` 同时清空两个账号选择器。只核对新增 ID，移除永远允许。
+  旧存储在内存中补齐三项，不写回、不改 revision；history 保留三项变更。
+- 启用前必修：xAI Chat 是否使用 body 键需先在 1 个账号上取得收益证据；compact
+  需在 staging 用真实端点确认不报错、不改变结果，生产先只列 1 个账号。
+
 ## Claude/Gemini 身份与粘性策略管理（T4.0）
 
 anthropic_identity 默认 anchor_group_ids=[]、metadata_group_ids=[]、
 gemini_anchor=false、rollout_percent=0；metadata 范围必须是 anchor 范围的子集。
 两组 ID 只接受存在的 anthropic 分组，空列表表示关闭。
 routing 默认 keep_sticky_on_busy.enabled=false、group_ids=[]、rollout_percent=0，
-affinity_mode=score。busy 的空分组列表表示全部；本构建只接受 score，
-其他取值在 validate 中为 unsupported_in_build、PUT 为 CACHE_POLICY_UNSUPPORTED。
+affinity_mode=score、affinity_rollout_percent=0。busy 的空分组列表表示全部；
+affinity_mode 的 prev_host 需要构建能力 l09a（见下文 L-09a），prev_host+quality
+属于尚未实现的 L-10，其他取值在 validate 中为 unsupported_in_build、PUT 为
+CACHE_POLICY_UNSUPPORTED。
 
 策略管理与请求行为使用独立的静态构建能力。T4.0 的 L-04、L-03、L-07
 能力均为 false；能力字段的启用或扩张在 validate 中为 unsupported_in_build，
@@ -421,6 +450,46 @@ Chat Completions 经 Responses 上游的成功 HTTP 响应，在实际 L-01 注�
 Responses 原生流式的规则错误直接写客户端，独立清除已解码 message 中的已知 U。
 未注入或策略关闭时使用原 reader/writer，不分配还原对象。Messages 兼容入站不在
 L-01 允许的 ingress 中，维持原有身份与转换逻辑，不扩大注入范围。
+
+## OpenAI 上一主机偏好（L-09a）
+
+routing 的 `affinity_mode=prev_host` 与 `affinity_rollout_percent`（0–100，默认 0）
+控制 L-09a，构建能力 l09a 为 true 时才可开启；`prev_host+quality` 始终为
+unsupported_in_build。离开 score 或调高比例为 enable，回到 score 为 disable；
+旧存储在内存中补 0，不写回、不改 revision，history 记录该字段。
+它依赖既有静态 cache-aware：`gateway.openai_cache.aware_routing_enabled=false` 或静态
+`rollout_percent=0` 时允许保存，但 routing 带 blocker `static_aware_routing_disabled`，
+L-09a 不执行。routing 同时承载 L-07：任一已激活的功能生效即为 on；只有 L-09a
+被静态前提阻断时为 blocked。请求快照中的 L-09a 还要求总开关、无 kill、快照不陈旧，
+并且本次刷新读到了分组的回退关系；读不到时 L-09a 关闭。
+
+触发只有一种：新请求的首次普通选号中，sticky 层在既有删除处删除了绑定，且被删除的
+owner 按账号状态是硬失效（余额暂停、额度耗尽、过期，或 401 认证失败的 error 状态）。
+删除条件、`CountsForSession` 与局部 sticky 变量不变，选号器只调用一次；被删除的 owner
+仍由原有过滤排除。被删除 owner 的上游主机（与 `accountUpstreamHost` 相同的等价）
+作为提示：OAuth 的 `platform|official`、空主机、非 BALANCE/AUTH 的硬失效、最近一次
+错误体为 HTML，均不给提示；AUTH 只在进程内最近 10 分钟同一主机上出现 AUTH、BALANCE
+或 5xx 的不同账号少于 2 个、且 L-09a 生效已满 10 分钟时可用，该计数只在 L-09a
+生效时喂入。限流、临时不可调度、transport、分组或渠道不符等删除不触发。
+
+首次选号标记由 handler 在 Responses、Messages、Chat 与 WS 新连接的首次选号前置入，
+只有快照中 L-09a 生效时才在既有的 RequestState 上保存，首次进入选号即翻转，
+failover、同账号重试、handler 层重选、WS 后续 turn 与未知调用方都不再评估。
+availability fallback 请求、被 `availability_fallback_group_id` 引用的目标组、quality
+接管、guardian、监控探针、quarantine fail-open、last-resort、advanced 的成本 overflow
+或 stale 尾部均不施加。分桶为 `SHA256("l09a-cohort|" + session)`，嵌套在静态 cohort
+之内；只在旧 cache-aware gate 通过后评估。
+
+L-09a 只在既有同档块（与原 hook 相同的定义）证据完整、且块内有提示主机的候选时，
+在原 hook 之后按“提示主机优先、旧 cache score、原次序”稳定排列；不增删候选，
+不改权重、健康、租约、top-K、分池或预算，也不保证最终选中同一主机。
+未生效时原 hook 的比较函数、排序与 RNG 消耗不变；没有新的 Redis 读写。
+
+完整事件记录 `l09a_arm`（none/off/on）、`l09a_applied` 与 `l09a_skip`，枚举与判定顺序
+见 cache_trace l09a 契约；`route_reason` 不变。进程计数器 `l09a_skip_total{reason}` 与
+`l09a_hint_unusable_total{reason}`（host_suspect、official_host、non_json、
+reason_not_listed、host_empty）每 5 分钟随 `cache.l09a_summary` 日志输出一次；
+分组回退关系读取失败记 `cache.l09a_group_roles_unavailable`。
 
 ### 多平台观测的 stats 口径（M2b）
 

@@ -67,6 +67,9 @@ X-B1：管理能力不代表行为可用。L-04、L-03、L-07 各有静态能力
 不修改关闭态 writer、既有调度、韧性、重试或计费解析边界。完整行为和指标见
 [OpenAI 缓存可靠性](../../../docs/openai-cache-reliability.md#m31启用前安全边界)。
 `max_inflight_per_key` 默认 2、范围 1–16，内存补齐旧存储并纳入 history；升 enable、降 disable。
+L-17（T3.4）在 upstream_identity 末尾追加 `grok.chat_body_key`、`grok.compact_identity`、
+`grok.account_ids`（默认 false/false/[]，空列表不生效），静态能力 l17 同 X-B1；原始 Chat 与
+compact 只写作用域身份，compact 不加工具；实际写入后的 prompt_cache_key 400 按账号跳过 24h。
 新跳过原因按 quality_rotation → upstream_rejects → fanin_cap 排序。
 实际生效时追加 l01_restore_fallback，最小事件与未生效事件形态保持。
 字面还原识别转义引号与对象键；拒绝路径标记响应已提交并复用原端点 400 writer。

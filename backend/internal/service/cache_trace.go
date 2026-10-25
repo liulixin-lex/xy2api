@@ -67,6 +67,8 @@ type cacheTraceData struct {
 	L01RestoreFallback                                                  string
 	L01Applied                                                          bool
 	L01PolicyRevision                                                   int64
+	L09AArm, L09ASkip                                                   string
+	L09AApplied                                                         bool
 	LossClass, NAReason                                                 string
 	PromptTokens, ReadTokens                                            int
 	Prefix                                                              cachePrefixObservation

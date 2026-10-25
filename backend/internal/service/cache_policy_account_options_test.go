@@ -49,6 +49,20 @@ func (r *cacheOptionPageRepo) ListWithFilters(_ context.Context, p pagination.Pa
 	if r.panicList {
 		panic("account option lookup entered request snapshot path")
 	}
+	if platform == PlatformGrok {
+		// L-17 grok.account_ids candidates: one Grok-only query, all types.
+		require.Empty(r.t, kind)
+		require.Empty(r.t, status)
+		require.Equal(r.t, "id", p.SortBy)
+		require.Equal(r.t, 500, p.PageSize)
+		grok := []Account{}
+		for _, row := range r.rows {
+			if row.Platform == PlatformGrok {
+				grok = append(grok, row)
+			}
+		}
+		return grok, &pagination.PaginationResult{Total: int64(len(grok))}, nil
+	}
 	require.Equal(r.t, PlatformOpenAI, platform)
 	require.Equal(r.t, AccountTypeAPIKey, kind)
 	require.Empty(r.t, status, "inactive/unschedulable accounts remain configuration candidates")

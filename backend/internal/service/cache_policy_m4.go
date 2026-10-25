@@ -31,6 +31,9 @@ type CacheM4BuildCapabilities struct {
 	L04 bool
 	L03 bool
 	L07 bool
+	// L09A is the prev_host affinity (T3.1a). prev_host+quality is L-10 and
+	// has no capability yet.
+	L09A bool
 }
 
 func WithCacheM4BuildCapabilities(capabilities CacheM4BuildCapabilities) CachePolicyOption {
@@ -54,7 +57,7 @@ func m4PolicyDefaults(index int) map[string]any {
 	}
 	busy := map[string]any{"enabled": false, "group_ids": []int64{}, "rollout_percent": 0}
 	cacheL07AddDefaults(busy)
-	return map[string]any{"keep_sticky_on_busy": busy, "affinity_mode": "score"}
+	return map[string]any{"keep_sticky_on_busy": busy, "affinity_mode": cacheAffinityScore, "affinity_rollout_percent": 0}
 }
 
 func m4PolicyField(spec map[string]any, field string) any {
@@ -153,7 +156,9 @@ func mergeM4Policy(index int, before map[string]any, raw json.RawMessage, caps c
 				var v string
 				if json.Unmarshal(value, &v) != nil {
 					code = "malformed_body"
-				} else if v != "score" {
+				} else if v != cacheAffinityScore && v != cacheAffinityPrevHost {
+					// prev_host+quality needs L-10; prev_host is checked
+					// against the build capability with the other changes.
 					code = "unsupported_in_build"
 				}
 				next = v
@@ -272,6 +277,8 @@ func (s *CachePolicyService) m4UnsupportedChanges(index int, spec map[string]any
 			unsupported = !s.m4Behaviors.L03
 		case "keep_sticky_on_busy.enabled", "keep_sticky_on_busy.group_ids":
 			unsupported = !s.m4Behaviors.L07
+		case "affinity_mode":
+			unsupported = !s.m4Behaviors.L09A
 		}
 		if unsupported {
 			errs = append(errs, CachePolicyFieldError{Field: change.Field, Code: "unsupported_in_build"})
@@ -291,7 +298,8 @@ func (s *CachePolicyService) m4ConfiguredCapabilities(index int, spec map[string
 		return (s.m4Behaviors.L04 && anchor) || (s.m4Behaviors.L03 && meta), (!s.m4Behaviors.L04 && anchor) || (!s.m4Behaviors.L03 && meta)
 	}
 	enabled, _ := m4PolicyField(spec, "keep_sticky_on_busy.enabled").(bool)
-	return enabled && s.m4Behaviors.L07, enabled && !s.m4Behaviors.L07
+	affinity := cacheAffinityMode(spec) != cacheAffinityScore
+	return (enabled && s.m4Behaviors.L07) || (affinity && s.m4Behaviors.L09A), (enabled && !s.m4Behaviors.L07) || (affinity && !s.m4Behaviors.L09A)
 }
 
 func m4PolicyConfigured(index int, spec map[string]any) (configured bool, rollout int) {
@@ -311,11 +319,24 @@ func (s *CachePolicyService) m4Effective(index int, stored, loaded cachePolicyEn
 	invalid := stored.parseError || loaded.parseError || masterInvalid
 	configured, rollout := m4PolicyConfigured(index, loaded.envelope.Spec)
 	implemented, unimplemented := s.m4ConfiguredCapabilities(index, loaded.envelope.Spec)
-	// The process guard (A5) pauses L-07 only where it would otherwise run.
-	guard := index == 5 && implemented && s.L07GuardTripped()
-	blocked := (unimplemented && !implemented) || guard
 	enabled := implemented && rollout > 0
-	active = enabled && !invalid && !s.kill && p.MasterEnabled() && !guard
+	// The process guard (A5) pauses L-07 only where it would otherwise run.
+	guard := false
+	staticBlocked := false
+	if index == 5 {
+		// Routing carries L-07 and L-09a; it is on when either feature
+		// takes effect (cache_policies l09a §1).
+		spec := loaded.envelope.Spec
+		busy, _ := m4PolicyField(spec, "keep_sticky_on_busy.enabled").(bool)
+		l07 := busy && s.m4Behaviors.L07
+		affinity := cacheAffinityMode(spec) != cacheAffinityScore
+		staticBlocked = s.l09aStaticBlocked(spec)
+		guard = l07 && s.L07GuardTripped()
+		enabled = (l07 && rollout > 0 && !guard) ||
+			(affinity && s.m4Behaviors.L09A && policyInt(spec["affinity_rollout_percent"]) > 0 && !staticBlocked)
+	}
+	blocked := (unimplemented && !implemented) || ((guard || staticBlocked) && !enabled)
+	active = enabled && !invalid && !s.kill && p.MasterEnabled()
 	if index == 5 {
 		e.ClippedFields = s.cacheL07ClippedFields(loaded.envelope.Spec)
 	}
@@ -324,6 +345,9 @@ func (s *CachePolicyService) m4Effective(index int, stored, loaded cachePolicyEn
 	}
 	if invalid {
 		e.Blockers = append(e.Blockers, "parse_error")
+	}
+	if staticBlocked {
+		e.Blockers = append(e.Blockers, "static_aware_routing_disabled")
 	}
 	if unimplemented && !implemented {
 		e.Blockers = append(e.Blockers, "not_implemented_in_build")
@@ -350,7 +374,7 @@ func (s *CachePolicyService) m4Effective(index int, stored, loaded cachePolicyEn
 	if index == 4 && !s.anthropicObservabilityAvailable && (e.State == "on" || e.State == "masked_by_master") {
 		e.Warnings = append(e.Warnings, "anthropic_observability_missing")
 	}
-	if configured && rollout == 0 && !invalid {
+	if (configured && rollout == 0 || index == 5 && s.l09aRolloutZero(loaded.envelope.Spec)) && !invalid {
 		e.Warnings = append(e.Warnings, "no_effect_rollout_zero")
 	}
 	if index == 5 && s.cacheL07ShareGroupSelected(stored.envelope.Spec) {
@@ -378,7 +402,8 @@ func m4PolicySchema(index int, caps cacheL07Caps) []map[string]any {
 		{"field": "keep_sticky_on_busy.rollout_percent", "type": "int", "min": 0, "max": 100, "unit": "percent"},
 	}
 	schema = append(schema, cacheL07Schema(caps)...)
-	return append(schema, map[string]any{"field": "affinity_mode", "type": "enum", "options": []string{"score", "prev_host", "prev_host+quality"}})
+	return append(schema, map[string]any{"field": "affinity_mode", "type": "enum", "options": []string{"score", "prev_host", "prev_host+quality"}},
+		map[string]any{"field": "affinity_rollout_percent", "type": "int", "min": 0, "max": 100, "unit": "percent"})
 }
 
 func (s *CachePolicyService) m4Schema(index int) []map[string]any {
@@ -392,6 +417,8 @@ func (s *CachePolicyService) m4Schema(index int) []map[string]any {
 			unsupported = !s.m4Behaviors.L03
 		case "keep_sticky_on_busy.enabled", "keep_sticky_on_busy.group_ids":
 			unsupported = !s.m4Behaviors.L07
+		case "affinity_mode":
+			unsupported = !s.m4Behaviors.L09A
 		}
 		if unsupported {
 			field["not_implemented_in_build"] = true
