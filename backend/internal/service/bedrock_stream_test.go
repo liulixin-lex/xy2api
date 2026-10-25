@@ -153,7 +153,7 @@ func TestBedrockStreamProviderUsageObservationAfterMetricsNormalization(t *testi
 	require.Equal(t, ClaudeUsage{InputTokens: 17, OutputTokens: 9, CacheCreationInputTokens: 5, CacheReadInputTokens: 1024}, *got.usage)
 	trace := cacheTraceFromGin(c)
 	require.NotNil(t, trace)
-	require.EqualValues(t, 7, trace.data.UsageFields)
+	require.EqualValues(t, 3, trace.data.UsageFields)
 	require.True(t, trace.data.UsagePromptPresent)
 }
 

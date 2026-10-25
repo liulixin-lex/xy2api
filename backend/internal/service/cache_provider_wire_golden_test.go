@@ -62,7 +62,7 @@ func m2bBillingGolden(t *testing.T, usage ClaudeUsage, model string, account *Ac
 	require.NoError(t, err)
 	require.NotNil(t, repo.lastLog)
 	u := repo.lastLog
-	return map[string]any{"input": u.InputTokens, "output": u.OutputTokens, "create": u.CacheCreationTokens, "read": u.CacheReadTokens, "input_cost": u.InputCost, "output_cost": u.OutputCost, "create_cost": u.CacheCreationCost, "read_cost": u.CacheReadCost, "total_cost": u.TotalCost, "actual_cost": u.ActualCost}
+	return map[string]any{"input": float64(u.InputTokens), "output": float64(u.OutputTokens), "create": float64(u.CacheCreationTokens), "read": float64(u.CacheReadTokens), "input_cost": u.InputCost, "output_cost": u.OutputCost, "create_cost": u.CacheCreationCost, "read_cost": u.CacheReadCost, "total_cost": u.TotalCost, "actual_cost": u.ActualCost}
 }
 
 func m2bProviderTraceEngine(cfg *config.Config, platform string, enabled bool) *OpenAIGatewayService {
