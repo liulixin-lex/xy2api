@@ -417,8 +417,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		anchorParsed, _ = service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformGemini)
 		if anchorParsed != nil {
 			anchorParsed.Model = inboundAnchorModel
-			sessionAPIKey := h.gatewayService.PrepareCacheAnchor(c, apiKey, anchorParsed, service.PlatformGemini, false)
-			sessionRoutingGroupID = sessionAPIKey.GroupID
+			h.gatewayService.PrepareCacheAnchor(c, apiKey, anchorParsed, service.PlatformGemini, false)
 		}
 	}
 	defer h.gatewayService.ReleaseCacheAnchor(anchorParsed)
@@ -444,6 +443,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		traceSource = "gemini_digest"
 	} else if traceSource == "gemini_cli" && anchorParsed != nil {
 		h.gatewayService.CacheAnchorEarlierTier(anchorParsed)
+	}
+	if h.gatewayService.CacheAnchorApplied(anchorParsed) {
+		sessionRoutingGroupID = anchorParsed.GroupID
 	}
 	if providerTraceEligible {
 		h.gatewayService.BindProviderCacheTraceSession(c, sessionHash, traceSource)

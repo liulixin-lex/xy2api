@@ -119,8 +119,7 @@ func TestL04RequestSkipOrderAndScope(t *testing.T) {
 	}
 	s, c, k, p := l04RequestFixture(t, CacheM4BuildCapabilities{L04: true}, true)
 	s.PrepareCacheAnchor(c, k, p, PlatformAnthropic, false)
-	wrong := int64(99)
-	p.GroupID = &wrong
+	p.AnchorV2.servingGroupID = 99
 	require.NotEqual(t, p.AnchorV2.value, s.GenerateSessionHash(p))
 	require.Equal(t, "scope_mismatch", p.cacheL04.skip)
 	require.Empty(t, s.anchorInflight.entries)
@@ -205,12 +204,14 @@ func TestL04ClaudeCodeFallbackStickyNamespaceC2C3(t *testing.T) {
 			} else {
 				s.concurrencyService = NewConcurrencyService(&mockConcurrencyCache{acquireResults: map[int64]bool{1: false, 2: false}, loadMap: map[int64]*AccountLoadInfo{1: {AccountID: 1, LoadRate: 100}, 2: {AccountID: 2, LoadRate: 100}}})
 			}
-			serving := s.PrepareCacheAnchor(c, key, p, PlatformAnthropic, false)
-			require.Equal(t, int64(77), *serving.GroupID)
+			require.Same(t, key, s.PrepareCacheAnchor(c, key, p, PlatformAnthropic, false))
+			require.Equal(t, int64(31), *p.GroupID, "prepare alone cannot change routing")
 			require.Equal(t, int64(31), *key.GroupID, "authenticated key is not mutated")
 			hash := s.GenerateSessionHash(p)
+			require.True(t, s.CacheAnchorApplied(p))
+			servingGroupID := p.GroupID
 			require.Equal(t, int64(77), p.AnchorV2.servingGroupID)
-			selection, err := s.SelectAccountWithLoadAwareness(c.Request.Context(), serving.GroupID, hash, "", nil, "", 0)
+			selection, err := s.SelectAccountWithLoadAwareness(c.Request.Context(), servingGroupID, hash, "", nil, "", 0)
 			require.NoError(t, err)
 			require.NotNil(t, selection)
 			if profit {
@@ -224,7 +225,7 @@ func TestL04ClaudeCodeFallbackStickyNamespaceC2C3(t *testing.T) {
 				defer selection.ReleaseFunc()
 			}
 			bindCtx := ContextWithSelectionProfitGate(c.Request.Context(), selection)
-			require.NoError(t, s.BindStickySessionAfterProfitAdmission(bindCtx, serving.GroupID, hash, selection.Account.ID))
+			require.NoError(t, s.BindStickySessionAfterProfitAdmission(bindCtx, servingGroupID, hash, selection.Account.ID))
 			require.NotEmpty(t, cache.writes)
 			for _, gid := range cache.writes {
 				require.Equal(t, int64(77), gid, "every actual cache write uses the serving namespace")
@@ -266,9 +267,10 @@ func TestL04GeminiPrecedenceAndEmptyDigest(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, p.GroupID)
 		s.PrepareCacheAnchor(c, k, p, PlatformGemini, false)
-		require.Equal(t, k.GroupID, p.GroupID)
+		require.Nil(t, p.GroupID, "Gemini only gains serving scope on application")
 		hash := s.GenerateSessionHash(p)
 		if p.AnchorV2.value != "" {
+			require.Equal(t, k.GroupID, p.GroupID)
 			require.Equal(t, p.AnchorV2.value, hash)
 			s.ReleaseCacheAnchor(p)
 			s.PrepareCacheAnchor(c, k, p, PlatformGemini, false)
@@ -292,8 +294,8 @@ func TestL04RequestTwoTenantDigestsAndTraceServingGroup(t *testing.T) {
 		s.groupRepo = &mockGroupRepoForGateway{groups: map[int64]*Group{31: k.Group, 77: fallback}}
 		// Begin fixes the authenticated tenant; preparation only changes trace scope.
 		s.BeginProviderCacheTrace(c, PlatformAnthropic, "messages", p.Body.Bytes(), p)
-		serving := s.PrepareCacheAnchor(c, k, p, PlatformAnthropic, false)
-		require.Equal(t, int64(77), *serving.GroupID)
+		require.Same(t, k, s.PrepareCacheAnchor(c, k, p, PlatformAnthropic, false))
+		require.Equal(t, int64(31), *p.GroupID)
 		current, _ := c.Get("api_key")
 		require.Same(t, k, current)
 		require.Same(t, k, BillingAPIKey(c.Request.Context(), k))
@@ -405,4 +407,121 @@ func TestL04MiddlewareServingClonePreservesBillingOrigin(t *testing.T) {
 	require.Equal(t, int64(77), cacheTraceFromGin(c).data.GroupID)
 	require.Equal(t, int64(31), *origin.GroupID)
 	s.ReleaseCacheAnchor(p)
+}
+
+type l04ControlStickyCall struct {
+	operation string
+	group     int64
+	hash      string
+	account   int64
+}
+
+type l04ControlNamespaceCache struct {
+	*mockGatewayCacheForPlatform
+	calls []l04ControlStickyCall
+}
+
+func (m *l04ControlNamespaceCache) GetSessionAccountID(_ context.Context, group int64, hash string) (int64, error) {
+	m.calls = append(m.calls, l04ControlStickyCall{"get", group, hash, 2})
+	return 2, nil
+}
+func (m *l04ControlNamespaceCache) SetSessionAccountID(ctx context.Context, group int64, hash string, account int64, ttl time.Duration) error {
+	m.calls = append(m.calls, l04ControlStickyCall{"set", group, hash, account})
+	return m.mockGatewayCacheForPlatform.SetSessionAccountID(ctx, group, hash, account, ttl)
+}
+
+// The preexisting selector resolves A to B internally. Skipped L04 requests
+// must preserve that entire baseline sequence, including the handler's A read,
+// A prefetch and A final bind; only applied requests may consistently use B.
+func TestL04ClaudeCodeSkippedRequestsKeepBaselineStickySequence(t *testing.T) {
+	for _, scenario := range []string{"not_in_group", "arm_off", "compat", "earlier_tier", "fanin_cap", "share_active"} {
+		t.Run(scenario, func(t *testing.T) {
+			type result struct {
+				calls              []l04ControlStickyCall
+				hash               string
+				prefetch, selected int64
+			}
+			var results []result
+			for _, enabled := range []bool{false, true} {
+				s, c, key, p := l04RequestFixture(t, CacheM4BuildCapabilities{L04: enabled}, false)
+				fallback := gatewayProfitTestGroup(77, PlatformAnthropic)
+				key.Group.ClaudeCodeOnly = true
+				key.Group.FallbackGroupID = &fallback.ID
+				s.groupRepo = &mockGroupRepoForGateway{groups: map[int64]*Group{31: key.Group, 77: fallback}}
+				account := gatewayProfitTestAccount(2, PlatformAnthropic, 0.2, 77)
+				s.accountRepo = &mockAccountRepoForPlatform{accounts: []Account{account}, accountsByID: map[int64]*Account{2: &account}}
+				cache := &l04ControlNamespaceCache{mockGatewayCacheForPlatform: &mockGatewayCacheForPlatform{}}
+				s.cache = cache
+				s.cfg.RunMode = config.RunModeStandard
+				s.cfg.Gateway.Scheduling.LoadBatchEnabled = true
+				s.concurrencyService = NewConcurrencyService(stubConcurrencyCache{})
+				q := *s.providerTraceEngine.cachePolicies.Snapshot()
+				switch scenario {
+				case "not_in_group":
+					q.anchorPolicy.groups = []int64{31}
+				case "arm_off":
+					value := deriveCacheAnchorV2(s.cfg.JWT.Secret, key.ID, 77, p.Model, PlatformAnthropic, p.SystemRaw(), p.MessagesRaw())
+					a := CacheAnchorV2{value: value, servingGroupID: 77}
+					bucket, ok := a.cohortForGroup(77)
+					require.True(t, ok)
+					require.Positive(t, bucket)
+					q.anchorPolicy.rollout = bucket // exact h == rollout boundary is off
+				case "earlier_tier":
+					require.NoError(t, p.ReplaceBody([]byte(`{"model":"claude-sonnet-4-5","metadata":{"user_id":"user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_account__session_11111111-2222-4333-8444-555555555555"},"messages":[{"role":"user","content":"first"}]}`)))
+				case "fanin_cap":
+					s.anchorInflight.poisoned = true
+				case "share_active":
+					share := NewShareSchedulingService(nil, nil, nil)
+					share.state.Store(&shareSchedulingState{settings: ShareSchedulingSettings{Enabled: true}, groups: map[int64]*shareGroupPolicy{77: {groupID: 77, policy: sharesched.Policy{Scheduler: sharesched.SchedulerShare}}}})
+					s.shareScheduling = share
+				}
+				s.providerTraceEngine.cachePolicies.snapshot.Store(&q)
+				c.Set(cachePolicySnapshotGinKey, &q)
+				if scenario == "compat" {
+					require.Same(t, key, s.PrepareCompatCacheAnchor(c, key, p, PlatformAnthropic))
+				} else {
+					require.Same(t, key, s.PrepareCacheAnchor(c, key, p, PlatformAnthropic, false))
+				}
+				require.Equal(t, int64(31), *p.GroupID, "prepare does not switch the sticky namespace")
+				hash := s.GenerateSessionHash(p)
+				require.False(t, s.CacheAnchorApplied(p))
+				if enabled {
+					want := scenario
+					if want == "compat" {
+						want = "empty_anchor"
+					}
+					require.Equal(t, want, p.cacheL04.skip)
+				}
+				routingGroupID := key.GroupID
+				if s.CacheAnchorApplied(p) {
+					routingGroupID = p.GroupID
+				}
+				bound, err := s.GetCachedSessionAccountID(c.Request.Context(), routingGroupID, hash)
+				require.NoError(t, err)
+				require.Equal(t, int64(2), bound)
+				ctx := WithPrefetchedStickySession(c.Request.Context(), bound, *routingGroupID, false)
+				prefetch, ok := PrefetchedStickyGroupIDFromContext(ctx)
+				require.True(t, ok)
+				require.Equal(t, int64(31), prefetch)
+				// Share scheduling is intentionally not re-exercised here; its
+				// exclusion above must preserve the same sticky IO as the baseline.
+				if scenario == "share_active" {
+					s.shareScheduling = nil
+				}
+				selection, err := s.SelectAccountWithLoadAwareness(ctx, routingGroupID, hash, "", nil, "", 0)
+				require.NoError(t, err)
+				require.NotNil(t, selection)
+				require.Equal(t, int64(2), selection.Account.ID)
+				if selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
+				require.NoError(t, s.BindStickySessionAfterProfitAdmission(ContextWithSelectionProfitGate(ctx, selection), routingGroupID, hash, selection.Account.ID))
+				require.Equal(t, int64(31), cache.calls[0].group)
+				require.Equal(t, int64(31), cache.calls[len(cache.calls)-1].group)
+				results = append(results, result{cache.calls, hash, prefetch, selection.Account.ID})
+				s.ReleaseCacheAnchor(p)
+			}
+			require.Equal(t, results[0], results[1], "enabled-but-skipped must preserve every sticky call, prefetch, selection and hash")
+		})
+	}
 }

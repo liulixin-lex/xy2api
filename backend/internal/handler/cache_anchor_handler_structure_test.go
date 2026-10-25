@@ -75,6 +75,46 @@ func TestL04HandlerServingAndCountTokensBoundaries(t *testing.T) {
 	require.Positive(t, a)
 	require.Contains(t, s[a:], "PrepareCacheAnchor(c, fallbackAPIKey, parsedReq, fallbackGroup.Platform, false)")
 	require.Contains(t, s[a:], "sessionHash = h.gatewayService.GenerateSessionHash(parsedReq)")
+	// Every serving namespace switch is dominated by the actual applied result,
+	// after hashing/CLI/priority/counter admission have finished.
+	for _, filename := range []string{"gateway_handler.go", "gemini_v1beta_handler.go"} {
+		node, err := parser.ParseFile(token.NewFileSet(), filename, nil, 0)
+		require.NoError(t, err)
+		switches := 0
+		ast.Inspect(node, func(n ast.Node) bool {
+			branch, ok := n.(*ast.IfStmt)
+			if !ok {
+				return true
+			}
+			call, ok := branch.Cond.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "CacheAnchorApplied" {
+				return true
+			}
+			ast.Inspect(branch.Body, func(n ast.Node) bool {
+				assign, ok := n.(*ast.AssignStmt)
+				if !ok {
+					return true
+				}
+				for _, lhs := range assign.Lhs {
+					id, ok := lhs.(*ast.Ident)
+					if ok && (id.Name == "sessionGroupID" || id.Name == "sessionRoutingGroupID") {
+						switches++
+					}
+				}
+				return true
+			})
+			return true
+		})
+		want := 1
+		if filename == "gateway_handler.go" {
+			want = 2
+		}
+		require.Equal(t, want, switches, "all three serving namespace switches require actual application")
+	}
 	// The prior group registrations must be released with the old session key.
 	release := strings.LastIndex(s[:a], "ReleaseAccountSession(context.Background(), acc, sessionKey)")
 	require.GreaterOrEqual(t, release, 0)

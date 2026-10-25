@@ -2710,6 +2710,26 @@
     {
       "path": "backend/internal/handler/gemini_v1beta_handler.go",
       "value": "useDigestFallback := sessionBoundAccountID == 0 && !h.gatewayService.CacheAnchorApplied(anchorParsed)"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_anchor_request.go",
+      "value": "parsed.GroupID = &d.groupID"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_anchor_request_test.go",
+      "value": "func TestL04ClaudeCodeSkippedRequestsKeepBaselineStickySequence("
+    },
+    {
+      "path": "backend/internal/handler/cache_anchor_fallback_test.go",
+      "value": "func TestL04ClaudeCodeSkippedActualHandlersOffOnBytesAndSequence("
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "if h.gatewayService.CacheAnchorApplied(parsedReq) {\n\t\tsessionGroupID = parsedReq.GroupID\n\t}"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "if h.gatewayService.CacheAnchorApplied(anchorParsed) {\n\t\tsessionRoutingGroupID = anchorParsed.GroupID\n\t}"
     }
   ],
   "forbidden_module_paths": [

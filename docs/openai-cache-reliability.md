@@ -437,7 +437,7 @@ share active 保持既有路径；metadata、cacheable_content 与 Gemini CLI �
 其余候选按同一 anth-cohort|a2 哈希的嵌套阈值分桶，本期只会产生 l04_only/off。
 原有 sticky 之外的出站 body/header、metadata 和重试规则不变。候选携带 serving 作用域，
 使用时不匹配则回到基线；中间件换组、prompt-too-long 和 Claude Code 限制回退均重新判定。
-count_tokens 不进入派生或计数。Gemini 只在启用路径补 serving GroupID，保留 CLI 优先级。
+count_tokens 不进入派生或计数。只有 a2 实际生效时才补 serving GroupID；名单外、对照组、兼容入口、早期层级命中或在途上限跳过时，保留原 sticky/prefetch/选号序列。Gemini 保留 CLI 优先级。
 
 按 a2 维护进程内最多65536项在途计数，归零删除；超限、容量满或异常时回到基线，
 记 fanin_cap 并增加 l04_fanin_skip_total。请求结束和换组释放预留；多实例上限近似为

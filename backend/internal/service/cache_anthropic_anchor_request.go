@@ -26,7 +26,8 @@ func (s *GatewayService) CacheAnchorEnabled(c *gin.Context) bool {
 
 // PrepareCacheAnchor runs before sticky reads and scheduling. Off/capability
 // false returns the same key and never parses, resolves, hashes or allocates.
-// A resolved fallback key is a request-local clone; the authenticated ID is kept.
+// The serving group is private until an anchor is actually selected. Skipped
+// requests retain their original routing/sticky namespace and authenticated key.
 func (s *GatewayService) PrepareCacheAnchor(c *gin.Context, key *APIKey, parsed *ParsedRequest, platform string, countTokens bool) *APIKey {
 	return s.prepareCacheAnchor(c, key, parsed, platform, countTokens, true)
 }
@@ -88,15 +89,8 @@ func (s *GatewayService) prepareCacheAnchor(c *gin.Context, key *APIKey, parsed 
 		d.skip = "not_anthropic_group"
 		return key
 	}
-	if group.ID != *key.GroupID {
-		clone := *key
-		clone.Group = group
-		clone.GroupID = &group.ID
-		key = &clone
-	}
-	// Only routing/sticky consumers use this serving clone. Authentication,
-	// billing and existing group-level conversions retain their original key.
-	parsed.GroupID = key.GroupID
+	// Resolution is needed for anchor scope, eligibility and trace only. Returning
+	// a serving clone here would also change skipped/control requests' sticky IO.
 	d.groupID = group.ID
 	if platform == PlatformGemini {
 		if !d.policy.gemini {
@@ -173,9 +167,9 @@ func (s *GatewayService) cacheAnchorSession(parsed *ParsedRequest) string {
 	if d == nil || (d.skip != "" && d.skip != "none") {
 		return ""
 	}
-	groupID := derefGroupID(parsed.GroupID)
+	groupID := d.groupID
 	value := parsed.AnchorV2.candidateForGroup(groupID)
-	if value == "" || groupID != d.groupID {
+	if value == "" {
 		d.skip = "scope_mismatch"
 		parsed.AnchorV2.armed = false
 		d.publish()
@@ -192,6 +186,10 @@ func (s *GatewayService) cacheAnchorSession(parsed *ParsedRequest) string {
 		}
 		d.lease = lease
 	}
+	// This is the only point where serving scope becomes visible to routing.
+	// Metadata/cacheable/CLI winners, control arms and exhausted leases never
+	// reach it, so their GroupID and sticky namespace remain the baseline ones.
+	parsed.GroupID = &d.groupID
 	parsed.AnchorV2.armed = true
 	d.skip = "none"
 	d.publish()

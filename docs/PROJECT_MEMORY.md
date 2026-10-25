@@ -9,7 +9,7 @@
 ### T2.2 / L-04（2026-10-25，G，实现草稿）
 
 - 临时合并已冻结的 M3.1/T4 与 provider 编译检查点后，实现原生 Messages/Gemini 的 serving-scoped a2、能力与策略双门控、在途上限、策略字段与 trace 契约。依赖的 provider 行为验收仍待完成。
-- 只让 routing/sticky 消费解析后的 serving 组；认证、计费与既有组级转换保留原 APIKey。兼容 Chat/Responses 不映射文本，按 empty_anchor 走原兜底；count_tokens 不派生。元数据接口仍只留集成接缝，不实现 L-03/L-07。
+- 仅实际生效的 a2 才让 routing/sticky 消费解析后的 serving 组；Prepare 始终返回原 APIKey，跳过与对照请求保留基线 sticky/prefetch/选号序列；认证、计费与既有组级转换保留原 APIKey。兼容 Chat/Responses 不映射文本，按 empty_anchor 走原兜底；count_tokens 不派生。元数据接口仍只留集成接缝，不实现 L-03/L-07。
 - HMAC、租户与作用域、C2/C3、换组、实际 handler 字节对照和完整契约回放已准备；定向 Go 待执行，尚未通过验收。后续单批检查与独立关闭态 golden，未推送、部署。
 
 
@@ -1291,3 +1291,9 @@ pnpm --dir frontend run build
 
 - count_tokens handler 完全绕过锚点与 provider trace 准备，AST 断言零触达；纯准备函数保留内部 count_tokens 原因。Gemini 入站模型捕获位于原生 POST 解析之后、映射之前。实际 fallback 测试只对既有 Antigravity 随机 requestId 的精确值跨度做规范化，其他出站/客户端字节及关闭态调用序列严格比较。
 - 冻结契约 README 的四段父版本触发 IPv4 文档误报，仅为该精确路径登记 IPv4 规则例外，契约字节与源 SHA 保持，不放宽其他敏感项规则。原误报记录保留；后继只改文档和工具登记，backend 不变，Go 定向仍在原队列等待，不声称验收。
+
+### 2026-10-25 — T2.2 B-T22-1 跳过请求命名空间修复
+
+- 独立静态审查发现准备阶段提前返回 serving 克隆，会改变 Claude Code 回退组中未生效请求的 sticky 行为；改为只记录内部作用域，拿到实际锚点与在途许可后才设置 GroupID，三个 handler 接缝均以 CacheAnchorApplied 为条件。兼容入口恒返回原 key。
+- 补六种跳过状态的真实 cache/prefetch/选号序列对照，以及真实 handler 的客户端/出站字节对照；applied 的 C2/C3 断言仍在。先停止自动提交合并检查的条件控制器，原定向队列绑定修复后 SHA，未重复排队；本提交仍无 Go 通过结论。
+- 组装要求：T0b.4 在本任务之前合入；与维护分支接入真实 behaviorStale 时删除 cache_policy_behavior_stale.go 占位文件，不能同时保留两个定义。

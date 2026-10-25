@@ -26,6 +26,7 @@ import (
 type l04HandlerPolicyStore struct {
 	service.SettingRepository
 	enabled bool
+	spec    string
 }
 
 func (s *l04HandlerPolicyStore) GetMultiple(context.Context, []string) (map[string]string, error) {
@@ -33,7 +34,11 @@ func (s *l04HandlerPolicyStore) GetMultiple(context.Context, []string) (map[stri
 	if s.enabled {
 		master = `{"rev":1,"spec":{"enabled":true}}`
 	}
-	return map[string]string{"cache_feature_master": master, "cache_anthropic_identity_policy": `{"rev":7,"spec":{"anchor_group_ids":[31,77],"rollout_percent":100,"gemini_anchor":true}}`}, nil
+	policy := s.spec
+	if policy == "" {
+		policy = `{"rev":7,"spec":{"anchor_group_ids":[31,77],"rollout_percent":100,"gemini_anchor":true}}`
+	}
+	return map[string]string{"cache_feature_master": master, "cache_anthropic_identity_policy": policy}, nil
 }
 
 type l04HandlerStickyCall struct {
@@ -89,10 +94,14 @@ func l04HandlerFixture(t *testing.T, caps service.CacheM4BuildCapabilities, enab
 
 func l04HandlerPlatformFixture(t *testing.T, caps service.CacheM4BuildCapabilities, enabled, promptFallback bool, platform string) (*GatewayHandler, *service.APIKey, *l04HandlerSticky, *l04HandlerUpstream) {
 	t.Helper()
+	return l04HandlerPlatformPolicyFixture(t, caps, enabled, promptFallback, platform, "")
+}
+func l04HandlerPlatformPolicyFixture(t *testing.T, caps service.CacheM4BuildCapabilities, enabled, promptFallback bool, platform, policy string) (*GatewayHandler, *service.APIKey, *l04HandlerSticky, *l04HandlerUpstream) {
+	t.Helper()
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cfg.JWT.Secret = "l04-handler-synthetic"
 	cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-	policies := service.NewCachePolicyService(&l04HandlerPolicyStore{enabled: enabled}, cfg, service.WithCacheM4Policies(nil), service.WithCacheM4BuildCapabilities(caps), service.WithProviderCacheTrace())
+	policies := service.NewCachePolicyService(&l04HandlerPolicyStore{enabled: enabled, spec: policy}, cfg, service.WithCacheM4Policies(nil), service.WithCacheM4BuildCapabilities(caps), service.WithProviderCacheTrace())
 	require.NoError(t, policies.Refresh(context.Background()))
 	engine := service.ProvideOpenAIGatewayServiceWithCachePolicies(nil, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, policies, nil)
 	a := &service.Group{ID: 31, Hydrated: true, Platform: platform, Status: service.StatusActive}
@@ -278,6 +287,47 @@ func TestL04GeminiActualHandlerAnchorCLIAndCountTokens(t *testing.T) {
 			if !scenario.anchor {
 				require.Equal(t, got[0].calls, got[2].calls)
 			}
+		})
+	}
+}
+
+// The real handlers must retain the original sticky sequence on the CC fallback
+// path for every non-applied state, as well as identical client/upstream bytes.
+func TestL04ClaudeCodeSkippedActualHandlersOffOnBytesAndSequence(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, scenario := range []struct {
+		name, policy, path, body string
+		call                     func(*GatewayHandler, *gin.Context)
+	}{
+		{"not_in_group", `{"rev":7,"spec":{"anchor_group_ids":[31],"rollout_percent":100}}`, "/v1/messages", `{"model":"claude-sonnet-4-5","system":"common system","messages":[{"role":"user","content":"first user"}],"max_tokens":1}`, (*GatewayHandler).Messages},
+		{"arm_off", `{"rev":7,"spec":{"anchor_group_ids":[77],"rollout_percent":1}}`, "/v1/messages", `{"model":"claude-sonnet-4-5","system":"common system","messages":[{"role":"user","content":"first user"}],"max_tokens":1}`, (*GatewayHandler).Messages},
+		{"earlier_tier", "", "/v1/messages", `{"model":"claude-sonnet-4-5","system":[{"type":"text","text":"common system","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"first user"}],"max_tokens":1}`, (*GatewayHandler).Messages},
+		{"compat_chat", "", "/v1/chat/completions", `{"model":"claude-sonnet-4-5","messages":[{"role":"system","content":"system A"},{"role":"user","content":"hi"}],"stream":false}`, (*GatewayHandler).ChatCompletions},
+		{"compat_responses", "", "/v1/responses", `{"model":"claude-sonnet-4-5","instructions":"system B","input":"hi","stream":false}`, (*GatewayHandler).Responses},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			type result struct {
+				client []byte
+				bodies [][]byte
+				calls  []l04HandlerStickyCall
+				ids    []int64
+			}
+			var results []result
+			for _, enabled := range []bool{false, true} {
+				h, key, cache, up := l04HandlerPlatformPolicyFixture(t, service.CacheM4BuildCapabilities{L04: true}, enabled, false, service.PlatformAnthropic, scenario.policy)
+				key.Group.ClaudeCodeOnly = true
+				fallback := int64(77)
+				key.Group.FallbackGroupID = &fallback
+				client := l04ServeHandler(t, h, key, scenario.path, scenario.body, scenario.call)
+				require.Equal(t, []int64{2}, up.ids, "selector follows the original CC fallback path")
+				require.NotEmpty(t, cache.calls)
+				for _, call := range cache.calls {
+					require.False(t, strings.HasPrefix(call.hash, "a2:"))
+				}
+				require.Equal(t, int64(31), cache.calls[len(cache.calls)-1].group, "handler's final bind remains in the baseline namespace")
+				results = append(results, result{client, up.bodies, cache.calls, up.ids})
+			}
+			require.Equal(t, results[0], results[1], "no change to client/upstream bytes, chosen accounts or any sticky call on skipped requests")
 		})
 	}
 }

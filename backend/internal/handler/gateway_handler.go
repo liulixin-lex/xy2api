@@ -303,10 +303,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		platform = apiKey.Group.Platform
 	}
 	h.gatewayService.BeginProviderCacheTrace(c, platform, "messages", body, parsedReq)
-	sessionAPIKey := h.gatewayService.PrepareCacheAnchor(c, apiKey, parsedReq, platform, false)
-	sessionGroupID := sessionAPIKey.GroupID
+	h.gatewayService.PrepareCacheAnchor(c, apiKey, parsedReq, platform, false)
+	sessionGroupID := apiKey.GroupID
 	defer h.gatewayService.ReleaseCacheAnchor(parsedReq)
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	if h.gatewayService.CacheAnchorApplied(parsedReq) {
+		sessionGroupID = parsedReq.GroupID
+	}
 	h.gatewayService.BindProviderCacheTraceSession(c, sessionHash, "")
 
 	// [DEBUG-STICKY] 打印会话 hash 生成结果
@@ -1069,9 +1072,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						sessionSlotAccounts = make(map[int64]*service.Account)
 						if h.gatewayService.CacheAnchorEnabled(c) {
 							h.gatewayService.ReleaseCacheAnchor(parsedReq)
-							fallbackSessionKey := h.gatewayService.PrepareCacheAnchor(c, fallbackAPIKey, parsedReq, fallbackGroup.Platform, false)
-							sessionGroupID = fallbackSessionKey.GroupID
+							h.gatewayService.PrepareCacheAnchor(c, fallbackAPIKey, parsedReq, fallbackGroup.Platform, false)
 							sessionHash = h.gatewayService.GenerateSessionHash(parsedReq)
+							if h.gatewayService.CacheAnchorApplied(parsedReq) {
+								sessionGroupID = parsedReq.GroupID
+							}
 							sessionKey = sessionHash
 							h.gatewayService.BindProviderCacheTraceSession(c, sessionHash, "")
 						} else {
