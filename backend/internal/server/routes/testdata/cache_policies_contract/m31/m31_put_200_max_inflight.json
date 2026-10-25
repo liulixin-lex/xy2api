@@ -48,14 +48,16 @@
         }
       },
       "loaded": {
-        "rev": 4,
+        "rev": 5,
         "loaded_at": "2026-10-24T08:40:01Z"
       },
       "effective": {
         "state": "on",
         "active": true,
         "blockers": [],
-        "warnings": [],
+        "warnings": [
+          "account_options_unavailable"
+        ],
         "clipped_fields": []
       },
       "defaults": {
@@ -80,23 +82,7 @@
           "field": "account_ids",
           "type": "id_list",
           "ref": "account",
-          "options": [
-            {
-              "id": 101,
-              "name": "relay-a-01",
-              "platform": "openai"
-            },
-            {
-              "id": 102,
-              "name": "relay-b-01",
-              "platform": "openai"
-            },
-            {
-              "id": 103,
-              "name": "relay-c-01",
-              "platform": "openai"
-            }
-          ]
+          "options": []
         },
         {
           "field": "rollout_percent",

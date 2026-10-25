@@ -241,7 +241,7 @@ func recordOpenAIUpstreamIdentityRestoreFallback(c *gin.Context, kind string) {
 	}
 	// At most once per kind per attempt. Oversize dominates the trace enum.
 	bit := uint32(1)
-	if kind == "sse_oversize" {
+	if kind == "sse_oversize" { //nolint:staticcheck // QF1003: restore-only path kept byte-identical to the verified candidate; tagged switch deferred
 		bit = 2
 	} else if kind == "error_body" {
 		bit = 4

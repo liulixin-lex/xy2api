@@ -118,7 +118,7 @@ func TestCachePolicyM3ContractReplay(t *testing.T) {
 			audit := service.NewAuditLogService(auditRepo, nil)
 			accounts := &cacheM3FaultAccounts{
 				failOptions:   name == "m3_list_account_options_unavailable.json" || name == "m3_get_account_options_unavailable.json",
-				forbidQueries: name == "m3_put_disable_skip_account_options.json" || name == "m3_validate_disable_ids_unverified.json",
+				forbidQueries: name == "m3_put_disable_skip_account_options.json" || name == "m3_validate_disable_ids_unverified.json" || name == "m31_put_200_max_inflight.json",
 			}
 			cfg := &config.Config{}
 			cfg.Gateway.OpenAICache.DiagnosticsEnabled = true

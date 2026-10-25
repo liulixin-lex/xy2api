@@ -72,12 +72,14 @@ func TestL01M31OversizeSSEBoundedFragments(t *testing.T) {
 				}
 				data, err := w.Append(body[pos:end])
 				require.NoError(t, err)
-				got.Write(data)
+				_, err = got.Write(data)
+				require.NoError(t, err)
 				require.LessOrEqual(t, len(w.pending), limit+40, "oversize does not buffer the full event")
 			}
 			tail, err := w.Finish()
 			require.NoError(t, err)
-			got.Write(tail)
+			_, err = got.Write(tail)
+			require.NoError(t, err)
 			require.NotContains(t, got.String(), m31TestUUID)
 			// The normal trailing event has one data line and retains its bytes.
 			require.Equal(t, want, got.String())
@@ -136,11 +138,13 @@ func TestL01M31LiteralKeepsJSONSyntax(t *testing.T) {
 					}
 					part, err := w.Append(frame[pos:end])
 					require.NoError(t, err)
-					output.Write(part)
+					_, err = output.Write(part)
+					require.NoError(t, err)
 				}
 				tail, err := w.Finish()
 				require.NoError(t, err)
-				output.Write(tail)
+				_, err = output.Write(tail)
+				require.NoError(t, err)
 				require.NotContains(t, output.String(), m31TestUUID)
 				payload := strings.TrimSpace(strings.TrimPrefix(output.String(), "data: "))
 				require.True(t, gjson.Valid(payload), "size=%d: %s", size, payload)

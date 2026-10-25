@@ -236,7 +236,8 @@ func TestCachePolicyM4GroupCatalogLimitsAndFailure(t *testing.T) {
 			if schema["ref"] != "group" {
 				continue
 			}
-			options := schema["options"].([]cachePolicyAccountOption)
+			options, ok := schema["options"].([]cachePolicyAccountOption)
+			require.True(t, ok)
 			require.Len(t, options, 500)
 			for j, opt := range options {
 				require.Equal(t, PlatformAnthropic, opt.Platform)
@@ -273,9 +274,12 @@ func TestCachePolicyM4NestedSnapshotsAreImmutable(t *testing.T) {
 	old := s.Snapshot()
 	v, err := s.Get(context.Background(), "routing")
 	require.NoError(t, err)
-	nested := v.Stored.Spec["keep_sticky_on_busy"].(map[string]any)
+	nested, ok := v.Stored.Spec["keep_sticky_on_busy"].(map[string]any)
+	require.True(t, ok)
 	nested["enabled"] = false
-	nested["group_ids"].([]int64)[0] = 77
+	groupIDs, ok := nested["group_ids"].([]int64)
+	require.True(t, ok)
+	groupIDs[0] = 77
 	require.Equal(t, true, m4PolicyField(old.entries[5].envelope.Spec, "keep_sticky_on_busy.enabled"))
 	require.Equal(t, []int64{31}, m4PolicyField(old.entries[5].envelope.Spec, "keep_sticky_on_busy.group_ids"))
 	groups.forbid = true

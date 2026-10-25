@@ -74,10 +74,10 @@ func m4ContractSpec(t *testing.T, key string, enabled bool) map[string]any {
 	require.NoError(t, err)
 	var f cacheContract
 	require.NoError(t, json.Unmarshal(raw, &f))
-	for _, item := range f.Response["data"].(map[string]any)["policies"].([]any) {
-		v := item.(map[string]any)
+	for _, item := range cacheM4As[[]any](t, cacheM4As[map[string]any](t, f.Response["data"])["policies"]) {
+		v := cacheM4As[map[string]any](t, item)
 		if v["key"] == key {
-			return contractMap(t, v["stored"].(map[string]any)["spec"])
+			return contractMap(t, cacheM4As[map[string]any](t, v["stored"])["spec"])
 		}
 	}
 	t.Fatalf("missing policy %s", key)
@@ -189,7 +189,7 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 					seedPolicy(t, repo, v)
 				}
 			case strings.HasPrefix(scenario, "m4_validate_"):
-				rev := int64(data["current_rev"].(float64))
+				rev := int64(cacheM4As[float64](t, data["current_rev"]))
 				put(rev, m4ContractSpec(t, key, rev > 0))
 			case name == "m4_put_routing_disable_skip_group_options.json":
 				put(1, m4ContractSpec(t, key, true))
@@ -201,7 +201,7 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 				put(request.ExpectedRev, m4ContractSpec(t, key, false))
 			case strings.HasPrefix(name, "m4_history_"):
 				var maxRev int64
-				for _, v := range data["items"].([]any) {
+				for _, v := range cacheM4As[[]any](t, data["items"]) {
 					b, err := json.Marshal(v)
 					require.NoError(t, err)
 					var item service.CachePolicyHistoryItem
@@ -344,8 +344,8 @@ func TestCachePolicyM4RetainsM3ListEdges(t *testing.T) {
 					seedPolicy(t, repo, v)
 				}
 			}
-			newCards := defaults.Response["data"].(map[string]any)["policies"].([]any)
-			cards := expected["data"].(map[string]any)["policies"].([]any)
+			newCards := cacheM4As[[]any](t, cacheM4As[map[string]any](t, defaults.Response["data"])["policies"])
+			cards := cacheM4As[[]any](t, cacheM4As[map[string]any](t, expected["data"])["policies"])
 			cards[4], cards[5] = contractMap(t, newCards[4]), contractMap(t, newCards[5])
 			cfg := &config.Config{}
 			cfg.Gateway.OpenAICache.DiagnosticsEnabled = list.Existing.Diagnostics
@@ -373,18 +373,18 @@ func TestCachePolicyM4RetainsM3ListEdges(t *testing.T) {
 func cacheM31M4ProjectLegacyList(t *testing.T, response map[string]any) map[string]any {
 	t.Helper()
 	out := contractMap(t, response)
-	cards := out["data"].(map[string]any)["policies"].([]any)
+	cards := cacheM4As[[]any](t, cacheM4As[map[string]any](t, out["data"])["policies"])
 	require.Len(t, cards, 6)
-	upstream := cards[3].(map[string]any)
+	upstream := cacheM4As[map[string]any](t, cards[3])
 	require.Equal(t, "upstream_identity", upstream["key"])
-	spec := upstream["stored"].(map[string]any)["spec"].(map[string]any)
-	defaults := upstream["defaults"].(map[string]any)
+	spec := cacheM4As[map[string]any](t, cacheM4As[map[string]any](t, upstream["stored"])["spec"])
+	defaults := cacheM4As[map[string]any](t, upstream["defaults"])
 	require.Equal(t, "off", spec["mode"])
 	require.NotContains(t, spec, "max_inflight_per_key")
 	require.NotContains(t, defaults, "max_inflight_per_key")
-	schema := upstream["schema"].([]any)
+	schema := cacheM4As[[]any](t, upstream["schema"])
 	for _, field := range schema {
-		require.NotEqual(t, "max_inflight_per_key", field.(map[string]any)["field"])
+		require.NotEqual(t, "max_inflight_per_key", cacheM4As[map[string]any](t, field)["field"])
 	}
 	spec["max_inflight_per_key"] = float64(2)
 	defaults["max_inflight_per_key"] = float64(2)
@@ -408,4 +408,12 @@ func TestCachePolicyM31M4LegacyListProjectionMatchesAuthority(t *testing.T) {
 			require.Equal(t, expected.Response, cacheM31M4ProjectLegacyList(t, source.Response))
 		})
 	}
+}
+
+// cacheM4As checks a decoded contract value's dynamic type before use.
+func cacheM4As[T any](t *testing.T, value any) T {
+	t.Helper()
+	out, ok := value.(T)
+	require.True(t, ok, "unexpected contract value type %T", value)
+	return out
 }
