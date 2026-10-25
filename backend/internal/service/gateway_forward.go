@@ -97,6 +97,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		return nil, fmt.Errorf("parse request: empty request")
 	}
 	ctx, cacheDecision := s.beginClaudeCacheAttempt(ctx, parsed, account)
+	ctx = s.beginCacheMetadataAttempt(ctx, c, parsed, account)
 	defer func() { finishClaudeCacheAttempt(cacheDecision, result) }()
 	// API-key mappings and OAuth native IDs are resolved before mimicry.
 	validationModel := parsed.Model
@@ -182,6 +183,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	// successful wire transformations still update ParsedRequest as before.
 	syncWireBody := func(wire []byte) error {
 		wire = withoutClaudeCacheFallback(ctx, wire)
+		wire = withoutCacheMetadata(ctx, wire, parsed.Body.Bytes())
 		return replaceBody(wire)
 	}
 	reqModel := parsed.Model

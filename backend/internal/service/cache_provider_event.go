@@ -36,6 +36,9 @@ func emitProviderCacheTrace(d cacheTraceData) {
 	if d.L04Present {
 		attrs = append(attrs, slog.String("l04_arm", d.L04Arm), slog.Bool("l04_applied", d.L04Applied), slog.String("l04_skip", d.L04Skip), slog.Int64("l04_policy_rev", d.L04PolicyRevision))
 	}
+	if d.L03Present && d.Platform == PlatformAnthropic {
+		attrs = append(attrs, slog.String("l03_arm", d.L03Arm), slog.Bool("l03_applied", d.L03Applied), slog.String("l03_skip", d.L03Skip))
+	}
 	if d.GapSource == "settled" {
 		attrs = append(attrs, slog.Int64("gap_send_ms", d.GapSendMS))
 	}

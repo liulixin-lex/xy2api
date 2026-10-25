@@ -96,6 +96,11 @@ func (s *OpenAIGatewayService) beginProviderCacheTrace(c *gin.Context, platform,
 		Transport: "http", GapSource: "no_prev", RouteReason: "unknown", RebindCause: "none", TokensPerByteMilli: -1,
 		Prefix: cachePrefixUnavailable(0), Provider: cacheProviderFieldsUnavailable(platform),
 	}}
+	if platform == PlatformAnthropic && policy.anchorPolicy.metadataAvailable {
+		t.data.L03Present = true
+		t.data.L03Arm = "none"
+		t.data.L03Skip = "policy_off"
+	}
 	if policy.l04Available {
 		t.data.L04Present = true
 		t.data.L04Arm = "none"

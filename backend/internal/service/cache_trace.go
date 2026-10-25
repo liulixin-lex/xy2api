@@ -52,6 +52,9 @@ type cacheTrace struct {
 }
 
 type cacheTraceData struct {
+	L03Present                                                          bool
+	L03Arm, L03Skip                                                     string
+	L03Applied                                                          bool
 	L04Present                                                          bool
 	L04Arm, L04Skip                                                     string
 	L04Applied                                                          bool

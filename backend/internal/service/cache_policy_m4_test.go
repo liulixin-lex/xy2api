@@ -49,7 +49,7 @@ func m4PolicyFixture(t *testing.T, extra ...CachePolicyOption) (*CachePolicyServ
 	store.rows["cache_feature_master"] = `{"rev":1,"spec":{"enabled":true}}`
 	// Existing contract/behavior tests model a complete M4 build. Capability
 	// boundary tests explicitly replace this option with a partial/zero set.
-	options := append([]CachePolicyOption{WithCacheNorthstar(), WithCacheM4Policies(groups), WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L04: true, L03: true, L07: true})}, extra...)
+	options := append([]CachePolicyOption{WithCacheNorthstar(), WithCacheM4Policies(groups), WithCachePolicyAccounts(&l03PolicyAccounts{}), WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L04: true, L03: true, L07: true})}, extra...)
 	s := NewCachePolicyService(store, policyTestConfig(), options...)
 	require.NoError(t, s.Refresh(context.Background()))
 	require.Zero(t, groups.calls, "construction and snapshot publication never consult groups")
@@ -170,7 +170,7 @@ func TestCachePolicyM4DisableNeverReadsOrReusesGroupFacts(t *testing.T) {
 	require.Equal(t, []string{"anthropic_observability_missing"}, v.Warnings)
 	view, _, err = s.Update(context.Background(), "anthropic_identity", w, nil, CachePolicyActor{})
 	require.NoError(t, err)
-	require.Equal(t, []string{"anthropic_observability_missing", cachePolicyGroupOptionsUnavailable}, view.Effective.Warnings)
+	require.Equal(t, []string{"anthropic_observability_missing", cachePolicyAccountOptionsUnavailable, cachePolicyGroupOptionsUnavailable}, view.Effective.Warnings)
 	require.Equal(t, before, groups.calls)
 }
 

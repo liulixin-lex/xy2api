@@ -73,7 +73,7 @@ func TestCachePolicyL04SinglePolicyContractReplay(t *testing.T) {
 			cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
 			now := time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)
 			options := []service.CachePolicyOption{
-				service.WithCacheNorthstar(), service.WithCacheM4Policies(groups),
+				service.WithCacheNorthstar(), service.WithCacheM4Policies(groups), service.WithCachePolicyAccounts(cacheM3OptionAccounts{}),
 				service.WithCacheM4BuildCapabilities(capabilities), service.WithProviderCacheTrace(),
 				service.WithCachePolicyClock(func() time.Time { return now }),
 			}
@@ -88,7 +88,7 @@ func TestCachePolicyL04SinglePolicyContractReplay(t *testing.T) {
 			router := cacheM4ContractRouter(policies, audit, "0.0.0-contract", service.CachePolicyActor{UserID: 1, Email: "admin@example.com"})
 			status, got := cacheCall(t, router, f.Request.Method, f.Request.Path, f.Request.Body)
 			require.Equal(t, f.Status, status)
-			expected := contractMap(t, f.Response)
+			expected := cacheL03ExtendLegacyResponse(t, f.Response)
 			normalizePolicyTimes(t, got)
 			normalizePolicyTimes(t, expected)
 			require.Equal(t, expected, got, "full status/code/reason/metadata and success structure")
@@ -164,7 +164,7 @@ func TestCachePolicyL04CompleteCombinedListReplay(t *testing.T) {
 			router := cacheM4ContractRouter(policies, audit, list.BuildVersion, service.CachePolicyActor{UserID: 1, Email: "admin@example.com"})
 			status, got := cacheCall(t, router, f.Request.Method, f.Request.Path, f.Request.Body)
 			require.Equal(t, f.Status, status)
-			expected := contractMap(t, f.Response)
+			expected := cacheL03ExtendLegacyResponse(t, f.Response)
 			normalizePolicyTimes(t, got)
 			normalizePolicyTimes(t, expected)
 			require.Equal(t, expected, got, "all cards including M2b, M31 and T22 fields; no projection")
@@ -210,5 +210,5 @@ func cacheL04ExtendLegacyResponse(t *testing.T, input map[string]any) map[string
 		}
 	}
 	walk(out)
-	return out
+	return cacheL03ExtendLegacyResponse(t, out)
 }

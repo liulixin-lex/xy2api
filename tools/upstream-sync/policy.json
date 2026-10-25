@@ -2389,7 +2389,7 @@
     },
     {
       "path": "backend/internal/service/cache_policy.go",
-      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups), WithProviderCacheTrace(), WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L04: true}), WithCacheAnthropicObservability())"
+      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups), WithProviderCacheTrace(), WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L04: true, L03: true}), WithCacheAnthropicObservability())"
     },
     {
       "path": "backend/internal/service/openai_cache_diagnostics.go",
@@ -2730,6 +2730,50 @@
     {
       "path": "backend/internal/handler/gemini_v1beta_handler.go",
       "value": "if h.gatewayService.CacheAnchorApplied(anchorParsed) {\n\t\tsessionRoutingGroupID = anchorParsed.GroupID\n\t}"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_metadata.go",
+      "value": "!p.behaviorStale() && p.MasterEnabled()"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_metadata.go",
+      "value": "io.WriteString(h, \"anth-device|\")"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_metadata.go",
+      "value": "generateSessionUUID(\"anthropic-upstream-session:v1:\" + value)"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_metadata.go",
+      "value": "sjson.SetBytes(body, \"metadata.user_id\", userID)"
+    },
+    {
+      "path": "backend/internal/service/gateway_upstream_request.go",
+      "value": "body = s.applyCacheMetadata(ctx, c, account, body, enableMPT)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward.go",
+      "value": "wire = withoutCacheMetadata(ctx, wire, parsed.Body.Bytes())"
+    },
+    {
+      "path": "backend/internal/service/gateway_anthropic_passthrough.go",
+      "value": "s.applyCacheMetadataPassthrough(upstreamCtx, c, account, upstreamReq, wireBody)"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_metadata_request_test.go",
+      "value": "func TestL03NativeForwardWireAndObservationIndependence("
+    },
+    {
+      "path": "backend/internal/service/gateway_forward.go",
+      "value": "ctx = s.beginCacheMetadataAttempt(ctx, c, parsed, account)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_responses.go",
+      "value": "ctx = s.beginCacheMetadataAttempt(ctx, c, parsed, account)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
+      "value": "ctx = s.beginCacheMetadataAttempt(ctx, c, parsed, account)"
     }
   ],
   "forbidden_module_paths": [

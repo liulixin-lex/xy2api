@@ -40,6 +40,7 @@ func (s *GatewayService) ForwardAsResponses(
 	}
 	startTime := time.Now()
 	ctx, cacheDecision := s.beginClaudeCacheAttempt(ctx, parsed, account)
+	ctx = s.beginCacheMetadataAttempt(ctx, c, parsed, account)
 	defer func() { finishClaudeCacheAttempt(cacheDecision, result) }()
 
 	normalizedBody, normalized, err := normalizeOpenAIResponsesLegacyIngress(body)

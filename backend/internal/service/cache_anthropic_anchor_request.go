@@ -1,17 +1,24 @@
 package service
 
 import (
+	"slices"
+
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"github.com/tidwall/gjson"
 )
 
 type cacheAnchorDecision struct {
-	policy    cacheAnthropicAnchorPolicy
-	arm, skip string
-	groupID   int64
-	trace     *cacheTrace
-	lease     *cacheAnchorLease
+	policy                             cacheAnthropicAnchorPolicy
+	arm, skip                          string
+	groupID                            int64
+	trace                              *cacheTrace
+	lease                              *cacheAnchorLease
+	platform                           string
+	metadataEnabled                    bool
+	clientUserID                       bool
+	metadataAttempted, metadataApplied bool
 }
 
 // This predicate is shared with the selector's resolver. It has no IO and does
@@ -47,6 +54,12 @@ func (s *GatewayService) prepareCacheAnchor(c *gin.Context, key *APIKey, parsed 
 		if t := cacheTraceFromGin(c); t != nil {
 			t.mu.Lock()
 			t.data.L04Skip = "count_tokens"
+			if platform == PlatformAnthropic && p.anchorPolicy.metadataAvailable {
+				t.data.L03Present = true
+				t.data.L03Arm = "none"
+				t.data.L03Skip = "count_tokens"
+				t.data.L03Applied = false
+			}
 			t.mu.Unlock()
 		}
 		return key
@@ -56,7 +69,10 @@ func (s *GatewayService) prepareCacheAnchor(c *gin.Context, key *APIKey, parsed 
 	}
 	s.ReleaseCacheAnchor(parsed)
 	parsed.AnchorV2 = CacheAnchorV2{}
-	d := &cacheAnchorDecision{policy: p.anchorPolicy, arm: "none", trace: cacheTraceFromGin(c)}
+	d := &cacheAnchorDecision{policy: p.anchorPolicy, arm: "none", trace: cacheTraceFromGin(c), platform: platform, metadataEnabled: p.cacheMetadataEnabled()}
+	if d.metadataEnabled {
+		d.clientUserID = cacheMetadataHasClientValue(gjson.GetBytes(parsed.Body.Bytes(), "metadata.user_id"))
+	}
 	parsed.cacheL04 = d
 	if d.trace != nil {
 		parsed.cacheTraceSource = &d.trace.data.IDSource
@@ -128,7 +144,7 @@ func (s *GatewayService) prepareCacheAnchor(c *gin.Context, key *APIKey, parsed 
 		d.skip = "empty_anchor"
 		return key
 	}
-	d.arm = parsed.AnchorV2.armForGroup(group.ID, d.policy.rollout, d.policy.metadataRollout, d.policy.metadataAvailable)
+	d.arm = parsed.AnchorV2.armForGroup(group.ID, d.policy.rollout, d.policy.metadataRollout, d.policy.metadataAvailable && platform == PlatformAnthropic && slices.Contains(d.policy.metadataGroups, group.ID))
 	if d.arm == "off" {
 		d.skip = "arm_off"
 	}
@@ -138,6 +154,9 @@ func (s *GatewayService) prepareCacheAnchor(c *gin.Context, key *APIKey, parsed 
 func (d *cacheAnchorDecision) publish() {
 	if d == nil || d.trace == nil {
 		return
+	}
+	if !d.metadataAttempted {
+		defer d.publishMetadata(d.metadataInitialSkip())
 	}
 	t := d.trace
 	t.mu.Lock()

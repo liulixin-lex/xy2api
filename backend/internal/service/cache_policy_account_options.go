@@ -71,7 +71,7 @@ func (s *CachePolicyService) upstreamIdentityAccountOptions(ctx context.Context)
 
 func setCachePolicyAccountOptions(view *CachePolicyView, options []cachePolicyAccountOption) {
 	for _, field := range view.Schema {
-		if field["field"] == "account_ids" {
+		if field["field"] == "account_ids" || field["field"] == "metadata_account_ids" {
 			field["options"] = options
 			return
 		}
@@ -81,7 +81,13 @@ func setCachePolicyAccountOptions(view *CachePolicyView, options []cachePolicyAc
 // Options are response-only picker metadata, not a prerequisite for reading or
 // committing policy state. The warning never enters runtime snapshots/validate.
 func (s *CachePolicyService) populateCachePolicyAccountOptions(ctx context.Context, view *CachePolicyView) {
-	options, err := s.upstreamIdentityAccountOptions(ctx)
+	var options []cachePolicyAccountOption
+	var err error
+	if view.Key == "anthropic_identity" {
+		options, err = s.cacheMetadataAccountOptions(ctx)
+	} else {
+		options, err = s.upstreamIdentityAccountOptions(ctx)
+	}
 	if err != nil {
 		setCachePolicyUnavailableAccountOptions(view)
 		return
