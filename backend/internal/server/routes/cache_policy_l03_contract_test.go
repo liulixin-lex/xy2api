@@ -165,6 +165,9 @@ func TestCachePolicyL03CompleteCombinedListReplay(t *testing.T) {
 			status, got := cacheCall(t, router, f.Request.Method, f.Request.Path, f.Request.Body)
 			require.Equal(t, f.Status, status)
 			expected := cacheL03ComposeOtherCards(t, f.Response)
+			// PR C samples predate T2.5: an l07 build adds the m4l07 routing leaves
+			// (F derivation, proven by TestCachePolicyM4L07OverlayMatchesAuthority).
+			expected = cacheM4L07Overlay(t, expected)
 			normalizePolicyTimes(t, got)
 			normalizePolicyTimes(t, expected)
 			require.Equal(t, expected, got)

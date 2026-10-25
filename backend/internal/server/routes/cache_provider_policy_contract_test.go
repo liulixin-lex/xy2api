@@ -231,9 +231,12 @@ func cacheProviderPolicyReplay(t *testing.T, name string, raw []byte, options []
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(filepath.Join(output, name), b, 0600))
 	}
+	// PR C samples predate T2.5: an l07 build adds the m4l07 routing leaves
+	// (F derivation, proven by TestCachePolicyM4L07OverlayMatchesAuthority).
+	expected := cacheM4L07Overlay(t, f.Response)
 	normalizePolicyTimes(t, got)
-	normalizePolicyTimes(t, f.Response)
-	require.Equal(t, f.Response, got)
+	normalizePolicyTimes(t, expected)
+	require.Equal(t, expected, got)
 	audit.Start()
 	audit.Stop()
 	if strings.HasSuffix(f.Request.Path, "/validate") {
