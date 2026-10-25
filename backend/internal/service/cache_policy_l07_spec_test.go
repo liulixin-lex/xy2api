@@ -28,7 +28,8 @@ func l07PolicyFixture(t *testing.T, cfg *config.Config, extra ...CachePolicyOpti
 	if cfg == nil {
 		cfg = policyTestConfig()
 	}
-	options := append([]CachePolicyOption{WithCacheNorthstar(), WithCacheM4Policies(groups), WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L07: true})}, extra...)
+	// The production build: T2.5 and T3.1a are implemented.
+	options := append([]CachePolicyOption{WithCacheNorthstar(), WithCacheM4Policies(groups), WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L07: true, L09A: true})}, extra...)
 	s := NewCachePolicyService(store, cfg, options...)
 	require.NoError(t, s.Refresh(context.Background()))
 	return s, store, groups
@@ -56,13 +57,14 @@ func TestCacheL07PolicyDefaultsAndSchema(t *testing.T) {
 	}
 	require.Equal(t, []string{"keep_sticky_on_busy.enabled", "keep_sticky_on_busy.group_ids", "keep_sticky_on_busy.rollout_percent",
 		"keep_sticky_on_busy.max_consecutive_busy", "keep_sticky_on_busy.max_hold_seconds", "keep_sticky_on_busy.owner_busy_skip_per_min_cap",
-		"keep_sticky_on_busy.group_keep_ratio_pct", "keep_sticky_on_busy.health_lookback_seconds", "affinity_mode"}, fields)
+		"keep_sticky_on_busy.group_keep_ratio_pct", "keep_sticky_on_busy.health_lookback_seconds", "affinity_mode", "affinity_rollout_percent"}, fields)
 	require.Equal(t, map[string]any{"field": "keep_sticky_on_busy.group_keep_ratio_pct", "type": "int", "min": 1, "max": 20, "unit": "percent",
 		"cap_source": "gateway.cache_routing.l07_group_keep_ratio_cap_pct"}, s.schema(5)[6])
 	require.Equal(t, map[string]any{"field": "keep_sticky_on_busy.owner_busy_skip_per_min_cap", "type": "int", "min": 0, "max": 1000}, s.schema(5)[5])
 
 	// The parameters are not capability fields: a dormant build marks only
-	// enabled and group_ids, and still stores the parameters.
+	// enabled and group_ids (and the T3.1a affinity_mode), and still stores
+	// the parameters.
 	dormant, store, _ := l07PolicyFixture(t, nil, WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{}))
 	marked := []string{}
 	for _, field := range dormant.schema(5) {
@@ -70,7 +72,7 @@ func TestCacheL07PolicyDefaultsAndSchema(t *testing.T) {
 			marked = append(marked, fmt.Sprint(field["field"]))
 		}
 	}
-	require.Equal(t, []string{"keep_sticky_on_busy.enabled", "keep_sticky_on_busy.group_ids"}, marked)
+	require.Equal(t, []string{"keep_sticky_on_busy.enabled", "keep_sticky_on_busy.group_ids", "affinity_mode"}, marked)
 	w := policyWrite(t, `{"expected_rev":0,"spec":{"keep_sticky_on_busy":{"max_hold_seconds":120,"owner_busy_skip_per_min_cap":8}},"reason":"prepare","confirm":{"checkbox":true,"typed":"cache_routing_policy"}}`)
 	v, err := dormant.Validate(context.Background(), "routing", w, nil)
 	require.NoError(t, err)

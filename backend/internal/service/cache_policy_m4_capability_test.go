@@ -116,7 +116,7 @@ func TestCachePolicyM4DefaultWiringNeverReportsUnimplementedActive(t *testing.T)
 				// Use the production constructor, rather than the full-build test fixture.
 				s := ProvideCachePolicyService(store, policyTestConfig(), nil, nil, nil)
 				t.Cleanup(s.Stop)
-				require.Equal(t, CacheM4BuildCapabilities{L07: true}, s.m4Behaviors)
+				require.Equal(t, CacheM4BuildCapabilities{L07: true, L09A: true}, s.m4Behaviors)
 				require.NoError(t, s.Refresh(context.Background()))
 				view, err := s.Get(context.Background(), tc.key)
 				require.NoError(t, err)
