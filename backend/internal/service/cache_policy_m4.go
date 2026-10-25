@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -48,6 +49,7 @@ func m4PolicyDefaults(index int) map[string]any {
 		return map[string]any{
 			"anchor_group_ids": []int64{}, "gemini_anchor": false,
 			"metadata_group_ids": []int64{}, "rollout_percent": 0,
+			"metadata_rollout_percent": 0, "max_inflight_per_anchor": 2,
 		}
 	}
 	return map[string]any{
@@ -143,8 +145,8 @@ func mergeM4Policy(index int, before map[string]any, raw json.RawMessage) (map[s
 				var v int
 				if json.Unmarshal(value, &v) != nil {
 					code = "malformed_body"
-				} else if v < 0 || v > 100 {
-					errs = append(errs, CachePolicyFieldError{Field: field, Code: "out_of_range", Limit: map[string]int{"min": 0, "max": 100}})
+				} else if lo, hi := m4PolicyIntRange(field); v < lo || v > hi {
+					errs = append(errs, CachePolicyFieldError{Field: field, Code: "out_of_range", Limit: map[string]int{"min": lo, "max": hi}})
 					continue
 				}
 				next = v
@@ -189,6 +191,9 @@ func mergeM4Policy(index int, before map[string]any, raw json.RawMessage) (map[s
 		}
 	}
 	if index == 4 {
+		if policyInt(out["metadata_rollout_percent"]) > policyInt(out["rollout_percent"]) {
+			errs = append(errs, CachePolicyFieldError{Field: "metadata_rollout_percent", Code: "exceeds_rollout_percent", Limit: map[string]int{"max": policyInt(out["rollout_percent"])}})
+		}
 		anchors, _ := out["anchor_group_ids"].([]int64)
 		metadata, _ := out["metadata_group_ids"].([]int64)
 		members := make(map[int64]bool, len(anchors))
@@ -202,7 +207,18 @@ func mergeM4Policy(index int, before map[string]any, raw json.RawMessage) (map[s
 			}
 		}
 	}
+	// Invalid leaves never participate in direction or confirmation.
+	for _, err := range errs {
+		diff = slices.DeleteFunc(diff, func(d CachePolicyDiff) bool { return d.Field == err.Field })
+	}
 	return out, diff, errs
+}
+
+func m4PolicyIntRange(field string) (int, int) {
+	if field == "max_inflight_per_anchor" {
+		return 1, 16
+	}
+	return 0, 100
 }
 
 // Unlike account_ids and busy scope, an empty anchor/metadata list is disabled.
@@ -325,6 +341,8 @@ func m4PolicySchema(index int) []map[string]any {
 			{"field": "gemini_anchor", "type": "bool"},
 			{"field": "metadata_group_ids", "type": "id_list", "ref": "group", "options": options},
 			{"field": "rollout_percent", "type": "int", "min": 0, "max": 100, "unit": "percent"},
+			{"field": "metadata_rollout_percent", "type": "int", "min": 0, "max": 100, "unit": "percent"},
+			{"field": "max_inflight_per_anchor", "type": "int", "min": 1, "max": 16},
 		}
 	}
 	return []map[string]any{

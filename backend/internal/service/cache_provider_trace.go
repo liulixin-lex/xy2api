@@ -40,7 +40,7 @@ func (s *GatewayService) BindProviderCacheTraceSession(c *gin.Context, localSess
 	}
 	if t.data.Platform == PlatformGemini {
 		switch t.data.IDSource {
-		case "gemini_cli", "gemini_digest", "cacheable_content", "message_content_fallback":
+		case "gemini_cli", "gemini_digest", "cacheable_content", "message_content_fallback", "anchor_v2":
 		default:
 			t.data.IDSource = "unknown"
 		}
@@ -96,6 +96,12 @@ func (s *OpenAIGatewayService) beginProviderCacheTrace(c *gin.Context, platform,
 		Transport: "http", GapSource: "no_prev", RouteReason: "unknown", RebindCause: "none", TokensPerByteMilli: -1,
 		Prefix: cachePrefixUnavailable(0), Provider: cacheProviderFieldsUnavailable(platform),
 	}}
+	if policy.l04Available {
+		t.data.L04Present = true
+		t.data.L04Arm = "none"
+		t.data.L04Skip = "policy_off"
+		t.data.L04PolicyRevision = policy.revs[4]
+	}
 	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), cacheTraceKey{}, t))
 	noteCacheTraceFallback(c.Request.Context())
 	return t
@@ -124,6 +130,9 @@ func (s *OpenAIGatewayService) captureProviderCacheTrace(c *gin.Context, req *ht
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.data.GroupID = getOpenAIGroupIDFromContext(c)
+	if t.providerServingGroupID > 0 {
+		t.data.GroupID = t.providerServingGroupID
+	}
 	t.providerKey = s.cacheProviderSessionScope(t.data.Platform, t.apiKeyID, t.data.GroupID, t.providerLocalSession)
 	t.sessionKey = t.providerKey.digest
 	t.data.SessionDigest = t.sessionKey

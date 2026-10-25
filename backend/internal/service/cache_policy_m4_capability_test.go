@@ -117,13 +117,23 @@ func TestCachePolicyM4DefaultWiringNeverReportsUnimplementedActive(t *testing.T)
 				// Use the production constructor, rather than the full-build test fixture.
 				s := ProvideCachePolicyService(store, policyTestConfig(), nil, nil)
 				t.Cleanup(s.Stop)
-				require.Equal(t, CacheM4BuildCapabilities{}, s.m4Behaviors)
+				require.Equal(t, CacheM4BuildCapabilities{L04: true}, s.m4Behaviors)
 				require.NoError(t, s.Refresh(context.Background()))
 				view, err := s.Get(context.Background(), tc.key)
 				require.NoError(t, err)
-				require.Equal(t, "blocked", view.Effective.State)
-				require.False(t, *view.Effective.Active)
-				require.Equal(t, []string{"not_implemented_in_build"}, view.Effective.Blockers)
+				if tc.key == "routing" {
+					require.Equal(t, "blocked", view.Effective.State)
+					require.False(t, *view.Effective.Active)
+					require.Equal(t, []string{"not_implemented_in_build"}, view.Effective.Blockers)
+				} else {
+					require.Equal(t, master, *view.Effective.Active)
+					require.Empty(t, view.Effective.Blockers)
+					state := "masked_by_master"
+					if master {
+						state = "on"
+					}
+					require.Equal(t, state, view.Effective.State)
+				}
 				require.NotContains(t, view.Effective.Warnings, "anthropic_observability_missing")
 			})
 		}

@@ -6,6 +6,13 @@
 
 ## 当前交接状态
 
+### T2.2 / L-04（2026-10-25，G，实现草稿）
+
+- 临时合并已冻结的 M3.1/T4 与 provider 编译检查点后，实现原生 Messages/Gemini 的 serving-scoped a2、能力与策略双门控、在途上限、策略字段与 trace 契约。依赖的 provider 行为验收仍待完成。
+- 只让 routing/sticky 消费解析后的 serving 组；认证、计费与既有组级转换保留原 APIKey。兼容 Chat/Responses 不映射文本，按 empty_anchor 走原兜底；count_tokens 不派生。元数据接口仍只留集成接缝，不实现 L-03/L-07。
+- HMAC、租户与作用域、C2/C3、换组、实际 handler 字节对照和完整契约回放已准备；定向 Go 待执行，尚未通过验收。后续单批检查与独立关闭态 golden，未推送、部署。
+
+
 ### M3.1 转换出口隐私补修（2026-10-25，G，本地冻结待独立验证）
 
 - 在联合候选 efd7d3aaf 的独立评审 v2 精确树上补修：Chat 转换前统一还原，原生 Responses 规则错误清除已知 U；Messages 不扩大注入资格。实际 Forward 回显、关闭控制、结构门控及 reader EOF/读错测试已准备。
@@ -221,6 +228,12 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
+
+### 20261025-cache-m4-l04 — T2.2 本地锚点（G，进行中）
+
+- 临时基线合并已冻结 M3.1/T4.0 与已通过五 tag 编译的 T0b.4 检查点；仅本任务增量在其上提交，依赖合入后再变基，不使用 stash。
+- 实现 serving 组隔离的 a2、原层级之后的本地 sticky、三条换组重派生、count_tokens 排除、Gemini、并发上限与契约；请求 accessor 同时检查构建能力与行为过期保护。L-03/L-07 不在范围内。
+- 当前仅草稿与轻检；开发定向与交付单批检查尚未执行，不声称验收通过。不推送、不部署。
 
 ### 20261025-cache-m31-conversion-privacy — L-01 客户端转换出口补修（G，进行中）
 
@@ -1268,3 +1281,8 @@ pnpm --dir frontend run build
 ### 2026-10-25T05:38Z — T0b.4 provider 编译检查点
 
 - 五 tag vet 全部通过；Begin/Bind/accessor 与 session digest/history 键保持冻结。仅编译已验收，provider 行为、计费和关闭态回放由同一重任务后续执行，结果待补；不作为 M2b 最终集成交付。
+
+### 2026-10-25 — T2.2 原生锚点接线草稿
+
+- 仅原生 Messages/Gemini 派生，兼容入口保持原解析与原 hash；候选与分桶不读观测 digest。Claude Code 限制、prompt-too-long 和中间件 serving 组变化均重新判定；认证与计费不换 key，trace 单独使用 serving 组。
+- 同步策略新字段、history、完整契约与 JWT 轮换说明；有界在途计数异常回基线。包含定向与实际 handler 对照测试草稿，尚无 Go 通过结论。provider 五 tag 编译不等于行为验收；集成依赖合入后再按来源变基，不使用 stash。

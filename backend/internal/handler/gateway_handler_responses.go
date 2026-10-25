@@ -183,6 +183,8 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		APIKeyID:  apiKey.ID,
 	}
 	h.gatewayService.BeginProviderCacheTrace(c, effectiveAPIKeyPlatform(c, apiKey), "responses", body, parsedReq)
+	sessionAPIKey := h.gatewayService.PrepareCompatCacheAnchor(c, apiKey, parsedReq, effectiveAPIKeyPlatform(c, apiKey))
+	defer h.gatewayService.ReleaseCacheAnchor(parsedReq)
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 	h.gatewayService.BindProviderCacheTraceSession(c, sessionHash, "")
 	requestCtx = c.Request.Context()
@@ -196,7 +198,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		if failoverClientGone(c) {
 			return
 		}
-		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(requestCtx, apiKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
+		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(requestCtx, sessionAPIKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
 		if err != nil {
 			if failoverClientGone(c) {
 				reqLog.Info("gateway.responses.account_select_aborted_client_disconnected", zap.Error(err))
@@ -276,7 +278,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		account = latest
 		selection.Account = latest
 		if selection.ProfitGateActive() {
-			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, sessionHash, account.ID); err != nil {
+			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, sessionAPIKey.GroupID, sessionHash, account.ID); err != nil {
 				reqLog.Warn("gateway.responses.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}

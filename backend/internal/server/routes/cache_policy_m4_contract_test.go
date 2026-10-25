@@ -139,7 +139,7 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			require.NoError(t, json.Unmarshal(raw, &fixture))
 			scenario := strings.Replace(name, "m4_dormant_", "m4_", 1)
 			requests[name] = f
-			expected := contractMap(t, f.Response)
+			expected := cacheL04ExtendLegacyResponse(t, f.Response)
 			data, _ := f.Response["data"].(map[string]any)
 			repo := &cacheRouteStore{rows: map[string]string{
 				"cache_feature_master":                      `{"rev":1,"spec":{"enabled":true}}`,
@@ -313,6 +313,7 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			if strings.HasPrefix(entry.Source, "m4_list_") || strings.HasPrefix(entry.Source, "m4_dormant_list_") {
 				wrong = cacheM31M4ProjectLegacyList(t, wrong)
 			}
+			wrong = cacheL04ExtendLegacyResponse(t, wrong)
 			normalizePolicyTimes(t, wrong)
 			require.NotEqual(t, wrong, actual, "the corrupted contract response cannot pass full replay")
 		})
@@ -362,6 +363,7 @@ func TestCachePolicyM4RetainsM3ListEdges(t *testing.T) {
 			require.Equal(t, fixture.Status, status)
 			normalizePolicyTimes(t, got)
 			normalizePolicyTimes(t, expected)
+			expected = cacheL04ExtendLegacyResponse(t, expected)
 			require.Equal(t, expected, got)
 			require.Equal(t, 1, groups.calls)
 		})

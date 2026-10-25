@@ -68,6 +68,8 @@ type CachePolicySnapshot struct {
 	revs                [6]int64
 	revision            string
 	entries             [6]cachePolicyEntry
+	anchorPolicy        cacheAnthropicAnchorPolicy
+	l04Available        bool
 	upstream            CacheUpstreamIdentityPolicy
 	cohortViews         [2]cachePolicyCohortView
 	platforms           uint8
@@ -304,6 +306,8 @@ func (s *CachePolicyService) publishEntries(entries [6]cachePolicyEntry) {
 	p.byteBudget = int64(min(policyInt(o["byte_budget_mib"]), s.caps.MaxByteBudgetMiB)) << 20
 	p.rate = int64(min(policyInt(o["rate_mib_per_s"]), s.caps.MaxRateMiBPerS)) << 20
 	p.upstream = upstreamIdentityFromEntry(entries[3], p.MasterEnabled())
+	p.l04Available = s.m4Behaviors.L04
+	p.anchorPolicy = cacheAnthropicAnchorPolicyFromEntry(entries[4], s.m4Behaviors)
 	p.revision = fmt.Sprintf("m%d.o%d.u%d.a%d.r%d", p.revs[0], p.revs[1], p.revs[3], p.revs[4], p.revs[5])
 	p.initCohortViews()
 	for _, notify := range s.listeners {
@@ -373,7 +377,7 @@ func policyInt(v any) int {
 }
 
 func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config, accounts AccountRepository, groups GroupRepository) *CachePolicyService {
-	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups), WithProviderCacheTrace())
+	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups), WithProviderCacheTrace(), WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L04: true}), WithCacheAnthropicObservability())
 	s.Start()
 	return s
 }

@@ -413,3 +413,46 @@ L-01 允许的 ingress 中，维持原有身份与转换逻辑，不扩大注入
 ### M2b Messages 桥观测接线（开发中）
 
 Messages 桥由运行时观测策略中的 messages_bridge 独立选择，默认 platforms 仍只含 openai。仅经 Responses 出站的桥进入 OpenAI 事件和统计分区；经原生 Anthropic 或 raw Chat 出站的子路径不在本期覆盖内。发送标记及最终请求头观察位于实际发送边界，流式用量观察复用现有解析，账单数值与原规则保持一致。关闭平台、总闸或诊断开关时不启动该平台的异步观测；每请求继续固定策略快照。当前接线待验证，不能据此开启生产。
+
+
+## T2.2：Claude/Gemini 本地锚点（L-04）
+
+本构建声明 L-04=true、L-03=false、L-07=false。请求 accessor 同时检查能力、
+行为快照过期保护、总闸、master 与键的有效性；默认名单为空、Gemini 关闭、rollout=0，
+因此默认沿用原有请求、会话 hash 和选号。过期保护在独立维护功能合入前使用返回 false 的集成接缝。
+
+anthropic_identity 的 schema 末尾追加 metadata_rollout_percent（0..100，默认0）和
+max_inflight_per_anchor（1..16，默认2），两个字段均记录 history；调高为 enable。
+metadata_rollout_percent 不得超过请求后的 rollout_percent，错误码为 exceeds_rollout_percent，
+limit.max 为请求后的 rollout_percent；无效字段不参与 diff。旧存储只在内存中补默认，
+不写回、不改 rev。metadata 灰度不是能力字段，可以先存储，但 L-03 尚未实现，不生效。
+
+服务端使用认证 API key ID、有效 serving 组 ID、入站模型族、规范化 system 和首条非空
+user 文本生成 a2。HMAC-SHA256 使用 JWT secret，消息以 cache-anchor-v2 加 NUL 开头，
+五字段各用8字节大端长度前缀，截取前16字节小写 hex，带 a2: 前缀。忽略图片、工具、
+thinking 和整块 system-reminder，只压缩文本中的 Unicode 空白；不截断输入、不使用
+未隔离的旧 session 或观测 digest。两文本均空、缺 key/组/secret、平台不匹配均不派生。
+
+share active 保持既有路径；metadata、cacheable_content 与 Gemini CLI 等既有前档优先。
+其余候选按同一 anth-cohort|a2 哈希的嵌套阈值分桶，本期只会产生 l04_only/off。
+原有 sticky 之外的出站 body/header、metadata 和重试规则不变。候选携带 serving 作用域，
+使用时不匹配则回到基线；中间件换组、prompt-too-long 和 Claude Code 限制回退均重新判定。
+count_tokens 不进入派生或计数。Gemini 只在启用路径补 serving GroupID，保留 CLI 优先级。
+
+按 a2 维护进程内最多65536项在途计数，归零删除；超限、容量满或异常时回到基线，
+记 fanin_cap 并增加 l04_fanin_skip_total。请求结束和换组释放预留；多实例上限近似为
+单实例上限乘实例数。fanin_cap 超过候选的5%时人工缩小名单，不自动改变策略。
+
+完整 Anthropic/Gemini trace 在支持 L-04 的构建增加 l04_arm、l04_applied、l04_skip、
+l04_policy_rev，实际使用时 id_source=anchor_v2；OpenAI 与最小事件不变。
+观测开关不改变锚点、分桶或任何 L-04 决策；session_digest 仅由 T0b.4 对实际 hash 做隔离摘要。
+
+JWT secret 以 DB security_secrets.jwt_secret 为准。轮换将同时改变 OpenAI sticky、L-01 U、
+trace 锚点和 a2，导致一次全站冷启动；旧 Redis 键按 TTL 回收，期间约双倍内存。
+轮换安排在低峰期，在实验记录标明断点，之后24小时观察命中回升与 Redis 内存；
+实验按断点分段，不跨密钥周期合并。优先选择已启用 claude_cache_fallback 或上游会补断点的组。
+
+锚点文本只取原生 Messages 或原生 Gemini 的入站解析结果，由 handler 入口显式声明。
+Responses 与 Chat 兼容入口均不把 instructions/input/role=system 映射成锚点输入，
+即使携带同形 messages 也视为空锚点，记 empty_anchor，保留原有 hash 与出站字节。
+兼容入口的文本映射留待独立流量评估后决定，不由请求 body 自称原生来源。

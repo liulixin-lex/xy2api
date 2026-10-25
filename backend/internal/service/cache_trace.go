@@ -28,6 +28,7 @@ type cacheTraceKey struct{}
 type cacheTrace struct {
 	providerKey            cacheProviderSessionKey
 	providerSampled        bool
+	providerServingGroupID int64
 	providerLocalSession   string
 	providerHost           string
 	policy                 *CachePolicySnapshot
@@ -51,6 +52,10 @@ type cacheTrace struct {
 }
 
 type cacheTraceData struct {
+	L04Present                                                          bool
+	L04Arm, L04Skip                                                     string
+	L04Applied                                                          bool
+	L04PolicyRevision                                                   int64
 	Platform                                                            string
 	Provider                                                            cacheProviderFields
 	L01Arm, L01Skip                                                     string

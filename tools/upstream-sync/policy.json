@@ -557,7 +557,7 @@
     },
     {
       "path": "backend/internal/service/gateway_usage_billing.go",
-      "value": "if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {"
+      "value": "undelivered := resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier)"
     },
     {
       "path": "backend/internal/service/openai_gateway_usage.go",
@@ -2389,7 +2389,7 @@
     },
     {
       "path": "backend/internal/service/cache_policy.go",
-      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups), WithProviderCacheTrace())"
+      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups), WithProviderCacheTrace(), WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L04: true}), WithCacheAnthropicObservability())"
     },
     {
       "path": "backend/internal/service/openai_cache_diagnostics.go",
@@ -2514,10 +2514,6 @@
     {
       "path": "backend/internal/service/cache_trace.go",
       "value": "s.CaptureCachePolicy(c).TraceEnabledFor(cacheTraceOpenAIPlatform(c))"
-    },
-    {
-      "path": "backend/internal/service/cache_policy.go",
-      "value": "NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithProviderCacheTrace())"
     },
     {
       "path": "backend/internal/service/cache_trace_counter_platforms.go",
@@ -2678,6 +2674,42 @@
     {
       "path": "backend/internal/service/bedrock_stream.go",
       "value": "observeProviderCacheTrace(c, sseData)"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_anchor.go",
+      "value": "io.WriteString(h, \"cache-anchor-v2\\x00\")"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_anchor_request.go",
+      "value": "func (s *GatewayService) PrepareCacheAnchor("
+    },
+    {
+      "path": "backend/internal/service/cache_policy_anchor.go",
+      "value": "p.anchorPolicy.available && !p.behaviorStale() && p.MasterEnabled()"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "h.gatewayService.PrepareCacheAnchor(c, apiKey, parsedReq, service.PlatformAnthropic, true)"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "anchorParsed.Model = inboundAnchorModel"
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "value": "if undelivered {\n\t\treturn nil\n\t}"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
+      "value": "PrepareCompatCacheAnchor(c, apiKey, parsedReq, groupPlatform)"
+    },
+    {
+      "path": "backend/internal/service/cache_anthropic_anchor_request.go",
+      "value": "if !native {"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "useDigestFallback := sessionBoundAccountID == 0 && !h.gatewayService.CacheAnchorApplied(anchorParsed)"
     }
   ],
   "forbidden_module_paths": [
