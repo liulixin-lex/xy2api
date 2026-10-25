@@ -1286,3 +1286,8 @@ pnpm --dir frontend run build
 
 - 仅原生 Messages/Gemini 派生，兼容入口保持原解析与原 hash；候选与分桶不读观测 digest。Claude Code 限制、prompt-too-long 和中间件 serving 组变化均重新判定；认证与计费不换 key，trace 单独使用 serving 组。
 - 同步策略新字段、history、完整契约与 JWT 轮换说明；有界在途计数异常回基线。包含定向与实际 handler 对照测试草稿，尚无 Go 通过结论。provider 五 tag 编译不等于行为验收；集成依赖合入后再按来源变基，不使用 stash。
+
+### 2026-10-25 — T2.2 静态边界与登记收尾
+
+- count_tokens handler 完全绕过锚点与 provider trace 准备，AST 断言零触达；纯准备函数保留内部 count_tokens 原因。Gemini 入站模型捕获位于原生 POST 解析之后、映射之前。实际 fallback 测试只对既有 Antigravity 随机 requestId 的精确值跨度做规范化，其他出站/客户端字节及关闭态调用序列严格比较。
+- 冻结契约 README 的四段父版本触发 IPv4 文档误报，仅为该精确路径登记 IPv4 规则例外，契约字节与源 SHA 保持，不放宽其他敏感项规则。原误报记录保留；后继只改文档和工具登记，backend 不变，Go 定向仍在原队列等待，不声称验收。
