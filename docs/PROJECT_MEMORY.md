@@ -245,6 +245,8 @@
 - 用户明确授权使用本机 GitHub 凭据，将 PR #131 合入 main 并发布 0.4.7。
 - 使用独立工作树与集成分支，保留原 main 上既有未提交记忆；普通 merge 解决冲突，不改写历史、不绕过保护。
 - 起点：PR #131 `46e79a5a2`；远端 main `a19d7c5b9`，已包含缓存 PR #132–#140；当前正式版 0.4.6。
+- 集成 `d892dcc02` 只在记忆发生冲突并保留两侧记录；前端定向 19 项、typecheck、文档、audit、scheduler-diff 与工具 41 项通过。GitHub 其余 16 检查通过，两次 test 均在 main 新增的 `TestGrokL17DisabledStatesZeroExtraAllocs` 失败，关闭态完整转发的 allocs/op 相差 1–4；后端树与 main 相同。先定向复现测量干扰，保留精确零额外分配约束，修复后重新通过保护检查。
+- 原测试单独连续 10 轮通过；`AllocsPerRun` 计入同进程其他 goroutine 分配。将原分配测试移入新测试子进程，原场景、五轮取最小值及精确相等断言保持；全部 Grok L-17 与策略 L-17 定向连续三轮通过，完整 service unit 复验中。补丁只改测试隔离，不改业务逻辑。
 - 下一步：合入 main、核对冲突与检查，合并 #131；独立版本提交/PR 同步 VERSION 与 provenance，全部检查通过后打 annotated v0.4.7 并核验正式制品。
 
 ### 20261023-groups-dialog-size — 账号“编辑分组”弹窗加大（2026-10-23 登记）

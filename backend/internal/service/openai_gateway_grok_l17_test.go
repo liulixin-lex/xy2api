@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
@@ -448,10 +450,26 @@ func TestGrokL17RejectionExpiresAfter24h(t *testing.T) {
 
 // Disabled states read one snapshot bool before any allocation: allocs/op of
 // each state equals the no-snapshot arm in the same fixture. The arms
-// alternate and each keeps its minimum over five rounds.
+// alternate and each keeps its minimum over five rounds. Measure in a fresh
+// process because AllocsPerRun counts allocations from every goroutine, including
+// background workers and log sinks started by other service tests.
 func TestGrokL17DisabledStatesZeroExtraAllocs(t *testing.T) {
 	if l17RaceEnabled {
 		t.Skip("allocs/op is not exact under the race detector")
+	}
+	if os.Getenv("XY2API_TEST_L17_ALLOCS_CHILD") != "1" {
+		executable, err := os.Executable()
+		require.NoError(t, err)
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, executable,
+			"-test.run=^TestGrokL17DisabledStatesZeroExtraAllocs$",
+			"-test.count=1", "-test.v", "-test.timeout=60s")
+		cmd.Env = append(os.Environ(), "XY2API_TEST_L17_ALLOCS_CHILD=1")
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "isolated allocation checks:\n%s", output)
+		t.Logf("isolated allocation checks:\n%s", output)
+		return
 	}
 	gin.SetMode(gin.TestMode)
 	paths := []struct {
