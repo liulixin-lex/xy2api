@@ -39,7 +39,7 @@ func TestCachePolicyPOL2ContractReplay(t *testing.T) {
 	require.NoError(t, err)
 	hashes := map[string]string{}
 	require.NoError(t, json.Unmarshal(manifest, &hashes))
-	require.Len(t, hashes, 3)
+	require.Len(t, hashes, 7)
 	names := make([]string, 0, len(hashes))
 	for name := range hashes {
 		names = append(names, name)
@@ -55,14 +55,23 @@ func TestCachePolicyPOL2ContractReplay(t *testing.T) {
 			require.NoError(t, json.Unmarshal(raw, &f))
 			var meta struct {
 				Fixture struct {
-					SnapshotStale bool `json:"snapshot_stale"`
+					SnapshotStale     bool                               `json:"snapshot_stale"`
+					BuildCapabilities *service.CacheM4BuildCapabilities `json:"build_capabilities"`
 				} `json:"_fixture"`
 				DerivedFrom string `json:"_derived_from"`
 			}
 			require.NoError(t, json.Unmarshal(raw, &meta))
 			require.True(t, meta.Fixture.SnapshotStale)
 			expected := contractMap(t, f.Response)
+			if meta.DerivedFrom != "m3_validate_enable.json" {
+				expected = cachePOL2ProjectM31Upstream(t, expected)
+			}
 			data, _ := f.Response["data"].(map[string]any)
+			m4Sample := meta.DerivedFrom == "m4_list_on.json" ||
+				meta.DerivedFrom == "m4_list_masked_by_master.json" ||
+				meta.DerivedFrom == "m4_dormant_list_db_enabled.json" ||
+				name == "pol2_list_killed_and_stale.json"
+			listSample := m4Sample || meta.DerivedFrom == "m3_list_on.json"
 			repo := &cacheRouteStore{rows: map[string]string{
 				service.SettingKeyClaudeCacheFallbackPolicy: `{"enabled":true,"group_ids":[1,2]}`,
 				"cache_feature_master":                      `{"rev":1,"spec":{"enabled":true}}`,
@@ -77,9 +86,7 @@ func TestCachePolicyPOL2ContractReplay(t *testing.T) {
 				require.NoError(t, err)
 				repo.rows[key] = string(b)
 			}
-			// Fixtures follow the M3 replay of each source sample.
-			switch meta.DerivedFrom {
-			case "m3_list_on.json":
+			if listSample {
 				b, err := json.Marshal(data)
 				require.NoError(t, err)
 				var list service.CachePolicyList
@@ -100,34 +107,51 @@ func TestCachePolicyPOL2ContractReplay(t *testing.T) {
 						seedPolicy(t, repo, policy)
 					}
 				}
-			case "m3_validate_enable.json":
-				rev := int64(data["current_rev"].(float64))
-				spec := map[string]any{"mode": "off", "account_ids": []int64{}, "rollout_percent": 0}
-				for _, entry := range data["diff"].([]any) {
-					diff, ok := entry.(map[string]any)
-					require.True(t, ok)
-					field, ok := diff["field"].(string)
-					require.True(t, ok)
-					spec[field] = diff["before"]
-				}
-				for _, warning := range data["warnings"].([]any) {
-					if warning == "observability_off" {
-						repo.rows["cache_observability_policy"] = `{"rev":0,"spec":{"enabled":false}}`
+			} else {
+				switch meta.DerivedFrom {
+				case "m3_validate_enable.json":
+					rev := int64(data["current_rev"].(float64))
+					spec := map[string]any{"mode": "off", "account_ids": []int64{}, "rollout_percent": 0}
+					for _, entry := range data["diff"].([]any) {
+						diff, ok := entry.(map[string]any)
+						require.True(t, ok)
+						field, ok := diff["field"].(string)
+						require.True(t, ok)
+						spec[field] = diff["before"]
 					}
+					for _, warning := range data["warnings"].([]any) {
+						if warning == "observability_off" {
+							repo.rows["cache_observability_policy"] = `{"rev":0,"spec":{"enabled":false}}`
+						}
+					}
+					putSetting("cache_upstream_identity_policy", rev, spec)
+				case "m3_put_200.json":
+					var request struct {
+						ExpectedRev int64 `json:"expected_rev"`
+					}
+					require.NoError(t, json.Unmarshal(f.Request.Body, &request))
+					putSetting("cache_upstream_identity_policy", request.ExpectedRev, map[string]any{"mode": "off"})
+				default:
+					t.Fatalf("unexpected source sample %q", meta.DerivedFrom)
 				}
-				putSetting("cache_upstream_identity_policy", rev, spec)
-			case "m3_put_200.json":
-				var request struct {
-					ExpectedRev int64 `json:"expected_rev"`
-				}
-				require.NoError(t, json.Unmarshal(f.Request.Body, &request))
-				putSetting("cache_upstream_identity_policy", request.ExpectedRev, map[string]any{"mode": "off"})
-			default:
-				t.Fatalf("unexpected source sample %q", meta.DerivedFrom)
+			}
+			capabilities := service.CacheM4BuildCapabilities{}
+			if m4Sample {
+				capabilities = service.CacheM4BuildCapabilities{L04: true, L03: true, L07: true}
+			}
+			if meta.Fixture.BuildCapabilities != nil {
+				capabilities = *meta.Fixture.BuildCapabilities
 			}
 			store := &cachePOL2Store{cacheRouteStore: repo}
 			now := time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)
-			policies := service.NewCachePolicyService(store, cfg, service.WithCacheNorthstar(), service.WithCachePolicyAccounts(&cacheM3FaultAccounts{}), service.WithCachePolicyClock(func() time.Time { return now }))
+			groups := &cacheM4Groups{}
+			policies := service.NewCachePolicyService(store, cfg,
+				service.WithCacheNorthstar(),
+				service.WithCachePolicyAccounts(&cacheM3FaultAccounts{}),
+				service.WithCacheM4Policies(groups),
+				service.WithCacheM4BuildCapabilities(capabilities),
+				service.WithCachePolicyClock(func() time.Time { return now }),
+			)
 			require.NoError(t, policies.Refresh(ctx))
 			fresh := policies.Snapshot()
 			// Refreshes fail beyond the bound; the request then reads settings again.
@@ -138,8 +162,11 @@ func TestCachePolicyPOL2ContractReplay(t *testing.T) {
 			require.False(t, policies.Snapshot().UpstreamIdentity().Enabled())
 			store.fail = false
 
-			router := cacheTestRouter(policies, service.NewAuditLogService(&cacheRouteAudit{}, nil), nil)
-			if meta.DerivedFrom == "m3_list_on.json" {
+			audit := service.NewAuditLogService(&cacheRouteAudit{}, nil)
+			router := cacheTestRouter(policies, audit, nil)
+			if m4Sample {
+				router = cacheM4ContractRouter(policies, audit, version, service.CachePolicyActor{UserID: 1, Email: "admin@example.com"})
+			} else if meta.DerivedFrom == "m3_list_on.json" {
 				router = cacheM3ContractRouter(policies, service.NewAuditLogService(&cacheRouteAudit{}, nil), version)
 			}
 			status, got := cacheCall(t, router, f.Request.Method, f.Request.Path, f.Request.Body)
@@ -156,4 +183,40 @@ func TestCachePolicyPOL2ContractReplay(t *testing.T) {
 			}
 		})
 	}
+}
+
+// M31 adds one upstream field to legacy POL2 responses; every other field
+// remains byte-for-byte constrained by the published sample.
+func cachePOL2ProjectM31Upstream(t *testing.T, response map[string]any) map[string]any {
+	t.Helper()
+	out := contractMap(t, response)
+	data := cacheM4As[map[string]any](t, out["data"])
+	var upstream map[string]any
+	if policies, ok := data["policies"].([]any); ok {
+		for _, item := range policies {
+			policy := cacheM4As[map[string]any](t, item)
+			if policy["key"] == "upstream_identity" {
+				upstream = policy
+				break
+			}
+		}
+	} else if data["key"] == "upstream_identity" {
+		upstream = data
+	}
+	if upstream == nil {
+		return out
+	}
+	stored := cacheM4As[map[string]any](t, upstream["stored"])
+	spec := cacheM4As[map[string]any](t, stored["spec"])
+	require.NotContains(t, spec, "max_inflight_per_key")
+	spec["max_inflight_per_key"] = float64(2)
+	defaults := cacheM4As[map[string]any](t, upstream["defaults"])
+	require.NotContains(t, defaults, "max_inflight_per_key")
+	defaults["max_inflight_per_key"] = float64(2)
+	schema := cacheM4As[[]any](t, upstream["schema"])
+	for _, field := range schema {
+		require.NotEqual(t, "max_inflight_per_key", cacheM4As[map[string]any](t, field)["field"])
+	}
+	upstream["schema"] = append(schema, map[string]any{"field": "max_inflight_per_key", "type": "int", "min": float64(1), "max": float64(16)})
+	return out
 }
