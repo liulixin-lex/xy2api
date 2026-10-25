@@ -136,7 +136,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	grokOAuthClient := repository.NewGrokOAuthClient()
 	grokOAuthService := service.ProvideGrokOAuthService(proxyRepository, grokOAuthClient, configConfig, redisClient)
 	grokTokenProvider := service.ProvideGrokTokenProvider(accountRepository, geminiTokenCache, grokOAuthService, oAuthRefreshAPI, tempUnschedCache)
-	cachePolicyService := service.ProvideCachePolicyService(settingRepository, configConfig, accountRepository, groupRepository)
+	cachePolicyService := service.ProvideCachePolicyService(settingRepository, configConfig, accountRepository, groupRepository, gatewayService)
 	cacheTraceCounters := service.NewCacheTraceCounters()
 	openAIGatewayService := service.ProvideOpenAIGatewayServiceWithCachePolicies(accountRepository, usageLogRepository, usageBillingRepository, userRepository, userSubscriptionRepository, userGroupRateRepository, gatewayCache, configConfig, schedulerSnapshotService, concurrencyService, billingService, rateLimitService, billingCacheService, httpUpstream, deferredService, openAITokenProvider, grokTokenProvider, modelPricingResolver, channelService, balanceNotifyService, settingService, serviceUserPlatformQuotaRepository, cachePolicyService, cacheTraceCounters)
 	geminiOAuthClient := repository.NewGeminiOAuthClient(configConfig)

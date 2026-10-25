@@ -115,7 +115,7 @@ func TestCachePolicyM4DefaultWiringNeverReportsUnimplementedActive(t *testing.T)
 				store.rows["cache_feature_master"] = fmt.Sprintf(`{"rev":1,"spec":{"enabled":%t}}`, master)
 				store.rows["cache_"+tc.key+"_policy"] = `{"rev":1,"spec":` + tc.spec + `}`
 				// Use the production constructor, rather than the full-build test fixture.
-				s := ProvideCachePolicyService(store, policyTestConfig(), nil, nil)
+				s := ProvideCachePolicyService(store, policyTestConfig(), nil, nil, nil)
 				t.Cleanup(s.Stop)
 				require.Equal(t, CacheM4BuildCapabilities{}, s.m4Behaviors)
 				require.NoError(t, s.Refresh(context.Background()))

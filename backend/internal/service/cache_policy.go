@@ -69,6 +69,7 @@ type CachePolicySnapshot struct {
 	revision      string
 	entries       [6]cachePolicyEntry
 	upstream      CacheUpstreamIdentityPolicy
+	routingL07    CacheRoutingL07Policy
 	cohortViews   [2]cachePolicyCohortView
 }
 
@@ -299,6 +300,7 @@ func (s *CachePolicyService) publishEntries(entries [6]cachePolicyEntry) {
 	p.byteBudget = int64(min(policyInt(o["byte_budget_mib"]), s.caps.MaxByteBudgetMiB)) << 20
 	p.rate = int64(min(policyInt(o["rate_mib_per_s"]), s.caps.MaxRateMiBPerS)) << 20
 	p.upstream = upstreamIdentityFromEntry(entries[3], p.MasterEnabled())
+	p.routingL07 = routingL07FromEntry(entries[5], p.MasterEnabled() && !entries[0].parseError, s.m4Available && s.m4Behaviors.L07, s.l07Caps)
 	p.revision = fmt.Sprintf("m%d.o%d.u%d.a%d.r%d", p.revs[0], p.revs[1], p.revs[3], p.revs[4], p.revs[5])
 	p.initCohortViews()
 	for _, notify := range s.listeners {
@@ -367,8 +369,11 @@ func policyInt(v any) int {
 	return 0
 }
 
-func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config, accounts AccountRepository, groups GroupRepository) *CachePolicyService {
+func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config, accounts AccountRepository, groups GroupRepository, gateway *GatewayService) *CachePolicyService {
 	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups))
+	if gateway != nil {
+		gateway.cachePolicies = s
+	}
 	s.Start()
 	return s
 }

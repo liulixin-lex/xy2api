@@ -51,3 +51,90 @@ func (s *CachePolicyService) L07GuardTripped() bool {
 	}
 	return s.l07.guardTripped(s.now())
 }
+
+// CacheRoutingL07Policy is the typed keep_sticky_on_busy policy of one
+// snapshot (DESIGN §6.1A A6). It is built once at publication with the static
+// caps applied; requests read it through the snapshot pointer and never
+// allocate. Values are effective values: min(stored, static cap).
+type CacheRoutingL07Policy struct {
+	RolloutPercent         int
+	MaxConsecutiveBusy     int
+	MaxHoldSeconds         int
+	OwnerBusySkipPerMinCap int // 0: max(4, 2×owner concurrency)
+	GroupKeepRatioPct      int
+	HealthLookbackSeconds  int
+	GuardErrorDeltaPP      int
+	GuardPauseSeconds      int
+	active                 bool
+	revision               int64
+	groups                 map[int64]struct{} // empty: every group
+}
+
+// routingL07FromEntry folds the build capability, the kill switch, the
+// master switch and the entry's own validity into active, so the request
+// path has a single check.
+func routingL07FromEntry(entry cachePolicyEntry, master, capable bool, caps cacheL07Caps) CacheRoutingL07Policy {
+	busy, _ := entry.envelope.Spec["keep_sticky_on_busy"].(map[string]any)
+	field := func(name string, def, lo, hi int) int {
+		v, ok := busy[name]
+		if !ok {
+			return def
+		}
+		n := policyInt(v)
+		return max(lo, min(n, hi))
+	}
+	p := CacheRoutingL07Policy{
+		revision:               entry.envelope.Rev,
+		RolloutPercent:         field("rollout_percent", 0, 0, 100),
+		MaxConsecutiveBusy:     field("max_consecutive_busy", 2, 1, caps.MaxConsecutive),
+		MaxHoldSeconds:         field("max_hold_seconds", 60, 10, caps.MaxHoldSeconds),
+		OwnerBusySkipPerMinCap: field("owner_busy_skip_per_min_cap", 0, 0, 1000),
+		GroupKeepRatioPct:      field("group_keep_ratio_pct", 5, 1, caps.GroupKeepRatioPct),
+		HealthLookbackSeconds:  field("health_lookback_seconds", 120, 30, 600),
+		GuardErrorDeltaPP:      caps.GuardErrorDeltaPP,
+		GuardPauseSeconds:      caps.GuardPauseSeconds,
+	}
+	if ids, ok := busy["group_ids"].([]int64); ok && len(ids) > 0 {
+		p.groups = make(map[int64]struct{}, len(ids))
+		for _, id := range ids {
+			p.groups[id] = struct{}{}
+		}
+	}
+	enabled, _ := busy["enabled"].(bool)
+	p.active = capable && master && !entry.parseError && enabled && p.RolloutPercent > 0
+	return p
+}
+
+// AllowsGroup tests the serving group against group_ids (empty: all).
+func (p *CacheRoutingL07Policy) AllowsGroup(groupID int64) bool {
+	if p == nil {
+		return false
+	}
+	if len(p.groups) == 0 {
+		return true
+	}
+	_, ok := p.groups[groupID]
+	return ok
+}
+
+func (p *CacheRoutingL07Policy) Revision() int64 {
+	if p == nil {
+		return 0
+	}
+	return p.revision
+}
+
+// RoutingL07 returns the request policy of L-07 when it is active, nil
+// otherwise: no kill switch, master on, build capability l07, valid entries,
+// enabled with a positive rollout, and a fresh snapshot.
+func (p *CachePolicySnapshot) RoutingL07() *CacheRoutingL07Policy {
+	if p == nil || !p.routingL07.active || cacheL07SnapshotStale(p) {
+		return nil
+	}
+	return &p.routingL07
+}
+
+// cacheL07SnapshotStale is the seam of FX-POL-2 (behavior keys stop acting on
+// a stale snapshot). Replace the body with p.behaviorStale() when
+// cache/maint-obs2-pol2 is merged.
+func cacheL07SnapshotStale(p *CachePolicySnapshot) bool { return false }
