@@ -175,6 +175,7 @@ type CachePolicyService struct {
 	l07Caps                         cacheL07Caps
 	l07                             *l07Runtime
 	share                           cachePolicyShareLookup
+	l17                             bool
 
 	// Staleness bound, guarded by mu. refreshedAt is the last successful
 	// settings read; administrator writes neither refresh nor clear it.
@@ -341,7 +342,7 @@ func (s *CachePolicyService) publishEntries(entries [6]cachePolicyEntry) {
 	p.chainPercent = policyInt(o["chain_percent"])
 	p.byteBudget = int64(min(policyInt(o["byte_budget_mib"]), s.caps.MaxByteBudgetMiB)) << 20
 	p.rate = int64(min(policyInt(o["rate_mib_per_s"]), s.caps.MaxRateMiBPerS)) << 20
-	p.upstream = upstreamIdentityFromEntry(entries[3], p.MasterEnabled() && !p.stale)
+	p.upstream = upstreamIdentityFromEntry(entries[3], p.MasterEnabled() && !p.stale, s.l17)
 	p.routingL07 = routingL07FromEntry(entries[5], p.MasterEnabled() && !entries[0].parseError, s.m4Available && s.m4Behaviors.L07, s.l07Caps)
 	p.revision = fmt.Sprintf("m%d.o%d.u%d.a%d.r%d", p.revs[0], p.revs[1], p.revs[3], p.revs[4], p.revs[5])
 	p.initCohortViews()
@@ -397,7 +398,7 @@ func policyDefaults(index int) map[string]any {
 		return map[string]any{"enabled": false}
 	}
 	if index == 3 {
-		return map[string]any{"mode": "off", "account_ids": []int64{}, "rollout_percent": 0, "chat_compat_uuid": false, "header_only_uuid": false, "forward_session_headers": "whitelist", "max_inflight_per_key": 2}
+		return map[string]any{"mode": "off", "account_ids": []int64{}, "rollout_percent": 0, "chat_compat_uuid": false, "header_only_uuid": false, "forward_session_headers": "whitelist", "max_inflight_per_key": 2, "grok": grokIdentityPolicyDefaults()}
 	}
 	return map[string]any{"enabled": false, "sample_percent": 100, "chain_percent": 100, "byte_budget_mib": 64, "rate_mib_per_s": 32}
 }
@@ -415,7 +416,7 @@ func ProvideCachePolicyService(repo SettingRepository, cfg *config.Config, accou
 	// T2.5 implements L-07 with every limit of M4 kickoff §11 (DESIGN §6.1A);
 	// L-04 and L-03 stay storage-only until T2.2/T2.3.
 	s := NewCachePolicyService(repo, cfg, WithCacheNorthstar(), WithCachePolicyAccounts(accounts), WithCacheM4Policies(groups),
-		WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L07: true}))
+		WithCacheM4BuildCapabilities(CacheM4BuildCapabilities{L07: true}), WithCacheL17())
 	if gateway != nil {
 		gateway.cachePolicies = s
 	}

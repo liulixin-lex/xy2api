@@ -196,6 +196,8 @@ func TestCachePolicyPOL2ContractReplay(t *testing.T) {
 			}
 			status, got := cacheCall(t, router, f.Request.Method, f.Request.Path, f.Request.Body)
 			require.Equal(t, f.Status, status)
+			// pol2 is frozen; this build appends the L-17 grok fields (l17 false).
+			expected = cacheL17ProjectLegacy(t, expected, false)
 			normalizePolicyTimes(t, got)
 			normalizePolicyTimes(t, expected)
 			require.Equal(t, expected, got, "compare every field")

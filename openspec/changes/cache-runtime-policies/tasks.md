@@ -50,6 +50,14 @@
 - [ ] R 增量评审及最终集成关闭态证据。
 
 
+### T3.4 / L-17 Grok 身份缺口（开发中）
+
+- [x] 写入三个 grok 字段、能力 l17、账号范围只核对新增 ID、Grok 候选与旧存储补齐。
+- [x] 原始 Chat body 键与 compact 身份按账号开启；compact 不注入工具；关闭态先读快照布尔。
+- [x] 复用 24h 拒绝跳过表（独立实例）与 resilience 计数，400 保持基线呈现。
+- [x] l17 v1.1 契约样例、遗留回放与定向 Grok 测试已准备。
+- [ ] R 静态评审、CI 全量门禁；启用前取得 xAI Chat 收益证据与 compact staging 验证。
+
 ### M3.1 转换出口补修
 
 - [x] Chat buffered/streaming 在实际注入门控内统一还原，覆盖成功、failed 与 cyber。

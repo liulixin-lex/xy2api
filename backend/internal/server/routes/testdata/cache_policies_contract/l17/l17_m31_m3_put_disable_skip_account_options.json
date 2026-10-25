@@ -1,0 +1,149 @@
+{
+  "_contract": [
+    "M3-4",
+    "C-7",
+    "FE-Q3",
+    "M31",
+    "T34-L17"
+  ],
+  "_note": "T3.4 构建版本的字段形态：由 m31 v1.0.2 的 m31_m3_put_disable_skip_account_options.json 按 README §1 派生（upstream_identity 末尾追加两个 grok 字段；能力 l17 未声明的样例按 false 处理，字段带标记），其余逐字相同。原说明：M3.1 构建版本：由 m3m4 v1.2 的 m3_put_disable_skip_account_options.json 按 README §1 的规则派生（upstream_identity 追加 max_inflight_per_key；请求后或存储中 mode=uuid_fill 且 account_ids 为空时带 l01_all_accounts_unverified），其余逐字相同。原说明：v1.0.3：disable 方向的 PUT（mode uuid_fill→off）不查询账号表，包括 GetByIDs 校验与候选查询，所以响应的 account_ids 为 options: []，并带 account_options_unavailable，与查询失败用同一个提示（含义是“本次响应没有带候选”）。前端需要候选时另发一次 GET。enable、mixed 方向的 PUT 照常加载候选；写入成功后候选加载失败也按本规则返回 200。",
+  "request": {
+    "method": "PUT",
+    "path": "/api/v1/admin/cache/policies/upstream_identity",
+    "body": {
+      "expected_rev": 4,
+      "spec": {
+        "mode": "off"
+      },
+      "reason": "暂停试运行"
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "key": "upstream_identity",
+      "setting_key": "cache_upstream_identity_policy",
+      "available": true,
+      "risk": "high",
+      "gated_by_master": true,
+      "stored": {
+        "rev": 5,
+        "updated_at": "2026-10-24T09:00:00Z",
+        "updated_by": {
+          "user_id": 1,
+          "email": "admin@example.com"
+        },
+        "reason": "暂停试运行",
+        "spec": {
+          "mode": "off",
+          "account_ids": [
+            101,
+            102
+          ],
+          "rollout_percent": 50,
+          "chat_compat_uuid": false,
+          "header_only_uuid": false,
+          "forward_session_headers": "whitelist",
+          "max_inflight_per_key": 2,
+          "grok": {
+            "chat_body_key": false,
+            "compact_identity": false,
+            "account_ids": []
+          }
+        }
+      },
+      "loaded": {
+        "rev": 5,
+        "loaded_at": "2026-10-24T08:40:01Z"
+      },
+      "effective": {
+        "state": "off",
+        "active": false,
+        "blockers": [],
+        "warnings": [
+          "account_options_unavailable"
+        ],
+        "clipped_fields": []
+      },
+      "defaults": {
+        "mode": "off",
+        "account_ids": [],
+        "rollout_percent": 0,
+        "chat_compat_uuid": false,
+        "header_only_uuid": false,
+        "forward_session_headers": "whitelist",
+        "max_inflight_per_key": 2,
+        "grok": {
+          "chat_body_key": false,
+          "compact_identity": false,
+          "account_ids": []
+        }
+      },
+      "schema": [
+        {
+          "field": "mode",
+          "type": "enum",
+          "options": [
+            "off",
+            "uuid_fill"
+          ]
+        },
+        {
+          "field": "account_ids",
+          "type": "id_list",
+          "ref": "account",
+          "options": []
+        },
+        {
+          "field": "rollout_percent",
+          "type": "int",
+          "min": 0,
+          "max": 100,
+          "unit": "percent"
+        },
+        {
+          "field": "chat_compat_uuid",
+          "type": "bool"
+        },
+        {
+          "field": "header_only_uuid",
+          "type": "bool"
+        },
+        {
+          "field": "forward_session_headers",
+          "type": "enum",
+          "options": [
+            "whitelist",
+            "normalize"
+          ]
+        },
+        {
+          "field": "max_inflight_per_key",
+          "type": "int",
+          "min": 1,
+          "max": 16
+        },
+        {
+          "field": "grok.chat_body_key",
+          "type": "bool",
+          "not_implemented_in_build": true
+        },
+        {
+          "field": "grok.compact_identity",
+          "type": "bool",
+          "not_implemented_in_build": true
+        },
+        {
+          "field": "grok.account_ids",
+          "type": "id_list",
+          "ref": "account",
+          "options": [],
+          "not_implemented_in_build": true
+        }
+      ]
+    }
+  },
+  "_derived_from": "m31_m3_put_disable_skip_account_options.json"
+}

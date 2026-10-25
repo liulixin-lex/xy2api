@@ -1,0 +1,88 @@
+{
+  "_contract": [
+    "M3-2",
+    "T34-L17"
+  ],
+  "_note": "必须被拒绝：开启 grok 修正属于 enable，需要理由与勾选",
+  "_fixture": {
+    "build_capabilities": {
+      "l04": false,
+      "l03": false,
+      "l07": false,
+      "l17": true
+    },
+    "说明": "T3.4 构建的静态能力（l17 为 true；不含 M4 行为时 l04、l03、l07 为 false，M3 形态的样例中 M4 键为 not_in_build），后端测试预置，不属于响应"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/admin/cache/policies/upstream_identity/validate",
+    "body": {
+      "expected_rev": 4,
+      "spec": {
+        "grok": {
+          "chat_body_key": true,
+          "compact_identity": true,
+          "account_ids": [
+            701
+          ]
+        }
+      },
+      "reason": "Grok 身份缺口修正，先开一个账号",
+      "confirm": {
+        "checkbox": true,
+        "typed": null
+      }
+    }
+  },
+  "status": 200,
+  "response": {
+    "code": 0,
+    "message": "success",
+    "data": {
+      "valid": true,
+      "errors": [],
+      "warnings": [],
+      "diff": [
+        {
+          "field": "grok.account_ids",
+          "before": [],
+          "after": [
+            701
+          ]
+        },
+        {
+          "field": "grok.chat_body_key",
+          "before": false,
+          "after": true
+        },
+        {
+          "field": "grok.compact_identity",
+          "before": false,
+          "after": true
+        }
+      ],
+      "risk": "high",
+      "direction": "disable",
+      "confirm": {
+        "reason_required": false,
+        "checkbox_required": false,
+        "type_to_confirm": null
+      },
+      "current_rev": 4,
+      "rev_stale": false,
+      "effective_preview": {
+        "state": "on",
+        "active": true,
+        "blockers": []
+      },
+      "affected": [
+        {
+          "key": "upstream_identity",
+          "state_before": "on",
+          "state_after": "on",
+          "active_after": true
+        }
+      ]
+    }
+  }
+}

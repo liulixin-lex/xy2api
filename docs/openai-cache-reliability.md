@@ -336,6 +336,33 @@ null 形态依据保存的兼容 Responses 官方流示例及协议允许的空�
 启用实验中监测。
 
 
+## Grok 身份缺口（L-17）
+
+`upstream_identity` 末尾的 `grok.chat_body_key`、`grok.compact_identity` 与
+`grok.account_ids` 修补 Grok 的两处身份缺口，与 L-01 的 mode、账号范围和比例相互独立。
+默认 false、false、[]，等于原行为；账号列表为空表示不生效，两个开关只对列表中的 Grok
+账号（OAuth 与 API key）生效，按每次尝试的账号判定。三项属于静态能力 l17：能力为
+false 时字段带 `not_implemented_in_build`，启用方向返回 `CACHE_POLICY_UNSUPPORTED`，
+关闭与清空照常；数据库已启用时 state 为 blocked。请求快照在发布时把能力、紧急总闸、
+`cache_feature_master`、解析状态与陈旧上限合并为布尔值，无快照时为 false。
+
+- `chat_body_key`：Grok 走原始 xAI Chat 时，body 的 `prompt_cache_key` 改写为与
+  `X-Grok-Conv-Id` 相同的租户作用域身份，不转发客户端原值；身份为空时仍删除该字段。
+- `compact_identity`：`/responses/compact` 按同一种子链计算身份，body 与
+  `X-Grok-Conv-Id` 都携带；compact 不接受 `tool_choice`，因此不注入 Free 档原生工具，
+  也不走 Free 函数工具缓存路由。
+- 只有 L-17 实际写入 body 键的尝试收到 400，且 `error.param` 或 message 指向
+  `prompt_cache_key` 时，本进程对该账号跳过 L-17 两项 24 小时。该 400 保持端点原有的
+  呈现、重试与 failover，不新增重试；跳过表与 L-01 使用同一机制，但条目互不共用。
+- 通过既有 resilience 指标接口提供 `grok_identity_fix_applied_total{fix}` 与
+  `grok_identity_upstream_reject_total{fix}`；拒绝另记不含身份的告警日志
+  `grok_identity_upstream_reject`。Grok 不进入 cache_trace。
+- 管理接口的 `grok.account_ids.options` 只列 Grok 账号；候选查询失败时
+  `account_options_unavailable` 同时清空两个账号选择器。只核对新增 ID，移除永远允许。
+  旧存储在内存中补齐三项，不写回、不改 revision；history 保留三项变更。
+- 启用前必修：xAI Chat 是否使用 body 键需先在 1 个账号上取得收益证据；compact
+  需在 staging 用真实端点确认不报错、不改变结果，生产先只列 1 个账号。
+
 ## Claude/Gemini 身份与粘性策略管理（T4.0）
 
 anthropic_identity 默认 anchor_group_ids=[]、metadata_group_ids=[]、

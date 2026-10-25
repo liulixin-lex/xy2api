@@ -151,6 +151,10 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			if isList {
 				expected = cacheM31M4ProjectLegacyList(t, expected)
 			}
+			// The frozen M4 and T2.5 samples predate L-17: upstream_identity gains
+			// the grok leaves (F derivation, proven by
+			// TestCachePolicyL17LegacyProjectionMatchesAuthority).
+			expected = cacheL17ProjectLegacy(t, expected, false)
 			data, _ := f.Response["data"].(map[string]any)
 			repo := &cacheRouteStore{rows: map[string]string{
 				"cache_feature_master":                      `{"rev":1,"spec":{"enabled":true}}`,
@@ -365,6 +369,7 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 				// corruption can differ from the replayed response.
 				wrong = cacheM4L07Overlay(t, wrong)
 			}
+			wrong = cacheL17ProjectLegacy(t, wrong, false)
 			normalizePolicyTimes(t, wrong)
 			require.NotEqual(t, wrong, actual, "the corrupted contract response cannot pass full replay")
 		})
@@ -396,6 +401,7 @@ func TestCachePolicyM4ContractReplay(t *testing.T) {
 			if cacheM4ListSample(source) {
 				wrong = cacheM31M4ProjectLegacyList(t, wrong)
 			}
+			wrong = cacheL17ProjectLegacy(t, wrong, false)
 			normalizePolicyTimes(t, wrong)
 			require.NotEqual(t, wrong, actual, "the corrupted contract response cannot pass full replay")
 		})
@@ -411,13 +417,13 @@ func TestCachePolicyM4RetainsM3ListEdges(t *testing.T) {
 	require.NoError(t, err)
 	var defaults cacheContract
 	require.NoError(t, json.Unmarshal(raw, &defaults))
-	for _, name := range []string{"m31_m3_list_account_options_unavailable.json", "m31_m3_list_observability_off.json"} {
+	for _, name := range []string{"l17_m31_m3_list_account_options_unavailable.json", "l17_m31_m3_list_observability_off.json"} {
 		t.Run(name, func(t *testing.T) {
 			raw, err := os.ReadFile(filepath.Join(root, name))
 			require.NoError(t, err)
 			var fixture cacheContract
 			require.NoError(t, json.Unmarshal(raw, &fixture))
-			expected := contractMap(t, fixture.Response)
+			expected := cacheL17ProjectLegacy(t, contractMap(t, fixture.Response), false)
 			raw, err = json.Marshal(fixture.Response["data"])
 			require.NoError(t, err)
 			var list service.CachePolicyList
@@ -436,7 +442,7 @@ func TestCachePolicyM4RetainsM3ListEdges(t *testing.T) {
 			cfg.Gateway.OpenAICache.AwareRoutingEnabled = list.Existing.AwareRouting
 			cfg.Gateway.OpenAICache.RolloutPercent = list.Existing.Rollout
 			cfg.Gateway.CacheFeatures.KillSwitch = list.Static.KillSwitch
-			accounts := &cacheM3FaultAccounts{failOptions: name == "m31_m3_list_account_options_unavailable.json"}
+			accounts := &cacheM3FaultAccounts{failOptions: name == "l17_m31_m3_list_account_options_unavailable.json"}
 			groups := &cacheM4Groups{}
 			policies := service.NewCachePolicyService(repo, cfg, service.WithCacheNorthstar(), service.WithCacheM4Policies(groups), service.WithCacheM4BuildCapabilities(service.CacheM4BuildCapabilities{L04: true, L03: true, L07: true}), service.WithCachePolicyAccounts(accounts))
 			require.NoError(t, policies.Refresh(context.Background()))

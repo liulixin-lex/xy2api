@@ -83,6 +83,13 @@ func (l *openAIUpstreamIdentityLease) release() {
 	}
 }
 
+// isRejected reports only the reject skip; L-17 uses no fan-in lease.
+func (r *openAIUpstreamIdentityRuntime) isRejected(account int64, now time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return now.Before(r.rejectAllUntil) || now.Before(r.rejected[account])
+}
+
 func (r *openAIUpstreamIdentityRuntime) reject(account int64, now time.Time) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()

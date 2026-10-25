@@ -82,6 +82,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	}
 	SetOpsUpstreamModel(c, upstreamModel)
 	grokCacheIdentity := ""
+	grokBodyKeyApplied := false
 	if account.Platform == PlatformGrok {
 		// Resolve before image bridging or other body rewrites so the fallback is
 		// anchored to the client's stable conversation prefix.
@@ -162,9 +163,20 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		}
 	}
 	if account.Platform == PlatformGrok {
-		upstreamBody, err = stripGrokChatPromptCacheKey(upstreamBody)
-		if err != nil {
-			return nil, fmt.Errorf("remove Responses-only Grok prompt cache key: %w", err)
+		if grokCacheIdentity != "" && s.grokIdentityFixEnabled(c, account, grokIdentityFixChatBodyKey) {
+			// L-17: carry the scoped identity already sent as X-Grok-Conv-Id,
+			// never the client's raw key. An empty identity is still removed.
+			upstreamBody, err = sjson.SetBytes(upstreamBody, "prompt_cache_key", grokCacheIdentity)
+			if err != nil {
+				return nil, fmt.Errorf("apply Grok chat prompt cache identity: %w", err)
+			}
+			grokBodyKeyApplied = true
+			recordGrokIdentityFixApplied(account, grokIdentityFixChatBodyKey)
+		} else {
+			upstreamBody, err = stripGrokChatPromptCacheKey(upstreamBody)
+			if err != nil {
+				return nil, fmt.Errorf("remove Responses-only Grok prompt cache key: %w", err)
+			}
 		}
 		upstreamBody, err = normalizeGrokChatReasoningEffort(upstreamBody, upstreamModel)
 		if err != nil {
@@ -214,6 +226,9 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	// 7. Handle error response with failover
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
+		if grokBodyKeyApplied {
+			s.learnGrokIdentityRejection(account, grokIdentityFixChatBodyKey, resp.StatusCode, respBody)
+		}
 		if failure := s.learnOpenAIStreamOnlyHTTPFailure(ctx, c, account, resp.Request, resp, respBody, resilience.CapabilityProtocolChat); failure != nil {
 			return nil, failure
 		}
