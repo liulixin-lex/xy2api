@@ -108,16 +108,15 @@ func TestCachePolicyM4DefaultWiringNeverReportsUnimplementedActive(t *testing.T)
 		for _, tc := range []struct{ key, spec string }{
 			{"anthropic_identity", `{"anchor_group_ids":[31],"rollout_percent":50}`},
 			{"anthropic_identity", `{"gemini_anchor":true,"rollout_percent":50}`},
-			{"routing", `{"keep_sticky_on_busy":{"enabled":true,"rollout_percent":50}}`},
 		} {
 			t.Run(fmt.Sprint(master)+tc.key+tc.spec, func(t *testing.T) {
 				store := newPolicyTestStore()
 				store.rows["cache_feature_master"] = fmt.Sprintf(`{"rev":1,"spec":{"enabled":%t}}`, master)
 				store.rows["cache_"+tc.key+"_policy"] = `{"rev":1,"spec":` + tc.spec + `}`
 				// Use the production constructor, rather than the full-build test fixture.
-				s := ProvideCachePolicyService(store, policyTestConfig(), nil, nil)
+				s := ProvideCachePolicyService(store, policyTestConfig(), nil, nil, nil)
 				t.Cleanup(s.Stop)
-				require.Equal(t, CacheM4BuildCapabilities{}, s.m4Behaviors)
+				require.Equal(t, CacheM4BuildCapabilities{L07: true}, s.m4Behaviors)
 				require.NoError(t, s.Refresh(context.Background()))
 				view, err := s.Get(context.Background(), tc.key)
 				require.NoError(t, err)
@@ -126,6 +125,31 @@ func TestCachePolicyM4DefaultWiringNeverReportsUnimplementedActive(t *testing.T)
 				require.Equal(t, []string{"not_implemented_in_build"}, view.Effective.Blockers)
 				require.NotContains(t, view.Effective.Warnings, "anthropic_observability_missing")
 			})
+		}
+	}
+}
+
+// T2.5 production wiring: l07 is implemented, so an enabled routing policy
+// follows the master switch, and the request accessor follows it too.
+func TestCachePolicyProductionWiringImplementsL07(t *testing.T) {
+	for _, master := range []bool{false, true} {
+		store := newPolicyTestStore()
+		store.rows["cache_feature_master"] = fmt.Sprintf(`{"rev":1,"spec":{"enabled":%t}}`, master)
+		store.rows["cache_routing_policy"] = `{"rev":1,"spec":{"keep_sticky_on_busy":{"enabled":true,"rollout_percent":50}}}`
+		gateway := &GatewayService{}
+		s := ProvideCachePolicyService(store, policyTestConfig(), nil, nil, gateway)
+		t.Cleanup(s.Stop)
+		require.Same(t, s, gateway.cachePolicies, "the Anthropic gateway reads the same snapshots")
+		require.NoError(t, s.Refresh(context.Background()))
+		view, err := s.Get(context.Background(), "routing")
+		require.NoError(t, err)
+		require.NotContains(t, view.Effective.Blockers, "not_implemented_in_build")
+		if master {
+			require.Equal(t, "on", view.Effective.State)
+			require.NotNil(t, s.Snapshot().RoutingL07())
+		} else {
+			require.Equal(t, "masked_by_master", view.Effective.State)
+			require.Nil(t, s.Snapshot().RoutingL07())
 		}
 	}
 }

@@ -86,6 +86,7 @@ export default {
       static_aware_routing_disabled: 'This depends on a system switch that needs a config change and a restart, and it is off. Saving has no effect; ask operations to assess it.',
       parse_error: 'The stored configuration cannot be read and is treated as off. Saving once restores it.',
       kill_switch: 'The static kill switch is on: saved settings take effect only after it is lifted.',
+      stale_snapshot: 'Policy snapshot is stale. Database refresh has failed for longer than the limit, so behavior policies are treated as off until refresh recovers.',
     },
     warnings: {
       observability_off: 'Cache observation is off: the effect of this change cannot be evaluated. Turn on Cache observation first.',
@@ -118,6 +119,7 @@ export default {
       static_aware_routing_disabled: 'a required system switch is off, so saving has no effect',
       parse_error: 'the old configuration is unreadable and this save replaces it',
       kill_switch: 'the static kill switch is on, so this only saves until it is lifted',
+      stale_snapshot: 'The policy snapshot is stale, so saving has no effect until refresh recovers',
     },
     errors: {
       out_of_range: 'Out of the allowed range ({min} to {max})',

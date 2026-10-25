@@ -112,6 +112,8 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		"excluded_ids", excludedIDsList)
 
 	cfg := s.schedulingConfig()
+	// L-07: a keep of the previous attempt ends before this one may bind.
+	s.l07ReleaseAttempt(ctx)
 
 	// 检查 Claude Code 客户端限制（可能会替换 groupID 为降级分组）
 	group, groupID, err := s.checkClaudeCodeRestriction(ctx, groupID)
@@ -239,6 +241,8 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	if s.debugModelRoutingEnabled() && requestedModel != "" && modelRoutingAppliesToTargetPlatform(platform) {
 		logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] load-aware enabled: group_id=%v model=%s session=%s platform=%s", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), platform)
 	}
+	// L-07 record of the request; nil unless the routing policy armed it.
+	l07 := s.l07Begin(ctx, group, sessionHash, platform, len(origExcluded))
 
 	accounts, useMixed, err := s.listSchedulableAccounts(ctx, groupID, platform, hasForcePlatform)
 	if err != nil {
@@ -402,12 +406,13 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 									if s.debugModelRoutingEnabled() {
 										logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] routed sticky hit: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), stickyAccountID)
 									}
+									s.l07RoutedOwnerHit(ctx, l07, sessionHash, stickyAccountID)
 									return s.newSelectionResult(ctx, stickyAccount, true, result.ReleaseFunc, nil)
 								}
 							}
 
 							if stickyCacheMissReason == "" {
-								waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, stickyAccountID)
+								waitingCount, waitErr := s.concurrencyService.GetAccountWaitingCount(ctx, stickyAccountID)
 								if waitingCount < cfg.StickySessionMaxWaiting {
 									// 会话数量限制检查（等待计划也需要占用会话配额）
 									if !s.checkAndRegisterSession(ctx, stickyAccount, sessionHash) {
@@ -426,6 +431,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 									}
 								} else {
 									stickyCacheMissReason = "wait_queue_full"
+									s.l07OwnerBusy(ctx, l07, stickyAccount, sessionHash, requestedModel, result, err, waitErr)
 								}
 							}
 							// 粘性账号槽位满且等待队列已满，继续使用负载感知选择
@@ -435,6 +441,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							stickyCacheMissReason = "rpm_red"
 						}
 
+						if stickyCacheMissReason != "" && stickyCacheMissReason != "wait_queue_full" {
+							s.l07OwnerSkipped(l07)
+						}
 						// 记录粘性缓存未命中的结构化日志
 						if stickyCacheMissReason != "" {
 							baseRPM := stickyAccount.GetBaseRPM()
@@ -446,6 +455,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 								stickyCacheMissReason, stickyAccountID, shortSessionHash(sessionHash), currentRPM, baseRPM)
 						}
 					} else {
+						s.l07OwnerSkipped(l07)
 						_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 						logger.LegacyPrintf("service.gateway", "[StickyCacheMiss] reason=account_cleared account_id=%d session=%s current_rpm=0 base_rpm=0",
 							stickyAccountID, shortSessionHash(sessionHash))
@@ -555,6 +565,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 						"session", shortSessionHash(sessionHash),
 					)
 					_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+					s.l07OwnerSkipped(l07)
 				}
 
 				// 注意：不再检查 isAccountInGroup，因为 accountByID 已经从按分组过滤的
@@ -596,6 +607,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 								"reason", "session_limit",
 								"session", shortSessionHash(sessionHash),
 							)
+							s.l07OwnerSkipped(l07)
 						} else {
 							slog.Debug("sticky.layer1_5_no_routing_hit",
 								"account_id", accountID,
@@ -603,7 +615,11 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 								"result", "slot_acquired",
 							)
 							if s.cache != nil {
-								_ = s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), sessionHash, stickySessionTTL)
+								if l07.armed() {
+									s.l07RefreshOnOwnerHit(ctx, l07, derefGroupID(groupID), sessionHash, accountID, stickySessionTTL)
+								} else {
+									_ = s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), sessionHash, stickySessionTTL)
+								}
 							}
 							return s.newSelectionResult(ctx, account, true, result.ReleaseFunc, nil)
 						}
@@ -614,11 +630,12 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 						)
 					}
 
-					waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, accountID)
+					waitingCount, waitErr := s.concurrencyService.GetAccountWaitingCount(ctx, accountID)
 					if waitingCount < cfg.StickySessionMaxWaiting {
 						// 会话数量限制检查（等待计划也需要占用会话配额）
 						if !s.checkAndRegisterSession(ctx, account, sessionHash) {
 							// 会话限制已满，继续到 Layer 2
+							s.l07OwnerSkipped(l07)
 						} else {
 							slog.Debug("sticky.layer1_5_no_routing_hit",
 								"account_id", accountID,
@@ -632,6 +649,10 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 								MaxWaiting:     cfg.StickySessionMaxWaiting,
 							})
 						}
+					} else {
+						// Busy owner, full queue: L-07 may keep the binding while
+						// Layer2 serves this attempt (DESIGN §6.1A).
+						s.l07OwnerBusy(ctx, l07, account, sessionHash, requestedModel, result, err, waitErr)
 					}
 				} else if !clearSticky {
 					slog.Debug("sticky.layer1_5_no_routing_miss",
@@ -639,6 +660,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 						"reason", "gate_check_failed",
 						"session", shortSessionHash(sessionHash),
 					)
+					s.l07OwnerSkipped(l07)
 				}
 			} else {
 				slog.Debug("sticky.layer1_5_no_routing_miss",
@@ -646,6 +668,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					"reason", "account_not_in_map",
 					"session", shortSessionHash(sessionHash),
 				)
+				s.l07OwnerSkipped(l07)
 			}
 		}
 	} else if len(routingAccountIDs) == 0 && sessionHash != "" {

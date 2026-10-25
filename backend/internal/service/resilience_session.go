@@ -709,6 +709,7 @@ type sessionFailureRecorder struct {
 // threshold deletes the binding (owner-checked) and avoids the account for
 // the session (design §4.1-§4.2).
 func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, sessionHash string, accountID int64, c resilience.Category) {
+	noteL07AttemptFailure(ctx, accountID, c)
 	cfg := resilience.Current()
 	if rec == nil || rec.r == nil || rec.r.store == nil || !cfg.SessionOn() || !c.CountsForSession() {
 		return
