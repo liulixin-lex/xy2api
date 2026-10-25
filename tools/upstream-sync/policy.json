@@ -2427,8 +2427,12 @@
       "value": "s.timingWheel.ScheduleRecurring(\"cache:northstar\", time.Minute, s.runStandaloneCacheNorthstar)"
     },
     {
-      "path": "backend/internal/service/dashboard_aggregation_service.go",
-      "value": "s.cacheNorthstar.Cleanup(ctx, now)"
+      "path": "backend/internal/service/cache_northstar_aggregator.go",
+      "value": "s.cacheNorthstar.runLeaderCycle(ctx, now, enabled)"
+    },
+    {
+      "path": "backend/internal/service/cache_northstar_aggregator.go",
+      "value": "if err := s.Cleanup(ctx, now); err != nil {"
     },
     {
       "path": "backend/internal/handler/wire.go",
