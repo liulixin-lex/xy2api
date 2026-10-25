@@ -20,11 +20,12 @@ import (
 
 // Metadata consumes the same frozen behavior policy as the local anchor. It
 // never consults trace sampling, session digests or a client-supplied seed.
+// An empty metadata_account_ids admits no account, so it is closed as a whole.
 func (p *CachePolicySnapshot) cacheMetadataEnabled() bool {
 	return p != nil && p.anchorPolicy.available && p.anchorPolicy.metadataAvailable &&
 		!p.behaviorStale() && p.MasterEnabled() && p.anchorPolicy.valid &&
 		p.anchorPolicy.metadataRollout > 0 && p.anchorPolicy.metadataRollout <= p.anchorPolicy.rollout &&
-		p.anchorPolicy.rollout <= 100 && len(p.anchorPolicy.groups) > 0
+		p.anchorPolicy.rollout <= 100 && len(p.anchorPolicy.groups) > 0 && len(p.anchorPolicy.metadataAccounts) > 0
 }
 
 func cacheMetadataEndpointAllowed(baseURL string) bool {
@@ -66,6 +67,12 @@ func (s *GatewayService) beginCacheMetadataAttempt(ctx context.Context, c *gin.C
 	}
 	d := parsed.cacheL04
 	if !d.metadataEnabled || d.platform != PlatformAnthropic {
+		return ctx
+	}
+	// Group scope and the arm are final for every attempt; the control arm is
+	// recorded without attaching the attempt to the context.
+	if skip := d.metadataPreSkip(); skip != "" {
+		d.publishMetadata(skip)
 		return ctx
 	}
 	d.metadataAttempted = false
@@ -216,6 +223,10 @@ func (d *cacheAnchorDecision) metadataInitialSkip() string {
 	}
 	if d.skip == "scope_mismatch" || d.skip == "fanin_cap" {
 		return d.skip
+	}
+	// An empty account list is never evaluated per attempt.
+	if len(d.policy.metadataAccounts) == 0 {
+		return "not_in_metadata_accounts"
 	}
 	return "not_apikey"
 }

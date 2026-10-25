@@ -71,9 +71,6 @@ func (s *GatewayService) prepareCacheAnchor(c *gin.Context, key *APIKey, parsed 
 	parsed.AnchorV2 = CacheAnchorV2{}
 	parsed.cacheL04 = nil
 	d := cacheAnchorDecision{policy: p.anchorPolicy, arm: "none", trace: cacheTraceFromGin(c), platform: platform, metadataEnabled: p.cacheMetadataEnabled()}
-	if d.metadataEnabled {
-		d.clientUserID = cacheMetadataHasClientValue(gjson.GetBytes(parsed.Body.Bytes(), "metadata.user_id"))
-	}
 	if d.trace != nil {
 		parsed.cacheTraceSource = &d.trace.data.IDSource
 	}
@@ -85,6 +82,10 @@ func (s *GatewayService) prepareCacheAnchor(c *gin.Context, key *APIKey, parsed 
 	if d.skip != "" {
 		d.publish()
 		return key
+	}
+	// Only the L-03 arm reads the client value, still from the original body.
+	if d.metadataEnabled && d.arm == "both" {
+		d.clientUserID = cacheMetadataHasClientValue(gjson.GetBytes(parsed.Body.Bytes(), "metadata.user_id"))
 	}
 	retained := d
 	parsed.cacheL04 = &retained

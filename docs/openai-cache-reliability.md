@@ -506,6 +506,9 @@ metadata_rollout_percent 不得超过 rollout_percent。cacheable_content 先命
 metadata 透传、claude-cli UA、作用域不符、在途超限、非APIKey、官方端点、账号名单外依序跳过。
 账号保存后改为官方端点或非APIKey，运行时也跳过。a2 与 L-04 共用有界在途计数，
 同一请求跨 attempt 只持有一份登记，释放沿用请求生命周期。
+metadata_account_ids 为空时整体关闭：不读客户端值、不挂 attempt、不取在途登记，trace 记
+not_in_metadata_accounts。对照臂（h ≥ metadata_rollout_percent）与名单外组在挂 attempt 之前判定，
+不分配；客户端值只在处理臂读取，仍取原始请求体。这些状态的 allocs/op 与 L-03 关闭态严格相等。
 
 每次 attempt 都按实际账号派生 device_id=HMAC-SHA256(K,anth-device|account_id) 的64位小写hex；
 session_id=generateSessionUUID(anthropic-upstream-session:v1:+a2)，account_uuid为空。

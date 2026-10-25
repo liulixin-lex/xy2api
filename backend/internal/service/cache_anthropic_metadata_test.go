@@ -61,7 +61,7 @@ func TestCacheMetadataIdentityScopeAndEmpty(t *testing.T) {
 func TestCacheMetadataPolicyClosedGate(t *testing.T) {
 	base := CachePolicySnapshot{master: true, anchorPolicy: cacheAnthropicAnchorPolicy{
 		available: true, metadataAvailable: true, valid: true, groups: []int64{31},
-		rollout: 100, metadataRollout: 50,
+		metadataAccounts: []int64{501}, rollout: 100, metadataRollout: 50,
 	}}
 	for _, tc := range []struct {
 		name   string
@@ -75,6 +75,7 @@ func TestCacheMetadataPolicyClosedGate(t *testing.T) {
 		{"metadata_off", func(p *CachePolicySnapshot) { p.anchorPolicy.metadataRollout = 0 }},
 		{"no_group", func(p *CachePolicySnapshot) { p.anchorPolicy.groups = nil }},
 		{"invalid_nested", func(p *CachePolicySnapshot) { p.anchorPolicy.metadataRollout = 101 }},
+		{"empty_accounts", func(p *CachePolicySnapshot) { p.anchorPolicy.metadataAccounts = nil }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := base

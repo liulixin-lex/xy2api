@@ -81,3 +81,39 @@ func TestL04OutOfScopeActualHandlerAllocsEqualClosedBuild(t *testing.T) {
 		})
 	}
 }
+
+// L-03 closed states on the actual handlers: the control arm and an empty
+// metadata_account_ids cost what metadata_rollout_percent=0 costs, with L-04
+// applied in every arm.
+func TestL03ClosedStatesActualHandlerAllocsEqualRolloutZero(t *testing.T) {
+	withHandlerResilience(t, nil)
+	const scope = `"anchor_group_ids":[31,77],"metadata_group_ids":[31,77],"rollout_percent":100,"gemini_anchor":true`
+	closed := `{"rev":7,"spec":{` + scope + `,"metadata_account_ids":[1,2],"metadata_rollout_percent":0}}`
+	for _, tc := range []struct{ name, policy, path, body string }{
+		{"control_arm", `{"rev":7,"spec":{` + scope + `,"metadata_account_ids":[1,2],"metadata_rollout_percent":1}}`, "/v1/messages", `{"model":"claude-sonnet-4-5","system":"common system","messages":[{"role":"user","content":"first user"}],"max_tokens":1}`},
+		{"empty_accounts", `{"rev":7,"spec":{` + scope + `,"metadata_account_ids":[],"metadata_rollout_percent":100}}`, "/v1/messages", `{"model":"claude-sonnet-4-5","system":"common system","messages":[{"role":"user","content":"first user"}],"max_tokens":1}`},
+		{"compat_empty_accounts", `{"rev":7,"spec":{` + scope + `,"metadata_account_ids":[],"metadata_rollout_percent":100}}`, "/v1/chat/completions", `{"model":"claude-sonnet-4-5","messages":[{"role":"system","content":"system A"},{"role":"user","content":"hi"}],"stream":false}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &l04HandlerPolicyStore{enabled: true, spec: closed}
+			h, k, cache, up, policies := l04HandlerStoreFixture(t, service.CacheM4BuildCapabilities{L04: true, L03: true}, store, false, service.PlatformAnthropic)
+			arm := func(spec string) func() {
+				return func() {
+					store.spec = spec
+					require.NoError(t, policies.Refresh(context.Background()))
+				}
+			}
+			call := (*GatewayHandler).Messages
+			if tc.path != "/v1/messages" {
+				call = (*GatewayHandler).ChatCompletions
+			}
+			op := func() {
+				cache.calls, up.ids, up.bodies = cache.calls[:0], up.ids[:0], up.bodies[:0]
+				l04ServeHandler(t, h, k, tc.path, tc.body, call)
+			}
+			got := l04HandlerArmAllocs([]func(){arm(closed), arm(tc.policy)}, op)
+			t.Logf("allocs/op l03_rollout_zero=%v %s=%v", got[0], tc.name, got[1])
+			require.Equal(t, got[0], got[1], "a closed L-03 state must cost what metadata_rollout_percent=0 costs")
+		})
+	}
+}

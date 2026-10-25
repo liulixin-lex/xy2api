@@ -1350,3 +1350,8 @@ pnpm --dir frontend run build
 - provider golden 发现名单外请求先分配判定结构再判组（每请求 +1，Claude Code 回退 +2，prompt-too-long 回退另有重算哈希）。改为派生前的跳过一律只记 trace、不保留判定；Claude Code 回退按直连回退组判名单，名单外不查组；prompt-too-long 只在 A 已生效或 B 待定时重算；Gemini 在 gemini_anchor 关闭时不为锚点解析请求体。对照臂与 earlier_tier 的 a2 分桶开销按开工包 v1.3.3 只报告，不改。
 - 按 F 裁定，策略 diff 只对解析阶段错误与 exceeds_rollout_percent/exceeds_chain_percent 去掉字段；not_subset_of_anchor_groups 等引用与关系错误保留字段（m3m4 v1.2）。
 - 新增 service 与真实 handler 的同夹具交替 allocs 断言（每臂 5 轮取最小，先预热一轮），关闭态严格相等；在原 240d 产品上红测失败、修复后通过。wire、选号与 sticky 断言不变；未推送、未部署。
+
+### 2026-10-25 — T2.3 L-03 关闭态分配修复（O-L04 接手 G）
+
+- 按 cherry-pick 并入 T2.2 的关闭态分配修复（不变基）。L-03 对照臂与名单外组在挂 attempt 前判定，不再为每次 attempt 分配 context；metadata_account_ids 为空时整体关闭，不读客户端值、不取在途登记、不解析端点，trace 记 not_in_metadata_accounts；客户端值只在处理臂读取。
+- 新增 service 与真实 handler 的同夹具交替 allocs 断言，修复前红测失败（对照臂 +1、空名单 +2/请求）。routes 中 m31 旧 M4 卡片样例的组合构建回放失败在原 73eaf 上即存在，由组装分支的按构建选样处理。
