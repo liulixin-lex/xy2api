@@ -54,12 +54,9 @@ xy2api 对上游三个调度文件的改动仅是：插入 controlled 钩子、`
    - 同 (优先级, 负载率, last_used 秒) 的账号组内随机打散（`shuffleWithinSortGroups`）。
 4. **Layer 3 兜底排队**（`:790-804`）：按优先级 + LRU（或随机）返回等待计划，最多等待 30 秒、100 人。
 
-会话哈希来源（`gateway_service.go:902-966`）：`metadata.user_id` 中的 session → 带 `cache_control` 的可缓存内容 → (IP、UA、API Key、system、全部消息) 摘要。
+会话哈希来源（`gateway_service.go`、`gateway_session_anchor.go`）：现有 share 锚点 → `metadata.user_id` 中的 session → 稳定兜底锚点。Anthropic 兜底键包含 IP、规范化 UA、API Key、Group、规范化 system 和首条有效 user 文本；不再依赖 `cache_control` 断点位置或整段对话历史，因此同一对话跨轮保持稳定并隔离不同 Key/Group。
 
-- 第二级取“第一条带断点的消息”的文本（`gateway_service.go:1060-1250`），客户端把断点放在最新消息时逐轮变化；只有 system 带断点时取 system 文本，不含 API Key，同一分组里不同租户的会话共用一个哈希。
-- 第三级每轮对话消息变长，哈希随之变化。
-
-因此**无显式会话标识的客户端基本没有跨轮粘性**，详见 §7.3。
+稳定锚点会去掉 system 与首条 user 文本中的完整 system-reminder 区间，折叠空白，并从 system 每段文本中去掉开头的 billing header 行。Claude Code prompt 中的日期、cwd、git status 与 `## Session Context` 环境段仍参与哈希；独立对话若身份字段、system 与首条 user 完全相同，也会共用 sticky 和 resilience 状态。详见 §7.3。
 
 ### 2.2 OpenAI 默认（旧）路径：`selectAccountWithLoadAwareness`
 
@@ -234,7 +231,7 @@ V2→V5 设计、按模型策略 → 按分组策略 → 双模式 → 一键开
 
 | 事实 | 位置 | 影响 |
 |---|---|---|
-| Anthropic 会话哈希回退：带断点内容取“第一条带断点的消息”，客户端移动断点时逐轮变化；只有 system 带断点时不含 API Key；全文摘要逐轮变化 | `gateway_service.go:902-966`、`:1060-1250` | 无会话标识客户端几乎没有跨轮粘性，或不同租户挤到同一绑定 |
+| Anthropic 兜底键使用身份字段、规范化 system 与首条有效 user 文本；cache breakpoint 移动和后续对话增长不改变键 | `gateway_service.go`、`gateway_session_anchor.go` | 升级后会重新绑定；日期等普通 system 文本变化仍会换键，相同首轮与身份的独立对话可能共享 sticky 与韧性状态 |
 | 粘性 TTL 1 小时，每次命中 `EXPIRE` 续期 | `gateway_service.go:36`、`gateway_scheduling.go:597`、`openai_sticky_compat.go:187-206`、`repository/gateway_cache.go:56-59` | 可用 `TTL − PTTL` 推算会话空闲时长，零额外往返 |
 | 粘性账号满载时排队：最多 3 人、最长 120 秒；兜底排队 30 秒、100 人 | `config.go:2626-2629`、`gateway_scheduling.go:607-631` | 缓存友好，但尾延迟高 |
 | 负载均衡层选中后覆盖粘性绑定 | `gateway_scheduling.go:764-775` | 满载即永久改绑，会话不回原账号 |

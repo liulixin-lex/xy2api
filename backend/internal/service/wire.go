@@ -383,9 +383,8 @@ func ProvideGrokTokenProvider(
 }
 
 // ProvideDashboardAggregationService 创建并启动仪表盘聚合服务
-func ProvideDashboardAggregationService(repo DashboardAggregationRepository, timingWheel *TimingWheelService, lockCache LeaderLockCache, db *sql.DB, cfg *config.Config, settingRepo SettingRepository, northstar *CacheNorthstarAggregator) *DashboardAggregationService {
+func ProvideDashboardAggregationService(repo DashboardAggregationRepository, timingWheel *TimingWheelService, lockCache LeaderLockCache, db *sql.DB, cfg *config.Config, settingRepo SettingRepository) *DashboardAggregationService {
 	svc := NewDashboardAggregationService(repo, timingWheel, cfg)
-	svc.cacheNorthstar = northstar
 	svc.settingRepo = settingRepo
 	svc.SetLeaderLock(lockCache, db)
 	svc.Start()
@@ -900,8 +899,8 @@ var ProviderSet = wire.NewSet(
 	ProvideUsageBillingRecoveryService,
 	NewAnnouncementService,
 	NewAdminService,
-	ProvideGatewayServiceWithCacheTrace,
-	ProvideOpenAIGatewayServiceWithCachePolicies,
+	NewGatewayService,
+	NewOpenAIGatewayService,
 	ProvideImageStorageSettingService,
 	ProvideImageTaskService,
 	ProvideBatchImageModelPricingResolver,
@@ -922,7 +921,7 @@ var ProviderSet = wire.NewSet(
 	NewAntigravityOAuthService,
 	ProvideOAuthRefreshAPI,
 	ProvideGeminiTokenProvider,
-	ProvideGeminiMessagesCompatServiceWithCacheTrace,
+	NewGeminiMessagesCompatService,
 	ProvideShareSchedulingService,
 	NewGroupCategoryService,
 	ProvideResilienceService,
@@ -951,10 +950,6 @@ var ProviderSet = wire.NewSet(
 	ProvideOpsService,
 	ProvideOpsIngressRejectAggregator,
 	ProvideAuditLogService,
-	ProvideCachePolicyService,
-	NewCacheTraceCounters,
-	NewCacheNorthstarAggregator,
-	NewCacheObservabilityService,
 	ProvideOpsMetricsCollector,
 	ProvideOpsAggregationService,
 	ProvideOpsAlertEvaluatorService,
@@ -1129,8 +1124,6 @@ func ProvideShareSchedulingService(repo ShareSchedulingRepository, store ShareSc
 	s.opsEnabled = cfg == nil || cfg.Ops.Enabled
 	gateway.shareScheduling = s
 	openai.shareScheduling = s
-	// The routing policy view warns about share-active busy groups (m4l07).
-	openai.cachePolicies.attachShareScheduling(s)
 	s.attachGateways(gateway, openai)
 	s.Start()
 	return s

@@ -285,9 +285,9 @@ func TestForwardAsChatCompletions_APIKeyAutoDerivesStableIsolatedPromptCacheKey(
 	require.NotEmpty(t, firstKey)
 	require.Equal(t, firstKey, appendedKey)
 	require.NotEqual(t, firstKey, otherTenantKey)
-	require.Equal(t, generateSessionUUID(firstKey), upstream.requests[0].Header.Get("session_id"))
+	require.Equal(t, firstKey, upstream.requests[0].Header.Get("session_id"))
 	require.Equal(t, upstream.requests[0].Header.Get("session_id"), upstream.requests[1].Header.Get("session_id"))
-	require.Equal(t, generateSessionUUID(otherTenantKey), upstream.requests[2].Header.Get("session_id"))
+	require.Equal(t, otherTenantKey, upstream.requests[2].Header.Get("session_id"))
 	require.NotEqual(t, upstream.requests[1].Header.Get("session_id"), upstream.requests[2].Header.Get("session_id"))
 }
 

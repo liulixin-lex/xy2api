@@ -21,13 +21,6 @@ import (
 func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (*http.Request, []byte, error) {
 	body = stripDeferredToolCacheControl(body)
 	if account.Platform == PlatformAnthropic && account.Type == AccountTypeServiceAccount {
-		if parsed, _ := ctx.Value(cacheMetadataAttemptKey{}).(*ParsedRequest); parsed != nil {
-			mpt := false
-			if s.settingService != nil {
-				_, mpt, _ = s.settingService.GetGatewayForwardingSettings(ctx)
-			}
-			body = s.applyCacheMetadata(ctx, c, account, body, mpt)
-		}
 		req, err := s.buildUpstreamRequestAnthropicVertex(ctx, c, account, body, token, modelID, reqStream)
 		return req, body, err
 	}
@@ -90,8 +83,6 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 			}
 		}
 	}
-
-	body = s.applyCacheMetadata(ctx, c, account, body, enableMPT)
 
 	// 一致性铁律：同一次请求内只取一次 mimic UA，出站 User-Agent 头与
 	// 请求体 x-anthropic-billing-header 的 cc_version 都源自这一个字符串，
@@ -218,7 +209,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	filterSonnet55ToolsetBetaHeader(req.Header, body, modelID)
 
 	// === DEBUG: 打印上游转发请求（headers + body 摘要），与 CLIENT_ORIGINAL 对比 ===
-	s.debugLogGatewaySnapshot("UPSTREAM_FORWARD", s.cacheMetadataDebugHeaders(ctx, req.Header), s.cacheMetadataDebugBody(ctx, body), map[string]string{
+	s.debugLogGatewaySnapshot("UPSTREAM_FORWARD", req.Header, body, map[string]string{
 		"url":                 req.URL.String(),
 		"token_type":          tokenType,
 		"mimic_claude_code":   strconv.FormatBool(mimicClaudeCode),
@@ -233,7 +224,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		c.Set(claudeMimicDebugInfoKey, buildClaudeMimicDebugLine(req, body, account, tokenType, mimicClaudeCode))
 	}
 	if s.debugClaudeMimicEnabled() {
-		logClaudeMimicDebug(req, cacheMetadataRedactedBody(ctx, body), account, tokenType, mimicClaudeCode)
+		logClaudeMimicDebug(req, body, account, tokenType, mimicClaudeCode)
 	}
 
 	return req, body, nil

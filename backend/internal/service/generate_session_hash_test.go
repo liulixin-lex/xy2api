@@ -4,6 +4,7 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/liulixin-lex/xy2api/internal/domain"
@@ -90,6 +91,20 @@ func TestGenerateSessionHash_MetadataHasHighestPriority(t *testing.T) {
 
 	hash := svc.GenerateSessionHash(parsed)
 	require.Equal(t, "123e4567-e89b-12d3-a456-426614174000", hash, "metadata session_id should have highest priority")
+}
+
+func TestGenerateSessionHash_ShareGroupAnchorKeepsPriority(t *testing.T) {
+	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 71}, Account{ID: 72})
+	groupID := shareTestGroupID
+	parsed := mustParseSessionHashRequest(t, anthropicSessionBody("system", []any{msg("user", "prompt")}, ""), &SessionContext{APIKeyID: 73})
+	parsed.GroupID = &groupID
+
+	want := env.gateway.shareSessionHash(parsed)
+	require.True(t, strings.HasPrefix(want, shareAnchorPrefix))
+	require.Equal(t, want, env.gateway.GenerateSessionHash(parsed), "GroupID activates the existing share anchor before the stable fallback")
+
+	parsed.GroupID = nil
+	require.NotEqual(t, want, env.gateway.GenerateSessionHash(parsed), "without a share GroupID the stable fallback remains active")
 }
 
 func TestGenerateSessionHash_SystemPlusMessages(t *testing.T) {
@@ -196,7 +211,7 @@ func TestGenerateSessionHash_NilSessionContextBackwardCompatible(t *testing.T) {
 	require.Equal(t, h1, h2, "nil SessionContext should produce same hash as no SessionContext")
 }
 
-func TestGenerateSessionHash_ContinuousConversation_HashChangesWithMessages(t *testing.T) {
+func TestGenerateSessionHash_ContinuousConversation_HashStableAcrossTurns(t *testing.T) {
 	svc := &GatewayService{}
 	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "test", APIKeyID: 1}
 	round1 := mustParseSessionHashRequest(t, anthropicSessionBody("You are a helpful assistant.", []any{msg("user", "hello")}, ""), ctx)
@@ -209,9 +224,9 @@ func TestGenerateSessionHash_ContinuousConversation_HashChangesWithMessages(t *t
 	require.NotEmpty(t, h1)
 	require.NotEmpty(t, h2)
 	require.NotEmpty(t, h3)
-	require.NotEqual(t, h1, h2, "different conversation rounds should produce different hashes")
-	require.NotEqual(t, h2, h3, "each new round should produce a different hash")
-	require.NotEqual(t, h1, h3, "round 1 and round 3 should differ")
+	require.Equal(t, h1, h2, "later messages must not change the conversation anchor")
+	require.Equal(t, h2, h3, "later messages must not change the conversation anchor")
+	require.Equal(t, h1, h3, "all rounds with the same first user message share one anchor")
 }
 
 func TestGenerateSessionHash_ContinuousConversation_SameRoundSameHash(t *testing.T) {
@@ -271,11 +286,11 @@ func TestGenerateSessionHash_ResponsesInputDoesNotOverrideHigherPrioritySources(
 		require.Equal(t, "123e4567-e89b-12d3-a456-426614174000", svc.GenerateSessionHash(parsed))
 	})
 
-	t.Run("cache control", func(t *testing.T) {
+	t.Run("cache control does not override client identity", func(t *testing.T) {
 		body := `{"system":[{"type":"text","text":"stable cache anchor","cache_control":{"type":"ephemeral"}}],"input":"hello"}`
 		first := mustParseResponsesSessionHashRequest(t, body, ctx)
 		second := mustParseResponsesSessionHashRequest(t, body, &SessionContext{ClientIP: "9.8.7.6", UserAgent: "other", APIKeyID: 2})
-		require.Equal(t, svc.GenerateSessionHash(first), svc.GenerateSessionHash(second))
+		require.NotEqual(t, svc.GenerateSessionHash(first), svc.GenerateSessionHash(second))
 	})
 }
 
@@ -287,7 +302,7 @@ func TestGenerateSessionHash_MessageRollback(t *testing.T) {
 
 	hOrig := svc.GenerateSessionHash(original)
 	hRollback := svc.GenerateSessionHash(rollback)
-	require.NotEqual(t, hOrig, hRollback, "rollback with different last message should produce different hash")
+	require.Equal(t, hOrig, hRollback, "changing only a later user message must not change the conversation anchor")
 }
 
 func TestGenerateSessionHash_MessageRollbackSameContent(t *testing.T) {
@@ -410,7 +425,7 @@ func TestGenerateSessionHash_SameUserGrowingConversation(t *testing.T) {
 		h := svc.GenerateSessionHash(parsed)
 		require.NotEmpty(t, h, "round %d hash should not be empty", round)
 		if prevHash != "" {
-			require.NotEqual(t, prevHash, h, "round %d hash should differ from previous round", round)
+			require.Equal(t, prevHash, h, "round %d must reuse the first user anchor", round)
 		}
 		prevHash = h
 		h2 := svc.GenerateSessionHash(parsed)
@@ -427,7 +442,7 @@ func TestGenerateSessionHash_MultipleUserMessages(t *testing.T) {
 
 	parsed2 := mustParseSessionHashRequest(t, anthropicSessionBody(nil, []any{msg("user", "first"), msg("user", "CHANGED"), msg("user", "third"), msg("user", "fourth"), msg("user", "fifth")}, ""), ctx)
 	h2 := svc.GenerateSessionHash(parsed2)
-	require.NotEqual(t, h, h2, "changing any message should change the hash")
+	require.Equal(t, h, h2, "changing a later user message must not change the hash")
 }
 
 func TestGenerateSessionHash_MessageOrderMatters(t *testing.T) {
@@ -461,7 +476,7 @@ func TestGenerateSessionHash_ArraySystemPrompt(t *testing.T) {
 	require.NotEmpty(t, h, "array system prompt should produce a hash")
 }
 
-func TestGenerateSessionHash_CacheControlOverridesSessionContext(t *testing.T) {
+func TestGenerateSessionHash_CacheControlDoesNotMergeAPIKeys(t *testing.T) {
 	svc := &GatewayService{}
 	system := []any{map[string]any{"type": "text", "text": "You are a tool-specific assistant.", "cache_control": map[string]any{"type": "ephemeral"}}}
 	body := anthropicSessionBody(system, []any{msg("user", "hello")}, "")
@@ -470,7 +485,7 @@ func TestGenerateSessionHash_CacheControlOverridesSessionContext(t *testing.T) {
 
 	h1 := svc.GenerateSessionHash(parsed1)
 	h2 := svc.GenerateSessionHash(parsed2)
-	require.Equal(t, h1, h2, "cache_control ephemeral has higher priority, SessionContext should not affect result")
+	require.NotEqual(t, h1, h2, "cache_control must not bypass API key isolation")
 }
 
 func TestGenerateSessionHash_EmptyMessages(t *testing.T) {
@@ -478,7 +493,7 @@ func TestGenerateSessionHash_EmptyMessages(t *testing.T) {
 	parsed := mustParseSessionHashRequest(t, anthropicSessionBody(nil, []any{}, ""), &SessionContext{ClientIP: "1.1.1.1", UserAgent: "test", APIKeyID: 1})
 
 	h := svc.GenerateSessionHash(parsed)
-	require.NotEmpty(t, h, "empty messages with SessionContext should still produce a hash from context")
+	require.Empty(t, h, "context alone is insufficient to create a sticky session")
 }
 
 func TestGenerateSessionHash_EmptyMessagesNoContext(t *testing.T) {
@@ -497,7 +512,7 @@ func TestGenerateSessionHash_SessionContextWithEmptyFields(t *testing.T) {
 
 	h1 := svc.GenerateSessionHash(withEmptyCtx)
 	h2 := svc.GenerateSessionHash(withoutCtx)
-	require.NotEqual(t, h1, h2, "empty-field SessionContext should still differ from nil SessionContext")
+	require.Equal(t, h1, h2, "nil and empty session contexts both encode empty identity fields")
 }
 
 func TestGenerateSessionHash_LongConversation(t *testing.T) {
@@ -516,7 +531,7 @@ func TestGenerateSessionHash_LongConversation(t *testing.T) {
 	moreMessages := append(append([]any{}, messages...), msg("user", "one more"), msg("assistant", "ok"))
 	parsed2 := mustParseSessionHashRequest(t, anthropicSessionBody("System prompt", moreMessages, ""), ctx)
 	h2 := svc.GenerateSessionHash(parsed2)
-	require.NotEqual(t, h, h2, "adding more messages to long conversation should change hash")
+	require.Equal(t, h, h2, "adding later messages must not change the conversation anchor")
 }
 
 func TestGenerateSessionHash_GeminiContentsProducesHash(t *testing.T) {
@@ -549,7 +564,7 @@ func TestGenerateSessionHash_GeminiSameContentsSameHash(t *testing.T) {
 	require.Equal(t, h1, h2, "same Gemini contents should produce identical hash")
 }
 
-func TestGenerateSessionHash_GeminiMultiTurnHashChanges(t *testing.T) {
+func TestGenerateSessionHash_GeminiMultiTurnHashStable(t *testing.T) {
 	svc := &GatewayService{}
 	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "gemini-cli", APIKeyID: 1}
 	round1 := mustParseGeminiSessionHashRequest(t, geminiSessionBody(nil, []any{geminiMsg("user", "hello")}), ctx)
@@ -559,7 +574,7 @@ func TestGenerateSessionHash_GeminiMultiTurnHashChanges(t *testing.T) {
 	h2 := svc.GenerateSessionHash(round2)
 	require.NotEmpty(t, h1)
 	require.NotEmpty(t, h2)
-	require.NotEqual(t, h1, h2, "Gemini multi-turn should produce different hashes per round")
+	require.Equal(t, h1, h2, "Gemini later turns must keep the first user anchor")
 }
 
 func TestGenerateSessionHash_GeminiDifferentUsersSameContentDifferentHash(t *testing.T) {
@@ -606,7 +621,7 @@ func TestGenerateSessionHash_GeminiNonTextPartsIgnored(t *testing.T) {
 	require.NotEmpty(t, h, "Gemini message with mixed parts should still produce a hash from text parts")
 }
 
-func TestGenerateSessionHash_GeminiMultiTurnHashNotSticky(t *testing.T) {
+func TestGenerateSessionHash_GeminiMultiTurnHashStableAcrossTurns(t *testing.T) {
 	svc := &GatewayService{}
 	ctx := &SessionContext{ClientIP: "10.0.0.1", UserAgent: "gemini-cli", APIKeyID: 42}
 	rounds := []string{
@@ -621,9 +636,9 @@ func TestGenerateSessionHash_GeminiMultiTurnHashNotSticky(t *testing.T) {
 		hashes[i] = svc.GenerateSessionHash(parsed)
 		require.NotEmpty(t, hashes[i], "round %d hash should not be empty", i+1)
 	}
-	require.NotEqual(t, hashes[0], hashes[1], "round 1 vs 2 hash should differ (contents grow)")
-	require.NotEqual(t, hashes[1], hashes[2], "round 2 vs 3 hash should differ (contents grow)")
-	require.NotEqual(t, hashes[0], hashes[2], "round 1 vs 3 hash should differ")
+	require.Equal(t, hashes[0], hashes[1], "round 1 and 2 share the same first user anchor")
+	require.Equal(t, hashes[1], hashes[2], "round 2 and 3 share the same first user anchor")
+	require.Equal(t, hashes[0], hashes[2], "all rounds share one first user anchor")
 
 	parsedAgain := mustParseGeminiSessionHashRequest(t, rounds[1], ctx)
 	h2Again := svc.GenerateSessionHash(parsedAgain)
@@ -645,6 +660,113 @@ func TestGenerateSessionHash_GeminiEndToEnd(t *testing.T) {
 	parsed3 := mustParseGeminiSessionHashRequest(t, body, &SessionContext{ClientIP: "10.0.0.2", UserAgent: "gemini-cli/1.0", APIKeyID: 99})
 	h3 := svc.GenerateSessionHash(parsed3)
 	require.NotEqual(t, h, h3, "different user with same Gemini request should get different hash")
+}
+
+func TestGenerateSessionHash_StableAnchorRemovesReminderIntervals(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "192.0.2.1", UserAgent: "claude-cli/1.0", APIKeyID: 11}
+	first := mustParseSessionHashRequest(t, `{"system":"before <system-reminder>Monday</system-reminder> middle <system-reminder>cwd A</system-reminder> after","messages":[{"role":"user","content":"start <system-reminder>date 1</system-reminder> keep <system-reminder>status 1</system-reminder> end"}]}`, ctx)
+	second := mustParseSessionHashRequest(t, `{"system":"before <system-reminder>Tuesday</system-reminder> middle <system-reminder>cwd B</system-reminder> after","messages":[{"role":"user","content":"start <system-reminder>date 2</system-reminder> keep <system-reminder>status 2</system-reminder> end"}]}`, ctx)
+	changedOutside := mustParseSessionHashRequest(t, `{"system":"before changed <system-reminder>Tuesday</system-reminder> middle <system-reminder>cwd B</system-reminder> after","messages":[{"role":"user","content":"start <system-reminder>date 2</system-reminder> keep <system-reminder>status 2</system-reminder> end"}]}`, ctx)
+
+	require.Equal(t, svc.GenerateSessionHash(first), svc.GenerateSessionHash(second))
+	require.NotEqual(t, svc.GenerateSessionHash(second), svc.GenerateSessionHash(changedOutside), "text outside reminder intervals remains part of the anchor")
+}
+
+func TestGenerateSessionHash_StableAnchorRetainsOrdinaryEnvironmentText(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "192.0.2.1", UserAgent: "claude-cli/1.0", APIKeyID: 11}
+	first := mustParseSessionHashRequest(t, `{"system":"Current date: Monday, October 26, 2026\n## Session Context\ncwd: /work/one\ngit status: clean","messages":[{"role":"user","content":"prompt"}]}`, ctx)
+	changed := mustParseSessionHashRequest(t, `{"system":"Current date: Tuesday, October 27, 2026\n## Session Context\ncwd: /work/one\ngit status: clean","messages":[{"role":"user","content":"prompt"}]}`, ctx)
+	changedContext := mustParseSessionHashRequest(t, `{"system":"Current date: Monday, October 26, 2026\n## Session Context\ncwd: /work/two\ngit status: modified","messages":[{"role":"user","content":"prompt"}]}`, ctx)
+
+	require.NotEqual(t, svc.GenerateSessionHash(first), svc.GenerateSessionHash(changed), "date text is not specially removed")
+	require.NotEqual(t, svc.GenerateSessionHash(first), svc.GenerateSessionHash(changedContext), "cwd and git status text remain part of the anchor")
+}
+
+func TestGenerateSessionHash_StableAnchorSkipsReminderOnlyUser(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "192.0.2.1", UserAgent: "client", APIKeyID: 12}
+	withReminder := mustParseSessionHashRequest(t, `{"messages":[{"role":"user","content":"  <system-reminder>dynamic</system-reminder> \n"},{"role":"assistant","content":"ignored"},{"role":"user","content":"real first prompt"}]}`, ctx)
+	withoutReminder := mustParseSessionHashRequest(t, `{"messages":[{"role":"user","content":"real first prompt"}]}`, ctx)
+	emptyAfterNormalization := mustParseSessionHashRequest(t, `{"system":" <system-reminder>dynamic system</system-reminder> ","messages":[{"role":"user","content":" <system-reminder>dynamic user</system-reminder> \n"}]}`, ctx)
+
+	require.Equal(t, svc.GenerateSessionHash(withoutReminder), svc.GenerateSessionHash(withReminder))
+	require.Empty(t, svc.GenerateSessionHash(emptyAfterNormalization), "system and user text that normalize to empty must not create a sticky key")
+}
+
+func TestGenerateSessionHash_StableAnchorResponsesReminderIntervals(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "192.0.2.1", UserAgent: "responses-client", APIKeyID: 13}
+	first := mustParseResponsesSessionHashRequest(t, `{"input":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"before <system-reminder>A</system-reminder> after"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"prompt"}]}]}`, ctx)
+	second := mustParseResponsesSessionHashRequest(t, `{"input":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"before <system-reminder>B</system-reminder> after"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"prompt"}]}]}`, ctx)
+
+	require.Equal(t, svc.GenerateSessionHash(first), svc.GenerateSessionHash(second))
+}
+
+func TestGenerateSessionHash_StableAnchorStripsOnlyLeadingBillingLine(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "192.0.2.1", UserAgent: "client", APIKeyID: 14}
+	first := mustParseSessionHashRequest(t, `{"system":" \r\nx-anthropic-billing-header:value one\r\nInstruction A\nx-anthropic-billing-header-extra: keep\nQuoted: \"x-anthropic-billing-header: keep\"\n","messages":[{"role":"user","content":"prompt"}]}`, ctx)
+	second := mustParseSessionHashRequest(t, `{"system":" \r\nx-anthropic-billing-header:value two\r\nInstruction A\nx-anthropic-billing-header-extra: keep\nQuoted: \"x-anthropic-billing-header: keep\"\n","messages":[{"role":"user","content":"prompt"}]}`, ctx)
+	changedInstruction := mustParseSessionHashRequest(t, `{"system":" \r\nx-anthropic-billing-header:value two\r\nInstruction B\nx-anthropic-billing-header-extra: keep\nQuoted: \"x-anthropic-billing-header: keep\"\n","messages":[{"role":"user","content":"prompt"}]}`, ctx)
+	changedExtra := mustParseSessionHashRequest(t, `{"system":" \r\nx-anthropic-billing-header:value two\r\nInstruction A\nx-anthropic-billing-header-extra: changed\nQuoted: \"x-anthropic-billing-header: keep\"\n","messages":[{"role":"user","content":"prompt"}]}`, ctx)
+	changedLaterHeader := mustParseSessionHashRequest(t, `{"system":" \r\nx-anthropic-billing-header:value two\r\nInstruction A\nx-anthropic-billing-header: later value\nQuoted: \"x-anthropic-billing-header: keep\"\n","messages":[{"role":"user","content":"prompt"}]}`, ctx)
+	changedQuote := mustParseSessionHashRequest(t, `{"system":" \r\nx-anthropic-billing-header:value two\r\nInstruction A\nx-anthropic-billing-header-extra: keep\nQuoted: \"x-anthropic-billing-header: changed\"\n","messages":[{"role":"user","content":"prompt"}]}`, ctx)
+
+	require.Equal(t, svc.GenerateSessionHash(first), svc.GenerateSessionHash(second), "only the leading billing line is volatile")
+	require.NotEqual(t, svc.GenerateSessionHash(second), svc.GenerateSessionHash(changedInstruction), "following instructions remain significant")
+	require.NotEqual(t, svc.GenerateSessionHash(second), svc.GenerateSessionHash(changedExtra), "the -extra field is not a billing header")
+	require.NotEqual(t, svc.GenerateSessionHash(second), svc.GenerateSessionHash(changedLaterHeader), "a same-name field on a later line remains significant")
+	require.NotEqual(t, svc.GenerateSessionHash(second), svc.GenerateSessionHash(changedQuote), "a quoted billing header remains significant")
+}
+
+func TestGenerateSessionHash_StableAnchorStripsBillingLineFromArrayBlocks(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "192.0.2.1", UserAgent: "client", APIKeyID: 15}
+	first := mustParseSessionHashRequest(t, `{"system":[{"type":"text","text":"  x-anthropic-billing-header: one\rInstruction A"},{"type":"text","text":"Instruction B"}],"messages":[{"role":"user","content":"prompt"}]}`, ctx)
+	second := mustParseSessionHashRequest(t, `{"system":[{"type":"text","text":"  x-anthropic-billing-header: two\rInstruction A"},{"type":"text","text":"Instruction B"}],"messages":[{"role":"user","content":"prompt"}]}`, ctx)
+	changed := mustParseSessionHashRequest(t, `{"system":[{"type":"text","text":"  x-anthropic-billing-header: two\rInstruction changed"},{"type":"text","text":"Instruction B"}],"messages":[{"role":"user","content":"prompt"}]}`, ctx)
+
+	require.Equal(t, svc.GenerateSessionHash(first), svc.GenerateSessionHash(second))
+	require.NotEqual(t, svc.GenerateSessionHash(second), svc.GenerateSessionHash(changed))
+}
+
+func TestGenerateSessionHash_StableAnchorSupportsGeminiMessageShapes(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "192.0.2.1", UserAgent: "gemini-cli", APIKeyID: 16}
+	contentShape := mustParseSessionHashRequest(t, `{"messages":[{"role":"user","content":"first prompt"},{"role":"assistant","content":"answer"},{"role":"user","content":"later"}]}`, ctx)
+	partsShape := mustParseSessionHashRequest(t, `{"messages":[{"role":"","parts":[{"text":"first prompt"}]},{"role":"model","parts":[{"text":"answer"}]},{"role":"user","parts":[{"text":"later"}]}]}`, ctx)
+
+	require.Equal(t, svc.GenerateSessionHash(contentShape), svc.GenerateSessionHash(partsShape), "role-less Gemini parts and Messages content share the same first-user text")
+}
+
+func TestGenerateSessionHash_StableAnchorSeparatesGroupsAndNULBoundaries(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "192.0.2.1", UserAgent: "client", APIKeyID: 17}
+	body := anthropicSessionBody("system", []any{msg("user", "prompt")}, "")
+	groupA, groupB := int64(7), int64(8)
+	first := mustParseSessionHashRequest(t, body, ctx)
+	first.GroupID = &groupA
+	second := mustParseSessionHashRequest(t, body, ctx)
+	second.GroupID = &groupB
+	require.NotEqual(t, svc.GenerateSessionHash(first), svc.GenerateSessionHash(second), "GroupID is part of the fallback anchor")
+
+	nulInSystem := mustParseSessionHashRequest(t, `{"system":"a\u0000b","messages":[{"role":"user","content":"c"}]}`, ctx)
+	nulInUser := mustParseSessionHashRequest(t, `{"system":"a","messages":[{"role":"user","content":"b\u0000c"}]}`, ctx)
+	require.NotEqual(t, svc.GenerateSessionHash(nulInSystem), svc.GenerateSessionHash(nulInUser), "escaped NUL bytes cannot impersonate the system-user delimiter")
+}
+
+func TestGenerateSessionHash_StableAnchorIsUnprefixedAndDoesNotMutateBody(t *testing.T) {
+	svc := &GatewayService{}
+	body := `{"system":"system","messages":[{"role":"user","content":"prompt"}]}`
+	parsed := mustParseSessionHashRequest(t, body, &SessionContext{ClientIP: "192.0.2.1", UserAgent: "client", APIKeyID: 18})
+	original := append([]byte(nil), parsed.Body.Bytes()...)
+
+	hash := svc.GenerateSessionHash(parsed)
+	require.NotEmpty(t, hash)
+	require.False(t, strings.HasPrefix(hash, shareAnchorPrefix), "ordinary fallback hashes are not share anchors")
+	require.Equal(t, original, parsed.Body.Bytes(), "hash calculation must not rewrite request bytes")
 }
 
 func TestGenerateSessionHash_PlaceholderSessionIDIsIgnored(t *testing.T) {

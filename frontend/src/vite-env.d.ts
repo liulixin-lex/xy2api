@@ -2,8 +2,6 @@
 
 interface ImportMetaEnv {
   readonly VITE_API_BASE_URL: string
-  /** Development only: `mock` previews the cache charts with synthetic data. */
-  readonly VITE_CACHE_PANEL_DATA_SOURCE?: string
   readonly BASE_URL: string
 }
 

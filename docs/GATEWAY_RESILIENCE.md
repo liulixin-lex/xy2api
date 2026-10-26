@@ -280,6 +280,7 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 
 ## 7. 已知限制
 
+- Anthropic 没有显式 metadata session 时，兜底粘性键由客户端 IP、规范化 User-Agent、API Key、Group、规范化 system 和首条有效 user 文本构成；system/user 文本会去掉完整的 `<system-reminder>...</system-reminder>` 区间并折叠空白，system 的每段文本只去掉开头的 `x-anthropic-billing-header:` 行。Claude Code prompt 中的日期句、cwd、git status 与 `## Session Context` 环境段不做通用删除，顶层日期按天变化时可能每天换键。会话升级后首次请求会使用新键并重新绑定；同一 Key、Group、IP、UA、system 和首条 user 完全相同的独立对话会共享账号绑定及韧性失败状态。
 - 统计计数保存在进程内存，多实例部署时按实例分别统计，重启后清零。
 - WebSocket 不挂连接级预算，建连首回合的换号仍按 `max_account_switches`；Gemini compat 服务未接入首事件守卫，由停滞检测兜底。
 - Chat Completions 与 Messages 经 OpenAI 兼容转换时（0.4.2），首输出档位约束等待响应头和第一行上游数据。0.4.4 起开场事件推迟到第一个内容（`stream.prelude_staging`），首事件守卫随之延长到第一个内容，此前的失败可以换号；第一个内容写出之后的静默由停滞检测结束并记账，不再换号；关闭该开关时回到 0.4.2 的行为（第一行之后写出开场，不再换号）；如果此后上游只发中转站伪保活帧、不出内容，按 §7.8 算存活，停滞检测不会结束它。停滞检测未覆盖或不记账的路径：原生 Chat Completions 透传（账号不支持 `/responses` 时）没有停滞检测；CN Anthropic 原生上的 Responses 与 Chat 转换停滞时只结束请求、不冷却账号；Anthropic API Key 透传、Bedrock、CN Anthropic 原生 Messages 记账但不分输出前后，统一按 `stream_data_interval_timeout`；Antigravity 与图片按各自的规则。

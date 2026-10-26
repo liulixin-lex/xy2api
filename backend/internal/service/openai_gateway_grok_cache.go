@@ -3,20 +3,14 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
-	"sync/atomic"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
-	"go.uber.org/zap"
 )
 
 const (
@@ -28,66 +22,6 @@ const (
 	grokFreeCacheDisabledToolChoice  = "none"
 	grokClientToolCacheOptInExtraKey = "grok_client_tool_cache_enabled"
 )
-
-const (
-	grokIdentityFixChatBodyKey     = 0
-	grokIdentityFixCompactIdentity = 1
-)
-
-// grok_identity_fix_applied_total{fix}: counted only when an L-17 policy adds
-// the scoped identity to a request that would otherwise carry none. The
-// summary log never includes the identity itself.
-var grokIdentityFixApplied [2]atomic.Int64
-
-var grokIdentityFixNames = [2]string{"chat_body_key", "compact_identity"}
-
-func recordGrokIdentityFixApplied(account *Account, fix int) {
-	resilience.Count("grok_identity_fix_applied_total", 0, account.ID, grokIdentityFixNames[fix])
-	total := grokIdentityFixApplied[fix].Add(1)
-	if total&(total-1) == 0 || total%1000 == 0 {
-		slog.Info("grok identity fix applied", "fix", grokIdentityFixNames[fix], "grok_identity_fix_applied_total", total)
-	}
-}
-
-// GrokIdentityFixAppliedTotal reports the process counter for one fix name.
-func GrokIdentityFixAppliedTotal(fix string) int64 {
-	for i, name := range grokIdentityFixNames {
-		if name == fix {
-			return grokIdentityFixApplied[i].Load()
-		}
-	}
-	return 0
-}
-
-// grokIdentityFixEnabled reads the request snapshot first, so a disabled
-// policy never reaches the process-local reject skip (FX-L01-2's 24h table,
-// in an L-17 instance that shares no entries with L-01).
-func (s *OpenAIGatewayService) grokIdentityFixEnabled(c *gin.Context, account *Account, fix int) bool {
-	p := CachePolicyFromGin(c)
-	enabled := p.GrokCompactIdentity(account.ID)
-	if fix == grokIdentityFixChatBodyKey {
-		enabled = p.GrokChatBodyKey(account.ID)
-	}
-	return enabled && !s.grokIdentityRuntime.isRejected(account.ID, time.Now())
-}
-
-// learnGrokIdentityRejection is called only for an attempt whose body
-// prompt_cache_key was written by L-17. It records state and never changes the
-// response: the 400 keeps its baseline presentation, retry and failover.
-func (s *OpenAIGatewayService) learnGrokIdentityRejection(account *Account, fix int, status int, body []byte) {
-	if status != http.StatusBadRequest {
-		return
-	}
-	param := gjson.GetBytes(body, "error.param").String()
-	message := gjson.GetBytes(body, "error.message").String()
-	if param != "prompt_cache_key" && !strings.Contains(strings.ToLower(message), "prompt_cache_key") {
-		return
-	}
-	resilience.Count("grok_identity_upstream_reject_total", 0, account.ID, grokIdentityFixNames[fix])
-	if s.grokIdentityRuntime.reject(account.ID, time.Now()) {
-		logger.L().Warn("L-17 upstream rejected Grok prompt_cache_key; Grok identity fixes disabled for this account for 24h", zap.Int64("account_id", account.ID), zap.String("fix", grokIdentityFixNames[fix]), zap.String("alert", "grok_identity_upstream_reject"))
-	}
-}
 
 // Claude Code metadata.user_id often ends with _session_<uuid>.
 var claudeCodeSessionSuffixPattern = regexp.MustCompile(`_session_([a-f0-9-]+)$`)
@@ -131,12 +65,6 @@ func extractClaudeCodeSessionIDFromPayload(body []byte) string {
 // internal probes and incomplete request contexts instead of creating a cache
 // identity that could be shared by unrelated tenants.
 func resolveGrokCacheIdentity(c *gin.Context, body []byte, explicitKey, upstreamModel string) string {
-	return resolveGrokCacheIdentityFor(c, body, explicitKey, upstreamModel, false)
-}
-
-// compactIdentity is true only when L-17 compact_identity applies to the
-// attempt account; compact then uses the same seed chain as any other turn.
-func resolveGrokCacheIdentityFor(c *gin.Context, body []byte, explicitKey, upstreamModel string, compactIdentity bool) string {
 	apiKeyID := getAPIKeyIDFromContext(c)
 	if apiKeyID <= 0 {
 		return ""
@@ -144,7 +72,7 @@ func resolveGrokCacheIdentityFor(c *gin.Context, body []byte, explicitKey, upstr
 	// /responses/compact rejects tool_choice and does not represent a normal
 	// conversation turn. Keep both cache identity and Free-tier routing
 	// augmentation out of this path.
-	if isOpenAIResponsesCompactPath(c) && !compactIdentity {
+	if isOpenAIResponsesCompactPath(c) {
 		return ""
 	}
 

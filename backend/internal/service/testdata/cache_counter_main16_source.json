@@ -1,7 +1,0 @@
-{
-  "source_commit": "16a776e347df37a4f7d6b0715014c35264b8ccc9",
-  "source_path": "backend/internal/service/cache_trace_counters.go",
-  "source_sha256": "6d4eebc040368d92ac60e24de171cdf06717652da84c133904ee5423ab199845",
-  "method_suffix_sha256": "e615ff065eb7b610e9c3a4a9aad3a9e9cf56a548cee073f5c2f86b8234812236",
-  "transformation": "Only PreviousHour and Snapshot renamed with main16Counter prefix; no statements changed."
-}

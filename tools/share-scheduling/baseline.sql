@@ -87,7 +87,7 @@ ORDER BY samples DESC;
 
 \echo '== 0.6 explicit client session coverage by platform and endpoint'
 -- usage_logs.session_id holds the client session header. The Anthropic key
--- source split (metadata_user_id / cacheable_content / message_content_fallback)
+-- source split (metadata_user_id / stable_anchor)
 -- is only in the "sticky.hash_source" log entries; count their "source" field.
 SELECT a.platform, COALESCE(u.inbound_endpoint, '') AS inbound_endpoint,
        count(*) AS requests,

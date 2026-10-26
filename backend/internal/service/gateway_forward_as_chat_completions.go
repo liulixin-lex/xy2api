@@ -33,12 +33,8 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	body []byte,
 	parsed *ParsedRequest,
 ) (result *ForwardResult, err error) {
-	if s.providerTraceEngine != nil {
-		defer func() { s.providerTraceEngine.finishProviderCacheTrace(c, result) }()
-	}
 	startTime := time.Now()
 	ctx, cacheDecision := s.beginClaudeCacheAttempt(ctx, parsed, account)
-	ctx = s.beginCacheMetadataAttempt(ctx, c, parsed, account)
 	defer func() { finishClaudeCacheAttempt(cacheDecision, result) }()
 
 	// 1. Parse Chat Completions request
@@ -144,14 +140,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, forwardedBody, mappedModel)
 
 	// 11. Send request
-	if s.providerTraceEngine != nil {
-		s.providerTraceEngine.captureProviderCacheTrace(c, upstreamReq, account, "messages")
-		s.providerTraceEngine.markProviderCacheTraceSent(c)
-	}
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
-	if s.providerTraceEngine != nil {
-		s.providerTraceEngine.submitCacheTraceJob(c)
-	}
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
@@ -274,9 +263,6 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		}
 
 		var event apicompat.AnthropicStreamEvent
-		if providerCacheTraceFromGin(c) != nil {
-			observeProviderCacheTrace(c, []byte(payload))
-		}
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue
 		}
@@ -436,9 +422,6 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	}
 
 	processAnthropicEvent := func(event *apicompat.AnthropicStreamEvent, payload string, hold bool) []string {
-		if providerCacheTraceFromGin(c) != nil {
-			observeProviderCacheTrace(c, []byte(payload))
-		}
 		// Forward received usage regardless of the client stream_options.
 		// The intermediate Responses converter synthesizes usage even when absent.
 		ccState.IncludeUsage = ccState.IncludeUsage || anthropicChatStreamHasUsage(event, payload)

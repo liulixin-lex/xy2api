@@ -293,6 +293,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		UserAgent: c.GetHeader("User-Agent"),
 		APIKeyID:  apiKey.ID,
 	}
+	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+
+	// [DEBUG-STICKY] 打印会话 hash 生成结果
+	reqLog.Info("sticky.session_hash_generated",
+		zap.String("session_hash", sessionHash),
+		zap.String("metadata_user_id_raw", parsedReq.MetadataUserID),
+	)
+
 	// 获取平台：优先使用强制平台（/antigravity 路由），其次使用 composite 解析出的目标平台，否则使用分组平台
 	platform := ""
 	if forcePlatform, ok := middleware2.GetForcePlatformFromContext(c); ok {
@@ -302,22 +310,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	} else if apiKey.Group != nil {
 		platform = apiKey.Group.Platform
 	}
-	h.gatewayService.BeginProviderCacheTrace(c, platform, "messages", body, parsedReq)
-	h.gatewayService.PrepareCacheAnchor(c, apiKey, parsedReq, platform, false)
-	sessionGroupID := apiKey.GroupID
-	defer h.gatewayService.ReleaseCacheAnchor(parsedReq)
-	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
-	if h.gatewayService.CacheAnchorApplied(parsedReq) {
-		sessionGroupID = parsedReq.GroupID
-	}
-	h.gatewayService.BindProviderCacheTraceSession(c, sessionHash, "")
-
-	// [DEBUG-STICKY] 打印会话 hash 生成结果
-	reqLog.Info("sticky.session_hash_generated",
-		zap.String("session_hash", sessionHash),
-		zap.String("metadata_user_id_raw", parsedReq.MetadataUserID),
-	)
-
 	sessionKey := sessionHash
 	if platform == service.PlatformGemini && sessionHash != "" {
 		sessionKey = "gemini:" + sessionHash
@@ -326,7 +318,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	// 查询粘性会话绑定的账号 ID
 	var sessionBoundAccountID int64
 	if sessionKey != "" {
-		sessionBoundAccountID, _ = h.gatewayService.GetCachedSessionAccountID(c.Request.Context(), sessionGroupID, sessionKey)
+		sessionBoundAccountID, _ = h.gatewayService.GetCachedSessionAccountID(c.Request.Context(), apiKey.GroupID, sessionKey)
 		// [DEBUG-STICKY] 打印粘性会话查询结果
 		reqLog.Info("sticky.cache_lookup",
 			zap.String("session_key", sessionKey),
@@ -334,8 +326,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		)
 		if sessionBoundAccountID > 0 {
 			prefetchedGroupID := int64(0)
-			if sessionGroupID != nil {
-				prefetchedGroupID = *sessionGroupID
+			if apiKey.GroupID != nil {
+				prefetchedGroupID = *apiKey.GroupID
 			}
 			ctx := service.WithPrefetchedStickySession(c.Request.Context(), sessionBoundAccountID, prefetchedGroupID, h.metadataBridgeEnabled())
 			c.Request = c.Request.WithContext(ctx)
@@ -359,7 +351,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		// xy2api resilience: the pre-output heartbeat ends with the request (design §7.2).
 		defer stopPreOutputKeepalive(c)
 		for {
-			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), sessionGroupID, sessionKey, reqModel, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
+			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
 			if err != nil {
 				if failoverClientGone(c) {
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
@@ -494,7 +486,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
 			if selection.ProfitGateActive() || !selection.Acquired {
-				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, sessionGroupID, sessionKey, account.ID); err != nil {
+				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -521,7 +513,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqStream,
 					body,
 					hasBoundSession,
-					service.WithForwardGeminiSession(derefGroupID(sessionGroupID), sessionKey),
+					service.WithForwardGeminiSession(derefGroupID(apiKey.GroupID), sessionKey),
 				)
 			} else {
 				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
@@ -697,7 +689,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				zap.Bool("has_bound_session", hasBoundSession),
 				zap.Int("failed_account_count", len(fs.FailedAccountIDs)),
 			)
-			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), sessionGroupID, sessionKey, reqModel, fs.FailedAccountIDs, parsedReq.MetadataUserID, subject.UserID)
+			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), currentAPIKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, parsedReq.MetadataUserID, subject.UserID)
 			if err != nil {
 				if failoverClientGone(c) {
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
@@ -848,7 +840,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
 			if selection.ProfitGateActive() || !selection.Acquired {
-				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, sessionGroupID, sessionKey, account.ID); err != nil {
+				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -1061,7 +1053,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						ctx := context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, "")
 						c.Request = c.Request.WithContext(ctx)
 						currentAPIKey = fallbackAPIKey
-						sessionGroupID = currentAPIKey.GroupID
 						currentSubscription = nil
 						fallbackUsed = true
 						retryWithFallback = true
@@ -1070,23 +1061,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							h.gatewayService.ReleaseAccountSession(context.Background(), acc, sessionKey)
 						}
 						sessionSlotAccounts = make(map[int64]*service.Account)
-						if h.gatewayService.CacheAnchorEnabled(c) {
-							// Only an anchor applied in A or still pending in B can change the
-							// baseline hash; any other state would recompute the same value.
-							applied := h.gatewayService.CacheAnchorApplied(parsedReq)
-							h.gatewayService.ReleaseCacheAnchor(parsedReq)
-							h.gatewayService.PrepareCacheAnchor(c, fallbackAPIKey, parsedReq, fallbackGroup.Platform, false)
-							if applied || h.gatewayService.CacheAnchorPending(parsedReq) {
-								sessionHash = h.gatewayService.GenerateSessionHash(parsedReq)
-								if h.gatewayService.CacheAnchorApplied(parsedReq) {
-									sessionGroupID = parsedReq.GroupID
-								}
-								sessionKey = sessionHash
-							}
-							h.gatewayService.BindProviderCacheTraceSession(c, sessionHash, "")
-						} else {
-							currentAPIKey = fallbackAPIKey
-						}
 						break
 					}
 					_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
@@ -1164,7 +1138,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// - 粘性账号因负载/RPM 被跳过、选中了其他账号：不覆盖原绑定，
 			//   下次请求粘性账号恢复后仍可命中
 			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), sessionGroupID, sessionKey, account.ID); err != nil {
+				if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -2302,10 +2276,23 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		UserAgent: c.GetHeader("User-Agent"),
 		APIKeyID:  apiKey.ID,
 	}
+	parsedReq.GroupID = apiKey.GroupID
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	sessionKey := sessionHash
+	platform := ""
+	if forcePlatform, ok := middleware2.GetForcePlatformFromContext(c); ok {
+		platform = forcePlatform
+	} else if resolvedPlatform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context()); ok {
+		platform = resolvedPlatform
+	} else if apiKey.Group != nil {
+		platform = apiKey.Group.Platform
+	}
+	if platform == service.PlatformGemini && sessionHash != "" {
+		sessionKey = "gemini:" + sessionHash
+	}
 
 	// 选择支持该模型的账号
-	account, err := h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model)
+	account, err := h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionKey, parsedReq.Model)
 	if err != nil {
 		reqLog.Warn("gateway.count_tokens_select_account_failed", zap.Error(err))
 		cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, service.PlatformAnthropic)
@@ -2322,7 +2309,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		reqLog.Error("gateway.count_tokens_forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		// 错误响应已在 ForwardCountTokens 中处理
 		// 上游未服务该会话，立即释放选号时注册的会话槽（客户端可能已断开，用独立 ctx）
-		h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionHash)
+		h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
 		return
 	}
 }

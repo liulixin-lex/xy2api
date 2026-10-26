@@ -1,6 +1,8 @@
 package service
 
 import (
+	"io"
+	"log/slog"
 	"strconv"
 	"strings"
 	"testing"
@@ -84,6 +86,95 @@ func BenchmarkGenerateSessionHash_LargeAnthropicMessages(b *testing.B) {
 			}
 		})
 	}
+}
+
+func BenchmarkGenerateSessionHash_AnchorFixtures(b *testing.B) {
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError})))
+	b.Cleanup(func() { slog.SetDefault(previousLogger) })
+
+	const longTextSize = 128 * 1024
+	fixtures := []struct {
+		name     string
+		platform string
+		body     []byte
+	}{
+		{
+			name:     "long_history_without_breakpoint",
+			platform: domain.PlatformAnthropic,
+			body:     buildSessionHashBenchmarkAnthropicBody(16, 20, 0),
+		},
+		{
+			name:     "single_turn",
+			platform: domain.PlatformAnthropic,
+			body:     []byte(`{"messages":[{"role":"user","content":"Explain the tradeoff."}]}`),
+		},
+		{
+			name:     "large_system",
+			platform: domain.PlatformAnthropic,
+			body:     buildSessionHashBenchmarkAnthropicBody(0, 0, longTextSize),
+		},
+		{
+			name:     "large_first_user",
+			platform: domain.PlatformAnthropic,
+			body:     buildSessionHashBenchmarkAnthropicBody(longTextSize, 0, 0),
+		},
+		{
+			name:     "gemini",
+			platform: domain.PlatformGemini,
+			body:     []byte(`{"systemInstruction":{"parts":[{"text":"You are a coding assistant."}]},"contents":[{"role":"user","parts":[{"text":"Explain the tradeoff."}]}]}`),
+		},
+		{
+			name:     "responses",
+			platform: domain.PlatformOpenAI,
+			body:     []byte(`{"instructions":"You are a coding assistant.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Explain the tradeoff."}]}]}`),
+		},
+	}
+	svc := &GatewayService{}
+	groupID := int64(7)
+	for _, fixture := range fixtures {
+		b.Run(fixture.name, func(b *testing.B) {
+			parsed, err := ParseGatewayRequest(NewRequestBodyRef(fixture.body), fixture.platform)
+			if err != nil {
+				b.Fatalf("parse benchmark request: %v", err)
+			}
+			parsed.GroupID = &groupID
+			parsed.SessionContext = &SessionContext{ClientIP: "192.0.2.10", UserAgent: "benchmark-client/1.0", APIKeyID: 42}
+
+			b.SetBytes(int64(len(fixture.body)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchmarkStringSink = svc.GenerateSessionHash(parsed)
+			}
+		})
+	}
+}
+
+func buildSessionHashBenchmarkAnthropicBody(firstUserBytes, historyTurns, systemBytes int) []byte {
+	var body strings.Builder
+	_, _ = body.WriteString(`{"system":"`)
+	_, _ = body.WriteString(strings.Repeat("system instruction ", systemBytes/len("system instruction ")))
+	_, _ = body.WriteString(`","messages":[`)
+	separator := ""
+	writeMessage := func(role, text string) {
+		_, _ = body.WriteString(separator)
+		_, _ = body.WriteString(`{"role":"`)
+		_, _ = body.WriteString(role)
+		_, _ = body.WriteString(`","content":"`)
+		_, _ = body.WriteString(text)
+		_, _ = body.WriteString(`"}`)
+		separator = ","
+	}
+	if firstUserBytes > 0 || historyTurns == 0 {
+		writeMessage("user", strings.Repeat("u", firstUserBytes))
+	}
+	for i := 0; i < historyTurns; i++ {
+		writeMessage("assistant", strings.Repeat("a", 3072))
+		writeMessage("user", strings.Repeat("u", 3072))
+	}
+	_, _ = body.WriteString(`]}`)
+	return []byte(body.String())
 }
 
 func BenchmarkOpenAIResponses_LargeInputMeta(b *testing.B) {
@@ -201,14 +292,18 @@ func BenchmarkOpenAIResponses_LargeInputFunctionCallValidation(b *testing.B) {
 	}
 }
 
-// BenchmarkExtractCacheableContent_System 关注字符串拼接路径的性能。
-func BenchmarkExtractCacheableContent_System(b *testing.B) {
+func BenchmarkStableSessionAnchor_System(b *testing.B) {
 	svc := &GatewayService{}
-	req := buildSystemCacheableRequest(12)
+	body := buildSessionHashBenchmarkAnthropicBody(0, 0, 12*len("system instruction "))
+	req, err := ParseGatewayRequest(NewRequestBodyRef(body), domain.PlatformAnthropic)
+	if err != nil {
+		b.Fatalf("parse benchmark request: %v", err)
+	}
 
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		benchmarkStringSink = svc.extractCacheableContent(req)
+		benchmarkStringSink = svc.stableSessionAnchorHash(req)
 	}
 }
 
@@ -225,25 +320,6 @@ func benchmarkBodySizes() []struct {
 		{name: "16MB", bytes: 16 << 20},
 		{name: "32MB", bytes: 32 << 20},
 	}
-}
-
-func buildSystemCacheableRequest(parts int) *ParsedRequest {
-	var builder strings.Builder
-	_, _ = builder.WriteString(`{"system":[`)
-	for i := 0; i < parts; i++ {
-		if i > 0 {
-			_ = builder.WriteByte(',')
-		}
-		_, _ = builder.WriteString(`{"text":"system_part_`)
-		_, _ = builder.WriteString(strconv.Itoa(i))
-		_, _ = builder.WriteString(`","cache_control":{"type":"ephemeral"}}`)
-	}
-	_, _ = builder.WriteString(`]}`)
-	parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(builder.String())), "")
-	if err != nil {
-		panic(err)
-	}
-	return parsed
 }
 
 func buildLargeAnthropicMessagesBody(targetBytes int, includeCacheControl bool) []byte {

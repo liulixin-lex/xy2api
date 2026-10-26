@@ -122,28 +122,10 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`
 	return err
 }
 
-const cachePolicyAuditRevisionSQL = "(CASE WHEN l.status_code < 400 AND (l.extra->>'rev_after') ~ '^[0-9]+$' THEN (l.extra->>'rev_after')::numeric ELSE NULL END)"
-
 func buildAuditLogsWhere(filter *service.AuditLogFilter) (string, []any) {
 	clauses := make([]string, 0, 10)
 	args := make([]any, 0, 10)
 	clauses = append(clauses, "1=1")
-	if filter.CachePolicyOnly {
-		clauses = append(clauses, "l.method = 'PUT' AND l.action IN ('admin.cache.policies.master.update','admin.cache.policies.observability.update','admin.cache.policies.northstar.update','admin.cache.policies.upstream_identity.update','admin.cache.policies.anthropic_identity.update','admin.cache.policies.routing.update')")
-	}
-	if filter.CachePolicyBefore != nil {
-		args = append(args, filter.CachePolicyBefore.UTC())
-		clauses = append(clauses, "l.created_at < $"+itoa(len(args)))
-	}
-	if filter.CachePolicyAfterRev != nil || filter.CachePolicyRevisionOnly {
-		revision := cachePolicyAuditRevisionSQL
-		if filter.CachePolicyAfterRev != nil {
-			args = append(args, *filter.CachePolicyAfterRev)
-			clauses = append(clauses, revision+" > $"+itoa(len(args)))
-		} else {
-			clauses = append(clauses, revision+" IS NOT NULL")
-		}
-	}
 
 	if filter.StartTime != nil {
 		args = append(args, filter.StartTime.UTC())
@@ -272,18 +254,6 @@ func (r *auditLogRepository) List(ctx context.Context, filter *service.AuditLogF
 	}
 
 	where, args := buildAuditLogsWhere(filter)
-	if filter.CachePolicyCoverage {
-		// One database snapshot covers distinct revisions and both bounds.
-		// Pagination, the latest settings rev and failed writes are irrelevant.
-		coverage := &service.CachePolicyRevisionCoverage{}
-		query := "SELECT COUNT(DISTINCT " + cachePolicyAuditRevisionSQL +
-			"), COALESCE(MIN(" + cachePolicyAuditRevisionSQL + "), 0), COALESCE(MAX(" +
-			cachePolicyAuditRevisionSQL + "), 0) FROM audit_logs l " + where
-		if err := r.db.QueryRowContext(ctx, query, args...).Scan(&coverage.Count, &coverage.MinRev, &coverage.MaxRev); err != nil {
-			return nil, err
-		}
-		return &service.AuditLogList{PolicyRevisions: coverage}, nil
-	}
 	countSQL := "SELECT COUNT(*) FROM audit_logs l " + where
 	var total int
 	if err := r.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
@@ -309,9 +279,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 			return nil, err
 		}
 		// 列表页不返回 body，降低载荷；详情接口返回完整记录。
-		if !filter.IncludeRequestBody {
-			item.RequestBody = ""
-		}
+		item.RequestBody = ""
 		logs = append(logs, item)
 	}
 	if err := rows.Err(); err != nil {

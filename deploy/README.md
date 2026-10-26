@@ -676,13 +676,3 @@ gateway:
 **Cipher Suites (TLS 1.2):** `49195`, `49196`, `49199`, `49200` (ECDHE variants)
 
 **Curves:** `29` (X25519), `23` (P-256), `24` (P-384), `25` (P-521)
-
-### 缓存观测运行时控制
-
-新增缓存策略在管理员“缓存观测 → 开关与参数”中保存，默认关闭，其他实例最多
-约 60 秒刷新。先确认既有 `gateway.openai_cache.diagnostics_enabled`；
-它仍是静态配置，不由新总开关接管。应急 `GATEWAY_CACHE_FEATURES_KILL_SWITCH=true`
-会停用新增缓存功能，但允许预先保存回滚参数。解除总闸需要重启；不需要重建容器。
-硬上限使用 `gateway.cache_trace.workers/max_byte_budget_mib/max_rate_mib_per_s`
-以及 sessions/chains/checkpoints 配置，见 config.example.yaml 和
-[缓存说明](../docs/openai-cache-reliability.md)。不要通过数据库绕过管理员校验与审计。
