@@ -6,64 +6,13 @@
 
 ## 当前交接状态
 
-### XY2API 0.4.7 已发布；cache-slim 本地回退（2026-10-26）
+### XY2API 缓存精简已合入 main（2026-10-26）
 
 - [v0.4.7](https://github.com/liulixin-lex/xy2api/releases/tag/v0.4.7) 已于 2026-10-25T16:49:36Z 发布（2026-10-26 经 GitHub Release API 只读核实）；#131 的分组弹窗改动保留。
-- 缓存 PR #132–#140 已在 chore/cache-slim 回退，保留 279 并新增 280；两条升级路径和不可恢复的数据删除见 [迁移与回退](openai-cache-reliability.md#迁移与回退)。
-- W1 回退 2cf359a99、迁移 280 6ca14b4f6 已验收并通过 R1 审查；W1b 文档与退役登记验收通过，工具单测 41 项通过。发布准备时的原始交接已归档，不将其未完成措辞继续作为当前状态。
-- 只新增两项确定性会话键处理，说明见 [会话键](openai-cache-reliability.md#会话键)：B1 OpenAI 会话标识统一为 UUID（a289014eb，后台开关 `enable_openai_session_uuid` 默认开启）；B2 Anthropic/Gemini 兜底键改为跨轮稳定锚点（90e0015b5，无开关）。两项各自独立审查通过，PR 待开；不发版，不操作生产。
-
-### 缓存 PR C 组装（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### T2.3 / L-03（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### T2.2 / L-04（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### M3.1 转换出口隐私补修（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 缓存 M3.1 与 T4.0 联合集成（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 缓存 M3.1 / L-01 启用前安全（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### OpenAI 缓存 P0a（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 缓存 M2b / provider 挂点（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 缓存策略历史 UTC（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 缓存 P0b / M2 后端（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 缓存 M1 已合入 main（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 缓存 M2 与 M1.1（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 运行时缓存策略 T0a.5（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
+- [PR #142](https://github.com/liulixin-lex/xy2api/pull/142) 于 2026-10-26T05:35:31Z 常规合入 main `1a9d9ac99`，18 项检查通过。回退缓存 PR #132–#140，保留已发布迁移 279 并新增 280 删除其五张表；升级路径与不可恢复的数据删除见 [迁移与回退](openai-cache-reliability.md#迁移与回退)。
+- 只保留两项确定性会话键处理，见 [会话键](openai-cache-reliability.md#会话键)：OpenAI 会话标识统一为 UUID（后台开关 `enable_openai_session_uuid`，默认开启）；Anthropic/Gemini 兜底键改为跨轮稳定锚点（无开关）。
+- 0.4.7 期间的 31 项缓存任务（M1–M4、P0a/P0b、L-01/L-03/L-04/L-07/L-09a/L-17、PR C/D 组装、管理后台缓存面板等）已终止，登记原文在 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)；GitHub 上 8 个已合并的 feat/cache-* 分支已删除，测试服务器与工作机上的缓存期开发产物先存档后清理。
+- 未发版、未操作生产。下一次发版升级时会执行 280；之后不能再运行 0.4.7，可以回退到 0.4.6。
 
 ### XY2API 0.4.6 正式发布完成（2026-10-23；生产未部署）
 
@@ -221,87 +170,9 @@
 
 ## 进行中的工作
 
-### 20261026-cache-slim — 缓存精简（B1/B2 已集成，待整体复审与 PR）
-
-- chore/cache-slim 已完成回退 2cf359a99 与迁移 280 6ca14b4f6，W1 验收及 R1 审查通过。
-- B1 a289014eb、B2 90e0015b5 由各自分支 cherry-pick；分支上的记忆改动未带入，custom_patches 两边各 43 项一致，audit 与 scheduler-diff 通过。下一步：整体复审、全量门禁、推送并开 PR 合入 main。
-- W1b 已补五条退役规则、迁移与回退说明，原样归档 33 条记录并更正 0.4.7 发布状态；文档检查、工具单测 41 项、diff 检查及退役/归档核验通过，交主会话集成。
-
 ### 20261025-pr131-release047 — 0.4.7 已发布（2026-10-26 更正）
 
-- v0.4.7 已于 2026-10-25T16:49:36Z 发布；发布准备登记已原样归档。缓存部分已被 cache-slim 精简方案取代（2026-10-26），当前进度见本节 cache-slim 条目。
-
-### 20261025-cache-t31a-l09a — T3.1a L-09a OpenAI 上一主机偏好（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261025-cache-prc-assembly — PR C 组装（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261025-cache-m4-l03 — T2.3 上游元数据身份（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261025-cache-m4-l04 — T2.2 本地锚点（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261025-cache-m4-l07 — T2.5 L-07 Anthropic 忙时保持粘性（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261025-cache-p3-l17 — T3.4 L-17 Grok 身份缺口（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261025-cache-m31-conversion-privacy — L-01 客户端转换出口补修（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261024-cache-m31-m4a-integration — M3.1 与 T4.0 联合候选（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261024-cache-m31-l01（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261024-cache-m3-e9 — L-01 租户种子门禁（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261024-cache-m4-t40 — M4 两个管理员策略键（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261024-cache-m3-integration — hardening、L-01 与管理员策略卡片（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261024-cache-m1-hardening — M1 后端加固（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261023-cache-p1-l01 — M3 上游 UUID 会话键补全（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261024-cache-p0b-fields — M2b（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261023-cache-p0b — 在线缓存北极星与管理员图表（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261024-cache-m2-integration-prep — M2 与 M1.1（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
-
-### 20261023-cache-fe-panel — 管理后台缓存开关与参数（已终止）
-
-- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
+- v0.4.7 已于 2026-10-25T16:49:36Z 发布；发布准备登记已原样归档。缓存部分已被 cache-slim 精简方案取代，PR #142 已于 2026-10-26 合入 main，见“当前交接状态”。
 
 ### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（PR #120 已合入 main，进入下一个版本；待真实上游验证；2026-10-22 DOCS 更新状态）
 
@@ -1374,3 +1245,11 @@ pnpm --dir frontend run build
 - 验证：文档一致性检查、upstream-sync audit 与 scheduler-diff 通过；B1 集成后 build、vet、定向 race 与 admin/server/migrations unit 通过。全量门禁由整体复审执行。
 - 卡点/风险：B1 开启后上游粘性与缓存分区会重建一次；B2 使不带 metadata 的已有 Anthropic/Gemini 会话一次性重新绑定。
 - 下一步：整体复审、推送、开 PR、等待必需检查后合入；不发版。
+
+### 2026-10-26 — 20261026-cache-slim — 合入与收尾
+
+- 请求/目标：缓存精简合入 main，并清理缓存期分支与开发产物。
+- 完成操作：PR #142（head `f29712930`）常规合入 main `1a9d9ac99`；GitHub 8 个已合并 feat/cache-* 分支删除；测试服务器与工作机上的缓存期 worktree、分支、构建产物和 staging 资源，按清单先存档（patch、未跟踪文件 tar、bundle、MANIFEST）后删除；未合入分支的提交由汇总 bundle 覆盖并逐项核对。
+- 验证：本地全量门禁通过；PR 那一轮 CI 的 `TestCompatHeartbeatCommitsOnlyStableStreamHeaders` 在 race 下偶发失败一次（测试文件与基线相同，push 那一轮同一提交通过，本地 30 次复跑均通过），只重跑失败的 job 后 18 项通过。
+- 记忆：主文件中 31 条已终止缓存任务的摘要合并为一条；cache-slim 进行中条目原样移入归档。
+- 卡点/风险：无。未发版、未操作生产。
