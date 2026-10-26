@@ -596,6 +596,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 
+	if filledKey := s.fillOpenAIResponsesPromptCacheKey(ctx, c, account, body, upstreamModel, wsDecision.Transport); filledKey != "" {
+		markPatchSet("prompt_cache_key", filledKey)
+	}
+
 	if !SupportsVerbosity(upstreamModel) && gjson.GetBytes(body, "text.verbosity").Exists() {
 		markPatchDelete("text.verbosity")
 	}

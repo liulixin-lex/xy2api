@@ -701,6 +701,9 @@ const (
 	// 在检测到非官方 base URL 时注入的 3 bit 隐写指纹。仅适用于 Anthropic OAuth/SetupToken
 	// 账号；API Key 账号不受影响。
 	SettingKeyEnableClientDatelineNormalization = "enable_client_dateline_normalization"
+
+	// SettingKeyEnableOpenAISessionUUID unifies gateway-generated OpenAI API key session identities.
+	SettingKeyEnableOpenAISessionUUID = "enable_openai_session_uuid"
 	// SettingKeyRewriteMessageCacheControl 是否改写 messages[*].content[*].cache_control（默认 false）
 	SettingKeyRewriteMessageCacheControl = "rewrite_message_cache_control"
 	// SettingKeyAntigravityUserAgentVersion Antigravity 上游 User-Agent 版本号（空值使用环境变量/默认值）

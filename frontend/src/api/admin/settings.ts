@@ -645,6 +645,7 @@ export interface SystemSettings {
   claude_cache_fallback_policy?: ClaudeCacheFallbackPolicy;
   rewrite_message_cache_control: boolean;
   enable_client_dateline_normalization: boolean;
+  enable_openai_session_uuid: boolean;
   antigravity_user_agent_version: string;
   openai_codex_user_agent: string;
   openai_codex_client_version: string;
@@ -983,6 +984,7 @@ export interface UpdateSettingsRequest {
   claude_cache_fallback_policy?: ClaudeCacheFallbackPolicy;
   rewrite_message_cache_control?: boolean;
   enable_client_dateline_normalization?: boolean;
+  enable_openai_session_uuid?: boolean;
   antigravity_user_agent_version?: string;
   openai_codex_user_agent?: string;
   openai_codex_client_version?: string;

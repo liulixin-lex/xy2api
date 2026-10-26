@@ -47,7 +47,26 @@ Compose / 环境变量对应 `GATEWAY_OPENAI_CACHE_DIAGNOSTICS_ENABLED`、`GATEW
 
 本地和 CI 使用合成上游、并发测试及独立 Redis 验证，不证明生产命中率已经提升。短提示、不稳定的前置内容、请求间隔、错误切换和代理内部凭据池仍可能导致低命中；发布后需结合诊断确认，不能一律归因于网关调度。
 
-<!-- 会话键说明在 B1/B2 集成完成后补充于此。 -->
+## 会话键
+
+上游缓存和中转站的粘性路由，都要靠一个跨轮次保持不变的会话标识。0.4.7 之后的精简版只保留以下两项确定性处理，不做观测、实验或策略框架。
+
+### OpenAI：统一会话标识
+
+后台设置 `enable_openai_session_uuid`，默认开启，只作用于 OpenAI API Key 账号。
+
+- **兼容路径**：Chat Completions 和 Anthropic Messages 转 Responses 时，如果会话键由网关自动生成（自动派生、metadata 或 digest），body 里的 `prompt_cache_key` 使用与 `session_id` 头相同的 UUID。头的取值与之前一致；本地续链、digest 和恢复状态仍使用原键。
+- **原生 HTTP `/v1/responses`**：请求既没有 `prompt_cache_key` 字段，也没有显式会话头时，网关用现有的租户隔离路由身份派生一个 UUID，填入 `prompt_cache_key`，不写会话头。
+  - 前提是配置了 JWT secret。
+  - 以下情况不补：compact、WebSocket、透传、OAuth、Grok，以及模型门之外的模型。
+- **客户端显式值保持原行为**：body 中带有 `prompt_cache_key`（包括空值），或者带有显式会话头时，请求与关闭该设置时完全相同。
+- **例外**：
+  - 质量路由轮换生效时，body 使用轮换值，与 `session_id` 头可以不同。
+  - OpenCode 的 `X-OpenCode-Session` 按原有来源顺序派生，Messages 的 metadata 可以优先于新键。原生补键后，opencode.ai 的 `/zen/v1` 可能新增这个头，`/zen/go` 改为使用稳定来源。
+- **自定义兼容站**：同样适用。原有兼容路径本来就会向同一批账号发送这个字段，所以风险不变。如果某个上游不接受这个字段，关闭该设置即可恢复原行为。
+- **切换影响**：开启或关闭后，上游的粘性分区和缓存分区会重建一次。
+
+<!-- Anthropic 与 Gemini 稳定兜底会话键的说明随对应提交补充于此。 -->
 
 ## 迁移与回退
 

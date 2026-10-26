@@ -277,6 +277,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// upstreams using the Responses API can derive a stable session identifier
 	// from prompt_cache_key. This makes our Anthropic /v1/messages compatibility
 	// path behave more like a native Responses client.
+	compatSessionUUID := openAICompatSessionUUID(c, account, promptCacheKey, false)
 	if account.Type == AccountTypeAPIKey {
 		if trimmedKey := strings.TrimSpace(promptCacheKey); trimmedKey != "" {
 			var reqBody map[string]any
@@ -285,6 +286,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			}
 			if existing, ok := reqBody["prompt_cache_key"].(string); !ok || strings.TrimSpace(existing) == "" {
 				reqBody["prompt_cache_key"] = trimmedKey
+				if account.IsOpenAIApiKey() && compatPromptCacheInjected &&
+					!openAIClientHasSessionIdentity(c, body) && s.openAISessionUUIDEnabled(ctx) {
+					reqBody["prompt_cache_key"] = compatSessionUUID
+				}
 				updated, err := json.Marshal(reqBody)
 				if err != nil {
 					return nil, fmt.Errorf("remarshal after prompt cache key injection: %w", err)
@@ -375,7 +380,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// Override session_id with a deterministic UUID derived from the isolated
 	// session key, ensuring different API keys produce different upstream sessions.
 	if account.Platform != PlatformGrok && promptCacheKey != "" {
-		isolatedSessionID := generateSessionUUID(isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), promptCacheKey))
+		isolatedSessionID := compatSessionUUID
 		upstreamReq.Header.Set("session_id", isolatedSessionID)
 		if upstreamReq.Header.Get("conversation_id") != "" {
 			upstreamReq.Header.Set("conversation_id", isolatedSessionID)

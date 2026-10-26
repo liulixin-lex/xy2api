@@ -1979,6 +1979,34 @@
     {
       "path": "backend/internal/handler/wire.go",
       "value": "GroupCategory:          groupCategoryHandler,"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "compatSessionUUID := openAICompatSessionUUID(c, account, promptCacheKey, compatPromptCacheTenantIsolated)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "compatSessionUUID := openAICompatSessionUUID(c, account, promptCacheKey, false)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "s.fillOpenAIResponsesPromptCacheKey(ctx, c, account, body, upstreamModel, wsDecision.Transport)"
+    },
+    {
+      "path": "backend/internal/service/openai_session_uuid.go",
+      "value": "xy2api:openai-filled-pck:v1:"
+    },
+    {
+      "path": "backend/internal/service/domain_constants.go",
+      "value": "\"enable_openai_session_uuid\""
+    },
+    {
+      "path": "backend/internal/service/setting_gateway_runtime.go",
+      "value": "func (s *SettingService) IsOpenAISessionUUIDEnabled"
+    },
+    {
+      "path": "frontend/src/views/admin/SettingsView.vue",
+      "value": "v-model=\"form.enable_openai_session_uuid\""
     }
   ],
   "forbidden_module_paths": [
@@ -2033,7 +2061,8 @@
     "xy-resilience-v2-handler-exits",
     "xy-resilience-v2-streams",
     "xy-account-stream-only-learning",
-    "xy-resilience-v2-classification"
+    "xy-resilience-v2-classification",
+    "xy-openai-session-uuid"
   ],
   "custom_patch_tests": [
     {
@@ -2875,6 +2904,61 @@
       "id": "xy-group-categories",
       "path": "frontend/src/views/admin/__tests__/GroupsView.categories.spec.ts",
       "literal": "saves categories after the group is created"
+    },
+    {
+      "id": "xy-openai-session-uuid",
+      "path": "backend/internal/service/openai_cache_reliability_test.go",
+      "literal": "TestOpenAICacheSessionUUIDDisabledWireBaseline"
+    },
+    {
+      "id": "xy-openai-session-uuid",
+      "path": "backend/internal/service/openai_cache_reliability_test.go",
+      "literal": "TestOpenAICacheSessionUUIDCompatAutomatic"
+    },
+    {
+      "id": "xy-openai-session-uuid",
+      "path": "backend/internal/service/openai_cache_reliability_test.go",
+      "literal": "TestOpenAICacheSessionUUIDResponsesWire"
+    },
+    {
+      "id": "xy-openai-session-uuid",
+      "path": "backend/internal/service/openai_cache_reliability_test.go",
+      "literal": "TestOpenAICacheSessionUUIDResponsesExclusions"
+    },
+    {
+      "id": "xy-openai-session-uuid",
+      "path": "backend/internal/service/openai_cache_reliability_test.go",
+      "literal": "TestOpenAICacheSessionUUIDSettings"
+    },
+    {
+      "id": "xy-openai-session-uuid",
+      "path": "backend/internal/service/openai_cache_reliability_test.go",
+      "literal": "TestOpenAICacheSessionUUIDQualityContinuation"
+    },
+    {
+      "id": "xy-openai-session-uuid",
+      "path": "backend/internal/handler/admin/setting_handler_session_uuid_test.go",
+      "literal": "TestOpenAISessionUUIDSettings"
+    },
+    {
+      "id": "xy-openai-session-uuid",
+      "path": "frontend/src/views/admin/__tests__/SettingsView.spec.ts",
+      "literal": "loads the OpenAI session UUID setting %s and saves changes"
+    },
+    {
+      "id": "xy-openai-session-uuid",
+      "path": "backend/internal/service/openai_cache_reliability_test.go",
+      "literal": "TestOpenAICacheSessionUUIDExcludedWireUnchanged"
+    },
+    {
+      "id": "xy-openai-session-uuid",
+      "path": "backend/internal/service/openai_cache_reliability_test.go",
+      "literal": "TestOpenAICacheSessionUUIDResponsesDecodedAndLaterTurn"
+    },
+    {
+      "id": "xy-openai-session-uuid",
+      "path": "backend/internal/service/openai_cache_reliability_test.go",
+      "literal": "TestOpenAICacheSessionUUIDResponsesScopeAndModelMapping"
     }
   ]
 }

@@ -518,8 +518,11 @@ func TestForwardAsAnthropic_AutoDerivesPromptCacheKeyWhenMessagesDispatchHasNoSe
 	require.NotNil(t, result)
 	cacheKey := gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String()
 	require.NotEmpty(t, cacheKey)
-	require.True(t, strings.HasPrefix(cacheKey, "anthropic-digest-"))
-	require.Equal(t, generateSessionUUID(isolateOpenAISessionID(0, cacheKey)), upstream.lastReq.Header.Get("session_id"))
+	var originalReq apicompat.AnthropicRequest
+	require.NoError(t, json.Unmarshal(body, &originalReq))
+	originalKey := promptCacheKeyFromAnthropicDigest(buildOpenAICompatAnthropicDigestChain(&originalReq))
+	require.Equal(t, generateSessionUUID(isolateOpenAISessionID(0, originalKey)), cacheKey)
+	require.Equal(t, cacheKey, upstream.lastReq.Header.Get("session_id"))
 }
 
 func TestForwardAsAnthropic_GPT6AstraPromptCacheIdentityStableAcrossAppendedTurns(t *testing.T) {
@@ -1027,9 +1030,13 @@ func TestForwardAsAnthropic_APIKeyMetadataSessionSurvivesChangingCacheControlAnc
 	require.NotNil(t, firstResult)
 	firstKey := gjson.GetBytes(upstream.bodies[0], "prompt_cache_key").String()
 	require.NotEmpty(t, firstKey)
-	require.True(t, strings.HasPrefix(firstKey, "anthropic-metadata-"))
+	var originalReq apicompat.AnthropicRequest
+	require.NoError(t, json.Unmarshal(firstBody, &originalReq))
+	originalKey := promptCacheKeyFromAnthropicMetadataSession(&originalReq)
+	require.True(t, strings.HasPrefix(originalKey, "anthropic-metadata-"))
+	require.Equal(t, generateSessionUUID(isolateOpenAISessionID(0, originalKey)), firstKey)
 
-	svc.disableOpenAICompatSessionContinuation(context.Background(), nil, account, firstKey)
+	svc.disableOpenAICompatSessionContinuation(context.Background(), nil, account, originalKey)
 
 	secondRec := httptest.NewRecorder()
 	secondCtx, _ := gin.CreateTestContext(secondRec)

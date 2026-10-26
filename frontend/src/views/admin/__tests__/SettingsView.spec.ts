@@ -149,6 +149,7 @@ vi.mock("@/utils/apiError", () => ({
 vi.mock("vue-i18n", async () => {
   const actual = await vi.importActual<typeof import("vue-i18n")>("vue-i18n");
   const translations: Record<string, string> = {
+    "admin.settings.gatewayForwarding.openAISessionUUID": "统一 OpenAI 会话标识",
     "admin.settings.wechatConnect.title": "微信登录",
     "admin.settings.wechatConnect.description": "用于微信开放平台或公众号/小程序的第三方登录配置。",
     "admin.settings.wechatConnect.enabledLabel": "启用微信登录",
@@ -476,6 +477,7 @@ const baseSettingsResponse = {
   enable_anthropic_cache_ttl_1h_injection: false,
   rewrite_message_cache_control: false,
   enable_client_dateline_normalization: true,
+  enable_openai_session_uuid: true,
   antigravity_user_agent_version: "",
   openai_codex_user_agent: "",
   payment_enabled: true,
@@ -1563,6 +1565,29 @@ describe("admin SettingsView payment visible method controls", () => {
       interval_minutes: 60,
     });
     expect(showSuccess).toHaveBeenCalledWith("上游倍率自动探测设置已保存");
+  });
+
+  it.each([undefined, true, false])("loads the OpenAI session UUID setting %s and saves changes", async (enabled) => {
+    const settings = { ...baseSettingsResponse };
+    if (enabled === undefined) {
+      delete (settings as Partial<typeof settings>).enable_openai_session_uuid;
+    } else {
+      settings.enable_openai_session_uuid = enabled;
+    }
+    getSettings.mockResolvedValueOnce(settings);
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    const toggle = wrapper.get('[data-testid="openai-session-uuid-toggle"]');
+    const initial = enabled ?? true;
+    expect((toggle.element as HTMLInputElement).checked).toBe(initial);
+    expect(wrapper.text()).toContain("统一 OpenAI 会话标识");
+    await toggle.setValue(!initial);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    const payload = updateSettings.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(payload.enable_openai_session_uuid).toBe(!initial);
   });
 
   it("loads and saves configurable Grok cross-client model mapping", async () => {

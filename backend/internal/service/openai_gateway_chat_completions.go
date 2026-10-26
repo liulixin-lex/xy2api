@@ -308,6 +308,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	// record the final slug immediately before policy/auth/upstream dispatch.
 	SetOpsUpstreamModel(c, upstreamModel)
 
+	compatSessionUUID := openAICompatSessionUUID(c, account, promptCacheKey, compatPromptCacheTenantIsolated)
 	if account.Type == AccountTypeAPIKey {
 		if trimmedKey := strings.TrimSpace(promptCacheKey); trimmedKey != "" {
 			var reqBody map[string]any
@@ -316,6 +317,10 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			}
 			if existing, ok := reqBody["prompt_cache_key"].(string); !ok || strings.TrimSpace(existing) == "" {
 				reqBody["prompt_cache_key"] = trimmedKey
+				if account.IsOpenAIApiKey() && (compatPromptCacheInjected || compatPromptCacheTenantIsolated) &&
+					!openAIClientHasSessionIdentity(c, body) && s.openAISessionUUIDEnabled(ctx) {
+					reqBody["prompt_cache_key"] = compatSessionUUID
+				}
 				responsesBody, err = json.Marshal(reqBody)
 				if err != nil {
 					return nil, fmt.Errorf("remarshal after prompt cache key injection: %w", err)
@@ -366,12 +371,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 
 	if promptCacheKey != "" {
-		apiKeyID := getAPIKeyIDFromContext(c)
-		sessionKey := promptCacheKey
-		if !compatPromptCacheTenantIsolated {
-			sessionKey = isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), promptCacheKey)
-		}
-		upstreamReq.Header.Set("session_id", generateSessionUUID(sessionKey))
+		upstreamReq.Header.Set("session_id", compatSessionUUID)
 	}
 
 	// 7. Send request

@@ -476,6 +476,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.RewriteMessageCacheControl != after.RewriteMessageCacheControl {
 		changed = append(changed, "rewrite_message_cache_control")
 	}
+	if before.EnableOpenAISessionUUID != after.EnableOpenAISessionUUID {
+		changed = append(changed, "enable_openai_session_uuid")
+	}
 	if before.EnableClientDatelineNormalization != after.EnableClientDatelineNormalization {
 		changed = append(changed, "enable_client_dateline_normalization")
 	}

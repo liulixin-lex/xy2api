@@ -247,6 +247,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyEnableAnthropicCacheTTL1hInjection:                 "false",
 		SettingKeyRewriteMessageCacheControl:                         strconv.FormatBool(s.defaultRewriteMessageCacheControl()),
 		SettingKeyEnableClientDatelineNormalization:                  "true",
+		SettingKeyEnableOpenAISessionUUID:                            "true",
 		SettingKeyAntigravityUserAgentVersion:                        "",
 		SettingKeyOpenAICodexUserAgent:                               "",
 		SettingKeyOpenAICodexClientVersion:                           "",
@@ -897,6 +898,10 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.EnableClientDatelineNormalization = v == "true"
 	} else {
 		result.EnableClientDatelineNormalization = true
+	}
+	result.EnableOpenAISessionUUID = true
+	if v, ok := settings[SettingKeyEnableOpenAISessionUUID]; ok && v != "" {
+		result.EnableOpenAISessionUUID = v == "true"
 	}
 	result.AntigravityUserAgentVersion = antigravity.NormalizeUserAgentVersion(settings[SettingKeyAntigravityUserAgentVersion])
 	result.OpenAICodexUserAgent = strings.TrimSpace(settings[SettingKeyOpenAICodexUserAgent])

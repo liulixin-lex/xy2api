@@ -64,6 +64,7 @@ type cachedGatewayForwardingSettings struct {
 	anthropicCacheTTL1hInjection     bool
 	rewriteMessageCacheControl       bool
 	clientDatelineNormalization      bool
+	openAISessionUUID                bool
 	expiresAt                        int64 // unix nano
 }
 
@@ -1003,6 +1004,7 @@ type gatewayForwardingSettingsResult struct {
 	openAITTFTMode                                                                        string
 	fp, mp, cch, claudeOAuthSystemPromptInjection, cacheTTL1h, rewriteMessageCacheControl bool
 	clientDatelineNormalization                                                           bool
+	openAISessionUUID                                                                     bool
 	claudeOAuthSystemPrompt, claudeOAuthSystemPromptBlocks                                string
 }
 
@@ -1020,6 +1022,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				cacheTTL1h:                       cached.anthropicCacheTTL1hInjection,
 				rewriteMessageCacheControl:       cached.rewriteMessageCacheControl,
 				clientDatelineNormalization:      cached.clientDatelineNormalization,
+				openAISessionUUID:                cached.openAISessionUUID,
 			}
 		}
 	}
@@ -1037,6 +1040,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 					cacheTTL1h:                       cached.anthropicCacheTTL1hInjection,
 					rewriteMessageCacheControl:       cached.rewriteMessageCacheControl,
 					clientDatelineNormalization:      cached.clientDatelineNormalization,
+					openAISessionUUID:                cached.openAISessionUUID,
 				}, nil
 			}
 		}
@@ -1053,6 +1057,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			SettingKeyEnableAnthropicCacheTTL1hInjection,
 			SettingKeyRewriteMessageCacheControl,
 			SettingKeyEnableClientDatelineNormalization,
+			SettingKeyEnableOpenAISessionUUID,
 		})
 		if err != nil {
 			slog.Warn("failed to get gateway forwarding settings", "error", err)
@@ -1065,9 +1070,10 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				anthropicCacheTTL1hInjection:     false,
 				rewriteMessageCacheControl:       s.defaultRewriteMessageCacheControl(),
 				clientDatelineNormalization:      true,
+				openAISessionUUID:                true,
 				expiresAt:                        time.Now().Add(gatewayForwardingErrorTTL).UnixNano(),
 			})
-			return gatewayForwardingSettingsResult{openAITTFTMode: OpenAITTFTModeSemantic, fp: true, claudeOAuthSystemPromptInjection: true, rewriteMessageCacheControl: s.defaultRewriteMessageCacheControl(), clientDatelineNormalization: true}, nil
+			return gatewayForwardingSettingsResult{openAITTFTMode: OpenAITTFTModeSemantic, fp: true, claudeOAuthSystemPromptInjection: true, rewriteMessageCacheControl: s.defaultRewriteMessageCacheControl(), clientDatelineNormalization: true, openAISessionUUID: true}, nil
 		}
 		ttftMode := normalizeOpenAITTFTMode(values[SettingKeyOpenAITTFTMode])
 		fp := true
@@ -1091,6 +1097,10 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		if v, ok := values[SettingKeyEnableClientDatelineNormalization]; ok && v != "" {
 			clientDatelineNormalization = v == "true"
 		}
+		openAISessionUUID := true
+		if v, ok := values[SettingKeyEnableOpenAISessionUUID]; ok && v != "" {
+			openAISessionUUID = v == "true"
+		}
 		gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
 			openAITTFTMode:                   ttftMode,
 			fingerprintUnification:           fp,
@@ -1102,6 +1112,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			anthropicCacheTTL1hInjection:     cacheTTL1h,
 			rewriteMessageCacheControl:       rewriteMessageCacheControl,
 			clientDatelineNormalization:      clientDatelineNormalization,
+			openAISessionUUID:                openAISessionUUID,
 			expiresAt:                        time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
 		})
 		return gatewayForwardingSettingsResult{
@@ -1115,12 +1126,13 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			cacheTTL1h:                       cacheTTL1h,
 			rewriteMessageCacheControl:       rewriteMessageCacheControl,
 			clientDatelineNormalization:      clientDatelineNormalization,
+			openAISessionUUID:                openAISessionUUID,
 		}, nil
 	})
 	if r, ok := val.(gatewayForwardingSettingsResult); ok {
 		return r
 	}
-	return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true, clientDatelineNormalization: true}
+	return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true, clientDatelineNormalization: true, openAISessionUUID: true}
 }
 
 // GetOpenAITTFTMode 返回 Responses first_token_ms 的统计口径。
@@ -1150,6 +1162,14 @@ func (s *SettingService) IsRewriteMessageCacheControlEnabled(ctx context.Context
 // 的客户端 dateline 归一化。默认开启。
 func (s *SettingService) IsClientDatelineNormalizationEnabled(ctx context.Context) bool {
 	return s.getGatewayForwardingSettingsCached(ctx).clientDatelineNormalization
+}
+
+// IsOpenAISessionUUIDEnabled returns the gateway-generated OpenAI session identity switch.
+func (s *SettingService) IsOpenAISessionUUIDEnabled(ctx context.Context) bool {
+	if s == nil || s.settingRepo == nil {
+		return true
+	}
+	return s.getGatewayForwardingSettingsCached(ctx).openAISessionUUID
 }
 
 // GetClaudeOAuthSystemPromptInjectionSettings returns the Claude OAuth mimic

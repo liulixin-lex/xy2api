@@ -194,7 +194,8 @@
     "xy-account-stream-only-learning",
     "xy-resilience-v2-classification",
     "xy-group-slot-concurrency",
-    "xy-group-categories"
+    "xy-group-categories",
+    "xy-openai-session-uuid"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/92"
 }

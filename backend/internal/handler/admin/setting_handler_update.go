@@ -253,6 +253,7 @@ type UpdateSettingsRequest struct {
 	EnableAnthropicCacheTTL1hInjection     *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
 	RewriteMessageCacheControl             *bool   `json:"rewrite_message_cache_control"`
 	EnableClientDatelineNormalization      *bool   `json:"enable_client_dateline_normalization"`
+	EnableOpenAISessionUUID                *bool   `json:"enable_openai_session_uuid"`
 	AntigravityUserAgentVersion            *string `json:"antigravity_user_agent_version"`
 	OpenAICodexUserAgent                   *string `json:"openai_codex_user_agent"`
 	OpenAICodexClientVersion               *string `json:"openai_codex_client_version"`
@@ -1783,6 +1784,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.RewriteMessageCacheControl
 		}(),
+		EnableOpenAISessionUUID: func() bool {
+			if req.EnableOpenAISessionUUID != nil {
+				return *req.EnableOpenAISessionUUID
+			}
+			return previousSettings.EnableOpenAISessionUUID
+		}(),
 		EnableClientDatelineNormalization: func() bool {
 			if req.EnableClientDatelineNormalization != nil {
 				return *req.EnableClientDatelineNormalization
@@ -2415,6 +2422,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableAnthropicCacheTTL1hInjection:                     updatedSettings.EnableAnthropicCacheTTL1hInjection,
 		RewriteMessageCacheControl:                             updatedSettings.RewriteMessageCacheControl,
 		EnableClientDatelineNormalization:                      updatedSettings.EnableClientDatelineNormalization,
+		EnableOpenAISessionUUID:                                updatedSettings.EnableOpenAISessionUUID,
 		AntigravityUserAgentVersion:                            updatedSettings.AntigravityUserAgentVersion,
 		OpenAICodexUserAgent:                                   updatedSettings.OpenAICodexUserAgent,
 		OpenAICodexClientVersion:                               updatedSettings.OpenAICodexClientVersion,

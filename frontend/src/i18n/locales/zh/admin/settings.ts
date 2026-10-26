@@ -593,6 +593,8 @@ export default {
         anthropicCacheTTL1hInjectionHint: '开启后，对 Anthropic OAuth/Setup Token 请求体中已有的 ephemeral 缓存块强制写入 1h；响应 usage 默认按 5m 回写计费，账号级 TTL 计费设置优先。',
         rewriteMessageCacheControl: '改写消息缓存断点',
         rewriteMessageCacheControlHint: '默认关闭，保留客户端在 messages 内容块中的 cache_control。开启后会清除客户端断点并注入代理断点，适合不自行管理缓存策略的客户端。',
+        openAISessionUUID: '统一 OpenAI 会话标识',
+        openAISessionUUIDHint: '为 OpenAI API Key 账号统一网关生成的 UUID 会话标识，并为未携带会话标识的 Responses 请求补充一个，便于上游保持会话缓存。客户端显式值保持原有行为。关闭后恢复原有行为。',
         clientDatelineNormalization: '客户端 dateline 归一化',
         clientDatelineNormalizationHint: '默认开启。将 Anthropic OAuth/Setup Token 请求体中 "Today\'s date is …" 语句里的撇号与日期分隔符还原为 ASCII 撇号 + 短横线 (2026-07-01) 的规范形态，抹除某些客户端在检测到非官方 base URL 时注入的隐写指纹位。仅作用于 system prompt 与 <system-reminder> 块内，API Key 账号不受影响。',
         antigravityUserAgentVersion: 'Antigravity UA 版本',
