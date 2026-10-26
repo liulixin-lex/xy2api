@@ -6,13 +6,13 @@
 
 ## 当前交接状态
 
-### XY2API 缓存精简已合入 main（2026-10-26）
+### XY2API 0.4.8 已发布：缓存精简（2026-10-26）
 
 - [v0.4.7](https://github.com/liulixin-lex/xy2api/releases/tag/v0.4.7) 已于 2026-10-25T16:49:36Z 发布（2026-10-26 经 GitHub Release API 只读核实）；#131 的分组弹窗改动保留。
 - [PR #142](https://github.com/liulixin-lex/xy2api/pull/142) 于 2026-10-26T05:35:31Z 常规合入 main `1a9d9ac99`，18 项检查通过。回退缓存 PR #132–#140，保留已发布迁移 279 并新增 280 删除其五张表；升级路径与不可恢复的数据删除见 [迁移与回退](openai-cache-reliability.md#迁移与回退)。
 - 只保留两项确定性会话键处理，见 [会话键](openai-cache-reliability.md#会话键)：OpenAI 会话标识统一为 UUID（后台开关 `enable_openai_session_uuid`，默认开启）；Anthropic/Gemini 兜底键改为跨轮稳定锚点（无开关）。
 - 0.4.7 期间的 31 项缓存任务（M1–M4、P0a/P0b、L-01/L-03/L-04/L-07/L-09a/L-17、PR C/D 组装、管理后台缓存面板等）已终止，登记原文在 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)；GitHub 上 8 个已合并的 feat/cache-* 分支已删除，测试服务器与工作机上的缓存期开发产物先存档后清理。
-- 0.4.8 版本准备进行中（2026-10-26，用户授权发版）：程序 VERSION 与 provenance 产品版本升为 0.4.8，Sub2API 兼容基线保持 0.2.15；版本 PR 的保护检查通过后合入，再以 annotated v0.4.8 触发正式 Release 并核验附件与镜像。升级时执行 280；之后不能再运行 0.4.7，可以回退到 0.4.6。不操作生产部署。
+- [v0.4.8](https://github.com/liulixin-lex/xy2api/releases/tag/v0.4.8) 已于 2026-10-26T07:08:31Z 正式发布：版本 PR [#144](https://github.com/liulixin-lex/xy2api/pull/144) 合并提交 `4e7c9096c`，annotated tag 对象 `6841ae45f`；Release run 40282569807 成功。五平台附件与 checksums 一致，二进制报告 0.4.8 / 兼容 0.2.15 / commit 4e7c9096c、vcs.modified=false；GHCR `0.4.8`、`0.4`、`latest` 为同一 amd64+arm64 index，标签 version/revision 一致。升级时执行 280；之后不能再运行 0.4.7，可以回退到 0.4.6。生产仍为 0.4.6，未部署。
 
 ### XY2API 0.4.6 正式发布完成（2026-10-23；生产未部署）
 
@@ -169,11 +169,6 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
-
-### 20261026-release048 — XY2API 0.4.8 版本准备
-
-- 分支 release/0.4.8-20261026 基于 main `b9bf524c3`（#142 缓存精简、#143 记忆收尾）；只改 VERSION、UPSTREAM_BASE 产品版本与本记忆。
-- 下一步：保护检查通过后合入 main，在合并提交上打 annotated v0.4.8，核验 Release 附件、GHCR 镜像与版本号。不部署生产。
 
 ### 20261025-pr131-release047 — 0.4.7 已发布（2026-10-26 更正）
 
@@ -1264,3 +1259,9 @@ pnpm --dir frontend run build
 - 请求/目标：用户授权发布包含 #142、#143 的 0.4.8。
 - 修改：程序 VERSION 与 provenance 产品版本 0.4.7→0.4.8，兼容基线 0.2.15 不变；登记本任务。
 - 验证与下一步：本地文档、audit、scheduler-diff、工具单测后提交版本 PR；全部保护检查通过后合入并打 annotated tag，触发 Release，核验产物。不操作生产。
+
+### 2026-10-26 — 20261026-release048 — 0.4.8 发布完成
+
+- 完成操作：#144 常规合入 main `4e7c9096c`（18 项检查通过）；在该提交上创建 annotated v0.4.8 并推送，Release run 40282569807 的 verify-version、build-frontend、release 均成功，2026-10-26T07:08:31Z 正式发布（非 draft、非 prerelease）。
+- 验证：checksums 核验 darwin_arm64 与 linux_amd64 附件；解包二进制报告 XY2API 0.4.8、兼容 0.2.15、commit 4e7c9096c，构建信息 vcs.modified=false；GHCR 0.4.8/0.4/latest 指向同一 amd64+arm64 index，镜像标签 version=0.4.8、revision=4e7c9096c。
+- 记忆：版本准备登记原样归档。未部署生产。
