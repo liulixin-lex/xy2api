@@ -273,6 +273,53 @@
         "tools/gateway-resilience/staging/fixtures.py",
         "tools/gateway-resilience/staging/fallback_billing.py"
       ]
+    },
+    {
+      "pattern": "(?<![A-Za-z0-9_])cache_(?:northstar_(?:hourly|hours|rollup_state)|observability_events|trace_hourly)(?![a-z0-9_])",
+      "reason": "0.4.7 后的精简回退了 #132–#140 的缓存功能",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "backend/migrations/279_cache_northstar.sql",
+        "backend/migrations/280_drop_cache_northstar.sql",
+        "backend/migrations/cache_northstar_removal_test.go",
+        "docs/openai-cache-reliability.md"
+      ]
+    },
+    {
+      "pattern": "(?<![A-Za-z])cache_(?:feature_master|features|polic(?:y(?:_snapshot_age_seconds|_stale_total)?|ies)|trace(?:_contract)?|northstar(?:_policy|_source|_work)?|observability_policy|upstream_identity_policy|anthropic_identity_policy|routing_policy)(?![a-z0-9_])|gateway\\.cache_routing\\.l07_[a-z0-9_]+|GATEWAY_CACHE_(?:FEATURES|POLICY|TRACE|ROUTING)(?:_[A-Z0-9]+)*(?![A-Z0-9_])",
+      "reason": "0.4.7 后的精简回退了 #132–#140 的缓存功能",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "backend/migrations/cache_northstar_removal_test.go",
+        "backend/migrations/checksums.json"
+      ]
+    },
+    {
+      "pattern": "(?:Cache(?:Northstar|Trace|Observability|Panel|Features|Routing|Anchor|Experiments|M4Build|UpstreamIdentityPolicy|L17)|cache(?:Northstar|Trace|Observability|Panel|Policies))[A-Za-z0-9_]*\\b|\\b(?:CacheBreakdown[A-Za-z0-9_]*|cacheBreakdown[A-Z][A-Za-z0-9_]*|buildCacheBreakdown)\\b|\\b(?:[Cc]achePolicy(?!JSON\\b)[A-Z][A-Za-z0-9_]*|(?:Capture|Decode|New|Provide|Update|With|clone|err|populate|register|set)CachePolicy[A-Za-z0-9_]*)\\b",
+      "reason": "0.4.7 后的精简回退了 #132–#140 的缓存功能",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "backend/migrations/cache_northstar_removal_test.go"
+      ]
+    },
+    {
+      "pattern": "(?<![A-Za-z0-9_])(?:l(?:01|03|04|07|09a)_[a-z0-9_]+|grok_identity_[a-z0-9_]+|keep_sticky_on_busy|metadata_(?:account_ids|group_ids|rollout_percent)|anchor_group_ids|ingress_chain_percent|max_inflight_per_(?:anchor|key)|max_consecutive_busy|max_hold_seconds|group_keep_ratio_pct|owner_busy_skip_per_min_cap|affinity_rollout_percent|persist_trace_hourly|normalize_client_pck|forward_session_headers|chat_compat_uuid|header_only_uuid|chat_body_key|compact_identity|uuid_fill|anthropic_identity)(?![A-Za-z0-9_])",
+      "reason": "0.4.7 后的精简回退了 #132–#140 的缓存功能",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
+    },
+    {
+      "pattern": "(?:/api/v1)?/admin/cache(?![A-Za-z0-9_-])|/cache/(?:policies|northstar|breakdown|stats|experiments)(?![A-Za-z0-9_-])|\\b(?:cacheObservability|cacheSettings|cacheCharts)(?![A-Za-z0-9_])|\\badmin\\.cache\\.policies(?![A-Za-z0-9_])|\\bCACHE_(?:PANEL|POLICY|ROLLUP)_[A-Z_]+(?![A-Z_])",
+      "reason": "0.4.7 后的精简回退了 #132–#140 的缓存功能",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
     }
   ],
   "private": [

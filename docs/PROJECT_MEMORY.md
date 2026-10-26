@@ -2,93 +2,67 @@
 
 > 跨 Agent、跨会话的持续交接文件。开始仓库任务前必须完整阅读本文件；执行过程中在关键节点更新；结束前写明结果、验证、卡点和下一步。项目事实变化时同步更新本文件，不能只追加日志而保留过期的顶部状态。
 >
-> 本文件只放进行中与近期的内容。已结束任务的交接状态、登记，以及 2026-10-19 及以前的操作日志在 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)（按归档规范原样移入，最近一次为 2026-10-24）。文档目录见 [`README.md`](README.md)。
+> 本文件只放进行中与近期的内容。已结束任务的交接状态、登记，以及 2026-10-19 及以前的操作日志在 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)（按归档规范原样移入，最近一次为 2026-10-26）。文档目录见 [`README.md`](README.md)。
 
 ## 当前交接状态
 
-### XY2API 0.4.7 版本准备（2026-10-26）
+### XY2API 0.4.7 已发布；cache-slim 本地回退（2026-10-26）
 
-- [PR #131](https://github.com/liulixin-lex/xy2api/pull/131) 已合入 main `27b4e22a32`，包含账号分组宽版弹窗、60vh 列表及相关测试；最新 18 项检查通过。原任务详细登记原样移入归档。
-- 0.4.7 同时包含 main 已合入的缓存 PR #132–#140，新增策略默认关闭；首次启动执行迁移 279，兼容基线仍为 0.2.15。现行启用与回退说明见 [缓存可靠性文档](openai-cache-reliability.md)。
-- 版本 PR 与制品验证进行中，尚未宣称发布完成；后续步骤见自己的进行中登记。本轮不操作生产部署。
+- [v0.4.7](https://github.com/liulixin-lex/xy2api/releases/tag/v0.4.7) 已于 2026-10-25T16:49:36Z 发布（2026-10-26 经 GitHub Release API 只读核实）；#131 的分组弹窗改动保留。
+- 缓存 PR #132–#140 已在 chore/cache-slim 回退，保留 279 并新增 280；两条升级路径和不可恢复的数据删除见 [迁移与回退](openai-cache-reliability.md#迁移与回退)。
+- W1 回退 2cf359a99、迁移 280 6ca14b4f6 已验收并通过 R1 审查；W1b 文档与退役登记验收通过，工具单测 41 项通过。B1/B2 进行中，PR 未开。发布准备时的原始交接已归档，不将其未完成措辞继续作为当前状态。
 
-### 缓存 PR C 组装（2026-10-25，O-MNT，draft 待 CI）
+### 缓存 PR C 组装（已终止）
 
-- 在 main a003162ff（#136）上依次 merge M2b（含 Messages 测试与 golden 补交）、T2.3（含 T2.2 全部内容）及 fe-m2b、fe-m2-fixes、fe-m4l03（含 fe-m4l04）、fe-m4l07 四个 UI 来源；只用 merge commit，来源 SHA 不变。T2.2/T2.3 的同名 behaviorStale 占位在合并中删除，接入 #136 的真实陈旧标记，A-T22-1 单独补测试与 runbook。
-- 只改测试或登记的接缝独立提交：policy 回放按构建与能力选样（combo_prc 取代 m2m2b 的 list 与 pol2 的 list，替代样例必须在回放）、Gemini anchor_v2 期望、M4 账号候选边界选样、T2.2 原版调度等价改写的 scheduler-diff 登记。独立评审静态通过。
-- 开发期定向：service、handler 全部通过；routes 仅余 T2.2 not_subset 产品缺陷 2 例，待 T2.2 负责人修复后再 merge；race 无数据竞争；前端 vitest 与 vue-tsc 通过；上游审计、调度 diff、文档与 diff-check 通过。#137 合入后再 merge main 并追加 A-L07-3。最终 head 的 provider/OpenAI golden 由独立评审执行。未合入、未部署。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-### T2.3 / L-03（2026-10-25，G，本地冻结待定向验证）
+### T2.3 / L-03（已终止）
 
-- 叠在冻结 T2.2 上接入 L-03 策略、账号候选/校验/history、Anthropic trace 与真实发送出口。任何非空客户端 user_id 都优先；a2 与 L-04 共用作用域和 lease，cacheable_content 先命中时允许生成但不改本地身份。
-- 实现与24个新顶层测试已准备，策略 v1.0.2、trace v1.0 原字节同步。首轮定向23/24顶层通过；唯一失败为契约 diff 排序笔误，按负责人更正同步冻结样例，产品字典序保持。受影响回放补验中；只跑触及包定向与契约，全量通用门禁交 CI，独立 golden 待评审方执行；T2.2 先于 T2.3 合入。不推送、不部署。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-### T2.2 / L-04（2026-10-25，G，实现草稿）
+### T2.2 / L-04（已终止）
 
-- 临时合并已冻结的 M3.1/T4 与 provider 编译检查点后，实现原生 Messages/Gemini 的 serving-scoped a2、能力与策略双门控、在途上限、策略字段与 trace 契约。依赖的 provider 行为验收仍待完成。
-- 仅实际生效的 a2 才让 routing/sticky 消费解析后的 serving 组；Prepare 始终返回原 APIKey，跳过与对照请求保留基线 sticky/prefetch/选号序列；认证、计费与既有组级转换保留原 APIKey。兼容 Chat/Responses 不映射文本，按 empty_anchor 走原兜底；count_tokens 不派生。元数据接口仍只留集成接缝，不实现 L-03/L-07。
-- HMAC、租户与作用域、C2/C3、换组、实际 handler 字节对照和完整契约回放已准备；定向 Go 待执行，尚未通过验收。后续单批检查与独立关闭态 golden，未推送、部署。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
+### M3.1 转换出口隐私补修（已终止）
 
-### M3.1 转换出口隐私补修（2026-10-25，G，本地冻结待独立验证）
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-- 在联合候选 efd7d3aaf 的独立评审 v2 精确树上补修：Chat 转换前统一还原，原生 Responses 规则错误清除已知 U；Messages 不扩大注入资格。实际 Forward 回显、关闭控制、结构门控及 reader EOF/读错测试已准备。
-- 本次仅轻检，不宣称运行通过。负责人指定唯一合并定向与 golden 由独立评审执行，staging 只补 active/T4.0；原联合候选的失败证据保留。不推送、不部署。
+### 缓存 M3.1 与 T4.0 联合集成（已终止）
 
-### 缓存 M3.1 与 T4.0 联合集成（2026-10-24，P，待最终候选门禁）
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-- M3 PR #134 已常规合入main c07ece514，tree与4a0c一致；本批在实际新main组装11个来源提交并独立补测试接缝，保留M31/T4及UI语义、全部冻结fixtures与迁移。T4来源已通过；M31来源收集器中断保留原rc1，按裁定由本联合流水线完整覆盖，不续跑来源。
-- 当前只有组装与轻量核对完成；五tag、完整unit、缓存race、lint、实际HTTP/trace及前端、最终R/S和CI均待执行，未宣称READY、未推送/部署。详见进行中P条目。
+### 缓存 M3.1 / L-01 启用前安全（已终止）
 
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-### 缓存 M3.1 / L-01 启用前安全（2026-10-24，本地冻结待验证）
+### OpenAI 缓存 P0a（已终止）
 
-- 从M3最终4a0c1107f独立开发，代码与27个新顶层测试准备完成，早期静态审查及E1/E2增量无阻塞；仅格式、文档、diff和契约文件轻检通过，全部Go执行仍待单批heavy。保留关闭态routing/sticky字节，启用路径以服务端provenance防伪；上游本来无效的usage/单行上限维持基线。M3-only回放27份，M4派生6份留集成；未推送、未部署。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-### OpenAI 缓存 P0a（2026-10-24，M1 已合入）
+### 缓存 M2b / provider 挂点（已终止）
 
-- T0a.1–T0a.4、运行时策略与管理员面板已随 PR #132 合入 main `72c2d0169`，功能默认关闭，未变更生产。G 的详细实现与验证记录已原样移入 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)。
-- P1 L-01 已在吸收 M1 后完成本地实现与非计时门禁，保持默认关闭，待独立评审；当前交接见下方 P1 条目。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
+### 缓存策略历史 UTC（已终止）
 
-### 缓存 M2b / provider 挂点（2026-10-25，编译已过）
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-- 已变基到 M3 main c07ece514。Anthropic/Gemini 生产发送、原始 usage、计费后结算与 Wire 接线已补；Begin/Bind/accessor 及平台、租户、serving 组作用域的摘要/history 键保持冻结。入站锚点按实际协议读取，涵盖 Messages/Responses 转换。
-- 检查点 `9243c2867` 已通过五 tag vet、docs/diff，并通知依赖方。audit 因旧内联未送达判断的字面量登记停止；仅同步登记到相同的调用与提前返回，源码不变，继承五 tag 结果后续跑 unit/race、实际契约/golden、stats S1–S5 与 Messages 桥。行为门禁及后续字段组尚未完成，不作为最终集成交付。
+### 缓存 P0b / M2 后端（已终止）
 
-- G：M1 日志 Attr 合并已验证；正式 d1 待复核，详见归档。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-### 缓存策略历史 UTC（M1.1，本地完成）
+### 缓存 M1 已合入 main（已终止）
 
-- 基于 main `72c2d0169`，history `at` 按 UTC 输出；八例时区回归及相关门禁通过。详见归档，未推送或部署；后续性能修复独立提交。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-### 缓存 P0b / M2 后端（2026-10-24，本地实现完成）
+### 缓存 M2 与 M1.1（已终止）
 
-- PR #133 测试隔离补丁已完成：两个 northstar 集成测试各用独立 PostgreSQL，保留真实仓储事务与原断言；定向 3/3、完整 repository 1779 通过及 4 项原跳过。CI 索引翻转本地未复现，未改上游测试、产品或迁移；负责人批准立即交付，精确共享统计证明排队后补。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-- 基于文档前置 0dfeb9980 及已合入 M1 的 main；默认关闭的在线北极星、三种金额视角和四个管理员图表接口已完成，等待独立评审、集成与 staging 验证。
-- 本地功能、race、真实 PostgreSQL 对账、五种构建方式 vet、完整韧性门禁及全量 lint 已通过。handler 全包仅有两项原有跳过；原编译接缝失败修复后全包复验通过，原始记录保留。
-- 迁移 279 已在共享数据库使用前定稿，含保留期索引、不含会话状态表；部署后不得改写。详细登记在下方 G2 条目，提交号以本分支日志为准。未推送、部署或访问生产。
+### 运行时缓存策略 T0a.5（已终止）
 
-### 缓存 M1 已合入 main（2026-10-24）
-
-- [PR #132](https://github.com/liulixin-lex/xy2api/pull/132) 于 2026-10-24T04:35:11Z 合入，merge commit `72c2d01698cd859223e943a0fa61b3454bca31ec`；tree 与批准候选 `6ba7c345c` 一致。
-- 八项必需检查全部通过、独立终审无阻塞、端到端五项通过，分支保留；功能默认关闭，未部署。正式 d1/d2 由 G 另行交付，仅影响是否开启生产观测。
-- P 的原交接与登记原样移入 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)；其中“待推送”等文字保留当时状态，以本摘要为当前事实。
-
-### 缓存 M2 与 M1.1（2026-10-24，PR #133 测试隔离修补）
-
-- 输入：文档公共base `0dfeb9980`，G2 P0b及R16/R17至 `94481bcf4`，UI至 `913e7a6c7`，M1.1 `411540d5d`/`d24ed1a2c`；本次追加G2测试隔离 `ce0192351`，不含M3。
-- 已完成：原候选 `729928626` 的本地功能、编译、lint、安全、迁移与零执行门禁、R终审及S端到端通过；PR已开。GitHub首轮7项通过，test两组在既有EXPLAIN索引断言失败，未重跑。
-- 本次：仅将northstar集成测试切到独立PostgreSQL并更新记忆。G2定向3/3、完整repository1779通过/4原跳过/0失败；本地原候选也通过，因此不宣称复现或证明根因。源码补丁已获R核对，集成候选增量复核及CI待完成。
-- 下一步：按负责人授权普通push追加，让CI与R并行；本地只补docs/audit/diff，复用G2仓储门禁。8项必需检查、strict和讨论要求满足且R增量通过后以merge commit合入。
-- 约束：公共base不动、分支保留、不force、不绕过保护；功能默认关闭、生产不变更。279及checksum字节保持冻结。
-
-### 运行时缓存策略 T0a.5（2026-10-23，本地完成）
-
-- 核心已在 T0a.3 d770e4dbb 上独立提交为 c493068db；接缝独立提交，提交号以本分支 git log 为准。默认关闭、管理员审计、每请求固定快照与远端约60秒刷新已验证。
-- T0a.3 接缝全量缓存 race 加 undelivered 夹具定向复验、关闭态产品证明及59处独立零执行探针、默认全量 lint 均通过。完整门禁与已知 prelude 偶发证据见归档登记；G2 输入已固定且不再 rebase；T4 与运行时开关的跨分支接缝由集成终审复核。未推送、部署或访问生产。
-
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
 ### XY2API 0.4.6 正式发布完成（2026-10-23；生产未部署）
 
@@ -182,9 +156,9 @@
   6. 测试服务器收尾：本任务的候选镜像（`xy2api-staging:*`）、`evidence/` 下的浸泡与演练目录、升级演练留下的 `xy2api_upgrade` 库，按 staging-validation §11 在生产验证后清理；预上线主机上的两份切换前备份（路径见私有清单）在正式部署后再删。
 - 本任务与 #105、#107、#108、#110、#112 的交接状态与登记已原样移入 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)。
 
-### 版本与环境速览（2026-10-23T19:45Z 核实；2026-10-23 更新正式版）
+### 版本与环境速览（2026-10-26 更新正式版）
 
-- 正式版：XY2API v0.4.6（2026-10-23，Sub2API 兼容基线 0.2.15）。生产主机 2026-10-20 09:15Z 起经在线更新运行 0.4.3 程序（2026-10-21T11:35Z 只读核实：公开设置的版本为 0.4.3，容器内程序 commit `888f49db8`），容器镜像仍是 0.3.0；部署需要用户单独授权。
+- 正式版：XY2API v0.4.7（2026-10-25，Sub2API 兼容基线 0.2.15）。生产主机 2026-10-20 09:15Z 起经在线更新运行 0.4.3 程序（2026-10-21T11:35Z 只读核实：公开设置的版本为 0.4.3，容器内程序 commit `888f49db8`），容器镜像仍是 0.3.0；部署需要用户单独授权。
 - 待定：XY-image 0.0.17（先交接，并经用户确认）；0.4.6 生产部署（单独授权）。预上线主机运行 0.4.2 的浸泡候选 `0ad63fab7`，换成正式镜像需要授权。见上两节。
 - 上游：Sub2API v0.2.17 已发布、尚未同步（2026-10-17 定时检测；2026-10-19 定时同步的 prepare 失败），需按 [`UPSTREAM_SYNC.md`](UPSTREAM_SYNC.md) 另开任务。
 - 工具链：Go 以 `backend/go.mod` 为准（当前 1.27.3）；golangci-lint v2.14.0（与 CI 同版）。
@@ -246,140 +220,86 @@
 
 ## 进行中的工作
 
-### 20261025-pr131-release047 — 合并 PR #131 并发布 0.4.7（版本准备，进行中）
+### 20261026-cache-slim — 缓存精简（W1b 完成，待 B1/B2 集成）
 
-- 用户明确授权本机 GitHub 凭据、合入 #131 和发布 0.4.7；独立工作树保留原 main 既有未提交记录。
-- #131 已常规合入 main `27b4e22a32`，最终候选 `acfe38230` 最新 18 项检查全部通过；只在记忆解决冲突、保留双方历史。分组弹窗改动、测试和文档已交付，旧任务登记原样归档。
-- 集成首轮两组 test 在 Grok L-17 分配计数门禁失败；原测试独立十轮通过，补丁将同样的测量隔离到测试子进程，保留全部场景与精确相等断言，不改产品逻辑。Grok/策略 L-17 定向三轮通过，其后完整保护检查通过；失败证据保存在仓库外。
-- 本地：弹窗与选择器 19 测试、前端 typecheck、工具 41 项、完整 service unit（532.992s）、docs、scheduler-diff 与干净树 audit 通过；全部 Go/前端与安全门禁以最终候选 CI 为准。
-- 版本准备：只同步程序 VERSION 与 UPSTREAM_BASE 的产品版本到 0.4.7，兼容基线保持 0.2.15。新版本包含 main 已合入的缓存 PR #132–#140，新增策略默认关闭；迁移 279 增加五张观测/汇总表。
-- 下一步：版本 PR 全部检查通过后常规合入，打 annotated v0.4.7，等待正式 Release 并验证六附件、五平台源码、GHCR 双架构与本机隔离安装；生产部署不在本轮范围。
+- chore/cache-slim 已完成回退 2cf359a99 与迁移 280 6ca14b4f6，W1 验收及 R1 审查通过；B1/B2 进行中，PR 未开。
+- W1b 已补五条退役规则、迁移与回退说明，原样归档 33 条记录并更正 0.4.7 发布状态；文档检查、工具单测 41 项、diff 检查及退役/归档核验通过，交主会话集成。
 
-### 20261025-cache-t31a-l09a — T3.1a L-09a OpenAI 上一主机偏好（O-L09A，候选待评审）
+### 20261025-pr131-release047 — 0.4.7 已发布（2026-10-26 更正）
 
-- 按开工包 v1.1（方案 A）：新请求首次普通选号中，sticky 层在既有删除处因 owner 硬失效删除绑定时，以被删除 owner 的主机为提示，在原 cache hook 之后的证据完整同档块内排列；没有跨请求存储，不改删除条件、CountsForSession 或局部 sticky 变量，选号器只调用一次。
-- 策略按 cache_policies_contract/l09a（affinity_rollout_percent、能力 l09a、static_aware_routing_disabled，prev_host+quality 保持 unsupported），trace 按 cache_trace_contract/l09a v1.0.1。首次选号许可只在快照生效时挂到 RequestState（一个 8B 指针，结构体仍在 576B size class）；生产的静态 cache-aware 关闭，L-09a 零执行。
-- 启用前：白名单与排除清单由 X 复核；B8（静态 aware routing 改为运行时可调）待用户决策；数据门控不变。不推送、不部署。
+- v0.4.7 已于 2026-10-25T16:49:36Z 发布；发布准备登记已原样归档。缓存部分已被 cache-slim 精简方案取代（2026-10-26），当前进度见本节 cache-slim 条目。
 
-### 20261025-cache-prc-assembly — PR C 组装（O-MNT，进行中）
+### 20261025-cache-t31a-l09a — T3.1a L-09a OpenAI 上一主机偏好（已终止）
 
-- 分支 cache/prc-assembly，基于 main a003162ff。已完成来源 merge、接缝提交与开发期定向；以 draft PR 先跑 CI，后续修复与 main merge 只追加提交。
-- 待办：T2.2 not_subset 与分配修复交付后再 merge 并复验受影响回放；#137 合入后 merge main 并 cherry-pick A-L07-3；最终 head golden。不推送正式 PR 以外的分支，不部署。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-### 20261025-cache-m4-l03 — T2.3 上游元数据身份（G，进行中）
+### 20261025-cache-prc-assembly — PR C 组装（已终止）
 
-- 叠在 T2.2 冻结提交上，独立工作树开发；不改正在验证的 T2.2 与 L-01 修复来源。
-- 按现行契约由作用域匹配的非空 a2 派生会话，账号决定完整64位设备 HMAC；允许 cacheable_content 先命中，metadata 与锚点共享 lease。任何非空客户端值与 metadata 透传优先；官方端点、非APIKey、CLI与账号名单运行时校验，关闭态零触达。
-- 策略 m4l03 v1.0.1、trace v1.0 已原字节同步；新增账号字段只核新增ID，disable PUT跳过账号查询，账号/组提示分域。普通与透传发送出口均接线，生成值从本地同步与调试输出排除。定向与独立 golden仍待执行；全量通用检查交CI。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-### 20261025-cache-m4-l04 — T2.2 本地锚点（G，进行中）
+### 20261025-cache-m4-l03 — T2.3 上游元数据身份（已终止）
 
-- 临时基线合并已冻结 M3.1/T4.0 与已通过五 tag 编译的 T0b.4 检查点；仅本任务增量在其上提交，依赖合入后再变基，不使用 stash。
-- 实现 serving 组隔离的 a2、原层级之后的本地 sticky、三条换组重派生、count_tokens 排除、Gemini、并发上限与契约；请求 accessor 同时检查构建能力与行为过期保护。L-03/L-07 不在范围内。
-- 当前仅草稿与轻检；开发定向与交付单批检查尚未执行，不声称验收通过。不推送、不部署。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-### 20261025-cache-m4-l07 — T2.5 L-07 Anthropic 忙时保持粘性（O-L07，候选待统一门禁）
+### 20261025-cache-m4-l04 — T2.2 本地锚点（已终止）
 
-- 基于联合候选 d866d29c4。sticky owner 槽位忙且等待队列满时，Layer2 照常服务本次 attempt，但借软罚拒写通道（INV-04）让选号层 7 处与 handler 层 7 处绑定都不改绑；下一次选号前释放（按 attempt）。H1–H3、A1–A6 都在 0.4.x 既有判定之后叠加，只会更早回到基线；状态读写失败一律放弃。
-- 策略侧按 cache_policies_contract/m4l07（5 个上限字段、静态上限与 clipped、guard_tripped、share_group_no_effect）；trace 只提供 L07TraceFieldsFromContext，写入 Anthropic 事件的一行待与 M2b 组合时接线。能力位 l07=true 为单独提交，策略默认关闭；生产启用要求 M2b 观测在线。
-- 关闭态（kill、总开关、能力为 false、策略关、分组外、对照组）选号、sticky 写入序列与 allocs/op 与基线相同，由测试锁定。不推送、不部署。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-### 20261025-cache-p3-l17 — T3.4 L-17 Grok 身份缺口（O-L17，进行中）
+### 20261025-cache-m4-l07 — T2.5 L-07 Anthropic 忙时保持粘性（已终止）
 
-- 自 main a003162ff 建 cache/p3-l17。按契约 l17 v1.1 写入 grok.chat_body_key、grok.compact_identity、grok.account_ids（能力 l17、空列表不生效、只核对新增 ID）；原始 Chat 写作用域身份、compact 带身份不加工具、实际写入后的 prompt_cache_key 400 按账号跳过 24h。T-c 不做。
-- 定向 Go 测试与契约回放在本机分流执行；全量门禁交 CI，R 静态评审后由 P 开 PR。未推送、未部署。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-### 20261025-cache-m31-conversion-privacy — L-01 客户端转换出口补修（G，进行中）
+### 20261025-cache-p3-l17 — T3.4 L-17 Grok 身份缺口（已终止）
 
-- 按负责人裁定，从联合候选 efd7d3aaf 应用独立评审 v2，精确基线 tree a56c02da；在其上修复 Chat buffered 回显注入标识的问题，并审计 Chat 流式、Messages 兼容及错误出口。
-- 还原仅在实际注入且策略启用的门控中执行，维持关闭态字节和分配；补回显测试、结构登记及同步文档。产品补修 00407e03a 已本地提交，格式、diff 与文档一致性通过。Go 未执行；独立评审执行唯一合并定向与 golden。不推送、不部署。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-### 20261024-cache-m31-m4a-integration — M3.1 与 T4.0 联合候选（P，冻结待统一门禁）
+### 20261025-cache-m31-conversion-privacy — L-01 客户端转换出口补修（已终止）
 
-- PR #134 已常规合入，main c07ece514，tree 与批准的4a0c相同。以该新main重放G T4.0两提交、G M31两提交、UI重基M4六提交和M31一提交；原说明/协作尾注保留，作者与提交者统一项目noreply。仅测试接缝独立提交，不改来源产品语义。
-- T4.0来源r3五tag与完整实际契约通过；M31来源五tag及106顶层PASS，随后日志收集器逐片JSON解析中断，原rc1保留，race/lint未执行。PM裁定不续跑来源，由最终候选一次执行五tag、完整unit、缓存race、lint、HTTP/trace、前端及工具门禁。采用已核对的换行拼接收集器，原分片/补suffix证明仅解析器向量，不冒充产品事件。
-- M31-only完整27份回放保留；M4六列表用权威M31派生完整HTTP相等，29反例原文件不改、同投影六正例自检必须相等，两份M3 list边界仍保留。新增options阻塞时M4回退与M31降cap均发布、双revision不回退且零分组查询的确定性回归。全部新增测试待本联合流水线实际执行。
-- 下一步：冻结最终SHA/tree与11条来源映射；R独立组装/身份/接缝核对和一次组合golden，S一次staging；所有门禁闭合才READY、普通push/PR，保护检查/strict/讨论满足后merge commit。279及checksum不变，默认关闭，无生产操作。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-### 20261024-cache-m31-l01（G，进行中）
+### 20261024-cache-m31-m4a-integration — M3.1 与 T4.0 联合候选（已终止）
 
-- 基线 M3 最终 4a0c1107f，独立 cache/m31-l01；FX-L01-1 fail-safe 还原、24h账号拒绝记忆、65536项在途上限、max_inflight_per_key默认2/范围1..16、history及软提示的代码与定向测试已写入。按PM只做轻检，不排heavy；Go编译、unit/race与样例实际回放均未执行。
-- 依PM防伪裁定与DESIGN §3.9，保持全部routing hash/legacy sticky字节；仅Enabled时记录/消费显式provenance，判定仍在原no_routing_session位置。补伪造关闭/开启、正常scoped、错误体四形态、还原oversize与基线usage/scanner边界测试。gofmt/diff/docs与39份契约原字节轻检通过；6份M4派生列表等T4.0集成。X-E9原队列不变，之后T4.0与M3.1各单批执行，未推送/部署。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
+### 20261024-cache-m31-l01（已终止）
 
-### 20261024-cache-m3-e9 — L-01 租户种子门禁（G，进行中）
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-- 基于冻结M3候选6188d5d04，仅在policy关闭早退后、cohort前要求RoutingSession带v2:；非隔离旧种子记no_routing_session，不变更0.4.x粘性与显式键处理。
-- 覆盖三处真实哈希入口、复合组OpenAI apikey真实Forward与policy_off零执行顺序；附平台闸门阳性/阴性对照，内部skip不代表复合组public trace。单批五tag、L01 focused unit/race、增量lint待执行。T4.0暂停，未推送或部署。
+### 20261024-cache-m3-e9 — L-01 租户种子门禁（已终止）
 
-### 20261024-cache-m4-t40 — M4 两个管理员策略键（G，开发中）
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-- 已变基到冻结 M3 最终候选 4a0c1107f，分支 cache/m4-t40；仅实现 anthropic_identity 与 routing 的管理、验证、存储和分组选项，默认关闭且没有请求路径接线。保留0.4.x与M3行为。
-- 依据M4开工包§1及m3m4 v1.1：routing仅score；点路径实际diff、风险确认、分组白名单/降级warning和disable零查询与契约一致；northstar形态不变。
-- X-B1按F m3m4 v1.2：独立L-04/L-03/L-07静态能力且生产全false，能力字段拒绝启用，关闭及恢复默认零组查询；DB只激活未实现行为时blocked+not_implemented_in_build，过渡构建按已实现行为决定状态。已准备10份dormant样例及9反例；不排新heavy，待X-E9与S r3结束后仅排r3。
-- 计划：完成实现及20个M4样例/反例与M3保留回放，交付前一个heavy跑五tag编译、受影响包unit和回放。M3统一流水线优先，重任务按预算排队；不stash/autostash、不push、不部署。M3若有修补则跟进最终head。
+### 20261024-cache-m4-t40 — M4 两个管理员策略键（已终止）
 
-### 20261024-cache-m3-integration — hardening、L-01 与管理员策略卡片（P，进行中）
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-- 基于已合入 M2 的 main `16a776e347`，依次集成 G2 hardening、G P1/M3 与 UI 卡片；保留 M2、M1.1、迁移 279 和 northstar 测试隔离。项目 noreply 身份与来源尾注保留。
-- 三方来源已独立审查；集成后固定候选，由一次合并流水线、独立关闭态 golden 与正式 staging 验收。全部通过后按授权经 PR、八项必需检查与 strict 合入；不部署生产。当前三方23项已导入；重复深拷贝声明的删除已折入首个P1提交。接缝保留只发布新revision，响应view建好即解锁再查账号；新增慢查询不阻塞订阅与关闭的回归。冻结M1列表除能力新增的upstream卡外完全比较，该卡按场景明确断言，完整新卡由22份v1.1实际HTTP回放覆盖。集成门禁尚未执行。
+### 20261024-cache-m3-integration — hardening、L-01 与管理员策略卡片（已终止）
 
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-### 20261024-cache-m1-hardening — M1 后端加固（G2，变基完成，交接验证中）
+### 20261024-cache-m1-hardening — M1 后端加固（已终止）
 
-- N-4：补真实logger的Responses流式、透传/原始Chat两种模式、16位会话摘要及非unknown路由/改绑；HTTP可见性覆盖真实回退中间件、Responses/Chat流式与非流式，以及上游错误耗尽。RecordUsage非abuse回归随N-2交付，均待批次门禁。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-- 契约测试保留源期望：可用键HTTP回放，未来策略仅显式DTO/信封形状回放；历史输入为独立审计夹具。C-8未来功能未在当前构建行为测试中冒称通过；划分已交契约负责人核对。
+### 20261023-cache-p1-l01 — M3 上游 UUID 会话键补全（已终止）
 
-- N-2：观测复用既有计费的送达判定，启用时保留上游用量快照；补晚断连/开关切换/用量改写回归。N-3 已独立提交，整批 Go 门禁尚待冻结后执行。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-- 授权与基点：从 M2 后端 a99f71795 建立 cache/m1-hardening；每项小提交，不推送。M2 合入后再变基 main，先检查全部构建 tag；M2 评审阻塞优先修。
-- 范围：T0a.4 N-2/N-3/N-4/N-5、T0a.5 N-3/N-7、T0a.2-fix n-2/n-5，以及 T0a.3 n-2/n-3/n-4；已完成的 observer_failed 优先级与 policy history UTC 不重复处理。
-- 当前：10 个提交仅重放到 M2 main 16a776e347；产品补丁无冲突，保留 main 的 M2/R16/R17/隔离测试及记忆归档。旧门禁由 M3 最终候选流水线取代，已有失败保留；最小测试修正：正常计费模式断言为 token、未送达已关闭计时、legacy logger 夹具保留认证身份并显式注入历史摘要。五 tag 编译全部通过，计费与 logger 定向 race 通过，28 条事件严格校验通过；未送达旧测试另需将“容器为空”精确改为“计时关闭且前缀历史为空”，只补跑该组。长门禁交集成候选。
-### 20261023-cache-p1-l01 — M3 上游 UUID 会话键补全（G，增量修复待新基点门禁）
+### 20261024-cache-p0b-fields — M2b（已终止）
 
-- 基点main `16a776e347`（M2 已合入），分支 `cache/p1-l01`。既有响应/cohort补修 `05b3f3cfe`、管理员API `a90727351` 已交R；本轮按PM/R追加原位null和管理员候选故障降级，提交号以git log为准。仅实际注入时恢复已有响应字段为null，未生效与显式客户端值不动；不同上游无key形态仍需在实验中核对。
-- 管理API：账号options静态合格、升序最多500；候选失败不阻断List/Get/PUT，空options并追加account_options_unavailable；disable方向Validate/PUT不访问账号表，开启/mixed保持必要校验。管理契约已同步m3m4 v1.1，共22个原字节M3样例；五份list含M2实际形态，回放完整比较。
-- 验证范围：既有r5 focused7031与140分配对照是旧树证据；13:30剩余重任务按PM中止。本轮仅格式、diff、文档、静态契约与干净树审计，不宣称新增Go测试已通过。Q5是保存的官方文档流示例，不是实际请求录制。
-- 当前：完整四提交已变基到M2 main；northstar、计数器、M1.1 emit-only/UTC与仓储测试隔离保留。1e31dbe3c五tag编译全部通过；v1.1后继e972cd4e7仅改样例/unit测试，unit补查通过，其余四tag按未变化编译输入继承。R已核对变基语义无阻塞；工作树待本次纯记忆收尾后交P。实际unit/race、zero/logger/compat/lint、22样例回放与staging仍由最终M3候选统一执行，来源没有重复长测试。未推送、未变更生产。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
+### 20261023-cache-p0b — 在线缓存北极星与管理员图表（已终止）
 
-### 20261024-cache-p0b-fields — M2b（G2，进行中）
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-- 基点 c07ece514；五个既有检查点以 rebase --onto 重放，保留 M2/M3 与仓储隔离。当前 provider 挂点、原始 usage 和计费后结算已接齐，检查点 9243c2867 的五 tag vet 全过；先前 main16a 的 golden 是基线证据，当前候选行为回放待同一流水线续跑。
-- 接口冻结：BeginProviderCacheTrace、BindProviderCacheTraceSession、ProviderCacheTraceSessionDigest；摘要按 <platform>-session 域和 api_key_id|serving_group_id|local_hash 计算，前 16 hex，history/LRU 带平台。L-04 决策不读取观测 accessor。Gemini 来源保留合法 cacheable_content/message_content_fallback，M4 只追加 anchor_v2。
-- 单条流水线先五 tag，通过即本地提交编译检查点并通知依赖方；同租约继续触及包 unit、race、真实输出契约与 golden、stats S1–S5、Messages 桥和增量 lint。不重复任务，可信编译缓存播种，测试 -count=1；结果待补。
-- 旧存储只在内存补 ingress_chain_percent=min(10,chain_percent)，不写回或改 rev，validate/PUT 共用基础；FX-OBS-1 alias-only 按 n/a_usage，计费解析不改。T0b.5 别名计费变化按裁定延期。其他字段组待后续实现，未推送或部署。
+### 20261024-cache-m2-integration-prep — M2 与 M1.1（已终止）
 
-### 20261023-cache-p0b — 在线缓存北极星与管理员图表（G2，实现完成，待集成）
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
-- PR #133 测试隔离补丁已完成：两个 northstar 集成测试各用独立 PostgreSQL，保留真实仓储事务与原断言；定向 3/3、完整 repository 1779 通过及 4 项原跳过。CI 索引翻转本地未复现，未改上游测试、产品或迁移；负责人批准立即交付，精确共享统计证明排队后补。
+### 20261023-cache-fe-panel — 管理后台缓存开关与参数（已终止）
 
-- 追加审查（R17，已完成）：priced_models 改为严格范围内已定价模型计数，priced_p_share 保持业务范围；新增范围差异回归，独立提交，lint 由 P 在 M2 最终候选上的全量 golangci 覆盖。
-
-- 追加审查（R16）已修：邮箱账号名按 meta.platform/key 生成稳定标签，分组名采用相同判定；普通名称和原数据保留。v1.0.2 源样例自检、86 项定向 race、27 份实际 handler 输出校验均通过；lint 由 P 在 M2 最终候选上的全量 golangci 覆盖，独立提交交付集成。
-
-- 授权：cache/p0b 基于文档归档提交 0dfeb9980（父提交为已合入 M1 的 main 72c2d0169）；只本地开发与提交，不推送、不部署。保留 main 的 T0a.4 API 对齐和 observer_failed 优先级修补。
-- 范围：northstar 默认关闭的运行时策略、UTC 小时 rollup/回填/D-1、trace 小时计数与持久化、四个管理员图表接口与三种金额口径。沿用既有鉴权、审计与快照，不改变路由、用量或账单。
-- 数据正确性：非 UTC 数据库时间、趋势/价格键和事件输出统一 UTC；每小时先读取前一小时再做会话 LAG，跨整点机会量不依赖持久会话状态。279 含 bucket_start B-tree，不含 session_state；跨整点独立期望值为 0/17011。
-- 迁移冻结：279 的 sha256(TrimSpace) 为 58dc0c8572b7ecd1899db8f995d1f2795a40762a9d94e864ac6a8f377bc3447e，第一次在共享数据库执行后不再修改；后续结构修订使用新迁移。没有提交本地 embed 占位资源。
-- 新基线验证：1613 项缓存 race、304 项配置/Wire race、6 项关闭态独立探针通过；F 契约实际 handler 输出 20 项自检通过。全 handler unit race 为 2035 通过、2 项既有跳过、0 race；完整 ci_gate 419 项通过、0 skip；default/unit/integration/e2e/embed vet 通过；默认全量 lint 0 问题。
-- 编译接缝：原 unit vet 发现 M1 既有测试未传 provider 的新计数器参数，补 nil 且保留全部断言；定向及全包复验通过。所有改签名函数按不限 tag 的全 backend 引用核对，产品源码不受这行测试修复影响。
-- 当前：最终真实 PostgreSQL DinD 两项通过，0 fail/skip；对账、跨整点独立期望、重复重放、D-1 事务和失败回滚均覆盖，临时资源按 ID 清理完毕。41 项同步工具测试及调度差异检查通过，干净提交再核验同步审计与文档。原始失败与环境记录保留，独立评审、staging 端到端、集成和 GitHub 必需检查由负责人安排；未推送、部署。
-
-
-### 20261024-cache-m2-integration-prep — M2 与 M1.1（PR #133 等CI与增量核对）
-
-- 执行者：P；来源映射、记忆冲突保留规则与原始失败证据在仓库外保存。原候选预检已结束，临时工作树/缓存清理，集成分支保留。
-- 当前：按PM裁定追加G2 `ce0192351` 的测试隔离补丁，只改测试和记忆；产品、279、既有EXPLAIN断言不变。代码原样导入，记忆日志并集保留，项目身份和原提交说明保留。
-- 下一步：普通push更新现有PR；G2完整repository结果继承，本地只补文档及audit；R核对集成差异，GitHub八项全绿后按已有授权合入，不变更生产。
-
-### 20261023-cache-fe-panel — 管理后台缓存开关与参数（F-1a，开发中）
-
-- 授权：缓存项目 PM 指派；基线 `e369fd3bb`，分支 `cache/fe-panel`；不推送、不合并、不部署。
-- 范围：M1 只交付前端“开关与参数”页（`/admin/cache`，仅管理员，侧栏在“运维监控”之后），对接 `/api/v1/admin/cache/policies` 的列表、预校验、带 `expected_rev` 的写入与变更记录；后端接口缺失（404）时页面提示后端版本未提供。观测图表（F-1）为本分支单独提交：图表接口（P0b）存在时才显示“巡检”页签，缺失时页面只显示开关；生产构建只读真实接口，mock 数据仅开发环境可用。
-- 约束：默认全部关闭；表单范围以接口返回的 schema 为准；总开关只覆盖改出站或选号的三个键；`claude_cache_fallback_policy` 与 `gateway.openai_cache.*` 只读展示并链接原设置页，不改其存储与语义。
-- 状态：首版 `ec311712c` 经评审有条件通过后，已按评审与 v1.7.4 契约修复：错误按平台信封的 `reason` 识别，写入后整页重读，409 与 `rev_stale` 走三方合并，确认框列出提交后的影响，静态总闸期间仍可保存。接口契约样例作为前端测试夹具，相关测试已列入根 `Makefile` 的关键 vitest 清单；路由与侧栏入口已登记到 `tools/upstream-sync/policy.json` 的 required_literals。图表按 v1.7.4 §8 对齐金额口径与回退组标注，图表测试同样列入关键清单。待后端接口落地后联调。
+- 已被 cache-slim 精简方案取代（2026-10-26）；原交接与验证记录已原样移入 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)。
 
 ### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（PR #120 已合入 main，进入下一个版本；待真实上游验证；2026-10-22 DOCS 更新状态）
 
@@ -1433,3 +1353,13 @@ pnpm --dir frontend run build
 - 合并：#131 先普通 merge 最新 main，只在记忆冲突，双方历史保留；最终 `acfe38230` 的 18 项检查通过后常规合入 `27b4e22a32`。首轮完整 Go 分配计数偶发失败已用测试子进程隔离修正，精确断言与业务树语义保持；证据在仓库外。
 - 修改：程序 VERSION 与 provenance 产品版本升为 0.4.7，兼容 0.2.15 不变；旧弹窗任务登记原样归档，保留其他 Agent 的任务与历史。版本说明涵盖本版全部已合入缓存功能、默认关闭、迁移 279 及启用前条件。
 - 验证与下一步：本地 docs、audit、scheduler-diff、工具 41 项、前端定向 19 项及 typecheck 已通过；版本提交后继续完整保护检查，成功后 annotated tag、官方 Release 流程和正式产物/隔离安装验证。尚未发版，不操作生产。
+
+### 2026-10-26 — 20261026-cache-slim — W1b 文档与登记
+
+- 请求/目标：整体回退缓存 PR #132–#140，保留已发布迁移 279，新增迁移 280；补退役登记、升级与回退说明和记忆归档。
+- 开始状态：chore/cache-slim 的干净 HEAD 6ca14b4f6；前置回退为 2cf359a99，W1 的 13 项主验证及 R1 代码关已通过。
+- 完成操作：从 e369fd3bb 与 a19d7c5b9 提取专属新增名字并登记精确退役规则；原样归档 31 条已终止缓存交接/登记和两条发布准备记录，只追加归档；按 GitHub Release API 更正 0.4.7 发布于 2026-10-25T16:49:36Z。
+- 修改文件：tools/docs_consistency.json、docs/openai-cache-reliability.md、本记忆与归档。仅表名规则额外允许现行迁移说明，其余规则只放行必要历史和迁移位置。
+- 验证：文档一致性检查通过；工具单测 41 项通过、0 失败；git diff --check 通过。五条规则在 a19d7c5b9 均命中，在 e369fd3bb 均零命中，精简树只在允许位置命中；18 项既有名称保留探针、33 条归档原文及既有归档前缀核验通过，主文件保留超过 15KB 余量。未重复运行不受文档改动影响的 Go 与前端门禁。
+- 卡点/风险：迁移 280 删除五表数据，不再支持运行 0.4.7；可以回退到 0.4.6。
+- 下一步：W1b 本地提交交付主会话；B1/B2 进行中，PR 未开，由主会话继续集成和最终验证。
