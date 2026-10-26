@@ -143,17 +143,13 @@ func (s *OpenAIGatewayService) GenerateExplicitSessionHash(c *gin.Context, body 
 		return ""
 	}
 
-	sessionID, tenantScoped := s.scopedOpenAISessionSeed(c, body, sessionID)
+	sessionID = s.scopedOpenAISessionSeed(c, body, sessionID)
 	currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)
 	if strings.HasPrefix(sessionID, "openai-routing-v2:") {
 		currentHash = "v2:" + currentHash
 		legacyHash = ""
 	}
 	c.Set(openAICacheSessionGinKey, currentHash)
-	if CachePolicyFromGin(c).UpstreamIdentity().Enabled() {
-		c.Set(openAICacheSessionProvenanceGinKey, tenantScoped)
-	}
-	s.beginCacheTrace(c, body)
 	if c.Request != nil {
 		if diagnostic := s.newCacheDiagnostic(c, body, "ingress"); diagnostic != nil {
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAICacheDiagnosticKey{}, diagnostic))
@@ -193,9 +189,6 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 		sessionID = deriveOpenAIContentSessionSeed(body)
 	}
 	if sessionID == "" {
-		// Missing routing identity must not hide an enabled observation. The
-		// trace keeps an empty digest and never creates a session/history key.
-		s.beginCacheTrace(c, body)
 		return ""
 	}
 
@@ -203,17 +196,13 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 		sessionID = grokStickyAffinitySeed(sessionID, body)
 	}
 
-	sessionID, tenantScoped := s.scopedOpenAISessionSeed(c, body, sessionID)
+	sessionID = s.scopedOpenAISessionSeed(c, body, sessionID)
 	currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)
 	if strings.HasPrefix(sessionID, "openai-routing-v2:") {
 		currentHash = "v2:" + currentHash
 		legacyHash = ""
 	}
 	c.Set(openAICacheSessionGinKey, currentHash)
-	if CachePolicyFromGin(c).UpstreamIdentity().Enabled() {
-		c.Set(openAICacheSessionProvenanceGinKey, tenantScoped)
-	}
-	s.beginCacheTrace(c, body)
 	if c.Request != nil {
 		if diagnostic := s.newCacheDiagnostic(c, body, "ingress"); diagnostic != nil {
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAICacheDiagnosticKey{}, diagnostic))
@@ -263,17 +252,13 @@ func (s *OpenAIGatewayService) GenerateSessionHashWithFallback(c *gin.Context, b
 		return ""
 	}
 
-	seed, tenantScoped := s.scopedOpenAISessionSeed(c, body, seed)
+	seed = s.scopedOpenAISessionSeed(c, body, seed)
 	currentHash, legacyHash := deriveOpenAISessionHashes(seed)
 	if strings.HasPrefix(seed, "openai-routing-v2:") {
 		currentHash = "v2:" + currentHash
 		legacyHash = ""
 	}
 	c.Set(openAICacheSessionGinKey, currentHash)
-	if CachePolicyFromGin(c).UpstreamIdentity().Enabled() {
-		c.Set(openAICacheSessionProvenanceGinKey, tenantScoped)
-	}
-	s.beginCacheTrace(c, body)
 	if c.Request != nil {
 		if diagnostic := s.newCacheDiagnostic(c, body, "ingress"); diagnostic != nil {
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAICacheDiagnosticKey{}, diagnostic))
@@ -1319,7 +1304,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				clearSticky := shouldClearStickySession(account, requestedModel)
 				if clearSticky {
 					_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
-					s.l09aOwnerCleared(ctx, account)
 				}
 				if !clearSticky && isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability) {
 					account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
@@ -1465,9 +1449,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		shuffleWithinSortGroups(available)
 		if !rateOrder.enabled && !stickySpillover && stickyAccountID == 0 {
 			s.preferCacheCandidates(ctx, available, requestedModel)
-		}
-		if l09a := s.l09aFirst(ctx); l09a != nil {
-			s.l09aPreferCacheCandidates(ctx, l09a, available, requestedModel, rateOrder.enabled, stickySpillover, stickyAccountID)
 		}
 		if rateOrder.enabled {
 			sort.SliceStable(available, func(i, j int) bool {

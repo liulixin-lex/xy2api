@@ -235,9 +235,6 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 		if openaiCCRawAllowedHeaders[lowerKey] {
 			for _, v := range values {
 				upstreamReq.Header.Add(key, v)
-				if strings.EqualFold(key, "session_id") {
-					cacheTraceFromGin(c).setSessionSource("client_value")
-				}
 			}
 		}
 	}
@@ -261,15 +258,12 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	applyOpenCodeSessionHeader(c, account, targetURL, upstreamReq.Header, body)
 	s.prepareQualityHTTP(ctx, c, account, upstreamReq, body)
 	s.captureCacheRequestDiagnostic(c, upstreamReq)
-	s.captureCacheTraceRequest(c, upstreamReq, account, "chat")
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	s.markCacheTraceSent(c)
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
-	s.startCacheTraceRequest(c)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
@@ -304,9 +298,6 @@ func (s *OpenAIGatewayService) scanCCStream(
 	startTime time.Time,
 	emit func(*apicompat.ChatCompletionsChunk),
 ) ccStreamScanState {
-	// The attempt-local gate keeps the disabled per-frame path to one bool check.
-	cacheTraceActive := cacheTraceObserving(c)
-
 	var st ccStreamScanState
 
 	scanner := s.newUpstreamSSEScanner(resp.Body, relayLivenessFor(c, account))
@@ -331,11 +322,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 			observer.ObserveOpenAI([]byte(payload), "")
 		}
 
-		if cacheTraceActive {
-			if u := extractCCStreamUsageForCacheTrace(c, payload); u != nil {
-				st.Usage = *u
-			}
-		} else if u := extractCCStreamUsage(payload); u != nil {
+		if u := extractCCStreamUsage(payload); u != nil {
 			st.Usage = *u
 		}
 
@@ -380,7 +367,6 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 	resp *http.Response,
 	writeError compatErrorWriter,
 ) (_ *apicompat.ChatCompletionsResponse, _ OpenAIUsage, retErr error) {
-	cacheTraceActive := cacheTraceObserving(c)
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		classified := nonstreamReadError(c.Request.Context(), resp, err)
@@ -406,14 +392,8 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 	}
 
 	usage := OpenAIUsage{}
-	if cacheTraceActive {
-		if parsed, ok := extractOpenAIUsageForCacheTrace(c, respBody); ok {
-			usage = parsed
-		}
-	} else {
-		if parsed, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
-			usage = parsed
-		}
+	if parsed, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
+		usage = parsed
 	}
 	return &ccResp, usage, nil
 }

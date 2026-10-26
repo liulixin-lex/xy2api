@@ -35,12 +35,8 @@ func (s *GatewayService) ForwardAsResponses(
 	body []byte,
 	parsed *ParsedRequest,
 ) (result *ForwardResult, err error) {
-	if s.providerTraceEngine != nil {
-		defer func() { s.providerTraceEngine.finishProviderCacheTrace(c, result) }()
-	}
 	startTime := time.Now()
 	ctx, cacheDecision := s.beginClaudeCacheAttempt(ctx, parsed, account)
-	ctx = s.beginCacheMetadataAttempt(ctx, c, parsed, account)
 	defer func() { finishClaudeCacheAttempt(cacheDecision, result) }()
 
 	normalizedBody, normalized, err := normalizeOpenAIResponsesLegacyIngress(body)
@@ -155,14 +151,7 @@ func (s *GatewayService) ForwardAsResponses(
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, forwardedBody, mappedModel)
 
 	// 11. Send request
-	if s.providerTraceEngine != nil {
-		s.providerTraceEngine.captureProviderCacheTrace(c, upstreamReq, account, "messages")
-		s.providerTraceEngine.markProviderCacheTraceSent(c)
-	}
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
-	if s.providerTraceEngine != nil {
-		s.providerTraceEngine.submitCacheTraceJob(c)
-	}
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
@@ -425,9 +414,6 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		}
 
 		var event apicompat.AnthropicStreamEvent
-		if providerCacheTraceFromGin(c) != nil {
-			observeProviderCacheTrace(c, []byte(payload))
-		}
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			logger.L().Warn("forward_as_responses buffered: failed to parse event",
 				zap.Error(err),
@@ -578,10 +564,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 
 	// processEvent converts a single parsed Anthropic SSE event into the
 	// Responses SSE frames for the client.
-	processEvent := func(event *apicompat.AnthropicStreamEvent, payload string) []string {
-		if providerCacheTraceFromGin(c) != nil {
-			observeProviderCacheTrace(c, []byte(payload))
-		}
+	processEvent := func(event *apicompat.AnthropicStreamEvent) []string {
 		if firstChunk {
 			firstChunk = false
 			ms := int(time.Since(startTime).Milliseconds())
@@ -648,9 +631,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	// stages the opening and ends a broken stream with response.failed.
 	var stream *gatewayConvertStream
 	stream = s.newGatewayConvertStream(c, resp, account, gatewayConvertResponses, mappedModel, gatewayConvertHooks{
-		convert: func(event *apicompat.AnthropicStreamEvent, payload string, _ bool) []string {
-			return processEvent(event, payload)
-		},
+		convert:  func(event *apicompat.AnthropicStreamEvent, _ string, _ bool) []string { return processEvent(event) },
 		finalize: finalizeStream,
 		failure: func(source []byte) []string {
 			return gatewayResponsesFailedFrames(stream.ctx(), state, originalModel, source)

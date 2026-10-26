@@ -43,7 +43,7 @@ func (u *ptUsageUpstream) DoWithTLS(req *http.Request, proxyURL string, accountI
 	return u.Do(req, proxyURL, accountID, concurrency)
 }
 
-func newPassthroughUsageHandler(t *testing.T, usageRepo service.UsageLogRepository, upstream service.HTTPUpstream, streamInterval int, policies ...*service.CachePolicyService) *OpenAIGatewayHandler {
+func newPassthroughUsageHandler(t *testing.T, usageRepo service.UsageLogRepository, upstream service.HTTPUpstream, streamInterval int) *OpenAIGatewayHandler {
 	t.Helper()
 	repo := &grokCredentialHandlerRepo{accounts: []service.Account{{
 		ID: 811, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
@@ -55,14 +55,10 @@ func newPassthroughUsageHandler(t *testing.T, usageRepo service.UsageLogReposito
 	cfg.Gateway.StreamDataIntervalTimeout = streamInterval
 	billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billing.Stop)
-	var policy *service.CachePolicyService
-	if len(policies) > 0 {
-		policy = policies[0]
-	}
-	gateway := service.ProvideOpenAIGatewayServiceWithCachePolicies(
+	gateway := service.NewOpenAIGatewayService(
 		repo, usageRepo, nil, nil, nil, nil, nil, cfg, nil, nil,
 		service.NewBillingService(cfg, nil), nil, billing, upstream,
-		&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil, policy, nil,
+		&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil,
 	)
 	cache := &concurrencyCacheMock{
 		acquireUserSlotFn:    func(context.Context, int64, int, string) (bool, error) { return true, nil },

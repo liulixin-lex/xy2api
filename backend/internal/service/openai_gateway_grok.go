@@ -68,8 +68,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	// OpenAI /responses/compact is not a native xAI endpoint. Convert it into a
 	// normal Grok Responses turn that asks for a structured summary, then map the
 	// reply back to an OpenAI compaction item on the way out.
-	compactPath := isOpenAIResponsesCompactPath(c)
-	if compactPath {
+	if isOpenAIResponsesCompactPath(c) {
 		patchedBody, err = buildGrokCompactRequestBody(patchedBody)
 		if err != nil {
 			return nil, err
@@ -83,26 +82,17 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	if extractClaudeCodeSessionIDFromPayload(body) != "" {
 		cacheIdentityBody = body
 	}
-	// L-17 compact_identity lets compact derive the same identity. Compact then
-	// carries prompt_cache_key and X-Grok-Conv-Id only: it rejects tool_choice,
-	// so neither Free-tier tool route may add tools to it.
-	compactIdentity := compactPath && s.grokIdentityFixEnabled(c, account, grokIdentityFixCompactIdentity)
-	cacheIdentity := resolveGrokCacheIdentityFor(c, cacheIdentityBody, "", upstreamModel, compactIdentity)
-	compactIdentity = compactIdentity && cacheIdentity != ""
+	cacheIdentity := resolveGrokCacheIdentity(c, cacheIdentityBody, "", upstreamModel)
 	mixedCacheIntentBody := append([]byte(nil), patchedBody...)
-	patchedBody, err = applyGrokResponsesCacheIdentity(patchedBody, body, cacheIdentity, account.IsGrokOAuth() && !compactIdentity)
+	patchedBody, err = applyGrokResponsesCacheIdentity(patchedBody, body, cacheIdentity, account.IsGrokOAuth())
 	if err != nil {
 		return nil, fmt.Errorf("apply grok prompt cache identity: %w", err)
 	}
-	if compactIdentity {
-		recordGrokIdentityFixApplied(account, grokIdentityFixCompactIdentity)
-	} else {
-		// Free OAuth + client function tools: reuse Messages mixed-tools cache route
-		// (append web_search/x_search so xAI does not force non-cacheable build-free).
-		patchedBody, err = applyGrokFreeRequestToolCacheRoute(c, patchedBody, mixedCacheIntentBody, account, cacheIdentity)
-		if err != nil {
-			return nil, fmt.Errorf("apply grok Free function-tool cache route: %w", err)
-		}
+	// Free OAuth + client function tools: reuse Messages mixed-tools cache route
+	// (append web_search/x_search so xAI does not force non-cacheable build-free).
+	patchedBody, err = applyGrokFreeRequestToolCacheRoute(c, patchedBody, mixedCacheIntentBody, account, cacheIdentity)
+	if err != nil {
+		return nil, fmt.Errorf("apply grok Free function-tool cache route: %w", err)
 	}
 
 	token, _, err := s.getRequestCredential(ctx, c, account)
@@ -172,9 +162,6 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
-		if compactIdentity {
-			s.learnGrokIdentityRejection(account, grokIdentityFixCompactIdentity, resp.StatusCode, respBody)
-		}
 		if !isOpenAIResponsesCompactPath(c) {
 			if failure := s.LearnStreamOnlyFailure(ctx, account, resilience.CapabilityProtocolResponses, gjson.GetBytes(patchedBody, "stream").Bool(), resp.StatusCode, respBody, patchedBody); failure != nil {
 				return nil, failure

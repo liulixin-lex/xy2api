@@ -2,18 +2,12 @@ package service
 
 import (
 	"bytes"
-	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"hash/crc32"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"testing"
-	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -75,86 +69,6 @@ func TestTransformBedrockInvocationMetrics(t *testing.T) {
 		assert.False(t, gjson.GetBytes(result, "amazon-bedrock-invocationMetrics").Exists())
 		assert.Equal(t, int64(100), gjson.GetBytes(result, "usage.output_tokens").Int())
 	})
-}
-
-func TestBedrockStreamProviderUsageObservationAfterMetricsNormalization(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	cfg := &config.Config{JWT: config.JWTConfig{Secret: "bedrock-provider-trace-test-secret"}}
-	cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
-	engine := &OpenAIGatewayService{cfg: cfg}
-	engine.cachePolicies = NewCachePolicyService(nil, cfg, WithProviderCacheTrace())
-	traceTestSetPolicy(engine, map[string]any{
-		"enabled": true, "platforms": []string{PlatformAnthropic}, "sample_percent": 100, "chain_percent": 100,
-	})
-
-	groupID := int64(401)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-	c.Set("api_key", &APIKey{ID: 501, GroupID: &groupID, Group: &Group{ID: groupID, Platform: PlatformAnthropic}})
-	body := []byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"fixture"}]}`)
-	svc := &GatewayService{cfg: cfg, providerTraceEngine: engine}
-	svc.BeginProviderCacheTrace(c, PlatformAnthropic, "messages", body, nil)
-	svc.BindProviderCacheTraceSession(c, "bedrock-provider-session", "cacheable_content")
-
-	buildChunkFrame := func(event []byte) []byte {
-		var headers bytes.Buffer
-		for name, value := range map[string]string{":event-type": "chunk", ":message-type": "event"} {
-			require.NoError(t, headers.WriteByte(byte(len(name))))
-			_, err := headers.WriteString(name)
-			require.NoError(t, err)
-			require.NoError(t, headers.WriteByte(7))
-			if err := binary.Write(&headers, binary.BigEndian, uint16(len(value))); err != nil {
-				t.Fatal(err)
-			}
-			_, err = headers.WriteString(value)
-			require.NoError(t, err)
-		}
-		payload := []byte(`{"bytes":"` + base64.StdEncoding.EncodeToString(event) + `"}`)
-		prelude := bytes.NewBuffer(nil)
-		total := uint32(12 + headers.Len() + len(payload) + 4)
-		if err := binary.Write(prelude, binary.BigEndian, total); err != nil {
-			t.Fatal(err)
-		}
-		if err := binary.Write(prelude, binary.BigEndian, uint32(headers.Len())); err != nil {
-			t.Fatal(err)
-		}
-		var frame bytes.Buffer
-		if _, err := frame.Write(prelude.Bytes()); err != nil {
-			t.Fatal(err)
-		}
-		if err := binary.Write(&frame, binary.BigEndian, crc32.Checksum(prelude.Bytes(), crc32.MakeTable(crc32.IEEE))); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := frame.Write(headers.Bytes()); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := frame.Write(payload); err != nil {
-			t.Fatal(err)
-		}
-		if err := binary.Write(&frame, binary.BigEndian, crc32.Checksum(frame.Bytes(), crc32.MakeTable(crc32.IEEE))); err != nil {
-			t.Fatal(err)
-		}
-		return frame.Bytes()
-	}
-
-	var stream bytes.Buffer
-	for _, event := range [][]byte{
-		[]byte(`{"type":"message_start","message":{"usage":{"input_tokens":17,"cache_read_input_tokens":1024,"cache_creation_input_tokens":5}}}`),
-		[]byte(`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"amazon-bedrock-invocationMetrics":{"inputTokenCount":17,"outputTokenCount":9}}`),
-	} {
-		if _, err := stream.Write(buildChunkFrame(event)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(stream.Bytes()))}
-	got, err := svc.handleBedrockStreamingResponse(context.Background(), resp, c, &Account{ID: 703, Platform: PlatformAnthropic}, time.Now(), "claude-sonnet-4-5")
-	require.NoError(t, err)
-	require.NotNil(t, got)
-	require.Equal(t, ClaudeUsage{InputTokens: 17, OutputTokens: 9, CacheCreationInputTokens: 5, CacheReadInputTokens: 1024}, *got.usage)
-	trace := cacheTraceFromGin(c)
-	require.NotNil(t, trace)
-	require.EqualValues(t, 3, trace.data.UsageFields)
-	require.True(t, trace.data.UsagePromptPresent)
 }
 
 func TestExtractEventStreamHeaderValue(t *testing.T) {

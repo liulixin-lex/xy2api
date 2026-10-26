@@ -200,14 +200,7 @@ func (s *GatewayService) executeBedrockUpstream(
 			return nil, err
 		}
 
-		if s.providerTraceEngine != nil {
-			s.providerTraceEngine.captureProviderCacheTrace(c, upstreamReq, account, "messages")
-			s.providerTraceEngine.markProviderCacheTraceSent(c)
-		}
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, nil)
-		if s.providerTraceEngine != nil {
-			s.providerTraceEngine.submitCacheTraceJob(c)
-		}
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
@@ -413,9 +406,6 @@ func (s *GatewayService) handleBedrockNonStreamingResponse(
 		return nil, nonstreamReadError(ctx, resp, err)
 	}
 
-	if providerCacheTraceFromGin(c) != nil {
-		observeProviderCacheTrace(c, body)
-	}
 	// 转换 Bedrock 特有的 amazon-bedrock-invocationMetrics 为标准 Anthropic usage 格式
 	// 并移除该字段避免透传给客户端
 	body = transformBedrockInvocationMetrics(body)

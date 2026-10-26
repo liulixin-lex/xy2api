@@ -50,7 +50,7 @@ func stagedCodexFingerprintIDs(c *gin.Context, account *Account) *codexFingerpri
 // 非透传与透传两个请求构造器共用本函数，防止应用语义漂移。仅解析该
 // snapshot 的 OAuth 账号可读取，避免 stale context 跨账号 failover 泄漏。
 func applyStagedCodexFingerprintHeaders(c *gin.Context, account *Account, h http.Header) {
-	applyCodexFingerprintHeaders(h, stagedCodexFingerprintIDs(c, account), cacheTraceFromGin(c))
+	applyCodexFingerprintHeaders(h, stagedCodexFingerprintIDs(c, account))
 }
 
 func applyStagedCodexFingerprintClientMetadata(c *gin.Context, account *Account, reqBody map[string]any) bool {
@@ -354,7 +354,7 @@ func resolveCodexFingerprintIDsFromRequest(account *Account, clientHeaders http.
 
 // applyCodexFingerprintHeaders 按预计算的收敛 ID 改写出站 HTTP 头中的设备指纹。
 // 在 buildUpstreamRequest 的白名单透传之后、enforceCodexIdentityHeaders 之前调用。
-func applyCodexFingerprintHeaders(h http.Header, ids *codexFingerprintIDs, traces ...*cacheTrace) {
+func applyCodexFingerprintHeaders(h http.Header, ids *codexFingerprintIDs) {
 	if h == nil || ids == nil {
 		return
 	}
@@ -375,9 +375,6 @@ func applyCodexFingerprintHeaders(h http.Header, ids *codexFingerprintIDs, trace
 	// 连字符形式和下划线形式都改写，保证一致
 	h.Set("session-id", ids.sessionID)
 	h.Set("session_id", ids.sessionID)
-	if len(traces) > 0 {
-		traces[0].setSessionSource("fingerprint_converged")
-	}
 	h.Set("thread-id", ids.threadID)
 
 	rewriteCodexTurnMetadataFields(h, map[string]any{
@@ -414,7 +411,7 @@ func rewriteCodexTurnMetadataFields(h http.Header, fields map[string]any) {
 
 // applyCodexFingerprintClientMetadata 按预计算的收敛 ID 改写请求体中的 client_metadata。
 // 使用与头改写相同的 ids 实例，确保 turn_id 等随机字段一致。
-func applyCodexFingerprintClientMetadata(reqBody map[string]any, ids *codexFingerprintIDs, traces ...*cacheTrace) bool {
+func applyCodexFingerprintClientMetadata(reqBody map[string]any, ids *codexFingerprintIDs) bool {
 	if reqBody == nil || ids == nil {
 		return false
 	}
@@ -431,7 +428,6 @@ func applyCodexFingerprintClientMetadata(reqBody map[string]any, ids *codexFinge
 		modified = true
 	}
 	if applyCodexFingerprintPromptCacheKey(reqBody, ids) {
-		markCacheTracePCK(traces, "oauth_rewritten")
 		modified = true
 	}
 	return modified
@@ -536,7 +532,7 @@ func applyCodexFingerprintPromptCacheKey(reqBody map[string]any, ids *codexFinge
 // 其余字节原样保留；root prompt_cache_key 仅在可证明是 body session 默认值时
 // 做标量改写。语义与 applyCodexFingerprintClientMetadata 逐点一致（含
 // "非对象值整体替换为收敛集合"的行为）。
-func applyCodexFingerprintClientMetadataRaw(body []byte, ids *codexFingerprintIDs, traces ...*cacheTrace) ([]byte, bool, error) {
+func applyCodexFingerprintClientMetadataRaw(body []byte, ids *codexFingerprintIDs) ([]byte, bool, error) {
 	if len(body) == 0 || ids == nil {
 		return body, false, nil
 	}
@@ -574,7 +570,6 @@ func applyCodexFingerprintClientMetadataRaw(body []byte, ids *codexFingerprintID
 	}
 	promptCacheKey := gjson.GetBytes(body, "prompt_cache_key")
 	if promptCacheKey.Exists() && promptCacheKey.Type == gjson.String && strings.TrimSpace(promptCacheKey.String()) != "" && shouldRewriteCodexFingerprintPromptCacheKey(ids, promptCacheKey.String()) {
-		markCacheTracePCK(traces, "oauth_rewritten")
 		rewritten, err := sjson.SetBytes(next, "prompt_cache_key", ids.sessionID)
 		if err != nil {
 			return body, false, fmt.Errorf("splice converged prompt_cache_key: %w", err)

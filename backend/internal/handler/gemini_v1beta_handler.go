@@ -318,7 +318,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		googleError(c, http.StatusBadRequest, "Invalid model in URL")
 		return
 	}
-	inboundAnchorModel := modelName
 	if resolvedModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok && strings.TrimSpace(resolvedModel) != "" {
 		modelName = strings.TrimSpace(resolvedModel)
 	}
@@ -407,29 +406,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 
 	// 3) select account (sticky session based on request body)
 	// 优先使用 Gemini CLI 的会话标识（privileged-user-id + tmp 目录哈希）
-	providerTraceEligible := shouldTraceGeminiProviderAction(action)
-	if providerTraceEligible {
-		h.gatewayService.BeginProviderCacheTrace(c, service.PlatformGemini, "gemini", body, nil)
-	}
-	sessionRoutingGroupID := apiKey.GroupID
-	var anchorParsed *service.ParsedRequest
-	// The body is parsed only for an in-scope anchor (e.g. not with gemini_anchor off).
-	if providerTraceEligible && h.gatewayService.CacheAnchorEnabled(c) && !h.gatewayService.CacheAnchorOutOfScope(c, apiKey, service.PlatformGemini) {
-		anchorParsed, _ = service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformGemini)
-		if anchorParsed != nil {
-			anchorParsed.Model = inboundAnchorModel
-			h.gatewayService.PrepareCacheAnchor(c, apiKey, anchorParsed, service.PlatformGemini, false)
-		}
-	}
-	defer h.gatewayService.ReleaseCacheAnchor(anchorParsed)
 	sessionHash := extractGeminiCLISessionHash(c, body)
-	traceSource := "gemini_cli"
-	if sessionHash == "" && anchorParsed != nil {
-		sessionHash = h.gatewayService.GenerateCacheAnchorSession(anchorParsed)
-		if sessionHash != "" {
-			traceSource = "anchor_v2"
-		}
-	}
 	if sessionHash == "" {
 		// Fallback: 使用通用的会话哈希生成逻辑（适用于其他客户端）
 		parsedReq, _ := service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformGemini)
@@ -441,15 +418,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			}
 		}
 		sessionHash = h.gatewayService.GenerateSessionHash(parsedReq)
-		traceSource = "gemini_digest"
-	} else if traceSource == "gemini_cli" && anchorParsed != nil {
-		h.gatewayService.CacheAnchorEarlierTier(anchorParsed)
-	}
-	if h.gatewayService.CacheAnchorApplied(anchorParsed) {
-		sessionRoutingGroupID = anchorParsed.GroupID
-	}
-	if providerTraceEligible {
-		h.gatewayService.BindProviderCacheTraceSession(c, sessionHash, traceSource)
 	}
 	sessionKey := sessionHash
 	if sessionHash != "" {
@@ -459,11 +427,11 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	// 查询粘性会话绑定的账号 ID（用于检测账号切换）
 	var sessionBoundAccountID int64
 	if sessionKey != "" {
-		sessionBoundAccountID, _ = h.gatewayService.GetCachedSessionAccountID(c.Request.Context(), sessionRoutingGroupID, sessionKey)
+		sessionBoundAccountID, _ = h.gatewayService.GetCachedSessionAccountID(c.Request.Context(), apiKey.GroupID, sessionKey)
 		if sessionBoundAccountID > 0 {
 			prefetchedGroupID := int64(0)
-			if sessionRoutingGroupID != nil {
-				prefetchedGroupID = *sessionRoutingGroupID
+			if apiKey.GroupID != nil {
+				prefetchedGroupID = *apiKey.GroupID
 			}
 			ctx := service.WithPrefetchedStickySession(c.Request.Context(), sessionBoundAccountID, prefetchedGroupID, h.metadataBridgeEnabled())
 			c.Request = c.Request.WithContext(ctx)
@@ -476,7 +444,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	var geminiPrefixHash string
 	var geminiSessionUUID string
 	var matchedDigestChain string
-	useDigestFallback := sessionBoundAccountID == 0 && !h.gatewayService.CacheAnchorApplied(anchorParsed)
+	useDigestFallback := sessionBoundAccountID == 0
 
 	if useDigestFallback {
 		// 解析 Gemini 请求体
@@ -504,7 +472,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				// 查找会话
 				foundUUID, foundAccountID, foundMatchedChain, found := h.gatewayService.FindGeminiSession(
 					c.Request.Context(),
-					derefGroupID(sessionRoutingGroupID),
+					derefGroupID(apiKey.GroupID),
 					geminiPrefixHash,
 					geminiDigestChain,
 				)
@@ -523,7 +491,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 					if sessionKey == "" {
 						sessionKey = service.GenerateGeminiDigestSessionKey(geminiPrefixHash, foundUUID)
 					}
-					_ = h.gatewayService.BindStickySession(c.Request.Context(), sessionRoutingGroupID, sessionKey, foundAccountID)
+					_ = h.gatewayService.BindStickySession(c.Request.Context(), apiKey.GroupID, sessionKey, foundAccountID)
 				} else {
 					// 生成新的会话 UUID
 					geminiSessionUUID = uuid.New().String()
@@ -550,7 +518,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	}
 
 	for {
-		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), sessionRoutingGroupID, sessionKey, modelName, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
+		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, modelName, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
 		if err != nil {
 			if failoverClientGone(c) {
 				reqLog.Info("gemini.account_select_aborted_client_disconnected", zap.Error(err))
@@ -677,7 +645,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已抢槽
 		// 的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
 		if selection.ProfitGateActive() || !selection.Acquired {
-			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, sessionRoutingGroupID, sessionKey, account.ID); err != nil {
+			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, sessionKey, account.ID); err != nil {
 				reqLog.Warn("gemini.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
@@ -690,7 +658,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		if fs.SwitchCount > 0 {
 			requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 		}
-		sessionGroupID := derefGroupID(sessionRoutingGroupID)
+		sessionGroupID := derefGroupID(apiKey.GroupID)
 		if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 			result, err = h.antigravityGatewayService.ForwardGemini(
 				requestCtx,
@@ -738,7 +706,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		if useDigestFallback && geminiDigestChain != "" && geminiPrefixHash != "" {
 			if err := h.gatewayService.SaveGeminiSession(
 				c.Request.Context(),
-				derefGroupID(sessionRoutingGroupID),
+				derefGroupID(apiKey.GroupID),
 				geminiPrefixHash,
 				geminiDigestChain,
 				geminiSessionUUID,
@@ -812,10 +780,6 @@ func parseGeminiModelAction(rest string) (model string, action string, err error
 	}
 
 	return "", "", &pathParseError{"invalid model action path"}
-}
-
-func shouldTraceGeminiProviderAction(action string) bool {
-	return action == "generateContent" || action == "streamGenerateContent"
 }
 
 func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError) {

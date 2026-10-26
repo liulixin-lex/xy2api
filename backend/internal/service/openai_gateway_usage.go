@@ -160,19 +160,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		return errors.New("openai usage result is nil")
 	}
 	s.observeCacheUsage(result, input.Account, time.Now())
-	var traceResult *OpenAIForwardResult
-	if result.CacheTrace != nil || result.cacheTraceFailure != nil {
-		// Billing resolution can rewrite usage. Observe the upstream values.
-		snapshot := *result
-		traceResult = &snapshot
-		defer func() {
-			if traceResult != nil {
-				// Pricing/credential errors never reach a billing decision.
-				// Close the send without training history or emitting an event.
-				s.settleCacheTrace(ctx, traceResult, input.Account, cacheTraceUnbilled)
-			}
-		}()
-	}
 	s.resilience.NoteAccountSuccess(ctx, input.Account)
 	// OpenAI input_tokens already include cache reads and writes.
 	s.resilience.NoteSessionCacheUsage(ctx, result.Usage.CacheReadInputTokens, result.Usage.InputTokens)
@@ -524,18 +511,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// xy2api resilience: a client that left before any output is not billed,
 	// except at upstream cost under the abuse guard (design §8.2).
 	resilienceAnnotateUsage(ctx, usageLog)
-	skipBilling := resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier)
-	if traceResult != nil {
-		delivery := cacheTraceDelivered
-		if skipBilling {
-			delivery = cacheTraceUnbilled
-		} else if usageLog.BillingMode != nil && *usageLog.BillingMode == UsageBillingModeUndeliveredAbuse {
-			delivery = cacheTraceAbuse
-		}
-		s.settleCacheTrace(ctx, traceResult, input.Account, delivery)
-		traceResult = nil
-	}
-	if skipBilling {
+	if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {
 		return nil
 	}
 	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, apiKey)
@@ -543,9 +519,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		writeUsageLogAfterBilling(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 		logger.LegacyPrintf("service.openai_gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.logCacheSettlement(result, usageLog)
-		if result.cachePanel != nil {
-			s.recordCachePanelSettlement(result, usageLog, account)
-		}
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
 		return nil
 	}
@@ -577,9 +550,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 	writeUsageLogAfterBilling(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 	s.logCacheSettlement(result, usageLog)
-	if result.cachePanel != nil {
-		s.recordCachePanelSettlement(result, usageLog, account)
-	}
 
 	return nil
 }

@@ -55,7 +55,6 @@ type DashboardAggregationRepository interface {
 // DashboardAggregationService 负责定时聚合与回填。
 type DashboardAggregationService struct {
 	repo                 DashboardAggregationRepository
-	cacheNorthstar       *CacheNorthstarAggregator
 	timingWheel          *TimingWheelService
 	cfg                  config.DashboardAggregationConfig
 	settingRepo          SettingRepository
@@ -101,7 +100,6 @@ func (s *DashboardAggregationService) Start() {
 		logger.LegacyPrintf("service.dashboard_aggregation", "[DashboardAggregation] 聚合作业已禁用")
 		// Explicit runtime retention remains available without dashboard aggregation.
 		s.timingWheel.ScheduleRecurring("dashboard:retention", time.Minute, s.runScheduledRetention)
-		s.timingWheel.ScheduleRecurring("cache:northstar", time.Minute, s.runStandaloneCacheNorthstar)
 		return
 	}
 	go s.runStartupGroupUsageSync()
@@ -240,7 +238,6 @@ func (s *DashboardAggregationService) runScheduledAggregation() {
 	}
 	defer release()
 	defer s.runScheduledGroupUsageSync()
-	defer s.runScheduledCacheNorthstar()
 
 	now := time.Now().UTC()
 	last, err := s.repo.GetAggregationWatermark(ctx)

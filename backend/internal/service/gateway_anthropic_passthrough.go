@@ -109,16 +109,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			input.Body = input.Parsed.Body.Bytes()
 		}
 
-		s.applyCacheMetadataPassthrough(upstreamCtx, c, account, upstreamReq, wireBody)
-
-		if s.providerTraceEngine != nil {
-			s.providerTraceEngine.captureProviderCacheTrace(c, upstreamReq, account, "messages")
-			s.providerTraceEngine.markProviderCacheTraceSent(c)
-		}
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
-		if s.providerTraceEngine != nil {
-			s.providerTraceEngine.submitCacheTraceJob(c)
-		}
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
@@ -562,9 +553,6 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 					ms := int(time.Since(startTime).Milliseconds())
 					firstTokenMs = &ms
 				}
-				if providerCacheTraceFromGin(c) != nil {
-					observeProviderCacheTrace(c, []byte(data))
-				}
 				parseSSEUsagePassthrough(data, usage)
 			} else {
 				trimmed := strings.TrimSpace(line)
@@ -881,9 +869,6 @@ func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, anthropicTooLargeError)
 	if err != nil {
 		return nil, nonstreamReadError(ctx, resp, err)
-	}
-	if providerCacheTraceFromGin(c) != nil {
-		observeProviderCacheTrace(c, body)
 	}
 
 	observer := upstreamResponseModelObserverFromContext(c)

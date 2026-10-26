@@ -54,28 +54,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/account/__tests__/AccountTableFilters.spec.ts \
 	src/views/admin/__tests__/GroupsView.columnSettings.spec.ts \
 	src/views/admin/__tests__/GroupsView.categories.spec.ts \
-	src/views/admin/__tests__/AccountsView.groupCategories.spec.ts \
-	src/i18n/__tests__/localesNoKeyCollision.spec.ts \
-	src/features/cache-observability/__tests__/integrationSurface.spec.ts \
-	src/features/cache-observability/settings/__tests__/m4Policies.spec.ts \
-	src/features/cache-observability/settings/__tests__/m4l04.spec.ts \
-	src/features/cache-observability/settings/__tests__/m4l03.spec.ts \
-	src/features/cache-observability/settings/__tests__/schema.spec.ts \
-	src/features/cache-observability/settings/__tests__/m4l07.spec.ts \
-	src/features/cache-observability/settings/__tests__/usePolicies.spec.ts \
-	src/features/cache-observability/settings/__tests__/upstreamIdentity.spec.ts \
-	src/features/cache-observability/settings/__tests__/m31.spec.ts \
-	src/features/cache-observability/settings/__tests__/l17.spec.ts \
-	src/features/cache-observability/settings/__tests__/l09a.spec.ts \
-	src/features/cache-observability/settings/__tests__/contract.spec.ts \
-	src/features/cache-observability/settings/__tests__/pol2.spec.ts \
-	src/features/cache-observability/settings/__tests__/CacheSettingsPanel.spec.ts \
-	src/features/cache-observability/charts/__tests__/m2Fixes.spec.ts \
-	src/features/cache-observability/charts/__tests__/viewModel.spec.ts \
-	src/features/cache-observability/charts/__tests__/mock.spec.ts \
-	src/features/cache-observability/charts/__tests__/m2bStats.spec.ts \
-	src/features/cache-observability/charts/__tests__/ChartsPanel.spec.ts \
-	src/features/cache-observability/charts/__tests__/contract.spec.ts
+	src/views/admin/__tests__/AccountsView.groupCategories.spec.ts
 
 # 一键编译前后端
 build: build-backend build-frontend

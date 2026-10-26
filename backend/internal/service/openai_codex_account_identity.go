@@ -162,7 +162,7 @@ func applyCodexAccountIdentityEmbeddedMetadata(values map[string]any, account *A
 	return true
 }
 
-func applyCodexAccountIdentityClientMetadataMap(requestBody map[string]any, account *Account, apiKeyID int64, traces ...*cacheTrace) bool {
+func applyCodexAccountIdentityClientMetadataMap(requestBody map[string]any, account *Account, apiKeyID int64) bool {
 	if requestBody == nil || codexAccountIdentityNamespace(account) == "" {
 		return false
 	}
@@ -186,7 +186,6 @@ func applyCodexAccountIdentityClientMetadataMap(requestBody map[string]any, acco
 		next := scopeCodexAccountIdentityValue(account, apiKeyID, kind, raw)
 		if next != raw {
 			requestBody["prompt_cache_key"] = next
-			markCacheTracePCK(traces, "oauth_rewritten")
 			changed = true
 		}
 	}
@@ -196,7 +195,7 @@ func applyCodexAccountIdentityClientMetadataMap(requestBody map[string]any, acco
 // applyCodexAccountIdentityClientMetadataRaw scopes only the small identity
 // subobjects with gjson/sjson. The passthrough hot path never unmarshals the
 // potentially multi-megabyte request body.
-func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, apiKeyID int64, traces ...*cacheTrace) ([]byte, bool, error) {
+func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, apiKeyID int64) ([]byte, bool, error) {
 	if len(body) == 0 || codexAccountIdentityNamespace(account) == "" {
 		return body, false, nil
 	}
@@ -239,7 +238,6 @@ func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, a
 		}
 		scoped := scopeCodexAccountIdentityValue(account, apiKeyID, kind, raw)
 		if scoped != raw {
-			markCacheTracePCK(traces, "oauth_rewritten")
 			rewritten, err := sjson.SetBytes(next, "prompt_cache_key", scoped)
 			if err != nil {
 				return body, false, fmt.Errorf("splice account-scoped prompt_cache_key: %w", err)
