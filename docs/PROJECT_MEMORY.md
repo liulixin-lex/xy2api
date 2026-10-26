@@ -12,7 +12,7 @@
 - [PR #142](https://github.com/liulixin-lex/xy2api/pull/142) 于 2026-10-26T05:35:31Z 常规合入 main `1a9d9ac99`，18 项检查通过。回退缓存 PR #132–#140，保留已发布迁移 279 并新增 280 删除其五张表；升级路径与不可恢复的数据删除见 [迁移与回退](openai-cache-reliability.md#迁移与回退)。
 - 只保留两项确定性会话键处理，见 [会话键](openai-cache-reliability.md#会话键)：OpenAI 会话标识统一为 UUID（后台开关 `enable_openai_session_uuid`，默认开启）；Anthropic/Gemini 兜底键改为跨轮稳定锚点（无开关）。
 - 0.4.7 期间的 31 项缓存任务（M1–M4、P0a/P0b、L-01/L-03/L-04/L-07/L-09a/L-17、PR C/D 组装、管理后台缓存面板等）已终止，登记原文在 [记忆归档](PROJECT_MEMORY_ARCHIVE.md)；GitHub 上 8 个已合并的 feat/cache-* 分支已删除，测试服务器与工作机上的缓存期开发产物先存档后清理。
-- 未发版、未操作生产。下一次发版升级时会执行 280；之后不能再运行 0.4.7，可以回退到 0.4.6。
+- 0.4.8 版本准备进行中（2026-10-26，用户授权发版）：程序 VERSION 与 provenance 产品版本升为 0.4.8，Sub2API 兼容基线保持 0.2.15；版本 PR 的保护检查通过后合入，再以 annotated v0.4.8 触发正式 Release 并核验附件与镜像。升级时执行 280；之后不能再运行 0.4.7，可以回退到 0.4.6。不操作生产部署。
 
 ### XY2API 0.4.6 正式发布完成（2026-10-23；生产未部署）
 
@@ -169,6 +169,11 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
+
+### 20261026-release048 — XY2API 0.4.8 版本准备
+
+- 分支 release/0.4.8-20261026 基于 main `b9bf524c3`（#142 缓存精简、#143 记忆收尾）；只改 VERSION、UPSTREAM_BASE 产品版本与本记忆。
+- 下一步：保护检查通过后合入 main，在合并提交上打 annotated v0.4.8，核验 Release 附件、GHCR 镜像与版本号。不部署生产。
 
 ### 20261025-pr131-release047 — 0.4.7 已发布（2026-10-26 更正）
 
@@ -1253,3 +1258,9 @@ pnpm --dir frontend run build
 - 验证：本地全量门禁通过；PR 那一轮 CI 的 `TestCompatHeartbeatCommitsOnlyStableStreamHeaders` 在 race 下偶发失败一次（测试文件与基线相同，push 那一轮同一提交通过，本地 30 次复跑均通过），只重跑失败的 job 后 18 项通过。
 - 记忆：主文件中 31 条已终止缓存任务的摘要合并为一条；cache-slim 进行中条目原样移入归档。
 - 卡点/风险：无。未发版、未操作生产。
+
+### 2026-10-26 — 20261026-release048 — 0.4.8 版本准备
+
+- 请求/目标：用户授权发布包含 #142、#143 的 0.4.8。
+- 修改：程序 VERSION 与 provenance 产品版本 0.4.7→0.4.8，兼容基线 0.2.15 不变；登记本任务。
+- 验证与下一步：本地文档、audit、scheduler-diff、工具单测后提交版本 PR；全部保护检查通过后合入并打 annotated tag，触发 Release，核验产物。不操作生产。
