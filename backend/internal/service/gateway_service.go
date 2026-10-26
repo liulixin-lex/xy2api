@@ -936,43 +936,8 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 		)
 	}
 
-	// 2. 提取带 cache_control: {type: "ephemeral"} 的内容
-	cacheableContent := s.extractCacheableContent(parsed)
-	if cacheableContent != "" {
-		hash := s.hashContent(cacheableContent)
-		slog.Info("sticky.hash_source",
-			"source", "cacheable_content",
-			"hash", hash,
-		)
-		return hash
-	}
-
-	// 3. 最后 fallback: 使用 session上下文 + system + 所有消息的完整摘要串
-	var combined strings.Builder
-	// 混入请求上下文区分因子，避免不同用户相同消息产生相同 hash
-	if parsed.SessionContext != nil {
-		_, _ = combined.WriteString(parsed.SessionContext.ClientIP)
-		_, _ = combined.WriteString(":")
-		_, _ = combined.WriteString(NormalizeSessionUserAgent(parsed.SessionContext.UserAgent))
-		_, _ = combined.WriteString(":")
-		_, _ = combined.WriteString(strconv.FormatInt(parsed.SessionContext.APIKeyID, 10))
-		_, _ = combined.WriteString("|")
-	}
-	if systemText := extractTextFromSystemRaw(parsed.SystemRaw()); systemText != "" {
-		_, _ = combined.WriteString(systemText)
-	}
-	contentStart := combined.Len()
-	appendMessageTextsFromRaw(&combined, parsed.MessagesRaw())
-	if combined.Len() == contentStart {
-		appendResponsesSessionAnchorFromRaw(&combined, parsed.InputRaw())
-	}
-	if combined.Len() > 0 {
-		hash := s.hashContent(combined.String())
-		slog.Info("sticky.hash_source",
-			"source", "message_content_fallback",
-			"hash", hash,
-			"content_len", combined.Len(),
-		)
+	if hash := s.stableSessionAnchorHash(parsed); hash != "" {
+		slog.Info("sticky.hash_source", "source", "stable_anchor", "hash", hash)
 		return hash
 	}
 
@@ -1084,18 +1049,6 @@ func (s *GatewayService) SaveAnthropicSession(_ context.Context, groupID int64, 
 	return nil
 }
 
-func (s *GatewayService) extractCacheableContent(parsed *ParsedRequest) string {
-	if parsed == nil {
-		return ""
-	}
-
-	systemText := extractCacheableTextFromSystemRaw(parsed.SystemRaw())
-	if messageText := extractCacheableTextFromMessagesRaw(parsed.MessagesRaw()); messageText != "" {
-		return messageText
-	}
-	return systemText
-}
-
 func parseRawJSONView(raw []byte) gjson.Result {
 	if len(raw) == 0 {
 		return gjson.Result{}
@@ -1145,32 +1098,6 @@ func extractTextFromContentRaw(content gjson.Result) string {
 		return builder.String()
 	}
 	return ""
-}
-
-func appendMessageTextsFromRaw(builder *strings.Builder, raw []byte) {
-	if builder == nil || len(raw) == 0 {
-		return
-	}
-	messages := parseRawJSONView(raw)
-	if !messages.IsArray() {
-		return
-	}
-	messages.ForEach(func(_, msg gjson.Result) bool {
-		if content := msg.Get("content"); content.Exists() {
-			_, _ = builder.WriteString(extractTextFromContentRaw(content))
-			return true
-		}
-		parts := msg.Get("parts")
-		if parts.IsArray() {
-			parts.ForEach(func(_, part gjson.Result) bool {
-				if text := part.Get("text").String(); text != "" {
-					_, _ = builder.WriteString(text)
-				}
-				return true
-			})
-		}
-		return true
-	})
 }
 
 func appendResponsesSessionAnchorFromRaw(builder *strings.Builder, raw []byte) {
@@ -1230,51 +1157,6 @@ func appendResponsesContentText(builder *strings.Builder, content gjson.Result) 
 		}
 		return true
 	})
-}
-
-func extractCacheableTextFromSystemRaw(raw []byte) string {
-	system := parseRawJSONView(raw)
-	if !system.IsArray() {
-		return ""
-	}
-	var builder strings.Builder
-	system.ForEach(func(_, part gjson.Result) bool {
-		if part.Get("cache_control.type").String() == "ephemeral" {
-			if text := part.Get("text").String(); text != "" {
-				_, _ = builder.WriteString(text)
-			}
-		}
-		return true
-	})
-	return builder.String()
-}
-
-func extractCacheableTextFromMessagesRaw(raw []byte) string {
-	messages := parseRawJSONView(raw)
-	if !messages.IsArray() {
-		return ""
-	}
-	var text string
-	messages.ForEach(func(_, msg gjson.Result) bool {
-		content := msg.Get("content")
-		if !content.IsArray() {
-			return true
-		}
-		found := false
-		content.ForEach(func(_, part gjson.Result) bool {
-			if part.Get("cache_control.type").String() == "ephemeral" {
-				found = true
-				return false
-			}
-			return true
-		})
-		if found {
-			text = extractTextFromContentRaw(content)
-			return false
-		}
-		return true
-	})
-	return text
 }
 
 func (s *GatewayService) hashContent(content string) string {

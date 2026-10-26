@@ -66,7 +66,22 @@ Compose / 环境变量对应 `GATEWAY_OPENAI_CACHE_DIAGNOSTICS_ENABLED`、`GATEW
 - **自定义兼容站**：同样适用。原有兼容路径本来就会向同一批账号发送这个字段，所以风险不变。如果某个上游不接受这个字段，关闭该设置即可恢复原行为。
 - **切换影响**：开启或关闭后，上游的粘性分区和缓存分区会重建一次。
 
-<!-- Anthropic 与 Gemini 稳定兜底会话键的说明随对应提交补充于此。 -->
+### Anthropic 与 Gemini：稳定兜底会话键
+
+这项处理没有开关。它只用于没有 share 锚点、也没有 metadata.user_id 会话的请求；Claude Code 这类带 metadata 的客户端不受影响。
+
+- **原来的问题**：兜底键取自带 cache_control 的消息或全部消息，每一轮都会变，所以多账号分组里会频繁换号。
+- **现在的组成**：客户端 IP、规范化后的 UA、API Key、分组，以及规范化后的 system 和首条 user 文本，一起计算哈希。
+- **规范化规则**：
+  - 去掉 `<system-reminder>` 标签内的内容、开头的 billing 行和多余空白。
+  - 首条 user 如果只剩 reminder，顺延到下一条有文本的 user。
+- **入口一致**：count_tokens 和 Gemini 原生入口使用与 Messages 相同的分组，同一段内容得到同一个键。
+- **边界**：
+  - system 中随日期变化的句子，会让键每天最多变一次。
+  - cwd、git status 这类内容不做通用删除。
+  - 客户端换 IP 会换键。
+  - 同一租户、同一台机器上，首句完全相同的两段对话会共用一个账号。
+- **升级影响**：不带 metadata 的已有会话会一次性重新绑定账号。
 
 ## 迁移与回退
 

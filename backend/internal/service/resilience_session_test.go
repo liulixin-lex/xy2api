@@ -202,6 +202,74 @@ func TestGatewayHardBoundAccountRebinds(t *testing.T) {
 	require.Equal(t, int64(42), cache.sessionBindings["sess"])
 }
 
+func TestGatewayStableSessionAnchorDrivesResilienceAcrossTurns(t *testing.T) {
+	groupID := int64(7)
+	ctx := &SessionContext{ClientIP: "192.0.2.40", UserAgent: "claude-cli/1.0", APIKeyID: 90}
+	parseRound := func(t *testing.T, messages []any) *ParsedRequest {
+		t.Helper()
+		parsed := mustParseSessionHashRequest(t, anthropicSessionBody("You are a coding assistant.", messages, ""), ctx)
+		parsed.GroupID = &groupID
+		return parsed
+	}
+	turn1 := parseRound(t, []any{msg("user", "Write a function")})
+	turn2 := parseRound(t, []any{msg("user", "Write a function"), msg("assistant", "func answer() {}"), msg("user", "Add error handling")})
+	svcForHash := &GatewayService{}
+	firstHash := svcForHash.GenerateSessionHash(turn1)
+	secondHash := svcForHash.GenerateSessionHash(turn2)
+	require.NotEmpty(t, firstHash)
+	require.Equal(t, firstHash, secondHash, "different rounds must enter the same selector and failure state")
+
+	t.Run("second round hits original owner", func(t *testing.T) {
+		svc, cache := newLastResortGatewayFixture(t, []Account{
+			{ID: 101, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 2},
+			{ID: 102, Platform: PlatformAnthropic, Priority: 2, Status: StatusActive, Schedulable: true, Concurrency: 2},
+		})
+		cache.sessionBindings = map[string]int64{firstHash: 101}
+		ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+		result, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, secondHash, "claude-sonnet-4", nil, "", 0)
+		require.NoError(t, err)
+		require.Equal(t, int64(101), result.Account.ID)
+	})
+
+	t.Run("soft penalty serves substitute and keeps owner binding", func(t *testing.T) {
+		cooldown := time.Now().Add(45 * time.Second)
+		svc, cache := newLastResortGatewayFixture(t, []Account{
+			{ID: 201, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 2, RateLimitResetAt: &cooldown},
+			{ID: 202, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 2},
+		})
+		cache.sessionBindings = map[string]int64{firstHash: 201}
+		ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+		result, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, secondHash, "claude-sonnet-4", nil, "", 0)
+		require.NoError(t, err)
+		require.Equal(t, int64(202), result.Account.ID)
+		require.Equal(t, int64(201), cache.sessionBindings[firstHash], "soft penalty leaves the original owner binding intact")
+		require.Zero(t, cache.deletedSessions[firstHash])
+	})
+
+	t.Run("failure streak removes old owner and binds failover", func(t *testing.T) {
+		withResilienceSettings(t, nil)
+		svc, cache := newLastResortGatewayFixture(t, []Account{
+			{ID: 301, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 2},
+			{ID: 302, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 2},
+		})
+		cache.sessionBindings = map[string]int64{firstHash: 301}
+		recorder := svc.gatewaySessionRecorder()
+		recorder.Failure(context.Background(), groupID, firstHash, 301, resilience.CategoryRateLimit)
+		recorder.Failure(context.Background(), groupID, secondHash, 301, resilience.CategoryTransient)
+		_, stillBound := cache.sessionBindings[firstHash]
+		require.False(t, stillBound, "the threshold failure removes the old binding")
+		require.GreaterOrEqual(t, cache.deletedSessions[firstHash], 1)
+		require.Contains(t, svc.resilience.sessionAvoid(context.Background(), &groupID, secondHash), int64(301))
+
+		requestCtx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+		result, err := svc.SelectAccountWithLoadAwareness(requestCtx, &groupID, secondHash, "claude-sonnet-4", nil, "", 0)
+		require.NoError(t, err)
+		require.Equal(t, int64(302), result.Account.ID)
+		require.NoError(t, svc.BindStickySessionAfterProfitAdmission(requestCtx, &groupID, secondHash, result.Account.ID))
+		require.Equal(t, int64(302), cache.sessionBindings[secondHash], "the failover owner receives the stable key")
+	})
+}
+
 func TestSessionFailureStreakRebindsAndAvoids(t *testing.T) {
 	// Spec: one busy failure keeps the session; the second moves it.
 	withResilienceSettings(t, nil)

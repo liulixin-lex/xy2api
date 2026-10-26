@@ -180,6 +180,7 @@
     "xy-resilience-fallback-hook",
     "xy-index-nonce-no-304",
     "xy-placeholder-session-id",
+    "xy-anthropic-stable-session-anchor",
     "xy-allowlist-404-hint",
     "xy-registration-email-alias-hardening",
     "xy-admin-user-batch-status",

@@ -261,6 +261,10 @@
       "value": "|| fallbackForcedFastChargesStandard(ctx, serviceTier) {"
     },
     {
+      "path": "backend/internal/service/gateway_service.go",
+      "value": "s.stableSessionAnchorHash(parsed)"
+    },
+    {
       "path": "backend/internal/handler/dto/mappers.go",
       "value": "u.Group = GroupFromServiceShallow(l.OriginGroup)"
     },
@@ -2047,6 +2051,7 @@
     "xy-resilience-fallback-hook",
     "xy-index-nonce-no-304",
     "xy-placeholder-session-id",
+    "xy-anthropic-stable-session-anchor",
     "xy-allowlist-404-hint",
     "xy-registration-email-alias-hardening",
     "xy-admin-user-batch-status",
@@ -2344,6 +2349,31 @@
       "id": "xy-placeholder-session-id",
       "path": "backend/internal/service/generate_session_hash_test.go",
       "literal": "TestGenerateSessionHash_PlaceholderSessionIDIsIgnored"
+    },
+    {
+      "id": "xy-anthropic-stable-session-anchor",
+      "path": "backend/internal/service/gateway_service.go",
+      "literal": "s.stableSessionAnchorHash(parsed)"
+    },
+    {
+      "id": "xy-anthropic-stable-session-anchor",
+      "path": "backend/internal/service/generate_session_hash_test.go",
+      "literal": "func TestGenerateSessionHash_ContinuousConversation_HashStableAcrossTurns"
+    },
+    {
+      "id": "xy-anthropic-stable-session-anchor",
+      "path": "backend/internal/service/generate_session_hash_test.go",
+      "literal": "func TestGenerateSessionHash_StableAnchorStripsOnlyLeadingBillingLine"
+    },
+    {
+      "id": "xy-anthropic-stable-session-anchor",
+      "path": "backend/internal/service/resilience_session_test.go",
+      "literal": "func TestGatewayStableSessionAnchorDrivesResilienceAcrossTurns"
+    },
+    {
+      "id": "xy-anthropic-stable-session-anchor",
+      "path": "backend/internal/handler/gateway_session_anchor_handler_test.go",
+      "literal": "func TestGatewaySessionAnchorHandlerKeysShareNonzeroGroupAndBindings"
     },
     {
       "id": "xy-allowlist-404-hint",
