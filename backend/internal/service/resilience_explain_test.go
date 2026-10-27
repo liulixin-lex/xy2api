@@ -30,7 +30,7 @@ func TestResilienceExplainShowsPenaltiesSessionLastResortAndFallback(t *testing.
 	require.Equal(t, 0, out.HealthyCount)
 	require.Len(t, out.Accounts, 2)
 	require.Equal(t, ResilienceAccountExplanation{AccountID: 4, Name: "dry", Platform: PlatformOpenAI, Priority: 1,
-		Tier: "hard", Reason: "balance_exhausted", CapabilityLearned: []resilience.LearnedCapability{}}, out.Accounts[0])
+		Tier: "hard", Reason: "balance_exhausted", RecoverAt: &pausedUntil, CapabilityLearned: []resilience.LearnedCapability{}}, out.Accounts[0])
 	busy := out.Accounts[1]
 	require.Equal(t, "soft", busy.Tier)
 	require.Equal(t, "temp_unschedulable", busy.Reason)

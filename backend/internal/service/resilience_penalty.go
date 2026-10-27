@@ -114,6 +114,10 @@ func (s *RateLimitService) resilienceHandleUpstreamError(ctx context.Context, ac
 		if isOpenAIAccount(account) && (account.Type != AccountTypeAPIKey || res.RetryAfter <= 0) {
 			return false, false
 		}
+		if !account.IsOpenAICompatible() && res.RetryAfter <= 0 {
+			s.resilience.recordModelBreakerFailure(ctx, account)
+			return false, false
+		}
 		s.applyTransientCooldown(ctx, account, res, fmt.Sprintf("HTTP %d", statusCode))
 		return false, false
 	case resilience.CategoryClientError:
@@ -164,7 +168,11 @@ func (s *RateLimitService) ApplyResilienceOutcome(ctx context.Context, account *
 			s.applyBalancePause(ctx, account, evidence)
 		}
 	case res.Category.SoftCooldown():
-		s.applyTransientCooldown(ctx, account, res, evidence)
+		if !account.IsOpenAICompatible() && res.RetryAfter <= 0 {
+			s.resilience.recordModelBreakerFailure(ctx, account)
+		} else {
+			s.applyTransientCooldown(ctx, account, res, evidence)
+		}
 	}
 }
 
@@ -300,6 +308,10 @@ func (r *ResilienceService) NoteAccountSuccess(ctx context.Context, account *Acc
 	// too; it must not lift cooldowns.
 	if resilience.StateFrom(ctx).AccountFailed(account.ID) {
 		return
+	}
+	if !account.IsOpenAICompatible() {
+		st := resilience.StateFrom(ctx)
+		r.getModelBreakerState().recordSuccessAt(account.ID, st.Model(), st.Budget().Started())
 	}
 	now := time.Now()
 	resilience.StateFrom(ctx).SessionSuccess(ctx, account.ID)

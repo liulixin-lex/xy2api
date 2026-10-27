@@ -2241,6 +2241,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			return nil, OpenAIAccountScheduleDecision{}, cachedErr
 		}
 	}
+	ctx = s.withResilienceOpenAIEligibility(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform)
 	avoided := s.resilience.sessionAvoid(ctx, groupID, sessionHash)
 	excludedIDs = mergeExcluded(excludedIDs, avoided)
 	ctx = s.withOpenAIShareTrace(ctx, groupID, sessionHash, excludedIDs, requiredImageCapability)
@@ -2314,6 +2315,9 @@ type openAIGroupPrivacyRequirement struct {
 }
 
 func (s *OpenAIGatewayService) withOpenAIGroupPrivacyRequirement(ctx context.Context, groupID *int64) context.Context {
+	if cached, ok := ctx.Value(openAIGroupPrivacyRequirementContextKey{}).(openAIGroupPrivacyRequirement); ok && cached.groupID == derefGroupID(groupID) {
+		return ctx
+	}
 	return context.WithValue(ctx, openAIGroupPrivacyRequirementContextKey{}, openAIGroupPrivacyRequirement{
 		groupID:  derefGroupID(groupID),
 		required: s.loadOpenAIGroupRequiresPrivacySet(ctx, groupID),
@@ -2449,6 +2453,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	}
 	scheduler := s.getOpenAIAccountScheduler(ctx)
 	if scheduler == nil {
+		ctx = withOpenAIStickyMigrationGuard(ctx, previousResponseID, requiredTransport)
 		decision.Layer = openAIAccountScheduleLayerLoadBalance
 		if selection, hit, err := s.selectLegacyAccountByPreviousResponse(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform); err != nil {
 			return nil, decision, err
@@ -2653,7 +2658,7 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResultWithContext(ctx 
 	}
 	if success {
 		s.openaiOAuth429RetryStartedAt.Delete(accountID)
-		s.clearOpenAIAccountModelTransientState(accountID, normalizeOpenAIAccountModelTransientModel(model))
+		s.ReportOpenAIAttemptSuccess(ctx, account, model)
 	}
 	scheduler := s.getOpenAIAccountScheduler(ctx)
 	if scheduler == nil {

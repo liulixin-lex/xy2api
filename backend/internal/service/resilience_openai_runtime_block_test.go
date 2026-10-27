@@ -34,7 +34,9 @@ func newOpenAIRuntimeBlockEnv(t *testing.T, scheduler sharesched.Scheduler, ids 
 func breakOpenAIModel(t *testing.T, env *openAIShareTestEnv, id int64, failures int, at time.Time) {
 	t.Helper()
 	for i := 0; i < failures; i++ {
-		env.svc.recordOpenAIAccountModelTransientFailure(env.account(id), "gpt-5.1", at)
+		// Separate rounds; failures inside an open cooldown no longer escalate.
+		when := at.Add(time.Duration(i-failures+1) * 5 * time.Minute)
+		env.svc.recordOpenAIAccountModelTransientFailure(env.account(id), "gpt-5.1", when)
 	}
 	require.True(t, env.svc.isOpenAIAccountModelRuntimeBlocked(env.account(id), "gpt-5.1"))
 }

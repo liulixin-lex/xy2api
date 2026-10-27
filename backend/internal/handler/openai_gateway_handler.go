@@ -818,6 +818,15 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// 从不可变的 canonical forwardBody 派生本次尝试 body 并整块剔除上游私有的加密
 		// reasoning item（含耦合的 id/summary），避免非透传上游 400 拒绝 Kiro reasoning 形态。
 		attemptBody := h.deriveOpenAIForwardAttemptBody(reqLog, forwardBody, account, &passthroughFailoverState)
+		if st := resilience.StateFrom(c.Request.Context()); st != nil {
+			st.SetAttemptProfile(resilience.AttemptProfile{
+				AccountID: account.ID, AttemptStart: forwardStart,
+				Model:     service.OpenAIAttemptModel(account, forwardModel),
+				Warm:      service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0),
+				Stream:    reqStream,
+				BodyBytes: len(attemptBody),
+			})
+		}
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
@@ -1408,7 +1417,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		account := selection.Account
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai_messages.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
-		_ = scheduleDecision
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
@@ -1431,6 +1439,15 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		defaultMappedModel := strings.TrimSpace(effectiveMappedModel)
 		// 应用渠道模型映射到请求体
 		forwardBody := mappedBodyForMessages(channelMappingMsg.Mapped, channelMappingMsg.MappedModel)
+		if st := resilience.StateFrom(c.Request.Context()); st != nil {
+			st.SetAttemptProfile(resilience.AttemptProfile{
+				AccountID: account.ID, AttemptStart: forwardStart,
+				Model:     service.OpenAIAttemptModel(account, currentRoutingModel),
+				Warm:      service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0),
+				Stream:    reqStream,
+				BodyBytes: len(forwardBody),
+			})
+		}
 		// xy2api resilience: delayed pre-output heartbeat for CDN-fronted streams (design §7.2).
 		armPreOutputKeepalive(c, service.PreOutputProtocolAnthropic, reqStream, account)
 		writerSizeBeforeForward := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)
@@ -3628,8 +3645,8 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		h.handleFailoverExhaustedSimple(c, http.StatusBadGateway, streamStarted)
 		return
 	}
-	copyFailoverRetryAfter(c, failoverErr.StatusCode, failoverErr.ResponseHeaders)
 	if failoverErr.IsOpenAIRequestBodyTooLarge() {
+		suppressResilienceRetryAdvice(c, "non_retryable")
 		service.SetOpsUpstreamError(c, http.StatusRequestEntityTooLarge, service.OpenAIRequestBodyTooLargeClientMessage, "")
 		h.handleStreamingAwareError(
 			c,
@@ -3641,6 +3658,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		return
 	}
 	if failoverErr.Reason == service.OpenAIHTTPContinuationUnsupportedReason {
+		suppressResilienceRetryAdvice(c, "non_retryable")
 		message := strings.TrimSpace(failoverErr.ClientMessage)
 		if message == "" {
 			message = "previous_response_id requires an OpenAI API-key account for HTTP requests"
@@ -3648,6 +3666,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", message, streamStarted)
 		return
 	}
+	copyFailoverRetryAfter(c, failoverErr.StatusCode, failoverErr.ResponseHeaders)
 	if status, errType, message, ok := resilienceWebSearchHistoryRejected(c, h.gatewayService, failoverErr); ok {
 		h.handleStreamingAwareError(c, status, errType, message, streamStarted)
 		return
@@ -3772,15 +3791,15 @@ func copyFailoverRetryAfter(c *gin.Context, status int, headers http.Header) {
 	// Every final upstream replaces the provenance, even when its hint is
 	// absent or invalid. Do not revive a previous attempt's delay.
 	c.Set(ginKeyResilienceUpstreamRetryAfter, "")
+	c.Writer.Header().Del("Retry-After")
+	if !resilience.RetryAdviceEligible(status, "", "") {
+		return
+	}
 	retryAfter := strings.TrimSpace(headers.Get("Retry-After"))
 	if retryAfter == "" || len(retryAfter) > 128 || strings.ContainsAny(retryAfter, "\r\n") || !isSafeRetryAfter(retryAfter) {
 		return
 	}
-	// Keep the legacy HTTP header behavior, but a client error mapped to
-	// 502 is not evidence of a transient upstream recovery.
-	if resilience.RetryAdviceEligible(status, "", "") {
-		c.Set(ginKeyResilienceUpstreamRetryAfter, retryAfter)
-	}
+	c.Set(ginKeyResilienceUpstreamRetryAfter, retryAfter)
 	c.Header("Retry-After", retryAfter)
 }
 

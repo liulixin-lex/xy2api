@@ -5,15 +5,18 @@ package handler
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	middleware "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -127,4 +130,49 @@ func TestGatewayChatCompletions_GeminiClientCancelBeforeUpstreamResponseMarks499
 	require.Equal(t, statusClientClosedRequest, rec.Code)
 	require.Zero(t, rec.Body.Len())
 	require.Zero(t, opsQueued)
+}
+
+type geminiStallUpstream struct {
+	service.HTTPUpstream
+	body io.ReadCloser
+}
+
+func (u *geminiStallUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: u.body}, nil
+}
+
+func TestGatewayGeminiStreamStallWritesOneTerminal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withHandlerResilience(t, func(s *resilience.Settings) { s.Stall.TextStallSeconds = 1 })
+	for _, protocol := range []string{"messages", "chat"} {
+		t.Run(protocol, func(t *testing.T) {
+			f := newGeminiClientCancelFixture(t)
+			reader, writer := io.Pipe()
+			t.Cleanup(func() { _ = reader.Close(); _ = writer.Close() })
+			written := make(chan struct{})
+			go func() {
+				defer close(written)
+				_, _ = io.WriteString(writer, "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello\"}]}}]}\n\n")
+			}()
+			f.handler.geminiCompatService = service.NewGeminiMessagesCompatService(nil, nil, nil, nil, nil, nil,
+				&geminiStallUpstream{body: reader}, nil, &config.Config{})
+			path, call := EndpointMessages, f.handler.Messages
+			if protocol == "chat" {
+				path, call = "/v1/chat/completions", f.handler.ChatCompletions
+			}
+			rec, _ := f.serve(t, path, path,
+				`{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hi"}],"max_tokens":32,"stream":true}`, call)
+			<-written
+			body := rec.Body.String()
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.Contains(t, body, "hello")
+			require.Equal(t, 1, strings.Count(body, `"type":"stream_timeout"`), body)
+			require.NotContains(t, body, "Upstream request failed")
+			if protocol == "messages" {
+				require.Equal(t, 1, strings.Count(body, "event: error"), body)
+			} else {
+				require.Equal(t, 1, strings.Count(body, "data: [DONE]"), body)
+			}
+		})
+	}
 }

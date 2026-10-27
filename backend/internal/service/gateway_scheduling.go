@@ -508,7 +508,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							continue
 						}
 						if sessionHash != "" && s.cache != nil {
-							_ = s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, item.account.ID)
+							_ = s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, item.account.ID, requestedModel)
 						}
 						if s.debugModelRoutingEnabled() {
 							logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] routed select: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), item.account.ID)
@@ -735,7 +735,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 	loadMap, err := s.concurrencyService.GetAccountsLoadBatch(ctx, accountLoads)
 	if err != nil {
-		if result, ok, legacyErr := s.tryAcquireByLegacyOrder(ctx, candidates, groupID, sessionHash, preferOAuth); legacyErr != nil {
+		if result, ok, legacyErr := s.tryAcquireByLegacyOrder(ctx, candidates, groupID, sessionHash, requestedModel, preferOAuth); legacyErr != nil {
 			return nil, legacyErr
 		} else if ok {
 			return result, nil
@@ -778,7 +778,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
 				} else {
 					if sessionHash != "" && s.cache != nil {
-						_ = s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.account.ID)
+						_ = s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.account.ID, requestedModel)
 					}
 					return s.newSelectionResult(ctx, selected.account, true, result.ReleaseFunc, nil)
 				}
@@ -816,7 +816,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	return nil, ErrNoAvailableAccounts
 }
 
-func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates []*Account, groupID *int64, sessionHash string, preferOAuth bool) (*AccountSelectionResult, bool, error) {
+func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates []*Account, groupID *int64, sessionHash, requestedModel string, preferOAuth bool) (*AccountSelectionResult, bool, error) {
 	ordered := append([]*Account(nil), candidates...)
 	sortAccountsByPriorityAndLastUsed(ordered, preferOAuth)
 
@@ -829,7 +829,7 @@ func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates
 				continue
 			}
 			if sessionHash != "" && s.cache != nil {
-				_ = s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, acc.ID)
+				_ = s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, acc.ID, requestedModel)
 			}
 			selection, err := s.newSelectionResult(ctx, acc, true, result.ReleaseFunc, nil)
 			if err != nil {
@@ -1180,7 +1180,7 @@ func (s *GatewayService) isAccountSchedulableForModelSelection(ctx context.Conte
 	if account == nil {
 		return false
 	}
-	return account.IsSchedulableForModelWithContext(ctx, requestedModel)
+	return account.IsSchedulableForModelWithContext(ctx, requestedModel) && !resilienceModelBreakerBlocks(ctx, account, requestedModel)
 }
 
 // isAccountInGroup checks if the account belongs to the specified group.
@@ -2044,7 +2044,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 
 		if selected != nil {
 			if sessionHash != "" && s.cache != nil {
-				if err := s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.ID); err != nil {
+				if err := s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.ID, requestedModel); err != nil {
 					logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
 				}
 			}
@@ -2169,7 +2169,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 
 	// 4. 建立粘性绑定
 	if sessionHash != "" && s.cache != nil {
-		if err := s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.ID); err != nil {
+		if err := s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.ID, requestedModel); err != nil {
 			logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
 		}
 	}
@@ -2310,7 +2310,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 
 		if selected != nil {
 			if sessionHash != "" && s.cache != nil {
-				if err := s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.ID); err != nil {
+				if err := s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.ID, requestedModel); err != nil {
 					logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
 				}
 			}
@@ -2436,7 +2436,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 
 	// 4. 建立粘性绑定
 	if sessionHash != "" && s.cache != nil {
-		if err := s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.ID); err != nil {
+		if err := s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.ID, requestedModel); err != nil {
 			logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
 		}
 	}

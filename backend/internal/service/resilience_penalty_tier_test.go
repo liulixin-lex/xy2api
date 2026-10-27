@@ -53,7 +53,7 @@ func TestSoftCooldownKeepsActiveBalancePause(t *testing.T) {
 
 func TestSoftCooldownStillExtendsSoftCooldown(t *testing.T) {
 	svc, repo, account, _ := newPenaltyFixture(t, PlatformAnthropic)
-	svc.HandleUpstreamError(context.Background(), account, 524, http.Header{}, []byte(`gateway timeout`))
+	svc.HandleUpstreamError(context.Background(), account, 524, http.Header{"Retry-After": {"30"}}, []byte(`gateway timeout`))
 	first := repo.tempUntil
 	svc.HandleUpstreamError(context.Background(), account, http.StatusServiceUnavailable, http.Header{"Retry-After": {"90"}}, nil)
 	require.True(t, repo.tempUntil.After(first), "a longer soft cooldown extends a shorter one")
@@ -64,7 +64,7 @@ func TestSoftCooldownStillExtendsSoftCooldown(t *testing.T) {
 // a pause written between the read and the clear.
 func TestLiftTransientCooldownKeepsPauseWrittenAfterRead(t *testing.T) {
 	svc, repo, account, r := newPenaltyFixture(t, PlatformAnthropic)
-	svc.HandleUpstreamError(context.Background(), account, http.StatusBadGateway, http.Header{}, []byte(`{"error":{"message":"bad gateway"}}`))
+	svc.HandleUpstreamError(context.Background(), account, http.StatusBadGateway, http.Header{"Retry-After": {"30"}}, []byte(`{"error":{"message":"bad gateway"}}`))
 	require.True(t, strings.HasPrefix(repo.tempReason, resilience.ReasonPrefixTransient), repo.tempReason)
 	r.lastResortUsed.Store(account.ID, time.Now())
 

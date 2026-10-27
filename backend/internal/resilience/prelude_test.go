@@ -24,6 +24,7 @@ func TestClassifyStreamEvent(t *testing.T) {
 		{"unknown_codex_metadata", "responses", "codex.response.metadata", `{}`, Unknown, false},
 		{"response_metadata", "responses", "response.metadata", `{"type":"response.metadata","sequence_number":2,"metadata":{"openai_chatgpt_moderation_metadata":{}}}`, Prelude, false},
 		{"response_metadata_type_only", "responses", "", `{"type":"response.metadata","metadata":{}}`, Prelude, false},
+		{"codex_rate_limits", "responses", "codex.rate_limits", `{"type":"codex.rate_limits","rate_limits":{"primary":{"used_percent":12}}}`, Prelude, false},
 		{"codex_metadata_payload_type_wins", "responses", "response.metadata", `{"type":"codex.response.metadata"}`, Unknown, false},
 		{"response_metadata_not_messages", "messages", "response.metadata", `{}`, Unknown, false},
 		{"empty_reasoning", "responses", "response.output_item.added", `{"item":{"type":"reasoning","summary":[]}}`, Prelude, false},

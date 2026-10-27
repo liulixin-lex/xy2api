@@ -80,7 +80,9 @@ type ResilienceService struct {
 	// background holds optional loops registered before Start.
 	background []func(ctx context.Context)
 
-	rateLimit *RateLimitService
+	rateLimit        *RateLimitService
+	modelBreakerOnce sync.Once
+	modelBreaker     *openAIAccountModelTransientState
 
 	lastResortGroups lastResortGroupCache
 	// lastResortUsed records accounts recently served as last resort

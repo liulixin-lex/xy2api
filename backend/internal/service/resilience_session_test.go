@@ -430,7 +430,7 @@ func TestStreakOwnerLosesItsBinding(t *testing.T) {
 	rec.Failure(ctx, 7, "sess", 51, resilience.CategoryTransient)
 	require.True(t, st.Avoided(51))
 	require.True(t, resilienceBindAllowed(ctx, 52))
-	require.True(t, svc.resilienceGatewayBindAllowed(ctx, 52))
+	require.True(t, svc.resilienceGatewayBindAllowed(ctx, 52, ""))
 }
 
 func TestLastResortGroupSnapshotsDropExpiredEntries(t *testing.T) {

@@ -292,9 +292,11 @@ func (b *Budget) ClampWait(d time.Duration, now time.Time) time.Duration {
 }
 
 // AttemptTimeout returns the single-attempt first-output timeout: the tier
-// timeout bounded by the remaining budget. lastCandidate removes the tier
-// timeout so the last usable account only answers to the deadline (design
-// §7.4). Zero means no per-attempt timeout.
+// timeout, raised to the time the request has already spent, bounded by the
+// remaining budget. Raising it makes cut attempts back off geometrically when
+// every upstream is slow, while fast failures do not lengthen the next try.
+// lastCandidate removes the tier timeout so the last usable account only
+// answers to the deadline (design §7.4). Zero means no per-attempt timeout.
 func (b *Budget) AttemptTimeout(tier time.Duration, lastCandidate bool, now time.Time) time.Duration {
 	if b == nil {
 		return tier
@@ -302,6 +304,9 @@ func (b *Budget) AttemptTimeout(tier time.Duration, lastCandidate bool, now time
 	rem := b.Remaining(now)
 	if lastCandidate {
 		return rem
+	}
+	if spent := now.Sub(b.started); tier > 0 && spent > tier {
+		tier = spent
 	}
 	if rem > 0 && (tier <= 0 || rem < tier) {
 		return rem

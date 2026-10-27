@@ -23,6 +23,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
 	gocache "github.com/patrickmn/go-cache"
 	"github.com/tidwall/gjson"
@@ -691,6 +692,8 @@ const (
 
 type GatewayFailureReason string
 
+const PlannedFirstOutputTimeoutReason GatewayFailureReason = "planned_first_output_timeout"
+
 // UpstreamFailoverError indicates an upstream or credential error that may
 // trigger account failover. Additive metadata keeps existing composite literals
 // source-compatible and preserves their legacy retry-next-account behavior.
@@ -946,29 +949,18 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 
 // BindStickySession sets session -> account binding with standard TTL.
 func (s *GatewayService) BindStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
-	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
-	if sessionHash == "" || accountID <= 0 || s.cache == nil {
-		return nil
-	}
-	if !s.resilienceGatewayBindAllowed(ctx, accountID) {
-		return nil
-	}
-	ttl := stickySessionTTL
-	if shareTTL, ok := s.shareScheduling.shareBindingTTL(derefGroupID(groupID)); ok {
-		ttl = shareTTL
-	}
-	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, ttl)
+	return s.bindGatewayStickySession(ctx, groupID, sessionHash, accountID, resilience.StateFrom(ctx).Model())
 }
 
 // bindGatewayStickySessionDuringSelection preserves the normal eager sticky
 // behavior unless a profit gate is installed. Profit-controlled requests bind
 // only after the terminal post-slot check, otherwise a rejected candidate could
 // overwrite a healthy pre-existing sticky binding.
-func (s *GatewayService) bindGatewayStickySessionDuringSelection(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+func (s *GatewayService) bindGatewayStickySessionDuringSelection(ctx context.Context, groupID *int64, sessionHash string, accountID int64, requestedModel string) error {
 	if gatewayProfitControlGateActive(ctx) {
 		return nil
 	}
-	return s.BindStickySession(ctx, groupID, sessionHash, accountID)
+	return s.bindGatewayStickySession(ctx, groupID, sessionHash, accountID, requestedModel)
 }
 
 // BindStickySessionAfterProfitAdmission records a terminally admitted

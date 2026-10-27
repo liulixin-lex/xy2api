@@ -156,8 +156,11 @@ func TestRetryAdviceReadsOnlyFreshLocalCandidates(t *testing.T) {
 	// A repository with no implemented methods panics if the advisor performs I/O.
 	svc := &OpenAIGatewayService{resilience: r, accountRepo: &capabilityRepo{}}
 	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+	ctx = svc.withResilienceOpenAIEligibility(ctx, &group, "", "model", nil, OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityResponses, "", false, PlatformOpenAI)
 	require.Equal(t, resilience.RetryAdvice{Source: "unknown"}, svc.RetryAdvice(ctx, &group, "model"))
 	r.lastResortGroups.entries = map[int64]lastResortGroupEntry{group: {accounts: []Account{*capabilityTestAccount(1), *capabilityTestAccount(2)}, expires: time.Now().Add(time.Minute)}}
+	parent := int64(99)
+	r.lastResortGroups.entries[group].accounts[1].ParentAccountID = &parent
 	resilience.StateFrom(ctx).MarkAccountFailed(1)
 	require.Equal(t, resilience.RetryAdvice{Seconds: 1, Source: "healthy_candidate"}, svc.RetryAdvice(ctx, &group, "model"))
 	resilience.StateFrom(ctx).MarkAccountFailed(2)
@@ -168,6 +171,132 @@ func TestRetryAdviceReadsOnlyFreshLocalCandidates(t *testing.T) {
 	canceled, cancel := context.WithCancel(fresh)
 	cancel()
 	require.Equal(t, resilience.RetryAdvice{Source: "unknown"}, svc.RetryAdvice(canceled, &group, "model"))
+}
+
+func TestRecoveryProjectionUsesModelBreakerAcrossExits(t *testing.T) {
+	r, _, repo, _ := newFallbackFixture(t)
+	SetResilienceInstance(r)
+	t.Cleanup(func() { SetResilienceInstance(nil) })
+	group := int64(20)
+	model := "gpt-test"
+	accounts := []Account{*capabilityTestAccount(1), *capabilityTestAccount(2), *capabilityTestAccount(3)}
+	accounts[1].Credentials = map[string]any{"model_mapping": map[string]any{"other": "other"}}
+	accounts[2].Platform = PlatformAnthropic
+	svc := &OpenAIGatewayService{resilience: r, accountRepo: repo}
+	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+	ctx = svc.withResilienceOpenAIEligibility(ctx, &group, "", model, nil, OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityResponses, "", false, PlatformOpenAI)
+	gate := resilienceOpenAIEligibility(ctx, group, model)
+	now := time.Now()
+	state := svc.getOpenAIAccountModelTransientState()
+	state.recordSlowFailure(1, model, now)
+	breaker := state.recordSlowFailure(1, model, now)
+	check := func(expected time.Time) {
+		t.Helper()
+		repo.byGroup[group] = accounts
+		r.lastResortGroups.drop(group)
+		projection := resilienceRecoveryProjection(ctx, accounts, model, now, func(a *Account) bool {
+			return gate.allows(a, true, true, now)
+		}, svc.resilienceRecoveryPenaltyOf)
+		require.WithinDuration(t, expected, projection.at, time.Millisecond)
+		require.False(t, projection.healthy)
+		require.InDelta(t, expected.Sub(now).Seconds(), svc.NoAccountRetryAfter(ctx, &group, model).Seconds(), 1)
+		require.Equal(t, resilience.RetryAdvice{Seconds: 10, Source: "recovery"}, svc.RetryAdvice(ctx, &group, model))
+		require.True(t, resilienceNoAccountIsGroupLevel(ctx, group, model))
+	}
+	check(breaker.BlockUntil)
+
+	// Restrictions combine by latest end for an account, earliest for the group.
+	end := now.Add(90 * time.Second)
+	accounts[0].OverloadUntil = &end
+	other := *capabilityTestAccount(4)
+	accounts = append(accounts, other)
+	state.recordSlowFailure(4, model, now)
+	state.recordSlowFailure(4, model, now)
+	state.recordSlowFailure(4, model, now) // 120s, so account 1 recovers first.
+	check(end)
+
+	// A hard timed limit must not hide an even later model breaker.
+	hardEnd := now.Add(6 * time.Minute)
+	accounts[0].RateLimitResetAt = &hardEnd
+	for i := 0; i < 4; i++ {
+		breaker = state.recordSlowFailure(1, model, now)
+	}
+	accounts = accounts[:3]
+	check(breaker.BlockUntil)
+
+	// A request-only capability veto must never become a group-wide failure.
+	nominal := *capabilityTestAccount(5)
+	nominal.Extra = map[string]any{"openai_responses_supported": false}
+	accounts = append(accounts, nominal)
+	repo.byGroup[group] = accounts
+	r.lastResortGroups.drop(group)
+	require.False(t, resilienceNoAccountIsGroupLevel(ctx, group, model))
+	require.Equal(t, 10, svc.RetryAdvice(ctx, &group, model).Seconds)
+}
+
+func TestRecoveryAdviceIgnoresAttemptExclusions(t *testing.T) {
+	r, _, repo, _ := newFallbackFixture(t)
+	group := int64(20)
+	model := "gpt-test"
+	now := time.Now()
+	soon, late := now.Add(8*time.Second), now.Add(time.Minute)
+	a, b := capabilityTestAccount(1), capabilityTestAccount(2)
+	a.OverloadUntil, b.OverloadUntil = &soon, &late
+	repo.byGroup[group] = []Account{*a, *b}
+	svc := &OpenAIGatewayService{resilience: r, accountRepo: repo}
+	ctx := budgetServiceCtx(t, group)
+	resilience.StateFrom(ctx).NoteTurn(group, model, "")
+	excluded := map[int64]struct{}{a.ID: {}}
+	ctx = svc.withResilienceOpenAIEligibility(ctx, &group, "", model, excluded, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, "", false, PlatformOpenAI)
+	delete(excluded, a.ID)
+	excluded[b.ID] = struct{}{}
+	require.True(t, r.soleCandidate(ctx, group, b.ID), "selection retains its original exclusions")
+	require.False(t, r.soleCandidate(ctx, group, a.ID), "later handler mutations do not exclude an alternative")
+	resilience.StateFrom(ctx).MarkAccountFailed(a.ID)
+	resilience.StateFrom(ctx).MarkAccountFailed(b.ID)
+	require.InDelta(t, 8, svc.NoAccountRetryAfter(ctx, &group, model).Seconds(), 0.5)
+	require.Equal(t, resilience.RetryAdvice{Seconds: 8, Source: "recovery"}, svc.RetryAdvice(ctx, &group, model))
+}
+
+func TestRecoveryProjectionCombinesHardPauseAndModelBreaker(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		hard time.Duration
+		want time.Duration
+	}{
+		{"breaker ends later", 2 * time.Second, 20 * time.Second},
+		{"hard pause ends later", 600 * time.Second, 600 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _, accounts, _ := newFallbackFixture(t)
+			prev := Resilience()
+			SetResilienceInstance(r)
+			t.Cleanup(func() { SetResilienceInstance(prev) })
+			now := time.Now()
+			hardEnd := now.Add(tc.hard)
+			account := Account{ID: 91, Platform: PlatformGemini, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+				TempUnschedulableUntil: &hardEnd, TempUnschedulableReason: "manual"}
+			model := "gemini-2.5-flash"
+			state := r.getModelBreakerState()
+			state.recordFailure(account.ID, model, now.Add(-35*time.Second))
+			state.recordFailure(account.ID, model, now.Add(-35*time.Second))
+			// The third round opened 45 seconds, of which 25 have elapsed.
+			state.recordFailure(account.ID, model, now.Add(-25*time.Second))
+			tier, end, reason := resiliencePenaltyOf(&account, model, now)
+			require.Equal(t, resilience.TierHard, tier)
+			require.Equal(t, "temp_unschedulable", reason)
+			require.Equal(t, now.Add(tc.want), end)
+			projection := resilienceRecoveryProjection(context.Background(), []Account{account}, model, now, nil, resiliencePenaltyOf)
+			require.Equal(t, tc.want, projection.wait(now))
+
+			accounts.byGroup[10] = []Account{account}
+			out, err := r.Explain(context.Background(), 10, "", model)
+			require.NoError(t, err)
+			require.Len(t, out.Accounts, 1)
+			require.Equal(t, "hard", out.Accounts[0].Tier)
+			require.Equal(t, &end, out.Accounts[0].RecoverAt)
+		})
+	}
 }
 
 func TestRetryAdviceUsesKnownRecoveryAndStrongerHardStates(t *testing.T) {

@@ -221,6 +221,26 @@ func TestFailoverLoopSkipsAttemptReportedByStream(t *testing.T) {
 	require.Equal(t, 1, rec.failures[14])
 }
 
+func TestPlannedFirstOutputTimeoutDoesNotCountForSession(t *testing.T) {
+	withHandlerResilience(t, nil)
+	ctx := budgetCtx(t, resilience.KindText, 7)
+	rec := &countingRecorder{failures: map[int64]int{}}
+	resilience.StateFrom(ctx).SetSession(7, "sess", rec)
+	for _, reason := range []service.GatewayFailureReason{service.PlannedFirstOutputTimeoutReason, ""} {
+		bad := &service.UpstreamFailoverError{
+			StatusCode: 504, Reason: reason,
+			ResponseBody: []byte(`{"error":{"type":"first_output_timeout","message":"no output"}}`),
+		}
+		resilienceReportAttemptFailure(ctx, 11, bad)
+		resilienceReportAttemptFailure(ctx, 11, bad)
+		if reason != "" {
+			require.Zero(t, rec.failures[11], "planned cutoffs never enter the avoid streak")
+		} else {
+			require.Equal(t, 2, rec.failures[11], "real 504s still reach the session recorder")
+		}
+	}
+}
+
 func TestDecisionV2TransientAndRateLimitKeepSameHostCandidates(t *testing.T) {
 	withHandlerResilience(t, nil)
 	for _, tc := range []struct {

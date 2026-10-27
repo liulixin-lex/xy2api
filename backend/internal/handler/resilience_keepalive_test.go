@@ -94,3 +94,24 @@ func TestHeartbeatThenFailoverKeepsSwitching(t *testing.T) {
 	require.True(t, strings.HasPrefix(last, "event: error\ndata: {\"type\":\"error\""), last)
 	require.Contains(t, last, "overloaded_error")
 }
+
+func TestArmPreOutputKeepaliveResumesBetweenAPIKeyAttempts(t *testing.T) {
+	withHandlerResilience(t, func(s *resilience.Settings) {
+		s.Keepalive.DelaySeconds = 0
+		s.Keepalive.IntervalSeconds = 1
+	})
+	c, rec := keepaliveCtxWithRecorder(t, "cf", resilience.KindText)
+	defer stopPreOutputKeepalive(c)
+	armPreOutputKeepalive(c, service.PreOutputProtocolResponses, true, &service.Account{ID: 1, Type: service.AccountTypeAPIKey})
+	require.Eventually(t, func() bool { return service.PreOutputKeepaliveCommitted(c) }, time.Second, time.Millisecond)
+	before := c.Writer.Size()
+	c.Header("X-Upstream-Request", "attempt-one")
+	wrapped := c.Writer
+	armPreOutputKeepalive(c, service.PreOutputProtocolResponses, true, &service.Account{ID: 2, Type: service.AccountTypeAPIKey})
+	require.Same(t, wrapped, c.Writer)
+	require.Eventually(t, func() bool { return c.Writer.Size() > before }, 2*time.Second, 5*time.Millisecond)
+	require.Equal(t, -1, service.OpenAICompactKeepaliveAdjustedWrittenSize(c))
+	c.JSON(503, gin.H{"error": gin.H{"message": "busy"}})
+	stopPreOutputKeepalive(c)
+	require.Contains(t, rec.Body.String(), "event: response.failed")
+}

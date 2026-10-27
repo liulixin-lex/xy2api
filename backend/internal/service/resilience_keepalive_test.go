@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -152,4 +153,79 @@ func TestPreOutputKeepaliveSemanticOutputStopsBeats(t *testing.T) {
 	stop()
 	require.Equal(t, size, len(w.Body.String()), "no heartbeat after the first semantic byte")
 	require.Greater(t, OpenAICompactKeepaliveAdjustedWrittenSize(c), 0)
+}
+
+func TestPreOutputKeepaliveResumesSameOwnerAndRejectsOldTimer(t *testing.T) {
+	c, w := newKeepaliveTestContext(t)
+	original := c.Writer
+	stop := StartPreOutputKeepalive(c, PreOutputProtocolResponses, 0, time.Hour)
+	defer stop()
+	waitCommitted(t, c)
+	k, wrapped := keepaliveFrom(c), c.Writer
+	k.mu.Lock()
+	oldGeneration, oldDone, before := k.generation, k.done, k.bytes
+	k.mu.Unlock()
+	c.Header("X-Upstream-Request", "first-attempt")
+	StartPreOutputKeepalive(c, PreOutputProtocolResponses, 0, time.Hour)()
+	require.Same(t, k, keepaliveFrom(c))
+	require.Same(t, wrapped, c.Writer)
+	select {
+	case <-oldDone:
+	default:
+		t.Fatal("old heartbeat must exit before the next generation starts")
+	}
+	require.False(t, k.beat(oldGeneration), "a stale timer cannot write")
+	k.mu.Lock()
+	generation := k.generation
+	require.Equal(t, before, k.bytes, "committed heartbeat waits an interval from its last write")
+	k.mu.Unlock()
+	require.True(t, k.beat(generation))
+	require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c))
+	// The passthrough's attempt-local stop keeps the request owner and wrapper.
+	startOpenAISSEKeepalive(c, time.Hour)()
+	require.Same(t, wrapped, c.Writer)
+	StartPreOutputKeepalive(c, PreOutputProtocolResponses, 0, time.Hour)()
+	c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"message": "busy"}})
+	stop()
+	require.Same(t, original, c.Writer)
+	require.Contains(t, w.Body.String(), "event: response.failed")
+}
+
+func TestPreOutputKeepaliveTerminalCannotResume(t *testing.T) {
+	for _, terminal := range []string{"committed_stop", "content", "cleanup", "request_end", "write_failure"} {
+		t.Run(terminal, func(t *testing.T) {
+			c, _ := newKeepaliveTestContext(t)
+			ctx, cancel := context.WithCancel(c.Request.Context())
+			defer cancel()
+			c.Request = c.Request.WithContext(ctx)
+			stop := StartPreOutputKeepalive(c, PreOutputProtocolResponses, time.Hour, time.Hour)
+			defer stop()
+			k := keepaliveFrom(c)
+			switch terminal {
+			case "committed_stop":
+				StopOpenAICompactSSEKeepaliveCommitted(c)
+			case "content":
+				_, err := c.Writer.Write([]byte("data: content\n\n"))
+				require.NoError(t, err)
+			case "cleanup":
+				stop()
+			case "request_end":
+				cancel()
+			case "write_failure":
+				k.mu.Lock()
+				k.writer = &keepaliveFailWriter{ResponseWriter: k.writer}
+				generation := k.generation
+				k.mu.Unlock()
+				require.False(t, k.beat(generation))
+			}
+			StartPreOutputKeepalive(c, PreOutputProtocolResponses, 0, time.Millisecond)()
+			require.False(t, k.beat(k.generation))
+		})
+	}
+}
+
+type keepaliveFailWriter struct{ gin.ResponseWriter }
+
+func (w *keepaliveFailWriter) Write([]byte) (int, error) {
+	return 0, context.Canceled
 }

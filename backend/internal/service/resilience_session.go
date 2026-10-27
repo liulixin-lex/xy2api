@@ -21,7 +21,8 @@ const lastResortCandidateTTL = 2 * time.Second
 
 // resiliencePenaltyOf returns the penalty tier of an account for a model
 // (design §3.1): hard states are never used; soft states only as a last
-// resort. recoverAt is when the latest soft restriction ends.
+// resort. recoverAt is when the latest soft restriction ends. Timed hard
+// states retain the later of their own end and the model breaker end.
 func resiliencePenaltyOf(a *Account, model string, now time.Time) (resilience.PenaltyTier, time.Time, string) {
 	if a == nil || !a.IsActive() || !a.Schedulable || a.IQCheck.BlocksScheduling() {
 		return resilience.TierHard, time.Time{}, "unavailable"
@@ -42,18 +43,25 @@ func resiliencePenaltyOf(a *Account, model string, now time.Time) (resilience.Pe
 			reason = why
 		}
 	}
+	modelBreakerEnd := Resilience().modelBreakerEnd(a, model, now)
+	hard := func(until time.Time, why string) (resilience.PenaltyTier, time.Time, string) {
+		if modelBreakerEnd.After(until) {
+			until = modelBreakerEnd
+		}
+		return resilience.TierHard, until, why
+	}
 	if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) {
 		if resilience.TempUnschedTier(a.TempUnschedulableReason) == resilience.TierHard {
 			if resilience.IsBalancePause(a.TempUnschedulableReason) {
-				return resilience.TierHard, time.Time{}, "balance_exhausted"
+				return hard(*a.TempUnschedulableUntil, "balance_exhausted")
 			}
-			return resilience.TierHard, time.Time{}, "temp_unschedulable"
+			return hard(*a.TempUnschedulableUntil, "temp_unschedulable")
 		}
 		soft(*a.TempUnschedulableUntil, "temp_unschedulable")
 	}
 	if a.RateLimitResetAt != nil && now.Before(*a.RateLimitResetAt) {
 		if a.RateLimitResetAt.Sub(now) > resilience.HardRateLimitThreshold {
-			return resilience.TierHard, time.Time{}, "rate_limited"
+			return hard(*a.RateLimitResetAt, "rate_limited")
 		}
 		soft(*a.RateLimitResetAt, "rate_limited")
 	}
@@ -61,9 +69,14 @@ func resiliencePenaltyOf(a *Account, model string, now time.Time) (resilience.Pe
 		soft(*a.OverloadUntil, "overloaded")
 	}
 	if model != "" {
+		if !a.IsOpenAICompatible() {
+			if !modelBreakerEnd.IsZero() {
+				soft(modelBreakerEnd, "model_transient")
+			}
+		}
 		if remaining := a.GetRateLimitRemainingTimeWithContext(context.Background(), model); remaining > 0 {
 			if remaining > resilience.HardRateLimitThreshold {
-				return resilience.TierHard, time.Time{}, "model_rate_limited"
+				return hard(now.Add(remaining), "model_rate_limited")
 			}
 			soft(now.Add(remaining), "model_rate_limited")
 		}
@@ -142,14 +155,18 @@ func withoutSoftPenalties(a Account, now time.Time) *Account {
 type lastResortCandidate struct {
 	account   *Account
 	recoverAt time.Time
+	held      bool
 }
 
 // pickLastResort orders candidates by priority (lower first), then by the
-// earliest end of the penalty (design §4.3).
+// latency hold preference, then the earliest end of the penalty (design §4.3).
 func pickLastResort(cands []lastResortCandidate) []lastResortCandidate {
 	sort.SliceStable(cands, func(i, j int) bool {
 		if cands[i].account.Priority != cands[j].account.Priority {
 			return cands[i].account.Priority < cands[j].account.Priority
+		}
+		if cands[i].held != cands[j].held {
+			return !cands[i].held
 		}
 		return cands[i].recoverAt.Before(cands[j].recoverAt)
 	})
@@ -523,11 +540,28 @@ func (s *GatewayService) resilienceGatewaySelectionEpilogue(ctx context.Context,
 	return result, err
 }
 
+// bindGatewayStickySession receives the selection model explicitly because
+// eager bindings precede the selection epilogue's NoteTurn.
+func (s *GatewayService) bindGatewayStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64, requestedModel string) error {
+	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
+	if sessionHash == "" || accountID <= 0 || s.cache == nil {
+		return nil
+	}
+	if !s.resilienceGatewayBindAllowed(ctx, accountID, requestedModel) {
+		return nil
+	}
+	ttl := stickySessionTTL
+	if shareTTL, ok := s.shareScheduling.shareBindingTTL(derefGroupID(groupID)); ok {
+		ttl = shareTTL
+	}
+	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, ttl)
+}
+
 // resilienceGatewayBindAllowed reports whether the session may be bound to
 // accountID. When the request started with a different owner that is only
 // soft-penalised, the owner keeps the binding (design §4.2); the owner is
 // looked up only in that mismatch case.
-func (s *GatewayService) resilienceGatewayBindAllowed(ctx context.Context, accountID int64) bool {
+func (s *GatewayService) resilienceGatewayBindAllowed(ctx context.Context, accountID int64, requestedModel string) bool {
 	st := resilience.StateFrom(ctx)
 	if !resilienceBindAllowed(ctx, accountID) {
 		return false
@@ -541,7 +575,7 @@ func (s *GatewayService) resilienceGatewayBindAllowed(ctx context.Context, accou
 	if err != nil || bound == nil {
 		return true
 	}
-	if resilienceKeepsSoftStickyBinding(bound, "") {
+	if resilienceKeepsSoftStickyBinding(bound, requestedModel) {
 		st.KeepSticky(owner)
 		return false
 	}
@@ -620,7 +654,8 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 		if !gate.isAccountTransportCompatible(candidate, req.RequiredTransport) {
 			continue
 		}
-		cands = append(cands, lastResortCandidate{account: candidate, recoverAt: recoverAt})
+		held := resilience.Current().Enabled && s.openAIAccountLatencyHoldSnapshot(candidate, canonicalOpenAIAccountSchedulingModel(candidate, req.RequestedModel), now).Held
+		cands = append(cands, lastResortCandidate{account: candidate, recoverAt: recoverAt, held: held})
 	}
 	cands = pickLastResort(cands)
 	if len(cands) == 0 {

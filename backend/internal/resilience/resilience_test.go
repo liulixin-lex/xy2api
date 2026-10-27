@@ -148,15 +148,17 @@ func TestBudgetClampWaitAndAttemptTimeout(t *testing.T) {
 	require.Equal(t, 60*time.Second, b.AttemptTimeout(60*time.Second, false, t0))
 	require.Equal(t, 240*time.Second, b.AttemptTimeout(60*time.Second, true, t0))
 	require.Equal(t, 40*time.Second, b.AttemptTimeout(60*time.Second, false, t0.Add(200*time.Second)))
+	// A later attempt gets at least the time already spent (geometric back-off).
+	require.Equal(t, 90*time.Second, b.AttemptTimeout(60*time.Second, false, t0.Add(90*time.Second)))
 }
 
 func TestFirstOutputTier(t *testing.T) {
 	s := Defaults()
-	require.Equal(t, 180*time.Second, FirstOutputTier(&s, "gpt-5.5", ""))
-	require.Equal(t, 180*time.Second, FirstOutputTier(&s, "gpt-5.5", "medium"))
-	require.Equal(t, 180*time.Second, FirstOutputTier(&s, "gpt-5.5", "high"))
-	require.Equal(t, 200*time.Second, FirstOutputTier(&s, "gpt-5.5", "XHIGH"))
-	require.Equal(t, 220*time.Second, FirstOutputTier(&s, "gpt-5.5", "max"))
+	require.Equal(t, 20*time.Second, FirstOutputTier(&s, "gpt-5.5", ""))
+	require.Equal(t, 20*time.Second, FirstOutputTier(&s, "gpt-5.5", "medium"))
+	require.Equal(t, 25*time.Second, FirstOutputTier(&s, "gpt-5.5", "high"))
+	require.Equal(t, 30*time.Second, FirstOutputTier(&s, "gpt-5.5", "XHIGH"))
+	require.Equal(t, 30*time.Second, FirstOutputTier(&s, "gpt-5.5", "max"))
 	s.Budget.ModelOverrides = map[string]int{"gpt-6.1-sol": 200, "gpt-6*": 150}
 	require.Equal(t, 200*time.Second, FirstOutputTier(&s, "GPT-6.1-sol", "low"))
 	require.Equal(t, 150*time.Second, FirstOutputTier(&s, "gpt-6.2", "low"))

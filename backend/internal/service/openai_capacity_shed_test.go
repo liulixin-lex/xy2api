@@ -133,6 +133,7 @@ func TestOpenAIStreamErrorFrameDoesNotStartClientOutput(t *testing.T) {
 		{`{"type":"unknown_event"}`, "unknown_event", true},
 		{`{"type":"response.metadata","sequence_number":2,"metadata":{"openai_chatgpt_moderation_metadata":{}}}`, "response.metadata", false},
 		{`{"type":"codex.response.metadata"}`, "codex.response.metadata", true},
+		{`{"type":"codex.rate_limits","rate_limits":{}}`, "codex.rate_limits", false},
 		{`{"type":"response.output_item.added","item":{"type":"reasoning","summary":[]}}`, "response.output_item.added", false},
 		{`{"type":"response.output_item.added","item":{"type":"reasoning","encrypted_content":"ciphertext"}}`, "response.output_item.added", true},
 		{`{"type":"response.reasoning_summary_part.added","part":{"type":"summary_text","text":""}}`, "response.reasoning_summary_part.added", false},

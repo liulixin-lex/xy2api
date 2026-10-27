@@ -183,15 +183,17 @@ func Defaults() Settings {
 		Session:    SessionSettings{Enabled: true, StreakThreshold: 2, StreakWindowSeconds: 600, AvoidSeconds: 600},
 		LastResort: SwitchSettings{Enabled: true},
 		Balance:    BalanceSettings{Enabled: true, PauseSeconds: 300},
-		// First-output tiers are calibrated on 7 days of production first-token
-		// latency (tasks 0.4): about 0.1-0.2% of successful streams exceed them.
+		// Of attempts still silent at 20s in 48 h of production data, about half
+		// remained silent at 30s and one tenth at 60s; fresh attempts on healthy
+		// accounts produced a first byte within seconds. The last candidate is
+		// governed only by the remaining request budget (Budget.AttemptTimeout).
 		Budget: BudgetSettings{
 			Enabled:                           true,
 			MaxAttempts:                       4,
 			PreOutputBudgetSeconds:            240,
-			FirstOutputTimeoutSeconds:         FirstOutputTimeouts{Default: 180, High: 180, XHigh: 200, Max: 220},
+			FirstOutputTimeoutSeconds:         FirstOutputTimeouts{Default: 20, High: 25, XHigh: 30, Max: 30},
 			AnthropicFirstEventTimeoutSeconds: 90,
-			GeminiFirstEventTimeoutSeconds:    90,
+			GeminiFirstEventTimeoutSeconds:    60,
 			ModelOverrides:                    map[string]int{},
 			SameAccountRetryMax:               1,
 			GeminiSameAccountRetries:          1,
