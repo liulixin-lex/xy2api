@@ -509,6 +509,13 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 		}
 		return "capability_mismatch"
 	}
+	if account.Platform == PlatformOpenAI && len(iqGateKeysForRequest(account, requestedModel, requireCompact)) > 0 {
+		for _, key := range iqGateKeysForRequest(account, requestedModel, requireCompact) {
+			if account.isRateLimitActiveForKey(key) {
+				return "model_rate_limited"
+			}
+		}
+	}
 	if requireCompact && openAICompactSupportTier(account) == 0 {
 		return "compact_unsupported"
 	}

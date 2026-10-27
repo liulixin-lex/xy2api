@@ -14,12 +14,12 @@ func TestIQMonitoringSchedule(t *testing.T) {
 	s.IntervalMinutes = 15
 	s.Enabled = true
 	for i := 1; i <= 6; i++ {
-		finishIQSchedule(&s, iqcheck.Grade("21"), now)
+		finishIQSchedule(&s, iqcheck.Grade("21", iqcheck.Check{Expected: "21", Naive: "29"}), now)
 		want := 15 * time.Minute
 		require.Equal(t, want, s.NextRunAt.Sub(now))
 		now = *s.NextRunAt
 	}
-	finishIQSchedule(&s, iqcheck.Grade("29"), now)
+	finishIQSchedule(&s, iqcheck.Grade("29", iqcheck.Check{Expected: "21", Naive: "29"}), now)
 	require.True(t, s.BlocksScheduling())
 	require.Equal(t, 15*time.Minute, s.NextRunAt.Sub(now))
 	for i := 1; i <= 3; i++ {
@@ -68,7 +68,7 @@ func TestIQProtocolCooldownRetainsEffectiveAssessment(t *testing.T) {
 	now := time.Now().UTC()
 	s := domain.DefaultIQCheck()
 	s.Enabled = true
-	finishIQSchedule(&s, iqcheck.Grade("29"), now)
+	finishIQSchedule(&s, iqcheck.Grade("29", iqcheck.Check{Expected: "21", Naive: "29"}), now)
 	valid := *s.LastValidAt
 	for i := 1; i <= 4; i++ {
 		now = now.Add(time.Hour)
@@ -83,7 +83,7 @@ func TestIQProtocolCooldownRetainsEffectiveAssessment(t *testing.T) {
 		}
 	}
 	now = now.Add(time.Hour)
-	finishIQSchedule(&s, iqcheck.Grade("21"), now)
+	finishIQSchedule(&s, iqcheck.Grade("21", iqcheck.Check{Expected: "21", Naive: "29"}), now)
 	require.False(t, s.BlocksScheduling())
 	require.Zero(t, s.ProtocolFailures)
 }
@@ -93,7 +93,7 @@ func TestIQForbiddenAutomaticallyResumes(t *testing.T) {
 	s := domain.DefaultIQCheck()
 	s.Enabled = true
 	s.IntervalMinutes = 1
-	finishIQSchedule(&s, iqcheck.Grade("29"), now)
+	finishIQSchedule(&s, iqcheck.Grade("29", iqcheck.Check{Expected: "21", Naive: "29"}), now)
 	for i := 0; i < 4; i++ {
 		now = now.Add(time.Hour)
 		finishIQSchedule(&s, iqcheck.Unknown("http_403"), now)
@@ -101,7 +101,7 @@ func TestIQForbiddenAutomaticallyResumes(t *testing.T) {
 		require.Equal(t, time.Duration(1<<min(i, 2))*time.Minute, s.NextRunAt.Sub(now))
 		require.True(t, s.BlocksScheduling())
 	}
-	finishIQSchedule(&s, iqcheck.Grade("21"), now)
+	finishIQSchedule(&s, iqcheck.Grade("21", iqcheck.Check{Expected: "21", Naive: "29"}), now)
 	require.Equal(t, time.Minute, s.NextRunAt.Sub(now))
 	require.False(t, s.BlocksScheduling())
 	for _, reason := range []string{"permission_denied", "authentication_unavailable"} {

@@ -75,6 +75,39 @@ func (d *Diagnostic) Bounded() *Diagnostic {
 		return nil
 	}
 	v := *d
+	if d.ModelIdentity != nil {
+		identity := *d.ModelIdentity
+		identity.Body = append([]string(nil), d.ModelIdentity.Body...)
+		identity.Header = append([]string(nil), d.ModelIdentity.Header...)
+		identity.Flags = append([]string(nil), d.ModelIdentity.Flags...)
+		v.ModelIdentity = &identity
+		truncated := false
+		for len(diagnosticJSON(v)) > 3500 {
+			switch {
+			case len(identity.Body) > 0 && len(identity.Body[len(identity.Body)-1]) > 0:
+				identity.Body[len(identity.Body)-1] = identity.Body[len(identity.Body)-1][:len(identity.Body[len(identity.Body)-1])-1]
+			case len(identity.Header) > 0 && len(identity.Header[len(identity.Header)-1]) > 0:
+				identity.Header[len(identity.Header)-1] = identity.Header[len(identity.Header)-1][:len(identity.Header[len(identity.Header)-1])-1]
+			case len(identity.Sent) > 0:
+				identity.Sent = identity.Sent[:len(identity.Sent)-1]
+			case len(identity.Body) > 0:
+				identity.Body = identity.Body[:len(identity.Body)-1]
+			case len(identity.Header) > 0:
+				identity.Header = identity.Header[:len(identity.Header)-1]
+			default:
+				break
+			}
+			truncated = true
+			v.ModelIdentity = &identity
+			if len(identity.Body) == 0 && len(identity.Header) == 0 && identity.Sent == "" {
+				break
+			}
+		}
+		if truncated {
+			identity.Flags = append(identity.Flags, "display_truncated")
+			v.ModelIdentity = &identity
+		}
+	}
 	switch v.LimitKind {
 	case "response_bytes", "event_bytes", "answer_bytes":
 	default:
@@ -101,6 +134,8 @@ func (d *Diagnostic) Bounded() *Diagnostic {
 	v.RequestID = safeToken(v.RequestID, 128)
 	return &v
 }
+
+func diagnosticJSON(d Diagnostic) []byte { b, _ := json.Marshal(d); return b }
 
 func (d *Diagnostic) ignoreItem(kind string) {
 	d.IgnoredItems++

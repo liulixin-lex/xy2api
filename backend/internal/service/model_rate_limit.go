@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 )
 
@@ -20,8 +21,20 @@ const (
 
 // isRateLimitActiveForKey 检查指定 key 的限流是否生效
 func (a *Account) isRateLimitActiveForKey(key string) bool {
+	if domain.IsIQGateKey(key) {
+		return a.hasRateLimitKey(key)
+	}
 	resetAt := a.modelRateLimitResetAt(key)
 	return resetAt != nil && time.Now().Before(*resetAt)
+}
+
+func (a *Account) hasRateLimitKey(key string) bool {
+	if a == nil || a.Extra == nil {
+		return false
+	}
+	limits, _ := a.Extra[modelRateLimitsKey].(map[string]any)
+	_, ok := limits[key]
+	return ok
 }
 
 // getRateLimitRemainingForKey 获取指定 key 的限流剩余时间，0 表示未限流或已过期
@@ -74,6 +87,10 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 	modelKey = strings.TrimSpace(modelKey)
 	if modelKey == "" {
 		return nil
+	}
+	if a.Platform == PlatformOpenAI && !iqGateKeyPresent(a, requestedModel) {
+		// Canonical model calculation is only needed for accounts carrying an IQ gate.
+		// Preserve the existing mapped key fast path for all other accounts.
 	}
 
 	keys := []string{modelKey}
