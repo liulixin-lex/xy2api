@@ -31,7 +31,7 @@ func TestIQCompletedItemsRecovery(t *testing.T) {
 		{"refusal", strings.Replace(done, `"output_text"`, `"refusal"`, 1) + terminal, "unknown", "refusal"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(tc.body))}, false, "http")
+			r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(tc.body))}, false, "http", fixtureCheck)
 			require.Equal(t, tc.status, r.Status)
 			require.Equal(t, tc.reason, r.Reason)
 			if tc.name == "commentary" {
@@ -52,7 +52,7 @@ func TestIQRecoveryRetryPolicy(t *testing.T) {
 	for _, reason := range []string{"http_403", "quota_exhausted", "wrong_answer", "refusal"} {
 		require.False(t, Retryable(Unknown(reason)), reason)
 	}
-	require.False(t, Retryable(Grade("29")))
+	require.False(t, Retryable(Grade("29", fixtureCheck)))
 	r := Unknown("timeout")
 	r.Diagnostic = &Diagnostic{Transport: "plugin"}
 	require.False(t, Retryable(r))
@@ -72,12 +72,12 @@ func TestIQCompletedItemIdentityAndPartialTerminal(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := done + `data: {"type":"response.completed","response":{"status":"completed","output":[` + tc.output + "]}}\n\n"
-			r := Parse(strings.NewReader(body), true, false)
+			r := parseInput(strings.NewReader(body), true, false, fixtureCheck)
 			require.Equal(t, tc.status, r.Status, r.Reason)
 		})
 	}
 	for _, body := range []string{strings.Replace(done, `"output_index":1`, `"output_index":1,"OUTPUT_INDEX":2`, 1), strings.Replace(done, `"id":"msg_1",`, "", 1)} {
-		r := Parse(strings.NewReader(body+`data: {"type":"response.completed","response":{"status":"completed","output":[]}}`+"\n\n"), true, false)
+		r := parseInput(strings.NewReader(body+`data: {"type":"response.completed","response":{"status":"completed","output":[]}}`+"\n\n"), true, false, fixtureCheck)
 		require.Equal(t, "unknown", r.Status)
 	}
 }
@@ -117,7 +117,7 @@ func TestIQRelayBlankPlaceholderMessages(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := relayPlaceholderStream(tc.placeholders, `{"answer":21}`)
-			r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}, false, "http")
+			r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}, false, "http", fixtureCheck)
 			require.Equal(t, "smart", r.Status, r.Reason)
 			require.Equal(t, `{"answer":21}`, r.Answer)
 			require.Equal(t, tc.done, r.Diagnostic.DoneMessages)
@@ -127,6 +127,6 @@ func TestIQRelayBlankPlaceholderMessages(t *testing.T) {
 	}
 	// Only whitespace is exempt; a phase-less message with text still competes.
 	textual := strings.ReplaceAll(relayPlaceholderStream(1, `{"answer":21}`), `"text":" "`, `"text":"29"`)
-	require.Equal(t, "conflicting_final_response", Parse(strings.NewReader(textual), true, false).Reason)
-	require.Equal(t, "empty_final_text", Parse(strings.NewReader(relayPlaceholderStream(1, " ")), true, false).Reason)
+	require.Equal(t, "conflicting_final_response", parseInput(strings.NewReader(textual), true, false, fixtureCheck).Reason)
+	require.Equal(t, "empty_final_text", parseInput(strings.NewReader(relayPlaceholderStream(1, " ")), true, false, fixtureCheck).Reason)
 }

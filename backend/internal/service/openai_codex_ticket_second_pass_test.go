@@ -66,7 +66,7 @@ func TestCodexTicketSecondPassLateIQAfterProxyEdit(t *testing.T) {
 	a := ticketTestAccount(41)
 	ticket := verifiedTestTicket(a, 292)
 	a.Extra[openAICodexTicketExtraKey(ticket.Model)] = ticket
-	result := iqcheck.Grade("21")
+	result := iqcheck.Grade("21", iqcheck.Check{Expected: "21", Naive: "29"})
 	result.StateModel, result.StateTicketID = ticket.Model, codexTicketIdentity(ticket)
 	require.True(t, CodexTicketIQResultCurrent(a, result, time.Now()))
 	a.Proxy.Host = "changed.example.invalid"

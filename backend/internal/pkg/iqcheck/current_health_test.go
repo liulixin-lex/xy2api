@@ -13,7 +13,7 @@ import (
 )
 
 func healthResponse(body, media string, status int) Result {
-	return ParseHTTP(&http.Response{StatusCode: status, Header: http.Header{"Content-Type": {media}}, Body: io.NopCloser(strings.NewReader(body))}, false, "http")
+	return ParseHTTP(&http.Response{StatusCode: status, Header: http.Header{"Content-Type": {media}}, Body: io.NopCloser(strings.NewReader(body))}, false, "http", fixtureCheck)
 }
 
 func healthTerminal(answer string) string {
@@ -28,7 +28,7 @@ func TestIQCompatibilityLongReasoning(t *testing.T) {
 		event := "data: {\"type\":\"response.reasoning_text.delta\",\"delta\":\"" + strings.Repeat("x", 64000) + "\"}\n\n"
 		body := strings.Repeat(event, 8) + "data: " + healthTerminal(answer) + "\n\ndata: [DONE]\n\n"
 		r := healthResponse(body, "text/event-stream", 200)
-		require.Equal(t, Grade(answer).Status, r.Status, r)
+		require.Equal(t, Grade(answer, fixtureCheck).Status, r.Status, r)
 		require.Greater(t, r.Diagnostic.BytesRead, int64(256*1024))
 		require.NotContains(t, r.Answer, "xxxxx")
 	}
@@ -81,7 +81,7 @@ func TestIQTerminalCompatibilityPreservesEvidence(t *testing.T) {
 
 func TestIQLimitDiagnostics(t *testing.T) {
 	body := strings.Repeat(" ", MaxResponseBytes) + "{}"
-	r := Parse(strings.NewReader(body), false, false)
+	r := parseInput(strings.NewReader(body), false, false, fixtureCheck)
 	require.Equal(t, "response_too_large", r.Reason)
 	require.Equal(t, "response_bytes", r.Diagnostic.LimitKind)
 	require.Equal(t, MaxResponseBytes, r.Diagnostic.LimitBytes)
@@ -96,7 +96,7 @@ func TestIQLimitDiagnostics(t *testing.T) {
 func TestIQSocketTimeoutClassification(t *testing.T) {
 	err := &net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded}
 	for _, body := range []io.Reader{brokenReader{err}, io.MultiReader(strings.NewReader("data: "+healthTerminal("21")+"\n\n"), brokenReader{err})} {
-		r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(body)}, false, "http")
+		r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(body)}, false, "http", fixtureCheck)
 		require.Equal(t, "unknown", r.Status)
 		require.Equal(t, "timeout", r.Reason)
 		require.Equal(t, "timeout", r.Diagnostic.Category)

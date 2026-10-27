@@ -109,7 +109,7 @@ func isErrorEnvelope(raw []byte) bool {
 
 func FailureCategory(reason string) string {
 	switch reason {
-	case "correct_answer", "wrong_answer":
+	case "correct_answer", "wrong_answer", "model_mismatch":
 		return "assessment"
 	case "quota_exhausted", "http_402":
 		return "quota"
