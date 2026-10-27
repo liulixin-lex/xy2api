@@ -23,9 +23,8 @@
 | [`openai-cache-reliability.md`](openai-cache-reliability.md) | OpenAI 缓存计量与可靠性 |
 | [`CLAUDE_CACHE_FALLBACK.md`](CLAUDE_CACHE_FALLBACK.md) | Claude 自动缓存（按分组） |
 | [`OPENAI_QUALITY_ROUTING.md`](OPENAI_QUALITY_ROUTING.md) | OpenAI 会话质量路由 |
-| [`OPENAI_IQ_CHECK.md`](OPENAI_IQ_CHECK.md) | OpenAI 智商检测 |
-| [`IQ_CURRENT_HEALTH.md`](IQ_CURRENT_HEALTH.md) | 智商检测的当前健康、协议兼容与调度避让 |
-| [`CODEX_STATE.md`](CODEX_STATE.md) | Codex STATE 与智商检测 |
+| [`OPENAI_IQ_CHECK.md`](OPENAI_IQ_CHECK.md) | OpenAI 智商检测：按“账号 × 模型”检测与冷却、参数化题目、自报模型识别、升级与回退 |
+| [`CODEX_STATE.md`](CODEX_STATE.md) | Codex STATE 与智商检测（按出站模型联动） |
 | [`CODEX_STATE_RELIABILITY.md`](CODEX_STATE_RELIABILITY.md) | STATE 可靠性控制与策略 |
 | [`GPT61_SOL_SUPPORT.md`](GPT61_SOL_SUPPORT.md) | GPT-6.1 Sol 适配（来源清单 [`GPT61_SOL_PROVENANCE.json`](GPT61_SOL_PROVENANCE.json)） |
 | [`OPENAI_FAST.md`](OPENAI_FAST.md) | OpenAI 分组 Fast 优先级、全局过滤与档位计费 |
@@ -69,7 +68,7 @@
 |---|---|
 | [`CONTROLLED_SCHEDULING.md`](CONTROLLED_SCHEDULING.md) / [`CONTROLLED_SCHEDULING_ACCEPTANCE.md`](CONTROLLED_SCHEDULING_ACCEPTANCE.md) | 智能可控调度，0.3.0 退役，由份额调度取代 |
 | [`ui-scheduling-dual-mode.md`](ui-scheduling-dual-mode.md) / [`ui-scheduling-one-click.md`](ui-scheduling-one-click.md) | 已退役调度方案的界面设计 |
-| [`IQ_RELIABILITY_IMPLEMENTATION.md`](IQ_RELIABILITY_IMPLEMENTATION.md) | 智商检测早期实施记录，现行说明见 `OPENAI_IQ_CHECK.md` |
+| [`IQ_RELIABILITY_IMPLEMENTATION.md`](IQ_RELIABILITY_IMPLEMENTATION.md) / [`IQ_CURRENT_HEALTH.md`](IQ_CURRENT_HEALTH.md) | 智商检测的早期实施记录与单模型“当前健康”实现，已被按模型检测取代；现行说明见 `OPENAI_IQ_CHECK.md` |
 | [`AUDIT_v0.0.10.md`](AUDIT_v0.0.10.md) | v0.0.10 本地代码审计 |
 | [`V021_ISSUE_SUMMARY.md`](V021_ISSUE_SUMMARY.md) / [`V021_RELIABILITY_FIX.md`](V021_RELIABILITY_FIX.md) / [`V021_REMEDIATION_PLAN.md`](V021_REMEDIATION_PLAN.md) / [`ISSUES_AND_CHANGES.md`](ISSUES_AND_CHANGES.md) | v0.2.1 可靠性修复记录 |
 
@@ -84,7 +83,7 @@
 | [`replace-controlled-with-share-scheduling`](../openspec/changes/replace-controlled-with-share-scheduling/) | 剔除可控调度、引入份额调度 | 0.3.0 已发布，默认关闭；份额规则由 `simplify-share-scheduling-20261020` 精简，影子运行不再执行 |
 | [`async-image-tasks-v2`](../openspec/changes/async-image-tasks-v2/) | 异步生图任务 v2 | 0.3.0 已发布 |
 | [`add-claude-cache-fallback`](../openspec/changes/add-claude-cache-fallback/) | Claude 自动缓存 | 0.2.4 起发布；真实上游账单核验未做 |
-| [`stabilize-openai-iq-check`](../openspec/changes/stabilize-openai-iq-check/) | 智商检测稳定性 | 已完成 |
-| [`iq-detection-operations`](../openspec/changes/iq-detection-operations/) | 智商检测运营 | 已结束（线上验收按用户决定不再执行） |
+| [`stabilize-openai-iq-check`](../openspec/changes/stabilize-openai-iq-check/) | 智商检测稳定性 | 已完成；2026-10-27 起被按模型检测取代，见 `docs/OPENAI_IQ_CHECK.md` |
+| [`iq-detection-operations`](../openspec/changes/iq-detection-operations/) | 智商检测运营 | 已结束（线上验收按用户决定不再执行）；2026-10-27 起被按模型检测取代 |
 | [`add-openai-compatible-prompt-audit`](../openspec/changes/add-openai-compatible-prompt-audit/) | 提示词审计 | 上游 Sub2API 的变更，随同步引入 |
 | [`codex-manifest-pinned-accounts`](../openspec/changes/codex-manifest-pinned-accounts/) | Codex manifest 固定账号 | 上游 Sub2API 的变更，随同步引入 |
