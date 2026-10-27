@@ -177,6 +177,30 @@ func TestOpenAILastResortFreshVerificationRejectsNewIQGate(t *testing.T) {
 	}
 }
 
+func TestOpenAILastResortFreshCompactGateUsesFreshMapping(t *testing.T) {
+	planned := iqLastResortAccount(1)
+	planned.Credentials = map[string]any{
+		"model_mapping":         map[string]any{"gpt-6-astra": "gpt-6-astra"},
+		"compact_model_mapping": map[string]any{"gpt-6-astra": "gpt-6.1-sol"},
+	}
+	planned.Extra = map[string]any{"openai_responses_mode": "force_responses"}
+	fresh := planned
+	fresh.Credentials = map[string]any{
+		"model_mapping":         map[string]any{"gpt-6-astra": "gpt-6-astra"},
+		"compact_model_mapping": map[string]any{"gpt-6-astra": "gpt-5.6-luna"},
+	}
+	fresh.Extra = iqLastResortExtra("iq:gpt-5.6-luna", time.Now().Add(-time.Minute))
+	accounts := &iqRunAccounts{accounts: map[int64]*Account{fresh.ID: &fresh}}
+	gateway := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{OpenAICompactModel: "gpt-6.1-sol"}}}
+	resilienceService := NewResilienceService(nil, nil)
+
+	_, ok := resilienceService.verifyLastResortAccount(context.Background(), accounts, shareTestGroupID, &planned, "gpt-6-astra", true,
+		resiliencePenaltyOf, func(account *Account) string {
+			return gateway.openAICodexTicketOutboundModel(account, "gpt-6-astra", true)
+		})
+	require.False(t, ok, "the fresh luna compact mapping must be checked")
+}
+
 func timePointer(value time.Time) *time.Time {
 	return &value
 }

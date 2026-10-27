@@ -60,6 +60,28 @@ func TestCompactFallbackGateUsesForwardFinalModel(t *testing.T) {
 	require.Contains(t, []string{"model_rate_limited", "runtime_blocked"}, reason)
 }
 
+func TestRawChatCompactRequestUsesOrdinaryOutboundForIQGateAndTicket(t *testing.T) {
+	account := &Account{
+		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":               "fixture",
+			"model_mapping":         map[string]any{"public": "gpt-6-astra"},
+			"compact_model_mapping": map[string]any{"public": "gpt-5.6-luna"},
+		},
+		Extra: map[string]any{
+			"openai_responses_mode": "force_chat_completions",
+			"model_rate_limits":     map[string]any{"iq:gpt-6.1-sol": map[string]any{}},
+		},
+	}
+	gateway := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{OpenAICompactModel: "gpt-6.1-sol"}}}
+	forwardModel := resolveOpenAIAccountUpstreamModelForRequest(account, "public", true)
+	outboundModel := gateway.openAICodexTicketOutboundModel(account, "public", true)
+
+	require.Equal(t, "gpt-6-astra", forwardModel)
+	require.Equal(t, forwardModel, outboundModel, "Codex ticket routing must use the raw Chat body.model")
+	require.False(t, iqGateBlocksRequest(account, "public", true, outboundModel))
+}
+
 func TestIQGateRemainingFloorAndLastResort(t *testing.T) {
 	ctx := withResilienceLastResortGate(context.Background())
 	now := time.Now()

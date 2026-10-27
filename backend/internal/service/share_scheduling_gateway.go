@@ -223,7 +223,7 @@ func (s *GatewayService) shareGatewayLastResort(ctx context.Context, gp *shareGr
 		limit:  func(acc *Account) int { return acc.Concurrency },
 		verify: func(acc *Account) (*Account, sharesched.Reason) {
 			// The plan used a 2 s group list (review R09).
-			if fresh, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *groupID, acc, requestedModel, false, resiliencePenaltyOf); ok {
+			if fresh, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *groupID, acc, requestedModel, false, resiliencePenaltyOf, nil); ok {
 				return fresh, ""
 			}
 			return nil, sharesched.ReasonIneligible

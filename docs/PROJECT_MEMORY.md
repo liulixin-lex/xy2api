@@ -2,7 +2,7 @@
 
 > 跨 Agent、跨会话的持续交接文件。开始仓库任务前必须完整阅读本文件；执行过程中在关键节点更新；结束前写明结果、验证、卡点和下一步。项目事实变化时同步更新本文件，不能只追加日志而保留过期的顶部状态。
 >
-> 本文件只放进行中与近期的内容。已结束任务的交接状态、登记，以及 2026-10-19 及以前的操作日志在 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)（按归档规范原样移入，最近一次为 2026-10-26）。文档目录见 [`README.md`](README.md)。
+> 本文件只放进行中与近期的内容。已结束任务的交接状态、登记，以及 2026-10-19 及以前的操作日志在 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)（按归档规范原样移入，最近一次为 2026-10-27）。文档目录见 [`README.md`](README.md)。
 
 ## 当前交接状态
 
@@ -10,6 +10,12 @@
 
 - 分支 `wip/iq-integfix-20261027` 的修复提交为 `72310c050d5036d7dc1b23930b285192b3354aeb`；真实 PostgreSQL repository 集成、本机 build、四组 vet、repository/service unit、gofmt 与文档一致性全部通过。逐项依据与结果见归档及本文件操作日志。
 - 未推送、未开 PR、未操作生产；用户要求的详细摘要报告在本机 `.work/tasks/20261027-iq-per-model/implementation/INTEGFIX_REPORT.md`。
+
+### IQ 按模型门禁 R4 修复（本地完成；2026-10-27）
+
+- 本地提交 `41b5f9f5c` 修复 3 个 P1 与 1 个 P2，覆盖 fresh compact 出站值、raw Chat compact 误挡、Retry-After 租约预算和出站快照失败释放。
+- 构建、四组 vet、最终完整 unit、gofmt、`ci_gate.py`（451 项 `-race`、0 跳过）、scheduler-diff、文档一致性与 `sync.py audit` 均通过。详细结果见本文件操作日志与归档。
+- 未推送、未开 PR、未连接服务器；R4 报告保存在仓库外。
 
 ### 网关韧性复盘：随 0.4.9 发布（2026-10-27 更新）
 
@@ -1489,3 +1495,19 @@ pnpm --dir frontend run build
 - **提交**：实现与测试 `72310c050d5036d7dc1b23930b285192b3354aeb`（`fix(iq): repair PostgreSQL integration regressions`）；本记忆收尾随下一条纯记忆提交。
 - **卡点/风险**：无。未推送、未开 PR、未连接生产。
 - **下一步**：无。详细逐项根因、代码/测试裁决和测试用例名记于本机 `.work/tasks/20261027-iq-per-model/implementation/INTEGFIX_REPORT.md`。
+
+### 2026-10-27T23:53Z — 20261027-iq-r4fix — 修复、验证并本地提交
+
+- 请求/目标：修复 astra R4 的 3 个 P1 与 1 个 P2；每项一个最小单测，准确执行 compact 协议分流，不加剧业务请求中断。
+- 开始状态：分支 `wip/iq-r4fix-20261027`，HEAD `9b3597b7e0859f2e92e783236a34279e7f326065`，工作树干净。
+- 完成操作：
+  - fresh last-resort 复核改为读取 fresh 账号后重新计算 compact 出站模型；Codex ticket 出站预测仅在实际 compact Responses 分支应用 fallback，raw Chat 沿用普通映射。
+  - Retry-After 或普通题间等待超出 `lease_until - 10s` 安全窗口时不继续等待，立即以具体 unknown 原因 Complete，并保留汇总 Retry-After。
+  - 出站快照返回 false 或 error 时，以独立 3 秒 context 按旧 token Defer，revision 不符时由既有仓储逻辑清旧租约并保留新排期。
+  - 更新 `docs/OPENAI_IQ_CHECK.md` 的 compact 门禁说明；没有修改 repository、调度白名单文件或 policy。
+- 修改文件：`backend/internal/service/iq_check_service.go`、`iq_check_service_test.go`、`iq_check_gate_test.go`、`resilience_last_resort_iq_gate_test.go`、`resilience_session.go`、`share_scheduling_gateway.go`、`share_scheduling_openai.go`、`openai_codex_ticket.go`、`docs/OPENAI_IQ_CHECK.md`、本记忆文件。
+- 单测：`TestOpenAILastResortFreshCompactGateUsesFreshMapping`、`TestRawChatCompactRequestUsesOrdinaryOutboundForIQGateAndTicket`、`TestIQExecutionCompletesBeforeLeaseWhenRetryAfterExceedsBudget`、`TestIQExecutionReleasesLeaseWhenOutboundSnapshotFails`，通过。
+- 验证：`go build ./...`；default/unit/integration/e2e 四组 `go vet`；`gofmt -l` 空；完整 `go test -count=1 -tags=unit ./internal/service/... ./internal/pkg/iqcheck/... ./internal/pkg/openai/... ./internal/handler/...` 最终通过；`ci_gate.py` 451 项 `-race`、0 跳过；`sync.py scheduler-diff`、`sync.py audit`、文档一致性、`git diff --check` 通过。`ci_gate.py` 初次因 `go` 不在 PATH 未启动，加入指定 Go 目录后通过。第一次完整 unit 曾返回一次失败，但输出因测试日志量过大被截断；service 单包复跑与第二次完整命令都通过，未定位首轮具体断言。
+- 提交：`41b5f9f5c`（`fix(iq): repair R4 model gates and lease completion`）。未推送、未开 PR、未连接服务器。
+- 卡点/风险：最终完整 unit 与韧性 race 门禁全过；首轮全量 unit 的失败断言未能从被截断输出恢复，已由单包和完整复跑验证通过。
+- 下一步：无。

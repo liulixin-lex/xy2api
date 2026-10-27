@@ -355,7 +355,7 @@ func (r *ResilienceService) groupAccountsForLastResort(ctx context.Context, repo
 // copy is that row with soft penalties relaxed. A failed read keeps the
 // planned copy (the list itself was read moments ago).
 func (r *ResilienceService) verifyLastResortAccount(ctx context.Context, repo AccountRepository, groupID int64, planned *Account, model string, requireCompact bool,
-	penaltyOf func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string), compactOutbound ...string) (*Account, bool) {
+	penaltyOf func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string), compactOutboundForFresh func(*Account) string) (*Account, bool) {
 	if planned == nil {
 		return nil, false
 	}
@@ -376,7 +376,11 @@ func (r *ResilienceService) verifyLastResortAccount(ctx context.Context, repo Ac
 		r.lastResortGroups.drop(groupID)
 		return nil, false
 	}
-	if iqGateBlocksRequest(fresh, model, requireCompact, compactOutbound...) {
+	compactOutbound := ""
+	if requireCompact && compactOutboundForFresh != nil {
+		compactOutbound = compactOutboundForFresh(fresh)
+	}
+	if iqGateBlocksRequest(fresh, model, requireCompact, compactOutbound) {
 		r.lastResortGroups.drop(groupID)
 		return nil, false
 	}
@@ -447,7 +451,7 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 	// for the best one.
 	var busy []lastResortCandidate
 	for _, c := range pickLastResort(cands) {
-		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *groupID, c.account, requestedModel, false, resiliencePenaltyOf)
+		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *groupID, c.account, requestedModel, false, resiliencePenaltyOf, nil)
 		if !ok {
 			continue
 		}
@@ -679,12 +683,14 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	// for the best one. Codex accounts under upstream pressure take slots
 	// only up to their adaptive limit.
 	verified := cands[:0]
-	for _, c := range cands {
-		compactOutboundModel := ""
-		if req.RequireCompact {
-			compactOutboundModel = s.openAICodexTicketOutboundModel(c.account, req.RequestedModel, true)
+	var compactOutboundForFresh func(*Account) string
+	if req.RequireCompact {
+		compactOutboundForFresh = func(fresh *Account) string {
+			return s.openAICodexTicketOutboundModel(fresh, req.RequestedModel, true)
 		}
-		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, c.account, req.RequestedModel, req.RequireCompact, s.resilienceOpenAIPenaltyOf, compactOutboundModel)
+	}
+	for _, c := range cands {
+		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, c.account, req.RequestedModel, req.RequireCompact, s.resilienceOpenAIPenaltyOf, compactOutboundForFresh)
 		if !ok {
 			continue
 		}
