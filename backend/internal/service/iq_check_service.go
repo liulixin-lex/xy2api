@@ -295,7 +295,6 @@ type IQCheckService struct {
 	modelsMu       sync.Mutex
 	modelsCache    map[string]IQModelCatalog
 	modelsFlight   singleflight.Group
-	targets        *IQTargetService
 	targetRepo     IQTargetRepository
 }
 
