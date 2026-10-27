@@ -150,7 +150,23 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
-	if err := createAccountRecord(ctx, r.client, account); err != nil {
+	client := r.client
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	client = tx.Client()
+	if err := createAccountRecord(ctx, client, account); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if account.IQTargetsPatch != nil {
+		if _, err := r.SaveIQTargetsTx(ctx, client, account.ID, *account.IQTargetsPatch); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
@@ -170,7 +186,7 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	account.Extra = service.MergeOpenAICodexTicketExtra(account.Extra, nil)
 	account.Extra = stripIQGateEntries(account.Extra)
 	service.InitializeNewCodexTicketAccount(account)
-	account.IQCheck = resetIQState(domain.DefaultIQCheck(), account.IQCheckSettings, time.Now().UTC())
+	account.IQCheck = domain.DefaultIQCheck()
 
 	builder := client.Account.Create().
 		SetName(account.Name).
@@ -230,6 +246,9 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	created, err := builder.Save(ctx)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
+	}
+	// updateLockedAccount performs identity comparison while holding the account lock.
+	if account.IQTargetsPatch == nil && account.IQCheckSettings == nil { /* no target mutation */
 	}
 
 	account.ID = created.ID
@@ -542,6 +561,11 @@ func (r *accountRepository) updateAccount(
 	if err != nil {
 		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
 	}
+	if account.IQTargetsPatch != nil {
+		if _, err := r.SaveIQTargetsTx(ctx, client, account.ID, *account.IQTargetsPatch); err != nil {
+			return err
+		}
+	}
 	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
 		return err
 	}
@@ -629,8 +653,9 @@ func (r *accountRepository) updateLockedAccount(
 		if err := service.ValidateIQCheckSettings(account.Platform, account.IQCheckSettings); err != nil {
 			return nil, err
 		}
-		state = applyIQSettings(state, account.IQCheckSettings, identityChanged, time.Now().UTC())
-		builder.SetIqCheck(mustJSONIQ(state))
+		if identityChanged {
+			state = domain.DefaultIQCheck()
+		}
 	}
 
 	account.IQCheck = state
@@ -2898,7 +2923,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	}
 	iqExpression := ""
 	if len(iqConditions) > 0 {
-		iqExpression = ", iq_check = CASE WHEN platform='openai' THEN xy_iq_apply_settings(iq_check,'{}'::jsonb,(" + joinClauses(iqConditions, " OR ") + "),NOW()) ELSE iq_check END"
+		// Target reset is performed by the transaction owner after the row lock.
 	}
 	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || len(iqConditions) > 0
 	baseCtx := ctx
@@ -3288,23 +3313,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			idx++
 		}
 	}
-	iqPatch := "'{}'::jsonb"
-	if updates.IQCheck != nil {
-		payload, err := json.Marshal(updates.IQCheck)
-		if err != nil {
-			return 0, err
-		}
-		iqPatch = "$" + itoa(idx) + "::jsonb"
-		idx++
-		args = append(args, payload)
-	}
-	if len(iqResetConditions) > 0 || updates.IQCheck != nil {
-		condition := "false"
-		if len(iqResetConditions) > 0 {
-			condition = "(" + joinClauses(iqResetConditions, " OR ") + ")"
-		}
-		setClauses = append(setClauses, "iq_check = CASE WHEN platform='openai' THEN xy_iq_apply_settings(iq_check,"+iqPatch+","+condition+",NOW()) ELSE iq_check END")
-	}
+	// IQ targets are reset under each updated account row lock below.
 
 	ollamaGroupIdentityChanges := make([]string, 0, 2)
 	if _, ok := updates.Credentials["api_key"]; ok {

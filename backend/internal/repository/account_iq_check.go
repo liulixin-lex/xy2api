@@ -16,7 +16,6 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
-var iqTargetIdentityKeys = []string{"api_key", "base_url", "access_token", "refresh_token", "chatgpt_account_id", "header_override_enabled", "header_overrides", "user_agent", "model_mapping"}
 var iqTransportExtraKeys = []string{"openai_responses_mode", "openai_responses_supported", "openai_passthrough", "enable_tls_fingerprint", "tls_fingerprint_profile_id"}
 
 func applyIQStatusFilter(ctx context.Context, q *dbent.AccountQuery) *dbent.AccountQuery {
@@ -29,8 +28,16 @@ func applyIQStatusFilter(ctx context.Context, q *dbent.AccountQuery) *dbent.Acco
 		return q
 	}
 	return q.Where(dbaccount.PlatformEQ(service.PlatformOpenAI), func(s *entsql.Selector) {
-		c := s.C("iq_check")
-		s.Where(entsql.ExprP("CASE WHEN " + c + "->>'enabled' = 'true' THEN CASE WHEN " + c + "->>'last_run_status' = 'unknown' THEN 'unknown' ELSE COALESCE(" + c + "->>'status','unknown') END ELSE 'unknown' END = '" + status + "'"))
+		expr := "EXISTS (SELECT 1 FROM account_iq_targets t WHERE t.account_id=" + s.C("id") + " AND t.enabled AND "
+		switch status {
+		case "degraded":
+			expr += "t.verdict='degraded'"
+		case "smart":
+			expr += "t.verdict='smart' AND NOT EXISTS (SELECT 1 FROM account_iq_targets u WHERE u.account_id=t.account_id AND u.enabled AND u.verdict<>'smart')"
+		default:
+			expr += "NOT EXISTS (SELECT 1 FROM account_iq_targets u WHERE u.account_id=t.account_id AND u.enabled AND u.verdict IN ('smart','degraded'))"
+		}
+		s.Where(entsql.ExprP(expr + ")"))
 	})
 }
 

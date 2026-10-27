@@ -437,6 +437,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	account := &Account{
 		// Targets are persisted by the repository after the account row exists.
 		IQCheckSettings: input.IQCheck,
+		IQTargetsPatch:  input.IQTargets,
 		Name:            input.Name,
 		Notes:           normalizeAccountNotes(input.Notes),
 		Platform:        input.Platform,
@@ -553,11 +554,6 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
 	}
-	if input.IQTargets != nil {
-		if repo, ok := s.accountRepo.(IQTargetAccountRepository); ok {
-			_, _ = repo.SaveIQTargetsTx(ctx, nil, account.ID, *input.IQTargets)
-		}
-	}
 
 	// 绑定分组
 	if len(groupIDs) > 0 {
@@ -603,11 +599,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		return nil, err
 	}
 	account.IQCheckSettings = input.IQCheck
-	if input.IQTargets != nil {
-		if repo, ok := s.accountRepo.(IQTargetAccountRepository); ok {
-			_, _ = repo.SaveIQTargetsTx(ctx, nil, id, *input.IQTargets)
-		}
-	}
+	account.IQTargetsPatch = input.IQTargets
 	account.IQPreserveTokenRotation = input.IQPreserveTokenRotation
 	if account.Platform == PlatformTypeSafe && input.Type != "" && input.Type != AccountTypeAPIKey {
 		return nil, errors.New("typesafe accounts only support apikey credentials")

@@ -45,7 +45,8 @@ type Account struct {
 	UpdatedAt          time.Time
 
 	Schedulable             bool
-	IQPreserveTokenRotation bool `json:"-"`
+	IQPreserveTokenRotation bool                   `json:"-"`
+	IQTargetsPatch          *domain.IQTargetsPatch `json:"-"`
 	IQCheck                 domain.IQCheck
 	IQCheckSettings         *domain.IQCheckSettings `json:"-"` // Explicit administrative edit; never populated from storage.
 
