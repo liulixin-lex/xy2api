@@ -76,7 +76,7 @@ func recoverIQRetryDeadlines(ctx context.Context, db *dbent.Client, now time.Tim
 		if err = closeIQRetry(ctx, db, e.id, &e.s, now, "retry_deadline_exceeded"); err != nil {
 			return err
 		}
-		if _, err = db.Account.UpdateOneID(e.id).SetIqCheck(e.s).Save(ctx); err != nil {
+		if _, err = db.Account.UpdateOneID(e.id).SetIqCheck(mustJSONIQ(e.s)).Save(ctx); err != nil {
 			return err
 		}
 		if err = enqueueSchedulerOutbox(ctx, db, service.SchedulerOutboxEventAccountChanged, &e.id, nil, nil); err != nil {
@@ -172,7 +172,7 @@ func recoverIQExpiredLeases(ctx context.Context, db *dbent.Client, now time.Time
 				queueIQ(&s, now)
 			}
 		}
-		if _, err = db.Account.UpdateOneID(e.id).SetIqCheck(s).Save(ctx); err != nil {
+		if _, err = db.Account.UpdateOneID(e.id).SetIqCheck(mustJSONIQ(s)).Save(ctx); err != nil {
 			return nil, err
 		}
 		if err = enqueueSchedulerOutbox(ctx, db, service.SchedulerOutboxEventAccountChanged, &e.id, nil, nil); err != nil {

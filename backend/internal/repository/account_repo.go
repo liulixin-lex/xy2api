@@ -165,7 +165,7 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		SetStatus(account.Status).
 		SetErrorMessage(account.ErrorMessage).
 		SetSchedulable(account.Schedulable).
-		SetIqCheck(account.IQCheck).
+		SetIqCheck(mustJSONIQ(account.IQCheck)).
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
 
 	if account.RateMultiplier != nil {
@@ -217,6 +217,16 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	account.CreatedAt = created.CreatedAt
 	account.UpdatedAt = created.UpdatedAt
 	return nil
+}
+
+func mustJSONIQ(value domain.IQCheck) []byte {
+	b, _ := json.Marshal(value)
+	return b
+}
+func decodeIQCheck(raw []byte) domain.IQCheck {
+	var v domain.IQCheck
+	_ = json.Unmarshal(raw, &v)
+	return v
 }
 
 // CreateWithAccountGroups atomically persists an account, its exact per-group priorities,
@@ -575,7 +585,10 @@ func (r *accountRepository) updateLockedAccount(
 	}
 	builder.SetSchedulable(schedulable)
 	account.Schedulable = schedulable
-	state := current.IqCheck
+	var state domain.IQCheck
+	if err := json.Unmarshal(current.IqCheck, &state); err != nil {
+		return nil, err
+	}
 	identityChanged := current.Type != account.Type || current.Platform != account.Platform
 	for _, key := range iqIdentityKeys {
 		if account.IQPreserveTokenRotation && (key == "access_token" || key == "refresh_token") {
@@ -598,7 +611,7 @@ func (r *accountRepository) updateLockedAccount(
 			return nil, err
 		}
 		state = applyIQSettings(state, account.IQCheckSettings, identityChanged, time.Now().UTC())
-		builder.SetIqCheck(state)
+		builder.SetIqCheck(mustJSONIQ(state))
 	}
 
 	account.IQCheck = state
@@ -3806,7 +3819,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		CreatedAt:               m.CreatedAt,
 		UpdatedAt:               m.UpdatedAt,
 		Schedulable:             m.Schedulable,
-		IQCheck:                 m.IqCheck.CurrentAssessment(),
+		IQCheck:                 decodeIQCheck(m.IqCheck).CurrentAssessment(),
 		RateLimitedAt:           m.RateLimitedAt,
 		RateLimitResetAt:        m.RateLimitResetAt,
 		OverloadUntil:           m.OverloadUntil,

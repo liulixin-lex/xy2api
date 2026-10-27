@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -134,7 +135,11 @@ func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckC
 	if err != nil {
 		return false, err
 	}
-	s := a.IqCheck.WithSettings(nil)
+	var legacy domain.IQCheck
+	if err := json.Unmarshal(a.IqCheck, &legacy); err != nil {
+		return false, err
+	}
+	s := legacy.WithSettings(nil)
 	if s.LeaseToken != c.Token || s.StartedAt != nil {
 		return false, nil
 	}
@@ -145,7 +150,7 @@ func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckC
 		if s.Enabled {
 			queueIQ(&s, now)
 		}
-		if _, err = db.Account.UpdateOneID(c.AccountID).SetIqCheck(s).Save(ctx); err != nil {
+		if _, err = db.Account.UpdateOneID(c.AccountID).SetIqCheck(mustJSONIQ(s)).Save(ctx); err != nil {
 			return false, err
 		}
 		if err = enqueueSchedulerOutbox(ctx, db, service.SchedulerOutboxEventAccountChanged, &c.AccountID, nil, nil); err != nil {
@@ -161,7 +166,7 @@ func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckC
 		if err := closeIQRetry(ctx, db, c.AccountID, &s, now, "retry_deadline_exceeded"); err != nil {
 			return false, err
 		}
-		if _, err = db.Account.UpdateOneID(c.AccountID).SetIqCheck(s).Save(ctx); err != nil {
+		if _, err = db.Account.UpdateOneID(c.AccountID).SetIqCheck(mustJSONIQ(s)).Save(ctx); err != nil {
 			return false, err
 		}
 		if err = enqueueSchedulerOutbox(ctx, db, service.SchedulerOutboxEventAccountChanged, &c.AccountID, nil, nil); err != nil {
@@ -206,7 +211,7 @@ func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckC
 		if s.NextRunAt == nil || next.After(*s.NextRunAt) {
 			s.NextRunAt = &next
 		}
-		if _, err = db.Account.UpdateOneID(c.AccountID).SetIqCheck(s).Save(ctx); err != nil {
+		if _, err = db.Account.UpdateOneID(c.AccountID).SetIqCheck(mustJSONIQ(s)).Save(ctx); err != nil {
 			return false, err
 		}
 		if err = enqueueSchedulerOutbox(ctx, db, service.SchedulerOutboxEventAccountChanged, &c.AccountID, nil, nil); err != nil {
@@ -280,7 +285,7 @@ func (r *accountRepository) StartIQCheck(ctx context.Context, c service.IQCheckC
 			return false, err
 		}
 	}
-	if _, err = db.Account.UpdateOneID(c.AccountID).SetIqCheck(s).Save(ctx); err != nil {
+	if _, err = db.Account.UpdateOneID(c.AccountID).SetIqCheck(mustJSONIQ(s)).Save(ctx); err != nil {
 		return false, err
 	}
 	if err = enqueueSchedulerOutbox(ctx, db, service.SchedulerOutboxEventAccountChanged, &c.AccountID, nil, nil); err != nil {
