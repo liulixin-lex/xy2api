@@ -49,6 +49,85 @@ func TestUpdateExtraWithoutModelRateLimitsPreservesAllEntries(t *testing.T) {
 	require.Equal(t, wantLimits, fresh.Extra["model_rate_limits"])
 }
 
+func TestCreateAndUpdateNormalizeModelRateLimitsNull(t *testing.T) {
+	ctx := context.Background()
+	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+	account := &service.Account{
+		Name:        fmt.Sprintf("iq-null-extra-%d", time.Now().UnixNano()),
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Extra:       map[string]any{"model_rate_limits": nil},
+	}
+	require.NoError(t, repo.Create(ctx, account))
+	t.Cleanup(func() { cleanupIQTestAccount(t, account.ID) })
+
+	fresh, err := repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{}, fresh.Extra["model_rate_limits"], "Create stores null as an object")
+	fresh.Extra["model_rate_limits"] = nil
+	fresh.Name += "-updated"
+	require.NoError(t, repo.Update(ctx, fresh))
+	fresh, err = repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{}, fresh.Extra["model_rate_limits"], "ordinary Update stores null as an object")
+
+	for _, invalid := range []any{[]any{"bad"}, "bad", true} {
+		badCreate := &service.Account{
+			Name:        fmt.Sprintf("iq-bad-extra-%d", time.Now().UnixNano()),
+			Platform:    service.PlatformOpenAI,
+			Type:        service.AccountTypeAPIKey,
+			Status:      service.StatusActive,
+			Schedulable: true,
+			Extra:       map[string]any{"model_rate_limits": invalid},
+		}
+		require.Error(t, repo.Create(ctx, badCreate), "Create rejects model_rate_limits=%#v", invalid)
+
+		badUpdate, err := repo.GetByID(ctx, account.ID)
+		require.NoError(t, err)
+		badUpdate.Extra["model_rate_limits"] = invalid
+		require.Error(t, repo.Update(ctx, badUpdate), "ordinary Update rejects model_rate_limits=%#v", invalid)
+	}
+}
+
+func TestProjectAndRequeueIQGatesHandleLegacyNullModelRateLimits(t *testing.T) {
+	ctx := context.Background()
+	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+	a := createEnabledIQTargetAccount(t, repo, "null-model-rate-limits")
+
+	_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(COALESCE(extra,'{}'::jsonb),'{model_rate_limits}','null'::jsonb,true) WHERE id=$1`, a.ID)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_iq_targets SET verdict='degraded',verdict_at=now(),gate_model='gpt-6-astra' WHERE account_id=$1`, a.ID)
+	require.NoError(t, err)
+	changed, err := repo.ProjectIQGates(ctx, repo.client, a.ID)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Contains(t, accountIQRateLimits(t, a.ID), "iq:gpt-6-astra")
+
+	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(COALESCE(extra,'{}'::jsonb),'{model_rate_limits}','null'::jsonb,true) WHERE id=$1`, a.ID)
+	require.NoError(t, err)
+	stored, err := repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	stored.Extra["model_rate_limits"] = nil
+
+	tx, err := repo.client.Tx(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	var lockedID int64
+	lockRows, err := tx.Client().QueryContext(ctx, `SELECT id FROM accounts WHERE id=$1 FOR NO KEY UPDATE`, a.ID)
+	require.NoError(t, err)
+	require.True(t, lockRows.Next())
+	require.NoError(t, lockRows.Scan(&lockedID))
+	require.NoError(t, lockRows.Close())
+	changed, err = repo.RequeueIQTargetsTx(ctx, tx.Client(), stored, "gpt-6-astra")
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.NoError(t, tx.Commit())
+	require.Contains(t, stored.Extra["model_rate_limits"], "iq:gpt-6-astra")
+	require.Contains(t, accountIQRateLimits(t, a.ID), "iq:gpt-6-astra")
+}
+
 func TestAccountIdentityChangesResetIQTargets(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -307,6 +386,45 @@ func TestClaimIQTargetsHonorsManualSchedulingGlobalLimitAndUniqueTokens(t *testi
 	require.NotEqual(t, claims[0].LeaseToken, claims[1].LeaseToken)
 }
 
+func TestClaimIQTargetsUsesDatabaseClock(t *testing.T) {
+	ctx := context.Background()
+	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+	enabled := true
+	a := &service.Account{
+		Name:        fmt.Sprintf("iq-db-clock-%d", time.Now().UnixNano()),
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{"api_key": "fixture"},
+		IQTargetsPatch: &domain.IQTargetsPatch{Targets: []domain.IQTargetSettings{
+			{Model: "active", Enabled: &enabled},
+			{Model: "due", Enabled: &enabled},
+		}},
+	}
+	require.NoError(t, repo.Create(ctx, a))
+	t.Cleanup(func() { cleanupIQTestAccount(t, a.ID) })
+	_, err := integrationDB.ExecContext(ctx, `UPDATE account_iq_targets SET next_run_at=now()-interval '1 minute' WHERE account_id=$1`, a.ID)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_iq_targets SET lease_token='active-lease',lease_until=clock_timestamp()+interval '4 minutes',manual_requested_at=clock_timestamp() WHERE account_id=$1 AND model='active'`, a.ID)
+	require.NoError(t, err)
+
+	claims, err := repo.ClaimIQTargets(ctx, time.Now().UTC().Add(5*time.Minute), 2)
+	require.NoError(t, err)
+	require.Len(t, claims, 1, "the active lease must count against the global limit despite a fast caller clock")
+	require.Equal(t, "due", claims[0].Model)
+	var activeToken string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT lease_token FROM account_iq_targets WHERE account_id=$1 AND model='active'`, a.ID).Scan(&activeToken))
+	require.Equal(t, "active-lease", activeToken)
+
+	var startedAt time.Time
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT started_at FROM account_iq_check_results WHERE lease_token=$1`, claims[0].LeaseToken).Scan(&startedAt))
+	var databaseNow time.Time
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&databaseNow))
+	require.WithinDuration(t, databaseNow, startedAt, 2*time.Second, "round start uses the database clock")
+	require.InDelta(t, float64(5*claims[0].TimeoutSeconds+120), claims[0].LeaseUntil.Sub(startedAt).Seconds(), 0.01, "lease expiry and round start share one instant")
+}
+
 func TestDeferIQTargetPreservesManualRequestTimestampAndLeaseOwnership(t *testing.T) {
 	ctx := context.Background()
 	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
@@ -335,6 +453,97 @@ func TestDeferIQTargetPreservesManualRequestTimestampAndLeaseOwnership(t *testin
 	require.NoError(t, repo.DeferIQTarget(ctx, stale, "account_busy", time.Now().UTC().Add(time.Minute)))
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT lease_token FROM account_iq_targets WHERE id=$1`, stale.ID).Scan(&leaseToken))
 	require.Equal(t, "replacement-token", *leaseToken, "a stale worker cannot release a newer lease")
+}
+
+func TestDeferIQTargetWithOldRevisionPreservesNewSchedule(t *testing.T) {
+	ctx := context.Background()
+	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+	a := createEnabledIQTargetAccount(t, repo, "defer-old-revision")
+	claim := claimIQTargetForAccount(t, repo, a.ID, 10)
+	_, err := integrationDB.ExecContext(ctx, `UPDATE account_iq_targets SET revision='new-revision',next_run_at=now(),not_before=now()+interval '3 minutes',manual_requested_at=now()-interval '1 minute' WHERE id=$1`, claim.ID)
+	require.NoError(t, err)
+	var nextRunAt, notBefore, manualRequestedAt time.Time
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT next_run_at,not_before,manual_requested_at FROM account_iq_targets WHERE id=$1`, claim.ID).Scan(&nextRunAt, &notBefore, &manualRequestedAt))
+
+	require.NoError(t, repo.DeferIQTarget(ctx, claim, "account_busy", time.Now().UTC().Add(time.Hour)))
+	var revision string
+	var leaseToken *string
+	var leaseUntil *time.Time
+	var savedNextRunAt, savedNotBefore, savedManualRequestedAt time.Time
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT revision,lease_token,lease_until,next_run_at,not_before,manual_requested_at FROM account_iq_targets WHERE id=$1`, claim.ID).Scan(&revision, &leaseToken, &leaseUntil, &savedNextRunAt, &savedNotBefore, &savedManualRequestedAt))
+	require.Equal(t, "new-revision", revision)
+	require.Nil(t, leaseToken)
+	require.Nil(t, leaseUntil)
+	require.Equal(t, nextRunAt, savedNextRunAt)
+	require.Equal(t, notBefore, savedNotBefore)
+	require.Equal(t, manualRequestedAt, savedManualRequestedAt)
+	var remainingRounds int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM account_iq_check_results WHERE lease_token=$1`, claim.LeaseToken).Scan(&remainingRounds))
+	require.Zero(t, remainingRounds, "the stale deferred round is closed by its own lease token")
+}
+
+func TestAccountUpdateAndClaimResultInsertDoNotDeadlock(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+	enabled := true
+	a := &service.Account{
+		Name:        fmt.Sprintf("iq-lock-order-%d", time.Now().UnixNano()),
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{"api_key": "before"},
+		IQTargetsPatch: &domain.IQTargetsPatch{Targets: []domain.IQTargetSettings{{
+			Model: "gpt-6-astra", Enabled: &enabled,
+		}}},
+	}
+	require.NoError(t, repo.Create(ctx, a))
+	t.Cleanup(func() { cleanupIQTestAccount(t, a.ID) })
+	fresh, err := repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	fresh.Credentials["api_key"] = "after"
+
+	claimTx, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer claimTx.Rollback()
+	var targetID int64
+	var revision string
+	require.NoError(t, claimTx.QueryRowContext(ctx, `SELECT id,revision FROM account_iq_targets WHERE account_id=$1 AND model='gpt-6-astra' FOR UPDATE`, a.ID).Scan(&targetID, &revision))
+	leaseToken := fmt.Sprintf("iq-claim-lock-%d", time.Now().UnixNano())
+	_, err = claimTx.ExecContext(ctx, `UPDATE account_iq_targets SET lease_token=$2,lease_until=clock_timestamp()+interval '5 minutes' WHERE id=$1`, targetID, leaseToken)
+	require.NoError(t, err)
+
+	updateDone := make(chan error, 1)
+	go func() { updateDone <- repo.Update(ctx, fresh) }()
+
+	waiting := false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case updateErr := <-updateDone:
+			require.NoError(t, updateErr)
+			t.Fatal("account update finished before it waited on the locked target")
+		default:
+		}
+		err = integrationDB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE 'UPDATE account_iq_targets SET revision=gen_random_uuid()::text%')`).Scan(&waiting)
+		require.NoError(t, err)
+		if waiting {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	require.True(t, waiting, "account edit must hold its account lock while waiting to reset the target")
+
+	_, err = claimTx.ExecContext(ctx, `INSERT INTO account_iq_check_results(account_id,lease_token,prompt_version,model,effort,status,reason,started_at,config_revision,outbound_model,mode) VALUES($1,$2,'candy-v3','gpt-6-astra','low','unknown','',clock_timestamp(),$3,'gpt-6-astra','normal')`, a.ID, leaseToken, revision)
+	require.NoError(t, err, "claim result insertion must coexist with the account writer lock")
+	require.NoError(t, claimTx.Commit())
+	select {
+	case err = <-updateDone:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("account update did not finish after the claim released its target lock")
+	}
 }
 
 func TestCompleteIQTargetFinishesRoundAndPersistsSchedulingStreaks(t *testing.T) {

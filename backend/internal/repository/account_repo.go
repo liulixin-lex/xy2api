@@ -206,6 +206,9 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	}
 
 	account.Extra = service.MergeOpenAICodexTicketExtra(account.Extra, nil)
+	if err := normalizeModelRateLimits(account.Extra); err != nil {
+		return err
+	}
 	account.Extra = stripIQGateEntries(account.Extra)
 	service.InitializeNewCodexTicketAccount(account)
 
@@ -626,7 +629,7 @@ func (r *accountRepository) updateLockedAccount(
 		SetErrorMessage(account.ErrorMessage).
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
 
-	current, err := client.Account.Query().Where(dbaccount.IDEQ(account.ID)).ForUpdate().Only(ctx)
+	current, err := client.Account.Query().Where(dbaccount.IDEQ(account.ID)).ForUpdate(entsql.WithLockClause("FOR NO KEY UPDATE")).Only(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -852,7 +855,11 @@ func lockAndMergeAccountProbeExtra(
 			currentExtra = nil
 		}
 	}
-	extra := service.MergeOpenAICodexTicketExtra(copyJSONMap(normalizeJSONMap(account.Extra)), currentExtra)
+	incomingExtra := copyJSONMap(normalizeJSONMap(account.Extra))
+	if err := normalizeModelRateLimits(incomingExtra); err != nil {
+		return nil, err
+	}
+	extra := service.MergeOpenAICodexTicketExtra(incomingExtra, currentExtra)
 	for key := range extraModelRateLimits(extra) {
 		if domain.IsIQGateKey(key) {
 			delete(extraModelRateLimits(extra), key)
@@ -869,6 +876,9 @@ func lockAndMergeAccountProbeExtra(
 			}
 		}
 		extra["model_rate_limits"] = limits
+	}
+	if err := normalizeModelRateLimits(extra); err != nil {
+		return nil, err
 	}
 	extra = service.MergeCapabilityLearningExtra(extra, currentExtra)
 	for _, key := range []string{

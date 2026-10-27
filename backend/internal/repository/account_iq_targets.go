@@ -139,7 +139,7 @@ func iqDatabaseTime(ctx context.Context, c *dbent.Client) (time.Time, error) {
 	return now, rows.Err()
 }
 
-func (r *accountRepository) ClaimIQTargets(ctx context.Context, now time.Time, limit int) ([]service.IQTargetClaim, error) {
+func (r *accountRepository) ClaimIQTargets(ctx context.Context, _ time.Time, limit int) ([]service.IQTargetClaim, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -152,7 +152,12 @@ func (r *accountRepository) ClaimIQTargets(ctx context.Context, now time.Time, l
 	if _, err = c.ExecContext(ctx, `SELECT pg_advisory_xact_lock(78421021)`); err != nil {
 		return nil, err
 	}
-	_, _ = c.ExecContext(ctx, `UPDATE account_iq_check_results SET finished_at=now(),status='unknown',reason='interrupted' WHERE finished_at IS NULL AND NOT EXISTS (SELECT 1 FROM account_iq_targets t WHERE t.lease_token=account_iq_check_results.lease_token AND t.lease_until>now())`)
+	now, err := iqDatabaseTime(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	now = now.UTC()
+	_, _ = c.ExecContext(ctx, `UPDATE account_iq_check_results SET finished_at=$1,status='unknown',reason='interrupted' WHERE finished_at IS NULL AND NOT EXISTS (SELECT 1 FROM account_iq_targets t WHERE t.lease_token=account_iq_check_results.lease_token AND t.lease_until>$1)`, now)
 	var active int
 	countRows, e := c.QueryContext(ctx, `SELECT count(*) FROM account_iq_targets WHERE lease_until > $1`, now)
 	if e != nil {
@@ -226,7 +231,7 @@ func (r *accountRepository) DeferIQTarget(ctx context.Context, claim service.IQT
 	}
 	defer tx.Rollback()
 	c := tx.Client()
-	rows, err := c.QueryContext(ctx, `SELECT id FROM account_iq_targets WHERE id=$1 AND lease_token=$2 AND lease_until>clock_timestamp() FOR UPDATE`, claim.ID, claim.LeaseToken)
+	rows, err := c.QueryContext(ctx, `SELECT revision FROM account_iq_targets WHERE id=$1 AND lease_token=$2 AND lease_until>clock_timestamp() FOR UPDATE`, claim.ID, claim.LeaseToken)
 	if err != nil {
 		return err
 	}
@@ -234,9 +239,20 @@ func (r *accountRepository) DeferIQTarget(ctx context.Context, claim service.IQT
 		rows.Close()
 		return tx.Commit()
 	}
+	var revision string
+	if err := rows.Scan(&revision); err != nil {
+		rows.Close()
+		return err
+	}
 	rows.Close()
 	if _, err = c.ExecContext(ctx, `DELETE FROM account_iq_check_results WHERE lease_token=$1`, claim.LeaseToken); err != nil {
 		return err
+	}
+	if revision != claim.Revision {
+		if _, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2`, claim.ID, claim.LeaseToken); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	if _, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET lease_token=NULL,lease_until=NULL,next_run_at=$3,not_before=$3,manual_requested_at=CASE WHEN $4 THEN COALESCE(manual_requested_at,$5) ELSE manual_requested_at END,last_reason=$6,updated_at=now() WHERE id=$1 AND lease_token=$2`, claim.ID, claim.LeaseToken, next, claim.ManualRequested, claim.ManualRequestedAt, reason); err != nil {
 		return err
@@ -785,6 +801,9 @@ func (r *accountRepository) RequeueIQTargetsTx(ctx context.Context, c *dbent.Cli
 			return false, err
 		}
 	}
+	if currentLimits == nil {
+		currentLimits = map[string]any{}
+	}
 	incomingLimits := map[string]any{}
 	if value, ok := account.Extra["model_rate_limits"]; ok {
 		encoded, marshalErr := json.Marshal(value)
@@ -794,6 +813,9 @@ func (r *accountRepository) RequeueIQTargetsTx(ctx context.Context, c *dbent.Cli
 		if err = json.Unmarshal(encoded, &incomingLimits); err != nil {
 			return false, err
 		}
+	}
+	if incomingLimits == nil {
+		incomingLimits = map[string]any{}
 	}
 	for key := range incomingLimits {
 		if domain.IsIQGateKey(key) {
@@ -883,6 +905,9 @@ func (r *accountRepository) ProjectIQGates(ctx context.Context, c *dbent.Client,
 		if e = json.Unmarshal(b, &limits); e != nil {
 			return false, fmt.Errorf("decode model_rate_limits: %w", e)
 		}
+	}
+	if limits == nil {
+		limits = map[string]any{}
 	}
 	currentIQ := map[string]time.Time{}
 	for k, v := range limits {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	entsql "entgo.io/ent/dialect/sql"
 	"github.com/liulixin-lex/xy2api/ent"
 	dbaccount "github.com/liulixin-lex/xy2api/ent/account"
 	"github.com/liulixin-lex/xy2api/internal/config"
@@ -133,7 +134,7 @@ func (r *accountRepository) MutateCodexTicketBatch(ctx context.Context, ids []in
 	ordered := sortedUniqueAccountIDs(append([]int64(nil), ids...))
 	locked := map[int64]*ent.Account{}
 	if limit > 0 && len(ordered) > 1 {
-		rows, e := c.Account.Query().Where(dbaccount.IDIn(ordered...)).Order(ent.Asc(dbaccount.FieldID)).ForUpdate().All(ctx)
+		rows, e := c.Account.Query().Where(dbaccount.IDIn(ordered...)).Order(ent.Asc(dbaccount.FieldID)).ForUpdate(entsql.WithLockClause("FOR NO KEY UPDATE")).All(ctx)
 		if e != nil {
 			return nil, e
 		}
@@ -156,7 +157,7 @@ func (r *accountRepository) MutateCodexTicketBatch(ctx context.Context, ids []in
 		m := locked[id]
 		var err error
 		if m == nil {
-			m, err = c.Account.Query().Where(dbaccount.IDEQ(id)).ForUpdate().Only(ctx)
+			m, err = c.Account.Query().Where(dbaccount.IDEQ(id)).ForUpdate(entsql.WithLockClause("FOR NO KEY UPDATE")).Only(ctx)
 		}
 		if err != nil {
 			return nil, translatePersistenceError(err, service.ErrAccountNotFound, nil)
