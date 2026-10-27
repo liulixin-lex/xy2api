@@ -99,7 +99,7 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 	// = relational graphs with back-references that would cycle under encoding/json.
 	stripped := map[string]struct{}{
 		"Credentials": {}, "Groups": {}, "AccountGroups": {},
-		"IQPreserveTokenRotation": {}, "IQCheckSettings": {},
+		"IQPreserveTokenRotation": {}, "IQCheckSettings": {}, "IQTargetsPatch": {}, "IQTargets": {},
 	}
 	// Fields intentionally exposed as readable metadata (incl. Extra and Proxy —
 	// the proxy password is already handed out via ResolveOutboundIdentity's URL).

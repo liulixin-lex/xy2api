@@ -60,6 +60,7 @@ type DataProxy struct {
 // (外审第6轮裁决:保持排除 + 前端警告,而非升级格式做完整往返)。
 type DataAccount struct {
 	IQCheck            *domain.IQCheckSettings `json:"iq_check,omitempty"`
+	IQTargets          *domain.IQTargetsPatch  `json:"iq_targets,omitempty"`
 	Name               string                  `json:"name"`
 	Notes              *string                 `json:"notes,omitempty"`
 	Platform           string                  `json:"platform"`
@@ -210,6 +211,13 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 		}
 		// Learned capabilities belong to this account identity, not an export.
 		extra := service.RedactOpenAICodexTicketExtra(acc.Extra)
+		if limits, ok := extra["model_rate_limits"].(map[string]any); ok {
+			for key := range limits {
+				if domain.IsIQGateKey(key) {
+					delete(limits, key)
+				}
+			}
+		}
 		delete(extra, "capability_learned_responses")
 		delete(extra, "capability_learned_chat")
 		dataAccounts = append(dataAccounts, DataAccount{
@@ -462,6 +470,14 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			ExpiresAt:            item.ExpiresAt,
 			AutoPauseOnExpired:   item.AutoPauseOnExpired,
 			SkipDefaultGroupBind: skipDefaultGroupBind,
+		}
+		if item.IQTargets != nil {
+			patch := *item.IQTargets
+			for i := range patch.Targets {
+				enabled := false
+				patch.Targets[i].Enabled = &enabled
+			}
+			accountInput.IQTargets = &patch
 		}
 
 		if item.IQCheck != nil {

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
@@ -320,6 +321,14 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	}
 	if source.Platform == PlatformOpenAI {
 		input.IQCheck = source.IQCheck.CopySettings()
+		if len(source.IQTargets) > 0 {
+			patch := domain.IQTargetsPatch{}
+			for _, target := range source.IQTargets {
+				enabled := false
+				patch.Targets = append(patch.Targets, domain.IQTargetSettings{Model: target.Model, Enabled: &enabled})
+			}
+			input.IQTargets = &patch
+		}
 	}
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {

@@ -456,6 +456,15 @@ type AccountSchedulerGroupScore struct {
 const accountListGroupUngroupedQueryValue = "ungrouped"
 
 func (h *AccountHandler) accountResponseFromService(account *service.Account) *dto.Account {
+	if account != nil {
+		if repo, ok := h.adminService.(interface {
+			ListIQTargetSummaries(context.Context, []int64) (map[int64][]domain.IQTargetSummary, error)
+		}); ok {
+			if summaries, err := repo.ListIQTargetSummaries(context.Background(), []int64{account.ID}); err == nil {
+				account.IQTargets = summaries[account.ID]
+			}
+		}
+	}
 	out := dto.AccountFromService(account)
 	h.enrichCodexTicketStatus(account, out)
 	if h != nil && h.ollamaCloudUsage != nil && out != nil {
@@ -830,6 +839,19 @@ func (h *AccountHandler) List(c *gin.Context) {
 			if err := h.opencodeGoUsage.ResolveOpenCodeGoUsageAccounts(c.Request.Context(), accountPointers); err != nil {
 				response.ErrorFrom(c, err)
 				return
+			}
+		}
+	}
+	if repo, ok := h.adminService.(interface {
+		ListIQTargetSummaries(context.Context, []int64) (map[int64][]domain.IQTargetSummary, error)
+	}); ok && len(accounts) > 0 {
+		ids := make([]int64, len(accounts))
+		for i := range accounts {
+			ids[i] = accounts[i].ID
+		}
+		if summaries, err := repo.ListIQTargetSummaries(c.Request.Context(), ids); err == nil {
+			for i := range accounts {
+				accounts[i].IQTargets = summaries[accounts[i].ID]
 			}
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -43,6 +44,21 @@ func extraModelRateLimits(extra map[string]any) map[string]any {
 	}
 	limits, _ := extra["model_rate_limits"].(map[string]any)
 	return limits
+}
+
+func normalizeModelRateLimits(extra map[string]any) error {
+	if extra == nil {
+		return nil
+	}
+	v, ok := extra["model_rate_limits"]
+	if !ok || v == nil {
+		extra["model_rate_limits"] = map[string]any{}
+		return nil
+	}
+	if _, ok := v.(map[string]any); ok {
+		return nil
+	}
+	return fmt.Errorf("model_rate_limits must be an object")
 }
 
 func stripIQGateEntries(extra map[string]any) map[string]any {
@@ -2779,7 +2795,7 @@ func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) 
 	client := clientFromContext(ctx, r.client)
 	result, err := client.ExecContext(
 		ctx,
-		"UPDATE accounts SET extra = jsonb_set(COALESCE(extra, '{}'::jsonb), '{model_rate_limits}', COALESCE((SELECT jsonb_object_agg(key, value) FROM jsonb_each(COALESCE(extra->'model_rate_limits', '{}'::jsonb)) WHERE key NOT LIKE 'iq:%'), '{}'::jsonb), true), updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
+		"UPDATE accounts SET extra = CASE WHEN jsonb_typeof(extra->'model_rate_limits')='object' THEN jsonb_set(COALESCE(extra, '{}'::jsonb), '{model_rate_limits}', COALESCE((SELECT jsonb_object_agg(key, value) FROM jsonb_each(COALESCE(extra->'model_rate_limits', '{}'::jsonb)) WHERE key LIKE 'iq:%'), '{}'::jsonb), true) ELSE COALESCE(extra, '{}'::jsonb) - 'model_rate_limits' END, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
 		id,
 	)
 	if err != nil {
@@ -2897,6 +2913,9 @@ func (r *accountRepository) AutoPauseExpiredAccounts(ctx context.Context, now ti
 
 func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
 	updates = stripCodexFingerprintSeedFromExtraUpdate(updates)
+	if err := normalizeModelRateLimits(updates); err != nil {
+		return err
+	}
 	if limits, ok := updates["model_rate_limits"].(map[string]any); ok {
 		for key := range limits {
 			if domain.IsIQGateKey(key) {
@@ -3207,6 +3226,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	}
 
 	updates.Extra = stripCodexFingerprintSeedFromExtraUpdate(updates.Extra)
+	if err := normalizeModelRateLimits(updates.Extra); err != nil {
+		return 0, err
+	}
 	if limits, ok := updates.Extra["model_rate_limits"].(map[string]any); ok {
 		for key := range limits {
 			if domain.IsIQGateKey(key) {
