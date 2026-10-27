@@ -224,6 +224,16 @@
 
 ## 进行中的工作
 
+### 20261027-iq-r4fix — IQ 按模型门禁 R4 修复（进行中）
+
+- **背景**：分支 `wip/iq-r4fix-20261027` 基于 `9b3597b7e`；按 astra R4 报告修复 3 个 P1 与 1 个 P2。
+- **目标与约束**：修复 fresh compact 出站值、raw Chat compact 误挡、Retry-After 等待越过租约、快照写失败遗留租约；每项一个最小单测。不得修改 repository 层，除非修复绝对需要；不得触碰其他 worktree 或连接服务器。调度文件若有修改须同步 scheduler-diff；更新 IQ 文档并通过文档检查。
+- **开始状态**：HEAD `9b3597b7e0859f2e92e783236a34279e7f326065`，工作树干净。已读取 `AGENTS.md`、本文件、方案 v1.2、ROUTES 与 R4 报告。
+- **已完成**：只读核对四个缺陷与现有 service 调度、租约接口；确认可在 service 层修复，不需要改 repository。
+- **未完成**：实现四项修复及四个单测；运行指定 Go 构建、四组 vet、unit、韧性门禁、scheduler-diff 与文档一致性；提交并写仓库外交付报告。
+- **卡点与风险**：无。
+- **关键位置**：`backend/internal/service/iq_check_service.go`、`resilience_session.go`、`iq_check_gate.go`、`openai_codex_ticket.go`、相关 service 单测、`docs/OPENAI_IQ_CHECK.md`。
+
 ### 20261027-resilience-review — 网关韧性功能复盘（已提交 `7140cda93`，PR #146；2026-10-27）
 
 - **请求**（用户 2026-10-27）：0.4.9 改动提交后，分析原有“网关韧性”策略是否需要同步调整，有无多余、臃肿、无用的功能与可优化项；与 Codex 讨论后给出最终方案，批准后再写代码。

@@ -453,6 +453,9 @@ func (s *IQCheckService) executeTarget(ctx context.Context, c IQTargetClaim) {
 	}
 	c.OutboundModel = CanonicalIQOutboundModel(account, c.Model)
 	if ok, snapshotErr := s.targetRepo.SetIQTargetOutboundModel(roundCtx, c, c.OutboundModel); snapshotErr != nil || !ok {
+		releaseCtx, cancelRelease := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		s.deferTarget(releaseCtx, c, "outbound_model_snapshot_failed", time.Now().UTC().Add(time.Minute))
+		cancelRelease()
 		return
 	}
 	if s.concurrency == nil || s.concurrency.cache == nil {
@@ -557,6 +560,9 @@ func (s *IQCheckService) executeTarget(ctx context.Context, c IQTargetClaim) {
 		waitUntil := time.Now().Add(2 * time.Second)
 		if retryAfter != nil && retryAfter.After(waitUntil) {
 			waitUntil = *retryAfter
+		}
+		if !waitUntil.Before(leaseQuestionDeadline) {
+			break
 		}
 		if err := sleepIQAttempt(roundCtx, time.Until(waitUntil)); err != nil {
 			if ctx.Err() == nil {

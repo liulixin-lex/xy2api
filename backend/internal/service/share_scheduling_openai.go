@@ -174,7 +174,7 @@ func (s *OpenAIGatewayService) shareOpenAILastResort(ctx context.Context, gp *sh
 		limit: func(acc *Account) int { return s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency) },
 		verify: func(acc *Account) (*Account, sharesched.Reason) {
 			// The plan used a 2 s group list (review R09).
-			if fresh, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, acc, req.RequestedModel, false, s.resilienceOpenAIPenaltyOf); ok {
+			if fresh, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, acc, req.RequestedModel, false, s.resilienceOpenAIPenaltyOf, nil); ok {
 				return fresh, ""
 			}
 			return nil, sharesched.ReasonIneligible

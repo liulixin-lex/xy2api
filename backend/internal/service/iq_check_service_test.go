@@ -37,11 +37,23 @@ type iqRunTargetRepo struct {
 
 type iqExecutionRepo struct {
 	IQTargetRepository
-	attempts  []iqcheck.Result
-	completed iqcheck.Result
-	outbound  string
-	views     []domain.IQTargetView
-	page      IQResultsPage
+	attempts                []iqcheck.Result
+	completed               iqcheck.Result
+	completedAt             time.Time
+	outbound                string
+	snapshotConfigured      bool
+	snapshotOK              bool
+	snapshotErr             error
+	beforeSnapshot          func()
+	deferred                int
+	deferredClaim           IQTargetClaim
+	deferredReason          string
+	deferredNext            time.Time
+	deferredContextErr      error
+	deferredHasDeadline     bool
+	deferredContextDeadline time.Time
+	views                   []domain.IQTargetView
+	page                    IQResultsPage
 }
 
 type iqReconcileFailureRepo struct {
@@ -53,16 +65,32 @@ type iqReconcileFailureRepo struct {
 func (r *iqReconcileFailureRepo) ReconcileIQGates(context.Context) error { return r.err }
 
 func (r *iqExecutionRepo) SetIQTargetOutboundModel(_ context.Context, _ IQTargetClaim, model string) (bool, error) {
+	if r.beforeSnapshot != nil {
+		r.beforeSnapshot()
+	}
 	r.outbound = model
-	return true, nil
+	if !r.snapshotConfigured {
+		return true, nil
+	}
+	return r.snapshotOK, r.snapshotErr
 }
 func (r *iqExecutionRepo) AddIQTargetAttempt(_ context.Context, _ IQTargetClaim, _ int, _ string, _ iqcheck.Challenge, result iqcheck.Result, _, _ time.Time) error {
 	r.attempts = append(r.attempts, result)
 	return nil
 }
-func (r *iqExecutionRepo) CompleteIQTarget(_ context.Context, _ IQTargetClaim, result iqcheck.Result, _ time.Time) (bool, error) {
+func (r *iqExecutionRepo) CompleteIQTarget(_ context.Context, _ IQTargetClaim, result iqcheck.Result, finished time.Time) (bool, error) {
 	r.completed = result
+	r.completedAt = finished
 	return true, nil
+}
+func (r *iqExecutionRepo) DeferIQTarget(ctx context.Context, claim IQTargetClaim, reason string, next time.Time) error {
+	r.deferred++
+	r.deferredClaim = claim
+	r.deferredReason = reason
+	r.deferredNext = next
+	r.deferredContextErr = ctx.Err()
+	r.deferredContextDeadline, r.deferredHasDeadline = ctx.Deadline()
+	return nil
 }
 func (r *iqExecutionRepo) ListIQTargetViews(context.Context, int64) ([]domain.IQTargetView, error) {
 	return r.views, nil
@@ -286,6 +314,86 @@ func TestIQExecutionUsesOneCanonicalOutboundSnapshot(t *testing.T) {
 	require.Equal(t, "gpt-6.1-sol", repo.outbound)
 	require.Equal(t, repo.outbound, transport.payload["model"])
 	require.Equal(t, "authentication_unavailable", repo.completed.Reason)
+}
+
+func TestIQExecutionCompletesBeforeLeaseWhenRetryAfterExceedsBudget(t *testing.T) {
+	account := &Account{ID: 79, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "fixture", "base_url": "https://example.test"},
+		Extra:       map[string]any{"openai_responses_mode": "force_responses"}}
+	transport := &targetProbeTransport{status: http.StatusServiceUnavailable, headers: http.Header{"Retry-After": {"60"}}, body: `{}`}
+	repo := &iqExecutionRepo{}
+	cache := &iqSlotTestCache{}
+	svc := &IQCheckService{
+		accounts: &targetProbeAccounts{account: account}, targetRepo: repo,
+		tester:      &AccountTestService{cfg: &config.Config{}, httpUpstream: transport},
+		concurrency: &ConcurrencyService{cache: cache},
+	}
+	leaseUntil := time.Now().Add(30 * time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		svc.executeTarget(ctx, IQTargetClaim{
+			ID: 3, AccountID: account.ID, Model: "gpt-6-astra", Revision: "revision", LeaseToken: "lease",
+			ManualRequested: true, TimeoutSeconds: 5, LeaseUntil: leaseUntil, Mode: "normal",
+		})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		cancel()
+		<-done
+	}
+	cancel()
+
+	require.Len(t, repo.attempts, 1)
+	require.Equal(t, 1, transport.calls)
+	require.Equal(t, "unknown", repo.completed.Status)
+	require.Equal(t, "http_503", repo.completed.Reason)
+	require.NotNil(t, repo.completed.Diagnostic)
+	require.NotNil(t, repo.completed.Diagnostic.RetryAfter)
+	require.True(t, repo.completed.Diagnostic.RetryAfter.After(time.Now().Add(50*time.Second)))
+	require.True(t, repo.completedAt.Before(leaseUntil))
+	require.Equal(t, int32(1), cache.releases.Load())
+}
+
+func TestIQExecutionReleasesLeaseWhenOutboundSnapshotFails(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		snapshotOK  bool
+		snapshotErr error
+	}{
+		{name: "rejected", snapshotOK: false},
+		{name: "error", snapshotOK: true, snapshotErr: fmt.Errorf("snapshot write failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			account := &Account{ID: 80, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+				Credentials: map[string]any{"api_key": "fixture", "base_url": "https://example.test"},
+				Extra:       map[string]any{"openai_responses_mode": "force_responses"}}
+			ctx, cancel := context.WithCancel(context.Background())
+			repo := &iqExecutionRepo{
+				snapshotConfigured: true, snapshotOK: tc.snapshotOK, snapshotErr: tc.snapshotErr,
+				beforeSnapshot: cancel,
+			}
+			svc := &IQCheckService{accounts: &targetProbeAccounts{account: account}, targetRepo: repo}
+			claim := IQTargetClaim{
+				ID: 4, AccountID: account.ID, Model: "gpt-6-astra", Revision: "revision", LeaseToken: "old-lease",
+				ManualRequested: true, TimeoutSeconds: 5, LeaseUntil: time.Now().Add(time.Minute), Mode: "normal",
+			}
+			svc.executeTarget(ctx, claim)
+			cancel()
+
+			require.Equal(t, 1, repo.deferred)
+			require.Equal(t, claim.LeaseToken, repo.deferredClaim.LeaseToken)
+			require.Equal(t, "outbound_model_snapshot_failed", repo.deferredReason)
+			require.NoError(t, repo.deferredContextErr)
+			require.True(t, repo.deferredHasDeadline)
+			require.True(t, time.Now().Before(repo.deferredContextDeadline))
+			require.True(t, time.Until(repo.deferredContextDeadline) <= 3*time.Second)
+			require.True(t, repo.deferredNext.After(time.Now()))
+			require.Empty(t, repo.attempts)
+		})
+	}
 }
 
 func TestIQTargetProbeParsesOAuthResponsesStreamTerminal(t *testing.T) {
