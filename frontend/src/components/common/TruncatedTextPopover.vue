@@ -4,7 +4,7 @@
         v-if="popoverStyle"
         data-test="truncated-text-popover"
         role="tooltip"
-        class="pointer-events-none fixed z-[100000030] whitespace-pre-line rounded-lg bg-gray-900 px-3 py-2 text-left text-xs leading-relaxed text-white shadow-xl ring-1 ring-white/10 [overflow-wrap:anywhere] dark:bg-gray-800"
+        class="pointer-events-none fixed z-[100000030] overflow-hidden whitespace-pre-line rounded-lg bg-gray-900 px-3 py-2 text-left text-xs leading-relaxed text-white shadow-xl ring-1 ring-white/10 [overflow-wrap:anywhere] dark:bg-gray-800"
         :style="popoverStyle"
       >
         {{ text }}
@@ -26,6 +26,7 @@ const props = withDefaults(defineProps<{
 })
 
 const POPOVER_GAP = 6
+const VIEWPORT_MARGIN = 8
 const rootRef = ref<HTMLElement | null>(null)
 const popoverStyle = ref<Record<string, string> | null>(null)
 
@@ -33,11 +34,16 @@ function open() {
   const el = rootRef.value
   if (!props.enabled || !el || el.scrollHeight <= el.clientHeight + 1) return
   const rect = el.getBoundingClientRect()
+  // 放在空间更大的一侧，高度不超过这一侧，避免超长说明顶出屏幕
+  const spaceAbove = rect.top - POPOVER_GAP - VIEWPORT_MARGIN
+  const spaceBelow = window.innerHeight - rect.bottom - POPOVER_GAP - VIEWPORT_MARGIN
   const style: Record<string, string> = { left: `${rect.left}px`, width: `${rect.width}px` }
-  if (rect.top > window.innerHeight / 2) {
+  if (spaceAbove > spaceBelow) {
     style.bottom = `${window.innerHeight - rect.top + POPOVER_GAP}px`
+    style.maxHeight = `${Math.max(0, spaceAbove)}px`
   } else {
     style.top = `${rect.bottom + POPOVER_GAP}px`
+    style.maxHeight = `${Math.max(0, spaceBelow)}px`
   }
   popoverStyle.value = style
   window.addEventListener('scroll', close, true)

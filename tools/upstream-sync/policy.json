@@ -2078,7 +2078,7 @@
     },
     {
       "path": "frontend/src/components/common/GroupOptionItem.vue",
-      "value": ":enabled=\"descriptionPopover\""
+      "value": ":enabled=\"compactDescription\""
     },
     {
       "path": "frontend/src/views/user/KeysView.vue",
@@ -2086,7 +2086,7 @@
     },
     {
       "path": "frontend/src/views/user/KeysView.vue",
-      "value": "description-popover"
+      "value": "compact-description"
     },
     {
       "path": "frontend/src/views/user/KeysView.vue",
@@ -2094,7 +2094,11 @@
     },
     {
       "path": "frontend/src/components/common/GroupOptionItem.vue",
-      "value": ":title=\"description && !descriptionPopover ? description : undefined\""
+      "value": ":title=\"description && !compactDescription ? description : undefined\""
+    },
+    {
+      "path": "frontend/src/components/common/GroupOptionItem.vue",
+      "value": ":class=\"compactDescription ? 'line-clamp-1' : 'line-clamp-3'\""
     }
   ],
   "forbidden_module_paths": [
