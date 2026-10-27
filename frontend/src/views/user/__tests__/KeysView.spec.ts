@@ -191,7 +191,7 @@ const DataTableStub = {
 
 const SelectStub = {
   name: 'Select',
-  props: ['modelValue', 'options'],
+  props: { modelValue: null, options: null, matchTriggerWidth: Boolean },
   emits: ['update:modelValue'],
   template: '<select :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value)"></select>',
 }
@@ -229,7 +229,8 @@ const mountView = async () => {
         DataTable: DataTableStub,
         Pagination: PaginationStub,
         BaseDialog: {
-          props: ['show', 'title'],
+          name: 'BaseDialog',
+          props: ['show', 'title', 'width'],
           emits: ['close'],
           template: '<div v-if="show" role="dialog"><button data-test="close-dialog" @click="$emit(\'close\')">Close</button><slot /><slot name="footer" /></div>',
         },
@@ -638,6 +639,26 @@ describe('user KeysView column settings', () => {
       await flushPromises()
       expect(wrapper.get<HTMLInputElement>('input[value="openai"]').element.checked).toBe(true)
       expect(optionIds(wrapper)).toEqual([2])
+    })
+
+    it('uses a wide dialog whose group dropdown matches the field width', async () => {
+      const wrapper = await openCreate()
+      const dialog = wrapper.findAllComponents({ name: 'BaseDialog' }).find((item) => item.props('title') === messages['keys.createKey'])
+      expect(dialog?.props('width')).toBe('wide')
+      expect(groupSelect(wrapper).props('matchTriggerWidth')).toBe(true)
+    })
+
+    it('marks exclusive groups only when the badge is shown to users', async () => {
+      getAvailableGroups.mockResolvedValue([
+        { ...availableGroups[1], id: 21, is_exclusive: true, show_exclusive_badge: true },
+        { ...availableGroups[1], id: 22, is_exclusive: true, show_exclusive_badge: false },
+        { ...availableGroups[1], id: 23, is_exclusive: false, show_exclusive_badge: true },
+      ])
+      const wrapper = await openCreate()
+      const exclusiveById = Object.fromEntries(
+        groupSelect(wrapper).props('options').map((option: { value: number; exclusive: boolean }) => [option.value, option.exclusive])
+      )
+      expect(exclusiveById).toEqual({ 21: true, 22: false, 23: false })
     })
 
     it('resets provider and group when reopening create, and preserves edit options', async () => {

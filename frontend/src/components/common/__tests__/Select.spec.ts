@@ -36,7 +36,7 @@ const mockTriggerRect = (left: number, width: number) => {
   })
 }
 
-const openSelect = async () => {
+const openSelect = async (props: Record<string, unknown> = {}) => {
   const wrapper = mount(Select, {
     props: {
       modelValue: null,
@@ -46,6 +46,7 @@ const openSelect = async () => {
           label: 'very-long-unbroken-option-value-that-must-not-overflow',
         },
       ],
+      ...props,
     },
   })
   unmountWrapper = () => wrapper.unmount()
@@ -112,6 +113,27 @@ describe('Select dropdown viewport constraints', () => {
     expect(dropdown?.style.left).toBe('312px')
     expect(dropdown?.style.minWidth).toBe('0px')
     expect(dropdown?.style.maxWidth).toBe('0px')
+  })
+
+  it('keeps content-sized width unless matchTriggerWidth is set', async () => {
+    setViewportWidth(1280)
+    mockTriggerRect(100, 848)
+
+    expect((await openSelect())?.style.width).toBe('')
+    unmountWrapper?.()
+    document.body.innerHTML = ''
+
+    const dropdown = await openSelect({ matchTriggerWidth: true })
+    expect(dropdown?.style.width).toBe('848px')
+    expect(dropdown?.style.maxWidth).toBe('1172px')
+  })
+
+  it('caps a trigger-width dropdown at the viewport edge', async () => {
+    setViewportWidth(600)
+    mockTriggerRect(100, 848)
+
+    const dropdown = await openSelect({ matchTriggerWidth: true })
+    expect(dropdown?.style.width).toBe('492px')
   })
 })
 

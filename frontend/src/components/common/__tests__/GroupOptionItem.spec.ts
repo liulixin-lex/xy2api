@@ -42,3 +42,20 @@ describe('GroupOptionItem description layout', () => {
     expect(wrapper.find('[title]').attributes('title')).toBe(description)
   })
 })
+
+describe('GroupOptionItem exclusive tag', () => {
+  const mountItem = (props: Record<string, unknown> = {}) => mount(GroupOptionItem, {
+    props: { name: 'Example group', platform: 'openai', ...props },
+    global: { stubs: { GroupBadge: true, Icon: true } },
+  })
+
+  it('is hidden by default', () => {
+    expect(mountItem().find('[data-test="group-option-exclusive-tag"]').exists()).toBe(false)
+  })
+
+  it('shows the user-facing exclusive label when requested', () => {
+    const tag = mountItem({ exclusive: true }).get('[data-test="group-option-exclusive-tag"]')
+    expect(tag.text()).toBe('availableChannels.exclusive')
+    expect(tag.attributes('title')).toBe('availableChannels.exclusiveTooltip')
+  })
+})

@@ -5,14 +5,26 @@
       class="flex min-w-0 flex-1 flex-col items-start"
       :title="description || undefined"
     >
-      <!-- Row 1: platform badge (name bold) -->
-      <GroupBadge
-        :name="name"
-        :platform="platform"
-        :subscription-type="subscriptionType"
-        :show-rate="false"
-        class="groupOptionItemBadge"
-      />
+      <!-- Row 1: platform badge (name bold) + exclusive tag -->
+      <div class="flex max-w-full items-center gap-1.5">
+        <GroupBadge
+          :name="name"
+          :platform="platform"
+          :subscription-type="subscriptionType"
+          :show-rate="false"
+          class="groupOptionItemBadge min-w-0"
+        />
+        <!-- 是否展示由调用方按 is_exclusive 与 show_exclusive_badge 决定 -->
+        <span
+          v-if="exclusive"
+          data-test="group-option-exclusive-tag"
+          class="inline-flex shrink-0 items-center gap-1 rounded-md bg-purple-50 px-1.5 py-0.5 text-[11px] font-medium text-purple-600 dark:bg-purple-900/20 dark:text-purple-400"
+          :title="t('availableChannels.exclusiveTooltip')"
+        >
+          <Icon name="shield" size="xs" class="h-3 w-3" />
+          {{ t('availableChannels.exclusive') }}
+        </span>
+      </div>
       <!-- Row 2: description with top spacing -->
       <span
         v-if="description"
@@ -62,6 +74,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import GroupBadge from './GroupBadge.vue'
+import Icon from '@/components/icons/Icon.vue'
 import type { SubscriptionType, GroupPlatform } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
@@ -81,6 +94,7 @@ interface Props {
   description?: string | null
   selected?: boolean
   showCheckmark?: boolean
+  exclusive?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -88,7 +102,8 @@ const props = withDefaults(defineProps<Props>(), {
   selected: false,
   showCheckmark: true,
   userRateMultiplier: null,
-  peakRateEnabled: false
+  peakRateEnabled: false,
+  exclusive: false
 })
 
 // Whether user has a custom rate different from default

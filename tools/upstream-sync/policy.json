@@ -2043,6 +2043,38 @@
     {
       "path": "backend/internal/service/gateway_service.go",
       "value": "return s.bindGatewayStickySession(ctx, groupID, sessionHash, accountID, resilience.StateFrom(ctx).Model())"
+    },
+    {
+      "path": "frontend/src/components/common/Select.vue",
+      "value": "matchTriggerWidth?: boolean"
+    },
+    {
+      "path": "frontend/src/components/common/Select.vue",
+      "value": "if (props.matchTriggerWidth) style.width = `${minWidth}px`"
+    },
+    {
+      "path": "frontend/src/components/common/GroupOptionItem.vue",
+      "value": "data-test=\"group-option-exclusive-tag\""
+    },
+    {
+      "path": "frontend/src/components/common/GroupOptionItem.vue",
+      "value": "exclusive?: boolean"
+    },
+    {
+      "path": "frontend/src/views/user/KeysView.vue",
+      "value": "match-trigger-width"
+    },
+    {
+      "path": "frontend/src/views/user/KeysView.vue",
+      "value": "exclusive: group.is_exclusive && group.show_exclusive_badge !== false"
+    },
+    {
+      "path": "frontend/src/views/user/KeysView.vue",
+      "value": ":exclusive=\"option.exclusive\""
+    },
+    {
+      "path": "frontend/src/views/user/KeysView.vue",
+      "value": ":exclusive=\"(option as unknown as GroupOption).exclusive\""
     }
   ],
   "forbidden_module_paths": [

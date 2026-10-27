@@ -469,7 +469,7 @@
     <BaseDialog
       :show="showCreateModal || showEditModal"
       :title="showEditModal ? t('keys.editKey') : t('keys.createKey')"
-      width="normal"
+      width="wide"
       @close="closeModals"
     >
       <form id="key-form" @submit.prevent="handleSubmit" class="space-y-5">
@@ -545,6 +545,7 @@
             :empty-text="t('common.noGroupsAvailable')"
             :searchable="true"
             :search-placeholder="t('keys.searchGroup')"
+            match-trigger-width
             data-tour="key-form-group"
           >
             <template #selected="{ option }">
@@ -574,6 +575,7 @@
                 :peak-end="(option as unknown as GroupOption).peakEnd"
                 :peak-rate-multiplier="(option as unknown as GroupOption).peakRateMultiplier"
                 :description="(option as unknown as GroupOption).description"
+                :exclusive="(option as unknown as GroupOption).exclusive"
                 :selected="selected"
               />
             </template>
@@ -1182,6 +1184,7 @@
               :peak-end="option.peakEnd"
               :peak-rate-multiplier="option.peakRateMultiplier"
               :description="option.description"
+              :exclusive="option.exclusive"
               :selected="
                 selectedKeyForGroup?.group_id === option.value ||
                 (!selectedKeyForGroup?.group_id && option.value === null)
@@ -1256,6 +1259,7 @@ interface GroupOption {
   peakRateMultiplier: number
   subscriptionType: SubscriptionType
   platform: GroupPlatform
+  exclusive: boolean
 }
 
 const appStore = useAppStore()
@@ -1523,7 +1527,9 @@ const groupOptions = computed(() =>
     peakEnd: group.peak_end,
     peakRateMultiplier: group.peak_rate_multiplier,
     subscriptionType: group.subscription_type,
-    platform: group.platform
+    platform: group.platform,
+    // 后台关闭“向用户显示专属标识”时不标专属
+    exclusive: group.is_exclusive && group.show_exclusive_badge !== false
   }))
 )
 
