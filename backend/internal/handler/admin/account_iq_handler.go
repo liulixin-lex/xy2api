@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/response"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
@@ -16,6 +17,41 @@ func NewAccountIQHandler(s *service.IQCheckService) *AccountIQHandler {
 }
 func ProvideAccountIQHandler(s *service.IQCheckService) *AccountIQHandler {
 	return NewAccountIQHandler(s)
+}
+func (h *AccountIQHandler) Get(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	v, e := h.service.TargetViews(c.Request.Context(), id)
+	if e != nil {
+		response.ErrorFrom(c, e)
+		return
+	}
+	response.Success(c, gin.H{"targets": v})
+}
+func (h *AccountIQHandler) Put(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	var p domain.IQTargetsPatch
+	if e := c.ShouldBindJSON(&p); e != nil {
+		response.ErrorFrom(c, e)
+		return
+	}
+	if e := h.service.SaveTargets(c.Request.Context(), id, p); e != nil {
+		response.ErrorFrom(c, e)
+		return
+	}
+	v, e := h.service.TargetViews(c.Request.Context(), id)
+	if e != nil {
+		response.ErrorFrom(c, e)
+		return
+	}
+	response.Success(c, gin.H{"targets": v})
 }
 func (h *AccountIQHandler) Run(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)

@@ -47,8 +47,8 @@ ALTER TABLE account_iq_check_attempts ADD COLUMN IF NOT EXISTS challenge JSONB;
 CREATE OR REPLACE FUNCTION cleanup_account_iq_check() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     IF NEW.deleted_at IS NOT NULL AND OLD.deleted_at IS NULL THEN
-        DELETE FROM account_iq_check_results WHERE account_id = NEW.id;
         DELETE FROM account_iq_targets WHERE account_id = NEW.id;
+        DELETE FROM account_iq_check_results WHERE account_id = NEW.id;
         NEW.iq_check = '{"enabled":false,"interval_minutes":15,"status":"unknown"}'::jsonb;
     END IF;
     RETURN NEW;
@@ -58,7 +58,7 @@ INSERT INTO account_iq_targets(account_id, model, enabled, reasoning_effort, int
 SELECT a.id, m.model, COALESCE((a.iq_check->>'enabled')::boolean,false), COALESCE(NULLIF(a.iq_check->>'reasoning_effort',''),'low'),
        COALESCE(NULLIF(a.iq_check->>'interval_minutes','')::int,5), COALESCE(NULLIF(a.iq_check->>'timeout_seconds','')::int,120),
        gen_random_uuid()::text,
-       CASE WHEN m.model = COALESCE(NULLIF(a.iq_check->>'model',''), 'gpt-6-astra') AND COALESCE((a.iq_check->>'enabled')::boolean,false) AND a.iq_check->>'last_valid_status' = 'degraded' THEN 'degraded' ELSE 'unknown' END,
+       CASE WHEN m.model = COALESCE(NULLIF(a.iq_check->>'model',''), 'gpt-6-astra') AND COALESCE((a.iq_check->>'enabled')::boolean,false) AND COALESCE(NULLIF(a.iq_check->>'last_valid_status',''),a.iq_check->>'status','unknown') = 'degraded' THEN 'degraded' ELSE 'unknown' END,
        NULL
 FROM accounts a
 CROSS JOIN LATERAL (VALUES ('gpt-6-astra'), ('gpt-6.1-sol')) AS m(model)
@@ -67,7 +67,7 @@ ON CONFLICT (account_id, model) DO NOTHING;
 INSERT INTO account_iq_targets(account_id, model, enabled, reasoning_effort, interval_minutes, timeout_seconds, revision, verdict)
 SELECT a.id, a.iq_check->>'model', COALESCE((a.iq_check->>'enabled')::boolean,false), COALESCE(NULLIF(a.iq_check->>'reasoning_effort',''),'low'),
        COALESCE(NULLIF(a.iq_check->>'interval_minutes','')::int,5), COALESCE(NULLIF(a.iq_check->>'timeout_seconds','')::int,120), gen_random_uuid()::text,
-       CASE WHEN COALESCE((a.iq_check->>'enabled')::boolean,false) AND a.iq_check->>'last_valid_status'='degraded' THEN 'degraded' ELSE 'unknown' END
+       CASE WHEN COALESCE((a.iq_check->>'enabled')::boolean,false) AND COALESCE(NULLIF(a.iq_check->>'last_valid_status',''),a.iq_check->>'status','unknown')='degraded' THEN 'degraded' ELSE 'unknown' END
 FROM accounts a
 WHERE a.deleted_at IS NULL AND a.platform='openai' AND NULLIF(a.iq_check->>'model','') IS NOT NULL
   AND a.iq_check->>'model' NOT IN ('gpt-6-astra','gpt-6.1-sol')

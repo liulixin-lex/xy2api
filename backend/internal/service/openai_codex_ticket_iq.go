@@ -40,12 +40,18 @@ func CodexTicketProbeLeaseUntil(a *Account, now time.Time) *time.Time {
 	}
 	return nil
 }
-func (s *OpenAIGatewayService) codexTicketIQWait(ctx context.Context, a *Account) (string, time.Time) {
+func (s *OpenAIGatewayService) codexTicketIQWait(ctx context.Context, a *Account, outboundModel ...string) (string, time.Time) {
 	now := time.Now()
 	if !s.openAICodexTicketEnabledContext(ctx) {
 		return "", now
 	}
-	model := s.openAICodexTicketOutboundModel(a, a.IQCheck.Profile().Model, false)
+	model := ""
+	if len(outboundModel) > 0 {
+		model = outboundModel[0]
+	}
+	if model == "" {
+		model = s.openAICodexTicketOutboundModel(a, a.IQCheck.Profile().Model, false)
+	}
 	ac := codexAccountTicketConfigOf(a)
 	if !ac.manages(model) {
 		return "", now

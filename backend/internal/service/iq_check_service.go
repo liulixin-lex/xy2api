@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/domain"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/iqcheck"
@@ -38,6 +39,13 @@ type IQCheckClaim struct {
 	StartedAt      time.Time
 	Profile        domain.IQProfile
 	Protocol       string
+}
+type IQCheckRepository interface {
+	ConfigureIQCheck(context.Context, int64, domain.IQCheckSettings) (domain.IQCheck, error)
+	QueueIQCheck(context.Context, int64) error
+	ClaimIQChecks(context.Context, time.Time, int) ([]IQCheckClaim, error)
+	CompleteIQCheck(context.Context, IQCheckClaim, iqcheck.Result, time.Time) error
+	ListIQCheckRecords(context.Context, int64) ([]IQCheckRecord, error)
 }
 
 type IQCheckAttempt struct {
@@ -72,23 +80,17 @@ type IQCheckRecord struct {
 	ConfigRevision   string              `json:"config_revision"`
 }
 
-type IQCheckRepository interface {
-	ConfigureIQCheck(context.Context, int64, domain.IQCheckSettings) (domain.IQCheck, error)
-	QueueIQCheck(context.Context, int64) error
-	ClaimIQChecks(context.Context, time.Time, int) ([]IQCheckClaim, error)
-	CompleteIQCheck(context.Context, IQCheckClaim, iqcheck.Result, time.Time) error
-	ListIQCheckRecords(context.Context, int64) ([]IQCheckRecord, error)
-}
-
 type IQTargetClaim struct {
-	ID, AccountID               int64
-	Model, Revision, LeaseToken string
-	Enabled                     bool
-	ReasoningEffort             string
-	TimeoutSeconds              int
-	Verdict                     string
-	LeaseUntil                  time.Time
-	Mode                        string
+	ID, AccountID                 int64
+	Model, Revision, LeaseToken   string
+	Enabled                       bool
+	ReasoningEffort               string
+	TimeoutSeconds                int
+	Verdict                       string
+	LeaseUntil                    time.Time
+	Mode                          string
+	OutboundModel                 string
+	DegradedStreak, FailureStreak int
 }
 type IQTargetRepository interface {
 	ListIQTargetSummaries(context.Context, []int64) (map[int64][]domain.IQTargetSummary, error)
@@ -99,6 +101,8 @@ type IQTargetRepository interface {
 	ListIQResults(context.Context, int64, string, int64, int) (IQResultsPage, error)
 	QueueIQTargets(context.Context, int64, []string) ([]IQRunTarget, error)
 	ReconcileIQGates(context.Context) error
+	ListIQTargetViews(context.Context, int64) ([]domain.IQTargetView, error)
+	SaveIQTargets(context.Context, int64, domain.IQTargetsPatch) error
 }
 
 type IQResultsPage struct {
@@ -124,11 +128,38 @@ type IQRunBatchRequest struct {
 	Models     []string `json:"models,omitempty"`
 }
 
-func (s *IQCheckService) RequestRun(ctx context.Context, id int64, models []string) ([]IQRunTarget, error) {
-	if s == nil || s.targets == nil {
+func (s *IQCheckService) TargetViews(ctx context.Context, id int64) ([]domain.IQTargetView, error) {
+	if s == nil || s.targetRepo == nil {
 		return nil, ErrIQCheckInvalid
 	}
-	return s.targets.RequestRun(ctx, id, models)
+	return s.targetRepo.ListIQTargetViews(ctx, id)
+}
+func (s *IQCheckService) SaveTargets(ctx context.Context, id int64, patch domain.IQTargetsPatch) error {
+	if s == nil || s.targetRepo == nil {
+		return ErrIQCheckInvalid
+	}
+	return s.targetRepo.SaveIQTargets(ctx, id, patch)
+}
+
+func (s *IQCheckService) RequestRun(ctx context.Context, id int64, models []string) ([]IQRunTarget, error) {
+	if s == nil || s.targetRepo == nil {
+		return nil, ErrIQCheckInvalid
+	}
+	if s.accounts == nil {
+		return nil, ErrIQCheckInvalid
+	}
+	a, err := s.accounts.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if a.Platform != PlatformOpenAI || a.IsCredentialShadow() {
+		return nil, ErrIQCheckInvalid
+	}
+	out, err := s.targetRepo.QueueIQTargets(ctx, id, models)
+	if err == nil {
+		s.notify()
+	}
+	return out, err
 }
 func (s *IQCheckService) RequestRunBatch(ctx context.Context, ids []int64, models []string) []IQRunAccount {
 	out := make([]IQRunAccount, 0, len(ids))
@@ -180,6 +211,51 @@ func (s *IQCheckService) ProbeTarget(ctx context.Context, claim IQTargetClaim) i
 	return s.probe(ctx, claim.AccountID, IQCheckClaim{AccountID: claim.AccountID, Token: claim.LeaseToken, Revision: claim.Revision, TimeoutSeconds: claim.TimeoutSeconds, TargetModel: claim.Model, TargetEffort: claim.ReasoningEffort, Challenge: iqcheck.NewChallenge(), Profile: domain.IQProfile{Model: claim.Model, ReasoningEffort: claim.ReasoningEffort}})
 }
 
+func applyIQProbeRequestIdentity(req *http.Request, account *Account) error {
+	apiKey := account.Type == AccountTypeAPIKey
+	var ids *codexFingerprintIDs
+	if !apiKey {
+		ids = resolveCodexFingerprintIDsFromRequest(account, nil)
+		if ids == nil {
+			return nil
+		}
+	}
+	raw, err := io.ReadAll(req.Body)
+	if err != nil {
+		return err
+	}
+	_ = req.Body.Close()
+	var payload map[string]any
+	if err = json.Unmarshal(raw, &payload); err != nil {
+		return err
+	}
+	if apiKey {
+		session := uuid.NewString()
+		payload["prompt_cache_key"] = session
+		for _, name := range []string{"session_id", "conversation_id", "session-id", "x-session-id", "x-session-affinity", "x-opencode-session", "x-conversation-id", "thread-id", "x-client-request-id", "x-codex-window-id", "previous_response_id", "previous-response-id", "x-codex-turn-state", "x-codex-turn-metadata", "idempotency-key", "x-idempotency-key"} {
+			for key := range req.Header {
+				if strings.EqualFold(key, name) {
+					delete(req.Header, key)
+				}
+			}
+		}
+		for _, name := range []string{"session_id", "conversation_id", "session-id", "x-session-id", "x-session-affinity", "x-conversation-id"} {
+			req.Header.Set(name, session)
+		}
+	} else {
+		applyCodexFingerprintHeaders(req.Header, ids)
+		applyCodexFingerprintClientMetadata(payload, ids)
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req.Body = io.NopCloser(bytes.NewReader(encoded))
+	req.ContentLength = int64(len(encoded))
+	req.GetBody = nil
+	return nil
+}
+
 func ValidateIQCheckSettings(platform string, settings *domain.IQCheckSettings) error {
 	if settings == nil {
 		return nil
@@ -220,13 +296,14 @@ type IQCheckService struct {
 	modelsCache    map[string]IQModelCatalog
 	modelsFlight   singleflight.Group
 	targets        *IQTargetService
+	targetRepo     IQTargetRepository
 }
 
 func (s *IQCheckService) ResultsPage(ctx context.Context, id int64, model string, beforeID int64, limit int) (IQResultsPage, error) {
-	if s == nil || s.targets == nil || s.targets.repo == nil {
+	if s == nil || s.targetRepo == nil {
 		return IQResultsPage{}, ErrIQCheckInvalid
 	}
-	return s.targets.repo.ListIQResults(ctx, id, model, beforeID, limit)
+	return s.targetRepo.ListIQResults(ctx, id, model, beforeID, limit)
 }
 
 func ProvideIQCheckService(accounts AccountRepository, tester *AccountTestService, tokens *OpenAITokenProvider, concurrency *ConcurrencyService) *IQCheckService {
@@ -238,8 +315,7 @@ func ProvideIQCheckService(accounts AccountRepository, tester *AccountTestServic
 		return s
 	}
 	if targetOK {
-		s.targets = ProvideIQTargetService(targetRepo, accounts)
-		s.targets.SetProbe(func(ctx context.Context, claim IQTargetClaim) iqcheck.Result { return s.probeTarget(ctx, claim) })
+		s.targetRepo = targetRepo
 		_ = targetRepo.ReconcileIQGates(context.Background())
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -247,8 +323,8 @@ func ProvideIQCheckService(accounts AccountRepository, tester *AccountTestServic
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		if s.targets != nil {
-			s.targets.Start(ctx)
+		if targetOK {
+			s.runTargets(ctx)
 		} else if ok {
 			s.run(ctx)
 		}
@@ -261,13 +337,72 @@ func (s *IQCheckService) Stop() {
 		s.cancel()
 		s.wg.Wait()
 	}
-	if s.targets != nil {
-		s.targets.Stop()
-	}
 }
 
 func (s *IQCheckService) probeTarget(ctx context.Context, c IQTargetClaim) iqcheck.Result {
 	return s.probe(ctx, c.AccountID, IQCheckClaim{AccountID: c.AccountID, Token: c.LeaseToken, Revision: c.Revision, TimeoutSeconds: c.TimeoutSeconds, TargetModel: c.Model, TargetEffort: c.ReasoningEffort, Challenge: iqcheck.NewChallenge(), Profile: domain.IQProfile{Model: c.Model, ReasoningEffort: c.ReasoningEffort}})
+}
+func (s *IQCheckService) runTargets(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	cleanup := time.NewTicker(10 * time.Minute)
+	defer cleanup.Stop()
+	for {
+		claims, err := s.targetRepo.ClaimIQTargets(ctx, time.Now().UTC(), s.maxConcurrency)
+		if err == nil {
+			for _, c := range claims {
+				s.wg.Add(1)
+				go func(c IQTargetClaim) { defer s.wg.Done(); s.executeTarget(ctx, c) }(c)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		case <-s.wake:
+		case <-cleanup.C:
+			if _, e := s.targetRepo.CleanupIQResults(ctx, time.Now().UTC().Add(-7*24*time.Hour), 5000); e != nil {
+				logger.LegacyPrintf("iq_check", "cleanup failed: %v", e)
+			}
+		}
+	}
+}
+func (s *IQCheckService) executeTarget(ctx context.Context, c IQTargetClaim) {
+	outcomes := make([]iqcheck.Outcome, 0, iqcheck.MaxAttemptsPerRound)
+	for attempt := 1; attempt <= iqcheck.MaxAttemptsPerRound; attempt++ {
+		challenge := iqcheck.NewChallenge()
+		effort := c.ReasoningEffort
+		if attempt > 1 {
+			effort = iqcheck.AttemptEffort(c.Mode, c.ReasoningEffort, outcomes)
+		}
+		started := time.Now().UTC()
+		result := s.probe(ctx, c.AccountID, IQCheckClaim{AccountID: c.AccountID, Token: c.LeaseToken, Revision: c.Revision, TimeoutSeconds: c.TimeoutSeconds, TargetModel: c.OutboundModel, TargetEffort: effort, Challenge: challenge, Profile: domain.IQProfile{Model: c.OutboundModel, ReasoningEffort: effort}})
+		finished := time.Now().UTC()
+		if err := s.targetRepo.AddIQTargetAttempt(ctx, c, attempt, effort, challenge, result, started, finished); err != nil {
+			return
+		}
+		outcomes = append(outcomes, iqcheck.Outcome{Status: result.Status, Retryable: result.Reason == "transport_unavailable"})
+		status, done := iqcheck.DecideRound(c.Mode, outcomes)
+		if done {
+			result.Status = status
+			result.Reason = map[string]string{"smart": "correct_answer", "degraded": "wrong_answer", "unknown": "unknown"}[status]
+			_, _ = s.targetRepo.CompleteIQTarget(ctx, c, result, finished)
+			return
+		}
+		if err := sleepIQAttempt(ctx, 2*time.Second); err != nil {
+			return
+		}
+	}
+}
+func sleepIQAttempt(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 func (s *IQCheckService) Configure(ctx context.Context, id int64, settings domain.IQCheckSettings) (domain.IQCheck, error) {
 	if s.repo == nil {

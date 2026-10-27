@@ -121,7 +121,7 @@ func (s *IQCheckService) execute(ctx context.Context, c IQCheckClaim) {
 		return
 	}
 	if s.tester != nil && s.tester.openaiGatewayService != nil {
-		if reason, next := s.tester.openaiGatewayService.codexTicketIQWait(ctx, a); reason != "" {
+		if reason, next := s.tester.openaiGatewayService.codexTicketIQWait(ctx, a, canonicalOpenAIAccountSchedulingModel(a, a.IQCheck.Profile().Model)); reason != "" {
 			deferUnsent(reason, next)
 			return
 		}

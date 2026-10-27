@@ -89,6 +89,27 @@ type IQTargetSummary struct {
 	LastRunAt  *time.Time `json:"last_run_at,omitempty"`
 	NextRunAt  *time.Time `json:"next_run_at,omitempty"`
 }
+type IQTargetView struct {
+	Model             string     `json:"model"`
+	Enabled           bool       `json:"enabled"`
+	ReasoningEffort   string     `json:"reasoning_effort"`
+	IntervalMinutes   int        `json:"interval_minutes"`
+	TimeoutSeconds    int        `json:"timeout_seconds"`
+	Verdict           string     `json:"verdict"`
+	VerdictAt         *time.Time `json:"verdict_at"`
+	GateModel         *string    `json:"gate_model"`
+	GateActive        bool       `json:"gate_active"`
+	GateResetAt       *time.Time `json:"gate_reset_at"`
+	State             string     `json:"state"`
+	PausedReason      string     `json:"paused_reason"`
+	LastRunAt         *time.Time `json:"last_run_at"`
+	LastResult        string     `json:"last_result"`
+	LastReason        string     `json:"last_reason"`
+	NextRunAt         *time.Time `json:"next_run_at"`
+	NotBefore         *time.Time `json:"not_before"`
+	RoundID           *int64     `json:"round_id"`
+	CompletedAttempts int        `json:"completed_attempts"`
+}
 type IQProfile struct {
 	Model           string `json:"model"`
 	ReasoningEffort string `json:"reasoning_effort"`

@@ -44,7 +44,7 @@ func (s *IQCheckService) Models(ctx context.Context, id int64, refresh bool) (IQ
 	if s.tester == nil {
 		return IQModelCatalog{}, ErrIQCheckInvalid
 	}
-	keyData, _ := json.Marshal([]any{id, account.Type, account.IQCheck.Revision, account.GetOpenAIBaseURL(), account.ProxyID, upstreamModelsProxyURL(account)})
+	keyData, _ := json.Marshal([]any{id, account.Type, domain.IQModelAstra, account.GetOpenAIBaseURL(), account.ProxyID, upstreamModelsProxyURL(account)})
 	key := fmt.Sprintf("%x", sha256.Sum256(keyData))
 	s.modelsMu.Lock()
 	cached, exists := s.modelsCache[key]
@@ -114,7 +114,7 @@ func (s *IQCheckService) Models(ctx context.Context, id int64, refresh bool) (IQ
 			if m.DefaultReasoningLevel != "" {
 				item.CapabilitySources["default_reasoning_level"] = "upstream"
 			}
-			if id == domain.DefaultIQModel && m.Reasoning == nil && len(m.SupportedReasoningLevels) == 0 {
+			if id == domain.IQModelAstra && m.Reasoning == nil && len(m.SupportedReasoningLevels) == 0 {
 				item.SupportedReasoningLevels = []string{"low", "medium", "high", "xhigh", "max"}
 				item.CapabilitySources["supported_reasoning_levels"] = "reference"
 			}

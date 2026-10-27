@@ -1260,15 +1260,9 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 }
 
 func (s *OpenAIGatewayService) queueCodexIQRetest(a *Account, model string, rt *codexTicketRuntime, now time.Time) {
-	if !a.IQCheck.Enabled || s.openAICodexTicketOutboundModel(a, a.IQCheck.Profile().Model, false) != model {
+	if model == "" {
 		return
 	}
-	// Keep the last effective verdict. Advancing the revision fences late IQ workers.
-	a.IQCheck.Revision = uuid.NewString()
-	a.IQCheck.NextRunAt = &now
-	a.IQCheck.ExecutionState = "queued"
-	a.IQCheck.ExecutionReason = "state_recovered"
-	a.IQCheck.TaskID = uuid.NewString()
 	rt.IQRetest = "queued"
 }
 
