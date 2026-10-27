@@ -164,7 +164,6 @@ type AdminAccountRepository interface {
 // Nil pointers mean "do not change".
 type AccountBulkUpdate struct {
 	IQTargets      *domain.IQTargetsPatch
-	IQCheck        *domain.IQCheckSettings
 	Name           *string
 	ProxyID        *int64
 	Concurrency    *int

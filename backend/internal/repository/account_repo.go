@@ -58,7 +58,10 @@ func normalizeModelRateLimits(extra map[string]any) error {
 		extra["model_rate_limits"] = map[string]any{}
 		return nil
 	}
-	if _, ok := v.(map[string]any); ok {
+	if limits, ok := v.(map[string]any); ok {
+		if limits == nil {
+			extra["model_rate_limits"] = map[string]any{}
+		}
 		return nil
 	}
 	return fmt.Errorf("model_rate_limits must be an object")
@@ -197,6 +200,9 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 func createAccountRecord(ctx context.Context, client *dbent.Client, account *service.Account) error {
 	if account == nil {
 		return service.ErrAccountNilInput
+	}
+	if err := service.ValidateIQTargetsPatch(account.Platform, account.IQTargetsPatch); err != nil {
+		return err
 	}
 
 	account.Extra = service.MergeOpenAICodexTicketExtra(account.Extra, nil)
@@ -538,6 +544,9 @@ func (r *accountRepository) updateAccount(
 ) error {
 	if account == nil {
 		return nil
+	}
+	if err := service.ValidateIQTargetsPatch(account.Platform, account.IQTargetsPatch); err != nil {
+		return err
 	}
 
 	baseCtx := ctx
@@ -3224,6 +3233,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if len(ids) == 0 {
 		return 0, nil
 	}
+	if err := service.ValidateIQTargetsPatch(service.PlatformOpenAI, updates.IQTargets); err != nil {
+		return 0, err
+	}
 	updates.Extra = stripCodexFingerprintSeedFromExtraUpdate(updates.Extra)
 	if err := normalizeModelRateLimits(updates.Extra); err != nil {
 		return 0, err
@@ -3520,7 +3532,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		if len(iqResetConditions) > 0 {
 			identityExpr = "(" + joinClauses(iqResetConditions, " OR ") + ")"
 		}
-		selectQuery := "SELECT id, " + identityExpr + " FROM accounts WHERE id = ANY(" + idsPlaceholder + ") AND deleted_at IS NULL"
+		selectQuery := "SELECT id, platform, " + identityExpr + " FROM accounts WHERE id = ANY(" + idsPlaceholder + ") AND deleted_at IS NULL"
 		if len(iqResetConditions) > 0 && updates.IQTargets == nil {
 			selectQuery += " AND " + identityExpr
 		}
@@ -3531,10 +3543,15 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 		for lockRows.Next() {
 			var accountID int64
+			var platform string
 			var changed bool
-			if err := lockRows.Scan(&accountID, &changed); err != nil {
+			if err := lockRows.Scan(&accountID, &platform, &changed); err != nil {
 				lockRows.Close()
 				return 0, err
+			}
+			if updates.IQTargets != nil && platform != service.PlatformOpenAI {
+				lockRows.Close()
+				return 0, service.ErrIQCheckInvalid
 			}
 			targetAccountIDs = append(targetAccountIDs, accountID)
 			if changed {

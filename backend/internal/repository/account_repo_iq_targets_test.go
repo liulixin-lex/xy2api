@@ -16,6 +16,7 @@ func TestNormalizeModelRateLimits(t *testing.T) {
 	}{
 		{name: "omitted remains omitted", input: map[string]any{"other": true}, want: map[string]any{"other": true}},
 		{name: "nil becomes empty object", input: map[string]any{"model_rate_limits": nil}, want: map[string]any{"model_rate_limits": map[string]any{}}},
+		{name: "nil map becomes empty object", input: map[string]any{"model_rate_limits": map[string]any(nil)}, want: map[string]any{"model_rate_limits": map[string]any{}}},
 		{name: "object is retained", input: map[string]any{"model_rate_limits": map[string]any{"gpt-6": true}}, want: map[string]any{"model_rate_limits": map[string]any{"gpt-6": true}}},
 		{name: "non-object is rejected", input: map[string]any{"model_rate_limits": []any{}}, wantErr: true},
 	}

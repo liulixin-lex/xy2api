@@ -128,11 +128,17 @@ func TestBulkUpdateResetsChangedIdentitiesAndSavesTargetPatch(t *testing.T) {
 	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
 	changed := createDegradedIQTargetAccount(t, repo, map[string]any{"api_key": "changed", "model_mapping": map[string]any{"requested": "old"}}, nil)
 	unchanged := createDegradedIQTargetAccount(t, repo, map[string]any{"api_key": "unchanged", "model_mapping": map[string]any{"requested": "new"}}, nil)
+	limits := `{"gpt-6":{"rate_limited_at":"2026-10-27T00:00:00Z","reason":"manual"},"iq:gpt-6-astra":{"rate_limited_at":"2026-10-27T00:00:00Z","rate_limit_reset_at":"2026-10-27T01:00:00Z","reason":"iq_degraded"}}`
+	for _, accountID := range []int64{changed.ID, unchanged.ID} {
+		_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(COALESCE(extra,'{}'::jsonb),'{model_rate_limits}',$2::jsonb,true) WHERE id=$1`, accountID, limits)
+		require.NoError(t, err)
+	}
 	enabled := false
 	patch := domain.IQTargetsPatch{Targets: []domain.IQTargetSettings{{Model: "copied-target", Enabled: &enabled}}}
 
 	_, err := repo.BulkUpdate(ctx, []int64{changed.ID, unchanged.ID}, service.AccountBulkUpdate{
 		Credentials: map[string]any{"model_mapping": map[string]any{"requested": "new"}},
+		Extra:       map[string]any{"operator_note": "kept"},
 		IQTargets:   &patch,
 	})
 	require.NoError(t, err)
@@ -145,6 +151,16 @@ func TestBulkUpdateResetsChangedIdentitiesAndSavesTargetPatch(t *testing.T) {
 		var enabledValue bool
 		require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT enabled FROM account_iq_targets WHERE account_id=$1 AND model='copied-target'`, accountID).Scan(&enabledValue))
 		require.False(t, enabledValue)
+		fresh, err := repo.GetByID(ctx, accountID)
+		require.NoError(t, err)
+		storedLimits, ok := fresh.Extra["model_rate_limits"].(map[string]any)
+		require.True(t, ok)
+		require.Contains(t, storedLimits, "gpt-6", "ordinary model rate limits survive a bulk extra patch without model_rate_limits")
+		if accountID == changed.ID {
+			require.NotContains(t, storedLimits, "iq:gpt-6-astra")
+		} else {
+			require.Contains(t, storedLimits, "iq:gpt-6-astra")
+		}
 	}
 }
 

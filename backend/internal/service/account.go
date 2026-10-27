@@ -49,7 +49,6 @@ type Account struct {
 	IQTargetsPatch          *domain.IQTargetsPatch   `json:"-"`
 	IQTargets               []domain.IQTargetSummary `json:"-"`
 	IQCheck                 domain.IQCheck
-	IQCheckSettings         *domain.IQCheckSettings `json:"-"` // Explicit administrative edit; never populated from storage.
 
 	RateLimitedAt    *time.Time
 	RateLimitResetAt *time.Time

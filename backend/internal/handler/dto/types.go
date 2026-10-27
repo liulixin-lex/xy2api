@@ -242,7 +242,6 @@ type Account struct {
 	UpdatedAt               time.Time                         `json:"updated_at"`
 
 	Schedulable     bool                          `json:"schedulable"`
-	IQCheck         domain.IQCheck                `json:"iq_check"`
 	IQTargets       []domain.IQTargetSummary      `json:"iq_targets"`
 	OpenCodeGoUsage *service.OpenCodeGoUsageState `json:"opencode_go_usage,omitempty"`
 
@@ -373,7 +372,6 @@ type AccountListItem struct {
 	UpdatedAt               time.Time  `json:"updated_at"`
 
 	Schedulable bool                     `json:"schedulable"`
-	IQCheck     domain.IQCheck           `json:"iq_check"`
 	IQTargets   []domain.IQTargetSummary `json:"iq_targets"`
 
 	RateLimitedAt    *time.Time `json:"rate_limited_at"`
