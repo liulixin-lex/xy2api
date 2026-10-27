@@ -25,6 +25,18 @@ type IQTargetRepository interface {
 	ClaimIQTargets(context.Context, time.Time, int) ([]service.IQTargetClaim, error)
 	AddIQTargetAttempt(context.Context, service.IQTargetClaim, int, string, iqcheck.Challenge, iqcheck.Result, time.Time, time.Time) error
 	CompleteIQTarget(context.Context, service.IQTargetClaim, iqcheck.Result, time.Time) (bool, error)
+	CleanupIQResults(context.Context, time.Time, int) (int64, error)
+}
+
+func (r *accountRepository) CleanupIQResults(ctx context.Context, before time.Time, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 5000
+	}
+	res, err := r.sql.ExecContext(ctx, `DELETE FROM account_iq_check_results WHERE id IN (SELECT id FROM account_iq_check_results WHERE started_at < $1 ORDER BY id LIMIT $2)`, before, limit)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (r *accountRepository) ClaimIQTargets(ctx context.Context, now time.Time, limit int) ([]service.IQTargetClaim, error) {

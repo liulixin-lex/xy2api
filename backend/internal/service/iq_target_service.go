@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"strconv"
 	"sync"
 	"time"
 
@@ -12,10 +11,15 @@ import (
 type IQTargetService struct {
 	repo           IQTargetRepository
 	accounts       AccountRepository
+	probe          func(context.Context, IQTargetClaim) iqcheck.Result
 	maxConcurrency int
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
 	wake           chan struct{}
+}
+
+func (s *IQTargetService) SetProbe(fn func(context.Context, IQTargetClaim) iqcheck.Result) {
+	s.probe = fn
 }
 
 func ProvideIQTargetService(repo IQTargetRepository, accounts AccountRepository) *IQTargetService {
@@ -45,6 +49,8 @@ func (s *IQTargetService) Notify() {
 func (s *IQTargetService) run(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	cleanup := time.NewTicker(10 * time.Minute)
+	defer cleanup.Stop()
 	for {
 		claims, err := s.repo.ClaimIQTargets(ctx, time.Now().UTC(), s.maxConcurrency)
 		if err == nil {
@@ -58,6 +64,12 @@ func (s *IQTargetService) run(ctx context.Context) {
 			return
 		case <-ticker.C:
 		case <-s.wake:
+		case <-cleanup.C:
+			if r, ok := s.repo.(interface {
+				CleanupIQResults(context.Context, time.Time, int) (int64, error)
+			}); ok {
+				_, _ = r.CleanupIQResults(ctx, time.Now().UTC().Add(-7*24*time.Hour), 5000)
+			}
 		}
 	}
 }
@@ -73,6 +85,9 @@ func (s *IQTargetService) execute(ctx context.Context, claim IQTargetClaim) {
 		challenge := iqcheck.NewChallenge()
 		started := time.Now().UTC()
 		result := iqcheck.Unknown("transport_unavailable")
+		if s.probe != nil {
+			result = s.probe(ctx, claim)
+		}
 		effort := claim.ReasoningEffort
 		if attempt > 1 {
 			effort = iqcheck.AttemptEffort(claim.Mode, claim.ReasoningEffort, outcomes)
@@ -88,9 +103,19 @@ func (s *IQTargetService) execute(ctx context.Context, claim IQTargetClaim) {
 			_, _ = s.repo.CompleteIQTarget(ctx, claim, result, time.Now().UTC())
 			return
 		}
+		if err := sleepIQAttempt(ctx, 2*time.Second); err != nil {
+			return
+		}
 	}
 }
 
-func targetExpected(ch iqcheck.Challenge) string { return strconv.Itoa(ch.Answer()) }
-
-var _ = targetExpected
+func sleepIQAttempt(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}

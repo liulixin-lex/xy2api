@@ -19,6 +19,7 @@ import (
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/iqcheck"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai_compat"
 )
 
@@ -28,6 +29,9 @@ var ErrIQCheckDisabled = infraerrors.BadRequest("IQ_CHECK_DISABLED", "IQ check i
 type IQCheckClaim struct {
 	RoundDeadline  *time.Time
 	TimeoutSeconds int
+	TargetModel    string
+	TargetEffort   string
+	Challenge      iqcheck.Challenge
 	AccountID      int64
 	Token          string
 	Revision       string
@@ -92,6 +96,10 @@ type IQTargetRepository interface {
 	CompleteIQTarget(context.Context, IQTargetClaim, iqcheck.Result, time.Time) (bool, error)
 }
 
+func (s *IQCheckService) ProbeTarget(ctx context.Context, claim IQTargetClaim) iqcheck.Result {
+	return s.probe(ctx, claim.AccountID, IQCheckClaim{AccountID: claim.AccountID, Token: claim.LeaseToken, Revision: claim.Revision, TimeoutSeconds: claim.TimeoutSeconds, TargetModel: claim.Model, TargetEffort: claim.ReasoningEffort, Challenge: iqcheck.NewChallenge(), Profile: domain.IQProfile{Model: claim.Model, ReasoningEffort: claim.ReasoningEffort}})
+}
+
 func ValidateIQCheckSettings(platform string, settings *domain.IQCheckSettings) error {
 	if settings == nil {
 		return nil
@@ -131,19 +139,32 @@ type IQCheckService struct {
 	modelsMu       sync.Mutex
 	modelsCache    map[string]IQModelCatalog
 	modelsFlight   singleflight.Group
+	targets        *IQTargetService
 }
 
 func ProvideIQCheckService(accounts AccountRepository, tester *AccountTestService, tokens *OpenAITokenProvider, concurrency *ConcurrencyService) *IQCheckService {
 	repo, ok := accounts.(IQCheckRepository)
 	maxConcurrency := iqMonitoringConfig()
 	s := &IQCheckService{wake: make(chan struct{}, 1), concurrency: concurrency, maxConcurrency: maxConcurrency, repo: repo, accounts: accounts, tester: tester, tokens: tokens}
-	if !ok {
+	targetRepo, targetOK := accounts.(IQTargetRepository)
+	if !ok && !targetOK {
 		return s
+	}
+	if targetOK {
+		s.targets = ProvideIQTargetService(targetRepo, accounts)
+		s.targets.SetProbe(func(ctx context.Context, claim IQTargetClaim) iqcheck.Result { return s.probeTarget(ctx, claim) })
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	s.wg.Add(1)
-	go func() { defer s.wg.Done(); s.run(ctx) }()
+	go func() {
+		defer s.wg.Done()
+		if s.targets != nil {
+			s.targets.Start(ctx)
+		} else if ok {
+			s.run(ctx)
+		}
+	}()
 	return s
 }
 
@@ -152,6 +173,13 @@ func (s *IQCheckService) Stop() {
 		s.cancel()
 		s.wg.Wait()
 	}
+	if s.targets != nil {
+		s.targets.Stop()
+	}
+}
+
+func (s *IQCheckService) probeTarget(ctx context.Context, c IQTargetClaim) iqcheck.Result {
+	return s.probe(ctx, c.AccountID, IQCheckClaim{AccountID: c.AccountID, Token: c.LeaseToken, Revision: c.Revision, TimeoutSeconds: c.TimeoutSeconds, TargetModel: c.Model, TargetEffort: c.ReasoningEffort, Challenge: iqcheck.NewChallenge(), Profile: domain.IQProfile{Model: c.Model, ReasoningEffort: c.ReasoningEffort}})
 }
 func (s *IQCheckService) Configure(ctx context.Context, id int64, settings domain.IQCheckSettings) (domain.IQCheck, error) {
 	if s.repo == nil {
@@ -241,6 +269,12 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 			return iqcheck.Unknown("cancelled_by_account_change")
 		}
 		profile = claims[0].Profile.Defaults()
+		if claims[0].TargetModel != "" {
+			profile.Model = claims[0].TargetModel
+		}
+		if claims[0].TargetEffort != "" {
+			profile.ReasoningEffort = claims[0].TargetEffort
+		}
 	}
 	isOAuth := account.IsOAuth()
 	chat := !isOAuth && !openai_compat.ShouldUseResponsesAPI(account.Extra)
@@ -288,8 +322,11 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 	if err != nil || (token == "" && !account.IsOpenAIAgentIdentity()) {
 		return iqcheck.Unknown("authentication_unavailable")
 	}
-	challenge := iqcheck.Challenge{V: 1, R: [3]int{7, 9, 8}, S: [3]int{7, 6, 4}, Cols: [3]int{0, 1, 2}, Rows: [2]int{0, 1}, Draw: [2]int{9, 12}, Naive: 29}
-	check := iqcheck.Check{Expected: strconv.Itoa(challenge.Answer()), Naive: strconv.Itoa(challenge.Naive), Sent: profile.Model, PreferHeader: isOAuth}
+	challenge := iqcheck.NewChallenge()
+	if len(claims) > 0 && claims[0].Challenge.V != 0 {
+		challenge = claims[0].Challenge
+	}
+	check := iqcheck.Check{Expected: strconv.Itoa(challenge.Answer()), Naive: strconv.Itoa(challenge.Naive), Sent: profile.Model, PreferHeader: isOAuth || account.IsOpenAIAgentIdentity(), Rules: qualityDowngradeRules(s)}
 	payload, _ := json.Marshal(iqcheck.Payload(chat, profile.Model, profile.ReasoningEffort, challenge))
 	req, err := http.NewRequestWithContext(WithHTTPUpstreamRedirectsDisabled(WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileOpenAI)), http.MethodPost, apiURL, bytes.NewReader(payload))
 	if err != nil {
@@ -318,7 +355,9 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 		setOpenAIChatGPTAccountHeaders(req.Header, account)
 		enforceCodexIdentityHeadersWithUA(req.Header, account.GetOpenAIUserAgent())
 	} else {
-		applyIQAPIKeyHeaders(req.Header)
+		if ua := account.GetOpenAIUserAgent(); ua != "" {
+			req.Header.Set("User-Agent", ua)
+		}
 	}
 	account.ApplyHeaderOverrides(req.Header)
 	// Disable net/http replay of a POST on a reused connection, including overrides.
@@ -411,4 +450,8 @@ func (s *IQCheckService) notify() {
 	case s.wake <- struct{}{}:
 	default:
 	}
+}
+
+func qualityDowngradeRules(s *IQCheckService) []openai.DowngradeRule {
+	return openai.DefaultDowngradeRules()
 }
