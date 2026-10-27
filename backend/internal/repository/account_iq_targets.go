@@ -3,134 +3,262 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"time"
 
-	"encoding/json"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
+	dbent "github.com/liulixin-lex/xy2api/ent"
 	"github.com/liulixin-lex/xy2api/internal/domain"
+	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
-// IQTargetRepository is the small control-plane port used by the IQ service.
-// It intentionally stays separate from AccountRepository.
+// IQTargetRepository is the control-plane port. Callers that mutate target
+// contributions must hold the account row lock before invoking these methods.
 type IQTargetRepository interface {
-	ListIQTargetSummaries(context.Context, int64) ([]domain.IQTargetSummary, error)
-	SaveIQTargetsTx(context.Context, *sql.Tx, int64, domain.IQTargetsPatch) error
-	ResetIQTargetsOnIdentityChangeTx(context.Context, *sql.Tx, int64) error
-	ProjectIQGates(context.Context, *sql.Tx, int64) error
+	ListIQTargetSummaries(context.Context, []int64) (map[int64][]domain.IQTargetSummary, error)
+	SaveIQTargetsTx(context.Context, *dbent.Client, int64, domain.IQTargetsPatch) (bool, error)
+	ResetIQTargetsOnIdentityChangeTx(context.Context, *dbent.Client, int64) (bool, error)
+	ProjectIQGates(context.Context, *dbent.Client, int64) (bool, error)
 }
 
-func (r *accountRepository) ListIQTargetSummaries(ctx context.Context, accountID int64) ([]domain.IQTargetSummary, error) {
-	rows, err := r.sql.QueryContext(ctx, `SELECT model,verdict,enabled,verdict_at,last_run_at,next_run_at,paused_reason,lease_until,gate_model FROM account_iq_targets WHERE account_id=$1 ORDER BY model`, accountID)
+func (r *accountRepository) ListIQTargetSummaries(ctx context.Context, ids []int64) (map[int64][]domain.IQTargetSummary, error) {
+	out := make(map[int64][]domain.IQTargetSummary)
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := r.sql.QueryContext(ctx, `SELECT account_id,model,verdict,enabled,verdict_at,last_run_at,next_run_at,paused_reason,lease_until,manual_requested_at,gate_model FROM account_iq_targets WHERE account_id = ANY($1) ORDER BY account_id,model`, pq.Array(ids))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []domain.IQTargetSummary
+	now := time.Now().UTC()
 	for rows.Next() {
+		var id int64
 		var x domain.IQTargetSummary
 		var paused string
-		var lease *time.Time
+		var lease, manual *time.Time
 		var gate sql.NullString
-		if err := rows.Scan(&x.Model, &x.Verdict, &x.Enabled, &x.VerdictAt, &x.LastRunAt, &x.NextRunAt, &paused, &lease, &gate); err != nil {
+		if err := rows.Scan(&id, &x.Model, &x.Verdict, &x.Enabled, &x.VerdictAt, &x.LastRunAt, &x.NextRunAt, &paused, &lease, &manual, &gate); err != nil {
 			return nil, err
 		}
-		x.GateActive = gate.Valid && gate.String != ""
+		x.GateActive = x.Enabled && x.Verdict == "degraded" && gate.Valid && gate.String != ""
 		switch {
-		case lease != nil && lease.After(time.Now().UTC()):
+		case lease != nil && lease.After(now):
 			x.State = "running"
-		case paused != "":
-			x.State = "paused"
-		case x.Enabled:
+		case manual != nil:
 			x.State = "queued"
+		case x.Enabled && paused != "":
+			x.State = "paused"
 		default:
 			x.State = "idle"
 		}
-		out = append(out, x)
+		out[id] = append(out[id], x)
 	}
 	return out, rows.Err()
 }
 
-func (r *accountRepository) SaveIQTargetsTx(ctx context.Context, tx *sql.Tx, accountID int64, patch domain.IQTargetsPatch) error {
+func (r *accountRepository) SaveIQTargetsTx(ctx context.Context, c *dbent.Client, accountID int64, patch domain.IQTargetsPatch) (bool, error) {
+	changed := false
 	for _, model := range patch.Remove {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM account_iq_targets WHERE account_id=$1 AND model=$2`, accountID, model); err != nil {
-			return err
+		res, err := c.ExecContext(ctx, `DELETE FROM account_iq_targets WHERE account_id=$1 AND model=$2`, accountID, model)
+		if err != nil {
+			return false, err
 		}
+		n, _ := res.RowsAffected()
+		changed = changed || n > 0
 	}
 	for _, s := range patch.Targets {
 		if err := s.Validate(); err != nil {
-			return err
+			return false, err
 		}
-		enabled := false
-		effort := domain.DefaultIQEffort
-		interval := 5
-		timeout := 120
+		var id int64
+		var oldEnabled bool
+		var oldEffort string
+		var oldInterval, oldTimeout int
+		var oldVerdict, oldGate, oldRevision string
+		var next, lastRun *time.Time
+		q, e := c.QueryContext(ctx, `SELECT id,enabled,reasoning_effort,interval_minutes,timeout_seconds,verdict,COALESCE(gate_model,''),revision,next_run_at,last_run_at FROM account_iq_targets WHERE account_id=$1 AND model=$2 FOR UPDATE`, accountID, s.Model)
+		err := sql.ErrNoRows
+		if e == nil && q.Next() {
+			err = q.Scan(&id, &oldEnabled, &oldEffort, &oldInterval, &oldTimeout, &oldVerdict, &oldGate, &oldRevision, &next, &lastRun)
+		}
+		if q != nil {
+			q.Close()
+		}
+		if err != nil && err != sql.ErrNoRows {
+			return false, err
+		}
+		if err == sql.ErrNoRows {
+			en := false
+			eff := "low"
+			iv, to := 5, 120
+			if s.Enabled != nil {
+				en = *s.Enabled
+			}
+			if s.ReasoningEffort != nil {
+				eff = *s.ReasoningEffort
+			}
+			if s.IntervalMinutes != nil {
+				iv = *s.IntervalMinutes
+			}
+			if s.TimeoutSeconds != nil {
+				to = *s.TimeoutSeconds
+			}
+			_, err = c.ExecContext(ctx, `INSERT INTO account_iq_targets(account_id,model,enabled,reasoning_effort,interval_minutes,timeout_seconds,revision,next_run_at) VALUES($1,$2,$3,$4,$5,$6,$7,now())`, accountID, s.Model, en, eff, iv, to, uuid.NewString())
+			if err != nil {
+				return false, err
+			}
+			changed = true
+			continue
+		}
+		en := oldEnabled
+		eff := oldEffort
+		iv, to := oldInterval, oldTimeout
 		if s.Enabled != nil {
-			enabled = *s.Enabled
+			en = *s.Enabled
 		}
 		if s.ReasoningEffort != nil {
-			effort = *s.ReasoningEffort
+			eff = *s.ReasoningEffort
 		}
 		if s.IntervalMinutes != nil {
-			interval = *s.IntervalMinutes
+			iv = *s.IntervalMinutes
 		}
 		if s.TimeoutSeconds != nil {
-			timeout = *s.TimeoutSeconds
+			to = *s.TimeoutSeconds
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO account_iq_targets(account_id,model,enabled,reasoning_effort,interval_minutes,timeout_seconds,revision,next_run_at) VALUES($1,$2,$3,$4,$5,$6,$7,CASE WHEN $3 THEN now() ELSE now() END) ON CONFLICT(account_id,model) DO UPDATE SET enabled=EXCLUDED.enabled,reasoning_effort=EXCLUDED.reasoning_effort,interval_minutes=EXCLUDED.interval_minutes,timeout_seconds=EXCLUDED.timeout_seconds,revision=gen_random_uuid()::text,updated_at=now()`, accountID, s.Model, enabled, effort, interval, timeout, uuid.NewString())
+		identity := en != oldEnabled || eff != oldEffort || to != oldTimeout
+		intervalOnly := iv != oldInterval && !identity
+		if identity {
+			_, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET enabled=$2,reasoning_effort=$3,interval_minutes=$4,timeout_seconds=$5,revision=gen_random_uuid()::text,verdict='unknown',verdict_at=NULL,gate_model=NULL,paused_reason='',degraded_streak=0,failure_streak=0,not_before=NULL,next_run_at=now(),updated_at=now() WHERE id=$1`, id, en, eff, iv, to)
+		} else if intervalOnly {
+			_, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET interval_minutes=$2,next_run_at=LEAST(next_run_at,COALESCE(last_run_at,now())+make_interval(mins=>$2)),updated_at=now() WHERE id=$1`, id, iv)
+		} else {
+			_, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET enabled=$2,reasoning_effort=$3,interval_minutes=$4,timeout_seconds=$5,updated_at=now() WHERE id=$1`, id, en, eff, iv, to)
+		}
 		if err != nil {
-			return err
+			return false, err
 		}
+		changed = true
+		_ = oldVerdict
+		_ = oldGate
+		_ = oldRevision
+		_ = next
+		_ = lastRun
 	}
-	return nil
+	gateChanged, err := r.ProjectIQGates(ctx, c, accountID)
+	return changed || gateChanged, err
 }
 
-func (r *accountRepository) ResetIQTargetsOnIdentityChangeTx(ctx context.Context, tx *sql.Tx, accountID int64) error {
-	_, err := tx.ExecContext(ctx, `UPDATE account_iq_targets SET revision=gen_random_uuid()::text,verdict='unknown',verdict_at=NULL,gate_model=NULL,degraded_streak=0,failure_streak=0,paused_reason='',lease_token=NULL,lease_until=NULL,next_run_at=CASE WHEN enabled THEN now() ELSE next_run_at END,updated_at=now() WHERE account_id=$1`, accountID)
-	return err
-}
-
-func (r *accountRepository) ProjectIQGates(ctx context.Context, tx *sql.Tx, accountID int64) error {
-	rows, err := tx.QueryContext(ctx, `SELECT gate_model,GREATEST(next_run_at,COALESCE(not_before,next_run_at))+make_interval(secs=>timeout_seconds) FROM account_iq_targets WHERE account_id=$1 AND enabled AND verdict='degraded' AND gate_model IS NOT NULL`, accountID)
+func (r *accountRepository) ResetIQTargetsOnIdentityChangeTx(ctx context.Context, c *dbent.Client, accountID int64) (bool, error) {
+	res, err := c.ExecContext(ctx, `UPDATE account_iq_targets SET revision=gen_random_uuid()::text,verdict='unknown',verdict_at=NULL,gate_model=NULL,degraded_streak=0,failure_streak=0,paused_reason='',not_before=NULL,next_run_at=CASE WHEN enabled THEN now() ELSE next_run_at END,updated_at=now() WHERE account_id=$1`, accountID)
 	if err != nil {
-		return err
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	g, e := r.ProjectIQGates(ctx, c, accountID)
+	return n > 0 || g, e
+}
+
+func (r *accountRepository) ProjectIQGates(ctx context.Context, c *dbent.Client, accountID int64) (bool, error) {
+	rows, err := c.QueryContext(ctx, `SELECT gate_model,GREATEST(next_run_at,COALESCE(not_before,next_run_at))+make_interval(secs=>timeout_seconds) FROM account_iq_targets WHERE account_id=$1 AND enabled AND verdict='degraded' AND gate_model IS NOT NULL`, accountID)
+	if err != nil {
+		return false, err
 	}
 	defer rows.Close()
-	gates := map[string]time.Time{}
+	desired := map[string]time.Time{}
 	for rows.Next() {
 		var m string
 		var t time.Time
 		if err := rows.Scan(&m, &t); err != nil {
-			return err
+			return false, err
 		}
-		if old, ok := gates[m]; !ok || t.After(old) {
-			gates[m] = t
+		if old, ok := desired[m]; !ok || t.After(old) {
+			desired[m] = t
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return false, err
 	}
 	var raw []byte
-	if err := tx.QueryRowContext(ctx, `SELECT extra FROM accounts WHERE id=$1 FOR UPDATE`, accountID).Scan(&raw); err != nil {
-		return err
+	rowsAccount, err := c.QueryContext(ctx, `SELECT extra FROM accounts WHERE id=$1`, accountID)
+	if err != nil {
+		return false, err
+	}
+	if !rowsAccount.Next() {
+		rowsAccount.Close()
+		return false, sql.ErrNoRows
+	}
+	if err := rowsAccount.Scan(&raw); err != nil {
+		rowsAccount.Close()
+		return false, err
+	}
+	rowsAccount.Close()
+	if err != nil {
+		return false, err
 	}
 	var extra map[string]any
 	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &extra)
+		if err := json.Unmarshal(raw, &extra); err != nil {
+			return false, fmt.Errorf("decode account extra: %w", err)
+		}
 	}
 	if extra == nil {
 		extra = map[string]any{}
 	}
-	for k := range extra {
-		if domain.IsIQGateKey(k) {
-			delete(extra, k)
+	limits := map[string]any{}
+	if v, ok := extra["model_rate_limits"]; ok {
+		b, e := json.Marshal(v)
+		if e != nil {
+			return false, e
+		}
+		if e = json.Unmarshal(b, &limits); e != nil {
+			return false, fmt.Errorf("decode model_rate_limits: %w", e)
 		}
 	}
-	for model, reset := range gates {
-		extra[domain.IQGateKeyPrefix+model] = map[string]any{"rate_limited_at": time.Now().UTC(), "rate_limit_reset_at": reset, "reason": domain.IQGateReason}
+	currentIQ := map[string]time.Time{}
+	for k, v := range limits {
+		if domain.IsIQGateKey(k) {
+			var item struct {
+				Reset time.Time `json:"rate_limit_reset_at"`
+			}
+			b, _ := json.Marshal(v)
+			if json.Unmarshal(b, &item) == nil {
+				currentIQ[k] = item.Reset
+			}
+		}
 	}
-	b, _ := json.Marshal(extra)
-	_, err = tx.ExecContext(ctx, `UPDATE accounts SET extra=$2::jsonb,updated_at=now() WHERE id=$1`, accountID, string(b))
-	return err
+	same := len(currentIQ) == len(desired)
+	for m, t := range desired {
+		if old, ok := currentIQ[domain.IQGateKeyPrefix+m]; !ok || !old.Equal(t) {
+			same = false
+		}
+	}
+	if same {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	for k := range limits {
+		if domain.IsIQGateKey(k) {
+			delete(limits, k)
+		}
+	}
+	for m, t := range desired {
+		limits[domain.IQGateKeyPrefix+m] = map[string]any{"rate_limited_at": now, "rate_limit_reset_at": t, "reason": domain.IQGateReason}
+	}
+	extra["model_rate_limits"] = limits
+	b, e := json.Marshal(extra)
+	if e != nil {
+		return false, e
+	}
+	if _, e = c.ExecContext(ctx, `UPDATE accounts SET extra=$2::jsonb,updated_at=now() WHERE id=$1`, accountID, string(b)); e != nil {
+		return false, e
+	}
+	if e = enqueueSchedulerOutbox(ctx, c, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); e != nil {
+		return false, e
+	}
+	return true, nil
 }
 
 var _ IQTargetRepository = (*accountRepository)(nil)
