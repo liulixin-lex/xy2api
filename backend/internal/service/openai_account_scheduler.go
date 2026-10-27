@@ -1862,8 +1862,13 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
 		return false, "model_not_supported"
 	}
-	if !account.IsSchedulableForModelWithContext(ctx, req.RequestedModel) {
+	if iqGateBlocksRequest(account, req.RequestedModel, req.RequireCompact) {
 		return false, "model_rate_limited"
+	}
+	if !account.IsSchedulableForModelWithContext(ctx, req.RequestedModel) {
+		if !account.IsSchedulable() || !lastResortModelLimitSoft(ctx, account, req.RequestedModel, req.RequireCompact) {
+			return false, "model_rate_limited"
+		}
 	}
 	if req.GroupID != nil && s != nil && s.service != nil &&
 		s.service.needsUpstreamChannelRestrictionCheck(ctx, req.GroupID) &&

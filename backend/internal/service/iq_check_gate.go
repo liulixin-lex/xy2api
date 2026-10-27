@@ -46,3 +46,12 @@ func iqGateKeysForRequest(account *Account, model string, requireCompact bool) [
 	}
 	return keys
 }
+
+func iqGateBlocksRequest(account *Account, model string, requireCompact bool) bool {
+	for _, key := range iqGateKeysForRequest(account, model, requireCompact) {
+		if account.hasRateLimitKey(key) {
+			return true
+		}
+	}
+	return false
+}
