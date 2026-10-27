@@ -100,10 +100,13 @@ func (r *accountRepository) ListIQResults(ctx context.Context, accountID int64, 
 		}
 		for ar.Next() {
 			var a service.IQAttempt
-			if err := ar.Scan(&a.AttemptNo, &a.Effort, &a.Challenge, &a.Expected, &a.Answer, &a.ReportedModel, &a.ModelClass, &a.Status, &a.Reason, &a.LatencyMS, &a.Diagnostic); err != nil {
+			var challenge, diagnostic []byte
+			if err := ar.Scan(&a.AttemptNo, &a.Effort, &challenge, &a.Expected, &a.Answer, &a.ReportedModel, &a.ModelClass, &a.Status, &a.Reason, &a.LatencyMS, &diagnostic); err != nil {
 				ar.Close()
 				return page, err
 			}
+			a.Challenge = json.RawMessage(challenge)
+			a.Diagnostic = json.RawMessage(diagnostic)
 			a.Answer = iqcheck.ExtractAnswer(a.Answer).Value
 			if len(a.Answer) > 64 {
 				a.Answer = ""

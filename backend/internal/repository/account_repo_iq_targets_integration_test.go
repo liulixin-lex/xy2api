@@ -187,6 +187,8 @@ func TestAccountIdentityChangesResetIQTargets(t *testing.T) {
 			var notBefore *time.Time
 			err = integrationDB.QueryRowContext(ctx, `SELECT verdict,COALESCE(gate_model,''),not_before FROM account_iq_targets WHERE account_id=$1`, a.ID).Scan(&verdict, &gateModel, &notBefore)
 			require.NoError(t, err)
+			fresh, err = repo.GetByID(ctx, a.ID)
+			require.NoError(t, err)
 			limits, ok := fresh.Extra["model_rate_limits"].(map[string]any)
 			if tc.wantReset {
 				require.Equal(t, "unknown", verdict)
@@ -340,6 +342,7 @@ func TestIQTargetsMigrationBackfillsDegradedStatusFallback(t *testing.T) {
 func TestClaimIQTargetsHonorsManualSchedulingGlobalLimitAndUniqueTokens(t *testing.T) {
 	ctx := context.Background()
 	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+	automaticEnabled := true
 	manualEnabled := false
 	a := &service.Account{
 		Name:        fmt.Sprintf("iq-claim-rules-%d", time.Now().UnixNano()),
@@ -349,7 +352,8 @@ func TestClaimIQTargetsHonorsManualSchedulingGlobalLimitAndUniqueTokens(t *testi
 		Schedulable: false,
 		Credentials: map[string]any{"api_key": "fixture"},
 		IQTargetsPatch: &domain.IQTargetsPatch{Targets: []domain.IQTargetSettings{
-			{Model: "automatic", Enabled: boolPtr(true)},
+			{Model: "automatic", Enabled: &automaticEnabled},
+			{Model: "automatic-2", Enabled: &automaticEnabled},
 			{Model: "manual", Enabled: &manualEnabled},
 			{Model: "later", Enabled: &manualEnabled},
 		}},
@@ -744,7 +748,7 @@ func TestProjectIQGatesWritesRenewsRevokesAndRepairsBadReset(t *testing.T) {
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM scheduler_outbox WHERE account_id=$1`, a.ID).Scan(&outboxAfterNoop))
 	require.Equal(t, outboxAfterWrite, outboxAfterNoop)
 
-	_, err = integrationDB.ExecContext(ctx, `UPDATE account_iq_targets SET next_run_at=next_run_at+interval '1 minute' WHERE account_id=$1`, a.ID)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_iq_targets SET not_before=not_before+interval '1 minute' WHERE account_id=$1`, a.ID)
 	require.NoError(t, err)
 	renewed, err := repo.ProjectIQGates(ctx, repo.client, a.ID)
 	require.NoError(t, err)
@@ -870,7 +874,7 @@ func TestRequeueIQTargetsRetainsVerdictAndGateWithoutManualMode(t *testing.T) {
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT revision,verdict,gate_model,paused_reason,manual_requested_at,not_before FROM account_iq_targets WHERE account_id=$1`, a.ID).Scan(&nextRevision, &verdict, &gateModel, &paused, &manualAt, &notBefore))
 	require.NotEqual(t, revision, nextRevision)
 	require.Equal(t, "degraded", verdict)
-	require.Equal(t, "gpt-6-astra", gateModel)
+	require.Equal(t, "gpt-6", gateModel)
 	require.Empty(t, paused)
 	require.Nil(t, manualAt, "ticket refresh queues ordinary target work without marking a manual request")
 	require.Nil(t, notBefore)

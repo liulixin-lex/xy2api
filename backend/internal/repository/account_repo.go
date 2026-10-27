@@ -173,25 +173,40 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
 	client := r.client
-	tx, err := r.client.Tx(ctx)
-	if err != nil {
-		return err
+	contextTx := dbent.TxFromContext(ctx)
+	var tx *dbent.Tx
+	if contextTx != nil {
+		client = contextTx.Client()
+	} else if account != nil && account.IQTargetsPatch != nil {
+		var err error
+		tx, err = r.client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return err
+		}
+		if tx != nil {
+			defer func() { _ = tx.Rollback() }()
+			ctx = dbent.NewTxContext(ctx, tx)
+			client = tx.Client()
+		}
 	}
-	client = tx.Client()
 	if err := createAccountRecord(ctx, client, account); err != nil {
-		_ = tx.Rollback()
 		return err
 	}
 	if account.IQTargetsPatch != nil {
 		if _, err := r.SaveIQTargetsTx(ctx, client, account.ID, *account.IQTargetsPatch); err != nil {
-			_ = tx.Rollback()
 			return err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return err
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
+	outboxExec := r.sql
+	if contextTx != nil || (account.IQTargetsPatch != nil && tx == nil) {
+		outboxExec = client
+	}
+	if err := enqueueSchedulerOutbox(ctx, outboxExec, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account create failed: account=%d err=%v", account.ID, err)
 	}
 	return nil
@@ -2792,7 +2807,7 @@ func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) 
 	client := clientFromContext(ctx, r.client)
 	result, err := client.ExecContext(
 		ctx,
-		"UPDATE accounts SET extra = CASE WHEN jsonb_typeof(extra->'model_rate_limits')='object' THEN jsonb_set(COALESCE(extra, '{}'::jsonb), '{model_rate_limits}', COALESCE((SELECT jsonb_object_agg(key, value) FROM jsonb_each(COALESCE(extra->'model_rate_limits', '{}'::jsonb)) WHERE key LIKE 'iq:%'), '{}'::jsonb), true) ELSE COALESCE(extra, '{}'::jsonb) - 'model_rate_limits' END, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
+		"UPDATE accounts SET extra = CASE WHEN jsonb_typeof(extra->'model_rate_limits')='object' AND EXISTS (SELECT 1 FROM jsonb_each(extra->'model_rate_limits') WHERE key LIKE 'iq:%') THEN jsonb_set(COALESCE(extra, '{}'::jsonb), '{model_rate_limits}', (SELECT jsonb_object_agg(key, value) FROM jsonb_each(extra->'model_rate_limits') WHERE key LIKE 'iq:%'), true) ELSE COALESCE(extra, '{}'::jsonb) - 'model_rate_limits' END, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
 		id,
 	)
 	if err != nil {
@@ -3313,11 +3328,13 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	}
 	// JSONB 需要合并而非覆盖，使用 raw SQL 保持旧行为。
 	credentialPlaceholder := ""
+	var credentialPayload []byte
 	if len(updates.Credentials) > 0 {
 		payload, err := json.Marshal(updates.Credentials)
 		if err != nil {
 			return 0, err
 		}
+		credentialPayload = payload
 		credentialPlaceholder = "$" + itoa(idx)
 		setClauses = append(setClauses, "credentials = COALESCE(credentials, '{}'::jsonb) || "+credentialPlaceholder+"::jsonb")
 		args = append(args, payload)
@@ -3325,15 +3342,33 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	}
 
 	iqResetConditions := make([]string, 0)
+	iqSelectResetConditions := make([]string, 0)
+	iqSelectArgs := make([]any, 0)
 	if credentialPlaceholder != "" {
+		identityKeys := make([]string, 0, len(iqTargetIdentityKeys))
 		for _, key := range iqTargetIdentityKeys {
 			if _, ok := updates.Credentials[key]; ok {
+				identityKeys = append(identityKeys, key)
+			}
+		}
+		if len(identityKeys) > 0 {
+			selectCredentialPlaceholder := "$" + itoa(len(iqSelectArgs)+1)
+			iqSelectArgs = append(iqSelectArgs, credentialPayload)
+			for _, key := range identityKeys {
 				iqResetConditions = append(iqResetConditions, "credentials->'"+key+"' IS DISTINCT FROM "+credentialPlaceholder+"::jsonb->'"+key+"'")
+				iqSelectResetConditions = append(iqSelectResetConditions, "credentials->'"+key+"' IS DISTINCT FROM "+selectCredentialPlaceholder+"::jsonb->'"+key+"'")
 			}
 		}
 	}
 	if ollamaProxyIdentityChanged != "" {
 		iqResetConditions = append(iqResetConditions, ollamaProxyIdentityChanged)
+		if *updates.ProxyID == 0 {
+			iqSelectResetConditions = append(iqSelectResetConditions, "proxy_id IS NOT NULL")
+		} else {
+			selectProxyPlaceholder := "$" + itoa(len(iqSelectArgs)+1)
+			iqSelectArgs = append(iqSelectArgs, *updates.ProxyID)
+			iqSelectResetConditions = append(iqSelectResetConditions, "proxy_id IS DISTINCT FROM "+selectProxyPlaceholder)
+		}
 	}
 	for _, key := range iqTransportExtraKeys {
 		if value, ok := updates.Extra[key]; ok {
@@ -3344,6 +3379,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			iqResetConditions = append(iqResetConditions, "extra->'"+key+"' IS DISTINCT FROM $"+itoa(idx)+"::jsonb")
 			args = append(args, raw)
 			idx++
+			selectExtraPlaceholder := "$" + itoa(len(iqSelectArgs)+1)
+			iqSelectArgs = append(iqSelectArgs, raw)
+			iqSelectResetConditions = append(iqSelectResetConditions, "extra->'"+key+"' IS DISTINCT FROM "+selectExtraPlaceholder+"::jsonb")
 		}
 	}
 	// Identity changes are selected and locked before UPDATE below.
@@ -3493,7 +3531,6 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	setClauses = append(setClauses, "updated_at = NOW()")
 
 	idsPlaceholder := "$" + itoa(idx)
-	idsArgIndex := idx
 	whereClause := " WHERE id = ANY(" + idsPlaceholder + ") AND deleted_at IS NULL"
 	args = append(args, pq.Array(ids))
 	idx++
@@ -3529,15 +3566,17 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	var identityChangedAccountIDs []int64
 	if targetClient != nil && (len(iqResetConditions) > 0 || updates.IQTargets != nil) {
 		identityExpr := "FALSE"
-		if len(iqResetConditions) > 0 {
-			identityExpr = "(" + joinClauses(iqResetConditions, " OR ") + ")"
+		if len(iqSelectResetConditions) > 0 {
+			identityExpr = "(" + joinClauses(iqSelectResetConditions, " OR ") + ")"
 		}
-		selectQuery := "SELECT id, platform, " + identityExpr + " FROM accounts WHERE id = ANY(" + idsPlaceholder + ") AND deleted_at IS NULL"
+		selectIDsPlaceholder := "$" + itoa(len(iqSelectArgs)+1)
+		selectQuery := "SELECT id, platform, " + identityExpr + " FROM accounts WHERE id = ANY(" + selectIDsPlaceholder + ") AND deleted_at IS NULL"
 		if len(iqResetConditions) > 0 && updates.IQTargets == nil {
 			selectQuery += " AND " + identityExpr
 		}
 		selectQuery += " ORDER BY id FOR NO KEY UPDATE"
-		lockRows, err := exec.QueryContext(ctx, selectQuery, args[:idsArgIndex]...)
+		selectArgs := append(iqSelectArgs, pq.Array(ids))
+		lockRows, err := exec.QueryContext(ctx, selectQuery, selectArgs...)
 		if err != nil {
 			return 0, err
 		}

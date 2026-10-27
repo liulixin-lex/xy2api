@@ -3467,3 +3467,21 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 下一步：保护检查通过后合入 main，在合并提交上打 annotated v0.4.9，核验 Release 附件、GHCR 镜像与版本号。不部署生产。
 
 <!-- 2026-10-27 0.4.9 原样归档结束。 -->
+
+## 2026-10-27 IQ 按模型集成回归修复归档（原样归档）
+
+### 20261027-iq-integfix — IQ 按模型改造的 PostgreSQL 集成回归修复（进行中）
+
+- **请求/目标**（2026-10-27）：修复真实 PostgreSQL repository 集成测试暴露的 12 个回归，逐项对照本地交接包 `20261027-iq-per-model/FINAL_PLAN.md` v1.2 与 `implementation/ROUTES.md`；全部验证通过后，在指定 worktree 本地提交，并写仓库外报告。
+- **要求与约束**：只在独立 worktree `wip/iq-integfix-20261027` 修改；不碰主工作树和生产；最小修复，不新增无关测试或放宽断言。上游同步登记字面量保持不变；不修改 scheduler 两个原版文件。提交使用用户指定身份与协作尾注。
+- **开始状态**：HEAD `3ae964a7e27bfe3f74a89e83e1b79c810bb5b8cc`，分支 `wip/iq-integfix-20261027`，工作树干净。
+- **已完成**：读取仓库 `AGENTS.md`、本记忆与任务方案/路由分工；核实指定分支与 HEAD。
+- **未完成**：对照 12 个失败与方案契约；修复代码或仅在契约明确要求时修正测试；运行远端 PostgreSQL 全量集成及本机要求的 build/vet/gofmt/unit 验证；提交并写报告。
+- **卡点与风险**：无。
+- **关键位置**：代码 worktree 为 `xy2api-wt/iq-integfix`；方案与报告位于本机 `.work/tasks/20261027-iq-per-model/`，不入库。
+
+### 归档更正（2026-10-27）
+
+- 任务已完成。修复内容与验证结果见 `docs/PROJECT_MEMORY.md` 中 2026-10-27 `20261027-iq-integfix` 操作日志；逐项报告位于本机 `.work/tasks/20261027-iq-per-model/implementation/INTEGFIX_REPORT.md`。
+
+<!-- 2026-10-27 IQ 按模型集成回归修复归档结束。 -->

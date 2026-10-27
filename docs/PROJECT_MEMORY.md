@@ -6,6 +6,11 @@
 
 ## 当前交接状态
 
+### IQ 按模型改造的 PostgreSQL 集成回归已修复（2026-10-27）
+
+- 分支 `wip/iq-integfix-20261027` 已修复并提交 12 个集成失败对应的实现与既有测试问题；真实 PostgreSQL repository 集成、本机 build、四组 vet、repository/service unit、gofmt 与文档一致性全部通过。逐项依据与结果见归档及本文件操作日志。
+- 未推送、未开 PR、未操作生产；用户要求的详细摘要报告在本机 `.work/tasks/20261027-iq-per-model/implementation/INTEGFIX_REPORT.md`。
+
 ### 网关韧性复盘：随 0.4.9 发布（2026-10-27 更新）
 
 - **背景**：0.4.9（`ed2e429f6`）提交后，用户要求复盘原有韧性策略，看哪些需要同步调整、哪些多余。Claude 与 Codex 独立分析并互审，astra 两轮找漏洞后定稿为 v3。用户批准，并选定：第二批同进 0.4.9；非 OpenAI 本轮就做模型级 breaker；过渡开关在上线 7 天后再删。
@@ -1456,3 +1461,13 @@ pnpm --dir frontend run build
 - 请求/目标：v0.4.9 已发布，用户要求更新现行文档中仍写着“0.4.9（未发布）”的标注。
 - 修改：`docs/GATEWAY_RESILIENCE.md`、`docs/account-scheduling.md`、`docs/USAGE_METRICS.md` 只改版本标注，行为描述不变；韧性文档引言改为按 0.4.9 的行为描述。
 - 验证：文档一致性通过；全仓库再无 0.4.8/0.4.9 的“未发布”残留。未部署生产。
+
+### 2026-10-27 — 20261027-iq-integfix — PostgreSQL 集成回归修复完成
+
+- **请求/目标**：在独立 worktree 修复真实 PostgreSQL repository 集成套件发现的 12 项 IQ 按模型改造回归，按 FINAL_PLAN v1.2 与 ROUTES 契约裁定代码和测试责任；全部验证通过后提交并写仓库外报告。
+- **开始状态**：分支 `wip/iq-integfix-20261027`，HEAD `3ae964a7e27bfe3f74a89e83e1b79c810bb5b8cc`，工作树干净。
+- **完成操作**：修复 `Create` 事务上下文、清限流后空对象、BulkUpdate 锁查询参数类型/编号、NULL diagnostic 读取；身份重置断言改读持久化快照。按契约修正四处既有用例：增加第二个自动目标、让投影输入有效改变 reset 时间、断言规范出站 gate、并发 test 留言数匹配目标数。上游登记字面量原样保留，未改两个 scheduler 原版文件。
+- **修改文件**：`backend/internal/repository/account_repo.go`、`account_iq_targets.go`、`account_repo_iq_targets_integration_test.go` 与本记忆。
+- **验证**：8c8g 真实 PostgreSQL `go test -tags=integration -count=1 -timeout 24m ./internal/repository/` 通过（0 失败）；本机 `go build ./...`、default/unit/integration/e2e 四组 vet、`go test -count=1 -tags=unit ./internal/repository/... ./internal/service/...`、gofmt、文档一致性、diff-check 均通过。
+- **卡点/风险**：无。未推送、未开 PR、未连接生产。
+- **下一步**：无。详细逐项根因、代码/测试裁决和测试用例名记于本机 `.work/tasks/20261027-iq-per-model/implementation/INTEGFIX_REPORT.md`。
