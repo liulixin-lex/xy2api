@@ -463,14 +463,6 @@ func (s *OpenAIGatewayService) recordOpenAIAccountModelTransientFailure(account 
 	return state.recordFailure(account.ID, openAIAccountModelTransientModel(canonicalModel), now)
 }
 
-func (s *OpenAIGatewayService) clearOpenAIAccountModelTransientState(accountID int64, model string) {
-	state := s.getOpenAIAccountModelTransientState()
-	if state == nil {
-		return
-	}
-	state.recordSuccess(accountID, model)
-}
-
 func (s *OpenAIGatewayService) recordOpenAIAccountModelSlowFailure(account *Account, canonicalModel string, now time.Time) openAIAccountModelTransientDecision {
 	if s == nil || account == nil {
 		return openAIAccountModelTransientDecision{}

@@ -247,7 +247,7 @@ type geminiNativeStreamWriter struct {
 func (w *geminiNativeStreamWriter) write(line string) error {
 	if !geminiStreamMayWrite(w.resp) {
 		if w.pending.Len()+len(line) <= ssePendingLimit {
-			w.pending.WriteString(line)
+			_, _ = w.pending.WriteString(line)
 			return nil
 		}
 		g := geminiAttemptOf(w.resp)

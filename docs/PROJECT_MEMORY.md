@@ -1429,3 +1429,10 @@ pnpm --dir frontend run build
 - **修改文件**：本记忆文件（随本条另行提交）。
 - **验证**：`sync.py audit` 通过；工作树干净。
 - **下一步**：等 CI；合并、发版、部署各自待授权。
+
+### 2026-10-27 — 20261027-resilience-review — 修复 PR #146 的 golangci-lint
+
+- **请求/目标**：PR #146 的 CI 只有 golangci-lint 失败，其余 test、upstream-sync-audit、前端与安全扫描均通过。
+- **完成操作**：补检 `resilience_gemini_attempt.go` 里 `bytes.Buffer.WriteString` 的返回值（errcheck）；删除已无调用方的 `clearOpenAIAccountModelTransientState`（unused）。
+- **验证**：本机按 CI 锁定的 golangci-lint v2.14.0 全量运行，0 issues；`go build ./...`、service unit vet、gofmt、文档一致性通过。
+- **下一步**：等 CI 复跑；合并、发版、部署各自待授权。
