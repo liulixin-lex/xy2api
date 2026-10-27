@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain"
-	"github.com/liulixin-lex/xy2api/internal/pkg/iqcheck"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 )
 
@@ -191,35 +190,19 @@ type IQCheckMetric struct {
 
 // Download contains no account identity or raw responses. Record retention bounds it to three rounds.
 func (s *IQCheckService) Diagnostics(ctx context.Context, id int64) (any, error) {
-	records, err := s.Records(ctx, id)
+	if s == nil || s.targets == nil {
+		return nil, ErrIQCheckInvalid
+	}
+	page, err := s.ResultsPage(ctx, id, "", 0, 100)
 	if err != nil {
 		return nil, err
 	}
-	type item struct {
-		StartedAt  time.Time           `json:"started_at"`
-		FinishedAt *time.Time          `json:"finished_at"`
-		Status     string              `json:"status"`
-		Reason     string              `json:"reason"`
-		Profile    domain.IQProfile    `json:"profile"`
-		Diagnostic *iqcheck.Diagnostic `json:"diagnostic,omitempty"`
-		Attempts   []IQCheckAttempt    `json:"attempts"`
-	}
-	out := make([]item, 0, len(records))
-	for _, r := range records {
-		out = append(out, item{r.StartedAt, r.FinishedAt, r.Status, r.Reason, domain.IQProfile{Model: r.Model, ReasoningEffort: r.Effort, OutputMode: r.OutputMode}, r.Diagnostic.Bounded(), r.Attempts})
-	}
-	hourly := []IQCheckMetric{}
-	if source, ok := s.repo.(interface {
-		IQCheckMetrics(context.Context, int64) ([]IQCheckMetric, error)
-	}); ok {
-		hourly, err = source.IQCheckMetrics(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-	}
 	return struct {
-		Version int             `json:"version"`
-		Rounds  any             `json:"rounds"`
-		Hourly  []IQCheckMetric `json:"hourly"`
-	}{2, out, hourly}, nil
+		Version int `json:"version"`
+		Targets []struct {
+			Rounds []IQRound `json:"rounds"`
+		} `json:"targets"`
+	}{3, []struct {
+		Rounds []IQRound `json:"rounds"`
+	}{{Rounds: page.Rounds}}}, nil
 }

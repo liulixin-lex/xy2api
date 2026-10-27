@@ -19,6 +19,32 @@ type IQTargetService struct {
 	wake           chan struct{}
 }
 
+func (s *IQTargetService) RequestRun(ctx context.Context, id int64, models []string) ([]IQRunTarget, error) {
+	if s.accounts == nil {
+		return nil, ErrIQCheckInvalid
+	}
+	a, err := s.accounts.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if a.Platform != PlatformOpenAI || a.IsCredentialShadow() {
+		return nil, ErrIQCheckInvalid
+	}
+	out, err := s.repo.QueueIQTargets(ctx, id, models)
+	if err == nil {
+		s.Notify()
+	}
+	return out, err
+}
+func contains(xs []string, v string) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *IQTargetService) SetProbe(fn func(context.Context, IQTargetClaim) iqcheck.Result) {
 	s.probe = fn
 }

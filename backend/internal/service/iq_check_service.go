@@ -91,17 +91,64 @@ type IQTargetClaim struct {
 	Mode                        string
 }
 type IQTargetRepository interface {
+	ListIQTargetSummaries(context.Context, []int64) (map[int64][]domain.IQTargetSummary, error)
 	ClaimIQTargets(context.Context, time.Time, int) ([]IQTargetClaim, error)
 	AddIQTargetAttempt(context.Context, IQTargetClaim, int, string, iqcheck.Challenge, iqcheck.Result, time.Time, time.Time) error
 	CompleteIQTarget(context.Context, IQTargetClaim, iqcheck.Result, time.Time) (bool, error)
 	CleanupIQResults(context.Context, time.Time, int) (int64, error)
 	ListIQResults(context.Context, int64, string, int64, int) (IQResultsPage, error)
+	QueueIQTargets(context.Context, int64, []string) ([]IQRunTarget, error)
+	ReconcileIQGates(context.Context) error
 }
 
 type IQResultsPage struct {
 	Rounds       []IQRound `json:"rounds"`
 	NextBeforeID *int64    `json:"next_before_id"`
 }
+type IQRunTarget struct {
+	Model   string `json:"model"`
+	State   string `json:"state"`
+	RoundID *int64 `json:"round_id,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+}
+type IQRunAccount struct {
+	AccountID int64         `json:"account_id"`
+	Reason    string        `json:"reason,omitempty"`
+	Targets   []IQRunTarget `json:"targets"`
+}
+type IQRunRequest struct {
+	Models []string `json:"models,omitempty"`
+}
+type IQRunBatchRequest struct {
+	AccountIDs []int64  `json:"account_ids"`
+	Models     []string `json:"models,omitempty"`
+}
+
+func (s *IQCheckService) RequestRun(ctx context.Context, id int64, models []string) ([]IQRunTarget, error) {
+	if s == nil || s.targets == nil {
+		return nil, ErrIQCheckInvalid
+	}
+	return s.targets.RequestRun(ctx, id, models)
+}
+func (s *IQCheckService) RequestRunBatch(ctx context.Context, ids []int64, models []string) []IQRunAccount {
+	out := make([]IQRunAccount, 0, len(ids))
+	for _, id := range ids {
+		targets, err := s.RequestRun(ctx, id, models)
+		if err != nil {
+			out = append(out, IQRunAccount{AccountID: id, Reason: runReason(err)})
+		} else {
+			out = append(out, IQRunAccount{AccountID: id, Targets: targets})
+		}
+	}
+	return out
+}
+func runReason(err error) string {
+	if errors.Is(err, ErrIQCheckInvalid) {
+		return "not_openai"
+	}
+	return "credentials_unavailable"
+}
+
 type IQRound struct {
 	ID            int64       `json:"id"`
 	Model         string      `json:"model"`
@@ -193,6 +240,7 @@ func ProvideIQCheckService(accounts AccountRepository, tester *AccountTestServic
 	if targetOK {
 		s.targets = ProvideIQTargetService(targetRepo, accounts)
 		s.targets.SetProbe(func(ctx context.Context, claim IQTargetClaim) iqcheck.Result { return s.probeTarget(ctx, claim) })
+		_ = targetRepo.ReconcileIQGates(context.Background())
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel

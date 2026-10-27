@@ -14,6 +14,32 @@ type AccountIQHandler struct{ service *service.IQCheckService }
 func NewAccountIQHandler(s *service.IQCheckService) *AccountIQHandler {
 	return &AccountIQHandler{service: s}
 }
+func ProvideAccountIQHandler(s *service.IQCheckService) *AccountIQHandler {
+	return NewAccountIQHandler(s)
+}
+func (h *AccountIQHandler) Run(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	var req service.IQRunRequest
+	_ = c.ShouldBindJSON(&req)
+	out, e := h.service.RequestRun(c.Request.Context(), id, req.Models)
+	if e != nil {
+		response.ErrorFrom(c, e)
+		return
+	}
+	response.Success(c, gin.H{"targets": out})
+}
+func (h *AccountIQHandler) RunBatch(c *gin.Context) {
+	var req service.IQRunBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"accounts": h.service.RequestRunBatch(c.Request.Context(), req.AccountIDs, req.Models)})
+}
 func (h *AccountIQHandler) Results(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {

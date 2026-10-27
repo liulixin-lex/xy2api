@@ -288,6 +288,79 @@ func (r *accountRepository) ListIQTargetSummaries(ctx context.Context, ids []int
 	return out, rows.Err()
 }
 
+func (r *accountRepository) QueueIQTargets(ctx context.Context, accountID int64, models []string) ([]service.IQRunTarget, error) {
+	rows, err := r.sql.QueryContext(ctx, `SELECT model,lease_until FROM account_iq_targets WHERE account_id=$1 AND ($2::text[] IS NULL OR model=ANY($2)) ORDER BY model`, accountID, pq.Array(models))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []service.IQRunTarget
+	seen := map[string]bool{}
+	for rows.Next() {
+		var model string
+		var lease *time.Time
+		if err := rows.Scan(&model, &lease); err != nil {
+			return nil, err
+		}
+		state := "queued"
+		if lease != nil && lease.After(time.Now().UTC()) {
+			state = "running"
+		}
+		out = append(out, service.IQRunTarget{Model: model, State: state})
+		seen[model] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if _, err = r.sql.ExecContext(ctx, `UPDATE account_iq_targets SET manual_requested_at=COALESCE(manual_requested_at,now()) WHERE account_id=$1 AND ($2::text[] IS NULL OR model=ANY($2)) AND (lease_until IS NULL OR lease_until<=now())`, accountID, pq.Array(models)); err != nil {
+		return nil, err
+	}
+	for _, model := range models {
+		if !seen[model] {
+			out = append(out, service.IQRunTarget{Model: model, State: "rejected", Reason: "unknown_target"})
+		}
+	}
+	return out, nil
+}
+
+func (r *accountRepository) ReconcileIQGates(ctx context.Context) error {
+	rows, err := r.sql.QueryContext(ctx, `SELECT DISTINCT account_id FROM account_iq_targets WHERE enabled AND verdict='degraded'`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		tx, err := r.client.Tx(ctx)
+		if err != nil {
+			return err
+		}
+		c := tx.Client()
+		if _, err = c.ExecContext(ctx, `SELECT id FROM accounts WHERE id=$1 FOR NO KEY UPDATE`, id); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if _, err := r.ProjectIQGates(ctx, c, id); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *accountRepository) SaveIQTargetsTx(ctx context.Context, c *dbent.Client, accountID int64, patch domain.IQTargetsPatch) (bool, error) {
 	changed := false
 	for _, model := range patch.Remove {
