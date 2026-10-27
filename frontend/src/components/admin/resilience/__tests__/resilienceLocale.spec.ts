@@ -33,9 +33,9 @@ describe('gateway resilience 0.4.4 locale keys', () => {
   })
 
   // DOCS/PM 2026-10-21: the whitelist adds response.queued and content-free
-  // added events; since 2026-10-22 also the exact response.metadata event,
-  // but never codex.* metadata. The Codex cap also covers configuration
-  // rejections.
+  // added events; since 2026-10-22 also the exact response.metadata event;
+  // since 0.4.9 also codex.rate_limits, but no other codex.* metadata. The
+  // Codex cap also covers configuration rejections.
   it.each([
     ['zh', zh, { queued: 'response.queued', added: 'added', configReject: '配置拒绝' }],
     ['en', en, { queued: 'response.queued', added: 'added', configReject: 'configuration rejection' }]
@@ -45,7 +45,7 @@ describe('gateway resilience 0.4.4 locale keys', () => {
     expect(whitelist).toContain(words.queued)
     expect(whitelist).toContain(words.added)
     expect(whitelist).toContain('response.metadata')
-    expect(whitelist).not.toContain('codex.')
+    expect(whitelist.split('codex.rate_limits').join('')).not.toContain('codex.')
     expect(text('fields.codexRetryAfterCapHint')).toContain(words.configReject)
   })
 
