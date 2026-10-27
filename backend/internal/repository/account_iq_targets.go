@@ -11,6 +11,7 @@ import (
 	"github.com/lib/pq"
 	dbent "github.com/liulixin-lex/xy2api/ent"
 	"github.com/liulixin-lex/xy2api/internal/domain"
+	"github.com/liulixin-lex/xy2api/internal/pkg/iqcheck"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
@@ -21,6 +22,171 @@ type IQTargetRepository interface {
 	SaveIQTargetsTx(context.Context, *dbent.Client, int64, domain.IQTargetsPatch) (bool, error)
 	ResetIQTargetsOnIdentityChangeTx(context.Context, *dbent.Client, int64) (bool, error)
 	ProjectIQGates(context.Context, *dbent.Client, int64) (bool, error)
+	ClaimIQTargets(context.Context, time.Time, int) ([]service.IQTargetClaim, error)
+	AddIQTargetAttempt(context.Context, service.IQTargetClaim, int, string, iqcheck.Challenge, iqcheck.Result, time.Time, time.Time) error
+	CompleteIQTarget(context.Context, service.IQTargetClaim, iqcheck.Result, time.Time) (bool, error)
+}
+
+func (r *accountRepository) ClaimIQTargets(ctx context.Context, now time.Time, limit int) ([]service.IQTargetClaim, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	c := tx.Client()
+	if _, err = c.ExecContext(ctx, `SELECT pg_advisory_xact_lock(78421021)`); err != nil {
+		return nil, err
+	}
+	var active int
+	countRows, e := c.QueryContext(ctx, `SELECT count(*) FROM account_iq_targets WHERE lease_until > $1`, now)
+	if e != nil {
+		return nil, e
+	}
+	if !countRows.Next() {
+		countRows.Close()
+		return nil, sql.ErrNoRows
+	}
+	if err = countRows.Scan(&active); err != nil {
+		countRows.Close()
+		return nil, err
+	}
+	countRows.Close()
+	remaining := limit - active
+	if remaining <= 0 {
+		return nil, tx.Commit()
+	}
+	rows, err := c.QueryContext(ctx, `SELECT t.id,t.account_id,t.model,t.revision,t.enabled,t.reasoning_effort,t.timeout_seconds,t.verdict FROM account_iq_targets t JOIN accounts a ON a.id=t.account_id WHERE a.deleted_at IS NULL AND a.platform='openai' AND (t.lease_until IS NULL OR t.lease_until <= $1) AND (t.not_before IS NULL OR t.not_before <= $1) AND (t.manual_requested_at IS NOT NULL OR (t.enabled AND t.paused_reason='' AND t.next_run_at <= $1 AND a.status='active' AND a.schedulable AND COALESCE(a.rate_limit_reset_at,'-infinity') <= $1 AND COALESCE(a.overload_until,'-infinity') <= $1 AND COALESCE(a.temp_unschedulable_until,'-infinity') <= $1)) ORDER BY (t.manual_requested_at IS NULL),COALESCE(t.manual_requested_at,t.next_run_at),t.id LIMIT $2 FOR UPDATE OF t SKIP LOCKED`, now, remaining)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []service.IQTargetClaim
+	for rows.Next() {
+		var x service.IQTargetClaim
+		if err := rows.Scan(&x.ID, &x.AccountID, &x.Model, &x.Revision, &x.Enabled, &x.ReasoningEffort, &x.TimeoutSeconds, &x.Verdict); err != nil {
+			return nil, err
+		}
+		x.LeaseToken = uuid.NewString()
+		x.LeaseUntil = now.Add(time.Duration(5*x.TimeoutSeconds+120) * time.Second)
+		out = append(out, x)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		x := &out[i]
+		if _, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET lease_token=$2,lease_until=$3,manual_requested_at=NULL,updated_at=now() WHERE id=$1`, x.ID, x.LeaseToken, x.LeaseUntil); err != nil {
+			return nil, err
+		}
+		x.Mode = "normal"
+		if x.Verdict == "degraded" {
+			x.Mode = "recheck"
+		}
+		if _, err = c.ExecContext(ctx, `INSERT INTO account_iq_check_results(account_id,lease_token,prompt_version,model,effort,status,reason,started_at,config_revision,outbound_model,mode) VALUES($1,$2,'candy-v3',$3,$4,'unknown','', $5,$6,$3,$7)`, x.AccountID, x.LeaseToken, x.Model, x.ReasoningEffort, now, x.Revision, x.Mode); err != nil {
+			return nil, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (r *accountRepository) AddIQTargetAttempt(ctx context.Context, claim service.IQTargetClaim, attempt int, effort string, challenge iqcheck.Challenge, result iqcheck.Result, started, finished time.Time) error {
+	b, err := json.Marshal(challenge)
+	if err != nil {
+		return err
+	}
+	diagnostic := []byte("null")
+	if result.Diagnostic != nil {
+		diagnostic = result.Diagnostic.JSON()
+	}
+	_, err = r.sql.ExecContext(ctx, `INSERT INTO account_iq_check_attempts(result_id,attempt_no,lease_token,started_at,finished_at,status,reason,latency_ms,effort,expected,answer,reported_model,model_class,challenge,diagnostic) SELECT id,$3,$2,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,NULLIF($15::jsonb,'null'::jsonb) FROM account_iq_check_results WHERE lease_token=$1`, claim.LeaseToken, claim.LeaseToken+":"+fmt.Sprint(attempt), attempt, started, finished, result.Status, result.Reason, finished.Sub(started).Milliseconds(), effort, fmt.Sprint(challenge.Answer()), result.Answer, result.ReportedModel, string(result.ModelClass), string(b), string(diagnostic))
+	return err
+}
+
+func (r *accountRepository) CompleteIQTarget(ctx context.Context, claim service.IQTargetClaim, result iqcheck.Result, now time.Time) (bool, error) {
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	c := tx.Client()
+	if _, err = c.ExecContext(ctx, `SELECT id FROM accounts WHERE id=$1 FOR NO KEY UPDATE`, claim.AccountID); err != nil {
+		return false, err
+	}
+	rows, err := c.QueryContext(ctx, `SELECT revision,enabled,verdict,COALESCE(gate_model,''),reasoning_effort,interval_minutes,timeout_seconds FROM account_iq_targets WHERE id=$1 AND lease_token=$2 FOR UPDATE`, claim.ID, claim.LeaseToken)
+	if err != nil {
+		return false, err
+	}
+	var revision, verdict, gate, effort string
+	var enabled bool
+	var interval, timeout int
+	if !rows.Next() {
+		rows.Close()
+		_, err = c.ExecContext(ctx, `UPDATE account_iq_check_results SET finished_at=$2,status='unknown',reason='lease_lost' WHERE lease_token=$1 AND finished_at IS NULL`, claim.LeaseToken, now)
+		if err != nil {
+			return false, err
+		}
+		if err = tx.Commit(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if err = rows.Scan(&revision, &enabled, &verdict, &gate, &effort, &interval, &timeout); err != nil {
+		rows.Close()
+		return false, err
+	}
+	rows.Close()
+	if revision != claim.Revision {
+		_, err = c.ExecContext(ctx, `UPDATE account_iq_check_results SET finished_at=$2,status='unknown',reason='cancelled_by_account_change' WHERE lease_token=$1 AND finished_at IS NULL`, claim.LeaseToken, now)
+		if err != nil {
+			return false, err
+		}
+		if _, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET lease_token=NULL,lease_until=NULL WHERE id=$1 AND lease_token=$2`, claim.ID, claim.LeaseToken); err != nil {
+			return false, err
+		}
+		if err = tx.Commit(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if !enabled {
+		result.Status = "unknown"
+		result.Reason = "cancelled_by_account_change"
+	}
+	newVerdict := verdict
+	if result.Status == "smart" || result.Status == "degraded" {
+		newVerdict = result.Status
+	}
+	newGate := gate
+	if result.Status == "smart" {
+		newGate = ""
+	}
+	if result.Status == "degraded" {
+		newGate = claim.Model
+	}
+	next := now.Add(time.Duration(interval) * time.Minute)
+	if result.Status == "degraded" {
+		next = now.Add(time.Hour)
+	}
+	if _, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET verdict=$3,verdict_at=CASE WHEN $3='unknown' THEN verdict_at ELSE $4 END,gate_model=NULLIF($5,''),last_run_at=$4,last_result=$6,last_reason=$7,next_run_at=$8,lease_token=NULL,lease_until=NULL,manual_requested_at=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2`, claim.ID, claim.LeaseToken, newVerdict, now, newGate, result.Status, result.Reason, next); err != nil {
+		return false, err
+	}
+	changed, err := r.ProjectIQGates(ctx, c, claim.AccountID)
+	if err != nil {
+		return false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return false, err
+	}
+	if changed {
+		r.syncSchedulerAccountSnapshot(ctx, claim.AccountID)
+	}
+	return changed, nil
 }
 
 func (r *accountRepository) ListIQTargetSummaries(ctx context.Context, ids []int64) (map[int64][]domain.IQTargetSummary, error) {
@@ -133,10 +299,7 @@ func (r *accountRepository) SaveIQTargetsTx(ctx context.Context, c *dbent.Client
 			continue
 		}
 		if switchChange {
-			_, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET enabled=$2,reasoning_effort=$3,interval_minutes=$4,timeout_seconds=$5,revision=gen_random_uuid()::text,verdict='unknown',verdict_at=NULL,gate_model=NULL,paused_reason='',degraded_streak=0,failure_streak=0,not_before=NULL,next_run_at=now(),updated_at=now() WHERE id=$1`, id, en, eff, iv, to)
-			if !en {
-				_, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET next_run_at=COALESCE(next_run_at,now()) WHERE id=$1`, id)
-			}
+			_, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET enabled=$2,reasoning_effort=$3,interval_minutes=$4,timeout_seconds=$5,revision=gen_random_uuid()::text,verdict='unknown',verdict_at=NULL,gate_model=NULL,paused_reason='',degraded_streak=0,failure_streak=0,not_before=NULL,next_run_at=CASE WHEN $2 THEN now() ELSE next_run_at END,updated_at=now() WHERE id=$1`, id, en, eff, iv, to)
 		} else if profileChange {
 			_, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET enabled=$2,reasoning_effort=$3,interval_minutes=$4,timeout_seconds=$5,revision=gen_random_uuid()::text,paused_reason='',degraded_streak=0,failure_streak=0,not_before=NULL,next_run_at=now(),updated_at=now() WHERE id=$1`, id, en, eff, iv, to)
 		} else if intervalOnly {

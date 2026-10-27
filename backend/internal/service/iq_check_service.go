@@ -76,6 +76,22 @@ type IQCheckRepository interface {
 	ListIQCheckRecords(context.Context, int64) ([]IQCheckRecord, error)
 }
 
+type IQTargetClaim struct {
+	ID, AccountID               int64
+	Model, Revision, LeaseToken string
+	Enabled                     bool
+	ReasoningEffort             string
+	TimeoutSeconds              int
+	Verdict                     string
+	LeaseUntil                  time.Time
+	Mode                        string
+}
+type IQTargetRepository interface {
+	ClaimIQTargets(context.Context, time.Time, int) ([]IQTargetClaim, error)
+	AddIQTargetAttempt(context.Context, IQTargetClaim, int, string, iqcheck.Challenge, iqcheck.Result, time.Time, time.Time) error
+	CompleteIQTarget(context.Context, IQTargetClaim, iqcheck.Result, time.Time) (bool, error)
+}
+
 func ValidateIQCheckSettings(platform string, settings *domain.IQCheckSettings) error {
 	if settings == nil {
 		return nil
