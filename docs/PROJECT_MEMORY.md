@@ -1450,3 +1450,9 @@ pnpm --dir frontend run build
 - 完成操作：#147 常规合入 main `da96d7652`（全部检查通过）；在该提交上创建 annotated v0.4.9 并推送，Release run 40467640370 的 verify-version、build-frontend、release 均成功，2026-10-27T07:45:20Z 正式发布（非 draft、非 prerelease）。
 - 验证：checksums 核验 darwin_arm64 与 linux_amd64 附件；解包二进制报告 XY2API 0.4.9、兼容 0.2.15、commit da96d7652，构建信息 vcs.modified=false；GHCR 0.4.9/0.4/latest 指向同一 amd64+arm64 index，镜像标签 version=0.4.9、revision=da96d7652。
 - 记忆：版本准备登记原样归档。未部署生产。
+
+### 2026-10-27 — 20261027-docs-drop-unreleased-049 — 去掉 0.4.9“未发布”标注
+
+- 请求/目标：v0.4.9 已发布，用户要求更新现行文档中仍写着“0.4.9（未发布）”的标注。
+- 修改：`docs/GATEWAY_RESILIENCE.md`、`docs/account-scheduling.md`、`docs/USAGE_METRICS.md` 只改版本标注，行为描述不变；韧性文档引言改为按 0.4.9 的行为描述。
+- 验证：文档一致性通过；全仓库再无 0.4.8/0.4.9 的“未发布”残留。未部署生产。
