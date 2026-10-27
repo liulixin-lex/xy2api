@@ -675,7 +675,7 @@ describe('user KeysView column settings', () => {
 
       const items = groupSelect(wrapper).findAllComponents({ name: 'GroupOptionItem' })
       expect(items.map((item) => item.props('exclusive'))).toEqual([true, false, false])
-      expect(items.every((item) => item.props('clampDescription') === false)).toBe(true)
+      expect(items.every((item) => item.props('descriptionPopover') === true)).toBe(true)
 
       const selectedTags = () => groupSelect(wrapper).get('[data-test="select-selected"]').findAll('[data-test="exclusive-group-tag"]')
       await groupSelect(wrapper).vm.$emit('update:modelValue', 21)

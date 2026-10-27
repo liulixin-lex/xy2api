@@ -579,7 +579,7 @@
                 :peak-rate-multiplier="(option as unknown as GroupOption).peakRateMultiplier"
                 :description="(option as unknown as GroupOption).description"
                 :exclusive="(option as unknown as GroupOption).exclusive"
-                :clamp-description="false"
+                description-popover
                 :selected="selected"
               />
             </template>

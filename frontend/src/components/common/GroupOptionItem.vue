@@ -3,7 +3,7 @@
     <!-- Left: name + description -->
     <div
       class="flex min-w-0 flex-1 flex-col items-start"
-      :title="description || undefined"
+      :title="description && !descriptionPopover ? description : undefined"
     >
       <!-- Row 1: platform badge (name bold) + exclusive tag -->
       <div class="flex max-w-full items-center gap-1.5">
@@ -17,13 +17,12 @@
         <ExclusiveGroupTag v-if="exclusive" />
       </div>
       <!-- Row 2: description with top spacing -->
-      <span
+      <TruncatedTextPopover
         v-if="description"
-        class="mt-1.5 w-full whitespace-pre-line [overflow-wrap:anywhere] text-left text-xs leading-relaxed text-gray-500 dark:text-gray-400"
-        :class="clampDescription && 'line-clamp-3'"
-      >
-        {{ description }}
-      </span>
+        :text="description"
+        :enabled="descriptionPopover"
+        class="mt-1.5 w-full whitespace-pre-line [overflow-wrap:anywhere] text-left text-xs leading-relaxed text-gray-500 dark:text-gray-400 line-clamp-3"
+      />
     </div>
 
     <!-- Right: rate pill + checkmark (vertically centered to first row) -->
@@ -67,6 +66,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import GroupBadge from './GroupBadge.vue'
 import ExclusiveGroupTag from './ExclusiveGroupTag.vue'
+import TruncatedTextPopover from './TruncatedTextPopover.vue'
 import type { SubscriptionType, GroupPlatform } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
@@ -87,8 +87,8 @@ interface Props {
   selected?: boolean
   showCheckmark?: boolean
   exclusive?: boolean
-  /** 说明最多显示 3 行；关掉后完整换行显示 */
-  clampDescription?: boolean
+  /** 说明超过 3 行被截断时，悬停弹出完整内容（替代原生 title） */
+  descriptionPopover?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -98,7 +98,7 @@ const props = withDefaults(defineProps<Props>(), {
   userRateMultiplier: null,
   peakRateEnabled: false,
   exclusive: false,
-  clampDescription: true
+  descriptionPopover: false
 })
 
 // Whether user has a custom rate different from default

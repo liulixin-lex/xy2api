@@ -60,15 +60,24 @@ describe('GroupOptionItem exclusive tag', () => {
   })
 })
 
-describe('GroupOptionItem description clamp', () => {
+describe('GroupOptionItem description popover', () => {
   const description = 'A long group description'
-  const descriptionClasses = (props: Record<string, unknown>) => mount(GroupOptionItem, {
+  const mountItem = (props: Record<string, unknown> = {}) => mount(GroupOptionItem, {
     props: { name: 'Example group', platform: 'openai', description, ...props },
     global: { stubs: { GroupBadge: true } },
-  }).findAll('span').find((element) => element.text() === description)?.classes()
+  })
 
-  it('can show the whole description instead of three lines', () => {
-    expect(descriptionClasses({ clampDescription: false })).not.toContain('line-clamp-3')
-    expect(descriptionClasses({ clampDescription: false })).toContain('whitespace-pre-line')
+  it('keeps the native title and the popover off by default', () => {
+    const wrapper = mountItem()
+    expect(wrapper.find('[title]').attributes('title')).toBe(description)
+    expect(wrapper.getComponent({ name: 'TruncatedTextPopover' }).props('enabled')).toBe(false)
+  })
+
+  it('swaps the native title for the hover popover when requested', () => {
+    const wrapper = mountItem({ descriptionPopover: true })
+    expect(wrapper.find('[title]').exists()).toBe(false)
+    const text = wrapper.getComponent({ name: 'TruncatedTextPopover' })
+    expect(text.props('enabled')).toBe(true)
+    expect(text.classes()).toContain('line-clamp-3')
   })
 })
