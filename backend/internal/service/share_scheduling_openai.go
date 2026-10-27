@@ -174,7 +174,7 @@ func (s *OpenAIGatewayService) shareOpenAILastResort(ctx context.Context, gp *sh
 		limit: func(acc *Account) int { return s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency) },
 		verify: func(acc *Account) (*Account, sharesched.Reason) {
 			// The plan used a 2 s group list (review R09).
-			if fresh, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, acc, req.RequestedModel, s.resilienceOpenAIPenaltyOf); ok {
+			if fresh, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, acc, req.RequestedModel, false, s.resilienceOpenAIPenaltyOf); ok {
 				return fresh, ""
 			}
 			return nil, sharesched.ReasonIneligible
@@ -359,7 +359,7 @@ func (g *openAIShareGates) candidateReason(acc *Account, now time.Time) (sharesc
 	lastResort := resilienceLastResortGate(g.ctx)
 	switch reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(g.ctx, acc, g.in.platform, g.in.model, false, g.in.capability); {
 	case reason == "":
-	case reason == "model_rate_limited" && lastResortModelLimitSoft(g.ctx, acc, g.in.model):
+	case reason == "model_rate_limited" && lastResortModelLimitSoft(g.ctx, acc, g.in.model, false):
 	case reason == "model_rate_limited":
 		return sharesched.ReasonModelRateLimited, shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf, shareModelLimitEnd(g.ctx, acc, g.in.model, now))
 	case reason == "not_schedulable":

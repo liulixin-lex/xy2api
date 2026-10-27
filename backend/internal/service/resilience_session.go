@@ -33,6 +33,9 @@ func resiliencePenaltyOf(a *Account, model string, now time.Time) (resilience.Pe
 	if a.IsAPIKeyOrBedrock() && a.IsQuotaExceeded() {
 		return resilience.TierHard, time.Time{}, "quota_exceeded"
 	}
+	if model != "" && iqGateBlocksRequest(a, model, false) {
+		return resilience.TierHard, time.Time{}, "model_rate_limited"
+	}
 	tier := resilience.TierNone
 	var recoverAt time.Time
 	reason := ""
@@ -351,7 +354,7 @@ func (r *ResilienceService) groupAccountsForLastResort(ctx context.Context, repo
 // served only when its current row still allows last resort; the returned
 // copy is that row with soft penalties relaxed. A failed read keeps the
 // planned copy (the list itself was read moments ago).
-func (r *ResilienceService) verifyLastResortAccount(ctx context.Context, repo AccountRepository, groupID int64, planned *Account, model string,
+func (r *ResilienceService) verifyLastResortAccount(ctx context.Context, repo AccountRepository, groupID int64, planned *Account, model string, requireCompact bool,
 	penaltyOf func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string)) (*Account, bool) {
 	if planned == nil {
 		return nil, false
@@ -370,6 +373,10 @@ func (r *ResilienceService) verifyLastResortAccount(ctx context.Context, repo Ac
 	}
 	now := time.Now()
 	if fresh == nil || (groupID > 0 && len(fresh.GroupIDs) > 0 && !containsInt64(fresh.GroupIDs, groupID)) {
+		r.lastResortGroups.drop(groupID)
+		return nil, false
+	}
+	if iqGateBlocksRequest(fresh, model, requireCompact) {
 		r.lastResortGroups.drop(groupID)
 		return nil, false
 	}
@@ -440,7 +447,7 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 	// for the best one.
 	var busy []lastResortCandidate
 	for _, c := range pickLastResort(cands) {
-		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *groupID, c.account, requestedModel, resiliencePenaltyOf)
+		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *groupID, c.account, requestedModel, false, resiliencePenaltyOf)
 		if !ok {
 			continue
 		}
@@ -639,13 +646,16 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 		if acc.Platform != platform || !acc.IsOpenAICompatible() {
 			continue
 		}
+		if iqGateBlocksRequest(&acc, req.RequestedModel, req.RequireCompact) {
+			continue
+		}
 		tier, recoverAt, _ := s.resilienceOpenAIPenaltyOf(&acc, req.RequestedModel, now)
 		if !lastResortTierAllowed(tier, acc.ID, avoided) {
 			continue
 		}
 		candidate := withoutSoftPenalties(acc, now)
 		if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(gateCtx, candidate, platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability); reason != "" &&
-			(reason != "model_rate_limited" || !lastResortModelLimitSoft(gateCtx, candidate, req.RequestedModel)) {
+			(reason != "model_rate_limited" || !lastResortModelLimitSoft(gateCtx, candidate, req.RequestedModel, req.RequireCompact)) {
 			continue
 		}
 		if ok, _ := gate.isAccountRequestCompatibleReason(gateCtx, candidate, req); !ok {
@@ -666,7 +676,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	// only up to their adaptive limit.
 	verified := cands[:0]
 	for _, c := range cands {
-		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, c.account, req.RequestedModel, s.resilienceOpenAIPenaltyOf)
+		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, c.account, req.RequestedModel, req.RequireCompact, s.resilienceOpenAIPenaltyOf)
 		if !ok {
 			continue
 		}
@@ -726,13 +736,9 @@ func resilienceLastResortGate(ctx context.Context) bool {
 // lastResortModelLimitSoft reports whether a per-model rate limit lets the
 // account through as a last resort: only in a last-resort context and only
 // while the limit is within the soft threshold (design §3.1).
-func lastResortModelLimitSoft(ctx context.Context, acc *Account, model string) bool {
-	if acc != nil && accountHasIQGate(acc) {
-		for _, key := range iqGateKeysForRequest(acc, model, false) {
-			if acc.hasRateLimitKey(key) {
-				return false
-			}
-		}
+func lastResortModelLimitSoft(ctx context.Context, acc *Account, model string, requireCompact bool) bool {
+	if iqGateBlocksRequest(acc, model, requireCompact) {
+		return false
 	}
 	return resilienceLastResortGate(ctx) && acc.GetRateLimitRemainingTimeWithContext(ctx, model) <= resilience.HardRateLimitThreshold
 }

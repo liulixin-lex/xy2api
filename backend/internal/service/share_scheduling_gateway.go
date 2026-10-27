@@ -79,7 +79,7 @@ func (g gatewayCandidateGates) candidateReason(ctx context.Context, acc *Account
 		return sharesched.ReasonModelUnsupported, time.Time{}
 	case g.channelCheck && s.isUpstreamModelRestrictedByChannel(ctx, *g.groupID, acc, g.model):
 		return sharesched.ReasonChannelRestricted, time.Time{}
-	case !s.isAccountSchedulableForModelSelection(ctx, acc, g.model) && !lastResortModelLimitSoft(ctx, acc, g.model):
+	case !s.isAccountSchedulableForModelSelection(ctx, acc, g.model) && !lastResortModelLimitSoft(ctx, acc, g.model, false):
 		return sharesched.ReasonModelRateLimited, shareSoftRecovery(acc, g.model, now, resiliencePenaltyOf, shareModelLimitEnd(ctx, acc, g.model, now))
 	case !s.isAccountSchedulableForQuota(acc):
 		return sharesched.ReasonQuotaExceeded, time.Time{}
@@ -223,7 +223,7 @@ func (s *GatewayService) shareGatewayLastResort(ctx context.Context, gp *shareGr
 		limit:  func(acc *Account) int { return acc.Concurrency },
 		verify: func(acc *Account) (*Account, sharesched.Reason) {
 			// The plan used a 2 s group list (review R09).
-			if fresh, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *groupID, acc, requestedModel, resiliencePenaltyOf); ok {
+			if fresh, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *groupID, acc, requestedModel, false, resiliencePenaltyOf); ok {
 				return fresh, ""
 			}
 			return nil, sharesched.ReasonIneligible
