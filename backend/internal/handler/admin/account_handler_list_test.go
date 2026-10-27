@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -29,6 +30,9 @@ func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
 		AccountGroups: []service.AccountGroup{{AccountID: 501, GroupID: groupID, Priority: 2, Group: &service.Group{ID: groupID, Name: "codex", Platform: service.PlatformOpenAI}}},
 		CreatedAt:     now, UpdatedAt: now,
 	}}
+	adminSvc.iqTargetSummaries = map[int64][]domain.IQTargetSummary{
+		501: {{Model: "gpt-6-astra", Enabled: true, Verdict: "smart", State: "idle"}},
+	}
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=20&lite=1", nil)
@@ -47,6 +51,8 @@ func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
 	require.Equal(t, float64(501), liteItem["id"])
 	require.Equal(t, []any{float64(groupID)}, liteItem["group_ids"])
 	require.Equal(t, true, liteItem["schedulable"])
+	require.NotContains(t, liteItem, "iq_check")
+	require.Equal(t, "gpt-6-astra", liteItem["iq_targets"].([]any)[0].(map[string]any)["model"])
 	require.NotContains(t, liteItem, "groups")
 	require.NotContains(t, liteItem, "account_groups")
 	credentials, ok := liteItem["credentials"].(map[string]any)
@@ -77,6 +83,8 @@ func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
 	require.NoError(t, json.Unmarshal(recFull.Body.Bytes(), &fullPayload))
 	require.Contains(t, fullPayload.Data.Items[0], "groups")
 	require.Contains(t, fullPayload.Data.Items[0], "account_groups")
+	require.NotContains(t, fullPayload.Data.Items[0], "iq_check")
+	require.Contains(t, fullPayload.Data.Items[0], "iq_targets")
 }
 
 func TestAccountHandlerListLiteStaysBelowResponseBudget(t *testing.T) {

@@ -38,15 +38,15 @@ type dataProxy struct {
 }
 
 type dataAccount struct {
-	IQCheck     *domain.IQCheckSettings `json:"iq_check"`
-	Name        string                  `json:"name"`
-	Platform    string                  `json:"platform"`
-	Type        string                  `json:"type"`
-	Credentials map[string]any          `json:"credentials"`
-	Extra       map[string]any          `json:"extra"`
-	ProxyKey    *string                 `json:"proxy_key"`
-	Concurrency int                     `json:"concurrency"`
-	Priority    int                     `json:"priority"`
+	IQCheck     *domain.IQTargetsPatch `json:"iq_check"`
+	Name        string                 `json:"name"`
+	Platform    string                 `json:"platform"`
+	Type        string                 `json:"type"`
+	Credentials map[string]any         `json:"credentials"`
+	Extra       map[string]any         `json:"extra"`
+	ProxyKey    *string                `json:"proxy_key"`
+	Concurrency int                    `json:"concurrency"`
+	Priority    int                    `json:"priority"`
 }
 
 func setupAccountDataRouter() (*gin.Engine, *stubAdminService) {
@@ -102,10 +102,15 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 			Status:   service.StatusActive,
 		},
 	}
+	enabled := true
+	effort := "high"
+	interval, timeout := 30, 90
+	adminSvc.iqTargetSettings = map[int64][]domain.IQTargetSettings{21: {{
+		Model: "custom-model", Enabled: &enabled, ReasoningEffort: &effort, IntervalMinutes: &interval, TimeoutSeconds: &timeout,
+	}}}
 	adminSvc.accounts = []service.Account{
 		{
 			ID:          21,
-			IQCheck:     domain.IQCheck{Enabled: true, IntervalMinutes: 30, Model: "custom-model", ReasoningEffort: "high", OutputMode: "strict", Status: "degraded"},
 			Name:        "account",
 			Platform:    service.PlatformOpenAI,
 			Type:        service.AccountTypeOAuth,
@@ -133,8 +138,9 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 	require.Len(t, resp.Data.Accounts, 1)
 	require.Equal(t, "secret", resp.Data.Accounts[0].Credentials["token"])
 	require.NotNil(t, resp.Data.Accounts[0].IQCheck)
-	require.False(t, *resp.Data.Accounts[0].IQCheck.Enabled)
-	require.Equal(t, "custom-model", *resp.Data.Accounts[0].IQCheck.Model)
+	require.Len(t, resp.Data.Accounts[0].IQCheck.Targets, 1)
+	require.True(t, *resp.Data.Accounts[0].IQCheck.Targets[0].Enabled)
+	require.Equal(t, "custom-model", resp.Data.Accounts[0].IQCheck.Targets[0].Model)
 }
 
 func TestExportDataWithoutProxies(t *testing.T) {
@@ -323,12 +329,13 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 	require.Len(t, adminSvc.createdProxies, 0)
 	require.Len(t, adminSvc.createdAccounts, 1)
 	require.True(t, adminSvc.createdAccounts[0].SkipDefaultGroupBind)
-	settings := adminSvc.createdAccounts[0].IQCheck
+	settings := adminSvc.createdAccounts[0].IQTargets
 	require.NotNil(t, settings)
-	require.False(t, *settings.Enabled)
-	require.Equal(t, "custom-model", *settings.Model)
-	require.Equal(t, "upstream_default", *settings.ReasoningEffort)
-	require.Equal(t, 45, *settings.IntervalMinutes)
+	require.Len(t, settings.Targets, 1)
+	require.False(t, *settings.Targets[0].Enabled)
+	require.Equal(t, "custom-model", settings.Targets[0].Model)
+	require.Equal(t, "upstream_default", *settings.Targets[0].ReasoningEffort)
+	require.Equal(t, 45, *settings.Targets[0].IntervalMinutes)
 }
 
 func TestExportDataExcludesCodexTicketMaterial(t *testing.T) {

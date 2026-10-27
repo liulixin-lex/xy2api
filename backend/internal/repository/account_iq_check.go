@@ -10,24 +10,13 @@ import (
 	"github.com/google/uuid"
 	dbent "github.com/liulixin-lex/xy2api/ent"
 	dbaccount "github.com/liulixin-lex/xy2api/ent/account"
-	dbpredicate "github.com/liulixin-lex/xy2api/ent/predicate"
 	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/iqcheck"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai_compat"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
-var iqIdentityKeys = []string{"api_key", "base_url", "access_token", "refresh_token", "chatgpt_account_id", "header_override_enabled", "header_overrides", "user_agent"}
 var iqTransportExtraKeys = []string{"openai_responses_mode", "openai_responses_supported", "openai_passthrough", "enable_tls_fingerprint", "tls_fingerprint_profile_id"}
-
-func iqSchedulablePredicate() dbpredicate.Account {
-	return func(s *entsql.Selector) {
-		c := s.C("iq_check")
-		// Keep this aligned with IQCheck.BlocksScheduling: errors do not create
-		// or clear an IQ pause; only the last valid assessment owns that gate.
-		s.Where(entsql.ExprP("NOT (COALESCE(" + c + "->>'enabled','false') = 'true' AND COALESCE(NULLIF(" + c + "->>'last_valid_status','')," + c + "->>'status','unknown') = 'degraded')"))
-	}
-}
 
 func applyIQStatusFilter(ctx context.Context, q *dbent.AccountQuery) *dbent.AccountQuery {
 	status := service.IQStatusFilter(ctx)
@@ -39,8 +28,16 @@ func applyIQStatusFilter(ctx context.Context, q *dbent.AccountQuery) *dbent.Acco
 		return q
 	}
 	return q.Where(dbaccount.PlatformEQ(service.PlatformOpenAI), func(s *entsql.Selector) {
-		c := s.C("iq_check")
-		s.Where(entsql.ExprP("CASE WHEN " + c + "->>'enabled' = 'true' THEN CASE WHEN " + c + "->>'last_run_status' = 'unknown' THEN 'unknown' ELSE COALESCE(" + c + "->>'status','unknown') END ELSE 'unknown' END = '" + status + "'"))
+		expr := "EXISTS (SELECT 1 FROM account_iq_targets t WHERE t.account_id=" + s.C("id") + " AND t.enabled AND "
+		switch status {
+		case "degraded":
+			expr += "t.verdict='degraded'"
+		case "smart":
+			expr += "t.verdict='smart' AND NOT EXISTS (SELECT 1 FROM account_iq_targets u WHERE u.account_id=t.account_id AND u.enabled AND u.verdict<>'smart')"
+		default:
+			expr += "NOT EXISTS (SELECT 1 FROM account_iq_targets u WHERE u.account_id=t.account_id AND u.enabled AND u.verdict IN ('smart','degraded'))"
+		}
+		s.Where(entsql.ExprP(expr + ")"))
 	})
 }
 

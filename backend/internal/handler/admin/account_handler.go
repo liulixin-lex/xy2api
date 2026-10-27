@@ -225,51 +225,51 @@ func NewAccountHandler(
 
 // CreateAccountRequest represents create account request
 type CreateAccountRequest struct {
-	IQCheck                 *domain.IQCheckSettings `json:"iq_check"`
-	Name                    string                  `json:"name" binding:"required"`
-	Notes                   *string                 `json:"notes"`
-	Platform                string                  `json:"platform" binding:"required"`
-	Type                    string                  `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock service_account"`
-	Credentials             map[string]any          `json:"credentials" binding:"required"`
-	Extra                   map[string]any          `json:"extra"`
-	ProxyID                 *int64                  `json:"proxy_id"`
-	Concurrency             int                     `json:"concurrency"`
-	Priority                int                     `json:"priority"`
-	RateMultiplier          *float64                `json:"rate_multiplier"`
-	LoadFactor              *int                    `json:"load_factor"`
-	GroupIDs                []int64                 `json:"group_ids"`
-	ExpiresAt               *int64                  `json:"expires_at"`
-	AutoPauseOnExpired      *bool                   `json:"auto_pause_on_expired"`
-	ProbeEnabled            *bool                   `json:"upstream_billing_probe_enabled"`
-	ConfirmMixedChannelRisk *bool                   `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	IQCheck                 *domain.IQTargetsPatch `json:"iq_check"`
+	Name                    string                 `json:"name" binding:"required"`
+	Notes                   *string                `json:"notes"`
+	Platform                string                 `json:"platform" binding:"required"`
+	Type                    string                 `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock service_account"`
+	Credentials             map[string]any         `json:"credentials" binding:"required"`
+	Extra                   map[string]any         `json:"extra"`
+	ProxyID                 *int64                 `json:"proxy_id"`
+	Concurrency             int                    `json:"concurrency"`
+	Priority                int                    `json:"priority"`
+	RateMultiplier          *float64               `json:"rate_multiplier"`
+	LoadFactor              *int                   `json:"load_factor"`
+	GroupIDs                []int64                `json:"group_ids"`
+	ExpiresAt               *int64                 `json:"expires_at"`
+	AutoPauseOnExpired      *bool                  `json:"auto_pause_on_expired"`
+	ProbeEnabled            *bool                  `json:"upstream_billing_probe_enabled"`
+	ConfirmMixedChannelRisk *bool                  `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
 // UpdateAccountRequest represents update account request
 // 使用指针类型来区分"未提供"和"设置为0"
 type UpdateAccountRequest struct {
-	IQCheck                 *domain.IQCheckSettings `json:"iq_check"`
-	Name                    string                  `json:"name"`
-	Notes                   *string                 `json:"notes"`
-	Type                    string                  `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
-	Credentials             map[string]any          `json:"credentials"`
-	Extra                   map[string]any          `json:"extra"`
-	ProxyID                 *int64                  `json:"proxy_id"`
-	Concurrency             *int                    `json:"concurrency"`
-	Priority                *int                    `json:"priority"`
-	RateMultiplier          *float64                `json:"rate_multiplier"`
-	LoadFactor              *int                    `json:"load_factor"`
-	Status                  string                  `json:"status" binding:"omitempty,oneof=active inactive error"`
-	GroupIDs                *[]int64                `json:"group_ids"`
-	ExpiresAt               *int64                  `json:"expires_at"`
-	AutoPauseOnExpired      *bool                   `json:"auto_pause_on_expired"`
-	ProbeEnabled            *bool                   `json:"upstream_billing_probe_enabled"`
-	RateSyncEnabled         *bool                   `json:"upstream_billing_rate_sync_enabled"`
-	ConfirmMixedChannelRisk *bool                   `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	IQCheck                 *domain.IQTargetsPatch `json:"iq_check"`
+	Name                    string                 `json:"name"`
+	Notes                   *string                `json:"notes"`
+	Type                    string                 `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
+	Credentials             map[string]any         `json:"credentials"`
+	Extra                   map[string]any         `json:"extra"`
+	ProxyID                 *int64                 `json:"proxy_id"`
+	Concurrency             *int                   `json:"concurrency"`
+	Priority                *int                   `json:"priority"`
+	RateMultiplier          *float64               `json:"rate_multiplier"`
+	LoadFactor              *int                   `json:"load_factor"`
+	Status                  string                 `json:"status" binding:"omitempty,oneof=active inactive error"`
+	GroupIDs                *[]int64               `json:"group_ids"`
+	ExpiresAt               *int64                 `json:"expires_at"`
+	AutoPauseOnExpired      *bool                  `json:"auto_pause_on_expired"`
+	ProbeEnabled            *bool                  `json:"upstream_billing_probe_enabled"`
+	RateSyncEnabled         *bool                  `json:"upstream_billing_rate_sync_enabled"`
+	ConfirmMixedChannelRisk *bool                  `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
 type BulkUpdateAccountsRequest struct {
-	IQCheck                 *domain.IQCheckSettings   `json:"iq_check"`
+	IQCheck                 *domain.IQTargetsPatch    `json:"iq_check"`
 	AccountIDs              []int64                   `json:"account_ids"`
 	Filters                 *BulkUpdateAccountFilters `json:"filters"`
 	Name                    string                    `json:"name"`
@@ -456,6 +456,18 @@ type AccountSchedulerGroupScore struct {
 const accountListGroupUngroupedQueryValue = "ungrouped"
 
 func (h *AccountHandler) accountResponseFromService(account *service.Account) *dto.Account {
+	if account != nil {
+		if repo, ok := h.adminService.(interface {
+			ListIQTargetSummaries(context.Context, []int64) (map[int64][]domain.IQTargetSummary, error)
+		}); ok {
+			if summaries, err := repo.ListIQTargetSummaries(context.Background(), []int64{account.ID}); err == nil {
+				account.IQTargets = summaries[account.ID]
+				if account.IQTargets == nil {
+					account.IQTargets = []domain.IQTargetSummary{}
+				}
+			}
+		}
+	}
 	out := dto.AccountFromService(account)
 	h.enrichCodexTicketStatus(account, out)
 	if h != nil && h.ollamaCloudUsage != nil && out != nil {
@@ -833,6 +845,22 @@ func (h *AccountHandler) List(c *gin.Context) {
 			}
 		}
 	}
+	if repo, ok := h.adminService.(interface {
+		ListIQTargetSummaries(context.Context, []int64) (map[int64][]domain.IQTargetSummary, error)
+	}); ok && len(accounts) > 0 {
+		ids := make([]int64, len(accounts))
+		for i := range accounts {
+			ids[i] = accounts[i].ID
+		}
+		if summaries, err := repo.ListIQTargetSummaries(c.Request.Context(), ids); err == nil {
+			for i := range accounts {
+				accounts[i].IQTargets = summaries[accounts[i].ID]
+				if accounts[i].IQTargets == nil {
+					accounts[i].IQTargets = []domain.IQTargetSummary{}
+				}
+			}
+		}
+	}
 
 	// Get current concurrency counts for all accounts
 	accountIDs := make([]int64, len(accounts))
@@ -1194,7 +1222,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 			ExpiresAt:             req.ExpiresAt,
 			AutoPauseOnExpired:    req.AutoPauseOnExpired,
 			ProbeEnabled:          req.ProbeEnabled,
-			IQCheck:               req.IQCheck,
+			IQTargets:             req.IQCheck,
 			SkipMixedChannelCheck: skipCheck,
 		})
 		if execErr != nil {
@@ -1327,7 +1355,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		ExpiresAt:             req.ExpiresAt,
 		AutoPauseOnExpired:    req.AutoPauseOnExpired,
 		ProbeEnabled:          req.ProbeEnabled,
-		IQCheck:               req.IQCheck,
+		IQTargets:             req.IQCheck,
 		RateSyncEnabled:       req.RateSyncEnabled,
 		SkipMixedChannelCheck: skipCheck,
 	})
@@ -2520,7 +2548,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		Credentials:           req.Credentials,
 		Extra:                 req.Extra,
 		ProbeEnabled:          req.ProbeEnabled,
-		IQCheck:               req.IQCheck,
+		IQTargets:             req.IQCheck,
 		SkipMixedChannelCheck: skipCheck,
 	})
 	if err != nil {

@@ -197,8 +197,6 @@ func shareAccountStateReason(a *Account, now time.Time) (sharesched.Reason, time
 		return sharesched.ReasonInactive, time.Time{}
 	case !a.Schedulable:
 		return sharesched.ReasonNotSchedulable, time.Time{}
-	case a.IQCheck.BlocksScheduling():
-		return sharesched.ReasonIQDegraded, time.Time{}
 	case a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt):
 		return sharesched.ReasonExpired, time.Time{}
 	case a.OverloadUntil != nil && now.Before(*a.OverloadUntil):
