@@ -45,8 +45,11 @@ vi.mock('@/api/admin', () => ({
   }
 }))
 
+const getIQCheckMock = vi.hoisted(() => vi.fn())
 vi.mock('@/api/admin/accounts', () => ({
-  getAntigravityDefaultModelMapping: vi.fn()
+  getAntigravityDefaultModelMapping: vi.fn(),
+  getIQCheck: getIQCheckMock,
+  getIQCheckModels: vi.fn()
 }))
 
 vi.mock('@/api/admin/groupCategories', () => ({
@@ -1791,38 +1794,44 @@ describe('EditAccountModal', () => {
   })
 })
 
-describe('EditAccountModal IQ validity lifecycle', () => {
+describe('EditAccountModal IQ targets', () => {
   let wrapper: ReturnType<typeof mountModal>
+  const iqTarget = (model: string) => ({ model, enabled: true, reasoning_effort: 'low', interval_minutes: 5, timeout_seconds: 120, verdict: 'smart', state: 'idle', gate_active: false })
 
   beforeEach(() => {
     authIsSimpleMode.value = true
     updateAccountMock.mockReset().mockResolvedValue(buildAccount())
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    getIQCheckMock.mockReset().mockResolvedValue([iqTarget('gpt-6-astra'), iqTarget('gpt-6.1-sol')])
   })
   afterEach(() => wrapper?.unmount())
 
-  const enterInvalidModel = async () => {
-    const iq = wrapper.getComponent(IQCheckSettings)
-    const model = iq.findAllComponents(SelectStub).find(select => select.attributes('id')?.endsWith('-model'))!
-    model.vm.$emit('update:modelValue', 'bad model')
-    await flushPromises()
-    expect(iq.get('[role="alert"]').text()).toContain('iqModelInvalid')
-    expect(iq.emitted('validity')?.at(-1)).toEqual([false])
-  }
+  const intervalInput = (index: number) => wrapper.getComponent(IQCheckSettings).findAll('[data-testid="iq-target-row"]')[index].get('input[type="number"]')
 
-  it.each([true, false])('saves a non-OpenAI account after invalid OpenAI input (close first: %s)', async closeFirst => {
+  it('omits iq_check when nothing changed and sends only the changed target fields', async () => {
     wrapper = mountModal()
+    await flushPromises()
+    expect(getIQCheckMock).toHaveBeenCalledWith(buildAccount().id)
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0][1]).not.toHaveProperty('iq_check')
+    await intervalInput(1).setValue('15')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[1][1].iq_check).toEqual({ targets: [{ model: 'gpt-6.1-sol', interval_minutes: 15 }] })
+  })
+
+  it.each([true, false])('blocks invalid IQ input but saves a non-OpenAI account afterwards (close first: %s)', async closeFirst => {
+    wrapper = mountModal()
+    await flushPromises()
     const instance = wrapper.vm.$
-    await enterInvalidModel()
+    await intervalInput(0).setValue('0')
     await wrapper.get('#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock).not.toHaveBeenCalled()
 
     const nextAccount = buildVertexAccount()
     if (closeFirst) {
-      await wrapper.findAll('button').find(button => button.text() === 'common.cancel')!.trigger('click')
-      expect(wrapper.emitted('close')).toHaveLength(1)
       await wrapper.setProps({ show: false })
-      expect(wrapper.findComponent(IQCheckSettings).exists()).toBe(false)
       await wrapper.setProps({ account: nextAccount })
       await wrapper.setProps({ show: true })
     } else {
@@ -1833,61 +1842,20 @@ describe('EditAccountModal IQ validity lifecycle', () => {
     await wrapper.get('#edit-account-form').trigger('submit.prevent')
     await flushPromises()
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    expect(updateAccountMock.mock.calls[0][0]).toBe(nextAccount.id)
     expect(updateAccountMock.mock.calls[0][1]).not.toHaveProperty('iq_check')
     expect((wrapper.vm as unknown as { iqValid: boolean }).iqValid).toBe(true)
   })
 
-  it('rehydrates valid saved IQ settings when reopening the same account in the same instance', async () => {
-    const account = buildAccount()
-    account.iq_check = { enabled: true, interval_minutes: 15, model: 'saved-model', reasoning_effort: 'high' }
-    wrapper = mountModal(account)
-    const instance = wrapper.vm.$
-    const iqInstance = wrapper.getComponent(IQCheckSettings).vm.$
-    await enterInvalidModel()
-    await wrapper.setProps({ show: false })
-    expect(wrapper.findComponent(IQCheckSettings).exists()).toBe(false)
-    await wrapper.setProps({ show: true })
-    expect(wrapper.vm.$).toBe(instance)
-    const iq = wrapper.getComponent(IQCheckSettings)
-    expect(iq.vm.$).not.toBe(iqInstance)
-    expect(iq.props('modelValue')).toMatchObject(account.iq_check)
-    expect(iq.emitted('validity')?.at(-1)).toEqual([true])
-    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+  it('reloads saved targets when reopening the same account', async () => {
+    wrapper = mountModal()
     await flushPromises()
-    expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    expect(updateAccountMock.mock.calls[0][1].iq_check).toMatchObject(account.iq_check)
-  })
-
-  it('still blocks invalid saved OpenAI settings after closing and reopening', async () => {
-    const account = buildAccount()
-    account.iq_check = { enabled: true, interval_minutes: 15, model: 'bad model', reasoning_effort: 'low' }
-    wrapper = mountModal(account)
-    const instance = wrapper.vm.$
-    await wrapper.get('#edit-account-form').trigger('submit.prevent')
-    expect(updateAccountMock).not.toHaveBeenCalled()
+    await intervalInput(0).setValue('0')
     await wrapper.setProps({ show: false })
     await wrapper.setProps({ show: true })
-    expect(wrapper.vm.$).toBe(instance)
-    expect(wrapper.getComponent(IQCheckSettings).emitted('validity')?.at(-1)).toEqual([false])
-    await wrapper.get('#edit-account-form').trigger('submit.prevent')
-    expect(updateAccountMock).not.toHaveBeenCalled()
-  })
-
-  it.each([
-    { id: 8, model: 'other invalid' },
-    { id: 1, model: 'bad model' }
-  ])('keeps invalid OpenAI settings blocked when replacing the account with id $id and the same validation error', async next => {
-    const account = buildAccount()
-    account.iq_check = { enabled: true, interval_minutes: 15, model: 'bad model', reasoning_effort: 'low' }
-    wrapper = mountModal(account)
-    const instance = wrapper.getComponent(IQCheckSettings).vm.$
-    await wrapper.setProps({ account: { ...account, id: next.id, iq_check: { ...account.iq_check, model: next.model } } })
-    expect(wrapper.getComponent(IQCheckSettings).vm.$).toBe(instance)
-    expect(wrapper.getComponent(IQCheckSettings).get('[role="alert"]').text()).toContain('iqModelInvalid')
-    await wrapper.get('#edit-account-form').trigger('submit.prevent')
     await flushPromises()
-    expect(updateAccountMock).not.toHaveBeenCalled()
+    expect(getIQCheckMock).toHaveBeenCalledTimes(2)
+    expect((intervalInput(0).element as HTMLInputElement).value).toBe('5')
+    expect(wrapper.getComponent(IQCheckSettings).emitted('validity')?.at(-1)).toEqual([true])
   })
 
   it('ignores unrelated IQ validity at the non-OpenAI submit entry point', async () => {

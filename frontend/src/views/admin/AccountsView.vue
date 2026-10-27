@@ -181,6 +181,8 @@
           @reset-status="handleBulkResetStatus"
           @refresh-token="handleBulkRefreshToken"
           @probe-upstream-billing="handleBulkProbeUpstreamBilling"
+          :iq-busy="runningIQBatch"
+          @run-iq-check="handleBulkRunIQCheck"
           @edit-selected="openBulkEditSelected"
           @edit-filtered="openBulkEditFiltered"
           @clear="clearSelection"
@@ -299,7 +301,7 @@
             </div>
           </template>
           <template #cell-iq_check="{ row }">
-            <IQCheckCell :account="row" :busy="togglingIQCheck.has(row.id)" @toggle="handleToggleIQCheck(row)" @records="iqRecordsAccount = row" />
+            <IQCheckCell :account="row" :busy="togglingIQCheck.has(row.id)" @toggle="handleToggleIQCheck(row, $event)" @records="iqRecordsAccount = row" />
           </template>
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
@@ -534,6 +536,8 @@ import AccountStreamOnlyBadge from '@/components/admin/account/AccountStreamOnly
 import type { AccountRecentHealth as AccountRecentHealthStats } from '@/api/admin/accounts'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import IQCheckCell from '@/components/account/IQCheckCell.vue'
+import { IQ_BUILTIN_MODELS, iqAccountVerdict, iqRunSummary } from '@/components/admin/account/iqCheckPresentation'
+import { IQ_RUN_BATCH_LIMIT } from '@/api/admin/accounts'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
@@ -554,6 +558,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
+import type { IQRunAccount, IQRunTarget, IQTargetSummary } from '@/types'
 import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 
 const IQCheckResultsModal = defineLazyComponent(() => import('@/components/admin/account/IQCheckResultsModal.vue'))
@@ -573,7 +578,7 @@ const AccountStatsModal = defineLazyComponent(() => import('@/components/admin/a
 const ScheduledTestsPanel = defineLazyComponent(() => import('@/components/admin/account/ScheduledTestsPanel.vue'))
 const ErrorPassthroughRulesModal = defineLazyComponent(() => import('@/components/admin/ErrorPassthroughRulesModal.vue'))
 const TLSFingerprintProfilesModal = defineLazyComponent(() => import('@/components/admin/TLSFingerprintProfilesModal.vue'))
-const { t } = useI18n()
+const { t, te } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const proxies = ref<AccountProxy[]>([])
@@ -673,16 +678,34 @@ const confirmedSchedulingUpdates = new Map<number, { version: number; schedulabl
 const pendingSchedulable = new Map<number, boolean>()
 const togglingIQCheck = ref(new Set<number>())
 const iqRecordsAccount = ref<Account | null>(null)
-const handleIQSummaryUpdated = (state: NonNullable<Account['iq_check']>) => {
+const handleIQSummaryUpdated = (targets: IQTargetSummary[]) => {
   const account = iqRecordsAccount.value
   if (!account) return
-  iqRecordsAccount.value = { ...account, iq_check: state }
+  iqRecordsAccount.value = { ...account, iq_targets: targets }
   const current = accounts.value.find(item => item.id === account.id)
-  if (current) patchAccountInList({ ...current, iq_check: state })
+  if (current) patchAccountInList({ ...current, iq_targets: targets })
+}
+const reportIQRun = (results: IQRunTarget[] | IQRunAccount[]) => {
+  const { queued, rejected, reasons } = iqRunSummary(results)
+  const reasonText = reasons.map(reason => te(`admin.accounts.iqReasons.${reason}`) ? t(`admin.accounts.iqReasons.${reason}`) : reason).join(', ')
+  if (rejected) appStore.showError(t('admin.accounts.iqRunPartial', { queued, rejected, reasons: reasonText }))
+  else appStore.showSuccess(t('admin.accounts.iqQueued', { count: queued }))
 }
 const handleRunIQCheck = async (account: Account) => {
-  try { const result = await adminAPI.accounts.runIQCheck(account.id); appStore.showSuccess(result?.next_eligible_at ? t('admin.accounts.iqQueuedAt', { time: formatDateTime(result.next_eligible_at) }) : t('admin.accounts.iqQueued')); await refreshAccountsIncrementally() }
+  try { reportIQRun(await adminAPI.accounts.runIQCheck(account.id)); await refreshAccountsIncrementally() }
   catch { appStore.showError(t('admin.accounts.iqFailed')) }
+}
+const runningIQBatch = ref(false)
+const handleBulkRunIQCheck = async () => {
+  // Selection can span pages; the server rejects non-OpenAI accounts per target.
+  const ids = [...selIds.value]
+  if (ids.length > IQ_RUN_BATCH_LIMIT) { appStore.showError(t('admin.accounts.iqBatchLimit', { limit: IQ_RUN_BATCH_LIMIT })); return }
+  runningIQBatch.value = true
+  try {
+    reportIQRun(await adminAPI.accounts.runIQCheckBatch(ids))
+    await refreshAccountsIncrementally()
+  } catch { appStore.showError(t('admin.accounts.iqFailed')) }
+  finally { runningIQBatch.value = false }
 }
 const menu = reactive<{show:boolean, acc:Account|null, anchorRect:DOMRect|null}>({ show: false, acc: null, anchorRect: null })
 const exportingData = ref(false)
@@ -2301,7 +2324,7 @@ const accountMatchesCurrentFilters = (account: Account) => {
   const filters = buildAccountQueryFilters()
   if (filters.platform && account.platform !== filters.platform) return false
   if (filters.type && account.type !== filters.type) return false
-  if (filters.iq_status && (account.platform !== 'openai' || (account.iq_check?.enabled ? account.iq_check.status : 'unknown') !== filters.iq_status)) return false
+  if (filters.iq_status && (account.platform !== 'openai' || iqAccountVerdict(account.iq_targets) !== filters.iq_status)) return false
   if (filters.status) {
     const now = Date.now()
     const rateLimitResetAt = account.rate_limit_reset_at ? new Date(account.rate_limit_reset_at).getTime() : Number.NaN
@@ -2657,13 +2680,13 @@ const handleToggleSchedulable = async (a: Account) => {
     schedulingMutationVersion++
   }
 }
-const handleToggleIQCheck = async (a: Account) => {
+// The list switch turns both built-in targets on or off; custom targets keep their own setting.
+const handleToggleIQCheck = async (a: Account, enabled: boolean) => {
   if (togglingIQCheck.value.has(a.id)) return
   togglingIQCheck.value.add(a.id)
   try {
-    const current = a.iq_check
-    const updated = await adminAPI.accounts.setIQCheck(a.id, { enabled: !current?.enabled, interval_minutes: current?.interval_minutes || 15 })
-    patchAccountInList({ ...a, iq_check: updated })
+    const targets = await adminAPI.accounts.setIQCheck(a.id, { targets: IQ_BUILTIN_MODELS.map(model => ({ model, enabled })) })
+    patchAccountInList({ ...a, iq_targets: targets })
     enterAutoRefreshSilentWindow()
   } catch (error) {
     console.error('Failed to toggle IQ check:', error)

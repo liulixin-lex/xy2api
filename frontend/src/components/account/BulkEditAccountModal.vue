@@ -23,11 +23,7 @@
 
       <div v-if="targetSelectedPlatforms.length === 1 && targetSelectedPlatforms[0] === 'openai'">
         <label class="flex items-center gap-2 text-sm"><input v-model="editIQCheck" type="checkbox" class="rounded text-blue-500" />{{ t('admin.accounts.iqBulkEdit') }}</label>
-        <div v-if="editIQCheck" class="mt-3 space-y-3">
-          <p class="input-hint">{{ t('admin.accounts.iqBulkFieldsHint') }}</p>
-          <div class="flex flex-wrap gap-3"><label v-for="field in iqEditableFields" :key="field.key" class="flex items-center gap-2 text-sm"><input v-model="iqFields" type="checkbox" :value="field.key" class="rounded text-blue-500" />{{ t(field.label) }}</label></div>
-          <IQCheckSettings v-model="iqSettings" :fields="iqFields" @validity="iqValid = $event" />
-        </div>
+        <IQCheckSettings v-if="editIQCheck" bulk class="mt-3" @patch="iqPatch = $event" @validity="iqValid = $event" />
       </div>
       <!-- Mixed platform warning -->
       <div v-if="isMixedPlatform" class="rounded-lg bg-amber-50 p-4 dark:bg-amber-900/20">
@@ -1484,7 +1480,7 @@
 
 <script setup lang="ts">
 import IQCheckSettings from './IQCheckSettings.vue'
-import type { IQCheckSettings as IQSettings } from '@/types'
+import type { IQTargetsPatch } from '@/types'
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -1565,14 +1561,8 @@ const allTargetsGrok = computed(
     targetSelectedPlatforms.value.every((p) => p === 'grok')
 )
 const editIQCheck = ref(false)
-const iqSettings = ref<IQSettings>({ enabled: false, interval_minutes: 15, model: 'gpt-6-astra', reasoning_effort: 'low', output_mode: 'compat', timeout_seconds: 120, })
+const iqPatch = ref<IQTargetsPatch | null>(null)
 const iqValid = ref(true)
-const iqFields = ref<(keyof IQSettings)[]>([])
-const iqEditableFields: { key: keyof IQSettings; label: string }[] = [
- { key: 'timeout_seconds', label: 'admin.accounts.iqTimeout' },
-  { key: 'enabled', label: 'admin.accounts.iqCheck' }, { key: 'interval_minutes', label: 'admin.accounts.iqInterval' },
-  { key: 'model', label: 'admin.accounts.iqModel' }, { key: 'reasoning_effort', label: 'admin.accounts.iqEffort' }, { key: 'output_mode', label: 'admin.accounts.iqOutputMode' }
-]
 const isMixedPlatform = computed(() => targetSelectedPlatforms.value.length > 1)
 
 const allOpenAIPassthroughCapable = computed(() => {
@@ -2090,7 +2080,7 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     )
   }
 
-  if (editIQCheck.value && iqFields.value.length) updates.iq_check = Object.fromEntries(iqFields.value.map(key => [key, iqSettings.value[key]]))
+  if (editIQCheck.value && iqPatch.value) updates.iq_check = iqPatch.value
 
   if (enableUpstreamBillingAutoProbe.value) {
     updates.upstream_billing_probe_enabled = upstreamBillingAutoProbeMode.value === 'enabled'
@@ -2218,7 +2208,7 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
 }
 
 const handleSubmit = async () => {
-  if (editIQCheck.value && (!iqValid.value || !iqFields.value.length)) { appStore.showError(t('admin.accounts.iqSelectFields')); return }
+  if (editIQCheck.value && (!iqValid.value || !iqPatch.value)) { appStore.showError(t('admin.accounts.iqSelectFields')); return }
   if (targetMode.value === 'selected' && props.accountIds.length === 0) {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
     return
@@ -2397,8 +2387,7 @@ watch(
       enableOpenAIWSMode.value = false
       enableOpenAIAPIKeyWSMode.value = false
       editIQCheck.value = false
-      iqSettings.value = { enabled: false, interval_minutes: 15, model: 'gpt-6-astra', reasoning_effort: 'low', output_mode: 'compat', timeout_seconds: 120, }
-      iqFields.value = []
+      iqPatch.value = null
       enableUpstreamBillingAutoProbe.value = false
       enableCodexCLIOnly.value = false
       enableCodexCLIOnlyAppServer.value = false
