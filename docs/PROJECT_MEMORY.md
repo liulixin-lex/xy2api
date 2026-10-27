@@ -6,6 +6,12 @@
 
 ## 当前交接状态
 
+### 创建密钥弹窗加宽与专属标识：PR #150 待合并（2026-10-27 更新）
+
+- 用户端“API 密钥”的创建/编辑弹窗改为 `wide`，分组下拉与输入框同宽（`Select` 新增可选 `matchTriggerWidth`），长说明换行；专属分组在开启“向用户显示专属标识”时带紫色“专属”标签（`GroupOptionItem` 新增可选 `exclusive`）。只改前端。
+- [PR #150](https://github.com/liulixin-lex/xy2api/pull/150) 待 CI 与另一位作者合并；发版、部署另行授权。
+- 已知：main 上 `resilienceLocale.spec.ts` 有 2 项失败（0.4.9 文案已含 `codex.rate_limits`，旧断言要求不含 `codex.`），不在 CI 关键集里，未修。
+
 ### 网关韧性复盘：随 0.4.9 发布（2026-10-27 更新）
 
 - **背景**：0.4.9（`ed2e429f6`）提交后，用户要求复盘原有韧性策略，看哪些需要同步调整、哪些多余。Claude 与 Codex 独立分析并互审，astra 两轮找漏洞后定稿为 v3。用户批准，并选定：第二批同进 0.4.9；非 OpenAI 本轮就做模型级 breaker；过渡开关在上线 7 天后再删。
@@ -228,7 +234,8 @@
 
 - **请求**（用户 2026-10-27）：用户端“API 密钥”创建密钥选 OpenAI 时，分组下拉比弹窗宽。把弹窗加宽，下拉与之同宽，长说明换行；专属分组开启“向用户显示专属标识”时，选分组要带专属标识，关闭时不带。
 - **分支**：`fix/key-dialog-width-exclusive-badge-20261027`（工作树 `xy2api-wt/key-dialog`，自 main `d25bcd8dc`）。只改前端：`/groups/available` 已返回 `is_exclusive` 与 `show_exclusive_badge`。
-- **下一步**：门禁、本机目测、开 PR 后停下。
+- **结果**：提交 `90d589190`，[PR #150](https://github.com/liulixin-lex/xy2api/pull/150)。钩子登记 `required_literals` 8 条，`GROUP_SYSTEM_PROMPTS.md` 补用户端说明。本机实测（127.0.0.1，已清理）：弹窗 896px，输入框与下拉均 846px；只有开关打开的专属分组带标签，行内切换浮层相同。
+- **下一步**：等 CI，停在 PR。
 
 ### 20261027-resilience-review — 网关韧性功能复盘（已提交 `7140cda93`，PR #146；2026-10-27）
 
@@ -1462,3 +1469,13 @@ pnpm --dir frontend run build
 - 请求/目标：v0.4.9 已发布，用户要求更新现行文档中仍写着“0.4.9（未发布）”的标注。
 - 修改：`docs/GATEWAY_RESILIENCE.md`、`docs/account-scheduling.md`、`docs/USAGE_METRICS.md` 只改版本标注，行为描述不变；韧性文档引言改为按 0.4.9 的行为描述。
 - 验证：文档一致性通过；全仓库再无 0.4.8/0.4.9 的“未发布”残留。未部署生产。
+
+### 2026-10-27T14:30Z — 20261027-key-dialog-exclusive — PR #150 已开
+
+- 请求/目标：创建密钥弹窗加宽，分组下拉同宽、长说明换行；按“向用户显示专属标识”在选分组时显示专属标签。
+- 开始状态：main `d25bcd8dc`，工作树 `xy2api-wt/key-dialog`。
+- 完成操作：`Select` 加 `matchTriggerWidth`，`GroupOptionItem` 加 `exclusive`（默认关，管理端不变），KeysView 弹窗改 `wide` 并接入两处；policy 登记，文档补充。
+- 修改文件：`Select.vue`、`GroupOptionItem.vue`、`KeysView.vue` 及三个 spec、`policy.json`、`GROUP_SYSTEM_PROMPTS.md`。
+- 验证：lint、typecheck、i18n、build 通过；相关 spec 41 项通过；全量 vitest 3288/3290（2 项为 main 既有的 `resilienceLocale.spec.ts`）；`sync.py audit`、scheduler-diff、文档一致性、tools 41 项通过；本机无头 Chrome 实测通过。
+- 卡点/风险：无。
+- 下一步：等 CI 与合并；发版、部署另行授权。
