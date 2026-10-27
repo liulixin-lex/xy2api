@@ -54,7 +54,9 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/account/__tests__/AccountTableFilters.spec.ts \
 	src/views/admin/__tests__/GroupsView.columnSettings.spec.ts \
 	src/views/admin/__tests__/GroupsView.categories.spec.ts \
-	src/views/admin/__tests__/AccountsView.groupCategories.spec.ts
+	src/views/admin/__tests__/AccountsView.groupCategories.spec.ts \
+	src/components/common/__tests__/Select.spec.ts \
+	src/components/common/__tests__/GroupOptionItem.spec.ts
 
 # 一键编译前后端
 build: build-backend build-frontend

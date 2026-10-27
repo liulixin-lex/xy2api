@@ -50,12 +50,25 @@ describe('GroupOptionItem exclusive tag', () => {
   })
 
   it('is hidden by default', () => {
-    expect(mountItem().find('[data-test="group-option-exclusive-tag"]').exists()).toBe(false)
+    expect(mountItem().find('[data-test="exclusive-group-tag"]').exists()).toBe(false)
   })
 
   it('shows the user-facing exclusive label when requested', () => {
-    const tag = mountItem({ exclusive: true }).get('[data-test="group-option-exclusive-tag"]')
+    const tag = mountItem({ exclusive: true }).get('[data-test="exclusive-group-tag"]')
     expect(tag.text()).toBe('availableChannels.exclusive')
     expect(tag.attributes('title')).toBe('availableChannels.exclusiveTooltip')
+  })
+})
+
+describe('GroupOptionItem description clamp', () => {
+  const description = 'A long group description'
+  const descriptionClasses = (props: Record<string, unknown>) => mount(GroupOptionItem, {
+    props: { name: 'Example group', platform: 'openai', description, ...props },
+    global: { stubs: { GroupBadge: true } },
+  }).findAll('span').find((element) => element.text() === description)?.classes()
+
+  it('can show the whole description instead of three lines', () => {
+    expect(descriptionClasses({ clampDescription: false })).not.toContain('line-clamp-3')
+    expect(descriptionClasses({ clampDescription: false })).toContain('whitespace-pre-line')
   })
 })

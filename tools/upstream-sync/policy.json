@@ -2054,7 +2054,7 @@
     },
     {
       "path": "frontend/src/components/common/GroupOptionItem.vue",
-      "value": "data-test=\"group-option-exclusive-tag\""
+      "value": "<ExclusiveGroupTag v-if=\"exclusive\" />"
     },
     {
       "path": "frontend/src/components/common/GroupOptionItem.vue",
@@ -2075,6 +2075,22 @@
     {
       "path": "frontend/src/views/user/KeysView.vue",
       "value": ":exclusive=\"(option as unknown as GroupOption).exclusive\""
+    },
+    {
+      "path": "frontend/src/components/common/GroupOptionItem.vue",
+      "value": ":class=\"clampDescription && 'line-clamp-3'\""
+    },
+    {
+      "path": "frontend/src/views/user/KeysView.vue",
+      "value": "width=\"wide\""
+    },
+    {
+      "path": "frontend/src/views/user/KeysView.vue",
+      "value": ":clamp-description=\"false\""
+    },
+    {
+      "path": "frontend/src/views/user/KeysView.vue",
+      "value": "<ExclusiveGroupTag v-if=\"(option as unknown as GroupOption).exclusive\" />"
     }
   ],
   "forbidden_module_paths": [
