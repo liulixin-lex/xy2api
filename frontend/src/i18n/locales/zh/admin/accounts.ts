@@ -372,6 +372,7 @@ export default {
         start_unavailable: "任务暂未启动",
         account_busy: "账号繁忙",
         concurrency_unavailable: "并发服务暂不可用",
+        outbound_model_snapshot_failed: "出站模型记录失败，稍后重试",
         account_quota: "账号额度不足",
         account_cooldown: "账号健康冷却",
         account_expired: "账号过期",

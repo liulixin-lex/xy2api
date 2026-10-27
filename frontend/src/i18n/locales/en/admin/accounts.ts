@@ -374,6 +374,7 @@ export default {
         start_unavailable: "Start unavailable",
         account_busy: "Account busy",
         concurrency_unavailable: "Concurrency unavailable",
+        outbound_model_snapshot_failed: "Failed to record outbound model; retrying later",
         account_quota: "Account quota exhausted",
         account_cooldown: "Account cooldown",
         account_expired: "Account expired",
