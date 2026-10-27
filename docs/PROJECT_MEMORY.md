@@ -6,7 +6,7 @@
 
 ## 当前交接状态
 
-### 网关韧性复盘：已提交 `7140cda93`，PR #146 待 CI 与合并授权（2026-10-27 更新）
+### 网关韧性复盘：PR #146 已合入 main `c6cfcfe2f`，0.4.9 版本准备中（2026-10-27 更新）
 
 - **背景**：0.4.9（`ed2e429f6`）提交后，用户要求复盘原有韧性策略，看哪些需要同步调整、哪些多余。Claude 与 Codex 独立分析并互审，astra 两轮找漏洞后定稿为 v3。用户批准，并选定：第二批同进 0.4.9；非 OpenAI 本轮就做模型级 breaker；过渡开关在上线 7 天后再删。
 - **结论**：没有需要整块删除的功能。问题在覆盖不均：生产上 Gemini 普通 5xx 从不冷却，一个坏号 27 小时失败 10,886 次；Gemini 也没有尝试截止。另一类是 0.4.9 带来的联动缺口。
@@ -23,10 +23,11 @@
 - **审查**：astra 审查了 C 路（3 项应改）、D 路（6 项应改）及复核（1 项应改），全部修复；D 路还按总设计师要求收窄了同号重试的跳过范围，并修正了 OpenAI 网关平台的范围回归。
 - **验证**（本机，`7140cda93`）：`go build ./...`；四种 tag 的 vet；gofmt；service、handler、resilience、server、repository 全量 unit；`ci_gate.py` 446 项（`-race`、0 跳过）；`sync.py audit` 与 scheduler-diff；文档一致性；tools 单测；diff-check。前端 vue-tsc、i18n eslint 与相关 61 项测试由文档 agent 运行，通过。
 - **未完成**：
-  1. 等 PR #146 的 CI（含 golangci-lint）通过；
-  2. 合并、发版、部署各自待授权；
+  1. PR #146 的 CI 全绿（头提交 `60b6fdf87`）：golangci-lint 的两处问题已修复；push 触发的 test 因既有计时测试不稳定，重跑两次后通过；2026-10-27 用户授权“合并并发版”，以合并提交合入 main `c6cfcfe2f`；
+  2. 0.4.9 发版进行中（见“进行中的工作”）；部署未授权；
   3. 上线 7 天后复核过渡开关与 fast_fail。
 - **卡点与风险**：
+  - CI 上偶发失败的既有测试：`TestCompatPreludeCommentHeartbeatStillAllowsFailover/enabled` 和 `TestCompatHeartbeatCommitsOnlyStableStreamHeaders/...messages=enabled`。main 在 2026-10-26（0.4.8 发布时）已失败过一次，本机 `-race` 加满 CPU 负载反复运行均未复现。`ci_gate.py` 只打印汇总、不输出断言，原因未定位；两者的心跳 1 秒与首输出截止 2 秒只差 1 秒，是可疑点；
   - 已管理端保存过设置的部署，Gemini 截止仍为 90 秒（库里存有显式值）；
   - 非 OpenAI breaker 是进程内状态，多实例各自计数；
   - 迁移的空位预检仍有抢槽竞态。
@@ -222,6 +223,11 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
+
+### 20261027-release049 — XY2API 0.4.9 版本准备
+
+- 分支 release/0.4.9-20261027 基于 main `c6cfcfe2f`（#146：OpenAI 首字分级、慢失败冷却、韧性复盘）；只改 VERSION、UPSTREAM_BASE 产品版本与本记忆，兼容基线 0.2.15 不变。
+- 下一步：保护检查通过后合入 main，在合并提交上打 annotated v0.4.9，核验 Release 附件、GHCR 镜像与版本号。不部署生产。
 
 ### 20261027-resilience-review — 网关韧性功能复盘（已提交 `7140cda93`，PR #146；2026-10-27）
 
@@ -1436,3 +1442,10 @@ pnpm --dir frontend run build
 - **完成操作**：补检 `resilience_gemini_attempt.go` 里 `bytes.Buffer.WriteString` 的返回值（errcheck）；删除已无调用方的 `clearOpenAIAccountModelTransientState`（unused）。
 - **验证**：本机按 CI 锁定的 golangci-lint v2.14.0 全量运行，0 issues；`go build ./...`、service unit vet、gofmt、文档一致性通过。
 - **下一步**：等 CI 复跑；合并、发版、部署各自待授权。
+
+### 2026-10-27 — 20261027-release049 — 0.4.9 版本准备
+
+- 请求/目标：用户授权“合并并发版”：合入 PR #146 并发布 0.4.9。
+- 完成：#146 以合并提交合入 main `c6cfcfe2f`。
+- 修改：程序 VERSION 与 provenance 产品版本 0.4.8→0.4.9，兼容基线 0.2.15 不变；登记本任务。
+- 验证与下一步：本地文档、audit、scheduler-diff、工具单测后提交版本 PR；全部保护检查通过后合入并打 annotated tag，触发 Release，核验产物。不操作生产。
