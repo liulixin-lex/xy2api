@@ -176,7 +176,14 @@ func TestFirstOutputTimeoutTiers(t *testing.T) {
 
 	// Anthropic and Gemini first events.
 	require.Equal(t, 90*time.Second, resilienceFirstEventTimeout(budgetTestCtx(resilience.KindText), 1, PlatformAnthropic))
-	require.Equal(t, 90*time.Second, resilienceFirstEventTimeout(budgetTestCtx(resilience.KindText), 1, PlatformGemini))
+	require.Equal(t, 60*time.Second, resilienceFirstEventTimeout(budgetTestCtx(resilience.KindText), 1, PlatformGemini))
+	require.Equal(t, 90*time.Second, resilienceFirstEventTimeout(budgetTestCtx(resilience.KindText), 1, PlatformAntigravity))
+	custom := *resilience.Current()
+	custom.Budget.AnthropicFirstEventTimeoutSeconds = 75
+	custom.Budget.GeminiFirstEventTimeoutSeconds = 40
+	resilience.Publish(custom)
+	require.Equal(t, 75*time.Second, resilienceFirstEventTimeout(budgetTestCtx(resilience.KindText), 1, PlatformAntigravity))
+	require.Equal(t, 40*time.Second, resilienceFirstEventTimeout(budgetTestCtx(resilience.KindText), 1, PlatformGemini))
 	require.Zero(t, resilienceFirstEventTimeout(context.Background(), 1, PlatformAnthropic))
 	require.Zero(t, resilienceFirstEventTimeout(budgetTestCtx(resilience.KindImage), 1, PlatformAnthropic))
 }

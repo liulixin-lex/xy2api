@@ -268,7 +268,7 @@ func (s *GeminiMessagesCompatService) isAccountUsableForRequestWithPrecheck(
 ) bool {
 	// 检查模型调度能力
 	// Check model scheduling capability
-	if !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
+	if !account.IsSchedulableForModelWithContext(ctx, requestedModel) || resilienceModelBreakerBlocks(ctx, account, requestedModel) {
 		return false
 	}
 
@@ -617,7 +617,7 @@ func (s *GeminiMessagesCompatService) SelectAccountForAIStudioEndpoints(ctx cont
 	return s.hydrateSelectedAccount(ctx, selected)
 }
 
-func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
+func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (_ *ForwardResult, retErr error) {
 	beginUpstreamResponseModelObservation(c)
 	beginGeminiImageOutputObservation(c)
 	startTime := time.Now()
@@ -802,11 +802,17 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		return nil, fmt.Errorf("unsupported account type: %s", account.Type)
 	}
 
+	attemptGuard := newGeminiAttempt(ctx, account, mappedModel, "generateContent", geminiReq, req.Stream, PreOutputProtocolAnthropic, startTime)
+	defer func() {
+		retErr = attemptGuard.finish(c, s.rateLimitService, account, retErr)
+		attemptGuard.close()
+	}()
+
 	var resp *http.Response
 	signatureRetryStage := 0
 	inPlaceRetries := 0
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
-		upstreamReq, idHeader, err := buildReq(ctx)
+		upstreamReq, idHeader, err := buildReq(attemptGuard.ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil, err
@@ -819,6 +825,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		}
 		requestIDHeader = idHeader
 
+		attemptGuard.headerWait()
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
 			return nil, s.handleUpstreamTransportError(ctx, c, account, err)
@@ -826,6 +833,8 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 
 		// Special-case: signature/thought_signature validation errors are not transient, but may be fixed by
 		// downgrading Claude thinking/tool history to plain text (conservative two-stage retry).
+		attemptGuard.wrap(resp)
+
 		if resp.StatusCode == http.StatusBadRequest && signatureRetryStage < 2 {
 			respBody := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
@@ -880,8 +889,8 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: detected signature-related 400, retrying with downgraded Claude blocks (%s)", account.ID, stageName)
 					geminiReq = retryGeminiReq
 					// Consume one retry budget attempt and continue with the updated request payload.
-					if !sleepGeminiBackoffCtx(ctx, 1) {
-						return nil, ctx.Err()
+					if !sleepGeminiBackoffCtx(attemptGuard.ctx, 1) {
+						return nil, context.Cause(attemptGuard.ctx)
 					}
 					continue
 				}
@@ -920,7 +929,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				// Mark as rate-limited early so concurrent requests avoid this account.
 				s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 			}
-			if attempt < geminiMaxRetries && geminiInPlaceRetryAllowed(ctx, &inPlaceRetries) {
+			if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(ctx, &inPlaceRetries) {
 				upstreamReqID := resp.Header.Get(requestIDHeader)
 				if upstreamReqID == "" {
 					upstreamReqID = resp.Header.Get("x-goog-request-id")
@@ -949,8 +958,8 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				})
 
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
-				if !sleepGeminiBackoffCtx(ctx, attempt) {
-					return nil, ctx.Err()
+				if !sleepGeminiBackoffCtx(attemptGuard.ctx, attempt) {
+					return nil, context.Cause(attemptGuard.ctx)
 				}
 				continue
 			}
@@ -1113,7 +1122,13 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	} else {
 		if useUpstreamStream {
 			collected, usageObj, _, err := collectGeminiSSEObserved(resp.Body, true, nil)
+			err = completeGeminiResponse(resp, err)
 			if err != nil {
+				classified := nonstreamReadError(ctx, resp, err)
+				var failover *UpstreamFailoverError
+				if errors.As(classified, &failover) || ctx.Err() != nil {
+					return nil, classified
+				}
 				return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Failed to read upstream stream")
 			}
 			collectedBytes, _ := json.Marshal(collected)
@@ -1163,7 +1178,7 @@ func isGeminiSignatureRelatedError(respBody []byte) bool {
 	return strings.Contains(msg, "thought_signature") || strings.Contains(msg, "signature")
 }
 
-func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (*ForwardResult, error) {
+func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (_ *ForwardResult, retErr error) {
 	beginUpstreamResponseModelObservation(c)
 	beginGeminiImageOutputObservation(c)
 	startTime := time.Now()
@@ -1351,10 +1366,16 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		return nil, s.writeGoogleError(c, http.StatusBadGateway, "Unsupported account type: "+account.Type)
 	}
 
+	attemptGuard := newGeminiAttempt(ctx, account, mappedModel, action, body, stream, "gemini", startTime)
+	defer func() {
+		retErr = attemptGuard.finish(c, s.rateLimitService, account, retErr)
+		attemptGuard.close()
+	}()
+
 	var resp *http.Response
 	inPlaceRetries := 0
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
-		upstreamReq, idHeader, err := buildReq(ctx)
+		upstreamReq, idHeader, err := buildReq(attemptGuard.ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil, err
@@ -1367,6 +1388,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		}
 		requestIDHeader = idHeader
 
+		attemptGuard.headerWait()
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
 			transportErr := s.handleUpstreamTransportError(ctx, c, account, err)
@@ -1387,6 +1409,8 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			}
 			return nil, transportErr
 		}
+
+		attemptGuard.wrap(resp)
 
 		// 错误策略优先：匹配则跳过重试直接处理。
 		if matched, rebuilt := s.checkErrorPolicyInLoop(ctx, account, resp, mappedModel); matched {
@@ -1411,7 +1435,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			if resp.StatusCode == 429 {
 				s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 			}
-			if attempt < geminiMaxRetries && geminiInPlaceRetryAllowed(ctx, &inPlaceRetries) {
+			if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(ctx, &inPlaceRetries) {
 				upstreamReqID := resp.Header.Get(requestIDHeader)
 				if upstreamReqID == "" {
 					upstreamReqID = resp.Header.Get("x-goog-request-id")
@@ -1440,8 +1464,8 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				})
 
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
-				if !sleepGeminiBackoffCtx(ctx, attempt) {
-					return nil, ctx.Err()
+				if !sleepGeminiBackoffCtx(attemptGuard.ctx, attempt) {
+					return nil, context.Cause(attemptGuard.ctx)
 				}
 				continue
 			}
@@ -1627,7 +1651,13 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					best = sig
 				}
 			})
+			err = completeGeminiResponse(resp, err)
 			if err != nil {
+				classified := nonstreamReadError(ctx, resp, err)
+				var failover *UpstreamFailoverError
+				if errors.As(classified, &failover) || ctx.Err() != nil {
+					return nil, classified
+				}
 				return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to read upstream stream")
 			}
 			s.finalizeGeminiSSESignal(c, account, false, requestID, best, stats.dataEvents > 0, stats.fallback)
@@ -1714,7 +1744,7 @@ func (s *GeminiMessagesCompatService) shouldRetryGeminiUpstreamError(account *Ac
 
 func (s *GeminiMessagesCompatService) shouldFailoverGeminiUpstreamError(statusCode int) bool {
 	switch statusCode {
-	case 401, 403, 429, 529:
+	case 401, 403, 408, 429, 529:
 		return true
 	default:
 		return statusCode >= 500
@@ -2124,10 +2154,11 @@ type geminiStreamResult struct {
 
 func (s *GeminiMessagesCompatService) handleNonStreamingResponse(c *gin.Context, resp *http.Response, originalModel string) (*ClaudeUsage, error) {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	err = completeGeminiResponse(resp, err)
 	if err != nil {
 		classified := nonstreamReadError(c.Request.Context(), resp, err)
 		var failover *UpstreamFailoverError
-		if errors.As(classified, &failover) {
+		if errors.As(classified, &failover) || c.Request.Context().Err() != nil {
 			return nil, classified
 		}
 		return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Failed to read upstream response")
@@ -2184,8 +2215,17 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 			},
 		},
 	}
-	writeSSE(c.Writer, "message_start", messageStart)
-	flusher.Flush()
+	messageStarted := false
+	startMessage := func() {
+		if !messageStarted {
+			messageStarted = true
+			writeSSE(c.Writer, "message_start", messageStart)
+			flusher.Flush()
+		}
+	}
+	if geminiStreamMayWrite(resp) {
+		startMessage()
+	}
 
 	var firstTokenMs *int
 	var usage ClaudeUsage
@@ -2215,6 +2255,12 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 			continue
 		}
 		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if guardErr := observeGeminiStream(resp, []byte(payload)); guardErr != nil {
+			return nil, guardErr
+		}
+		if geminiStreamMayWrite(resp) {
+			startMessage()
+		}
 		if payload == "" || payload == "[DONE]" {
 			if errors.Is(err, io.EOF) {
 				break
@@ -2390,6 +2436,10 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 		}
 	}
 
+	if err := completeGeminiResponse(resp, nil); err != nil {
+		return nil, err
+	}
+	startMessage()
 	if openBlockIndex >= 0 {
 		writeSSE(c.Writer, "content_block_stop", map[string]any{
 			"type":  "content_block_stop",
@@ -2741,6 +2791,7 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 	}
 
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
+	err = completeGeminiResponse(resp, err)
 	if err != nil {
 		return nil, nonstreamReadError(c.Request.Context(), resp, err)
 	}
@@ -2803,12 +2854,17 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 	}
 	c.Header("Content-Type", contentType)
 
-	flusher, ok := c.Writer.(http.Flusher)
+	_, ok := c.Writer.(http.Flusher)
 	if !ok {
 		return nil, errors.New("streaming not supported")
 	}
 
-	reader := bufio.NewReader(resp.Body)
+	upstreamBody, err := geminiNativeStreamReader(c, resp, s.cfg)
+	if err != nil {
+		return nil, err
+	}
+	reader := bufio.NewReader(upstreamBody)
+	output := &geminiNativeStreamWriter{c: c, resp: resp}
 	usage := &ClaudeUsage{}
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
@@ -2825,10 +2881,14 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 			trimmed := strings.TrimRight(line, "\r\n")
 			if strings.HasPrefix(trimmed, "data:") {
 				payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
+				if guardErr := observeGeminiStream(resp, []byte(payload)); guardErr != nil {
+					return nil, guardErr
+				}
 				// Keepalive / done markers
 				if payload == "" || payload == "[DONE]" {
-					_, _ = io.WriteString(c.Writer, line)
-					flusher.Flush()
+					if err := output.write(line); err != nil {
+						return nil, err
+					}
 				} else {
 					var rawToWrite string
 					rawToWrite = payload
@@ -2854,26 +2914,26 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 					observer.ObserveGemini(rawBytes)
 					observeGeminiImageOutputs(c, rawBytes)
 
-					if firstTokenMs == nil {
+					if firstTokenMs == nil && geminiStreamMayWrite(resp) {
 						ms := int(time.Since(startTime).Milliseconds())
 						firstTokenMs = &ms
 					}
 
 					if isOAuth {
 						// SSE format requires double newline (\n\n) to separate events
-						_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", rawToWrite)
-					} else {
-						// Pass-through for AI Studio responses.
-						_, _ = io.WriteString(c.Writer, line)
+						line = fmt.Sprintf("data: %s\n\n", rawToWrite)
 					}
-					flusher.Flush()
+					if err := output.write(line); err != nil {
+						return nil, err
+					}
 				}
 			} else {
 				if !sawDataEvent {
 					fallback.AddLine(trimmed)
 				}
-				_, _ = io.WriteString(c.Writer, line)
-				flusher.Flush()
+				if err := output.write(line); err != nil {
+					return nil, err
+				}
 			}
 		}
 
@@ -2885,6 +2945,12 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 		}
 	}
 
+	if err := completeGeminiResponse(resp, nil); err != nil {
+		return nil, err
+	}
+	if err := output.flush(); err != nil {
+		return nil, err
+	}
 	s.finalizeGeminiSSESignal(c, account, true, upstreamRequestID, best, sawDataEvent, fallback)
 
 	return &geminiNativeStreamResult{usage: usage, firstTokenMs: firstTokenMs}, nil
@@ -3121,7 +3187,7 @@ func (s *GeminiMessagesCompatService) handleGeminiUpstreamError(ctx context.Cont
 	if !account.ShouldHandleErrorCode(statusCode) {
 		return
 	}
-	if s.rateLimitService != nil && (statusCode == 401 || statusCode == 403 || statusCode == 529) {
+	if s.rateLimitService != nil && (statusCode == 401 || statusCode == 403 || statusCode >= 500 || statusCode == 408) {
 		s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, headers, body)
 		return
 	}

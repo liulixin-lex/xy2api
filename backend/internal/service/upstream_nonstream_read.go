@@ -73,6 +73,11 @@ func nonstreamReadError(ctx context.Context, resp *http.Response, err error) err
 	if errors.Is(err, context.Canceled) || errors.Is(err, ErrUpstreamResponseBodyTooLarge) || requestReplayUnsafe(ctx) {
 		return err
 	}
+	var deadline *geminiAttemptDeadlineError
+	if errors.As(err, &deadline) {
+		return &UpstreamFailoverError{StatusCode: http.StatusGatewayTimeout,
+			ResponseBody: []byte(`{"error":{"type":"first_output_timeout","message":"Upstream produced no output before the deadline"}}`), cause: err}
+	}
 	var transportErr net.Error
 	retryable := errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.ErrClosedPipe) ||
 		errors.Is(err, net.ErrClosed) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) ||

@@ -193,7 +193,7 @@ func Defaults() Settings {
 			PreOutputBudgetSeconds:            240,
 			FirstOutputTimeoutSeconds:         FirstOutputTimeouts{Default: 20, High: 25, XHigh: 30, Max: 30},
 			AnthropicFirstEventTimeoutSeconds: 90,
-			GeminiFirstEventTimeoutSeconds:    90,
+			GeminiFirstEventTimeoutSeconds:    60,
 			ModelOverrides:                    map[string]int{},
 			SameAccountRetryMax:               1,
 			GeminiSameAccountRetries:          1,

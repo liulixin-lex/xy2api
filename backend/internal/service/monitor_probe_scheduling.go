@@ -57,7 +57,7 @@ func (s *GatewayService) monitorProbeFreeSlot(ctx context.Context, candidates []
 	if !monitorprobe.IsProbe(ctx) {
 		return nil, false, nil
 	}
-	return s.tryAcquireByLegacyOrder(ctx, candidates, groupID, "", preferOAuth)
+	return s.tryAcquireByLegacyOrder(ctx, candidates, groupID, "", "", preferOAuth)
 }
 
 // monitorProbeRoutedWait returns the routed accounts a request may wait on

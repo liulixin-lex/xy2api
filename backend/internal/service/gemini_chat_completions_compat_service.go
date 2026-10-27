@@ -111,10 +111,16 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		useUpstreamStream,
 	)
 
+	attemptGuard := newGeminiAttempt(ctx, account, mappedModel, "generateContent", geminiReq, clientStream, PreOutputProtocolChat, startTime)
+	defer func() {
+		retErr = attemptGuard.finish(c, s.rateLimitService, account, retErr)
+		attemptGuard.close()
+	}()
+
 	var resp *http.Response
 	inPlaceRetries := 0
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
-		upstreamReq, idHeader, err := buildReq(ctx)
+		upstreamReq, idHeader, err := buildReq(attemptGuard.ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil, err
@@ -123,10 +129,13 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		}
 		requestIDHeader = idHeader
 
+		attemptGuard.headerWait()
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
 			return nil, s.handleUpstreamTransportError(ctx, c, account, err)
 		}
+
+		attemptGuard.wrap(resp)
 
 		if matched, rebuilt := s.checkErrorPolicyInLoop(ctx, account, resp, mappedModel); matched {
 			resp = rebuilt
@@ -149,7 +158,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 			if resp.StatusCode == http.StatusTooManyRequests {
 				s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 			}
-			if attempt < geminiMaxRetries && geminiInPlaceRetryAllowed(ctx, &inPlaceRetries) {
+			if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(ctx, &inPlaceRetries) {
 				upstreamReqID := resp.Header.Get(requestIDHeader)
 				if upstreamReqID == "" {
 					upstreamReqID = resp.Header.Get("x-goog-request-id")
@@ -168,8 +177,8 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 					Message:            upstreamMsg,
 				})
 				logger.LegacyPrintf("service.gemini_chat_completions", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
-				if !sleepGeminiBackoffCtx(ctx, attempt) {
-					return nil, ctx.Err()
+				if !sleepGeminiBackoffCtx(attemptGuard.ctx, attempt) {
+					return nil, context.Cause(attemptGuard.ctx)
 				}
 				continue
 			}
@@ -247,7 +256,13 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		firstTokenMs = streamRes.firstTokenMs
 	} else if useUpstreamStream {
 		collected, usageObj, _, err := collectGeminiSSEObserved(resp.Body, account.Type == AccountTypeOAuth, nil)
+		err = completeGeminiResponse(resp, err)
 		if err != nil {
+			classified := nonstreamReadError(ctx, resp, err)
+			var failover *UpstreamFailoverError
+			if errors.As(classified, &failover) || ctx.Err() != nil {
+				return nil, classified
+			}
 			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Failed to read upstream stream")
 		}
 		collectedBytes, _ := json.Marshal(collected)
@@ -443,6 +458,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsNonStreamingResponseF
 	isOAuth bool,
 ) (_ *ClaudeUsage, retErr error) {
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
+	err = completeGeminiResponse(resp, err)
 	if err != nil {
 		return nil, nonstreamReadError(c.Request.Context(), resp, err)
 	}
@@ -553,19 +569,27 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 		return false
 	}
 
-	messageID := generateAnthropicMsgID()
-	if emitAnthropicEvent(&apicompat.AnthropicStreamEvent{
-		Type: "message_start",
-		Message: &apicompat.AnthropicResponse{
-			ID:         messageID,
-			Type:       "message",
-			Role:       "assistant",
-			Model:      originalModel,
-			Content:    []apicompat.AnthropicContentBlock{},
-			StopReason: nil, // JSON null
-			Usage:      apicompat.AnthropicUsage{},
-		},
-	}) {
+	messageStarted := false
+	startMessage := func() bool {
+		if messageStarted {
+			return false
+		}
+		messageStarted = true
+		messageID := generateAnthropicMsgID()
+		return emitAnthropicEvent(&apicompat.AnthropicStreamEvent{
+			Type: "message_start",
+			Message: &apicompat.AnthropicResponse{
+				ID:         messageID,
+				Type:       "message",
+				Role:       "assistant",
+				Model:      originalModel,
+				Content:    []apicompat.AnthropicContentBlock{},
+				StopReason: nil, // JSON null
+				Usage:      apicompat.AnthropicUsage{},
+			},
+		})
+	}
+	if geminiStreamMayWrite(resp) && startMessage() {
 		return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 	}
 
@@ -606,6 +630,12 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 			trimmed := strings.TrimRight(line, "\r\n")
 			if strings.HasPrefix(trimmed, "data:") {
 				payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
+				if guardErr := observeGeminiStream(resp, []byte(payload)); guardErr != nil {
+					return nil, guardErr
+				}
+				if geminiStreamMayWrite(resp) && startMessage() {
+					return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
+				}
 				if payload != "" && payload != "[DONE]" {
 					rawBytes := []byte(payload)
 					if isOAuth {
@@ -616,7 +646,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 
 					var geminiResp map[string]any
 					if err := json.Unmarshal(rawBytes, &geminiResp); err == nil {
-						if firstChunk {
+						if firstChunk && geminiStreamMayWrite(resp) {
 							firstChunk = false
 							ms := int(time.Since(startTime).Milliseconds())
 							firstTokenMs = &ms
@@ -744,6 +774,12 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 		}
 	}
 
+	if err := completeGeminiResponse(resp, nil); err != nil {
+		return nil, err
+	}
+	if startMessage() {
+		return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
+	}
 	if closeOpenBlock() {
 		return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 	}

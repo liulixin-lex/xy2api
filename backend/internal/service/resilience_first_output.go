@@ -58,6 +58,7 @@ func (r *ResilienceService) soleCandidate(ctx context.Context, groupID, accountI
 	}
 	st := resilience.StateFrom(ctx)
 	model := st.Model()
+	gate := resilienceOpenAIEligibility(ctx, groupID, model)
 	now := time.Now()
 	for i := range accounts {
 		a := &accounts[i]
@@ -65,6 +66,9 @@ func (r *ResilienceService) soleCandidate(ctx context.Context, groupID, accountI
 			continue
 		}
 		if model != "" && !a.IsModelSupported(model) {
+			continue
+		}
+		if gate != nil && a.IsOpenAICompatible() && !gate.allows(a, true, false, now) {
 			continue
 		}
 		if tier, _, _ := resiliencePenaltyOf(a, model, now); tier != resilience.TierHard {
@@ -157,7 +161,7 @@ func resilienceFirstEventTimeout(ctx context.Context, accountID int64, platform 
 	}
 	cfg := resilience.Current()
 	tier := time.Duration(cfg.Budget.AnthropicFirstEventTimeoutSeconds) * time.Second
-	if platform == PlatformGemini || platform == PlatformAntigravity {
+	if platform == PlatformGemini {
 		tier = time.Duration(cfg.Budget.GeminiFirstEventTimeoutSeconds) * time.Second
 	}
 	return b.AttemptTimeout(tier, resilienceLastCandidate(ctx, accountID), time.Now())

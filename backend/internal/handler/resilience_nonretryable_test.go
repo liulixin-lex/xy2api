@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -52,5 +53,33 @@ func TestTransientFailuresRetainCandidateAdvice(t *testing.T) {
 		(&OpenAIGatewayHandler{}).handleStreamingAwareError(c, status, "api_error", "Unavailable", true)
 		_, body := parseResponsesFailedSSE(t, w.Body.String())
 		require.Equal(t, map[string]any{"retry-after": "7"}, body["headers"])
+	}
+}
+
+func TestNonRetryableFailoverDoesNotCopyUpstreamRetryAfter(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, tc := range []struct {
+		name string
+		err  *service.UpstreamFailoverError
+	}{
+		{"body_limit", bodyLimitFailoverTestError()},
+		{"continuation", &service.UpstreamFailoverError{StatusCode: http.StatusBadGateway, Reason: service.OpenAIHTTPContinuationUnsupportedReason}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, streaming := range []bool{false, true} {
+				c, w := turnCapContext(t, EndpointResponses)
+				c.Header("Retry-After", "9")
+				c.Set(ginKeyResilienceUpstreamRetryAfter, "9")
+				resilience.SetRetryAdvice(c.Request.Context(), resilience.RetryAdvice{Seconds: 9})
+				tc.err.ResponseHeaders = http.Header{"Retry-After": []string{"7"}}
+				(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, tc.err, streaming)
+				require.Empty(t, w.Header().Get("Retry-After"))
+				require.True(t, resilience.RetryAdviceFrom(c.Request.Context()).Suppress)
+				if streaming {
+					_, body := parseResponsesFailedSSE(t, w.Body.String())
+					require.NotContains(t, body, "headers")
+				}
+			}
+		})
 	}
 }

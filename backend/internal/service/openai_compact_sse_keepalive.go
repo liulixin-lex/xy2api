@@ -27,10 +27,14 @@ const openAICompactSSEKeepaliveKey = "openai_compact_sse_keepalive"
 // 原 JSON+状态码链路（Codex 按 HTTP 状态码重试）；首拍之后状态码固化为 200，
 // 后续错误由写回方降级为 response.failed 流内终止事件。
 type openAICompactSSEKeepalive struct {
-	mu      sync.Mutex
-	writer  gin.ResponseWriter
-	started bool
-	stopped bool
+	mu         sync.Mutex
+	writer     gin.ResponseWriter
+	started    bool
+	stopped    bool
+	closed     bool
+	generation uint64
+	done       chan struct{}
+	lastWrite  time.Time
 	// bytes 是心跳已写出的注释字节数。心跳不构成语义响应，handler 的
 	// "Forward 期间是否已写响应"判定（failover 放弃换号的依据）必须扣除
 	// 这部分字节，见 OpenAICompactKeepaliveAdjustedWrittenSize。
@@ -83,10 +87,21 @@ func startSSEKeepalive(c *gin.Context, firstDelay, interval time.Duration, frame
 	if firstDelay < 0 {
 		firstDelay = 0
 	}
+	if k := keepaliveFrom(c); k != nil {
+		if w, ok := c.Writer.(*openAICompactKeepaliveWriter); ok && w.k == k && (k.protocol != "" || protocol == "") {
+			k.resume(firstDelay, interval)
+			if protocol == "" {
+				// An attempt-local passthrough owner only suspends the request's
+				// heartbeat; its final cleanup retains the wrapper.
+				return k.suspend
+			}
+		}
+		return func() {}
+	}
 	originalWriter := c.Writer
 	k := &openAICompactSSEKeepalive{
 		writer:   originalWriter,
-		stop:     make(chan struct{}),
+		stopped:  true,
 		frame:    frame,
 		protocol: protocol,
 	}
@@ -100,43 +115,80 @@ func startSSEKeepalive(c *gin.Context, firstDelay, interval time.Duration, frame
 	wrappedWriter := &openAICompactKeepaliveWriter{ResponseWriter: originalWriter, k: k}
 	c.Writer = wrappedWriter
 
-	var reqDone <-chan struct{}
-	if c.Request != nil {
-		reqDone = c.Request.Context().Done()
-	}
-	go func() {
-		timer := time.NewTimer(firstDelay)
-		defer timer.Stop()
-		for {
-			select {
-			case <-k.stop:
-				return
-			case <-reqDone:
-				return
-			case <-timer.C:
-			}
-			if !k.beat() {
-				return
-			}
-			timer.Reset(interval)
-		}
-	}()
+	k.resume(firstDelay, interval)
 	return func() {
 		k.Stop()
-		// Do not leave a pooled middleware writer reachable through the compact
-		// wrapper after the request finishes.
+		// Only the creator owns final cleanup. Attempt-local stops must not
+		// detach the wrapper, which also rewrites committed error responses.
 		if current, ok := c.Writer.(*openAICompactKeepaliveWriter); ok && current == wrappedWriter {
 			c.Writer = originalWriter
 		}
 	}
 }
 
-// beat 在锁内提交（首次）响应头并写出一条 SSE 注释行；返回 false 表示心跳已
-// 停止或下游写入失败，goroutine 应退出。
-func (k *openAICompactSSEKeepalive) beat() bool {
+func (k *openAICompactSSEKeepalive) resume(firstDelay, interval time.Duration) {
+	k.mu.Lock()
+	if k.closed || !k.stopped {
+		k.mu.Unlock()
+		return
+	}
+	done := k.done
+	k.mu.Unlock()
+	if done != nil {
+		<-done
+	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	if k.stopped {
+	if k.closed || !k.stopped || (k.ctx != nil && k.ctx.Err() != nil) {
+		return
+	}
+	if k.started {
+		firstDelay = interval - time.Since(k.lastWrite)
+		if firstDelay < 0 {
+			firstDelay = 0
+		}
+	}
+	k.stopped = false
+	k.generation++
+	generation := k.generation
+	stop, done := make(chan struct{}), make(chan struct{})
+	k.stop, k.done = stop, done
+	var reqDone <-chan struct{}
+	if k.ctx != nil {
+		reqDone = k.ctx.Done()
+	}
+	go func() {
+		defer close(done)
+		timer := time.NewTimer(firstDelay)
+		defer timer.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-reqDone:
+				k.Stop()
+				return
+			case <-timer.C:
+			}
+			if !k.beat(generation) {
+				return
+			}
+			timer.Reset(interval)
+		}
+	}()
+}
+
+// beat 在锁内提交（首次）响应头并写出一条 SSE 注释行；返回 false 表示心跳已
+// 停止或下游写入失败，goroutine 应退出。
+func (k *openAICompactSSEKeepalive) beat(generation uint64) bool {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.stopped || k.closed || generation != k.generation {
+		return false
+	}
+	if k.ctx != nil && k.ctx.Err() != nil {
+		k.closed = true
+		k.markStoppedLocked()
 		return false
 	}
 	if !k.started {
@@ -155,16 +207,25 @@ func (k *openAICompactSSEKeepalive) beat() bool {
 	}
 	n, err := k.writer.Write(frame)
 	k.bytes += n
+	k.lastWrite = time.Now()
 	if err != nil {
-		k.stopped = true
+		k.closed = true
+		k.markStoppedLocked()
 		return false
 	}
 	k.writer.Flush()
 	return true
 }
 
-// Stop 停止心跳；幂等，可与写回路径并发调用。
+// Stop permanently closes the heartbeat; it cannot resume on a later attempt.
 func (k *openAICompactSSEKeepalive) Stop() {
+	k.mu.Lock()
+	k.closed = true
+	k.markStoppedLocked()
+	k.mu.Unlock()
+}
+
+func (k *openAICompactSSEKeepalive) suspend() {
 	k.mu.Lock()
 	k.markStoppedLocked()
 	k.mu.Unlock()
@@ -195,6 +256,7 @@ func StopOpenAICompactSSEKeepaliveCommitted(c *gin.Context) bool {
 		return false
 	}
 	k.mu.Lock()
+	k.closed = true
 	k.markStoppedLocked()
 	committed := k.started
 	k.mu.Unlock()
@@ -253,7 +315,7 @@ func (w *openAICompactKeepaliveWriter) suspend() {
 	if w.k == nil {
 		return
 	}
-	w.k.Stop()
+	w.k.suspend()
 }
 
 func (w *openAICompactKeepaliveWriter) Header() http.Header {
@@ -266,6 +328,9 @@ func (w *openAICompactKeepaliveWriter) Header() http.Header {
 
 func (w *openAICompactKeepaliveWriter) Write(data []byte) (int, error) {
 	w.suspend()
+	if w.k != nil {
+		w.k.Stop()
+	}
 	if w.ResponseWriter == nil {
 		return 0, nil
 	}
@@ -277,6 +342,9 @@ func (w *openAICompactKeepaliveWriter) Write(data []byte) (int, error) {
 
 func (w *openAICompactKeepaliveWriter) WriteString(s string) (int, error) {
 	w.suspend()
+	if w.k != nil {
+		w.k.Stop()
+	}
 	if w.ResponseWriter == nil {
 		return 0, nil
 	}

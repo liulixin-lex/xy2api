@@ -207,14 +207,18 @@ func TestGeminiForwardNative_EmptyStreamMarksUpstreamFailure(t *testing.T) {
 }
 
 func TestGeminiForwardNative_NormalStreamLeavesNoMark(t *testing.T) {
+	withResilienceSettings(t, nil)
 	gin.SetMode(gin.TestMode)
-	svc := newGeminiSignalService("text/event-stream", geminiSignalTestStopSSE)
+	body := "id: response-1\r\nevent: message\r\n" +
+		"data: {\"usageMetadata\":{\"promptTokenCount\":10},\"modelVersion\":\"gemini-3.7-flash\",\"responseId\":\"response-1\"}\r\n\r\n" +
+		geminiSignalTestStopSSE
+	svc := newGeminiSignalService("text/event-stream", body)
 	c, rec := newGeminiNativeTestContext(t)
 
-	result, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(),
+	result, err := svc.ForwardNative(geminiAttemptTestContext(context.Background(), 0), c, geminiSignalTestAccount(),
 		"gemini-3.7-flash", "streamGenerateContent", true, geminiSignalTestRequest())
 	require.NoError(t, err)
-	require.Equal(t, geminiSignalTestStopSSE, rec.Body.String())
+	require.Equal(t, body, rec.Body.String())
 	require.Equal(t, 4, result.Usage.OutputTokens)
 	require.Empty(t, GetOpsStreamErrors(c))
 	require.Empty(t, upstreamErrorEventsFromContext(t, c))
@@ -298,7 +302,18 @@ data: {"error":{"code":503,"message":"The model is overloaded. Please try again 
 }
 
 func TestGeminiForwardNative_StreamNonSSEJSONBodyIsInspected(t *testing.T) {
+	withResilienceSettings(t, nil)
 	gin.SetMode(gin.TestMode)
+	t.Run("json without content type under budget", func(t *testing.T) {
+		body := `{"candidates":[{"content":{"parts":[{"text":"hello"}]},"finishReason":"STOP"}]}` + "\n"
+		svc := newGeminiSignalService("", body)
+		c, rec := newGeminiNativeTestContext(t)
+		_, err := svc.ForwardNative(geminiAttemptTestContext(context.Background(), 0), c, geminiSignalTestAccount(),
+			"gemini-3.7-flash", "streamGenerateContent", true, geminiSignalTestRequest())
+		require.NoError(t, err)
+		require.Equal(t, body, rec.Body.String())
+		require.Empty(t, GetOpsStreamErrors(c))
+	})
 	t.Run("json array with content filter", func(t *testing.T) {
 		body := `[{
   "candidates": [{"content": {"parts": [{"text": "hello"}], "role": "model"}}],
@@ -312,7 +327,7 @@ func TestGeminiForwardNative_StreamNonSSEJSONBodyIsInspected(t *testing.T) {
 `
 		svc := newGeminiSignalService("application/json", body)
 		c, rec := newGeminiNativeTestContext(t)
-		_, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(),
+		_, err := svc.ForwardNative(geminiAttemptTestContext(context.Background(), 0), c, geminiSignalTestAccount(),
 			"gemini-3.7-flash", "streamGenerateContent", true, geminiSignalTestRequest())
 		require.NoError(t, err)
 		require.Equal(t, body, rec.Body.String())

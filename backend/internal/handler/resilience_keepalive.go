@@ -21,8 +21,8 @@ const ginKeyPreOutputKeepaliveStop = "xy_resilience_pre_output_keepalive_stop"
 // text request that arrived through a CDN edge, after authentication,
 // billing checks and selection have passed, on an account that is not an
 // official OAuth account. The heartbeat clock runs from the request start
-// and is not reset by account switches; later calls are no-ops, except that
-// an uncommitted heartbeat stops when an official OAuth account takes over.
+// and is not reset by account switches. Later attempts resume a suspended
+// heartbeat, except when an official OAuth account takes over.
 func armPreOutputKeepalive(c *gin.Context, protocol string, stream bool, account *service.Account) {
 	if c == nil || c.Request == nil {
 		return
@@ -48,16 +48,16 @@ func armPreOutputKeepalive(c *gin.Context, protocol string, stream bool, account
 		service.StopPreOutputKeepaliveIfUncommitted(c)
 		return
 	}
-	if _, armed := c.Get(ginKeyPreOutputKeepaliveStop); armed {
-		return
-	}
 	start := time.Now()
 	if b != nil && !b.Started().IsZero() {
 		start = b.Started()
 	}
 	delay := time.Duration(cfg.Keepalive.DelaySeconds)*time.Second - time.Since(start)
 	interval := time.Duration(cfg.Keepalive.IntervalSeconds) * time.Second
-	c.Set(ginKeyPreOutputKeepaliveStop, service.StartPreOutputKeepalive(c, protocol, delay, interval))
+	stop := service.StartPreOutputKeepalive(c, protocol, delay, interval)
+	if _, armed := c.Get(ginKeyPreOutputKeepaliveStop); !armed {
+		c.Set(ginKeyPreOutputKeepaliveStop, stop)
+	}
 }
 
 // stopPreOutputKeepalive stops the request's pre-output heartbeat and

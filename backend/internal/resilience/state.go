@@ -32,6 +32,9 @@ type RequestState struct {
 	// firstOutputNoted is set once firstOutput is; later writes skip mu.
 	firstOutputNoted atomic.Bool
 	attemptProfile   AttemptProfile
+	// selectionEligibility holds a scheduler-owned, typed request gate. The
+	// generic accessors keep provider account types out of this package.
+	selectionEligibility any
 
 	// groupID is the API key's group (0 when ungrouped or unknown).
 	groupID int64
@@ -314,6 +317,27 @@ func (s *RequestState) SessionSuccess(ctx context.Context, accountID int64) {
 }
 
 type stateKey struct{}
+
+// SetSelectionEligibility replaces the request's gate on every selection.
+func SetSelectionEligibility[T any](s *RequestState, gate T) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.selectionEligibility = gate
+	s.mu.Unlock()
+}
+
+// SelectionEligibility returns the gate only for the caller's account type.
+func SelectionEligibility[T any](s *RequestState) (gate T) {
+	if s == nil {
+		return gate
+	}
+	s.mu.Lock()
+	gate, _ = s.selectionEligibility.(T)
+	s.mu.Unlock()
+	return gate
+}
 
 // NewRequestState creates an empty state.
 func NewRequestState() *RequestState { return &RequestState{requestID: uuid.NewString()} }

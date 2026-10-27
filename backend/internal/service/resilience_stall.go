@@ -80,10 +80,9 @@ func noteResilienceStall(ctx context.Context, rl *RateLimitService, account *Acc
 }
 
 // resilienceFirstOutputGuardOwnsStall reports whether a stalled OpenAI
-// stream is left to its first-output guard: before output the guard fails
-// the attempt over at its tier (xhigh 200 s, max 220 s), which the 180 s
-// stall check used to beat with a final stream_timeout (review P1-C). With
-// stall handling off the 0.3.0 order stays.
+// stream is left to its first-output guard. Before output that guard owns
+// the attempt deadline and failover; stall detection takes over after
+// output starts. With stall handling off the inherited order stays.
 func resilienceFirstOutputGuardOwnsStall(guardArmed, outputStarted bool) bool {
 	return guardArmed && !outputStarted && resilience.Current().StallOn()
 }

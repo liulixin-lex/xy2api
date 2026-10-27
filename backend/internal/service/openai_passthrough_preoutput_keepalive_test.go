@@ -79,9 +79,16 @@ func TestPassthroughKeepaliveDoesNotBlockPreOutputFailover(t *testing.T) {
 // 停拍之后不得再有心跳字节写出 —— 主循环接管 ResponseWriter 的前提。
 func TestPassthroughKeepaliveStopsBeforeHandingOverWriter(t *testing.T) {
 	c, rec := newPassthroughKeepaliveTestContext(t)
+	// Compact's pre-header owner must resume in place when unguarded
+	// passthrough takes over after response headers suspended it.
+	MarkOpenAICompactClientStream(c)
+	cleanup := StartOpenAICompactSSEKeepalive(c, time.Hour)
+	defer cleanup()
+	c.Header("X-Upstream-Request", "headers-received")
 	stop := startOpenAISSEKeepalive(c, keepaliveTestInterval)
 	waitForKeepaliveBeats()
 	stop()
+	require.NotZero(t, rec.Body.Len(), "passthrough must resume the suspended compact heartbeat")
 
 	before := rec.Body.String()
 	waitForKeepaliveBeats()

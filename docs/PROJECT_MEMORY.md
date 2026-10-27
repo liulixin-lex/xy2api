@@ -6,10 +6,37 @@
 
 ## 当前交接状态
 
-### OpenAI 首字、成功率、缓存与账号路由优化：实施完成，待授权提交（2026-10-26T19:16Z 更新）
+### 网关韧性复盘：已实施并验证，未提交（2026-10-27 更新）
+
+- **背景**：0.4.9（`ed2e429f6`）提交后，用户要求复盘原有韧性策略，看哪些需要同步调整、哪些多余。Claude 与 Codex 独立分析并互审，astra 两轮找漏洞后定稿为 v3。用户批准，并选定：第二批同进 0.4.9；非 OpenAI 本轮就做模型级 breaker；过渡开关在上线 7 天后再删。
+- **结论**：没有需要整块删除的功能。问题在覆盖不均：生产上 Gemini 普通 5xx 从不冷却，一个坏号 27 小时失败 10,886 次；Gemini 也没有尝试截止。另一类是 0.4.9 带来的联动缺口。
+- **已完成**（在本分支 `ed2e429f6` 之上，**未提交**）：
+  1. 首包前心跳按尝试恢复：收头只暂挂，写出语义内容、到达终态或请求结束才永久关闭；
+  2. planned 截断不计入会话失败；
+  3. OpenAI“最后候选”使用本请求的完整调度资格（含 HTTP 续链只认 API Key）；
+  4. 无号 Retry-After、失败帧、负缓存共用读取模型 breaker 的恢复投影；不可重试的错误不带 Retry-After；
+  5. 判慢迁移前先确认替代号有实时空位；末位兜底排序加入 hold；
+  6. 非 OpenAI（不走 OpenAI 网关的平台）的账号×模型 breaker：阶梯 10/45/90/180/300 秒，同轮不升级，成功按请求起点保护；OpenAI 普通阶梯同步改为同一阶梯；带 retry_after 时仍按账号冷却；
+  7. Gemini 的 5xx/408 接入通用惩罚；同号重试只在该模型已经失败时跳过；
+  8. Gemini 文本尝试截止 60 秒（只截非最后候选，覆盖 6 个完整读取分支），输出后 stall，阶段标签；Antigravity 改读 Anthropic 字段；
+  9. 原版文件钩子已登记：scheduler-diff 块 `resilience-review-20261027`、具名补丁 `xy-resilience-coverage`；文档与 zh/en 文案已同步。
+- **审查**：astra 审查了 C 路（3 项应改）、D 路（6 项应改）及复核（1 项应改），全部修复；D 路还按总设计师要求收窄了同号重试的跳过范围，并修正了 OpenAI 网关平台的范围回归。
+- **验证**（本机，最终工作树）：`go build ./...`；四种 tag 的 vet；gofmt；service、handler、resilience、server、repository 全量 unit；scheduler-diff；文档一致性；diff-check。前端 vue-tsc、i18n eslint 与相关 61 项测试由文档 agent 运行，通过。
+- **未完成**：
+  1. 提交与推送需用户授权；
+  2. 提交后运行 `sync.py audit`；
+  3. PR、合并、发版、部署各自待授权；
+  4. 上线 7 天后复核过渡开关与 fast_fail。
+- **卡点与风险**：
+  - 已管理端保存过设置的部署，Gemini 截止仍为 90 秒（库里存有显式值）；
+  - 非 OpenAI breaker 是进程内状态，多实例各自计数；
+  - 迁移的空位预检仍有抢槽竞态。
+- **关键位置**：本地交接包 `.work/resilience-review/`（不入库），含 `FINAL_PLAN.md`、`IMPLEMENTATION_SPLIT.md`、`C_IMPLEMENTATION_REPORT.md`、`code_review_*.md`。D 路 worktree `../xy2api-wt/resil-gemini`（分支 `wip/resil-gemini-20261027`）已集成，可删除。
+
+### OpenAI 首字、成功率、缓存与账号路由优化：已本地提交 `ed2e429f6`，待授权推送（2026-10-27 更新）
 
 - **背景**：生产 48 小时只读分析发现首输出截止 180–220 秒晚于中转约 125 秒的截断、遗留选号不感知延迟且硬粘性、`codex.rate_limits` 提前提交了流、无号 503 不计入 SLA。用户 2026-10-26 批准 6 项改动，要求精简，不做影子、灰度和冗余兜底。
-- **已完成**（分支 `feat/openai-ttft-health-routing-20261026`，基于 main `4162a4f03`，**未提交**）：
+- **已完成**（分支 `feat/openai-ttft-health-routing-20261026`，基于 main `4162a4f03`，已本地提交 `ed2e429f6`）：
   1. 首字截止分热/冷：热 20/25/30/30 秒，冷尝试按请求体 ≥128KiB/≥256KiB 至少 45/75 秒，按已耗时递增，最后候选不截断；
   2. 计划内截止 `planned_first_output_timeout`，豁免账号级惩罚，账号×模型慢失败冷却 1/2/4/8/10 分钟；
   3. `codex.rate_limits` 判为开场事件；
@@ -26,7 +53,7 @@
 - **验证**（本机）：resilience/service/handler 三包全量 unit 通过；四种 build tag 的 vet、`go build ./...`、`ci_gate.py`（-race、0 跳过）、scheduler-diff、文档一致性、tools 单测通过。前端 lint/typecheck 未在本机运行（无 node_modules，改动只是两条 i18n 文案），由 CI 覆盖；`sync.py audit` 要求干净工作树，提交后运行。
 - **未完成**：提交、推送、PR、合并、发版、部署都需要用户授权；部署后按本地交接包 FINAL_PLAN §8 观测。
 - **残留风险**：
-  - 官方 OAuth 收头前无心跳；混合池心跳不重启（生产暂无）；
+  - 官方 OAuth 收头前无心跳；换号后心跳不恢复的问题已由韧性复盘修复（见上一节）；
   - 被截断的尝试可能已被中转计费；负载快照全满时仍排队；
   - Forward 内部的原地重发沿用本次 attempt 的 profile 与截止；
   - 非 load 选号路径在并发迁移时可能重新读到新绑定；
@@ -197,7 +224,24 @@
 
 ## 进行中的工作
 
-### 20261026-openai-ttft-health-routing — OpenAI 首字、成功率、缓存与账号路由优化（实施完成，待授权提交；2026-10-26T19:16Z）
+### 20261027-resilience-review — 网关韧性功能复盘（已实施并验证，待授权提交；2026-10-27）
+
+- **请求**（用户 2026-10-27）：0.4.9 改动提交后，分析原有“网关韧性”策略是否需要同步调整，有无多余、臃肿、无用的功能与可优化项；与 Codex 讨论后给出最终方案，批准后再写代码。
+- **过程**：Claude（Opus）与 Codex（astra）各自独立分析，再互审 8 个分歧，总设计师合并为最终方案（本地交接包 `.work/resilience-review/FINAL_PLAN.md`，不入库）。
+- **结论摘要**：没有需要整块删除的功能，问题在覆盖不均与 0.4.9 联动缺口。
+  - 第一批（随 0.4.9）：首包前心跳按尝试恢复；planned 截断不计会话失败；末位候选改读选号结果；无号 Retry-After 读模型健康；迁移推迟到写绑定时删旧绑定；末位兜底排序加 hold；清死代码与错文档。
+  - 第二批（建议同进 0.4.9）：Gemini 5xx 接进通用惩罚（固定 30 秒冷却，不做账号级升级：astra 反例证明它会伤同账号的健康模型）；Gemini 60 秒尝试截止、输出后 stall 与阶段标签。
+  - 第三批（上线 7 天后）：删过渡开关、Retry-After 收敛。
+- **根因已核实**：Gemini helper 只把 401/403/529 交给通用惩罚，普通 5xx 直接返回，问题账号非 pool、无自定义规则；Gemini 三入口无尝试截止且不设阶段，`select` 段平均 295 秒其实是在等上游。
+- **用户决策**（2026-10-27）：批准方案 v3；第二批同进 0.4.9；非 OpenAI 冷却本轮就做模型级 breaker（复用 OpenAI 账号×模型内核，阶梯 10/45/90/180/300 秒、同轮不升级、成功按起点保护；OpenAI 普通失败阶梯随之从封顶 45 秒改为逐级到 300 秒）；开关删除放在上线 7 天后。
+- **实施**（2026-10-27）：拆分见本地 `.work/resilience-review/IMPLEMENTATION_SPLIT.md`。
+  - C 路（第 1–7 项）在主检出的本分支，由 Codex 实施；
+  - D 路（Gemini 5xx 接线、模型级 breaker、Gemini 60 秒截止）在 worktree 分支 `wip/resil-gemini-20261027`，由 Codex 实施；
+  - 两路都不提交，由总设计师集成，并登记 policy/scheduler-diff；文档与 i18n 由文档 agent 负责，审查由 astra 负责。
+- **集成与审查**：C 路在主检出实施；D 路的补丁先暂存 C 改动再三方合并，之后的修正直接在主检出进行。astra 的 10 条应改全部修复。总设计师另外纠正了两处越界：D 路同号重试跳过范围过宽、C 路回退配置下透传心跳缺口。
+- **下一步**：用户授权后提交；提交后跑 `sync.py audit`；推送、PR、发版、部署另行授权。
+
+### 20261026-openai-ttft-health-routing — OpenAI 首字、成功率、缓存与账号路由优化（已本地提交 `ed2e429f6`，未推送；2026-10-27）
 
 - **实施**（2026-10-26T17:40Z）：总设计师（Claude）编排，代码由两路 Codex agent 并行实施，astra 审查，文档与前端文案由 Claude 完成。
   - A 路（截止链路：起步补丁、改动 1、2、3、6、判慢样本采集点）在分支 `feat/openai-ttft-health-routing-20261026`；
@@ -221,7 +265,7 @@
   6. 无号 503 计入 SLA。
 
   撤回：端到端首字口径、全局拥塞阈值。“预算过期的槽位等待”经核实为误报。
-- **下一步**：用户授权后提交（本记忆随同一提交）、在干净工作树上运行 `sync.py audit`、推送并开 PR；合并、发版、部署分别授权。
+- **下一步**：2026-10-27 经用户授权本地提交为 `ed2e429f6`，干净工作树上 `sync.py audit` 通过；推送、PR、合并、发版、部署分别待授权。
 
 ### 20261025-pr131-release047 — 0.4.7 已发布（2026-10-26 更正）
 
@@ -1346,3 +1390,31 @@ pnpm --dir frontend run build
 - **验证**：三包全量 unit；四种 build tag 的 vet；`go build ./...`；`ci_gate.py`（-race、0 跳过）；scheduler-diff；文档一致性；tools 单测。基线 `4162a4f03` 上 handler、service 全量 unit 同样通过，作为对照。前端 lint/typecheck 本机未运行（无依赖）。
 - **卡点/风险**：无阻塞；残留风险见“当前交接状态”。
 - **下一步**：提交、推送、PR、合并、发版、部署均待用户授权。
+
+### 2026-10-27 — 20261027-resilience-review — 网关韧性复盘：方案定稿、实施、验证，待授权提交
+
+- **请求/目标**：用户要求先提交 0.4.9（已提交为 `ed2e429f6`），再与 Codex 一起复盘原有“网关韧性”：需不需要同步调整，有无多余、臃肿、无用的功能，给出最终方案。用户批准方案 v3 后要求实施，并选定第二批同进 0.4.9、本轮就做非 OpenAI 模型级 breaker。
+- **开始状态**：分支 `feat/openai-ttft-health-routing-20261026`，HEAD `ed2e429f6`，工作树只有本记忆文件的改动。
+- **完成操作**：
+  - **生产只读取数**：48 小时流量构成、7 天未送达、7 天 Warn 事件、Gemini 与 Anthropic 的时延，以及问题账号的配置形态。数据库会话为只读；未导出整张设置表；本地临时文件已删除。
+  - **方案**：Claude 与 Codex 各自独立分析，再互审 8 个分歧；总设计师合并成稿，astra 找漏洞两轮，定稿为 v3。被纠正或撤回的立场：
+    - 迁移“延后删绑定”（v2 同号 `SET NX` 证伪）；
+    - 账号级冷却升级（会连带伤到同账号的健康模型）；
+    - M8 卡片误导（标签“失败分类修正”是准确的）。
+  - **实施**：C 路（0.4.9 联动 7 项）在主检出；D 路（Gemini 5xx、模型级 breaker、Gemini 截止）在 worktree，后经三方合并集成。文档 agent 同步了 `docs/GATEWAY_RESILIENCE.md`、`docs/account-scheduling.md` 与 zh/en 的 `budgetHint`。
+  - **审查**：astra 审 C 路 3 项、D 路 6 项、复核 1 项，均为“应改”，全部修复。
+  - **登记**：scheduler-diff 新增块 `resilience-review-20261027`，覆盖 `gateway_scheduling.go`、`openai_account_scheduler.go`、`gemini_messages_compat_service.go`；具名补丁 `xy-resilience-coverage`（policy 与 `UPSTREAM_BASE.json`）含 21 个补丁测试、8 条必需字面量。
+- **修改文件**：
+  - backend 的 resilience、service、handler：约 40 个文件，新增 `resilience_selection_eligibility.go`、`resilience_model_breaker.go`、`resilience_gemini_attempt.go` 及两个测试文件；
+  - `tools/upstream-sync/policy.json`、`tools/upstream-sync/scheduler-diff.json`、`UPSTREAM_BASE.json`；
+  - 上述文档与 i18n；
+  - 本记忆文件。
+- **验证**（最终工作树）：
+  - `go build ./...`；四种 tag 的 vet；gofmt；
+  - service、handler、resilience、server、repository 全量 unit；
+  - `ci_gate.py`：446 项 `-race`，0 跳过；
+  - scheduler-diff、文档一致性、tools 单测 41 项、diff-check；
+  - 前端：vue-tsc、i18n eslint、相关 61 项测试。
+  - 未运行：golangci-lint（本机未安装，由 CI 运行）；`sync.py audit`（要求干净工作树，提交后运行）。
+- **卡点/风险**：无阻塞。残留风险见“当前交接状态”的同名小节。
+- **下一步**：等待用户授权提交，之后运行 `sync.py audit`；推送、PR、合并、发版、部署各自待授权；上线 7 天后复核过渡开关与 fast_fail。

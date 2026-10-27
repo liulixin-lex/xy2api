@@ -34,13 +34,10 @@ var (
 //
 // It shares the compact keepalive machinery and context key, so every
 // writer that already handles a committed compact keepalive (failover size
-// checks, terminal frames) handles it too. It is a no-op when a keepalive is
-// already present; the returned stop function is idempotent.
+// checks, terminal frames) handles it too. A suspended pre-output heartbeat
+// resumes in place; only its creator receives the final cleanup function.
 func StartPreOutputKeepalive(c *gin.Context, protocol string, firstDelay, interval time.Duration) func() {
 	if c == nil || interval <= 0 {
-		return func() {}
-	}
-	if _, exists := c.Get(openAICompactSSEKeepaliveKey); exists {
 		return func() {}
 	}
 	frame := preOutputCommentFrame

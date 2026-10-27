@@ -91,7 +91,7 @@ func TestResilienceExplainCapabilityExcludesSoftButPreservesHardReason(t *testin
 	require.Equal(t, "soft", out.Accounts[0].Tier)
 	require.Equal(t, "balance_exhausted", out.Accounts[1].Reason)
 	require.Equal(t, "hard", out.Accounts[1].Tier)
-	require.Nil(t, out.Accounts[1].RecoverAt, "keep the hard penalty's unknown recovery")
+	require.Equal(t, hard.TempUnschedulableUntil, out.Accounts[1].RecoverAt, "keep the hard penalty's recovery time")
 
 	// The fallback must also honor the requested mode.
 	accounts.byGroup[20] = []Account{soft}

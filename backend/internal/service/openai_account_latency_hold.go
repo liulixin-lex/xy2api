@@ -202,44 +202,6 @@ func (s *OpenAIGatewayService) recordOpenAIAccountLatencySample(account *Account
 	}
 }
 
-func (s *OpenAIGatewayService) openAIAccountLatencyHoldSnapshots(accounts []Account, requestedModel string, now time.Time) map[int64]openAIAccountLatencyHoldSnapshot {
-	result := make(map[int64]openAIAccountLatencyHoldSnapshot, len(accounts))
-	if s == nil {
-		return result
-	}
-	state := s.getOpenAIAccountLatencyHoldState()
-	if state == nil {
-		return result
-	}
-	if now.IsZero() {
-		now = time.Now()
-	}
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	for i := range accounts {
-		account := &accounts[i]
-		model := openAIAccountModelTransientModel(canonicalOpenAIAccountSchedulingModel(account, requestedModel))
-		key, ok := openAIAccountModelTransientKey(account.ID, model)
-		if !ok {
-			continue
-		}
-		entry, exists := state.entries[key]
-		if !exists {
-			continue
-		}
-		if !entry.holdUntil.IsZero() && now.Before(entry.holdUntil) {
-			entry.lastTouched = now
-			state.entries[key] = entry
-			result[account.ID] = openAIAccountLatencyHoldSnapshot{Held: true, HoldUntil: entry.holdUntil}
-		} else if !entry.holdUntil.IsZero() {
-			entry.holdUntil = time.Time{}
-			entry.lastTouched = now
-			state.entries[key] = entry
-		}
-	}
-	return result
-}
-
 func (s *OpenAIGatewayService) partitionOpenAILatencyHeldAccounts(_ context.Context, accounts []*Account, requestedModel string, compact bool) []*Account {
 	if s == nil || !resilience.Current().Enabled || s.getOpenAIAccountLatencyHoldState().latestHoldUntilUnixNano.Load() <= time.Now().UnixNano() {
 		return accounts
@@ -349,6 +311,8 @@ func (s *OpenAIGatewayService) migrateOpenAILatencyHeldOwner(ctx context.Context
 		return stickyAccountID
 	}
 	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
+	alternatives := make([]*Account, 0, len(accounts))
+	loadRequests := make([]AccountWithConcurrency, 0, len(accounts))
 	for i := range accounts {
 		candidate := &accounts[i]
 		if candidate.ID == stickyAccountID {
@@ -371,6 +335,23 @@ func (s *OpenAIGatewayService) migrateOpenAILatencyHeldOwner(ctx context.Context
 		}
 		if vetoed, _ := openAIProfitControlVetoReason(ctx, candidate); vetoed {
 			continue
+		}
+		alternatives = append(alternatives, candidate)
+		loadRequests = append(loadRequests, AccountWithConcurrency{ID: candidate.ID, MaxConcurrency: candidate.Concurrency})
+	}
+	var loads map[int64]*AccountLoadInfo
+	if s.concurrencyService != nil {
+		loads, err = s.concurrencyService.GetAccountsLoadBatchFresh(ctx, loadRequests)
+		if err != nil {
+			return stickyAccountID
+		}
+	}
+	for _, candidate := range alternatives {
+		if s.concurrencyService != nil {
+			load := loads[candidate.ID]
+			if load == nil || (candidate.Concurrency > 0 && load.CurrentConcurrency >= candidate.Concurrency) {
+				continue
+			}
 		}
 		if err := s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, stickyAccountID); err != nil {
 			continue

@@ -2011,6 +2011,38 @@
     {
       "path": "frontend/src/views/admin/SettingsView.vue",
       "value": "v-model=\"form.enable_openai_session_uuid\""
+    },
+    {
+      "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
+      "value": "attemptGuard := newGeminiAttempt(ctx, account, mappedModel, \"generateContent\", geminiReq, clientStream, PreOutputProtocolChat, startTime)"
+    },
+    {
+      "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
+      "value": "!resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody)"
+    },
+    {
+      "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
+      "value": "err = completeGeminiResponse(resp, err)"
+    },
+    {
+      "path": "backend/internal/service/upstream_nonstream_read.go",
+      "value": "var deadline *geminiAttemptDeadlineError"
+    },
+    {
+      "path": "backend/internal/service/openai_compact_sse_keepalive.go",
+      "value": "func (k *openAICompactSSEKeepalive) resume(firstDelay, interval time.Duration)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "suppressResilienceRetryAdvice(c, \"non_retryable\")"
+    },
+    {
+      "path": "backend/internal/handler/resilience_failover.go",
+      "value": "failoverErr.Reason == service.PlannedFirstOutputTimeoutReason"
+    },
+    {
+      "path": "backend/internal/service/gateway_service.go",
+      "value": "return s.bindGatewayStickySession(ctx, groupID, sessionHash, accountID, resilience.StateFrom(ctx).Model())"
     }
   ],
   "forbidden_module_paths": [
@@ -2068,7 +2100,8 @@
     "xy-account-stream-only-learning",
     "xy-resilience-v2-classification",
     "xy-openai-session-uuid",
-    "xy-openai-ttft-health-routing"
+    "xy-openai-ttft-health-routing",
+    "xy-resilience-coverage"
   ],
   "custom_patch_tests": [
     {
@@ -3055,6 +3088,111 @@
       "id": "xy-openai-ttft-health-routing",
       "path": "backend/internal/service/openai_account_latency_hold_test.go",
       "literal": "func TestMigrateOpenAILatencyHeldOwnerUsesHealthyAlternativeAndProfitGate"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/handler/resilience_budget_test.go",
+      "literal": "func TestPlannedFirstOutputTimeoutDoesNotCountForSession"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/handler/resilience_keepalive_test.go",
+      "literal": "func TestArmPreOutputKeepaliveResumesBetweenAPIKeyAttempts"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/resilience_keepalive_test.go",
+      "literal": "func TestPreOutputKeepaliveTerminalCannotResume"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/handler/resilience_nonretryable_test.go",
+      "literal": "func TestNonRetryableFailoverDoesNotCopyUpstreamRetryAfter"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/openai_account_latency_hold_test.go",
+      "literal": "func TestMigrateOpenAILatencyHeldOwnerRequiresFreshCapacity"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/openai_account_model_transient_test.go",
+      "literal": "func TestOpenAIModelTransient_ConsecutiveRoundsEscalateModelBlock"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/resilience_attempt_profile_test.go",
+      "literal": "func TestLastCandidateUsesSchedulerRequestEligibility"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/resilience_attempt_profile_test.go",
+      "literal": "func TestHTTPContinuationEligibilityInMixedAccountGroup"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/resilience_attempt_profile_test.go",
+      "literal": "func TestSelectionEligibilityReusesPrivacyReadAndSkipsNegativeCache"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/resilience_errors_test.go",
+      "literal": "func TestRecoveryProjectionUsesModelBreakerAcrossExits"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/resilience_errors_test.go",
+      "literal": "func TestRecoveryAdviceIgnoresAttemptExclusions"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/resilience_model_breaker_test.go",
+      "literal": "func TestGeminiModelBreakerFailureIsolationAndSuccess"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/resilience_model_breaker_test.go",
+      "literal": "func TestGatewayLastResortUsesModelBreakerAccount"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/resilience_gemini_attempt_test.go",
+      "literal": "func TestGeminiAttemptNonstreamReadDeadlineAndClientCancel"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/resilience_gemini_attempt_test.go",
+      "literal": "func TestGeminiAttemptNonstreamExclusions"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/resilience_gemini_attempt_test.go",
+      "literal": "func TestGeminiAttemptStreamContentAndStall"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/handler/gemini_client_cancel_test.go",
+      "literal": "func TestGatewayGeminiStreamStallWritesOneTerminal"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/resilience_model_breaker_test.go",
+      "literal": "func TestGatewayModelSoftBoundAccountKeepsBinding"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/resilience_model_breaker_test.go",
+      "literal": "func TestOpenAICompatibleTransientKeepsAccountCooldown"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/resilience_keepalive_test.go",
+      "literal": "func TestPreOutputKeepaliveResumesSameOwnerAndRejectsOldTimer"
+    },
+    {
+      "id": "xy-resilience-coverage",
+      "path": "backend/internal/service/resilience_errors_test.go",
+      "literal": "func TestRecoveryProjectionCombinesHardPauseAndModelBreaker"
     }
   ]
 }

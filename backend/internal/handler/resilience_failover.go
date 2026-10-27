@@ -13,7 +13,7 @@ import (
 // counts once, even when its error reaches a failover loop.
 func resilienceReportAttemptFailure(ctx context.Context, accountID int64, failoverErr *service.UpstreamFailoverError) {
 	st := resilience.StateFrom(ctx)
-	if st == nil || failoverErr == nil || st.StreamFailureReported(accountID) {
+	if st == nil || failoverErr == nil || failoverErr.Reason == service.PlannedFirstOutputTimeoutReason || st.StreamFailureReported(accountID) {
 		return
 	}
 	st.SessionFailure(ctx, accountID, service.ClassifyFailoverError(failoverErr).Category)

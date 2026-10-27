@@ -50,6 +50,14 @@ func resilienceNoAccountIsGroupLevel(ctx context.Context, groupID int64, model s
 		return false
 	}
 	forced, _ := ctx.Value(ctxkey.ForcePlatform).(string)
+	gate := resilienceOpenAIEligibility(ctx, groupID, model)
+	if forced == "" && gate != nil {
+		forced = gate.req.Platform
+	}
+	penalty := resiliencePenaltyOf
+	if gate != nil {
+		penalty = gate.service.resilienceRecoveryPenaltyOf
+	}
 	now := time.Now()
 	for i := range accounts {
 		a := &accounts[i]
@@ -64,7 +72,7 @@ func resilienceNoAccountIsGroupLevel(ctx context.Context, groupID int64, model s
 			// request that shares the key/group/model fast-fail counters.
 			return false
 		}
-		if tier, _, _ := resiliencePenaltyOf(a, model, now); tier == resilience.TierNone {
+		if tier, _, _ := penalty(a, model, now); tier == resilience.TierNone {
 			return false
 		}
 	}
@@ -194,7 +202,17 @@ func (s *OpenAIGatewayService) NoAccountRetryAfter(ctx context.Context, groupID 
 	if s == nil || s.resilience == nil || groupID == nil || s.accountRepo == nil {
 		return 0
 	}
-	return s.resilience.noAccountRetryAfter(ctx, s.accountRepo, *groupID, model)
+	accounts, err := s.resilience.groupAccountsForLastResort(ctx, s.accountRepo, *groupID)
+	if err != nil {
+		return 0
+	}
+	gate := resilienceOpenAIEligibility(ctx, *groupID, model)
+	now := time.Now()
+	include := func(a *Account) bool { return a.IsOpenAICompatible() }
+	if gate != nil {
+		include = func(a *Account) bool { return gate.allows(a, true, true, now) }
+	}
+	return resilienceRecoveryProjection(ctx, accounts, model, now, include, s.resilienceRecoveryPenaltyOf).wait(now)
 }
 
 func (r *ResilienceService) noAccountRetryAfter(ctx context.Context, repo AccountRepository, groupID int64, model string) time.Duration {
@@ -203,37 +221,91 @@ func (r *ResilienceService) noAccountRetryAfter(ctx context.Context, repo Accoun
 		return 0
 	}
 	now := time.Now()
-	var earliest time.Time
-	consider := func(t time.Time) {
-		if t.After(now) && (earliest.IsZero() || t.Before(earliest)) {
-			earliest = t
+	return resilienceRecoveryProjection(ctx, accounts, model, now, nil, resiliencePenaltyOf).wait(now)
+}
+
+// resilienceRecoveryPenaltyOf keeps non-OpenAI model state behind the shared
+// penalty function. OpenAI also has a local breaker absent from account rows.
+func (s *OpenAIGatewayService) resilienceRecoveryPenaltyOf(a *Account, model string, now time.Time) (resilience.PenaltyTier, time.Time, string) {
+	if a == nil || !a.IsOpenAI() {
+		return resiliencePenaltyOf(a, model, now)
+	}
+	tier, end, reason := s.resilienceOpenAIPenaltyOf(a, model, now)
+	if tier == resilience.TierHard {
+		if breakerEnd := s.openAIModelBreakerEnd(a, model, now); breakerEnd.After(end) {
+			end = breakerEnd
 		}
 	}
-	for i := range accounts {
-		a := &accounts[i]
-		if !a.IsActive() || !a.Schedulable {
-			continue
-		}
-		tier, recoverAt, _ := resiliencePenaltyOf(a, model, now)
-		switch tier {
-		case resilience.TierSoft:
-			consider(recoverAt)
-		case resilience.TierNone:
-			// Healthy but busy (concurrency, session limits): soon.
-			consider(now.Add(time.Second))
-		case resilience.TierHard:
-			if a.RateLimitResetAt != nil {
-				consider(*a.RateLimitResetAt)
-			}
-			if a.TempUnschedulableUntil != nil && resilience.IsBalancePause(a.TempUnschedulableReason) {
-				consider(*a.TempUnschedulableUntil)
-			}
-		}
-	}
-	if earliest.IsZero() {
+	return tier, end, reason
+}
+
+type resilienceRecovery struct {
+	at      time.Time
+	healthy bool
+}
+
+func (p resilienceRecovery) wait(now time.Time) time.Duration {
+	if p.at.IsZero() {
 		return 0
 	}
-	return earliest.Sub(now)
+	return p.at.Sub(now)
+}
+
+// resilienceRecoveryProjection is unbounded: each account recovers at its
+// latest active restriction, the group at the earliest such account. Callers
+// supply their qualification scope and clamp only at the protocol exit.
+func resilienceRecoveryProjection(ctx context.Context, accounts []Account, model string, now time.Time, include func(*Account) bool, penalty func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string)) resilienceRecovery {
+	forced, _ := ctx.Value(ctxkey.ForcePlatform).(string)
+	state := resilience.StateFrom(ctx)
+	var projection resilienceRecovery
+	for i := range accounts {
+		if ctx.Err() != nil {
+			return resilienceRecovery{}
+		}
+		a := &accounts[i]
+		if (forced != "" && a.Platform != forced) || (model != "" && !a.IsModelSupported(model)) ||
+			a.CapabilityExclusion(ctx, model, now) != nil || resilience.CapabilityExcluded(ctx, a.ID) {
+			continue
+		}
+		tier, recoverAt, reason := penalty(a, model, now)
+		if tier == resilience.TierHard {
+			switch reason {
+			case "balance_exhausted", "rate_limited", "model_rate_limited", "temp_unschedulable":
+			default:
+				continue
+			}
+		}
+		// Relax timed penalties only for eligibility: the original account's
+		// timestamps below still determine when it can actually recover.
+		candidate := *withoutSoftPenalties(*a, now)
+		if tier == resilience.TierHard {
+			candidate.TempUnschedulableUntil = nil
+			candidate.RateLimitResetAt = nil
+		}
+		if include != nil && !include(&candidate) {
+			continue
+		}
+		if tier == resilience.TierNone {
+			if !state.AccountFailed(a.ID) && !state.Avoided(a.ID) {
+				return resilienceRecovery{at: now.Add(time.Second), healthy: true}
+			}
+			continue
+		}
+		for _, end := range []*time.Time{a.TempUnschedulableUntil, a.RateLimitResetAt, a.OverloadUntil} {
+			if end != nil && end.After(recoverAt) {
+				recoverAt = *end
+			}
+		}
+		if remaining := a.GetRateLimitRemainingTimeWithContext(ctx, model); remaining > 0 {
+			if end := now.Add(remaining); end.After(recoverAt) {
+				recoverAt = end
+			}
+		}
+		if recoverAt.After(now) && (projection.at.IsZero() || recoverAt.Before(projection.at)) {
+			projection.at = recoverAt
+		}
+	}
+	return projection
 }
 
 // RetryAdvice uses only the current process's fresh account snapshot. A miss
@@ -250,7 +322,12 @@ func (s *OpenAIGatewayService) RetryAdvice(ctx context.Context, groupID *int64, 
 	if s == nil {
 		return resilience.RetryAdvice{Source: "unknown"}
 	}
-	return s.resilience.retryAdviceFromSnapshot(ctx, groupID, model, func(a *Account) bool { return a.IsOpenAICompatible() }, s.resilienceOpenAIPenaltyOf)
+	now := time.Now()
+	include := func(a *Account) bool { return a.IsOpenAICompatible() }
+	if gate := resilienceOpenAIEligibility(ctx, derefGroupID(groupID), model); gate != nil {
+		include = func(a *Account) bool { return gate.allows(a, false, true, now) }
+	}
+	return s.resilience.retryAdviceFromSnapshot(ctx, groupID, model, include, s.resilienceRecoveryPenaltyOf)
 }
 
 func (r *ResilienceService) retryAdviceFromSnapshot(ctx context.Context, groupID *int64, model string, include func(*Account) bool, penalty func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string)) resilience.RetryAdvice {
@@ -271,63 +348,12 @@ func (r *ResilienceService) retryAdviceFromSnapshot(ctx context.Context, groupID
 	if !ok || !now.Before(snapshot.expires) {
 		return unknown
 	}
-	forced, _ := ctx.Value(ctxkey.ForcePlatform).(string)
-	state := resilience.StateFrom(ctx)
-	var earliest time.Time
-	for i := range snapshot.accounts {
-		if ctx.Err() != nil {
-			return unknown
-		}
-		account := &snapshot.accounts[i]
-		if include != nil && !include(account) {
-			continue
-		}
-		if forced != "" && account.Platform != forced {
-			continue
-		}
-		if model != "" && !account.IsModelSupported(model) {
-			continue
-		}
-		if account.CapabilityExclusion(ctx, model, now) != nil || resilience.CapabilityExcluded(ctx, account.ID) {
-			continue
-		}
-		tier, recoverAt, reason := penalty(account, model, now)
-		switch tier {
-		case resilience.TierNone:
-			if !state.AccountFailed(account.ID) && !state.Avoided(account.ID) {
-				return resilience.RetryAdvice{Seconds: 1, Source: "healthy_candidate"}
-			}
-			continue
-		case resilience.TierHard:
-			// Only timed restrictions recover without operator action. A revoked,
-			// expired, disabled or quota-exhausted account stays unknown even if it
-			// also happens to carry an old cooldown timestamp.
-			switch reason {
-			case "balance_exhausted", "rate_limited", "model_rate_limited", "temp_unschedulable":
-			default:
-				continue
-			}
-		}
-		// Recovery of one account is the latest of its known restrictions; the
-		// group's recovery is the earliest such account. Tried penalised accounts
-		// can recover for a later request, but tried healthy accounts are no hint.
-		for _, end := range []*time.Time{account.TempUnschedulableUntil, account.RateLimitResetAt, account.OverloadUntil} {
-			if end != nil && end.After(recoverAt) {
-				recoverAt = *end
-			}
-		}
-		if remaining := account.GetRateLimitRemainingTimeWithContext(ctx, model); remaining > 0 {
-			if end := now.Add(remaining); end.After(recoverAt) {
-				recoverAt = end
-			}
-		}
-		if recoverAt.After(now) && (earliest.IsZero() || recoverAt.Before(earliest)) {
-			earliest = recoverAt
-		}
+	projection := resilienceRecoveryProjection(ctx, snapshot.accounts, model, now, include, penalty)
+	if projection.healthy {
+		return resilience.RetryAdvice{Seconds: 1, Source: "healthy_candidate"}
 	}
-	if earliest.IsZero() {
+	if projection.at.IsZero() {
 		return unknown
 	}
-	seconds := int((earliest.Sub(now) + time.Second - 1) / time.Second)
-	return resilience.RetryAdvice{Seconds: max(2, min(seconds, 10)), Source: "recovery"}
+	return resilience.RetryAdvice{Seconds: resilience.ClampRetryAfter(projection.wait(now), 2, 10), Source: "recovery"}
 }

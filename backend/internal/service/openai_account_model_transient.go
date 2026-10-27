@@ -114,6 +114,15 @@ func (s *openAIAccountModelTransientState) recordFailureKind(accountID int64, mo
 	if !exists || entry.lastFailure.IsZero() || now.Sub(entry.lastFailure) > openAIModelTransientStreakTTL || now.Before(entry.lastFailure) {
 		entry.failureStreak = 0
 	}
+	// Concurrent attempts already in flight belong to the current open round.
+	// They refresh the success fence without extending or escalating the block.
+	if !slow && now.Before(entry.blockUntil) {
+		entry.lastFailure, entry.lastTouched = now, now
+		s.entries[key] = entry
+		return openAIAccountModelTransientDecision{
+			FailureStreak: entry.failureStreak, SlowStreak: entry.slowStreak, BlockUntil: entry.blockUntil,
+		}
+	}
 	if slow {
 		if entry.lastSlow.IsZero() || now.Before(entry.lastSlow) || now.Sub(entry.lastSlow) > openAIModelTransientStreakTTL {
 			entry.slowStreak = 0
@@ -130,6 +139,12 @@ func (s *openAIAccountModelTransientState) recordFailureKind(accountID int64, mo
 
 	cooldown := time.Duration(0)
 	switch {
+	case !slow && entry.failureStreak >= 6:
+		cooldown = 300 * time.Second
+	case !slow && entry.failureStreak == 5:
+		cooldown = 180 * time.Second
+	case !slow && entry.failureStreak == 4:
+		cooldown = 90 * time.Second
 	case entry.failureStreak >= 3:
 		cooldown = openAIModelTransientLongCooldown
 	case entry.failureStreak == 2:
@@ -184,7 +199,8 @@ func (s *openAIAccountModelTransientState) recordSuccessAt(accountID int64, mode
 	}
 	s.mu.Lock()
 	entry, ok := s.entries[key]
-	if !ok || (!entry.lastSlow.IsZero() && (attemptStart.IsZero() || !attemptStart.After(entry.lastSlow))) {
+	if !ok || (!entry.lastSlow.IsZero() && (attemptStart.IsZero() || !attemptStart.After(entry.lastSlow))) ||
+		(!attemptStart.IsZero() && !attemptStart.After(entry.lastFailure)) {
 		s.mu.Unlock()
 		return
 	}
@@ -193,9 +209,19 @@ func (s *openAIAccountModelTransientState) recordSuccessAt(accountID int64, mode
 }
 
 func (s *openAIAccountModelTransientState) isBlocked(accountID int64, model string, now time.Time) bool {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	entry, _ := s.readEntry(accountID, model, now)
+	return !entry.blockUntil.IsZero() && now.Before(entry.blockUntil)
+}
+
+// readEntry shares the streak TTL with scheduling and retry decisions. Expired
+// failures must disappear before either reader can act on them.
+func (s *openAIAccountModelTransientState) readEntry(accountID int64, model string, now time.Time) (openAIAccountModelTransientEntry, bool) {
 	key, ok := openAIAccountModelTransientKey(accountID, model)
 	if s == nil || !ok {
-		return false
+		return openAIAccountModelTransientEntry{}, false
 	}
 	if now.IsZero() {
 		now = time.Now()
@@ -205,15 +231,15 @@ func (s *openAIAccountModelTransientState) isBlocked(accountID int64, model stri
 	defer s.mu.Unlock()
 	entry, exists := s.entries[key]
 	if !exists {
-		return false
+		return openAIAccountModelTransientEntry{}, false
 	}
 	if !entry.lastFailure.IsZero() && now.Sub(entry.lastFailure) > openAIModelTransientStreakTTL {
 		delete(s.entries, key)
-		return false
+		return openAIAccountModelTransientEntry{}, false
 	}
 	entry.lastTouched = now
 	s.entries[key] = entry
-	return !entry.blockUntil.IsZero() && now.Before(entry.blockUntil)
+	return entry, true
 }
 
 func (s *openAIAccountModelTransientState) size() int {

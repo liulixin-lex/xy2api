@@ -192,10 +192,15 @@ func TestTransientCooldownHonoursRetryAfter(t *testing.T) {
 	require.True(t, strings.HasPrefix(repo.tempReason, resilience.ReasonPrefixTransient), repo.tempReason)
 	require.WithinDuration(t, time.Now().Add(60*time.Second), repo.tempUntil, 3*time.Second)
 
-	// No retry_after: the default 30 s.
-	svc2, repo2, account2, _ := newPenaltyFixture(t, PlatformAnthropic)
-	svc2.HandleUpstreamError(context.Background(), account2, 524, http.Header{}, []byte(`gateway timeout`))
-	require.WithinDuration(t, time.Now().Add(30*time.Second), repo2.tempUntil, 3*time.Second)
+	// No retry_after: the account stays available; the requested model gets a breaker.
+	svc2, repo2, account2, r2 := newPenaltyFixture(t, PlatformAnthropic)
+	st := resilience.NewRequestState()
+	st.NoteTurn(0, "model-a", "")
+	ctx := resilience.WithRequestState(context.Background(), st)
+	svc2.HandleUpstreamError(ctx, account2, 524, http.Header{}, []byte(`gateway timeout`))
+	svc2.HandleUpstreamError(ctx, account2, 524, http.Header{}, []byte(`gateway timeout`))
+	require.Zero(t, repo2.tempCalls)
+	require.WithinDuration(t, time.Now().Add(10*time.Second), r2.modelBreakerEnd(account2, "model-a", time.Now()), 3*time.Second)
 
 	// retry_after above the cap is capped at 120 s.
 	svc3, repo3, account3, _ := newPenaltyFixture(t, PlatformGemini)
@@ -226,7 +231,7 @@ func TestTransientCooldownRefreshesGroupSnapshot(t *testing.T) {
 		77: {accounts: []Account{*account}, expires: time.Now().Add(time.Minute)},
 		78: {accounts: []Account{}, expires: time.Now().Add(time.Minute)},
 	}
-	svc.HandleUpstreamError(context.Background(), account, 524, http.Header{}, []byte(`gateway timeout`))
+	svc.HandleUpstreamError(context.Background(), account, 524, http.Header{"Retry-After": {"30"}}, []byte(`gateway timeout`))
 	_, cached := r.lastResortGroups.entries[77]
 	require.False(t, cached, "the cooled-down account's group is re-read")
 	_, other := r.lastResortGroups.entries[78]
@@ -249,7 +254,7 @@ func TestApplyResilienceOutcomeStreamBalanceAndStall(t *testing.T) {
 	requireBalancePause(t, repo, 300*time.Second)
 
 	svc2, repo2, account2, _ := newPenaltyFixture(t, PlatformAnthropic)
-	svc2.ApplyResilienceOutcome(context.Background(), account2, resilience.Result{Category: resilience.CategoryStall}, "stall")
+	svc2.ApplyResilienceOutcome(context.Background(), account2, resilience.Result{Category: resilience.CategoryStall, RetryAfter: 30 * time.Second}, "stall")
 	require.WithinDuration(t, time.Now().Add(30*time.Second), repo2.tempUntil, 3*time.Second)
 }
 
@@ -257,7 +262,7 @@ func TestBrokenStreamUsageLiftsNoCooldown(t *testing.T) {
 	// The partial usage of a stream that broke on a last-resort account is
 	// recorded, but it is no success: the transient cooldown stays.
 	svc, repo, account, r := newPenaltyFixture(t, PlatformAnthropic)
-	svc.HandleUpstreamError(context.Background(), account, http.StatusBadGateway, http.Header{}, []byte(`{"error":{"message":"bad gateway"}}`))
+	svc.HandleUpstreamError(context.Background(), account, http.StatusBadGateway, http.Header{"Retry-After": {"30"}}, []byte(`{"error":{"message":"bad gateway"}}`))
 	require.True(t, strings.HasPrefix(repo.tempReason, resilience.ReasonPrefixTransient), repo.tempReason)
 	r.lastResortUsed.Store(account.ID, time.Now())
 

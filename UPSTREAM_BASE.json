@@ -197,7 +197,8 @@
     "xy-group-slot-concurrency",
     "xy-group-categories",
     "xy-openai-session-uuid",
-    "xy-openai-ttft-health-routing"
+    "xy-openai-ttft-health-routing",
+    "xy-resilience-coverage"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/92"
 }

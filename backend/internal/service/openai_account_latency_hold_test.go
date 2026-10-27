@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -133,4 +134,61 @@ func TestMigrateOpenAILatencyHeldOwnerUsesHealthyAlternativeAndProfitGate(t *tes
 	got = svc.migrateOpenAILatencyHeldOwner(profitCtx, &group, PlatformOpenAI, "v2:migrate", "gpt-test", owner.ID, nil, false, "")
 	require.Equal(t, owner.ID, got)
 	require.Equal(t, owner.ID, state.KeptSticky())
+}
+
+func TestMigrateOpenAILatencyHeldOwnerRequiresFreshCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		concurrency int
+		load        *AccountLoadInfo
+		loadErr     error
+		warm        bool
+		migrate     bool
+	}{
+		{name: "full despite cached free slot", concurrency: 1, load: &AccountLoadInfo{CurrentConcurrency: 1}, warm: true},
+		{name: "query failed", concurrency: 1, loadErr: errors.New("load unavailable")},
+		{name: "missing load", concurrency: 1},
+		{name: "free slot despite load percentage", concurrency: 2, load: &AccountLoadInfo{CurrentConcurrency: 1, LoadRate: 100}, migrate: true},
+		{name: "unlimited", load: &AccountLoadInfo{CurrentConcurrency: 100}, migrate: true},
+		{name: "unlimited missing load"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			group := int64(79)
+			owner := Account{ID: 301, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, GroupIDs: []int64{group}}
+			alternative := owner
+			alternative.ID, alternative.Concurrency = 302, tc.concurrency
+			sticky := &atomicStickyTestCache{bindings: map[string]int64{"openai:v2:migrate": owner.ID}}
+			loads := &schedulerTestConcurrencyCache{skipDefaultLoad: true, loadMap: map[int64]*AccountLoadInfo{}}
+			concurrency := NewConcurrencyService(loads)
+			if tc.warm {
+				loads.loadMap[alternative.ID] = &AccountLoadInfo{}
+				concurrency.SetAccountLoadBatchCacheTTL(time.Hour)
+				_, err := concurrency.GetAccountsLoadBatch(context.Background(), []AccountWithConcurrency{{ID: alternative.ID, MaxConcurrency: alternative.Concurrency}})
+				require.NoError(t, err)
+			}
+			loads.loadMap[alternative.ID], loads.loadBatchErr = tc.load, tc.loadErr
+			svc := &OpenAIGatewayService{
+				cache: sticky, cfg: &config.Config{RunMode: config.RunModeStandard}, concurrencyService: concurrency,
+				accountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: []Account{owner, alternative}}},
+			}
+			now := time.Now()
+			for i := 0; i < openAIAccountLatencyMinSamples; i++ {
+				svc.recordOpenAIAccountLatencySample(&owner, "gpt-test", 11*time.Second, now)
+			}
+			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+			resilience.StateFrom(ctx).KeepSticky(owner.ID)
+			got := svc.migrateOpenAILatencyHeldOwner(ctx, &group, PlatformOpenAI, "v2:migrate", "gpt-test", owner.ID, nil, false, "")
+			bound, err := sticky.GetSessionAccountID(ctx, group, "openai:v2:migrate")
+			if tc.migrate {
+				require.Zero(t, got)
+				require.Zero(t, resilience.StateFrom(ctx).KeptSticky())
+				require.ErrorIs(t, err, ErrStickySessionNotFound)
+			} else {
+				require.Equal(t, owner.ID, got)
+				require.Equal(t, owner.ID, resilience.StateFrom(ctx).KeptSticky())
+				require.NoError(t, err)
+				require.Equal(t, owner.ID, bound)
+			}
+		})
+	}
 }
