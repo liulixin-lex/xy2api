@@ -100,6 +100,13 @@ func TestSSEDeliveryCountsUnknownAndErrorBlocksAsContent(t *testing.T) {
 	}
 }
 
+func TestSSECodexRateLimitsPreludeIsNotDelivery(t *testing.T) {
+	withResilienceSettings(t, nil)
+	c, st := newSSEDeliveryContext(t, "text/event-stream")
+	_, _ = c.Writer.WriteString("event: codex.rate_limits\ndata: {\"type\":\"codex.rate_limits\",\"rate_limits\":{}}\n\n")
+	require.Zero(t, st.DeliveredBytes(), "codex.rate_limits is an opening event")
+}
+
 func TestSSEDeliveryHandlesSplitWritesAndCRLF(t *testing.T) {
 	c, st := newSSEDeliveryContext(t, "text/event-stream")
 	start := "event: message_start\r\ndata: {\"type\":\"message_start\"}\r\n\r\n"

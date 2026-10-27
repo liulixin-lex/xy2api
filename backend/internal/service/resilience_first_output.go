@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -97,11 +98,54 @@ func (s *OpenAIGatewayService) openAIFirstOutputTimeoutFor(ctx context.Context, 
 	if b == nil {
 		return s.openAIFirstOutputTimeout(reasoningEffort)
 	}
+	profile := resilience.StateFrom(ctx).AttemptProfile()
+	profileMatches := profile.AccountID == accountID && accountID > 0
+	if profileMatches {
+		model = profile.Model
+	}
 	tier := resilience.FirstOutputTier(resilience.Current(), model, reasoningEffort)
+	// A missing or mismatched profile is cold, but has no size floor.
+	if profileMatches && !profile.Warm {
+		tier = coldFirstOutputTier(tier, profile.BodyBytes)
+	}
 	if attemptStart.IsZero() {
 		attemptStart = time.Now()
 	}
 	return b.AttemptTimeout(tier, resilienceLastCandidate(ctx, accountID), attemptStart)
+}
+
+func coldFirstOutputTier(tier time.Duration, bodyBytes int) time.Duration {
+	if bodyBytes >= 256*1024 && tier < 75*time.Second {
+		return 75 * time.Second
+	}
+	if bodyBytes >= 128*1024 && tier < 45*time.Second {
+		return 45 * time.Second
+	}
+	return tier
+}
+
+// ReportOpenAIAttemptSuccess clears transient failure state using the current
+// attempt start and samples the delivered first-content delay of warm streams.
+// model is already the actual outbound canonical model.
+func (s *OpenAIGatewayService) ReportOpenAIAttemptSuccess(ctx context.Context, account *Account, model string) {
+	if s == nil || account == nil {
+		return
+	}
+	canonical := strings.TrimSpace(model)
+	start := time.Time{}
+	if st := resilience.StateFrom(ctx); st != nil {
+		profile := st.AttemptProfile()
+		if profile.AccountID == account.ID {
+			start = profile.AttemptStart
+			if profile.Warm && profile.Stream {
+				first := st.FirstOutput()
+				if !first.IsZero() && first.After(profile.AttemptStart) {
+					s.recordOpenAIAccountLatencySample(account, canonical, first.Sub(profile.AttemptStart), time.Now())
+				}
+			}
+		}
+	}
+	s.clearOpenAIAccountModelTransientStateAt(account.ID, openAIAccountModelTransientModel(canonical), start)
 }
 
 // resilienceFirstEventTimeout returns the first-upstream-event timeout of a

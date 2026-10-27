@@ -2067,7 +2067,8 @@
     "xy-resilience-v2-streams",
     "xy-account-stream-only-learning",
     "xy-resilience-v2-classification",
-    "xy-openai-session-uuid"
+    "xy-openai-session-uuid",
+    "xy-openai-ttft-health-routing"
   ],
   "custom_patch_tests": [
     {
@@ -2989,6 +2990,71 @@
       "id": "xy-openai-session-uuid",
       "path": "backend/internal/service/openai_cache_reliability_test.go",
       "literal": "TestOpenAICacheSessionUUIDResponsesScopeAndModelMapping"
+    },
+    {
+      "id": "xy-openai-ttft-health-routing",
+      "path": "backend/internal/resilience/resilience_test.go",
+      "literal": "func TestFirstOutputTier"
+    },
+    {
+      "id": "xy-openai-ttft-health-routing",
+      "path": "backend/internal/resilience/prelude_test.go",
+      "literal": "codex_rate_limits"
+    },
+    {
+      "id": "xy-openai-ttft-health-routing",
+      "path": "backend/internal/service/resilience_delivery_sse_test.go",
+      "literal": "func TestSSECodexRateLimitsPreludeIsNotDelivery"
+    },
+    {
+      "id": "xy-openai-ttft-health-routing",
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "literal": "func TestClassifyOpsNoAvailableAccountsCountsTowardSLA"
+    },
+    {
+      "id": "xy-openai-ttft-health-routing",
+      "path": "backend/internal/service/resilience_attempt_profile_test.go",
+      "literal": "func TestOpenAIAttemptWarmUsesSessionStickyLayer"
+    },
+    {
+      "id": "xy-openai-ttft-health-routing",
+      "path": "backend/internal/service/resilience_attempt_profile_test.go",
+      "literal": "func TestFirstOutputWarmToColdUsesSameAttemptStartAndColdFloor"
+    },
+    {
+      "id": "xy-openai-ttft-health-routing",
+      "path": "backend/internal/service/resilience_first_output_cooldown_test.go",
+      "literal": "func TestPlannedFirstOutputTimeoutSkipsAccountLevelPenalties"
+    },
+    {
+      "id": "xy-openai-ttft-health-routing",
+      "path": "backend/internal/service/openai_account_model_transient_test.go",
+      "literal": "func TestOpenAIModelTransient_SlowFastSlowKeepsSlowStreakContinuousOnly"
+    },
+    {
+      "id": "xy-openai-ttft-health-routing",
+      "path": "backend/internal/service/openai_account_model_transient_test.go",
+      "literal": "func TestOpenAIModelTransient_OldOrUnknownSuccessDoesNotClearSlowBlock"
+    },
+    {
+      "id": "xy-openai-ttft-health-routing",
+      "path": "backend/internal/service/openai_account_latency_hold_test.go",
+      "literal": "func TestOpenAIAccountLatencyHoldDecayAndThreshold"
+    },
+    {
+      "id": "xy-openai-ttft-health-routing",
+      "path": "backend/internal/service/openai_account_latency_hold_test.go",
+      "literal": "func TestPartitionLatencyHeldCompactDoesNotCrossTier"
+    },
+    {
+      "id": "xy-openai-ttft-health-routing",
+      "path": "backend/internal/service/openai_account_latency_hold_test.go",
+      "literal": "func TestMigrateOpenAILatencyHeldOwnerKeepsSingleOrAllHeldOwner"
+    },
+    {
+      "id": "xy-openai-ttft-health-routing",
+      "path": "backend/internal/service/openai_account_latency_hold_test.go",
+      "literal": "func TestMigrateOpenAILatencyHeldOwnerUsesHealthyAlternativeAndProfitGate"
     }
   ]
 }

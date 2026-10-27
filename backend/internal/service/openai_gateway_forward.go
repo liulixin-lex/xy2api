@@ -1047,7 +1047,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	firstOutputTimeout := time.Duration(0)
 	if reqStream && account.Platform == PlatformOpenAI {
-		firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, originalModel, reasoningEffortValue, time.Now())
+		firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, originalModel, reasoningEffortValue, startTime)
 	}
 
 	// xy2api resilience: web_search history on API-key relays.

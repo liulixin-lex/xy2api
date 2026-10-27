@@ -1162,6 +1162,7 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 		}
 		return s.isBetterAccount(a, b)
 	})
+	eligible = s.partitionOpenAILatencyHeldAccounts(ctx, eligible, requestedModel, requireCompact)
 	return eligible[0], compactBlocked, filterStats
 }
 
@@ -1243,6 +1244,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			stickyAccountID = accountID
 		}
 	}
+	stickyAccountID = s.migrateOpenAILatencyHeldOwner(ctx, groupID, platform, sessionHash, requestedModel, stickyAccountID, excludedIDs, requireCompact, requiredCapability)
 	if s.concurrencyService == nil || !cfg.LoadBatchEnabled {
 		account, stickyHit, err := s.selectAccountForModelWithExclusionsStickyHit(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability, preferLowUpstreamRate)
 		if err != nil {
@@ -1474,6 +1476,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		} else {
 			selectionOrder = append(selectionOrder, available...)
 		}
+		selectionOrder = s.partitionOpenAILatencyHeldLoad(ctx, selectionOrder, requestedModel, requireCompact)
 
 		for _, item := range selectionOrder {
 			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, item.account, platform, requestedModel, false, requiredCapability)
@@ -1514,6 +1517,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if requireCompact {
 			ordered = prioritizeOpenAICompactAccounts(ordered)
 		}
+		ordered = s.partitionOpenAILatencyHeldAccounts(ctx, ordered, requestedModel, requireCompact)
 		for _, acc := range ordered {
 			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, platform, requestedModel, false, requiredCapability)
 			if fresh == nil {
@@ -1567,6 +1571,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if requireCompact {
 		candidates = prioritizeOpenAICompactAccounts(candidates)
 	}
+	candidates = s.partitionOpenAILatencyHeldAccounts(ctx, candidates, requestedModel, requireCompact)
 	for _, acc := range candidates {
 		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, platform, requestedModel, false, requiredCapability)
 		if fresh == nil {

@@ -5,7 +5,7 @@ Tools for the 0.4.0 gateway resilience work (`openspec/changes/gateway-resilienc
 | Tool | Purpose |
 |---|---|
 | `baseline.sql` | Read-only design §14 metrics from PostgreSQL: errors by phase, no-account 503 and the longest no-account streak per group, balance-disabled accounts, "insufficient balance" shown to users with a positive balance, consecutive failures of one key on one account, cache read share and TTFT; on 0.4.0 also undelivered requests, fallback usage and accounts in a balance pause. |
-| `first_token_calibration.sql` | First token latency per model and reasoning effort over N days (P50–P99.9) and the share above the current tiers (180/200/220 seconds) and the 240-second budget, to calibrate `budget.first_output_timeout_seconds`. |
+| `first_token_calibration.sql` | First token latency per model and reasoning effort over N days (P50–P99.9) and the share above the current tiers (20/25/30 seconds since 0.4.9) and the 240-second budget, to calibrate `budget.first_output_timeout_seconds`. |
 | `metrics.sql` | The `baseline.sql` numbers as JSON lines, for `metrics_report.py`. Sets the session read-only itself. |
 | `caddy_cuts.py` | CDN cut rate per entry (Cloudflare, ESA, direct) from Caddy JSON access logs; with `--app`, matches each cut to the application log to find requests completed (and billed) after the client was cut; share of 503 responses with `Retry-After`. `--json` prints one object. |
 | `session_streaks.py` | From application logs (JSON or console format): consecutive failures of one session on one account (requests without a session hash are counted per API key, separately), and the latency of requests that switched accounts and still succeeded. `--json` prints one object. |

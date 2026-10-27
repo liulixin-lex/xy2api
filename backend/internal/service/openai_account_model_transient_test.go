@@ -126,6 +126,47 @@ func TestOpenAIModelTransient_SuccessResetsStreakAcrossSparseTraffic(t *testing.
 	assert.False(t, state.isBlocked(35, "gpt-5.5", now.Add(gap+time.Second)))
 }
 
+func TestOpenAIModelTransient_SlowFastSlowKeepsSlowStreakContinuousOnly(t *testing.T) {
+	state := newOpenAIAccountModelTransientState(128)
+	now := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
+	first := state.recordSlowFailure(35, "gpt-5.5", now)
+	require.Equal(t, 1, first.SlowStreak)
+	fast := state.recordFailure(35, "gpt-5.5", now.Add(time.Second))
+	require.Zero(t, fast.SlowStreak)
+	second := state.recordSlowFailure(35, "gpt-5.5", now.Add(2*time.Second))
+	require.Equal(t, 1, second.SlowStreak)
+	require.Equal(t, 3, second.FailureStreak)
+	require.Equal(t, openAIModelTransientLongCooldown, second.Cooldown)
+	third := state.recordSlowFailure(35, "gpt-5.5", now.Add(3*time.Second))
+	require.Equal(t, 2, third.SlowStreak)
+	require.Equal(t, time.Minute, third.Cooldown)
+}
+
+func TestOpenAIModelTransient_OldOrUnknownSuccessDoesNotClearSlowBlock(t *testing.T) {
+	state := newOpenAIAccountModelTransientState(128)
+	now := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
+	state.recordSlowFailure(35, "gpt-5.5", now)
+	state.recordSlowFailure(35, "gpt-5.5", now.Add(time.Second))
+	state.recordSuccessAt(35, "gpt-5.5", now)
+	require.True(t, state.isBlocked(35, "gpt-5.5", now.Add(2*time.Second)))
+	state.recordSuccessAt(35, "gpt-5.5", time.Time{})
+	require.True(t, state.isBlocked(35, "gpt-5.5", now.Add(2*time.Second)))
+	state.recordSuccessAt(35, "gpt-5.5", now.Add(2*time.Second))
+	require.False(t, state.isBlocked(35, "gpt-5.5", now.Add(2*time.Second)))
+}
+
+func TestOpenAIModelTransient_FastFailureDoesNotShortenSlowBlock(t *testing.T) {
+	state := newOpenAIAccountModelTransientState(128)
+	now := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
+	state.recordSlowFailure(35, "gpt-5.5", now)
+	second := state.recordSlowFailure(35, "gpt-5.5", now.Add(time.Second))
+	fast := state.recordFailure(35, "gpt-5.5", now.Add(2*time.Second))
+	require.Equal(t, second.BlockUntil, fast.BlockUntil)
+	require.True(t, state.isBlocked(35, "gpt-5.5", now.Add(30*time.Second)))
+	state.recordSuccessAt(35, "gpt-5.5", now)
+	require.True(t, state.isBlocked(35, "gpt-5.5", now.Add(30*time.Second)), "fast failure preserves the old-success guard")
+}
+
 func TestOpenAIModelTransient_IgnoresInvalidKeys(t *testing.T) {
 	state := newOpenAIAccountModelTransientState(128)
 	now := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
@@ -161,6 +202,7 @@ func TestOpenAIModelTransient_StateIsBoundedAndConcurrencySafe(t *testing.T) {
 			defer wg.Done()
 			model := fmt.Sprintf("gpt-test-%d", i)
 			state.recordFailure(int64(i+1), model, now.Add(time.Duration(i)*time.Millisecond))
+			state.recordSlowFailure(int64(i+1), model, now.Add(time.Duration(i)*time.Millisecond))
 			_ = state.isBlocked(int64(i+1), model, now.Add(time.Second))
 		}(i)
 	}

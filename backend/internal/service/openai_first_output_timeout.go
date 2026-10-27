@@ -268,6 +268,17 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 		account.ID, originalModel, reasoningEffort, phase, elapsed, timeout,
 	)
 	requestID := strings.TrimSpace(responseHeaders.Get("x-request-id"))
+	planned := false
+	profile := resilience.AttemptProfile{}
+	if st := resilience.StateFrom(ctx); st != nil {
+		profile = st.AttemptProfile()
+		// Only HTTP handlers write profiles; WebSocket attempts cannot match.
+		planned = profile.AccountID == account.ID && !profile.AttemptStart.IsZero() && resilienceTextBudget(ctx) != nil
+	}
+	reason := GatewayFailureReason("first_output_timeout")
+	if planned {
+		reason = PlannedFirstOutputTimeoutReason
+	}
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		ProxyID:   proxyID,
 		ProxyName: proxyName,
@@ -277,14 +288,17 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 		Reason: "first_output_timeout",
 		Detail: fmt.Sprintf("phase=%s elapsed_ms=%d timeout_ms=%d timeout_seconds=%g", phase, elapsed.Milliseconds(), timeout.Milliseconds(), timeout.Seconds()),
 	})
-	if s.rateLimitService != nil {
+	if !planned && s.rateLimitService != nil {
 		s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
+	}
+	if planned {
+		s.recordOpenAIAccountModelSlowFailure(account, profile.Model, time.Now())
 	}
 	resilience.Count(resilience.MetricFirstOutputTimeout, resilience.StateFrom(ctx).GroupID(), account.ID, phase)
 	return &UpstreamFailoverError{
 		StatusCode:      http.StatusGatewayTimeout,
 		ResponseBody:    []byte(`{"error":{"type":"first_output_timeout","message":"Upstream produced no output before the deadline"}}`),
-		ResponseHeaders: responseHeaders.Clone(), SafeToFailoverAfterWrite: true,
+		ResponseHeaders: responseHeaders.Clone(), SafeToFailoverAfterWrite: true, Reason: reason,
 	}
 }
 

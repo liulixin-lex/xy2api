@@ -691,6 +691,8 @@ const (
 
 type GatewayFailureReason string
 
+const PlannedFirstOutputTimeoutReason GatewayFailureReason = "planned_first_output_timeout"
+
 // UpstreamFailoverError indicates an upstream or credential error that may
 // trigger account failover. Additive metadata keeps existing composite literals
 // source-compatible and preserves their legacy retry-next-account behavior.

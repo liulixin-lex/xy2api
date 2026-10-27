@@ -154,13 +154,13 @@ func budgetTestCtx(kind resilience.RequestKind) context.Context {
 
 func TestFirstOutputTimeoutTiers(t *testing.T) {
 	withResilienceSettings(t, func(s *resilience.Settings) {
-		s.Budget.ModelOverrides = map[string]int{"gpt-5.5-pro*": 200}
+		s.Budget.ModelOverrides = map[string]int{"gpt-5.5-pro-2026": 200}
 	})
 	svc := &OpenAIGatewayService{cfg: &config.Config{}}
 	ctx := budgetTestCtx(resilience.KindText)
-	require.Equal(t, 180*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "", time.Time{}))
-	require.Equal(t, 200*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "xhigh", time.Time{}))
-	require.Equal(t, 220*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "max", time.Time{}))
+	require.Equal(t, 20*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "", time.Time{}))
+	require.Equal(t, 30*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "xhigh", time.Time{}))
+	require.Equal(t, 30*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "max", time.Time{}))
 	require.Equal(t, 200*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5-pro-2026", "low", time.Time{}))
 
 	// The last usable candidate only answers to the pre-output deadline.
@@ -191,7 +191,8 @@ func TestFirstOutputTimeoutMeasuredFromAttemptStart(t *testing.T) {
 	ctx := resilience.WithRequestState(context.Background(), st)
 	start := time.Now().Add(-150 * time.Second)
 	st.SetBudget(resilience.NewBudget(ctx, resilience.Current(), resilience.KindText, start))
-	require.Equal(t, 180*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "", start))
+	st.SetAttemptProfile(resilience.AttemptProfile{AccountID: 1, AttemptStart: start, Warm: true})
+	require.Equal(t, 20*time.Second, svc.openAIFirstOutputTimeoutFor(ctx, 1, "gpt-5.5", "", start))
 }
 
 func TestStallMarksTheTurnFailed(t *testing.T) {

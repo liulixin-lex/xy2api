@@ -2449,6 +2449,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	}
 	scheduler := s.getOpenAIAccountScheduler(ctx)
 	if scheduler == nil {
+		ctx = withOpenAIStickyMigrationGuard(ctx, previousResponseID, requiredTransport)
 		decision.Layer = openAIAccountScheduleLayerLoadBalance
 		if selection, hit, err := s.selectLegacyAccountByPreviousResponse(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform); err != nil {
 			return nil, decision, err
@@ -2653,7 +2654,7 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResultWithContext(ctx 
 	}
 	if success {
 		s.openaiOAuth429RetryStartedAt.Delete(accountID)
-		s.clearOpenAIAccountModelTransientState(accountID, normalizeOpenAIAccountModelTransientModel(model))
+		s.ReportOpenAIAttemptSuccess(ctx, account, model)
 	}
 	scheduler := s.getOpenAIAccountScheduler(ctx)
 	if scheduler == nil {

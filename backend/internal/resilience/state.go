@@ -31,6 +31,7 @@ type RequestState struct {
 	firstOutput time.Time
 	// firstOutputNoted is set once firstOutput is; later writes skip mu.
 	firstOutputNoted atomic.Bool
+	attemptProfile   AttemptProfile
 
 	// groupID is the API key's group (0 when ungrouped or unknown).
 	groupID int64
@@ -455,6 +456,21 @@ func (s *RequestState) KeptSticky() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.keptSticky
+}
+
+// ClearKeptStickyIfOwner releases a previously kept sticky owner when it still
+// matches owner. A concurrent request that kept another owner is preserved.
+func (s *RequestState) ClearKeptStickyIfOwner(owner int64) bool {
+	if s == nil || owner <= 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.keptSticky != owner {
+		return false
+	}
+	s.keptSticky = 0
+	return true
 }
 
 // SetLastResort records last-resort soft selection.

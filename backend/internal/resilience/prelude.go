@@ -71,10 +71,12 @@ func ClassifyStreamEvent(protocol, eventType string, payload []byte) EventClass 
 		switch typ {
 		case "response.created", "response.in_progress", "response.queued", "keepalive":
 			return EventClass{Kind: Prelude}
-		case "response.metadata":
-			// The Codex backend sends it before any content and before a
-			// capacity error. Exact name only, and only with the native
-			// whitelist on; otherwise it falls through to Unknown (content).
+		case "response.metadata", "codex.rate_limits":
+			// The Codex backend sends them before any content and before a
+			// capacity error (codex.rate_limits carries the plan's usage
+			// windows; production saw it commit streams that then failed with
+			// a replayable 503). Exact names only, and only with the native
+			// whitelist on; otherwise they fall through to Unknown (content).
 			if Current().NativePreludeWhitelistOn() {
 				return EventClass{Kind: Prelude}
 			}

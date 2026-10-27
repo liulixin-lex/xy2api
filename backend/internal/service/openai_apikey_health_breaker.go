@@ -26,6 +26,9 @@ func classifyOpenAIAPIKeyHealthFailure(err error) (int, []byte, bool) {
 
 	var failoverErr *UpstreamFailoverError
 	if errors.As(err, &failoverErr) {
+		if failoverErr.Reason == PlannedFirstOutputTimeoutReason {
+			return failoverErr.StatusCode, failoverErr.ResponseBody, false
+		}
 		// These failures already have dedicated recovery/state handling or are not
 		// attributable to the selected account.
 		if failoverErr.IsCredentialFailure() ||

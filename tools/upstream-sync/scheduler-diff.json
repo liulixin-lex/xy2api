@@ -293,6 +293,24 @@
         "added": [
           "sessionHash = monitorProbeSessionHash(ctx, sessionHash)"
         ]
+      },
+      {
+        "block": "ttft-attempt-success-start",
+        "note": "OpenAI TTFT health routing: a successful report clears the account+model transient state through ReportOpenAIAttemptSuccess, which reads the attempt start from the matching attempt profile so a success that began before the latest planned slow failure does not lift its cooldown, and records the warm-stream latency sample.",
+        "removed": [
+          "s.clearOpenAIAccountModelTransientState(accountID, normalizeOpenAIAccountModelTransientModel(model))"
+        ],
+        "added": [
+          "s.ReportOpenAIAttemptSuccess(ctx, account, model)"
+        ]
+      },
+      {
+        "block": "ttft-sticky-migration-guard",
+        "note": "OpenAI TTFT health routing: on the legacy path, requests carrying previous_response_id or needing a non-HTTP transport (WebSocket) are marked so a latency-held sticky owner is never migrated away from them.",
+        "removed": [],
+        "added": [
+          "ctx = withOpenAIStickyMigrationGuard(ctx, previousResponseID, requiredTransport)"
+        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [
@@ -500,6 +518,25 @@
           "if selection, selectErr := openAIMonitorProbeFreeSlot(ctx, tryAcquireFromLoadMap); selectErr != nil || selection != nil {",
           "return selection, selectErr",
           "}"
+        ]
+      },
+      {
+        "block": "ttft-latency-hold-order",
+        "note": "OpenAI TTFT health routing: after the existing sort, shuffle, cache preference and rate order, accounts in a latency hold are moved to the end of the candidate list (stable, within each compact tier); nothing is removed, so profit gate, DB recheck and slot checks are unchanged. Legacy selection only.",
+        "removed": [],
+        "added": [
+          "eligible = s.partitionOpenAILatencyHeldAccounts(ctx, eligible, requestedModel, requireCompact)",
+          "selectionOrder = s.partitionOpenAILatencyHeldLoad(ctx, selectionOrder, requestedModel, requireCompact)",
+          "ordered = s.partitionOpenAILatencyHeldAccounts(ctx, ordered, requestedModel, requireCompact)",
+          "candidates = s.partitionOpenAILatencyHeldAccounts(ctx, candidates, requestedModel, requireCompact)"
+        ]
+      },
+      {
+        "block": "ttft-latency-hold-migration",
+        "note": "OpenAI TTFT health routing: when the sticky owner is in a latency hold and the group has a usable account that is not, the binding is removed under an owner check and selection continues without the sticky owner, so the normal bind path rebinds the session once. Single-account groups and all-held groups keep the binding.",
+        "removed": [],
+        "added": [
+          "stickyAccountID = s.migrateOpenAILatencyHeldOwner(ctx, groupID, platform, sessionHash, requestedModel, stickyAccountID, excludedIDs, requireCompact, requiredCapability)"
         ]
       }
     ],

@@ -147,6 +147,11 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	if s == nil || account == nil {
 		return false
 	}
+	// Fast failures break the slow streak even when account policies or pool
+	// retries bypass recordFailure. Leave cooldowns and lastSlow untouched.
+	if len(canonicalModel) > 0 && shouldCooldownOpenAITransientUpstreamError(statusCode, responseBody) {
+		s.getOpenAIAccountModelTransientState().resetSlowStreak(account.ID, canonicalModel[0])
+	}
 	// Team 联动熔断必须先于 model-not-found 与账户级临时不可调度规则的早退。
 	if s.rateLimitService != nil {
 		s.rateLimitService.maybeHandleOpenAITeamLinkedError(stateCtx, account, statusCode, responseBody)
@@ -196,6 +201,7 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 				"failure_streak", decision.FailureStreak,
 				"cooldown_ms", decision.Cooldown.Milliseconds(),
 				"block_scope", "account_model",
+				"slow_streak", 0,
 			)
 		}
 	}
@@ -463,6 +469,32 @@ func (s *OpenAIGatewayService) clearOpenAIAccountModelTransientState(accountID i
 		return
 	}
 	state.recordSuccess(accountID, model)
+}
+
+func (s *OpenAIGatewayService) recordOpenAIAccountModelSlowFailure(account *Account, canonicalModel string, now time.Time) openAIAccountModelTransientDecision {
+	if s == nil || account == nil {
+		return openAIAccountModelTransientDecision{}
+	}
+	decision := s.getOpenAIAccountModelTransientState().recordSlowFailure(account.ID, openAIAccountModelTransientModel(canonicalModel), now)
+	if decision.SlowStreak >= 1 {
+		slog.Warn("openai_model_transient_state",
+			"account_id", account.ID,
+			"model", openAIAccountModelTransientModel(canonicalModel),
+			"failure_streak", decision.FailureStreak,
+			"cooldown_ms", decision.Cooldown.Milliseconds(),
+			"block_scope", "account_model",
+			"slow_streak", decision.SlowStreak,
+			"reason", string(PlannedFirstOutputTimeoutReason),
+		)
+	}
+	return decision
+}
+
+func (s *OpenAIGatewayService) clearOpenAIAccountModelTransientStateAt(accountID int64, model string, attemptStart time.Time) {
+	state := s.getOpenAIAccountModelTransientState()
+	if state != nil {
+		state.recordSuccessAt(accountID, model, attemptStart)
+	}
 }
 
 func (s *OpenAIGatewayService) isOpenAIAccountModelRuntimeBlocked(account *Account, requestedModel string) bool {

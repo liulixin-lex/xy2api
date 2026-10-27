@@ -238,7 +238,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		account := selection.Account
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai_chat_completions.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
-		_ = scheduleDecision
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
@@ -260,6 +259,15 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		forwardBody := body
 		if channelMapping.Mapped {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
+		}
+		if st := resilience.StateFrom(c.Request.Context()); st != nil {
+			st.SetAttemptProfile(resilience.AttemptProfile{
+				AccountID: account.ID, AttemptStart: forwardStart,
+				Model:     service.OpenAIAttemptModel(account, forwardModel),
+				Warm:      service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0),
+				Stream:    reqStream,
+				BodyBytes: len(forwardBody),
+			})
 		}
 		// xy2api resilience: delayed pre-output heartbeat for CDN-fronted streams (design §7.2).
 		armPreOutputKeepalive(c, service.PreOutputProtocolChat, reqStream, account)
