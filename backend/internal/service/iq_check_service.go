@@ -94,6 +94,39 @@ type IQTargetRepository interface {
 	ClaimIQTargets(context.Context, time.Time, int) ([]IQTargetClaim, error)
 	AddIQTargetAttempt(context.Context, IQTargetClaim, int, string, iqcheck.Challenge, iqcheck.Result, time.Time, time.Time) error
 	CompleteIQTarget(context.Context, IQTargetClaim, iqcheck.Result, time.Time) (bool, error)
+	CleanupIQResults(context.Context, time.Time, int) (int64, error)
+	ListIQResults(context.Context, int64, string, int64, int) (IQResultsPage, error)
+}
+
+type IQResultsPage struct {
+	Rounds       []IQRound `json:"rounds"`
+	NextBeforeID *int64    `json:"next_before_id"`
+}
+type IQRound struct {
+	ID            int64       `json:"id"`
+	Model         string      `json:"model"`
+	OutboundModel string      `json:"outbound_model"`
+	Mode          string      `json:"mode"`
+	Effort        string      `json:"effort"`
+	Status        string      `json:"status"`
+	Reason        string      `json:"reason"`
+	StartedAt     time.Time   `json:"started_at"`
+	FinishedAt    *time.Time  `json:"finished_at"`
+	PromptVersion string      `json:"prompt_version"`
+	Attempts      []IQAttempt `json:"attempts"`
+}
+type IQAttempt struct {
+	AttemptNo     int             `json:"attempt_no"`
+	Effort        string          `json:"effort"`
+	Challenge     json.RawMessage `json:"challenge"`
+	Expected      string          `json:"expected"`
+	Answer        string          `json:"answer"`
+	ReportedModel string          `json:"reported_model"`
+	ModelClass    string          `json:"model_class"`
+	Status        string          `json:"status"`
+	Reason        string          `json:"reason"`
+	LatencyMS     *int64          `json:"latency_ms"`
+	Diagnostic    json.RawMessage `json:"diagnostic"`
 }
 
 func (s *IQCheckService) ProbeTarget(ctx context.Context, claim IQTargetClaim) iqcheck.Result {
@@ -140,6 +173,13 @@ type IQCheckService struct {
 	modelsCache    map[string]IQModelCatalog
 	modelsFlight   singleflight.Group
 	targets        *IQTargetService
+}
+
+func (s *IQCheckService) ResultsPage(ctx context.Context, id int64, model string, beforeID int64, limit int) (IQResultsPage, error) {
+	if s == nil || s.targets == nil || s.targets.repo == nil {
+		return IQResultsPage{}, ErrIQCheckInvalid
+	}
+	return s.targets.repo.ListIQResults(ctx, id, model, beforeID, limit)
 }
 
 func ProvideIQCheckService(accounts AccountRepository, tester *AccountTestService, tokens *OpenAITokenProvider, concurrency *ConcurrencyService) *IQCheckService {
@@ -270,7 +310,7 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 		}
 		profile = claims[0].Profile.Defaults()
 		if claims[0].TargetModel != "" {
-			profile.Model = claims[0].TargetModel
+			profile.Model = canonicalOpenAIAccountSchedulingModel(account, claims[0].TargetModel)
 		}
 		if claims[0].TargetEffort != "" {
 			profile.ReasoningEffort = claims[0].TargetEffort
@@ -355,8 +395,14 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 		setOpenAIChatGPTAccountHeaders(req.Header, account)
 		enforceCodexIdentityHeadersWithUA(req.Header, account.GetOpenAIUserAgent())
 	} else {
-		if ua := account.GetOpenAIUserAgent(); ua != "" {
-			req.Header.Set("User-Agent", ua)
+		ua := account.GetOpenAIUserAgent()
+		originator := ""
+		if ua == "" {
+			ua, originator = CodexCanonicalAuthIdentity()
+		}
+		req.Header.Set("User-Agent", ua)
+		if originator != "" {
+			req.Header.Set("Originator", originator)
 		}
 	}
 	account.ApplyHeaderOverrides(req.Header)
@@ -372,7 +418,7 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 		proxyURL = account.Proxy.URL()
 	}
 	if gateway := s.tester.openaiGatewayService; gateway != nil {
-		outbound := gateway.openAICodexTicketOutboundModel(account, profile.Model, false)
+		outbound := canonicalOpenAIAccountSchedulingModel(account, profile.Model)
 		// IQ uses the same final outbound model as business routing.
 		if outbound != profile.Model {
 			payloadProfile := profile
@@ -400,6 +446,18 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 			stateModel = receipt.model
 			stateTicketID = receipt.identity()
 		}
+	}
+	// The probe must use the same canonical outbound model used by scheduling.
+	if body, e := io.ReadAll(req.Body); e == nil {
+		var envelope map[string]any
+		if json.Unmarshal(body, &envelope) == nil {
+			if model, ok := envelope["model"].(string); !ok || model != check.Sent {
+				return iqcheck.Unknown("request_model_mismatch")
+			}
+		}
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		req.ContentLength = int64(len(body))
+		req.GetBody = nil
 	}
 	if gateway := s.tester.openaiGatewayService; gateway != nil && codexAccountTicketConfigOf(account).Enabled {
 		budgetModel := gateway.openAICodexTicketOutboundModel(account, profile.Model, false)
@@ -453,5 +511,8 @@ func (s *IQCheckService) notify() {
 }
 
 func qualityDowngradeRules(s *IQCheckService) []openai.DowngradeRule {
-	return openai.DefaultDowngradeRules()
+	if s != nil && s.tester != nil && s.tester.openaiGatewayService != nil {
+		return s.tester.openaiGatewayService.qualityConfig().DowngradeRules()
+	}
+	return nil
 }

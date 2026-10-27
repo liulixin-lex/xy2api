@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/iqcheck"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 )
 
 type IQTargetService struct {
@@ -65,10 +66,8 @@ func (s *IQTargetService) run(ctx context.Context) {
 		case <-ticker.C:
 		case <-s.wake:
 		case <-cleanup.C:
-			if r, ok := s.repo.(interface {
-				CleanupIQResults(context.Context, time.Time, int) (int64, error)
-			}); ok {
-				_, _ = r.CleanupIQResults(ctx, time.Now().UTC().Add(-7*24*time.Hour), 5000)
+			if _, err := s.repo.CleanupIQResults(ctx, time.Now().UTC().Add(-7*24*time.Hour), 5000); err != nil {
+				logger.LegacyPrintf("iq_check", "cleanup failed: %v", err)
 			}
 		}
 	}

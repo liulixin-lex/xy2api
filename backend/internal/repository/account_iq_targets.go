@@ -26,6 +26,7 @@ type IQTargetRepository interface {
 	AddIQTargetAttempt(context.Context, service.IQTargetClaim, int, string, iqcheck.Challenge, iqcheck.Result, time.Time, time.Time) error
 	CompleteIQTarget(context.Context, service.IQTargetClaim, iqcheck.Result, time.Time) (bool, error)
 	CleanupIQResults(context.Context, time.Time, int) (int64, error)
+	ListIQResults(context.Context, int64, string, int64, int) (service.IQResultsPage, error)
 }
 
 func (r *accountRepository) CleanupIQResults(ctx context.Context, before time.Time, limit int) (int64, error) {
@@ -37,6 +38,56 @@ func (r *accountRepository) CleanupIQResults(ctx context.Context, before time.Ti
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+func (r *accountRepository) ListIQResults(ctx context.Context, accountID int64, model string, beforeID int64, limit int) (service.IQResultsPage, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	args := []any{accountID, limit}
+	where := `account_id=$1 AND started_at >= now()-interval '7 days'`
+	if model != "" {
+		args = append(args, model)
+		where += fmt.Sprintf(" AND model=$%d", len(args))
+	}
+	if beforeID > 0 {
+		args = append(args, beforeID)
+		where += fmt.Sprintf(" AND id<$%d", len(args))
+	}
+	rows, err := r.sql.QueryContext(ctx, `SELECT id,model,outbound_model,mode,effort,status,reason,started_at,finished_at,prompt_version FROM account_iq_check_results WHERE `+where+` ORDER BY id DESC LIMIT $2`, args...)
+	if err != nil {
+		return service.IQResultsPage{}, err
+	}
+	defer rows.Close()
+	page := service.IQResultsPage{}
+	for rows.Next() {
+		var x service.IQRound
+		if err := rows.Scan(&x.ID, &x.Model, &x.OutboundModel, &x.Mode, &x.Effort, &x.Status, &x.Reason, &x.StartedAt, &x.FinishedAt, &x.PromptVersion); err != nil {
+			return page, err
+		}
+		ar, err := r.sql.QueryContext(ctx, `SELECT attempt_no,effort,challenge,expected,answer,reported_model,model_class,status,reason,latency_ms,diagnostic FROM account_iq_check_attempts WHERE result_id=$1 ORDER BY attempt_no`, x.ID)
+		if err != nil {
+			return page, err
+		}
+		for ar.Next() {
+			var a service.IQAttempt
+			if err := ar.Scan(&a.AttemptNo, &a.Effort, &a.Challenge, &a.Expected, &a.Answer, &a.ReportedModel, &a.ModelClass, &a.Status, &a.Reason, &a.LatencyMS, &a.Diagnostic); err != nil {
+				ar.Close()
+				return page, err
+			}
+			x.Attempts = append(x.Attempts, a)
+		}
+		ar.Close()
+		page.Rounds = append(page.Rounds, x)
+	}
+	if err := rows.Err(); err != nil {
+		return page, err
+	}
+	if len(page.Rounds) == limit {
+		id := page.Rounds[len(page.Rounds)-1].ID
+		page.NextBeforeID = &id
+	}
+	return page, nil
 }
 
 func (r *accountRepository) ClaimIQTargets(ctx context.Context, now time.Time, limit int) ([]service.IQTargetClaim, error) {
