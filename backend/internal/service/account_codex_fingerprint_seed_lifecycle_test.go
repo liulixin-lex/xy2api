@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -170,6 +171,11 @@ type codexSeedDuplicateRepo struct {
 
 func (r *codexSeedDuplicateRepo) CreateWithAccountGroups(ctx context.Context, account *Account, _ []AccountGroup) error {
 	return r.Create(ctx, account)
+}
+
+func (r *codexSeedDuplicateRepo) ListIQTargetSettings(_ context.Context, ids []int64) (map[int64][]domain.IQTargetSettings, error) {
+	out := make(map[int64][]domain.IQTargetSettings, len(ids))
+	return out, nil
 }
 
 func TestDuplicateAccountDoesNotCopyCodexFingerprintSeed(t *testing.T) {
