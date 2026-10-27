@@ -727,8 +727,12 @@ func resilienceLastResortGate(ctx context.Context) bool {
 // account through as a last resort: only in a last-resort context and only
 // while the limit is within the soft threshold (design §3.1).
 func lastResortModelLimitSoft(ctx context.Context, acc *Account, model string) bool {
-	if acc != nil && iqGateKeyPresent(acc, model) {
-		return false
+	if acc != nil && accountHasIQGate(acc) {
+		for _, key := range iqGateKeysForRequest(acc, model, false) {
+			if acc.hasRateLimitKey(key) {
+				return false
+			}
+		}
 	}
 	return resilienceLastResortGate(ctx) && acc.GetRateLimitRemainingTimeWithContext(ctx, model) <= resilience.HardRateLimitThreshold
 }

@@ -2911,7 +2911,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 			client = tx.Client()
 		}
 	}
-	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
+	extraExpression := "COALESCE(extra, '{}'::jsonb) || jsonb_set($1::jsonb, '{model_rate_limits}', COALESCE(($1::jsonb->'model_rate_limits') || (SELECT COALESCE(jsonb_object_agg(key,value),'{}'::jsonb) FROM jsonb_each(COALESCE(accounts.extra->'model_rate_limits','{}'::jsonb)) WHERE key LIKE 'iq:%'),'{}'::jsonb), true)"
 	if clearProbeSnapshot {
 		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 	}
@@ -3342,6 +3342,13 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if len(updates.Extra) > 0 || len(ollamaGroupIdentityChanges) > 0 || len(opencodeGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" || updates.EnsureCodexFingerprintSeed {
 		extraExpression := "COALESCE(extra, '{}'::jsonb)"
 		if len(updates.Extra) > 0 {
+			if limits, ok := updates.Extra["model_rate_limits"].(map[string]any); ok {
+				for key := range limits {
+					if domain.IsIQGateKey(key) {
+						delete(limits, key)
+					}
+				}
+			}
 			payload, err := json.Marshal(updates.Extra)
 			if err != nil {
 				return 0, err

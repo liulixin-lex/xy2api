@@ -15,16 +15,24 @@ func iqGateModelKey(model string) string {
 }
 
 func iqGateKeyPresent(account *Account, model string) bool {
+	return accountHasIQGate(account)
+}
+
+func accountHasIQGate(account *Account) bool {
 	if account == nil || account.Extra == nil {
 		return false
 	}
 	limits, _ := account.Extra[modelRateLimitsKey].(map[string]any)
-	_, ok := limits[iqGateModelKey(model)]
-	return ok
+	for key := range limits {
+		if domain.IsIQGateKey(key) {
+			return true
+		}
+	}
+	return false
 }
 
 func iqGateKeysForRequest(account *Account, model string, requireCompact bool) []string {
-	if account == nil || !iqGateKeyPresent(account, model) {
+	if account == nil || !accountHasIQGate(account) {
 		return nil
 	}
 	keys := []string{iqGateModelKey(canonicalOpenAIAccountSchedulingModel(account, model))}

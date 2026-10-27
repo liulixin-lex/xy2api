@@ -39,6 +39,17 @@ func (a *Account) hasRateLimitKey(key string) bool {
 
 // getRateLimitRemainingForKey 获取指定 key 的限流剩余时间，0 表示未限流或已过期
 func (a *Account) getRateLimitRemainingForKey(key string) time.Duration {
+	if domain.IsIQGateKey(key) && a.hasRateLimitKey(key) {
+		resetAt := a.modelRateLimitResetAt(key)
+		if resetAt == nil {
+			return 30 * time.Second
+		}
+		remaining := time.Until(*resetAt)
+		if remaining < 30*time.Second {
+			return 30 * time.Second
+		}
+		return remaining
+	}
 	resetAt := a.modelRateLimitResetAt(key)
 	if resetAt == nil {
 		return 0
@@ -88,11 +99,6 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 	if modelKey == "" {
 		return nil
 	}
-	if a.Platform == PlatformOpenAI && !iqGateKeyPresent(a, requestedModel) {
-		// Canonical model calculation is only needed for accounts carrying an IQ gate.
-		// Preserve the existing mapped key fast path for all other accounts.
-	}
-
 	keys := []string{modelKey}
 	switch a.Platform {
 	case PlatformAntigravity:
@@ -100,6 +106,12 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 			keys = append(keys, antigravityGeminiModelRateLimitKey)
 		}
 	case PlatformOpenAI:
+		if accountHasIQGate(a) {
+			canonical := canonicalOpenAIAccountSchedulingModel(a, requestedModel)
+			if canonical != "" {
+				keys = append(keys, domain.IQGateKeyPrefix+canonical)
+			}
+		}
 		if openAIImageGenerationRateLimitApplies(ctx, requestedModel, modelKey) && modelKey != openAIImageGenerationRateLimitKey {
 			keys = append(keys, openAIImageGenerationRateLimitKey)
 		}
