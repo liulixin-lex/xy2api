@@ -628,6 +628,9 @@ func parse(body io.Reader, sse, chat bool, d *Diagnostic, c Check, headers []str
 		if p.answer == "" && d.Code != "" {
 			return finishUnknown(d, d.Code)
 		}
+		if strings.TrimSpace(p.answer) == "" {
+			return finishUnknown(d, "empty_final_text")
+		}
 		identity := openai.ClassifyDeclarations(c.Sent, p.bodyModels, p.headerModels, c.PreferHeader, c.Rules, p.selection)
 		c.declaration = &identity
 		r := Grade(p.answer, c)

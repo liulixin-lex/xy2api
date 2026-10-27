@@ -125,7 +125,7 @@ func TestProtocolAmbiguityAndRefusal(t *testing.T) {
 			if result.Status != tc.status {
 				t.Fatalf("%+v", result)
 			}
-			if tc.status == "smart" && result.ReportedModel != "" {
+			if tc.status == "smart" && result.ReportedModel != "reported-model" {
 				t.Fatal(result)
 			}
 		})

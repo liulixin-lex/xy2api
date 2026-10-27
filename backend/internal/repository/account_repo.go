@@ -37,6 +37,24 @@ import (
 	"entgo.io/ent/dialect/sql/sqljson"
 )
 
+func extraModelRateLimits(extra map[string]any) map[string]any {
+	if extra == nil {
+		return nil
+	}
+	limits, _ := extra["model_rate_limits"].(map[string]any)
+	return limits
+}
+
+func stripIQGateEntries(extra map[string]any) map[string]any {
+	limits := extraModelRateLimits(extra)
+	for key := range limits {
+		if domain.IsIQGateKey(key) {
+			delete(limits, key)
+		}
+	}
+	return extra
+}
+
 // accountRepository 实现 service.AccountRepository 接口。
 // 提供 AI API 账户的完整数据访问功能。
 //
@@ -150,6 +168,7 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		return err
 	}
 	account.Extra = service.MergeOpenAICodexTicketExtra(account.Extra, nil)
+	account.Extra = stripIQGateEntries(account.Extra)
 	service.InitializeNewCodexTicketAccount(account)
 	account.IQCheck = resetIQState(domain.DefaultIQCheck(), account.IQCheckSettings, time.Now().UTC())
 
@@ -806,6 +825,23 @@ func lockAndMergeAccountProbeExtra(
 		}
 	}
 	extra := service.MergeOpenAICodexTicketExtra(copyJSONMap(normalizeJSONMap(account.Extra)), currentExtra)
+	for key := range extraModelRateLimits(extra) {
+		if domain.IsIQGateKey(key) {
+			delete(extraModelRateLimits(extra), key)
+		}
+	}
+	if current := extraModelRateLimits(currentExtra); len(current) > 0 {
+		limits := extraModelRateLimits(extra)
+		if limits == nil {
+			limits = map[string]any{}
+		}
+		for key, value := range current {
+			if domain.IsIQGateKey(key) {
+				limits[key] = value
+			}
+		}
+		extra["model_rate_limits"] = limits
+	}
 	extra = service.MergeCapabilityLearningExtra(extra, currentExtra)
 	for _, key := range []string{
 		service.UpstreamBillingProbeEnabledExtraKey,
@@ -2725,7 +2761,7 @@ func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) 
 	client := clientFromContext(ctx, r.client)
 	result, err := client.ExecContext(
 		ctx,
-		"UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) - 'model_rate_limits', updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
+		"UPDATE accounts SET extra = jsonb_set(COALESCE(extra, '{}'::jsonb), '{model_rate_limits}', COALESCE((SELECT jsonb_object_agg(key, value) FROM jsonb_each(COALESCE(extra->'model_rate_limits', '{}'::jsonb)) WHERE key NOT LIKE 'iq:%'), '{}'::jsonb), true), updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
 		id,
 	)
 	if err != nil {
@@ -2843,6 +2879,13 @@ func (r *accountRepository) AutoPauseExpiredAccounts(ctx context.Context, now ti
 
 func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
 	updates = stripCodexFingerprintSeedFromExtraUpdate(updates)
+	if limits, ok := updates["model_rate_limits"].(map[string]any); ok {
+		for key := range limits {
+			if domain.IsIQGateKey(key) {
+				delete(limits, key)
+			}
+		}
+	}
 	if len(updates) == 0 {
 		return nil
 	}
@@ -2882,6 +2925,9 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		}
 	}
 	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
+	if _, hasLimits := updates["model_rate_limits"]; hasLimits {
+		extraExpression = "COALESCE(extra, '{}'::jsonb) || jsonb_set($1::jsonb, '{model_rate_limits}', COALESCE(($1::jsonb->'model_rate_limits') || (SELECT COALESCE(jsonb_object_agg(key,value),'{}'::jsonb) FROM jsonb_each(COALESCE(accounts.extra->'model_rate_limits','{}'::jsonb)) WHERE key LIKE 'iq:%'),'{}'::jsonb), true)"
+	}
 	if clearProbeSnapshot {
 		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 	}
@@ -3143,6 +3189,13 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	}
 
 	updates.Extra = stripCodexFingerprintSeedFromExtraUpdate(updates.Extra)
+	if limits, ok := updates.Extra["model_rate_limits"].(map[string]any); ok {
+		for key := range limits {
+			if domain.IsIQGateKey(key) {
+				delete(limits, key)
+			}
+		}
+	}
 
 	setClauses := make([]string, 0, 8)
 	args := make([]any, 0, 8)
@@ -3305,6 +3358,13 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if len(updates.Extra) > 0 || len(ollamaGroupIdentityChanges) > 0 || len(opencodeGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" || updates.EnsureCodexFingerprintSeed {
 		extraExpression := "COALESCE(extra, '{}'::jsonb)"
 		if len(updates.Extra) > 0 {
+			if limits, ok := updates.Extra["model_rate_limits"].(map[string]any); ok {
+				for key := range limits {
+					if domain.IsIQGateKey(key) {
+						delete(limits, key)
+					}
+				}
+			}
 			payload, err := json.Marshal(updates.Extra)
 			if err != nil {
 				return 0, err
@@ -3312,6 +3372,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			extraExpression += " || $" + itoa(idx) + "::jsonb"
 			args = append(args, payload)
 			idx++
+			if _, hasLimits := updates.Extra["model_rate_limits"]; hasLimits {
+				extraExpression = "(" + extraExpression + ") || jsonb_build_object('model_rate_limits', COALESCE((" + extraExpression + ")->'model_rate_limits', '{}'::jsonb) || (SELECT COALESCE(jsonb_object_agg(key,value),'{}'::jsonb) FROM jsonb_each(COALESCE(accounts.extra->'model_rate_limits','{}'::jsonb)) WHERE key LIKE 'iq:%'))"
+			}
 			if upstreamBillingProbeExplicitlyDisabled(updates.Extra) || upstreamBillingProbeSnapshotClearRequested(updates.Extra) {
 				extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 			}
