@@ -190,7 +190,7 @@ type IQCheckMetric struct {
 
 // Download contains no account identity or raw responses. Record retention bounds it to three rounds.
 func (s *IQCheckService) Diagnostics(ctx context.Context, id int64) (any, error) {
-	if s == nil || s.targets == nil {
+	if s == nil || s.targetRepo == nil {
 		return nil, ErrIQCheckInvalid
 	}
 	page, err := s.ResultsPage(ctx, id, "", 0, 100)
