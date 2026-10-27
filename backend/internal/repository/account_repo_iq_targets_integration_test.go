@@ -113,3 +113,80 @@ func TestAccountIdentityChangesResetIQTargets(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateExtraTransportIdentityChangeResetsIQTargets(t *testing.T) {
+	ctx := context.Background()
+	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+	a := createDegradedIQTargetAccount(t, repo, map[string]any{"api_key": "fixture"}, nil)
+
+	require.NoError(t, repo.UpdateExtra(ctx, a.ID, map[string]any{"openai_responses_mode": "force_chat_completions"}))
+	assertIQTargetReset(t, a.ID)
+}
+
+func TestBulkUpdateResetsChangedIdentitiesAndSavesTargetPatch(t *testing.T) {
+	ctx := context.Background()
+	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+	changed := createDegradedIQTargetAccount(t, repo, map[string]any{"api_key": "changed", "model_mapping": map[string]any{"requested": "old"}}, nil)
+	unchanged := createDegradedIQTargetAccount(t, repo, map[string]any{"api_key": "unchanged", "model_mapping": map[string]any{"requested": "new"}}, nil)
+	enabled := false
+	patch := domain.IQTargetsPatch{Targets: []domain.IQTargetSettings{{Model: "copied-target", Enabled: &enabled}}}
+
+	_, err := repo.BulkUpdate(ctx, []int64{changed.ID, unchanged.ID}, service.AccountBulkUpdate{
+		Credentials: map[string]any{"model_mapping": map[string]any{"requested": "new"}},
+		IQTargets:   &patch,
+	})
+	require.NoError(t, err)
+	assertIQTargetReset(t, changed.ID)
+
+	var verdict string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT verdict FROM account_iq_targets WHERE account_id=$1 AND model='gpt-6-astra'`, unchanged.ID).Scan(&verdict))
+	require.Equal(t, "degraded", verdict, "an unchanged identity retains its verdict")
+	for _, accountID := range []int64{changed.ID, unchanged.ID} {
+		var enabledValue bool
+		require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT enabled FROM account_iq_targets WHERE account_id=$1 AND model='copied-target'`, accountID).Scan(&enabledValue))
+		require.False(t, enabledValue)
+	}
+}
+
+func createDegradedIQTargetAccount(t *testing.T, repo *accountRepository, credentials, extra map[string]any) *service.Account {
+	t.Helper()
+	ctx := context.Background()
+	enabled := true
+	a := &service.Account{
+		Name:        fmt.Sprintf("b3-target-%d", time.Now().UnixNano()),
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Credentials: credentials,
+		Extra:       extra,
+		IQTargetsPatch: &domain.IQTargetsPatch{Targets: []domain.IQTargetSettings{{
+			Model: "gpt-6-astra", Enabled: &enabled,
+		}}},
+	}
+	require.NoError(t, repo.Create(ctx, a))
+	t.Cleanup(func() { cleanupIQTestAccount(t, a.ID) })
+	_, err := integrationDB.ExecContext(ctx, `UPDATE account_iq_targets SET verdict='degraded',verdict_at=now(),gate_model='gpt-6-astra',degraded_streak=3,failure_streak=2,not_before=now()+interval '1 hour' WHERE account_id=$1`, a.ID)
+	require.NoError(t, err)
+	_, err = repo.ProjectIQGates(ctx, repo.client, a.ID)
+	require.NoError(t, err)
+	return a
+}
+
+func assertIQTargetReset(t *testing.T, accountID int64) {
+	t.Helper()
+	ctx := context.Background()
+	var verdict, gateModel string
+	var notBefore *time.Time
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT verdict,COALESCE(gate_model,''),not_before FROM account_iq_targets WHERE account_id=$1 AND model='gpt-6-astra'`, accountID).Scan(&verdict, &gateModel, &notBefore))
+	require.Equal(t, "unknown", verdict)
+	require.Empty(t, gateModel)
+	require.Nil(t, notBefore)
+	var raw []byte
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT extra FROM accounts WHERE id=$1`, accountID).Scan(&raw))
+	var extra map[string]any
+	require.NoError(t, json.Unmarshal(raw, &extra))
+	limits, _ := extra["model_rate_limits"].(map[string]any)
+	_, hasGate := limits["iq:gpt-6-astra"]
+	require.False(t, hasGate)
+}

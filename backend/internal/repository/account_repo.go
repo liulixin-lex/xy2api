@@ -2928,10 +2928,6 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 			iqConditions = append(iqConditions, "extra->'"+key+"' IS DISTINCT FROM $1::jsonb->'"+key+"'")
 		}
 	}
-	iqExpression := ""
-	if len(iqConditions) > 0 {
-		// Target reset is performed by the transaction owner after the row lock.
-	}
 	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || len(iqConditions) > 0
 	baseCtx := ctx
 	contextTx := dbent.TxFromContext(ctx)
@@ -2959,9 +2955,32 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	if service.ShouldEnsureCodexFingerprintSeedForExtraUpdates(updates) {
 		extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)
 	}
+	identityChanged := false
+	if len(iqConditions) > 0 {
+		rows, err := client.QueryContext(ctx,
+			"SELECT ("+joinClauses(iqConditions, " OR ")+") FROM accounts WHERE id = $2 AND deleted_at IS NULL FOR NO KEY UPDATE",
+			string(payload), id,
+		)
+		if err != nil {
+			return err
+		}
+		if rows.Next() {
+			if err := rows.Scan(&identityChanged); err != nil {
+				rows.Close()
+				return err
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+	}
 	result, err := client.ExecContext(
 		ctx,
-		"UPDATE accounts SET extra = "+extraExpression+iqExpression+", updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL",
+		"UPDATE accounts SET extra = "+extraExpression+", updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL",
 		string(payload), id,
 	)
 
@@ -2975,6 +2994,11 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	}
 	if affected == 0 {
 		return service.ErrAccountNotFound
+	}
+	if identityChanged {
+		if _, err := r.ResetIQTargetsOnIdentityChangeTx(ctx, client, id); err != nil {
+			return err
+		}
 	}
 	if durableSchedulerChange {
 		if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
@@ -3200,19 +3224,6 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	if updates.IQCheck != nil {
-		if err := service.ValidateIQCheckSettings(service.PlatformOpenAI, updates.IQCheck); err != nil {
-			return 0, err
-		}
-		invalid, err := r.client.Account.Query().Where(dbaccount.IDIn(ids...), dbaccount.PlatformNEQ(service.PlatformOpenAI)).Exist(ctx)
-		if err != nil {
-			return 0, err
-		}
-		if invalid {
-			return 0, service.ErrIQCheckInvalid
-		}
-	}
-
 	updates.Extra = stripCodexFingerprintSeedFromExtraUpdate(updates.Extra)
 	if err := normalizeModelRateLimits(updates.Extra); err != nil {
 		return 0, err
@@ -3323,7 +3334,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			idx++
 		}
 	}
-	// IQ targets are reset under each updated account row lock below.
+	// Identity changes are selected and locked before UPDATE below.
 
 	ollamaGroupIdentityChanges := make([]string, 0, 2)
 	if _, ok := updates.Credentials["api_key"]; ok {
@@ -3463,13 +3474,15 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		setClauses = append(setClauses, "extra = "+extraExpression)
 	}
 
-	if len(setClauses) == 0 {
+	if len(setClauses) == 0 && updates.IQTargets == nil {
 		return 0, nil
 	}
 
 	setClauses = append(setClauses, "updated_at = NOW()")
 
-	whereClause := " WHERE id = ANY($" + itoa(idx) + ") AND deleted_at IS NULL"
+	idsPlaceholder := "$" + itoa(idx)
+	idsArgIndex := idx
+	whereClause := " WHERE id = ANY(" + idsPlaceholder + ") AND deleted_at IS NULL"
 	args = append(args, pq.Array(ids))
 	idx++
 	if updates.ProbeEnabled != nil {
@@ -3496,6 +3509,46 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			exec = tx.Client()
 		}
 	}
+	targetClient := clientFromContext(ctx, r.client)
+	if updates.IQTargets != nil && targetClient == nil {
+		return 0, errors.New("IQ target update requires an Ent transaction client")
+	}
+	var targetAccountIDs []int64
+	var identityChangedAccountIDs []int64
+	if targetClient != nil && (len(iqResetConditions) > 0 || updates.IQTargets != nil) {
+		identityExpr := "FALSE"
+		if len(iqResetConditions) > 0 {
+			identityExpr = "(" + joinClauses(iqResetConditions, " OR ") + ")"
+		}
+		selectQuery := "SELECT id, " + identityExpr + " FROM accounts WHERE id = ANY(" + idsPlaceholder + ") AND deleted_at IS NULL"
+		if len(iqResetConditions) > 0 && updates.IQTargets == nil {
+			selectQuery += " AND " + identityExpr
+		}
+		selectQuery += " ORDER BY id FOR NO KEY UPDATE"
+		lockRows, err := exec.QueryContext(ctx, selectQuery, args[:idsArgIndex]...)
+		if err != nil {
+			return 0, err
+		}
+		for lockRows.Next() {
+			var accountID int64
+			var changed bool
+			if err := lockRows.Scan(&accountID, &changed); err != nil {
+				lockRows.Close()
+				return 0, err
+			}
+			targetAccountIDs = append(targetAccountIDs, accountID)
+			if changed {
+				identityChangedAccountIDs = append(identityChangedAccountIDs, accountID)
+			}
+		}
+		if err := lockRows.Err(); err != nil {
+			lockRows.Close()
+			return 0, err
+		}
+		if err := lockRows.Close(); err != nil {
+			return 0, err
+		}
+	}
 
 	result, err := exec.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -3519,6 +3572,23 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			return 0, service.ErrUpstreamBillingProbeAccountInvalid
 		}
 	}
+	targetStateChanged := false
+	for _, accountID := range identityChangedAccountIDs {
+		changed, err := r.ResetIQTargetsOnIdentityChangeTx(ctx, targetClient, accountID)
+		if err != nil {
+			return 0, err
+		}
+		targetStateChanged = targetStateChanged || changed
+	}
+	if updates.IQTargets != nil {
+		for _, accountID := range targetAccountIDs {
+			changed, err := r.SaveIQTargetsTx(ctx, targetClient, accountID, *updates.IQTargets)
+			if err != nil {
+				return 0, err
+			}
+			targetStateChanged = targetStateChanged || changed
+		}
+	}
 	if rows > 0 {
 		payload := map[string]any{"account_ids": ids}
 		if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, payload); err != nil {
@@ -3531,7 +3601,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 	if rows > 0 && contextTx == nil {
-		shouldSync := false
+		shouldSync := targetStateChanged
 		if updates.Status != nil && (*updates.Status == service.StatusError || *updates.Status == service.StatusDisabled) {
 			shouldSync = true
 		}
