@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -40,6 +41,14 @@ type blockingDuplicateAdminServiceStub struct {
 	calls        atomic.Int32
 	recoverCalls atomic.Int32
 	recoverErr   error
+}
+
+func (s *duplicateAccountAdminServiceStub) ListIQTargetSummaries(context.Context, []int64) (map[int64][]domain.IQTargetSummary, error) {
+	return map[int64][]domain.IQTargetSummary{}, nil
+}
+
+func (s *blockingDuplicateAdminServiceStub) ListIQTargetSummaries(context.Context, []int64) (map[int64][]domain.IQTargetSummary, error) {
+	return map[int64][]domain.IQTargetSummary{}, nil
 }
 
 type failOnceMarkSucceededRepo struct {

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,6 +35,29 @@ func TestIQGateCanonicalKeysAndFailClosed(t *testing.T) {
 	}
 	a := &Account{Platform: PlatformOpenAI, Extra: map[string]any{"model_rate_limits": map[string]any{"gpt-6-astra": map[string]any{}}}}
 	require.Empty(t, iqGateKeysForRequest(a, "gpt-6-astra", false))
+}
+
+func TestCompactFallbackGateUsesForwardFinalModel(t *testing.T) {
+	account := &Account{
+		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+		Credentials: map[string]any{"api_key": "fixture"},
+		Extra: map[string]any{"model_rate_limits": map[string]any{
+			"iq:gpt-6.1-sol": map[string]any{},
+		}},
+	}
+	gateway := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{OpenAICompactModel: "gpt-6.1-sol"}}}
+	actualOutbound := gateway.openAICodexTicketOutboundModel(account, "gpt-6-astra", true)
+	require.Equal(t, "gpt-6.1-sol", actualOutbound)
+	keys := iqGateKeysForRequest(account, "gpt-6-astra", true, actualOutbound)
+	require.Contains(t, keys, "iq:gpt-6-astra")
+	require.Contains(t, keys, "iq:gpt-6.1-sol")
+
+	scheduler := &defaultOpenAIAccountScheduler{service: gateway, stats: newOpenAIAccountRuntimeStats()}
+	compatible, reason := scheduler.isAccountRequestCompatibleReason(context.Background(), account, OpenAIAccountScheduleRequest{
+		Platform: PlatformOpenAI, RequestedModel: "gpt-6-astra", RequireCompact: true,
+	})
+	require.False(t, compatible)
+	require.Contains(t, []string{"model_rate_limited", "runtime_blocked"}, reason)
 }
 
 func TestIQGateRemainingFloorAndLastResort(t *testing.T) {

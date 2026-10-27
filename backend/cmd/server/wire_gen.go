@@ -308,7 +308,10 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	resilienceService := service.ProvideResilienceService(settingRepository, resilienceStore, resilienceRepository, undeliveredRepository, accountRepository, groupRepository, rateLimitService, gatewayService, openAIGatewayService)
 	resilienceHandler := admin.NewResilienceHandler(resilienceService)
 	upstreamBillingProbeService := service.ProvideUpstreamBillingProbeService(accountRepository, accountTestService, settingService, leaderLockCache, db)
-	iqCheckService := service.ProvideIQCheckService(accountRepository, accountTestService, openAITokenProvider, concurrencyService)
+	iqCheckService, err := service.ProvideIQCheckService(accountRepository, accountTestService, openAITokenProvider, concurrencyService)
+	if err != nil {
+		return nil, err
+	}
 	accountIQHandler := admin.ProvideAccountIQHandler(iqCheckService)
 	openCodeGoUsageService := service.ProvideOpenCodeGoUsageService(accountRepository, httpUpstream, settingService, leaderLockCache, db)
 	idempotencyCoordinator := service.ProvideIdempotencyCoordinator(idempotencyRepository, configConfig)

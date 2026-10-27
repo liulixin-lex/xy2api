@@ -36,3 +36,13 @@ func TestIQMonitoringErrorCodes(t *testing.T) {
 	require.Equal(t, "quota_exhausted", r.Reason)
 	require.Equal(t, "plugin_attempts_unknown", r.Diagnostic.RetryVisibility)
 }
+
+func TestRetryableFollowsFailurePolicyForServerErrorsAndParseFailures(t *testing.T) {
+	for _, result := range []Result{
+		{Status: "unknown", Reason: "http_500"},
+		{Status: "unknown", Reason: "unparseable_answer", Diagnostic: &Diagnostic{Stage: "parse"}},
+	} {
+		require.True(t, Retryable(result), result.Reason)
+	}
+	require.False(t, Retryable(Unknown("authentication_unavailable")))
+}

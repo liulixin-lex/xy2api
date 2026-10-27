@@ -100,9 +100,9 @@ type IQTargetSummary struct {
 	State      string     `json:"state"`
 	Enabled    bool       `json:"enabled"`
 	GateActive bool       `json:"gate_active"`
-	VerdictAt  *time.Time `json:"verdict_at,omitempty"`
-	LastRunAt  *time.Time `json:"last_run_at,omitempty"`
-	NextRunAt  *time.Time `json:"next_run_at,omitempty"`
+	VerdictAt  *time.Time `json:"verdict_at"`
+	LastRunAt  *time.Time `json:"last_run_at"`
+	NextRunAt  *time.Time `json:"next_run_at"`
 }
 
 type IQTargetView struct {

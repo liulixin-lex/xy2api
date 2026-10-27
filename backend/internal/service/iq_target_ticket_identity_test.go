@@ -26,6 +26,8 @@ func TestIQTicketIdentityForResultTracksOnlyEffectiveJudgments(t *testing.T) {
 		StateModel: "gpt-6-astra", StateProtection: "protected",
 	}, got)
 	require.Equal(t, "model_mismatch", iqTargetRoundReason("degraded", []string{"wrong_answer", "model_mismatch"}))
+	require.Equal(t, "authentication_unavailable", iqTargetRoundReason("unknown", []string{"timeout", "authentication_unavailable"}))
+	require.Equal(t, "quota_exhausted", iqTargetRoundReason("unknown", []string{"timeout", "quota_exhausted"}))
 }
 
 func TestCodexTicketIQIdentitiesCurrentRejectsAnyStaleQuestion(t *testing.T) {

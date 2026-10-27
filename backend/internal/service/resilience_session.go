@@ -355,7 +355,7 @@ func (r *ResilienceService) groupAccountsForLastResort(ctx context.Context, repo
 // copy is that row with soft penalties relaxed. A failed read keeps the
 // planned copy (the list itself was read moments ago).
 func (r *ResilienceService) verifyLastResortAccount(ctx context.Context, repo AccountRepository, groupID int64, planned *Account, model string, requireCompact bool,
-	penaltyOf func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string)) (*Account, bool) {
+	penaltyOf func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string), compactOutbound ...string) (*Account, bool) {
 	if planned == nil {
 		return nil, false
 	}
@@ -376,7 +376,7 @@ func (r *ResilienceService) verifyLastResortAccount(ctx context.Context, repo Ac
 		r.lastResortGroups.drop(groupID)
 		return nil, false
 	}
-	if iqGateBlocksRequest(fresh, model, requireCompact) {
+	if iqGateBlocksRequest(fresh, model, requireCompact, compactOutbound...) {
 		r.lastResortGroups.drop(groupID)
 		return nil, false
 	}
@@ -646,7 +646,11 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 		if acc.Platform != platform || !acc.IsOpenAICompatible() {
 			continue
 		}
-		if iqGateBlocksRequest(&acc, req.RequestedModel, req.RequireCompact) {
+		compactOutboundModel := ""
+		if req.RequireCompact {
+			compactOutboundModel = s.openAICodexTicketOutboundModel(&acc, req.RequestedModel, true)
+		}
+		if iqGateBlocksRequest(&acc, req.RequestedModel, req.RequireCompact, compactOutboundModel) {
 			continue
 		}
 		tier, recoverAt, _ := s.resilienceOpenAIPenaltyOf(&acc, req.RequestedModel, now)
@@ -654,8 +658,8 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 			continue
 		}
 		candidate := withoutSoftPenalties(acc, now)
-		if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(gateCtx, candidate, platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability); reason != "" &&
-			(reason != "model_rate_limited" || !lastResortModelLimitSoft(gateCtx, candidate, req.RequestedModel, req.RequireCompact)) {
+		if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(gateCtx, candidate, platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability, s); reason != "" &&
+			(reason != "model_rate_limited" || !lastResortModelLimitSoft(gateCtx, candidate, req.RequestedModel, req.RequireCompact, compactOutboundModel)) {
 			continue
 		}
 		if ok, _ := gate.isAccountRequestCompatibleReason(gateCtx, candidate, req); !ok {
@@ -676,7 +680,11 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	// only up to their adaptive limit.
 	verified := cands[:0]
 	for _, c := range cands {
-		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, c.account, req.RequestedModel, req.RequireCompact, s.resilienceOpenAIPenaltyOf)
+		compactOutboundModel := ""
+		if req.RequireCompact {
+			compactOutboundModel = s.openAICodexTicketOutboundModel(c.account, req.RequestedModel, true)
+		}
+		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, c.account, req.RequestedModel, req.RequireCompact, s.resilienceOpenAIPenaltyOf, compactOutboundModel)
 		if !ok {
 			continue
 		}
@@ -736,8 +744,8 @@ func resilienceLastResortGate(ctx context.Context) bool {
 // lastResortModelLimitSoft reports whether a per-model rate limit lets the
 // account through as a last resort: only in a last-resort context and only
 // while the limit is within the soft threshold (design §3.1).
-func lastResortModelLimitSoft(ctx context.Context, acc *Account, model string, requireCompact bool) bool {
-	if iqGateBlocksRequest(acc, model, requireCompact) {
+func lastResortModelLimitSoft(ctx context.Context, acc *Account, model string, requireCompact bool, compactOutbound ...string) bool {
+	if iqGateBlocksRequest(acc, model, requireCompact, compactOutbound...) {
 		return false
 	}
 	return resilienceLastResortGate(ctx) && acc.GetRateLimitRemainingTimeWithContext(ctx, model) <= resilience.HardRateLimitThreshold

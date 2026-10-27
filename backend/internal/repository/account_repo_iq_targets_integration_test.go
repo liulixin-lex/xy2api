@@ -14,6 +14,7 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/iqcheck"
+	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -360,6 +361,105 @@ func TestCompleteIQTargetFinishesRoundAndPersistsSchedulingStreaks(t *testing.T)
 	require.Zero(t, failureStreak)
 	require.Nil(t, leaseToken)
 }
+
+func TestIQRoundStoresCanonicalOutboundModelAndNormalizedAnswerOnly(t *testing.T) {
+	ctx := context.Background()
+	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+	enabled := true
+	normalized := "21"
+	a := &service.Account{
+		Name: fmt.Sprintf("iq-outbound-%d", time.Now().UnixNano()), Platform: service.PlatformOpenAI,
+		Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true,
+		Credentials:    map[string]any{"api_key": "fixture", "model_mapping": map[string]any{"public-alias": "gpt-6.1-sol"}},
+		IQTargetsPatch: &domain.IQTargetsPatch{Targets: []domain.IQTargetSettings{{Model: "public-alias", Enabled: &enabled}}},
+	}
+	require.NoError(t, repo.Create(ctx, a))
+	t.Cleanup(func() { cleanupIQTestAccount(t, a.ID) })
+	claim := claimIQTargetForAccount(t, repo, a.ID, 10)
+	claim.OutboundModel = "gpt-6.1-sol"
+	ok, err := repo.SetIQTargetOutboundModel(ctx, claim, claim.OutboundModel)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	rawAnswer := `{"answer":21} with explanation that must not be retained`
+	require.NoError(t, repo.AddIQTargetAttempt(ctx, claim, 1, "low", iqcheck.Challenge{V: 21}, iqcheck.Result{
+		Status: "smart", Reason: "correct_answer", Answer: rawAnswer, NormalizedAnswer: &normalized,
+	}, time.Now().UTC(), time.Now().UTC()))
+	var persistedOutbound, persistedAnswer string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT outbound_model FROM account_iq_check_results WHERE lease_token=$1`, claim.LeaseToken).Scan(&persistedOutbound))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT answer FROM account_iq_check_attempts WHERE lease_token=$1`, claim.LeaseToken+":1").Scan(&persistedAnswer))
+	require.Equal(t, "gpt-6.1-sol", persistedOutbound)
+	require.Equal(t, "21", persistedAnswer)
+
+	page, err := repo.ListIQResults(ctx, a.ID, "public-alias", 0, 20)
+	require.NoError(t, err)
+	require.Len(t, page.Rounds, 1)
+	require.Equal(t, "21", page.Rounds[0].Attempts[0].Answer)
+	encodedPage, err := json.Marshal(page)
+	require.NoError(t, err)
+	require.NotContains(t, string(encodedPage), rawAnswer)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_iq_check_attempts SET answer=$2 WHERE lease_token=$1`, claim.LeaseToken+":1", "The final answer is 21, with detailed explanation 99")
+	require.NoError(t, err)
+	page, err = repo.ListIQResults(ctx, a.ID, "public-alias", 0, 20)
+	require.NoError(t, err)
+	require.Equal(t, "21", page.Rounds[0].Attempts[0].Answer)
+	encodedPage, err = json.Marshal(page)
+	require.NoError(t, err)
+	require.NotContains(t, string(encodedPage), "detailed explanation")
+}
+
+func TestCompleteIQTargetPausesAfterAuthenticationFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+	a := createEnabledIQTargetAccount(t, repo, "auth-pause")
+	claim := claimIQTargetForAccount(t, repo, a.ID, 10)
+	accepted, err := repo.CompleteIQTarget(ctx, claim, iqcheck.Unknown("authentication_unavailable"), time.Now().UTC())
+	require.NoError(t, err)
+	require.True(t, accepted)
+	var pausedReason string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT paused_reason FROM account_iq_targets WHERE id=$1`, claim.ID).Scan(&pausedReason))
+	require.Equal(t, "authentication_unavailable", pausedReason)
+}
+
+func TestIQStatusUnknownIncludesNoEnabledAndMixedTargets(t *testing.T) {
+	ctx := context.Background()
+	repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+	makeAccount := func(name string, targets ...domain.IQTargetSettings) *service.Account {
+		account := &service.Account{Name: fmt.Sprintf("iq-filter-%s-%d", name, time.Now().UnixNano()), Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{"api_key": "fixture"}}
+		if targets != nil {
+			account.IQTargetsPatch = &domain.IQTargetsPatch{Targets: targets}
+		}
+		require.NoError(t, repo.Create(ctx, account))
+		t.Cleanup(func() { cleanupIQTestAccount(t, account.ID) })
+		return account
+	}
+	unknownNoTargets := makeAccount("no-targets")
+	unknownNoEnabled := makeAccount("disabled", domain.IQTargetSettings{Model: "disabled", Enabled: boolPointer(false)})
+	mixed := makeAccount("mixed", domain.IQTargetSettings{Model: "smart", Enabled: boolPointer(true)}, domain.IQTargetSettings{Model: "unknown", Enabled: boolPointer(true)})
+	allSmart := makeAccount("smart", domain.IQTargetSettings{Model: "smart", Enabled: boolPointer(true)})
+	degraded := makeAccount("degraded", domain.IQTargetSettings{Model: "degraded", Enabled: boolPointer(true)})
+	_, err := integrationDB.ExecContext(ctx, `UPDATE account_iq_targets SET verdict=CASE model WHEN 'smart' THEN 'smart' WHEN 'degraded' THEN 'degraded' ELSE 'unknown' END WHERE account_id IN ($1,$2,$3)`, mixed.ID, allSmart.ID, degraded.ID)
+	require.NoError(t, err)
+	query := func(status string) map[int64]bool {
+		accounts, _, err := repo.ListWithFilters(service.WithIQStatusFilter(ctx, status), pagination.PaginationParams{Page: 1, PageSize: 100}, service.PlatformOpenAI, "", "", "", 0, "")
+		require.NoError(t, err)
+		ids := make(map[int64]bool, len(accounts))
+		for _, account := range accounts {
+			ids[account.ID] = true
+		}
+		return ids
+	}
+	unknown := query("unknown")
+	require.True(t, unknown[unknownNoTargets.ID])
+	require.True(t, unknown[unknownNoEnabled.ID])
+	require.True(t, unknown[mixed.ID])
+	require.False(t, unknown[allSmart.ID])
+	require.False(t, unknown[degraded.ID])
+	require.True(t, query("smart")[allSmart.ID])
+	require.True(t, query("degraded")[degraded.ID])
+}
+
+func boolPointer(value bool) *bool { return &value }
 
 func TestCompleteIQTargetManualRunOnDisabledTargetPreservesVerdict(t *testing.T) {
 	ctx := context.Background()

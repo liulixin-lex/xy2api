@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/domain"
@@ -30,6 +33,55 @@ type iqRunTargetRepo struct {
 	saved  []domain.IQTargetSettings
 	queued []string
 	result []IQRunTarget
+}
+
+type iqExecutionRepo struct {
+	IQTargetRepository
+	attempts  []iqcheck.Result
+	completed iqcheck.Result
+	outbound  string
+	views     []domain.IQTargetView
+	page      IQResultsPage
+}
+
+type iqReconcileFailureRepo struct {
+	AccountRepository
+	IQTargetRepository
+	err error
+}
+
+func (r *iqReconcileFailureRepo) ReconcileIQGates(context.Context) error { return r.err }
+
+func (r *iqExecutionRepo) SetIQTargetOutboundModel(_ context.Context, _ IQTargetClaim, model string) (bool, error) {
+	r.outbound = model
+	return true, nil
+}
+func (r *iqExecutionRepo) AddIQTargetAttempt(_ context.Context, _ IQTargetClaim, _ int, _ string, _ iqcheck.Challenge, result iqcheck.Result, _, _ time.Time) error {
+	r.attempts = append(r.attempts, result)
+	return nil
+}
+func (r *iqExecutionRepo) CompleteIQTarget(_ context.Context, _ IQTargetClaim, result iqcheck.Result, _ time.Time) (bool, error) {
+	r.completed = result
+	return true, nil
+}
+func (r *iqExecutionRepo) ListIQTargetViews(context.Context, int64) ([]domain.IQTargetView, error) {
+	return r.views, nil
+}
+func (r *iqExecutionRepo) ListIQResults(context.Context, int64, string, int64, int) (IQResultsPage, error) {
+	return r.page, nil
+}
+
+type iqSlotTestCache struct {
+	ConcurrencyCache
+	releases atomic.Int32
+}
+
+func (*iqSlotTestCache) AcquireAccountSlot(context.Context, int64, int, string) (bool, error) {
+	return true, nil
+}
+func (c *iqSlotTestCache) ReleaseAccountSlot(context.Context, int64, string) error {
+	c.releases.Add(1)
+	return nil
 }
 
 func (r *iqRunTargetRepo) SaveIQTargets(_ context.Context, _ int64, patch domain.IQTargetsPatch) error {
@@ -69,8 +121,17 @@ func TestIQRequestRunRejectsUnavailableCredentialsAndBatchMapsReasons(t *testing
 	batch := service.RequestRunBatch(context.Background(), []int64{1, 2}, nil)
 	require.Equal(t, "credentials_unavailable", batch[0].Reason)
 	require.Empty(t, batch[0].Targets)
+	require.NotNil(t, batch[0].Targets)
 	require.Equal(t, "not_openai", batch[1].Reason)
 	require.Empty(t, batch[1].Targets)
+	require.NotNil(t, batch[1].Targets)
+}
+
+func TestProvideIQCheckServiceFailsStartupWhenGateReconciliationFails(t *testing.T) {
+	reconcileErr := fmt.Errorf("gate reconciliation unavailable")
+	svc, err := ProvideIQCheckService(&iqReconcileFailureRepo{err: reconcileErr}, nil, nil, nil)
+	require.ErrorIs(t, err, reconcileErr)
+	require.Nil(t, svc)
 }
 
 func TestIQTargetProbeUsesConfiguredResponsesAndChatRoutes(t *testing.T) {
@@ -97,9 +158,10 @@ func TestIQTargetProbeUsesConfiguredResponsesAndChatRoutes(t *testing.T) {
 			}
 			transport := &targetProbeTransport{status: http.StatusOK, body: body}
 			probe := &IQCheckService{accounts: &targetProbeAccounts{account: account}, tester: &AccountTestService{cfg: &config.Config{}, httpUpstream: transport}}
+			outboundModel := CanonicalIQOutboundModel(account, tc.targetModel)
 			result := probe.probe(context.Background(), account.ID, iqProbeRequest{
-				TargetModel: tc.targetModel, TargetEffort: "low", Challenge: challenge,
-				Profile: iqProbeProfile{Model: tc.targetModel, ReasoningEffort: "low"},
+				TargetModel: outboundModel, TargetEffort: "low", Challenge: challenge,
+				Profile: iqProbeProfile{Model: outboundModel, ReasoningEffort: "low"},
 			})
 			require.Equal(t, "smart", result.Status, result)
 			require.Equal(t, "gpt-6-astra", transport.payload["model"], "the probe uses the canonical account model")
@@ -113,6 +175,117 @@ func TestIQTargetProbeUsesConfiguredResponsesAndChatRoutes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIQRoundRetriesTransientUnknownBeforeJudging(t *testing.T) {
+	timeout := iqcheck.Unknown("timeout")
+	outcomes := []iqcheck.Outcome{
+		{Status: timeout.Status, Retryable: iqcheck.Retryable(timeout)},
+		{Status: "degraded"},
+		{Status: "smart"},
+		{Status: "smart"},
+	}
+	status, done := iqcheck.DecideRound("normal", outcomes)
+	require.True(t, done)
+	require.Equal(t, "smart", status)
+}
+
+func TestIQResponseCollectionsAndEmptyTimesSerializeByContract(t *testing.T) {
+	emptyPage, err := (&IQCheckService{targetRepo: &iqExecutionRepo{}}).ResultsPage(context.Background(), 1, "", 0, 20)
+	require.NoError(t, err)
+	emptyPageJSON, err := json.Marshal(emptyPage)
+	require.NoError(t, err)
+	require.Contains(t, string(emptyPageJSON), `"rounds":[]`)
+
+	page, err := json.Marshal(IQResultsPage{Rounds: []IQRound{{Attempts: []IQAttempt{}}}})
+	require.NoError(t, err)
+	require.Contains(t, string(page), `"rounds":[{"id":0`)
+	require.Contains(t, string(page), `"attempts":[]`)
+
+	summary, err := json.Marshal(domain.IQTargetSummary{Model: "model"})
+	require.NoError(t, err)
+	for _, field := range []string{`"verdict_at":null`, `"last_run_at":null`, `"next_run_at":null`} {
+		require.Contains(t, string(summary), field)
+	}
+	view, err := json.Marshal(domain.IQTargetView{Model: "model"})
+	require.NoError(t, err)
+	for _, field := range []string{`"verdict_at":null`, `"gate_reset_at":null`, `"last_run_at":null`, `"next_run_at":null`, `"not_before":null`} {
+		require.Contains(t, string(view), field)
+	}
+	batch, err := json.Marshal(IQRunAccount{AccountID: 7, Targets: []IQRunTarget{}})
+	require.NoError(t, err)
+	require.Contains(t, string(batch), `"targets":[]`)
+}
+
+func TestIQResultsAndDiagnosticsExposeOnlyNormalizedAnswers(t *testing.T) {
+	rawAnswer := "The final answer is 21, with a detailed explanation that must not be returned."
+	repo := &iqExecutionRepo{
+		views: []domain.IQTargetView{{Model: "gpt-6-astra"}},
+		page:  IQResultsPage{Rounds: []IQRound{{Attempts: []IQAttempt{{Answer: rawAnswer}}}}},
+	}
+	svc := &IQCheckService{targetRepo: repo}
+	page, err := svc.ResultsPage(context.Background(), 1, "gpt-6-astra", 0, 20)
+	require.NoError(t, err)
+	require.Equal(t, "21", page.Rounds[0].Attempts[0].Answer)
+	pageJSON, err := json.Marshal(page)
+	require.NoError(t, err)
+	require.NotContains(t, string(pageJSON), "detailed explanation")
+
+	diagnostics, err := svc.Diagnostics(context.Background(), 1)
+	require.NoError(t, err)
+	diagnosticsJSON, err := json.Marshal(diagnostics)
+	require.NoError(t, err)
+	require.Contains(t, string(diagnosticsJSON), `"answer":"21"`)
+	require.NotContains(t, string(diagnosticsJSON), "detailed explanation")
+}
+
+func TestIQProbeQuestionDeadlineCancelsHungUpstreamAndReleasesSlot(t *testing.T) {
+	account := &Account{ID: 77, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "fixture", "base_url": "https://example.test"},
+		Extra:       map[string]any{"openai_responses_mode": "force_responses"}}
+	transport := &targetProbeTransport{status: http.StatusUnauthorized, body: `{"error":{"code":"invalid_api_key"}}`, waitFirst: true, firstStarted: make(chan struct{})}
+	repo := &iqExecutionRepo{}
+	cache := &iqSlotTestCache{}
+	svc := &IQCheckService{
+		accounts: &targetProbeAccounts{account: account}, targetRepo: repo,
+		tester:      &AccountTestService{cfg: &config.Config{}, httpUpstream: transport},
+		concurrency: &ConcurrencyService{cache: cache},
+	}
+	svc.executeTarget(context.Background(), IQTargetClaim{
+		ID: 1, AccountID: account.ID, Model: "gpt-6-astra", Revision: "revision", LeaseToken: "lease",
+		ManualRequested: true, TimeoutSeconds: 1, LeaseUntil: time.Now().Add(20 * time.Second), Mode: "normal",
+	})
+	select {
+	case <-transport.firstStarted:
+	default:
+		t.Fatal("hung upstream request was not started")
+	}
+	require.GreaterOrEqual(t, transport.calls, 2)
+	require.Equal(t, "timeout", repo.attempts[0].Reason)
+	require.Equal(t, "unknown", repo.attempts[0].Status)
+	require.GreaterOrEqual(t, cache.releases.Load(), int32(2))
+	require.Equal(t, "authentication_unavailable", repo.completed.Reason, repo.attempts)
+}
+
+func TestIQExecutionUsesOneCanonicalOutboundSnapshot(t *testing.T) {
+	account := &Account{ID: 78, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+		Credentials: map[string]any{"api_key": "fixture", "base_url": "https://example.test", "model_mapping": map[string]any{"public-model": "gpt-6.1-sol"}},
+		Extra:       map[string]any{"openai_responses_mode": "force_responses"}}
+	transport := &targetProbeTransport{status: http.StatusUnauthorized, body: `{"error":{"message":"invalid API key"}}`}
+	repo := &iqExecutionRepo{}
+	cache := &iqSlotTestCache{}
+	svc := &IQCheckService{
+		accounts: &targetProbeAccounts{account: account}, targetRepo: repo,
+		tester:      &AccountTestService{cfg: &config.Config{}, httpUpstream: transport},
+		concurrency: &ConcurrencyService{cache: cache},
+	}
+	svc.executeTarget(context.Background(), IQTargetClaim{
+		ID: 2, AccountID: account.ID, Model: "public-model", Revision: "revision", LeaseToken: "lease",
+		ManualRequested: true, TimeoutSeconds: 30, LeaseUntil: time.Now().Add(time.Minute), Mode: "normal",
+	})
+	require.Equal(t, "gpt-6.1-sol", repo.outbound)
+	require.Equal(t, repo.outbound, transport.payload["model"])
+	require.Equal(t, "authentication_unavailable", repo.completed.Reason)
 }
 
 func TestIQTargetProbeParsesOAuthResponsesStreamTerminal(t *testing.T) {

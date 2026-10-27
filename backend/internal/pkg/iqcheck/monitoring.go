@@ -166,9 +166,9 @@ func Retryable(r Result) bool {
 	if r.Reason == "quota_exhausted" || r.Status != "unknown" || r.Diagnostic != nil && (r.Diagnostic.Transport == "plugin" || r.Diagnostic.RetryAfterUnbounded) {
 		return false
 	}
-	if pause, _, protocol := FailurePolicy(r); pause {
+	if pause, transient, protocol := FailurePolicy(r); pause {
 		return false
-	} else if protocol {
+	} else if transient || protocol {
 		return true
 	}
 	if r.Diagnostic != nil && r.Diagnostic.Stage == "http" {

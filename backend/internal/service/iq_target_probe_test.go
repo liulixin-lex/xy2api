@@ -25,11 +25,14 @@ func (r *targetProbeAccounts) GetByID(context.Context, int64) (*Account, error) 
 }
 
 type targetProbeTransport struct {
-	status  int
-	body    string
-	headers http.Header
-	request *http.Request
-	payload map[string]any
+	status       int
+	body         string
+	headers      http.Header
+	request      *http.Request
+	payload      map[string]any
+	waitFirst    bool
+	firstStarted chan struct{}
+	calls        int
 }
 
 func (u *targetProbeTransport) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
@@ -39,12 +42,20 @@ func (u *targetProbeTransport) DoWithTLS(req *http.Request, _ string, _ int64, _
 	return u.respond(req)
 }
 func (u *targetProbeTransport) respond(req *http.Request) (*http.Response, error) {
+	u.calls++
 	u.request = req
 	var payload map[string]any
 	if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
 		return nil, err
 	}
 	u.payload = payload
+	if u.waitFirst && u.calls == 1 {
+		if u.firstStarted != nil {
+			close(u.firstStarted)
+		}
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	}
 	headers := u.headers
 	if headers == nil {
 		headers = make(http.Header)
@@ -83,9 +94,10 @@ func TestIQTargetProbeUsesCanonicalModelAndAccountSpecificDeclarationSource(t *t
 				body:    responseBody,
 			}
 			svc := &IQCheckService{accounts: &targetProbeAccounts{account: account}, tester: &AccountTestService{cfg: &config.Config{}, httpUpstream: transport}}
+			outboundModel := CanonicalIQOutboundModel(account, "public-alias")
 			result := svc.probe(context.Background(), account.ID, iqProbeRequest{
-				TargetModel: "public-alias", TargetEffort: "low", Challenge: challenge,
-				Profile: iqProbeProfile{Model: "public-alias", ReasoningEffort: "low"},
+				TargetModel: outboundModel, TargetEffort: "low", Challenge: challenge,
+				Profile: iqProbeProfile{Model: outboundModel, ReasoningEffort: "low"},
 			})
 			require.Equal(t, "gpt-6-astra", transport.payload["model"])
 			require.Equal(t, tc.wantStatus, result.Status)

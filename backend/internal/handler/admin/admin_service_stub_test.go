@@ -17,6 +17,8 @@ type stubAdminService struct {
 	accounts                            []service.Account
 	iqTargetSettings                    map[int64][]domain.IQTargetSettings
 	iqTargetSummaries                   map[int64][]domain.IQTargetSummary
+	iqTargetSummariesErr                error
+	iqSummariesContextValue             any
 	accountSchedulerScoreFilterAccounts []service.Account
 	openAISchedulerScorePoolAccounts    []service.Account
 	schedulerScoreFilterCalls           int
@@ -512,7 +514,11 @@ func (s *stubAdminService) GetAccountsByIDs(ctx context.Context, ids []int64) ([
 	return out, nil
 }
 
-func (s *stubAdminService) ListIQTargetSummaries(_ context.Context, ids []int64) (map[int64][]domain.IQTargetSummary, error) {
+func (s *stubAdminService) ListIQTargetSummaries(ctx context.Context, ids []int64) (map[int64][]domain.IQTargetSummary, error) {
+	s.iqSummariesContextValue = ctx.Value(iqSummaryContextTestKey{})
+	if s.iqTargetSummariesErr != nil {
+		return nil, s.iqTargetSummariesErr
+	}
 	out := make(map[int64][]domain.IQTargetSummary, len(ids))
 	for _, id := range ids {
 		out[id] = append([]domain.IQTargetSummary(nil), s.iqTargetSummaries[id]...)

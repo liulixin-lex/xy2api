@@ -35,13 +35,17 @@ func accountHasIQGate(account *Account) bool {
 	return false
 }
 
-func iqGateKeysForRequest(account *Account, model string, requireCompact bool) []string {
+func iqGateKeysForRequest(account *Account, model string, requireCompact bool, compactOutbound ...string) []string {
 	if account == nil || !accountHasIQGate(account) {
 		return nil
 	}
 	keys := []string{iqGateModelKey(canonicalOpenAIAccountSchedulingModel(account, model))}
 	if requireCompact {
-		if compact := resolveOpenAIAccountUpstreamModelForRequest(account, model, true); compact != "" {
+		compact := resolveOpenAIAccountUpstreamModelForRequest(account, model, true)
+		if len(compactOutbound) > 0 && strings.TrimSpace(compactOutbound[0]) != "" {
+			compact = strings.TrimSpace(compactOutbound[0])
+		}
+		if compact != "" {
 			key := iqGateModelKey(compact)
 			if key != keys[0] {
 				keys = append(keys, key)
@@ -51,8 +55,8 @@ func iqGateKeysForRequest(account *Account, model string, requireCompact bool) [
 	return keys
 }
 
-func iqGateBlocksRequest(account *Account, model string, requireCompact bool) bool {
-	for _, key := range iqGateKeysForRequest(account, model, requireCompact) {
+func iqGateBlocksRequest(account *Account, model string, requireCompact bool, compactOutbound ...string) bool {
+	for _, key := range iqGateKeysForRequest(account, model, requireCompact, compactOutbound...) {
 		if account.hasRateLimitKey(key) {
 			return true
 		}

@@ -3,7 +3,9 @@ package admin
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -16,6 +18,8 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
+
+type iqSummaryContextTestKey struct{}
 
 func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
 	router, adminSvc := setupAccountListRouter()
@@ -156,6 +160,27 @@ func TestAccountHandlerListIncludesCreatedAt(t *testing.T) {
 	require.NoError(t, err)
 	_, offset := parsed.Zone()
 	require.Equal(t, 0, offset)
+}
+
+func TestAccountIQSummaryErrorsPropagateWithRequestContext(t *testing.T) {
+	router, adminSvc := setupAccountListRouter()
+	adminSvc.iqTargetSummariesErr = errors.New("summary read failed")
+	ctx := context.WithValue(context.Background(), iqSummaryContextTestKey{}, "request-context")
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=20", nil).WithContext(ctx)
+	listResponse := httptest.NewRecorder()
+	router.ServeHTTP(listResponse, request)
+	require.Equal(t, http.StatusInternalServerError, listResponse.Code)
+	require.Equal(t, "request-context", adminSvc.iqSummariesContextValue)
+
+	adminSvc.iqTargetSummariesErr = nil
+	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router = gin.New()
+	router.GET("/api/v1/admin/accounts/:id", handler.GetByID)
+	adminSvc.iqTargetSummariesErr = errors.New("summary read failed")
+	detailResponse := httptest.NewRecorder()
+	router.ServeHTTP(detailResponse, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/1", nil).WithContext(ctx))
+	require.Equal(t, http.StatusInternalServerError, detailResponse.Code)
+	require.Equal(t, "request-context", adminSvc.iqSummariesContextValue)
 }
 
 func TestAccountHandlerListReturnsSchedulerScoresPerGroup(t *testing.T) {

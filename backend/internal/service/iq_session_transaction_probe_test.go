@@ -53,10 +53,11 @@ func TestIQAPIProbeUsesFreshSessionAfterOverridesAndMapping(t *testing.T) {
 	transport := &iqTargetProbeSeriesTransport{}
 	service := &IQCheckService{accounts: &targetProbeAccounts{account: account}, tester: &AccountTestService{cfg: &config.Config{}, httpUpstream: transport}}
 	challenge := iqcheck.NewChallenge()
+	outboundModel := CanonicalIQOutboundModel(account, domain.IQModelAstra)
 	for range 3 {
 		result := service.probe(context.Background(), account.ID, iqProbeRequest{
-			TargetModel: domain.IQModelAstra, TargetEffort: "low", Challenge: challenge,
-			Profile: iqProbeProfile{Model: domain.IQModelAstra, ReasoningEffort: "low"},
+			TargetModel: outboundModel, TargetEffort: "low", Challenge: challenge,
+			Profile: iqProbeProfile{Model: outboundModel, ReasoningEffort: "low"},
 		})
 		require.Equal(t, "unknown", result.Status)
 	}

@@ -29,6 +29,7 @@ type IQTargetRepository interface {
 	ClaimIQTargets(context.Context, time.Time, int) ([]service.IQTargetClaim, error)
 	AddIQTargetAttempt(context.Context, service.IQTargetClaim, int, string, iqcheck.Challenge, iqcheck.Result, time.Time, time.Time) error
 	CompleteIQTarget(context.Context, service.IQTargetClaim, iqcheck.Result, time.Time) (bool, error)
+	SetIQTargetOutboundModel(context.Context, service.IQTargetClaim, string) (bool, error)
 	CleanupIQResults(context.Context, time.Time, int) (int64, error)
 	ListIQResults(context.Context, int64, string, int64, int) (service.IQResultsPage, error)
 }
@@ -61,7 +62,7 @@ func applyIQStatusFilter(ctx context.Context, q *dbent.AccountQuery) *dbent.Acco
 		case "smart":
 			expr += "t.verdict='smart' AND NOT EXISTS (SELECT 1 FROM account_iq_targets u WHERE u.account_id=t.account_id AND u.enabled AND u.verdict<>'smart')"
 		default:
-			expr += "NOT EXISTS (SELECT 1 FROM account_iq_targets u WHERE u.account_id=t.account_id AND u.enabled AND u.verdict IN ('smart','degraded'))"
+			expr = "(NOT EXISTS (SELECT 1 FROM account_iq_targets d WHERE d.account_id=" + s.C("id") + " AND d.enabled AND d.verdict='degraded') AND NOT (EXISTS (SELECT 1 FROM account_iq_targets sm WHERE sm.account_id=" + s.C("id") + " AND sm.enabled) AND NOT EXISTS (SELECT 1 FROM account_iq_targets u WHERE u.account_id=" + s.C("id") + " AND u.enabled AND u.verdict<>'smart'))"
 		}
 		s.Where(entsql.ExprP(expr + ")"))
 	})
@@ -86,9 +87,10 @@ func (r *accountRepository) ListIQResults(ctx context.Context, accountID int64, 
 		return service.IQResultsPage{}, err
 	}
 	defer rows.Close()
-	page := service.IQResultsPage{}
+	page := service.IQResultsPage{Rounds: make([]service.IQRound, 0)}
 	for rows.Next() {
 		var x service.IQRound
+		x.Attempts = make([]service.IQAttempt, 0)
 		if err := rows.Scan(&x.ID, &x.Model, &x.OutboundModel, &x.Mode, &x.Effort, &x.Status, &x.Reason, &x.StartedAt, &x.FinishedAt, &x.PromptVersion); err != nil {
 			return page, err
 		}
@@ -101,6 +103,10 @@ func (r *accountRepository) ListIQResults(ctx context.Context, accountID int64, 
 			if err := ar.Scan(&a.AttemptNo, &a.Effort, &a.Challenge, &a.Expected, &a.Answer, &a.ReportedModel, &a.ModelClass, &a.Status, &a.Reason, &a.LatencyMS, &a.Diagnostic); err != nil {
 				ar.Close()
 				return page, err
+			}
+			a.Answer = iqcheck.ExtractAnswer(a.Answer).Value
+			if len(a.Answer) > 64 {
+				a.Answer = ""
 			}
 			x.Attempts = append(x.Attempts, a)
 		}
@@ -204,6 +210,15 @@ func (r *accountRepository) ClaimIQTargets(ctx context.Context, now time.Time, l
 	return out, nil
 }
 
+func (r *accountRepository) SetIQTargetOutboundModel(ctx context.Context, claim service.IQTargetClaim, model string) (bool, error) {
+	result, err := r.sql.ExecContext(ctx, `UPDATE account_iq_check_results r SET outbound_model=$3 FROM account_iq_targets t WHERE r.lease_token=$1 AND r.finished_at IS NULL AND t.id=$2 AND t.lease_token=$1 AND t.revision=$4 AND t.lease_until>clock_timestamp()`, claim.LeaseToken, claim.ID, model, claim.Revision)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
 func (r *accountRepository) DeferIQTarget(ctx context.Context, claim service.IQTargetClaim, reason string, next time.Time) error {
 	tx, err := r.client.Tx(ctx)
 	if err != nil {
@@ -238,7 +253,14 @@ func (r *accountRepository) AddIQTargetAttempt(ctx context.Context, claim servic
 	if result.Diagnostic != nil {
 		diagnostic = result.Diagnostic.JSON()
 	}
-	_, err = r.sql.ExecContext(ctx, `INSERT INTO account_iq_check_attempts(result_id,attempt_no,lease_token,started_at,finished_at,status,reason,latency_ms,effort,expected,answer,reported_model,model_class,challenge,diagnostic) SELECT id,$3,$2,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,NULLIF($15::jsonb,'null'::jsonb) FROM account_iq_check_results WHERE lease_token=$1`, claim.LeaseToken, claim.LeaseToken+":"+fmt.Sprint(attempt), attempt, started, finished, result.Status, result.Reason, finished.Sub(started).Milliseconds(), effort, fmt.Sprint(challenge.Answer()), result.Answer, result.ReportedModel, string(result.ModelClass), string(b), string(diagnostic))
+	answer := ""
+	if result.NormalizedAnswer != nil {
+		answer = *result.NormalizedAnswer
+		if len(answer) > 64 {
+			answer = ""
+		}
+	}
+	_, err = r.sql.ExecContext(ctx, `INSERT INTO account_iq_check_attempts(result_id,attempt_no,lease_token,started_at,finished_at,status,reason,latency_ms,effort,expected,answer,reported_model,model_class,challenge,diagnostic) SELECT id,$3,$2,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,NULLIF($15::jsonb,'null'::jsonb) FROM account_iq_check_results WHERE lease_token=$1`, claim.LeaseToken, claim.LeaseToken+":"+fmt.Sprint(attempt), attempt, started, finished, result.Status, result.Reason, finished.Sub(started).Milliseconds(), effort, fmt.Sprint(challenge.Answer()), answer, result.ReportedModel, string(result.ModelClass), string(b), string(diagnostic))
 	return err
 }
 

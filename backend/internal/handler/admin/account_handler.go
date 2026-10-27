@@ -361,16 +361,18 @@ type AccountSchedulerGroupScore struct {
 
 const accountListGroupUngroupedQueryValue = "ungrouped"
 
-func (h *AccountHandler) accountResponseFromService(account *service.Account) *dto.Account {
+func (h *AccountHandler) accountResponseWithContext(ctx context.Context, account *service.Account) (*dto.Account, error) {
 	if account != nil {
-		if repo, ok := h.adminService.(interface {
-			ListIQTargetSummaries(context.Context, []int64) (map[int64][]domain.IQTargetSummary, error)
-		}); ok {
-			if summaries, err := repo.ListIQTargetSummaries(context.Background(), []int64{account.ID}); err == nil {
-				account.IQTargets = summaries[account.ID]
-				if account.IQTargets == nil {
-					account.IQTargets = []domain.IQTargetSummary{}
-				}
+		if h.adminService == nil {
+			account.IQTargets = []domain.IQTargetSummary{}
+		} else {
+			summaries, err := h.adminService.ListIQTargetSummaries(ctx, []int64{account.ID})
+			if err != nil {
+				return nil, err
+			}
+			account.IQTargets = summaries[account.ID]
+			if account.IQTargets == nil {
+				account.IQTargets = []domain.IQTargetSummary{}
 			}
 		}
 	}
@@ -379,7 +381,7 @@ func (h *AccountHandler) accountResponseFromService(account *service.Account) *d
 	if h != nil && h.ollamaCloudUsage != nil && out != nil {
 		h.ollamaCloudUsage.EnrichState(out.OllamaCloudUsage)
 	}
-	return out
+	return out, nil
 }
 
 func (h *AccountHandler) accountListResponseFromService(account *service.Account) *dto.Account {
@@ -408,14 +410,19 @@ func (h *AccountHandler) isSimpleMode() bool {
 	return h != nil && h.cfg != nil && h.cfg.RunMode == config.RunModeSimple
 }
 
-func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, account *service.Account) AccountWithConcurrency {
+func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, account *service.Account) (AccountWithConcurrency, error) {
 	item := AccountWithConcurrency{
-		Account:            h.accountResponseFromService(account),
+		Account:            nil,
 		simpleMode:         h.isSimpleMode(),
 		CurrentConcurrency: 0,
 	}
+	var err error
+	item.Account, err = h.accountResponseWithContext(ctx, account)
+	if err != nil {
+		return AccountWithConcurrency{}, err
+	}
 	if account == nil {
-		return item
+		return item, nil
 	}
 
 	if h.concurrencyService != nil {
@@ -452,7 +459,7 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 
 	h.enrichShadowParents(ctx, []AccountWithConcurrency{item})
 
-	return item
+	return item, nil
 }
 
 // scoreOpenAIAccountSchedulerPool 对池内 OpenAI 账号计算调度分数快照。
@@ -751,19 +758,20 @@ func (h *AccountHandler) List(c *gin.Context) {
 			}
 		}
 	}
-	if repo, ok := h.adminService.(interface {
-		ListIQTargetSummaries(context.Context, []int64) (map[int64][]domain.IQTargetSummary, error)
-	}); ok && len(accounts) > 0 {
+	if len(accounts) > 0 {
 		ids := make([]int64, len(accounts))
 		for i := range accounts {
 			ids[i] = accounts[i].ID
 		}
-		if summaries, err := repo.ListIQTargetSummaries(c.Request.Context(), ids); err == nil {
-			for i := range accounts {
-				accounts[i].IQTargets = summaries[accounts[i].ID]
-				if accounts[i].IQTargets == nil {
-					accounts[i].IQTargets = []domain.IQTargetSummary{}
-				}
+		summaries, err := h.adminService.ListIQTargetSummaries(c.Request.Context(), ids)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		for i := range accounts {
+			accounts[i].IQTargets = summaries[accounts[i].ID]
+			if accounts[i].IQTargets == nil {
+				accounts[i].IQTargets = []domain.IQTargetSummary{}
 			}
 		}
 	}
@@ -869,7 +877,11 @@ func (h *AccountHandler) List(c *gin.Context) {
 	result := make([]AccountWithConcurrency, len(accounts))
 	for i := range accounts {
 		acc := &accounts[i]
-		accountResponse := h.accountResponseFromService(acc)
+		accountResponse := dto.AccountFromService(acc)
+		h.enrichCodexTicketStatus(acc, accountResponse)
+		if h.ollamaCloudUsage != nil {
+			h.ollamaCloudUsage.EnrichState(accountResponse.OllamaCloudUsage)
+		}
 		if lite {
 			accountResponse = h.accountListResponseFromService(acc)
 			if h.isSimpleMode() {
@@ -1034,7 +1046,12 @@ func (h *AccountHandler) GetByID(c *gin.Context) {
 		}
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // CheckMixedChannel handles checking mixed channel risk for account-group binding.
@@ -1139,7 +1156,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 		h.adminService.ForceAntigravityPrivacy(ctx, account)
 		// OpenAI OAuth: 新账号直接设置隐私
 		h.adminService.ForceOpenAIPrivacy(ctx, account)
-		return h.buildAccountResponseWithRuntime(ctx, account), nil
+		return h.buildAccountResponseWithRuntime(ctx, account)
 	})
 	if err != nil {
 		// 检查是否为混合渠道错误
@@ -1192,7 +1209,7 @@ func (h *AccountHandler) Duplicate(c *gin.Context) {
 			if execErr != nil {
 				return nil, execErr
 			}
-			return h.buildAccountResponseWithRuntime(ctx, account), nil
+			return h.buildAccountResponseWithRuntime(ctx, account)
 		},
 	)
 	if err != nil {
@@ -1203,7 +1220,12 @@ func (h *AccountHandler) Duplicate(c *gin.Context) {
 				slog.Warn("account_duplicate_recovery_failed", "account_id", accountID, "actor_scope", actorScope, "reason", reason, "error", recoverErr)
 			} else if recovered != nil {
 				c.Header("X-Idempotency-Recovered", "true")
-				response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), recovered))
+				item, responseErr := h.buildAccountResponseWithRuntime(c.Request.Context(), recovered)
+				if responseErr != nil {
+					response.ErrorFrom(c, responseErr)
+					return
+				}
+				response.Success(c, item)
 				return
 			}
 		}
@@ -1287,7 +1309,12 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		h.scheduleOpenAIResponsesProbe(account)
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // scheduleOpenAIResponsesProbe 异步触发 OpenAI APIKey 账号的 Responses API 能力探测。
@@ -1416,7 +1443,12 @@ func (h *AccountHandler) RecoverState(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // ClearCapabilityLearning removes only learned stream-mode restrictions.
@@ -1661,15 +1693,25 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 	}
 
 	if warning == "missing_project_id_temporary" {
+		item, responseErr := h.buildAccountResponseWithRuntime(c.Request.Context(), updatedAccount)
+		if responseErr != nil {
+			response.ErrorFrom(c, responseErr)
+			return
+		}
 		response.Success(c, gin.H{
-			"account": h.buildAccountResponseWithRuntime(c.Request.Context(), updatedAccount),
+			"account": item,
 			"message": "Token refreshed successfully, but project_id could not be retrieved (will retry automatically)",
 			"warning": "missing_project_id_temporary",
 		})
 		return
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), updatedAccount))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), updatedAccount)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // ApplyOAuthCredentialsRequest is the payload for persisting re-authorized OAuth credentials.
@@ -1792,7 +1834,12 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 		}
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(ctx, updatedAccount))
+	item, err := h.buildAccountResponseWithRuntime(ctx, updatedAccount)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // GetStats handles getting account statistics
@@ -1849,7 +1896,12 @@ func (h *AccountHandler) ClearError(c *gin.Context) {
 		}
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // RevertProxyFallback handles reverting account proxy to original before fallback.
@@ -2686,7 +2738,12 @@ func (h *AccountHandler) ClearRateLimit(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // ResetQuota handles resetting account quota usage
@@ -2709,7 +2766,12 @@ func (h *AccountHandler) ResetQuota(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // GetTempUnschedulable handles getting temporary unschedulable status
@@ -2891,7 +2953,12 @@ func (h *AccountHandler) SetSchedulable(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // GetAvailableModels handles getting available models for an account
@@ -3285,10 +3352,20 @@ func (h *AccountHandler) SetPrivacy(c *gin.Context) {
 			account.Extra = make(map[string]any)
 		}
 		account.Extra["privacy_mode"] = mode
-		response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+		item, responseErr := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
+		if responseErr != nil {
+			response.ErrorFrom(c, responseErr)
+			return
+		}
+		response.Success(c, item)
 		return
 	}
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), updated))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), updated)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // RefreshTier handles refreshing Google One tier for a single account
