@@ -51,7 +51,10 @@ func normalizeModelRateLimits(extra map[string]any) error {
 		return nil
 	}
 	v, ok := extra["model_rate_limits"]
-	if !ok || v == nil {
+	if !ok {
+		return nil
+	}
+	if v == nil {
 		extra["model_rate_limits"] = map[string]any{}
 		return nil
 	}
@@ -196,13 +199,9 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		return service.ErrAccountNilInput
 	}
 
-	if err := service.ValidateIQCheckSettings(account.Platform, account.IQCheckSettings); err != nil {
-		return err
-	}
 	account.Extra = service.MergeOpenAICodexTicketExtra(account.Extra, nil)
 	account.Extra = stripIQGateEntries(account.Extra)
 	service.InitializeNewCodexTicketAccount(account)
-	account.IQCheck = domain.DefaultIQCheck()
 
 	builder := client.Account.Create().
 		SetName(account.Name).
@@ -216,7 +215,6 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		SetStatus(account.Status).
 		SetErrorMessage(account.ErrorMessage).
 		SetSchedulable(account.Schedulable).
-		SetIqCheck(mustJSONIQ(account.IQCheck)).
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
 
 	if account.RateMultiplier != nil {
@@ -263,10 +261,6 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if err != nil {
 		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
 	}
-	// updateLockedAccount performs identity comparison while holding the account lock.
-	if account.IQTargetsPatch == nil && account.IQCheckSettings == nil { /* no target mutation */
-	}
-
 	account.ID = created.ID
 	account.CreatedAt = created.CreatedAt
 	account.UpdatedAt = created.UpdatedAt
@@ -644,10 +638,6 @@ func (r *accountRepository) updateLockedAccount(
 	}
 	builder.SetSchedulable(schedulable)
 	account.Schedulable = schedulable
-	var state domain.IQCheck
-	if err := json.Unmarshal(current.IqCheck, &state); err != nil {
-		return nil, err
-	}
 	identityChanged := current.Type != account.Type || current.Platform != account.Platform
 	for _, key := range iqTargetIdentityKeys {
 		if account.IQPreserveTokenRotation && (key == "access_token" || key == "refresh_token") {
@@ -665,17 +655,6 @@ func (r *accountRepository) updateLockedAccount(
 	if !reflect.DeepEqual(current.ProxyID, account.ProxyID) {
 		identityChanged = true
 	}
-	if identityChanged || account.IQCheckSettings != nil {
-		if err := service.ValidateIQCheckSettings(account.Platform, account.IQCheckSettings); err != nil {
-			return nil, err
-		}
-		if identityChanged {
-			state = domain.DefaultIQCheck()
-		}
-	}
-
-	account.IQCheck = state
-
 	if explicitRateMultiplier != nil {
 		builder.SetRateMultiplier(*explicitRateMultiplier)
 	}
@@ -737,7 +716,16 @@ func (r *accountRepository) updateLockedAccount(
 	builder.SetQuotaDimension(dbaccount.QuotaDimension(account.QuotaDimensionOrDefault()))
 	builder.SetNillableParentAccountID(account.ParentAccountID)
 
-	return builder.Save(ctx)
+	updated, err := builder.Save(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if identityChanged {
+		if _, err := r.ResetIQTargetsOnIdentityChangeTx(ctx, client, account.ID); err != nil {
+			return nil, err
+		}
+	}
+	return updated, nil
 }
 
 func lockAndMergeAccountProbeExtra(
