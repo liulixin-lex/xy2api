@@ -2911,7 +2911,10 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 			client = tx.Client()
 		}
 	}
-	extraExpression := "COALESCE(extra, '{}'::jsonb) || jsonb_set($1::jsonb, '{model_rate_limits}', COALESCE(($1::jsonb->'model_rate_limits') || (SELECT COALESCE(jsonb_object_agg(key,value),'{}'::jsonb) FROM jsonb_each(COALESCE(accounts.extra->'model_rate_limits','{}'::jsonb)) WHERE key LIKE 'iq:%'),'{}'::jsonb), true)"
+	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
+	if _, hasLimits := updates["model_rate_limits"]; hasLimits {
+		extraExpression = "COALESCE(extra, '{}'::jsonb) || jsonb_set($1::jsonb, '{model_rate_limits}', COALESCE(($1::jsonb->'model_rate_limits') || (SELECT COALESCE(jsonb_object_agg(key,value),'{}'::jsonb) FROM jsonb_each(COALESCE(accounts.extra->'model_rate_limits','{}'::jsonb)) WHERE key LIKE 'iq:%'),'{}'::jsonb), true)"
+	}
 	if clearProbeSnapshot {
 		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 	}
@@ -3356,6 +3359,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			extraExpression += " || $" + itoa(idx) + "::jsonb"
 			args = append(args, payload)
 			idx++
+			if _, hasLimits := updates.Extra["model_rate_limits"]; hasLimits {
+				extraExpression = "(" + extraExpression + ") || jsonb_build_object('model_rate_limits', COALESCE((" + extraExpression + ")->'model_rate_limits', '{}'::jsonb) || (SELECT COALESCE(jsonb_object_agg(key,value),'{}'::jsonb) FROM jsonb_each(COALESCE(accounts.extra->'model_rate_limits','{}'::jsonb)) WHERE key LIKE 'iq:%'))"
+			}
 			if upstreamBillingProbeExplicitlyDisabled(updates.Extra) || upstreamBillingProbeSnapshotClearRequested(updates.Extra) {
 				extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 			}
