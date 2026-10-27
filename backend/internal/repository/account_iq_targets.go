@@ -77,12 +77,10 @@ func (r *accountRepository) SaveIQTargetsTx(ctx context.Context, c *dbent.Client
 		var oldEnabled bool
 		var oldEffort string
 		var oldInterval, oldTimeout int
-		var oldVerdict, oldGate, oldRevision string
-		var next, lastRun *time.Time
-		q, e := c.QueryContext(ctx, `SELECT id,enabled,reasoning_effort,interval_minutes,timeout_seconds,verdict,COALESCE(gate_model,''),revision,next_run_at,last_run_at FROM account_iq_targets WHERE account_id=$1 AND model=$2 FOR UPDATE`, accountID, s.Model)
+		q, e := c.QueryContext(ctx, `SELECT id,enabled,reasoning_effort,interval_minutes,timeout_seconds FROM account_iq_targets WHERE account_id=$1 AND model=$2 FOR UPDATE`, accountID, s.Model)
 		err := sql.ErrNoRows
 		if e == nil && q.Next() {
-			err = q.Scan(&id, &oldEnabled, &oldEffort, &oldInterval, &oldTimeout, &oldVerdict, &oldGate, &oldRevision, &next, &lastRun)
+			err = q.Scan(&id, &oldEnabled, &oldEffort, &oldInterval, &oldTimeout)
 		}
 		if q != nil {
 			q.Close()
@@ -128,10 +126,19 @@ func (r *accountRepository) SaveIQTargetsTx(ctx context.Context, c *dbent.Client
 		if s.TimeoutSeconds != nil {
 			to = *s.TimeoutSeconds
 		}
-		identity := en != oldEnabled || eff != oldEffort || to != oldTimeout
-		intervalOnly := iv != oldInterval && !identity
-		if identity {
+		switchChange := en != oldEnabled
+		profileChange := eff != oldEffort || to != oldTimeout
+		intervalOnly := iv != oldInterval && !switchChange && !profileChange
+		if !switchChange && !profileChange && !intervalOnly {
+			continue
+		}
+		if switchChange {
 			_, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET enabled=$2,reasoning_effort=$3,interval_minutes=$4,timeout_seconds=$5,revision=gen_random_uuid()::text,verdict='unknown',verdict_at=NULL,gate_model=NULL,paused_reason='',degraded_streak=0,failure_streak=0,not_before=NULL,next_run_at=now(),updated_at=now() WHERE id=$1`, id, en, eff, iv, to)
+			if !en {
+				_, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET next_run_at=COALESCE(next_run_at,now()) WHERE id=$1`, id)
+			}
+		} else if profileChange {
+			_, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET enabled=$2,reasoning_effort=$3,interval_minutes=$4,timeout_seconds=$5,revision=gen_random_uuid()::text,paused_reason='',degraded_streak=0,failure_streak=0,not_before=NULL,next_run_at=now(),updated_at=now() WHERE id=$1`, id, en, eff, iv, to)
 		} else if intervalOnly {
 			_, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET interval_minutes=$2,next_run_at=LEAST(next_run_at,COALESCE(last_run_at,now())+make_interval(mins=>$2)),updated_at=now() WHERE id=$1`, id, iv)
 		} else {
@@ -141,11 +148,6 @@ func (r *accountRepository) SaveIQTargetsTx(ctx context.Context, c *dbent.Client
 			return false, err
 		}
 		changed = true
-		_ = oldVerdict
-		_ = oldGate
-		_ = oldRevision
-		_ = next
-		_ = lastRun
 	}
 	gateChanged, err := r.ProjectIQGates(ctx, c, accountID)
 	return changed || gateChanged, err
