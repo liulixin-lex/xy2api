@@ -110,8 +110,6 @@ func accountReadableSnapshotJSON(account *Account) []byte {
 	clone := *account
 	clone.Credentials = nil
 	clone.IQPreserveTokenRotation = false
-	clone.IQCheckSettings = nil
-	clone.IQCheck = account.IQCheck.Summary()
 	// Reuse the export boundary for private STATE material without mutating Extra.
 	clone.Extra = RedactOpenAICodexTicketExtra(account.Extra)
 	clone.Groups = nil

@@ -66,7 +66,6 @@ const (
 	ReasonWindowCost          Reason = "window_cost"
 	ReasonRPMLimit            Reason = "rpm_limit"
 	ReasonSessionLimit        Reason = "session_limit"
-	ReasonIQDegraded          Reason = "iq_degraded"
 	ReasonQuotaAutoPause      Reason = "quota_auto_pause"
 	ReasonShadowParent        Reason = "shadow_parent_unhealthy"
 	ReasonGrokQuota           Reason = "grok_quota"

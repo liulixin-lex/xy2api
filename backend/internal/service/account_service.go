@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	dbent "github.com/liulixin-lex/xy2api/ent"
 	"github.com/liulixin-lex/xy2api/internal/domain"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
@@ -126,6 +127,10 @@ type AccountRepository interface {
 	// ListShadowsByParent 返回指定父账号的影子账号；当前实现仅查 quota_dimension='spark'（唯一预设）。
 	// ⚠️ 新增影子维度时：须更新此函数（或新增维度专用列举），并检查所有调用点（级联删除/一母一影校验/type 守卫），否则会静默漏掉新维度。
 	ListShadowsByParent(ctx context.Context, parentID int64) ([]*Account, error)
+}
+
+type IQTargetAccountRepository interface {
+	SaveIQTargetsTx(context.Context, *dbent.Client, int64, domain.IQTargetsPatch) (bool, error)
 }
 
 type AccountDuplicateRepository interface {

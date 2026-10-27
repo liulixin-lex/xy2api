@@ -24,7 +24,7 @@ const lastResortCandidateTTL = 2 * time.Second
 // resort. recoverAt is when the latest soft restriction ends. Timed hard
 // states retain the later of their own end and the model breaker end.
 func resiliencePenaltyOf(a *Account, model string, now time.Time) (resilience.PenaltyTier, time.Time, string) {
-	if a == nil || !a.IsActive() || !a.Schedulable || a.IQCheck.BlocksScheduling() {
+	if a == nil || !a.IsActive() || !a.Schedulable {
 		return resilience.TierHard, time.Time{}, "unavailable"
 	}
 	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {

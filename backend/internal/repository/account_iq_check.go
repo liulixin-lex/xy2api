@@ -10,24 +10,14 @@ import (
 	"github.com/google/uuid"
 	dbent "github.com/liulixin-lex/xy2api/ent"
 	dbaccount "github.com/liulixin-lex/xy2api/ent/account"
-	dbpredicate "github.com/liulixin-lex/xy2api/ent/predicate"
 	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/iqcheck"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai_compat"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
-var iqIdentityKeys = []string{"api_key", "base_url", "access_token", "refresh_token", "chatgpt_account_id", "header_override_enabled", "header_overrides", "user_agent"}
+var iqTargetIdentityKeys = []string{"api_key", "base_url", "access_token", "refresh_token", "chatgpt_account_id", "header_override_enabled", "header_overrides", "user_agent", "model_mapping"}
 var iqTransportExtraKeys = []string{"openai_responses_mode", "openai_responses_supported", "openai_passthrough", "enable_tls_fingerprint", "tls_fingerprint_profile_id"}
-
-func iqSchedulablePredicate() dbpredicate.Account {
-	return func(s *entsql.Selector) {
-		c := s.C("iq_check")
-		// Keep this aligned with IQCheck.BlocksScheduling: errors do not create
-		// or clear an IQ pause; only the last valid assessment owns that gate.
-		s.Where(entsql.ExprP("NOT (COALESCE(" + c + "->>'enabled','false') = 'true' AND COALESCE(NULLIF(" + c + "->>'last_valid_status','')," + c + "->>'status','unknown') = 'degraded')"))
-	}
-}
 
 func applyIQStatusFilter(ctx context.Context, q *dbent.AccountQuery) *dbent.AccountQuery {
 	status := service.IQStatusFilter(ctx)

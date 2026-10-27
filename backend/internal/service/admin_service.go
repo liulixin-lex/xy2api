@@ -408,6 +408,7 @@ type UpdateGroupInput struct {
 }
 
 type CreateAccountInput struct {
+	IQTargets          *domain.IQTargetsPatch
 	IQCheck            *domain.IQCheckSettings
 	Name               string
 	Notes              *string
@@ -441,6 +442,7 @@ type ShadowOptions struct {
 }
 
 type UpdateAccountInput struct {
+	IQTargets               *domain.IQTargetsPatch
 	IQPreserveTokenRotation bool // Internal provider-issued token refresh, not an API field.
 	IQCheck                 *domain.IQCheckSettings
 	Name                    string
@@ -464,6 +466,7 @@ type UpdateAccountInput struct {
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.
 type BulkUpdateAccountsInput struct {
+	IQTargets      *domain.IQTargetsPatch
 	IQCheck        *domain.IQCheckSettings
 	AccountIDs     []int64
 	Filters        *BulkUpdateAccountFilters

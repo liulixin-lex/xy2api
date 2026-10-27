@@ -435,6 +435,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, OpenCodeGoUsageSnapshotExtraKey)
 	accountExtra = prepareCodexFingerprintExtraForCreate(input.Platform, input.Type, accountExtra)
 	account := &Account{
+		// Targets are persisted by the repository after the account row exists.
 		IQCheckSettings: input.IQCheck,
 		Name:            input.Name,
 		Notes:           normalizeAccountNotes(input.Notes),
@@ -447,6 +448,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Priority:        input.Priority,
 		Status:          StatusActive,
 		Schedulable:     true,
+	}
+	if input.IQTargets != nil {
+		account.Extra = MergeOpenAICodexTicketExtra(account.Extra, nil)
 	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
@@ -549,6 +553,11 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
 	}
+	if input.IQTargets != nil {
+		if repo, ok := s.accountRepo.(IQTargetAccountRepository); ok {
+			_, _ = repo.SaveIQTargetsTx(ctx, nil, account.ID, *input.IQTargets)
+		}
+	}
 
 	// 绑定分组
 	if len(groupIDs) > 0 {
@@ -594,6 +603,11 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		return nil, err
 	}
 	account.IQCheckSettings = input.IQCheck
+	if input.IQTargets != nil {
+		if repo, ok := s.accountRepo.(IQTargetAccountRepository); ok {
+			_, _ = repo.SaveIQTargetsTx(ctx, nil, id, *input.IQTargets)
+		}
+	}
 	account.IQPreserveTokenRotation = input.IQPreserveTokenRotation
 	if account.Platform == PlatformTypeSafe && input.Type != "" && input.Type != AccountTypeAPIKey {
 		return nil, errors.New("typesafe accounts only support apikey credentials")
