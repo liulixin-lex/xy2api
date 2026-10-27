@@ -6,7 +6,7 @@
 
 ## 当前交接状态
 
-### 网关韧性复盘：PR #146 已合入 main `c6cfcfe2f`，0.4.9 版本准备中（2026-10-27 更新）
+### 网关韧性复盘：随 0.4.9 发布（2026-10-27 更新）
 
 - **背景**：0.4.9（`ed2e429f6`）提交后，用户要求复盘原有韧性策略，看哪些需要同步调整、哪些多余。Claude 与 Codex 独立分析并互审，astra 两轮找漏洞后定稿为 v3。用户批准，并选定：第二批同进 0.4.9；非 OpenAI 本轮就做模型级 breaker；过渡开关在上线 7 天后再删。
 - **结论**：没有需要整块删除的功能。问题在覆盖不均：生产上 Gemini 普通 5xx 从不冷却，一个坏号 27 小时失败 10,886 次；Gemini 也没有尝试截止。另一类是 0.4.9 带来的联动缺口。
@@ -24,7 +24,7 @@
 - **验证**（本机，`7140cda93`）：`go build ./...`；四种 tag 的 vet；gofmt；service、handler、resilience、server、repository 全量 unit；`ci_gate.py` 446 项（`-race`、0 跳过）；`sync.py audit` 与 scheduler-diff；文档一致性；tools 单测；diff-check。前端 vue-tsc、i18n eslint 与相关 61 项测试由文档 agent 运行，通过。
 - **未完成**：
   1. PR #146 的 CI 全绿（头提交 `60b6fdf87`）：golangci-lint 的两处问题已修复；push 触发的 test 因既有计时测试不稳定，重跑两次后通过；2026-10-27 用户授权“合并并发版”，以合并提交合入 main `c6cfcfe2f`；
-  2. 0.4.9 发版进行中（见“进行中的工作”）；部署未授权；
+  2. [v0.4.9](https://github.com/liulixin-lex/xy2api/releases/tag/v0.4.9) 已于 2026-10-27T07:45:20Z 正式发布：版本 PR [#147](https://github.com/liulixin-lex/xy2api/pull/147) 合并提交 `da96d7652`，annotated tag 对象 `8b2dca6ed`；Release run 40467640370 成功。五平台附件与 checksums 一致，二进制报告 0.4.9 / 兼容 0.2.15 / commit da96d7652、vcs.modified=false；GHCR `0.4.9`、`0.4`、`latest` 为同一 amd64+arm64 index，标签 version/revision 一致。无新迁移。生产未部署，部署待授权；
   3. 上线 7 天后复核过渡开关与 fast_fail。
 - **卡点与风险**：
   - CI 上偶发失败的既有测试：`TestCompatPreludeCommentHeartbeatStillAllowsFailover/enabled` 和 `TestCompatHeartbeatCommitsOnlyStableStreamHeaders/...messages=enabled`。main 在 2026-10-26（0.4.8 发布时）已失败过一次，本机 `-race` 加满 CPU 负载反复运行均未复现。`ci_gate.py` 只打印汇总、不输出断言，原因未定位；两者的心跳 1 秒与首输出截止 2 秒只差 1 秒，是可疑点；
@@ -33,7 +33,7 @@
   - 迁移的空位预检仍有抢槽竞态。
 - **关键位置**：本地交接包 `.work/resilience-review/`（不入库），含 `FINAL_PLAN.md`、`IMPLEMENTATION_SPLIT.md`、`C_IMPLEMENTATION_REPORT.md`、`code_review_*.md`。D 路 worktree 与分支已删除，其交接记录保留在 `.work/resilience-review/d-route/`。
 
-### OpenAI 首字、成功率、缓存与账号路由优化：已提交 `ed2e429f6`，随 PR #146 推送（2026-10-27 更新）
+### OpenAI 首字、成功率、缓存与账号路由优化：随 0.4.9 发布（2026-10-27 更新）
 
 - **背景**：生产 48 小时只读分析发现首输出截止 180–220 秒晚于中转约 125 秒的截断、遗留选号不感知延迟且硬粘性、`codex.rate_limits` 提前提交了流、无号 503 不计入 SLA。用户 2026-10-26 批准 6 项改动，要求精简，不做影子、灰度和冗余兜底。
 - **已完成**（分支 `feat/openai-ttft-health-routing-20261026`，基于 main `4162a4f03`，已本地提交 `ed2e429f6`）：
@@ -51,7 +51,7 @@
   - 判慢降序随韧性总开关，会话迁移另外要求 session 开关；
   - “组内无账号支持所请求模型”的 503 同样计入 SLA（消息无法可靠区分容量耗尽与模型不受支持）。
 - **验证**（本机）：resilience/service/handler 三包全量 unit 通过；四种 build tag 的 vet、`go build ./...`、`ci_gate.py`（-race、0 跳过）、scheduler-diff、文档一致性、tools 单测通过。前端 lint/typecheck 未在本机运行（无 node_modules，改动只是两条 i18n 文案），由 CI 覆盖；`sync.py audit` 要求干净工作树，提交后运行。
-- **未完成**：合并、发版、部署都需要用户授权；部署后按本地交接包 FINAL_PLAN §8 观测。
+- **未完成**：已随 PR #146 合入并在 v0.4.9 发布；部署需要用户授权，部署后按本地交接包 FINAL_PLAN §8 观测。
 - **残留风险**：
   - 官方 OAuth 收头前无心跳；换号后心跳不恢复的问题已由韧性复盘修复（见上一节）；
   - 被截断的尝试可能已被中转计费；负载快照全满时仍排队；
@@ -223,11 +223,6 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
-
-### 20261027-release049 — XY2API 0.4.9 版本准备
-
-- 分支 release/0.4.9-20261027 基于 main `c6cfcfe2f`（#146：OpenAI 首字分级、慢失败冷却、韧性复盘）；只改 VERSION、UPSTREAM_BASE 产品版本与本记忆，兼容基线 0.2.15 不变。
-- 下一步：保护检查通过后合入 main，在合并提交上打 annotated v0.4.9，核验 Release 附件、GHCR 镜像与版本号。不部署生产。
 
 ### 20261027-resilience-review — 网关韧性功能复盘（已提交 `7140cda93`，PR #146；2026-10-27）
 
@@ -1449,3 +1444,9 @@ pnpm --dir frontend run build
 - 完成：#146 以合并提交合入 main `c6cfcfe2f`。
 - 修改：程序 VERSION 与 provenance 产品版本 0.4.8→0.4.9，兼容基线 0.2.15 不变；登记本任务。
 - 验证与下一步：本地文档、audit、scheduler-diff、工具单测后提交版本 PR；全部保护检查通过后合入并打 annotated tag，触发 Release，核验产物。不操作生产。
+
+### 2026-10-27 — 20261027-release049 — 0.4.9 发布完成
+
+- 完成操作：#147 常规合入 main `da96d7652`（全部检查通过）；在该提交上创建 annotated v0.4.9 并推送，Release run 40467640370 的 verify-version、build-frontend、release 均成功，2026-10-27T07:45:20Z 正式发布（非 draft、非 prerelease）。
+- 验证：checksums 核验 darwin_arm64 与 linux_amd64 附件；解包二进制报告 XY2API 0.4.9、兼容 0.2.15、commit da96d7652，构建信息 vcs.modified=false；GHCR 0.4.9/0.4/latest 指向同一 amd64+arm64 index，镜像标签 version=0.4.9、revision=da96d7652。
+- 记忆：版本准备登记原样归档。未部署生产。
