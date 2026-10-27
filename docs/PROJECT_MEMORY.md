@@ -2,9 +2,15 @@
 
 > 跨 Agent、跨会话的持续交接文件。开始仓库任务前必须完整阅读本文件；执行过程中在关键节点更新；结束前写明结果、验证、卡点和下一步。项目事实变化时同步更新本文件，不能只追加日志而保留过期的顶部状态。
 >
-> 本文件只放进行中与近期的内容。已结束任务的交接状态、登记，以及 2026-10-19 及以前的操作日志在 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)（按归档规范原样移入，最近一次为 2026-10-26）。文档目录见 [`README.md`](README.md)。
+> 本文件只放进行中与近期的内容。已结束任务的交接状态、登记，以及 2026-10-19 及以前的操作日志在 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)（按归档规范原样移入，最近一次为 2026-10-27）。文档目录见 [`README.md`](README.md)。
 
 ## 当前交接状态
+
+### IQ 按模型门禁 R4 修复（本地完成；2026-10-27）
+
+- 本地提交 `41b5f9f5c` 修复 3 个 P1 与 1 个 P2，覆盖 fresh compact 出站值、raw Chat compact 误挡、Retry-After 租约预算和出站快照失败释放。
+- 构建、四组 vet、最终完整 unit、gofmt、`ci_gate.py`（451 项 `-race`、0 跳过）、scheduler-diff、文档一致性与 `sync.py audit` 均通过。详细结果见本文件操作日志与归档。
+- 未推送、未开 PR、未连接服务器；R4 报告保存在仓库外。
 
 ### 网关韧性复盘：随 0.4.9 发布（2026-10-27 更新）
 
@@ -223,16 +229,6 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
-
-### 20261027-iq-r4fix — IQ 按模型门禁 R4 修复（进行中）
-
-- **背景**：分支 `wip/iq-r4fix-20261027` 基于 `9b3597b7e`；按 astra R4 报告修复 3 个 P1 与 1 个 P2。
-- **目标与约束**：修复 fresh compact 出站值、raw Chat compact 误挡、Retry-After 等待越过租约、快照写失败遗留租约；每项一个最小单测。不得修改 repository 层，除非修复绝对需要；不得触碰其他 worktree 或连接服务器。调度文件若有修改须同步 scheduler-diff；更新 IQ 文档并通过文档检查。
-- **开始状态**：HEAD `9b3597b7e0859f2e92e783236a34279e7f326065`，工作树干净。已读取 `AGENTS.md`、本文件、方案 v1.2、ROUTES 与 R4 报告。
-- **已完成**：只读核对四个缺陷与现有 service 调度、租约接口；确认可在 service 层修复，不需要改 repository。
-- **未完成**：实现四项修复及四个单测；运行指定 Go 构建、四组 vet、unit、韧性门禁、scheduler-diff 与文档一致性；提交并写仓库外交付报告。
-- **卡点与风险**：无。
-- **关键位置**：`backend/internal/service/iq_check_service.go`、`resilience_session.go`、`iq_check_gate.go`、`openai_codex_ticket.go`、相关 service 单测、`docs/OPENAI_IQ_CHECK.md`。
 
 ### 20261027-resilience-review — 网关韧性功能复盘（已提交 `7140cda93`，PR #146；2026-10-27）
 
@@ -1466,3 +1462,19 @@ pnpm --dir frontend run build
 - 请求/目标：v0.4.9 已发布，用户要求更新现行文档中仍写着“0.4.9（未发布）”的标注。
 - 修改：`docs/GATEWAY_RESILIENCE.md`、`docs/account-scheduling.md`、`docs/USAGE_METRICS.md` 只改版本标注，行为描述不变；韧性文档引言改为按 0.4.9 的行为描述。
 - 验证：文档一致性通过；全仓库再无 0.4.8/0.4.9 的“未发布”残留。未部署生产。
+
+### 2026-10-27T23:53Z — 20261027-iq-r4fix — 修复、验证并本地提交
+
+- 请求/目标：修复 astra R4 的 3 个 P1 与 1 个 P2；每项一个最小单测，准确执行 compact 协议分流，不加剧业务请求中断。
+- 开始状态：分支 `wip/iq-r4fix-20261027`，HEAD `9b3597b7e0859f2e92e783236a34279e7f326065`，工作树干净。
+- 完成操作：
+  - fresh last-resort 复核改为读取 fresh 账号后重新计算 compact 出站模型；Codex ticket 出站预测仅在实际 compact Responses 分支应用 fallback，raw Chat 沿用普通映射。
+  - Retry-After 或普通题间等待超出 `lease_until - 10s` 安全窗口时不继续等待，立即以具体 unknown 原因 Complete，并保留汇总 Retry-After。
+  - 出站快照返回 false 或 error 时，以独立 3 秒 context 按旧 token Defer，revision 不符时由既有仓储逻辑清旧租约并保留新排期。
+  - 更新 `docs/OPENAI_IQ_CHECK.md` 的 compact 门禁说明；没有修改 repository、调度白名单文件或 policy。
+- 修改文件：`backend/internal/service/iq_check_service.go`、`iq_check_service_test.go`、`iq_check_gate_test.go`、`resilience_last_resort_iq_gate_test.go`、`resilience_session.go`、`share_scheduling_gateway.go`、`share_scheduling_openai.go`、`openai_codex_ticket.go`、`docs/OPENAI_IQ_CHECK.md`、本记忆文件。
+- 单测：`TestOpenAILastResortFreshCompactGateUsesFreshMapping`、`TestRawChatCompactRequestUsesOrdinaryOutboundForIQGateAndTicket`、`TestIQExecutionCompletesBeforeLeaseWhenRetryAfterExceedsBudget`、`TestIQExecutionReleasesLeaseWhenOutboundSnapshotFails`，通过。
+- 验证：`go build ./...`；default/unit/integration/e2e 四组 `go vet`；`gofmt -l` 空；完整 `go test -count=1 -tags=unit ./internal/service/... ./internal/pkg/iqcheck/... ./internal/pkg/openai/... ./internal/handler/...` 最终通过；`ci_gate.py` 451 项 `-race`、0 跳过；`sync.py scheduler-diff`、`sync.py audit`、文档一致性、`git diff --check` 通过。`ci_gate.py` 初次因 `go` 不在 PATH 未启动，加入指定 Go 目录后通过。第一次完整 unit 曾返回一次失败，但输出因测试日志量过大被截断；service 单包复跑与第二次完整命令都通过，未定位首轮具体断言。
+- 提交：`41b5f9f5c`（`fix(iq): repair R4 model gates and lease completion`）。未推送、未开 PR、未连接服务器。
+- 卡点/风险：最终完整 unit 与韧性 race 门禁全过；首轮全量 unit 的失败断言未能从被截断输出恢复，已由单包和完整复跑验证通过。
+- 下一步：无。
