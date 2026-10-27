@@ -163,7 +163,7 @@ func TestCodexTicketRepositorySecondPassProxyIQFence(t *testing.T) {
 	require.True(t, started)
 	before, e := repo.GetByID(ctx, a.ID)
 	require.NoError(t, e)
-	result := iqcheck.Grade("21")
+	result := iqcheck.Grade("21", iqcheck.Check{Expected: "21", Naive: "29", Sent: "gpt-6-astra"})
 	result.StateModel = "gpt-6-astra"
 	// Build the probe's persisted identity fixture, then prove it is current before editing.
 	identity := map[string]any{"account_id": a.ID, "type": a.Type, "proxy_id": p.ID, "proxy": p.URL(), "proxy_status": p.Status, "identity_namespace": "chatgpt:fixture"}

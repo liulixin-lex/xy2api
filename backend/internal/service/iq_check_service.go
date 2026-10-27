@@ -28,17 +28,21 @@ var ErrIQCheckInvalid = infraerrors.BadRequest("IQ_CHECK_INVALID", "Invalid Open
 var ErrIQCheckDisabled = infraerrors.BadRequest("IQ_CHECK_DISABLED", "IQ check is disabled")
 
 type IQCheckClaim struct {
-	RoundDeadline  *time.Time
-	TimeoutSeconds int
-	TargetModel    string
-	TargetEffort   string
-	Challenge      iqcheck.Challenge
-	AccountID      int64
-	Token          string
-	Revision       string
-	StartedAt      time.Time
-	Profile        domain.IQProfile
-	Protocol       string
+	RoundDeadline    *time.Time
+	TimeoutSeconds   int
+	TargetModel      string
+	TargetEffort     string
+	Challenge        iqcheck.Challenge
+	AccountID        int64
+	Token            string
+	Revision         string
+	StartedAt        time.Time
+	Profile          domain.IQProfile
+	Protocol         string
+	StateTicketID    string
+	StateFingerprint string
+	StateRevision    string
+	StateModel       string
 }
 type IQCheckRepository interface {
 	ConfigureIQCheck(context.Context, int64, domain.IQCheckSettings) (domain.IQCheck, error)
@@ -81,16 +85,17 @@ type IQCheckRecord struct {
 }
 
 type IQTargetClaim struct {
-	ID, AccountID                 int64
-	Model, Revision, LeaseToken   string
-	Enabled                       bool
-	ReasoningEffort               string
-	TimeoutSeconds                int
-	Verdict                       string
-	LeaseUntil                    time.Time
-	Mode                          string
-	OutboundModel                 string
-	DegradedStreak, FailureStreak int
+	ID, AccountID                                              int64
+	Model, Revision, LeaseToken                                string
+	Enabled                                                    bool
+	ReasoningEffort                                            string
+	TimeoutSeconds                                             int
+	Verdict                                                    string
+	LeaseUntil                                                 time.Time
+	Mode                                                       string
+	OutboundModel                                              string
+	DegradedStreak, FailureStreak                              int
+	StateTicketID, StateFingerprint, StateRevision, StateModel string
 }
 type IQTargetRepository interface {
 	ListIQTargetSummaries(context.Context, []int64) (map[int64][]domain.IQTargetSummary, error)
@@ -376,6 +381,7 @@ func (s *IQCheckService) executeTarget(ctx context.Context, c IQTargetClaim) {
 		}
 		started := time.Now().UTC()
 		result := s.probe(ctx, c.AccountID, IQCheckClaim{AccountID: c.AccountID, Token: c.LeaseToken, Revision: c.Revision, TimeoutSeconds: c.TimeoutSeconds, TargetModel: c.OutboundModel, TargetEffort: effort, Challenge: challenge, Profile: domain.IQProfile{Model: c.OutboundModel, ReasoningEffort: effort}})
+		c.StateTicketID, c.StateFingerprint, c.StateRevision, c.StateModel = result.StateTicketID, result.StateFingerprint, result.StateRevision, result.StateModel
 		finished := time.Now().UTC()
 		if err := s.targetRepo.AddIQTargetAttempt(ctx, c, attempt, effort, challenge, result, started, finished); err != nil {
 			return
