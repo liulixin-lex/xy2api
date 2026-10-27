@@ -417,7 +417,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.GET("/:id/iq-check/results", h.Admin.AccountIQ.Results)
 		accounts.GET("/:id/iq-check/diagnostics", h.Admin.AccountIQ.Diagnostics)
 		accounts.POST("/iq-check/run", h.Admin.AccountIQ.RunBatch)
-		accounts.GET("/:id/iq-check/models", h.Admin.Account.ListIQCheckModels)
+		accounts.GET("/:id/iq-check/models", h.Admin.AccountIQ.Models)
 		accounts.POST("/:id/upstream-billing-probe", h.Admin.Account.ProbeUpstreamBilling)
 		accounts.GET("/:id/ollama-cloud-usage", h.Admin.Account.GetOllamaCloudUsage)
 		accounts.PUT("/:id/ollama-cloud-usage/session", h.Admin.Account.SaveOllamaCloudUsageSession)

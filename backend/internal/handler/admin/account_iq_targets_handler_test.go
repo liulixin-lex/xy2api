@@ -52,6 +52,6 @@ func TestAccountDetailAndSavedResponseUseIQTargetContract(t *testing.T) {
 		})
 	}
 	require.NotNil(t, adminSvc.lastUpdateAccountInput.IQTargets)
-	require.Len(t, adminSvc.lastUpdateAccountInput.IQTargets.Targets, 1)
-	require.Equal(t, "gpt-6-astra", adminSvc.lastUpdateAccountInput.IQTargets.Targets[0].Model)
+	require.Len(t, adminSvc.lastUpdateAccountInput.IQTargets.Targets, 2)
+	require.Equal(t, []string{domain.IQModelAstra, domain.IQModelSol}, []string{adminSvc.lastUpdateAccountInput.IQTargets.Targets[0].Model, adminSvc.lastUpdateAccountInput.IQTargets.Targets[1].Model})
 }

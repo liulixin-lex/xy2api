@@ -14,6 +14,10 @@ func iqGateModelKey(model string) string {
 	return domain.IQGateKeyPrefix + model
 }
 
+func CanonicalIQOutboundModel(account *Account, model string) string {
+	return canonicalOpenAIAccountSchedulingModel(account, model)
+}
+
 func iqGateKeyPresent(account *Account, model string) bool {
 	return accountHasIQGate(account)
 }

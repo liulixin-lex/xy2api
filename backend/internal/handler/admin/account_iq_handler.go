@@ -106,3 +106,17 @@ func (h *AccountIQHandler) Diagnostics(c *gin.Context) {
 	c.Header("Content-Disposition", `attachment; filename="iq-check-diagnostics.json"`)
 	_ = json.NewEncoder(c.Writer).Encode(data)
 }
+
+func (h *AccountIQHandler) Models(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	result, err := h.service.Models(c.Request.Context(), id, c.Query("refresh") == "true")
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}

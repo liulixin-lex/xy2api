@@ -330,7 +330,6 @@
     "278_group_categories.sql": "772a821a29667e96929c4e49f9f07c3218875f3ddf0e019be613f701432d756e",
     "279_cache_northstar.sql": "58dc0c8572b7ecd1899db8f995d1f2795a40762a9d94e864ac6a8f377bc3447e",
     "280_drop_cache_northstar.sql": "da25329842bda08dbfe7cd8e050639b666bf318d84eb66f11495534811dc391b",
-    "281_iq_targets.sql": "89afabbf74d78d3e211ac410f5f6b6ff1038338638e32bb229e83fc3e19f3786"
-  },
-  "281_iq_targets.sql": "be2a721dba3dec5966074c8b296f7c6d036c34f9626446572567cda43af1c3ee"
+    "281_iq_targets.sql": "54c49823cfd3076f58bbcd3d1e2420421ed696db78f0d1f939983bcebe78dc6b"
+  }
 }

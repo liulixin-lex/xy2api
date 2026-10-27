@@ -25,83 +25,51 @@ import (
 )
 
 var ErrIQCheckInvalid = infraerrors.BadRequest("IQ_CHECK_INVALID", "Invalid OpenAI IQ check settings")
-var ErrIQCheckDisabled = infraerrors.BadRequest("IQ_CHECK_DISABLED", "IQ check is disabled")
 
-type IQCheckClaim struct {
-	RoundDeadline    *time.Time
-	TimeoutSeconds   int
-	TargetModel      string
-	TargetEffort     string
-	Challenge        iqcheck.Challenge
-	AccountID        int64
-	Token            string
-	Revision         string
-	StartedAt        time.Time
-	Profile          domain.IQProfile
-	Protocol         string
+type iqProbeProfile struct {
+	Model           string
+	ReasoningEffort string
+}
+
+type iqProbeRequest struct {
+	TimeoutSeconds int
+	TargetModel    string
+	TargetEffort   string
+	Challenge      iqcheck.Challenge
+	Revision       string
+	Profile        iqProbeProfile
+	Protocol       string
+}
+
+type IQTargetClaim struct {
+	ID, AccountID                 int64
+	Model, Revision, LeaseToken   string
+	Enabled                       bool
+	ManualRequested               bool
+	ManualRequestedAt             *time.Time
+	ReasoningEffort               string
+	TimeoutSeconds                int
+	Verdict                       string
+	LeaseUntil                    time.Time
+	Mode                          string
+	OutboundModel                 string
+	DegradedStreak, FailureStreak int
+	TicketIdentities              []IQTicketIdentity
+}
+
+type IQTicketIdentity struct {
 	StateTicketID    string
 	StateFingerprint string
 	StateRevision    string
 	StateModel       string
-}
-type IQCheckRepository interface {
-	ConfigureIQCheck(context.Context, int64, domain.IQCheckSettings) (domain.IQCheck, error)
-	QueueIQCheck(context.Context, int64) error
-	ClaimIQChecks(context.Context, time.Time, int) ([]IQCheckClaim, error)
-	CompleteIQCheck(context.Context, IQCheckClaim, iqcheck.Result, time.Time) error
-	ListIQCheckRecords(context.Context, int64) ([]IQCheckRecord, error)
-}
-
-type IQCheckAttempt struct {
-	Number     int                 `json:"attempt_no"`
-	StartedAt  time.Time           `json:"started_at"`
-	FinishedAt *time.Time          `json:"finished_at"`
-	Status     string              `json:"status"`
-	Reason     string              `json:"reason"`
-	LatencyMS  int64               `json:"latency_ms"`
-	Diagnostic *iqcheck.Diagnostic `json:"diagnostic,omitempty"`
-}
-type IQCheckRecord struct {
-	Attempts         []IQCheckAttempt    `json:"attempts"`
-	Diagnostic       *iqcheck.Diagnostic `json:"diagnostic,omitempty"`
-	ID               int64               `json:"id"`
-	PromptVersion    string              `json:"prompt_version"`
-	Model            string              `json:"model"`
-	Effort           string              `json:"effort"`
-	Status           string              `json:"status"`
-	Answer           string              `json:"answer"`
-	Reason           string              `json:"reason,omitempty"`
-	StartedAt        time.Time           `json:"started_at"`
-	FinishedAt       *time.Time          `json:"finished_at"`
-	LatencyMS        int64               `json:"latency_ms"`
-	NormalizedAnswer *string             `json:"normalized_answer"`
-	AnswerFormat     string              `json:"answer_format"`
-	OutputMode       string              `json:"output_mode"`
-	FormatCompliant  *bool               `json:"format_compliant"`
-	GraderVersion    string              `json:"grader_version"`
-	Protocol         string              `json:"protocol"`
-	ReportedModel    *string             `json:"reported_model"`
-	ConfigRevision   string              `json:"config_revision"`
-}
-
-type IQTargetClaim struct {
-	ID, AccountID                                              int64
-	Model, Revision, LeaseToken                                string
-	Enabled                                                    bool
-	ReasoningEffort                                            string
-	TimeoutSeconds                                             int
-	Verdict                                                    string
-	LeaseUntil                                                 time.Time
-	Mode                                                       string
-	OutboundModel                                              string
-	DegradedStreak, FailureStreak                              int
-	StateTicketID, StateFingerprint, StateRevision, StateModel string
+	StateProtection  string
 }
 type IQTargetRepository interface {
 	ListIQTargetSummaries(context.Context, []int64) (map[int64][]domain.IQTargetSummary, error)
 	ClaimIQTargets(context.Context, time.Time, int) ([]IQTargetClaim, error)
 	AddIQTargetAttempt(context.Context, IQTargetClaim, int, string, iqcheck.Challenge, iqcheck.Result, time.Time, time.Time) error
 	CompleteIQTarget(context.Context, IQTargetClaim, iqcheck.Result, time.Time) (bool, error)
+	DeferIQTarget(context.Context, IQTargetClaim, string, time.Time) error
 	CleanupIQResults(context.Context, time.Time, int) (int64, error)
 	ListIQResults(context.Context, int64, string, int64, int) (IQResultsPage, error)
 	QueueIQTargets(context.Context, int64, []string) ([]IQRunTarget, error)
@@ -158,7 +126,26 @@ func (s *IQCheckService) RequestRun(ctx context.Context, id int64, models []stri
 		return nil, err
 	}
 	if a.Platform != PlatformOpenAI || a.IsCredentialShadow() {
-		return nil, ErrIQCheckInvalid
+		return rejectedIQTargets(models, "not_openai"), nil
+	}
+	if !iqProbeCredentialsAvailable(a, s.tokens != nil) {
+		return rejectedIQTargets(models, "credentials_unavailable"), nil
+	}
+	models = append([]string(nil), models...)
+	requestedForDefaults := models
+	if len(requestedForDefaults) == 0 {
+		requestedForDefaults = domain.DefaultIQModels
+	}
+	defaults := make([]domain.IQTargetSettings, 0, len(requestedForDefaults))
+	for _, model := range requestedForDefaults {
+		if model == domain.IQModelAstra || model == domain.IQModelSol {
+			defaults = append(defaults, domain.IQTargetSettings{Model: model})
+		}
+	}
+	if len(defaults) > 0 {
+		if err := s.targetRepo.SaveIQTargets(ctx, id, domain.IQTargetsPatch{Targets: defaults}); err != nil {
+			return nil, err
+		}
 	}
 	out, err := s.targetRepo.QueueIQTargets(ctx, id, models)
 	if err == nil {
@@ -172,6 +159,8 @@ func (s *IQCheckService) RequestRunBatch(ctx context.Context, ids []int64, model
 		targets, err := s.RequestRun(ctx, id, models)
 		if err != nil {
 			out = append(out, IQRunAccount{AccountID: id, Reason: runReason(err)})
+		} else if len(targets) > 0 && targets[0].State == "rejected" {
+			out = append(out, IQRunAccount{AccountID: id, Reason: targets[0].Reason, Targets: []IQRunTarget{}})
 		} else {
 			out = append(out, IQRunAccount{AccountID: id, Targets: targets})
 		}
@@ -179,10 +168,38 @@ func (s *IQCheckService) RequestRunBatch(ctx context.Context, ids []int64, model
 	return out
 }
 func runReason(err error) string {
+	if errors.Is(err, ErrAccountNotFound) {
+		return "not_found"
+	}
 	if errors.Is(err, ErrIQCheckInvalid) {
 		return "not_openai"
 	}
 	return "credentials_unavailable"
+}
+
+func rejectedIQTargets(models []string, reason string) []IQRunTarget {
+	if len(models) == 0 {
+		models = domain.DefaultIQModels
+	}
+	out := make([]IQRunTarget, 0, len(models))
+	for _, model := range models {
+		out = append(out, IQRunTarget{Model: model, State: "rejected", Reason: reason})
+	}
+	return out
+}
+
+func iqProbeCredentialsAvailable(account *Account, canRefresh bool) bool {
+	if account == nil || account.IsCredentialShadow() {
+		return false
+	}
+	if account.IsOpenAIAgentIdentity() {
+		_, err := agentIdentityPrivateKey(account)
+		return err == nil
+	}
+	if account.IsOAuth() {
+		return strings.TrimSpace(account.GetOpenAIAccessToken()) != "" || canRefresh && strings.TrimSpace(account.GetOpenAIRefreshToken()) != ""
+	}
+	return strings.TrimSpace(account.GetOpenAIProtocolAPIKey()) != ""
 }
 
 type IQRound struct {
@@ -213,7 +230,7 @@ type IQAttempt struct {
 }
 
 func (s *IQCheckService) ProbeTarget(ctx context.Context, claim IQTargetClaim) iqcheck.Result {
-	return s.probe(ctx, claim.AccountID, IQCheckClaim{AccountID: claim.AccountID, Token: claim.LeaseToken, Revision: claim.Revision, TimeoutSeconds: claim.TimeoutSeconds, TargetModel: claim.Model, TargetEffort: claim.ReasoningEffort, Challenge: iqcheck.NewChallenge(), Profile: domain.IQProfile{Model: claim.Model, ReasoningEffort: claim.ReasoningEffort}})
+	return s.probe(ctx, claim.AccountID, iqProbeRequest{Revision: claim.Revision, TimeoutSeconds: claim.TimeoutSeconds, TargetModel: claim.Model, TargetEffort: claim.ReasoningEffort, Challenge: iqcheck.NewChallenge(), Profile: iqProbeProfile{Model: claim.Model, ReasoningEffort: claim.ReasoningEffort}})
 }
 
 func applyIQProbeRequestIdentity(req *http.Request, account *Account) error {
@@ -261,19 +278,6 @@ func applyIQProbeRequestIdentity(req *http.Request, account *Account) error {
 	return nil
 }
 
-func ValidateIQCheckSettings(platform string, settings *domain.IQCheckSettings) error {
-	if settings == nil {
-		return nil
-	}
-	if platform != PlatformOpenAI {
-		return ErrIQCheckInvalid
-	}
-	if err := settings.Validate(); err != nil {
-		return infraerrors.BadRequest("IQ_CHECK_INVALID", err.Error())
-	}
-	return nil
-}
-
 type iqStatusContextKey struct{}
 
 func WithIQStatusFilter(ctx context.Context, status string) context.Context {
@@ -290,7 +294,6 @@ func ValidIQStatusFilter(status string) bool {
 type IQCheckService struct {
 	concurrency    *ConcurrencyService
 	maxConcurrency int
-	repo           IQCheckRepository
 	accounts       AccountRepository
 	tester         *AccountTestService
 	tokens         *OpenAITokenProvider
@@ -310,28 +313,46 @@ func (s *IQCheckService) ResultsPage(ctx context.Context, id int64, model string
 	return s.targetRepo.ListIQResults(ctx, id, model, beforeID, limit)
 }
 
+func (s *IQCheckService) Diagnostics(ctx context.Context, id int64) (any, error) {
+	if s == nil || s.targetRepo == nil {
+		return nil, ErrIQCheckInvalid
+	}
+	targets, err := s.targetRepo.ListIQTargetViews(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	type diagnosticTarget struct {
+		Model  string    `json:"model"`
+		Rounds []IQRound `json:"rounds"`
+	}
+	out := struct {
+		Version int                `json:"version"`
+		Targets []diagnosticTarget `json:"targets"`
+	}{Version: 3, Targets: make([]diagnosticTarget, 0, len(targets))}
+	for _, target := range targets {
+		page, err := s.targetRepo.ListIQResults(ctx, id, target.Model, 0, 100)
+		if err != nil {
+			return nil, err
+		}
+		out.Targets = append(out.Targets, diagnosticTarget{Model: target.Model, Rounds: page.Rounds})
+	}
+	return out, nil
+}
+
 func ProvideIQCheckService(accounts AccountRepository, tester *AccountTestService, tokens *OpenAITokenProvider, concurrency *ConcurrencyService) *IQCheckService {
-	repo, ok := accounts.(IQCheckRepository)
-	maxConcurrency := iqMonitoringConfig()
-	s := &IQCheckService{wake: make(chan struct{}, 1), concurrency: concurrency, maxConcurrency: maxConcurrency, repo: repo, accounts: accounts, tester: tester, tokens: tokens}
-	targetRepo, targetOK := accounts.(IQTargetRepository)
-	if !ok && !targetOK {
+	targetRepo, ok := accounts.(IQTargetRepository)
+	s := &IQCheckService{wake: make(chan struct{}, 1), concurrency: concurrency, maxConcurrency: iqTargetMaxConcurrency(), accounts: accounts, tester: tester, tokens: tokens}
+	if !ok {
 		return s
 	}
-	if targetOK {
-		s.targetRepo = targetRepo
-		_ = targetRepo.ReconcileIQGates(context.Background())
-	}
+	s.targetRepo = targetRepo
+	_ = targetRepo.ReconcileIQGates(context.Background())
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		if targetOK {
-			s.runTargets(ctx)
-		} else if ok {
-			s.run(ctx)
-		}
+		s.runTargets(ctx)
 	}()
 	return s
 }
@@ -343,9 +364,6 @@ func (s *IQCheckService) Stop() {
 	}
 }
 
-func (s *IQCheckService) probeTarget(ctx context.Context, c IQTargetClaim) iqcheck.Result {
-	return s.probe(ctx, c.AccountID, IQCheckClaim{AccountID: c.AccountID, Token: c.LeaseToken, Revision: c.Revision, TimeoutSeconds: c.TimeoutSeconds, TargetModel: c.Model, TargetEffort: c.ReasoningEffort, Challenge: iqcheck.NewChallenge(), Profile: domain.IQProfile{Model: c.Model, ReasoningEffort: c.ReasoningEffort}})
-}
 func (s *IQCheckService) runTargets(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -372,16 +390,70 @@ func (s *IQCheckService) runTargets(ctx context.Context) {
 	}
 }
 func (s *IQCheckService) executeTarget(ctx context.Context, c IQTargetClaim) {
+	defer s.notify()
+	account, err := s.accounts.GetByID(ctx, c.AccountID)
+	if err != nil {
+		s.deferTarget(ctx, c, "account_unavailable", time.Now().UTC().Add(time.Minute))
+		return
+	}
+	now := time.Now().UTC()
+	if !c.ManualRequested {
+		if reason, next := accountProbeHealth(account, now); reason != "" {
+			s.deferTarget(ctx, c, reason, next)
+			return
+		}
+	}
+	c.OutboundModel = canonicalOpenAIAccountSchedulingModel(account, c.Model)
+	if s.concurrency == nil || s.concurrency.cache == nil {
+		s.deferTarget(ctx, c, "concurrency_unavailable", now.Add(time.Minute))
+		return
+	}
+	if s.tester != nil && s.tester.openaiGatewayService != nil {
+		if reason, next := s.tester.openaiGatewayService.codexTicketIQWait(ctx, account, c.OutboundModel); reason != "" {
+			s.deferTarget(ctx, c, reason, next)
+			return
+		}
+	}
 	outcomes := make([]iqcheck.Outcome, 0, iqcheck.MaxAttemptsPerRound)
+	judgedReasons := make([]string, 0, iqcheck.MaxAttemptsPerRound)
 	for attempt := 1; attempt <= iqcheck.MaxAttemptsPerRound; attempt++ {
+		slot, slotErr := acquireAccountProbeSlot(ctx, s.concurrency, c.AccountID, account.Concurrency)
+		if slotErr != nil || slot == nil || !slot.Acquired {
+			if attempt == 1 {
+				s.deferTarget(ctx, c, "account_busy", iqAccountBusyRetryAt(time.Now().UTC()))
+				return
+			}
+			deadline := time.Now().Add(30 * time.Second)
+			for (slotErr != nil || slot == nil || !slot.Acquired) && time.Now().Before(deadline) {
+				if err := sleepIQAttempt(ctx, time.Second); err != nil {
+					return
+				}
+				slot, slotErr = acquireAccountProbeSlot(ctx, s.concurrency, c.AccountID, account.Concurrency)
+			}
+			if slotErr != nil || slot == nil || !slot.Acquired {
+				result := iqcheck.Unknown("account_busy")
+				finished := time.Now().UTC()
+				_, _ = s.targetRepo.CompleteIQTarget(ctx, c, result, finished)
+				return
+			}
+		}
 		challenge := iqcheck.NewChallenge()
 		effort := c.ReasoningEffort
 		if attempt > 1 {
 			effort = iqcheck.AttemptEffort(c.Mode, c.ReasoningEffort, outcomes)
 		}
 		started := time.Now().UTC()
-		result := s.probe(ctx, c.AccountID, IQCheckClaim{AccountID: c.AccountID, Token: c.LeaseToken, Revision: c.Revision, TimeoutSeconds: c.TimeoutSeconds, TargetModel: c.OutboundModel, TargetEffort: effort, Challenge: challenge, Profile: domain.IQProfile{Model: c.OutboundModel, ReasoningEffort: effort}})
-		c.StateTicketID, c.StateFingerprint, c.StateRevision, c.StateModel = result.StateTicketID, result.StateFingerprint, result.StateRevision, result.StateModel
+		var result iqcheck.Result
+		func() {
+			if slot.ReleaseFunc != nil {
+				defer slot.ReleaseFunc()
+			}
+			result = s.probe(ctx, c.AccountID, iqProbeRequest{Revision: c.Revision, TimeoutSeconds: c.TimeoutSeconds, TargetModel: c.OutboundModel, TargetEffort: effort, Challenge: challenge, Profile: iqProbeProfile{Model: c.OutboundModel, ReasoningEffort: effort}})
+		}()
+		if identity, judged := iqTicketIdentityForResult(result); judged {
+			c.TicketIdentities = append(c.TicketIdentities, identity)
+			judgedReasons = append(judgedReasons, result.Reason)
+		}
 		finished := time.Now().UTC()
 		if err := s.targetRepo.AddIQTargetAttempt(ctx, c, attempt, effort, challenge, result, started, finished); err != nil {
 			return
@@ -390,13 +462,52 @@ func (s *IQCheckService) executeTarget(ctx context.Context, c IQTargetClaim) {
 		status, done := iqcheck.DecideRound(c.Mode, outcomes)
 		if done {
 			result.Status = status
-			result.Reason = map[string]string{"smart": "correct_answer", "degraded": "wrong_answer", "unknown": "unknown"}[status]
-			_, _ = s.targetRepo.CompleteIQTarget(ctx, c, result, finished)
+			result.Reason = iqTargetRoundReason(status, judgedReasons)
+			accepted, err := s.targetRepo.CompleteIQTarget(ctx, c, result, finished)
+			if err == nil && accepted && status == "degraded" && s.tester != nil && s.tester.openaiGatewayService != nil {
+				s.tester.openaiGatewayService.recoverCodexFromIQTarget(ctx, c, result, c.TicketIdentities)
+			}
 			return
 		}
 		if err := sleepIQAttempt(ctx, 2*time.Second); err != nil {
 			return
 		}
+	}
+}
+
+func (s *IQCheckService) deferTarget(ctx context.Context, claim IQTargetClaim, reason string, next time.Time) {
+	if err := s.targetRepo.DeferIQTarget(ctx, claim, reason, next); err != nil {
+		logger.LegacyPrintf("iq_check", "defer failed: account=%d err=%v", claim.AccountID, err)
+	}
+}
+
+func iqTicketIdentityForResult(result iqcheck.Result) (IQTicketIdentity, bool) {
+	if result.Status != "smart" && result.Status != "degraded" {
+		return IQTicketIdentity{}, false
+	}
+	stateProtection := ""
+	if result.Diagnostic != nil {
+		stateProtection = result.Diagnostic.StateProtection
+	}
+	return IQTicketIdentity{
+		StateTicketID: result.StateTicketID, StateFingerprint: result.StateFingerprint,
+		StateRevision: result.StateRevision, StateModel: result.StateModel, StateProtection: stateProtection,
+	}, true
+}
+
+func iqTargetRoundReason(status string, judgedReasons []string) string {
+	switch status {
+	case "smart":
+		return "correct_answer"
+	case "degraded":
+		for _, reason := range judgedReasons {
+			if reason == "model_mismatch" {
+				return reason
+			}
+		}
+		return "wrong_answer"
+	default:
+		return "unknown"
 	}
 }
 func sleepIQAttempt(ctx context.Context, d time.Duration) error {
@@ -409,52 +520,7 @@ func sleepIQAttempt(ctx context.Context, d time.Duration) error {
 		return nil
 	}
 }
-func (s *IQCheckService) Configure(ctx context.Context, id int64, settings domain.IQCheckSettings) (domain.IQCheck, error) {
-	if s.repo == nil {
-		return domain.IQCheck{}, ErrIQCheckInvalid
-	}
-	return s.repo.ConfigureIQCheck(ctx, id, settings)
-}
-func (s *IQCheckService) Queue(ctx context.Context, id int64) error {
-	if s.repo == nil {
-		return ErrIQCheckInvalid
-	}
-	err := s.repo.QueueIQCheck(ctx, id)
-	s.notify()
-	return err
-}
-func (s *IQCheckService) Records(ctx context.Context, id int64) ([]IQCheckRecord, error) {
-	if s.repo == nil {
-		return nil, ErrIQCheckInvalid
-	}
-	return s.repo.ListIQCheckRecords(ctx, id)
-}
-
-func (s *IQCheckService) run(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-	for {
-		claims, err := s.repo.ClaimIQChecks(ctx, time.Now().UTC(), s.maxConcurrency)
-		if err != nil && ctx.Err() == nil {
-			logger.LegacyPrintf("iq_check", "claim failed: %v", err)
-		}
-		for _, claim := range claims {
-			s.wg.Add(1)
-			go func(claim IQCheckClaim) {
-				defer s.wg.Done()
-				s.execute(ctx, claim)
-			}(claim)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		case <-s.wake:
-		}
-	}
-}
-
-func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckClaim) (result iqcheck.Result) {
+func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...iqProbeRequest) (result iqcheck.Result) {
 	transport := "http"
 	stateProtection := "unmanaged"
 	stateTicketID := ""
@@ -491,12 +557,15 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 	if s.tester.pluginManager != nil && s.tester.pluginManager.ShouldRouteOpenAIOAuth(account) {
 		transport = "plugin"
 	}
-	profile := account.IQCheck.Profile()
+	profile := iqProbeProfile{Model: domain.IQModelAstra, ReasoningEffort: domain.DefaultIQEffort}
 	if len(claims) > 0 {
-		if account.IQCheck.Revision != claims[0].Revision {
-			return iqcheck.Unknown("cancelled_by_account_change")
+		profile = claims[0].Profile
+		if profile.Model == "" {
+			profile.Model = domain.IQModelAstra
 		}
-		profile = claims[0].Profile.Defaults()
+		if profile.ReasoningEffort == "" {
+			profile.ReasoningEffort = domain.DefaultIQEffort
+		}
 		if claims[0].TargetModel != "" {
 			profile.Model = canonicalOpenAIAccountSchedulingModel(account, claims[0].TargetModel)
 		}

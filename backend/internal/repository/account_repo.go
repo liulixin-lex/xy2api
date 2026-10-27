@@ -273,16 +273,6 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	return nil
 }
 
-func mustJSONIQ(value domain.IQCheck) []byte {
-	b, _ := json.Marshal(value)
-	return b
-}
-func decodeIQCheck(raw []byte) domain.IQCheck {
-	var v domain.IQCheck
-	_ = json.Unmarshal(raw, &v)
-	return v
-}
-
 // CreateWithAccountGroups atomically persists an account, its exact per-group priorities,
 // and the scheduler outbox event used to publish the new routing snapshot.
 func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account *service.Account, groups []service.AccountGroup) error {
@@ -3981,7 +3971,6 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		CreatedAt:               m.CreatedAt,
 		UpdatedAt:               m.UpdatedAt,
 		Schedulable:             m.Schedulable,
-		IQCheck:                 decodeIQCheck(m.IqCheck).CurrentAssessment(),
 		RateLimitedAt:           m.RateLimitedAt,
 		RateLimitResetAt:        m.RateLimitResetAt,
 		OverloadUntil:           m.OverloadUntil,

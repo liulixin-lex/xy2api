@@ -48,7 +48,7 @@ type Account struct {
 	IQPreserveTokenRotation bool                     `json:"-"`
 	IQTargetsPatch          *domain.IQTargetsPatch   `json:"-"`
 	IQTargets               []domain.IQTargetSummary `json:"-"`
-	IQCheck                 domain.IQCheck
+	IQRequeueModels         []string                 `json:"-"`
 
 	RateLimitedAt    *time.Time
 	RateLimitResetAt *time.Time

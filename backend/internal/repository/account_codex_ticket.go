@@ -180,15 +180,17 @@ func (r *accountRepository) MutateCodexTicketBatch(ctx context.Context, ids []in
 		if err != nil {
 			return nil, err
 		}
+		for _, model := range a.IQRequeueModels {
+			if _, err = r.RequeueIQTargetsTx(ctx, c, a, model); err != nil {
+				return nil, err
+			}
+		}
 		if changed {
 			changedIDs = append(changedIDs, id)
 			if limit > 0 {
 				active++
 			}
 			update := c.Account.UpdateOneID(id).SetExtra(a.Extra)
-			if !service.CodexTicketDiagnosticsOnly(ctx) {
-				update.SetIqCheck(mustJSONIQ(a.IQCheck))
-			}
 			if _, err = update.Save(ctx); err != nil {
 				return nil, err
 			}

@@ -245,7 +245,7 @@ func (s *OpenAIGatewayService) runCodexQualityJob(ctx context.Context, id int64,
 			if cooldown := codexTicketAccountRetryAfter(a, now); cooldown != nil {
 				return false, ErrCodexTicketConflict
 			}
-			if reason, _ := iqHealth(a, now); reason != "" {
+			if reason, _ := accountProbeHealth(a, now); reason != "" {
 				return false, ErrCodexTicketConflict
 			}
 			q = codexQualityOf(a, job.model)

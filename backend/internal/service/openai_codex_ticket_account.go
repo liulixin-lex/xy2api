@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	apperrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 )
 
@@ -70,6 +71,8 @@ type CodexAccountTicketStatus struct {
 	Quality            *CodexTicketQualityStatus `json:"quality,omitempty"`
 	Standby            *CodexTicketSlotStatus    `json:"standby,omitempty"`
 	Budget             *CodexTicketBudgetStatus  `json:"budget,omitempty"`
+	IQStatus           string                    `json:"iq_status,omitempty"`
+	IQRetest           string                    `json:"iq_retest,omitempty"`
 	Task               *CodexTicketTask          `json:"task,omitempty"`
 	ConfigRevision     string                    `json:"config_revision"`
 	UpdatedAt          time.Time                 `json:"updated_at"`
@@ -90,8 +93,6 @@ type CodexAccountTicketStatus struct {
 	MissingPolicy        string                     `json:"missing_policy"`
 	Protection           string                     `json:"protection"`
 	ModelVerified        bool                       `json:"model_verified"`
-	IQStatus             string                     `json:"iq_status"`
-	IQRetest             string                     `json:"iq_retest"`
 	Events               []CodexTicketEvent         `json:"events,omitempty"`
 	Watchdog             CodexTicketWatchdogStatus  `json:"watchdog"`
 	TicketPlan           string                     `json:"ticket_plan"`
@@ -245,10 +246,69 @@ func (s *OpenAIGatewayService) GetCodexAccountTicketStatus(ctx context.Context, 
 	for _, model := range ac.Models {
 		status.Tickets = append(status.Tickets, *s.codexModelTicketStatus(a, ac, model, pool, status.GlobalEnabled))
 	}
+	targets, err := s.codexTicketIQTargetSummaries(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	status.IQStatus, status.IQRetest = codexTicketIQStatus(a, ac.Model, targets)
+	for i := range status.Tickets {
+		status.Tickets[i].IQStatus, status.Tickets[i].IQRetest = codexTicketIQStatus(a, status.Tickets[i].Model, targets)
+	}
 	return status, nil
 }
+
+func (s *OpenAIGatewayService) codexTicketIQTargetSummaries(ctx context.Context, account *Account) ([]domain.IQTargetSummary, error) {
+	reader, ok := s.accountRepo.(interface {
+		ListIQTargetSummaries(context.Context, []int64) (map[int64][]domain.IQTargetSummary, error)
+	})
+	if !ok {
+		return nil, nil
+	}
+	byID, err := reader.ListIQTargetSummaries(ctx, []int64{account.ID})
+	if err != nil {
+		return nil, err
+	}
+	return byID[account.ID], nil
+}
+
+func codexTicketIQStatus(account *Account, model string, targets []domain.IQTargetSummary) (string, string) {
+	found, enabled, degraded, allSmart := false, false, false, true
+	retest := ""
+	for _, target := range targets {
+		if CanonicalIQOutboundModel(account, target.Model) != model {
+			continue
+		}
+		found = true
+		if target.State == "running" || retest != "running" && target.State == "queued" {
+			retest = target.State
+		}
+		if !target.Enabled {
+			continue
+		}
+		enabled = true
+		if target.Verdict == "degraded" {
+			degraded = true
+		}
+		if target.Verdict != "smart" {
+			allSmart = false
+		}
+	}
+	if !found {
+		return "not_configured", retest
+	}
+	if !enabled {
+		return "not_enabled", retest
+	}
+	if degraded {
+		return "degraded", retest
+	}
+	if allSmart {
+		return "smart", retest
+	}
+	return "unknown", retest
+}
 func (s *OpenAIGatewayService) codexModelTicketStatus(a *Account, ac codexAccountTicketConfig, model, pool string, global bool) *CodexAccountTicketStatus {
-	st := &CodexAccountTicketStatus{ConfigRevision: ac.ConfigRevision, UpdatedAt: time.Now(), TicketPlan: ac.TicketPlan, TargetLength: codexTicketTargetLength(ac.TicketPlan), Enabled: ac.Enabled, GlobalEnabled: global, Model: model, MissingPolicy: ac.MissingPolicy, ProxyConfigured: pool != "" && ValidateOpenAICodexTicketHarvestProxyURL(pool) == nil, FixedProxyConfigured: a.Proxy != nil && a.ProxyID != nil, State: "waiting", Protection: "paused", IQStatus: a.IQCheck.Status}
+	st := &CodexAccountTicketStatus{ConfigRevision: ac.ConfigRevision, UpdatedAt: time.Now(), TicketPlan: ac.TicketPlan, TargetLength: codexTicketTargetLength(ac.TicketPlan), Enabled: ac.Enabled, GlobalEnabled: global, Model: model, MissingPolicy: ac.MissingPolicy, ProxyConfigured: pool != "" && ValidateOpenAICodexTicketHarvestProxyURL(pool) == nil, FixedProxyConfigured: a.Proxy != nil && a.ProxyID != nil, State: "waiting", Protection: "paused"}
 	if u, e := url.Parse(strings.ReplaceAll(pool, "{sid}", "%7Bsid%7D")); e == nil {
 		st.ProxyDisplay = u.Host
 	}
@@ -304,7 +364,6 @@ func (s *OpenAIGatewayService) codexModelTicketStatus(a *Account, ac codexAccoun
 			st.LastError = "Account acquisition is cooling down after an authentication or rate-limit rejection"
 		}
 	}
-	st.IQRetest = rt.IQRetest
 	st.Events = rt.Events
 	st.Watchdog.Enabled = ac.Enabled && global
 	st.Watchdog.TriggerCount = rt.TriggerCount
@@ -369,13 +428,6 @@ func (s *OpenAIGatewayService) codexModelTicketStatus(a *Account, ac codexAccoun
 			st.Protection = "unprotected"
 			st.LastError = "Configure this account's fixed business proxy; forwarding without STATE"
 		}
-	}
-	if !a.IQCheck.Enabled {
-		st.IQStatus = "not_enabled"
-		st.IQRetest = ""
-	} else if s.openAICodexTicketOutboundModel(a, a.IQCheck.Profile().Model, false) != model {
-		st.IQStatus = "not_configured"
-		st.IQRetest = ""
 	}
 	return st
 }
@@ -611,10 +663,7 @@ func (s *OpenAIGatewayService) claimCodexTicket(a *Account, active, limit int, n
 	if active >= limit || !codexAccountTicketEligible(a) || codexTicketAccountRetryAfter(a, now) != nil {
 		return nil
 	}
-	if reason, _ := iqHealth(a, now); reason != "" {
-		return nil
-	}
-	if a.IQCheck.LeaseUntil != nil && a.IQCheck.LeaseUntil.After(now) {
+	if reason, _ := accountProbeHealth(a, now); reason != "" {
 		return nil
 	}
 	ac := codexAccountTicketConfigOf(a)
@@ -931,7 +980,7 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 			if retryAfter.After(next) {
 				next = retryAfter
 			}
-			if _, health := iqHealth(a, now); health.After(next) {
+			if _, health := accountProbeHealth(a, now); health.After(next) {
 				next = health
 			}
 			if accountRejected && (rt.AccountRetryAfter == nil || next.After(*rt.AccountRetryAfter)) {
@@ -982,7 +1031,7 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 			if !codexTicketLeaseMatches(rt, job, now) || !ac.manages(job.model) || ac.Revision != job.revision || !codexAccountTicketEligible(a) || codexTicketFixedProxyFingerprint(a) != job.fixedFingerprint {
 				return false, ErrCodexTicketConflict
 			}
-			if reason, next := iqHealth(a, now); reason != "" {
+			if reason, next := accountProbeHealth(a, now); reason != "" {
 				retryAfter = next
 				return false, ErrCodexTicketConflict
 			}
@@ -1149,7 +1198,7 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 					if !codexTicketLeaseMatches(rt, job, now) || !cfg.manages(job.model) || cfg.Revision != job.revision || codexTicketFixedProxyFingerprint(live) != job.fixedFingerprint {
 						return false, ErrCodexTicketConflict
 					}
-					if reason, _ := iqHealth(live, now); reason != "" {
+					if reason, _ := accountProbeHealth(live, now); reason != "" {
 						return false, ErrCodexTicketConflict
 					}
 					expires := candidate.ExpiresAt
@@ -1213,7 +1262,7 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 					if !previous.validFor(live, cfg, now) {
 						codexTicketRecoveryHistory(&rt, now)
 						rt.Recoveries = append(rt.Recoveries, now)
-						s.queueCodexIQRetest(live, job.model, &rt, now)
+						s.queueCodexIQRetest(live, job.model)
 					}
 					if result == "unchanged" {
 						rt.Task.finish("unchanged", now)
@@ -1259,11 +1308,16 @@ func (s *OpenAIGatewayService) runCodexAccountTicketJob(ctx context.Context, id 
 	}
 }
 
-func (s *OpenAIGatewayService) queueCodexIQRetest(a *Account, model string, rt *codexTicketRuntime, now time.Time) {
+func (s *OpenAIGatewayService) queueCodexIQRetest(a *Account, model string) {
 	if model == "" {
 		return
 	}
-	rt.IQRetest = "queued"
+	for _, existing := range a.IQRequeueModels {
+		if existing == model {
+			return
+		}
+	}
+	a.IQRequeueModels = append(a.IQRequeueModels, model)
 }
 
 // Account authentication, access and rate-limit rejections end the entire round.

@@ -2,55 +2,82 @@ package service
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/domain"
+	"github.com/liulixin-lex/xy2api/internal/pkg/iqcheck"
 	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
 	"github.com/stretchr/testify/require"
 )
 
-type iqSessionPoolFixture struct {
-	iqProbeTransport
-	pool map[string]string
+type iqTargetProbeSeriesTransport struct {
+	HTTPUpstream
+	requests []*http.Request
+	bodies   []map[string]any
 }
 
-func (u *iqSessionPoolFixture) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
-	key := req.Header.Get("session_id")
-	answer, exists := u.pool[key]
-	if !exists {
-		answer = "29"
-		if len(u.pool)%2 == 1 {
-			answer = "21"
-		}
-		u.pool[key] = answer
+func (u *iqTargetProbeSeriesTransport) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	return u.respond(req)
+}
+func (u *iqTargetProbeSeriesTransport) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.respond(req)
+}
+func (u *iqTargetProbeSeriesTransport) respond(req *http.Request) (*http.Response, error) {
+	u.requests = append(u.requests, req)
+	var body map[string]any
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		return nil, err
 	}
-	u.status = 200
-	u.body = `{"choices":[{"index":0,"message":{"content":"` + answer + `"},"finish_reason":"stop"}]}`
-	return u.doProbe(req)
+	u.bodies = append(u.bodies, body)
+	return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`))}, nil
 }
 
-func TestIQSessionTransactionProbe(t *testing.T) {
-	a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
-		Credentials: map[string]any{"api_key": "fixture"}, Extra: map[string]any{"openai_responses_mode": "force_chat_completions"}}
-	u := &iqSessionPoolFixture{pool: make(map[string]string)}
-	s := &IQCheckService{accounts: &iqProbeAccounts{account: a}, tester: &AccountTestService{cfg: &config.Config{}, httpUpstream: u}}
-	outcomes := make([]string, 0, 3)
-	cache := map[any]bool{}
-	explicit := 0
+func TestIQAPIProbeUsesFreshSessionAfterOverridesAndMapping(t *testing.T) {
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key": "fixture", "header_override_enabled": true,
+			"header_overrides": map[string]any{
+				"session_id": "stale", "SESSION-ID": "stale", "x-session-affinity": "stale",
+				"x-opencode-session": "stale", "x-codex-turn-state": "stale", "idempotency-key": "stale",
+				"x-test-preserved": "keep",
+			},
+			"model_mapping": map[string]any{"gpt-6-astra": "gpt-5.6-sol"},
+		},
+		Extra: map[string]any{"openai_responses_mode": "force_responses"},
+	}
+	transport := &iqTargetProbeSeriesTransport{}
+	service := &IQCheckService{accounts: &targetProbeAccounts{account: account}, tester: &AccountTestService{cfg: &config.Config{}, httpUpstream: transport}}
+	challenge := iqcheck.NewChallenge()
 	for range 3 {
-		outcomes = append(outcomes, s.probe(context.Background(), 1).Status)
+		result := service.probe(context.Background(), account.ID, iqProbeRequest{
+			TargetModel: domain.IQModelAstra, TargetEffort: "low", Challenge: challenge,
+			Profile: iqProbeProfile{Model: domain.IQModelAstra, ReasoningEffort: "low"},
+		})
+		require.Equal(t, "unknown", result.Status)
 	}
-	require.Len(t, u.requests, 3)
-	for i, req := range u.requests {
-		if req.Header.Get("session_id") != "" {
-			explicit++
+	require.Len(t, transport.requests, 3)
+	seen := map[string]bool{}
+	for i, req := range transport.requests {
+		cacheKey, ok := transport.bodies[i]["prompt_cache_key"].(string)
+		require.True(t, ok)
+		require.NotEmpty(t, cacheKey)
+		require.False(t, seen[cacheKey], "each physical probe gets a fresh cache identity")
+		seen[cacheKey] = true
+		require.Equal(t, "gpt-5.6-sol", transport.bodies[i]["model"])
+		for _, name := range []string{"session_id", "conversation_id", "session-id", "x-session-id", "x-session-affinity", "x-conversation-id"} {
+			require.Equal(t, cacheKey, req.Header.Get(name), name)
 		}
-		cache[u.bodies[i]["prompt_cache_key"]] = true
+		for _, name := range []string{"x-opencode-session", "x-codex-turn-state", "previous_response_id", "idempotency-key", "x-idempotency-key"} {
+			require.Empty(t, req.Header.Get(name), name)
+		}
+		require.Equal(t, []string{"keep"}, req.Header[resolveWireCasing("x-test-preserved")])
+		require.Equal(t, "Bearer fixture", req.Header.Get("Authorization"))
 		require.Nil(t, req.GetBody)
 		require.True(t, HTTPUpstreamSingleAttempt(req.Context()))
 	}
-	fmt.Printf("IQ_SESSION_PROBE attempts=3 explicit_sessions=%d unique_sessions=%d cache_keys=%d outcomes=%s\n", explicit, len(u.pool), len(cache), strings.Join(outcomes, ","))
 }

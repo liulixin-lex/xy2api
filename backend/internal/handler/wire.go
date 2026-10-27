@@ -60,7 +60,6 @@ func ProvideAdminHandlers(
 	claudeResetCredits *service.ClaudeResetCreditService,
 ) *AdminHandlers {
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
-	accountHandler.SetIQCheckService(iqCheckService)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
 	accountHandler.SetCodexTicketSettings(settingService)
 	accountHandler.SetCodexAccountTicketService(codexTicketGateway)

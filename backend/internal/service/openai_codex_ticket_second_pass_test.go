@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/iqcheck"
 	"github.com/stretchr/testify/require"
 )
@@ -72,6 +73,25 @@ func TestCodexTicketSecondPassLateIQAfterProxyEdit(t *testing.T) {
 	a.Proxy.Host = "changed.example.invalid"
 	require.False(t, ticket.validFor(a, codexAccountTicketConfigOf(a), time.Now()))
 	require.False(t, CodexTicketIQResultCurrent(a, result, time.Now()))
+}
+
+func TestCodexTicketIQStatusUsesMatchingOutboundTarget(t *testing.T) {
+	account := &Account{Credentials: map[string]any{"model_mapping": map[string]any{"astra-alias": "gpt-6-astra", "astra-alias-2": "gpt-6-astra"}}}
+	status, retest := codexTicketIQStatus(account, "gpt-6-astra", []domain.IQTargetSummary{
+		{Model: "astra-alias", Enabled: true, Verdict: "smart", State: "idle"},
+		{Model: "astra-alias-2", Enabled: true, Verdict: "unknown", State: "queued"},
+	})
+	require.Equal(t, "unknown", status)
+	require.Equal(t, "queued", retest)
+
+	status, retest = codexTicketIQStatus(account, "gpt-6-astra", []domain.IQTargetSummary{
+		{Model: "astra-alias", Enabled: true, Verdict: "degraded", State: "running"},
+		{Model: "astra-alias-2", Enabled: false, Verdict: "smart", State: "idle"},
+	})
+	require.Equal(t, "degraded", status)
+	require.Equal(t, "running", retest)
+	status, _ = codexTicketIQStatus(account, "gpt-6.1-sol", []domain.IQTargetSummary{{Model: "astra-alias", Enabled: true, Verdict: "smart"}})
+	require.Equal(t, "not_configured", status)
 }
 
 func TestCodexTicketSecondPassSSEStopsRound(t *testing.T) {

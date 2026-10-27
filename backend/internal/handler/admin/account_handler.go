@@ -68,7 +68,6 @@ type AccountHandler struct {
 	tokenCacheInvalidator   service.TokenCacheInvalidator
 	grokImportProber        grokImportProber
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
-	iqCheckService          *service.IQCheckService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
 	codexTicketSettings     *service.SettingService
 	codexAccountTickets     codexAccountTicketManager
@@ -79,99 +78,6 @@ type AccountHandler struct {
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.
 func (h *AccountHandler) SetUpstreamBillingProbeService(probe *service.UpstreamBillingProbeService) {
 	h.upstreamBillingProbe = probe
-}
-
-func (h *AccountHandler) SetIQCheckService(check *service.IQCheckService) { h.iqCheckService = check }
-
-func (h *AccountHandler) ListIQCheckModels(c *gin.Context) {
-	if h.iqCheckService == nil {
-		response.ErrorFrom(c, service.ErrIQCheckInvalid)
-		return
-	}
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.ErrorFrom(c, service.ErrIQCheckInvalid)
-		return
-	}
-	result, err := h.iqCheckService.Models(c.Request.Context(), id, c.Query("refresh") == "true")
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, result)
-}
-
-func (h *AccountHandler) ConfigureIQCheck(c *gin.Context) {
-	if h.iqCheckService == nil {
-		response.ErrorFrom(c, service.ErrIQCheckInvalid)
-		return
-	}
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	var settings domain.IQCheckSettings
-	if err := c.ShouldBindJSON(&settings); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	state, err := h.iqCheckService.Configure(c.Request.Context(), id, settings)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, state.Summary())
-}
-
-func (h *AccountHandler) GetIQCheckStatus(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 || h.iqCheckService == nil {
-		response.ErrorFrom(c, service.ErrIQCheckInvalid)
-		return
-	}
-	state, err := h.iqCheckService.Status(c.Request.Context(), id)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, state)
-}
-
-func (h *AccountHandler) RunIQCheck(c *gin.Context) {
-	if h.iqCheckService == nil {
-		response.ErrorFrom(c, service.ErrIQCheckInvalid)
-		return
-	}
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	result, err := h.iqCheckService.QueueStatus(c.Request.Context(), id)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, result)
-}
-
-func (h *AccountHandler) ListIQCheckResults(c *gin.Context) {
-	if h.iqCheckService == nil {
-		response.ErrorFrom(c, service.ErrIQCheckInvalid)
-		return
-	}
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	items, err := h.iqCheckService.Records(c.Request.Context(), id)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, items)
 }
 
 func (h *AccountHandler) SetOllamaCloudUsageService(usage *service.OllamaCloudUsageService) {
@@ -3569,24 +3475,4 @@ func sanitizeExtraBaseRPM(extra map[string]any) {
 		v = 10000
 	}
 	extra["base_rpm"] = v
-}
-
-func (h *AccountHandler) DownloadIQCheckDiagnostics(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	if h.iqCheckService == nil {
-		response.ErrorFrom(c, service.ErrIQCheckInvalid)
-		return
-	}
-	result, err := h.iqCheckService.Diagnostics(c.Request.Context(), id)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	c.Header("Content-Disposition", `attachment; filename="iq-check-diagnostics.json"`)
-	c.Header("Cache-Control", "no-store")
-	c.JSON(200, result)
 }

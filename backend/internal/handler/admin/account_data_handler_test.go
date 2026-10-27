@@ -331,11 +331,13 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 	require.True(t, adminSvc.createdAccounts[0].SkipDefaultGroupBind)
 	settings := adminSvc.createdAccounts[0].IQTargets
 	require.NotNil(t, settings)
-	require.Len(t, settings.Targets, 1)
-	require.False(t, *settings.Targets[0].Enabled)
-	require.Equal(t, "custom-model", settings.Targets[0].Model)
-	require.Equal(t, "upstream_default", *settings.Targets[0].ReasoningEffort)
-	require.Equal(t, 45, *settings.Targets[0].IntervalMinutes)
+	require.Len(t, settings.Targets, 3)
+	require.Equal(t, []string{domain.IQModelAstra, domain.IQModelSol, "custom-model"}, []string{settings.Targets[0].Model, settings.Targets[1].Model, settings.Targets[2].Model})
+	for _, target := range settings.Targets {
+		require.False(t, *target.Enabled, "imported targets are disabled")
+		require.Equal(t, "upstream_default", *target.ReasoningEffort)
+		require.Equal(t, 45, *target.IntervalMinutes)
+	}
 }
 
 func TestExportDataExcludesCodexTicketMaterial(t *testing.T) {
