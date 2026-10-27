@@ -3,6 +3,7 @@
 package schema
 
 import (
+	"encoding/json"
 	"github.com/liulixin-lex/xy2api/ent/schema/mixins"
 	"github.com/liulixin-lex/xy2api/internal/domain"
 
@@ -147,8 +148,10 @@ func (Account) Fields() []ent.Field {
 		// false 表示账户暂时不参与请求分配（如正在刷新 token）
 		field.Bool("schedulable").
 			Default(true),
-		field.JSON("iq_check", domain.IQCheck{}).
-			Default(domain.DefaultIQCheck).
+		field.JSON("iq_check", json.RawMessage{}).
+			Default(func() json.RawMessage {
+				return json.RawMessage(`{"enabled":false,"interval_minutes":5,"status":"unknown"}`)
+			}).
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
 
 		// rate_limited_at: 触发速率限制的时间

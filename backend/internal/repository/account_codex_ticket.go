@@ -187,7 +187,7 @@ func (r *accountRepository) MutateCodexTicketBatch(ctx context.Context, ids []in
 			}
 			update := c.Account.UpdateOneID(id).SetExtra(a.Extra)
 			if !service.CodexTicketDiagnosticsOnly(ctx) {
-				update.SetIqCheck(a.IQCheck)
+				update.SetIqCheck(mustJSONIQ(a.IQCheck))
 			}
 			if _, err = update.Save(ctx); err != nil {
 				return nil, err

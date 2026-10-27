@@ -3,13 +3,13 @@
 package account
 
 import (
+	"encoding/json/jsontext"
 	"fmt"
 	"time"
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
-	"github.com/liulixin-lex/xy2api/internal/domain"
 )
 
 const (
@@ -223,7 +223,7 @@ var (
 	// DefaultSchedulable holds the default value on creation for the "schedulable" field.
 	DefaultSchedulable bool
 	// DefaultIqCheck holds the default value on creation for the "iq_check" field.
-	DefaultIqCheck func() domain.IQCheck
+	DefaultIqCheck func() jsontext.Value
 	// SessionWindowStatusValidator is a validator for the "session_window_status" field. It is called by the builders before save.
 	SessionWindowStatusValidator func(string) error
 )

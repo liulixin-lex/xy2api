@@ -4,19 +4,20 @@ package ent
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"time"
 
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
+	"entgo.io/ent/dialect/sql/sqljson"
 	"entgo.io/ent/schema/field"
 	"github.com/liulixin-lex/xy2api/ent/account"
 	"github.com/liulixin-lex/xy2api/ent/group"
 	"github.com/liulixin-lex/xy2api/ent/predicate"
 	"github.com/liulixin-lex/xy2api/ent/proxy"
 	"github.com/liulixin-lex/xy2api/ent/usagelog"
-	"github.com/liulixin-lex/xy2api/internal/domain"
 )
 
 // AccountUpdate is the builder for updating Account entities.
@@ -372,16 +373,14 @@ func (_u *AccountUpdate) SetNillableSchedulable(v *bool) *AccountUpdate {
 }
 
 // SetIqCheck sets the "iq_check" field.
-func (_u *AccountUpdate) SetIqCheck(v domain.IQCheck) *AccountUpdate {
+func (_u *AccountUpdate) SetIqCheck(v jsontext.Value) *AccountUpdate {
 	_u.mutation.SetIqCheck(v)
 	return _u
 }
 
-// SetNillableIqCheck sets the "iq_check" field if the given value is not nil.
-func (_u *AccountUpdate) SetNillableIqCheck(v *domain.IQCheck) *AccountUpdate {
-	if v != nil {
-		_u.SetIqCheck(*v)
-	}
+// AppendIqCheck appends value to the "iq_check" field.
+func (_u *AccountUpdate) AppendIqCheck(v jsontext.Value) *AccountUpdate {
+	_u.mutation.AppendIqCheck(v)
 	return _u
 }
 
@@ -912,6 +911,11 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.IqCheck(); ok {
 		_spec.SetField(account.FieldIqCheck, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedIqCheck(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, account.FieldIqCheck, value)
+		})
 	}
 	if value, ok := _u.mutation.RateLimitedAt(); ok {
 		_spec.SetField(account.FieldRateLimitedAt, field.TypeTime, value)
@@ -1529,16 +1533,14 @@ func (_u *AccountUpdateOne) SetNillableSchedulable(v *bool) *AccountUpdateOne {
 }
 
 // SetIqCheck sets the "iq_check" field.
-func (_u *AccountUpdateOne) SetIqCheck(v domain.IQCheck) *AccountUpdateOne {
+func (_u *AccountUpdateOne) SetIqCheck(v jsontext.Value) *AccountUpdateOne {
 	_u.mutation.SetIqCheck(v)
 	return _u
 }
 
-// SetNillableIqCheck sets the "iq_check" field if the given value is not nil.
-func (_u *AccountUpdateOne) SetNillableIqCheck(v *domain.IQCheck) *AccountUpdateOne {
-	if v != nil {
-		_u.SetIqCheck(*v)
-	}
+// AppendIqCheck appends value to the "iq_check" field.
+func (_u *AccountUpdateOne) AppendIqCheck(v jsontext.Value) *AccountUpdateOne {
+	_u.mutation.AppendIqCheck(v)
 	return _u
 }
 
@@ -2099,6 +2101,11 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if value, ok := _u.mutation.IqCheck(); ok {
 		_spec.SetField(account.FieldIqCheck, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedIqCheck(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, account.FieldIqCheck, value)
+		})
 	}
 	if value, ok := _u.mutation.RateLimitedAt(); ok {
 		_spec.SetField(account.FieldRateLimitedAt, field.TypeTime, value)
