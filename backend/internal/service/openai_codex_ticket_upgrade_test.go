@@ -172,7 +172,7 @@ func TestCodexTicketUpgradeLateReceiptAndIQRecovery(t *testing.T) {
 	live, e = r.GetByID(context.Background(), 41)
 	require.NoError(t, e)
 	require.NotNil(t, s.lookupOpenAICodexTicket(live, old.Model))
-	result := iqcheck.Grade("20")
+	result := iqcheck.Grade("20", iqcheck.Check{Expected: "21", Naive: "29"})
 	result.StateModel = old.Model
 	result.StateTicketID = codexTicketIdentity(old)
 	require.False(t, CodexTicketIQResultCurrent(live, result, time.Now()))

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -271,7 +272,9 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 	if err != nil || (token == "" && !account.IsOpenAIAgentIdentity()) {
 		return iqcheck.Unknown("authentication_unavailable")
 	}
-	payload, _ := json.Marshal(iqcheck.Payload(chat, profile))
+	challenge := iqcheck.Challenge{V: 1, R: [3]int{7, 9, 8}, S: [3]int{7, 6, 4}, Cols: [3]int{0, 1, 2}, Rows: [2]int{0, 1}, Draw: [2]int{9, 12}, Naive: 29}
+	check := iqcheck.Check{Expected: strconv.Itoa(challenge.Answer()), Naive: strconv.Itoa(challenge.Naive), Sent: profile.Model, PreferHeader: isOAuth}
+	payload, _ := json.Marshal(iqcheck.Payload(chat, profile.Model, profile.ReasoningEffort, challenge))
 	req, err := http.NewRequestWithContext(WithHTTPUpstreamRedirectsDisabled(WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileOpenAI)), http.MethodPost, apiURL, bytes.NewReader(payload))
 	if err != nil {
 		return iqcheck.Unknown("invalid_endpoint")
@@ -319,7 +322,8 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 		if outbound != profile.Model {
 			payloadProfile := profile
 			payloadProfile.Model = outbound
-			encoded, e := json.Marshal(iqcheck.Payload(chat, payloadProfile))
+			check.Sent = outbound
+			encoded, e := json.Marshal(iqcheck.Payload(chat, payloadProfile.Model, payloadProfile.ReasoningEffort, challenge))
 			if e != nil {
 				return iqcheck.Unknown("request_failed")
 			}
@@ -379,7 +383,7 @@ func (s *IQCheckService) probe(ctx context.Context, id int64, claims ...IQCheckC
 	}
 	defer func() { _ = resp.Body.Close() }()
 	headerMS := time.Since(started).Milliseconds()
-	result = iqcheck.ParseHTTP(resp, chat, transport)
+	result = iqcheck.ParseHTTP(resp, chat, transport, check)
 	if result.Diagnostic != nil {
 		result.Diagnostic.FirstByteMS += headerMS
 	}

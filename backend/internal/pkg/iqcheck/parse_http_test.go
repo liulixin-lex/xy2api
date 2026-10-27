@@ -48,7 +48,7 @@ func TestHTTPStreamContracts(t *testing.T) {
 		{"bad terminal", `data: {"type":"response.completed","response":{"status":"completed","output":"21"}}` + "\n\n", "text/event-stream", "unknown", "invalid_event_shape", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {tc.media}}, Body: io.NopCloser(strings.NewReader(tc.body))}, false, "http")
+			r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {tc.media}}, Body: io.NopCloser(strings.NewReader(tc.body))}, false, "http", fixtureCheck)
 			if r.Status != tc.status || r.Reason != tc.reason || r.Diagnostic == nil || r.Diagnostic.FormatDetected != tc.detected {
 				t.Fatalf("%+v diagnostic=%+v", r, r.Diagnostic)
 			}
@@ -67,27 +67,27 @@ func TestHTTPBoundsCompressionAndDiagnostics(t *testing.T) {
 	w := gzip.NewWriter(&zipped)
 	_, _ = w.Write([]byte(finalEvent("21")))
 	_ = w.Close()
-	r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}, "Content-Encoding": {"gzip"}}, Body: io.NopCloser(&zipped)}, false, "plugin")
+	r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}, "Content-Encoding": {"gzip"}}, Body: io.NopCloser(&zipped)}, false, "plugin", fixtureCheck)
 	if r.Status != "smart" || r.Diagnostic.Transport != "plugin" {
 		t.Fatal(r)
 	}
-	r = ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}, "Content-Encoding": {"gzip"}}, Body: io.NopCloser(strings.NewReader("not-gzip"))}, false, "http")
+	r = ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}, "Content-Encoding": {"gzip"}}, Body: io.NopCloser(strings.NewReader("not-gzip"))}, false, "http", fixtureCheck)
 	if r.Reason != "response_decompression_failed" {
 		t.Fatal(r)
 	}
-	r = Parse(strings.NewReader("data: "+strings.Repeat("x", MaxEventBytes)+"\n\n"), true, false)
+	r = parseInput(strings.NewReader("data: "+strings.Repeat("x", MaxEventBytes)+"\n\n"), true, false, fixtureCheck)
 	if r.Reason != "event_too_large" {
 		t.Fatal(r)
 	}
-	r = Parse(strings.NewReader(strings.Repeat("data: {\"type\":\"x\"}\n\n", MaxEvents+1)), true, false)
+	r = parseInput(strings.NewReader(strings.Repeat("data: {\"type\":\"x\"}\n\n", MaxEvents+1)), true, false, fixtureCheck)
 	if r.Reason != "too_many_events" {
 		t.Fatal(r)
 	}
-	r = Parse(io.MultiReader(strings.NewReader(finalEvent("21")), brokenReader{context.DeadlineExceeded}), true, false)
+	r = parseInput(io.MultiReader(strings.NewReader(finalEvent("21")), brokenReader{context.DeadlineExceeded}), true, false, fixtureCheck)
 	if r.Reason != "timeout" || r.Status != "unknown" {
 		t.Fatal(r)
 	}
-	r = Parse(strings.NewReader(`data: {"type":"response.auxiliary","SECRET_KEY":{"type":1,"type":2}}`+"\n\n"), true, false)
+	r = parseInput(strings.NewReader(`data: {"type":"response.auxiliary","SECRET_KEY":{"type":1,"type":2}}`+"\n\n"), true, false, fixtureCheck)
 	if strings.Contains(string(r.Diagnostic.JSON()), "SECRET_KEY") {
 		t.Fatal(r.Diagnostic)
 	}
@@ -96,7 +96,7 @@ func TestHTTPBoundsCompressionAndDiagnostics(t *testing.T) {
 		t.Fatal("unbounded diagnostic")
 	}
 	for _, code := range []int{400, 401, 429, 500, 503} {
-		r = ParseHTTP(&http.Response{StatusCode: code, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("secret"))}, false, "http")
+		r = ParseHTTP(&http.Response{StatusCode: code, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("secret"))}, false, "http", fixtureCheck)
 		if r.Reason != httpCode(code) || r.Answer != "" {
 			t.Fatal(r)
 		}
@@ -108,7 +108,7 @@ func TestOAuthContractFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(bytes.NewReader(raw))}, false, "http")
+	r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(bytes.NewReader(raw))}, false, "http", fixtureCheck)
 	if r.Status != "smart" || r.Answer != `{"answer":21}` || r.Diagnostic.EventIndex != 9 {
 		t.Fatalf("%+v %+v", r, r.Diagnostic)
 	}
@@ -126,7 +126,7 @@ func TestOAuthContractFixture(t *testing.T) {
 			_, _ = w.Write(raw)
 			_ = w.Close()
 		}
-		r = ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}, "Content-Encoding": {codec}}, Body: io.NopCloser(&b)}, false, "plugin")
+		r = ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}, "Content-Encoding": {codec}}, Body: io.NopCloser(&b)}, false, "plugin", fixtureCheck)
 		if r.Status != "smart" {
 			t.Fatal(codec, r)
 		}
@@ -135,12 +135,12 @@ func TestOAuthContractFixture(t *testing.T) {
 
 func TestDiagnosticFailureEventAndCompression(t *testing.T) {
 	for _, codec := range []string{"br", "zstd", "deflate"} {
-		r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}, "Content-Encoding": {codec}}, Body: io.NopCloser(strings.NewReader("invalid compressed bytes"))}, false, "plugin")
+		r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}, "Content-Encoding": {codec}}, Body: io.NopCloser(strings.NewReader("invalid compressed bytes"))}, false, "plugin", fixtureCheck)
 		if r.Status != "unknown" || r.Reason != "response_decompression_failed" {
 			t.Fatalf("%s: %+v", codec, r)
 		}
 	}
-	r := Parse(strings.NewReader("event: response.completed\ndata: {bad}\n\n"), true, false)
+	r := parseInput(strings.NewReader("event: response.completed\ndata: {bad}\n\n"), true, false, fixtureCheck)
 	if r.Diagnostic.EventType != "response.completed" || r.Diagnostic.EventIndex != 1 {
 		t.Fatal(r.Diagnostic)
 	}
@@ -165,7 +165,7 @@ func TestHTTPCaseAliasedFields(t *testing.T) {
 		{"distinct extension keys remain compatible", "data: {\"type\":\"response.auxiliary\",\"custom\":1,\"Custom\":2}\n\n" + finalEvent("21"), "text/event-stream", "smart", "correct_answer", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {tc.media}}, Body: io.NopCloser(strings.NewReader(tc.body))}, tc.chat, "http")
+			r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {tc.media}}, Body: io.NopCloser(strings.NewReader(tc.body))}, tc.chat, "http", fixtureCheck)
 			if r.Status != tc.status || r.Reason != tc.reason || r.Diagnostic == nil || r.Diagnostic.Field != tc.field {
 				t.Fatalf("%+v diagnostic=%+v", r, r.Diagnostic)
 			}
@@ -189,7 +189,7 @@ func TestHTTPFinalMessageBoundaries(t *testing.T) {
 				if media == "text/event-stream" {
 					body = `data: {"type":"response.completed","response":` + body + "}\n\n"
 				}
-				r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {media}}, Body: io.NopCloser(strings.NewReader(body))}, false, "http")
+				r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {media}}, Body: io.NopCloser(strings.NewReader(body))}, false, "http", fixtureCheck)
 				if r.Status != tc.status || r.Reason != tc.reason || r.Answer != tc.answer {
 					t.Fatalf("%+v diagnostic=%+v", r, r.Diagnostic)
 				}
@@ -237,7 +237,7 @@ func TestHTTPCompressedUpstreamRoundTrip(t *testing.T) {
 			if encoding == "gzip" && !response.Uncompressed {
 				t.Fatal("expected transport gzip decompression")
 			}
-			result := ParseHTTP(response, false, "http")
+			result := ParseHTTP(response, false, "http", fixtureCheck)
 			if result.Status != "smart" || result.NormalizedAnswer == nil || *result.NormalizedAnswer != "21" {
 				t.Fatalf("%+v", result)
 			}

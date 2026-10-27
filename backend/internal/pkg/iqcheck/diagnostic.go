@@ -6,30 +6,40 @@ import (
 	"time"
 )
 
-const ParserVersion = "iq-response-v6"
+const ParserVersion = "iq-response-v7"
+
+type ModelIdentityDiagnostic struct {
+	Source string   `json:"source"`
+	Sent   string   `json:"sent"`
+	Body   []string `json:"body"`
+	Header []string `json:"header"`
+	Flags  []string `json:"flags"`
+}
 
 // Diagnostic never contains response text, reasoning, credentials or raw errors.
 // Fixed field lengths keep its JSON representation below the database's 4 KiB cap.
 type Diagnostic struct {
-	LimitKind           string     `json:"limit_kind,omitempty"`
-	LimitBytes          int        `json:"limit_bytes,omitempty"`
-	Category            string     `json:"category,omitempty"`
-	StateProtection     string     `json:"state_protection,omitempty"`
-	DoneMessages        int        `json:"done_messages,omitempty"`
-	TerminalItems       int        `json:"terminal_items,omitempty"`
-	IgnoredItems        int        `json:"ignored_items,omitempty"`
-	IgnoredTypes        string     `json:"ignored_types,omitempty"`
-	AnswerSource        string     `json:"answer_source,omitempty"`
-	FirstByteMS         int64      `json:"first_byte_ms"`
-	TotalMS             int64      `json:"total_ms"`
-	ErrorCode           string     `json:"error_code,omitempty"`
-	ErrorType           string     `json:"error_type,omitempty"`
-	RetryAfter          *time.Time `json:"retry_after,omitempty"`
-	RetryAfterUnbounded bool       `json:"retry_after_unbounded,omitempty"`
-	InputTokens         int64      `json:"input_tokens,omitempty"`
-	OutputTokens        int64      `json:"output_tokens,omitempty"`
-	ReasoningTokens     int64      `json:"reasoning_tokens,omitempty"`
-	RetryVisibility     string     `json:"retry_visibility,omitempty"`
+	NaiveAnswer         bool                     `json:"naive_answer,omitempty"`
+	ModelIdentity       *ModelIdentityDiagnostic `json:"model_identity,omitempty"`
+	LimitKind           string                   `json:"limit_kind,omitempty"`
+	LimitBytes          int                      `json:"limit_bytes,omitempty"`
+	Category            string                   `json:"category,omitempty"`
+	StateProtection     string                   `json:"state_protection,omitempty"`
+	DoneMessages        int                      `json:"done_messages,omitempty"`
+	TerminalItems       int                      `json:"terminal_items,omitempty"`
+	IgnoredItems        int                      `json:"ignored_items,omitempty"`
+	IgnoredTypes        string                   `json:"ignored_types,omitempty"`
+	AnswerSource        string                   `json:"answer_source,omitempty"`
+	FirstByteMS         int64                    `json:"first_byte_ms"`
+	TotalMS             int64                    `json:"total_ms"`
+	ErrorCode           string                   `json:"error_code,omitempty"`
+	ErrorType           string                   `json:"error_type,omitempty"`
+	RetryAfter          *time.Time               `json:"retry_after,omitempty"`
+	RetryAfterUnbounded bool                     `json:"retry_after_unbounded,omitempty"`
+	InputTokens         int64                    `json:"input_tokens,omitempty"`
+	OutputTokens        int64                    `json:"output_tokens,omitempty"`
+	ReasoningTokens     int64                    `json:"reasoning_tokens,omitempty"`
+	RetryVisibility     string                   `json:"retry_visibility,omitempty"`
 
 	ParserVersion  string `json:"parser_version"`
 	Stage          string `json:"stage"`

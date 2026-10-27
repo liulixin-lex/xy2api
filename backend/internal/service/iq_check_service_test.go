@@ -11,7 +11,6 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/domain"
-	"github.com/liulixin-lex/xy2api/internal/pkg/iqcheck"
 	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
 	"github.com/stretchr/testify/require"
 )
@@ -70,7 +69,7 @@ func TestIQCheckProbe(t *testing.T) {
 		{"unauthorized", 401, "", "unknown", nil}, {"quota", 429, "", "unknown", nil}, {"server", 503, "", "unknown", nil}, {"unsupported", 400, "", "unknown", nil}, {"empty", 200, "{}", "unknown", nil}, {"timeout", 0, "", "unknown", context.DeadlineExceeded}, {"disconnected", 0, "", "unknown", io.ErrUnexpectedEOF},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Extra: map[string]any{"openai_responses_mode": "force_chat_completions"}, Credentials: map[string]any{"api_key": "fixture", "base_url": "https://example.test", "model_mapping": map[string]any{iqcheck.Model: "other-model"}}}
+			a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Extra: map[string]any{"openai_responses_mode": "force_chat_completions"}, Credentials: map[string]any{"api_key": "fixture", "base_url": "https://example.test", "model_mapping": map[string]any{"gpt-6-astra": "other-model"}}}
 			transport := &iqProbeTransport{status: tc.httpStatus, body: tc.body, failure: tc.failure}
 			s := &IQCheckService{accounts: &iqProbeAccounts{account: a}, tester: &AccountTestService{cfg: &config.Config{}, httpUpstream: transport}}
 			for i := 0; i < 2; i++ {
@@ -82,9 +81,9 @@ func TestIQCheckProbe(t *testing.T) {
 				require.Nil(t, transport.requests[i].GetBody)
 				require.True(t, HTTPUpstreamSingleAttempt(transport.requests[i].Context()))
 				require.Equal(t, "single_attempt", result.Diagnostic.RetryVisibility)
-				require.Equal(t, iqcheck.Model, transport.bodies[i]["model"])
+				require.Equal(t, "gpt-6-astra", transport.bodies[i]["model"])
 				require.Equal(t, false, transport.bodies[i]["store"])
-				require.Equal(t, iqcheck.Effort, transport.bodies[i]["reasoning_effort"])
+				require.Equal(t, "low", transport.bodies[i]["reasoning_effort"])
 				require.NotContains(t, transport.bodies[i], "previous_response_id")
 				require.NotContains(t, transport.bodies[i], "conversation")
 			}
@@ -130,8 +129,8 @@ func TestIQCheckOAuthPayloadAndStaleCandidate(t *testing.T) {
 			s := &IQCheckService{accounts: &iqProbeAccounts{account: a}, tester: &AccountTestService{cfg: &config.Config{}, httpUpstream: transport}}
 			result := s.probe(context.Background(), 1)
 			require.Equal(t, "smart", result.Status)
-			require.Equal(t, iqcheck.Model, transport.bodies[0]["model"])
-			require.Equal(t, map[string]any{"effort": iqcheck.Effort}, transport.bodies[0]["reasoning"])
+			require.Equal(t, "gpt-6-astra", transport.bodies[0]["model"])
+			require.Equal(t, map[string]any{"effort": "low"}, transport.bodies[0]["reasoning"])
 			if kind == AccountTypeAPIKey {
 				require.NotEmpty(t, transport.requests[0].Header.Get("Session_id"))
 				require.Equal(t, transport.bodies[0]["prompt_cache_key"], transport.requests[0].Header.Get("Conversation_id"))
@@ -145,16 +144,16 @@ func TestIQCheckOAuthPayloadAndStaleCandidate(t *testing.T) {
 	fresh := cached
 	fresh.IQCheck.Status = "degraded"
 	gateway := &OpenAIGatewayService{accountRepo: &iqProbeAccounts{account: &fresh}, schedulerSnapshot: &SchedulerSnapshotService{}}
-	require.Nil(t, gateway.recheckSelectedOpenAIAccountFromDB(context.Background(), &cached, nil, PlatformOpenAI, iqcheck.Model, false, ""))
+	require.Nil(t, gateway.recheckSelectedOpenAIAccountFromDB(context.Background(), &cached, nil, PlatformOpenAI, "gpt-6-astra", false, ""))
 	for _, status := range []string{"smart", "unknown"} {
 		fresh.IQCheck.Status = status
 		fresh.IQCheck.LastValidStatus = "smart"
 		fresh.IQCheck.LastRunStatus = "unknown"
 		fresh.IQCheck.LastRunReason = "response_too_large"
-		require.NotNil(t, gateway.recheckSelectedOpenAIAccountFromDB(context.Background(), &cached, nil, PlatformOpenAI, iqcheck.Model, false, ""), "an inconclusive probe cannot remove an otherwise eligible account from scheduling")
+		require.NotNil(t, gateway.recheckSelectedOpenAIAccountFromDB(context.Background(), &cached, nil, PlatformOpenAI, "gpt-6-astra", false, ""), "an inconclusive probe cannot remove an otherwise eligible account from scheduling")
 	}
 	fresh.IQCheck.ObserveResult("smart", "correct_answer", time.Now())
-	require.NotNil(t, gateway.recheckSelectedOpenAIAccountFromDB(context.Background(), &cached, nil, PlatformOpenAI, iqcheck.Model, false, ""))
+	require.NotNil(t, gateway.recheckSelectedOpenAIAccountFromDB(context.Background(), &cached, nil, PlatformOpenAI, "gpt-6-astra", false, ""))
 }
 
 func TestIQCheckConfiguredRoutes(t *testing.T) {
