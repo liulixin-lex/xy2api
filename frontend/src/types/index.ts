@@ -1582,7 +1582,9 @@ export interface IQModelIdentity { source?: string; sent?: string; body?: string
 export type IQDiagnostic = Record<string, unknown> & { model_identity?: IQModelIdentity }
 export interface IQAttempt { attempt_no: number; effort: string; challenge: IQChallenge | null; expected: string; answer: string; reported_model: string; model_class: string; status: IQVerdict; reason: string; latency_ms: number | null; diagnostic: IQDiagnostic | null }
 export interface IQRound { id: number; model: string; outbound_model: string; mode: 'normal' | 'recheck'; effort: string; status: '' | IQVerdict; reason: string; started_at: string; finished_at: string | null; prompt_version: string; attempts: IQAttempt[] }
-export interface IQRoundPage { rounds: IQRound[]; next_before_id: number | null }
+// filter: '' = all rounds; 'abnormal' = finished rounds with a non-smart verdict or answer. total counts the filtered 7-day window.
+export type IQRoundFilter = '' | 'abnormal'
+export interface IQRoundPage { rounds: IQRound[]; total: number; page: number; page_size: number }
 
 export interface CreateAccountRequest {
   iq_check?: IQTargetsPatch
