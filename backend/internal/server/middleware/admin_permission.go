@@ -2,9 +2,11 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
@@ -108,6 +110,13 @@ func AdminPermission() gin.HandlerFunc {
 				}
 			}
 		}
+		if entry.WS {
+			ctx, cancel := context.WithCancel(c.Request.Context())
+			c.Request = c.Request.WithContext(ctx)
+			defer cancel()
+			go recheckOperatorWebSocket(ctx, cancel, scope, 30*time.Second)
+		}
+
 		if len(entry.Redact) == 0 {
 			c.Next()
 			return
@@ -120,5 +129,26 @@ func AdminPermission() gin.HandlerFunc {
 		defer func() { c.Writer = original }()
 		c.Next()
 		writer.finish()
+	}
+}
+
+func recheckOperatorWebSocket(ctx context.Context, cancel context.CancelFunc, scope *operatoraccess.Scope, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if scope.Reload == nil {
+				cancel()
+				return
+			}
+			permissions, active, err := scope.Reload(ctx)
+			if err != nil || !active || !permissions.Can(operatoraccess.ModuleOps, operatoraccess.LevelView) {
+				cancel()
+				return
+			}
+		}
 	}
 }

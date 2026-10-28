@@ -33,6 +33,9 @@ type UserStatusBatchRepository interface {
 }
 
 func (s *adminServiceImpl) BatchUpdateUserStatus(ctx context.Context, userIDs []int64, status string, actorAdminID int64) (BatchUserStatusResult, error) {
+	if err := s.operatorCheckUserTargets(ctx, userIDs); err != nil {
+		return BatchUserStatusResult{}, err
+	}
 	if status != StatusActive && status != StatusDisabled {
 		return BatchUserStatusResult{}, ErrInvalidBatchUserStatus
 	}

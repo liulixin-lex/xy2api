@@ -4,9 +4,11 @@ package operatoraccess
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -57,4 +59,27 @@ func TestFieldLookupMatchesEncodingJSON(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestCheckCanonicalIsLinearInKeyCount(t *testing.T) {
+	obj := make(map[string]int, 90000)
+	for i := 0; i < 90000; i++ {
+		obj[fmt.Sprintf("k%d", i)] = i
+	}
+	body, err := json.Marshal(obj)
+	require.NoError(t, err)
+	start := time.Now()
+	require.NoError(t, CheckCanonical("application/json", body, nil, nil))
+	if !operatorRaceEnabled {
+		require.Less(t, time.Since(start), time.Second)
+	}
+	for i := 90000; i < 100001; i++ {
+		obj[fmt.Sprintf("k%d", i)] = i
+	}
+	body, err = json.Marshal(obj)
+	require.NoError(t, err)
+	err = CheckCanonical("application/json", body, nil, nil)
+	require.Error(t, err)
+	require.Equal(t, "body", err.(*CanonicalError).Field)
+	require.Error(t, CheckCanonical("application/json", []byte(`{"k":1,"K":2}`), nil, nil))
 }

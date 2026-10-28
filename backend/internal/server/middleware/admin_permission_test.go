@@ -6,12 +6,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
@@ -381,4 +383,52 @@ func TestAdminPermissionMounts(t *testing.T) {
 		require.Less(t, strings.Index(s, tc.auth), strings.Index(s, tc.permission))
 		require.Less(t, strings.Index(s, tc.permission), strings.Index(s, tc.compliance))
 	}
+}
+
+func TestAdminPermissionWebSocketClosesAfterRevoke(t *testing.T) {
+	for _, which := range []string{"permission", "role", "error"} {
+		t.Run(which, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			sc := permissionScope()
+			sc.Reload = func(context.Context) (operatoraccess.Permissions, bool, error) {
+				switch which {
+				case "role":
+					return sc.Perms, false, nil
+				case "error":
+					return sc.Perms, true, errors.New("load failed")
+				default:
+					return operatoraccess.Permissions{}, true, nil
+				}
+			}
+			done := make(chan struct{})
+			go func() { recheckOperatorWebSocket(ctx, cancel, sc, time.Millisecond); close(done) }()
+			select {
+			case <-ctx.Done():
+			case <-time.After(time.Second):
+				t.Fatal("revoked connection remained open")
+			}
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("recheck leaked")
+			}
+		})
+	}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	sc := permissionScope()
+	var handlerCtx context.Context
+	r.Use(func(c *gin.Context) {
+		c.Request = c.Request.WithContext(operatoraccess.WithScope(c.Request.Context(), sc))
+	}, AdminPermission())
+	r.GET("/api/v1/admin/ops/ws/qps", func(c *gin.Context) {
+		handlerCtx = c.Request.Context()
+		require.NoError(t, handlerCtx.Err())
+		c.Status(204)
+	})
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest("GET", "/api/v1/admin/ops/ws/qps", nil))
+	require.Equal(t, 204, rec.Code)
+	require.ErrorIs(t, handlerCtx.Err(), context.Canceled)
 }

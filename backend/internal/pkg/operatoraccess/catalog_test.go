@@ -32,7 +32,7 @@ func TestCatalogKeysAreWellFormed(t *testing.T) {
 func TestCatalogEntriesAreConsistent(t *testing.T) {
 	targets := strings.Fields("user_path_id user_path_user_id user_body_id user_body_ids apikey_owner sub_owner sub_body_owners order_owner group_rate_rows group_rpm_rows group_members")
 	fields := strings.Fields("user_create user_update user_batch_no_all user_bind_identity user_replace_group apikey_group user_search group_create group_update group_delete channel_create channel_update monitor_create monitor_update monitor_template_update monitor_template_apply account_create account_update account_bulk_update account_oauth_apply account_import_address account_url_probe proxy_create proxy_update proxy_delete redeem_safe_rows redeem_batch_rows promo_search subscription_assign subscription_update affiliate_config risk_config ops_alert_config redeem_search codex_ticket_proxy redeem_create_and_redeem sub_bulk_action aff_rate ops_runtime_alert")
-	redactions := strings.Fields("account api_key redeem_code promo_code order_code proxy_password monitor monitor_template audit_body ops_upstream_url")
+	redactions := strings.Fields("account api_key redeem_code promo_code order_code proxy_password monitor monitor_template audit_body ops_upstream_url monitor_message")
 	for _, key := range Keys() {
 		t.Run(key, func(t *testing.T) {
 			e, ok := Lookup(key)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -14,6 +15,22 @@ const ErrorDetailHidden = "upstream error details hidden"
 
 var upstreamURL = regexp.MustCompile("[A-Za-z][A-Za-z0-9+.-]*://[^\\s\\\"'<>\\x60]+")
 
+var machineCode = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+
+// StripURLUserinfo removes credentials from every URL embedded in a string.
+func StripURLUserinfo(s string) string {
+	return upstreamURL.ReplaceAllStringFunc(s, func(raw string) string {
+		start := strings.Index(raw, "://") + 3
+		end := len(raw)
+		if i := strings.IndexAny(raw[start:], "/?#"); i >= 0 {
+			end = start + i
+		}
+		if at := strings.LastIndex(raw[start:end], "@"); at >= 0 {
+			return raw[:start] + "***@" + raw[start+at+1:]
+		}
+		return raw
+	})
+}
 func ScrubURLs(s string) string { return upstreamURL.ReplaceAllString(s, "[upstream]") }
 func Mask(v string) string {
 	r := []rune(v)
@@ -93,7 +110,7 @@ func scrubErrorValues(v any, status int) {
 			}
 			switch k {
 			case "error", "error_message", "last_error", "temp_unschedulable_reason", "response_text":
-				if s != "" {
+				if s != "" && !machineCode.MatchString(s) {
 					m[k] = ErrorDetailHidden
 				}
 			case "message", "reason":
@@ -129,8 +146,12 @@ func RedactEventLine(line []byte) []byte {
 	}
 	scrubStrings(m)
 	walkObjects(m, func(obj map[string]any) {
-		if v, ok := obj["error"]; ok && v != nil && v != "" {
-			obj["error"] = ErrorDetailHidden
+		for _, key := range []string{"error", "error_message", "last_error", "temp_unschedulable_reason", "response_text"} {
+			if v, ok := obj[key]; ok && v != nil && v != "" {
+				if code, ok := v.(string); !ok || !machineCode.MatchString(code) {
+					obj[key] = ErrorDetailHidden
+				}
+			}
 		}
 	})
 	out, err := json.Marshal(m)
@@ -226,27 +247,47 @@ func Redact(body []byte, rules []Redaction, s *Scope) ([]byte, error) {
 			})
 		case "audit_body":
 			walkObjects(v, func(m map[string]any) {
-				if body, ok := m["request_body"].(string); ok {
-					parsed, err := decodeJSON([]byte(body))
-					if err != nil {
-						m["request_body"] = "<request body hidden>"
-					} else {
-						redactAuditTree(parsed, address)
-						raw, _ := json.Marshal(parsed)
-						m["request_body"] = string(raw)
-					}
+				if _, body := m["request_body"]; !body && m["path"] == nil {
+					return
 				}
-				if !address {
-					if extra, ok := m["extra"].(map[string]any); ok {
-						if q, ok := extra["query"]; ok {
-							extra["query"] = scrubStrings(q)
-						}
-					}
+				method, _ := m["method"].(string)
+				path, _ := m["path"].(string)
+				row, found := Lookup(Key(method, path))
+				extra, _ := m["extra"].(map[string]any)
+				if !strings.HasPrefix(path, "/api/v1/admin/") || !found || row.Kind == KindSuperOnly {
+					m["request_body"] = "<request body hidden>"
+					delete(extra, "query")
+					return
+				}
+				body, _ := m["request_body"].(string)
+				parsed, err := decodeJSON([]byte(body))
+				if err != nil {
+					m["request_body"] = "<request body hidden>"
+				} else {
+					parsed = redactAuditTree(parsed, address)
+					raw, _ := json.Marshal(parsed)
+					m["request_body"] = string(raw)
+				}
+				if q, ok := extra["query"].(string); ok && hideAuditQuery(q, address) {
+					extra["query"] = "<query hidden>"
 				}
 			})
+		case "monitor_message":
+			if !address {
+				walkObjects(dataValue(v), func(m map[string]any) {
+					if msg, ok := m["message"].(string); ok && msg != "" {
+						if m["status"] == "error" {
+							m["message"] = ErrorDetailHidden
+						} else {
+							m["message"] = ScrubURLs(msg)
+						}
+					}
+				})
+			}
 		case "ops_upstream_url":
 			if !address && !s.Can(ModuleOps, LevelView) {
-				redactOps(v)
+				redactOpsURLs(v)
+				redactOps(dataValue(v), false)
 			}
 		default:
 			return nil, fmt.Errorf("operatoraccess: unknown redaction %q", rule)
@@ -270,9 +311,13 @@ func redactOrder(v any) {
 		}
 	})
 }
-func redactAuditTree(v any, address bool) {
+func redactAuditTree(v any, address bool) any {
 	walkObjects(v, func(m map[string]any) {
 		for k, value := range m {
+			if strings.EqualFold(k, "rt") || strings.EqualFold(k, "proxy_url") {
+				m[k] = "***"
+				continue
+			}
 			header := false
 			for _, key := range []string{"header_overrides", "extra_headers", "body_override"} {
 				if strings.EqualFold(k, key) {
@@ -294,6 +339,13 @@ func redactAuditTree(v any, address bool) {
 			}
 		}
 	})
+	return transformStrings(v, func(s string) string {
+		s = StripURLUserinfo(s)
+		if !address {
+			s = ScrubURLs(s)
+		}
+		return s
+	})
 }
 func maskAuditValues(v any) any {
 	switch x := v.(type) {
@@ -311,7 +363,84 @@ func maskAuditValues(v any) any {
 		return "***"
 	}
 }
-func redactOps(v any) {
+func dataValue(v any) any {
+	if m, ok := v.(map[string]any); ok {
+		return m["data"]
+	}
+	return nil
+}
+func transformStrings(v any, f func(string) string) any {
+	switch x := v.(type) {
+	case string:
+		return f(x)
+	case map[string]any:
+		for k, v := range x {
+			x[k] = transformStrings(v, f)
+		}
+	case []any:
+		for i, v := range x {
+			x[i] = transformStrings(v, f)
+		}
+	}
+	return v
+}
+func auditAddressKey(k string) bool {
+	for _, name := range []string{"base_url", "api_base_urls", "custom_base_url", "endpoint", "upstream_url"} {
+		if strings.EqualFold(k, name) {
+			return true
+		}
+	}
+	return false
+}
+func hideAuditQuery(raw string, address bool) bool {
+	q, err := url.ParseQuery(raw)
+	if err != nil {
+		return true
+	}
+	for k, values := range q {
+		if !address && auditAddressKey(k) {
+			return true
+		}
+		for _, value := range values {
+			if i := strings.Index(value, "://"); i >= 0 {
+				if !address || strings.Contains(value[i+3:], "@") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+func redactOps(v any, event bool) {
+	walkObjects(v, func(m map[string]any) {
+		delete(m, "upstream_url")
+		_, kind := m["kind"]
+		_, status := m["upstream_status_code"]
+		keys := []string{"upstream_error_message", "upstream_error_detail", "upstream_response_body"}
+		if event || kind || status {
+			keys = append(keys, "message", "detail")
+		}
+		for _, key := range keys {
+			if s, ok := m[key].(string); ok && s != "" {
+				m[key] = ErrorDetailHidden
+			}
+		}
+		if raw, ok := m["upstream_errors"].(string); ok {
+			parsed, err := decodeJSON([]byte(raw))
+			if err != nil {
+				m["upstream_errors"] = "[]"
+			} else {
+				redactOps(parsed, true)
+				b, _ := json.Marshal(parsed)
+				m["upstream_errors"] = string(b)
+			}
+		}
+	})
+}
+
+// URL removal also covers legacy non-envelope response shapes. Message replacement
+// remains limited to data and serialized upstream events.
+func redactOpsURLs(v any) {
 	walkObjects(v, func(m map[string]any) {
 		delete(m, "upstream_url")
 		if raw, ok := m["upstream_errors"].(string); ok {
@@ -319,9 +448,9 @@ func redactOps(v any) {
 			if err != nil {
 				m["upstream_errors"] = "[]"
 			} else {
-				redactOps(parsed)
-				b, _ := json.Marshal(parsed)
-				m["upstream_errors"] = string(b)
+				redactOps(parsed, true)
+				encoded, _ := json.Marshal(parsed)
+				m["upstream_errors"] = string(encoded)
 			}
 		}
 	})

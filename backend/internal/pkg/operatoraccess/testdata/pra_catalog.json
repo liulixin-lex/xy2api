@@ -2310,7 +2310,9 @@
   "flags": [],
   "target": null,
   "fields": null,
-  "redact": [],
+  "redact": [
+   "monitor_message"
+  ],
   "ws": false
  },
  {
@@ -2324,7 +2326,9 @@
   "flags": [],
   "target": null,
   "fields": null,
-  "redact": [],
+  "redact": [
+   "monitor_message"
+  ],
   "ws": false
  },
  {

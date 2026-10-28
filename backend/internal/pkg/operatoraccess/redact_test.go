@@ -72,7 +72,7 @@ func TestRedactAccountScrubsURLsAtAnyDepthAnd5xx(t *testing.T) {
 	require.Equal(t, "dial tcp 192.0.2.3:443 refused", obj["error"])
 }
 func TestScrubErrorStringsHidesErrorDetail(t *testing.T) {
-	body := `{"error":"tls relay.example","error_message":"relay.example","nested":[{"last_error":"192.0.2.1:443","temp_unschedulable_reason":"refused","response_text":"cert.example","message":"visit https://relay.example/path","reason":"UPSTREAM_ERROR"}],"message":"top relay.example"}`
+	body := `{"error":"tls relay.example","error_message":"relay.example","nested":[{"last_error":"192.0.2.1:443","temp_unschedulable_reason":"connection refused","response_text":"cert.example","message":"visit https://relay.example/path","reason":"UPSTREAM_ERROR"}],"message":"top relay.example"}`
 	for _, status := range []int{200, 400, 503} {
 		raw, err := ScrubErrorStrings([]byte(body), status)
 		require.NoError(t, err)
@@ -138,7 +138,7 @@ func TestRedactAPIKeyRedeemPromoAndOrderCodes(t *testing.T) {
 }
 func TestRedactAuditBodyScrubsAddresses(t *testing.T) {
 	body := `{"base_url":"https://relay.example","nested":[{"custom_base_url":"https://relay.example","api_base_urls":["https://relay.example"]}],"endpoint":"https://relay.example","upstream_url":"https://relay.example"}`
-	raw, _ := json.Marshal(map[string]any{"request_body": body, "extra": map[string]any{"query": "endpoint=https://relay.example/path"}})
+	raw, _ := json.Marshal(map[string]any{"method": "POST", "path": "/api/v1/admin/accounts", "request_body": body, "extra": map[string]any{"query": "endpoint=https://relay.example/path"}})
 	obj := redactTest(t, string(raw), []Redaction{"audit_body"})
 	require.NotContains(t, obj["request_body"], "relay.example")
 	require.NotContains(t, obj["extra"].(map[string]any)["query"], "relay.example")
@@ -147,7 +147,7 @@ func TestRedactAuditBodyScrubsAddresses(t *testing.T) {
 }
 func TestRedactAuditBodyMasksHeaderMapsAlways(t *testing.T) {
 	body := `{"extra_headers":{"X-Relay":"secret"},"Extra_Headers":{"Alias":"secret"},"HEADER_OVERRIDES":{"Header":"secret"},"nested":[{"Body_Override":{"x":"secret"},"Base_URL":"https://relay.example","Custom_Base_URL":"https://relay.example"}]}`
-	raw, _ := json.Marshal(map[string]any{"request_body": body})
+	raw, _ := json.Marshal(map[string]any{"method": "POST", "path": "/api/v1/admin/accounts", "request_body": body})
 	for _, flags := range [][]Flag{nil, {FlagAccountsUpstreamAddress}} {
 		obj := redactTest(t, string(raw), []Redaction{"audit_body"}, flags...)
 		require.NotContains(t, obj["request_body"], "secret")
@@ -159,7 +159,7 @@ func TestRedactAuditBodyMasksHeaderMapsAlways(t *testing.T) {
 }
 func TestRedactAuditBodyHidesUnparseableBody(t *testing.T) {
 	for _, body := range []string{"invalid secret", "{\"extra_headers\":...<truncated>", "{} {}"} {
-		raw, _ := json.Marshal(map[string]any{"request_body": body})
+		raw, _ := json.Marshal(map[string]any{"method": "POST", "path": "/api/v1/admin/accounts", "request_body": body})
 		for _, flags := range [][]Flag{nil, {FlagAccountsUpstreamAddress}} {
 			obj := redactTest(t, string(raw), []Redaction{"audit_body"}, flags...)
 			require.Equal(t, "<request body hidden>", obj["request_body"])
@@ -191,4 +191,98 @@ func TestMask(t *testing.T) {
 	for input, want := range map[string]string{"": "****", "1234567": "****", "12345678": "12****78", "123456789012345": "12****45", "1234567890123456": "123456****3456", "密钥密钥密钥密钥": "密钥****密钥"} {
 		require.Equal(t, want, Mask(input))
 	}
+}
+
+func auditR5(t *testing.T, method, path, body, query string, flags ...Flag) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{"method": method, "path": path, "request_body": body, "extra": map[string]any{"query": query, "params": map[string]any{"id": "7"}}})
+	require.NoError(t, err)
+	return redactTest(t, string(raw), []Redaction{"audit_body"}, flags...)
+}
+func TestRedactAuditBodyHidesBodiesOfRoutesOperatorsCannotCall(t *testing.T) {
+	for _, flags := range [][]Flag{nil, {FlagAccountsUpstreamAddress}} {
+		for _, route := range [][2]string{{"PUT", "/api/v1/admin/settings"}, {"PUT", "/api/v1/admin/settings/codex-ticket/proxies"}, {"POST", "/api/v1/user/profile"}, {"POST", "/api/v1/auth/login"}, {"POST", "/api/v1/admin/unknown"}, {"POST", ""}, {"PUT", "/api/v1/admin/accounts/7"}} {
+			obj := auditR5(t, route[0], route[1], `{"secret":"hidden"}`, "q=secret", flags...)
+			require.Equal(t, "<request body hidden>", obj["request_body"])
+			extra := obj["extra"].(map[string]any)
+			require.NotContains(t, extra, "query")
+			require.Contains(t, extra, "params")
+		}
+		obj := auditR5(t, "PUT", "/api/v1/admin/accounts/:id", `{"name":"shown"}`, "q=ok", flags...)
+		require.JSONEq(t, `{"name":"shown"}`, obj["request_body"].(string))
+	}
+}
+func TestRedactAuditBodyAlwaysMasksTokensProxyURLsAndUserinfo(t *testing.T) {
+	body := `{"rt":"token","nested":[{"RT":"token","proxy_url":"http://u:p@h:1"}],"note":"visit http://u:p@h:1/path","url":"https://relay.example/private-token"}`
+	for _, flags := range [][]Flag{nil, {FlagAccountsUpstreamAddress}} {
+		obj := auditR5(t, "POST", "/api/v1/admin/accounts", body, "q=ok", flags...)
+		raw := obj["request_body"].(string)
+		require.NotContains(t, raw, "u:p")
+		require.NotContains(t, raw, `"token"`)
+		if len(flags) == 0 {
+			require.NotContains(t, raw, "relay.example")
+			require.Contains(t, raw, "[upstream]")
+		} else {
+			require.Contains(t, raw, "http://***@h:1/path")
+		}
+	}
+	require.Equal(t, "http://***@h:1/x and socks5://***@host:2", StripURLUserinfo("http://u:p@h:1/x and socks5://u:p@host:2"))
+}
+func TestRedactAuditBodyHidesEncodedQueryURLs(t *testing.T) {
+	for _, q := range []string{"base_url=https%3A%2F%2Fr.example", "u=https:%2F%2Fr.example", "u=http%3A%2F%2Fu%3Ap%40h%3A1", "u=%ZZ", "Endpoint=bare"} {
+		obj := auditR5(t, "POST", "/api/v1/admin/accounts", `{}`, q)
+		require.Equal(t, "<query hidden>", obj["extra"].(map[string]any)["query"])
+	}
+	for _, q := range []string{"u=http%3A%2F%2Fu%3Ap%40h%3A1", "u=%ZZ"} {
+		obj := auditR5(t, "POST", "/api/v1/admin/accounts", `{}`, q, FlagAccountsUpstreamAddress)
+		require.Equal(t, "<query hidden>", obj["extra"].(map[string]any)["query"])
+	}
+	obj := auditR5(t, "POST", "/api/v1/admin/accounts", `{}`, "q=hello%20world")
+	require.Equal(t, "q=hello%20world", obj["extra"].(map[string]any)["query"])
+}
+func TestRedactOpsUpstreamMessagesForUsageOnlyCallers(t *testing.T) {
+	body := `{"code":0,"message":"envelope","data":{"upstream_url":"https://relay.example","upstream_error_message":"host.example","upstream_error_detail":"192.0.2.1:443","upstream_response_body":"tls.example","events":[{"kind":"error","message":"host.example","detail":"192.0.2.1:443"},{"upstream_status_code":502,"message":"tls.example"}],"upstream_errors":"[{\"message\":\"host.example\",\"detail\":\"192.0.2.1:443\",\"upstream_response_body\":\"tls.example\"}]"}}`
+	obj := redactTest(t, body, []Redaction{"ops_upstream_url"})
+	raw, _ := json.Marshal(obj)
+	require.NotContains(t, string(raw), "example")
+	require.NotContains(t, string(raw), "192.0.2.1")
+	require.Equal(t, "envelope", obj["message"])
+	for _, sc := range []*Scope{{Perms: Permissions{Modules: map[Module]Level{ModuleOps: LevelView}}}, {Perms: Permissions{Flags: map[Flag]bool{FlagAccountsUpstreamAddress: true}}}} {
+		raw, err := Redact([]byte(body), []Redaction{"ops_upstream_url"}, sc)
+		require.NoError(t, err)
+		require.Contains(t, string(raw), "host.example")
+	}
+}
+func TestRedactMonitorMessageHidesNetworkErrors(t *testing.T) {
+	body := `{"message":"envelope","data":[{"status":"error","message":"dial tcp 192.0.2.1:443: cert.example"},{"status":"slow","message":"slow response"},{"status":"ok","message":"https://relay.example/path"},{"status":"error","message":""}]}`
+	obj := redactTest(t, body, []Redaction{"monitor_message"})
+	rows := obj["data"].([]any)
+	require.Equal(t, ErrorDetailHidden, rows[0].(map[string]any)["message"])
+	require.Equal(t, "slow response", rows[1].(map[string]any)["message"])
+	require.Equal(t, "[upstream]", rows[2].(map[string]any)["message"])
+	require.Equal(t, "", rows[3].(map[string]any)["message"])
+	require.Equal(t, "envelope", obj["message"])
+	obj = redactTest(t, body, []Redaction{"monitor_message"}, FlagAccountsUpstreamAddress)
+	require.Contains(t, obj["data"].([]any)[0].(map[string]any)["message"], "192.0.2.1")
+}
+func TestScrubErrorStringsKeepsMachineCodes(t *testing.T) {
+	for _, code := range []string{"mixed_channel_warning", "x", "a" + strings.Repeat("0", 63)} {
+		body, _ := json.Marshal(map[string]any{"error": code, "error_message": code, "nested": map[string]any{"last_error": code, "response_text": code, "temp_unschedulable_reason": code}})
+		raw, err := ScrubErrorStrings(body, 200)
+		require.NoError(t, err)
+		require.NotContains(t, string(raw), ErrorDetailHidden)
+		raw, err = Redact(body, []Redaction{"account"}, nil)
+		require.NoError(t, err)
+		require.NotContains(t, string(raw), ErrorDetailHidden)
+		require.NotContains(t, string(RedactEventLine(append([]byte("data: "), body...))), ErrorDetailHidden)
+	}
+	for _, detail := range []string{"Mixed_Code", "host.example", "connection refused", "a" + strings.Repeat("0", 64)} {
+		body, _ := json.Marshal(map[string]any{"error": detail})
+		raw, err := ScrubErrorStrings(body, 200)
+		require.NoError(t, err)
+		require.Contains(t, string(raw), ErrorDetailHidden)
+	}
+	raw, err := ScrubErrorStrings([]byte(`{"message":"machine_code"}`), 400)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), ErrorDetailHidden)
 }

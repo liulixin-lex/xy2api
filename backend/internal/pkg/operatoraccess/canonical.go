@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/url"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -31,7 +32,8 @@ func CheckCanonical(contentType string, body []byte, query url.Values, queryKeys
 		if err != nil || tok != json.Delim('{') {
 			return &CanonicalError{Field: "body"}
 		}
-		if err = canonicalObject(d, 1); err != nil {
+		members := 0
+		if err = canonicalObject(d, 1, &members); err != nil {
 			return &CanonicalError{Field: "body"}
 		}
 		if _, err = d.Token(); err != io.EOF {
@@ -46,11 +48,11 @@ func CheckCanonical(contentType string, body []byte, query url.Values, queryKeys
 	return nil
 }
 
-func canonicalObject(d *json.Decoder, depth int) error {
+func canonicalObject(d *json.Decoder, depth int, members *int) error {
 	if depth > 64 {
 		return fmt.Errorf("too deep")
 	}
-	keys := []string{}
+	keys := map[string]struct{}{}
 	for d.More() {
 		tok, err := d.Token()
 		if err != nil {
@@ -60,13 +62,16 @@ func canonicalObject(d *json.Decoder, depth int) error {
 		if !ok {
 			return fmt.Errorf("invalid key")
 		}
-		for _, seen := range keys {
-			if strings.EqualFold(key, seen) {
-				return fmt.Errorf("duplicate key")
-			}
+		*members++
+		if *members > 100000 {
+			return fmt.Errorf("too many members")
 		}
-		keys = append(keys, key)
-		if err = canonicalValue(d, depth); err != nil {
+		folded := foldCanonical(key)
+		if _, seen := keys[folded]; seen {
+			return fmt.Errorf("duplicate key")
+		}
+		keys[folded] = struct{}{}
+		if err = canonicalValue(d, depth, members); err != nil {
 			return err
 		}
 	}
@@ -79,7 +84,7 @@ func canonicalObject(d *json.Decoder, depth int) error {
 	}
 	return nil
 }
-func canonicalValue(d *json.Decoder, depth int) error {
+func canonicalValue(d *json.Decoder, depth int, members *int) error {
 	tok, err := d.Token()
 	if err != nil {
 		return err
@@ -90,13 +95,13 @@ func canonicalValue(d *json.Decoder, depth int) error {
 	}
 	switch delim {
 	case '{':
-		return canonicalObject(d, depth+1)
+		return canonicalObject(d, depth+1, members)
 	case '[':
 		if depth+1 > 64 {
 			return fmt.Errorf("too deep")
 		}
 		for d.More() {
-			if err = canonicalValue(d, depth+1); err != nil {
+			if err = canonicalValue(d, depth+1, members); err != nil {
 				return err
 			}
 		}
@@ -126,4 +131,17 @@ func Field[V any](obj map[string]V, name string) (V, bool) {
 	}
 	var zero V
 	return zero, false
+}
+
+// foldCanonical gives every Unicode SimpleFold orbit one representative.
+func foldCanonical(key string) string {
+	return strings.Map(func(r rune) rune {
+		smallest := r
+		for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+			if next < smallest {
+				smallest = next
+			}
+		}
+		return smallest
+	}, key)
 }
