@@ -31,6 +31,8 @@ type IQModelCatalog struct {
 	Error     string     `json:"error,omitempty"`
 }
 
+var iqModelDiscoveryTransportExtraKeys = []string{"openai_responses_mode", "openai_responses_supported", "openai_passthrough", "enable_tls_fingerprint", "tls_fingerprint_profile_id"}
+
 // Discovery uses the raw upstream catalog, without SyncUpstreamModelCatalog's
 // configured-model fallback, registry requests or account metadata writes.
 func (s *IQCheckService) Models(ctx context.Context, id int64, refresh bool) (IQModelCatalog, error) {
@@ -44,8 +46,7 @@ func (s *IQCheckService) Models(ctx context.Context, id int64, refresh bool) (IQ
 	if s.tester == nil {
 		return IQModelCatalog{}, ErrIQCheckInvalid
 	}
-	keyData, _ := json.Marshal([]any{id, account.Type, account.IQCheck.Revision, account.GetOpenAIBaseURL(), account.ProxyID, upstreamModelsProxyURL(account)})
-	key := fmt.Sprintf("%x", sha256.Sum256(keyData))
+	key := iqModelDiscoveryCacheKey(account)
 	s.modelsMu.Lock()
 	cached, exists := s.modelsCache[key]
 	s.modelsMu.Unlock()
@@ -114,7 +115,7 @@ func (s *IQCheckService) Models(ctx context.Context, id int64, refresh bool) (IQ
 			if m.DefaultReasoningLevel != "" {
 				item.CapabilitySources["default_reasoning_level"] = "upstream"
 			}
-			if id == domain.DefaultIQModel && m.Reasoning == nil && len(m.SupportedReasoningLevels) == 0 {
+			if id == domain.IQModelAstra && m.Reasoning == nil && len(m.SupportedReasoningLevels) == 0 {
 				item.SupportedReasoningLevels = []string{"low", "medium", "high", "xhigh", "max"}
 				item.CapabilitySources["supported_reasoning_levels"] = "reference"
 			}
@@ -163,6 +164,23 @@ func (s *IQCheckService) Models(ctx context.Context, id int64, refresh bool) (IQ
 	}
 }
 
+func iqModelDiscoveryCacheKey(account *Account) string {
+	credentials := map[string]any{}
+	for _, key := range []string{"api_key", "base_url", "access_token", "refresh_token", "chatgpt_account_id", "header_override_enabled", "header_overrides", "user_agent", "model_mapping"} {
+		if value, ok := account.Credentials[key]; ok {
+			credentials[key] = value
+		}
+	}
+	extra := map[string]any{}
+	for _, key := range iqModelDiscoveryTransportExtraKeys {
+		if value, ok := account.Extra[key]; ok {
+			extra[key] = value
+		}
+	}
+	keyData, _ := json.Marshal([]any{account.ID, account.Type, domain.IQModelAstra, account.GetOpenAIBaseURL(), account.ProxyID, upstreamModelsProxyURL(account), credentials, extra})
+	return fmt.Sprintf("%x", sha256.Sum256(keyData))
+}
+
 // IQ configuration accepts custom effort tokens. Do not discard or alias values
 // merely because the shared business-model catalog does not recognize them.
 func iqRawReasoningLevels(entry upstreamModelCapabilityEntry) []string {
@@ -170,8 +188,7 @@ func iqRawReasoningLevels(entry upstreamModelCapabilityEntry) []string {
 	seen := map[string]bool{}
 	add := func(value string) {
 		value = strings.TrimSpace(value)
-		settings := domain.IQCheckSettings{ReasoningEffort: &value}
-		if settings.Validate() == nil && value != "upstream_default" && !seen[value] {
+		if domain.ValidateIQEffort(value) == nil && value != "upstream_default" && !seen[value] {
 			seen[value] = true
 			levels = append(levels, value)
 		}

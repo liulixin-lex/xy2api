@@ -7,9 +7,12 @@ import { apiClient } from '../client'
 import type { OpenAIReferralRefreshResult, OpenAIReferralSendResult } from '@/types/openaiReferrals'
 import type {
   Account,
-  IQCheckRecord,
-  IQCheckSettings,
   IQModelCatalog,
+  IQRoundPage,
+  IQRunAccount,
+  IQRunTarget,
+  IQTarget,
+  IQTargetsPatch,
   AccountListItem,
   CreateAccountRequest,
   UpdateAccountRequest,
@@ -76,9 +79,14 @@ export async function list(
   return data
 }
 
-export async function setIQCheck(id: number, payload: Partial<IQCheckSettings>) {
-  const { data } = await apiClient.put(`/admin/accounts/${id}/iq-check`, payload)
-  return data
+export async function getIQCheck(id: number, signal?: AbortSignal) {
+  const { data } = await apiClient.get<{ targets: IQTarget[] }>(`/admin/accounts/${id}/iq-check`, { signal })
+  return data.targets
+}
+
+export async function setIQCheck(id: number, patch: IQTargetsPatch) {
+  const { data } = await apiClient.put<{ targets: IQTarget[] }>(`/admin/accounts/${id}/iq-check`, patch)
+  return data.targets
 }
 
 export async function getIQCheckModels(id: number, refresh = false, signal?: AbortSignal) {
@@ -86,18 +94,22 @@ export async function getIQCheckModels(id: number, refresh = false, signal?: Abo
   return data
 }
 
-export async function runIQCheck(id: number) {
-  const { data } = await apiClient.post(`/admin/accounts/${id}/iq-check/run`)
-  return data
+/** Without models, the server checks every target of the account (built-ins are created disabled when missing). */
+export async function runIQCheck(id: number, models?: string[]) {
+  const { data } = await apiClient.post<{ targets: IQRunTarget[] }>(`/admin/accounts/${id}/iq-check/run`, models ? { models } : {})
+  return data.targets
 }
 
-export async function getIQCheckStatus(id: number, signal?: AbortSignal) {
-  const { data } = await apiClient.get<NonNullable<Account['iq_check']>>(`/admin/accounts/${id}/iq-check`, { signal })
-  return data
+export const IQ_RUN_BATCH_LIMIT = 200
+
+export async function runIQCheckBatch(accountIds: number[], models?: string[]) {
+  const { data } = await apiClient.post<{ accounts: IQRunAccount[] }>('/admin/accounts/iq-check/run', { account_ids: accountIds, ...(models ? { models } : {}) })
+  return data.accounts
 }
 
-export async function getIQCheckResults(id: number, signal?: AbortSignal) {
-  const { data } = await apiClient.get<IQCheckRecord[]>(`/admin/accounts/${id}/iq-check/results`, { signal })
+export async function listIQResults(id: number, query: { model: string; before_id?: number | null; limit?: number }, signal?: AbortSignal) {
+  const params = { model: query.model, limit: query.limit ?? 20, ...(query.before_id ? { before_id: query.before_id } : {}) }
+  const { data } = await apiClient.get<IQRoundPage>(`/admin/accounts/${id}/iq-check/results`, { params, signal })
   return data
 }
 
@@ -1227,10 +1239,11 @@ export const accountsAPI = {
   getTempUnschedulableStatus,
   resetTempUnschedulable,
   setSchedulable,
+  getIQCheck,
   setIQCheck,
   runIQCheck,
-  getIQCheckResults,
-  getIQCheckStatus,
+  runIQCheckBatch,
+  listIQResults,
   getIQCheckModels,
   getAvailableModels,
   syncUpstreamModels,

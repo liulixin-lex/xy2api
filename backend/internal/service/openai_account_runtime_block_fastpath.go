@@ -585,6 +585,9 @@ func (s *OpenAIGatewayService) isOpenAIAccountRequestRuntimeBlocked(account *Acc
 		return false
 	}
 	outboundModel := s.openAICodexTicketOutboundModel(account, requestedModel, requireCompact)
+	if iqGateBlocksRequest(account, requestedModel, requireCompact, outboundModel) {
+		return true
+	}
 	if s.openAICodexTicketBlocksAccount(account, outboundModel) {
 		return true
 	}

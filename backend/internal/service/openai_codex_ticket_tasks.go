@@ -56,7 +56,7 @@ func codexTaskStatus(a *Account, rt codexTicketRuntime, now time.Time) *CodexTic
 		task.RetryAt = rt.HardRetryAfter
 		return &task
 	}
-	if reason, until := iqHealth(a, now); reason != "" {
+	if reason, until := accountProbeHealth(a, now); reason != "" {
 		task.State = "waiting"
 		task.WaitReason = "account_health"
 		if !until.IsZero() {

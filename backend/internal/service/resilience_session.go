@@ -24,7 +24,7 @@ const lastResortCandidateTTL = 2 * time.Second
 // resort. recoverAt is when the latest soft restriction ends. Timed hard
 // states retain the later of their own end and the model breaker end.
 func resiliencePenaltyOf(a *Account, model string, now time.Time) (resilience.PenaltyTier, time.Time, string) {
-	if a == nil || !a.IsActive() || !a.Schedulable || a.IQCheck.BlocksScheduling() {
+	if a == nil || !a.IsActive() || !a.Schedulable {
 		return resilience.TierHard, time.Time{}, "unavailable"
 	}
 	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
@@ -32,6 +32,9 @@ func resiliencePenaltyOf(a *Account, model string, now time.Time) (resilience.Pe
 	}
 	if a.IsAPIKeyOrBedrock() && a.IsQuotaExceeded() {
 		return resilience.TierHard, time.Time{}, "quota_exceeded"
+	}
+	if model != "" && iqGateBlocksRequest(a, model, false) {
+		return resilience.TierHard, time.Time{}, "model_rate_limited"
 	}
 	tier := resilience.TierNone
 	var recoverAt time.Time
@@ -351,8 +354,8 @@ func (r *ResilienceService) groupAccountsForLastResort(ctx context.Context, repo
 // served only when its current row still allows last resort; the returned
 // copy is that row with soft penalties relaxed. A failed read keeps the
 // planned copy (the list itself was read moments ago).
-func (r *ResilienceService) verifyLastResortAccount(ctx context.Context, repo AccountRepository, groupID int64, planned *Account, model string,
-	penaltyOf func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string)) (*Account, bool) {
+func (r *ResilienceService) verifyLastResortAccount(ctx context.Context, repo AccountRepository, groupID int64, planned *Account, model string, requireCompact bool,
+	penaltyOf func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string), compactOutboundForFresh func(*Account) string) (*Account, bool) {
 	if planned == nil {
 		return nil, false
 	}
@@ -370,6 +373,14 @@ func (r *ResilienceService) verifyLastResortAccount(ctx context.Context, repo Ac
 	}
 	now := time.Now()
 	if fresh == nil || (groupID > 0 && len(fresh.GroupIDs) > 0 && !containsInt64(fresh.GroupIDs, groupID)) {
+		r.lastResortGroups.drop(groupID)
+		return nil, false
+	}
+	compactOutbound := ""
+	if requireCompact && compactOutboundForFresh != nil {
+		compactOutbound = compactOutboundForFresh(fresh)
+	}
+	if iqGateBlocksRequest(fresh, model, requireCompact, compactOutbound) {
 		r.lastResortGroups.drop(groupID)
 		return nil, false
 	}
@@ -440,7 +451,7 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 	// for the best one.
 	var busy []lastResortCandidate
 	for _, c := range pickLastResort(cands) {
-		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *groupID, c.account, requestedModel, resiliencePenaltyOf)
+		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *groupID, c.account, requestedModel, false, resiliencePenaltyOf, nil)
 		if !ok {
 			continue
 		}
@@ -639,13 +650,20 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 		if acc.Platform != platform || !acc.IsOpenAICompatible() {
 			continue
 		}
+		compactOutboundModel := ""
+		if req.RequireCompact {
+			compactOutboundModel = s.openAICodexTicketOutboundModel(&acc, req.RequestedModel, true)
+		}
+		if iqGateBlocksRequest(&acc, req.RequestedModel, req.RequireCompact, compactOutboundModel) {
+			continue
+		}
 		tier, recoverAt, _ := s.resilienceOpenAIPenaltyOf(&acc, req.RequestedModel, now)
 		if !lastResortTierAllowed(tier, acc.ID, avoided) {
 			continue
 		}
 		candidate := withoutSoftPenalties(acc, now)
-		if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(gateCtx, candidate, platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability); reason != "" &&
-			(reason != "model_rate_limited" || !lastResortModelLimitSoft(gateCtx, candidate, req.RequestedModel)) {
+		if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(gateCtx, candidate, platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability, s); reason != "" &&
+			(reason != "model_rate_limited" || !lastResortModelLimitSoft(gateCtx, candidate, req.RequestedModel, req.RequireCompact, compactOutboundModel)) {
 			continue
 		}
 		if ok, _ := gate.isAccountRequestCompatibleReason(gateCtx, candidate, req); !ok {
@@ -665,8 +683,14 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	// for the best one. Codex accounts under upstream pressure take slots
 	// only up to their adaptive limit.
 	verified := cands[:0]
+	var compactOutboundForFresh func(*Account) string
+	if req.RequireCompact {
+		compactOutboundForFresh = func(fresh *Account) string {
+			return s.openAICodexTicketOutboundModel(fresh, req.RequestedModel, true)
+		}
+	}
 	for _, c := range cands {
-		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, c.account, req.RequestedModel, s.resilienceOpenAIPenaltyOf)
+		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, c.account, req.RequestedModel, req.RequireCompact, s.resilienceOpenAIPenaltyOf, compactOutboundForFresh)
 		if !ok {
 			continue
 		}
@@ -726,7 +750,10 @@ func resilienceLastResortGate(ctx context.Context) bool {
 // lastResortModelLimitSoft reports whether a per-model rate limit lets the
 // account through as a last resort: only in a last-resort context and only
 // while the limit is within the soft threshold (design §3.1).
-func lastResortModelLimitSoft(ctx context.Context, acc *Account, model string) bool {
+func lastResortModelLimitSoft(ctx context.Context, acc *Account, model string, requireCompact bool, compactOutbound ...string) bool {
+	if iqGateBlocksRequest(acc, model, requireCompact, compactOutbound...) {
+		return false
+	}
 	return resilienceLastResortGate(ctx) && acc.GetRateLimitRemainingTimeWithContext(ctx, model) <= resilience.HardRateLimitThreshold
 }
 

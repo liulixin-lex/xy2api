@@ -233,7 +233,9 @@ func TestAccountHandlerSimpleModeBatchPrevalidatesAllGroupsAtomically(t *testing
 func TestAccountHandlerAdvancedModeKeepsFullGroupReferences(t *testing.T) {
 	group := &service.Group{ID: 7, Name: "advanced", RateMultiplier: 9, SubscriptionType: service.SubscriptionTypeSubscription}
 	h := NewAccountHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	raw, err := json.Marshal(h.buildAccountResponseWithRuntime(context.Background(), &service.Account{Groups: []*service.Group{group}}))
+	item, err := h.buildAccountResponseWithRuntime(context.Background(), &service.Account{Groups: []*service.Group{group}})
+	require.NoError(t, err)
+	raw, err := json.Marshal(item)
 	require.NoError(t, err)
 	require.Contains(t, string(raw), `"rate_multiplier":9`)
 	require.Contains(t, string(raw), `"subscription_type":"subscription"`)

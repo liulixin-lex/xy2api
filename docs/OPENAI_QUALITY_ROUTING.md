@@ -21,18 +21,39 @@ The detector compares (2) against (3). Billing continues using the existing mode
 and response-model billing rules. A configured Sol-to-Terra mapping followed by
 a Terra declaration is not a downgrade.
 
-The strict normalizer accepts GPT-5.6 and newer text-model names, known GPT-6/Astra
-and GPT-5.6/Sol aliases, registered effort suffixes, and valid date suffixes.
-Unknown names, suffixes, missing declarations, malformed JSON, duplicate model
-keys, and conflicting envelope declarations do not trigger enforcement. A later
+Usage auditing (`upstream_model_mismatch`) uses the same classification for
+OpenAI models: a declaration that is the same or equivalent, such as a different
+case, an `openai/` prefix, or a date or effort suffix, is recorded as matching.
+Any other declared difference is still a mismatch. Grok and Gemini keep their
+existing comparison. Historical records are not recomputed.
+
+Model names are normalized by `openai.ModelIdentity`, shared with account IQ
+checks and usage auditing:
+
+- case is ignored; `_` and whitespace become `-`; only an `openai/` prefix is
+  removed, so other provider paths and deployment names stay unrecognized;
+- a date snapshot may be written `-YYYY-MM-DD` or `-YYYYMMDD` and must be a real
+  calendar date; at most one registered effort suffix is accepted;
+- the base must be `gpt-<version>-(astra|sol|terra|luna)` with version 5.6 or
+  newer; bare `gpt-6` means `gpt-6-astra` and bare `gpt-5.6` means `gpt-5.6-sol`.
+
+Each declaration is classified against the outbound model as same, equivalent,
+snapshot drift, newer or older version, different, unrecognized, undeclared, or
+downgrade. Only a downgrade, meaning a configured (outbound base, declared base)
+pair, triggers enforcement. Unknown names, missing declarations, malformed JSON,
+duplicate model keys, and conflicting envelope declarations do not. A later
 conflicting declaration is logged by the existing observer but cannot undo an
 already observed downgrade. Image-generation requests are excluded.
 
-Built-in evidence pairs are Astra/Sol/Terra to GPT-5.6 Luna, including Luna-max.
-GPT-6 is included: `gpt-6` is a registered alias of `gpt-6-astra`; the default
-rule detects both routing to GPT-5.6 Luna. Registered effort/date variants also
-apply. Version eligibility alone does not make every model mismatch a downgrade;
-unknown model names and unconfigured downgrade pairs still only produce records.
+The built-in downgrade pairs map `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`,
+`gpt-5.6-sol`, and `gpt-5.6-terra` to `gpt-5.6-luna`; effort and date variants
+of both sides apply. A version or variant difference alone is never treated as
+a downgrade: a new substitution first appears as "different" in records and
+becomes enforceable only once it is configured as a pair.
+
+**Behavior change:** `gpt-6.1-sol` and `gpt-6-sol` to `gpt-5.6-luna` are new
+built-in pairs. Under `enforce`, sessions on API Key upstreams that report
+those substitutions now avoid the account.
 
 Additional explicit pairs can be appended in configuration:
 
@@ -45,6 +66,10 @@ gateway:
       - from: gpt-6-astra
         to: gpt-5.6-terra
 ```
+
+Both `from` and `to` must be recognized by `openai.ModelIdentity` and have
+different bases; otherwise configuration validation fails at startup. Account IQ
+checks read the same built-in and configured pairs.
 
 ## Scheduling and Affinity
 
@@ -108,10 +133,12 @@ alone never proves that a referenced response can be removed.
 ## Observability and Limits
 
 Account IQ probes use a separate path and do not inherit business-session quality
-state. Each API Key probe attempt, including a scheduled retry, now sends a fresh
-session identity and `prompt_cache_key`; its target credential and fixed question
-stay unchanged. OAuth IQ probes use the configured device/session fingerprint
-convergence policy instead of API pool rotation. See `OPENAI_IQ_CHECK.md`.
+state. On API Key accounts each probe question sends a fresh session identity and
+`prompt_cache_key`. OAuth IQ probes use the configured device/session
+fingerprint convergence policy instead of API pool rotation, and classify the
+`openai-model` response header first because the official backend echoes the
+requested name in the body. A probe that reports a configured downgrade counts
+as a wrong answer. See [OPENAI_IQ_CHECK.md](OPENAI_IQ_CHECK.md).
 
 Structured `openai_quality_routing` events cover downgrade evidence, sticky
 invalidation, replacement, identity rotation, pinned continuation, and storage

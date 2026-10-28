@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
@@ -67,6 +68,26 @@ func (s *adminServiceImpl) GetAccountsByIDs(ctx context.Context, ids []int64) ([
 	}
 
 	return accounts, nil
+}
+
+func (s *adminServiceImpl) ListIQTargetSummaries(ctx context.Context, ids []int64) (map[int64][]domain.IQTargetSummary, error) {
+	reader, ok := s.accountRepo.(interface {
+		ListIQTargetSummaries(context.Context, []int64) (map[int64][]domain.IQTargetSummary, error)
+	})
+	if !ok {
+		return map[int64][]domain.IQTargetSummary{}, nil
+	}
+	return reader.ListIQTargetSummaries(ctx, ids)
+}
+
+func (s *adminServiceImpl) ListIQTargetSettings(ctx context.Context, ids []int64) (map[int64][]domain.IQTargetSettings, error) {
+	reader, ok := s.accountRepo.(interface {
+		ListIQTargetSettings(context.Context, []int64) (map[int64][]domain.IQTargetSettings, error)
+	})
+	if !ok {
+		return nil, errors.New("IQ target settings reader is not configured")
+	}
+	return reader.ListIQTargetSettings(ctx, ids)
 }
 
 const maxAccountNameRunes = 100
@@ -239,6 +260,31 @@ func cloneAccountValuePointer[T any](value *T) *T {
 	return &cloned
 }
 
+func ValidateIQTargetsPatch(platform string, patch *domain.IQTargetsPatch) error {
+	if patch == nil {
+		return nil
+	}
+	if platform != PlatformOpenAI {
+		return ErrIQCheckInvalid
+	}
+	seen := make(map[string]struct{}, len(patch.Targets))
+	for _, target := range patch.Targets {
+		if err := target.Validate(); err != nil {
+			return infraerrors.BadRequest("IQ_TARGETS_INVALID", err.Error())
+		}
+		if _, exists := seen[target.Model]; exists {
+			return infraerrors.BadRequest("IQ_TARGETS_INVALID", "duplicate target model")
+		}
+		seen[target.Model] = struct{}{}
+	}
+	for _, model := range patch.Remove {
+		if strings.TrimSpace(model) == "" {
+			return infraerrors.BadRequest("IQ_TARGETS_INVALID", "remove model must not be empty")
+		}
+	}
+	return nil
+}
+
 // DuplicateAccount creates a paused account from source configuration without carrying first-class
 // runtime state. Credentials and extra configuration are deep-copied so normalization of the new
 // account cannot mutate the in-memory source. Linked credential shadows are excluded because they
@@ -319,7 +365,19 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 		SkipMixedChannelCheck: true,
 	}
 	if source.Platform == PlatformOpenAI {
-		input.IQCheck = source.IQCheck.CopySettings()
+		settingsByAccount, err := s.ListIQTargetSettings(ctx, []int64{source.ID})
+		if err != nil {
+			return nil, err
+		}
+		if settings := settingsByAccount[source.ID]; len(settings) > 0 {
+			patch := domain.IQTargetsPatch{Targets: make([]domain.IQTargetSettings, 0, len(settings))}
+			for _, setting := range settings {
+				enabled := false
+				setting.Enabled = &enabled
+				patch.Targets = append(patch.Targets, setting)
+			}
+			input.IQTargets = &patch
+		}
 	}
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {
@@ -418,7 +476,7 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
 	accountExtra = MergeCapabilityLearningExtra(accountExtra, nil)
 	accountExtra = MergeOpenAICodexTicketExtra(accountExtra, nil)
-	if err := ValidateIQCheckSettings(input.Platform, input.IQCheck); err != nil {
+	if err := ValidateIQTargetsPatch(input.Platform, input.IQTargets); err != nil {
 		return nil, err
 	}
 	if input.Platform == PlatformTypeSafe && input.Type != AccountTypeAPIKey {
@@ -435,18 +493,22 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, OpenCodeGoUsageSnapshotExtraKey)
 	accountExtra = prepareCodexFingerprintExtraForCreate(input.Platform, input.Type, accountExtra)
 	account := &Account{
-		IQCheckSettings: input.IQCheck,
-		Name:            input.Name,
-		Notes:           normalizeAccountNotes(input.Notes),
-		Platform:        input.Platform,
-		Type:            input.Type,
-		Credentials:     input.Credentials,
-		Extra:           accountExtra,
-		ProxyID:         input.ProxyID,
-		Concurrency:     normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
-		Priority:        input.Priority,
-		Status:          StatusActive,
-		Schedulable:     true,
+		// Targets are persisted by the repository after the account row exists.
+		IQTargetsPatch: input.IQTargets,
+		Name:           input.Name,
+		Notes:          normalizeAccountNotes(input.Notes),
+		Platform:       input.Platform,
+		Type:           input.Type,
+		Credentials:    input.Credentials,
+		Extra:          accountExtra,
+		ProxyID:        input.ProxyID,
+		Concurrency:    normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
+		Priority:       input.Priority,
+		Status:         StatusActive,
+		Schedulable:    true,
+	}
+	if input.IQTargets != nil {
+		account.Extra = MergeOpenAICodexTicketExtra(account.Extra, nil)
 	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
@@ -590,10 +652,10 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
-	if err := ValidateIQCheckSettings(account.Platform, input.IQCheck); err != nil {
+	if err := ValidateIQTargetsPatch(account.Platform, input.IQTargets); err != nil {
 		return nil, err
 	}
-	account.IQCheckSettings = input.IQCheck
+	account.IQTargetsPatch = input.IQTargets
 	account.IQPreserveTokenRotation = input.IQPreserveTokenRotation
 	if account.Platform == PlatformTypeSafe && input.Type != "" && input.Type != AccountTypeAPIKey {
 		return nil, errors.New("typesafe accounts only support apikey credentials")
@@ -1016,12 +1078,11 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	if err != nil {
 		return nil, err
 	}
-
 	needMixedChannelCheck := input.GroupIDs != nil && !input.SkipMixedChannelCheck
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.IQTargets != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1032,6 +1093,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	for _, account := range cachedTargets {
 		if account != nil {
 			targetsByID[account.ID] = account
+			if err := ValidateIQTargetsPatch(account.Platform, input.IQTargets); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if openAISettings.any() {
@@ -1187,7 +1251,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		repoUpdates.Schedulable = input.Schedulable
 	}
 
-	repoUpdates.IQCheck = input.IQCheck
+	repoUpdates.IQTargets = input.IQTargets
 
 	// Run bulk update for column/jsonb fields first.
 	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {

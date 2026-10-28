@@ -19,15 +19,25 @@ import (
 
 type duplicateAccountRepoStub struct {
 	*sparkShadowRepoStub
-	atomicCreateErr error
-	accountGroupsOf map[int64][]AccountGroup
+	atomicCreateErr  error
+	accountGroupsOf  map[int64][]AccountGroup
+	iqTargetSettings map[int64][]domain.IQTargetSettings
 }
 
 func newDuplicateAccountRepoStub() *duplicateAccountRepoStub {
 	return &duplicateAccountRepoStub{
 		sparkShadowRepoStub: newSparkShadowRepoStub(),
 		accountGroupsOf:     make(map[int64][]AccountGroup),
+		iqTargetSettings:    make(map[int64][]domain.IQTargetSettings),
 	}
+}
+
+func (s *duplicateAccountRepoStub) ListIQTargetSettings(_ context.Context, ids []int64) (map[int64][]domain.IQTargetSettings, error) {
+	out := make(map[int64][]domain.IQTargetSettings, len(ids))
+	for _, id := range ids {
+		out[id] = append([]domain.IQTargetSettings(nil), s.iqTargetSettings[id]...)
+	}
+	return out, nil
 }
 
 func (s *duplicateAccountRepoStub) CreateWithAccountGroups(ctx context.Context, account *Account, groups []AccountGroup) error {
@@ -349,18 +359,26 @@ func TestDuplicateAccountReturnsExistingCopyForSameOperationKey(t *testing.T) {
 	require.NotEmpty(t, first.Extra[duplicateAccountOperationIDExtraKey])
 }
 
-func TestDuplicateAccountPreservesIQProfileButDisablesCheck(t *testing.T) {
+func TestDuplicateAccountCopiesIQTargetSettingsDisabled(t *testing.T) {
 	ctx := context.Background()
 	repo := newDuplicateAccountRepoStub()
 	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
-	source := &Account{Name: "source", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Credentials: map[string]any{"api_key": "fixture"}, IQCheck: domain.IQCheck{Enabled: true, IntervalMinutes: 45, Model: "custom-model", ReasoningEffort: "ultra", OutputMode: "strict", Status: "degraded"}}
+	enabled := true
+	effort := "ultra"
+	interval, timeout := 45, 180
+	source := &Account{Name: "source", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Credentials: map[string]any{"api_key": "fixture"}}
 	require.NoError(t, repo.Create(ctx, source))
+	repo.iqTargetSettings[source.ID] = []domain.IQTargetSettings{{
+		Model: "custom-model", Enabled: &enabled, ReasoningEffort: &effort, IntervalMinutes: &interval, TimeoutSeconds: &timeout,
+	}}
 	copy, err := svc.DuplicateAccount(ctx, source.ID, "admin:1", "")
 	require.NoError(t, err)
-	require.NotNil(t, copy.IQCheckSettings)
-	require.False(t, *copy.IQCheckSettings.Enabled)
-	require.Equal(t, "custom-model", *copy.IQCheckSettings.Model)
-	require.Equal(t, "ultra", *copy.IQCheckSettings.ReasoningEffort)
-	require.Equal(t, 45, *copy.IQCheckSettings.IntervalMinutes)
+	require.NotNil(t, copy.IQTargetsPatch)
+	require.Len(t, copy.IQTargetsPatch.Targets, 1)
+	require.False(t, *copy.IQTargetsPatch.Targets[0].Enabled)
+	require.Equal(t, "custom-model", copy.IQTargetsPatch.Targets[0].Model)
+	require.Equal(t, "ultra", *copy.IQTargetsPatch.Targets[0].ReasoningEffort)
+	require.Equal(t, 45, *copy.IQTargetsPatch.Targets[0].IntervalMinutes)
+	require.Equal(t, 180, *copy.IQTargetsPatch.Targets[0].TimeoutSeconds)
 	require.False(t, copy.Schedulable)
 }

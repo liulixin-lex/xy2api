@@ -22,7 +22,10 @@ func (r codexTicketReceipt) identity() string {
 
 // CodexTicketIQResultCurrent runs under the account row lock on IQ completion.
 func CodexTicketIQResultCurrent(a *Account, result iqcheck.Result, now time.Time) bool {
-	if result.StateFingerprint != "" && (a == nil || result.StateFingerprint != codexTicketFixedProxyFingerprint(a) || result.StateRevision != codexAccountTicketConfigOf(a).Revision) {
+	if a == nil {
+		return false
+	}
+	if result.StateFingerprint != "" && (result.StateFingerprint != codexTicketFixedProxyFingerprint(a) || result.StateRevision != codexAccountTicketConfigOf(a).Revision) {
 		return false
 	}
 	if result.StateTicketID == "" {
@@ -32,83 +35,95 @@ func CodexTicketIQResultCurrent(a *Account, result iqcheck.Result, now time.Time
 	t := parseOpenAICodexTicketFromAny(a.ID, result.StateModel, a.Extra[openAICodexTicketExtraKey(result.StateModel)])
 	return ac.manages(result.StateModel) && t.validFor(a, ac, now) && codexTicketIdentity(t) == result.StateTicketID
 }
-func CodexTicketProbeLeaseUntil(a *Account, now time.Time) *time.Time {
-	for _, rt := range codexTicketRuntimes(a) {
-		if rt.LeaseUntil != nil && rt.LeaseUntil.After(now) {
-			return rt.LeaseUntil
+
+func CodexTicketIQIdentitiesCurrent(a *Account, identities []IQTicketIdentity, now time.Time) bool {
+	for _, identity := range identities {
+		result := iqcheck.Result{
+			StateTicketID: identity.StateTicketID, StateFingerprint: identity.StateFingerprint,
+			StateRevision: identity.StateRevision, StateModel: identity.StateModel,
+		}
+		if identity.StateTicketID == "" && identity.StateFingerprint == "" {
+			continue
+		}
+		if !CodexTicketIQResultCurrent(a, result, now) {
+			return false
 		}
 	}
-	return nil
+	return true
 }
-func (s *OpenAIGatewayService) codexTicketIQWait(ctx context.Context, a *Account) (string, time.Time) {
+
+func (s *OpenAIGatewayService) codexTicketIQWait(ctx context.Context, account *Account, outboundModel string) (string, time.Time) {
 	now := time.Now()
 	if !s.openAICodexTicketEnabledContext(ctx) {
 		return "", now
 	}
-	model := s.openAICodexTicketOutboundModel(a, a.IQCheck.Profile().Model, false)
-	ac := codexAccountTicketConfigOf(a)
-	if !ac.manages(model) {
+	config := codexAccountTicketConfigOf(account)
+	if !config.manages(outboundModel) {
 		return "", now
 	}
-	if until := CodexTicketProbeLeaseUntil(a, now); until != nil {
+	runtime := codexTicketRuntimes(account)[outboundModel]
+	if runtime.LeaseUntil != nil && runtime.LeaseUntil.After(now) {
 		return "waiting_state", now.Add(6 * time.Second)
 	}
-	if ac.MissingPolicy != "allow_unprotected" && !s.lookupOpenAICodexTicket(a, model).validFor(a, ac, now) {
+	if config.MissingPolicy != "allow_unprotected" && !s.lookupOpenAICodexTicket(account, outboundModel).validFor(account, config, now) {
 		next := now.Add(6 * time.Second)
-		rt := codexTicketRuntimes(a)[model]
-		if rt.RetryAfter != nil && rt.RetryAfter.After(next) {
-			next = *rt.RetryAfter
+		if runtime.RetryAfter != nil && runtime.RetryAfter.After(next) {
+			next = *runtime.RetryAfter
 		}
 		return "waiting_state", next
 	}
 	return "", now
 }
-func (s *OpenAIGatewayService) recoverCodexFromIQ(ctx context.Context, c IQCheckClaim, result iqcheck.Result) {
-	if result.Status != "degraded" || result.Reason != "wrong_answer" {
+
+func (s *OpenAIGatewayService) recoverCodexFromIQTarget(ctx context.Context, claim IQTargetClaim, result iqcheck.Result, identities []IQTicketIdentity) {
+	if result.Status != "degraded" || result.Reason != "wrong_answer" && result.Reason != "model_mismatch" {
 		return
 	}
-	a, e := s.codexTicketAccountByID(ctx, c.AccountID)
-	if e != nil || a.IQCheck.Revision != c.Revision || !CodexTicketIQResultCurrent(a, result, time.Now()) {
+	a, err := s.codexTicketAccountByID(ctx, claim.AccountID)
+	if err != nil || !CodexTicketIQIdentitiesCurrent(a, identities, time.Now()) {
 		return
 	}
-	if result.StateTicketID == "" {
-		if result.Diagnostic == nil || result.Diagnostic.StateProtection != "unprotected" {
-			return
+	seen := make(map[string]struct{}, len(identities))
+	for _, identity := range identities {
+		if identity.StateModel == "" {
+			continue
 		}
-		_, e = s.mutateCodexTicket(ctx, a.ID, 0, func(live *Account, _ int, now time.Time) (bool, error) {
-			if live.IQCheck.Revision != c.Revision || !CodexTicketIQResultCurrent(live, result, now) || !codexAccountTicketConfigOf(live).manages(result.StateModel) {
+		if identity.StateTicketID != "" {
+			key := identity.StateModel + "\x00" + identity.StateTicketID
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			ticket := parseOpenAICodexTicketFromAny(a.ID, identity.StateModel, a.Extra[openAICodexTicketExtraKey(identity.StateModel)])
+			if codexTicketIdentity(ticket) == identity.StateTicketID {
+				s.invalidateCodexTicketFromResponse(receiptForCodexTicket(ticket), "iq_degraded")
+			}
+			continue
+		}
+		if identity.StateProtection != "unprotected" {
+			continue
+		}
+		key := "unprotected\x00" + identity.StateModel
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		_, err = s.mutateCodexTicket(ctx, a.ID, 0, func(live *Account, _ int, now time.Time) (bool, error) {
+			if !CodexTicketIQIdentitiesCurrent(live, []IQTicketIdentity{identity}, now) || !codexAccountTicketConfigOf(live).manages(identity.StateModel) {
 				return false, nil
 			}
-			rt := codexTicketRuntimes(live)[result.StateModel]
+			rt := codexTicketRuntimes(live)[identity.StateModel]
 			if rt.IQRecoveryAt != nil && rt.IQRecoveryAt.After(now.Add(-15*time.Minute)) {
 				return false, nil
 			}
 			rt.IQRecoveryAt = &now
 			rt.Requested = true
 			rt.event(now, "iq_unprotected_recovery")
-			saveCodexTicketRuntime(live, result.StateModel, rt)
+			saveCodexTicketRuntime(live, identity.StateModel, rt)
 			return true, nil
 		})
-		if e == nil {
-			s.startCodexAccountTicketJob(ctx, a.ID, false, result.StateModel)
+		if err == nil {
+			s.startCodexAccountTicketJob(ctx, a.ID, false, identity.StateModel)
 		}
-		return
-	}
-	t := s.lookupOpenAICodexTicket(a, result.StateModel)
-	if codexTicketIdentity(t) != result.StateTicketID {
-		return
-	}
-	s.invalidateCodexTicketFromResponse(receiptForCodexTicket(t), "iq_degraded")
-}
-
-func CodexTicketIQResultFinished(a *Account, result iqcheck.Result, now time.Time) {
-	if result.StateModel == "" {
-		return
-	}
-	rt := codexTicketRuntimes(a)[result.StateModel]
-	if rt.IQRetest == "queued" {
-		rt.IQRetest = result.Status
-		rt.event(now, "iq_result_"+result.Status)
-		saveCodexTicketRuntime(a, result.StateModel, rt)
 	}
 }

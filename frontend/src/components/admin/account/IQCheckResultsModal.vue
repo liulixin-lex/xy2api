@@ -1,198 +1,378 @@
 <template>
   <BaseDialog :show="show" :title="t('admin.accounts.iqRecords')" width="wide" @close="$emit('close')">
-    <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
-      <div class="min-w-0">
-        <p class="break-words text-sm font-medium text-gray-900 dark:text-gray-100">{{ account?.name }}</p>
-        <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqHistoryRetention') }}</p>
-      </div>
-      <div class="flex flex-wrap items-center gap-2">
-        <button type="button" class="btn btn-primary inline-flex items-center gap-2" :disabled="!state?.enabled || queuing || state.execution_state === 'running' || state.execution_state === 'pending' || state.execution_state === 'retry_wait'" @click="queueCheck">
-          <Icon name="play" size="sm" />{{ t('admin.accounts.iqRun') }}
-        </button>
-        <button type="button" class="btn btn-secondary inline-flex items-center gap-2" :disabled="downloading || !account || !records.length" @click="downloadDiagnostics">
-          <Icon name="download" size="sm" />{{ t('admin.accounts.iqDownload') }}
-        </button>
-        <button type="button" class="btn btn-secondary h-10 w-10 p-0" :disabled="loading || !account" :title="t('common.refresh')" :aria-label="t('common.refresh')" @click="loadRecords">
-          <Icon name="refresh" size="sm" :class="loading && 'animate-spin'" />
-        </button>
-      </div>
-    </div>
-    <p v-if="copyMessage" role="status" class="mb-3 text-sm">{{ copyMessage }}</p>
-    <p v-if="queueError" role="alert" class="mb-3 text-sm text-red-600 dark:text-red-400">{{ queueError }}</p>
-    <p v-if="queueMessage" role="status" class="mb-3 text-sm text-gray-700 dark:text-gray-300">{{ queueMessage }}</p>
-    <div v-if="state" class="mb-5 border-b border-gray-200 pb-5 dark:border-dark-600" data-testid="iq-current-state" :aria-label="t('admin.accounts.iqCurrentState')">
-      <p class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ state.enabled ? t('admin.accounts.iqCheckStatus.' + (state.last_run_status === 'unknown' ? 'unknown' : state.status || 'unknown')) : t('admin.accounts.iqOff') }}</p>
-      <p v-if="state.enabled && state.last_run_status === 'unknown' && state.last_valid_at" class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqPreviousValid') }}<span v-if="state.last_valid_status"> · {{ t('admin.accounts.iqCheckStatus.' + state.last_valid_status) }}</span> · {{ formatDateTime(state.last_valid_at) }}</p>
-      <p v-if="state.scheduling_blocked" class="mt-2 text-sm text-amber-700 dark:text-amber-300">{{ t('admin.accounts.iqTrafficAvoidance') }}</p>
-      <p v-if="currentReason" class="mt-2 text-sm text-gray-700 dark:text-gray-300">{{ currentReason }}</p>
-      <dl class="mt-4 grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
-        <div><dt class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqLastAssessment') }}</dt><dd class="mt-1 tabular-nums">{{ state.last_run_at ? formatDateTime(state.last_run_at) : t('admin.accounts.iqNotChecked') }}</dd></div>
-        <div><dt class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqNextCheck') }}</dt><dd class="mt-1 tabular-nums">{{ iqNextLabel(state, t, formatDateTime) }}</dd></div>
-      </dl>
-    </div>
-    <p v-if="statusError" role="alert" class="mb-3 text-sm text-red-600 dark:text-red-400">{{ statusError }}</p>
-    <p v-if="downloadError" role="alert" class="mb-3 text-sm text-red-600 dark:text-red-400">{{ downloadError }}</p>
-    <div v-if="error" role="alert" class="py-4 text-center">
-      <p class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
-      <button type="button" class="btn btn-secondary mt-3" @click="loadRecords">{{ t('common.refresh') }}</button>
-    </div>
-    <div v-if="loading && !records.length" role="status" class="flex items-center justify-center gap-2 py-12 text-sm text-gray-500 dark:text-dark-400"><Icon name="refresh" size="sm" class="animate-spin" />{{ t('common.loading') }}</div>
-    <div v-else-if="!records.length && !error" class="py-12 text-center text-gray-500 dark:text-dark-400"><Icon name="clock" class="mx-auto mb-3" /><p class="text-sm">{{ t('admin.accounts.iqEmpty') }}</p></div>
-    <ol v-if="records.length" class="divide-y divide-gray-200 dark:divide-dark-600">
-      <li v-for="record in records" :key="record.id" class="py-5 first:pt-0 last:pb-0">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <span class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium" :class="statusClass(record)">{{ record.finished_at ? t('admin.accounts.iqCheckStatus.' + record.status) : t(state?.execution_state === 'retry_wait' ? 'admin.accounts.iqExecutionStates.retry_wait' : 'admin.accounts.iqRunning') }}</span>
-          <time :datetime="record.started_at" class="text-xs tabular-nums text-gray-500 dark:text-dark-400">{{ formatDateTime(record.started_at) }}</time>
+    <div ref="root">
+      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div class="min-w-0">
+          <p class="break-words text-sm font-medium text-gray-900 dark:text-gray-100">{{ account?.name }}</p>
+          <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqHistoryRetention') }}</p>
         </div>
-        <p v-if="record.reason && record.reason !== 'correct_answer'" class="mt-3 break-words text-sm text-gray-700 dark:text-gray-300">{{ reasonLabel(record.reason) }}</p>
-        <dl class="mt-4 grid grid-cols-2 gap-x-5 gap-y-4 sm:grid-cols-4">
-          <div class="min-w-0"><dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqNormalizedAnswer') }}</dt><dd class="mt-1 break-words text-base font-semibold tabular-nums" data-testid="iq-answer">{{ record.normalized_answer ?? '—' }}</dd></div>
-          <div class="min-w-0"><dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqModel') }}</dt><dd class="mt-1 break-all text-sm text-gray-900 dark:text-gray-100">{{ record.model || '—' }}</dd></div>
-          <div class="min-w-0"><dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqEffort') }}</dt><dd class="mt-1 break-words text-sm text-gray-900 dark:text-gray-100">{{ iqEffortLabel(record.effort) }}</dd></div>
-          <div class="min-w-0"><dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqDuration') }}</dt><dd class="mt-1 text-sm tabular-nums text-gray-900 dark:text-gray-100">{{ record.finished_at ? (record.latency_ms / 1000).toFixed(2) + ' s' : '—' }}</dd></div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button type="button" class="btn btn-secondary inline-flex items-center gap-2" data-testid="iq-run-all" :disabled="running !== null || !targets.length || targets.every(iqTargetBusy)" @click="run()">
+            <Icon name="play" size="sm" />{{ t('admin.accounts.iqRunAll') }}
+          </button>
+          <button type="button" class="btn btn-secondary inline-flex items-center gap-2" :disabled="downloading || !account" @click="downloadDiagnostics">
+            <Icon name="download" size="sm" />{{ t('admin.accounts.iqDownload') }}
+          </button>
+          <button type="button" class="btn btn-secondary h-10 w-10 p-0" :disabled="loading || !account" :title="t('common.refresh')" :aria-label="t('common.refresh')" @click="refresh(false)">
+            <Icon name="refresh" size="sm" :class="loading && 'animate-spin'" />
+          </button>
+        </div>
+      </div>
+
+      <p v-if="runMessage" role="status" class="mb-3 text-sm text-gray-700 dark:text-gray-300">{{ runMessage }}</p>
+      <p v-for="message in [runError, targetsError, downloadError].filter(Boolean)" :key="message" role="alert" class="mb-3 text-sm text-red-600 dark:text-red-400">{{ message }}</p>
+
+      <div v-if="targets.length > 1" role="tablist" :aria-label="t('admin.accounts.iqTargets')" class="tabs mb-4 overflow-x-auto">
+        <button v-for="target in targets" :key="target.model" type="button" role="tab" :aria-selected="target.model === selected" :data-testid="'iq-tab-' + target.model" class="tab inline-flex shrink-0 items-center gap-2 px-3 py-1.5" :class="target.model === selected && 'tab-active'" @click="selectModel(target.model)">
+          <Icon v-if="iqTargetBusy(target)" name="refresh" size="xs" class="animate-spin text-primary-500" />
+          <span v-else class="h-2 w-2 rounded-full" :class="dotClass(target)" aria-hidden="true" />
+          <span class="max-w-[12rem] truncate">{{ iqModelLabel(target.model) }}</span>
+        </button>
+      </div>
+
+      <section v-if="current" ref="summary" class="mb-6 border-b border-gray-200 pb-5 dark:border-dark-600" data-testid="iq-target-summary" :aria-label="current.model">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0 space-y-1">
+            <p class="flex flex-wrap items-center gap-2">
+              <span class="badge" :class="verdictBadge(current)">{{ verdictLabel(current) }}</span>
+              <span class="break-all text-sm text-gray-500 dark:text-dark-400">{{ current.model }}</span>
+            </p>
+            <p class="text-sm text-gray-800 dark:text-gray-200" data-testid="iq-verdict-explain">{{ verdictExplain(current) }}</p>
+            <p v-if="current.gate_active && current.gate_model && current.gate_model !== current.model" class="break-all text-xs text-gray-500 dark:text-dark-400" data-testid="iq-gate-model">{{ t('admin.accounts.iqGateModel', { model: current.gate_model }) }}</p>
+            <p v-if="stateLine(current)" class="text-sm" :class="current.state === 'paused' ? 'text-amber-700 dark:text-amber-400' : 'text-primary-700 dark:text-primary-300'">{{ stateLine(current) }}</p>
+          </div>
+          <button type="button" class="btn btn-primary inline-flex shrink-0 items-center gap-2" data-testid="iq-run-target" :disabled="running !== null || iqTargetBusy(current)" @click="run(current.model)">
+            <Icon :name="iqTargetBusy(current) || running === current.model ? 'refresh' : 'play'" size="sm" :class="(iqTargetBusy(current) || running === current.model) && 'animate-spin'" />
+            {{ t(current.state === 'queued' ? 'admin.accounts.iqStates.queued' : current.state === 'running' ? 'admin.accounts.iqStates.running' : 'admin.accounts.iqRunTarget') }}
+          </button>
+        </div>
+        <dl class="mt-4 grid grid-cols-2 gap-x-5 gap-y-3 text-xs sm:grid-cols-4">
+          <div><dt class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqLastAssessment') }}</dt><dd class="mt-1 tabular-nums text-gray-900 dark:text-gray-100">{{ current.last_run_at ? formatDateTime(current.last_run_at) : t('admin.accounts.iqNotChecked') }}</dd></div>
+          <div><dt class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqNextCheck') }}</dt><dd class="mt-1 tabular-nums text-gray-900 dark:text-gray-100">{{ nextLabel(current) }}</dd></div>
+          <div><dt class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqEffort') }}</dt><dd class="mt-1 text-gray-900 dark:text-gray-100">{{ iqEffortLabel(current.reasoning_effort) }}</dd></div>
+          <div><dt class="text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqInterval') }}</dt><dd class="mt-1 tabular-nums text-gray-900 dark:text-gray-100">{{ current.interval_minutes }}</dd></div>
         </dl>
-        <details v-if="record.answer" class="mt-4">
-          <summary class="cursor-pointer text-sm text-gray-600 dark:text-gray-300">{{ t('admin.accounts.iqRawAnswer') }}</summary>
-          <pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-3 text-sm text-gray-800 dark:bg-dark-700 dark:text-gray-200">{{ record.answer || (record.reason ? reasonLabel(record.reason) : t('admin.accounts.iqRunning')) }}</pre>
-        </details>
-        <details v-if="record.attempts && record.attempts.length > 1" class="mt-3" data-testid="iq-attempts">
-          <summary class="cursor-pointer text-sm text-gray-600 dark:text-gray-300">{{ t('admin.accounts.iqAttempts', { count: record.attempts.length }) }}</summary>
-          <ol class="mt-2 divide-y divide-gray-100 dark:divide-dark-700">
-            <li v-for="attempt in record.attempts" :key="attempt.attempt_no" class="flex flex-wrap justify-between gap-2 py-2 text-sm">
-              <span>{{ t('admin.accounts.iqAttemptNumber', { number: attempt.attempt_no }) }} · {{ attempt.finished_at ? reasonLabel(attempt.reason) : t('admin.accounts.iqRunning') }}</span>
-              <span class="tabular-nums">{{ attempt.finished_at ? (attempt.latency_ms / 1000).toFixed(2) + ' s' : '—' }}</span>
-                  </li>
-          </ol>
-        </details>
-        <details class="mt-3">
-          <summary class="cursor-pointer text-sm text-gray-600 dark:text-gray-300">{{ t('admin.accounts.iqDiagnostic') }}</summary>
-          <p v-if="!record.grader_version || record.grader_version === 'candy-grader-v1'" class="input-hint">{{ t('admin.accounts.iqLegacyResult') }}</p>
-          <p v-if="record.finished_at && record.format_compliant === false && record.normalized_answer != null" class="input-hint">{{ t('admin.accounts.iqFormatMismatch') }}</p>
-          <dl class="mt-3 grid grid-cols-1 gap-x-5 gap-y-3 text-sm sm:grid-cols-2">
-            <div v-for="row in iqDiagnosticSummary(record, t)" :key="row.label" class="min-w-0">
-              <dt class="text-xs text-gray-500 dark:text-dark-400">{{ row.label }}</dt><dd class="mt-1 break-words tabular-nums">{{ row.value }}</dd>
-            </div>
-          </dl>
-        </details>
-        <details v-if="iqTechnicalGroups(record, t, te).length" class="mt-3" data-testid="iq-technical-details">
-          <summary class="cursor-pointer text-sm text-gray-600 dark:text-gray-300">{{ t('admin.accounts.iqTechnicalDetails') }}</summary>
-          <section v-for="group in iqTechnicalGroups(record, t, te)" :key="group.label" class="mt-4">
-            <h4 class="mb-2 text-sm font-medium">{{ group.label }}</h4>
-            <dl class="grid grid-cols-1 gap-x-5 gap-y-2 text-xs sm:grid-cols-2">
-              <div v-for="row in group.rows" :key="row.label" class="min-w-0">
-                <dt class="text-gray-500 dark:text-dark-400">{{ row.label }}</dt>
-                <dd class="mt-1 break-words">{{ row.value }}<code v-if="row.raw && row.raw !== row.value" class="ml-2 break-all text-gray-500 dark:text-dark-400">{{ row.raw }}</code>
-                  <button v-if="row.raw" type="button" class="ml-2 rounded p-1 text-gray-600 focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300" :aria-label="t('admin.accounts.iqCopyField', { field: row.label })" @click="copyValue(row.raw)"><Icon name="copy" size="xs" /></button>
-                </dd>
-              </div>
-            </dl>
-          </section>
-        </details>
-      </li>
-    </ol>
+      </section>
+
+      <div v-if="roundsError" role="alert" class="py-4 text-center">
+        <p class="text-sm text-red-600 dark:text-red-400">{{ roundsError }}</p>
+        <button type="button" class="btn btn-secondary mt-3" @click="refresh(false)">{{ t('common.refresh') }}</button>
+      </div>
+      <div v-if="loading && !rounds.length" role="status" class="flex items-center justify-center gap-2 py-12 text-sm text-gray-500 dark:text-dark-400"><Icon name="refresh" size="sm" class="animate-spin" />{{ t('common.loading') }}</div>
+      <div v-else-if="!rounds.length && !roundsError" class="py-10 text-center text-gray-500 dark:text-dark-400"><Icon name="clock" class="mx-auto mb-3" /><p class="text-sm">{{ t('admin.accounts.iqEmpty') }}</p></div>
+
+      <ol v-if="rounds.length" class="divide-y divide-gray-200 dark:divide-dark-600">
+        <li v-for="round in rounds" :key="round.id" data-testid="iq-round">
+          <button type="button" class="flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-2 py-3 text-left hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:bg-dark-700/50" :aria-expanded="expanded.has(round.id)" @click="toggle(round.id)">
+            <Icon name="chevronRight" size="sm" class="shrink-0 text-gray-400 transition-transform" :class="expanded.has(round.id) && 'rotate-90'" />
+            <span class="badge" :class="roundBadge(round)">{{ round.finished_at ? t('admin.accounts.iqCheckStatus.' + (round.status || 'unknown')) : t('admin.accounts.iqStates.running') }}</span>
+            <span v-if="round.mode === 'recheck'" class="badge badge-gray">{{ t('admin.accounts.iqRecheck') }}</span>
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.iqAttemptCount', { count: round.attempts.length }) }}</span>
+            <span v-if="round.reason && round.reason !== 'correct_answer'" class="min-w-0 truncate text-sm text-gray-500 dark:text-dark-400">{{ reasonLabel(round.reason) }}</span>
+            <time :datetime="round.started_at" class="ml-auto text-xs tabular-nums text-gray-500 dark:text-dark-400">{{ formatDateTime(round.started_at) }}</time>
+          </button>
+          <Transition :css="false" @enter="revealAttempts">
+            <ol v-if="expanded.has(round.id)" class="space-y-4 pb-5 pl-2 sm:pl-8" data-testid="iq-attempts">
+              <li v-if="round.outbound_model && round.outbound_model !== round.model" class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqOutboundModel', { model: round.outbound_model }) }}</li>
+              <li v-for="attempt in round.attempts" :key="attempt.attempt_no" class="iq-attempt rounded-xl bg-gray-50 p-4 dark:bg-dark-800/60" data-testid="iq-attempt">
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ t('admin.accounts.iqAttemptNumber', { number: attempt.attempt_no }) }}</span>
+                  <span class="inline-flex items-center gap-1 text-sm font-medium" :class="outcomeClass(attempt)" data-testid="iq-outcome">
+                    <Icon :name="outcomeIcon(attempt)" size="sm" />{{ outcomeLabel(attempt) }}
+                  </span>
+                  <span class="ml-auto text-xs tabular-nums text-gray-500 dark:text-dark-400">{{ [iqEffortLabel(attempt.effort), attempt.latency_ms != null ? iqSeconds(attempt.latency_ms) : ''].filter(Boolean).join(' · ') }}</span>
+                </div>
+                <div class="mt-3 grid grid-cols-1 gap-4" :class="attempt.challenge && 'sm:grid-cols-[auto_minmax(0,1fr)]'">
+                  <table v-if="attempt.challenge" class="self-start text-sm tabular-nums" data-testid="iq-challenge">
+                    <caption class="mb-1 text-left text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqChallengeCaption') }}</caption>
+                    <thead>
+                      <tr>
+                        <th class="px-2 py-1"><span class="sr-only">{{ t('admin.accounts.iqShape') }}</span></th>
+                        <th v-for="flavor in iqChallengeTable(attempt.challenge).flavors" :key="flavor" scope="col" class="px-3 py-1 text-xs font-medium text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqFlavors.' + IQ_FLAVORS[flavor]) }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="row in iqChallengeTable(attempt.challenge).rows" :key="row.shape" class="border-t border-gray-200 dark:border-dark-600">
+                        <th scope="row" class="px-2 py-1.5 text-left text-xs font-medium text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqShapes.' + IQ_SHAPES[row.shape]) }}</th>
+                        <td v-for="(count, index) in row.counts" :key="index" class="px-3 py-1.5 text-center text-gray-900 dark:text-gray-100">{{ count }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <dl class="grid grid-cols-1 gap-x-5 gap-y-2 text-sm sm:grid-cols-2">
+                    <div v-if="attempt.expected" class="min-w-0 sm:col-span-2">
+                      <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqExpected') }}</dt>
+                      <dd class="mt-0.5 tabular-nums text-gray-900 dark:text-gray-100" data-testid="iq-derivation">{{ attempt.challenge ? t('admin.accounts.iqDerivation', { answer: attempt.expected, circle: attempt.challenge.draw[0], star: attempt.challenge.draw[1] }) : attempt.expected }}</dd>
+                    </div>
+                    <div v-if="attempt.challenge" class="min-w-0">
+                      <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqNaive') }}</dt>
+                      <dd class="mt-0.5 tabular-nums text-gray-900 dark:text-gray-100">{{ attempt.challenge.naive }}</dd>
+                    </div>
+                    <div class="min-w-0">
+                      <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqNormalizedAnswer') }}</dt>
+                      <dd class="mt-0.5 break-words font-semibold tabular-nums text-gray-900 dark:text-gray-100" data-testid="iq-answer">{{ attempt.answer || '—' }}</dd>
+                    </div>
+                    <div class="min-w-0 sm:col-span-2">
+                      <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqReportedModel') }}</dt>
+                      <dd class="mt-0.5 flex flex-wrap items-center gap-2" data-testid="iq-reported-model">
+                        <span v-if="declarations(attempt).length" class="flex flex-wrap gap-x-3 gap-y-1">
+                          <span v-for="item in declarations(attempt)" :key="item.source" class="break-all text-gray-900 dark:text-gray-100"><span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqDeclarationSources.' + item.source) }}</span> {{ item.values.join(', ') }}</span>
+                        </span>
+                        <span v-else class="break-all text-gray-900 dark:text-gray-100">{{ attempt.reported_model || '—' }}</span>
+                        <span v-if="attempt.model_class" class="badge" :class="classBadge(attempt)" data-testid="iq-model-class">{{ classLabel(attempt.model_class) }}</span>
+                        <span v-if="attempt.diagnostic?.model_identity?.flags?.includes('source_disagreement')" class="badge badge-warning">{{ t('admin.accounts.iqSourceDisagreement') }}</span>
+                      </dd>
+                    </div>
+                    <div v-if="attempt.status === 'unknown' && attempt.reason" class="min-w-0 sm:col-span-2">
+                      <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqReason') }}</dt>
+                      <dd class="mt-0.5 text-gray-900 dark:text-gray-100">{{ reasonLabel(attempt.reason) }}</dd>
+                    </div>
+                    <div v-if="iqTokenSummary(attempt.diagnostic, t)" class="min-w-0 sm:col-span-2">
+                      <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqTokenUsage') }}</dt>
+                      <dd class="mt-0.5 tabular-nums text-gray-900 dark:text-gray-100">{{ iqTokenSummary(attempt.diagnostic, t) }}</dd>
+                    </div>
+                  </dl>
+                </div>
+                <details v-if="iqTechnicalGroups(attempt.diagnostic, t, te).length" class="mt-3" data-testid="iq-technical-details">
+                  <summary class="cursor-pointer text-xs text-gray-600 dark:text-gray-300">{{ t('admin.accounts.iqTechnicalDetails') }}</summary>
+                  <section v-for="group in iqTechnicalGroups(attempt.diagnostic, t, te)" :key="group.label" class="mt-3">
+                    <h4 class="mb-2 text-xs font-medium text-gray-700 dark:text-gray-300">{{ group.label }}</h4>
+                    <dl class="grid grid-cols-1 gap-x-5 gap-y-2 text-xs sm:grid-cols-2">
+                      <div v-for="row in group.rows" :key="row.label" class="min-w-0">
+                        <dt class="text-gray-500 dark:text-dark-400">{{ row.label }}</dt>
+                        <dd class="mt-0.5 break-words">{{ row.value }}<code v-if="row.raw && row.raw !== row.value" class="ml-2 break-all text-gray-500 dark:text-dark-400">{{ row.raw }}</code></dd>
+                      </div>
+                    </dl>
+                  </section>
+                </details>
+              </li>
+            </ol>
+          </Transition>
+        </li>
+      </ol>
+      <div v-if="nextBefore" class="mt-4 text-center">
+        <button type="button" class="btn btn-secondary btn-sm" :disabled="loadingMore" @click="loadRounds('more')">{{ t('admin.accounts.iqLoadOlder') }}</button>
+      </div>
+    </div>
   </BaseDialog>
 </template>
+
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { gsap } from 'gsap'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { downloadIQCheckDiagnostics } from '@/api/admin/accounts'
 import { adminAPI } from '@/api/admin'
-import type { Account, IQCheckRecord } from '@/types'
+import type { Account, IQAttempt, IQRound, IQTarget } from '@/types'
 import { formatDateTime } from '@/utils/format'
-import { iqDiagnosticSummary, iqTechnicalGroups, iqEffortLabel, iqNextLabel } from './iqCheckPresentation'
+import { isReducedMotion } from '@/composables/useMotionPreference'
+import { IQ_FLAVORS, IQ_SHAPES, iqAttemptOutcome, iqChallengeTable, IQ_CLOCK, iqEffortLabel, iqModelClassTone, iqModelLabel, iqSeconds, iqTargetBusy, iqTechnicalGroups, iqTokenSummary, sortIQTargets } from './iqCheckPresentation'
+
 const props = defineProps<{ show: boolean; account: Account | null }>()
-const emit = defineEmits<{ close: []; updated: [state: NonNullable<Account['iq_check']>] }>()
+const emit = defineEmits<{ close: []; updated: [targets: IQTarget[]] }>()
 const { t, te } = useI18n()
+const POLL_MS = 3000
+
 const reasonLabel = (reason: string) => te(`admin.accounts.iqReasons.${reason}`) ? t(`admin.accounts.iqReasons.${reason}`) : reason
-const executionReasonLabel = (reason: string) => te(`admin.accounts.iqExecutionReasons.${reason}`) ? t(`admin.accounts.iqExecutionReasons.${reason}`) : reasonLabel(reason)
-const statusClass = (record: IQCheckRecord) => !record.finished_at ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : record.status === 'smart' ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300' : record.status === 'degraded' ? 'bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
+const classLabel = (value: string) => te(`admin.accounts.iqModelClasses.${value}`) ? t(`admin.accounts.iqModelClasses.${value}`) : value
+
+// ---- target summary: can this model be used now, why, and when is the recheck ----
+const verdictBadge = (target: IQTarget) => target.gate_active || target.verdict === 'degraded' ? 'badge-danger' : target.verdict === 'smart' && target.enabled ? 'badge-success' : 'badge-gray'
+const dotClass = (target: IQTarget) => target.gate_active || target.verdict === 'degraded' ? 'bg-red-500' : target.verdict === 'smart' && target.enabled ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-dark-500'
+const verdictLabel = (target: IQTarget) => target.gate_active ? t('admin.accounts.iqGateActive') : target.enabled ? t('admin.accounts.iqCheckStatus.' + target.verdict) : t('admin.accounts.iqOff')
+function verdictExplain(target: IQTarget) {
+  if (target.gate_active) return t('admin.accounts.iqExplain.gate') + (target.gate_reset_at ? ' ' + t('admin.accounts.iqRecheckAt', { time: formatDateTime(target.gate_reset_at, IQ_CLOCK) }) : '')
+  if (!target.enabled) return t('admin.accounts.iqExplain.off')
+  return t('admin.accounts.iqExplain.' + target.verdict)
+}
+function stateLine(target: IQTarget) {
+  if (target.state === 'running') return t('admin.accounts.iqRunningProgress', { count: target.completed_attempts })
+  if (target.state === 'queued') return t('admin.accounts.iqStates.queued')
+  if (target.state === 'paused') return t('admin.accounts.iqPausedBecause', { reason: reasonLabel(target.paused_reason) })
+  return ''
+}
+function nextLabel(target: IQTarget) {
+  if (iqTargetBusy(target)) return t('admin.accounts.iqStates.' + target.state)
+  if (!target.enabled || target.state === 'paused') return '—'
+  const times = [target.next_run_at, target.not_before].filter((value): value is string => !!value)
+  return times.length ? formatDateTime(times.reduce((a, b) => (new Date(a) > new Date(b) ? a : b))) : '—'
+}
+
+// ---- per-round and per-attempt detail ----
+const roundBadge = (round: IQRound) => !round.finished_at ? 'badge-primary' : round.status === 'smart' ? 'badge-success' : round.status === 'degraded' ? 'badge-danger' : 'badge-gray'
+const outcomeLabel = (attempt: IQAttempt) => t('admin.accounts.iqOutcomes.' + iqAttemptOutcome(attempt))
+const outcomeIcon = (attempt: IQAttempt) => ({ correct: 'checkCircle', wrong: 'xCircle', naive: 'xCircle', downgrade: 'xCircle', conflict: 'exclamationTriangle', unknown: 'questionCircle' } as const)[iqAttemptOutcome(attempt)]
+const outcomeClass = (attempt: IQAttempt) => ({ correct: 'text-emerald-700 dark:text-emerald-400', wrong: 'text-red-700 dark:text-red-400', naive: 'text-red-700 dark:text-red-400', downgrade: 'text-red-700 dark:text-red-400', conflict: 'text-amber-700 dark:text-amber-400', unknown: 'text-gray-600 dark:text-dark-300' })[iqAttemptOutcome(attempt)]
+const classBadge = (attempt: IQAttempt) => ({ danger: 'badge-danger', warning: 'badge-warning', neutral: 'badge-gray' })[iqModelClassTone(attempt)]
+/** Body and header declarations side by side when both sources reported a model. */
+function declarations(attempt: IQAttempt) {
+  const identity = attempt.diagnostic?.model_identity
+  if (!identity?.body?.length || !identity.header?.length) return []
+  return [{ source: 'body', values: identity.body }, { source: 'header', values: identity.header }]
+}
+
+// ---- data loading and polling ----
+const targets = ref<IQTarget[]>([])
+const selected = ref('')
+const current = computed(() => targets.value.find(target => target.model === selected.value))
+const rounds = ref<IQRound[]>([])
+const nextBefore = ref<number | null>(null)
+const expanded = ref(new Set<number>())
+const loading = ref(false)
+const loadingMore = ref(false)
+const targetsError = ref('')
+const roundsError = ref('')
+let session = 0
+let roundsVersion = 0
+let controller = new AbortController()
+let pollTimer: ReturnType<typeof setTimeout> | undefined
+
+const pickDefault = (list: IQTarget[]) => (list.find(target => target.gate_active) ?? list.find(target => target.enabled) ?? list[0])?.model ?? ''
+
+async function loadTargets(s: number) {
+  const id = props.account?.id
+  if (!id) return
+  try {
+    const list = sortIQTargets(await adminAPI.accounts.getIQCheck(id, controller.signal))
+    if (s !== session) return
+    targets.value = list
+    targetsError.value = ''
+    if (!list.some(target => target.model === selected.value)) selected.value = pickDefault(list)
+    emit('updated', list)
+  } catch { if (s === session) targetsError.value = t('admin.accounts.iqStatusFailed') }
+}
+
+/** replace: first page; merge: refresh the first page and keep older pages; more: append the next page. */
+async function loadRounds(mode: 'replace' | 'merge' | 'more') {
+  const id = props.account?.id
+  const model = selected.value
+  if (!id || !model) return
+  const s = session
+  const version = mode === 'more' ? roundsVersion : ++roundsVersion
+  if (mode === 'more') loadingMore.value = true
+  try {
+    const page = await adminAPI.accounts.listIQResults(id, { model, before_id: mode === 'more' ? nextBefore.value : null }, controller.signal)
+    if (s !== session || version !== roundsVersion || model !== selected.value) return
+    roundsError.value = ''
+    if (mode === 'merge' && rounds.value.length) {
+      const byId = new Map(rounds.value.map(round => [round.id, round]))
+      for (const round of page.rounds) byId.set(round.id, round)
+      rounds.value = [...byId.values()].sort((a, b) => b.id - a.id)
+    } else {
+      rounds.value = mode === 'more' ? [...rounds.value, ...page.rounds] : page.rounds
+      nextBefore.value = page.next_before_id
+    }
+  } catch { if (s === session && version === roundsVersion) roundsError.value = t('admin.accounts.iqHistoryFailed') }
+  finally { if (mode === 'more') loadingMore.value = false }
+}
+
+function stopPolling() { clearTimeout(pollTimer); pollTimer = undefined }
+function schedulePoll() {
+  stopPolling()
+  if (!props.show || !targets.value.some(iqTargetBusy)) return
+  pollTimer = setTimeout(() => {
+    if (document.visibilityState === 'hidden') schedulePoll()
+    else void refresh(true)
+  }, POLL_MS)
+}
+
+async function refresh(poll: boolean) {
+  stopPolling()
+  const s = session
+  if (!props.show || !props.account) return
+  if (!poll) loading.value = true
+  await loadTargets(s)
+  await loadRounds(poll ? 'merge' : 'replace')
+  if (s !== session) return
+  loading.value = false
+  schedulePoll()
+}
+
+function selectModel(model: string) {
+  if (model === selected.value) return
+  selected.value = model
+  rounds.value = []
+  nextBefore.value = null
+  expanded.value = new Set()
+  roundsError.value = ''
+  loading.value = true
+  void loadRounds('replace').then(() => { loading.value = false })
+}
+
+function toggle(id: number) {
+  const next = new Set(expanded.value)
+  if (!next.delete(id)) next.add(id)
+  expanded.value = next
+}
+
+// ---- manual checks ----
+const running = ref<string | null>(null)
+const runMessage = ref('')
+const runError = ref('')
+async function run(model?: string) {
+  const id = props.account?.id
+  if (!id || running.value !== null) return
+  const s = session
+  running.value = model ?? ''
+  runMessage.value = ''; runError.value = ''
+  try {
+    const results = await adminAPI.accounts.runIQCheck(id, model ? [model] : undefined)
+    if (s !== session) return
+    const accepted = results.filter(result => result.state !== 'rejected').map(result => iqModelLabel(result.model))
+    const rejected = results.filter(result => result.state === 'rejected').map(result => `${iqModelLabel(result.model)}: ${reasonLabel(result.reason || '')}`)
+    if (accepted.length) runMessage.value = t('admin.accounts.iqRunAccepted', { models: accepted.join(', ') })
+    if (rejected.length) runError.value = t('admin.accounts.iqRunRejected', { details: rejected.join('; ') })
+    await refresh(true)
+  } catch { if (s === session) runError.value = t('admin.accounts.iqFailed') }
+  finally { if (s === session) running.value = null }
+}
+
+// ---- diagnostics download ----
 const downloading = ref(false)
 const downloadError = ref('')
-let downloadRequest = 0
 async function downloadDiagnostics() {
- if (!props.account || downloading.value) return
- const version = ++downloadRequest
- downloading.value = true
- downloadError.value = ''
- try { const blob = await downloadIQCheckDiagnostics(props.account.id); if (version !== downloadRequest) return; const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = 'iq-check-diagnostics.json'; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000) }
- catch { if (version === downloadRequest) downloadError.value = t('admin.accounts.iqDownloadFailed') }
- finally { if (version === downloadRequest) downloading.value = false }
-}
-const records = ref<IQCheckRecord[]>([])
-const loading = ref(false)
-const error = ref('')
-const state = ref<Account['iq_check']>()
-const currentReason = computed(() => {
-  const value = state.value
-  if (!value?.enabled) return ''
-  const reason = (value.last_run_status === 'unknown' ? value.last_run_reason : '') || value.execution_reason
-  if (reason === 'minimum_interval') return ''
-  if (reason === 'http_403' && value.execution_state !== 'paused') return t('admin.accounts.iqForbiddenRetry')
-  return reason ? executionReasonLabel(reason) : ''
-})
-const copyMessage = ref('')
-async function copyValue(value: string) {
-  try { await navigator.clipboard.writeText(value); copyMessage.value = t('admin.accounts.iqCopied') }
-  catch { copyMessage.value = t('admin.accounts.iqCopyFailed') }
-}
-const statusError = ref('')
-const queuing = ref(false)
-const queueError = ref('')
-const queueMessage = ref('')
-let queueRequest = 0
-let request = 0
-let controller: AbortController | undefined
-let refreshTimer: ReturnType<typeof setTimeout> | undefined
-function stopRefresh() { clearTimeout(refreshTimer); controller?.abort() }
-function scheduleRefresh() {
-  clearTimeout(refreshTimer)
-  if (!props.show) return
-  refreshTimer = setTimeout(() => {
-    if (document.visibilityState === 'hidden') scheduleRefresh()
-    else void loadRecords()
-  }, state.value?.execution_state === 'running' || state.value?.execution_state === 'pending' || state.value?.execution_state === 'retry_wait' ? 5000 : 15000)
-}
-async function queueCheck() {
   const id = props.account?.id
-  if (!id || !state.value?.enabled || queuing.value) return
-  const version = ++queueRequest
-  queuing.value = true
-  queueError.value = ''; queueMessage.value = ''
+  if (!id || downloading.value) return
+  const s = session
+  downloading.value = true
+  downloadError.value = ''
   try {
-    const result = await adminAPI.accounts.runIQCheck(id)
-    if (version !== queueRequest) return
-    queueMessage.value = result?.next_eligible_at ? t('admin.accounts.iqQueuedAt', { time: formatDateTime(result.next_eligible_at) }) : t('admin.accounts.iqQueued')
-    await loadRecords()
-  } catch { if (version === queueRequest) queueError.value = t('admin.accounts.iqFailed') }
-  finally { if (version === queueRequest) queuing.value = false }
+    const blob = await downloadIQCheckDiagnostics(id)
+    if (s !== session) return
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url; link.download = 'iq-check-diagnostics.json'
+    document.body.appendChild(link); link.click(); link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch { if (s === session) downloadError.value = t('admin.accounts.iqDownloadFailed') }
+  finally { if (s === session) downloading.value = false }
 }
-async function loadRecords() {
-  stopRefresh()
-  const version = ++request
-  const id = props.account?.id
-  if (!props.show || !id) return
-  loading.value = true
-  error.value = ''
-  statusError.value = ''
+
+// ---- motion: attempts settle in when a round opens; the summary eases in on target switch ----
+const root = ref<HTMLElement>()
+const summary = ref<HTMLElement>()
+let motion: gsap.Context | undefined
+onMounted(() => { motion = gsap.context(() => {}, root.value) })
+function revealAttempts(el: Element, done: () => void) {
+  if (!motion || isReducedMotion()) return done()
+  motion.add(() => gsap.from(el.querySelectorAll('.iq-attempt'), { autoAlpha: 0, y: -6, duration: 0.22, ease: 'expo.out', stagger: { amount: 0.09 }, clearProps: 'opacity,visibility,transform', onComplete: done }))
+}
+watch(selected, async (_value, previous) => {
+  if (!previous || !motion || isReducedMotion()) return
+  await nextTick()
+  if (summary.value) motion.add(() => gsap.from(summary.value!, { autoAlpha: 0.4, y: 4, duration: 0.2, ease: 'expo.out', clearProps: 'opacity,visibility,transform' }))
+})
+
+function reset() {
+  session++
+  controller.abort()
   controller = new AbortController()
-  const signal = controller.signal
-  await Promise.all([
-    adminAPI.accounts.getIQCheckResults(id, signal).then(result => { if (version === request) records.value = result }).catch(() => { if (version === request) error.value = t('admin.accounts.iqHistoryFailed') }),
-    adminAPI.accounts.getIQCheckStatus(id, signal).then(result => {
-      if (version === request) { state.value = result; emit('updated', result) }
-    }).catch(() => { if (version === request) statusError.value = t('admin.accounts.iqStatusFailed') })
-  ])
-  if (version === request) { loading.value = false; scheduleRefresh() }
+  stopPolling()
+  targets.value = []; selected.value = ''; rounds.value = []; nextBefore.value = null; expanded.value = new Set()
+  targetsError.value = ''; roundsError.value = ''; downloadError.value = ''; runMessage.value = ''; runError.value = ''
+  loading.value = false; loadingMore.value = false; downloading.value = false; running.value = null
 }
-watch([() => props.show, () => props.account?.id], () => {
-  stopRefresh()
-  request++; downloadRequest++; queueRequest++
-  records.value = []; error.value = ''; downloadError.value = ''; copyMessage.value = ''
-  state.value = undefined; statusError.value = ''; queueError.value = ''; queueMessage.value = ''
-  loading.value = false; downloading.value = false; queuing.value = false
-  void loadRecords()
-}, { immediate: true })
-onBeforeUnmount(() => { request++; downloadRequest++; queueRequest++; stopRefresh() })
+watch([() => props.show, () => props.account?.id], () => { reset(); void refresh(false) }, { immediate: true })
+onBeforeUnmount(() => { reset(); motion?.revert() })
 </script>

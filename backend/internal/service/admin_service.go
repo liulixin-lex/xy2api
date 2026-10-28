@@ -81,6 +81,7 @@ type AdminService interface {
 	// 可调度的 OpenAI 账号，用于按组计算调度分数。
 	ListOpenAISchedulableAccountsForSchedulerScore(ctx context.Context, groupID *int64) ([]Account, error)
 	GetAccount(ctx context.Context, id int64) (*Account, error)
+	ListIQTargetSummaries(ctx context.Context, ids []int64) (map[int64][]domain.IQTargetSummary, error)
 	GetAccountsByIDs(ctx context.Context, ids []int64) ([]*Account, error)
 	CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error)
 	ValidateAccountGroupBindings(ctx context.Context, groupIDs []int64) error
@@ -408,7 +409,7 @@ type UpdateGroupInput struct {
 }
 
 type CreateAccountInput struct {
-	IQCheck            *domain.IQCheckSettings
+	IQTargets          *domain.IQTargetsPatch
 	Name               string
 	Notes              *string
 	Platform           string
@@ -441,8 +442,8 @@ type ShadowOptions struct {
 }
 
 type UpdateAccountInput struct {
+	IQTargets               *domain.IQTargetsPatch
 	IQPreserveTokenRotation bool // Internal provider-issued token refresh, not an API field.
-	IQCheck                 *domain.IQCheckSettings
 	Name                    string
 	Notes                   *string
 	Type                    string // Account type: oauth, setup-token, apikey
@@ -464,7 +465,7 @@ type UpdateAccountInput struct {
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.
 type BulkUpdateAccountsInput struct {
-	IQCheck        *domain.IQCheckSettings
+	IQTargets      *domain.IQTargetsPatch
 	AccountIDs     []int64
 	Filters        *BulkUpdateAccountFilters
 	Name           string

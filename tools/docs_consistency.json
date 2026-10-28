@@ -320,6 +320,23 @@
         "docs/PROJECT_MEMORY.md",
         "docs/PROJECT_MEMORY_ARCHIVE.md"
       ]
+    },
+    {
+      "pattern": "XY2API-IQ-Monitor|candy-grader-v2|\\b(?:iqSchedulablePredicate|BlocksScheduling|scheduling_blocked|ReasonIQDegraded|busy_deferrals|protocol_failures|recordIQMetric|iqHealth)\\b",
+      "reason": "the per-model IQ redesign replaced the account-level IQ gate, its monitoring state and the fixed probe identity; see docs/OPENAI_IQ_CHECK.md",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "docs/IQ_CURRENT_HEALTH.md",
+        "docs/IQ_RELIABILITY_IMPLEMENTATION.md",
+        "openspec/changes/stabilize-openai-iq-check/**",
+        "openspec/changes/iq-detection-operations/**",
+        "backend/migrations/243_iq_check_monitoring.sql",
+        "backend/migrations/244_iq_check_bulk_busy_reset.sql",
+        "backend/migrations/245_iq_check_reliability.sql",
+        "backend/migrations/246_iq_check_simplification.sql",
+        "backend/migrations/256_iq_current_health.sql"
+      ]
     }
   ],
   "private": [

@@ -15,7 +15,7 @@
               <Icon name="play" size="sm" class="text-green-500" :stroke-width="2" />
               {{ t('admin.accounts.testConnection') }}
             </button>
-            <button v-if="account.platform === 'openai' && account.iq_check?.enabled" @click="$emit('iq-run', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-blue-600 hover:bg-gray-100 dark:hover:bg-dark-700">{{ t('admin.accounts.iqRun') }}</button>
+            <button v-if="account.platform === 'openai'" @click="$emit('iq-run', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-blue-600 hover:bg-gray-100 dark:hover:bg-dark-700">{{ t('admin.accounts.iqRun') }}</button>
             <button v-if="account.platform === 'openai'" @click="$emit('iq-records', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">{{ t('admin.accounts.iqRecords') }}</button>
             <button @click="$emit('stats', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">
               <Icon name="chart" size="sm" class="text-indigo-500" />
@@ -70,6 +70,7 @@ import { useResizeObserver, useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
+import { IQ_GATE_KEY_PREFIX } from './iqCheckPresentation'
 
 const props = defineProps<{ show: boolean; account: Account | null; anchorRect: DOMRect | null }>()
 const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow'])
@@ -120,7 +121,8 @@ const isRateLimited = computed(() => {
     | undefined
   if (modelLimits) {
     const now = new Date()
-    return Object.values(modelLimits).some(info => new Date(info.rate_limit_reset_at) > now)
+    // IQ gates are not cleared by "recover state"; they lift only after a passing recheck.
+    return Object.entries(modelLimits).some(([key, info]) => !key.startsWith(IQ_GATE_KEY_PREFIX) && new Date(info.rate_limit_reset_at) > now)
   }
   return false
 })

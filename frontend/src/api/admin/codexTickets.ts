@@ -41,7 +41,8 @@ export interface CodexAccountTicketStatus {
   missing_policy?: 'block' | 'allow_unprotected'
   protection?: 'protected' | 'unprotected' | 'paused' | 'disabled'
   model_verified?: boolean
-  iq_status?: string
+  /** Verdict of the IQ target whose outbound model matches this ticket's model. */
+  iq_status?: 'not_enabled' | 'not_configured' | 'smart' | 'degraded' | 'unknown'
   iq_retest?: string
   events?: { at: string; reason: string }[]
   enabled: boolean

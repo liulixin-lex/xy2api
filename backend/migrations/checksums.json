@@ -329,6 +329,7 @@
     "277_remove_balance_alert_rules.sql": "93eb49370029252bc6e793c53451e35944f58e3c3e7d9909d82964640ce2c6ae",
     "278_group_categories.sql": "772a821a29667e96929c4e49f9f07c3218875f3ddf0e019be613f701432d756e",
     "279_cache_northstar.sql": "58dc0c8572b7ecd1899db8f995d1f2795a40762a9d94e864ac6a8f377bc3447e",
-    "280_drop_cache_northstar.sql": "da25329842bda08dbfe7cd8e050639b666bf318d84eb66f11495534811dc391b"
+    "280_drop_cache_northstar.sql": "da25329842bda08dbfe7cd8e050639b666bf318d84eb66f11495534811dc391b",
+    "281_iq_targets.sql": "54c49823cfd3076f58bbcd3d1e2420421ed696db78f0d1f939983bcebe78dc6b"
   }
 }

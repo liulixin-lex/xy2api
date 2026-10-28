@@ -67,9 +67,15 @@ func (g *openAIResilienceEligibility) allows(account *Account, allowIO, recovery
 		}
 	}
 	candidate := withoutSoftPenalties(*account, now)
+	if g.req.RequireCompact {
+		compactOutbound := g.service.openAICodexTicketOutboundModel(candidate, g.req.RequestedModel, true)
+		if iqGateBlocksRequest(candidate, g.req.RequestedModel, true, compactOutbound) {
+			return false
+		}
+	}
 	// Callers evaluate the model's penalty separately (hard exclusion or
 	// timed recovery). Do not let that timed limit mask the other gates.
-	if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(g.ctx, candidate, g.req.Platform, "", g.req.RequireCompact, g.req.RequiredCapability); reason != "" {
+	if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(g.ctx, candidate, g.req.Platform, "", g.req.RequireCompact, g.req.RequiredCapability, g.service); reason != "" {
 		return false
 	}
 	if g.req.RequestedModel != "" && !candidate.IsModelSupported(g.req.RequestedModel) {

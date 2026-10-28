@@ -93,19 +93,17 @@ describe('BulkEditAccountModal', () => {
     expect(wrapper.find('account-failure-domains-stub').exists()).toBe(false)
     wrapper.unmount()
   })
-  it('updates only selected IQ fields across accounts', async () => {
+  it('updates only the IQ fields set for each target across accounts', async () => {
     vi.mocked(adminAPI.accounts.bulkUpdate).mockResolvedValue({ success: 2, failed: 0 } as any)
     const wrapper = mountModal({ selectedPlatforms: ['openai'] })
     const toggle = wrapper.findAll('label').find(label => label.text() === 'admin.accounts.iqBulkEdit')!
     await toggle.get('input').setValue(true)
-    const field = wrapper.get('input[type="checkbox"][value="model"]')
-    await field.setValue(true)
-    const settings = wrapper.getComponent(IQCheckSettings)
-    settings.vm.$emit('update:modelValue', { ...settings.props('modelValue'), model: 'custom-check-model' })
+    const sol = wrapper.getComponent(IQCheckSettings).findAll('[data-testid="iq-target-row"]')[1]
+    expect(sol.text()).toContain('gpt-6.1-sol')
+    await sol.get('input[type="number"]').setValue('10')
     await nextTick()
     await wrapper.get('form').trigger('submit'); await flushPromises()
-    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalled()
-    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0][1]?.iq_check).toEqual({ model: 'custom-check-model' })
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0][1]?.iq_check).toEqual({ targets: [{ model: 'gpt-6.1-sol', interval_minutes: 10 }] })
   })
   beforeEach(() => {
     vi.mocked(adminAPI.accounts.bulkUpdate).mockReset()
