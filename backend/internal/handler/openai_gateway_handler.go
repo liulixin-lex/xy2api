@@ -3763,7 +3763,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 				c.Set(service.OpsSkipPassthroughKey, true)
 			}
 
-			copyFailoverRetryAfter(c, statusCode, failoverErr.ResponseHeaders)
+			copyFailoverRetryAfter(c, respCode, failoverErr.ResponseHeaders)
 			respCode = applyExhaustedRetryHint(c, h.gatewayService, respCode)
 			h.handleStreamingAwareError(c, respCode, "upstream_error", service.SanitizeUpstreamErrorMessage(msg), streamStarted)
 			return

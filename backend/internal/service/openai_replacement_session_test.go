@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
 
@@ -131,4 +132,34 @@ func TestOpenAILegacyReplacementSessionTriesNextSlot(t *testing.T) {
 		require.Equal(t, int64(2), result.Account.ID)
 		result.ReleaseFunc()
 	}
+}
+
+func TestOpenAIShareCompactReplacementKeepsLowestLoad(t *testing.T) {
+	env := newOpenAIShareTestEnv(t, shareTestPolicy(sharesched.SchedulerShare), 1, 2, 3)
+	env.svc.cfg.Gateway.Scheduling.LoadBatchEnabled = true
+	for _, id := range []int64{2, 3} {
+		env.account(id).Extra = map[string]any{"openai_compact_supported": true}
+	}
+	env.svc.concurrencyService = NewConcurrencyService(schedulerTestConcurrencyCache{
+		loadMap: map[int64]*AccountLoadInfo{2: {LoadRate: 0}, 3: {LoadRate: 20}},
+	})
+	var session string
+	for i := 0; i < 100; i++ {
+		candidate := fmt.Sprintf("share-compact-%d", i)
+		if openAIReplacementSessionHash(shareTestGroupID, candidate, 3) > openAIReplacementSessionHash(shareTestGroupID, candidate, 2) {
+			session = candidate
+			break
+		}
+	}
+	require.NotEmpty(t, session, "use a session whose HRW winner has higher load")
+	env.cache.bind("openai:"+session, 1, time.Hour)
+	group := shareTestGroupID
+	require.True(t, env.share.shareSchedulingActive(group))
+	result, decision, err := env.svc.SelectAccountWithScheduler(context.Background(), &group, "", session, "gpt-5.1",
+		map[int64]struct{}{1: {}}, OpenAIUpstreamTransportAny, true)
+	require.NoError(t, err)
+	require.True(t, result.Acquired)
+	defer result.ReleaseFunc()
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.Equal(t, int64(2), result.Account.ID, "share compact bypass keeps the original minimum-load order")
 }

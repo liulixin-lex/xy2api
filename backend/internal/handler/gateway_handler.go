@@ -1963,7 +1963,7 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 			}
 
 			respCode, errType, msg := anthropicFailoverError(respCode, "upstream_error", msg, failoverErr)
-			copyFailoverRetryAfter(c, statusCode, failoverErr.ResponseHeaders)
+			copyFailoverRetryAfter(c, respCode, failoverErr.ResponseHeaders)
 			respCode = applyExhaustedRetryHint(c, h.gatewayService, respCode)
 			h.handleStreamingAwareError(c, respCode, errType, service.SanitizeUpstreamErrorMessage(msg), streamStarted)
 			return

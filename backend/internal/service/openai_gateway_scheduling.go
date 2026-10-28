@@ -1255,7 +1255,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			stickyAccountID = accountID
 		}
 	}
-	replacementSession := platform == PlatformOpenAI && sessionHash != "" && (stickyAccountID > 0 || len(excludedIDs) > 0)
+	replacementSession := platform == PlatformOpenAI && sessionHash != "" &&
+		(stickyAccountID > 0 || len(excludedIDs) > 0) &&
+		!s.shareScheduling.shareSchedulingActive(derefGroupID(groupID))
 	stickyAccountID = s.migrateOpenAILatencyHeldOwner(ctx, groupID, platform, sessionHash, requestedModel, stickyAccountID, excludedIDs, requireCompact, requiredCapability)
 	if s.concurrencyService == nil || !cfg.LoadBatchEnabled {
 		account, stickyHit, err := s.selectAccountForModelWithExclusionsStickyHit(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability, preferLowUpstreamRate)

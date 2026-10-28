@@ -81,3 +81,30 @@ func TestAnthropicCapacityRuleProjectsMessageAndStatus(t *testing.T) {
 		require.NotEmpty(t, rec.Header().Get("Retry-After"))
 	}
 }
+
+func TestTerminalPassthroughRuleDropsUpstreamRetryAfter(t *testing.T) {
+	withHandlerResilience(t, nil)
+	status := http.StatusForbidden
+	message := "access denied by rule"
+	rules := &passthroughRuleRepo{rules: []*model.ErrorPassthroughRule{{
+		ID: 1, Name: "terminal", Enabled: true, Priority: 1, ErrorCodes: []int{502},
+		MatchMode: model.MatchModeAll, Platforms: []string{"anthropic", "openai"}, ResponseCode: &status, CustomMessage: &message,
+	}}}
+	for _, name := range []string{"gateway", "openai"} {
+		t.Run(name, func(t *testing.T) {
+			c, rec := newResilienceTestContext(t)
+			passthrough := service.NewErrorPassthroughService(rules, nil)
+			failure := &service.UpstreamFailoverError{StatusCode: http.StatusBadGateway,
+				ResponseBody: []byte(`{"error":{"message":"upstream failure"}}`), ResponseHeaders: http.Header{"Retry-After": {"60"}}}
+			if name == "gateway" {
+				(&GatewayHandler{errorPassthroughService: passthrough}).handleFailoverExhausted(c, failure, service.PlatformAnthropic, false)
+			} else {
+				(&OpenAIGatewayHandler{errorPassthroughService: passthrough}).handleFailoverExhausted(c, failure, false)
+			}
+			require.Equal(t, http.StatusForbidden, rec.Code)
+			require.Equal(t, message, gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
+			require.Empty(t, rec.Header().Get("Retry-After"))
+			require.Empty(t, c.GetString(ginKeyResilienceUpstreamRetryAfter))
+		})
+	}
+}
