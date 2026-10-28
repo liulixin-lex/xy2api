@@ -74,6 +74,7 @@ describe('OperatorPermissionsTable', () => {
 
     for (const moduleId of ADMIN_MODULE_IDS) {
       const moduleRow = wrapper.get(`[data-test="operator-module-row-${moduleId}"]`)
+      expect(moduleRow.findAll('td').every(cell => cell.classes().includes('py-0.5'))).toBe(true)
       // A module row holds only its view and manage boxes.
       expect(moduleRow.findAll('input[type="checkbox"]').map((input) => input.attributes('data-test'))).toEqual([
         `operator-view-${moduleId}`,

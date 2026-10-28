@@ -76,7 +76,8 @@ const modalGlobals = () => ({
   plugins: [getActivePinia()!],
   stubs: {
     BaseDialog: {
-      props: ['show', 'title'],
+      name: 'BaseDialog',
+      props: ['show', 'title', 'width'],
       template: '<div v-if="show"><slot /><slot name="footer" /></div>'
     },
     Select: true,
@@ -117,6 +118,66 @@ describe('UserEditModal operator role', () => {
     update.mockResolvedValue({})
     updateOperatorPermissions.mockResolvedValue({ modules: {}, flags: [] })
     getOperatorPermissions.mockResolvedValue({ modules: { users: 'view' }, flags: [] })
+  })
+
+  it.each([
+    ['admin', 'operator', 'extra-wide'],
+    ['admin', 'user', 'normal'],
+    ['admin', 'admin', 'normal'],
+    ['operator', 'operator', 'normal'],
+    ['operator', 'user', 'normal']
+  ] as const)('uses %s editing %s dialog width %s', async (signedInRole, editedRole, width) => {
+    const wrapper = mountModal(signedInRole, editedRole)
+    await flushPromises()
+
+    expect(wrapper.findComponent({ name: 'BaseDialog' }).props('width')).toBe(width)
+    const form = wrapper.get('#edit-user-form')
+    expect(form.classes().includes('grid')).toBe(width === 'extra-wide')
+    expect(wrapper.find('[data-test="operator-permissions-panel"]').exists()).toBe(width === 'extra-wide')
+    if (width === 'normal') expect(form.classes()).toContain('space-y-5')
+  })
+
+  it('keeps user fields together before permissions and switches to columns only at lg', async () => {
+    const wrapper = mountModal('admin', 'operator')
+    await flushPromises()
+
+    const form = wrapper.get('#edit-user-form')
+    expect(form.classes()).toEqual(expect.arrayContaining(['grid-cols-1', 'lg:grid-cols-2']))
+    expect(Array.from(form.element.children).map(child => child.getAttribute('data-test'))).toEqual([
+      'user-edit-fields', 'operator-permissions-panel'
+    ])
+    const fields = wrapper.get('[data-test="user-edit-fields"]')
+    expect(fields.classes()).toContain('space-y-5')
+    expect(fields.findAll('label.input-label').map(label => label.text())).toEqual([
+      'admin.users.email',
+      'admin.users.password',
+      'admin.users.username',
+      'admin.users.form.roleLabel',
+      'admin.users.notes',
+      'admin.users.columns.concurrency',
+      'admin.users.form.rpmLimit'
+    ])
+    expect(fields.findComponent({ name: 'UserAttributeForm' }).exists()).toBe(true)
+    expect(fields.find('[data-test="operator-permissions-table"]').exists()).toBe(false)
+  })
+
+  it('widens and restores the layout when the selected role changes', async () => {
+    const wrapper = mountModal('admin', 'user')
+    const dialog = wrapper.findComponent({ name: 'BaseDialog' })
+    const roleSelect = wrapper.findComponent({ name: 'Select' })
+
+    roleSelect.vm.$emit('update:modelValue', 'operator')
+    await flushPromises()
+    expect(dialog.props('width')).toBe('extra-wide')
+    expect(wrapper.find('[data-test="operator-permissions-table"]').exists()).toBe(true)
+
+    for (const role of ['user', 'admin']) {
+      roleSelect.vm.$emit('update:modelValue', role)
+      await flushPromises()
+      expect(dialog.props('width')).toBe('normal')
+      expect(wrapper.get('#edit-user-form').classes()).not.toContain('grid')
+      expect(wrapper.find('[data-test="operator-permissions-panel"]').exists()).toBe(false)
+    }
   })
 
   it('loads the table when the always-mounted UsersView modal receives user then show in one click', async () => {
