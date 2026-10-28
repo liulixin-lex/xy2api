@@ -70,10 +70,14 @@ describe('gateway resilience settings', () => {
     expect(w.text()).toContain('admin.resilience.settings.saved')
   })
 
-  it('edits the balance pause in the balance card', async () => {
+  it('edits the initial balance pause with a tiered pause hint in the balance card', async () => {
     const w = mountSettings(); await flushPromises()
     const card = w.get('[data-testid="resilience-card-balance"]')
-    expect(card.find('[data-testid="resilience-field-balancePause"]').exists()).toBe(true)
+    const pause = card.get('[data-testid="resilience-field-balancePause"]')
+    expect(pause.attributes('min')).toBe('30')
+    expect(pause.attributes('max')).toBe('3600')
+    expect(card.get('label[for="resilience-balancePause"]').text()).toBe('admin.resilience.settings.fields.balancePause')
+    expect(card.get('.input-hint').text()).toBe('admin.resilience.settings.fields.balancePauseHint')
     await w.get('[data-testid="resilience-field-balancePause"]').setValue('600')
     await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
     const expected = settings()

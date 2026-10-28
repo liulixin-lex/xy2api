@@ -12,7 +12,7 @@ export default {
         lastResort: 'Last-resort selection',
         lastResortHint: 'Without healthy accounts, serve on a free soft-penalised account, by priority and soonest cooldown end, queueing only when all are busy, so single-account groups stay available.',
         balance: 'Pause on low balance',
-        balanceHint: 'Accounts out of upstream balance stop being scheduled for the pause; real traffic retries them afterwards and pauses them again if still short. "Recover State" in the account list puts one back at once.',
+        balanceHint: 'Accounts out of upstream balance stop being scheduled until real traffic retries them after the pause; "Recover State" in the account list puts one back at once.',
         budget: 'Request budget',
         budgetHint: 'Maximum attempts per request and total time before the first output. Streaming requests are held to the total time until their first output; for non-streaming requests it only decides whether another attempt may start, and the attempt in flight is not cut. Gemini text requests are the exception: an attempt that is not the last candidate moves to another account when no content (for non-streaming, the full response) arrives within gemini_first_event_timeout_seconds (60 s by default). Antigravity uses anthropic_first_event_timeout_seconds; set both in the advanced JSON. Same-account retries only for capacity shedding.',
         failure: 'Failure classification fixes',
@@ -37,7 +37,8 @@ export default {
         outputP99Hint: 'In-flight reservations cap output tokens at the model\'s 7-day P99 (at least 1024).'
       },
       fields: {
-        balancePause: 'Pause (s)',
+        balancePause: 'Initial pause (s)',
+        balancePauseHint: 'Consecutive balance failures on the same account pause it for ×1 → ×3 → ×12 of this duration (5/15/60 min by default; the third step is the cap), resetting after a successful request or a manual "Recover State".',
         maxAttempts: 'Maximum attempts',
         preOutputBudget: 'Total time before first output (s)',
         keepaliveDelay: 'First heartbeat delay (s)',
