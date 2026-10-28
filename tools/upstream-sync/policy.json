@@ -52,7 +52,8 @@
       "skills/**",
       "tools/**",
       "openspec/changes/gateway-resilience-v2-20261021/**",
-      "openspec/changes/gateway-resilience-045-20261021/**"
+      "openspec/changes/gateway-resilience-045-20261021/**",
+      "openspec/changes/upstream-balance-20261027/**"
     ],
     "manual_merge": [
       "Makefile",
@@ -216,7 +217,8 @@
       "frontend/src/components/account/__tests__/EditAccountModal.spec.ts",
       "frontend/src/components/admin/account/AccountTableFilters.vue",
       "frontend/src/components/admin/usage/UsageTable.vue",
-      "backend/Makefile"
+      "backend/Makefile",
+      "backend/internal/service/account_credentials_redact.go"
     ],
     "generated": [
       "backend/ent/**",
@@ -2139,6 +2141,122 @@
     {
       "path": "frontend/src/components/account/EditAccountModal.vue",
       "value": "@patch=\"iqPatch = $event\""
+    },
+    {
+      "path": "frontend/src/api/admin/accounts.ts",
+      "value": "'/admin/accounts/upstream-balances'"
+    },
+    {
+      "path": "frontend/src/api/admin/accounts.ts",
+      "value": "export interface UpstreamBalanceItem {"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "{ key: 'upstream_balance', label: t('admin.accounts.columns.upstreamBalance'), sortable: false }"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "<UpstreamBalanceCell"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "useIntervalFn(pollUpstreamBalances"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "adminAPI.accounts.getUpstreamBalances("
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "invalidateUpstreamBalances("
+    },
+    {
+      "path": "frontend/src/components/account/EditAccountModal.vue",
+      "value": "<NewApiWalletSection"
+    },
+    {
+      "path": "frontend/src/components/account/EditAccountModal.vue",
+      "value": "applyNewApiWalletCredentials(newCredentials, editNewApiWallet.value, 'edit')"
+    },
+    {
+      "path": "frontend/src/components/account/CreateAccountModal.vue",
+      "value": "<NewApiWalletSection"
+    },
+    {
+      "path": "frontend/src/components/account/CreateAccountModal.vue",
+      "value": "applyNewApiWalletCredentials(credentials, newApiWallet.value, 'create')"
+    },
+    {
+      "path": "frontend/src/components/account/credentialsBuilder.ts",
+      "value": "&& mode !== 'coding' && officialAccountAPISupported(account, mode)"
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh/admin/accounts.ts",
+      "value": "upstreamBalance: '上游余额'"
+    },
+    {
+      "path": "frontend/src/i18n/locales/en/admin/accounts.ts",
+      "value": "upstreamBalance: 'Upstream Balance'"
+    },
+    {
+      "path": "backend/internal/service/account_credentials_redact.go",
+      "value": "\"newapi_access_token\","
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "accounts.GET(\"/upstream-balances\", h.Admin.Account.GetUpstreamBalances)"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_handler.go",
+      "value": "*service.UpstreamBalanceService"
+    },
+    {
+      "path": "backend/internal/handler/wire.go",
+      "value": "accountHandler.SetUpstreamBalanceService(upstreamBalance)"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "ProvideUpstreamBalanceService,"
+    },
+    {
+      "path": "backend/internal/repository/wire.go",
+      "value": "NewUpstreamBalanceStore,"
+    },
+    {
+      "path": "backend/cmd/server/wire.go",
+      "value": "upstreamBalance.Stop()"
+    },
+    {
+      "path": "backend/cmd/server/wire_gen.go",
+      "value": "service.ProvideUpstreamBalanceService("
+    },
+    {
+      "path": "backend/internal/service/cn_provider_balance_service.go",
+      "value": "if upstreamBalanceCNRelayAccount(account) {"
+    },
+    {
+      "path": "backend/internal/service/cn_provider_balance_check_service.go",
+      "value": "account.Schedulable && !upstreamBalanceCNRelayAccount(account)"
+    },
+    {
+      "path": "backend/internal/service/channel_monitor_quota_fetcher.go",
+      "value": "if upstreamBalanceCNRelayAccount(account) {"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "delete(credentials, \"newapi_access_token\")"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "if err := validateNewAPIAccessCredentials(input.Credentials); err != nil {"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "account.Credentials = dropNewAPITokenOnOriginChange(&previousForToken, account.Credentials, input.Credentials, account.ProxyID)"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "input.Credentials = clearBulkNewAPITokenOnIdentityChange(cachedTargets, input.Credentials, input.ProxyID)"
     }
   ],
   "forbidden_module_paths": [
@@ -2197,7 +2315,8 @@
     "xy-resilience-v2-classification",
     "xy-openai-session-uuid",
     "xy-openai-ttft-health-routing",
-    "xy-resilience-coverage"
+    "xy-resilience-coverage",
+    "xy-upstream-balance"
   ],
   "custom_patch_tests": [
     {
@@ -3289,6 +3408,126 @@
       "id": "xy-resilience-coverage",
       "path": "backend/internal/service/resilience_errors_test.go",
       "literal": "func TestRecoveryProjectionCombinesHardPauseAndModelBreaker"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "frontend/src/components/account/__tests__/UpstreamBalanceCell.spec.ts",
+      "literal": "shows the dollar amount and greys it out after three minutes without an update"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "frontend/src/views/admin/__tests__/AccountsView.upstreamBalance.spec.ts",
+      "literal": "asks for the visible accounts on load and every 30 seconds"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "frontend/src/views/admin/__tests__/AccountsView.upstreamBalance.spec.ts",
+      "literal": "skips polling while a dialog is open"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "frontend/src/views/admin/__tests__/AccountsView.upstreamBalance.spec.ts",
+      "literal": "drops the cached value of an edited account and never shows an answer from before the edit"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "frontend/src/components/account/__tests__/NewApiWalletSection.spec.ts",
+      "literal": "omits an untouched token, sends null to clear it and a string to replace it"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "frontend/src/components/account/__tests__/EditAccountModal.newapiWallet.spec.ts",
+      "literal": "keeps the new-api access token unless it is cleared, and sends null when cleared"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "frontend/src/components/account/__tests__/credentialsBuilder.platformCatalog.spec.ts",
+      "literal": "hides the CN balance sub-cell for kimi and deepseek relays"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/service/upstream_balance_read_test.go",
+      "literal": "func TestUpstreamBalanceReadPathMakesNoUpstreamCallsOrAccountWrites"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/service/upstream_balance_read_test.go",
+      "literal": "func TestUpstreamBalanceFingerprintChangeHidesOldValue"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/service/upstream_balance_target_test.go",
+      "literal": "func TestUpstreamBalanceURLHelpers"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/service/account_credentials_newapi_token_test.go",
+      "literal": "func TestNewAPIAccessTokenIsSensitiveAndNullClears"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/handler/admin/account_upstream_balance_test.go",
+      "literal": "func TestUpstreamBalanceSecretsNeverInStoreLogsOrResponse"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/repository/upstream_balance_store_test.go",
+      "literal": "func TestUpstreamBalanceStoreFailureDoesNotExtendSuccessTTL"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/handler/admin/account_upstream_balance_test.go",
+      "literal": "func TestGetUpstreamBalancesRejectsInvalidIDs"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/service/cn_provider_balance_relay_skip_test.go",
+      "literal": "func TestCNBalanceSkipsRelayKimiAndDeepseekAccounts"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/service/upstream_balance_integration_unit_test.go",
+      "literal": "func TestDuplicateAccountDropsNewAPIToken"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/service/upstream_balance_round_test.go",
+      "literal": "func TestUpstreamBalanceSingleRoundAcrossInstances"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/service/upstream_balance_newapi_test.go",
+      "literal": "func TestUpstreamBalanceNewAPI401DisambiguatesWithTokenUsage"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/repository/upstream_balance_store_newapi_test.go",
+      "literal": "func TestUpstreamBalanceOriginLockSpacesTokenUsageCalls"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/service/upstream_balance_integration_unit_test.go",
+      "literal": "func TestUpdateAndBulkUpdateClearTokenOnProxyChange"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/service/upstream_balance_integration_unit_test.go",
+      "literal": "func TestUpdateAccountRejectsInvalidNewAPIUserID"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/service/upstream_balance_integration_unit_test.go",
+      "literal": "func TestNewAPIAccessTokenBulkOriginChangeClears"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/service/upstream_balance_reviewfix_test.go",
+      "literal": "func TestUpstreamBalanceURLPolicyRejectsBeforeRequest"
+    },
+    {
+      "id": "xy-upstream-balance",
+      "path": "backend/internal/service/upstream_balance_reviewfix_test.go",
+      "literal": "func TestUpstreamBalanceStatusPanicRecoveredAndStopWaits"
     }
   ]
 }
