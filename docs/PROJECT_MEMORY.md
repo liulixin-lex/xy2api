@@ -6,13 +6,21 @@
 
 ## 当前交接状态
 
+### 智商检测记录界面精简与上线观察修复：PR #154 合入 main（2026-10-28；未发版、未部署）
+
+- 检测记录分页（每页 10 轮、总数、“仅异常”）与弹窗精简；答对题紧凑诊断；默认全局并发 8；403/429/`rate_limited`/带 `Retry-After` 的未知结果不在轮内重试；不可自动领取的账号显示“暂停：账号不可调度”；排期抖动生效。用户 2026-10-28 授权推送并合并，全部保护检查通过后以合并提交合入。
+- 遗留：生产暂不部署；判定规则相关观察项 7 天后复核（本地 `.work/tasks/20261028-iq-records-ui-ops/PLAN.md` §6）；单账号“不降智”分组需运维加第 2 个账号。发版、部署另行授权。
+- 详细登记已原样归档。
+
 ### 创建密钥弹窗加宽与专属标识：随 0.4.10 发布（2026-10-28 更新）
 
 - 用户端“API 密钥”的创建/编辑弹窗改为 `wide`，分组下拉与输入框同宽（`Select` 可选 `matchTriggerWidth`）。分组说明按用户要求只显示一行，超出省略，悬停弹出完整说明（`GroupOptionItem` 可选 `compactDescription` + `TruncatedTextPopover`）。专属分组在开启“向用户显示专属标识”时，选项、已选值、行内切换浮层都带“专属”标签（`ExclusiveGroupTag`）。只改前端。
 - [PR #150](https://github.com/liulixin-lex/xy2api/pull/150)：2026-10-28 用户授权合并。与 #151 在本记忆和 `policy.json` 登记处冲突，两侧都保留后全部保护检查通过，以合并提交 `1ef9213bd` 合入 main，[v0.4.10](https://github.com/liulixin-lex/xy2api/releases/tag/v0.4.10) 已于 2026-10-28T04:53:58Z 正式发布；部署未授权。
 - 已知：main 上 `resilienceLocale.spec.ts` 有 2 项失败（0.4.9 文案已含 `codex.rate_limits`，旧断言要求不含 `codex.`），不在 CI 关键集里，未修。（更正 2026-10-28：已随 PR #151 的 `9d9594975` 修复。）
 
-### OpenAI 智商检测按模型重构：随 0.4.10 发布（2026-10-28；未部署）
+### OpenAI 智商检测按模型重构：随 0.4.10 发布（2026-10-28；生产已部署）
+
+- 2026-10-28 只读核实：生产已运行 0.4.10（05:25:56Z 启动，迁移 281 同时执行；部署非本仓库 agent 操作）。上线观察与后续改动见进行中的 `20261028-iq-records-ui-ops`。
 
 - 账号 × 模型检测与 `iq:<出站模型>` fail-closed 门禁，现行说明见 [`OPENAI_IQ_CHECK.md`](OPENAI_IQ_CHECK.md)。用户 2026-10-28 授权推送并合并；PR #151 全部保护检查通过后以 merge commit 合入。同 PR 将 `golang.org/x/net` 升到 v0.62.0（GO-2026-6860，govulncheck 新公告）。
 - 遗留：参数化题未做真实上游校准；发版说明须写明默认降级组合新增 6.1-sol、6-sol → 5.6-luna 会改变质量路由，升级须停全部旧副本后执行迁移 281、启动对账失败即不启动；上线观察 7 天后再删旧结构。[v0.4.10](https://github.com/liulixin-lex/xy2api/releases/tag/v0.4.10) 已于 2026-10-28T04:53:58Z 正式发布，发布说明（含升级要求）写在 tag 正文；部署未授权。
@@ -1034,3 +1042,49 @@ pnpm --dir frontend run build
 - 完成操作：版本 PR #152 全部检查通过后以合并提交合入 main `6042b7b68`；在该提交上创建 annotated v0.4.10（tag 对象 `922929557`，正文为更新内容与升级要求，用 `--cleanup=whitespace` 保留 `##` 标题行）并推送。Release run 40633537613 的 verify-version、build-frontend、release 均成功，2026-10-28T04:53:58Z 正式发布（非 draft、非 prerelease），Release 页面正文即 tag 正文。
 - 验证：checksums 核验 darwin_arm64 与 linux_amd64 附件；解包二进制报告 XY2API 0.4.10、兼容 0.2.15、commit 6042b7b68，构建信息 vcs.modified=false；GHCR 0.4.10/0.4/latest 指向同一 index（amd64+arm64），镜像标签 version=0.4.10、revision=6042b7b68（开发机 Docker 无 buildx，改用 GHCR registry API 匿名只读核验）。
 - 记忆：#150 与版本准备登记原样归档；版本速览更新为 0.4.10。未部署生产。
+
+### 2026-10-28 — 20261028-iq-records-ui-ops — 上线观察与方案草案
+
+- 请求/目标：见“进行中的工作”同名条目。
+- 开始状态：main `478f1b335`，与 origin 一致，工作树干净。
+- 完成操作：生产只读（数据库只读会话，未导出设置表）：核实生产版本与迁移；统计上线后的轮次、题目、吞吐、门禁一致性、分组无号日志与错误日志。阅读弹窗与结果接口代码，确认列表累加机制。写方案草案并请 Codex 复核。
+- 修改文件：本记忆（任务登记、顶部状态更正为“生产已部署”与本条）。
+- 验证：文档一致性检查。
+- 卡点/风险：观察只有 1 小时，判定规则相关的现象只列为观察项。
+- 下一步：合入复核意见，交用户确认。
+
+### 2026-10-28 — 20261028-iq-records-ui-ops — 方案定稿 v1.1（实施交其他 agent）
+
+- 请求/目标：用户确认并发默认改 8、生产暂不部署；合入 Codex 复核后定稿。
+- 开始状态：main `478f1b335`，工作树只有本记忆的未提交改动。
+- 完成操作：Codex 第六轮复核意见逐条对照代码核实后全部采纳；补排期抖动修复；生产只读连接已关闭，本机临时脚本已删除。
+- 修改文件：本记忆（未提交）；本地交接包不入库。
+- 验证：文档一致性检查。
+- 卡点/风险：判定规则相关现象只观察了 1 小时，列为 7 天后复核项。
+- 下一步：由实施 agent 接手并在本条目登记。
+
+### 2026-10-28 — 20261028-iq-records-ui-ops — 实施只读审查（astra）
+
+- 请求/目标：按 PLAN v1.1、ROUTES.md 与实施报告只读审查 `git diff 478f1b335 9660fcacf`，检查分页/异常定义、紧凑诊断、轮内重试、暂停推导、抖动、前端轮询与文档一致性，并把结果写入实现目录。
+- 完成操作：审查只读 worktree `9660fcac` 的后端、前端和 `docs/OPENAI_IQ_CHECK.md`；报告写入 `.work/tasks/20261028-iq-records-ui-ops/implementation/review_impl_astra.md`，列出 3 个 P2（原始错误码、答案着色、`total=0` 页码回退）。未修改被审 worktree，未连接服务器。
+- 验证：`GOTOOLCHAIN=local ~/sdk/go1.27.3/bin/go test -count=1 ./internal/pkg/iqcheck ./internal/service ./internal/handler/admin` 通过；前端 Vitest 定向 `IQCheckResultsModal.spec.ts`、`iqCheckPresentation.spec.ts`、`admin.accounts.iqCheck.spec.ts`，21 项通过。
+- 未完成/下一步：实施 agent 需修复并复核 3 个 P2；集成、全量门禁、推送、PR、合并、发版和部署按原授权边界执行。
+
+### 2026-10-28 — 20261028-iq-records-ui-ops — 实施完成，本地提交待授权推送
+
+- 请求/目标：用户要求按更新后的方案 v1.1 完成实施。
+- 开始状态：main `478f1b335`，工作树只有规划者对本记忆的未提交登记（已保留并随本分支提交）。
+- 完成操作：总设计师先定接口契约（本地 `implementation/ROUTES.md`），后端（Codex，worktree）与前端（Claude Opus，主检出只改 `frontend/`）并行实施；astra 审查实施，3 个 P2 由前端修复；总设计师同步 `OPENAI_IQ_CHECK.md` 与退役登记。`before_id`/`next_before_id` 的退役规则用 `paths` 限定在 IQ 文件，因为运维告警接口仍用 `before_id`；已用临时命中验证规则生效。
+- 修改文件：`backend/`（记录分页、紧凑诊断、默认并发、轮内重试、暂停推导、抖动及定向测试）、`frontend/`（记录弹窗、题目与技术详情、i18n 删减与新增文案、对应 spec）、`docs/OPENAI_IQ_CHECK.md`、`tools/docs_consistency.json`、本记忆。
+- 验证：后端 agent 在开发机跑 repository 集成套件 0 失败、ci_gate 451 项 `-race` 0 跳过、golangci-lint 0 项、四组 vet、unit；集成后本机复跑 build、vet、gofmt、golangci-lint、定向 unit、前端 lint/typecheck/全量测试/build、文档一致性、scheduler-diff、tools 单测；干净工作树 `sync.py audit`。
+- 卡点/风险：前端只列表滚动依赖 `:has()`，不支持的浏览器回到整个弹窗滚动；“失败位置”遇到没有文案的阶段或原因时仍显示原值（目前后端发出的值都有文案）。
+- 下一步：用户授权后推送并开 PR；合并、发版、部署另行授权。
+
+### 2026-10-28 — 20261028-iq-records-ui-ops — 推送、开 PR #154 并合并
+
+- 请求/目标：用户 2026-10-28 授权“推送、合并”（不含发版、部署）。
+- 开始状态：分支 `feat/iq-records-ui-ops-20261028`，HEAD `77aa5214b`，origin/main 仍为 `478f1b335`，工作树干净。
+- 完成操作：推送并开 PR #154；本条目与任务登记原样归档，顶部只留结果摘要。
+- 验证：PR #154 全部保护检查通过后以合并提交合入。
+- 卡点/风险：见顶部遗留项。
+- 下一步：发版、部署待用户授权。

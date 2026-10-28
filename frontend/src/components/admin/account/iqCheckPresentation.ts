@@ -1,7 +1,7 @@
 import type { IQAttempt, IQChallenge, IQDiagnostic, IQRunAccount, IQRunTarget, IQTargetSummary, IQVerdict } from '@/types'
 
 type Translate = (key: string, params?: Record<string, string | number>) => string
-export type IQDetailRow = { label: string; value: string; raw?: string }
+export type IQDetailRow = { key: string; label: string; value: string }
 const prefix = 'admin.accounts.'
 
 export const IQ_BUILTIN_MODELS = ['gpt-6-astra', 'gpt-6.1-sol'] as const
@@ -88,33 +88,30 @@ export function iqTokenSummary(d: IQDiagnostic | null, t: Translate) {
   return parts.join(' · ')
 }
 
-const technicalKeys = [
-  ['iqRequest', ['protocol', 'http_status', 'request_id', 'first_byte_ms', 'total_ms', 'media_type', 'content_encoding', 'transport', 'retry_visibility', 'error_code', 'error_type', 'retry_after', 'retry_after_unbounded']],
-  ['iqParsing', ['code', 'category', 'limit_kind', 'limit_bytes', 'stage', 'answer_source', 'done_messages', 'terminal_items', 'ignored_items', 'ignored_types', 'event_type', 'event_index', 'bytes_read', 'field', 'offset', 'format_detected', 'parser_version']]
-] as const
+const stringOf = (d: IQDiagnostic | null, key: string) => typeof d?.[key] === 'string' ? d[key] as string : ''
 
-/** Known bounded diagnostic fields only; unknown keys are never rendered. */
-export function iqTechnicalGroups(d: IQDiagnostic | null, t: Translate, exists: (key: string) => boolean) {
+/**
+ * Technical detail rows: request ID, timing, tokens, and failure facts. Reads the compact diagnostic stored for correct
+ * answers and the full one kept for wrong or unknown answers alike; raw codes are translated, never shown beside.
+ */
+export function iqTechnicalRows(attempt: IQAttempt, t: Translate, exists: (key: string) => boolean, formatTime: (value: string) => string): IQDetailRow[] {
+  const d = attempt.diagnostic
   const translated = (group: string, value: string) => exists(prefix + group + '.' + value) ? t(prefix + group + '.' + value) : value
-  const row = (key: string, value: unknown): IQDetailRow[] => {
-    if (value == null || value === '' || (key === 'code' && value === 'correct_answer')) return []
-    const raw = String(value)
-    let display = raw
-    if (key === 'category') display = translated('iqCategories', raw)
-    if (key === 'limit_kind') display = translated('iqLimits', raw)
-    if (key === 'stage') display = translated('iqStages', raw)
-    if (key === 'answer_source') display = translated('iqAnswerSources', raw)
-    if (key === 'retry_visibility') display = translated('iqRetryVisibility', raw)
-    if (key === 'code') display = translated('iqReasons', raw)
-    if (key === 'protocol') display = ({ responses: 'Responses API', chat_completions: 'Chat Completions API' })[raw] ?? raw
-    if (key === 'transport') display = raw === 'http' ? 'HTTP' : raw === 'plugin' ? t(prefix + 'iqPlugin') : raw
-    if (key === 'media_type') display = ({ 'text/event-stream': 'SSE', 'application/json': 'JSON' })[raw] ?? raw
-    if (key === 'first_byte_ms' || key === 'total_ms') display = iqSeconds(Number(value))
-    if (key === 'format_detected' || key === 'retry_after_unbounded') display = t(prefix + (value ? 'iqYes' : 'iqNo'))
-    if (key === 'bytes_read' || key === 'limit_bytes') display = `${Number(value).toLocaleString()} B`
-    return [{ label: t(prefix + 'iqDiagnosticLabels.' + key), value: display, raw }]
-  }
-  return technicalKeys
-    .map(([label, keys]) => ({ label: t(prefix + label), rows: keys.flatMap(key => row(key, d?.[key])) }))
-    .filter(group => group.rows.length)
+  const firstByte = numberOf(d, 'first_byte_ms'), total = numberOf(d, 'total_ms'), status = numberOf(d, 'http_status')
+  const retryAfter = stringOf(d, 'retry_after')
+  // Upstream error code and type come from one closed backend list; only the common ones are worded, the rest stay hidden.
+  const errorKeys = ['error_code', 'error_type'].map(key => stringOf(d, key)).filter(Boolean).map(value => prefix + 'iqUpstreamErrors.' + value).filter(exists)
+  const upstreamError = [...new Set(errorKeys.map(key => t(key)))].join(' · ')
+  const stage = stringOf(d, 'stage'), reason = stringOf(d, 'code') || attempt.reason
+  const failure = attempt.status === 'unknown' ? [stage && translated('iqStages', stage), reason && translated('iqReasons', reason)].filter(Boolean).join(' · ') : ''
+  const rows: [string, string][] = [
+    ['request_id', stringOf(d, 'request_id')],
+    ['latency', [firstByte ? t(prefix + 'iqFirstByteValue', { value: iqSeconds(firstByte) }) : '', total ? t(prefix + 'iqTotalValue', { value: iqSeconds(total) }) : ''].filter(Boolean).join(' / ')],
+    ['tokens', iqTokenSummary(d, t)],
+    ['http_status', status != null && status !== 200 ? String(status) : ''],
+    ['error', upstreamError],
+    ['retry_after', retryAfter ? formatTime(retryAfter) : d?.retry_after_unbounded === true ? t(prefix + 'iqRetryAfterUnbounded') : ''],
+    ['failure', failure]
+  ]
+  return rows.filter(([, value]) => value).map(([key, value]) => ({ key, label: t(prefix + 'iqDiagnosticLabels.' + key), value }))
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	entsql "entgo.io/ent/dialect/sql"
@@ -31,7 +32,7 @@ type IQTargetRepository interface {
 	CompleteIQTarget(context.Context, service.IQTargetClaim, iqcheck.Result, time.Time) (bool, error)
 	SetIQTargetOutboundModel(context.Context, service.IQTargetClaim, string) (bool, error)
 	CleanupIQResults(context.Context, time.Time, int) (int64, error)
-	ListIQResults(context.Context, int64, string, int64, int) (service.IQResultsPage, error)
+	ListIQResults(context.Context, int64, string, service.IQResultsQuery) (service.IQResultsPage, error)
 }
 
 func (r *accountRepository) CleanupIQResults(ctx context.Context, before time.Time, limit int) (int64, error) {
@@ -68,62 +69,94 @@ func applyIQStatusFilter(ctx context.Context, q *dbent.AccountQuery) *dbent.Acco
 	})
 }
 
-func (r *accountRepository) ListIQResults(ctx context.Context, accountID int64, model string, beforeID int64, limit int) (service.IQResultsPage, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 20
+func (r *accountRepository) ListIQResults(ctx context.Context, accountID int64, model string, query service.IQResultsQuery) (service.IQResultsPage, error) {
+	page := service.IQResultsPage{Rounds: make([]service.IQRound, 0), Page: max(1, query.Page), PageSize: query.PageSize}
+	if page.PageSize <= 0 {
+		page.PageSize = 10
 	}
-	args := []any{accountID, limit}
-	where := `account_id=$1 AND started_at >= now()-interval '7 days'`
+	page.PageSize = min(100, page.PageSize)
+	args := []any{accountID}
+	where := `r.account_id=$1 AND r.started_at >= now()-interval '7 days'`
 	if model != "" {
 		args = append(args, model)
-		where += fmt.Sprintf(" AND model=$%d", len(args))
+		where += fmt.Sprintf(" AND r.model=$%d", len(args))
 	}
-	if beforeID > 0 {
-		args = append(args, beforeID)
-		where += fmt.Sprintf(" AND id<$%d", len(args))
+	if query.Filter == "abnormal" {
+		where += ` AND r.finished_at IS NOT NULL AND (r.status<>'smart' OR EXISTS (SELECT 1 FROM account_iq_check_attempts a WHERE a.result_id=r.id AND a.status<>'smart'))`
 	}
-	rows, err := r.sql.QueryContext(ctx, `SELECT id,model,outbound_model,mode,effort,status,reason,started_at,finished_at,prompt_version FROM account_iq_check_results WHERE `+where+` ORDER BY id DESC LIMIT $2`, args...)
+	if query.CountTotal {
+		rows, err := r.sql.QueryContext(ctx, `SELECT count(*) FROM account_iq_check_results r WHERE `+where, args...)
+		if err != nil {
+			return page, err
+		}
+		if !rows.Next() {
+			err = rows.Err()
+			_ = rows.Close()
+			if err == nil {
+				err = sql.ErrNoRows
+			}
+			return page, err
+		}
+		if err := rows.Scan(&page.Total); err != nil {
+			_ = rows.Close()
+			return page, err
+		}
+		if err := rows.Close(); err != nil {
+			return page, err
+		}
+		if page.Total == 0 || int64(page.Page-1) > (page.Total-1)/int64(page.PageSize) {
+			return page, nil
+		}
+	}
+	args = append(args, page.PageSize, int64(page.Page-1)*int64(page.PageSize))
+	rows, err := r.sql.QueryContext(ctx, `SELECT r.id,r.model,r.outbound_model,r.mode,r.effort,r.status,r.reason,r.started_at,r.finished_at,r.prompt_version FROM account_iq_check_results r WHERE `+where+fmt.Sprintf(" ORDER BY r.id DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args)), args...)
 	if err != nil {
-		return service.IQResultsPage{}, err
+		return page, err
 	}
 	defer func() { _ = rows.Close() }()
-	page := service.IQResultsPage{Rounds: make([]service.IQRound, 0)}
+	ids := make([]int64, 0, page.PageSize)
+	positions := make(map[int64]int, page.PageSize)
 	for rows.Next() {
 		var x service.IQRound
 		x.Attempts = make([]service.IQAttempt, 0)
 		if err := rows.Scan(&x.ID, &x.Model, &x.OutboundModel, &x.Mode, &x.Effort, &x.Status, &x.Reason, &x.StartedAt, &x.FinishedAt, &x.PromptVersion); err != nil {
 			return page, err
 		}
-		ar, err := r.sql.QueryContext(ctx, `SELECT attempt_no,effort,challenge,expected,answer,reported_model,model_class,status,reason,latency_ms,diagnostic FROM account_iq_check_attempts WHERE result_id=$1 ORDER BY attempt_no`, x.ID)
-		if err != nil {
-			return page, err
-		}
-		for ar.Next() {
-			var a service.IQAttempt
-			var challenge, diagnostic []byte
-			if err := ar.Scan(&a.AttemptNo, &a.Effort, &challenge, &a.Expected, &a.Answer, &a.ReportedModel, &a.ModelClass, &a.Status, &a.Reason, &a.LatencyMS, &diagnostic); err != nil {
-				_ = ar.Close()
-				return page, err
-			}
-			a.Challenge = json.RawMessage(challenge)
-			a.Diagnostic = json.RawMessage(diagnostic)
-			a.Answer = iqcheck.ExtractAnswer(a.Answer).Value
-			if len(a.Answer) > 64 {
-				a.Answer = ""
-			}
-			x.Attempts = append(x.Attempts, a)
-		}
-		_ = ar.Close()
+		positions[x.ID] = len(page.Rounds)
+		ids = append(ids, x.ID)
 		page.Rounds = append(page.Rounds, x)
 	}
 	if err := rows.Err(); err != nil {
 		return page, err
 	}
-	if len(page.Rounds) == limit {
-		id := page.Rounds[len(page.Rounds)-1].ID
-		page.NextBeforeID = &id
+	if err := rows.Close(); err != nil {
+		return page, err
 	}
-	return page, nil
+	if len(ids) == 0 {
+		return page, nil
+	}
+	attempts, err := r.sql.QueryContext(ctx, `SELECT result_id,attempt_no,effort,challenge,expected,answer,reported_model,model_class,status,reason,latency_ms,diagnostic FROM account_iq_check_attempts WHERE result_id = ANY($1) ORDER BY result_id,attempt_no`, pq.Array(ids))
+	if err != nil {
+		return page, err
+	}
+	defer func() { _ = attempts.Close() }()
+	for attempts.Next() {
+		var id int64
+		var a service.IQAttempt
+		var challenge, diagnostic []byte
+		if err := attempts.Scan(&id, &a.AttemptNo, &a.Effort, &challenge, &a.Expected, &a.Answer, &a.ReportedModel, &a.ModelClass, &a.Status, &a.Reason, &a.LatencyMS, &diagnostic); err != nil {
+			return page, err
+		}
+		a.Challenge = json.RawMessage(challenge)
+		a.Diagnostic = json.RawMessage(diagnostic)
+		a.Answer = iqcheck.ExtractAnswer(a.Answer).Value
+		if len(a.Answer) > 64 {
+			a.Answer = ""
+		}
+		round := &page.Rounds[positions[id]]
+		round.Attempts = append(round.Attempts, a)
+	}
+	return page, attempts.Err()
 }
 
 func iqDatabaseTime(ctx context.Context, c *dbent.Client) (time.Time, error) {
@@ -270,7 +303,25 @@ func (r *accountRepository) AddIQTargetAttempt(ctx context.Context, claim servic
 	}
 	diagnostic := []byte("null")
 	if result.Diagnostic != nil {
-		diagnostic = result.Diagnostic.JSON()
+		if result.Status == "smart" {
+			d := result.Diagnostic.Bounded()
+			compact := struct {
+				RequestID       string                           `json:"request_id"`
+				HTTPStatus      int                              `json:"http_status"`
+				FirstByteMS     int64                            `json:"first_byte_ms"`
+				TotalMS         int64                            `json:"total_ms"`
+				InputTokens     int64                            `json:"input_tokens"`
+				OutputTokens    int64                            `json:"output_tokens"`
+				ReasoningTokens int64                            `json:"reasoning_tokens"`
+				ModelIdentity   *iqcheck.ModelIdentityDiagnostic `json:"model_identity,omitempty"`
+			}{d.RequestID, d.HTTPStatus, d.FirstByteMS, d.TotalMS, d.InputTokens, d.OutputTokens, d.ReasoningTokens, d.ModelIdentity}
+			diagnostic, err = json.Marshal(compact)
+			if err != nil {
+				return err
+			}
+		} else {
+			diagnostic = result.Diagnostic.JSON()
+		}
 	}
 	answer := ""
 	if result.NormalizedAnswer != nil {
@@ -398,7 +449,7 @@ func (r *accountRepository) CompleteIQTarget(ctx context.Context, claim service.
 	if result.Status == "degraded" {
 		newGate = claim.OutboundModel
 	}
-	sched := iqcheck.NextSchedule(completedAt, time.Duration(interval)*time.Minute, claim.DegradedStreak, claim.FailureStreak, result, 0)
+	sched := iqcheck.NextSchedule(completedAt, time.Duration(interval)*time.Minute, claim.DegradedStreak, claim.FailureStreak, result, time.Duration(rand.Int64N(int64(min(30*time.Second, time.Duration(interval)*time.Minute/20))+1)))
 	next := completedAt.Add(time.Duration(interval) * time.Minute)
 	if sched.NextRunAt != nil {
 		next = *sched.NextRunAt
@@ -431,7 +482,7 @@ func (r *accountRepository) ListIQTargetSummaries(ctx context.Context, ids []int
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := r.sql.QueryContext(ctx, `SELECT account_id,model,verdict,enabled,verdict_at,last_run_at,next_run_at,paused_reason,lease_until,manual_requested_at,gate_model FROM account_iq_targets WHERE account_id = ANY($1) ORDER BY account_id,model`, pq.Array(ids))
+	rows, err := r.sql.QueryContext(ctx, `SELECT t.account_id,t.model,t.verdict,t.enabled,t.verdict_at,t.last_run_at,t.next_run_at,t.paused_reason,t.lease_until,t.manual_requested_at,t.gate_model,(a.deleted_at IS NULL AND a.platform='openai' AND a.status='active' AND a.schedulable AND COALESCE(a.rate_limit_reset_at,'-infinity') <= now() AND COALESCE(a.overload_until,'-infinity') <= now() AND COALESCE(a.temp_unschedulable_until,'-infinity') <= now()) FROM account_iq_targets t JOIN accounts a ON a.id=t.account_id WHERE t.account_id = ANY($1) ORDER BY t.account_id,t.model`, pq.Array(ids))
 	if err != nil {
 		return nil, err
 	}
@@ -441,9 +492,10 @@ func (r *accountRepository) ListIQTargetSummaries(ctx context.Context, ids []int
 		var id int64
 		var x domain.IQTargetSummary
 		var paused string
+		var schedulable bool
 		var lease, manual *time.Time
 		var gate sql.NullString
-		if err := rows.Scan(&id, &x.Model, &x.Verdict, &x.Enabled, &x.VerdictAt, &x.LastRunAt, &x.NextRunAt, &paused, &lease, &manual, &gate); err != nil {
+		if err := rows.Scan(&id, &x.Model, &x.Verdict, &x.Enabled, &x.VerdictAt, &x.LastRunAt, &x.NextRunAt, &paused, &lease, &manual, &gate, &schedulable); err != nil {
 			return nil, err
 		}
 		x.GateActive = x.Enabled && x.Verdict == "degraded" && gate.Valid && gate.String != ""
@@ -452,7 +504,7 @@ func (r *accountRepository) ListIQTargetSummaries(ctx context.Context, ids []int
 			x.State = "running"
 		case manual != nil:
 			x.State = "queued"
-		case x.Enabled && paused != "":
+		case x.Enabled && (paused != "" || !schedulable):
 			x.State = "paused"
 		case x.Enabled && x.NextRunAt != nil && !x.NextRunAt.After(now):
 			x.State = "queued"
@@ -465,7 +517,7 @@ func (r *accountRepository) ListIQTargetSummaries(ctx context.Context, ids []int
 }
 
 func (r *accountRepository) ListIQTargetViews(ctx context.Context, id int64) ([]domain.IQTargetView, error) {
-	rows, err := r.sql.QueryContext(ctx, `SELECT model,enabled,reasoning_effort,interval_minutes,timeout_seconds,verdict,verdict_at,gate_model,last_run_at,last_result,last_reason,next_run_at,not_before,paused_reason,lease_until,manual_requested_at,COALESCE((SELECT id FROM account_iq_check_results r WHERE r.account_id=account_iq_targets.account_id AND r.model=account_iq_targets.model AND r.finished_at IS NULL ORDER BY r.id DESC LIMIT 1),0),COALESCE((SELECT count(*) FROM account_iq_check_attempts a JOIN account_iq_check_results r ON r.id=a.result_id WHERE r.account_id=account_iq_targets.account_id AND r.model=account_iq_targets.model AND r.finished_at IS NULL),0) FROM account_iq_targets WHERE account_id=$1 ORDER BY model`, id)
+	rows, err := r.sql.QueryContext(ctx, `SELECT t.model,t.enabled,t.reasoning_effort,t.interval_minutes,t.timeout_seconds,t.verdict,t.verdict_at,t.gate_model,t.last_run_at,t.last_result,t.last_reason,t.next_run_at,t.not_before,t.paused_reason,t.lease_until,t.manual_requested_at,COALESCE((SELECT id FROM account_iq_check_results r WHERE r.account_id=t.account_id AND r.model=t.model AND r.finished_at IS NULL ORDER BY r.id DESC LIMIT 1),0),COALESCE((SELECT count(*) FROM account_iq_check_attempts a JOIN account_iq_check_results r ON r.id=a.result_id WHERE r.account_id=t.account_id AND r.model=t.model AND r.finished_at IS NULL),0),(a.deleted_at IS NULL AND a.platform='openai' AND a.status='active' AND a.schedulable AND COALESCE(a.rate_limit_reset_at,'-infinity') <= now() AND COALESCE(a.overload_until,'-infinity') <= now() AND COALESCE(a.temp_unschedulable_until,'-infinity') <= now()) FROM account_iq_targets t JOIN accounts a ON a.id=t.account_id WHERE t.account_id=$1 ORDER BY t.model`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -477,7 +529,8 @@ func (r *accountRepository) ListIQTargetViews(ctx context.Context, id int64) ([]
 		var lease, manual *time.Time
 		var round int64
 		var attempts int
-		if err := rows.Scan(&x.Model, &x.Enabled, &x.ReasoningEffort, &x.IntervalMinutes, &x.TimeoutSeconds, &x.Verdict, &x.VerdictAt, &gate, &x.LastRunAt, &x.LastResult, &x.LastReason, &x.NextRunAt, &x.NotBefore, &x.PausedReason, &lease, &manual, &round, &attempts); err != nil {
+		var schedulable bool
+		if err := rows.Scan(&x.Model, &x.Enabled, &x.ReasoningEffort, &x.IntervalMinutes, &x.TimeoutSeconds, &x.Verdict, &x.VerdictAt, &gate, &x.LastRunAt, &x.LastResult, &x.LastReason, &x.NextRunAt, &x.NotBefore, &x.PausedReason, &lease, &manual, &round, &attempts, &schedulable); err != nil {
 			return nil, err
 		}
 		if gate.Valid {
@@ -504,8 +557,11 @@ func (r *accountRepository) ListIQTargetViews(ctx context.Context, id int64) ([]
 			x.State = "running"
 		case manual != nil:
 			x.State = "queued"
-		case x.PausedReason != "":
+		case x.Enabled && x.PausedReason != "":
 			x.State = "paused"
+		case x.Enabled && !schedulable:
+			x.State = "paused"
+			x.PausedReason = "account_unschedulable"
 		case x.Enabled && x.NextRunAt != nil && !x.NextRunAt.After(time.Now().UTC()):
 			x.State = "queued"
 		default:

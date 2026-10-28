@@ -82,9 +82,9 @@ func (h *AccountIQHandler) Results(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	before, _ := strconv.ParseInt(c.Query("before_id"), 10, 64)
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	page, e := h.service.ResultsPage(c.Request.Context(), id, c.Query("model"), before, limit)
+	pageNumber, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+	page, e := h.service.ResultsPage(c.Request.Context(), id, c.Query("model"), max(1, pageNumber), min(50, max(1, pageSize)), c.Query("filter"))
 	if e != nil {
 		response.ErrorFrom(c, e)
 		return

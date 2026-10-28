@@ -32,7 +32,7 @@ func accountProbeHealth(a *Account, now time.Time) (string, time.Time) {
 }
 
 func iqTargetMaxConcurrency() int {
-	n := 2
+	n := 8
 	if v, err := strconv.Atoi(os.Getenv("IQ_CHECK_MAX_CONCURRENCY")); err == nil && v >= 1 && v <= 10 {
 		n = v
 	}

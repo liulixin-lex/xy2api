@@ -21,10 +21,13 @@ describe('IQ check configuration API', () => {
     expect(await runIQCheckBatch([8, 9])).toEqual([{ account_id: 9, reason: 'not_openai', targets: [] }])
     expect(post).toHaveBeenLastCalledWith('/admin/accounts/iq-check/run', { account_ids: [8, 9] })
   })
-  it('pages results per model', async () => {
-    get.mockResolvedValue({ data: { rounds: [], next_before_id: null } })
-    await listIQResults(8, { model: 'gpt-6-astra', before_id: 41 })
-    expect(get).toHaveBeenLastCalledWith('/admin/accounts/8/iq-check/results', { params: { model: 'gpt-6-astra', limit: 20, before_id: 41 }, signal: undefined })
+  it('pages results per model and sends the filter only when narrowing', async () => {
+    const page = { rounds: [], total: 0, page: 2, page_size: 10 }
+    get.mockResolvedValue({ data: page })
+    expect(await listIQResults(8, { model: 'gpt-6-astra', page: 2, page_size: 10, filter: '' })).toEqual(page)
+    expect(get).toHaveBeenLastCalledWith('/admin/accounts/8/iq-check/results', { params: { model: 'gpt-6-astra', page: 2, page_size: 10 }, signal: undefined })
+    await listIQResults(8, { model: 'gpt-6-astra', page: 1, page_size: 10, filter: 'abnormal' })
+    expect(get).toHaveBeenLastCalledWith('/admin/accounts/8/iq-check/results', { params: { model: 'gpt-6-astra', page: 1, page_size: 10, filter: 'abnormal' }, signal: undefined })
   })
   it('uses the read-only IQ catalog endpoint with cancellation', async () => {
     const catalog = { models: [], fetched_at: null, from_cache: false, stale: false, error: 'model_discovery_failed' }

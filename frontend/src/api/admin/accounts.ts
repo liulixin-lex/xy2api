@@ -8,6 +8,7 @@ import type { OpenAIReferralRefreshResult, OpenAIReferralSendResult } from '@/ty
 import type {
   Account,
   IQModelCatalog,
+  IQRoundFilter,
   IQRoundPage,
   IQRunAccount,
   IQRunTarget,
@@ -107,8 +108,9 @@ export async function runIQCheckBatch(accountIds: number[], models?: string[]) {
   return data.accounts
 }
 
-export async function listIQResults(id: number, query: { model: string; before_id?: number | null; limit?: number }, signal?: AbortSignal) {
-  const params = { model: query.model, limit: query.limit ?? 20, ...(query.before_id ? { before_id: query.before_id } : {}) }
+export async function listIQResults(id: number, query: { model: string; page: number; page_size: number; filter: IQRoundFilter }, signal?: AbortSignal) {
+  const { filter, ...rest } = query
+  const params = filter ? query : rest
   const { data } = await apiClient.get<IQRoundPage>(`/admin/accounts/${id}/iq-check/results`, { params, signal })
   return data
 }
