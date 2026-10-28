@@ -42,6 +42,9 @@ func (a *Account) IsSchedulableForModelWithContext(ctx context.Context, requeste
 	if !a.IsSchedulable() {
 		return false
 	}
+	if a.modelUnsupportedRateLimitActive(ctx, requestedModel, time.Now()) {
+		return false
+	}
 	if a.isModelRateLimitedWithContext(ctx, requestedModel) {
 		if a.Platform == PlatformOpenAI && resilienceLastResortGate(ctx) && !iqGateBlocksRequest(a, requestedModel, false) && a.IsSchedulable() && a.GetRateLimitRemainingTimeWithContext(ctx, requestedModel) <= resilience.HardRateLimitThreshold {
 			return true

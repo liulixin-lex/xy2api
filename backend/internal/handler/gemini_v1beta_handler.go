@@ -20,6 +20,7 @@ import (
 	pkghttputil "github.com/liulixin-lex/xy2api/internal/pkg/httputil"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ip"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
 
@@ -595,6 +596,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 					zap.Int64("account_id", account.ID),
 					zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 				)
+				c.Header("Retry-After", "2")
 				googleError(c, http.StatusTooManyRequests, "Too many pending requests, please retry later")
 				return
 			}
@@ -827,6 +829,18 @@ func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverE
 
 	// 使用默认的错误映射
 	status, message := mapGeminiUpstreamError(statusCode)
+	classification := service.ClassifyFailoverError(failoverErr)
+	switch classification.Category {
+	case resilience.CategoryBalance, resilience.CategoryRateLimit, resilience.CategoryRateLimitReset,
+		resilience.CategoryCapacityShed, resilience.CategoryTransient,
+		resilience.CategoryFirstOutputTimeout, resilience.CategoryStall:
+		status = http.StatusServiceUnavailable
+		_, message = mapGeminiUpstreamError(status)
+		if retryAfter := failoverErr.ResponseHeaders.Get("Retry-After"); retryAfter != "" {
+			c.Header("Retry-After", retryAfter)
+		}
+		status = applyExhaustedRetryHint(c, h.gatewayService, status)
+	}
 	googleError(c, status, message)
 }
 

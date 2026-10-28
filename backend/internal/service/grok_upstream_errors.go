@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
 
@@ -201,6 +202,12 @@ func (s *OpenAIGatewayService) shouldFailoverGrokUpstreamError(statusCode int, r
 	if isGrokContentPolicyRejection(statusCode, responseBody) {
 		return false
 	}
+	if isOpenAIRequestBodyTooLargeError(statusCode, extractUpstreamErrorMessage(responseBody), responseBody) {
+		return true
+	}
+	if shouldFailoverClassifiedUpstreamError(statusCode, nil, responseBody) {
+		return true
+	}
 	// A 422 emitted by xAI's ModelInput decoder is account/runtime compatibility,
 	// not quota exhaustion. Another account may run a different upstream build,
 	// so fail over without applying an account cooldown.
@@ -213,6 +220,18 @@ func (s *OpenAIGatewayService) shouldFailoverGrokUpstreamError(statusCode int, r
 		return decision.ShouldFailover
 	}
 	return s.shouldFailoverUpstreamError(statusCode)
+}
+
+func shouldFailoverClassifiedUpstreamError(statusCode int, headers http.Header, responseBody []byte) bool {
+	result := classifyUpstreamHTTP(statusCode, headers, responseBody, "")
+	switch result.Category {
+	case resilience.CategoryBalance, resilience.CategoryModelUnsupported:
+		return true
+	case resilience.CategoryAuth:
+		return statusCode == http.StatusPaymentRequired && result.Reason == "deactivated_workspace"
+	default:
+		return false
+	}
 }
 
 func isGrokDecoderCompatibilityError(statusCode int, responseBody []byte) bool {

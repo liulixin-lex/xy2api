@@ -106,6 +106,17 @@ func TestBudgetSameAccountRetryOncePerAccount(t *testing.T) {
 	require.Equal(t, 1, fs.SwitchCount)
 }
 
+func TestHardModelUnsupportedDoesNotRetrySameAccount(t *testing.T) {
+	withHandlerResilience(t, nil)
+	ctx := budgetCtx(t, resilience.KindText, 7)
+	err := &service.UpstreamFailoverError{
+		StatusCode:   http.StatusBadRequest,
+		ResponseBody: []byte(`{"error":{"message":"unknown provider for model x"}}`),
+	}
+	require.True(t, resilienceAccountLevelFailure(err, time.Millisecond))
+	require.False(t, sameAccountRetryAllowedCtx(ctx, 1, err, 0, 3))
+}
+
 func TestBudgetUpstreamRetryAfterBeyondCapSwitches(t *testing.T) {
 	// Spec: upstream asks for 120 s -> no wait on that account, switch.
 	withHandlerResilience(t, nil)

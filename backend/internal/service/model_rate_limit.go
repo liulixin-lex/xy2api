@@ -233,6 +233,34 @@ func (a *Account) modelRateLimitReason(scope string) string {
 	return reason
 }
 
+func (a *Account) modelUnsupportedRateLimitActive(ctx context.Context, requestedModel string, now time.Time) bool {
+	if a == nil || requestedModel == "" {
+		return false
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	for _, key := range a.modelRateLimitKeysForRequest(ctx, requestedModel) {
+		if !isModelUnsupportedRateLimitReason(a.modelRateLimitReason(key)) {
+			continue
+		}
+		if until := a.modelRateLimitResetAt(key); until != nil && now.Before(*until) {
+			return true
+		}
+	}
+	return false
+}
+
+func isModelUnsupportedRateLimitReason(reason string) bool {
+	switch strings.TrimSpace(reason) {
+	case upstreamModelNotFoundReason, upstreamModelUnsupported400Reason,
+		upstreamModelNotFound401Reason, upstreamCodexPlanGatedModelReason:
+		return true
+	default:
+		return false
+	}
+}
+
 func setAccountModelRateLimitSnapshot(account *Account, scope string, resetAt time.Time, reason string, now time.Time) {
 	if account == nil || strings.TrimSpace(scope) == "" {
 		return

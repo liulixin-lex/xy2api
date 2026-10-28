@@ -37,14 +37,20 @@ func TestIsUpstreamModelNotFoundError(t *testing.T) {
 			want:       false,
 		},
 		{
+			name:       "400 structured missing model message",
+			statusCode: http.StatusBadRequest,
+			body:       []byte(`{"error":{"type":"invalid_request_error","message":"unknown provider for model x"}}`),
+			want:       true,
+		},
+		{
 			name:       "404 arbitrary body is not model specific",
 			statusCode: http.StatusNotFound,
 			body:       []byte(`404 page not found`),
 			want:       false,
 		},
 		{
-			name:       "non 404 does not match",
-			statusCode: http.StatusBadRequest,
+			name:       "wrong status does not match",
+			statusCode: http.StatusServiceUnavailable,
 			body:       []byte(`{"error":{"message":"model not found"}}`),
 			want:       false,
 		},
@@ -124,10 +130,11 @@ func TestIsOpenAICompatibleModelNotFound400(t *testing.T) {
 		{name: "model not found", body: `{"error":{"message":"Model not found: claude-x"}}`, want: true},
 		{name: "unknown model", body: `{"error":{"message":"unknown model: claude-x"}}`, want: true},
 		{name: "model unsupported", body: `{"error":{"message":"The requested model is not supported"}}`, want: true},
-		{name: "plain text compatible gateway", body: `unknown provider for model claude-x`, want: true},
+		{name: "plain text is ignored", body: `unknown provider for model claude-x`, want: false},
 		{name: "invalid parameter remains terminal", body: `{"error":{"code":"invalid_request_error","message":"Invalid value for temperature"}}`, want: false},
-		{name: "structured non-matching code overrides model not found message", body: `{"error":{"code":"invalid_request_error","message":"Model not found: claude-x"}}`, want: false},
+		{name: "generic request error code allows structured model message", body: `{"error":{"code":"invalid_request_error","message":"Model not found: claude-x"}}`, want: true},
 		{name: "structured non-matching error code overrides unsupported message", body: `{"error":{"code":"upstream_error","message":"The requested model is not supported"}}`, want: false},
+		{name: "param prevents text matching", body: `{"error":{"param":"tools","message":"The requested model is not supported"}}`, want: false},
 		{name: "echoed phrase is ignored", body: `{"error":{"message":"Invalid request"},"echo":"model not found"}`, want: false},
 	}
 

@@ -111,7 +111,8 @@ func resilienceAccountLevelFailure(failoverErr *service.UpstreamFailoverError, a
 	if attempt >= resilienceSlowAttempt {
 		return true
 	}
-	return service.ClassifyFailoverError(failoverErr).Hard()
+	result := service.ClassifyFailoverError(failoverErr)
+	return result.Category == resilience.CategoryModelUnsupported || result.Hard()
 }
 
 // resilienceRetryDelay jitters a back-off by ±20 % and bounds it by the
