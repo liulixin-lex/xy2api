@@ -497,6 +497,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore, useAppStore } from '@/stores'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'
@@ -537,8 +538,10 @@ const modelPlazaRequiresAuth = computed(
 const showModelPlazaEntry = computed(
   () => modelPlazaEnabled.value && (isAuthenticated.value || !modelPlazaRequiresAuth.value),
 )
-const isAdmin = computed(() => authStore.isAdmin)
-const dashboardPath = computed(() => isAdmin.value ? '/admin/dashboard' : '/dashboard')
+const adminAccessStore = useAdminAccessStore()
+const isAdmin = computed(() => authStore.canAccessAdmin)
+if (isAdmin.value && !authStore.isAdmin) void adminAccessStore.ensureLoaded()
+const dashboardPath = computed(() => authStore.isAdmin ? '/admin/dashboard' : isAdmin.value ? adminAccessStore.adminHomePath : '/dashboard')
 const userInitial = computed(() => {
   const user = authStore.user
   if (!user || !user.email) return ''

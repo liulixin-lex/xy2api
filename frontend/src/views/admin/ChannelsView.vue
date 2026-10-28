@@ -39,7 +39,7 @@
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
-            <button @click="openCreateDialog" class="btn btn-primary">
+            <button v-if="canManage" @click="openCreateDialog" class="btn btn-primary">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.channels.createChannel', 'Create Channel') }}
             </button>
@@ -68,6 +68,8 @@
           <template #cell-status="{ row }">
             <Toggle
               :modelValue="row.status === 'active'"
+              :disabled="!canToggleStatus(row)"
+              class="disabled:cursor-not-allowed disabled:opacity-50"
               @update:modelValue="toggleChannelStatus(row)"
             />
           </template>
@@ -99,6 +101,7 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <button
+                v-if="canManage"
                 @click="openEditDialog(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
@@ -106,6 +109,7 @@
                 <span class="text-xs">{{ t('common.edit', 'Edit') }}</span>
               </button>
               <button
+                v-if="canManage && has('users.balance_adjust')"
                 @click="handleDelete(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
@@ -119,7 +123,7 @@
             <EmptyState
               :title="t('admin.channels.noChannelsYet', 'No Channels Yet')"
               :description="t('admin.channels.createFirstChannel', 'Create your first channel to manage model pricing')"
-              :action-text="t('admin.channels.createChannel', 'Create Channel')"
+              :action-text="canManage ? t('admin.channels.createChannel', 'Create Channel') : undefined"
               @action="openCreateDialog"
             />
           </template>
@@ -264,6 +268,7 @@
                   </p>
                 </div>
                 <Toggle
+                  :disabled="accountStatsPricingLocked"
                   :modelValue="form.apply_pricing_to_account_stats"
                   @update:modelValue="form.apply_pricing_to_account_stats = $event"
                 />
@@ -306,7 +311,7 @@
                     <input
                       type="checkbox"
                       :checked="section.group_ids.includes(group.id)"
-                      :disabled="isGroupInOtherChannel(group.id, section.platform)"
+                      :disabled="isGroupInOtherChannel(group.id, section.platform) || !has('users.balance_adjust')"
                       class="h-3 w-3 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                       @change="toggleGroupInSection(sIdx, group.id)"
                     />
@@ -457,7 +462,7 @@
             </div>
 
             <!-- Account Stats Pricing Rules (per-platform, always visible) -->
-            <div class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-700 space-y-3">
+            <fieldset :disabled="accountStatsPricingLocked" :inert="accountStatsPricingLocked" data-testid="account-stats-pricing" class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-700 space-y-3">
               <div class="flex items-center justify-between">
                 <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">
                   {{ t('admin.channels.form.accountStatsPricingRules') }}
@@ -586,7 +591,7 @@
                   </div>
                 </div>
               </div>
-            </div>
+            </fieldset>
           </div>
         </form>
       </div>
@@ -654,13 +659,22 @@ import Toggle from '@/components/common/Toggle.vue'
 import PricingEntryCard from '@/components/admin/channel/PricingEntryCard.vue'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useKeyedDebouncedSearch } from '@/composables/useKeyedDebouncedSearch'
+import { useAdminPermission } from '@/composables/useAdminPermission'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { canManage, has } = useAdminPermission('channels')
+const adminAccess = useAdminAccessStore()
 
 // Web Search global enabled state (loaded once on mount)
 const webSearchGlobalEnabled = ref(false)
 async function loadWebSearchGlobalState() {
+  if (adminAccess.isOperator) {
+    await adminAccess.ensureLoaded()
+    webSearchGlobalEnabled.value = adminAccess.settings?.web_search_emulation_enabled === true
+    return
+  }
   try {
     const cfg = await adminAPI.settings.getWebSearchEmulationConfig()
     webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
@@ -1353,6 +1367,10 @@ function handleSort(key: string, order: 'asc' | 'desc') {
   loadChannels()
 }
 
+// A grouped channel uses these rules for billing too (R8-5).
+const accountStatsPricingLocked = computed(() => !has('users.balance_adjust') && (editingChannel.value?.group_ids.length ?? 0) > 0)
+let originalAccountStatsPricing = ''
+
 // ── Dialog ──
 function resetForm() {
   form.name = ''
@@ -1389,6 +1407,8 @@ async function openEditDialog(channel: Channel) {
 
   // Distribute channel-level rules into per-platform sections
   distributeRulesToPlatforms(channel.account_stats_pricing_rules || [])
+
+  originalAccountStatsPricing = JSON.stringify(accountStatsRulesToAPI())
 
   // Populate ruleAccountNameCache for existing rule accounts
   await populateRuleAccountNameCache()
@@ -1619,6 +1639,15 @@ async function handleSubmit() {
         apply_pricing_to_account_stats: form.apply_pricing_to_account_stats,
         account_stats_pricing_rules: accountStatsRulesToAPI()
       }
+      // Omit unchanged projections: distributing rules into platform sections can normalize them.
+      if (!has('users.balance_adjust')) {
+        if (accountStatsPricingLocked.value || form.apply_pricing_to_account_stats === !!editingChannel.value.apply_pricing_to_account_stats) {
+          delete req.apply_pricing_to_account_stats
+        }
+        if (accountStatsPricingLocked.value || JSON.stringify(accountStatsRulesToAPI()) === originalAccountStatsPricing) {
+          delete req.account_stats_pricing_rules
+        }
+      }
       await adminAPI.channels.update(editingChannel.value.id, req)
       appStore.showSuccess(t('admin.channels.updateSuccess', 'Channel updated'))
     } else {
@@ -1649,7 +1678,13 @@ async function handleSubmit() {
 }
 
 // ── Toggle status ──
+// A grouped channel's status counts as a price field without "Adjust balance".
+function canToggleStatus(channel: Channel) {
+  return canManage.value && (has('users.balance_adjust') || (channel.group_ids || []).length === 0)
+}
+
 async function toggleChannelStatus(channel: Channel) {
+  if (!canToggleStatus(channel)) return
   const newStatus = channel.status === 'active' ? 'disabled' : 'active'
   try {
     await adminAPI.channels.update(channel.id, { status: newStatus })

@@ -30,7 +30,7 @@
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
-            <button @click="openCreateDialog" class="btn btn-primary">
+            <button v-if="canManage" @click="openCreateDialog" class="btn btn-primary">
               <Icon name="plus" size="md" class="mr-1" />
               {{ t('admin.announcements.createAnnouncement') }}
             </button>
@@ -129,6 +129,7 @@
                 <Icon name="chartBar" size="sm" />
               </button>
               <button
+                v-if="canManage"
                 @click="openEditDialog(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-600 dark:hover:text-gray-300"
                 :title="t('common.edit')"
@@ -136,6 +137,7 @@
                 <Icon name="edit" size="sm" />
               </button>
               <button
+                v-if="canManage"
                 @click="handleDelete(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
                 :title="t('common.delete')"
@@ -149,7 +151,7 @@
             <EmptyState
               :title="t('empty.noData')"
               :description="t('admin.announcements.createFirstAnnouncement')"
-              :action-text="t('admin.announcements.createAnnouncement')"
+              :action-text="canManage ? t('admin.announcements.createAnnouncement') : undefined"
               @action="openCreateDialog"
             />
           </template>
@@ -275,6 +277,7 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 
 import AnnouncementTargetingEditor from '@/components/admin/announcements/AnnouncementTargetingEditor.vue'
 import AnnouncementReadStatusDialog from '@/components/admin/announcements/AnnouncementReadStatusDialog.vue'
@@ -282,6 +285,7 @@ import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { canManage } = useAdminPermission('announcements')
 
 const announcements = ref<Announcement[]>([])
 const loading = ref(false)

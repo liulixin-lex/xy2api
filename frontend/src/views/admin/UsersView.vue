@@ -29,6 +29,7 @@
                 :options="[
                   { value: '', label: t('admin.users.allRoles') },
                   { value: 'admin', label: t('admin.users.admin') },
+                  { value: 'operator', label: t('admin.users.operator') },
                   { value: 'user', label: t('admin.users.user') }
                 ]"
                 @change="applyFilter"
@@ -233,6 +234,7 @@
               </div>
               <!-- Attributes Config Button -->
               <button
+                v-if="canManage"
                 @click="showAttributesModal = true"
                 class="btn btn-secondary px-2 md:px-3"
                 :title="t('admin.users.attributes.configButton')"
@@ -243,7 +245,7 @@
             </div>
 
             <button
-              v-if="selectedCount > 0"
+              v-if="canManage && selectedCount > 0"
               class="btn btn-secondary flex-1 md:flex-initial"
               data-test="bulk-edit-limits"
               @click="showBulkEditModal = true"
@@ -253,7 +255,7 @@
             </button>
 
             <button
-              v-if="selectedCount > 0"
+              v-if="canManage && selectedCount > 0"
               class="btn btn-secondary flex-1 md:flex-initial"
               data-test="bulk-disable-users"
               :disabled="bulkStatusUpdating"
@@ -264,7 +266,7 @@
             </button>
 
             <button
-              v-if="selectedCount > 0"
+              v-if="canManage && selectedCount > 0"
               class="btn btn-secondary flex-1 md:flex-initial"
               data-test="bulk-enable-users"
               :disabled="bulkStatusUpdating"
@@ -275,7 +277,7 @@
             </button>
 
             <button
-              v-if="selectedCount > 0"
+              v-if="canManage && selectedCount > 0"
               class="btn btn-danger flex-1 md:flex-initial"
               data-test="bulk-delete-users"
               :disabled="bulkDeleting"
@@ -286,7 +288,7 @@
             </button>
 
             <!-- Create User Button (full width on mobile, auto width on desktop) -->
-            <button @click="showCreateModal = true" class="btn btn-primary flex-1 md:flex-initial">
+            <button v-if="canManage" @click="showCreateModal = true" class="btn btn-primary flex-1 md:flex-initial">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.users.createUser') }}
             </button>
@@ -304,6 +306,7 @@
           selectable
           :selected-keys="selectedIds"
           :selection-label="getUserSelectionLabel"
+          :row-selectable="canSelectUser"
           :actions-count="7"
           :server-side-sort="true"
           default-sort-key="created_at"
@@ -359,7 +362,7 @@
           </template>
 
           <template #cell-role="{ value }">
-            <span :class="['badge', value === 'admin' ? 'badge-purple' : 'badge-gray']">
+            <span :class="['badge', value === 'admin' ? 'badge-purple' : value === 'operator' ? 'badge-primary' : 'badge-gray']">
               {{ t('admin.users.roles.' + value) }}
             </span>
           </template>
@@ -459,6 +462,7 @@
               <div class="group relative">
                 <button
                   class="font-medium text-gray-900 underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:text-primary-600 dark:text-white dark:decoration-dark-500 dark:hover:text-primary-400"
+                  :disabled="!canReadRow(row)"
                   @click="handleBalanceHistory(row)"
                 >
                   ${{ value.toFixed(2) }}
@@ -470,6 +474,7 @@
                 </div>
               </div>
               <button
+                v-if="canAdjustBalanceOf(row)"
                 @click.stop="handleDeposit(row)"
                 class="rounded px-2 py-0.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
                 :title="t('admin.users.deposit')"
@@ -484,6 +489,7 @@
               type="button"
               class="block text-left underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:decoration-primary-400 dark:decoration-dark-500"
               :title="t('admin.users.platformQuota.cellColumnTooltip')"
+              :disabled="!canReadRow(row)"
               @click="handlePlatformQuota(row)"
             >
               <UserPlatformQuotaCell :quotas="platformQuotaStats[row.id]" />
@@ -636,6 +642,7 @@
             <div class="flex items-center gap-1">
               <!-- Edit Button -->
               <button
+                v-if="isSuperAdmin || canActOn(row)"
                 @click="handleEdit(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
@@ -645,7 +652,7 @@
 
               <!-- Toggle Status Button (not for admin) -->
               <button
-                v-if="row.role !== 'admin'"
+                v-if="canActOn(row)"
                 @click="handleToggleStatus(row)"
                 :class="[
                   'flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors',
@@ -661,6 +668,7 @@
 
               <!-- More Actions Menu Trigger -->
               <button
+                v-if="canReadRow(row)"
                 @click="openActionMenu(row, $event)"
                 class="action-menu-trigger flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white"
                 :class="{ 'bg-gray-100 text-gray-900 dark:bg-dark-700 dark:text-white': activeMenuId === row.id }"
@@ -675,7 +683,7 @@
             <EmptyState
               :title="t('admin.users.noUsersYet')"
               :description="t('admin.users.createFirstUser')"
-              :action-text="t('admin.users.createUser')"
+              :action-text="canManage ? t('admin.users.createUser') : undefined"
               @action="showCreateModal = true"
             />
           </template>
@@ -716,6 +724,7 @@
 
               <!-- Allowed Groups -->
               <button
+                v-if="isSuperAdmin || canActOn(user)"
                 @click="handleAllowedGroups(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -727,6 +736,7 @@
 
               <!-- Deposit -->
               <button
+                v-if="canAdjustBalanceOf(user)"
                 @click="handleDeposit(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -736,6 +746,7 @@
 
               <!-- Withdraw -->
               <button
+                v-if="canAdjustBalanceOf(user)"
                 @click="handleWithdraw(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -747,6 +758,7 @@
 
               <!-- Platform Quotas -->
               <button
+                v-if="isSuperAdmin || canActOn(user)"
                 @click="handlePlatformQuota(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -767,7 +779,7 @@
 
               <!-- Delete (not for admin) -->
               <button
-                v-if="user.role !== 'admin'"
+                v-if="canActOn(user)"
                 @click="handleDelete(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
               >
@@ -828,6 +840,8 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { formatDateTime } from '@/utils/format'
@@ -866,6 +880,18 @@ import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryM
 import GroupReplaceModal from '@/components/admin/user/GroupReplaceModal.vue'
 
 const appStore = useAppStore()
+const authStore = useAuthStore()
+const { canManage, has, isSuperAdmin } = useAdminPermission('users')
+// Super admins act on everyone except admins. Operators with users:manage act
+// on plain users other than themselves (the backend target rule).
+const canActOn = (row: AdminUser) =>
+  isSuperAdmin.value ? row.role !== 'admin' : canManage.value && row.role === 'user' && row.id !== authStore.user?.id
+const canSelectUser = (row: AdminUser) => isSuperAdmin.value || canActOn(row)
+// Operators can only open plain users' details (never admins, operators or themselves).
+const canReadRow = (row: AdminUser) => isSuperAdmin.value || row.role === 'user'
+// Super admins keep deposit and withdraw on every row; operators need the row and "Adjust balance".
+const canAdjustBalanceOf = (row: AdminUser) =>
+  isSuperAdmin.value || (canActOn(row) && has('users.balance_adjust'))
 
 // Generate dynamic attribute columns from enabled definitions
 const attributeColumns = computed<Column[]>(() =>
@@ -1357,7 +1383,13 @@ const {
 })
 
 const handleSelectedKeysUpdate = (keys: Array<string | number>) => {
-  setSelectedIds(keys.filter((key): key is number => typeof key === 'number'))
+  const ids = keys.filter((key): key is number => typeof key === 'number')
+  // Operators never select rows they cannot act on (admins, operators, themselves),
+  // so bulk actions never send a target the backend refuses.
+  setSelectedIds(isSuperAdmin.value ? ids : ids.filter((id) => {
+    const row = sortedUsers.value.find((user) => user.id === id)
+    return !row || canActOn(row)
+  }))
 }
 
 const getUserSelectionLabel = (user: AdminUser) =>
@@ -1391,6 +1423,7 @@ const viewingUser = ref<AdminUser | null>(null)
 const platformQuotaUser = ref<AdminUser | null>(null)
 
 const handlePlatformQuota = (user: AdminUser) => {
+  if (!canReadRow(user)) return
   platformQuotaUser.value = user
   showPlatformQuotaModal.value = true
 }
@@ -1427,11 +1460,13 @@ const loadUsersSecondaryData = async (
     )
   }
 
-  if (attributeDefinitions.value.length > 0 && hasVisibleAttributeColumns.value) {
+  const readableIds = new Set(users.value.filter(canReadRow).map((user) => user.id))
+  const attributeUserIds = isSuperAdmin.value ? userIds : userIds.filter((id) => readableIds.has(id))
+  if (attributeUserIds.length > 0 && attributeDefinitions.value.length > 0 && hasVisibleAttributeColumns.value) {
     tasks.push(
       (async () => {
         try {
-          const attrResponse = await adminAPI.userAttributes.getBatchUserAttributes(userIds)
+          const attrResponse = await adminAPI.userAttributes.getBatchUserAttributes(attributeUserIds)
           if (signal?.aborted) return
           if (typeof expectedSeq === 'number' && expectedSeq !== secondaryDataSeq) return
           userAttributeValues.value = attrResponse.attributes
@@ -1448,11 +1483,14 @@ const loadUsersSecondaryData = async (
       (async () => {
         try {
           // 无批量端点：对当前页用户逐个拉取，分块并发（每批 6），批间检查中止条件，避免大 pageSize 时请求洪峰
+          // 普通管理员只拉取自己能查看的用户（不含管理员、其他普通管理员和自己）
+          const readableIds = new Set(users.value.filter(canReadRow).map((user) => user.id))
+          const quotaIds = isSuperAdmin.value ? userIds : userIds.filter((id) => readableIds.has(id))
           const CHUNK = 6
-          for (let i = 0; i < userIds.length; i += CHUNK) {
+          for (let i = 0; i < quotaIds.length; i += CHUNK) {
             if (signal?.aborted) return
             if (typeof expectedSeq === 'number' && expectedSeq !== secondaryDataSeq) return
-            const chunk = userIds.slice(i, i + CHUNK)
+            const chunk = quotaIds.slice(i, i + CHUNK)
             const results = await Promise.allSettled(
               chunk.map((id) => adminAPI.users.getPlatformQuotas(id))
             )
@@ -1939,6 +1977,7 @@ const closeBalanceModal = () => {
 }
 
 const handleBalanceHistory = (user: AdminUser) => {
+  if (!canReadRow(user)) return
   balanceHistoryUser.value = user
   showBalanceHistoryModal.value = true
 }

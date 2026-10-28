@@ -111,13 +111,16 @@ func normalizeUserRole(role, fallback string) (string, error) {
 	if role == "" {
 		return fallback, nil
 	}
-	if role != RoleAdmin && role != RoleUser {
+	if role != RoleAdmin && role != RoleOperator && role != RoleUser {
 		return "", fmt.Errorf("invalid role: %q (must be %s or %s)", role, RoleAdmin, RoleUser)
 	}
 	return role, nil
 }
 
 func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInput) (*User, error) {
+	if err := s.operatorUserCreateRules(ctx, input); err != nil {
+		return nil, err
+	}
 	balance := 0.0
 	if input.Balance != nil {
 		balance = *input.Balance
@@ -151,9 +154,9 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 		return nil, err
 	}
 	// 创建管理员属权限敏感操作，落审计日志（含操作者），便于事后追溯。
-	if user.Role == RoleAdmin {
-		logger.LegacyPrintf("service.admin", "audit: admin user created actor_admin_id=%d target_user_id=%d",
-			input.ActorAdminID, user.ID)
+	if user.Role != RoleUser {
+		logger.LegacyPrintf("service.admin", "audit: privileged user created actor_admin_id=%d target_user_id=%d role=%s",
+			input.ActorAdminID, user.ID, user.Role)
 	}
 	s.assignDefaultSubscriptions(ctx, user.ID)
 	return user, nil
@@ -178,6 +181,9 @@ func (s *adminServiceImpl) ensureNotLastAdmin(ctx context.Context) error {
 }
 
 func (s *adminServiceImpl) assignDefaultSubscriptions(ctx context.Context, userID int64) {
+	if s.operatorSkipsSignupGrants(ctx) {
+		return
+	}
 	if s.settingService == nil || s.defaultSubAssigner == nil || userID <= 0 {
 		return
 	}
@@ -195,6 +201,9 @@ func (s *adminServiceImpl) assignDefaultSubscriptions(ctx context.Context, userI
 }
 
 func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *UpdateUserInput) (*User, error) {
+	if err := s.operatorUserUpdateRules(ctx, id, input); err != nil {
+		return nil, err
+	}
 	// 校验用户专属分组倍率：必须 > 0（nil 合法，表示清除专属倍率）
 	if input.GroupRates != nil {
 		for groupID, rate := range input.GroupRates {
@@ -257,7 +266,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 		// 防锁死保护：不允许降级系统中最后一个管理员（自我降级已在 handler 层拦截，
 		// 此处兜底覆盖跨管理员互降导致零 admin 的场景）。
-		if user.Role == RoleAdmin && role == RoleUser {
+		if user.Role == RoleAdmin && role != RoleAdmin {
 			if err := s.ensureNotLastAdmin(ctx); err != nil {
 				return nil, err
 			}
@@ -448,6 +457,9 @@ func (s *adminServiceImpl) deleteUserWithAPIKeys(ctx context.Context, userID int
 }
 
 func (s *adminServiceImpl) BatchUpdateConcurrency(ctx context.Context, userIDs []int64, value int, mode string) (int, error) {
+	if err := s.operatorCheckUserTargets(ctx, userIDs); err != nil {
+		return 0, err
+	}
 	cleaned := make([]int64, 0, len(userIDs))
 	for _, uid := range userIDs {
 		if uid > 0 {
@@ -481,6 +493,9 @@ func (s *adminServiceImpl) BatchUpdateConcurrency(ctx context.Context, userIDs [
 }
 
 func (s *adminServiceImpl) BatchUpdateLimits(ctx context.Context, userIDs []int64, concurrency, rpmLimit *int) (int, error) {
+	if err := s.operatorCheckUserTargets(ctx, userIDs); err != nil {
+		return 0, err
+	}
 	if concurrency == nil && rpmLimit == nil {
 		return 0, fmt.Errorf("at least one of concurrency or rpm_limit is required")
 	}
@@ -909,6 +924,9 @@ func redeemCodeHistoryTime(code RedeemCode) time.Time {
 }
 
 func (s *adminServiceImpl) BindUserAuthIdentity(ctx context.Context, userID int64, input AdminBindAuthIdentityInput) (*AdminBoundAuthIdentity, error) {
+	if err := s.operatorBindIdentityRules(ctx, input); err != nil {
+		return nil, err
+	}
 	if userID <= 0 {
 		return nil, infraerrors.BadRequest("INVALID_INPUT", "user_id must be greater than 0")
 	}

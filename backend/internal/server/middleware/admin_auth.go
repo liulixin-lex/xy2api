@@ -17,8 +17,9 @@ func NewAdminAuthMiddleware(
 	userService *service.UserService,
 	settingService *service.SettingService,
 	auditService *service.AuditLogService,
+	operatorAccess *service.OperatorAccessService, // xy-admin-operator-scope
 ) AdminAuthMiddleware {
-	return AdminAuthMiddleware(adminAuth(authService, userService, settingService, auditService))
+	return AdminAuthMiddleware(adminAuth(authService, userService, settingService, auditService, operatorAccess))
 }
 
 // adminAuth 管理员认证中间件实现
@@ -30,6 +31,7 @@ func adminAuth(
 	userService *service.UserService,
 	settingService *service.SettingService,
 	auditService *service.AuditLogService,
+	operatorAccess *service.OperatorAccessService, // xy-admin-operator-scope
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// WebSocket upgrade requests cannot set Authorization headers in browsers.
@@ -38,7 +40,7 @@ func adminAuth(
 		//   Sec-WebSocket-Protocol: sub2api-admin, jwt.<token>
 		if isWebSocketUpgradeRequest(c) {
 			if token := extractJWTFromWebSocketSubprotocol(c); token != "" {
-				if !validateJWTForAdmin(c, token, authService, userService, settingService, auditService) {
+				if !validateJWTForAdmin(c, token, authService, userService, settingService, auditService, operatorAccess) {
 					return
 				}
 				c.Next()
@@ -66,7 +68,7 @@ func adminAuth(
 					AbortWithError(c, 401, "UNAUTHORIZED", "Authorization required")
 					return
 				}
-				if !validateJWTForAdmin(c, token, authService, userService, settingService, auditService) {
+				if !validateJWTForAdmin(c, token, authService, userService, settingService, auditService, operatorAccess) {
 					return
 				}
 				c.Next()
@@ -150,6 +152,7 @@ func validateAdminAPIKey(
 	c.Set(string(ContextKeyUserRole), admin.Role)
 	c.Set(ContextKeyAuthEmail, admin.Email)
 	c.Set("auth_method", "admin_api_key")
+	setSuperAdminActor(c, admin.ID)
 	return true
 }
 
@@ -161,6 +164,7 @@ func validateJWTForAdmin(
 	userService *service.UserService,
 	settingService *service.SettingService,
 	auditService *service.AuditLogService,
+	operatorAccess *service.OperatorAccessService, // xy-admin-operator-scope
 ) bool {
 	// 验证 JWT token
 	claims, err := authService.ValidateToken(token)
@@ -202,7 +206,7 @@ func validateJWTForAdmin(
 	}
 
 	// 检查管理员权限
-	if !user.IsAdmin() {
+	if !user.CanAccessAdmin() {
 		AbortWithError(c, 403, "FORBIDDEN", "Admin access required")
 		return false
 	}
@@ -215,6 +219,9 @@ func validateJWTForAdmin(
 	c.Set(ContextKeyAuthEmail, user.Email)
 	c.Set(ContextKeySessionID, claims.SessionID)
 	c.Set("auth_method", "jwt")
+	if !setOperatorScope(c, user, operatorAccess) { //nolint:staticcheck // S1008: preserve the contract-pinned authentication hook.
+		return false
+	}
 
 	return true
 }

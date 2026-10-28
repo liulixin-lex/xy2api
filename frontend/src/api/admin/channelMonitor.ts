@@ -18,6 +18,8 @@ export type Provider =
   | 'opencode_go'
 export type MonitorStatus = 'operational' | 'degraded' | 'failed' | 'error'
 export type BodyOverrideMode = 'off' | 'merge' | 'replace'
+/** Operator responses hide configured request bodies with this exact sentinel. */
+export type BodyOverride = Record<string, unknown> | '******' | null
 export type APIMode = 'chat_completions' | 'responses'
 /**
  * probe = LLM 探活（默认）；quota = 仅查关联账号用量（零 LLM 成本）；
@@ -95,7 +97,7 @@ export interface ChannelMonitor {
   template_id: number | null
   extra_headers: Record<string, string>
   body_override_mode: BodyOverrideMode
-  body_override: Record<string, unknown> | null
+  body_override: BodyOverride
   /** 检测模式：probe（默认）/ quota / quota_probe */
   check_mode: CheckMode
   /** 配额模式关联的账号 ID；探活模式为 null */
@@ -149,7 +151,7 @@ export interface CreateParams {
   template_id?: number | null
   extra_headers?: Record<string, string>
   body_override_mode?: BodyOverrideMode
-  body_override?: Record<string, unknown> | null
+  body_override?: BodyOverride
 }
 
 // Update request: api_key 空串 = 不修改；clear_template=true 时把 template_id 置空；

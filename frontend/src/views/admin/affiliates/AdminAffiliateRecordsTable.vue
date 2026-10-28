@@ -13,7 +13,7 @@
             <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
           </button>
           <button
-            v-if="props.type === 'transfers'"
+            v-if="props.type === 'transfers' && canManage && has('orders.refund')"
             type="button"
             class="btn btn-primary ml-auto"
             data-test="affiliate-withdraw-open"
@@ -185,6 +185,7 @@ import { affiliatesAPI, type AffiliateInviteRecord, type AffiliateRebateRecord, 
 import type { PaginatedResponse } from '@/types'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { formatDateTime as formatDisplayDateTime } from '@/utils/format'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 
 type RecordType = 'invites' | 'rebates' | 'transfers'
 type AffiliateRecord = AffiliateInviteRecord | AffiliateRebateRecord | AffiliateTransferRecord
@@ -195,6 +196,8 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
+// 返利提现需要“退款”权限
+const { canManage, has } = useAdminPermission('affiliates')
 const loading = ref(false)
 const records = ref<AffiliateRecord[]>([])
 const filters = reactive({ search: '', start_at: '', end_at: '' })

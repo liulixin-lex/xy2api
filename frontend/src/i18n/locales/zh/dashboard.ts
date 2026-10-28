@@ -834,6 +834,7 @@ export default {
     securityTitle: '安全设置',
     securityDescription: '密码、双因素认证和通知提醒集中放在右侧。',
     administrator: '管理员',
+    operator: '普通管理员',
     user: '用户',
     username: '用户名',
     email: '邮箱',

@@ -10,6 +10,7 @@ import plugins from './plugins'
 import shareScheduling from './shareScheduling'
 import resilience from './resilience'
 import groupCategories from './groupCategories'
+import operatorAccess from './operatorAccess'
 
 export default {
   ...overview,
@@ -24,4 +25,5 @@ export default {
   ...shareScheduling,
   ...resilience,
   ...groupCategories,
+  ...operatorAccess,
 }

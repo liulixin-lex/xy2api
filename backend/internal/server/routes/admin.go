@@ -23,12 +23,19 @@ func RegisterAdminRoutes(
 	// 插件 UI 使用短时能力 URL，仅提供经过安装校验的静态资源。
 	v1.GET("/plugin-ui/:token/*path", h.Admin.Plugin.ServeUIAsset)
 
+	// xy-admin-operator-scope: bootstrap skips compliance and catalog checks.
+	meAccess := v1.Group("/admin/me")
+	meAccess.Use(gin.HandlerFunc(adminAuth))
+	meAccess.Use(panelRateLimiter.Global())
+	meAccess.GET("/access", h.Admin.OperatorAccess.MeAccess)
+
 	admin := v1.Group("/admin")
 	admin.Use(gin.HandlerFunc(adminAuth))
 	// 面板全局按用户限流（默认管理员豁免，可在系统设置中关闭豁免）
 	admin.Use(panelRateLimiter.Global())
 	// 审计中间件挂在认证之后：所有管理面变更类操作 + 敏感读取入审计日志
 	admin.Use(gin.HandlerFunc(auditLog))
+	admin.Use(middleware.AdminPermission())
 	admin.Use(middleware.AdminComplianceGuard(settingService))
 
 	if h.UsageExport != nil {
@@ -343,6 +350,8 @@ func registerUserManagementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		// User attribute values
 		users.GET("/:id/attributes", h.Admin.UserAttribute.GetUserAttributes)
 		users.PUT("/:id/attributes", h.Admin.UserAttribute.UpdateUserAttributes)
+		users.GET("/:id/operator-permissions", h.Admin.OperatorAccess.GetPermissions)
+		users.PUT("/:id/operator-permissions", h.Admin.OperatorAccess.PutPermissions)
 	}
 }
 

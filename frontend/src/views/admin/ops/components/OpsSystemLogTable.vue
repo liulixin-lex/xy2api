@@ -8,9 +8,13 @@ import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
 import { useAppStore } from '@/stores'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 
 const appStore = useAppStore()
 const { t } = useI18n()
+// 运行时日志配置的保存、重置和日志清理只有超级管理员可以操作
+const adminAccess = useAdminAccessStore()
+const superOnly = computed(() => !adminAccess.isOperator)
 
 // 与 DataTable 一致：< 768px 切换为卡片视图，避免宽表在移动端被截断。
 const isDesktopViewport = useMediaQuery('(min-width: 768px)')
@@ -462,10 +466,10 @@ onMounted(async () => {
               </label>
             </div>
             <div class="flex flex-wrap items-center gap-2 lg:justify-end">
-              <button type="button" class="btn btn-primary btn-sm" :disabled="runtimeSaving || runtimeLoading || !runtimeConfigLoaded" @click="saveRuntimeConfig">
+              <button v-if="superOnly" type="button" class="btn btn-primary btn-sm" :disabled="runtimeSaving || runtimeLoading || !runtimeConfigLoaded" @click="saveRuntimeConfig">
                 {{ runtimeSaving ? t('common.saving') : t('admin.ops.systemLogs.saveAndApply') }}
               </button>
-              <button type="button" class="btn btn-secondary btn-sm" :disabled="runtimeSaving" @click="resetRuntimeConfig">
+              <button v-if="superOnly" type="button" class="btn btn-secondary btn-sm" :disabled="runtimeSaving" @click="resetRuntimeConfig">
                 {{ t('admin.ops.systemLogs.resetDefaults') }}
               </button>
             </div>
@@ -538,7 +542,7 @@ onMounted(async () => {
     <div class="mb-3 flex flex-wrap gap-2">
       <button type="button" class="btn btn-primary btn-sm" @click="applyFilters">{{ t('admin.ops.systemLogs.search') }}</button>
       <button type="button" class="btn btn-secondary btn-sm" @click="resetFilters">{{ t('common.reset') }}</button>
-      <button type="button" class="btn btn-danger btn-sm" @click="cleanupCurrentFilter">{{ t('admin.ops.systemLogs.cleanCurrentFilters') }}</button>
+      <button v-if="superOnly" type="button" class="btn btn-danger btn-sm" @click="cleanupCurrentFilter">{{ t('admin.ops.systemLogs.cleanCurrentFilters') }}</button>
       <button type="button" class="btn btn-secondary btn-sm" @click="fetchHealth">{{ t('admin.ops.systemLogs.refreshHealth') }}</button>
     </div>
 

@@ -21,6 +21,7 @@ import (
 	dbuser "github.com/liulixin-lex/xy2api/ent/user"
 	"github.com/liulixin-lex/xy2api/ent/userallowedgroup"
 	"github.com/liulixin-lex/xy2api/ent/usersubscription"
+	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 	"github.com/liulixin-lex/xy2api/internal/service"
 
@@ -539,14 +540,11 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 		q = q.Where(dbuser.RoleEQ(filters.Role))
 	}
 	if filters.Search != "" {
-		q = q.Where(
-			dbuser.Or(
-				dbuser.EmailContainsFold(filters.Search),
-				dbuser.UsernameContainsFold(filters.Search),
-				dbuser.NotesContainsFold(filters.Search),
-				dbuser.HasAPIKeysWith(apikey.KeyContainsFold(filters.Search)),
-			),
-		)
+		predicates := []predicate.User{dbuser.EmailContainsFold(filters.Search), dbuser.UsernameContainsFold(filters.Search), dbuser.NotesContainsFold(filters.Search)}
+		if !operatoraccess.HideAPIKeySearch(ctx) {
+			predicates = append(predicates, dbuser.HasAPIKeysWith(apikey.KeyContainsFold(filters.Search)))
+		}
+		q = q.Where(dbuser.Or(predicates...))
 	}
 
 	if filters.GroupName != "" {

@@ -10,6 +10,7 @@
           v-if="store.settings"
           :model-value="store.settings.enabled"
           :labelled="false"
+          :disabled="!canManage"
           @update:model-value="store.setGlobalEnabled"
         />
         <div v-else-if="store.settingsFailed" class="flex items-center gap-2 text-sm text-red-700 dark:text-red-300" role="alert">
@@ -79,8 +80,11 @@ import ShareModeCard from '@/components/admin/shareScheduling/ShareModeCard.vue'
 import ShareReportDetails from '@/components/admin/shareScheduling/ShareReportDetails.vue'
 import ShareTrafficTable from '@/components/admin/shareScheduling/ShareTrafficTable.vue'
 import { useShareSchedulingStore } from '@/stores/shareScheduling'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 
 const { t } = useI18n()
+// 全局开关、调度模式和会话保持的保存需要份额调度的管理权限
+const { canManage } = useAdminPermission('share_scheduling')
 const route = useRoute()
 const router = useRouter()
 const store = useShareSchedulingStore()

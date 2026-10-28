@@ -39,12 +39,13 @@
         {{ t('admin.accounts.stateTicket.globalOff') }}
         <a href="/admin/settings?tab=gateway" target="_blank" rel="noopener noreferrer" class="font-medium underline">{{ t('admin.accounts.stateTicket.gatewaySettings') }}</a>
       </p>
-      <div class="text-xs text-gray-500 dark:text-gray-400" data-testid="codex-account-ticket-global-pool">
+      <!-- 代理池路由只对超级管理员开放：普通管理员不显示代理池与手动代理 -->
+      <div v-if="!isOperator" class="text-xs text-gray-500 dark:text-gray-400" data-testid="codex-account-ticket-global-pool">
         <p v-if="status.proxy_configured">{{ t('admin.accounts.stateTicket.globalPoolConfigured', { address: status.proxy_display }) }}</p>
         <p v-else class="text-amber-700 dark:text-amber-300">{{ t('admin.accounts.stateTicket.globalPoolMissing') }}</p>
         <p><a href="/admin/settings?tab=gateway" target="_blank" rel="noopener noreferrer" class="font-medium underline">{{ t('admin.accounts.stateTicket.gatewaySettings') }}</a></p>
       </div>
-      <div>
+      <div v-if="!isOperator" data-testid="codex-account-ticket-manual-proxy">
         <label :for="`state-manual-proxy-${accountId}`" class="input-label">{{ t('admin.accounts.stateTicket.manualProxy') }}</label>
         <select :id="`state-manual-proxy-${accountId}`" v-model="selectedProxy" class="input w-full text-sm" :disabled="busy">
           <option value="">{{ t('admin.accounts.stateTicket.autoProxy') }}</option>
@@ -157,9 +158,11 @@ import { useI18n } from 'vue-i18n'
 import Toggle from '@/components/common/Toggle.vue'
 import { getTicketProxyPool, type TicketProxy } from '@/api/admin/codexTicketProxies'
 import { getCodexAccountTicket, saveCodexAccountTicket, harvestCodexAccountTicket, type CodexAccountTicketStatus, type CodexTicketPlan } from '@/api/admin/codexTickets'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 
 const props = defineProps<{ accountId: number; visible: boolean; proxyChanged?: boolean }>()
 const { t, locale } = useI18n()
+const isOperator = computed(() => useAdminAccessStore().isOperator)
 const status = ref<CodexAccountTicketStatus | null>(null)
 const enabled = ref(false)
 const selectedProxy = ref('')
@@ -368,6 +371,10 @@ watch(() => [props.accountId, props.visible] as const, async () => {
   loading.value = false
   if (!props.visible) return
   await load(true)
+  if (isOperator.value) {
+    if (generation === currentGeneration && props.visible) schedulePoll()
+    return
+  }
   try {
     const pool = await getTicketProxyPool()
     if (generation === currentGeneration) proxyOptions.value = pool.entries.filter(entry => entry.enabled)

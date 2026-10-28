@@ -6,7 +6,7 @@
         <button @click="loadPlans" :disabled="plansLoading" class="btn btn-secondary" :title="t('common.refresh')">
           <Icon name="refresh" size="md" :class="plansLoading ? 'animate-spin' : ''" />
         </button>
-        <button @click="openPlanEdit(null)" class="btn btn-primary">{{ t('payment.admin.createPlan') }}</button>
+        <button v-if="canEditPlans" @click="openPlanEdit(null)" class="btn btn-primary">{{ t('payment.admin.createPlan') }}</button>
       </div>
 
       <!-- Plans Table -->
@@ -44,6 +44,7 @@
               'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
               value ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600'
             ]"
+            :disabled="!canEditPlans"
             @click="toggleForSale(row)"
           >
             <span :class="[
@@ -54,11 +55,11 @@
         </template>
         <template #cell-actions="{ row }">
           <div class="flex items-center gap-2">
-            <button @click="openPlanEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400">
+            <button v-if="canEditPlans" @click="openPlanEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400">
               <Icon name="edit" size="sm" />
               <span class="text-xs">{{ t('common.edit') }}</span>
             </button>
-            <button @click="confirmDeletePlan(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400">
+            <button v-if="canEditPlans" @click="confirmDeletePlan(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400">
               <Icon name="trash" size="sm" />
               <span class="text-xs">{{ t('common.delete') }}</span>
             </button>
@@ -93,9 +94,15 @@ import GroupBadge from '@/components/common/GroupBadge.vue'
 import PlanEditDialog from './PlanEditDialog.vue'
 import { currencySymbol } from '@/components/payment/currency'
 import { platformTextClass } from '@/utils/platformColors'
+import { useAdminPermission } from '@/composables/useAdminPermission'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+// 新建、编辑、删除和上下架套餐需要“加减余额”权限
+const { canManage, has } = useAdminPermission('orders')
+const canEditPlans = computed(() => canManage.value && has('users.balance_adjust'))
+const adminAccess = useAdminAccessStore()
 
 function planCurrencySymbol(currency?: string): string {
   return currencySymbol(currency || 'USD')
@@ -113,6 +120,18 @@ async function loadGroups() {
 }
 
 async function loadPaymentConfig() {
+  // 普通管理员不能读取支付配置：价格预览所需的汇率和手续费来自 /me/access
+  if (adminAccess.isOperator) {
+    await adminAccess.ensureLoaded()
+    const settings = adminAccess.settings
+    paymentConfig.value = settings
+      ? ({
+          subscription_usd_to_cny_rate: settings.payment_subscription_usd_to_cny_rate,
+          recharge_fee_rate: settings.payment_recharge_fee_rate
+        } as AdminPaymentConfig)
+      : null
+    return
+  }
   try {
     const res = await adminPaymentAPI.getConfig()
     paymentConfig.value = res.data

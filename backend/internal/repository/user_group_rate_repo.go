@@ -94,13 +94,13 @@ func (r *userGroupRateRepository) GetByUserIDs(ctx context.Context, userIDs []in
 	return result, nil
 }
 
-// GetByGroupID 获取指定分组下所有用户的专属配置（rate 与 rpm_override 任一非 NULL 即返回）
+// GetByGroupID 获取指定分组下未删除用户的专属配置。
 func (r *userGroupRateRepository) GetByGroupID(ctx context.Context, groupID int64) ([]service.UserGroupRateEntry, error) {
 	query := `
 		SELECT ugr.user_id, u.username, u.email, COALESCE(u.notes, ''), u.status, ugr.rate_multiplier, ugr.rpm_override
 		FROM user_group_rate_multipliers ugr
-		JOIN users u ON u.id = ugr.user_id AND u.deleted_at IS NULL
-		WHERE ugr.group_id = $1
+		JOIN users u ON u.id = ugr.user_id
+		WHERE ugr.group_id = $1 AND u.deleted_at IS NULL
 		ORDER BY ugr.user_id
 	`
 	rows, err := r.sql.QueryContext(ctx, query, groupID)
@@ -131,6 +131,29 @@ func (r *userGroupRateRepository) GetByGroupID(ctx context.Context, groupID int6
 		return nil, err
 	}
 	return result, nil
+}
+
+// GetOwnerIDsByGroupID is an authorization query, not a user-facing list.
+// Retained rows still belong to soft-deleted users and must be checked before writes.
+func (r *userGroupRateRepository) GetOwnerIDsByGroupID(ctx context.Context, groupID int64, rpmOnly bool) ([]int64, error) {
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT user_id FROM user_group_rate_multipliers
+		WHERE group_id = $1 AND (NOT $2::boolean OR rpm_override IS NOT NULL)
+		ORDER BY user_id
+	`, groupID, rpmOnly)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // GetByUserAndGroup 获取用户在特定分组的专属 rate_multiplier（NULL 返回 nil）

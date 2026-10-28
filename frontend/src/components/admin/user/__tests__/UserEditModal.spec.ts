@@ -42,7 +42,8 @@ const mountModal = (concurrency: number) => mount(UserEditModal, {
   global: {
     stubs: {
       BaseDialog: {
-        props: ['show', 'title'],
+        name: 'BaseDialog',
+        props: ['show', 'title', 'width'],
         template: '<div v-if="show"><slot /><slot name="footer" /></div>'
       },
       Select: true,
@@ -60,6 +61,15 @@ describe('UserEditModal concurrency', () => {
     showSuccess.mockReset()
     showError.mockReset()
     update.mockResolvedValue({})
+  })
+
+  it('keeps normal-user editing at normal width with the existing field spacing', () => {
+    const wrapper = mountModal(1)
+
+    expect(wrapper.findComponent({ name: 'BaseDialog' }).props('width')).toBe('normal')
+    expect(wrapper.get('#edit-user-form').classes()).toContain('space-y-5')
+    expect(wrapper.get('[data-test="user-edit-fields"]').classes()).toContain('space-y-5')
+    expect(wrapper.find('[data-test="operator-permissions-panel"]').exists()).toBe(false)
   })
 
   // Regression coverage for issue #5977: the gateway treats concurrency <= 0 as

@@ -97,6 +97,10 @@ func (s *userGroupRateRepoStubForListUsers) SyncUserGroupRates(_ context.Context
 	panic("unexpected SyncUserGroupRates call")
 }
 
+func (s *userGroupRateRepoStubForListUsers) GetOwnerIDsByGroupID(context.Context, int64, bool) ([]int64, error) {
+	panic("unexpected GetOwnerIDsByGroupID call")
+}
+
 func (s *userGroupRateRepoStubForListUsers) GetByGroupID(_ context.Context, _ int64) ([]UserGroupRateEntry, error) {
 	panic("unexpected GetByGroupID call")
 }

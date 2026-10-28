@@ -61,6 +61,7 @@
             v-model="accountSelectValue"
             :options="accountOptions"
             :placeholder="t('admin.channelMonitor.form.linkedAccountPlaceholder')"
+            :disabled="!canLinkAccount"
             remote
             :loading="accountsLoading"
             @search="onAccountSearch"
@@ -73,7 +74,7 @@
         <p v-if="accountHydrationFailed" class="mt-1 text-xs text-amber-600 dark:text-amber-400">
           {{ t('admin.channelMonitor.form.linkedAccountMissing') }}
         </p>
-        <p v-if="accountOptions.length === 0 && !accountsLoading && !accountSearchQuery" class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+        <p v-if="canLinkAccount && accountOptions.length === 0 && !accountsLoading && !accountSearchQuery" class="mt-1 text-xs text-amber-600 dark:text-amber-400">
           {{ t('admin.channelMonitor.form.linkedAccountEmpty') }}
         </p>
       </div>
@@ -96,7 +97,8 @@
         </div>
       </div>
 
-      <div v-if="usesProbePart">
+      <!-- 编辑时没有“显示上游地址”权限：不显示地址（后端保留原地址） -->
+      <div v-if="usesProbePart && (!editing || canSeeEndpoint)">
         <label class="input-label">{{ t('admin.channelMonitor.form.endpoint') }} <span class="text-red-500">*</span></label>
         <div class="flex gap-2">
           <input v-model="form.endpoint" data-testid="monitor-endpoint" type="text" required class="input flex-1" :placeholder="t('admin.channelMonitor.form.endpointPlaceholder')" />
@@ -105,6 +107,10 @@
           </button>
         </div>
       </div>
+
+      <p v-if="headersDropped" class="text-xs text-amber-600 dark:text-amber-400" data-testid="monitor-headers-dropped">
+        {{ t('admin.operatorAccess.monitorHeadersDropped') }}
+      </p>
 
       <div v-if="usesProbePart">
         <label class="input-label">
@@ -186,6 +192,9 @@
               :placeholder="t('admin.channelMonitor.templateField.placeholder')"
             />
             <p class="mt-1 text-xs text-gray-400">{{ t('admin.channelMonitor.templateField.applyHint') }}</p>
+            <p v-if="hasSuperOnlyTemplates" class="mt-1 text-xs text-amber-600 dark:text-amber-400" data-testid="monitor-template-super-only">
+              {{ t('admin.operatorAccess.templateApplySuperOnly') }}
+            </p>
           </div>
 
           <MonitorAdvancedRequestConfig
@@ -260,6 +269,8 @@ import MonitorKeyPickerDialog from '@/components/admin/monitor/MonitorKeyPickerD
 import MonitorAdvancedRequestConfig from '@/components/admin/monitor/MonitorAdvancedRequestConfig.vue'
 import ProviderIcon from '@/components/user/monitor/ProviderIcon.vue'
 import { useChannelMonitorFormat } from '@/composables/useChannelMonitorFormat'
+import { useAdminAccessStore } from '@/stores/adminAccess'
+import { operatorAccountErrorMessage } from '@/components/account/operatorAccountRules'
 import {
   PROVIDER_OPENAI,
   PROVIDER_ANTHROPIC,
@@ -310,6 +321,27 @@ const systemDefaultInterval = computed<number>(() => {
 
 // editing is true when we have an existing monitor
 const editing = computed<ChannelMonitor | null>(() => props.monitor)
+const adminAccess = useAdminAccessStore()
+// 普通管理员编辑监控：没有“显示上游地址”权限时不显示地址
+const canSeeEndpoint = computed(() => adminAccess.can('accounts.upstream_address'))
+// 普通管理员修改地址、服务商或接口模式时，只保留本次填写的请求头（"******" 是未重填的已存值）
+const MASKED_HEADER_VALUE = '******'
+const monitorNetworkChanged = computed(() => {
+  const m = editing.value
+  if (!m) return false
+  const endpointChanged = canSeeEndpoint.value && form.endpoint.trim() !== (m.endpoint || '').trim()
+  return endpointChanged || form.provider !== m.provider || form.api_mode !== normalizeAPIMode(m.api_mode)
+})
+const headersDropped = computed(() => adminAccess.isOperator && monitorNetworkChanged.value)
+// Linking an account to a quota monitor needs accounts:view (the account list and the backend rule).
+const canLinkAccount = computed(() => adminAccess.can('accounts:view'))
+// Operators cannot attach a template that carries extra headers (super admin only).
+function templateHasHeaders(tpl: ChannelMonitorTemplate): boolean {
+  return Object.keys(tpl.extra_headers || {}).length > 0 || (tpl.body_override === '******' || Object.keys(tpl.body_override || {}).length > 0)
+}
+function templateIsSuperOnly(tpl: ChannelMonitorTemplate): boolean {
+  return adminAccess.isOperator && templateHasHeaders(tpl)
+}
 
 const submitting = ref(false)
 
@@ -337,7 +369,7 @@ interface MonitorForm {
   template_id: number | null
   extra_headers: Record<string, string>
   body_override_mode: BodyOverrideMode
-  body_override: Record<string, unknown> | null
+  body_override: Record<string, unknown> | '******' | null
 }
 
 const form = reactive<MonitorForm>({
@@ -381,9 +413,10 @@ const templateOptions = computed(() => {
   })
   return [
     { value: '', label: t('admin.channelMonitor.templateField.none') },
-    ...items.map((t) => ({ value: String(t.id), label: templateOptionLabel(t) })),
+    ...items.map((t) => ({ value: String(t.id), label: templateOptionLabel(t), disabled: templateIsSuperOnly(t) })),
   ]
 })
+const hasSuperOnlyTemplates = computed(() => templateOptions.value.some((opt) => 'disabled' in opt && opt.disabled))
 
 async function loadTemplates() {
   if (templatesCache.value.length > 0) return
@@ -409,6 +442,8 @@ const templateSelectValue = computed<string>({
     }
     const id = Number(raw)
     if (!Number.isFinite(id)) return
+    const picked = templatesCache.value.find((t) => t.id === id)
+    if (picked && templateIsSuperOnly(picked)) return
     form.template_id = id
     // 应用模板 = 拷贝快照
     const tpl = templatesCache.value.find((t) => t.id === id)
@@ -418,7 +453,7 @@ const templateSelectValue = computed<string>({
       form.template_id = id
       form.extra_headers = { ...(tpl.extra_headers || {}) }
       form.body_override_mode = tpl.body_override_mode
-      form.body_override = tpl.body_override ? { ...tpl.body_override } : null
+      form.body_override = tpl.body_override === '******' ? '******' : tpl.body_override ? { ...tpl.body_override } : null
       suppressFormWatchers = false
     }
   },
@@ -498,6 +533,9 @@ interface CheckModeOption {
   disabled: boolean
 }
 
+// Quota modes need a linked account: a new one needs accounts:view, a stored one may stay.
+const canKeepOrLinkAccount = computed(() => canLinkAccount.value || (editing.value?.account_id ?? 0) > 0)
+
 const checkModeOptions = computed<CheckModeOption[]>(() => [
   {
     value: CHECK_MODE_PROBE,
@@ -510,14 +548,15 @@ const checkModeOptions = computed<CheckModeOption[]>(() => [
     value: CHECK_MODE_QUOTA,
     label: t('admin.channelMonitor.form.checkModeQuota'),
     hint: t('admin.channelMonitor.form.checkModeQuotaHint'),
-    disabled: false,
+    // 没有账号查看权限时不能关联新账号：只保留已关联账号的配额监控
+    disabled: !canKeepOrLinkAccount.value,
   },
   {
     value: CHECK_MODE_QUOTA_PROBE,
     label: t('admin.channelMonitor.form.checkModeQuotaProbe'),
     hint: t('admin.channelMonitor.form.checkModeQuotaProbeHint'),
     // antigravity 无探活 adapter，只支持配额模式。
-    disabled: form.provider === PROVIDER_ANTIGRAVITY,
+    disabled: form.provider === PROVIDER_ANTIGRAVITY || !canKeepOrLinkAccount.value,
   },
 ])
 
@@ -561,7 +600,7 @@ const accountOptions = computed(() => {
   }))
   const pinned = pinnedAccount.value
   if (pinned && !linkedAccounts.value.some((a) => a.id === pinned.id)) {
-    opts.unshift({ value: String(pinned.id), label: `${pinned.name} (#${pinned.id})` })
+    opts.unshift({ value: String(pinned.id), label: pinned.name ? `${pinned.name} (#${pinned.id})` : `#${pinned.id}` })
   }
   return opts
 })
@@ -589,6 +628,11 @@ const accountSelectValue = computed<string>({
 // 失败不阻塞表单：下拉为空 + 空态提示。
 async function loadLinkedAccounts(search = '') {
   if (!usesQuotaMode.value || !props.show) return
+  if (!canLinkAccount.value) {
+    // No accounts:view: keep the stored link as it is, without loading accounts.
+    if (form.account_id != null) pinnedAccount.value = { id: form.account_id, name: '' }
+    return
+  }
   accountSearchQuery.value = search
   const seq = ++accountSearchSeq
   accountSearchAbort?.abort()
@@ -766,7 +810,7 @@ function loadFromMonitor(m: ChannelMonitor) {
   form.template_id = m.template_id ?? null
   form.extra_headers = { ...(m.extra_headers || {}) }
   form.body_override_mode = m.body_override_mode || 'off'
-  form.body_override = m.body_override ? { ...m.body_override } : null
+  form.body_override = m.body_override === '******' ? '******' : m.body_override ? { ...m.body_override } : null
   suppressFormWatchers = false
 }
 
@@ -869,6 +913,16 @@ async function handleSubmit() {
       // account_id 同理：probe 模式不带账号，update 发 0 显式解绑存量关联
       // （后端 0=清空、null=不动）。仅 update——create 发 0 会落 &0 触发 FK 违约。
       if (!usesQuotaMode.value) req.account_id = 0
+      // 没有账号查看权限：已关联的账号保持不变（不提交）
+      else if (!canLinkAccount.value) delete req.account_id
+      // 普通管理员：模板未改动时不提交 template_id（含请求头的模板只有超级管理员可以关联）
+      if (adminAccess.isOperator && req.template_id != null && req.template_id === (target.template_id ?? null)) delete req.template_id
+      if (!canSeeEndpoint.value) delete req.endpoint
+      if (headersDropped.value) {
+        req.extra_headers = Object.fromEntries(
+          Object.entries(req.extra_headers || {}).filter(([, value]) => value !== MASKED_HEADER_VALUE),
+        )
+      }
       await adminAPI.channelMonitor.update(target.id, req)
       appStore.showSuccess(t('admin.channelMonitor.updateSuccess'))
     } else {
@@ -878,7 +932,7 @@ async function handleSubmit() {
     emit('saved')
     emit('close')
   } catch (err: unknown) {
-    appStore.showError(extractApiErrorMessage(err, t('common.error')))
+    appStore.showError(operatorAccountErrorMessage(err, t) || extractApiErrorMessage(err, t('common.error')))
   } finally {
     submitting.value = false
   }

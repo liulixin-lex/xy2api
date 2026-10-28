@@ -4,7 +4,7 @@
       <template #filters>
         <div class="flex flex-wrap items-center gap-3">
           <!-- Left: Search + Filters -->
-          <div class="flex-1 sm:max-w-64">
+          <div v-if="hasIssue" class="flex-1 sm:max-w-64">
             <input
               v-model="searchQuery"
               type="text"
@@ -30,7 +30,7 @@
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
-            <button @click="showCreateDialog = true" class="btn btn-primary">
+            <button v-if="canIssue" @click="showCreateDialog = true" class="btn btn-primary">
               <Icon name="plus" size="md" class="mr-1" />
               {{ t('admin.promo.createCode') }}
             </button>
@@ -126,6 +126,7 @@
                 <Icon name="eye" size="sm" />
               </button>
               <button
+                v-if="canIssue"
                 @click="handleEdit(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-600 dark:hover:text-gray-300"
                 :title="t('common.edit')"
@@ -133,6 +134,7 @@
                 <Icon name="edit" size="sm" />
               </button>
               <button
+                v-if="canManage"
                 @click="handleDelete(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
                 :title="t('common.delete')"
@@ -403,9 +405,14 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { canManage, has } = useAdminPermission('promo_codes')
+// 新建、编辑优惠码和按优惠码搜索需要“生成兑换码”权限
+const hasIssue = computed(() => has('redeem_codes.issue'))
+const canIssue = computed(() => canManage.value && hasIssue.value)
 const { copyToClipboard: clipboardCopy } = useClipboard()
 
 // State
@@ -525,7 +532,7 @@ const loadCodes = async () => {
       pagination.page_size,
       {
         status: filters.status || undefined,
-        search: searchQuery.value || undefined,
+        search: (hasIssue.value && searchQuery.value) || undefined,
         sort_by: sortState.sort_by,
         sort_order: sortState.sort_order
       },

@@ -11,7 +11,7 @@
         <p class="text-sm text-gray-500 dark:text-gray-400">
           {{ t('admin.errorPassthrough.description') }}
         </p>
-        <button @click="showCreateModal = true" class="btn btn-primary btn-sm">
+        <button v-if="!readonly" @click="showCreateModal = true" class="btn btn-primary btn-sm">
           <Icon name="plus" size="sm" class="mr-1" />
           {{ t('admin.errorPassthrough.createRule') }}
         </button>
@@ -162,6 +162,7 @@
               </td>
               <td class="px-3 py-2">
                 <button
+                  :disabled="readonly"
                   @click="toggleEnabled(rule)"
                   :class="[
                     'relative inline-flex h-4 w-7 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
@@ -177,7 +178,7 @@
                 </button>
               </td>
               <td class="px-3 py-2">
-                <div class="flex items-center gap-1">
+                <div v-if="!readonly" class="flex items-center gap-1">
                   <button
                     @click="handleEdit(rule)"
                     class="p-1 text-gray-500 hover:text-primary-600 dark:hover:text-primary-400"
@@ -442,6 +443,8 @@ import Icon from '@/components/icons/Icon.vue'
 
 const props = defineProps<{
   show: boolean
+  /** View-only operators: no create, edit, toggle or delete. */
+  readonly?: boolean
 }>()
 
 const emit = defineEmits<{

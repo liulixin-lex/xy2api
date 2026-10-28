@@ -7,6 +7,9 @@
     <p class="mb-3 text-sm text-gray-600 dark:text-gray-400">
       {{ t('admin.channelMonitor.template.applyPickerHint') }}
     </p>
+    <p v-if="applyNeedsSuperAdmin" class="mb-3 text-sm text-amber-600 dark:text-amber-400" data-testid="template-apply-super-only">
+      {{ t('admin.operatorAccess.templateApplySuperOnly') }}
+    </p>
 
     <div v-if="loading" class="py-6 text-center text-sm text-gray-400">
       {{ t('common.loading') }}
@@ -74,7 +77,8 @@
         </button>
         <button
           class="btn btn-primary"
-          :disabled="submitting || selectedIds.length === 0"
+          :disabled="submitting || selectedIds.length === 0 || applyNeedsSuperAdmin"
+          data-testid="template-apply-confirm"
           @click="handleApply"
         >
           {{ submitting
@@ -95,11 +99,14 @@ import { adminAPI } from '@/api/admin'
 import type { AssociatedMonitorBrief } from '@/api/admin/channelMonitorTemplate'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { supportsMonitorResponses } from '@/constants/channelMonitor'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 
 const props = defineProps<{
   show: boolean
   templateId: number | null
   templateName: string
+  /** The template has at least one extra header: only super admins may apply it. */
+  templateHasHeaders?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -109,6 +116,8 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const adminAccess = useAdminAccessStore()
+const applyNeedsSuperAdmin = computed(() => adminAccess.isOperator && props.templateHasHeaders === true)
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -163,7 +172,7 @@ function selectNone() {
 }
 
 async function handleApply() {
-  if (props.templateId == null || selectedIds.value.length === 0 || submitting.value) return
+  if (props.templateId == null || selectedIds.value.length === 0 || submitting.value || applyNeedsSuperAdmin.value) return
   submitting.value = true
   try {
     const { affected } = await adminAPI.channelMonitorTemplate.apply(

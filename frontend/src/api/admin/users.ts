@@ -6,6 +6,7 @@
 import { apiClient } from '../client'
 import { listPlatformIds } from '@/constants/platformCatalog'
 import type { AccountPlatform, AdminUser, UpdateUserRequest, PaginatedResponse, ApiKey } from '@/types'
+import type { AdminPermissionsWire } from '@/types/adminAccess'
 
 export interface AdminBindAuthIdentityChannelRequest {
   channel: string
@@ -144,7 +145,7 @@ export async function create(userData: {
   password: string
   username?: string
   notes?: string
-  role?: 'admin' | 'user'
+  role?: 'admin' | 'operator' | 'user'
   balance?: number
   concurrency?: number
   rpm_limit?: number
@@ -426,6 +427,26 @@ export async function resetPlatformQuotaWindow(
   return data
 }
 
+/**
+ * Get the operator permissions stored for a user (super admin only).
+ * A user without a stored row returns `{ modules: {}, flags: [] }`.
+ */
+export async function getOperatorPermissions(id: number): Promise<AdminPermissionsWire> {
+  const { data } = await apiClient.get<AdminPermissionsWire>(`/admin/users/${id}/operator-permissions`)
+  return data
+}
+
+/**
+ * Replace the operator permissions of a user (super admin only, step-up protected).
+ */
+export async function updateOperatorPermissions(
+  id: number,
+  body: AdminPermissionsWire
+): Promise<AdminPermissionsWire> {
+  const { data } = await apiClient.put<AdminPermissionsWire>(`/admin/users/${id}/operator-permissions`, body)
+  return data
+}
+
 export const usersAPI = {
   list,
   getById,
@@ -445,6 +466,8 @@ export const usersAPI = {
   getPlatformQuotas,
   updatePlatformQuotas,
   resetPlatformQuotaWindow,
+  getOperatorPermissions,
+  updateOperatorPermissions,
 }
 
 export default usersAPI

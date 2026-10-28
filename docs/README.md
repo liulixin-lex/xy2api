@@ -32,6 +32,7 @@
 | [`GROUP_SYSTEM_PROMPTS.md`](GROUP_SYSTEM_PROMPTS.md) | 分组标识与系统提示词 |
 | [`GROUP_CATEGORIES.md`](GROUP_CATEGORIES.md) | 分组分类（管理端整理，不影响调度、计费和用户端） |
 | [`UPSTREAM_BALANCE.md`](UPSTREAM_BALANCE.md) | 账号页「上游余额」列：sub2api 与 new-api 的识别和口径、每分钟采集、对上游的影响、new-api 访问令牌 |
+| [`ADMIN_PERMISSIONS.md`](ADMIN_PERMISSIONS.md) | 普通管理员与后台权限：模块「查看 / 管理」、资金与数据开关、显示上游地址与网络设置、只有超级管理员能做的事、保护措施与原因码、迁移 282 与回退 |
 | [`CHANNEL_MONITOR_V1.md`](CHANNEL_MONITOR_V1.md) | 渠道监控 v1：判定口径（10 秒黄、30 秒红）、流式探测与请求形状、探测选号、调度可靠性 |
 | [`GROK_MONITOR_RESPONSES.md`](GROK_MONITOR_RESPONSES.md) | Grok 渠道监控的 Responses 模式（0.4.1 起，可选） |
 | [`ASYNC_IMAGE_TASKS.md`](ASYNC_IMAGE_TASKS.md) | 异步生图任务 |
@@ -77,6 +78,7 @@
 
 | 变更 | 内容 | 状态 |
 |---|---|---|
+| [`operator-role-20261027`](../openspec/changes/operator-role-20261027/) | 普通管理员（`operator`）角色与逐人权限：权限目录与中间件、资金与放置开关、上游地址开关、脱敏、角色保护；叠加在 PR-B 之上 | 开发中（PR-A） |
 | [`upstream-balance-20261027`](../openspec/changes/upstream-balance-20261027/) | 账号页「上游余额」列与 new-api 访问令牌；中转的 kimi、deepseek 账号退出 CN 余额检查 | 开发中（PR-B） |
 | [`gateway-resilience-045-20261021`](../openspec/changes/gateway-resilience-045-20261021/) | 网关韧性 0.4.5：RA-1 修复、OpenAI Responses 透传与 Gateway 入站经 Anthropic 上游的明确终止、审查遗留 P2 | 0.4.5、0.4.6 已发布（生产未部署）；后续待办见其 tasks §7 |
 | [`gateway-resilience-v2-20261021`](../openspec/changes/gateway-resilience-v2-20261021/) | 网关韧性第二期：可重放前缀与推迟开场、分类修正、失败帧重试提示、仅流式能力学习、事件字段 | 0.4.4 已发布；已知缺陷 RA-1 已在 0.4.5 修复（`gateway-resilience-045-20261021`）；`response.metadata` 的开场判据于 2026-10-22 修订（0.4.6，见 045 tasks 7.7）；浸泡见其 tasks |

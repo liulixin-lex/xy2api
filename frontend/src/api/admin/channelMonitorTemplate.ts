@@ -6,7 +6,7 @@
  */
 
 import { apiClient } from '../client'
-import type { APIMode, BodyOverrideMode, Provider } from './channelMonitor'
+import type { APIMode, BodyOverride, BodyOverrideMode, Provider } from './channelMonitor'
 
 export interface ChannelMonitorTemplate {
   id: number
@@ -16,7 +16,7 @@ export interface ChannelMonitorTemplate {
   description: string
   extra_headers: Record<string, string>
   body_override_mode: BodyOverrideMode
-  body_override: Record<string, unknown> | null
+  body_override: BodyOverride
   created_at: string
   updated_at: string
   /** 关联的监控数量（快照来自此模板，仅 template_id 匹配即可） */
@@ -39,7 +39,7 @@ export interface CreateParams {
   description?: string
   extra_headers?: Record<string, string>
   body_override_mode?: BodyOverrideMode
-  body_override?: Record<string, unknown> | null
+  body_override?: BodyOverride
 }
 
 export interface UpdateParams {
@@ -48,7 +48,7 @@ export interface UpdateParams {
   description?: string
   extra_headers?: Record<string, string>
   body_override_mode?: BodyOverrideMode
-  body_override?: Record<string, unknown> | null
+  body_override?: BodyOverride
 }
 
 export interface ApplyResponse {

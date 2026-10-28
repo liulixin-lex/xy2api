@@ -553,6 +553,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	if err := s.operatorAccountCreateRules(ctx, input); err != nil {
+		return nil, err
+	}
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {
 		return nil, err
@@ -654,6 +657,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.operatorAccountUpdateRules(ctx, account, input); err != nil {
 		return nil, err
 	}
 	if err := ValidateIQTargetsPatch(account.Platform, input.IQTargets); err != nil {
@@ -1015,6 +1021,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	if err := s.operatorAccountExtraRules(ctx, id, updates); err != nil {
+		return err
+	}
 	updates = MergeCapabilityLearningExtra(updates, nil)
 	updates = MergeOpenAICodexTicketExtra(updates, nil)
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
@@ -1064,6 +1073,10 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			return nil, err
 		}
 		input.AccountIDs = accountIDs
+	}
+
+	if err := s.operatorAccountBulkRules(ctx, input); err != nil {
+		return nil, err
 	}
 
 	result := &BulkUpdateAccountsResult{
@@ -1455,6 +1468,9 @@ func (s *adminServiceImpl) SetAccountSchedulable(ctx context.Context, id int64, 
 }
 
 func (s *adminServiceImpl) RevertAccountProxyFallback(ctx context.Context, id int64) error {
+	if err := s.operatorSuperAdminOnly(ctx); err != nil {
+		return err
+	}
 	if err := s.accountRepo.RevertProxyFallback(ctx, id); err != nil {
 		return err
 	}

@@ -186,10 +186,10 @@
         </button>
         <slot name="after-reset" />
         <template v-if="mode === 'usage'">
-          <button type="button" @click="$emit('cleanup')" class="btn btn-danger">
+          <button v-if="canCleanup" type="button" @click="$emit('cleanup')" class="btn btn-danger">
             {{ t('admin.usage.cleanup.button') }}
           </button>
-          <button type="button" @click="$emit('export')" :disabled="exporting" class="btn btn-primary">
+          <button v-if="canExport" type="button" @click="$emit('export')" :disabled="exporting" class="btn btn-primary">
             {{ t('usage.exportExcel') }}
           </button>
         </template>
@@ -222,12 +222,18 @@ interface Props {
   mode?: 'usage' | 'errors' | 'ranking'
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
+  /** 清理使用记录（超级管理员） */
+  canCleanup?: boolean
+  /** 导出使用记录（普通管理员需要“导出业务数据”权限） */
+  canExport?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   showActions: true,
   mode: 'usage',
-  flat: false
+  flat: false,
+  canCleanup: true,
+  canExport: true
 })
 const emit = defineEmits([
   'update:modelValue',

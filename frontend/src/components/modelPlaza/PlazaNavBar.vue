@@ -46,6 +46,7 @@ import { useI18n } from 'vue-i18n'
 import { sanitizeUrl } from '@/utils/url'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -57,5 +58,7 @@ const siteLogo = computed(() =>
   sanitizeUrl(settings.value?.site_logo || '', { allowRelative: true, allowDataUrl: true })
 )
 const isAuthenticated = computed(() => authStore.isAuthenticated)
-const backTarget = computed(() => (authStore.isAdmin ? '/admin/dashboard' : '/dashboard'))
+const adminAccessStore = useAdminAccessStore()
+if (authStore.canAccessAdmin && !authStore.isAdmin) void adminAccessStore.ensureLoaded()
+const backTarget = computed(() => adminAccessStore.landingPath)
 </script>
