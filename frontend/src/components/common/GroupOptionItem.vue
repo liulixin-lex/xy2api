@@ -3,23 +3,27 @@
     <!-- Left: name + description -->
     <div
       class="flex min-w-0 flex-1 flex-col items-start"
-      :title="description || undefined"
+      :title="description && !compactDescription ? description : undefined"
     >
-      <!-- Row 1: platform badge (name bold) -->
-      <GroupBadge
-        :name="name"
-        :platform="platform"
-        :subscription-type="subscriptionType"
-        :show-rate="false"
-        class="groupOptionItemBadge"
-      />
+      <!-- Row 1: platform badge (name bold) + exclusive tag -->
+      <div class="flex max-w-full items-center gap-1.5">
+        <GroupBadge
+          :name="name"
+          :platform="platform"
+          :subscription-type="subscriptionType"
+          :show-rate="false"
+          class="groupOptionItemBadge min-w-0"
+        />
+        <ExclusiveGroupTag v-if="exclusive" />
+      </div>
       <!-- Row 2: description with top spacing -->
-      <span
+      <TruncatedTextPopover
         v-if="description"
-        class="mt-1.5 w-full whitespace-pre-line [overflow-wrap:anywhere] text-left text-xs leading-relaxed text-gray-500 dark:text-gray-400 line-clamp-3"
-      >
-        {{ description }}
-      </span>
+        :text="description"
+        :enabled="compactDescription"
+        class="mt-1.5 w-full whitespace-pre-line [overflow-wrap:anywhere] text-left text-xs leading-relaxed text-gray-500 dark:text-gray-400"
+        :class="compactDescription ? 'line-clamp-1' : 'line-clamp-3'"
+      />
     </div>
 
     <!-- Right: rate pill + checkmark (vertically centered to first row) -->
@@ -62,6 +66,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import GroupBadge from './GroupBadge.vue'
+import ExclusiveGroupTag from './ExclusiveGroupTag.vue'
+import TruncatedTextPopover from './TruncatedTextPopover.vue'
 import type { SubscriptionType, GroupPlatform } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
@@ -81,6 +87,9 @@ interface Props {
   description?: string | null
   selected?: boolean
   showCheckmark?: boolean
+  exclusive?: boolean
+  /** 说明只显示一行，超出部分省略，悬停弹出完整内容（替代原生 title） */
+  compactDescription?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -88,7 +97,9 @@ const props = withDefaults(defineProps<Props>(), {
   selected: false,
   showCheckmark: true,
   userRateMultiplier: null,
-  peakRateEnabled: false
+  peakRateEnabled: false,
+  exclusive: false,
+  compactDescription: false
 })
 
 // Whether user has a custom rate different from default

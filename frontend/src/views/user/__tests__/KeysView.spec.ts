@@ -173,6 +173,9 @@ const DataTableStub = {
           <slot name="cell-id" :value="row.id" :row="row" />
         </div>
         <slot name="cell-name" :value="row.name" :row="row" />
+        <div data-test="key-group-cell">
+          <slot name="cell-group" :value="row.group" :row="row" />
+        </div>
         <slot name="cell-actions" :row="row" />
         <div data-test="current-concurrency">
           <slot name="cell-current_concurrency" :value="row.current_concurrency" :row="row" />
@@ -191,9 +194,19 @@ const DataTableStub = {
 
 const SelectStub = {
   name: 'Select',
-  props: ['modelValue', 'options'],
+  props: { modelValue: null, options: null, matchTriggerWidth: Boolean },
   emits: ['update:modelValue'],
-  template: '<select :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value)"></select>',
+  template: `
+    <div>
+      <select :value="modelValue" @change="$emit('update:modelValue', $event.target.value)"></select>
+      <div data-test="select-selected">
+        <slot name="selected" :option="(options || []).find((option) => option.value === modelValue) ?? null" />
+      </div>
+      <div v-for="option in options || []" :key="String(option.value)" data-test="select-option">
+        <slot name="option" :option="option" :selected="option.value === modelValue" />
+      </div>
+    </div>
+  `,
 }
 
 const SearchInputStub = {
@@ -229,7 +242,8 @@ const mountView = async () => {
         DataTable: DataTableStub,
         Pagination: PaginationStub,
         BaseDialog: {
-          props: ['show', 'title'],
+          name: 'BaseDialog',
+          props: ['show', 'title', 'width'],
           emits: ['close'],
           template: '<div v-if="show" role="dialog"><button data-test="close-dialog" @click="$emit(\'close\')">Close</button><slot /><slot name="footer" /></div>',
         },
@@ -638,6 +652,47 @@ describe('user KeysView column settings', () => {
       await flushPromises()
       expect(wrapper.get<HTMLInputElement>('input[value="openai"]').element.checked).toBe(true)
       expect(optionIds(wrapper)).toEqual([2])
+    })
+
+    it('uses a wide dialog whose group dropdown matches the field width', async () => {
+      const wrapper = await openCreate()
+      const dialog = wrapper.findAllComponents({ name: 'BaseDialog' }).find((item) => item.props('title') === messages['keys.createKey'])
+      expect(dialog?.props('width')).toBe('wide')
+      expect(groupSelect(wrapper).props('matchTriggerWidth')).toBe(true)
+    })
+
+    it('marks exclusive groups only when the badge is shown to users', async () => {
+      getAvailableGroups.mockResolvedValue([
+        { ...availableGroups[1], id: 21, is_exclusive: true, show_exclusive_badge: true },
+        { ...availableGroups[1], id: 22, is_exclusive: true, show_exclusive_badge: false },
+        { ...availableGroups[1], id: 23, is_exclusive: false, show_exclusive_badge: true },
+      ])
+      const wrapper = await openCreate()
+      const exclusiveById = Object.fromEntries(
+        groupSelect(wrapper).props('options').map((option: { value: number; exclusive: boolean }) => [option.value, option.exclusive])
+      )
+      expect(exclusiveById).toEqual({ 21: true, 22: false, 23: false })
+
+      const items = groupSelect(wrapper).findAllComponents({ name: 'GroupOptionItem' })
+      expect(items.map((item) => item.props('exclusive'))).toEqual([true, false, false])
+      expect(items.every((item) => item.props('compactDescription') === true)).toBe(true)
+
+      const selectedTags = () => groupSelect(wrapper).get('[data-test="select-selected"]').findAll('[data-test="exclusive-group-tag"]')
+      await groupSelect(wrapper).vm.$emit('update:modelValue', 21)
+      expect(selectedTags()).toHaveLength(1)
+      await groupSelect(wrapper).vm.$emit('update:modelValue', 22)
+      expect(selectedTags()).toHaveLength(0)
+    })
+
+    it('marks exclusive groups in the row group switcher', async () => {
+      getAvailableGroups.mockResolvedValue([
+        { ...availableGroups[1], id: 21, is_exclusive: true, show_exclusive_badge: true },
+        { ...availableGroups[1], id: 22, is_exclusive: true, show_exclusive_badge: false },
+      ])
+      const wrapper = await mountView()
+      await wrapper.get('[data-test="key-group-cell"] button').trigger('click')
+      const items = wrapper.findAllComponents({ name: 'GroupOptionItem' })
+      expect(items.map((item) => item.props('exclusive'))).toEqual([true, false])
     })
 
     it('resets provider and group when reopening create, and preserves edit options', async () => {

@@ -6,6 +6,12 @@
 
 ## 当前交接状态
 
+### 创建密钥弹窗加宽与专属标识：PR #150 待合并（2026-10-27 更新）
+
+- 用户端“API 密钥”的创建/编辑弹窗改为 `wide`，分组下拉与输入框同宽（`Select` 可选 `matchTriggerWidth`）。分组说明按用户要求只显示一行，超出省略，悬停弹出完整说明（`GroupOptionItem` 可选 `compactDescription` + `TruncatedTextPopover`）。专属分组在开启“向用户显示专属标识”时，选项、已选值、行内切换浮层都带“专属”标签（`ExclusiveGroupTag`）。只改前端。
+- [PR #150](https://github.com/liulixin-lex/xy2api/pull/150) 待 CI 与另一位作者合并；发版、部署另行授权。
+- 已知：main 上 `resilienceLocale.spec.ts` 有 2 项失败（0.4.9 文案已含 `codex.rate_limits`，旧断言要求不含 `codex.`），不在 CI 关键集里，未修。（更正 2026-10-28：已随 PR #151 的 `9d9594975` 修复。）
+
 ### OpenAI 智商检测按模型重构：PR #151 合入 main（2026-10-28；未发版、未部署）
 
 - 账号 × 模型检测与 `iq:<出站模型>` fail-closed 门禁，现行说明见 [`OPENAI_IQ_CHECK.md`](OPENAI_IQ_CHECK.md)。用户 2026-10-28 授权推送并合并；PR #151 全部保护检查通过后以 merge commit 合入。同 PR 将 `golang.org/x/net` 升到 v0.62.0（GO-2026-6860，govulncheck 新公告）。
@@ -229,6 +235,14 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
+
+### 20261027-key-dialog-exclusive — 创建密钥弹窗加宽与专属标识（2026-10-27）
+
+- **请求**（用户 2026-10-27）：用户端“API 密钥”创建密钥选 OpenAI 时，分组下拉比弹窗宽。把弹窗加宽，下拉与之同宽，长说明换行；专属分组开启“向用户显示专属标识”时，选分组要带专属标识，关闭时不带。
+- **分支**：`fix/key-dialog-width-exclusive-badge-20261027`（工作树 `xy2api-wt/key-dialog`，自 main `d25bcd8dc`）。只改前端：`/groups/available` 已返回 `is_exclusive` 与 `show_exclusive_badge`。
+- **结果**：[PR #150](https://github.com/liulixin-lex/xy2api/pull/150)，提交 `90d589190`、`676a497df`、`1d854e3c6`、`db90eceb6`。钩子登记 `required_literals` 14 条，Select/GroupOptionItem/TruncatedTextPopover 三个 spec 进 CI 关键集。本机实测（127.0.0.1，已清理）：弹窗 896px，输入框与下拉均 846px；说明一行省略，悬停弹完整说明；只有开关打开的专属分组带标签。
+- **用户追加**（2026-10-27）：先要求过长说明“省略、悬停另弹、移开消失”，再要求“只留一行”。管理端页面不变（3 行 + 原生 title）。
+- **下一步**：等 CI，停在 PR。
 
 ### 20261025-pr131-release047 — 0.4.7 已发布（2026-10-26 更正）
 
@@ -906,6 +920,23 @@ pnpm --dir frontend run build
 - 请求/目标：v0.4.9 已发布，用户要求更新现行文档中仍写着“0.4.9（未发布）”的标注。
 - 修改：`docs/GATEWAY_RESILIENCE.md`、`docs/account-scheduling.md`、`docs/USAGE_METRICS.md` 只改版本标注，行为描述不变；韧性文档引言改为按 0.4.9 的行为描述。
 - 验证：文档一致性通过；全仓库再无 0.4.8/0.4.9 的“未发布”残留。未部署生产。
+
+### 2026-10-27T14:30Z — 20261027-key-dialog-exclusive — PR #150 已开
+
+- 请求/目标：创建密钥弹窗加宽，分组下拉同宽、长说明换行；按“向用户显示专属标识”在选分组时显示专属标签。
+- 开始状态：main `d25bcd8dc`，工作树 `xy2api-wt/key-dialog`。
+- 完成操作：`Select` 加 `matchTriggerWidth`，`GroupOptionItem` 加 `exclusive`（默认关，管理端不变），KeysView 弹窗改 `wide` 并接入两处；policy 登记，文档补充。
+- 修改文件：`Select.vue`、`GroupOptionItem.vue`、`KeysView.vue` 及三个 spec、`policy.json`、`GROUP_SYSTEM_PROMPTS.md`。
+- 验证：lint、typecheck、i18n、build 通过；相关 spec 41 项通过；全量 vitest 3288/3290（2 项为 main 既有的 `resilienceLocale.spec.ts`）；`sync.py audit`、scheduler-diff、文档一致性、tools 41 项通过；本机无头 Chrome 实测通过。
+- 卡点/风险：无。
+- 下一步：等 CI 与合并；发版、部署另行授权。
+
+### 2026-10-27T16:30Z — 20261027-key-dialog-exclusive — PR #150 审查修复与一行说明
+
+- 请求/目标：两轮多维对抗审查（Claude workflow）的修复；用户追加“说明省略、悬停弹出完整内容、只留一行”。
+- 完成操作：`width="wide"` 等钩子补登记；已选值带专属标签；KeysView 的 Select/DataTable 桩渲染插槽，绑定可被测试捕获；新增 `TruncatedTextPopover`（只在被截断时弹出，挂 body、层级高于下拉、不拦截点击，按空间大的一侧放置并限高，滚动/移开即关）；弹窗说明一行省略。中途的“完整换行”方案（`676a497df`）已按用户反馈撤回。
+- 验证：lint、typecheck、i18n、build 通过；CI 关键集 57 文件 732 项通过；全量 vitest 只剩 main 既有的 `resilienceLocale.spec.ts` 2 项；绑定逐个删除的变异检查均被测试捕获；本机无头 Chrome 实测通过；文档一致性、scheduler-diff、tools 41 项通过。
+- 下一步：推送后等 CI，停在 PR。
 
 ### 2026-10-27 — 20261027-iq-per-model — 只读分析与方案定稿，待批准
 

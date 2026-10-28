@@ -159,6 +159,8 @@ interface Props {
   remote?: boolean
   /** 远程搜索模式下的加载态：options 为空时下拉显示 loading 文案 */
   loading?: boolean
+  /** 下拉面板与触发框同宽，选项里的长文字换行，不再按内容撑宽 */
+  matchTriggerWidth?: boolean
 }
 
 interface Emits {
@@ -177,7 +179,8 @@ const props = withDefaults(defineProps<Props>(), {
   valueKey: 'value',
   labelKey: 'label',
   remote: false,
-  loading: false
+  loading: false,
+  matchTriggerWidth: false
 })
 
 const emit = defineEmits<Emits>()
@@ -231,6 +234,7 @@ const dropdownStyle = computed(() => {
     maxWidth: `${availableWidth}px`,
     zIndex: '100000020'
   }
+  if (props.matchTriggerWidth) style.width = `${minWidth}px`
 
   if (dropdownPosition.value === 'top') {
     style.bottom = `${window.innerHeight - rect.top + 4}px`

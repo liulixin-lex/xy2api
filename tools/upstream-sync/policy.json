@@ -2045,6 +2045,62 @@
       "value": "return s.bindGatewayStickySession(ctx, groupID, sessionHash, accountID, resilience.StateFrom(ctx).Model())"
     },
     {
+      "path": "frontend/src/components/common/Select.vue",
+      "value": "matchTriggerWidth?: boolean"
+    },
+    {
+      "path": "frontend/src/components/common/Select.vue",
+      "value": "if (props.matchTriggerWidth) style.width = `${minWidth}px`"
+    },
+    {
+      "path": "frontend/src/components/common/GroupOptionItem.vue",
+      "value": "<ExclusiveGroupTag v-if=\"exclusive\" />"
+    },
+    {
+      "path": "frontend/src/components/common/GroupOptionItem.vue",
+      "value": "exclusive?: boolean"
+    },
+    {
+      "path": "frontend/src/views/user/KeysView.vue",
+      "value": "match-trigger-width"
+    },
+    {
+      "path": "frontend/src/views/user/KeysView.vue",
+      "value": "exclusive: group.is_exclusive && group.show_exclusive_badge !== false"
+    },
+    {
+      "path": "frontend/src/views/user/KeysView.vue",
+      "value": ":exclusive=\"option.exclusive\""
+    },
+    {
+      "path": "frontend/src/views/user/KeysView.vue",
+      "value": ":exclusive=\"(option as unknown as GroupOption).exclusive\""
+    },
+    {
+      "path": "frontend/src/components/common/GroupOptionItem.vue",
+      "value": ":enabled=\"compactDescription\""
+    },
+    {
+      "path": "frontend/src/views/user/KeysView.vue",
+      "value": "width=\"wide\""
+    },
+    {
+      "path": "frontend/src/views/user/KeysView.vue",
+      "value": "compact-description"
+    },
+    {
+      "path": "frontend/src/views/user/KeysView.vue",
+      "value": "<ExclusiveGroupTag v-if=\"(option as unknown as GroupOption).exclusive\" />"
+    },
+    {
+      "path": "frontend/src/components/common/GroupOptionItem.vue",
+      "value": ":title=\"description && !compactDescription ? description : undefined\""
+    },
+    {
+      "path": "frontend/src/components/common/GroupOptionItem.vue",
+      "value": ":class=\"compactDescription ? 'line-clamp-1' : 'line-clamp-3'\""
+    },
+    {
       "path": "backend/internal/repository/account_repo.go",
       "value": "account.Extra = stripIQGateEntries(account.Extra)"
     },
