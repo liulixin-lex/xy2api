@@ -3,8 +3,9 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
 import AccountsView from '../AccountsView.vue'
 
-const { listAccounts, getUpstreamBalances } = vi.hoisted(() => ({
+const { listAccounts, listWithEtag, getUpstreamBalances } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
+  listWithEtag: vi.fn(),
   getUpstreamBalances: vi.fn()
 }))
 
@@ -12,7 +13,7 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
-      listWithEtag: vi.fn(),
+      listWithEtag,
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
       getBatchRecentHealth: vi.fn().mockResolvedValue({ stats: {} }),
       getUpstreamBalances,
@@ -137,6 +138,9 @@ const row = (id: number, updatedAt = '2026-10-27T10:00:00Z', extra: Record<strin
   status: 'active',
   schedulable: true,
   updated_at: updatedAt,
+  proxy_id: null,
+  credentials: { base_url: 'https://relay.example.com/v1', api_protocol: 'chat_completions' },
+  credentials_status: { has_api_key: true },
   ...extra
 })
 const page = (ids: number[], pageNo = 1, total = ids.length, makeRow: (id: number) => ReturnType<typeof row> = id => row(id)) => ({
@@ -448,8 +452,10 @@ describe('admin AccountsView upstream balance column', () => {
     expect(getUpstreamBalances).toHaveBeenCalledTimes(2)
     const firstSignal = getUpstreamBalances.mock.calls[1][1].signal as AbortSignal
 
-    // 重载拿到同一批 id，但账号 1 的 updated_at 变了（例如别的管理员换了 Key）。
-    listAccounts.mockResolvedValue(page([1, 2], 1, 2, id => row(id, id === 1 ? '2026-10-27T12:02:00Z' : undefined)))
+    // 重载拿到同一批 id，但账号 1 的接入地址变了（例如别的管理员改了配置）。
+    listAccounts.mockResolvedValue(
+      page([1, 2], 1, 2, id => row(id, undefined, id === 1 ? { credentials: { base_url: 'https://other.example.com/v1' } } : {}))
+    )
     wrapper.getComponent({ name: 'AccountTableFilters' }).vm.$emit('change')
     await vi.advanceTimersByTimeAsync(300)
     await flushPromises()
@@ -466,6 +472,48 @@ describe('admin AccountsView upstream balance column', () => {
     expect(balanceText(wrapper, 2)).toBe('$7.00')
   })
 
+  it('shows — for a row whose configuration changed while the new request is still pending', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    expect(balanceText(wrapper, 1)).toBe('$12.34')
+
+    const pending = deferred<unknown>()
+    getUpstreamBalances.mockImplementationOnce(() => pending.promise)
+    listAccounts.mockResolvedValue(page([1, 2], 1, 2, id => row(id, undefined, id === 1 ? { proxy_id: 9 } : {})))
+    wrapper.getComponent({ name: 'AccountTableFilters' }).vm.$emit('change')
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+
+    expect(getUpstreamBalances).toHaveBeenCalledTimes(2)
+    expect(balanceText(wrapper, 1)).toBe('—')
+    expect(balanceText(wrapper, 2)).toBe('$7.00')
+
+    pending.resolve(answer(okItem(1, 3), okItem(2, 7)))
+    await flushPromises()
+    expect(balanceText(wrapper, 1)).toBe('$3.00')
+  })
+
+  it('asks once when the id set and a kept row both change in the same reload', async () => {
+    listAccounts.mockReset().mockResolvedValue(page([1, 2]))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(getUpstreamBalances).toHaveBeenCalledTimes(1)
+
+    // 同一次重载：账号 2 换成账号 3（id 集合变了），留下的账号 1 的接入地址也变了。
+    listAccounts.mockResolvedValue(
+      page([1, 3], 1, 2, id => row(id, undefined, id === 1 ? { credentials: { base_url: 'https://other.example.com/v1' } } : {}))
+    )
+    wrapper.getComponent({ name: 'AccountTableFilters' }).vm.$emit('change')
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+
+    expect(getUpstreamBalances).toHaveBeenCalledTimes(2)
+    expect(getUpstreamBalances.mock.calls[1][0]).toEqual([1, 3])
+    expect((getUpstreamBalances.mock.calls[1][1].signal as AbortSignal).aborted).toBe(false)
+    expect(balanceText(wrapper, 1)).toBe('$12.34')
+    expect(balanceText(wrapper, 3)).toBe('$7.00')
+  })
+
   it('does not ask again when only runtime fields of a row change', async () => {
     const wrapper = mountView()
     await flushPromises()
@@ -478,6 +526,28 @@ describe('admin AccountsView upstream balance column', () => {
 
     expect(listAccounts).toHaveBeenCalledTimes(2)
     expect(getUpstreamBalances).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not ask again when auto-refresh only brings a newer updated_at and last-used time', async () => {
+    // 网关每 10 秒回写最近使用时间时会刷新 updated_at；这不是配置变化。
+    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
+    listWithEtag.mockReset().mockResolvedValue({
+      notModified: false,
+      etag: 'v2',
+      data: page([1, 2], 1, 2, id =>
+        row(id, '2026-10-27T12:02:50Z', { last_used_at: '2026-10-27T12:02:50Z', current_concurrency: 2 })
+      )
+    })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(getUpstreamBalances).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(7_000)
+    await flushPromises()
+
+    expect(listWithEtag).toHaveBeenCalled()
+    expect(getUpstreamBalances).toHaveBeenCalledTimes(1)
+    expect(balanceText(wrapper, 1)).toBe('$12.34')
   })
 
   it('asks right away when the column is shown again from the open tools menu', async () => {

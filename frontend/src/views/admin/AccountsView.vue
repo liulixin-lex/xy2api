@@ -1539,11 +1539,23 @@ const upstreamBalanceNow = ref(Date.now())
 // 请求代次：新请求、账号增删改、卸载都会 +1，旧代次的响应一律丢弃。
 let upstreamBalanceReqSeq = 0
 let upstreamBalanceAbortController: AbortController | null = null
-// 每个账号行的版本（updated_at）。别处改了 Key、地址、代理等配置时行被原位替换、id 集合不变，
-// 只能靠版本变化发现；版本变了的账号记为“待确认”，重查失败时不保留它们的旧值。
+// 每个账号行的“身份版本”：取决定后端余额指纹的配置字段（平台、类型、代理、脱敏后的凭据与 has_* 标记）。
+// 不用 updated_at：网关每 10 秒回写最近使用时间时也会刷新它。别处改了地址、代理等配置时行被原位替换、
+// id 集合不变，只能靠版本变化发现。列表看不到的密钥轮换由后端指纹在下一次轮询内隐藏旧值。
 let upstreamBalanceRowVersions = new Map<number, string>()
-const upstreamBalanceStaleIds = new Set<string>()
-const upstreamBalanceRowVersion = (account: { updated_at?: string | null }) => account.updated_at ?? ''
+let upstreamBalanceIdKeySeen = ''
+const stableStringify = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  if (value && typeof value === 'object') {
+    const entries = Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${stableStringify((value as Record<string, unknown>)[key])}`)
+    return `{${entries.join(',')}}`
+  }
+  return JSON.stringify(value ?? null)
+}
+const upstreamBalanceRowVersion = (account: Pick<Account, 'platform' | 'type' | 'proxy_id' | 'credentials' | 'credentials_status'>) =>
+  stableStringify([account.platform, account.type, account.proxy_id ?? null, account.credentials ?? null, account.credentials_status ?? null])
 const upstreamBalanceIdKey = (rows: Array<{ id: number }>) => rows.map(row => row.id).sort((a, b) => a - b).join(',')
 
 const tickUpstreamBalanceNow = () => {
@@ -1605,13 +1617,12 @@ const refreshUpstreamBalances = async () => {
     results.forEach((result, index) => {
       if (result.status === 'fulfilled') {
         for (const item of result.value?.items ?? []) next[String(item.account_id)] = item
-        for (const id of chunks[index]) upstreamBalanceStaleIds.delete(String(id))
         return
       }
-      // 失败的分片保留这些账号上一次的值；配置已变（版本变了）的账号除外。
+      // 失败的分片保留这些账号上一次的值（配置变了的账号在发现时已删掉，不会被带回来）。
       for (const id of chunks[index]) {
         const key = String(id)
-        if (previous[key] && !upstreamBalanceStaleIds.has(key)) next[key] = previous[key]
+        if (previous[key]) next[key] = previous[key]
       }
       if (!isAbortLikeError(result.reason)) {
         console.error('Failed to load upstream balances:', result.reason)
@@ -1635,33 +1646,27 @@ const pollUpstreamBalances = () => {
 }
 useIntervalFn(pollUpstreamBalances, UPSTREAM_BALANCE_POLL_MS)
 
-// 切页、改每页条数、筛选或增删行使当前页的账号集合变化时立即重新请求；只是重新排序不算变化。
-watch(
-  () => upstreamBalanceIdKey(accounts.value),
-  () => { void refreshUpstreamBalances() }
-)
-// 同一批账号里有行的版本变了（自动刷新、重载或别的管理员改了配置）：作废进行中的请求并立即重查一次。
-// 只看 updated_at，并发数、会话数等运行时字段的变化不会多发请求。
-watch(accounts, (rows, previousRows) => {
+// 当前页账号变化时只用这一个监听，一次变化最多发一次请求：
+// - 切页、改每页条数、筛选或增删行使 id 集合变化（只是重新排序不算）；
+// - 同一批账号里有行的身份版本变了（自动刷新、重载或别的管理员改了配置）：先删掉这些账号的旧值，
+//   请求返回前显示 —，重查失败也不会把旧值带回来。
+// 运行时字段（并发数、会话数、最近使用时间、updated_at）的变化不会多发请求。
+watch(accounts, (rows) => {
+  const idKey = upstreamBalanceIdKey(rows)
+  const idChanged = idKey !== upstreamBalanceIdKeySeen
+  upstreamBalanceIdKeySeen = idKey
   const versions = new Map<number, string>()
-  let versionChanged = false
+  const changedIDs: number[] = []
   for (const row of rows) {
     const version = upstreamBalanceRowVersion(row)
     const known = upstreamBalanceRowVersions.get(row.id)
-    if (known !== undefined && known !== version) {
-      upstreamBalanceStaleIds.add(String(row.id))
-      versionChanged = true
-    }
+    if (known !== undefined && known !== version) changedIDs.push(row.id)
     versions.set(row.id, version)
   }
   upstreamBalanceRowVersions = versions
-  for (const key of [...upstreamBalanceStaleIds]) {
-    if (!versions.has(Number(key))) upstreamBalanceStaleIds.delete(key)
-  }
-  if (!versionChanged) return
-  abortUpstreamBalanceRequests()
-  // id 集合也变了时由上面的 id 监听负责重查，避免同一次变化发两次请求。
-  if (upstreamBalanceIdKey(rows) === upstreamBalanceIdKey(previousRows ?? [])) void refreshUpstreamBalances()
+  if (changedIDs.length > 0) invalidateUpstreamBalances(changedIDs)
+  else if (idChanged) abortUpstreamBalanceRequests()
+  if (idChanged || changedIDs.length > 0) void refreshUpstreamBalances()
 })
 const invalidateCurrentPageUpstreamBalances = () => {
   invalidateUpstreamBalances(accounts.value.map(account => account.id))

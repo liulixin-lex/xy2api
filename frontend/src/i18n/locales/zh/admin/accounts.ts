@@ -614,7 +614,7 @@ export default {
       newapiWallet: {
         title: 'new-api 钱包余额（可选）',
         hint: '上游是 new-api 时填写。建议使用只有 profile:read 权限的令牌。每分钟查询会在上游留下访问记录。旧版（v0.x）new-api 的令牌没有权限范围，等同整个上游账号的权限。',
-        hostChangeHint: '更改接入地址并保存后，已保存的令牌会被清除',
+        hostChangeHint: '更改接入地址或代理并保存后，已保存的令牌会被清除',
         accessToken: '访问令牌',
         tokenKeepPlaceholder: '留空则保留当前令牌',
         userId: '用户 ID（旧版 new-api 需要）',

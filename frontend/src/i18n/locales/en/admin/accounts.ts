@@ -768,7 +768,7 @@ export default {
       newapiWallet: {
         title: 'new-api wallet balance (optional)',
         hint: 'Fill this in when the upstream is new-api. Use a token with only the profile:read permission. Each per-minute check leaves an access record on the upstream. Tokens from older new-api versions (v0.x) have no scope and carry full account access.',
-        hostChangeHint: 'Changing the endpoint address clears the saved token on save',
+        hostChangeHint: 'Changing the endpoint address or proxy clears the saved token on save',
         accessToken: 'Access token',
         tokenKeepPlaceholder: 'Leave empty to keep the current token',
         userId: 'User ID (needed by older new-api)',
