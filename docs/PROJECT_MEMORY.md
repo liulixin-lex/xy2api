@@ -6,16 +6,16 @@
 
 ## 当前交接状态
 
-### 创建密钥弹窗加宽与专属标识：PR #150 待合并（2026-10-27 更新）
+### 创建密钥弹窗加宽与专属标识：PR #150 合入 main，随 0.4.10 发布（2026-10-28 更新）
 
 - 用户端“API 密钥”的创建/编辑弹窗改为 `wide`，分组下拉与输入框同宽（`Select` 可选 `matchTriggerWidth`）。分组说明按用户要求只显示一行，超出省略，悬停弹出完整说明（`GroupOptionItem` 可选 `compactDescription` + `TruncatedTextPopover`）。专属分组在开启“向用户显示专属标识”时，选项、已选值、行内切换浮层都带“专属”标签（`ExclusiveGroupTag`）。只改前端。
-- [PR #150](https://github.com/liulixin-lex/xy2api/pull/150) 待 CI 与另一位作者合并；发版、部署另行授权。
+- [PR #150](https://github.com/liulixin-lex/xy2api/pull/150)：2026-10-28 用户授权合并。与 #151 在本记忆和 `policy.json` 登记处冲突，两侧都保留后全部保护检查通过，以合并提交 `1ef9213bd` 合入 main。随 0.4.10 发布，部署未授权。
 - 已知：main 上 `resilienceLocale.spec.ts` 有 2 项失败（0.4.9 文案已含 `codex.rate_limits`，旧断言要求不含 `codex.`），不在 CI 关键集里，未修。（更正 2026-10-28：已随 PR #151 的 `9d9594975` 修复。）
 
-### OpenAI 智商检测按模型重构：PR #151 合入 main（2026-10-28；未发版、未部署）
+### OpenAI 智商检测按模型重构：PR #151 合入 main，随 0.4.10 发布（2026-10-28；未部署）
 
 - 账号 × 模型检测与 `iq:<出站模型>` fail-closed 门禁，现行说明见 [`OPENAI_IQ_CHECK.md`](OPENAI_IQ_CHECK.md)。用户 2026-10-28 授权推送并合并；PR #151 全部保护检查通过后以 merge commit 合入。同 PR 将 `golang.org/x/net` 升到 v0.62.0（GO-2026-6860，govulncheck 新公告）。
-- 遗留：参数化题未做真实上游校准；发版说明须写明默认降级组合新增 6.1-sol、6-sol → 5.6-luna 会改变质量路由，升级须停全部旧副本后执行迁移 281、启动对账失败即不启动；上线观察 7 天后再删旧结构。发版与部署另行授权。
+- 遗留：参数化题未做真实上游校准；发版说明须写明默认降级组合新增 6.1-sol、6-sol → 5.6-luna 会改变质量路由，升级须停全部旧副本后执行迁移 281、启动对账失败即不启动；上线观察 7 天后再删旧结构。0.4.10 发版进行中，部署未授权。
 - 详细交接与实施记录已原样归档。
 
 ### 网关韧性复盘：随 0.4.9 发布（2026-10-27 更新）
@@ -242,7 +242,13 @@
 - **分支**：`fix/key-dialog-width-exclusive-badge-20261027`（工作树 `xy2api-wt/key-dialog`，自 main `d25bcd8dc`）。只改前端：`/groups/available` 已返回 `is_exclusive` 与 `show_exclusive_badge`。
 - **结果**：[PR #150](https://github.com/liulixin-lex/xy2api/pull/150)，提交 `90d589190`、`676a497df`、`1d854e3c6`、`db90eceb6`。钩子登记 `required_literals` 14 条，Select/GroupOptionItem/TruncatedTextPopover 三个 spec 进 CI 关键集。本机实测（127.0.0.1，已清理）：弹窗 896px，输入框与下拉均 846px；说明一行省略，悬停弹完整说明；只有开关打开的专属分组带标签。
 - **用户追加**（2026-10-27）：先要求过长说明“省略、悬停另弹、移开消失”，再要求“只留一行”。管理端页面不变（3 行 + 原生 title）。
-- **下一步**：等 CI，停在 PR。
+- **下一步**：已合入 main `1ef9213bd`（2026-10-28），随 0.4.10 发布；发布后归档。
+
+### 20261028-release0410 — XY2API 0.4.10 版本准备
+
+- 分支 `release/0.4.10-20261028` 基于 main `1ef9213bd`（#151：OpenAI 智商检测按模型重构；#150：用户端密钥弹窗加宽与专属标识）；只改 VERSION、UPSTREAM_BASE 产品版本与本记忆，兼容基线 0.2.15 不变。
+- 发布说明写在 annotated tag 正文：更新内容，以及升级要求（停全部旧副本、迁移 281、sol 检测请求量翻倍、默认降级组合新增两条、回退步骤）。
+- 下一步：保护检查通过后合入 main，在合并提交上打 annotated v0.4.10，核验 Release 附件、GHCR 镜像与版本号。不部署生产。
 
 ### 20261025-pr131-release047 — 0.4.7 已发布（2026-10-26 更正）
 
@@ -1026,3 +1032,13 @@ pnpm --dir frontend run build
 - 验证：PR #151 全部保护检查通过后合并。
 - 卡点/风险：见“当前交接状态”的遗留项。
 - 下一步：发版与部署待用户授权。
+
+### 2026-10-28 — 20261028-release0410 — 合并其余 PR 并准备 0.4.10
+
+- 请求/目标：用户 2026-10-28 要求“将其它的 PR 也一同合并，然后发版 0.4.10”。
+- 开始状态：main `468e6a59c`（#151 已合入）；唯一的开放 PR 为 #150，其分支与 main 冲突。
+- 完成操作：在独立 worktree 把 main 合进 #150 的分支。冲突只在本记忆与 `policy.json` 的 required_literals，两侧都保留；resilience-review 与 ttft 两条进行中条目已在 main 归档，按 main 删除。为 #150 的“已知失败 spec”追加更正（已由 `9d9594975` 修复）。全部保护检查通过后以合并提交合入 main `1ef9213bd`。版本分支把 VERSION 与 UPSTREAM_BASE 产品版本从 0.4.9 升到 0.4.10。
+- 修改文件：`backend/cmd/server/VERSION`、`UPSTREAM_BASE.json`、本记忆。
+- 验证：文档一致性、`sync.py audit`、scheduler-diff、tools 单测通过后提交版本 PR。
+- 卡点/风险：本机磁盘一度被 Go 构建缓存（约 96G）占满，`go clean -cache` 后恢复。
+- 下一步：版本 PR 合入后打 annotated tag v0.4.10，触发 Release，核验产物。不部署生产。
