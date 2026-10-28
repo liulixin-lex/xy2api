@@ -568,6 +568,23 @@ describe('admin AccountsView upstream balance column', () => {
     expect(getUpstreamBalances).toHaveBeenCalledTimes(1)
   })
 
+  it('asks exactly once when an edit changes the account identity', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    expect(getUpstreamBalances).toHaveBeenCalledTimes(1)
+
+    // 编辑改了接入地址：handleAccountUpdated 自己重查一次，并记下新版本，行监听不应再发第二次。
+    wrapper
+      .findAllComponents({ name: 'AccountPriorityCell' })[0]
+      .vm.$emit('updated', { ...row(1), credentials: { base_url: 'https://other.example.com/v1' } })
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(10)
+    await flushPromises()
+
+    expect(getUpstreamBalances).toHaveBeenCalledTimes(2)
+    expect((getUpstreamBalances.mock.calls[1][1].signal as AbortSignal).aborted).toBe(false)
+  })
+
   it('stops polling after the page is left', async () => {
     const wrapper = mountView()
     await flushPromises()
